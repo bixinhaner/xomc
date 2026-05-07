@@ -13,19 +13,31 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/config/datamodel"
+	"github.com/omcgo/omcgo/internal/config/parammodel"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
+	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/task"
 	"go.uber.org/zap"
 )
 
 // ParameterTreeHandler provides REST API handlers for the device parameter tree.
+//
+// T-0098 P2-07：双栈期 dmRegistry 与 paramRegistry 共存。当 paramRegistryEnabled
+// 为 true 且 productRegistry/paramRegistry 均注入、且基站 ProductClass 能命中
+// product 时，校验走 MappingValidator；否则降级到既有 dmRegistry 路径。
+//
+// 切换原则与 P2-02 verify §6 / 设计 §1.7 一致：feature flag 不写入 Registry 自身，
+// 由各消费者按需读取——本 handler 通过 paramRegistryEnabled 显式控制。
 type ParameterTreeHandler struct {
-	deviceService *DeviceService
-	paramRepo     DeviceParameterRepository
-	dmRegistry    *datamodel.DataModelRegistry
-	logger        *zap.Logger
+	deviceService        *DeviceService
+	paramRepo            DeviceParameterRepository
+	dmRegistry           *datamodel.DataModelRegistry
+	paramRegistry        *parammodel.Registry
+	productRegistry      *product.Registry
+	paramRegistryEnabled bool
+	logger               *zap.Logger
 }
 
 // NewParameterTreeHandler creates a new parameter tree handler.
@@ -35,6 +47,54 @@ func NewParameterTreeHandler(deviceService *DeviceService, paramRepo DeviceParam
 		paramRepo:     paramRepo,
 		dmRegistry:    dmRegistry,
 		logger:        logger,
+	}
+}
+
+// WithParamRegistry 启用 T-0098 P2-07 dual-stack 模式。
+//
+// 调用方典型用法（provider/router.go）：
+//
+//	h := device.NewParameterTreeHandler(svc, repo, dmReg, logger).
+//	    WithParamRegistry(c.ParamRegistry, c.ProductRegistry, c.Cfg.ParamRegistry.UseNew)
+//
+// enabled=false 或 paramRegistry/productRegistry 为 nil 时，handler 退化到
+// 既有 dmRegistry 路径（与未调用本方法等价）。
+func (h *ParameterTreeHandler) WithParamRegistry(paramReg *parammodel.Registry, prodReg *product.Registry, enabled bool) *ParameterTreeHandler {
+	h.paramRegistry = paramReg
+	h.productRegistry = prodReg
+	h.paramRegistryEnabled = enabled && paramReg != nil && prodReg != nil
+	return h
+}
+
+// resolveMappingValidator 在 dual-stack 启用时尝试构造 MappingValidator。
+//
+// 返回 nil 时调用方需走旧 dmRegistry 路径。任意一步失败均静默 fallthrough，
+// 调试可通过 zap debug 字段排查。
+func (h *ParameterTreeHandler) resolveMappingValidator(ctx context.Context, dev *model.Device) *parammodel.MappingValidator {
+	if !h.paramRegistryEnabled || h.paramRegistry == nil || h.productRegistry == nil || dev == nil {
+		return nil
+	}
+	if dev.ProductClass == "" {
+		return nil
+	}
+	match, err := h.productRegistry.MatchProductClass(ctx, dev.ProductClass)
+	if err != nil || match == nil || match.Product == nil {
+		return nil
+	}
+	set, err := h.paramRegistry.GetByProduct(ctx, match.Product.ID, dev.FirmwareVersion)
+	if err != nil || set == nil {
+		return nil
+	}
+	return parammodel.NewMappingValidator(set)
+}
+
+// mappingValidationToLegacy 把 MappingValidationError 转成 datamodel.ValidationError，
+// 保持响应 JSON 形态稳定（path/rule/message）。Code → Rule 字段名映射。
+func mappingValidationToLegacy(ve *parammodel.MappingValidationError) datamodel.ValidationError {
+	return datamodel.ValidationError{
+		Path:    ve.Path,
+		Rule:    ve.Code,
+		Message: ve.Message,
 	}
 }
 
@@ -236,9 +296,31 @@ func (h *ParameterTreeHandler) SetParameterValues(c *gin.Context) {
 		}
 	}
 
-	// Model-based validation (if data model is available).
+	// Model-based validation — T-0098 P2-07：先尝试新 MappingValidator，
+	// 落空再降级到 dmRegistry。两条路径只走其一。
 	var rebootRequired bool
-	if h.dmRegistry != nil {
+	if mv := h.resolveMappingValidator(c.Request.Context(), dev); mv != nil {
+		var validationErrors []datamodel.ValidationError
+		for _, item := range req.Parameters {
+			if ve := mv.ValidateValue(item.Path, item.Value); ve != nil {
+				validationErrors = append(validationErrors, mappingValidationToLegacy(ve))
+			}
+		}
+		if len(validationErrors) > 0 {
+			response.FailWithData(c, http.StatusBadRequest,
+				"parameter validation failed",
+				gin.H{"validation_errors": validationErrors})
+			return
+		}
+		for _, item := range req.Parameters {
+			if def := mv.LookupParam(item.Path); def != nil {
+				if def.ChangeApplies == "RebootRequired" || def.ChangeApplies == "NotifyRequired" {
+					rebootRequired = true
+					break
+				}
+			}
+		}
+	} else if h.dmRegistry != nil {
 		dm, _ := h.dmRegistry.ResolveForDevice(c.Request.Context(), dev)
 		if dm != nil {
 			validator, validatorErr := datamodel.NewParameterValidator(dm)
@@ -946,8 +1028,15 @@ func (h *ParameterTreeHandler) AddObject(c *gin.Context) {
 		return
 	}
 
-	// Validate using data model.
-	if h.dmRegistry != nil {
+	// Validate using data model — T-0098 P2-07：MappingValidator 优先，dmRegistry 兜底。
+	if mv := h.resolveMappingValidator(c.Request.Context(), dev); mv != nil {
+		currentCount, _ := h.countInstances(c.Request.Context(), id, req.ObjectPath)
+		if ve := mv.ValidateAddObject(req.ObjectPath, currentCount); ve != nil {
+			response.FailWithData(c, http.StatusBadRequest,
+				"add object validation failed", gin.H{"details": ve})
+			return
+		}
+	} else if h.dmRegistry != nil {
 		dm, _ := h.dmRegistry.ResolveForDevice(c.Request.Context(), dev)
 		if dm != nil {
 			validator, _ := datamodel.NewParameterValidator(dm)
@@ -1019,17 +1108,26 @@ func (h *ParameterTreeHandler) DeleteObject(c *gin.Context) {
 	// Extract parent object path for validation.
 	parentPath := extractParentObjectPath(req.ObjectPath)
 
-	// Validate using data model.
-	if h.dmRegistry != nil && parentPath != "" {
-		dm, _ := h.dmRegistry.ResolveForDevice(c.Request.Context(), dev)
-		if dm != nil {
-			validator, _ := datamodel.NewParameterValidator(dm)
-			if validator != nil {
-				currentCount, _ := h.countInstances(c.Request.Context(), id, parentPath)
-				if ve := validator.ValidateDeleteObject(parentPath, currentCount); ve != nil {
-					response.FailWithData(c, http.StatusBadRequest,
-						"delete object validation failed", gin.H{"details": ve})
-					return
+	// Validate using data model — T-0098 P2-07：MappingValidator 优先，dmRegistry 兜底。
+	if parentPath != "" {
+		if mv := h.resolveMappingValidator(c.Request.Context(), dev); mv != nil {
+			currentCount, _ := h.countInstances(c.Request.Context(), id, parentPath)
+			if ve := mv.ValidateDeleteObject(parentPath, currentCount); ve != nil {
+				response.FailWithData(c, http.StatusBadRequest,
+					"delete object validation failed", gin.H{"details": ve})
+				return
+			}
+		} else if h.dmRegistry != nil {
+			dm, _ := h.dmRegistry.ResolveForDevice(c.Request.Context(), dev)
+			if dm != nil {
+				validator, _ := datamodel.NewParameterValidator(dm)
+				if validator != nil {
+					currentCount, _ := h.countInstances(c.Request.Context(), id, parentPath)
+					if ve := validator.ValidateDeleteObject(parentPath, currentCount); ve != nil {
+						response.FailWithData(c, http.StatusBadRequest,
+							"delete object validation failed", gin.H{"details": ve})
+						return
+					}
 				}
 			}
 		}

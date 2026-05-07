@@ -290,7 +290,10 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	exportHandler.SetPermissionService(c.PermService)
 	exportHandler.RegisterRoutes(permGroup("devices"))
 
-	paramTreeHandler := device.NewParameterTreeHandler(c.DeviceService, c.ParamRepo, c.DMRegistry, c.Logger)
+	// T-0098 P2-07：注入 ParamRegistry / ProductRegistry 启用 dual-stack；
+	// useNew flag false 时退化到既有 dmRegistry 路径（兼容现网行为）。
+	paramTreeHandler := device.NewParameterTreeHandler(c.DeviceService, c.ParamRepo, c.DMRegistry, c.Logger).
+		WithParamRegistry(c.ParamRegistry, c.ProductRegistry, c.Cfg.ParamRegistry.UseNew)
 	paramTreeHandler.RegisterRoutes(permGroup("devices"))
 
 	// ----- Config routes → resource "datamodels" -----
