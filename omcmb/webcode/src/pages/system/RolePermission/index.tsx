@@ -292,6 +292,19 @@ const ALL_PERMISSION_LEAF_KEYS: string[] = (() => {
   }
   return keys;
 })();
+// 二级 key（如 "device.list"）。用于打开编辑/查看面板时一并展开二级，
+// 让回显的叶子勾选状态立即可见（否则二级默认折叠 → 视觉上像没勾选）。
+const ALL_SECOND_LEVEL_KEYS: string[] = (() => {
+  const keys: string[] = [];
+  for (const module of PERMISSION_MODULES) {
+    for (const child of module.children) {
+      keys.push(`${module.key}.${child.key}`);
+    }
+  }
+  return keys;
+})();
+// 一级 + 二级合集，编辑/查看打开时展开到二级即可（叶子是 leaf，无需 expand）。
+const ALL_EXPANDABLE_KEYS: string[] = [...ALL_MODULE_KEYS, ...ALL_SECOND_LEVEL_KEYS];
 // 把 permissions 字符串数组转为 Tree 的 checkedKeys（仅保留叶子节点）。
 // 模块级纯函数，无运行时依赖；避免 useCallback 的 lint immutability 问题。
 function permissionsArrayToCheckedKeys(permissions: string[]): React.Key[] {
@@ -317,7 +330,10 @@ export default function RoleManagement() {
   // 权限树展开的节点
   const [expandedPermissionKeys, setExpandedPermissionKeys] = useState<React.Key[]>([]);
   // 父子联动开关
-  const [permissionCheckStrictly, setPermissionCheckStrictly] = useState(true);
+  // 默认开启父子联动（checkStrictly=false）：编辑面板回显时由 antd Tree 自动从已勾选叶子
+  // 推导出二级父节点的 halfChecked 状态。否则父节点收起时视觉上像"没勾选"，与 PRD §6
+  // "已分配权限可见"诉求不符。详见 docs/prd/system/roles.md §6 / commit message。
+  const [permissionCheckStrictly, setPermissionCheckStrictly] = useState(false);
   // 设备组选择
   const [selectedDeviceGroupIds, setSelectedDeviceGroupIds] = useState<string[]>([]);
   // 网络类型权限选择
@@ -437,7 +453,8 @@ export default function RoleManagement() {
       roleName: role.roleName,
       description: role.description,
     });
-    setExpandedPermissionKeys(ALL_MODULE_KEYS);
+    // 同时展开一级 + 二级，避免二级折叠时回显叶子勾选不可见（PRD §6 编辑回显诉求）。
+    setExpandedPermissionKeys(ALL_EXPANDABLE_KEYS);
     // 先用列表数据快速展示（防止抖动），再用专项端点结果覆盖
     setCheckedPermissionKeys(permissionsArrayToCheckedKeys(role.permissions || []));
     setSelectedDeviceGroupIds(role.deviceGroupIds || []);
@@ -473,16 +490,8 @@ export default function RoleManagement() {
 
   // 叶子节点 keys 直接用顶层 ALL_PERMISSION_LEAF_KEYS 常量（不再起本地别名）。
 
-  // 获取所有二级菜单的 key（用于展开）
-  const allSecondLevelKeys = useMemo(() => {
-    const keys: string[] = [];
-    for (const module of PERMISSION_MODULES) {
-      for (const child of module.children) {
-        keys.push(`${module.key}.${child.key}`);
-      }
-    }
-    return keys;
-  }, []);
+  // 二级菜单 key 直接用顶层 ALL_SECOND_LEVEL_KEYS 常量（PERMISSION_MODULES 编译期常量派生）。
+  const allSecondLevelKeys = ALL_SECOND_LEVEL_KEYS;
 
   // PERMISSION_MODULES 派生 keys 直接复用顶层 ALL_MODULE_KEYS / ALL_PERMISSION_KEYS 常量。
 
