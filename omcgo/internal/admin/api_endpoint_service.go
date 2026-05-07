@@ -120,26 +120,39 @@ func (s *ApiEndpointService) SyncApiEndpoints(ctx context.Context, routes gin.Ro
 }
 
 // inferApiGroup extracts an api_group from a URL path.
+//
+// 规则：跳过 /api/v{N} 前缀后取第一个有意义的段。/admin/<sub>/... 形态再下钻
+// 一级，避免所有 admin 路径都被聚成同一个 "admin" 组（粒度过粗），更贴近
+// 业务模块（users/roles/menus/sysConfig/api-endpoints 等）。
+//
 // Examples:
 //
-//	/api/v1/admin/users        -> admin
+//	/api/v1/admin/users        -> users
+//	/api/v1/admin/roles/:id    -> roles
+//	/api/v1/admin/sysConfig    -> sysConfig
+//	/api/v1/auth/login         -> auth
 //	/api/v1/devices            -> devices
 //	/api/v1/device-groups/tree -> device-groups
+//	/api/v1/admin              -> admin   （兜底，无下钻段）
 func inferApiGroup(path string) string {
-	// Strip leading slash and split
 	path = strings.TrimPrefix(path, "/")
 	parts := strings.Split(path, "/")
 
-	// Skip well-known prefix segments: "api", "v1" (or any vN), "admin"
 	skip := map[string]bool{"api": true, "v1": true, "v2": true, "v3": true}
-	for _, p := range parts {
-		if p == "" || skip[p] {
-			continue
-		}
-		// Return the first meaningful segment as the group
-		return p
+	idx := 0
+	for idx < len(parts) && (parts[idx] == "" || skip[parts[idx]]) {
+		idx++
 	}
-	return ""
+	if idx >= len(parts) {
+		return ""
+	}
+
+	first := parts[idx]
+	// /admin/<sub>/... 下钻一级；仅当下一段非空时生效，避免 "/admin" 退化成 ""。
+	if first == "admin" && idx+1 < len(parts) && parts[idx+1] != "" {
+		return parts[idx+1]
+	}
+	return first
 }
 
 // inferRouteName generates a human-readable name from method and path.

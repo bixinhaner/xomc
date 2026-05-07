@@ -317,9 +317,16 @@ function mapFrontendUser(user: Partial<User>): Record<string, unknown> {
 }
 
 function mapBackendRole(br: BackendRole): Role {
-  // Map permissions to string array
-  const permissions = (br.permissions || []).map(
-    (p) => `${p.resource}:${p.action}`
+  // v0.7 修复：menu permissions 回显
+  //
+  // 前端 PERMISSION_MODULES 的叶子 key 格式是 `module.sub.op`（点分 3 段，无 action 后缀）；
+  // 前端 permissionsToArray 提交时硬编码 action='read'，后端入库 (resource="module.sub.op", action="read")。
+  // 此处回读只取 resource，去掉 action 维度，使 round-trip 与 ALL_PERMISSION_LEAF_KEYS 对齐：
+  //   写入：["device.list.query"] → DB ("device.list.query", "read")
+  //   读取：DB → ["device.list.query"]（不再带 ":read" 后缀）
+  // 用 Set 去重避免历史数据中同 resource 多 action 行产生重复 key。
+  const permissions = Array.from(
+    new Set((br.permissions || []).map((p) => p.resource))
   );
 
   // Ensure required fields have values
@@ -385,6 +392,18 @@ function mapUserListResponse(
     page: resp.page,
     pageSize: resp.pageSize,
   };
+}
+
+// 后端 CreateApiEndpointRequest / UpdateApiEndpointRequest 的 ApiGroup json tag
+// 是 "api_group"。http.ts 不做 body 字段转换，需在此显式映射前端 camelCase → 后端 snake_case。
+function toBackendApiEndpointBody(payload: Partial<ApiEndpointPayload>): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (payload.path !== undefined) body.path = payload.path;
+  if (payload.method !== undefined) body.method = payload.method;
+  if (payload.name !== undefined) body.name = payload.name;
+  if (payload.description !== undefined) body.description = payload.description;
+  if (payload.apiGroup !== undefined) body.api_group = payload.apiGroup;
+  return body;
 }
 
 export const adminApi = {
@@ -843,12 +862,14 @@ export const adminApi = {
   },
 
   async createApiEndpoint(payload: ApiEndpointPayload): Promise<ApiEndpoint> {
-    const { data } = await http.post<ApiEndpoint>('/admin/api-endpoints', payload);
+    // 后端 CreateApiEndpointRequest.ApiGroup json tag 为 "api_group"，
+    // http.ts 不做 body 字段名转换，必须在此显式映射。
+    const { data } = await http.post<ApiEndpoint>('/admin/api-endpoints', toBackendApiEndpointBody(payload));
     return data;
   },
 
   async updateApiEndpoint(id: string, payload: Partial<ApiEndpointPayload>): Promise<ApiEndpoint> {
-    const { data } = await http.put<ApiEndpoint>(`/admin/api-endpoints/${id}`, payload);
+    const { data } = await http.put<ApiEndpoint>(`/admin/api-endpoints/${id}`, toBackendApiEndpointBody(payload));
     return data;
   },
 

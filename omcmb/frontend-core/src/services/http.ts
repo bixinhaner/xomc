@@ -9,11 +9,13 @@ import { useMock } from './apiSwitch';
 
 // --- Parameter name conversion (camelCase → snake_case) ---
 
-// Specific field mappings for pagination params
+// Specific field mappings for pagination + 已知 snake_case 后端字段。
+// 仅显式登记需要转换的字段，避免误伤已经是 snake_case 的参数。
 const paramKeyMap: Record<string, string> = {
   pageSize: 'page_size',
   sortField: 'sort_by',
   sortOrder: 'sort_dir',
+  apiGroup: 'api_group',
 };
 
 const sortOrderMap: Record<string, string> = {
@@ -85,9 +87,47 @@ http.interceptors.request.use(
 );
 
 // --- Response interceptor ---
+//
+// v0.6 起后端逐步迁移到统一信封 {ret:1, msg, data}（参 omcgo/docs/architecture/api-envelope.md）。
+// 拦截器逻辑：
+//   - 成功 2xx + body 含 `ret` 字段 → 视为信封；ret=1 拆出 data 节点；ret=0 reject 业务错误
+//   - 成功 2xx + body 不含 `ret` → 兼容期：原样透传（迁移完成后删该分支）
+//   - 失败 4xx/5xx → 进 onRejected；后端错误信封统一 {ret:0, msg, data:null, biz_code?}
+//
+// 业务侧无感切换：service 文件中 `const { data } = await http.get(...)` 拿到的就是裸业务体，
+// 与之前未包装时一致。
+
+type EnvelopeBody<T = unknown> = {
+  ret?: number;
+  msg?: string;
+  data?: T;
+  biz_code?: number;
+  request_id?: string;
+};
 
 http.interceptors.response.use(
-  (response: AxiosResponse) => response,
+  (response: AxiosResponse) => {
+    const body = response.data as EnvelopeBody | unknown;
+    if (body && typeof body === 'object' && 'ret' in (body as object)) {
+      const env = body as EnvelopeBody;
+      if (env.ret === 1) {
+        // 信封成功：把 data 节点向下游透出，使 `const { data } = await http.get(...)` 拿到业务体
+        return { ...response, data: env.data };
+      }
+      if (env.ret === 0) {
+        // 信封业务失败（罕见：HTTP 200 + ret=0 不推荐，但兼容防御）
+        const err = new Error(env.msg || 'Business request failed') as Error & {
+          bizCode?: number;
+          requestId?: string;
+        };
+        err.bizCode = env.biz_code;
+        err.requestId = env.request_id;
+        return Promise.reject(err);
+      }
+    }
+    // 兼容期：未包装的裸响应原样返回（待全量迁移完成后移除此分支）
+    return response;
+  },
   async (error: AxiosError) => {
     const originalRequest = error.config;
     if (!originalRequest) return Promise.reject(error);
@@ -157,18 +197,44 @@ http.interceptors.response.use(
       }
     }
 
-    // Extract error message from response body
+    // Extract error message from response body.
+    // v0.6 信封：{ret:0, msg, data:null, biz_code?, request_id?}
+    // 兼容老格式：{code, message, details, error}
     const responseData = error.response?.data as
-      | { code?: number; message?: string; details?: string; error?: string }
+      | {
+          ret?: number;
+          msg?: string;
+          biz_code?: number;
+          request_id?: string;
+          // legacy fields (pre-v0.6, 兼容期保留)
+          code?: number;
+          message?: string;
+          details?: string;
+          error?: string;
+        }
       | undefined;
 
     if (responseData) {
-      // Unify error message extraction
-      // Prefer details over message (message is often generic like "Internal Server Error")
       const message =
-        responseData.details || responseData.message || responseData.error;
+        responseData.msg ||
+        responseData.details ||
+        responseData.message ||
+        responseData.error;
       if (message) {
         error.message = message;
+      }
+      // 暴露业务错误码 + request_id 到 error 对象，业务侧可读
+      const enrichedErr = error as AxiosError & {
+        bizCode?: number;
+        requestId?: string;
+      };
+      if (responseData.biz_code !== undefined) {
+        enrichedErr.bizCode = responseData.biz_code;
+      } else if (responseData.code !== undefined) {
+        enrichedErr.bizCode = responseData.code;
+      }
+      if (responseData.request_id) {
+        enrichedErr.requestId = responseData.request_id;
       }
     }
 
