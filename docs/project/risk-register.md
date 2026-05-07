@@ -381,9 +381,10 @@
 - **概率**：中
 - **影响**：中
 - **Owner**：后端架构（D4=A）
-- **状态**：**Mitigating by D4=A** (2026-05-07，决议后端架构同学产出)
+- **状态**：**Closed by reality** (2026-05-07，事实自动满足)
 - **关联 Task**：T-0098-P1-02 / T-0098-P1-06
-- **缓解**：D4=A 决策落定；具体人选由 sprint planning 时落实；脚本与 paramModel/KPI/Alarm 数据耦合紧，与设计文档同步迭代
+- **关闭依据**：实施计划 §1.4 Gap 分析有误 — `omcgo/data/param-mappings/products.xml`（9714 bytes，15 产品 + 29 正则全套）已在 commit 50fa1a0c（2026-05-07 XML 数据资产入库）入库；schema 与设计稿 §4.5 ~95% 对齐（仅 `<alarm enableUnknownAlarm>` 属性缺省，由 loader Go XML unmarshal bool 默认值 false 吸收，与设计 schema `DEFAULT false` 一致）；离线脚本归属问题随之解套（资产已存在无需新产）
+- **后续**：P1-06 Loader 实施时可选：① 容忍缺属性（推荐）/ ② 一次性补 15 产品 enableUnknownAlarm="false" 显式属性（cosmetic，可放 P1-04 / P1-06 同 PR）
 
 ### R-T0098-12 super_admin 角色与现有 admin 权限边界争议
 - **描述**：Phase 3 引入 super_admin 角色，与现有 admin 角色权限边界可能争议
