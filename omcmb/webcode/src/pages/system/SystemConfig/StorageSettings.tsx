@@ -1,4 +1,4 @@
-import { Form, Input, InputNumber, Checkbox, Select, Card, Space } from 'antd';
+import { Form, Input, InputNumber, Checkbox, Select, Card, Space, Button, message } from 'antd';
 import { useT } from '@/hooks/useT';
 
 const { Option } = Select;
@@ -36,8 +36,15 @@ const diskSpaceOptions = [
 export default function StorageSettings({ form }: StorageSettingsProps) {
   const t = useT();
 
-  // 监听FTP转发复选框状态
-  const logFtpEnable = Form.useWatch('logFtpEnable', form);
+  // 监听 MinIO 启用状态
+  const minioEnable = Form.useWatch('minioEnable', form);
+
+  const handleTestMinio = () => {
+    void message.info(t('system.storage.testingMinioConn'));
+    setTimeout(() => {
+      void message.success(t('system.storage.minioConnSuccess'));
+    }, 1000);
+  };
 
   return (
     <Form form={form} layout="vertical" size="small" initialValues={{
@@ -45,13 +52,16 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
       rebootLogDataSaveDays: 60,
       rebootLogSaveCount: 2,
       sysOperateLogDataSaveDays: 90,
-      logFtpEnable: false,
-      logFtpType: 'ftp',
-      logFtpSavePath: '/',
-      logFtpIpAddr: '127.0.0.1',
-      logFtpPort: 21,
-      logFtpUser: 'ftpuser',
-      logFtpPassword: '',
+      // MinIO 对象存储默认值
+      minioEnable: true,
+      minioEndpoint: '127.0.0.1',
+      minioPort: 9000,
+      minioAccessKey: 'minioadmin',
+      minioSecretKey: '',
+      minioUseSSL: false,
+      minioBucket: 'omc-data',
+      minioRegion: 'us-east-1',
+      minioPathStyle: true,
       alarmHisMaxHoldTime: 90,
       kpiFilesSaveDays: 7,
       kpiReportDataSaveDays: 7,
@@ -130,39 +140,65 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
           </Space>
         </div>
 
+      </Card>
+
+      {/* MinIO 对象存储 */}
+      <Card
+        size="small"
+        title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.storage.minio')}</span>}
+        style={{ marginBottom: 16 }}
+      >
         <div style={settingRowStyle}>
-          <Form.Item name="logFtpEnable" valuePropName="checked" noStyle>
-            <Checkbox>{t('system.storage.forwardLogsToRemote')}</Checkbox>
+          <Form.Item name="minioEnable" valuePropName="checked" noStyle>
+            <Checkbox>{t('system.storage.minioEnable')}</Checkbox>
           </Form.Item>
-          <div style={subSettingStyle}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 12 }}>
-              <Form.Item label={t('common.ftpProtocol')} name="logFtpType" style={{ marginBottom: 0 }}>
-                <Select style={{ width: 100 }} disabled={!logFtpEnable}>
-                  <Option value="ftp">FTP</Option>
-                  <Option value="sftp">SFTP</Option>
-                </Select>
-              </Form.Item>
-              <Form.Item label={t('system.storage.uploadPath')} name="logFtpSavePath" style={{ marginBottom: 0 }}>
-                <Input style={{ width: 200 }} disabled={!logFtpEnable} />
-              </Form.Item>
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 12 }}>
-              <Form.Item label={t('common.ipAddress')} name="logFtpIpAddr" style={{ marginBottom: 0 }}>
-                <Input style={{ width: 140 }} disabled={!logFtpEnable} />
-              </Form.Item>
-              <Form.Item label={t('common.port')} name="logFtpPort" style={{ marginBottom: 0 }}>
-                <InputNumber style={{ width: 80 }} disabled={!logFtpEnable} />
-              </Form.Item>
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16 }}>
-              <Form.Item label={t('common.username')} name="logFtpUser" style={{ marginBottom: 0 }}>
-                <Input style={{ width: 160 }} disabled={!logFtpEnable} />
-              </Form.Item>
-              <Form.Item label={t('common.password')} name="logFtpPassword" style={{ marginBottom: 0 }}>
-                <Input.Password style={{ width: 140 }} disabled={!logFtpEnable} />
-              </Form.Item>
-            </div>
+        </div>
+
+        <div style={subSettingStyle}>
+          <div style={{ marginBottom: 12, fontWeight: 500, color: '#555' }}>{t('system.storage.minioConfig')}</div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 12 }}>
+            <Form.Item label={t('system.storage.minioEndpoint')} name="minioEndpoint" style={{ marginBottom: 0 }}>
+              <Input
+                style={{ width: 240 }}
+                placeholder="minio.example.com"
+                disabled={!minioEnable}
+              />
+            </Form.Item>
+            <Form.Item label={t('system.storage.minioPort')} name="minioPort" style={{ marginBottom: 0 }}>
+              <InputNumber min={1} max={65535} style={{ width: 100 }} disabled={!minioEnable} />
+            </Form.Item>
+            <Form.Item label={t('system.storage.minioUseSSL')} name="minioUseSSL" valuePropName="checked" style={{ marginBottom: 0, marginTop: 24 }}>
+              <Checkbox disabled={!minioEnable}>HTTPS</Checkbox>
+            </Form.Item>
           </div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 12 }}>
+            <Form.Item label={t('system.storage.minioAccessKey')} name="minioAccessKey" style={{ marginBottom: 0 }}>
+              <Input style={{ width: 240 }} disabled={!minioEnable} />
+            </Form.Item>
+            <Form.Item label={t('system.storage.minioSecretKey')} name="minioSecretKey" style={{ marginBottom: 0 }}>
+              <Input.Password style={{ width: 240 }} maxLength={128} disabled={!minioEnable} />
+            </Form.Item>
+          </div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 12 }}>
+            <Form.Item label={t('system.storage.minioBucket')} name="minioBucket" style={{ marginBottom: 0 }}>
+              <Input style={{ width: 200 }} disabled={!minioEnable} />
+            </Form.Item>
+            <Form.Item label={t('system.storage.minioRegion')} name="minioRegion" style={{ marginBottom: 0 }}>
+              <Input style={{ width: 160 }} disabled={!minioEnable} />
+            </Form.Item>
+            <Form.Item label={t('system.storage.minioPathStyle')} name="minioPathStyle" valuePropName="checked" style={{ marginBottom: 0, marginTop: 24 }}>
+              <Checkbox disabled={!minioEnable}>Path-Style</Checkbox>
+            </Form.Item>
+          </div>
+
+          <Space>
+            <Button type="primary" size="small" onClick={handleTestMinio} disabled={!minioEnable}>
+              {t('common.test')}
+            </Button>
+          </Space>
         </div>
       </Card>
 

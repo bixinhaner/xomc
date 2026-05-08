@@ -17,8 +17,6 @@ type ServerRole = 'primary' | 'standby';
 interface ServerInfo {
   ip: string;
   port: number;
-  // 'running' | 'stopped' — 后端真实联调时再扩展为运行/告警/停止/未知
-  status: 'running' | 'stopped';
 }
 
 interface NorthboundSettingsProps {
@@ -31,8 +29,8 @@ const mockUsers: NorthboundUser[] = [
   { id: '2', userName: 'northuser2', userPwd: '******', userEnable: '0', responseTime: '2026-02-20 14:15:00' },
 ];
 
-const initialPrimary: ServerInfo = { ip: '192.168.1.100', port: 8081, status: 'running' };
-const initialStandby: ServerInfo = { ip: '192.168.1.101', port: 8081, status: 'running' };
+const initialPrimary: ServerInfo = { ip: '192.168.1.100', port: 8081 };
+const initialStandby: ServerInfo = { ip: '192.168.1.101', port: 8081 };
 
 // 设置行样式
 const _settingRowStyle: React.CSSProperties = {
@@ -93,8 +91,10 @@ function ServerInfoBlock({ role, info, isActive, onSwitch, t }: ServerInfoBlockP
         </div>
         <div style={infoItemStyle}>
           <span style={{ color: 'rgba(0, 0, 0, 0.65)' }}>{t('system.northbound.serviceStatus')}：</span>
-          <Tag color={info.status === 'running' ? 'green' : 'red'}>
-            {info.status === 'running' ? t('status.running') : t('status.stopped')}
+          <Tag color={isActive ? 'green' : 'default'}>
+            {isActive
+              ? t('system.northbound.statusExecuting')
+              : t('system.northbound.statusInactive')}
           </Tag>
         </div>
       </div>
