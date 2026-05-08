@@ -181,6 +181,9 @@ func (m *handlerMockMenuRepo) GetByRole(_ context.Context, _ uuid.UUID) ([]Menu,
 func (m *handlerMockMenuRepo) GetByUser(_ context.Context, _ uuid.UUID) ([]Menu, error) {
 	return nil, nil
 }
+func (m *handlerMockMenuRepo) GetAllActive(_ context.Context) ([]Menu, error) {
+	return nil, nil
+}
 func (m *handlerMockMenuRepo) SetRoleMenus(_ context.Context, _ uuid.UUID, _ []uuid.UUID, _ uuid.UUID) error {
 	return nil
 }

@@ -740,17 +740,13 @@ func (s *AdminService) UnlockUser(ctx context.Context, id uuid.UUID) error {
 	return s.userRepo.Update(ctx, user)
 }
 
-// GetRole returns a role by ID with permissions loaded.
+// GetRole returns a role by ID. B3-Phase2-B 起 permissions 表已 DROP，
+// role.Permissions 永远为空切片；权限以 role_menus / role_api_permissions 双轨承载。
 func (s *AdminService) GetRole(ctx context.Context, id uuid.UUID) (*Role, error) {
 	role, err := s.roleRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get role: %w", err)
 	}
-	perms, err := s.roleRepo.GetPermissions(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("get role permissions: %w", err)
-	}
-	role.Permissions = perms
 	return role, nil
 }
 
@@ -771,12 +767,9 @@ func (s *AdminService) CreateRole(ctx context.Context, req CreateRoleRequest) (*
 		return nil, fmt.Errorf("create role: %w", err)
 	}
 
-	// B3-Phase1：停止写入 permissions 表（旧 resource:action 三元组）。
-	// 角色权限改由 role_menus（菜单可见性）+ role_api_permissions（API 鉴权）双轨承载，
-	// 与 GVA 风格一致。permissions 表保留旧数据服务 Casbin LoadPolicy（向下兼容），
-	// 但不再增量写入。Phase2 切换中间件 + DROP TABLE。
-	// 详见 docs/prd/system/menu-dynamic-loading.md §4.2.4 (B3-Phase1)。
-	_ = req.Permissions // 保留请求字段兼容前端 payload，不再消费
+	// B3-Phase2-B：permissions 表已 DROP；角色权限改由 role_menus（菜单可见性）+
+	// role_api_permissions（API 鉴权）双轨承载。req.Permissions 仅为前端兼容字段，已忽略。
+	_ = req.Permissions
 
 	return s.GetRole(ctx, role.ID)
 }
@@ -806,8 +799,8 @@ func (s *AdminService) UpdateRole(ctx context.Context, id uuid.UUID, req UpdateR
 		return nil, fmt.Errorf("update role: %w", err)
 	}
 
-	// B3-Phase1：停止写入 permissions 表（同 CreateRole）。前端 RolePermission 仍可
-	// 在 payload 中带 permissions 字段（兼容期），后端忽略。Phase2 切换 + DROP。
+	// B3-Phase2-B：permissions 表已 DROP（同 CreateRole）。req.Permissions 仅为前端
+	// 兼容字段，后端忽略。前端 P3 落地后该字段在 DTO 中删除。
 	_ = req.Permissions
 
 	return s.GetRole(ctx, id)
@@ -859,9 +852,8 @@ func (s *AdminService) CopyRole(ctx context.Context, sourceID uuid.UUID) (*Role,
 		return nil, fmt.Errorf("create copy role: %w", err)
 	}
 
-	// B3-Phase1：复制 permissions 三元组路径已停用（停止写入 permissions 表）。
-	// 角色权限改由 role_menus + role_api_permissions 双轨承载，下面已按这两个关联
-	// 复制。permissions 表保留旧数据兜底 Casbin LoadPolicy（向下兼容）。Phase2 DROP。
+	// B3-Phase2-B：permissions 表已 DROP；复制路径走 role_menus + role_api_permissions
+	// 双轨（下面已按这两个关联复制）。src.Permissions 字段保留向后兼容，不消费。
 	_ = src.Permissions
 
 	// 复制 role_device_groups（含 network_types）/ role_api_permissions：
@@ -920,7 +912,8 @@ func (s *AdminService) allocateCopyRoleName(ctx context.Context, base string) (s
 	return "", fmt.Errorf("no available copy role name for %s after 99 attempts", base)
 }
 
-// ListAllPermissions returns all permissions across all roles.
+// ListAllPermissions 已 deprecated（B3-Phase2-B 起 permissions 表 DROP）。
+// 永远返回空切片；前端 P3 完成后该路由 + 方法整体移除。
 func (s *AdminService) ListAllPermissions(ctx context.Context) ([]Permission, error) {
 	return s.roleRepo.ListAllPermissions(ctx)
 }

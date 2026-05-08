@@ -38,23 +38,10 @@ INSERT INTO role_inheritance (parent_role_id, child_role_id, domain)
 SELECT p.id, c.id, 'system' FROM roles p, roles c WHERE p.name = 'operator' AND c.name = 'viewer'
 ON CONFLICT DO NOTHING;
 
--- 5. 权限
-INSERT INTO permissions (role_id, resource, action)
-SELECT '10000000-0000-0000-0000-000000000001', r, a
-FROM unnest(ARRAY['devices','alarms','pm','config','datamodels','users','roles','firmware','northbound','interop']) AS r,
-     unnest(ARRAY['read','write','delete','admin']) AS a
-ON CONFLICT DO NOTHING;
-
-INSERT INTO permissions (role_id, resource, action)
-SELECT '10000000-0000-0000-0000-000000000002', r, a
-FROM unnest(ARRAY['devices','alarms','pm','config','datamodels','firmware','northbound']) AS r,
-     unnest(ARRAY['read','write']) AS a
-ON CONFLICT DO NOTHING;
-
-INSERT INTO permissions (role_id, resource, action)
-SELECT '10000000-0000-0000-0000-000000000003', r, 'read'
-FROM unnest(ARRAY['devices','alarms','pm','config','datamodels','firmware','northbound']) AS r
-ON CONFLICT DO NOTHING;
+-- 5. 权限：B3-Phase2-B 起 permissions 表已 DROP（migrations/000065），种子 INSERT 整段移除。
+--    角色权限改由 role_menus（菜单可见性）+ role_api_permissions（API 鉴权）双轨承载,
+--    分别由 seed/000063_seed_role_menus_builtin.sql 与 seed/000064_seed_role_api_permissions_viewer.sql
+--    （及 v1.0 路线 admin/operator 全集 seed）兜底。
 
 -- 6. OUI 厂商注册
 INSERT INTO oui_registry (oui, manufacturer, short_name, country) VALUES
@@ -190,7 +177,7 @@ DELETE FROM sys_configs;
 DELETE FROM role_inheritance;
 DELETE FROM role_menus;
 DELETE FROM menus;
-DELETE FROM permissions;
+-- B3-Phase2-B：permissions 表已 DROP（migrations/000065），无需 DELETE。
 DELETE FROM user_roles;
 DELETE FROM users WHERE username = 'admin';
 DELETE FROM roles WHERE is_system = TRUE;

@@ -37,40 +37,14 @@ func newPgAdapter(pool *pgxpool.Pool) *pgAdapter {
 func (a *pgAdapter) LoadPolicy(m casbinModel.Model) error {
 	ctx := context.Background()
 
-	// 1. Load permission policies: p = (sub, dom, obj, act)
-	// Domain is "system" because permissions are role-level (carrier-agnostic).
-	// v1.0：users.carrier 已删除，g 策略也统一在 'system' 单域，多 carrier 隔离失效（参 §11.11 Q3）。
-	rows, err := a.pool.Query(ctx, `
-		SELECT r.name AS role_name, p.resource, p.action
-		FROM permissions p
-		JOIN roles r ON r.id = p.role_id
-	`)
-	if err != nil {
-		return fmt.Errorf("load permission policies: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var roleName, resource, action string
-		if err := rows.Scan(&roleName, &resource, &action); err != nil {
-			return fmt.Errorf("scan permission policy: %w", err)
-		}
-		m.AddPolicy("p", "p", []string{"role:" + roleName, "system", resource, action})
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	// 1.5. B3-Phase1：双源 LoadPolicy — 同时加载端点级策略
+	// 端点级策略（B3-Phase2-B 起为唯一来源）：(role, path, method)
 	//
-	// 当前 (resource, action) 模型仍由 Step 1 的 permissions 表喂；本步骤额外加载
-	// role_api_permissions JOIN api_endpoints 输出的端点级 (path, method) 策略，
-	// 喂入同一 model.conf（matcher 含 keyMatch 兼容）。Phase1 不改 router/中间件，
-	// 端点级策略暂不被 Enforce 命中——仅为 Phase2 切换 RequireAPIPermission 中间件
-	// 准备数据基础。详见 docs/prd/system/menu-dynamic-loading.md §4.2.4 (B3-Phase1)。
+	// 历史 permissions 表（resource, action 抽象）已在 B3-Phase2-B 整体 DROP。
+	// 当前所有受保护路由经 RequireAPIPermission 中间件触发 CheckPermission 鉴权，
+	// Casbin 仅消费 role_api_permissions JOIN api_endpoints 端点级数据。
 	//
-	// admin/operator 角色 role_api_permissions 各有 445 行 = api_endpoints 全集；
-	// viewer 由 seed/000064_seed_role_api_permissions_viewer.sql 兜底为 GET 类全集。
+	// admin/operator 角色 role_api_permissions 各 445 行 = api_endpoints 全集；
+	// viewer 由 seed/000064_seed_role_api_permissions_viewer.sql 兜底 GET 全集。
 	rowsAPI, err := a.pool.Query(ctx, `
 		SELECT r.name AS role_name, ae.path, ae.method
 		FROM role_api_permissions rap
@@ -78,9 +52,7 @@ func (a *pgAdapter) LoadPolicy(m casbinModel.Model) error {
 		JOIN roles r ON r.id = rap.role_id
 	`)
 	if err != nil {
-		// role_api_permissions 表可能在旧环境未建（v1.0 前）→ 不阻断
-		// （已 v1.0 必有此表，参 migrations/000056_roles_v1_extras.sql）
-		return nil
+		return fmt.Errorf("load api permission policies: %w", err)
 	}
 	defer rowsAPI.Close()
 
@@ -89,7 +61,6 @@ func (a *pgAdapter) LoadPolicy(m casbinModel.Model) error {
 		if err := rowsAPI.Scan(&roleName, &path, &method); err != nil {
 			return fmt.Errorf("scan api permission policy: %w", err)
 		}
-		// 端点级策略：obj=path, act=method
 		m.AddPolicy("p", "p", []string{"role:" + roleName, "system", path, method})
 	}
 	if err := rowsAPI.Err(); err != nil {
@@ -254,7 +225,8 @@ func NewCasbinAuthorizer(pool *pgxpool.Pool, bus event.EventBus, modelPath strin
 }
 
 // CheckPermission checks if a subject has permission (implements PermissionChecker interface).
-// v1.0：domain 固定为 "system"（去 carrier 多租户隔离，详见 §11.11 Q3）。
+// B3-Phase2-B 起，obj/act 入参语义为端点级 (path, method)。domain 固定为 "system"
+// （去 carrier 多租户隔离，详见 §11.11 Q3）。
 func (a *CasbinAuthorizer) CheckPermission(_ context.Context, userID uuid.UUID, resource, action string) (bool, error) {
 	ok, err := a.enforcer.Enforce(userID.String(), "system", resource, action)
 	if err != nil {

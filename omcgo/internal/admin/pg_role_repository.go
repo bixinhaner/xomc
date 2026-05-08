@@ -108,11 +108,8 @@ func (r *PgRoleRepository) GetByID(ctx context.Context, id uuid.UUID) (*Role, er
 	}
 	applyRoleNullables(&role, code)
 
-	perms, err := r.GetPermissions(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	role.Permissions = perms
+	// B3-Phase2-B：permissions 表已 DROP，不再回填 role.Permissions（保持空切片）。
+	// 前端 P3 完成后将彻底移除该字段。
 
 	// 与列表接口对齐，让单角色详情也带 DeviceGroupIDs / UserCount（前端编辑面板可一次拿全）
 	roles := []Role{role}
@@ -531,107 +528,25 @@ func (r *PgRoleRepository) GetUserRoles(ctx context.Context, userID uuid.UUID) (
 	return roles, nil
 }
 
-func (r *PgRoleRepository) GetPermissions(ctx context.Context, roleID uuid.UUID) ([]Permission, error) {
-	query, args, err := storage.Psql.Select("id", "role_id", "resource", "action").
-		From("permissions").
-		Where(sq.Eq{"role_id": roleID}).
-		OrderBy("resource ASC", "action ASC").
-		ToSql()
-	if err != nil {
-		return nil, fmt.Errorf("build get permissions SQL: %w", err)
-	}
-
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("get permissions: %w", err)
-	}
-	defer rows.Close()
-
-	var perms []Permission
-	for rows.Next() {
-		var p Permission
-		if err := rows.Scan(&p.ID, &p.RoleID, &p.Resource, &p.Action); err != nil {
-			return nil, fmt.Errorf("scan permission: %w", err)
-		}
-		perms = append(perms, p)
-	}
-	return perms, nil
+// GetPermissions 已 deprecated（B3-Phase2-B 起 permissions 表 DROP）。
+// 保留方法签名以兼容 PermissionChecker 接口，永远返回空切片。
+// 待前端 P3 完成 + 接口最终清理后整段移除。
+func (r *PgRoleRepository) GetPermissions(_ context.Context, _ uuid.UUID) ([]Permission, error) {
+	return []Permission{}, nil
 }
 
-func (r *PgRoleRepository) ListAllPermissions(ctx context.Context) ([]Permission, error) {
-	query, args, err := storage.Psql.Select("id", "role_id", "resource", "action").
-		From("permissions").
-		OrderBy("resource ASC", "action ASC").
-		ToSql()
-	if err != nil {
-		return nil, fmt.Errorf("build list all permissions SQL: %w", err)
-	}
-
-	rows, err := r.pool.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("list all permissions: %w", err)
-	}
-	defer rows.Close()
-
-	var perms []Permission
-	for rows.Next() {
-		var p Permission
-		if err := rows.Scan(&p.ID, &p.RoleID, &p.Resource, &p.Action); err != nil {
-			return nil, fmt.Errorf("scan permission: %w", err)
-		}
-		perms = append(perms, p)
-	}
-	return perms, nil
+// ListAllPermissions 已 deprecated（B3-Phase2-B 起）。永远返回空切片。
+func (r *PgRoleRepository) ListAllPermissions(_ context.Context) ([]Permission, error) {
+	return []Permission{}, nil
 }
 
-func (r *PgRoleRepository) AddPermissions(ctx context.Context, roleID uuid.UUID, perms []Permission) error {
-	if len(perms) == 0 {
-		return nil
-	}
-
-	builder := storage.Psql.Insert("permissions").
-		Columns("id", "role_id", "resource", "action")
-
-	for _, p := range perms {
-		id := p.ID
-		if id == uuid.Nil {
-			id = uuid.New()
-		}
-		builder = builder.Values(id, roleID, p.Resource, p.Action)
-	}
-
-	query, args, err := builder.ToSql()
-	if err != nil {
-		return fmt.Errorf("build add permissions SQL: %w", err)
-	}
-
-	_, err = r.pool.Exec(ctx, query, args...)
-	if err != nil {
-		return fmt.Errorf("add permissions: %w", err)
-	}
-
-	if r.authorizer != nil {
-		_ = r.authorizer.NotifyPolicyChange()
-	}
+// AddPermissions 已 deprecated（B3-Phase2-B 起）。no-op，不报错避免影响 service 流程。
+func (r *PgRoleRepository) AddPermissions(_ context.Context, _ uuid.UUID, _ []Permission) error {
 	return nil
 }
 
-func (r *PgRoleRepository) RemoveAllPermissions(ctx context.Context, roleID uuid.UUID) error {
-	query, args, err := storage.Psql.Delete("permissions").
-		Where(sq.Eq{"role_id": roleID}).
-		ToSql()
-	if err != nil {
-		return fmt.Errorf("build remove all permissions SQL: %w", err)
-	}
-
-	_, err = r.pool.Exec(ctx, query, args...)
-	if err != nil {
-		return fmt.Errorf("remove all permissions: %w", err)
-	}
-
-	if r.authorizer != nil {
-		_ = r.authorizer.NotifyPolicyChange()
-	}
+// RemoveAllPermissions 已 deprecated（B3-Phase2-B 起）。no-op。
+func (r *PgRoleRepository) RemoveAllPermissions(_ context.Context, _ uuid.UUID) error {
 	return nil
 }
 
@@ -896,31 +811,13 @@ func (r *PgRoleRepository) GetUserVisibleGroupIDs(ctx context.Context, userID uu
 	return ids, rows.Err()
 }
 
+// CheckPermission 通过 Casbin 检查 (path, method) 端点级权限。
+// B3-Phase2-B 起 permissions 表已 DROP，无 SQL fallback；若 authorizer 未注入直接 false。
 func (r *PgRoleRepository) CheckPermission(ctx context.Context, userID uuid.UUID, resource, action string) (bool, error) {
-	// Use Casbin in-memory evaluation when available
-	if r.authorizer != nil {
-		return r.authorizer.CheckPermission(ctx, userID, resource, action)
+	if r.authorizer == nil {
+		return false, fmt.Errorf("casbin authorizer not configured")
 	}
-
-	// Fallback: SQL query
-	query, args, err := storage.Psql.Select("COUNT(*)").
-		From("permissions p").
-		Join("user_roles ur ON ur.role_id = p.role_id").
-		Where(sq.And{
-			sq.Eq{"ur.user_id": userID},
-			sq.Eq{"p.resource": resource},
-			sq.Eq{"p.action": action},
-		}).
-		ToSql()
-	if err != nil {
-		return false, fmt.Errorf("build check permission SQL: %w", err)
-	}
-
-	var count int64
-	if err := r.pool.QueryRow(ctx, query, args...).Scan(&count); err != nil {
-		return false, fmt.Errorf("check permission: %w", err)
-	}
-	return count > 0, nil
+	return r.authorizer.CheckPermission(ctx, userID, resource, action)
 }
 
 // ListRoleUsers returns a paginated list of users assigned to a role.
