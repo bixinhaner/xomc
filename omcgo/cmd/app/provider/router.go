@@ -340,19 +340,25 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	alarmLibraryHandler := alarm.NewLibraryHandler(ah.alarmLibraryService, c.Logger)
 	alarmLibraryHandler.RegisterRoutes(permGroup("alarms").Group("/alarms/alarm-libraries"))
 
-	// ----- T-0098 P3-04: Alarm Definitions routes → resource "alarms" (P3-05 进一步收口为 super_admin) -----
+	// ----- T-0098 P3-05: Super-admin-only group — 仅放行 super_admin 用户。
+	// 4 个 P3 治理 handler（产品 / 参数模型 / KPI 库 / 告警库）均挂在此处，
+	// admin / operator / viewer 一律 403。
+	superAdminGroup := v1.Group("")
+	superAdminGroup.Use(admin.RequireSuperAdmin())
+
+	// ----- T-0098 P3-04: Alarm Definitions routes → super_admin only -----
 	if c.AlarmDefHandler != nil {
-		c.AlarmDefHandler.RegisterRoutes(permGroup("alarms"))
+		c.AlarmDefHandler.RegisterRoutes(superAdminGroup)
 	}
 
-	// ----- T-0098 P3-02: ParamModel routes → resource "datamodels" (P3-05 进一步收口为 super_admin) -----
+	// ----- T-0098 P3-02: ParamModel routes → super_admin only -----
 	if c.ParamModelHandler != nil {
-		c.ParamModelHandler.RegisterRoutes(permGroup("datamodels"))
+		c.ParamModelHandler.RegisterRoutes(superAdminGroup)
 	}
 
-	// ----- T-0098 P3-01: Product routes → resource "datamodels" (P3-05 进一步收口为 super_admin) -----
+	// ----- T-0098 P3-01: Product routes → super_admin only -----
 	if c.ProductHandler != nil {
-		c.ProductHandler.RegisterRoutes(permGroup("datamodels"))
+		c.ProductHandler.RegisterRoutes(superAdminGroup)
 	}
 
 	// ----- Alarm filter rule routes → resource "alarms" -----
@@ -367,9 +373,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// ----- Indicator management routes → resource "pm" -----
 	ph.indicatorHandler.RegisterRoutes(permGroup("pm"))
 
-	// ----- T-0098 P3-03: Indicator REST routes → resource "pm" (P3-05 进一步收口为 super_admin) -----
+	// ----- T-0098 P3-03: Indicator REST routes → super_admin only -----
 	if ph.indicatorRESTHandler != nil {
-		ph.indicatorRESTHandler.RegisterRoutes(permGroup("pm"))
+		ph.indicatorRESTHandler.RegisterRoutes(superAdminGroup)
 	}
 
 	// ----- Dashboard routes → resource "devices" -----
