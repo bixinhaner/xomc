@@ -796,25 +796,41 @@ export default function RoleManagement() {
       message.warning(t('role.pleaseSelectPermission'));
       return;
     }
-    // §11.2 决议 ① 触点 5：清空设备分组二次确认。
-    // 选 0 个二级节点不再硬阻止，改为弹 Modal 警告 → OK 才继续保存（允许显式清空）。
-    const selectedSecondLevel = selectedDeviceGroupIds.filter((id) => allSecondLevelIds.includes(id));
-    if (selectedSecondLevel.length === 0) {
+
+    // 中层：清空设备分组二次确认 + 实际保存。
+    // §11.2 决议 ① 触点 5：选 0 个二级节点不再硬阻止，改为弹 Modal 警告 → OK 才继续。
+    const proceed = () => {
+      const selectedSecondLevel = selectedDeviceGroupIds.filter((id) => allSecondLevelIds.includes(id));
+      if (selectedSecondLevel.length === 0) {
+        modal.confirm({
+          title: '确认清空设备分组绑定',
+          content: '该角色下的用户将立即失去设备数据可见权限。是否继续？',
+          okText: '继续保存',
+          okButtonProps: { danger: true },
+          cancelText: '取消',
+          onOk: () => doEditSubmit(),
+        });
+        return;
+      }
+      doEditSubmit();
+    };
+
+    // 外层：内置角色额外加一道"权限即时生效"二次确认。
+    // 内置角色的权限改动会立即影响所有分配此角色的用户，需显式确认才能继续。
+    if (isBuiltIn(selectedRole)) {
       modal.confirm({
-        title: '确认清空设备分组绑定',
-        content: '该角色下的用户将立即失去设备数据可见权限。是否继续？',
+        title: '确认修改内置角色权限',
+        content: `内置角色「${selectedRole.roleName}」的权限调整将立即影响所有分配此角色的用户。是否继续？`,
         okText: '继续保存',
         okButtonProps: { danger: true },
         cancelText: '取消',
-        onOk: () => {
-          // 用户确认清空 → 直接进入保存流程（绕过本校验）
-          doEditSubmit();
-        },
+        onOk: proceed,
       });
       return;
     }
-    doEditSubmit();
-  }, [selectedRole, hasAnyPermission, selectedDeviceGroupIds, allSecondLevelIds, doEditSubmit, message, modal, t]);
+
+    proceed();
+  }, [selectedRole, hasAnyPermission, isBuiltIn, selectedDeviceGroupIds, allSecondLevelIds, doEditSubmit, message, modal, t]);
 
   const filterFields: FilterField[] = useMemo(() => [
     { name: 'roleName', label: t('role.roleName'), type: 'input', placeholder: t('role.roleName') },
@@ -857,7 +873,7 @@ export default function RoleManagement() {
         ];
         return (
           <Space size={4}>
-            <Button type="link" size="small" disabled={isBuiltIn(role)}
+            <Button type="link" size="small"
               onClick={() => {
                 loadRoleDetailToForm(role);
                 setEditVisible(true);
@@ -1457,6 +1473,16 @@ export default function RoleManagement() {
           </div>
         }
       >
+        {/* 内置角色提示：允许调整权限，但不允许改名/描述/删除 */}
+        {selectedRole && isBuiltIn(selectedRole) && (
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="内置角色"
+            description="仅可调整菜单/API/数据权限，不允许修改名称、描述或删除。修改将立即影响所有分配此角色的用户。"
+          />
+        )}
         {/* §11.2 决议 ① 触点 2：未绑设备分组的角色 banner 提示 */}
         {selectedDeviceGroupIds.length === 0 && (
           <Alert
@@ -1480,6 +1506,8 @@ export default function RoleManagement() {
               placeholder={t('role.descriptionPlaceholder')}
               maxLength={500}
               showCount
+              readOnly={selectedRole ? isBuiltIn(selectedRole) : false}
+              style={selectedRole && isBuiltIn(selectedRole) ? { color: 'var(--color-text-secondary)' } : undefined}
             />
           </Form.Item>
         </Form>

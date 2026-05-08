@@ -38,3 +38,6 @@ tmp/
 
 # Database backups (T-0042 W1.8) — 备份产物不入库
 backups/
+
+# Playwright MCP transient artifacts (snapshots / console logs)
+.playwright-mcp/
