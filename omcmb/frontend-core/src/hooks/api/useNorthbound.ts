@@ -84,3 +84,25 @@ export function useSwitchActiveNorthboundServer() {
     },
   });
 }
+
+interface UpdateNorthboundServerPayload {
+  role: NorthboundServerRole;
+  host: string;
+  port: number;
+  description?: string;
+}
+
+/**
+ * 编辑主备服务器配置 mutation（独立编辑权限）。
+ * 成功后 invalidate 列表，UI 自动 refetch 拉到最新 host/port/description。
+ */
+export function useUpdateNorthboundServer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ role, host, port, description }: UpdateNorthboundServerPayload) =>
+      northboundApi.updateServer(role, { host, port, description }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [...NORTHBOUND_SERVERS_KEY] });
+    },
+  });
+}

@@ -228,4 +228,22 @@ export const northboundApi = {
   async switchActiveServer(role: NorthboundServerRole): Promise<void> {
     await http.put('/northbound/servers/active', { role });
   },
+
+  /**
+   * PUT /northbound/servers/:role — 编辑指定 role 的连接配置。
+   *
+   * body: { host: string, port: int, description?: string }；不动 is_active。
+   * 权限：独立编辑权限点（seed/000070 默认仅授予 admin / operator 角色）；
+   *       viewer / 未授权角色调用返回 403。
+   */
+  async updateServer(
+    role: NorthboundServerRole,
+    payload: { host: string; port: number; description?: string },
+  ): Promise<void> {
+    await http.put(`/northbound/servers/${role}`, {
+      host: payload.host,
+      port: payload.port,
+      description: payload.description ?? '',
+    });
+  },
 };

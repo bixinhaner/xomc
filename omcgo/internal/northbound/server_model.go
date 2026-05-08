@@ -41,3 +41,13 @@ type Server struct {
 type SwitchActiveRequest struct {
 	Role ServerRole `json:"role" binding:"required"`
 }
+
+// UpdateServerRequest 是 PUT /northbound/servers/:role 的请求体。
+//
+// role 由 path 参数提供；body 不包含 role / id / is_active —— 切换激活组走
+// /servers/active 端点，避免单个端点同时改"配置"和"状态"语义。
+type UpdateServerRequest struct {
+	Host        string `json:"host" binding:"required,min=1,max=255"`
+	Port        int    `json:"port" binding:"required,min=1,max=65535"`
+	Description string `json:"description" binding:"max=255"`
+}

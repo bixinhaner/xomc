@@ -22,6 +22,9 @@ type ServerRepository interface {
 	//   2) UPDATE northbound_servers SET is_active = TRUE  WHERE role = $1
 	// 两步同事务。
 	SetActive(ctx context.Context, role ServerRole) error
+	// Update 修改指定 role 的连接配置（host / port / description）。
+	// 不动 is_active 字段；切换激活组走 SetActive。role 不存在返回 ErrNotFound。
+	Update(ctx context.Context, role ServerRole, host string, port int, description string) error
 }
 
 // PgServerRepository 实现 ServerRepository 基于 PostgreSQL。
@@ -135,6 +138,33 @@ func (r *PgServerRepository) SetActive(ctx context.Context, role ServerRole) err
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit set-active tx: %w", err)
+	}
+	return nil
+}
+
+// Update 修改 host / port / description；不影响 is_active。
+func (r *PgServerRepository) Update(ctx context.Context, role ServerRole, host string, port int, description string) error {
+	if !role.IsValid() {
+		return fmt.Errorf("invalid role %q: %w", role, commonerrors.ErrInvalidInput)
+	}
+
+	query, args, err := storage.Psql.
+		Update("northbound_servers").
+		Set("host", host).
+		Set("port", port).
+		Set("description", description).
+		Where(sq.Eq{"role": role}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update northbound_server SQL: %w", err)
+	}
+
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update northbound_server: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
 	}
 	return nil
 }

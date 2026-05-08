@@ -20,6 +20,8 @@ type fakeServerRepo struct {
 	getErr       error
 	setActiveErr error
 	setActiveLog []ServerRole
+	updateErr    error
+	updateLog    []updateCall
 }
 
 func (r *fakeServerRepo) List(_ context.Context) ([]Server, error) {
@@ -53,6 +55,29 @@ func (r *fakeServerRepo) SetActive(_ context.Context, role ServerRole) error {
 		r.servers[i].IsActive = r.servers[i].Role == role
 	}
 	return nil
+}
+
+type updateCall struct {
+	role        ServerRole
+	host        string
+	port        int
+	description string
+}
+
+func (r *fakeServerRepo) Update(_ context.Context, role ServerRole, host string, port int, description string) error {
+	r.updateLog = append(r.updateLog, updateCall{role, host, port, description})
+	if r.updateErr != nil {
+		return r.updateErr
+	}
+	for i := range r.servers {
+		if r.servers[i].Role == role {
+			r.servers[i].Host = host
+			r.servers[i].Port = port
+			r.servers[i].Description = description
+			return nil
+		}
+	}
+	return commonerrors.ErrNotFound
 }
 
 func newTestServers(activeRole ServerRole) []Server {
@@ -129,6 +154,60 @@ func TestServerService_SetActive(t *testing.T) {
 				"unexpected SetActive call count")
 		})
 	}
+}
+
+func TestServerService_Update(t *testing.T) {
+	tests := []struct {
+		name    string
+		role    ServerRole
+		req     UpdateServerRequest
+		wantErr bool
+	}{
+		{
+			name:    "valid update primary",
+			role:    ServerRolePrimary,
+			req:     UpdateServerRequest{Host: "10.1.1.1", Port: 9000, Description: "primary updated"},
+			wantErr: false,
+		},
+		{
+			name:    "valid update standby with empty description",
+			role:    ServerRoleStandby,
+			req:     UpdateServerRequest{Host: "10.1.1.2", Port: 9000},
+			wantErr: false,
+		},
+		{name: "invalid role", role: ServerRole("foo"), req: UpdateServerRequest{Host: "x", Port: 80}, wantErr: true},
+		{name: "empty host rejected", role: ServerRolePrimary, req: UpdateServerRequest{Host: "", Port: 80}, wantErr: true},
+		{name: "port=0 rejected", role: ServerRolePrimary, req: UpdateServerRequest{Host: "x", Port: 0}, wantErr: true},
+		{name: "port=70000 rejected", role: ServerRolePrimary, req: UpdateServerRequest{Host: "x", Port: 70000}, wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &fakeServerRepo{servers: newTestServers(ServerRolePrimary)}
+			svc := NewServerService(repo, zap.NewNop())
+			err := svc.Update(context.Background(), tc.role, tc.req)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, repo.updateLog, 1)
+			assert.Equal(t, tc.role, repo.updateLog[0].role)
+			assert.Equal(t, tc.req.Host, repo.updateLog[0].host)
+			assert.Equal(t, tc.req.Port, repo.updateLog[0].port)
+			assert.Equal(t, tc.req.Description, repo.updateLog[0].description)
+		})
+	}
+}
+
+func TestServerService_Update_RoleNotFound(t *testing.T) {
+	// 仿 repo.Update 返回 ErrNotFound（仿真：servers 列表里没目标 role）
+	repo := &fakeServerRepo{servers: []Server{
+		{Role: ServerRolePrimary, Host: "10.0.0.1", Port: 8081, IsActive: true},
+	}}
+	svc := NewServerService(repo, zap.NewNop())
+	err := svc.Update(context.Background(), ServerRoleStandby, UpdateServerRequest{Host: "x", Port: 80})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrNotFound))
 }
 
 func TestServerService_SetActive_RoleNotFound(t *testing.T) {

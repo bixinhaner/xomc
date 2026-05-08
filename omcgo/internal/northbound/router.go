@@ -73,10 +73,13 @@ func (r *Router) RegisterRoutes(rg *gin.RouterGroup) {
 		nb.GET("/export/config/:deviceId", r.configHandler.ExportConfig)
 
 		// 主备服务器配置 + 切换（system/config 北向设置）。
-		// 仅在 SetServerService 注入后挂载，未注入时这两条端点 404，避免 nil deref。
+		// 仅在 SetServerService 注入后挂载，未注入时这三条端点 404，避免 nil deref。
+		// PUT /servers/:role 是"独立编辑权限"端点：默认仅 admin / operator 角色拥有
+		// （seed/000070 显式 grant），viewer 不可改配置。
 		if r.serverHandler != nil {
 			nb.GET("/servers", r.serverHandler.ListServers)
 			nb.PUT("/servers/active", r.serverHandler.SwitchActive)
+			nb.PUT("/servers/:role", r.serverHandler.UpdateServer)
 		}
 	}
 }

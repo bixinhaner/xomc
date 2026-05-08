@@ -1,11 +1,12 @@
-import { useState } from 'react';
-import { Form, Input, Switch, Table, Button, Modal, Tag, Card, Spin, message } from 'antd';
-import { PlusOutlined, MoreOutlined, SwapOutlined } from '@ant-design/icons';
+import { useEffect, useState } from 'react';
+import { Form, Input, InputNumber, Switch, Table, Button, Modal, Tag, Card, Spin, message } from 'antd';
+import { PlusOutlined, MoreOutlined, SwapOutlined, EditOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useT } from '@/hooks/useT';
 import {
   useNorthboundServers,
   useSwitchActiveNorthboundServer,
+  useUpdateNorthboundServer,
 } from '@core/hooks/api/useNorthbound';
 import type {
   NorthboundServer,
@@ -46,11 +47,12 @@ const infoItemStyle: React.CSSProperties = {
 interface ServerInfoBlockProps {
   server: NorthboundServer;
   onSwitch: () => void;
+  onEdit: () => void;
   switching: boolean;
   t: ReturnType<typeof useT>;
 }
 
-function ServerInfoBlock({ server, onSwitch, switching, t }: ServerInfoBlockProps) {
+function ServerInfoBlock({ server, onSwitch, onEdit, switching, t }: ServerInfoBlockProps) {
   const isActive = server.isActive;
   const titleKey =
     server.role === 'primary'
@@ -74,17 +76,22 @@ function ServerInfoBlock({ server, onSwitch, switching, t }: ServerInfoBlockProp
         </span>
       }
       extra={
-        !isActive ? (
-          <Button
-            type="primary"
-            size="small"
-            icon={<SwapOutlined />}
-            loading={switching}
-            onClick={onSwitch}
-          >
-            {t('system.northbound.switchToActive')}
+        <div style={{ display: 'inline-flex', gap: 8 }}>
+          <Button size="small" icon={<EditOutlined />} onClick={onEdit}>
+            {t('common.edit')}
           </Button>
-        ) : null
+          {!isActive && (
+            <Button
+              type="primary"
+              size="small"
+              icon={<SwapOutlined />}
+              loading={switching}
+              onClick={onSwitch}
+            >
+              {t('system.northbound.switchToActive')}
+            </Button>
+          )}
+        </div>
       }
     >
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24 }}>
@@ -122,9 +129,55 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
   const { data: servers, isLoading: serversLoading, error: serversError } = useNorthboundServers();
   const switchMutation = useSwitchActiveNorthboundServer();
 
+  // 主备服务器编辑（独立编辑权限：默认仅 admin / operator 角色可调，
+  // viewer 调用会收到 403，由 axios 拦截器统一提示）。
+  const updateMutation = useUpdateNorthboundServer();
+  const [editForm] = Form.useForm();
+  const [editVisible, setEditVisible] = useState(false);
+  const [editing, setEditing] = useState<NorthboundServer | null>(null);
+
   const primary = servers?.find((s) => s.role === 'primary');
   const standby = servers?.find((s) => s.role === 'standby');
   const activeRole = servers?.find((s) => s.isActive)?.role;
+
+  // editing 切换时同步表单字段（避免上次编辑残留）
+  useEffect(() => {
+    if (editVisible && editing) {
+      editForm.setFieldsValue({
+        host: editing.host,
+        port: editing.port,
+        description: editing.description,
+      });
+    }
+  }, [editVisible, editing, editForm]);
+
+  const openEditModal = (server: NorthboundServer) => {
+    setEditing(server);
+    setEditVisible(true);
+  };
+
+  const handleEditSubmit = async () => {
+    if (!editing) return;
+    try {
+      const values = await editForm.validateFields();
+      await updateMutation.mutateAsync({
+        role: editing.role,
+        host: String(values.host).trim(),
+        port: Number(values.port),
+        description: values.description ?? '',
+      });
+      void message.success(t('common.updateSuccess'));
+      setEditVisible(false);
+      setEditing(null);
+      editForm.resetFields();
+    } catch (err: unknown) {
+      // antd validateFields 会抛 errorInfo（无 message 字段），这种情况下不显示错误 toast；
+      // mutation 错误（含 403 无权限）通过 message.error 显示给用户。
+      if (err instanceof Error && err.message) {
+        void message.error(err.message);
+      }
+    }
+  };
 
   const handleSwitchActive = (target: NorthboundServerRole) => {
     if (target === activeRole) return;
@@ -267,6 +320,7 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
                   server={primary}
                   switching={switchMutation.isPending && switchMutation.variables === 'primary'}
                   onSwitch={() => handleSwitchActive('primary')}
+                  onEdit={() => openEditModal(primary)}
                   t={t}
                 />
               )}
@@ -275,6 +329,7 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
                   server={standby}
                   switching={switchMutation.isPending && switchMutation.variables === 'standby'}
                   onSwitch={() => handleSwitchActive('standby')}
+                  onEdit={() => openEditModal(standby)}
                   t={t}
                 />
               )}
@@ -302,6 +357,53 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
           />
         </Card>
       </Form>
+
+      {/* 编辑主备服务器配置弹窗（独立编辑权限：viewer 调用会被后端 403） */}
+      <Modal
+        title={
+          editing
+            ? `${t('common.edit')}: ${
+                editing.role === 'primary'
+                  ? t('system.northbound.primaryServer')
+                  : t('system.northbound.standbyServer')
+              }`
+            : t('common.edit')
+        }
+        open={editVisible}
+        onOk={handleEditSubmit}
+        onCancel={() => {
+          setEditVisible(false);
+          setEditing(null);
+          editForm.resetFields();
+        }}
+        confirmLoading={updateMutation.isPending}
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
+        destroyOnHidden
+      >
+        <Form form={editForm} layout="vertical">
+          <Form.Item
+            name="host"
+            label={t('common.ipAddress')}
+            rules={[
+              { required: true, message: t('common.pleaseInput') },
+              { max: 255, message: 'host length must be ≤ 255' },
+            ]}
+          >
+            <Input placeholder="e.g. 192.168.1.100" />
+          </Form.Item>
+          <Form.Item
+            name="port"
+            label={t('common.port')}
+            rules={[{ required: true, message: t('common.pleaseInput') }]}
+          >
+            <InputNumber min={1} max={65535} style={{ width: '100%' }} placeholder="1-65535" />
+          </Form.Item>
+          <Form.Item name="description" label={t('common.description')}>
+            <Input.TextArea rows={2} maxLength={255} />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       {/* 添加/编辑用户弹窗 */}
       <Modal

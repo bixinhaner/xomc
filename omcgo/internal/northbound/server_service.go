@@ -67,3 +67,26 @@ func (s *ServerService) SetActive(ctx context.Context, role ServerRole) error {
 		zap.Int("port", current.Port))
 	return nil
 }
+
+// Update 修改指定 role 的连接配置。host 必填，port ∈ [1, 65535]。
+// role 不合法返回错误；不存在返回 ErrNotFound。
+func (s *ServerService) Update(ctx context.Context, role ServerRole, req UpdateServerRequest) error {
+	if !role.IsValid() {
+		return fmt.Errorf("invalid role %q", role)
+	}
+	if req.Host == "" {
+		return fmt.Errorf("host is required")
+	}
+	if req.Port < 1 || req.Port > 65535 {
+		return fmt.Errorf("port must be in [1, 65535], got %d", req.Port)
+	}
+
+	if err := s.repo.Update(ctx, role, req.Host, req.Port, req.Description); err != nil {
+		return fmt.Errorf("update %s server: %w", role, err)
+	}
+	s.logger.Info("northbound server config updated",
+		zap.String("role", string(role)),
+		zap.String("host", req.Host),
+		zap.Int("port", req.Port))
+	return nil
+}
