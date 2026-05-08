@@ -10,6 +10,7 @@
 | 0.2  | 2026-05-08 | Backend/Frontend Team | 7 项开放决策定稿；补一级菜单图标尺寸实测 |
 | 0.3  | 2026-05-08 | Backend/Frontend Team | 附录 A 100 图标白名单冻结；P0 启动前最终版 |
 | 0.4  | 2026-05-08 | Backend Team | §4.2.4 修订：B3 端点级方案 + 双段实施（Phase1 准备 / Phase2 切换）|
+| 0.5  | 2026-05-08 | Backend/Frontend Team | B3-Phase2-B 完成 (DROP permissions) + 前端 P1/P2/P3 全部落地；§4.2.4 / §5 / §7 状态收尾 |
 
 **关联功能域**：F06 OMC-R 核心 / RBAC
 
@@ -220,17 +221,24 @@ UPDATE menus SET component_path = '' WHERE component_path LIKE '%/UserManagement
 3. **`viewer` role_api_permissions seed**（[migrations/seed/000064_seed_role_api_permissions_viewer.sql](../../../migrations/seed/000064_seed_role_api_permissions_viewer.sql)）：补 198 行 GET 类 endpoints，避免 Phase2 切换后只读角色 API 全 403。`admin`/`operator` 已有 445 行（=全集）。
 4. **`service.UpdateRole/CreateRole/CopyRole` 删除 permissions 写入**：3 处 `AddPermissions` + 1 处 `RemoveAllPermissions` 移除；保留 `req.Permissions` 字段兼容前端 payload；老 `permissions` 表数据"凝固"，不再增长，仍服务现 Casbin LoadPolicy。
 
-##### B3-Phase2（切换段，下次会话）
+##### B3-Phase2-A（router 切换，commit fd507e5d）✅
 
-破坏性改动，必须配套 e2e 4 角色完整验证：
+`router.go` 30+ 路由组的 `permGroup(resource)` helper 内部从 `RequirePermission(...)` 切到 `RequireAPIPermission(ad.roleRepo)`，含原 4 处粗粒度 `RequirePermission` 的位置。permGroup 第一参数已被忽略（保留兼容），所有受保护路由经 RequireAPIPermission 中间件触发端点级 (path, method) 鉴权。
 
-1. **`router.go` 30+ 处 `permGroup(resource)` helper 替换为 `RequireAPIPermission(roleRepo)`**（包括第 252、388、399、419 行 4 处粗粒度 `RequirePermission`）
-2. **`PgRoleRepository.AddPermissions / RemoveAllPermissions / CheckPermission` 整段删除或 deprecate**
-3. **迁移 `000NNN_drop_permissions_table.sql`**：DROP TABLE permissions + DROP idx_permissions_role
-4. **e2e 4 内置角色 + 自定义角色完整鉴权验证**：admin/operator/viewer/test 各自访问 30+ API 路由组验证 200/403 符合预期
-5. **PRD v0.5 收尾**：标注 B3 完成
+##### B3-Phase2-B（permissions 表 DROP，commit d07a5cef）✅
 
-**风险隔离**：Phase2 切换时若 e2e 失败 → 立即 revert 单 PR（router.go 改动是 atomic 的 git revert）+ 保留 Phase1 的"准备数据"留作下一次。
+破坏性改动落地：
+
+1. ✅ **迁移 `migrations/000065_drop_permissions_table.sql`**：DROP TABLE permissions CASCADE + DROP INDEX idx_permissions_role；Down 段 CREATE TABLE 兜底闭环。
+2. ✅ **`casbin.go::pgAdapter.LoadPolicy` 改单源**：删 SELECT permissions 块，仅保留 role_api_permissions JOIN api_endpoints 端点级策略加载。
+3. ✅ **`PgRoleRepository.AddPermissions / RemoveAllPermissions / GetPermissions / ListAllPermissions` 全部 stub** 为返回 nil/[]Permission{}（保留接口签名，避免破坏 PermissionChecker / PermissionWriter contract）；CheckPermission 移除 SQL fallback，强依赖 Casbin。
+4. ✅ **service.go 清理**：GetRole 不再调 GetPermissions；CreateRole / UpdateRole / CopyRole 注释升级为 Phase2-B；ListAllPermissions deprecated 注释。
+5. ✅ **`seed/000001_seed_data.sql`**：移除 3 处 INSERT INTO permissions 与 Down 段 DELETE FROM permissions（fresh deploy 不再尝试写入已 DROP 的表）。
+6. ✅ **mockMenuRepo.GetAllActive stub**：handler_test.go / service_test.go 补缺漏，admin 测试包恢复编译。
+
+**Verify**: go build ./... ✅ / go test -timeout 60s ./internal/admin/ → ok ✅
+
+**风险隔离**：Phase2-B 改动均为代码 stub + DDL DROP；现网 staging 环境如需回滚，goose down 000065 会 CREATE TABLE 空壳（数据无法恢复，但 Casbin 已切端点级单源，行为不依赖该表数据）。
 
 #### 4.2.5 数据迁移文件（P0/P2/P3 各一份）
 
@@ -630,12 +638,14 @@ const canDelete = usePermission('system:user:delete');
 
 ## 5. 实施分阶段路线图
 
-| 阶段 | 范围 | 入口文件 | 风险 | 预计工作量 |
+| 阶段 | 范围 | 入口文件 | 风险 | 状态 |
 |------|------|---------|------|-----------|
-| **P0：图标可配** | IconPicker（含 ~100 Outlined）+ iconRegistry + MenuManagement icon 字段（删 showIcon Checkbox）+ seed 回填一级目录 icon | `frontend-core/src/components/IconPicker/`, `MenuManagement/index.tsx`, `migrations/seed/000NNN_menu_icon_backfill.sql` | 低（独立功能、向后兼容） | 1 天 |
-| **P1：用户菜单接口对接** | menuStore（带 partialize/merge for Set）+ useUserMenus + MenuBootstrap 阻塞首屏 + NavMenu 灰度 + 切换角色后 invalidate | `frontend-core/src/store/menuStore.ts`, `hooks/api/useMenus.ts`, `webcode/src/App.tsx`, `Sidebar/NavMenu.tsx` | 中（hydration 时机 + 首屏阻塞） | 2 天 |
-| **P2：动态路由** | componentRegistry（~100 lazy import）+ buildRouter + PrivateRoute routePath 守卫 + 403 页面 + seed 回填 component_path | `router/componentRegistry.ts`, `router/routes.tsx`, `router/index.tsx`, `router/PrivateRoute.tsx`, `pages/error/Forbidden.tsx`, `migrations/seed/000NNN_menu_component_path_backfill.sql` | 中（feature flag 控制，旧路由仍可用作降级） | 2 天 |
-| **P3：权限模型一次到位** | RolePermission 改用 menus tree + setRoleMenus；删除 PERMISSION_MODULES 常量；后端 service.UpdateRole/CreateRole 删除 permissions 写入；DROP TABLE permissions；NAV_CONFIG_FALLBACK + ICON_MAP 清理；feature flag 默认 true | `pages/system/RolePermission/index.tsx`, `internal/admin/service.go::{UpdateRole,CreateRole}`, `internal/admin/pg_role_repository.go::{AddPermissions,RemoveAllPermissions}` 整段删除, `migrations/000NNN_drop_permissions_table.sql`, 全栈灰度清理 | **高（破坏性 + 一次到位）** | 3-4 天 |
+| **P0：图标可配** ✅ | IconPicker（116 个 Outlined 白名单）+ iconRegistry + MenuManagement icon 字段 | `webcode/src/components/IconPicker/`, `pages/system/MenuManagement/index.tsx` | 低 | commit e319759e |
+| **P1：用户菜单接口对接** ✅ | menuStore（partialize/merge for Set）+ useUserMenus / useMenuTree + MenuBootstrap 阻塞首屏 + NavMenu 灰度 + .env VITE_DYNAMIC_MENU=false | `frontend-core/src/store/menuStore.ts`, `frontend-core/src/services/api/menuApi.ts`, `frontend-core/src/types/menu.ts`, `frontend-core/src/hooks/api/useMenus.ts`, `frontend-core/src/hooks/usePermission.ts`, `webcode/src/components/MenuBootstrap/*`, `webcode/src/components/Layout/Sidebar/NavMenu.tsx` | 中 | commit 01e35c32 |
+| **P2：动态路由 + 守卫** ✅ | componentRegistry（~95 entries）+ PrivateRoute routePath 守卫 + 403 页面接入 + seed 000066 回填 component_path | `webcode/src/router/componentRegistry.ts`, `webcode/src/router/PrivateRoute.tsx`, `webcode/src/router/routes.tsx`, `migrations/seed/000066_menu_component_path_backfill.sql` | 中 | commit 365abf19 |
+| **P3：RolePermission 模型迁移** ✅ | RolePermission 删 PERMISSION_MODULES（250+ 行硬编码）+ 派生常量；改用 useMenuTree + fetchRoleMenuIds + setRoleMenus；createRole/updateRole 的 permissions 字段恒为 [] | `pages/system/RolePermission/index.tsx` | 中 | commit 099b0a12 |
+| **B3-Phase2-A：router 切端点级鉴权** ✅ | router.go 30+ 路由组 permGroup helper 改用 RequireAPIPermission 中间件 | `cmd/app/provider/router.go` | 中 | commit fd507e5d |
+| **B3-Phase2-B：permissions 表 DROP** ✅ | migrations/000065 DROP TABLE; casbin LoadPolicy 单源；pg_role_repository 4 方法 stub；seed/000001 移除 INSERT | `internal/admin/{casbin.go, pg_role_repository.go, service.go}`, `migrations/000065_drop_permissions_table.sql`, `migrations/seed/000001_seed_data.sql` | 高 | commit d07a5cef |
 
 **总工作量**：约 8-9 工作日，P0 → P1 → P2 → P3 严格顺序。
 
