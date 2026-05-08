@@ -11,6 +11,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/stun"
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/alarm"
+	alarmdef "github.com/omcgo/omcgo/internal/alarm/definition"
 	"github.com/omcgo/omcgo/internal/config/baseline"
 	"github.com/omcgo/omcgo/internal/config/datamodel"
 	"github.com/omcgo/omcgo/internal/config/parammodel"
@@ -64,6 +65,10 @@ type Container struct {
 
 	// ParamIntersect 模块设置（T-0098 P2-03）
 	ParamIntersect *parammodel.IntersectService
+
+	// AlarmDefModule 设置（T-0098 P3-04）
+	AlarmDefRegistry *alarmdef.Registry
+	AlarmDefHandler  *alarmdef.Handler
 
 	// ConfigModule 设置
 	DMRegistry      *datamodel.DataModelRegistry

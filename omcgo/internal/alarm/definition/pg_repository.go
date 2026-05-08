@@ -2,9 +2,14 @@ package definition
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	sq "github.com/Masterminds/squirrel"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -105,4 +110,345 @@ func strDeref(p *string) string {
 		return ""
 	}
 	return *p
+}
+
+// ── P3-04 写路径与查询过滤实现 ──────────────────────────────────────
+
+const baseAlarmDefSelect = `
+SELECT d.id, d.identifier, d.ne_type, d.cn_name, d.en_name,
+       d.severity_id, d.event_type, d.cn_probable_cause, d.en_probable_cause,
+       d.cn_suggestion, d.en_suggestion, d.is_show,
+       l.code, l.name
+FROM alarm_definitions d
+JOIN alarm_severity_levels l ON d.severity_id = l.id`
+
+// ListWithFilter 实现 WriteRepository。
+func (r *PgRepository) ListWithFilter(ctx context.Context, f ListFilter) ([]ResolvedDefinition, int, error) {
+	page := f.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := f.PageSize
+	if pageSize <= 0 || pageSize > 500 {
+		pageSize = 50
+	}
+
+	psql := sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
+
+	conds := sq.And{}
+	if f.NeType != nil && *f.NeType != "" {
+		conds = append(conds, sq.Eq{"d.ne_type": *f.NeType})
+	}
+	if f.SeverityCode != nil {
+		conds = append(conds, sq.Eq{"l.code": *f.SeverityCode})
+	}
+	if f.Keyword != nil && strings.TrimSpace(*f.Keyword) != "" {
+		kw := "%" + strings.TrimSpace(*f.Keyword) + "%"
+		conds = append(conds, sq.Or{
+			sq.ILike{"d.identifier": kw},
+			sq.ILike{"d.cn_name": kw},
+			sq.ILike{"d.en_name": kw},
+		})
+	}
+
+	// COUNT
+	cb := psql.Select("COUNT(*)").
+		From("alarm_definitions d").
+		Join("alarm_severity_levels l ON d.severity_id = l.id")
+	if len(conds) > 0 {
+		cb = cb.Where(conds)
+	}
+	cSQL, cArgs, err := cb.ToSql()
+	if err != nil {
+		return nil, 0, fmt.Errorf("build count sql: %w", err)
+	}
+	var total int
+	if err := r.pool.QueryRow(ctx, cSQL, cArgs...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count alarm_definitions: %w", err)
+	}
+
+	// PAGE
+	lb := psql.Select(
+		"d.id", "d.identifier", "d.ne_type", "d.cn_name", "d.en_name",
+		"d.severity_id", "d.event_type", "d.cn_probable_cause", "d.en_probable_cause",
+		"d.cn_suggestion", "d.en_suggestion", "d.is_show",
+		"l.code", "l.name",
+	).
+		From("alarm_definitions d").
+		Join("alarm_severity_levels l ON d.severity_id = l.id").
+		OrderBy("d.identifier ASC").
+		Limit(uint64(pageSize)).
+		Offset(uint64((page - 1) * pageSize))
+	if len(conds) > 0 {
+		lb = lb.Where(conds)
+	}
+	lSQL, lArgs, err := lb.ToSql()
+	if err != nil {
+		return nil, 0, fmt.Errorf("build list sql: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, lSQL, lArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query alarm_definitions: %w", err)
+	}
+	defer rows.Close()
+
+	out, err := scanResolvedDefs(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
+// GetByIdentifier 实现 WriteRepository。
+func (r *PgRepository) GetByIdentifier(ctx context.Context, identifier string) (*ResolvedDefinition, error) {
+	row := r.pool.QueryRow(ctx, baseAlarmDefSelect+" WHERE d.identifier = $1", identifier)
+	rd, err := scanOneResolved(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrUnknownIdentifier
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get alarm_definition %q: %w", identifier, err)
+	}
+	return rd, nil
+}
+
+// Create 实现 WriteRepository。
+func (r *PgRepository) Create(ctx context.Context, in CreateInput) (*ResolvedDefinition, error) {
+	if strings.TrimSpace(in.Identifier) == "" {
+		return nil, fmt.Errorf("identifier is required")
+	}
+	if strings.TrimSpace(in.NeType) == "" {
+		return nil, fmt.Errorf("ne_type is required")
+	}
+
+	// 反查 severity_id
+	var severityID uuid.UUID
+	if err := r.pool.QueryRow(ctx,
+		`SELECT id FROM alarm_severity_levels WHERE code = $1`, in.SeverityCode,
+	).Scan(&severityID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("severity_code %d not in alarm_severity_levels", in.SeverityCode)
+		}
+		return nil, fmt.Errorf("lookup severity_code: %w", err)
+	}
+
+	const insertSQL = `
+INSERT INTO alarm_definitions (
+    identifier, ne_type, cn_name, en_name, severity_id, event_type,
+    cn_probable_cause, en_probable_cause, cn_suggestion, en_suggestion, is_show
+) VALUES ($1, $2, NULLIF($3,''), NULLIF($4,''), $5, $6,
+          NULLIF($7,''), NULLIF($8,''), NULLIF($9,''), NULLIF($10,''), $11)
+RETURNING id`
+	var id uuid.UUID
+	if err := r.pool.QueryRow(ctx, insertSQL,
+		in.Identifier, in.NeType, in.CnName, in.EnName, severityID, in.EventType,
+		in.CnProbableCause, in.EnProbableCause, in.CnSuggestion, in.EnSuggestion, in.IsShow,
+	).Scan(&id); err != nil {
+		return nil, fmt.Errorf("insert alarm_definition: %w", err)
+	}
+
+	return r.GetByIdentifier(ctx, in.Identifier)
+}
+
+// Update 实现 WriteRepository。
+func (r *PgRepository) Update(ctx context.Context, identifier string, in UpdateInput) (*ResolvedDefinition, error) {
+	psql := sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
+	ub := psql.Update("alarm_definitions").Where(sq.Eq{"identifier": identifier})
+
+	dirty := false
+	if in.NeType != nil {
+		ub = ub.Set("ne_type", *in.NeType)
+		dirty = true
+	}
+	if in.CnName != nil {
+		ub = ub.Set("cn_name", nullIfEmptyAny(*in.CnName))
+		dirty = true
+	}
+	if in.EnName != nil {
+		ub = ub.Set("en_name", nullIfEmptyAny(*in.EnName))
+		dirty = true
+	}
+	if in.SeverityCode != nil {
+		var sid uuid.UUID
+		if err := r.pool.QueryRow(ctx,
+			`SELECT id FROM alarm_severity_levels WHERE code = $1`, *in.SeverityCode,
+		).Scan(&sid); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, fmt.Errorf("severity_code %d not in alarm_severity_levels", *in.SeverityCode)
+			}
+			return nil, fmt.Errorf("lookup severity_code: %w", err)
+		}
+		ub = ub.Set("severity_id", sid)
+		dirty = true
+	}
+	if in.EventType != nil {
+		ub = ub.Set("event_type", *in.EventType)
+		dirty = true
+	}
+	if in.CnProbableCause != nil {
+		ub = ub.Set("cn_probable_cause", nullIfEmptyAny(*in.CnProbableCause))
+		dirty = true
+	}
+	if in.EnProbableCause != nil {
+		ub = ub.Set("en_probable_cause", nullIfEmptyAny(*in.EnProbableCause))
+		dirty = true
+	}
+	if in.CnSuggestion != nil {
+		ub = ub.Set("cn_suggestion", nullIfEmptyAny(*in.CnSuggestion))
+		dirty = true
+	}
+	if in.EnSuggestion != nil {
+		ub = ub.Set("en_suggestion", nullIfEmptyAny(*in.EnSuggestion))
+		dirty = true
+	}
+	if in.IsShow != nil {
+		ub = ub.Set("is_show", *in.IsShow)
+		dirty = true
+	}
+
+	if !dirty {
+		return r.GetByIdentifier(ctx, identifier)
+	}
+
+	uSQL, uArgs, err := ub.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build update sql: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, uSQL, uArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("update alarm_definition: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrUnknownIdentifier
+	}
+	return r.GetByIdentifier(ctx, identifier)
+}
+
+// Delete 实现 WriteRepository。
+func (r *PgRepository) Delete(ctx context.Context, identifier string) (bool, error) {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM alarm_definitions WHERE identifier = $1`, identifier)
+	if err != nil {
+		return false, fmt.Errorf("delete alarm_definition %q: %w", identifier, err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// UnknownStats 实现 WriteRepository。
+//
+// 聚合 alarms_active 中 is_unknown=true 的 alarm_identifier 频次；
+// productID 非空时按 devices.product_id 关联过滤。
+func (r *PgRepository) UnknownStats(ctx context.Context, productID *uuid.UUID, days int) ([]UnknownAlarmStat, error) {
+	if days <= 0 {
+		days = 7
+	}
+	psql := sq.StatementBuilder.PlaceholderFormat(sq.Dollar)
+	conds := sq.And{
+		sq.Eq{"a.is_unknown": true},
+		sq.Expr("a.raised_at >= NOW() - make_interval(days => ?)", days),
+	}
+
+	from := "alarms_active a"
+	if productID != nil {
+		from = "alarms_active a JOIN devices dv ON a.device_id = dv.id"
+		conds = append(conds, sq.Eq{"dv.product_id": *productID})
+	}
+
+	qb := psql.Select(
+		"a.alarm_identifier",
+		"COUNT(*)",
+		"MAX(a.raised_at)",
+		"COALESCE(MAX(a.alarm_type), '')",
+	).
+		From(from).
+		Where(conds).
+		GroupBy("a.alarm_identifier").
+		OrderBy("COUNT(*) DESC").
+		Limit(200)
+
+	sqlStr, args, err := qb.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build unknown-stats sql: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query unknown-stats: %w", err)
+	}
+	defer rows.Close()
+
+	var out []UnknownAlarmStat
+	for rows.Next() {
+		var (
+			s        UnknownAlarmStat
+			lastSeen time.Time
+		)
+		if err := rows.Scan(&s.Identifier, &s.Count, &lastSeen, &s.NeType); err != nil {
+			return nil, fmt.Errorf("scan unknown-stat row: %w", err)
+		}
+		s.LastSeenAt = lastSeen.UTC().Format(time.RFC3339)
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// ── helpers ─────────────────────────────────────────────────────────
+
+// nullIfEmptyAny 是 P3-04 的辅助：空字符串 → nil（用于 SQL NULL）；
+// loader.go 已有同名 nullIfEmpty 但语义不同（返回 sql.NullString），故避开重名。
+func nullIfEmptyAny(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func scanOneResolved(row pgx.Row) (*ResolvedDefinition, error) {
+	var rd ResolvedDefinition
+	var (
+		cnName, enName, cnProbCause, enProbCause, cnSugg, enSugg *string
+		eventType                                                 *int
+	)
+	if err := row.Scan(
+		&rd.ID, &rd.Identifier, &rd.NeType, &cnName, &enName,
+		&rd.SeverityID, &eventType, &cnProbCause, &enProbCause,
+		&cnSugg, &enSugg, &rd.IsShow,
+		&rd.SeverityCode, &rd.SeverityName,
+	); err != nil {
+		return nil, err
+	}
+	rd.CnName = strDeref(cnName)
+	rd.EnName = strDeref(enName)
+	rd.CnProbableCause = strDeref(cnProbCause)
+	rd.EnProbableCause = strDeref(enProbCause)
+	rd.CnSuggestion = strDeref(cnSugg)
+	rd.EnSuggestion = strDeref(enSugg)
+	rd.EventType = eventType
+	return &rd, nil
+}
+
+func scanResolvedDefs(rows pgx.Rows) ([]ResolvedDefinition, error) {
+	var out []ResolvedDefinition
+	for rows.Next() {
+		var rd ResolvedDefinition
+		var (
+			cnName, enName, cnProbCause, enProbCause, cnSugg, enSugg *string
+			eventType                                                 *int
+		)
+		if err := rows.Scan(
+			&rd.ID, &rd.Identifier, &rd.NeType, &cnName, &enName,
+			&rd.SeverityID, &eventType, &cnProbCause, &enProbCause,
+			&cnSugg, &enSugg, &rd.IsShow,
+			&rd.SeverityCode, &rd.SeverityName,
+		); err != nil {
+			return nil, fmt.Errorf("scan alarm_definition: %w", err)
+		}
+		rd.CnName = strDeref(cnName)
+		rd.EnName = strDeref(enName)
+		rd.CnProbableCause = strDeref(cnProbCause)
+		rd.EnProbableCause = strDeref(enProbCause)
+		rd.CnSuggestion = strDeref(cnSugg)
+		rd.EnSuggestion = strDeref(enSugg)
+		rd.EventType = eventType
+		out = append(out, rd)
+	}
+	return out, rows.Err()
 }

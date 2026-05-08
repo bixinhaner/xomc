@@ -124,6 +124,13 @@ func Setup(r *gin.Engine, c *Container) error {
 		Depends: []string{"dictload", "productregistry"},
 		Init:    func() error { return initParamRegistryModule(c) },
 	})
+	// T-0098 P3-04：AlarmDefinition Registry + Service + Handler — REST API 入口装配。
+	// 依赖 dictload 完成后 alarm_definitions / alarm_severity_levels 表已写入。
+	graph.Add(components.ModuleInitializer{
+		Name:    "alarmdef",
+		Depends: []string{"dictload"},
+		Init:    func() error { return initAlarmDefModule(c) },
+	})
 
 	totalStart := time.Now()
 
@@ -332,6 +339,11 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// ----- Alarm library routes → resource "alarms" -----
 	alarmLibraryHandler := alarm.NewLibraryHandler(ah.alarmLibraryService, c.Logger)
 	alarmLibraryHandler.RegisterRoutes(permGroup("alarms").Group("/alarms/alarm-libraries"))
+
+	// ----- T-0098 P3-04: Alarm Definitions routes → resource "alarms" (P3-05 进一步收口为 super_admin) -----
+	if c.AlarmDefHandler != nil {
+		c.AlarmDefHandler.RegisterRoutes(permGroup("alarms"))
+	}
 
 	// ----- Alarm filter rule routes → resource "alarms" -----
 	alarmFilterHandler := alarm.NewFilterHandler(ah.alarmFilterRuleRepo, c.Logger)

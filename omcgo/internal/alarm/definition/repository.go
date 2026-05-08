@@ -14,12 +14,86 @@ var ErrUnknownIdentifier = errors.New("alarm/definition: unknown identifier")
 
 // Repository 抽象 AlarmDefinition Registry 所需的读访问。
 //
-// 写路径（XML 加载）由 P1-06 Loader 单独负责，不在本接口范围。
+// 写路径（XML 加载）由 P1-06 Loader 单独负责；P3-04 handler 用的 CRUD
+// 写路径见 WriteRepository。
 type Repository interface {
 	// ListAll 返回所有 alarm_definitions 行 + severity_id → severity_code 反查。
 	ListAll(ctx context.Context) ([]ResolvedDefinition, error)
 	// ListSeverityLevels 返回 alarm_severity_levels 全部 4 行（启动期一次性）。
 	ListSeverityLevels(ctx context.Context) ([]SeverityLevel, error)
+}
+
+// WriteRepository 是 P3-04 handler CRUD 用的写路径接口。
+//
+// 与 Repository 分开：Registry 只读不写；Loader 走 UPSERT；handler 走精确语义。
+type WriteRepository interface {
+	Repository
+
+	// ListWithFilter 支持 ne_type / severity_code / keyword 过滤 + 分页。
+	// keyword 在 identifier / cn_name / en_name 上做 ILIKE。
+	ListWithFilter(ctx context.Context, f ListFilter) ([]ResolvedDefinition, int, error)
+
+	// GetByIdentifier 单条详情；不存在 → (nil, ErrUnknownIdentifier)。
+	GetByIdentifier(ctx context.Context, identifier string) (*ResolvedDefinition, error)
+
+	// Create 新建告警定义；severity_code 用于反查 severity_id。
+	Create(ctx context.Context, in CreateInput) (*ResolvedDefinition, error)
+
+	// Update 局部更新；nil 字段表示不变。
+	Update(ctx context.Context, identifier string, in UpdateInput) (*ResolvedDefinition, error)
+
+	// Delete 按 identifier 删除；返回是否真正删除（false=不存在）。
+	Delete(ctx context.Context, identifier string) (bool, error)
+
+	// UnknownStats 聚合 alarms_active 中 is_unknown=true 的 identifier 频次。
+	// productID 为 nil 时不按 product 过滤；days 限制 raised_at 时间窗口。
+	UnknownStats(ctx context.Context, productID *uuid.UUID, days int) ([]UnknownAlarmStat, error)
+}
+
+// ListFilter 控制 ListWithFilter 行为。
+type ListFilter struct {
+	NeType       *string
+	SeverityCode *int
+	Keyword      *string
+	Page         int
+	PageSize     int
+}
+
+// CreateInput 是 Create 入参。
+type CreateInput struct {
+	Identifier      string
+	NeType          string
+	CnName          string
+	EnName          string
+	SeverityCode    int // 31001-31004
+	EventType       *int
+	CnProbableCause string
+	EnProbableCause string
+	CnSuggestion    string
+	EnSuggestion    string
+	IsShow          bool
+}
+
+// UpdateInput 是 Update 入参；nil 字段保留原值。
+type UpdateInput struct {
+	NeType          *string
+	CnName          *string
+	EnName          *string
+	SeverityCode    *int
+	EventType       *int
+	CnProbableCause *string
+	EnProbableCause *string
+	CnSuggestion    *string
+	EnSuggestion    *string
+	IsShow          *bool
+}
+
+// UnknownAlarmStat 是 unknown-stats 端点的单条结果。
+type UnknownAlarmStat struct {
+	Identifier string `json:"identifier"`
+	Count      int    `json:"count"`
+	LastSeenAt string `json:"last_seen_at"`
+	NeType     string `json:"ne_type,omitempty"`
 }
 
 // ResolvedDefinition 是 AlarmDefinition + severity 反查后的合成结构，供 Registry 直接缓存。
