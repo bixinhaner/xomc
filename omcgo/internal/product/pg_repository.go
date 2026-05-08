@@ -85,14 +85,15 @@ func (r *PgRepository) ListProducts(ctx context.Context) ([]*Product, error) {
 
 // FetchIndicatorPlatformsByDeviceType 实现 Repository。
 //
-// 表名按 deviceType 静态路由到 perf_indicators_enb / _gsm / _gnb（设计 §2 KPI 三平台）。
+// 表名按 deviceType 静态路由到 rela_platform_indicator_formula_{enb,gsm,gnb}（设计 §2 KPI 三平台）。
+// 平台名落在公式表 platform_name 列；perf_indicators_* 本身不存平台维度。
 // 未识别 deviceType 返回空集（与上层 WARN-only 校验语义一致）。
 func (r *PgRepository) FetchIndicatorPlatformsByDeviceType(ctx context.Context, deviceType string) (map[string]struct{}, error) {
-	table, ok := indicatorTableByDeviceType(deviceType)
+	table, ok := formulaTableByDeviceType(deviceType)
 	if !ok {
 		return map[string]struct{}{}, nil
 	}
-	q := fmt.Sprintf(`SELECT DISTINCT platform FROM %s WHERE platform IS NOT NULL`, table)
+	q := fmt.Sprintf(`SELECT DISTINCT platform_name FROM %s WHERE platform_name IS NOT NULL`, table)
 	rows, err := r.pool.Query(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("query %s platforms: %w", table, err)
@@ -138,6 +139,21 @@ func indicatorTableByDeviceType(deviceType string) (string, bool) {
 		return "perf_indicators_gsm", true
 	case "gnb":
 		return "perf_indicators_gnb", true
+	default:
+		return "", false
+	}
+}
+
+// formulaTableByDeviceType 把 product.indicator_device_type 映射到平台公式物理表名。
+// platform_name 列只存在于公式表，不在 perf_indicators_*。
+func formulaTableByDeviceType(deviceType string) (string, bool) {
+	switch deviceType {
+	case "enb":
+		return "rela_platform_indicator_formula_enb", true
+	case "gsm":
+		return "rela_platform_indicator_formula_gsm", true
+	case "gnb":
+		return "rela_platform_indicator_formula_gnb", true
 	default:
 		return "", false
 	}
