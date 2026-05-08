@@ -1,6 +1,6 @@
 -- +goose Up
 -- ============================================================
--- 000064_seed_role_api_permissions_viewer.sql
+-- 000067_seed_role_api_permissions_viewer.sql
 -- 为 viewer 内置角色补 role_api_permissions：仅授予全部 GET 类 API 端点
 -- （只读权限，符合 viewer 角色语义）。
 --

@@ -44,7 +44,7 @@ func (a *pgAdapter) LoadPolicy(m casbinModel.Model) error {
 	// Casbin 仅消费 role_api_permissions JOIN api_endpoints 端点级数据。
 	//
 	// admin/operator 角色 role_api_permissions 各 445 行 = api_endpoints 全集；
-	// viewer 由 seed/000064_seed_role_api_permissions_viewer.sql 兜底 GET 全集。
+	// viewer 由 seed/000067_seed_role_api_permissions_viewer.sql 兜底 GET 全集。
 	rowsAPI, err := a.pool.Query(ctx, `
 		SELECT r.name AS role_name, ae.path, ae.method
 		FROM role_api_permissions rap

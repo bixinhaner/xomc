@@ -40,7 +40,7 @@ ON CONFLICT DO NOTHING;
 
 -- 5. 权限：B3-Phase2-B 起 permissions 表已 DROP（migrations/000065），种子 INSERT 整段移除。
 --    角色权限改由 role_menus（菜单可见性）+ role_api_permissions（API 鉴权）双轨承载,
---    分别由 seed/000063_seed_role_menus_builtin.sql 与 seed/000064_seed_role_api_permissions_viewer.sql
+--    分别由 seed/000066_seed_role_menus_builtin.sql 与 seed/000067_seed_role_api_permissions_viewer.sql
 --    （及 v1.0 路线 admin/operator 全集 seed）兜底。
 
 -- 6. OUI 厂商注册

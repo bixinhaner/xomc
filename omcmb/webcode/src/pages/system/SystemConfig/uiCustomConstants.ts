@@ -1,5 +1,5 @@
 // 与后端 sys_configs (category='ui_custom') 的 5 个 key 一一对应，
-// 与 omcgo/migrations/seed/000062_seed_ui_custom.sql 默认值保持同步。
+// 与 omcgo/migrations/seed/000065_seed_ui_custom.sql 默认值保持同步。
 // 详见 docs/prd/system/ui-customization.md §3。
 
 export const UI_CUSTOM_KEYS = [

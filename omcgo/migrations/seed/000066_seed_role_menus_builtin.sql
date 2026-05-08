@@ -1,6 +1,6 @@
 -- +goose Up
 -- ============================================================
--- 000063_seed_role_menus_builtin.sql
+-- 000066_seed_role_menus_builtin.sql
 -- 为 3 个内置角色（admin/operator/viewer）补 role_menus 关联，避免
 -- 切换到动态菜单数据源（PRD docs/prd/system/menu-dynamic-loading.md
 -- §4.2.4 折中方案 C）后非 builtIn 用户菜单空白。

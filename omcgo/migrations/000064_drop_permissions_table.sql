@@ -2,7 +2,7 @@
 --
 -- 历史 RBAC 模型抽象 (resource, action) 三元组，与 B3 端点级 (path, method) 模型重复。
 -- 端点级策略由 role_api_permissions JOIN api_endpoints 承载，详见
--- migrations/000056_roles_v1_extras.sql + seed/000064_seed_role_api_permissions_viewer.sql。
+-- migrations/000056_roles_v1_extras.sql + seed/000067_seed_role_api_permissions_viewer.sql。
 --
 -- 风险：DROP CASCADE 会清掉 permissions 表中存量数据；Casbin LoadPolicy 已切到
 -- role_api_permissions 单源（参 internal/admin/casbin.go），rollback 路径见 Down 段。
