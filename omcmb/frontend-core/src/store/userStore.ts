@@ -37,9 +37,6 @@ interface UserState {
   hasPermission: (permission: string) => boolean;
   // Legacy alias
   setUser: (user: User) => void;
-
-  // Compat getter — returns accessToken
-  readonly token: string | null;
 }
 
 export const useUserStore = create<UserState>()(
@@ -52,10 +49,6 @@ export const useUserStore = create<UserState>()(
       isAuthenticated: false,
       permissions: [],
       loading: false,
-
-      get token() {
-        return get().accessToken;
-      },
 
       login: (user) => set({ currentUser: user, isAuthenticated: true }),
       setUser: (user) => set({ currentUser: user, isAuthenticated: true }),
