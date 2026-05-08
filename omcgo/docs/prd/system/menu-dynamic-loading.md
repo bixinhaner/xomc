@@ -11,6 +11,7 @@
 | 0.3  | 2026-05-08 | Backend/Frontend Team | 附录 A 100 图标白名单冻结；P0 启动前最终版 |
 | 0.4  | 2026-05-08 | Backend Team | §4.2.4 修订：B3 端点级方案 + 双段实施（Phase1 准备 / Phase2 切换）|
 | 0.5  | 2026-05-08 | Backend/Frontend Team | B3-Phase2-B 完成 (DROP permissions) + 前端 P1/P2/P3 全部落地；§4.2.4 / §5 / §7 状态收尾 |
+| 0.6  | 2026-05-08 | Frontend Team | v0.5 复核收口：adminApi.getUserMenuTree 删除 + logout 清 menuStore + Forbidden §4.3.5 文案；新增 §10 待办（buildRouter 完全动态化 / e2e / 灰度切换） |
 
 **关联功能域**：F06 OMC-R 核心 / RBAC
 
@@ -800,6 +801,37 @@ const canDelete = usePermission('system:user:delete');
 - **禁止 Filled / TwoTone**：16px 渲染下视觉不达标（参 §1.3）。
 - **总量上限 200**：超过 200 后 bundle 影响明显，需要按需 lazy load 重构。
 - **删除图标的兼容**：若某图标从清单移除而历史菜单仍在用 → MenuManagement 编辑时显示"⚠️ 图标已下线"提示，IconPicker 不展示该图标，渲染时回退到无图标。
+
+---
+
+## 10. 待办事项（v0.6 复核遗留）
+
+> P0/P1/P2/P3 + B3 主线全部 ✅；本节列出 PRD 字面要求中**部分实现**或**留待后续**的项，
+> 不阻塞 v0.6 标记"主线收口"，但需在后续 wave 跟进。
+
+### 10.1 部分实现（与 PRD 字面要求有差距，已在 commit message 中标注偏离原因）
+
+| # | PRD 章节 | 实际状态 | 偏离原因 | 建议处理 |
+|---|---------|---------|---------|---------|
+| 1 | §4.3.4 完全动态 buildRouter | 仅做 componentRegistry + PrivateRoute 守卫；routes.tsx 保留 100+ 静态 lazy import | 一次性切完全动态 = 触碰 18 模块 100+ 路由，灰度风险大 | P2.5 wave：env=true 在 staging 跑过 1-2 周后再做 buildRouter 重构（commit 365abf19 已说明） |
+| 2 | §5 P3 DoD #5「后端 PgRoleRepository 4 方法已删除」 | 4 方法 stub 为返回 nil/[]，未真删 | 删除会破坏 PermissionChecker / PermissionWriter 接口 contract，影响 mock 与 RequireAPIPermission 中间件签名 | 待 RolePermission 灰度上线 1 个版本周期后，统一接口清理（同时移除 `Role.Permissions` / `CreateRoleRequest.Permissions` / `UpdateRoleRequest.Permissions` 三个 DTO 字段） |
+| 3 | §5 P3 DoD #7「VITE_DYNAMIC_MENU 默认 true，无 fallback」 | 默认 false，NAV_CONFIG fallback 仍在 | §6 降级策略矛盾：P1/P2 出问题需要立刻回退到 false；UAT 未通过前不能切 true | UAT 通过后单独发版切 default=true；同 PR 删 NAV_CONFIG / STATIC_ICON_MAP fallback |
+
+### 10.2 上线前必做（PRD §5 P3 DoD #3 / #6）
+
+| # | 项目 | 说明 |
+|---|------|------|
+| 1 | e2e 4 内置角色 + 3 测试角色端到端鉴权验证 | 在 `omcgo/scripts/e2e_verify.sh` 增加 W2.D.2 RBAC 章节：admin / operator / viewer / 自定义 viewer-test 各自访问 30+ 受保护 API 路由组，验证 200/403 符合预期 |
+| 2 | staging 环境跑 permissions 表 DROP 迁移 down/up | `make migrate-down` 回到 000064 → `make migrate-up` 到 000066，验证 Casbin LoadPolicy 单源、所有非 builtIn 用户鉴权正常 |
+| 3 | RolePermission UAT | 4 内置角色 + 1 自定义角色的"菜单可见性 + 按钮 disable + API 鉴权"三轨对齐 |
+
+### 10.3 后续清理工作
+
+| # | 项目 | 说明 |
+|---|------|------|
+| 1 | adminApi.createRole / updateRole 移除 permissions 字段 | RolePermission P3 已传 []，但 API client 还在 split 资源/动作；UAT 后清理 |
+| 2 | adminApi.MenuItem 类型与 frontend-core/types/menu.ts Menu 类型合并 | 两套并存（MenuItem 字段名不规整、Menu 干净）；后续 RolePermission / MenuManagement 全切 Menu 后删 MenuItem |
+| 3 | NAV_CONFIG / STATIC_ICON_MAP 兜底分支删除 | 跟 §10.1 #3 灰度切换同 PR 完成 |
 
 ---
 
