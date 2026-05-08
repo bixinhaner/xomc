@@ -247,10 +247,16 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// Authenticated user routes (any authenticated user)
 	ad.adminHandler.RegisterAuthenticatedRoutes(v1)
 
-	// Helper: permission-scoped sub-group
-	permGroup := func(resource string) *gin.RouterGroup {
+	// Helper: permission-scoped sub-group.
+	//
+	// B3-Phase2（参 docs/prd/system/menu-dynamic-loading.md §4.2.4）：
+	// 内部从粗粒度 RequireResourcePermission(resource) 切换为端点级
+	// RequireAPIPermission（按 c.Request.URL.Path + Method 鉴权，对齐 GVA 风格）。
+	// resource 参数保留供 30+ 调用点签名兼容，新版被忽略；helper 名留作"受保护
+	// 路由组"语义提示。
+	permGroup := func(_ string) *gin.RouterGroup {
 		g := v1.Group("")
-		g.Use(admin.RequireResourcePermission(ad.roleRepo, resource))
+		g.Use(admin.RequireAPIPermission(ad.roleRepo))
 		return g
 	}
 
@@ -384,9 +390,10 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// ----- Report routes → resource "pm" -----
 	md.reportHandler.RegisterRoutes(permGroup("pm"))
 
-	// ----- System Info endpoint → resource "devices", read only -----
+	// ----- System Info endpoint -----
+	// B3-Phase2：原 RequirePermission("devices","read") 改为端点级 RequireAPIPermission。
 	sysInfoGroup := v1.Group("")
-	sysInfoGroup.Use(admin.RequirePermission(ad.roleRepo, "devices", "read"))
+	sysInfoGroup.Use(admin.RequireAPIPermission(ad.roleRepo))
 	sysInfoGroup.GET("/system/info", md.sysInfoHandler.GetSystemInfo)
 
 	// ----- Northbound routes → resource "northbound" -----
@@ -395,9 +402,11 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// ----- API Key management routes (authenticated users) -----
 	ad.apiKeyHandler.RegisterRoutes(v1)
 
-	// ----- Admin management routes (require admin permission) -----
+	// ----- Admin management routes -----
+	// B3-Phase2：原 RequirePermission("users","admin") 改为端点级 RequireAPIPermission。
+	// 受保护粒度：/admin/* 下每个具体端点 path+method 单独鉴权。
 	adminGroup := v1.Group("/admin")
-	adminGroup.Use(admin.RequirePermission(ad.roleRepo, "users", "admin"))
+	adminGroup.Use(admin.RequireAPIPermission(ad.roleRepo))
 	ad.adminHandler.RegisterAdminRoutes(adminGroup)
 
 	// ----- Dictionary management routes (require admin permission) -----
@@ -416,8 +425,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// adminGroup already enforces RBAC users:admin; dead-letter handler nests
 	// under /admin via its own internal /admin/dead-letters group. Mount under
 	// v1 directly with the same admin permission to avoid double /admin prefix.
+	// B3-Phase2：dlqAdmin 同 adminGroup 切换为端点级。
 	dlqAdmin := v1.Group("")
-	dlqAdmin.Use(admin.RequirePermission(ad.roleRepo, "users", "admin"))
+	dlqAdmin.Use(admin.RequireAPIPermission(ad.roleRepo))
 	if md.deadLetterHandler != nil {
 		md.deadLetterHandler.RegisterRoutes(dlqAdmin)
 	}
