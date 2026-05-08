@@ -219,6 +219,25 @@ func RequireAPIPermission(roleRepo PermissionChecker) gin.HandlerFunc {
 // RequireCarrier — v1.0 已删除：users.carrier 已从 schema 移除，无 carrier 过滤需求。
 // 如旧代码仍 import 该函数，需要按 PRD §11.11 改造。
 
+// RequireSuperAdmin 严格仅放行 super_admin（builtIn 用户）。
+//
+// 与 RequirePermission 的区别：RequirePermission 让 super_admin 旁路，但其他角色
+// 也可能因显式 RBAC 授权而通过；RequireSuperAdmin 则**只**放 super_admin，
+// 不接受任何其他角色，即使该角色被赋予了对应资源的权限。
+//
+// 用于 T-0098 P3-05 收口：产品装配件 / 参数模型 / KPI 库 / 告警库治理 API
+// 仅 super_admin 可写改读。运维 admin / operator / viewer 一律 403。
+func RequireSuperAdmin() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if isSuper, _ := c.Get(CtxKeyIsSuperAdmin); isSuper == true {
+			c.Next()
+			return
+		}
+		commonerrors.AbortWithError(c, http.StatusForbidden,
+			errors.New("super_admin role required"))
+	}
+}
+
 // RequireResourcePermission returns a Gin middleware that dynamically determines
 // the permission action based on the HTTP method and checks the user has the
 // corresponding resource permission.

@@ -580,29 +580,5 @@ export const alarmService = {
     await delay(50, 100);
   },
 
-  // -- Alarm libraries (mock) ------------------------------------------------
-
-  async getAlarmLibraries(params: Record<string, unknown> & { page: number; pageSize: number }) {
-    await delay(100, 200);
-    const mockItems = [
-      { id: 'lib-001', alarmIdentifier: 'ALM-0001', alarmSource: 'ENB', eventType: '30003', severity: 2, enabled: true, probableCause: 'CPU占用率超阈值', explanation: '可能导致系统性能下降', carrier: null, technology: null, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z' },
-      { id: 'lib-002', alarmIdentifier: 'ALM-0002', alarmSource: 'GNB', eventType: '30000', severity: 1, enabled: true, probableCause: '设备断连', explanation: '设备与网管系统失去连接', carrier: null, technology: null, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z' },
-      { id: 'lib-003', alarmIdentifier: 'ALM-0003', alarmSource: 'CPE', eventType: '30004', severity: 2, enabled: true, probableCause: '温度过高', explanation: '设备运行温度超过安全阈值', carrier: null, technology: null, createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z' },
-    ];
-    return { items: mockItems, total: mockItems.length, page: params.page, pageSize: params.pageSize };
-  },
-
-  async createAlarmLibrary(payload: Record<string, unknown>) {
-    await delay(200, 400);
-    return { id: generateId('lib'), ...payload, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-  },
-
-  async updateAlarmLibrary(id: string, payload: Record<string, unknown>) {
-    await delay(150, 300);
-    return { id, ...payload, updatedAt: new Date().toISOString() };
-  },
-
-  async deleteAlarmLibrary(_id: string): Promise<void> {
-    await delay(150, 300);
-  },
+  // T-0098-P5-06：旧 alarm-library mock 已删，治理走 alarmDefinitionService（mock/services/alarmDefinitionService.ts）。
 };

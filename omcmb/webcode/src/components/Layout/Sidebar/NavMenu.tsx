@@ -3,6 +3,7 @@ import { Menu as AntMenu } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   AppstoreOutlined,
+  AppstoreAddOutlined,
   DashboardOutlined,
   ClusterOutlined,
   AlertOutlined,
@@ -31,6 +32,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useTabStore } from '@core/store/tabStore';
 import { useAppStore } from '@core/store/appStore';
 import { useMenuStore } from '@core/store/menuStore';
+import { useUserStore } from '@core/store/userStore';
 import type { Menu as DynamicMenu } from '@core/types/menu';
 import { useResponsive } from '@/hooks/useResponsive';
 import { useT } from '@/hooks/useT';
@@ -41,8 +43,9 @@ import type { NavGroup, NavChild } from './navConfig';
 
 type MenuItem = Required<MenuProps>['items'][number];
 
-// 静态模式（VITE_DYNAMIC_MENU=false）兜底图标映射，仅给 NAV_CONFIG 用。
+// 静态模式（VITE_DYNAMIC_MENU=false）兜底图标映射，仅给 NAV_CONFIG iconName 用。
 // 动态模式优先调 resolveIcon（IconPicker 116 个白名单）。
+// AppstoreAddOutlined 来自 T-0098-P4-02 产品中心目录（origin/main）。
 const STATIC_ICON_MAP: Record<string, React.ReactNode> = {
   DashboardOutlined: <DashboardOutlined />,
   ClusterOutlined: <ClusterOutlined />,
@@ -60,6 +63,7 @@ const STATIC_ICON_MAP: Record<string, React.ReactNode> = {
   RadarChartOutlined: <RadarChartOutlined />,
   SafetyOutlined: <SafetyOutlined />,
   AppstoreOutlined: <AppstoreOutlined />,
+  AppstoreAddOutlined: <AppstoreAddOutlined />,
   GatewayOutlined: <GatewayOutlined />,
   DeploymentUnitOutlined: <DeploymentUnitOutlined />,
   WifiOutlined: <WifiOutlined />,
@@ -71,7 +75,7 @@ const STATIC_ICON_MAP: Record<string, React.ReactNode> = {
 };
 
 // ---------------------------------------------------------------------------
-// 静态分支（保留兜底）：消费 NAV_CONFIG
+// 静态分支（保留兜底）：消费 NAV_CONFIG（已按 super_admin 过滤）
 // ---------------------------------------------------------------------------
 
 function buildStaticMenuItems(groups: NavGroup[], t: (id: string) => string): MenuItem[] {
@@ -145,6 +149,9 @@ function renderIcon(name: string | undefined): React.ReactNode {
  *  - 仅渲染 type='directory'|'menu'（按钮跳过）
  *  - 单子节点目录扁平化（与 NAV_CONFIG 行为一致）
  *  - 隐藏 status!=active 或 showStatus='hide' 的节点
+ *
+ * 注：动态模式下，super_admin 过滤由后端 GetUserMenuTreeByRole / GetAllActive
+ * 在 service 层完成（user.source='builtIn' 旁路），前端无需再过滤。
  */
 function buildDynamicMenuItems(menus: DynamicMenu[]): MenuItem[] {
   return menus
@@ -256,6 +263,7 @@ export default function NavMenu({
   const setMobileOverlayOpen = useAppStore((s) => s.setMobileOverlayOpen);
   const { isMobile } = useResponsive();
   const t = useT();
+  const isSuperAdmin = useUserStore((s) => s.currentUser?.isSuperAdmin === true);
 
   const dynamicMenus = useMenuStore((s) => s.menus);
   const menuLoaded = useMenuStore((s) => s.loaded);
@@ -263,10 +271,17 @@ export default function NavMenu({
   // 灰度判定：env 启用 + 已加载 + 树非空 → 走动态分支；否则兜底 NAV_CONFIG。
   const useDynamic = isDynamicMenuEnabled() && menuLoaded && dynamicMenus.length > 0;
 
+  // T-0098-P4-02：静态分支 NAV_CONFIG 按 super_admin 过滤（产品中心仅超管可见）。
+  // 动态分支由后端 service 层完成同等过滤，无需前端二次处理。
+  const filteredNav = useMemo(
+    () => NAV_CONFIG.filter((g) => !g.requireSuperAdmin || isSuperAdmin),
+    [isSuperAdmin],
+  );
+
   const menuItems = useMemo(
     () =>
-      useDynamic ? buildDynamicMenuItems(dynamicMenus) : buildStaticMenuItems(NAV_CONFIG, t),
-    [useDynamic, dynamicMenus, t],
+      useDynamic ? buildDynamicMenuItems(dynamicMenus) : buildStaticMenuItems(filteredNav, t),
+    [useDynamic, dynamicMenus, filteredNav, t],
   );
 
   const dynamicKeyToLeaf = useMemo(
@@ -278,12 +293,12 @@ export default function NavMenu({
     [useDynamic, dynamicMenus],
   );
   const staticKeyToChild = useMemo(
-    () => (useDynamic ? new Map<string, NavChild>() : buildStaticKeyToChild(NAV_CONFIG)),
-    [useDynamic],
+    () => (useDynamic ? new Map<string, NavChild>() : buildStaticKeyToChild(filteredNav)),
+    [useDynamic, filteredNav],
   );
   const staticPathToKey = useMemo(
-    () => (useDynamic ? new Map<string, string>() : buildStaticPathToKey(NAV_CONFIG)),
-    [useDynamic],
+    () => (useDynamic ? new Map<string, string>() : buildStaticPathToKey(filteredNav)),
+    [useDynamic, filteredNav],
   );
 
   const selectedKeys = useMemo(() => {
@@ -298,9 +313,9 @@ export default function NavMenu({
     }
     const selectedKey = staticPathToKey.get(location.pathname);
     if (!selectedKey) return [];
-    const group = NAV_CONFIG.find((g) => g.children.some((c) => c.key === selectedKey));
+    const group = filteredNav.find((g) => g.children.some((c) => c.key === selectedKey));
     return group ? [group.key] : [];
-  }, [useDynamic, dynamicMenus, staticPathToKey, location.pathname]);
+  }, [useDynamic, dynamicMenus, staticPathToKey, filteredNav, location.pathname]);
 
   const handleMenuClick: MenuProps['onClick'] = ({ key }) => {
     if (useDynamic) {

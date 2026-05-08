@@ -9,6 +9,9 @@ export interface NavGroup {
   label: string;
   iconName: string;
   children: NavChild[];
+  /** T-0098-P4-02：true 表示该组仅对 super_admin 可见。
+   *  NavMenu 渲染时按 user.isSuperAdmin 过滤；非超管登录看不到此组。 */
+  requireSuperAdmin?: boolean;
 }
 
 export type NavConfig = NavGroup[];
@@ -54,7 +57,7 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'alarm-history',      label: 'nav.alarm.history',        path: '/alarm/history' },
       // { key: 'alarm-stats',        label: 'nav.alarm.statistics',     path: '/alarm/statistics' },  // 隐藏告警统计
       { key: 'alarm-rule',         label: 'nav.alarm.rules',          path: '/alarm/rules' },
-      { key: 'alarm-knowledge',    label: 'nav.alarm.library',        path: '/alarm/library' },
+      // T-0098-P5-06：旧 alarm-knowledge（/alarm/library）已下线，治理走 /product/alarm-library（super_admin）。
       // { key: 'alarm-sync',         label: 'nav.alarm.sync',           path: '/alarm/sync' },           // 隐藏
       // { key: 'alarm-notification', label: 'nav.alarm.notification',   path: '/alarm/notification' },  // 隐藏告警通知
       // { key: 'alarm-interface',    label: 'nav.alarm.interfaceFault', path: '/alarm/interface-fault' }, // 隐藏
@@ -175,6 +178,19 @@ export const NAV_CONFIG: NavConfig = [
       // { key: 'log-operation',label: 'nav.log.operation',  path: '/log/operation' },  // 隐藏
       // { key: 'log-system',   label: 'nav.log.system',     path: '/log/system' },       // 隐藏
       // { key: 'log-config',   label: 'nav.log.config',     path: '/log/config' },       // 隐藏
+    ],
+  },
+  {
+    key: 'product',
+    label: 'nav.product',
+    iconName: 'AppstoreAddOutlined',
+    requireSuperAdmin: true,  // T-0098-P4-02：仅超管可见的字典治理菜单
+    children: [
+      { key: 'product-products',       label: 'nav.product.products',       path: '/product/products' },
+      { key: 'product-param-model',    label: 'nav.product.paramModel',     path: '/product/param-model' },
+      { key: 'product-kpi-library',    label: 'nav.product.kpiLibrary',     path: '/product/kpi-library' },
+      { key: 'product-alarm-library',  label: 'nav.product.alarmLibrary',   path: '/product/alarm-library' },
+      { key: 'product-orphan-devices', label: 'nav.product.orphanDevices',  path: '/product/orphan-devices' },
     ],
   },
   {

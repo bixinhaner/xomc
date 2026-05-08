@@ -39,6 +39,9 @@ type Alarm struct {
 	ClearedBy      *string           `json:"cleared_by,omitempty" db:"cleared_by"`
 	ClearNote      *string           `json:"clear_note,omitempty" db:"clear_note"`
 	AdditionalInfo map[string]string `json:"additional_info,omitempty" db:"additional_info"`
+	// IsUnknown 标记 T-0098 P2-10 fallback 写入的告警（identifier 不在 alarm_definitions
+	// 但 product.enable_unknown_alarm=true）。dashboard / 治理闭环依据此过滤。
+	IsUnknown      bool              `json:"is_unknown" db:"is_unknown"`
 	CreatedAt      time.Time         `json:"created_at" db:"created_at"`
 	UpdatedAt      time.Time         `json:"updated_at" db:"updated_at"`
 }

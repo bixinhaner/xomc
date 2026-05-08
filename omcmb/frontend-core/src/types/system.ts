@@ -11,6 +11,9 @@ export interface User {
   displayName: string;
   email: string;
   role: UserRole;
+  /** 派生：是否为超级管理员（source === 'builtIn'，对齐后端 user.IsSuperAdmin()）。
+   *  T-0098-P4 用于产品中心治理菜单 / 路由守卫；admin/operator/viewer 一律不可见。 */
+  isSuperAdmin?: boolean;
   roles?: string[];
   roleIds?: string[];
   status: UserStatus;

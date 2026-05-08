@@ -8,39 +8,87 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/omcgo/omcgo/internal/config/datamodel"
+	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/task"
 )
 
 // ConformanceTestRunner executes predefined interop conformance test cases
 // against a target device identified by serial number.
+//
+// T-0098 P5-01：旧 dataModelReg 路径已删除，期望参数集仅来自 paramRegistry +
+// productRegistry 的 ParamMapping（设计 §1.11）。前置任意一步失败 → checkParam*
+// / verify_response 返回错误（不再降级）。
 type ConformanceTestRunner struct {
-	cases        map[TestCategory][]TestCase
-	deviceRepo   device.DeviceRepository
-	paramRepo    device.DeviceParameterRepository
-	dataModelReg *datamodel.DataModelRegistry
-	taskSvc      task.Enqueuer
-	logger       *zap.Logger
+	cases           map[TestCategory][]TestCase
+	deviceRepo      device.DeviceRepository
+	paramRepo       device.DeviceParameterRepository
+	paramRegistry   *parammodel.Registry
+	productRegistry *product.Registry
+	taskSvc         task.Enqueuer
+	logger          *zap.Logger
 }
 
 // NewConformanceTestRunner creates a runner pre-loaded with test cases.
 func NewConformanceTestRunner(
 	deviceRepo device.DeviceRepository,
 	paramRepo device.DeviceParameterRepository,
-	dataModelReg *datamodel.DataModelRegistry,
+	paramReg *parammodel.Registry,
+	prodReg *product.Registry,
 	taskSvc task.Enqueuer,
 	logger *zap.Logger,
 ) *ConformanceTestRunner {
 	return &ConformanceTestRunner{
-		cases:        make(map[TestCategory][]TestCase),
-		deviceRepo:   deviceRepo,
-		paramRepo:    paramRepo,
-		dataModelReg: dataModelReg,
-		taskSvc:      taskSvc,
-		logger:       logger.Named("conformance-runner"),
+		cases:           make(map[TestCategory][]TestCase),
+		deviceRepo:      deviceRepo,
+		paramRepo:       paramRepo,
+		paramRegistry:   paramReg,
+		productRegistry: prodReg,
+		taskSvc:         taskSvc,
+		logger:          logger.Named("conformance-runner"),
 	}
+}
+
+// resolveExpectedParams 通过 ParamRegistry 获取期望参数集。
+// 任意一步失败 → 返回 (nil, "")，调用方据此判定 model_exists 失败。
+//
+// expectedParam 是 parammodel.ParamMapping 的最小公共视图，仅 Path / Type / Writable。
+func (r *ConformanceTestRunner) resolveExpectedParams(ctx context.Context, dev *model.Device) ([]expectedParam, string) {
+	if r.paramRegistry == nil || r.productRegistry == nil {
+		return nil, ""
+	}
+	if dev == nil || dev.ProductClass == "" {
+		return nil, ""
+	}
+	match, err := r.productRegistry.MatchProductClass(ctx, dev.ProductClass)
+	if err != nil || match == nil || match.Product == nil {
+		return nil, ""
+	}
+	set, err := r.paramRegistry.GetByProduct(ctx, match.Product.ID, dev.FirmwareVersion)
+	if err != nil || set == nil {
+		return nil, ""
+	}
+	out := make([]expectedParam, 0, len(set.Mappings))
+	for _, m := range set.Mappings {
+		if m.EntryType != "parameter" {
+			continue
+		}
+		out = append(out, expectedParam{
+			Path:     m.PrivatePath,
+			Type:     m.DataType,
+			Writable: parammodel.IsAccessWritable(m.Access),
+		})
+	}
+	return out, string(set.Source)
+}
+
+// expectedParam 是 parammodel.ParamMapping 的最小公共视图。
+type expectedParam struct {
+	Path     string
+	Type     string
+	Writable bool
 }
 
 // RegisterCases adds a batch of test cases under their respective categories.
@@ -52,7 +100,6 @@ func (r *ConformanceTestRunner) RegisterCases(tc []TestCase) {
 
 // ListTestCases returns all registered test cases grouped by category.
 func (r *ConformanceTestRunner) ListTestCases() map[TestCategory][]TestCase {
-	// Return a copy to prevent external mutation.
 	out := make(map[TestCategory][]TestCase, len(r.cases))
 	for cat, cases := range r.cases {
 		copied := make([]TestCase, len(cases))
@@ -173,10 +220,8 @@ func (r *ConformanceTestRunner) executeCheckParam(ctx context.Context, dev *mode
 	}
 }
 
-// checkNotEmpty verifies that a device field is not empty. Supports both single
-// "field" and batch "fields" parameters.
+// checkNotEmpty verifies that a device field is not empty.
 func (r *ConformanceTestRunner) checkNotEmpty(dev *model.Device, field string, step TestStep) error {
-	// Handle batch "fields" parameter.
 	if rawFields, ok := step.Params["fields"]; ok {
 		var fields []string
 		switch v := rawFields.(type) {
@@ -221,71 +266,57 @@ func (r *ConformanceTestRunner) checkPositive(dev *model.Device, field string) e
 	}
 }
 
-// checkParamPathsPresent verifies that device parameters include paths from the data model.
+// checkParamPathsPresent verifies that device parameters include paths from the param mapping.
 func (r *ConformanceTestRunner) checkParamPathsPresent(ctx context.Context, dev *model.Device) error {
-	dm, err := r.dataModelReg.ResolveForDevice(ctx, dev)
-	if err != nil {
-		return fmt.Errorf("resolve data model: %w", err)
-	}
-	if dm == nil {
-		return fmt.Errorf("no data model found for device %s", dev.SerialNumber)
+	expected, _ := r.resolveExpectedParams(ctx, dev)
+	if expected == nil {
+		return fmt.Errorf("no param mapping found for device %s", dev.SerialNumber)
 	}
 
 	params, err := r.paramRepo.GetByDevice(ctx, dev.ID)
 	if err != nil {
 		return fmt.Errorf("get device parameters: %w", err)
 	}
-
 	if len(params) == 0 {
 		return fmt.Errorf("device has no reported parameters")
 	}
-
 	return nil
 }
 
-// checkParamTypesMatch validates parameter types against the data model.
+// checkParamTypesMatch validates parameter types against the param mapping.
 func (r *ConformanceTestRunner) checkParamTypesMatch(ctx context.Context, dev *model.Device) error {
-	dm, err := r.dataModelReg.ResolveForDevice(ctx, dev)
-	if err != nil {
-		return fmt.Errorf("resolve data model: %w", err)
-	}
-	if dm == nil {
-		return fmt.Errorf("no data model found for device %s", dev.SerialNumber)
+	expected, _ := r.resolveExpectedParams(ctx, dev)
+	if expected == nil {
+		return fmt.Errorf("no param mapping found for device %s", dev.SerialNumber)
 	}
 
 	params, err := r.paramRepo.GetByDevice(ctx, dev.ID)
 	if err != nil {
 		return fmt.Errorf("get device parameters: %w", err)
 	}
-
 	if len(params) == 0 {
 		return fmt.Errorf("device has no reported parameters")
 	}
 
-	// Parse the parameter tree from the data model.
-	var dmParams []datamodel.Parameter
-	if err := json.Unmarshal(dm.ParameterTree, &dmParams); err != nil {
-		return fmt.Errorf("parse data model parameter tree: %w", err)
-	}
-
-	// Build a lookup of expected types.
-	expectedTypes := make(map[string]string, len(dmParams))
-	for _, p := range dmParams {
+	expectedTypes := make(map[string]string, len(expected))
+	for _, p := range expected {
 		expectedTypes[p.Path] = p.Type
 	}
+	return countTypeMismatches(params, expectedTypes)
+}
 
-	// Check each device parameter against expected types.
+// countTypeMismatches 统计 actualParams 与 expectedTypes 之间的 type 不一致条数。
+func countTypeMismatches(actualParams []model.DeviceParameter, expectedTypes map[string]string) error {
 	mismatches := 0
-	for _, p := range params {
+	for _, p := range actualParams {
 		expected, ok := expectedTypes[p.ParameterPath]
 		if !ok {
-			continue // extra param, not a type mismatch
+			continue
 		}
 		if string(p.ParameterType) != expected {
 			mismatches++
 		}
 	}
-
 	if mismatches > 0 {
 		return fmt.Errorf("%d parameter type mismatches found", mismatches)
 	}
@@ -340,14 +371,10 @@ func (r *ConformanceTestRunner) executeVerifyResponse(ctx context.Context, dev *
 		return nil
 
 	case "model_exists":
-		dm, err := r.dataModelReg.ResolveForDevice(ctx, dev)
-		if err != nil {
-			return fmt.Errorf("resolve data model: %w", err)
+		if expected, _ := r.resolveExpectedParams(ctx, dev); expected != nil {
+			return nil
 		}
-		if dm == nil {
-			return fmt.Errorf("no data model found for device %s", dev.SerialNumber)
-		}
-		return nil
+		return fmt.Errorf("no param mapping found for device %s", dev.SerialNumber)
 
 	default:
 		return fmt.Errorf("unknown verify_response check: %s", check)

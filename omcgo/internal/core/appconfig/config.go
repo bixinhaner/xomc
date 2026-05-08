@@ -123,6 +123,76 @@ type BatchProcessorConfig struct {
 	ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout"` // 优雅关闭超时
 }
 
+// DictLoaderConfig 配置共享字典装载基础设施（T-0098 P1-01）。
+// 由参数模型 / KPI 指标库 / 告警库 / 产品 四类启动期 Loader 共用：
+//   - XMLBaseDir 是各域 Loader.Directory() 的根（相对工作目录或绝对路径）
+//   - AutoLoadOnStartup=false 时跳过启动期 LoadAll，仅由管理 API 触发 Reload
+//   - CacheVersionPollInterval 控制 Redis 计数器轮询周期（每实例独立 goroutine）
+//   - LoadConcurrency 限制 LoadAll 内 errgroup 并发数
+//
+// 各域独立配置（如参数模型的 discovered_cache_ttl）仍放在各自的
+// ParamModelConfig / IndicatorConfig / AlarmDefinitionConfig 中。
+type DictLoaderConfig struct {
+	XMLBaseDir               string        `mapstructure:"xml_base_dir"`
+	AutoLoadOnStartup        bool          `mapstructure:"auto_load_on_startup"`
+	CacheVersionPollInterval time.Duration `mapstructure:"cache_version_poll_interval"`
+	LoadConcurrency          int           `mapstructure:"load_concurrency"`
+
+	// T-0098 P1-06：4 域 Loader 子配置。
+	// 默认值由各 Loader 包构造期 fallback（避免 yaml 缺省即崩）。
+	ParamModel       ParamModelLoaderConfig       `mapstructure:"param_model"`
+	Indicator        IndicatorLoaderConfig        `mapstructure:"indicator"`
+	AlarmDefinition  AlarmDefinitionLoaderConfig  `mapstructure:"alarm_definition"`
+	Product          ProductLoaderConfig          `mapstructure:"product"`
+}
+
+// ParamModelLoaderConfig 控制参数模型 Loader 行为（T-0098 P1-06）。
+// 扫描 {XMLBaseDir}/{Directory}/，按 ParamModelFiles 白名单加载 9 个 paramModel XML，
+// StandardModelFile 单文件加载 standard-model.xml。
+type ParamModelLoaderConfig struct {
+	Directory         string   `mapstructure:"directory"`           // 默认 "param-mappings"
+	ParamModelFiles   []string `mapstructure:"param_model_files"`   // 9 个白名单（空即扫除已知 routing/products 之外）
+	StandardModelFile string   `mapstructure:"standard_model_file"` // 默认 "standard-model.xml"
+}
+
+// IndicatorLoaderConfig 控制 KPI 指标库 Loader 行为（T-0098 P1-06）。
+// EnbDirectory 内的所有 *.xml 视为 ENB 平台文件；GsmFile / GnbFile 单文件加载。
+type IndicatorLoaderConfig struct {
+	BaseDirectory string `mapstructure:"base_directory"` // 默认 "indicator-library"
+	EnbSubdir     string `mapstructure:"enb_subdir"`     // 默认 "enb"
+	GsmFile       string `mapstructure:"gsm_file"`       // 默认 "GSM.xml"
+	GnbFile       string `mapstructure:"gnb_file"`       // 默认 "GNB.xml"
+}
+
+// AlarmDefinitionLoaderConfig 控制告警库 Loader 行为（T-0098 P1-06）。
+// 扫描 {XMLBaseDir}/{Directory}/，按文件名推断 ne_type（ENB.xml → "ENB"）。
+type AlarmDefinitionLoaderConfig struct {
+	Directory string `mapstructure:"directory"` // 默认 "alarm-definitions"
+}
+
+// ProductLoaderConfig 控制产品装配件 Loader 行为（T-0098 P1-06）。
+// File 单文件加载 products.xml；启动期校验三引用（paramModel / indicator platform / alarm ne_type）。
+type ProductLoaderConfig struct {
+	Directory string `mapstructure:"directory"` // 默认 "param-mappings"（与 paramModel 同目录）
+	File      string `mapstructure:"file"`      // 默认 "products.xml"
+}
+
+// ParamRegistryConfig 控制 ParamRegistry 运行期行为（T-0098 P2-02）。
+//
+// UseNew 是 dual-stack 切换 flag：
+//   - false（默认）→ 消费者（provision/sync、orchestrator、device handler、interop）继续走旧 datamodel.ParamRegistry
+//   - true        → 消费者走新 parammodel.Registry + Translator（P2-02..P2-08 全部合入后才能切）
+//
+// 本 flag **不被 parammodel.Registry 自身消费**——新 Registry 始终可启动可测；
+// flag 仅在 P2-04..08 各消费者改造时按需读取，决定走哪个栈。
+//
+// DefaultTTL / DiscoveredTTL 控制 L2 Redis 缓存 TTL；≤ 0 时由 RedisCache 退化为 24h。
+type ParamRegistryConfig struct {
+	UseNew        bool          `mapstructure:"use_new"`
+	DefaultTTL    time.Duration `mapstructure:"default_ttl"`
+	DiscoveredTTL time.Duration `mapstructure:"discovered_ttl"`
+}
+
 // AppConfig 是 App 服务的完整配置。
 // 由 cmd/app/main.go 读取 config.yaml 后初始化，包含 REST API、认证、
 // 北向接口、开站引擎、数据模型过期策略和可观测性配置。
@@ -141,6 +211,8 @@ type AppConfig struct {
 	Provision       ProvisionConfig       `mapstructure:"provision"`
 	Upgrade         UpgradeConfig         `mapstructure:"upgrade"`
 	DataModelExpiry DataModelExpiryConfig `mapstructure:"datamodel_expiry"`
+	DictLoader      DictLoaderConfig      `mapstructure:"dict_loader"`
+	ParamRegistry   ParamRegistryConfig   `mapstructure:"param_registry"`
 	BatchProcessor  BatchProcessorConfig  `mapstructure:"batch_processor"`
 	Metrics         MetricsConfig         `mapstructure:"metrics"`
 	Tracer          TracerConfig          `mapstructure:"tracer"`

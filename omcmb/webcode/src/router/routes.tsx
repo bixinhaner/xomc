@@ -36,7 +36,6 @@ const CurrentAlarms      = React.lazy(() => import('@/pages/alarm/CurrentAlarms'
 const HistoricalAlarms   = React.lazy(() => import('@/pages/alarm/HistoricalAlarms'));
 const AlarmStatistics    = React.lazy(() => import('@/pages/alarm/AlarmStatistics'));
 const AlarmRules         = React.lazy(() => import('@/pages/alarm/AlarmRules'));
-const AlarmLibrary       = React.lazy(() => import('@/pages/alarm/AlarmSupportLibrary'));
 const AlarmSync          = React.lazy(() => import('@/pages/alarm/AlarmSync'));
 const CustomAlarmStats   = React.lazy(() => import('@/pages/alarm/CustomAlarmStats'));
 
@@ -51,7 +50,6 @@ const CellManagement     = React.lazy(() => import('@/pages/config/CellManagemen
 const BaselineMgmt       = React.lazy(() => import('@/pages/config/BaselineManagement'));
 const CommonConfig       = React.lazy(() => import('@/pages/config/CommonConfig'));
 const NeighborParams     = React.lazy(() => import('@/pages/config/NeighborParams'));
-const DataModelMgmt      = React.lazy(() => import('@/pages/config/DataModelManagement'));
 const NorthboundMgmt     = React.lazy(() => import('@/pages/config/NorthboundManagement'));
 const AutoProvisioning   = React.lazy(() => import('@/pages/config/AutoProvisioning'));
 const InteropTesting     = React.lazy(() => import('@/pages/config/InteropTesting'));
@@ -157,6 +155,13 @@ const OpsTasks           = React.lazy(() => import('@/pages/ops/TaskManagement')
 const NetworkDiagnosis   = React.lazy(() => import('@/pages/ops/NetworkDiagnosis'));
 const OpsDownloads       = React.lazy(() => import('@/pages/ops/Downloads'));
 
+// T-0098-P4 Product Center (super_admin only)
+const ProductsPage       = React.lazy(() => import('@/pages/product/products'));
+const ParamModelPage     = React.lazy(() => import('@/pages/product/param-model'));
+const KpiLibraryPage     = React.lazy(() => import('@/pages/product/kpi-library'));
+const AlarmLibraryPage   = React.lazy(() => import('@/pages/product/alarm-library'));
+const OrphanDevicesPage  = React.lazy(() => import('@/pages/product/orphan-devices'));
+
 // ---------------------------------------------------------------------------
 // Loading fallback
 // ---------------------------------------------------------------------------
@@ -173,6 +178,19 @@ function withSuspense(Component: React.ComponentType) {
         <Component />
       </Suspense>
     </ErrorBoundary>
+  );
+}
+
+// T-0098-P4-02：super_admin 治理路由组守卫包装
+function withSuperAdmin(Component: React.ComponentType) {
+  return (
+    <PrivateRoute requireSuperAdmin>
+      <ErrorBoundary>
+        <Suspense fallback={<PageLoader />}>
+          <Component />
+        </Suspense>
+      </ErrorBoundary>
+    </PrivateRoute>
   );
 }
 
@@ -218,7 +236,6 @@ export const routes: RouteObject[] = [
       { path: 'alarm/history',    element: withSuspense(HistoricalAlarms) },
       { path: 'alarm/statistics', element: withSuspense(AlarmStatistics) },
       { path: 'alarm/rules',      element: withSuspense(AlarmRules) },
-      { path: 'alarm/library',    element: withSuspense(AlarmLibrary) },
       { path: 'alarm/sync',       element: withSuspense(AlarmSync) },
       { path: 'alarm/custom-stats', element: withSuspense(CustomAlarmStats) },
 
@@ -233,7 +250,6 @@ export const routes: RouteObject[] = [
       { path: 'config/baseline',         element: withSuspense(BaselineMgmt) },
       { path: 'config/common',           element: withSuspense(CommonConfig) },
       { path: 'config/neighbor',         element: withSuspense(NeighborParams) },
-      { path: 'config/data-model',       element: withSuspense(DataModelMgmt) },
       { path: 'config/northbound',       element: withSuspense(NorthboundMgmt) },
       { path: 'config/auto-provision',   element: withSuspense(AutoProvisioning) },
       { path: 'config/interop-test',     element: withSuspense(InteropTesting) },
@@ -341,7 +357,15 @@ export const routes: RouteObject[] = [
       { path: 'ops/network-diagnosis', element: withSuspense(NetworkDiagnosis) },
       { path: 'ops/downloads',         element: withSuspense(OpsDownloads) },
 
-      // 404
+      // T-0098-P4 Product Center (super_admin only)
+      { path: 'product/products',       element: withSuperAdmin(ProductsPage) },
+      { path: 'product/param-model',    element: withSuperAdmin(ParamModelPage) },
+      { path: 'product/kpi-library',    element: withSuperAdmin(KpiLibraryPage) },
+      { path: 'product/alarm-library',  element: withSuperAdmin(AlarmLibraryPage) },
+      { path: 'product/orphan-devices', element: withSuperAdmin(OrphanDevicesPage) },
+
+      // 403 / 404
+      { path: '403', element: <Forbidden /> },
       { path: '*', element: <NotFound /> },
     ],
   },

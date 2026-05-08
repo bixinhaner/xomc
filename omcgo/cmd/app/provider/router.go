@@ -11,7 +11,6 @@ import (
 
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/alarm"
-	"github.com/omcgo/omcgo/internal/config/datamodel"
 	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/omcgo/omcgo/internal/core/components"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
@@ -103,6 +102,33 @@ func Setup(r *gin.Engine, c *Container) error {
 		Name:    "misc",
 		Depends: []string{"task"},
 		Init:    func() error { return initMiscModules(c) },
+	})
+	// T-0098 P1-06：字典加载（4 域 paramModel/indicator/alarm-definition/product）
+	// 无业务依赖，但 P1 schema 必须已迁移（migrate up 跑过 000057-000059）
+	graph.Add(components.ModuleInitializer{
+		Name: "dictload",
+		Init: func() error { return initDictLoadModule(c) },
+	})
+	// T-0098 P2-01：ProductRegistry（productClass 全局正则路由 + L1+L2 缓存 + 三引用校验）
+	// 依赖 dictload 完成后 products / alarm_definitions / perf_indicators_* 表已写入。
+	graph.Add(components.ModuleInitializer{
+		Name:    "productregistry",
+		Depends: []string{"dictload"},
+		Init:    func() error { return initProductRegistryModule(c) },
+	})
+	// T-0098 P2-02：ParamRegistry（按 productId/paramModelId 取映射 + Translator 双向翻译）
+	// 依赖 productregistry 注入为 productGetter（反查 product.ParamModelID 供 default 降级）。
+	graph.Add(components.ModuleInitializer{
+		Name:    "paramregistry",
+		Depends: []string{"dictload", "productregistry"},
+		Init:    func() error { return initParamRegistryModule(c) },
+	})
+	// T-0098 P3-04：AlarmDefinition Registry + Service + Handler — REST API 入口装配。
+	// 依赖 dictload 完成后 alarm_definitions / alarm_severity_levels 表已写入。
+	graph.Add(components.ModuleInitializer{
+		Name:    "alarmdef",
+		Depends: []string{"dictload"},
+		Init:    func() error { return initAlarmDefModule(c) },
 	})
 
 	totalStart := time.Now()
@@ -281,15 +307,14 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	exportHandler.SetPermissionService(c.PermService)
 	exportHandler.RegisterRoutes(permGroup("devices"))
 
-	paramTreeHandler := device.NewParameterTreeHandler(c.DeviceService, c.ParamRepo, c.DMRegistry, c.Logger)
+	// T-0098 P5-01：dmRegistry 已删除，直接注入 ParamRegistry / ProductRegistry。
+	paramTreeHandler := device.NewParameterTreeHandler(c.DeviceService, c.ParamRepo, c.ParamRegistry, c.ProductRegistry, c.Logger)
 	paramTreeHandler.RegisterRoutes(permGroup("devices"))
 
-	// ----- Config routes → resource "datamodels" -----
-	ch := c.configHandlerDeps
-	dmHandler := datamodel.NewHandler(ch.dmRepo, ch.ouiRepo, ch.dmRegistry, ch.dmImporter)
-	dmHandler.RegisterRoutes(permGroup("datamodels"))
+	// T-0098-P5-01：旧 /api/v1/datamodels CRUD 已下线，治理走 /api/v1/products + /api/v1/param-models（super_admin）。
 
 	// ----- ConfigTemplate routes → resource "config" -----
+	ch := c.configHandlerDeps
 	templateHandler := template.NewHandler(ch.templateRepo)
 	templateHandler.RegisterRoutes(permGroup("config"))
 
@@ -317,9 +342,28 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	alarmHandler := alarm.NewHandler(c.AlarmEngine, ah.alarmPgStore, ah.alarmSyncService, c.Logger)
 	alarmHandler.RegisterRoutes(permGroup("alarms"))
 
-	// ----- Alarm library routes → resource "alarms" -----
-	alarmLibraryHandler := alarm.NewLibraryHandler(ah.alarmLibraryService, c.Logger)
-	alarmLibraryHandler.RegisterRoutes(permGroup("alarms").Group("/alarms/alarm-libraries"))
+	// T-0098-P5-06：旧 /alarms/alarm-libraries 路由已下线，治理走 /alarms/alarm-definitions（super_admin）。
+
+	// ----- T-0098 P3-05: Super-admin-only group — 仅放行 super_admin 用户。
+	// 4 个 P3 治理 handler（产品 / 参数模型 / KPI 库 / 告警库）均挂在此处，
+	// admin / operator / viewer 一律 403。
+	superAdminGroup := v1.Group("")
+	superAdminGroup.Use(admin.RequireSuperAdmin())
+
+	// ----- T-0098 P3-04: Alarm Definitions routes → super_admin only -----
+	if c.AlarmDefHandler != nil {
+		c.AlarmDefHandler.RegisterRoutes(superAdminGroup)
+	}
+
+	// ----- T-0098 P3-02: ParamModel routes → super_admin only -----
+	if c.ParamModelHandler != nil {
+		c.ParamModelHandler.RegisterRoutes(superAdminGroup)
+	}
+
+	// ----- T-0098 P3-01: Product routes → super_admin only -----
+	if c.ProductHandler != nil {
+		c.ProductHandler.RegisterRoutes(superAdminGroup)
+	}
 
 	// ----- Alarm filter rule routes → resource "alarms" -----
 	alarmFilterHandler := alarm.NewFilterHandler(ah.alarmFilterRuleRepo, c.Logger)
@@ -332,6 +376,11 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- Indicator management routes → resource "pm" -----
 	ph.indicatorHandler.RegisterRoutes(permGroup("pm"))
+
+	// ----- T-0098 P3-03: Indicator REST routes → super_admin only -----
+	if ph.indicatorRESTHandler != nil {
+		ph.indicatorRESTHandler.RegisterRoutes(superAdminGroup)
+	}
 
 	// ----- Dashboard routes → resource "devices" -----
 	md.dashboardHandler.RegisterRoutes(permGroup("devices"))

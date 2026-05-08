@@ -617,9 +617,10 @@ func (r *PgDeviceRepository) scanDevice(ctx context.Context, query string, args 
 }
 
 func deviceColumns() []string {
+	// T-0098 P5-02：移除 data_model_id（列已 DROP）。
 	return []string{
 		"d.id", "d.serial_number", "d.oui", "d.product_class", "d.manufacturer", "d.model_name",
-		"d.carrier", "d.technology", "d.data_model_id", "d.status", "d.firmware_version",
+		"d.carrier", "d.technology", "d.status", "d.firmware_version",
 		"host(d.ip_address) as ip_address", "d.connection_request_url",
 		"d.nat_detected", "d.udp_connection_request_address",
 		"d.last_inform_at", "d.last_inform_events",
@@ -643,7 +644,7 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 
 	err := row.Scan(
 		&d.ID, &d.SerialNumber, &d.OUI, &productClass, &manufacturer, &modelName,
-		&d.Carrier, &d.Technology, &d.DataModelID, &d.Status, &firmwareVersion,
+		&d.Carrier, &d.Technology, &d.Status, &firmwareVersion,
 		&ipAddr, &connReqURL,
 		&d.NatDetected, &udpAddr,
 		&d.LastInformAt, &eventsData,
@@ -713,7 +714,7 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 
 	err := rows.Scan(
 		&d.ID, &d.SerialNumber, &d.OUI, &productClass, &manufacturer, &modelName,
-		&d.Carrier, &d.Technology, &d.DataModelID, &d.Status, &firmwareVersion,
+		&d.Carrier, &d.Technology, &d.Status, &firmwareVersion,
 		&ipAddr, &connReqURL,
 		&d.NatDetected, &udpAddr,
 		&d.LastInformAt, &eventsData,
@@ -1046,7 +1047,7 @@ func scanRecycleBinRow(rows pgx.Rows) (*model.Device, error) {
 
 	err := rows.Scan(
 		&d.ID, &d.SerialNumber, &d.OUI, &productClass, &manufacturer, &modelName,
-		&d.Carrier, &d.Technology, &d.DataModelID, &d.Status, &firmwareVersion,
+		&d.Carrier, &d.Technology, &d.Status, &firmwareVersion,
 		&ipAddr, &connReqURL,
 		&d.NatDetected, &udpAddr,
 		&d.LastInformAt, &eventsData,

@@ -8,11 +8,12 @@ import (
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/alarm"
+	"github.com/omcgo/omcgo/internal/alarm/definition"
+	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/omcgo/omcgo/internal/core/reliability/dlq"
 	"github.com/omcgo/omcgo/internal/core/reliability/runner"
-	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/mr"
 	mrcollector "github.com/omcgo/omcgo/internal/mr/collector"
@@ -20,6 +21,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/collector"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
+	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/report"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/transfer"
@@ -122,7 +124,28 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 		logger.Warn("start alarm sync processor", zap.Error(err))
 	}
 
+	// T-0098 P2-10：构造 AlarmDefinition Registry + ProductRegistry adapter，启用 fallback 决策。
+	// 任何一步失败都仅记 WARN 后退化到旧路径（不阻塞 worker 启动）。
 	alarmReceiver := alarm.NewAlarmReceiver(alarmEngine, w.EventBus, logger)
+	alarmDefRepo := definition.NewPgRepository(w.PgPool)
+	alarmDefMetrics := definition.NewRegistryMetrics(w.MetricsReg)
+	alarmDefRegistry := definition.NewRegistry(alarmDefRepo, alarmDefMetrics, logger)
+	if err := alarmDefRegistry.Refresh(context.Background()); err != nil {
+		logger.Warn("alarm-definition registry refresh failed; fallback disabled", zap.Error(err))
+	} else {
+		productRepo := product.NewPgRepository(w.PgPool)
+		productMetrics := product.NewRegistryMetrics(w.MetricsReg)
+		// worker 进程告警频率低，无需 Redis L2，直接 NopCache。
+		productRegistry := product.NewRegistry(productRepo, product.NopCache{}, productMetrics, logger)
+		if err := productRegistry.Refresh(context.Background()); err != nil {
+			logger.Warn("product registry refresh failed in worker; alarm fallback disabled", zap.Error(err))
+		} else {
+			productResolver := &definition.ProductRegistryAdapter{Registry: productRegistry}
+			alarmReceiver = alarmReceiver.WithAlarmDefRegistry(alarmDefRegistry, productResolver)
+			logger.Info("alarm-definition fallback enabled",
+				zap.Int("definitions_loaded", alarmDefRegistry.Count()))
+		}
+	}
 	if err := alarmReceiver.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe alarm receiver", zap.Error(err))
 	}

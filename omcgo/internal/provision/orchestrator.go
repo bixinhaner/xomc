@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/omcgo/omcgo/internal/task"
 )
@@ -103,4 +104,55 @@ func extractParameterNames(params json.RawMessage) []string {
 		names = append(names, k)
 	}
 	return names
+}
+
+// BuildProvisioningStepsTranslated 是 T-0098 P2-05 Path A 双栈版本。
+//
+// 设计契约（§1.11 Path A）：模板 Parameters JSON 的 key 视为 standardPath；构建步骤
+// 前通过 Translator.ToPrivate 翻译为设备私有路径，使 SPV / GPV 下发时携带正确的
+// 私有路径。translator 为 nil → 等价于 BuildProvisioningSteps（不翻译，沿用旧栈语义）。
+//
+// 翻译策略：
+//   - Translator.ToPrivate(k).Found=true   → 使用 Translated（privatePath）
+//   - Found=false                          → 保留原 key（容错；可能是模板存了 privatePath 老数据）
+//   - 模板 Parameters 为空                 → 直接 fallthrough
+func BuildProvisioningStepsTranslated(tmpl *template.ConfigTemplate, translator *parammodel.Translator) ([]ProvisioningStep, error) {
+	if translator == nil {
+		return BuildProvisioningSteps(tmpl)
+	}
+	translatedParams, err := translateTemplateParameters(tmpl.Parameters, translator)
+	if err != nil {
+		return nil, fmt.Errorf("translate template parameters: %w", err)
+	}
+	clone := *tmpl
+	clone.Parameters = translatedParams
+	return BuildProvisioningSteps(&clone)
+}
+
+// translateTemplateParameters 把 Parameters JSON 的 key（standardPath）翻译为 privatePath。
+//
+// 输入空 / nil → 原样返回。Unmarshal 失败 → 返回原 RawMessage（容错：模板可能存的是
+// 字符串数组 / 嵌套对象等其它形态，留给后续 SPV 路径自己消费）。
+func translateTemplateParameters(params json.RawMessage, translator *parammodel.Translator) (json.RawMessage, error) {
+	if len(params) == 0 || translator == nil {
+		return params, nil
+	}
+	var src map[string]any
+	if err := json.Unmarshal(params, &src); err != nil {
+		// 容错：保留原 JSON，由旧栈消费
+		return params, nil
+	}
+	if len(src) == 0 {
+		return params, nil
+	}
+	dst := make(map[string]any, len(src))
+	for k, v := range src {
+		result := translator.ToPrivate(k)
+		dst[result.Translated] = v
+	}
+	out, err := json.Marshal(dst)
+	if err != nil {
+		return nil, fmt.Errorf("marshal translated parameters: %w", err)
+	}
+	return out, nil
 }

@@ -798,6 +798,22 @@ KPI 指标库是 PM 性能管理子系统的元数据基础，定义"采集什�
 
 ### 2.3 数据库 Schema
 
+> **2026-05-07 决策 D1=A 命名对齐说明**（实施计划 §6 决策表 D1=A，T-0098-P1-05 docs 落地）：
+>
+> 本节使用的目标名（左列）在生产 schema 中以历史命名（右列）实际落地。**保留现状**，迁移 `000035_indicator_management.sql` 沿用以下别名；后续 Loader / Registry / API 代码以历史命名为准。本节其余规格（列、唯一约束、索引、行数）仍以左列描述为契约。
+>
+> | 设计目标名（本节使用） | 生产实际表名（已落地，迁移 000035） |
+> |---|---|
+> | `indicator_units` | `indicator_unit`（单数） |
+> | `platform_indicator_formulas_enb` | `rela_platform_indicator_formula_enb` |
+> | `platform_indicator_formulas_gsm` | `rela_platform_indicator_formula_gsm` |
+> | `platform_indicator_formulas_gnb` | `rela_platform_indicator_formula_gnb` |
+> | `enabled_indicators_enb` | `enabled_pm_indicators_enb` |
+> | `enabled_indicators_gsm` | `enabled_pm_indicators_gsm` |
+> | `enabled_indicators_gnb` | `enabled_pm_indicators_gnb` |
+>
+> 决议依据：实际落地表已在 17 张迁移产物 + `internal/pm/indicator/` 15 个 Go 文件中广泛引用；重命名将链式触发 PM worker / loader / handler / repo 大规模 churn，价值低于风险。设计文档采纳"按现实回写"，不写 `000060_kpi_rename.sql`。
+
 #### 2.3.1 共享：`indicator_units` — 单位字典（27 行）
 
 | 列 | 类型 | 说明 |

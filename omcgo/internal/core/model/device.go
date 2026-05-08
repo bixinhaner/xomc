@@ -21,7 +21,7 @@ type Device struct {
 	ModelName                   string                 `json:"model_name" db:"model_name"`
 	Carrier                     CarrierCode            `json:"carrier" db:"carrier"`
 	Technology                  Technology             `json:"technology" db:"technology"`
-	DataModelID                 *uuid.UUID             `json:"data_model_id,omitempty" db:"data_model_id"`
+	// T-0098 P5-02：DataModelID 字段已删除（devices.data_model_id 列 DROP，路由改由 productClass + ProductRegistry）。
 	Status                      DeviceStatus           `json:"status" db:"status"`
 	FirmwareVersion             string                 `json:"firmware_version" db:"firmware_version"`
 	IPAddress                   string                 `json:"ip_address" db:"ip_address"`

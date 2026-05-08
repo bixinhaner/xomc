@@ -345,7 +345,7 @@ func deviceWithInfoSelectColumns() []string {
 	return []string{
 		// devices columns (aliased with d.)
 		"d.id", "d.serial_number", "d.oui", "d.product_class", "d.manufacturer", "d.model_name",
-		"d.carrier", "d.technology", "d.data_model_id", "d.status", "d.firmware_version",
+		"d.carrier", "d.technology", "d.status", "d.firmware_version",
 		"host(d.ip_address) as ip_address", "d.connection_request_url",
 		"d.nat_detected", "d.udp_connection_request_address",
 		"d.last_inform_at", "d.last_inform_events",
@@ -451,7 +451,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	err := rows.Scan(
 		// devices fields
 		&d.ID, &d.SerialNumber, &d.OUI, &productClass, &manufacturer, &modelName,
-		&d.Carrier, &d.Technology, &d.DataModelID, &d.Status, &firmwareVersion,
+		&d.Carrier, &d.Technology, &d.Status, &firmwareVersion,
 		&ipAddr, &connReqURL,
 		&d.NatDetected, &udpAddr,
 		&d.LastInformAt, &eventsData,

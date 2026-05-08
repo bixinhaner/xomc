@@ -78,6 +78,9 @@ const (
 )
 
 // ParameterDiscoveryLog records the parameter discovery process for a device.
+//
+// T-0098 P5-02：DataModelID 字段已删除（data_model_id 列从 parameter_discovery_log DROP）。
+// 设备发现路径改写 discovered_param_mappings（IntersectService），不再生成 datamodel.DataModel。
 type ParameterDiscoveryLog struct {
 	ID              uuid.UUID       `json:"id"`
 	DeviceID        uuid.UUID       `json:"device_id"`
@@ -86,7 +89,6 @@ type ParameterDiscoveryLog struct {
 	ProductClass    string          `json:"product_class"`
 	FirmwareVersion string          `json:"firmware_version"`
 	ParameterCount  int             `json:"parameter_count"`
-	DataModelID     *uuid.UUID      `json:"data_model_id,omitempty"`
 	Status          DiscoveryStatus `json:"status"`
 	ErrorMessage    string          `json:"error_message,omitempty"`
 	CreatedAt       time.Time       `json:"created_at"`

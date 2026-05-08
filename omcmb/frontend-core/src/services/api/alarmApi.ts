@@ -61,58 +61,9 @@ interface BackendAlarmStatistics {
 }
 
 // ---------------------------------------------------------------------------
-// Backend alarm library model
+// T-0098-P5-06：旧 alarm_libraries 接口已下线，改由 alarmDefinitionApi（P4-01）
+// 提供 /alarms/alarm-definitions CRUD（super_admin 治理）。
 // ---------------------------------------------------------------------------
-
-interface BackendAlarmLibrary {
-  id: string;
-  alarm_identifier: string;
-  alarm_source: string;
-  event_type: string;
-  severity: number;
-  enabled: boolean;
-  probable_cause: string;
-  explanation?: string;
-  additional_info?: Record<string, unknown>;
-  carrier?: string;
-  technology?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-interface AlarmLibraryItem {
-  id: string;
-  alarmIdentifier: string;
-  alarmSource: string;
-  eventType: string;
-  severity: number;
-  enabled: boolean;
-  probableCause: string;
-  explanation?: string;
-  additionalInfo?: Record<string, unknown>;
-  carrier?: string;
-  technology?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-function mapBackendLibrary(bl: BackendAlarmLibrary): AlarmLibraryItem {
-  return {
-    id: bl.id,
-    alarmIdentifier: bl.alarm_identifier,
-    alarmSource: bl.alarm_source,
-    eventType: bl.event_type,
-    severity: bl.severity,
-    enabled: bl.enabled,
-    probableCause: bl.probable_cause,
-    explanation: bl.explanation,
-    additionalInfo: bl.additional_info,
-    carrier: bl.carrier,
-    technology: bl.technology,
-    createdAt: bl.created_at,
-    updatedAt: bl.updated_at,
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Backend alarm filter rule model
@@ -580,66 +531,7 @@ export const alarmApi = {
     return mapBackendAlarmRule(updated);
   },
 
-  // -- Alarm libraries ----------------------------------------------------
-
-  async getAlarmLibraries(params: PageRequest & { alarmIdentifier?: string; alarmSource?: string; severity?: string; eventType?: string; keyword?: string }): Promise<PageResponse<AlarmLibraryItem>> {
-    const query: Record<string, unknown> = {
-      page: params.page,
-      pageSize: params.pageSize,
-    };
-    if (params.alarmIdentifier) query.alarm_identifier = params.alarmIdentifier;
-    if (params.alarmSource) query.alarm_source = params.alarmSource;
-    if (params.severity) query.severity = params.severity;
-    if (params.eventType) query.event_type = params.eventType;
-    if (params.keyword) query.keyword = params.keyword;
-    const { data } = await http.get<BackendListResponse<BackendAlarmLibrary>>(
-      '/alarms/alarm-libraries',
-      { params: query }
-    );
-    return {
-      items: (data.items || []).map(mapBackendLibrary),
-      total: data.total,
-      page: data.page,
-      pageSize: data.page_size,
-    };
-  },
-
-  async createAlarmLibrary(payload: {
-    alarm_identifier: string;
-    alarm_source: string;
-    event_type: string;
-    severity: number;
-    probable_cause: string;
-    explanation?: string;
-    carrier?: string;
-    technology?: string;
-    enabled?: boolean;
-  }): Promise<AlarmLibraryItem> {
-    const { data } = await http.post<BackendAlarmLibrary>(
-      '/alarms/alarm-libraries',
-      payload
-    );
-    return mapBackendLibrary(data);
-  },
-
-  async updateAlarmLibrary(id: string, payload: Partial<{
-    severity: number;
-    enabled: boolean;
-    probable_cause: string;
-    explanation: string;
-    carrier: string;
-    technology: string;
-  }>): Promise<AlarmLibraryItem> {
-    const { data } = await http.put<BackendAlarmLibrary>(
-      `/alarms/alarm-libraries/${id}`,
-      payload
-    );
-    return mapBackendLibrary(data);
-  },
-
-  async deleteAlarmLibrary(id: string): Promise<void> {
-    await http.delete(`/alarms/alarm-libraries/${id}`);
-  },
+  // T-0098-P5-06：旧 /alarms/alarm-libraries 接口已下线，治理走 alarmDefinitionApi（/alarms/alarm-definitions）。
 
   // -- Alarm sync ----------------------------------------------------------
 

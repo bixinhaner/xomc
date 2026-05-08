@@ -5,6 +5,8 @@ import { isDynamicMenuEnabled } from '@/components/MenuBootstrap/featureFlag';
 
 interface PrivateRouteProps {
   children: React.ReactNode;
+  /** T-0098-P4-02：true 时仅 super_admin 可访问，否则跳 /403。 */
+  requireSuperAdmin?: boolean;
 }
 
 // 路径白名单：即使不在用户菜单也可访问。
@@ -28,16 +30,23 @@ function isPathAllowedByMenu(routePaths: Set<string>, pathname: string): boolean
 /**
  * PrivateRoute wraps protected content.
  *
- * 三层守卫：
+ * 四层守卫（按序）：
  *   1. 未登录 → /login
- *   2. Token 过期且无 refresh → /login
- *   3. 已登录 + 灰度开启 + 菜单已加载 + 当前 path 不在用户菜单 → /403
- *
- * 第 3 步仅在 VITE_DYNAMIC_MENU=true 且 menuStore.loaded=true 时启用，
- * 避免静态模式 / 首屏未加载完成时误拦截。
+ *   2. Token 过期且无 refresh → /login（access token 过期但 refresh 存在时，
+ *      http.ts 拦截器自动 silent refresh，不在此层处理）
+ *   3. requireSuperAdmin=true 但非超管 → /403
+ *      （T-0098-P4-02 super_admin 治理路由组守卫；isSuperAdmin 由后端
+ *      source==='builtIn' 派生）
+ *   4. 已登录 + 灰度开启 + 菜单已加载 + 当前 path 不在用户菜单 → /403
+ *      （仅 VITE_DYNAMIC_MENU=true 且 menuStore.loaded=true 时启用，
+ *      避免静态模式 / 首屏未加载完成时误拦截）
  */
-export default function PrivateRoute({ children }: PrivateRouteProps) {
-  const { isAuthenticated, accessToken, refreshToken, isTokenExpired } = useUserStore();
+export default function PrivateRoute({
+  children,
+  requireSuperAdmin = false,
+}: PrivateRouteProps) {
+  const { isAuthenticated, accessToken, refreshToken, isTokenExpired, currentUser } =
+    useUserStore();
   const menuLoaded = useMenuStore((s) => s.loaded);
   const routePaths = useMenuStore((s) => s.routePaths);
   const location = useLocation();
@@ -55,6 +64,11 @@ export default function PrivateRoute({ children }: PrivateRouteProps) {
   // No access token and no refresh token → force re-login
   if (!accessToken && !refreshToken) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  // T-0098-P4-02：super_admin 治理路由组守卫
+  if (requireSuperAdmin && !currentUser?.isSuperAdmin) {
+    return <Navigate to="/403" replace />;
   }
 
   // 路径守卫：仅动态模式 + 菜单已加载时启用，避免误判

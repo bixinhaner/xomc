@@ -151,7 +151,7 @@ P1-05 KPI 对齐    ┘                                          └→ P2-08 in
 | **T-0098-P1-02** | 迁移 `000057_products.sql` — `products` + `product_class_patterns` + `devices.product_id` 列 | S | F02 | — | up/down 配对；`scripts/check-migrations.sh` 通过 |
 | **T-0098-P1-03** | 迁移 `000058_param_dictionary.sql` — `param_models` + `param_mappings`（含 `is_storable`）+ `discovered_param_mappings`（`product_id+swVersion` 主键）+ `standard_params` + 既有表（`devices.param_model_id` / `parameter_discovery_log.param_model_id`） | M | F02 | P1-02 | 同上 + 索引校验 |
 | **T-0098-P1-04** | 迁移 `000059_alarm_dictionary.sql` — `alarm_severity_levels` + 4 行种子 + `alarm_definitions` 新建（按设计 schema）+ `alarms_active.is_unknown ADD COLUMN` + 决策 D2 处置旧 `alarm_libraries` | M | F04 | — | 同上；4 行 severity 种子可查 |
-| **T-0098-P1-05** | KPI 表名对齐（决策 D1）：保留现状 + 改设计文档 OR 改名 → 写迁移 `000060_kpi_rename.sql` | S | F03 | — | KPI worker 单元测试通过 |
+| **T-0098-P1-05** | KPI 表名对齐文档（决策 **D1=A 已定**）：保留现状 `indicator_unit` / `rela_platform_indicator_formula_*` / `enabled_pm_indicators_*`；本任务 docs 落地，**不写迁移**（设计 §2.3 顶部已加 D1=A 命名对齐表） | S | F03 | — | 设计 §2.3 footnote 落地；无 schema 变更 |
 | **T-0098-P1-06** | 4 个 Loader 实现（`product/loader.go` / `parammodel/loader.go` / `indicator/loader.go`（增量）/ `alarm/definition/loader.go`）+ provider 接线 | L | infra+各域 | P1-01..05 | 启动后 `omcgo-app` 各域行数 = 设计基线 |
 
 **Phase 1 DoD**：

@@ -2,85 +2,134 @@ package interop
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/model"
-	"github.com/omcgo/omcgo/internal/config/datamodel"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/product"
 )
 
 // DataModelValidator compares a device's actual reported parameters against its
-// resolved data model definition to produce a conformance report.
+// resolved param mapping definition to produce a conformance report.
+//
+// T-0098 P5-01：旧 dataModelReg 路径已删除；现仅走 paramRegistry + productRegistry。
+// 设备 ProductClass 未命中 product 或 ParamRegistry.GetByProduct 失败 → 直接报错。
 type DataModelValidator struct {
-	dataModelReg *datamodel.DataModelRegistry
-	paramRepo    device.DeviceParameterRepository
-	deviceRepo   device.DeviceRepository
-	logger       *zap.Logger
+	paramRegistry   *parammodel.Registry
+	productRegistry *product.Registry
+	paramRepo       device.DeviceParameterRepository
+	deviceRepo      device.DeviceRepository
+	logger          *zap.Logger
 }
 
 // NewDataModelValidator creates a new DataModelValidator.
 func NewDataModelValidator(
-	dataModelReg *datamodel.DataModelRegistry,
+	paramReg *parammodel.Registry,
+	prodReg *product.Registry,
 	paramRepo device.DeviceParameterRepository,
 	deviceRepo device.DeviceRepository,
 	logger *zap.Logger,
 ) *DataModelValidator {
 	return &DataModelValidator{
-		dataModelReg: dataModelReg,
-		paramRepo:    paramRepo,
-		deviceRepo:   deviceRepo,
-		logger:       logger.Named("datamodel-validator"),
+		paramRegistry:   paramReg,
+		productRegistry: prodReg,
+		paramRepo:       paramRepo,
+		deviceRepo:      deviceRepo,
+		logger:          logger.Named("datamodel-validator"),
 	}
 }
 
-// ValidateDevice resolves the data model for the given device and compares
-// the device's actual parameters against the model's expected parameter tree.
+// validatorExpectedParam 是 parammodel.ParamMapping 的最小公共视图。
+type validatorExpectedParam struct {
+	Path     string
+	Type     string
+	Writable bool
+}
+
+// resolveExpectedParams 通过 ParamRegistry 获取期望参数集；
+// 任意一步失败 → 返回 (nil, "", "", err)，调用方据此报错。
+func (v *DataModelValidator) resolveExpectedParams(ctx context.Context, dev *model.Device) ([]validatorExpectedParam, string, string, error) {
+	if v.paramRegistry == nil || v.productRegistry == nil {
+		return nil, "", "", fmt.Errorf("param registry not configured")
+	}
+	if dev == nil || dev.ProductClass == "" {
+		return nil, "", "", fmt.Errorf("device productClass missing")
+	}
+	match, err := v.productRegistry.MatchProductClass(ctx, dev.ProductClass)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("match productClass: %w", err)
+	}
+	if match == nil || match.Product == nil {
+		return nil, "", "", fmt.Errorf("no product match for productClass=%s", dev.ProductClass)
+	}
+	set, err := v.paramRegistry.GetByProduct(ctx, match.Product.ID, dev.FirmwareVersion)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("paramRegistry.GetByProduct: %w", err)
+	}
+	if set == nil {
+		return nil, "", "", fmt.Errorf("no param mapping for product %s @ %s", match.Product.ID, dev.FirmwareVersion)
+	}
+	out := make([]validatorExpectedParam, 0, len(set.Mappings))
+	for _, m := range set.Mappings {
+		if m.EntryType != "parameter" {
+			continue
+		}
+		out = append(out, validatorExpectedParam{
+			Path:     m.PrivatePath,
+			Type:     m.DataType,
+			Writable: parammodel.IsAccessWritable(m.Access),
+		})
+	}
+	return out, string(set.Source), dev.FirmwareVersion, nil
+}
+
+// ValidateDevice resolves the param mapping for the given device and compares
+// the device's actual parameters against the mapping's expected list.
+//
+// 旧签名兼容保留 carrier/tech 入参，但新栈不再消费（路由判定走 ProductClass）。
 func (v *DataModelValidator) ValidateDevice(
 	ctx context.Context,
 	deviceID uuid.UUID,
-	carrier model.CarrierCode,
-	tech model.Technology,
+	_ model.CarrierCode,
+	_ model.Technology,
 ) (*ValidationReport, error) {
-	// Fetch the device.
 	dev, err := v.deviceRepo.GetByID(ctx, deviceID)
 	if err != nil {
 		return nil, fmt.Errorf("get device %s: %w", deviceID, err)
 	}
 
-	// Resolve the data model using the provided carrier/tech with the device's OUI/ProductClass.
-	dm, err := v.dataModelReg.Resolve(ctx, carrier, tech, dev.OUI, dev.ProductClass)
+	expected, source, fwVersion, err := v.resolveExpectedParams(ctx, dev)
 	if err != nil {
-		return nil, fmt.Errorf("resolve data model: %w", err)
-	}
-	if dm == nil {
-		return nil, fmt.Errorf("no data model found for carrier=%s tech=%s oui=%s product=%s",
-			carrier, tech, dev.OUI, dev.ProductClass)
+		return nil, err
 	}
 
-	// Parse the expected parameter tree.
-	var expectedParams []datamodel.Parameter
-	if err := json.Unmarshal(dm.ParameterTree, &expectedParams); err != nil {
-		return nil, fmt.Errorf("parse data model parameter tree: %w", err)
-	}
+	return v.compare(ctx, deviceID, dev, expected, fmt.Sprintf("paramRegistry:%s@%s", source, fwVersion))
+}
 
-	// Fetch the device's actual parameters.
+// compare 公共比对路径。
+func (v *DataModelValidator) compare(
+	ctx context.Context,
+	deviceID uuid.UUID,
+	dev *model.Device,
+	expectedParams []validatorExpectedParam,
+	modelVersion string,
+) (*ValidationReport, error) {
 	actualParams, err := v.paramRepo.GetByDevice(ctx, deviceID)
 	if err != nil {
 		return nil, fmt.Errorf("get device parameters: %w", err)
 	}
 
-	// Build lookups.
 	actualByPath := make(map[string]model.DeviceParameter, len(actualParams))
 	for _, p := range actualParams {
 		actualByPath[p.ParameterPath] = p
 	}
 
-	expectedByPath := make(map[string]datamodel.Parameter, len(expectedParams))
+	expectedByPath := make(map[string]validatorExpectedParam, len(expectedParams))
 	for _, p := range expectedParams {
 		expectedByPath[p.Path] = p
 	}
@@ -88,12 +137,11 @@ func (v *DataModelValidator) ValidateDevice(
 	report := &ValidationReport{
 		DeviceID:     deviceID.String(),
 		DeviceSN:     dev.SerialNumber,
-		ModelVersion: dm.Version,
+		ModelVersion: modelVersion,
 		TotalParams:  len(expectedParams),
 		CreatedAt:    time.Now(),
 	}
 
-	// Compare expected vs actual.
 	matched := 0
 	for _, ep := range expectedParams {
 		ap, found := actualByPath[ep.Path]
@@ -101,8 +149,6 @@ func (v *DataModelValidator) ValidateDevice(
 			report.MissingParams = append(report.MissingParams, ep.Path)
 			continue
 		}
-
-		// Check type mismatch.
 		if string(ap.ParameterType) != ep.Type {
 			report.MismatchParams = append(report.MismatchParams, ParamMismatch{
 				Path:     ep.Path,
@@ -112,8 +158,6 @@ func (v *DataModelValidator) ValidateDevice(
 			})
 			continue
 		}
-
-		// Check writable mismatch.
 		if ap.Writable != ep.Writable {
 			report.MismatchParams = append(report.MismatchParams, ParamMismatch{
 				Path:     ep.Path,
@@ -123,11 +167,9 @@ func (v *DataModelValidator) ValidateDevice(
 			})
 			continue
 		}
-
 		matched++
 	}
 
-	// Find extra parameters not in the data model.
 	for _, ap := range actualParams {
 		if _, found := expectedByPath[ap.ParameterPath]; !found {
 			report.ExtraParams = append(report.ExtraParams, ap.ParameterPath)
@@ -142,6 +184,7 @@ func (v *DataModelValidator) ValidateDevice(
 	v.logger.Info("device validation complete",
 		zap.String("device_id", deviceID.String()),
 		zap.String("device_sn", dev.SerialNumber),
+		zap.String("model_version", modelVersion),
 		zap.Int("total", report.TotalParams),
 		zap.Int("matched", report.MatchedParams),
 		zap.Int("missing", len(report.MissingParams)),

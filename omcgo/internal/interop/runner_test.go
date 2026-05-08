@@ -238,7 +238,9 @@ func testRPCCases() []TestCase {
 
 func newTestRunner(devRepo *mockDeviceRepo, paramRepo *mockParamRepo, cmdQ *mockCmdQueue) *ConformanceTestRunner {
 	logger := zap.NewNop()
-	runner := NewConformanceTestRunner(devRepo, paramRepo, nil, cmdQ, logger)
+	// T-0098 P5-01：paramRegistry / productRegistry 在单测中传 nil；
+	// 期望参数集解析失败时 checkParam* 报错，对应 TestRun_PathPresent_NoModel 路径。
+	runner := NewConformanceTestRunner(devRepo, paramRepo, nil, nil, cmdQ, logger)
 	runner.RegisterCases(testProtocolCases())
 	runner.RegisterCases(testRPCCases())
 	return runner

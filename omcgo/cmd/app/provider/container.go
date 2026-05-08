@@ -11,16 +11,19 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/stun"
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/alarm"
+	alarmdef "github.com/omcgo/omcgo/internal/alarm/definition"
 	"github.com/omcgo/omcgo/internal/config/baseline"
-	"github.com/omcgo/omcgo/internal/config/datamodel"
+	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/carrier"
 	"github.com/omcgo/omcgo/internal/core/components"
+	"github.com/omcgo/omcgo/internal/core/dictloader"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
+	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/topology"
 )
@@ -50,9 +53,31 @@ type Container struct {
 
 	// ===== 共享服务（由各模块 Init 设置）=====
 
-	// ConfigModule 设置
-	DMRegistry      *datamodel.DataModelRegistry
-	DMImporter      *datamodel.DataModelImporter
+	// DictLoad 模块设置（T-0098 P1-06）
+	DictLoaderRegistry *dictloader.Registry
+
+	// ProductRegistry 模块设置（T-0098 P2-01）
+	ProductRegistry *product.Registry
+
+	// ParamRegistry 模块设置（T-0098 P2-02）
+	ParamRegistry *parammodel.Registry
+
+	// ParamIntersect 模块设置（T-0098 P2-03）
+	ParamIntersect *parammodel.IntersectService
+
+	// AlarmDefModule 设置（T-0098 P3-04）
+	AlarmDefRegistry *alarmdef.Registry
+	AlarmDefHandler  *alarmdef.Handler
+
+	// ParamModelHandler 设置（T-0098 P3-02）
+	ParamModelRepo    *parammodel.PgRepository
+	ParamModelHandler *parammodel.Handler
+
+	// ProductHandler 设置（T-0098 P3-01）
+	ProductRepo    *product.PgRepository
+	ProductHandler *product.Handler
+
+	// ConfigModule 设置（T-0098 P5-01：旧 DMRegistry / DMImporter 已删除）
 	TemplateService *template.ConfigTemplateService
 
 	// TopologyModule 设置

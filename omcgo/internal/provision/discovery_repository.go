@@ -2,7 +2,6 @@ package provision
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
@@ -14,6 +13,9 @@ import (
 )
 
 // ParameterDiscoveryLogRepository defines the persistence interface for discovery logs.
+//
+// T-0098 P5-02：data_model_id 列已从 parameter_discovery_log DROP；
+// ParameterDiscoveryLog.DataModelID 字段不再持久化（保留 zero value 仅供 in-memory 兼容）。
 type ParameterDiscoveryLogRepository interface {
 	Create(ctx context.Context, log *ParameterDiscoveryLog) error
 	Update(ctx context.Context, log *ParameterDiscoveryLog) error
@@ -37,9 +39,9 @@ func NewPgParameterDiscoveryLogRepository(pool *pgxpool.Pool) *PgParameterDiscov
 func (r *PgParameterDiscoveryLogRepository) Create(ctx context.Context, log *ParameterDiscoveryLog) error {
 	query, args, err := storage.Psql.Insert("parameter_discovery_log").
 		Columns("id", "device_id", "device_sn", "oui", "product_class", "firmware_version",
-			"parameter_count", "data_model_id", "status", "error_message").
+			"parameter_count", "status", "error_message").
 		Values(log.ID, log.DeviceID, log.DeviceSN, log.OUI, log.ProductClass, log.FirmwareVersion,
-			log.ParameterCount, log.DataModelID, log.Status, log.ErrorMessage).
+			log.ParameterCount, log.Status, log.ErrorMessage).
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build insert discovery log: %w", err)
@@ -53,7 +55,6 @@ func (r *PgParameterDiscoveryLogRepository) Create(ctx context.Context, log *Par
 func (r *PgParameterDiscoveryLogRepository) Update(ctx context.Context, log *ParameterDiscoveryLog) error {
 	query, args, err := storage.Psql.Update("parameter_discovery_log").
 		Set("parameter_count", log.ParameterCount).
-		Set("data_model_id", log.DataModelID).
 		Set("status", log.Status).
 		Set("error_message", log.ErrorMessage).
 		Set("updated_at", time.Now()).
@@ -71,7 +72,7 @@ func (r *PgParameterDiscoveryLogRepository) Update(ctx context.Context, log *Par
 func (r *PgParameterDiscoveryLogRepository) GetByID(ctx context.Context, id uuid.UUID) (*ParameterDiscoveryLog, error) {
 	query, args, err := storage.Psql.Select(
 		"id", "device_id", "device_sn", "oui", "product_class", "firmware_version",
-		"parameter_count", "data_model_id", "status", "error_message", "created_at", "updated_at",
+		"parameter_count", "status", "error_message", "created_at", "updated_at",
 	).From("parameter_discovery_log").
 		Where(squirrel.Eq{"id": id}).
 		ToSql()
@@ -84,7 +85,7 @@ func (r *PgParameterDiscoveryLogRepository) GetByID(ctx context.Context, id uuid
 func (r *PgParameterDiscoveryLogRepository) GetByDeviceID(ctx context.Context, deviceID uuid.UUID) (*ParameterDiscoveryLog, error) {
 	query, args, err := storage.Psql.Select(
 		"id", "device_id", "device_sn", "oui", "product_class", "firmware_version",
-		"parameter_count", "data_model_id", "status", "error_message", "created_at", "updated_at",
+		"parameter_count", "status", "error_message", "created_at", "updated_at",
 	).From("parameter_discovery_log").
 		Where(squirrel.Eq{"device_id": deviceID}).
 		OrderBy("created_at DESC").
@@ -115,16 +116,11 @@ func (r *PgParameterDiscoveryLogRepository) UpdateStatus(ctx context.Context, id
 func (r *PgParameterDiscoveryLogRepository) scanOne(ctx context.Context, query string, args ...interface{}) (*ParameterDiscoveryLog, error) {
 	row := r.pool.QueryRow(ctx, query, args...)
 	var log ParameterDiscoveryLog
-	var dataModelID sql.NullString
 	if err := row.Scan(
 		&log.ID, &log.DeviceID, &log.DeviceSN, &log.OUI, &log.ProductClass, &log.FirmwareVersion,
-		&log.ParameterCount, &dataModelID, &log.Status, &log.ErrorMessage, &log.CreatedAt, &log.UpdatedAt,
+		&log.ParameterCount, &log.Status, &log.ErrorMessage, &log.CreatedAt, &log.UpdatedAt,
 	); err != nil {
 		return nil, fmt.Errorf("scan discovery log: %w", err)
-	}
-	if dataModelID.Valid {
-		id, _ := uuid.Parse(dataModelID.String)
-		log.DataModelID = &id
 	}
 	return &log, nil
 }

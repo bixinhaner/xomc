@@ -384,3 +384,62 @@ func TestAuditLogger_SkipsGetRequests(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.False(t, auditCreated)
 }
+
+// ── T-0098 P3-05 RequireSuperAdmin ───────────────────────────────────
+
+func TestRequireSuperAdmin_Allowed(t *testing.T) {
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set(CtxKeyUserID, uuid.New())
+		c.Set(CtxKeyUsername, "root")
+		c.Set(CtxKeyIsSuperAdmin, true)
+		c.Next()
+	})
+	r.Use(RequireSuperAdmin())
+	r.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestRequireSuperAdmin_NonSuperRejected(t *testing.T) {
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set(CtxKeyUserID, uuid.New())
+		c.Set(CtxKeyUsername, "admin")
+		// Not a super admin: IsSuperAdmin false / 缺省。
+		c.Set(CtxKeyIsSuperAdmin, false)
+		c.Set(CtxKeyRoles, []string{"admin"})
+		c.Next()
+	})
+	r.Use(RequireSuperAdmin())
+	r.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestRequireSuperAdmin_Unauthenticated(t *testing.T) {
+	r := gin.New()
+	// 没有上游 RequireAuth：IsSuperAdmin 未设置。
+	r.Use(RequireSuperAdmin())
+	r.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}

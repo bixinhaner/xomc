@@ -64,6 +64,21 @@ func TestAppConfig_Validate(t *testing.T) {
 			modify:  func(c *AppConfig) { c.Metrics.Port = 99999 },
 			wantErr: "metrics.port must be between 1 and 65535",
 		},
+		{
+			name:    "negative dict_loader concurrency",
+			modify:  func(c *AppConfig) { c.DictLoader.LoadConcurrency = -1 },
+			wantErr: "dict_loader.load_concurrency must not be negative",
+		},
+		{
+			name:    "dict_loader concurrency exceeds cap",
+			modify:  func(c *AppConfig) { c.DictLoader.LoadConcurrency = 128 },
+			wantErr: "dict_loader.load_concurrency must not exceed 64",
+		},
+		{
+			name:    "negative dict_loader poll interval",
+			modify:  func(c *AppConfig) { c.DictLoader.CacheVersionPollInterval = -1 * time.Second },
+			wantErr: "dict_loader.cache_version_poll_interval must not be negative",
+		},
 	}
 
 	for _, tt := range tests {

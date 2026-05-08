@@ -1,0 +1,60 @@
+// Package definition 提供 T-0098 告警库字典（设计 §3）。
+//
+// P1-06 阶段交付：
+//   - model.go    XML 解析结构 + 领域类型
+//   - loader.go   实现 dictloader.Loader — 启动期 7 个 ne_type XML 加载
+//
+// Phase 2/3 接力：Registry sync.Map + 接收路径 fallback + handler（设计 §3.3-§3.5）。
+package definition
+
+import (
+	"encoding/xml"
+
+	"github.com/google/uuid"
+)
+
+// AlarmDefinition 对应 alarm_definitions 表（设计 §3.2.2）。
+type AlarmDefinition struct {
+	ID                uuid.UUID
+	Identifier        string
+	NeType            string
+	CnName            string
+	EnName            string
+	SeverityID        uuid.UUID
+	EventType         *int
+	CnProbableCause   string
+	EnProbableCause   string
+	CnSuggestion      string
+	EnSuggestion      string
+	IsShow            bool
+}
+
+// SeverityLevel 对应 alarm_severity_levels 表（设计 §3.2.1，4 行种子由 P1-04 写入）。
+type SeverityLevel struct {
+	ID           uuid.UUID
+	Code         int
+	Name         string
+	DisplayOrder int
+}
+
+// xmlAlarmModel 解析 7 个 ne_type 的 alarm xml（设计 §3.4）。
+type xmlAlarmModel struct {
+	XMLName    xml.Name   `xml:"alarmModel"`
+	NeType     string     `xml:"neType,attr"`
+	DeviceType string     `xml:"deviceType,attr"`
+	TotalCount int        `xml:"totalCount,attr"`
+	Alarms     []xmlAlarm `xml:"alarms>alarm"`
+}
+
+type xmlAlarm struct {
+	Identifier      string `xml:"identifier,attr"`
+	CnName          string `xml:"cnName,attr"`
+	EnName          string `xml:"enName,attr"`
+	Severity        string `xml:"severity,attr"`
+	EventType       string `xml:"eventType,attr"`
+	CnProbableCause string `xml:"cnProbableCause,attr"`
+	EnProbableCause string `xml:"enProbableCause,attr"`
+	CnSuggestion    string `xml:"cnSuggestion,attr"`
+	EnSuggestion    string `xml:"enSuggestion,attr"`
+	IsShow          string `xml:"isShow,attr"` // "Y" / "N"
+}

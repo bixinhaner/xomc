@@ -2,13 +2,16 @@ package alarm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
+
+	"github.com/omcgo/omcgo/internal/alarm/definition"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
-	"go.uber.org/zap"
 )
 
 // AlarmPayload is the event payload for device alarm events.
@@ -29,15 +32,45 @@ type AlarmPayload struct {
 }
 
 // AlarmReceiver subscribes to device alarm events and processes them.
+//
+// T-0098 P2-10：在调用 engine.Process 前对 alarm.AlarmIdentifier 做"识别 → fallback
+// 决策"。已知 identifier 直接放过；未知 → 查 device.product.enable_unknown_alarm，
+//
+//	true  → severity=Warning + IsUnknown=true 写入活动告警（治理闭环用）
+//	false → 丢弃 + INFO + alarm_unknown_total{action=dropped}
+//
+// alarmDefRegistry / productResolver 任一为 nil 时退化到 P2-10 之前的行为（不做识别检查）。
 type AlarmReceiver struct {
-	engine   *AlarmEngine
-	eventBus event.EventBus
-	logger   *zap.Logger
+	engine           *AlarmEngine
+	eventBus         event.EventBus
+	logger           *zap.Logger
+	alarmDefRegistry *definition.Registry
+	productResolver  definition.ProductResolver
+	defMetrics       fallbackMetrics // 取自 alarmDefRegistry.Metrics() 的最小子集
+}
+
+// fallbackMetrics 是 receiver 需要的 alarm_unknown_total 计数接口。
+type fallbackMetrics interface {
+	UnknownDropped()
+	UnknownKept()
 }
 
 // NewAlarmReceiver creates a new AlarmReceiver.
 func NewAlarmReceiver(engine *AlarmEngine, eventBus event.EventBus, logger *zap.Logger) *AlarmReceiver {
 	return &AlarmReceiver{engine: engine, eventBus: eventBus, logger: logger}
+}
+
+// WithAlarmDefRegistry 启用 T-0098 P2-10 fallback 决策（设计 §3.5）。
+//
+// alarmDefReg / productResolver 任一为 nil → 等价于不调用本方法。
+func (r *AlarmReceiver) WithAlarmDefRegistry(alarmDefReg *definition.Registry, productResolver definition.ProductResolver) *AlarmReceiver {
+	if alarmDefReg == nil || productResolver == nil {
+		return r
+	}
+	r.alarmDefRegistry = alarmDefReg
+	r.productResolver = productResolver
+	r.defMetrics = alarmDefReg.Metrics()
+	return r
 }
 
 // Subscribe registers the receiver for device alarm events.
@@ -83,6 +116,16 @@ func (r *AlarmReceiver) handleAlarmEvent(ctx context.Context, evt event.Event) e
 		AdditionalInfo: payload.Additional,
 	}
 
+	// T-0098 P2-10 fallback 决策：identifier 不在 alarm_definitions → 查 product.enable_unknown_alarm
+	if drop, err := r.applyFallback(ctx, alarm, payload); err != nil {
+		r.logger.Warn("apply alarm fallback failed (proceed without fallback)",
+			zap.Error(err),
+			zap.String("alarm_identifier", payload.AlarmIdentifier))
+	} else if drop {
+		// product.enable_unknown_alarm = false → 静默丢弃
+		return nil
+	}
+
 	if err := r.engine.Process(ctx, alarm); err != nil {
 		r.logger.Error("process alarm",
 			zap.Error(err),
@@ -102,4 +145,61 @@ func (r *AlarmReceiver) handleAlarmEvent(ctx context.Context, evt event.Event) e
 	}
 
 	return nil
+}
+
+// applyFallback 执行 §3.5 fallback 决策。
+//
+// 返回 (drop=true, nil) 表示告警被丢弃（调用方应直接 return nil）。
+// 返回 (drop=false, nil) 表示告警继续走 engine.Process（已知或被保留为 unknown）。
+// 返回 (false, err) 表示 fallback 流程出错；调用方按既有路径继续即可。
+//
+// alarmDefRegistry 或 productResolver 未注入时直接返回 (false, nil)，行为与 P2-10 之前一致。
+func (r *AlarmReceiver) applyFallback(ctx context.Context, alarm *model.Alarm, payload AlarmPayload) (bool, error) {
+	if r.alarmDefRegistry == nil || r.productResolver == nil {
+		return false, nil
+	}
+	if _, err := r.alarmDefRegistry.Lookup(ctx, alarm.AlarmIdentifier); err == nil {
+		return false, nil
+	} else if !errors.Is(err, definition.ErrUnknownIdentifier) {
+		return false, err
+	}
+
+	// 未命中：查 product.enable_unknown_alarm
+	productClass := payload.AlarmSource // 约定 alarm_source 透传 device.ProductClass
+	if productClass == "" {
+		r.dropUnknown(alarm, "no product_class in payload")
+		return true, nil
+	}
+	prod, err := r.productResolver.ResolveByProductClass(ctx, productClass)
+	if err != nil {
+		return false, fmt.Errorf("resolve product %s: %w", productClass, err)
+	}
+	if prod == nil || !prod.EnableUnknownAlarm {
+		r.dropUnknown(alarm, "enable_unknown_alarm=false")
+		return true, nil
+	}
+
+	// 保留为 Warning（severity_code=31004）+ IsUnknown=true
+	alarm.Severity = model.AlarmSeverity(31004)
+	alarm.IsUnknown = true
+	if r.defMetrics != nil {
+		r.defMetrics.UnknownKept()
+	}
+	r.logger.Info("unknown alarm kept as fallback",
+		zap.String("alarm_identifier", alarm.AlarmIdentifier),
+		zap.String("device_sn", alarm.DeviceSN),
+		zap.String("product_class", productClass),
+	)
+	return false, nil
+}
+
+func (r *AlarmReceiver) dropUnknown(alarm *model.Alarm, reason string) {
+	if r.defMetrics != nil {
+		r.defMetrics.UnknownDropped()
+	}
+	r.logger.Info("unknown alarm dropped",
+		zap.String("alarm_identifier", alarm.AlarmIdentifier),
+		zap.String("device_sn", alarm.DeviceSN),
+		zap.String("reason", reason),
+	)
 }

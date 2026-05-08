@@ -2,12 +2,10 @@ package provision
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/config/datamodel"
 	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/carrier"
@@ -22,10 +20,14 @@ import (
 )
 
 // ProvisioningEngine orchestrates the full auto-provisioning workflow.
+//
+// T-0098 P5-01：旧 dmRegistry / GPN 二阶段同步 / handleDataModelFileReceived
+// 已删除。Path B 同步走 syncService.StartPathBSync（基于 paramRegistry.GetByProduct
+// 的 MappingSet）；Path C 模型上传由 modelUploadService.HandleModelFileReceived
+// 解析 XML → IntersectService 写 discovered_param_mappings。
 type ProvisioningEngine struct {
 	taskRepo           ProvisioningTaskRepository
 	deviceService      *device.DeviceService
-	dmRegistry         *datamodel.DataModelRegistry
 	templateService    *template.ConfigTemplateService
 	carrierRegistry    *carrier.CarrierRegistry
 	taskSvc            task.Enqueuer
@@ -40,7 +42,6 @@ type ProvisioningEngine struct {
 func NewProvisioningEngine(
 	taskRepo ProvisioningTaskRepository,
 	deviceService *device.DeviceService,
-	dmRegistry *datamodel.DataModelRegistry,
 	templateService *template.ConfigTemplateService,
 	carrierRegistry *carrier.CarrierRegistry,
 	taskSvc task.Enqueuer,
@@ -51,7 +52,6 @@ func NewProvisioningEngine(
 	return &ProvisioningEngine{
 		taskRepo:        taskRepo,
 		deviceService:   deviceService,
-		dmRegistry:      dmRegistry,
 		templateService: templateService,
 		carrierRegistry: carrierRegistry,
 		taskSvc:         taskSvc,
@@ -101,7 +101,7 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 	}
 	e.logger.Info("provisioning engine subscribed to device.registered events")
 
-	// Subscribe to datamodel.file.received for model upload processing (replaces old GPN flow).
+	// Subscribe to datamodel.file.received for Path C model upload processing.
 	if _, err := bus.QueueSubscribe(event.SubjectDataModelFileReceived, "provision-model-upload", func(ctx context.Context, evt event.Event) error {
 		return e.handleDataModelFileReceived(ctx, evt)
 	}); err != nil {
@@ -119,19 +119,19 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 		e.logger.Info("provisioning engine subscribed to GPV response events")
 	}
 
-	// Subscribe to GPN response for two-phase sync processing.
-	if _, err := bus.QueueSubscribe(event.SubjectCommandGetNamesResponse, "provision-gpn", func(ctx context.Context, evt event.Event) error {
-		return e.handleGPNResponse(ctx, evt)
-	}); err != nil {
-		e.logger.Warn("failed to subscribe to GPN response", zap.Error(err))
-	} else {
-		e.logger.Info("provisioning engine subscribed to GPN response events")
-	}
+	// T-0098 P5-01：GPN response 订阅删除（two-phase sync 已移除）。
 
 	return nil
 }
 
 // HandleBootstrap processes a device bootstrap event and initiates the provisioning workflow.
+//
+// 路由策略（P5-01 后）：
+//
+//	Path A：模板匹配命中 + AutoConfigure → 经典模板下发流程
+//	Path B：AutoSync 启用 + Path B 可用（productClass 命中 product + paramMapping 存在） → 直接 GPV 同步
+//	Path C：ModelUpload 启用 + 设备未上传过 → 下发 Upload(FileType=11)
+//	否则失败
 func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapEvent) error {
 	ctx, span := tracing.StartSpan(ctx, tracing.ProvisionTracerName, "Provision HandleBootstrap",
 		attribute.String("provision.device_sn", evt.SerialNumber),
@@ -171,7 +171,7 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 
 	e.publishEvent(ctx, event.SubjectProvisionStarted, task)
 
-	// 2. Identify device — resolve data model.
+	// 2. Identify device.
 	if err := e.transitionTask(ctx, task, StateIdentifying); err != nil {
 		return e.failTask(ctx, task, fmt.Errorf("transition to identifying: %w", err))
 	}
@@ -180,25 +180,6 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 	if err != nil {
 		return e.failTask(ctx, task, fmt.Errorf("get device: %w", err))
 	}
-
-	dm, err := e.dmRegistry.ResolveForDevice(ctx, dev)
-	if err != nil {
-		return e.failTask(ctx, task, fmt.Errorf("resolve data model: %w", err))
-	}
-	if dm != nil {
-		e.logger.Info("data model resolved",
-			zap.String("device_sn", evt.SerialNumber),
-			zap.String("model_id", dm.ID.String()),
-			zap.String("scope", string(dm.Scope)),
-		)
-	}
-
-	// Four-path branching based on feature toggles and data model availability.
-	//
-	// Path A: Has matching template → classic provisioning flow (configuring).
-	// Path B: Has DataModel + auto_sync enabled → sync parameter values only.
-	// Path C: No DataModel + model_upload enabled → request CPE to upload parameter model XML.
-	// Path D: All switches off or no match → fail task (backward compatible).
 
 	// 3. Try matching template first (Path A).
 	if err := e.transitionTask(ctx, task, StateMatching); err != nil {
@@ -211,7 +192,6 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 	}
 
 	if tmpl != nil && e.config.AutoConfigure {
-		// Path A: classic provisioning with template (requires parameter path mapping).
 		return e.handleTemplateProvisioning(ctx, task, dev, tmpl, evt.SerialNumber)
 	}
 	if tmpl != nil {
@@ -221,23 +201,21 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 		)
 	}
 
-	// No template matched. Check auto-sync and model upload paths.
-
-	// Path B: DataModel exists + auto_sync enabled → sync parameters.
-	if dm != nil && e.config.AutoSync.Enabled && e.syncService != nil {
-		return e.handleAutoSync(ctx, task, dev, dm)
+	// Path B: AutoSync enabled + paramMapping available → sync via GPV.
+	if e.config.AutoSync.Enabled && e.syncService != nil && e.syncService.PathBEnabled(ctx, dev) {
+		return e.handleAutoSync(ctx, task, dev)
 	}
 
-	// Path C: No DataModel + model_upload enabled → request CPE parameter model upload.
-	if dm == nil && e.config.ModelUpload.Enabled && e.modelUploadService != nil {
+	// Path C: ModelUpload enabled → request CPE parameter model upload.
+	if e.config.ModelUpload.Enabled && e.modelUploadService != nil {
 		return e.handleModelUpload(ctx, task, dev)
 	}
 
-	// Path D: No template, no applicable feature toggle → fail.
-	e.logger.Warn("no matching template found, provisioning skipped",
+	// Path D: nothing applicable → fail.
+	e.logger.Warn("no provisioning path applicable, skipping",
 		zap.String("device_sn", evt.SerialNumber),
 	)
-	return e.failTask(ctx, task, fmt.Errorf("no matching template for device %s", evt.SerialNumber))
+	return e.failTask(ctx, task, fmt.Errorf("no provisioning path for device %s", evt.SerialNumber))
 }
 
 // handleTemplateProvisioning executes the classic provisioning flow (Path A).
@@ -253,9 +231,23 @@ func (e *ProvisioningEngine) handleTemplateProvisioning(ctx context.Context, tas
 		return e.failTask(ctx, task, fmt.Errorf("transition to configuring: %w", err))
 	}
 
-	steps, err := BuildProvisioningSteps(tmpl)
-	if err != nil {
-		return e.failTask(ctx, task, fmt.Errorf("build provisioning steps: %w", err))
+	// T-0098 P2-05：Path A 模板 Parameters 视为 standardPath，
+	// 翻译为 privatePath 后再下发；翻译未解出时退化为原 standardPath。
+	var (
+		steps    []ProvisioningStep
+		buildErr error
+	)
+	if e.syncService != nil {
+		if translator, ok := e.syncService.ResolveTranslator(ctx, dev); ok {
+			steps, buildErr = BuildProvisioningStepsTranslated(tmpl, translator)
+		} else {
+			steps, buildErr = BuildProvisioningSteps(tmpl)
+		}
+	} else {
+		steps, buildErr = BuildProvisioningSteps(tmpl)
+	}
+	if buildErr != nil {
+		return e.failTask(ctx, task, fmt.Errorf("build provisioning steps: %w", buildErr))
 	}
 	task.TotalSteps = len(steps)
 	if err := e.taskRepo.Update(ctx, task); err != nil {
@@ -299,44 +291,27 @@ func (e *ProvisioningEngine) handleModelUpload(ctx context.Context, task *Provis
 	return nil
 }
 
-// handleAutoSync initiates parameter value synchronization (Path B).
-// Uses two-phase sync: GPN discovery → GPV partial path fetch.
+// handleAutoSync initiates Path B parameter value synchronization.
 func (e *ProvisioningEngine) handleAutoSync(ctx context.Context, task *ProvisioningTask,
-	dev *model.Device, dm *datamodel.DataModel) error {
+	dev *model.Device) error {
 
 	if err := e.transitionTask(ctx, task, StateSyncing); err != nil {
 		return e.failTask(ctx, task, fmt.Errorf("transition to syncing: %w", err))
 	}
 
-	// Use two-phase sync with the data model iterator.
-	if err := e.syncService.StartTwoPhaseSync(ctx, dev, dm); err != nil {
-		return e.failTask(ctx, task, fmt.Errorf("start two-phase sync: %w", err))
+	used, err := e.syncService.StartPathBSync(ctx, dev)
+	if err != nil {
+		return e.failTask(ctx, task, fmt.Errorf("start path-b sync: %w", err))
+	}
+	if !used {
+		return e.failTask(ctx, task, fmt.Errorf("path-b sync unavailable for device %s", dev.SerialNumber))
 	}
 
-	e.logger.Info("two-phase auto-sync initiated",
+	e.logger.Info("path-b auto-sync initiated",
 		zap.String("device_sn", dev.SerialNumber),
 		zap.String("task_id", task.ID.String()),
 	)
-
 	return nil
-}
-
-// extractPathsFromParameterTree extracts parameter paths from a DataModel's parameter tree JSON.
-func extractPathsFromParameterTree(tree json.RawMessage) ([]string, error) {
-	var params []struct {
-		Path string `json:"path"`
-	}
-	if err := json.Unmarshal(tree, &params); err != nil {
-		return nil, fmt.Errorf("unmarshal parameter tree: %w", err)
-	}
-
-	paths := make([]string, 0, len(params))
-	for _, p := range params {
-		if p.Path != "" {
-			paths = append(paths, p.Path)
-		}
-	}
-	return paths, nil
 }
 
 // HandleRPCResult processes an RPC response and advances the provisioning state.
@@ -421,8 +396,6 @@ func (e *ProvisioningEngine) failTask(ctx context.Context, task *ProvisioningTas
 		"error":     cause.Error(),
 	})
 
-	// Return nil: task failure is a terminal business state, not a processing error.
-	// Returning cause would make the NATS handler NAK the message and trigger redelivery.
 	return nil
 }
 
@@ -467,9 +440,10 @@ func (e *ProvisioningEngine) publishEvent(ctx context.Context, subject string, d
 }
 
 // handleDataModelFileReceived processes datamodel.file.received events.
-// When a CPE uploads its parameter model XML (via Upload RPC FileType "11"),
-// the ACS stores the file in MinIO and publishes this event.
-// The engine downloads the XML, parses it, and creates a DataModel.
+//
+// 设备 FileType=11 上传 → ACS 存 MinIO 后发本事件；本 handler 拉文件、解析 XML、
+// 调 IntersectService 写 discovered_param_mappings。完成后若 AutoSync 启用且
+// Path B 可用，触发同步。
 func (e *ProvisioningEngine) handleDataModelFileReceived(ctx context.Context, evt event.Event) error {
 	var payload dataModelFilePayload
 	if err := evt.DecodePayload(&payload); err != nil {
@@ -488,7 +462,6 @@ func (e *ProvisioningEngine) handleDataModelFileReceived(ctx context.Context, ev
 		return nil
 	}
 
-	// Look up the device.
 	dev, err := e.deviceService.GetBySerialNumber(ctx, payload.DeviceSN)
 	if err != nil {
 		e.logger.Error("find device for datamodel file", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
@@ -504,75 +477,30 @@ func (e *ProvisioningEngine) handleDataModelFileReceived(ctx context.Context, ev
 		return nil
 	}
 
-	dm, err := e.modelUploadService.HandleModelFileReceived(ctx, dev, payload)
-	if err != nil {
+	if err := e.modelUploadService.HandleModelFileReceived(ctx, dev, payload); err != nil {
 		e.logger.Error("handle model file received", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
 		return nil
 	}
 
-	e.logger.Info("data model created from uploaded file",
+	e.logger.Info("model XML processed, discovered mappings written",
 		zap.String("device_sn", payload.DeviceSN),
-		zap.String("model_id", dm.ID.String()),
 	)
 
-	// After model creation, auto-sync parameters using two-phase sync.
+	// After discovered mappings written, auto-sync via Path B if enabled.
 	if e.syncService != nil && e.config.AutoSync.Enabled {
-		if syncErr := e.syncService.StartTwoPhaseSync(ctx, dev, dm); syncErr != nil {
-			e.logger.Warn("auto-sync after model upload failed",
+		if used, syncErr := e.syncService.StartPathBSync(ctx, dev); syncErr != nil {
+			e.logger.Warn("path-b auto-sync after model upload failed",
 				zap.Error(syncErr),
 				zap.String("device_sn", payload.DeviceSN),
 			)
-		} else {
-			e.logger.Info("two-phase auto-sync initiated after model upload",
+		} else if used {
+			e.logger.Info("path-b auto-sync initiated after model upload",
 				zap.String("device_sn", payload.DeviceSN),
 			)
-		}
-	}
-
-	return nil
-}
-
-// gpnResponsePayload is the structured event payload for GetParameterNamesResponse.
-type gpnResponsePayload struct {
-	DeviceSN       string                      `json:"device_sn"`
-	Method         string                      `json:"method"`
-	Path           string                      `json:"path"`
-	ParameterInfos []tr069.ParameterInfoStruct `json:"parameter_infos"`
-}
-
-// handleGPNResponse processes GetParameterNamesResponse events for two-phase sync.
-func (e *ProvisioningEngine) handleGPNResponse(ctx context.Context, evt event.Event) error {
-	var payload gpnResponsePayload
-	if err := evt.DecodePayload(&payload); err != nil {
-		e.logger.Error("decode GPN response event", zap.Error(err))
-		return nil
-	}
-
-	e.logger.Info("received GPN response",
-		zap.String("device_sn", payload.DeviceSN),
-		zap.String("path", payload.Path),
-		zap.Int("parameter_count", len(payload.ParameterInfos)),
-	)
-
-	if payload.DeviceSN == "" {
-		return nil
-	}
-
-	dev, err := e.deviceService.GetBySerialNumber(ctx, payload.DeviceSN)
-	if err != nil {
-		e.logger.Error("find device for GPN response", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
-		return nil
-	}
-	if dev == nil {
-		e.logger.Warn("device not found for GPN response, skipping", zap.String("device_sn", payload.DeviceSN))
-		return nil
-	}
-
-	// Always pass to HandleGPNResult (even with empty ParameterInfos) so the
-	// pending GPN count decrements and the sync plan can transition to GPV phase.
-	if e.syncService != nil {
-		if err := e.syncService.HandleGPNResult(ctx, dev, payload.Path, payload.ParameterInfos); err != nil {
-			e.logger.Error("handle GPN result", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
+		} else {
+			e.logger.Info("path-b auto-sync skipped (mapping unavailable)",
+				zap.String("device_sn", payload.DeviceSN),
+			)
 		}
 	}
 
@@ -587,6 +515,9 @@ type gpvResponsePayload struct {
 }
 
 // handleGPVResponse processes GetParameterValuesResponse events from ACS.
+//
+// T-0098 P5-01：先尝试 Path B 翻译落库（standardPath）；命中即返回，否则
+// 用旧 HandleSyncResult 直写 privatePath（兜底，参数保留可见性）。
 func (e *ProvisioningEngine) handleGPVResponse(ctx context.Context, evt event.Event) error {
 	var payload gpvResponsePayload
 	if err := evt.DecodePayload(&payload); err != nil {
@@ -613,17 +544,29 @@ func (e *ProvisioningEngine) handleGPVResponse(ctx context.Context, evt event.Ev
 		return nil
 	}
 
-	if e.syncService != nil {
-		if err := e.syncService.HandleSyncResult(ctx, dev, payload.ParameterValues); err != nil {
-			e.logger.Error("save parameter values", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
-			return nil
-		}
-		e.logger.Info("parameter values saved",
+	if e.syncService == nil {
+		return nil
+	}
+
+	if used, err := e.syncService.HandleSyncResultPathB(ctx, dev, payload.ParameterValues); err != nil {
+		e.logger.Error("path-b save parameter values", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
+		return nil
+	} else if used {
+		e.logger.Info("path-b parameter values saved",
 			zap.String("device_sn", payload.DeviceSN),
 			zap.Int("count", len(payload.ParameterValues)),
 		)
+		return nil
 	}
 
+	if err := e.syncService.HandleSyncResult(ctx, dev, payload.ParameterValues); err != nil {
+		e.logger.Error("save parameter values", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
+		return nil
+	}
+	e.logger.Info("parameter values saved (privatePath direct)",
+		zap.String("device_sn", payload.DeviceSN),
+		zap.Int("count", len(payload.ParameterValues)),
+	)
 	return nil
 }
 
