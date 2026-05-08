@@ -6,6 +6,7 @@ import PrivateRoute from './PrivateRoute';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import LoginPage from '@/pages/login';
 import NotFound from '@/pages/error/NotFound';
+import Forbidden from '@/pages/error/Forbidden';
 
 // ---------------------------------------------------------------------------
 // Real lazy-loaded page imports
@@ -155,6 +156,13 @@ const OpsTasks           = React.lazy(() => import('@/pages/ops/TaskManagement')
 const NetworkDiagnosis   = React.lazy(() => import('@/pages/ops/NetworkDiagnosis'));
 const OpsDownloads       = React.lazy(() => import('@/pages/ops/Downloads'));
 
+// T-0098-P4 Product Center (super_admin only)
+const ProductsPage       = React.lazy(() => import('@/pages/product/products'));
+const ParamModelPage     = React.lazy(() => import('@/pages/product/param-model'));
+const KpiLibraryPage     = React.lazy(() => import('@/pages/product/kpi-library'));
+const AlarmLibraryPage   = React.lazy(() => import('@/pages/product/alarm-library'));
+const OrphanDevicesPage  = React.lazy(() => import('@/pages/product/orphan-devices'));
+
 // ---------------------------------------------------------------------------
 // Loading fallback
 // ---------------------------------------------------------------------------
@@ -171,6 +179,19 @@ function withSuspense(Component: React.ComponentType) {
         <Component />
       </Suspense>
     </ErrorBoundary>
+  );
+}
+
+// T-0098-P4-02：super_admin 治理路由组守卫包装
+function withSuperAdmin(Component: React.ComponentType) {
+  return (
+    <PrivateRoute requireSuperAdmin>
+      <ErrorBoundary>
+        <Suspense fallback={<PageLoader />}>
+          <Component />
+        </Suspense>
+      </ErrorBoundary>
+    </PrivateRoute>
   );
 }
 
@@ -336,7 +357,15 @@ export const routes: RouteObject[] = [
       { path: 'ops/network-diagnosis', element: withSuspense(NetworkDiagnosis) },
       { path: 'ops/downloads',         element: withSuspense(OpsDownloads) },
 
-      // 404
+      // T-0098-P4 Product Center (super_admin only)
+      { path: 'product/products',       element: withSuperAdmin(ProductsPage) },
+      { path: 'product/param-model',    element: withSuperAdmin(ParamModelPage) },
+      { path: 'product/kpi-library',    element: withSuperAdmin(KpiLibraryPage) },
+      { path: 'product/alarm-library',  element: withSuperAdmin(AlarmLibraryPage) },
+      { path: 'product/orphan-devices', element: withSuperAdmin(OrphanDevicesPage) },
+
+      // 403 / 404
+      { path: '403', element: <Forbidden /> },
       { path: '*', element: <NotFound /> },
     ],
   },

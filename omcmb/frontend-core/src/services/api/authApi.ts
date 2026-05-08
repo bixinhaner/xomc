@@ -9,6 +9,7 @@ interface BackendUser {
   email: string;
   carrier?: string;
   status: string;
+  source?: 'builtIn' | 'admin' | 'LDAP';
   roles?: Array<{ id: string; name: string; description: string }>;
   last_login_at?: string;
   created_at: string;
@@ -23,6 +24,9 @@ function mapBackendUserToFrontend(bu: BackendUser): User {
     email: bu.email || '',
     phone: '',
     role: ((bu.roles && bu.roles.length > 0 ? bu.roles[0].name : 'viewer') as User['role']),
+    // T-0098-P4-02：派生超管标志（与后端 user.IsSuperAdmin() 即 source==='builtIn' 同义）
+    isSuperAdmin: bu.source === 'builtIn',
+    source: bu.source,
     status: (bu.status as User['status']) || 'active',
     lastLoginTime: bu.last_login_at || '',
     createTime: bu.created_at,

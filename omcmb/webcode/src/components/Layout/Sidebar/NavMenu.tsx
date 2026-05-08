@@ -18,6 +18,7 @@ import {
   RadarChartOutlined,
   SafetyOutlined,
   AppstoreOutlined,
+  AppstoreAddOutlined,
   GatewayOutlined,
   DeploymentUnitOutlined,
   WifiOutlined,
@@ -30,6 +31,7 @@ import {
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTabStore } from '@core/store/tabStore';
 import { useAppStore } from '@core/store/appStore';
+import { useUserStore } from '@core/store/userStore';
 import { useResponsive } from '@/hooks/useResponsive';
 import { useT } from '@/hooks/useT';
 import { NAV_CONFIG } from './navConfig';
@@ -54,6 +56,7 @@ const ICON_MAP: Record<string, React.ReactNode> = {
   RadarChartOutlined:   <RadarChartOutlined />,
   SafetyOutlined:         <SafetyOutlined />,
   AppstoreOutlined:       <AppstoreOutlined />,
+  AppstoreAddOutlined:    <AppstoreAddOutlined />,
   GatewayOutlined:        <GatewayOutlined />,
   DeploymentUnitOutlined: <DeploymentUnitOutlined />,
   WifiOutlined:           <WifiOutlined />,
@@ -124,10 +127,16 @@ export default function NavMenu({ collapsed, position = 'left' }: { collapsed?: 
   const setMobileOverlayOpen = useAppStore((s) => s.setMobileOverlayOpen);
   const { isMobile } = useResponsive();
   const t = useT();
+  const isSuperAdmin = useUserStore((s) => s.currentUser?.isSuperAdmin === true);
 
-  const menuItems = useMemo(() => buildMenuItems(NAV_CONFIG, t), [t]);
-  const keyToChild = useMemo(() => buildKeyToChild(NAV_CONFIG), []);
-  const pathToKey = useMemo(() => buildPathToKey(NAV_CONFIG), []);
+  // T-0098-P4-02：按 super_admin 过滤 requireSuperAdmin 组（产品中心仅超管可见）
+  const filteredNav = useMemo(
+    () => NAV_CONFIG.filter((g) => !g.requireSuperAdmin || isSuperAdmin),
+    [isSuperAdmin]
+  );
+  const menuItems = useMemo(() => buildMenuItems(filteredNav, t), [filteredNav, t]);
+  const keyToChild = useMemo(() => buildKeyToChild(filteredNav), [filteredNav]);
+  const pathToKey = useMemo(() => buildPathToKey(filteredNav), [filteredNav]);
 
   // Derive selected keys from current pathname
   const selectedKeys = useMemo(() => {
@@ -139,9 +148,9 @@ export default function NavMenu({ collapsed, position = 'left' }: { collapsed?: 
   const defaultOpenKeys = useMemo(() => {
     const selectedKey = pathToKey.get(location.pathname);
     if (!selectedKey) return [];
-    const group = NAV_CONFIG.find((g) => g.children.some((c) => c.key === selectedKey));
+    const group = filteredNav.find((g) => g.children.some((c) => c.key === selectedKey));
     return group ? [group.key] : [];
-  }, [location.pathname, pathToKey]);
+  }, [location.pathname, pathToKey, filteredNav]);
 
   const handleMenuClick: MenuProps['onClick'] = ({ key }) => {
     const child = keyToChild.get(key);
