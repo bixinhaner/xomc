@@ -31,6 +31,10 @@ vendor/
 # Local config (each developer maintains their own)
 config.local.yaml
 
+# 登录密码加密 RSA 私钥（dev/test 由进程自动生成；生产从 K8s Secret 挂载）
+configs/keys/
+*.pem
+
 # Claude Code
 .claude/
 

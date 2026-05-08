@@ -147,7 +147,13 @@ type AuditLogFilter struct {
 	model.ListRequest
 }
 
-// CreateUserRequest is the input for creating a new user.
+// CreateUserRequest 是 service 层创建用户的明文输入。
+//
+// 注意：HTTP /admin/users 端点不再直接绑定本结构（密码必须 RSA-OAEP 加密传输，
+// 见 CreateUserHTTPRequest）。本结构仍保留为：
+//   - service.CreateUser 的入参（明文）
+//   - xlsx 批量导入路径 ImportUsers 的内部入参（导入文件本身在管理员可信范围内）
+//
 // v1.0：移除 Carrier 字段（users.carrier 已删）。
 type CreateUserRequest struct {
 	Username    string      `json:"username" binding:"required,min=3,max=64"`
@@ -158,6 +164,23 @@ type CreateUserRequest struct {
 	Description string      `json:"description"`
 	ExpireAt    *time.Time  `json:"expire_at"`
 	RoleIDs     []uuid.UUID `json:"role_ids"`
+}
+
+// CreateUserHTTPRequest 是 POST /api/v1/admin/users 的请求体（密码加密传输）。
+//
+// 前端先调 GET /auth/public-key 拉公钥，把 {password, ts, nonce} JSON 用
+// RSA-OAEP/SHA-256 加密 → base64 → 填入 encrypted_password；同时回传 key_id。
+// 后端 handler 解密后构造 CreateUserRequest 调 service。
+type CreateUserHTTPRequest struct {
+	Username          string      `json:"username" binding:"required,min=3,max=64"`
+	EncryptedPassword string      `json:"encrypted_password" binding:"required"`
+	KeyID             string      `json:"key_id" binding:"required"`
+	DisplayName       string      `json:"display_name"`
+	Email             string      `json:"email" binding:"omitempty,email"`
+	Phone             string      `json:"phone"`
+	Description       string      `json:"description"`
+	ExpireAt          *time.Time  `json:"expire_at"`
+	RoleIDs           []uuid.UUID `json:"role_ids"`
 }
 
 // UpdateUserRequest is the input for updating an existing user.
@@ -177,12 +200,17 @@ type UpdateUserRequest struct {
 	RoleIDs     *[]uuid.UUID `json:"role_ids"`
 }
 
-// LoginRequest is the input for user authentication.
+// LoginRequest 是 POST /api/v1/auth/login 的请求体。
+//
+// 密码必须 RSA-OAEP 加密：前端调 GET /auth/public-key 拉公钥，把
+// {password, ts, nonce} JSON 用 RSA-OAEP/SHA-256 加密 → base64 → 填入
+// encrypted_password；同时回传 key_id。后端 handler 解密后调 service.Login。
 type LoginRequest struct {
-	Username      string `json:"username" binding:"required"`
-	Password      string `json:"password" binding:"required"`
-	CaptchaID     string `json:"captcha_id"`
-	CaptchaAnswer string `json:"captcha_answer"`
+	Username          string `json:"username" binding:"required"`
+	EncryptedPassword string `json:"encrypted_password" binding:"required"`
+	KeyID             string `json:"key_id" binding:"required"`
+	CaptchaID         string `json:"captcha_id"`
+	CaptchaAnswer     string `json:"captcha_answer"`
 }
 
 // RefreshRequest is the input for refreshing a JWT token.
@@ -195,9 +223,11 @@ type AssignRoleRequest struct {
 	RoleID uuid.UUID `json:"role_id" binding:"required"`
 }
 
-// ResetPasswordRequest is the input for resetting a user's password.
+// ResetPasswordRequest 是 POST /api/v1/admin/users/:id/reset-password 的请求体。
+// 新密码必须 RSA-OAEP 加密传输。
 type ResetPasswordRequest struct {
-	NewPassword string `json:"new_password" binding:"required,min=6"`
+	EncryptedNewPassword string `json:"encrypted_new_password" binding:"required"`
+	KeyID                string `json:"key_id" binding:"required"`
 }
 
 // CreateRoleRequest is the input for creating a new role.

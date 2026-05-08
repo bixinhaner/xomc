@@ -96,24 +96,30 @@ func TestLoginEndpoint(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	// Note: This test only verifies the request parsing, not the full auth flow
 	// (which requires database). It confirms the handler correctly binds JSON input.
+	//
+	// 自 T-引入登录密码 RSA-OAEP 加密传输后，password 字段被替换为
+	// encrypted_password + key_id（明文不再走线）。本测试相应更新。
 
-	// Verify that LoginRequest requires username and password
+	// Verify that LoginRequest requires username and encrypted_password
 	var req admin.LoginRequest
 	data, _ := json.Marshal(map[string]string{})
 	err := json.Unmarshal(data, &req)
 	require.NoError(t, err)
 	assert.Empty(t, req.Username)
-	assert.Empty(t, req.Password)
+	assert.Empty(t, req.EncryptedPassword)
+	assert.Empty(t, req.KeyID)
 
 	// Verify that LoginRequest properly deserializes
 	data, _ = json.Marshal(map[string]string{
-		"username": "admin",
-		"password": "secret",
+		"username":           "admin",
+		"encrypted_password": "base64-rsa-oaep-ciphertext",
+		"key_id":             "abc123",
 	})
 	err = json.Unmarshal(data, &req)
 	require.NoError(t, err)
 	assert.Equal(t, "admin", req.Username)
-	assert.Equal(t, "secret", req.Password)
+	assert.Equal(t, "base64-rsa-oaep-ciphertext", req.EncryptedPassword)
+	assert.Equal(t, "abc123", req.KeyID)
 }
 
 // TestRefreshRequestFormat verifies the refresh request JSON structure.

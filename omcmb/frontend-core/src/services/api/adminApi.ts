@@ -1,4 +1,5 @@
 import http from '../http';
+import { encryptPassword } from '../crypto/passwordCipher';
 import type {
   User,
   UserRole,
@@ -552,9 +553,12 @@ export const adminApi = {
       roleIds?: string[];
     }
   ): Promise<User> {
+    // 初始密码必须 RSA-OAEP 加密传输（与登录、改密一致）。
+    const { encryptedPassword, keyId } = await encryptPassword(data.password);
     const { data: bu } = await http.post<BackendUser>('/admin/users', {
       username: data.username,
-      password: data.password,
+      encrypted_password: encryptedPassword,
+      key_id: keyId,
       email: data.email || undefined,
       phone: data.phone || undefined,
       description: data.description || undefined,
@@ -582,8 +586,12 @@ export const adminApi = {
   },
 
   async resetPassword(id: string, newPassword: string): Promise<void> {
-    // 后端字段名 new_password（snake_case），axios 不转 body 字段。
-    await http.post(`/admin/users/${id}/reset-password`, { new_password: newPassword });
+    // 新密码必须 RSA-OAEP 加密传输。
+    const { encryptedPassword, keyId } = await encryptPassword(newPassword);
+    await http.post(`/admin/users/${id}/reset-password`, {
+      encrypted_new_password: encryptedPassword,
+      key_id: keyId,
+    });
   },
 
   async lockUser(id: string): Promise<void> {
@@ -1032,8 +1040,16 @@ export const adminApi = {
   },
 
   // Change password (current user)
+  // 旧/新密码均需 RSA-OAEP 加密传输；两个密文使用同一 key_id。
   async changePassword(data: { old_password: string; new_password: string }): Promise<void> {
-    await http.post('/auth/change-password', data);
+    const oldEnc = await encryptPassword(data.old_password);
+    const newEnc = await encryptPassword(data.new_password);
+    // 两次 encryptPassword 共用同一公钥缓存 → keyId 必然相同；这里取其一即可。
+    await http.post('/auth/change-password', {
+      encrypted_old_password: oldEnc.encryptedPassword,
+      encrypted_new_password: newEnc.encryptedPassword,
+      key_id: oldEnc.keyId,
+    });
   },
 
   // ---- System Config (KV by category, batch upsert) ----

@@ -66,6 +66,11 @@ jwt:
   access_token_ttl: 30m
   refresh_token_ttl: 168h
 
+# 登录类接口密码 RSA-OAEP 加密传输。
+# 多副本部署时此路径必须挂载同一份 K8s Secret，确保各副本使用同一密钥（keyID 一致）。
+login_crypto:
+  private_key_path: "/etc/omcgo/keys/login_rsa_private.pem"
+
 cors:
   allow_origins:
     - "http://localhost:8080"

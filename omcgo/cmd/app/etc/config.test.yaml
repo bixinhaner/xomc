@@ -66,6 +66,10 @@ jwt:
   access_token_ttl: 30m
   refresh_token_ttl: 168h
 
+# 登录类接口密码 RSA-OAEP 加密传输；私钥不存在时启动自动生成。
+login_crypto:
+  private_key_path: "configs/keys/login_rsa_private.pem"
+
 cors:
   allow_origins:
     - "http://localhost:3000"

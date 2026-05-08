@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -58,7 +59,25 @@ func (h *Handler) Login(c *gin.Context) {
 	// 	}
 	// }
 
-	tokenPair, err := h.service.Login(ctx, req.Username, req.Password)
+	if h.loginCipher == nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError,
+			errors.New("login password cipher not configured"))
+		return
+	}
+	plainPwd, err := h.loginCipher.Decrypt(ctx, req.KeyID, req.EncryptedPassword)
+	if err != nil {
+		log.Warn("login decrypt failed",
+			zap.String("username", req.Username),
+			zap.String("ip", clientIP),
+			zap.Error(err),
+		)
+		// 对外仅以 401 暴露失败原因，不区分"密钥错"/"重放"/"过期"，避免给攻击者反馈。
+		h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, "decrypt_failed")
+		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
+		return
+	}
+
+	tokenPair, err := h.service.Login(ctx, req.Username, plainPwd)
 	if err != nil {
 		reason := classifyLoginFailure(err)
 
@@ -265,6 +284,8 @@ func classifyLoginFailure(err error) string {
 
 // ChangePassword handles POST /api/v1/auth/change-password.
 // The user must be authenticated; it verifies the old password before updating.
+//
+// 旧/新密码均需 RSA-OAEP 加密传输（共用一次 keyID）。
 func (h *Handler) ChangePassword(c *gin.Context) {
 	userID := getUserID(c)
 	if userID == uuid.Nil {
@@ -272,13 +293,38 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	var req ChangePasswordRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	var httpReq ChangePasswordHTTPRequest
+	if err := c.ShouldBindJSON(&httpReq); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
-	if err := h.service.ChangePassword(c.Request.Context(), userID, req); err != nil {
+	if h.loginCipher == nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError,
+			errors.New("login password cipher not configured"))
+		return
+	}
+	ctx := c.Request.Context()
+	oldPlain, err := h.loginCipher.Decrypt(ctx, httpReq.KeyID, httpReq.EncryptedOldPassword)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("decrypt old password: %w", err))
+		return
+	}
+	newPlain, err := h.loginCipher.Decrypt(ctx, httpReq.KeyID, httpReq.EncryptedNewPassword)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("decrypt new password: %w", err))
+		return
+	}
+	if len(newPlain) < 6 {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			errors.New("new password must be at least 6 characters"))
+		return
+	}
+
+	req := ChangePasswordRequest{OldPassword: oldPlain, NewPassword: newPlain}
+	if err := h.service.ChangePassword(ctx, userID, req); err != nil {
 		status := commonerrors.HTTPStatusFromError(err)
 		commonerrors.AbortWithError(c, status, err)
 		return

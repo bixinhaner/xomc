@@ -3,15 +3,24 @@ package admin
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/admin/loginpwd"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
@@ -200,10 +209,78 @@ func handlerHashPassword(pw string) string {
 	return string(h)
 }
 
+// handlerTestEnv 聚合一次性的测试上下文：除路由 Engine 外还携带登录密码加密所需的
+// keystore / cipher / publicKey，便于测试构造合法的加密 LoginRequest。
+type handlerTestEnv struct {
+	Engine    *gin.Engine
+	KeyID     string
+	PublicKey *rsa.PublicKey
+	Now       time.Time
+}
+
+// encryptPassword 构造前端等价物：把 {password, ts, nonce} JSON 用 RSA-OAEP-SHA256
+// 加密 → base64。每次调用 nonce 都会变化，可避免单测内 ReplayGuard 误判。
+func (e *handlerTestEnv) encryptPassword(t *testing.T, plain string) string {
+	t.Helper()
+	nonceBytes := make([]byte, 16)
+	_, err := rand.Read(nonceBytes)
+	require.NoError(t, err)
+
+	body, err := json.Marshal(loginpwd.Payload{
+		Password: plain,
+		TS:       e.Now.Unix(),
+		Nonce:    base64.RawURLEncoding.EncodeToString(nonceBytes),
+	})
+	require.NoError(t, err)
+
+	ct, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, e.PublicKey, body, nil)
+	require.NoError(t, err)
+	return base64.StdEncoding.EncodeToString(ct)
+}
+
+// handlerNewTestEnv 与 handlerNewTestRouter 等价但额外暴露加密所需信息。
+//
+// 测试需要构造合法 LoginRequest / CreateUserHTTPRequest / ResetPasswordRequest /
+// ChangePasswordHTTPRequest 时调用本函数；其它测试可继续调 handlerNewTestRouter。
+func handlerNewTestEnv(
+	t *testing.T,
+	userRepo *handlerMockUserRepo,
+	roleRepo *handlerMockRoleRepo,
+) *handlerTestEnv {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	jwt, err := NewJWTService("test-secret-key-minimum-32-chars!!")
+	require.NoError(t, err)
+	svc := NewAdminService(userRepo, roleRepo, &handlerMockMenuRepo{}, &handlerMockAuditRepo{}, jwt, zap.NewNop())
+	h := NewHandler(svc, zap.NewNop())
+
+	now := time.Now()
+	ks, err := loginpwd.NewKeystore(filepath.Join(t.TempDir(), "key.pem"))
+	require.NoError(t, err)
+	guard := loginpwd.NewMemReplayGuard(func() time.Time { return now })
+	cipher := loginpwd.NewCipher(ks, guard)
+	h.SetLoginCipher(cipher)
+	pubHandler := loginpwd.NewPublicKeyHandler(cipher)
+
+	r := gin.New()
+	api := r.Group("/api/v1")
+	h.RegisterAuthRoutes(api, pubHandler)
+	h.RegisterAdminRoutes(api)
+
+	return &handlerTestEnv{
+		Engine:    r,
+		KeyID:     ks.ActiveKeyID(),
+		PublicKey: parsePublicKeyForTest(t, ks.ActivePublicKeyPEM()),
+		Now:       now,
+	}
+}
+
 func handlerNewTestRouter(
 	userRepo *handlerMockUserRepo,
 	roleRepo *handlerMockRoleRepo,
 ) *gin.Engine {
+	// nil-tolerant fallback: tests in this file pre-date *testing.T threading;
+	// 走 handlerNewTestEnv 即可，但 t 拿不到。这里用一个最简等价路径。
 	gin.SetMode(gin.TestMode)
 	jwt, err := NewJWTService("test-secret-key-minimum-32-chars!!")
 	if err != nil {
@@ -211,11 +288,58 @@ func handlerNewTestRouter(
 	}
 	svc := NewAdminService(userRepo, roleRepo, &handlerMockMenuRepo{}, &handlerMockAuditRepo{}, jwt, zap.NewNop())
 	h := NewHandler(svc, zap.NewNop())
+
+	keyDir, err := filepathTempDir()
+	if err != nil {
+		panic(err)
+	}
+	ks, err := loginpwd.NewKeystore(filepath.Join(keyDir, "key.pem"))
+	if err != nil {
+		panic(err)
+	}
+	cipher := loginpwd.NewCipher(ks, loginpwd.NewMemReplayGuard(nil))
+	h.SetLoginCipher(cipher)
+	pubHandler := loginpwd.NewPublicKeyHandler(cipher)
+
 	r := gin.New()
 	api := r.Group("/api/v1")
-	h.RegisterAuthRoutes(api)
+	h.RegisterAuthRoutes(api, pubHandler)
 	h.RegisterAdminRoutes(api)
 	return r
+}
+
+// filepathTempDir 在 testing.T 不可达时分配一个进程级临时目录，进程退出由 OS 回收。
+func filepathTempDir() (string, error) {
+	return os.MkdirTemp("", "admin-handler-test-keys-*")
+}
+
+// parsePublicKeyForTest 把 PEM 字符串解码为 *rsa.PublicKey。
+func parsePublicKeyForTest(t *testing.T, pemStr string) *rsa.PublicKey {
+	t.Helper()
+	block, _ := pem.Decode([]byte(pemStr))
+	require.NotNil(t, block)
+	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+	require.NoError(t, err)
+	rsaPub, ok := pub.(*rsa.PublicKey)
+	require.True(t, ok)
+	return rsaPub
+}
+
+// encryptPayloadForTest 用前端等价流程构造一份 RSA-OAEP-SHA256 + base64 密文。
+func encryptPayloadForTest(t *testing.T, pub *rsa.PublicKey, plain string, now time.Time) string {
+	t.Helper()
+	nonceBytes := make([]byte, 16)
+	_, err := rand.Read(nonceBytes)
+	require.NoError(t, err)
+	body, err := json.Marshal(loginpwd.Payload{
+		Password: plain,
+		TS:       now.Unix(),
+		Nonce:    base64.RawURLEncoding.EncodeToString(nonceBytes),
+	})
+	require.NoError(t, err)
+	ct, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, pub, body, nil)
+	require.NoError(t, err)
+	return base64.StdEncoding.EncodeToString(ct)
 }
 
 func handlerJSON(v interface{}) *bytes.Buffer {
@@ -243,13 +367,17 @@ func TestHandler_Login_Success(t *testing.T) {
 			return []Role{{Name: "admin"}}, nil
 		},
 	}
-	r := handlerNewTestRouter(userRepo, roleRepo)
+	env := handlerNewTestEnv(t, userRepo, roleRepo)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login",
-		handlerJSON(LoginRequest{Username: "admin", Password: "correct"}))
+		handlerJSON(LoginRequest{
+			Username:          "admin",
+			EncryptedPassword: env.encryptPassword(t, "correct"),
+			KeyID:             env.KeyID,
+		}))
 	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
+	env.Engine.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	var resp TokenPair
@@ -269,13 +397,17 @@ func TestHandler_Login_InvalidCredentials(t *testing.T) {
 			}, nil
 		},
 	}
-	r := handlerNewTestRouter(userRepo, &handlerMockRoleRepo{})
+	env := handlerNewTestEnv(t, userRepo, &handlerMockRoleRepo{})
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login",
-		handlerJSON(LoginRequest{Username: "admin", Password: "wrong"}))
+		handlerJSON(LoginRequest{
+			Username:          "admin",
+			EncryptedPassword: env.encryptPassword(t, "wrong"),
+			KeyID:             env.KeyID,
+		}))
 	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
+	env.Engine.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 }
@@ -322,13 +454,18 @@ func TestHandler_CreateUser_Success(t *testing.T) {
 			return nil
 		},
 	}
-	r := handlerNewTestRouter(userRepo, &handlerMockRoleRepo{})
+	env := handlerNewTestEnv(t, userRepo, &handlerMockRoleRepo{})
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/users",
-		handlerJSON(CreateUserRequest{Username: "newuser", Password: "password123", DisplayName: "New User"}))
+		handlerJSON(CreateUserHTTPRequest{
+			Username:          "newuser",
+			EncryptedPassword: env.encryptPassword(t, "password123"),
+			KeyID:             env.KeyID,
+			DisplayName:       "New User",
+		}))
 	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
+	env.Engine.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusCreated, w.Code)
 	var resp User
@@ -452,13 +589,26 @@ func TestHandler_Login_AuditLog_OnFailure(t *testing.T) {
 	require.NoError(t, err)
 	svc := NewAdminService(userRepo, &handlerMockRoleRepo{}, &handlerMockMenuRepo{}, auditRepo, jwt, zap.NewNop())
 	h := NewHandler(svc, zap.NewNop())
+
+	now := time.Now()
+	ks, err := loginpwd.NewKeystore(filepath.Join(t.TempDir(), "key.pem"))
+	require.NoError(t, err)
+	cipher := loginpwd.NewCipher(ks, loginpwd.NewMemReplayGuard(func() time.Time { return now }))
+	h.SetLoginCipher(cipher)
+	pubKey := parsePublicKeyForTest(t, ks.ActivePublicKeyPEM())
+	encrypted := encryptPayloadForTest(t, pubKey, "wrong", now)
+
 	r := gin.New()
 	api := r.Group("/api/v1")
-	h.RegisterAuthRoutes(api)
+	h.RegisterAuthRoutes(api, loginpwd.NewPublicKeyHandler(cipher))
 
 	w := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login",
-		handlerJSON(LoginRequest{Username: "admin", Password: "wrong"}))
+		handlerJSON(LoginRequest{
+			Username:          "admin",
+			EncryptedPassword: encrypted,
+			KeyID:             ks.ActiveKeyID(),
+		}))
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("User-Agent", "TestAgent/1.0")
 	r.ServeHTTP(w, httpReq)
@@ -508,13 +658,26 @@ func TestHandler_Login_AuditLog_OnSuccess(t *testing.T) {
 	require.NoError(t, err)
 	svc := NewAdminService(userRepo, roleRepo, &handlerMockMenuRepo{}, auditRepo, jwt, zap.NewNop())
 	h := NewHandler(svc, zap.NewNop())
+
+	now := time.Now()
+	ks, err := loginpwd.NewKeystore(filepath.Join(t.TempDir(), "key.pem"))
+	require.NoError(t, err)
+	cipher := loginpwd.NewCipher(ks, loginpwd.NewMemReplayGuard(func() time.Time { return now }))
+	h.SetLoginCipher(cipher)
+	pubKey := parsePublicKeyForTest(t, ks.ActivePublicKeyPEM())
+	encrypted := encryptPayloadForTest(t, pubKey, "correct", now)
+
 	r := gin.New()
 	api := r.Group("/api/v1")
-	h.RegisterAuthRoutes(api)
+	h.RegisterAuthRoutes(api, loginpwd.NewPublicKeyHandler(cipher))
 
 	w := httptest.NewRecorder()
 	httpReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login",
-		handlerJSON(LoginRequest{Username: "admin", Password: "correct"}))
+		handlerJSON(LoginRequest{
+			Username:          "admin",
+			EncryptedPassword: encrypted,
+			KeyID:             ks.ActiveKeyID(),
+		}))
 	httpReq.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, httpReq)
 

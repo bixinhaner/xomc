@@ -66,6 +66,12 @@ jwt:
   access_token_ttl: 30m
   refresh_token_ttl: 168h
 
+# 登录类接口密码 RSA-OAEP 加密传输（前端用 /auth/public-key 公钥加密 password+ts+nonce）。
+# private_key_path 不存在时进程启动会生成 2048 位 RSA 私钥并落盘（0600）。
+# 生产多副本部署应改为挂载 K8s Secret 共享同一私钥，确保 keyID 一致。
+login_crypto:
+  private_key_path: "configs/keys/login_rsa_private.pem"
+
 cors:
   allow_origins:
     - "http://localhost:3000"

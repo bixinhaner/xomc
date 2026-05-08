@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/admin/loginpwd"
 	"github.com/omcgo/omcgo/internal/topology"
 	"go.uber.org/zap"
 )
@@ -42,6 +43,20 @@ func initAdminModule(c *Container) error {
 	adminHandler.SetLoginGuard(loginGuard)
 	adminHandler.SetRoleDeviceGroupRepo(roleRepo)
 	adminHandler.SetApiPermRepo(roleRepo)
+
+	// 登录类接口的密码 RSA-OAEP 加密：keystore 启动时加载或生成私钥；
+	// 失败为 fatal —— 没有密钥所有登录请求都会拒绝，不能静默降级到明文。
+	keystore, err := loginpwd.NewKeystore(c.Cfg.LoginCrypto.PrivateKeyPath)
+	if err != nil {
+		return fmt.Errorf("init login password keystore: %w", err)
+	}
+	loginCipher := loginpwd.NewCipher(keystore, loginpwd.NewRedisReplayGuard(c.Redis))
+	pubKeyHandler := loginpwd.NewPublicKeyHandler(loginCipher)
+	adminHandler.SetLoginCipher(loginCipher)
+	logger.Info("login password cipher initialized",
+		zap.String("key_id", keystore.ActiveKeyID()),
+		zap.String("private_key_path", c.Cfg.LoginCrypto.PrivateKeyPath),
+	)
 
 	permService := admin.NewPermissionService(roleRepo, c.GroupRepo, c.Redis, logger)
 	adminHandler.SetPermissionService(permService)
@@ -114,6 +129,7 @@ func initAdminModule(c *Container) error {
 		sysConfigHandler: sysConfigHandler,
 		uiAssetHandler:   uiAssetHandler,
 		logHandler:       logHandler,
+		pubKeyHandler:    pubKeyHandler,
 		jwtService:       jwtService,
 		tokenRevoker:     tokenRevoker,
 		apiKeySvc:        apiKeySvc,
@@ -151,6 +167,7 @@ type adminHandlerDeps struct {
 	sysConfigHandler *admin.SysConfigHandler
 	uiAssetHandler   *admin.UIAssetHandler
 	logHandler       *admin.LogHandler
+	pubKeyHandler    *loginpwd.PublicKeyHandler
 	jwtService       *admin.JWTService
 	tokenRevoker     *admin.TokenRevoker
 	apiKeySvc        *admin.APIKeyService

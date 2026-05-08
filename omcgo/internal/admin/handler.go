@@ -10,6 +10,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/omcgo/omcgo/internal/admin/audit"
+	"github.com/omcgo/omcgo/internal/admin/loginpwd"
 )
 
 // Audit log action constants for authentication events.
@@ -49,7 +50,8 @@ type Handler struct {
 	apiPermRepo        RoleApiPermissionRepository
 	permService        *PermissionService
 	apiEndpointService *ApiEndpointService
-	ginRoutes          gin.RoutesInfo // set after router registration
+	loginCipher        *loginpwd.Cipher // 必填：登录类接口密码 RSA-OAEP 解密
+	ginRoutes          gin.RoutesInfo   // set after router registration
 	logger             *zap.Logger
 	loginLimiter       sync.Map // map[string]*ipLimiterEntry
 }
@@ -95,6 +97,12 @@ func (h *Handler) SetApiEndpointService(svc *ApiEndpointService) {
 	h.apiEndpointService = svc
 }
 
+// SetLoginCipher 注入登录类接口的密码加密 cipher。
+// 必须在 Login / ChangePassword / ResetPassword / CreateUser 路由生效前调用。
+func (h *Handler) SetLoginCipher(c *loginpwd.Cipher) {
+	h.loginCipher = c
+}
+
 // SetGinRoutes stores gin route info for use in SyncApiEndpoints.
 func (h *Handler) SetGinRoutes(routes gin.RoutesInfo) {
 	h.ginRoutes = routes
@@ -137,12 +145,16 @@ func (h *Handler) cleanupLoginLimiters() {
 }
 
 // RegisterAuthRoutes registers public authentication routes (no auth required).
-func (h *Handler) RegisterAuthRoutes(rg *gin.RouterGroup) {
+//
+// pubKeyHandler 提供 RSA 公钥下发接口，前端登录前先拉公钥再加密密码。
+// 必传 —— 没有公钥下发，前端无法构造合法登录请求。
+func (h *Handler) RegisterAuthRoutes(rg *gin.RouterGroup, pubKeyHandler *loginpwd.PublicKeyHandler) {
 	auth := rg.Group("/auth")
 	{
 		auth.POST("/login", h.Login)
 		auth.POST("/refresh", h.Refresh)
 		auth.GET("/captcha", h.GetCaptcha)
+		auth.GET("/public-key", pubKeyHandler.Get)
 	}
 }
 

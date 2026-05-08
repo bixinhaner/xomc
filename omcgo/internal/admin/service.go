@@ -1192,10 +1192,19 @@ func (s *AdminService) GetUserMenuTreeByRole(ctx context.Context, userID uuid.UU
 
 // ==================== Password Change ====================
 
-// ChangePasswordRequest is the input for changing a user's own password.
+// ChangePasswordRequest 是 service.ChangePassword 的明文入参。
+// HTTP 端点不直接绑定本结构（见 ChangePasswordHTTPRequest），handler 解密后构造。
 type ChangePasswordRequest struct {
-	OldPassword string `json:"old_password" binding:"required"`
-	NewPassword string `json:"new_password" binding:"required,min=6"`
+	OldPassword string `json:"old_password"`
+	NewPassword string `json:"new_password"`
+}
+
+// ChangePasswordHTTPRequest 是 POST /api/v1/auth/change-password 的请求体。
+// 旧/新密码均需 RSA-OAEP 加密传输。两个密文使用同一 key_id（一次公钥）。
+type ChangePasswordHTTPRequest struct {
+	EncryptedOldPassword string `json:"encrypted_old_password" binding:"required"`
+	EncryptedNewPassword string `json:"encrypted_new_password" binding:"required"`
+	KeyID                string `json:"key_id" binding:"required"`
 }
 
 // ChangePassword verifies the old password and updates to the new one.

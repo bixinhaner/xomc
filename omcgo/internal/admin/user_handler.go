@@ -2,6 +2,8 @@ package admin
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -22,12 +24,39 @@ func userContextWithOperator(c *gin.Context) context.Context {
 }
 
 func (h *Handler) CreateUser(c *gin.Context) {
-	var req CreateUserRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	var httpReq CreateUserHTTPRequest
+	if err := c.ShouldBindJSON(&httpReq); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
 
+	if h.loginCipher == nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError,
+			errors.New("login password cipher not configured"))
+		return
+	}
+	plainPwd, err := h.loginCipher.Decrypt(c.Request.Context(), httpReq.KeyID, httpReq.EncryptedPassword)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("decrypt password: %w", err))
+		return
+	}
+	if len(plainPwd) < 6 {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			errors.New("password must be at least 6 characters"))
+		return
+	}
+
+	req := CreateUserRequest{
+		Username:    httpReq.Username,
+		Password:    plainPwd,
+		DisplayName: httpReq.DisplayName,
+		Email:       httpReq.Email,
+		Phone:       httpReq.Phone,
+		Description: httpReq.Description,
+		ExpireAt:    httpReq.ExpireAt,
+		RoleIDs:     httpReq.RoleIDs,
+	}
 	user, err := h.service.CreateUser(userContextWithOperator(c), req)
 	if err != nil {
 		status := commonerrors.HTTPStatusFromError(err)
@@ -167,7 +196,25 @@ func (h *Handler) ResetPassword(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.ResetPassword(c.Request.Context(), id, req.NewPassword); err != nil {
+	if h.loginCipher == nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError,
+			errors.New("login password cipher not configured"))
+		return
+	}
+	ctx := c.Request.Context()
+	plainPwd, err := h.loginCipher.Decrypt(ctx, req.KeyID, req.EncryptedNewPassword)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("decrypt new password: %w", err))
+		return
+	}
+	if len(plainPwd) < 6 {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			errors.New("new password must be at least 6 characters"))
+		return
+	}
+
+	if err := h.service.ResetPassword(ctx, id, plainPwd); err != nil {
 		status := commonerrors.HTTPStatusFromError(err)
 		commonerrors.AbortWithError(c, status, err)
 		return

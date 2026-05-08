@@ -84,6 +84,52 @@ check_status_in() {
     return 1
 }
 
+# Helper: encrypt_password — 把明文密码用后端 RSA-OAEP/SHA-256 公钥加密成 base64 密文。
+#
+# 后端 /auth/public-key 返回 {key_id, public_key(PEM)}，前端登录类接口必须把
+# {password, ts, nonce} JSON 加密后填到 encrypted_password 字段。本脚本用 Python
+# cryptography 库做加密，第一次调用拉取并缓存公钥到 PUBLIC_KEY_PEM/PUBLIC_KEY_ID。
+#
+# 用法：
+#   ENC=$(encrypt_password "admin123")
+#   curl ... -d "{\"username\":\"admin\",\"encrypted_password\":\"$ENC\",\"key_id\":\"$PUBLIC_KEY_ID\"}"
+#
+# 依赖：python3 + cryptography（pip install cryptography）。dev/CI 环境通常已具备。
+PUBLIC_KEY_PEM=""
+PUBLIC_KEY_ID=""
+encrypt_password() {
+    local plain="$1"
+    if [ -z "$PUBLIC_KEY_PEM" ]; then
+        local pk_resp
+        pk_resp=$(curl -s "$API/auth/public-key")
+        PUBLIC_KEY_PEM=$(echo "$pk_resp" | python3 -c "import sys,json; d=json.load(sys.stdin); print((d.get('data') or {}).get('public_key',''))" 2>/dev/null)
+        PUBLIC_KEY_ID=$(echo "$pk_resp" | python3 -c "import sys,json; d=json.load(sys.stdin); print((d.get('data') or {}).get('key_id',''))" 2>/dev/null)
+        if [ -z "$PUBLIC_KEY_PEM" ] || [ -z "$PUBLIC_KEY_ID" ]; then
+            echo "ERROR: failed to fetch /auth/public-key" >&2
+            return 1
+        fi
+    fi
+    PEM_INPUT="$PUBLIC_KEY_PEM" PLAIN_INPUT="$plain" python3 <<'PYEOF'
+import os, sys, json, time, secrets, base64
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+plain = os.environ['PLAIN_INPUT']
+pem = os.environ['PEM_INPUT'].encode()
+pub = serialization.load_pem_public_key(pem)
+payload = json.dumps({
+    "password": plain,
+    "ts": int(time.time()),
+    "nonce": secrets.token_hex(16),
+}).encode()
+ct = pub.encrypt(
+    payload,
+    padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                 algorithm=hashes.SHA256(), label=None),
+)
+sys.stdout.write(base64.b64encode(ct).decode())
+PYEOF
+}
+
 # Helper: check JSON field exists and is not empty
 check_json_field() {
     local desc="$1"
@@ -290,10 +336,11 @@ check_status "GET /healthz" "200" "$HTTP_CODE"
 section "2. Authentication — Login"
 # ============================================================
 
-# 2.1 Valid login
+# 2.1 Valid login（密码必须 RSA-OAEP 加密后传 encrypted_password + key_id）
+ENC_ADMIN=$(encrypt_password "admin123")
 RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"username":"admin","password":"admin123"}')
+    -d "{\"username\":\"admin\",\"encrypted_password\":\"$ENC_ADMIN\",\"key_id\":\"$PUBLIC_KEY_ID\"}")
 HTTP_CODE=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
 check_status "POST /auth/login (valid credentials)" "200" "$HTTP_CODE"
@@ -310,10 +357,11 @@ if [ "$HTTP_CODE" = "200" ]; then
     REFRESH_TOKEN=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('refresh_token',''))" 2>/dev/null || echo "")
 fi
 
-# 2.2 Invalid password
+# 2.2 Invalid password（同样需要加密；后端解密成功 → bcrypt 比对失败 → 401）
+ENC_WRONG=$(encrypt_password "wrongpassword")
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"username":"admin","password":"wrongpassword"}')
+    -d "{\"username\":\"admin\",\"encrypted_password\":\"$ENC_WRONG\",\"key_id\":\"$PUBLIC_KEY_ID\"}")
 check_status "POST /auth/login (wrong password)" "401" "$HTTP_CODE"
 
 # 2.3 No auth token → 401
@@ -853,17 +901,19 @@ if [ -n "$ACCESS_TOKEN" ]; then
         fi
     fi
 
-    # 12.2 Create user
+    # 12.2 Create user（初始密码 RSA-OAEP 加密传输）
+    ENC_TEST=$(encrypt_password "Test@12345")
     RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/admin/users" \
         -H "$AUTH_HEADER" \
         -H "Content-Type: application/json" \
-        -d '{
-            "username": "e2e-testuser",
-            "password": "Test@12345",
-            "display_name": "E2E Test User",
-            "email": "e2e@test.com",
-            "status": "active"
-        }')
+        -d "{
+            \"username\": \"e2e-testuser\",
+            \"encrypted_password\": \"$ENC_TEST\",
+            \"key_id\": \"$PUBLIC_KEY_ID\",
+            \"display_name\": \"E2E Test User\",
+            \"email\": \"e2e@test.com\",
+            \"status\": \"active\"
+        }")
     HTTP_CODE=$(echo "$RESP" | tail -1)
     BODY=$(echo "$RESP" | sed '$d')
     NEW_USER_ID=""
@@ -1993,21 +2043,23 @@ section "27. Password Management"
 if [ -n "$ACCESS_TOKEN" ]; then
     AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
 
-    # 27.1 Create a test user for password management
+    # 27.1 Create a test user for password management（初始密码加密）
+    ENC_PWD_INIT=$(encrypt_password "TestPass123!")
     RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/admin/users" \
         -H "$AUTH_HEADER" \
         -H "Content-Type: application/json" \
-        -d '{"username":"e2e_pwd_test","password":"TestPass123!","email":"e2e_pwd@test.com","role":"operator","carrier":"cmcc"}')
+        -d "{\"username\":\"e2e_pwd_test\",\"encrypted_password\":\"$ENC_PWD_INIT\",\"key_id\":\"$PUBLIC_KEY_ID\",\"email\":\"e2e_pwd@test.com\",\"role\":\"operator\",\"carrier\":\"cmcc\"}")
     HTTP_CODE=$(echo "$RESP" | tail -1)
     BODY=$(echo "$RESP" | sed '$d')
     PWD_USER_ID=$(py_get "$BODY" "id")
 
-    # 27.2 Reset password
+    # 27.2 Reset password（新密码加密）
     if [ -n "$PWD_USER_ID" ]; then
+        ENC_PWD_NEW=$(encrypt_password "NewPass456!")
         HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/admin/users/$PWD_USER_ID/reset-password" \
             -H "$AUTH_HEADER" \
             -H "Content-Type: application/json" \
-            -d '{"new_password":"NewPass456!"}')
+            -d "{\"encrypted_new_password\":\"$ENC_PWD_NEW\",\"key_id\":\"$PUBLIC_KEY_ID\"}")
         check_status "POST /admin/users/:id/reset-password" "200" "$HTTP_CODE"
 
         # 27.3 Lock user
@@ -2339,11 +2391,12 @@ section "32. Admin User Operations Extended"
 if [ -n "$ACCESS_TOKEN" ]; then
     AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
 
-    # Create a temporary user for password/lock tests
+    # Create a temporary user for password/lock tests（密码加密）
+    ENC_S6_INIT=$(encrypt_password "TestPass123")
     RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/admin/users" \
         -H "$AUTH_HEADER" \
         -H "Content-Type: application/json" \
-        -d '{"username":"e2e-s6-userops","password":"TestPass123","display_name":"S6 UserOps","email":"s6-userops@e2e.test"}')
+        -d "{\"username\":\"e2e-s6-userops\",\"encrypted_password\":\"$ENC_S6_INIT\",\"key_id\":\"$PUBLIC_KEY_ID\",\"display_name\":\"S6 UserOps\",\"email\":\"s6-userops@e2e.test\"}")
     HTTP_CODE=$(echo "$RESP" | tail -1)
     BODY=$(echo "$RESP" | sed '$d')
     S6_USER_ID=""
@@ -2351,12 +2404,13 @@ if [ -n "$ACCESS_TOKEN" ]; then
         S6_USER_ID=$(py_get "$BODY" "id")
     fi
 
-    # 32.1 Reset password
+    # 32.1 Reset password（新密码加密）
     if [ -n "$S6_USER_ID" ]; then
+        ENC_S6_NEW=$(encrypt_password "NewPass1234!")
         HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/admin/users/$S6_USER_ID/reset-password" \
             -H "$AUTH_HEADER" \
             -H "Content-Type: application/json" \
-            -d '{"new_password":"NewPass1234!"}')
+            -d "{\"encrypted_new_password\":\"$ENC_S6_NEW\",\"key_id\":\"$PUBLIC_KEY_ID\"}")
         check_status "POST /admin/users/:id/reset-password (Sprint 6)" "200" "$HTTP_CODE"
     else
         fail "POST /admin/users/:id/reset-password (Sprint 6)" "skipped — no user"
@@ -2394,11 +2448,12 @@ section "33. Admin Role Assignment"
 if [ -n "$ACCESS_TOKEN" ]; then
     AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
 
-    # Create a temp user and role for assignment tests
+    # Create a temp user and role for assignment tests（密码加密）
+    ENC_S6A=$(encrypt_password "TestPass123")
     RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/admin/users" \
         -H "$AUTH_HEADER" \
         -H "Content-Type: application/json" \
-        -d '{"username":"e2e-s6-assign","password":"TestPass123","display_name":"S6 Assign","email":"s6-assign@e2e.test"}')
+        -d "{\"username\":\"e2e-s6-assign\",\"encrypted_password\":\"$ENC_S6A\",\"key_id\":\"$PUBLIC_KEY_ID\",\"display_name\":\"S6 Assign\",\"email\":\"s6-assign@e2e.test\"}")
     HTTP_CODE=$(echo "$RESP" | tail -1)
     BODY=$(echo "$RESP" | sed '$d')
     S6A_USER_ID=""
@@ -4770,15 +4825,17 @@ fi
 section "W1.6 Wave 1 — Auth Domain (claim ≥ 4)"
 
 claim "auth: login with valid admin/admin123 returns 200"
+W16_ENC_OK=$(encrypt_password "admin123")
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"username":"admin","password":"admin123"}')
+    -d "{\"username\":\"admin\",\"encrypted_password\":\"$W16_ENC_OK\",\"key_id\":\"$PUBLIC_KEY_ID\"}")
 check_status "W1.6 auth-1: POST /auth/login valid creds" "200" "$HTTP_CODE"
 
 claim "auth: login with wrong password returns 401"
+W16_ENC_BAD=$(encrypt_password "definitely-wrong-pwd-w16")
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"username":"admin","password":"definitely-wrong-pwd-w16"}')
+    -d "{\"username\":\"admin\",\"encrypted_password\":\"$W16_ENC_BAD\",\"key_id\":\"$PUBLIC_KEY_ID\"}")
 check_status "W1.6 auth-2: POST /auth/login wrong password" "401" "$HTTP_CODE"
 
 claim "auth: protected resource without token returns 401"
@@ -4791,9 +4848,10 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/devices" \
 check_status "W1.6 auth-4: GET /devices with bogus token" "401" "$HTTP_CODE"
 
 # Refresh ACCESS_TOKEN locally to be safe (Token from earlier sections may have expired)
+W16_ENC_REFRESH=$(encrypt_password "admin123")
 W16_LOGIN_RESP=$(curl -s -X POST "$API/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"username":"admin","password":"admin123"}')
+    -d "{\"username\":\"admin\",\"encrypted_password\":\"$W16_ENC_REFRESH\",\"key_id\":\"$PUBLIC_KEY_ID\"}")
 W16_TOKEN=$(echo "$W16_LOGIN_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || echo "")
 W16_AUTH="Authorization: Bearer ${W16_TOKEN}"
 
@@ -4982,11 +5040,13 @@ fi
 # ============================================================
 
 # ---------- W2D 准备：取独立 token，带轻量重试 ----------
+# 注意：每次重试都生成新的 ENC（nonce 不同），避免 ReplayGuard 拒绝。
 W2D_TOKEN=""
 for w2d_attempt in 1 2 3 4 5; do
+    W2D_ENC=$(encrypt_password "admin123")
     W2D_LOGIN_RESP=$(curl -s -X POST "$API/auth/login" \
         -H "Content-Type: application/json" \
-        -d '{"username":"admin","password":"admin123"}')
+        -d "{\"username\":\"admin\",\"encrypted_password\":\"$W2D_ENC\",\"key_id\":\"$PUBLIC_KEY_ID\"}")
     W2D_TOKEN=$(echo "$W2D_LOGIN_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || echo "")
     if [ -n "$W2D_TOKEN" ]; then
         break

@@ -204,6 +204,7 @@ type AppConfig struct {
 	NATS            NATSConfig            `mapstructure:"nats"`
 	MinIO           MinIOConfig           `mapstructure:"minio"`
 	JWT             JWTConfig             `mapstructure:"jwt"`
+	LoginCrypto     LoginCryptoConfig     `mapstructure:"login_crypto"`
 	CORS            CORSConfig            `mapstructure:"cors"`
 	ConnReq         ConnReqConfig         `mapstructure:"conn_req"`
 	Northbound      NorthboundConfig      `mapstructure:"northbound"`
@@ -227,6 +228,16 @@ type JWTConfig struct {
 	Secret          string        `mapstructure:"secret"`
 	AccessTokenTTL  time.Duration `mapstructure:"access_token_ttl"`
 	RefreshTokenTTL time.Duration `mapstructure:"refresh_token_ttl"`
+}
+
+// LoginCryptoConfig 配置登录类接口（login / change-password / reset-password / create-user）
+// 的密码 RSA-OAEP 加密传输。
+//
+// PrivateKeyPath：RSA 私钥 PEM 文件路径；不存在时进程启动会自动生成 2048 位密钥落盘
+// （文件 0600，目录 0700）。生产部署多副本时建议把同一份私钥挂载为 K8s Secret，
+// 避免每个副本独立生成导致 keyID 不一致。
+type LoginCryptoConfig struct {
+	PrivateKeyPath string `mapstructure:"private_key_path"`
 }
 
 // NorthboundConfig 配置北向接口（OSS 推送）。

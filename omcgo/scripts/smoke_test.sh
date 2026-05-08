@@ -100,9 +100,32 @@ echo ""
 # ---------------------------------------------------------------------------
 echo "=== auth (2 cases) ==="
 
+# 登录密码必须 RSA-OAEP 加密：先拉公钥，再用 cryptography 模块加密 password+ts+nonce。
+PUBKEY_RESP=$(curl --max-time 5 -s "$API/auth/public-key")
+PUBLIC_KEY_PEM=$(echo "$PUBKEY_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print((d.get('data') or {}).get('public_key',''))" 2>/dev/null)
+PUBLIC_KEY_ID=$(echo "$PUBKEY_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); print((d.get('data') or {}).get('key_id',''))" 2>/dev/null)
+if [ -z "$PUBLIC_KEY_PEM" ] || [ -z "$PUBLIC_KEY_ID" ]; then
+    echo "❌ failed to fetch /auth/public-key (got: $PUBKEY_RESP)"
+    exit 2
+fi
+
+# 加密单个明文密码，输出 base64 密文。
+encrypt_password() {
+    PEM_INPUT="$PUBLIC_KEY_PEM" PLAIN_INPUT="$1" python3 <<'PYEOF'
+import os, sys, json, time, secrets, base64
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+pub = serialization.load_pem_public_key(os.environ['PEM_INPUT'].encode())
+payload = json.dumps({"password": os.environ['PLAIN_INPUT'], "ts": int(time.time()), "nonce": secrets.token_hex(16)}).encode()
+ct = pub.encrypt(payload, padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
+sys.stdout.write(base64.b64encode(ct).decode())
+PYEOF
+}
+
+ENC_OK=$(encrypt_password "${ADMIN_PASS}")
 HTTP_CODE=$(http_code POST "$API/auth/login" "$TMPDIR/auth.json" \
     -H "Content-Type: application/json" \
-    -d "{\"username\":\"${ADMIN_USER}\",\"password\":\"${ADMIN_PASS}\"}")
+    -d "{\"username\":\"${ADMIN_USER}\",\"encrypted_password\":\"${ENC_OK}\",\"key_id\":\"${PUBLIC_KEY_ID}\"}")
 check_status "1. POST /auth/login (${ADMIN_USER}/***)" "200" "$HTTP_CODE"
 
 TOKEN=""
@@ -111,9 +134,10 @@ if [ "$HTTP_CODE" = "200" ] && [ -s "$TMPDIR/auth.json" ]; then
 fi
 AUTH_HEADER="Authorization: Bearer ${TOKEN}"
 
+ENC_BAD=$(encrypt_password "WRONG_PASSWORD_FOR_SMOKE")
 HTTP_CODE=$(http_code POST "$API/auth/login" /dev/null \
     -H "Content-Type: application/json" \
-    -d "{\"username\":\"${ADMIN_USER}\",\"password\":\"WRONG_PASSWORD_FOR_SMOKE\"}")
+    -d "{\"username\":\"${ADMIN_USER}\",\"encrypted_password\":\"${ENC_BAD}\",\"key_id\":\"${PUBLIC_KEY_ID}\"}")
 check_status_in "2. POST /auth/login (bad cred)" "401 400" "$HTTP_CODE"
 
 # ---------------------------------------------------------------------------
