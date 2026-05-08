@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import type { Key } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   App,
@@ -508,7 +509,47 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
     [t, updateDetailMutation.isPending],
   );
 
-  const detailList = detailData?.list ?? [];
+  // PRD §10 v0.2：把扁平的字典项列表构建成 parentId → children 的树形结构，
+  //   交给 Antd Table 的内置 tree 模式渲染（自动添加缩进与展开/收起箭头）。
+  type DetailWithChildren = DictionaryDetail & { children?: DetailWithChildren[] };
+  const treeData = useMemo<DetailWithChildren[]>(() => {
+    const flat = detailData?.list ?? [];
+    const map = new Map<number, DetailWithChildren>();
+    for (const item of flat) {
+      map.set(item.id, { ...item });
+    }
+    const roots: DetailWithChildren[] = [];
+    for (const node of map.values()) {
+      if (node.parentId != null && map.has(node.parentId)) {
+        const parent = map.get(node.parentId)!;
+        if (!parent.children) parent.children = [];
+        parent.children.push(node);
+      } else {
+        roots.push(node);
+      }
+    }
+    const bySort = (a: DictionaryDetail, b: DictionaryDetail) => (a.sort ?? 0) - (b.sort ?? 0);
+    roots.sort(bySort);
+    for (const node of map.values()) {
+      if (node.children) node.children.sort(bySort);
+    }
+    return roots;
+  }, [detailData?.list]);
+
+  // 默认展开所有有子项的父节点；用户可在表格内自行收起，数据刷新后重新展开。
+  const [expandedRowKeys, setExpandedRowKeys] = useState<Key[]>([]);
+  useEffect(() => {
+    const flat = detailData?.list ?? [];
+    const parentIds: Key[] = [];
+    const seen = new Set<number>();
+    for (const d of flat) {
+      if (d.parentId != null && !seen.has(d.parentId)) {
+        seen.add(d.parentId);
+        parentIds.push(d.parentId);
+      }
+    }
+    setExpandedRowKeys(parentIds);
+  }, [detailData?.list]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -566,12 +607,17 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
             <DataTable
               tableId="dict-detail-table"
               columns={columns}
-              dataSource={detailList as (DictionaryDetail & Record<string, unknown>)[]}
+              dataSource={treeData as (DictionaryDetail & Record<string, unknown>)[]}
               loading={isLoading}
               rowKey="id"
               total={detailData?.total ?? 0}
               pageSize={20}
               currentPage={1}
+              expandable={{
+                expandedRowKeys,
+                onExpandedRowsChange: (keys) => setExpandedRowKeys([...keys]),
+                indentSize: 24,
+              }}
             />
           </Card>
         )}
