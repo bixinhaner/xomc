@@ -67,7 +67,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	prod := rg.Group("/products")
 	prod.GET("/:id/discovered", h.ListDiscovered)
 	prod.GET("/:id/discovered/versions", h.ListDiscoveredVersions)
-	prod.DELETE("/:id/discovered", h.DeleteDiscoveredVersion)
+	prod.DELETE("/:id/discovered/versions/:swVersion", h.DeleteDiscoveredVersion)
 }
 
 // ── ParamModel ──────────────────────────────────────────────────────
@@ -377,9 +377,9 @@ func (h *Handler) DeleteDiscoveredVersion(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, fmt.Errorf("product id not a uuid"))
 		return
 	}
-	swVersion := strings.TrimSpace(c.Query("swVersion"))
+	swVersion := strings.TrimSpace(c.Param("swVersion"))
 	if swVersion == "" {
-		commonerrors.AbortWithError(c, http.StatusBadRequest, fmt.Errorf("swVersion query parameter required"))
+		commonerrors.AbortWithError(c, http.StatusBadRequest, fmt.Errorf("swVersion path parameter required"))
 		return
 	}
 	deleted, err := h.repo.DeleteDiscoveredVersion(c.Request.Context(), productID, swVersion)

@@ -297,11 +297,10 @@ export const paramModelApi = {
   },
 
   async deleteDiscovered(productId: string, swVersion?: string): Promise<{ deleted: number }> {
-    const params: Record<string, unknown> = {};
-    if (swVersion) params.swVersion = swVersion;
-    const { data } = await http.delete<{ deleted: number }>(`/products/${productId}/discovered`, {
-      params,
-    });
+    const url = swVersion
+      ? `/products/${productId}/discovered/versions/${encodeURIComponent(swVersion)}`
+      : `/products/${productId}/discovered`;
+    const { data } = await http.delete<{ deleted: number }>(url);
     return data;
   },
 
