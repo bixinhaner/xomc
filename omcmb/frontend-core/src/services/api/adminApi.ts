@@ -847,10 +847,9 @@ export const adminApi = {
     return data.data || [];
   },
 
-  async getUserMenuTree(): Promise<MenuItem[]> {
-    const { data } = await http.get<{data: MenuItem[]}>('/admin/menus/user');
-    return data.data || [];
-  },
+  // getUserMenuTree (调 /admin/menus/user) 已删除：路径 PRD §3.2 / §4.2.1 标定为
+  // 错路径，前端统一改走 menuApi.fetchUserMenus → GET /auth/menus（含
+  // currentRoleID 感知）。
 
   async getMenuById(id: string): Promise<MenuItem | null> {
     try {

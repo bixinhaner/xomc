@@ -95,10 +95,5 @@ export function useMenuTree() {
   });
 }
 
-export function useUserMenuTree() {
-  return useQuery<MenuItem[]>({
-    queryKey: ['admin', 'menus', 'user-tree'],
-    queryFn: () => adminApi.getUserMenuTree(),
-    staleTime: 5 * 60 * 1000,
-  });
-}
+// useUserMenuTree 已删除（PRD §3.2 + §4.2.1）：错路径 /admin/menus/user 与前端
+// 当前用户菜单语义重叠，统一改走 useUserMenus（拉 GET /auth/menus）。

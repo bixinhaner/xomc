@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { User } from '../types/system';
+import { useMenuStore } from './menuStore';
 
 export type { User };
 // Legacy alias
@@ -79,6 +80,10 @@ export const useUserStore = create<UserState>()(
           permissions: [],
         });
         localStorage.removeItem('omc-user-store');
+        // 退出 / Token 失效时同步清空菜单缓存，防止下一个用户登录时
+        // persist 残留指向上一个用户的角色菜单（PRD §6 风险表 / §3.3 #7）。
+        useMenuStore.getState().clear();
+        localStorage.removeItem('omc-menu-store');
       },
 
       isTokenExpired: () => {

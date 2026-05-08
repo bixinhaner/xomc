@@ -1110,9 +1110,11 @@ const messages: Record<string, string> = {
   'error.404.message': '抱歉，您访问的页面不存在。',
   'error.403.title':   '无访问权限',
   'error.403.message': '抱歉，您没有权限访问此页面。',
+  'error.403.contactAdmin':  '如需访问该功能，请联系系统管理员为您增加菜单权限。',
   'error.500.title':   '服务器错误',
   'error.500.message': '服务器发生错误，请稍后重试。',
   'error.backHome':    '返回首页',
+  'error.relogin':     '重新登录',
 
   // -------------------------------------------------------------------------
   // KPI / Performance labels

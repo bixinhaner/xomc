@@ -1104,9 +1104,11 @@ const messages: Record<string, string> = {
   'error.404.message': 'Sorry, the page you are looking for does not exist.',
   'error.403.title':   'Access Denied',
   'error.403.message': 'Sorry, you do not have permission to access this page.',
+  'error.403.contactAdmin':  'To access this feature, please contact your administrator to grant the menu permission.',
   'error.500.title':   'Server Error',
   'error.500.message': 'A server error occurred. Please try again later.',
   'error.backHome':    'Back to Home',
+  'error.relogin':     'Sign in again',
 
   // -------------------------------------------------------------------------
   // KPI / Performance labels
