@@ -44,151 +44,16 @@ import type { DeviceGroup } from '@core/types/device';
 import { useT } from '@/hooks/useT';
 import { apiPermissionApi } from '@core/services/api/apiPermissionApi';
 import { adminApi } from '@core/services/api/adminApi';
+import { useMenuTree } from '@core/hooks/api/useMenus';
+import { fetchRoleMenuIds, setRoleMenus as apiSetRoleMenus } from '@core/services/api/menuApi';
+import type { Menu } from '@core/types/menu';
 
-// 操作权限类型
-interface OperationItem {
-  key: string;
-  titleKey: string;
-}
-
-// 权限子菜单项定义（二级菜单 + 三级操作）
-interface PermissionSubItem {
-  key: string;
-  titleKey: string;
-  operations?: OperationItem[]; // 三级操作权限
-}
-
-// 权限模块定义（一级菜单 + 二级菜单）
-interface PermissionModule {
-  key: string;
-  titleKey: string;
-  children: PermissionSubItem[];
-}
-
-// 默认的操作权限（查询、新增、修改、删除、导出、批量）
-const DEFAULT_OPERATIONS: OperationItem[] = [
-  { key: 'query', titleKey: 'role.operation.query' },
-  { key: 'add', titleKey: 'role.operation.add' },
-  { key: 'edit', titleKey: 'role.operation.edit' },
-  { key: 'delete', titleKey: 'role.operation.delete' },
-  { key: 'export', titleKey: 'role.operation.export' },
-  { key: 'batch', titleKey: 'role.operation.batch' },
-];
-
-// 完整的权限模块结构（一级 + 二级菜单）
-const PERMISSION_MODULES: PermissionModule[] = [
-  {
-    key: 'device',
-    titleKey: 'role.modules.device',
-    children: [
-      { key: 'list', titleKey: 'nav.device.list' },
-      { key: 'register', titleKey: 'nav.device.register' },
-      { key: 'group', titleKey: 'nav.device.group' },
-      { key: 'detail', titleKey: 'nav.device.detail' },
-      { key: 'ne', titleKey: 'nav.device.ne' },
-      { key: 'monitor', titleKey: 'nav.device.monitor' },
-      { key: 'commission', titleKey: 'nav.device.commission' },
-      { key: 'stats', titleKey: 'nav.device.stats' },
-      { key: 'import', titleKey: 'nav.device.import' },
-      { key: 'rules', titleKey: 'nav.device.rules' },
-    ],
-  },
-  {
-    key: 'alarm',
-    titleKey: 'role.modules.alarm',
-    children: [
-      { key: 'current', titleKey: 'nav.alarm.current' },
-      { key: 'history', titleKey: 'nav.alarm.history' },
-      { key: 'statistics', titleKey: 'nav.alarm.statistics' },
-      { key: 'rules', titleKey: 'nav.alarm.rules' },
-      { key: 'library', titleKey: 'nav.alarm.library' },
-      { key: 'sync', titleKey: 'nav.alarm.sync' },
-    ],
-  },
-  {
-    key: 'performance',
-    titleKey: 'role.modules.performance',
-    children: [
-      { key: 'kpiStandard', titleKey: 'nav.performance.kpiStandard' },
-      { key: 'kpiStation', titleKey: 'nav.performance.kpiStation' },
-      { key: 'extraction', titleKey: 'nav.performance.extraction' },
-      { key: 'charts', titleKey: 'nav.performance.charts' },
-      { key: 'threshold', titleKey: 'nav.performance.threshold' },
-      { key: 'files', titleKey: 'nav.performance.files' },
-      { key: 'taskConfig', titleKey: 'nav.performance.taskConfig' },
-    ],
-  },
-  {
-    key: 'software',
-    titleKey: 'role.modules.software',
-    children: [
-      { key: 'version', titleKey: 'nav.software.version' },
-      { key: 'upgradePlan', titleKey: 'nav.software.upgradePlan' },
-      { key: 'activation', titleKey: 'nav.software.activation' },
-      { key: 'firmware', titleKey: 'nav.software.firmware' },
-    ],
-  },
-  {
-    key: 'file',
-    titleKey: 'role.modules.file',
-    children: [
-      { key: 'configRetrieval', titleKey: 'nav.file.configRetrieval' },
-      { key: 'configDistribution', titleKey: 'nav.file.configDistribution' },
-      { key: 'logRetrieval', titleKey: 'nav.file.logRetrieval' },
-      { key: 'perfRetrieval', titleKey: 'nav.file.perfRetrieval' },
-      { key: 'mrRetrieval', titleKey: 'nav.file.mrRetrieval' },
-      { key: 'userFiles', titleKey: 'nav.file.userFiles' },
-      { key: 'deviceFiles', titleKey: 'nav.file.deviceFiles' },
-    ],
-  },
-  {
-    key: 'log',
-    titleKey: 'role.modules.log',
-    children: [
-      { key: 'device', titleKey: 'nav.log.device' },
-      { key: 'exception', titleKey: 'nav.log.exception' },
-      { key: 'event', titleKey: 'nav.log.event' },
-      { key: 'operation', titleKey: 'nav.log.operation' },
-      { key: 'system', titleKey: 'nav.log.system' },
-      { key: 'config', titleKey: 'nav.log.config' },
-    ],
-  },
-  {
-    key: 'system',
-    titleKey: 'role.modules.system',
-    children: [
-      { key: 'deviceClass', titleKey: 'nav.system.deviceClass' },
-      { key: 'users', titleKey: 'nav.system.users' },
-      { key: 'groups', titleKey: 'nav.system.groups' },
-      { key: 'roles', titleKey: 'nav.system.roles' },
-      { key: 'menus', titleKey: 'nav.system.menus' },
-      { key: 'operationLog', titleKey: 'nav.system.operationLog' },
-      { key: 'config', titleKey: 'nav.system.config' },
-      { key: 'dataDict', titleKey: 'nav.system.dataDict' },
-    ],
-  },
-  {
-    key: 'report',
-    titleKey: 'role.modules.report',
-    children: [
-      { key: 'lteStandard', titleKey: 'nav.report.lteStandard' },
-      { key: 'station', titleKey: 'nav.report.station' },
-      { key: 'historicalKpi', titleKey: 'nav.report.historicalKpi' },
-      { key: 'pollStats', titleKey: 'nav.report.pollStats' },
-    ],
-  },
-  {
-    key: 'ops',
-    titleKey: 'role.modules.ops',
-    children: [
-      { key: 'templates', titleKey: 'nav.ops.templates' },
-      { key: 'commands', titleKey: 'nav.ops.commands' },
-      { key: 'tasks', titleKey: 'nav.ops.tasks' },
-      { key: 'networkDiagnosis', titleKey: 'nav.ops.networkDiagnosis' },
-      { key: 'downloads', titleKey: 'nav.ops.downloads' },
-    ],
-  },
-];
+// PERMISSION_MODULES 已删除（B3-Phase2-B + 菜单动态加载 P3）。
+// 角色菜单权限的唯一权威源是后端 menus 表（GET /admin/menus/tree）；
+// 树形数据由 buildMenuPermissionTree(menuTree) 构建，节点 key 即 menu.id (UUID)。
+//
+// 历史 PERMISSION_MODULES 是把"模块/二级/三级操作"硬编码成字符串 (`device.list.add`)
+// 的写法，与后端 permissions 表三元组 1:1 对应；该表已 DROP，常量同步删除。
 
 // 网络类型权限选项
 const DATA_NETWORK_TYPE_OPTIONS = [
@@ -262,53 +127,53 @@ const buildDeviceGroupTreeData = (
     .filter((node): node is TreeDataNode => node !== null);
 };
 
-// 模块级派生常量：PERMISSION_MODULES 是编译期常量，其衍生 keys 不依赖任何运行期状态。
-// 之前用 useMemo([]) 包裹会触发 react-hooks/immutability lint 错误（编译器认为 deps 不充分）。
-const ALL_MODULE_KEYS: string[] = PERMISSION_MODULES.map((m) => m.key);
-const ALL_PERMISSION_KEYS: string[] = (() => {
-  const keys: string[] = [];
-  for (const module of PERMISSION_MODULES) {
-    keys.push(module.key);
-    for (const child of module.children) {
-      keys.push(`${module.key}.${child.key}`);
-      const operations = child.operations || DEFAULT_OPERATIONS;
-      for (const op of operations) {
-        keys.push(`${module.key}.${child.key}.${op.key}`);
+// 菜单树驱动的辅助函数（替代 PERMISSION_MODULES 派生常量）。
+//
+// 节点 key = menu.id (UUID)。这些函数运行时依赖 menuTree（异步加载），故不再是
+// 模块级常量；调用方在 useMemo([menuTree]) 内引用即可。
+function isMenuVisible(m: Menu): boolean {
+  return m.status === 'active' && m.showStatus !== 'hide';
+}
+
+/** 把后端菜单树转 antd TreeDataNode 树。叶子节点显式 isLeaf=true。 */
+function buildMenuPermissionTree(menus: Menu[]): TreeDataNode[] {
+  const sortAndFilter = (list: Menu[]) =>
+    [...list].filter(isMenuVisible).sort((a, b) => a.sortOrder - b.sortOrder);
+  const walk = (list: Menu[]): TreeDataNode[] =>
+    sortAndFilter(list).map((m) => {
+      const childNodes = m.children?.length ? walk(m.children) : [];
+      return childNodes.length > 0
+        ? { key: m.id, title: m.name, children: childNodes }
+        : { key: m.id, title: m.name, isLeaf: true };
+    });
+  return walk(menus);
+}
+
+/** 全部节点 ID（含目录/菜单/按钮），用于"全选/全不选"。 */
+function collectAllMenuIds(menus: Menu[]): string[] {
+  const ids: string[] = [];
+  const walk = (list: Menu[]) => {
+    for (const m of list.filter(isMenuVisible)) {
+      ids.push(m.id);
+      if (m.children?.length) walk(m.children);
+    }
+  };
+  walk(menus);
+  return ids;
+}
+
+/** 一级目录 + 二级菜单 ID（用于"展开/折叠"复选框 + 回显默认展开集）。 */
+function collectExpandableMenuIds(menus: Menu[]): string[] {
+  const ids: string[] = [];
+  for (const top of menus.filter(isMenuVisible)) {
+    ids.push(top.id);
+    if (top.children?.length) {
+      for (const child of top.children.filter(isMenuVisible)) {
+        if (child.children?.length) ids.push(child.id);
       }
     }
   }
-  return keys;
-})();
-// 仅叶子节点（三级操作）keys，用于 array ↔ checkedKeys 转换的过滤集。
-const ALL_PERMISSION_LEAF_KEYS: string[] = (() => {
-  const keys: string[] = [];
-  for (const module of PERMISSION_MODULES) {
-    for (const child of module.children) {
-      const operations = child.operations || DEFAULT_OPERATIONS;
-      for (const op of operations) {
-        keys.push(`${module.key}.${child.key}.${op.key}`);
-      }
-    }
-  }
-  return keys;
-})();
-// 二级 key（如 "device.list"）。用于打开编辑/查看面板时一并展开二级，
-// 让回显的叶子勾选状态立即可见（否则二级默认折叠 → 视觉上像没勾选）。
-const ALL_SECOND_LEVEL_KEYS: string[] = (() => {
-  const keys: string[] = [];
-  for (const module of PERMISSION_MODULES) {
-    for (const child of module.children) {
-      keys.push(`${module.key}.${child.key}`);
-    }
-  }
-  return keys;
-})();
-// 一级 + 二级合集，编辑/查看打开时展开到二级即可（叶子是 leaf，无需 expand）。
-const ALL_EXPANDABLE_KEYS: string[] = [...ALL_MODULE_KEYS, ...ALL_SECOND_LEVEL_KEYS];
-// 把 permissions 字符串数组转为 Tree 的 checkedKeys（仅保留叶子节点）。
-// 模块级纯函数，无运行时依赖；避免 useCallback 的 lint immutability 问题。
-function permissionsArrayToCheckedKeys(permissions: string[]): React.Key[] {
-  return permissions.filter((p) => ALL_PERMISSION_LEAF_KEYS.includes(p));
+  return ids;
 }
 
 export default function RoleManagement() {
@@ -504,6 +369,22 @@ export default function RoleManagement() {
       adminApi.setRoleDeviceGroups(roleId, { deviceGroupIds, networkTypes }),
   });
 
+  // P3：菜单权限改由 role_menus 表驱动 — 拉/写当前角色的 menu_id 数组。
+  const getRoleMenuIdsMut = useMutation({
+    mutationFn: (roleId: string) => fetchRoleMenuIds(roleId),
+  });
+  const setRoleMenusMut = useMutation({
+    mutationFn: ({ roleId, menuIds }: { roleId: string; menuIds: string[] }) =>
+      apiSetRoleMenus(roleId, { menu_ids: menuIds }),
+  });
+
+  // 全量菜单树（GET /admin/menus/tree）。useMenuTree 内部 staleTime=60s。
+  const { data: menuTree = [] } = useMenuTree();
+
+  const permissionTreeData = useMemo(() => buildMenuPermissionTree(menuTree), [menuTree]);
+  const allMenuIds = useMemo(() => collectAllMenuIds(menuTree), [menuTree]);
+  const expandableMenuIds = useMemo(() => collectExpandableMenuIds(menuTree), [menuTree]);
+
   const isBuiltIn = useCallback((role: Role) => role.builtIn === 1 || role.builtIn === 2, []);
 
   // v0.5：编辑/查看面板打开时的统一回显逻辑（修复菜单权限 + 数据权限回显空白 bug）。
@@ -523,20 +404,16 @@ export default function RoleManagement() {
       roleName: role.roleName,
       description: role.description,
     });
-    // 同时展开一级 + 二级，避免二级折叠时回显叶子勾选不可见（PRD §6 编辑回显诉求）。
-    setExpandedPermissionKeys(ALL_EXPANDABLE_KEYS);
-    // 先用列表数据快速展示（防止抖动），再用专项端点结果覆盖
-    setCheckedPermissionKeys(permissionsArrayToCheckedKeys(role.permissions || []));
+    // 默认展开一级 + 二级目录（菜单树异步加载，expandableMenuIds 此时已就位 / 否则下一帧 useMemo 重算）。
+    setExpandedPermissionKeys(expandableMenuIds);
+    // 清空快速回显，避免上一个角色的菜单 ID 残留
+    setCheckedPermissionKeys([]);
     setSelectedDeviceGroupIds(role.deviceGroupIds || []);
     setSelectedNetworkTypes(role.networkTypes || []);
 
-    // 1) 拉单角色详情，覆盖菜单权限回显（list 接口未填 permissions）
-    getRoleDetail.mutate(role.id, {
-      onSuccess: (full) => {
-        if (full?.permissions) {
-          setCheckedPermissionKeys(permissionsArrayToCheckedKeys(full.permissions));
-        }
-      },
+    // 1) 拉角色已绑定 menu_ids（GET /admin/roles/:id/menus）
+    getRoleMenuIdsMut.mutate(role.id, {
+      onSuccess: (menuIds) => setCheckedPermissionKeys(menuIds),
     });
     // 2) 拉设备分组 + 网络制式专项端点
     getRoleDeviceGroupsMut.mutate(role.id, {
@@ -549,8 +426,7 @@ export default function RoleManagement() {
     getRoleApiPermissions.mutate(role.id, {
       onSuccess: (ids) => setSelectedApiEndpointIds(ids),
     });
-    // ALL_MODULE_KEYS 是模块级常量，不需列入 deps。
-  }, [form, getRoleDetail, getRoleDeviceGroupsMut, getRoleApiPermissions]);
+  }, [form, expandableMenuIds, getRoleMenuIdsMut, getRoleDeviceGroupsMut, getRoleApiPermissions]);
 
   // 已有的角色名称列表（用于重复检查）
   const existingRoleNames = useMemo(
@@ -558,44 +434,21 @@ export default function RoleManagement() {
     [data?.items]
   );
 
-  // 叶子节点 keys 直接用顶层 ALL_PERMISSION_LEAF_KEYS 常量（不再起本地别名）。
+  // permissionTreeData / allMenuIds / expandableMenuIds 已在上方根据 menuTree 计算。
 
-  // 二级菜单 key 直接用顶层 ALL_SECOND_LEVEL_KEYS 常量（PERMISSION_MODULES 编译期常量派生）。
-  const allSecondLevelKeys = ALL_SECOND_LEVEL_KEYS;
+  /**
+   * 把当前 checkedPermissionKeys（菜单 ID 数组）转成提交给后端的 menu_ids 数组。
+   * 仅过滤出"实际存在于当前菜单树"的 ID（防止旧 cache 的脏 ID 漏到 PUT）。
+   */
+  const permissionsToMenuIds = useCallback((keys: React.Key[]): string[] => {
+    const valid = new Set(allMenuIds);
+    return (keys as string[]).filter((k) => valid.has(k));
+  }, [allMenuIds]);
 
-  // PERMISSION_MODULES 派生 keys 直接复用顶层 ALL_MODULE_KEYS / ALL_PERMISSION_KEYS 常量。
-
-  // 构建菜单权限树形数据（三级结构）
-  const permissionTreeData = useMemo((): TreeDataNode[] => {
-    return PERMISSION_MODULES.map((module) => ({
-      key: module.key,
-      title: t(module.titleKey),
-      children: module.children.map((child) => ({
-        key: `${module.key}.${child.key}`,
-        title: t(child.titleKey),
-        children: (child.operations || DEFAULT_OPERATIONS).map((op) => ({
-          key: `${module.key}.${child.key}.${op.key}`,
-          title: t(op.titleKey),
-          isLeaf: true,
-        })),
-      })),
-    }));
-  }, [t]);
-
-  // 将 checkedPermissionKeys 转换为 permissions 数组（用于提交）
-  // 格式：["device.list", "alarm.current", ...]
-  const permissionsToArray = useCallback((keys: React.Key[]): string[] => {
-    // 只返回叶子节点的 key；ALL_PERMISSION_LEAF_KEYS 为顶层常量不需列入 deps。
-    return keys.filter((k) => ALL_PERMISSION_LEAF_KEYS.includes(k as string)) as string[];
-  }, []);
-
-  // permissionsArrayToCheckedKeys 已抽到模块级 permissionsArrayToCheckedKeys（避免 lint
-  // immutability + before-declared 双重错误）。
-
-  // 检查是否至少选择了一个权限
+  // 至少选了一个菜单（无论目录/菜单/按钮）即视为有权限。
   const hasAnyPermission = useMemo(
-    () => checkedPermissionKeys.some((k) => ALL_PERMISSION_LEAF_KEYS.includes(k as string)),
-    [checkedPermissionKeys]
+    () => permissionsToMenuIds(checkedPermissionKeys).length > 0,
+    [checkedPermissionKeys, permissionsToMenuIds]
   );
 
   // 校验角色名称
@@ -705,14 +558,14 @@ export default function RoleManagement() {
     }
 
     form.validateFields().then((vals) => {
+      const menuIds = permissionsToMenuIds(checkedPermissionKeys);
       createRole.mutate(
         {
           roleName: vals.roleName as string,
           description: (vals.description as string) ?? '',
-          permissions: permissionsToArray(checkedPermissionKeys),
-          // deviceGroupIds 在 createRole 主请求里也带上，旧代码兼容；
-          // v0.5：后端 CreateRole 实际不读这两个字段（保留是为了兼容前端契约），
-          // 真正的写入由下方 setRoleDeviceGroupsMut 完成。
+          // P3：permissions 字段已无意义（permissions 表 DROP），传空数组兼容 Role 类型签名。
+          // 真正的菜单权限由下方 setRoleMenusMut 写入 role_menus。
+          permissions: [],
           deviceGroupIds: selectedDeviceGroupIds,
           networkTypes: selectedNetworkTypes,
           builtIn: 0,
@@ -720,7 +573,9 @@ export default function RoleManagement() {
         {
           onSuccess: (newRole) => {
             if (newRole?.id) {
-              // v0.5 决议修复：通过专项端点保存设备分组 + 网络制式
+              // 写菜单绑定（role_menus）
+              setRoleMenusMut.mutate({ roleId: newRole.id, menuIds });
+              // 通过专项端点保存设备分组 + 网络制式
               setRoleDeviceGroupsMut.mutate({
                 roleId: newRole.id,
                 deviceGroupIds: selectedDeviceGroupIds,
@@ -743,7 +598,7 @@ export default function RoleManagement() {
         },
       );
     });
-  }, [form, createRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, hasAnyPermission, allSecondLevelIds, permissionsToArray, setRoleDeviceGroupsMut, setRoleApiPermissions, message, t]);
+  }, [form, createRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, hasAnyPermission, allSecondLevelIds, permissionsToMenuIds, setRoleMenusMut, setRoleDeviceGroupsMut, setRoleApiPermissions, message, t]);
 
   // doEditSubmit 拆出实际提交逻辑，配合下方"清空设备分组二次确认"复用。
   // 必须先于 handleEdit 声明，否则 React 的 useCallback 会触发 react-hooks/refs：
@@ -751,20 +606,25 @@ export default function RoleManagement() {
   const doEditSubmit = useCallback(() => {
     if (!selectedRole) return;
     form.validateFields().then((vals) => {
+      const menuIds = permissionsToMenuIds(checkedPermissionKeys);
       updateRole.mutate(
         {
           id: selectedRole.id,
           data: {
             roleName: vals.roleName as string,
             description: vals.description as string,
-            permissions: permissionsToArray(checkedPermissionKeys),
+            // P3：permissions 字段已无意义（permissions 表 DROP），传空数组。
+            // 菜单权限改由下方 setRoleMenusMut 写入 role_menus。
+            permissions: [],
             deviceGroupIds: selectedDeviceGroupIds,
             networkTypes: selectedNetworkTypes,
           },
         },
         {
           onSuccess: () => {
-            // v0.5 决议修复：通过专项端点保存设备分组 + 网络制式
+            // 写菜单绑定（role_menus）
+            setRoleMenusMut.mutate({ roleId: selectedRole.id, menuIds });
+            // 通过专项端点保存设备分组 + 网络制式
             setRoleDeviceGroupsMut.mutate({
               roleId: selectedRole.id,
               deviceGroupIds: selectedDeviceGroupIds,
@@ -785,7 +645,7 @@ export default function RoleManagement() {
         },
       );
     });
-  }, [selectedRole, form, updateRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, permissionsToArray, setRoleDeviceGroupsMut, setRoleApiPermissions, message, t]);
+  }, [selectedRole, form, updateRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, permissionsToMenuIds, setRoleMenusMut, setRoleDeviceGroupsMut, setRoleApiPermissions, message, t]);
 
   // 校验并提交编辑
   const handleEdit = useCallback(() => {
@@ -929,26 +789,23 @@ export default function RoleManagement() {
 
   // 渲染菜单权限配置（树形结构 - 按图片样式）
   const renderPermissionConfig = (readOnly = false) => {
-    // 是否全部展开（一级 + 二级都要展开）
-    const isAllExpanded = expandedPermissionKeys.length >= ALL_MODULE_KEYS.length + allSecondLevelKeys.length;
+    // 是否全部展开（一级目录 + 二级菜单都已展开）
+    const isAllExpanded =
+      expandableMenuIds.length > 0 &&
+      expandedPermissionKeys.length >= expandableMenuIds.length;
 
     // 展开/折叠所有（复选框）
     const handleExpandChange = (checked: boolean) => {
       if (checked) {
-        // 展开所有一级和二级节点
-        setExpandedPermissionKeys([...ALL_MODULE_KEYS, ...allSecondLevelKeys]);
+        setExpandedPermissionKeys(expandableMenuIds);
       } else {
         setExpandedPermissionKeys([]);
       }
     };
 
-    // 全选/全不选（复选框）- 控制所有节点
+    // 全选/全不选（复选框）- 控制所有节点（含按钮）
     const handleSelectAllChange = (checked: boolean) => {
-      if (checked) {
-        setCheckedPermissionKeys(ALL_PERMISSION_KEYS);
-      } else {
-        setCheckedPermissionKeys([]);
-      }
+      setCheckedPermissionKeys(checked ? allMenuIds : []);
     };
 
     // 父子联动（复选框）- 勾选表示联动，不勾选表示不联动
@@ -956,15 +813,16 @@ export default function RoleManagement() {
       setPermissionCheckStrictly(!checked); // checkStrictly=false 表示联动
     };
 
-    // 获取当前选中的节点数量（用于全选状态计算）- 统计所有节点
+    // 当前选中的菜单 ID 中"实际存在于树"的数量（去掉旧 cache 的脏 ID 影响）
+    const validCheckedSet = new Set(allMenuIds);
     const checkedCount = checkedPermissionKeys.filter((k) =>
-      ALL_PERMISSION_KEYS.includes(k as string)
+      validCheckedSet.has(k as string),
     ).length;
 
     // 是否全选
-    const isAllSelected = checkedCount === ALL_PERMISSION_KEYS.length && ALL_PERMISSION_KEYS.length > 0;
+    const isAllSelected = allMenuIds.length > 0 && checkedCount === allMenuIds.length;
     // 是否部分选中
-    const isIndeterminate = checkedCount > 0 && checkedCount < ALL_PERMISSION_KEYS.length;
+    const isIndeterminate = checkedCount > 0 && checkedCount < allMenuIds.length;
 
     // 处理树节点选中
     const handleCheck: TreeProps['onCheck'] = (checked) => {
