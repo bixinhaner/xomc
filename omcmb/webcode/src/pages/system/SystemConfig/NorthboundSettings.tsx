@@ -1,8 +1,16 @@
 import { useState } from 'react';
-import { Form, Input, Switch, Table, Button, Modal, Tag, Card, message } from 'antd';
+import { Form, Input, Switch, Table, Button, Modal, Tag, Card, Spin, message } from 'antd';
 import { PlusOutlined, MoreOutlined, SwapOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useT } from '@/hooks/useT';
+import {
+  useNorthboundServers,
+  useSwitchActiveNorthboundServer,
+} from '@core/hooks/api/useNorthbound';
+import type {
+  NorthboundServer,
+  NorthboundServerRole,
+} from '@core/services/api/northboundApi';
 
 interface NorthboundUser {
   id: string;
@@ -12,25 +20,15 @@ interface NorthboundUser {
   responseTime: string;
 }
 
-type ServerRole = 'primary' | 'standby';
-
-interface ServerInfo {
-  ip: string;
-  port: number;
-}
-
 interface NorthboundSettingsProps {
   form: ReturnType<typeof Form.useForm>[0];
 }
 
-// Mock 数据
+// Mock 数据（用户管理仍 mock；本次范围聚焦主备服务器切换）
 const mockUsers: NorthboundUser[] = [
   { id: '1', userName: 'northuser1', userPwd: '******', userEnable: '1', responseTime: '2026-01-15 10:30:00' },
   { id: '2', userName: 'northuser2', userPwd: '******', userEnable: '0', responseTime: '2026-02-20 14:15:00' },
 ];
-
-const initialPrimary: ServerInfo = { ip: '192.168.1.100', port: 8081 };
-const initialStandby: ServerInfo = { ip: '192.168.1.101', port: 8081 };
 
 // 设置行样式
 const _settingRowStyle: React.CSSProperties = {
@@ -46,15 +44,18 @@ const infoItemStyle: React.CSSProperties = {
 
 // 主/备服务器单卡片
 interface ServerInfoBlockProps {
-  role: ServerRole;
-  info: ServerInfo;
-  isActive: boolean;
+  server: NorthboundServer;
   onSwitch: () => void;
+  switching: boolean;
   t: ReturnType<typeof useT>;
 }
 
-function ServerInfoBlock({ role, info, isActive, onSwitch, t }: ServerInfoBlockProps) {
-  const titleKey = role === 'primary' ? 'system.northbound.primaryServer' : 'system.northbound.standbyServer';
+function ServerInfoBlock({ server, onSwitch, switching, t }: ServerInfoBlockProps) {
+  const isActive = server.isActive;
+  const titleKey =
+    server.role === 'primary'
+      ? 'system.northbound.primaryServer'
+      : 'system.northbound.standbyServer';
   return (
     <Card
       size="small"
@@ -74,7 +75,13 @@ function ServerInfoBlock({ role, info, isActive, onSwitch, t }: ServerInfoBlockP
       }
       extra={
         !isActive ? (
-          <Button type="primary" size="small" icon={<SwapOutlined />} onClick={onSwitch}>
+          <Button
+            type="primary"
+            size="small"
+            icon={<SwapOutlined />}
+            loading={switching}
+            onClick={onSwitch}
+          >
             {t('system.northbound.switchToActive')}
           </Button>
         ) : null
@@ -83,11 +90,11 @@ function ServerInfoBlock({ role, info, isActive, onSwitch, t }: ServerInfoBlockP
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24 }}>
         <div style={infoItemStyle}>
           <span style={{ color: 'rgba(0, 0, 0, 0.65)' }}>{t('common.ipAddress')}：</span>
-          <span style={{ fontWeight: 500 }}>{info.ip}</span>
+          <span style={{ fontWeight: 500 }}>{server.host}</span>
         </div>
         <div style={infoItemStyle}>
           <span style={{ color: 'rgba(0, 0, 0, 0.65)' }}>{t('common.port')}：</span>
-          <span style={{ fontWeight: 500 }}>{info.port}</span>
+          <span style={{ fontWeight: 500 }}>{server.port}</span>
         </div>
         <div style={infoItemStyle}>
           <span style={{ color: 'rgba(0, 0, 0, 0.65)' }}>{t('system.northbound.serviceStatus')}：</span>
@@ -109,12 +116,17 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
   const [editingUser, setEditingUser] = useState<NorthboundUser | null>(null);
   const [userForm] = Form.useForm();
 
-  // 主备服务器：当前真实切换由后端完成，前端在 mock 阶段仅维护视图状态。
-  const [primary] = useState<ServerInfo>(initialPrimary);
-  const [standby] = useState<ServerInfo>(initialStandby);
-  const [activeRole, setActiveRole] = useState<ServerRole>('primary');
+  // 主备服务器：从后端 northbound_servers 表拉取，切换走 PUT /northbound/servers/active。
+  // 后端事务保证 partial unique index `is_active=true` 全表只一行；切换成功后 query
+  // 自动 invalidate refetch，UI 高亮自动跟随。
+  const { data: servers, isLoading: serversLoading, error: serversError } = useNorthboundServers();
+  const switchMutation = useSwitchActiveNorthboundServer();
 
-  const handleSwitchActive = (target: ServerRole) => {
+  const primary = servers?.find((s) => s.role === 'primary');
+  const standby = servers?.find((s) => s.role === 'standby');
+  const activeRole = servers?.find((s) => s.isActive)?.role;
+
+  const handleSwitchActive = (target: NorthboundServerRole) => {
     if (target === activeRole) return;
     const targetLabel =
       target === 'primary'
@@ -125,9 +137,14 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
       content: t('system.northbound.switchConfirm', { server: targetLabel }),
       okText: t('common.confirm'),
       cancelText: t('common.cancel'),
-      onOk: () => {
-        setActiveRole(target);
-        void message.success(t('system.northbound.switchSuccess'));
+      onOk: async () => {
+        try {
+          await switchMutation.mutateAsync(target);
+          void message.success(t('system.northbound.switchSuccess'));
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : 'switch failed';
+          void message.error(msg);
+        }
       },
     });
   };
@@ -235,22 +252,34 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
           title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.northbound.serviceInfo')}</span>}
           style={{ marginBottom: 16 }}
         >
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
-            <ServerInfoBlock
-              role="primary"
-              info={primary}
-              isActive={activeRole === 'primary'}
-              onSwitch={() => handleSwitchActive('primary')}
-              t={t}
-            />
-            <ServerInfoBlock
-              role="standby"
-              info={standby}
-              isActive={activeRole === 'standby'}
-              onSwitch={() => handleSwitchActive('standby')}
-              t={t}
-            />
-          </div>
+          {serversLoading ? (
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '24px 0' }}>
+              <Spin />
+            </div>
+          ) : serversError ? (
+            <div style={{ color: 'var(--color-error)' }}>
+              {t('common.failed')}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+              {primary && (
+                <ServerInfoBlock
+                  server={primary}
+                  switching={switchMutation.isPending && switchMutation.variables === 'primary'}
+                  onSwitch={() => handleSwitchActive('primary')}
+                  t={t}
+                />
+              )}
+              {standby && (
+                <ServerInfoBlock
+                  server={standby}
+                  switching={switchMutation.isPending && switchMutation.variables === 'standby'}
+                  onSwitch={() => handleSwitchActive('standby')}
+                  t={t}
+                />
+              )}
+            </div>
+          )}
         </Card>
 
         {/* 用户管理 */}

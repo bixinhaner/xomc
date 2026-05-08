@@ -18,10 +18,13 @@ type Router struct {
 	pmHandler     *PMHandler
 	alarmHandler  *AlarmHandler
 	configHandler *ConfigHandler
+	serverHandler *ServerHandler        // 主备服务器配置 + 切换（system/config 北向设置）
 	outboxRepo    push.OutboxRepository // may be nil if outbox is not configured
 }
 
 // NewRouter creates a new northbound Router.
+//
+// serverHandler 通过 SetServerService 在 ServerService 装配完成后注入。
 func NewRouter(svc *NorthboundService) *Router {
 	logger := svc.logger
 	return &Router{
@@ -30,6 +33,12 @@ func NewRouter(svc *NorthboundService) *Router {
 		alarmHandler:  NewAlarmHandler(svc, logger),
 		configHandler: NewConfigHandler(svc, logger),
 	}
+}
+
+// SetServerService 注入主备服务器 service（创建 ServerHandler）。
+// 在 provider/modules.go 完成 northbound_servers repo + service 装配后调用。
+func (r *Router) SetServerService(svc *ServerService) {
+	r.serverHandler = NewServerHandler(svc, r.svc.logger)
 }
 
 // SetOutboxRepo sets the outbox repository for dead letter queue endpoints.
@@ -62,6 +71,13 @@ func (r *Router) RegisterRoutes(rg *gin.RouterGroup) {
 		nb.POST("/export/pm", r.pmHandler.ExportPM)
 		nb.POST("/export/alarms", r.alarmHandler.ExportAlarms)
 		nb.GET("/export/config/:deviceId", r.configHandler.ExportConfig)
+
+		// 主备服务器配置 + 切换（system/config 北向设置）。
+		// 仅在 SetServerService 注入后挂载，未注入时这两条端点 404，避免 nil deref。
+		if r.serverHandler != nil {
+			nb.GET("/servers", r.serverHandler.ListServers)
+			nb.PUT("/servers/active", r.serverHandler.SwitchActive)
+		}
 	}
 }
 

@@ -4,6 +4,8 @@ import {
   type AddPushTargetRequest,
   type ExportPMRequest,
   type ExportAlarmRequest,
+  type NorthboundServer,
+  type NorthboundServerRole,
 } from '../../services/api/northboundApi';
 
 export function usePushTargets() {
@@ -56,5 +58,29 @@ export function useExportPM() {
 export function useExportAlarms() {
   return useMutation({
     mutationFn: (req: ExportAlarmRequest) => northboundApi.exportAlarms(req),
+  });
+}
+
+// --- 主备服务器（system/config 北向设置）---
+
+const NORTHBOUND_SERVERS_KEY = ['northbound', 'servers'] as const;
+
+/** 拉主备两组配置；30s staleTime（与现有 push-targets 对齐）。 */
+export function useNorthboundServers() {
+  return useQuery<NorthboundServer[]>({
+    queryKey: [...NORTHBOUND_SERVERS_KEY],
+    queryFn: () => northboundApi.getServers(),
+    staleTime: 30 * 1000,
+  });
+}
+
+/** 切换激活组 mutation；成功后 invalidate 列表自动 refetch 让 UI 更新高亮。 */
+export function useSwitchActiveNorthboundServer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (role: NorthboundServerRole) => northboundApi.switchActiveServer(role),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [...NORTHBOUND_SERVERS_KEY] });
+    },
   });
 }

@@ -272,6 +272,14 @@ func initNorthboundModule(c *Container) error {
 	nbService := northbound.NewNorthboundService(c.AlarmPgStore, c.PMCounterRepo, c.PMKPIRepo, c.ParamRepo, pushEngine, syncService, logger)
 	nbRouter := northbound.NewRouter(nbService)
 
+	// 主备 OSS 服务器配置 + 切换（system/config 北向设置页消费）。
+	// 配置面与数据面分离：nbService 管数据导出 / 推送 / 同步；ServerService 管
+	// active 组配置 (primary <-> standby)。后续 wave push engine 接入 active server
+	// 后即可实现"切换即生效"。
+	nbServerRepo := northbound.NewPgServerRepository(c.PgPool)
+	nbServerSvc := northbound.NewServerService(nbServerRepo, logger)
+	nbRouter.SetServerService(nbServerSvc)
+
 	c.miscDeps.nbRouter = nbRouter
 
 	logger.Info("northbound/OSS module initialized")

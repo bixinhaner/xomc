@@ -22,7 +22,33 @@ interface BackendSyncResult {
   truncated: boolean;
 }
 
+/** 后端 northbound_servers 表行 JSON 形态（与 omcgo 内 model 严格对齐）。 */
+interface BackendNorthboundServer {
+  id: string;
+  role: NorthboundServerRole;
+  host: string;
+  port: number;
+  description: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 // --- Frontend types ---
+
+export type NorthboundServerRole = 'primary' | 'standby';
+
+/** 北向 OSS 主备服务器配置（system/config 北向设置页消费）。 */
+export interface NorthboundServer {
+  id: string;
+  role: NorthboundServerRole;
+  host: string;
+  port: number;
+  description: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface PushTarget {
   id: string;
@@ -100,6 +126,19 @@ function mapBackendSyncResult(r: BackendSyncResult): SyncResult {
   };
 }
 
+function mapBackendNorthboundServer(b: BackendNorthboundServer): NorthboundServer {
+  return {
+    id: b.id,
+    role: b.role,
+    host: b.host,
+    port: b.port,
+    description: b.description,
+    isActive: b.is_active,
+    createdAt: b.created_at,
+    updatedAt: b.updated_at,
+  };
+}
+
 // --- Exported service ---
 
 export const northboundApi = {
@@ -168,5 +207,25 @@ export const northboundApi = {
   async exportConfig(deviceId: string): Promise<unknown> {
     const { data } = await http.get(`/northbound/export/config/${deviceId}`);
     return data;
+  },
+
+  // --- 主备服务器（system/config 北向设置 切换功能）---
+
+  /** GET /northbound/servers — 列出主备两组配置。 */
+  async getServers(): Promise<NorthboundServer[]> {
+    const { data } = await http.get<{ items: BackendNorthboundServer[]; total: number }>(
+      '/northbound/servers',
+    );
+    return (data?.items ?? []).map(mapBackendNorthboundServer);
+  },
+
+  /**
+   * PUT /northbound/servers/active — 切换激活组。
+   *
+   * 后端语义：role 已激活时返回 200 noop（不报错）；role 不存在返回 404。
+   * 切换成功后主备 is_active 自动互换（事务保证 partial unique index 不冲突）。
+   */
+  async switchActiveServer(role: NorthboundServerRole): Promise<void> {
+    await http.put('/northbound/servers/active', { role });
   },
 };
