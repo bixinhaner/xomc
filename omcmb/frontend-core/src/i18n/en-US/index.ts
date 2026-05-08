@@ -3608,9 +3608,8 @@ const messages: Record<string, string> = {
   'mml.confirmDeleteTask':                   'Delete task record "{name}"? This action cannot be undone.',
   'mml.confirmCancelTitle':                  'Confirm Cancellation',
   'mml.confirmCancelScript':                 'Terminate script "{name}"? The current execution will be interrupted.',
-  'mml.startFailed':                         'Failed to start: {error}',
-  'mml.pauseFailed':                         'Failed to pause: {error}',
-  'mml.cancelFailed':                        'Failed to cancel: {error}',
+  // duplicates of mml.startFailed/pauseFailed/cancelFailed removed; canonical
+  // entries above (line ~3552) take effect.
   'mml.editScript':                          'Edit Script',
   'mml.copyScript':                          'Copy',
   'mml.deviceName':                          'Device Name',
