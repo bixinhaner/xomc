@@ -70,6 +70,10 @@ type Container struct {
 	AlarmDefRegistry *alarmdef.Registry
 	AlarmDefHandler  *alarmdef.Handler
 
+	// ParamModelHandler 设置（T-0098 P3-02）
+	ParamModelRepo    *parammodel.PgRepository
+	ParamModelHandler *parammodel.Handler
+
 	// ConfigModule 设置
 	DMRegistry      *datamodel.DataModelRegistry
 	DMImporter      *datamodel.DataModelImporter

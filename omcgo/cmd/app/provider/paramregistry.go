@@ -2,12 +2,14 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/config/parammodel"
+	"github.com/omcgo/omcgo/internal/core/dictloader"
 )
 
 // initParamRegistryModule 构造 ParamRegistry 并 Refresh（T-0098 P2-02）。
@@ -81,5 +83,29 @@ func initParamRegistryModule(c *Container) error {
 		intersectMetrics,
 		logger,
 	)
+
+	// T-0098 P3-02：ParamModel handler — 共用 PgRepository 走 CRUD/查询，registry
+	// 用于写后 Invalidate / Translate。Reloader 适配 dictloader.Registry.ReloadOne。
+	c.ParamModelRepo = repo
+	c.ParamModelHandler = parammodel.NewHandler(
+		repo,
+		registry,
+		&paramModelReloader{reg: c.DictLoaderRegistry},
+		logger,
+	)
 	return nil
+}
+
+// paramModelReloader 把 dictloader.Registry.ReloadOne(...)(Report, error)
+// 适配为 parammodel.Reloader 期望的 ReloadOne(ctx, name) error。
+type paramModelReloader struct {
+	reg *dictloader.Registry
+}
+
+func (r *paramModelReloader) ReloadOne(ctx context.Context, name string) error {
+	if r.reg == nil {
+		return errors.New("dictloader registry not wired")
+	}
+	_, err := r.reg.ReloadOne(ctx, name)
+	return err
 }
