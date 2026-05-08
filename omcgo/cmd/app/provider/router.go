@@ -350,6 +350,11 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 		c.ParamModelHandler.RegisterRoutes(permGroup("datamodels"))
 	}
 
+	// ----- T-0098 P3-01: Product routes → resource "datamodels" (P3-05 进一步收口为 super_admin) -----
+	if c.ProductHandler != nil {
+		c.ProductHandler.RegisterRoutes(permGroup("datamodels"))
+	}
+
 	// ----- Alarm filter rule routes → resource "alarms" -----
 	alarmFilterHandler := alarm.NewFilterHandler(ah.alarmFilterRuleRepo, c.Logger)
 	alarmFilterHandler.RegisterRoutes(permGroup("alarms").Group("/alarms/alarm-filters"))

@@ -2,11 +2,15 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/config/parammodel"
+	"github.com/omcgo/omcgo/internal/core/dictloader"
 	"github.com/omcgo/omcgo/internal/product"
 )
 
@@ -56,5 +60,40 @@ func initProductRegistryModule(c *Container) error {
 	}
 
 	c.ProductRegistry = registry
+
+	// T-0098 P3-01：Product handler — DiscoveredCleaner 由 parammodel.PgRepository 实现
+	// （DeleteDiscoveredAll 已在 P3-02 添加）；rematcher 暂用 handler 内置实现。
+	c.ProductRepo = repo
+	c.ProductHandler = product.NewHandler(
+		repo,
+		registry,
+		&productDiscoveredCleaner{repo: parammodel.NewPgRepository(c.PgPool)},
+		nil, // rematcher: nil → handler 走内置 fallback 用 Registry 重算
+		&productReloader{reg: c.DictLoaderRegistry},
+		logger,
+	)
 	return nil
+}
+
+// productDiscoveredCleaner 实现 product.DiscoveredCleaner（避免反向 import）。
+type productDiscoveredCleaner struct {
+	repo *parammodel.PgRepository
+}
+
+func (c *productDiscoveredCleaner) DeleteDiscoveredAll(ctx context.Context, productID uuid.UUID) (int64, error) {
+	return c.repo.DeleteDiscoveredAll(ctx, productID)
+}
+
+// productReloader 把 dictloader.Registry.ReloadOne(ctx,name)(Report,error)
+// 适配为 product.Reloader 期望的 ReloadOne(ctx,name) error。
+type productReloader struct {
+	reg *dictloader.Registry
+}
+
+func (r *productReloader) ReloadOne(ctx context.Context, name string) error {
+	if r.reg == nil {
+		return errors.New("dictloader registry not wired")
+	}
+	_, err := r.reg.ReloadOne(ctx, name)
+	return err
 }

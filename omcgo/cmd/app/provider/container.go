@@ -74,6 +74,10 @@ type Container struct {
 	ParamModelRepo    *parammodel.PgRepository
 	ParamModelHandler *parammodel.Handler
 
+	// ProductHandler 设置（T-0098 P3-01）
+	ProductRepo    *product.PgRepository
+	ProductHandler *product.Handler
+
 	// ConfigModule 设置
 	DMRegistry      *datamodel.DataModelRegistry
 	DMImporter      *datamodel.DataModelImporter
