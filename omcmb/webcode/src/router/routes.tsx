@@ -3,9 +3,11 @@ import { Navigate, type RouteObject } from 'react-router-dom';
 import { Spin } from 'antd';
 import AppShell from '@/components/Layout';
 import PrivateRoute from './PrivateRoute';
+import MenuBootstrap from '@/components/MenuBootstrap';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
 import LoginPage from '@/pages/login';
 import NotFound from '@/pages/error/NotFound';
+import Forbidden from '@/pages/error/Forbidden';
 
 // ---------------------------------------------------------------------------
 // Real lazy-loaded page imports
@@ -186,12 +188,15 @@ export const routes: RouteObject[] = [
     path: '/',
     element: (
       <PrivateRoute>
-        <AppShell />
+        <MenuBootstrap>
+          <AppShell />
+        </MenuBootstrap>
       </PrivateRoute>
     ),
     children: [
       { index: true, element: <Navigate to="/dashboard" replace /> },
       { path: 'dashboard', element: withSuspense(Dashboard) },
+      { path: '403', element: <Forbidden /> },
 
       // Device Management
       { path: 'device/list',       element: withSuspense(DeviceList) },

@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
-import { Menu } from 'antd';
+import { Menu as AntMenu } from 'antd';
 import type { MenuProps } from 'antd';
 import {
+  AppstoreOutlined,
   DashboardOutlined,
   ClusterOutlined,
   AlertOutlined,
@@ -17,7 +18,6 @@ import {
   BarChartOutlined,
   RadarChartOutlined,
   SafetyOutlined,
-  AppstoreOutlined,
   GatewayOutlined,
   DeploymentUnitOutlined,
   WifiOutlined,
@@ -30,55 +30,63 @@ import {
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTabStore } from '@core/store/tabStore';
 import { useAppStore } from '@core/store/appStore';
+import { useMenuStore } from '@core/store/menuStore';
+import type { Menu as DynamicMenu } from '@core/types/menu';
 import { useResponsive } from '@/hooks/useResponsive';
 import { useT } from '@/hooks/useT';
+import { resolveIcon } from '@/components/IconPicker/icons';
+import { isDynamicMenuEnabled } from '@/components/MenuBootstrap/featureFlag';
 import { NAV_CONFIG } from './navConfig';
 import type { NavGroup, NavChild } from './navConfig';
 
 type MenuItem = Required<MenuProps>['items'][number];
 
-const ICON_MAP: Record<string, React.ReactNode> = {
-  DashboardOutlined:    <DashboardOutlined />,
-  ClusterOutlined:      <ClusterOutlined />,
-  AlertOutlined:        <AlertOutlined />,
-  SettingOutlined:      <SettingOutlined />,
-  LineChartOutlined:    <LineChartOutlined />,
-  CodeOutlined:         <CodeOutlined />,
-  GlobalOutlined:       <GlobalOutlined />,
-  SaveOutlined:         <SaveOutlined />,
-  CloudUploadOutlined:  <CloudUploadOutlined />,
-  FolderOutlined:       <FolderOutlined />,
-  FileTextOutlined:     <FileTextOutlined />,
-  ToolOutlined:         <ToolOutlined />,
-  BarChartOutlined:     <BarChartOutlined />,
-  RadarChartOutlined:   <RadarChartOutlined />,
-  SafetyOutlined:         <SafetyOutlined />,
-  AppstoreOutlined:       <AppstoreOutlined />,
-  GatewayOutlined:        <GatewayOutlined />,
+// 静态模式（VITE_DYNAMIC_MENU=false）兜底图标映射，仅给 NAV_CONFIG 用。
+// 动态模式优先调 resolveIcon（IconPicker 116 个白名单）。
+const STATIC_ICON_MAP: Record<string, React.ReactNode> = {
+  DashboardOutlined: <DashboardOutlined />,
+  ClusterOutlined: <ClusterOutlined />,
+  AlertOutlined: <AlertOutlined />,
+  SettingOutlined: <SettingOutlined />,
+  LineChartOutlined: <LineChartOutlined />,
+  CodeOutlined: <CodeOutlined />,
+  GlobalOutlined: <GlobalOutlined />,
+  SaveOutlined: <SaveOutlined />,
+  CloudUploadOutlined: <CloudUploadOutlined />,
+  FolderOutlined: <FolderOutlined />,
+  FileTextOutlined: <FileTextOutlined />,
+  ToolOutlined: <ToolOutlined />,
+  BarChartOutlined: <BarChartOutlined />,
+  RadarChartOutlined: <RadarChartOutlined />,
+  SafetyOutlined: <SafetyOutlined />,
+  AppstoreOutlined: <AppstoreOutlined />,
+  GatewayOutlined: <GatewayOutlined />,
   DeploymentUnitOutlined: <DeploymentUnitOutlined />,
-  WifiOutlined:           <WifiOutlined />,
-  ThunderboltOutlined:    <ThunderboltOutlined />,
-  ApartmentOutlined:      <ApartmentOutlined />,
-  CloudServerOutlined:    <CloudServerOutlined />,
-  AimOutlined:            <AimOutlined />,
-  ExperimentOutlined:     <ExperimentOutlined />,
+  WifiOutlined: <WifiOutlined />,
+  ThunderboltOutlined: <ThunderboltOutlined />,
+  ApartmentOutlined: <ApartmentOutlined />,
+  CloudServerOutlined: <CloudServerOutlined />,
+  AimOutlined: <AimOutlined />,
+  ExperimentOutlined: <ExperimentOutlined />,
 };
 
-function buildMenuItems(groups: NavGroup[], t: (id: string) => string): MenuItem[] {
+// ---------------------------------------------------------------------------
+// 静态分支（保留兜底）：消费 NAV_CONFIG
+// ---------------------------------------------------------------------------
+
+function buildStaticMenuItems(groups: NavGroup[], t: (id: string) => string): MenuItem[] {
   return groups.map((group) => {
-    // Groups with a single child that is the "main" page get rendered as a direct item
     if (group.children.length === 1) {
       const child = group.children[0];
       return {
         key: child.key,
-        icon: ICON_MAP[group.iconName],
+        icon: STATIC_ICON_MAP[group.iconName],
         label: t(group.label),
       } as MenuItem;
     }
-
     return {
       key: group.key,
-      icon: ICON_MAP[group.iconName],
+      icon: STATIC_ICON_MAP[group.iconName],
       label: t(group.label),
       children: group.children.map(
         (child: NavChild): MenuItem => ({
@@ -90,14 +98,12 @@ function buildMenuItems(groups: NavGroup[], t: (id: string) => string): MenuItem
   });
 }
 
-// Flat map: menu item key → NavChild (for looking up path on click)
-function buildKeyToChild(groups: NavGroup[]): Map<string, NavChild> {
+function buildStaticKeyToChild(groups: NavGroup[]): Map<string, NavChild> {
   const map = new Map<string, NavChild>();
   for (const group of groups) {
     for (const child of group.children) {
       map.set(child.key, child);
     }
-    // Also map single-child groups directly to their child
     if (group.children.length === 1) {
       map.set(group.key, group.children[0]);
     }
@@ -105,8 +111,7 @@ function buildKeyToChild(groups: NavGroup[]): Map<string, NavChild> {
   return map;
 }
 
-// Flat map: path → menu key (for selected keys from URL)
-function buildPathToKey(groups: NavGroup[]): Map<string, string> {
+function buildStaticPathToKey(groups: NavGroup[]): Map<string, string> {
   const map = new Map<string, string>();
   for (const group of groups) {
     for (const child of group.children) {
@@ -116,7 +121,134 @@ function buildPathToKey(groups: NavGroup[]): Map<string, string> {
   return map;
 }
 
-export default function NavMenu({ collapsed, position = 'left' }: { collapsed?: boolean; position?: 'left' | 'right' | 'top' }) {
+// ---------------------------------------------------------------------------
+// 动态分支：消费 menuStore
+// ---------------------------------------------------------------------------
+
+interface DynamicLeaf {
+  key: string;
+  label: string;
+  path: string;
+}
+
+function isVisible(menu: DynamicMenu): boolean {
+  return menu.status === 'active' && menu.showStatus !== 'hide';
+}
+
+function renderIcon(name: string | undefined): React.ReactNode {
+  const Component = resolveIcon(name);
+  return Component ? <Component /> : <AppstoreOutlined />;
+}
+
+/**
+ * 把后端菜单树转 antd Menu items。规则：
+ *  - 仅渲染 type='directory'|'menu'（按钮跳过）
+ *  - 单子节点目录扁平化（与 NAV_CONFIG 行为一致）
+ *  - 隐藏 status!=active 或 showStatus='hide' 的节点
+ */
+function buildDynamicMenuItems(menus: DynamicMenu[]): MenuItem[] {
+  return menus
+    .filter(isVisible)
+    .filter((m) => m.type !== 'button')
+    .map((m) => {
+      const visibleChildren = (m.children ?? [])
+        .filter(isVisible)
+        .filter((c) => c.type !== 'button');
+
+      // 叶子菜单
+      if (m.type === 'menu' || visibleChildren.length === 0) {
+        return {
+          key: m.routePath || m.id,
+          icon: renderIcon(m.icon),
+          label: m.name,
+        } as MenuItem;
+      }
+
+      // 单子节点目录扁平化
+      if (visibleChildren.length === 1) {
+        const only = visibleChildren[0];
+        return {
+          key: only.routePath || only.id,
+          icon: renderIcon(m.icon),
+          label: m.name,
+        } as MenuItem;
+      }
+
+      return {
+        key: m.id,
+        icon: renderIcon(m.icon),
+        label: m.name,
+        children: buildDynamicMenuItems(visibleChildren),
+      } as MenuItem;
+    });
+}
+
+/** 扁平索引：menu key → DynamicLeaf（path 跳转用）。 */
+function buildDynamicKeyToLeaf(menus: DynamicMenu[]): Map<string, DynamicLeaf> {
+  const map = new Map<string, DynamicLeaf>();
+  const walk = (list: DynamicMenu[]) => {
+    for (const m of list.filter(isVisible)) {
+      if (m.type === 'menu' && m.routePath) {
+        map.set(m.routePath, { key: m.routePath, label: m.name, path: m.routePath });
+      }
+      // 单子节点目录扁平化：父目录 key 也指向唯一子节点
+      const visibleChildren = (m.children ?? [])
+        .filter(isVisible)
+        .filter((c) => c.type !== 'button');
+      if (m.type === 'directory' && visibleChildren.length === 1) {
+        const only = visibleChildren[0];
+        if (only.routePath) {
+          map.set(only.routePath, { key: only.routePath, label: only.name, path: only.routePath });
+        }
+      }
+      if (m.children?.length) walk(m.children);
+    }
+  };
+  walk(menus);
+  return map;
+}
+
+/** 找到包含当前 path 的顶级目录 ID，作为 antd Menu defaultOpenKeys。 */
+function findDynamicTopOpenKey(menus: DynamicMenu[], pathname: string): string[] {
+  const matchInSubtree = (list: DynamicMenu[]): boolean => {
+    for (const m of list) {
+      if (m.routePath === pathname) return true;
+      if (m.children?.length && matchInSubtree(m.children)) return true;
+    }
+    return false;
+  };
+  for (const top of menus) {
+    if (top.children?.length && matchInSubtree(top.children)) {
+      return [top.id];
+    }
+  }
+  return [];
+}
+
+/** path → key（用于 selectedKeys）；动态模式 key === path，故映射 1:1。 */
+function buildDynamicPathToKey(menus: DynamicMenu[]): Map<string, string> {
+  const map = new Map<string, string>();
+  const walk = (list: DynamicMenu[]) => {
+    for (const m of list.filter(isVisible)) {
+      if (m.routePath) map.set(m.routePath, m.routePath);
+      if (m.children?.length) walk(m.children);
+    }
+  };
+  walk(menus);
+  return map;
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export default function NavMenu({
+  collapsed,
+  position = 'left',
+}: {
+  collapsed?: boolean;
+  position?: 'left' | 'right' | 'top';
+}) {
   const navigate = useNavigate();
   const location = useLocation();
   const openTab = useTabStore((s) => s.openTab);
@@ -125,37 +257,70 @@ export default function NavMenu({ collapsed, position = 'left' }: { collapsed?: 
   const { isMobile } = useResponsive();
   const t = useT();
 
-  const menuItems = useMemo(() => buildMenuItems(NAV_CONFIG, t), [t]);
-  const keyToChild = useMemo(() => buildKeyToChild(NAV_CONFIG), []);
-  const pathToKey = useMemo(() => buildPathToKey(NAV_CONFIG), []);
+  const dynamicMenus = useMenuStore((s) => s.menus);
+  const menuLoaded = useMenuStore((s) => s.loaded);
 
-  // Derive selected keys from current pathname
+  // 灰度判定：env 启用 + 已加载 + 树非空 → 走动态分支；否则兜底 NAV_CONFIG。
+  const useDynamic = isDynamicMenuEnabled() && menuLoaded && dynamicMenus.length > 0;
+
+  const menuItems = useMemo(
+    () =>
+      useDynamic ? buildDynamicMenuItems(dynamicMenus) : buildStaticMenuItems(NAV_CONFIG, t),
+    [useDynamic, dynamicMenus, t],
+  );
+
+  const dynamicKeyToLeaf = useMemo(
+    () => (useDynamic ? buildDynamicKeyToLeaf(dynamicMenus) : new Map<string, DynamicLeaf>()),
+    [useDynamic, dynamicMenus],
+  );
+  const dynamicPathToKey = useMemo(
+    () => (useDynamic ? buildDynamicPathToKey(dynamicMenus) : new Map<string, string>()),
+    [useDynamic, dynamicMenus],
+  );
+  const staticKeyToChild = useMemo(
+    () => (useDynamic ? new Map<string, NavChild>() : buildStaticKeyToChild(NAV_CONFIG)),
+    [useDynamic],
+  );
+  const staticPathToKey = useMemo(
+    () => (useDynamic ? new Map<string, string>() : buildStaticPathToKey(NAV_CONFIG)),
+    [useDynamic],
+  );
+
   const selectedKeys = useMemo(() => {
-    const key = pathToKey.get(location.pathname);
+    const map = useDynamic ? dynamicPathToKey : staticPathToKey;
+    const key = map.get(location.pathname);
     return key ? [key] : [];
-  }, [location.pathname, pathToKey]);
+  }, [useDynamic, dynamicPathToKey, staticPathToKey, location.pathname]);
 
-  // Derive open (expanded) submenu keys from current pathname
   const defaultOpenKeys = useMemo(() => {
-    const selectedKey = pathToKey.get(location.pathname);
+    if (useDynamic) {
+      return findDynamicTopOpenKey(dynamicMenus, location.pathname);
+    }
+    const selectedKey = staticPathToKey.get(location.pathname);
     if (!selectedKey) return [];
     const group = NAV_CONFIG.find((g) => g.children.some((c) => c.key === selectedKey));
     return group ? [group.key] : [];
-  }, [location.pathname, pathToKey]);
+  }, [useDynamic, dynamicMenus, staticPathToKey, location.pathname]);
 
   const handleMenuClick: MenuProps['onClick'] = ({ key }) => {
-    const child = keyToChild.get(key);
-    if (!child) return;
-    openTab({ key: child.key, label: child.label, path: child.path, closable: true });
-    void navigate(child.path);
-    // Close mobile drawer after navigation
+    if (useDynamic) {
+      const leaf = dynamicKeyToLeaf.get(key);
+      if (!leaf) return;
+      openTab({ key: leaf.key, label: leaf.label, path: leaf.path, closable: true });
+      void navigate(leaf.path);
+    } else {
+      const child = staticKeyToChild.get(key);
+      if (!child) return;
+      openTab({ key: child.key, label: child.label, path: child.path, closable: true });
+      void navigate(child.path);
+    }
     if (isMobile) setMobileOverlayOpen(false);
   };
 
   const isHorizontal = position === 'top';
 
   return (
-    <Menu
+    <AntMenu
       mode={isHorizontal ? 'horizontal' : 'inline'}
       theme={appTheme === 'fresh' ? 'light' : 'dark'}
       inlineCollapsed={isHorizontal ? undefined : collapsed}
@@ -163,9 +328,10 @@ export default function NavMenu({ collapsed, position = 'left' }: { collapsed?: 
       selectedKeys={selectedKeys}
       defaultOpenKeys={isHorizontal ? undefined : defaultOpenKeys}
       onClick={handleMenuClick}
-      style={isHorizontal
-        ? { border: 'none', flex: 1, height: '100%' }
-        : { border: 'none', flex: 1, overflowY: 'auto', overflowX: 'hidden' }
+      style={
+        isHorizontal
+          ? { border: 'none', flex: 1, height: '100%' }
+          : { border: 'none', flex: 1, overflowY: 'auto', overflowX: 'hidden' }
       }
     />
   );
