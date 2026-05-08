@@ -61,6 +61,41 @@ func (a *pgAdapter) LoadPolicy(m casbinModel.Model) error {
 		return err
 	}
 
+	// 1.5. B3-Phase1：双源 LoadPolicy — 同时加载端点级策略
+	//
+	// 当前 (resource, action) 模型仍由 Step 1 的 permissions 表喂；本步骤额外加载
+	// role_api_permissions JOIN api_endpoints 输出的端点级 (path, method) 策略，
+	// 喂入同一 model.conf（matcher 含 keyMatch 兼容）。Phase1 不改 router/中间件，
+	// 端点级策略暂不被 Enforce 命中——仅为 Phase2 切换 RequireAPIPermission 中间件
+	// 准备数据基础。详见 docs/prd/system/menu-dynamic-loading.md §4.2.4 (B3-Phase1)。
+	//
+	// admin/operator 角色 role_api_permissions 各有 445 行 = api_endpoints 全集；
+	// viewer 由 seed/000064_seed_role_api_permissions_viewer.sql 兜底为 GET 类全集。
+	rowsAPI, err := a.pool.Query(ctx, `
+		SELECT r.name AS role_name, ae.path, ae.method
+		FROM role_api_permissions rap
+		JOIN api_endpoints ae ON ae.id = rap.endpoint_id
+		JOIN roles r ON r.id = rap.role_id
+	`)
+	if err != nil {
+		// role_api_permissions 表可能在旧环境未建（v1.0 前）→ 不阻断
+		// （已 v1.0 必有此表，参 migrations/000056_roles_v1_extras.sql）
+		return nil
+	}
+	defer rowsAPI.Close()
+
+	for rowsAPI.Next() {
+		var roleName, path, method string
+		if err := rowsAPI.Scan(&roleName, &path, &method); err != nil {
+			return fmt.Errorf("scan api permission policy: %w", err)
+		}
+		// 端点级策略：obj=path, act=method
+		m.AddPolicy("p", "p", []string{"role:" + roleName, "system", path, method})
+	}
+	if err := rowsAPI.Err(); err != nil {
+		return err
+	}
+
 	// 2. Load role assignments: g = (user_id, role:{name}, domain)
 	// v1.0：users.carrier 已删除，所有 g 策略统一在 'system' 单域。多 carrier RBAC 隔离能力不再保留。
 	// 详见 docs/prd/system/users.md §11.11 决议 Q3。

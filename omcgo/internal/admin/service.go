@@ -771,19 +771,12 @@ func (s *AdminService) CreateRole(ctx context.Context, req CreateRoleRequest) (*
 		return nil, fmt.Errorf("create role: %w", err)
 	}
 
-	if len(req.Permissions) > 0 {
-		perms := make([]Permission, len(req.Permissions))
-		for i, p := range req.Permissions {
-			perms[i] = Permission{
-				RoleID:   role.ID,
-				Resource: p.Resource,
-				Action:   p.Action,
-			}
-		}
-		if err := s.roleRepo.AddPermissions(ctx, role.ID, perms); err != nil {
-			return nil, fmt.Errorf("add permissions: %w", err)
-		}
-	}
+	// B3-Phase1：停止写入 permissions 表（旧 resource:action 三元组）。
+	// 角色权限改由 role_menus（菜单可见性）+ role_api_permissions（API 鉴权）双轨承载，
+	// 与 GVA 风格一致。permissions 表保留旧数据服务 Casbin LoadPolicy（向下兼容），
+	// 但不再增量写入。Phase2 切换中间件 + DROP TABLE。
+	// 详见 docs/prd/system/menu-dynamic-loading.md §4.2.4 (B3-Phase1)。
+	_ = req.Permissions // 保留请求字段兼容前端 payload，不再消费
 
 	return s.GetRole(ctx, role.ID)
 }
@@ -813,24 +806,9 @@ func (s *AdminService) UpdateRole(ctx context.Context, id uuid.UUID, req UpdateR
 		return nil, fmt.Errorf("update role: %w", err)
 	}
 
-	if req.Permissions != nil {
-		if err := s.roleRepo.RemoveAllPermissions(ctx, id); err != nil {
-			return nil, fmt.Errorf("remove old permissions: %w", err)
-		}
-		if len(req.Permissions) > 0 {
-			perms := make([]Permission, len(req.Permissions))
-			for i, p := range req.Permissions {
-				perms[i] = Permission{
-					RoleID:   id,
-					Resource: p.Resource,
-					Action:   p.Action,
-				}
-			}
-			if err := s.roleRepo.AddPermissions(ctx, id, perms); err != nil {
-				return nil, fmt.Errorf("add new permissions: %w", err)
-			}
-		}
-	}
+	// B3-Phase1：停止写入 permissions 表（同 CreateRole）。前端 RolePermission 仍可
+	// 在 payload 中带 permissions 字段（兼容期），后端忽略。Phase2 切换 + DROP。
+	_ = req.Permissions
 
 	return s.GetRole(ctx, id)
 }
@@ -881,21 +859,10 @@ func (s *AdminService) CopyRole(ctx context.Context, sourceID uuid.UUID) (*Role,
 		return nil, fmt.Errorf("create copy role: %w", err)
 	}
 
-	// 复制 permissions（roles.permissions 三元组）
-	if len(src.Permissions) > 0 {
-		perms := make([]Permission, len(src.Permissions))
-		for i, p := range src.Permissions {
-			perms[i] = Permission{
-				RoleID:   copied.ID,
-				Resource: p.Resource,
-				Action:   p.Action,
-			}
-		}
-		if err := s.roleRepo.AddPermissions(ctx, copied.ID, perms); err != nil {
-			s.logger.Warn("copy role permissions failed",
-				zap.String("role_id", copied.ID.String()), zap.Error(err))
-		}
-	}
+	// B3-Phase1：复制 permissions 三元组路径已停用（停止写入 permissions 表）。
+	// 角色权限改由 role_menus + role_api_permissions 双轨承载，下面已按这两个关联
+	// 复制。permissions 表保留旧数据兜底 Casbin LoadPolicy（向下兼容）。Phase2 DROP。
+	_ = src.Permissions
 
 	// 复制 role_device_groups（含 network_types）/ role_api_permissions：
 	// 这两类绑定走 RoleDeviceGroupRepository / RoleApiPermissionRepository 接口，

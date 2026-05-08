@@ -159,6 +159,63 @@ func RequirePermission(roleRepo PermissionChecker, resource, action string) gin.
 	}
 }
 
+// RequireAPIPermission returns a Gin middleware that checks the authenticated
+// user has permission for the current request's URL path + HTTP method.
+//
+// 端点级（path+method）鉴权 — B3-Phase2 切换段使用，对齐 GVA 风格。
+// 当前 (Phase1) 已挂上的 LoadPolicy 双源加载使端点级策略可被 Casbin Enforce 命中，
+// 但本中间件暂未挂任何路由组——Phase2 会替换 router.go 中的 RequirePermission /
+// RequireResourcePermission 调用为本中间件。
+//
+// 与 RequirePermission 的差异：
+//   - RequirePermission(roleRepo, resource, action) → 硬编码业务字符串（粗粒度）
+//   - RequireAPIPermission(roleRepo)               → 自动读 c.Request.URL.Path /
+//                                                     c.Request.Method（端点级）
+//
+// 超管旁路：claims.IsSuperAdmin（user.source='builtIn' 派生）一致。
+// 详见 docs/prd/system/menu-dynamic-loading.md §4.2.4 (B3-Phase1/Phase2)。
+func RequireAPIPermission(roleRepo PermissionChecker) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userIDVal, exists := c.Get(CtxKeyUserID)
+		if !exists {
+			commonerrors.AbortWithError(c, http.StatusUnauthorized,
+				errors.New("authentication required"))
+			return
+		}
+
+		userID, ok := userIDVal.(uuid.UUID)
+		if !ok {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				errors.New("invalid user context"))
+			return
+		}
+
+		// builtIn 超管旁路（与 RequirePermission/RequireResourcePermission 行为一致）
+		if isSuper, _ := c.Get(CtxKeyIsSuperAdmin); isSuper == true {
+			c.Next()
+			return
+		}
+
+		// 端点级鉴权：obj=path, act=method
+		path := c.Request.URL.Path
+		method := c.Request.Method
+		ctx := c.Request.Context()
+		allowed, err := roleRepo.CheckPermission(ctx, userID, path, method)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				errors.New("permission check failed"))
+			return
+		}
+		if !allowed {
+			commonerrors.AbortWithError(c, http.StatusForbidden,
+				errors.New("insufficient permissions"))
+			return
+		}
+
+		c.Next()
+	}
+}
+
 // RequireCarrier — v1.0 已删除：users.carrier 已从 schema 移除，无 carrier 过滤需求。
 // 如旧代码仍 import 该函数，需要按 PRD §11.11 改造。
 
