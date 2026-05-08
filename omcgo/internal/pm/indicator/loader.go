@@ -90,6 +90,7 @@ type xmlIndicator struct {
 	IndicatorLevel  string `xml:"indicatorLevel,attr"` // ENB/GSM only
 	Formula         string `xml:"formula,attr"`
 	Enabled         string `xml:"enabled,attr"`        // 缺省视 "true"（P2-09 接力 OR 合并）
+	GroupID         string `xml:"groupId,attr"`        // 功能集 group_id；缺省回退 default 占位组
 }
 
 func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
@@ -393,8 +394,12 @@ func flushIndicators(ctx context.Context, tx pgx.Tx, table string, batch []xmlIn
 		if ind.IsCounter == "0" {
 			isCounter = "0"
 		}
+		groupID := defaultGroupID
+		if g := strings.TrimSpace(ind.GroupID); g != "" {
+			groupID = g
+		}
 		row := []interface{}{
-			ind.ID, enName, cnName, defaultGroupID,
+			ind.ID, enName, cnName, groupID,
 			nullIfEmpty(ind.DataType), nullIfEmpty(ind.UnitID), isBuiltIn, isCounter,
 			nullIfEmpty(ind.Arithmetic), nullIfEmpty(ind.StatisType),
 		}
@@ -403,6 +408,7 @@ func flushIndicators(ctx context.Context, tx pgx.Tx, table string, batch []xmlIn
 		}
 		ib = ib.Values(row...)
 	}
+	// group_id 跟随 XML 的 GroupID（缺省 default）；XML 是真相源，重启始终对齐 XML。
 	updateClause := `ON CONFLICT (id) DO UPDATE SET
 	    en_name      = EXCLUDED.en_name,
 	    cn_name      = EXCLUDED.cn_name,
