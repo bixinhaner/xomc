@@ -1030,8 +1030,13 @@ func (s *AdminService) GetMenuTree(ctx context.Context, status *MenuStatus) ([]M
 }
 
 // GetUserMenuTree returns the menu tree for a specific user.
+//
+// 超管旁路（参 docs/prd/system/menu-dynamic-loading.md §4.2.2）：
+// 若 user.source='builtIn' → 返回所有 status='normal' 的菜单（不依赖 role_menus）。
+// 这与 internal/admin/middleware.go:138/191 的 builtIn 用户直接放行行为对齐。
+// 仅 source='builtIn' 视为超管，role.code='admin' 的非 builtIn 用户仍受 role_menus 限制。
 func (s *AdminService) GetUserMenuTree(ctx context.Context, userID uuid.UUID) ([]Menu, error) {
-	menus, err := s.menuRepo.GetByUser(ctx, userID)
+	menus, err := s.menuRepoGetMenusForUser(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -1039,6 +1044,20 @@ func (s *AdminService) GetUserMenuTree(ctx context.Context, userID uuid.UUID) ([
 	// Build tree and filter out button type items for display
 	tree := buildMenuTree(menus)
 	return filterTreeForDisplay(tree), nil
+}
+
+// menuRepoGetMenusForUser 根据 user.source 选择菜单加载策略：
+// - source='builtIn'  → GetAllActive（超管旁路）
+// - 其他              → GetByUser（按 user_roles → role_menus 过滤）
+func (s *AdminService) menuRepoGetMenusForUser(ctx context.Context, userID uuid.UUID) ([]Menu, error) {
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get user for menu tree: %w", err)
+	}
+	if user.Source == UserSourceBuiltIn {
+		return s.menuRepo.GetAllActive(ctx)
+	}
+	return s.menuRepo.GetByUser(ctx, userID)
 }
 
 // SetRoleMenus sets the menu permissions for a role.
@@ -1187,8 +1206,28 @@ func (s *AdminService) SwitchRole(ctx context.Context, userID uuid.UUID, targetR
 }
 
 // GetUserMenuTreeByRole returns the menu tree based on the user's current active role.
+//
+// 超管旁路同 GetUserMenuTree：source='builtIn' 用户返回全量 active 菜单，忽略 roleID 入参。
+// 非 builtIn 用户按 roleID 查询 role_menus 关联，按树形结构返回（含 button 节点供前端按
+// 钮级权限判断）。参 docs/prd/system/menu-dynamic-loading.md §4.2.2。
 func (s *AdminService) GetUserMenuTreeByRole(ctx context.Context, userID uuid.UUID, roleID uuid.UUID) ([]Menu, error) {
-	return s.menuRepo.GetByRole(ctx, roleID)
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get user for menu tree by role: %w", err)
+	}
+	if user.Source == UserSourceBuiltIn {
+		menus, err := s.menuRepo.GetAllActive(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return buildMenuTree(menus), nil
+	}
+	menus, err := s.menuRepo.GetByRole(ctx, roleID)
+	if err != nil {
+		return nil, err
+	}
+	// GetByRole 已按 parent/sort 排序但未组装成树。
+	return buildMenuTree(menus), nil
 }
 
 // ==================== Password Change ====================

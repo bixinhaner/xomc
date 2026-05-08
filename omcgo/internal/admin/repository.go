@@ -127,6 +127,9 @@ type MenuRepository interface {
 	GetTree(ctx context.Context, status *MenuStatus) ([]Menu, error)
 	GetByRole(ctx context.Context, roleID uuid.UUID) ([]Menu, error)
 	GetByUser(ctx context.Context, userID uuid.UUID) ([]Menu, error)
+	// GetAllActive 返回全部 status='active' 的菜单（含 directory/menu/button），
+	// 给超管旁路用（user.source='builtIn'）。参 docs/prd/system/menu-dynamic-loading.md §4.2.2
+	GetAllActive(ctx context.Context) ([]Menu, error)
 	SetRoleMenus(ctx context.Context, roleID uuid.UUID, menuIDs []uuid.UUID, operatorID uuid.UUID) error
 	GetRoleMenuIDs(ctx context.Context, roleID uuid.UUID) ([]uuid.UUID, error)
 }

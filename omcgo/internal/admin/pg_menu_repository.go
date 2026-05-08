@@ -263,6 +263,35 @@ func (r *PgMenuRepository) GetTree(ctx context.Context, status *MenuStatus) ([]M
 	return r.buildTree(menus), nil
 }
 
+// GetAllActive 返回全部 status='normal' 的菜单（含 directory/menu/button），
+// 仅供超管旁路使用（user.source='builtIn'）。
+// 参 docs/prd/system/menu-dynamic-loading.md §4.2.2 / §设计原则 #4。
+func (r *PgMenuRepository) GetAllActive(ctx context.Context) ([]Menu, error) {
+	sql, args, err := storage.Psql.Select(menuColumns...).
+		From("menus").
+		Where(sq.Eq{"status": "normal"}).
+		OrderBy("parent_id NULLS FIRST, sort_order ASC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build get all active menus SQL: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get all active menus: %w", err)
+	}
+	defer rows.Close()
+
+	var menus []Menu
+	for rows.Next() {
+		m, err := scanMenuFromRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		menus = append(menus, *m)
+	}
+	return menus, nil
+}
+
 func (r *PgMenuRepository) GetByRole(ctx context.Context, roleID uuid.UUID) ([]Menu, error) {
 	query, args, err := storage.Psql.Select("m.id", "m.name", "m.type", "m.permission_key", "m.parent_id",
 		"m.sort_order", "m.route_path", "m.component_path", "m.icon", "m.show_status", "m.status",
