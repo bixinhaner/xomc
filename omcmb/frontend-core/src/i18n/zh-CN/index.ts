@@ -2935,6 +2935,19 @@ const messages: Record<string, string> = {
   'system.northbound.switchConfirm':         '确认将活动服务器切换为{server}？',
   'system.northbound.switchSuccess':         '主备切换成功',
 
+  // System - Menu management
+  'system.menu.icon':                        '菜单图标',
+  'system.menu.iconPlaceholder':             '请选择图标',
+  'system.menu.iconHint':                    '图标只能从内置库中选择，不支持上传自定义 SVG',
+
+  // IconPicker
+  'iconPicker.search':       '搜索图标',
+  'iconPicker.placeholder':  '请选择图标',
+  'iconPicker.noMatch':      '无匹配图标',
+  'iconPicker.clear':        '清除',
+  'iconPicker.totalCount':   '共 {count} 个',
+  'iconPicker.matchCount':   '匹配 {count} 个',
+
   // System - SAS Settings
 
   // System - LDAP Settings

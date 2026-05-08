@@ -1,0 +1,85 @@
+.popover {
+  width: 360px;
+}
+
+.gridWrapper {
+  margin-top: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+}
+
+.cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--color-text, rgba(0, 0, 0, 0.88));
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.cell:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.cellSelected {
+  background: rgba(22, 119, 255, 0.08);
+  border-color: var(--color-primary, #1677ff);
+  color: var(--color-primary, #1677ff);
+}
+
+.cellSelected:hover {
+  background: rgba(22, 119, 255, 0.12);
+}
+
+.empty {
+  margin: 16px 0;
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-border, rgba(5, 5, 5, 0.06));
+  font-size: 12px;
+  color: var(--color-text-secondary, rgba(0, 0, 0, 0.45));
+}
+
+.matchCount {
+  color: var(--color-primary, #1677ff);
+}
+
+.trigger {
+  cursor: pointer;
+}
+
+.trigger:disabled {
+  cursor: not-allowed;
+}
+
+.prefixPlaceholder {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+}
+
+.clearIcon {
+  cursor: pointer;
+  color: var(--color-text-disabled, rgba(0, 0, 0, 0.25));
+  transition: color 0.15s;
+}
+
+.clearIcon:hover {
+  color: var(--color-text-secondary, rgba(0, 0, 0, 0.45));
+}

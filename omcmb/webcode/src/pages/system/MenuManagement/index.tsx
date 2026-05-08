@@ -13,8 +13,8 @@ import {
   Space,
   TreeSelect,
   Radio,
-  Checkbox,
 } from 'antd';
+import IconPicker from '@/components/IconPicker';
 import type { MenuProps } from 'antd';
 import {
   UpOutlined,
@@ -279,8 +279,9 @@ export default function MenuManagement() {
       permissionKey: menu.permissionKey,
       componentPath: menu.componentPath,
       status: menu.status,
-      // 新增字段
-      showIcon: !!menu.icon,
+      // 图标：直接回显 antd icon export name（如 'DashboardOutlined'）
+      // 仅一级 directory 类型显示 IconPicker，其他类型字段不渲染
+      icon: menu.icon,
       isExternal: menu.isExternal || 'no',
       routePath: menu.routePath,
       routeParams: menu.routeParams,
@@ -292,7 +293,8 @@ export default function MenuManagement() {
 
   // 处理保存（PUT /admin/menus/:id）。
   // 字段映射：sort → sort_order；permissionKey → permission_key；空字符串显式传以便清空。
-  // showIcon 为 mock 字段，icon 仅在用户真填了图标值时才覆盖。
+  // icon 直接来自 IconPicker（antd icon export name 或 undefined）；
+  // 仅 directory 类型表单渲染了 IconPicker，其他类型 vals.icon 为 undefined。
   const handleSave = useCallback(() => {
     form.validateFields().then((vals) => {
       if (!selectedMenu) return;
@@ -305,8 +307,8 @@ export default function MenuManagement() {
         component_path: vals.componentPath ?? '',
         show_status: vals.showStatus ?? 'show',
         status: vals.status,
+        icon: vals.icon ?? '',
       };
-      if (vals.showIcon === false) payload.icon = '';
       updateMenuMut.mutate(
         { id: selectedMenu.id, payload },
         {
@@ -345,13 +347,14 @@ export default function MenuManagement() {
       showStatus: 'show',
       isExternal: 'no',
       apiPermission: 'none',
-      showIcon: true,
+      icon: undefined,
     });
     setAddVisible(true);
   }, [addForm]);
 
   // 保存新增菜单（POST /admin/menus）。
   // parentId === '0' 是 TreeSelect 的「主类目」哨兵 → 转后端 parent_id=null。
+  // icon 仅 directory 类型表单含 IconPicker，其他类型 vals.icon 为 undefined。
   const handleAddSave = useCallback(() => {
     addForm.validateFields().then((vals) => {
       const payload: CreateMenuPayload = {
@@ -363,6 +366,7 @@ export default function MenuManagement() {
         route_path: vals.routePath ?? '',
         component_path: vals.componentPath ?? '',
         show_status: vals.showStatus ?? 'show',
+        icon: vals.icon ?? '',
       };
       createMenuMut.mutate(payload, {
         onSuccess: () => {
@@ -616,11 +620,11 @@ export default function MenuManagement() {
                       <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder="请输入显示排序" />
                     </Form.Item>
                     <Form.Item
-                      name="showIcon"
-                      label="菜单图标"
-                      valuePropName="checked"
+                      name="icon"
+                      label={t('system.menu.icon')}
+                      extra={t('system.menu.iconHint')}
                     >
-                      <Checkbox>显示菜单图标</Checkbox>
+                      <IconPicker placeholder={t('system.menu.iconPlaceholder')} />
                     </Form.Item>
                     <Form.Item
                       name="isExternal"
@@ -874,12 +878,11 @@ export default function MenuManagement() {
                       <Input placeholder="请输入菜单名称" maxLength={50} />
                     </Form.Item>
                     <Form.Item
-                      name="showIcon"
-                      label="菜单图标"
-                      valuePropName="checked"
-                      initialValue={true}
+                      name="icon"
+                      label={t('system.menu.icon')}
+                      extra={t('system.menu.iconHint')}
                     >
-                      <Checkbox>显示菜单图标</Checkbox>
+                      <IconPicker placeholder={t('system.menu.iconPlaceholder')} />
                     </Form.Item>
                     <Form.Item
                       name="isExternal"

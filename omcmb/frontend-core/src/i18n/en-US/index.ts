@@ -2928,6 +2928,19 @@ const messages: Record<string, string> = {
   'system.northbound.switchConfirm':         'Switch active server to {server}?',
   'system.northbound.switchSuccess':         'Active server switched',
 
+  // System - Menu management
+  'system.menu.icon':                        'Menu Icon',
+  'system.menu.iconPlaceholder':             'Select an icon',
+  'system.menu.iconHint':                    'Icons can only be selected from the built-in library; custom SVG upload is not supported',
+
+  // IconPicker
+  'iconPicker.search':       'Search icons',
+  'iconPicker.placeholder':  'Select an icon',
+  'iconPicker.noMatch':      'No matching icons',
+  'iconPicker.clear':        'Clear',
+  'iconPicker.totalCount':   '{count} total',
+  'iconPicker.matchCount':   '{count} matched',
+
   // System - SAS Settings
 
   // System - LDAP Settings
@@ -3609,7 +3622,7 @@ const messages: Record<string, string> = {
   'mml.confirmCancelTitle':                  'Confirm Cancellation',
   'mml.confirmCancelScript':                 'Terminate script "{name}"? The current execution will be interrupted.',
   // duplicates of mml.startFailed/pauseFailed/cancelFailed removed; canonical
-  // entries above (line ~3552) take effect.
+  // entries above (line ~3565) take effect.
   'mml.editScript':                          'Edit Script',
   'mml.copyScript':                          'Copy',
   'mml.deviceName':                          'Device Name',
