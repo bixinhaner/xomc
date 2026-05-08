@@ -362,6 +362,11 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// ----- Indicator management routes → resource "pm" -----
 	ph.indicatorHandler.RegisterRoutes(permGroup("pm"))
 
+	// ----- T-0098 P3-03: Indicator REST routes → resource "pm" (P3-05 进一步收口为 super_admin) -----
+	if ph.indicatorRESTHandler != nil {
+		ph.indicatorRESTHandler.RegisterRoutes(permGroup("pm"))
+	}
+
 	// ----- Dashboard routes → resource "devices" -----
 	md.dashboardHandler.RegisterRoutes(permGroup("devices"))
 
