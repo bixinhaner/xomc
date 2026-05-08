@@ -16,4 +16,8 @@ if [ ! -f "$CONFIG" ]; then
   CONFIG="/etc/omcgo/${SERVICE}.dev.yaml"
 fi
 
+# T-0098 dictloader 用相对路径 xml_base_dir: "data" 加载字典 XML。
+# 切到 /etc/omcgo 让相对路径解析为 /etc/omcgo/data（与 Dockerfile.app COPY 一致）。
+cd /etc/omcgo
+
 exec "omcgo-${SERVICE}" --config "$CONFIG" "$@"

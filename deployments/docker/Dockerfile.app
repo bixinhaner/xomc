@@ -38,6 +38,10 @@ COPY --from=builder /build/cmd/app/etc/config.dev.yaml /etc/omcgo/app.dev.yaml
 COPY --from=builder /build/cmd/app/etc/config.test.yaml /etc/omcgo/app.test.yaml
 COPY --from=builder /build/cmd/app/etc/config.prod.yaml /etc/omcgo/app.prod.yaml
 COPY --from=builder /build/migrations /etc/omcgo/migrations
+# T-0098 dictloader 启动期加载的 4 域字典 XML（param-mappings / indicator-library /
+# alarm-definitions / products）。config.dev.yaml 用相对路径 xml_base_dir: "data"，
+# entrypoint.sh 把 cwd 切到 /etc/omcgo 让相对路径解析正确。
+COPY --from=builder /build/data /etc/omcgo/data
 COPY deployments/docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
