@@ -9,6 +9,7 @@
 | 0.1  | 2026-05-08 | Backend/Frontend Team | 初稿，待 review |
 | 0.2  | 2026-05-08 | Backend/Frontend Team | 7 项开放决策定稿；补一级菜单图标尺寸实测 |
 | 0.3  | 2026-05-08 | Backend/Frontend Team | 附录 A 100 图标白名单冻结；P0 启动前最终版 |
+| 0.4  | 2026-05-08 | Backend Team | §4.2.4 修订：B3 端点级方案 + 双段实施（Phase1 准备 / Phase2 切换）|
 
 **关联功能域**：F06 OMC-R 核心 / RBAC
 
@@ -198,15 +199,38 @@ UPDATE menus SET icon = NULL WHERE icon IN ('DashboardOutlined', /* ... */);
 UPDATE menus SET component_path = '' WHERE component_path LIKE '%/UserManagement' /* ... */;
 ```
 
-#### 4.2.4 permissions 表退役（P3 一次到位）
+#### 4.2.4 permissions 表退役（B3 端点级方案，分 Phase1/Phase2 实施）
 
-**已确认决策**：P3 阶段一次到位，**同迁移 + 同 PR**：
-1. `service.UpdateRole` / `service.CreateRole` 删除 `RemoveAllPermissions / AddPermissions` 调用，仅保留 role_menus / role_api_permissions / role_device_groups 三张关联表。
-2. `repo.AddPermissions / RemoveAllPermissions` 整段删除（不留 deprecated 兜底）。
-3. 新增迁移 DROP `permissions` 表 + DROP `idx_permissions_role`（参 [migrations/000002_users_roles.sql:50-57](../../../migrations/000002_users_roles.sql)）。
-4. 老角色已存在的 permissions 行 → DROP TABLE 时一并丢弃（**不**做数据迁移转写到 role_menus，因为前端 PERMISSION_MODULES 与 menus 表的 key 命名规则不同，逐条映射易出错；改为 P3 上线后由各局点重新走 RolePermission 编辑面板手动配权——这与"重新登录后生效"原则一致）。
+**v0.4 修订（2026-05-08）**：原 v0.3 决策"P3 一次性 DROP TABLE"在调研后判定**不可行**：
+- `casbin.go::pgAdapter.LoadPolicy` 把 `permissions` 表喂给 Casbin → 中间件鉴权依赖
+- `router.go` 用 `permGroup(resource)` helper 注册了 30+ 路由组，全部依赖 Casbin (resource, action) 模型
+- 直接 DROP = 全部非 builtIn 用户 API 鉴权失败
 
-**风险隔离**：DROP TABLE 操作在迁移文件单独一个事务里；上线前在 staging 跑一遍 down 迁移 + up 迁移确认 idempotent。
+**v0.4 决策**：升级为 **B3 端点级方案**（对齐 GVA `casbin_rule (role, path, method)` 风格），**分双段实施**：
+
+##### B3-Phase1（向下兼容准备段，本 PR / commit `cca8bc59`）
+
+零破坏现网行为，仅做数据源准备 + 新中间件就位 + 停止增量写入：
+
+1. **Casbin 双源 LoadPolicy**：
+   - 保留原 `SELECT permissions p JOIN roles r` 输出 (resource, action) 策略
+   - 新增 `SELECT role_api_permissions rap JOIN api_endpoints ae JOIN roles r` 输出 (path, method) 端点级策略
+   - 同一 `model.conf` 装两类策略，matcher 含 `keyMatch` 兼容路径通配
+2. **新中间件 `RequireAPIPermission(roleRepo)`**：自动读 `c.Request.URL.Path` / `c.Request.Method`，调 `CheckPermission`。**Phase1 暂未挂任何路由组**。
+3. **`viewer` role_api_permissions seed**（[migrations/seed/000064_seed_role_api_permissions_viewer.sql](../../../migrations/seed/000064_seed_role_api_permissions_viewer.sql)）：补 198 行 GET 类 endpoints，避免 Phase2 切换后只读角色 API 全 403。`admin`/`operator` 已有 445 行（=全集）。
+4. **`service.UpdateRole/CreateRole/CopyRole` 删除 permissions 写入**：3 处 `AddPermissions` + 1 处 `RemoveAllPermissions` 移除；保留 `req.Permissions` 字段兼容前端 payload；老 `permissions` 表数据"凝固"，不再增长，仍服务现 Casbin LoadPolicy。
+
+##### B3-Phase2（切换段，下次会话）
+
+破坏性改动，必须配套 e2e 4 角色完整验证：
+
+1. **`router.go` 30+ 处 `permGroup(resource)` helper 替换为 `RequireAPIPermission(roleRepo)`**（包括第 252、388、399、419 行 4 处粗粒度 `RequirePermission`）
+2. **`PgRoleRepository.AddPermissions / RemoveAllPermissions / CheckPermission` 整段删除或 deprecate**
+3. **迁移 `000NNN_drop_permissions_table.sql`**：DROP TABLE permissions + DROP idx_permissions_role
+4. **e2e 4 内置角色 + 自定义角色完整鉴权验证**：admin/operator/viewer/test 各自访问 30+ API 路由组验证 200/403 符合预期
+5. **PRD v0.5 收尾**：标注 B3 完成
+
+**风险隔离**：Phase2 切换时若 e2e 失败 → 立即 revert 单 PR（router.go 改动是 atomic 的 git revert）+ 保留 Phase1 的"准备数据"留作下一次。
 
 #### 4.2.5 数据迁移文件（P0/P2/P3 各一份）
 
