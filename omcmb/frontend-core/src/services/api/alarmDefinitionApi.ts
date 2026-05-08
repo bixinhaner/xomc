@@ -1,0 +1,191 @@
+import http from '../http';
+import type {
+  AlarmDefinition,
+  AlarmSeverityLevel,
+  UnknownAlarmStat,
+  AlarmDefinitionFilter,
+  CreateAlarmDefinitionInput,
+  UpdateAlarmDefinitionInput,
+  UnknownStatsFilter,
+} from '../../types/alarmDefinition';
+
+interface BackendDefinition {
+  id: string;
+  identifier: string;
+  ne_type: string;
+  cn_name: string;
+  en_name: string;
+  severity_id?: string;
+  severity_code: number;
+  severity_name: string;
+  event_type?: string;
+  cn_probable_cause?: string;
+  en_probable_cause?: string;
+  cn_suggestion?: string;
+  en_suggestion?: string;
+  is_show: boolean;
+  is_unknown?: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+interface BackendSeverityLevel {
+  id: string;
+  code: number;
+  cn_name: string;
+  en_name: string;
+  color_hex?: string;
+}
+
+interface BackendUnknownStat {
+  product_id?: string;
+  product_name?: string;
+  identifier: string;
+  count: number;
+  last_seen_at?: string;
+}
+
+function mapDef(b: BackendDefinition): AlarmDefinition {
+  return {
+    id: b.id,
+    identifier: b.identifier,
+    neType: b.ne_type,
+    cnName: b.cn_name,
+    enName: b.en_name,
+    severityId: b.severity_id,
+    severityCode: b.severity_code,
+    severityName: b.severity_name,
+    eventType: b.event_type,
+    cnProbableCause: b.cn_probable_cause,
+    enProbableCause: b.en_probable_cause,
+    cnSuggestion: b.cn_suggestion,
+    enSuggestion: b.en_suggestion,
+    isShow: b.is_show,
+    isUnknown: b.is_unknown,
+    createdAt: b.created_at,
+    updatedAt: b.updated_at,
+  };
+}
+
+function mapSeverity(b: BackendSeverityLevel): AlarmSeverityLevel {
+  return {
+    id: b.id,
+    code: b.code,
+    cnName: b.cn_name,
+    enName: b.en_name,
+    colorHex: b.color_hex,
+  };
+}
+
+function mapUnknown(b: BackendUnknownStat): UnknownAlarmStat {
+  return {
+    productId: b.product_id,
+    productName: b.product_name,
+    identifier: b.identifier,
+    count: b.count,
+    lastSeenAt: b.last_seen_at,
+  };
+}
+
+function defPayload(
+  input: CreateAlarmDefinitionInput | UpdateAlarmDefinitionInput
+): Record<string, unknown> {
+  const p: Record<string, unknown> = {};
+  if ('identifier' in input && input.identifier !== undefined) p.identifier = input.identifier;
+  if (input.neType !== undefined) p.ne_type = input.neType;
+  if (input.cnName !== undefined) p.cn_name = input.cnName;
+  if (input.enName !== undefined) p.en_name = input.enName;
+  if (input.severityCode !== undefined) p.severity_code = input.severityCode;
+  if (input.eventType !== undefined) p.event_type = input.eventType;
+  if (input.cnProbableCause !== undefined) p.cn_probable_cause = input.cnProbableCause;
+  if (input.enProbableCause !== undefined) p.en_probable_cause = input.enProbableCause;
+  if (input.cnSuggestion !== undefined) p.cn_suggestion = input.cnSuggestion;
+  if (input.enSuggestion !== undefined) p.en_suggestion = input.enSuggestion;
+  if (input.isShow !== undefined) p.is_show = input.isShow;
+  return p;
+}
+
+export const alarmDefinitionApi = {
+  async list(filter?: AlarmDefinitionFilter): Promise<{
+    items: AlarmDefinition[];
+    total: number;
+    page: number;
+    pageSize: number;
+  }> {
+    const params: Record<string, unknown> = {};
+    if (filter?.neType) params.ne_type = filter.neType;
+    if (filter?.severityCode !== undefined) params.severity_code = filter.severityCode;
+    if (filter?.keyword) params.keyword = filter.keyword;
+    if (filter?.isUnknown !== undefined) params.is_unknown = filter.isUnknown;
+    if (filter?.page) params.page = filter.page;
+    if (filter?.pageSize) params.pageSize = filter.pageSize;
+
+    const { data } = await http.get<{
+      items: BackendDefinition[];
+      total: number;
+      page: number;
+      page_size: number;
+    }>('/alarm-definitions', { params });
+    return {
+      items: (data.items || []).map(mapDef),
+      total: data.total || 0,
+      page: data.page || 1,
+      pageSize: data.page_size || 20,
+    };
+  },
+
+  async get(identifier: string): Promise<AlarmDefinition> {
+    const { data } = await http.get<BackendDefinition>(
+      `/alarm-definitions/${encodeURIComponent(identifier)}`
+    );
+    return mapDef(data);
+  },
+
+  async create(input: CreateAlarmDefinitionInput): Promise<AlarmDefinition> {
+    const { data } = await http.post<BackendDefinition>('/alarm-definitions', defPayload(input));
+    return mapDef(data);
+  },
+
+  async update(identifier: string, input: UpdateAlarmDefinitionInput): Promise<AlarmDefinition> {
+    const { data } = await http.put<BackendDefinition>(
+      `/alarm-definitions/${encodeURIComponent(identifier)}`,
+      defPayload(input)
+    );
+    return mapDef(data);
+  },
+
+  async delete(identifier: string): Promise<void> {
+    await http.delete(`/alarm-definitions/${encodeURIComponent(identifier)}`);
+  },
+
+  async unknownStats(filter?: UnknownStatsFilter): Promise<{ items: UnknownAlarmStat[]; days: number }> {
+    const params: Record<string, unknown> = {};
+    if (filter?.productId) params.productId = filter.productId;
+    if (filter?.days) params.days = filter.days;
+    const { data } = await http.get<{ items: BackendUnknownStat[]; days: number }>(
+      '/alarm-definitions/unknown-stats',
+      { params }
+    );
+    return {
+      items: (data.items || []).map(mapUnknown),
+      days: data.days || 7,
+    };
+  },
+
+  async severityLevels(): Promise<{ items: AlarmSeverityLevel[] }> {
+    const { data } = await http.get<{ items: BackendSeverityLevel[] }>('/alarm-severity-levels');
+    return {
+      items: (data.items || []).map(mapSeverity),
+    };
+  },
+
+  async cacheRefresh(): Promise<{ refreshed: boolean }> {
+    const { data } = await http.post<{ refreshed: boolean }>('/alarm-definitions/cache/refresh');
+    return data;
+  },
+
+  async importDirectory(): Promise<{ reloaded: string }> {
+    const { data } = await http.post<{ reloaded: string }>('/alarm-definitions/import-directory');
+    return data;
+  },
+};
