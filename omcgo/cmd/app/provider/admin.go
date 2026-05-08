@@ -94,6 +94,9 @@ func initAdminModule(c *Container) error {
 	sysConfigService := admin.NewSysConfigService(sysConfigRepo)
 	sysConfigHandler := admin.NewSysConfigHandler(sysConfigService)
 
+	// UI 定制化资产上传 / 公开下载（参 docs/prd/system/ui-customization.md）
+	uiAssetHandler := admin.NewUIAssetHandler(c.MinIO, c.Cfg.MinIO.Buckets.UIAssets)
+
 	// Log module
 	logRepo := admin.NewPgLogRepository(c.PgPool)
 	logHandler := admin.NewLogHandler(logRepo)
@@ -109,6 +112,7 @@ func initAdminModule(c *Container) error {
 		apiKeyHandler:    apiKeyHandler,
 		dictHandler:      dictHandler,
 		sysConfigHandler: sysConfigHandler,
+		uiAssetHandler:   uiAssetHandler,
 		logHandler:       logHandler,
 		jwtService:       jwtService,
 		tokenRevoker:     tokenRevoker,
@@ -145,6 +149,7 @@ type adminHandlerDeps struct {
 	apiKeyHandler    *admin.APIKeyHandler
 	dictHandler      *admin.DictionaryHandler
 	sysConfigHandler *admin.SysConfigHandler
+	uiAssetHandler   *admin.UIAssetHandler
 	logHandler       *admin.LogHandler
 	jwtService       *admin.JWTService
 	tokenRevoker     *admin.TokenRevoker

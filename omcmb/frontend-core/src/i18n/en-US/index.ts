@@ -132,6 +132,7 @@ const messages: Record<string, string> = {
   'status.decommissioned': 'Decommissioned',
   'status.pending':        'Pending',
   'status.running':        'Running',
+  'status.stopped':        'Stopped',
   'status.success':        'Success',
   'status.failed':         'Failed',
   'status.cancelled':      'Cancelled',
@@ -2920,6 +2921,12 @@ const messages: Record<string, string> = {
   'system.northbound.leaveEmptyToKeep':      'Leave empty to keep current',
   'system.northbound.enabled':               'Enabled',
   'system.northbound.disabled':              'Disabled',
+  'system.northbound.primaryServer':         'Primary Server',
+  'system.northbound.standbyServer':         'Standby Server',
+  'system.northbound.currentActive':         'Active',
+  'system.northbound.switchToActive':        'Switch to Active',
+  'system.northbound.switchConfirm':         'Switch active server to {server}?',
+  'system.northbound.switchSuccess':         'Active server switched',
 
   // System - SAS Settings
 
@@ -2945,6 +2952,12 @@ const messages: Record<string, string> = {
   'system.ui.confirmRestoreDefault':         'Confirm restore default UI settings?',
   'system.ui.restoreWillOverwrite':          'This will overwrite current settings',
   'system.ui.restoreDefault':                'Restore Default',
+  'system.ui.uploading':                     'Uploading…',
+  'system.ui.uploadFailed':                  'Image upload failed',
+  'system.ui.invalidImageType':              'Only PNG / JPG images are allowed',
+  'system.ui.previewApplied':                'Theme color preview applied (resets on refresh)',
+  'system.ui.loadFailed':                    'Failed to load UI settings',
+  'system.ui.saveFailed':                    'Save failed',
 
   // System - Dashboard
   'system.dashboard.cpu':                    'CPU',

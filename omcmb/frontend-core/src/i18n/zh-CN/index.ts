@@ -132,6 +132,7 @@ const messages: Record<string, string> = {
   'status.decommissioned': '已停用',
   'status.pending':        '待执行',
   'status.running':        '执行中',
+  'status.stopped':        '已停止',
   'status.success':        '成功',
   'status.failed':         '失败',
   'status.cancelled':      '已取消',
@@ -2927,6 +2928,12 @@ const messages: Record<string, string> = {
   'system.northbound.leaveEmptyToKeep':      '不修改请留空',
   'system.northbound.enabled':               '已启用',
   'system.northbound.disabled':              '已禁用',
+  'system.northbound.primaryServer':         '主用服务器',
+  'system.northbound.standbyServer':         '备用服务器',
+  'system.northbound.currentActive':         '当前活动',
+  'system.northbound.switchToActive':        '切换为活动',
+  'system.northbound.switchConfirm':         '确认将活动服务器切换为{server}？',
+  'system.northbound.switchSuccess':         '主备切换成功',
 
   // System - SAS Settings
 
@@ -2952,6 +2959,12 @@ const messages: Record<string, string> = {
   'system.ui.confirmRestoreDefault':         '确定恢复默认UI设置？',
   'system.ui.restoreWillOverwrite':          '此操作将覆盖当前设置',
   'system.ui.restoreDefault':                '恢复默认',
+  'system.ui.uploading':                     '上传中…',
+  'system.ui.uploadFailed':                  '图片上传失败',
+  'system.ui.invalidImageType':              '仅支持 PNG / JPG 图片',
+  'system.ui.previewApplied':                '主题色已临时预览（刷新后还原）',
+  'system.ui.loadFailed':                    '加载 UI 配置失败',
+  'system.ui.saveFailed':                    '保存失败',
 
   // System - Dashboard
   'system.dashboard.cpu':                    'CPU',

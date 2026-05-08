@@ -229,6 +229,11 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	publicV1 := r.Group("/api/v1")
 	ad.adminHandler.RegisterAuthRoutes(publicV1)
 
+	// 公开端点：登录页拉取品牌化资产 + 公开配置项（is_public=true）
+	// 详见 docs/prd/system/ui-customization.md §6
+	ad.sysConfigHandler.RegisterPublicRoutes(publicV1)
+	ad.uiAssetHandler.RegisterPublicRoutes(publicV1)
+
 	// Protected API v1 routes (JWT or API Key authentication required)
 	v1 := r.Group("/api/v1")
 	v1.Use(admin.RequireAuthWithAPIKey(ad.jwtService, ad.apiKeySvc, ad.userRepo, ad.roleRepo, ad.tokenRevoker))
@@ -400,6 +405,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- System config management routes (require admin permission) -----
 	ad.sysConfigHandler.RegisterRoutes(adminGroup)
+
+	// ----- UI 定制化：上传 Logo / 登录背景图（require admin permission）-----
+	ad.uiAssetHandler.RegisterRoutes(adminGroup)
 
 	// ----- System log routes (require admin permission) -----
 	ad.logHandler.RegisterRoutes(adminGroup)

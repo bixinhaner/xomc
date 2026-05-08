@@ -1,75 +1,112 @@
-import { useState } from 'react';
-import { Form, Input, ColorPicker, Upload, Button, Divider, Space, message, Popconfirm, Row, Col, Card } from 'antd';
+import {
+  App,
+  Form,
+  Input,
+  ColorPicker,
+  Upload,
+  Button,
+  Divider,
+  Space,
+  Popconfirm,
+  Row,
+  Col,
+  Card,
+} from 'antd';
 import { InboxOutlined, EyeOutlined, UndoOutlined } from '@ant-design/icons';
-import type { UploadFile, RcFile } from 'antd/es/upload';
+import type { RcFile } from 'antd/es/upload';
 import { useT } from '@/hooks/useT';
+import { useUploadUIAsset } from '@core/hooks/api/useSystem';
+import {
+  UI_CUSTOM_DEFAULTS,
+  SIZE_LOGIN_BG,
+  SIZE_LOGO,
+  ACCEPT_IMAGE_TYPES,
+  type UIAssetKind,
+} from './uiCustomConstants';
 
 const { Dragger } = Upload;
 
 interface UICustomSettingsProps {
   form: ReturnType<typeof Form.useForm>[0];
+  initialValues?: Record<string, string>;
+  onRestoreDefaults: () => void;
+  restoring?: boolean;
 }
 
-// 默认值
-const defaultUIConfig = {
-  ui_omc_name: 'BaiOMC',
-  ui_color: '#FF4614',
-  ui_login_background: './images/login/login_bg.png',
-  ui_menu_logo_up: './images/login/nav_logo_collapse.png',
-  ui_menu_logo_down: './images/login/logo_big.png',
-};
-
-export default function UICustomSettings({ form }: UICustomSettingsProps) {
+export default function UICustomSettings({
+  form,
+  initialValues,
+  onRestoreDefaults,
+  restoring = false,
+}: UICustomSettingsProps) {
   const t = useT();
-  const [loginBgFile, setLoginBgFile] = useState<UploadFile[]>([]);
-  const [logoSmallFile, setLogoSmallFile] = useState<UploadFile[]>([]);
-  const [logoBigFile, setLogoBigFile] = useState<UploadFile[]>([]);
+  const { message } = App.useApp();
+  const uploadAsset = useUploadUIAsset();
 
-  const handlePreview = () => {
-    void message.info(t('system.ui.previewThemeColor'));
-    // 实际实现中可以动态修改CSS变量
+  // 三个上传位的预览 URL 直接订阅 form 字段值——无需本地 state，也避开 set-state-in-effect。
+  const loginBgUrl = (Form.useWatch('ui_login_background', form) as string | undefined) ?? '';
+  const logoSmallUrl = (Form.useWatch('ui_menu_logo_up', form) as string | undefined) ?? '';
+  const logoLargeUrl = (Form.useWatch('ui_menu_logo_down', form) as string | undefined) ?? '';
+
+  // 主题色实时预览：动态注入 CSS 变量；只在当前会话生效，刷新页面还原。
+  const handlePreviewColor = () => {
+    const raw = form.getFieldValue('ui_color') as unknown;
+    const hex = typeof raw === 'string' ? raw : '';
+    if (!hex) return;
+    document.documentElement.style.setProperty('--ant-color-primary', hex);
+    void message.success(t('system.ui.previewApplied'));
   };
 
-  const handleRestore = () => {
-    form.setFieldsValue(defaultUIConfig);
-    setLoginBgFile([]);
-    setLogoSmallFile([]);
-    setLogoBigFile([]);
-    void message.success(t('system.ui.restoredDefault'));
-  };
-
-  const beforeUploadBg = (file: RcFile) => {
-    const isLt1M = file.size / 1024 / 1024 < 1;
-    if (!isLt1M) {
-      void message.error(t('system.ui.loginBgSizeExceeded'));
+  // 通用上传 before-upload 钩子：体积/类型预校验通过 → 调后端上传 → 写回 form 字段。
+  const buildBeforeUpload = (key: string, kind: UIAssetKind, sizeLimit: number) => {
+    return (file: RcFile): boolean => {
+      if (!ACCEPT_IMAGE_TYPES.includes(file.type as (typeof ACCEPT_IMAGE_TYPES)[number])) {
+        void message.error(t('system.ui.invalidImageType'));
+        return false;
+      }
+      if (file.size > sizeLimit) {
+        void message.error(
+          kind === 'login_bg' ? t('system.ui.loginBgSizeExceeded') : t('system.ui.logoSizeExceeded'),
+        );
+        return false;
+      }
+      uploadAsset
+        .mutateAsync({ file, kind })
+        .then(({ url }) => form.setFieldValue(key, url))
+        .catch(() => void message.error(t('system.ui.uploadFailed')));
+      // 始终阻止 antd 自动上传（我们手动调 useUploadUIAsset），不入 fileList。
       return false;
-    }
-    setLoginBgFile([file]);
-    return false;
-  };
-
-  const beforeUploadLogo = (file: RcFile) => {
-    const isLt400K = file.size / 1024 < 400;
-    if (!isLt400K) {
-      void message.error(t('system.ui.logoSizeExceeded'));
-      return false;
-    }
-    return false;
+    };
   };
 
   return (
-    <Form form={form} layout="vertical" size="small" initialValues={defaultUIConfig}>
+    <Form
+      form={form}
+      layout="vertical"
+      size="small"
+      initialValues={initialValues ?? UI_CUSTOM_DEFAULTS}
+    >
       <Row gutter={24}>
         <Col span={12}>
-          <Form.Item name="ui_omc_name" label={t('system.ui.omcName')} rules={[{ required: true, message: t('system.ui.pleaseInputOmcName') }]}>
-            <Input placeholder={t('system.ui.pleaseInputSystemName')} />
+          <Form.Item
+            name="ui_omc_name"
+            label={t('system.ui.omcName')}
+            rules={[{ required: true, message: t('system.ui.pleaseInputOmcName') }]}
+          >
+            <Input placeholder={t('system.ui.pleaseInputSystemName')} maxLength={32} />
           </Form.Item>
         </Col>
         <Col span={12}>
-          <Form.Item name="ui_color" label={t('system.ui.themeColor')} rules={[{ required: true }]}>
+          <Form.Item
+            name="ui_color"
+            label={t('system.ui.themeColor')}
+            rules={[{ required: true }]}
+            // antd v5 ColorPicker 的 onChange 第二参为 hex 字符串；用它把表单值固化为 string。
+            getValueFromEvent={(_color: unknown, hex: string) => hex}
+          >
             <Space>
               <ColorPicker format="hex" />
-              <Button icon={<EyeOutlined />} onClick={handlePreview}>
+              <Button icon={<EyeOutlined />} onClick={handlePreviewColor}>
                 {t('common.preview')}
               </Button>
             </Space>
@@ -77,71 +114,46 @@ export default function UICustomSettings({ form }: UICustomSettingsProps) {
         </Col>
       </Row>
 
-      <Divider orientation="left" plain>{t('system.ui.imageUpload')}</Divider>
+      <Divider orientation="left" plain>
+        {t('system.ui.imageUpload')}
+      </Divider>
 
       <Row gutter={24}>
         <Col span={8}>
-          <Card size="small" title={t('system.ui.loginBackground')} extra={<span style={{ color: '#999', fontSize: 12 }}>{t('system.ui.max1mb')}</span>}>
-            <Form.Item name="ui_login_background">
-              <Dragger
-                fileList={loginBgFile}
-                beforeUpload={beforeUploadBg}
-                onRemove={() => setLoginBgFile([])}
-                maxCount={1}
-                accept="image/jpeg,image/jpg,image/png"
-              >
-                <p className="ant-upload-drag-icon">
-                  <InboxOutlined />
-                </p>
-                <p className="ant-upload-text">{t('common.clickOrDragToUpload')}</p>
-                <p className="ant-upload-hint">{t('common.supportJpgPng')}</p>
-              </Dragger>
-            </Form.Item>
-          </Card>
+          <ImageUploadCard
+            title={t('system.ui.loginBackground')}
+            sizeHint={t('system.ui.max1mb')}
+            fieldName="ui_login_background"
+            previewUrl={loginBgUrl}
+            beforeUpload={buildBeforeUpload('ui_login_background', 'login_bg', SIZE_LOGIN_BG)}
+            uploading={uploadAsset.isPending}
+            uploadHintKey="common.supportJpgPng"
+            placeholderKey="common.clickOrDragToUpload"
+          />
         </Col>
         <Col span={8}>
-          <Card size="small" title={t('system.ui.logoSmall')} extra={<span style={{ color: '#999', fontSize: 12 }}>{t('system.ui.max400kb')}</span>}>
-            <Form.Item name="ui_menu_logo_up">
-              <Dragger
-                fileList={logoSmallFile}
-                beforeUpload={(file) => {
-                  if (beforeUploadLogo(file) === false) return false;
-                  setLogoSmallFile([file]);
-                  return false;
-                }}
-                onRemove={() => setLogoSmallFile([])}
-                maxCount={1}
-                accept="image/jpeg,image/jpg,image/png"
-              >
-                <p className="ant-upload-drag-icon">
-                  <InboxOutlined />
-                </p>
-                <p className="ant-upload-text">{t('system.ui.showWhenMenuCollapsed')}</p>
-              </Dragger>
-            </Form.Item>
-          </Card>
+          <ImageUploadCard
+            title={t('system.ui.logoSmall')}
+            sizeHint={t('system.ui.max400kb')}
+            fieldName="ui_menu_logo_up"
+            previewUrl={logoSmallUrl}
+            beforeUpload={buildBeforeUpload('ui_menu_logo_up', 'logo_small', SIZE_LOGO)}
+            uploading={uploadAsset.isPending}
+            uploadHintKey="system.ui.showWhenMenuCollapsed"
+            placeholderKey="common.clickOrDragToUpload"
+          />
         </Col>
         <Col span={8}>
-          <Card size="small" title={t('system.ui.logoLarge')} extra={<span style={{ color: '#999', fontSize: 12 }}>{t('system.ui.max400kb')}</span>}>
-            <Form.Item name="ui_menu_logo_down">
-              <Dragger
-                fileList={logoBigFile}
-                beforeUpload={(file) => {
-                  if (beforeUploadLogo(file) === false) return false;
-                  setLogoBigFile([file]);
-                  return false;
-                }}
-                onRemove={() => setLogoBigFile([])}
-                maxCount={1}
-                accept="image/jpeg,image/jpg,image/png"
-              >
-                <p className="ant-upload-drag-icon">
-                  <InboxOutlined />
-                </p>
-                <p className="ant-upload-text">{t('system.ui.showWhenMenuExpanded')}</p>
-              </Dragger>
-            </Form.Item>
-          </Card>
+          <ImageUploadCard
+            title={t('system.ui.logoLarge')}
+            sizeHint={t('system.ui.max400kb')}
+            fieldName="ui_menu_logo_down"
+            previewUrl={logoLargeUrl}
+            beforeUpload={buildBeforeUpload('ui_menu_logo_down', 'logo_large', SIZE_LOGO)}
+            uploading={uploadAsset.isPending}
+            uploadHintKey="system.ui.showWhenMenuExpanded"
+            placeholderKey="common.clickOrDragToUpload"
+          />
         </Col>
       </Row>
 
@@ -151,15 +163,90 @@ export default function UICustomSettings({ form }: UICustomSettingsProps) {
         <Popconfirm
           title={t('system.ui.confirmRestoreDefault')}
           description={t('system.ui.restoreWillOverwrite')}
-          onConfirm={handleRestore}
+          onConfirm={onRestoreDefaults}
           okText={t('common.confirm')}
           cancelText={t('common.cancel')}
         >
-          <Button icon={<UndoOutlined />}>
+          <Button icon={<UndoOutlined />} loading={restoring}>
             {t('system.ui.restoreDefault')}
           </Button>
         </Popconfirm>
       </Space>
     </Form>
+  );
+}
+
+// ------ 单个图片上传卡片 ------
+
+interface ImageUploadCardProps {
+  title: string;
+  sizeHint: string;
+  fieldName: string;
+  previewUrl: string;
+  beforeUpload: (file: RcFile) => boolean;
+  uploading: boolean;
+  uploadHintKey: string;
+  placeholderKey: string;
+}
+
+function ImageUploadCard({
+  title,
+  sizeHint,
+  fieldName,
+  previewUrl,
+  beforeUpload,
+  uploading,
+  uploadHintKey,
+  placeholderKey,
+}: ImageUploadCardProps) {
+  const t = useT();
+  return (
+    <Card
+      size="small"
+      title={title}
+      extra={<span style={{ color: '#999', fontSize: 12 }}>{sizeHint}</span>}
+    >
+      {/* 预览缩略图：value 既可能是 /api/v1/admin/public/ui-assets/<uuid>.png（已上传），
+          也可能是 ./images/...png（首次启动的 bundle 自带资源）。<img> 都能正确解析。 */}
+      {previewUrl ? (
+        <div style={{ marginBottom: 8, textAlign: 'center' }}>
+          <img
+            src={previewUrl}
+            alt={title}
+            style={{
+              maxWidth: '100%',
+              maxHeight: 80,
+              objectFit: 'contain',
+              border: '1px solid #f0f0f0',
+              borderRadius: 4,
+              padding: 4,
+              background: '#fafafa',
+            }}
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).style.display = 'none';
+            }}
+          />
+        </div>
+      ) : null}
+
+      {/* form 字段以隐藏 Input 携带 URL；上传成功后由 form.setFieldValue 写入。 */}
+      <Form.Item name={fieldName} hidden>
+        <Input />
+      </Form.Item>
+
+      <Dragger
+        beforeUpload={beforeUpload}
+        showUploadList={false}
+        disabled={uploading}
+        maxCount={1}
+        accept="image/jpeg,image/jpg,image/png"
+      >
+        <p className="ant-upload-drag-icon">
+          <InboxOutlined />
+        </p>
+        <p className="ant-upload-text">{t(placeholderKey)}</p>
+        <p className="ant-upload-hint">{uploading ? t('system.ui.uploading') : t(uploadHintKey)}</p>
+      </Dragger>
+    </Card>
   );
 }

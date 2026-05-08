@@ -1049,4 +1049,30 @@ export const adminApi = {
     const { data } = await http.post<{ updated?: number }>('/admin/sysConfig/batch', payload);
     return data?.updated ?? 0;
   },
+
+  // ---- Public configs (no auth) ----
+  // 登录页用：拉取 is_public=true 的配置项（产品名、Logo、登录背景等）。
+  // 参 docs/prd/system/ui-customization.md §6。
+  async getPublicSysConfigsByCategory(category: string): Promise<SysConfigItem[]> {
+    const { data } = await http.get<BackendSysConfig[]>('/admin/public/configs', { params: { category } });
+    return (Array.isArray(data) ? data : []).map(mapBackendSysConfig);
+  },
+
+  // ---- UI Customization asset upload ----
+  // 上传 Logo / 登录背景图到 MinIO，返回相对 URL（写回 sys_configs.value）。
+  // kind 决定后端体积上限（login_bg < 1 MiB；logo_small/logo_large < 400 KiB）。
+  async uploadUIAsset(
+    file: File | Blob,
+    kind: 'login_bg' | 'logo_small' | 'logo_large',
+  ): Promise<{ url: string; name: string; size: number }> {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('kind', kind);
+    const { data } = await http.post<{ url: string; name: string; size: number }>(
+      '/admin/uploads/ui-asset',
+      form,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+    return data;
+  },
 };

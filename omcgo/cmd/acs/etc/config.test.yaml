@@ -59,6 +59,7 @@ minio:
     logs: "logs"
     reports: "reports"
     exchange: "omc-exchange"
+    ui_assets: "ui-assets"
 
 upload:
   base_url: "http://acs:7557"

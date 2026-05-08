@@ -392,6 +392,7 @@ type MinIOConfig struct {
 //   - Logs：设备运行日志、安全日志、故障日志、PCAP 抓包
 //   - Reports：北向报表导出
 //   - Exchange：数据模型 XML、导入导出中间文件
+//   - UIAssets：UI 定制化品牌资产（Logo / 登录背景图等，参 docs/prd/system/ui-customization.md）
 type BucketConfig struct {
 	PMFiles      string `mapstructure:"pm_files"`
 	MRFiles      string `mapstructure:"mr_files"`
@@ -400,6 +401,7 @@ type BucketConfig struct {
 	Logs         string `mapstructure:"logs"`
 	Reports      string `mapstructure:"reports"`
 	Exchange     string `mapstructure:"exchange"`
+	UIAssets     string `mapstructure:"ui_assets"`
 }
 
 // MetricsConfig 配置 Prometheus 指标暴露端口。

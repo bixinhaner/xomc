@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Form, Input, Switch, Table, Button, Modal, Tag, Card, message } from 'antd';
-import { PlusOutlined, MoreOutlined } from '@ant-design/icons';
+import { PlusOutlined, MoreOutlined, SwapOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useT } from '@/hooks/useT';
 
@@ -12,6 +12,15 @@ interface NorthboundUser {
   responseTime: string;
 }
 
+type ServerRole = 'primary' | 'standby';
+
+interface ServerInfo {
+  ip: string;
+  port: number;
+  // 'running' | 'stopped' — 后端真实联调时再扩展为运行/告警/停止/未知
+  status: 'running' | 'stopped';
+}
+
 interface NorthboundSettingsProps {
   form: ReturnType<typeof Form.useForm>[0];
 }
@@ -21,6 +30,9 @@ const mockUsers: NorthboundUser[] = [
   { id: '1', userName: 'northuser1', userPwd: '******', userEnable: '1', responseTime: '2026-01-15 10:30:00' },
   { id: '2', userName: 'northuser2', userPwd: '******', userEnable: '0', responseTime: '2026-02-20 14:15:00' },
 ];
+
+const initialPrimary: ServerInfo = { ip: '192.168.1.100', port: 8081, status: 'running' };
+const initialStandby: ServerInfo = { ip: '192.168.1.101', port: 8081, status: 'running' };
 
 // 设置行样式
 const _settingRowStyle: React.CSSProperties = {
@@ -34,12 +46,91 @@ const infoItemStyle: React.CSSProperties = {
   gap: 8,
 };
 
+// 主/备服务器单卡片
+interface ServerInfoBlockProps {
+  role: ServerRole;
+  info: ServerInfo;
+  isActive: boolean;
+  onSwitch: () => void;
+  t: ReturnType<typeof useT>;
+}
+
+function ServerInfoBlock({ role, info, isActive, onSwitch, t }: ServerInfoBlockProps) {
+  const titleKey = role === 'primary' ? 'system.northbound.primaryServer' : 'system.northbound.standbyServer';
+  return (
+    <Card
+      size="small"
+      type="inner"
+      style={{
+        flex: '1 1 320px',
+        minWidth: 320,
+        borderColor: isActive ? '#1677ff' : undefined,
+        background: isActive ? '#e6f4ff' : undefined,
+      }}
+      styles={{ body: { padding: '12px 16px' } }}
+      title={
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600 }}>
+          {t(titleKey)}
+          {isActive && <Tag color="green" style={{ margin: 0 }}>{t('system.northbound.currentActive')}</Tag>}
+        </span>
+      }
+      extra={
+        !isActive ? (
+          <Button type="primary" size="small" icon={<SwapOutlined />} onClick={onSwitch}>
+            {t('system.northbound.switchToActive')}
+          </Button>
+        ) : null
+      }
+    >
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 24 }}>
+        <div style={infoItemStyle}>
+          <span style={{ color: 'rgba(0, 0, 0, 0.65)' }}>{t('common.ipAddress')}：</span>
+          <span style={{ fontWeight: 500 }}>{info.ip}</span>
+        </div>
+        <div style={infoItemStyle}>
+          <span style={{ color: 'rgba(0, 0, 0, 0.65)' }}>{t('common.port')}：</span>
+          <span style={{ fontWeight: 500 }}>{info.port}</span>
+        </div>
+        <div style={infoItemStyle}>
+          <span style={{ color: 'rgba(0, 0, 0, 0.65)' }}>{t('system.northbound.serviceStatus')}：</span>
+          <Tag color={info.status === 'running' ? 'green' : 'red'}>
+            {info.status === 'running' ? t('status.running') : t('status.stopped')}
+          </Tag>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
   const t = useT();
   const [users, setUsers] = useState<NorthboundUser[]>(mockUsers);
   const [modalVisible, setModalVisible] = useState(false);
   const [editingUser, setEditingUser] = useState<NorthboundUser | null>(null);
   const [userForm] = Form.useForm();
+
+  // 主备服务器：当前真实切换由后端完成，前端在 mock 阶段仅维护视图状态。
+  const [primary] = useState<ServerInfo>(initialPrimary);
+  const [standby] = useState<ServerInfo>(initialStandby);
+  const [activeRole, setActiveRole] = useState<ServerRole>('primary');
+
+  const handleSwitchActive = (target: ServerRole) => {
+    if (target === activeRole) return;
+    const targetLabel =
+      target === 'primary'
+        ? t('system.northbound.primaryServer')
+        : t('system.northbound.standbyServer');
+    Modal.confirm({
+      title: t('common.confirm'),
+      content: t('system.northbound.switchConfirm', { server: targetLabel }),
+      okText: t('common.confirm'),
+      cancelText: t('common.cancel'),
+      onOk: () => {
+        setActiveRole(target);
+        void message.success(t('system.northbound.switchSuccess'));
+      },
+    });
+  };
 
   const handleAddUser = () => {
     setEditingUser(null);
@@ -138,21 +229,27 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
         northboundPort: 8081,
         northboundServiceStatus: '1',
       }}>
-        {/* 服务信息 */}
-        <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.northbound.serviceInfo')}</span>} style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 32 }}>
-            <div style={infoItemStyle}>
-              <span style={{ color: 'rgba(0, 0, 0, 0.65)' }}>{t('common.ipAddress')}：</span>
-              <span style={{ fontWeight: 500 }}>192.168.1.100</span>
-            </div>
-            <div style={infoItemStyle}>
-              <span style={{ color: 'rgba(0, 0, 0, 0.65)' }}>{t('common.port')}：</span>
-              <span style={{ fontWeight: 500 }}>8081</span>
-            </div>
-            <div style={infoItemStyle}>
-              <span style={{ color: 'rgba(0, 0, 0, 0.65)' }}>{t('system.northbound.serviceStatus')}：</span>
-              <Tag color="green">{t('status.running')}</Tag>
-            </div>
+        {/* 服务信息：主用 / 备用 双服务器，支持主备切换 */}
+        <Card
+          size="small"
+          title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.northbound.serviceInfo')}</span>}
+          style={{ marginBottom: 16 }}
+        >
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+            <ServerInfoBlock
+              role="primary"
+              info={primary}
+              isActive={activeRole === 'primary'}
+              onSwitch={() => handleSwitchActive('primary')}
+              t={t}
+            />
+            <ServerInfoBlock
+              role="standby"
+              info={standby}
+              isActive={activeRole === 'standby'}
+              onSwitch={() => handleSwitchActive('standby')}
+              t={t}
+            />
           </div>
         </Card>
 

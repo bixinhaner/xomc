@@ -425,3 +425,12 @@ export function useBatchUpdateSysConfigs() {
     },
   });
 }
+
+// UI 定制化资产上传 — POST /admin/uploads/ui-asset。
+// 参 omgo/docs/prd/system/ui-customization.md §6.1。
+export function useUploadUIAsset() {
+  return useMutation({
+    mutationFn: (vars: { file: File | Blob; kind: 'login_bg' | 'logo_small' | 'logo_large' }) =>
+      adminApi.uploadUIAsset(vars.file, vars.kind),
+  });
+}
