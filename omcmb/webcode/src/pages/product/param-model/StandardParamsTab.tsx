@@ -1,0 +1,188 @@
+import { useState } from 'react';
+import { Card, Table, Input, Select, Space, Button, Modal, Form, Popconfirm, message } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import {
+  useStandardParams,
+  useUpsertStandard,
+  useDeleteStandard,
+} from '@core/hooks/api/useParamModels';
+import type { StandardParam, UpsertStandardInput } from '@core/types/paramModel';
+
+const ENTRY_OPTIONS = [
+  { label: '全部', value: '' },
+  { label: 'parameter', value: 'parameter' },
+  { label: 'object', value: 'object' },
+];
+
+export default function StandardParamsTab() {
+  const [keyword, setKeyword] = useState('');
+  const [entryType, setEntryType] = useState('');
+  const { data, isLoading } = useStandardParams({
+    keyword: keyword || undefined,
+    entryType: entryType || undefined,
+  });
+  const upsertMut = useUpsertStandard();
+  const deleteMut = useDeleteStandard();
+
+  const [editing, setEditing] = useState<StandardParam | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [form] = Form.useForm<UpsertStandardInput>();
+
+  const items = data?.items || [];
+
+  const columns = [
+    { title: 'standard_path', dataIndex: 'standardPath', ellipsis: true },
+    { title: 'entry_type', dataIndex: 'entryType', width: 100 },
+    { title: 'access', dataIndex: 'access', width: 100 },
+    { title: 'data_type', dataIndex: 'dataType', width: 100 },
+    { title: 'change_applies', dataIndex: 'changeApplies', width: 130 },
+    { title: 'min', dataIndex: 'minValue', width: 80 },
+    { title: 'max', dataIndex: 'maxValue', width: 80 },
+    {
+      title: '操作',
+      width: 120,
+      render: (_: unknown, row: StandardParam) => (
+        <Space>
+          <Button
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => {
+              setEditing(row);
+              form.setFieldsValue(row);
+            }}
+          />
+          <Popconfirm
+            title={`确认删除「${row.standardPath}」？`}
+            onConfirm={() =>
+              deleteMut
+                .mutateAsync(row.standardPath)
+                .then(() => message.success('已删除'))
+                .catch((e) => message.error((e as Error).message))
+            }
+          >
+            <Button size="small" danger icon={<DeleteOutlined />} />
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
+
+  const handleSave = async () => {
+    try {
+      const v = await form.validateFields();
+      await upsertMut.mutateAsync({ input: v, path: editing?.standardPath });
+      message.success(editing ? '已保存' : '已创建');
+      setEditing(null);
+      setCreating(false);
+      form.resetFields();
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (msg) message.error(msg);
+    }
+  };
+
+  return (
+    <Card
+      size="small"
+      title="标准参数树 / Standard Params"
+      extra={
+        <Space>
+          <Input.Search
+            placeholder="搜索 standard_path"
+            allowClear
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            style={{ width: 240 }}
+          />
+          <Select
+            value={entryType}
+            onChange={(v) => setEntryType(v)}
+            options={ENTRY_OPTIONS}
+            style={{ width: 120 }}
+          />
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              setCreating(true);
+              setEditing(null);
+              form.resetFields();
+              form.setFieldsValue({
+                entryType: 'parameter',
+                access: 'readWrite',
+                dataType: 'string',
+                changeApplies: 'reload',
+              });
+            }}
+          >
+            新增
+          </Button>
+        </Space>
+      }
+    >
+      <Table<StandardParam>
+        rowKey="standardPath"
+        loading={isLoading}
+        columns={columns}
+        dataSource={items}
+        size="small"
+        pagination={{ pageSize: 50, showSizeChanger: true }}
+      />
+      <Modal
+        title={editing ? '编辑标准参数' : '新增标准参数'}
+        open={Boolean(editing) || creating}
+        onOk={() => void handleSave()}
+        onCancel={() => {
+          setEditing(null);
+          setCreating(false);
+          form.resetFields();
+        }}
+        confirmLoading={upsertMut.isPending}
+        width={620}
+        destroyOnClose
+      >
+        <Form form={form} layout="vertical">
+          <Form.Item
+            name="standardPath"
+            label="standard_path"
+            rules={[{ required: true, message: '必填' }]}
+          >
+            <Input disabled={Boolean(editing)} />
+          </Form.Item>
+          <Space wrap>
+            <Form.Item name="entryType" label="entry_type" rules={[{ required: true }]}>
+              <Select
+                options={[
+                  { label: 'parameter', value: 'parameter' },
+                  { label: 'object', value: 'object' },
+                ]}
+                style={{ width: 140 }}
+              />
+            </Form.Item>
+            <Form.Item name="access" label="access" rules={[{ required: true }]}>
+              <Select
+                options={[
+                  { label: 'readWrite', value: 'readWrite' },
+                  { label: 'readOnly', value: 'readOnly' },
+                ]}
+                style={{ width: 140 }}
+              />
+            </Form.Item>
+            <Form.Item name="dataType" label="data_type" rules={[{ required: true }]}>
+              <Input style={{ width: 140 }} />
+            </Form.Item>
+            <Form.Item name="changeApplies" label="change_applies">
+              <Input style={{ width: 140 }} />
+            </Form.Item>
+            <Form.Item name="minValue" label="min">
+              <Input style={{ width: 140 }} />
+            </Form.Item>
+            <Form.Item name="maxValue" label="max">
+              <Input style={{ width: 140 }} />
+            </Form.Item>
+          </Space>
+        </Form>
+      </Modal>
+    </Card>
+  );
+}
