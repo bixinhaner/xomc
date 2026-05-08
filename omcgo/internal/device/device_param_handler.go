@@ -12,7 +12,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/config/datamodel"
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -24,57 +23,40 @@ import (
 
 // ParameterTreeHandler provides REST API handlers for the device parameter tree.
 //
-// T-0098 P2-07：双栈期 dmRegistry 与 paramRegistry 共存。当 paramRegistryEnabled
-// 为 true 且 productRegistry/paramRegistry 均注入、且基站 ProductClass 能命中
-// product 时，校验走 MappingValidator；否则降级到既有 dmRegistry 路径。
-//
-// 切换原则与 P2-02 verify §6 / 设计 §1.7 一致：feature flag 不写入 Registry 自身，
-// 由各消费者按需读取——本 handler 通过 paramRegistryEnabled 显式控制。
+// T-0098 P5-01：旧 dmRegistry / datamodel.ParameterValidator 路径已删除。
+// 现仅走 parammodel.MappingValidator（来自 paramRegistry + productRegistry 的
+// 双向映射）。元属性范围因此收敛到 ParamMapping 的 5 项（access / data_type /
+// change_applies / min_value / max_value）；description / default_value /
+// max_instances 等字段在 mapping 表外，本 handler 不再注入。
 type ParameterTreeHandler struct {
-	deviceService        *DeviceService
-	paramRepo            DeviceParameterRepository
-	dmRegistry           *datamodel.DataModelRegistry
-	paramRegistry        *parammodel.Registry
-	productRegistry      *product.Registry
-	paramRegistryEnabled bool
-	logger               *zap.Logger
+	deviceService   *DeviceService
+	paramRepo       DeviceParameterRepository
+	paramRegistry   *parammodel.Registry
+	productRegistry *product.Registry
+	logger          *zap.Logger
 }
 
 // NewParameterTreeHandler creates a new parameter tree handler.
-func NewParameterTreeHandler(deviceService *DeviceService, paramRepo DeviceParameterRepository, dmRegistry *datamodel.DataModelRegistry, logger *zap.Logger) *ParameterTreeHandler {
+func NewParameterTreeHandler(
+	deviceService *DeviceService,
+	paramRepo DeviceParameterRepository,
+	paramReg *parammodel.Registry,
+	prodReg *product.Registry,
+	logger *zap.Logger,
+) *ParameterTreeHandler {
 	return &ParameterTreeHandler{
-		deviceService: deviceService,
-		paramRepo:     paramRepo,
-		dmRegistry:    dmRegistry,
-		logger:        logger,
+		deviceService:   deviceService,
+		paramRepo:       paramRepo,
+		paramRegistry:   paramReg,
+		productRegistry: prodReg,
+		logger:          logger,
 	}
 }
 
-// WithParamRegistry 启用 T-0098 P2-07 dual-stack 模式。
-//
-// 调用方典型用法（provider/router.go）：
-//
-//	h := device.NewParameterTreeHandler(svc, repo, dmReg, logger).
-//	    WithParamRegistry(c.ParamRegistry, c.ProductRegistry, c.Cfg.ParamRegistry.UseNew)
-//
-// enabled=false 或 paramRegistry/productRegistry 为 nil 时，handler 退化到
-// 既有 dmRegistry 路径（与未调用本方法等价）。
-func (h *ParameterTreeHandler) WithParamRegistry(paramReg *parammodel.Registry, prodReg *product.Registry, enabled bool) *ParameterTreeHandler {
-	h.paramRegistry = paramReg
-	h.productRegistry = prodReg
-	h.paramRegistryEnabled = enabled && paramReg != nil && prodReg != nil
-	return h
-}
-
-// resolveMappingValidator 在 dual-stack 启用时尝试构造 MappingValidator。
-//
-// 返回 nil 时调用方需走旧 dmRegistry 路径。任意一步失败均静默 fallthrough，
-// 调试可通过 zap debug 字段排查。
+// resolveMappingValidator 尝试构造当前设备的 MappingValidator。
+// 任意一步失败返回 nil；调用方需做空检查后跳过校验/富化逻辑。
 func (h *ParameterTreeHandler) resolveMappingValidator(ctx context.Context, dev *model.Device) *parammodel.MappingValidator {
-	if !h.paramRegistryEnabled || h.paramRegistry == nil || h.productRegistry == nil || dev == nil {
-		return nil
-	}
-	if dev.ProductClass == "" {
+	if h.paramRegistry == nil || h.productRegistry == nil || dev == nil || dev.ProductClass == "" {
 		return nil
 	}
 	match, err := h.productRegistry.MatchProductClass(ctx, dev.ProductClass)
@@ -88,14 +70,20 @@ func (h *ParameterTreeHandler) resolveMappingValidator(ctx context.Context, dev 
 	return parammodel.NewMappingValidator(set)
 }
 
-// mappingValidationToLegacy 把 MappingValidationError 转成 datamodel.ValidationError，
-// 保持响应 JSON 形态稳定（path/rule/message）。Code → Rule 字段名映射。
-func mappingValidationToLegacy(ve *parammodel.MappingValidationError) datamodel.ValidationError {
-	return datamodel.ValidationError{
-		Path:    ve.Path,
-		Rule:    ve.Code,
-		Message: ve.Message,
+// Constraints 是参数取值范围的简化表示，对齐前端字段（路径上 JSON key=constraints）。
+// 仅承载数值上下限；字符串长度/枚举/正则不在 ParamMapping 范畴内。
+type Constraints struct {
+	MinValue *int64 `json:"min_value,omitempty"`
+	MaxValue *int64 `json:"max_value,omitempty"`
+}
+
+// constraintsFromMapping 把 ParamMapping 的 MinValue/MaxValue 收集为 Constraints；
+// 二者全空返回 nil（避免返回无意义对象）。
+func constraintsFromMapping(m *parammodel.ParamMapping) *Constraints {
+	if m == nil || (m.MinValue == nil && m.MaxValue == nil) {
+		return nil
 	}
+	return &Constraints{MinValue: m.MinValue, MaxValue: m.MaxValue}
 }
 
 // RegisterRoutes registers parameter tree routes.
@@ -119,41 +107,41 @@ func (h *ParameterTreeHandler) RegisterRoutes(rg *gin.RouterGroup) {
 
 // ParameterTreeNode represents a node in the parameter tree hierarchy.
 type ParameterTreeNode struct {
-	Name          string               `json:"name"`
-	FullPath      string               `json:"full_path"`
-	IsLeaf        bool                 `json:"is_leaf"`
-	Value         string               `json:"value,omitempty"`
-	Type          string               `json:"type,omitempty"`
-	Writable      bool                 `json:"writable"`
-	Children      []*ParameterTreeNode `json:"children,omitempty"`
-	// Model metadata (enriched from data model)
-	Description   string                     `json:"description,omitempty"`
-	MultiInstance bool                       `json:"multi_instance,omitempty"`
-	MaxInstances  int                        `json:"max_instances,omitempty"`
-	MinInstances  int                        `json:"min_instances,omitempty"`
-	InstanceCount int                        `json:"instance_count,omitempty"`
-	CanAdd        bool                       `json:"can_add,omitempty"`
-	CanDelete     bool                       `json:"can_delete,omitempty"`
-	ChangeApplies string                     `json:"change_applies,omitempty"`
-	DefaultValue  string                     `json:"default_value,omitempty"`
-	Constraints   *datamodel.Constraints     `json:"constraints,omitempty"`
+	Name     string               `json:"name"`
+	FullPath string               `json:"full_path"`
+	IsLeaf   bool                 `json:"is_leaf"`
+	Value    string               `json:"value,omitempty"`
+	Type     string               `json:"type,omitempty"`
+	Writable bool                 `json:"writable"`
+	Children []*ParameterTreeNode `json:"children,omitempty"`
+	// Model metadata (enriched from MappingValidator)
+	Description   string       `json:"description,omitempty"`
+	MultiInstance bool         `json:"multi_instance,omitempty"`
+	MaxInstances  int          `json:"max_instances,omitempty"`
+	MinInstances  int          `json:"min_instances,omitempty"`
+	InstanceCount int          `json:"instance_count,omitempty"`
+	CanAdd        bool         `json:"can_add,omitempty"`
+	CanDelete     bool         `json:"can_delete,omitempty"`
+	ChangeApplies string       `json:"change_applies,omitempty"`
+	DefaultValue  string       `json:"default_value,omitempty"`
+	Constraints   *Constraints `json:"constraints,omitempty"`
 }
 
 // ParameterSchemaItem represents a parameter with schema and current value info.
 type ParameterSchemaItem struct {
-	Path          string                 `json:"path"`
-	Type          string                 `json:"type"`
-	Writable      bool                   `json:"writable"`
-	Description   string                 `json:"description,omitempty"`
-	DefaultValue  string                 `json:"default_value,omitempty"`
-	Notify        string                 `json:"notify,omitempty"`
-	ForcedInform  bool                   `json:"forced_inform,omitempty"`
-	ChangeApplies string                 `json:"change_applies,omitempty"`
-	Category      string                 `json:"category,omitempty"`
-	IsList        bool                   `json:"is_list,omitempty"`
-	Constraints   *datamodel.Constraints `json:"constraints,omitempty"`
-	CurrentValue  *string                `json:"current_value"`
-	LastSyncedAt  *time.Time             `json:"last_synced_at,omitempty"`
+	Path          string       `json:"path"`
+	Type          string       `json:"type"`
+	Writable      bool         `json:"writable"`
+	Description   string       `json:"description,omitempty"`
+	DefaultValue  string       `json:"default_value,omitempty"`
+	Notify        string       `json:"notify,omitempty"`
+	ForcedInform  bool         `json:"forced_inform,omitempty"`
+	ChangeApplies string       `json:"change_applies,omitempty"`
+	Category      string       `json:"category,omitempty"`
+	IsList        bool         `json:"is_list,omitempty"`
+	Constraints   *Constraints `json:"constraints,omitempty"`
+	CurrentValue  *string      `json:"current_value"`
+	LastSyncedAt  *time.Time   `json:"last_synced_at,omitempty"`
 }
 
 // ObjectSchemaItem represents a multi-instance object with schema info.
@@ -192,22 +180,15 @@ func (h *ParameterTreeHandler) GetParameterTree(c *gin.Context) {
 
 	tree := buildTree(params)
 
-	// Enrich tree with model metadata if available.
-	if h.dmRegistry != nil {
-		dev, devErr := h.deviceService.GetDevice(c.Request.Context(), id)
-		if devErr == nil && dev != nil {
-			dm, _ := h.dmRegistry.ResolveForDevice(c.Request.Context(), dev)
-			if dm != nil {
-				validator, _ := datamodel.NewParameterValidator(dm)
-				if validator != nil {
-					enrichTreeWithModel(tree, validator)
-				}
-			}
+	// Enrich tree with mapping metadata if available.
+	dev, devErr := h.deviceService.GetDevice(c.Request.Context(), id)
+	if devErr == nil && dev != nil {
+		if mv := h.resolveMappingValidator(c.Request.Context(), dev); mv != nil {
+			enrichTreeWithMapping(tree, mv)
 		}
 	}
 
 	// objects_only=true 时只返回对象/文件夹节点，去掉所有叶子节点。
-	// 用于左侧树面板，将 ~5925 节点缩减为 ~200 个文件夹节点。
 	if c.DefaultQuery("objects_only", "false") == "true" {
 		tree = stripLeafNodes(tree)
 	}
@@ -216,7 +197,6 @@ func (h *ParameterTreeHandler) GetParameterTree(c *gin.Context) {
 }
 
 // SearchParameters handles GET /api/v1/devices/:id/parameter-tree/search.
-// Searches parameters by path keyword.
 func (h *ParameterTreeHandler) SearchParameters(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -252,7 +232,6 @@ type SetParameterValuesRequest struct {
 }
 
 // SetParameterValues handles PUT /api/v1/devices/:id/parameter-tree.
-// Queues SetParameterValues RPC for the device.
 func (h *ParameterTreeHandler) SetParameterValues(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -266,7 +245,6 @@ func (h *ParameterTreeHandler) SetParameterValues(c *gin.Context) {
 		return
 	}
 
-	// Verify device exists.
 	dev, err := h.deviceService.GetDevice(c.Request.Context(), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
@@ -296,14 +274,13 @@ func (h *ParameterTreeHandler) SetParameterValues(c *gin.Context) {
 		}
 	}
 
-	// Model-based validation — T-0098 P2-07：先尝试新 MappingValidator，
-	// 落空再降级到 dmRegistry。两条路径只走其一。
+	// Mapping-based validation（T-0098 P5-01：已无 dmRegistry 兜底，未命中即跳过）。
 	var rebootRequired bool
 	if mv := h.resolveMappingValidator(c.Request.Context(), dev); mv != nil {
-		var validationErrors []datamodel.ValidationError
+		var validationErrors []*parammodel.MappingValidationError
 		for _, item := range req.Parameters {
 			if ve := mv.ValidateValue(item.Path, item.Value); ve != nil {
-				validationErrors = append(validationErrors, mappingValidationToLegacy(ve))
+				validationErrors = append(validationErrors, ve)
 			}
 		}
 		if len(validationErrors) > 0 {
@@ -320,37 +297,8 @@ func (h *ParameterTreeHandler) SetParameterValues(c *gin.Context) {
 				}
 			}
 		}
-	} else if h.dmRegistry != nil {
-		dm, _ := h.dmRegistry.ResolveForDevice(c.Request.Context(), dev)
-		if dm != nil {
-			validator, validatorErr := datamodel.NewParameterValidator(dm)
-			if validatorErr == nil {
-				var validationErrors []datamodel.ValidationError
-				for _, item := range req.Parameters {
-					if ve := validator.ValidateValue(item.Path, item.Value); ve != nil {
-						validationErrors = append(validationErrors, *ve)
-					}
-				}
-				if len(validationErrors) > 0 {
-					response.FailWithData(c, http.StatusBadRequest,
-						"parameter validation failed",
-						gin.H{"validation_errors": validationErrors})
-					return
-				}
-				// Check if any parameter requires reboot.
-				for _, item := range req.Parameters {
-					if def := validator.LookupParam(item.Path); def != nil {
-						if def.ChangeApplies == "RebootRequired" || def.ChangeApplies == "NotifyRequired" {
-							rebootRequired = true
-							break
-						}
-					}
-				}
-			}
-		}
 	}
 
-	// Queue SPV command via device service.
 	if err := h.deviceService.SetParameters(c.Request.Context(), id, req.Parameters); err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
@@ -364,7 +312,6 @@ func (h *ParameterTreeHandler) SetParameterValues(c *gin.Context) {
 }
 
 // TriggerSync handles POST /api/v1/devices/:id/parameters/sync.
-// Triggers a manual parameter value sync for the device.
 func (h *ParameterTreeHandler) TriggerSync(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -382,7 +329,6 @@ func (h *ParameterTreeHandler) TriggerSync(c *gin.Context) {
 		return
 	}
 
-	// Get existing parameters to sync.
 	params, err := h.paramRepo.GetByDevice(c.Request.Context(), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
@@ -394,7 +340,6 @@ func (h *ParameterTreeHandler) TriggerSync(c *gin.Context) {
 		return
 	}
 
-	// Enqueue GPV for all parameter paths.
 	paths := make([]string, 0, len(params))
 	for _, p := range params {
 		paths = append(paths, p.ParameterPath)
@@ -429,7 +374,6 @@ func (h *ParameterTreeHandler) TriggerSync(c *gin.Context) {
 }
 
 // TriggerDiscover handles POST /api/v1/devices/:id/parameters/discover.
-// Triggers a manual parameter tree discovery for the device.
 func (h *ParameterTreeHandler) TriggerDiscover(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -447,7 +391,6 @@ func (h *ParameterTreeHandler) TriggerDiscover(c *gin.Context) {
 		return
 	}
 
-	// Enqueue GPN for full tree discovery.
 	gpnParams, _ := json.Marshal(map[string]interface{}{
 		"path":       "Device.",
 		"next_level": false,
@@ -475,7 +418,6 @@ func (h *ParameterTreeHandler) TriggerDiscover(c *gin.Context) {
 }
 
 // GetSyncStatus handles GET /api/v1/devices/:id/parameters/sync-status.
-// Returns the current sync/discovery status for the device.
 func (h *ParameterTreeHandler) GetSyncStatus(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -483,14 +425,12 @@ func (h *ParameterTreeHandler) GetSyncStatus(c *gin.Context) {
 		return
 	}
 
-	// Get parameter count and last update time.
 	params, err := h.paramRepo.GetByDevice(c.Request.Context(), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 
-	// Check pending commands in queue.
 	var pendingCommands int64
 	if taskSvc := h.deviceService.GetTaskService(); taskSvc != nil {
 		dev, devErr := h.deviceService.GetDevice(c.Request.Context(), id)
@@ -512,7 +452,6 @@ func (h *ParameterTreeHandler) GetSyncStatus(c *gin.Context) {
 }
 
 // SyncConfigFile handles POST /api/v1/devices/:id/config-file/sync.
-// Triggers an Upload RPC with filetype=11 (Configuration File) to sync device config.
 func (h *ParameterTreeHandler) SyncConfigFile(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -530,29 +469,21 @@ func (h *ParameterTreeHandler) SyncConfigFile(c *gin.Context) {
 		return
 	}
 
-	// 检查任务服务是否可用
 	if h.deviceService.GetTaskService() == nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("task service not configured"))
 		return
 	}
 
-	// 创建 Upload RPC 命令，filetype=11 (Configuration File / Data Model)
-	// URL 将由 ACS 的 Upload handler 根据 upload server 配置自动填充
 	uploadParams, _ := json.Marshal(map[string]interface{}{
-		"file_type":       "11", // Configuration File / Data Model
-		"url":             "",   // 由 ACS 根据 upload server 配置自动填充
-		"username":        "",
-		"password":        "",
-		"delay_seconds":   0,
-		"no_more_requests": 1, // 这是最后一个请求
+		"file_type":        "11",
+		"url":              "",
+		"username":         "",
+		"password":         "",
+		"delay_seconds":    0,
+		"no_more_requests": 1,
 	})
 
 	taskSvc := h.deviceService.GetTaskService()
-	if taskSvc == nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("task service not configured"))
-		return
-	}
-
 	created, err := taskSvc.CreateTask(c.Request.Context(), &task.CreateTaskRequest{
 		DeviceSN:   dev.SerialNumber,
 		Method:     "Upload",
@@ -623,18 +554,16 @@ func buildTree(params []model.DeviceParameter) []*ParameterTreeNode {
 }
 
 // stripLeafNodes 递归移除树中的所有叶子节点，只保留对象/文件夹节点。
-// 同时过滤掉数据模型模板占位符（如 {i}），这些是多实例对象的模板路径，不应展示。
+// 同时过滤掉数据模型模板占位符（如 {i}），这些是多实例对象的模板路径。
 func stripLeafNodes(nodes []*ParameterTreeNode) []*ParameterTreeNode {
 	var result []*ParameterTreeNode
 	for _, node := range nodes {
 		if node.IsLeaf {
 			continue
 		}
-		// 跳过数据模型模板占位符节点（如 {i}、{i+1} 等）
 		if strings.Contains(node.Name, "{") {
 			continue
 		}
-		// 递归处理子节点
 		node.Children = stripLeafNodes(node.Children)
 		result = append(result, node)
 	}
@@ -652,15 +581,15 @@ type DirectChildrenResponse struct {
 
 // ChildParameterItem 富化叶子参数，包含数据模型元数据。
 type ChildParameterItem struct {
-	ParameterPath  string                 `json:"parameter_path"`
-	ParameterValue string                 `json:"parameter_value"`
-	ParameterType  string                 `json:"parameter_type"`
-	Writable       bool                   `json:"writable"`
-	LastUpdatedAt  string                 `json:"last_updated_at"`
-	Description    string                 `json:"description,omitempty"`
-	DefaultValue   string                 `json:"default_value,omitempty"`
-	ChangeApplies  string                 `json:"change_applies,omitempty"`
-	Constraints    *datamodel.Constraints `json:"constraints,omitempty"`
+	ParameterPath  string       `json:"parameter_path"`
+	ParameterValue string       `json:"parameter_value"`
+	ParameterType  string       `json:"parameter_type"`
+	Writable       bool         `json:"writable"`
+	LastUpdatedAt  string       `json:"last_updated_at"`
+	Description    string       `json:"description,omitempty"`
+	DefaultValue   string       `json:"default_value,omitempty"`
+	ChangeApplies  string       `json:"change_applies,omitempty"`
+	Constraints    *Constraints `json:"constraints,omitempty"`
 }
 
 // SubObjectSummary 子对象摘要，包含名称和后代参数数量。
@@ -671,7 +600,6 @@ type SubObjectSummary struct {
 }
 
 // GetDirectChildren handles GET /api/v1/devices/:id/parameters/children.
-// 返回指定 path_prefix 下的直接叶子参数（分页）和直接子对象列表。
 func (h *ParameterTreeHandler) GetDirectChildren(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -699,27 +627,24 @@ func (h *ParameterTreeHandler) GetDirectChildren(c *gin.Context) {
 	}
 	offset := (page - 1) * pageSize
 
-	// 1. 获取直接叶子参数（分页）
 	leaves, total, err := h.paramRepo.GetDirectChildLeaves(c.Request.Context(), id, pathPrefix, pageSize, offset)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 
-	// 2. 计算直接子对象：获取该前缀下所有更深层级的参数，提取第一级子路径段
 	allDescendants, err := h.paramRepo.GetByPathPrefix(c.Request.Context(), id, pathPrefix)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 
-	subObjectCounts := make(map[string]int) // segment name -> 后代参数计数
+	subObjectCounts := make(map[string]int)
 	for _, p := range allDescendants {
 		suffix := strings.TrimPrefix(p.ParameterPath, pathPrefix)
 		if suffix == "" {
 			continue
 		}
-		// 如果 suffix 不包含 "."，是直接叶子（已通过 SQL 查询获取），跳过
 		dotIdx := strings.Index(suffix, ".")
 		if dotIdx < 0 {
 			continue
@@ -736,22 +661,15 @@ func (h *ParameterTreeHandler) GetDirectChildren(c *gin.Context) {
 			ChildCount: count,
 		})
 	}
-	// 按名称排序
 	sort.Slice(subObjects, func(i, j int) bool {
 		return subObjects[i].Name < subObjects[j].Name
 	})
 
-	// 3. 构建富化叶子参数（含数据模型元数据）
 	items := make([]ChildParameterItem, 0, len(leaves))
-	var validator *datamodel.ParameterValidator
-	if h.dmRegistry != nil {
-		dev, devErr := h.deviceService.GetDevice(c.Request.Context(), id)
-		if devErr == nil && dev != nil {
-			dm, _ := h.dmRegistry.ResolveForDevice(c.Request.Context(), dev)
-			if dm != nil {
-				validator, _ = datamodel.NewParameterValidator(dm)
-			}
-		}
+	var mv *parammodel.MappingValidator
+	dev, devErr := h.deviceService.GetDevice(c.Request.Context(), id)
+	if devErr == nil && dev != nil {
+		mv = h.resolveMappingValidator(c.Request.Context(), dev)
 	}
 
 	for _, p := range leaves {
@@ -762,18 +680,16 @@ func (h *ParameterTreeHandler) GetDirectChildren(c *gin.Context) {
 			Writable:       p.Writable,
 			LastUpdatedAt:  p.LastUpdatedAt.Format(time.RFC3339),
 		}
-		if validator != nil {
-			if def := validator.LookupParam(p.ParameterPath); def != nil {
-				if def.Writable {
+		if mv != nil {
+			if def := mv.LookupParam(p.ParameterPath); def != nil {
+				if parammodel.IsAccessWritable(def.Access) {
 					item.Writable = true
 				}
-				if def.Type != "" {
-					item.ParameterType = def.Type
+				if def.DataType != "" {
+					item.ParameterType = def.DataType
 				}
-				item.Description = def.Description
-				item.DefaultValue = def.DefaultValue
 				item.ChangeApplies = def.ChangeApplies
-				item.Constraints = def.Constraints
+				item.Constraints = constraintsFromMapping(def)
 			}
 		}
 		items = append(items, item)
@@ -789,7 +705,6 @@ func (h *ParameterTreeHandler) GetDirectChildren(c *gin.Context) {
 }
 
 // GetParameterSchema handles GET /api/v1/devices/:id/parameters/schema.
-// Returns parameters with schema metadata and current values.
 func (h *ParameterTreeHandler) GetParameterSchema(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -809,7 +724,6 @@ func (h *ParameterTreeHandler) GetParameterSchema(c *gin.Context) {
 		return
 	}
 
-	// Get current parameter values.
 	var params []model.DeviceParameter
 	if pathPrefix != "" {
 		params, err = h.paramRepo.GetByPathPrefix(c.Request.Context(), id, pathPrefix)
@@ -821,23 +735,15 @@ func (h *ParameterTreeHandler) GetParameterSchema(c *gin.Context) {
 		return
 	}
 
-	// Try to get data model for schema enrichment.
 	var schemaItems []ParameterSchemaItem
 	var objectItems []ObjectSchemaItem
 
-	if h.dmRegistry != nil {
-		dm, _ := h.dmRegistry.ResolveForDevice(c.Request.Context(), dev)
-		if dm != nil {
-			validator, _ := datamodel.NewParameterValidator(dm)
-			if validator != nil {
-				schemaItems = mergeSchemaWithValues(validator, params, pathPrefix)
-				objectItems = buildObjectSchema(validator, params, pathPrefix)
-			}
-		}
+	if mv := h.resolveMappingValidator(c.Request.Context(), dev); mv != nil {
+		schemaItems = mergeSchemaWithValues(mv, params, pathPrefix)
+		objectItems = buildObjectSchema(mv, params, pathPrefix)
 	}
 
 	if schemaItems == nil {
-		// Fallback: return basic parameter info without model metadata.
 		schemaItems = make([]ParameterSchemaItem, 0, len(params))
 		for _, p := range params {
 			val := p.ParameterValue
@@ -858,8 +764,11 @@ func (h *ParameterTreeHandler) GetParameterSchema(c *gin.Context) {
 	})
 }
 
-func mergeSchemaWithValues(validator *datamodel.ParameterValidator, params []model.DeviceParameter, pathPrefix string) []ParameterSchemaItem {
-	var items []ParameterSchemaItem
+// mergeSchemaWithValues 用 MappingValidator 富化参数 schema。
+// MappingValidator 不承载 description / default / notify / forced_inform / category / is_list；
+// 这些字段在响应里会留空（向前兼容）。
+func mergeSchemaWithValues(mv *parammodel.MappingValidator, params []model.DeviceParameter, pathPrefix string) []ParameterSchemaItem {
+	items := make([]ParameterSchemaItem, 0, len(params))
 
 	for _, p := range params {
 		if pathPrefix != "" && !strings.HasPrefix(p.ParameterPath, pathPrefix) {
@@ -872,17 +781,11 @@ func mergeSchemaWithValues(validator *datamodel.ParameterValidator, params []mod
 			LastSyncedAt: &p.LastUpdatedAt,
 		}
 
-		if def := validator.LookupParam(p.ParameterPath); def != nil {
-			item.Type = def.Type
-			item.Writable = def.Writable
-			item.Description = def.Description
-			item.DefaultValue = def.DefaultValue
-			item.Notify = def.Notify
-			item.ForcedInform = def.ForcedInform
+		if def := mv.LookupParam(p.ParameterPath); def != nil {
+			item.Type = def.DataType
+			item.Writable = parammodel.IsAccessWritable(def.Access)
 			item.ChangeApplies = def.ChangeApplies
-			item.Category = def.Category
-			item.IsList = def.IsList
-			item.Constraints = def.Constraints
+			item.Constraints = constraintsFromMapping(def)
 		} else {
 			item.Type = string(p.ParameterType)
 			item.Writable = p.Writable
@@ -893,16 +796,15 @@ func mergeSchemaWithValues(validator *datamodel.ParameterValidator, params []mod
 	return items
 }
 
-func buildObjectSchema(validator *datamodel.ParameterValidator, params []model.DeviceParameter, pathPrefix string) []ObjectSchemaItem {
-	// Discover multi-instance objects from actual parameter paths.
-	objectInstances := make(map[string]map[int]bool) // objectPrefix -> set of instance numbers
+// buildObjectSchema 从实际参数路径推断多实例对象 + 用 MappingValidator 补 access / writable。
+// MappingValidator 不存 max/min instances；本响应字段设 0，前端做空值处理。
+func buildObjectSchema(mv *parammodel.MappingValidator, params []model.DeviceParameter, pathPrefix string) []ObjectSchemaItem {
+	objectInstances := make(map[string]map[int]bool)
 
 	for _, p := range params {
-		refs := datamodel.ExtractInstanceNumbers(p.ParameterPath)
-		// Build the object path prefix for each instance ref.
+		refs := extractInstanceRefs(p.ParameterPath)
 		path := p.ParameterPath
 		for _, ref := range refs {
-			// Find the position of "ref.Segment.ref.Instance." in the path.
 			search := fmt.Sprintf("%s.%d.", ref.Segment, ref.Instance)
 			idx := strings.Index(path, search)
 			if idx >= 0 {
@@ -915,7 +817,7 @@ func buildObjectSchema(validator *datamodel.ParameterValidator, params []model.D
 		}
 	}
 
-	var items []ObjectSchemaItem
+	items := make([]ObjectSchemaItem, 0, len(objectInstances))
 	for objPrefix, instSet := range objectInstances {
 		if pathPrefix != "" && !strings.HasPrefix(objPrefix, pathPrefix) && !strings.HasPrefix(pathPrefix, objPrefix) {
 			continue
@@ -932,13 +834,11 @@ func buildObjectSchema(validator *datamodel.ParameterValidator, params []model.D
 			CurrentInstances: instances,
 		}
 
-		if obj := validator.LookupObject(objPrefix); obj != nil {
+		if obj := mv.LookupObject(objPrefix); obj != nil {
 			item.Access = obj.Access
-			item.MaxInstances = obj.MaxInstances
-			item.MinInstances = datamodel.GetMinInstances(*obj)
-			item.IsList = obj.IsList
-			item.CanAdd = obj.Access == "READ_WRITE" && (obj.MaxInstances == 0 || len(instances) < obj.MaxInstances)
-			item.CanDeleteAny = obj.Access == "READ_WRITE" && len(instances) > item.MinInstances
+			canWrite := parammodel.IsAccessWritable(obj.Access)
+			item.CanAdd = canWrite
+			item.CanDeleteAny = canWrite && len(instances) > 0
 		}
 
 		items = append(items, item)
@@ -947,21 +847,19 @@ func buildObjectSchema(validator *datamodel.ParameterValidator, params []model.D
 	return items
 }
 
-func enrichTreeWithModel(nodes []*ParameterTreeNode, v *datamodel.ParameterValidator) {
+// enrichTreeWithMapping 用 MappingValidator 给 ParameterTreeNode 补元属性。
+// 多实例容器节点的 MaxInstances/MinInstances/CanAdd/CanDelete 因 mapping 不存这些字段，
+// 退化为：仅在 access 含写权限时允许 CanAdd / CanDelete。
+func enrichTreeWithMapping(nodes []*ParameterTreeNode, mv *parammodel.MappingValidator) {
 	for _, node := range nodes {
 		if node.IsLeaf {
-			if def := v.LookupParam(node.FullPath); def != nil {
-				node.Writable = def.Writable
-				node.Type = def.Type
-				node.Description = def.Description
+			if def := mv.LookupParam(node.FullPath); def != nil {
+				node.Writable = parammodel.IsAccessWritable(def.Access)
+				node.Type = def.DataType
 				node.ChangeApplies = def.ChangeApplies
-				node.DefaultValue = def.DefaultValue
-				node.Constraints = def.Constraints
+				node.Constraints = constraintsFromMapping(def)
 			}
 		} else {
-			// 判断是否为多实例容器：子节点中有数字命名的实例（如 1, 2, 3）。
-			// 不能依赖 LookupObject 返回的模板定义，因为实例节点（如 Interface.1）
-			// 也会匹配到模板（如 Interface.{12}），导致误标记。
 			instanceCount := 0
 			for _, child := range node.Children {
 				if !child.IsLeaf && isNumericName(child.Name) {
@@ -971,24 +869,20 @@ func enrichTreeWithModel(nodes []*ParameterTreeNode, v *datamodel.ParameterValid
 			if instanceCount > 0 {
 				node.MultiInstance = true
 				node.InstanceCount = instanceCount
-				// 通过第一个实例子节点反查数据模型模板定义，获取约束信息。
 				for _, child := range node.Children {
 					if !child.IsLeaf && isNumericName(child.Name) {
 						templatePath := child.FullPath + "."
-						if obj := v.LookupObject(templatePath); obj != nil {
-							node.MaxInstances = obj.MaxInstances
-							node.MinInstances = datamodel.GetMinInstances(*obj)
-							node.CanAdd = obj.Access == "READ_WRITE" &&
-								(obj.MaxInstances == 0 || instanceCount < obj.MaxInstances)
-							node.CanDelete = obj.Access == "READ_WRITE" &&
-								instanceCount > node.MinInstances
+						if obj := mv.LookupObject(templatePath); obj != nil {
+							canWrite := parammodel.IsAccessWritable(obj.Access)
+							node.CanAdd = canWrite
+							node.CanDelete = canWrite && instanceCount > 0
 						}
 						break
 					}
 				}
 			}
 		}
-		enrichTreeWithModel(node.Children, v)
+		enrichTreeWithMapping(node.Children, mv)
 	}
 }
 
@@ -998,13 +892,32 @@ func isNumericName(name string) bool {
 	return err == nil
 }
 
+// instanceRef 表示一条多实例引用（e.g. "Foo.7" → segment="Foo" instance=7）。
+type instanceRef struct {
+	Segment  string
+	Instance int
+}
+
+// extractInstanceRefs 从参数路径里抽出 ".<segment>.<num>." 形态的多实例引用。
+// 等价于旧 datamodel.ExtractInstanceNumbers。
+func extractInstanceRefs(path string) []instanceRef {
+	parts := strings.Split(path, ".")
+	var refs []instanceRef
+	for i := 1; i < len(parts); i++ {
+		if isNumericName(parts[i]) && parts[i-1] != "" {
+			n, _ := strconv.Atoi(parts[i])
+			refs = append(refs, instanceRef{Segment: parts[i-1], Instance: n})
+		}
+	}
+	return refs
+}
+
 // AddObjectRequest defines the request body for adding a multi-instance object.
 type AddObjectRequest struct {
 	ObjectPath string `json:"object_path" binding:"required"`
 }
 
 // AddObject handles POST /api/v1/devices/:id/objects/add.
-// Queues an AddObject RPC for the device.
 func (h *ParameterTreeHandler) AddObject(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -1028,26 +941,12 @@ func (h *ParameterTreeHandler) AddObject(c *gin.Context) {
 		return
 	}
 
-	// Validate using data model — T-0098 P2-07：MappingValidator 优先，dmRegistry 兜底。
 	if mv := h.resolveMappingValidator(c.Request.Context(), dev); mv != nil {
 		currentCount, _ := h.countInstances(c.Request.Context(), id, req.ObjectPath)
 		if ve := mv.ValidateAddObject(req.ObjectPath, currentCount); ve != nil {
 			response.FailWithData(c, http.StatusBadRequest,
 				"add object validation failed", gin.H{"details": ve})
 			return
-		}
-	} else if h.dmRegistry != nil {
-		dm, _ := h.dmRegistry.ResolveForDevice(c.Request.Context(), dev)
-		if dm != nil {
-			validator, _ := datamodel.NewParameterValidator(dm)
-			if validator != nil {
-				currentCount, _ := h.countInstances(c.Request.Context(), id, req.ObjectPath)
-				if ve := validator.ValidateAddObject(req.ObjectPath, currentCount); ve != nil {
-					response.FailWithData(c, http.StatusBadRequest,
-						"add object validation failed", gin.H{"details": ve})
-					return
-				}
-			}
 		}
 	}
 
@@ -1081,7 +980,6 @@ type DeleteObjectRequest struct {
 }
 
 // DeleteObject handles POST /api/v1/devices/:id/objects/delete.
-// Queues a DeleteObject RPC for the device.
 func (h *ParameterTreeHandler) DeleteObject(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -1105,10 +1003,8 @@ func (h *ParameterTreeHandler) DeleteObject(c *gin.Context) {
 		return
 	}
 
-	// Extract parent object path for validation.
 	parentPath := extractParentObjectPath(req.ObjectPath)
 
-	// Validate using data model — T-0098 P2-07：MappingValidator 优先，dmRegistry 兜底。
 	if parentPath != "" {
 		if mv := h.resolveMappingValidator(c.Request.Context(), dev); mv != nil {
 			currentCount, _ := h.countInstances(c.Request.Context(), id, parentPath)
@@ -1116,19 +1012,6 @@ func (h *ParameterTreeHandler) DeleteObject(c *gin.Context) {
 				response.FailWithData(c, http.StatusBadRequest,
 					"delete object validation failed", gin.H{"details": ve})
 				return
-			}
-		} else if h.dmRegistry != nil {
-			dm, _ := h.dmRegistry.ResolveForDevice(c.Request.Context(), dev)
-			if dm != nil {
-				validator, _ := datamodel.NewParameterValidator(dm)
-				if validator != nil {
-					currentCount, _ := h.countInstances(c.Request.Context(), id, parentPath)
-					if ve := validator.ValidateDeleteObject(parentPath, currentCount); ve != nil {
-						response.FailWithData(c, http.StatusBadRequest,
-							"delete object validation failed", gin.H{"details": ve})
-						return
-					}
-				}
 			}
 		}
 	}
@@ -1179,14 +1062,12 @@ func (h *ParameterTreeHandler) countInstances(ctx context.Context, deviceID uuid
 }
 
 // extractParentObjectPath extracts the parent object path from an instance path.
-// "Device.Services.FAPService.1.CellConfig.LTE.EPC.PLMNList.3." -> "Device.Services.FAPService.1.CellConfig.LTE.EPC.PLMNList."
 func extractParentObjectPath(instancePath string) string {
 	path := strings.TrimSuffix(instancePath, ".")
 	parts := strings.Split(path, ".")
 	if len(parts) < 2 {
 		return ""
 	}
-	// Check if the last part is a number (instance number).
 	if _, err := strconv.Atoi(parts[len(parts)-1]); err == nil {
 		return strings.Join(parts[:len(parts)-1], ".") + "."
 	}

@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/task"
-	"github.com/omcgo/omcgo/internal/config/datamodel"
 	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/carrier"
@@ -185,16 +184,14 @@ func newEngineHarness(deviceRepo device.DeviceRepository) *engineHarness {
 	evtBus := &mockEventBus{}
 	logger := zap.NewNop()
 
-	// Construct real (lightweight) collaborators that the engine expects.
+	// T-0098 P5-01：dmRegistry 已删除，引擎仅依赖 deviceService/templateService/carrierReg。
 	devService := device.NewDeviceService(deviceRepo, nil, nil, nil, logger)
-	dmRegistry := datamodel.NewDataModelRegistry(nil, nil, logger)
 	tmplService := template.NewConfigTemplateService(nil, logger)
 	carrierReg := carrier.NewRegistry()
 
 	engine := NewProvisioningEngine(
 		taskRepo,
 		devService,
-		dmRegistry,
 		tmplService,
 		carrierReg,
 		cmdQueue,
@@ -828,115 +825,23 @@ func (m *mockTemplateRepo) FindBestMatch(ctx context.Context, carrier model.Carr
 	return nil, nil
 }
 
-type mockDataModelRepo struct {
-	CreateFn     func(ctx context.Context, dm *datamodel.DataModel) error
-	GetByIDFn    func(ctx context.Context, id uuid.UUID) (*datamodel.DataModel, error)
-	UpdateFn     func(ctx context.Context, dm *datamodel.DataModel) error
-	DeleteFn     func(ctx context.Context, id uuid.UUID) error
-	ListFn       func(ctx context.Context, filter datamodel.DataModelFilter) (*model.ListResponse[datamodel.DataModel], error)
-	FindActiveFn func(ctx context.Context, carrier model.CarrierCode, tech model.Technology, oui, productClass string, scope model.DataModelScope) (*datamodel.DataModel, error)
-	ActivateFn   func(ctx context.Context, id uuid.UUID) error
-	DeprecateFn  func(ctx context.Context, id uuid.UUID) error
-	StatisticsFn func(ctx context.Context) (*datamodel.DataModelStats, error)
-}
-
-func (m *mockDataModelRepo) Create(ctx context.Context, dm *datamodel.DataModel) error {
-	if m.CreateFn != nil {
-		return m.CreateFn(ctx, dm)
-	}
-	return nil
-}
-
-func (m *mockDataModelRepo) GetByID(ctx context.Context, id uuid.UUID) (*datamodel.DataModel, error) {
-	if m.GetByIDFn != nil {
-		return m.GetByIDFn(ctx, id)
-	}
-	return nil, nil
-}
-
-func (m *mockDataModelRepo) Update(ctx context.Context, dm *datamodel.DataModel) error {
-	if m.UpdateFn != nil {
-		return m.UpdateFn(ctx, dm)
-	}
-	return nil
-}
-
-func (m *mockDataModelRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	if m.DeleteFn != nil {
-		return m.DeleteFn(ctx, id)
-	}
-	return nil
-}
-
-func (m *mockDataModelRepo) List(ctx context.Context, filter datamodel.DataModelFilter) (*model.ListResponse[datamodel.DataModel], error) {
-	if m.ListFn != nil {
-		return m.ListFn(ctx, filter)
-	}
-	return nil, nil
-}
-
-func (m *mockDataModelRepo) FindActive(ctx context.Context, carrier model.CarrierCode, tech model.Technology, oui, productClass string, scope model.DataModelScope) (*datamodel.DataModel, error) {
-	if m.FindActiveFn != nil {
-		return m.FindActiveFn(ctx, carrier, tech, oui, productClass, scope)
-	}
-	return nil, nil
-}
-
-func (m *mockDataModelRepo) Activate(ctx context.Context, id uuid.UUID) error {
-	if m.ActivateFn != nil {
-		return m.ActivateFn(ctx, id)
-	}
-	return nil
-}
-
-func (m *mockDataModelRepo) Deprecate(ctx context.Context, id uuid.UUID) error {
-	if m.DeprecateFn != nil {
-		return m.DeprecateFn(ctx, id)
-	}
-	return nil
-}
-
-func (m *mockDataModelRepo) Statistics(ctx context.Context) (*datamodel.DataModelStats, error) {
-	if m.StatisticsFn != nil {
-		return m.StatisticsFn(ctx)
-	}
-	return nil, nil
-}
-
-func (m *mockDataModelRepo) FindActiveWithFirmware(ctx context.Context, carrier model.CarrierCode, tech model.Technology, oui, productClass, firmwareVersion string, scope model.DataModelScope) (*datamodel.DataModel, error) {
-	return nil, nil
-}
-
-func (m *mockDataModelRepo) FindActiveForMatch(ctx context.Context, carrier model.CarrierCode, tech model.Technology, oui, productClass, firmwareVersion string) (*datamodel.DataModel, error) {
-	return nil, nil
-}
-
-func (m *mockDataModelRepo) TouchLastAccessed(ctx context.Context, id uuid.UUID) error {
-	return nil
-}
-
-func (m *mockDataModelRepo) DeleteExpired(ctx context.Context, autoMaxAge, manualMaxAge int) (int64, error) {
-	return 0, nil
-}
+// T-0098 P5-01：mockDataModelRepo 已删除（datamodel 包整体下线）。
 
 func newFullEngineHarness() *fullEngineHarness {
 	logger := zap.NewNop()
 	taskRepo := &mockTaskRepo{}
 	devRepo := &mockDeviceRepo{}
 	tmplRepo := &mockTemplateRepo{}
-	dmRepo := &mockDataModelRepo{}
 	cmdQueue := &mockCommandQueue{}
 	evtBus := &mockEventBus{}
 
 	devService := device.NewDeviceService(devRepo, nil, nil, nil, logger)
-	dmRegistry := datamodel.NewDataModelRegistry(dmRepo, nil, logger)
 	tmplService := template.NewConfigTemplateService(tmplRepo, logger)
 	carrierReg := carrier.NewRegistry()
 
 	engine := NewProvisioningEngine(
 		taskRepo,
 		devService,
-		dmRegistry,
 		tmplService,
 		carrierReg,
 		cmdQueue,

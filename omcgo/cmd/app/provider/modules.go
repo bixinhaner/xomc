@@ -98,21 +98,23 @@ func initSoftwareModule(c *Container) error {
 }
 
 // initProvisionModule 初始化 F09 自动开站模块。
+// T-0098 P5-01：dmRegistry / dmImporter 已删除，改由 paramRegistry / productRegistry / intersectService 接管。
 func initProvisionModule(c *Container) error {
 	logger := c.Logger.Named("provision")
 
 	provisionRepo := provision.NewPgProvisioningTaskRepository(c.PgPool)
 	discoveryLogRepo := provision.NewPgParameterDiscoveryLogRepository(c.PgPool)
 	provisionEngine := provision.NewProvisioningEngine(
-		provisionRepo, c.DeviceService, c.DMRegistry, c.TemplateService,
+		provisionRepo, c.DeviceService, c.TemplateService,
 		c.Carriers, c.TaskSvc, c.EventBus, c.Cfg.Provision, logger,
 	)
 
 	if c.Cfg.Provision.ModelUpload.Enabled {
 		modelUploadSvc := provision.NewModelUploadService(
-			discoveryLogRepo, c.DMImporter, c.DMRegistry, c.TaskSvc,
-			c.MinIO, c.Cfg.Provision.ModelUpload, logger,
-		).WithParamRegistry(c.ProductRegistry, c.ParamIntersect, c.Cfg.ParamRegistry.UseNew)
+			discoveryLogRepo, c.TaskSvc, c.MinIO,
+			c.ProductRegistry, c.ParamIntersect,
+			c.Cfg.Provision.ModelUpload, logger,
+		)
 		provisionEngine.SetModelUploadService(modelUploadSvc)
 		logger.Info("model upload service enabled",
 			zap.String("upload_url", c.Cfg.Provision.ModelUpload.UploadURL))
@@ -122,7 +124,7 @@ func initProvisionModule(c *Container) error {
 		syncSvc := provision.NewSyncService(
 			c.ParamRepo, discoveryLogRepo, c.TaskSvc, planStore,
 			c.Cfg.Provision.AutoSync, c.Cfg.Provision.AutoSync.GPVBatchSize, logger,
-		).WithParamRegistry(c.ParamRegistry, c.ProductRegistry, c.Cfg.ParamRegistry.UseNew)
+		).WithParamRegistry(c.ParamRegistry, c.ProductRegistry, true)
 		provisionEngine.SetSyncService(syncSvc)
 		logger.Info("auto-sync service enabled")
 	}
@@ -277,17 +279,15 @@ func initNorthboundModule(c *Container) error {
 }
 
 // initInteropModule 初始化 F10 互操作测试模块。
+// T-0098 P5-01：dataModelReg 已删除，直接注入 ParamRegistry / ProductRegistry。
 func initInteropModule(c *Container) error {
 	logger := c.Logger.Named("interop")
 
-	// T-0098 P2-08：dual-stack 启用 ParamRegistry，flag off 时退化既有 dataModelReg 路径。
-	testRunner := interop.NewConformanceTestRunner(c.DeviceRepo, c.ParamRepo, c.DMRegistry, c.TaskSvc, logger).
-		WithParamRegistry(c.ParamRegistry, c.ProductRegistry, c.Cfg.ParamRegistry.UseNew)
+	testRunner := interop.NewConformanceTestRunner(c.DeviceRepo, c.ParamRepo, c.ParamRegistry, c.ProductRegistry, c.TaskSvc, logger)
 	testRunner.RegisterCases(cases.ProtocolCases())
 	testRunner.RegisterCases(cases.DataModelCases())
 	testRunner.RegisterCases(cases.RPCCases())
-	dmValidator := interop.NewDataModelValidator(c.DMRegistry, c.ParamRepo, c.DeviceRepo, logger).
-		WithParamRegistry(c.ParamRegistry, c.ProductRegistry, c.Cfg.ParamRegistry.UseNew)
+	dmValidator := interop.NewDataModelValidator(c.ParamRegistry, c.ProductRegistry, c.ParamRepo, c.DeviceRepo, logger)
 	interopHandler := interop.NewHandler(testRunner, dmValidator, logger)
 
 	c.miscDeps.interopHandler = interopHandler

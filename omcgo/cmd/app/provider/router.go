@@ -11,7 +11,6 @@ import (
 
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/alarm"
-	"github.com/omcgo/omcgo/internal/config/datamodel"
 	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/omcgo/omcgo/internal/core/components"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
@@ -297,18 +296,14 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	exportHandler.SetPermissionService(c.PermService)
 	exportHandler.RegisterRoutes(permGroup("devices"))
 
-	// T-0098 P2-07：注入 ParamRegistry / ProductRegistry 启用 dual-stack；
-	// useNew flag false 时退化到既有 dmRegistry 路径（兼容现网行为）。
-	paramTreeHandler := device.NewParameterTreeHandler(c.DeviceService, c.ParamRepo, c.DMRegistry, c.Logger).
-		WithParamRegistry(c.ParamRegistry, c.ProductRegistry, c.Cfg.ParamRegistry.UseNew)
+	// T-0098 P5-01：dmRegistry 已删除，直接注入 ParamRegistry / ProductRegistry。
+	paramTreeHandler := device.NewParameterTreeHandler(c.DeviceService, c.ParamRepo, c.ParamRegistry, c.ProductRegistry, c.Logger)
 	paramTreeHandler.RegisterRoutes(permGroup("devices"))
 
-	// ----- Config routes → resource "datamodels" -----
-	ch := c.configHandlerDeps
-	dmHandler := datamodel.NewHandler(ch.dmRepo, ch.ouiRepo, ch.dmRegistry, ch.dmImporter)
-	dmHandler.RegisterRoutes(permGroup("datamodels"))
+	// T-0098-P5-01：旧 /api/v1/datamodels CRUD 已下线，治理走 /api/v1/products + /api/v1/param-models（super_admin）。
 
 	// ----- ConfigTemplate routes → resource "config" -----
+	ch := c.configHandlerDeps
 	templateHandler := template.NewHandler(ch.templateRepo)
 	templateHandler.RegisterRoutes(permGroup("config"))
 
@@ -336,9 +331,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	alarmHandler := alarm.NewHandler(c.AlarmEngine, ah.alarmPgStore, ah.alarmSyncService, c.Logger)
 	alarmHandler.RegisterRoutes(permGroup("alarms"))
 
-	// ----- Alarm library routes → resource "alarms" -----
-	alarmLibraryHandler := alarm.NewLibraryHandler(ah.alarmLibraryService, c.Logger)
-	alarmLibraryHandler.RegisterRoutes(permGroup("alarms").Group("/alarms/alarm-libraries"))
+	// T-0098-P5-06：旧 /alarms/alarm-libraries 路由已下线，治理走 /alarms/alarm-definitions（super_admin）。
 
 	// ----- T-0098 P3-05: Super-admin-only group — 仅放行 super_admin 用户。
 	// 4 个 P3 治理 handler（产品 / 参数模型 / KPI 库 / 告警库）均挂在此处，

@@ -2,13 +2,14 @@
  * API Service Layer — Entry point.
  *
  * Each backend domain will have its own API module file here.
- * These will be implemented progressively starting from Sprint 1:
  *
  * Sprint 1: authApi, deviceApi, alarmApi ✅
  * Sprint 2: templateApi, softwareApi, adminApi, topologyApi ✅
  * Sprint 3: pmApi, mrApi ✅
- * Sprint 4: dashboardApi, logApi, datamodelApi, northboundApi, provisionApi, interopApi ✅
+ * Sprint 4: dashboardApi, logApi, northboundApi, provisionApi, interopApi ✅
  * Sprint 9: backupApi, fileApi, mmlApi ✅
+ * T-0098 P4: paramModelApi, productApi, indicatorLibraryApi, alarmDefinitionApi ✅
+ * T-0098 P5: 移除 datamodelApi（被 paramModelApi + productApi 取代）✅
  */
 
 export { http } from '../http';
@@ -23,7 +24,6 @@ export { pmApi } from './pmApi';
 export { mrApi } from './mrApi';
 export { dashboardApi } from './dashboardApi';
 export { logApi } from './logApi';
-export { datamodelApi } from './datamodelApi';
 export { northboundApi } from './northboundApi';
 export { provisionApi } from './provisionApi';
 export { interopApi } from './interopApi';

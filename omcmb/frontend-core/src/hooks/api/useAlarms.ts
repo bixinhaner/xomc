@@ -177,46 +177,8 @@ export function useToggleAlarmRule() {
   });
 }
 
-// -- Alarm libraries --------------------------------------------------------
-
-export function useAlarmLibraries(params: Record<string, unknown> & { page: number; pageSize: number }) {
-  return useQuery({
-    queryKey: ['alarms', 'libraries', params],
-    queryFn: () => api.getAlarmLibraries(params),
-  });
-}
-
-export function useCreateAlarmLibrary() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (data: Parameters<typeof api.createAlarmLibrary>[0]) =>
-      api.createAlarmLibrary(data),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['alarms', 'libraries'] });
-    },
-  });
-}
-
-export function useUpdateAlarmLibrary() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: Parameters<typeof api.updateAlarmLibrary>[1] }) =>
-      api.updateAlarmLibrary(id, payload),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['alarms', 'libraries'] });
-    },
-  });
-}
-
-export function useDeleteAlarmLibrary() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => api.deleteAlarmLibrary(id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['alarms', 'libraries'] });
-    },
-  });
-}
+// T-0098-P5-06：旧 useAlarmLibraries / useCreate|Update|DeleteAlarmLibrary 已下线，
+// 治理 hook 走 useAlarmDefinitions（@core/hooks/api/useAlarmDefinitions）。
 
 export function useTriggerAlarmSync() {
   const queryClient = useQueryClient();

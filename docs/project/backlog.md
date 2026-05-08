@@ -67,11 +67,11 @@
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
 | Total tasks | 132 | — | 含 T-0098 umbrella + 36 sub-task；变更明细见 changelog |
-| `done` | 109 | — | 详细 Closing Evidence → `backlog/done/2026Q2.md`（+6 P1 + 2 P2-01/02 + 9 P2-03..11 + 5 P3-01..05 + **+8 T-0098-P4-01..P4-08 2026-05-08（P4 wave 收官）+ 1 T-0095 D10=A 吸收 done**；P4 8 子任务全 done — 4 API 业务层 + 5 治理页面 + super_admin 守卫 + v2/v3 兼容性 0 新错误）|
-| `in_dev` | 1 | — | T-0098 数据字典平台化（umbrella；P1 6 + P2 11 + P3 5 + **P4 8 共 30 子任务 done**；P5 6 子任务仍 triaged 待下轮 planning） |
+| `done` | 116 | — | 详细 Closing Evidence → `backlog/done/2026Q2.md`（+6 P1 + 2 P2-01/02 + 9 P2-03..11 + 5 P3-01..05 + 8 P4-01..P4-08 + T-0095 D10=A 吸收 done + **+6 T-0098-P5-01..P5-06 2026-05-08（P5 wave 收官）+ T-0098 umbrella 进 done**；T-0098 数据字典平台化 36/36 全收官，旧 datamodel 包整体下线，参数+KPI+告警三大字典走 dictloader+4 Registry+Translator+IntersectService 新栈）|
+| `in_dev` | 0 | — | T-0098 已整体收官 |
 | `in_design` | 0 | — | — |
-| `planned` | 6 | — | 其他任务（T-0098 P4 全部 done，P5 仍 triaged） |
-| `triaged` | 13 | — | T-0098-P5 6 sub-task；剩 T-0030 / T-0090 / T-0091 / T-0093 / T-0035 / T-0096 / T-0097 不阻塞主链路 |
+| `planned` | 6 | — | 其他任务（T-0098 全部 done） |
+| `triaged` | 7 | — | T-0030 / T-0090 / T-0091 / T-0093 / T-0035 / T-0096 / T-0097 不阻塞主链路 |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
 | **P0 风险关闭数** | **1 / 5** | 5 / 5 | R-005 已关；R-001/002/003/004 Open（注：**P1 R-103 / R-104** 已关闭但不计入 P0 — R-103 在 T-0015 后关闭；**R-104 在 T-0027 后关闭 2026-05-06**）|
@@ -297,7 +297,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0090 | MML 控制台公/私命令新增页面 UX 整改 — ① 操作类型差异化（MOD→修改值入口）② 删 3 字段（参数配置/所属分类/适用产品类型）③ 命令编码 input→textarea ④ textarea 必须自定义、不允许选已有命令 ⑤ 私有命令页面参考公有页面（功能一致）⑥ 私有命令按当前管理员所属分组过滤（RBAC）⑦ 公有命令不按管理员过滤 | feat | frontend+F06/mml+admin | P2 | XL | — (T-0094 已 rejected as misdiagnosis 2026-04-30) | R-NEW（productTypes 删除破坏性 + RBAC 私有命令分组隔离 双重风险） | @chenbo01 提需求；**2026-04-30 B 方案二次扩展**：原 ①②③ 保留 + 新加 ④（textarea 自定义限制）+ ⑤⑥⑦（私有/公有命令 RBAC 差异化）；用户重叠检测拍板 B（不覆盖原版而是扩展）；**Est L → XL，强制 S2 拆**；ULTRATHINK 三层核查（Go struct + migrations + FE 表单）+ B 扩展后子项风险阶梯横跨 4 档：①③④⑤ 纯 FE 低风险（操作类型差异化 + textarea + 自定义限制 + 私有页面复用公有 UI）；② 中耦合（参数配置 UI section 删后端接空 map 兼容；categoryGroup 清理由 T-0094 决策）；②④ productTypes 删 = 破坏性 migration（drop column + 历史数据评估 + Down 段回滚预案）；⑥ RBAC = backend 改动（mml_custom_command 查询按当前 admin 的 role_device_groups 过滤 private 命令；query 重写 + service 层 admin context 注入）；S2 强建议**拆 4 段**：T-0090a（S, FE-only ① ③ ④ + ② UI section 删除）+ T-0090b（M, ref + migration drop productTypes）+ T-0090c（M-L, backend RBAC private 查询过滤 + admin context 注入）+ T-0090d（S, FE 私有命令页面创建 复用公有组件）；Domain 加 admin（⑥ 涉 RBAC）；候选 Sprint=GA 规划期 |
 | T-0096 | MML script 页面「更新」弹窗取消产品类型字段（应与 /mml/console「保存脚本」弹窗一致） | ref | frontend+F06/mml | P3 | S | T-0090 | R-NEW（共享 T-0090 productTypes 删除风险） | Triage 2026-04-30 走 B 方案 standalone（不 fold 进 T-0090a — 因 page scope 不同 script vs console + T-0090 体量已 L 不宜再扩 + 独立 PR 更清晰）；语义**反向** deps T-0090："与 console 一致"意味着 console 决定 productTypes 去留 → script 跟随（若 T-0090 决定保留 productTypes，T-0096 也保留；命名"取消"但执行随 T-0090）；建议与 T-0090a 同 Sprint 紧随做省 cross-PR 协调 |
 | T-0097 | MML console「保存脚本」弹窗确认按钮 API 结果反馈（成功/失败提示） | bug | frontend+F06/mml | P2 | S | — | R-NEW（toast util 场景失效面） | Triage 2026-04-30 走 C 方案 triaged + **pre-pick reproduce 待办**：静态核查 `ScriptTaskDrawer.tsx:232` toast.success + `:242` toast.error 已在 → bug 真实性存疑；pick 前需 user 提供 reproduce 步骤；4 候选成因优先级（高→低）：① mock 模式（useMock=true 时 mockService 不抛错 → toast.error 永不触发，最可能解释"看不到任何提示"）② axios 拦截器吞 401/403 错误码 ③ 用户混淆"保存脚本"指其他按钮 ④ toast util 场景失效（line 190 注释提示 to-do-list #2 曾遇）；建议 user 实测：先在 dev real-API 模式（VITE_USE_MOCK=false）尝试触发失败 + 看浏览器 console 是否报错 |
-| T-0098 | 参数模型 / KPI 指标库 / 告警库 数据字典平台化（XML 源文件 → 启动期 loader → DB schema → 双层缓存 → REST API → 产品管理 UI；本次提交仅交付 S2 整合设计稿 + XML 数据资产入库；**2026-05-07 v3 设计稿重组 + 三大业务流程图 + v1 实施计划落地** — 33 子任务 / 5 Phase / 10 决策待 PgM 拍板，**2026-05-07 D1-D10 全采纳推荐 + 36 子任务（T-0098-P1-01 .. T-0098-P5-06）拆出登记 §4.1 + 12 R-T0098-* 风险同步 risk-register + P1 6 条升格 planned/wave-3/Claude（前戏完成可开车）**，详见 `docs/project/参数-KPI-告警-整合-实施计划.md` + §10 changelog；**新方案**取代 `omcgo/docs/param-model-delivery/参数模型重新设计方案.md` + `omcgo/docs/prd/product/产品模型*.md` 旧设计） | feat | F02+F03+F04 | P2 | in_dev | Claude | XL | — | `docs/design/参数-KPI-告警-整合设计方案.md` + `docs/project/参数-KPI-告警-整合-实施计划.md` + `AI承诺对峙清单.md` W3 | wave-3 | 2026-05-07 |
+| T-0098 | 参数模型 / KPI 指标库 / 告警库 数据字典平台化 — **2026-05-08 36/36 全收官**（P1 6 + P2 11 + P3 5 + P4 8 + P5 6）；旧 datamodel 包整体下线，新栈 ParamModel + ProductRegistry + Translator + IntersectService + dictloader（4 个 Registry：product / parammodel / indicator / alarm-definition）就位；47 REST 端点（products 17 + param-models 19 + indicators 21 + alarm-definitions 9 重叠去重）+ 5 治理 UI 页（products / param-model / kpi-library / alarm-library / orphan-devices）+ super_admin 守卫 + R-T0098-01..12 风险全闭环 | feat | F02+F03+F04 | P2 | done | Claude | XL | — | `docs/design/参数-KPI-告警-整合设计方案.md` + `docs/project/参数-KPI-告警-整合-实施计划.md` + `AI承诺对峙清单.md` W3 | wave-3 | 2026-05-08 |
 
 ### 4.1 T-0098 拆分子任务
 
@@ -324,16 +324,16 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 
 | ID | Title | Domain | Closed | 一句话摘要 |
 |----|-------|--------|--------|----------|
-| **T-0098-P4-08** | webcode-v2/v3 兼容性评估（D7=A 仅评估编译） | frontend-core | 2026-05-08 | **P4 wave 收官**；webcode ✅ / v2 ❌ 13 条预存 / v3 ❌ 17 条预存；P4 16 个新文件 0 错误命中；预存归 R-T0098-07 跟进 |
-| **T-0098-P4-07** | /product/orphan-devices 治理页 | frontend | 2026-05-08 | 2 文件 ~228 LOC；列表 + 单台/批量绑定（Modal 串行）+ 全量重新匹配（Popconfirm）；与 P4-06 unknown-stats productId 联动 |
-| **T-0098-P4-06** | /product/alarm-library 单页 + 详情抽屉 + 未识别频次 | frontend | 2026-05-08 | 3 文件 ~403 LOC；4 过滤（keyword/neType/severityCode/isUnknown 三态）+ 11 字段 CRUD + UnknownStatsModal；与 AlarmSupportLibrary 并存到 P5-06 |
-| **T-0098-P4-05** | /product/kpi-library 5 Tabs + 公式 CRUD（吸收 T-0095） | frontend | 2026-05-08 | 5 文件 ~611 LOC；ENB/GSM/GNB 共享 IndicatorTab（GNB 隐藏 indicator_level）+ 启用 + 单位；公式编辑前端括号校验；**D10=A 吸收 T-0095** |
-| **T-0098-P4-04** | /product/param-model 3 Tabs + XML 导入 + storable + {i} 校验 | frontend | 2026-05-08 | 4 文件 ~643 LOC；3 Tabs + storable 三态过滤 + {i} 占位符红色感叹号 + Standard CRUD（编辑禁主键）|
-| **T-0098-P4-03** | /product/products 列表 + 4 段抽屉 + 浮窗 + 测试匹配 | frontend | 2026-05-08 | **P4 最复杂（L）**；4 文件 ~741 LOC；MatchTester 300ms debounce / MatchOrderDrawer 全局浮窗 / 抽屉 4 段（基本/字典引用/上传策略/正则）/ patterns 上下移；data_type 强制 disabled |
-| **T-0098-P4-02** | navConfig 产品中心 + super_admin 守卫 + i18n | frontend | 2026-05-08 | UserRole 加 isSuperAdmin 派生（source==='builtIn'）/ PrivateRoute requireSuperAdmin / withSuperAdmin helper / NavMenu 按 isSuperAdmin 过滤 / i18n zh-CN+en-US 各 11 keys / 5 stub 页 |
-| **T-0098-P4-01** | frontend-core 字典平台业务层 — 4 API + 4 Hook + 4 Type + 4 Mock | frontend-core | 2026-05-08 | **P4 wave 入口**；20 新文件 ~2898 LOC；47 端点全覆盖；BackendXxx + mapBackendXxx + createApiSwitch 沿用 deviceApi 模式；不拆 datamodelApi/alarmApi（P5-04/P5-06 处理）|
-| **T-0095** | F03 KPI 指标管理（D10=A 吸收正式关闭） | F03 | 2026-05-08 | **D10=A 吸收闭环**；P4-05 KPI 指标库 5 Tabs + 公式 CRUD 已覆盖；不再独立推进 |
-| **T-0098-P2-02** | ParamRegistry — Registry + Translator + L1+L2 缓存 + discovered→default 降级 | F02 | 2026-05-07 | **参数轨脊柱 / 一次解锁 6 条下游**；6 实现 + 4 测试 ~1860 LOC；registry 60-100%/translator 91-100%/metrics 100% 单测；6 metric + 5 log 全 grep；productGetter 接口注入解耦；param_registry.use_new dual-stack flag 默认 false |
+| **T-0098** | 数据字典平台化（umbrella，**36/36 全收官**） | F02+F03+F04 | 2026-05-08 | **历时 W3 wave 实现收敛阶段**；旧 datamodel 包整体下线 + 新 ParamModel + ProductRegistry + Translator + IntersectService + 4 个 dictloader Registry 就位；47 REST 端点 + 5 治理 UI + super_admin 守卫；R-T0098-01..12 全闭环 |
+| **T-0098-P5-06** | DROP alarm_libraries / alarm_library_i18n + 旧告警库代码下线 | F04 | 2026-05-08 | 迁移 000062 + 删 5 alarm 内部 .go + alarm/helpers.go 抽 strPtr + provider 接线 + seed/000028 占位 + 前端 alarmApi 删 4 端点 + AlarmSupportLibrary 整页删；R-T0098-03 闭环 |
+| **T-0098-P5-05** | CLAUDE.md + omcgo/CLAUDE.md 模块清单同步 | process | 2026-05-08 | 根 CLAUDE.md §3/§6/§16.4 + omcgo/CLAUDE.md §1/§4/§5.2/§5.3/§6/§8 全更新；§5.3「数据模型规范」整章重写为「参数模型字典规范」；commit scope 加 parammodel+product 删 datamodel |
+| **T-0098-P5-04** | 前端 datamodelApi.ts + DataModelManagement 页面下线 | frontend-core | 2026-05-08 | 删 4 文件 + 移除 services/api/index.ts 导出 + routes.tsx 路由；webcode typecheck PASS |
+| **T-0098-P5-03** | grep 验证 datamodel 无业务引用 | infra | 2026-05-08 | grep cmd/internal/ → 0 业务引用；剩余命中均为历史注释 / 文件名字符串 / NATS subject 名 |
+| **T-0098-P5-02** | 迁移 000063 DROP datamodel 表族 + 列 | infra | 2026-05-08 | 5 步迁移 + Go 代码联动（discovery_repository / device repos / model.Device / ParameterDiscoveryLog 全部剥离 data_model_id）；check-migrations.sh PASS |
+| **T-0098-P5-01** | 删除 internal/config/datamodel/ 全包 + 改造 9 消费者 | F02 | 2026-05-08 | **包整体下线** ~5166 LOC；9 消费者重写（device_param_handler / interop runner+validator / provision sync+engine+model_upload + provider 4 文件）+ 新 model_xml_parser.go 接管 CPE XML→CPEEntry 直接解析；R-T0098-01 闭环 |
+| **T-0098-P4-08** | webcode-v2/v3 兼容性评估（D7=A 仅评估编译） | frontend-core | 2026-05-08 | **P4 wave 收官**；webcode ✅ / v2 ❌ 13 条预存 / v3 ❌ 17 条预存；P4 16 个新文件 0 错误命中 |
+| **T-0098-P4-07** | /product/orphan-devices 治理页 | frontend | 2026-05-08 | 2 文件 ~228 LOC；列表 + 单台/批量绑定 + 全量重新匹配；与 P4-06 unknown-stats productId 联动 |
+| **T-0098-P4-06** | /product/alarm-library 单页 + 详情抽屉 + 未识别频次 | frontend | 2026-05-08 | 3 文件 ~403 LOC；4 过滤 + 11 字段 CRUD + UnknownStatsModal |
 
 （其余历史 done 见归档；T-0094 misdiagnosis 见 §8 Rejected）
 
@@ -397,11 +397,11 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 
 | 日期 | 动作 | 条目 | 一句话 |
 |------|------|------|--------|
+| 2026-05-08 | **P5 wave 全收官 + T-0098 整体进 done** | T-0098-P5-01..P5-06 6 sub-task + T-0098 umbrella | 旧 datamodel 包整体下线（19 .go ~5166 LOC 删除）+ 9 消费者重写 + 新 model_xml_parser.go 接管 XML 解析 + migrations/000062 alarm_libraries DROP + 000063 datamodel 5 步 DROP + 前端 datamodelApi/AlarmSupportLibrary/DataModelManagement 整页删 + CLAUDE.md 模块清单同步；go build/test/vet ./... 全过；T-0098 数据字典平台化 36/36 全收官，结束历时 W3 wave 实现收敛阶段；done 109→116 / triaged 13→7 / in_dev 1→0 |
 | 2026-05-08 | **P4 wave 全收官 + T-0095 D10=A 吸收正式关闭** | T-0098-P4-01..P4-08 + T-0095 9 sub-task | P4-01 业务层 4 API+4 Hook+4 Type+4 Mock ~2898 LOC → P4-02 super_admin 守卫 + i18n + 5 stub → P4-03 产品页（最复杂 L 4 段抽屉 + 浮窗 + MatchTester 实时） → P4-04 参数模型 3 Tabs + {i} 校验 → P4-05 KPI 库 5 Tabs + 全平台公式（吸收 T-0095） → P4-06 告警库 + 未识别频次 → P4-07 孤儿设备治理 → P4-08 v2/v3 兼容性 0 新错误；webcode typecheck 全程通过；30/36 P4 子任务 done；done 100→109 / planned 14→6 |
 | 2026-05-07 | **P2-02 ParamRegistry done** S2..S7 wave-batched 全过 | T-0098-P2-02 | 6 实现 + 4 测试 ~1860 LOC（含 ~655 LOC 测试）；registry 60-100% / translator 91-100% / metrics 100% 单测覆盖；6 Prometheus metric + 5 类 log 全 grep 命中；Provider ModuleGraph "paramregistry" Depends ["dictload","productregistry"]；param_registry.use_new dual-stack flag 默认 false；productGetter 接口注入解耦；**一次落地解锁 P2-03..P2-08 6 条下游**；详见 verify-T-0098-P2-02.md；planned 16→15 / done 85→86 |
 | 2026-05-07 | **P2-01 ProductRegistry done** S2..S7 wave-batched 全过 | T-0098-P2-01 | 6 实现 + 3 测试 ~1280 LOC（含 ~515 LOC 测试）；registry 87-95% / cache 100% / metrics 100% 单测覆盖；4 Prometheus metric + 3 类 log 全 grep 命中；Provider ModuleGraph "productregistry" Depends ["dictload"]；详见 verify-T-0098-P2-01.md；planned 17→16 / done 84→85 |
 | 2026-05-07 | **P2 前戏完成升格 + 双入口准入** | T-0098-P2-01..P2-11 11 sub-task | State→planned / Sprint=wave-3 / Owner=Claude；P2-01 (F02 ProductRegistry) + P2-09 (F03 KPI loader) 两个独立入口可并发；其余 9 条因路径集中 `internal/provision/` 串行；wave-batched §C.1 准入 Skip S0/S1；triaged 37→26 / planned 6→17 |
-| 2026-05-07 | **P1 wave 收官** S2..S7 wave-batched 全过 | T-0098-P1-02..P1-06 5 commit | P1-02 products schema → P1-03 param 字典 + 跨域 FK → P1-04 alarm 字典 + 4 种子 → P1-05 KPI 命名 D1=A docs → P1-06 4 Loader + provider + 修复 entry_type 列宽；**DoD 12 项行数全过**（9+4781+2001 / 15+29 / 4+442 / 1764 / 6254）；6 sub-task 全部 done；wave-3 P1 阶段封箱 |
 
 ---
 

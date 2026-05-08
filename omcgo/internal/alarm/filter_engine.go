@@ -346,10 +346,10 @@ func buildWebhookPayload(alarm *model.Alarm) webhookPayload {
 	return p
 }
 
-// enrichFromLibrary 从告警库补充告警信息。
+// enrichFromLibrary 从告警字典（alarm_definitions）补充告警信息。
+// T-0098-P5-06：旧 alarm_libraries 已 DROP，后续接入 alarm_definitions Registry。
 func (e *FilterEngine) enrichFromLibrary(ctx context.Context, alarm *model.Alarm) {
 	if (alarm.ProbableCause != nil && *alarm.ProbableCause != "") && (alarm.AlarmSource != nil && *alarm.AlarmSource != "") {
 		return
 	}
-	// 后续集成时通过注入 AlarmLibraryRepository 实现
 }

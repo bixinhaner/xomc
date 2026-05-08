@@ -46,15 +46,16 @@ omc/                                # 根仓库（单一 git）
 │   ├── CLAUDE.md                   # 后端详细指导
 │   ├── cmd/                        # 入口：app / acs / worker / migrate / omcctl
 │   ├── internal/                   # 私有代码（功能域 + 基础设施）
-│   │   ├── core/                   #   基础设施（appconfig/components/event/middleware/model/...）
+│   │   ├── core/                   #   基础设施（appconfig/components/event/middleware/model/dictloader/...）
 │   │   ├── carrier/                #   运营商适配（cmcc/ctcc/cucc）
-│   │   ├── acs/ config/ pm/ alarm/ mr/                 # F01-F05
+│   │   ├── acs/ config/ pm/ alarm/ mr/                 # F01-F05（config/ 含 parammodel/ template/ baseline/）
+│   │   ├── product/                                    # T-0098 产品装配件 + 路由（替代旧 datamodel）
 │   │   ├── device/ admin/ topology/ software/ backup/
 │   │   ├── dashboard/ ops/ report/ mml/ filemanager/
 │   │   ├── syslog/ license/                            # F06 各子模块
 │   │   ├── nedirect/ northbound/ provision/ interop/   # F07-F10
 │   │   └── notification/ task/ transfer/ events/       # 跨域基础设施（详见 §6）
-│   ├── datamodels/                 # TR069 数据模型种子
+│   ├── datamodels/                 # TR069 数据模型种子（XML 资产，由 dictloader 启动期加载）
 │   ├── migrations/                 # 数据库迁移（goose）
 │   ├── scripts/                    # E2E、压测、CPE 模拟器、诊断
 │   └── 规范/                        # 三大运营商技术规范原件
@@ -175,7 +176,7 @@ Vite dev server `:3000` 通过 `/api` 代理到后端 App `:8081`。设计基线
 | 编号 | 功能域 | 核心职责 | 后端模块 |
 |------|--------|---------|---------|
 | F01 | 南向接口 (TR069) | ACS 引擎，SOAP/XML 协议处理 | `acs/` |
-| F02 | 数据模型与配置 | TR069 参数树，三级回退，配置模板/基线 | `config/` |
+| F02 | 数据模型与配置 | 参数模型字典（XML→param_models / param_mappings / discovered_param_mappings）+ 产品装配件 + 配置模板 / 基线（T-0098 后旧 datamodel 包已下线） | `product/` `config/parammodel/` `config/template/` `config/baseline/` |
 | F03 | 性能管理 (PM/KPI) | 计数器采集，KPI 计算，时序存储 | `pm/` |
 | F04 | 告警管理 | 告警接收、去重、关联、生命周期 | `alarm/` |
 | F05 | 测量报告 (MR) | MRO/MRS/MRE 文件采集与解析 | `mr/` |
@@ -641,7 +642,7 @@ docs/project/risk-register.md                 → 项目经理（PgM）
 | 功能域 | 核心业务规则 |
 |--------|------------|
 | F01 南向 | ACS 支持多厂商 CPE 同时在线；会话并发数受限于 Redis 和 goroutine 池 |
-| F02 配置 | 三级回退（产品→OUI→运营商默认）；模板支持批量下发和回滚 |
+| F02 配置 | T-0098 后参数走 ParamModel 字典 + Translator 双向翻译（standardPath ↔ privatePath）+ Intersect 写 discovered_param_mappings；产品装配件由 ProductRegistry 路由 productClass；模板支持批量下发和回滚 |
 | F03 PM | PM 文件遵循 3GPP 32.435；KPI 多级聚合（设备→站点→区域→网络）|
 | F04 告警 | 去重窗口、关联规则、升级策略可配置；活动告警持久化 |
 | F05 MR | MRO/MRS/MRE 三种类型；RSRP/RSRQ/SINR 测量值解析 |

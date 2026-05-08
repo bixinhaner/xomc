@@ -21,7 +21,7 @@
 | 编号 | 功能域 | 核心职责 |
 |------|--------|---------|
 | F01 | 南向接口（TR069） | ACS 引擎，SOAP/XML 协议处理，设备通信通道 |
-| F02 | 数据模型与配置 | TR069 参数树定义，三级回退解析，配置模板 |
+| F02 | 数据模型与配置 | 参数模型字典（XML→param_models / param_mappings / discovered_param_mappings）+ Translator 双向翻译 + 配置模板（T-0098 后旧 datamodel 三级回退已下线） |
 | F03 | 性能管理（PM/KPI） | 计数器采集，KPI 计算，时序存储 |
 | F04 | 告警管理 | 告警接收、去重、关联、生命周期 |
 | F05 | 测量报告（MR） | MRO/MRS/MRE 文件采集与解析 |
@@ -149,10 +149,20 @@ omcgo/
 │   │   └── auth/                   #   CPE 认证
 │   │
 │   ├── config/                     # F02: 数据模型与配置管理（业务域）
-│   │   ├── datamodel/              #   数据模型注册表、三级回退解析、缓存
+│   │   ├── parammodel/             #   参数模型字典（T-0098 P1-P5 替代旧 datamodel）
+│   │   │                              · Loader → param_models / param_mappings / standard_params
+│   │   │                              · Registry → discovered + default 双源映射
+│   │   │                              · Translator → standardPath ↔ privatePath O(1) 双向翻译
+│   │   │                              · IntersectService → 写 discovered_param_mappings
+│   │   │                              · MappingValidator → 元属性校验（access / range / change_applies）
 │   │   ├── template/               #   配置模板
 │   │   ├── baseline/               #   配置基线
 │   │   └── sync_handler.go         #   配置同步
+│   │
+│   ├── product/                    # F02: 产品装配件 + ProductRegistry（T-0098 P2-01）
+│   │                                  · productClass 全局正则路由 → product
+│   │                                  · param_model_id / indicator_platform / alarm_ne_type 装配
+│   │                                  · enable_filetype11 / enable_unknown_alarm 三态策略
 │   │
 │   ├── pm/                         # F03: 性能管理
 │   ├── alarm/                      # F04: 告警管理
@@ -299,11 +309,10 @@ acs:task:{taskID}                     — 任务详情 Hash（TTL 24h）
 acs:cwmp2task:{hash}                  — CWMP ID → Task ID 映射（TTL 24h）
 acs:heartbeat:{device_serial}        — 心跳时间戳（TTL = 2×inform_interval）
 acs:connreq:pending:{device_serial}  — Connection Request 去重（TTL 30 秒）
-datamodel:product:{carrier}:{tech}:{oui}:{product_class} — 数据模型缓存
-datamodel:oui:{carrier}:{tech}:{oui}
-datamodel:default:{carrier}:{tech}
-datamodel:resolve:{carrier}:{tech}:{oui}:{product_class} — 解析结果缓存（TTL 1 小时）
-datamodel:cache_version              — 缓存版本号（跨实例协调）
+parammodel:default:{paramModelID}                       — ParamRegistry default mapping 缓存（TTL 24h）
+parammodel:discovered:{productID}:{swVersion}           — ParamRegistry discovered mapping 缓存（TTL 1h）
+product:byProductClass:{productClass}                   — ProductRegistry 路由结果缓存（TTL 1h）
+parammodel:cache_version                                — 缓存版本号（跨实例协调）
 alarm:active:{device_serial}         — 活跃告警 Hash
 ratelimit:inform:{device_serial}     — 限流计数器
 ```
@@ -313,22 +322,37 @@ ratelimit:inform:{device_serial}     — 限流计数器
 - 全局准入控制器（`AdmissionController`）限制并发会话数
 - PM/MR 文件处理使用 WorkerPool 控制并发
 
-### 5.3 数据模型专项规范
+### 5.3 参数模型字典专项规范（T-0098 P1-P5）
 
-**三级回退解析**（查找设备对应的数据模型定义）：
-1. **product 级**：carrier + tech + oui + product_class（最精确）
-2. **oui 级**：carrier + tech + oui（厂商默认）
-3. **carrier_default 级**：carrier + tech（运营商默认）
+旧 datamodel 三级回退（product / oui / carrier_default）+ data_model_definitions 表已下线（migrations/000063 DROP）。新栈走 ParamModel 字典：
 
-**三级缓存**：
-1. 内存 L1（`sync.Map`，进程内）
-2. Redis L2（`datamodel:*` keys，TTL 24 小时）
-3. PostgreSQL（`data_model_definitions` 表）
+**装配件（product / param_model / mapping）**：
+1. **products** 表（migrations/000057）：装配件聚合产品类、参数模型、KPI 平台、告警 ne_type、上传开关
+2. **param_models / param_mappings**（migrations/000058）：默认映射，按 paramModel 加载
+3. **discovered_param_mappings**：设备 FileType=11 上传 XML 后由 IntersectService 写入；按 (product_id, sw_version) 索引
+4. **standard_params**：standardPath 元属性参考表
 
-**生命周期**：`draft` → `active` → `deprecated`
-- 同分类（carrier + tech + oui + product_class + scope）仅一个 `active` 模型
-- 激活新模型自动废弃旧模型
-- 变更时自增 `datamodel:cache_version` 通知所有 ACS 实例
+**路由**：
+- 设备上报 productClass → ProductRegistry.MatchProductClass（全局正则）→ product
+- product.param_model_id → ParamRegistry.GetByProduct(productID, swVersion)
+  - 优先 discovered_param_mappings（精确匹配 swVersion）
+  - 退化 param_mappings（默认映射）
+  - 双源合并 → MappingSet（含 Source 标记 discovered/default）
+
+**双向翻译（Translator）**：
+- standardPath（IETF / 标准化）↔ privatePath（厂商专有）
+- 模板 / SPV / GPV 输入侧用 standardPath，下发 / 持久化用 privatePath
+- {i} 占位符规范化：运行时实例号 ".N." 与模板 ".{i}." 折叠为同一索引键
+
+**缓存**：
+1. 内存 L1（`sync.Map`，进程内 Registry）
+2. Redis L2（`parammodel:*` / `product:*` keys）
+3. PostgreSQL（多表）
+
+**Loader 启动期加载**（dictloader 框架）：
+- 4 个 Loader：product / parammodel / indicator / alarm-definition
+- 文件白名单 → 单事务幂等 UPSERT
+- ModuleGraph 编排：dictload → productregistry → paramregistry → 等
 
 ### 5.4 事件驱动规范
 
@@ -605,7 +629,7 @@ TRUNCATE alarm_libraries CASCADE;
 - `perf` — 性能优化
 
 **scope**（对应功能域或模块）：
-`acs`, `config`, `datamodel`, `pm`, `alarm`, `mr`, `device`, `admin`, `topology`, `software`, `backup`, `dashboard`, `ops`, `report`, `mml`, `filemanager`, `syslog`, `license`, `nedirect`, `northbound`, `provision`, `interop`, `carrier`, `components`, `api`, `deploy`
+`acs`, `config`, `parammodel`, `product`, `pm`, `alarm`, `mr`, `device`, `admin`, `topology`, `software`, `backup`, `dashboard`, `ops`, `report`, `mml`, `filemanager`, `syslog`, `license`, `nedirect`, `northbound`, `provision`, `interop`, `carrier`, `components`, `api`, `deploy`
 
 **示例**：
 ```
@@ -651,7 +675,7 @@ chore(deploy): 添加 ACS 引擎的 Dockerfile 和 K8s deployment
 | 阶段 | 目标 | 核心模块 |
 |------|------|---------|
 | **一：基础建设** | ACS 引擎能接收 Inform 并注册设备 | 项目脚手架, components 层, pkg/tr069, acs 基础, device 注册 |
-| **二：核心功能** | 完整设备管理和自动开站流程 | acs/rpc 全量方法, task 统一队列, connreq, datamodel, carrier(cmcc), provision |
+| **二：核心功能** | 完整设备管理和自动开站流程 | acs/rpc 全量方法, task 统一队列, connreq, parammodel/product 字典, carrier(cmcc), provision |
 | **三：数据管线** | PM/告警/MR 数据全链路 | pm, kpi, alarm, mr, carrier(ctcc/cucc) |
 | **四：北向与规模化** | OSS 对接、10 万级验证、生产加固 | northbound, omcr 完整功能, 负载测试, TLS/认证/监控 |
 

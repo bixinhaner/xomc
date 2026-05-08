@@ -13,7 +13,6 @@ import (
 	"github.com/omcgo/omcgo/internal/alarm"
 	alarmdef "github.com/omcgo/omcgo/internal/alarm/definition"
 	"github.com/omcgo/omcgo/internal/config/baseline"
-	"github.com/omcgo/omcgo/internal/config/datamodel"
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
@@ -78,9 +77,7 @@ type Container struct {
 	ProductRepo    *product.PgRepository
 	ProductHandler *product.Handler
 
-	// ConfigModule 设置
-	DMRegistry      *datamodel.DataModelRegistry
-	DMImporter      *datamodel.DataModelImporter
+	// ConfigModule 设置（T-0098 P5-01：旧 DMRegistry / DMImporter 已删除）
 	TemplateService *template.ConfigTemplateService
 
 	// TopologyModule 设置

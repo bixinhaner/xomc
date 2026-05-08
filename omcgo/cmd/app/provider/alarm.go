@@ -11,7 +11,8 @@ import (
 )
 
 // initAlarmModule 初始化 F04 告警管理模块。
-// 设置: AlarmPgStore, AlarmEngine, AlarmLibraryRepository, AlarmFilterRuleRepository
+// 设置: AlarmPgStore, AlarmEngine, AlarmFilterRuleRepository
+// T-0098-P5-06：旧 alarm_libraries / alarm_library_i18n 已 DROP，改由 alarm_definitions（dictloader）提供。
 func initAlarmModule(c *Container) error {
 	logger := c.Logger.Named("alarm")
 
@@ -31,10 +32,6 @@ func initAlarmModule(c *Container) error {
 	if err := alarmSyncProcessor.Start(context.Background()); err != nil {
 		logger.Warn("start alarm sync processor", zap.NamedError("err", err))
 	}
-
-	// 告警库仓储
-	alarmLibraryRepo := alarm.NewPgAlarmLibraryRepository(c.PgPool)
-	alarmLibraryService := alarm.NewLibraryService(alarmLibraryRepo, logger)
 
 	// 过滤规则仓储
 	alarmFilterRuleRepo := alarm.NewPgAlarmFilterRuleRepository(c.PgPool)
@@ -75,7 +72,6 @@ func initAlarmModule(c *Container) error {
 	// Store deps for route registration
 	c.alarmHandlerDeps = &alarmHandlerDeps{
 		alarmPgStore:          alarmPgStore,
-		alarmLibraryService:   alarmLibraryService,
 		alarmFilterRuleRepo:   alarmFilterRuleRepo,
 		dataPermissionChecker: dataPermissionChecker,
 		alarmSyncService:      alarmSyncService,
@@ -87,7 +83,6 @@ func initAlarmModule(c *Container) error {
 
 type alarmHandlerDeps struct {
 	alarmPgStore          *alarm.PgAlarmStore
-	alarmLibraryService   *alarm.LibraryService
 	alarmFilterRuleRepo   *alarm.PgAlarmFilterRuleRepository
 	dataPermissionChecker *alarm.DataPermissionChecker
 	alarmSyncService      *alarm.AlarmSyncService
