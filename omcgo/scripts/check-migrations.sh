@@ -148,6 +148,93 @@ else
   echo ""
 fi
 
+# ── 跨目录冲突：seed/ 与 migrations/ 不可有同 version_id ──────────
+# goose 用 goose_db_version 表里的 version_id 全局唯一作为 PRIMARY KEY；
+# 即便 migrations/000NNN.sql 与 migrations/seed/000NNN.sql 路径不同，跑到第二个
+# 同号迁移时也会被静默跳过（不应用），导致预期数据没落库。
+# 历史教训：commit 4742b792 北向 seed 用 000066 与 既有 000066_seed_role_menus_builtin.sql
+# 撞号，被 commit 2d8486c5 重命名修复。本检查从根上杜绝。
+SEED_DIR="$(pwd)/seed"
+if [[ -d "$SEED_DIR" ]]; then
+  SEED_FILES=()
+  while IFS= read -r line; do
+    SEED_FILES+=("$line")
+  done < <(cd "$SEED_DIR" && ls -1 [0-9][0-9][0-9][0-9][0-9][0-9]_*.sql 2>/dev/null | sort)
+
+  if [[ ${#SEED_FILES[@]} -gt 0 ]]; then
+    echo "📋 seed 目录共发现 ${#SEED_FILES[@]} 个迁移文件"
+
+    # 收集 seed 版本号
+    SEED_NUMS=()
+    for f in "${SEED_FILES[@]}"; do
+      SEED_NUMS+=("${f:0:6}")
+    done
+    SEED_NUMS_LIST=$(printf '%s\n' "${SEED_NUMS[@]}" | sort -n | tr '\n' ' ')
+
+    # 与 migrations/ 集合交集 = 同号冲突
+    COLLIDE=()
+    for sn in "${SEED_NUMS[@]}"; do
+      case " $NUMS_LIST " in
+        *" $sn "*) COLLIDE+=("$sn") ;;
+      esac
+    done
+
+    if [[ ${#COLLIDE[@]} -gt 0 ]]; then
+      # 仅 WARN 不 FAIL：origin 主线已有多处 pre-existing 同号（27/28/29/57-60/65），
+      # 现网默认接受（先 schema 再 seed 顺序 + idempotent 写法 + 内容互不冲突）。
+      # 新增冲突务必在 review 时基于此输出修正：把后合入的文件抬到更大版本号。
+      echo "⚠️  跨目录同号冲突（goose version_id 全局 PRIMARY KEY 全表唯一，"
+      echo "    第二个同号迁移会被 goose 静默跳过 → 数据可能不应用）："
+      for c in "${COLLIDE[@]}"; do
+        MFILE=$(printf '%s\n' "${FILES[@]}" | grep "^$c" | head -1)
+        SFILE=$(printf '%s\n' "${SEED_FILES[@]}" | grep "^$c" | head -1)
+        echo "     - $c"
+        echo "         migrations/    : $MFILE"
+        echo "         migrations/seed/: $SFILE"
+      done
+      echo ""
+      echo "   ⚠️  存在 ${#COLLIDE[@]} 处冲突。新加冲突务必修复（重命名后合入文件为更大版本号）；"
+      echo "       既有冲突可由 release-gate 集中清理 — 不阻塞当前 CI。"
+      echo ""
+    else
+      echo "✅ migrations/ 与 seed/ 无跨目录同号冲突"
+      echo ""
+    fi
+
+    # seed 目录内自检（不要求连续，但要求 up/down 标记齐全 + 命名规范）
+    SEED_MISSING_GOOSE=()
+    SEED_BAD_NAME=()
+    for f in "${SEED_FILES[@]}"; do
+      if ! grep -q -- "-- +goose Up" "$SEED_DIR/$f"; then
+        SEED_MISSING_GOOSE+=("seed/$f (missing Up)")
+      fi
+      if ! grep -q -- "-- +goose Down" "$SEED_DIR/$f"; then
+        SEED_MISSING_GOOSE+=("seed/$f (missing Down)")
+      fi
+      if [[ ! "$f" =~ ^[0-9]{6}_[a-z0-9_]+\.sql$ ]]; then
+        SEED_BAD_NAME+=("seed/$f")
+      fi
+    done
+
+    if [[ ${#SEED_MISSING_GOOSE[@]} -gt 0 ]]; then
+      echo "⚠️  seed 目录文件缺少 goose 标记："
+      for m in "${SEED_MISSING_GOOSE[@]}"; do
+        echo "     - $m"
+      done
+      echo ""
+      FAIL=1
+    fi
+    if [[ ${#SEED_BAD_NAME[@]} -gt 0 ]]; then
+      echo "⚠️  seed 目录文件命名不规范："
+      for b in "${SEED_BAD_NAME[@]}"; do
+        echo "     - $b"
+      done
+      echo ""
+      FAIL=1
+    fi
+  fi
+fi
+
 # ── 总结 ───────────────────────────────────────────────────────
 if [[ "$FAIL" -eq 0 ]]; then
   echo "════════════════════════════════════════"

@@ -2971,6 +2971,7 @@ const messages: Record<string, string> = {
   'system.northbound.switchToActive':        'Switch Server',
   'system.northbound.switchConfirm':         'Switching to {server} takes effect immediately. Confirm switch?',
   'system.northbound.switchSuccess':         'Server switched successfully',
+  'system.northbound.editNoPermission':      'No permission: please contact admin to grant "Northbound server edit" permission',
   'system.northbound.statusExecuting':       'Active',
   'system.northbound.statusInactive':        'Inactive',
 

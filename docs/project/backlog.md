@@ -313,7 +313,8 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 
 | ID | Title | Proposed By | Created | Notes |
 |----|-------|-------------|---------|-------|
-| — | （当前为空，新想法请在此行之上追加） | — | — | 下周一 Triage 会议判决 |
+| T-0099 | F08 北向 push engine 接入 active server（关闭"切换 / 编辑即生效"环） | dev (Claude) | 2026-05-08 | **背景**：commit 4742b792 / 84cad900 落地 northbound_servers 主备配置 + 切换/编辑 API + UI；DB 字段就位但 push engine（`internal/northbound/push/engine.go`）仍读 `config.dev.yaml` 静态 PushTargets 作为推送目标。**目标**：让 push engine 启动期 + 切换/编辑后从 `northbound_servers WHERE is_active=TRUE` 读取目标，关闭"前端改 DB 但实际推送不变"的环。**实施**：(a) push engine 加 `RefreshActiveTarget(ctx)` 方法读 NorthboundServerRepo；(b) ServerService.SetActive / Update 成功后通过 EventBus 发 `northbound.server.changed` 事件，push engine 订阅 reload；(c) 启动期 dictloader 后调用一次 RefreshActiveTarget 兜底。**依赖**：T-0098 已 done；northbound_servers 表已就位。**验收**：切换主备 → ListTargets() 立即反映；编辑 host/port → 下次推送命中新目标；e2e 加"切换后推送命中新 host"用例。**预估**：2-3 工作日。 |
+| — | （新想法在 T-0099 上方追加） | — | — | 下周一 Triage 会议判决 |
 
 ---
 

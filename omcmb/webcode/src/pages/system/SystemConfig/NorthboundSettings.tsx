@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Form, Input, InputNumber, Switch, Table, Button, Modal, Tag, Card, Spin, message } from 'antd';
+import { Form, Input, InputNumber, Switch, Table, Button, Modal, Tag, Card, Spin, Tooltip, message } from 'antd';
 import { PlusOutlined, MoreOutlined, SwapOutlined, EditOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useT } from '@/hooks/useT';
@@ -8,10 +8,17 @@ import {
   useSwitchActiveNorthboundServer,
   useUpdateNorthboundServer,
 } from '@core/hooks/api/useNorthbound';
+import { usePermission } from '@core/hooks/usePermission';
 import type {
   NorthboundServer,
   NorthboundServerRole,
 } from '@core/services/api/northboundApi';
+
+// 北向服务器编辑权限 key（与 menus.permission_key 严格对齐）。
+// seed/000071 注入 menu button 节点 + admin/operator role_menus 绑定；
+// 后端 PUT /northbound/servers/:role 由 seed/000070 的 role_api_permissions
+// 兜底 — 前端预测 + 后端兜底双层防护。
+const PERM_NORTHBOUND_EDIT = 'system:config:northbound:edit';
 
 interface NorthboundUser {
   id: string;
@@ -49,10 +56,11 @@ interface ServerInfoBlockProps {
   onSwitch: () => void;
   onEdit: () => void;
   switching: boolean;
+  canEdit: boolean;
   t: ReturnType<typeof useT>;
 }
 
-function ServerInfoBlock({ server, onSwitch, onEdit, switching, t }: ServerInfoBlockProps) {
+function ServerInfoBlock({ server, onSwitch, onEdit, switching, canEdit, t }: ServerInfoBlockProps) {
   const isActive = server.isActive;
   const titleKey =
     server.role === 'primary'
@@ -77,9 +85,19 @@ function ServerInfoBlock({ server, onSwitch, onEdit, switching, t }: ServerInfoB
       }
       extra={
         <div style={{ display: 'inline-flex', gap: 8 }}>
-          <Button size="small" icon={<EditOutlined />} onClick={onEdit}>
-            {t('common.edit')}
-          </Button>
+          <Tooltip
+            title={canEdit ? undefined : t('system.northbound.editNoPermission')}
+          >
+            {/* 无权限时按钮 disabled，hover 提示 — 与 PRD §4.3.6 "disabled 而非隐藏" 对齐 */}
+            <Button
+              size="small"
+              icon={<EditOutlined />}
+              onClick={onEdit}
+              disabled={!canEdit}
+            >
+              {t('common.edit')}
+            </Button>
+          </Tooltip>
           {!isActive && (
             <Button
               type="primary"
@@ -131,6 +149,11 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
 
   // 主备服务器编辑（独立编辑权限：默认仅 admin / operator 角色可调，
   // viewer 调用会收到 403，由 axios 拦截器统一提示）。
+  // canEditServer：前端预测，根据 menuStore.permissionKeys 的 button 节点判定。
+  // - admin / operator：seed/000071 已绑定 → true
+  // - viewer：未绑定 → false → 编辑按钮 disabled + Tooltip
+  // 后端 PUT 仍由 RequireAPIPermission 中间件兜底（即使前端绕过）。
+  const canEditServer = usePermission(PERM_NORTHBOUND_EDIT);
   const updateMutation = useUpdateNorthboundServer();
   const [editForm] = Form.useForm();
   const [editVisible, setEditVisible] = useState(false);
@@ -321,6 +344,7 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
                   switching={switchMutation.isPending && switchMutation.variables === 'primary'}
                   onSwitch={() => handleSwitchActive('primary')}
                   onEdit={() => openEditModal(primary)}
+                  canEdit={canEditServer}
                   t={t}
                 />
               )}
@@ -330,6 +354,7 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
                   switching={switchMutation.isPending && switchMutation.variables === 'standby'}
                   onSwitch={() => handleSwitchActive('standby')}
                   onEdit={() => openEditModal(standby)}
+                  canEdit={canEditServer}
                   t={t}
                 />
               )}

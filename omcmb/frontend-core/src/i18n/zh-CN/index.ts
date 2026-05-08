@@ -2980,6 +2980,7 @@ const messages: Record<string, string> = {
   'system.northbound.switchToActive':        '切换服务器',
   'system.northbound.switchConfirm':         '切换为{server}将立即生效，请确认是否切换？',
   'system.northbound.switchSuccess':         '服务器切换成功',
+  'system.northbound.editNoPermission':      '无权限：请联系管理员申请「北向服务器编辑」权限',
   'system.northbound.statusExecuting':       '执行中',
   'system.northbound.statusInactive':        '未生效',
 
