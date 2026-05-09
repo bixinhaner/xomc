@@ -39,13 +39,26 @@ export function useLicenseSummary() {
   });
 }
 
+/**
+ * 激活 license（T-0100-P3）。
+ *
+ * mutate 接受 { licenseCode, force? }：force=false 时若同 (device_type, region)
+ * 已有 active license，后端返 409 + ActivateConflictBody，调用方在 onError
+ * 里 parseActivateConflict(err.response.data) 弹 Modal 二次确认；用户确认后
+ * 用 force=true 再调一次。
+ */
+export interface ActivateLicenseInput {
+  licenseCode: string;
+  force?: boolean;
+}
+
 export function useActivateLicense() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (licenseCode: string) =>
+    mutationFn: ({ licenseCode, force }: ActivateLicenseInput) =>
       useMock
         ? licenseService.activate(licenseCode)
-        : licenseApi.activateLicense(licenseCode),
+        : licenseApi.activateLicense(licenseCode, force ?? false),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['licenses'] });
     },
@@ -65,12 +78,23 @@ export function useRevokeLicense() {
   });
 }
 
+/**
+ * 导入 license（T-0100-P3）。
+ *
+ * 真实 API 返回 ImportLicenseResult（含 signatureStatus）；mock 路径用 service
+ * 返回 License（向下兼容），调用方需 instanceof check 或检查 license 字段。
+ * 推荐：禁用 mock 模式或仅在后端联调时使用本 hook。
+ */
 export function useImportLicense() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: Omit<License, 'id'>) =>
       useMock
-        ? licenseService.importLicense(data)
+        ? licenseService.importLicense(data).then((lic) => ({
+            license: lic,
+            signatureStatus: 'unverified' as const,
+            signatureNote: 'mock mode: signature not verified',
+          }))
         : licenseApi.importLicense(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['licenses'] });

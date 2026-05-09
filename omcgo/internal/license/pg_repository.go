@@ -398,6 +398,52 @@ func (r *PgLicenseRepository) ListActiveLicenses(ctx context.Context) ([]*Licens
 	return out, nil
 }
 
+// ListActiveByDimension returns active licenses with the same (device_type,
+// region) dimension. NULL is matched against NULL (业务约束：同维度最多一个
+// active；NULL device_type/region 视为同一"未指定"维度桶)。
+//
+// T-0100-P3：Activate 同维度冲突检测，用于 force=false 时返回 409 + 冲突列表，
+// 或 force=true 时定位待自动 revoke 的旧 license。
+func (r *PgLicenseRepository) ListActiveByDimension(
+	ctx context.Context, deviceType *string, region *string,
+) ([]*License, error) {
+	q := storage.Psql.Select(licenseEnforcementColumns...).
+		From("licenses").
+		Where(sq.Eq{"status": StatusActive})
+
+	if deviceType == nil {
+		q = q.Where("device_type IS NULL")
+	} else {
+		q = q.Where(sq.Eq{"device_type": *deviceType})
+	}
+	if region == nil {
+		q = q.Where("region IS NULL")
+	} else {
+		q = q.Where(sq.Eq{"region": *region})
+	}
+
+	query, args, err := q.OrderBy("created_at DESC").ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list active by dimension query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list active by dimension: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*License
+	for rows.Next() {
+		lic, err := scanLicenseFull(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan active license: %w", err)
+		}
+		out = append(out, lic)
+	}
+	return out, nil
+}
+
 // CountDevices returns the total number of registered devices.
 // Used as the "used_devices" measurement for capacity enforcement.
 func (r *PgLicenseRepository) CountDevices(ctx context.Context) (int, error) {

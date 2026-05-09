@@ -29,6 +29,12 @@ type LicenseRepository interface {
 	// used by the cron monitor to scan expiry windows and capacity alerts.
 	ListActiveLicenses(ctx context.Context) ([]*License, error)
 
+	// ListActiveByDimension returns active licenses matching the given
+	// (device_type, region) dimension. NULL dimensions are treated as a
+	// catch-all bucket; passing nil means "match the same NULL bucket".
+	// T-0100-P3：Activate 同维度冲突检测（PRD §5.3.2）。
+	ListActiveByDimension(ctx context.Context, deviceType *string, region *string) ([]*License, error)
+
 	// CountDevices returns the current count of registered devices,
 	// used as the "used_devices" measurement for capacity enforcement.
 	CountDevices(ctx context.Context) (int, error)

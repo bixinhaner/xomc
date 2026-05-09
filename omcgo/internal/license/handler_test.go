@@ -126,6 +126,37 @@ func (m *fakeLicenseRepo) ListActiveLicenses(_ context.Context) ([]*License, err
 	return out, nil
 }
 
+// ListActiveByDimension matches active licenses sharing the same (device_type,
+// region) bucket. NULL values match NULL — used by Activate same-dimension flow.
+func (m *fakeLicenseRepo) ListActiveByDimension(
+	_ context.Context, deviceType *string, region *string,
+) ([]*License, error) {
+	var out []*License
+	for _, lic := range m.licenses {
+		if lic.Status != StatusActive {
+			continue
+		}
+		if !samePtrString(lic.DeviceType, deviceType) {
+			continue
+		}
+		if !samePtrString(lic.Region, region) {
+			continue
+		}
+		out = append(out, lic)
+	}
+	return out, nil
+}
+
+func samePtrString(a, b *string) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
 // fakeDeviceCount lets tests override the device-count return value.
 var fakeDeviceCount = 0
 
@@ -290,6 +321,69 @@ func TestHandler_Activate(t *testing.T) {
 	assert.Equal(t, StatusActive, repo.licenses[lic.ID].Status)
 }
 
+// T-0100-P3 / PRD §5.3.2: 同 (device_type, region) 维度已有 active license 时，
+// force=false 应返回 409 + ActivateConflictResponse；force=true 应自动 revoke
+// 旧 active 后再激活新 license。
+func TestHandler_Activate_SameDimensionConflict_NoForce(t *testing.T) {
+	h, repo := newTestLicenseHandler()
+	router := setupLicenseRouter(h)
+
+	deviceType := "pico"
+	region := "east"
+	old := seedLicense(repo, "Old Active", "LIC-DIM-OLD", "Prod", TypeSubscription, StatusActive)
+	old.DeviceType = &deviceType
+	old.Region = &region
+	target := seedLicense(repo, "New Pending", "LIC-DIM-NEW", "Prod", TypeSubscription, StatusPending)
+	target.DeviceType = &deviceType
+	target.Region = &region
+
+	body := ActivateRequest{LicenseCode: "LIC-DIM-NEW", Force: false}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/licenses/activate", bytes.NewReader(mustMarshalLicense(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+
+	var resp ActivateConflictResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "same_dimension_active", resp.Conflict)
+	require.Len(t, resp.ConflictingActive, 1)
+	assert.Equal(t, old.ID, resp.ConflictingActive[0].ID)
+	// 仓库未变更：旧仍 active、新仍 pending。
+	assert.Equal(t, StatusActive, repo.licenses[old.ID].Status)
+	assert.Equal(t, StatusPending, repo.licenses[target.ID].Status)
+}
+
+func TestHandler_Activate_SameDimensionConflict_Force(t *testing.T) {
+	h, repo := newTestLicenseHandler()
+	router := setupLicenseRouter(h)
+
+	deviceType := "pico"
+	region := "east"
+	old := seedLicense(repo, "Old Active", "LIC-DIM-OLD2", "Prod", TypeSubscription, StatusActive)
+	old.DeviceType = &deviceType
+	old.Region = &region
+	target := seedLicense(repo, "New Pending", "LIC-DIM-NEW2", "Prod", TypeSubscription, StatusPending)
+	target.DeviceType = &deviceType
+	target.Region = &region
+
+	body := ActivateRequest{LicenseCode: "LIC-DIM-NEW2", Force: true}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/licenses/activate", bytes.NewReader(mustMarshalLicense(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var resp License
+	response.DecodeData(t, w.Body, &resp)
+	assert.Equal(t, target.ID, resp.ID)
+	assert.Equal(t, StatusActive, resp.Status)
+	// 旧 active 已自动 revoke。
+	assert.Equal(t, StatusRevoked, repo.licenses[old.ID].Status)
+	assert.Equal(t, StatusActive, repo.licenses[target.ID].Status)
+}
+
 func TestHandler_Revoke(t *testing.T) {
 	h, repo := newTestLicenseHandler()
 	router := setupLicenseRouter(h)
@@ -345,24 +439,28 @@ func TestHandler_Import(t *testing.T) {
 
 	assert.Equal(t, http.StatusCreated, w.Code)
 
-	var resp License
+	var resp ImportResponse
 	response.DecodeData(t, w.Body, &resp)
-	assert.NotEqual(t, uuid.Nil, resp.ID)
-	assert.Equal(t, "Imported License", resp.LicenseName)
-	assert.Equal(t, "LIC-IMP-001", resp.LicenseCode)
-	assert.Equal(t, "Product Z", resp.ProductName)
-	assert.Equal(t, TypePerpetual, resp.LicenseType)
-	assert.Equal(t, StatusPending, resp.Status)
-	assert.Equal(t, 500, resp.MaxDevices)
-	assert.Equal(t, 0, resp.UsedDevices)
-	require.NotNil(t, resp.Licensor)
-	assert.Equal(t, "Vendor Corp", *resp.Licensor)
-	require.NotNil(t, resp.DeviceType)
-	assert.Equal(t, "pico", *resp.DeviceType)
-	require.NotNil(t, resp.Region)
-	assert.Equal(t, "east", *resp.Region)
-	require.NotNil(t, resp.Notes)
-	assert.Equal(t, "Imported for testing", *resp.Notes)
+	require.NotNil(t, resp.License)
+	assert.NotEqual(t, uuid.Nil, resp.License.ID)
+	assert.Equal(t, "Imported License", resp.License.LicenseName)
+	assert.Equal(t, "LIC-IMP-001", resp.License.LicenseCode)
+	assert.Equal(t, "Product Z", resp.License.ProductName)
+	assert.Equal(t, TypePerpetual, resp.License.LicenseType)
+	assert.Equal(t, StatusPending, resp.License.Status)
+	assert.Equal(t, 500, resp.License.MaxDevices)
+	assert.Equal(t, 0, resp.License.UsedDevices)
+	require.NotNil(t, resp.License.Licensor)
+	assert.Equal(t, "Vendor Corp", *resp.License.Licensor)
+	require.NotNil(t, resp.License.DeviceType)
+	assert.Equal(t, "pico", *resp.License.DeviceType)
+	require.NotNil(t, resp.License.Region)
+	assert.Equal(t, "east", *resp.License.Region)
+	require.NotNil(t, resp.License.Notes)
+	assert.Equal(t, "Imported for testing", *resp.License.Notes)
+	// T-0100-P3 / Q4=B：MVP 阶段未签名 license 仍允许入库，signature_status='unverified'。
+	assert.Equal(t, string(SignatureUnverified), resp.SignatureStatus)
+	assert.NotEmpty(t, resp.SignatureNote)
 }
 
 // TestHandler_Import_DuplicateCode_Returns409 guards the W2.D.1.b /

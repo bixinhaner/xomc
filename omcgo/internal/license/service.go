@@ -89,19 +89,96 @@ func (s *Service) Summary(ctx context.Context) (*LicenseSummary, error) {
 	return summary, nil
 }
 
+// SameDimensionConflictError 表示同 (device_type, region) 维度已存在 active license。
+//
+// T-0100-P3 / PRD §5.3.2：业务约束规定同维度最多一个 active；Activate 检测到
+// 冲突且 force=false 时返回此错误，handler 翻成 HTTP 409 + ConflictingLicenses
+// 列表，前端弹 Modal 二次确认；force=true 再次调用进入自动 revoke + activate
+// 串行流程。
+type SameDimensionConflictError struct {
+	DeviceType  *string
+	Region      *string
+	Conflicting []*License
+}
+
+// Error implements error.
+func (e *SameDimensionConflictError) Error() string {
+	return fmt.Sprintf(
+		"same-dimension active license already exists (device_type=%s, region=%s, count=%d): %s",
+		strPtrOrEmpty(e.DeviceType), strPtrOrEmpty(e.Region), len(e.Conflicting),
+		commonerrors.ErrAlreadyExists.Error(),
+	)
+}
+
+// Unwrap exposes ErrAlreadyExists so commonerrors.HTTPStatusFromError → 409
+// （与"license_code 已存在"复用 409 语义；前端通过响应 body 的 code/conflict
+// 字段区分两种冲突来源）。
+func (e *SameDimensionConflictError) Unwrap() error { return commonerrors.ErrAlreadyExists }
+
+func strPtrOrEmpty(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+// ActivateResult 是 Activate 执行结果，便于 handler 知道是否做了 auto-revoke
+// 以便额外写一条 license_log（log_type=auto_revoke_by_activate）。
+type ActivateResult struct {
+	Activated *License // 新激活 license
+	// AutoRevoked 列出本次 activate 自动 revoke 的同维度旧 license（可能多条）。
+	// 仅 force=true 路径非空；handler 据此为每条写 auto_revoke_by_activate 日志。
+	AutoRevoked []*License
+}
+
 // Activate finds a license by code and sets its status to active.
-func (s *Service) Activate(ctx context.Context, licenseCode string) (*License, error) {
+//
+// force=false（默认）：检测同 (device_type, region) 维度是否已有 active；
+// 若有，返回 SameDimensionConflictError → handler 翻 409 + 冲突列表，前端弹
+// Modal 二次确认。若无冲突，直接激活。
+//
+// force=true：跳过冲突预检，先把同维度旧 active 全部 revoke（写日志的责任在
+// handler，避免 service 层耦合 LogWriter），再激活目标 license。
+func (s *Service) Activate(ctx context.Context, licenseCode string, force bool) (*ActivateResult, error) {
 	lic, err := s.repo.GetByCode(ctx, licenseCode)
 	if err != nil {
 		return nil, fmt.Errorf("get license by code: %w", err)
 	}
 
 	if lic.Status == StatusActive {
-		return lic, nil
+		return &ActivateResult{Activated: lic}, nil
 	}
-
 	if lic.Status == StatusRevoked {
 		return nil, commonerrors.NewBusinessError(9100, "cannot activate a revoked license", commonerrors.ErrInvalidInput)
+	}
+
+	conflicts, err := s.repo.ListActiveByDimension(ctx, lic.DeviceType, lic.Region)
+	if err != nil {
+		return nil, fmt.Errorf("list active by dimension: %w", err)
+	}
+	// 排除目标 license 自身（理论上 status != active 不会撞上，但保险一层）。
+	conflicts = filterOutByID(conflicts, lic.ID)
+
+	if len(conflicts) > 0 && !force {
+		return nil, &SameDimensionConflictError{
+			DeviceType:  lic.DeviceType,
+			Region:      lic.Region,
+			Conflicting: conflicts,
+		}
+	}
+
+	autoRevoked := make([]*License, 0, len(conflicts))
+	for _, old := range conflicts {
+		old.Status = StatusRevoked
+		if err := s.repo.Update(ctx, old); err != nil {
+			return nil, fmt.Errorf("auto-revoke conflicting license %s: %w", old.ID, err)
+		}
+		s.logger.Info("license auto-revoked by activate",
+			zap.String("revoked_id", old.ID.String()),
+			zap.String("revoked_code", old.LicenseCode),
+			zap.String("activated_code", licenseCode),
+		)
+		autoRevoked = append(autoRevoked, old)
 	}
 
 	lic.Status = StatusActive
@@ -114,9 +191,21 @@ func (s *Service) Activate(ctx context.Context, licenseCode string) (*License, e
 	s.logger.Info("license activated",
 		zap.String("license_id", lic.ID.String()),
 		zap.String("license_code", licenseCode),
+		zap.Int("auto_revoked_count", len(autoRevoked)),
 	)
 
-	return lic, nil
+	return &ActivateResult{Activated: lic, AutoRevoked: autoRevoked}, nil
+}
+
+// filterOutByID drops any *License whose ID matches the given UUID.
+func filterOutByID(in []*License, id uuid.UUID) []*License {
+	out := make([]*License, 0, len(in))
+	for _, lic := range in {
+		if lic.ID != id {
+			out = append(out, lic)
+		}
+	}
+	return out
 }
 
 // Revoke sets a license status to revoked.

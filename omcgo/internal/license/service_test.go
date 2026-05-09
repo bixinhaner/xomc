@@ -19,17 +19,18 @@ import (
 // --- Mock Repository ---
 
 type mockLicenseRepo struct {
-	createFn      func(ctx context.Context, lic *License) error
-	getByIDFn     func(ctx context.Context, id uuid.UUID) (*License, error)
-	getByCodeFn   func(ctx context.Context, code string) (*License, error)
-	updateFn      func(ctx context.Context, lic *License) error
-	listFn        func(ctx context.Context, filter LicenseFilter) (*model.ListResponse[License], error)
-	summaryFn     func(ctx context.Context) (*LicenseSummary, error)
-	getActiveFn   func(ctx context.Context) (*License, error)
-	listActiveFn  func(ctx context.Context) ([]*License, error)
-	countDevFn    func(ctx context.Context) (int, error)
-	markExpFn     func(ctx context.Context, id uuid.UUID) error
-	updCapAlertFn func(ctx context.Context, id uuid.UUID, threshold int, at time.Time) error
+	createFn       func(ctx context.Context, lic *License) error
+	getByIDFn      func(ctx context.Context, id uuid.UUID) (*License, error)
+	getByCodeFn    func(ctx context.Context, code string) (*License, error)
+	updateFn       func(ctx context.Context, lic *License) error
+	listFn         func(ctx context.Context, filter LicenseFilter) (*model.ListResponse[License], error)
+	summaryFn      func(ctx context.Context) (*LicenseSummary, error)
+	getActiveFn    func(ctx context.Context) (*License, error)
+	listActiveFn   func(ctx context.Context) ([]*License, error)
+	listByDimFn    func(ctx context.Context, deviceType *string, region *string) ([]*License, error)
+	countDevFn     func(ctx context.Context) (int, error)
+	markExpFn      func(ctx context.Context, id uuid.UUID) error
+	updCapAlertFn  func(ctx context.Context, id uuid.UUID, threshold int, at time.Time) error
 }
 
 func (m *mockLicenseRepo) Create(ctx context.Context, lic *License) error {
@@ -84,6 +85,15 @@ func (m *mockLicenseRepo) GetActiveLicenseWithMaxDevices(ctx context.Context) (*
 func (m *mockLicenseRepo) ListActiveLicenses(ctx context.Context) ([]*License, error) {
 	if m.listActiveFn != nil {
 		return m.listActiveFn(ctx)
+	}
+	return nil, nil
+}
+
+func (m *mockLicenseRepo) ListActiveByDimension(
+	ctx context.Context, deviceType *string, region *string,
+) ([]*License, error) {
+	if m.listByDimFn != nil {
+		return m.listByDimFn(ctx, deviceType, region)
 	}
 	return nil, nil
 }
@@ -285,11 +295,13 @@ func TestService_Activate_Success(t *testing.T) {
 	}
 
 	svc := newTestService(repo)
-	result, err := svc.Activate(context.Background(), licCode)
+	result, err := svc.Activate(context.Background(), licCode, false)
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	assert.Equal(t, StatusActive, result.Status)
+	require.NotNil(t, result.Activated)
+	assert.Equal(t, StatusActive, result.Activated.Status)
+	assert.Empty(t, result.AutoRevoked, "no same-dimension conflict expected")
 	require.NotNil(t, updatedLic)
 	assert.Equal(t, StatusActive, updatedLic.Status)
 }
@@ -310,12 +322,13 @@ func TestService_Activate_AlreadyActive(t *testing.T) {
 	}
 
 	svc := newTestService(repo)
-	result, err := svc.Activate(context.Background(), licCode)
+	result, err := svc.Activate(context.Background(), licCode, false)
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	assert.Equal(t, StatusActive, result.Status, "should return same license (idempotent)")
-	assert.Equal(t, lic.ID, result.ID)
+	require.NotNil(t, result.Activated)
+	assert.Equal(t, StatusActive, result.Activated.Status, "should return same license (idempotent)")
+	assert.Equal(t, lic.ID, result.Activated.ID)
 }
 
 func TestService_Activate_Revoked(t *testing.T) {
@@ -333,13 +346,125 @@ func TestService_Activate_Revoked(t *testing.T) {
 	}
 
 	svc := newTestService(repo)
-	result, err := svc.Activate(context.Background(), licCode)
+	result, err := svc.Activate(context.Background(), licCode, false)
 
 	require.Error(t, err)
 	assert.Nil(t, result)
 	var bErr *commonerrors.BusinessError
 	assert.True(t, errors.As(err, &bErr))
 	assert.Equal(t, 9100, bErr.Code)
+}
+
+// --- Tests: Activate same-dimension flow (T-0100-P3) ---
+
+func TestService_Activate_SameDimensionConflict_NoForce(t *testing.T) {
+	licCode := "LIC-NEW-001"
+	deviceType := "pico"
+	region := "huabei"
+	target := &License{
+		ID:          uuid.New(),
+		LicenseCode: licCode,
+		Status:      StatusPending,
+		DeviceType:  &deviceType,
+		Region:      &region,
+	}
+	old := &License{
+		ID:          uuid.New(),
+		LicenseCode: "LIC-OLD-001",
+		LicenseName: "old",
+		Status:      StatusActive,
+		DeviceType:  &deviceType,
+		Region:      &region,
+	}
+
+	updateCalls := 0
+	repo := &mockLicenseRepo{
+		getByCodeFn: func(_ context.Context, _ string) (*License, error) { return target, nil },
+		listByDimFn: func(_ context.Context, dt *string, rg *string) ([]*License, error) {
+			require.NotNil(t, dt)
+			require.NotNil(t, rg)
+			assert.Equal(t, deviceType, *dt)
+			assert.Equal(t, region, *rg)
+			return []*License{old}, nil
+		},
+		updateFn: func(_ context.Context, _ *License) error {
+			updateCalls++
+			return nil
+		},
+	}
+
+	result, err := newTestService(repo).Activate(context.Background(), licCode, false)
+	require.Error(t, err)
+	assert.Nil(t, result)
+
+	var conflict *SameDimensionConflictError
+	require.True(t, errors.As(err, &conflict))
+	assert.Len(t, conflict.Conflicting, 1)
+	assert.Equal(t, old.ID, conflict.Conflicting[0].ID)
+	assert.Equal(t, 0, updateCalls, "no Update should fire when force=false")
+	// 校验 Unwrap → ErrAlreadyExists（HTTP 409 映射）
+	assert.True(t, errors.Is(err, commonerrors.ErrAlreadyExists))
+}
+
+func TestService_Activate_SameDimensionConflict_Force(t *testing.T) {
+	licCode := "LIC-NEW-002"
+	deviceType := "pico"
+	target := &License{
+		ID:          uuid.New(),
+		LicenseCode: licCode,
+		Status:      StatusPending,
+		DeviceType:  &deviceType,
+	}
+	old1 := &License{ID: uuid.New(), LicenseCode: "LIC-OLD-A", Status: StatusActive, DeviceType: &deviceType}
+	old2 := &License{ID: uuid.New(), LicenseCode: "LIC-OLD-B", Status: StatusActive, DeviceType: &deviceType}
+
+	var updates []*License
+	repo := &mockLicenseRepo{
+		getByCodeFn: func(_ context.Context, _ string) (*License, error) { return target, nil },
+		listByDimFn: func(_ context.Context, _ *string, _ *string) ([]*License, error) {
+			return []*License{old1, old2}, nil
+		},
+		updateFn: func(_ context.Context, l *License) error {
+			updates = append(updates, l)
+			return nil
+		},
+	}
+
+	result, err := newTestService(repo).Activate(context.Background(), licCode, true)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Activated)
+	assert.Equal(t, StatusActive, result.Activated.Status)
+	assert.Len(t, result.AutoRevoked, 2)
+	// 期望写入顺序：先 revoke 两条旧 active，再激活新 license（共 3 次 Update）
+	require.Len(t, updates, 3)
+	assert.Equal(t, StatusRevoked, updates[0].Status)
+	assert.Equal(t, StatusRevoked, updates[1].Status)
+	assert.Equal(t, StatusActive, updates[2].Status)
+	assert.Equal(t, target.ID, updates[2].ID)
+}
+
+func TestService_Activate_SameDimension_NullBucket(t *testing.T) {
+	// device_type 与 region 均 nil 也算同一桶；与 nil 桶冲突时 force=false 应 409。
+	licCode := "LIC-NULL-001"
+	target := &License{ID: uuid.New(), LicenseCode: licCode, Status: StatusPending}
+	old := &License{ID: uuid.New(), LicenseCode: "LIC-NULL-OLD", Status: StatusActive}
+
+	repo := &mockLicenseRepo{
+		getByCodeFn: func(_ context.Context, _ string) (*License, error) { return target, nil },
+		listByDimFn: func(_ context.Context, dt *string, rg *string) ([]*License, error) {
+			assert.Nil(t, dt)
+			assert.Nil(t, rg)
+			return []*License{old}, nil
+		},
+	}
+
+	_, err := newTestService(repo).Activate(context.Background(), licCode, false)
+	require.Error(t, err)
+	var conflict *SameDimensionConflictError
+	require.True(t, errors.As(err, &conflict))
+	assert.Nil(t, conflict.DeviceType)
+	assert.Nil(t, conflict.Region)
 }
 
 // --- Tests: Revoke ---

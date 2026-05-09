@@ -7,6 +7,44 @@ import type { PageRequest, PageResponse } from '../../types/pagination';
 // 与后端 internal/license/license_log_model.go 保持一致：9 种 log_type + 4 种 result。
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// T-0100-P3: Activate 同维度冲突响应 + Import 签名状态
+// 后端契约：handler.ActivateConflictResponse / handler.ImportResponse
+// ---------------------------------------------------------------------------
+
+/** 后端 409 同维度冲突响应（snake_case，对应 ActivateConflictResponse）。 */
+export interface ActivateConflictBody {
+  conflict: 'same_dimension_active';
+  device_type: string | null;
+  region: string | null;
+  conflicting_active: BackendLicense[];
+  hint: string;
+}
+
+/** 前端 camelCase 形式（mapper 输出）。 */
+export interface ActivateConflict {
+  conflict: 'same_dimension_active';
+  deviceType: string | null;
+  region: string | null;
+  conflictingActive: License[];
+  hint: string;
+}
+
+export type LicenseSignatureStatus = 'verified' | 'unverified' | 'invalid';
+
+/** Import 响应（POST /licenses/import 的 envelope.data）。 */
+export interface ImportLicenseResult {
+  license: License;
+  signatureStatus: LicenseSignatureStatus;
+  signatureNote: string;
+}
+
+interface BackendImportResponse {
+  license: BackendLicense;
+  signature_status: LicenseSignatureStatus;
+  signature_note?: string;
+}
+
 export type LicenseLogType =
   | 'import'
   | 'activate'
@@ -197,9 +235,18 @@ export const licenseApi = {
     };
   },
 
-  async activateLicense(licenseCode: string): Promise<License> {
+  /**
+   * 激活 license（T-0100-P3）。
+   *
+   * - force=false（默认）：检测同 (device_type, region) 维度已有 active license
+   *   时后端返 409 + ActivateConflictBody，调用方 catch error.response.data
+   *   弹 Modal 二次确认。
+   * - force=true：跳过冲突预检，自动 revoke 同维度旧 license 后再激活。
+   */
+  async activateLicense(licenseCode: string, force = false): Promise<License> {
     const { data } = await http.post<BackendLicense>('/licenses/activate', {
       license_code: licenseCode,
+      force,
     });
     return mapBackendLicense(data);
   },
@@ -258,7 +305,14 @@ export const licenseApi = {
     return (data.items || []).map(mapBackendLog);
   },
 
-  async importLicense(licenseData: Omit<License, 'id'>): Promise<License> {
+  /**
+   * 导入 license（T-0100-P3）。
+   *
+   * 返回包含签名状态的 ImportLicenseResult；前端在导入成功 Modal 上根据
+   * `signatureStatus` 决定是否显示 "未签名校验" warning Tag（Q4=B 决议：
+   * MVP 阶段允许 'unverified' 入库，P4-C 收紧为强校验）。
+   */
+  async importLicense(licenseData: Omit<License, 'id'>): Promise<ImportLicenseResult> {
     const payload = {
       license_name: licenseData.licenseName,
       license_code: licenseData.licenseCode,
@@ -275,7 +329,32 @@ export const licenseApi = {
       region: licenseData.region || null,
       notes: licenseData.notes || null,
     };
-    const { data } = await http.post<BackendLicense>('/licenses/import', payload);
-    return mapBackendLicense(data);
+    const { data } = await http.post<BackendImportResponse>('/licenses/import', payload);
+    return {
+      license: mapBackendLicense(data.license),
+      signatureStatus: data.signature_status,
+      signatureNote: data.signature_note ?? '',
+    };
   },
 };
+
+/**
+ * 把 axios error 解析为同维度冲突信息（若是）。
+ *
+ * 用于 LicenseOperations 的 Activate Tab：activateLicense 抛 409 时调用方
+ * 取 error.response?.data 传给本函数；非冲突错误返 null（继续按通用错误处理）。
+ */
+export function parseActivateConflict(payload: unknown): ActivateConflict | null {
+  if (typeof payload !== 'object' || payload === null) return null;
+  const body = payload as Partial<ActivateConflictBody>;
+  if (body.conflict !== 'same_dimension_active' || !Array.isArray(body.conflicting_active)) {
+    return null;
+  }
+  return {
+    conflict: 'same_dimension_active',
+    deviceType: body.device_type ?? null,
+    region: body.region ?? null,
+    conflictingActive: body.conflicting_active.map(mapBackendLicense),
+    hint: body.hint ?? '',
+  };
+}

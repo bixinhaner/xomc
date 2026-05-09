@@ -1,170 +1,356 @@
-import { useState, useMemo } from 'react';
-import { Button, Card, Upload, Input, Tag, message, Tabs, Form, Modal } from 'antd';
-import { InboxOutlined, CheckCircleOutlined, StopOutlined, UploadOutlined } from '@ant-design/icons';
+// LicenseOperations — T-0100-P3 重写：Import / Activate / Revoke / Export 四 Tab
+// + 当前用户最近 30 天审计日志。所有写操作通过 system:license:operate 权限点门控。
+//
+// 后端契约：
+//   POST /licenses/import     → ImportLicenseResult { license, signatureStatus, signatureNote }
+//   POST /licenses/activate   → 200 License | 409 ActivateConflictBody（同维度冲突）
+//   POST /licenses/:id/revoke → noop on success
+//   GET  /licenses?status=active → 撤销 Tab 下拉 + 激活 Tab 同维度查询源
+//   GET  /licenses/logs?actor_user_id=&start_time= → 我的近 30 天操作历史
+//
+// 多皮肤注意：本文件只在 webcode 主皮肤；frontend-core 的 API / Hook / 类型已
+// 同步，webcode-v2/v3 若复刻 LicenseOperations 直接 import @core 即可。
+
+import { useMemo, useState } from 'react';
+import {
+  Alert,
+  Button,
+  Card,
+  Form,
+  Input,
+  message,
+  Modal,
+  Select,
+  Space,
+  Tabs,
+  Tag,
+  Tooltip,
+  Upload,
+} from 'antd';
+import {
+  CheckCircleOutlined,
+  DownloadOutlined,
+  ExclamationCircleOutlined,
+  InboxOutlined,
+  StopOutlined,
+  UploadOutlined,
+} from '@ant-design/icons';
 import type { UploadFile, RcFile } from 'antd/es/upload';
+import type { AxiosError } from 'axios';
+import dayjs from 'dayjs';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
-import { useActivateLicense, useRevokeLicense, useImportLicense } from '@core/hooks/api/useLicense';
+import {
+  useActivateLicense,
+  useImportLicense,
+  useLicenseLogs,
+  useLicenses,
+  useRevokeLicense,
+} from '@core/hooks/api/useLicense';
+import {
+  parseActivateConflict,
+  type ActivateConflict,
+  type LicenseLog,
+  type LicenseLogType,
+  type LicenseLogResult,
+  type LicenseSignatureStatus,
+} from '@core/services/api/licenseApi';
+import { useUserStore } from '@core/store/userStore';
+import { usePermission } from '@core/hooks/usePermission';
+import type { License } from '@core/mock/data/license';
 import { useT } from '@/hooks/useT';
 
 const { Dragger } = Upload;
+const { TextArea } = Input;
 
-type OperationType = 'import' | 'activate' | 'revoke' | 'query';
-type OperationResult = 'success' | 'failed' | 'pending';
+const PERM_LICENSE_OPERATE = 'system:license:operate';
 
-interface LicenseOperationRecord {
-  id: string;
-  operationTime: string;
-  operationType: OperationType;
-  licenseId: string;
-  operator: string;
-  result: OperationResult;
-  remark?: string;
-}
-
-const mockOperationHistory: LicenseOperationRecord[] = [
-  { id: 'lo-001', operationTime: '2024-06-01T09:00:00.000Z', operationType: 'import', licenseId: 'OMC-BASIC-HB-2024-001', operator: 'admin', result: 'success', remark: '导入基础许可证' },
-  { id: 'lo-002', operationTime: '2024-06-01T09:05:00.000Z', operationType: 'activate', licenseId: 'OMC-BASIC-HB-2024-001', operator: 'admin', result: 'success' },
-  { id: 'lo-003', operationTime: '2024-05-15T14:00:00.000Z', operationType: 'import', licenseId: 'OMC-ADV-HD-2024-001', operator: 'admin', result: 'success', remark: '导入高级许可证' },
-  { id: 'lo-004', operationTime: '2024-05-15T14:05:00.000Z', operationType: 'activate', licenseId: 'OMC-ADV-HD-2024-001', operator: 'admin', result: 'success' },
-  { id: 'lo-005', operationTime: '2024-04-01T10:00:00.000Z', operationType: 'import', licenseId: 'OMC-TRIAL-2024-001', operator: 'operator1', result: 'failed', remark: 'License文件格式错误' },
-  { id: 'lo-006', operationTime: '2024-03-01T16:00:00.000Z', operationType: 'revoke', licenseId: 'OMC-OLD-2023-001', operator: 'admin', result: 'success', remark: '旧版许可证到期撤销' },
-];
-
-const opTypeColorMap: Record<OperationType, string> = {
+const logTypeColorMap: Record<LicenseLogType, string> = {
   import: 'blue',
   activate: 'green',
   revoke: 'orange',
-  query: 'default',
+  query_detail: 'default',
+  enforcement_capacity: 'volcano',
+  enforcement_expiry: 'volcano',
+  capacity_alert: 'gold',
+  expiry_alert: 'gold',
+  auto_expire: 'magenta',
+  auto_revoke_by_activate: 'cyan',
 };
 
-const resultColorMap: Record<OperationResult, string> = {
+const logResultColorMap: Record<LicenseLogResult, string> = {
   success: 'green',
   failed: 'red',
-  pending: 'processing',
+  denied: 'orange',
+  warning: 'gold',
 };
+
+const signatureStatusColor: Record<LicenseSignatureStatus, string> = {
+  verified: 'green',
+  unverified: 'gold',
+  invalid: 'red',
+};
+
+interface ImportFormValues {
+  licenseName: string;
+  licenseCode: string;
+  productName: string;
+  maxDevices: number;
+  issueDate: string;
+  expiryDate?: string;
+  notes?: string;
+  pasted?: string;
+}
 
 export default function LicenseOperations() {
   const t = useT();
-  const [fileList, setFileList] = useState<UploadFile[]>([]);
-  const [activateCode, setActivateCode] = useState('');
-  const [revokeId, setRevokeId] = useState('');
-  const [history, setHistory] = useState<LicenseOperationRecord[]>(mockOperationHistory);
-  const [_importForm] = Form.useForm();
-  const [importLoading, setImportLoading] = useState(false);
+  const canOperate = usePermission(PERM_LICENSE_OPERATE);
+  const currentUserId = useUserStore((s) => s.user?.id);
 
+  // ------------------- queries -------------------
+  const activeLicensesQuery = useLicenses({ status: 'active', page: 1, pageSize: 200 });
+  const myLogsQuery = useLicenseLogs({
+    page: 1,
+    pageSize: 50,
+    actorUserId: currentUserId,
+    startTime: dayjs().subtract(30, 'day').toISOString(),
+  });
+
+  // ------------------- mutations -------------------
+  const importLicense = useImportLicense();
   const activateLicense = useActivateLicense();
   const revokeLicense = useRevokeLicense();
-  const _importLicense = useImportLicense();
 
-  const opTypeLabelMap: Record<OperationType, string> = useMemo(() => ({
-    import: t('common.import'),
-    activate: t('license.activate'),
-    revoke: t('license.revoke'),
-    query: t('license.query'),
-  }), [t]);
+  // ------------------- Tab 1: Import -------------------
+  const [importForm] = Form.useForm<ImportFormValues>();
+  const [importFiles, setImportFiles] = useState<UploadFile[]>([]);
+  const [importMode, setImportMode] = useState<'file' | 'paste'>('file');
 
-  const resultLabelMap: Record<OperationResult, string> = useMemo(() => ({
-    success: t('status.success'),
-    failed: t('status.failed'),
-    pending: t('status.pending'),
-  }), [t]);
+  const handleImport = async () => {
+    if (!canOperate) return;
+    let values: ImportFormValues;
+    try {
+      values = await importForm.validateFields();
+    } catch {
+      return;
+    }
 
-  const handleImport = () => {
-    if (fileList.length === 0) { void message.warning(t('license.selectFileFirst')); return; }
-    setImportLoading(true);
-    setTimeout(() => {
-      setImportLoading(false);
-      const newRecord: LicenseOperationRecord = {
-        id: `lo-${Date.now()}`,
-        operationTime: new Date().toISOString(),
-        operationType: 'import',
-        licenseId: `OMC-IMPORT-${Date.now()}`,
-        operator: 'admin',
-        result: 'success',
-        remark: `${t('license.importFile')}: ${fileList[0]?.name ?? ''}`,
-      };
-      setHistory((prev) => [newRecord, ...prev]);
-      setFileList([]);
-      void message.success(t('license.importSuccess'));
-    }, 1500);
+    // 简化：不真正解析二进制 license 文件（P4-C 才接 OEM 解析），表单字段直接进 payload。
+    const payload: Omit<License, 'id'> = {
+      licenseName: values.licenseName,
+      licenseCode: values.licenseCode,
+      productName: values.productName,
+      licenseType: 'subscription',
+      status: 'pending',
+      maxDevices: values.maxDevices,
+      usedDevices: 0,
+      features: [],
+      issueDate: values.issueDate,
+      expiryDate: values.expiryDate ?? null,
+      licensor: '',
+      deviceType: '',
+      region: '',
+      notes: values.notes,
+    };
+
+    try {
+      const result = await importLicense.mutateAsync(payload);
+      Modal.success({
+        title: t('license.importSuccess'),
+        content: (
+          <div>
+            <p>
+              <strong>{t('license.licenseCode')}:</strong> {result.license.licenseCode}
+            </p>
+            <p>
+              <strong>{t('license.licenseName')}:</strong> {result.license.licenseName}
+            </p>
+            <p>
+              <strong>{t('license.signature')}:</strong>{' '}
+              <Tag color={signatureStatusColor[result.signatureStatus]}>
+                {t(`license.signature.${result.signatureStatus}`)}
+              </Tag>
+            </p>
+            {result.signatureStatus !== 'verified' && (
+              <Alert
+                type="warning"
+                showIcon
+                message={t('license.signatureWarning')}
+                description={result.signatureNote}
+                style={{ marginTop: 8 }}
+              />
+            )}
+          </div>
+        ),
+      });
+      importForm.resetFields();
+      setImportFiles([]);
+    } catch (err) {
+      void message.error(extractErrorMessage(err) || t('common.error'));
+    }
+  };
+
+  // ------------------- Tab 2: Activate -------------------
+  const [activateCode, setActivateCode] = useState('');
+
+  const doActivate = async (code: string, force: boolean) => {
+    try {
+      await activateLicense.mutateAsync({ licenseCode: code, force });
+      void message.success(t('license.activateSuccess'));
+      setActivateCode('');
+    } catch (err) {
+      const conflict = extractConflict(err);
+      if (conflict) {
+        Modal.confirm({
+          title: t('license.sameDimensionConflictTitle'),
+          icon: <ExclamationCircleOutlined />,
+          content: <SameDimensionConflictBody conflict={conflict} t={t} />,
+          okText: t('license.forceActivate'),
+          okButtonProps: { danger: true },
+          cancelText: t('common.cancel'),
+          onOk: () => doActivate(code, true),
+        });
+        return;
+      }
+      void message.error(extractErrorMessage(err) || t('common.error'));
+    }
   };
 
   const handleActivate = () => {
-    if (!activateCode.trim()) { void message.warning(t('license.enterActivationCode')); return; }
-    activateLicense.mutate(activateCode, {
-      onSuccess: () => {
-        const newRecord: LicenseOperationRecord = {
-          id: `lo-${Date.now()}`,
-          operationTime: new Date().toISOString(),
-          operationType: 'activate',
-          licenseId: activateCode,
-          operator: 'admin',
-          result: 'success',
-        };
-        setHistory((prev) => [newRecord, ...prev]);
-        setActivateCode('');
-        void message.success(t('license.activateSuccess'));
-      },
-    });
+    if (!canOperate) return;
+    const code = activateCode.trim();
+    if (!code) {
+      void message.warning(t('license.enterActivationCode'));
+      return;
+    }
+    void doActivate(code, false);
   };
+
+  // ------------------- Tab 3: Revoke -------------------
+  const [revokeId, setRevokeId] = useState<string | undefined>(undefined);
+  const activeLicenses: License[] = activeLicensesQuery.data?.items ?? [];
 
   const handleRevoke = () => {
-    if (!revokeId.trim()) { void message.warning(t('license.enterRevokeId')); return; }
+    if (!canOperate || !revokeId) return;
+    const target = activeLicenses.find((l) => l.id === revokeId);
     Modal.confirm({
       title: t('license.confirmRevoke'),
-      content: t('license.confirmRevokeMsg', { id: revokeId }),
+      icon: <ExclamationCircleOutlined />,
+      content: (
+        <div>
+          <p>{t('license.confirmRevokeMsg', { id: target?.licenseCode ?? revokeId })}</p>
+          {activeLicenses.length === 1 && (
+            <Alert
+              type="warning"
+              showIcon
+              message={t('license.revokeLastActiveWarning')}
+              style={{ marginTop: 8 }}
+            />
+          )}
+        </div>
+      ),
       okType: 'danger',
-      onOk: () => {
-        revokeLicense.mutate(revokeId, {
-          onSuccess: () => {
-            const newRecord: LicenseOperationRecord = {
-              id: `lo-${Date.now()}`,
-              operationTime: new Date().toISOString(),
-              operationType: 'revoke',
-              licenseId: revokeId,
-              operator: 'admin',
-              result: 'success',
-            };
-            setHistory((prev) => [newRecord, ...prev]);
-            setRevokeId('');
-            void message.success(t('license.revokeSuccess'));
-          },
-        });
+      okText: t('license.revoke'),
+      cancelText: t('common.cancel'),
+      onOk: async () => {
+        try {
+          await revokeLicense.mutateAsync(revokeId);
+          void message.success(t('license.revokeSuccess'));
+          setRevokeId(undefined);
+        } catch (err) {
+          void message.error(extractErrorMessage(err) || t('common.error'));
+        }
       },
     });
   };
 
-  const historyColumns: DataTableColumn<LicenseOperationRecord & Record<string, unknown>>[] = useMemo(() => [
-    {
-      key: 'operationTime', title: t('table.time'), dataIndex: 'operationTime', width: 170,
-      render: (val) => new Date(String(val)).toLocaleString('zh-CN'),
-    },
-    {
-      key: 'operationType', title: t('license.operationType'), dataIndex: 'operationType', width: 100,
-      render: (val) => {
-        const tp = val as OperationType;
-        return <Tag color={opTypeColorMap[tp]}>{opTypeLabelMap[tp]}</Tag>;
+  // ------------------- Tab 4: Export (MVP JSON) -------------------
+  const [exportId, setExportId] = useState<string | undefined>(undefined);
+
+  const handleExport = () => {
+    if (!exportId) return;
+    const target = activeLicenses.find((l) => l.id === exportId);
+    if (!target) return;
+    const blob = new Blob([JSON.stringify(target, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${target.licenseCode}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    void message.success(t('license.exportSuccess'));
+  };
+
+  // ------------------- 我的近 30 天日志 -------------------
+  const myLogs: LicenseLog[] = myLogsQuery.data?.items ?? [];
+
+  const logColumns: DataTableColumn<LicenseLog & Record<string, unknown>>[] = useMemo(
+    () => [
+      {
+        key: 'createdAt',
+        title: t('table.time'),
+        dataIndex: 'createdAt',
+        width: 170,
+        render: (val) => dayjs(String(val)).format('YYYY-MM-DD HH:mm:ss'),
       },
-    },
-    {
-      key: 'licenseId', title: 'License ID', dataIndex: 'licenseId', width: 220,
-      render: (val) => <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(val)}</span>,
-    },
-    { key: 'operator', title: t('table.operator'), dataIndex: 'operator', width: 100 },
-    {
-      key: 'result', title: t('table.result'), dataIndex: 'result', width: 90,
-      render: (val) => {
-        const r = val as OperationResult;
-        return <Tag color={resultColorMap[r]}>{resultLabelMap[r]}</Tag>;
+      {
+        key: 'logType',
+        title: t('license.operationType'),
+        dataIndex: 'logType',
+        width: 160,
+        render: (val) => {
+          const lt = val as LicenseLogType;
+          return <Tag color={logTypeColorMap[lt] ?? 'default'}>{t(`license.logType.${lt}`)}</Tag>;
+        },
       },
-    },
-    { key: 'remark', title: t('license.remark'), dataIndex: 'remark', ellipsis: true, render: (val) => val ? String(val) : '—' },
-  ], [t, opTypeLabelMap, resultLabelMap]);
+      {
+        key: 'result',
+        title: t('table.result'),
+        dataIndex: 'result',
+        width: 100,
+        render: (val) => {
+          const r = val as LicenseLogResult;
+          return <Tag color={logResultColorMap[r] ?? 'default'}>{t(`license.logResult.${r}`)}</Tag>;
+        },
+      },
+      {
+        key: 'details',
+        title: t('license.remark'),
+        dataIndex: 'details',
+        ellipsis: true,
+        render: (val) => {
+          if (!val || typeof val !== 'object') return '—';
+          const d = val as Record<string, unknown>;
+          return (
+            <span style={{ fontFamily: 'monospace', fontSize: 12 }}>
+              {String(d.summary ?? d.license_code ?? JSON.stringify(d).slice(0, 80))}
+            </span>
+          );
+        },
+      },
+    ],
+    [t],
+  );
+
+  // ------------------- render -------------------
+  const disabledTooltip = canOperate ? '' : t('license.noOperatePermission');
 
   return (
-    <ListPageLayout title={t('nav.license.operations')} subtitle={t('license.operationsSubtitle')}>
+    <ListPageLayout
+      title={t('nav.license.operations')}
+      subtitle={t('license.operationsSubtitle')}
+    >
+      {!canOperate && (
+        <Alert
+          type="info"
+          showIcon
+          message={t('license.noOperatePermission')}
+          description={t('license.noOperatePermissionDesc')}
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
       <Tabs
         items={[
           {
@@ -172,28 +358,119 @@ export default function LicenseOperations() {
             label: t('license.importLicense'),
             children: (
               <Card>
-                <div style={{ maxWidth: 600 }}>
-                  <Dragger
-                    fileList={fileList}
-                    beforeUpload={(file: RcFile) => { setFileList([file]); return false; }}
-                    onRemove={() => setFileList([])}
-                    maxCount={1}
-                    accept=".lic,.dat,.xml,.key"
+                <Space style={{ marginBottom: 16 }}>
+                  <Button
+                    type={importMode === 'file' ? 'primary' : 'default'}
+                    onClick={() => setImportMode('file')}
                   >
-                    <p className="ant-upload-drag-icon"><InboxOutlined /></p>
+                    {t('license.importByFile')}
+                  </Button>
+                  <Button
+                    type={importMode === 'paste' ? 'primary' : 'default'}
+                    onClick={() => setImportMode('paste')}
+                  >
+                    {t('license.importByPaste')}
+                  </Button>
+                </Space>
+
+                <Alert
+                  type="warning"
+                  showIcon
+                  message={t('license.signatureMvpWarning')}
+                  style={{ marginBottom: 16, maxWidth: 720 }}
+                />
+
+                {importMode === 'file' ? (
+                  <Dragger
+                    fileList={importFiles}
+                    beforeUpload={(file: RcFile) => {
+                      setImportFiles([file]);
+                      return false;
+                    }}
+                    onRemove={() => setImportFiles([])}
+                    maxCount={1}
+                    accept=".lic,.dat,.xml,.key,.json"
+                    style={{ maxWidth: 720, marginBottom: 16 }}
+                  >
+                    <p className="ant-upload-drag-icon">
+                      <InboxOutlined />
+                    </p>
                     <p className="ant-upload-text">{t('license.dragFileHere')}</p>
                     <p className="ant-upload-hint">{t('license.supportedFormats')}</p>
                   </Dragger>
+                ) : (
+                  <Form.Item label={t('license.pasteActivationCode')} style={{ maxWidth: 720 }}>
+                    <TextArea
+                      rows={6}
+                      placeholder={t('license.pasteActivationCode')}
+                      style={{ fontFamily: 'monospace' }}
+                    />
+                  </Form.Item>
+                )}
+
+                <Form
+                  form={importForm}
+                  layout="vertical"
+                  style={{ maxWidth: 720 }}
+                  disabled={!canOperate || importLicense.isPending}
+                >
+                  <Form.Item
+                    name="licenseName"
+                    label={t('license.licenseName')}
+                    rules={[{ required: true, message: t('license.licenseNameRequired') }]}
+                  >
+                    <Input />
+                  </Form.Item>
+                  <Form.Item
+                    name="licenseCode"
+                    label={t('license.licenseCode')}
+                    rules={[{ required: true, message: t('license.licenseCodeRequired') }]}
+                  >
+                    <Input style={{ fontFamily: 'monospace' }} />
+                  </Form.Item>
+                  <Form.Item
+                    name="productName"
+                    label={t('license.productName')}
+                    rules={[{ required: true, message: t('license.productNameRequired') }]}
+                  >
+                    <Input />
+                  </Form.Item>
+                  <Form.Item
+                    name="maxDevices"
+                    label={t('license.capacity')}
+                    initialValue={100}
+                    rules={[{ required: true }]}
+                  >
+                    <Input type="number" min={1} />
+                  </Form.Item>
+                  <Form.Item
+                    name="issueDate"
+                    label={t('license.issueDate')}
+                    rules={[{ required: true }]}
+                    initialValue={dayjs().toISOString()}
+                  >
+                    <Input placeholder="ISO 8601" />
+                  </Form.Item>
+                  <Form.Item name="expiryDate" label={t('license.expiryDate')}>
+                    <Input placeholder="ISO 8601 (空表示永久)" />
+                  </Form.Item>
+                  <Form.Item name="notes" label={t('license.notes')}>
+                    <TextArea rows={2} />
+                  </Form.Item>
+                </Form>
+
+                <Tooltip title={disabledTooltip}>
                   <Button
                     type="primary"
                     icon={<UploadOutlined />}
-                    loading={importLoading}
+                    loading={importLicense.isPending}
+                    disabled={!canOperate}
                     onClick={handleImport}
-                    style={{ marginTop: 16, width: '100%' }}
+                    style={{ marginTop: 8 }}
                   >
                     {t('license.importLicense')}
                   </Button>
-                </div>
+                </Tooltip>
               </Card>
             ),
           },
@@ -202,24 +479,30 @@ export default function LicenseOperations() {
             label: t('license.activateLicense'),
             children: (
               <Card>
-                <div style={{ maxWidth: 500 }}>
-                  <p style={{ color: '#666', marginBottom: 16 }}>{t('license.activateDescription')}</p>
-                  <Input.TextArea
+                <div style={{ maxWidth: 720 }}>
+                  <p style={{ color: '#666', marginBottom: 16 }}>
+                    {t('license.activateDescription')}
+                  </p>
+                  <TextArea
                     rows={4}
                     value={activateCode}
                     onChange={(e) => setActivateCode(e.target.value)}
                     placeholder={t('license.pasteActivationCode')}
                     style={{ fontFamily: 'monospace', marginBottom: 16 }}
+                    disabled={!canOperate || activateLicense.isPending}
                   />
-                  <Button
-                    type="primary"
-                    icon={<CheckCircleOutlined />}
-                    loading={activateLicense.isPending}
-                    onClick={handleActivate}
-                    block
-                  >
-                    {t('license.activateLicense')}
-                  </Button>
+                  <Tooltip title={disabledTooltip}>
+                    <Button
+                      type="primary"
+                      icon={<CheckCircleOutlined />}
+                      loading={activateLicense.isPending}
+                      disabled={!canOperate}
+                      onClick={handleActivate}
+                      block
+                    >
+                      {t('license.activateLicense')}
+                    </Button>
+                  </Tooltip>
                 </div>
               </Card>
             ),
@@ -229,49 +512,145 @@ export default function LicenseOperations() {
             label: t('license.revokeLicense'),
             children: (
               <Card>
-                <div style={{ maxWidth: 500 }}>
-                  <p style={{ color: '#ff4d4f', marginBottom: 16, fontWeight: 500 }}>
-                    {t('license.revokeWarning')}
-                  </p>
-                  <Input
-                    value={revokeId}
-                    onChange={(e) => setRevokeId(e.target.value)}
-                    placeholder={t('license.enterRevokeIdPlaceholder')}
-                    style={{ marginBottom: 16, fontFamily: 'monospace' }}
+                <div style={{ maxWidth: 720 }}>
+                  <Alert
+                    type="error"
+                    showIcon
+                    message={t('license.revokeWarning')}
+                    style={{ marginBottom: 16 }}
                   />
-                  <Button
-                    danger
-                    type="primary"
-                    icon={<StopOutlined />}
-                    loading={revokeLicense.isPending}
-                    onClick={handleRevoke}
-                    block
-                  >
-                    {t('license.revokeLicense')}
-                  </Button>
+                  <Form.Item label={t('license.selectActiveLicense')}>
+                    <Select
+                      placeholder={t('license.selectActiveLicensePlaceholder')}
+                      value={revokeId}
+                      onChange={setRevokeId}
+                      loading={activeLicensesQuery.isLoading}
+                      disabled={!canOperate}
+                      options={activeLicenses.map((l) => ({
+                        value: l.id,
+                        label: `${l.licenseCode} — ${l.licenseName} (${l.maxDevices})`,
+                      }))}
+                      style={{ width: '100%', marginBottom: 16 }}
+                    />
+                  </Form.Item>
+                  <Tooltip title={disabledTooltip}>
+                    <Button
+                      danger
+                      type="primary"
+                      icon={<StopOutlined />}
+                      loading={revokeLicense.isPending}
+                      disabled={!canOperate || !revokeId}
+                      onClick={handleRevoke}
+                      block
+                    >
+                      {t('license.revokeLicense')}
+                    </Button>
+                  </Tooltip>
                 </div>
               </Card>
             ),
           },
           {
-            key: 'history',
-            label: t('license.operationHistory'),
+            key: 'export',
+            label: t('license.exportLicense'),
             children: (
-              <DataTable
-                tableId="license-operations-history"
-                columns={historyColumns}
-                dataSource={history as (LicenseOperationRecord & Record<string, unknown>)[]}
-                loading={false}
-                rowKey="id"
-                total={history.length}
-                pageSize={20}
-                currentPage={1}
-                scroll={{ x: 900 }}
-              />
+              <Card>
+                <div style={{ maxWidth: 720 }}>
+                  <Alert
+                    type="info"
+                    showIcon
+                    message={t('license.exportMvpHint')}
+                    style={{ marginBottom: 16 }}
+                  />
+                  <Form.Item label={t('license.selectActiveLicense')}>
+                    <Select
+                      placeholder={t('license.selectActiveLicensePlaceholder')}
+                      value={exportId}
+                      onChange={setExportId}
+                      loading={activeLicensesQuery.isLoading}
+                      options={activeLicenses.map((l) => ({
+                        value: l.id,
+                        label: `${l.licenseCode} — ${l.licenseName}`,
+                      }))}
+                      style={{ width: '100%', marginBottom: 16 }}
+                    />
+                  </Form.Item>
+                  <Button
+                    type="primary"
+                    icon={<DownloadOutlined />}
+                    disabled={!exportId}
+                    onClick={handleExport}
+                    block
+                  >
+                    {t('license.exportJson')}
+                  </Button>
+                </div>
+              </Card>
             ),
           },
         ]}
       />
+
+      <Card title={t('license.myRecent30dLogs')} style={{ marginTop: 24 }}>
+        <DataTable
+          tableId="license-operations-my-logs"
+          columns={logColumns}
+          dataSource={myLogs as (LicenseLog & Record<string, unknown>)[]}
+          loading={myLogsQuery.isLoading}
+          rowKey="id"
+          total={myLogs.length}
+          pageSize={50}
+          currentPage={1}
+          scroll={{ x: 800 }}
+        />
+      </Card>
     </ListPageLayout>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+interface SameDimensionConflictBodyProps {
+  conflict: ActivateConflict;
+  t: ReturnType<typeof useT>;
+}
+
+function SameDimensionConflictBody({ conflict, t }: SameDimensionConflictBodyProps) {
+  return (
+    <div>
+      <p>{t('license.sameDimensionConflictMsg')}</p>
+      <ul style={{ paddingLeft: 16 }}>
+        {conflict.conflictingActive.map((l) => (
+          <li key={l.id}>
+            <strong>{l.licenseCode}</strong> — {l.licenseName} ({l.maxDevices})
+          </li>
+        ))}
+      </ul>
+      <p style={{ marginTop: 8, color: '#888', fontSize: 12 }}>
+        {t('license.dimensionLabel')}: device_type=
+        <code>{conflict.deviceType ?? '<null>'}</code>, region=
+        <code>{conflict.region ?? '<null>'}</code>
+      </p>
+    </div>
+  );
+}
+
+function extractConflict(err: unknown): ActivateConflict | null {
+  const ax = err as AxiosError<unknown> | undefined;
+  if (!ax || ax.response?.status !== 409) return null;
+  return parseActivateConflict(ax.response.data);
+}
+
+function extractErrorMessage(err: unknown): string {
+  const ax = err as AxiosError<{ msg?: string; message?: string }> | undefined;
+  if (ax?.response?.data) {
+    const d = ax.response.data;
+    if (typeof d === 'object' && d !== null) {
+      return d.msg ?? d.message ?? '';
+    }
+  }
+  if (err instanceof Error) return err.message;
+  return '';
 }

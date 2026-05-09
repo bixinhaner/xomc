@@ -10,7 +10,8 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
-// LogType 是 license_logs.log_type 枚举（与 migration 000073 chk_license_logs_log_type 保持一致）。
+// LogType 是 license_logs.log_type 枚举（与 migration 000073 / 000074
+// chk_license_logs_log_type 保持一致；000074 在原 9 种基础上加 auto_revoke_by_activate）。
 type LogType string
 
 const (
@@ -28,6 +29,10 @@ const (
 	LogTypeCapacityAlert LogType = "capacity_alert"
 	LogTypeExpiryAlert   LogType = "expiry_alert"
 	LogTypeAutoExpire    LogType = "auto_expire"
+
+	// T-0100-P3：用户激活同维度（device_type+region）已有 active license 时，
+	// 自动 revoke 旧 license 触发的写日志（actor_user_id 与 force activate 同一用户）
+	LogTypeAutoRevokeByActivate LogType = "auto_revoke_by_activate"
 )
 
 // LogResult 是 license_logs.result 枚举（与 migration 000073 chk_license_logs_result 保持一致）。

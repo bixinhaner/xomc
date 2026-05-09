@@ -2,6 +2,7 @@ package license
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -99,8 +100,35 @@ func (h *Handler) GetQuota(c *gin.Context) {
 // ---- Request types ----
 
 // ActivateRequest defines the request body for activating a license.
+//
+// Force=true 让 Activate 在同 (device_type, region) 维度冲突时跳过 409，
+// 自动 revoke 旧 active 后再激活新 license（前端 Modal 二次确认通过后调用）。
 type ActivateRequest struct {
 	LicenseCode string `json:"license_code" binding:"required"`
+	Force       bool   `json:"force"`
+}
+
+// ActivateConflictResponse 是 Activate 返回 409（同维度冲突）时的响应体。
+//
+// 前端据此弹 Modal 列出旧 active license（license_code + license_name + max_devices），
+// 用户确认后再次 POST /licenses/activate { force: true }。
+type ActivateConflictResponse struct {
+	Conflict          string     `json:"conflict"` // 固定 "same_dimension_active"
+	DeviceType        *string    `json:"device_type"`
+	Region            *string    `json:"region"`
+	ConflictingActive []*License `json:"conflicting_active"`
+	Hint              string     `json:"hint"`
+}
+
+// ImportResponse 是 POST /licenses/import 的响应体。
+//
+// SignatureStatus（T-0100-P3 / Q4=B）：MVP 暂未接入 OEM 公钥强校验，所有
+// import 默认 signature_status='unverified' + 后端写一条 zap.Warn；前端用此
+// 字段在导入成功 Modal 上显示警告 Tag，提示用户后续 P4-C 阶段会强校验。
+type ImportResponse struct {
+	License         *License `json:"license"`
+	SignatureStatus string   `json:"signature_status"` // "verified" | "unverified" | "invalid"
+	SignatureNote   string   `json:"signature_note,omitempty"`
 }
 
 // ImportRequest defines the request body for importing a new license.
@@ -310,6 +338,13 @@ func (h *Handler) GetSummary(c *gin.Context) {
 }
 
 // Activate handles POST /api/v1/licenses/activate.
+//
+// T-0100-P3 / PRD §5.3.2 同维度冲突流程：
+//   - force=false（默认）：service 返回 SameDimensionConflictError → 409 +
+//     ActivateConflictResponse（含旧 active 列表），前端弹 Modal 二次确认。
+//   - force=true：跳过冲突预检，自动 revoke 同维度旧 active 后激活新 license；
+//     每条 auto-revoke 写一条 license_log（log_type=auto_revoke_by_activate），
+//     再写新 license 的 activate 日志。
 func (h *Handler) Activate(c *gin.Context) {
 	var req ActivateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -318,9 +353,22 @@ func (h *Handler) Activate(c *gin.Context) {
 	}
 
 	actor := actorIDFromContext(c)
-	lic, err := h.service.Activate(c.Request.Context(), req.LicenseCode)
+	result, err := h.service.Activate(c.Request.Context(), req.LicenseCode, req.Force)
 	if err != nil {
-		// failed audit
+		// 同维度冲突：返回 409 + 旧 active 列表，前端弹确认 Modal；不写 failed
+		// 日志（属正常预检反馈，非真失败）。
+		var conflict *SameDimensionConflictError
+		if errors.As(err, &conflict) {
+			c.AbortWithStatusJSON(http.StatusConflict, ActivateConflictResponse{
+				Conflict:          "same_dimension_active",
+				DeviceType:        conflict.DeviceType,
+				Region:            conflict.Region,
+				ConflictingActive: conflict.Conflicting,
+				Hint:              "same (device_type, region) already has active license; resubmit with force=true to auto-revoke and activate",
+			})
+			return
+		}
+
 		h.logWriter.Write(c.Request.Context(), LicenseLogEntry{
 			LogType:     LogTypeActivate,
 			ActorUserID: actor,
@@ -328,6 +376,7 @@ func (h *Handler) Activate(c *gin.Context) {
 			Details: map[string]any{
 				"summary":      "activate license failed",
 				"license_code": req.LicenseCode,
+				"force":        req.Force,
 				"err":          err.Error(),
 			},
 			ClientIP:  c.ClientIP(),
@@ -337,7 +386,28 @@ func (h *Handler) Activate(c *gin.Context) {
 		return
 	}
 
-	// success audit
+	// 自动 revoke 同维度旧 active：每条单独写一条 auto_revoke_by_activate 日志，
+	// actor 与 force activate 同一用户。
+	for _, old := range result.AutoRevoked {
+		oldID := old.ID
+		h.logWriter.Write(c.Request.Context(), LicenseLogEntry{
+			LicenseID:   &oldID,
+			LogType:     LogTypeAutoRevokeByActivate,
+			ActorUserID: actor,
+			Result:      LogResultSuccess,
+			Details: map[string]any{
+				"summary":               "auto-revoked by force activate",
+				"revoked_license_code":  old.LicenseCode,
+				"revoked_license_name":  old.LicenseName,
+				"triggered_by_activate": req.LicenseCode,
+			},
+			ClientIP:  c.ClientIP(),
+			UserAgent: c.Request.UserAgent(),
+		})
+	}
+
+	// 主激活成功日志
+	lic := result.Activated
 	licID := lic.ID
 	h.logWriter.Write(c.Request.Context(), LicenseLogEntry{
 		LicenseID:   &licID,
@@ -345,9 +415,11 @@ func (h *Handler) Activate(c *gin.Context) {
 		ActorUserID: actor,
 		Result:      LogResultSuccess,
 		Details: map[string]any{
-			"summary":      "license activated",
-			"license_code": lic.LicenseCode,
-			"license_name": lic.LicenseName,
+			"summary":            "license activated",
+			"license_code":       lic.LicenseCode,
+			"license_name":       lic.LicenseName,
+			"force":              req.Force,
+			"auto_revoked_count": len(result.AutoRevoked),
 		},
 		ClientIP:  c.ClientIP(),
 		UserAgent: c.Request.UserAgent(),
@@ -427,6 +499,18 @@ func (h *Handler) Import(c *gin.Context) {
 	}
 
 	actor := actorIDFromContext(c)
+
+	// T-0100-P3 / Q4=B：MVP 阶段先做签名 stub 校验，结果落响应 + zap.Warn
+	// （未签名/未配置公钥仍允许入库）。GA 前 P4-C 切实现，strict 模式拒绝。
+	sigStatus, sigNote := VerifySignature(nil)
+	if sigStatus != SignatureVerified {
+		h.logger.Warn("license import signature unverified (MVP P3, strict in P4-C)",
+			zap.String("license_code", req.LicenseCode),
+			zap.String("signature_status", string(sigStatus)),
+			zap.String("signature_note", sigNote),
+		)
+	}
+
 	created, err := h.service.Import(c.Request.Context(), lic)
 	if err != nil {
 		h.logWriter.Write(c.Request.Context(), LicenseLogEntry{
@@ -434,9 +518,10 @@ func (h *Handler) Import(c *gin.Context) {
 			ActorUserID: actor,
 			Result:      LogResultFailed,
 			Details: map[string]any{
-				"summary":      "import license failed",
-				"license_code": req.LicenseCode,
-				"err":          err.Error(),
+				"summary":          "import license failed",
+				"license_code":     req.LicenseCode,
+				"signature_status": string(sigStatus),
+				"err":              err.Error(),
 			},
 			ClientIP:  c.ClientIP(),
 			UserAgent: c.Request.UserAgent(),
@@ -445,22 +530,34 @@ func (h *Handler) Import(c *gin.Context) {
 		return
 	}
 
+	// 成功导入：日志 result=warning（签名未验证）/ success（已验证），兼容
+	// monitor / 合规审计的"敏感事件"过滤。
+	logResult := LogResultSuccess
+	if sigStatus != SignatureVerified {
+		logResult = LogResultWarning
+	}
 	createdID := created.ID
 	h.logWriter.Write(c.Request.Context(), LicenseLogEntry{
 		LicenseID:   &createdID,
 		LogType:     LogTypeImport,
 		ActorUserID: actor,
-		Result:      LogResultSuccess,
+		Result:      logResult,
 		Details: map[string]any{
-			"summary":      "license imported",
-			"license_code": created.LicenseCode,
-			"license_name": created.LicenseName,
-			"license_type": string(created.LicenseType),
-			"max_devices":  created.MaxDevices,
+			"summary":          "license imported",
+			"license_code":     created.LicenseCode,
+			"license_name":     created.LicenseName,
+			"license_type":     string(created.LicenseType),
+			"max_devices":      created.MaxDevices,
+			"signature_status": string(sigStatus),
+			"signature_note":   sigNote,
 		},
 		ClientIP:  c.ClientIP(),
 		UserAgent: c.Request.UserAgent(),
 	})
 
-	response.OKWithStatus(c, http.StatusCreated, created)
+	response.OKWithStatus(c, http.StatusCreated, ImportResponse{
+		License:         created,
+		SignatureStatus: string(sigStatus),
+		SignatureNote:   sigNote,
+	})
 }
