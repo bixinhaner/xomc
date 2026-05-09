@@ -77,3 +77,29 @@ export function useImportLicense() {
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// T-0100-P1 audit logs
+// 后端 GET /licenses/logs（分页+过滤）+ GET /licenses/:id/logs（单 license 最近 N 条）
+// 没有 mock 实现 — 按现状治理层日志只在真后端展示，dev 用 docker compose 起后端跑通
+// ---------------------------------------------------------------------------
+
+import type { LicenseLogQuery } from '../../services/api/licenseApi';
+
+/** 全量审计日志（LicenseLogs 主页用）。 */
+export function useLicenseLogs(params: LicenseLogQuery) {
+  return useQuery({
+    queryKey: ['licenses', 'logs', params],
+    queryFn: () => licenseApi.getLicenseLogs(params),
+    placeholderData: (prev) => prev, // 翻页不闪
+  });
+}
+
+/** 单 license 最近 N 条日志（详情抽屉用，P2 阶段消费）。 */
+export function useLicenseLogsByLicense(licenseId: string, limit = 10) {
+  return useQuery({
+    queryKey: ['licenses', 'logs', 'by-license', licenseId, limit],
+    queryFn: () => licenseApi.getLicenseLogsByLicense(licenseId, limit),
+    enabled: Boolean(licenseId),
+  });
+}

@@ -3,6 +3,7 @@ package license
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -18,7 +19,8 @@ import (
 type Handler struct {
 	service   *Service
 	logger    *zap.Logger
-	logWriter LogWriter // T-0100-P0: 审计日志写入；nil 时退化为 NoopLogWriter
+	logWriter LogWriter            // T-0100-P0: 审计日志写入；nil 时退化为 NoopLogWriter
+	logRepo   LicenseLogRepository // T-0100-P1: GET /licenses/logs 端点读侧；nil 时返 503
 }
 
 // NewHandler creates a new license Handler.
@@ -39,6 +41,12 @@ func (h *Handler) SetLogWriter(w LogWriter) {
 		w = NoopLogWriter{}
 	}
 	h.logWriter = w
+}
+
+// SetLogRepo 注入 LicenseLogRepository（T-0100-P1），供 GET /licenses/logs +
+// GET /licenses/:id/logs 端点读取审计日志数据。
+func (h *Handler) SetLogRepo(repo LicenseLogRepository) {
+	h.logRepo = repo
 }
 
 // actorIDFromContext 从 gin.Context 取当前用户 UUID（admin middleware 设置）。
@@ -62,11 +70,13 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	// Register specific routes BEFORE the :id route to avoid conflicts.
 	licenses.GET("/summary", h.GetSummary)
 	licenses.GET("/quota", h.GetQuota)
+	licenses.GET("/logs", h.ListLogs) // T-0100-P1：全量审计日志（分页 + 过滤）
 	licenses.POST("/activate", h.Activate)
 	licenses.POST("/import", h.Import)
 
 	licenses.GET("", h.List)
 	licenses.GET("/:id", h.GetByID)
+	licenses.GET("/:id/logs", h.GetLicenseLogs) // T-0100-P1：单 license 审计日志（详情抽屉）
 	licenses.POST("/:id/revoke", h.Revoke)
 }
 
@@ -143,6 +153,132 @@ func (h *Handler) List(c *gin.Context) {
 	}
 
 	response.OK(c, result)
+}
+
+// ListLogs handles GET /api/v1/licenses/logs（T-0100-P1）。
+//
+// 支持的 query 参数（任选）：
+//   - page / page_size       分页（默认 page=1, page_size=20，上限 200）
+//   - license_id             单 license UUID
+//   - log_type               重复参数支持多值，如 ?log_type=import&log_type=activate
+//   - result                 重复参数支持多值
+//   - actor_user_id          单用户 UUID
+//   - start_time / end_time  RFC3339 时间窗
+//   - search                 details JSONB::text ILIKE 关键字（模糊搜索）
+//
+// 响应：标准 envelope + ListResponse[LicenseLog]，按 created_at DESC 排序。
+func (h *Handler) ListLogs(c *gin.Context) {
+	if h.logRepo == nil {
+		commonerrors.AbortWithError(c, http.StatusServiceUnavailable,
+			commonerrors.NewBusinessError(9104, "license logs service not configured", nil))
+		return
+	}
+
+	filter := LicenseLogFilter{
+		ListRequest: model.DefaultListRequest(),
+	}
+	if err := c.ShouldBindQuery(&filter.ListRequest); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	if v := c.Query("license_id"); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+		filter.LicenseID = &id
+	}
+	if v := c.Query("actor_user_id"); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+		filter.ActorUserID = &id
+	}
+	if vs := c.QueryArray("log_type"); len(vs) > 0 {
+		filter.LogTypes = make([]LogType, 0, len(vs))
+		for _, v := range vs {
+			if v != "" {
+				filter.LogTypes = append(filter.LogTypes, LogType(v))
+			}
+		}
+	}
+	if vs := c.QueryArray("result"); len(vs) > 0 {
+		filter.Results = make([]LogResult, 0, len(vs))
+		for _, v := range vs {
+			if v != "" {
+				filter.Results = append(filter.Results, LogResult(v))
+			}
+		}
+	}
+	if v := c.Query("start_time"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+		filter.StartTime = &t
+	}
+	if v := c.Query("end_time"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+		filter.EndTime = &t
+	}
+	if v := c.Query("search"); v != "" {
+		filter.Search = &v
+	}
+
+	result, err := h.logRepo.List(c.Request.Context(), filter)
+	if err != nil {
+		h.logger.Error("list license logs failed", zap.Error(err))
+		commonerrors.AbortWithError(c, http.StatusInternalServerError,
+			commonerrors.NewBusinessError(9105, "failed to list license logs", err))
+		return
+	}
+	response.OK(c, result)
+}
+
+// GetLicenseLogs handles GET /api/v1/licenses/:id/logs（T-0100-P1）。
+//
+// 取单 license 最近 N 条审计日志（详情抽屉 "最近操作" 用）。
+//   - query limit：默认 10，上限 100
+func (h *Handler) GetLicenseLogs(c *gin.Context) {
+	if h.logRepo == nil {
+		commonerrors.AbortWithError(c, http.StatusServiceUnavailable,
+			commonerrors.NewBusinessError(9104, "license logs service not configured", nil))
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	limit := 10
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+
+	logs, err := h.logRepo.ListByLicense(c.Request.Context(), id, limit)
+	if err != nil {
+		h.logger.Error("list license logs by id failed",
+			zap.String("license_id", id.String()),
+			zap.Error(err))
+		commonerrors.AbortWithError(c, http.StatusInternalServerError,
+			commonerrors.NewBusinessError(9106, "failed to list license logs by id", err))
+		return
+	}
+
+	response.OK(c, gin.H{"items": logs, "total": len(logs)})
 }
 
 // GetByID handles GET /api/v1/licenses/:id.

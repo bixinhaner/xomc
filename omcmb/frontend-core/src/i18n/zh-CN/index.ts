@@ -2167,6 +2167,30 @@ const messages: Record<string, string> = {
   'license.logsSubtitle':           '查看许可证操作历史记录',
   'license.clientIp':               '客户端IP',
 
+  // T-0100-P1 LicenseLogs 主页（9 种 log_type + 4 种 result）
+  'license.logs.type.label':                '操作类型',
+  'license.logs.type.import':               '导入',
+  'license.logs.type.activate':             '激活',
+  'license.logs.type.revoke':               '吊销',
+  'license.logs.type.queryDetail':          '查询详情',
+  'license.logs.type.enforcementCapacity':  '容量拦截',
+  'license.logs.type.enforcementExpiry':    '过期拦截',
+  'license.logs.type.capacityAlert':        '容量阈值告警',
+  'license.logs.type.expiryAlert':          '过期阈值告警',
+  'license.logs.type.autoExpire':           '自动过期',
+  'license.logs.result.success':            '成功',
+  'license.logs.result.failed':             '失败',
+  'license.logs.result.denied':             '已拒绝',
+  'license.logs.result.warning':            '告警',
+  'license.logs.actor':                     '操作者',
+  'license.logs.systemActor':               '系统',
+  'license.logs.filterLicenseId':           '许可证ID',
+  'license.logs.filterType':                '操作类型',
+  'license.logs.filterResult':              '结果',
+  'license.logs.filterSearch':              '关键词',
+  'license.logs.licenseIdPlaceholder':      '请输入许可证 UUID',
+  'license.logs.searchPlaceholder':         '在 details 摘要中搜索',
+
   // -------------------------------------------------------------------------
   // MR module
   // -------------------------------------------------------------------------

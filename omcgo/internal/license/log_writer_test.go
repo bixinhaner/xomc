@@ -44,12 +44,62 @@ func (m *memLogRepo) Create(_ context.Context, log *LicenseLog) error {
 	return nil
 }
 
-func (m *memLogRepo) List(_ context.Context, _ LicenseLogFilter) (*model.ListResponse[LicenseLog], error) {
+func (m *memLogRepo) List(_ context.Context, filter LicenseLogFilter) (*model.ListResponse[LicenseLog], error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	cp := make([]LicenseLog, len(m.logs))
-	copy(cp, m.logs)
-	return model.NewListResponse(cp, int64(len(cp)), 1, len(cp)), nil
+	filtered := make([]LicenseLog, 0, len(m.logs))
+	for _, l := range m.logs {
+		if filter.LicenseID != nil {
+			if l.LicenseID == nil || *l.LicenseID != *filter.LicenseID {
+				continue
+			}
+		}
+		if filter.ActorUserID != nil {
+			if l.ActorUserID == nil || *l.ActorUserID != *filter.ActorUserID {
+				continue
+			}
+		}
+		if len(filter.LogTypes) > 0 {
+			match := false
+			for _, t := range filter.LogTypes {
+				if l.LogType == t {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
+		if len(filter.Results) > 0 {
+			match := false
+			for _, r := range filter.Results {
+				if l.Result == r {
+					match = true
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+		}
+		if filter.StartTime != nil && l.CreatedAt.Before(*filter.StartTime) {
+			continue
+		}
+		if filter.EndTime != nil && l.CreatedAt.After(*filter.EndTime) {
+			continue
+		}
+		filtered = append(filtered, l)
+	}
+	page := filter.Page
+	if page <= 0 {
+		page = 1
+	}
+	pageSize := filter.PageSize
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	return model.NewListResponse(filtered, int64(len(filtered)), page, pageSize), nil
 }
 
 func (m *memLogRepo) ListByLicense(_ context.Context, licenseID uuid.UUID, limit int) ([]LicenseLog, error) {

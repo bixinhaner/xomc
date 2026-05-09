@@ -4031,12 +4031,47 @@ if [ -n "$ACCESS_TOKEN" ]; then
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/licenses?status=active" -H "$AUTH_HEADER")
     check_status "GET /licenses?status=active (filter)" "200" "$HTTP_CODE"
 
-    # 65.9 T-0100-P0 license_logs 表 + LogWriter 接入验证：
-    #      Import / Activate / Revoke / enforcement 拒绝 / monitor cron 触发的
-    #      8 类事件应自动写入 license_logs。本阶段无 GET /licenses/logs 端点
-    #      （P1 阶段建），claim 仅声明 P0 接入完成；DB 实际验证移交 P1 后端 +
-    #      前端 LicenseLogs 页面真实查询。
-    claim "license: T-0100-P0 license_logs 表迁移 + LogWriter 接入 5 处写入点（handler/enforcer/monitor）"
+    # 65.9 T-0100-P1 license_logs 真 HTTP 断言（GET /licenses/logs + GET /:id/logs）
+    claim "license: T-0100-P1 GET /licenses/logs 返 200 + 含 items/total"
+    RESP=$(curl -s -w "\n%{http_code}" "$API/licenses/logs?page=1&page_size=20" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /licenses/logs (paginated)" "200" "$HTTP_CODE"
+    if [ "$HTTP_CODE" = "200" ]; then
+        check_json_field "license logs response has items array" "$BODY" "items"
+    fi
+
+    claim "license: T-0100-P1 GET /licenses/logs?log_type=import&log_type=activate 多值过滤"
+    RESP=$(curl -s -w "\n%{http_code}" \
+        "$API/licenses/logs?log_type=import&log_type=activate&page_size=10" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    check_status "GET /licenses/logs (multi log_type filter)" "200" "$HTTP_CODE"
+
+    claim "license: T-0100-P1 GET /licenses/logs?result=denied (enforcement 命中)"
+    RESP=$(curl -s -w "\n%{http_code}" "$API/licenses/logs?result=denied" -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    check_status "GET /licenses/logs (result=denied filter)" "200" "$HTTP_CODE"
+
+    claim "license: T-0100-P1 GET /licenses/:id/logs 返单 license 最近 N 条"
+    # 用 import 段创建的 license（NEW_LIC_ID）；如未拿到 id，跳过断言
+    if [ -n "$NEW_LIC_ID" ]; then
+        RESP=$(curl -s -w "\n%{http_code}" "$API/licenses/$NEW_LIC_ID/logs?limit=5" -H "$AUTH_HEADER")
+        HTTP_CODE=$(echo "$RESP" | tail -1)
+        check_status "GET /licenses/:id/logs" "200" "$HTTP_CODE"
+    else
+        # 多状态合理化：上一步 import 失败时无 id；用任意 UUID 探活路径，404 不会发生（端点接受任意 UUID 后查 0 条返 200 空 items）
+        RESP=$(curl -s -w "\n%{http_code}" \
+            "$API/licenses/00000000-0000-0000-0000-000000000000/logs?limit=5" \
+            -H "$AUTH_HEADER")
+        HTTP_CODE=$(echo "$RESP" | tail -1)
+        check_status "GET /licenses/:id/logs (zero-uuid path probe)" "200" "$HTTP_CODE"
+    fi
+
+    claim "license: T-0100-P1 GET /licenses/logs?license_id=invalid 返 400"
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+        "$API/licenses/logs?license_id=not-a-uuid" -H "$AUTH_HEADER")
+    check_status "GET /licenses/logs (invalid license_id → 400)" "400" "$HTTP_CODE"
 else
     fail "S65 License CRUD" "skipped — no access token"
 fi

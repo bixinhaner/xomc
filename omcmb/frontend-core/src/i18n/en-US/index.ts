@@ -2160,6 +2160,30 @@ const messages: Record<string, string> = {
   'license.logsSubtitle':           'View license operation history',
   'license.clientIp':               'Client IP',
 
+  // T-0100-P1 LicenseLogs main page (9 log_types + 4 results)
+  'license.logs.type.label':                'Type',
+  'license.logs.type.import':               'Import',
+  'license.logs.type.activate':             'Activate',
+  'license.logs.type.revoke':               'Revoke',
+  'license.logs.type.queryDetail':          'Query Detail',
+  'license.logs.type.enforcementCapacity':  'Capacity Block',
+  'license.logs.type.enforcementExpiry':    'Expiry Block',
+  'license.logs.type.capacityAlert':        'Capacity Alert',
+  'license.logs.type.expiryAlert':          'Expiry Alert',
+  'license.logs.type.autoExpire':           'Auto Expire',
+  'license.logs.result.success':            'Success',
+  'license.logs.result.failed':             'Failed',
+  'license.logs.result.denied':             'Denied',
+  'license.logs.result.warning':            'Warning',
+  'license.logs.actor':                     'Actor',
+  'license.logs.systemActor':               'System',
+  'license.logs.filterLicenseId':           'License ID',
+  'license.logs.filterType':                'Type',
+  'license.logs.filterResult':              'Result',
+  'license.logs.filterSearch':              'Keyword',
+  'license.logs.licenseIdPlaceholder':      'Enter license UUID',
+  'license.logs.searchPlaceholder':         'Search in details summary',
+
   // -------------------------------------------------------------------------
   // MR module
   // -------------------------------------------------------------------------
