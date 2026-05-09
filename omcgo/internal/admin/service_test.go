@@ -247,7 +247,10 @@ func (m *mockAuditRepo) List(ctx context.Context, filter AuditLogFilter) (*model
 	return &model.ListResponse[AuditLog]{Items: []AuditLog{}}, nil
 }
 
-type mockMenuRepo struct{}
+type mockMenuRepo struct {
+	getAllActiveFn func(ctx context.Context) ([]Menu, error)
+	setRoleMenusFn func(ctx context.Context, roleID uuid.UUID, menuIDs []uuid.UUID, operatorID uuid.UUID) error
+}
 
 func (m *mockMenuRepo) Create(_ context.Context, _ *Menu, _ uuid.UUID) error  { return nil }
 func (m *mockMenuRepo) GetByID(_ context.Context, _ uuid.UUID) (*Menu, error) { return nil, nil }
@@ -270,10 +273,16 @@ func (m *mockMenuRepo) GetByRole(_ context.Context, _ uuid.UUID) ([]Menu, error)
 func (m *mockMenuRepo) GetByUser(_ context.Context, _ uuid.UUID) ([]Menu, error) {
 	return nil, nil
 }
-func (m *mockMenuRepo) GetAllActive(_ context.Context) ([]Menu, error) {
+func (m *mockMenuRepo) GetAllActive(ctx context.Context) ([]Menu, error) {
+	if m.getAllActiveFn != nil {
+		return m.getAllActiveFn(ctx)
+	}
 	return nil, nil
 }
-func (m *mockMenuRepo) SetRoleMenus(_ context.Context, _ uuid.UUID, _ []uuid.UUID, _ uuid.UUID) error {
+func (m *mockMenuRepo) SetRoleMenus(ctx context.Context, roleID uuid.UUID, menuIDs []uuid.UUID, operatorID uuid.UUID) error {
+	if m.setRoleMenusFn != nil {
+		return m.setRoleMenusFn(ctx, roleID, menuIDs, operatorID)
+	}
 	return nil
 }
 func (m *mockMenuRepo) GetRoleMenuIDs(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
@@ -589,4 +598,73 @@ func TestAdminService_CheckPermission(t *testing.T) {
 	ok, err = svc.CheckPermission(context.Background(), userID, "users", "admin")
 	require.NoError(t, err)
 	assert.False(t, ok)
+}
+
+func TestAdminService_SetRoleMenus_ExpandsAncestors(t *testing.T) {
+	// 菜单结构：
+	//   设备管理 (directory) ← parent=nil
+	//     └─ 设备列表 (menu) ← parent=设备管理
+	//          └─ 查询 (button) ← parent=设备列表
+	dirID := uuid.New()
+	menuID := uuid.New()
+	btnID := uuid.New()
+	roleID := uuid.New()
+	allMenus := []Menu{
+		{ID: dirID, Name: "设备管理", Type: MenuTypeDirectory},
+		{ID: menuID, Name: "设备列表", Type: MenuTypeMenu, ParentID: &dirID},
+		{ID: btnID, Name: "查询", Type: MenuTypeButton, ParentID: &menuID},
+	}
+
+	cases := []struct {
+		name   string
+		input  []uuid.UUID
+		wantIn []uuid.UUID // 期望保存集合至少包含这些 ID（顺序不约束）
+	}{
+		{
+			name:   "仅授叶子按钮 → 自动补两层祖先",
+			input:  []uuid.UUID{btnID},
+			wantIn: []uuid.UUID{btnID, menuID, dirID},
+		},
+		{
+			name:   "仅授中间 menu → 自动补 directory",
+			input:  []uuid.UUID{menuID},
+			wantIn: []uuid.UUID{menuID, dirID},
+		},
+		{
+			name:   "授 directory → 不变",
+			input:  []uuid.UUID{dirID},
+			wantIn: []uuid.UUID{dirID},
+		},
+		{
+			name:   "空输入 → 空保存",
+			input:  []uuid.UUID{},
+			wantIn: []uuid.UUID{},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var captured []uuid.UUID
+			menuRepo := &mockMenuRepo{
+				getAllActiveFn: func(_ context.Context) ([]Menu, error) {
+					return allMenus, nil
+				},
+				setRoleMenusFn: func(_ context.Context, _ uuid.UUID, ids []uuid.UUID, _ uuid.UUID) error {
+					captured = append([]uuid.UUID(nil), ids...)
+					return nil
+				},
+			}
+			roleRepo := &mockRoleRepo{
+				getByIDFn: func(_ context.Context, _ uuid.UUID) (*Role, error) {
+					return &Role{ID: roleID}, nil
+				},
+			}
+			jwt, _ := NewJWTService("test-secret-minimum-32-characters!!")
+			svc := NewAdminService(&mockUserRepo{}, roleRepo, menuRepo, &mockAuditRepo{}, jwt, zap.NewNop())
+
+			err := svc.SetRoleMenus(context.Background(), roleID, tc.input, uuid.New())
+			require.NoError(t, err)
+			assert.ElementsMatch(t, tc.wantIn, captured)
+		})
+	}
 }

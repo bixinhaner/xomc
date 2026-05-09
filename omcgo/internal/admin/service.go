@@ -1021,18 +1021,75 @@ func (s *AdminService) menuRepoGetMenusForUser(ctx context.Context, userID uuid.
 }
 
 // SetRoleMenus sets the menu permissions for a role.
+//
+// 任何被授予的后代节点（menu / button）都会自动补全其祖先目录链；
+// 否则 assembleMenuTree 会因父节点缺失把整棵子树丢弃（孤儿节点既不是 root，
+// 也不挂在任何 root 下，导致前端 NavMenu 看不到该子树）。
+//
+// 例：仅授 [设备列表→查询] 时，若不补祖先，前端看不到"设备管理 / 设备列表"。
+// 修复后会自动加入 [设备管理, 设备列表]，整条目录链可见。
 func (s *AdminService) SetRoleMenus(ctx context.Context, roleID uuid.UUID, menuIDs []uuid.UUID, operatorID uuid.UUID) error {
 	// Verify role exists
 	if _, err := s.roleRepo.GetByID(ctx, roleID); err != nil {
 		return commonerrors.ErrNotFound
 	}
 
-	if err := s.menuRepo.SetRoleMenus(ctx, roleID, menuIDs, operatorID); err != nil {
+	expanded, err := s.expandMenuAncestors(ctx, menuIDs)
+	if err != nil {
+		return fmt.Errorf("expand menu ancestors: %w", err)
+	}
+
+	if err := s.menuRepo.SetRoleMenus(ctx, roleID, expanded, operatorID); err != nil {
 		return err
 	}
 	// PRD roles.md §10 DoD：菜单变更后失效该角色下所有用户的可见域缓存。
 	s.InvalidatePermCacheByRole(ctx, roleID)
 	return nil
+}
+
+// expandMenuAncestors 把输入的 menuIDs 集合扩展为"自身 + 全部祖先目录"。
+// 全菜单数量小（< 200），加载一次即可在内存里做闭包。
+//
+// 边界：
+//   - 空输入直接返回空切片，不查 DB
+//   - 输入中包含数据库不存在的 ID 时静默跳过（不阻塞保存，由 repo 端 FK 约束兜底）
+//   - 防自环 / 重复出现：用 map 去重 + 已访问标记
+func (s *AdminService) expandMenuAncestors(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error) {
+	if len(ids) == 0 {
+		return ids, nil
+	}
+	all, err := s.menuRepo.GetAllActive(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load active menus: %w", err)
+	}
+	byID := make(map[uuid.UUID]Menu, len(all))
+	for _, m := range all {
+		byID[m.ID] = m
+	}
+
+	seen := make(map[uuid.UUID]struct{}, len(ids))
+	queue := append([]uuid.UUID(nil), ids...)
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if _, ok := seen[cur]; ok {
+			continue
+		}
+		seen[cur] = struct{}{}
+		m, exists := byID[cur]
+		if !exists {
+			continue
+		}
+		if m.ParentID != nil {
+			queue = append(queue, *m.ParentID)
+		}
+	}
+
+	out := make([]uuid.UUID, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	return out, nil
 }
 
 // GetRoleMenus returns the menu permissions for a role.
