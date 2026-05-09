@@ -161,14 +161,21 @@ func (m *memLogRepo) ListBefore(_ context.Context, before time.Time, limit int) 
 	return out, nil
 }
 
-// DeleteBefore 模拟物理删除，返回受影响行数。
-func (m *memLogRepo) DeleteBefore(_ context.Context, before time.Time) (int64, error) {
+// DeleteByIDs 按 id 批量删除（T-0100-P4-B2 替代 DeleteBefore）。
+func (m *memLogRepo) DeleteByIDs(_ context.Context, ids []uuid.UUID) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	idSet := make(map[uuid.UUID]struct{}, len(ids))
+	for _, id := range ids {
+		idSet[id] = struct{}{}
+	}
 	kept := m.logs[:0]
 	deleted := int64(0)
 	for _, l := range m.logs {
-		if l.CreatedAt.Before(before) {
+		if _, hit := idSet[l.ID]; hit {
 			deleted++
 			continue
 		}

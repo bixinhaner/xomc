@@ -38,13 +38,18 @@ type LicenseLogRepository interface {
 	CountDenialsSince(ctx context.Context, since time.Time) (int64, error)
 
 	// ListBefore 取 created_at < before 的日志，按 created_at ASC 排序，
-	// 至多 limit 条。T-0100-P4-B 归档 cron 用：分批读出、写 MinIO 后再 DeleteBefore。
+	// 至多 limit 条。T-0100-P4-B 归档 cron 用：分批读出、写 MinIO 后再 DeleteByIDs。
 	// limit ≤ 0 时使用默认值 10000（单次归档上限，避免一次性吃满内存）。
 	ListBefore(ctx context.Context, before time.Time, limit int) ([]LicenseLog, error)
 
-	// DeleteBefore 删除 created_at < before 的日志，返回删除条数。
-	// 仅在 ListBefore + 归档落 MinIO 成功后调用；失败只删部分行不影响下次重试。
-	DeleteBefore(ctx context.Context, before time.Time) (int64, error)
+	// DeleteByIDs 按 id 列表批量物理删除日志，返回删除条数。
+	//
+	// T-0100-P4-B2（修复 review 922d87a4 WARNING #3）：归档 cron 改为
+	// "ListBefore → 归档 → DeleteByIDs(已归档行的 id 集合)"，避免单 tick
+	// 积压超 batchSize 时 DeleteBefore(cutoff) 把未归档行也一并删掉。
+	//
+	// ids 空切片视作 no-op 返 (0, nil)。
+	DeleteByIDs(ctx context.Context, ids []uuid.UUID) (int64, error)
 }
 
 // licenseLogColumns 全列清单（与 migration 000073 字段一致）。
@@ -249,18 +254,23 @@ func (r *PgLicenseLogRepository) ListBefore(ctx context.Context, before time.Tim
 	return items, nil
 }
 
-// DeleteBefore 实现 LicenseLogRepository.DeleteBefore，物理删除 created_at <
-// before 的全部日志。返回受影响行数（含 0）。
-func (r *PgLicenseLogRepository) DeleteBefore(ctx context.Context, before time.Time) (int64, error) {
+// DeleteByIDs 实现 LicenseLogRepository.DeleteByIDs，按 id 列表批量物理删除。
+//
+// T-0100-P4-B2：替代 DeleteBefore，让归档 cron 仅删本 tick 实际写入 MinIO 的
+// 行；积压超 batchSize 时未归档行留 DB 等下个 tick 处理。
+func (r *PgLicenseLogRepository) DeleteByIDs(ctx context.Context, ids []uuid.UUID) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
 	query, args, err := storage.Psql.Delete("license_logs").
-		Where(sq.Lt{"created_at": before}).
+		Where(sq.Eq{"id": ids}).
 		ToSql()
 	if err != nil {
-		return 0, fmt.Errorf("build delete-before license_logs SQL: %w", err)
+		return 0, fmt.Errorf("build delete-by-ids license_logs SQL: %w", err)
 	}
 	tag, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
-		return 0, fmt.Errorf("delete license_logs before %s: %w", before.Format(time.RFC3339), err)
+		return 0, fmt.Errorf("delete license_logs by ids (count=%d): %w", len(ids), err)
 	}
 	return tag.RowsAffected(), nil
 }

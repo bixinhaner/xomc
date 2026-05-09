@@ -266,6 +266,54 @@ func TestLogArchiver_CrossTickSameMonth_NoOverwrite(t *testing.T) {
 		"all 16 logs preserved across 2 shards; pre-fix this would be 7 (tick 2 overwrote tick 1)")
 }
 
+// TestLogArchiver_BatchOverflow_OnlyArchivedDeleted — T-0100-P4-B2 回归测试。
+//
+// 场景：单 tick 积压超过 batchSize（用 SetBatchSize(3) 模拟）。ListBefore
+// 只取最早的 3 条；剩余 4 条仍 < cutoff 但本 tick 不归档。修复前 DeleteBefore
+// 会按 cutoff 一刀切把 7 条全删（4 条没归档就丢了）；修复后 DeleteByIDs(本批 3 条 id)
+// 仅删归档过的，剩余 4 条留 DB 等下个 tick 处理 → 零数据丢失。
+//
+// 此测试是 review 报告 REVIEW_922d87a4_chenbo01_license.md WARNING #3 的回归
+// 防护，必须随 archiver.go 同步维护；移除前请先评估"按 id 删"的语义是否回退到
+// "按 cutoff 删"。
+func TestLogArchiver_BatchOverflow_OnlyArchivedDeleted(t *testing.T) {
+	origNow := nowFunc
+	defer func() { nowFunc = origNow }()
+	nowFunc = func() time.Time { return time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC) }
+
+	repo := newMemLogRepo()
+	mc := newFakeMinIO()
+
+	// 7 条全部早于 cutoff，但 batchSize=3 只能归档前 3 条
+	oldTime := time.Date(2025, 8, 15, 10, 0, 0, 0, time.UTC)
+	seedLogsForArchive(t, repo, oldTime, 7)
+
+	a := NewLogArchiver(repo, mc, "lic-arch", 6, zap.NewNop())
+	a.SetBatchSize(3)
+
+	res, err := a.ArchiveOnce(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 3, res.LogsArchived, "batchSize=3 限制本 tick 只归档 3 条")
+	assert.Equal(t, int64(3), res.LogsDeleted, "DeleteByIDs 仅删本批 3 条")
+
+	// 关键断言：DB 仍有 4 条剩余日志，下个 tick 接力归档
+	remaining := repo.snapshot()
+	assert.Len(t, remaining, 4,
+		"4 条未归档行必须保留；pre-fix DeleteBefore(cutoff) 会把这 4 条也误删丢失")
+
+	// 第二轮：再跑一次 ArchiveOnce 把剩余 3 条归档（不动 nowFunc，cutoff 不变）
+	res2, err := a.ArchiveOnce(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 3, res2.LogsArchived)
+	assert.Len(t, repo.snapshot(), 1, "再剩 1 条等下次 tick")
+
+	// 第三轮：清光剩余 1 条
+	res3, err := a.ArchiveOnce(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 1, res3.LogsArchived)
+	assert.Empty(t, repo.snapshot())
+}
+
 // TestLogArchiver_KeyContainsTickTimestampAndCount — T-0100-P4-B1 显式验证键名格式。
 func TestLogArchiver_KeyContainsTickTimestampAndCount(t *testing.T) {
 	origNow := nowFunc

@@ -274,7 +274,7 @@ func (failingLogRepo) CountDenialsSince(_ context.Context, _ time.Time) (int64, 
 func (failingLogRepo) ListBefore(_ context.Context, _ time.Time, _ int) ([]LicenseLog, error) {
 	return nil, nil
 }
-func (failingLogRepo) DeleteBefore(_ context.Context, _ time.Time) (int64, error) {
+func (failingLogRepo) DeleteByIDs(_ context.Context, _ []uuid.UUID) (int64, error) {
 	return 0, nil
 }
 

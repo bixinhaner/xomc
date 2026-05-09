@@ -23,7 +23,10 @@
 //  2. ListBefore(cutoff, batchSize) 拉一批最早的日志
 //  3. 按 YYYY-MM 分桶（同月聚合），月内按 created_at 升序
 //  4. 对每个月的日志：写 PutObject 到唯一键 `{YYYY-MM}/{tickTS}-{count}.jsonl.gz`
-//  5. 全部月归档成功后，DeleteBefore(cutoff) 物理删 DB 行
+//  5. 全部月归档成功后，DeleteByIDs(本批已归档行的 id 集合) 物理删 DB 行
+//     —— **不**用 DeleteBefore(cutoff)，因为 ListBefore 受 batchSize 限制可能
+//     只取了一部分；对超出 batchSize 的剩余行，DeleteBefore 会把没归档的也
+//     一并删掉造成数据丢失（T-0100-P4-B2 修复 review 922d87a4 WARNING #3）
 //  6. 任一步失败 → return error，不删 DB（下次 tick 重试，幂等）
 package license
 
@@ -37,6 +40,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 )
@@ -156,7 +160,13 @@ func (a *LogArchiver) ArchiveOnce(ctx context.Context) (*ArchiveResult, error) {
 			zap.Int64("bytes_written", info.Size))
 	}
 
-	deleted, err := a.repo.DeleteBefore(ctx, cutoff)
+	// T-0100-P4-B2：仅删本 tick 实际归档的行（按 id），不要按 cutoff 一刀切，
+	// 防止 ListBefore 受 batchSize 限制只读了一部分时把剩余未归档行也误删。
+	archivedIDs := make([]uuid.UUID, 0, len(logs))
+	for i := range logs {
+		archivedIDs = append(archivedIDs, logs[i].ID)
+	}
+	deleted, err := a.repo.DeleteByIDs(ctx, archivedIDs)
 	if err != nil {
 		return nil, fmt.Errorf("delete archived logs from DB: %w", err)
 	}
