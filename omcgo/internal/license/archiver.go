@@ -1,18 +1,28 @@
-// Package license — log archive (T-0100-P4-B).
+// Package license — log archive (T-0100-P4-B + P4-B1).
 //
 // 周级 cron 任务把 license_logs 表里 created_at < (now - retention_months) 的
-// 行打包写到 MinIO，键名 `license-logs/{YYYY-MM}.jsonl.gz`，归档成功后从 DB
-// 删除对应行。等保 2.0 三级 8.1.4.7 要求重要操作日志保留 ≥ 6 个月（PRD §5.4.5）。
+// 行打包写到 MinIO，按月聚合 + 按 tick 唯一化键名：
+//
+//	license-logs/{YYYY-MM}/{tickTimestampUTC}-{count}.jsonl.gz
+//
+// 归档成功后从 DB 删除对应行。等保 2.0 三级 8.1.4.7 要求重要操作日志保留
+// ≥ 6 个月（PRD §5.4.5）。
+//
+// **键名设计（T-0100-P4-B1 修复 CRITICAL）**：
+//
+// P4-B 初版用 `license-logs/{YYYY-MM}.jsonl.gz` 固定键，cutoff 漂移落在月内时
+// 同月会被跨 tick 覆盖（review 报告 REVIEW_922d87a4_chenbo01_license.md
+// CRITICAL #1）。P4-B1 把 tick UTC 时间戳 + 本批日志条数嵌入键名，确保：
+//   - 同 tick 重复跑（重启 / 重试）覆盖自身（幂等）
+//   - 不同 tick 即使覆盖到同一个月也写到不同 key（零数据丢失）
+//   - 按月前缀 `license-logs/{YYYY-MM}/` 列举可拿到该月所有归档片段，
+//     审计工具按 tickTimestamp 排序合并即可
 //
 // 单次 tick 的正确性保证：
 //  1. 计算 cutoff = now - retention_months
 //  2. ListBefore(cutoff, batchSize) 拉一批最早的日志
 //  3. 按 YYYY-MM 分桶（同月聚合），月内按 created_at 升序
-//  4. 对每个月的日志：
-//     a. StatObject 看 MinIO 上是否已有 `license-logs/{YYYY-MM}.jsonl.gz`
-//     b. 已存在：append 模式（下载 → 解压 → 追加 → 压缩 → 上传覆盖）
-//        简化处理：当前实现直接覆盖（cron 同月只跑一次，理论上不会同月二次归档）
-//     c. PutObject 写新对象
+//  4. 对每个月的日志：写 PutObject 到唯一键 `{YYYY-MM}/{tickTS}-{count}.jsonl.gz`
 //  5. 全部月归档成功后，DeleteBefore(cutoff) 物理删 DB 行
 //  6. 任一步失败 → return error，不删 DB（下次 tick 重试，幂等）
 package license
@@ -32,10 +42,12 @@ import (
 )
 
 // archiveObjectIO 是 LogArchiver 消费的 MinIO 窄接口。consumer-side 定义
-// 让测试 mock 只需 ~30 行；*minio.Client 天然实现。
+// 让测试 mock 只需 ~20 行；*minio.Client 天然实现。
+//
+// 仅依赖 PutObject：键名走 tick 唯一化方案后不再需要 StatObject 探活
+// （详见 package doc T-0100-P4-B1 修复说明）。
 type archiveObjectIO interface {
 	PutObject(ctx context.Context, bucket, key string, reader io.Reader, size int64, opts minio.PutObjectOptions) (minio.UploadInfo, error)
-	StatObject(ctx context.Context, bucket, key string, opts minio.StatObjectOptions) (minio.ObjectInfo, error)
 }
 
 // LogArchiver 归档器。零值不可用；通过 NewLogArchiver 构造。
@@ -93,8 +105,8 @@ type ArchiveResult struct {
 //
 // 设计取舍：
 //   - minio 为 nil 或 bucket 为空 → 短路返 nil（dev 配置友好）
-//   - 当月日志可能跨 tick 被分批归档：每月单独 PutObject，重复跑会覆盖
-//     （objects 是 immutable 替换语义，无版本号一致性问题）
+//   - 键名按 tick 唯一化（YYYY-MM/{tickTS}-{count}.jsonl.gz）：同月跨 tick
+//     归档不会互相覆盖（T-0100-P4-B1 修复 review CRITICAL #1）
 //   - 删除 DB 在所有月归档成功后才执行，保证"先持久化再删原表"原子性
 //     （MinIO 失败 → DB 不变 → 下 tick 重试不丢数据）
 func (a *LogArchiver) ArchiveOnce(ctx context.Context) (*ArchiveResult, error) {
@@ -103,7 +115,10 @@ func (a *LogArchiver) ArchiveOnce(ctx context.Context) (*ArchiveResult, error) {
 		return &ArchiveResult{}, nil
 	}
 
-	cutoff := nowFunc().AddDate(0, -a.retentionMonths, 0).UTC()
+	now := nowFunc()
+	cutoff := now.AddDate(0, -a.retentionMonths, 0).UTC()
+	tickTS := now.UTC().Format("20060102T150405Z") // T-0100-P4-B1：tick 唯一标识
+
 	logs, err := a.repo.ListBefore(ctx, cutoff, a.batchSize)
 	if err != nil {
 		return nil, fmt.Errorf("list logs before cutoff: %w", err)
@@ -119,7 +134,9 @@ func (a *LogArchiver) ArchiveOnce(ctx context.Context) (*ArchiveResult, error) {
 
 	var totalBytes int64
 	for month, monthLogs := range groups {
-		key := fmt.Sprintf("license-logs/%s.jsonl.gz", month)
+		// T-0100-P4-B1：键名 = `license-logs/{YYYY-MM}/{tickTS}-{count}.jsonl.gz`
+		// {tickTS} 防同月跨 tick 覆盖；{count} 让运维直接从 key 读出条数。
+		key := fmt.Sprintf("license-logs/%s/%s-%d.jsonl.gz", month, tickTS, len(monthLogs))
 		body, err := encodeLogsJSONLGz(monthLogs)
 		if err != nil {
 			return nil, fmt.Errorf("encode logs for %s: %w", month, err)

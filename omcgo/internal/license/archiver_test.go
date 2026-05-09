@@ -44,16 +44,6 @@ func (m *fakeMinIO) PutObject(_ context.Context, bucket, key string, reader io.R
 	return minio.UploadInfo{Bucket: bucket, Key: key, Size: int64(len(body))}, nil
 }
 
-func (m *fakeMinIO) StatObject(_ context.Context, bucket, key string, _ minio.StatObjectOptions) (minio.ObjectInfo, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	body, ok := m.objects[bucket+"/"+key]
-	if !ok {
-		return minio.ObjectInfo{}, errors.New("not found")
-	}
-	return minio.ObjectInfo{Key: key, Size: int64(len(body))}, nil
-}
-
 func (m *fakeMinIO) get(t *testing.T, bucket, key string) []byte {
 	t.Helper()
 	m.mu.Lock()
@@ -61,6 +51,20 @@ func (m *fakeMinIO) get(t *testing.T, bucket, key string) []byte {
 	body, ok := m.objects[bucket+"/"+key]
 	require.True(t, ok, "expected object %s/%s to exist", bucket, key)
 	return body
+}
+
+// listKeysByPrefix 返回 bucket 下匹配前缀的 key（用于 P4-B1 校验同月归档片段）。
+func (m *fakeMinIO) listKeysByPrefix(bucket, prefix string) []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	full := bucket + "/" + prefix
+	out := make([]string, 0)
+	for k := range m.objects {
+		if strings.HasPrefix(k, full) {
+			out = append(out, strings.TrimPrefix(k, bucket+"/"))
+		}
+	}
+	return out
 }
 
 // seedLogsForArchive 往 memLogRepo 灌入指定 created_at 的日志。
@@ -124,8 +128,13 @@ func TestLogArchiver_HappyPath_SingleMonth(t *testing.T) {
 	assert.Equal(t, 3, res.LogsArchived)
 	assert.Equal(t, int64(3), res.LogsDeleted)
 
-	// MinIO 内 key 命中
-	body := mc.get(t, "license-archive", "license-logs/2025-08.jsonl.gz")
+	// T-0100-P4-B1：键名 = `license-logs/{YYYY-MM}/{tickTS}-{count}.jsonl.gz`
+	keys := mc.listKeysByPrefix("license-archive", "license-logs/2025-08/")
+	require.Len(t, keys, 1, "expected exactly 1 archive shard for 2025-08")
+	assert.Contains(t, keys[0], "20260509T120000Z-3.jsonl.gz",
+		"key includes tickTS UTC + log count")
+
+	body := mc.get(t, "license-archive", keys[0])
 	gr, err := gzip.NewReader(bytes.NewReader(body))
 	require.NoError(t, err)
 	decoded, err := io.ReadAll(gr)
@@ -162,9 +171,11 @@ func TestLogArchiver_HappyPath_MultipleMonths(t *testing.T) {
 	assert.Equal(t, 6, res.LogsArchived)
 	assert.Equal(t, int64(6), res.LogsDeleted)
 
+	// T-0100-P4-B1：每月各一个 shard，前缀 `license-logs/{YYYY-MM}/`
 	for _, m := range []string{"2025-08", "2025-09", "2025-10"} {
-		key := "license-logs/" + m + ".jsonl.gz"
-		body := mc.get(t, "lic-arch", key)
+		keys := mc.listKeysByPrefix("lic-arch", "license-logs/"+m+"/")
+		require.Len(t, keys, 1, "month %s should have exactly 1 archive shard", m)
+		body := mc.get(t, "lic-arch", keys[0])
 		assert.Greater(t, len(body), 10, "month %s archive should be non-trivial", m)
 	}
 	assert.Empty(t, repo.snapshot())
@@ -195,6 +206,84 @@ func TestLogArchiver_RetentionDefault(t *testing.T) {
 	// 0 → 默认 6 月
 	a := NewLogArchiver(newMemLogRepo(), newFakeMinIO(), "b", 0, zap.NewNop())
 	assert.Equal(t, 6, a.retentionMonths)
+}
+
+// TestLogArchiver_CrossTickSameMonth_NoOverwrite — T-0100-P4-B1 回归测试。
+//
+// 场景：周级 cron + 6 月保留期，cutoff 落在月内。第 N 周 tick 归档某月 1-9 日
+// 日志，第 N+1 周 tick 归档同月 10-16 日日志。修复前两次 tick 都写到
+// `license-logs/{YYYY-MM}.jsonl.gz` 同一个 key 互相覆盖；修复后两次写到不同
+// 唯一 key（含 tickTS），同月所有 shard 在 `license-logs/{YYYY-MM}/` 前缀下
+// 共存，零数据丢失。
+//
+// 此测试是 review 报告 REVIEW_922d87a4_chenbo01_license.md CRITICAL #1 的回归
+// 防护，必须随 archiver.go 同步维护；移除前请先评估键名方案是否回退。
+func TestLogArchiver_CrossTickSameMonth_NoOverwrite(t *testing.T) {
+	origNow := nowFunc
+	defer func() { nowFunc = origNow }()
+
+	repo := newMemLogRepo()
+	mc := newFakeMinIO()
+	a := NewLogArchiver(repo, mc, "lic-arch", 6, zap.NewNop())
+
+	// 同月（2025-11）跨两个时段灌日志
+	earlyNov := time.Date(2025, 11, 5, 8, 0, 0, 0, time.UTC)
+	lateNov := time.Date(2025, 11, 13, 8, 0, 0, 0, time.UTC)
+	seedLogsForArchive(t, repo, earlyNov, 9)  // tick 1 会归档这 9 条
+	seedLogsForArchive(t, repo, lateNov, 7)   // tick 2 才归档这 7 条
+
+	// Tick 1：cutoff = 2025-11-10，归档 11-05 那 9 条；11-13 7 条留下
+	nowFunc = func() time.Time { return time.Date(2026, 5, 10, 3, 0, 0, 0, time.UTC) }
+	res1, err := a.ArchiveOnce(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 9, res1.LogsArchived)
+	assert.Equal(t, int64(9), res1.LogsDeleted)
+	assert.Len(t, repo.snapshot(), 7, "11-13 logs not yet eligible")
+
+	// Tick 2：cutoff = 2025-11-17，归档剩余 11-13 那 7 条
+	nowFunc = func() time.Time { return time.Date(2026, 5, 17, 3, 0, 0, 0, time.UTC) }
+	res2, err := a.ArchiveOnce(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 7, res2.LogsArchived)
+	assert.Equal(t, int64(7), res2.LogsDeleted)
+	assert.Empty(t, repo.snapshot(), "all archived")
+
+	// 关键断言：同月前缀下应有 2 个不同 shard，加起来 16 条记录
+	keys := mc.listKeysByPrefix("lic-arch", "license-logs/2025-11/")
+	require.Len(t, keys, 2, "two ticks must produce two distinct shards (no overwrite)")
+
+	totalRecords := 0
+	for _, k := range keys {
+		body := mc.get(t, "lic-arch", k)
+		gr, err := gzip.NewReader(bytes.NewReader(body))
+		require.NoError(t, err)
+		decoded, err := io.ReadAll(gr)
+		require.NoError(t, err)
+		require.NoError(t, gr.Close())
+		totalRecords += len(strings.Split(strings.TrimRight(string(decoded), "\n"), "\n"))
+	}
+	assert.Equal(t, 16, totalRecords,
+		"all 16 logs preserved across 2 shards; pre-fix this would be 7 (tick 2 overwrote tick 1)")
+}
+
+// TestLogArchiver_KeyContainsTickTimestampAndCount — T-0100-P4-B1 显式验证键名格式。
+func TestLogArchiver_KeyContainsTickTimestampAndCount(t *testing.T) {
+	origNow := nowFunc
+	defer func() { nowFunc = origNow }()
+	nowFunc = func() time.Time { return time.Date(2026, 5, 10, 3, 15, 30, 0, time.UTC) }
+
+	repo := newMemLogRepo()
+	mc := newFakeMinIO()
+	seedLogsForArchive(t, repo, time.Date(2025, 8, 1, 0, 0, 0, 0, time.UTC), 5)
+
+	a := NewLogArchiver(repo, mc, "b", 6, zap.NewNop())
+	_, err := a.ArchiveOnce(context.Background())
+	require.NoError(t, err)
+
+	keys := mc.listKeysByPrefix("b", "license-logs/2025-08/")
+	require.Len(t, keys, 1)
+	// tickTS = 20260510T031530Z（UTC，秒级）；count = 5
+	assert.Equal(t, "license-logs/2025-08/20260510T031530Z-5.jsonl.gz", keys[0])
 }
 
 func TestEncodeLogsJSONLGz_Decompresses(t *testing.T) {
