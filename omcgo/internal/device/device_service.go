@@ -681,6 +681,11 @@ func (s *DeviceService) TransitionStatus(ctx context.Context, deviceID uuid.UUID
 		return fmt.Errorf("update status: %w", err)
 	}
 
+	// C2 修复：状态变更后清 cache，避免前端读到 stale status 字段（最长一个 inform 周期）
+	if s.cache != nil {
+		s.cache.Delete(ctx, device.SerialNumber)
+	}
+
 	// Update gauge: decrement old status, increment new status
 	if s.metrics != nil {
 		s.metrics.DevicesTotal.WithLabelValues(string(device.Status), string(device.Carrier)).Dec()
@@ -1109,13 +1114,24 @@ func (s *DeviceService) UpdateDevice(ctx context.Context, id uuid.UUID, req Upda
 
 // DeleteDevice deletes a device by ID.
 func (s *DeviceService) DeleteDevice(ctx context.Context, id uuid.UUID) error {
-	return s.deviceRepo.Delete(ctx, id)
+	// C2 修复：先查 SN 用于删除后清 cache（cache key 是 SN 不是 ID）
+	device, _ := s.deviceRepo.GetByID(ctx, id)
+	if err := s.deviceRepo.Delete(ctx, id); err != nil {
+		return err
+	}
+	if s.cache != nil && device != nil {
+		s.cache.Delete(ctx, device.SerialNumber)
+	}
+	return nil
 }
 
 // BatchDeleteDevices deletes multiple devices by their IDs.
 // Returns a BatchOperationResult summarising successes and failures.
 func (s *DeviceService) BatchDeleteDevices(ctx context.Context, ids []uuid.UUID, deletedBy string) BatchOperationResult {
 	result := BatchOperationResult{Total: len(ids)}
+
+	// C2 修复：先查 SN 列表用于删除后清 cache
+	idToSN, _ := s.deviceRepo.ListSerialsByIDs(ctx, ids)
 
 	deleted, err := s.deviceRepo.BatchDelete(ctx, ids, deletedBy)
 	if err != nil {
@@ -1136,6 +1152,13 @@ func (s *DeviceService) BatchDeleteDevices(ctx context.Context, ids []uuid.UUID,
 
 	result.Succeeded = int(deleted)
 	result.Failed = len(ids) - int(deleted)
+
+	// C2 修复：删除成功后清 cache（cache key 用 SN，cache 不感知 ID）
+	if s.cache != nil {
+		for _, sn := range idToSN {
+			s.cache.Delete(ctx, sn)
+		}
+	}
 
 	s.logger.Info("batch delete devices",
 		zap.Int("total", len(ids)),
@@ -1197,12 +1220,34 @@ func (s *DeviceService) ListRecycleBin(ctx context.Context, filter RecycleBinFil
 
 // RestoreDevices restores soft-deleted devices.
 func (s *DeviceService) RestoreDevices(ctx context.Context, ids []uuid.UUID) (int64, error) {
-	return s.deviceRepo.RestoreDevices(ctx, ids)
+	// C2 修复：恢复后清 cache，让下次 inform 重新走 GetOrLoad 加载干净的 device 行
+	idToSN, _ := s.deviceRepo.ListSerialsByIDs(ctx, ids)
+	n, err := s.deviceRepo.RestoreDevices(ctx, ids)
+	if err != nil {
+		return n, err
+	}
+	if s.cache != nil {
+		for _, sn := range idToSN {
+			s.cache.Delete(ctx, sn)
+		}
+	}
+	return n, nil
 }
 
 // PermanentDeleteDevices permanently removes devices from the database.
 func (s *DeviceService) PermanentDeleteDevices(ctx context.Context, ids []uuid.UUID) (int64, error) {
-	return s.deviceRepo.PermanentDelete(ctx, ids)
+	// C2 修复：先查 SN 用于删除后清 cache
+	idToSN, _ := s.deviceRepo.ListSerialsByIDs(ctx, ids)
+	n, err := s.deviceRepo.PermanentDelete(ctx, ids)
+	if err != nil {
+		return n, err
+	}
+	if s.cache != nil {
+		for _, sn := range idToSN {
+			s.cache.Delete(ctx, sn)
+		}
+	}
+	return n, nil
 }
 
 // GetProductClasses returns distinct product types from the device table,

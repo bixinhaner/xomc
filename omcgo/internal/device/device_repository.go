@@ -127,6 +127,10 @@ type DeviceReader interface {
 	// FindStaleDevices finds active devices that haven't sent Inform within the threshold.
 	// Used by OfflineDetector to mark devices as offline.
 	FindStaleDevices(ctx context.Context, threshold time.Time, limit int) ([]*model.Device, error)
+	// ListSerialsByIDs 按 ID 列表查 serial_number，供 service 层在批量删除/恢复
+	// 操作前后拿到受影响的 SN 列表，统一调 cache.Delete 维护 cache 一致性。
+	// 返回 map[id]sn，找不到的 ID 不在 map 中。
+	ListSerialsByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error)
 }
 
 // DeviceWriter provides write operations for devices.
@@ -306,6 +310,7 @@ func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) e
 		Set("longitude", device.Longitude).
 		Set("extension_data", extData).
 		Where(sq.Eq{"id": device.ID}).
+		Where(notDeleted). // 防软删 device 被 inform 静默复活；命中时 RowsAffected=0 → 上层 ErrNotFound → 清 cache 走 auto-register
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build update query: %w", err)
@@ -1329,6 +1334,33 @@ func (r *PgDeviceRepository) FindStaleDevices(ctx context.Context, threshold tim
 	}
 
 	return devices, nil
+}
+
+// ListSerialsByIDs 按 ID 批量查 serial_number。supplied IDs 中找不到行的 ID 不在结果 map 中。
+// 用于 service 层批量 Delete/Restore/PermanentDelete 前后拿到 SN 列表统一清 cache。
+func (r *PgDeviceRepository) ListSerialsByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+	if len(ids) == 0 {
+		return map[uuid.UUID]string{}, nil
+	}
+	rows, err := r.pool.Query(ctx,
+		`SELECT id, serial_number FROM devices WHERE id = ANY($1)`,
+		ids,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list serials by ids: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[uuid.UUID]string, len(ids))
+	for rows.Next() {
+		var id uuid.UUID
+		var sn string
+		if err := rows.Scan(&id, &sn); err != nil {
+			return nil, fmt.Errorf("scan id-sn pair: %w", err)
+		}
+		out[id] = sn
+	}
+	return out, rows.Err()
 }
 
 // mandatoryProductClasses are always returned even if no devices exist in the database.

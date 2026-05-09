@@ -130,6 +130,9 @@ func (m *fakeDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]Ge
 func (m *fakeDeviceRepo) FindStaleDevices(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
 	return nil, nil
 }
+func (m *fakeDeviceRepo) ListSerialsByIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]string, error) {
+	return map[uuid.UUID]string{}, nil
+}
 func (m *fakeDeviceRepo) ListRecycleBin(_ context.Context, _ RecycleBinFilter) (*model.ListResponse[model.Device], error) {
 	return model.NewListResponse([]model.Device{}, 0, 1, 20), nil
 }

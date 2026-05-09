@@ -111,6 +111,9 @@ func (m *infMockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([
 func (m *infMockDeviceRepo) FindStaleDevices(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
 	return nil, nil
 }
+func (m *infMockDeviceRepo) ListSerialsByIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]string, error) {
+	return map[uuid.UUID]string{}, nil
+}
 func (m *infMockDeviceRepo) ListRecycleBin(_ context.Context, _ RecycleBinFilter) (*model.ListResponse[model.Device], error) {
 	return model.NewListResponse([]model.Device{}, 0, 1, 20), nil
 }

@@ -324,6 +324,8 @@ func (p *BatchInformProcessor) batchUpdateDevices(ctx context.Context, updates [
 			udpAddr = dev.UDPConnectionRequestAddress
 		}
 
+		// AND deleted_at IS NULL：防止软删的 device 被 inform 静默复活
+		// （cache stale → 这里 UPDATE 仍命中已删行，silent data corruption）
 		query := `UPDATE devices SET
 			oui = $1, product_class = $2, manufacturer = $3,
 			status = $4, firmware_version = $5,
@@ -331,7 +333,7 @@ func (p *BatchInformProcessor) batchUpdateDevices(ctx context.Context, updates [
 			nat_detected = $8, udp_connection_request_address = $9,
 			last_inform_at = $10, last_inform_events = $11,
 			updated_at = NOW()
-		WHERE id = $12`
+		WHERE id = $12 AND deleted_at IS NULL`
 
 		batch.Queue(query,
 			dev.OUI, dev.ProductClass, dev.Manufacturer,
@@ -522,6 +524,8 @@ func (r *PgDeviceRepository) BatchUpdateDevices(ctx context.Context, devices []*
 			udpAddr = dev.UDPConnectionRequestAddress
 		}
 
+		// AND deleted_at IS NULL：防止软删的 device 被 inform 静默复活
+		// （cache stale → 这里 UPDATE 仍命中已删行，silent data corruption）
 		query := `UPDATE devices SET
 			oui = $1, product_class = $2, manufacturer = $3,
 			status = $4, firmware_version = $5,
@@ -529,7 +533,7 @@ func (r *PgDeviceRepository) BatchUpdateDevices(ctx context.Context, devices []*
 			nat_detected = $8, udp_connection_request_address = $9,
 			last_inform_at = $10, last_inform_events = $11,
 			updated_at = NOW()
-		WHERE id = $12`
+		WHERE id = $12 AND deleted_at IS NULL`
 
 		batch.Queue(query,
 			dev.OUI, dev.ProductClass, dev.Manufacturer,

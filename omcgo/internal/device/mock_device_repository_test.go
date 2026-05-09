@@ -116,6 +116,21 @@ func (mr *MockDeviceRepositoryMockRecorder) FindStaleDevices(ctx, threshold, lim
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FindStaleDevices", reflect.TypeOf((*MockDeviceRepository)(nil).FindStaleDevices), ctx, threshold, limit)
 }
 
+// ListSerialsByIDs mocks base method.
+func (m *MockDeviceRepository) ListSerialsByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListSerialsByIDs", ctx, ids)
+	ret0, _ := ret[0].(map[uuid.UUID]string)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListSerialsByIDs indicates an expected call of ListSerialsByIDs.
+func (mr *MockDeviceRepositoryMockRecorder) ListSerialsByIDs(ctx, ids any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListSerialsByIDs", reflect.TypeOf((*MockDeviceRepository)(nil).ListSerialsByIDs), ctx, ids)
+}
+
 // GetByID mocks base method.
 func (m *MockDeviceRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.Device, error) {
 	m.ctrl.T.Helper()
