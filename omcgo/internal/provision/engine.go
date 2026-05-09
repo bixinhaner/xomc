@@ -13,6 +13,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/tracing"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"go.opentelemetry.io/otel/attribute"
@@ -35,6 +36,8 @@ type ProvisioningEngine struct {
 	deduper            *event.Deduper
 	modelUploadService *ModelUploadService
 	syncService        *SyncService
+	productRegistry    *product.Registry
+	productRepo        *product.PgRepository
 	config             appconfig.ProvisionConfig
 	logger             *zap.Logger
 }
@@ -77,6 +80,46 @@ func (e *ProvisioningEngine) SetSyncService(svc *SyncService) {
 // nil 表示关闭去重（向后兼容单进程内存 EventBus 场景）。
 func (e *ProvisioningEngine) SetDeduper(d *event.Deduper) {
 	e.deduper = d
+}
+
+// SetProductBinder 注入产品装配件路由 + 写回能力（B1 修复）。
+// HandleBootstrap identify 阶段调 productRegistry 命中产品后,用 productRepo
+// 把 product_id / param_model_id 写回 device 行,避免前端"产品中心"设备数永 0
+// 和孤儿设备页误判。两个参数任一为 nil 都关闭此功能。
+func (e *ProvisioningEngine) SetProductBinder(reg *product.Registry, repo *product.PgRepository) {
+	e.productRegistry = reg
+	e.productRepo = repo
+}
+
+// bindDeviceProduct 在 HandleBootstrap identify 阶段调 productRegistry 路由
+// productClass 命中产品后，把 product_id / param_model_id 写回 device 行。
+// 任何错误都仅记 warn 不阻断后续 provisioning（孤儿设备由前端孤儿设备页处理）。
+func (e *ProvisioningEngine) bindDeviceProduct(ctx context.Context, dev *model.Device) {
+	if e.productRegistry == nil || e.productRepo == nil || dev == nil || dev.ProductClass == "" {
+		return
+	}
+	match, err := e.productRegistry.MatchProductClass(ctx, dev.ProductClass)
+	if err != nil {
+		e.logger.Warn("bindDeviceProduct: match productClass failed",
+			zap.String("device_sn", dev.SerialNumber),
+			zap.String("product_class", dev.ProductClass),
+			zap.Error(err))
+		return
+	}
+	if match == nil || match.Product == nil {
+		return
+	}
+	if err := e.productRepo.BindDevice(ctx, dev.ID, match.Product.ID, match.Product.ParamModelID); err != nil {
+		e.logger.Warn("bindDeviceProduct: write product_id failed",
+			zap.String("device_sn", dev.SerialNumber),
+			zap.String("product_id", match.Product.ID.String()),
+			zap.Error(err))
+		return
+	}
+	e.logger.Info("device bound to product",
+		zap.String("device_sn", dev.SerialNumber),
+		zap.String("product_id", match.Product.ID.String()),
+		zap.String("product_name", match.Product.Name))
 }
 
 // bootstrapEvent represents the data published on device.registered.
@@ -192,6 +235,10 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 	if err != nil {
 		return e.failTask(ctx, task, fmt.Errorf("get device: %w", err))
 	}
+
+	// 2.5 路由产品装配件并回写 device.product_id / param_model_id（B1 修复）。
+	// 路由失败/未命中（孤儿设备）不阻断后续 provisioning，仅记 warn。
+	e.bindDeviceProduct(ctx, dev)
 
 	// 3. Try matching template first (Path A).
 	if err := e.transitionTask(ctx, task, StateMatching); err != nil {

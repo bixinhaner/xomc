@@ -109,6 +109,10 @@ func initProvisionModule(c *Container) error {
 		c.Carriers, c.TaskSvc, c.EventBus, c.Cfg.Provision, logger,
 	)
 	provisionEngine.SetDeduper(c.Deduper)
+	// B1：identify 阶段路由产品并回写 product_id/param_model_id。
+	if c.ProductRegistry != nil && c.ProductRepo != nil {
+		provisionEngine.SetProductBinder(c.ProductRegistry, c.ProductRepo)
+	}
 
 	if c.Cfg.Provision.ModelUpload.Enabled {
 		modelUploadSvc := provision.NewModelUploadService(

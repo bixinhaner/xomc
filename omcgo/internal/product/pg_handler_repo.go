@@ -510,5 +510,23 @@ func (r *PgRepository) BindOrphanDevice(ctx context.Context, deviceID, productID
 	return nil
 }
 
+// BindDevice 把 ProvisioningEngine 路由命中后的产品装配件回写到 device 行，
+// 同时更新 product_id 和 param_model_id（B1 修复）。
+// paramModelID 为 nil 时仅写 product_id（理论上 product 必有 paramModel，但容错）。
+// rowsAffected==0 视为非致命：日志 warn 由调用方决定，仍返回 nil。
+func (r *PgRepository) BindDevice(ctx context.Context, deviceID, productID uuid.UUID, paramModelID *uuid.UUID) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE devices SET product_id = $1, param_model_id = $2 WHERE id = $3 AND deleted_at IS NULL`,
+		productID, paramModelID, deviceID,
+	)
+	if err != nil {
+		return fmt.Errorf("bind device product: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("device %s not found or already deleted", deviceID)
+	}
+	return nil
+}
+
 // 引入 context 占位（避免 import 未使用 — handler 路径会调用本文件函数）。
 var _ = context.Background
