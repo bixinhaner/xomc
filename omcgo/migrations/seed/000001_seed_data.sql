@@ -5,11 +5,13 @@
 -- 所有 INSERT 使用 ON CONFLICT DO NOTHING 确保幂等性
 -- ============================================================
 
--- 1. 系统角色
+-- 1. 内置角色（仅 admin 为系统级 / 受保护，不可删；operator / viewer 为默认普通角色，
+--    管理员可在 UI 上修改 / 删除 / 增改成员）。
+--    pg_role_repository.go Delete 逻辑：is_system=TRUE 才返回 403 Forbidden。
 INSERT INTO roles (id, name, description, is_system) VALUES
-    ('10000000-0000-0000-0000-000000000001', 'admin', 'System administrator with full access', TRUE),
-    ('10000000-0000-0000-0000-000000000002', 'operator', 'Operator with read/write access to operational resources', TRUE),
-    ('10000000-0000-0000-0000-000000000003', 'viewer', 'Read-only viewer', TRUE)
+    ('10000000-0000-0000-0000-000000000001', 'admin',    'System administrator with full access', TRUE),
+    ('10000000-0000-0000-0000-000000000002', 'operator', 'Operator with read/write access to operational resources', FALSE),
+    ('10000000-0000-0000-0000-000000000003', 'viewer',   'Read-only viewer', FALSE)
 ON CONFLICT (name) DO NOTHING;
 
 -- 2. 管理员用户
@@ -180,7 +182,8 @@ DELETE FROM menus;
 -- B3-Phase2-B：permissions 表已 DROP（migrations/000065），无需 DELETE。
 DELETE FROM user_roles;
 DELETE FROM users WHERE username = 'admin';
-DELETE FROM roles WHERE is_system = TRUE;
+-- v0.2 起仅 admin 为 is_system=TRUE，operator/viewer 改为非系统角色 → 按名称精确删除。
+DELETE FROM roles WHERE name IN ('admin', 'operator', 'viewer');
 DELETE FROM kpi_definitions;
 DELETE FROM data_model_definitions;
 DELETE FROM oui_registry;
