@@ -187,6 +187,20 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, erro
 		}
 	}
 
+	// §1.9 对账：param_mappings 已被本事务整体替换，需同步 discovered_param_mappings
+	// 按 private_path 锚定 DELETE / UPDATE。失败仅记 WARN，不阻断 reload（DB 已落地）。
+	delN, updN, recErr := reconcileDiscoveredForModel(ctx, tx, modelID)
+	if recErr != nil {
+		l.logger.Warn("reconcile discovered_param_mappings failed",
+			zap.String("model", doc.ParamModel),
+			zap.Error(recErr))
+	} else if delN > 0 || updN > 0 {
+		l.logger.Info("reconciled discovered_param_mappings",
+			zap.String("model", doc.ParamModel),
+			zap.Int64("deleted", delN),
+			zap.Int64("updated", updN))
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return 0, fmt.Errorf("commit tx: %w", err)
 	}
@@ -198,6 +212,74 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, erro
 		zap.Int("params", totalParams),
 		zap.String("file", loadedFrom))
 	return rows, nil
+}
+
+// reconcileDiscoveredForModel 实现设计 §1.9 对账：
+//
+//   - DELETE：discovered 中 private_path 在新 param_mappings 已不存在 → 删
+//   - UPDATE：private_path 仍在，但 standard_path / 元属性变了 →
+//     按 product.device_attrs_override 决定每个属性取设备值还是新默认值；
+//     is_storable 始终跟随默认（不参与设备覆盖）。
+//
+// 范围限定：仅处理 products.param_model_id = modelID 引用的产品。
+// 调用时机：每个 paramModel 重写 param_mappings 后、commit 前。
+func reconcileDiscoveredForModel(ctx context.Context, tx pgx.Tx, modelID string) (deleted, updated int64, err error) {
+	const delSQL = `
+DELETE FROM discovered_param_mappings d
+USING products pr
+WHERE d.product_id = pr.id
+  AND pr.param_model_id = $1
+  AND NOT EXISTS (
+    SELECT 1 FROM param_mappings pm
+    WHERE pm.param_model_id = $1
+      AND pm.private_path = d.private_path
+  )`
+	delTag, err := tx.Exec(ctx, delSQL, modelID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("reconcile DELETE: %w", err)
+	}
+	deleted = delTag.RowsAffected()
+
+	const updSQL = `
+UPDATE discovered_param_mappings d
+SET standard_path = pm.standard_path,
+    access = CASE WHEN COALESCE((pr.device_attrs_override->>'access')::boolean, false)
+                  THEN d.access ELSE pm.access END,
+    data_type = CASE WHEN COALESCE((pr.device_attrs_override->>'data_type')::boolean, false)
+                     THEN d.data_type ELSE pm.data_type END,
+    change_applies = CASE WHEN COALESCE((pr.device_attrs_override->>'change_applies')::boolean, false)
+                          THEN d.change_applies ELSE pm.change_applies END,
+    min_value = CASE WHEN COALESCE((pr.device_attrs_override->>'min_value')::boolean, false)
+                     THEN d.min_value ELSE pm.min_value END,
+    max_value = CASE WHEN COALESCE((pr.device_attrs_override->>'max_value')::boolean, false)
+                     THEN d.max_value ELSE pm.max_value END,
+    is_storable = pm.is_storable,
+    updated_at = now()
+FROM param_mappings pm, products pr
+WHERE d.product_id = pr.id
+  AND pr.param_model_id = $1
+  AND pm.param_model_id = $1
+  AND d.private_path = pm.private_path
+  AND (
+    d.standard_path IS DISTINCT FROM pm.standard_path
+    OR d.is_storable IS DISTINCT FROM pm.is_storable
+    OR (NOT COALESCE((pr.device_attrs_override->>'access')::boolean, false)
+        AND d.access IS DISTINCT FROM pm.access)
+    OR (NOT COALESCE((pr.device_attrs_override->>'data_type')::boolean, false)
+        AND d.data_type IS DISTINCT FROM pm.data_type)
+    OR (NOT COALESCE((pr.device_attrs_override->>'change_applies')::boolean, false)
+        AND d.change_applies IS DISTINCT FROM pm.change_applies)
+    OR (NOT COALESCE((pr.device_attrs_override->>'min_value')::boolean, false)
+        AND d.min_value IS DISTINCT FROM pm.min_value)
+    OR (NOT COALESCE((pr.device_attrs_override->>'max_value')::boolean, false)
+        AND d.max_value IS DISTINCT FROM pm.max_value)
+  )`
+	updTag, err := tx.Exec(ctx, updSQL, modelID)
+	if err != nil {
+		return deleted, 0, fmt.Errorf("reconcile UPDATE: %w", err)
+	}
+	updated = updTag.RowsAffected()
+	return deleted, updated, nil
 }
 
 // batchInsertMappings 把 entries 批量插入 param_mappings；entryType 固定。
