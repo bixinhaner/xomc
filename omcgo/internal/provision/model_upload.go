@@ -75,7 +75,7 @@ func (s *ModelUploadService) resolveProduct(ctx context.Context, dev *model.Devi
 //
 // 设备 product.EnableFileType11=false → 直接跳过 Upload，标 discovery_log 为
 // completed (reason=disabled_by_product_config)，让 Translator 自动降级到默认映射。
-func (s *ModelUploadService) RequestModelUpload(ctx context.Context, dev *model.Device) (*ParameterDiscoveryLog, error) {
+func (s *ModelUploadService) RequestModelUpload(ctx context.Context, dev *model.Device, sourceID string) (*ParameterDiscoveryLog, error) {
 	log := NewParameterDiscoveryLog(dev.ID, dev.SerialNumber, dev.OUI, dev.ProductClass, dev.FirmwareVersion)
 	log.Status = DiscoveryDiscovering
 
@@ -116,6 +116,7 @@ func (s *ModelUploadService) RequestModelUpload(ctx context.Context, dev *model.
 		Priority:   1,
 		CommandKey: fmt.Sprintf("model-upload-%s", dev.SerialNumber),
 		Source:     task.TaskSourceSystem,
+		SourceID:   sourceID,
 	}); err != nil {
 		_ = s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoveryFailed, err.Error())
 		return nil, fmt.Errorf("enqueue Upload command: %w", err)

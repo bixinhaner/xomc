@@ -160,7 +160,7 @@ func TestEnqueueSteps_Success(t *testing.T) {
 		},
 	}
 
-	err := EnqueueSteps(context.Background(), "TEST-DEVICE-SN", steps, queue)
+	err := EnqueueSteps(context.Background(), "TEST-DEVICE-SN", steps, queue, "")
 	require.NoError(t, err)
 	require.Len(t, pushed, 3)
 
@@ -196,7 +196,7 @@ func TestEnqueueSteps_ErrorOnSecondStep(t *testing.T) {
 		},
 	}
 
-	err := EnqueueSteps(context.Background(), "SN-ERR", steps, queue)
+	err := EnqueueSteps(context.Background(), "SN-ERR", steps, queue, "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "enqueue step 2")
 	assert.Contains(t, err.Error(), "SetParameterValues")
@@ -212,7 +212,7 @@ func TestEnqueueSteps_EmptySteps(t *testing.T) {
 		},
 	}
 
-	err := EnqueueSteps(context.Background(), "SN-EMPTY", nil, queue)
+	err := EnqueueSteps(context.Background(), "SN-EMPTY", nil, queue, "")
 	require.NoError(t, err)
 }
 

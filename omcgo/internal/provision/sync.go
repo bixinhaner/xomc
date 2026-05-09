@@ -62,7 +62,7 @@ func NewSyncService(
 
 // StartSync initiates a full parameter value sync by enqueuing batched
 // GetParameterValues commands for the device's root object.
-func (s *SyncService) StartSync(ctx context.Context, dev *model.Device, paramPaths []string) error {
+func (s *SyncService) StartSync(ctx context.Context, dev *model.Device, paramPaths []string, sourceID string) error {
 	log, _ := s.discoveryRepo.GetByDeviceID(ctx, dev.ID)
 	if log != nil {
 		_ = s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoverySyncing, "")
@@ -84,6 +84,7 @@ func (s *SyncService) StartSync(ctx context.Context, dev *model.Device, paramPat
 			Priority:   10 + i,
 			CommandKey: fmt.Sprintf("sync-gpv-%s-%d", dev.SerialNumber, i),
 			Source:     task.TaskSourceSystem,
+			SourceID:   sourceID,
 		}); err != nil {
 			return fmt.Errorf("enqueue GPV batch %d: %w", i, err)
 		}
@@ -137,7 +138,7 @@ func (s *SyncService) HandleSyncResult(ctx context.Context, dev *model.Device,
 // enqueueGPVPrefixes enqueues GPV commands using partial path prefixes.
 // 供 sync_pathb.go 的 Path B 流程复用：把 ParamMapping 抽出的去重对象前缀
 // 分批做 GPV，CPE 自动展开实例。
-func (s *SyncService) enqueueGPVPrefixes(ctx context.Context, dev *model.Device, prefixes []string) error {
+func (s *SyncService) enqueueGPVPrefixes(ctx context.Context, dev *model.Device, prefixes []string, sourceID string) error {
 	log, _ := s.discoveryRepo.GetByDeviceID(ctx, dev.ID)
 	if log != nil {
 		_ = s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoverySyncing, "")
@@ -159,6 +160,7 @@ func (s *SyncService) enqueueGPVPrefixes(ctx context.Context, dev *model.Device,
 			Priority:   10 + i,
 			CommandKey: fmt.Sprintf("sync-gpv-%s-%d", dev.SerialNumber, i),
 			Source:     task.TaskSourceSystem,
+			SourceID:   sourceID,
 		}); err != nil {
 			return fmt.Errorf("enqueue GPV batch %d: %w", i, err)
 		}

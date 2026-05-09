@@ -46,7 +46,7 @@ func (s *SyncService) PathBEnabled(ctx context.Context, dev *model.Device) bool 
 //
 // 返回 (true, nil) 表示已切到 Path B；(false, nil) 表示无法走新栈，调用方应降级旧栈；
 // (false, err) 表示新栈选中后执行出错（不再降级，由 engine 处理）。
-func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device) (bool, error) {
+func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sourceID string) (bool, error) {
 	set, ok := s.resolveMappingSet(ctx, dev)
 	if !ok {
 		return false, nil
@@ -66,7 +66,7 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device) (bo
 		return true, nil
 	}
 
-	if err := s.enqueueGPVPrefixes(ctx, dev, prefixes); err != nil {
+	if err := s.enqueueGPVPrefixes(ctx, dev, prefixes, sourceID); err != nil {
 		return true, fmt.Errorf("enqueue path-b GPV: %w", err)
 	}
 

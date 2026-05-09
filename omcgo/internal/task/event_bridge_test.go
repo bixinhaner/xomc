@@ -66,8 +66,15 @@ func TestCompletionEventBridge_SubscribeRegistersBothSubjects(t *testing.T) {
 	require.NoError(t, bridge.Subscribe(bus))
 	assert.Contains(t, bus.queueSubs, event.SubjectTaskCompleted)
 	assert.Contains(t, bus.queueSubs, event.SubjectTaskFailed)
-	for _, g := range bus.queueGroups {
-		assert.Equal(t, "task-completion-bridge", g)
+	// 每个 subject 用独立 queue 名（C1 阶段 2 拆分），避免 NATS Durable Consumer
+	// "subject does not match consumer" 拒绝。
+	expected := map[string]string{
+		event.SubjectTaskCompleted: "task-completion-bridge-completed",
+		event.SubjectTaskFailed:    "task-completion-bridge-failed",
+	}
+	require.Equal(t, len(bus.queueSubs), len(bus.queueGroups))
+	for i, subject := range bus.queueSubs {
+		assert.Equal(t, expected[subject], bus.queueGroups[i], "queue name for %s", subject)
 	}
 }
 

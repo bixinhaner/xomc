@@ -372,6 +372,11 @@ func initMiscModules(c *Container) error {
 		if c.EventBus != nil {
 			completionRouter := task.NewCompletionRouter(logger)
 			completionRouter.Register(task.TaskSourceMML, aggregator)
+			// D2 修复：provision 创建的 device_task（GPV / Upload / SPV / Reboot）source=system，
+			// 失败时由 ProvisioningEngine 回查 source_id（=ProvisioningTask.id）联动 fail。
+			if c.miscDeps.provisionEngine != nil {
+				completionRouter.Register(task.TaskSourceSystem, c.miscDeps.provisionEngine)
+			}
 			bridge := task.NewCompletionEventBridge(logger, completionRouter, c.Deduper)
 			if err := bridge.Subscribe(c.EventBus); err != nil {
 				logger.Warn("subscribe task completion bridge", zap.Error(err))
@@ -379,6 +384,9 @@ func initMiscModules(c *Container) error {
 		} else {
 			// 单进程部署（单测/无 NATS）下退化为同进程回调
 			c.miscDeps.taskSvc.AddCompletionCallback(aggregator)
+			if c.miscDeps.provisionEngine != nil {
+				c.miscDeps.taskSvc.AddCompletionCallback(c.miscDeps.provisionEngine)
+			}
 		}
 
 		logger.Info("MML fan-out bridge enabled")

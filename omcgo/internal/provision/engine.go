@@ -266,7 +266,7 @@ func (e *ProvisioningEngine) handleTemplateProvisioning(ctx context.Context, tas
 		return e.failTask(ctx, task, fmt.Errorf("update task steps: %w", err))
 	}
 
-	if err := EnqueueSteps(ctx, deviceSN, steps, e.taskSvc); err != nil {
+	if err := EnqueueSteps(ctx, deviceSN, steps, e.taskSvc, task.ID.String()); err != nil {
 		return e.failTask(ctx, task, fmt.Errorf("enqueue steps: %w", err))
 	}
 
@@ -290,7 +290,7 @@ func (e *ProvisioningEngine) handleModelUpload(ctx context.Context, task *Provis
 		return e.failTask(ctx, task, fmt.Errorf("transition to discovering: %w", err))
 	}
 
-	_, err := e.modelUploadService.RequestModelUpload(ctx, dev)
+	_, err := e.modelUploadService.RequestModelUpload(ctx, dev, task.ID.String())
 	if err != nil {
 		return e.failTask(ctx, task, fmt.Errorf("request model upload: %w", err))
 	}
@@ -311,7 +311,7 @@ func (e *ProvisioningEngine) handleAutoSync(ctx context.Context, task *Provision
 		return e.failTask(ctx, task, fmt.Errorf("transition to syncing: %w", err))
 	}
 
-	used, err := e.syncService.StartPathBSync(ctx, dev)
+	used, err := e.syncService.StartPathBSync(ctx, dev, task.ID.String())
 	if err != nil {
 		return e.failTask(ctx, task, fmt.Errorf("start path-b sync: %w", err))
 	}
@@ -387,6 +387,57 @@ func (e *ProvisioningEngine) transitionTask(ctx context.Context, task *Provision
 	}
 	task.Status = target
 	return e.taskRepo.UpdateStatus(ctx, task.ID, target, "")
+}
+
+// OnTaskCompleted 实现 task.TaskCompletionCallback 接口。
+// CompletionRouter 在 NATS 投递 task.completed/task.failed（system source）时调用。
+//
+// 联动语义（D2 修复）：
+//   - device_task.SourceID 携带的是 ProvisioningTask.ID（由 sync.go / model_upload.go
+//     在 CreateTask 时设置）。本回调用 SourceID 反查 ProvisioningTask 并按 device_task
+//     的终态推动它前进。
+//   - **failed**：立即把 ProvisioningTask 置 failed（任意一个 GPV/Upload/SPV 子任务失败
+//     都视为整批 provisioning 失败，例如 BAICELLS 9005 Fault）。
+//   - **completed**：当前不在此回调内推进 ProvisioningTask（多个子任务/响应分摊推进
+//     由 HandleRPCResult 和 handleGPVResponse 各自路径处理）；此回调只对 failed 兜底。
+func (e *ProvisioningEngine) OnTaskCompleted(ctx context.Context, t *task.Task) {
+	if t == nil || t.SourceID == "" {
+		return
+	}
+	if t.Status != task.TaskStatusFailed && t.Status != task.TaskStatusExpired {
+		return
+	}
+	ptID, err := uuid.Parse(t.SourceID)
+	if err != nil {
+		e.logger.Warn("OnTaskCompleted: source_id is not a valid uuid, skipping",
+			zap.String("task_id", t.ID),
+			zap.String("source_id", t.SourceID),
+			zap.Error(err))
+		return
+	}
+	pt, err := e.taskRepo.GetByID(ctx, ptID)
+	if err != nil {
+		e.logger.Warn("OnTaskCompleted: lookup provisioning task failed",
+			zap.String("provisioning_task_id", ptID.String()),
+			zap.Error(err))
+		return
+	}
+	if pt == nil || IsTerminal(pt.Status) {
+		return
+	}
+	cause := fmt.Errorf("device task %s (%s) failed: code=%d %s",
+		t.ID, t.Method, t.ErrorCode, t.ErrorMessage)
+	if failErr := e.failTask(ctx, pt, cause); failErr != nil {
+		e.logger.Error("OnTaskCompleted: failTask error",
+			zap.String("provisioning_task_id", ptID.String()),
+			zap.Error(failErr))
+		return
+	}
+	e.logger.Info("provisioning task failed by device task callback",
+		zap.String("provisioning_task_id", ptID.String()),
+		zap.String("device_task_id", t.ID),
+		zap.String("device_sn", t.DeviceSN),
+		zap.Int("error_code", t.ErrorCode))
 }
 
 func (e *ProvisioningEngine) failTask(ctx context.Context, task *ProvisioningTask, cause error) error {
@@ -500,7 +551,12 @@ func (e *ProvisioningEngine) handleDataModelFileReceived(ctx context.Context, ev
 
 	// After discovered mappings written, auto-sync via Path B if enabled.
 	if e.syncService != nil && e.config.AutoSync.Enabled {
-		if used, syncErr := e.syncService.StartPathBSync(ctx, dev); syncErr != nil {
+		// 反查 active provisioning_task 作为 sourceID，让 task.failed 能联动它（D2）
+		var sourceID string
+		if pt, _ := e.taskRepo.GetByDeviceID(ctx, dev.ID); pt != nil {
+			sourceID = pt.ID.String()
+		}
+		if used, syncErr := e.syncService.StartPathBSync(ctx, dev, sourceID); syncErr != nil {
 			e.logger.Warn("path-b auto-sync after model upload failed",
 				zap.Error(syncErr),
 				zap.String("device_sn", payload.DeviceSN),

@@ -76,7 +76,9 @@ func BuildProvisioningSteps(tmpl *template.ConfigTemplate) ([]ProvisioningStep, 
 }
 
 // EnqueueSteps pushes provisioning steps into the unified device task queue.
-func EnqueueSteps(ctx context.Context, deviceSN string, steps []ProvisioningStep, taskSvc task.Enqueuer) error {
+// sourceID 透传 ProvisioningTask.ID，让 CompletionRouter 在 task.failed/completed
+// 时按 source_id 反查并联动该 ProvisioningTask（D2 修复）。
+func EnqueueSteps(ctx context.Context, deviceSN string, steps []ProvisioningStep, taskSvc task.Enqueuer, sourceID string) error {
 	for _, step := range steps {
 		if _, err := taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
 			DeviceSN:   deviceSN,
@@ -85,6 +87,7 @@ func EnqueueSteps(ctx context.Context, deviceSN string, steps []ProvisioningStep
 			Priority:   step.Order,
 			CommandKey: fmt.Sprintf("provision-%s-%d", step.Method, step.Order),
 			Source:     task.TaskSourceSystem,
+			SourceID:   sourceID,
 		}); err != nil {
 			return fmt.Errorf("enqueue step %d (%s) for %s: %w", step.Order, step.Method, deviceSN, err)
 		}
