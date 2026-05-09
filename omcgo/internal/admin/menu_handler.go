@@ -176,6 +176,11 @@ func (h *Handler) SetRoleMenus(c *gin.Context) {
 }
 
 // GetRoleMenus handles GET /roles/:id/menus.
+//
+// 返回角色当前绑定的菜单 ID 列表（仅 UUID 字符串，不返回完整 Menu 对象）。
+// 响应契约：{ menu_ids: [string, ...] } —— 与前端 fetchRoleMenuIds + RolePermission
+// 编辑页 setCheckedPermissionKeys 严格对齐。历史上曾返回 {data:[Menu, ...]} 与前端
+// 契约不符，导致角色编辑保存后重开菜单权限树全部空回显。
 func (h *Handler) GetRoleMenus(c *gin.Context) {
 	roleID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -183,12 +188,17 @@ func (h *Handler) GetRoleMenus(c *gin.Context) {
 		return
 	}
 
-	menus, err := h.service.GetRoleMenus(c.Request.Context(), roleID)
+	menuIDs, err := h.service.GetRoleMenuIDs(c.Request.Context(), roleID)
 	if err != nil {
 		status := commonerrors.HTTPStatusFromError(err)
 		commonerrors.AbortWithError(c, status, err)
 		return
 	}
 
-	response.OK(c, gin.H{"data": menus})
+	// 显式空切片避免 JSON marshal 出 null（前端 `data?.menu_ids ?? []` 兜底也行，
+	// 但显式空数组语义更清晰）。
+	if menuIDs == nil {
+		menuIDs = []uuid.UUID{}
+	}
+	response.OK(c, gin.H{"menu_ids": menuIDs})
 }
