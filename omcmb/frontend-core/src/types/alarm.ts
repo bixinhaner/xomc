@@ -91,6 +91,7 @@ export interface AlarmFilter {
   keyword?: string;                       // 关键字搜索
   timeRange?: [string, string];           // 故障时间范围
   searchType?: 'Fuzzy' | 'Precise';       // 搜索方式：模糊/精确
+  isUnknown?: 'true' | 'false';           // 未识别告警过滤：true 仅未识别 / false 仅已识别 / 不传 全部
 }
 
 export interface AlarmCount {

@@ -363,6 +363,10 @@ function buildAlarmQuery(
     query.end_time = filter.timeRange[1];
   }
   if (filter.keyword) query.keyword = filter.keyword;
+  // 未识别告警过滤（设计 §3.3 治理闭环）：'true'/'false' 字符串透传给后端 form:"is_unknown"
+  if (filter.isUnknown !== undefined && filter.isUnknown !== '') {
+    query.is_unknown = filter.isUnknown;
+  }
 
   return query;
 }

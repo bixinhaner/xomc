@@ -59,6 +59,7 @@ type alarmQuery struct {
 	EndTime    string `form:"end_time"`
 	AlarmType  string `form:"alarm_type"`
 	IsRead     string `form:"is_read"`
+	IsUnknown  string `form:"is_unknown"`
 	DeviceName string `form:"device_name"`
 	Keyword    string `form:"keyword"`
 	model.ListRequest
@@ -103,6 +104,10 @@ func (h *Handler) ListActive(c *gin.Context) {
 	if q.IsRead != "" {
 		read := q.IsRead == "true"
 		filter.IsRead = &read
+	}
+	if q.IsUnknown != "" {
+		unk := q.IsUnknown == "true"
+		filter.IsUnknown = &unk
 	}
 	if q.DeviceName != "" {
 		filter.DeviceName = &q.DeviceName

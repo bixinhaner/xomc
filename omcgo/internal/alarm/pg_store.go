@@ -347,6 +347,9 @@ func applyActiveFilters(qb squirrel.SelectBuilder, f AlarmFilter) squirrel.Selec
 	if f.IsRead != nil {
 		qb = qb.Where(squirrel.Eq{"is_read": *f.IsRead})
 	}
+	if f.IsUnknown != nil {
+		qb = qb.Where(squirrel.Eq{"is_unknown": *f.IsUnknown})
+	}
 	if f.DeviceName != nil {
 		qb = qb.Where(squirrel.Like{"device_name": "%" + *f.DeviceName + "%"})
 	}

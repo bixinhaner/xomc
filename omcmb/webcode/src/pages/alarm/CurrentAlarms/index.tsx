@@ -170,6 +170,17 @@ export default function CurrentAlarms() {
         { label: t('alarm.dealState.confirmedUncleared'), value: '1' },
       ],
     },
+    {
+      // 未识别告警过滤：识别状态 = identifier 是否在告警库中存在（设计 §3.3 治理闭环）
+      name: 'isUnknown',
+      label: t('alarm.recognizeStatus', { defaultMessage: '识别状态' }),
+      type: 'select',
+      options: [
+        { label: t('common.all'), value: '' },
+        { label: t('alarm.recognizeStatus.unknown', { defaultMessage: '仅未识别' }), value: 'true' },
+        { label: t('alarm.recognizeStatus.known', { defaultMessage: '仅已识别' }), value: 'false' },
+      ],
+    },
   ], [t]);
 
   const queryParams = useMemo(
@@ -232,6 +243,7 @@ export default function CurrentAlarms() {
       neType: values.neType as string,
       unread: values.unread as '0' | '1',
       dealState: values.dealState as AlarmFilter['dealState'],
+      isUnknown: values.isUnknown as AlarmFilter['isUnknown'],
       keyword: values.keyword as string,
       timeRange: values.timeRange as [string, string] | undefined,
     });
