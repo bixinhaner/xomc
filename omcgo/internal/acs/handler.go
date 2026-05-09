@@ -10,6 +10,8 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1580,35 +1582,47 @@ func (h *Handler) createPMUploadTask(r *http.Request, deviceSN string) *rpcTaskT
 
 // =====================================================================// 测试功能结束
 // =====================================================================
-// detectSOAPFault 检查 SOAP 响应中是否包含 Fault
-// 返回: (isFault, faultCode, faultString)
+// faultEnvRegex matches the SOAP <Fault> element regardless of namespace
+// prefix (soap-env / SOAP-ENV / soapenv / env / s / cwmp / none) and case.
+// Examples that must match: <Fault>, <soap-env:Fault>, <SOAP-ENV:Fault>.
+var faultEnvRegex = regexp.MustCompile(`(?i)<(?:[a-z][\w-]*:)?fault[ >]`)
+
+// cwmpFaultCodeRegex / cwmpFaultStringRegex extract the inner CWMP-level
+// FaultCode / FaultString carried under <detail><cwmp:Fault>. CWMP spec uses
+// CamelCase tag names, while SOAP-level <faultcode>/<faultstring> are
+// lowercase; matching case-sensitively keeps the two layers distinct.
+var (
+	cwmpFaultCodeRegex   = regexp.MustCompile(`(?s)<(?:[a-zA-Z][\w-]*:)?FaultCode>\s*(\d+)\s*</(?:[a-zA-Z][\w-]*:)?FaultCode>`)
+	cwmpFaultStringRegex = regexp.MustCompile(`(?s)<(?:[a-zA-Z][\w-]*:)?FaultString>([^<]*)</(?:[a-zA-Z][\w-]*:)?FaultString>`)
+	soapFaultStringRegex = regexp.MustCompile(`(?s)<faultstring>([^<]*)</faultstring>`)
+	soapFaultCodeRegex   = regexp.MustCompile(`(?s)<faultcode>([^<]*)</faultcode>`)
+)
+
+// detectSOAPFault checks whether a SOAP envelope carries a CPE-side Fault and,
+// if so, returns the CWMP-level numeric FaultCode plus a descriptive string.
+// Falls back to the outer SOAP <faultstring> when CWMP-level fields are absent.
 func detectSOAPFault(body []byte) (bool, int, string) {
-	// 简单检查 XML 中是否包含 Fault 元素
-	bodyStr := string(body)
-	if strings.Contains(bodyStr, "<Fault>") || strings.Contains(bodyStr, "<soap:Fault>") || strings.Contains(bodyStr, "<SOAP-ENV:Fault>") {
-		// 提取 faultcode 和 faultstring (简化处理)
-		faultCode := 0
-		faultString := "SOAP fault"
-
-		// 尝试提取 faultcode
-		if codeStart := strings.Index(bodyStr, "<faultcode>"); codeStart != -1 {
-			codeStart += len("<faultcode>")
-			if codeEnd := strings.Index(bodyStr[codeStart:], "</faultcode>"); codeEnd != -1 {
-				faultString = strings.TrimSpace(bodyStr[codeStart : codeStart+codeEnd])
-			}
-		}
-
-		// 尝试提取 faultstring
-		if strStart := strings.Index(bodyStr, "<faultstring>"); strStart != -1 {
-			strStart += len("<faultstring>")
-			if strEnd := strings.Index(bodyStr[strStart:], "</faultstring>"); strEnd != -1 {
-				faultString = strings.TrimSpace(bodyStr[strStart : strStart+strEnd])
-			}
-		}
-
-		return true, faultCode, faultString
+	if !faultEnvRegex.Match(body) {
+		return false, 0, ""
 	}
-	return false, 0, ""
+
+	faultCode := 0
+	faultString := "SOAP fault"
+
+	if m := cwmpFaultCodeRegex.FindSubmatch(body); m != nil {
+		if n, err := strconv.Atoi(strings.TrimSpace(string(m[1]))); err == nil {
+			faultCode = n
+		}
+	}
+	if m := cwmpFaultStringRegex.FindSubmatch(body); m != nil {
+		faultString = strings.TrimSpace(string(m[1]))
+	} else if m := soapFaultStringRegex.FindSubmatch(body); m != nil {
+		faultString = strings.TrimSpace(string(m[1]))
+	} else if m := soapFaultCodeRegex.FindSubmatch(body); m != nil {
+		faultString = strings.TrimSpace(string(m[1]))
+	}
+
+	return true, faultCode, faultString
 }
 
 // isLocalhost 检查 URL 是否包含 localhost 或 127.0.0.1

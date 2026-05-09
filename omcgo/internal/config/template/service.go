@@ -2,8 +2,10 @@ package template
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"go.uber.org/zap"
 )
@@ -32,6 +34,10 @@ func (s *ConfigTemplateService) Match(ctx context.Context, device *model.Device)
 
 	t, err := s.repo.FindBestMatch(ctx, device.Carrier, device.Technology, device.ProductClass, TemplateProvisioning)
 	if err != nil {
+		// No template available for this device → fall through to Path B/C.
+		if errors.Is(err, commonerrors.ErrNotFound) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("match template for device %s: %w", device.SerialNumber, err)
 	}
 

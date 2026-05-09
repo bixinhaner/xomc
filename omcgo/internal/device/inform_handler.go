@@ -174,6 +174,10 @@ func (h *InformHandler) handleRebootComplete(ctx context.Context, evt event.Even
 			return regErr
 		}
 		device = registered
+		// First-time registration via reboot_complete path is equivalent to bootstrap;
+		// publish device.registered so ProvisioningEngine can route productClass and
+		// kick off Path B/C (auto-sync / model upload).
+		h.service.PublishDeviceRegistered(ctx, device)
 	} else {
 		updated, updErr := h.service.UpdateFromInform(ctx, inform)
 		if updErr != nil {
