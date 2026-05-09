@@ -2184,6 +2184,25 @@ const messages: Record<string, string> = {
   'license.logs.licenseIdPlaceholder':      'Enter license UUID',
   'license.logs.searchPlaceholder':         'Search in details summary',
 
+  // T-0100-P2 LicenseList Summary cards + detail drawer 4 Tabs
+  'license.summary.activeCount':            'Active Licenses',
+  'license.summary.totalCapacityUsage':     'Active / Total',
+  'license.summary.expiringSoon':           'Expiring in 30 days',
+  'license.summary.enforcementHits7d':      'Enforcement Hits (7d)',
+  'license.summary.maxDevices':             'Max Devices',
+  'license.summary.usedDevices':            'Used Devices',
+  'license.detail.tab.basic':               'Basic',
+  'license.detail.tab.capacity':            'Capacity',
+  'license.detail.tab.features':            'Features',
+  'license.detail.tab.audit':               'Audit',
+  'license.detail.usageRatio':              'Usage',
+  'license.detail.daysRemaining':           'Days Until Expiry',
+  'license.detail.daysLeft':                'days left',
+  'license.detail.daysAgo':                 'days ago',
+  'license.detail.noFeatures':              'No features enabled',
+  'license.detail.noAudit':                 'No audit records',
+  'license.detail.viewFullAudit':           'View full audit',
+
   // -------------------------------------------------------------------------
   // MR module
   // -------------------------------------------------------------------------

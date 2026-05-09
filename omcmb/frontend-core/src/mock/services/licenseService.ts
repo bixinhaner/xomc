@@ -48,7 +48,7 @@ export const licenseService = {
     return newItem;
   },
 
-  async getSummary(): Promise<{ total: number; active: number; expired: number; pending: number; expiringSoon: number }> {
+  async getSummary(): Promise<{ total: number; active: number; expired: number; pending: number; expiringSoon: number; enforcementHits7d: number }> {
     await delay(80, 150);
     const now = new Date().toISOString();
     const thirtyDaysLater = new Date(Date.now() + 30 * 86400000).toISOString();
@@ -60,6 +60,8 @@ export const licenseService = {
       expiringSoon: licenses.filter(
         (l) => l.status === 'active' && l.expiryDate && l.expiryDate > now && l.expiryDate <= thirtyDaysLater
       ).length,
+      // mock 没法直接计 enforcement 命中，固定 0；真实环境由后端 /licenses/summary 填充
+      enforcementHits7d: 0,
     };
   },
 };

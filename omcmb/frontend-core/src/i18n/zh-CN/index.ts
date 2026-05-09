@@ -2191,6 +2191,25 @@ const messages: Record<string, string> = {
   'license.logs.licenseIdPlaceholder':      '请输入许可证 UUID',
   'license.logs.searchPlaceholder':         '在 details 摘要中搜索',
 
+  // T-0100-P2 LicenseList Summary 卡片 + 详情抽屉 4 Tabs
+  'license.summary.activeCount':            '激活许可证数',
+  'license.summary.totalCapacityUsage':     '激活/总数',
+  'license.summary.expiringSoon':           '30 天内过期',
+  'license.summary.enforcementHits7d':      '近 7 天 enforcement 命中',
+  'license.summary.maxDevices':             '最大设备数',
+  'license.summary.usedDevices':            '已使用设备数',
+  'license.detail.tab.basic':               '基本信息',
+  'license.detail.tab.capacity':            '容量信息',
+  'license.detail.tab.features':            '功能特性',
+  'license.detail.tab.audit':               '审计记录',
+  'license.detail.usageRatio':              '使用率',
+  'license.detail.daysRemaining':           '距过期',
+  'license.detail.daysLeft':                '天',
+  'license.detail.daysAgo':                 '天前',
+  'license.detail.noFeatures':              '该许可证未启用任何特性',
+  'license.detail.noAudit':                 '暂无审计记录',
+  'license.detail.viewFullAudit':           '查看完整审计',
+
   // -------------------------------------------------------------------------
   // MR module
   // -------------------------------------------------------------------------

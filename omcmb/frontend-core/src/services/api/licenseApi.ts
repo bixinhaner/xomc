@@ -100,6 +100,19 @@ interface BackendLicenseSummary {
   expired: number;
   pending: number;
   expiring_soon: number;
+  // T-0100-P2：近 7 天 enforcement 拒绝次数（result='denied'）
+  // 后端 logRepo 未注入或查询失败时退化为 0
+  enforcement_hits_7d?: number;
+}
+
+/** Summary 卡片用的统计快照（前端 camelCase）。 */
+export interface LicenseSummary {
+  total: number;
+  active: number;
+  expired: number;
+  pending: number;
+  expiringSoon: number;
+  enforcementHits7d: number;
 }
 
 interface BackendListResponse<T> {
@@ -172,13 +185,7 @@ export const licenseApi = {
     }
   },
 
-  async getLicenseSummary(): Promise<{
-    total: number;
-    active: number;
-    expired: number;
-    pending: number;
-    expiringSoon: number;
-  }> {
+  async getLicenseSummary(): Promise<LicenseSummary> {
     const { data } = await http.get<BackendLicenseSummary>('/licenses/summary');
     return {
       total: data.total,
@@ -186,6 +193,7 @@ export const licenseApi = {
       expired: data.expired,
       pending: data.pending,
       expiringSoon: data.expiring_soon,
+      enforcementHits7d: data.enforcement_hits_7d ?? 0,
     };
   },
 

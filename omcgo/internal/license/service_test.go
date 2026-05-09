@@ -190,6 +190,76 @@ func TestService_Summary(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, expected, result)
+	// 未注入 logRepo 时 EnforcementHits7d=0（默认值）
+	assert.Equal(t, int64(0), result.EnforcementHits7d)
+}
+
+// T-0100-P2: Summary 卡 enforcement_hits_7d 字段。
+func TestService_Summary_WithEnforcementHits(t *testing.T) {
+	repo := &mockLicenseRepo{
+		summaryFn: func(ctx context.Context) (*LicenseSummary, error) {
+			return &LicenseSummary{Total: 10, Active: 8}, nil
+		},
+	}
+	logRepo := newMemLogRepo()
+	// 喂 3 条 denied + 1 条 success（不计入）
+	licID := uuid.New()
+	w := NewLogWriter(logRepo, zap.NewNop())
+	for i := 0; i < 3; i++ {
+		w.Write(context.Background(), LicenseLogEntry{
+			LicenseID: &licID,
+			LogType:   LogTypeEnforcementCapacity,
+			Result:    LogResultDenied,
+		})
+	}
+	w.Write(context.Background(), LicenseLogEntry{
+		LicenseID: &licID,
+		LogType:   LogTypeImport,
+		Result:    LogResultSuccess,
+	})
+
+	svc := newTestService(repo)
+	svc.SetLogRepo(logRepo)
+
+	result, err := svc.Summary(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), result.EnforcementHits7d, "应只计入 denied 记录")
+	assert.Equal(t, int64(10), result.Total, "其它字段不变")
+}
+
+// LogRepo 失败时退化为 0，不阻断 Summary
+func TestService_Summary_LogRepoErrorDegradesToZero(t *testing.T) {
+	repo := &mockLicenseRepo{
+		summaryFn: func(ctx context.Context) (*LicenseSummary, error) {
+			return &LicenseSummary{Total: 5}, nil
+		},
+	}
+	logRepo := newMemLogRepo()
+	logRepo.failOn[LogTypeImport] = nil // 占位，failOn 不直接控制 CountDenialsSince
+	// memLogRepo.CountDenialsSince 不会失败；用一个手动 stub 验证 degraded 路径
+	svc := newTestService(repo)
+	svc.SetLogRepo(&failingLogRepo{})
+
+	result, err := svc.Summary(context.Background())
+	require.NoError(t, err, "Summary 主体不应受 logRepo 错误影响")
+	assert.Equal(t, int64(0), result.EnforcementHits7d, "降级为 0")
+	assert.Equal(t, int64(5), result.Total)
+}
+
+// failingLogRepo 用于测试 logRepo 错误降级路径。
+type failingLogRepo struct{}
+
+func (failingLogRepo) Create(_ context.Context, _ *LicenseLog) error {
+	return nil
+}
+func (failingLogRepo) List(_ context.Context, _ LicenseLogFilter) (*model.ListResponse[LicenseLog], error) {
+	return nil, nil
+}
+func (failingLogRepo) ListByLicense(_ context.Context, _ uuid.UUID, _ int) ([]LicenseLog, error) {
+	return nil, nil
+}
+func (failingLogRepo) CountDenialsSince(_ context.Context, _ time.Time) (int64, error) {
+	return 0, errors.New("simulated db down")
 }
 
 // --- Tests: Activate ---

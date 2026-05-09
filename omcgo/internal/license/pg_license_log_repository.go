@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
@@ -30,6 +31,11 @@ type LicenseLogRepository interface {
 	// ListByLicense 取单 license 最近 N 条日志（详情抽屉 "最近操作" 用）。
 	// limit ≤ 0 时使用默认值 10。
 	ListByLicense(ctx context.Context, licenseID uuid.UUID, limit int) ([]LicenseLog, error)
+
+	// CountDenialsSince 返回从 since 开始到现在的 enforcement 拒绝次数
+	// （result='denied'，含 enforcement_capacity / enforcement_expiry）。
+	// 用于 Summary 卡片"近 N 天 enforcement 命中"统计。
+	CountDenialsSince(ctx context.Context, since time.Time) (int64, error)
 }
 
 // licenseLogColumns 全列清单（与 migration 000073 字段一致）。
@@ -167,6 +173,36 @@ func (r *PgLicenseLogRepository) List(ctx context.Context, filter LicenseLogFilt
 	}
 
 	return model.NewListResponse(items, total, page, pageSize), nil
+}
+
+// CountDenialsSince 实现 LicenseLogRepository.CountDenialsSince。
+//
+// 等价 SQL：
+//
+//	SELECT COUNT(*) FROM license_logs
+//	WHERE result = 'denied' AND created_at >= $1
+//
+// 复合索引方向：created_at DESC 索引覆盖 since 过滤；result 字段虽无单列
+// 索引但行集小、值域只有 4 种，PG 优化器会走 created_at 索引扫描后内存过滤，
+// 在表规模 < 100w 时性能足够。表更大时再加 partial index ON (created_at)
+// WHERE result='denied'。
+func (r *PgLicenseLogRepository) CountDenialsSince(ctx context.Context, since time.Time) (int64, error) {
+	query, args, err := storage.Psql.Select("COUNT(*)").
+		From("license_logs").
+		Where(sq.And{
+			sq.Eq{"result": string(LogResultDenied)},
+			sq.GtOrEq{"created_at": since},
+		}).
+		ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build count denials SQL: %w", err)
+	}
+
+	var n int64
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count denials since %s: %w", since.Format(time.RFC3339), err)
+	}
+	return n, nil
 }
 
 // ListByLicense 实现 LicenseLogRepository.ListByLicense，取单 license 最近 N 条。

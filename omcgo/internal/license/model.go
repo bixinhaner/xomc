@@ -82,12 +82,18 @@ type Quota struct {
 }
 
 // LicenseSummary contains aggregated license statistics.
+//
+// EnforcementHits7d 是 T-0100-P2 加的字段：近 7 天 enforcement 拒绝次数
+// （license_logs WHERE result='denied' AND created_at >= now()-7d）。
+// 用于 LicenseList 顶部"近 7 天 enforcement 命中"卡片，让运维一眼看到
+// 拦截次数趋势。值不可用时（如 license_logs 表不存在）退化为 0。
 type LicenseSummary struct {
-	Total        int64 `json:"total"`
-	Active       int64 `json:"active"`
-	Expired      int64 `json:"expired"`
-	Pending      int64 `json:"pending"`
-	ExpiringSoon int64 `json:"expiring_soon"`
+	Total             int64 `json:"total"`
+	Active            int64 `json:"active"`
+	Expired           int64 `json:"expired"`
+	Pending           int64 `json:"pending"`
+	ExpiringSoon      int64 `json:"expiring_soon"`
+	EnforcementHits7d int64 `json:"enforcement_hits_7d"`
 }
 
 // LicenseFilter specifies criteria for listing licenses.

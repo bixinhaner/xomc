@@ -419,7 +419,8 @@ func initMiscModules(c *Container) error {
 	licenseEnforcer.SetLogWriter(licenseLogWriter)
 	licenseMonitor.SetLogWriter(licenseLogWriter)
 	licenseHandler.SetLogWriter(licenseLogWriter)
-	licenseHandler.SetLogRepo(licenseLogRepo) // T-0100-P1：让 GET /licenses/logs 走真实 repo
+	licenseHandler.SetLogRepo(licenseLogRepo)  // T-0100-P1：让 GET /licenses/logs 走真实 repo
+	licenseSvc.SetLogRepo(licenseLogRepo)      // T-0100-P2：让 Summary 卡 enforcement_hits_7d 走真实 count
 	c.miscDeps.licenseLogRepo = licenseLogRepo
 
 	c.miscDeps.licenseHandler = licenseHandler

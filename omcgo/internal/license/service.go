@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -15,6 +16,7 @@ import (
 // Service provides business logic for license management.
 type Service struct {
 	repo     LicenseRepository
+	logRepo  LicenseLogRepository // T-0100-P2 Summary 卡 enforcement_hits_7d 用；nil 时退化为 0
 	logger   *zap.Logger
 	enforcer Enforcer // optional; nil during bootstrap before Enforcer is wired
 }
@@ -31,6 +33,12 @@ func NewService(repo LicenseRepository, logger *zap.Logger) *Service {
 // state-mutating operations (Import / Activate / Revoke). Optional.
 func (s *Service) SetEnforcer(e Enforcer) {
 	s.enforcer = e
+}
+
+// SetLogRepo 注入 LicenseLogRepository（T-0100-P2），让 Summary 卡片能拉
+// 近 7 天 enforcement 命中数。
+func (s *Service) SetLogRepo(repo LicenseLogRepository) {
+	s.logRepo = repo
 }
 
 // invalidateEnforcerCache calls Invalidate on the Enforcer if wired.
@@ -60,8 +68,25 @@ func (s *Service) GetByID(ctx context.Context, id uuid.UUID) (*License, error) {
 }
 
 // Summary returns aggregated license statistics.
+//
+// EnforcementHits7d 在 logRepo 可用时填充近 7 天 result='denied' 计数；
+// logRepo 未注入或查询失败均退化为 0（warn 日志），不阻断 Summary 主体。
 func (s *Service) Summary(ctx context.Context) (*LicenseSummary, error) {
-	return s.repo.Summary(ctx)
+	summary, err := s.repo.Summary(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if s.logRepo != nil {
+		since := nowFunc().Add(-7 * 24 * time.Hour)
+		hits, qErr := s.logRepo.CountDenialsSince(ctx, since)
+		if qErr != nil {
+			s.logger.Warn("count enforcement denials for summary failed (degraded to 0)",
+				zap.Error(qErr))
+		} else {
+			summary.EnforcementHits7d = hits
+		}
+	}
+	return summary, nil
 }
 
 // Activate finds a license by code and sets its status to active.

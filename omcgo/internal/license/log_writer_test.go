@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -35,6 +36,10 @@ func (m *memLogRepo) Create(_ context.Context, log *LicenseLog) error {
 	defer m.mu.Unlock()
 	if err, ok := m.failOn[log.LogType]; ok {
 		return err
+	}
+	// 模拟 DB 的 `created_at DEFAULT NOW()`：调用方未设置时填当前时间
+	if log.CreatedAt.IsZero() {
+		log.CreatedAt = time.Now()
 	}
 	m.logs = append(m.logs, *log)
 	select {
@@ -100,6 +105,18 @@ func (m *memLogRepo) List(_ context.Context, filter LicenseLogFilter) (*model.Li
 		pageSize = 20
 	}
 	return model.NewListResponse(filtered, int64(len(filtered)), page, pageSize), nil
+}
+
+func (m *memLogRepo) CountDenialsSince(_ context.Context, since time.Time) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var n int64
+	for _, l := range m.logs {
+		if l.Result == LogResultDenied && !l.CreatedAt.Before(since) {
+			n++
+		}
+	}
+	return n, nil
 }
 
 func (m *memLogRepo) ListByLicense(_ context.Context, licenseID uuid.UUID, limit int) ([]LicenseLog, error) {
