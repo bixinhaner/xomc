@@ -77,17 +77,19 @@ func (e *Engine) Subscribe(eventBus event.EventBus) error {
 		handler = e.EnqueueEvent
 	}
 
-	subjects := []string{
-		event.SubjectOSSAlarmForward,
-		event.SubjectOSSPMExport,
-		event.SubjectOSSConfigSnapshot,
+	// 每个 subject 用独立 queue 名（durable consumer name），避免 NATS Durable
+	// Consumer "subject does not match consumer" 拒绝。
+	subjectQueues := map[string]string{
+		event.SubjectOSSAlarmForward:       "northbound-push-alarm",
+		event.SubjectOSSPMExport:           "northbound-push-pm",
+		event.SubjectOSSConfigSnapshot:     "northbound-push-config",
 		// 设备重启事件直接透传给订阅 "device_event" 数据类型的 OSS 目标。
 		// 运营商 OSS 若无重启事件需求，可通过 DataTypes 过滤不接收。
-		event.SubjectDeviceRebootComplete,
+		event.SubjectDeviceRebootComplete:  "northbound-push-reboot",
 	}
 
-	for _, subject := range subjects {
-		sub, err := eventBus.QueueSubscribe(subject, "northbound-push", handler)
+	for subject, queue := range subjectQueues {
+		sub, err := eventBus.QueueSubscribe(subject, queue, handler)
 		if err != nil {
 			return fmt.Errorf("subscribe to %s: %w", subject, err)
 		}

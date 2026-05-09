@@ -41,6 +41,9 @@ nats:
   url: "nats://nats:4222"
   max_reconnect: -1
   reconnect_wait: 2s
+  # 检测到 stream Retention 与代码定义不一致时自动删除重建（仅 dev/test）。
+  # 生产请保持 false，由运维手动处理 retention 变更。
+  allow_stream_rebuild: true
 
 minio:
   endpoint: "minio:9000"

@@ -140,7 +140,7 @@ func (inf *Infra) ConnectNATS(ctx context.Context, cfg appconfig.NATSConfig) err
 		return client.HealthCheck()
 	})
 
-	if err := client.EnsureStreams(ctx); err != nil {
+	if err := client.EnsureStreams(ctx, cfg.AllowStreamRebuild); err != nil {
 		inf.Logger.Warn("ensure NATS streams", zap.Error(err))
 	}
 	return nil

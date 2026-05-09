@@ -452,6 +452,10 @@ type NATSConfig struct {
 	URL           string        `mapstructure:"url"`
 	MaxReconnect  int           `mapstructure:"max_reconnect"`
 	ReconnectWait time.Duration `mapstructure:"reconnect_wait"`
+	// AllowStreamRebuild 控制 EnsureStreams 检测到现有 stream 的 Retention
+	// 与 DefaultStreams 不一致时是否自动删除重建。生产默认 false（仅 WARN，
+	// 由运维手动处理）；dev/test 可设 true，重启即按新 retention 重建。
+	AllowStreamRebuild bool `mapstructure:"allow_stream_rebuild"`
 }
 
 // MinIOConfig 配置 MinIO 对象存储连接。

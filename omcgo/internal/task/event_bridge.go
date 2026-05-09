@@ -43,19 +43,27 @@ func (b *CompletionEventBridge) Subscribe(bus event.EventBus) error {
 	if b.router == nil {
 		return fmt.Errorf("completion router is nil")
 	}
-	subs := []string{event.SubjectTaskCompleted, event.SubjectTaskFailed}
+	// 每个 subject 用独立 queue 名（durable consumer name），避免 NATS Durable
+	// Consumer "subject does not match consumer" 拒绝。
+	subs := map[string]string{
+		event.SubjectTaskCompleted: "task-completion-bridge-completed",
+		event.SubjectTaskFailed:    "task-completion-bridge-failed",
+	}
 	handler := event.EventHandler(b.handle)
 	if b.deduper != nil {
 		handler = b.deduper.Wrap("task-completion-bridge", handler)
 	}
-	for _, subject := range subs {
-		sub := subject
-		if _, err := bus.QueueSubscribe(sub, "task-completion-bridge", handler); err != nil {
-			return fmt.Errorf("subscribe %s: %w", sub, err)
+	for subject, queue := range subs {
+		if _, err := bus.QueueSubscribe(subject, queue, handler); err != nil {
+			return fmt.Errorf("subscribe %s: %w", subject, err)
 		}
 	}
+	subjects := make([]string, 0, len(subs))
+	for s := range subs {
+		subjects = append(subjects, s)
+	}
 	b.logger.Info("task completion event bridge subscribed",
-		zap.Strings("subjects", subs))
+		zap.Strings("subjects", subjects))
 	return nil
 }
 

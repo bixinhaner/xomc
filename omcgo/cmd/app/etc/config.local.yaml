@@ -41,6 +41,7 @@ nats:
   url: "nats://localhost:4222"
   max_reconnect: -1
   reconnect_wait: 2s
+  allow_stream_rebuild: true
 
 minio:
   endpoint: "localhost:9000"

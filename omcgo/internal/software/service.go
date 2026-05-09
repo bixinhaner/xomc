@@ -940,9 +940,13 @@ func (s *SoftwareService) UpdateFirmwareMetadata(ctx context.Context, fw *Firmwa
 }
 
 // Subscribe registers all event subscriptions for the software service.
+//
+// 每个 subject 用独立 queue 名（durable consumer name），避免 "subject does
+// not match consumer" 错误：NATS Durable Consumer 一旦绑定 FilterSubject，
+// 其他 subject 用同名 durable 注册会被拒绝。
 func (s *SoftwareService) Subscribe(eventBus event.EventBus) error {
 	// TransferComplete — upgrade state advancement
-	_, err := eventBus.QueueSubscribe(event.SubjectDeviceTransferComplete, "software-upgrade", func(ctx context.Context, evt event.Event) error {
+	_, err := eventBus.QueueSubscribe(event.SubjectDeviceTransferComplete, "software-upgrade-transfer", func(ctx context.Context, evt event.Event) error {
 		return s.HandleTransferComplete(ctx, evt)
 	})
 	if err != nil {
@@ -950,7 +954,7 @@ func (s *SoftwareService) Subscribe(eventBus event.EventBus) error {
 	}
 
 	// Download response — detect download failures
-	_, err = eventBus.QueueSubscribe(event.SubjectCommandDownloadResponse, "software-upgrade", func(ctx context.Context, evt event.Event) error {
+	_, err = eventBus.QueueSubscribe(event.SubjectCommandDownloadResponse, "software-upgrade-download-resp", func(ctx context.Context, evt event.Event) error {
 		return s.executor.HandleDownloadResponse(ctx, evt)
 	})
 	if err != nil {
@@ -958,7 +962,7 @@ func (s *SoftwareService) Subscribe(eventBus event.EventBus) error {
 	}
 
 	// RebootComplete — rollback completion and 4G upgrade
-	_, err = eventBus.QueueSubscribe(event.SubjectDeviceRebootComplete, "software-upgrade", func(ctx context.Context, evt event.Event) error {
+	_, err = eventBus.QueueSubscribe(event.SubjectDeviceRebootComplete, "software-upgrade-reboot", func(ctx context.Context, evt event.Event) error {
 		return s.executor.HandleRebootComplete(ctx, evt)
 	})
 	if err != nil {
@@ -966,7 +970,7 @@ func (s *SoftwareService) Subscribe(eventBus event.EventBus) error {
 	}
 
 	// 5G Upgrade Finish — 102 UPGRADE FINISH event
-	_, err = eventBus.QueueSubscribe(event.SubjectDeviceUpgradeFinish, "software-upgrade", func(ctx context.Context, evt event.Event) error {
+	_, err = eventBus.QueueSubscribe(event.SubjectDeviceUpgradeFinish, "software-upgrade-finish", func(ctx context.Context, evt event.Event) error {
 		return s.executor.HandleUpgradeFinish(ctx, evt)
 	})
 	if err != nil {
@@ -974,7 +978,7 @@ func (s *SoftwareService) Subscribe(eventBus event.EventBus) error {
 	}
 
 	// Device periodic — check for pending upgrades on reconnect
-	_, err = eventBus.QueueSubscribe(event.SubjectDevicePeriodic, "software-upgrade", func(ctx context.Context, evt event.Event) error {
+	_, err = eventBus.QueueSubscribe(event.SubjectDevicePeriodic, "software-upgrade-periodic", func(ctx context.Context, evt event.Event) error {
 		return s.executor.HandleDeviceOnline(ctx, evt)
 	})
 	if err != nil {

@@ -41,6 +41,7 @@ nats:
   url: "nats://nats:4222"
   max_reconnect: -1
   reconnect_wait: 2s
+  allow_stream_rebuild: true
 
 minio:
   endpoint: "minio:9000"
