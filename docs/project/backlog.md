@@ -269,6 +269,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0079 | backup_task → file_path 链路回填（EventBus pub-sub + filename embed taskID8 + DB-layer CAS first-write-wins + restore_by_task_id 新 endpoint）| feat | F06/backup | P2 | done | Claude | M | T-0072 ✅, T-0007 ✅ | R-102 / `prd/T-0079-backup-task-filepath-linkage.md` | sprint-07 | 2026-04-29 |
 | T-0080 | migration 000038 重复 hotfix（rename `000038_upgrade_tasks_firmware_id_nullable.sql` → `000049_*.sql` 让 goose 可解析；pre-existing 历史遗留，T-0072 review-agent 发现）| fix | infra/migration | P0 | done | Claude | S | — | CLAUDE.md §5.5 / T-0072 review finding | sprint-07 | 2026-04-29 |
 | T-0027 | 拓扑自动分组规则引擎激活（三路径全闭环：手工 ApplyRule + cron @hourly + device.registered EventBus；A4 SQL 守护；6 metric + 7 log key + FE 来源列；R-104 关闭）| feat | F06/topology | P1 | done | Claude | M | — | R-104 关闭 / `prd/F06-topology-auto-grouping.md` / `docs/review-report/20260506/verify-T-0027.md` | sprint-09 | 2026-05-06 |
+| T-0100-P0 | license_logs 表迁移 + LogWriter + 5 处写入点接入（handler import/activate/revoke + enforcer EnforceCapacity/Expiry + monitor capacity/expiry/auto_expire）— umbrella T-0100 子任务（详 §4.2） | feat | F06/license | P1 | done | Claude | M | T-0015 ✅ | R-109 关闭 / `prd/F06-license.md` §6.2 §9.3 | wave-3-finishing | 2026-05-09 |
 
 **说明**：
 - T-0009 是外部凭据申请，不编码但走流水线（作为前置项，保证 T-0014 不被卡）。
@@ -297,6 +298,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0090 | MML 控制台公/私命令新增页面 UX 整改 — ① 操作类型差异化（MOD→修改值入口）② 删 3 字段（参数配置/所属分类/适用产品类型）③ 命令编码 input→textarea ④ textarea 必须自定义、不允许选已有命令 ⑤ 私有命令页面参考公有页面（功能一致）⑥ 私有命令按当前管理员所属分组过滤（RBAC）⑦ 公有命令不按管理员过滤 | feat | frontend+F06/mml+admin | P2 | XL | — (T-0094 已 rejected as misdiagnosis 2026-04-30) | R-NEW（productTypes 删除破坏性 + RBAC 私有命令分组隔离 双重风险） | @chenbo01 提需求；**2026-04-30 B 方案二次扩展**：原 ①②③ 保留 + 新加 ④（textarea 自定义限制）+ ⑤⑥⑦（私有/公有命令 RBAC 差异化）；用户重叠检测拍板 B（不覆盖原版而是扩展）；**Est L → XL，强制 S2 拆**；ULTRATHINK 三层核查（Go struct + migrations + FE 表单）+ B 扩展后子项风险阶梯横跨 4 档：①③④⑤ 纯 FE 低风险（操作类型差异化 + textarea + 自定义限制 + 私有页面复用公有 UI）；② 中耦合（参数配置 UI section 删后端接空 map 兼容；categoryGroup 清理由 T-0094 决策）；②④ productTypes 删 = 破坏性 migration（drop column + 历史数据评估 + Down 段回滚预案）；⑥ RBAC = backend 改动（mml_custom_command 查询按当前 admin 的 role_device_groups 过滤 private 命令；query 重写 + service 层 admin context 注入）；S2 强建议**拆 4 段**：T-0090a（S, FE-only ① ③ ④ + ② UI section 删除）+ T-0090b（M, ref + migration drop productTypes）+ T-0090c（M-L, backend RBAC private 查询过滤 + admin context 注入）+ T-0090d（S, FE 私有命令页面创建 复用公有组件）；Domain 加 admin（⑥ 涉 RBAC）；候选 Sprint=GA 规划期 |
 | T-0096 | MML script 页面「更新」弹窗取消产品类型字段（应与 /mml/console「保存脚本」弹窗一致） | ref | frontend+F06/mml | P3 | S | T-0090 | R-NEW（共享 T-0090 productTypes 删除风险） | Triage 2026-04-30 走 B 方案 standalone（不 fold 进 T-0090a — 因 page scope 不同 script vs console + T-0090 体量已 L 不宜再扩 + 独立 PR 更清晰）；语义**反向** deps T-0090："与 console 一致"意味着 console 决定 productTypes 去留 → script 跟随（若 T-0090 决定保留 productTypes，T-0096 也保留；命名"取消"但执行随 T-0090）；建议与 T-0090a 同 Sprint 紧随做省 cross-PR 协调 |
 | T-0097 | MML console「保存脚本」弹窗确认按钮 API 结果反馈（成功/失败提示） | bug | frontend+F06/mml | P2 | S | — | R-NEW（toast util 场景失效面） | Triage 2026-04-30 走 C 方案 triaged + **pre-pick reproduce 待办**：静态核查 `ScriptTaskDrawer.tsx:232` toast.success + `:242` toast.error 已在 → bug 真实性存疑；pick 前需 user 提供 reproduce 步骤；4 候选成因优先级（高→低）：① mock 模式（useMock=true 时 mockService 不抛错 → toast.error 永不触发，最可能解释"看不到任何提示"）② axios 拦截器吞 401/403 错误码 ③ 用户混淆"保存脚本"指其他按钮 ④ toast util 场景失效（line 190 注释提示 to-do-list #2 曾遇）；建议 user 实测：先在 dev real-API 模式（VITE_USE_MOCK=false）尝试触发失败 + 看浏览器 console 是否报错 |
+| T-0100 | F06 license 治理层（umbrella，5 子任务详见 §4.2） | feat | F06/license+frontend+admin | P1 | triaged | Claude | XL | T-0015 ✅ | R-109 / `prd/F06-license.md` | wave-3-finishing | 2026-05-09 |
 | T-0098 | 参数模型 / KPI 指标库 / 告警库 数据字典平台化 — **2026-05-08 36/36 全收官**（P1 6 + P2 11 + P3 5 + P4 8 + P5 6）；旧 datamodel 包整体下线，新栈 ParamModel + ProductRegistry + Translator + IntersectService + dictloader（4 个 Registry：product / parammodel / indicator / alarm-definition）就位；47 REST 端点（products 17 + param-models 19 + indicators 21 + alarm-definitions 9 重叠去重）+ 5 治理 UI 页（products / param-model / kpi-library / alarm-library / orphan-devices）+ super_admin 守卫 + R-T0098-01..12 风险全闭环 | feat | F02+F03+F04 | P2 | done | Claude | XL | — | `docs/design/参数-KPI-告警-整合设计方案.md` + `docs/project/参数-KPI-告警-整合-实施计划.md` + `AI承诺对峙清单.md` W3 | wave-3 | 2026-05-08 |
 
 ### 4.1 T-0098 拆分子任务
@@ -307,15 +309,30 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 >
 > **2026-05-07 前戏完成升格**：P1-01..P1-06 6 条已 **State→planned / Sprint=wave-3 / Owner=Claude**；wave-batched 模式（dev-pipeline §C.1）准入开发，Skip S0/S1；可直接 `/dev-pipeline pick T-0098-P1-01` 开车。**commit 形态**：6 commit + 单 PR（每 commit footer 各挂 `Backlog: T-0098-P1-0N`）；P2-01..P5-06 30 条仍 triaged 等下次 sprint planning。
 
+### 4.2 T-0100 子任务（F06 license 治理层）
+
+> 5 子任务覆盖 PRD `prd/F06-license.md` §14.2 五阶段实施路线图。**P0-P3 严格顺序依赖**（P0 是关键路径阻塞项）；P4 各项独立可并行。
+>
+> **2026-05-09 自我 triage**：T-0100-P0 已升 **planned / wave-3-finishing / Owner=Claude** 立即开车（P0 仅写日志基建，不依赖 Q1-Q4 决议）；P1-P4 4 条仍 triaged，等 T-0100-P0 落地 + Q1-Q4 决议后下次 sprint planning 决策准入。
+
+| ID | Title | Type | Domain | Prio | State | Owner | Est | Deps | Risk/PRD | Sprint | Updated |
+|----|-------|------|--------|------|-------|-------|-----|------|----------|--------|---------|
+| T-0100-P0 | license_logs 表迁移 + LogWriter 服务 + 5 处写入点接入（handler 3 + enforcer 2 + monitor 3） | feat | F06/license | P1 | done | Claude | M (~2d) | T-0015 ✅ | R-109 关闭 / `prd/F06-license.md` §6.2 §9.3 | wave-3-finishing | 2026-05-09 |
+| T-0100-P1 | LicenseLogs 主页全量 — 后端 GET `/licenses/logs` + 过滤分页；前端接 API + i18n（去 mock） | feat | F06/license+frontend | P1 | triaged | — | M (~2d) | T-0100-P0 | `prd/F06-license.md` §5.4 §11.2 V11 | — | 2026-05-09 |
+| T-0100-P2 | LicenseList 详情抽屉 + Summary 卡片（后端 GET `/licenses/:id/logs` + Summary 增强；前端抽屉 + 进度条 + 跳转 Logs） | feat | F06/license+frontend | P1 | triaged | — | M (~2d) | T-0100-P1 | `prd/F06-license.md` §5.2 §11.2 V9 V14 | — | 2026-05-09 |
+| T-0100-P3 | LicenseOperations 完整 4 Tab + 操作历史接 API + 导入校验链 + `system:license:operate` 权限点 seed | feat | F06/license+frontend+admin | P1 | triaged | — | L (~3d) | T-0100-P2 + Q1/Q3/Q4 决议 | `prd/F06-license.md` §5.3 §8 §11.2 V10 V12 | — | 2026-05-09 |
+| T-0100-P4 | 导出 PDF/CSV + 6 月归档 cron + 数字签名（GA 前必须；P4-A 导出/B 归档/C 签名独立可并行） | feat | F06/license+frontend+ops | P2 | triaged | — | L (~3-4d) | T-0100-P3 + Q4 决议 | `prd/F06-license.md` §5.3.4 §5.4.5 §11.2 V13 | — | 2026-05-09 |
+
 ---
 
 ## 5. Proposed — 待 Triage
 
 | ID | Title | Proposed By | Created | Notes |
 |----|-------|-------------|---------|-------|
-| T-0100 | F06 license 治理层 — 管理 UI + 审计日志 + 合规归档（接 T-0015 执行层落地） | dev (Claude) | 2026-05-09 | **PRD**：[`docs/project/prd/F06-license.md`](prd/F06-license.md)（v1.0，由 F06-license-enforcement.md 已 done 与 F06-license-management.md 合并而来；后者已删除，前者保留作执行层落地依据）。**背景**：T-0015 落地的 enforcement 引擎（`internal/license/{enforcer,monitor}.go`）已自动按容量/过期拦截 + 阈值告警 cron，但治理层缺位：(1) `license_logs` 表不存在 → enforcement 拒绝事件无审计证据，违反等保 2.0 三级 8.1.4.7；(2) 三页面（`/license/list` `/license/operations` `/license/logs`）骨架在但日志数据全 mock；(3) `system:license:operate` 独立权限点未 seed → 任何 admin/operator 都能 Import/Activate/Revoke。**5 阶段实施路线**（PRD §14.2，建议 S2 拆 5 子任务）：P0 license_logs 表迁移 + LogWriter（2d）→ P1 LogsLogs 主页（2d）→ P2 List 详情抽屉 + Summary 卡片（2d）→ P3 Operations 4 Tab + 权限点 seed（3d）→ P4 导出 + 归档 + 签名（3-4d）。P0-P3 严格顺序；P4 各项独立可并行。**总工作量** 12-13 工作日，**Est=XL，强制 S2 拆**。**4 个待决议**（PRD §16，S2 立项前必须 PM 拍板）：Q1 激活时自动 revoke 同维度旧 active 还是弹确认（倾向 B 弹确认）/ Q2 无 active license 是否拦截（倾向 B 放行+critical 告警，与 V7 一致）/ Q3 是否新增 license-admin/auditor 内置角色（倾向 C 留给 RolePermission 自定义）/ Q4 数字签名 MVP 是否必须（倾向 B 放过+warning，GA 前补强）。**依赖**：T-0015 ✅ 已 done；migration 000043 ✅ 已落地；前端三页面 ✅ 骨架就位。**风险**：R-105 待登记（合规审计缺口，P0 落地后 Closed）。**验收**：PRD §11.2 V9-V14 6 条 GWT；e2e 加 ≥ 4 claim（导入→激活、权限隔离、Logs 过滤 enforcement、详情抽屉跳转 Logs）；test 覆盖率 ≥ 70%。 |
 | T-0099 | F08 北向 push engine 接入 active server（关闭"切换 / 编辑即生效"环） | dev (Claude) | 2026-05-08 | **背景**：commit 4742b792 / 84cad900 落地 northbound_servers 主备配置 + 切换/编辑 API + UI；DB 字段就位但 push engine（`internal/northbound/push/engine.go`）仍读 `config.dev.yaml` 静态 PushTargets 作为推送目标。**目标**：让 push engine 启动期 + 切换/编辑后从 `northbound_servers WHERE is_active=TRUE` 读取目标，关闭"前端改 DB 但实际推送不变"的环。**实施**：(a) push engine 加 `RefreshActiveTarget(ctx)` 方法读 NorthboundServerRepo；(b) ServerService.SetActive / Update 成功后通过 EventBus 发 `northbound.server.changed` 事件，push engine 订阅 reload；(c) 启动期 dictloader 后调用一次 RefreshActiveTarget 兜底。**依赖**：T-0098 已 done；northbound_servers 表已就位。**验收**：切换主备 → ListTargets() 立即反映；编辑 host/port → 下次推送命中新目标；e2e 加"切换后推送命中新 host"用例。**预估**：2-3 工作日。 |
-| — | （新想法在 T-0100 上方追加） | — | — | 下周一 Triage 会议判决 |
+| — | （新想法在 T-0099 上方追加） | — | — | 下周一 Triage 会议判决 |
+
+> **2026-05-09 自我 triage（用户授权）**：T-0100 由 Proposed 直接进 §4 Triaged + 拆 5 子任务（§4.2）；T-0100-P0 进 §3 Active Planned 立即开车（P0 仅写日志基建，不依赖 Q1-Q4 决议）。R-109 已登记 risk-register.md。
 
 ---
 
@@ -326,6 +343,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 
 | ID | Title | Domain | Closed | 一句话摘要 |
 |----|-------|--------|--------|----------|
+| **T-0100-P0** | license_logs 表 + LogWriter 接入 5 处写入点 | F06/license | 2026-05-09 | migration 000073 + 9 种 log_type CHECK + 4 索引；license_log_model.go + pg_license_log_repository.go + log_writer.go（NoopLogWriter + pgLogWriter）；handler 3 处（Import/Activate/Revoke 成功+失败双路径）+ enforcer 2 处（EnforceCapacity/Expiry 拒绝事件）+ monitor 3 处（auto_expire/expiry_alert/capacity_alert）全接入；DI modules.go SetLogWriter；7 个 unit test（all log_types/results、system 操作、nil license_id、repo 失败非阻断、details marshal 失败降级、empty details 规范化、并发 50 写）全过；R-109（合规审计缺口）关闭 |
 | **T-0098** | 数据字典平台化（umbrella，**36/36 全收官**） | F02+F03+F04 | 2026-05-08 | **历时 W3 wave 实现收敛阶段**；旧 datamodel 包整体下线 + 新 ParamModel + ProductRegistry + Translator + IntersectService + 4 个 dictloader Registry 就位；47 REST 端点 + 5 治理 UI + super_admin 守卫；R-T0098-01..12 全闭环 |
 | **T-0098-P5-06** | DROP alarm_libraries / alarm_library_i18n + 旧告警库代码下线 | F04 | 2026-05-08 | 迁移 000062 + 删 5 alarm 内部 .go + alarm/helpers.go 抽 strPtr + provider 接线 + seed/000028 占位 + 前端 alarmApi 删 4 端点 + AlarmSupportLibrary 整页删；R-T0098-03 闭环 |
 | **T-0098-P5-05** | CLAUDE.md + omcgo/CLAUDE.md 模块清单同步 | process | 2026-05-08 | 根 CLAUDE.md §3/§6/§16.4 + omcgo/CLAUDE.md §1/§4/§5.2/§5.3/§6/§8 全更新；§5.3「数据模型规范」整章重写为「参数模型字典规范」；commit scope 加 parammodel+product 删 datamodel |

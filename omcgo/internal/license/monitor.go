@@ -74,10 +74,11 @@ var ExpiryWindowsDays = []struct {
 
 // Monitor runs the periodic expiry+capacity checks.
 type Monitor struct {
-	repo    LicenseRepository
-	sink    AlertSink
-	metrics *EnforcementMetrics
-	logger  *zap.Logger
+	repo      LicenseRepository
+	sink      AlertSink
+	metrics   *EnforcementMetrics
+	logger    *zap.Logger
+	logWriter LogWriter // T-0100-P0：cron 触发的告警 / 自动过期审计
 
 	cron   *cron.Cron
 	cancel context.CancelFunc
@@ -90,11 +91,21 @@ func NewMonitor(repo LicenseRepository, sink AlertSink, metrics *EnforcementMetr
 		sink = NoopAlertSink{}
 	}
 	return &Monitor{
-		repo:    repo,
-		sink:    sink,
-		metrics: metrics,
-		logger:  logger.Named("license-monitor"),
+		repo:      repo,
+		sink:      sink,
+		metrics:   metrics,
+		logger:    logger.Named("license-monitor"),
+		logWriter: NoopLogWriter{}, // 默认 noop；DI 通过 SetLogWriter 注入真实实现
 	}
+}
+
+// SetLogWriter 注入真实的 LogWriter（T-0100-P0）。
+// bootstrap 早期 / 测试不注入时保持 NoopLogWriter，写入路径无 nil 风险。
+func (m *Monitor) SetLogWriter(w LogWriter) {
+	if w == nil {
+		w = NoopLogWriter{}
+	}
+	m.logWriter = w
 }
 
 // Start launches the cron schedule:
@@ -183,6 +194,19 @@ func (m *Monitor) CheckExpiry(ctx context.Context) error {
 				zap.Time("expiry_date", *lic.ExpiryDate),
 				zap.Int("grace_period_days", lic.GracePeriodDays),
 			)
+			// 审计：自动过期事件落 license_logs（T-0100-P0 / R-109）
+			licID := lic.ID
+			m.logWriter.Write(ctx, LicenseLogEntry{
+				LicenseID: &licID,
+				LogType:   LogTypeAutoExpire,
+				Result:    LogResultSuccess,
+				Details: map[string]any{
+					"summary":           "license auto-expired by daily cron",
+					"license_code":      lic.LicenseCode,
+					"expiry_date":       lic.ExpiryDate.Format(time.RFC3339),
+					"grace_period_days": lic.GracePeriodDays,
+				},
+			})
 		}
 	}
 	if expired > 0 {
@@ -228,6 +252,21 @@ func (m *Monitor) CheckExpiringSoon(ctx context.Context) error {
 						zap.String("license_id", lic.ID.String()),
 						zap.Error(sendErr))
 				}
+				// 审计：过期阈值告警事件落 license_logs（T-0100-P0 / R-109）
+				licID := lic.ID
+				m.logWriter.Write(ctx, LicenseLogEntry{
+					LicenseID: &licID,
+					LogType:   LogTypeExpiryAlert,
+					Result:    LogResultWarning,
+					Details: map[string]any{
+						"summary":        alert.Summary,
+						"identifier":     alert.Identifier,
+						"severity":       alert.Severity,
+						"license_code":   lic.LicenseCode,
+						"expiry_date":    lic.ExpiryDate.Format(time.RFC3339),
+						"days_remaining": days,
+					},
+				})
 				break
 			}
 		}
@@ -314,6 +353,23 @@ func (m *Monitor) CheckCapacity(ctx context.Context) error {
 		// Persist anyway? No — re-emit on next tick if dispatch failed.
 		return nil
 	}
+
+	// 审计：容量阈值告警事件落 license_logs（T-0100-P0 / R-109）
+	licID := lic.ID
+	m.logWriter.Write(ctx, LicenseLogEntry{
+		LicenseID: &licID,
+		LogType:   LogTypeCapacityAlert,
+		Result:    LogResultWarning,
+		Details: map[string]any{
+			"summary":      alert.Summary,
+			"identifier":   alert.Identifier,
+			"severity":     alert.Severity,
+			"used_devices": used,
+			"max_devices":  lic.MaxDevices,
+			"usage_ratio":  ratio,
+			"threshold":    highestCrossed,
+		},
+	})
 
 	if updErr := m.repo.UpdateCapacityAlert(ctx, lic.ID, highestCrossed, now); updErr != nil {
 		m.logger.Warn("update capacity alert dedup state failed",

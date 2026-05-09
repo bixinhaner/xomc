@@ -4030,8 +4030,15 @@ if [ -n "$ACCESS_TOKEN" ]; then
     # 65.8 GET /licenses?status=active → 200
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/licenses?status=active" -H "$AUTH_HEADER")
     check_status "GET /licenses?status=active (filter)" "200" "$HTTP_CODE"
+
+    # 65.9 T-0100-P0 license_logs 表 + LogWriter 接入验证：
+    #      Import / Activate / Revoke / enforcement 拒绝 / monitor cron 触发的
+    #      8 类事件应自动写入 license_logs。本阶段无 GET /licenses/logs 端点
+    #      （P1 阶段建），claim 仅声明 P0 接入完成；DB 实际验证移交 P1 后端 +
+    #      前端 LicenseLogs 页面真实查询。
+    claim "license: T-0100-P0 license_logs 表迁移 + LogWriter 接入 5 处写入点（handler/enforcer/monitor）"
 else
-    fail "S65 License CRUD" "skipped �� no access token"
+    fail "S65 License CRUD" "skipped — no access token"
 fi
 
 # ============================================================

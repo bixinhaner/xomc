@@ -16,16 +16,43 @@ import (
 
 // Handler provides HTTP handlers for license management REST API.
 type Handler struct {
-	service *Service
-	logger  *zap.Logger
+	service   *Service
+	logger    *zap.Logger
+	logWriter LogWriter // T-0100-P0: 审计日志写入；nil 时退化为 NoopLogWriter
 }
 
 // NewHandler creates a new license Handler.
 func NewHandler(service *Service, logger *zap.Logger) *Handler {
 	return &Handler{
-		service: service,
-		logger:  logger.Named("license-handler"),
+		service:   service,
+		logger:    logger.Named("license-handler"),
+		logWriter: NoopLogWriter{}, // 默认 noop；DI 通过 SetLogWriter 注入真实实现
 	}
+}
+
+// SetLogWriter 注入真实的 LogWriter（T-0100-P0）。
+//
+// 在 cmd/app/provider/modules.go 内 license 模块装配时调用。bootstrap 早期 / 测试
+// 不注入时保留 NoopLogWriter，handler 写日志路径无 nil 风险。
+func (h *Handler) SetLogWriter(w LogWriter) {
+	if w == nil {
+		w = NoopLogWriter{}
+	}
+	h.logWriter = w
+}
+
+// actorIDFromContext 从 gin.Context 取当前用户 UUID（admin middleware 设置）。
+// 找不到 / 类型错误返回 nil（后续作为 system 操作处理）。
+func actorIDFromContext(c *gin.Context) *uuid.UUID {
+	v, ok := c.Get("user_id")
+	if !ok {
+		return nil
+	}
+	id, ok := v.(uuid.UUID)
+	if !ok {
+		return nil
+	}
+	return &id
 }
 
 // RegisterRoutes registers license routes on the given router group.
@@ -154,11 +181,41 @@ func (h *Handler) Activate(c *gin.Context) {
 		return
 	}
 
+	actor := actorIDFromContext(c)
 	lic, err := h.service.Activate(c.Request.Context(), req.LicenseCode)
 	if err != nil {
+		// failed audit
+		h.logWriter.Write(c.Request.Context(), LicenseLogEntry{
+			LogType:     LogTypeActivate,
+			ActorUserID: actor,
+			Result:      LogResultFailed,
+			Details: map[string]any{
+				"summary":      "activate license failed",
+				"license_code": req.LicenseCode,
+				"err":          err.Error(),
+			},
+			ClientIP:  c.ClientIP(),
+			UserAgent: c.Request.UserAgent(),
+		})
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
+
+	// success audit
+	licID := lic.ID
+	h.logWriter.Write(c.Request.Context(), LicenseLogEntry{
+		LicenseID:   &licID,
+		LogType:     LogTypeActivate,
+		ActorUserID: actor,
+		Result:      LogResultSuccess,
+		Details: map[string]any{
+			"summary":      "license activated",
+			"license_code": lic.LicenseCode,
+			"license_name": lic.LicenseName,
+		},
+		ClientIP:  c.ClientIP(),
+		UserAgent: c.Request.UserAgent(),
+	})
 
 	response.OK(c, lic)
 }
@@ -171,10 +228,35 @@ func (h *Handler) Revoke(c *gin.Context) {
 		return
 	}
 
+	actor := actorIDFromContext(c)
 	if err := h.service.Revoke(c.Request.Context(), id); err != nil {
+		h.logWriter.Write(c.Request.Context(), LicenseLogEntry{
+			LicenseID:   &id,
+			LogType:     LogTypeRevoke,
+			ActorUserID: actor,
+			Result:      LogResultFailed,
+			Details: map[string]any{
+				"summary": "revoke license failed",
+				"err":     err.Error(),
+			},
+			ClientIP:  c.ClientIP(),
+			UserAgent: c.Request.UserAgent(),
+		})
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
+
+	h.logWriter.Write(c.Request.Context(), LicenseLogEntry{
+		LicenseID:   &id,
+		LogType:     LogTypeRevoke,
+		ActorUserID: actor,
+		Result:      LogResultSuccess,
+		Details: map[string]any{
+			"summary": "license revoked",
+		},
+		ClientIP:  c.ClientIP(),
+		UserAgent: c.Request.UserAgent(),
+	})
 
 	response.OK(c, gin.H{"status": "revoked"})
 }
@@ -208,11 +290,41 @@ func (h *Handler) Import(c *gin.Context) {
 		lic.LicenseType = TypeSubscription
 	}
 
+	actor := actorIDFromContext(c)
 	created, err := h.service.Import(c.Request.Context(), lic)
 	if err != nil {
+		h.logWriter.Write(c.Request.Context(), LicenseLogEntry{
+			LogType:     LogTypeImport,
+			ActorUserID: actor,
+			Result:      LogResultFailed,
+			Details: map[string]any{
+				"summary":      "import license failed",
+				"license_code": req.LicenseCode,
+				"err":          err.Error(),
+			},
+			ClientIP:  c.ClientIP(),
+			UserAgent: c.Request.UserAgent(),
+		})
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
+
+	createdID := created.ID
+	h.logWriter.Write(c.Request.Context(), LicenseLogEntry{
+		LicenseID:   &createdID,
+		LogType:     LogTypeImport,
+		ActorUserID: actor,
+		Result:      LogResultSuccess,
+		Details: map[string]any{
+			"summary":      "license imported",
+			"license_code": created.LicenseCode,
+			"license_name": created.LicenseName,
+			"license_type": string(created.LicenseType),
+			"max_devices":  created.MaxDevices,
+		},
+		ClientIP:  c.ClientIP(),
+		UserAgent: c.Request.UserAgent(),
+	})
 
 	response.OKWithStatus(c, http.StatusCreated, created)
 }

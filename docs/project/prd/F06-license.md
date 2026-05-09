@@ -700,7 +700,7 @@ ALTER TABLE licenses
 - [ ] V9-V14 在 `e2e_verify.sh` 加 ≥ 1 claim（治理层 P3 完成时）
 - [x] 6 个 metric `grep -rn` 都返回 ≥ 1
 - [x] `risk-register.md` R-103 状态 Open → Closed
-- [ ] `risk-register.md` 新增 R-105（合规审计缺口）→ 治理层落地后 Closed
+- [ ] `risk-register.md` 新增 R-109（合规审计缺口）→ 治理层落地后 Closed
 - [x] backlog T-0015 done（执行层）
 - [ ] backlog 新登记治理层任务（待 T-NNNN）
 
@@ -716,7 +716,7 @@ ALTER TABLE licenses
 - **Migration**：
   - [`migrations/000043_licenses_capacity_expiry.sql`](../../../omcgo/migrations/000043_licenses_capacity_expiry.sql)（已落地）
   - `migrations/000NNN_license_logs.sql`（P0 待建）
-- **风险登记**：[`docs/project/risk-register.md`](../risk-register.md) R-103（已闭）+ R-105（待登记 / 闭）
+- **风险登记**：[`docs/project/risk-register.md`](../risk-register.md) R-103（已闭）+ R-109（治理层合规审计缺口，本任务 P0 关闭）
 - **Backlog**：[`docs/project/backlog.md`](../backlog.md) T-0015（done）+ 治理层 T-NNNN（待登记）
 - **审计合规依据**：等保 2.0 三级 8.1.4.7（重要操作日志保留 ≥ 6 个月）
 - **权限模型参考**：commit `b1cdea13` 北向 OSS 主备编辑权限初始化（独立 button 权限点模式）

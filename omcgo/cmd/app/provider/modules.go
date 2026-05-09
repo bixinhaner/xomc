@@ -408,9 +408,22 @@ func initMiscModules(c *Container) error {
 	licenseMetrics := license.NewEnforcementMetrics(c.MetricsReg)
 	licenseEnforcer := license.NewEnforcer(licenseRepo, logger, licenseMetrics)
 	licenseSvc.SetEnforcer(licenseEnforcer)
-	c.miscDeps.licenseHandler = license.NewHandler(licenseSvc, logger)
+	licenseHandler := license.NewHandler(licenseSvc, logger)
+	licenseMonitor := license.NewMonitor(licenseRepo, license.NoopAlertSink{}, licenseMetrics, logger)
+
+	// T-0100-P0：审计日志（license_logs 表）。enforcer / monitor / handler 三处写入点
+	// 通过 SetLogWriter 注入；NewLogWriter 内部失败降级 warn 不阻断主业务（详见
+	// internal/license/log_writer.go）。
+	licenseLogRepo := license.NewPgLicenseLogRepository(c.PgPool)
+	licenseLogWriter := license.NewLogWriter(licenseLogRepo, logger)
+	licenseEnforcer.SetLogWriter(licenseLogWriter)
+	licenseMonitor.SetLogWriter(licenseLogWriter)
+	licenseHandler.SetLogWriter(licenseLogWriter)
+	c.miscDeps.licenseLogRepo = licenseLogRepo // 暴露给 P1 阶段 GET /licenses/logs handler 复用
+
+	c.miscDeps.licenseHandler = licenseHandler
 	c.miscDeps.licenseEnforcer = licenseEnforcer
-	c.miscDeps.licenseMonitor = license.NewMonitor(licenseRepo, license.NoopAlertSink{}, licenseMetrics, logger)
+	c.miscDeps.licenseMonitor = licenseMonitor
 
 	// Wire enforcer into DeviceService so device.create / future write ops
 	// gate on capacity + expiry. Read-only operations are unaffected (D1).
@@ -560,6 +573,8 @@ type miscDeps struct {
 	licenseHandler  *license.Handler
 	licenseEnforcer *license.EnforcerImpl
 	licenseMonitor  *license.Monitor
+	// T-0100-P0：审计日志 repo（暴露给 P1 GET /licenses/logs handler 复用）
+	licenseLogRepo license.LicenseLogRepository
 
 	// Ops
 	opsHandler *ops.Handler

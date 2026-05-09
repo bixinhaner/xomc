@@ -66,9 +66,10 @@ var nowFunc = time.Now
 
 // EnforcerImpl is the concrete Enforcer.
 type EnforcerImpl struct {
-	repo    LicenseRepository
-	logger  *zap.Logger
-	metrics *EnforcementMetrics
+	repo      LicenseRepository
+	logger    *zap.Logger
+	metrics   *EnforcementMetrics
+	logWriter LogWriter // T-0100-P0：拒绝事件审计；nil 时退化为 NoopLogWriter
 
 	cacheMu      sync.RWMutex
 	cachedActive *License
@@ -80,11 +81,21 @@ type EnforcerImpl struct {
 // metrics may be nil (degrades to no-op recording).
 func NewEnforcer(repo LicenseRepository, logger *zap.Logger, metrics *EnforcementMetrics) *EnforcerImpl {
 	return &EnforcerImpl{
-		repo:     repo,
-		logger:   logger.Named("license-enforcer"),
-		metrics:  metrics,
-		cacheTTL: DefaultCacheTTL,
+		repo:      repo,
+		logger:    logger.Named("license-enforcer"),
+		metrics:   metrics,
+		logWriter: NoopLogWriter{}, // 默认 noop；DI 通过 SetLogWriter 注入真实实现
+		cacheTTL:  DefaultCacheTTL,
 	}
+}
+
+// SetLogWriter 注入真实的 LogWriter（T-0100-P0）。
+// bootstrap 早期 / 测试不注入时保持 NoopLogWriter，写入路径无 nil 风险。
+func (e *EnforcerImpl) SetLogWriter(w LogWriter) {
+	if w == nil {
+		w = NoopLogWriter{}
+	}
+	e.logWriter = w
 }
 
 // SetCacheTTL overrides the cache TTL. Test-only convenience.
@@ -161,6 +172,19 @@ func (e *EnforcerImpl) EnforceCapacity(ctx context.Context, additional int) erro
 			zap.Int("used_devices", used),
 			zap.Int("additional", additional),
 		)
+		// 审计：拒绝事件落 license_logs（T-0100-P0 / R-109）
+		licID := lic.ID
+		e.logWriter.Write(ctx, LicenseLogEntry{
+			LicenseID: &licID,
+			LogType:   LogTypeEnforcementCapacity,
+			Result:    LogResultDenied,
+			Details: map[string]any{
+				"summary":      "device.create denied: capacity exceeded",
+				"max_devices":  lic.MaxDevices,
+				"used_devices": used,
+				"additional":   additional,
+			},
+		})
 		return fmt.Errorf("used=%d, max=%d, additional=%d: %w",
 			used, lic.MaxDevices, additional, commonerrors.ErrLicenseCapacityExceeded)
 	}
@@ -199,6 +223,19 @@ func (e *EnforcerImpl) EnforceExpiry(ctx context.Context, operation string) erro
 			zap.Time("expiry_date", *lic.ExpiryDate),
 			zap.Int("grace_period_days", lic.GracePeriodDays),
 		)
+		// 审计：拒绝事件落 license_logs（T-0100-P0 / R-109）
+		licID := lic.ID
+		e.logWriter.Write(ctx, LicenseLogEntry{
+			LicenseID: &licID,
+			LogType:   LogTypeEnforcementExpiry,
+			Result:    LogResultDenied,
+			Details: map[string]any{
+				"summary":           "write operation denied: license expired",
+				"operation":         operation,
+				"expiry_date":       lic.ExpiryDate.Format(time.RFC3339),
+				"grace_period_days": lic.GracePeriodDays,
+			},
+		})
 		return fmt.Errorf("license %s expired at %s (grace=%dd): %w",
 			lic.ID, lic.ExpiryDate.Format(time.RFC3339), lic.GracePeriodDays,
 			commonerrors.ErrLicenseExpired)

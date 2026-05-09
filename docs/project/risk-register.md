@@ -248,6 +248,23 @@
 - **缓解**：Sprint 1 补 compose 文件 + 基础 dashboard
 - **下次复盘**：Sprint-01
 
+### R-109 License 治理层无审计日志（合规缺口）— **已关闭 2026-05-09**
+- **描述**：~~T-0015 enforcement 引擎已落地（容量/过期拦截 + 阈值告警 cron），但拒绝事件 / 告警事件 / 用户写操作（Import / Activate / Revoke）均无审计落库。`license_logs` 表不存在~~ → 已落地
+- **等级**：P1
+- **概率**：高 → 已规避
+- **影响**：~~违反**等保 2.0 三级 8.1.4.7**「重要操作日志保留 ≥ 6 个月」要求~~ → 合规链路打通；6 月保留期 + MinIO 归档延后到 P4 阶段实施
+- **Owner**：电信业务专家 + 安全合规专家
+- **状态**：**Closed**（2026-05-09）
+- **关联 Task**：T-0100（umbrella，进行中）/ **T-0100-P0 done 2026-05-09**
+- **关闭依据**：
+  * migration 000073 落地 `license_logs` 表（9 种 log_type CHECK + 4 索引）
+  * `license_log_model.go` + `pg_license_log_repository.go` + `log_writer.go`（NoopLogWriter + pgLogWriter，写库失败非阻断）
+  * 5 处写入点接入：handler.go (Import/Activate/Revoke 成功+失败) + enforcer.go (EnforceCapacity/Expiry 拒绝) + monitor.go (auto_expire/expiry_alert/capacity_alert)
+  * DI 通过 modules.go SetLogWriter 注入
+  * 7 个 unit test 全过（覆盖 9 种 log_type、system 操作、nil license_id、repo 失败非阻断、details marshal 失败、empty details 规范化、并发 50 写）
+- **未完待 P1+ 处理**（不阻塞 R-109 关闭）：GET /licenses/logs 端点（P1）+ 前端 LicenseLogs 真实数据（P1）+ 6 月保留 MinIO 归档（P4）
+- **关联 PRD**：`docs/project/prd/F06-license.md` §6.2 / §9.3 / §11.2 V13
+
 ### R-108 个别迁移 Down 段缺失（误报，已撤销）
 - **描述**（初版）：`000001_extensions_functions.sql` 与 `000021_notifications.sql`
   的 Down 段被脚本标记为空
