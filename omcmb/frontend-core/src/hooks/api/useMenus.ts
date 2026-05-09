@@ -12,16 +12,29 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Menu } from '../../types/menu';
 import { fetchMenuTree, fetchUserMenus } from '../../services/api/menuApi';
 import { useMenuStore } from '../../store/menuStore';
+import { useUserStore } from '../../store/userStore';
 
 /** Query key 常量，便于 invalidate 与单点维护。 */
 export const userMenusQueryKey = ['userMenus'] as const;
 export const menuTreeQueryKey = ['menus', 'tree'] as const;
 
-/** 当前用户当前角色的菜单树。拉取成功自动写入 menuStore。 */
+/**
+ * 当前用户当前角色的菜单树。拉取成功自动写入 menuStore。
+ *
+ * queryKey 必须带 userId：用户切换（admin → test）时 key 变化 → React Query 不会
+ * 复用上一个用户的菜单缓存。修复"切换用户后侧边栏短暂显示前一个用户菜单，刷新才
+ * 恢复"的 bug —— 旧实现固定 queryKey=['userMenus'] + staleTime=5min，logout 只
+ * clearAuth/menuStore 不动 React Query 缓存，下个用户登录在 5 分钟内会命中前一个
+ * 用户的缓存（fresh，不重新 fetch）。
+ *
+ * enabled 依赖 userId：未登录态（logout 后回到 /login）不发请求。
+ */
 export function useUserMenus() {
   const setMenus = useMenuStore((s) => s.setMenus);
+  const userId = useUserStore((s) => s.currentUser?.id);
   return useQuery<Menu[]>({
-    queryKey: [...userMenusQueryKey],
+    queryKey: [...userMenusQueryKey, userId],
+    enabled: !!userId,
     queryFn: async () => {
       const data = await fetchUserMenus();
       setMenus(data);
