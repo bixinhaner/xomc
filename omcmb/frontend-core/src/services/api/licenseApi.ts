@@ -255,6 +255,36 @@ export const licenseApi = {
     await http.post(`/licenses/${id}/revoke`);
   },
 
+  /**
+   * 单条 license PDF 导出（T-0100-P4-A）。
+   *
+   * 返回 Blob，调用方用 URL.createObjectURL 触发浏览器下载。后端走
+   * GET /licenses/:id/export?format=pdf，Content-Type=application/pdf。
+   */
+  async exportLicensePDF(id: string): Promise<{ blob: Blob; filename: string }> {
+    const resp = await http.get(`/licenses/${id}/export`, {
+      params: { format: 'pdf' },
+      responseType: 'blob',
+    });
+    const cd = (resp.headers as Record<string, string | undefined>)['content-disposition'] ?? '';
+    return { blob: resp.data as Blob, filename: parseFilename(cd, `license-${id}.pdf`) };
+  },
+
+  /**
+   * 全量 active license CSV 导出（T-0100-P4-A）。
+   *
+   * 后端 GET /licenses/export?format=csv，Content-Type=text/csv，UTF-8 BOM
+   * 头方便 Excel 直接打开。
+   */
+  async exportAllActiveCSV(): Promise<{ blob: Blob; filename: string }> {
+    const resp = await http.get(`/licenses/export`, {
+      params: { format: 'csv' },
+      responseType: 'blob',
+    });
+    const cd = (resp.headers as Record<string, string | undefined>)['content-disposition'] ?? '';
+    return { blob: resp.data as Blob, filename: parseFilename(cd, 'licenses-active.csv') };
+  },
+
   // -------------------------------------------------------------------------
   // T-0100-P1 audit logs
   // -------------------------------------------------------------------------
@@ -337,6 +367,24 @@ export const licenseApi = {
     };
   },
 };
+
+/**
+ * 从 Content-Disposition 头解析 filename。
+ *
+ * 支持两种格式：
+ *   - filename="xxx.csv"
+ *   - filename*=UTF-8''xxx.csv（RFC 5987）
+ * 解析失败用 fallback。
+ */
+function parseFilename(cd: string, fallback: string): string {
+  const m1 = /filename\*=UTF-8''([^;]+)/i.exec(cd);
+  if (m1) {
+    try { return decodeURIComponent(m1[1]); } catch { /* fall through */ }
+  }
+  const m2 = /filename="?([^";]+)"?/i.exec(cd);
+  if (m2) return m2[1];
+  return fallback;
+}
 
 /**
  * 把 axios error 解析为同维度冲突信息（若是）。

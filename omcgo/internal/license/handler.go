@@ -3,6 +3,7 @@ package license
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -72,12 +73,14 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	licenses.GET("/summary", h.GetSummary)
 	licenses.GET("/quota", h.GetQuota)
 	licenses.GET("/logs", h.ListLogs) // T-0100-P1：全量审计日志（分页 + 过滤）
+	licenses.GET("/export", h.ExportAll) // T-0100-P4-A：全量 active license CSV
 	licenses.POST("/activate", h.Activate)
 	licenses.POST("/import", h.Import)
 
 	licenses.GET("", h.List)
 	licenses.GET("/:id", h.GetByID)
-	licenses.GET("/:id/logs", h.GetLicenseLogs) // T-0100-P1：单 license 审计日志（详情抽屉）
+	licenses.GET("/:id/logs", h.GetLicenseLogs)     // T-0100-P1：单 license 审计日志（详情抽屉）
+	licenses.GET("/:id/export", h.ExportByID)       // T-0100-P4-A：单条 PDF 导出
 	licenses.POST("/:id/revoke", h.Revoke)
 }
 
@@ -467,6 +470,151 @@ func (h *Handler) Revoke(c *gin.Context) {
 	})
 
 	response.OK(c, gin.H{"status": "revoked"})
+}
+
+// ExportByID handles GET /api/v1/licenses/:id/export?format=pdf|json.
+//
+// T-0100-P4-A / PRD §5.3.4：单条 license 导出。format=pdf 返 application/pdf
+// 字节流 + Content-Disposition attachment；format=json 返 application/json。
+// 成功时按 query_detail 写一条审计日志（PRD §5.4.1 列出 query_detail 是敏感读
+// 操作之一，导出比纯查询更敏感，复用同 log_type）。
+func (h *Handler) ExportByID(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	format := c.DefaultQuery("format", "pdf")
+	if format != "pdf" && format != "json" {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			commonerrors.NewBusinessError(9107, "format must be pdf or json", commonerrors.ErrInvalidInput))
+		return
+	}
+
+	lic, err := h.service.GetByID(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	// 收集近 30 天审计 + 当前 quota（缺一不影响导出主体）。
+	var logs []LicenseLog
+	if h.logRepo != nil {
+		ll, lerr := h.logRepo.ListByLicense(c.Request.Context(), id, 50)
+		if lerr != nil {
+			h.logger.Warn("list license logs for export degraded",
+				zap.String("license_id", id.String()), zap.Error(lerr))
+		} else {
+			logs = ll
+		}
+	}
+	quota, qerr := h.service.Quota(c.Request.Context())
+	if qerr != nil {
+		h.logger.Warn("get quota for export degraded", zap.Error(qerr))
+		quota = nil
+	}
+
+	actor := actorIDFromContext(c)
+	username := ""
+	if v, ok := c.Get("username"); ok {
+		if s, ok2 := v.(string); ok2 {
+			username = s
+		}
+	}
+
+	exportCtx := ExportContext{
+		License:     lic,
+		Quota:       quota,
+		RecentLogs:  logs,
+		GeneratedAt: nowFunc(),
+		GeneratedBy: username,
+	}
+
+	// 审计：query_detail 类型 + details.export_format 用于后续追溯
+	h.logWriter.Write(c.Request.Context(), LicenseLogEntry{
+		LicenseID:   &id,
+		LogType:     LogTypeQueryDetail,
+		ActorUserID: actor,
+		Result:      LogResultSuccess,
+		Details: map[string]any{
+			"summary":       "license exported",
+			"export_format": format,
+			"license_code":  lic.LicenseCode,
+		},
+		ClientIP:  c.ClientIP(),
+		UserAgent: c.Request.UserAgent(),
+	})
+
+	switch format {
+	case "pdf":
+		filename := fmt.Sprintf("license-%s.pdf", lic.LicenseCode)
+		c.Header("Content-Type", "application/pdf")
+		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+		if err := WriteSingleLicensePDF(c.Writer, exportCtx); err != nil {
+			h.logger.Error("write license PDF failed",
+				zap.String("license_id", id.String()), zap.Error(err))
+			// 已 flush 部分字节，无法回 5xx；仅记录。
+		}
+	case "json":
+		c.Header("Content-Type", "application/json")
+		c.Header("Content-Disposition",
+			fmt.Sprintf(`attachment; filename="license-%s.json"`, lic.LicenseCode))
+		c.JSON(http.StatusOK, gin.H{
+			"license":      lic,
+			"quota":        quota,
+			"recent_logs":  logs,
+			"generated_at": exportCtx.GeneratedAt,
+			"generated_by": valueOrSystem(username),
+		})
+	}
+}
+
+// ExportAll handles GET /api/v1/licenses/export?format=csv.
+//
+// T-0100-P4-A / PRD §5.3.4：全量 active license CSV 汇总；UTF-8 BOM 头方便
+// Excel 直接打开。仅支持 csv 格式（PDF 全量没意义；JSON 全量去 GET /licenses?status=active）。
+func (h *Handler) ExportAll(c *gin.Context) {
+	format := c.DefaultQuery("format", "csv")
+	if format != "csv" {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			commonerrors.NewBusinessError(9108, "format must be csv for bulk export", commonerrors.ErrInvalidInput))
+		return
+	}
+
+	licenses, err := h.service.ListActiveForExport(c.Request.Context())
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	actor := actorIDFromContext(c)
+	h.logWriter.Write(c.Request.Context(), LicenseLogEntry{
+		LogType:     LogTypeQueryDetail,
+		ActorUserID: actor,
+		Result:      LogResultSuccess,
+		Details: map[string]any{
+			"summary":       "bulk license export",
+			"export_format": "csv",
+			"row_count":     len(licenses),
+		},
+		ClientIP:  c.ClientIP(),
+		UserAgent: c.Request.UserAgent(),
+	})
+
+	filename := fmt.Sprintf("licenses-active-%s.csv", nowFunc().Format("20060102"))
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	if err := WriteAllActiveCSV(c.Writer, licenses); err != nil {
+		h.logger.Error("write bulk license CSV failed", zap.Error(err))
+	}
+}
+
+func valueOrSystem(s string) string {
+	if s == "" {
+		return "system"
+	}
+	return s
 }
 
 // Import handles POST /api/v1/licenses/import.

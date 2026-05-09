@@ -49,6 +49,7 @@ import {
   useRevokeLicense,
 } from '@core/hooks/api/useLicense';
 import {
+  licenseApi,
   parseActivateConflict,
   type ActivateConflict,
   type LicenseLog,
@@ -265,21 +266,47 @@ export default function LicenseOperations() {
     });
   };
 
-  // ------------------- Tab 4: Export (MVP JSON) -------------------
+  // ------------------- Tab 4: Export (T-0100-P4-A) -------------------
+  // Single PDF: GET /licenses/:id/export?format=pdf （后端 fpdf 渲染）
+  // Bulk CSV:   GET /licenses/export?format=csv     （后端 stdlib encoding/csv + BOM 头）
   const [exportId, setExportId] = useState<string | undefined>(undefined);
+  const [exportingSingle, setExportingSingle] = useState(false);
+  const [exportingBulk, setExportingBulk] = useState(false);
 
-  const handleExport = () => {
-    if (!exportId) return;
-    const target = activeLicenses.find((l) => l.id === exportId);
-    if (!target) return;
-    const blob = new Blob([JSON.stringify(target, null, 2)], { type: 'application/json' });
+  const triggerDownload = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${target.licenseCode}.json`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
-    void message.success(t('license.exportSuccess'));
+  };
+
+  const handleExportSinglePDF = async () => {
+    if (!exportId) return;
+    setExportingSingle(true);
+    try {
+      const { blob, filename } = await licenseApi.exportLicensePDF(exportId);
+      triggerDownload(blob, filename);
+      void message.success(t('license.exportSuccess'));
+    } catch (err) {
+      void message.error(extractErrorMessage(err) || t('common.error'));
+    } finally {
+      setExportingSingle(false);
+    }
+  };
+
+  const handleExportBulkCSV = async () => {
+    setExportingBulk(true);
+    try {
+      const { blob, filename } = await licenseApi.exportAllActiveCSV();
+      triggerDownload(blob, filename);
+      void message.success(t('license.exportSuccess'));
+    } catch (err) {
+      void message.error(extractErrorMessage(err) || t('common.error'));
+    } finally {
+      setExportingBulk(false);
+    }
   };
 
   // ------------------- 我的近 30 天日志 -------------------
@@ -559,9 +586,11 @@ export default function LicenseOperations() {
                   <Alert
                     type="info"
                     showIcon
-                    message={t('license.exportMvpHint')}
+                    message={t('license.exportP4aHint')}
                     style={{ marginBottom: 16 }}
                   />
+
+                  <h4 style={{ marginBottom: 8 }}>{t('license.exportSingleTitle')}</h4>
                   <Form.Item label={t('license.selectActiveLicense')}>
                     <Select
                       placeholder={t('license.selectActiveLicensePlaceholder')}
@@ -579,10 +608,25 @@ export default function LicenseOperations() {
                     type="primary"
                     icon={<DownloadOutlined />}
                     disabled={!exportId}
-                    onClick={handleExport}
+                    loading={exportingSingle}
+                    onClick={handleExportSinglePDF}
+                    block
+                    style={{ marginBottom: 24 }}
+                  >
+                    {t('license.exportPdf')}
+                  </Button>
+
+                  <h4 style={{ marginBottom: 8 }}>{t('license.exportBulkTitle')}</h4>
+                  <p style={{ color: '#666', marginBottom: 12 }}>
+                    {t('license.exportBulkHint')}
+                  </p>
+                  <Button
+                    icon={<DownloadOutlined />}
+                    loading={exportingBulk}
+                    onClick={handleExportBulkCSV}
                     block
                   >
-                    {t('license.exportJson')}
+                    {t('license.exportCsvBulk')}
                   </Button>
                 </div>
               </Card>

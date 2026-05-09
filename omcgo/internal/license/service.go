@@ -62,6 +62,14 @@ func (s *Service) List(ctx context.Context, filter LicenseFilter) (*model.ListRe
 	return s.repo.List(ctx, filter)
 }
 
+// ListActiveForExport 返回所有 active license（用于全量 CSV 导出）。
+//
+// T-0100-P4-A：与 ListActiveLicenses 复用同一仓库方法；保留独立 Service 方法以便
+// 后续加导出过滤条件（如按 license_type 过滤）时不污染 enforcement 用法。
+func (s *Service) ListActiveForExport(ctx context.Context) ([]*License, error) {
+	return s.repo.ListActiveLicenses(ctx)
+}
+
 // GetByID retrieves a license by ID.
 func (s *Service) GetByID(ctx context.Context, id uuid.UUID) (*License, error) {
 	return s.repo.GetByID(ctx, id)

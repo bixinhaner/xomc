@@ -513,3 +513,96 @@ func TestHandler_Import_MissingRequiredField_Returns400(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code,
 		"missing required fields must yield 400; got %d (body=%s)", w.Code, w.Body.String())
 }
+
+// ---------------------------------------------------------------------------
+// T-0100-P4-A: Export endpoints
+// ---------------------------------------------------------------------------
+
+func TestHandler_ExportByID_PDF(t *testing.T) {
+	h, repo := newTestLicenseHandler()
+	router := setupLicenseRouter(h)
+
+	lic := seedLicense(repo, "Export PDF", "LIC-EXP-PDF-001", "ProdP", TypeSubscription, StatusActive)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/licenses/"+lic.ID.String()+"/export?format=pdf", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/pdf", w.Header().Get("Content-Type"))
+	assert.Contains(t, w.Header().Get("Content-Disposition"), "license-LIC-EXP-PDF-001.pdf")
+	assert.Greater(t, w.Body.Len(), 100)
+	assert.Equal(t, []byte("%PDF-"), w.Body.Bytes()[:5])
+}
+
+func TestHandler_ExportByID_JSON(t *testing.T) {
+	h, repo := newTestLicenseHandler()
+	router := setupLicenseRouter(h)
+
+	lic := seedLicense(repo, "Export JSON", "LIC-EXP-JSON-001", "ProdJ", TypeSubscription, StatusActive)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/licenses/"+lic.ID.String()+"/export?format=json", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+	assert.Contains(t, w.Header().Get("Content-Disposition"), ".json")
+
+	var body map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Contains(t, body, "license")
+	require.Contains(t, body, "generated_at")
+}
+
+func TestHandler_ExportByID_InvalidFormat(t *testing.T) {
+	h, repo := newTestLicenseHandler()
+	router := setupLicenseRouter(h)
+
+	lic := seedLicense(repo, "X", "LIC-EXP-BAD-001", "P", TypeSubscription, StatusActive)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/licenses/"+lic.ID.String()+"/export?format=xml", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandler_ExportAll_CSV(t *testing.T) {
+	h, repo := newTestLicenseHandler()
+	router := setupLicenseRouter(h)
+
+	seedLicense(repo, "Active 1", "LIC-EXP-A1", "P1", TypeSubscription, StatusActive)
+	seedLicense(repo, "Active 2", "LIC-EXP-A2", "P2", TypePerpetual, StatusActive)
+	seedLicense(repo, "Pending",  "LIC-EXP-P1", "P3", TypeSubscription, StatusPending) // 不应包含
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/licenses/export?format=csv", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Header().Get("Content-Type"), "text/csv")
+	assert.Contains(t, w.Header().Get("Content-Disposition"), ".csv")
+
+	body := w.Body.String()
+	// 含 BOM 头
+	assert.Equal(t, byte(0xEF), body[0])
+	assert.Contains(t, body, "LIC-EXP-A1")
+	assert.Contains(t, body, "LIC-EXP-A2")
+	assert.NotContains(t, body, "LIC-EXP-P1", "pending license must not be in active export")
+}
+
+func TestHandler_ExportAll_InvalidFormat(t *testing.T) {
+	h, _ := newTestLicenseHandler()
+	router := setupLicenseRouter(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/licenses/export?format=pdf", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code,
+		"bulk export rejects format != csv")
+}
