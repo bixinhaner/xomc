@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import {
   Alert,
@@ -337,14 +337,9 @@ export default function RoleManagement() {
     });
   }, [apiGroupNames, apiGroupMap]);
 
-  // 数据加载到位后默认展开全部分组（与菜单权限"打开编辑面板自动展开二级"对齐）。
-  useEffect(() => {
-    if (apiGroupParentKeys.length > 0 && expandedApiGroupKeys.length === 0) {
-      setExpandedApiGroupKeys(apiGroupParentKeys);
-    }
-    // 仅在分组首次出现时触发；后续手动展开/折叠由用户控制。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiGroupParentKeys.length]);
+  // API 权限分组默认折叠（"展开/折叠"复选框默认未勾选）。用户需要展开时点击复选框或单个分组。
+  // 历史上此处有一个 useEffect 在数据首次到位后自动展开所有分组，已移除以保持
+  // 与菜单权限的默认折叠行为一致。
 
   const getRoleApiPermissions = useMutation({
     mutationFn: (roleId: string) => apiPermissionApi.getRolePermissions(roleId),
@@ -404,8 +399,10 @@ export default function RoleManagement() {
       roleName: role.roleName,
       description: role.description,
     });
-    // 默认展开一级 + 二级目录（菜单树异步加载，expandableMenuIds 此时已就位 / 否则下一帧 useMemo 重算）。
-    setExpandedPermissionKeys(expandableMenuIds);
+    // 默认折叠：菜单 / API 权限树打开编辑面板时不预展开，与"展开/折叠"复选框默认未勾选一致。
+    // 用户需要展开时手动点击复选框或单个目录节点。
+    setExpandedPermissionKeys([]);
+    setExpandedApiGroupKeys([]);
     // 清空快速回显，避免上一个角色的菜单 ID 残留
     setCheckedPermissionKeys([]);
     setSelectedDeviceGroupIds(role.deviceGroupIds || []);
