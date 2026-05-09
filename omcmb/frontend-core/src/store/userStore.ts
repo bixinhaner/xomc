@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { User } from '../types/system';
 import { useMenuStore } from './menuStore';
+import { useTabStore } from './tabStore';
 
 export type { User };
 // Legacy alias
@@ -84,6 +85,10 @@ export const useUserStore = create<UserState>()(
         // persist 残留指向上一个用户的角色菜单（PRD §6 风险表 / §3.3 #7）。
         useMenuStore.getState().clear();
         localStorage.removeItem('omc-menu-store');
+        // 同步清空标签页（sessionStorage 存），避免下一个用户进来后
+        // 右侧仍残留上一个用户打开过的页面。
+        useTabStore.getState().closeAllTabs();
+        sessionStorage.removeItem('omc-tab-store');
       },
 
       isTokenExpired: () => {
