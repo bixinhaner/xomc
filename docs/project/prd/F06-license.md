@@ -262,7 +262,9 @@ if s.licenseEnforcer != nil {
 - **方式 B**：粘贴 license 字符串到 textarea
 - **校验链**：
   1. 文件解析成功（JSON / 自定义二进制）
-  2. 数字签名验证（厂商公钥；MVP 阶段可放过 + warning，参 Q4）
+  2. 数字签名验证（**Q4=B MVP 放过 + warning**）：
+     - 当前阶段：未签名 / 签名无效 / 公钥未配置 → 仍允许 import 入库，但写一条 zap.Warn 日志（含 `license_code` + 原因）+ 在 import 响应里返回 `signature_status: 'unverified' | 'invalid' | 'verified'` 字段供前端 Modal 显示警告 Tag
+     - GA 前补强（P4-C）：configs/oem_public_keys/*.pem 加载 + 强校验，未签名 license 直接 400 拒绝
   3. license_code 不与已有冲突（UNIQUE）
   4. issue_date / expiry_date 时间合理性
 - **API**：`POST /api/v1/licenses/import`（已存在）
@@ -271,8 +273,12 @@ if s.licenseEnforcer != nil {
 #### 5.3.2 Tab 2：激活
 
 - 输入 `license_code`（从 Tab 1 跳转可自动填）
+- 提交时**先查询同 `device_type + region` 是否已有 active license**：
+  - 已有 → **弹 Modal 确认**（Q1=B）："当前已有 active license `<old_license_code>`，激活新 license 将自动吊销旧的。是否继续？"
+  - 用户点"继续" → 串行调 `POST /:old_id/revoke`（自动 + log_type=`auto_revoke_by_activate`）+ `POST /activate`（log_type=`activate`），两条日志均记 actor_user_id；任一步失败 → 整体回滚（前端 message.error 不静默）
+  - 用户点"取消" → 中止激活，前端 toast "已取消"
+  - 没有同维度旧 active → 直接 `POST /activate`
 - `POST /api/v1/licenses/activate`：状态 `pending → active`
-- 同 `device_type + region` 维度自动 revoke 旧 active（参 Q1，**B 弹确认**）
 - 反馈：成功 toast + 跳转列表高亮新激活；不存在 → 404；已激活 → noop + "该 license 已是 active"
 
 #### 5.3.3 Tab 3：吊销
@@ -652,7 +658,7 @@ ALTER TABLE licenses
 | **P0** | license_logs 表迁移 + repository + service.LogWriter；enforcer / monitor / handler 三处接入 | 2 天 |
 | **P1** | LicenseLogs 主页（后端 GET /licenses/logs + 过滤分页；前端接 API + i18n） | 2 天 |
 | **P2** | LicenseList 详情抽屉 + Summary 卡片（后端 GET /licenses/:id/logs + Summary 增强；前端抽屉 + 进度条 + 跳转 Logs） | 2 天 |
-| **P3** | LicenseOperations 完整 4 Tab（4 Tab UI + 操作历史接 API + 导入校验链 + 权限点 seed） | 3 天 |
+| **P3** | LicenseOperations 完整 4 Tab（4 Tab UI + 操作历史接 API + 导入校验链 + 权限点 seed）— Q1/Q3/Q4 已决议 ✅ 无阻塞 | 3 天 |
 | **P4** | 导出 + 归档 + 签名（PDF / CSV 导出；归档 cron；签名验证） | 3-4 天 |
 
 **总工作量**：12-13 工作日。P0 → P1 → P2 → P3 严格顺序；P4 各项独立可并行。
@@ -667,23 +673,25 @@ ALTER TABLE licenses
 | 2 | LicenseOperations 操作历史 mock | 高 | P3：接 `/licenses/logs?actor_user_id=current&limit=20` |
 | 3 | LicenseLogs 全 mock | 高 | P1：接 `/licenses/logs` + 过滤器 |
 | 4 | 导出 PDF / CSV 端点未实现 | 中 | P4：handler.Export + 前端文件下载；MVP 可先 JSON |
-| 5 | license 文件签名验证未实现 | 中 — 安全合规风险 | P4：OEM 公钥配置（env / configs）+ Verify；MVP 阶段记 warning 不阻断 |
-| 6 | 独立"许可证操作"权限点未 seed | 中 | P3：参 commit `b1cdea13` 模式 — menus button + role_menus seed |
+| 5 | license 文件签名验证未实现 | 中 — 安全合规风险 | **Q4=B 决议**：P3 阶段 import 不阻断、写 warn + signature_status 字段；P4-C：OEM 公钥配置（configs/oem_public_keys/*.pem）+ 强校验 |
+| 6 | 独立"许可证操作"权限点未 seed | 中 | P3：参 commit `b1cdea13` 模式 — menus button (system:license:operate) + role_api_permissions seed；**Q3=C 决议**：不附带新增 license-admin 内置角色，企业按需在 /system/roles 自建 |
 | 7 | enforcement 命中无可视化 | 中 | P2：LicenseList 顶部 "近 7 天 enforcement 命中" 卡片 + 跳转 Logs |
 | 8 | 日志归档 cron 未实现 | 低 — GA 前必须 | P4：monitor.go 新增 `archiveOldLogs(ctx)` + weekly schedule |
-| 9 | `license-admin` / `auditor` 内置角色未建 | 低 — 依赖 Q3 决议 | seed 角色 + role_menus + role_api_permissions |
+| 9 | ~~`license-admin` / `auditor` 内置角色未建~~ | — | **Q3=C 决议关闭**：不新增内置角色，企业按 /system/roles 自定义；条目作废 |
 | 10 | 等保 2.0 6 个月保留期未配置可调 | 低 | sys_configs 加 key `license.log.retention_months`，默认 6 |
 
 ---
 
-## 16. 待决议
+## 16. 决议（2026-05-09 已拍板，状态 Locked）
 
-| # | 议题 | 选项 | 倾向（待 PM 拍板）|
+| # | 议题 | 决议 | 落地点 |
 |---|---|---|---|
-| **Q1** | 激活时是否自动 revoke 同维度旧 active | A. 自动 / B. 弹确认 / C. 拒绝（用户必须先 revoke 旧的）| **B**（用户友好 + 明确意图） |
-| **Q2** | 无 active license 时是否拦截 | A. 拦截严格 / B. 放行 + critical 告警（dev 友好）| **B**（与 V7 一致） |
-| **Q3** | 是否新增 `license-admin` / `auditor` 内置角色 | A. 新增 / B. 只用 super_admin / C. 留给 RolePermission 自定义 | **C**（避免内置角色膨胀） |
-| **Q4** | 数字签名 MVP 是否必须 | A. 必须 / B. 可放过 + warning（MVP）/ C. 完全跳过 | **B**（GA 前补强为 A） |
+| **Q1** | 激活时同维度旧 active 处理 | **B 弹确认 Modal** —— 用户点激活后弹「当前已有 active license XXX，激活新 license 将自动吊销旧的。是否继续？」二次确认；通过后自动 revoke + activate 串行执行，写两条 license_log（auto_revoke_by_activate + activate） | P3 LicenseOperations Tab 2 |
+| **Q2** | 无 active license 时是否拦截 | **B 放行 + critical 告警**（与 V7 一致） | 已实施于 P0 enforcer.go |
+| **Q3** | 是否新增 `license-admin` / `auditor` 内置角色 | **C 留给 RolePermission 自定义** —— 不新增内置角色；仅 seed `system:license:operate` button menu + role_api_permissions；企业按需在 /system/roles 自建带 license 权限的角色 | P3 权限点 seed |
+| **Q4** | 数字签名 MVP 是否必须 | **B MVP 放过 + warning，GA 前补强为 A** —— P3 阶段 import 接受未签名 / 签名无效的 license 但记 warn 日志（包含 license_code + reason）；OEM 公钥配置 + 强校验延后到 P4-C 实施 | P3 import 校验链；GA 前 P4-C 收紧 |
+
+**决议依据**：用户友好 / 避免膨胀 / GA 前补强 / dev 环境友好（参考 PRD §11.1 V7）。
 
 ---
 

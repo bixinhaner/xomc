@@ -320,7 +320,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0100-P0 | license_logs 表迁移 + LogWriter 服务 + 5 处写入点接入（handler 3 + enforcer 2 + monitor 3） | feat | F06/license | P1 | done | Claude | M (~2d) | T-0015 ✅ | R-109 关闭 / `prd/F06-license.md` §6.2 §9.3 | wave-3-finishing | 2026-05-09 |
 | T-0100-P1 | LicenseLogs 主页全量 — 后端 GET `/licenses/logs` + 过滤分页；前端接 API + i18n（去 mock） | feat | F06/license+frontend | P1 | done | Claude | M (~2d) | T-0100-P0 ✅ | `prd/F06-license.md` §5.4 §11.2 V11 | wave-3-finishing | 2026-05-09 |
 | T-0100-P2 | LicenseList 详情抽屉 + Summary 卡片（后端 GET `/licenses/:id/logs` + Summary 增强；前端抽屉 + 进度条 + 跳转 Logs） | feat | F06/license+frontend | P1 | done | Claude | M (~2d) | T-0100-P1 ✅ | `prd/F06-license.md` §5.2 §11.2 V9 V14 | wave-3-finishing | 2026-05-09 |
-| T-0100-P3 | LicenseOperations 完整 4 Tab + 操作历史接 API + 导入校验链 + `system:license:operate` 权限点 seed | feat | F06/license+frontend+admin | P1 | triaged | — | L (~3d) | T-0100-P2 + Q1/Q3/Q4 决议 | `prd/F06-license.md` §5.3 §8 §11.2 V10 V12 | — | 2026-05-09 |
+| T-0100-P3 | LicenseOperations 完整 4 Tab + 操作历史接 API + 导入校验链 + `system:license:operate` 权限点 seed | feat | F06/license+frontend+admin | P1 | planned | Claude | L (~3d) | T-0100-P2 ✅ + Q1/Q3/Q4 ✅（2026-05-09 user 拍板 B/C/B 全推荐） | `prd/F06-license.md` §5.3 §8 §11.2 V10 V12 §16 决议 | wave-3-finishing | 2026-05-09 |
 | T-0100-P4 | 导出 PDF/CSV + 6 月归档 cron + 数字签名（GA 前必须；P4-A 导出/B 归档/C 签名独立可并行） | feat | F06/license+frontend+ops | P2 | triaged | — | L (~3-4d) | T-0100-P3 + Q4 决议 | `prd/F06-license.md` §5.3.4 §5.4.5 §11.2 V13 | — | 2026-05-09 |
 
 ---
