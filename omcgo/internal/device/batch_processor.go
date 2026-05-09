@@ -248,26 +248,63 @@ func (p *BatchInformProcessor) doFlush(ctx context.Context, buffer map[string]*i
 		updates = append(updates, u)
 	}
 
-	// 1. 批量更新设备表
-	if err := p.batchUpdateDevices(ctx, updates); err != nil {
+	// 1. 批量更新设备表（返回每条 update 的 RowsAffected）
+	affected, err := p.batchUpdateDevices(ctx, updates)
+	if err != nil {
 		return fmt.Errorf("batch update devices: %w", err)
 	}
 
-	// 2. 批量更新参数表
-	if err := p.batchUpsertParams(ctx, updates); err != nil {
+	// Partition：UPDATE 命中的（PG 行还在）走正常 cache write-through；
+	// 没命中的（cache 是 stale，PG 行已被删）DEL cache 让下次 inform 走 auto-register。
+	hit := make([]*informUpdate, 0, len(updates))
+	orphan := make([]*informUpdate, 0)
+	for i, u := range updates {
+		if affected[i] > 0 {
+			hit = append(hit, u)
+		} else {
+			orphan = append(orphan, u)
+		}
+	}
+
+	if len(orphan) > 0 {
+		p.invalidateOrphanCache(ctx, orphan)
+	}
+
+	// 2. 批量更新参数表（仅 hit，避免 device_id 外键悬空）
+	if err := p.batchUpsertParams(ctx, hit); err != nil {
 		return fmt.Errorf("batch upsert params: %w", err)
 	}
 
-	// 3. 批量 Redis 操作（缓存刷新 + STUN 地址）
-	p.batchRedisOps(ctx, updates)
+	// 3. 批量 Redis 操作（仅 hit，避免把 stale device 写回 cache）
+	p.batchRedisOps(ctx, hit)
 
 	return nil
 }
 
-// batchUpdateDevices 使用 UPDATE ... FROM (VALUES ...) 批量更新设备表。
-func (p *BatchInformProcessor) batchUpdateDevices(ctx context.Context, updates []*informUpdate) error {
+// invalidateOrphanCache DEL stale cache for devices whose PG row vanished.
+// 下次 inform 会 cache miss → PG miss → handlePeriodic 走 auto-register（A1 修复后的路径）。
+func (p *BatchInformProcessor) invalidateOrphanCache(ctx context.Context, orphans []*informUpdate) {
+	if p.cache == nil {
+		return
+	}
+	pipe := p.redisClient.Pipeline()
+	for _, u := range orphans {
+		pipe.Del(ctx, deviceCacheKey(u.device.SerialNumber))
+		p.logger.Warn("orphan inform: device row missing from PG, clearing stale cache (next inform will auto-register)",
+			zap.String("device_sn", u.device.SerialNumber),
+			zap.String("stale_device_id", u.device.ID.String()))
+	}
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+		p.logger.Warn("orphan cache invalidate", zap.Error(err))
+	}
+}
+
+// batchUpdateDevices 批量更新设备表。返回每条 update 的 RowsAffected：
+// >0 表示 PG 行存在并已更新；==0 表示 cache 命中但 PG 行已不存在（orphan，
+// 由 doFlush 走 invalidateOrphanCache）。
+func (p *BatchInformProcessor) batchUpdateDevices(ctx context.Context, updates []*informUpdate) ([]int64, error) {
 	if len(updates) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	batch := &pgx.Batch{}
@@ -309,13 +346,16 @@ func (p *BatchInformProcessor) batchUpdateDevices(ctx context.Context, updates [
 	br := p.pool.SendBatch(ctx, batch)
 	defer br.Close()
 
+	affected := make([]int64, len(updates))
 	for i := 0; i < len(updates); i++ {
-		if _, err := br.Exec(); err != nil {
-			return fmt.Errorf("exec batch update item %d (device %s): %w",
+		ct, err := br.Exec()
+		if err != nil {
+			return nil, fmt.Errorf("exec batch update item %d (device %s): %w",
 				i, updates[i].device.SerialNumber, err)
 		}
+		affected[i] = ct.RowsAffected()
 	}
-	return nil
+	return affected, nil
 }
 
 // batchUpsertParams 将所有设备的参数合并到一个 pgx.Batch 中执行。

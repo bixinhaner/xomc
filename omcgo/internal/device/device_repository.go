@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
@@ -310,9 +311,14 @@ func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) e
 		return fmt.Errorf("build update query: %w", err)
 	}
 
-	_, err = r.pool.Exec(ctx, query, args...)
+	ct, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("update device: %w", err)
+	}
+	// device row vanished between cache hit and update — surface as ErrNotFound
+	// so the caller can fall back to register / cache invalidation.
+	if ct.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
 	}
 	return nil
 }

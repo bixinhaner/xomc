@@ -3,6 +3,7 @@ package device
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -615,6 +616,20 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 		zap.String("device_id", device.ID.String()))
 
 	if err := s.deviceRepo.Update(ctx, device); err != nil {
+		// stale-cache recovery: cache returned a device whose row no longer
+		// exists in PG (manual delete / migration race). Invalidate the cache
+		// and let the caller retry as a registration. Without this fall-back
+		// the device would be permanently stuck — UpdateFromInform keeps
+		// silently writing 0 rows while the cache writes itself back.
+		if errors.Is(err, commonerrors.ErrNotFound) {
+			s.logger.Warn("UpdateFromInform: stale cache detected (device gone from DB), clearing and signalling re-register",
+				zap.String("device_id", device.ID.String()),
+				zap.String("serial_number", device.SerialNumber))
+			if s.cache != nil {
+				s.cache.Delete(ctx, device.SerialNumber)
+			}
+			return nil, nil
+		}
 		s.logger.Error("UpdateFromInform: deviceRepo.Update failed",
 			zap.Error(err),
 			zap.String("device_id", device.ID.String()))

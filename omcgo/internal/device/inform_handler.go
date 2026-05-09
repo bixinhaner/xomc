@@ -257,10 +257,29 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 	}
 
 	// 回退：原有逐条处理逻辑
-	if _, err := h.service.UpdateFromInform(ctx, inform); err != nil {
+	updated, err := h.service.UpdateFromInform(ctx, inform)
+	if err != nil {
 		h.logger.Error("handlePeriodic: UpdateFromInform failed",
 			zap.Error(err), zap.String("serial_number", sn))
 		return err
+	}
+
+	// Stale-cache fall-through: UpdateFromInform returned (nil, nil) because the
+	// cache pointed at a row that has since been deleted from PG. Recover by
+	// running auto-register so the device is re-created and downstream
+	// provisioning fires (otherwise this device would be stuck forever).
+	if updated == nil {
+		h.logger.Info("handlePeriodic: stale cache fall-through, auto-registering",
+			zap.String("serial_number", sn))
+		carrierCode := h.resolveCarrier(payload.DeviceId.OUI)
+		registered, regErr := h.service.RegisterFromInform(ctx, inform, carrierCode)
+		if regErr != nil {
+			h.logger.Error("handlePeriodic: stale-cache fall-through register failed",
+				zap.Error(regErr), zap.String("serial_number", sn))
+			return regErr
+		}
+		h.service.PublishDeviceRegistered(ctx, registered)
+		return nil
 	}
 
 	h.logger.Debug("handlePeriodic: device updated",
