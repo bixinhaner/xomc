@@ -23,7 +23,7 @@ VALUES (
     'aaaa0008-1000-0000-0000-000000000001'::uuid,  -- 系统配置父节点
     100,                                            -- 排在 query/add/edit/delete (sort 1-4) 之后
     '',                                             -- button 类型无路由
-    'active',
+    'normal',
     'show'
 )
 ON CONFLICT (id) DO NOTHING;
