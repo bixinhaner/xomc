@@ -41,9 +41,16 @@ export default function MenuBootstrap({ children }: MenuBootstrapProps) {
 
 function MenuBootstrapInner({ loaded, children }: { loaded: boolean; children: ReactNode }) {
   // useQuery 仅在已登录 + 灰度启用时挂载；否则不会无谓发请求。
-  const { isLoading, isError } = useUserMenus();
+  const { isError } = useUserMenus();
 
-  if (!loaded && isLoading) {
+  // 阻塞条件改为 `!loaded` 单一判定（不再依赖 isLoading）。
+  //
+  // 历史 bug：之前是 `!loaded && isLoading`。当 React Query 命中前一个用户的缓存时
+  // isLoading 立即为 false（同步返回），但 cache hit 不会触发 queryFn 的 setMenus
+  // 写入，menuStore.loaded 始终为 false → 此分支不命中，fall through 到 children
+  // → NavMenu 看到空 menuStore → 回退到 NAV_CONFIG 静态菜单 → 用户切换后看到"上个用户菜单残留"。
+  // 修复后：只要 menuStore 还没加载完成就一律 spin，避免任何窗口期渲染脏 UI。
+  if (!loaded && !isError) {
     return (
       <div
         style={{

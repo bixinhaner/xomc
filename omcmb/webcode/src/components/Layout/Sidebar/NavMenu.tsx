@@ -268,8 +268,14 @@ export default function NavMenu({
   const dynamicMenus = useMenuStore((s) => s.menus);
   const menuLoaded = useMenuStore((s) => s.loaded);
 
-  // 灰度判定：env 启用 + 已加载 + 树非空 → 走动态分支；否则兜底 NAV_CONFIG。
-  const useDynamic = isDynamicMenuEnabled() && menuLoaded && dynamicMenus.length > 0;
+  // 灰度判定：env 启用 + 已加载 → 走动态分支；env 关闭才兜底 NAV_CONFIG。
+  //
+  // 关键：曾经条件含 `dynamicMenus.length > 0`，导致角色无菜单绑定（或 admin 退出后
+  // menuStore 被 clearAuth 清空但下个用户菜单还没拉到）时回退到 NAV_CONFIG 静态菜单。
+  // 静态菜单按 isSuperAdmin 过滤后是 10 项，恰好跟 admin 真实菜单视觉一致 →
+  // 用户切换后看到"admin 菜单残留"，刷新页面才好。
+  // 修复：动态模式启用后永远走动态分支；空菜单由 MenuBootstrap 的 spin 兜底。
+  const useDynamic = isDynamicMenuEnabled() && menuLoaded;
 
   // T-0098-P4-02：静态分支 NAV_CONFIG 按 super_admin 过滤（产品中心仅超管可见）。
   // 动态分支由后端 service 层完成同等过滤，无需前端二次处理。
