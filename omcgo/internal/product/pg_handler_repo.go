@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
@@ -480,12 +481,15 @@ func (r *PgRepository) ListOrphanDevices(ctx context.Context, limit int) ([]Orph
 	var out []OrphanDevice
 	for rows.Next() {
 		var d OrphanDevice
-		var lastInform *string
+		var lastInform *time.Time
 		if err := rows.Scan(&d.ID, &d.SerialNumber, &d.OUI, &d.ProductClass,
 			&d.Carrier, &d.Manufacturer, &lastInform); err != nil {
 			return nil, fmt.Errorf("scan orphan device: %w", err)
 		}
-		d.LastInformAt = lastInform
+		if lastInform != nil {
+			s := lastInform.Format(time.RFC3339)
+			d.LastInformAt = &s
+		}
 		out = append(out, d)
 	}
 	return out, rows.Err()
