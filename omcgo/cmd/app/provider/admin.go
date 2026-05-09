@@ -70,15 +70,21 @@ func initAdminModule(c *Container) error {
 	// Casbin RBAC engine — in-memory permission evaluation.
 	// 策略变更广播走 NATS JetStream（sys.casbin.policy.reload），替代原
 	// Redis Pub/Sub，获得持久化 + 订阅者断线重连回放。
+	//
+	// 失败处理：B3-Phase2-B 起 permissions 表已 DROP，无 SQL fallback —— authorizer
+	// 未注入则 PgRoleRepository.CheckPermission 直接返 error，所有走
+	// RequireAPIPermission/RequirePermission 的端点对非超管用户全部 500。
+	// 因此 Casbin 初始化失败必须直接终止进程，不能让进程"看似正常启动"后所有
+	// 业务接口故障；常见根因是 configs/casbin_model.conf 没挂进容器（参
+	// deployments/docker/Dockerfile.app）。
 	authorizer, err := admin.NewCasbinAuthorizer(c.PgPool, c.EventBus, "configs/casbin_model.conf", logger)
 	if err != nil {
-		logger.Warn("casbin init failed, falling back to SQL permission checks", zap.Error(err))
-	} else {
-		roleRepo.SetAuthorizer(authorizer)
-		c.GS.Register("casbin-watcher", 1, func(_ context.Context) error { authorizer.Stop(); return nil })
-		authorizer.StartPeriodicRefresh(5 * time.Minute)
-		logger.Info("casbin RBAC engine initialized")
+		return fmt.Errorf("init casbin authorizer (model=configs/casbin_model.conf): %w", err)
 	}
+	roleRepo.SetAuthorizer(authorizer)
+	c.GS.Register("casbin-watcher", 1, func(_ context.Context) error { authorizer.Stop(); return nil })
+	authorizer.StartPeriodicRefresh(5 * time.Minute)
+	logger.Info("casbin RBAC engine initialized")
 
 	// Set shared services
 	c.JWTService = jwtService

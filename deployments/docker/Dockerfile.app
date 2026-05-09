@@ -42,6 +42,13 @@ COPY --from=builder /build/migrations /etc/omcgo/migrations
 # alarm-definitions / products）。config.dev.yaml 用相对路径 xml_base_dir: "data"，
 # entrypoint.sh 把 cwd 切到 /etc/omcgo 让相对路径解析正确。
 COPY --from=builder /build/data /etc/omcgo/data
+# Casbin RBAC 模型文件：admin provider 启动期加载 configs/casbin_model.conf
+# （相对路径，由 entrypoint.sh 切到 /etc/omcgo 后解析）。
+# 缺失会导致 NewCasbinAuthorizer 失败 → roleRepo.authorizer == nil →
+# 所有走 RequireAPIPermission/RequirePermission 的端点对非超管用户返
+# 500 "casbin authorizer not configured"
+# （pg_role_repository.go::CheckPermission）。
+COPY --from=builder /build/configs /etc/omcgo/configs
 COPY deployments/docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
