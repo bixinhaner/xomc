@@ -30,7 +30,7 @@ export default function UserDropdown() {
 
   const displayName = currentUser?.displayName ?? currentUser?.username ?? t('user.notLoggedIn');
   const avatarText = displayName.charAt(0).toUpperCase();
-  const roleName = currentUser?.role ? t(`user.role.${currentUser.role}`) : '';
+  const roleName = currentUser?.role ?? '';
 
   const changePasswordMutation = useMutation({
     mutationFn: (data: { old_password: string; new_password: string }) =>
