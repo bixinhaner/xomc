@@ -108,6 +108,7 @@ func initProvisionModule(c *Container) error {
 		provisionRepo, c.DeviceService, c.TemplateService,
 		c.Carriers, c.TaskSvc, c.EventBus, c.Cfg.Provision, logger,
 	)
+	provisionEngine.SetDeduper(c.Deduper)
 
 	if c.Cfg.Provision.ModelUpload.Enabled {
 		modelUploadSvc := provision.NewModelUploadService(
@@ -371,7 +372,7 @@ func initMiscModules(c *Container) error {
 		if c.EventBus != nil {
 			completionRouter := task.NewCompletionRouter(logger)
 			completionRouter.Register(task.TaskSourceMML, aggregator)
-			bridge := task.NewCompletionEventBridge(logger, completionRouter)
+			bridge := task.NewCompletionEventBridge(logger, completionRouter, c.Deduper)
 			if err := bridge.Subscribe(c.EventBus); err != nil {
 				logger.Warn("subscribe task completion bridge", zap.Error(err))
 			}

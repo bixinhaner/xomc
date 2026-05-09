@@ -38,13 +38,13 @@ func (fakeSub) Unsubscribe() error { return nil }
 
 func TestCompletionEventBridge_NewBridge(t *testing.T) {
 	router := NewCompletionRouter(zap.NewNop())
-	bridge := NewCompletionEventBridge(zap.NewNop(), router)
+	bridge := NewCompletionEventBridge(zap.NewNop(), router, nil)
 	require.NotNil(t, bridge)
 }
 
 func TestCompletionEventBridge_SubscribeNilBus(t *testing.T) {
 	router := NewCompletionRouter(zap.NewNop())
-	bridge := NewCompletionEventBridge(zap.NewNop(), router)
+	bridge := NewCompletionEventBridge(zap.NewNop(), router, nil)
 
 	err := bridge.Subscribe(nil)
 	require.Error(t, err)
@@ -52,7 +52,7 @@ func TestCompletionEventBridge_SubscribeNilBus(t *testing.T) {
 }
 
 func TestCompletionEventBridge_SubscribeNilRouter(t *testing.T) {
-	bridge := NewCompletionEventBridge(zap.NewNop(), nil)
+	bridge := NewCompletionEventBridge(zap.NewNop(), nil, nil)
 	err := bridge.Subscribe(&fakeEventBus{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "completion router")
@@ -60,7 +60,7 @@ func TestCompletionEventBridge_SubscribeNilRouter(t *testing.T) {
 
 func TestCompletionEventBridge_SubscribeRegistersBothSubjects(t *testing.T) {
 	router := NewCompletionRouter(zap.NewNop())
-	bridge := NewCompletionEventBridge(zap.NewNop(), router)
+	bridge := NewCompletionEventBridge(zap.NewNop(), router, nil)
 	bus := &fakeEventBus{}
 
 	require.NoError(t, bridge.Subscribe(bus))
@@ -73,7 +73,7 @@ func TestCompletionEventBridge_SubscribeRegistersBothSubjects(t *testing.T) {
 
 func TestCompletionEventBridge_SubscribeBusError(t *testing.T) {
 	router := NewCompletionRouter(zap.NewNop())
-	bridge := NewCompletionEventBridge(zap.NewNop(), router)
+	bridge := NewCompletionEventBridge(zap.NewNop(), router, nil)
 	bus := &fakeEventBus{queueErr: errors.New("nats down")}
 
 	err := bridge.Subscribe(bus)
@@ -86,7 +86,7 @@ func TestCompletionEventBridge_HandleDispatchesToRouter(t *testing.T) {
 	rec := &recordingHandler{}
 	router.Register(TaskSourceMML, rec)
 
-	bridge := NewCompletionEventBridge(zap.NewNop(), router)
+	bridge := NewCompletionEventBridge(zap.NewNop(), router, nil)
 
 	tk := &Task{ID: "t-bridge", Source: TaskSourceMML, SourceID: "mml-1", Status: TaskStatusCompleted}
 	evt, err := event.NewEvent(event.SubjectTaskCompleted, tk)
@@ -99,7 +99,7 @@ func TestCompletionEventBridge_HandleDispatchesToRouter(t *testing.T) {
 
 func TestCompletionEventBridge_HandleBadPayload(t *testing.T) {
 	router := NewCompletionRouter(zap.NewNop())
-	bridge := NewCompletionEventBridge(zap.NewNop(), router)
+	bridge := NewCompletionEventBridge(zap.NewNop(), router, nil)
 
 	// 制造一个 payload 解码会失败的事件：直接传一个无法 marshal 成 Task 的事件。
 	// event.NewEvent 接受 interface{}; 用一个无法被 Task 反序列化的对象（数字）。

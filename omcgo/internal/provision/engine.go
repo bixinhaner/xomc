@@ -32,6 +32,7 @@ type ProvisioningEngine struct {
 	carrierRegistry    *carrier.CarrierRegistry
 	taskSvc            task.Enqueuer
 	eventBus           event.EventBus
+	deduper            *event.Deduper
 	modelUploadService *ModelUploadService
 	syncService        *SyncService
 	config             appconfig.ProvisionConfig
@@ -71,6 +72,13 @@ func (e *ProvisioningEngine) SetSyncService(svc *SyncService) {
 	e.syncService = svc
 }
 
+// SetDeduper enables idempotent event handling for the provisioning engine.
+// When set, repeated NATS deliveries of the same event ID skip the handler.
+// nil 表示关闭去重（向后兼容单进程内存 EventBus 场景）。
+func (e *ProvisioningEngine) SetDeduper(d *event.Deduper) {
+	e.deduper = d
+}
+
 // bootstrapEvent represents the data published on device.registered.
 type bootstrapEvent struct {
 	DeviceID     uuid.UUID `json:"device_id"`
@@ -83,7 +91,7 @@ type bootstrapEvent struct {
 
 // Subscribe registers the engine to listen for bootstrap and model file events.
 func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
-	_, err := bus.QueueSubscribe(event.SubjectDeviceRegistered, "provisioning", func(ctx context.Context, evt event.Event) error {
+	bootstrapHandler := func(ctx context.Context, evt event.Event) error {
 		e.logger.Info("provisioning engine received device.registered event",
 			zap.String("event_id", evt.ID),
 			zap.String("subject", evt.Subject),
@@ -94,7 +102,11 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 			return err
 		}
 		return e.HandleBootstrap(ctx, bsEvt)
-	})
+	}
+	if e.deduper != nil {
+		bootstrapHandler = e.deduper.Wrap("provision-bootstrap", bootstrapHandler)
+	}
+	_, err := bus.QueueSubscribe(event.SubjectDeviceRegistered, "provisioning", bootstrapHandler)
 	if err != nil {
 		e.logger.Error("failed to subscribe provisioning engine", zap.Error(err))
 		return err

@@ -43,6 +43,7 @@ type Container struct {
 	Redis      redis.UniversalClient
 	MinIO      *minio.Client
 	EventBus   event.EventBus
+	Deduper    *event.Deduper
 	TaskSvc    *task.TaskService
 	Carriers   *carrier.CarrierRegistry
 	Cfg        *appconfig.AppConfig

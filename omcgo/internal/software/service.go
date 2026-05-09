@@ -942,7 +942,7 @@ func (s *SoftwareService) UpdateFirmwareMetadata(ctx context.Context, fw *Firmwa
 // Subscribe registers all event subscriptions for the software service.
 func (s *SoftwareService) Subscribe(eventBus event.EventBus) error {
 	// TransferComplete — upgrade state advancement
-	_, err := eventBus.Subscribe(event.SubjectDeviceTransferComplete, func(ctx context.Context, evt event.Event) error {
+	_, err := eventBus.QueueSubscribe(event.SubjectDeviceTransferComplete, "software-upgrade", func(ctx context.Context, evt event.Event) error {
 		return s.HandleTransferComplete(ctx, evt)
 	})
 	if err != nil {

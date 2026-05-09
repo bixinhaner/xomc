@@ -87,7 +87,7 @@ func (e *Engine) Subscribe(eventBus event.EventBus) error {
 	}
 
 	for _, subject := range subjects {
-		sub, err := eventBus.Subscribe(subject, handler)
+		sub, err := eventBus.QueueSubscribe(subject, "northbound-push", handler)
 		if err != nil {
 			return fmt.Errorf("subscribe to %s: %w", subject, err)
 		}

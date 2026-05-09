@@ -27,15 +27,18 @@ type TransferBridge struct {
 	buckets     appconfig.BucketConfig
 	httpClient  *http.Client
 	eventBus    event.EventBus
+	deduper     *event.Deduper
 	logger      *zap.Logger
 }
 
 // NewTransferBridge creates a new TransferBridge.
+// deduper 为 nil 时关闭幂等检查（向后兼容单进程内存 EventBus 场景）。
 func NewTransferBridge(
 	deviceRepo device.DeviceRepository,
 	minioClient *minio.Client,
 	buckets appconfig.BucketConfig,
 	eventBus event.EventBus,
+	deduper *event.Deduper,
 	logger *zap.Logger,
 ) *TransferBridge {
 	return &TransferBridge{
@@ -46,16 +49,21 @@ func NewTransferBridge(
 			Timeout: 30 * time.Second,
 		},
 		eventBus: eventBus,
+		deduper:  deduper,
 		logger:   logger.Named("transfer-bridge"),
 	}
 }
 
 // Subscribe registers the bridge to listen for autonomous transfer complete events.
 func (b *TransferBridge) Subscribe(bus event.EventBus) error {
+	handler := event.EventHandler(b.handleAutonomousTransferComplete)
+	if b.deduper != nil {
+		handler = b.deduper.Wrap("transfer-autonomous", handler)
+	}
 	_, err := bus.QueueSubscribe(
 		event.SubjectDeviceAutonomousTransferComplete,
 		"transfer-bridge",
-		b.handleAutonomousTransferComplete,
+		handler,
 	)
 	if err != nil {
 		return fmt.Errorf("subscribe autonomous_transfer_complete: %w", err)

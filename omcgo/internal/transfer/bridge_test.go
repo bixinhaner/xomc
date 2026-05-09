@@ -215,7 +215,7 @@ func TestHandleATC_FaultSkipped(t *testing.T) {
 	bus := newMockEventBus()
 	repo := newMockDeviceRepo()
 
-	bridge := NewTransferBridge(repo, nil, appconfig.BucketConfig{PMFiles: "pm", MRFiles: "mr", Logs: "logs"}, bus, logger)
+	bridge := NewTransferBridge(repo, nil, appconfig.BucketConfig{PMFiles: "pm", MRFiles: "mr", Logs: "logs"}, bus, nil, logger)
 
 	payload := map[string]interface{}{
 		"device_sn":       "TEST-SN-001",
@@ -245,7 +245,7 @@ func TestHandleATC_DeviceNotFound(t *testing.T) {
 	bus := newMockEventBus()
 	repo := newMockDeviceRepo() // empty
 
-	bridge := NewTransferBridge(repo, nil, appconfig.BucketConfig{PMFiles: "pm", MRFiles: "mr", Logs: "logs"}, bus, logger)
+	bridge := NewTransferBridge(repo, nil, appconfig.BucketConfig{PMFiles: "pm", MRFiles: "mr", Logs: "logs"}, bus, nil, logger)
 
 	payload := map[string]interface{}{
 		"device_sn":       "UNKNOWN-SN",
@@ -266,7 +266,7 @@ func TestHandleATC_NoTransferURL(t *testing.T) {
 	bus := newMockEventBus()
 	repo := newMockDeviceRepo()
 
-	bridge := NewTransferBridge(repo, nil, appconfig.BucketConfig{PMFiles: "pm", MRFiles: "mr", Logs: "logs"}, bus, logger)
+	bridge := NewTransferBridge(repo, nil, appconfig.BucketConfig{PMFiles: "pm", MRFiles: "mr", Logs: "logs"}, bus, nil, logger)
 
 	payload := map[string]interface{}{
 		"device_sn":       "TEST-SN-001",
@@ -412,7 +412,7 @@ func TestSubscribe(t *testing.T) {
 	bus := newMockEventBus()
 	repo := newMockDeviceRepo()
 
-	bridge := NewTransferBridge(repo, nil, appconfig.BucketConfig{PMFiles: "pm", MRFiles: "mr", Logs: "logs"}, bus, logger)
+	bridge := NewTransferBridge(repo, nil, appconfig.BucketConfig{PMFiles: "pm", MRFiles: "mr", Logs: "logs"}, bus, nil, logger)
 
 	if err := bridge.Subscribe(bus); err != nil {
 		t.Fatalf("subscribe: %v", err)
@@ -437,7 +437,7 @@ func TestDownloadAndStore_HTTPError(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	bridge := NewTransferBridge(nil, nil, appconfig.BucketConfig{PMFiles: "pm", MRFiles: "mr", Logs: "logs"}, bus, logger)
+	bridge := NewTransferBridge(nil, nil, appconfig.BucketConfig{PMFiles: "pm", MRFiles: "mr", Logs: "logs"}, bus, nil, logger)
 
 	_, err := bridge.downloadAndStore(context.Background(), ts.URL+"/file.xml", "test-bucket", "test/path.xml")
 	if err == nil {

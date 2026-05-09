@@ -18,15 +18,19 @@ import (
 // 持有一个 CompletionRouter，由 router 按 `Task.Source` 分发；装配阶段
 // `router.Register(TaskSourceMML, mmlAggregator)` 等完成上下游绑定。
 type CompletionEventBridge struct {
-	router *CompletionRouter
-	logger *zap.Logger
+	router  *CompletionRouter
+	deduper *event.Deduper
+	logger  *zap.Logger
 }
 
 // NewCompletionEventBridge 构造事件桥接。router 不能为 nil。
-func NewCompletionEventBridge(logger *zap.Logger, router *CompletionRouter) *CompletionEventBridge {
+// deduper 为 nil 时关闭幂等检查（NATS InterestPolicy 下重投会导致 ResultAggregator
+// 重复累加 → 上线 InterestPolicy 必须传非 nil）。
+func NewCompletionEventBridge(logger *zap.Logger, router *CompletionRouter, deduper *event.Deduper) *CompletionEventBridge {
 	return &CompletionEventBridge{
-		router: router,
-		logger: logger.Named("task-event-bridge"),
+		router:  router,
+		deduper: deduper,
+		logger:  logger.Named("task-event-bridge"),
 	}
 }
 
@@ -40,9 +44,13 @@ func (b *CompletionEventBridge) Subscribe(bus event.EventBus) error {
 		return fmt.Errorf("completion router is nil")
 	}
 	subs := []string{event.SubjectTaskCompleted, event.SubjectTaskFailed}
+	handler := event.EventHandler(b.handle)
+	if b.deduper != nil {
+		handler = b.deduper.Wrap("task-completion-bridge", handler)
+	}
 	for _, subject := range subs {
 		sub := subject
-		if _, err := bus.QueueSubscribe(sub, "task-completion-bridge", b.handle); err != nil {
+		if _, err := bus.QueueSubscribe(sub, "task-completion-bridge", handler); err != nil {
 			return fmt.Errorf("subscribe %s: %w", sub, err)
 		}
 	}

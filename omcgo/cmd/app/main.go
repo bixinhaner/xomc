@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/omcgo/omcgo/cmd/app/provider"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
@@ -67,6 +69,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 		Redis:      app.Redis,
 		MinIO:      app.MinIO,
 		EventBus:   app.EventBus,
+		Deduper:    event.NewDeduper(app.Redis, 24*time.Hour, app.Logger),
 		TaskSvc:    app.TaskSvc,
 		Carriers:   app.Carriers,
 		Cfg:        &cfg,

@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/alarm/definition"
 	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/omcgo/omcgo/internal/core/reliability/dlq"
 	"github.com/omcgo/omcgo/internal/core/reliability/runner"
@@ -185,10 +187,11 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 
 	// Transfer Bridge
 	deviceRepo := device.NewPgDeviceRepository(w.PgPool)
+	transferDeduper := event.NewDeduper(w.Redis, 24*time.Hour, logger)
 	transferBridge := transfer.NewTransferBridge(
 		deviceRepo, w.MinIO,
 		cfg.MinIO.Buckets,
-		w.EventBus, logger,
+		w.EventBus, transferDeduper, logger,
 	)
 	if err := transferBridge.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe transfer bridge", zap.Error(err))
