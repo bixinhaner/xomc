@@ -263,13 +263,13 @@ func (r *PgMenuRepository) GetTree(ctx context.Context, status *MenuStatus) ([]M
 	return r.buildTree(menus), nil
 }
 
-// GetAllActive 返回全部 status='normal' 的菜单（含 directory/menu/button），
+// GetAllActive 返回全部 status=MenuStatusNormal 的菜单（含 directory/menu/button），
 // 仅供超管旁路使用（user.source='builtIn'）。
 // 参 docs/prd/system/menu-dynamic-loading.md §4.2.2 / §设计原则 #4。
 func (r *PgMenuRepository) GetAllActive(ctx context.Context) ([]Menu, error) {
 	sql, args, err := storage.Psql.Select(menuColumns...).
 		From("menus").
-		Where(sq.Eq{"status": "normal"}).
+		Where(sq.Eq{"status": MenuStatusNormal}).
 		OrderBy("parent_id NULLS FIRST, sort_order ASC").
 		ToSql()
 	if err != nil {
@@ -333,8 +333,9 @@ func (r *PgMenuRepository) GetByUser(ctx context.Context, userID uuid.UUID) ([]M
 		Join("roles r ON r.id = ur.role_id").
 		Where(sq.And{
 			sq.Eq{"ur.user_id": userID},
+			// r.status: roles 表 status 值域 'active'/'disabled'（与 menus 不同表不同口径）
 			sq.Eq{"r.status": "active"},
-			sq.Eq{"m.status": "normal"},
+			sq.Eq{"m.status": MenuStatusNormal},
 		}).
 		OrderBy("m.sort_order ASC").
 		ToSql()

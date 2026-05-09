@@ -262,13 +262,15 @@ type RoleFilter struct {
 }
 
 // MenuStatus represents the lifecycle status of a menu.
+//
+// 取值与 DDL CHECK 约束严格一致：migrations/000009_sys_admin.sql 第 38 行
+// `chk_status CHECK (status IN ('normal','disabled'))`。任何写库点必须使用
+// 本常量，避免历史上把 "active" 当别名注入引发 SQLSTATE 23514。
 type MenuStatus string
 
 const (
-	MenuStatusActive   MenuStatus = "active"
-	MenuStatusInactive MenuStatus = "inactive"
-	// MenuStatusNormal is an alias for active status (backward compatibility)
-	MenuStatusNormal MenuStatus = "active"
+	MenuStatusNormal   MenuStatus = "normal"
+	MenuStatusDisabled MenuStatus = "disabled"
 )
 
 // MenuType constants for menu item types.

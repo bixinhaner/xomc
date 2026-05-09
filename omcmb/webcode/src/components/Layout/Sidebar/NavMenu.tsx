@@ -136,7 +136,7 @@ interface DynamicLeaf {
 }
 
 function isVisible(menu: DynamicMenu): boolean {
-  return menu.status === 'active' && menu.showStatus !== 'hide';
+  return menu.status === 'normal' && menu.showStatus !== 'hide';
 }
 
 function renderIcon(name: string | undefined): React.ReactNode {

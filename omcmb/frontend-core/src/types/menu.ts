@@ -8,7 +8,10 @@
 // 设计依据：docs/prd/system/menu-dynamic-loading.md §4.3.2 (P1 menuStore + Hook)。
 
 export type MenuType = 'directory' | 'menu' | 'button';
-export type MenuStatus = 'active' | 'disabled';
+// 与后端 admin.MenuStatus 严格一致；后端 DDL chk_status 仅允许 'normal'/'disabled'
+// （migrations/000009_sys_admin.sql:38）。历史代码曾把 'active' 当 alias 但与 DB
+// 实际值漂移导致动态菜单全空，故彻底统一到 DB 口径。
+export type MenuStatus = 'normal' | 'disabled';
 export type MenuShowStatus = 'show' | 'hide';
 
 /** 后端 Menu JSON 形态。永远用于解码 HTTP 响应，不直接给业务层消费。 */

@@ -132,7 +132,7 @@ const buildDeviceGroupTreeData = (
 // 节点 key = menu.id (UUID)。这些函数运行时依赖 menuTree（异步加载），故不再是
 // 模块级常量；调用方在 useMemo([menuTree]) 内引用即可。
 function isMenuVisible(m: Menu): boolean {
-  return m.status === 'active' && m.showStatus !== 'hide';
+  return m.status === 'normal' && m.showStatus !== 'hide';
 }
 
 /** 把后端菜单树转 antd TreeDataNode 树。叶子节点显式 isLeaf=true。 */
