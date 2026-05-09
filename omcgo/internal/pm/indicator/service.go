@@ -458,12 +458,20 @@ func (s *IndicatorManagementService) buildIDMap(ctx context.Context, dt DeviceTy
 	return idMap, nil
 }
 
-func (s *IndicatorManagementService) refreshRedisCache(ctx context.Context, dt DeviceType) {
+// BumpCacheVersion 递增 indicator:cache_version（dictloader 标准协议 key），
+// 触发其他实例 30s 轮询感知缓存失效。供 cache/refresh 端点 + 写路径调用。
+func (s *IndicatorManagementService) BumpCacheVersion(ctx context.Context) {
 	if s.redis == nil {
 		return
 	}
-	key := fmt.Sprintf("indicator:cache_version:%s", dt.Suffix())
-	s.redis.Incr(ctx, key)
+	s.redis.Incr(ctx, "indicator:cache_version")
+}
+
+// refreshRedisCache 写路径调用，等价于 BumpCacheVersion；保留旧签名（dt 参数当前不再用，
+// 统一用单 key indicator:cache_version，与设计 §2.8 协议对齐）。
+func (s *IndicatorManagementService) refreshRedisCache(ctx context.Context, dt DeviceType) {
+	_ = dt
+	s.BumpCacheVersion(ctx)
 }
 
 func buildTree(groups []*IndicatorGroup) []*IndicatorGroup {

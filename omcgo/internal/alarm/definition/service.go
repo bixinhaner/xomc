@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -12,21 +13,33 @@ import (
 //
 // 职责：
 //   - 调用 WriteRepository 完成 CRUD
-//   - 写后触发 Registry.Refresh 同步 in-memory 缓存（与 §3.6 cache_version 协议对齐）
+//   - 写后触发 Registry.Refresh 同步本实例 in-memory 缓存
+//   - 写后/refresh 时递增 alarm:cache_version（dictloader §5.4 协议），
+//     触发其他实例 30s 轮询感知失效
 //   - 返回严重级反向查询结果给上层
 type Service struct {
 	repo     WriteRepository
 	registry *Registry
+	redis    redis.UniversalClient
 	logger   *zap.Logger
 }
 
 // NewService 构造 Service；registry 为 nil 时仅有 DB 直读直写（仍可工作，但
-// 缓存不刷）；生产路径必须传 Registry 实例。
-func NewService(repo WriteRepository, registry *Registry, logger *zap.Logger) *Service {
+// 缓存不刷）；rdb 为 nil 时跳过跨实例失效广播（单实例可接受）；生产路径必须传齐。
+func NewService(repo WriteRepository, registry *Registry, rdb redis.UniversalClient, logger *zap.Logger) *Service {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Service{repo: repo, registry: registry, logger: logger.Named("alarmdef.service")}
+	return &Service{repo: repo, registry: registry, redis: rdb, logger: logger.Named("alarmdef.service")}
+}
+
+// bumpCacheVersion 递增 alarm:cache_version（dictloader §5.4 标准协议），
+// 触发其他实例的 30s 轮询感知失效。redis 为 nil 时静默跳过。
+func (s *Service) bumpCacheVersion(ctx context.Context) {
+	if s.redis == nil {
+		return
+	}
+	s.redis.Incr(ctx, "alarm:cache_version")
 }
 
 // List 走过滤分页。
@@ -82,14 +95,20 @@ func (s *Service) UnknownStats(ctx context.Context, productID *uuid.UUID, days i
 }
 
 // RefreshCache 手动刷新（HTTP cache/refresh）。
+// 行为：本实例 Registry.Refresh + 跨实例 cache_version INCR。
 func (s *Service) RefreshCache(ctx context.Context) error {
 	if s.registry == nil {
 		return fmt.Errorf("registry not wired; cache refresh disabled")
 	}
-	return s.registry.Refresh(ctx)
+	if err := s.registry.Refresh(ctx); err != nil {
+		return err
+	}
+	s.bumpCacheVersion(ctx)
+	return nil
 }
 
 // refreshAsync 写路径完成后异步刷缓存；失败仅 WARN（DB 已落地，缓存最多落后一拍）。
+// 同时 INCR cache_version 通知其他实例。
 func (s *Service) refreshAsync(ctx context.Context, op, identifier string) {
 	if s.registry == nil {
 		return
@@ -101,4 +120,5 @@ func (s *Service) refreshAsync(ctx context.Context, op, identifier string) {
 			zap.Error(err),
 		)
 	}
+	s.bumpCacheVersion(ctx)
 }

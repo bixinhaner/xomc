@@ -547,8 +547,9 @@ func (h *RESTHandler) ImportDirectory(c *gin.Context) {
 }
 
 func (h *RESTHandler) CacheRefresh(c *gin.Context) {
-	// 指标 Registry 没有显式 Refresh 钩子；service 内部走 Redis 失效 + DB 直读。
-	// 调用 ListIndicators 一次即可触发缓存重建（cost 最小）。
-	// 这里直接返回 ok：业务上等价于"下次查询从 DB 重读"，与 Redis TTL 行为一致。
-	response.OK(c, gin.H{"refreshed": true, "note": "indicator service uses pull-through cache; next query reloads"})
+	// 触发跨实例失效：递增 indicator:cache_version（设计 §2.8 + dictloader §5.4 协议）。
+	// service 自身用 pull-through 缓存，本端实例下次查询从 DB 重读；其他实例 30s 内
+	// 轮询到 cache_version 变化后清空 L1 sync.Map。
+	h.svc.BumpCacheVersion(c.Request.Context())
+	response.OK(c, gin.H{"refreshed": true})
 }

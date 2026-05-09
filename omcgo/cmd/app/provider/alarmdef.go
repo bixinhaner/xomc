@@ -39,7 +39,7 @@ func initAlarmDefModule(c *Container) error {
 		logger.Warn("alarm-definition registry initial refresh failed; lookup will miss until reload")
 	}
 
-	service := alarmdef.NewService(repo, registry, logger)
+	service := alarmdef.NewService(repo, registry, c.Redis, logger)
 	reloader := &alarmDefReloader{reg: c.DictLoaderRegistry}
 	handler := alarmdef.NewHandler(service, reloader, logger)
 
