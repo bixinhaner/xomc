@@ -9,7 +9,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/core/components/logger"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
 
@@ -144,6 +146,15 @@ func RequirePermission(roleRepo PermissionChecker, resource, action string) gin.
 		ctx := c.Request.Context()
 		allowed, err := roleRepo.CheckPermission(ctx, userID, resource, action)
 		if err != nil {
+			// 把真实 err 写日志，前端只暴露通用 500 文案。常见根因：
+			//   - "casbin authorizer not configured"（启动期 Casbin 初始化失败）
+			//   - "casbin enforce: ..."（策略加载/匹配出错）
+			logger.L(ctx).Error("permission check failed",
+				zap.String("user_id", userID.String()),
+				zap.String("resource", resource),
+				zap.String("action", action),
+				zap.Error(err),
+			)
 			commonerrors.AbortWithError(c, http.StatusInternalServerError,
 				errors.New("permission check failed"))
 			return
@@ -202,6 +213,12 @@ func RequireAPIPermission(roleRepo PermissionChecker) gin.HandlerFunc {
 		ctx := c.Request.Context()
 		allowed, err := roleRepo.CheckPermission(ctx, userID, path, method)
 		if err != nil {
+			logger.L(ctx).Error("api permission check failed",
+				zap.String("user_id", userID.String()),
+				zap.String("path", path),
+				zap.String("method", method),
+				zap.Error(err),
+			)
 			commonerrors.AbortWithError(c, http.StatusInternalServerError,
 				errors.New("permission check failed"))
 			return
@@ -273,6 +290,12 @@ func RequireResourcePermission(roleRepo PermissionChecker, resource string) gin.
 		ctx := c.Request.Context()
 		allowed, err := roleRepo.CheckPermission(ctx, userID, resource, action)
 		if err != nil {
+			logger.L(ctx).Error("resource permission check failed",
+				zap.String("user_id", userID.String()),
+				zap.String("resource", resource),
+				zap.String("action", action),
+				zap.Error(err),
+			)
 			commonerrors.AbortWithError(c, http.StatusInternalServerError,
 				errors.New("permission check failed"))
 			return
