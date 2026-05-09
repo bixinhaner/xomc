@@ -19,10 +19,11 @@ import (
 
 // Handler provides HTTP handlers for license management REST API.
 type Handler struct {
-	service   *Service
-	logger    *zap.Logger
-	logWriter LogWriter            // T-0100-P0: 审计日志写入；nil 时退化为 NoopLogWriter
-	logRepo   LicenseLogRepository // T-0100-P1: GET /licenses/logs 端点读侧；nil 时返 503
+	service     *Service
+	logger      *zap.Logger
+	logWriter   LogWriter            // T-0100-P0: 审计日志写入；nil 时退化为 NoopLogWriter
+	logRepo     LicenseLogRepository // T-0100-P1: GET /licenses/logs 端点读侧；nil 时返 503
+	sigVerifier *SignatureVerifier   // T-0100-P4-C: OEM 公钥验签；nil 时退化为 P3 stub 行为
 }
 
 // NewHandler creates a new license Handler.
@@ -49,6 +50,12 @@ func (h *Handler) SetLogWriter(w LogWriter) {
 // GET /licenses/:id/logs 端点读取审计日志数据。
 func (h *Handler) SetLogRepo(repo LicenseLogRepository) {
 	h.logRepo = repo
+}
+
+// SetSignatureVerifier 注入 SignatureVerifier（T-0100-P4-C）。nil 等价于不开启
+// 强校验（保留 P3 stub "unverified" 行为，让 dev / 单元测试不挂依赖）。
+func (h *Handler) SetSignatureVerifier(v *SignatureVerifier) {
+	h.sigVerifier = v
 }
 
 // actorIDFromContext 从 gin.Context 取当前用户 UUID（admin middleware 设置）。
@@ -135,21 +142,28 @@ type ImportResponse struct {
 }
 
 // ImportRequest defines the request body for importing a new license.
+//
+// SignedLicenseJSON（T-0100-P4-C）：可选，原始签名 license JSON 文件内容。
+// 当存在时，handler 用 SignatureVerifier 做 RSA-PSS 验证；strict 模式下未通过
+// 直接拒绝；非 strict 模式下放过但反映 signature_status。其他结构化字段仍以
+// 显式传入为准（前端可能基于 file 解析后再让用户编辑），verifier 仅校验"原文
+// 是否被合法签名"，不强制 license 字段一致——这是审计 + 法务追责的设计取舍。
 type ImportRequest struct {
-	LicenseName string          `json:"license_name" binding:"required"`
-	LicenseCode string          `json:"license_code" binding:"required"`
-	ProductName string          `json:"product_name" binding:"required"`
-	LicenseType LicenseType     `json:"license_type"`
-	Status      LicenseStatus   `json:"status"`
-	MaxDevices  int             `json:"max_devices"`
-	UsedDevices int             `json:"used_devices"`
-	Features    json.RawMessage `json:"features"`
-	IssueDate   time.Time       `json:"issue_date" binding:"required"`
-	ExpiryDate  *time.Time      `json:"expiry_date"`
-	Licensor    *string         `json:"licensor"`
-	DeviceType  *string         `json:"device_type"`
-	Region      *string         `json:"region"`
-	Notes       *string         `json:"notes"`
+	LicenseName       string          `json:"license_name" binding:"required"`
+	LicenseCode       string          `json:"license_code" binding:"required"`
+	ProductName       string          `json:"product_name" binding:"required"`
+	LicenseType       LicenseType     `json:"license_type"`
+	Status            LicenseStatus   `json:"status"`
+	MaxDevices        int             `json:"max_devices"`
+	UsedDevices       int             `json:"used_devices"`
+	Features          json.RawMessage `json:"features"`
+	IssueDate         time.Time       `json:"issue_date" binding:"required"`
+	ExpiryDate        *time.Time      `json:"expiry_date"`
+	Licensor          *string         `json:"licensor"`
+	DeviceType        *string         `json:"device_type"`
+	Region            *string         `json:"region"`
+	Notes             *string         `json:"notes"`
+	SignedLicenseJSON string          `json:"signed_license_json,omitempty"`
 }
 
 // ---- Handlers ----
@@ -648,11 +662,41 @@ func (h *Handler) Import(c *gin.Context) {
 
 	actor := actorIDFromContext(c)
 
-	// T-0100-P3 / Q4=B：MVP 阶段先做签名 stub 校验，结果落响应 + zap.Warn
-	// （未签名/未配置公钥仍允许入库）。GA 前 P4-C 切实现，strict 模式拒绝。
-	sigStatus, sigNote := VerifySignature(nil)
+	// T-0100-P4-C：当 sigVerifier 注入时，对 SignedLicenseJSON 字段做 RSA-PSS 验签。
+	// strict=true：unverified/invalid 直接 400 拒绝；strict=false：放过但反映状态。
+	// 未注入 verifier（nil）或 SignedLicenseJSON 空 → 退化为 P3 stub 行为（unverified）。
+	var sigStatus SignatureStatus
+	var sigNote string
+	if h.sigVerifier != nil && req.SignedLicenseJSON != "" {
+		var sigErr error
+		sigStatus, sigNote, sigErr = h.sigVerifier.VerifyLicenseJSON([]byte(req.SignedLicenseJSON))
+		if sigErr != nil {
+			// strict 模式：写 failed 审计 + 400 拒绝
+			h.logWriter.Write(c.Request.Context(), LicenseLogEntry{
+				LogType:     LogTypeImport,
+				ActorUserID: actor,
+				Result:      LogResultFailed,
+				Details: map[string]any{
+					"summary":          "import rejected by strict signature verification",
+					"license_code":     req.LicenseCode,
+					"signature_status": string(sigStatus),
+					"signature_note":   sigNote,
+				},
+				ClientIP:  c.ClientIP(),
+				UserAgent: c.Request.UserAgent(),
+			})
+			commonerrors.AbortWithError(c, http.StatusBadRequest,
+				commonerrors.NewBusinessError(9109,
+					"license signature verification failed (strict mode): "+sigNote,
+					commonerrors.ErrInvalidInput))
+			return
+		}
+	} else {
+		// 退化：保持 P3 stub 行为（让没接 verifier 的部署仍可导入）。
+		sigStatus, sigNote = VerifySignature(nil)
+	}
 	if sigStatus != SignatureVerified {
-		h.logger.Warn("license import signature unverified (MVP P3, strict in P4-C)",
+		h.logger.Warn("license import signature unverified",
 			zap.String("license_code", req.LicenseCode),
 			zap.String("signature_status", string(sigStatus)),
 			zap.String("signature_note", sigNote),

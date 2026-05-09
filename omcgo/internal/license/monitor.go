@@ -74,11 +74,13 @@ var ExpiryWindowsDays = []struct {
 
 // Monitor runs the periodic expiry+capacity checks.
 type Monitor struct {
-	repo      LicenseRepository
-	sink      AlertSink
-	metrics   *EnforcementMetrics
-	logger    *zap.Logger
-	logWriter LogWriter // T-0100-P0：cron 触发的告警 / 自动过期审计
+	repo             LicenseRepository
+	sink             AlertSink
+	metrics          *EnforcementMetrics
+	logger           *zap.Logger
+	logWriter        LogWriter // T-0100-P0：cron 触发的告警 / 自动过期审计
+	archiver         *LogArchiver // T-0100-P4-B：license_logs 6 月归档；nil 时跳过
+	archiveSchedule  string       // T-0100-P4-B：归档 cron expression；空时不注册
 
 	cron   *cron.Cron
 	cancel context.CancelFunc
@@ -106,6 +108,16 @@ func (m *Monitor) SetLogWriter(w LogWriter) {
 		w = NoopLogWriter{}
 	}
 	m.logWriter = w
+}
+
+// SetArchiver 注入 LogArchiver（T-0100-P4-B）。nil 等价于不注册归档 cron。
+// schedule 为空时使用默认 "0 3 * * 0"（每周日 03:00 UTC）。
+func (m *Monitor) SetArchiver(a *LogArchiver, schedule string) {
+	m.archiver = a
+	if schedule == "" {
+		schedule = "0 3 * * 0"
+	}
+	m.archiveSchedule = schedule
 }
 
 // Start launches the cron schedule:
@@ -149,11 +161,31 @@ func (m *Monitor) Start(ctx context.Context) error {
 		return fmt.Errorf("schedule capacity check: %w", err)
 	}
 
+	// T-0100-P4-B：周级归档 cron。仅在 SetArchiver 注入后注册；超时 30min（PRD
+	// 没规定单 tick 上限，但批 10000 条 + gzip 压缩 + MinIO 上传 + DELETE 通常 <
+	// 几分钟，30min 是 generous 上限）。
+	if m.archiver != nil {
+		if _, err := m.cron.AddFunc(m.archiveSchedule, func() {
+			c, c2 := context.WithTimeout(scoped, 30*time.Minute)
+			defer c2()
+			if _, err := m.archiver.ArchiveOnce(c); err != nil {
+				m.logger.Warn("license log archive run failed", zap.Error(err))
+			}
+		}); err != nil {
+			return fmt.Errorf("schedule log archive: %w", err)
+		}
+	}
+
 	m.cron.Start()
-	m.logger.Info("license monitor cron started",
+	logFields := []zap.Field{
 		zap.String("expiry_schedule", "0 0 * * * UTC"),
 		zap.String("expiring_soon_schedule", "0 1 * * * UTC"),
-		zap.String("capacity_schedule", "0 * * * * (hourly)"))
+		zap.String("capacity_schedule", "0 * * * * (hourly)"),
+	}
+	if m.archiver != nil {
+		logFields = append(logFields, zap.String("archive_schedule", m.archiveSchedule))
+	}
+	m.logger.Info("license monitor cron started", logFields...)
 	return nil
 }
 

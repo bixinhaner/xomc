@@ -36,6 +36,15 @@ type LicenseLogRepository interface {
 	// （result='denied'，含 enforcement_capacity / enforcement_expiry）。
 	// 用于 Summary 卡片"近 N 天 enforcement 命中"统计。
 	CountDenialsSince(ctx context.Context, since time.Time) (int64, error)
+
+	// ListBefore 取 created_at < before 的日志，按 created_at ASC 排序，
+	// 至多 limit 条。T-0100-P4-B 归档 cron 用：分批读出、写 MinIO 后再 DeleteBefore。
+	// limit ≤ 0 时使用默认值 10000（单次归档上限，避免一次性吃满内存）。
+	ListBefore(ctx context.Context, before time.Time, limit int) ([]LicenseLog, error)
+
+	// DeleteBefore 删除 created_at < before 的日志，返回删除条数。
+	// 仅在 ListBefore + 归档落 MinIO 成功后调用；失败只删部分行不影响下次重试。
+	DeleteBefore(ctx context.Context, before time.Time) (int64, error)
 }
 
 // licenseLogColumns 全列清单（与 migration 000073 字段一致）。
@@ -203,6 +212,57 @@ func (r *PgLicenseLogRepository) CountDenialsSince(ctx context.Context, since ti
 		return 0, fmt.Errorf("count denials since %s: %w", since.Format(time.RFC3339), err)
 	}
 	return n, nil
+}
+
+// ListBefore 实现 LicenseLogRepository.ListBefore，按 created_at ASC 取早于
+// before 的最多 limit 条日志。归档 cron 用。
+func (r *PgLicenseLogRepository) ListBefore(ctx context.Context, before time.Time, limit int) ([]LicenseLog, error) {
+	if limit <= 0 {
+		limit = 10000
+	}
+	query, args, err := storage.Psql.Select(licenseLogColumns...).
+		From("license_logs").
+		Where(sq.Lt{"created_at": before}).
+		OrderBy("created_at ASC").
+		Limit(uint64(limit)).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list-before license_logs SQL: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query license_logs before %s: %w", before.Format(time.RFC3339), err)
+	}
+	defer rows.Close()
+
+	items := make([]LicenseLog, 0, limit)
+	for rows.Next() {
+		log, err := scanLicenseLog(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, *log)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate list-before rows: %w", err)
+	}
+	return items, nil
+}
+
+// DeleteBefore 实现 LicenseLogRepository.DeleteBefore，物理删除 created_at <
+// before 的全部日志。返回受影响行数（含 0）。
+func (r *PgLicenseLogRepository) DeleteBefore(ctx context.Context, before time.Time) (int64, error) {
+	query, args, err := storage.Psql.Delete("license_logs").
+		Where(sq.Lt{"created_at": before}).
+		ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build delete-before license_logs SQL: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("delete license_logs before %s: %w", before.Format(time.RFC3339), err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // ListByLicense 实现 LicenseLogRepository.ListByLicense，取单 license 最近 N 条。

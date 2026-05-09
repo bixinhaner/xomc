@@ -134,6 +134,50 @@ func (m *memLogRepo) ListByLicense(_ context.Context, licenseID uuid.UUID, limit
 	return out, nil
 }
 
+// ListBefore 模拟 PG 的 ASC 排序 + limit clamp；用于归档 cron 单测。
+func (m *memLogRepo) ListBefore(_ context.Context, before time.Time, limit int) ([]LicenseLog, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if limit <= 0 {
+		limit = 10000
+	}
+	out := make([]LicenseLog, 0)
+	for _, l := range m.logs {
+		if l.CreatedAt.Before(before) {
+			out = append(out, l)
+		}
+	}
+	// ASC by created_at（与 PG 行为一致）
+	for i := 0; i < len(out); i++ {
+		for j := i + 1; j < len(out); j++ {
+			if out[j].CreatedAt.Before(out[i].CreatedAt) {
+				out[i], out[j] = out[j], out[i]
+			}
+		}
+	}
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// DeleteBefore 模拟物理删除，返回受影响行数。
+func (m *memLogRepo) DeleteBefore(_ context.Context, before time.Time) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	kept := m.logs[:0]
+	deleted := int64(0)
+	for _, l := range m.logs {
+		if l.CreatedAt.Before(before) {
+			deleted++
+			continue
+		}
+		kept = append(kept, l)
+	}
+	m.logs = kept
+	return deleted, nil
+}
+
 func (m *memLogRepo) snapshot() []LicenseLog {
 	m.mu.Lock()
 	defer m.mu.Unlock()

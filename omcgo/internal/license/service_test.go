@@ -271,6 +271,12 @@ func (failingLogRepo) ListByLicense(_ context.Context, _ uuid.UUID, _ int) ([]Li
 func (failingLogRepo) CountDenialsSince(_ context.Context, _ time.Time) (int64, error) {
 	return 0, errors.New("simulated db down")
 }
+func (failingLogRepo) ListBefore(_ context.Context, _ time.Time, _ int) ([]LicenseLog, error) {
+	return nil, nil
+}
+func (failingLogRepo) DeleteBefore(_ context.Context, _ time.Time) (int64, error) {
+	return 0, nil
+}
 
 // --- Tests: Activate ---
 

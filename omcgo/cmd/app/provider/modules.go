@@ -436,6 +436,40 @@ func initMiscModules(c *Container) error {
 	licenseSvc.SetLogRepo(licenseLogRepo)      // T-0100-P2：让 Summary 卡 enforcement_hits_7d 走真实 count
 	c.miscDeps.licenseLogRepo = licenseLogRepo
 
+	// T-0100-P4-C：OEM 公钥加载 + 注入 SignatureVerifier。dev 默认 strict=false
+	// + 空 PublicKeyDir → 等价于 P3 stub（unverified 放过）；prod 推荐配置
+	// configs/oem_public_keys/*.pem + strict=true 收紧。
+	licenseVerifier := license.NewSignatureVerifier(c.Cfg.License.Signing.Strict)
+	if dir := c.Cfg.License.Signing.PublicKeyDir; dir != "" {
+		if loadErr := licenseVerifier.LoadKeysFromDir(dir); loadErr != nil {
+			logger.Warn("license OEM public key load reported errors (non-fatal)",
+				zap.String("dir", dir), zap.Error(loadErr))
+		}
+		logger.Info("license signature verifier loaded",
+			zap.String("dir", dir),
+			zap.Int("key_count", licenseVerifier.KeyCount()),
+			zap.Bool("strict", c.Cfg.License.Signing.Strict))
+	}
+	licenseHandler.SetSignatureVerifier(licenseVerifier)
+
+	// T-0100-P4-B：周级 license_logs 归档 cron。MinIO bucket 默认走 logs；
+	// retention=0 / nil minio / 空 bucket → 静默禁用归档（dev 友好）。
+	archiveBucket := c.Cfg.License.LogArchive.MinIOBucket
+	if archiveBucket == "" {
+		archiveBucket = c.Cfg.MinIO.Buckets.Logs
+	}
+	if c.Cfg.License.LogArchive.RetentionMonths > 0 && archiveBucket != "" && c.MinIO != nil {
+		licenseArchiver := license.NewLogArchiver(
+			licenseLogRepo, c.MinIO, archiveBucket,
+			c.Cfg.License.LogArchive.RetentionMonths, logger,
+		)
+		licenseMonitor.SetArchiver(licenseArchiver, c.Cfg.License.LogArchive.Schedule)
+		logger.Info("license log archive cron configured",
+			zap.Int("retention_months", c.Cfg.License.LogArchive.RetentionMonths),
+			zap.String("bucket", archiveBucket),
+			zap.String("schedule", c.Cfg.License.LogArchive.Schedule))
+	}
+
 	c.miscDeps.licenseHandler = licenseHandler
 	c.miscDeps.licenseEnforcer = licenseEnforcer
 	c.miscDeps.licenseMonitor = licenseMonitor
