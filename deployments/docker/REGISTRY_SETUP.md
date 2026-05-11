@@ -55,6 +55,69 @@ failed to do request: Head "https://registry-1.docker.io/...": dial tcp ... i/o 
 > ⚠️ **关键认知**：dockerd 和 BuildKit 是两个独立引擎，配置文件**不互通**。
 > 必须**两份**都配，否则 `docker compose build` 仍超时。
 
+### 3.0 TL;DR — 复制粘贴一气呵成
+
+新机器首次部署，按顺序运行下面整块（约 3-5 分钟）：
+
+```bash
+# === 1) 配 dockerd mirror + DNS ===
+sudo mkdir -p /etc/docker
+sudo tee /etc/docker/daemon.json >/dev/null <<'EOF'
+{
+  "registry-mirrors": [
+    "https://docker.m.daocloud.io",
+    "https://docker.1panel.live",
+    "https://hub.rat.dev",
+    "https://docker.nju.edu.cn"
+  ],
+  "dns": ["223.5.5.5", "223.6.6.6", "114.114.114.114"],
+  "dns-opts": ["timeout:2", "attempts:3"]
+}
+EOF
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+sleep 3
+
+# === 2) 配 BuildKit mirror ===
+sudo mkdir -p /etc/buildkit
+sudo tee /etc/buildkit/buildkitd.toml >/dev/null <<'EOF'
+[registry."docker.io"]
+  mirrors = [
+    "docker.m.daocloud.io",
+    "docker.1panel.live",
+    "hub.rat.dev",
+    "docker.nju.edu.cn"
+  ]
+EOF
+
+# === 3) 重建 buildx builder（network=host 关键！）===
+docker buildx rm omc-builder 2>/dev/null || true
+docker buildx create --name omc-builder \
+    --driver docker-container \
+    --config /etc/buildkit/buildkitd.toml \
+    --driver-opt network=host \
+    --use
+docker buildx inspect --bootstrap
+
+# === 4) 构建并启动 ===
+cd ~/code/goomc                                   # 调整为你的项目根目录
+docker compose -f deployments/docker/docker-compose.yml up -d --build
+```
+
+**踩坑点**：
+- 第 1 步与第 2 步**不能省略任一个**（daemon mirror 给 `docker pull` 用，BuildKit mirror 给 `docker compose build` 用，**互不共享**）
+- 第 3 步 `--driver-opt network=host` 是**关键**：让 buildkit 容器走宿主机网络栈，
+  使用宿主机 `/etc/resolv.conf` 解析 mirror 域名。不加这行的话，buildkit 容器内部
+  会用 daemon.json 的 `dns:` 字段（公网 DNS），公司网络通常挡 UDP 53 端口，会报：
+  ```
+  lookup docker.m.daocloud.io on 114.114.114.114:53: i/o timeout
+  ```
+- 全部 mirror 都不通时看 §4 连通性检测；公司网完全锁外看 §6.5
+
+下面 §3.1-§3.4 展开每一步的原理与验证。日常部署可以直接用上面 TL;DR，不需要逐段读。
+
+---
+
 ### 3.1 配 daemon 的 mirror（影响 `docker pull` + dockerd 内置 builder）
 
 ```bash
@@ -124,9 +187,15 @@ EOF
 docker buildx rm omc-builder 2>/dev/null || true
 
 # 用 docker-container driver 建新 builder，加载 buildkitd.toml
+# --driver-opt network=host 是关键：让 buildkit 容器共享宿主机网络栈，
+#   直接用宿主机的 /etc/resolv.conf 解析 mirror 域名，避免容器内 DNS
+#   走 daemon.json 配的 223.5.5.5/114.114.114.114 等公网 DNS（部分服务器
+#   到这些 DNS 的 UDP 53 端口被防火墙挡，会出现：
+#     lookup docker.m.daocloud.io on 114.114.114.114:53: i/o timeout）
 docker buildx create --name omc-builder \
     --driver docker-container \
     --config /etc/buildkit/buildkitd.toml \
+    --driver-opt network=host \
     --use
 
 # bootstrap：触发拉取 moby/buildkit 镜像并启动 buildkitd 容器
@@ -207,6 +276,7 @@ https://hub.uuuadc.top
 |---|---|---|
 | `failed to resolve source metadata for docker.io/library/alpine:3.19` `dial tcp ...:443: i/o timeout` | BuildKit 拉 base image 直接走 docker.io | §3.2 + §3.3 |
 | `resolve image config for docker-image://docker.io/docker/dockerfile:1` | BuildKit 拉 syntax frontend 走 docker.io | §3.2 + §3.3 |
+| `Head "https://docker.m.daocloud.io/v2/..." dial tcp: lookup docker.m.daocloud.io on 114.114.114.114:53: ... i/o timeout` | BuildKit mirror **已生效**，但容器内查公网 DNS 端口 53 不通（防火墙 / 网络隔离） | §3.3 加 `--driver-opt network=host`；详见 §6.5 |
 | `the --mount option requires BuildKit` | 关了 BuildKit（设了 `DOCKER_BUILDKIT=0`） | `unset DOCKER_BUILDKIT COMPOSE_DOCKER_CLI_BUILD` 恢复 |
 | `dial tcp: lookup mirrors.aliyun.com on 53: i/o timeout` | 容器内 DNS 失败（端口 53） | 参 [DOCKER_DNS_FIX.md](./DOCKER_DNS_FIX.md)，不是 mirror 问题 |
 | `go: ... mirrors.aliyun.com... no such host` | 同上，DNS 问题 | 同上 |
@@ -238,7 +308,43 @@ docker buildx ls
 
 BuildKit 的 mirror 列表是**顺序尝试**，第一个 mirror 慢/挂会拖慢整体。先 §4 检测，把不通的删掉。
 
-### 6.4 「断网 / 完全离线机房」
+### 6.4 「mirror 配生效了，但容器内解析 mirror 域名超时」
+
+错误形如：
+
+```
+Head "https://docker.m.daocloud.io/v2/...":
+dial tcp: lookup docker.m.daocloud.io on 114.114.114.114:53: i/o timeout
+```
+
+注意 URL 里已经是 mirror 域名 → 说明 §3.2 buildkitd.toml 已生效；问题在**容器内 DNS 解析**：
+buildkit 容器走的是 daemon.json `dns:` 字段配的 223.5.5.5 / 114.114.114.114 等公网 DNS，
+但这台服务器到这些 DNS 的 UDP 53 端口不通（常见于公司网防火墙）。
+
+修法：让 buildkit 容器**共享宿主机网络**，直接用宿主机的 `/etc/resolv.conf` 解析。重建 builder：
+
+```bash
+docker buildx rm omc-builder
+docker buildx create --name omc-builder \
+    --driver docker-container \
+    --config /etc/buildkit/buildkitd.toml \
+    --driver-opt network=host \
+    --use
+docker buildx inspect --bootstrap
+```
+
+关键就是 `--driver-opt network=host` 这一行。**§3.3 已经默认带上**，本节是给"老 builder 没加"的情况补救。
+
+验证宿主机能正常解析 mirror：
+
+```bash
+# 不应该 timeout
+dig +short docker.m.daocloud.io
+```
+
+如果宿主机自己也 timeout → 公司网完全锁外，看 §6.5。
+
+### 6.5 「断网 / 完全离线机房」
 
 部分客户机房完全无外网。两条路：
 1. 客户提供内网 harbor（你这边把 daemon.json 的 mirror 改成内网 harbor URL）
