@@ -9,9 +9,10 @@ import (
 )
 
 // TestCases_CategoryCounts pins the per-category case counts so accidental
-// deletions / merges are caught immediately. Counts come from T-0030 Phase 2
-// targets (PRD §7 修订门槛): DM=7 / Protocol=8 / RPC=17 / Inform=5 (total 37).
-// Phase 1 baseline was DM=6 / Protocol=7 / RPC=13 / Inform=4 (total 30).
+// deletions / merges are caught immediately. Counts after T-0114 fault-inject
+// category (PRD §8 Phase 2 option): DM=7 / Protocol=8 / RPC=17 / Inform=5 /
+// FaultInject=4 (total 41). Phase 1 baseline was 30; Phase 2 second-negative
+// + carrier private RPC raised to 37; T-0114 fault-inject adds 4.
 func TestCases_CategoryCounts(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -23,6 +24,7 @@ func TestCases_CategoryCounts(t *testing.T) {
 		{"protocol", ProtocolCases(), 8, interop.CategoryProtocol},
 		{"rpc", RPCCases(), 17, interop.CategoryRPC},
 		{"inform", InformCases(), 5, interop.CategoryInform},
+		{"fault_inject", FaultInjectCases(), 4, interop.CategoryFaultInject},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -37,23 +39,30 @@ func TestCases_CategoryCounts(t *testing.T) {
 // TestCases_NegativePathPerCategory enforces PRD §7 Phase 2 修订门槛
 // "每 category 至少 2 个 negative path" — guards against regressions where
 // negative tests get deleted while well-meaning contributors trim suites.
-// Phase 1 baseline was ≥ 1; Phase 2 raised to ≥ 2.
+// Phase 1 baseline was ≥ 1; Phase 2 raised to ≥ 2; fault_inject treated
+// looser (≥ 1) since the entire category serves as fault tooling.
 func TestCases_NegativePathPerCategory(t *testing.T) {
-	categories := map[string][]interop.TestCase{
-		"datamodel": DataModelCases(),
-		"protocol":  ProtocolCases(),
-		"rpc":       RPCCases(),
-		"inform":    InformCases(),
+	categories := []struct {
+		name    string
+		cases   []interop.TestCase
+		minNeg  int
+		comment string
+	}{
+		{"datamodel", DataModelCases(), 2, "PRD §7 Phase 2"},
+		{"protocol", ProtocolCases(), 2, "PRD §7 Phase 2"},
+		{"rpc", RPCCases(), 2, "PRD §7 Phase 2"},
+		{"inform", InformCases(), 2, "PRD §7 Phase 2"},
+		{"fault_inject", FaultInjectCases(), 1, "T-0114: whole category is fault tooling; ≥1 negative suffices"},
 	}
-	for name, cases := range categories {
-		t.Run(name, func(t *testing.T) {
+	for _, cat := range categories {
+		t.Run(cat.name, func(t *testing.T) {
 			negCount := 0
-			for _, c := range cases {
+			for _, c := range cat.cases {
 				if c.ExpectedOutcome == "fail" {
 					negCount++
 				}
 			}
-			assert.GreaterOrEqual(t, negCount, 2, "%s must contain at least two negative path cases (PRD §7 Phase 2)", name)
+			assert.GreaterOrEqual(t, negCount, cat.minNeg, "%s must contain at least %d negative path case(s) (%s)", cat.name, cat.minNeg, cat.comment)
 		})
 	}
 }
@@ -63,11 +72,12 @@ func TestCases_NegativePathPerCategory(t *testing.T) {
 // The runner has no carrier-specific code branches (§16.4); coverage is
 // declared via "Carrier: <code>" prefix in Description per PRD §9.6.
 func TestCases_CarrierCoverage(t *testing.T) {
-	all := append(append(append(
+	all := append(append(append(append(
 		DataModelCases(),
 		ProtocolCases()...),
 		RPCCases()...),
-		InformCases()...)
+		InformCases()...),
+		FaultInjectCases()...)
 
 	carriers := map[string]bool{"cmcc": false, "ctcc": false, "cucc": false}
 	for _, c := range all {
@@ -96,11 +106,12 @@ func containsTag(haystack, needle string) bool {
 // globally unique across categories, and (b) ExpectedOutcome only takes the
 // documented values "", "pass", or "fail".
 func TestCases_IDsUniqueAndExpectedOutcomeValid(t *testing.T) {
-	all := append(append(append(
+	all := append(append(append(append(
 		DataModelCases(),
 		ProtocolCases()...),
 		RPCCases()...),
-		InformCases()...)
+		InformCases()...),
+		FaultInjectCases()...)
 
 	seen := make(map[string]string, len(all))
 	for _, c := range all {
@@ -120,6 +131,6 @@ func TestCases_IDsUniqueAndExpectedOutcomeValid(t *testing.T) {
 		assert.NotEmpty(t, c.Name, "case %s has no Name", c.ID)
 	}
 
-	// Sanity: total count matches PRD §7 Phase 2 修订门槛 "≥ 35".
-	assert.GreaterOrEqual(t, len(all), 35, "total case count fell below PRD §7 Phase 2 threshold")
+	// Sanity: total count after T-0114 fault-inject category (≥ 39).
+	assert.GreaterOrEqual(t, len(all), 39, "total case count fell below T-0114 threshold (37 Phase 2 + 4 fault-inject - 2 buffer)")
 }

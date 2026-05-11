@@ -309,6 +309,7 @@ func initInteropModule(c *Container) error {
 	testRunner.RegisterCases(cases.DataModelCases())
 	testRunner.RegisterCases(cases.RPCCases())
 	testRunner.RegisterCases(cases.InformCases())
+	testRunner.RegisterCases(cases.FaultInjectCases())
 	dmValidator := interop.NewDataModelValidator(c.ParamRegistry, c.ProductRegistry, c.ParamRepo, c.DeviceRepo, logger)
 	interopHandler := interop.NewHandler(testRunner, dmValidator, logger)
 

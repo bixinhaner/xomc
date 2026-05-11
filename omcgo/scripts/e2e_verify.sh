@@ -5679,6 +5679,14 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
     -H "Content-Type: application/json" -d '{"device_sn":"'$W2D_BAD_UUID'"}')
 check_status_in "W2D iop-9: POST /interop/run/report?format=csv" "200 400 404 401" "$HTTP_CODE"
 
+# T-0114 fault-inject category — new 5th category routes through the same
+# RunByCategory path; verify the category name passes IsValid().
+claim "interop: run fault_inject category (T-0114) returns 200/400/404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/interop/run/fault_inject" -H "$W2D_AUTH" \
+    -H "Content-Type: application/json" -d '{"device_sn":"'$W2D_BAD_UUID'"}')
+check_status_in "W2D iop-10: POST /interop/run/fault_inject" "200 400 404 401" "$HTTP_CODE"
+
 # ------------------------------------------------------------
 section "W2.D.1 alarm 补充 — Library / Filter / History (≥ 5 claims)"
 

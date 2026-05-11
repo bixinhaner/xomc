@@ -6,21 +6,22 @@ import "time"
 type TestCategory string
 
 const (
-	CategoryProtocol  TestCategory = "protocol"
-	CategoryDataModel TestCategory = "datamodel"
-	CategoryRPC       TestCategory = "rpc"
-	CategoryInform    TestCategory = "inform"
+	CategoryProtocol    TestCategory = "protocol"
+	CategoryDataModel   TestCategory = "datamodel"
+	CategoryRPC         TestCategory = "rpc"
+	CategoryInform      TestCategory = "inform"
+	CategoryFaultInject TestCategory = "fault_inject" // T-0114: 故障注入用例
 )
 
 // ValidTestCategories returns all supported test categories.
 func ValidTestCategories() []TestCategory {
-	return []TestCategory{CategoryProtocol, CategoryDataModel, CategoryRPC, CategoryInform}
+	return []TestCategory{CategoryProtocol, CategoryDataModel, CategoryRPC, CategoryInform, CategoryFaultInject}
 }
 
 // IsValid checks whether the category is a recognized test category.
 func (c TestCategory) IsValid() bool {
 	switch c {
-	case CategoryProtocol, CategoryDataModel, CategoryRPC, CategoryInform:
+	case CategoryProtocol, CategoryDataModel, CategoryRPC, CategoryInform, CategoryFaultInject:
 		return true
 	}
 	return false
