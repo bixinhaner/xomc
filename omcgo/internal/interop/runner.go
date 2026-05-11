@@ -161,13 +161,21 @@ func (r *ConformanceTestRunner) RunByCategory(ctx context.Context, deviceSN stri
 }
 
 // runTestCase executes a single test case and returns the result.
+//
+// For TestCase.ExpectedOutcome == "fail" (negative path), the pass/fail
+// verdict is inverted at the end: all-steps-passing becomes failed
+// ("negative case unexpectedly passed") and any step failing becomes
+// passed ("expected failure observed"). This lets case library authors
+// validate the runner's ability to detect bad inputs without adding a
+// new action type.
 func (r *ConformanceTestRunner) runTestCase(ctx context.Context, dev *model.Device, tc TestCase) TestResult {
 	start := time.Now()
 	result := TestResult{
-		TestCaseID: tc.ID,
-		TestName:   tc.Name,
-		Category:   tc.Category,
-		Passed:     true,
+		TestCaseID:      tc.ID,
+		TestName:        tc.Name,
+		Category:        tc.Category,
+		Passed:          true,
+		ExpectedOutcome: tc.ExpectedOutcome,
 	}
 
 	for _, step := range tc.Steps {
@@ -183,6 +191,20 @@ func (r *ConformanceTestRunner) runTestCase(ctx context.Context, dev *model.Devi
 	if result.Passed {
 		result.Details = "All steps passed"
 	}
+
+	if tc.ExpectedOutcome == "fail" {
+		if result.Passed {
+			result.Passed = false
+			result.Error = "negative case unexpectedly passed all steps"
+			result.Details = "Expected failure but all steps passed (negative path broken)"
+		} else {
+			originalErr := result.Error
+			result.Passed = true
+			result.Error = ""
+			result.Details = "Expected failure observed: " + originalErr
+		}
+	}
+
 	result.Duration = time.Since(start)
 	return result
 }

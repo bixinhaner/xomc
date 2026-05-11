@@ -5611,7 +5611,7 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
 check_status_in "W2D prov-3: POST /provisioning/tasks/<not-found>/retry" "404 401 400" "$HTTP_CODE"
 
 # ------------------------------------------------------------
-section "W2.D.1 interop Domain (≥ 3 claims)"
+section "W2.D.1 interop Domain (≥ 6 claims — T-0030 Phase 1 expansion)"
 
 claim "interop: list test cases returns 200/401"
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
@@ -5628,6 +5628,27 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
     "$API/interop/run/unknown-category-w2d" -H "$W2D_AUTH" \
     -H "Content-Type: application/json" -d '{}')
 check_status_in "W2D iop-3: POST /interop/run/<unknown>" "404 400 200 401" "$HTTP_CODE"
+
+# T-0030 Phase 1 expansion (PRD §3 V4): per-category run endpoints reachable.
+# These claims do not require a real device — they probe that the route
+# multiplexer accepts each category and rejects unknown bodies properly.
+claim "interop: run protocol category returns 200/400/404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/interop/run/protocol" -H "$W2D_AUTH" \
+    -H "Content-Type: application/json" -d '{"device_sn":"'$W2D_BAD_UUID'"}')
+check_status_in "W2D iop-4: POST /interop/run/protocol" "200 400 404 401" "$HTTP_CODE"
+
+claim "interop: run datamodel category returns 200/400/404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/interop/run/datamodel" -H "$W2D_AUTH" \
+    -H "Content-Type: application/json" -d '{"device_sn":"'$W2D_BAD_UUID'"}')
+check_status_in "W2D iop-5: POST /interop/run/datamodel" "200 400 404 401" "$HTTP_CODE"
+
+claim "interop: run inform category (T-0030 new) returns 200/400/404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/interop/run/inform" -H "$W2D_AUTH" \
+    -H "Content-Type: application/json" -d '{"device_sn":"'$W2D_BAD_UUID'"}')
+check_status_in "W2D iop-6: POST /interop/run/inform" "200 400 404 401" "$HTTP_CODE"
 
 # ------------------------------------------------------------
 section "W2.D.1 alarm 补充 — Library / Filter / History (≥ 5 claims)"

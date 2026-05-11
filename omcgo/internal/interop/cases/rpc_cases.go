@@ -227,5 +227,104 @@ func RPCCases() []interop.TestCase {
 				},
 			},
 		},
+		{
+			ID:          "RPC-010",
+			Name:        "Upload",
+			Description: "Verify the device supports the Upload RPC method (used for log / config / PM file collection from device → OMC)",
+			Category:    interop.CategoryRPC,
+			Steps: []interop.TestStep{
+				{
+					Order:       1,
+					Description: "Enqueue an Upload command",
+					Action:      "send_rpc",
+					Params: map[string]interface{}{
+						"method": "Upload",
+					},
+				},
+				{
+					Order:       2,
+					Description: "Verify command was enqueued successfully",
+					Action:      "verify_response",
+					Params: map[string]interface{}{
+						"check": "command_queued",
+					},
+				},
+			},
+		},
+		{
+			ID:          "RPC-011",
+			Name:        "ScheduleInform",
+			Description: "Verify the device supports the ScheduleInform RPC method (used to trigger an on-demand Inform after a delay)",
+			Category:    interop.CategoryRPC,
+			Steps: []interop.TestStep{
+				{
+					Order:       1,
+					Description: "Enqueue a ScheduleInform command",
+					Action:      "send_rpc",
+					Params: map[string]interface{}{
+						"method": "ScheduleInform",
+					},
+				},
+				{
+					Order:       2,
+					Description: "Verify command was enqueued successfully",
+					Action:      "verify_response",
+					Params: map[string]interface{}{
+						"check": "command_queued",
+					},
+				},
+			},
+		},
+		{
+			ID:          "RPC-012",
+			Name:        "GetRPCMethods",
+			Description: "Verify the device supports the GetRPCMethods RPC (interoperability discovery — lets OMC enumerate what the device implements)",
+			Category:    interop.CategoryRPC,
+			Steps: []interop.TestStep{
+				{
+					Order:       1,
+					Description: "Enqueue a GetRPCMethods command",
+					Action:      "send_rpc",
+					Params: map[string]interface{}{
+						"method": "GetRPCMethods",
+					},
+				},
+				{
+					Order:       2,
+					Description: "Verify command was enqueued successfully",
+					Action:      "verify_response",
+					Params: map[string]interface{}{
+						"check": "command_queued",
+					},
+				},
+			},
+		},
+		{
+			// Negative path: probes runner reaction to an unknown verify_response check.
+			// Validates PRD §3 V3 "失败路径可识别".
+			ID:              "RPC-013",
+			Name:            "Negative — Verify Response With Unknown Check",
+			Description:     "Negative path: verify_response with an unrecognized check keyword; runner must surface 'unknown verify_response check' error. Pass = error correctly surfaced",
+			Category:        interop.CategoryRPC,
+			ExpectedOutcome: "fail",
+			Steps: []interop.TestStep{
+				{
+					Order:       1,
+					Description: "Enqueue a known-good RPC (Reboot) — step expected to pass",
+					Action:      "send_rpc",
+					Params: map[string]interface{}{
+						"method": "Reboot",
+					},
+				},
+				{
+					Order:       2,
+					Description: "Invoke verify_response with check=no_such_check — expected to fail",
+					Action:      "verify_response",
+					Params: map[string]interface{}{
+						"check": "no_such_check",
+					},
+				},
+			},
+		},
 	}
 }

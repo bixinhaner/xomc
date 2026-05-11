@@ -431,3 +431,83 @@ func TestTestResult_JSON(t *testing.T) {
 	assert.Contains(t, string(data), `"test_case_id":"PROTO-001"`)
 	assert.Contains(t, string(data), `"passed":true`)
 }
+
+// TestRunTestCase_NegativePath_ExpectedFailureObserved verifies that a TestCase
+// with ExpectedOutcome="fail" returns Passed=true when a step actually fails,
+// and Details surface the original error for downstream inspection.
+//
+// T-0030 V3: negative path 用例 — 验收 §3 V3 "失败路径可识别"。
+func TestRunTestCase_NegativePath_ExpectedFailureObserved(t *testing.T) {
+	devRepo := newMockDeviceRepo(newTestDevice())
+	paramRepo := newMockParamRepo()
+	cmdQ := newMockCmdQueue()
+	logger := zap.NewNop()
+	runner := NewConformanceTestRunner(devRepo, paramRepo, nil, nil, cmdQ, logger)
+
+	negCase := TestCase{
+		ID: "NEG-001", Name: "Negative — Unknown Check", Category: CategoryProtocol,
+		ExpectedOutcome: "fail",
+		Steps: []TestStep{
+			{Order: 1, Action: "check_param", Params: map[string]interface{}{"check": "no_such_check_type"}},
+		},
+	}
+	runner.RegisterCases([]TestCase{negCase})
+
+	results, err := runner.RunByCategory(context.Background(), "TEST-SN-001", CategoryProtocol)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+
+	r := results[0]
+	assert.True(t, r.Passed, "negative case should be marked passed when step fails as expected")
+	assert.Empty(t, r.Error, "Error should be cleared after expected failure")
+	assert.Contains(t, r.Details, "Expected failure observed")
+	assert.Contains(t, r.Details, "unknown check type")
+	assert.Equal(t, "fail", r.ExpectedOutcome)
+}
+
+// TestRunTestCase_NegativePath_UnexpectedPassFails verifies that a TestCase
+// with ExpectedOutcome="fail" is marked failed when all steps unexpectedly pass.
+func TestRunTestCase_NegativePath_UnexpectedPassFails(t *testing.T) {
+	devRepo := newMockDeviceRepo(newTestDevice())
+	paramRepo := newMockParamRepo()
+	cmdQ := newMockCmdQueue()
+	logger := zap.NewNop()
+	runner := NewConformanceTestRunner(devRepo, paramRepo, nil, nil, cmdQ, logger)
+
+	negCase := TestCase{
+		ID: "NEG-002", Name: "Negative — All Steps Pass", Category: CategoryProtocol,
+		ExpectedOutcome: "fail",
+		Steps: []TestStep{
+			{Order: 1, Action: "check_param", Params: map[string]interface{}{"field": "serial_number", "check": "not_empty"}},
+		},
+	}
+	runner.RegisterCases([]TestCase{negCase})
+
+	results, err := runner.RunByCategory(context.Background(), "TEST-SN-001", CategoryProtocol)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+
+	r := results[0]
+	assert.False(t, r.Passed, "negative case should be marked failed when no step actually fails")
+	assert.Contains(t, r.Error, "negative case unexpectedly passed")
+	assert.Equal(t, "fail", r.ExpectedOutcome)
+}
+
+// TestRunTestCase_DefaultPassSemanticsUnchanged verifies that omitting
+// ExpectedOutcome preserves the pre-T-0030 behavior (pass = all steps pass).
+func TestRunTestCase_DefaultPassSemanticsUnchanged(t *testing.T) {
+	devRepo := newMockDeviceRepo(newTestDevice())
+	paramRepo := newMockParamRepo()
+	cmdQ := newMockCmdQueue()
+	logger := zap.NewNop()
+	runner := NewConformanceTestRunner(devRepo, paramRepo, nil, nil, cmdQ, logger)
+	runner.RegisterCases(testProtocolCases())
+
+	results, err := runner.RunByCategory(context.Background(), "TEST-SN-001", CategoryProtocol)
+	require.NoError(t, err)
+	require.Len(t, results, 3)
+	for _, r := range results {
+		assert.True(t, r.Passed)
+		assert.Empty(t, r.ExpectedOutcome, "default cases should have empty ExpectedOutcome")
+	}
+}
