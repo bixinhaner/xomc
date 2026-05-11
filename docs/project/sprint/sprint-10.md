@@ -62,11 +62,15 @@
 
 ## 5. 每日进展（Daily Standup，可选）
 
-**2026-05-11 周日**（Sprint 启动前预热）：T-0090 S2 拆分完成（commit `a71ab4a9`）；T-0097 pre-pick 调研 + S3 实施 + S4 typecheck + S6 commit `5b281b06`（AddTemplateModal 切 App.useApp() scoped messageApi）+ S7 backlog state-writeback → done。两个 sprint-10 deliverable 提前完成；剩余 sprint 工作日全部留给 T-0030 F10 用例库扩充
-**2026-05-12 周一**：T-0030 F10 用例库扩充 D1
-**2026-05-13 周二**：T-0030 D2
-**2026-05-14 周三**：T-0030 D3
-...
+**2026-05-11 周日**（Sprint 启动前预热 — 三 deliverable 全闭）：
+- T-0090 S2 拆分完成（commit `a71ab4a9`）
+- T-0097 pre-pick 调研 + S3 实施 + S4 typecheck + S6 commit `5b281b06`（AddTemplateModal 切 App.useApp()）+ S7 → done
+- T-0030 S0/S1/S2 立项（commit `533ea232`，PRD `F10-interop-testing-coverage.md` 250 行）+ ULTRATHINK F06 ops 需求现状分析 + sprint-11 draft + T-0113 登记（commit `1d41c39b`）+ T-0030 S3-S7 实施（commit `92a3eb76`，diff +633/-17）— **Phase 1 done**
+
+**单晚完成 sprint-10 全部三 deliverable**（T-0090/T-0097/T-0030），sprint 14 天窗口可全部空出做 Phase 2 / sprint-11 提前启动 / 富余 task。
+
+**2026-05-12 周一**（可选）：sprint-11 plan 提前 + T-0090 sub-task 提前启动 / 或 T-0030 Phase 2 启动（运营商私有用例 / 设备矩阵 / 报告 export）
+**2026-05-25 周日**：sprint-10 正式 close + sprint-11 plan
 
 ---
 

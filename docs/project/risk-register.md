@@ -425,19 +425,19 @@
 - **状态**：Open
 
 ### R-202 F10 互操作用例库稀疏
-- **描述**：仅 RPC/Protocol/DataModel 三类（14 用例），无 Inform category，无 negative path，无运营商参数化矩阵，无失败路径用例。GA 阶段交付给客户时如出现"用 OMC 内置互操作工具仍漏检产线问题"会损害商用形象。
+- **描述**：原状仅 RPC/Protocol/DataModel 三类（14 用例），无 Inform category，无 negative path，无运营商参数化矩阵。GA 阶段交付给客户时如出现"用 OMC 内置互操作工具仍漏检产线问题"会损害商用形象。
 - **等级**：P2
 - **概率**：中
 - **影响**：客户验收阶段 OMC 互操作能力被质疑、口碑风险
 - **Owner**：测试专家
-- **状态**：Open（计划 sprint-10 闭环到 Mitigating，sprint-11+ Phase 2 后 Closed）
-- **关联 Task**：T-0030（F10 互操作用例库扩充 — sprint-10 Phase 1 进行中）
+- **状态**：**Mitigating**（2026-05-11 — T-0030 Phase 1 完成 commit `92a3eb76`，Phase 2 留 sprint-11+ 后可降到 Closed）
+- **关联 Task**：T-0030（F10 互操作用例库扩充 — Phase 1 done 2026-05-11，Phase 2 待启）
 - **缓解路径**：
-  - Phase 1（T-0030 sprint-10 内）：用例 14→≥30 + 新建 Inform category + 引入 negative path 机制 + e2e 断言 3→≥6
-  - Phase 2（后续 sprint，可选）：运营商私有用例（X_CMCC_* / X_CT-COM_* / X_CU-COM_*）+ 设备型号矩阵参数化 + 验收报告 export
-  - 关闭门槛：用例 ≥ 50 + 4 category 全覆盖 + 各 category ≥ 2 个 negative path + e2e ≥ 10 claim
+  - ✅ Phase 1（T-0030 done 2026-05-11）：用例 14→30（DM 2→6 / Protocol 3→7 / RPC 9→13 / Inform 0→4 新建）+ ExpectedOutcome 翻转机制（4 个 negative path：每类 ≥ 1）+ e2e 断言 3→6 + 10 新单测
+  - Phase 2（sprint-11+ 可选）：运营商私有用例（X_CMCC_* / X_CT-COM_* / X_CU-COM_*）+ 设备型号矩阵参数化 + 验收报告 export
+  - 关闭门槛（→ Closed）：用例 ≥ 50 + 4 category 全覆盖（已 ✅）+ 各 category ≥ 2 个 negative path（当前每类仅 1，差 1）+ e2e ≥ 10 claim（当前 6，差 4）
 - **关联 PRD**：`docs/project/prd/F10-interop-testing-coverage.md`
-- **下次复盘**：sprint-10 close 时（2026-05-25）
+- **下次复盘**：sprint-11 plan 时（2026-05-26）评估是否启动 Phase 2
 
 ### R-203 CAPTCHA 图形生成待补
 - **描述**：admin 模块仅端点，无图形生成
