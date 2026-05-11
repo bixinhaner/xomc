@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Modal, Form, Input, Select, Button, message, Space, InputNumber, Switch } from 'antd';
+import { App, Modal, Form, Input, Select, Button, Space, InputNumber, Switch } from 'antd';
 import { useCreateMMLTemplate } from '@core/hooks/api/useMML';
 import { useAllMMLCommands } from '@core/hooks/api/useMML';
 import { useDictionary } from '@core/hooks/api/useSystem';
@@ -16,6 +16,9 @@ interface AddTemplateModalProps {
 
 export default function AddTemplateModal({ open, scope, onClose, onSuccess, onSaveAndExecute }: AddTemplateModalProps) {
   const t = useT();
+  // antd v5：在 Modal/Drawer 嵌套场景下静态 message 调用会脱离 ConfigProvider/App
+  // 上下文导致提示丢失（T-0097）。统一改走 App.useApp() 的 scoped messageApi。
+  const { message } = App.useApp();
 
   const OPERATION_TYPE_OPTIONS = [
     { label: t('mml.console.opTypeLST'), value: 'LST' },
