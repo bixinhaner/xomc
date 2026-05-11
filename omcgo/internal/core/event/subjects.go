@@ -338,6 +338,13 @@ const (
 	// SubjectOSSConfigSnapshot 是配置快照需对外同步时发布。
 	// 发布者：provision.Engine，订阅者：北向模块 Sync Service
 	SubjectOSSConfigSnapshot = "oss.config.snapshot"
+
+	// SubjectNorthboundServerChanged 是北向主备 OSS 服务器配置变更时发布
+	// （SetActive 切换 / Update 修改 host/port）。
+	// 发布者：northbound.ServerService，订阅者：northbound.push.Engine
+	// 触发 push engine 调用 RefreshActiveTarget(ctx) reload 推送目标（T-0099）。
+	// Payload Data: {"role":"primary|standby","action":"active_switch|update","host":"...","port":N}
+	SubjectNorthboundServerChanged = "northbound.server.changed"
 )
 
 // NE Direct events

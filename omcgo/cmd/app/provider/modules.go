@@ -279,11 +279,19 @@ func initNorthboundModule(c *Container) error {
 
 	// 主备 OSS 服务器配置 + 切换（system/config 北向设置页消费）。
 	// 配置面与数据面分离：nbService 管数据导出 / 推送 / 同步；ServerService 管
-	// active 组配置 (primary <-> standby)。后续 wave push engine 接入 active server
-	// 后即可实现"切换即生效"。
+	// active 组配置 (primary <-> standby)。
+	// T-0099: ServerService 注入 EventBus，SetActive/Update 后发
+	// SubjectNorthboundServerChanged → push engine 订阅 reload 关闭"切换即生效"环。
 	nbServerRepo := northbound.NewPgServerRepository(c.PgPool)
-	nbServerSvc := northbound.NewServerService(nbServerRepo, logger)
+	nbServerSvc := northbound.NewServerService(nbServerRepo, c.EventBus, logger)
 	nbRouter.SetServerService(nbServerSvc)
+
+	// T-0099: push engine 接入 active server provider + 启动期 refresh 兜底。
+	// 失败仅 warn（dev 环境 northbound_servers 表可能空），不阻塞启动。
+	pushEngine.SetActiveServerProvider(nbServerSvc)
+	if err := pushEngine.RefreshActiveTarget(context.Background()); err != nil {
+		logger.Warn("initial active target refresh failed", zap.Error(err))
+	}
 
 	c.miscDeps.nbRouter = nbRouter
 

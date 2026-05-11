@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/event"
 )
 
 // fakeServerRepo 简易内存实现，便于 table-driven 测试。
@@ -89,7 +90,7 @@ func newTestServers(activeRole ServerRole) []Server {
 
 func TestServerService_List(t *testing.T) {
 	repo := &fakeServerRepo{servers: newTestServers(ServerRolePrimary)}
-	svc := NewServerService(repo, zap.NewNop())
+	svc := NewServerService(repo, nil, zap.NewNop())
 
 	got, err := svc.List(context.Background())
 	require.NoError(t, err)
@@ -114,7 +115,7 @@ func TestServerService_GetActive(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &fakeServerRepo{servers: newTestServers(tc.active)}
-			svc := NewServerService(repo, zap.NewNop())
+			svc := NewServerService(repo, nil, zap.NewNop())
 			got, err := svc.GetActive(context.Background())
 			require.NoError(t, err)
 			if tc.wantNil {
@@ -143,7 +144,7 @@ func TestServerService_SetActive(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &fakeServerRepo{servers: newTestServers(tc.initialActive)}
-			svc := NewServerService(repo, zap.NewNop())
+			svc := NewServerService(repo, nil, zap.NewNop())
 			err := svc.SetActive(context.Background(), tc.target)
 			if tc.wantErr {
 				require.Error(t, err)
@@ -183,7 +184,7 @@ func TestServerService_Update(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &fakeServerRepo{servers: newTestServers(ServerRolePrimary)}
-			svc := NewServerService(repo, zap.NewNop())
+			svc := NewServerService(repo, nil, zap.NewNop())
 			err := svc.Update(context.Background(), tc.role, tc.req)
 			if tc.wantErr {
 				require.Error(t, err)
@@ -204,7 +205,7 @@ func TestServerService_Update_RoleNotFound(t *testing.T) {
 	repo := &fakeServerRepo{servers: []Server{
 		{Role: ServerRolePrimary, Host: "10.0.0.1", Port: 8081, IsActive: true},
 	}}
-	svc := NewServerService(repo, zap.NewNop())
+	svc := NewServerService(repo, nil, zap.NewNop())
 	err := svc.Update(context.Background(), ServerRoleStandby, UpdateServerRequest{Host: "x", Port: 80})
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, commonerrors.ErrNotFound))
@@ -215,9 +216,98 @@ func TestServerService_SetActive_RoleNotFound(t *testing.T) {
 	repo := &fakeServerRepo{servers: []Server{
 		{Role: ServerRolePrimary, Host: "10.0.0.1", Port: 8081, IsActive: true},
 	}}
-	svc := NewServerService(repo, zap.NewNop())
+	svc := NewServerService(repo, nil, zap.NewNop())
 	err := svc.SetActive(context.Background(), ServerRoleStandby)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, commonerrors.ErrNotFound),
 		"expected ErrNotFound, got %v", err)
+}
+
+// ============================================================
+// T-0099 — EventBus publish + GetActiveForPush 适配器测试
+// ============================================================
+
+// captureEventBus 捕获 publish 调用用于断言。
+type captureEventBus struct {
+	published []capturedEvent
+}
+
+type capturedEvent struct {
+	subject string
+	payload []byte
+}
+
+func (b *captureEventBus) Publish(_ context.Context, subject string, evt event.Event) error {
+	b.published = append(b.published, capturedEvent{subject: subject, payload: evt.Payload})
+	return nil
+}
+
+func (b *captureEventBus) Subscribe(_ string, _ event.EventHandler) (event.Subscription, error) {
+	return nil, nil
+}
+
+func (b *captureEventBus) QueueSubscribe(_ string, _ string, _ event.EventHandler) (event.Subscription, error) {
+	return nil, nil
+}
+
+func (b *captureEventBus) Close() error { return nil }
+
+func TestServerService_SetActive_PublishesEvent(t *testing.T) {
+	repo := &fakeServerRepo{servers: []Server{
+		{Role: ServerRolePrimary, Host: "10.0.0.1", Port: 8081, IsActive: true},
+		{Role: ServerRoleStandby, Host: "10.0.0.2", Port: 8082, IsActive: false},
+	}}
+	bus := &captureEventBus{}
+	svc := NewServerService(repo, bus, zap.NewNop())
+
+	err := svc.SetActive(context.Background(), ServerRoleStandby)
+	require.NoError(t, err)
+	require.Len(t, bus.published, 1, "expect one event published")
+	assert.Equal(t, event.SubjectNorthboundServerChanged, bus.published[0].subject)
+	// payload 含 role=standby + action=active_switch
+	assert.Contains(t, string(bus.published[0].payload), `"role":"standby"`)
+	assert.Contains(t, string(bus.published[0].payload), `"action":"active_switch"`)
+}
+
+func TestServerService_Update_PublishesEvent(t *testing.T) {
+	repo := &fakeServerRepo{servers: []Server{
+		{Role: ServerRolePrimary, Host: "10.0.0.1", Port: 8081, IsActive: true},
+	}}
+	bus := &captureEventBus{}
+	svc := NewServerService(repo, bus, zap.NewNop())
+
+	err := svc.Update(context.Background(), ServerRolePrimary, UpdateServerRequest{
+		Host: "10.0.0.99", Port: 9999,
+	})
+	require.NoError(t, err)
+	require.Len(t, bus.published, 1)
+	assert.Contains(t, string(bus.published[0].payload), `"action":"update"`)
+	assert.Contains(t, string(bus.published[0].payload), `"host":"10.0.0.99"`)
+	assert.Contains(t, string(bus.published[0].payload), `"port":9999`)
+}
+
+func TestServerService_GetActiveForPush(t *testing.T) {
+	t.Run("returns active info", func(t *testing.T) {
+		repo := &fakeServerRepo{servers: []Server{
+			{Role: ServerRolePrimary, Host: "10.0.0.1", Port: 8081, IsActive: false},
+			{Role: ServerRoleStandby, Host: "10.0.0.2", Port: 8082, IsActive: true},
+		}}
+		svc := NewServerService(repo, nil, zap.NewNop())
+
+		info, err := svc.GetActiveForPush(context.Background())
+		require.NoError(t, err)
+		require.NotNil(t, info)
+		assert.Equal(t, "standby", info.Role)
+		assert.Equal(t, "10.0.0.2", info.Host)
+		assert.Equal(t, 8082, info.Port)
+	})
+	t.Run("returns nil when no active", func(t *testing.T) {
+		repo := &fakeServerRepo{servers: []Server{
+			{Role: ServerRolePrimary, Host: "10.0.0.1", Port: 8081, IsActive: false},
+		}}
+		svc := NewServerService(repo, nil, zap.NewNop())
+		info, err := svc.GetActiveForPush(context.Background())
+		require.NoError(t, err)
+		assert.Nil(t, info)
+	})
 }

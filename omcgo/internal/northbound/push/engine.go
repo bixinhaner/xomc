@@ -41,6 +41,11 @@ type Engine struct {
 	logger          *zap.Logger
 	subs            []event.Subscription
 	outboxRepo      OutboxRepository // nil means direct delivery (no outbox)
+
+	// T-0099 active server reload — push 目标动态从 northbound_servers 表读取
+	activeServerProvider ActiveServerProvider // nil → 不订阅 server.changed 事件，沿用静态配置
+	refreshSuccessCount  int64                // metric counter
+	refreshFailureCount  int64
 }
 
 // NewEngine creates a new push Engine with initial targets loaded from config.
@@ -95,6 +100,19 @@ func (e *Engine) Subscribe(eventBus event.EventBus) error {
 		}
 		e.subs = append(e.subs, sub)
 	}
+
+	// T-0099 — 订阅 northbound.server.changed 触发 active target reload。
+	// 即使 activeServerProvider 暂未注入也订阅（handler 内部判 nil 短路），
+	// 避免后续 SetActiveServerProvider 之后还要重订一遍。
+	changedSub, err := eventBus.QueueSubscribe(
+		event.SubjectNorthboundServerChanged,
+		"northbound-push-server-changed",
+		e.handleServerChanged,
+	)
+	if err != nil {
+		return fmt.Errorf("subscribe to %s: %w", event.SubjectNorthboundServerChanged, err)
+	}
+	e.subs = append(e.subs, changedSub)
 
 	mode := "direct"
 	if e.outboxRepo != nil {
