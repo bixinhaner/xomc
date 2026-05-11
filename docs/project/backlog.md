@@ -66,12 +66,12 @@
 
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
-| Total tasks | 146 | — | 含 T-0098 umbrella + 36 sub-task；2026-05-10 新增 12 umbrella（T-0101..T-0112 F06 运维管理）+ 66 sub-task（见 backlog/subtasks/T-0101-ops-management.md）；2026-05-11 +T-0113 F06 ops 合规债清账；变更明细见 changelog |
+| Total tasks | 149 | — | 含 T-0098 umbrella + 36 sub-task；2026-05-10 新增 12 umbrella（T-0101..T-0112 F06 运维管理）+ 66 sub-task；2026-05-11 +T-0113 F06 ops 合规债清账 + T-0114/T-0115/T-0116 F10 Phase 3 三 task（fault-inject / 报告 export / 设备矩阵）；变更明细见 changelog |
 | `done` | 132 | — | 详细 Closing Evidence → `backlog/done/2026Q2.md`（+6 P1 + 2 P2-01/02 + 9 P2-03..11 + 5 P3-01..05 + 8 P4-01..P4-08 + T-0095 D10=A 吸收 done + +6 T-0098-P5-01..P5-06 2026-05-08（P5 wave 收官）+ T-0098 umbrella 进 done + +12 T-0101..T-0112 F06 运维管理 wave 收官 2026-05-11 + T-0099 北向 push engine 接入 active server 2026-05-11 + T-0097 MML AddTemplateModal 切 App.useApp() 2026-05-11 + **+T-0030 F10 互操作用例库 14→30 Phase 1 收官 2026-05-11（commit 92a3eb76 / R-202 Mitigating）**）|
 | `in_dev` | 0 | — | T-0098 已整体收官 |
 | `in_design` | 1 | — | T-0090 sprint-10 S2 拆分完成 + 4 sub-task 进 backlog/subtasks/T-0090-mml-ux-rework.md 等 sprint-11 |
 | `planned` | 6 | — | T-0009/T-0014/T-0017/T-0020/T-0023 (wave + 短信凭据外部阻塞) — sprint-10 三 deliverable 全闭（T-0030 Phase 1 done / T-0090 升 in_design 完成 S2 拆分 / T-0097 done）|
-| `triaged` | 5 | — | T-0091 / T-0093 (backup 外部 trigger) / T-0035 (XL 待 S2 拆) / T-0096 (deps T-0090 跟随) / T-0113 (F06 ops 合规债清账) |
+| `triaged` | 8 | — | T-0091 / T-0093 (backup 外部 trigger) / T-0035 (XL 待 S2 拆) / T-0096 (deps T-0090 跟随) / T-0113 (F06 ops 合规债清账) / T-0114 (F10 fault-inject P3) / T-0115 (F10 报告 export P2 — sprint-11 候选) / T-0116 (F10 设备矩阵 XL P3) |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
 | **P0 风险关闭数** | **1 / 5** | 5 / 5 | R-005 已关；R-001/002/003/004 Open（注：**P1 R-103 / R-104** 已关闭但不计入 P0 — R-103 在 T-0015 后关闭；**R-104 在 T-0027 后关闭 2026-05-06**；**P2 R-202 在 T-0030 Phase 1+2 后关闭 2026-05-11**）|
@@ -296,6 +296,9 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 |----|-------|------|--------|------|-----|------|------|-------|
 | T-0093 | backup SFTP / FTPS 真 auth probe 实施（pkg/sftp + crypto/ssh + crypto/tls）— T-0032 carve-out；不依赖运维凭据可独立开发 | feat | F06/backup | P2 | M | T-0032 ✅ | R-204 / T-0032 carve-out | trigger：实际部署有 SFTP/FTPS 配置需求时启动 |
 | T-0113 | F06 ops wave 合规债清账 — PRD §13 Q1-Q6 决议纪要补齐 + dev-pipeline §B6 偏差登记（commits ce36108f/6e42a664/c0485129 footer 五元组缺）+ wave 期间漏掉的合规动作（如有）| proc | F06/ops+process | P2 | S | T-0101..T-0112 ✅ | — | 合规债，sprint-11 stretch 候选；详 `docs/project/sprint/sprint-11.md` §3；纯文档/纪要清账，无代码改动；触发：sprint-11 余力 OR sprint-12 起手 |
+| T-0114 | F10 互操作 fault-inject 用例 category — 新建专用 step action（如 simulate_offline / inject_invalid_inform / corrupt_param_path）+ 注册 CategoryFaultInject + 用例 ≥ 4 + 单测 + e2e claim；T-0030 Phase 3 拆出独立 task | feat | F10 | P3 | M | T-0030 ✅ | — | 价值偏低（与现有 negative path 重叠），仅当 GA 阶段产品方提出"故障注入测试矩阵"时启动；起手前需 W1 调研 runner.executeStep 是否能扩 action 而不破坏现有 3 action 语义 |
+| T-0115 | F10 互操作验收报告 CSV/PDF export — 新建 GET/POST `/interop/run/report?format=csv|pdf` 端点 + service.Export(results, format) 方法 + CSV(stdlib encoding/csv) + PDF(可选 gofpdf) + 前端下载按钮 + e2e claim；T-0030 Phase 3 拆出独立 task；**客户面最高价值**（QA 给运营商签字交付）| feat | F10+frontend | P2 | M-L | T-0030 ✅ | — | CSV 单 format 先做（MVP），PDF/markdown 留 Phase 2；带 device_sn / test_case_id / passed / expected_outcome 等列；适合 sprint-11/12 实施 |
+| T-0116 | F10 互操作设备型号矩阵参数化 — TestCase struct 加 target_device_models[] 字段 + runner 按设备型号过滤用例 + carrier×model 矩阵执行 + 报告分组；T-0030 Phase 3 拆出独立 task；架构改动较大 | feat | F10 | P3 | XL→需 S2 拆 | T-0030 ✅ + T-0115（报告改造）| — | XL 任务需 sprint planning 拆 sub-task；改 model.go + runner.go + cases struct + 注册路径；建议 T-0115 完成后启动以复用其报告分组能力 |
 | T-0035 | 前端多皮肤架构（Phase 3-7：v2 皮肤脚手架 → 18 模块补齐 → 双皮肤部署） | feat | frontend | P2 | XL | T-0035-P1 | — | 方案 `frontend-multi-skin-plan-20260422.md`；Phase 1（`@omc/frontend-core` 抽取 + workspaces）已完成；Phase 3+ 需 Sprint 规划 |
 | T-0091 | backup 真 KMS 适配器实施（AWS KMS / Vault Transit / HSM 二选一）— KMSClient interface 已 ready (T-0086)，本任务做 SDK 集成 + DI wiring + observability metrics | feat | F06/backup+security | P2 | M-L | T-0086 ✅ | R-102 / T-0086 carve-out | trigger：运维侧选定厂商 + 凭据准备；KEKWrapper refactor 与 T-0087 KEK 旋转一并做；新增 metric `omc_backup_kms_call_total{op,result}` + `omc_backup_kms_call_duration_seconds{op}` |
 | T-0096 | MML script 页面「更新」弹窗取消产品类型字段（应与 /mml/console「保存脚本」弹窗一致） | ref | frontend+F06/mml | P3 | S | T-0090 | R-NEW（共享 T-0090 productTypes 删除风险） | Triage 2026-04-30 走 B 方案 standalone（不 fold 进 T-0090a — 因 page scope 不同 script vs console + T-0090 体量已 L 不宜再扩 + 独立 PR 更清晰）；语义**反向** deps T-0090："与 console 一致"意味着 console 决定 productTypes 去留 → script 跟随（若 T-0090 决定保留 productTypes，T-0096 也保留；命名"取消"但执行随 T-0090）；建议与 T-0090a 同 Sprint 紧随做省 cross-PR 协调 |
