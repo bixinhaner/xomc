@@ -113,6 +113,9 @@ CREATE TABLE IF NOT EXISTS ops_maintenance_windows (
 );
 CREATE INDEX IF NOT EXISTS idx_ops_mw_status ON ops_maintenance_windows(status);
 CREATE INDEX IF NOT EXISTS idx_ops_mw_active ON ops_maintenance_windows(start_at, end_at) WHERE status = 'active';
+-- DROP + CREATE 兜底幂等：PG 14 之前 CREATE TRIGGER 无 IF NOT EXISTS 语法，
+-- 半失败重跑或 docker volume 残留场景下裸 CREATE 会报 SQLSTATE 42710
+DROP TRIGGER IF EXISTS trigger_ops_mw_updated_at ON ops_maintenance_windows;
 CREATE TRIGGER trigger_ops_mw_updated_at BEFORE UPDATE ON ops_maintenance_windows
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -130,6 +133,7 @@ CREATE TABLE IF NOT EXISTS ops_playbooks (
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_ops_pb_use_count ON ops_playbooks(use_count DESC);
+DROP TRIGGER IF EXISTS trigger_ops_pb_updated_at ON ops_playbooks;
 CREATE TRIGGER trigger_ops_pb_updated_at BEFORE UPDATE ON ops_playbooks
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
