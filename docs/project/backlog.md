@@ -69,8 +69,8 @@
 | Total tasks | 145 | — | 含 T-0098 umbrella + 36 sub-task；2026-05-10 新增 12 umbrella（T-0101..T-0112 F06 运维管理）+ 66 sub-task（见 backlog/subtasks/T-0101-ops-management.md）；变更明细见 changelog |
 | `done` | 130 | — | 详细 Closing Evidence → `backlog/done/2026Q2.md`（+6 P1 + 2 P2-01/02 + 9 P2-03..11 + 5 P3-01..05 + 8 P4-01..P4-08 + T-0095 D10=A 吸收 done + +6 T-0098-P5-01..P5-06 2026-05-08（P5 wave 收官）+ T-0098 umbrella 进 done + +12 T-0101..T-0112 F06 运维管理 wave 收官 2026-05-11 + **+T-0099 北向 push engine 接入 active server 2026-05-11（commit 35b97d6f 关闭"切换即生效"环）**）|
 | `in_dev` | 0 | — | T-0098 已整体收官 |
-| `in_design` | 0 | — | — |
-| `planned` | 9 | — | T-0009/T-0014/T-0017/T-0020/T-0023 (wave + 短信凭据外部阻塞) + sprint-10 新增 3：T-0030/T-0090/T-0097 |
+| `in_design` | 1 | — | T-0090 sprint-10 S2 拆分完成 + 4 sub-task 进 backlog/subtasks/T-0090-mml-ux-rework.md 等 sprint-11 |
+| `planned` | 8 | — | T-0009/T-0014/T-0017/T-0020/T-0023 (wave + 短信凭据外部阻塞) + sprint-10：T-0030/T-0097（T-0090 升 in_design 完成 S2 拆分）|
 | `triaged` | 4 | — | T-0091 / T-0093 (backup 外部 trigger) / T-0035 (XL 待 S2 拆) / T-0096 (deps T-0090 跟随) |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
@@ -215,7 +215,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0026 | Runbook 体系 6 份达标 ≥5（pg/redis/acs 三新 + 既有 nats/dr/db-backup，1491+ 行） | docs | ops | P0 | done | Claude | M | — | `release-gate.md §3.4` | sprint-07 | 2026-04-28 |
 | T-0095 | F03 KPI 指标管理（标准报表 + 站点报表）— **2026-05-08 D10=A 吸收正式关闭（P4-05 完成 KPI 指标库 5 Tabs 全平台公式 CRUD UI）** | feat | F03 | P1 | done | Claude | XL | — | T-0098 D10=A 吸收 / 详见 §10 changelog 2026-05-08 | sprint-01 | 2026-05-08 |
 | T-0030 | F10 互操作用例库扩充（GA 级质量补强） | feat | F10 | P2 | planned | Claude | L | — | R-202 / `docs/project/sprint/sprint-10.md` | sprint-10 | 2026-05-11 |
-| T-0090 | MML 控制台公/私命令新增页面 UX 整改（7 子项 B 方案二次扩展）— **sprint-10 仅做 S2 拆分**，产出 a/b/c/d 4 sub-task 待 sprint-11 执行；不实际 implement | feat | frontend+F06/mml+admin | P2 | planned | Claude | XL→S2 拆 | — | R-NEW（productTypes 删除 + RBAC 私有命令分组）/ `docs/project/sprint/sprint-10.md` | sprint-10 | 2026-05-11 |
+| T-0090 | MML 控制台公/私命令新增页面 UX 整改（7 子项 B 方案二次扩展）— sprint-10 S2 拆分完成（4 sub-task 见 `backlog/subtasks/T-0090-mml-ux-rework.md`，等 sprint-11 执行） | feat | frontend+F06/mml+admin | P2 | in_design | Claude | XL→拆 4 段 | — | R-NEW（productTypes 删除 + RBAC 私有命令分组）/ `backlog/subtasks/T-0090-mml-ux-rework.md` | sprint-10 | 2026-05-11 |
 | T-0097 | MML console「保存脚本」弹窗确认按钮 API 结果反馈 — **pre-pick 必先复现**（dev real-API VITE_USE_MOCK=false + 浏览器 console 实测）；4 候选成因（mock 模式 / axios 拦截器 / 用户混淆 / toast util 失效） | bug | frontend+F06/mml | P2 | planned | Claude | S | — | R-NEW（toast util 场景失效面）/ `docs/project/sprint/sprint-10.md` | sprint-10 | 2026-05-11 |
 | T-0040 | acs/worker 加 `/healthz` + `/readyz`（W1.3） | td | infra | P0 | done | Claude | S | — | `AI承诺对峙清单.md` W1.3 | wave-1 | 2026-04-27 |
 | T-0041 | `internal/core/middleware/ratelimit` per-IP token bucket + router 接入（W1.4） | feat | infra | P0 | done | Claude | M | — | `AI承诺对峙清单.md` W1.4 | wave-1 | 2026-04-27 |
@@ -432,6 +432,7 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 
 | 日期 | 动作 | 条目 | 一句话 |
 |------|------|------|--------|
+| 2026-05-11 | **S2 拆分 done** | T-0090 | sprint-10 S2 设计完成：T-0090 拆出 4 sub-task（a FE-only S / b DB drop M / c backend RBAC M-L / d FE 私有页 S）写入 `backlog/subtasks/T-0090-mml-ux-rework.md`；State planned → in_design；本 sprint-10 deliverable 完成，不进 S3 implement；4 sub-task 待 sprint-11 planning 升 planned；R-NEW 拆为 4 子风险 R-NEW-1..4 分摊到 sub-task；T-0096 (script 弹窗) 建议 sprint-11 跟随 T-0090-a |
 | 2026-05-11 | **sprint-10 planning** | T-0030 / T-0090 / T-0097 | dev-pipeline §A7 Path A 保守方案：3 任务 triaged → planned / Sprint=sprint-10 / Owner=Claude；T-0030 GA 级用例库扩充 L；T-0097 MML toast bug S (pre-pick 必先复现)；T-0090 XL UX 整改本 Sprint 只做 S2 拆分（产 a/b/c/d sub-task 待 sprint-11 执行）；外部 trigger（T-0091 KMS / T-0093 SFTP）留 triaged；XL（T-0035 多皮肤）需独立 S2 拆；sprint-10.md 创建 2026-05-12~25 窗口；planned 6→9 / triaged 7→4 |
 | 2026-05-11 | **wave done** | T-0100-P5 (a+b+c+d) | License 治理层 review 残项清理 4 sub-task 完成（拆 a/b/c/d 内部并行执行）；4 commits 358cfe53/4c3c59f7/bcc1212c/e30fdd5d；review 残项 9 项闭包 + 5 cosmetic 登 known-debt + e2e fixture 留二期；R-NEW 关闭；done 129→130 / proposed 1→0 |
 | 2026-05-11 | **feat done** | T-0099 | F08 北向 push engine 接入 active server — 关闭"切换/编辑即生效"环；commit `35b97d6f`；走 dev-pipeline §A4 pick + feat 全 S0-S7；新增 push.ActiveServerProvider 接口 + Engine.RefreshActiveTarget + event.SubjectNorthboundServerChanged + ServerService.GetActiveForPush 适配器 + EventBus 注入 + 启动期 refresh 兜底；测试 active_target_test 6 + server_service_test +3 race PASS；done 128→129 / proposed 2→1 |
