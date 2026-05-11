@@ -63,6 +63,10 @@ docker --version
 docker compose version
 ```
 
+> **国内服务器首次部署**：基础镜像（`alpine` / `golang` / `node` / `nginx`）从 Docker Hub 拉取，
+> 国内访问通常会超时。先按 [REGISTRY_SETUP.md](./REGISTRY_SETUP.md) 配宿主机 Docker / BuildKit
+> 镜像源（10 分钟一次性配置），再回来执行 §4 启动流程。
+
 ---
 
 ## 4. 快速启动
@@ -593,7 +597,16 @@ cd deployments/docker && docker compose up  # ❌
 cd /path/to/goomc && docker compose -f deployments/docker/docker-compose.yml up  # ✅
 ```
 
-### 13.5 前端页面空白 / API 请求失败
+### 13.5 镜像拉取超时 / `failed to resolve source metadata for docker.io/...`
+
+国内服务器访问 Docker Hub 超时。**daemon.json 配 mirror 不够** —— BuildKit 需要单独配 `buildkitd.toml`。
+完整流程见 [REGISTRY_SETUP.md](./REGISTRY_SETUP.md)。
+
+### 13.6 容器内 DNS 解析失败 / `dial tcp: lookup xxx on 53: i/o timeout`
+
+不是 mirror 问题（端口 53 是 DNS，端口 443 才是 mirror）。见 [DOCKER_DNS_FIX.md](./DOCKER_DNS_FIX.md)。
+
+### 13.7 前端页面空白 / API 请求失败
 
 ```bash
 # 检查 nginx 配置是否有语法错误
