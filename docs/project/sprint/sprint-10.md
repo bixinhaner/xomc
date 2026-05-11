@@ -62,9 +62,10 @@
 
 ## 5. 每日进展（Daily Standup，可选）
 
-**2026-05-12 周一**：Sprint 启动；T-0090 S2 设计拆分（先做，~0.5d），并行 T-0097 复现尝试
-**2026-05-13 周二**：T-0030 F10 用例库扩充 D1
-**2026-05-14 周三**：T-0030 D2
+**2026-05-11 周日**（Sprint 启动前预热）：T-0090 S2 拆分完成（commit `a71ab4a9`）；T-0097 pre-pick 调研 + S3 实施 + S4 typecheck + S6 commit `5b281b06`（AddTemplateModal 切 App.useApp() scoped messageApi）+ S7 backlog state-writeback → done。两个 sprint-10 deliverable 提前完成；剩余 sprint 工作日全部留给 T-0030 F10 用例库扩充
+**2026-05-12 周一**：T-0030 F10 用例库扩充 D1
+**2026-05-13 周二**：T-0030 D2
+**2026-05-14 周三**：T-0030 D3
 ...
 
 ---
