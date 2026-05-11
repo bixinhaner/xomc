@@ -44,11 +44,14 @@ import type { DataTableColumn } from '@/components/DataTable';
 import {
   useActivateLicense,
   useImportLicense,
+  useImportSignedLicense,
   useLicenseLogs,
   useLicenses,
   useRevokeLicense,
 } from '@core/hooks/api/useLicense';
 import {
+  LicenseErrorCodes,
+  extractLicenseErrorCode,
   licenseApi,
   parseActivateConflict,
   type ActivateConflict,
@@ -120,6 +123,7 @@ export default function LicenseOperations() {
 
   // ------------------- mutations -------------------
   const importLicense = useImportLicense();
+  const importSignedLicense = useImportSignedLicense(); // T-0100-P5-c 文件上传路径
   const activateLicense = useActivateLicense();
   const revokeLicense = useRevokeLicense();
 
@@ -130,14 +134,50 @@ export default function LicenseOperations() {
 
   const handleImport = async () => {
     if (!canOperate) return;
+
+    // 文件模式 + 有上传文件 → 走 P5-c 签名导入路径
+    if (importMode === 'file' && importFiles.length > 0) {
+      const file = importFiles[0].originFileObj as RcFile | undefined;
+      if (!file) {
+        void message.error(t('license.noFileSelected'));
+        return;
+      }
+      try {
+        const content = await file.text();
+        const result = await importSignedLicense.mutateAsync(content);
+        renderImportSuccessModal(result);
+        importForm.resetFields();
+        setImportFiles([]);
+      } catch (err) {
+        const code = extractLicenseErrorCode(err);
+        if (code === LicenseErrorCodes.SignatureVerifyFailed) {
+          // 12109 strict 模式拒绝 — 专属 UI 提示
+          Modal.error({
+            title: t('license.signatureVerifyFailedTitle'),
+            content: (
+              <Alert
+                type="error"
+                showIcon
+                message={t('license.signatureVerifyFailedMsg')}
+                description={extractErrorMessage(err)}
+              />
+            ),
+            okText: t('common.gotIt'),
+          });
+          return;
+        }
+        void message.error(extractErrorMessage(err) || t('common.error'));
+      }
+      return;
+    }
+
+    // 粘贴模式 / 表单模式 → 沿用原 importLicense 路径（无签名）
     let values: ImportFormValues;
     try {
       values = await importForm.validateFields();
     } catch {
       return;
     }
-
-    // 简化：不真正解析二进制 license 文件（P4-C 才接 OEM 解析），表单字段直接进 payload。
     const payload: Omit<License, 'id'> = {
       licenseName: values.licenseName,
       licenseCode: values.licenseCode,
@@ -157,39 +197,44 @@ export default function LicenseOperations() {
 
     try {
       const result = await importLicense.mutateAsync(payload);
-      Modal.success({
-        title: t('license.importSuccess'),
-        content: (
-          <div>
-            <p>
-              <strong>{t('license.licenseCode')}:</strong> {result.license.licenseCode}
-            </p>
-            <p>
-              <strong>{t('license.licenseName')}:</strong> {result.license.licenseName}
-            </p>
-            <p>
-              <strong>{t('license.signature')}:</strong>{' '}
-              <Tag color={signatureStatusColor[result.signatureStatus]}>
-                {t(`license.signature.${result.signatureStatus}`)}
-              </Tag>
-            </p>
-            {result.signatureStatus !== 'verified' && (
-              <Alert
-                type="warning"
-                showIcon
-                message={t('license.signatureWarning')}
-                description={result.signatureNote}
-                style={{ marginTop: 8 }}
-              />
-            )}
-          </div>
-        ),
-      });
+      renderImportSuccessModal(result);
       importForm.resetFields();
       setImportFiles([]);
     } catch (err) {
       void message.error(extractErrorMessage(err) || t('common.error'));
     }
+  };
+
+  // 复用 Import 成功 Modal — 文件路径 + 表单路径共享。
+  const renderImportSuccessModal = (result: { license: License; signatureStatus: LicenseSignatureStatus; signatureNote: string }) => {
+    Modal.success({
+      title: t('license.importSuccess'),
+      content: (
+        <div>
+          <p>
+            <strong>{t('license.licenseCode')}:</strong> {result.license.licenseCode}
+          </p>
+          <p>
+            <strong>{t('license.licenseName')}:</strong> {result.license.licenseName}
+          </p>
+          <p>
+            <strong>{t('license.signature')}:</strong>{' '}
+            <Tag color={signatureStatusColor[result.signatureStatus]}>
+              {t(`license.signature.${result.signatureStatus}`)}
+            </Tag>
+          </p>
+          {result.signatureStatus !== 'verified' && (
+            <Alert
+              type="warning"
+              showIcon
+              message={t('license.signatureWarning')}
+              description={result.signatureNote}
+              style={{ marginTop: 8 }}
+            />
+          )}
+        </div>
+      ),
+    });
   };
 
   // ------------------- Tab 2: Activate -------------------

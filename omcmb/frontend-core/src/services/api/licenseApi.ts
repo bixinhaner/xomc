@@ -366,7 +366,58 @@ export const licenseApi = {
       signatureNote: data.signature_note ?? '',
     };
   },
+
+  /**
+   * 上传签名 license 文件并导入（T-0100-P5-c）。
+   *
+   * 工作流（PRD §5.3.1）：
+   *   1. 前端 FileReader 读 .lic / .json 文件原始内容
+   *   2. POST /licenses/import 时附带 signed_license_json 字段（后端在 verifier
+   *      注入时会做 RSA-PSS 验签 + canonicalize）
+   *   3. strict 模式下若验签失败 → 后端返 12109 错误 → 调用方 catch 后解析错误码
+   *
+   * 文件内容期望是一个完整 JSON 对象，至少含：license_code / signature / key_id
+   * 等字段；handler.go::Import 会从 SignedLicenseJSON 解构出 license 元数据。
+   */
+  async importSignedLicense(signedJSON: string): Promise<ImportLicenseResult> {
+    const payload = {
+      signed_license_json: signedJSON,
+    };
+    const { data } = await http.post<BackendImportResponse>('/licenses/import', payload);
+    return {
+      license: mapBackendLicense(data.license),
+      signatureStatus: data.signature_status,
+      signatureNote: data.signature_note ?? '',
+    };
+  },
 };
+
+/**
+ * License 错误码（与 omcgo/global/errors.go 12100-12109 段保持同步）。
+ *
+ * 前端用于区分签名校验失败（12109）等专属错误，给出针对性 UI 文案。
+ */
+export const LicenseErrorCodes = {
+  RevokedActivate: 12100,
+  QuotaLoad: 12103,
+  LogsServiceUnavail: 12104,
+  LogsListFailed: 12105,
+  LogsByIDFailed: 12106,
+  ExportFormatInvalid: 12107,
+  BulkExportFormatInvalid: 12108,
+  SignatureVerifyFailed: 12109,
+} as const;
+
+/**
+ * 从 axios error 提取后端 BusinessError.Code（如有）。
+ * 后端 response.Fail 输出格式：{ code: <number>, msg: "...", biz_code: <number> }
+ * 通过 biz_code 字段提取错误码；提取失败返 0。
+ */
+export function extractLicenseErrorCode(err: unknown): number {
+  if (typeof err !== 'object' || err === null) return 0;
+  const e = err as { response?: { data?: { biz_code?: number; code?: number } } };
+  return e.response?.data?.biz_code ?? e.response?.data?.code ?? 0;
+}
 
 /**
  * 从 Content-Disposition 头解析 filename。

@@ -102,6 +102,29 @@ export function useImportLicense() {
   });
 }
 
+/**
+ * T-0100-P5-c — 上传签名 license 文件并导入。
+ *
+ * 与 useImportLicense 的区别：
+ *   - 入参为文件原始内容字符串（前端 FileReader 读出），后端走 P4-C RSA-PSS 验签
+ *   - mock 模式直接返 unverified（保持向下兼容）
+ *
+ * 12109 (SignatureVerifyFailed) 错误由调用方在 catch 中用 extractLicenseErrorCode
+ * 提取后给针对性 UI 展示。
+ */
+export function useImportSignedLicense() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (signedJSON: string) =>
+      useMock
+        ? Promise.reject(new Error('mock mode does not support signed import; toggle VITE_USE_MOCK=false'))
+        : licenseApi.importSignedLicense(signedJSON),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['licenses'] });
+    },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // T-0100-P1 audit logs
 // 后端 GET /licenses/logs（分页+过滤）+ GET /licenses/:id/logs（单 license 最近 N 条）
