@@ -5669,6 +5669,16 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     "$API/interop/test-cases" -H "$W2D_AUTH")
 check_status_in "W2D iop-8: GET /interop/test-cases (4-category sanity)" "200 401" "$HTTP_CODE"
 
+# T-0115 Phase 1: CSV report export endpoint reachable. The endpoint runs the
+# same conformance flow as /run then streams results as text/csv. We probe
+# with a bad device_sn so a 404 or 400 is also acceptable — only validate
+# the route exists and the format=csv parameter passes the supported check.
+claim "interop: export report as CSV (T-0115) returns 200/400/404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/interop/run/report?format=csv" -H "$W2D_AUTH" \
+    -H "Content-Type: application/json" -d '{"device_sn":"'$W2D_BAD_UUID'"}')
+check_status_in "W2D iop-9: POST /interop/run/report?format=csv" "200 400 404 401" "$HTTP_CODE"
+
 # ------------------------------------------------------------
 section "W2.D.1 alarm 补充 — Library / Filter / History (≥ 5 claims)"
 

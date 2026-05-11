@@ -1,7 +1,10 @@
 package interop
 
 import (
+	"context"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -35,6 +38,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		interop.GET("/test-cases", h.ListTestCases)
 		interop.POST("/run", h.RunTests)
 		interop.POST("/run/:category", h.RunByCategory)
+		interop.POST("/run/report", h.ExportReport) // T-0115: CSV report export
 		interop.POST("/validate/:deviceId", h.ValidateDevice)
 	}
 }
@@ -136,6 +140,76 @@ func (h *Handler) RunByCategory(c *gin.Context) {
 		"failed":    len(results) - passed,
 		"results":   results,
 	})
+}
+
+// executeRunRequest is the common path between RunTests and ExportReport:
+// runs the requested categories (all categories if Categories is empty) and
+// returns the flat result slice. Returns ErrInvalidInput-wrapped error if a
+// requested category is unknown.
+func (h *Handler) executeRunRequest(ctx context.Context, req *RunTestsRequest) ([]TestResult, error) {
+	if len(req.Categories) == 0 {
+		return h.runner.RunAll(ctx, req.DeviceSN)
+	}
+
+	var results []TestResult
+	for _, cat := range req.Categories {
+		if !cat.IsValid() {
+			return nil, commonerrors.NewBusinessError(10001, "invalid test category: "+string(cat), commonerrors.ErrInvalidInput)
+		}
+		catResults, err := h.runner.RunByCategory(ctx, req.DeviceSN, cat)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, catResults...)
+	}
+	return results, nil
+}
+
+// ExportReport executes the same conformance run as RunTests but streams the
+// results as a downloadable report (CSV today; PDF / markdown reserved for
+// future T-0115 iterations). Format is selected via the ?format= query
+// parameter and defaults to csv.
+//
+// T-0115 Phase 1: CSV only — gives operator QA a sign-off artefact without
+// needing to scrape the JSON RunTests response.
+func (h *Handler) ExportReport(c *gin.Context) {
+	formatParam := c.DefaultQuery("format", string(ReportFormatCSV))
+	format := ReportFormat(formatParam)
+	if !format.IsValid() {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			commonerrors.NewBusinessError(10005, "unsupported report format: "+formatParam+" (supported: csv)", commonerrors.ErrInvalidInput))
+		return
+	}
+
+	var req RunTestsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	results, err := h.executeRunRequest(c.Request.Context(), &req)
+	if err != nil {
+		status := commonerrors.HTTPStatusFromError(err)
+		commonerrors.AbortWithError(c, status, err)
+		return
+	}
+
+	filename := ReportFilename(req.DeviceSN, format, time.Now())
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", `attachment; filename="`+filename+`"`)
+	c.Header("X-Interop-Report-Format", string(format))
+	c.Header("X-Interop-Report-Rows", strconv.Itoa(len(results)))
+	c.Status(http.StatusOK)
+
+	if err := WriteCSVReport(c.Writer, req.DeviceSN, results); err != nil {
+		h.logger.Error("write csv report failed",
+			zap.String("device_sn", req.DeviceSN),
+			zap.Int("results", len(results)),
+			zap.Error(err),
+		)
+		// Headers already flushed by csv writer at this point; no clean way
+		// to surface the error back to client mid-stream — log + return.
+	}
 }
 
 // ValidateDevice compares a device's actual parameters against its data model definition.
