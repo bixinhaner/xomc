@@ -84,28 +84,59 @@ brew install libpq jq libxml2  # 然后把 libpq 的 bin 加 PATH
 
 `curl` 通常已自带。`bash` 需 4.0+。
 
-### 鉴权前置
+### 鉴权前置 — 获取 OMCCTL_API_KEY
 
-工具走 `X-API-Key` 鉴权（与 `omcctl` 一致）。先创建一个绑定到拥有
-**POST /api/v1/devices/tasks** 权限角色的用户的 API key：
+工具走 `X-API-Key` 鉴权（与 `omcctl` 一致）。OMC 登录强制 RSA-OAEP 加密密码
+（[admin/model.go LoginRequest](../../omcgo/internal/admin/model.go)），命令行没法
+直接 curl 登录拿 JWT。两条获取路径：
 
-```bash
-# 方式 A：在 omcgo 前端登录 → 系统管理 → API Key 管理 → 新建
-# 方式 B：直接 SQL（开发环境）
-psql "$DSN" <<EOF
-INSERT INTO api_keys (id, prefix, secret_hash, user_id, status, expires_at)
-VALUES (gen_random_uuid(), substring(md5(random()::text), 1, 8),
-        crypt('plaintext-key-32chars', gen_salt('bf')),
-        (SELECT id FROM users WHERE username='admin'),
-        'active', NOW() + INTERVAL '30 days');
-EOF
-```
-
-把 key 设到环境变量：
+#### 路径 A（推荐，运维场景）：用 helper 脚本直接生成
 
 ```bash
-export OMCCTL_API_KEY='your-api-key-here'
+# 在能访问 PG 的位置（容器内 / 跳板机）跑
+export OMCCTL_API_KEY="$(./omcgo/scripts/gen_api_key.sh \
+    --dsn "postgres://omc:omc@localhost:5432/omcgo" \
+    --user admin \
+    --name mml-diag-probe \
+    --expires 7)"
+
+echo "$OMCCTL_API_KEY"   # 应该看到 omk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
+
+`gen_api_key.sh` 做的事：
+- 读 `users` 表找指定用户 → 拿 user_id
+- 生成 36 字符 key (`omk_` + 32 hex，与 [apikey_service.go:40-46](../../omcgo/internal/admin/apikey_service.go#L40-L46) 严格一致)
+- 用 pgcrypto `crypt(key, gen_salt('bf', 10))` 算 bcrypt 哈希（与 Go bcrypt 100% 兼容）
+- `INSERT api_keys`，stdout 输出明文 key（仅这一次显示）
+
+> 要求 PG 启用 pgcrypto 扩展（omcgo 标准部署已启用，自检：
+> `psql "$DSN" -c "SELECT 1 FROM pg_extension WHERE extname='pgcrypto'"`）
+
+#### 路径 B（有前端访问权限）：浏览器 + curl
+
+1. 浏览器登录前端
+2. devtools → Application → Storage → `omc-app-store` 或 Cookies 里找 JWT（具体存放位置看前端实现，搜关键字 `accessToken` / `Bearer`）
+3. 用 JWT 调创建接口：
+
+```bash
+TOKEN='<paste-from-devtools>'
+RESP=$(curl -fsSL -X POST http://localhost:8081/api/v1/api-keys \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"name":"mml-diag","scopes":[]}')
+export OMCCTL_API_KEY=$(echo "$RESP" | jq -r '.data.key // .key')
+```
+
+#### 验证
+
+无论哪条路径，验证一下：
+
+```bash
+curl -fsSL -H "X-API-Key: $OMCCTL_API_KEY" \
+    http://localhost:8081/api/v1/devices?page=1\&page_size=1
+```
+
+返回 JSON 即可。返回 401 表示 key 无效或用户没权限。
 
 ---
 
