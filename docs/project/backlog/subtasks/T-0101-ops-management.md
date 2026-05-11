@@ -1,5 +1,7 @@
 # T-0101..T-0112 拆分子任务（F06 运维管理）
 
+> **2026-05-11 状态更新**：12 umbrella 全部已 done（commits ce36108f/6e42a664/c0485129 MVP 落地，详 `docs/project/backlog/done/2026Q2.md`）；本表下方 66 sub-task 仍处 proposed，待 sprint planning 拍板 Q1-Q6 后升 planned 推进生产级实施（剩余 ~20-25 工作日）。MVP 边界与二期清单见每个 umbrella 在 done/2026Q2.md 的 Closing Evidence 行。
+>
 > 从 `docs/project/backlog.md` §5 Proposed 12 个 umbrella 拆出（2026-05-10）。
 > 来源 PRD: `docs/project/prd/F06-ops-management.md`（847 行）
 > 推进计划: `docs/project/F06-ops-management-implementation-plan.md`（347 行 / 8 Sprint × 16 周 / ~38 工作日）
