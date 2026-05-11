@@ -181,5 +181,22 @@ func ProtocolCases() []interop.TestCase {
 				},
 			},
 		},
+		{
+			// Negative path 2 (Phase 2): unknown action type — exercises runner.executeStep
+			// default branch ("unknown action: ...").
+			ID:              "PROTO-008",
+			Name:            "Negative — Unknown Action Type",
+			Description:     "Negative path: step with an action keyword the runner doesn't dispatch (e.g. 'protocol_voodoo'); runner must surface 'unknown action' error",
+			Category:        interop.CategoryProtocol,
+			ExpectedOutcome: "fail",
+			Steps: []interop.TestStep{
+				{
+					Order:       1,
+					Description: "Invoke unrecognized action 'protocol_voodoo' — expected to fail",
+					Action:      "protocol_voodoo",
+					Params:      map[string]interface{}{},
+				},
+			},
+		},
 	}
 }

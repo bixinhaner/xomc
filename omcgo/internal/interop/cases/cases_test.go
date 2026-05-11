@@ -9,8 +9,9 @@ import (
 )
 
 // TestCases_CategoryCounts pins the per-category case counts so accidental
-// deletions / merges are caught immediately. Counts come from T-0030 Phase 1
-// targets (PRD §8): DM=6 / Protocol=7 / RPC=13 / Inform=4.
+// deletions / merges are caught immediately. Counts come from T-0030 Phase 2
+// targets (PRD §7 修订门槛): DM=7 / Protocol=8 / RPC=17 / Inform=5 (total 37).
+// Phase 1 baseline was DM=6 / Protocol=7 / RPC=13 / Inform=4 (total 30).
 func TestCases_CategoryCounts(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -18,10 +19,10 @@ func TestCases_CategoryCounts(t *testing.T) {
 		expected int
 		category interop.TestCategory
 	}{
-		{"datamodel", DataModelCases(), 6, interop.CategoryDataModel},
-		{"protocol", ProtocolCases(), 7, interop.CategoryProtocol},
-		{"rpc", RPCCases(), 13, interop.CategoryRPC},
-		{"inform", InformCases(), 4, interop.CategoryInform},
+		{"datamodel", DataModelCases(), 7, interop.CategoryDataModel},
+		{"protocol", ProtocolCases(), 8, interop.CategoryProtocol},
+		{"rpc", RPCCases(), 17, interop.CategoryRPC},
+		{"inform", InformCases(), 5, interop.CategoryInform},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -33,9 +34,10 @@ func TestCases_CategoryCounts(t *testing.T) {
 	}
 }
 
-// TestCases_NegativePathPerCategory enforces PRD §3 V3 "每 category 至少 1 个
-// negative path" — guards against regressions where negative tests get deleted
-// while well-meaning contributors trim suites.
+// TestCases_NegativePathPerCategory enforces PRD §7 Phase 2 修订门槛
+// "每 category 至少 2 个 negative path" — guards against regressions where
+// negative tests get deleted while well-meaning contributors trim suites.
+// Phase 1 baseline was ≥ 1; Phase 2 raised to ≥ 2.
 func TestCases_NegativePathPerCategory(t *testing.T) {
 	categories := map[string][]interop.TestCase{
 		"datamodel": DataModelCases(),
@@ -51,9 +53,43 @@ func TestCases_NegativePathPerCategory(t *testing.T) {
 					negCount++
 				}
 			}
-			assert.GreaterOrEqual(t, negCount, 1, "%s must contain at least one negative path case", name)
+			assert.GreaterOrEqual(t, negCount, 2, "%s must contain at least two negative path cases (PRD §7 Phase 2)", name)
 		})
 	}
+}
+
+// TestCases_CarrierCoverage enforces PRD §7 Phase 2 修订门槛 "三家运营商覆盖"
+// — at least one case per carrier (cmcc / ctcc / cucc) tagged in Description.
+// The runner has no carrier-specific code branches (§16.4); coverage is
+// declared via "Carrier: <code>" prefix in Description per PRD §9.6.
+func TestCases_CarrierCoverage(t *testing.T) {
+	all := append(append(append(
+		DataModelCases(),
+		ProtocolCases()...),
+		RPCCases()...),
+		InformCases()...)
+
+	carriers := map[string]bool{"cmcc": false, "ctcc": false, "cucc": false}
+	for _, c := range all {
+		for code := range carriers {
+			if containsTag(c.Description, "Carrier: "+code) {
+				carriers[code] = true
+			}
+		}
+	}
+	for code, seen := range carriers {
+		assert.True(t, seen, "no test case tagged 'Carrier: %s' — PRD §7 Phase 2 三家运营商覆盖", code)
+	}
+}
+
+// containsTag is a substring helper to avoid importing strings just for this.
+func containsTag(haystack, needle string) bool {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
 }
 
 // TestCases_IDsUniqueAndExpectedOutcomeValid ensures (a) every case ID is
@@ -84,6 +120,6 @@ func TestCases_IDsUniqueAndExpectedOutcomeValid(t *testing.T) {
 		assert.NotEmpty(t, c.Name, "case %s has no Name", c.ID)
 	}
 
-	// Sanity: total count matches PRD §3 V1 "≥ 30".
-	assert.GreaterOrEqual(t, len(all), 30, "total case count fell below PRD §3 V1 threshold")
+	// Sanity: total count matches PRD §7 Phase 2 修订门槛 "≥ 35".
+	assert.GreaterOrEqual(t, len(all), 35, "total case count fell below PRD §7 Phase 2 threshold")
 }

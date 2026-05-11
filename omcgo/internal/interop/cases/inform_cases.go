@@ -112,5 +112,33 @@ func InformCases() []interop.TestCase {
 				},
 			},
 		},
+		{
+			// Negative path 2 (Phase 2): multi-step where good step precedes bad step;
+			// validates runner breaks on first failure even when earlier steps succeed.
+			ID:              "INF-005",
+			Name:            "Negative — Mid-Sequence Step Failure",
+			Description:     "Negative path: first step succeeds (serial_number not_empty), second step intentionally fails (unknown check). Runner must break at step 2 and surface the error. Pass = step 2 error surfaced",
+			Category:        interop.CategoryInform,
+			ExpectedOutcome: "fail",
+			Steps: []interop.TestStep{
+				{
+					Order:       1,
+					Description: "Step 1 — known-good check that should pass",
+					Action:      "check_param",
+					Params: map[string]interface{}{
+						"field": "serial_number",
+						"check": "not_empty",
+					},
+				},
+				{
+					Order:       2,
+					Description: "Step 2 — unknown check keyword, expected to fail",
+					Action:      "check_param",
+					Params: map[string]interface{}{
+						"check": "no_such_inform_check",
+					},
+				},
+			},
+		},
 	}
 }

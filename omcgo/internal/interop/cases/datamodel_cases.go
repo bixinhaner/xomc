@@ -146,5 +146,23 @@ func DataModelCases() []interop.TestCase {
 				},
 			},
 		},
+		{
+			// Negative path 2 (Phase 2): unknown verify_response check inside datamodel context.
+			ID:              "DM-007",
+			Name:            "Negative — Unknown verify_response Check",
+			Description:     "Negative path: verify_response with unknown check keyword (e.g. 'model_does_not_exist_check'); runner must surface 'unknown verify_response check' error",
+			Category:        interop.CategoryDataModel,
+			ExpectedOutcome: "fail",
+			Steps: []interop.TestStep{
+				{
+					Order:       1,
+					Description: "Invoke verify_response with unrecognized check — expected to fail",
+					Action:      "verify_response",
+					Params: map[string]interface{}{
+						"check": "model_does_not_exist_check",
+					},
+				},
+			},
+		},
 	}
 }

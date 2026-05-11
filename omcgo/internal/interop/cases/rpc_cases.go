@@ -326,5 +326,102 @@ func RPCCases() []interop.TestCase {
 				},
 			},
 		},
+		{
+			// Negative path 2 (Phase 2): empty method on a second send_rpc — exercises the
+			// 'send_rpc step missing method parameter' path from a different context.
+			ID:              "RPC-014",
+			Name:            "Negative — RPC With Missing Method String",
+			Description:     "Negative path: send_rpc params include 'method' key but value is empty string. Validates that runner does not silently accept '' as a method name",
+			Category:        interop.CategoryRPC,
+			ExpectedOutcome: "fail",
+			Steps: []interop.TestStep{
+				{
+					Order:       1,
+					Description: "send_rpc with method='' — expected to fail",
+					Action:      "send_rpc",
+					Params: map[string]interface{}{
+						"method": "",
+					},
+				},
+			},
+		},
+		{
+			// Phase 2 — Carrier-private RPC coverage (CMCC). The runner does not interpret
+			// X_CMCC_* semantics; this test only validates the enqueue path accepts
+			// vendor-namespaced method strings without rejection. Carrier label in
+			// Description per PRD §9.6 (no carrier-specific code branches).
+			ID:          "RPC-015",
+			Name:        "Carrier (CMCC) — X_CMCC_Reboot Enqueue",
+			Description: "Carrier: cmcc — Verify the task queue accepts CMCC-private RPC method 'X_CMCC_Reboot' (CMCC PCM 接口规范 vendor extension for graceful subsystem reboot)",
+			Category:    interop.CategoryRPC,
+			Steps: []interop.TestStep{
+				{
+					Order:       1,
+					Description: "Enqueue CMCC-private X_CMCC_Reboot command",
+					Action:      "send_rpc",
+					Params: map[string]interface{}{
+						"method": "X_CMCC_Reboot",
+					},
+				},
+				{
+					Order:       2,
+					Description: "Verify command was enqueued successfully",
+					Action:      "verify_response",
+					Params: map[string]interface{}{
+						"check": "command_queued",
+					},
+				},
+			},
+		},
+		{
+			// Phase 2 — Carrier-private RPC coverage (CTCC).
+			ID:          "RPC-016",
+			Name:        "Carrier (CTCC) — X_CT-COM_Restart Enqueue",
+			Description: "Carrier: ctcc — Verify the task queue accepts CTCC-private RPC method 'X_CT-COM_Restart' (CTCC 网管命令规范 vendor extension)",
+			Category:    interop.CategoryRPC,
+			Steps: []interop.TestStep{
+				{
+					Order:       1,
+					Description: "Enqueue CTCC-private X_CT-COM_Restart command",
+					Action:      "send_rpc",
+					Params: map[string]interface{}{
+						"method": "X_CT-COM_Restart",
+					},
+				},
+				{
+					Order:       2,
+					Description: "Verify command was enqueued successfully",
+					Action:      "verify_response",
+					Params: map[string]interface{}{
+						"check": "command_queued",
+					},
+				},
+			},
+		},
+		{
+			// Phase 2 — Carrier-private RPC coverage (CUCC).
+			ID:          "RPC-017",
+			Name:        "Carrier (CUCC) — X_CU-COM_DBConfig Enqueue",
+			Description: "Carrier: cucc — Verify the task queue accepts CUCC-private RPC method 'X_CU-COM_DBConfig' (CUCC 设备运维接口规范 vendor extension for DB config push)",
+			Category:    interop.CategoryRPC,
+			Steps: []interop.TestStep{
+				{
+					Order:       1,
+					Description: "Enqueue CUCC-private X_CU-COM_DBConfig command",
+					Action:      "send_rpc",
+					Params: map[string]interface{}{
+						"method": "X_CU-COM_DBConfig",
+					},
+				},
+				{
+					Order:       2,
+					Description: "Verify command was enqueued successfully",
+					Action:      "verify_response",
+					Params: map[string]interface{}{
+						"check": "command_queued",
+					},
+				},
+			},
+		},
 	}
 }

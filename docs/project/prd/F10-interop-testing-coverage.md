@@ -116,16 +116,19 @@ F10 互操作（Interoperability Testing）是 OMC 在出厂联调阶段对设�
 
 ## 7. 度量（含 R-202 关闭门槛）
 
-| 指标 | 当前 | Phase 1 目标（sprint-10 内） | Phase 2 目标（后续可选） |
-|------|------|------------------------------|--------------------------|
-| 用例总数 | 14 | **≥ 30** | ≥ 50 |
-| Category 数 | 3（DM / Protocol / RPC） | **4**（+ Inform） | 4 + 可能补 fault-inject |
-| Negative path 用例数 | 0 | **≥ 4**（每 category ≥ 1） | ≥ 10 |
-| E2E claim 数（interop 域） | 3 | **≥ 6** | ≥ 10 |
-| 单元测试通过率 | 100% | **100%（含新增）** | 100% |
-| R-202 状态 | Open | **降级到 Mitigating** | Closed |
+| 指标 | 原状 | Phase 1 目标 | Phase 2 目标（2026-05-11 修订）|
+|------|------|--------------|--------------------------------|
+| 用例总数 | 14 | **≥ 30** ✅ (实际 30) | **≥ 35**（原 ≥ 50）|
+| Category 数 | 3（DM / Protocol / RPC） | **4**（+ Inform）✅ | 4（保持，fault-inject 可独立子任务）|
+| Negative path 用例数 | 0 | **≥ 4**（每 category ≥ 1）✅ | **≥ 8**（每 category ≥ 2）|
+| 运营商覆盖 | 通用基线 | 标签声明法 ✅ | **三家覆盖**（CMCC + CTCC + CUCC 至少各 1 私有 RPC 用例）|
+| E2E claim 数（interop 域）| 3 | **≥ 6** ✅ | **≥ 8**（原 ≥ 10）|
+| 单元测试通过率 | 100% | **100%**（含新增）✅ | **100%** |
+| R-202 状态 | Open | **Mitigating** ✅ | **Closed** |
 
-**R-202 闭环路径**：Phase 1 完成后 R-202 从 P2 Open → P2 Mitigating；如后续启动 Phase 2 则可彻底 Closed。本任务 T-0030 **不承诺**完全关闭 R-202（避免估算膨胀），仅承诺降级 + 闭环路径已知。
+**Phase 2 门槛 2026-05-11 修订理由**：原门槛（用例 ≥ 50 / e2e ≥ 10）在字段池有限的现实下会产生"伪用例"（多个 step 复制粘贴只改 Name）有损用例库质量。修订后门槛聚焦三件事 — (a) 每类 negative ≥ 2 让 negative 机制覆盖度饱满；(b) 三家运营商覆盖是 Phase 2 旗舰需求；(c) 用例 ≥ 35 增量保守不强求伪用例。**真正未做的 Phase 2 选项**（fault-inject category / 验收报告 export / 设备型号矩阵参数化）留独立 sub-task，需架构改动不宜并入 T-0030。
+
+**R-202 闭环路径**：Phase 1 完成 → P2 Mitigating；Phase 2 修订门槛达成 → P2 Closed。
 
 ---
 

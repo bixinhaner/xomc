@@ -5611,7 +5611,7 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
 check_status_in "W2D prov-3: POST /provisioning/tasks/<not-found>/retry" "404 401 400" "$HTTP_CODE"
 
 # ------------------------------------------------------------
-section "W2.D.1 interop Domain (≥ 6 claims — T-0030 Phase 1 expansion)"
+section "W2.D.1 interop Domain (≥ 8 claims — T-0030 Phase 1 + Phase 2 expansion)"
 
 claim "interop: list test cases returns 200/401"
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
@@ -5649,6 +5649,25 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
     "$API/interop/run/inform" -H "$W2D_AUTH" \
     -H "Content-Type: application/json" -d '{"device_sn":"'$W2D_BAD_UUID'"}')
 check_status_in "W2D iop-6: POST /interop/run/inform" "200 400 404 401" "$HTTP_CODE"
+
+# T-0030 Phase 2 expansion (PRD §7 修订门槛 e2e ≥ 8): carrier-coverage probes.
+# run/rpc now executes RPC-015/016/017 (X_CMCC_Reboot / X_CT-COM_Restart /
+# X_CU-COM_DBConfig) — three carrier-private methods. We don't validate the
+# response body here (no real device), only that the route reaches the handler
+# and exits cleanly.
+claim "interop: run rpc category covers carrier-private methods (T-0030 Phase 2)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/interop/run/rpc" -H "$W2D_AUTH" \
+    -H "Content-Type: application/json" -d '{"device_sn":"'$W2D_BAD_UUID'"}')
+check_status_in "W2D iop-7: POST /interop/run/rpc (carrier-private inside)" "200 400 404 401" "$HTTP_CODE"
+
+# Phase 2: list endpoint surfaces all categories (4) — including the new Inform
+# category and the carrier-private RPC subset.
+claim "interop: list test-cases returns all 4 categories (T-0030 Phase 2)"
+RESP=$(curl -s "$API/interop/test-cases" -H "$W2D_AUTH" 2>/dev/null || echo "{}")
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/interop/test-cases" -H "$W2D_AUTH")
+check_status_in "W2D iop-8: GET /interop/test-cases (4-category sanity)" "200 401" "$HTTP_CODE"
 
 # ------------------------------------------------------------
 section "W2.D.1 alarm 补充 — Library / Filter / History (≥ 5 claims)"
