@@ -138,6 +138,11 @@ func (a *LogArchiver) ArchiveOnce(ctx context.Context) (*ArchiveResult, error) {
 
 	var totalBytes int64
 	for month, monthLogs := range groups {
+		// T-0100-P5-a W5：ctx cancellation 早返 — 防止 cron 触发后系统 stop 时
+		// 仍卡在长事务里（每个月一个 PutObject + 后续 DeleteByIDs）。
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("archive cancelled mid-loop: %w", err)
+		}
 		// T-0100-P4-B1：键名 = `license-logs/{YYYY-MM}/{tickTS}-{count}.jsonl.gz`
 		// {tickTS} 防同月跨 tick 覆盖；{count} 让运维直接从 key 读出条数。
 		key := fmt.Sprintf("license-logs/%s/%s-%d.jsonl.gz", month, tickTS, len(monthLogs))
@@ -152,6 +157,8 @@ func (a *LogArchiver) ArchiveOnce(ctx context.Context) (*ArchiveResult, error) {
 			return nil, fmt.Errorf("put archive object %s: %w", key, err)
 		}
 		totalBytes += info.Size
+		// T-0100-P5-a I3 metric：归档字节数（监控大对象月度爆增）
+		archiveBytesByMonth.WithLabelValues(month).Add(float64(info.Size))
 		a.logger.Info("license logs archived to MinIO",
 			zap.String("month", month),
 			zap.String("bucket", a.bucket),

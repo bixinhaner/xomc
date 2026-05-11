@@ -6,7 +6,16 @@ package license
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
+
+// T-0100-P5-a I3 — 归档字节数按月度统计；监控大对象月度爆增（某月日志异常增大
+// 可能预示告警风暴 / 攻击）。用 promauto 注册到 DefaultRegisterer 一次，进程级
+// 单例。
+var archiveBytesByMonth = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "omc_license_archive_bytes_per_month",
+	Help: "License logs archived bytes per YYYY-MM month bucket.",
+}, []string{"month"})
 
 // EnforcementMetrics exposes Prometheus metrics for license enforcement
 // decisions and capacity state.

@@ -458,6 +458,14 @@ func initMiscModules(c *Container) error {
 			zap.Int("key_count", licenseVerifier.KeyCount()),
 			zap.Bool("strict", c.Cfg.License.Signing.Strict))
 	}
+	// T-0100-P5-a W4：strict=true 但实际 0 keys 启动是高风险静默失败（所有
+	// import 都会被拒，运维不知原因）。strict 模式必须有至少 1 个公钥，否则
+	// Fatal 阻止启动让运维立刻定位（config.yaml license.signing.public_key_dir
+	// 误配 / 公钥文件缺失 等场景）。
+	if c.Cfg.License.Signing.Strict && licenseVerifier.KeyCount() == 0 {
+		logger.Fatal("license strict mode requires at least 1 OEM public key but none loaded; check license.signing.public_key_dir",
+			zap.String("dir", c.Cfg.License.Signing.PublicKeyDir))
+	}
 	licenseHandler.SetSignatureVerifier(licenseVerifier)
 
 	// T-0100-P4-B：周级 license_logs 归档 cron。MinIO bucket 默认走 logs；
