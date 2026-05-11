@@ -16,6 +16,7 @@ import {
   Radio,
 } from 'antd';
 import IconPicker from '@/components/IconPicker';
+import { resolveIcon } from '@/components/IconPicker/icons';
 import type { MenuProps } from 'antd';
 import {
   UpOutlined,
@@ -498,8 +499,28 @@ export default function MenuManagement() {
       },
     },
     {
+      key: 'icon',
+      title: '图标',
+      dataIndex: 'icon',
+      width: 100,
+      render: (val: string | undefined) => {
+        if (!val) return <span style={{ color: 'var(--color-text-secondary)' }}>-</span>;
+        const Icon = resolveIcon(val);
+        // Icon === null：DB 写了 icon 名但不在 IconPicker 白名单（历史脏数据）；
+        // 显示 icon 名让运营能立刻定位需要 fixup 的项。
+        return Icon ? (
+          <Space size={4}>
+            <Icon style={{ fontSize: 16 }} />
+            <span style={{ color: 'var(--color-text-secondary)', fontSize: 12 }}>{val}</span>
+          </Space>
+        ) : (
+          <span style={{ color: 'var(--color-error)', fontSize: 12 }}>{val}（未在白名单）</span>
+        );
+      },
+    },
+    {
       key: 'name',
-      title: '菜单名称',
+      title: '菜单名称（中文）',
       dataIndex: 'name',
       width: 260,
       render: (val, record) => {
@@ -531,6 +552,19 @@ export default function MenuManagement() {
             <span>{String(val)}</span>
           </span>
         );
+      },
+    },
+    {
+      key: 'nameEn',
+      title: '菜单名称（English）',
+      // nameI18n 是嵌套对象，无法用 dataIndex 直取；用 render 自定义。
+      // 缺译文时显示 "-"，与图标列保持一致的「无值」视觉。
+      dataIndex: 'id',
+      width: 200,
+      render: (_val, record) => {
+        const en = record.nameI18n?.['en-US'];
+        if (!en) return <span style={{ color: 'var(--color-text-secondary)' }}>-</span>;
+        return <span>{en}</span>;
       },
     },
     {
