@@ -84,42 +84,66 @@ brew install libpq jq libxml2  # 然后把 libpq 的 bin 加 PATH
 
 `curl` 通常已自带。`bash` 需 4.0+。
 
-### 鉴权前置 — 获取 OMCCTL_API_KEY
+### 鉴权 — 默认零配置
 
-工具走 `X-API-Key` 鉴权（与 `omcctl` 一致）。OMC 登录强制 RSA-OAEP 加密密码
-（[admin/model.go LoginRequest](../../omcgo/internal/admin/model.go)），命令行没法
-直接 curl 登录拿 JWT。两条获取路径：
+工具默认**自动**做这三件事，**无需任何参数**：
 
-#### 路径 A（推荐，运维场景）：用 helper 脚本直接生成
+1. 搜索 OMC App 配置文件并解析 `db.dsn` 与 `server.port`
+2. 推断 API URL（`http://127.0.0.1:<port>`）
+3. 用 pgcrypto 直接在 DB 层为 `admin` 用户生成一个 1 天有效期的临时 API Key，
+   退出时**自动撤销**（trap EXIT）
 
-```bash
-# 在能访问 PG 的位置（容器内 / 跳板机）跑
-export OMCCTL_API_KEY="$(./omcgo/scripts/gen_api_key.sh \
-    --dsn "postgres://omc:omc@localhost:5432/omcgo" \
-    --user admin \
-    --name mml-diag-probe \
-    --expires 7)"
+#### 单项覆盖
 
-echo "$OMCCTL_API_KEY"   # 应该看到 omk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+| 场景 | 覆盖参数 |
+|---|---|
+| API 不在 127.0.0.1（远程节点跑脚本） | `--api http://10.0.0.5:8081` |
+| DSN 与 config 写的不同（容器内 host=postgres，但脚本在容器外） | `--dsn "postgres://omc:omc@10.0.0.5:5432/omcgo"` |
+| 已有现成 API Key | `--api-key omk_xxx` 或 `export OMCCTL_API_KEY=omk_xxx` |
+| 自动生成 key 用别的账号 | `--user operator` |
+| 想保留临时 key 多次复用 | `--keep-api-key` |
+| 配置文件不在默认搜索路径 | `--config /custom/path/app.yaml` |
+
+#### 配置文件搜索顺序
+
+```
+1. $OMC_CONFIG 环境变量
+2. /etc/omcgo/app.${OMCGO_ENV:-prod}.yaml  ← 容器内默认
+3. /etc/omcgo/app.dev.yaml                  ← 容器 fallback
+4. ./omcgo/cmd/app/etc/config.local.yaml    ← 仓库根
+5. ./omcgo/cmd/app/etc/config.dev.yaml
+6. ./cmd/app/etc/config.dev.yaml            ← cwd 已在 omcgo/ 时
 ```
 
-`gen_api_key.sh` 做的事：
-- 读 `users` 表找指定用户 → 拿 user_id
-- 生成 36 字符 key (`omk_` + 32 hex，与 [apikey_service.go:40-46](../../omcgo/internal/admin/apikey_service.go#L40-L46) 严格一致)
-- 用 pgcrypto `crypt(key, gen_salt('bf', 10))` 算 bcrypt 哈希（与 Go bcrypt 100% 兼容）
-- `INSERT api_keys`，stdout 输出明文 key（仅这一次显示）
+#### 临时 API Key 生命周期
 
-> 要求 PG 启用 pgcrypto 扩展（omcgo 标准部署已启用，自检：
-> `psql "$DSN" -c "SELECT 1 FROM pg_extension WHERE extname='pgcrypto'"`）
+- 启动：随机生成 `omk_+32hex` 明文 → `crypt(plain, gen_salt('bf',10))` → INSERT `api_keys`，过期 1 天
+- 退出（含 Ctrl+C / 异常）：`UPDATE api_keys SET revoked_at=NOW()`，避免密钥残留
+- 仅在脚本内存中短暂持有明文，不会落盘
 
-#### 路径 B（有前端访问权限）：浏览器 + curl
+> PG 需启用 pgcrypto 扩展。omcgo 标准部署已启用；缺失时脚本会给清晰错误，
+> 让 DBA 执行 `CREATE EXTENSION pgcrypto;` 或运维改用 `--api-key` 提供现成 key。
 
-1. 浏览器登录前端
-2. devtools → Application → Storage → `omc-app-store` 或 Cookies 里找 JWT（具体存放位置看前端实现，搜关键字 `accessToken` / `Bearer`）
-3. 用 JWT 调创建接口：
+#### 持久化 API Key（如想长期复用）
+
+若想避免每次跑脚本都临时建 key（比如 cron 定时巡检），用配套工具 `gen_api_key.sh`
+生成一个长期 key：
 
 ```bash
-TOKEN='<paste-from-devtools>'
+export OMCCTL_API_KEY="$(./omcgo/scripts/gen_api_key.sh \
+    --dsn "postgres://omc:omc@localhost:5432/omcgo" \
+    --user admin --name mml-diag --expires 30)"
+```
+
+之后所有 `diag_mml_gpn_probe.sh` 调用自动用这个 key（认 `$OMCCTL_API_KEY`），
+跳过临时 key 生成。
+
+#### 已有前端 JWT 想直接换 API Key（备选）
+
+如果浏览器已登录、能从 devtools 拿到 JWT：
+
+```bash
+TOKEN='<paste-from-devtools-Application-Storage>'
 RESP=$(curl -fsSL -X POST http://localhost:8081/api/v1/api-keys \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
@@ -127,64 +151,78 @@ RESP=$(curl -fsSL -X POST http://localhost:8081/api/v1/api-keys \
 export OMCCTL_API_KEY=$(echo "$RESP" | jq -r '.data.key // .key')
 ```
 
-#### 验证
-
-无论哪条路径，验证一下：
+#### 自检 API Key 是否可用
 
 ```bash
 curl -fsSL -H "X-API-Key: $OMCCTL_API_KEY" \
-    http://localhost:8081/api/v1/devices?page=1\&page_size=1
+    "http://localhost:8081/api/v1/devices?page=1&page_size=1"
 ```
 
-返回 JSON 即可。返回 401 表示 key 无效或用户没权限。
+返回 JSON 即可；401 表示 key 无效或用户没权限。
 
 ---
 
 ## 4. 使用
 
-### 4.1 最简调用（自动选设备）
+### 4.1 零参数运行（推荐）
 
 ```bash
-./omcgo/scripts/diag_mml_gpn_probe.sh \
-    --dsn "postgres://omc:omc@localhost:5432/omcgo" \
-    --api-key "$OMCCTL_API_KEY"
+./omcgo/scripts/diag_mml_gpn_probe.sh
 ```
 
-工具自动：
+工具自动完成：
 
-1. 从 `devices` 表挑一台 `status='active'` 且 `last_inform_at < 10 分钟` 的设备
-2. POST `/api/v1/devices/tasks` 创建 GPN task（默认 `path="Device."`, `next_level=false`）
-3. 轮询 task 状态（每 2s 一次，默认超时 120s）
-4. 解析响应，对比 mml_params，输出到 `/tmp/mml-diag-<timestamp>/`
+1. 找配置文件 → 解析 `db.dsn` 与 `server.port` → 推断 API URL
+2. 为 `admin` 自动生成 1 天有效期临时 API Key（退出时撤销）
+3. 从 `devices` 表挑一台 `status='active'` 且 `last_inform_at < 10 分钟` 的设备
+4. POST `/api/v1/devices/tasks` 创建 GPN task（默认 `path="Device."`, `next_level=false`）
+5. 轮询 task 状态（每 2s，默认超时 120s）
+6. 解析响应、对比 mml_params，输出到 `/tmp/mml-diag-<timestamp>/`
 
-### 4.2 指定设备 + 自定义输出目录
+### 4.2 远程节点跑（脚本与 OMC 不在同机）
 
 ```bash
 ./omcgo/scripts/diag_mml_gpn_probe.sh \
     --dsn "postgres://omc:omc@10.0.0.5:5432/omcgo" \
-    --api "http://10.0.0.5:8081" \
-    --api-key "$OMCCTL_API_KEY" \
+    --api "http://10.0.0.5:8081"
+```
+
+仅当默认的"读 config + localhost"行不通时才需要覆盖。API Key 仍然自动生成。
+
+### 4.3 指定具体设备 + 自定义输出目录
+
+```bash
+./omcgo/scripts/diag_mml_gpn_probe.sh \
     --device-sn "BAI-A2B3C4-001" \
     --output ./diag-2026-05-11
 ```
 
-### 4.3 只取根目录下的直接子节点（轻量探针）
+### 4.4 只取根目录直接子节点（轻量探针）
 
 ```bash
-./omcgo/scripts/diag_mml_gpn_probe.sh \
-    --dsn ... --api-key ... \
-    --next-level
+./omcgo/scripts/diag_mml_gpn_probe.sh --next-level
 ```
 
 `--next-level` 设置 NextLevel=true，CPE 只返回 `Device.` 的直接子节点（约 10-20 条）。
 **适用于探活；不适合做全量数据模型对比**（默认 `false` 才是全量）。
 
-### 4.4 探测特定子树（如只看 GSM 模组）
+### 4.5 探测特定子树（如只看 GSM 模组）
 
 ```bash
-./omcgo/scripts/diag_mml_gpn_probe.sh \
-    --dsn ... --api-key ... \
-    --root-path "Device.X_BAICELLS_DeviceGSM."
+./omcgo/scripts/diag_mml_gpn_probe.sh --root-path "Device.X_BAICELLS_DeviceGSM."
+```
+
+### 4.6 用现成 API Key 跳过自动生成
+
+```bash
+export OMCCTL_API_KEY='omk_...'
+./omcgo/scripts/diag_mml_gpn_probe.sh
+```
+
+或显式：
+
+```bash
+./omcgo/scripts/diag_mml_gpn_probe.sh --api-key 'omk_...'
 ```
 
 ---

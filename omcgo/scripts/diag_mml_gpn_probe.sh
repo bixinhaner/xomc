@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # diag_mml_gpn_probe.sh
 #
-# MML 命令路径诊断工具
+# MML 命令路径根因诊断工具
 # =======================
 # 向一台在线 CPE 发送 GetParameterNames("Device.", false)，拿回真实数据模型，
 # 与 mml_params 表里的 tr069_path 比对，找出"DB 配了但 CPE 实际不存在"的路径。
 # 这类路径是 LST/MOD/DSP/SET 等 MML 命令被 CPE silent drop 的根本原因。
+#
+# 零参数运行（推荐）：自动从 OMC App 配置文件读 DSN 与 API URL，自动生成
+# 临时 API Key（用完撤销）。覆盖任何一项：传 --config / --dsn / --api / --api-key。
 #
 # 数据通路依据：
 #   - 任务创建 → POST /api/v1/devices/tasks?device_sn=<SN>（X-API-Key 鉴权）
@@ -15,69 +18,79 @@
 #     可访问 path 的完整集合（叶子 + 中间节点 + 多实例展开后的具体索引）
 #
 # 用法 / 故障排查见 docs/operations/diag-mml-gpn-probe.md。
-# 设计依据：解决"LST DEVICE_INFO 命令报文被 baicells CPE 丢弃"的诊断 gap。
 
 set -euo pipefail
 
 # ────────────────────────────────────────────────────────────────────
-# 默认参数 & 帮助
+# 默认参数
 # ────────────────────────────────────────────────────────────────────
+CONFIG=""
 DSN=""
-API_URL="${OMC_API_URL:-http://localhost:8081}"
+API_URL=""
 API_KEY="${OMCCTL_API_KEY:-}"
+API_KEY_USER="admin"
 DEVICE_SN="AUTO"
 TIMEOUT_SEC=120
 OUTPUT_DIR=""
 ROOT_PATH="Device."
 NEXT_LEVEL="false"
+KEEP_API_KEY="false"
+
+# 自动生成的 key id（用于退出时撤销）
+AUTO_GENERATED_KEY_ID=""
 
 usage() {
     cat <<EOF
 Usage: $(basename "$0") [options]
 
-发送 GetParameterNames 探针到一台在线 CPE，对比 mml_params 表，输出诊断报告。
+向在线 CPE 发 GetParameterNames，对比 mml_params 表，输出诊断报告。
 
-必需参数:
-  --dsn        <pg_dsn>   PostgreSQL 连接串 (e.g. postgres://omc:omc@host:5432/omcgo)
-  --api-key    <key>      OMC App 的 X-API-Key（或设环境变量 OMCCTL_API_KEY）
+【零参数运行（推荐）】
+   $(basename "$0")
+   工具自动：
+     1. 搜索 OMC App 配置文件 (按下列顺序)
+        a. \$OMC_CONFIG 环境变量
+        b. /etc/omcgo/app.\${OMCGO_ENV:-prod}.yaml （容器内）
+        c. /etc/omcgo/app.dev.yaml （容器 fallback）
+        d. ./omcgo/cmd/app/etc/config.local.yaml （仓库根）
+        e. ./omcgo/cmd/app/etc/config.dev.yaml
+        f. ./cmd/app/etc/config.dev.yaml （脚本在 omcgo/ 下）
+     2. 从配置读 db.dsn 与 server.port，推断 API URL
+     3. 自动为 admin 用户生成 1 天有效期的临时 API Key（退出时撤销）
+     4. 跑诊断
 
-可选参数:
-  --api        <url>      OMC App API 基地址，默认 \$OMC_API_URL 或 http://localhost:8081
-  --device-sn  <SN>       指定 CPE SN，默认 AUTO（自动挑一台 status='active' 且
+可选覆盖参数（每项都有自动回退）：
+  --config    <path>      OMC App 配置文件路径
+  --dsn       <pg_dsn>    覆盖 config.db.dsn
+  --api       <url>       覆盖根据 config.server.port 推断的 API URL
+  --api-key   <key>       使用现成 API Key（或设环境变量 OMCCTL_API_KEY）；
+                          否则自动生成临时 key
+  --user      <username>  自动生成 key 时关联的用户名，默认 admin
+  --keep-api-key          不撤销自动生成的临时 key（默认退出时撤销）
+  --device-sn <SN>        CPE SN，默认 AUTO（自动挑一台 status='active' 且
                           last_inform_at < 10 分钟的设备）
-  --timeout    <sec>      等 task 完成的超时秒数，默认 120
-  --output     <dir>      输出目录，默认 /tmp/mml-diag-<timestamp>
-  --root-path  <path>     GPN 起始路径，默认 Device.（TR-069 spec 唯一根之一）
-  --next-level            若设置则 NextLevel=true（仅返回根的直接子节点）。
-                          默认 false：返回 Device. 下的完整数据模型树。
+  --timeout   <sec>       等 task 完成的超时秒数，默认 120
+  --output    <dir>       输出目录，默认 /tmp/mml-diag-<timestamp>
+  --root-path <path>      GPN 起始路径，默认 Device.
+  --next-level            NextLevel=true（仅返回根的直接子节点）
   -h | --help             显示本帮助
 
-输出文件：
-  report.md            人看的摘要 + 头部样本
-  raw_response.xml     CPE 返回的原始 SOAP body（调试用）
-  cpe_paths.txt        CPE 真实 path 列表（每行一条，sort -u）
-  db_paths.txt         mml_params 表全部不重复 tr069_path
-  missing_in_cpe.txt   ❌ DB 配了但 CPE 不存在 — 这些就是 MML 命令被丢的根因
-  extra_in_cpe.txt     ℹ️ CPE 有但 DB 未收录 — 可补充
-  matched.txt          ✅ 双方都有
-  fixup.sql            修复草稿（注释形式，需 review 后手动启用）
-  meta.json            运行元数据（设备/task/统计数）
-
-示例:
-  $(basename "$0") --dsn "postgres://omc:omc@localhost:5432/omcgo" \\
-                   --api-key "\$OMCCTL_API_KEY" \\
-                   --api http://10.0.0.1:8081
-
-  # 指定具体设备 + 自定义输出目录
-  $(basename "$0") --dsn ... --api-key ... \\
-                   --device-sn "BAI-12345" \\
-                   --output ./diag-output
+输出文件（位于 \$OUTPUT_DIR）：
+  report.md           人看的摘要 + 头部样本
+  raw_response.xml    CPE 原始 SOAP body
+  cpe_paths.txt       CPE 真实 path 列表
+  db_paths.txt        DB mml_params 全部不重复 path
+  missing_in_cpe.txt  ❌ DB 配了但 CPE 不存在 = MML 命令被丢的根因
+  extra_in_cpe.txt    ℹ️ CPE 有但 DB 未收录 = 候选扩充
+  matched.txt         ✅ 双方都有
+  fixup.sql           修复草稿（注释形式，需 review）
+  meta.json           运行元数据
 
 Exit codes:
   0  成功
-  1  使用错误（缺参数 / 缺依赖）
-  2  未找到在线设备
-  3  任务创建失败
+  1  使用错误（缺依赖 / 配置文件无法定位 / 参数非法）
+  2  未找到在线设备 / 配置文件不可读
+  3  任务创建失败 / API Key 生成失败
   4  任务超时未完成
   5  任务返回 SOAP Fault
   6  响应无法解析（XML 结构异常）
@@ -89,21 +102,21 @@ EOF
 # ────────────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
     case "$1" in
-    --dsn)          DSN="$2"; shift 2 ;;
-    --api)          API_URL="$2"; shift 2 ;;
-    --api-key)      API_KEY="$2"; shift 2 ;;
-    --device-sn)    DEVICE_SN="$2"; shift 2 ;;
-    --timeout)      TIMEOUT_SEC="$2"; shift 2 ;;
-    --output)       OUTPUT_DIR="$2"; shift 2 ;;
-    --root-path)    ROOT_PATH="$2"; shift 2 ;;
-    --next-level)   NEXT_LEVEL="true"; shift ;;
-    -h|--help)      usage; exit 0 ;;
+    --config)        CONFIG="$2"; shift 2 ;;
+    --dsn)           DSN="$2"; shift 2 ;;
+    --api)           API_URL="$2"; shift 2 ;;
+    --api-key)       API_KEY="$2"; shift 2 ;;
+    --user)          API_KEY_USER="$2"; shift 2 ;;
+    --keep-api-key)  KEEP_API_KEY="true"; shift ;;
+    --device-sn)     DEVICE_SN="$2"; shift 2 ;;
+    --timeout)       TIMEOUT_SEC="$2"; shift 2 ;;
+    --output)        OUTPUT_DIR="$2"; shift 2 ;;
+    --root-path)     ROOT_PATH="$2"; shift 2 ;;
+    --next-level)    NEXT_LEVEL="true"; shift ;;
+    -h|--help)       usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
     esac
 done
-
-[[ -z "$DSN" ]] && { echo "ERROR: --dsn is required (or set PGSERVICE/PGHOST etc)" >&2; exit 1; }
-[[ -z "$API_KEY" ]] && { echo "ERROR: --api-key (or OMCCTL_API_KEY env) is required" >&2; exit 1; }
 
 OUTPUT_DIR="${OUTPUT_DIR:-/tmp/mml-diag-$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "$OUTPUT_DIR"
@@ -117,23 +130,189 @@ need() {
         exit 1
     }
 }
-need psql
-need curl
-need jq
-need xmllint
+need psql; need curl; need jq; need xmllint
 
 # ────────────────────────────────────────────────────────────────────
 # 公用函数
 # ────────────────────────────────────────────────────────────────────
-log() { printf '[%(%H:%M:%S)T] %s\n' -1 "$*" >&2; }
+# 用 date 子进程，避免 printf %(...)T 在 bash < 4.2 / macOS 默认 bash 3.2 上失败
+log() { echo "[$(date +%H:%M:%S)] $*" >&2; }
 
-# psql_at: -At 无对齐无表头，安全输出单/多行；-v 参数化避免 SQL 注入
 psql_at() {
     local sql="$1"; shift
     psql "$DSN" -X --no-psqlrc --set ON_ERROR_STOP=1 -At "$@" -c "$sql"
 }
 
-# api_post / api_get: 走 X-API-Key 鉴权；-f 失败即非零退出
+# ────────────────────────────────────────────────────────────────────
+# 步骤 0：自动发现 config / DSN / API URL
+# ────────────────────────────────────────────────────────────────────
+discover_config() {
+    # 优先级 1: --config
+    if [[ -n "$CONFIG" ]]; then
+        [[ -r "$CONFIG" ]] || { echo "ERROR: --config 文件不可读: $CONFIG" >&2; exit 2; }
+        log "config: $CONFIG (--config)"
+        return
+    fi
+    # 优先级 2: $OMC_CONFIG
+    if [[ -n "${OMC_CONFIG:-}" ]]; then
+        CONFIG="$OMC_CONFIG"
+        [[ -r "$CONFIG" ]] || { echo "ERROR: \$OMC_CONFIG 不可读: $CONFIG" >&2; exit 2; }
+        log "config: $CONFIG (\$OMC_CONFIG)"
+        return
+    fi
+    # 优先级 3-7: 标准位置探测
+    local env_profile="${OMCGO_ENV:-prod}"
+    local candidates=(
+        "/etc/omcgo/app.${env_profile}.yaml"
+        "/etc/omcgo/app.dev.yaml"
+        "./omcgo/cmd/app/etc/config.local.yaml"
+        "./omcgo/cmd/app/etc/config.dev.yaml"
+        "./cmd/app/etc/config.local.yaml"
+        "./cmd/app/etc/config.dev.yaml"
+    )
+    for c in "${candidates[@]}"; do
+        if [[ -r "$c" ]]; then
+            CONFIG="$c"
+            log "config: $CONFIG (auto-discovered)"
+            return
+        fi
+    done
+    echo "ERROR: 找不到 OMC App 配置文件。尝试过以下位置：" >&2
+    printf '  - %s\n' "${candidates[@]}" >&2
+    echo "  显式指定：--config <path> 或设 \$OMC_CONFIG" >&2
+    exit 2
+}
+
+# yaml_get_scalar：从 YAML 提取顶级 section 下的标量字段。
+# 限制：仅支持 2 层缩进固定 2 空格（项目所有 config 均符合此格式）。
+# 用法：yaml_get_scalar <file> <section> <key>
+#   yaml_get_scalar config.yaml db dsn
+#   yaml_get_scalar config.yaml server port
+yaml_get_scalar() {
+    awk -v sec="$2" -v key="$3" '
+        $0 ~ "^" sec ":" { flag=1; next }
+        flag && /^[^ #]/ { flag=0 }
+        flag && $0 ~ "^  " key ":" {
+            sub("^  " key ":[ \t]*", "")
+            sub(/^"/, ""); sub(/"$/, "")
+            sub(/[ \t]*#.*$/, "")    # strip trailing comment
+            print
+            exit
+        }
+    ' "$1"
+}
+
+discover_config
+
+# DSN：优先 --dsn，否则从 config 读
+if [[ -z "$DSN" ]]; then
+    DSN=$(yaml_get_scalar "$CONFIG" db dsn)
+    [[ -z "$DSN" ]] && { echo "ERROR: 从 $CONFIG 读 db.dsn 失败" >&2; exit 2; }
+    log "DSN: ${DSN%%@*}@*** (from $CONFIG)"  # 隐藏密码后半段
+else
+    log "DSN: ${DSN%%@*}@*** (--dsn)"
+fi
+
+# API URL：优先 --api，否则根据 config server.port 推断
+if [[ -z "$API_URL" ]]; then
+    PORT=$(yaml_get_scalar "$CONFIG" server port)
+    [[ -z "$PORT" ]] && PORT=8081
+    API_URL="http://127.0.0.1:$PORT"
+    log "API URL: $API_URL (inferred from server.port=$PORT)"
+else
+    log "API URL: $API_URL (--api)"
+fi
+
+# 验证 PG 与 API 可达
+psql_at "SELECT 1" >/dev/null 2>&1 || {
+    echo "ERROR: 无法连接 PG: $DSN" >&2
+    echo "  → psql \"\$DSN\" -c 'SELECT 1' 排查（容器内 DSN 用 host=postgres，容器外要改）" >&2
+    exit 2
+}
+curl -fsS --max-time 5 "$API_URL/health" >/dev/null 2>&1 || \
+curl -fsS --max-time 5 "$API_URL/api/v1/auth/public-key" >/dev/null 2>&1 || {
+    echo "ERROR: 无法连接 API: $API_URL" >&2
+    echo "  → curl -v $API_URL/api/v1/auth/public-key 排查" >&2
+    exit 2
+}
+
+# ────────────────────────────────────────────────────────────────────
+# 步骤 0.5：API Key — 优先用现成，否则自动生成临时 key
+# ────────────────────────────────────────────────────────────────────
+ensure_pgcrypto() {
+    local has
+    has=$(psql_at "SELECT count(*) FROM pg_extension WHERE extname='pgcrypto'")
+    [[ "$has" == "1" ]] || {
+        echo "ERROR: pgcrypto 扩展未启用（自动生成 API Key 需要它）" >&2
+        echo "  → 由 DBA 执行：CREATE EXTENSION pgcrypto;" >&2
+        echo "  → 或提供 --api-key 跳过自动生成" >&2
+        exit 3
+    }
+}
+
+gen_hex32() {
+    if [[ -r /dev/urandom ]]; then
+        head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n'
+    elif command -v openssl >/dev/null; then
+        openssl rand -hex 16
+    else
+        echo "ERROR: 缺少随机源（/dev/urandom 与 openssl 都不可用）" >&2
+        exit 3
+    fi
+}
+
+auto_generate_key() {
+    ensure_pgcrypto
+
+    local uid
+    uid=$(psql_at "SELECT id FROM users WHERE username = :'u'" -v u="$API_KEY_USER")
+    if [[ -z "$uid" ]]; then
+        echo "ERROR: 用户不存在: $API_KEY_USER" >&2
+        echo "  → psql \"\$DSN\" -c 'SELECT username FROM users LIMIT 20'" >&2
+        exit 3
+    fi
+
+    local plain="omk_$(gen_hex32)"
+    local prefix="${plain:0:8}"
+    local key_id
+    key_id=$(psql_at "
+        INSERT INTO api_keys (user_id, name, key_prefix, key_hash, scopes, expires_at)
+        VALUES (:'uid'::uuid, :'name', :'prefix',
+                crypt(:'plain', gen_salt('bf', 10)),
+                '{}', NOW() + INTERVAL '1 day')
+        RETURNING id" \
+        -v uid="$uid" \
+        -v name="mml-diag-probe-auto-$(date +%Y%m%d-%H%M%S)" \
+        -v prefix="$prefix" \
+        -v plain="$plain")
+    [[ -z "$key_id" ]] && { echo "ERROR: 自动生成 API Key 失败" >&2; exit 3; }
+
+    AUTO_GENERATED_KEY_ID="$key_id"
+    API_KEY="$plain"
+    log "已自动生成临时 API Key (user=$API_KEY_USER, key_id=$key_id, 1 天后过期)"
+}
+
+revoke_auto_key() {
+    [[ -z "$AUTO_GENERATED_KEY_ID" ]] && return
+    [[ "$KEEP_API_KEY" == "true" ]] && {
+        log "保留临时 API Key (--keep-api-key)：key_id=$AUTO_GENERATED_KEY_ID"
+        return
+    }
+    psql_at "UPDATE api_keys SET revoked_at = NOW() WHERE id = :'id'::uuid" \
+        -v id="$AUTO_GENERATED_KEY_ID" >/dev/null 2>&1 \
+        && log "已撤销临时 API Key: $AUTO_GENERATED_KEY_ID" \
+        || log "WARN: 撤销 API Key 失败: $AUTO_GENERATED_KEY_ID (手动清理：UPDATE api_keys SET revoked_at=NOW() WHERE id='$AUTO_GENERATED_KEY_ID')"
+}
+
+# 任何退出路径都尝试撤销自动生成的 key
+trap revoke_auto_key EXIT
+
+if [[ -z "$API_KEY" ]]; then
+    auto_generate_key
+else
+    log "API Key: 使用 ${API_KEY:0:8}*** (--api-key 或 \$OMCCTL_API_KEY)"
+fi
+
 api_post() {
     curl -fsSL --max-time 30 \
         -H "X-API-Key: $API_KEY" \
@@ -188,7 +367,6 @@ RESP=$(api_post "/api/v1/devices/tasks?device_sn=$DEVICE_SN" "$REQ_BODY") || {
     exit 3
 }
 
-# 后端 response 包络是 {ret, msg, data:{...task...}}；保险起见做 fallback
 TASK_ID=$(echo "$RESP" | jq -r '.data.id // .id // empty')
 if [[ -z "$TASK_ID" || "$TASK_ID" == "null" ]]; then
     echo "ERROR: 任务创建响应无 task id" >&2
@@ -211,26 +389,20 @@ while true; do
 
     STATUS="${ROW%%|*}"
     case "$STATUS" in
-    completed)
-        log "task 完成"
-        break
-        ;;
+    completed) log "task 完成"; break ;;
     failed)
         REST="${ROW#*|}"
         echo "ERROR: task 失败 — code=${REST%%|*} msg=${REST#*|}" >&2
         exit 5
         ;;
-    "")
-        echo "ERROR: task status 为空" >&2
-        exit 4
-        ;;
-    *) ;;  # pending / sent / in_progress → 继续等
+    "") echo "ERROR: task status 为空" >&2; exit 4 ;;
+    *) ;;
     esac
 
     if (( $(date +%s) > DEADLINE )); then
         echo "ERROR: 等待超时 ${TIMEOUT_SEC}s，task 仍为 $STATUS" >&2
         echo "  → 设备可能未在线 / Connection Request 未生效 / inform 间隔太长" >&2
-        echo "  → 检查 ACS 日志：grep $TASK_ID  acs.log" >&2
+        echo "  → 检查 ACS 日志：grep $TASK_ID acs.log" >&2
         exit 4
     fi
     sleep 2
@@ -254,14 +426,12 @@ fi
 #   <ParameterList SOAP-ENC:arrayType="cwmp:ParameterInfoStruct[N]">
 #     <ParameterInfoStruct><Name>Device.X.Y</Name><Writable>1</Writable></ParameterInfoStruct>
 #     ...
-#   </ParameterList>
-#
-# 用 xmllint local-name() 绕开命名空间差异（不同设备 cwmp/无前缀混杂）
+# 用 xmllint local-name() 绕开命名空间差异。
 log "用 xmllint 解析 ParameterInfoStruct/Name 节点…"
 xmllint --xpath \
     "//*[local-name()='ParameterInfoStruct']/*[local-name()='Name']/text()" \
     "$OUTPUT_DIR/raw_response.xml" 2>/dev/null \
-    | tr '\n' '\n' | awk 'NF { gsub(/^[ \t]+|[ \t]+$/,""); print }' \
+    | awk 'NF { gsub(/^[ \t]+|[ \t]+$/,""); print }' \
     | sort -u > "$OUTPUT_DIR/cpe_paths.txt" || true
 
 CPE_COUNT=$(wc -l < "$OUTPUT_DIR/cpe_paths.txt" | tr -d ' ')
@@ -287,7 +457,6 @@ log "DB 有 $DB_COUNT 条不重复 path"
 # ────────────────────────────────────────────────────────────────────
 # 步骤 6：差异计算
 # ────────────────────────────────────────────────────────────────────
-# comm 要求文件已 sort（两边都用 sort -u 保证）
 comm -23 "$OUTPUT_DIR/db_paths.txt"  "$OUTPUT_DIR/cpe_paths.txt" > "$OUTPUT_DIR/missing_in_cpe.txt"
 comm -13 "$OUTPUT_DIR/db_paths.txt"  "$OUTPUT_DIR/cpe_paths.txt" > "$OUTPUT_DIR/extra_in_cpe.txt"
 comm -12 "$OUTPUT_DIR/db_paths.txt"  "$OUTPUT_DIR/cpe_paths.txt" > "$OUTPUT_DIR/matched.txt"
@@ -298,12 +467,13 @@ MATCH=$(wc -l < "$OUTPUT_DIR/matched.txt"        | tr -d ' ')
 log "diff: matched=$MATCH  missing=$MISS  extra=$EXTRA"
 
 # ────────────────────────────────────────────────────────────────────
-# 步骤 7：报告 + 元数据
+# 步骤 7：报告
 # ────────────────────────────────────────────────────────────────────
 {
     echo "# MML 路径诊断报告"
     echo
     echo "- 生成时间: $(date)"
+    echo "- 配置文件: \`$CONFIG\`"
     echo "- 设备 SN: \`$DEVICE_SN\`"
     echo "- 设备元信息: \`$DEVICE_META\`"
     echo "- GPN 参数: path=\`$ROOT_PATH\` next_level=\`$NEXT_LEVEL\`"
@@ -324,16 +494,14 @@ log "diff: matched=$MATCH  missing=$MISS  extra=$EXTRA"
     echo "**这些就是 MML 命令被 CPE 丢弃的根因**。修复选项："
     echo
     echo "1. **path 拼写错** → \`UPDATE mml_params SET tr069_path = '<正确>' WHERE tr069_path = '<错>'\`"
-    echo "2. **path 不属于此 product** → 解除 \`mml_command_params_rel\` 绑定，或按 product_id 拆 param 库"
+    echo "2. **path 不属于此 product** → 解除 \`mml_command_params_rel\` 绑定"
     echo "3. **CPE 数据模型未实现** → 通知设备侧补齐，DB 暂保留"
     echo
     echo "### 前 50 条样本（完整见 missing_in_cpe.txt）"
     echo
     echo '```'
     head -50 "$OUTPUT_DIR/missing_in_cpe.txt"
-    if [[ "$MISS" -gt 50 ]]; then
-        echo "... 还有 $((MISS - 50)) 条"
-    fi
+    if [[ "$MISS" -gt 50 ]]; then echo "... 还有 $((MISS - 50)) 条"; fi
     echo '```'
     echo
     echo "## ℹ️ CPE 有但 DB 未收录"
@@ -342,27 +510,12 @@ log "diff: matched=$MATCH  missing=$MISS  extra=$EXTRA"
     echo
     echo '```'
     head -20 "$OUTPUT_DIR/extra_in_cpe.txt"
-    if [[ "$EXTRA" -gt 20 ]]; then
-        echo "... 还有 $((EXTRA - 20)) 条"
-    fi
+    if [[ "$EXTRA" -gt 20 ]]; then echo "... 还有 $((EXTRA - 20)) 条"; fi
     echo '```'
-    echo
-    echo "## 文件清单"
-    echo
-    echo "| 文件 | 说明 |"
-    echo "|---|---|"
-    echo "| raw_response.xml | 原始 SOAP body（调试用） |"
-    echo "| cpe_paths.txt | CPE 真实 path 列表 |"
-    echo "| db_paths.txt | DB 全部不重复 path |"
-    echo "| missing_in_cpe.txt | ❌ 修复目标 |"
-    echo "| extra_in_cpe.txt | ℹ️ 候选扩充 |"
-    echo "| matched.txt | ✅ 已对齐 |"
-    echo "| fixup.sql | 修复草稿（注释，需 review） |"
-    echo "| meta.json | 运行元数据 |"
 } > "$OUTPUT_DIR/report.md"
 
 # ────────────────────────────────────────────────────────────────────
-# 步骤 8：修复草稿 SQL（仅注释，不直接 DELETE/UPDATE）
+# 步骤 8：修复草稿 SQL
 # ────────────────────────────────────────────────────────────────────
 {
     echo "-- mml-diag GPN probe 修复草稿"
@@ -370,13 +523,6 @@ log "diff: matched=$MATCH  missing=$MISS  extra=$EXTRA"
     echo "-- 设备: $DEVICE_SN  task_id: $TASK_ID"
     echo "--"
     echo "-- ⚠️  本文件全部为注释。每条路径都需人工 review 后取消注释才会执行。"
-    echo "-- 工具 NOT 直接修改 DB，避免误删运维不熟悉的历史数据。"
-    echo "--"
-    echo "-- 三种典型修法（按情况二选一）："
-    echo "--   A. path 拼错 → UPDATE mml_params SET tr069_path='<correct>' WHERE tr069_path='<wrong>';"
-    echo "--   B. 不属于此设备 → DELETE FROM mml_command_params_rel WHERE param_id IN ("
-    echo "--                       SELECT id FROM mml_params WHERE tr069_path='<wrong>');"
-    echo "--   C. CPE 该补 → 保留 DB 不动，通知设备侧"
     echo
     while IFS= read -r p; do
         [[ -z "$p" ]] && continue
@@ -388,10 +534,11 @@ log "diff: matched=$MATCH  missing=$MISS  extra=$EXTRA"
 } > "$OUTPUT_DIR/fixup.sql"
 
 # ────────────────────────────────────────────────────────────────────
-# 步骤 9：元数据 JSON（机器消费）
+# 步骤 9：元数据 JSON
 # ────────────────────────────────────────────────────────────────────
 jq -n \
     --arg ts "$(date -Iseconds 2>/dev/null || date +%FT%T)" \
+    --arg cfg "$CONFIG" \
     --arg sn "$DEVICE_SN" \
     --arg meta "$DEVICE_META" \
     --arg tid "$TASK_ID" \
@@ -404,6 +551,7 @@ jq -n \
     --argjson extra "$EXTRA" \
     '{
       generated_at: $ts,
+      config: $cfg,
       device_sn: $sn,
       device_meta: $meta,
       task_id: $tid,
