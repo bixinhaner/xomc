@@ -7,8 +7,8 @@ import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import JSONViewer from '@/components/JSONViewer';
-import { mockOpsCommandRecords } from '@core/mock/data/opsTools';
 import type { OpsCommandRecord } from '@core/mock/data/opsTools';
+import { useOpsCommandRecords } from '@core/hooks/api/useOpsTools';
 import { useT } from '@/hooks/useT';
 
 function formatDuration(ms: number): string {
@@ -23,6 +23,21 @@ export default function CommandManagement() {
   const [pageSize, setPageSize] = useState(20);
   const [detailVisible, setDetailVisible] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState<OpsCommandRecord | null>(null);
+
+  const queryParams = useMemo(
+    () => ({
+      deviceSn: filters.deviceSn ? String(filters.deviceSn) : undefined,
+      operator: filters.operator ? String(filters.operator) : undefined,
+      success:
+        filters.result === 'success' ? true : filters.result === 'failed' ? false : undefined,
+      page,
+      pageSize,
+    }),
+    [filters, page, pageSize],
+  );
+  const { data, isLoading, refetch } = useOpsCommandRecords(queryParams);
+  const records: OpsCommandRecord[] = data?.items ?? [];
+  const total = data?.total ?? 0;
 
   const filterFields: FilterField[] = useMemo(() => [
     { name: 'keyword', label: t('ops.commandOrDevice'), type: 'input', placeholder: t('ops.commandOrDevicePlaceholder') },
@@ -40,20 +55,14 @@ export default function CommandManagement() {
     { name: 'timeRange', label: t('ops.executeTime'), type: 'date-range' },
   ], [t]);
 
-  const filtered = mockOpsCommandRecords.filter((r) => {
+  // keyword 是前端模糊匹配，后端目前不支持 — 在已分页结果上叠加 client-side filter。
+  const paginated = records.filter((r) => {
     if (filters.keyword) {
       const kw = String(filters.keyword).toLowerCase();
       if (!r.commandText.toLowerCase().includes(kw) && !r.deviceSn.toLowerCase().includes(kw)) return false;
     }
-    if (filters.deviceSn && !r.deviceSn.includes(String(filters.deviceSn))) return false;
-    if (filters.operator && !r.operator.includes(String(filters.operator))) return false;
-    if (filters.result === 'success' && !r.success) return false;
-    if (filters.result === 'failed' && r.success) return false;
     return true;
   });
-
-  const startIndex = (page - 1) * pageSize;
-  const paginated = filtered.slice(startIndex, startIndex + pageSize);
 
   const columns: DataTableColumn<OpsCommandRecord & Record<string, unknown>>[] = useMemo(() => [
     {
@@ -151,13 +160,13 @@ export default function CommandManagement() {
         tableId="ops-command-list"
         columns={columns}
         dataSource={paginated as (OpsCommandRecord & Record<string, unknown>)[]}
-        loading={false}
+        loading={isLoading}
         rowKey="id"
-        total={filtered.length}
+        total={total}
         pageSize={pageSize}
         currentPage={page}
         onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-        onExport={(format) => void console.log(t('common.export'), format)}
+        onRefresh={() => void refetch()}
         scroll={{ x: 1300 }}
         alarmRowStyle={(record) => {
           const r = record as OpsCommandRecord;
