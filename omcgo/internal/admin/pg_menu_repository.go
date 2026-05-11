@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"time"
@@ -16,10 +17,38 @@ import (
 	"github.com/omcgo/omcgo/internal/core/storage"
 )
 
+// menuColumns 的列顺序必须与 scanMenu / scanMenuFromRows 的 Scan 顺序严格一致。
+// name_i18n / i18n_key 由 migration 000083 引入。
 var menuColumns = []string{
-	"id", "name", "type", "permission_key", "parent_id", "sort_order",
+	"id", "name", "name_i18n", "i18n_key", "type", "permission_key", "parent_id", "sort_order",
 	"route_path", "component_path", "icon", "show_status", "status",
 	"created_by", "created_at", "updated_by", "updated_at",
+}
+
+// marshalNameI18n 把 map 序列化为 JSONB；nil/空 map 返 nil（写 SQL NULL）。
+// 之所以 empty map 也归一为 NULL：方案 C 语义上「未配置多语言」与「配置了空字典」无区别，
+// 一律 NULL 让 SELECT 时 fallback 链路（i18n_key → NameI18n → Name）走默认分支。
+func marshalNameI18n(m map[string]string) (interface{}, error) {
+	if len(m) == 0 {
+		return nil, nil
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil, fmt.Errorf("marshal name_i18n: %w", err)
+	}
+	return b, nil
+}
+
+// unmarshalNameI18n 反序列化 JSONB；NULL / 空 bytes 返 nil map。
+func unmarshalNameI18n(raw []byte) (map[string]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("unmarshal name_i18n: %w", err)
+	}
+	return m, nil
 }
 
 // PgMenuRepository implements MenuRepository using PostgreSQL.
@@ -41,10 +70,16 @@ func (r *PgMenuRepository) Create(ctx context.Context, menu *Menu, operatorID uu
 	menu.UpdatedBy = &operatorID
 	menu.UpdatedAt = time.Now()
 
+	nameI18n, err := marshalNameI18n(menu.NameI18n)
+	if err != nil {
+		return err
+	}
+
 	query, args, err := storage.Psql.Insert("menus").
 		Columns(menuColumns...).
 		Values(
-			menu.ID, menu.Name, menu.Type, menu.PermissionKey, nullableUUID(menu.ParentID), menu.SortOrder,
+			menu.ID, menu.Name, nameI18n, nullableString(menu.I18nKey),
+			menu.Type, menu.PermissionKey, nullableUUID(menu.ParentID), menu.SortOrder,
 			nullableString(menu.RoutePath), nullableString(menu.ComponentPath), nullableString(menu.Icon),
 			menu.ShowStatus, menu.Status,
 			menu.CreatedBy, menu.CreatedAt, menu.UpdatedBy, menu.UpdatedAt,
@@ -179,6 +214,17 @@ func (r *PgMenuRepository) Update(ctx context.Context, id uuid.UUID, req *Update
 	if req.Name != nil {
 		updates["name"] = *req.Name
 	}
+	if req.NameI18n != nil {
+		// *req.NameI18n 可能是空 map（表示「清空译文」），marshalNameI18n 会归一为 NULL。
+		nameI18n, err := marshalNameI18n(*req.NameI18n)
+		if err != nil {
+			return err
+		}
+		updates["name_i18n"] = nameI18n
+	}
+	if req.I18nKey != nil {
+		updates["i18n_key"] = nullableString(*req.I18nKey)
+	}
 	if req.SortOrder != nil {
 		updates["sort_order"] = *req.SortOrder
 	}
@@ -293,7 +339,8 @@ func (r *PgMenuRepository) GetAllActive(ctx context.Context) ([]Menu, error) {
 }
 
 func (r *PgMenuRepository) GetByRole(ctx context.Context, roleID uuid.UUID) ([]Menu, error) {
-	query, args, err := storage.Psql.Select("m.id", "m.name", "m.type", "m.permission_key", "m.parent_id",
+	query, args, err := storage.Psql.Select("m.id", "m.name", "m.name_i18n", "m.i18n_key",
+		"m.type", "m.permission_key", "m.parent_id",
 		"m.sort_order", "m.route_path", "m.component_path", "m.icon", "m.show_status", "m.status",
 		"m.created_by", "m.created_at", "m.updated_by", "m.updated_at").
 		From("menus m").
@@ -324,7 +371,8 @@ func (r *PgMenuRepository) GetByRole(ctx context.Context, roleID uuid.UUID) ([]M
 }
 
 func (r *PgMenuRepository) GetByUser(ctx context.Context, userID uuid.UUID) ([]Menu, error) {
-	query, args, err := storage.Psql.Select("DISTINCT m.id", "m.name", "m.type", "m.permission_key", "m.parent_id",
+	query, args, err := storage.Psql.Select("DISTINCT m.id", "m.name", "m.name_i18n", "m.i18n_key",
+		"m.type", "m.permission_key", "m.parent_id",
 		"m.sort_order", "m.route_path", "m.component_path", "m.icon", "m.show_status", "m.status",
 		"m.created_by", "m.created_at", "m.updated_by", "m.updated_at").
 		From("menus m").
@@ -421,13 +469,18 @@ func (r *PgMenuRepository) GetRoleMenuIDs(ctx context.Context, roleID uuid.UUID)
 }
 
 // scanMenu scans a single menu from a pgx.Row.
+//
+// Scan 顺序与 menuColumns 严格对齐；name_i18n 用 *[]byte 接 JSONB 原始字节，
+// 再走 unmarshalNameI18n 解码。NULL → nil bytes → nil map（前端兜底到 Name）。
 func scanMenu(row pgx.Row) (*Menu, error) {
 	var m Menu
 	var parentID, createdBy, updatedBy *uuid.UUID
-	var routePath, componentPath, icon *string
+	var routePath, componentPath, icon, i18nKey *string
+	var nameI18nRaw []byte
 
 	err := row.Scan(
-		&m.ID, &m.Name, &m.Type, &m.PermissionKey, &parentID, &m.SortOrder,
+		&m.ID, &m.Name, &nameI18nRaw, &i18nKey,
+		&m.Type, &m.PermissionKey, &parentID, &m.SortOrder,
 		&routePath, &componentPath, &icon, &m.ShowStatus, &m.Status,
 		&createdBy, &m.CreatedAt, &updatedBy, &m.UpdatedAt,
 	)
@@ -438,19 +491,9 @@ func scanMenu(row pgx.Row) (*Menu, error) {
 		return nil, fmt.Errorf("scan menu: %w", err)
 	}
 
-	m.ParentID = parentID
-	m.CreatedBy = createdBy
-	m.UpdatedBy = updatedBy
-	if routePath != nil {
-		m.RoutePath = *routePath
+	if err := applyMenuOptionalCols(&m, parentID, createdBy, updatedBy, routePath, componentPath, icon, i18nKey, nameI18nRaw); err != nil {
+		return nil, err
 	}
-	if componentPath != nil {
-		m.ComponentPath = *componentPath
-	}
-	if icon != nil {
-		m.Icon = *icon
-	}
-
 	return &m, nil
 }
 
@@ -458,10 +501,12 @@ func scanMenu(row pgx.Row) (*Menu, error) {
 func scanMenuFromRows(rows pgx.Rows) (*Menu, error) {
 	var m Menu
 	var parentID, createdBy, updatedBy *uuid.UUID
-	var routePath, componentPath, icon *string
+	var routePath, componentPath, icon, i18nKey *string
+	var nameI18nRaw []byte
 
 	err := rows.Scan(
-		&m.ID, &m.Name, &m.Type, &m.PermissionKey, &parentID, &m.SortOrder,
+		&m.ID, &m.Name, &nameI18nRaw, &i18nKey,
+		&m.Type, &m.PermissionKey, &parentID, &m.SortOrder,
 		&routePath, &componentPath, &icon, &m.ShowStatus, &m.Status,
 		&createdBy, &m.CreatedAt, &updatedBy, &m.UpdatedAt,
 	)
@@ -469,6 +514,20 @@ func scanMenuFromRows(rows pgx.Rows) (*Menu, error) {
 		return nil, fmt.Errorf("scan menu row: %w", err)
 	}
 
+	if err := applyMenuOptionalCols(&m, parentID, createdBy, updatedBy, routePath, componentPath, icon, i18nKey, nameI18nRaw); err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+// applyMenuOptionalCols 把 scan 出的可空列回填到 Menu，避免 scanMenu / scanMenuFromRows
+// 两份重复代码（历史只回填 5 个可空列，新增 i18n_key + name_i18n 后重复成本变高）。
+func applyMenuOptionalCols(
+	m *Menu,
+	parentID, createdBy, updatedBy *uuid.UUID,
+	routePath, componentPath, icon, i18nKey *string,
+	nameI18nRaw []byte,
+) error {
 	m.ParentID = parentID
 	m.CreatedBy = createdBy
 	m.UpdatedBy = updatedBy
@@ -481,8 +540,15 @@ func scanMenuFromRows(rows pgx.Rows) (*Menu, error) {
 	if icon != nil {
 		m.Icon = *icon
 	}
-
-	return &m, nil
+	if i18nKey != nil {
+		m.I18nKey = *i18nKey
+	}
+	nameI18n, err := unmarshalNameI18n(nameI18nRaw)
+	if err != nil {
+		return err
+	}
+	m.NameI18n = nameI18n
+	return nil
 }
 
 // buildTree builds a tree structure from a flat list of menus.

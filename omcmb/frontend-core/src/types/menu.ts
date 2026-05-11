@@ -14,10 +14,20 @@ export type MenuType = 'directory' | 'menu' | 'button';
 export type MenuStatus = 'normal' | 'disabled';
 export type MenuShowStatus = 'show' | 'hide';
 
+/**
+ * 菜单多语言译文字典：键为 locale code（zh-CN/en-US/...），值为对应译文。
+ * 由后端 menus.name_i18n JSONB 列承载，菜单管理 UI 可编辑。
+ */
+export type MenuNameI18n = Record<string, string>;
+
 /** 后端 Menu JSON 形态。永远用于解码 HTTP 响应，不直接给业务层消费。 */
 export interface BackendMenu {
   id: string;
   name: string;
+  /** 多语言译文（migration 000083 引入），未配置时缺失。 */
+  name_i18n?: MenuNameI18n | null;
+  /** react-intl 翻译键（兼容字段），命中前端 messages 时优先于 name_i18n。 */
+  i18n_key?: string | null;
   type: MenuType;
   permission_key: string;
   parent_id?: string | null;
@@ -36,6 +46,8 @@ export interface BackendMenu {
 export interface Menu {
   id: string;
   name: string;
+  nameI18n?: MenuNameI18n;
+  i18nKey?: string;
   type: MenuType;
   permissionKey: string;
   parentId: string | null;
@@ -55,6 +67,8 @@ export function mapBackendMenu(b: BackendMenu): Menu {
   return {
     id: b.id,
     name: b.name,
+    nameI18n: b.name_i18n ?? undefined,
+    i18nKey: b.i18n_key || undefined,
     type: b.type,
     permissionKey: b.permission_key,
     parentId: b.parent_id ?? null,
@@ -68,6 +82,34 @@ export function mapBackendMenu(b: BackendMenu): Menu {
     updatedAt: b.updated_at,
     children: b.children?.map(mapBackendMenu),
   };
+}
+
+/**
+ * 根据当前 locale 解析菜单显示名（方案 C 渲染优先级）：
+ *   1. i18nKey 命中前端 messages  → 用 react-intl 翻译值
+ *   2. nameI18n[locale]            → 当前语言译文
+ *   3. nameI18n['zh-CN']           → 中文兜底（覆盖率最广的语言）
+ *   4. name                        → 终极 fallback（DB 原始 name 字段）
+ *
+ * 调用方负责提供 messages（通常通过 useIntl().messages）；不传 messages 时
+ * i18nKey 路径自动跳过，仅走 nameI18n / name fallback。
+ *
+ * 设计依据：T-0113 菜单多语言改造方案 §C，单测见 menu.test.ts。
+ */
+export function resolveMenuLabel(
+  menu: Pick<Menu, 'name' | 'nameI18n' | 'i18nKey'>,
+  locale: string,
+  messages?: Record<string, string>,
+): string {
+  if (menu.i18nKey && messages && typeof messages[menu.i18nKey] === 'string') {
+    return messages[menu.i18nKey];
+  }
+  const i18n = menu.nameI18n;
+  if (i18n) {
+    if (i18n[locale]) return i18n[locale];
+    if (i18n['zh-CN']) return i18n['zh-CN'];
+  }
+  return menu.name;
 }
 
 /** 把树扁平化为线性数组，供 Set 构造（permissionKeys / routePaths）使用。 */

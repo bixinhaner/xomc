@@ -941,6 +941,8 @@ func (s *AdminService) CreateMenu(ctx context.Context, req CreateMenuRequest, op
 
 	menu := &Menu{
 		Name:          req.Name,
+		NameI18n:      req.NameI18n,
+		I18nKey:       req.I18nKey,
 		Type:          req.Type,
 		PermissionKey: req.PermissionKey,
 		ParentID:      req.ParentID,

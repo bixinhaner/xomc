@@ -291,23 +291,34 @@ const (
 )
 
 // Menu represents a navigation menu item.
+//
+// 多语言字段（migration 000083）：
+//   - NameI18n：多语言译文字典，键为 locale code（zh-CN/en-US/...），值为译文。
+//     菜单管理 UI 编辑后写入；nil 表示未配置多语言，前端回退到 Name。
+//   - I18nKey：可选 react-intl 翻译键，命中前端 messages 时优先于 NameI18n。
+//     主要用于早期没经过 UI 编辑、直接走前端 i18n 包翻译的内置菜单。
+//
+// 前端渲染优先级（参 frontend-core/src/types/menu.ts 与 NavMenu.tsx）：
+//   I18nKey 命中前端 messages > NameI18n[locale] > NameI18n["zh-CN"] > Name
 type Menu struct {
-	ID             uuid.UUID      `json:"id"`
-	Name           string         `json:"name"`
-	Type           string         `json:"type"`
-	PermissionKey  string         `json:"permission_key"`
-	ParentID       *uuid.UUID     `json:"parent_id,omitempty"`
-	SortOrder      int            `json:"sort_order"`
-	RoutePath      string         `json:"route_path,omitempty"`
-	ComponentPath  string         `json:"component_path,omitempty"`
-	Icon           string         `json:"icon,omitempty"`
-	ShowStatus     MenuShowStatus `json:"show_status"`
-	Status         MenuStatus  `json:"status"`
-	CreatedBy      *uuid.UUID  `json:"created_by,omitempty"`
-	CreatedAt      time.Time   `json:"created_at"`
-	UpdatedBy      *uuid.UUID  `json:"updated_by,omitempty"`
-	UpdatedAt      time.Time   `json:"updated_at"`
-	Children       []Menu      `json:"children,omitempty"`
+	ID             uuid.UUID         `json:"id"`
+	Name           string            `json:"name"`
+	NameI18n       map[string]string `json:"name_i18n,omitempty"`
+	I18nKey        string            `json:"i18n_key,omitempty"`
+	Type           string            `json:"type"`
+	PermissionKey  string            `json:"permission_key"`
+	ParentID       *uuid.UUID        `json:"parent_id,omitempty"`
+	SortOrder      int               `json:"sort_order"`
+	RoutePath      string            `json:"route_path,omitempty"`
+	ComponentPath  string            `json:"component_path,omitempty"`
+	Icon           string            `json:"icon,omitempty"`
+	ShowStatus     MenuShowStatus    `json:"show_status"`
+	Status         MenuStatus        `json:"status"`
+	CreatedBy      *uuid.UUID        `json:"created_by,omitempty"`
+	CreatedAt      time.Time         `json:"created_at"`
+	UpdatedBy      *uuid.UUID        `json:"updated_by,omitempty"`
+	UpdatedAt      time.Time         `json:"updated_at"`
+	Children       []Menu            `json:"children,omitempty"`
 }
 
 // MenuFilter provides filtering options for listing menus.
@@ -319,30 +330,38 @@ type MenuFilter struct {
 }
 
 // UpdateMenuRequest is the input for updating an existing menu.
+//
+// NameI18n / I18nKey 为指针：nil 表示「不变更该字段」，非 nil（含空值）表示
+// 显式写入。前端传 {"name_i18n": null} 时按「不变更」处理；传 {"name_i18n": {}}
+// 表示清空所有译文（合法），repo 会写 JSONB '{}'。
 type UpdateMenuRequest struct {
-	Name          *string         `json:"name"`
-	Type          *string         `json:"type"`
-	PermissionKey *string         `json:"permission_key"`
-	ParentID      *uuid.UUID      `json:"parent_id"`
-	SortOrder     *int            `json:"sort_order"`
-	RoutePath     *string         `json:"route_path"`
-	ComponentPath *string         `json:"component_path"`
-	Icon          *string         `json:"icon"`
-	ShowStatus    *MenuShowStatus `json:"show_status"`
-	Status        *MenuStatus     `json:"status"`
+	Name          *string            `json:"name"`
+	NameI18n      *map[string]string `json:"name_i18n"`
+	I18nKey       *string            `json:"i18n_key"`
+	Type          *string            `json:"type"`
+	PermissionKey *string            `json:"permission_key"`
+	ParentID      *uuid.UUID         `json:"parent_id"`
+	SortOrder     *int               `json:"sort_order"`
+	RoutePath     *string            `json:"route_path"`
+	ComponentPath *string            `json:"component_path"`
+	Icon          *string            `json:"icon"`
+	ShowStatus    *MenuShowStatus    `json:"show_status"`
+	Status        *MenuStatus        `json:"status"`
 }
 
 // CreateMenuRequest is the input for creating a new menu.
 type CreateMenuRequest struct {
-	Name          string         `json:"name" binding:"required"`
-	Type          string         `json:"type" binding:"required"`
-	PermissionKey string         `json:"permission_key" binding:"required"`
-	ParentID      *uuid.UUID     `json:"parent_id"`
-	SortOrder     int            `json:"sort_order"`
-	RoutePath     string         `json:"route_path"`
-	ComponentPath string         `json:"component_path"`
-	Icon          string         `json:"icon"`
-	ShowStatus    MenuShowStatus `json:"show_status"`
+	Name          string            `json:"name" binding:"required"`
+	NameI18n      map[string]string `json:"name_i18n"`
+	I18nKey       string            `json:"i18n_key"`
+	Type          string            `json:"type" binding:"required"`
+	PermissionKey string            `json:"permission_key" binding:"required"`
+	ParentID      *uuid.UUID        `json:"parent_id"`
+	SortOrder     int               `json:"sort_order"`
+	RoutePath     string            `json:"route_path"`
+	ComponentPath string            `json:"component_path"`
+	Icon          string            `json:"icon"`
+	ShowStatus    MenuShowStatus    `json:"show_status"`
 }
 
 // SetRoleMenusRequest is the input for setting role menu permissions.

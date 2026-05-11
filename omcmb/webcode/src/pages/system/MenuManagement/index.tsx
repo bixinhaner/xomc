@@ -32,7 +32,14 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import { useT } from '@/hooks/useT';
 import http from '@core/services/http';
+import { SUPPORTED_LOCALES, LOCALE_DISPLAY } from '@core/i18n';
+import type { Locale } from '@core/types/common';
 import styles from './index.module.css';
+
+// 菜单管理 UI 暴露的额外语言：除主语言（zh-CN）外的所有支持语言。
+// 扩展新语言只需在 frontend-core/src/i18n/index.ts 追加 SUPPORTED_LOCALES，
+// 表单自动多出一行输入框，无需改本文件。
+const EXTRA_LOCALES: readonly Locale[] = SUPPORTED_LOCALES.filter((l) => l !== 'zh-CN');
 
 // 菜单类型
 type MenuType = 'menu' | 'directory' | 'button';
@@ -53,6 +60,10 @@ type ApiPermission = 'required' | 'none';
 interface MenuItem {
   id: string;
   name: string;
+  /** 多语言译文字典（migration 000083 引入）；编辑表单按 locale 拆字段填入。 */
+  nameI18n?: Record<string, string>;
+  /** react-intl 翻译键（高级字段），命中前端 messages 时优先于 nameI18n。 */
+  i18nKey?: string;
   type: MenuType;
   sort: number;
   permissionKey: string;
@@ -74,6 +85,8 @@ interface MenuItem {
 interface BackendMenu {
   id: string;
   name: string;
+  name_i18n?: Record<string, string> | null;
+  i18n_key?: string | null;
   type: MenuType;
   permission_key: string;
   parent_id?: string;
@@ -93,6 +106,8 @@ function mapBackendMenu(b: BackendMenu): MenuItem {
   return {
     id: b.id,
     name: b.name,
+    nameI18n: b.name_i18n ?? undefined,
+    i18nKey: b.i18n_key || undefined,
     type: b.type,
     sort: b.sort_order,
     permissionKey: b.permission_key,
@@ -143,6 +158,8 @@ async function fetchMenuTree(): Promise<MenuItem[]> {
 // CreateMenuRequest payload（与 omcgo/internal/admin/model.go CreateMenuRequest 对齐）。
 interface CreateMenuPayload {
   name: string;
+  name_i18n?: Record<string, string>;
+  i18n_key?: string;
   type: MenuType;
   permission_key: string;
   parent_id?: string | null;
@@ -274,6 +291,10 @@ export default function MenuManagement() {
     setSelectedMenu(menu);
     form.setFieldsValue({
       name: menu.name,
+      // 多语言译文字典回显到嵌套 form 字段（namePath: ['nameI18n', locale]）；
+      // 缺译文的 locale 在表单里就是空字符串，保存时聚合逻辑会自动剔除。
+      nameI18n: menu.nameI18n ?? {},
+      i18nKey: menu.i18nKey ?? '',
       type: menu.type,
       sort: menu.sort,
       permissionKey: menu.permissionKey,
@@ -291,6 +312,27 @@ export default function MenuManagement() {
     setEditVisible(true);
   }, [form]);
 
+  // 把表单的 name + nameI18n 字段聚合为后端期望的 name_i18n。
+  // 规则：
+  //   - 主语言（zh-CN）与表单"菜单名称"字段强绑定，确保 name 与 name_i18n["zh-CN"] 始终一致
+  //   - 其他 locale 取自嵌套字段；空字符串视为"未填"，从结果剔除（避免存空字符串污染回退链）
+  // 返回值始终是一个 map（最小含 zh-CN）；上层把它放进 payload.name_i18n。
+  const buildNameI18nPayload = useCallback(
+    (formName: string, formNameI18n: Record<string, string> | undefined): Record<string, string> => {
+      const result: Record<string, string> = { 'zh-CN': formName };
+      if (formNameI18n) {
+        for (const locale of EXTRA_LOCALES) {
+          const v = formNameI18n[locale];
+          if (typeof v === 'string' && v.trim() !== '') {
+            result[locale] = v;
+          }
+        }
+      }
+      return result;
+    },
+    [],
+  );
+
   // 处理保存（PUT /admin/menus/:id）。
   // 字段映射：sort → sort_order；permissionKey → permission_key；空字符串显式传以便清空。
   // icon 直接来自 IconPicker（antd icon export name 或 undefined）；
@@ -300,6 +342,8 @@ export default function MenuManagement() {
       if (!selectedMenu) return;
       const payload: UpdateMenuPayload = {
         name: vals.name,
+        name_i18n: buildNameI18nPayload(vals.name, vals.nameI18n),
+        i18n_key: vals.i18nKey ?? '',
         type: vals.type,
         sort_order: vals.sort,
         permission_key: vals.permissionKey,
@@ -322,7 +366,7 @@ export default function MenuManagement() {
         },
       );
     });
-  }, [form, selectedMenu, message, t, updateMenuMut]);
+  }, [form, selectedMenu, message, t, updateMenuMut, buildNameI18nPayload]);
 
   // 生成树形选择数据
   const menuTreeData = useMemo(() => {
@@ -348,6 +392,8 @@ export default function MenuManagement() {
       isExternal: 'no',
       apiPermission: 'none',
       icon: undefined,
+      nameI18n: {},
+      i18nKey: '',
     });
     setAddVisible(true);
   }, [addForm]);
@@ -359,6 +405,8 @@ export default function MenuManagement() {
     addForm.validateFields().then((vals) => {
       const payload: CreateMenuPayload = {
         name: vals.name,
+        name_i18n: buildNameI18nPayload(vals.name, vals.nameI18n),
+        i18n_key: vals.i18nKey ?? '',
         type: vals.type,
         permission_key: vals.permissionKey || '',
         parent_id: vals.parentId === '0' ? null : vals.parentId,
@@ -377,7 +425,7 @@ export default function MenuManagement() {
         onError: (err) => message.error((err as Error).message || t('common.saveFailed')),
       });
     });
-  }, [addForm, message, t, createMenuMut]);
+  }, [addForm, message, t, createMenuMut, buildNameI18nPayload]);
 
   // 排序值 +1（PUT /admin/menus/:id 仅更新 sort_order）。
   const handleMoveDown = useCallback((record: MenuItem & { level: number }) => {
@@ -528,6 +576,31 @@ export default function MenuManagement() {
     },
   ], [t, handleEdit, handleDelete, expandedKeys, toggleExpand, handleMoveUp, handleMoveDown]);
 
+  // i18n 字段块：在每个含"菜单名称"输入框的表单分支后追加。
+  // 包括：除主语言外的每种 locale 一个输入框 + i18n key 高级字段。
+  // 数组循环 EXTRA_LOCALES 实现「新增语言只改 SUPPORTED_LOCALES 一处」。
+  const i18nFields = (
+    <>
+      {EXTRA_LOCALES.map((locale) => (
+        <Form.Item
+          key={locale}
+          name={['nameI18n', locale]}
+          label={`菜单名称（${LOCALE_DISPLAY[locale]}）`}
+          extra={`可选；未填时在 ${LOCALE_DISPLAY[locale]} 语境下回退到中文`}
+        >
+          <Input placeholder={`${LOCALE_DISPLAY[locale]} 名称`} maxLength={64} />
+        </Form.Item>
+      ))}
+      <Form.Item
+        name="i18nKey"
+        label="i18n key（高级）"
+        extra="可选；命中前端 messages 时优先于上面译文。例如 nav.ops.command"
+      >
+        <Input placeholder="可选" maxLength={128} />
+      </Form.Item>
+    </>
+  );
+
   return (
     <ListPageLayout
       title="菜单管理"
@@ -590,11 +663,12 @@ export default function MenuManagement() {
         <Form form={form} layout="vertical">
           <Form.Item
             name="name"
-            label="菜单名称"
+            label="菜单名称（中文）"
             rules={[{ required: true, message: '请输入菜单名称' }]}
           >
             <Input placeholder="请输入菜单名称" maxLength={50} />
           </Form.Item>
+          {i18nFields}
           <Form.Item
             name="type"
             label="类型"
@@ -872,11 +946,12 @@ export default function MenuManagement() {
                     </Form.Item>
                     <Form.Item
                       name="name"
-                      label="菜单名称"
+                      label="菜单名称（中文）"
                       rules={[{ required: true, message: '请输入菜单名称' }]}
                     >
                       <Input placeholder="请输入菜单名称" maxLength={50} />
                     </Form.Item>
+                    {i18nFields}
                     <Form.Item
                       name="icon"
                       label={t('system.menu.icon')}
@@ -952,11 +1027,12 @@ export default function MenuManagement() {
                     </Form.Item>
                     <Form.Item
                       name="name"
-                      label="菜单名称"
+                      label="菜单名称（中文）"
                       rules={[{ required: true, message: '请输入菜单名称' }]}
                     >
                       <Input placeholder="请输入菜单名称" maxLength={50} />
                     </Form.Item>
+                    {i18nFields}
                     <Form.Item
                       name="isExternal"
                       label="是否外链"
@@ -1043,11 +1119,12 @@ export default function MenuManagement() {
                     </Form.Item>
                     <Form.Item
                       name="name"
-                      label="菜单名称"
+                      label="菜单名称（中文）"
                       rules={[{ required: true, message: '请输入菜单名称' }]}
                     >
                       <Input placeholder="请输入菜单名称" maxLength={50} />
                     </Form.Item>
+                    {i18nFields}
                     <Form.Item
                       name="permissionKey"
                       label="权限字符"

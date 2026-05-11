@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { Menu as AntMenu } from 'antd';
 import type { MenuProps } from 'antd';
+import { useIntl } from 'react-intl';
 import {
   AppstoreOutlined,
   AppstoreAddOutlined,
@@ -34,6 +35,7 @@ import { useAppStore } from '@core/store/appStore';
 import { useMenuStore } from '@core/store/menuStore';
 import { useUserStore } from '@core/store/userStore';
 import type { Menu as DynamicMenu } from '@core/types/menu';
+import { resolveMenuLabel } from '@core/types/menu';
 import { useResponsive } from '@/hooks/useResponsive';
 import { useT } from '@/hooks/useT';
 import { resolveIcon } from '@/components/IconPicker/icons';
@@ -145,15 +147,22 @@ function renderIcon(name: string | undefined): React.ReactNode {
 }
 
 /**
+ * MenuLabelResolver 把 menu 解析为当前 locale 下的显示文案。
+ * 用 type alias 避免在所有 helper 签名里重复 `(m) => string` 的 verbose 形式。
+ */
+type MenuLabelResolver = (menu: DynamicMenu) => string;
+
+/**
  * 把后端菜单树转 antd Menu items。规则：
  *  - 仅渲染 type='directory'|'menu'（按钮跳过）
  *  - 单子节点目录扁平化（与 NAV_CONFIG 行为一致）
  *  - 隐藏 status!=active 或 showStatus='hide' 的节点
+ *  - label 走 resolveMenuLabel：i18nKey 命中 messages > nameI18n[locale] > name fallback
  *
  * 注：动态模式下，super_admin 过滤由后端 GetUserMenuTreeByRole / GetAllActive
  * 在 service 层完成（user.source='builtIn' 旁路），前端无需再过滤。
  */
-function buildDynamicMenuItems(menus: DynamicMenu[]): MenuItem[] {
+function buildDynamicMenuItems(menus: DynamicMenu[], label: MenuLabelResolver): MenuItem[] {
   return menus
     .filter(isVisible)
     .filter((m) => m.type !== 'button')
@@ -167,7 +176,7 @@ function buildDynamicMenuItems(menus: DynamicMenu[]): MenuItem[] {
         return {
           key: m.routePath || m.id,
           icon: renderIcon(m.icon),
-          label: m.name,
+          label: label(m),
         } as MenuItem;
       }
 
@@ -177,26 +186,26 @@ function buildDynamicMenuItems(menus: DynamicMenu[]): MenuItem[] {
         return {
           key: only.routePath || only.id,
           icon: renderIcon(m.icon),
-          label: m.name,
+          label: label(m),
         } as MenuItem;
       }
 
       return {
         key: m.id,
         icon: renderIcon(m.icon),
-        label: m.name,
-        children: buildDynamicMenuItems(visibleChildren),
+        label: label(m),
+        children: buildDynamicMenuItems(visibleChildren, label),
       } as MenuItem;
     });
 }
 
-/** 扁平索引：menu key → DynamicLeaf（path 跳转用）。 */
-function buildDynamicKeyToLeaf(menus: DynamicMenu[]): Map<string, DynamicLeaf> {
+/** 扁平索引：menu key → DynamicLeaf（path 跳转用）。leaf.label 同样走 label resolver。 */
+function buildDynamicKeyToLeaf(menus: DynamicMenu[], label: MenuLabelResolver): Map<string, DynamicLeaf> {
   const map = new Map<string, DynamicLeaf>();
   const walk = (list: DynamicMenu[]) => {
     for (const m of list.filter(isVisible)) {
       if (m.type === 'menu' && m.routePath) {
-        map.set(m.routePath, { key: m.routePath, label: m.name, path: m.routePath });
+        map.set(m.routePath, { key: m.routePath, label: label(m), path: m.routePath });
       }
       // 单子节点目录扁平化：父目录 key 也指向唯一子节点
       const visibleChildren = (m.children ?? [])
@@ -205,7 +214,7 @@ function buildDynamicKeyToLeaf(menus: DynamicMenu[]): Map<string, DynamicLeaf> {
       if (m.type === 'directory' && visibleChildren.length === 1) {
         const only = visibleChildren[0];
         if (only.routePath) {
-          map.set(only.routePath, { key: only.routePath, label: only.name, path: only.routePath });
+          map.set(only.routePath, { key: only.routePath, label: label(only), path: only.routePath });
         }
       }
       if (m.children?.length) walk(m.children);
@@ -263,9 +272,20 @@ export default function NavMenu({
   const setMobileOverlayOpen = useAppStore((s) => s.setMobileOverlayOpen);
   const { isMobile } = useResponsive();
   const t = useT();
+  const intl = useIntl();
   const isSuperAdmin = useUserStore((s) => s.currentUser?.isSuperAdmin === true);
 
   const dynamicMenus = useMenuStore((s) => s.menus);
+
+  // 动态菜单 label 解析器：每次 locale / messages 变化都重新生成，确保
+  // 切换语言后 antd Menu 立即重渲染（同时影响 openTab 标题）。
+  // intl.messages 类型是 Record<string, MessageFormatElement[] | string>，
+  // resolveMenuLabel 内部对 string typeof 做了校验，直接转 Record<string, string>。
+  const labelResolver = useMemo<MenuLabelResolver>(
+    () => (m: DynamicMenu) =>
+      resolveMenuLabel(m, intl.locale, intl.messages as Record<string, string>),
+    [intl.locale, intl.messages],
+  );
 
   // 灰度判定：仅依赖 env flag。动态模式启用后永远走动态分支，**任何时候**不回退到
   // NAV_CONFIG 静态菜单。
@@ -290,13 +310,18 @@ export default function NavMenu({
 
   const menuItems = useMemo(
     () =>
-      useDynamic ? buildDynamicMenuItems(dynamicMenus) : buildStaticMenuItems(filteredNav, t),
-    [useDynamic, dynamicMenus, filteredNav, t],
+      useDynamic
+        ? buildDynamicMenuItems(dynamicMenus, labelResolver)
+        : buildStaticMenuItems(filteredNav, t),
+    [useDynamic, dynamicMenus, labelResolver, filteredNav, t],
   );
 
   const dynamicKeyToLeaf = useMemo(
-    () => (useDynamic ? buildDynamicKeyToLeaf(dynamicMenus) : new Map<string, DynamicLeaf>()),
-    [useDynamic, dynamicMenus],
+    () =>
+      useDynamic
+        ? buildDynamicKeyToLeaf(dynamicMenus, labelResolver)
+        : new Map<string, DynamicLeaf>(),
+    [useDynamic, dynamicMenus, labelResolver],
   );
   const dynamicPathToKey = useMemo(
     () => (useDynamic ? buildDynamicPathToKey(dynamicMenus) : new Map<string, string>()),
