@@ -493,7 +493,31 @@ func initMiscModules(c *Container) error {
 	opsCmdRepo := ops.NewPgCommandRecordRepository(c.PgPool)
 	opsSvc := ops.NewService(opsTemplateRepo, opsTaskRepo, opsCmdRepo, logger)
 	c.miscDeps.opsHandler = ops.NewHandler(opsSvc, logger)
-	logger.Info("ops tools module initialized")
+
+	// F06 运维管理扩展（T-0101..T-0112）— 7 个新子系统
+	opsExecRepo := ops.NewPgTaskExecutionRepository(c.PgPool)
+	opsDiagRepo := ops.NewPgDiagnosticRepository(c.PgPool)
+	opsDLRepo := ops.NewPgDownloadRepository(c.PgPool)
+	opsAuditRepo := ops.NewPgAuditLogRepository(c.PgPool)
+	opsMWRepo := ops.NewPgMaintenanceWindowRepository(c.PgPool)
+	opsPBRepo := ops.NewPgPlaybookRepository(c.PgPool)
+
+	opsAuditSvc := ops.NewAuditLogService(opsAuditRepo, logger)
+	opsApprovalSvc := ops.NewApprovalService(opsTaskRepo, opsAuditSvc, logger)
+	opsDiagSvc := ops.NewDiagnosticService(opsDiagRepo, opsAuditSvc, logger)
+	opsDLSvc := ops.NewDownloadService(opsDLRepo, opsAuditSvc, logger)
+	opsMWSvc := ops.NewMaintenanceWindowService(opsMWRepo, opsAuditSvc, logger)
+	opsPBSvc := ops.NewPlaybookService(opsPBRepo, logger)
+	opsExecutor := ops.NewTaskExecutor(opsTaskRepo, opsExecRepo, opsAuditSvc, logger)
+	opsBGSvc := ops.NewBreakGlassService(opsAuditSvc, logger)
+	opsInspectionSvc := ops.NewInspectionService(opsDiagSvc, opsAuditSvc, logger)
+	opsSSEHub := ops.NewSSEHub()
+
+	c.miscDeps.opsExtHandler = ops.NewExtHandler(
+		opsDiagSvc, opsDLSvc, opsAuditSvc, opsMWSvc, opsPBSvc,
+		opsExecutor, opsApprovalSvc, opsBGSvc, opsInspectionSvc, opsSSEHub, logger,
+	)
+	logger.Info("ops tools module initialized (incl. F06 ext T-0101..T-0112)")
 
 	// Report module
 	reportDefRepo := report.NewPgDefinitionRepository(c.PgPool)
@@ -626,7 +650,8 @@ type miscDeps struct {
 	licenseLogRepo license.LicenseLogRepository
 
 	// Ops
-	opsHandler *ops.Handler
+	opsHandler    *ops.Handler
+	opsExtHandler *ops.ExtHandler
 
 	// Report
 	reportHandler *report.Handler

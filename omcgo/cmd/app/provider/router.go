@@ -435,6 +435,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- OpsTools routes → resource "devices" -----
 	md.opsHandler.RegisterRoutes(permGroup("devices"))
+	if md.opsExtHandler != nil {
+		md.opsExtHandler.RegisterRoutes(permGroup("devices"))
+	}
 
 	// ----- Report routes → resource "pm" -----
 	md.reportHandler.RegisterRoutes(permGroup("pm"))
