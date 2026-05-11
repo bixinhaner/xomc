@@ -139,6 +139,17 @@ const (
 	ErrCodeLicenseExpired        = 12003
 	ErrCodeLicenseAlreadyActive  = 12004
 	ErrCodeLicenseAlreadyRevoked = 12005
+
+	// 12100-12109 段 — handler/service 业务异常（T-0100-P5-d 迁移自野生段 9100-9109）。
+	// 命名约定：12100-12109 对应原 9100-9109 错误，保留语义一一对应方便回溯。
+	ErrCodeLicenseRevokedActivate         = 12100 // 原 9100：尝试激活已 revoked 的 license
+	ErrCodeLicenseQuotaLoad               = 12103 // 原 9103：加载 license quota 失败
+	ErrCodeLicenseLogsServiceUnavail      = 12104 // 原 9104：log 服务未注入
+	ErrCodeLicenseLogsListFailed          = 12105 // 原 9105：list 日志失败
+	ErrCodeLicenseLogsByIDFailed          = 12106 // 原 9106：list 日志 by license id 失败
+	ErrCodeLicenseExportFormatInvalid     = 12107 // 原 9107：单条导出 format 不合法
+	ErrCodeLicenseBulkExportFormatInvalid = 12108 // 原 9108：批量导出 format 不合法
+	ErrCodeLicenseSignatureVerifyFailed   = 12109 // 原 9109：strict 模式签名校验失败
 )
 
 // Reports (13000-13999)

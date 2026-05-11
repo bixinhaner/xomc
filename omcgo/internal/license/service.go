@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/global"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
@@ -157,7 +158,7 @@ func (s *Service) Activate(ctx context.Context, licenseCode string, force bool) 
 		return &ActivateResult{Activated: lic}, nil
 	}
 	if lic.Status == StatusRevoked {
-		return nil, commonerrors.NewBusinessError(9100, "cannot activate a revoked license", commonerrors.ErrInvalidInput)
+		return nil, commonerrors.NewBusinessError(global.ErrCodeLicenseRevokedActivate, "cannot activate a revoked license", commonerrors.ErrInvalidInput)
 	}
 
 	conflicts, err := s.repo.ListActiveByDimension(ctx, lic.DeviceType, lic.Region)

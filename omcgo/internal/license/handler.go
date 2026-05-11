@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/global"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
@@ -101,7 +102,7 @@ func (h *Handler) GetQuota(c *gin.Context) {
 	if err != nil {
 		h.logger.Error("get license quota failed", zap.Error(err))
 		commonerrors.AbortWithError(c, http.StatusInternalServerError,
-			commonerrors.NewBusinessError(9103, "failed to load license quota", err))
+			commonerrors.NewBusinessError(global.ErrCodeLicenseQuotaLoad, "failed to load license quota", err))
 		return
 	}
 	response.OK(c, q)
@@ -215,7 +216,7 @@ func (h *Handler) List(c *gin.Context) {
 func (h *Handler) ListLogs(c *gin.Context) {
 	if h.logRepo == nil {
 		commonerrors.AbortWithError(c, http.StatusServiceUnavailable,
-			commonerrors.NewBusinessError(9104, "license logs service not configured", nil))
+			commonerrors.NewBusinessError(global.ErrCodeLicenseLogsServiceUnavail, "license logs service not configured", nil))
 		return
 	}
 
@@ -283,7 +284,7 @@ func (h *Handler) ListLogs(c *gin.Context) {
 	if err != nil {
 		h.logger.Error("list license logs failed", zap.Error(err))
 		commonerrors.AbortWithError(c, http.StatusInternalServerError,
-			commonerrors.NewBusinessError(9105, "failed to list license logs", err))
+			commonerrors.NewBusinessError(global.ErrCodeLicenseLogsListFailed, "failed to list license logs", err))
 		return
 	}
 	response.OK(c, result)
@@ -296,7 +297,7 @@ func (h *Handler) ListLogs(c *gin.Context) {
 func (h *Handler) GetLicenseLogs(c *gin.Context) {
 	if h.logRepo == nil {
 		commonerrors.AbortWithError(c, http.StatusServiceUnavailable,
-			commonerrors.NewBusinessError(9104, "license logs service not configured", nil))
+			commonerrors.NewBusinessError(global.ErrCodeLicenseLogsServiceUnavail, "license logs service not configured", nil))
 		return
 	}
 
@@ -319,7 +320,7 @@ func (h *Handler) GetLicenseLogs(c *gin.Context) {
 			zap.String("license_id", id.String()),
 			zap.Error(err))
 		commonerrors.AbortWithError(c, http.StatusInternalServerError,
-			commonerrors.NewBusinessError(9106, "failed to list license logs by id", err))
+			commonerrors.NewBusinessError(global.ErrCodeLicenseLogsByIDFailed, "failed to list license logs by id", err))
 		return
 	}
 
@@ -502,7 +503,7 @@ func (h *Handler) ExportByID(c *gin.Context) {
 	format := c.DefaultQuery("format", "pdf")
 	if format != "pdf" && format != "json" {
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			commonerrors.NewBusinessError(9107, "format must be pdf or json", commonerrors.ErrInvalidInput))
+			commonerrors.NewBusinessError(global.ErrCodeLicenseExportFormatInvalid, "format must be pdf or json", commonerrors.ErrInvalidInput))
 		return
 	}
 
@@ -592,7 +593,7 @@ func (h *Handler) ExportAll(c *gin.Context) {
 	format := c.DefaultQuery("format", "csv")
 	if format != "csv" {
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			commonerrors.NewBusinessError(9108, "format must be csv for bulk export", commonerrors.ErrInvalidInput))
+			commonerrors.NewBusinessError(global.ErrCodeLicenseBulkExportFormatInvalid, "format must be csv for bulk export", commonerrors.ErrInvalidInput))
 		return
 	}
 
@@ -686,7 +687,7 @@ func (h *Handler) Import(c *gin.Context) {
 				UserAgent: c.Request.UserAgent(),
 			})
 			commonerrors.AbortWithError(c, http.StatusBadRequest,
-				commonerrors.NewBusinessError(9109,
+				commonerrors.NewBusinessError(global.ErrCodeLicenseSignatureVerifyFailed,
 					"license signature verification failed (strict mode): "+sigNote,
 					commonerrors.ErrInvalidInput))
 			return

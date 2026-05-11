@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/global"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
@@ -358,7 +359,7 @@ func TestService_Activate_Revoked(t *testing.T) {
 	assert.Nil(t, result)
 	var bErr *commonerrors.BusinessError
 	assert.True(t, errors.As(err, &bErr))
-	assert.Equal(t, 9100, bErr.Code)
+	assert.Equal(t, global.ErrCodeLicenseRevokedActivate, bErr.Code)
 }
 
 // --- Tests: Activate same-dimension flow (T-0100-P3) ---
