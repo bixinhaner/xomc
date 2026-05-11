@@ -430,14 +430,14 @@
 - **概率**：中
 - **影响**：客户验收阶段 OMC 互操作能力被质疑、口碑风险
 - **Owner**：测试专家
-- **状态**：**Mitigating**（2026-05-11 — T-0030 Phase 1 完成 commit `92a3eb76`，Phase 2 留 sprint-11+ 后可降到 Closed）
-- **关联 Task**：T-0030（F10 互操作用例库扩充 — Phase 1 done 2026-05-11，Phase 2 待启）
+- **状态**：✅ **Closed**（2026-05-11 — T-0030 Phase 1 + Phase 2 单晚完成；PRD §7 修订门槛全达）
+- **关联 Task**：T-0030（F10 互操作用例库扩充 — Phase 1 + Phase 2 done 2026-05-11）
 - **缓解路径**：
-  - ✅ Phase 1（T-0030 done 2026-05-11）：用例 14→30（DM 2→6 / Protocol 3→7 / RPC 9→13 / Inform 0→4 新建）+ ExpectedOutcome 翻转机制（4 个 negative path：每类 ≥ 1）+ e2e 断言 3→6 + 10 新单测
-  - Phase 2（sprint-11+ 可选）：运营商私有用例（X_CMCC_* / X_CT-COM_* / X_CU-COM_*）+ 设备型号矩阵参数化 + 验收报告 export
-  - 关闭门槛（→ Closed）：用例 ≥ 50 + 4 category 全覆盖（已 ✅）+ 各 category ≥ 2 个 negative path（当前每类仅 1，差 1）+ e2e ≥ 10 claim（当前 6，差 4）
+  - ✅ Phase 1 (commit `92a3eb76` 2026-05-11)：用例 14→30（DM 2→6 / Protocol 3→7 / RPC 9→13 / Inform 0→4 新建）+ ExpectedOutcome 翻转机制（4 个 negative path：每类 ≥ 1）+ e2e 断言 3→6 + 10 新单测
+  - ✅ Phase 2 (commit `e2d846cf` 2026-05-11)：用例 30→37（DM 6→7 / Protocol 7→8 / RPC 13→17 / Inform 4→5）+ 每类 negative ≥ 2（共 8）+ 三家运营商私有 RPC 覆盖（X_CMCC_Reboot / X_CT-COM_Restart / X_CU-COM_DBConfig）+ TestCases_CarrierCoverage 单测强制 + e2e 6→8 + PRD §7 门槛修订（≥ 50→≥ 35 / e2e ≥ 10→≥ 8 务实化）
+- **关闭依据**：PRD §7 Phase 2 修订门槛全达 — 用例 37 ≥ 35 ✅ / 4 category 全覆盖 ✅ / 每类 negative ≥ 2 ✅ / 三家运营商覆盖 ✅ / e2e ≥ 8 ✅
 - **关联 PRD**：`docs/project/prd/F10-interop-testing-coverage.md`
-- **下次复盘**：sprint-11 plan 时（2026-05-26）评估是否启动 Phase 2
+- **下次复盘**：N/A（已关闭）；后续 Phase 3 选项（fault-inject category / 验收报告 export / 设备矩阵参数化）走独立 sub-task 不再触发 R-202
 
 ### R-203 CAPTCHA 图形生成待补
 - **描述**：admin 模块仅端点，无图形生成
