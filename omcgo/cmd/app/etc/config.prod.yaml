@@ -79,6 +79,18 @@ cors:
 northbound:
   push_targets: []
 
+# T-0100-P4-B/C + P5-a/b — License 治理层运行时配置（详 docs/project/prd/F06-license.md §5.3 §5.4）
+# prod 推荐：填 public_key_dir + strict=true 收紧（OEM 颁发 license 须带签名）；
+# P5-a W4：strict=true 但 KeyCount==0 时启动 Fatal，运维误配可立即定位。
+license:
+  signing:
+    public_key_dir: "/etc/omcgo/oem_public_keys"
+    strict: true
+  log_archive:
+    retention_months: 6
+    minio_bucket: ""  # 空 → fallback minio.buckets.logs
+    schedule: "0 3 * * 0"
+
 ne_direct:
   enabled: false
   host: "0.0.0.0"

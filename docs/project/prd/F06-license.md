@@ -264,11 +264,12 @@ if s.licenseEnforcer != nil {
   1. 文件解析成功（JSON / 自定义二进制）
   2. 数字签名验证（**Q4=B MVP 放过 + warning**）：
      - 当前阶段：未签名 / 签名无效 / 公钥未配置 → 仍允许 import 入库，但写一条 zap.Warn 日志（含 `license_code` + 原因）+ 在 import 响应里返回 `signature_status: 'unverified' | 'invalid' | 'verified'` 字段供前端 Modal 显示警告 Tag
-     - GA 前补强（P4-C）：configs/oem_public_keys/*.pem 加载 + 强校验，未签名 license 直接 400 拒绝
+     - **P4-C 已实现**（commit `bddad147` / `d0cc4a0b`）：`internal/license/signature.go` `SignatureVerifier` 线程安全 keys map + `LoadKeysFromDir(.pem 文件，PKIX/PKCS1 双格式)` + `VerifyLicenseJSON` (RSA-PSS-SaltLen32 + canonicalize) + strict 模式 → handler 拒绝；`appconfig.LicenseConfig.Signing.{PublicKeyDir,Strict}` + DI 接线在 `cmd/app/provider/modules.go`
+     - **P5-a W4 守卫**（commit `bcc1212c`）：`strict=true && KeyCount==0` 启动 Fatal，防 prod 误配公钥目录路径错误导致所有 import 静默被拒
   3. license_code 不与已有冲突（UNIQUE）
   4. issue_date / expiry_date 时间合理性
-- **API**：`POST /api/v1/licenses/import`（已存在）
-- **响应**：成功 → Modal 显示导入详情 + "去激活" CTA；失败 → 错误码 + 详细原因
+- **API**：`POST /api/v1/licenses/import`（已存在）+ 可选 `signed_license_json` 字段（**P5-c 前端已接**，文件模式 FileReader 读 content → POST，commit `4c3c59f7`）
+- **响应**：成功 → Modal 显示导入详情 + 签名状态 Tag + "去激活" CTA；失败 → 错误码（**12109 SignatureVerifyFailed** 专属 UI 文案）+ 详细原因
 
 #### 5.3.2 Tab 2：激活
 

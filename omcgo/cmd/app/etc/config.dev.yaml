@@ -83,6 +83,24 @@ cors:
 northbound:
   push_targets: []
 
+# T-0100-P4-B/C + P5-a/b — License 治理层运行时配置（详 docs/project/prd/F06-license.md §5.3 §5.4）
+license:
+  signing:
+    # OEM 公钥目录（.pem 文件，PKIX 或 PKCS1 格式）。空 → 等价 P3 stub
+    # （unverified 放过）；非空且 strict=true → 启动期 KeyCount==0 时 Fatal（P5-a W4）。
+    public_key_dir: ""
+    # strict=true：未签名 / 验证失败 → 直接拒绝（HTTP 400 + 错误码 12109）；
+    # dev 默认 false 友好放过 + warning。
+    strict: false
+  log_archive:
+    # license_logs 月度归档保留期（月）；默认 6 满足等保 2.0 三级 8.1.4.7。
+    # 0 → 静默禁用归档（dev 友好）。
+    retention_months: 6
+    # 归档目标 bucket；空 → fallback 到 minio.buckets.logs。
+    minio_bucket: ""
+    # 周级 cron 调度（默认每周日 03:00 UTC）。
+    schedule: "0 3 * * 0"
+
 ne_direct:
   enabled: false
   host: "0.0.0.0"
