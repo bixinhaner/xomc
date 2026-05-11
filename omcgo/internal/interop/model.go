@@ -34,13 +34,20 @@ func (c TestCategory) IsValid() bool {
 //   - "fail": negative path — all steps passing marks the case failed
 //     ("negative case unexpectedly passed"); at least one step failing
 //     marks the case passed ("expected failure observed").
+//
+// TargetDeviceModels (T-0116) filters which device.ModelName values the
+// case applies to. Nil or empty slice = run against any device (default
+// behaviour). Non-empty = runner skips the case unless device.ModelName
+// exactly matches one of the listed values. Used to scope vendor-specific
+// fault / RPC cases (e.g. X_CMCC_Reboot probe only for cmcc-class models).
 type TestCase struct {
-	ID              string       `json:"id"`
-	Name            string       `json:"name"`
-	Description     string       `json:"description"`
-	Category        TestCategory `json:"category"`
-	Steps           []TestStep   `json:"steps"`
-	ExpectedOutcome string       `json:"expected_outcome,omitempty"`
+	ID                 string       `json:"id"`
+	Name               string       `json:"name"`
+	Description        string       `json:"description"`
+	Category           TestCategory `json:"category"`
+	Steps              []TestStep   `json:"steps"`
+	ExpectedOutcome    string       `json:"expected_outcome,omitempty"`
+	TargetDeviceModels []string     `json:"target_device_models,omitempty"`
 }
 
 // TestStep describes one action within a test case.

@@ -511,3 +511,77 @@ func TestRunTestCase_DefaultPassSemanticsUnchanged(t *testing.T) {
 		assert.Empty(t, r.ExpectedOutcome, "default cases should have empty ExpectedOutcome")
 	}
 }
+
+// TestRunner_FiltersByDeviceModel verifies TargetDeviceModels gating (T-0116).
+// Cases with no filter run against any device; cases with non-empty filter
+// run only when device.ModelName matches one of the listed values.
+func TestRunner_FiltersByDeviceModel(t *testing.T) {
+	devRepo := newMockDeviceRepo(newTestDevice()) // ModelName = "SC-100"
+	paramRepo := newMockParamRepo()
+	cmdQ := newMockCmdQueue()
+	logger := zap.NewNop()
+
+	tests := []struct {
+		name              string
+		targetModels      []string
+		expectExecuted    bool
+		runnerExpectCount int
+	}{
+		{"no filter (nil) runs", nil, true, 1},
+		{"empty filter slice runs", []string{}, true, 1},
+		{"matching model runs", []string{"SC-100"}, true, 1},
+		{"matching among multiple runs", []string{"OTHER", "SC-100", "XYZ"}, true, 1},
+		{"non-matching model skipped", []string{"OTHER-MODEL"}, false, 0},
+		{"multiple non-matching skipped", []string{"OTHER", "ANOTHER"}, false, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner := NewConformanceTestRunner(devRepo, paramRepo, nil, nil, cmdQ, logger)
+			runner.RegisterCases([]TestCase{
+				{
+					ID: "MODEL-FILTER-001", Name: "Model filter probe", Category: CategoryProtocol,
+					TargetDeviceModels: tt.targetModels,
+					Steps: []TestStep{
+						{Order: 1, Action: "check_param", Params: map[string]interface{}{"field": "serial_number", "check": "not_empty"}},
+					},
+				},
+			})
+
+			results, err := runner.RunByCategory(context.Background(), "TEST-SN-001", CategoryProtocol)
+			require.NoError(t, err)
+			assert.Len(t, results, tt.runnerExpectCount, "unexpected result count for %s", tt.name)
+			if tt.expectExecuted {
+				assert.True(t, results[0].Passed)
+			}
+		})
+	}
+}
+
+// TestRunner_FiltersByDeviceModel_RunAll verifies the same filter applies in
+// RunAll (across all categories).
+func TestRunner_FiltersByDeviceModel_RunAll(t *testing.T) {
+	devRepo := newMockDeviceRepo(newTestDevice()) // ModelName = "SC-100"
+	paramRepo := newMockParamRepo()
+	cmdQ := newMockCmdQueue()
+	logger := zap.NewNop()
+	runner := NewConformanceTestRunner(devRepo, paramRepo, nil, nil, cmdQ, logger)
+
+	// Register two cases: one universal, one scoped to a non-matching model.
+	runner.RegisterCases([]TestCase{
+		{
+			ID: "UNIV-001", Name: "Universal", Category: CategoryProtocol,
+			Steps: []TestStep{{Order: 1, Action: "check_param", Params: map[string]interface{}{"field": "serial_number", "check": "not_empty"}}},
+		},
+		{
+			ID: "SCOPED-001", Name: "Scoped to OTHER-MODEL", Category: CategoryProtocol,
+			TargetDeviceModels: []string{"OTHER-MODEL"},
+			Steps:              []TestStep{{Order: 1, Action: "check_param", Params: map[string]interface{}{"field": "serial_number", "check": "not_empty"}}},
+		},
+	})
+
+	results, err := runner.RunAll(context.Background(), "TEST-SN-001")
+	require.NoError(t, err)
+	require.Len(t, results, 1, "only universal case should execute (scoped one filtered out)")
+	assert.Equal(t, "UNIV-001", results[0].TestCaseID)
+}

@@ -109,7 +109,24 @@ func (r *ConformanceTestRunner) ListTestCases() map[TestCategory][]TestCase {
 	return out
 }
 
-// RunAll executes every registered test case against the specified device.
+// shouldRunForDevice reports whether the case should execute against the given
+// device based on TargetDeviceModels filter (T-0116). Nil/empty filter = run
+// against any device (default). Non-empty = require exact match on
+// device.ModelName.
+func shouldRunForDevice(tc TestCase, dev *model.Device) bool {
+	if len(tc.TargetDeviceModels) == 0 {
+		return true
+	}
+	for _, m := range tc.TargetDeviceModels {
+		if m == dev.ModelName {
+			return true
+		}
+	}
+	return false
+}
+
+// RunAll executes every registered test case against the specified device,
+// honouring per-case TargetDeviceModels filters (T-0116).
 func (r *ConformanceTestRunner) RunAll(ctx context.Context, deviceSN string) ([]TestResult, error) {
 	dev, err := r.deviceRepo.GetBySerialNumber(ctx, deviceSN)
 	if err != nil {
@@ -126,6 +143,9 @@ func (r *ConformanceTestRunner) RunAll(ctx context.Context, deviceSN string) ([]
 			continue
 		}
 		for _, tc := range cases {
+			if !shouldRunForDevice(tc, dev) {
+				continue
+			}
 			result := r.runTestCase(ctx, dev, tc)
 			results = append(results, result)
 		}
@@ -133,7 +153,8 @@ func (r *ConformanceTestRunner) RunAll(ctx context.Context, deviceSN string) ([]
 	return results, nil
 }
 
-// RunByCategory executes test cases in the given category against the device.
+// RunByCategory executes test cases in the given category against the device,
+// honouring per-case TargetDeviceModels filters (T-0116).
 func (r *ConformanceTestRunner) RunByCategory(ctx context.Context, deviceSN string, category TestCategory) ([]TestResult, error) {
 	if !category.IsValid() {
 		return nil, fmt.Errorf("invalid test category: %s", category)
@@ -154,6 +175,9 @@ func (r *ConformanceTestRunner) RunByCategory(ctx context.Context, deviceSN stri
 
 	var results []TestResult
 	for _, tc := range cases {
+		if !shouldRunForDevice(tc, dev) {
+			continue
+		}
 		result := r.runTestCase(ctx, dev, tc)
 		results = append(results, result)
 	}
