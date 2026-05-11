@@ -26,9 +26,20 @@
 | §2 候选承诺项 State | 仍为 `triaged` / `proposed`（未升 `planned`）| 等 sprint-10 close 时正式 plan |
 | Sprint Goal 措辞 | 暂定 | sprint-10 close 时可调 |
 | Owner | 默认 Claude | 同 |
-| Stretch 候选 | T-0113 + T-0103 部分 | 同 |
+| Stretch 候选 | T-0113 + T-0103 多页 + T-0102-b/c | 2026-05-11 D-1 扩展（sprint-10 提前完成 → buffer 增大）|
 
 **为什么提前 draft**：方案 B（F06 ops 4 sprint GA 路线图）已锁定，sprint-11 候选项只待拍板；提前固化避免 sprint planning 当场争论 1-2 小时。
+
+### 2026-05-11 D-1 进度更新（sprint-10 启动前夜）
+
+| 事件 | 影响 sprint-11 draft |
+|------|---------------------|
+| **sprint-10 三 deliverable 全闭单晚完成** — T-0090 S2 拆分 / T-0097 fix / T-0030 双 Phase（用例 14→37 + R-202 Closed）+ Phase 3 三 task MVP（T-0114/T-0115/T-0116） | sprint-10 14 天窗口全部 buffer；sprint-11 候选项不变（T-0090 sub-task / T-0101-d / T-0102-a 仍待 sprint-11 执行），但 stretch 候选可大幅扩展 |
+| **R-202 P2 风险已 Closed** | sprint-11 §4 依赖表删除"sprint-10 T-0030 完成"行（已 done）|
+| **T-0115 CSV report MVP 已交付** | sprint-11 §8 sprint-13 路线"P-2 下载+诊断"中 T-0105-b transfer.Upload 真触发仍待做（CSV 是 export 报告，与 transfer.Upload 收日志/取配置无关），路线图不变 |
+| **today 累计 17 commits 已 push** | origin/main 已含全部本会话产物，无 sprint-10 残余推送动作 |
+
+**sprint-11 主线候选项稳定**：T-0090 a/b/c/d 4 sub-task + T-0101-d + T-0102-a 仍是 ~8-10d 容量主体；新 stretch 候选见 §3 扩展。
 
 ---
 
@@ -69,10 +80,18 @@
 
 ## 3. Stretch Goals 候选（如有余力）
 
-| # | ID | 工作项 | 估算 | 触发条件 |
-|---|----|--------|------|---------|
-| 1 | T-0113 | F06 ops wave 合规债清账（PRD §13 Q1-Q6 决议纪要补齐 + dev-pipeline §B6 footer 偏差登记） | S (~0.5d) | T-0090 + T-0101-d + T-0102-a 提早 D8 闭环时立即做 |
-| 2 | T-0103-c | CommandManagement 页接 useOpsExt 新 API（替换 mock）| M (~1d) | T-0102-a 真 RPC 派发完成后立即做 — 让用户能"看到" P-1 通路价值 |
+> **2026-05-11 D-1 扩展**：sprint-10 三 deliverable 单晚完成后整个 14 天窗口富余，sprint-11 也可视情况吸纳更多 stretch — 但仍受 11d 总容量约束。优先级排序：T-0103-c（unlock 用户感知）> T-0113（合规债）> T-0103-b/d/e（更多页面接 API）> T-0102-b/c（MML 流式 + per-device 限流）。
+
+| # | ID | 工作项 | 估算 | 触发条件 | 优先级 |
+|---|----|--------|------|---------|------|
+| 1 | T-0103-c | CommandManagement 页接 useOpsExt 新 API（替换 mock）| M (~1d) | T-0102-a 真 RPC 派发完成后立即做 — 让用户能"看到" P-1 通路价值 | **高**（升级候选 committed） |
+| 2 | T-0113 | F06 ops wave 合规债清账（PRD §13 Q1-Q6 决议纪要补齐 + dev-pipeline §B6 footer 偏差登记）| S (~0.5d) | T-0090 + T-0101-d + T-0102-a 提早 D8 闭环时立即做 | 中 |
+| 3 | T-0103-b | TaskManagement 页接 API + 设备级流水视图 | M (~1d) | T-0103-c 完成 + 还有余力 | 中 |
+| 4 | T-0103-d | Templates 页接 API + Edit modal（模板导入导出可后置）| M (~1d) | 同上 | 中 |
+| 5 | T-0102-b | MML 命令流式输出（多帧推送 SSE）| M (~1.5d) | sprint-12 主线，可仅做调研放 stretch | 低（sprint-12 主线，不进 sprint-11 committed）|
+| 6 | T-0102-c | per-device RPC 限流（rate.Limiter）| S (~0.5d) | 同 T-0102-b | 低 |
+
+**Stretch 容量约束**：sprint-11 主线 ~8-10d / 总 11d → 实际 stretch 余量 1-3d。**建议吸纳顺序**：T-0103-c（同 sprint 配对 T-0102-a 天然，1d 内可做）→ T-0113 清账（0.5d）→ T-0103-b 或 T-0103-d（1d）。**不应**今晚就升 committed — 等 sprint-11 D5 看主线进度再加塞。
 
 T-0113 强调：**纯文档/纪要清账**，无代码改动，可在 sprint 任意阶段穿插做。
 
@@ -82,7 +101,7 @@ T-0113 强调：**纯文档/纪要清账**，无代码改动，可在 sprint 任
 
 | 依赖项 | 阻塞什么 | 预计解除 | Owner |
 |-------|---------|---------|-------|
-| sprint-10 T-0030 完成 | 不阻塞 sprint-11（T-0030 与 F10/sprint-10 闭环；sprint-11 主题不同领域）| 2026-05-25 | Claude |
+| ~~sprint-10 T-0030 完成~~ | ~~不阻塞 sprint-11~~ | **✅ 已 done 2026-05-11 D-1** | — |
 | T-0090 sub-task State 升 planned | 等本 draft sprint planning 拍板（T-0090 a/b/c/d 当前 triaged 在 `subtasks/T-0090-mml-ux-rework.md`） | 2026-05-25 sprint planning | Claude |
 | T-0101-d / T-0102-a State 升 planned | 等本 draft sprint planning 拍板（66 sub-task 当前 proposed 在 `subtasks/T-0101-ops-management.md`）| 2026-05-25 sprint planning | Claude |
 | W1 待定点：`internal/acs/rpc/` 是否提供 step.type 派发接口 | T-0101-d 实施时长上限 | sprint-11 D1 起手 grep | Claude |
@@ -130,6 +149,8 @@ T-0113 强调：**纯文档/纪要清账**，无代码改动，可在 sprint 任
 
 ## 8. Sprint-12+ 后续路线图（参考，方案 B）
 
+> **2026-05-11 D-1 提前完成红利**：sprint-10 富余 ~10 工作日（窗口 14 天，原计划只用 3-4 天给 T-0030 等）— 红利可流向：① sprint-11 stretch 候选区（见 §3）；② sprint-10 期间 ad-hoc 启动 sprint-11 主线候选项；③ buffer 留给突发 hotfix / 客户反馈。**不建议**今晚就把 sprint-11 候选项升 committed（违反"Sprint 不加塞"原则）。
+
 | Sprint | 窗口 | 主线 |
 |--------|------|------|
 | 12 | 6/9-6/22 | F06 ops P-1 通路收尾：T-0101-b/c/e + T-0102-b/c + T-0103-b..f 5 ops 页 UI 全接 |
@@ -138,5 +159,7 @@ T-0113 强调：**纯文档/纪要清账**，无代码改动，可在 sprint 任
 | 14 下 + 15 | 7/15-8/3 | 体验优化：T-0108 巡检 + T-0110 知识库 + T-0111-c/d break-glass + 长尾 |
 
 → **3 sprint = 6 周到 GA 门槛**（2026-07-06）；含体验全完 2026-08-03。
+
+**T-0030 + Phase 3 三 task 已 done 不进路线图**（F10 互操作模块已完工，R-202 Closed；剩余 PDF/markdown export / 设备×型号矩阵用例填充等 Phase 2 polish 项作长尾任务）。
 
 详 dev-pipeline 会话记录 2026-05-11 ULTRATHINK 决策分析。
