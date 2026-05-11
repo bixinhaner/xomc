@@ -18,9 +18,9 @@ import (
 )
 
 // menuColumns 的列顺序必须与 scanMenu / scanMenuFromRows 的 Scan 顺序严格一致。
-// name_i18n / i18n_key 由 migration 000083 引入。
+// name_i18n 由 migration 000083 引入；i18n_key 由 000085 删除。
 var menuColumns = []string{
-	"id", "name", "name_i18n", "i18n_key", "type", "permission_key", "parent_id", "sort_order",
+	"id", "name", "name_i18n", "type", "permission_key", "parent_id", "sort_order",
 	"route_path", "component_path", "icon", "show_status", "status",
 	"created_by", "created_at", "updated_by", "updated_at",
 }
@@ -78,7 +78,7 @@ func (r *PgMenuRepository) Create(ctx context.Context, menu *Menu, operatorID uu
 	query, args, err := storage.Psql.Insert("menus").
 		Columns(menuColumns...).
 		Values(
-			menu.ID, menu.Name, nameI18n, nullableString(menu.I18nKey),
+			menu.ID, menu.Name, nameI18n,
 			menu.Type, menu.PermissionKey, nullableUUID(menu.ParentID), menu.SortOrder,
 			nullableString(menu.RoutePath), nullableString(menu.ComponentPath), nullableString(menu.Icon),
 			menu.ShowStatus, menu.Status,
@@ -222,9 +222,6 @@ func (r *PgMenuRepository) Update(ctx context.Context, id uuid.UUID, req *Update
 		}
 		updates["name_i18n"] = nameI18n
 	}
-	if req.I18nKey != nil {
-		updates["i18n_key"] = nullableString(*req.I18nKey)
-	}
 	if req.SortOrder != nil {
 		updates["sort_order"] = *req.SortOrder
 	}
@@ -339,7 +336,7 @@ func (r *PgMenuRepository) GetAllActive(ctx context.Context) ([]Menu, error) {
 }
 
 func (r *PgMenuRepository) GetByRole(ctx context.Context, roleID uuid.UUID) ([]Menu, error) {
-	query, args, err := storage.Psql.Select("m.id", "m.name", "m.name_i18n", "m.i18n_key",
+	query, args, err := storage.Psql.Select("m.id", "m.name", "m.name_i18n",
 		"m.type", "m.permission_key", "m.parent_id",
 		"m.sort_order", "m.route_path", "m.component_path", "m.icon", "m.show_status", "m.status",
 		"m.created_by", "m.created_at", "m.updated_by", "m.updated_at").
@@ -371,7 +368,7 @@ func (r *PgMenuRepository) GetByRole(ctx context.Context, roleID uuid.UUID) ([]M
 }
 
 func (r *PgMenuRepository) GetByUser(ctx context.Context, userID uuid.UUID) ([]Menu, error) {
-	query, args, err := storage.Psql.Select("DISTINCT m.id", "m.name", "m.name_i18n", "m.i18n_key",
+	query, args, err := storage.Psql.Select("DISTINCT m.id", "m.name", "m.name_i18n",
 		"m.type", "m.permission_key", "m.parent_id",
 		"m.sort_order", "m.route_path", "m.component_path", "m.icon", "m.show_status", "m.status",
 		"m.created_by", "m.created_at", "m.updated_by", "m.updated_at").
@@ -475,11 +472,11 @@ func (r *PgMenuRepository) GetRoleMenuIDs(ctx context.Context, roleID uuid.UUID)
 func scanMenu(row pgx.Row) (*Menu, error) {
 	var m Menu
 	var parentID, createdBy, updatedBy *uuid.UUID
-	var routePath, componentPath, icon, i18nKey *string
+	var routePath, componentPath, icon *string
 	var nameI18nRaw []byte
 
 	err := row.Scan(
-		&m.ID, &m.Name, &nameI18nRaw, &i18nKey,
+		&m.ID, &m.Name, &nameI18nRaw,
 		&m.Type, &m.PermissionKey, &parentID, &m.SortOrder,
 		&routePath, &componentPath, &icon, &m.ShowStatus, &m.Status,
 		&createdBy, &m.CreatedAt, &updatedBy, &m.UpdatedAt,
@@ -491,7 +488,7 @@ func scanMenu(row pgx.Row) (*Menu, error) {
 		return nil, fmt.Errorf("scan menu: %w", err)
 	}
 
-	if err := applyMenuOptionalCols(&m, parentID, createdBy, updatedBy, routePath, componentPath, icon, i18nKey, nameI18nRaw); err != nil {
+	if err := applyMenuOptionalCols(&m, parentID, createdBy, updatedBy, routePath, componentPath, icon, nameI18nRaw); err != nil {
 		return nil, err
 	}
 	return &m, nil
@@ -501,11 +498,11 @@ func scanMenu(row pgx.Row) (*Menu, error) {
 func scanMenuFromRows(rows pgx.Rows) (*Menu, error) {
 	var m Menu
 	var parentID, createdBy, updatedBy *uuid.UUID
-	var routePath, componentPath, icon, i18nKey *string
+	var routePath, componentPath, icon *string
 	var nameI18nRaw []byte
 
 	err := rows.Scan(
-		&m.ID, &m.Name, &nameI18nRaw, &i18nKey,
+		&m.ID, &m.Name, &nameI18nRaw,
 		&m.Type, &m.PermissionKey, &parentID, &m.SortOrder,
 		&routePath, &componentPath, &icon, &m.ShowStatus, &m.Status,
 		&createdBy, &m.CreatedAt, &updatedBy, &m.UpdatedAt,
@@ -514,18 +511,18 @@ func scanMenuFromRows(rows pgx.Rows) (*Menu, error) {
 		return nil, fmt.Errorf("scan menu row: %w", err)
 	}
 
-	if err := applyMenuOptionalCols(&m, parentID, createdBy, updatedBy, routePath, componentPath, icon, i18nKey, nameI18nRaw); err != nil {
+	if err := applyMenuOptionalCols(&m, parentID, createdBy, updatedBy, routePath, componentPath, icon, nameI18nRaw); err != nil {
 		return nil, err
 	}
 	return &m, nil
 }
 
-// applyMenuOptionalCols 把 scan 出的可空列回填到 Menu，避免 scanMenu / scanMenuFromRows
-// 两份重复代码（历史只回填 5 个可空列，新增 i18n_key + name_i18n 后重复成本变高）。
+// applyMenuOptionalCols 把 scan 出的可空列回填到 Menu，
+// 避免 scanMenu / scanMenuFromRows 两份重复代码。
 func applyMenuOptionalCols(
 	m *Menu,
 	parentID, createdBy, updatedBy *uuid.UUID,
-	routePath, componentPath, icon, i18nKey *string,
+	routePath, componentPath, icon *string,
 	nameI18nRaw []byte,
 ) error {
 	m.ParentID = parentID
@@ -539,9 +536,6 @@ func applyMenuOptionalCols(
 	}
 	if icon != nil {
 		m.Icon = *icon
-	}
-	if i18nKey != nil {
-		m.I18nKey = *i18nKey
 	}
 	nameI18n, err := unmarshalNameI18n(nameI18nRaw)
 	if err != nil {

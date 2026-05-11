@@ -62,8 +62,6 @@ interface MenuItem {
   name: string;
   /** 多语言译文字典（migration 000083 引入）；编辑表单按 locale 拆字段填入。 */
   nameI18n?: Record<string, string>;
-  /** react-intl 翻译键（高级字段），命中前端 messages 时优先于 nameI18n。 */
-  i18nKey?: string;
   type: MenuType;
   sort: number;
   permissionKey: string;
@@ -86,7 +84,6 @@ interface BackendMenu {
   id: string;
   name: string;
   name_i18n?: Record<string, string> | null;
-  i18n_key?: string | null;
   type: MenuType;
   permission_key: string;
   parent_id?: string;
@@ -107,7 +104,6 @@ function mapBackendMenu(b: BackendMenu): MenuItem {
     id: b.id,
     name: b.name,
     nameI18n: b.name_i18n ?? undefined,
-    i18nKey: b.i18n_key || undefined,
     type: b.type,
     sort: b.sort_order,
     permissionKey: b.permission_key,
@@ -159,7 +155,6 @@ async function fetchMenuTree(): Promise<MenuItem[]> {
 interface CreateMenuPayload {
   name: string;
   name_i18n?: Record<string, string>;
-  i18n_key?: string;
   type: MenuType;
   permission_key: string;
   parent_id?: string | null;
@@ -294,7 +289,6 @@ export default function MenuManagement() {
       // 多语言译文字典回显到嵌套 form 字段（namePath: ['nameI18n', locale]）；
       // 缺译文的 locale 在表单里就是空字符串，保存时聚合逻辑会自动剔除。
       nameI18n: menu.nameI18n ?? {},
-      i18nKey: menu.i18nKey ?? '',
       type: menu.type,
       sort: menu.sort,
       permissionKey: menu.permissionKey,
@@ -343,7 +337,6 @@ export default function MenuManagement() {
       const payload: UpdateMenuPayload = {
         name: vals.name,
         name_i18n: buildNameI18nPayload(vals.name, vals.nameI18n),
-        i18n_key: vals.i18nKey ?? '',
         type: vals.type,
         sort_order: vals.sort,
         permission_key: vals.permissionKey,
@@ -393,7 +386,6 @@ export default function MenuManagement() {
       apiPermission: 'none',
       icon: undefined,
       nameI18n: {},
-      i18nKey: '',
     });
     setAddVisible(true);
   }, [addForm]);
@@ -406,7 +398,6 @@ export default function MenuManagement() {
       const payload: CreateMenuPayload = {
         name: vals.name,
         name_i18n: buildNameI18nPayload(vals.name, vals.nameI18n),
-        i18n_key: vals.i18nKey ?? '',
         type: vals.type,
         permission_key: vals.permissionKey || '',
         parent_id: vals.parentId === '0' ? null : vals.parentId,
@@ -577,7 +568,7 @@ export default function MenuManagement() {
   ], [t, handleEdit, handleDelete, expandedKeys, toggleExpand, handleMoveUp, handleMoveDown]);
 
   // i18n 字段块：在每个含"菜单名称"输入框的表单分支后追加。
-  // 包括：除主语言外的每种 locale 一个输入框 + i18n key 高级字段。
+  // 除主语言（zh-CN）外的每种 locale 一个输入框。
   // 数组循环 EXTRA_LOCALES 实现「新增语言只改 SUPPORTED_LOCALES 一处」。
   const i18nFields = (
     <>
@@ -591,13 +582,6 @@ export default function MenuManagement() {
           <Input placeholder={`${LOCALE_DISPLAY[locale]} 名称`} maxLength={64} />
         </Form.Item>
       ))}
-      <Form.Item
-        name="i18nKey"
-        label="i18n key（高级）"
-        extra="可选；命中前端 messages 时优先于上面译文。例如 nav.ops.command"
-      >
-        <Input placeholder="可选" maxLength={128} />
-      </Form.Item>
     </>
   );
 

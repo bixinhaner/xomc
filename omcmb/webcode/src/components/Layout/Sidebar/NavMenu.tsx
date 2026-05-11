@@ -277,14 +277,11 @@ export default function NavMenu({
 
   const dynamicMenus = useMenuStore((s) => s.menus);
 
-  // 动态菜单 label 解析器：每次 locale / messages 变化都重新生成，确保
-  // 切换语言后 antd Menu 立即重渲染（同时影响 openTab 标题）。
-  // intl.messages 类型是 Record<string, MessageFormatElement[] | string>，
-  // resolveMenuLabel 内部对 string typeof 做了校验，直接转 Record<string, string>。
+  // 动态菜单 label 解析器：依赖 intl.locale，切换语言后 antd Menu 立即重渲染
+  // （同时影响 openTab 标题）。译文存 DB（menus.name_i18n），不再依赖前端 i18n 包。
   const labelResolver = useMemo<MenuLabelResolver>(
-    () => (m: DynamicMenu) =>
-      resolveMenuLabel(m, intl.locale, intl.messages as Record<string, string>),
-    [intl.locale, intl.messages],
+    () => (m: DynamicMenu) => resolveMenuLabel(m, intl.locale),
+    [intl.locale],
   );
 
   // 灰度判定：仅依赖 env flag。动态模式启用后永远走动态分支，**任何时候**不回退到

@@ -3,7 +3,6 @@ package admin
 import (
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -61,44 +60,39 @@ func TestUnmarshalNameI18n(t *testing.T) {
 }
 
 // TestApplyMenuOptionalCols_I18n 验证 scan helper 把可空列回填到 Menu 后，
-// i18n_key 与 name_i18n 都进入正确的结构体字段。
+// name_i18n 进入正确的结构体字段。
 func TestApplyMenuOptionalCols_I18n(t *testing.T) {
 	t.Parallel()
 
 	m := &Menu{}
-	i18nKey := "nav.ops.command"
 	raw := []byte(`{"zh-CN":"运维命令","en-US":"Commands"}`)
 
-	err := applyMenuOptionalCols(m, nil, nil, nil, nil, nil, nil, &i18nKey, raw)
+	err := applyMenuOptionalCols(m, nil, nil, nil, nil, nil, nil, raw)
 	require.NoError(t, err)
-	assert.Equal(t, "nav.ops.command", m.I18nKey)
 	assert.Equal(t, map[string]string{"zh-CN": "运维命令", "en-US": "Commands"}, m.NameI18n)
 }
 
-// TestApplyMenuOptionalCols_NullI18n 验证 NULL 时 Menu.I18nKey/NameI18n 保持零值。
+// TestApplyMenuOptionalCols_NullI18n 验证 NULL 时 Menu.NameI18n 保持 nil。
 func TestApplyMenuOptionalCols_NullI18n(t *testing.T) {
 	t.Parallel()
 
 	m := &Menu{}
-	err := applyMenuOptionalCols(m, nil, nil, nil, nil, nil, nil, nil, nil)
+	err := applyMenuOptionalCols(m, nil, nil, nil, nil, nil, nil, nil)
 	require.NoError(t, err)
-	assert.Empty(t, m.I18nKey)
 	assert.Nil(t, m.NameI18n)
 }
 
 // TestCreateMenuRequest_AcceptsI18n 简单冒烟：CreateMenuRequest JSON Bind 能接收
-// name_i18n / i18n_key 字段；不依赖 DB，仅验证类型签名与字段绑定。
+// name_i18n 字段；不依赖 DB，仅验证类型签名与字段绑定。
 func TestCreateMenuRequest_AcceptsI18n(t *testing.T) {
 	t.Parallel()
 	req := CreateMenuRequest{
 		Name:          "运维管理",
 		NameI18n:      map[string]string{"zh-CN": "运维管理", "en-US": "Operations"},
-		I18nKey:       "nav.ops",
 		Type:          "directory",
 		PermissionKey: "ops",
 	}
 	assert.Equal(t, "Operations", req.NameI18n["en-US"])
-	assert.Equal(t, "nav.ops", req.I18nKey)
 }
 
 // TestUpdateMenuRequest_PatchSemantics 指针字段的 patch 语义：
@@ -107,8 +101,6 @@ func TestCreateMenuRequest_AcceptsI18n(t *testing.T) {
 //   - 非 nil 指向非空 map → 写入
 func TestUpdateMenuRequest_PatchSemantics(t *testing.T) {
 	t.Parallel()
-	id := uuid.New()
-	_ = id // 仅占位避免 lint，本测试不涉及 repo 真写入
 
 	var nilReq UpdateMenuRequest
 	assert.Nil(t, nilReq.NameI18n, "未初始化时 NameI18n 必须是 nil（语义：不变更）")

@@ -26,8 +26,6 @@ export interface BackendMenu {
   name: string;
   /** 多语言译文（migration 000083 引入），未配置时缺失。 */
   name_i18n?: MenuNameI18n | null;
-  /** react-intl 翻译键（兼容字段），命中前端 messages 时优先于 name_i18n。 */
-  i18n_key?: string | null;
   type: MenuType;
   permission_key: string;
   parent_id?: string | null;
@@ -47,7 +45,6 @@ export interface Menu {
   id: string;
   name: string;
   nameI18n?: MenuNameI18n;
-  i18nKey?: string;
   type: MenuType;
   permissionKey: string;
   parentId: string | null;
@@ -68,7 +65,6 @@ export function mapBackendMenu(b: BackendMenu): Menu {
     id: b.id,
     name: b.name,
     nameI18n: b.name_i18n ?? undefined,
-    i18nKey: b.i18n_key || undefined,
     type: b.type,
     permissionKey: b.permission_key,
     parentId: b.parent_id ?? null,
@@ -85,25 +81,18 @@ export function mapBackendMenu(b: BackendMenu): Menu {
 }
 
 /**
- * 根据当前 locale 解析菜单显示名（方案 C 渲染优先级）：
- *   1. i18nKey 命中前端 messages  → 用 react-intl 翻译值
- *   2. nameI18n[locale]            → 当前语言译文
- *   3. nameI18n['zh-CN']           → 中文兜底（覆盖率最广的语言）
- *   4. name                        → 终极 fallback（DB 原始 name 字段）
+ * 根据当前 locale 解析菜单显示名（3 级 fallback）：
+ *   1. nameI18n[locale]   → 当前语言译文
+ *   2. nameI18n['zh-CN']  → 中文兜底（覆盖率最广的语言）
+ *   3. name               → 终极 fallback（DB 原始 name 字段）
  *
- * 调用方负责提供 messages（通常通过 useIntl().messages）；不传 messages 时
- * i18nKey 路径自动跳过，仅走 nameI18n / name fallback。
- *
- * 设计依据：T-0113 菜单多语言改造方案 §C，单测见 menu.test.ts。
+ * 设计依据：方案 C — DB JSONB 主路径，菜单管理 UI 编辑译文。
+ * 单测见 menu.test.ts。
  */
 export function resolveMenuLabel(
-  menu: Pick<Menu, 'name' | 'nameI18n' | 'i18nKey'>,
+  menu: Pick<Menu, 'name' | 'nameI18n'>,
   locale: string,
-  messages?: Record<string, string>,
 ): string {
-  if (menu.i18nKey && messages && typeof messages[menu.i18nKey] === 'string') {
-    return messages[menu.i18nKey];
-  }
   const i18n = menu.nameI18n;
   if (i18n) {
     if (i18n[locale]) return i18n[locale];
