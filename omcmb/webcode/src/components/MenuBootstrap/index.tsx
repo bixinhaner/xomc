@@ -9,12 +9,14 @@
 //
 // 设计依据：docs/prd/system/menu-dynamic-loading.md §4.3.2 (App 启动流程改造)。
 
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { Spin } from 'antd';
 
+import { useAppStore } from '@core/store/appStore';
 import { useMenuStore } from '@core/store/menuStore';
 import { useUserStore } from '@core/store/userStore';
 import { useUserMenus } from '@core/hooks/api/useMenus';
+import { useSysConfigsByCategory } from '@core/hooks/api/useSystem';
 
 import { isDynamicMenuEnabled } from './featureFlag';
 
@@ -39,9 +41,26 @@ export default function MenuBootstrap({ children }: MenuBootstrapProps) {
   return <MenuBootstrapInner loaded={loaded}>{children}</MenuBootstrapInner>;
 }
 
+// useShowMenuIconBootstrap 把 sys_configs.system.show_menu_icon 同步到 appStore。
+// 与 useUserMenus 同生命周期挂载 — 已登录且灰度启用时拉一次，NavMenu 自然消费。
+// 用户在「菜单管理」改 Switch 后会调 batchUpdateSysConfigs；React Query 的
+// invalidateQueries 会触发本 hook 重拉，从而把改动同步给当前 tab 的 appStore。
+function useShowMenuIconBootstrap() {
+  const setShowMenuIcon = useAppStore((s) => s.setShowMenuIcon);
+  const { data } = useSysConfigsByCategory('system');
+  useEffect(() => {
+    if (!data) return;
+    const item = data.find((c) => c.key === 'show_menu_icon');
+    if (!item) return;
+    // sys_configs.value 是 'true'/'false' 字符串（value_type='bool'）
+    setShowMenuIcon(item.value === 'true');
+  }, [data, setShowMenuIcon]);
+}
+
 function MenuBootstrapInner({ loaded, children }: { loaded: boolean; children: ReactNode }) {
   // useQuery 仅在已登录 + 灰度启用时挂载；否则不会无谓发请求。
   const { isError } = useUserMenus();
+  useShowMenuIconBootstrap();
 
   // 阻塞条件改为 `!loaded` 单一判定（不再依赖 isLoading）。
   //

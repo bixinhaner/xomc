@@ -157,12 +157,18 @@ type MenuLabelResolver = (menu: DynamicMenu) => string;
  *  - 仅渲染 type='directory'|'menu'（按钮跳过）
  *  - 单子节点目录扁平化（与 NAV_CONFIG 行为一致）
  *  - 隐藏 status!=active 或 showStatus='hide' 的节点
- *  - label 走 resolveMenuLabel：i18nKey 命中 messages > nameI18n[locale] > name fallback
+ *  - label 走 resolveMenuLabel：nameI18n[locale] > nameI18n['zh-CN'] > name
+ *  - icon 仅当 showIcon=true 时渲染（sys_configs.system.show_menu_icon 全局开关）
  *
  * 注：动态模式下，super_admin 过滤由后端 GetUserMenuTreeByRole / GetAllActive
  * 在 service 层完成（user.source='builtIn' 旁路），前端无需再过滤。
  */
-function buildDynamicMenuItems(menus: DynamicMenu[], label: MenuLabelResolver): MenuItem[] {
+function buildDynamicMenuItems(
+  menus: DynamicMenu[],
+  label: MenuLabelResolver,
+  showIcon: boolean,
+): MenuItem[] {
+  const icon = (m: DynamicMenu) => (showIcon ? renderIcon(m.icon) : undefined);
   return menus
     .filter(isVisible)
     .filter((m) => m.type !== 'button')
@@ -175,7 +181,7 @@ function buildDynamicMenuItems(menus: DynamicMenu[], label: MenuLabelResolver): 
       if (m.type === 'menu' || visibleChildren.length === 0) {
         return {
           key: m.routePath || m.id,
-          icon: renderIcon(m.icon),
+          icon: icon(m),
           label: label(m),
         } as MenuItem;
       }
@@ -185,16 +191,16 @@ function buildDynamicMenuItems(menus: DynamicMenu[], label: MenuLabelResolver): 
         const only = visibleChildren[0];
         return {
           key: only.routePath || only.id,
-          icon: renderIcon(m.icon),
+          icon: icon(m),
           label: label(m),
         } as MenuItem;
       }
 
       return {
         key: m.id,
-        icon: renderIcon(m.icon),
+        icon: icon(m),
         label: label(m),
-        children: buildDynamicMenuItems(visibleChildren, label),
+        children: buildDynamicMenuItems(visibleChildren, label, showIcon),
       } as MenuItem;
     });
 }
@@ -274,6 +280,9 @@ export default function NavMenu({
   const t = useT();
   const intl = useIntl();
   const isSuperAdmin = useUserStore((s) => s.currentUser?.isSuperAdmin === true);
+  // sys_configs.system.show_menu_icon → appStore.showMenuIcon（MenuBootstrap 启动期同步）。
+  // 关掉后整个动态菜单不渲染图标，运维在「菜单管理」页顶部 Switch 改即时生效。
+  const showMenuIcon = useAppStore((s) => s.showMenuIcon);
 
   const dynamicMenus = useMenuStore((s) => s.menus);
 
@@ -308,9 +317,9 @@ export default function NavMenu({
   const menuItems = useMemo(
     () =>
       useDynamic
-        ? buildDynamicMenuItems(dynamicMenus, labelResolver)
+        ? buildDynamicMenuItems(dynamicMenus, labelResolver, showMenuIcon)
         : buildStaticMenuItems(filteredNav, t),
-    [useDynamic, dynamicMenus, labelResolver, filteredNav, t],
+    [useDynamic, dynamicMenus, labelResolver, showMenuIcon, filteredNav, t],
   );
 
   const dynamicKeyToLeaf = useMemo(

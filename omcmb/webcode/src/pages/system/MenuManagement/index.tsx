@@ -11,6 +11,7 @@ import {
   InputNumber,
   Select,
   Space,
+  Switch,
   TreeSelect,
   Radio,
 } from 'antd';
@@ -34,6 +35,11 @@ import { useT } from '@/hooks/useT';
 import http from '@core/services/http';
 import { SUPPORTED_LOCALES, LOCALE_DISPLAY } from '@core/i18n';
 import type { Locale } from '@core/types/common';
+import { useAppStore } from '@core/store/appStore';
+import {
+  useSysConfigsByCategory,
+  useBatchUpdateSysConfigs,
+} from '@core/hooks/api/useSystem';
 import styles from './index.module.css';
 
 // 菜单管理 UI 暴露的额外语言：除主语言（zh-CN）外的所有支持语言。
@@ -174,6 +180,39 @@ export default function MenuManagement() {
   const t = useT();
   const { modal, message } = App.useApp();
   const queryClient = useQueryClient();
+
+  // sys_configs.system.show_menu_icon — 控制 NavMenu 是否显示菜单图标。
+  // appStore.showMenuIcon 由 MenuBootstrap 启动期同步；这里改本地 + DB 双写：
+  //   - 立刻 setShowMenuIcon → NavMenu 即时切换
+  //   - batchUpdateSysConfigs 持久化 → 下次刷新 / 其他 tab 一致
+  // sysConfig 列表用 useSysConfigsByCategory('system') 读，本组件不直接依赖结果，
+  // 仅用它来拿 show_menu_icon item 是否存在（用于 button loading 状态）。
+  const showMenuIcon = useAppStore((s) => s.showMenuIcon);
+  const setShowMenuIcon = useAppStore((s) => s.setShowMenuIcon);
+  const { data: sysConfigs } = useSysConfigsByCategory('system');
+  const batchUpdateSysConfigs = useBatchUpdateSysConfigs();
+  const handleToggleMenuIcon = useCallback(
+    (checked: boolean) => {
+      setShowMenuIcon(checked); // 本地即时
+      batchUpdateSysConfigs.mutate(
+        {
+          category: 'system',
+          items: [{ key: 'show_menu_icon', value: checked ? 'true' : 'false', value_type: 'bool' }],
+        },
+        {
+          onError: (err) => {
+            // 回滚本地，避免本地状态与 DB 不一致误导用户
+            setShowMenuIcon(!checked);
+            message.error((err as Error).message || t('common.saveFailed'));
+          },
+        },
+      );
+    },
+    [setShowMenuIcon, batchUpdateSysConfigs, message, t],
+  );
+  // 仅用于 Switch 的 loading 反馈（用户在网络慢时可见旋转）
+  const showMenuIconSwitchLoading =
+    batchUpdateSysConfigs.isPending && sysConfigs !== undefined;
 
   // ───── 拉取菜单树 ─────
   const { data: menus = [], isLoading } = useQuery({
@@ -589,9 +628,17 @@ export default function MenuManagement() {
     <ListPageLayout
       title="菜单管理"
       extra={
-        <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
-          {t('common.add')}
-        </Button>
+        <Space>
+          <span style={{ color: 'var(--color-text-secondary)' }}>显示菜单图标</span>
+          <Switch
+            checked={showMenuIcon}
+            onChange={handleToggleMenuIcon}
+            loading={showMenuIconSwitchLoading}
+          />
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
+            {t('common.add')}
+          </Button>
+        </Space>
       }
     >
       <FilterBar
@@ -745,6 +792,13 @@ export default function MenuManagement() {
                       rules={[{ required: true, message: '请输入显示排序' }]}
                     >
                       <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder="请输入显示排序" />
+                    </Form.Item>
+                    <Form.Item
+                      name="icon"
+                      label={t('system.menu.icon')}
+                      extra={t('system.menu.iconHint')}
+                    >
+                      <IconPicker placeholder={t('system.menu.iconPlaceholder')} />
                     </Form.Item>
                     <Form.Item
                       name="isExternal"
@@ -1017,6 +1071,13 @@ export default function MenuManagement() {
                       <Input placeholder="请输入菜单名称" maxLength={50} />
                     </Form.Item>
                     {i18nFields}
+                    <Form.Item
+                      name="icon"
+                      label={t('system.menu.icon')}
+                      extra={t('system.menu.iconHint')}
+                    >
+                      <IconPicker placeholder={t('system.menu.iconPlaceholder')} />
+                    </Form.Item>
                     <Form.Item
                       name="isExternal"
                       label="是否外链"

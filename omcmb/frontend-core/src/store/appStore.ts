@@ -24,6 +24,15 @@ interface AppState {
   theme: Theme;
   locale: Locale;
   effects3DEnabled: boolean;
+  /**
+   * 动态菜单是否显示图标。来源于 sys_configs.system.show_menu_icon，
+   * 启动期从 /admin/public/configs 读取后写入；用户在「菜单管理」页改 Switch
+   * 后写回 DB 并同步本地。默认 true（与改造前行为一致）。
+   *
+   * NavMenu 据此决定是否传 icon 给 antd Menu item — 关掉后 directory/menu
+   * 全部以纯文字渲染。
+   */
+  showMenuIcon: boolean;
   /** Mobile sidebar drawer visibility (not persisted) */
   isMobileOverlayOpen: boolean;
 
@@ -39,6 +48,7 @@ interface AppState {
   setLocale: (locale: Locale) => void;
   toggleLocale: () => void;
   setEffects3DEnabled: (enabled: boolean) => void;
+  setShowMenuIcon: (show: boolean) => void;
   setMobileOverlayOpen: (open: boolean) => void;
 }
 
@@ -53,6 +63,7 @@ export const useAppStore = create<AppState>()(
       theme: 'tech',
       locale: 'zh-CN',
       effects3DEnabled: false,
+      showMenuIcon: true,
       isMobileOverlayOpen: false,
 
       setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
@@ -79,6 +90,7 @@ export const useAppStore = create<AppState>()(
       toggleLocale: () =>
         set((state) => ({ locale: state.locale === 'zh-CN' ? 'en-US' : 'zh-CN' })),
       setEffects3DEnabled: (enabled) => set({ effects3DEnabled: enabled }),
+      setShowMenuIcon: (show) => set({ showMenuIcon: show }),
       setMobileOverlayOpen: (open) => set({ isMobileOverlayOpen: open }),
     }),
     {
