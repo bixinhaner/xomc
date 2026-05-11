@@ -66,12 +66,12 @@
 
 | 指标 | 当前 | 目标 | 备注 |
 |------|------|------|------|
-| Total tasks | 145 | — | 含 T-0098 umbrella + 36 sub-task；2026-05-10 新增 12 umbrella（T-0101..T-0112 F06 运维管理）+ 66 sub-task（见 backlog/subtasks/T-0101-ops-management.md）；变更明细见 changelog |
+| Total tasks | 146 | — | 含 T-0098 umbrella + 36 sub-task；2026-05-10 新增 12 umbrella（T-0101..T-0112 F06 运维管理）+ 66 sub-task（见 backlog/subtasks/T-0101-ops-management.md）；2026-05-11 +T-0113 F06 ops 合规债清账；变更明细见 changelog |
 | `done` | 131 | — | 详细 Closing Evidence → `backlog/done/2026Q2.md`（+6 P1 + 2 P2-01/02 + 9 P2-03..11 + 5 P3-01..05 + 8 P4-01..P4-08 + T-0095 D10=A 吸收 done + +6 T-0098-P5-01..P5-06 2026-05-08（P5 wave 收官）+ T-0098 umbrella 进 done + +12 T-0101..T-0112 F06 运维管理 wave 收官 2026-05-11 + T-0099 北向 push engine 接入 active server 2026-05-11（commit 35b97d6f 关闭"切换即生效"环）+ **+T-0097 MML AddTemplateModal 切 App.useApp() 2026-05-11（commit 5b281b06 修复"保存脚本"弹窗 API 反馈丢失）**）|
 | `in_dev` | 0 | — | T-0098 已整体收官 |
 | `in_design` | 1 | — | T-0090 sprint-10 S2 拆分完成 + 4 sub-task 进 backlog/subtasks/T-0090-mml-ux-rework.md 等 sprint-11 |
 | `planned` | 7 | — | T-0009/T-0014/T-0017/T-0020/T-0023 (wave + 短信凭据外部阻塞) + sprint-10：T-0030（T-0097 closed → done；T-0090 升 in_design 完成 S2 拆分）|
-| `triaged` | 4 | — | T-0091 / T-0093 (backup 外部 trigger) / T-0035 (XL 待 S2 拆) / T-0096 (deps T-0090 跟随) |
+| `triaged` | 5 | — | T-0091 / T-0093 (backup 外部 trigger) / T-0035 (XL 待 S2 拆) / T-0096 (deps T-0090 跟随) / T-0113 (F06 ops 合规债清账) |
 | `blocked` | 0 | ≤ 3 | — |
 | `proposed` 积压天数 | 0 | ≤ 7 | — |
 | **P0 风险关闭数** | **1 / 5** | 5 / 5 | R-005 已关；R-001/002/003/004 Open（注：**P1 R-103 / R-104** 已关闭但不计入 P0 — R-103 在 T-0015 后关闭；**R-104 在 T-0027 后关闭 2026-05-06**）|
@@ -295,6 +295,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | ID | Title | Type | Domain | Prio | Est | Deps | Risk | Notes |
 |----|-------|------|--------|------|-----|------|------|-------|
 | T-0093 | backup SFTP / FTPS 真 auth probe 实施（pkg/sftp + crypto/ssh + crypto/tls）— T-0032 carve-out；不依赖运维凭据可独立开发 | feat | F06/backup | P2 | M | T-0032 ✅ | R-204 / T-0032 carve-out | trigger：实际部署有 SFTP/FTPS 配置需求时启动 |
+| T-0113 | F06 ops wave 合规债清账 — PRD §13 Q1-Q6 决议纪要补齐 + dev-pipeline §B6 偏差登记（commits ce36108f/6e42a664/c0485129 footer 五元组缺）+ wave 期间漏掉的合规动作（如有）| proc | F06/ops+process | P2 | S | T-0101..T-0112 ✅ | — | 合规债，sprint-11 stretch 候选；详 `docs/project/sprint/sprint-11.md` §3；纯文档/纪要清账，无代码改动；触发：sprint-11 余力 OR sprint-12 起手 |
 | T-0035 | 前端多皮肤架构（Phase 3-7：v2 皮肤脚手架 → 18 模块补齐 → 双皮肤部署） | feat | frontend | P2 | XL | T-0035-P1 | — | 方案 `frontend-multi-skin-plan-20260422.md`；Phase 1（`@omc/frontend-core` 抽取 + workspaces）已完成；Phase 3+ 需 Sprint 规划 |
 | T-0091 | backup 真 KMS 适配器实施（AWS KMS / Vault Transit / HSM 二选一）— KMSClient interface 已 ready (T-0086)，本任务做 SDK 集成 + DI wiring + observability metrics | feat | F06/backup+security | P2 | M-L | T-0086 ✅ | R-102 / T-0086 carve-out | trigger：运维侧选定厂商 + 凭据准备；KEKWrapper refactor 与 T-0087 KEK 旋转一并做；新增 metric `omc_backup_kms_call_total{op,result}` + `omc_backup_kms_call_duration_seconds{op}` |
 | T-0096 | MML script 页面「更新」弹窗取消产品类型字段（应与 /mml/console「保存脚本」弹窗一致） | ref | frontend+F06/mml | P3 | S | T-0090 | R-NEW（共享 T-0090 productTypes 删除风险） | Triage 2026-04-30 走 B 方案 standalone（不 fold 进 T-0090a — 因 page scope 不同 script vs console + T-0090 体量已 L 不宜再扩 + 独立 PR 更清晰）；语义**反向** deps T-0090："与 console 一致"意味着 console 决定 productTypes 去留 → script 跟随（若 T-0090 决定保留 productTypes，T-0096 也保留；命名"取消"但执行随 T-0090）；建议与 T-0090a 同 Sprint 紧随做省 cross-PR 协调 |
@@ -432,6 +433,7 @@ T-0018 (灰度) ────────▶ T-0021 (回滚)   │
 
 | 日期 | 动作 | 条目 | 一句话 |
 |------|------|------|--------|
+| 2026-05-11 | **sprint-11 draft + 合规债登记** | sprint-11.md + T-0113 | dev-pipeline ULTRATHINK 决策 X2+X3：F06 ops 需求现状分析后给出方案 B（4 sprint GA 路线图），sprint-11 候选承诺项前置 freeze 到 `docs/project/sprint/sprint-11.md`（DRAFT，非 committed）— 6 候选：T-0090 a/b/c/d 4 sub-task + T-0101-d 步骤路由 + T-0102-a 实 RPC 派发，~8-10d / 11d 容量；Stretch 候选：T-0113 + T-0103-c；T-0113 新登 §4 Triaged（PRD Q1-Q6 决议纪要 + dev-pipeline §B6 footer 偏差补齐 + wave 漏项，proc S 类，无代码）；后续路线图 sprint-12/13/14 已写入 sprint-11.md §8（GA 门槛 2026-07-06，全完 2026-08-03）；Total 145→146 / triaged 4→5 |
 | 2026-05-11 | **bug done** | T-0097 | MML AddTemplateModal 切 `App.useApp()` scoped messageApi，关闭"保存脚本"弹窗 API 反馈丢失；commit `5b281b06`；4 候选成因 #4「toast util 失效」静态分析坐实 → antd v5 嵌套 Modal 下静态 message 脱 ConfigProvider 上下文；与全仓库 25+ 组件 dominant pattern（App.useApp）对齐；浏览器实测留用户回归；planned 8→7 / done 130→131 |
 | 2026-05-11 | **S2 拆分 done** | T-0090 | sprint-10 S2 设计完成：T-0090 拆出 4 sub-task（a FE-only S / b DB drop M / c backend RBAC M-L / d FE 私有页 S）写入 `backlog/subtasks/T-0090-mml-ux-rework.md`；State planned → in_design；本 sprint-10 deliverable 完成，不进 S3 implement；4 sub-task 待 sprint-11 planning 升 planned；R-NEW 拆为 4 子风险 R-NEW-1..4 分摊到 sub-task；T-0096 (script 弹窗) 建议 sprint-11 跟随 T-0090-a |
 | 2026-05-11 | **sprint-10 planning** | T-0030 / T-0090 / T-0097 | dev-pipeline §A7 Path A 保守方案：3 任务 triaged → planned / Sprint=sprint-10 / Owner=Claude；T-0030 GA 级用例库扩充 L；T-0097 MML toast bug S (pre-pick 必先复现)；T-0090 XL UX 整改本 Sprint 只做 S2 拆分（产 a/b/c/d sub-task 待 sprint-11 执行）；外部 trigger（T-0091 KMS / T-0093 SFTP）留 triaged；XL（T-0035 多皮肤）需独立 S2 拆；sprint-10.md 创建 2026-05-12~25 窗口；planned 6→9 / triaged 7→4 |
