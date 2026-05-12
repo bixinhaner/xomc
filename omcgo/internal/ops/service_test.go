@@ -932,3 +932,116 @@ func TestApprovalService_Approve_UpdateApprovalErrorPropagates(t *testing.T) {
 	assert.Contains(t, err.Error(), "persist approval decision",
 		"持久化失败应 wrap 出明确错误信息")
 }
+
+// ---------------------------------------------------------------------------
+// T-0101-e: TaskExecutor 结果聚合测试
+// ---------------------------------------------------------------------------
+
+// stubTaskExecRepo TaskExecutionRepository 测试 stub。
+type stubTaskExecRepo struct {
+	createFn      func(ctx context.Context, e *OpsTaskExecution) error
+	countStatusFn func(ctx context.Context, taskID uuid.UUID) (map[string]int, error)
+}
+
+func (s *stubTaskExecRepo) Create(ctx context.Context, e *OpsTaskExecution) error {
+	if s.createFn != nil {
+		return s.createFn(ctx, e)
+	}
+	return nil
+}
+func (s *stubTaskExecRepo) Update(_ context.Context, _ *OpsTaskExecution) error { return nil }
+func (s *stubTaskExecRepo) List(_ context.Context, _ TaskExecutionFilter) (*model.ListResponse[OpsTaskExecution], error) {
+	return model.NewListResponse([]OpsTaskExecution{}, 0, 1, 20), nil
+}
+func (s *stubTaskExecRepo) CountByTaskStatus(ctx context.Context, taskID uuid.UUID) (map[string]int, error) {
+	if s.countStatusFn != nil {
+		return s.countStatusFn(ctx, taskID)
+	}
+	return nil, nil
+}
+
+func newTestExecutor(taskRepo *mockTaskRepo, execRepo *stubTaskExecRepo) *TaskExecutor {
+	audit := NewAuditLogService(&mockAuditLogRepo{}, zap.NewNop())
+	return NewTaskExecutor(taskRepo, execRepo, audit, zap.NewNop())
+}
+
+func TestTaskExecutor_RecordExecution_Success(t *testing.T) {
+	var captured *OpsTaskExecution
+	execRepo := &stubTaskExecRepo{
+		createFn: func(_ context.Context, e *OpsTaskExecution) error {
+			captured = e
+			return nil
+		},
+	}
+	executor := newTestExecutor(&mockTaskRepo{}, execRepo)
+
+	exec := &OpsTaskExecution{
+		TaskID:   uuid.New(),
+		DeviceSN: "SN-001",
+		Status:   "success",
+	}
+	err := executor.RecordExecution(context.Background(), exec)
+	require.NoError(t, err)
+	assert.Equal(t, "SN-001", captured.DeviceSN, "execution 应透传到 repo")
+}
+
+func TestTaskExecutor_RecordExecution_NilRejected(t *testing.T) {
+	executor := newTestExecutor(&mockTaskRepo{}, &stubTaskExecRepo{})
+
+	err := executor.RecordExecution(context.Background(), nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrInvalidInput,
+		"nil execution 应被拒绝")
+}
+
+func TestTaskExecutor_AggregateForTask_ComputesProgress(t *testing.T) {
+	taskID := uuid.New()
+	var updated *OpsTask
+	taskRepo := &mockTaskRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*OpsTask, error) {
+			return &OpsTask{ID: taskID, TotalCount: 10}, nil
+		},
+		updateStatusFn: func(_ context.Context, task *OpsTask) error {
+			updated = task
+			return nil
+		},
+	}
+	execRepo := &stubTaskExecRepo{
+		countStatusFn: func(_ context.Context, _ uuid.UUID) (map[string]int, error) {
+			return map[string]int{"success": 6, "failed": 2, "skipped": 1, "running": 1}, nil
+		},
+	}
+	executor := newTestExecutor(taskRepo, execRepo)
+
+	err := executor.AggregateForTask(context.Background(), taskID)
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	assert.Equal(t, 6, updated.SuccessCount)
+	assert.Equal(t, 2, updated.FailCount)
+	// progress = (6 + 2 + 1) * 100 / 10 = 90（含 skipped 进分子，running 不计）
+	assert.Equal(t, 90, updated.Progress, "progress 公式：(success+failed+skipped)*100/total")
+}
+
+func TestTaskExecutor_AggregateForTask_ZeroTotalGuard(t *testing.T) {
+	taskID := uuid.New()
+	var updated *OpsTask
+	taskRepo := &mockTaskRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*OpsTask, error) {
+			return &OpsTask{ID: taskID, TotalCount: 0}, nil
+		},
+		updateStatusFn: func(_ context.Context, task *OpsTask) error {
+			updated = task
+			return nil
+		},
+	}
+	execRepo := &stubTaskExecRepo{
+		countStatusFn: func(_ context.Context, _ uuid.UUID) (map[string]int, error) {
+			return map[string]int{}, nil
+		},
+	}
+	executor := newTestExecutor(taskRepo, execRepo)
+
+	err := executor.AggregateForTask(context.Background(), taskID)
+	require.NoError(t, err)
+	assert.Equal(t, 0, updated.Progress, "TotalCount=0 时 Progress 保持 0 防 0 除")
+}

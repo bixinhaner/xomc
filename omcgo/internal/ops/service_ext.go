@@ -520,6 +520,67 @@ func (e *TaskExecutor) Rollback(ctx context.Context, taskID uuid.UUID) error {
 // 编译期断言：TaskExecutor 实现 TaskExecutorEngine 接口（小接口 5 方法契约）。
 var _ TaskExecutorEngine = (*TaskExecutor)(nil)
 
+// RecordExecution T-0101-e dispatcher 调用面：每 RPC 调用后写一行
+// ops_task_executions（含 status / started_at / completed_at / duration_ms /
+// request / response / error）。future T-0101-b 步骤路由器在每步发出后 call
+// 本方法持久化执行明细，dispatcher 不直接依赖 repository。
+func (e *TaskExecutor) RecordExecution(ctx context.Context, exec *OpsTaskExecution) error {
+	if exec == nil {
+		return fmt.Errorf("nil execution: %w", commonerrors.ErrInvalidInput)
+	}
+	if err := e.execRepo.Create(ctx, exec); err != nil {
+		return fmt.Errorf("record task execution: %w", err)
+	}
+	return nil
+}
+
+// AggregateForTask T-0101-e 聚合更新：扫指定 task 的全部 ops_task_executions
+// 聚合 success/fail/progress counts 并 atomic 写回 ops_tasks。
+//
+// 计算规则（PRD §5.3.3 进度模型）：
+//   - success_count = count where status='success'
+//   - fail_count = count where status='failed'
+//   - progress = (success + fail + skipped) * 100 / total_count（整数百分比）
+//
+// 仅当 task.TotalCount > 0 时计算 progress；==0 则保留 0（防 0 除）。
+// 不修改 task.Status / StartedAt / CompletedAt（那是 dispatcher 终态时
+// 经 TransitionStatus 单独转移）。
+func (e *TaskExecutor) AggregateForTask(ctx context.Context, taskID uuid.UUID) error {
+	counts, err := e.execRepo.CountByTaskStatus(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("count executions: %w", err)
+	}
+	task, err := e.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("get task for aggregate: %w", err)
+	}
+
+	successCnt := counts["success"]
+	failCnt := counts["failed"]
+	skippedCnt := counts["skipped"]
+
+	task.SuccessCount = successCnt
+	task.FailCount = failCnt
+	if task.TotalCount > 0 {
+		// 包含 skipped 进 progress 分子：skipped 也是 "已处理"（pause/cancel 跳过）
+		task.Progress = (successCnt + failCnt + skippedCnt) * 100 / task.TotalCount
+		if task.Progress > 100 {
+			task.Progress = 100 // 防御性钳位
+		}
+	}
+	if err := e.taskRepo.UpdateStatus(ctx, task); err != nil {
+		return fmt.Errorf("update task aggregate: %w", err)
+	}
+	e.logger.Debug("task aggregate updated",
+		zap.String("task_id", taskID.String()),
+		zap.Int("success", successCnt),
+		zap.Int("failed", failCnt),
+		zap.Int("skipped", skippedCnt),
+		zap.Int("progress", task.Progress),
+	)
+	return nil
+}
+
 // ---- SSEHub ----
 
 // SSEEvent SSE 推送的单帧消息（T-0102）。

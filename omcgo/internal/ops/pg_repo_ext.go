@@ -27,6 +27,10 @@ type TaskExecutionRepository interface {
 	Create(ctx context.Context, e *OpsTaskExecution) error
 	Update(ctx context.Context, e *OpsTaskExecution) error
 	List(ctx context.Context, filter TaskExecutionFilter) (*model.ListResponse[OpsTaskExecution], error)
+	// CountByTaskStatus 聚合统计指定 task 的 executions，返
+	// `{status: count}` map（T-0101-e 结果聚合）。skipped 是有意区分于 failed
+	// 的状态——dispatcher pause/cancel 后未发出的设备步是 skipped 不是 failed。
+	CountByTaskStatus(ctx context.Context, taskID uuid.UUID) (map[string]int, error)
 }
 
 type PgTaskExecutionRepository struct {
@@ -95,6 +99,37 @@ func (r *PgTaskExecutionRepository) List(ctx context.Context, filter TaskExecuti
 	}
 
 	return paginateOps[OpsTaskExecution](ctx, r.pool, q, "ops_task_executions", filter.ListRequest, scanTaskExecution)
+}
+
+// CountByTaskStatus 聚合统计指定 task 的 executions，返 `{status: count}` map
+// （T-0101-e 结果聚合）。单 SQL `SELECT status, COUNT(*) FROM ops_task_executions
+// WHERE task_id=$1 GROUP BY status` 避免 N 次 round-trip。
+func (r *PgTaskExecutionRepository) CountByTaskStatus(ctx context.Context, taskID uuid.UUID) (map[string]int, error) {
+	const rawSQL = `
+		SELECT status, COUNT(*) AS cnt
+		FROM ops_task_executions
+		WHERE task_id = $1
+		GROUP BY status`
+
+	rows, err := r.pool.Query(ctx, rawSQL, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("count task executions by status: %w", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int)
+	for rows.Next() {
+		var status string
+		var cnt int
+		if err := rows.Scan(&status, &cnt); err != nil {
+			return nil, fmt.Errorf("scan execution status count: %w", err)
+		}
+		counts[status] = cnt
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate execution status counts: %w", err)
+	}
+	return counts, nil
 }
 
 // ---- Diagnostic Repository ----
