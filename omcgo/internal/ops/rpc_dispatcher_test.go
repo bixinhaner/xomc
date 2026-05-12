@@ -222,11 +222,16 @@ func TestTaskExecutor_Run_InlineRPC_PartialFailure(t *testing.T) {
 	require.NoError(t, executor.Run(context.Background(), opsTaskID),
 		"partial failure must not bubble out of Run")
 
-	// All 3 CreateTask attempted; 2 succeeded.
-	assert.Len(t, enq.requests, 3)
-	assert.Equal(t, int32(2), enq.created.Load())
+	// T-0102-e retry behavior: SN-bad fails DefaultEnqueueMaxRetries times
+	// before recording a failed exec row; SN-1 / SN-3 each succeed on first
+	// attempt. Total enqueuer.CreateTask calls = 1 + N + 1 = 5 when N=3.
+	expectedCalls := 1 + DefaultEnqueueMaxRetries + 1
+	assert.Len(t, enq.requests, expectedCalls,
+		"SN-bad triggers retry-with-backoff (DefaultEnqueueMaxRetries attempts)")
+	assert.Equal(t, int32(2), enq.created.Load(),
+		"only 2 successful enqueues despite retries")
 
-	// Execution rows: 2 running, 1 failed.
+	// Execution rows: 2 running, 1 failed (one row per device, not per attempt).
 	rows := captor.all()
 	require.Len(t, rows, 3)
 	var running, failed int
@@ -238,6 +243,8 @@ func TestTaskExecutor_Run_InlineRPC_PartialFailure(t *testing.T) {
 			failed++
 			assert.Contains(t, ex.ErrorMessage, "SN-bad",
 				"error message must identify the failing device")
+			assert.Contains(t, ex.ErrorMessage, "enqueue after",
+				"after retries exhausted, message includes attempt count")
 		}
 	}
 	assert.Equal(t, 2, running)

@@ -413,9 +413,10 @@ type TaskExecutor struct {
 	taskRepo   TaskRepository
 	execRepo   TaskExecutionRepository
 	auditSvc   *AuditLogService
-	stepRouter *StepRouter   // T-0101-h 注入；nil 时 Rollback fallback ErrNotImplemented
-	enqueuer   task.Enqueuer // T-0102-c 注入；nil 时 inline-RPC 路径 fallback MVP placeholder
-	sseHub     *SSEHub       // T-0102-c 注入；nil 时跳过 SSE 事件发送
+	stepRouter *StepRouter         // T-0101-h 注入；nil 时 Rollback fallback ErrNotImplemented
+	enqueuer   task.Enqueuer       // T-0102-c 注入；nil 时 inline-RPC 路径 fallback MVP placeholder
+	sseHub     *SSEHub             // T-0102-c 注入；nil 时跳过 SSE 事件发送
+	limiter    *ConcurrencyLimiter // T-0102-e 注入；nil 时跳过 per-device 限流
 	logger     *zap.Logger
 }
 
@@ -436,6 +437,12 @@ func (e *TaskExecutor) SetEnqueuer(enq task.Enqueuer) { e.enqueuer = enq }
 // SetSSEHub wires the SSE hub used by inline RPC dispatch to publish
 // per-command events. Optional — nil disables SSE emits.
 func (e *TaskExecutor) SetSSEHub(hub *SSEHub) { e.sseHub = hub }
+
+// SetLimiter wires the concurrency limiter used by inline RPC dispatch
+// for per-device rate limiting (T-0102-e). Optional — nil disables
+// per-device limiting; global RPC limit / task semaphore are unaffected
+// since dispatcher caller side already handles those.
+func (e *TaskExecutor) SetLimiter(l *ConcurrencyLimiter) { e.limiter = l }
 
 // Run 启动一个 pending 任务。
 //
@@ -521,11 +528,27 @@ func parseInlineRPCEnvelope(message string) (RPCInlineEnvelope, bool) {
 	return env, true
 }
 
+// DefaultPerCmdTimeoutSeconds T-0102-e PRD §4.2.3 单命令默认 60s 超时；
+// 写入 task.CreateTaskRequest.ExpiresIn，由 device queue 层强制（CPE 在该
+// 时长内未应答则 task 状态 → expired）。批量场景每设备独立计时。
+const DefaultPerCmdTimeoutSeconds = 60
+
+// DefaultEnqueueMaxRetries T-0102-e 入队失败重试次数（针对 transient
+// 错误如 Redis 抖动 / pg 短暂不可用）；超过后认输并记 failed execution
+// 行让用户重发。3 次匹配 PolicyDecider 默认值（T-0101-f）。
+const DefaultEnqueueMaxRetries = 3
+
 // dispatchInlineRPC fans out one device-task per device_sn on the
 // OpsTask, each carrying the TR-069 RPC method derived from the
 // envelope. Per-device failures are recorded as failed execution rows
 // rather than aborting the whole task — this matches PRD §4.2.3 batch
 // semantics where one bad device shouldn't block the rest.
+//
+// T-0102-e enhancements (gated by SetLimiter):
+//   - per-device rate limit before each CreateTask (防同设备轰炸)
+//   - CreateTaskRequest.ExpiresIn = 60s (PRD §4.2.3 单命令默认超时)
+//   - retry on enqueue failure with exponential backoff capped at 5s
+//     (transient DB / Redis errors)
 func (e *TaskExecutor) dispatchInlineRPC(ctx context.Context, t *OpsTask, env RPCInlineEnvelope) error {
 	method, err := actionToRPCMethod(env.Action)
 	if err != nil {
@@ -560,8 +583,18 @@ func (e *TaskExecutor) dispatchInlineRPC(ctx context.Context, t *OpsTask, env RP
 			Description:  fmt.Sprintf("ops rpc %s (action=%s)", t.ID, env.Action),
 			DeviceIndex:  i,
 			CommandIndex: 0,
+			ExpiresIn:    DefaultPerCmdTimeoutSeconds, // T-0102-e
 		}
-		created, err := e.enqueuer.CreateTask(ctx, req)
+
+		// T-0102-e: per-device rate limit (no-op when limiter not wired).
+		if e.limiter != nil {
+			if waitErr := e.limiter.WaitForDevice(ctx, sn); waitErr != nil {
+				e.recordEnqueueFailure(ctx, t.ID, sn, env.Action, waitErr)
+				continue
+			}
+		}
+
+		created, err := e.enqueueWithRetry(ctx, req)
 		execRow := &OpsTaskExecution{
 			TaskID:    t.ID,
 			DeviceSN:  sn,
@@ -573,7 +606,7 @@ func (e *TaskExecutor) dispatchInlineRPC(ctx context.Context, t *OpsTask, env RP
 		if err != nil {
 			execRow.Status = "failed"
 			execRow.ErrorMessage = err.Error()
-			e.logger.Warn("enqueue rpc per-device failed",
+			e.logger.Warn("enqueue rpc per-device failed after retries",
 				zap.String("ops_task_id", t.ID.String()),
 				zap.String("device_sn", sn),
 				zap.String("method", method),
@@ -597,6 +630,54 @@ func (e *TaskExecutor) dispatchInlineRPC(ctx context.Context, t *OpsTask, env RP
 		zap.Int("total_devices", len(deviceSNs)),
 		zap.Int("dispatched", dispatched))
 	return nil
+}
+
+// enqueueWithRetry wraps enqueuer.CreateTask with bounded retries and
+// exponential backoff. Caps backoff at 5s; honors ctx cancellation
+// between attempts so a paused/cancelled task exits the retry loop
+// promptly rather than burning through the full budget.
+func (e *TaskExecutor) enqueueWithRetry(ctx context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
+	var lastErr error
+	for attempt := 0; attempt < DefaultEnqueueMaxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(1<<attempt) * time.Second // 2s, 4s
+			if backoff > 5*time.Second {
+				backoff = 5 * time.Second
+			}
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return nil, fmt.Errorf("enqueue retry cancelled: %w", ctx.Err())
+			}
+		}
+		created, err := e.enqueuer.CreateTask(ctx, req)
+		if err == nil {
+			return created, nil
+		}
+		lastErr = err
+	}
+	return nil, fmt.Errorf("enqueue after %d attempts: %w", DefaultEnqueueMaxRetries, lastErr)
+}
+
+// recordEnqueueFailure 写一条 failed execution 行（per-device 限流被 ctx
+// 取消等场景共用），主流程继续推下一个设备。
+func (e *TaskExecutor) recordEnqueueFailure(ctx context.Context, opsTaskID uuid.UUID, deviceSN, action string, cause error) {
+	execRow := &OpsTaskExecution{
+		TaskID:       opsTaskID,
+		DeviceSN:     deviceSN,
+		StepIndex:    0,
+		StepName:     action,
+		StepType:     "rpc",
+		Status:       "failed",
+		ErrorMessage: cause.Error(),
+		StartedAt:    ptrTime(time.Now()),
+	}
+	if err := e.execRepo.Create(ctx, execRow); err != nil {
+		e.logger.Warn("create enqueue-failure execution row failed",
+			zap.String("ops_task_id", opsTaskID.String()),
+			zap.String("device_sn", deviceSN),
+			zap.Error(err))
+	}
 }
 
 // publishDispatchEvent emits one command.dispatched SSE event per

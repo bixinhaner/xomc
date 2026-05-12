@@ -536,6 +536,10 @@ func initMiscModules(c *Container) error {
 	// T-0102-c: wire device-task enqueuer + SSE hub so inline RPC tasks
 	// fan out to internal/task (Redis + PG) and emit per-device events.
 	opsExecutor.SetEnqueuer(c.TaskSvc)
+	// T-0102-e: wire per-device rate limiter so a single device can't be
+	// flooded by one batch task; also enables retry-with-backoff inside
+	// dispatchInlineRPC. Defaults: 5 RPC/sec/device + 3 enqueue retries.
+	opsExecutor.SetLimiter(ops.NewConcurrencyLimiter(0, 0))
 	opsBGSvc := ops.NewBreakGlassService(opsAuditSvc, logger)
 	opsInspectionSvc := ops.NewInspectionService(opsDiagSvc, opsAuditSvc, logger)
 	opsSSEHub := ops.NewSSEHub()
