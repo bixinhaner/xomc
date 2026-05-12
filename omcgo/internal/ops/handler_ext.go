@@ -27,7 +27,7 @@ type ExtHandler struct {
 	auditSvc       *AuditLogService
 	maintenanceSvc *MaintenanceWindowService
 	playbookSvc    *PlaybookService
-	executor       *TaskExecutor
+	executor       TaskExecutorEngine
 	approvalSvc    *ApprovalService
 	breakGlassSvc  *BreakGlassService
 	inspectionSvc  *InspectionService

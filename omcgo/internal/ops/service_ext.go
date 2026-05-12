@@ -373,12 +373,40 @@ func (s *PlaybookService) Create(ctx context.Context, p *OpsPlaybook) (*OpsPlayb
 
 // ---- TaskExecutor (MVP stub) ----
 
-// TaskExecutor 调度引擎（T-0101，MVP stub）。
+// TaskExecutorEngine 调度引擎消费者驱动接口（T-0101-a 接口设计）。
+//
+// 5 控制方法 + 1 查询方法契约 — 让上层 handler / service 仅依赖此小接口
+// 而非具体实现，便于：
+//   - 测试 mock（替换为 stub executor）
+//   - 未来切换实现（in-process → distributed dispatcher）
+//   - 解耦 TaskExecutor 内部依赖（taskRepo / execRepo / auditSvc）变更不污染消费者
+//
+// Pause / Resume / Cancel / Rollback 当前 MVP 阶段是 no-op / stub —— 实际
+// dispatcher 协作（不打断已发出 RPC、只阻止后续设备）由 T-0101-b 步骤路由器
+// 落地后在循环每步前 poll task.Status 实施。本接口提前定义完整方法契约让
+// 上层代码可以按完整 API 调用 executor，dispatcher 上线时只需替换实现。
+//
+// ListExecutions 是执行历史数据查询（dispatcher 写、上层读），合入同一接口
+// 让消费者只依赖一个 abstract executor 类型即可（避免双 dep 注入）。
+type TaskExecutorEngine interface {
+	// ---- 控制 (5 方法) ----
+	Run(ctx context.Context, taskID uuid.UUID) error
+	Pause(ctx context.Context, taskID uuid.UUID) error
+	Resume(ctx context.Context, taskID uuid.UUID) error
+	Cancel(ctx context.Context, taskID uuid.UUID) error
+	Rollback(ctx context.Context, taskID uuid.UUID) error
+	// ---- 查询 (1 方法) ----
+	ListExecutions(ctx context.Context, filter TaskExecutionFilter) (*model.ListResponse[OpsTaskExecution], error)
+}
+
+// TaskExecutor 调度引擎（T-0101，MVP stub），实现 TaskExecutorEngine。
 //
 // MVP 行为：
 //   - Run：把任务状态从 pending → running，写一条"准备执行"的 ops_task_executions
-//   - Cancel / Pause / Resume：直接切状态字段
-//   - 实际 RPC dispatching / 步骤路由 / 结果聚合 / 回滚 留待 T-0101-b..i 二期实现
+//   - Pause / Resume / Cancel：T-0101-g atomic CAS 状态机已落地；本结构层 stub 委托
+//     给 Service.PauseTask/ResumeTask/CancelTask（消费 TaskRepository.TransitionStatus）
+//   - Rollback：T-0101-h 待实现，本任务返 ErrNotImplemented
+//   - 实际 RPC dispatching / 步骤路由 / 结果聚合 留待 T-0101-b..i 二期实现
 type TaskExecutor struct {
 	taskRepo TaskRepository
 	execRepo TaskExecutionRepository
@@ -433,6 +461,64 @@ func (e *TaskExecutor) Run(ctx context.Context, taskID uuid.UUID) error {
 func (e *TaskExecutor) ListExecutions(ctx context.Context, filter TaskExecutionFilter) (*model.ListResponse[OpsTaskExecution], error) {
 	return e.execRepo.List(ctx, filter)
 }
+
+// Pause T-0101-a 接口契约方法（MVP stub）：通过 TaskRepository.TransitionStatus
+// 原子 CAS 把 task 从 running → paused。dispatcher 协作（不打断已发出 RPC、只阻止
+// 后续设备）由 T-0101-b 步骤路由器在每步发出前 poll task.Status 实施。
+func (e *TaskExecutor) Pause(ctx context.Context, taskID uuid.UUID) error {
+	err := e.taskRepo.TransitionStatus(ctx, taskID,
+		[]OpsTaskStatus{OpsTaskRunning},
+		OpsTaskPaused, false, false)
+	if err != nil {
+		return fmt.Errorf("executor pause task: %w", err)
+	}
+	e.auditSvc.Log(ctx, &OpsAuditLog{
+		OpType: "task_pause", TargetType: "task", TargetID: taskID.String(),
+		RiskLevel: RiskCautious, Result: "success",
+	})
+	return nil
+}
+
+// Resume T-0101-a 接口契约方法（MVP stub）：paused → running，保留 started_at。
+func (e *TaskExecutor) Resume(ctx context.Context, taskID uuid.UUID) error {
+	err := e.taskRepo.TransitionStatus(ctx, taskID,
+		[]OpsTaskStatus{OpsTaskPaused},
+		OpsTaskRunning, true, false)
+	if err != nil {
+		return fmt.Errorf("executor resume task: %w", err)
+	}
+	e.auditSvc.Log(ctx, &OpsAuditLog{
+		OpType: "task_resume", TargetType: "task", TargetID: taskID.String(),
+		RiskLevel: RiskCautious, Result: "success",
+	})
+	return nil
+}
+
+// Cancel T-0101-a 接口契约方法（MVP stub）：pending/running/paused → cancelled。
+func (e *TaskExecutor) Cancel(ctx context.Context, taskID uuid.UUID) error {
+	err := e.taskRepo.TransitionStatus(ctx, taskID,
+		[]OpsTaskStatus{OpsTaskPending, OpsTaskRunning, OpsTaskPaused},
+		OpsTaskCancelled, false, true)
+	if err != nil {
+		return fmt.Errorf("executor cancel task: %w", err)
+	}
+	e.auditSvc.Log(ctx, &OpsAuditLog{
+		OpType: "task_cancel", TargetType: "task", TargetID: taskID.String(),
+		RiskLevel: RiskCautious, Result: "success",
+	})
+	return nil
+}
+
+// Rollback T-0101-a 接口契约方法（MVP stub）。T-0101-h 回滚引擎将提供完整实现
+// （执行 template.rollback_steps 反向序列）。当前返 ErrNotImplemented。
+func (e *TaskExecutor) Rollback(ctx context.Context, taskID uuid.UUID) error {
+	e.logger.Info("task rollback requested (not implemented yet)",
+		zap.String("task_id", taskID.String()))
+	return ErrNotImplemented
+}
+
+// 编译期断言：TaskExecutor 实现 TaskExecutorEngine 接口（小接口 5 方法契约）。
+var _ TaskExecutorEngine = (*TaskExecutor)(nil)
 
 // ---- SSEHub ----
 
