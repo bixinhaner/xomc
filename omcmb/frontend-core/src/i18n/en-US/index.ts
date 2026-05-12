@@ -3753,6 +3753,8 @@ const messages: Record<string, string> = {
   'mml.scriptTask':                          'Script Task',
   'mml.taskList':                            'Task List',
   'mml.scriptLibrary':                       'Script Library',
+  'mml.privateCommand.pageTitle':            'Private Commands',
+  'mml.confirmDeleteCustomCommand':          'Delete custom command "{name}"? This action cannot be undone.',
   'mml.taskManagement':                       'Task Management',
   'mml.taskRecord':                           'Task Record',
   'mml.scriptDetail':                         'Script Detail',

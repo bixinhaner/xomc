@@ -668,8 +668,9 @@ export const mmlApi = {
     };
     if (params?.commandCode) query.command_code = params.commandCode;
     if (params?.operationType) query.operation_type = params.operationType;
-    // Backend query param name stays template_scope for backward compat
-    if (params?.templateScope) query.template_scope = params.templateScope;
+    // T-0090-d：后端 handler.go L722 实际读 `command_scope`，本端旧 `template_scope`
+    // 与之不一致导致 scope 过滤被静默忽略；按后端契约对齐。
+    if (params?.templateScope) query.command_scope = params.templateScope;
 
     const { data } = await http.get<BackendListResponse<BackendMMLCustomCommand>>(
       '/mml/templates',

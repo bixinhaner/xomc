@@ -3760,6 +3760,8 @@ const messages: Record<string, string> = {
   'mml.scriptTask':                          '脚本任务',
   'mml.taskList':                            '任务列表',
   'mml.scriptLibrary':                       '脚本库',
+  'mml.privateCommand.pageTitle':            '私有命令',
+  'mml.confirmDeleteCustomCommand':          '确认删除自定义命令 "{name}"？此操作不可撤销。',
   'mml.taskManagement':                       '任务管理',
   'mml.taskRecord':                           '任务记录',
   'mml.scriptDetail':                         '脚本详情',
