@@ -1373,15 +1373,43 @@ func (r *PgCustomCommandRepository) List(ctx context.Context, filter CustomComma
 	base := storage.Psql.Select(customCommandColumns...).From("mml_custom_command")
 	countBase := storage.Psql.Select("COUNT(*)").From("mml_custom_command")
 
-	// Visibility rules: public commands + user's own private commands
+	// 可见性规则（T-0090-c）：
+	//   - public 始终可见
+	//   - private 仅在 (a) creator 匹配 filter.Creator self-fallback，或
+	//     (b) creator's RBAC group ∈ filter.VisibleGroupIDs（group-share）时可见
+	//   - 两条件均空 → deny-by-default 仅返 public（防止匿名/无凭据请求看到任何 private）
+	//
+	// SQL 注入防护：所有用户输入走参数化绑定；EXISTS 子查询用列名比较，无字符串拼接。
+	// R-NEW-2 mitigation：每个 private 行的可见性都经 OR 短路评估，无第三条隐式可见路径。
+	privateClauses := sq.Or{}
 	if filter.Creator != nil && *filter.Creator != "" {
-		cond := sq.Or{
-			sq.Eq{"command_scope": "public"},
-			sq.And{sq.Eq{"command_scope": "private"}, sq.Eq{"creator": *filter.Creator}},
-		}
-		base = base.Where(cond)
-		countBase = countBase.Where(cond)
+		privateClauses = append(privateClauses, sq.Eq{"creator": *filter.Creator})
 	}
+	if len(filter.VisibleGroupIDs) > 0 {
+		privateClauses = append(privateClauses, sq.Expr(
+			`EXISTS (
+				SELECT 1 FROM users u
+				JOIN user_roles ur ON ur.user_id = u.id
+				JOIN role_device_groups rdg ON rdg.role_id = ur.role_id
+				WHERE u.username = mml_custom_command.creator
+				  AND rdg.group_id = ANY(?)
+			)`,
+			filter.VisibleGroupIDs,
+		))
+	}
+
+	var visibility sq.Sqlizer
+	if len(privateClauses) == 0 {
+		// 无任何 private 可见性凭据 → 默认仅 public
+		visibility = sq.Eq{"command_scope": "public"}
+	} else {
+		visibility = sq.Or{
+			sq.Eq{"command_scope": "public"},
+			sq.And{sq.Eq{"command_scope": "private"}, privateClauses},
+		}
+	}
+	base = base.Where(visibility)
+	countBase = countBase.Where(visibility)
 
 	if filter.CommandCode != nil {
 		base = base.Where(sq.Eq{"command_code": *filter.CommandCode})

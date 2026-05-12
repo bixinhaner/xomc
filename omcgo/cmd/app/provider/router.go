@@ -100,7 +100,7 @@ func Setup(r *gin.Engine, c *Container) error {
 	})
 	graph.Add(components.ModuleInitializer{
 		Name:    "misc",
-		Depends: []string{"task"},
+		Depends: []string{"task", "admin"},
 		Init:    func() error { return initMiscModules(c) },
 	})
 	// T-0098 P1-06：字典加载（4 域 paramModel/indicator/alarm-definition/product）

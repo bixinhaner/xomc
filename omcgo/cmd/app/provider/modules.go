@@ -370,6 +370,12 @@ func initMiscModules(c *Container) error {
 	mmlService := mml.NewService(mmlCmdRepo, mmlScriptRepo, mmlTaskRepo, mmlCustomCmdRepo, messageHub, logger)
 	mmlService.SetAuditRepo(mmlAuditRepo)
 	mmlService.SetCmdParamRepo(mmlCmdParamRepo)
+	// T-0090-c：注入 admin RoleRepo 作 RBAC group 派生器，让 ListCustomCommands
+	// 走 group-share 路径（同组管理员可见对方 private 命令）。c.RoleRepo 由 admin
+	// 模块初始化时（router.go misc Depends admin）填入，此处必非 nil。
+	if c.RoleRepo != nil {
+		mmlService.SetRoleQuerier(c.RoleRepo)
+	}
 	c.miscDeps.mmlHandler = mml.NewHandler(mmlService, logger)
 	c.miscDeps.mmlService = mmlService
 

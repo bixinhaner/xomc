@@ -239,6 +239,20 @@ func (m *mockCustomCommandRepo) List(ctx context.Context, filter CustomCommandFi
 	return nil, nil
 }
 
+// mockRoleQuerier 模拟 admin.PgRoleRepository.GetUserVisibleGroupIDs；T-0090-c
+// 用于 service 层 RBAC 派生 test。
+type mockRoleQuerier struct {
+	groupsByUser map[uuid.UUID][]uuid.UUID
+	err          error
+}
+
+func (m *mockRoleQuerier) GetUserVisibleGroupIDs(_ context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.groupsByUser[userID], nil
+}
+
 // --- Helper ---
 
 func newTestService(cmdRepo *mockCommandRepo, scriptRepo *mockScriptRepo, taskRepo *mockTaskRepo) *Service {
@@ -1133,3 +1147,198 @@ func TestService_DeleteTask_NonRunning(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, taskID, deletedID)
 }
+
+// ---------------------------------------------------------------------------
+// T-0090-c: ListCustomCommands RBAC visibility tests
+// ---------------------------------------------------------------------------
+//
+// 设计目标（subtask 文件 §0 sub-task c + R-NEW-2 mitigation）：
+//   - public 命令始终可见（不受 RBAC 影响）
+//   - private 命令：(creator==username self-fallback) OR (creator's group ∈ visible)
+//   - 跨用户隔离：admin_a / admin_b / admin_c (groups [A,B]) / admin_d (no group)
+//   - 派生失败降级（roleQuerier 报错）只信 creator-self，不放行 group-share
+//   - roleQuerier 未注入（旧服务）只信 creator-self（向后兼容）
+//
+// 测试粒度：直接断言 repo.List 收到的 filter；不验 SQL 行为（PG 集成测试覆盖）。
+// 每个 case 都关注一个 admin（user_id + username + groups），跑 List 后看 filter
+// 是否正确派生 VisibleGroupIDs / 透传 Creator。
+
+func newCustomCmdServiceForRBAC(repo *mockCustomCommandRepo, rq RoleQuerier) *Service {
+	svc := NewService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{}, repo, nil, zap.NewNop())
+	if rq != nil {
+		svc.SetRoleQuerier(rq)
+	}
+	return svc
+}
+
+func TestService_ListCustomCommands_RBAC_AdminAWithGroupA(t *testing.T) {
+	adminA := uuid.New()
+	groupA := uuid.New()
+
+	var captured CustomCommandFilter
+	repo := &mockCustomCommandRepo{
+		listFn: func(_ context.Context, f CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error) {
+			captured = f
+			return model.NewListResponse([]MMLCustomCommand{}, 0, 1, 20), nil
+		},
+	}
+	svc := newCustomCmdServiceForRBAC(repo, &mockRoleQuerier{
+		groupsByUser: map[uuid.UUID][]uuid.UUID{adminA: {groupA}},
+	})
+
+	usernameA := "admin_a"
+	_, err := svc.ListCustomCommands(context.Background(), CustomCommandFilter{
+		Creator:     &usernameA,
+		UserID:      &adminA,
+		ListRequest: model.ListRequest{Page: 1, PageSize: 20},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []uuid.UUID{groupA}, captured.VisibleGroupIDs,
+		"admin_a 在 group_A 时，VisibleGroupIDs 应包含 group_A")
+	assert.Equal(t, "admin_a", *captured.Creator,
+		"Creator self-fallback username 必须透传到 repo")
+}
+
+func TestService_ListCustomCommands_RBAC_AdminBWithGroupB(t *testing.T) {
+	adminA := uuid.New()
+	adminB := uuid.New()
+	groupA := uuid.New()
+	groupB := uuid.New()
+
+	var captured CustomCommandFilter
+	repo := &mockCustomCommandRepo{
+		listFn: func(_ context.Context, f CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error) {
+			captured = f
+			return model.NewListResponse([]MMLCustomCommand{}, 0, 1, 20), nil
+		},
+	}
+	svc := newCustomCmdServiceForRBAC(repo, &mockRoleQuerier{
+		groupsByUser: map[uuid.UUID][]uuid.UUID{
+			adminA: {groupA},
+			adminB: {groupB},
+		},
+	})
+
+	usernameB := "admin_b"
+	_, err := svc.ListCustomCommands(context.Background(), CustomCommandFilter{
+		Creator:     &usernameB,
+		UserID:      &adminB,
+		ListRequest: model.ListRequest{Page: 1, PageSize: 20},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []uuid.UUID{groupB}, captured.VisibleGroupIDs,
+		"admin_b 在 group_B 时，VisibleGroupIDs 仅 group_B，跨用户隔离")
+	assert.NotContains(t, captured.VisibleGroupIDs, groupA,
+		"admin_b 不应看到 group_A — R-NEW-2 防泄露")
+}
+
+func TestService_ListCustomCommands_RBAC_AdminCWithMultipleGroups(t *testing.T) {
+	adminC := uuid.New()
+	groupA := uuid.New()
+	groupB := uuid.New()
+
+	var captured CustomCommandFilter
+	repo := &mockCustomCommandRepo{
+		listFn: func(_ context.Context, f CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error) {
+			captured = f
+			return model.NewListResponse([]MMLCustomCommand{}, 0, 1, 20), nil
+		},
+	}
+	svc := newCustomCmdServiceForRBAC(repo, &mockRoleQuerier{
+		groupsByUser: map[uuid.UUID][]uuid.UUID{adminC: {groupA, groupB}},
+	})
+
+	usernameC := "admin_c"
+	_, err := svc.ListCustomCommands(context.Background(), CustomCommandFilter{
+		Creator:     &usernameC,
+		UserID:      &adminC,
+		ListRequest: model.ListRequest{Page: 1, PageSize: 20},
+	})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []uuid.UUID{groupA, groupB}, captured.VisibleGroupIDs,
+		"admin_c 同时属 group_A+B 时，可见两组所有 private 命令（group-share 路径）")
+}
+
+func TestService_ListCustomCommands_RBAC_AdminDWithoutGroups(t *testing.T) {
+	adminD := uuid.New()
+
+	var captured CustomCommandFilter
+	repo := &mockCustomCommandRepo{
+		listFn: func(_ context.Context, f CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error) {
+			captured = f
+			return model.NewListResponse([]MMLCustomCommand{}, 0, 1, 20), nil
+		},
+	}
+	svc := newCustomCmdServiceForRBAC(repo, &mockRoleQuerier{
+		groupsByUser: map[uuid.UUID][]uuid.UUID{adminD: nil}, // 无 group
+	})
+
+	usernameD := "admin_d"
+	_, err := svc.ListCustomCommands(context.Background(), CustomCommandFilter{
+		Creator:     &usernameD,
+		UserID:      &adminD,
+		ListRequest: model.ListRequest{Page: 1, PageSize: 20},
+	})
+	require.NoError(t, err)
+	assert.Empty(t, captured.VisibleGroupIDs,
+		"admin_d 无 group 时 VisibleGroupIDs 应为空；private 仅 creator-self fallback 可见")
+	assert.Equal(t, "admin_d", *captured.Creator,
+		"无 group 时 Creator self-fallback 仍透传 — 用户自己创建的 private 至少自己能看到")
+}
+
+func TestService_ListCustomCommands_RBAC_QuerierError_DegradesToCreatorSelf(t *testing.T) {
+	adminA := uuid.New()
+
+	var captured CustomCommandFilter
+	repo := &mockCustomCommandRepo{
+		listFn: func(_ context.Context, f CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error) {
+			captured = f
+			return model.NewListResponse([]MMLCustomCommand{}, 0, 1, 20), nil
+		},
+	}
+	rq := &mockRoleQuerier{err: assertError("DB unreachable")}
+	svc := newCustomCmdServiceForRBAC(repo, rq)
+
+	usernameA := "admin_a"
+	_, err := svc.ListCustomCommands(context.Background(), CustomCommandFilter{
+		Creator:     &usernameA,
+		UserID:      &adminA,
+		ListRequest: model.ListRequest{Page: 1, PageSize: 20},
+	})
+	require.NoError(t, err, "派生失败不应阻断查询；service 须降级")
+	assert.Empty(t, captured.VisibleGroupIDs,
+		"GetUserVisibleGroupIDs 报错时 VisibleGroupIDs 须保持空（不残留旧值/不放行 group-share）")
+	assert.Equal(t, "admin_a", *captured.Creator,
+		"降级后 Creator self-fallback 仍透传，私有命令至少自己能看到")
+}
+
+func TestService_ListCustomCommands_RBAC_NoQuerierInjected_FallbackToCreatorOnly(t *testing.T) {
+	adminA := uuid.New()
+
+	var captured CustomCommandFilter
+	repo := &mockCustomCommandRepo{
+		listFn: func(_ context.Context, f CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error) {
+			captured = f
+			return model.NewListResponse([]MMLCustomCommand{}, 0, 1, 20), nil
+		},
+	}
+	// RoleQuerier 未注入（向后兼容场景：旧测试 / 旧部署）
+	svc := newCustomCmdServiceForRBAC(repo, nil)
+
+	usernameA := "admin_a"
+	_, err := svc.ListCustomCommands(context.Background(), CustomCommandFilter{
+		Creator:     &usernameA,
+		UserID:      &adminA,
+		ListRequest: model.ListRequest{Page: 1, PageSize: 20},
+	})
+	require.NoError(t, err)
+	assert.Empty(t, captured.VisibleGroupIDs,
+		"RoleQuerier 未注入时不应触发派生 — VisibleGroupIDs 须为空")
+	assert.Equal(t, "admin_a", *captured.Creator,
+		"无 RoleQuerier 场景下纯 creator-self 过滤（向后兼容）")
+}
+
+// assertError 是测试用 sentinel error，避免引入 errors 包仅为构造常量错误。
+type assertError string
+
+func (e assertError) Error() string { return string(e) }

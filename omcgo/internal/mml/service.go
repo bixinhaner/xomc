@@ -15,6 +15,15 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
+// RoleQuerier 派生当前 admin 在 RBAC 体系下可见的 device group IDs（用于 T-0090-c
+// 私有命令 group-share 过滤）。
+//
+// 消费者驱动小接口：admin.PgRoleRepository.GetUserVisibleGroupIDs 天然实现。
+// 不直接依赖 admin 包，便于测试 mock + 避免反向依赖。
+type RoleQuerier interface {
+	GetUserVisibleGroupIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
+}
+
 // Service provides business logic for the MML console module.
 type Service struct {
 	cmdRepo          CommandRepository
@@ -25,6 +34,7 @@ type Service struct {
 	cmdParamRepo     CommandParamRepository
 	fanouter         *Fanouter
 	hub              SSEPublisher
+	roleQuerier      RoleQuerier // optional; nil 时 ListCustomCommands fallback creator-only 过滤
 	logger           *zap.Logger
 }
 
@@ -83,6 +93,12 @@ func (s *Service) SetFanouter(f *Fanouter) {
 // SetCmdParamRepo sets the command-param relationship repository.
 func (s *Service) SetCmdParamRepo(repo CommandParamRepository) {
 	s.cmdParamRepo = repo
+}
+
+// SetRoleQuerier 注入 RBAC group 派生器；T-0090-c 用于 private 命令 group-share 过滤。
+// 不注入时 ListCustomCommands fallback 仅 creator-self 可见（即 T-0090-c 之前的行为）。
+func (s *Service) SetRoleQuerier(rq RoleQuerier) {
+	s.roleQuerier = rq
 }
 
 // publishTaskStatus pushes a task status change event via SSE.
@@ -994,9 +1010,29 @@ func splitScriptLines(content string) []string {
 
 // ---- Custom Command operations (Phase 3) ----
 
-// ListCustomCommands returns a paginated list of MML custom commands.
-// For private commands, only the creator's commands are shown.
+// ListCustomCommands returns a paginated list of MML custom commands with RBAC
+// visibility filtering applied (T-0090-c)：
+//
+//   - public 命令始终可见
+//   - private 命令仅在 (creator==filter.Creator) OR (creator's group ∈ VisibleGroupIDs)
+//     时可见；两条件均为空则 deny
+//
+// 若 filter.UserID 提供且 roleQuerier 已注入，则派生 filter.VisibleGroupIDs；
+// roleQuerier 未注入时降级为仅 creator-self 可见（T-0090-c 之前的行为）。
 func (s *Service) ListCustomCommands(ctx context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error) {
+	if s.roleQuerier != nil && filter.UserID != nil && *filter.UserID != uuid.Nil {
+		groupIDs, err := s.roleQuerier.GetUserVisibleGroupIDs(ctx, *filter.UserID)
+		if err != nil {
+			// 派生失败不阻断查询；降级为 creator-self only（公有 + 自己创建的私有）。
+			// 记录 warn 让运维可定位。
+			s.logger.Warn("derive visible group IDs failed; fallback to creator-self only",
+				zap.Stringer("user_id", *filter.UserID),
+				zap.Error(err),
+			)
+		} else {
+			filter.VisibleGroupIDs = groupIDs
+		}
+	}
 	return s.customCommandRepo.List(ctx, filter)
 }
 

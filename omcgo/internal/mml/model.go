@@ -195,12 +195,23 @@ type MMLCustomCommand struct {
 }
 
 // CustomCommandFilter specifies criteria for listing MML custom commands.
+//
+// 私有命令可见性（T-0090-c）：
+//   - public 命令：始终可见
+//   - private 命令：仅在以下任一条件满足时可见
+//       (a) creator == Creator （self fallback，防止脱离 group 后看不见自己创建的）
+//       (b) creator's RBAC group(s) 与 VisibleGroupIDs 交集非空 （group-share）
+//   - 若 Creator 与 VisibleGroupIDs 均为空 → 默认 deny private（仅 public 可见）
+//
+// UserID 由 service 层接收后调 RoleQuerier 派生 VisibleGroupIDs；repo 层仅消费派生结果。
 type CustomCommandFilter struct {
-	CommandCode   *string
-	OperationType *string
-	CommandScope  *string
-	CategoryGroup *string
-	Creator       *string
+	CommandCode     *string
+	OperationType   *string
+	CommandScope    *string
+	CategoryGroup   *string
+	Creator         *string      // 当前 admin 的 username；用于 private 命令 self-fallback 可见性
+	UserID          *uuid.UUID   // 当前 admin 的 user_id；service 层据此派生 VisibleGroupIDs
+	VisibleGroupIDs []uuid.UUID  // service 派生后填入；repo 层用作 group-share 可见性 SQL 参数
 	model.ListRequest
 }
 

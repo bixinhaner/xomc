@@ -726,10 +726,18 @@ func (h *Handler) ListTemplates(c *gin.Context) {
 		filter.CategoryGroup = &categoryGroup
 	}
 
-	// Pass current user for private template filtering
+	// T-0090-c：传入当前用户 username + user_id 双凭据让 service 层做 RBAC 可见性派生。
+	//   - Creator (username) 用于私有命令 self-fallback（永远能看到自己创建的）
+	//   - UserID (uuid) 用于 service 调 RoleQuerier.GetUserVisibleGroupIDs 派生
+	//     可见的 device group IDs → repo 走 group-share 路径
 	creator, _ := c.Get("username")
 	creatorStr, _ := creator.(string)
 	filter.Creator = &creatorStr
+	if userID, exists := c.Get("user_id"); exists {
+		if uid, ok := userID.(uuid.UUID); ok && uid != uuid.Nil {
+			filter.UserID = &uid
+		}
+	}
 
 	result, err := h.service.ListCustomCommands(c.Request.Context(), filter)
 	if err != nil {

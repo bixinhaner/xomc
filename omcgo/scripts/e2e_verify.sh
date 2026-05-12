@@ -5389,6 +5389,21 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     "$API/mml/templates?page=1&page_size=5" -H "$W2D_AUTH")
 check_status_in "W2D mml-4: GET /mml/templates" "200 401" "$HTTP_CODE"
 
+# T-0090-c RBAC visibility claims（subtask T-0090-mml-ux-rework.md sub-task c）
+# 端点契约层验证：scope=private / scope=public 两路径都能正常返回；admin context
+# 注入路径不破坏端点可达性。跨用户隔离语义由 service_test.go 6 个 RBAC 用例覆盖
+# （TestService_ListCustomCommands_RBAC_*），需多用户多 group seed 数据的真隔离
+# e2e 在后续 sub-task 或 release-gate 集中补。
+claim "mml: list templates scope=private returns 200/401 (T-0090-c admin context 注入路径)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/mml/templates?command_scope=private&page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D mml-4a: GET /mml/templates?scope=private (T-0090-c)" "200 401" "$HTTP_CODE"
+
+claim "mml: list templates scope=public returns 200/401 (T-0090-c admin context 不影响 public 路径)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/mml/templates?command_scope=public&page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "W2D mml-4b: GET /mml/templates?scope=public (T-0090-c)" "200 401" "$HTTP_CODE"
+
 claim "mml: get nonexistent task returns 404/401"
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     "$API/mml/tasks/$W2D_BAD_UUID" -H "$W2D_AUTH")
