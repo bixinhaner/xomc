@@ -123,8 +123,19 @@ export default function LoginPage() {
         await handleRealLogin(values);
       }
     } catch (err) {
+      // T-0119: error 显示优先级修复（T-0117 follow-up）
+      //   1. axios userMessage — 拦截器从后端 envelope 解出的友好业务文本（401/403/...）
+      //   2. client-side Error.message — passwordCipher 等前端抛的中文诊断（如 T-0117
+      //      "当前访问非安全上下文..."），仅当 err 不是 axios error 时使用，避免
+      //      "Request failed with status code 401" 渗透到 toast
+      //   3. i18n fallback 'login.failed'
       const axiosErr = err as AxiosError & { userMessage?: string };
-      const msg = axiosErr.userMessage || t('login.failed');
+      const isAxiosError = !!axiosErr.response;
+      const clientErrMsg =
+        !isAxiosError && err instanceof Error && err.message
+          ? err.message
+          : undefined;
+      const msg = axiosErr.userMessage || clientErrMsg || t('login.failed');
       message.error(msg);
     } finally {
       setLoading(false);
