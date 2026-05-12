@@ -1013,9 +1013,6 @@ func (s *Service) CreateCustomCommand(ctx context.Context, cmd *MMLCustomCommand
 	if cmd.ParamPaths == nil {
 		cmd.ParamPaths = []string{}
 	}
-	if cmd.ProductTypes == nil {
-		cmd.ProductTypes = []string{}
-	}
 
 	if err := s.customCommandRepo.Create(ctx, cmd); err != nil {
 		return nil, fmt.Errorf("create mml custom command: %w", err)
@@ -1046,9 +1043,6 @@ func (s *Service) UpdateCustomCommand(ctx context.Context, id uuid.UUID, cmd *MM
 	}
 	if cmd.ParamPaths != nil {
 		existing.ParamPaths = cmd.ParamPaths
-	}
-	if cmd.ProductTypes != nil {
-		existing.ProductTypes = cmd.ProductTypes
 	}
 
 	if err := s.customCommandRepo.Update(ctx, existing); err != nil {
@@ -1095,7 +1089,6 @@ func (s *Service) CloneCustomCommand(ctx context.Context, id uuid.UUID, currentU
 		Parameters:    source.Parameters,
 		ParamPaths:    source.ParamPaths,
 		Description:   source.Description,
-		ProductTypes:  source.ProductTypes,
 		Creator:       currentUser,
 	}
 

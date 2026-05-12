@@ -187,7 +187,6 @@ export interface MMLCustomCommand {
   parameters: Record<string, string | number | boolean>;
   paramPaths: string[];
   description: string;
-  productTypes: string[];
   creator: string;
   createdAt: string;
   updatedAt: string;

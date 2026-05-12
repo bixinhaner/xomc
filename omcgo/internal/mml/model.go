@@ -189,7 +189,6 @@ type MMLCustomCommand struct {
 	Parameters    map[string]interface{} `json:"parameters"`
 	ParamPaths    []string               `json:"param_paths"`
 	Description   string                 `json:"description"`
-	ProductTypes  []string               `json:"product_types"`
 	Creator       string                 `json:"creator"`
 	CreatedAt     time.Time              `json:"created_at"`
 	UpdatedAt     time.Time              `json:"updated_at"`

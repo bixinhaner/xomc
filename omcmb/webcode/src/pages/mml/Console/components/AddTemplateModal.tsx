@@ -56,8 +56,8 @@ export default function AddTemplateModal({ open, scope, onClose, onSuccess, onSa
           : {};
 
       // T-0090 子项 ②：UI 删 categoryGroup / productTypes / 参数配置 section；
-      // 但 MMLCustomCommand schema 仍 required（T-0090-b 才真删 column），
-      // 提交时传 empty default 保持后端兼容。
+      // productTypes column 已由 T-0090-b 真删；categoryGroup / paramPaths schema
+      // 仍 required，提交时传 empty default 保持后端兼容。
       const template: Omit<MMLCustomCommand, 'id' | 'creator' | 'createdAt' | 'updatedAt'> = {
         commandName: values.templateName,
         commandCode: values.commandCode,
@@ -67,7 +67,6 @@ export default function AddTemplateModal({ open, scope, onClose, onSuccess, onSa
         parameters,
         paramPaths: [],
         description: values.description ?? '',
-        productTypes: [],
       };
 
       try {

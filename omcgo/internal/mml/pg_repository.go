@@ -1251,7 +1251,7 @@ var customCommandAllowedSortColumns = map[string]bool{
 var customCommandColumns = []string{
 	"id", "command_name", "command_code", "operation_type",
 	"command_scope", "category_group", "parameters", "param_paths",
-	"description", "product_types", "creator",
+	"description", "creator",
 	"created_at", "updated_at",
 }
 
@@ -1274,18 +1274,14 @@ func (r *PgCustomCommandRepository) Create(ctx context.Context, cmd *MMLCustomCo
 	if err != nil {
 		return fmt.Errorf("marshal param_paths: %w", err)
 	}
-	productTypesJSON, err := json.Marshal(cmd.ProductTypes)
-	if err != nil {
-		return fmt.Errorf("marshal product_types: %w", err)
-	}
 
 	query, args, err := storage.Psql.Insert("mml_custom_command").
 		Columns("command_name", "command_code", "operation_type",
 			"command_scope", "category_group", "parameters", "param_paths",
-			"description", "product_types", "creator").
+			"description", "creator").
 		Values(cmd.CommandName, cmd.CommandCode, cmd.OperationType,
 			cmd.CommandScope, cmd.CategoryGroup, parametersJSON, paramPathsJSON,
-			cmd.Description, productTypesJSON, cmd.Creator).
+			cmd.Description, cmd.Creator).
 		Suffix("RETURNING " + joinColumns(customCommandColumns)).
 		ToSql()
 	if err != nil {
@@ -1329,10 +1325,6 @@ func (r *PgCustomCommandRepository) Update(ctx context.Context, cmd *MMLCustomCo
 	if err != nil {
 		return fmt.Errorf("marshal param_paths: %w", err)
 	}
-	productTypesJSON, err := json.Marshal(cmd.ProductTypes)
-	if err != nil {
-		return fmt.Errorf("marshal product_types: %w", err)
-	}
 
 	query, args, err := storage.Psql.Update("mml_custom_command").
 		Set("command_name", cmd.CommandName).
@@ -1343,7 +1335,6 @@ func (r *PgCustomCommandRepository) Update(ctx context.Context, cmd *MMLCustomCo
 		Set("parameters", parametersJSON).
 		Set("param_paths", paramPathsJSON).
 		Set("description", cmd.Description).
-		Set("product_types", productTypesJSON).
 		Where(sq.Eq{"id": cmd.ID}).
 		ToSql()
 	if err != nil {
@@ -1464,12 +1455,12 @@ func (r *PgCustomCommandRepository) List(ctx context.Context, filter CustomComma
 
 func scanCustomCommand(row pgx.Row) (*MMLCustomCommand, error) {
 	var c MMLCustomCommand
-	var parametersJSON, paramPathsJSON, productTypesJSON []byte
+	var parametersJSON, paramPathsJSON []byte
 
 	err := row.Scan(
 		&c.ID, &c.CommandName, &c.CommandCode, &c.OperationType,
 		&c.CommandScope, &c.CategoryGroup, &parametersJSON, &paramPathsJSON,
-		&c.Description, &productTypesJSON, &c.Creator,
+		&c.Description, &c.Creator,
 		&c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
@@ -1490,26 +1481,18 @@ func scanCustomCommand(row pgx.Row) (*MMLCustomCommand, error) {
 	}
 	if c.ParamPaths == nil {
 		c.ParamPaths = []string{}
-	}
-	if productTypesJSON != nil {
-		if err := json.Unmarshal(productTypesJSON, &c.ProductTypes); err != nil {
-			return nil, fmt.Errorf("unmarshal product_types: %w", err)
-		}
-	}
-	if c.ProductTypes == nil {
-		c.ProductTypes = []string{}
 	}
 	return &c, nil
 }
 
 func scanCustomCommandRow(rows pgx.Rows) (*MMLCustomCommand, error) {
 	var c MMLCustomCommand
-	var parametersJSON, paramPathsJSON, productTypesJSON []byte
+	var parametersJSON, paramPathsJSON []byte
 
 	err := rows.Scan(
 		&c.ID, &c.CommandName, &c.CommandCode, &c.OperationType,
 		&c.CommandScope, &c.CategoryGroup, &parametersJSON, &paramPathsJSON,
-		&c.Description, &productTypesJSON, &c.Creator,
+		&c.Description, &c.Creator,
 		&c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
@@ -1530,14 +1513,6 @@ func scanCustomCommandRow(rows pgx.Rows) (*MMLCustomCommand, error) {
 	}
 	if c.ParamPaths == nil {
 		c.ParamPaths = []string{}
-	}
-	if productTypesJSON != nil {
-		if err := json.Unmarshal(productTypesJSON, &c.ProductTypes); err != nil {
-			return nil, fmt.Errorf("unmarshal product_types: %w", err)
-		}
-	}
-	if c.ProductTypes == nil {
-		c.ProductTypes = []string{}
 	}
 	return &c, nil
 }

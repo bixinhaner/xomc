@@ -767,7 +767,6 @@ type CreateCustomCommandRequest struct {
 	Parameters    map[string]interface{} `json:"parameters"`
 	ParamPaths    []string               `json:"param_paths"`
 	Description   string                 `json:"description"`
-	ProductTypes  []string               `json:"product_types"`
 }
 
 // CreateTemplate handles POST /api/v1/mml/templates.
@@ -790,7 +789,6 @@ func (h *Handler) CreateTemplate(c *gin.Context) {
 		Parameters:    req.Parameters,
 		ParamPaths:    req.ParamPaths,
 		Description:   req.Description,
-		ProductTypes:  req.ProductTypes,
 		Creator:       creatorStr,
 	}
 
@@ -813,7 +811,6 @@ type UpdateCustomCommandRequest struct {
 	Parameters    map[string]interface{} `json:"parameters"`
 	ParamPaths    []string               `json:"param_paths"`
 	Description   string                 `json:"description"`
-	ProductTypes  []string               `json:"product_types"`
 }
 
 // UpdateTemplate handles PUT /api/v1/mml/templates/:id.
@@ -839,7 +836,6 @@ func (h *Handler) UpdateTemplate(c *gin.Context) {
 		Parameters:    req.Parameters,
 		ParamPaths:    req.ParamPaths,
 		Description:   req.Description,
-		ProductTypes:  req.ProductTypes,
 	}
 
 	updated, err := h.service.UpdateCustomCommand(c.Request.Context(), id, tmpl)

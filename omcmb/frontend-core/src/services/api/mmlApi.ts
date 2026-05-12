@@ -112,7 +112,6 @@ interface BackendMMLCustomCommand {
   parameters: Record<string, unknown> | null;
   param_paths: string[] | null;
   description: string;
-  product_types: string[] | null;
   creator: string;
   created_at: string;
   updated_at: string;
@@ -325,7 +324,6 @@ function mapBackendCustomCommand(bc: BackendMMLCustomCommand): MMLCustomCommand 
     parameters: (bc.parameters as Record<string, string | number | boolean>) || {},
     paramPaths: bc.param_paths || [],
     description: bc.description || '',
-    productTypes: bc.product_types || [],
     creator: bc.creator,
     createdAt: bc.created_at,
     updatedAt: bc.updated_at,
@@ -697,7 +695,6 @@ export const mmlApi = {
       parameters: tmpl.parameters,
       param_paths: tmpl.paramPaths,
       description: tmpl.description,
-      product_types: tmpl.productTypes,
     };
     const { data } = await http.post<BackendMMLCustomCommand>(
       '/mml/templates',
@@ -718,7 +715,6 @@ export const mmlApi = {
     if (tmpl.parameters !== undefined) payload.parameters = tmpl.parameters;
     if (tmpl.paramPaths !== undefined) payload.param_paths = tmpl.paramPaths;
     if (tmpl.description !== undefined) payload.description = tmpl.description;
-    if (tmpl.productTypes !== undefined) payload.product_types = tmpl.productTypes;
 
     const { data } = await http.put<BackendMMLCustomCommand>(
       `/mml/templates/${id}`,
