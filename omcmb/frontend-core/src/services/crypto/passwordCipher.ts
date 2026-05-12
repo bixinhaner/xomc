@@ -104,9 +104,27 @@ export interface EncryptedPasswordPayload {
  *
  * 单次登录/改密里多次调用本函数会复用同一公钥（缓存内），但每次生成不同的 ts/nonce，
  * 因此密文也不同；后端按 nonce 去重防重放。
+ *
+ * T-0117 fail-fast：Web Crypto API 仅在 secure context（HTTPS / localhost / 127.0.0.1）
+ * 可用。访问 `http://<内网 IP>:8081` 之类非 secure context 时 `crypto.subtle === undefined`，
+ * 历史上会在 `crypto.subtle.importKey(...)` 抛 TypeError，调用方看到的现象是
+ * "/auth/public-key 已成功，但 /auth/login 永不发出"。本检测让错误前置 + 信息明确。
  */
 export async function encryptPassword(plain: string): Promise<EncryptedPasswordPayload> {
   if (!plain) throw new Error('encryptPassword: plain password is empty');
+
+  if (typeof window !== 'undefined' && window.isSecureContext === false) {
+    throw new Error(
+      '当前访问非安全上下文（非 HTTPS / 非 localhost），Web Crypto API 不可用。' +
+      '请通过 https://<host> 或 http://localhost 访问；如部署在内网 IP，请联系运维启用 TLS。'
+    );
+  }
+  if (typeof crypto === 'undefined' || !crypto.subtle) {
+    throw new Error(
+      '浏览器或当前页面环境不支持 Web Crypto API (crypto.subtle 不可用)。' +
+      '请使用现代浏览器并通过 HTTPS 或 localhost 访问。'
+    );
+  }
 
   const { keyId, cryptoKey } = await getPublicKey();
   const payload = {
