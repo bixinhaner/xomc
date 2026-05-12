@@ -1131,3 +1131,100 @@ func TestSSEHub_UnsubscribeCleansEmptyChannel(t *testing.T) {
 	unsub()
 	assert.Equal(t, 0, hub.Stats().ChannelCount, "最后订阅者退出后 channel 应清掉防泄漏")
 }
+
+// ---------------------------------------------------------------------------
+// T-0101-h: TaskExecutor.Rollback + DispatchRollbackSteps 测试
+// ---------------------------------------------------------------------------
+
+func TestTaskExecutor_Rollback_NoStepRouter_ReturnsNotImplemented(t *testing.T) {
+	executor := newTestExecutor(&mockTaskRepo{}, &stubTaskExecRepo{})
+	// 不调 SetStepRouter
+	err := executor.Rollback(context.Background(), uuid.New())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrNotImplemented, "stepRouter 未注入时 fallback ErrNotImplemented")
+}
+
+func TestTaskExecutor_Rollback_WithStepRouter_DispatchesPlaceholder(t *testing.T) {
+	taskID := uuid.New()
+	taskRepo := &mockTaskRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*OpsTask, error) {
+			return &OpsTask{ID: taskID, Creator: "alice"}, nil
+		},
+	}
+	var capturedExec *OpsTaskExecution
+	execRepo := &stubTaskExecRepo{
+		createFn: func(_ context.Context, e *OpsTaskExecution) error {
+			capturedExec = e
+			return nil
+		},
+	}
+	executor := newTestExecutor(taskRepo, execRepo)
+	executor.SetStepRouter(NewStepRouter(zap.NewNop()))
+
+	err := executor.Rollback(context.Background(), taskID)
+	require.NoError(t, err)
+	require.NotNil(t, capturedExec, "Rollback 应写 placeholder execution")
+	assert.Equal(t, "rollback_dispatched", capturedExec.StepName)
+	assert.Equal(t, "rollback", capturedExec.StepType)
+}
+
+func TestTaskExecutor_DispatchRollbackSteps_ReverseOrder(t *testing.T) {
+	taskID := uuid.New()
+	executor := newTestExecutor(&mockTaskRepo{}, &stubTaskExecRepo{})
+	router := NewStepRouter(zap.NewNop())
+	// 用自定义 handler 捕获调用顺序
+	var calledOrder []string
+	router.Register(StepRPC, func(_ context.Context, step Step) error {
+		calledOrder = append(calledOrder, step.Name)
+		return nil
+	})
+	executor.SetStepRouter(router)
+
+	steps := []Step{
+		{Type: StepRPC, Name: "stepA"},
+		{Type: StepRPC, Name: "stepB"},
+		{Type: StepRPC, Name: "stepC"},
+	}
+	err := executor.DispatchRollbackSteps(context.Background(), taskID, steps)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"stepC", "stepB", "stepA"}, calledOrder,
+		"rollback 须反向 iterate（C→B→A）")
+}
+
+func TestTaskExecutor_DispatchRollbackSteps_StepFailureRecorded(t *testing.T) {
+	taskID := uuid.New()
+	var recordedExecs []*OpsTaskExecution
+	execRepo := &stubTaskExecRepo{
+		createFn: func(_ context.Context, e *OpsTaskExecution) error {
+			recordedExecs = append(recordedExecs, e)
+			return nil
+		},
+	}
+	executor := newTestExecutor(&mockTaskRepo{}, execRepo)
+	router := NewStepRouter(zap.NewNop())
+	router.Register(StepRPC, func(_ context.Context, step Step) error {
+		if step.Name == "fail_me" {
+			return errors.New("rpc failed")
+		}
+		return nil
+	})
+	executor.SetStepRouter(router)
+
+	steps := []Step{
+		{Type: StepRPC, Name: "ok1"},
+		{Type: StepRPC, Name: "fail_me"},
+		{Type: StepRPC, Name: "ok2"},
+	}
+	err := executor.DispatchRollbackSteps(context.Background(), taskID, steps)
+	require.NoError(t, err, "单步失败不中断 rollback 主流程（继续反向 iterate）")
+	require.Len(t, recordedExecs, 3, "3 个 rollback step 都应记录 execution")
+
+	// rollback 反向：ok2(success) → fail_me(failed) → ok1(success)
+	assert.Equal(t, "rollback:ok2", recordedExecs[0].StepName)
+	assert.Equal(t, "success", recordedExecs[0].Status)
+	assert.Equal(t, "rollback:fail_me", recordedExecs[1].StepName)
+	assert.Equal(t, "failed", recordedExecs[1].Status)
+	assert.Contains(t, recordedExecs[1].ErrorMessage, "rpc failed")
+	assert.Equal(t, "rollback:ok1", recordedExecs[2].StepName)
+	assert.Equal(t, "success", recordedExecs[2].Status)
+}
