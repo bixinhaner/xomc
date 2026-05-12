@@ -64,7 +64,7 @@
 |---|----|--------|-------|------|------|-------|------|
 | 1 | T-0090-a | MML 控制台 FE-only UX 调整（操作类型差异化展示 + 自定义命令限制） | Claude | S (~0.5d) | T-0090 主线 / R-NEW-1 | P2 | **done 2026-05-12（pull-forward 进 sprint-10 buffer 执行；commit `bf71e518`；详 `backlog/done/2026Q2.md`）** |
 | 2 | T-0090-b | DB drop product_types 列（migration up/down + 数据迁移）| Claude | M (~1-2d) | T-0090 主线 / R-NEW-2 | P2 | **done 2026-05-12（pull-forward 进 sprint-10 buffer 执行；commit `86b19c3f`；详 `backlog/done/2026Q2.md`）** |
-| 3 | T-0090-c | Backend RBAC 私有命令查询过滤（admin context + repo where 子句） | Claude | M-L (~2-3d) | T-0090 主线 / R-NEW-3 | P2 | planned |
+| 3 | T-0090-c | Backend RBAC 私有命令查询过滤（admin context + repo where 子句） | Claude | M-L (~2-3d) | T-0090 主线 / R-NEW-3 | P2 | **done 2026-05-12（pull-forward 进 sprint-10 buffer 执行；commit `2c114a40`；/security-review 0 P0/P1；详 `backlog/done/2026Q2.md`）** |
 | 4 | T-0090-d | FE 私有命令页（复用公有页面组件 + 切换私有/公有 tab） | Claude | S (~0.5d) | T-0090 主线 / R-NEW-4 | P2 | planned |
 | **5** | **T-0101-d** | **TaskExecutor 步骤路由到 `internal/acs/rpc/`**（**unlock OpsTask 整体**） | Claude | M (~2d) | F06 ops P-1 通路 / unlock GWT V2 | P1 | planned |
 | **6** | **T-0102-a** | **`/ops/commands/rpc` 实 RPC 派发到 acs**（替换 stub 占位） | Claude | M (~2d) | F06 ops P-1 通路 / unlock GWT V1 | P1 | planned |
