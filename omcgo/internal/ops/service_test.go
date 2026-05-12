@@ -1045,3 +1045,89 @@ func TestTaskExecutor_AggregateForTask_ZeroTotalGuard(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, updated.Progress, "TotalCount=0 时 Progress 保持 0 防 0 除")
 }
+
+// ---------------------------------------------------------------------------
+// T-0102-a: SSEHub 单元测试
+// ---------------------------------------------------------------------------
+
+func TestSSEHub_SubscribePublishUnsubscribe(t *testing.T) {
+	hub := NewSSEHub()
+
+	events, unsubscribe := hub.Subscribe("task:abc")
+	hub.Publish("task:abc", SSEEvent{Event: "command.dispatched", Data: []byte(`{"ok":true}`)})
+
+	select {
+	case evt := <-events:
+		assert.Equal(t, "command.dispatched", evt.Event)
+		assert.JSONEq(t, `{"ok":true}`, string(evt.Data))
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("event not received within 100ms")
+	}
+
+	unsubscribe()
+	// 解订后 chan 关闭；publish 不应 panic
+	hub.Publish("task:abc", SSEEvent{Event: "should_be_dropped", Data: []byte(`{}`)})
+}
+
+func TestSSEHub_PublishToNonexistentChannel_NoPanic(t *testing.T) {
+	hub := NewSSEHub()
+	// publish 到无订阅者 channel 应静默丢弃，不 panic
+	hub.Publish("task:nonexistent", SSEEvent{Event: "anything", Data: []byte(`{}`)})
+}
+
+func TestSSEHub_MultipleSubscribersFanOut(t *testing.T) {
+	hub := NewSSEHub()
+
+	events1, unsub1 := hub.Subscribe("task:fan")
+	events2, unsub2 := hub.Subscribe("task:fan")
+	defer unsub1()
+	defer unsub2()
+
+	hub.Publish("task:fan", SSEEvent{Event: "broadcast", Data: []byte(`{}`)})
+
+	got := 0
+	deadline := time.After(100 * time.Millisecond)
+	for got < 2 {
+		select {
+		case <-events1:
+			got++
+		case <-events2:
+			got++
+		case <-deadline:
+			t.Fatalf("expected 2 fan-out events, got %d", got)
+		}
+	}
+}
+
+func TestSSEHub_Stats(t *testing.T) {
+	hub := NewSSEHub()
+
+	// 初始：0 channel / 0 sub
+	stats := hub.Stats()
+	assert.Equal(t, 0, stats.ChannelCount)
+	assert.Equal(t, 0, stats.TotalSubs)
+
+	// 订阅 2 channel × 不同人数
+	_, unsubA1 := hub.Subscribe("task:a")
+	_, unsubA2 := hub.Subscribe("task:a")
+	_, unsubB1 := hub.Subscribe("task:b")
+	defer unsubA1()
+	defer unsubA2()
+	defer unsubB1()
+
+	stats = hub.Stats()
+	assert.Equal(t, 2, stats.ChannelCount, "task:a + task:b = 2 channels")
+	assert.Equal(t, 3, stats.TotalSubs, "2 + 1 = 3 总订阅者")
+	assert.Equal(t, 2, stats.SubscribersByCh["task:a"])
+	assert.Equal(t, 1, stats.SubscribersByCh["task:b"])
+}
+
+func TestSSEHub_UnsubscribeCleansEmptyChannel(t *testing.T) {
+	hub := NewSSEHub()
+
+	_, unsub := hub.Subscribe("task:cleanup")
+	assert.Equal(t, 1, hub.Stats().ChannelCount, "subscribe 后 channel 应存在")
+
+	unsub()
+	assert.Equal(t, 0, hub.Stats().ChannelCount, "最后订阅者退出后 channel 应清掉防泄漏")
+}

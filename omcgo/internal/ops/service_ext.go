@@ -638,6 +638,30 @@ func (h *SSEHub) Publish(channel string, event SSEEvent) {
 	}
 }
 
+// Stats T-0102-a observability：返当前 SSE Hub 订阅状态快照
+// （channel 数 + 每 channel 订阅者数）。可由 metrics endpoint 或 health check 消费。
+type SSEHubStats struct {
+	ChannelCount    int            `json:"channel_count"`
+	SubscribersByCh map[string]int `json:"subscribers_by_channel"`
+	TotalSubs       int            `json:"total_subscribers"`
+}
+
+// Stats 获取 SSE Hub 订阅状态快照（无锁竞争场景下 O(channel数)）。
+func (h *SSEHub) Stats() SSEHubStats {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	stats := SSEHubStats{
+		ChannelCount:    len(h.subs),
+		SubscribersByCh: make(map[string]int, len(h.subs)),
+	}
+	for ch, subs := range h.subs {
+		n := len(subs)
+		stats.SubscribersByCh[ch] = n
+		stats.TotalSubs += n
+	}
+	return stats
+}
+
 // ---- BreakGlassService ----
 
 // BreakGlassService 紧急权限（T-0111，MVP stub）。
