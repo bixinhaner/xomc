@@ -51,6 +51,7 @@ type Handler struct {
 	permService        *PermissionService
 	apiEndpointService *ApiEndpointService
 	loginCipher        *loginpwd.Cipher // 必填：登录类接口密码 RSA-OAEP 解密
+	allowPlaintextPwd  bool             // T-0120：允许明文密码 fallback（非 secure context 部署用，默认 false）
 	ginRoutes          gin.RoutesInfo   // set after router registration
 	logger             *zap.Logger
 	loginLimiter       sync.Map // map[string]*ipLimiterEntry
@@ -101,6 +102,14 @@ func (h *Handler) SetApiEndpointService(svc *ApiEndpointService) {
 // 必须在 Login / ChangePassword / ResetPassword / CreateUser 路由生效前调用。
 func (h *Handler) SetLoginCipher(c *loginpwd.Cipher) {
 	h.loginCipher = c
+}
+
+// SetAllowPlaintextPassword (T-0120) 控制是否接受明文密码登录 / 改密。
+// 默认 false；当部署在非 secure context（http://内网IP）crypto.subtle 不可用
+// 场景需启用时，启动期由 provider 据 LoginCryptoConfig.AllowPlaintext 注入。
+// 明文路径 always 经 audit log 标记 reason=plaintext_login，可合规追溯。
+func (h *Handler) SetAllowPlaintextPassword(allow bool) {
+	h.allowPlaintextPwd = allow
 }
 
 // SetGinRoutes stores gin route info for use in SyncApiEndpoints.

@@ -1259,10 +1259,17 @@ type ChangePasswordRequest struct {
 
 // ChangePasswordHTTPRequest 是 POST /api/v1/auth/change-password 的请求体。
 // 旧/新密码均需 RSA-OAEP 加密传输。两个密文使用同一 key_id（一次公钥）。
+//
+// T-0120：去掉 `required` tag — handler 内做二选一校验：
+//   - 加密路径（secure context）：EncryptedOldPassword + EncryptedNewPassword + KeyID 同时非空
+//   - 明文路径（仅 LoginCrypto.AllowPlaintext=true 时启用）：OldPassword + NewPassword 非空
+// 两路径都不满足 → handler 返 400 missing password。
 type ChangePasswordHTTPRequest struct {
-	EncryptedOldPassword string `json:"encrypted_old_password" binding:"required"`
-	EncryptedNewPassword string `json:"encrypted_new_password" binding:"required"`
-	KeyID                string `json:"key_id" binding:"required"`
+	EncryptedOldPassword string `json:"encrypted_old_password"`
+	EncryptedNewPassword string `json:"encrypted_new_password"`
+	KeyID                string `json:"key_id"`
+	OldPassword          string `json:"old_password"` // T-0120 plaintext fallback
+	NewPassword          string `json:"new_password"` // T-0120 plaintext fallback
 }
 
 // ChangePassword verifies the old password and updates to the new one.

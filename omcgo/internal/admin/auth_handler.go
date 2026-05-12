@@ -59,21 +59,54 @@ func (h *Handler) Login(c *gin.Context) {
 	// 	}
 	// }
 
-	if h.loginCipher == nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError,
-			errors.New("login password cipher not configured"))
-		return
-	}
-	plainPwd, err := h.loginCipher.Decrypt(ctx, req.KeyID, req.EncryptedPassword)
-	if err != nil {
-		log.Warn("login decrypt failed",
+	// T-0120 双路径密码解析：
+	//   - 加密路径：EncryptedPassword + KeyID 同时非空 → loginCipher.Decrypt
+	//   - 明文路径（allowPlaintextPwd=true 时启用）：Password 非空 → 直接采用
+	//   - 都不满足 → 400 missing password
+	// 明文路径成功的请求在审计日志里 reason=plaintext_login 留痕。
+	var (
+		plainPwd        string
+		pwdSourceReason string // 仅 plaintext 时非空，进审计
+		err             error
+	)
+	if req.EncryptedPassword != "" && req.KeyID != "" {
+		if h.loginCipher == nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				errors.New("login password cipher not configured"))
+			return
+		}
+		plainPwd, err = h.loginCipher.Decrypt(ctx, req.KeyID, req.EncryptedPassword)
+		if err != nil {
+			log.Warn("login decrypt failed",
+				zap.String("username", req.Username),
+				zap.String("ip", clientIP),
+				zap.Error(err),
+			)
+			// 对外仅以 401 暴露失败原因，不区分"密钥错"/"重放"/"过期"，避免给攻击者反馈。
+			h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, "decrypt_failed")
+			commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
+			return
+		}
+	} else if req.Password != "" {
+		if !h.allowPlaintextPwd {
+			log.Warn("plaintext login rejected (allow_plaintext=false)",
+				zap.String("username", req.Username),
+				zap.String("ip", clientIP),
+			)
+			h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, "plaintext_disabled")
+			commonerrors.AbortWithError(c, http.StatusBadRequest,
+				errors.New("plaintext password login is disabled; please use encrypted_password+key_id or deploy TLS"))
+			return
+		}
+		plainPwd = req.Password
+		pwdSourceReason = "plaintext_login" // 进审计；service.Login 成功后再写 success 行
+		log.Warn("plaintext login accepted (allow_plaintext=true; non-secure context)",
 			zap.String("username", req.Username),
 			zap.String("ip", clientIP),
-			zap.Error(err),
 		)
-		// 对外仅以 401 暴露失败原因，不区分"密钥错"/"重放"/"过期"，避免给攻击者反馈。
-		h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, "decrypt_failed")
-		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
+	} else {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			errors.New("missing password: provide encrypted_password+key_id or (if allow_plaintext) password"))
 		return
 	}
 
@@ -116,10 +149,17 @@ func (h *Handler) Login(c *gin.Context) {
 	log.Info("login success",
 		zap.String("username", req.Username),
 		zap.String("ip", clientIP),
+		zap.String("pwd_source", func() string {
+			if pwdSourceReason != "" {
+				return pwdSourceReason
+			}
+			return "encrypted"
+		}()),
 	)
 
 	// W3.G.2 ActionLogin / category 1 of 5: see comment in failure branch.
-	h.recordAuthAuditLog(auditActionLoginSuccess, req.Username, nil, clientIP, userAgent, "")
+	// T-0120：plaintext 路径在 reason 标记 plaintext_login 供合规追溯。
+	h.recordAuthAuditLog(auditActionLoginSuccess, req.Username, nil, clientIP, userAgent, pwdSourceReason)
 
 	response.OK(c, tokenPair)
 }
@@ -299,22 +339,43 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	if h.loginCipher == nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError,
-			errors.New("login password cipher not configured"))
-		return
-	}
 	ctx := c.Request.Context()
-	oldPlain, err := h.loginCipher.Decrypt(ctx, httpReq.KeyID, httpReq.EncryptedOldPassword)
-	if err != nil {
+
+	// T-0120 双路径：加密 vs 明文 fallback
+	var (
+		oldPlain string
+		newPlain string
+		err      error
+	)
+	if httpReq.EncryptedOldPassword != "" && httpReq.EncryptedNewPassword != "" && httpReq.KeyID != "" {
+		if h.loginCipher == nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				errors.New("login password cipher not configured"))
+			return
+		}
+		oldPlain, err = h.loginCipher.Decrypt(ctx, httpReq.KeyID, httpReq.EncryptedOldPassword)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest,
+				fmt.Errorf("decrypt old password: %w", err))
+			return
+		}
+		newPlain, err = h.loginCipher.Decrypt(ctx, httpReq.KeyID, httpReq.EncryptedNewPassword)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest,
+				fmt.Errorf("decrypt new password: %w", err))
+			return
+		}
+	} else if httpReq.OldPassword != "" && httpReq.NewPassword != "" {
+		if !h.allowPlaintextPwd {
+			commonerrors.AbortWithError(c, http.StatusBadRequest,
+				errors.New("plaintext password change is disabled; please use encrypted_*+key_id or deploy TLS"))
+			return
+		}
+		oldPlain = httpReq.OldPassword
+		newPlain = httpReq.NewPassword
+	} else {
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("decrypt old password: %w", err))
-		return
-	}
-	newPlain, err := h.loginCipher.Decrypt(ctx, httpReq.KeyID, httpReq.EncryptedNewPassword)
-	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("decrypt new password: %w", err))
+			errors.New("missing password: provide encrypted_*+key_id or (if allow_plaintext) old_password+new_password"))
 		return
 	}
 	if len(newPlain) < 6 {

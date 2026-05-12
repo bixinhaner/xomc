@@ -100,6 +100,22 @@ export interface EncryptedPasswordPayload {
 }
 
 /**
+ * T-0120 plaintext fallback：非 secure context（如 http://内网IP）部署下
+ * crypto.subtle 不可用，无法 RSA-OAEP 加密。preparePasswordPayload 返回明文
+ * marker；调用方据此切到后端 plaintext path（要求后端 LoginCrypto.AllowPlaintext=true）。
+ */
+export interface PlaintextPasswordPayload {
+  plaintextPassword: string;
+}
+
+export type PasswordPayload = EncryptedPasswordPayload | PlaintextPasswordPayload;
+
+/** Type guard：是否走 plaintext fallback 路径。 */
+export function isPlaintextPayload(p: PasswordPayload): p is PlaintextPasswordPayload {
+  return 'plaintextPassword' in p;
+}
+
+/**
  * 加密单个密码字段。返回 {encryptedPassword, keyId}，由调用方按各端点字段名映射。
  *
  * 单次登录/改密里多次调用本函数会复用同一公钥（缓存内），但每次生成不同的 ts/nonce，
@@ -113,6 +129,9 @@ export interface EncryptedPasswordPayload {
 export async function encryptPassword(plain: string): Promise<EncryptedPasswordPayload> {
   if (!plain) throw new Error('encryptPassword: plain password is empty');
 
+  // T-0117 fail-fast 保留：encryptPassword 是 secure context 专用 API
+  // T-0120 调用方应改走 preparePasswordPayload（自动 fallback 明文），但本函数
+  // 作为底层加密 primitive，保留显式抛错语义供测试 / 调试时直接调用。
   if (typeof window !== 'undefined' && window.isSecureContext === false) {
     throw new Error(
       '当前访问非安全上下文（非 HTTPS / 非 localhost），Web Crypto API 不可用。' +
@@ -138,4 +157,38 @@ export async function encryptPassword(plain: string): Promise<EncryptedPasswordP
     encryptedPassword: arrayBufferToBase64(ciphertext),
     keyId,
   };
+}
+
+/**
+ * preparePasswordPayload (T-0120) — 登录/改密的统一密码准备入口：
+ *   - secure context（HTTPS / localhost）+ crypto.subtle 可用 → RSA-OAEP 加密
+ *   - 非 secure context（如 http://内网IP）→ 返回明文 marker，由 authApi 切到
+ *     后端 plaintext path（要求后端 LoginCrypto.AllowPlaintext=true）
+ *
+ * 调用方用 isPlaintextPayload 判分支映射到后端字段：
+ *   - encrypted: encrypted_password + key_id
+ *   - plaintext: password (login) 或 old_password+new_password (change)
+ *
+ * 安全声明：plaintext path 是 escape hatch，专为内网受信网络部署设计；
+ * 公网部署应通过 TLS 强制加密路径。后端默认 AllowPlaintext=false 拒绝明文。
+ */
+export async function preparePasswordPayload(plain: string): Promise<PasswordPayload> {
+  if (!plain) throw new Error('preparePasswordPayload: plain password is empty');
+
+  const insecure =
+    (typeof window !== 'undefined' && window.isSecureContext === false) ||
+    typeof crypto === 'undefined' ||
+    !crypto.subtle;
+
+  if (insecure) {
+    if (typeof console !== 'undefined' && console.warn) {
+      console.warn(
+        '[security] 非 secure context — 密码以明文传输；仅适用内网受信部署。' +
+        '生产环境请部署 TLS（参 deployments/docker/TLS-SETUP.md）。'
+      );
+    }
+    return { plaintextPassword: plain };
+  }
+
+  return await encryptPassword(plain);
 }

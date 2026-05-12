@@ -171,10 +171,12 @@ type CreateUserRequest struct {
 // 前端先调 GET /auth/public-key 拉公钥，把 {password, ts, nonce} JSON 用
 // RSA-OAEP/SHA-256 加密 → base64 → 填入 encrypted_password；同时回传 key_id。
 // 后端 handler 解密后构造 CreateUserRequest 调 service。
+// T-0120 同 LoginRequest：去 required，handler 内做二选一校验
 type CreateUserHTTPRequest struct {
 	Username          string      `json:"username" binding:"required,min=3,max=64"`
-	EncryptedPassword string      `json:"encrypted_password" binding:"required"`
-	KeyID             string      `json:"key_id" binding:"required"`
+	EncryptedPassword string      `json:"encrypted_password"`
+	KeyID             string      `json:"key_id"`
+	Password          string      `json:"password"` // T-0120 plaintext fallback
 	DisplayName       string      `json:"display_name"`
 	Email             string      `json:"email" binding:"omitempty,email"`
 	Phone             string      `json:"phone"`
@@ -205,10 +207,15 @@ type UpdateUserRequest struct {
 // 密码必须 RSA-OAEP 加密：前端调 GET /auth/public-key 拉公钥，把
 // {password, ts, nonce} JSON 用 RSA-OAEP/SHA-256 加密 → base64 → 填入
 // encrypted_password；同时回传 key_id。后端 handler 解密后调 service.Login。
+// T-0120：EncryptedPassword + KeyID 去掉 `required` tag，handler 内做二选一校验:
+//   - 加密路径（secure context）：EncryptedPassword + KeyID 必须同时非空
+//   - 明文路径（仅 LoginCrypto.AllowPlaintext=true 时启用）：Password 非空
+// 两路径都不满足 → handler 返 400 missing password。
 type LoginRequest struct {
 	Username          string `json:"username" binding:"required"`
-	EncryptedPassword string `json:"encrypted_password" binding:"required"`
-	KeyID             string `json:"key_id" binding:"required"`
+	EncryptedPassword string `json:"encrypted_password"`
+	KeyID             string `json:"key_id"`
+	Password          string `json:"password"` // T-0120 plaintext fallback (config gated)
 	CaptchaID         string `json:"captcha_id"`
 	CaptchaAnswer     string `json:"captcha_answer"`
 }
@@ -224,10 +231,11 @@ type AssignRoleRequest struct {
 }
 
 // ResetPasswordRequest 是 POST /api/v1/admin/users/:id/reset-password 的请求体。
-// 新密码必须 RSA-OAEP 加密传输。
+// T-0120 双路径：加密 vs 明文 fallback。
 type ResetPasswordRequest struct {
-	EncryptedNewPassword string `json:"encrypted_new_password" binding:"required"`
-	KeyID                string `json:"key_id" binding:"required"`
+	EncryptedNewPassword string `json:"encrypted_new_password"`
+	KeyID                string `json:"key_id"`
+	NewPassword          string `json:"new_password"` // T-0120 plaintext fallback
 }
 
 // CreateRoleRequest is the input for creating a new role.

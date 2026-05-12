@@ -70,6 +70,12 @@ jwt:
 # 多副本部署时此路径必须挂载同一份 K8s Secret，确保各副本使用同一密钥（keyID 一致）。
 login_crypto:
   private_key_path: "/etc/omcgo/keys/login_rsa_private.pem"
+  # T-0120：允许明文密码登录 / 改密（非 secure context 部署 escape hatch）。
+  # 默认 false。设为 true 后前端在 http://内网IP 访问 crypto.subtle 不可用时
+  # 自动 fallback 发明文 password，后端 audit log 标记 reason=plaintext_login。
+  # **仅推荐内网受信网络 + 完整 audit 闭环时启用**；公网部署应保持 false，
+  # 强制 TLS 加密路径（参 deployments/docker/TLS-SETUP.md 自签证书快速启用）。
+  allow_plaintext: false
 
 cors:
   allow_origins:

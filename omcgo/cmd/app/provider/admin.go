@@ -53,10 +53,16 @@ func initAdminModule(c *Container) error {
 	loginCipher := loginpwd.NewCipher(keystore, loginpwd.NewRedisReplayGuard(c.Redis))
 	pubKeyHandler := loginpwd.NewPublicKeyHandler(loginCipher)
 	adminHandler.SetLoginCipher(loginCipher)
+	// T-0120：是否接受明文密码登录（非 secure context 部署 escape hatch）
+	adminHandler.SetAllowPlaintextPassword(c.Cfg.LoginCrypto.AllowPlaintext)
 	logger.Info("login password cipher initialized",
 		zap.String("key_id", keystore.ActiveKeyID()),
 		zap.String("private_key_path", c.Cfg.LoginCrypto.PrivateKeyPath),
+		zap.Bool("allow_plaintext", c.Cfg.LoginCrypto.AllowPlaintext),
 	)
+	if c.Cfg.LoginCrypto.AllowPlaintext {
+		logger.Warn("login_crypto.allow_plaintext=true — 明文密码登录已启用；仅推荐内网部署 + 完整 audit 闭环；公网部署应改 false 并部署 TLS（参 deployments/docker/TLS-SETUP.md）")
+	}
 
 	permService := admin.NewPermissionService(roleRepo, c.GroupRepo, c.Redis, logger)
 	adminHandler.SetPermissionService(permService)

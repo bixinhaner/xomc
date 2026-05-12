@@ -2,7 +2,8 @@ import http from '../http';
 import type { TokenPairResponse } from '../../store/userStore';
 import type { User } from '../../types/system';
 import {
-  encryptPassword,
+  preparePasswordPayload,
+  isPlaintextPayload,
   invalidatePublicKeyCache,
 } from '../crypto/passwordCipher';
 
@@ -40,14 +41,18 @@ function mapBackendUserToFrontend(bu: BackendUser): User {
 
 export const authApi = {
   async login(username: string, password: string): Promise<TokenPairResponse> {
-    // 密码必须 RSA-OAEP 加密传输（后端拒绝明文 password 字段）。
-    const { encryptedPassword, keyId } = await encryptPassword(password);
+    // T-0120 双路径：secure context → RSA-OAEP 加密；非 secure context →
+    // 明文 fallback（后端需 LoginCrypto.AllowPlaintext=true）
+    const payload = await preparePasswordPayload(password);
+    const body: Record<string, unknown> = { username };
+    if (isPlaintextPayload(payload)) {
+      body.password = payload.plaintextPassword;
+    } else {
+      body.encrypted_password = payload.encryptedPassword;
+      body.key_id = payload.keyId;
+    }
     try {
-      const { data } = await http.post<TokenPairResponse>('/auth/login', {
-        username,
-        encrypted_password: encryptedPassword,
-        key_id: keyId,
-      });
+      const { data } = await http.post<TokenPairResponse>('/auth/login', body);
       return data;
     } catch (err: unknown) {
       // 401 时主动失效公钥缓存：后端可能轮换了密钥，下次登录重新拉取。

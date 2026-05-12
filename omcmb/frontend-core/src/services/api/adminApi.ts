@@ -1,5 +1,8 @@
 import http from '../http';
-import { encryptPassword } from '../crypto/passwordCipher';
+import {
+  preparePasswordPayload,
+  isPlaintextPayload,
+} from '../crypto/passwordCipher';
 import type {
   User,
   UserRole,
@@ -553,12 +556,10 @@ export const adminApi = {
       roleIds?: string[];
     }
   ): Promise<User> {
-    // 初始密码必须 RSA-OAEP 加密传输（与登录、改密一致）。
-    const { encryptedPassword, keyId } = await encryptPassword(data.password);
-    const { data: bu } = await http.post<BackendUser>('/admin/users', {
+    // T-0120 双路径：secure context → RSA-OAEP；非 secure context → plaintext fallback
+    const payload = await preparePasswordPayload(data.password);
+    const body: Record<string, unknown> = {
       username: data.username,
-      encrypted_password: encryptedPassword,
-      key_id: keyId,
       email: data.email || undefined,
       phone: data.phone || undefined,
       description: data.description || undefined,
@@ -566,7 +567,14 @@ export const adminApi = {
       display_name: data.displayName || data.username,
       status: data.status,
       role_ids: data.roleIds && data.roleIds.length > 0 ? data.roleIds : undefined,
-    });
+    };
+    if (isPlaintextPayload(payload)) {
+      body.password = payload.plaintextPassword;
+    } else {
+      body.encrypted_password = payload.encryptedPassword;
+      body.key_id = payload.keyId;
+    }
+    const { data: bu } = await http.post<BackendUser>('/admin/users', body);
     return mapBackendUser(bu);
   },
 
@@ -586,12 +594,16 @@ export const adminApi = {
   },
 
   async resetPassword(id: string, newPassword: string): Promise<void> {
-    // 新密码必须 RSA-OAEP 加密传输。
-    const { encryptedPassword, keyId } = await encryptPassword(newPassword);
-    await http.post(`/admin/users/${id}/reset-password`, {
-      encrypted_new_password: encryptedPassword,
-      key_id: keyId,
-    });
+    // T-0120 双路径：secure context → RSA-OAEP；非 secure context → plaintext fallback
+    const payload = await preparePasswordPayload(newPassword);
+    const body: Record<string, unknown> = {};
+    if (isPlaintextPayload(payload)) {
+      body.new_password = payload.plaintextPassword;
+    } else {
+      body.encrypted_new_password = payload.encryptedPassword;
+      body.key_id = payload.keyId;
+    }
+    await http.post(`/admin/users/${id}/reset-password`, body);
   },
 
   async lockUser(id: string): Promise<void> {
@@ -1040,16 +1052,25 @@ export const adminApi = {
   },
 
   // Change password (current user)
-  // 旧/新密码均需 RSA-OAEP 加密传输；两个密文使用同一 key_id。
+  // T-0120 双路径：secure context → RSA-OAEP；非 secure context → plaintext fallback
+  // 后端需 LoginCrypto.AllowPlaintext=true 才接受明文路径。
   async changePassword(data: { old_password: string; new_password: string }): Promise<void> {
-    const oldEnc = await encryptPassword(data.old_password);
-    const newEnc = await encryptPassword(data.new_password);
-    // 两次 encryptPassword 共用同一公钥缓存 → keyId 必然相同；这里取其一即可。
-    await http.post('/auth/change-password', {
-      encrypted_old_password: oldEnc.encryptedPassword,
-      encrypted_new_password: newEnc.encryptedPassword,
-      key_id: oldEnc.keyId,
-    });
+    const oldPayload = await preparePasswordPayload(data.old_password);
+    const newPayload = await preparePasswordPayload(data.new_password);
+    const body: Record<string, unknown> = {};
+    if (isPlaintextPayload(oldPayload) && isPlaintextPayload(newPayload)) {
+      body.old_password = oldPayload.plaintextPassword;
+      body.new_password = newPayload.plaintextPassword;
+    } else if (!isPlaintextPayload(oldPayload) && !isPlaintextPayload(newPayload)) {
+      // 两次 preparePasswordPayload 共用同一公钥缓存 → keyId 必然相同；取其一即可。
+      body.encrypted_old_password = oldPayload.encryptedPassword;
+      body.encrypted_new_password = newPayload.encryptedPassword;
+      body.key_id = oldPayload.keyId;
+    } else {
+      // 理论不可达：单次 secure context 状态稳定 — 两次调用返回同 path
+      throw new Error('changePassword: payload mode mismatch (mixed secure/insecure context)');
+    }
+    await http.post('/auth/change-password', body);
   },
 
   // ---- System Config (KV by category, batch upsert) ----

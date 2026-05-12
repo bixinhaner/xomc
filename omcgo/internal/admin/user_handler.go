@@ -30,15 +30,33 @@ func (h *Handler) CreateUser(c *gin.Context) {
 		return
 	}
 
-	if h.loginCipher == nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError,
-			errors.New("login password cipher not configured"))
-		return
-	}
-	plainPwd, err := h.loginCipher.Decrypt(c.Request.Context(), httpReq.KeyID, httpReq.EncryptedPassword)
-	if err != nil {
+	// T-0120 双路径密码解析
+	var (
+		plainPwd string
+		err      error
+	)
+	if httpReq.EncryptedPassword != "" && httpReq.KeyID != "" {
+		if h.loginCipher == nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				errors.New("login password cipher not configured"))
+			return
+		}
+		plainPwd, err = h.loginCipher.Decrypt(c.Request.Context(), httpReq.KeyID, httpReq.EncryptedPassword)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest,
+				fmt.Errorf("decrypt password: %w", err))
+			return
+		}
+	} else if httpReq.Password != "" {
+		if !h.allowPlaintextPwd {
+			commonerrors.AbortWithError(c, http.StatusBadRequest,
+				errors.New("plaintext password is disabled; please use encrypted_password+key_id or deploy TLS"))
+			return
+		}
+		plainPwd = httpReq.Password
+	} else {
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("decrypt password: %w", err))
+			errors.New("missing password: provide encrypted_password+key_id or (if allow_plaintext) password"))
 		return
 	}
 	if len(plainPwd) < 6 {
@@ -196,16 +214,32 @@ func (h *Handler) ResetPassword(c *gin.Context) {
 		return
 	}
 
-	if h.loginCipher == nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError,
-			errors.New("login password cipher not configured"))
-		return
-	}
 	ctx := c.Request.Context()
-	plainPwd, err := h.loginCipher.Decrypt(ctx, req.KeyID, req.EncryptedNewPassword)
-	if err != nil {
+
+	// T-0120 双路径（reuse outer err declared at func top）
+	var plainPwd string
+	if req.EncryptedNewPassword != "" && req.KeyID != "" {
+		if h.loginCipher == nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				errors.New("login password cipher not configured"))
+			return
+		}
+		plainPwd, err = h.loginCipher.Decrypt(ctx, req.KeyID, req.EncryptedNewPassword)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest,
+				fmt.Errorf("decrypt new password: %w", err))
+			return
+		}
+	} else if req.NewPassword != "" {
+		if !h.allowPlaintextPwd {
+			commonerrors.AbortWithError(c, http.StatusBadRequest,
+				errors.New("plaintext password is disabled; please use encrypted_new_password+key_id or deploy TLS"))
+			return
+		}
+		plainPwd = req.NewPassword
+	} else {
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("decrypt new password: %w", err))
+			errors.New("missing password: provide encrypted_new_password+key_id or (if allow_plaintext) new_password"))
 		return
 	}
 	if len(plainPwd) < 6 {

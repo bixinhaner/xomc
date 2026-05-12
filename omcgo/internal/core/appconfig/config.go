@@ -277,8 +277,15 @@ type JWTConfig struct {
 // PrivateKeyPath：RSA 私钥 PEM 文件路径；不存在时进程启动会自动生成 2048 位密钥落盘
 // （文件 0600，目录 0700）。生产部署多副本时建议把同一份私钥挂载为 K8s Secret，
 // 避免每个副本独立生成导致 keyID 不一致。
+//
+// AllowPlaintext (T-0120)：是否接受明文密码登录 / 改密。默认 false。
+// 启用后前端在非 secure context（http://内网IP 之类 crypto.subtle 不可用场景）
+// 可 fallback 发明文 password，后端正常处理 + audit log 标记 reason=plaintext_login。
+// **仅推荐内网部署 + 完整 audit 闭环时启用**；公网 / 多租户部署应保持 false 强制
+// TLS 走加密路径（参 deployments/docker/TLS-SETUP.md 自签证书快速启用）。
 type LoginCryptoConfig struct {
 	PrivateKeyPath string `mapstructure:"private_key_path"`
+	AllowPlaintext bool   `mapstructure:"allow_plaintext"`
 }
 
 // NorthboundConfig 配置北向接口（OSS 推送）。

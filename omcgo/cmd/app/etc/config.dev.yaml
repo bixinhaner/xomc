@@ -74,6 +74,9 @@ jwt:
 # 生产多副本部署应改为挂载 K8s Secret 共享同一私钥，确保 keyID 一致。
 login_crypto:
   private_key_path: "configs/keys/login_rsa_private.pem"
+  # T-0120：允许明文密码登录 / 改密（非 secure context dev 环境的 escape hatch）。
+  # dev 默认 true 方便本地通过 http://192.168.x.x:8081 联调；prod 必须 false 走 TLS。
+  allow_plaintext: true
 
 cors:
   allow_origins:
