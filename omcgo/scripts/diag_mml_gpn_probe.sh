@@ -35,9 +35,12 @@ OUTPUT_DIR=""
 ROOT_PATH="Device."
 NEXT_LEVEL="false"
 KEEP_API_KEY="false"
-# T-DIAG-DOCKER：宿主机无 psql 时自动走 docker exec 到 postgres 容器。
-# --psql-docker auto    自动检测容器（默认）
-# --psql-docker off     禁用 docker fallback，强制要求宿主机有 psql
+# T-DIAG-DOCKER：psql 路由模式。
+# --psql-docker auto    自动检测（默认）：**优先 docker exec 到 postgres 容器**，
+#                       找不到容器才 fallback 到宿主机 psql。
+#                       2026-05-12 反转优先级（之前宿主 psql 优先，但 docker 化
+#                       postgres 通常宿主访问 localhost:5432 不通，进死路）。
+# --psql-docker off     禁用 docker，强制要求宿主机有 psql + 能直连 DSN
 # --psql-docker <name>  显式指定容器名 / ID
 PSQL_DOCKER_MODE="${PSQL_DOCKER:-auto}"
 PSQL_DOCKER_CONTAINER=""   # 实际使用的容器（auto 模式下自动填充）
@@ -80,9 +83,11 @@ Usage: $(basename "$0") [options]
   --root-path <path>      GPN 起始路径，默认 Device.
   --next-level            NextLevel=true（仅返回根的直接子节点）
   --psql-docker <mode>    psql 路由模式（默认 auto）：
-                          auto    宿主机无 psql 时自动 docker exec 到
-                                  postgres 容器（推荐）
-                          off     禁用 docker fallback，要求宿主机有 psql
+                          auto    优先 docker exec 到 postgres 容器；找不到
+                                  容器再 fallback 宿主机 psql（推荐；2026-05-12
+                                  反转优先级，避免 docker 化 postgres 在宿主
+                                  localhost:5432 不通走死路）
+                          off     禁用 docker，强制宿主机 psql + DSN 直连
                           <name>  显式指定容器名/ID（如 docker-postgres-1）
   -h | --help             显示本帮助
 
@@ -168,34 +173,37 @@ detect_psql_route() {
         return
         ;;
     auto)
-        # 优先宿主 psql
-        if command -v psql >/dev/null 2>&1; then
-            PSQL_DOCKER_CONTAINER=""
-            log "psql: host (auto-detected)"
-            return
-        fi
-        # 自动探测 postgres 容器
-        command -v docker >/dev/null 2>&1 || {
-            echo "ERROR: 宿主机无 psql 也无 docker，无法连数据库" >&2
-            echo "  → apt-get install postgresql-client（推荐）" >&2
-            exit 1
-        }
+        # T-DIAG-DOCKER（2026-05-12 反转优先级）：
+        # 宿主机有 psql ≠ 能连得通 — docker 化的 postgres 通常不暴露 5432 给宿主
+        # （或 DSN 里的 host 是容器编排别名 'postgres'，宿主 DNS 不解析）。
+        # 优先用 docker exec 进 postgres 容器本身跑 psql，避开网络死结；
+        # 仅当 docker 不可用或找不到 postgres 容器时才 fallback 到宿主 psql。
         local c cid
-        for c in goomc-postgres goomc_postgres_1 docker-postgres-1 deployments-postgres-1 postgres; do
-            if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$c"; then
-                PSQL_DOCKER_CONTAINER="$c"
-                log "psql: docker exec -i $c (auto-fallback; host psql not installed)"
+        if command -v docker >/dev/null 2>&1; then
+            # 1. well-known 容器名匹配
+            for c in goomc-postgres goomc_postgres_1 docker-postgres-1 deployments-postgres-1 postgres; do
+                if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$c"; then
+                    PSQL_DOCKER_CONTAINER="$c"
+                    log "psql: docker exec -i $c (auto; named container match)"
+                    return
+                fi
+            done
+            # 2. 镜像名匹配（timescale / postgres）— 任意运行中的 PG 实例
+            cid=$(docker ps --format '{{.ID}} {{.Image}}' 2>/dev/null | awk '/timescale|postgres/{print $1; exit}')
+            if [[ -n "$cid" ]]; then
+                PSQL_DOCKER_CONTAINER="$cid"
+                log "psql: docker exec -i $cid (auto; image match)"
                 return
             fi
-        done
-        # fallback: 任意暴露 5432 的运行容器
-        cid=$(docker ps --format '{{.ID}} {{.Image}}' 2>/dev/null | awk '/timescale|postgres/{print $1; exit}')
-        if [[ -n "$cid" ]]; then
-            PSQL_DOCKER_CONTAINER="$cid"
-            log "psql: docker exec -i $cid (auto-fallback via image match)"
+        fi
+        # 3. fallback：宿主机 psql（仅当无 docker 或无 postgres 容器时）
+        if command -v psql >/dev/null 2>&1; then
+            PSQL_DOCKER_CONTAINER=""
+            log "psql: host (fallback; no docker postgres container found)"
             return
         fi
-        echo "ERROR: 宿主无 psql；docker 也找不到运行中的 postgres 容器" >&2
+        # 4. 都没有
+        echo "ERROR: docker 找不到 postgres 容器，宿主机也无 psql" >&2
         echo "  → 启动容器：bash run/scripts/start-deps.sh" >&2
         echo "  → 或装 psql：apt-get install postgresql-client" >&2
         echo "  → 或显式指定：--psql-docker <container-name>" >&2
@@ -329,10 +337,12 @@ psql_at "SELECT 1" >/dev/null 2>&1 || {
     if [[ -n "$PSQL_DOCKER_CONTAINER" ]]; then
         echo "ERROR: 无法连接 PG（docker 路径）: 容器 $PSQL_DOCKER_CONTAINER + DSN $(docker_dsn)" >&2
         echo "  → docker exec -it $PSQL_DOCKER_CONTAINER psql -U omcgo -d omcgo -c 'SELECT 1' 排查" >&2
+        echo "  → docker ps  确认 postgres 容器运行" >&2
     else
-        echo "ERROR: 无法连接 PG: $DSN" >&2
-        echo "  → psql \"\$DSN\" -c 'SELECT 1' 排查（容器内 DSN 用 host=postgres，容器外要改）" >&2
-        echo "  → 或试 --psql-docker auto 让脚本走 docker exec 兜底" >&2
+        echo "ERROR: 无法连接 PG（host psql 路径）: $DSN" >&2
+        echo "  → 当前走宿主机 psql；DSN host=$(echo "$DSN" | sed -E 's#.*@([^/:]+).*#\1#') 在宿主可能不可达（docker 容器隔离 / 端口未映射）" >&2
+        echo "  → 建议：启动 postgres 容器（bash run/scripts/start-deps.sh），脚本会自动切 docker exec" >&2
+        echo "  → 或显式 --psql-docker <container-name>" >&2
     fi
     exit 2
 }
