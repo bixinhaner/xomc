@@ -13,6 +13,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/task"
 )
 
 // ============================================================
@@ -412,7 +413,9 @@ type TaskExecutor struct {
 	taskRepo   TaskRepository
 	execRepo   TaskExecutionRepository
 	auditSvc   *AuditLogService
-	stepRouter *StepRouter // T-0101-h 注入；nil 时 Rollback fallback ErrNotImplemented
+	stepRouter *StepRouter   // T-0101-h 注入；nil 时 Rollback fallback ErrNotImplemented
+	enqueuer   task.Enqueuer // T-0102-c 注入；nil 时 inline-RPC 路径 fallback MVP placeholder
+	sseHub     *SSEHub       // T-0102-c 注入；nil 时跳过 SSE 事件发送
 	logger     *zap.Logger
 }
 
@@ -425,23 +428,62 @@ func NewTaskExecutor(taskRepo TaskRepository, execRepo TaskExecutionRepository, 
 	}
 }
 
-// Run 启动一个 pending 任务（MVP：仅记录意图，不真发 RPC）。
+// SetEnqueuer wires the device-task enqueuer used by inline RPC dispatch
+// (T-0102-c). When nil (default), Run falls back to the MVP placeholder
+// path so existing template-driven flows are unaffected.
+func (e *TaskExecutor) SetEnqueuer(enq task.Enqueuer) { e.enqueuer = enq }
+
+// SetSSEHub wires the SSE hub used by inline RPC dispatch to publish
+// per-command events. Optional — nil disables SSE emits.
+func (e *TaskExecutor) SetSSEHub(hub *SSEHub) { e.sseHub = hub }
+
+// Run 启动一个 pending 任务。
+//
+// 行为分支：
+//   - OpsTask.Message 含 inline RPC envelope (kind="rpc") 且 enqueuer 已注入 →
+//     T-0102-c 实 RPC 派发路径：fan-out 每设备一条 device_tasks 记录交给
+//     internal/task 队列（ACS 引擎按设备 SN 弹出 → Connection Request → CWMP）
+//   - 其它情况（template 驱动 / 无 enqueuer）→ MVP placeholder：只标 running +
+//     写 executor_dispatched execution 行（既有行为不变）
 func (e *TaskExecutor) Run(ctx context.Context, taskID uuid.UUID) error {
-	task, err := e.taskRepo.GetByID(ctx, taskID)
+	t, err := e.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("get task: %w", err)
 	}
-	if task.Status != OpsTaskPending {
-		return fmt.Errorf("task not pending: status=%s", task.Status)
+	if t.Status != OpsTaskPending {
+		return fmt.Errorf("task not pending: status=%s", t.Status)
 	}
+
+	// Detect inline-RPC envelope. Failure to parse is treated as "not an
+	// inline RPC task" rather than as a hard error — template-driven tasks
+	// have unrelated free-form Message content.
+	envelope, isInlineRPC := parseInlineRPCEnvelope(t.Message)
+
 	now := time.Now()
-	task.Status = OpsTaskRunning
-	task.StartedAt = &now
-	if err := e.taskRepo.UpdateStatus(ctx, task); err != nil {
+	t.Status = OpsTaskRunning
+	t.StartedAt = &now
+	if err := e.taskRepo.UpdateStatus(ctx, t); err != nil {
 		return fmt.Errorf("update task status: %w", err)
 	}
-	// MVP：写一条 placeholder execution 行，标记任务已"接入调度引擎"
-	exec := &OpsTaskExecution{
+
+	if isInlineRPC && e.enqueuer != nil {
+		if err := e.dispatchInlineRPC(ctx, t, envelope); err != nil {
+			e.logger.Error("dispatch inline rpc failed",
+				zap.String("task_id", taskID.String()),
+				zap.Error(err))
+			// Don't fail Run — the task is already running and per-device
+			// failures are recorded as individual execution rows.
+		}
+		e.auditSvc.Log(ctx, &OpsAuditLog{
+			OpType: "task_run", TargetType: "task", TargetID: taskID.String(),
+			OperatorName: t.Creator, RiskLevel: t.RiskLevel, Result: "dispatched",
+		})
+		return nil
+	}
+
+	// MVP path: write a placeholder execution row marking the task as
+	// "accepted into the scheduler" without fan-out.
+	placeholder := &OpsTaskExecution{
 		TaskID:    taskID,
 		DeviceSN:  "*",
 		StepIndex: 0,
@@ -450,15 +492,137 @@ func (e *TaskExecutor) Run(ctx context.Context, taskID uuid.UUID) error {
 		Status:    "running",
 		StartedAt: &now,
 	}
-	if err := e.execRepo.Create(ctx, exec); err != nil {
+	if err := e.execRepo.Create(ctx, placeholder); err != nil {
 		e.logger.Warn("create placeholder execution failed", zap.Error(err))
 	}
 	e.auditSvc.Log(ctx, &OpsAuditLog{
 		OpType: "task_run", TargetType: "task", TargetID: taskID.String(),
-		OperatorName: task.Creator, RiskLevel: RiskCautious, Result: "success",
+		OperatorName: t.Creator, RiskLevel: RiskCautious, Result: "success",
 	})
 	return nil
 }
+
+// parseInlineRPCEnvelope inspects the Message field for the JSON
+// envelope T-0102-b stashes when ExecuteRPC enqueues an ad-hoc RPC.
+// Returns the parsed envelope and a bool signalling presence; a Message
+// that is empty, non-JSON, or carries a different kind returns (_, false)
+// so the caller routes to the template/placeholder path.
+func parseInlineRPCEnvelope(message string) (RPCInlineEnvelope, bool) {
+	if message == "" {
+		return RPCInlineEnvelope{}, false
+	}
+	var env RPCInlineEnvelope
+	if err := json.Unmarshal([]byte(message), &env); err != nil {
+		return RPCInlineEnvelope{}, false
+	}
+	if env.Kind != RPCInlineKind {
+		return RPCInlineEnvelope{}, false
+	}
+	return env, true
+}
+
+// dispatchInlineRPC fans out one device-task per device_sn on the
+// OpsTask, each carrying the TR-069 RPC method derived from the
+// envelope. Per-device failures are recorded as failed execution rows
+// rather than aborting the whole task — this matches PRD §4.2.3 batch
+// semantics where one bad device shouldn't block the rest.
+func (e *TaskExecutor) dispatchInlineRPC(ctx context.Context, t *OpsTask, env RPCInlineEnvelope) error {
+	method, err := actionToRPCMethod(env.Action)
+	if err != nil {
+		return fmt.Errorf("map action to rpc method: %w", err)
+	}
+
+	var deviceSNs []string
+	if err := json.Unmarshal(t.DeviceSNs, &deviceSNs); err != nil {
+		return fmt.Errorf("parse device_sns: %w", err)
+	}
+	if len(deviceSNs) == 0 {
+		return errors.New("no devices to dispatch")
+	}
+
+	paramsJSON, err := json.Marshal(env.Params)
+	if err != nil {
+		return fmt.Errorf("marshal params: %w", err)
+	}
+	if env.Params == nil {
+		paramsJSON = nil
+	}
+
+	var dispatched int
+	for i, sn := range deviceSNs {
+		req := &task.CreateTaskRequest{
+			DeviceSN:     sn,
+			Method:       method,
+			Params:       paramsJSON,
+			Source:       task.TaskSourceOps,
+			SourceID:     t.ID.String(),
+			CreatorID:    t.Creator,
+			Description:  fmt.Sprintf("ops rpc %s (action=%s)", t.ID, env.Action),
+			DeviceIndex:  i,
+			CommandIndex: 0,
+		}
+		created, err := e.enqueuer.CreateTask(ctx, req)
+		execRow := &OpsTaskExecution{
+			TaskID:    t.ID,
+			DeviceSN:  sn,
+			StepIndex: 0,
+			StepName:  env.Action,
+			StepType:  "rpc",
+			StartedAt: ptrTime(time.Now()),
+		}
+		if err != nil {
+			execRow.Status = "failed"
+			execRow.ErrorMessage = err.Error()
+			e.logger.Warn("enqueue rpc per-device failed",
+				zap.String("ops_task_id", t.ID.String()),
+				zap.String("device_sn", sn),
+				zap.String("method", method),
+				zap.Error(err))
+		} else {
+			execRow.Status = "running"
+			dispatched++
+			e.publishDispatchEvent(t.ID, sn, created.ID, env.Action, method)
+		}
+		if recErr := e.execRepo.Create(ctx, execRow); recErr != nil {
+			e.logger.Warn("create rpc execution row failed",
+				zap.String("ops_task_id", t.ID.String()),
+				zap.String("device_sn", sn),
+				zap.Error(recErr))
+		}
+	}
+
+	e.logger.Info("inline rpc dispatched",
+		zap.String("ops_task_id", t.ID.String()),
+		zap.String("method", method),
+		zap.Int("total_devices", len(deviceSNs)),
+		zap.Int("dispatched", dispatched))
+	return nil
+}
+
+// publishDispatchEvent emits one command.dispatched SSE event per
+// device-task on the per-ops-task channel so any active /commands/:id/
+// stream subscriber gets realtime fan-out visibility.
+func (e *TaskExecutor) publishDispatchEvent(opsTaskID uuid.UUID, deviceSN, deviceTaskID, action, method string) {
+	if e.sseHub == nil {
+		return
+	}
+	payload, err := json.Marshal(map[string]interface{}{
+		"ops_task_id":    opsTaskID,
+		"device_sn":      deviceSN,
+		"device_task_id": deviceTaskID,
+		"action":         action,
+		"method":         method,
+	})
+	if err != nil {
+		return
+	}
+	e.sseHub.Publish("command:"+opsTaskID.String(), SSEEvent{
+		Event: "command.dispatched",
+		Data:  payload,
+	})
+}
+
+func ptrTime(t time.Time) *time.Time { return &t }
 
 func (e *TaskExecutor) ListExecutions(ctx context.Context, filter TaskExecutionFilter) (*model.ListResponse[OpsTaskExecution], error) {
 	return e.execRepo.List(ctx, filter)

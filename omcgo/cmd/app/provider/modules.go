@@ -533,9 +533,13 @@ func initMiscModules(c *Container) error {
 	opsMWSvc := ops.NewMaintenanceWindowService(opsMWRepo, opsAuditSvc, logger)
 	opsPBSvc := ops.NewPlaybookService(opsPBRepo, logger)
 	opsExecutor := ops.NewTaskExecutor(opsTaskRepo, opsExecRepo, opsAuditSvc, logger)
+	// T-0102-c: wire device-task enqueuer + SSE hub so inline RPC tasks
+	// fan out to internal/task (Redis + PG) and emit per-device events.
+	opsExecutor.SetEnqueuer(c.TaskSvc)
 	opsBGSvc := ops.NewBreakGlassService(opsAuditSvc, logger)
 	opsInspectionSvc := ops.NewInspectionService(opsDiagSvc, opsAuditSvc, logger)
 	opsSSEHub := ops.NewSSEHub()
+	opsExecutor.SetSSEHub(opsSSEHub)
 
 	c.miscDeps.opsExtHandler = ops.NewExtHandler(
 		opsDiagSvc, opsDLSvc, opsAuditSvc, opsMWSvc, opsPBSvc,

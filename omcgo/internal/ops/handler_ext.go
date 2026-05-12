@@ -569,15 +569,21 @@ func (h *ExtHandler) ExecuteRPC(c *gin.Context) {
 		approvalState = ApprovalPending
 	}
 
+	// Validate the action up-front: an undispatchable action should fail
+	// the request, not get stuck in the queue forever (T-0102-c).
+	if _, err := actionToRPCMethod(req.Action); err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	// Inline command spec lives in Message until OpsTask gains a dedicated
 	// inline_command column. T-0102-c reads the envelope back to dispatch
 	// real RPCs against the ACS engine.
-	cmdEnvelope := map[string]interface{}{
-		"kind":   "rpc",
-		"action": req.Action,
-		"params": req.Params,
-	}
-	cmdJSON, _ := json.Marshal(cmdEnvelope)
+	cmdJSON, _ := json.Marshal(RPCInlineEnvelope{
+		Kind:   RPCInlineKind,
+		Action: req.Action,
+		Params: req.Params,
+	})
 	deviceSNsJSON, _ := json.Marshal(devices)
 
 	task := &OpsTask{
