@@ -62,7 +62,7 @@
 
 | # | ID | 工作项 | Owner | Est | 关联 | Prio | State 候选 |
 |---|----|--------|-------|------|------|-------|------|
-| 1 | T-0090-a | MML 控制台 FE-only UX 调整（操作类型差异化展示 + 自定义命令限制） | Claude | S (~0.5d) | T-0090 主线 / R-NEW-1 | P2 | planned |
+| 1 | T-0090-a | MML 控制台 FE-only UX 调整（操作类型差异化展示 + 自定义命令限制） | Claude | S (~0.5d) | T-0090 主线 / R-NEW-1 | P2 | **done 2026-05-12（pull-forward 进 sprint-10 buffer 执行；commit `bf71e518`；详 `backlog/done/2026Q2.md`）** |
 | 2 | T-0090-b | DB drop product_types 列（migration up/down + 数据迁移）| Claude | M (~1-2d) | T-0090 主线 / R-NEW-2 | P2 | planned |
 | 3 | T-0090-c | Backend RBAC 私有命令查询过滤（admin context + repo where 子句） | Claude | M-L (~2-3d) | T-0090 主线 / R-NEW-3 | P2 | planned |
 | 4 | T-0090-d | FE 私有命令页（复用公有页面组件 + 切换私有/公有 tab） | Claude | S (~0.5d) | T-0090 主线 / R-NEW-4 | P2 | planned |
