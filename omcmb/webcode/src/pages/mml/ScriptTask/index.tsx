@@ -76,7 +76,6 @@ const TASK_RESULT_KEYS: Record<MMLTaskResult, { color: string; key: string }> = 
 interface TaskForm {
   taskName: string;
   fileName: string;
-  productType: string;
   executeType: MMLExecuteType;
   time: Dayjs | null;
   periodStartTime: Dayjs | null;
@@ -347,7 +346,6 @@ export default function ScriptTask() {
     form.resetFields();
     form.setFieldsValue({
       taskName: task.taskName,
-      productType: '',
       executeType: task.executeType,
       offlineRetryEnable: task.offlineRetry,
       offlineRetryWaitTime: task.offlineRetryWait,
@@ -628,9 +626,8 @@ export default function ScriptTask() {
           <Form.Item label={t('mml.taskName')} name="taskName" rules={[{ required: true, message: t('mml.inputTaskNameRequired') }]} style={{ marginLeft: 12 }}>
             <Input maxLength={50} placeholder={t('mml.inputTaskName')} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item label={t('mml.productType')} name="productType" style={{ marginLeft: 12 }}>
-            <Select placeholder={t('mml.selectProductType')} allowClear options={productTypeOptions} />
-          </Form.Item>
+          {/* T-0096：删 productType Form.Item 与 console「保存脚本」弹窗对齐
+              （productTypeOptions 保留供 filter bar 过滤既有任务使用）*/}
           <div style={{ marginLeft: 12, marginBottom: 16 }}>
             <label style={{ display: 'block', marginBottom: 4, fontSize: 14 }}>
               {t('mml.deviceSn')} <span style={{ color: '#ff4d4f' }}>*</span>
