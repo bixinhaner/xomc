@@ -41,3 +41,7 @@ backups/
 
 # Playwright MCP transient artifacts (snapshots / console logs)
 .playwright-mcp/
+
+# T-0118 TLS 自签证书 + 本地化 nginx TLS conf — 不入库
+deployments/docker/certs/
+deployments/docker/default-tls.conf
