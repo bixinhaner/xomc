@@ -73,6 +73,8 @@
 
 ### 系统依赖
 
+工具需要：`curl`、`jq`、`xmllint`、`psql`（**或** 宿主机有 `docker` 且 postgres 跑在容器里 —— 自动 fallback）。
+
 ```bash
 # RHEL / CentOS / Rocky
 yum install -y postgresql jq libxml2  # psql / jq / xmllint
@@ -83,6 +85,30 @@ brew install libpq jq libxml2  # 然后把 libpq 的 bin 加 PATH
 ```
 
 `curl` 通常已自带。`bash` 需 4.0+。
+
+#### Docker fallback — 无 psql 时自动走容器
+
+如果宿主机没有 `psql`，但 postgres 跑在 `docker-compose` 起的容器里
+（典型部署：`bash run/scripts/start-deps.sh`），工具会**自动**检测并
+`docker exec -i <postgres-container> psql ...` 兜底，无需手动装包。
+
+```bash
+# 默认 --psql-docker auto：宿主有 psql 就用宿主，否则自动 docker
+bash omcgo/scripts/diag_mml_gpn_probe.sh
+
+# 显式指定容器（覆盖自动探测）
+bash omcgo/scripts/diag_mml_gpn_probe.sh --psql-docker goomc-postgres
+
+# 强制要求宿主 psql，禁用 docker fallback
+bash omcgo/scripts/diag_mml_gpn_probe.sh --psql-docker off
+```
+
+容器名自动探测顺序：
+`goomc-postgres` → `goomc_postgres_1` → `docker-postgres-1` →
+`deployments-postgres-1` → `postgres` → 任意 `timescale|postgres` 镜像。
+
+走 docker 路径时 DSN 的 host 会被改写为 `localhost`（容器内自连），
+所以配置文件里写 `localhost:5432` 或 `postgres:5432` 都能跑通。
 
 ### 鉴权 — 默认零配置
 

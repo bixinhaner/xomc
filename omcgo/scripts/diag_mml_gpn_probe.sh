@@ -35,6 +35,12 @@ OUTPUT_DIR=""
 ROOT_PATH="Device."
 NEXT_LEVEL="false"
 KEEP_API_KEY="false"
+# T-DIAG-DOCKER：宿主机无 psql 时自动走 docker exec 到 postgres 容器。
+# --psql-docker auto    自动检测容器（默认）
+# --psql-docker off     禁用 docker fallback，强制要求宿主机有 psql
+# --psql-docker <name>  显式指定容器名 / ID
+PSQL_DOCKER_MODE="${PSQL_DOCKER:-auto}"
+PSQL_DOCKER_CONTAINER=""   # 实际使用的容器（auto 模式下自动填充）
 
 # 自动生成的 key id（用于退出时撤销）
 AUTO_GENERATED_KEY_ID=""
@@ -73,6 +79,11 @@ Usage: $(basename "$0") [options]
   --output    <dir>       输出目录，默认 /tmp/mml-diag-<timestamp>
   --root-path <path>      GPN 起始路径，默认 Device.
   --next-level            NextLevel=true（仅返回根的直接子节点）
+  --psql-docker <mode>    psql 路由模式（默认 auto）：
+                          auto    宿主机无 psql 时自动 docker exec 到
+                                  postgres 容器（推荐）
+                          off     禁用 docker fallback，要求宿主机有 psql
+                          <name>  显式指定容器名/ID（如 docker-postgres-1）
   -h | --help             显示本帮助
 
 输出文件（位于 \$OUTPUT_DIR）：
@@ -113,6 +124,7 @@ while [[ $# -gt 0 ]]; do
     --output)        OUTPUT_DIR="$2"; shift 2 ;;
     --root-path)     ROOT_PATH="$2"; shift 2 ;;
     --next-level)    NEXT_LEVEL="true"; shift ;;
+    --psql-docker)   PSQL_DOCKER_MODE="$2"; shift 2 ;;
     -h|--help)       usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
     esac
@@ -130,7 +142,8 @@ need() {
         exit 1
     }
 }
-need psql; need curl; need jq; need xmllint
+need curl; need jq; need xmllint
+# psql 走 detect_psql_route 决策（host psql 或 docker fallback）。
 
 # ────────────────────────────────────────────────────────────────────
 # 公用函数
@@ -138,9 +151,94 @@ need psql; need curl; need jq; need xmllint
 # 用 date 子进程，避免 printf %(...)T 在 bash < 4.2 / macOS 默认 bash 3.2 上失败
 log() { echo "[$(date +%H:%M:%S)] $*" >&2; }
 
+# detect_psql_route 决定 psql_at 走宿主机 psql 还是 docker exec。
+# 调用前提：PSQL_DOCKER_MODE 已由 --psql-docker / $PSQL_DOCKER 设置（默认 auto）。
+detect_psql_route() {
+    case "$PSQL_DOCKER_MODE" in
+    off)
+        # 强制宿主 psql
+        if ! command -v psql >/dev/null 2>&1; then
+            echo "ERROR: --psql-docker off 但宿主机无 psql" >&2
+            echo "  → apt-get install postgresql-client（Debian/Ubuntu）" >&2
+            echo "  → 或去掉 --psql-docker off 让脚本自动走 docker 兜底" >&2
+            exit 1
+        fi
+        PSQL_DOCKER_CONTAINER=""
+        log "psql: host (--psql-docker off)"
+        return
+        ;;
+    auto)
+        # 优先宿主 psql
+        if command -v psql >/dev/null 2>&1; then
+            PSQL_DOCKER_CONTAINER=""
+            log "psql: host (auto-detected)"
+            return
+        fi
+        # 自动探测 postgres 容器
+        command -v docker >/dev/null 2>&1 || {
+            echo "ERROR: 宿主机无 psql 也无 docker，无法连数据库" >&2
+            echo "  → apt-get install postgresql-client（推荐）" >&2
+            exit 1
+        }
+        local c cid
+        for c in goomc-postgres goomc_postgres_1 docker-postgres-1 deployments-postgres-1 postgres; do
+            if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx "$c"; then
+                PSQL_DOCKER_CONTAINER="$c"
+                log "psql: docker exec -i $c (auto-fallback; host psql not installed)"
+                return
+            fi
+        done
+        # fallback: 任意暴露 5432 的运行容器
+        cid=$(docker ps --format '{{.ID}} {{.Image}}' 2>/dev/null | awk '/timescale|postgres/{print $1; exit}')
+        if [[ -n "$cid" ]]; then
+            PSQL_DOCKER_CONTAINER="$cid"
+            log "psql: docker exec -i $cid (auto-fallback via image match)"
+            return
+        fi
+        echo "ERROR: 宿主无 psql；docker 也找不到运行中的 postgres 容器" >&2
+        echo "  → 启动容器：bash run/scripts/start-deps.sh" >&2
+        echo "  → 或装 psql：apt-get install postgresql-client" >&2
+        echo "  → 或显式指定：--psql-docker <container-name>" >&2
+        exit 1
+        ;;
+    *)
+        # 显式容器名 / ID
+        command -v docker >/dev/null 2>&1 || {
+            echo "ERROR: 指定了 --psql-docker $PSQL_DOCKER_MODE 但宿主机无 docker" >&2
+            exit 1
+        }
+        docker ps --format '{{.Names}}\t{{.ID}}' 2>/dev/null \
+            | awk -v t="$PSQL_DOCKER_MODE" '$1==t || $2==t{found=1} END{exit !found}' || {
+            echo "ERROR: 容器 '$PSQL_DOCKER_MODE' 未运行" >&2
+            echo "  → docker ps  查看可用容器" >&2
+            exit 1
+        }
+        PSQL_DOCKER_CONTAINER="$PSQL_DOCKER_MODE"
+        log "psql: docker exec -i $PSQL_DOCKER_MODE (explicit --psql-docker)"
+        return
+        ;;
+    esac
+}
+
+# docker_dsn 把 DSN 里的 host 改写为容器自视角的 localhost。
+# 原因：YAML 配置的 host 通常是 'localhost'（宿主机视角端口映射）或
+# 'postgres'（容器编排别名）；从容器内连本机 postgres 服务用 localhost
+# (即 容器 内的 127.0.0.1) 最稳，因为我们的 docker exec 是进入 postgres 容器自身。
+docker_dsn() {
+    # 替换 @<host>(:<port>)?/ → @localhost:5432/
+    echo "$DSN" | sed -E 's#@[^/@:]+(:[0-9]+)?/#@localhost:5432/#'
+}
+
 psql_at() {
     local sql="$1"; shift
-    psql "$DSN" -X --no-psqlrc --set ON_ERROR_STOP=1 -At "$@" -c "$sql"
+    if [[ -n "$PSQL_DOCKER_CONTAINER" ]]; then
+        # docker exec -i 让 stdin 透传（支持后续 \copy 等需要 stdin 的扩展）；
+        # DSN 在容器内重写为 localhost。-T 不分配 TTY 避免 lint warning。
+        docker exec -i "$PSQL_DOCKER_CONTAINER" \
+            psql "$(docker_dsn)" -X --no-psqlrc --set ON_ERROR_STOP=1 -At "$@" -c "$sql"
+    else
+        psql "$DSN" -X --no-psqlrc --set ON_ERROR_STOP=1 -At "$@" -c "$sql"
+    fi
 }
 
 # ────────────────────────────────────────────────────────────────────
@@ -223,10 +321,19 @@ else
     log "API URL: $API_URL (--api)"
 fi
 
+# 决定 psql 路由（宿主 psql / docker exec）；必须在第一次 psql_at 之前。
+detect_psql_route
+
 # 验证 PG 与 API 可达
 psql_at "SELECT 1" >/dev/null 2>&1 || {
-    echo "ERROR: 无法连接 PG: $DSN" >&2
-    echo "  → psql \"\$DSN\" -c 'SELECT 1' 排查（容器内 DSN 用 host=postgres，容器外要改）" >&2
+    if [[ -n "$PSQL_DOCKER_CONTAINER" ]]; then
+        echo "ERROR: 无法连接 PG（docker 路径）: 容器 $PSQL_DOCKER_CONTAINER + DSN $(docker_dsn)" >&2
+        echo "  → docker exec -it $PSQL_DOCKER_CONTAINER psql -U omcgo -d omcgo -c 'SELECT 1' 排查" >&2
+    else
+        echo "ERROR: 无法连接 PG: $DSN" >&2
+        echo "  → psql \"\$DSN\" -c 'SELECT 1' 排查（容器内 DSN 用 host=postgres，容器外要改）" >&2
+        echo "  → 或试 --psql-docker auto 让脚本走 docker exec 兜底" >&2
+    fi
     exit 2
 }
 curl -fsS --max-time 5 "$API_URL/health" >/dev/null 2>&1 || \
