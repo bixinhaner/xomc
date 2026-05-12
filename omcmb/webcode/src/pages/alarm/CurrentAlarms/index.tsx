@@ -14,7 +14,12 @@ import type { DataTableColumn, BatchAction } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
+import { alarmService } from '@core/mock/services/alarmService';
+import { deviceService } from '@core/mock/services/deviceService';
 import { useCurrentAlarms, useAcknowledgeAlarms, useClearAlarms, useAlarmCount, useMarkAlarmRead, useUnacknowledgeAlarms } from '@core/hooks/api/useAlarms';
+import { alarmApi } from '@core/services/api/alarmApi';
+import { deviceApi } from '@core/services/api/deviceApi';
+import { createApiSwitch } from '@core/services/apiSwitch';
 import { useT } from '@/hooks/useT';
 import type { Alarm, DealState, EventType } from '@core/types/alarm';
 import type { AlarmFilter } from '@core/types/alarm';
@@ -70,6 +75,29 @@ const QUICK_FILTER_OPTIONS = [
 ];
 
 // 自动刷新间隔选项 - 移至组件内 useMemo
+
+const exportAlarmApi: typeof alarmApi = createApiSwitch(
+  alarmService as unknown as typeof alarmApi,
+  alarmApi,
+);
+const exportDeviceApi = createApiSwitch(deviceService, deviceApi);
+const EXPORT_PAGE_SIZE = 500;
+
+function escapeCsvCell(value: unknown): string {
+  const normalized = value == null ? '' : String(value);
+  const escaped = normalized.replace(/"/g, '""');
+  return `"${escaped}"`;
+}
+
+function triggerCsvDownload(content: string, filename: string) {
+  const blob = new Blob(['\ufeff' + content], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
 export default function CurrentAlarms() {
   const t = useT();
@@ -350,6 +378,96 @@ export default function CurrentAlarms() {
     [clearAlarms, clearTargetIds, refetch, t, message]
   );
 
+  const fetchDeviceSnsByGroups = useCallback(async (groupIds: string[]) => {
+    const snSet = new Set<string>();
+
+    await Promise.all(
+      groupIds.map(async (groupId) => {
+        let page = 1;
+
+        while (true) {
+          const response = await exportDeviceApi.getList({
+            groupId,
+            page,
+            pageSize: EXPORT_PAGE_SIZE,
+          });
+
+          response.items.forEach((device) => {
+            if (device.sn) {
+              snSet.add(device.sn);
+            }
+          });
+
+          if (response.items.length === 0 || response.page * response.pageSize >= response.total) {
+            break;
+          }
+
+          page += 1;
+        }
+      })
+    );
+
+    return snSet;
+  }, []);
+
+  const fetchAllCurrentAlarmsForExport = useCallback(async (filters: AlarmFilter) => {
+    const alarmsForExport: Alarm[] = [];
+    let page = 1;
+
+    while (true) {
+      const response = await exportAlarmApi.getCurrentAlarms({
+        ...filters,
+        page,
+        pageSize: EXPORT_PAGE_SIZE,
+      });
+
+      alarmsForExport.push(...response.items);
+
+      if (response.items.length === 0 || response.page * response.pageSize >= response.total) {
+        break;
+      }
+
+      page += 1;
+    }
+
+    return alarmsForExport;
+  }, []);
+
+  const downloadAlarmCsv = useCallback((items: Alarm[]) => {
+    const headers = [
+      t('alarm.alarmId'),
+      t('alarm.alarmIdentifier'),
+      t('alarm.severity'),
+      t('alarm.possibleCause'),
+      t('alarm.equipInfo'),
+      t('alarm.eventType'),
+      t('alarm.dealState'),
+      t('alarm.eventTime'),
+      t('alarm.updTime'),
+      t('alarm.dealMemo'),
+    ];
+
+    const rows = items.map((alarm) => [
+      alarm.id,
+      alarm.alarmIdentifier,
+      SEVERITY_LABEL[alarm.severity] ?? alarm.severity,
+      alarm.alarmName,
+      alarm.equipInfo,
+      t(EVENT_TYPE_CONFIG[alarm.eventType] || 'common.unknown'),
+      t(DEAL_STATE_CONFIG[alarm.dealState]?.label || 'common.unknown'),
+      alarm.eventTime,
+      alarm.updTime,
+      alarm.dealMemo || '',
+    ]);
+
+    const csv = [headers, ...rows]
+      .map((row) => row.map((cell) => escapeCsvCell(cell)).join(','))
+      .join('\n');
+
+    const datePart = new Date().toISOString().slice(0, 10);
+    triggerCsvDownload(csv, `current-alarms-${datePart}.csv`);
+  }, [t, SEVERITY_LABEL]);
+
 
   const handleMarkRead = useCallback(
     async () => {
@@ -368,18 +486,54 @@ export default function CurrentAlarms() {
   const handleExport = useCallback(
     async (params: ExportParams) => {
       setExportLoading(true);
+      message.open({ key: 'current-alarm-export', type: 'loading', content: t('common.exportInProgress'), duration: 0 });
       try {
-        const exportData = exportMode === 'selected' ? selectedRowKeys : undefined;
-        console.log('Export params:', { ...params, mode: exportMode, selectedIds: exportData });
-        void message.info(t('common.exportInProgress'));
+        if (params.deviceGroupIds.length === 0) {
+          message.open({ key: 'current-alarm-export', type: 'warning', content: t('export.selectDeviceGroup') });
+          return;
+        }
+
+        const selectedIdSet = new Set(selectedRowKeys.map((key) => String(key)));
+        const effectiveFilter: AlarmFilter = params.timeRange
+          ? { ...filterParams, timeRange: params.timeRange }
+          : filterParams;
+
+        const allowedDeviceSns = await fetchDeviceSnsByGroups(params.deviceGroupIds);
+        if (allowedDeviceSns.size === 0) {
+          message.open({ key: 'current-alarm-export', type: 'warning', content: t('common.noDataToExport') });
+          return;
+        }
+
+        const alarmsForExport = await fetchAllCurrentAlarmsForExport(effectiveFilter);
+        const filteredAlarms = alarmsForExport.filter((alarm) => allowedDeviceSns.has(alarm.deviceSn));
+        const exportItems = exportMode === 'selected'
+          ? filteredAlarms.filter((alarm) => selectedIdSet.has(alarm.id))
+          : filteredAlarms;
+
+        if (exportItems.length === 0) {
+          message.open({ key: 'current-alarm-export', type: 'warning', content: t('common.noDataToExport') });
+          return;
+        }
+
+        downloadAlarmCsv(exportItems);
+        message.open({ key: 'current-alarm-export', type: 'success', content: t('common.exportSuccess') });
         setExportOpen(false);
       } catch {
-        message.error(t('common.exportFailed'));
+        message.open({ key: 'current-alarm-export', type: 'error', content: t('common.exportFailed') });
       } finally {
         setExportLoading(false);
       }
     },
-    [exportMode, selectedRowKeys, message, t]
+    [
+      downloadAlarmCsv,
+      exportMode,
+      fetchAllCurrentAlarmsForExport,
+      fetchDeviceSnsByGroups,
+      filterParams,
+      message,
+      selectedRowKeys,
+      t,
+    ]
   );
 
   // 打开告警详情

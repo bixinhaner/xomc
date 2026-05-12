@@ -28,8 +28,10 @@ function buildTreeData(
   groups: DeviceGroup[],
   checkedKeys: string[]
 ): DataNode[] {
-  // 找出根节点（parentId 为 null 的节点）
-  const rootGroups = groups.filter((g) => g.parentId === null);
+  // 找出根节点：允许 null / undefined / 空字符串，或父节点不在当前可见集合内。
+  // 后一种情况用于兼容权限裁剪后的残缺树，避免整棵树空白。
+  const groupIdSet = new Set(groups.map((g) => g.id));
+  const rootGroups = groups.filter((g) => !g.parentId || !groupIdSet.has(g.parentId));
 
   function buildNode(group: DeviceGroup): DataNode {
     const children = groups.filter((g) => g.parentId === group.id);
@@ -122,6 +124,7 @@ export default function ExportModal({ open, onClose, onConfirm, confirmLoading }
       okText={t('export.startExport')}
       cancelText={t('common.cancel')}
       confirmLoading={confirmLoading}
+      okButtonProps={{ disabled: checkedKeys.length === 0 || groupsLoading }}
       width={600}
       destroyOnClose
     >
