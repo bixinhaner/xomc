@@ -65,7 +65,52 @@ func (a *ResultAggregator) OnTaskCompleted(ctx context.Context, dt *task.Task) {
 		return
 	}
 
+	// T-0102-d: emit a per-device "frame" SSE event so the UI sees each
+	// device's output as it arrives, not just the aggregate completion.
+	// Multi-frame semantics: one mml_device_frame per device_task terminal
+	// state; a 50-device task produces 50 frames over time.
+	a.publishDeviceFrame(ctx, mmlID, dt)
+
 	a.finalizeIfComplete(ctx, mmlID)
+}
+
+// publishDeviceFrame emits one SSE frame per device_task terminal state.
+// The frame carries the device's per-RPC outcome (status + result/error)
+// so the UI can render a live "device × step" stream. Failures during
+// the lookup/marshal phase are logged but never fail the caller — SSE
+// is best-effort fan-out, not a correctness boundary.
+func (a *ResultAggregator) publishDeviceFrame(ctx context.Context, mmlID uuid.UUID, dt *task.Task) {
+	if a.hub == nil {
+		return
+	}
+	mmlTask, err := a.taskRepo.GetByID(ctx, mmlID)
+	if err != nil || mmlTask == nil || mmlTask.Executor == "" {
+		return
+	}
+	payload := map[string]interface{}{
+		"task_id":        mmlID.String(),
+		"device_task_id": dt.ID,
+		"device_sn":      dt.DeviceSN,
+		"method":         dt.Method,
+		"status":         string(dt.Status),
+		"command_index":  dt.CommandIndex,
+		"device_index":   dt.DeviceIndex,
+	}
+	if len(dt.Result) > 0 {
+		payload["result"] = json.RawMessage(dt.Result)
+	}
+	if dt.ErrorMessage != "" {
+		payload["error_message"] = dt.ErrorMessage
+	}
+	if dt.CompletedAt != nil {
+		payload["completed_at"] = dt.CompletedAt
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		a.logger.Warn("marshal mml device frame", zap.Error(err))
+		return
+	}
+	a.hub.PublishSimple(mmlTask.Executor, "mml_device_frame", data)
 }
 
 // finalizeIfComplete transitions the MML task to completed/failed when all sub-tasks finish.
