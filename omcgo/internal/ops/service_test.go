@@ -74,11 +74,12 @@ func (m *mockTemplateRepo) IncrementUseCount(ctx context.Context, id uuid.UUID) 
 }
 
 type mockTaskRepo struct {
-	createFn         func(ctx context.Context, task *OpsTask) error
-	getByIDFn        func(ctx context.Context, id uuid.UUID) (*OpsTask, error)
-	updateStatusFn   func(ctx context.Context, task *OpsTask) error
-	listFn           func(ctx context.Context, filter TaskFilter) (*model.ListResponse[OpsTask], error)
-	updateApprovalFn func(ctx context.Context, taskID, approverID uuid.UUID, approve bool, decidedAt time.Time) error
+	createFn            func(ctx context.Context, task *OpsTask) error
+	getByIDFn           func(ctx context.Context, id uuid.UUID) (*OpsTask, error)
+	updateStatusFn      func(ctx context.Context, task *OpsTask) error
+	listFn              func(ctx context.Context, filter TaskFilter) (*model.ListResponse[OpsTask], error)
+	updateApprovalFn    func(ctx context.Context, taskID, approverID uuid.UUID, approve bool, decidedAt time.Time) error
+	transitionStatusFn  func(ctx context.Context, taskID uuid.UUID, validFrom []OpsTaskStatus, to OpsTaskStatus, setStartedAt, setCompletedAt bool) error
 }
 
 func (m *mockTaskRepo) Create(ctx context.Context, task *OpsTask) error {
@@ -112,6 +113,13 @@ func (m *mockTaskRepo) List(ctx context.Context, filter TaskFilter) (*model.List
 func (m *mockTaskRepo) UpdateApproval(ctx context.Context, taskID, approverID uuid.UUID, approve bool, decidedAt time.Time) error {
 	if m.updateApprovalFn != nil {
 		return m.updateApprovalFn(ctx, taskID, approverID, approve, decidedAt)
+	}
+	return nil
+}
+
+func (m *mockTaskRepo) TransitionStatus(ctx context.Context, taskID uuid.UUID, validFrom []OpsTaskStatus, to OpsTaskStatus, setStartedAt, setCompletedAt bool) error {
+	if m.transitionStatusFn != nil {
+		return m.transitionStatusFn(ctx, taskID, validFrom, to, setStartedAt, setCompletedAt)
 	}
 	return nil
 }
@@ -351,16 +359,24 @@ func TestService_CreateTask_WithTemplate(t *testing.T) {
 	assert.Equal(t, tmplID, incrementedID, "should increment use count for the correct template")
 }
 
+// ---------------------------------------------------------------------------
+// T-0101-g: Cancel/Pause/Resume 状态机原子转换测试
+// 重构 (T-0101-g)：CAS-based TransitionStatus 替代旧 GetByID+UpdateStatus；
+// 测试 mock 由 updateStatusFn 改 transitionStatusFn；保留 NotFound API 契约
+// 测试（disambiguate via secondary GetByID 回落 ErrNotFound）。
+// ---------------------------------------------------------------------------
+
 func TestService_CancelTask_FromPending(t *testing.T) {
 	taskID := uuid.New()
-	var statusUpdated *OpsTask
+	var capturedTo OpsTaskStatus
+	var capturedFrom []OpsTaskStatus
+	var capturedSetCompletedAt bool
 
 	taskRepo := &mockTaskRepo{
-		getByIDFn: func(_ context.Context, id uuid.UUID) (*OpsTask, error) {
-			return &OpsTask{ID: taskID, Status: OpsTaskPending}, nil
-		},
-		updateStatusFn: func(_ context.Context, task *OpsTask) error {
-			statusUpdated = task
+		transitionStatusFn: func(_ context.Context, _ uuid.UUID, validFrom []OpsTaskStatus, to OpsTaskStatus, _ bool, setCompletedAt bool) error {
+			capturedFrom = validFrom
+			capturedTo = to
+			capturedSetCompletedAt = setCompletedAt
 			return nil
 		},
 	}
@@ -369,16 +385,21 @@ func TestService_CancelTask_FromPending(t *testing.T) {
 	err := svc.CancelTask(context.Background(), taskID)
 
 	require.NoError(t, err)
-	require.NotNil(t, statusUpdated)
-	assert.Equal(t, OpsTaskCancelled, statusUpdated.Status)
-	assert.NotNil(t, statusUpdated.CompletedAt, "CompletedAt should be set")
+	assert.Equal(t, OpsTaskCancelled, capturedTo)
+	assert.ElementsMatch(t, []OpsTaskStatus{OpsTaskPending, OpsTaskRunning, OpsTaskPaused}, capturedFrom,
+		"Cancel 允许 from pending/running/paused 三态")
+	assert.True(t, capturedSetCompletedAt, "Cancel 必设置 completed_at")
 }
 
 func TestService_CancelTask_FromCompleted(t *testing.T) {
 	taskID := uuid.New()
 
 	taskRepo := &mockTaskRepo{
-		getByIDFn: func(_ context.Context, id uuid.UUID) (*OpsTask, error) {
+		transitionStatusFn: func(_ context.Context, _ uuid.UUID, _ []OpsTaskStatus, _ OpsTaskStatus, _, _ bool) error {
+			return ErrInvalidStateTransition
+		},
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*OpsTask, error) {
+			// 任务存在但状态非允许 → disambiguate 返 wrongState BusinessError
 			return &OpsTask{ID: taskID, Status: OpsTaskSuccess}, nil
 		},
 	}
@@ -394,14 +415,12 @@ func TestService_CancelTask_FromCompleted(t *testing.T) {
 
 func TestService_PauseTask_FromRunning(t *testing.T) {
 	taskID := uuid.New()
-	var statusUpdated *OpsTask
+	var capturedTo OpsTaskStatus
 
 	taskRepo := &mockTaskRepo{
-		getByIDFn: func(_ context.Context, id uuid.UUID) (*OpsTask, error) {
-			return &OpsTask{ID: taskID, Status: OpsTaskRunning}, nil
-		},
-		updateStatusFn: func(_ context.Context, task *OpsTask) error {
-			statusUpdated = task
+		transitionStatusFn: func(_ context.Context, _ uuid.UUID, validFrom []OpsTaskStatus, to OpsTaskStatus, _, _ bool) error {
+			capturedTo = to
+			assert.Equal(t, []OpsTaskStatus{OpsTaskRunning}, validFrom, "Pause 仅允许 from running")
 			return nil
 		},
 	}
@@ -410,15 +429,17 @@ func TestService_PauseTask_FromRunning(t *testing.T) {
 	err := svc.PauseTask(context.Background(), taskID)
 
 	require.NoError(t, err)
-	require.NotNil(t, statusUpdated)
-	assert.Equal(t, OpsTaskPaused, statusUpdated.Status)
+	assert.Equal(t, OpsTaskPaused, capturedTo)
 }
 
 func TestService_PauseTask_FromPending(t *testing.T) {
 	taskID := uuid.New()
 
 	taskRepo := &mockTaskRepo{
-		getByIDFn: func(_ context.Context, id uuid.UUID) (*OpsTask, error) {
+		transitionStatusFn: func(_ context.Context, _ uuid.UUID, _ []OpsTaskStatus, _ OpsTaskStatus, _, _ bool) error {
+			return ErrInvalidStateTransition
+		},
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*OpsTask, error) {
 			return &OpsTask{ID: taskID, Status: OpsTaskPending}, nil
 		},
 	}
@@ -434,14 +455,14 @@ func TestService_PauseTask_FromPending(t *testing.T) {
 
 func TestService_ResumeTask_FromPaused(t *testing.T) {
 	taskID := uuid.New()
-	var statusUpdated *OpsTask
+	var capturedTo OpsTaskStatus
+	var capturedSetStartedAt bool
 
 	taskRepo := &mockTaskRepo{
-		getByIDFn: func(_ context.Context, id uuid.UUID) (*OpsTask, error) {
-			return &OpsTask{ID: taskID, Status: OpsTaskPaused, StartedAt: nil}, nil
-		},
-		updateStatusFn: func(_ context.Context, task *OpsTask) error {
-			statusUpdated = task
+		transitionStatusFn: func(_ context.Context, _ uuid.UUID, validFrom []OpsTaskStatus, to OpsTaskStatus, setStartedAt, _ bool) error {
+			capturedTo = to
+			capturedSetStartedAt = setStartedAt
+			assert.Equal(t, []OpsTaskStatus{OpsTaskPaused}, validFrom, "Resume 仅允许 from paused")
 			return nil
 		},
 	}
@@ -450,16 +471,18 @@ func TestService_ResumeTask_FromPaused(t *testing.T) {
 	err := svc.ResumeTask(context.Background(), taskID)
 
 	require.NoError(t, err)
-	require.NotNil(t, statusUpdated)
-	assert.Equal(t, OpsTaskRunning, statusUpdated.Status)
-	assert.NotNil(t, statusUpdated.StartedAt, "StartedAt should be set when nil")
+	assert.Equal(t, OpsTaskRunning, capturedTo)
+	assert.True(t, capturedSetStartedAt, "Resume 须传 setStartedAt=true 让 SQL COALESCE 保留首次启动时刻")
 }
 
 func TestService_ResumeTask_FromRunning(t *testing.T) {
 	taskID := uuid.New()
 
 	taskRepo := &mockTaskRepo{
-		getByIDFn: func(_ context.Context, id uuid.UUID) (*OpsTask, error) {
+		transitionStatusFn: func(_ context.Context, _ uuid.UUID, _ []OpsTaskStatus, _ OpsTaskStatus, _, _ bool) error {
+			return ErrInvalidStateTransition
+		},
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*OpsTask, error) {
 			return &OpsTask{ID: taskID, Status: OpsTaskRunning}, nil
 		},
 	}
@@ -471,6 +494,35 @@ func TestService_ResumeTask_FromRunning(t *testing.T) {
 	var bErr *commonerrors.BusinessError
 	require.ErrorAs(t, err, &bErr)
 	assert.Equal(t, 8102, bErr.Code)
+}
+
+// TestService_PauseTask_AtomicCASRejection 模拟并发 race：CAS UPDATE 命中 0 行
+// 时正确返 BusinessError 8101（验 disambiguate 路径 + task 存在但状态非允许）。
+func TestService_PauseTask_AtomicCASRejection(t *testing.T) {
+	taskID := uuid.New()
+	var disambiguateCalled bool
+
+	taskRepo := &mockTaskRepo{
+		transitionStatusFn: func(_ context.Context, _ uuid.UUID, _ []OpsTaskStatus, _ OpsTaskStatus, _, _ bool) error {
+			return ErrInvalidStateTransition
+		},
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*OpsTask, error) {
+			disambiguateCalled = true
+			// 模拟并发 race：自当前 goroutine 调 CAS 期间，另一 goroutine 已把
+			// task pause 成功；本 goroutine CAS 命中 0 行，secondary GetByID
+			// 看到 status=paused（非 running），返 wrongState BusinessError
+			return &OpsTask{ID: taskID, Status: OpsTaskPaused}, nil
+		},
+	}
+
+	svc := newTestService(&mockTemplateRepo{}, taskRepo, &mockCmdRepo{})
+	err := svc.PauseTask(context.Background(), taskID)
+
+	require.Error(t, err)
+	assert.True(t, disambiguateCalled, "CAS rejection 时须调 secondary GetByID 区分 404/400")
+	var bErr *commonerrors.BusinessError
+	require.ErrorAs(t, err, &bErr)
+	assert.Equal(t, 8101, bErr.Code)
 }
 
 // ---------------------------------------------------------------------------
@@ -632,8 +684,15 @@ func TestService_CreateTask_TemplateLookupGenericError(t *testing.T) {
 // (Verify ErrNotFound propagates through %w wrapping for handler 404 mapping)
 // ---------------------------------------------------------------------------
 
+// T-0101-g NotFound API 契约保持：CAS 命中 0 行 + secondary GetByID 返
+// ErrNotFound 时 service 须正确传播 NotFound（HTTP 404），不被 8100/8101/8102
+// BusinessError 替代。
+
 func TestService_CancelTask_NotFound(t *testing.T) {
 	taskRepo := &mockTaskRepo{
+		transitionStatusFn: func(_ context.Context, _ uuid.UUID, _ []OpsTaskStatus, _ OpsTaskStatus, _, _ bool) error {
+			return ErrInvalidStateTransition
+		},
 		getByIDFn: func(_ context.Context, _ uuid.UUID) (*OpsTask, error) {
 			return nil, commonerrors.ErrNotFound
 		},
@@ -649,6 +708,9 @@ func TestService_CancelTask_NotFound(t *testing.T) {
 
 func TestService_PauseTask_NotFound(t *testing.T) {
 	taskRepo := &mockTaskRepo{
+		transitionStatusFn: func(_ context.Context, _ uuid.UUID, _ []OpsTaskStatus, _ OpsTaskStatus, _, _ bool) error {
+			return ErrInvalidStateTransition
+		},
 		getByIDFn: func(_ context.Context, _ uuid.UUID) (*OpsTask, error) {
 			return nil, commonerrors.ErrNotFound
 		},
@@ -664,6 +726,9 @@ func TestService_PauseTask_NotFound(t *testing.T) {
 
 func TestService_ResumeTask_NotFound(t *testing.T) {
 	taskRepo := &mockTaskRepo{
+		transitionStatusFn: func(_ context.Context, _ uuid.UUID, _ []OpsTaskStatus, _ OpsTaskStatus, _, _ bool) error {
+			return ErrInvalidStateTransition
+		},
 		getByIDFn: func(_ context.Context, _ uuid.UUID) (*OpsTask, error) {
 			return nil, commonerrors.ErrNotFound
 		},

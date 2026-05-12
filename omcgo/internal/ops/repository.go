@@ -26,6 +26,10 @@ type TaskRepository interface {
 	List(ctx context.Context, filter TaskFilter) (*model.ListResponse[OpsTask], error)
 	// UpdateApproval 持久化任务审批结果 + 联动执行状态转移（T-0101-d）。
 	UpdateApproval(ctx context.Context, taskID, approverID uuid.UUID, approve bool, decidedAt time.Time) error
+	// TransitionStatus 原子状态转换（T-0101-g 状态机原子转换）。
+	// 单 SQL UPDATE 含 `WHERE status = ANY(validFrom)` CAS guard，并发 race-safe。
+	// 若当前 status 不在 validFrom 集合中（或 task 不存在），返 ErrInvalidStateTransition。
+	TransitionStatus(ctx context.Context, taskID uuid.UUID, validFrom []OpsTaskStatus, to OpsTaskStatus, setStartedAt, setCompletedAt bool) error
 }
 
 // CommandRecordRepository provides persistence for ops command records.

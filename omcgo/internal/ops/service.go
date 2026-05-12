@@ -181,22 +181,33 @@ func (s *Service) ListTasks(ctx context.Context, filter TaskFilter) (*model.List
 	return s.taskRepo.List(ctx, filter)
 }
 
-// CancelTask cancels an ops task. Only pending or running tasks can be cancelled.
+// disambiguateInvalidTransition 在 CAS UPDATE 命中 0 行时辅助区分"任务不存在"
+// 与"状态非允许"两个 case（T-0101-g）：
+//   - 任务不存在 → 返 ErrNotFound（HTTP 404，保持原 API 契约）
+//   - 任务存在但状态非允许 → 返 wrongStateErr（HTTP 400 BusinessError）
+//
+// 仅在 CAS 失败时调用，对 happy path 0 额外 query 开销。
+func (s *Service) disambiguateInvalidTransition(ctx context.Context, id uuid.UUID, wrongStateErr error) error {
+	if _, getErr := s.taskRepo.GetByID(ctx, id); errors.Is(getErr, commonerrors.ErrNotFound) {
+		return getErr
+	}
+	return wrongStateErr
+}
+
+// CancelTask cancels an ops task. Only pending/running/paused tasks can be cancelled.
+//
+// T-0101-g 状态机原子转换：用 TransitionStatus 单 SQL CAS guard，并发请求最多
+// 一个 commit。CAS 命中 0 行时调 disambiguateInvalidTransition 还原 404 vs 400
+// API 契约区分（保持向后兼容）。
 func (s *Service) CancelTask(ctx context.Context, id uuid.UUID) error {
-	task, err := s.taskRepo.GetByID(ctx, id)
+	err := s.taskRepo.TransitionStatus(ctx, id,
+		[]OpsTaskStatus{OpsTaskPending, OpsTaskRunning, OpsTaskPaused},
+		OpsTaskCancelled, false, true)
+	if errors.Is(err, ErrInvalidStateTransition) {
+		return s.disambiguateInvalidTransition(ctx, id,
+			commonerrors.NewBusinessError(8100, "only pending/running/paused tasks can be cancelled", commonerrors.ErrInvalidInput))
+	}
 	if err != nil {
-		return fmt.Errorf("get ops task: %w", err)
-	}
-
-	if task.Status != OpsTaskPending && task.Status != OpsTaskRunning {
-		return commonerrors.NewBusinessError(8100, "only pending or running tasks can be cancelled", commonerrors.ErrInvalidInput)
-	}
-
-	task.Status = OpsTaskCancelled
-	now := time.Now()
-	task.CompletedAt = &now
-
-	if err := s.taskRepo.UpdateStatus(ctx, task); err != nil {
 		return fmt.Errorf("cancel ops task: %w", err)
 	}
 
@@ -208,19 +219,20 @@ func (s *Service) CancelTask(ctx context.Context, id uuid.UUID) error {
 }
 
 // PauseTask pauses an ops task. Only running tasks can be paused.
+//
+// T-0101-g 状态机原子转换 + dispatcher 协作点：本方法仅写 task.status=paused；
+// 已发出的 RPC 不被打断（subtask Notes "不打断已发出的 RPC，只阻止后续设备"）；
+// future T-0101-a/b dispatcher 在每步发出前 poll task.Status，命中 paused 时
+// 停推后续设备（本任务不实施 dispatcher 侧逻辑，留 hook）。
 func (s *Service) PauseTask(ctx context.Context, id uuid.UUID) error {
-	task, err := s.taskRepo.GetByID(ctx, id)
+	err := s.taskRepo.TransitionStatus(ctx, id,
+		[]OpsTaskStatus{OpsTaskRunning},
+		OpsTaskPaused, false, false)
+	if errors.Is(err, ErrInvalidStateTransition) {
+		return s.disambiguateInvalidTransition(ctx, id,
+			commonerrors.NewBusinessError(8101, "only running tasks can be paused", commonerrors.ErrInvalidInput))
+	}
 	if err != nil {
-		return fmt.Errorf("get ops task: %w", err)
-	}
-
-	if task.Status != OpsTaskRunning {
-		return commonerrors.NewBusinessError(8101, "only running tasks can be paused", commonerrors.ErrInvalidInput)
-	}
-
-	task.Status = OpsTaskPaused
-
-	if err := s.taskRepo.UpdateStatus(ctx, task); err != nil {
 		return fmt.Errorf("pause ops task: %w", err)
 	}
 
@@ -232,23 +244,18 @@ func (s *Service) PauseTask(ctx context.Context, id uuid.UUID) error {
 }
 
 // ResumeTask resumes a paused ops task. Only paused tasks can be resumed.
+//
+// T-0101-g 状态机原子转换：setStartedAt=true 让 SQL COALESCE 保留首次启动时刻；
+// 暂停期间已发出的 RPC 不被取消，dispatcher 恢复 polling 后从下一台设备续推。
 func (s *Service) ResumeTask(ctx context.Context, id uuid.UUID) error {
-	task, err := s.taskRepo.GetByID(ctx, id)
+	err := s.taskRepo.TransitionStatus(ctx, id,
+		[]OpsTaskStatus{OpsTaskPaused},
+		OpsTaskRunning, true, false)
+	if errors.Is(err, ErrInvalidStateTransition) {
+		return s.disambiguateInvalidTransition(ctx, id,
+			commonerrors.NewBusinessError(8102, "only paused tasks can be resumed", commonerrors.ErrInvalidInput))
+	}
 	if err != nil {
-		return fmt.Errorf("get ops task: %w", err)
-	}
-
-	if task.Status != OpsTaskPaused {
-		return commonerrors.NewBusinessError(8102, "only paused tasks can be resumed", commonerrors.ErrInvalidInput)
-	}
-
-	task.Status = OpsTaskRunning
-	now := time.Now()
-	if task.StartedAt == nil {
-		task.StartedAt = &now
-	}
-
-	if err := s.taskRepo.UpdateStatus(ctx, task); err != nil {
 		return fmt.Errorf("resume ops task: %w", err)
 	}
 

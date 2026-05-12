@@ -552,6 +552,55 @@ func scanTaskRow(rows pgx.Rows) (*OpsTask, error) {
 	return &t, nil
 }
 
+// ErrInvalidStateTransition T-0101-g：状态机 CAS UPDATE 命中 0 行（当前状态不在 validFrom）。
+var ErrInvalidStateTransition = errors.New("invalid state transition")
+
+// TransitionStatus 原子状态转换（T-0101-g 状态机原子转换）。
+//
+// 单 SQL `UPDATE ... WHERE id=$1 AND status = ANY($2)` 含 CAS guard，
+// 并发 race-safe — 同时 N 个 goroutine 调用，最多一个会 commit。
+//
+// validFrom 不可为空（empty allowedFrom 应直接走 UpdateStatus 无 guard 模式）。
+//   - 命中 0 行：当前 status 不在 validFrom 或 task 不存在 → ErrInvalidStateTransition
+//   - 命中 1 行：成功
+//
+// setStartedAt = true 时，仅在 started_at IS NULL 才赋值（COALESCE）— 用于 ResumeTask 恢复时不覆盖首次启动时刻。
+func (r *PgTaskRepository) TransitionStatus(ctx context.Context, taskID uuid.UUID, validFrom []OpsTaskStatus, to OpsTaskStatus, setStartedAt, setCompletedAt bool) error {
+	if len(validFrom) == 0 {
+		return fmt.Errorf("validFrom must not be empty: %w", commonerrors.ErrInvalidInput)
+	}
+	validStrs := make([]string, 0, len(validFrom))
+	for _, s := range validFrom {
+		validStrs = append(validStrs, string(s))
+	}
+
+	builder := storage.Psql.Update("ops_tasks").
+		Set("status", string(to)).
+		Set("updated_at", time.Now())
+	if setStartedAt {
+		builder = builder.Set("started_at", sq.Expr("COALESCE(started_at, NOW())"))
+	}
+	if setCompletedAt {
+		builder = builder.Set("completed_at", time.Now())
+	}
+	query, args, err := builder.
+		Where(sq.Eq{"id": taskID}).
+		Where(sq.Eq{"status": validStrs}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build transition status SQL: %w", err)
+	}
+
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("transition ops_task status: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return ErrInvalidStateTransition
+	}
+	return nil
+}
+
 // UpdateApproval 持久化任务的审批状态 + 同步执行状态转移（T-0101-d 状态机集成）。
 //
 //   - approve=true  → ApprovalState=approved + Status=running + ApproverUserID + ApprovedAt
