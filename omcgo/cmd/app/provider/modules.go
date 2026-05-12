@@ -539,7 +539,8 @@ func initMiscModules(c *Container) error {
 
 	c.miscDeps.opsExtHandler = ops.NewExtHandler(
 		opsDiagSvc, opsDLSvc, opsAuditSvc, opsMWSvc, opsPBSvc,
-		opsExecutor, opsApprovalSvc, opsBGSvc, opsInspectionSvc, opsSSEHub, logger,
+		opsExecutor, opsApprovalSvc, opsBGSvc, opsInspectionSvc,
+		opsSvc, opsSSEHub, logger,
 	)
 	logger.Info("ops tools module initialized (incl. F06 ext T-0101..T-0112)")
 

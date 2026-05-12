@@ -20,6 +20,14 @@ import (
 	"github.com/omcgo/omcgo/internal/core/response"
 )
 
+// TaskCreator is the slice of *Service that ExtHandler needs to enqueue
+// an ad-hoc RPC command as an OpsTask (T-0102-b). Defined here as a
+// consumer-driven small interface so the handler test can supply a
+// stub without standing up the full Service + repos.
+type TaskCreator interface {
+	CreateTask(ctx context.Context, task *OpsTask) (*OpsTask, error)
+}
+
 // ExtHandler F06 运维管理扩展端点（T-0104..T-0111）。
 type ExtHandler struct {
 	diagSvc        *DiagnosticService
@@ -31,6 +39,7 @@ type ExtHandler struct {
 	approvalSvc    *ApprovalService
 	breakGlassSvc  *BreakGlassService
 	inspectionSvc  *InspectionService
+	taskCreator    TaskCreator
 	sseHub         *SSEHub
 	logger         *zap.Logger
 }
@@ -45,6 +54,7 @@ func NewExtHandler(
 	approvalSvc *ApprovalService,
 	breakGlassSvc *BreakGlassService,
 	inspectionSvc *InspectionService,
+	taskCreator TaskCreator,
 	sseHub *SSEHub,
 	logger *zap.Logger,
 ) *ExtHandler {
@@ -58,6 +68,7 @@ func NewExtHandler(
 		approvalSvc:    approvalSvc,
 		breakGlassSvc:  breakGlassSvc,
 		inspectionSvc:  inspectionSvc,
+		taskCreator:    taskCreator,
 		sseHub:         sseHub,
 		logger:         logger.Named("ops.ext"),
 	}
@@ -507,38 +518,165 @@ func (h *ExtHandler) TaskEventsSSE(c *gin.Context) {
 // 即时命令
 // ============================================================
 
+// ExecuteRPC enqueues an ad-hoc RPC command as an OpsTask (T-0102-b).
+//
+// Wire contract (POST /api/v1/ops/commands/rpc):
+//
+//	request  : { device_sn | device_sns[], action, params? }
+//	response : 202 Accepted
+//	           { task_id, status, approval_required, stream_url }
+//
+// Behavior:
+//  1. Risk classify by action (classifyRiskForAction) — combined with
+//     device count, ApprovalService.EvaluateRiskLevel produces the task's
+//     overall risk.
+//  2. Persist an OpsTask via the consumer-driven TaskCreator interface.
+//     Inline command spec (action + params) lives in OpsTask.Message as
+//     a JSON envelope so T-0102-c's RPC dispatcher can read it back.
+//  3. If risk is L3 (dangerous), task is created with approval_state=pending
+//     and is NOT auto-dispatched — operator must call POST /tasks/:id/approve.
+//     Otherwise approval_state=not_required and a fire-and-forget goroutine
+//     calls executor.Run to move task → running.
+//  4. Audit log + SSE "command.enqueued" event published on the per-task
+//     channel "command:<task_id>" so the existing CommandStreamSSE handler
+//     can deliver realtime updates.
 func (h *ExtHandler) ExecuteRPC(c *gin.Context) {
 	var req struct {
-		DeviceSN string                 `json:"device_sn" binding:"required"`
-		Action   string                 `json:"action" binding:"required"`
-		Params   map[string]interface{} `json:"params,omitempty"`
+		DeviceSN  string                 `json:"device_sn,omitempty"`
+		DeviceSNs []string               `json:"device_sns,omitempty"`
+		Action    string                 `json:"action" binding:"required"`
+		Params    map[string]interface{} `json:"params,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid payload")
 		return
 	}
-	// MVP：审计 + 返 stub task_id；实际 RPC 派发待 T-0102-c
-	taskID := uuid.New()
+
+	devices := req.DeviceSNs
+	if len(devices) == 0 && req.DeviceSN != "" {
+		devices = []string{req.DeviceSN}
+	}
+	if len(devices) == 0 {
+		response.Fail(c, http.StatusBadRequest, "device_sn or device_sns required")
+		return
+	}
+
 	op := currentOperator(c)
-	payload, _ := json.Marshal(req)
+	actionRisk := classifyRiskForAction(req.Action)
+	overallRisk := h.approvalSvc.EvaluateRiskLevel(len(devices), actionRisk)
+	approvalState := ApprovalNotRequired
+	if h.approvalSvc.RequiresApproval(overallRisk) {
+		approvalState = ApprovalPending
+	}
+
+	// Inline command spec lives in Message until OpsTask gains a dedicated
+	// inline_command column. T-0102-c reads the envelope back to dispatch
+	// real RPCs against the ACS engine.
+	cmdEnvelope := map[string]interface{}{
+		"kind":   "rpc",
+		"action": req.Action,
+		"params": req.Params,
+	}
+	cmdJSON, _ := json.Marshal(cmdEnvelope)
+	deviceSNsJSON, _ := json.Marshal(devices)
+
+	task := &OpsTask{
+		TaskName:      buildRPCTaskName(req.Action, devices),
+		DeviceSNs:     deviceSNsJSON,
+		Creator:       op,
+		Message:       string(cmdJSON),
+		RiskLevel:     overallRisk,
+		ApprovalState: approvalState,
+		TotalSteps:    1,
+	}
+
+	created, err := h.taskCreator.CreateTask(c.Request.Context(), task)
+	if err != nil {
+		h.logger.Error("enqueue rpc task failed",
+			zap.String("action", req.Action),
+			zap.Int("device_count", len(devices)),
+			zap.Error(err))
+		response.Fail(c, http.StatusInternalServerError, "enqueue task failed")
+		return
+	}
+
+	// Audit log: input carries the original payload (action+params+devices),
+	// target_id is the task id so audit can cross-link to executions.
+	auditInput, _ := json.Marshal(req)
 	h.auditSvc.Log(c.Request.Context(), &OpsAuditLog{
-		OpType: "command_rpc", TargetType: "device", TargetID: req.DeviceSN,
-		OperatorName: op, RiskLevel: classifyRiskForAction(req.Action),
-		Result: "dispatched", Input: payload,
+		OpType:       "command_rpc",
+		TargetType:   "task",
+		TargetID:     created.ID.String(),
+		OperatorName: op,
+		RiskLevel:    overallRisk,
+		Result:       "enqueued",
+		Input:        auditInput,
 	})
-	// 发一个示意 SSE 事件
-	go func(tid string) {
-		evt := SSEEvent{
-			Event: "command.dispatched",
-			Data:  []byte(fmt.Sprintf(`{"task_id":"%s","action":"%s","device_sn":"%s","status":"queued","note":"MVP stub — 实际 RPC 派发待 T-0102-c"}`, tid, req.Action, req.DeviceSN)),
-		}
-		h.sseHub.Publish("command:"+tid, evt)
-	}(taskID.String())
+
+	// SSE notification on the per-task channel so any active subscriber
+	// of /commands/:id/stream gets immediate confirmation.
+	enqueuedEvt := SSEEvent{
+		Event: "command.enqueued",
+		Data: mustJSON(map[string]interface{}{
+			"task_id":           created.ID,
+			"action":            req.Action,
+			"devices":           devices,
+			"status":            created.Status,
+			"approval_required": approvalState == ApprovalPending,
+		}),
+	}
+	h.sseHub.Publish("command:"+created.ID.String(), enqueuedEvt)
+
+	// Auto-dispatch when no approval gating. fire-and-forget; the executor
+	// owns task lifecycle from here. T-0102-c will replace the executor's
+	// MVP stub with real RPC dispatch; this endpoint's contract does not
+	// change either way.
+	if approvalState == ApprovalNotRequired {
+		go h.runRPCAsync(created.ID)
+	}
+
 	c.JSON(http.StatusAccepted, gin.H{
-		"task_id":    taskID,
-		"status":     "dispatched",
-		"stream_url": fmt.Sprintf("/api/v1/ops/commands/%s/stream", taskID),
+		"task_id":           created.ID,
+		"status":            created.Status,
+		"risk_level":        overallRisk,
+		"approval_required": approvalState == ApprovalPending,
+		"stream_url":        fmt.Sprintf("/api/v1/ops/commands/%s/stream", created.ID),
 	})
+}
+
+// runRPCAsync is the fire-and-forget dispatch invoked when an RPC task
+// is not gated by approval. A fresh context.Background() is used because
+// the HTTP request's context is cancelled when the 202 response returns.
+// Errors are logged; the task's status field carries the true outcome.
+func (h *ExtHandler) runRPCAsync(taskID uuid.UUID) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := h.executor.Run(ctx, taskID); err != nil {
+		h.logger.Error("rpc executor run failed",
+			zap.String("task_id", taskID.String()),
+			zap.Error(err))
+	}
+}
+
+// buildRPCTaskName composes a human-readable task name from the action
+// and target devices. Single device shows the SN; multi-device shows a
+// count to keep the name within the 200-char column budget.
+func buildRPCTaskName(action string, devices []string) string {
+	if len(devices) == 1 {
+		return fmt.Sprintf("rpc:%s on %s", action, devices[0])
+	}
+	return fmt.Sprintf("rpc:%s on %d devices", action, len(devices))
+}
+
+// mustJSON marshals v and silently returns "null" on error. SSE payloads
+// are best-effort observability; a marshal failure should not crash the
+// publisher goroutine.
+func mustJSON(v interface{}) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return []byte("null")
+	}
+	return b
 }
 
 func (h *ExtHandler) CommandStreamSSE(c *gin.Context) {
