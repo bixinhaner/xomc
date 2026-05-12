@@ -4,6 +4,7 @@ import (
 	"bufio"
 	stdbytes "bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"io"
 	"net"
@@ -16,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/ssh"
 )
 
 // =============================================================================
@@ -215,35 +217,150 @@ func TestFTPConnectionTester_V4_DNSFail(t *testing.T) {
 	assert.Contains(t, result.Message, "no such host")
 }
 
-// V5 — protocol=sftp falls back to TCP-only success path
-func TestFTPConnectionTester_V5_SFTPFallback(t *testing.T) {
-	dialer := &fakeDialer{
-		// No script needed — SFTP path should not call ReadResponse.
-		script: []string{},
-	}
+// V5 — protocol=sftp auth success (SSH handshake + password OK)
+func TestFTPConnectionTester_V5_SFTPAuthSuccess(t *testing.T) {
+	dialer := &fakeDialer{}
 	tester := NewFTPConnectionTester(dialer, time.Second, zap.NewNop())
+	var capturedUser, capturedAddr string
+	tester.sshProbe = func(_ context.Context, addr string, cfg *ssh.ClientConfig) error {
+		capturedAddr = addr
+		capturedUser = cfg.User
+		return nil
+	}
 	cfg := makeFTPCfg(t, "sftp", "host", 22, "user", "pass")
+
+	result := tester.Test(context.Background(), cfg)
+	assert.True(t, result.Success)
+	assert.True(t, result.TCPReachable)
+	assert.True(t, result.AuthProbeSupported)
+	require.NotNil(t, result.AuthProbePassed)
+	assert.True(t, *result.AuthProbePassed)
+	assert.Contains(t, result.Message, "SFTP authenticated successfully")
+	assert.Equal(t, "host:22", capturedAddr)
+	assert.Equal(t, "user", capturedUser)
+}
+
+// V5b — protocol=sftp auth rejected (wrong password)
+func TestFTPConnectionTester_V5b_SFTPAuthRejected(t *testing.T) {
+	dialer := &fakeDialer{}
+	tester := NewFTPConnectionTester(dialer, time.Second, zap.NewNop())
+	tester.sshProbe = func(_ context.Context, _ string, _ *ssh.ClientConfig) error {
+		return errors.New("ssh: unable to authenticate, attempted methods [none password], no supported methods remain")
+	}
+	cfg := makeFTPCfg(t, "sftp", "host", 22, "user", "wrong")
+
+	result := tester.Test(context.Background(), cfg)
+	assert.False(t, result.Success)
+	assert.True(t, result.TCPReachable)
+	assert.True(t, result.AuthProbeSupported)
+	require.NotNil(t, result.AuthProbePassed)
+	assert.False(t, *result.AuthProbePassed)
+	assert.Contains(t, result.Message, "SFTP auth failed")
+	assert.Contains(t, result.Message, "unable to authenticate")
+}
+
+// V5c — SFTP error message must redact the literal password
+// even when the SSH server echoes it back (defense-in-depth).
+func TestFTPConnectionTester_V5c_SFTPPasswordNotEchoed(t *testing.T) {
+	password := "S3cr3tPwd!"
+	dialer := &fakeDialer{}
+	tester := NewFTPConnectionTester(dialer, time.Second, zap.NewNop())
+	tester.sshProbe = func(_ context.Context, _ string, _ *ssh.ClientConfig) error {
+		return errors.New("ssh: handshake failed: password " + password + " rejected")
+	}
+	cfg := makeFTPCfg(t, "sftp", "host", 22, "user", password)
+
+	result := tester.Test(context.Background(), cfg)
+	assert.False(t, result.Success)
+	assert.NotContains(t, result.Message, password,
+		"password literal must not appear in SFTP error message")
+	assert.Contains(t, result.Message, "[REDACTED]")
+}
+
+// V6 — protocol=ftps auth success (TLS handshake + USER/PASS OK)
+func TestFTPConnectionTester_V6_FTPSAuthSuccess(t *testing.T) {
+	dialer := &fakeDialer{}
+	tester := NewFTPConnectionTester(dialer, time.Second, zap.NewNop())
+	var capturedTLSCfg *tls.Config
+	tester.tlsProbe = func(_ context.Context, _, _ string, cfg *tls.Config) (net.Conn, error) {
+		capturedTLSCfg = cfg
+		// Hand back a fake FTP conn pre-loaded with the scripted server
+		// responses — probeFTPAuth runs USER/PASS on this conn just as
+		// it does for plain FTP.
+		return newFakeFTPConn([]string{
+			"220 (ProFTPD 1.3.5)",
+			"331 Password required",
+			"230 User logged in",
+		}), nil
+	}
+	cfg := makeFTPCfg(t, "ftps", "host", 990, "user", "secret")
+
+	result := tester.Test(context.Background(), cfg)
+	assert.True(t, result.Success)
+	assert.True(t, result.TCPReachable)
+	assert.True(t, result.AuthProbeSupported)
+	require.NotNil(t, result.AuthProbePassed)
+	assert.True(t, *result.AuthProbePassed)
+	assert.Contains(t, result.Message, "230")
+	require.NotNil(t, capturedTLSCfg, "tlsProbe must be called for ftps")
+	assert.Equal(t, "host", capturedTLSCfg.ServerName, "ServerName drives SNI")
+	assert.GreaterOrEqual(t, capturedTLSCfg.MinVersion, uint16(tls.VersionTLS12),
+		"TLS 1.2 floor required")
+}
+
+// V6b — protocol=ftps TLS handshake failure (e.g. cert / version mismatch)
+func TestFTPConnectionTester_V6b_FTPSTLSHandshakeFail(t *testing.T) {
+	dialer := &fakeDialer{}
+	tester := NewFTPConnectionTester(dialer, time.Second, zap.NewNop())
+	tester.tlsProbe = func(_ context.Context, _, _ string, _ *tls.Config) (net.Conn, error) {
+		return nil, errors.New("tls: server selected unsupported protocol version 301")
+	}
+	cfg := makeFTPCfg(t, "ftps", "host", 990, "user", "pass")
+
+	result := tester.Test(context.Background(), cfg)
+	assert.False(t, result.Success)
+	assert.True(t, result.TCPReachable, "TCP probe succeeded before TLS")
+	assert.True(t, result.AuthProbeSupported)
+	require.NotNil(t, result.AuthProbePassed)
+	assert.False(t, *result.AuthProbePassed)
+	assert.Contains(t, result.Message, "FTPS TLS handshake failed")
+	assert.Contains(t, result.Message, "unsupported protocol version")
+}
+
+// V6c — protocol=ftps TLS OK but FTP auth rejected post-TLS
+func TestFTPConnectionTester_V6c_FTPSAuthRejected(t *testing.T) {
+	dialer := &fakeDialer{}
+	tester := NewFTPConnectionTester(dialer, time.Second, zap.NewNop())
+	tester.tlsProbe = func(_ context.Context, _, _ string, _ *tls.Config) (net.Conn, error) {
+		return newFakeFTPConn([]string{
+			"220 Service ready",
+			"331 Password required",
+			"530 Login failed",
+		}), nil
+	}
+	cfg := makeFTPCfg(t, "ftps", "host", 990, "user", "wrong")
+
+	result := tester.Test(context.Background(), cfg)
+	assert.False(t, result.Success)
+	assert.True(t, result.TCPReachable)
+	require.NotNil(t, result.AuthProbePassed)
+	assert.False(t, *result.AuthProbePassed)
+	assert.Contains(t, result.Message, "530")
+}
+
+// V6d — unknown protocol falls through to TCP-only success path
+func TestFTPConnectionTester_V6d_UnknownProtocol(t *testing.T) {
+	dialer := &fakeDialer{}
+	tester := NewFTPConnectionTester(dialer, time.Second, zap.NewNop())
+	cfg := makeFTPCfg(t, "https", "host", 443, "user", "pass")
 
 	result := tester.Test(context.Background(), cfg)
 	assert.True(t, result.Success, "tcp reachable + auth probe unsupported → success")
 	assert.True(t, result.TCPReachable)
 	assert.False(t, result.AuthProbeSupported)
 	assert.Nil(t, result.AuthProbePassed)
-	assert.Contains(t, result.Message, "T-0093")
-	assert.Contains(t, result.Message, "sftp")
-}
-
-// V6 — protocol=ftps same TCP-only fallback path
-func TestFTPConnectionTester_V6_FTPSFallback(t *testing.T) {
-	dialer := &fakeDialer{}
-	tester := NewFTPConnectionTester(dialer, time.Second, zap.NewNop())
-	cfg := makeFTPCfg(t, "ftps", "host", 990, "user", "pass")
-
-	result := tester.Test(context.Background(), cfg)
-	assert.True(t, result.Success)
-	assert.True(t, result.TCPReachable)
-	assert.False(t, result.AuthProbeSupported)
-	assert.Contains(t, result.Message, "ftps")
+	assert.Contains(t, result.Message, "no auth probe")
+	assert.Contains(t, result.Message, "https")
 }
 
 // V7 — context timeout enforced via dialer's ctx

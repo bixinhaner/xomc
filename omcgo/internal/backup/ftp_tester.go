@@ -1,4 +1,4 @@
-// Package backup — FTP connection test service (T-0032).
+// Package backup — FTP connection test service (T-0032 + T-0093).
 //
 // FTPConnectionTester powers the POST /api/v1/backup/ftp-configs/:id/test
 // endpoint. It runs a two-tier probe against the configured FTP server:
@@ -6,31 +6,33 @@
 //  1. TCP reachability (DNS + connect) — works for every protocol value
 //     (ftp / sftp / ftps / anything else) and tells the operator the
 //     server is at least network-reachable on the configured port.
-//  2. FTP USER / PASS auth probe — runs only when protocol == "ftp",
-//     using stdlib net/textproto so no third-party FTP client dep is
-//     introduced. Validates that the configured username / password
-//     produce a 2xx response from the server.
-//
-// SFTP / FTPS deeper auth probes are deliberately out of scope (PRD §6
-// N1/N2): they require pkg/sftp + crypto/ssh + crypto/tls integration
-// and grow the dependency surface beyond an S-sized task. Carved out as
-// follow-up T-0093.
+//  2. Protocol-specific auth probe — runs deep authentication against
+//     the configured username / password:
+//       - "ftp":  net/textproto USER / PASS over plain conn (T-0032)
+//       - "sftp": crypto/ssh client handshake with password auth (T-0093)
+//       - "ftps": crypto/tls handshake (implicit FTPS) + USER / PASS
+//         over the TLS conn (T-0093)
+//       - other:  TCP reachability only, auth probe unsupported
 //
 // Security:
 //   - Passwords never appear in zap logs (zap fields only carry
 //     host/port/protocol/success/latency).
-//   - Passwords never appear in returned messages — only the FTP
-//     server's own response code + text.
-//   - The conn is closed via defer; net.textproto holds it without
-//     additional cleanup.
-//   - context timeout is enforced over both phases (TCP dial + FTP
-//     command exchange).
+//   - Passwords never appear in returned messages — defense-in-depth
+//     redactSubstring strips any literal echo from server responses.
+//   - Conn deadlines / context timeout enforced over every phase
+//     (TCP dial + protocol handshake + auth exchange).
+//   - SSH host key callback is InsecureIgnoreHostKey — the probe is a
+//     reachability + credential test, not a long-lived session; the
+//     operator owns the trust decision out-of-band (PRD §6 N3).
+//   - TLS verification skipped (operator-provided self-signed certs
+//     are common in network ops); auth still gated by USER / PASS.
 //   - No side effects: the probe never lists, writes, or deletes
 //     anything on the server.
 package backup
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
@@ -39,6 +41,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/crypto/ssh"
 )
 
 // Dialer is the narrow consumer-side contract FTPConnectionTester needs
@@ -48,6 +51,14 @@ import (
 type Dialer interface {
 	DialContext(ctx context.Context, network, addr string) (net.Conn, error)
 }
+
+// sshProbeFn / tlsProbeFn are internal extension points for the SFTP /
+// FTPS auth probes (T-0093). Tests in the same package override them
+// to drive the success / error matrix without standing up an in-process
+// SSH server or TLS listener. Production wiring uses sshDialDefault /
+// tlsDialDefault below.
+type sshProbeFn func(ctx context.Context, addr string, cfg *ssh.ClientConfig) error
+type tlsProbeFn func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error)
 
 // FTPTestResult is the structured outcome returned by the test endpoint.
 // Wire format mirrors the JSON the handler sends back.
@@ -68,18 +79,22 @@ type FTPTestResult struct {
 // frustrates the "click test → wait → see result" flow.
 const DefaultFTPTestTimeout = 5 * time.Second
 
-// FTPConnectionTester runs reachability and (for FTP) auth probes
-// against an FTPConfig. One instance per process; safe for concurrent
-// Test calls.
+// FTPConnectionTester runs reachability and protocol-specific auth
+// probes against an FTPConfig. One instance per process; safe for
+// concurrent Test calls.
 type FTPConnectionTester struct {
-	dialer  Dialer
-	timeout time.Duration
-	logger  *zap.Logger
+	dialer   Dialer
+	sshProbe sshProbeFn
+	tlsProbe tlsProbeFn
+	timeout  time.Duration
+	logger   *zap.Logger
 }
 
 // NewFTPConnectionTester returns a tester. dialer == nil falls back to
 // a default *net.Dialer; timeout <= 0 falls back to DefaultFTPTestTimeout.
-// logger == nil falls back to zap.NewNop.
+// logger == nil falls back to zap.NewNop. SSH / TLS probes use stdlib +
+// x/crypto/ssh defaults; tests override the unexported probe fields
+// directly.
 func NewFTPConnectionTester(dialer Dialer, timeout time.Duration, logger *zap.Logger) *FTPConnectionTester {
 	if dialer == nil {
 		dialer = &net.Dialer{Timeout: DefaultFTPTestTimeout}
@@ -90,7 +105,13 @@ func NewFTPConnectionTester(dialer Dialer, timeout time.Duration, logger *zap.Lo
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &FTPConnectionTester{dialer: dialer, timeout: timeout, logger: logger}
+	return &FTPConnectionTester{
+		dialer:   dialer,
+		sshProbe: sshDialDefault,
+		tlsProbe: tlsDialDefault,
+		timeout:  timeout,
+		logger:   logger,
+	}
 }
 
 // Test runs the connection test against the supplied FTPConfig and
@@ -129,14 +150,35 @@ func (t *FTPConnectionTester) Test(ctx context.Context, cfg *FTPConfig) FTPTestR
 		result.AuthProbePassed = &passed
 		result.Success = passed
 		result.Message = msg
+	case "sftp":
+		// TCP probe already proved reachability; close it and let the
+		// SSH probe open its own conn for the handshake. This costs
+		// one extra dial but keeps ssh.NewClientConn's lifecycle clean
+		// (the handshake takes ownership of the conn it's given).
+		_ = conn.Close()
+		result.AuthProbeSupported = true
+		passed, msg := t.probeSFTPAuth(ctx, addr, cfg)
+		result.AuthProbePassed = &passed
+		result.Success = passed
+		result.Message = msg
+	case "ftps":
+		// Implicit FTPS: the TLS handshake happens before any FTP
+		// command. Re-dial via tlsProbe so the FTP USER/PASS travel
+		// over the TLS conn.
+		_ = conn.Close()
+		result.AuthProbeSupported = true
+		passed, msg := t.probeFTPSAuth(ctx, addr, cfg)
+		result.AuthProbePassed = &passed
+		result.Success = passed
+		result.Message = msg
 	default:
-		// sftp / ftps / anything else: TCP-reachable is the strongest
-		// claim we can make without pulling in pkg/sftp + crypto/ssh
-		// or doing a TLS handshake. Surface this honestly.
+		// Unknown protocol — TCP-reachable is all we can honestly
+		// claim. Surface it explicitly so the operator can correct
+		// the configured protocol.
 		result.AuthProbeSupported = false
 		result.Success = true
 		result.Message = fmt.Sprintf(
-			"%s deep auth probe deferred to T-0093; TCP reachability verified",
+			"protocol %q has no auth probe; TCP reachability verified",
 			cfg.Protocol)
 	}
 
@@ -212,6 +254,93 @@ func (t *FTPConnectionTester) probeFTPAuth(conn net.Conn, cfg *FTPConfig) (bool,
 		safeMsg = redactSubstring(safeMsg, password)
 	}
 	return false, fmt.Sprintf("FTP auth rejected: code %d %s", passCode, safeMsg)
+}
+
+// probeSFTPAuth runs the SSH handshake + password auth check against
+// the configured SFTP server. Returns (passed, message). The message
+// is sanitized so the configured password never leaks even if the
+// server echoes it in an auth-failure diagnostic.
+//
+// HostKeyCallback is ssh.InsecureIgnoreHostKey — the probe is a
+// reachability + credential check, not a long-lived session, and the
+// operator pins host keys out-of-band when authoring the FTPConfig
+// (PRD §6 N3). Adding a key-pinning probe is future T-0094 territory.
+func (t *FTPConnectionTester) probeSFTPAuth(ctx context.Context, addr string, cfg *FTPConfig) (bool, string) {
+	password := ""
+	if cfg.PasswordEncrypted != nil {
+		password = *cfg.PasswordEncrypted
+	}
+	sshCfg := &ssh.ClientConfig{
+		User:            cfg.Username,
+		Auth:            []ssh.AuthMethod{ssh.Password(password)},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         t.timeout,
+	}
+	if err := t.sshProbe(ctx, addr, sshCfg); err != nil {
+		safe := errMessageOnly(err)
+		if password != "" && len(password) >= 4 {
+			safe = redactSubstring(safe, password)
+		}
+		return false, fmt.Sprintf("SFTP auth failed: %s", safe)
+	}
+	return true, "SFTP authenticated successfully"
+}
+
+// probeFTPSAuth runs implicit FTPS: TLS handshake first, then standard
+// FTP USER / PASS over the TLS conn. The auth result and message
+// semantics mirror probeFTPAuth.
+//
+// TLS InsecureSkipVerify is true: operator-managed FTPS servers are
+// commonly self-signed in network ops environments, and the probe's
+// trust signal is the USER/PASS exchange, not the cert chain. A
+// future task can add cert pinning when the FTPConfig gains a CA bundle
+// field.
+func (t *FTPConnectionTester) probeFTPSAuth(ctx context.Context, addr string, cfg *FTPConfig) (bool, string) {
+	tlsCfg := &tls.Config{
+		ServerName:         cfg.Host,
+		InsecureSkipVerify: true, //nolint:gosec // operator-managed self-signed FTPS is the norm; see PRD §6 N3
+		MinVersion:         tls.VersionTLS12,
+	}
+	conn, err := t.tlsProbe(ctx, "tcp", addr, tlsCfg)
+	if err != nil {
+		return false, fmt.Sprintf("FTPS TLS handshake failed: %s", errMessageOnly(err))
+	}
+	defer conn.Close()
+	return t.probeFTPAuth(conn, cfg)
+}
+
+// sshDialDefault is the production sshProbe — open TCP via stdlib
+// net.Dialer (honoring ctx for connect timeout), apply ctx deadline to
+// the conn so ssh.NewClientConn's handshake is bounded, then close
+// cleanly after auth completes (no session is held open).
+func sshDialDefault(ctx context.Context, addr string, cfg *ssh.ClientConfig) error {
+	d := &net.Dialer{Timeout: cfg.Timeout}
+	conn, err := d.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return err
+	}
+	if dl, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(dl)
+	}
+	sshConn, chans, reqs, err := ssh.NewClientConn(conn, addr, cfg)
+	if err != nil {
+		_ = conn.Close()
+		return err
+	}
+	client := ssh.NewClient(sshConn, chans, reqs)
+	return client.Close()
+}
+
+// tlsDialDefault is the production tlsProbe — uses stdlib tls.Dialer
+// which composes net.Dialer + TLS handshake under one DialContext that
+// honors the supplied context for connect timeout and handshake
+// timeout.
+func tlsDialDefault(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+	d := &tls.Dialer{
+		NetDialer: &net.Dialer{Timeout: DefaultFTPTestTimeout},
+		Config:    cfg,
+	}
+	return d.DialContext(ctx, network, addr)
 }
 
 // logTestOutcome emits a single zap.Info with the result fields that
