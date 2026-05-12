@@ -74,10 +74,11 @@ func (m *mockTemplateRepo) IncrementUseCount(ctx context.Context, id uuid.UUID) 
 }
 
 type mockTaskRepo struct {
-	createFn       func(ctx context.Context, task *OpsTask) error
-	getByIDFn      func(ctx context.Context, id uuid.UUID) (*OpsTask, error)
-	updateStatusFn func(ctx context.Context, task *OpsTask) error
-	listFn         func(ctx context.Context, filter TaskFilter) (*model.ListResponse[OpsTask], error)
+	createFn         func(ctx context.Context, task *OpsTask) error
+	getByIDFn        func(ctx context.Context, id uuid.UUID) (*OpsTask, error)
+	updateStatusFn   func(ctx context.Context, task *OpsTask) error
+	listFn           func(ctx context.Context, filter TaskFilter) (*model.ListResponse[OpsTask], error)
+	updateApprovalFn func(ctx context.Context, taskID, approverID uuid.UUID, approve bool, decidedAt time.Time) error
 }
 
 func (m *mockTaskRepo) Create(ctx context.Context, task *OpsTask) error {
@@ -106,6 +107,13 @@ func (m *mockTaskRepo) List(ctx context.Context, filter TaskFilter) (*model.List
 		return m.listFn(ctx, filter)
 	}
 	return nil, nil
+}
+
+func (m *mockTaskRepo) UpdateApproval(ctx context.Context, taskID, approverID uuid.UUID, approve bool, decidedAt time.Time) error {
+	if m.updateApprovalFn != nil {
+		return m.updateApprovalFn(ctx, taskID, approverID, approve, decidedAt)
+	}
+	return nil
 }
 
 type mockCmdRepo struct {
@@ -722,4 +730,140 @@ func TestMapPgError_NonPgError_PassesThrough(t *testing.T) {
 
 func TestMapPgError_Nil(t *testing.T) {
 	assert.Nil(t, mapPgError(nil, "ops_task"))
+}
+
+// ---------------------------------------------------------------------------
+// T-0101-d: ApprovalService 状态机集成测试
+// ---------------------------------------------------------------------------
+//
+// 测试覆盖（5 用例）：
+//   1. 4-eye self-approval forbidden（既有逻辑，反退化）
+//   2. 已审批的任务不可再审（ApprovalState 非 pending）
+//   3. approve → UpdateApproval 调用 + approve=true
+//   4. reject → UpdateApproval 调用 + approve=false
+//   5. UpdateApproval 报错时 Approve 错误传播
+
+// mockAuditLogRepo 是 AuditLogRepository 的 noop mock，仅满足 ApprovalService 依赖。
+type mockAuditLogRepo struct{}
+
+func (m *mockAuditLogRepo) Create(_ context.Context, _ *OpsAuditLog) error { return nil }
+func (m *mockAuditLogRepo) List(_ context.Context, _ AuditLogFilter) (*model.ListResponse[OpsAuditLog], error) {
+	return model.NewListResponse([]OpsAuditLog{}, 0, 1, 20), nil
+}
+
+func newTestApprovalService(taskRepo *mockTaskRepo) *ApprovalService {
+	audit := NewAuditLogService(&mockAuditLogRepo{}, zap.NewNop())
+	return NewApprovalService(taskRepo, audit, zap.NewNop())
+}
+
+func TestApprovalService_Approve_SelfApprovalForbidden(t *testing.T) {
+	creator := uuid.New() // 同时充当 creator 和 approver
+	taskID := uuid.New()
+	taskRepo := &mockTaskRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*OpsTask, error) {
+			return &OpsTask{ID: taskID, Creator: creator.String(), ApprovalState: ApprovalPending}, nil
+		},
+	}
+	svc := newTestApprovalService(taskRepo)
+
+	err := svc.Approve(context.Background(), taskID, creator, true, "self")
+	assert.ErrorIs(t, err, ErrSelfApprovalForbidden,
+		"创建者审批自己应被 4-eye 阻止")
+}
+
+func TestApprovalService_Approve_NonPendingRejected(t *testing.T) {
+	creator := uuid.New()
+	approver := uuid.New()
+	taskID := uuid.New()
+
+	cases := []struct {
+		name  string
+		state ApprovalState
+	}{
+		{"already_approved", ApprovalApproved},
+		{"already_rejected", ApprovalRejected},
+		{"not_required", ApprovalNotRequired},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			taskRepo := &mockTaskRepo{
+				getByIDFn: func(_ context.Context, _ uuid.UUID) (*OpsTask, error) {
+					return &OpsTask{ID: taskID, Creator: creator.String(), ApprovalState: tc.state}, nil
+				},
+			}
+			svc := newTestApprovalService(taskRepo)
+
+			err := svc.Approve(context.Background(), taskID, approver, true, "")
+			assert.ErrorIs(t, err, ErrApprovalNotPending,
+				"非 pending 状态不应再走审批 (got state=%q)", tc.state)
+		})
+	}
+}
+
+func TestApprovalService_Approve_TransitsToRunning(t *testing.T) {
+	creator := uuid.New()
+	approver := uuid.New()
+	taskID := uuid.New()
+
+	var capturedApprove bool
+	var capturedApprover uuid.UUID
+	taskRepo := &mockTaskRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*OpsTask, error) {
+			return &OpsTask{ID: taskID, Creator: creator.String(), ApprovalState: ApprovalPending}, nil
+		},
+		updateApprovalFn: func(_ context.Context, _, aid uuid.UUID, approve bool, _ time.Time) error {
+			capturedApprove = approve
+			capturedApprover = aid
+			return nil
+		},
+	}
+	svc := newTestApprovalService(taskRepo)
+
+	err := svc.Approve(context.Background(), taskID, approver, true, "looks good")
+	require.NoError(t, err)
+	assert.True(t, capturedApprove, "approve=true 应传到 UpdateApproval")
+	assert.Equal(t, approver, capturedApprover, "approver_user_id 应透传")
+}
+
+func TestApprovalService_Approve_TransitsToCancelled(t *testing.T) {
+	creator := uuid.New()
+	approver := uuid.New()
+	taskID := uuid.New()
+
+	var capturedApprove bool
+	taskRepo := &mockTaskRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*OpsTask, error) {
+			return &OpsTask{ID: taskID, Creator: creator.String(), ApprovalState: ApprovalPending}, nil
+		},
+		updateApprovalFn: func(_ context.Context, _, _ uuid.UUID, approve bool, _ time.Time) error {
+			capturedApprove = approve
+			return nil
+		},
+	}
+	svc := newTestApprovalService(taskRepo)
+
+	err := svc.Approve(context.Background(), taskID, approver, false, "too risky")
+	require.NoError(t, err)
+	assert.False(t, capturedApprove, "approve=false（拒绝）应传到 UpdateApproval")
+}
+
+func TestApprovalService_Approve_UpdateApprovalErrorPropagates(t *testing.T) {
+	creator := uuid.New()
+	approver := uuid.New()
+	taskID := uuid.New()
+
+	taskRepo := &mockTaskRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*OpsTask, error) {
+			return &OpsTask{ID: taskID, Creator: creator.String(), ApprovalState: ApprovalPending}, nil
+		},
+		updateApprovalFn: func(_ context.Context, _, _ uuid.UUID, _ bool, _ time.Time) error {
+			return errors.New("db unreachable")
+		},
+	}
+	svc := newTestApprovalService(taskRepo)
+
+	err := svc.Approve(context.Background(), taskID, approver, true, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "persist approval decision",
+		"持久化失败应 wrap 出明确错误信息")
 }

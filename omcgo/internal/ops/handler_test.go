@@ -55,10 +55,11 @@ func (m *hTemplateRepo) IncrementUseCount(ctx context.Context, id uuid.UUID) err
 }
 
 type mockOpsTaskRepo struct {
-	CreateFn       func(ctx context.Context, task *OpsTask) error
-	GetByIDFn      func(ctx context.Context, id uuid.UUID) (*OpsTask, error)
-	UpdateStatusFn func(ctx context.Context, task *OpsTask) error
-	ListFn         func(ctx context.Context, filter TaskFilter) (*model.ListResponse[OpsTask], error)
+	CreateFn         func(ctx context.Context, task *OpsTask) error
+	GetByIDFn        func(ctx context.Context, id uuid.UUID) (*OpsTask, error)
+	UpdateStatusFn   func(ctx context.Context, task *OpsTask) error
+	ListFn           func(ctx context.Context, filter TaskFilter) (*model.ListResponse[OpsTask], error)
+	UpdateApprovalFn func(ctx context.Context, taskID, approverID uuid.UUID, approve bool, decidedAt time.Time) error
 }
 
 func (m *mockOpsTaskRepo) Create(ctx context.Context, task *OpsTask) error {
@@ -72,6 +73,12 @@ func (m *mockOpsTaskRepo) UpdateStatus(ctx context.Context, task *OpsTask) error
 }
 func (m *mockOpsTaskRepo) List(ctx context.Context, filter TaskFilter) (*model.ListResponse[OpsTask], error) {
 	return m.ListFn(ctx, filter)
+}
+func (m *mockOpsTaskRepo) UpdateApproval(ctx context.Context, taskID, approverID uuid.UUID, approve bool, decidedAt time.Time) error {
+	if m.UpdateApprovalFn != nil {
+		return m.UpdateApprovalFn(ctx, taskID, approverID, approve, decidedAt)
+	}
+	return nil
 }
 
 type mockCmdRecordRepo struct {

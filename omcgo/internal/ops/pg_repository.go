@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
@@ -67,6 +68,8 @@ var taskColumns = []string{
 	"status", "current_step", "total_steps", "progress",
 	"success_count", "fail_count", "total_count",
 	"creator", "message", "started_at", "completed_at",
+	// T-0101-d 状态机集成：approval_state / approver / approved_at / risk_level（migration 000080 列）
+	"risk_level", "approval_state", "approver_user_id", "approved_at",
 	"created_at", "updated_at",
 }
 
@@ -352,16 +355,27 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *OpsTask) error {
 	if task.DeviceSNs == nil {
 		task.DeviceSNs = []byte("[]")
 	}
+	// T-0101-d 默认：RiskLevel/ApprovalState 留给 DB DEFAULT；调用方若已显式设置则尊重
+	risk := task.RiskLevel
+	if risk == "" {
+		risk = RiskSafe
+	}
+	approval := task.ApprovalState
+	if approval == "" {
+		approval = ApprovalNotRequired
+	}
 
 	query, args, err := storage.Psql.Insert("ops_tasks").
 		Columns("task_name", "template_id", "device_sns",
 			"status", "current_step", "total_steps", "progress",
 			"success_count", "fail_count", "total_count",
-			"creator", "message", "started_at", "completed_at").
+			"creator", "message", "started_at", "completed_at",
+			"risk_level", "approval_state", "approver_user_id", "approved_at").
 		Values(task.TaskName, task.TemplateID, task.DeviceSNs,
 			task.Status, task.CurrentStep, task.TotalSteps, task.Progress,
 			task.SuccessCount, task.FailCount, task.TotalCount,
-			task.Creator, task.Message, task.StartedAt, task.CompletedAt).
+			task.Creator, task.Message, task.StartedAt, task.CompletedAt,
+			string(risk), string(approval), task.ApproverUserID, task.ApprovedAt).
 		Suffix("RETURNING " + joinColumns(taskColumns)).
 		ToSql()
 	if err != nil {
@@ -496,11 +510,13 @@ func (r *PgTaskRepository) List(ctx context.Context, filter TaskFilter) (*model.
 
 func scanTask(row pgx.Row) (*OpsTask, error) {
 	var t OpsTask
+	var riskLevel, approvalState string
 	err := row.Scan(
 		&t.ID, &t.TaskName, &t.TemplateID, &t.DeviceSNs,
 		&t.Status, &t.CurrentStep, &t.TotalSteps, &t.Progress,
 		&t.SuccessCount, &t.FailCount, &t.TotalCount,
 		&t.Creator, &t.Message, &t.StartedAt, &t.CompletedAt,
+		&riskLevel, &approvalState, &t.ApproverUserID, &t.ApprovedAt,
 		&t.CreatedAt, &t.UpdatedAt,
 	)
 	if err != nil {
@@ -509,16 +525,20 @@ func scanTask(row pgx.Row) (*OpsTask, error) {
 	if t.DeviceSNs == nil {
 		t.DeviceSNs = []byte("[]")
 	}
+	t.RiskLevel = RiskLevel(riskLevel)
+	t.ApprovalState = ApprovalState(approvalState)
 	return &t, nil
 }
 
 func scanTaskRow(rows pgx.Rows) (*OpsTask, error) {
 	var t OpsTask
+	var riskLevel, approvalState string
 	err := rows.Scan(
 		&t.ID, &t.TaskName, &t.TemplateID, &t.DeviceSNs,
 		&t.Status, &t.CurrentStep, &t.TotalSteps, &t.Progress,
 		&t.SuccessCount, &t.FailCount, &t.TotalCount,
 		&t.Creator, &t.Message, &t.StartedAt, &t.CompletedAt,
+		&riskLevel, &approvalState, &t.ApproverUserID, &t.ApprovedAt,
 		&t.CreatedAt, &t.UpdatedAt,
 	)
 	if err != nil {
@@ -527,7 +547,45 @@ func scanTaskRow(rows pgx.Rows) (*OpsTask, error) {
 	if t.DeviceSNs == nil {
 		t.DeviceSNs = []byte("[]")
 	}
+	t.RiskLevel = RiskLevel(riskLevel)
+	t.ApprovalState = ApprovalState(approvalState)
 	return &t, nil
+}
+
+// UpdateApproval 持久化任务的审批状态 + 同步执行状态转移（T-0101-d 状态机集成）。
+//
+//   - approve=true  → ApprovalState=approved + Status=running + ApproverUserID + ApprovedAt
+//   - approve=false → ApprovalState=rejected + Status=cancelled + ApproverUserID + ApprovedAt
+//
+// 该方法不做 4-eye 判定或 ApprovalState 重复审批校验 — 调用方 ApprovalService.Approve
+// 须在调用前完成业务前置校验；本方法是纯持久化层 PATCH。
+func (r *PgTaskRepository) UpdateApproval(ctx context.Context, taskID, approverID uuid.UUID, approve bool, decidedAt time.Time) error {
+	newApprovalState := ApprovalApproved
+	newStatus := OpsTaskRunning
+	if !approve {
+		newApprovalState = ApprovalRejected
+		newStatus = OpsTaskCancelled
+	}
+
+	query, args, err := storage.Psql.Update("ops_tasks").
+		Set("approval_state", string(newApprovalState)).
+		Set("approver_user_id", approverID).
+		Set("approved_at", decidedAt).
+		Set("status", string(newStatus)).
+		Where(sq.Eq{"id": taskID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update ops_task approval SQL: %w", err)
+	}
+
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update ops_task approval: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
 }
 
 // ======================================================================

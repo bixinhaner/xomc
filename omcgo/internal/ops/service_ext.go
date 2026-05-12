@@ -84,7 +84,16 @@ var (
 	ErrSelfApprovalForbidden = errors.New("creator cannot self-approve (4-eye principle)")
 )
 
-// Approve 4 眼审批：approver_user_id 不能 == 任务 creator。
+// Approve 4 眼审批 + 状态机持久化（T-0101-d 状态机集成 / PRD §5.3.1 + §8.2）：
+//
+//   - 校验 4 眼：approverID != task.Creator（防自审）
+//   - 校验 ApprovalState 必须为 ApprovalPending（防重复审批/对未待审任务下手）
+//   - 持久化：调 taskRepo.UpdateApproval 一次性写 approval_state + approver_user_id +
+//     approved_at + status（approve=true → status=running / approve=false → status=cancelled）
+//   - 写审计：approval 操作 + result(approved|rejected) + reason
+//
+// 任务的初始 ApprovalState 由创建路径根据 RiskLevel 评估：L1/L2 → not_required（直接
+// 可被 router 拉起 running）；L3 → pending（等本方法走完）。
 func (s *ApprovalService) Approve(ctx context.Context, taskID, approverID uuid.UUID, approve bool, reason string) error {
 	task, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
@@ -93,9 +102,16 @@ func (s *ApprovalService) Approve(ctx context.Context, taskID, approverID uuid.U
 	if task.Creator == approverID.String() {
 		return ErrSelfApprovalForbidden
 	}
-	// MVP: 状态机简化 — 任务字段在主表，扩展列已通过 model 层 patch
-	// 实际工作中 ops_tasks 的 approval_state 字段需要专门 Update（待集成到 main TaskRepository）。
-	// 这里仅写审计，不持久化 approval_state（留待 T-0106-b 二期完善）。
+	if task.ApprovalState != ApprovalPending {
+		// 已 approved / rejected / not_required 的任务都不应再走审批
+		return fmt.Errorf("task approval_state=%q not eligible: %w",
+			task.ApprovalState, ErrApprovalNotPending)
+	}
+
+	if err := s.taskRepo.UpdateApproval(ctx, taskID, approverID, approve, time.Now()); err != nil {
+		return fmt.Errorf("persist approval decision: %w", err)
+	}
+
 	result := "approved"
 	if !approve {
 		result = "rejected"
@@ -110,7 +126,7 @@ func (s *ApprovalService) Approve(ctx context.Context, taskID, approverID uuid.U
 		Result:         result,
 		OutputSummary:  reason,
 	})
-	s.logger.Info("task approved",
+	s.logger.Info("task approval persisted",
 		zap.String("task_id", taskID.String()),
 		zap.String("approver", approverID.String()),
 		zap.Bool("approve", approve))

@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -23,6 +24,8 @@ type TaskRepository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*OpsTask, error)
 	UpdateStatus(ctx context.Context, task *OpsTask) error
 	List(ctx context.Context, filter TaskFilter) (*model.ListResponse[OpsTask], error)
+	// UpdateApproval 持久化任务审批结果 + 联动执行状态转移（T-0101-d）。
+	UpdateApproval(ctx context.Context, taskID, approverID uuid.UUID, approve bool, decidedAt time.Time) error
 }
 
 // CommandRecordRepository provides persistence for ops command records.
