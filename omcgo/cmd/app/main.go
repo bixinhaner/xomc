@@ -11,6 +11,7 @@ import (
 	"github.com/omcgo/omcgo/cmd/app/provider"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/middleware"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
@@ -61,7 +62,10 @@ func runApp(cmd *cobra.Command, args []string) error {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	engine := gin.New()
-	engine.Use(gin.Recovery())
+	// 自定义 recovery 中间件取代 gin.Recovery()：panic 走 zap.Error 而非
+	// stdlib log，确保 panic 同时进入 stdout（docker logs）和 zap output_paths
+	// 配置的 app.log 文件，运维只在 docker logs 看不到 app.log 的体验消除。
+	engine.Use(middleware.Recovery(app.Logger))
 
 	if err := provider.Setup(engine, &provider.Container{
 		PgPool:     app.PgPool,
