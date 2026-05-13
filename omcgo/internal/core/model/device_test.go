@@ -8,30 +8,47 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestDeriveOpState — 派生函数语义反退化：仅 DeviceActive → "1"，其余皆 "0"。
-// 契约同 internal/device/device_info_pg_repository.go OpState filter
-// (status='active' ↔ op_state='1')。
+// TestDeriveOpState — 派生函数语义反退化：op_state 表达生命周期"已激活"状态，
+// 与 status 的"当前在线"语义解耦。
+//
+// 已激活集合: {active, offline, maintenance}
+//   - active: 在线运行中
+//   - offline: 已激活但当前离线（OfflineDetector 标记，不应翻成未激活）
+//   - maintenance: 已激活但维护中
+// 未激活集合: {discovered, registered, provisioning, decommissioned, 空, 未知}
 func TestDeriveOpState(t *testing.T) {
 	cases := []struct {
 		status DeviceStatus
 		want   string
+		note   string
 	}{
-		{DeviceActive, "1"},
-		{DeviceDiscovered, "0"},
-		{DeviceRegistered, "0"},
-		{DeviceProvisioning, "0"},
-		{DeviceOffline, "0"},
-		{DeviceMaintenance, "0"},
-		{DeviceDecommissioned, "0"},
-		{DeviceStatus(""), "0"},          // empty string → 未激活
-		{DeviceStatus("garbage"), "0"},   // 未知值 → 未激活（fail-safe）
+		{DeviceActive, "1", "在线运行 → 激活"},
+		{DeviceOffline, "1", "已激活但离线 → 仍激活（关键：心跳超时不翻转激活态）"},
+		{DeviceMaintenance, "1", "已激活但维护中 → 仍激活"},
+		{DeviceDiscovered, "0", "刚发现未注册 → 未激活"},
+		{DeviceRegistered, "0", "API 预登记未来电 → 未激活"},
+		{DeviceProvisioning, "0", "配置中 → 未激活"},
+		{DeviceDecommissioned, "0", "已退役 → 未激活"},
+		{DeviceStatus(""), "0", "空串 fail-safe → 未激活"},
+		{DeviceStatus("garbage"), "0", "未知值 fail-safe → 未激活"},
 	}
 	for _, c := range cases {
 		c := c
 		t.Run(string(c.status), func(t *testing.T) {
-			assert.Equal(t, c.want, DeriveOpState(c.status))
+			assert.Equal(t, c.want, DeriveOpState(c.status), c.note)
 		})
 	}
+}
+
+// TestDeriveOpState_OfflineDoesNotDeactivate — 反退化核心场景：设备 inform 后
+// active → 离线检测器标 offline → op_state 不应翻转为未激活。
+// 现网设备 120200024719AAB0039 离线后激活状态变未激活的 bug 由本测试守护。
+func TestDeriveOpState_OfflineDoesNotDeactivate(t *testing.T) {
+	// 初次 inform 后
+	assert.Equal(t, "1", DeriveOpState(DeviceActive))
+	// OfflineDetector.markOffline 把 status 改为 offline 后
+	assert.Equal(t, "1", DeriveOpState(DeviceOffline),
+		"离线设备 op_state 必须保持 '1'：在线/离线和激活状态是两个独立维度")
 }
 
 // TestDevice_OpState_JSONRoundTrip — Device 结构 JSON 序列化后必含 op_state 字段，

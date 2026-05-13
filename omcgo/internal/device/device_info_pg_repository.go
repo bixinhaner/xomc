@@ -252,14 +252,16 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		countBuilder = countBuilder.Where(sq.Eq{"di.license_status": *filter.LicenseStatus})
 	}
 	if filter.OpState != nil {
+		// 契约同 model.DeriveOpState（device.go）：op_state 是生命周期状态，
+		// 与在线/离线解耦。已激活 = status ∈ {active, offline, maintenance}。
+		// 离线设备仍属"已激活"，不会因 OfflineDetector 翻 status 就掉到未激活。
+		activated := []string{"active", "offline", "maintenance"}
 		if *filter.OpState == "1" {
-			// 激活：status = 'active'
-			builder = builder.Where(sq.Eq{"d.status": "active"})
-			countBuilder = countBuilder.Where(sq.Eq{"d.status": "active"})
+			builder = builder.Where(sq.Eq{"d.status": activated})
+			countBuilder = countBuilder.Where(sq.Eq{"d.status": activated})
 		} else if *filter.OpState == "0" {
-			// 未激活：status != 'active'
-			builder = builder.Where(sq.NotEq{"d.status": "active"})
-			countBuilder = countBuilder.Where(sq.NotEq{"d.status": "active"})
+			builder = builder.Where(sq.NotEq{"d.status": activated})
+			countBuilder = countBuilder.Where(sq.NotEq{"d.status": activated})
 		}
 	}
 

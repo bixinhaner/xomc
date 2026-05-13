@@ -54,10 +54,13 @@ func buildDeviceFilterGoqu(filter DeviceFilter) []goqu.Expression {
 		conds = append(conds, goqu.C("product_class").Eq(*filter.ProductClass))
 	}
 	if filter.OpState != nil {
+		// 契约同 model.DeriveOpState：已激活 = status ∈ {active, offline, maintenance}。
+		// 离线设备仍属已激活，不应因 OfflineDetector 翻 status 而掉到未激活。
+		activated := []interface{}{model.DeviceActive, model.DeviceOffline, model.DeviceMaintenance}
 		if *filter.OpState == "1" {
-			conds = append(conds, goqu.C("status").Eq(model.DeviceActive))
+			conds = append(conds, goqu.C("status").In(activated...))
 		} else {
-			conds = append(conds, goqu.C("status").Neq(model.DeviceActive))
+			conds = append(conds, goqu.C("status").NotIn(activated...))
 		}
 	}
 

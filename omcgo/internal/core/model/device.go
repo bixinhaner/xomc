@@ -54,16 +54,26 @@ type Device struct {
 
 // DeriveOpState 把设备 Status 翻译为前端"激活状态"展示值。
 //
-// 契约（与 internal/device/device_info_pg_repository.go OpState filter 一致）：
+// 关键设计：**激活状态** ≠ **在线状态**。
+// 在 FE 数据模型里两者是独立列：
+//   - connStatus（在线/离线）由 status='active' 直接映射（deviceApi.ts:mapStatus）
+//   - opState（已激活/未激活）由本函数派生，表达**生命周期状态**
 //
-//	DeviceActive → "1"（激活）
-//	其它 status  → "0"（未激活，含 discovered/registered/provisioning/offline/maintenance/decommissioned）
+// 因此设备离线（status='offline'）不应导致激活状态翻转 —— 离线是"曾经激活过的
+// 设备暂时失联"，仍属已激活。维护中（maintenance）同理。
+//
+// 契约（与 internal/device/device_info_pg_repository.go OpState filter 同步）：
+//
+//	active / offline / maintenance     → "1"（已激活，含临时失联或维护中）
+//	discovered / registered / provisioning / decommissioned / 空 / 未知 → "0"（未激活）
 //
 // FE 渲染（omcmb/.../DeviceList/index.tsx）：opState ∈ {'1', 'active'} 显示 success，
-// 否则显示 error；返 'unknown' 会被前端视作未激活。
+// 否则显示 error。
 func DeriveOpState(status DeviceStatus) string {
-	if status == DeviceActive {
+	switch status {
+	case DeviceActive, DeviceOffline, DeviceMaintenance:
 		return "1"
+	default:
+		return "0"
 	}
-	return "0"
 }
