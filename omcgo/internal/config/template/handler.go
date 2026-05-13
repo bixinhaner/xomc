@@ -113,6 +113,7 @@ type createTemplateRequest struct {
 	TemplateType string          `json:"template_type" binding:"required"`
 	Parameters   json.RawMessage `json:"parameters" binding:"required"`
 	Priority     int             `json:"priority"`
+	AutoDispatch bool            `json:"auto_dispatch"`
 	Description  string          `json:"description"`
 }
 
@@ -134,6 +135,7 @@ func (h *Handler) Create(c *gin.Context) {
 		Priority:     req.Priority,
 		Version:      1,
 		Active:       true,
+		AutoDispatch: req.AutoDispatch,
 		Description:  req.Description,
 	}
 
@@ -153,6 +155,7 @@ type updateTemplateRequest struct {
 	Parameters   json.RawMessage `json:"parameters" binding:"required"`
 	Priority     int             `json:"priority"`
 	Active       bool            `json:"active"`
+	AutoDispatch bool            `json:"auto_dispatch"`
 	Description  string          `json:"description"`
 }
 
@@ -184,6 +187,7 @@ func (h *Handler) Update(c *gin.Context) {
 	existing.Parameters = req.Parameters
 	existing.Priority = req.Priority
 	existing.Active = req.Active
+	existing.AutoDispatch = req.AutoDispatch
 	existing.Description = req.Description
 
 	if err := h.repo.Update(c.Request.Context(), existing); err != nil {

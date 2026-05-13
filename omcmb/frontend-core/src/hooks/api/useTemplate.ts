@@ -68,3 +68,22 @@ export function useDeleteTemplates() {
     },
   });
 }
+
+/**
+ * T-0120 / T-0120-b: 模板显式下发。
+ * 调用方传 templateId + 设备 id 数组；mutation 返回 DispatchTemplateResponse
+ * （包含 dispatched / failed / totalDevices），UI 可据此渲染结果 Modal。
+ *
+ * 注意：mock 模式当前不模拟 dispatch（业务路径需要真实 ACS）；
+ * `useMock=true` 时直接抛错让 UI 显式提示"mock 模式不支持下发"。
+ */
+export function useDispatchTemplate() {
+  return useMutation({
+    mutationFn: ({ templateId, deviceIds }: { templateId: string; deviceIds: string[] }) => {
+      if (useMock) {
+        return Promise.reject(new Error('mock 模式不支持模板下发，请关闭 VITE_USE_MOCK'));
+      }
+      return templateApi.dispatchTemplate(templateId, deviceIds);
+    },
+  });
+}

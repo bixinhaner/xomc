@@ -142,3 +142,105 @@ func TestDispatchTemplate_DeviceLookupError(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "db down")
 }
+
+// ---------------------------------------------------------------------------
+// T-0120-b: HandleBootstrap selector OR semantics
+// （AutoDispatch=true 单独足以触发 Path A；AutoConfigure 既有语义不变）
+// ---------------------------------------------------------------------------
+
+// bootstrapHarnessWithTemplate seeds device + template into a full engine
+// harness, captures pushed RPC methods, and lets each test set AutoConfigure
+// + tmpl.AutoDispatch independently before running HandleBootstrap.
+func bootstrapHarnessWithTemplate(t *testing.T, autoConfigure, autoDispatch bool) (*fullEngineHarness, *[]string) {
+	t.Helper()
+	h := newFullEngineHarness()
+	h.engine.config.AutoConfigure = autoConfigure
+
+	deviceID := uuid.New()
+	tmplID := uuid.New()
+
+	h.devRepo.GetByIDFn = func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+		return &model.Device{
+			ID:           deviceID,
+			SerialNumber: "SN-T0120b",
+			Carrier:      model.CarrierCMCC,
+			Technology:   model.TechLTE,
+			OUI:          "001122",
+			ProductClass: "SmallCell-LTE",
+		}, nil
+	}
+	h.tmplRepo.FindBestMatchFn = func(_ context.Context, _ model.CarrierCode, _ model.Technology, _ string, _ template.TemplateType) (*template.ConfigTemplate, error) {
+		return &template.ConfigTemplate{
+			ID:           tmplID,
+			Name:         "tmpl",
+			Carrier:      model.CarrierCMCC,
+			Technology:   model.TechLTE,
+			ProductClass: "SmallCell-LTE",
+			TemplateType: template.TemplateProvisioning,
+			Parameters:   json.RawMessage(`{"Device.WiFi.SSID":"OMC"}`),
+			Active:       true,
+			AutoDispatch: autoDispatch,
+		}, nil
+	}
+	pushedMethods := make([]string, 0)
+	h.cmdQueue.CreateFn = func(_ context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
+		pushedMethods = append(pushedMethods, req.Method)
+		return task.NewTask(req), nil
+	}
+	return h, &pushedMethods
+}
+
+func runBootstrap(t *testing.T, h *fullEngineHarness) {
+	t.Helper()
+	evt := bootstrapEvent{
+		DeviceID:     uuid.New(),
+		SerialNumber: "SN-T0120b",
+		OUI:          "001122",
+		ProductClass: "SmallCell-LTE",
+		Carrier:      string(model.CarrierCMCC),
+		Technology:   string(model.TechLTE),
+	}
+	// 借用 device GetByIDFn mock 的固定返回，evt.DeviceID 不影响后续 lookup。
+	err := h.engine.HandleBootstrap(context.Background(), evt)
+	require.NoError(t, err)
+}
+
+func TestHandleBootstrap_AutoDispatchTrue_TriggersPathA(t *testing.T) {
+	// AutoConfigure=false（全局关闭）+ template.AutoDispatch=true（单条 opt-in）→ Path A
+	h, pushed := bootstrapHarnessWithTemplate(t, false, true)
+	runBootstrap(t, h)
+	// Path A enqueues GPV + SPV + Reboot
+	assert.Equal(t, []string{MethodGetParameterValues, MethodSetParameterValues, MethodReboot}, *pushed)
+}
+
+func TestHandleBootstrap_AutoConfigureTrue_PreservedSemantics(t *testing.T) {
+	// AutoConfigure=true（既有全局开关）+ template.AutoDispatch=false → Path A（向后兼容）
+	h, pushed := bootstrapHarnessWithTemplate(t, true, false)
+	runBootstrap(t, h)
+	assert.Equal(t, []string{MethodGetParameterValues, MethodSetParameterValues, MethodReboot}, *pushed)
+}
+
+func TestHandleBootstrap_BothFlagsTrue_StillPathA(t *testing.T) {
+	// 两 flag 都 true → 仍走 Path A（OR 语义，幂等）
+	h, pushed := bootstrapHarnessWithTemplate(t, true, true)
+	runBootstrap(t, h)
+	assert.Equal(t, []string{MethodGetParameterValues, MethodSetParameterValues, MethodReboot}, *pushed)
+}
+
+func TestHandleBootstrap_BothFlagsFalse_SkipsPathA(t *testing.T) {
+	// 两 flag 都 false + 有匹配模板 → 跳过 Path A，落入 Path B/C；
+	// 当前 harness 未注入 syncService / modelUploadService → 走 Path D fail。
+	h, pushed := bootstrapHarnessWithTemplate(t, false, false)
+	evt := bootstrapEvent{
+		DeviceID:     uuid.New(),
+		SerialNumber: "SN-T0120b",
+		OUI:          "001122",
+		ProductClass: "SmallCell-LTE",
+		Carrier:      string(model.CarrierCMCC),
+		Technology:   string(model.TechLTE),
+	}
+	_ = h.engine.HandleBootstrap(context.Background(), evt)
+	// 关键断言：Path A 未触发（未入队 SPV）
+	assert.Empty(t, *pushed, "two flags false + matching tmpl → Path A 必须跳过")
+}
+

@@ -29,6 +29,10 @@ type ConfigTemplate struct {
 	Priority     int               `json:"priority"`
 	Version      int               `json:"version"`
 	Active       bool              `json:"active"`
+	// AutoDispatch (T-0120-b) — opt-in：device.registered 事件触发时，
+	// 若模板匹配且此列 true → engine selector 强制走 Path A 自动下发；
+	// 默认 false 保留手动 dispatch 语义，避免历史模板被误触发。
+	AutoDispatch bool              `json:"auto_dispatch"`
 	Description  string            `json:"description,omitempty"`
 	CreatedAt    time.Time         `json:"created_at"`
 	UpdatedAt    time.Time         `json:"updated_at"`

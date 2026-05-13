@@ -20,6 +20,7 @@ import (
 var templateColumns = []string{
 	"id", "name", "carrier", "technology", "product_class",
 	"template_type", "parameters", "priority", "version", "active",
+	"auto_dispatch",
 	"description", "created_at", "updated_at",
 }
 
@@ -55,6 +56,7 @@ func (r *PgConfigTemplateRepository) Create(ctx context.Context, t *ConfigTempla
 		Values(
 			t.ID, t.Name, t.Carrier, t.Technology, nullableString(t.ProductClass),
 			t.TemplateType, t.Parameters, t.Priority, t.Version, t.Active,
+			t.AutoDispatch,
 			nullableString(t.Description), t.CreatedAt, t.UpdatedAt,
 		).
 		ToSql()
@@ -98,6 +100,7 @@ func (r *PgConfigTemplateRepository) Update(ctx context.Context, t *ConfigTempla
 		Set("priority", t.Priority).
 		Set("version", t.Version).
 		Set("active", t.Active).
+		Set("auto_dispatch", t.AutoDispatch).
 		Set("description", nullableString(t.Description)).
 		Set("updated_at", t.UpdatedAt).
 		Where(sq.Eq{"id": t.ID}).
@@ -310,6 +313,7 @@ func scanTemplate(row pgx.Row) (*ConfigTemplate, error) {
 	err := row.Scan(
 		&t.ID, &t.Name, &t.Carrier, &t.Technology, &productClass,
 		&t.TemplateType, &parameters, &t.Priority, &t.Version, &t.Active,
+		&t.AutoDispatch,
 		&description, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if err != nil {
@@ -343,6 +347,7 @@ func scanTemplates(rows pgx.Rows) ([]ConfigTemplate, error) {
 		err := rows.Scan(
 			&t.ID, &t.Name, &t.Carrier, &t.Technology, &productClass,
 			&t.TemplateType, &parameters, &t.Priority, &t.Version, &t.Active,
+			&t.AutoDispatch,
 			&description, &t.CreatedAt, &t.UpdatedAt,
 		)
 		if err != nil {

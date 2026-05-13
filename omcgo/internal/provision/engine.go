@@ -250,11 +250,13 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 		return e.failTask(ctx, task, fmt.Errorf("match template: %w", err))
 	}
 
-	if tmpl != nil && e.config.AutoConfigure {
+	// T-0120-b：模板自带 auto_dispatch=true 时 opt-in 自动走 Path A，
+	// 不依赖全局 config.auto_configure 开关；既有 auto_configure 语义保留。
+	if tmpl != nil && (e.config.AutoConfigure || tmpl.AutoDispatch) {
 		return e.handleTemplateProvisioning(ctx, task, dev, tmpl, evt.SerialNumber)
 	}
 	if tmpl != nil {
-		e.logger.Info("template matched but auto_configure disabled, skipping Path A",
+		e.logger.Info("template matched but auto_configure/auto_dispatch disabled, skipping Path A",
 			zap.String("device_sn", evt.SerialNumber),
 			zap.String("template_id", tmpl.ID.String()),
 		)

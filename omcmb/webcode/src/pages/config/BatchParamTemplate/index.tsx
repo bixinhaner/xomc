@@ -1,12 +1,15 @@
 import { useState, useMemo } from 'react';
-import { Button, Dropdown, Form, Input, Modal, Popconfirm, Select, Space, Tag, message } from 'antd';
-import { PlusOutlined, DeleteOutlined, CopyOutlined, MoreOutlined } from '@ant-design/icons';
+import { Button, Dropdown, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, message } from 'antd';
+import { PlusOutlined, DeleteOutlined, CopyOutlined, MoreOutlined, SendOutlined, CheckCircleTwoTone, CloseCircleTwoTone } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useConfigTemplates, useCreateConfigTemplate, useUpdateConfigTemplate, useDeleteConfigTemplates } from '@core/hooks/api/useConfig';
+import { useDispatchTemplate } from '@core/hooks/api/useTemplate';
+import { useDeviceList } from '@core/hooks/api/useDevices';
 import type { ConfigTemplate } from '@core/types/config';
+import type { DispatchResult, DispatchTemplateResponse } from '@core/services/api/templateApi';
 import { useT } from '@/hooks/useT';
 
 interface TemplateRow extends Record<string, unknown> {
@@ -48,10 +51,21 @@ export default function BatchParamTemplate() {
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const [form] = Form.useForm();
 
+  // T-0120-b dispatch modal state
+  const [dispatchTarget, setDispatchTarget] = useState<TemplateRow | null>(null);
+  const [dispatchDeviceIds, setDispatchDeviceIds] = useState<string[]>([]);
+  const [dispatchResult, setDispatchResult] = useState<DispatchTemplateResponse | null>(null);
+
   const { data, isLoading, refetch } = useConfigTemplates({ page, pageSize });
   const createTemplate = useCreateConfigTemplate();
   const updateTemplate = useUpdateConfigTemplate();
   const deleteTemplates = useDeleteConfigTemplates();
+  const dispatchTemplate = useDispatchTemplate();
+  // 设备下拉源：最多 200，按 SN 升序，足够普通场景手选；规模化筛选留后续
+  const { data: devicePage, isLoading: devLoading } = useDeviceList(
+    { page: 1, pageSize: 200 },
+    { refetchInterval: false },
+  );
 
   const tableSource = (data?.items ?? mockTemplates) as unknown as TemplateRow[];
 
@@ -99,6 +113,45 @@ export default function BatchParamTemplate() {
     });
   };
 
+  const openDispatch = (record: TemplateRow) => {
+    setDispatchTarget(record);
+    setDispatchDeviceIds([]);
+    setDispatchResult(null);
+  };
+
+  const closeDispatch = () => {
+    setDispatchTarget(null);
+    setDispatchDeviceIds([]);
+    setDispatchResult(null);
+  };
+
+  const handleDispatch = () => {
+    if (!dispatchTarget || dispatchDeviceIds.length === 0) {
+      void message.warning('请至少选择一台设备');
+      return;
+    }
+    dispatchTemplate.mutate(
+      { templateId: dispatchTarget.id, deviceIds: dispatchDeviceIds },
+      {
+        onSuccess: (resp) => {
+          setDispatchResult(resp);
+          if (resp.failed.length === 0) {
+            void message.success(`已成功下发到 ${resp.dispatched.length} 台设备`);
+          } else if (resp.dispatched.length === 0) {
+            void message.error(`全部 ${resp.totalDevices} 台设备下发失败`);
+          } else {
+            void message.warning(
+              `部分成功：${resp.dispatched.length} 成功 / ${resp.failed.length} 失败`,
+            );
+          }
+        },
+        onError: (err: Error) => {
+          void message.error(`下发失败：${err.message || '未知错误'}`);
+        },
+      },
+    );
+  };
+
   const columns: DataTableColumn<TemplateRow>[] = useMemo(() => [
     { key: 'templateName', title: t('config.template'), dataIndex: 'templateName', width: 220, ellipsis: true },
     { key: 'description', title: t('table.description'), dataIndex: 'description', width: 260, ellipsis: true },
@@ -116,7 +169,7 @@ export default function BatchParamTemplate() {
       key: 'action',
       title: t('table.operation'),
       dataIndex: 'id',
-      width: 100,
+      width: 180,
       fixed: 'right',
       render: (_, record) => {
         const menuItems: MenuProps['items'] = [
@@ -126,6 +179,14 @@ export default function BatchParamTemplate() {
         return (
           <Space size={4}>
             <Button type="link" size="small" onClick={() => openEdit(record)}>{t('common.edit')}</Button>
+            <Button
+              type="link"
+              size="small"
+              icon={<SendOutlined />}
+              onClick={() => openDispatch(record)}
+            >
+              下发
+            </Button>
             <Dropdown menu={{ items: menuItems }} trigger={['click']}>
               <Button type="link" size="small" icon={<MoreOutlined />} />
             </Dropdown>
@@ -164,7 +225,7 @@ export default function BatchParamTemplate() {
         onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
         onRefresh={() => void refetch()}
         onExport={() => void message.info(t('common.exportInProgress'))}
-        scroll={{ x: 1100 }}
+        scroll={{ x: 1200 }}
       />
 
       <Modal
@@ -188,6 +249,111 @@ export default function BatchParamTemplate() {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* T-0120-b 下发 Modal：选设备 → 调 dispatch API → 展示结果 */}
+      <Modal
+        title={`下发模板：${dispatchTarget?.templateName ?? ''}`}
+        open={!!dispatchTarget}
+        onCancel={closeDispatch}
+        width={680}
+        footer={
+          dispatchResult ? (
+            <Button type="primary" onClick={closeDispatch}>关闭</Button>
+          ) : (
+            <Space>
+              <Button onClick={closeDispatch}>{t('common.cancel') ?? '取消'}</Button>
+              <Button
+                type="primary"
+                icon={<SendOutlined />}
+                loading={dispatchTemplate.isPending}
+                onClick={handleDispatch}
+                disabled={dispatchDeviceIds.length === 0}
+              >
+                确认下发到 {dispatchDeviceIds.length} 台设备
+              </Button>
+            </Space>
+          )
+        }
+      >
+        {!dispatchResult ? (
+          <Form layout="vertical" style={{ marginTop: 8 }}>
+            <Form.Item label="目标设备" required>
+              <Select
+                mode="multiple"
+                placeholder="选择要下发的设备（可多选；按 SN 或名称搜索）"
+                loading={devLoading}
+                value={dispatchDeviceIds}
+                onChange={setDispatchDeviceIds}
+                optionFilterProp="label"
+                showSearch
+                style={{ width: '100%' }}
+                options={(devicePage?.items ?? []).map((d) => ({
+                  label: `${d.sn}${d.name && d.name !== d.sn ? ` (${d.name})` : ''}`,
+                  value: d.id,
+                }))}
+              />
+            </Form.Item>
+            <div style={{ color: '#999', fontSize: 12 }}>
+              说明：本次下发将强制走 Path A（模板 standardPath → privatePath 翻译 → SetParameterValues），
+              不受全局 auto_configure 开关影响。每台设备独立成败。
+            </div>
+          </Form>
+        ) : (
+          <DispatchResultPanel result={dispatchResult} />
+        )}
+      </Modal>
     </ListPageLayout>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// T-0120-b：dispatch 结果面板
+// ---------------------------------------------------------------------------
+function DispatchResultPanel({ result }: { result: DispatchTemplateResponse }) {
+  const summary = (
+    <Space size="large" style={{ marginBottom: 12 }}>
+      <Tag color="blue">总计 {result.totalDevices}</Tag>
+      <Tag color="green">成功 {result.dispatched.length}</Tag>
+      <Tag color={result.failed.length > 0 ? 'red' : 'default'}>
+        失败 {result.failed.length}
+      </Tag>
+    </Space>
+  );
+
+  const rows: Array<DispatchResult & { ok: boolean; key: string }> = [
+    ...result.dispatched.map((r) => ({ ...r, ok: true, key: `s-${r.deviceId}` })),
+    ...result.failed.map((r) => ({ ...r, ok: false, key: `f-${r.deviceId}` })),
+  ];
+
+  return (
+    <div>
+      {summary}
+      <Table
+        size="small"
+        rowKey="key"
+        pagination={false}
+        dataSource={rows}
+        columns={[
+          {
+            title: '状态',
+            dataIndex: 'ok',
+            width: 80,
+            render: (ok: boolean) =>
+              ok ? (
+                <CheckCircleTwoTone twoToneColor="#52c41a" />
+              ) : (
+                <CloseCircleTwoTone twoToneColor="#ff4d4f" />
+              ),
+          },
+          { title: '设备 ID', dataIndex: 'deviceId', ellipsis: true },
+          {
+            title: 'Task ID / 错误',
+            dataIndex: 'taskId',
+            render: (taskId: string | undefined, r) =>
+              r.ok ? <code style={{ fontSize: 12 }}>{taskId}</code> : <span style={{ color: '#ff4d4f' }}>{r.error}</span>,
+          },
+        ]}
+      />
+    </div>
   );
 }

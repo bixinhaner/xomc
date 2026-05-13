@@ -135,4 +135,64 @@ export const templateApi = {
       await http.delete(`/templates/${id}`);
     }
   },
+
+  /**
+   * T-0120 / T-0120-b: 显式下发模板到指定设备。
+   * 后端 POST /api/v1/templates/:id/dispatch；body { device_ids: string[] }。
+   * 响应：{ template_id, dispatched: [...], failed: [...], total_devices }。
+   * HTTP 语义：200 全成功 / 207 部分 / 422 全败 / 503 dispatcher 未配置。
+   */
+  async dispatchTemplate(
+    templateId: string,
+    deviceIds: string[]
+  ): Promise<DispatchTemplateResponse> {
+    const { data } = await http.post<BackendDispatchTemplateResponse>(
+      `/templates/${templateId}/dispatch`,
+      { device_ids: deviceIds }
+    );
+    return mapDispatchResponse(data);
+  },
 };
+
+// --- T-0120-b dispatch types ---
+
+interface BackendDispatchResult {
+  device_id: string;
+  task_id?: string;
+  error?: string;
+}
+
+interface BackendDispatchTemplateResponse {
+  template_id: string;
+  dispatched: BackendDispatchResult[];
+  failed: BackendDispatchResult[];
+  total_devices: number;
+}
+
+export interface DispatchResult {
+  deviceId: string;
+  taskId?: string;
+  error?: string;
+}
+
+export interface DispatchTemplateResponse {
+  templateId: string;
+  dispatched: DispatchResult[];
+  failed: DispatchResult[];
+  totalDevices: number;
+}
+
+function mapDispatchResult(r: BackendDispatchResult): DispatchResult {
+  return { deviceId: r.device_id, taskId: r.task_id, error: r.error };
+}
+
+function mapDispatchResponse(
+  resp: BackendDispatchTemplateResponse
+): DispatchTemplateResponse {
+  return {
+    templateId: resp.template_id,
+    dispatched: (resp.dispatched || []).map(mapDispatchResult),
+    failed: (resp.failed || []).map(mapDispatchResult),
+    totalDevices: resp.total_devices,
+  };
+}
