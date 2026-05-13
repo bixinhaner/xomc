@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
+	"github.com/omcgo/omcgo/internal/admin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
@@ -41,8 +42,7 @@ func (h *Handler) CreateRestore(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	createdBy, _ := c.Get("user_id") // optional middleware-injected actor
-	createdByStr, _ := createdBy.(string)
+	createdByStr := admin.UserIDStringFromCtx(c) // optional middleware-injected actor
 
 	rt, err := h.restoreService.Create(c.Request.Context(), &req, createdByStr)
 	if err != nil {
@@ -102,8 +102,7 @@ func (h *Handler) CreateRestoreByTaskID(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	createdBy, _ := c.Get("user_id")
-	createdByStr, _ := createdBy.(string)
+	createdByStr := admin.UserIDStringFromCtx(c)
 
 	result, err := h.restoreService.CreateByTaskID(c.Request.Context(), &req, createdByStr)
 	if err != nil {

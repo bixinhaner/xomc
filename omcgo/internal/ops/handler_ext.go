@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/admin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
@@ -760,15 +761,8 @@ func currentOperator(c *gin.Context) string {
 }
 
 func currentUserID(c *gin.Context) *uuid.UUID {
-	if v, ok := c.Get("user_id"); ok {
-		if s, ok := v.(string); ok {
-			if uid, err := uuid.Parse(s); err == nil {
-				return &uid
-			}
-		}
-		if uid, ok := v.(uuid.UUID); ok {
-			return &uid
-		}
+	if id, ok := admin.UserIDFromCtx(c); ok {
+		return &id
 	}
 	return nil
 }
