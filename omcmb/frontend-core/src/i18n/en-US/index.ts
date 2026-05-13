@@ -1916,9 +1916,11 @@ const messages: Record<string, string> = {
   'alarm.filter.noLimit':      'No Limit',
 
   // Topology node types
+  'topology.nodeType': 'Node Type',
   'topology.nodeType.eNB':    'Base Station',
   'topology.nodeType.domain': 'Domain',
   'topology.nodeType.site':   'Site',
+  'topology.status': 'Status',
 
   // -------------------------------------------------------------------------
   // Topology Settings

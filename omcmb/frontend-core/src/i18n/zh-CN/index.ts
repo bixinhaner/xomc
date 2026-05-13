@@ -1923,9 +1923,21 @@ const messages: Record<string, string> = {
   'alarm.filter.noLimit':      '不限',
 
   // Topology node types
+  'topology.nodeType': '节点类型',
   'topology.nodeType.eNB':    '基站',
+  'topology.nodeType.gNB':    '5G基站',
+  'topology.nodeType.CPE':    '用户终端',
+  'topology.nodeType.eGW':    '演进网关',
   'topology.nodeType.domain': '域',
   'topology.nodeType.site':   '站',
+  'topology.nodeType.router': '路由器',
+  'topology.nodeType.switch': '交换机',
+  'topology.status': '状态',
+
+  // Topology edge status
+  'topology.edgeStatus.active':   '活跃',
+  'topology.edgeStatus.inactive': '未激活',
+  'topology.edgeStatus.degraded': '降级',
 
   // -------------------------------------------------------------------------
   // Topology Settings
@@ -1979,6 +1991,13 @@ const messages: Record<string, string> = {
   'topology.site.active':      '正常',
   'topology.site.inactive':    '未激活',
   'topology.site.maintenance': '维护中',
+
+  // Site management fields
+  'topology.site.address':     '地址',
+  'topology.site.longitude':   '经度',
+  'topology.site.latitude':    '纬度',
+  'topology.site.coordinates': '坐标',
+  'topology.site.deviceCount': '设备数量',
 
   // -------------------------------------------------------------------------
   // MML Command Categories

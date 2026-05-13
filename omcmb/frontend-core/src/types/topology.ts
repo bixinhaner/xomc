@@ -32,6 +32,8 @@ export interface TopoNode {
   y: number;
   status: NodeStatus;
   deviceSn?: string;
+  siteId?: string;
+  domainId?: string;
 }
 
 export interface TopoEdge {

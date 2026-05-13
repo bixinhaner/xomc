@@ -3,6 +3,7 @@ import { topologyService } from '../../mock/services/topologyService';
 import { topologyApi } from '../../services/api/topologyApi';
 import { useMock } from '../../services/apiSwitch';
 import type { MapFilterParams, MapBounds } from '../../types/map';
+import type { SiteStatus, NodeType, NodeStatus, EdgeStatus } from '../../types/topology';
 
 export function useDomains() {
   return useQuery({
@@ -22,7 +23,13 @@ export function useDomainTree() {
   });
 }
 
-export function useSites(params?: { domainId?: string }) {
+export function useSites(params?: {
+  domainId?: string;
+  status?: SiteStatus;
+  keyword?: string;
+  page?: number;
+  pageSize?: number;
+}) {
   return useQuery({
     queryKey: ['topology', 'sites', params],
     queryFn: () =>
@@ -42,7 +49,13 @@ export function useSiteById(id: string) {
   });
 }
 
-export function useTopoNodes(params?: { domainId?: string }) {
+export function useTopoNodes(params?: {
+  domainId?: string;
+  nodeType?: NodeType;
+  status?: NodeStatus;
+  page?: number;
+  pageSize?: number;
+}) {
   return useQuery({
     queryKey: ['topology', 'nodes', params],
     queryFn: () =>
@@ -53,13 +66,17 @@ export function useTopoNodes(params?: { domainId?: string }) {
   });
 }
 
-export function useTopoEdges() {
+export function useTopoEdges(params?: {
+  status?: EdgeStatus;
+  page?: number;
+  pageSize?: number;
+}) {
   return useQuery({
-    queryKey: ['topology', 'edges'],
+    queryKey: ['topology', 'edges', params],
     queryFn: () =>
       useMock
         ? topologyService.getTopoEdges().then((items) => ({ items, total: items.length, page: 1, pageSize: items.length }))
-        : topologyApi.getTopoEdges(),
+        : topologyApi.getTopoEdges(params),
     refetchInterval: 30000,
   });
 }

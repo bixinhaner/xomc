@@ -92,6 +92,8 @@ function mapBackendTopoNode(bn: BackendTopoNode): TopoNode {
     y: bn.y,
     status: bn.status,
     deviceSn: bn.device_sn || undefined,
+    siteId: bn.site_id || undefined,
+    domainId: bn.domain_id || undefined,
   };
 }
 
@@ -183,9 +185,22 @@ export const topologyApi = {
     };
   },
 
-  async getSites(params?: { domainId?: string }): Promise<PageResponse<Site>> {
+  async getSites(params?: {
+    domainId?: string;
+    status?: SiteStatus;
+    keyword?: string;
+    page?: number;
+    pageSize?: number;
+  }): Promise<PageResponse<Site>> {
+    const queryParams: Record<string, unknown> = {};
+    if (params?.domainId) queryParams.domain_id = params.domainId;
+    if (params?.status) queryParams.status = params.status;
+    if (params?.keyword) queryParams.keyword = params.keyword;
+    if (params?.page) queryParams.page = params.page;
+    if (params?.pageSize) queryParams.page_size = params.pageSize;
+
     const { data } = await http.get<{ items: BackendSite[]; total: number; page: number; page_size: number }>('/sites', {
-      params: { domain_id: params?.domainId },
+      params: queryParams,
     });
     return {
       items: (data.items || []).map(mapBackendSite),
@@ -204,9 +219,22 @@ export const topologyApi = {
     }
   },
 
-  async getTopoNodes(params?: { domainId?: string }): Promise<PageResponse<TopoNode>> {
+  async getTopoNodes(params?: {
+    domainId?: string;
+    nodeType?: NodeType;
+    status?: NodeStatus;
+    page?: number;
+    pageSize?: number;
+  }): Promise<PageResponse<TopoNode>> {
+    const queryParams: Record<string, unknown> = {};
+    if (params?.domainId) queryParams.domain_id = params.domainId;
+    if (params?.nodeType) queryParams.node_type = params.nodeType;
+    if (params?.status) queryParams.status = params.status;
+    if (params?.page) queryParams.page = params.page;
+    if (params?.pageSize) queryParams.page_size = params.pageSize;
+
     const { data } = await http.get<{ items: BackendTopoNode[]; total: number; page: number; page_size: number }>('/topology/nodes', {
-      params: { domain_id: params?.domainId },
+      params: queryParams,
     });
     return {
       items: (data.items || []).map(mapBackendTopoNode),
@@ -216,8 +244,19 @@ export const topologyApi = {
     };
   },
 
-  async getTopoEdges(): Promise<PageResponse<TopoEdge>> {
-    const { data } = await http.get<{ items: BackendTopoEdge[]; total: number; page: number; page_size: number }>('/topology/edges');
+  async getTopoEdges(params?: {
+    status?: EdgeStatus;
+    page?: number;
+    pageSize?: number;
+  }): Promise<PageResponse<TopoEdge>> {
+    const queryParams: Record<string, unknown> = {};
+    if (params?.status) queryParams.status = params.status;
+    if (params?.page) queryParams.page = params.page;
+    if (params?.pageSize) queryParams.page_size = params.pageSize;
+
+    const { data } = await http.get<{ items: BackendTopoEdge[]; total: number; page: number; page_size: number }>('/topology/edges', {
+      params: queryParams,
+    });
     return {
       items: (data.items || []).map(mapBackendTopoEdge),
       total: data.total,
@@ -233,6 +272,129 @@ export const topologyApi = {
     return {
       nodes: (data.nodes || []).map(mapBackendTopoNode),
       edges: (data.edges || []).map(mapBackendTopoEdge),
+    };
+  },
+
+  /**
+   * 创建拓扑节点
+   */
+  async createTopoNode(data: {
+    label: string;
+    nodeType: NodeType;
+    x: number;
+    y: number;
+    status?: NodeStatus;
+    deviceSn?: string;
+    siteId?: string;
+    domainId?: string;
+  }): Promise<TopoNode> {
+    const { data: result } = await http.post<BackendTopoNode>('/topology/nodes', {
+      label: data.label,
+      node_type: data.nodeType,
+      x: data.x,
+      y: data.y,
+      status: data.status,
+      device_sn: data.deviceSn,
+      site_id: data.siteId,
+      domain_id: data.domainId,
+    });
+    return mapBackendTopoNode(result);
+  },
+
+  /**
+   * 更新拓扑节点
+   */
+  async updateTopoNode(id: string, data: {
+    label?: string;
+    nodeType?: NodeType;
+    x?: number;
+    y?: number;
+    status?: NodeStatus;
+    deviceSn?: string;
+    siteId?: string;
+    domainId?: string;
+  }): Promise<TopoNode> {
+    const { data: result } = await http.put<BackendTopoNode>(`/topology/nodes/${id}`, {
+      label: data.label,
+      node_type: data.nodeType,
+      x: data.x,
+      y: data.y,
+      status: data.status,
+      device_sn: data.deviceSn,
+      site_id: data.siteId,
+      domain_id: data.domainId,
+    });
+    return mapBackendTopoNode(result);
+  },
+
+  /**
+   * 删除拓扑节点
+   */
+  async deleteTopoNode(id: string): Promise<void> {
+    await http.delete(`/topology/nodes/${id}`);
+  },
+
+  /**
+   * 创建拓扑边
+   */
+  async createTopoEdge(data: {
+    sourceId: string;
+    targetId: string;
+    label?: string;
+    status?: EdgeStatus;
+  }): Promise<TopoEdge> {
+    const { data: result } = await http.post<BackendTopoEdge>('/topology/edges', {
+      source_id: data.sourceId,
+      target_id: data.targetId,
+      label: data.label,
+      status: data.status,
+    });
+    return mapBackendTopoEdge(result);
+  },
+
+  /**
+   * 更新拓扑边
+   */
+  async updateTopoEdge(id: string, data: {
+    sourceId?: string;
+    targetId?: string;
+    label?: string;
+    status?: EdgeStatus;
+  }): Promise<TopoEdge> {
+    const { data: result } = await http.put<BackendTopoEdge>(`/topology/edges/${id}`, {
+      source_id: data.sourceId,
+      target_id: data.targetId,
+      label: data.label,
+      status: data.status,
+    });
+    return mapBackendTopoEdge(result);
+  },
+
+  /**
+   * 删除拓扑边
+   */
+  async deleteTopoEdge(id: string): Promise<void> {
+    await http.delete(`/topology/edges/${id}`);
+  },
+
+  /**
+   * 批量从设备生成拓扑节点
+   */
+  async batchCreateTopoNodes(params?: {
+    siteId?: string;
+    domainId?: string;
+    nodeTypes?: NodeType[];
+    limit?: number;
+  }): Promise<{ created: number; nodes: TopoNode[] }> {
+    const { data } = await http.post<{ created: number; nodes: BackendTopoNode[] }>('/topology/nodes/batch', {
+      site_id: params?.siteId,
+      domain_id: params?.domainId,
+      node_types: params?.nodeTypes,
+      limit: params?.limit,
+    });
+    return {
+      created: data.created,
+      nodes: (data.nodes || []).map(mapBackendTopoNode),
     };
   },
 
