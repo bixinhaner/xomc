@@ -6,12 +6,33 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/components/logger"
 	"github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
 )
+
+// userIDFromCtx 从 gin context 提取 user_id，兼容 uuid.UUID 与 string 两种存储类型
+// 中间件（admin.RequireAuth / RequireAPIKey）当前存的是 uuid.UUID
+func userIDFromCtx(c *gin.Context) string {
+	v, exists := c.Get("user_id")
+	if !exists {
+		return ""
+	}
+	switch u := v.(type) {
+	case uuid.UUID:
+		if u == uuid.Nil {
+			return ""
+		}
+		return u.String()
+	case string:
+		return u
+	default:
+		return ""
+	}
+}
 
 // Handler 任务管理 REST API Handler
 type Handler struct {
@@ -65,10 +86,7 @@ func (h *Handler) CreateTask(c *gin.Context) {
 		req.Source = TaskSourceAPI
 	}
 	if req.CreatorID == "" {
-		// 从 context 获取用户 ID
-		if userID, exists := c.Get("user_id"); exists {
-			req.CreatorID = userID.(string)
-		}
+		req.CreatorID = userIDFromCtx(c)
 	}
 
 	task, err := h.service.CreateTask(c.Request.Context(), &req)
@@ -239,16 +257,14 @@ func (h *Handler) BatchCreateTasks(c *gin.Context) {
 	}
 
 	// 设置设备 SN 和默认值
-	userID, _ := c.Get("user_id")
+	creatorID := userIDFromCtx(c)
 	for _, req := range reqs {
 		req.DeviceSN = deviceSN
 		if req.Source == "" {
 			req.Source = TaskSourceAPI
 		}
 		if req.CreatorID == "" {
-			if uid, ok := userID.(string); ok {
-				req.CreatorID = uid
-			}
+			req.CreatorID = creatorID
 		}
 	}
 
