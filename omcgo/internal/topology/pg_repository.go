@@ -224,17 +224,21 @@ func (r *PgDeviceGroupRepository) GetTree(ctx context.Context) ([]DeviceGroup, e
 	return scanGroups(rows)
 }
 
-// GetTreeWithCounts returns all groups with device_count populated via LEFT JOIN.
+// GetTreeWithCounts returns all groups with device_count populated.
+// Optimized: Uses LATERAL join for efficient counting instead of GROUP BY on entire table.
 func (r *PgDeviceGroupRepository) GetTreeWithCounts(ctx context.Context) ([]DeviceGroup, error) {
 	const rawSQL = `
 		SELECT dg.id, dg.name, dg.parent_id, dg.carrier, dg.description, dg.sort_order,
 		       dg.level, dg.status, dg.is_default, dg.remark, dg.created_by, dg.updated_by,
 		       dg.created_at, dg.updated_at,
 		       dg.matching_mode, dg.name_rule_list, dg.lac_list, dg.tac_list,
-		       COUNT(dgm.device_id) AS device_count
+		       COALESCE(device_counts.count, 0) AS device_count
 		FROM device_groups dg
-		LEFT JOIN device_group_members dgm ON dgm.group_id = dg.id
-		GROUP BY dg.id
+		LEFT JOIN LATERAL (
+			SELECT COUNT(*) AS count
+			FROM device_group_members dgm
+			WHERE dgm.group_id = dg.id
+		) device_counts ON true
 		ORDER BY dg.sort_order ASC, dg.name ASC`
 
 	rows, err := r.pool.Query(ctx, rawSQL)

@@ -90,6 +90,7 @@ type GeoData struct {
 type SiteFilter struct {
 	DomainID *uuid.UUID
 	Status   *SiteStatus
+	Keyword  *string
 	model.ListRequest
 }
 
@@ -97,10 +98,12 @@ type SiteFilter struct {
 type TopoNodeFilter struct {
 	DomainID *uuid.UUID
 	NodeType *string
+	Status   *NodeStatus
 	model.ListRequest
 }
 
 // TopoEdgeFilter specifies criteria for listing topology edges.
 type TopoEdgeFilter struct {
+	Status *EdgeStatus
 	model.ListRequest
 }

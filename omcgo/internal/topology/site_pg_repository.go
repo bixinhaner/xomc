@@ -149,6 +149,10 @@ func (r *PgSiteRepository) List(ctx context.Context, filter SiteFilter) (*model.
 		base = base.Where(sq.Eq{"status": string(*filter.Status)})
 		countBase = countBase.Where(sq.Eq{"status": string(*filter.Status)})
 	}
+	if filter.Keyword != nil {
+		base = base.Where(sq.Like{"name": "%" + *filter.Keyword + "%"})
+		countBase = countBase.Where(sq.Like{"name": "%" + *filter.Keyword + "%"})
+	}
 
 	// Count total
 	countSQL, countArgs, err := countBase.ToSql()
@@ -321,6 +325,114 @@ func NewPgTopoNodeRepository(pool *pgxpool.Pool) *PgTopoNodeRepository {
 	return &PgTopoNodeRepository{pool: pool}
 }
 
+func (r *PgTopoNodeRepository) Create(ctx context.Context, node *TopoNode) error {
+	if node.ID == uuid.Nil {
+		node.ID = uuid.New()
+	}
+	now := time.Now()
+	node.CreatedAt = now
+	node.UpdatedAt = now
+	if node.Status == "" {
+		node.Status = NodeOnline
+	}
+
+	query, args, err := storage.Psql.Insert("topo_nodes").
+		Columns("id", "label", "node_type", "x", "y", "status",
+			"device_sn", "site_id", "domain_id", "created_at", "updated_at").
+		Values(
+			node.ID, node.Label, node.NodeType, node.X, node.Y, node.Status,
+			nullableString(node.DeviceSN),
+			nullableUUID(node.SiteID),
+			nullableUUID(node.DomainID),
+			node.CreatedAt, node.UpdatedAt,
+		).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build insert topo_node SQL: %w", err)
+	}
+
+	_, err = r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		if classified := classifyPgError(err); classified != err {
+			return classified
+		}
+		return fmt.Errorf("create topo_node: %w", err)
+	}
+	return nil
+}
+
+func (r *PgTopoNodeRepository) GetByID(ctx context.Context, id uuid.UUID) (*TopoNode, error) {
+	query, args, err := storage.Psql.Select(topoNodeColumns...).
+		From("topo_nodes").
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build select topo_node SQL: %w", err)
+	}
+
+	row := r.pool.QueryRow(ctx, query, args...)
+	node, err := scanTopoNodeRowFromRow(row)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, commonerrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("get topo_node: %w", err)
+	}
+	return node, nil
+}
+
+func (r *PgTopoNodeRepository) Update(ctx context.Context, node *TopoNode) error {
+	node.UpdatedAt = time.Now()
+
+	query, args, err := storage.Psql.Update("topo_nodes").
+		Set("label", node.Label).
+		Set("node_type", node.NodeType).
+		Set("x", node.X).
+		Set("y", node.Y).
+		Set("status", node.Status).
+		Set("device_sn", nullableString(node.DeviceSN)).
+		Set("site_id", nullableUUID(node.SiteID)).
+		Set("domain_id", nullableUUID(node.DomainID)).
+		Set("updated_at", node.UpdatedAt).
+		Where(sq.Eq{"id": node.ID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update topo_node SQL: %w", err)
+	}
+
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		if classified := classifyPgError(err); classified != err {
+			return classified
+		}
+		return fmt.Errorf("update topo_node: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
+func (r *PgTopoNodeRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	query, args, err := storage.Psql.Delete("topo_nodes").
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build delete topo_node SQL: %w", err)
+	}
+
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("delete topo_node: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
 func (r *PgTopoNodeRepository) List(ctx context.Context, filter TopoNodeFilter) (*model.ListResponse[TopoNode], error) {
 	base := storage.Psql.Select(topoNodeColumns...).From("topo_nodes")
 	countBase := storage.Psql.Select("COUNT(*)").From("topo_nodes")
@@ -332,6 +444,10 @@ func (r *PgTopoNodeRepository) List(ctx context.Context, filter TopoNodeFilter) 
 	if filter.NodeType != nil {
 		base = base.Where(sq.Eq{"node_type": *filter.NodeType})
 		countBase = countBase.Where(sq.Eq{"node_type": *filter.NodeType})
+	}
+	if filter.Status != nil {
+		base = base.Where(sq.Eq{"status": string(*filter.Status)})
+		countBase = countBase.Where(sq.Eq{"status": string(*filter.Status)})
 	}
 
 	// Count total
@@ -420,6 +536,40 @@ func (r *PgTopoNodeRepository) ListAll(ctx context.Context, domainID *uuid.UUID)
 
 // ---- TopoNode scanning helpers ----
 
+func scanTopoNodeRowFromRow(row pgx.Row) (*TopoNode, error) {
+	var n TopoNode
+	var (
+		deviceSN sql.NullString
+		siteID   sql.NullString
+		domainID sql.NullString
+	)
+
+	err := row.Scan(
+		&n.ID, &n.Label, &n.NodeType, &n.X, &n.Y, &n.Status,
+		&deviceSN, &siteID, &domainID, &n.CreatedAt, &n.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, commonerrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("scan topo_node row: %w", err)
+	}
+
+	if deviceSN.Valid {
+		n.DeviceSN = deviceSN.String
+	}
+	if siteID.Valid {
+		id, _ := uuid.Parse(siteID.String)
+		n.SiteID = &id
+	}
+	if domainID.Valid {
+		id, _ := uuid.Parse(domainID.String)
+		n.DomainID = &id
+	}
+
+	return &n, nil
+}
+
 func scanTopoNodeRow(rows pgx.Rows) (*TopoNode, error) {
 	var n TopoNode
 	var (
@@ -467,9 +617,106 @@ func NewPgTopoEdgeRepository(pool *pgxpool.Pool) *PgTopoEdgeRepository {
 	return &PgTopoEdgeRepository{pool: pool}
 }
 
+func (r *PgTopoEdgeRepository) Create(ctx context.Context, edge *TopoEdge) error {
+	if edge.ID == uuid.Nil {
+		edge.ID = uuid.New()
+	}
+	edge.CreatedAt = time.Now()
+	if edge.Status == "" {
+		edge.Status = EdgeActive
+	}
+
+	query, args, err := storage.Psql.Insert("topo_edges").
+		Columns("id", "source_id", "target_id", "label", "status", "created_at").
+		Values(edge.ID, edge.SourceID, edge.TargetID, nullableString(edge.Label), edge.Status, edge.CreatedAt).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build insert topo_edge SQL: %w", err)
+	}
+
+	_, err = r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		if classified := classifyPgError(err); classified != err {
+			return classified
+		}
+		return fmt.Errorf("create topo_edge: %w", err)
+	}
+	return nil
+}
+
+func (r *PgTopoEdgeRepository) GetByID(ctx context.Context, id uuid.UUID) (*TopoEdge, error) {
+	query, args, err := storage.Psql.Select(topoEdgeColumns...).
+		From("topo_edges").
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build select topo_edge SQL: %w", err)
+	}
+
+	row := r.pool.QueryRow(ctx, query, args...)
+	edge, err := scanTopoEdgeRowFromRow(row)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, commonerrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("get topo_edge: %w", err)
+	}
+	return edge, nil
+}
+
+func (r *PgTopoEdgeRepository) Update(ctx context.Context, edge *TopoEdge) error {
+	query, args, err := storage.Psql.Update("topo_edges").
+		Set("source_id", edge.SourceID).
+		Set("target_id", edge.TargetID).
+		Set("label", nullableString(edge.Label)).
+		Set("status", edge.Status).
+		Where(sq.Eq{"id": edge.ID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update topo_edge SQL: %w", err)
+	}
+
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		if classified := classifyPgError(err); classified != err {
+			return classified
+		}
+		return fmt.Errorf("update topo_edge: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
+func (r *PgTopoEdgeRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	query, args, err := storage.Psql.Delete("topo_edges").
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build delete topo_edge SQL: %w", err)
+	}
+
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("delete topo_edge: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
 func (r *PgTopoEdgeRepository) List(ctx context.Context, filter TopoEdgeFilter) (*model.ListResponse[TopoEdge], error) {
 	base := storage.Psql.Select(topoEdgeColumns...).From("topo_edges")
 	countBase := storage.Psql.Select("COUNT(*)").From("topo_edges")
+
+	if filter.Status != nil {
+		base = base.Where(sq.Eq{"status": string(*filter.Status)})
+		countBase = countBase.Where(sq.Eq{"status": string(*filter.Status)})
+	}
 
 	// Count total
 	countSQL, countArgs, err := countBase.ToSql()
@@ -554,6 +801,27 @@ func (r *PgTopoEdgeRepository) ListAll(ctx context.Context) ([]TopoEdge, error) 
 
 // ---- TopoEdge scanning helpers ----
 
+func scanTopoEdgeRowFromRow(row pgx.Row) (*TopoEdge, error) {
+	var e TopoEdge
+	var label sql.NullString
+
+	err := row.Scan(
+		&e.ID, &e.SourceID, &e.TargetID, &label, &e.Status, &e.CreatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, commonerrors.ErrNotFound
+		}
+		return nil, fmt.Errorf("scan topo_edge row: %w", err)
+	}
+
+	if label.Valid {
+		e.Label = label.String
+	}
+
+	return &e, nil
+}
+
 func scanTopoEdgeRow(rows pgx.Rows) (*TopoEdge, error) {
 	var e TopoEdge
 	var label sql.NullString
@@ -570,4 +838,22 @@ func scanTopoEdgeRow(rows pgx.Rows) (*TopoEdge, error) {
 	}
 
 	return &e, nil
+}
+
+// ======================================================================
+// Helper functions
+// ======================================================================
+
+func nullableUUID(id *uuid.UUID) interface{} {
+	if id == nil {
+		return nil
+	}
+	return *id
+}
+
+func nullableString(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
 }

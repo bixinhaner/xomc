@@ -5,20 +5,23 @@ import (
 	"fmt"
 	"time"
 
+	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/omcgo/omcgo/global"
 	"github.com/omcgo/omcgo/internal/admin/audit"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/core/storage"
 	"go.uber.org/zap"
 )
 
 // DeviceGroupService provides business logic for device group management.
 type DeviceGroupService struct {
-	repo   DeviceGroupRepository
-	pool   *pgxpool.Pool
-	logger *zap.Logger
+	repo       DeviceGroupRepository
+	topoNodeRepo TopoNodeRepository
+	pool       *pgxpool.Pool
+	logger     *zap.Logger
 
 	// PRD users.md §11.7 决议③ / roles.md §11.4：删除设备分组联动钩子。
 	// 两者均可为 nil（测试场景），DeleteGroup 退化为旧行为。
@@ -27,8 +30,8 @@ type DeviceGroupService struct {
 }
 
 // NewDeviceGroupService creates a new DeviceGroupService.
-func NewDeviceGroupService(repo DeviceGroupRepository, pool *pgxpool.Pool, logger *zap.Logger) *DeviceGroupService {
-	return &DeviceGroupService{repo: repo, pool: pool, logger: logger}
+func NewDeviceGroupService(repo DeviceGroupRepository, topoNodeRepo TopoNodeRepository, pool *pgxpool.Pool, logger *zap.Logger) *DeviceGroupService {
+	return &DeviceGroupService{repo: repo, topoNodeRepo: topoNodeRepo, pool: pool, logger: logger}
 }
 
 // GetTree returns the full group tree with children nested under parents.
@@ -542,3 +545,138 @@ func carrier(s string) carrierCode {
 }
 
 type carrierCode = model.CarrierCode
+
+// CreateTopoNodesFromDevices creates topology nodes from devices table.
+// Filters by technology (node_types) and site/domain IDs, with optional limit.
+func (s *DeviceGroupService) CreateTopoNodesFromDevices(ctx context.Context, siteID, domainID string, nodeTypes []string, limit int) ([]TopoNode, error) {
+	if s.pool == nil {
+		return nil, fmt.Errorf("database pool not available")
+	}
+
+	// Build query to select devices
+	base := storage.Psql.
+		Select("serial_number", "technology", "status", "latitude", "longitude").
+		From("devices").
+		Where(sq.Eq{"deleted_at": nil})
+
+	// Filter by technology if specified
+	if len(nodeTypes) > 0 {
+		var techFilter []interface{}
+		for _, nt := range nodeTypes {
+			// Map eNB/gNB to lte/nr
+			if nt == "eNB" {
+				techFilter = append(techFilter, "lte")
+			} else if nt == "gNB" {
+				techFilter = append(techFilter, "nr")
+			} else {
+				// For other types, try direct mapping
+				techFilter = append(techFilter, nt)
+			}
+		}
+		if len(techFilter) > 0 {
+			base = base.Where(sq.Eq{"technology": techFilter})
+		}
+	}
+
+	// Apply limit
+	maxLimit := 100
+	if limit > 0 && limit < maxLimit {
+		base = base.Limit(uint64(limit))
+	} else {
+		base = base.Limit(uint64(maxLimit))
+	}
+
+	sql, args, err := base.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build select devices SQL: %w", err)
+	}
+
+	rows, err := s.pool.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query devices: %w", err)
+	}
+	defer rows.Close()
+
+	var nodes []TopoNode
+	var x, y float64 = 50, 50
+	gridCols := 8
+	col := 0
+
+	for rows.Next() {
+		var serialNumber, technology, status string
+		var latitude, longitude *float64
+
+		if err := rows.Scan(&serialNumber, &technology, &status, &latitude, &longitude); err != nil {
+			return nil, fmt.Errorf("scan device row: %w", err)
+		}
+
+		// Determine node type based on technology
+		nodeType := "eGW" // default
+		if technology == "lte" {
+			nodeType = "eNB"
+		} else if technology == "nr" {
+			nodeType = "gNB"
+		} else if technology == "wifi" || technology == "cpe" {
+			nodeType = "CPE"
+		}
+
+		// Determine node status based on device status
+		nodeStatus := NodeOffline
+		if status == "registered" || status == "active" {
+			nodeStatus = NodeOnline
+		}
+
+		// Generate coordinates (simple grid layout)
+		x = 50 + float64(col%gridCols)*80
+		y = 50 + float64(col/gridCols)*80
+		col++
+
+		node := TopoNode{
+			ID:       uuid.New(),
+			Label:    serialNumber,
+			NodeType: nodeType,
+			X:        x,
+			Y:        y,
+			Status:   nodeStatus,
+			DeviceSN: serialNumber,
+		}
+
+		// Set site_id if provided
+		if siteID != "" {
+			sid, err := uuid.Parse(siteID)
+			if err == nil {
+				node.SiteID = &sid
+			}
+		}
+
+		// Set domain_id if provided
+		if domainID != "" {
+			did, err := uuid.Parse(domainID)
+			if err == nil {
+				node.DomainID = &did
+			}
+		}
+
+		// Use geo coordinates if available
+		if latitude != nil && longitude != nil {
+			// Scale geo coords to canvas (rough approximation)
+			node.X = *longitude
+			node.Y = *latitude
+		}
+
+		nodes = append(nodes, node)
+	}
+
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("iterate device rows: %w", rows.Err())
+	}
+
+	// Batch insert nodes
+	for i := range nodes {
+		if err := s.topoNodeRepo.Create(ctx, &nodes[i]); err != nil {
+			return nil, fmt.Errorf("create topo node %s: %w", nodes[i].Label, err)
+		}
+	}
+
+	return nodes, nil
+}

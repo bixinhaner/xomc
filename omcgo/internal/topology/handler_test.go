@@ -229,19 +229,63 @@ func (m *mockSiteRepo) ListWithCoordinates(_ context.Context) ([]Site, error) {
 // ---------------------------------------------------------------------------
 
 type mockTopoNodeRepo struct {
-	nodes []TopoNode
+	nodes map[uuid.UUID]TopoNode
 }
 
 func newMockTopoNodeRepo() *mockTopoNodeRepo {
-	return &mockTopoNodeRepo{}
+	return &mockTopoNodeRepo{nodes: make(map[uuid.UUID]TopoNode)}
+}
+
+func (m *mockTopoNodeRepo) Create(_ context.Context, node *TopoNode) error {
+	if node.ID == uuid.Nil {
+		node.ID = uuid.New()
+	}
+	now := time.Now()
+	node.CreatedAt = now
+	node.UpdatedAt = now
+	m.nodes[node.ID] = *node
+	return nil
+}
+
+func (m *mockTopoNodeRepo) GetByID(_ context.Context, id uuid.UUID) (*TopoNode, error) {
+	n, ok := m.nodes[id]
+	if !ok {
+		return nil, commonerrors.ErrNotFound
+	}
+	return &n, nil
+}
+
+func (m *mockTopoNodeRepo) Update(_ context.Context, node *TopoNode) error {
+	if _, ok := m.nodes[node.ID]; !ok {
+		return commonerrors.ErrNotFound
+	}
+	node.UpdatedAt = time.Now()
+	m.nodes[node.ID] = *node
+	return nil
+}
+
+func (m *mockTopoNodeRepo) Delete(_ context.Context, id uuid.UUID) error {
+	if _, ok := m.nodes[id]; !ok {
+		return commonerrors.ErrNotFound
+	}
+	delete(m.nodes, id)
+	return nil
 }
 
 func (m *mockTopoNodeRepo) List(_ context.Context, filter TopoNodeFilter) (*model.ListResponse[TopoNode], error) {
-	return model.NewListResponse(m.nodes, int64(len(m.nodes)), filter.Page, filter.PageSize), nil
+	items := make([]TopoNode, 0, len(m.nodes))
+	for _, n := range m.nodes {
+		items = append(items, n)
+	}
+	return model.NewListResponse(items, int64(len(items)), filter.Page, filter.PageSize), nil
 }
 
 func (m *mockTopoNodeRepo) ListAll(_ context.Context, _ *uuid.UUID) ([]TopoNode, error) {
-	return m.nodes, nil
+	items := make([]TopoNode, 0, len(m.nodes))
+	for _, n := range m.nodes {
+		items = append(items, n)
+	}
+	return items, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -249,19 +293,60 @@ func (m *mockTopoNodeRepo) ListAll(_ context.Context, _ *uuid.UUID) ([]TopoNode,
 // ---------------------------------------------------------------------------
 
 type mockTopoEdgeRepo struct {
-	edges []TopoEdge
+	edges map[uuid.UUID]TopoEdge
 }
 
 func newMockTopoEdgeRepo() *mockTopoEdgeRepo {
-	return &mockTopoEdgeRepo{}
+	return &mockTopoEdgeRepo{edges: make(map[uuid.UUID]TopoEdge)}
+}
+
+func (m *mockTopoEdgeRepo) Create(_ context.Context, edge *TopoEdge) error {
+	if edge.ID == uuid.Nil {
+		edge.ID = uuid.New()
+	}
+	edge.CreatedAt = time.Now()
+	m.edges[edge.ID] = *edge
+	return nil
+}
+
+func (m *mockTopoEdgeRepo) GetByID(_ context.Context, id uuid.UUID) (*TopoEdge, error) {
+	e, ok := m.edges[id]
+	if !ok {
+		return nil, commonerrors.ErrNotFound
+	}
+	return &e, nil
+}
+
+func (m *mockTopoEdgeRepo) Update(_ context.Context, edge *TopoEdge) error {
+	if _, ok := m.edges[edge.ID]; !ok {
+		return commonerrors.ErrNotFound
+	}
+	m.edges[edge.ID] = *edge
+	return nil
+}
+
+func (m *mockTopoEdgeRepo) Delete(_ context.Context, id uuid.UUID) error {
+	if _, ok := m.edges[id]; !ok {
+		return commonerrors.ErrNotFound
+	}
+	delete(m.edges, id)
+	return nil
 }
 
 func (m *mockTopoEdgeRepo) List(_ context.Context, filter TopoEdgeFilter) (*model.ListResponse[TopoEdge], error) {
-	return model.NewListResponse(m.edges, int64(len(m.edges)), filter.Page, filter.PageSize), nil
+	items := make([]TopoEdge, 0, len(m.edges))
+	for _, e := range m.edges {
+		items = append(items, e)
+	}
+	return model.NewListResponse(items, int64(len(items)), filter.Page, filter.PageSize), nil
 }
 
 func (m *mockTopoEdgeRepo) ListAll(_ context.Context) ([]TopoEdge, error) {
-	return m.edges, nil
+	items := make([]TopoEdge, 0, len(m.edges))
+	for _, e := range m.edges {
+		items = append(items, e)
+	}
+	return items, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -305,7 +390,7 @@ func newTestHandler() (*Handler, *mockDeviceGroupRepo, *mockSiteRepo, *mockTopoN
 	nodeRepo := newMockTopoNodeRepo()
 	edgeRepo := newMockTopoEdgeRepo()
 	logger := zap.NewNop()
-	service := NewDeviceGroupService(groupRepo, nil, logger)
+	service := NewDeviceGroupService(groupRepo, nodeRepo, nil, logger)
 	h := NewHandler(groupRepo, service, siteRepo, nodeRepo, edgeRepo)
 	return h, groupRepo, siteRepo, nodeRepo, edgeRepo
 }
@@ -633,10 +718,10 @@ func TestHandler_ListTopoNodes(t *testing.T) {
 	h, _, _, nodeRepo, _ := newTestHandler()
 	router := setupRouter(h)
 
-	nodeRepo.nodes = []TopoNode{
-		{ID: uuid.New(), Label: "eNB-001", NodeType: "enb", Status: NodeOnline},
-		{ID: uuid.New(), Label: "GW-001", NodeType: "gateway", Status: NodeOnline},
-	}
+	node1 := TopoNode{ID: uuid.New(), Label: "eNB-001", NodeType: "enb", Status: NodeOnline}
+	node2 := TopoNode{ID: uuid.New(), Label: "GW-001", NodeType: "gateway", Status: NodeOnline}
+	nodeRepo.nodes[node1.ID] = node1
+	nodeRepo.nodes[node2.ID] = node2
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/topology/nodes?page=1&page_size=20", nil)
@@ -648,4 +733,416 @@ func TestHandler_ListTopoNodes(t *testing.T) {
 	response.DecodeData(t, w.Body, &resp)
 	assert.Equal(t, int64(2), resp.Total)
 	assert.Len(t, resp.Items, 2)
+}
+
+// ---------------------------------------------------------------------------
+// Tests: TopoNode CRUD
+// ---------------------------------------------------------------------------
+
+func TestHandler_CreateTopoNode_Success(t *testing.T) {
+	h, _, _, nodeRepo, _ := newTestHandler()
+	router := setupRouter(h)
+
+	body := map[string]interface{}{
+		"label":     "eNB-Test-001",
+		"node_type": "eNB",
+		"x":         100.5,
+		"y":         200.3,
+		"status":    "online",
+		"device_sn": "SN12345",
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/topology/nodes",
+		bytes.NewReader(mustMarshal(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	var resp TopoNode
+	response.DecodeData(t, w.Body, &resp)
+	assert.Equal(t, "eNB-Test-001", resp.Label)
+	assert.Equal(t, "eNB", resp.NodeType)
+	assert.Equal(t, 100.5, resp.X)
+	assert.Equal(t, 200.3, resp.Y)
+	assert.Equal(t, NodeOnline, resp.Status)
+	assert.Equal(t, "SN12345", resp.DeviceSN)
+	assert.NotEqual(t, uuid.Nil, resp.ID)
+	assert.Len(t, nodeRepo.nodes, 1)
+}
+
+func TestHandler_CreateTopoNode_ValidationError(t *testing.T) {
+	h, _, _, _, _ := newTestHandler()
+	router := setupRouter(h)
+
+	cases := []struct {
+		name       string
+		body       map[string]interface{}
+		wantStatus int
+	}{
+		{
+			name: "missing label",
+			body: map[string]interface{}{
+				"node_type": "eNB",
+				"x":         100,
+				"y":         200,
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "missing node_type",
+			body: map[string]interface{}{
+				"label": "eNB-001",
+				"x":     100,
+				"y":     200,
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "invalid node_type",
+			body: map[string]interface{}{
+				"label":     "eNB-001",
+				"node_type": "INVALID",
+				"x":         100,
+				"y":         200,
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "invalid status",
+			body: map[string]interface{}{
+				"label":     "eNB-001",
+				"node_type": "eNB",
+				"status":    "invalid",
+				"x":         100,
+				"y":         200,
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/topology/nodes",
+				bytes.NewReader(mustMarshal(t, tc.body)))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tc.wantStatus, w.Code)
+		})
+	}
+}
+
+func TestHandler_CreateTopoNode_InvalidSiteID(t *testing.T) {
+	h, _, _, _, _ := newTestHandler()
+	router := setupRouter(h)
+
+	body := map[string]interface{}{
+		"label":     "eNB-001",
+		"node_type": "eNB",
+		"x":         100,
+		"y":         200,
+		"site_id":   "not-a-uuid",
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/topology/nodes",
+		bytes.NewReader(mustMarshal(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandler_GetTopoNode_Success(t *testing.T) {
+	h, _, _, nodeRepo, _ := newTestHandler()
+	router := setupRouter(h)
+
+	nodeID := uuid.New()
+	node := TopoNode{
+		ID:       nodeID,
+		Label:    "eNB-001",
+		NodeType: "eNB",
+		X:        100,
+		Y:        200,
+		Status:   NodeOnline,
+	}
+	nodeRepo.nodes[nodeID] = node
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/topology/nodes/"+nodeID.String(), nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp TopoNode
+	response.DecodeData(t, w.Body, &resp)
+	assert.Equal(t, nodeID, resp.ID)
+	assert.Equal(t, "eNB-001", resp.Label)
+}
+
+func TestHandler_GetTopoNode_NotFound(t *testing.T) {
+	h, _, _, _, _ := newTestHandler()
+	router := setupRouter(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/topology/nodes/"+uuid.New().String(), nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestHandler_UpdateTopoNode_Success(t *testing.T) {
+	h, _, _, nodeRepo, _ := newTestHandler()
+	router := setupRouter(h)
+
+	nodeID := uuid.New()
+	node := TopoNode{
+		ID:       nodeID,
+		Label:    "eNB-001",
+		NodeType: "eNB",
+		X:        100,
+		Y:        200,
+		Status:   NodeOnline,
+	}
+	nodeRepo.nodes[nodeID] = node
+
+	body := map[string]interface{}{
+		"label":  "eNB-001-Updated",
+		"x":      150.5,
+		"y":      250.3,
+		"status": "alarm",
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/topology/nodes/"+nodeID.String(),
+		bytes.NewReader(mustMarshal(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp TopoNode
+	response.DecodeData(t, w.Body, &resp)
+	assert.Equal(t, "eNB-001-Updated", resp.Label)
+	assert.Equal(t, 150.5, resp.X)
+	assert.Equal(t, 250.3, resp.Y)
+	assert.Equal(t, NodeAlarm, resp.Status)
+}
+
+func TestHandler_DeleteTopoNode_Success(t *testing.T) {
+	h, _, _, nodeRepo, _ := newTestHandler()
+	router := setupRouter(h)
+
+	nodeID := uuid.New()
+	node := TopoNode{
+		ID:       nodeID,
+		Label:    "eNB-001",
+		NodeType: "eNB",
+		Status:   NodeOnline,
+	}
+	nodeRepo.nodes[nodeID] = node
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/topology/nodes/"+nodeID.String(), nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Empty(t, nodeRepo.nodes)
+}
+
+// ---------------------------------------------------------------------------
+// Tests: TopoEdge CRUD
+// ---------------------------------------------------------------------------
+
+func TestHandler_CreateTopoEdge_Success(t *testing.T) {
+	h, _, _, _, edgeRepo := newTestHandler()
+	router := setupRouter(h)
+
+	sourceID := uuid.New()
+	targetID := uuid.New()
+
+	body := map[string]interface{}{
+		"source_id": sourceID.String(),
+		"target_id": targetID.String(),
+		"label":     "S1-C",
+		"status":    "active",
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/topology/edges",
+		bytes.NewReader(mustMarshal(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	var resp TopoEdge
+	response.DecodeData(t, w.Body, &resp)
+	assert.Equal(t, sourceID, resp.SourceID)
+	assert.Equal(t, targetID, resp.TargetID)
+	assert.Equal(t, "S1-C", resp.Label)
+	assert.Equal(t, EdgeActive, resp.Status)
+	assert.NotEqual(t, uuid.Nil, resp.ID)
+	assert.Len(t, edgeRepo.edges, 1)
+}
+
+func TestHandler_CreateTopoEdge_ValidationError(t *testing.T) {
+	h, _, _, _, _ := newTestHandler()
+	router := setupRouter(h)
+
+	cases := []struct {
+		name       string
+		body       map[string]interface{}
+		wantStatus int
+	}{
+		{
+			name: "missing source_id",
+			body: map[string]interface{}{
+				"target_id": uuid.New().String(),
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "missing target_id",
+			body: map[string]interface{}{
+				"source_id": uuid.New().String(),
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "invalid source_id",
+			body: map[string]interface{}{
+				"source_id": "not-a-uuid",
+				"target_id": uuid.New().String(),
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "invalid target_id",
+			body: map[string]interface{}{
+				"source_id": uuid.New().String(),
+				"target_id": "not-a-uuid",
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "invalid status",
+			body: map[string]interface{}{
+				"source_id": uuid.New().String(),
+				"target_id": uuid.New().String(),
+				"status":    "invalid",
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/topology/edges",
+				bytes.NewReader(mustMarshal(t, tc.body)))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tc.wantStatus, w.Code)
+		})
+	}
+}
+
+func TestHandler_GetTopoEdge_Success(t *testing.T) {
+	h, _, _, _, edgeRepo := newTestHandler()
+	router := setupRouter(h)
+
+	edgeID := uuid.New()
+	sourceID := uuid.New()
+	targetID := uuid.New()
+	edge := TopoEdge{
+		ID:       edgeID,
+		SourceID: sourceID,
+		TargetID: targetID,
+		Label:    "S1-C",
+		Status:   EdgeActive,
+	}
+	edgeRepo.edges[edgeID] = edge
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/topology/edges/"+edgeID.String(), nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp TopoEdge
+	response.DecodeData(t, w.Body, &resp)
+	assert.Equal(t, edgeID, resp.ID)
+	assert.Equal(t, "S1-C", resp.Label)
+}
+
+func TestHandler_UpdateTopoEdge_Success(t *testing.T) {
+	h, _, _, _, edgeRepo := newTestHandler()
+	router := setupRouter(h)
+
+	edgeID := uuid.New()
+	sourceID := uuid.New()
+	targetID := uuid.New()
+	edge := TopoEdge{
+		ID:       edgeID,
+		SourceID: sourceID,
+		TargetID: targetID,
+		Label:    "S1-C",
+		Status:   EdgeActive,
+	}
+	edgeRepo.edges[edgeID] = edge
+
+	body := map[string]interface{}{
+		"label":  "S1-U",
+		"status": "degraded",
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/topology/edges/"+edgeID.String(),
+		bytes.NewReader(mustMarshal(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp TopoEdge
+	response.DecodeData(t, w.Body, &resp)
+	assert.Equal(t, "S1-U", resp.Label)
+	assert.Equal(t, EdgeDegraded, resp.Status)
+}
+
+func TestHandler_DeleteTopoEdge_Success(t *testing.T) {
+	h, _, _, _, edgeRepo := newTestHandler()
+	router := setupRouter(h)
+
+	edgeID := uuid.New()
+	edge := TopoEdge{
+		ID:       edgeID,
+		SourceID: uuid.New(),
+		TargetID: uuid.New(),
+		Status:   EdgeActive,
+	}
+	edgeRepo.edges[edgeID] = edge
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/topology/edges/"+edgeID.String(), nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Empty(t, edgeRepo.edges)
+}
+
+func TestHandler_DeleteTopoEdge_NotFound(t *testing.T) {
+	h, _, _, _, _ := newTestHandler()
+	router := setupRouter(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/topology/edges/"+uuid.New().String(), nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }

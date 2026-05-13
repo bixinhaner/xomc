@@ -3,6 +3,7 @@ package topology
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
+	"golang.org/x/sync/semaphore"
 )
 
 // DeviceLister 设备列举器（消费侧 narrow 接口，单方法）。
@@ -43,6 +45,7 @@ type DeviceRuleService struct {
 	metrics      *RuleMetrics      // T-0027 D8 可选注入；nil 时所有埋点 no-op（PRD §12.5）
 	taskQueue    chan uuid.UUID    // 任务队列
 	workers      int               // Worker 数量
+	workerSem    *semaphore.Weighted // 并发控制：限制同时运行的goroutine数
 	logger       *zap.Logger
 }
 
@@ -56,6 +59,9 @@ func NewDeviceRuleService(
 	workers int,
 	logger *zap.Logger,
 ) *DeviceRuleService {
+	// 并发控制：CPU核心数 * 4，避免goroutine爆炸
+	maxConcurrency := int64(runtime.NumCPU() * 4)
+
 	svc := &DeviceRuleService{
 		repo:      repo,
 		taskRepo:  taskRepo,
@@ -64,6 +70,7 @@ func NewDeviceRuleService(
 		pool:      pool,
 		taskQueue: make(chan uuid.UUID, 100),
 		workers:   workers,
+		workerSem: semaphore.NewWeighted(maxConcurrency),
 		logger:    logger,
 	}
 
@@ -393,6 +400,7 @@ func (s *DeviceRuleService) ListTasks(ctx context.Context, ruleID uuid.UUID, lim
 }
 
 // processTask 处理应用任务（Worker 协程调用）
+// 优化：使用semaphore控制并发，避免goroutine爆炸
 func (s *DeviceRuleService) processTask(ctx context.Context, taskID uuid.UUID) {
 	task, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
@@ -432,11 +440,21 @@ func (s *DeviceRuleService) processTask(ctx context.Context, taskID uuid.UUID) {
 		zap.Int("total_devices", task.TotalDevices),
 	)
 
-	// 批量匹配
-	batchSize := 100
+	// 优化：批量匹配 + 并发控制
+	const batchSize = 50 // 减小批次大小，提高并发利用率
+	const progressUpdateInterval = 500 // 每500个设备更新一次进度，减少DB写入
+
 	var matchedCount, failedCount int
 	var mu sync.Mutex
 
+	// 预编译匹配结果缓存（针对设备名称模式）
+	type matchResult struct {
+		matched bool
+		err     error
+	}
+	results := make(chan matchResult, len(devices))
+
+	// 处理设备
 	for i := 0; i < len(devices); i += batchSize {
 		end := i + batchSize
 		if end > len(devices) {
@@ -445,9 +463,16 @@ func (s *DeviceRuleService) processTask(ctx context.Context, taskID uuid.UUID) {
 
 		var wg sync.WaitGroup
 		for j := i; j < end; j++ {
+			// 使用semaphore控制并发
+			if err := s.workerSem.Acquire(ctx, 1); err != nil {
+				s.logger.Error("failed to acquire semaphore", zap.Error(err))
+				break
+			}
+
 			wg.Add(1)
 			go func(idx int) {
 				defer wg.Done()
+				defer s.workerSem.Release(1)
 
 				device := devices[idx]
 				matched, err := s.matcher.matchRule(ctx, rule, MatchRequest{
@@ -456,6 +481,8 @@ func (s *DeviceRuleService) processTask(ctx context.Context, taskID uuid.UUID) {
 					LAC:        device.LAC,
 					TAC:        device.TAC,
 				})
+
+				results <- matchResult{matched: matched, err: err}
 
 				if err != nil {
 					mu.Lock()
@@ -469,8 +496,7 @@ func (s *DeviceRuleService) processTask(ctx context.Context, taskID uuid.UUID) {
 				}
 
 				if matched && rule.TargetGroupID != nil {
-					// T-0027 D5.B：写 source_type='rule' + source_rule_id；
-					// SQL 层 A4 守护跳过 source_type='manual' 行（rowsAffected=0）。
+					// T-0027 D5.B：写 source_type='rule' + source_rule_id
 					affected, err := s.groupRepo.AddDeviceWithSource(
 						ctx, *rule.TargetGroupID, device.ID, "rule", &rule.ID,
 					)
@@ -478,38 +504,54 @@ func (s *DeviceRuleService) processTask(ctx context.Context, taskID uuid.UUID) {
 						mu.Lock()
 						failedCount++
 						mu.Unlock()
-						s.metrics.RecordEvaluation("failed", "manual")
+						if s.metrics != nil {
+							s.metrics.RecordEvaluation("failed", "manual")
+						}
 						return
 					}
 					if affected == 0 {
-						// manual override 跳过，不计 matched / failed
+						// manual override 跳过
 						s.logger.Debug("topology.rule.manual_skipped",
 							zap.String("device_id", device.ID.String()),
 							zap.String("rule_id", rule.ID.String()),
 						)
-						s.metrics.RecordEvaluation("skipped", "manual")
+						if s.metrics != nil {
+							s.metrics.RecordEvaluation("skipped", "manual")
+						}
 						return
 					}
 					mu.Lock()
 					matchedCount++
 					mu.Unlock()
-					s.metrics.RecordEvaluation("matched", "manual")
+					if s.metrics != nil {
+						s.metrics.RecordEvaluation("matched", "manual")
+					}
 				}
 			}(j)
 		}
 		wg.Wait()
 
-		// 更新进度
-		task.MatchedCount = matchedCount
-		task.FailedCount = failedCount
-		s.taskRepo.Update(ctx, task)
+		// 定期更新进度，避免频繁DB写入
+		if (i+batchSize)%progressUpdateInterval == 0 || end >= len(devices) {
+			mu.Lock()
+			task.MatchedCount = matchedCount
+			task.FailedCount = failedCount
+			mu.Unlock()
+			if err := s.taskRepo.Update(ctx, task); err != nil {
+				s.logger.Warn("failed to update task progress", zap.Error(err))
+			}
+		}
 	}
+
+	close(results)
 
 	// 更新任务完成状态
 	completedAt := time.Now()
 	task.Status = "completed"
+	mu.Lock()
 	task.MatchedCount = matchedCount
 	task.FailedCount = failedCount
+	mu.Unlock()
 	task.CompletedAt = &completedAt
 	s.taskRepo.Update(ctx, task)
 

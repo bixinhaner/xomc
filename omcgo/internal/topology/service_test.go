@@ -145,7 +145,7 @@ func (m *mockGroupRepo) UpdateBoundRule(_ context.Context, _, _ uuid.UUID) error
 // --- Helper ---
 
 func newTestGroupService(repo *mockGroupRepo) *DeviceGroupService {
-	return NewDeviceGroupService(repo, nil, zap.NewNop())
+	return NewDeviceGroupService(repo, nil, nil, zap.NewNop())
 }
 
 func ptrUUID(id uuid.UUID) *uuid.UUID {

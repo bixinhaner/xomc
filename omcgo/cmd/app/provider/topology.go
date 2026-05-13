@@ -13,10 +13,10 @@ func initTopologyModule(c *Container) error {
 	logger := c.Logger.Named("topology")
 
 	groupRepo := topology.NewPgDeviceGroupRepository(c.PgPool)
-	groupService := topology.NewDeviceGroupService(groupRepo, c.PgPool, logger)
 	siteRepo := topology.NewPgSiteRepository(c.PgPool)
 	topoNodeRepo := topology.NewPgTopoNodeRepository(c.PgPool)
 	topoEdgeRepo := topology.NewPgTopoEdgeRepository(c.PgPool)
+	groupService := topology.NewDeviceGroupService(groupRepo, topoNodeRepo, c.PgPool, logger)
 
 	// Set shared services
 	c.GroupRepo = groupRepo

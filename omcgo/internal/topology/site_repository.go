@@ -17,12 +17,20 @@ type SiteRepository interface {
 
 // TopoNodeRepository provides persistence for topology nodes.
 type TopoNodeRepository interface {
+	Create(ctx context.Context, node *TopoNode) error
+	GetByID(ctx context.Context, id uuid.UUID) (*TopoNode, error)
+	Update(ctx context.Context, node *TopoNode) error
+	Delete(ctx context.Context, id uuid.UUID) error
 	List(ctx context.Context, filter TopoNodeFilter) (*model.ListResponse[TopoNode], error)
 	ListAll(ctx context.Context, domainID *uuid.UUID) ([]TopoNode, error)
 }
 
 // TopoEdgeRepository provides persistence for topology edges.
 type TopoEdgeRepository interface {
+	Create(ctx context.Context, edge *TopoEdge) error
+	GetByID(ctx context.Context, id uuid.UUID) (*TopoEdge, error)
+	Update(ctx context.Context, edge *TopoEdge) error
+	Delete(ctx context.Context, id uuid.UUID) error
 	List(ctx context.Context, filter TopoEdgeFilter) (*model.ListResponse[TopoEdge], error)
 	ListAll(ctx context.Context) ([]TopoEdge, error)
 }

@@ -69,7 +69,16 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	topo := rg.Group("/topology")
 	{
 		topo.GET("/nodes", h.ListTopoNodes)
+		topo.POST("/nodes", h.CreateTopoNode)
+		topo.GET("/nodes/:id", h.GetTopoNode)
+		topo.PUT("/nodes/:id", h.UpdateTopoNode)
+		topo.DELETE("/nodes/:id", h.DeleteTopoNode)
 		topo.GET("/edges", h.ListTopoEdges)
+		topo.POST("/edges", h.CreateTopoEdge)
+		topo.GET("/edges/:id", h.GetTopoEdge)
+		topo.PUT("/edges/:id", h.UpdateTopoEdge)
+		topo.DELETE("/edges/:id", h.DeleteTopoEdge)
+		topo.POST("/nodes/batch", h.BatchCreateTopoNodes)
 		topo.GET("/graph", h.GetTopoGraph)
 		topo.GET("/geo", h.GetGeoData)
 	}
@@ -483,6 +492,10 @@ func (h *Handler) ListTopoNodes(c *gin.Context) {
 	if nodeType := c.Query("node_type"); nodeType != "" {
 		filter.NodeType = &nodeType
 	}
+	if status := c.Query("status"); status != "" {
+		s := NodeStatus(status)
+		filter.Status = &s
+	}
 
 	result, err := h.nodeRepo.List(c.Request.Context(), filter)
 	if err != nil {
@@ -502,6 +515,11 @@ func (h *Handler) ListTopoEdges(c *gin.Context) {
 	if err := c.ShouldBindQuery(&filter.ListRequest); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
+	}
+
+	if status := c.Query("status"); status != "" {
+		s := EdgeStatus(status)
+		filter.Status = &s
 	}
 
 	result, err := h.edgeRepo.List(c.Request.Context(), filter)
@@ -561,4 +579,333 @@ func (h *Handler) GetGeoData(c *gin.Context) {
 		Sites: sites,
 		Nodes: nodes,
 	})
+}
+
+// ---- Topology Node CRUD handlers ----
+
+// CreateTopoNodeRequest creates a topology node request.
+type CreateTopoNodeRequest struct {
+	Label    string  `json:"label" binding:"required"`
+	NodeType string  `json:"node_type" binding:"required,oneof=eNB gNB CPE eGW domain router switch"`
+	X        float64 `json:"x"`
+	Y        float64 `json:"y"`
+	Status   string  `json:"status" binding:"omitempty,oneof=online offline alarm maintenance"`
+	DeviceSN string  `json:"device_sn,omitempty"`
+	SiteID   string  `json:"site_id,omitempty"`
+	DomainID string  `json:"domain_id,omitempty"`
+}
+
+// CreateTopoNode handles POST /api/v1/topology/nodes.
+func (h *Handler) CreateTopoNode(c *gin.Context) {
+	var req CreateTopoNodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	node := &TopoNode{
+		Label:    req.Label,
+		NodeType: req.NodeType,
+		X:        req.X,
+		Y:        req.Y,
+		Status:   NodeStatus(req.Status),
+		DeviceSN: req.DeviceSN,
+	}
+
+	if req.SiteID != "" {
+		siteID, err := uuid.Parse(req.SiteID)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+		node.SiteID = &siteID
+	}
+
+	if req.DomainID != "" {
+		domainID, err := uuid.Parse(req.DomainID)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+		node.DomainID = &domainID
+	}
+
+	if err := h.nodeRepo.Create(c.Request.Context(), node); err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	response.OKWithStatus(c, http.StatusCreated, node)
+}
+
+// GetTopoNode handles GET /api/v1/topology/nodes/:id.
+func (h *Handler) GetTopoNode(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	node, err := h.nodeRepo.GetByID(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	response.OK(c, node)
+}
+
+// UpdateTopoNodeRequest updates a topology node request.
+type UpdateTopoNodeRequest struct {
+	Label    *string   `json:"label"`
+	NodeType *string   `json:"node_type"`
+	X        *float64  `json:"x"`
+	Y        *float64  `json:"y"`
+	Status   *string   `json:"status"`
+	DeviceSN *string   `json:"device_sn"`
+	SiteID   *string   `json:"site_id"`
+	DomainID *string   `json:"domain_id"`
+}
+
+// UpdateTopoNode handles PUT /api/v1/topology/nodes/:id.
+func (h *Handler) UpdateTopoNode(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	var req UpdateTopoNodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	node, err := h.nodeRepo.GetByID(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	if req.Label != nil {
+		node.Label = *req.Label
+	}
+	if req.NodeType != nil {
+		node.NodeType = *req.NodeType
+	}
+	if req.X != nil {
+		node.X = *req.X
+	}
+	if req.Y != nil {
+		node.Y = *req.Y
+	}
+	if req.Status != nil {
+		node.Status = NodeStatus(*req.Status)
+	}
+	if req.DeviceSN != nil {
+		node.DeviceSN = *req.DeviceSN
+	}
+	if req.SiteID != nil {
+		siteID, err := uuid.Parse(*req.SiteID)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+		node.SiteID = &siteID
+	}
+	if req.DomainID != nil {
+		domainID, err := uuid.Parse(*req.DomainID)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+		node.DomainID = &domainID
+	}
+
+	if err := h.nodeRepo.Update(c.Request.Context(), node); err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	response.OK(c, node)
+}
+
+// DeleteTopoNode handles DELETE /api/v1/topology/nodes/:id.
+func (h *Handler) DeleteTopoNode(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	if err := h.nodeRepo.Delete(c.Request.Context(), id); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	response.OK(c, nil)
+}
+
+// ---- Topology Edge CRUD handlers ----
+
+// CreateTopoEdgeRequest creates a topology edge request.
+type CreateTopoEdgeRequest struct {
+	SourceID string `json:"source_id" binding:"required"`
+	TargetID string `json:"target_id" binding:"required"`
+	Label    string `json:"label,omitempty"`
+	Status   string `json:"status" binding:"omitempty,oneof=active inactive degraded"`
+}
+
+// CreateTopoEdge handles POST /api/v1/topology/edges.
+func (h *Handler) CreateTopoEdge(c *gin.Context) {
+	var req CreateTopoEdgeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	sourceID, err := uuid.Parse(req.SourceID)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	targetID, err := uuid.Parse(req.TargetID)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	edge := &TopoEdge{
+		SourceID: sourceID,
+		TargetID: targetID,
+		Label:    req.Label,
+		Status:   EdgeStatus(req.Status),
+	}
+
+	if err := h.edgeRepo.Create(c.Request.Context(), edge); err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	response.OKWithStatus(c, http.StatusCreated, edge)
+}
+
+// GetTopoEdge handles GET /api/v1/topology/edges/:id.
+func (h *Handler) GetTopoEdge(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	edge, err := h.edgeRepo.GetByID(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	response.OK(c, edge)
+}
+
+// UpdateTopoEdgeRequest updates a topology edge request.
+type UpdateTopoEdgeRequest struct {
+	SourceID *string `json:"source_id"`
+	TargetID *string `json:"target_id"`
+	Label    *string `json:"label"`
+	Status   *string `json:"status"`
+}
+
+// UpdateTopoEdge handles PUT /api/v1/topology/edges/:id.
+func (h *Handler) UpdateTopoEdge(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	var req UpdateTopoEdgeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	edge, err := h.edgeRepo.GetByID(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	if req.SourceID != nil {
+		sourceID, err := uuid.Parse(*req.SourceID)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+		edge.SourceID = sourceID
+	}
+	if req.TargetID != nil {
+		targetID, err := uuid.Parse(*req.TargetID)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+		edge.TargetID = targetID
+	}
+	if req.Label != nil {
+		edge.Label = *req.Label
+	}
+	if req.Status != nil {
+		edge.Status = EdgeStatus(*req.Status)
+	}
+
+	if err := h.edgeRepo.Update(c.Request.Context(), edge); err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	response.OK(c, edge)
+}
+
+// DeleteTopoEdge handles DELETE /api/v1/topology/edges/:id.
+func (h *Handler) DeleteTopoEdge(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	if err := h.edgeRepo.Delete(c.Request.Context(), id); err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	response.OK(c, nil)
+}
+
+// ---- Batch Create Topo Nodes ----
+
+// BatchCreateTopoNodesRequest batch creates topology nodes request.
+type BatchCreateTopoNodesRequest struct {
+	SiteID    string   `json:"site_id,omitempty"`
+	DomainID  string   `json:"domain_id,omitempty"`
+	NodeTypes []string `json:"node_types,omitempty"`
+	Limit     int      `json:"limit,omitempty"`
+}
+
+// BatchCreateTopoNodes handles POST /api/v1/topology/nodes/batch.
+func (h *Handler) BatchCreateTopoNodes(c *gin.Context) {
+	var req BatchCreateTopoNodesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	nodes, err := h.service.CreateTopoNodesFromDevices(c.Request.Context(), req.SiteID, req.DomainID, req.NodeTypes, req.Limit)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	response.OK(c, gin.H{"created": len(nodes), "nodes": nodes})
 }
