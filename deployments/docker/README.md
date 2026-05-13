@@ -46,7 +46,7 @@
 | `web`       | Dockerfile.web           | `8081:8081`, `8080:8080`   | Nginx 网关：8081 前端+API，8080 ACS 代理  |
 | `prometheus` | prom/prometheus:v2.51.0 | `9090:9090`                | 指标存储与查询                            |
 | `alertmanager` | prom/alertmanager:v0.27.0 | `9093:9093`            | 告警路由                                  |
-| `grafana`   | grafana/grafana:10.4.0   | `3000:3000`                | 可视化（admin/admin，dev 默认）。⚠️ 与 vite dev 撞 |
+| `grafana`   | grafana/grafana:10.4.0   | `3030:3000`                | 可视化（admin/admin，dev 默认）。宿主 3030 避让 vite dev :3000 |
 | `loki`      | grafana/loki:3.0.0       | `3100:3100`                | 日志存储与查询                            |
 | `promtail`  | grafana/promtail:3.0.0   | —（仅容器内）              | 日志采集 agent，tail run/logs 推到 Loki   |
 

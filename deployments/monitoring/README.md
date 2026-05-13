@@ -33,7 +33,7 @@ deployments/monitoring/
 | 服务 | 容器端口 | 宿主端口 | 说明 |
 |------|--------|--------|------|
 | Prometheus | 9090 | **9090** | 标准端口（acs metrics 已让出宿主 9090 → 9095） |
-| Grafana | 3000 | **3000** | 标准端口（⚠️ 与 webcode vite dev 撞，二选一） |
+| Grafana | 3000 | **3030** | 宿主 3030（避开 webcode vite dev :3000） |
 | AlertManager | 9093 | 9093 | 无冲突 |
 | Loki HTTP API | 3100 | 3100 | Grafana 通过此端口查日志 |
 | omcgo-acs metrics | 9090 | **9095** | 让出 9090 给 Prometheus 服务 |
@@ -41,7 +41,7 @@ deployments/monitoring/
 宿主访问入口：
 
 - Prometheus UI：<http://localhost:9090>
-- Grafana UI：<http://localhost:3000>（admin / admin，dev 默认值）
+- Grafana UI：<http://localhost:3030>（admin / admin，dev 默认值）
 - AlertManager UI：<http://localhost:9093>
 - Loki API：<http://localhost:3100>（无 UI，通过 Grafana 查询）
 
@@ -54,7 +54,7 @@ docker-compose -f deployments/docker/docker-compose.yml up -d \
 
 # 健康自检
 curl -fsSL http://localhost:9090/-/healthy        # Prometheus
-curl -fsSL http://localhost:3000/api/health       # Grafana
+curl -fsSL http://localhost:3030/api/health       # Grafana
 curl -fsSL http://localhost:9093/-/healthy        # AlertManager
 curl -fsSL http://localhost:3100/ready            # Loki
 
@@ -135,7 +135,7 @@ omcgo 三进程通过以下端口暴露 `/metrics`（容器内）：
 
 ## 日志查询（Loki + Grafana）
 
-打开 Grafana <http://localhost:3000> → 左侧 **Explore** → 数据源选 **Loki**。
+打开 Grafana <http://localhost:3030> → 左侧 **Explore** → 数据源选 **Loki**。
 
 ### Promtail 注入的 label 体系
 

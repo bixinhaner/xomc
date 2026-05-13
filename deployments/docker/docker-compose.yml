@@ -221,10 +221,8 @@ services:
   # 监控栈：Prometheus + Grafana + AlertManager + Loki + Promtail
   # 宿主端口约定（已为 prometheus/grafana 让出标准端口）：
   #   prometheus   9090:9090   ← 标准端口（acs metrics 让出到 9095）
-  #   grafana      3000:3000   ← 标准端口
-  #                              ⚠️ 与 webcode vite dev server 冲突，
-  #                              本机同时跑 grafana + npm run dev 需把前端 dev
-  #                              端口改去 3003 或先停 grafana。
+  #   grafana      3030:3000   ← 宿主 3030 避开 webcode vite dev :3000；
+  #                              容器内 grafana 仍监听 3000（healthcheck 用）
   #   alertmanager 9093:9093
   #   loki         3100:3100   ← Loki HTTP API（日志查询）
   #   promtail     —           ← 仅容器内运行，无对外端口
@@ -287,7 +285,7 @@ services:
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
     ports:
-      - "3000:3000"
+      - "3030:3000"   # 宿主 3030 → 容器 3000；避开 webcode vite dev :3000
     volumes:
       - ../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ../monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
