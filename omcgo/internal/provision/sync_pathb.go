@@ -203,22 +203,26 @@ func (s *SyncService) resolveMappingSet(ctx context.Context, dev *model.Device) 
 
 // ── 纯函数辅助（便于单测） ─────────────────────────────────────────────
 
-// extractStorablePrefixes 从 ParamMapping 列表抽出 is_storable=true 的 GPV 下发 path 列表。
+// extractStorablePrefixes 从 ParamMapping 列表抽出可下发的 GPV path 列表。
 //
 // 算法（设计 §1.11 Path B）：
-//   1. 过滤 is_storable=true
+//   1. 过滤 is_storable=true && is_supported=true（T-0103 后者剔除固件不支持的 path）
 //   2. basePrefix 处理每条 privatePath：
 //      - 含 "{i}" 模板段 → 截到第一个 "{i}" 前的对象前缀（让 CPE 枚举实例）
 //      - 叶子参数、末尾带点对象 → 原样
 //   3. 去重排序输出
 //
 // 设计原则："只查 XML 字典里实际列出的 path"，不从叶子自动派生父对象前缀。
-// 历史教训：basePrefix 曾把叶子 "....UeAccess.Enable" 截成 "....UeAccess."，
-// BAICELLS BaiBLQ_5.0.16.1_1229 固件不识别该对象节点 → 9005 Fault 整批 reject。
+// 历史教训：
+//   - basePrefix 曾把叶子 "....UeAccess.Enable" 截成 "....UeAccess."，
+//     BAICELLS BaiBLQ_5.0.16.1_1229 固件不识别该对象节点 → 9005 Fault 整批 reject。
+//   - 即便不截断，BLQ.xml 字典仍含若干 BAICELLS 固件不支持的叶子（AmbrLimitSwitch /
+//     RunningStatus / X_COM_SCTP_CONFIG_MTU / UeAccess.Enable），T-0103 通过 XML
+//     supported="false" + is_supported 列在此处过滤。
 func extractStorablePrefixes(mappings []parammodel.ParamMapping) []string {
 	seen := make(map[string]struct{}, len(mappings))
 	for _, m := range mappings {
-		if !m.IsStorable {
+		if !m.IsStorable || !m.IsSupported {
 			continue
 		}
 		prefix := basePrefix(m.PrivatePath)

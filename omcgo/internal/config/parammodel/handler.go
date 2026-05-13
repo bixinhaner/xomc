@@ -173,6 +173,7 @@ type mappingView struct {
 	MaxValue      *int64    `json:"max_value,omitempty"`
 	IsStorable    bool      `json:"is_storable"`
 	IsActive      bool      `json:"is_active"`
+	IsSupported   bool      `json:"is_supported"`
 	SoftwareVer   *string   `json:"software_version,omitempty"`
 }
 
@@ -182,7 +183,7 @@ func toMappingView(m *ParamMapping) mappingView {
 		StandardPath: m.StandardPath, PrivatePath: m.PrivatePath, EntryType: m.EntryType,
 		Access: m.Access, DataType: m.DataType, ChangeApplies: m.ChangeApplies,
 		MinValue: m.MinValue, MaxValue: m.MaxValue,
-		IsStorable: m.IsStorable, IsActive: m.IsActive, SoftwareVer: m.SoftwareVersion,
+		IsStorable: m.IsStorable, IsActive: m.IsActive, IsSupported: m.IsSupported, SoftwareVer: m.SoftwareVersion,
 	}
 }
 

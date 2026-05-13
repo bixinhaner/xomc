@@ -254,6 +254,7 @@ SET standard_path = pm.standard_path,
     max_value = CASE WHEN COALESCE((pr.device_attrs_override->>'max_value')::boolean, false)
                      THEN d.max_value ELSE pm.max_value END,
     is_storable = pm.is_storable,
+    is_supported = pm.is_supported,
     updated_at = now()
 FROM param_mappings pm, products pr
 WHERE d.product_id = pr.id
@@ -263,6 +264,7 @@ WHERE d.product_id = pr.id
   AND (
     d.standard_path IS DISTINCT FROM pm.standard_path
     OR d.is_storable IS DISTINCT FROM pm.is_storable
+    OR d.is_supported IS DISTINCT FROM pm.is_supported
     OR (NOT COALESCE((pr.device_attrs_override->>'access')::boolean, false)
         AND d.access IS DISTINCT FROM pm.access)
     OR (NOT COALESCE((pr.device_attrs_override->>'data_type')::boolean, false)
@@ -295,7 +297,7 @@ func batchInsertMappings(ctx context.Context, tx pgx.Tx, modelID string, entries
 		ib := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).Insert("param_mappings").Columns(
 			"param_model_id", "standard_path", "private_path", "entry_type",
 			"access", "data_type", "change_applies",
-			"min_value", "max_value", "is_storable", "is_active",
+			"min_value", "max_value", "is_storable", "is_active", "is_supported",
 		)
 		for _, e := range entries[i:end] {
 			std := e.StandardPath
@@ -312,8 +314,9 @@ func batchInsertMappings(ctx context.Context, tx pgx.Tx, modelID string, entries
 				nullIfEmpty(e.ChangeApplies),
 				parseNullableInt(e.Min),
 				parseNullableInt(e.Max),
-				!strings.EqualFold(strings.TrimSpace(e.Store), "false"), // 缺省 / 任意非 "false" → true
-				true,
+				!strings.EqualFold(strings.TrimSpace(e.Store), "false"),     // 缺省 / 任意非 "false" → true
+				true,                                                        // is_active
+				!strings.EqualFold(strings.TrimSpace(e.Supported), "false"), // T-0103: 缺省 / 任意非 "false" → true
 			)
 		}
 		sqlStr, args, err := ib.ToSql()

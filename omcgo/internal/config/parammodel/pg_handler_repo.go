@@ -359,16 +359,16 @@ func (r *PgRepository) DeleteStandardParam(ctx context.Context, standardPath str
 func (r *PgRepository) getMappingByID(ctx context.Context, id uuid.UUID) (*ParamMapping, error) {
 	const q = `SELECT id, param_model_id, standard_path, private_path, entry_type,
 	                 access, data_type, change_applies, min_value, max_value,
-	                 is_storable, is_active
+	                 is_storable, is_active, is_supported
 	          FROM param_mappings WHERE id = $1`
 	row := r.pool.QueryRow(ctx, q, id)
 	var (
-		m                              ParamMapping
+		m                               ParamMapping
 		access, dataType, changeApplies *string
 	)
 	if err := row.Scan(&m.ID, &m.ParamModelID, &m.StandardPath, &m.PrivatePath, &m.EntryType,
 		&access, &dataType, &changeApplies, &m.MinValue, &m.MaxValue,
-		&m.IsStorable, &m.IsActive); err != nil {
+		&m.IsStorable, &m.IsActive, &m.IsSupported); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNoMapping
 		}

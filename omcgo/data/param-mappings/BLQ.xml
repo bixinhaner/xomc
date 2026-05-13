@@ -12,7 +12,7 @@
     </objects>
     <parameters>
         <param name="Device.DeviceInfo.3GPPSpecVersion" standardPath="Device.DeviceInfo.3GPPSpecVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate" max="64"/>
-        <param name="Device.DeviceInfo.AmbrLimitSwitch" standardPath="Device.DeviceInfo.AmbrLimitSwitch" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.AmbrLimitSwitch" standardPath="Device.DeviceInfo.AmbrLimitSwitch" access="READ_WRITE" type="STRING" changeApplies="Immediate" supported="false"/>
         <param name="Device.DeviceInfo.AntennaInfo.Azimuth" standardPath="Device.DeviceInfo.AntennaInfo.Azimuth" access="READ_WRITE" type="INT" changeApplies="Immediate" max="359"/>
         <param name="Device.DeviceInfo.AntennaInfo.Azimuth2" standardPath="Device.DeviceInfo.AntennaInfo.Azimuth2" access="READ_WRITE" type="INT" changeApplies="Immediate" max="359"/>
         <param name="Device.DeviceInfo.AntennaInfo.Beamwidth" standardPath="Device.DeviceInfo.AntennaInfo.Beamwidth" access="READ_WRITE" type="INT" changeApplies="Immediate" max="360"/>
@@ -30,7 +30,7 @@
         <param name="Device.DeviceInfo.CPI_InstallCertificationTime2" standardPath="Device.DeviceInfo.SAS.CpiInstallCertificationTime2" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.CPI_Name" standardPath="Device.DeviceInfo.SAS.CpiName" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.ETH1_STATUS_SPEED" standardPath="Device.DeviceInfo.ETH1_STATUS_SPEED" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.DeviceInfo.FAPService.UeAccess.Enable" standardPath="Device.DeviceInfo.FAPService.UeAccess.Enable" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.FAPService.UeAccess.Enable" standardPath="Device.DeviceInfo.FAPService.UeAccess.Enable" access="READ_WRITE" type="STRING" changeApplies="Immediate" supported="false"/>
         <param name="Device.DeviceInfo.FAP_adminstate" standardPath="Device.DeviceInfo.FAP_adminstate" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.ForceRadioEnable" standardPath="Device.DeviceInfo.ForceRadioEnable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.GPS.horizontalAccuracy" standardPath="Device.DeviceInfo.GPS.horizontalAccuracy" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
@@ -41,7 +41,7 @@
         <param name="Device.DeviceInfo.PowerSpectralDensity1" standardPath="Device.DeviceInfo.PowerSpectralDensity1" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.PowerSpectralDensity2" standardPath="Device.DeviceInfo.PowerSpectralDensity2" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.ProductClass" standardPath="Device.DeviceInfo.ProductClass" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="1" max="64"/>
-        <param name="Device.DeviceInfo.RunningStatus" standardPath="Device.DeviceInfo.RunningStatus" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.RunningStatus" standardPath="Device.DeviceInfo.RunningStatus" access="READ_WRITE" type="STRING" changeApplies="Immediate" supported="false"/>
         <param name="Device.DeviceInfo.SAS.CallSign" standardPath="Device.DeviceInfo.SAS.CallSign" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="256"/>
         <param name="Device.DeviceInfo.SAS.ChannelReuse" standardPath="Device.DeviceInfo.SAS.ChannelReuse" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.SAS.CpiSignatureData" standardPath="Device.DeviceInfo.SAS.CpiSignatureData" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
@@ -98,7 +98,7 @@
         <param name="Device.DeviceInfo.X_COM_REM_Status" standardPath="Device.DeviceInfo.REM_Status" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.X_COM_ROLLBACK_CONTROL" standardPath="Device.DeviceInfo.ROLLBACK_CONTROL" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.X_COM_ROLLBACK_ENABLE" standardPath="Device.DeviceInfo.ROLLBACK_ENABLE" access="READ_ONLY" type="BOOLEAN" changeApplies="Immediate"/>
-        <param name="Device.DeviceInfo.X_COM_SCTP_CONFIG_MTU" standardPath="Device.DeviceInfo.X_COM_SCTP_CONFIG_MTU" access="READ_WRITE" type="INT" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.X_COM_SCTP_CONFIG_MTU" standardPath="Device.DeviceInfo.X_COM_SCTP_CONFIG_MTU" access="READ_WRITE" type="INT" changeApplies="Immediate" supported="false"/>
         <param name="Device.DeviceInfo.X_COM_SERVING_UNIT1_IPSEC_Address" standardPath="Device.DeviceInfo.SERVING_UNIT1_IPSEC_Address" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.X_COM_STATION_RUN_Time" standardPath="Device.DeviceInfo.UpTime" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.X_COM_UE_Count" standardPath="Device.DeviceInfo.UE_Count" access="READ_ONLY" type="INT" changeApplies="Immediate"/>

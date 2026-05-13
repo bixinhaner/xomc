@@ -48,6 +48,7 @@ type ParamMapping struct {
 	MaxValue        *int64
 	IsStorable      bool
 	IsActive        bool
+	IsSupported     bool    // T-0103 XML supported="false" → false；path-b sync 据此过滤
 	SoftwareVersion *string // 仅 discovered 映射非 nil
 }
 
@@ -112,7 +113,8 @@ type xmlParamEntry struct {
 	ChangeApplies string `xml:"changeApplies,attr"`
 	Min           string `xml:"min,attr"`
 	Max           string `xml:"max,attr"`
-	Store         string `xml:"store,attr"` // "true" | "false" | ""（缺省视 true）
+	Store         string `xml:"store,attr"`     // "true" | "false" | ""（缺省视 true）
+	Supported     string `xml:"supported,attr"` // T-0103 "false" → 标记设备不支持；缺省/其它视 true
 }
 
 // xmlStandardModel 解析 standard-model.xml（格式 D）。

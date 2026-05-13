@@ -316,6 +316,7 @@ func buildIntersectRow(productID uuid.UUID, swVersion string, dm ParamMapping, c
 		MaxValue:        dm.MaxValue,
 		IsStorable:      dm.IsStorable,
 		IsActive:        true,
+		IsSupported:     dm.IsSupported, // T-0103 从默认映射继承
 		SoftwareVersion: ptrStr(swVersion),
 	}
 	// productID 通过 write repo 显式传，row 内不冗余存储，但 PG INSERT 时按 productID 写入。
