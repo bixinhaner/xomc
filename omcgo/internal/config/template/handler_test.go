@@ -301,6 +301,187 @@ func TestHandler_DeleteTemplate_NotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// ---------------------------------------------------------------------------
+// Mock: TemplateDispatcher (T-0120)
+// ---------------------------------------------------------------------------
+
+type mockTemplateDispatcher struct {
+	calls    []dispatcherCall
+	resultFn func(tmplID, deviceID uuid.UUID) (uuid.UUID, error)
+}
+
+type dispatcherCall struct {
+	TemplateID uuid.UUID
+	DeviceID   uuid.UUID
+}
+
+func (m *mockTemplateDispatcher) DispatchTemplate(_ context.Context, tmpl *ConfigTemplate, deviceID uuid.UUID) (uuid.UUID, error) {
+	m.calls = append(m.calls, dispatcherCall{TemplateID: tmpl.ID, DeviceID: deviceID})
+	if m.resultFn != nil {
+		return m.resultFn(tmpl.ID, deviceID)
+	}
+	return uuid.New(), nil
+}
+
+func newTestHandlerWithDispatcher() (*Handler, *mockConfigTemplateRepo, *mockTemplateDispatcher) {
+	h, repo := newTestHandler()
+	disp := &mockTemplateDispatcher{}
+	h.SetDispatcher(disp)
+	return h, repo, disp
+}
+
+// ---------------------------------------------------------------------------
+// T-0120 Dispatch tests
+// ---------------------------------------------------------------------------
+
+func TestHandler_Dispatch_NotConfigured(t *testing.T) {
+	h, repo := newTestHandler()
+	router := setupRouter(h)
+	tmplID := uuid.New()
+	seedTemplate(repo, tmplID, "Tmpl", model.CarrierCMCC, model.TechLTE, TemplateProvisioning)
+
+	body := dispatchTemplateRequest{DeviceIDs: []string{uuid.New().String()}}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/templates/"+tmplID.String()+"/dispatch",
+		bytes.NewReader(mustMarshal(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
+func TestHandler_Dispatch_HappyPath_SingleDevice(t *testing.T) {
+	h, repo, disp := newTestHandlerWithDispatcher()
+	router := setupRouter(h)
+	tmplID := uuid.New()
+	seedTemplate(repo, tmplID, "Tmpl", model.CarrierCMCC, model.TechLTE, TemplateProvisioning)
+	deviceID := uuid.New()
+	expectedTaskID := uuid.New()
+	disp.resultFn = func(_, _ uuid.UUID) (uuid.UUID, error) { return expectedTaskID, nil }
+
+	body := dispatchTemplateRequest{DeviceIDs: []string{deviceID.String()}}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/templates/"+tmplID.String()+"/dispatch",
+		bytes.NewReader(mustMarshal(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp dispatchTemplateResponse
+	response.DecodeData(t, w.Body, &resp)
+	assert.Equal(t, tmplID.String(), resp.TemplateID)
+	assert.Equal(t, 1, resp.TotalDevices)
+	require.Len(t, resp.Dispatched, 1)
+	assert.Equal(t, deviceID.String(), resp.Dispatched[0].DeviceID)
+	assert.Equal(t, expectedTaskID.String(), resp.Dispatched[0].TaskID)
+	assert.Empty(t, resp.Failed)
+	require.Len(t, disp.calls, 1)
+	assert.Equal(t, tmplID, disp.calls[0].TemplateID)
+	assert.Equal(t, deviceID, disp.calls[0].DeviceID)
+}
+
+func TestHandler_Dispatch_PartialFailure(t *testing.T) {
+	h, repo, disp := newTestHandlerWithDispatcher()
+	router := setupRouter(h)
+	tmplID := uuid.New()
+	seedTemplate(repo, tmplID, "Tmpl", model.CarrierCMCC, model.TechLTE, TemplateProvisioning)
+	okDevice := uuid.New()
+	failDevice := uuid.New()
+	disp.resultFn = func(_, deviceID uuid.UUID) (uuid.UUID, error) {
+		if deviceID == failDevice {
+			return uuid.Nil, fmt.Errorf("simulated dispatch failure")
+		}
+		return uuid.New(), nil
+	}
+
+	body := dispatchTemplateRequest{DeviceIDs: []string{okDevice.String(), failDevice.String()}}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/templates/"+tmplID.String()+"/dispatch",
+		bytes.NewReader(mustMarshal(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusMultiStatus, w.Code)
+	var resp dispatchTemplateResponse
+	response.DecodeData(t, w.Body, &resp)
+	assert.Equal(t, 2, resp.TotalDevices)
+	require.Len(t, resp.Dispatched, 1)
+	require.Len(t, resp.Failed, 1)
+	assert.Equal(t, okDevice.String(), resp.Dispatched[0].DeviceID)
+	assert.Equal(t, failDevice.String(), resp.Failed[0].DeviceID)
+	assert.Contains(t, resp.Failed[0].Error, "simulated dispatch failure")
+}
+
+func TestHandler_Dispatch_TemplateNotFound(t *testing.T) {
+	h, _, _ := newTestHandlerWithDispatcher()
+	router := setupRouter(h)
+	body := dispatchTemplateRequest{DeviceIDs: []string{uuid.New().String()}}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/templates/"+uuid.New().String()+"/dispatch",
+		bytes.NewReader(mustMarshal(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestHandler_Dispatch_EmptyDeviceIDs(t *testing.T) {
+	h, repo, _ := newTestHandlerWithDispatcher()
+	router := setupRouter(h)
+	tmplID := uuid.New()
+	seedTemplate(repo, tmplID, "Tmpl", model.CarrierCMCC, model.TechLTE, TemplateProvisioning)
+	body := dispatchTemplateRequest{DeviceIDs: []string{}}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/templates/"+tmplID.String()+"/dispatch",
+		bytes.NewReader(mustMarshal(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandler_Dispatch_AllFailed_UnprocessableEntity(t *testing.T) {
+	h, repo, disp := newTestHandlerWithDispatcher()
+	router := setupRouter(h)
+	tmplID := uuid.New()
+	seedTemplate(repo, tmplID, "Tmpl", model.CarrierCMCC, model.TechLTE, TemplateProvisioning)
+	disp.resultFn = func(_, _ uuid.UUID) (uuid.UUID, error) {
+		return uuid.Nil, fmt.Errorf("device offline")
+	}
+	body := dispatchTemplateRequest{DeviceIDs: []string{uuid.New().String(), uuid.New().String()}}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/templates/"+tmplID.String()+"/dispatch",
+		bytes.NewReader(mustMarshal(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
+	var resp dispatchTemplateResponse
+	response.DecodeData(t, w.Body, &resp)
+	assert.Empty(t, resp.Dispatched)
+	assert.Len(t, resp.Failed, 2)
+}
+
+func TestHandler_Dispatch_InvalidUUID_MixedWithValid(t *testing.T) {
+	h, repo, disp := newTestHandlerWithDispatcher()
+	router := setupRouter(h)
+	tmplID := uuid.New()
+	seedTemplate(repo, tmplID, "Tmpl", model.CarrierCMCC, model.TechLTE, TemplateProvisioning)
+	okDevice := uuid.New()
+	body := dispatchTemplateRequest{DeviceIDs: []string{okDevice.String(), "not-a-uuid"}}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/templates/"+tmplID.String()+"/dispatch",
+		bytes.NewReader(mustMarshal(t, body)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusMultiStatus, w.Code)
+	var resp dispatchTemplateResponse
+	response.DecodeData(t, w.Body, &resp)
+	assert.Len(t, resp.Dispatched, 1)
+	assert.Len(t, resp.Failed, 1)
+	assert.Equal(t, "not-a-uuid", resp.Failed[0].DeviceID)
+	assert.Contains(t, resp.Failed[0].Error, "invalid device_id format")
+	require.Len(t, disp.calls, 1) // 仅 ok 设备进 dispatcher
+	assert.Equal(t, okDevice, disp.calls[0].DeviceID)
+}
+
 func TestHandler_CreateTemplate_BadRequest(t *testing.T) {
 	h, _ := newTestHandler()
 	router := setupRouter(h)

@@ -315,11 +315,13 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- ConfigTemplate routes → resource "config" -----
 	ch := c.configHandlerDeps
+	md := c.miscDeps
 	templateHandler := template.NewHandler(ch.templateRepo)
+	// T-0120: 接 provisioning engine 给 POST /:id/dispatch 提供 Path A 显式下发能力。
+	templateHandler.SetDispatcher(md.provisionEngine)
 	templateHandler.RegisterRoutes(permGroup("config"))
 
 	// ----- Provisioning routes → resource "config" -----
-	md := c.miscDeps
 	provisionHandler := provision.NewHandler(md.provisionRepo, md.provisionEngine)
 	provisionHandler.RegisterRoutes(permGroup("config"))
 
