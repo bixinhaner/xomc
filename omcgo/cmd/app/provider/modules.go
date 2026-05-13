@@ -383,7 +383,14 @@ func initMiscModules(c *Container) error {
 	// 保证此处 c.miscDeps.taskSvc 一定已就绪。
 	if c.miscDeps.taskSvc != nil {
 		fanouter := mml.NewFanouter(c.miscDeps.taskSvc, logger)
+		// Sprint B Q-V3-3：脚本多行严格序列 — 初次 fanout 仅入队 cmd_idx=0；
+		// Sequencer 通过 completion callback 链式入队后续行。
+		fanouter.SetSequentialMode(true)
 		mmlService.SetFanouter(fanouter)
+
+		// Sequencer：与 ResultAggregator 并行挂到 MML completion 通路，
+		// 在 device_task 进入终态后追加入队下一行命令。
+		sequencer := mml.NewSequencer(mmlTaskRepo, c.miscDeps.taskSvc, fanouter, logger)
 
 		// device_tasks 终态通过 NATS 跨进程事件投递到聚合器：
 		// ACS 在 MarkTaskCompleted/Failed 后发布 task.completed/task.failed，
@@ -392,6 +399,7 @@ func initMiscModules(c *Container) error {
 		if c.EventBus != nil {
 			completionRouter := task.NewCompletionRouter(logger)
 			completionRouter.Register(task.TaskSourceMML, aggregator)
+			completionRouter.Register(task.TaskSourceMML, sequencer) // Sprint B Q-V3-3
 			// D2 修复：provision 创建的 device_task（GPV / Upload / SPV / Reboot）source=system，
 			// 失败时由 ProvisioningEngine 回查 source_id（=ProvisioningTask.id）联动 fail。
 			if c.miscDeps.provisionEngine != nil {
@@ -404,6 +412,7 @@ func initMiscModules(c *Container) error {
 		} else {
 			// 单进程部署（单测/无 NATS）下退化为同进程回调
 			c.miscDeps.taskSvc.AddCompletionCallback(aggregator)
+			c.miscDeps.taskSvc.AddCompletionCallback(sequencer) // Sprint B Q-V3-3
 			if c.miscDeps.provisionEngine != nil {
 				c.miscDeps.taskSvc.AddCompletionCallback(c.miscDeps.provisionEngine)
 			}

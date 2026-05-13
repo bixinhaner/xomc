@@ -365,6 +365,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 		c.ProductHandler.RegisterRoutes(superAdminGroup)
 	}
 
+	// ----- Sprint B Q-V3-7：dictload admin reload 端点（含 mml-standard）-----
+	registerDictLoadAdminRoutes(c, superAdminGroup)
+
 	// ----- Alarm filter rule routes → resource "alarms" -----
 	alarmFilterHandler := alarm.NewFilterHandler(ah.alarmFilterRuleRepo, c.Logger)
 	alarmFilterHandler.RegisterRoutes(permGroup("alarms").Group("/alarms/alarm-filters"))

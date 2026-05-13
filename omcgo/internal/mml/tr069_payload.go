@@ -80,6 +80,46 @@ func validatePath(p string) PathSkipReason {
 	return ""
 }
 
+// expandInstancePaths 把含 {i} 占位符的路径展开为 TR-069 partial path
+// （末段 `.` 结尾）。CPE 按 spec §A.3.2.7 返回该前缀下全部参数。
+//
+// 规则：
+//   - 不含 {i} 的路径：原样保留
+//   - 含 {i} 的路径：取首个 {i} 段之前的前缀 + 末尾点
+//     例 "Device.X.{i}.Y.{i}.Z" → "Device.X."
+//     例 "Device.X.{i}.Y"       → "Device.X."
+//   - 罕见以 {i} 开头的路径：跳过（不合规，无法生成 partial path）
+//
+// 输入顺序保留；自动去重（多个 {i} 路径可能合到同一 partial path）。
+// 此函数为 Sprint B Q-V3-2 决议落地：fanout 层透明处理动态实例，
+// 上层无需感知 GPN→GPV 链路（实际通过 TR-069 partial path 单 RPC 解决）。
+func expandInstancePaths(paths []string) []string {
+	seen := make(map[string]struct{}, len(paths))
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if !strings.Contains(p, "{i}") {
+			if _, dup := seen[p]; !dup {
+				seen[p] = struct{}{}
+				out = append(out, p)
+			}
+			continue
+		}
+		// 找首个 {i} 段位置（`.{i}` 或 `{i}` 开头）
+		idx := strings.Index(p, ".{i}")
+		if idx < 0 {
+			// path 以 {i} 开头（如 "{i}.Foo"），无法构造合规 partial → 跳过
+			continue
+		}
+		// 截到首个 {i} 段之前 + 末尾 `.`
+		partial := p[:idx+1] // 含 idx 位置的 `.`
+		if _, dup := seen[partial]; !dup {
+			seen[partial] = struct{}{}
+			out = append(out, partial)
+		}
+	}
+	return out
+}
+
 // filterLegalPaths 把字符串列表过滤为仅包含合规路径，同时返回被跳过的明细。
 // 顺序保留输入顺序；重复路径在调用方按需去重（builder 已有 seen 逻辑）。
 func filterLegalPaths(paths []string) (legal []string, skipped []SkippedPath) {
@@ -154,9 +194,17 @@ func xsdType(valueType string) string {
 // buildParameterNames 收集所有 paramRefs 的 tr069_path → {"names":[...]}。
 // LST/DSP 不依赖 formValues：用户在控制台不填表单，命令的 param_refs 即为读取范围。
 //
-// 路径合规校验：每条 tr069_path 经 validatePath 过滤，不合规的路径（前缀错 /
-// 含 {i} 占位符 / 非法字符）被跳过，避免下发到 CPE 后被静默丢弃。
-// 跳过的明细通过 fanout 层的 Skipped 日志暴露，运维侧能看到具体哪条。
+// Sprint B Q-V3-2 决议：含 {i} 占位符的路径自动展开为 TR-069 **partial path**
+// （末段 `.` 结尾），CPE 按 spec §A.3.2.7 返回前缀下全部参数 — 让命令树
+// 自动发现的"含动态实例 LST 命令"也能正常工作，不需要用户手动填实例号。
+// 转换示例:
+//
+//	Device.X.{i}.Y.{i}.Z       → Device.X.（保守 partial path，到首个 {i} 之前）
+//	Device.X.{i}.Y             → Device.X.
+//	Device.X.Y                 → 原样保留
+//
+// 路径合规校验：每条（展开后的）tr069_path 经 validatePath 过滤；
+// 不合规的路径（前缀错 / 非法字符 / 仍含 {i}）被跳过。
 // 全部不合规时返回 ErrNoUsableParams 让上层跳过整条 command。
 func buildParameterNames(paramRefs []MMLParamRef) (json.RawMessage, error) {
 	raw := make([]string, 0, len(paramRefs))
@@ -165,6 +213,8 @@ func buildParameterNames(paramRefs []MMLParamRef) (json.RawMessage, error) {
 			raw = append(raw, ref.Tr069Path)
 		}
 	}
+	// Sprint B Q-V3-2: 展开 {i} 路径为 partial path（在合规校验之前）。
+	raw = expandInstancePaths(raw)
 	legal, skipped := filterLegalPaths(raw)
 
 	// 去重（保序）

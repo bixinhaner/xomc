@@ -3,6 +3,7 @@ package mml
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/task"
 )
@@ -52,9 +54,10 @@ func (s *stubCmdParamRepo) ListByCommandIDs(_ context.Context, ids []uuid.UUID) 
 // --- Mock Repositories ---
 
 type mockCommandRepo struct {
-	listFn      func(ctx context.Context, filter CommandFilter) (*model.ListResponse[MMLCommand], error)
-	getByIDFn   func(ctx context.Context, id uuid.UUID) (*MMLCommand, error)
-	getByCodeFn func(ctx context.Context, code string) (*MMLCommand, error)
+	listFn          func(ctx context.Context, filter CommandFilter) (*model.ListResponse[MMLCommand], error)
+	getByIDFn       func(ctx context.Context, id uuid.UUID) (*MMLCommand, error)
+	getByCodeFn     func(ctx context.Context, code string) (*MMLCommand, error)
+	listByGroupIDFn func(ctx context.Context, groupID uuid.UUID) ([]MMLCommand, error)
 }
 
 func (m *mockCommandRepo) List(ctx context.Context, filter CommandFilter) (*model.ListResponse[MMLCommand], error) {
@@ -74,6 +77,13 @@ func (m *mockCommandRepo) GetByID(ctx context.Context, id uuid.UUID) (*MMLComman
 func (m *mockCommandRepo) GetByCode(ctx context.Context, code string) (*MMLCommand, error) {
 	if m.getByCodeFn != nil {
 		return m.getByCodeFn(ctx, code)
+	}
+	return nil, nil
+}
+
+func (m *mockCommandRepo) ListByGroupID(ctx context.Context, groupID uuid.UUID) ([]MMLCommand, error) {
+	if m.listByGroupIDFn != nil {
+		return m.listByGroupIDFn(ctx, groupID)
 	}
 	return nil, nil
 }
@@ -615,6 +625,66 @@ func TestService_ExecuteCommand_WithCode(t *testing.T) {
 	assert.Equal(t, "GET_PARAM", entry["command_code"])
 	assert.Equal(t, "GetParameterValues", entry["rpc_method"])
 	assert.Equal(t, map[string]interface{}{"path": "Device.Info"}, entry["parameters"])
+}
+
+// Sprint B-6: 孤儿 command_code（FE Console 的 mml_custom_command 引用已下线码）
+// 必须降级为透传 entry 而非 500，确保 FE 用户体验不被 standard-model 重建影响。
+func TestService_ExecuteCommand_OrphanCommandCode_FallsBackInsteadOfErroring(t *testing.T) {
+	cmdRepo := &mockCommandRepo{
+		getByCodeFn: func(ctx context.Context, code string) (*MMLCommand, error) {
+			assert.Equal(t, "ORPHAN_OLD_CODE", code)
+			return nil, commonerrors.ErrNotFound
+		},
+	}
+
+	var capturedTask *MMLTask
+	taskRepo := &mockTaskRepo{
+		createFn: func(ctx context.Context, task *MMLTask) error {
+			capturedTask = task
+			task.ID = uuid.New()
+			return nil
+		},
+	}
+
+	svc := newTestService(cmdRepo, &mockScriptRepo{}, taskRepo)
+
+	req := ExecuteRequest{
+		CommandCode:   "ORPHAN_OLD_CODE",
+		DeviceSNs:     []string{"SN-orphan"},
+		Parameters:    map[string]interface{}{"x": "y"},
+		OperationType: "LST",
+		Creator:       "admin",
+	}
+
+	result, err := svc.ExecuteCommand(context.Background(), req)
+	require.NoError(t, err, "orphan command_code should NOT 500")
+	require.NotNil(t, result)
+	require.NotNil(t, capturedTask)
+
+	require.Len(t, capturedTask.Commands, 1)
+	entry := capturedTask.Commands[0]
+	assert.Equal(t, "ORPHAN_OLD_CODE", entry["command_code"])
+	assert.Equal(t, true, entry["orphan"], "orphan marker required for FE/audit")
+	assert.Equal(t, "LST", entry["operation_type"])
+	_, hasRPC := entry["rpc_method"]
+	assert.False(t, hasRPC, "rpc_method not set; Fanouter will skip per existing logic")
+}
+
+// 其它（非 NotFound）错误依旧抛出 — 不能把 DB 连接抖动也吞掉。
+func TestService_ExecuteCommand_NonNotFoundLookupError_StillFails(t *testing.T) {
+	cmdRepo := &mockCommandRepo{
+		getByCodeFn: func(ctx context.Context, code string) (*MMLCommand, error) {
+			return nil, fmt.Errorf("connection refused")
+		},
+	}
+
+	svc := newTestService(cmdRepo, &mockScriptRepo{}, &mockTaskRepo{})
+	_, err := svc.ExecuteCommand(context.Background(), ExecuteRequest{
+		CommandCode: "ANY",
+		DeviceSNs:   []string{"SN"},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "resolve command code")
 }
 
 func TestService_ExecuteCommand_WithoutCode(t *testing.T) {

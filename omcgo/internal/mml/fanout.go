@@ -17,9 +17,14 @@ type DeviceTaskCreator interface {
 }
 
 // Fanouter fans out an MML task into individual device_tasks.
+//
+// Sprint B Q-V3-3：sequentialMode=true 时，初次 fanout 仅入队
+// **每个设备的 command_index=0** device_task；后续命令由 Sequencer
+// 在前一行完成回调中追加入队，实现严格序列。
 type Fanouter struct {
-	taskCreator DeviceTaskCreator
-	logger      *zap.Logger
+	taskCreator    DeviceTaskCreator
+	sequentialMode bool
+	logger         *zap.Logger
 }
 
 // NewFanouter creates a new Fanouter.
@@ -29,6 +34,11 @@ func NewFanouter(taskCreator DeviceTaskCreator, logger *zap.Logger) *Fanouter {
 		logger:      logger.Named("mml-fanout"),
 	}
 }
+
+// SetSequentialMode 启用脚本多行严格序列模式（Sprint B Q-V3-3 决议）。
+// 启用后初次 fanout 只入队第一行；Sequencer 通过 completion callback 链式
+// 入队后续行。需要在 DI 层把 Sequencer 注册到 CompletionRouter。
+func (f *Fanouter) SetSequentialMode(enabled bool) { f.sequentialMode = enabled }
 
 // Fanout creates device_tasks for each (command, device) pair in the MML task.
 // Only called for immediate execution; scheduled/periodic tasks are fan-outed when started.
@@ -42,6 +52,22 @@ func (f *Fanouter) Fanout(ctx context.Context, mmlTask *MMLTask) (int, error) {
 		return 0, nil
 	}
 
+	// Sprint B Q-V3-3: sequentialMode 下只入队 command_index=0 那批
+	if f.sequentialMode && len(mmlTask.Commands) > 1 {
+		first := make([]*task.CreateTaskRequest, 0, len(mmlTask.DeviceSNs))
+		for _, r := range reqs {
+			if r.CommandIndex == 0 {
+				first = append(first, r)
+			}
+		}
+		reqs = first
+		f.logger.Info("mml fanout sequential mode: enqueue first line only",
+			zap.String("mml_task_id", mmlTask.ID.String()),
+			zap.Int("first_line_tasks", len(reqs)),
+			zap.Int("total_lines", len(mmlTask.Commands)),
+		)
+	}
+
 	created, err := f.taskCreator.BatchCreateTasks(ctx, reqs)
 	if err != nil {
 		return 0, fmt.Errorf("fanout mml task %s: %w", mmlTask.ID, err)
@@ -52,6 +78,7 @@ func (f *Fanouter) Fanout(ctx context.Context, mmlTask *MMLTask) (int, error) {
 		zap.Int("device_count", len(mmlTask.DeviceSNs)),
 		zap.Int("command_count", len(mmlTask.Commands)),
 		zap.Int("device_tasks_created", len(created)),
+		zap.Bool("sequential_mode", f.sequentialMode),
 	)
 
 	return len(created), nil

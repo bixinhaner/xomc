@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
@@ -474,6 +475,95 @@ type ExecuteRequest struct {
 	FailedRetryInterval int  `json:"failed_retry_interval"`
 }
 
+// ExecuteGroupRequest 批量执行某 mml_param_group 下所有命令的入参
+// （Sprint B Q-V3-1 决议）。
+type ExecuteGroupRequest struct {
+	GroupID    uuid.UUID              `json:"group_id"`
+	DeviceSNs  []string               `json:"device_sns"`
+	Parameters map[string]interface{} `json:"parameters,omitempty"` // 可选，传入下游每条 command
+	TaskName   string                 `json:"task_name,omitempty"`
+	Creator    string                 `json:"creator,omitempty"`
+	Executor   string                 `json:"executor,omitempty"`
+	// 仅过滤特定 operation_type（如只跑 LST，跳过 MOD/ADD/RMV）；
+	// 空数组 = 跑全部
+	OperationFilter []string    `json:"operation_filter,omitempty"`
+	ExecuteType     ExecuteType `json:"execute_type,omitempty"`
+	ScheduledAt     *string     `json:"scheduled_at,omitempty"`
+}
+
+// ExecuteGroup 把 group 下的全部命令展开为一个 MML task 执行（Sprint B Q-V3-1）。
+//
+// 语义：选一个 group 等于一键发起该 group 下所有 mml_commands 各自的 RPC。
+// 多命令在底层共享 mml_task.commands 数组，fanout + sequencer 自动串行展开。
+//
+// 失败语义：group 不存在或下无命令 → error；devices 为空 → error。
+func (s *Service) ExecuteGroup(ctx context.Context, req ExecuteGroupRequest) (*MMLTask, error) {
+	if req.GroupID == uuid.Nil {
+		return nil, fmt.Errorf("group_id required")
+	}
+	if len(req.DeviceSNs) == 0 {
+		return nil, fmt.Errorf("device_sns must be non-empty")
+	}
+
+	cmds, err := s.cmdRepo.ListByGroupID(ctx, req.GroupID)
+	if err != nil {
+		return nil, fmt.Errorf("list commands by group %s: %w", req.GroupID, err)
+	}
+	if len(cmds) == 0 {
+		return nil, fmt.Errorf("group %s has no commands", req.GroupID)
+	}
+
+	// 过滤 operation_type（如指定）
+	filtered := cmds
+	if len(req.OperationFilter) > 0 {
+		allowed := make(map[string]struct{}, len(req.OperationFilter))
+		for _, op := range req.OperationFilter {
+			allowed[op] = struct{}{}
+		}
+		filtered = filtered[:0]
+		for _, c := range cmds {
+			if _, ok := allowed[c.OperationType]; ok {
+				filtered = append(filtered, c)
+			}
+		}
+		if len(filtered) == 0 {
+			return nil, fmt.Errorf("group %s: no commands match operation_filter=%v", req.GroupID, req.OperationFilter)
+		}
+	}
+
+	// 构造 ExecuteRequest commands 数组：每个 command 一个 entry
+	commands := make([]map[string]interface{}, 0, len(filtered))
+	for _, c := range filtered {
+		entry := map[string]interface{}{
+			"command_code":   c.CommandCode,
+			"rpc_method":     c.RPCMethod,
+			"operation_type": c.OperationType,
+			"parameters":     req.Parameters,
+		}
+		s.attachParamRefs(ctx, entry, c.ID)
+		commands = append(commands, entry)
+	}
+
+	// 透传到 ExecuteCommand 走标准 fanout 链路
+	execReq := ExecuteRequest{
+		Commands:    commands,
+		DeviceSNs:   req.DeviceSNs,
+		Parameters:  req.Parameters,
+		TaskName:    req.TaskName,
+		Creator:     req.Creator,
+		Executor:    req.Executor,
+		ExecuteType: req.ExecuteType,
+		ScheduledAt: req.ScheduledAt,
+	}
+	if execReq.TaskName == "" {
+		execReq.TaskName = fmt.Sprintf("group:%s (%d commands)", req.GroupID, len(filtered))
+	}
+	if execReq.ExecuteType == "" {
+		execReq.ExecuteType = ExecuteImmediate
+	}
+	return s.ExecuteCommand(ctx, execReq)
+}
+
 // ExecuteCommand creates an MML task with pending status.
 // Real execution through cmdQueue to ACS is a future integration.
 func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLTask, error) {
@@ -512,22 +602,46 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 	if req.CommandCode != "" {
 		cmd, err := s.cmdRepo.GetByCode(ctx, req.CommandCode)
 		if err != nil {
-			return nil, fmt.Errorf("resolve command code %q: %w", req.CommandCode, err)
+			// Sprint B-6 fallback：standard-model 重建后部分老 command_code 已下线，
+			// FE Console 保存的 mml_custom_command 可能仍引用孤儿码。此时不阻塞任务
+			// 创建——退化为透传 entry，下游 resolveRPCMethods / fanout 会再次尝试
+			// 解析；若彻底无法识别，Fanouter 内部会跳过对应 device 任务并在审计
+			// 日志中留下痕迹，比直接 500 对用户友好得多。
+			if errors.Is(err, commonerrors.ErrNotFound) {
+				s.logger.Warn("mml execute: command_code not in mml_commands, degrading to raw passthrough",
+					zap.String("command_code", req.CommandCode),
+					zap.String("operation_type", req.OperationType),
+				)
+				entry := map[string]interface{}{
+					"command_code": req.CommandCode,
+					"parameters":   req.Parameters,
+					"orphan":       true, // 标记孤儿，便于审计 / FE 提示
+				}
+				if len(req.ParamPaths) > 0 {
+					entry["param_paths"] = req.ParamPaths
+				}
+				if req.OperationType != "" {
+					entry["operation_type"] = req.OperationType
+				}
+				commands = append(commands, entry)
+			} else {
+				return nil, fmt.Errorf("resolve command code %q: %w", req.CommandCode, err)
+			}
+		} else {
+			entry := map[string]interface{}{
+				"command_code": cmd.CommandCode,
+				"rpc_method":   cmd.RPCMethod,
+				"parameters":   req.Parameters,
+			}
+			if len(req.ParamPaths) > 0 {
+				entry["param_paths"] = req.ParamPaths
+			}
+			if req.OperationType != "" {
+				entry["operation_type"] = req.OperationType
+			}
+			s.attachParamRefs(ctx, entry, cmd.ID)
+			commands = append(commands, entry)
 		}
-
-		entry := map[string]interface{}{
-			"command_code": cmd.CommandCode,
-			"rpc_method":   cmd.RPCMethod,
-			"parameters":   req.Parameters,
-		}
-		if len(req.ParamPaths) > 0 {
-			entry["param_paths"] = req.ParamPaths
-		}
-		if req.OperationType != "" {
-			entry["operation_type"] = req.OperationType
-		}
-		s.attachParamRefs(ctx, entry, cmd.ID)
-		commands = append(commands, entry)
 	} else if len(req.ParamPaths) > 0 {
 		// 裸路径模式：用户没在命令树选命令，直接在"参数路径指定"面板敲了 N 个 TR-069 路径。
 		// 支持 LST/DSP/MOD/ADD/RMV 五种操作类型；param_refs 在此处按 op 合成
@@ -992,20 +1106,155 @@ func (s *Service) DeleteTask(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// splitScriptLines splits script content into individual command lines,
-// trimming whitespace and ignoring empty lines and comments.
-func splitScriptLines(content string) []string {
-	var lines []string
-	for _, line := range strings.Split(content, "\n") {
+// ScriptLine 一条解析后的脚本行（Sprint B Q-V3-4 决议）。
+//
+// 支持语法：
+//
+//	# 注释                            ← 跳过
+//	// 注释                           ← 跳过
+//	LST_DEVICE_DEVICEINFO              ← 无参 command_code（兼容老脚本）
+//	MOD_DEVICE_DEVICEINFO Azimuth=180  ← 带 K=V 参数
+//	MOD_DEVICE_DEVICEINFO Azimuth=180 Downtilt=5   ← 多个 K=V 空格分隔
+//	LST_FOO; # trailing comment ok    ← 行尾分号 + 注释保留兼容
+type ScriptLine struct {
+	CommandCode string            // 'LST_DEVICE_DEVICEINFO'
+	Parameters  map[string]string // {"Azimuth":"180","Downtilt":"5"}; 无参时空 map
+	LineNumber  int               // 原始行号（1-based），错误定位用
+}
+
+// ScriptParseError 详细的脚本解析错误，含行号 + 原因，让 FE 能精确定位坏行。
+type ScriptParseError struct {
+	LineNumber int
+	Raw        string
+	Reason     string
+}
+
+func (e *ScriptParseError) Error() string {
+	return fmt.Sprintf("script line %d: %s (raw=%q)", e.LineNumber, e.Reason, e.Raw)
+}
+
+// ParseScriptContent 把脚本文本解析为结构化 []ScriptLine。
+//
+// Sprint B Q-V3-4 决议 fail-fast：任一行语法错误 / 重复参数 key →
+// 返回 *ScriptParseError，**不返回部分结果**。整脚本要么全过要么拒收。
+//
+// 兼容老脚本：不带 K=V 的纯 command_code 行仍合法（Parameters 为 nil）。
+func ParseScriptContent(content string) ([]ScriptLine, error) {
+	var out []ScriptLine
+	for idx, raw := range strings.Split(content, "\n") {
+		lineNum := idx + 1
+		line := strings.TrimSpace(raw)
+
+		// strip trailing inline comments after #/// — 兼容 "LST_FOO; # comment"
+		if i := indexOfComment(line); i >= 0 {
+			line = strings.TrimSpace(line[:i])
+		}
+		// trailing semicolons
+		line = strings.TrimSuffix(line, ";")
 		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
+
+		// 空行 / 纯注释 → skip
+		if line == "" {
 			continue
 		}
-		// Strip trailing semicolons
-		line = strings.TrimSuffix(line, ";")
-		lines = append(lines, line)
+
+		// 拆分 token：第一个 token 为 command_code，后续 token 是 K=V
+		tokens := strings.Fields(line)
+		if len(tokens) == 0 {
+			continue
+		}
+		code := tokens[0]
+		if !isValidCommandCode(code) {
+			return nil, &ScriptParseError{
+				LineNumber: lineNum, Raw: raw,
+				Reason: fmt.Sprintf("invalid command_code %q (allowed: [A-Z0-9_]+)", code),
+			}
+		}
+
+		params := make(map[string]string)
+		for _, t := range tokens[1:] {
+			eq := strings.IndexByte(t, '=')
+			if eq < 0 {
+				return nil, &ScriptParseError{
+					LineNumber: lineNum, Raw: raw,
+					Reason: fmt.Sprintf("parameter %q missing '=' (expected key=value)", t),
+				}
+			}
+			key := strings.TrimSpace(t[:eq])
+			val := strings.TrimSpace(t[eq+1:])
+			if key == "" {
+				return nil, &ScriptParseError{
+					LineNumber: lineNum, Raw: raw,
+					Reason: fmt.Sprintf("parameter %q has empty key", t),
+				}
+			}
+			if _, dup := params[key]; dup {
+				return nil, &ScriptParseError{
+					LineNumber: lineNum, Raw: raw,
+					Reason: fmt.Sprintf("duplicate parameter key %q in same line", key),
+				}
+			}
+			params[key] = val
+		}
+		out = append(out, ScriptLine{
+			CommandCode: code,
+			Parameters:  params,
+			LineNumber:  lineNum,
+		})
 	}
-	return lines
+	return out, nil
+}
+
+// indexOfComment 返回该行内首个 # 或 // 的位置；-1 表示无注释。
+// 简单实现：不解析引号包裹（脚本本身不会含字符串字面量），首个出现就算。
+func indexOfComment(s string) int {
+	hash := strings.Index(s, "#")
+	slash := strings.Index(s, "//")
+	switch {
+	case hash < 0 && slash < 0:
+		return -1
+	case hash < 0:
+		return slash
+	case slash < 0:
+		return hash
+	case hash < slash:
+		return hash
+	default:
+		return slash
+	}
+}
+
+// isValidCommandCode command_code 字符集约束：[A-Z0-9_]+，至少 1 字符。
+// 与 Loader 生成规则一致（mml_commands.command_code 都是这个形态）。
+func isValidCommandCode(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// splitScriptLines 兼容老接口：调 ParseScriptContent 取 command_code 列表。
+// fail-fast 错误时丢错给老调用方（panic 不合适，老 caller 也得显式处理）。
+//
+// 新代码请直接用 ParseScriptContent 拿到结构化 [ScriptLine] + 参数。
+func splitScriptLines(content string) []string {
+	lines, err := ParseScriptContent(content)
+	if err != nil {
+		// 老调用方（service.go:499 ExecuteCommand）没法返错；当前 fallback 行为：
+		// 走 fail-fast 时 ParseScriptContent 已经拒了，外层应该用 ParseScriptContent
+		// 直接返 error。本兼容函数下次清理时删除。
+		return nil
+	}
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		out = append(out, l.CommandCode)
+	}
+	return out
 }
 
 // ---- Custom Command operations (Phase 3) ----

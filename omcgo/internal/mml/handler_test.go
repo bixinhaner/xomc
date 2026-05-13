@@ -24,9 +24,10 @@ import (
 // ---------------------------------------------------------------------------
 
 type hCmdRepo struct {
-	ListFn      func(ctx context.Context, filter CommandFilter) (*model.ListResponse[MMLCommand], error)
-	GetByIDFn   func(ctx context.Context, id uuid.UUID) (*MMLCommand, error)
-	GetByCodeFn func(ctx context.Context, code string) (*MMLCommand, error)
+	ListFn          func(ctx context.Context, filter CommandFilter) (*model.ListResponse[MMLCommand], error)
+	GetByIDFn       func(ctx context.Context, id uuid.UUID) (*MMLCommand, error)
+	GetByCodeFn     func(ctx context.Context, code string) (*MMLCommand, error)
+	ListByGroupIDFn func(ctx context.Context, groupID uuid.UUID) ([]MMLCommand, error)
 }
 
 func (m *hCmdRepo) List(ctx context.Context, filter CommandFilter) (*model.ListResponse[MMLCommand], error) {
@@ -37,6 +38,12 @@ func (m *hCmdRepo) GetByID(ctx context.Context, id uuid.UUID) (*MMLCommand, erro
 }
 func (m *hCmdRepo) GetByCode(ctx context.Context, code string) (*MMLCommand, error) {
 	return m.GetByCodeFn(ctx, code)
+}
+func (m *hCmdRepo) ListByGroupID(ctx context.Context, groupID uuid.UUID) ([]MMLCommand, error) {
+	if m.ListByGroupIDFn != nil {
+		return m.ListByGroupIDFn(ctx, groupID)
+	}
+	return nil, nil
 }
 
 type hScriptRepo struct {

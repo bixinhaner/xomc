@@ -109,6 +109,43 @@ func (r *PgCommandRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLCo
 	return cmd, nil
 }
 
+// ListByGroupID 按 group_id 查询命令（Sprint B Q-V3-1 group 批量执行 API 基础）。
+// 排序：先按 operation_type 顺序（LST/MOD/ADD/RMV 习惯），再按 command_code 字典序。
+func (r *PgCommandRepository) ListByGroupID(ctx context.Context, groupID uuid.UUID) ([]MMLCommand, error) {
+	query, args, err := storage.Psql.Select(commandColumns...).
+		From("mml_commands").
+		Where(sq.Eq{"group_id": groupID}).
+		OrderBy(`
+			CASE operation_type
+				WHEN 'LST' THEN 1
+				WHEN 'MOD' THEN 2
+				WHEN 'ADD' THEN 3
+				WHEN 'RMV' THEN 4
+				ELSE 99
+			END`, "command_code ASC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list mml_commands by group SQL: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list mml_commands by group: %w", err)
+	}
+	defer rows.Close()
+	var out []MMLCommand
+	for rows.Next() {
+		cmd, err := scanCommand(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan mml_command: %w", err)
+		}
+		out = append(out, *cmd)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate mml_commands: %w", err)
+	}
+	return out, nil
+}
+
 func (r *PgCommandRepository) GetByCode(ctx context.Context, code string) (*MMLCommand, error) {
 	query, args, err := storage.Psql.Select(commandColumns...).
 		From("mml_commands").

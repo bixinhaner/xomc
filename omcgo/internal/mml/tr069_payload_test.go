@@ -229,22 +229,28 @@ func TestBuildTR069Params_GetParameterValues_FiltersIllegalPaths(t *testing.T) {
 		Names []string `json:"names"`
 	}
 	require.NoError(t, json.Unmarshal(payload, &got))
-	assert.Len(t, got.Names, 6, "应只保留 6 条合法路径（去掉 7 条 DeviceGSM.* + 1 条带 {i}）")
-	// 不应该包含任何非法路径
+	// Sprint B Q-V3-2：含 {i} 的 Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress
+	// 自动展开为 partial path Device.IP.Interface.（不再被过滤）— 总数变 7。
+	assert.Len(t, got.Names, 7, "6 条合法 + 1 条 {i} 展开为 partial path")
+	// 仍不应包含 DeviceGSM.* 等非法前缀
 	for _, n := range got.Names {
 		assert.False(t, strings.HasPrefix(n, "DeviceGSM."), "DeviceGSM. 前缀必须被过滤")
-		assert.NotContains(t, n, "{i}", "占位符必须被过滤")
+		assert.NotContains(t, n, "{i}", "占位符必须被展开（不残留）")
 	}
-	// 必须保留这些
+	// 必须保留合法的具体路径
 	assert.Contains(t, got.Names, "Device.DeviceInfo.HardwareVersion")
 	assert.Contains(t, got.Names, "Device.DeviceInfo.X_COM_MACAddress")
+	// 含 {i} 的路径展开为 partial path
+	assert.Contains(t, got.Names, "Device.IP.Interface.")
 }
 
 func TestBuildTR069Params_GetParameterValues_AllIllegalReturnsError(t *testing.T) {
+	// Sprint B Q-V3-2 后：Device.X.{i}.Y 路径自动展开为 partial path Device.X.，
+	// 不再视为非法 — 所以本 case 只保留**真正非法**前缀路径来验证 ErrNoUsableParams。
 	refs := []MMLParamRef{
-		{ParamCode: "A", Tr069Path: "DeviceGSM.Mcc"},
-		{ParamCode: "B", Tr069Path: "Internal.X"},
-		{ParamCode: "C", Tr069Path: "Device.X.{i}.Y"},
+		{ParamCode: "A", Tr069Path: "DeviceGSM.Mcc"},  // 非 Device./IGD. 前缀
+		{ParamCode: "B", Tr069Path: "Internal.X"},     // 非法前缀
+		{ParamCode: "C", Tr069Path: "Bad@chars#here"}, // 非法字符
 	}
 	_, err := BuildTR069Params("GetParameterValues", refs, nil, "LST")
 	require.Error(t, err)

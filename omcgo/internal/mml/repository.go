@@ -13,6 +13,10 @@ type CommandRepository interface {
 	List(ctx context.Context, filter CommandFilter) (*model.ListResponse[MMLCommand], error)
 	GetByID(ctx context.Context, id uuid.UUID) (*MMLCommand, error)
 	GetByCode(ctx context.Context, code string) (*MMLCommand, error)
+	// ListByGroupID 返回某个 mml_param_group 下的全部命令（按 sort_order 排序）。
+	// Sprint B Q-V3-1 决议：group 作为"批量执行单元"，本方法为 POST
+	// /mml/groups/:id/execute 提供命令展开能力。
+	ListByGroupID(ctx context.Context, groupID uuid.UUID) ([]MMLCommand, error)
 }
 
 // ScriptRepository provides CRUD operations for user-defined MML scripts.

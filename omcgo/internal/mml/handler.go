@@ -71,6 +71,11 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	templates.PUT("/:id", h.UpdateTemplate)
 	templates.DELETE("/:id", h.DeleteTemplate)
 	templates.POST("/:id/clone", h.CloneTemplate)
+
+	// Sprint B Q-V3-1：mml_param_groups 批量执行。group 下的全部命令
+	// 一键展开为一个 mml_task，fanout + sequencer 自动串行下发。
+	groups := mml.Group("/groups")
+	groups.POST("/:id/execute", h.ExecuteGroup)
 }
 
 // ---- Request types ----
@@ -326,6 +331,70 @@ func (h *Handler) runExecute(c *gin.Context, req ExecuteHTTPRequest) {
 	execReq.PeriodTime = req.PeriodTime
 
 	task, err := h.service.ExecuteCommand(c.Request.Context(), execReq)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	response.OKWithStatus(c, http.StatusCreated, task)
+}
+
+// ExecuteGroupHTTPRequest defines the request body for
+// POST /api/v1/mml/groups/:id/execute（Sprint B Q-V3-1）。
+// GroupID 取自 URL path 参数，因此 body 里不暴露该字段。
+type ExecuteGroupHTTPRequest struct {
+	DeviceSNs       []string               `json:"device_sns" binding:"required"`
+	Parameters      map[string]interface{} `json:"parameters,omitempty"`
+	TaskName        string                 `json:"task_name,omitempty"`
+	OperationFilter []string               `json:"operation_filter,omitempty"`
+	ExecuteType     string                 `json:"execute_type,omitempty"`
+	ScheduledAt     string                 `json:"scheduled_at,omitempty"`
+}
+
+// ExecuteGroup handles POST /api/v1/mml/groups/:id/execute.
+// 把指定 mml_param_group 下的全部命令一次性下发（操作类型过滤可选）。
+// device_sns 必填；其他字段缺省走 ExecuteImmediate。
+func (h *Handler) ExecuteGroup(c *gin.Context) {
+	groupID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+
+	var req ExecuteGroupHTTPRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logger.Warn("mml group execute request validation failed",
+			zap.String("client_ip", c.ClientIP()),
+			zap.String("group_id", groupID.String()),
+			zap.Error(err),
+		)
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	creator, _ := c.Get("username")
+	creatorStr, _ := creator.(string)
+
+	executeType := req.ExecuteType
+	if executeType == "" {
+		executeType = string(ExecuteImmediate)
+	}
+
+	serviceReq := ExecuteGroupRequest{
+		GroupID:         groupID,
+		DeviceSNs:       req.DeviceSNs,
+		Parameters:      req.Parameters,
+		TaskName:        req.TaskName,
+		Creator:         creatorStr,
+		Executor:        creatorStr,
+		OperationFilter: req.OperationFilter,
+		ExecuteType:     ExecuteType(executeType),
+	}
+	if req.ScheduledAt != "" {
+		serviceReq.ScheduledAt = &req.ScheduledAt
+	}
+
+	task, err := h.service.ExecuteGroup(c.Request.Context(), serviceReq)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
