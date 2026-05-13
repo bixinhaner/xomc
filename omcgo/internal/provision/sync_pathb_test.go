@@ -18,7 +18,8 @@ func TestExtractStorablePrefixes_HappyPath(t *testing.T) {
 		{PrivatePath: "Dev.NotStorable", IsStorable: false, EntryType: "parameter"}, // 应被过滤
 	}
 	got := extractStorablePrefixes(mappings)
-	want := []string{"Dev.System.", "Dev.WiFi.Radio.", "Dev.WiFi.SSID."}
+	// {i} 模板截到对象前缀；普通叶子原样下发
+	want := []string{"Dev.System.Mode", "Dev.WiFi.Radio.", "Dev.WiFi.SSID."}
 	sort.Strings(got)
 	assert.Equal(t, want, got)
 }
@@ -54,26 +55,45 @@ func TestExtractStorablePrefixes_ObjectPaths(t *testing.T) {
 	assert.Equal(t, []string{"Dev.System.", "Dev.WiFi."}, got)
 }
 
-func TestExtractStorablePrefixes_EmptyAndInvalid(t *testing.T) {
+func TestExtractStorablePrefixes_EmptyFiltered_NoDotKept(t *testing.T) {
 	mappings := []parammodel.ParamMapping{
-		{PrivatePath: "", IsStorable: true},
-		{PrivatePath: "NoDot", IsStorable: true}, // 无 "." → basePrefix 返回空 → 过滤
+		{PrivatePath: "", IsStorable: true},      // 空串 → 过滤
+		{PrivatePath: "NoDot", IsStorable: true}, // 无 "." → 原样保留，由基站判定
 	}
 	got := extractStorablePrefixes(mappings)
-	assert.Empty(t, got)
+	assert.Equal(t, []string{"NoDot"}, got)
+}
+
+func TestExtractStorablePrefixes_LeafKeptAsIs(t *testing.T) {
+	mappings := []parammodel.ParamMapping{
+		{PrivatePath: "Device.X.Y.Z", IsStorable: true, EntryType: "parameter"},
+	}
+	got := extractStorablePrefixes(mappings)
+	assert.Equal(t, []string{"Device.X.Y.Z"}, got)
+}
+
+func TestExtractStorablePrefixes_LeavesNotMerged(t *testing.T) {
+	// 同父对象下的多个叶子参数 → 各自原样保留，不合并到父前缀
+	mappings := []parammodel.ParamMapping{
+		{PrivatePath: "Device.X.Y", IsStorable: true, EntryType: "parameter"},
+		{PrivatePath: "Device.X.Z", IsStorable: true, EntryType: "parameter"},
+	}
+	got := extractStorablePrefixes(mappings)
+	sort.Strings(got)
+	assert.Equal(t, []string{"Device.X.Y", "Device.X.Z"}, got)
 }
 
 func TestBasePrefix_Cases(t *testing.T) {
 	cases := []struct {
 		in, out string
 	}{
-		{"Dev.WiFi.SSID.{i}.Enabled", "Dev.WiFi.SSID."},
+		{"Dev.WiFi.SSID.{i}.Enabled", "Dev.WiFi.SSID."}, // {i} 模板截到对象前缀
 		{"Dev.WiFi.SSID.{i}.{i}.Foo", "Dev.WiFi.SSID."}, // 截到第一个 {i}
-		{"Dev.WiFi.SSID.", "Dev.WiFi.SSID."},
-		{"Dev.System.Mode", "Dev.System."},
-		{"Dev", ""},
-		{"", ""},
-		{"Dev.", "Dev."},
+		{"Dev.WiFi.SSID.", "Dev.WiFi.SSID."},            // object 原样
+		{"Dev.System.Mode", "Dev.System.Mode"},          // 叶子原样
+		{"Dev", "Dev"},                                  // 无 "." 原样
+		{"", ""},                                        // 空串
+		{"Dev.", "Dev."},                                // 末尾点原样
 	}
 	for _, c := range cases {
 		t.Run(c.in, func(t *testing.T) {

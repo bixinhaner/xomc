@@ -203,17 +203,18 @@ func (s *SyncService) resolveMappingSet(ctx context.Context, dev *model.Device) 
 
 // ── 纯函数辅助（便于单测） ─────────────────────────────────────────────
 
-// extractStorablePrefixes 从 ParamMapping 列表抽出 is_storable=true 的去重对象前缀。
+// extractStorablePrefixes 从 ParamMapping 列表抽出 is_storable=true 的 GPV 下发 path 列表。
 //
-// 算法：
+// 算法（设计 §1.11 Path B）：
 //   1. 过滤 is_storable=true
-//   2. 把每条 privatePath 的"叶子路径"提取为基础对象前缀（去末段 + 加 "."）
-//      - 如果 privatePath 以 "." 结尾（object 类型），原样使用
-//      - 否则去掉最后一个 "." 之后的部分（最后一段是叶子参数名）
-//   3. 把含 "{i}" 占位符的段替换为模板基础前缀（截断到第一个 "{i}" 之前一段含 "."）
-//   4. 去重排序输出
+//   2. basePrefix 处理每条 privatePath：
+//      - 含 "{i}" 模板段 → 截到第一个 "{i}" 前的对象前缀（让 CPE 枚举实例）
+//      - 叶子参数、末尾带点对象 → 原样
+//   3. 去重排序输出
 //
-// 设计 §1.11 Path B：枚举对象前缀做 GPV，CPE 自动展开所有实例号。
+// 设计原则："只查 XML 字典里实际列出的 path"，不从叶子自动派生父对象前缀。
+// 历史教训：basePrefix 曾把叶子 "....UeAccess.Enable" 截成 "....UeAccess."，
+// BAICELLS BaiBLQ_5.0.16.1_1229 固件不识别该对象节点 → 9005 Fault 整批 reject。
 func extractStorablePrefixes(mappings []parammodel.ParamMapping) []string {
 	seen := make(map[string]struct{}, len(mappings))
 	for _, m := range mappings {
@@ -241,28 +242,24 @@ func extractStorablePrefixes(mappings []parammodel.ParamMapping) []string {
 	return out
 }
 
-// basePrefix 从一条 privatePath 提取去重用的对象前缀（含末尾 "."）。
+// basePrefix 从一条 privatePath 提取 GPV 下发用的路径。
 //
-//   - "Dev.WiFi.SSID.{i}.Enabled" → "Dev.WiFi.SSID."（截到第一个 {i} 前一段）
+// 只对含 "{i}" 的模板路径做截断（截到第一个 "{i}" 前的对象前缀），其它形态原样返回。
+// 不再从叶子参数自动派生父对象前缀，避免基站不识别人为截出的对象节点。
+//
+//   - "Dev.WiFi.SSID.{i}.Enabled" → "Dev.WiFi.SSID."（截到 "{i}" 前，CPE 枚举实例）
 //   - "Dev.WiFi.SSID."             → "Dev.WiFi.SSID."（object 原样）
-//   - "Dev.System.Mode"            → "Dev.System."
-//   - "Dev"                        → ""（无 "."，无意义）
+//   - "Dev.System.Mode"            → "Dev.System.Mode"（叶子原样）
+//   - "Dev"                        → "Dev"（无 "."，原样，由基站判定）
 //   - ""                           → ""
 func basePrefix(privatePath string) string {
 	if privatePath == "" {
 		return ""
 	}
-	// 截到第一个 "{i}" 前面一段含 "."
 	if idx := strings.Index(privatePath, "{i}"); idx > 0 {
 		return privatePath[:idx]
 	}
-	if strings.HasSuffix(privatePath, ".") {
-		return privatePath
-	}
-	if idx := strings.LastIndex(privatePath, "."); idx >= 0 {
-		return privatePath[:idx+1]
-	}
-	return ""
+	return privatePath
 }
 
 // instantiateStandardPath 把 template standardPath 中的 {i} 占位符按 actualPrivate 中

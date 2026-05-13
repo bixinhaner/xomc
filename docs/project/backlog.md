@@ -331,6 +331,8 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 
 | ID | Title | Proposed By | Created | Notes |
 |----|-------|-------------|---------|-------|
+| T-0103 | D1 path-b 真性 9005 自治探测 + `discovered_param_mappings.is_supported=false` 标记 | Claude+user | 2026-05-13 | D1 path-b 去叶子截断（commit 待补 hash）落地后，BAICELLS `BaiBLQ_5.0.16.1_1229` 仍有部分字典叶子不支持 → §5.4 整批 9005 reject。已知 sample：`Device.DeviceInfo.AmbrLimitSwitch`（一批 5 个 invalid）/ `RunningStatus`（1 个）/ `X_COM_SCTP_CONFIG_MTU`（1 个）。需要：① batch 收到 9005 时降级为 per-name 探测；② 命中 invalid 的 path 在 `discovered_param_mappings` 标 `is_supported=false`，下次 sync 跳过；③ 后续 sync prefixes 数会随固件演进收敛。本次 D1 改动已经 `prefixes 410 / 754 mappings / 2 batch completed / 240 行 device_parameters` 验证主体效果，详见 `/Users/shangyingbin/Documents/notes/d1-path-b-no-split-implementation.md` |
+| T-0104 | GPV batch 在 9005 Fault 后续 batch CPE 不响应（task 卡 sent 状态）| Claude+user | 2026-05-13 | D1 测试时 9 个 GPV batch 顺序下发，BAICELLS 对前 5 个有响应（2 completed + 3 failed），但**后 4 个一直 sent 无响应**，CPE 后续 PERIODIC 也不带 GPV response。怀疑：CPE 在 9005 fault 后的 session 状态机异常 / ACS 同 session 内连发多个 RPC 边界问题 / per-device session 超时清理逻辑漏掉 sent task。需要：① ACS 给 sent task 加 expire 兜底（reaper 已有 timeout=900s 但 4 个仍 sent）；② 抓包 + protocol.log 复现验证；③ 跟 T-0103 联动 — 真性 9005 path 标 unsupported 后这批 batch 可能自然消失 |
 | — | （新想法在 T-0099 上方追加） | — | — | 下周一 Triage 会议判决 |
 
 > **2026-05-09 自我 triage（用户授权）**：T-0100 由 Proposed 直接进 §4 Triaged + 拆 5 子任务（§4.2）；T-0100-P0 进 §3 Active Planned 立即开车（P0 仅写日志基建，不依赖 Q1-Q4 决议）。R-109 已登记 risk-register.md。

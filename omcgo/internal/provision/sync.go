@@ -135,9 +135,12 @@ func (s *SyncService) HandleSyncResult(ctx context.Context, dev *model.Device,
 	return nil
 }
 
-// enqueueGPVPrefixes enqueues GPV commands using partial path prefixes.
-// 供 sync_pathb.go 的 Path B 流程复用：把 ParamMapping 抽出的去重对象前缀
-// 分批做 GPV，CPE 自动展开实例。
+// enqueueGPVPrefixes enqueues GPV commands using paths from the param mapping
+// dictionary as-is. 供 sync_pathb.go 的 Path B 流程复用：把 ParamMapping 抽出的
+// 去重 path 列表分批做 GPV。
+//
+// 路径形态由 basePrefix 决定（含 "{i}" 截到对象前缀，其余原样）。CPE 收到对象前缀
+// 时自动展开子树，收到叶子时返回该叶子的值。
 func (s *SyncService) enqueueGPVPrefixes(ctx context.Context, dev *model.Device, prefixes []string, sourceID string) error {
 	log, _ := s.discoveryRepo.GetByDeviceID(ctx, dev.ID)
 	if log != nil {
