@@ -1,6 +1,8 @@
 -- +goose Up
 -- ============================================================
--- 000089_mml_schema_rebuild.sql
+-- 000090_mml_schema_rebuild.sql
+-- (原编号 000089，与 9dda40a0 fix(migration): devices(sn,carrier) partial unique
+--  并行 PR 撞号；按 CLAUDE.md §5.5 "后合并者改大版本号"规则上调至 090)
 -- MML 表结构重建 — 基于 standard-model.xml 的命令字典化
 --
 -- 设计依据：docs/design/mml-rebuild-plan-20260513.md v3.1 APPROVED

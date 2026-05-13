@@ -784,7 +784,8 @@ dispatcher 出队前检查：`SELECT 1 FROM device_tasks WHERE id=depends_on AND
 ### 8.1 Migration 阶段（DDL + 数据 TRUNCATE）
 
 ```
-migrations/000089_mml_schema_optimize.sql
+migrations/000090_mml_schema_rebuild.sql   <!-- 原计划 000089，与 devices partial unique PR 撞号上调至 090 -->
+
   -- mml_param_versions 改 UUID 主键
   -- mml_param_groups 删 15 字段
   -- mml_params 删 16 字段
@@ -838,7 +839,7 @@ cmd/app/provider/modules.go 在 dictload ModuleGraph 加一条
 | 阶段 | 工作量 | 备注 |
 |------|-------|------|
 | Loader 实现 + 单测 | 1.5d | parser/grouper/command_gen + rpc_steps 序列生成 + 7 类映射规则表（§7.2 26 条规则）|
-| Migration 000089 schema 改 + TRUNCATE + DROP audit_log + 硬删 24 版本 | 0.7d | DDL 改动比 v1 多（多个 DROP TABLE / COLUMN）|
+| Migration 000090 schema 改 + TRUNCATE + DROP audit_log + 硬删 24 版本 | 0.7d | DDL 改动比 v1 多（多个 DROP TABLE / COLUMN）；编号由 000089 上调（撞号 fix） |
 | sys_dictionaries category 现有 7 类核对（不重 seed，只确认）| 0.1d | 仅做核对 |
 | `mml_scripts` 老执行态 → `mml_tasks` 数据迁移 SQL | 0.3d | INSERT...SELECT |
 | MML 服务层 audit 调用迁 `ops_audit_log` | 0.4d | 替换 mml/audit_repository.go 所有调用点 |
