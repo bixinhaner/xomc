@@ -1354,7 +1354,12 @@ func (h *Handler) sendSOAPResponse(w http.ResponseWriter, data []byte, log *zap.
 		zap.Int("soap_size", len(data)),
 		zap.String("soap_body", string(data)),
 	)
+	// T-0105: 显式 Content-Length 强制 identity transfer encoding。
+	// 否则 Go 在 WriteHeader 后看不到 Content-Length 会用 Transfer-Encoding: chunked。
+	// 部分 CPE 固件（BAICELLS BaiBLQ_5.0.16.1_1229 实测）在 POST 自己 RPC 响应后
+	// 收到 chunked-encoded 的 piggyback RPC 请求会停止后续 POST，断了 RPC chaining。
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
 	w.WriteHeader(http.StatusOK)
 	w.Write(data)
 }
