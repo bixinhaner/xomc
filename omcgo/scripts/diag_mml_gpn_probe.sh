@@ -239,13 +239,17 @@ docker_dsn() {
 
 psql_at() {
     local sql="$1"; shift
+    # SQL 通过 stdin 送给 psql 而不是 -c "$sql"。
+    # 原因：psql `-c "..."` 模式在多数版本下**不做 client-side 变量插值**，
+    # `:'u'`、`:'name'` 之类的 `-v var=value` 占位符会原文发给 server 触发
+    # "syntax error at or near :"。改走 stdin（file mode）后 psql 标准变量
+    # 插值生效，与 `-v / --set` 配合无缝。
     if [[ -n "$PSQL_DOCKER_CONTAINER" ]]; then
-        # docker exec -i 让 stdin 透传（支持后续 \copy 等需要 stdin 的扩展）；
-        # DSN 在容器内重写为 localhost。-T 不分配 TTY 避免 lint warning。
-        docker exec -i "$PSQL_DOCKER_CONTAINER" \
-            psql "$(docker_dsn)" -X --no-psqlrc --set ON_ERROR_STOP=1 -At "$@" -c "$sql"
+        # docker exec -i：stdin 透传到容器内 psql；DSN 在容器内重写为 localhost。
+        echo "$sql" | docker exec -i "$PSQL_DOCKER_CONTAINER" \
+            psql "$(docker_dsn)" -X --no-psqlrc --set ON_ERROR_STOP=1 -At "$@"
     else
-        psql "$DSN" -X --no-psqlrc --set ON_ERROR_STOP=1 -At "$@" -c "$sql"
+        echo "$sql" | psql "$DSN" -X --no-psqlrc --set ON_ERROR_STOP=1 -At "$@"
     fi
 }
 
