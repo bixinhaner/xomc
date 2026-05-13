@@ -44,6 +44,7 @@ export default function TopologyCanvasPage() {
   const t = useT();
   const [searchValue, setSearchValue] = useState('');
   const [selectedNode, setSelectedNode] = useState<TopoNode | null>(null);
+  const [highlightedNodeId, setHighlightedNodeId] = useState<string | null>(null);
   const [layoutType, setLayoutType] = useState('force');
   const [nodeTypeFilter, setNodeTypeFilter] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('');
@@ -122,10 +123,16 @@ export default function TopologyCanvasPage() {
             <List.Item
               style={{
                 cursor: 'pointer',
-                background: selectedNode?.id === node.id ? '#e6f4ff' : 'transparent',
+                background: highlightedNodeId === node.id ? '#e6f4ff' : 'transparent',
                 padding: '5px 12px',
               }}
-              onClick={() => setSelectedNode(node)}
+              onClick={() => {
+                const targetNode = nodes.find(n => n.id === node.id);
+                if (targetNode) {
+                  setSelectedNode(targetNode);
+                  setHighlightedNodeId(node.id);
+                }
+              }}
             >
               <div style={{ width: '100%' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -153,7 +160,12 @@ export default function TopologyCanvasPage() {
           nodes={filteredNodes}
           edges={filteredEdges}
           height="100%"
-          onNodeClick={(node) => setSelectedNode(node)}
+          highlightedNodeId={highlightedNodeId}
+          selectedNode={selectedNode}
+          onNodeClick={(node) => {
+            setSelectedNode(node);
+            setHighlightedNodeId(node.id);
+          }}
         />
 
         {/* Floating toolbar */}
@@ -233,39 +245,6 @@ export default function TopologyCanvasPage() {
             ))}
           </Space>
         </div>
-
-        {/* Selected node detail */}
-        {selectedNode && (
-          <div
-            style={{
-              position: 'absolute',
-              top: 16,
-              left: 16,
-              background: 'rgba(255,255,255,0.97)',
-              borderRadius: 8,
-              padding: '10px 14px',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
-              minWidth: 180,
-              zIndex: 10,
-            }}
-          >
-            <Typography.Text strong style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
-              {selectedNode.label}
-            </Typography.Text>
-            <div style={{ fontSize: 11, color: '#595959' }}>
-              <div>{t('table.type')}: <Tag color={NODE_TYPE_COLORS[selectedNode.type]}>{selectedNode.type}</Tag></div>
-              <div>{t('table.status')}: <Tag color={NODE_STATUS_MAP_KEYS[selectedNode.status]?.color}>{t(NODE_STATUS_MAP_KEYS[selectedNode.status]?.key)}</Tag></div>
-              {selectedNode.deviceSn && <div style={{ fontFamily: 'monospace', marginTop: 2 }}>SN: {selectedNode.deviceSn}</div>}
-            </div>
-            <Button
-              size="small"
-              style={{ marginTop: 6, fontSize: 11 }}
-              onClick={() => setSelectedNode(null)}
-            >
-              {t('common.close')}
-            </Button>
-          </div>
-        )}
       </div>
     </MapPageLayout>
   );

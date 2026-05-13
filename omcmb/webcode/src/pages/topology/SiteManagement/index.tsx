@@ -57,9 +57,9 @@ export default function SiteManagement() {
       label: t('table.status'),
       type: 'select',
       options: [
-        { label: t('status.online'), value: 'active' },
-        { label: t('status.disabled'), value: 'inactive' },
-        { label: t('status.pending'), value: 'maintenance' },
+        { label: t('topology.site.active'), value: 'active' },
+        { label: t('topology.site.inactive'), value: 'inactive' },
+        { label: t('topology.site.maintenance'), value: 'maintenance' },
       ],
     },
   ], [t, domainOptions]);
@@ -103,10 +103,10 @@ export default function SiteManagement() {
   const columns: DataTableColumn<SiteRow>[] = useMemo(() => [
     { key: 'name', title: t('table.name'), dataIndex: 'name', width: 200, ellipsis: true },
     { key: 'domainName', title: t('table.region'), dataIndex: 'domainName', width: 140 },
-    { key: 'address', title: t('table.site'), dataIndex: 'address', width: 260, ellipsis: true },
+    { key: 'address', title: t('topology.site.address'), dataIndex: 'address', width: 260, ellipsis: true },
     {
       key: 'coordinates',
-      title: t('table.site'),
+      title: t('topology.site.coordinates'),
       dataIndex: 'longitude',
       width: 160,
       render: (_, record) => (
@@ -115,7 +115,7 @@ export default function SiteManagement() {
         </span>
       ),
     },
-    { key: 'deviceCount', title: t('table.total'), dataIndex: 'deviceCount', width: 90 },
+    { key: 'deviceCount', title: t('topology.site.deviceCount'), dataIndex: 'deviceCount', width: 90 },
     {
       key: 'status',
       title: t('table.status'),
@@ -223,13 +223,13 @@ export default function SiteManagement() {
           <Form.Item label={t('table.region')} name="domainId" rules={[{ required: true }]}>
             <Input placeholder={t('common.placeholder')} />
           </Form.Item>
-          <Form.Item label={t('table.site')} name="address" rules={[{ required: true }]}>
+          <Form.Item label={t('topology.site.address')} name="address" rules={[{ required: true }]}>
             <Input placeholder={t('common.placeholder')} />
           </Form.Item>
-          <Form.Item label={t('table.site')} name="longitude" rules={[{ required: true }]}>
+          <Form.Item label={t('topology.site.longitude')} name="longitude" rules={[{ required: true }]}>
             <InputNumber min={73} max={135} precision={6} style={{ width: '100%' }} placeholder="73-135" />
           </Form.Item>
-          <Form.Item label={t('table.site')} name="latitude" rules={[{ required: true }]}>
+          <Form.Item label={t('topology.site.latitude')} name="latitude" rules={[{ required: true }]}>
             <InputNumber min={18} max={53} precision={6} style={{ width: '100%' }} placeholder="18-53" />
           </Form.Item>
         </Form>

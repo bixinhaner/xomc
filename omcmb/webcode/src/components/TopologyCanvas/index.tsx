@@ -1,4 +1,5 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { TopoNode, TopoEdge } from '@core/types/topology';
 import { useT } from '@/hooks/useT';
 import { useThemeToken, useIsDark } from '@/hooks/useThemeToken';
@@ -8,6 +9,8 @@ export interface TopologyCanvasProps {
   edges: TopoEdge[];
   height?: number | string;
   onNodeClick?: (node: TopoNode) => void;
+  highlightedNodeId?: string | null;
+  selectedNode?: TopoNode | null;
   style?: React.CSSProperties;
 }
 
@@ -35,14 +38,18 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
   edges,
   height = 480,
   onNodeClick,
+  highlightedNodeId,
+  selectedNode,
   style,
 }) => {
   const t = useT();
   const token = useThemeToken();
   const isDark = useIsDark();
   const svgRef = useRef<SVGSVGElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [popupPosition, setPopupPosition] = useState<{ x: number; y: number } | null>(null);
 
   // Pan state
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -51,6 +58,18 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
   const lastMouse = useRef({ x: 0, y: 0 });
   const pinchStartDist = useRef(0);
   const pinchStartScale = useRef(1);
+
+  // Update popup position when selected node, pan, or scale changes
+  useEffect(() => {
+    if (selectedNode && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const x = rect.left + selectedNode.x * scale + pan.x - NODE_RADIUS * scale - 170;
+      const y = rect.top + selectedNode.y * scale + pan.y - NODE_RADIUS * scale - 85;
+      setPopupPosition({ x, y });
+    } else {
+      setPopupPosition(null);
+    }
+  }, [selectedNode, pan, scale]);
 
   const NODE_TYPE_ICONS: Record<string, string> = useMemo(
     () => ({
@@ -179,14 +198,15 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
     boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
   };
 
-  return (
+  const canvasElement = (
     <div
+      ref={containerRef}
       style={{
         position: 'relative',
         height,
         background: isDark ? '#2C2C2C' : '#F8FAFF',
         borderRadius: 8,
-        overflow: 'hidden',
+        overflow: 'visible',
         cursor: isDragging.current ? 'grabbing' : 'grab',
         ...style,
       }}
@@ -329,7 +349,7 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
           {nodes.map((node) => {
             const statusColor = NODE_STATUS_COLORS[node.status] ?? '#8C8C8C';
             const isHovered = hoveredNodeId === node.id;
-            const isSelected = selectedNodeId === node.id;
+            const isSelected = highlightedNodeId === node.id || selectedNodeId === node.id;
             const r = NODE_RADIUS + (isSelected ? 3 : 0);
 
             return (
@@ -433,6 +453,57 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
         )}
       </svg>
     </div>
+  );
+
+  // Render popup via portal to avoid sidebar occlusion
+  const popupContent = selectedNode && popupPosition ? (
+    <div
+      style={{
+        position: 'fixed',
+        left: popupPosition.x,
+        top: popupPosition.y,
+        background: isDark ? 'rgba(40,40,40,0.95)' : 'rgba(255,255,255,0.95)',
+        borderRadius: 8,
+        padding: '10px 14px',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+        minWidth: 160,
+        zIndex: 9999,
+        border: `1px solid ${isDark ? '#444' : '#e8e8e8'}`,
+        pointerEvents: 'auto',
+      }}
+    >
+      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: isDark ? '#fff' : '#262626' }}>
+        {selectedNode.label}
+      </div>
+      <div style={{ fontSize: 11, color: isDark ? '#aaa' : '#595959' }}>
+        <div style={{ marginBottom: 3 }}>
+          {t('topology.nodeType')}: <span style={{
+            padding: '2px 6px',
+            borderRadius: 4,
+            background: '#f0f0f0',
+            fontWeight: 500,
+          }}>{selectedNode.type}</span>
+        </div>
+        <div style={{ marginBottom: 3 }}>
+          {t('table.status')}: <span style={{
+            color: NODE_STATUS_COLORS[selectedNode.status] ?? '#8C8C8C',
+            fontWeight: 500,
+          }}>{STATUS_LABELS[selectedNode.status] ?? selectedNode.status}</span>
+        </div>
+        {selectedNode.deviceSn && (
+          <div style={{ fontFamily: 'monospace', fontSize: 10, color: isDark ? '#888' : '#8c8c8c' }}>
+            SN: {selectedNode.deviceSn}
+          </div>
+        )}
+      </div>
+    </div>
+  ) : null;
+
+  return (
+    <>
+      {canvasElement}
+      {popupContent && typeof document !== 'undefined' && createPortal(popupContent, document.body)}
+    </>
   );
 };
 
