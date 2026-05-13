@@ -10,6 +10,7 @@ import (
 
 	alarmdef "github.com/omcgo/omcgo/internal/alarm/definition"
 	"github.com/omcgo/omcgo/internal/config/parammodel"
+	"github.com/omcgo/omcgo/internal/config/parammodel/mmlstandardloader"
 	"github.com/omcgo/omcgo/internal/core/dictloader"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/product"
@@ -46,8 +47,15 @@ func initDictLoadModule(c *Container) error {
 	indicatorLoader := indicator.NewLoader(c.PgPool, c.Cfg.DictLoader.Indicator, baseDir, logger)
 	alarmLoader := alarmdef.NewLoader(c.PgPool, c.Cfg.DictLoader.AlarmDefinition, baseDir, logger)
 	productLoader := product.NewLoader(c.PgPool, c.Cfg.DictLoader.Product, baseDir, logger)
+	// MML 标准模型 Loader — 复用 ParamModel 的 directory + standard_model_file 配置（同一 XML）。
+	// 数据消费目标不同：parammodel Loader 写 standard_params；mmlstandardloader 写 mml_params/groups/commands。
+	mmlLoader := mmlstandardloader.NewLoader(
+		c.PgPool, baseDir,
+		c.Cfg.DictLoader.ParamModel.Directory,
+		c.Cfg.DictLoader.ParamModel.StandardModelFile,
+		logger, c.MetricsReg)
 
-	for _, ld := range []dictloader.Loader{paramLoader, indicatorLoader, alarmLoader, productLoader} {
+	for _, ld := range []dictloader.Loader{paramLoader, indicatorLoader, alarmLoader, productLoader, mmlLoader} {
 		if err := registry.Register(ld); err != nil {
 			return fmt.Errorf("register %s loader: %w", ld.Name(), err)
 		}
@@ -99,8 +107,23 @@ func initDictLoadModule(c *Container) error {
 			zap.Error(err))
 		return err
 	})
+	g.Go(func() error {
+		t0 := time.Now()
+		rep, err := mmlLoader.LoadOnce(gctx)
+		logger.Info("mml-standard load done",
+			zap.Int("rows", rep.RowsAffected),
+			zap.Int("files_loaded", rep.FilesLoaded),
+			zap.Duration("duration", time.Since(t0)),
+			zap.Error(err))
+		// mml-standard 失败不阻塞启动（与既有 dictloader 一致 — 命令字典缺失仅影响 MML 控制台展示，不致命）
+		if err != nil {
+			logger.Warn("mml-standard loader failed; MML console may show empty command tree",
+				zap.Error(err))
+		}
+		return nil
+	})
 	if err := g.Wait(); err != nil {
-		return fmt.Errorf("dictload phase 1 (3 dicts in parallel): %w", err)
+		return fmt.Errorf("dictload phase 1 (4 dicts in parallel): %w", err)
 	}
 
 	// Phase 2：products（依赖 Phase 1 结果做引用校验）
