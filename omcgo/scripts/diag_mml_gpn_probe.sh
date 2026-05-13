@@ -239,17 +239,21 @@ docker_dsn() {
 
 psql_at() {
     local sql="$1"; shift
-    # SQL 通过 stdin 送给 psql 而不是 -c "$sql"。
-    # 原因：psql `-c "..."` 模式在多数版本下**不做 client-side 变量插值**，
-    # `:'u'`、`:'name'` 之类的 `-v var=value` 占位符会原文发给 server 触发
-    # "syntax error at or near :"。改走 stdin（file mode）后 psql 标准变量
-    # 插值生效，与 `-v / --set` 配合无缝。
+    # SQL 通过 stdin 送给 psql 而不是 -c "$sql"，让 client-side 变量插值
+    # (:'u' / :'name') 生效（-c 模式不做变量插值，会触发 server syntax error）。
+    #
+    # awk 过滤 psql 在 stdin 模式下追加的 command tag 行（INSERT N M / UPDATE N
+    # / DELETE N）— -c 模式无此行但不支持变量插值；stdin 模式必出现且 -At 不
+    # suppress 它，否则 INSERT...RETURNING 的结果会被 "INSERT 0 1" 污染（典型
+    # 现象：bash 变量含换行 + command tag → 后续 SQL 拼接出错）。
+    # awk 始终 exit 0 即使所有行被过滤，与 set -o pipefail 兼容。
     if [[ -n "$PSQL_DOCKER_CONTAINER" ]]; then
-        # docker exec -i：stdin 透传到容器内 psql；DSN 在容器内重写为 localhost。
         echo "$sql" | docker exec -i "$PSQL_DOCKER_CONTAINER" \
-            psql "$(docker_dsn)" -X --no-psqlrc --set ON_ERROR_STOP=1 -At "$@"
+            psql "$(docker_dsn)" -X --no-psqlrc --set ON_ERROR_STOP=1 -At "$@" \
+            | awk '!/^(INSERT|UPDATE|DELETE|SELECT|COPY) [0-9]+( [0-9]+)?$/'
     else
-        echo "$sql" | psql "$DSN" -X --no-psqlrc --set ON_ERROR_STOP=1 -At "$@"
+        echo "$sql" | psql "$DSN" -X --no-psqlrc --set ON_ERROR_STOP=1 -At "$@" \
+            | awk '!/^(INSERT|UPDATE|DELETE|SELECT|COPY) [0-9]+( [0-9]+)?$/'
     fi
 }
 
@@ -442,10 +446,26 @@ else
 fi
 
 api_post() {
-    curl -fsSL --max-time 30 \
+    # 不用 -f：HTTP 错误时仍写 response body 到 stdout/tmp，给 caller 看具体错误
+    # （后端 500/400 经常带 envelope 错误信息含 biz_code/msg，吞掉 = 失明诊断）
+    local path="$1" body="$2"
+    local tmp; tmp=$(mktemp)
+    local code
+    code=$(curl -sSL --max-time 30 \
+        -o "$tmp" -w "%{http_code}" \
         -H "X-API-Key: $API_KEY" \
         -H "Content-Type: application/json" \
-        -X POST --data "$2" "$API_URL$1"
+        -X POST --data "$body" "$API_URL$path")
+    if [[ "$code" =~ ^2 ]]; then
+        cat "$tmp"
+        rm -f "$tmp"
+        return 0
+    fi
+    local resp; resp=$(cat "$tmp")
+    rm -f "$tmp"
+    echo "ERROR: HTTP $code from POST $path" >&2
+    echo "  response: $resp" >&2
+    return 1
 }
 
 # ────────────────────────────────────────────────────────────────────
