@@ -310,7 +310,7 @@ func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) e
 		Set("longitude", device.Longitude).
 		Set("extension_data", extData).
 		Where(sq.Eq{"id": device.ID}).
-		Where(notDeleted). // 防软删 device 被 inform 静默复活；命中时 RowsAffected=0 → 上层 ErrNotFound → 清 cache 走 auto-register
+		Where(sq.Eq{"deleted_at": nil}). // 防软删 device 被 inform 静默复活；命中时 RowsAffected=0 → 上层 ErrNotFound → 清 cache 走 auto-register
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build update query: %w", err)
@@ -332,7 +332,7 @@ func (r *PgDeviceRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	query, args, _ := storage.Psql.Update("devices").
 		Set("deleted_at", time.Now()).
 		Where(sq.Eq{"id": id}).
-		Where(notDeleted).
+		Where(sq.Eq{"deleted_at": nil}).
 		ToSql()
 	_, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
@@ -641,7 +641,9 @@ func deviceColumns() []string {
 	}
 }
 
-// notDeleted is the standard soft-delete filter applied to all read queries.
+// notDeleted is the standard soft-delete filter applied to read queries that
+// alias devices as "d" (FROM devices d). UPDATE/DELETE on devices is single-table
+// without an alias and must use sq.Eq{"deleted_at": nil} inline.
 var notDeleted = sq.Eq{"d.deleted_at": nil}
 
 func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
