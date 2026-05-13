@@ -110,7 +110,10 @@
       "Bash(OMCGO_DB_DSN=\"postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable\" go run ./cmd/migrate up --paths migrations)",
       "Bash(OMCGO_DB_DSN=\"postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable\" go run ./cmd/migrate down --path migrations)",
       "Bash(awk '/T-0101 TaskExecutor/,/T-0102 即时命令/' /Users/cb/code/baicells/goomc/docs/project/backlog/subtasks/T-0101-ops-management.md)",
-      "Bash(git -C .. status --short)"
+      "Bash(git -C .. status --short)",
+      "Bash(chmod +x omcgo/scripts/trigger_device_config_upload.sh)",
+      "Bash(bash -n omcgo/scripts/trigger_device_config_upload.sh)",
+      "Bash(bash omcgo/scripts/trigger_device_config_upload.sh --help)"
     ],
     "deny": [
       "Bash(git push -f)",
