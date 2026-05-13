@@ -5,10 +5,6 @@
 -- 所有 INSERT 使用 ON CONFLICT DO NOTHING 确保幂等性
 -- ============================================================
 
--- 清理旧数据（确保可重复运行）
-DELETE FROM sys_dictionary_details;
-DELETE FROM sys_dictionaries;
-
 -- 1. 内置角色（仅 admin 为系统级 / 受保护，不可删；operator / viewer 为默认普通角色，
 --    管理员可在 UI 上修改 / 删除 / 增改成员）。
 --    pg_role_repository.go Delete 逻辑：is_system=TRUE 才返回 403 Forbidden。
@@ -50,17 +46,16 @@ ON CONFLICT DO NOTHING;
 --    （及 v1.0 路线 admin/operator 全集 seed）兜底。
 
 -- 6. OUI 厂商注册
--- 注意：oui_registry 表已在 000063_drop_datamodel.sql 中 DROP
--- INSERT INTO oui_registry (oui, manufacturer, short_name, country) VALUES
---     ('00E0FC', 'Huawei Technologies Co., Ltd.', 'Huawei', 'China'),
---     ('001E7E', 'ZTE Corporation', 'ZTE', 'China'),
---     ('000DB9', 'Ericsson AB', 'Ericsson', 'Sweden'),
---     ('0004F2', 'Nokia Corporation', 'Nokia', 'Finland'),
---     ('58FB96', 'Comba Telecom Systems', 'Comba', 'China'),
---     ('D4612E', 'Datang Mobile Communications', 'Datang', 'China'),
---     ('00259C', 'Cisco-Linksys LLC', 'Cisco', 'USA'),
---     ('7C7A53', 'Ruijie Networks Co., Ltd.', 'Ruijie', 'China')
--- ON CONFLICT (oui) DO NOTHING;
+INSERT INTO oui_registry (oui, manufacturer, short_name, country) VALUES
+    ('00E0FC', 'Huawei Technologies Co., Ltd.', 'Huawei', 'China'),
+    ('001E7E', 'ZTE Corporation', 'ZTE', 'China'),
+    ('000DB9', 'Ericsson AB', 'Ericsson', 'Sweden'),
+    ('0004F2', 'Nokia Corporation', 'Nokia', 'Finland'),
+    ('58FB96', 'Comba Telecom Systems', 'Comba', 'China'),
+    ('D4612E', 'Datang Mobile Communications', 'Datang', 'China'),
+    ('00259C', 'Cisco-Linksys LLC', 'Cisco', 'USA'),
+    ('7C7A53', 'Ruijie Networks Co., Ltd.', 'Ruijie', 'China')
+ON CONFLICT (oui) DO NOTHING;
 
 -- 7. 默认设备组
 INSERT INTO device_groups (id, name, parent_id, level, is_default, status, remark, created_by) VALUES
@@ -99,26 +94,31 @@ INSERT INTO kpi_definitions (id, name, display_name, formula, unit, category, ca
 ON CONFLICT (name) DO NOTHING;
 
 -- 9. 默认数据模型 (carrier_default scope)
--- 注意：data_model_definitions 表已在 000063_drop_datamodel.sql 中 DROP
--- 新参数模型系统走 param_models / param_mappings 路线（T-0098 P5）
--- INSERT INTO data_model_definitions (id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description) VALUES
--- ('30000047-0001-4000-8000-000000000001', 'cmcc', 'lte', '1.0', NULL, NULL, 'carrier_default', 'active', true, '{"Device.DeviceInfo": {"access": "r"}, "Device.DeviceInfo.SoftwareVersion": {"access": "r", "type": "string"}, "Device.DeviceInfo.HardwareVersion": {"access": "r", "type": "string"}, "Device.ManagementServer": {"access": "rw"}, "Device.Services.FAPService.1": {"access": "rw"}, "Device.Services.FAPService.1.FAPControl.LTE": {"access": "rw"}, "Device.FAP.GPS": {"access": "r"}}'::jsonb, '中国移动 LTE 默认数据模型')
--- ON CONFLICT DO NOTHING;
--- INSERT INTO data_model_definitions (id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description) VALUES
--- ('30000047-0001-4000-8000-000000000002', 'cmcc', 'nr', '1.0', NULL, NULL, 'carrier_default', 'active', true, '{"Device.DeviceInfo": {"access": "r"}, "Device.DeviceInfo.SoftwareVersion": {"access": "r", "type": "string"}, "Device.DeviceInfo.HardwareVersion": {"access": "r", "type": "string"}, "Device.ManagementServer": {"access": "rw"}}'::jsonb, '中国移动 NR 默认数据模型')
--- ON CONFLICT DO NOTHING;
--- INSERT INTO data_model_definitions (id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description) VALUES
--- ('30000047-0001-4000-8000-000000000003', 'ctcc', 'lte', '1.0', NULL, NULL, 'carrier_default', 'active', true, '{"Device.DeviceInfo": {"access": "r"}, "Device.DeviceInfo.SoftwareVersion": {"access": "r", "type": "string"}, "Device.ManagementServer": {"access": "rw"}}'::jsonb, '中国电信 LTE 默认数据模型')
--- ON CONFLICT DO NOTHING;
--- INSERT INTO data_model_definitions (id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description) VALUES
--- ('30000047-0001-4000-8000-000000000004', 'cucc', 'lte', '1.0', NULL, NULL, 'carrier_default', 'active', true, '{"Device.DeviceInfo": {"access": "r"}, "Device.DeviceInfo.SoftwareVersion": {"access": "r", "type": "string"}, "Device.ManagementServer": {"access": "rw"}}'::jsonb, '中国联通 LTE 默认数据模型')
--- ON CONFLICT DO NOTHING;
--- INSERT INTO data_model_definitions (id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description) VALUES
--- ('30000047-0002-4000-8000-000000000001', 'cmcc', 'lte', '1.0', '001A2B', NULL, 'oui', 'active', true, '{"Device.DeviceInfo": {"access": "r"}, "Device.DeviceInfo.SoftwareVersion": {"access": "r", "type": "string"}, "Device.DeviceInfo.HardwareVersion": {"access": "r", "type": "string"}, "Device.ManagementServer": {"access": "rw"}, "Device.Services.FAPService.1": {"access": "rw"}, "Device.Services.FAPService.1.FAPControl.LTE": {"access": "rw"}, "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus": {"access": "rw", "type": "boolean"}, "Device.FAP.GPS": {"access": "r"}, "Device.FAP.GPS.LockedLatitude": {"access": "r", "type": "string"}, "Device.FAP.GPS.LockedLongitude": {"access": "r", "type": "string"}}'::jsonb, 'BaiCells 厂商 LTE 设备默认配置')
--- ON CONFLICT DO NOTHING;
--- INSERT INTO data_model_definitions (id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description) VALUES
--- ('30000047-0003-4000-8000-000000000001', 'cmcc', 'lte', '1.0', '001A2B', 'SmallCell-LTE', 'product', 'active', true, '{"Device.DeviceInfo": {"access": "r"}, "Device.DeviceInfo.SoftwareVersion": {"access": "r", "type": "string"}, "Device.DeviceInfo.HardwareVersion": {"access": "r", "type": "string"}, "Device.ManagementServer": {"access": "rw"}, "Device.Services.FAPService.1": {"access": "rw"}, "Device.Services.FAPService.1.FAPControl.LTE": {"access": "rw"}, "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus": {"access": "rw", "type": "boolean"}, "Device.FAP.GPS": {"access": "r"}}'::jsonb, 'BaiCells SmallCell-LTE 产品数据模型')
--- ON CONFLICT DO NOTHING;
+INSERT INTO data_model_definitions (id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description) VALUES
+('30000047-0001-4000-8000-000000000001', 'cmcc', 'lte', '1.0', NULL, NULL, 'carrier_default', 'active', true, '{"Device.DeviceInfo": {"access": "r"}, "Device.DeviceInfo.SoftwareVersion": {"access": "r", "type": "string"}, "Device.DeviceInfo.HardwareVersion": {"access": "r", "type": "string"}, "Device.ManagementServer": {"access": "rw"}, "Device.Services.FAPService.1": {"access": "rw"}, "Device.Services.FAPService.1.FAPControl.LTE": {"access": "rw"}, "Device.FAP.GPS": {"access": "r"}}'::jsonb, '中国移动 LTE 默认数据模型')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO data_model_definitions (id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description) VALUES
+('30000047-0001-4000-8000-000000000002', 'cmcc', 'nr', '1.0', NULL, NULL, 'carrier_default', 'active', true, '{"Device.DeviceInfo": {"access": "r"}, "Device.DeviceInfo.SoftwareVersion": {"access": "r", "type": "string"}, "Device.DeviceInfo.HardwareVersion": {"access": "r", "type": "string"}, "Device.ManagementServer": {"access": "rw"}}'::jsonb, '中国移动 NR 默认数据模型')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO data_model_definitions (id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description) VALUES
+('30000047-0001-4000-8000-000000000003', 'ctcc', 'lte', '1.0', NULL, NULL, 'carrier_default', 'active', true, '{"Device.DeviceInfo": {"access": "r"}, "Device.DeviceInfo.SoftwareVersion": {"access": "r", "type": "string"}, "Device.ManagementServer": {"access": "rw"}}'::jsonb, '中国电信 LTE 默认数据模型')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO data_model_definitions (id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description) VALUES
+('30000047-0001-4000-8000-000000000004', 'cucc', 'lte', '1.0', NULL, NULL, 'carrier_default', 'active', true, '{"Device.DeviceInfo": {"access": "r"}, "Device.DeviceInfo.SoftwareVersion": {"access": "r", "type": "string"}, "Device.ManagementServer": {"access": "rw"}}'::jsonb, '中国联通 LTE 默认数据模型')
+ON CONFLICT DO NOTHING;
+
+-- 默认数据模型 (oui scope - BaiCells)
+INSERT INTO data_model_definitions (id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description) VALUES
+('30000047-0002-4000-8000-000000000001', 'cmcc', 'lte', '1.0', '001A2B', NULL, 'oui', 'active', true, '{"Device.DeviceInfo": {"access": "r"}, "Device.DeviceInfo.SoftwareVersion": {"access": "r", "type": "string"}, "Device.DeviceInfo.HardwareVersion": {"access": "r", "type": "string"}, "Device.ManagementServer": {"access": "rw"}, "Device.Services.FAPService.1": {"access": "rw"}, "Device.Services.FAPService.1.FAPControl.LTE": {"access": "rw"}, "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus": {"access": "rw", "type": "boolean"}, "Device.FAP.GPS": {"access": "r"}, "Device.FAP.GPS.LockedLatitude": {"access": "r", "type": "string"}, "Device.FAP.GPS.LockedLongitude": {"access": "r", "type": "string"}}'::jsonb, 'BaiCells 厂商 LTE 设备默认配置')
+ON CONFLICT DO NOTHING;
+
+-- 默认数据模型 (product scope - BaiCells SmallCell-LTE)
+INSERT INTO data_model_definitions (id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description) VALUES
+('30000047-0003-4000-8000-000000000001', 'cmcc', 'lte', '1.0', '001A2B', 'SmallCell-LTE', 'product', 'active', true, '{"Device.DeviceInfo": {"access": "r"}, "Device.DeviceInfo.SoftwareVersion": {"access": "r", "type": "string"}, "Device.DeviceInfo.HardwareVersion": {"access": "r", "type": "string"}, "Device.ManagementServer": {"access": "rw"}, "Device.Services.FAPService.1": {"access": "rw"}, "Device.Services.FAPService.1.FAPControl.LTE": {"access": "rw"}, "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus": {"access": "rw", "type": "boolean"}, "Device.FAP.GPS": {"access": "r"}}'::jsonb, 'BaiCells SmallCell-LTE 产品数据模型')
+ON CONFLICT DO NOTHING;
 
 -- 10. 字典数据
 INSERT INTO sys_dictionaries (name, type, status, description) VALUES
@@ -132,8 +132,7 @@ ON CONFLICT DO NOTHING;
 
 INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUES
 ('男', '1', 1, (SELECT id FROM sys_dictionaries WHERE type = 'gender')),
-('女', '2', 2, (SELECT id FROM sys_dictionaries WHERE type = 'gender'))
-ON CONFLICT DO NOTHING;
+('女', '2', 2, (SELECT id FROM sys_dictionaries WHERE type = 'gender'));
 
 INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUES
 ('int', '1', 1, (SELECT id FROM sys_dictionaries WHERE type = 'int')),
@@ -148,25 +147,20 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 ('uint32', '10', 10, (SELECT id FROM sys_dictionaries WHERE type = 'int')),
 ('uint64', '11', 11, (SELECT id FROM sys_dictionaries WHERE type = 'int')),
 ('uintptr', '12', 12, (SELECT id FROM sys_dictionaries WHERE type = 'int')),
-('byte', '13', 13, (SELECT id FROM sys_dictionaries WHERE type = 'int'))
-ON CONFLICT DO NOTHING;
+('byte', '13', 13, (SELECT id FROM sys_dictionaries WHERE type = 'int'));
 
 INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUES
-('time.Time', '1', 1, (SELECT id FROM sys_dictionaries WHERE type = 'time.Time'))
-ON CONFLICT DO NOTHING;
+('time.Time', '1', 1, (SELECT id FROM sys_dictionaries WHERE type = 'time.Time'));
 
 INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUES
 ('float32', '1', 1, (SELECT id FROM sys_dictionaries WHERE type = 'float64')),
-('float64', '2', 2, (SELECT id FROM sys_dictionaries WHERE type = 'float64'))
-ON CONFLICT DO NOTHING;
+('float64', '2', 2, (SELECT id FROM sys_dictionaries WHERE type = 'float64'));
 
 INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUES
-('string', '1', 1, (SELECT id FROM sys_dictionaries WHERE type = 'string'))
-ON CONFLICT DO NOTHING;
+('string', '1', 1, (SELECT id FROM sys_dictionaries WHERE type = 'string'));
 
 INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUES
-('bool', '1', 1, (SELECT id FROM sys_dictionaries WHERE type = 'bool'))
-ON CONFLICT DO NOTHING;
+('bool', '1', 1, (SELECT id FROM sys_dictionaries WHERE type = 'bool'));
 
 -- 11. 系统配置
 INSERT INTO sys_configs (category, key, value, value_type, description, is_public) VALUES
@@ -191,7 +185,7 @@ DELETE FROM users WHERE username = 'admin';
 -- v0.2 起仅 admin 为 is_system=TRUE，operator/viewer 改为非系统角色 → 按名称精确删除。
 DELETE FROM roles WHERE name IN ('admin', 'operator', 'viewer');
 DELETE FROM kpi_definitions;
--- DELETE FROM data_model_definitions;  -- 表已在 000063_drop_datamodel.sql 中 DROP
--- DELETE FROM oui_registry;             -- 表已在 000063_drop_datamodel.sql 中 DROP
+DELETE FROM data_model_definitions;
+DELETE FROM oui_registry;
 DELETE FROM device_group_members WHERE group_id = '00000000-0000-0000-0000-000000000002';
 DELETE FROM device_groups WHERE is_default = TRUE;
