@@ -361,7 +361,14 @@ ensure_pgcrypto() {
     has=$(psql_at "SELECT count(*) FROM pg_extension WHERE extname='pgcrypto'")
     [[ "$has" == "1" ]] || {
         echo "ERROR: pgcrypto 扩展未启用（自动生成 API Key 需要它）" >&2
-        echo "  → 由 DBA 执行：CREATE EXTENSION pgcrypto;" >&2
+        if [[ -n "$PSQL_DOCKER_CONTAINER" ]]; then
+            echo "  → 一键启用（docker exec）：" >&2
+            echo "      docker exec -i $PSQL_DOCKER_CONTAINER psql -U omcgo -d omcgo -c 'CREATE EXTENSION IF NOT EXISTS pgcrypto;'" >&2
+        else
+            echo "  → 一键启用（host psql）：" >&2
+            echo "      psql \"\$DSN\" -c 'CREATE EXTENSION IF NOT EXISTS pgcrypto;'" >&2
+        fi
+        echo "  → 或拉取最新代码 + 跑迁移（migrations/000088_enable_pgcrypto.sql 已加入版本化流程）" >&2
         echo "  → 或提供 --api-key 跳过自动生成" >&2
         exit 3
     }
