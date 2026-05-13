@@ -86,6 +86,40 @@ func TestFilterEngine_ProcessAlarm_LiveInReceiver(t *testing.T) {
 		assert.Equal(t, int32(1), atomic.LoadInt32(&store.saveActiveCount), "non-matching alarm should reach persistence")
 	})
 
+	t.Run("device_group_rule_short_circuits_process", func(t *testing.T) {
+		store := newCountingStore()
+		dispatcher := &mockDispatcher{}
+		groupID := uuid.New()
+
+		repo := &mockFilterRuleRepo{rules: []AlarmFilterRule{
+			{
+				FilterType:     FilterTypeDeviceGroup,
+				DeviceGroupIDs: []uuid.UUID{groupID},
+				Action:         FilterActionIgnore,
+				Name:           "ignore-group",
+			},
+		}}
+		filterEngine := NewFilterEngine(repo, store, dispatcher, nil, nil, zap.NewNop())
+		filterEngine.SetDeviceGroupResolver(&mockDeviceGroupResolver{groupID: &groupID})
+
+		engine := NewAlarmEngine(store, nil, nil, nil, zap.NewNop())
+		engine.SetFilterEngine(filterEngine)
+
+		alarm := &model.Alarm{
+			DeviceID:        uuid.New(),
+			DeviceSN:        "SN-FILTER-GROUP",
+			AlarmIdentifier: "NOISE_ALARM",
+			Severity:        model.AlarmMinor,
+			RaisedAt:        time.Now(),
+			Carrier:         model.CarrierCMCC,
+		}
+
+		err := engine.Process(context.Background(), alarm)
+		assert.NoError(t, err)
+		assert.Equal(t, int32(0), atomic.LoadInt32(&store.saveActiveCount), "group-matched ignored alarm must not be persisted")
+		assert.Empty(t, dispatcher.Calls())
+	})
+
 	t.Run("nil_filter_engine_keeps_default_behavior", func(t *testing.T) {
 		store := newCountingStore()
 		engine := NewAlarmEngine(store, nil, nil, nil, zap.NewNop())

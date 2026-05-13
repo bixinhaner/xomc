@@ -58,6 +58,7 @@ type alarmQuery struct {
 	StartTime  string `form:"start_time"`
 	EndTime    string `form:"end_time"`
 	AlarmType  string `form:"alarm_type"`
+	EventType  string `form:"event_type"`
 	IsRead     string `form:"is_read"`
 	IsUnknown  string `form:"is_unknown"`
 	DeviceName string `form:"device_name"`
@@ -100,6 +101,9 @@ func (h *Handler) ListActive(c *gin.Context) {
 	}
 	if q.AlarmType != "" {
 		filter.AlarmType = &q.AlarmType
+	}
+	if q.EventType != "" {
+		filter.EventType = &q.EventType
 	}
 	if q.IsRead != "" {
 		read := q.IsRead == "true"
@@ -162,6 +166,9 @@ func (h *Handler) ListHistory(c *gin.Context) {
 	}
 	if q.AlarmType != "" {
 		filter.AlarmType = &q.AlarmType
+	}
+	if q.EventType != "" {
+		filter.EventType = &q.EventType
 	}
 	if q.DeviceName != "" {
 		filter.DeviceName = &q.DeviceName

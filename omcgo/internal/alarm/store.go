@@ -22,6 +22,7 @@ type AlarmFilter struct {
 	AlarmIdentifiers []string           `form:"alarm_identifiers"`
 	AlarmSources   []string           `form:"alarm_sources"`
 	AlarmType      *string            `form:"alarm_type"`
+	EventType      *string            `form:"event_type"`
 	IsRead         *bool              `form:"is_read"`
 	IsUnknown      *bool              `form:"is_unknown"`
 	DeviceName     *string            `form:"device_name"`

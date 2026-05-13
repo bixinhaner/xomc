@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	gerr "errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Masterminds/squirrel"
@@ -344,6 +345,9 @@ func applyActiveFilters(qb squirrel.SelectBuilder, f AlarmFilter) squirrel.Selec
 	if f.AlarmType != nil {
 		qb = qb.Where(squirrel.Eq{"alarm_type": *f.AlarmType})
 	}
+	if f.EventType != nil {
+		qb = qb.Where(normalizedEventTypeExpr("event_type", *f.EventType))
+	}
 	if f.IsRead != nil {
 		qb = qb.Where(squirrel.Eq{"is_read": *f.IsRead})
 	}
@@ -393,6 +397,9 @@ func applyHistoryFilters(qb squirrel.SelectBuilder, f AlarmFilter) squirrel.Sele
 	if f.EndTime != nil {
 		qb = qb.Where(squirrel.LtOrEq{"time": *f.EndTime})
 	}
+	if f.EventType != nil {
+		qb = qb.Where(normalizedEventTypeExpr("event_type", *f.EventType))
+	}
 	if f.Keyword != nil {
 		kw := "%" + *f.Keyword + "%"
 		qb = qb.Where(squirrel.Or{
@@ -402,6 +409,66 @@ func applyHistoryFilters(qb squirrel.SelectBuilder, f AlarmFilter) squirrel.Sele
 		})
 	}
 	return qb
+}
+
+func normalizedEventTypeExpr(column string, raw string) squirrel.Sqlizer {
+	aliases := normalizedEventTypeAliases(raw)
+	placeholders := make([]string, 0, len(aliases))
+	args := make([]interface{}, 0, len(aliases))
+	for _, alias := range aliases {
+		placeholders = append(placeholders, "?")
+		args = append(args, alias)
+	}
+
+	expr := fmt.Sprintf(
+		"REPLACE(REPLACE(REPLACE(LOWER(COALESCE(%s, '')), ' ', ''), '-', ''), '_', '') IN (%s)",
+		column,
+		strings.Join(placeholders, ", "),
+	)
+	return squirrel.Expr(expr, args...)
+}
+
+func normalizedEventTypeAliases(raw string) []string {
+	key := normalizeEventTypeToken(raw)
+	buckets := map[string][]string{
+		"30000":               {"30000", "communication", "communications", "communicationalarm", "communicationsalarm"},
+		"communication":       {"30000", "communication", "communications", "communicationalarm", "communicationsalarm"},
+		"communications":      {"30000", "communication", "communications", "communicationalarm", "communicationsalarm"},
+		"communicationalarm":  {"30000", "communication", "communications", "communicationalarm", "communicationsalarm"},
+		"communicationsalarm": {"30000", "communication", "communications", "communicationalarm", "communicationsalarm"},
+		"30001":                 {"30001", "qualityofservice", "qualityofservicealarm"},
+		"qualityofservice":       {"30001", "qualityofservice", "qualityofservicealarm"},
+		"qualityofservicealarm":  {"30001", "qualityofservice", "qualityofservicealarm"},
+		"30002":               {"30002", "processingerror", "processingerroralarm"},
+		"processingerror":     {"30002", "processingerror", "processingerroralarm"},
+		"processingerroralarm": {"30002", "processingerror", "processingerroralarm"},
+		"30003":          {"30003", "device", "equipment", "devicealarm", "equipmentalarm"},
+		"device":         {"30003", "device", "equipment", "devicealarm", "equipmentalarm"},
+		"equipment":      {"30003", "device", "equipment", "devicealarm", "equipmentalarm"},
+		"devicealarm":    {"30003", "device", "equipment", "devicealarm", "equipmentalarm"},
+		"equipmentalarm": {"30003", "device", "equipment", "devicealarm", "equipmentalarm"},
+		"30004":             {"30004", "environment", "environmental", "environmentalarm", "environmentalalarm"},
+		"environment":        {"30004", "environment", "environmental", "environmentalarm", "environmentalalarm"},
+		"environmental":      {"30004", "environment", "environmental", "environmentalarm", "environmentalalarm"},
+		"environmentalarm":   {"30004", "environment", "environmental", "environmentalarm", "environmentalalarm"},
+		"environmentalalarm": {"30004", "environment", "environmental", "environmentalarm", "environmentalalarm"},
+		"30006":           {"30006", "30007", "performance", "service", "performancealarm", "servicealarm"},
+		"30007":           {"30006", "30007", "performance", "service", "performancealarm", "servicealarm"},
+		"performance":     {"30006", "30007", "performance", "service", "performancealarm", "servicealarm"},
+		"service":         {"30006", "30007", "performance", "service", "performancealarm", "servicealarm"},
+		"performancealarm": {"30006", "30007", "performance", "service", "performancealarm", "servicealarm"},
+		"servicealarm":    {"30006", "30007", "performance", "service", "performancealarm", "servicealarm"},
+	}
+
+	if aliases, ok := buckets[key]; ok {
+		return aliases
+	}
+	return []string{key}
+}
+
+func normalizeEventTypeToken(raw string) string {
+	replacer := strings.NewReplacer(" ", "", "-", "", "_", "")
+	return replacer.Replace(strings.ToLower(strings.TrimSpace(raw)))
 }
 
 type scannable interface {

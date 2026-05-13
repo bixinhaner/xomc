@@ -72,6 +72,15 @@ type dispatchCall struct {
 	Payload []byte
 }
 
+type mockDeviceGroupResolver struct {
+	groupID *uuid.UUID
+	err     error
+}
+
+func (m *mockDeviceGroupResolver) GetGroupID(_ context.Context, _ uuid.UUID) (*uuid.UUID, error) {
+	return m.groupID, m.err
+}
+
 func (m *mockDispatcher) Dispatch(ctx context.Context, url, secret string, payload []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -103,28 +112,56 @@ func TestMatch_IgnoreAction(t *testing.T) {
 	engine := newTestFilterEngine(nil, nil)
 	rule := &AlarmFilterRule{FilterType: FilterTypeAlarmSource, AlarmSources: []string{"Device"}, Action: FilterActionIgnore}
 	alarm := &model.Alarm{AlarmSource: strPtr("Device"), AlarmIdentifier: "CPU_OVERLOAD"}
-	assert.True(t, engine.match(alarm, uuid.UUID{}, rule))
+	assert.True(t, engine.match(context.Background(), alarm, uuid.UUID{}, rule))
 }
 
 func TestMatch_AutoAcknowledge(t *testing.T) {
 	engine := newTestFilterEngine(nil, nil)
 	rule := &AlarmFilterRule{FilterType: FilterTypeAlarmIdentifier, AlarmIdentifiers: []string{"CPU_OVERLOAD"}, Action: FilterActionAutoAcknowledge}
 	alarm := &model.Alarm{AlarmIdentifier: "CPU_OVERLOAD"}
-	assert.True(t, engine.match(alarm, uuid.UUID{}, rule))
+	assert.True(t, engine.match(context.Background(), alarm, uuid.UUID{}, rule))
 }
 
 func TestMatch_AutoClear(t *testing.T) {
 	engine := newTestFilterEngine(nil, nil)
 	rule := &AlarmFilterRule{FilterType: FilterTypeAlarmIdentifier, AlarmIdentifiers: []string{"TEMP_HIGH"}, Action: FilterActionAutoClear}
 	alarm := &model.Alarm{AlarmIdentifier: "TEMP_HIGH"}
-	assert.True(t, engine.match(alarm, uuid.UUID{}, rule))
+	assert.True(t, engine.match(context.Background(), alarm, uuid.UUID{}, rule))
 }
 
 func TestMatch_NoMatch(t *testing.T) {
 	engine := newTestFilterEngine(nil, nil)
 	rule := &AlarmFilterRule{FilterType: FilterTypeAlarmIdentifier, AlarmIdentifiers: []string{"CPU_OVERLOAD"}, Action: FilterActionIgnore}
 	alarm := &model.Alarm{AlarmIdentifier: "GPS_LOSS"}
-	assert.False(t, engine.match(alarm, uuid.UUID{}, rule))
+	assert.False(t, engine.match(context.Background(), alarm, uuid.UUID{}, rule))
+}
+
+func TestMatch_DeviceGroup(t *testing.T) {
+	engine := newTestFilterEngine(nil, nil)
+	groupID := uuid.New()
+	engine.SetDeviceGroupResolver(&mockDeviceGroupResolver{groupID: &groupID})
+	rule := &AlarmFilterRule{FilterType: FilterTypeDeviceGroup, DeviceGroupIDs: []uuid.UUID{groupID}, Action: FilterActionIgnore}
+	assert.True(t, engine.match(context.Background(), &model.Alarm{}, uuid.New(), rule))
+}
+
+func TestMatch_DeviceGroupWithoutResolverFailsClosed(t *testing.T) {
+	engine := newTestFilterEngine(nil, nil)
+	rule := &AlarmFilterRule{FilterType: FilterTypeDeviceGroup, DeviceGroupIDs: []uuid.UUID{uuid.New()}, Action: FilterActionIgnore}
+	assert.False(t, engine.match(context.Background(), &model.Alarm{}, uuid.New(), rule))
+}
+
+func TestProcessAlarm_DeviceGroup_IgnoreAction(t *testing.T) {
+	groupID := uuid.New()
+	engine := newTestFilterEngine([]AlarmFilterRule{
+		{FilterType: FilterTypeDeviceGroup, DeviceGroupIDs: []uuid.UUID{groupID}, Action: FilterActionIgnore, Name: "ignore-group"},
+	}, nil)
+	engine.SetDeviceGroupResolver(&mockDeviceGroupResolver{groupID: &groupID})
+
+	alarm := &model.Alarm{AlarmIdentifier: "DEVICE_OFFLINE"}
+	result, err := engine.ProcessAlarm(context.Background(), alarm, uuid.New())
+	assert.NoError(t, err)
+	assert.True(t, result.Handled)
+	assert.Equal(t, FilterActionIgnore, result.Action)
 }
 
 func TestProcessAlarm_Default(t *testing.T) {

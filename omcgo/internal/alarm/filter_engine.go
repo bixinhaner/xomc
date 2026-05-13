@@ -19,6 +19,7 @@ type FilterEngine struct {
 	store           AlarmStore
 	dispatcher      WebhookDispatcher
 	deadLetterRepo  DeadLetterRepository
+	deviceGroupResolver DeviceGroupResolver
 	metrics         *WebhookMetrics
 	emailDispatcher EmailDispatcher
 	logger          *zap.Logger
@@ -67,6 +68,12 @@ func (e *FilterEngine) SetEmailDispatcher(dispatcher EmailDispatcher) {
 	e.emailDispatcher = dispatcher
 }
 
+// SetDeviceGroupResolver injects the resolver used by device_group filter rules.
+// resolver == nil means device_group rules fail closed instead of matching all alarms.
+func (e *FilterEngine) SetDeviceGroupResolver(resolver DeviceGroupResolver) {
+	e.deviceGroupResolver = resolver
+}
+
 // ProcessResult 过滤处理结果。
 type ProcessResult struct {
 	Handled bool   // 是否被过滤规则处理
@@ -87,7 +94,7 @@ func (e *FilterEngine) ProcessAlarm(ctx context.Context, alarm *model.Alarm, dev
 
 	// 3. 按优先级匹配规则
 	for _, rule := range rules {
-		if e.match(alarm, deviceID, &rule) {
+		if e.match(ctx, alarm, deviceID, &rule) {
 			result, err := e.executeAction(ctx, alarm, &rule)
 			if err != nil {
 				return nil, err
@@ -101,7 +108,7 @@ func (e *FilterEngine) ProcessAlarm(ctx context.Context, alarm *model.Alarm, dev
 }
 
 // match 检查告警是否匹配过滤规则。
-func (e *FilterEngine) match(alarm *model.Alarm, deviceID uuid.UUID, rule *AlarmFilterRule) bool {
+func (e *FilterEngine) match(ctx context.Context, alarm *model.Alarm, deviceID uuid.UUID, rule *AlarmFilterRule) bool {
 	switch rule.FilterType {
 	case FilterTypeAlarmSource:
 		if len(rule.AlarmSources) == 0 {
@@ -140,7 +147,30 @@ func (e *FilterEngine) match(alarm *model.Alarm, deviceID uuid.UUID, rule *Alarm
 		if len(rule.DeviceGroupIDs) == 0 {
 			return true
 		}
-		return true // 设备组匹配由上层处理
+		if e.deviceGroupResolver == nil {
+			e.logger.Warn("device group rule skipped: resolver not configured",
+				zap.String("rule_name", rule.Name),
+				zap.String("device_id", deviceID.String()))
+			return false
+		}
+
+		groupID, err := e.deviceGroupResolver.GetGroupID(ctx, deviceID)
+		if err != nil {
+			e.logger.Warn("resolve device group failed",
+				zap.String("rule_name", rule.Name),
+				zap.String("device_id", deviceID.String()),
+				zap.Error(err))
+			return false
+		}
+		if groupID == nil {
+			return false
+		}
+		for _, gid := range rule.DeviceGroupIDs {
+			if gid == *groupID {
+				return true
+			}
+		}
+		return false
 
 	default:
 		return true

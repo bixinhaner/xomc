@@ -41,6 +41,7 @@ func initAlarmModule(c *Container) error {
 	webhookDispatcher := alarm.NewHTTPWebhookDispatcher(logger.Named("webhook"), webhookMetrics)
 	deadLetterRepo := alarm.NewPgDeadLetterRepository(c.PgPool)
 	filterEngine := alarm.NewFilterEngine(alarmFilterRuleRepo, alarmPgStore, webhookDispatcher, deadLetterRepo, webhookMetrics, logger.Named("filter"))
+	filterEngine.SetDeviceGroupResolver(alarm.NewPgDeviceGroupResolver(c.PgPool))
 
 	// W2.A.1 / T-0007 整合: SMTP 邮件派发器（实现 EmailDispatcher 接口）。
 	// 配置从环境变量读取（OMC_SMTP_HOST/PORT/USERNAME/PASSWORD/FROM/USE_TLS/USE_STARTTLS）。

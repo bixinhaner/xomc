@@ -56,7 +56,7 @@ ENV PATH=/app/node_modules/.bin:$PATH
 RUN npm run build
 
 # 验证构建产物完整性：index.html 引用的主入口文件必须存在
-RUN grep -oP 'src="/assets/[^"]+\.js"' dist/index.html | grep -oP '/assets/[^"]+' | while read f; do \
+RUN grep -oE '/assets/[^"]+\.js' dist/index.html | while read f; do \
       test -f "dist$f" || { echo "ERROR: build output missing: dist$f"; exit 1; }; \
     done
 

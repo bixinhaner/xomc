@@ -357,6 +357,10 @@ function buildAlarmQuery(
     const sev = Array.isArray(filter.severity) ? filter.severity[0] : filter.severity;
     if (sev) query.severity = severityStrToNum[sev];
   }
+  if (filter.eventType) {
+    const eventType = Array.isArray(filter.eventType) ? filter.eventType[0] : filter.eventType;
+    if (eventType) query.event_type = eventType;
+  }
   if (filter.deviceSn) query.device_sn = filter.deviceSn;
   if (filter.timeRange) {
     query.start_time = filter.timeRange[0];

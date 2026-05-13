@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import dayjs from 'dayjs';
 import { useT } from '@/hooks/useT';
 import {
   Button,
@@ -44,6 +45,35 @@ const FIELDS_PER_ROW = 6;
 
 const SESSION_PREFIX = 'omc_filter_';
 
+function hydrateFormValues(
+  values: Record<string, unknown>,
+  fields: FilterField[]
+): Record<string, unknown> {
+  const hydratedValues = { ...values };
+
+  fields.forEach((field) => {
+    if (field.type !== 'date-range') {
+      return;
+    }
+
+    const rawValue = hydratedValues[field.name];
+    if (!Array.isArray(rawValue)) {
+      return;
+    }
+
+    hydratedValues[field.name] = rawValue.map((item) => {
+      if (item == null || dayjs.isDayjs(item)) {
+        return item;
+      }
+
+      const parsed = dayjs(item as string | number | Date);
+      return parsed.isValid() ? parsed : item;
+    });
+  });
+
+  return hydratedValues;
+}
+
 const FilterBar: React.FC<FilterBarProps> = ({
   filterId,
   fields,
@@ -72,7 +102,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
           const stored = sessionStorage.getItem(storageKey);
           if (stored) {
             const parsed = JSON.parse(stored) as Record<string, unknown>;
-            form.setFieldsValue(parsed);
+            form.setFieldsValue(hydrateFormValues(parsed, fields));
             initializedRef.current = true;
             return;
           }
@@ -91,7 +121,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
         form.setFieldsValue(resetValues);
       } else {
         // 非空 initialValues，直接设置
-        form.setFieldsValue(initialValues);
+        form.setFieldsValue(hydrateFormValues(initialValues, fields));
       }
       initializedRef.current = true;
       return;
@@ -101,7 +131,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
       const stored = sessionStorage.getItem(storageKey);
       if (stored) {
         const parsed = JSON.parse(stored) as Record<string, unknown>;
-        form.setFieldsValue(parsed);
+        form.setFieldsValue(hydrateFormValues(parsed, fields));
       }
     } catch {
       // ignore
