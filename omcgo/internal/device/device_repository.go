@@ -708,6 +708,7 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 			return nil, fmt.Errorf("unmarshal last_inform_events: %w", err)
 		}
 	}
+	d.OpState = model.DeriveOpState(d.Status)
 	return &d, nil
 }
 
@@ -778,6 +779,7 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 			return nil, fmt.Errorf("unmarshal last_inform_events: %w", err)
 		}
 	}
+	d.OpState = model.DeriveOpState(d.Status)
 	return &d, nil
 }
 
@@ -1114,6 +1116,7 @@ func scanRecycleBinRow(rows pgx.Rows) (*model.Device, error) {
 			return nil, fmt.Errorf("unmarshal last_inform_events: %w", err)
 		}
 	}
+	d.OpState = model.DeriveOpState(d.Status)
 	return &d, nil
 }
 

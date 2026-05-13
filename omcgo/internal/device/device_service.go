@@ -424,6 +424,7 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		Carrier:                     carrier,
 		Technology:                  tech,
 		Status:                      model.DeviceActive,
+		OpState:                     model.DeriveOpState(model.DeviceActive),
 		FirmwareVersion:             findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion"),
 		ConnectionRequestURL:        findParamValue(inform.ParameterList, "Device.ManagementServer.ConnectionRequestURL"),
 		IPAddress:                   udpAddr,
@@ -588,6 +589,7 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 		if err := ValidateTransition(device.Status, model.DeviceActive); err == nil {
 			oldStatus := device.Status
 			device.Status = model.DeviceActive
+			device.OpState = model.DeriveOpState(model.DeviceActive)
 
 			// Record online time: update last_online_time, and first_online_time if this is the first time
 			if s.infoSyncer != nil {

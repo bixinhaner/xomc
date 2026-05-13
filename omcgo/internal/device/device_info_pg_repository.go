@@ -543,6 +543,9 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	d.OfflineDays = offlineDays
 	d.OfflineHours = offlineHours
 	d.OfflineMinutes = offlineMinutes
+	// T-FIX-OPSTATE: 派生 op_state 给前端 "激活状态" 列展示。
+	// 不入库，根据 status='active' 判断。embedded model.Device.Status 已 scan 完毕。
+	d.OpState = model.DeriveOpState(d.Status)
 
 	return &d, nil
 }

@@ -23,6 +23,11 @@ type Device struct {
 	Technology                  Technology             `json:"technology" db:"technology"`
 	// T-0098 P5-02：DataModelID 字段已删除（devices.data_model_id 列 DROP，路由改由 productClass + ProductRegistry）。
 	Status                      DeviceStatus           `json:"status" db:"status"`
+	// OpState 激活状态（前端展示用，'1'=激活 / '0'=未激活）。
+	// 由 Status 派生，**不入库**：scan/Register/Update 后通过
+	// model.DeriveOpState(Status) 统一回填，保持 status='active' ↔ op_state='1'
+	// 的双向契约（与 device_info_pg_repository.go OpState filter 一致）。
+	OpState                     string                 `json:"op_state" db:"-"`
 	FirmwareVersion             string                 `json:"firmware_version" db:"firmware_version"`
 	IPAddress                   string                 `json:"ip_address" db:"ip_address"`
 	ConnectionRequestURL        string                 `json:"connection_request_url" db:"connection_request_url"`
@@ -45,4 +50,20 @@ type Device struct {
 
 	// Group info (from device_groups table via device_group_members)
 	GroupName                   string                 `json:"group_name,omitempty" db:"group_name"`
+}
+
+// DeriveOpState 把设备 Status 翻译为前端"激活状态"展示值。
+//
+// 契约（与 internal/device/device_info_pg_repository.go OpState filter 一致）：
+//
+//	DeviceActive → "1"（激活）
+//	其它 status  → "0"（未激活，含 discovered/registered/provisioning/offline/maintenance/decommissioned）
+//
+// FE 渲染（omcmb/.../DeviceList/index.tsx）：opState ∈ {'1', 'active'} 显示 success，
+// 否则显示 error；返 'unknown' 会被前端视作未激活。
+func DeriveOpState(status DeviceStatus) string {
+	if status == DeviceActive {
+		return "1"
+	}
+	return "0"
 }

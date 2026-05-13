@@ -461,6 +461,8 @@ func prepareDeviceUpdate(device *model.Device, inform *tr069.InformMessage) ([]m
 	if device.Status == model.DeviceDiscovered || device.Status == model.DeviceOffline || device.Status == model.DeviceRegistered {
 		device.Status = model.DeviceActive
 	}
+	// T-FIX-OPSTATE: 同步 op_state 给前端"激活状态"列展示（status 任意变更后必须刷新）。
+	device.OpState = model.DeriveOpState(device.Status)
 
 	// 构建参数列表
 	var params []model.DeviceParameter
