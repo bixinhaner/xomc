@@ -1,0 +1,134 @@
+# Promtail 配置 — OMC 日志采集
+#
+# 数据流：tail /run/logs/* (zap JSON) → pipeline 解析 → push http://loki:3100
+#
+# Zap 日志格式（已验证）：
+#   {"level":"info","timestamp":"2026-05-11T15:30:32.422+0800","caller":"...",
+#    "msg":"request","request_id":"...","device_sn":"...",...}
+#
+# 关键点：
+#   - 用 zap 的 timestamp 作为日志时间（保持原始时序）
+#   - level / device_sn 抽为 label，便于 Grafana 过滤
+#   - lumberjack 滚动后 promtail 通过 inode 跟踪自动切到新文件，*.log.gz 不采集
+#   - request_id 留在 message 体内，可用 LogQL `| json | request_id="xxx"` 过滤
+#
+# 高基数风险（Loki 性能死穴）：
+#   不要把 request_id / trace_id / user_id 等高基数字段提为 label，
+#   否则 Loki stream 爆炸。这些字段保留在 message body，用 `| json` 后过滤。
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: info
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+    backoff_config:
+      min_period: 500ms
+      max_period: 5m
+      max_retries: 10
+
+# 通用 pipeline 片段（zap JSON 解析）通过 YAML anchor 复用
+scrape_configs:
+  # ─── omcgo-app ───────────────────────────────────────────────
+  - job_name: omcgo-app
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: omcgo-app
+          service: omcgo-app
+          deployment_unit: app
+          __path__: /run/logs/app/app.log
+    pipeline_stages:
+      - json:
+          expressions:
+            level: level
+            ts: timestamp
+            msg: msg
+            device_sn: device_sn
+      - labels:
+          level:
+      - timestamp:
+          source: ts
+          format: "2006-01-02T15:04:05.999Z07:00"
+      - output:
+          source: msg
+
+  # ─── omcgo-acs ───────────────────────────────────────────────
+  - job_name: omcgo-acs
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: omcgo-acs
+          service: omcgo-acs
+          deployment_unit: acs
+          __path__: /run/logs/acs/acs.log
+    pipeline_stages:
+      - json:
+          expressions:
+            level: level
+            ts: timestamp
+            msg: msg
+            device_sn: device_sn
+      - labels:
+          level:
+      - timestamp:
+          source: ts
+          format: "2006-01-02T15:04:05.999Z07:00"
+      - output:
+          source: msg
+
+  # ─── omcgo-worker ────────────────────────────────────────────
+  - job_name: omcgo-worker
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: omcgo-worker
+          service: omcgo-worker
+          deployment_unit: worker
+          __path__: /run/logs/worker/worker.log
+    pipeline_stages:
+      - json:
+          expressions:
+            level: level
+            ts: timestamp
+            msg: msg
+      - labels:
+          level:
+      - timestamp:
+          source: ts
+          format: "2006-01-02T15:04:05.999Z07:00"
+      - output:
+          source: msg
+
+  # ─── nginx access ────────────────────────────────────────────
+  - job_name: nginx-access
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: nginx
+          service: nginx
+          log_type: access
+          __path__: /run/logs/nginx/*access.log
+
+  # ─── nginx error ─────────────────────────────────────────────
+  - job_name: nginx-error
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: nginx
+          service: nginx
+          log_type: error
+          __path__: /run/logs/nginx/*error.log
+
+  # ─── frontend dev/build logs（非结构化，按原文落库）─────────
+  - job_name: frontend
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: frontend
+          service: frontend
+          __path__: /run/logs/frontend/*.log

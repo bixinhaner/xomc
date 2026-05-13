@@ -40,10 +40,15 @@
 | `nats`      | nats:2.10-alpine         | `4222:4222`, `8222:8222`   | 消息队列（JetStream 模式），8222 为监控端口 |
 | `minio`     | minio/minio:latest       | `9000:9000`, `9001:9001`   | 对象存储，9001 为 Web 控制台              |
 | `migrate`   | Dockerfile.app           | —（一次性任务）             | 启动时执行数据库迁移，成功后退出            |
-| `acs`       | Dockerfile.acs           | `9090:9090`, `7557:7557`   | ACS 服务，处理 TR-069 CWMP 设备通信       |
-| `app`       | Dockerfile.app           | —（不对外暴露）             | REST API 管理面服务，仅通过 Nginx 代理访问 |
+| `acs`       | Dockerfile.acs           | `9095:9090` (metrics), `7557:7557` | ACS 服务，处理 TR-069 CWMP 设备通信。metrics 让出宿主 9090 给 Prometheus |
+| `app`       | Dockerfile.app           | `9091:9091` (metrics)      | REST API 管理面服务，业务流量通过 Nginx 代理 |
 | `worker`    | Dockerfile.worker        | `9092:9092`                | 后台异步任务 Worker                       |
 | `web`       | Dockerfile.web           | `8081:8081`, `8080:8080`   | Nginx 网关：8081 前端+API，8080 ACS 代理  |
+| `prometheus` | prom/prometheus:v2.51.0 | `9090:9090`                | 指标存储与查询                            |
+| `alertmanager` | prom/alertmanager:v0.27.0 | `9093:9093`            | 告警路由                                  |
+| `grafana`   | grafana/grafana:10.4.0   | `3000:3000`                | 可视化（admin/admin，dev 默认）。⚠️ 与 vite dev 撞 |
+| `loki`      | grafana/loki:3.0.0       | `3100:3100`                | 日志存储与查询                            |
+| `promtail`  | grafana/promtail:3.0.0   | —（仅容器内）              | 日志采集 agent，tail run/logs 推到 Loki   |
 
 ---
 

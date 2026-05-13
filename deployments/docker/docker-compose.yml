@@ -133,7 +133,7 @@ services:
       dockerfile: deployments/docker/Dockerfile.acs
       network: host
     ports:
-      - "9090:9090"
+      - "9095:9090"   # metrics — 宿主 9095，容器内仍为 9090（让出 9090 给 Prometheus 服务）
       - "7557:7557"
     environment:
       OMCGO_ENV: "${OMCGO_ENV:-dev}"
@@ -218,18 +218,23 @@ services:
       - acs
 
   # ──────────────────────────────────────────────────────────────────
-  # 监控栈（W1.7）：Prometheus + Grafana + AlertManager
-  # 宿主端口映射避开冲突：
-  #   prometheus  9094:9090   (acs metrics 已占宿主 9090)
-  #   grafana     3002:3000   (设计基线 worktree 已占 3001)
+  # 监控栈：Prometheus + Grafana + AlertManager + Loki + Promtail
+  # 宿主端口约定（已为 prometheus/grafana 让出标准端口）：
+  #   prometheus   9090:9090   ← 标准端口（acs metrics 让出到 9095）
+  #   grafana      3000:3000   ← 标准端口
+  #                              ⚠️ 与 webcode vite dev server 冲突，
+  #                              本机同时跑 grafana + npm run dev 需把前端 dev
+  #                              端口改去 3003 或先停 grafana。
   #   alertmanager 9093:9093
+  #   loki         3100:3100   ← Loki HTTP API（日志查询）
+  #   promtail     —           ← 仅容器内运行，无对外端口
   # ──────────────────────────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:v2.51.0
     environment:
       TZ: "Asia/Shanghai"
     ports:
-      - "9094:9090"
+      - "9090:9090"
     volumes:
       - ../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ../monitoring/alerts:/etc/prometheus/alerts:ro
@@ -282,7 +287,7 @@ services:
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
     ports:
-      - "3002:3000"
+      - "3000:3000"
     volumes:
       - ../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ../monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
@@ -291,12 +296,66 @@ services:
     depends_on:
       prometheus:
         condition: service_healthy
+      loki:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/api/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 15s
+
+  # ──────────────────────────────────────────────────────────────────
+  # 日志栈：Loki（存储 + 查询）+ Promtail（采集 agent）
+  #
+  # 采集对象（容器内挂载路径与宿主 run/logs 一致）：
+  #   /run/logs/app/app.log         ← zap JSON       (job=omcgo-app)
+  #   /run/logs/acs/acs.log         ← zap JSON       (job=omcgo-acs)
+  #   /run/logs/worker/worker.log   ← zap JSON       (job=omcgo-worker)
+  #   /run/logs/nginx/*_access.log  ← nginx access   (job=nginx, log_type=access)
+  #   /run/logs/nginx/*_error.log   ← nginx error    (job=nginx, log_type=error)
+  #
+  # 解析行为：
+  #   - zap JSON 抽取 level / device_sn 作为 label
+  #   - timestamp 用 zap 的 ISO8601（保持原始时序，不被 promtail 注入时间）
+  #   - lumberjack 滚动产生的 *.log.gz 历史文件不被采集（仅 .log 当前文件）
+  #
+  # 查询入口：Grafana → Explore → Loki datasource，LogQL：
+  #   {service="omcgo-app"} |= "panic"                  # 找 panic
+  #   {service="omcgo-acs", level="error"}              # ACS error 级
+  #   {service="omcgo-app"} | json | device_sn="120..." # 按设备 SN 过滤
+  # ──────────────────────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:3.0.0
+    environment:
+      TZ: "Asia/Shanghai"
+    ports:
+      - "3100:3100"
+    volumes:
+      - ../monitoring/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - lokidata:/loki
+      - /etc/localtime:/etc/localtime:ro
+    command: ["-config.file=/etc/loki/loki-config.yml"]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3100/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  promtail:
+    image: grafana/promtail:3.0.0
+    environment:
+      TZ: "Asia/Shanghai"
+    volumes:
+      - ../monitoring/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - ../../run/logs:/run/logs:ro
+      - promtaildata:/tmp
+      - /etc/localtime:/etc/localtime:ro
+    command: ["-config.file=/etc/promtail/promtail-config.yml"]
+    depends_on:
+      loki:
+        condition: service_healthy
 
 volumes:
   pgdata:
@@ -306,6 +365,8 @@ volumes:
   prometheusdata:
   alertmanagerdata:
   grafanadata:
+  lokidata:
+  promtaildata:
 
 networks:
   default:

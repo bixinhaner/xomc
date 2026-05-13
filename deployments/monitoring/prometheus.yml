@@ -1,13 +1,13 @@
 # Prometheus 主配置 — OMC 三进程 + 自身
 #
-# 端口约定（与 omcgo/cmd/{app,acs,worker}/etc/config.dev.yaml 保持一致）：
+# 容器内端口（与 omcgo/cmd/{app,acs,worker}/etc/config.dev.yaml 保持一致）：
 #   omcgo-app    metrics  :9091
 #   omcgo-acs    metrics  :9090
 #   omcgo-worker metrics  :9092
 #
 # scrape target 走 docker-compose 内部 hostname（service 名），不要写 localhost。
-# 容器内部 prometheus 监听 :9090（默认），对外宿主端口映射为 9094:9090
-# （以避开 acs metrics :9090 的宿主端口冲突）。
+# 容器内部 prometheus 自身监听 :9090，宿主端口直接映射 9090:9090
+# （acs metrics 宿主端口已让出，移到 9095:9090）。
 
 global:
   scrape_interval: 15s

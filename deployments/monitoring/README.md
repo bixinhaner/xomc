@@ -1,6 +1,7 @@
 # OMC Monitoring Stack
 
-Prometheus + AlertManager + Grafana 一键起栈，覆盖 OMC 三进程（app / acs / worker）。
+Prometheus + AlertManager + Grafana + Loki + Promtail 一键起栈，覆盖
+OMC 三进程（app / acs / worker）的**指标 + 日志**双通道可观测性。
 
 ## 文件结构
 
@@ -9,14 +10,21 @@ deployments/monitoring/
 ├── prometheus.yml                # Prometheus 主配置（scrape + 告警路由）
 ├── alertmanager.yml              # AlertManager 路由 + receiver（占位 webhook）
 ├── alerts/
-│   └── omc-rules.yml             # starter 告警规则（三进程存活）
+│   ├── omc-rules.yml             # starter 告警规则（三进程存活）
+│   └── connection-pool-alerts.yml
+├── loki/
+│   └── loki-config.yml           # Loki 单节点 filesystem 存储 + 7d retention
+├── promtail/
+│   └── promtail-config.yml       # 日志采集（zap JSON 解析 + level/service label）
 ├── grafana/
 │   ├── provisioning/
-│   │   ├── datasources/prometheus.yml   # 自动注册 Prometheus 数据源
-│   │   └── dashboards/default.yml       # 自动加载 dashboards 目录
+│   │   ├── datasources/
+│   │   │   ├── prometheus.yml    # 自动注册 Prometheus 数据源
+│   │   │   └── loki.yml          # 自动注册 Loki 数据源
+│   │   └── dashboards/default.yml
 │   └── dashboards/
-│       └── omc-overview.json     # OMC 既有 dashboard（从根目录复制过来）
-├── grafana-dashboard.json        # 历史 dashboard 原件（不删除，作为引用）
+│       └── omc-overview.json
+├── grafana-dashboard.json        # 历史 dashboard 原件
 └── README.md                     # 本文件
 ```
 
@@ -24,34 +32,47 @@ deployments/monitoring/
 
 | 服务 | 容器端口 | 宿主端口 | 说明 |
 |------|--------|--------|------|
-| Prometheus | 9090 | **9094** | 避开 omcgo-acs metrics 已占宿主 :9090 |
-| Grafana | 3000 | **3002** | 避开设计基线 worktree 占用 :3001 |
+| Prometheus | 9090 | **9090** | 标准端口（acs metrics 已让出宿主 9090 → 9095） |
+| Grafana | 3000 | **3000** | 标准端口（⚠️ 与 webcode vite dev 撞，二选一） |
 | AlertManager | 9093 | 9093 | 无冲突 |
+| Loki HTTP API | 3100 | 3100 | Grafana 通过此端口查日志 |
+| omcgo-acs metrics | 9090 | **9095** | 让出 9090 给 Prometheus 服务 |
 
 宿主访问入口：
 
-- Prometheus UI：<http://localhost:9094>
-- Grafana UI：<http://localhost:3002>（admin / admin，dev 默认值）
+- Prometheus UI：<http://localhost:9090>
+- Grafana UI：<http://localhost:3000>（admin / admin，dev 默认值）
 - AlertManager UI：<http://localhost:9093>
+- Loki API：<http://localhost:3100>（无 UI，通过 Grafana 查询）
 
 ## 用法
 
 ```bash
-# 启动监控三件套
+# 启动监控 + 日志栈（5 个服务一起起）
 docker-compose -f deployments/docker/docker-compose.yml up -d \
-  prometheus alertmanager grafana
+  prometheus alertmanager grafana loki promtail
 
-# 健康自检（依次返回 OK / ok 字符串）
-curl -fsSL http://localhost:9094/-/healthy
-curl -fsSL http://localhost:3002/api/health
-curl -fsSL http://localhost:9093/-/healthy
+# 健康自检
+curl -fsSL http://localhost:9090/-/healthy        # Prometheus
+curl -fsSL http://localhost:3000/api/health       # Grafana
+curl -fsSL http://localhost:9093/-/healthy        # AlertManager
+curl -fsSL http://localhost:3100/ready            # Loki
 
 # 查看 scrape target 状态（包含 omc-app / omc-acs / omc-worker 三个 job）
-curl -s http://localhost:9094/api/v1/targets | jq '.data.activeTargets[] | {job:.labels.job, health:.health}'
+curl -s http://localhost:9090/api/v1/targets | jq '.data.activeTargets[] | {job:.labels.job, health:.health}'
+
+# 查看 Loki 已收到的 label（验证 promtail 推送成功）
+curl -s http://localhost:3100/loki/api/v1/labels | jq
+
+# 直接用 Loki API 验证日志写入（不经过 Grafana）
+curl -s -G 'http://localhost:3100/loki/api/v1/query_range' \
+  --data-urlencode 'query={service="omcgo-app"}' \
+  --data-urlencode "start=$(date -d '5 min ago' -u +%s)000000000" \
+  --data-urlencode "end=$(date -u +%s)000000000" | jq '.data.result[0].values[:3]'
 
 # 关闭
 docker-compose -f deployments/docker/docker-compose.yml down \
-  prometheus alertmanager grafana
+  prometheus alertmanager grafana loki promtail
 ```
 
 > ⚠️ **OMC 三进程未启动时**，Prometheus targets 会显示 `down`，这是预期行为，
@@ -78,7 +99,7 @@ docker-compose -f deployments/docker/docker-compose.yml down \
              summary: "<一句话>"
              description: "<多行，包含 Impact / Action>"
    ```
-3. 热加载（无需重启）：`curl -X POST http://localhost:9094/-/reload`。
+3. 热加载（无需重启）：`curl -X POST http://localhost:9090/-/reload`。
 4. 在 Prometheus UI **Status → Rules** 下确认新规则已加载。
 
 ## 加新 Grafana Dashboard
@@ -111,6 +132,58 @@ omcgo 三进程通过以下端口暴露 `/metrics`（容器内）：
 | omcgo-worker | `:9092` | `omcgo/cmd/worker/etc/config.dev.yaml` `metrics.port` |
 
 修改任一 metrics 端口时，必须同步修改 `prometheus.yml` 的 `scrape_configs`。
+
+## 日志查询（Loki + Grafana）
+
+打开 Grafana <http://localhost:3000> → 左侧 **Explore** → 数据源选 **Loki**。
+
+### Promtail 注入的 label 体系
+
+| label | 取值范围 | 用途 |
+|-------|---------|------|
+| `service` | `omcgo-app` / `omcgo-acs` / `omcgo-worker` / `nginx` / `frontend` | 主要过滤维度 |
+| `job` | 同 service | 历史习惯 label |
+| `deployment_unit` | `app` / `acs` / `worker` | 与 Prometheus 标签对齐 |
+| `level` | `info` / `warn` / `error` / `debug`（从 zap JSON 抽取） | 严重级过滤 |
+| `log_type` | `access` / `error`（仅 nginx） | nginx 日志类型 |
+
+> ⚠️ **不要**把 `request_id` / `device_sn` / `trace_id` 提为 label——这些是高基数字段，
+> 会让 Loki stream 数爆炸。它们保留在 message body，用 `| json` 解析后过滤。
+
+### 常用 LogQL
+
+```logql
+# 全文搜 panic（最常用，事故现场）
+{service="omcgo-app"} |= "panic"
+
+# 三进程 error 全量
+{level="error"}
+
+# ACS 模块 error
+{service="omcgo-acs", level="error"}
+
+# 按设备 SN 过滤（device_sn 在 JSON 体内）
+{service="omcgo-app"} | json | device_sn="120200024719AAB0039"
+
+# 按 request_id 追踪一次完整请求
+{service="omcgo-app"} | json | request_id="app-20260511153032-36520199"
+
+# 各服务 5 分钟内 error 速率（指标化）
+sum by (service) (count_over_time({level="error"}[5m]))
+
+# nginx 5xx 响应
+{service="nginx", log_type="access"} |~ " (5[0-9]{2}) "
+
+# 排除某些噪声日志
+{service="omcgo-app"} != "health" != "metrics"
+```
+
+### Loki → 指标联动
+
+Loki 支持把 LogQL 转成 Prometheus-like metric，可以在同一个 Grafana 面板里：
+- 上面板用 Prometheus 指标看 QPS / 延迟
+- 下面板用 Loki 看同时段错误日志
+- 点击指标尖刺 → Grafana 自动跳到对应时段的日志
 
 ## 关联文档
 
