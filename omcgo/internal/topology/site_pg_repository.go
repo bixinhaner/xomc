@@ -840,20 +840,5 @@ func scanTopoEdgeRow(rows pgx.Rows) (*TopoEdge, error) {
 	return &e, nil
 }
 
-// ======================================================================
-// Helper functions
-// ======================================================================
-
-func nullableUUID(id *uuid.UUID) interface{} {
-	if id == nil {
-		return nil
-	}
-	return *id
-}
-
-func nullableString(s string) interface{} {
-	if s == "" {
-		return nil
-	}
-	return s
-}
+// nullableUUID / nullableString helpers 在 pg_repository.go 同包内统一定义，
+// 此处不再重复声明（commit 6f5e4156 site CRUD 引入时遗留的重复定义已清理）。
