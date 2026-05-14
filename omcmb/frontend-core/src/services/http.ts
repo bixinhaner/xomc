@@ -144,6 +144,14 @@ http.interceptors.response.use(
       if (useMock) {
         return Promise.reject(error);
       }
+      // /auth/login 的 401 不是 token 过期 —— 是用户名密码错。如果走下面的
+      // clearAuth + window.location.href 硬跳分支，登录页 try/catch 里的
+      // message.error toast 还没渲染就被页面刷新清掉，用户看到"输错密码无任
+      // 何反馈"。透传给下面的 envelope-message-extract 分支让业务层自己 toast。
+      const reqURL = originalRequest.url || '';
+      if (reqURL.endsWith('/auth/login') || reqURL.includes('/auth/login?')) {
+        // fall through to message extraction below — 不走 token refresh / 不跳转
+      } else {
       const { refreshToken, clearAuth } = useUserStore.getState();
 
       // No refresh token or this was already a refresh attempt → logout
@@ -205,6 +213,7 @@ http.interceptors.response.use(
       } finally {
         isRefreshing = false;
       }
+      } // end else: token-refresh branch (login URL skipped)
     }
 
     // Extract error message from response body.
@@ -230,14 +239,20 @@ http.interceptors.response.use(
         responseData.details ||
         responseData.message ||
         responseData.error;
-      if (message) {
-        error.message = message;
-      }
-      // 暴露业务错误码 + request_id 到 error 对象，业务侧可读
+      // 暴露业务错误码 + request_id + userMessage 到 error 对象。
+      // userMessage 是业务层（LoginPage / KPIStandardReport 等）读取的友好文案
+      // 字段约定，与 error.message（"Request failed with status code 401"
+      // 风格）区分。此前只写 error.message 导致业务 axiosErr.userMessage 永远
+      // undefined → toast fallback 到通用文案；改成同时写两个字段。
       const enrichedErr = error as AxiosError & {
         bizCode?: number;
         requestId?: string;
+        userMessage?: string;
       };
+      if (message) {
+        error.message = message;
+        enrichedErr.userMessage = message;
+      }
       if (responseData.biz_code !== undefined) {
         enrichedErr.bizCode = responseData.biz_code;
       } else if (responseData.code !== undefined) {
