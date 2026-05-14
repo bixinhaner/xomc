@@ -17,10 +17,12 @@ import (
 )
 
 // userColumns: v1.0 起 carrier 列已删除（Phase 5 goose 迁移），代码层不再读写。
+// 000096 加 must_change_password + password_changed_at 两列（P1 密码策略）。
 var userColumns = []string{
 	"id", "username", "password_hash", "display_name", "email", "phone",
 	"description", "status", "source", "failed_login_attempts",
 	"locked_until", "last_failed_login_at", "last_login_at", "expire_at",
+	"must_change_password", "password_changed_at",
 	"created_by", "updated_by", "created_at", "updated_at",
 }
 
@@ -58,6 +60,7 @@ func (r *PgUserRepository) Create(ctx context.Context, user *User) error {
 			user.FailedLoginAttempts, nullableTime(user.LockedUntil),
 			nullableTime(user.LastFailedLoginAt), nullableTime(user.LastLoginAt),
 			nullableTime(user.ExpireAt),
+			user.MustChangePassword, nullableTime(user.PasswordChangedAt),
 			nullableUUID(user.CreatedBy), nullableUUID(user.UpdatedBy),
 			user.CreatedAt, user.UpdatedAt,
 		).
@@ -134,9 +137,14 @@ func (r *PgUserRepository) Update(ctx context.Context, user *User) error {
 }
 
 func (r *PgUserRepository) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
+	now := time.Now()
+	// P1：每次改密同步刷新 password_changed_at 并清除 must_change_password 标记。
+	// 让 Login 时的"密码过期 / 首次改密"两条策略自动进入正常生命周期。
 	query, args, err := storage.Psql.Update("users").
 		Set("password_hash", passwordHash).
-		Set("updated_at", time.Now()).
+		Set("password_changed_at", now).
+		Set("must_change_password", false).
+		Set("updated_at", now).
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	if err != nil {
@@ -146,6 +154,28 @@ func (r *PgUserRepository) UpdatePassword(ctx context.Context, id uuid.UUID, pas
 	tag, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("update password: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
+// SetMustChangePassword 单独切换"首次登录强制改密"标记。
+// CreateUser / ResetPassword 时按 sys_configs.security.modifyPWD 调；
+// UpdatePassword 内部已自动清除该标记，此 setter 不在 ChangePassword 路径调。
+func (r *PgUserRepository) SetMustChangePassword(ctx context.Context, id uuid.UUID, must bool) error {
+	query, args, err := storage.Psql.Update("users").
+		Set("must_change_password", must).
+		Set("updated_at", time.Now()).
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update must_change_password SQL: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update must_change_password: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return commonerrors.ErrNotFound
@@ -314,6 +344,7 @@ func scanUser(row pgx.Row) (*User, error) {
 		&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &email, &phone,
 		&description, &u.Status, &u.Source, &u.FailedLoginAttempts,
 		&u.LockedUntil, &u.LastFailedLoginAt, &u.LastLoginAt, &u.ExpireAt,
+		&u.MustChangePassword, &u.PasswordChangedAt,
 		&u.CreatedBy, &u.UpdatedBy, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {
@@ -333,6 +364,7 @@ func scanUserFromRows(rows pgx.Rows) (*User, error) {
 		&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &email, &phone,
 		&description, &u.Status, &u.Source, &u.FailedLoginAttempts,
 		&u.LockedUntil, &u.LastFailedLoginAt, &u.LastLoginAt, &u.ExpireAt,
+		&u.MustChangePassword, &u.PasswordChangedAt,
 		&u.CreatedBy, &u.UpdatedBy, &u.CreatedAt, &u.UpdatedAt,
 	)
 	if err != nil {

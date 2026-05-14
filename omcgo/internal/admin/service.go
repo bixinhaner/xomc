@@ -119,6 +119,15 @@ func (s *AdminService) SetSecurityPolicy(p *SecurityPolicy) {
 	s.policy = p
 }
 
+// policySnapshot 返当前生效的 SecurityPolicy 快照；未注入时返 default。
+// 让 CreateUser / Login / ChangePassword 等多处一致地读取策略。
+func (s *AdminService) policySnapshot(ctx context.Context) *securityPolicyValues {
+	if s.policy == nil {
+		return defaultPolicy()
+	}
+	return s.policy.Get(ctx)
+}
+
 // SetPermissionInvalidator 注入权限缓存失效器；用户角色 / 运营商 / 删除等写操作后会调用。
 // 详见 PRD docs/prd/system/users.md §10 DoD。
 func (s *AdminService) SetPermissionInvalidator(p PermissionInvalidator) {
@@ -258,7 +267,52 @@ func (s *AdminService) Login(ctx context.Context, username, password string) (*T
 		s.logger.Warn("update last login", zap.Error(err))
 	}
 
+	// P1 ①+④ 密码策略派生字段，附在 Login 响应里让 FE 决定是否强制改密 / 弹提示。
+	// 单独抽 helper 让 Login 主流程保持线性可读。
+	annotatePasswordPolicyState(ctx, user, s.policySnapshot(ctx), tokenPair)
+
 	return tokenPair, nil
+}
+
+// annotatePasswordPolicyState 把"是否必须改密 / 离过期还剩几天"两个派生字段
+// 填入 TokenPair 响应。规则：
+//
+//   ① must_change_password=true              → 用户首次登录 / 管理员重置
+//   ④ password_expires_at <= now             → 已过期 → 一并要求改密
+//   ④ password_expires_at - now <= prompt    → 不强制但附 days 让 FE 弹提示
+//
+// 任何字段未启用（expires=false）或 policy 未注入时，函数无副作用。
+func annotatePasswordPolicyState(_ context.Context, user *User, policy *securityPolicyValues, tp *TokenPair) {
+	if user == nil || tp == nil {
+		return
+	}
+	// ① 显式标记
+	if user.MustChangePassword {
+		tp.MustChangePassword = true
+	}
+	if policy == nil || !policy.PasswordExpiresEnabled || policy.PasswordValidDays <= 0 {
+		return
+	}
+	// ④ 密码过期判定：未设过修改时间戳 → 视为初始密码，立刻强制改密
+	if user.PasswordChangedAt == nil {
+		tp.MustChangePassword = true
+		return
+	}
+	validDuration := time.Duration(policy.PasswordValidDays) * 24 * time.Hour
+	expiresAt := user.PasswordChangedAt.Add(validDuration)
+	remaining := time.Until(expiresAt)
+	if remaining <= 0 {
+		tp.MustChangePassword = true
+		return
+	}
+	// 剩余天数（向下取整避免"还剩 0.4 天"显示为 0）
+	days := int(remaining / (24 * time.Hour))
+	if days < 0 {
+		days = 0
+	}
+	if policy.PasswordPromptDays > 0 && int64(days) <= policy.PasswordPromptDays {
+		tp.PasswordExpiresInDays = &days
+	}
 }
 
 // getDefaultRoleID returns the user's default role ID, or the first role if none is set.
@@ -313,6 +367,13 @@ func (s *AdminService) RefreshToken(ctx context.Context, refreshToken string) (*
 // CreateUser creates a new user account with role assignments.
 // If role assignment fails, the created user is rolled back to maintain consistency.
 func (s *AdminService) CreateUser(ctx context.Context, req CreateUserRequest) (*User, error) {
+	// P1-② 密码强度校验（sys_configs security.pwdMinLength / pwdMaxLength /
+	// passwordContent）。policy nil 时 ValidatePassword 安全降级（fail-open）。
+	pwdPolicy := PasswordPolicySnapshotFromSecurityPolicy(s.policySnapshot(ctx))
+	if err := ValidatePassword(req.Password, pwdPolicy); err != nil {
+		return nil, fmt.Errorf("%w: %w", err, commonerrors.ErrInvalidInput)
+	}
+
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
@@ -320,6 +381,7 @@ func (s *AdminService) CreateUser(ctx context.Context, req CreateUserRequest) (*
 
 	// 通过本接口创建的用户固定为管理员添加。
 	// LDAP 同步任务走独立内部路径写 UserSourceLDAP；seed 文件写 UserSourceBuiltIn。
+	now := time.Now()
 	user := &User{
 		Username:     req.Username,
 		PasswordHash: string(hash),
@@ -330,6 +392,10 @@ func (s *AdminService) CreateUser(ctx context.Context, req CreateUserRequest) (*
 		ExpireAt:     req.ExpireAt,
 		Status:       UserStatusActive,
 		Source:       UserSourceAdmin,
+		// P1-① 首次登录强制改密：按 sys_configs.security.modifyPWD 决定初始值。
+		MustChangePassword: s.policySnapshot(ctx).MustChangePasswordOnFirstLogin,
+		// P1-④ 让密码有效期从创建时刻起计；NULL 会被 Login 视为初始密码立刻过期。
+		PasswordChangedAt: &now,
 	}
 	if op := operatorIDFromContext(ctx); op != nil {
 		user.CreatedBy = op
@@ -699,12 +765,27 @@ func (s *AdminService) ResetPassword(ctx context.Context, id uuid.UUID, newPassw
 	if user.Source == UserSourceLDAP {
 		return ErrLDAPPasswordExternal
 	}
+	// P1-② 密码强度校验
+	policy := s.policySnapshot(ctx)
+	if err := ValidatePassword(newPassword, PasswordPolicySnapshotFromSecurityPolicy(policy)); err != nil {
+		return fmt.Errorf("%w: %w", err, commonerrors.ErrInvalidInput)
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("hash password: %w", err)
 	}
 	if err := s.userRepo.UpdatePassword(ctx, id, string(hash)); err != nil {
 		return fmt.Errorf("update password: %w", err)
+	}
+	// P1-① ResetPassword（admin 重置）后按 sys_configs.security.modifyPWD 决定
+	// 是否要求用户下次登录改密。UpdatePassword 已把 must_change_password 清零，
+	// 此处仅当 policy=true 时再 setter 重置回 true。
+	if policy.MustChangePasswordOnFirstLogin {
+		if repo, ok := s.userRepo.(*PgUserRepository); ok {
+			if err := repo.SetMustChangePassword(ctx, id, true); err != nil {
+				s.logger.Warn("set must_change_password after reset", zap.Error(err))
+			}
+		}
 	}
 	// 与 LockUserByUsername 保持一致：ResetLoginSecurity 不在 UserRepository 接口上，
 	// 通过类型断言直接调具体实现，失败仅警告（密码已成功重置）。
@@ -1307,6 +1388,12 @@ func (s *AdminService) ChangePassword(ctx context.Context, userID uuid.UUID, req
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.OldPassword)); err != nil {
 		return commonerrors.NewBusinessError(7020, "old password is incorrect", commonerrors.ErrUnauthorized)
+	}
+
+	// P1-② 密码强度校验（与 CreateUser / ResetPassword 同套规则）
+	if err := ValidatePassword(req.NewPassword,
+		PasswordPolicySnapshotFromSecurityPolicy(s.policySnapshot(ctx))); err != nil {
+		return fmt.Errorf("%w: %w", err, commonerrors.ErrInvalidInput)
 	}
 
 	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)

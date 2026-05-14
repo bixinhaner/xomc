@@ -42,6 +42,12 @@ type User struct {
 	LastFailedLoginAt   *time.Time `json:"last_failed_login_at,omitempty"`
 	LastLoginAt         *time.Time `json:"last_login_at,omitempty"`
 	ExpireAt            *time.Time `json:"expire_at,omitempty"`
+	// P1-① 首次登录强制改密：CreateUser/ResetPassword 时按
+	// sys_configs.security.modifyPWD 置为 true；ChangePassword 后清零。
+	MustChangePassword bool `json:"must_change_password"`
+	// P1-④ 密码最近修改时间；UpdatePassword 同步刷新。Login 时与
+	// sys_configs.security.validPeriod 比较判断密码过期。
+	PasswordChangedAt *time.Time `json:"password_changed_at,omitempty"`
 	CreatedBy           *uuid.UUID `json:"created_by,omitempty"`
 	UpdatedBy           *uuid.UUID `json:"updated_by,omitempty"`
 	// CreatorUsername / UpdaterUsername 是 ListUsers / GetUser 派生字段：
@@ -96,6 +102,14 @@ type TokenPair struct {
 	RefreshToken string    `json:"refresh_token"`
 	ExpiresAt    time.Time `json:"expires_at"`
 	TokenType    string    `json:"token_type"`
+
+	// P1 密码策略派生字段（仅 Login 响应填充；Refresh / 其他端点不带）：
+	//   - MustChangePassword: 用户必须立刻改密（首次登录 / 管理员重置 / 密码已过期）
+	//   - PasswordExpiresInDays: 距密码过期还剩多少天 (>=0)；nil = 未启用过期 / 已过期已在 MustChange
+	//   FE 拿到 MustChangePassword=true 后强制跳改密页；
+	//   拿到 PasswordExpiresInDays<=promptBeforeDays 时弹"即将过期"toast。
+	MustChangePassword    bool  `json:"must_change_password,omitempty"`
+	PasswordExpiresInDays *int  `json:"password_expires_in_days,omitempty"`
 }
 
 // AuditLog records a user action for auditing purposes.
