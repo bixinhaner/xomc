@@ -217,6 +217,19 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 		return rep, fmt.Errorf("upsert commands: %w", err)
 	}
 
+	// F-B 业务套餐：人工维护的 ~15 条 LST_PKG_* 命令，partial path 一次抓
+	// 整棵子树，避免 528+210 细粒度命令首屏淹没用户。独立于 grouper 派生
+	// 路径，写到同一 mml_commands 表（group_id = NULL）。
+	packages := PackageSpecs()
+	if err := upsertBusinessPackages(ctx, tx, packages); err != nil {
+		l.metrics.recordFailure("upsert_business_packages")
+		l.logger.Error("mml standard loader: upsert_business_packages failed",
+			zap.String("phase", "upsert_business_packages"),
+			zap.Int("attempted_rows", len(packages)),
+			zap.Error(err))
+		return rep, fmt.Errorf("upsert business packages: %w", err)
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		l.metrics.recordFailure("commit")
 		return rep, fmt.Errorf("commit: %w", err)
@@ -394,6 +407,54 @@ func upsertCommands(ctx context.Context, tx pgx.Tx, cmds []CommandSpec, groupIDs
 			groupID, nameJSON)
 		if err != nil {
 			return fmt.Errorf("upsert command %s: %w", c.Code, err)
+		}
+	}
+	return nil
+}
+
+// upsertBusinessPackages 批量 UPSERT 业务套餐 LST 命令（F-B / T-0119）。
+//
+// 与 upsertCommands 区别：
+//   - group_id = NULL（套餐不归属 mml_param_groups 派生树）
+//   - operation_type 固定 LST；rpc_method 固定 GetParameterValues
+//   - target_paths 通常是 partial path（以 "." 结尾）一次抓整棵子树
+//   - description 字段直填 PackageSpec.Description（FE 详情页用）
+//
+// 走相同的 ON CONFLICT (command_code) 路径；二次执行幂等。
+func upsertBusinessPackages(ctx context.Context, tx pgx.Tx, pkgs []PackageSpec) error {
+	for _, p := range pkgs {
+		targetPathsJSON, err := json.Marshal(p.TargetPaths)
+		if err != nil {
+			return fmt.Errorf("marshal target_paths for pkg %s: %w", p.Code, err)
+		}
+		nameJSON := nameI18nJSON(p.NameZh, p.NameEn)
+
+		_, err = tx.Exec(ctx, `
+			INSERT INTO mml_commands (
+				id, command_name, command_code, category, description, rpc_method,
+				operation_type, target_paths, target_object,
+				group_id, command_name_i18n,
+				help_doc
+			) VALUES (
+				gen_random_uuid(), $1, $2, $3, $4, $5,
+				'LST', $6::jsonb, NULL,
+				NULL, $7::jsonb,
+				''
+			)
+			ON CONFLICT (command_code) DO UPDATE
+			SET command_name      = EXCLUDED.command_name,
+			    category          = EXCLUDED.category,
+			    description       = EXCLUDED.description,
+			    rpc_method        = EXCLUDED.rpc_method,
+			    operation_type    = EXCLUDED.operation_type,
+			    target_paths      = EXCLUDED.target_paths,
+			    target_object     = NULL,
+			    group_id          = NULL,
+			    command_name_i18n = EXCLUDED.command_name_i18n
+		`, p.NameZh, p.Code, p.Category, p.Description, RPCGetParameterValues,
+			targetPathsJSON, nameJSON)
+		if err != nil {
+			return fmt.Errorf("upsert business package %s: %w", p.Code, err)
 		}
 	}
 	return nil
