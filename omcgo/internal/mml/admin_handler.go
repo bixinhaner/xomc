@@ -81,9 +81,12 @@ func (h *AdminHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	commands.PATCH("/:id", h.UpdateCommand)
 	commands.DELETE("/:id", h.DeleteCommand)
 
-	commands.POST("/:cid/sub-fields", h.CreateSubField)
-	commands.PATCH("/:cid/sub-fields/:sid", h.UpdateSubField)
-	commands.DELETE("/:cid/sub-fields/:sid", h.DeleteSubField)
+	// gin tree 不允许同 prefix 下命名参数同位置不同名 — 上方 commands.PATCH("/:id",...)
+	// 已把首段命名为 :id，这里子资源必须沿用 :id 而非 :cid（否则启动 panic）。
+	// handler 内 parseUUIDParam 同步改 "id"。
+	commands.POST("/:id/sub-fields", h.CreateSubField)
+	commands.PATCH("/:id/sub-fields/:sid", h.UpdateSubField)
+	commands.DELETE("/:id/sub-fields/:sid", h.DeleteSubField)
 
 	params := admin.Group("/params")
 	params.GET("", h.ListParams)
@@ -198,9 +201,9 @@ func (h *AdminHandler) DeleteCommand(c *gin.Context) {
 // SubField handlers
 // ============================================================
 
-// CreateSubField POST /api/v1/mml/admin/commands/:cid/sub-fields
+// CreateSubField POST /api/v1/mml/admin/commands/:id/sub-fields
 func (h *AdminHandler) CreateSubField(c *gin.Context) {
-	cid, ok := h.parseUUIDParam(c, "cid")
+	cid, ok := h.parseUUIDParam(c, "id")
 	if !ok {
 		return
 	}
@@ -217,7 +220,7 @@ func (h *AdminHandler) CreateSubField(c *gin.Context) {
 	response.OKWithStatus(c, http.StatusCreated, sf)
 }
 
-// UpdateSubField PATCH /api/v1/mml/admin/commands/:cid/sub-fields/:sid
+// UpdateSubField PATCH /api/v1/mml/admin/commands/:id/sub-fields/:sid
 func (h *AdminHandler) UpdateSubField(c *gin.Context) {
 	sid, ok := h.parseUUIDParam(c, "sid")
 	if !ok {
@@ -236,7 +239,7 @@ func (h *AdminHandler) UpdateSubField(c *gin.Context) {
 	response.OK(c, sf)
 }
 
-// DeleteSubField DELETE /api/v1/mml/admin/commands/:cid/sub-fields/:sid
+// DeleteSubField DELETE /api/v1/mml/admin/commands/:id/sub-fields/:sid
 func (h *AdminHandler) DeleteSubField(c *gin.Context) {
 	sid, ok := h.parseUUIDParam(c, "sid")
 	if !ok {
