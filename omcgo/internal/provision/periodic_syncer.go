@@ -2,7 +2,6 @@ package provision
 
 import (
 	"context"
-	"fmt"
 	"math/rand"
 	"sync"
 	"time"
@@ -167,7 +166,8 @@ func (p *PeriodicSyncer) enqueueBatch(ctx context.Context, devices []*model.Devi
 				}
 			}
 
-			sourceID := fmt.Sprintf("periodic:%s", d.ID.String())
+			// SourceID 是裸 UUID 写入 device_tasks.source_id；reason="periodic" 走 Redis 通道。
+			sourceID := d.ID.String()
 			used, err := p.syncer.StartPathBSync(ctx, d, sourceID, WithReason("periodic"))
 
 			countMu.Lock()

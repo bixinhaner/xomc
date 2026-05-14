@@ -525,7 +525,11 @@ func (h *Handler) SyncDeviceParams(c *gin.Context) {
 	}
 	_ = c.ShouldBindJSON(&req) // 容错：body 为空仍 OK
 
-	sourceID := fmt.Sprintf("manual:%s", uuid.New().String())
+	// SourceID 写入 device_tasks.source_id（UUID 列），仅做溯源标识；reason="manual"
+	// 通过 WithReason option 走 Redis 通道独立传递。响应里保留 manual:<uuid> display 形式
+	// 给前端 toast 与 API 契约。
+	sourceID := uuid.New().String()
+	displaySourceID := fmt.Sprintf("manual:%s", sourceID)
 	used, dev, err := h.service.SyncDeviceParamsManual(c.Request.Context(), id, sourceID)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
@@ -547,7 +551,7 @@ func (h *Handler) SyncDeviceParams(c *gin.Context) {
 	}
 	response.OKWithStatus(c, http.StatusAccepted, gin.H{
 		"status":        "queued",
-		"source_id":     sourceID,
+		"source_id":     displaySourceID,
 		"device_id":     id.String(),
 		"serial_number": deviceSN,
 		"force":         req.Force,

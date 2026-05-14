@@ -275,8 +275,9 @@ func (e *ProvisioningEngine) HandleDeviceOnline(ctx context.Context, evt device.
 		return nil
 	}
 
-	// Reason 标签写 Redis 临时映射，供 HandleSyncResultPathB 完成时读取打差异日志（T-0127）。
-	sourceID := fmt.Sprintf("device_online:%s", evt.DeviceID.String())
+	// SourceID 是裸 UUID（写入 device_tasks.source_id UUID 列做溯源）；reason="device_online"
+	// 通过 WithReason 走 Redis 通道传给 HandleSyncResultPathB 打差异日志（T-0127）。
+	sourceID := evt.DeviceID.String()
 	used, err := e.syncService.StartPathBSync(ctx, dev, sourceID, WithReason("device_online"))
 	if err != nil {
 		e.logger.Warn("device.online: StartPathBSync failed",
@@ -362,7 +363,8 @@ func (e *ProvisioningEngine) HandleFirmwareChanged(ctx context.Context, evt devi
 
 	// 4. 调 RequestModelUpload：log.Status=Discovering → Upload 真入队（handleDataModelFileReceived 会自动触发 Path B）；
 	//    log.Status=Completed (enable_filetype11=false) 或 err → 走 step 5 兜底
-	sourceID := fmt.Sprintf("firmware_changed:%s", evt.DeviceID.String())
+	// SourceID 是裸 UUID 写入 device_tasks.source_id；reason="firmware_changed" 走 Redis 通道。
+	sourceID := evt.DeviceID.String()
 	var modelUploadEnqueued bool
 	if e.modelUploadService != nil {
 		log, uploadErr := e.modelUploadService.RequestModelUpload(ctx, dev, sourceID)

@@ -156,7 +156,9 @@ func TestPeriodicSyncer_LeaderRunsBatch(t *testing.T) {
 	defer syncer.mu.Unlock()
 	for _, c := range syncer.calls {
 		assert.Equal(t, "periodic", c.reason, "reason 应为 periodic")
-		assert.Contains(t, c.sourceID, "periodic:", "sourceID 应以 periodic: 前缀")
+		// SourceID 是裸 UUID（写入 device_tasks.source_id UUID 列），reason 由 WithReason 独立通道传递
+		_, err := uuid.Parse(c.sourceID)
+		assert.NoError(t, err, "sourceID 必须是合法 UUID")
 	}
 }
 

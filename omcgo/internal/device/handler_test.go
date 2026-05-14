@@ -558,7 +558,10 @@ func TestHandler_SyncDeviceParams_Success(t *testing.T) {
 
 	require.Len(t, starter.calls, 1, "应调一次 StartManualSync")
 	assert.Equal(t, id, starter.calls[0].deviceID)
-	assert.Contains(t, starter.calls[0].sourceID, "manual:")
+	// 传给 service 的 sourceID 是裸 UUID（写入 device_tasks.source_id UUID 列），
+	// 响应里的 source_id 才是 manual:<uuid> display 形式
+	_, parseErr := uuid.Parse(starter.calls[0].sourceID)
+	assert.NoError(t, parseErr, "传给 service 的 sourceID 必须是合法 UUID")
 }
 
 func TestHandler_SyncDeviceParams_NoBody_OK(t *testing.T) {
