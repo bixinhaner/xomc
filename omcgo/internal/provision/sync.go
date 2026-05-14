@@ -33,6 +33,7 @@ type SyncService struct {
 	productRegistry      *product.Registry
 	paramRegistryEnabled bool
 	redisClient          redis.UniversalClient
+	paramSyncWriter      ParamSyncWriter
 	config               appconfig.AutoSyncConfig
 	batchSize            int
 	logger               *zap.Logger
@@ -42,6 +43,21 @@ type SyncService struct {
 // nil 表示禁用 reason 标签（差异日志 reason 字段会降级为 "unknown"，仍正常输出）。
 func (s *SyncService) SetRedisClient(client redis.UniversalClient) *SyncService {
 	s.redisClient = client
+	return s
+}
+
+// ParamSyncWriter 消费者驱动接口：HandleSyncResultPathB BatchUpsert 成功后回写
+// devices.last_param_sync_at（T-0124 设计 §2.6 统一回写口径，不区分触发源）。
+// device.DeviceRepository 自然满足；测试可用最小 mock。
+type ParamSyncWriter interface {
+	UpdateLastParamSyncAt(ctx context.Context, id uuid.UUID, at time.Time) error
+}
+
+// SetParamSyncWriter 注入 ParamSyncWriter（T-0124）。nil 表示禁用回写
+// （PeriodicSyncer 会因 last_param_sync_at 永远为 NULL 而每轮都重新入队，
+// dev/test 环境可接受；生产建议注入 DeviceRepository）。
+func (s *SyncService) SetParamSyncWriter(w ParamSyncWriter) *SyncService {
+	s.paramSyncWriter = w
 	return s
 }
 

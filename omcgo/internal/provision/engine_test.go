@@ -307,6 +307,14 @@ func (m *mockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]de
 func (m *mockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID, _ string) (int64, error) {
 	return 0, nil
 }
+func (m *mockDeviceRepo) ListStaleForParamSync(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
+	return nil, nil
+}
+
+func (m *mockDeviceRepo) UpdateLastParamSyncAt(_ context.Context, _ uuid.UUID, _ time.Time) error {
+	return nil
+}
+
 func (m *mockDeviceRepo) FindStaleDevices(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
 	return nil, nil
 }

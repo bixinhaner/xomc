@@ -134,6 +134,14 @@ provision:
     sync_on_bootstrap: true
     sync_on_firmware_change: true
     max_concurrent: 20
+  # T-0124 周期性参数同步兜底 — dev 默认关。生产灰度建议先 enabled=true /
+  # interval=72h / batch_size=50，观察一周后调到 24h / 200。
+  periodic_sync:
+    enabled: false
+    interval: 24h
+    batch_size: 200
+    max_concurrent: 10
+    stagger_window: 0  # 非 0 时把 batch 内入队动作打散到该窗口（如 5m）避免 PG 写入毛刺
 
 datamodel_expiry:
   auto_max_idle_days: 15

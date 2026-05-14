@@ -84,6 +84,12 @@ func (m *mockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID, _ string)
 func (m *mockDeviceRepo) FindStaleDevices(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
 	return nil, nil
 }
+func (m *mockDeviceRepo) ListStaleForParamSync(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
+	return nil, nil
+}
+func (m *mockDeviceRepo) UpdateLastParamSyncAt(_ context.Context, _ uuid.UUID, _ time.Time) error {
+	return nil
+}
 func (m *mockDeviceRepo) ListSerialsByIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]string, error) {
 	return map[uuid.UUID]string{}, nil
 }

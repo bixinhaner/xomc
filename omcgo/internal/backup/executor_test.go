@@ -102,6 +102,12 @@ func (m *execDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID, _ string)
 func (m *execDeviceRepo) FindStaleDevices(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
 	return nil, nil
 }
+func (m *execDeviceRepo) ListStaleForParamSync(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
+	return nil, nil
+}
+func (m *execDeviceRepo) UpdateLastParamSyncAt(_ context.Context, _ uuid.UUID, _ time.Time) error {
+	return nil
+}
 func (m *execDeviceRepo) ListSerialsByIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]string, error) {
 	return map[uuid.UUID]string{}, nil
 }

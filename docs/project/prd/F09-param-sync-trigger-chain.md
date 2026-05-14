@@ -766,4 +766,97 @@ T-0127 与 T-0123 合并实现（共享 Path B 测试场景）。
 - [x] 观测埋点名字列出（4 log key + 1 Redis key）
 - [x] 待定点 < 3（实际 0 个 — T-0123 已铺好 Redis 注入 + sync 服务）
 
+---
+
+## 设计备忘（T-0124，2026-05-14 S2 产出）
+
+> 接力 T-0123/T-0125，覆盖设计方案 §2 — 周期性参数同步兜底。**最大工作量 L** — 含迁移 + LeaderElector 抽象 + PeriodicSyncer + 回写口径统一 + DI + 配置。
+
+### 1. 现状勘察
+
+| 检查点 | 文件 | 现状 |
+|--------|------|------|
+| 迁移最大版本号 | `omcgo/migrations/` + `migrations/seed/` | DDL 000092 + seed 000093；**下一可用版本号 = 000094** |
+| `model.Device` LastParamSyncAt 字段 | `internal/core/model/device.go` | 不存在；本任务新增 `LastParamSyncAt *time.Time` |
+| `DeviceRepository` 接口 | `device_repository.go:106-157` | 有 `FindStaleDevices(threshold, limit)` 可参考；需新增 `ListStaleForParamSync` + `UpdateLastParamSyncAt` |
+| OfflineDetector 模式 | `offline_detector.go` | ticker + detect(ctx) 模式，本任务 PeriodicSyncer 参照同模式 |
+| SyncService 现有依赖 | `sync.go:26-37` | 未注入 deviceRepo。本任务通过 narrow `ParamSyncWriter` 接口（消费者驱动）注入 |
+| HandleSyncResultPathB 回写位置 | `sync_pathb.go` 末端 | T-0127 已插 `logPathBSyncDiff`；本任务再插 UpdateLastParamSyncAt（不区分 reason 统一） |
+
+### 2. 关键设计决策
+
+- **(a) Narrow `ParamSyncWriter` interface（消费者驱动）注入** vs 整个 DeviceRepository：测试只 mock 1 方法
+- **(b) `LeaderElector` 接口先行 + PG advisory lock 实现**：T-G post-RC 可让 OfflineDetector 复用同接口
+- **(c) 锁粒度：单 leader 全程持有**：startup 一次 TryAcquire，非每 tick 抢；连接断开 → 锁自动释放（PG session-scoped）
+- **(d) 回写位置严格 BatchUpsert 成功后**：不在入队时回写（避免任务未完被下一轮 tick 跳过）；不在 OnTaskCompleted（与 GPV 失败/超时区分困难）
+- **(e) GPV 范围方案 B**：复用 `extractStorablePrefixes(MappingSet)` 不引入新决策
+- **(f) MaxConcurrent 控制 CreateTask 入队并发**（非 GPV 并发）：防 PG 写入毛刺；GPV 并发由现有 ACS 准入控制管理
+
+### 3. 改动点清单
+
+| 文件 | 改动 | 估算行 |
+|------|------|------|
+| `migrations/000094_devices_last_param_sync_at.sql` | 新增字段 + 部分索引 + Down | +18 |
+| `internal/core/model/device.go` | LastParamSyncAt *time.Time 字段 | +1 |
+| `internal/device/device_repository.go` | 接口 + Pg 实现 `ListStaleForParamSync` / `UpdateLastParamSyncAt`；deviceColumns + scan + Update 含字段 | +60 |
+| `internal/provision/leader_elector.go` | **新增** LeaderElector interface + PGAdvisoryLeaderElector | +90 |
+| `internal/provision/periodic_syncer.go` | **新增** PeriodicSyncer struct + Start/runOnce + 并发池 + stagger window | +150 |
+| `internal/core/appconfig/config.go` | PeriodicSyncConfig 5 字段嵌套 ProvisionConfig | +15 |
+| `internal/provision/sync.go` | ParamSyncWriter 接口 + SetParamSyncWriter setter | +20 |
+| `internal/provision/sync_pathb.go` | HandleSyncResultPathB 末端调 UpdateLastParamSyncAt | +12 |
+| `cmd/app/provider/modules.go` | DI wiring：PGAdvisoryLeaderElector + PeriodicSyncer.Start + syncSvc.SetParamSyncWriter | +25 |
+| `cmd/app/etc/config.dev.yaml` | provision.periodic_sync 样例段（enabled=false 灰度） | +8 |
+| 测试 | PeriodicSyncer + LeaderElector + sync_pathb 回写 ≥ 8 testcase | +250 |
+
+**估算总改动**：~650 行（含测试），生产代码 ~400 行 / 测试 ~250 行。符合 L 工作量。
+
+### 4. 接口契约
+
+```go
+// provision/leader_elector.go
+type LeaderElector interface {
+    TryAcquire(ctx context.Context) (bool, error)
+    Release(ctx context.Context) error
+}
+
+// provision/sync.go (消费者驱动，DeviceRepository 自然满足)
+type ParamSyncWriter interface {
+    UpdateLastParamSyncAt(ctx context.Context, id uuid.UUID, at time.Time) error
+}
+
+// provision/periodic_syncer.go (消费者驱动)
+type StaleDeviceLister interface {
+    ListStaleForParamSync(ctx context.Context, threshold time.Time, limit int) ([]*model.Device, error)
+}
+
+type PathBSyncStarter interface {
+    StartPathBSync(ctx context.Context, dev *model.Device, sourceID string, opts ...PathBOption) (bool, error)
+}
+```
+
+### 5. PG advisory lock 不变量
+
+- Acquire 成功必须 hold 同一 conn 到 Release（advisory_lock session-scoped）
+- conn.Release() 归还 pool 时 PG 自动 release 锁（session 结束）— 异常退出/进程崩溃天然不残留
+- 多副本：第一个抢成功的副本成 leader 全程持；退出时 conn 归还 → 锁自动释放 → 下一副本下一 tick 成新 leader
+
+### 6. 观测埋点
+
+| 类型 | 名称 |
+|------|------|
+| log | `periodic syncer started` / `periodic syncer disabled, not starting` |
+| log | `periodic syncer: not leader, skip run` (debug) |
+| log | `periodic syncer: acquired leader` (info) |
+| log | `periodic syncer: batch enqueued` (info，device_count / duration) |
+| log | `last_param_sync_at written` (debug，成功回写) |
+| Prometheus | 推 follow-up `provision_periodic_devices_processed_total` 等 |
+
+### 7. 出口门（S2）
+
+- [x] 接口契约明确（4 narrow interfaces）
+- [x] 迁移草案 up/down 完整
+- [x] Carrier 差异点：无新增
+- [x] 观测埋点列出（5 log key）
+- [x] 待定点 0 个
+
 

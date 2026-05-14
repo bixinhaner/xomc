@@ -35,6 +35,9 @@ type Device struct {
 	UDPConnectionRequestAddress string                 `json:"udp_connection_request_address,omitempty" db:"udp_connection_request_address"`
 	LastInformAt                *time.Time             `json:"last_inform_at,omitempty" db:"last_inform_at"`
 	LastInformEvents            []string               `json:"last_inform_events,omitempty" db:"last_inform_events"`
+	// T-0124: 上一次 Path B 全量参数同步完成时刻（由 HandleSyncResultPathB 在 BatchUpsert 成功后回写，
+	// 不区分触发源 device_online / periodic / firmware_changed / manual）；PeriodicSyncer 据此找过期设备。
+	LastParamSyncAt             *time.Time             `json:"last_param_sync_at,omitempty" db:"last_param_sync_at"`
 	LastBootAt                  *time.Time             `json:"last_boot_at,omitempty" db:"last_boot_at"`
 	BootCount                   int                    `json:"boot_count" db:"boot_count"`
 	InformInterval              int                    `json:"inform_interval" db:"inform_interval"`

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
@@ -414,4 +415,35 @@ func TestSnapshotStandardPaths_BuildsMap(t *testing.T) {
 		_, ok := got[p]
 		assert.Truef(t, ok, "path %s should be in snapshot map", p)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests: T-0124 last_param_sync_at 回写口径
+// ---------------------------------------------------------------------------
+
+type fakeParamSyncWriter struct {
+	calls []paramSyncWriteCall
+	err   error
+}
+
+type paramSyncWriteCall struct {
+	deviceID uuid.UUID
+	at       time.Time
+}
+
+func (f *fakeParamSyncWriter) UpdateLastParamSyncAt(_ context.Context, id uuid.UUID, at time.Time) error {
+	f.calls = append(f.calls, paramSyncWriteCall{deviceID: id, at: at})
+	return f.err
+}
+
+func TestSetParamSyncWriter_ChainableReturnsSyncService(t *testing.T) {
+	svc := &SyncService{}
+	got := svc.SetParamSyncWriter(&fakeParamSyncWriter{})
+	assert.Same(t, svc, got, "SetParamSyncWriter 应返回 *SyncService 支持链式调用")
+}
+
+func TestSetParamSyncWriter_NilSafe(t *testing.T) {
+	svc := &SyncService{}
+	assert.NotPanics(t, func() { svc.SetParamSyncWriter(nil) }, "nil 注入应不 panic（dev/test 场景接受禁用回写）")
+	assert.Nil(t, svc.paramSyncWriter, "nil 注入后字段应为 nil")
 }

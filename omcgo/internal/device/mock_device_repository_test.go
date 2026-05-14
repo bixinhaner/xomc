@@ -116,6 +116,35 @@ func (mr *MockDeviceRepositoryMockRecorder) FindStaleDevices(ctx, threshold, lim
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FindStaleDevices", reflect.TypeOf((*MockDeviceRepository)(nil).FindStaleDevices), ctx, threshold, limit)
 }
 
+// ListStaleForParamSync mocks base method.
+func (m *MockDeviceRepository) ListStaleForParamSync(ctx context.Context, threshold time.Time, limit int) ([]*model.Device, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListStaleForParamSync", ctx, threshold, limit)
+	ret0, _ := ret[0].([]*model.Device)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListStaleForParamSync indicates an expected call of ListStaleForParamSync.
+func (mr *MockDeviceRepositoryMockRecorder) ListStaleForParamSync(ctx, threshold, limit any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListStaleForParamSync", reflect.TypeOf((*MockDeviceRepository)(nil).ListStaleForParamSync), ctx, threshold, limit)
+}
+
+// UpdateLastParamSyncAt mocks base method.
+func (m *MockDeviceRepository) UpdateLastParamSyncAt(ctx context.Context, id uuid.UUID, at time.Time) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateLastParamSyncAt", ctx, id, at)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateLastParamSyncAt indicates an expected call of UpdateLastParamSyncAt.
+func (mr *MockDeviceRepositoryMockRecorder) UpdateLastParamSyncAt(ctx, id, at any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateLastParamSyncAt", reflect.TypeOf((*MockDeviceRepository)(nil).UpdateLastParamSyncAt), ctx, id, at)
+}
+
 // ListSerialsByIDs mocks base method.
 func (m *MockDeviceRepository) ListSerialsByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
 	m.ctrl.T.Helper()

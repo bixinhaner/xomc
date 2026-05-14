@@ -191,6 +191,20 @@ func (s *SyncService) HandleSyncResultPathB(ctx context.Context, dev *model.Devi
 	// T-0127: 差异日志 — 把"之前上报、本次未上报"的 standardPath 差集写应用日志。
 	s.logPathBSyncDiff(ctx, dev, prevPaths, params)
 
+	// T-0124: 回写 last_param_sync_at（统一口径，不区分触发源）。
+	// 仅在 BatchUpsert 成功（含本次未变化时 len(params)=0 也算成功）后回写；
+	// GPV 部分失败 / 超时 / 取消时不回写，让下一轮周期或上线重试自动覆盖。
+	if s.paramSyncWriter != nil {
+		if err := s.paramSyncWriter.UpdateLastParamSyncAt(ctx, dev.ID, time.Now()); err != nil {
+			s.logger.Warn("update last_param_sync_at failed",
+				zap.String("device_id", dev.ID.String()),
+				zap.Error(err))
+		} else {
+			s.logger.Debug("last_param_sync_at written",
+				zap.String("device_id", dev.ID.String()))
+		}
+	}
+
 	return true, nil
 }
 

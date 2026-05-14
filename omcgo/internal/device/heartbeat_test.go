@@ -112,6 +112,12 @@ func (m *hbMockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]
 func (m *hbMockDeviceRepo) FindStaleDevices(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
 	return nil, nil
 }
+func (m *hbMockDeviceRepo) ListStaleForParamSync(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
+	return nil, nil
+}
+func (m *hbMockDeviceRepo) UpdateLastParamSyncAt(_ context.Context, _ uuid.UUID, _ time.Time) error {
+	return nil
+}
 func (m *hbMockDeviceRepo) ListSerialsByIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]string, error) {
 	return map[uuid.UUID]string{}, nil
 }

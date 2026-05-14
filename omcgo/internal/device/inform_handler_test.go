@@ -108,6 +108,14 @@ func (m *infMockDeviceRepo) GetGeoStats(_ context.Context, _ []string) (*GeoStat
 func (m *infMockDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]GeoDevice, error) {
 	return nil, nil
 }
+func (m *infMockDeviceRepo) ListStaleForParamSync(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
+	return nil, nil
+}
+
+func (m *infMockDeviceRepo) UpdateLastParamSyncAt(_ context.Context, _ uuid.UUID, _ time.Time) error {
+	return nil
+}
+
 func (m *infMockDeviceRepo) FindStaleDevices(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
 	return nil, nil
 }

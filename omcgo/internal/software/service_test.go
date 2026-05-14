@@ -216,6 +216,12 @@ func (m *svcMockDeviceRepo) BatchDelete(_ context.Context, _ []uuid.UUID, _ stri
 func (m *svcMockDeviceRepo) FindStaleDevices(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
 	return nil, nil
 }
+func (m *svcMockDeviceRepo) ListStaleForParamSync(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
+	return nil, nil
+}
+func (m *svcMockDeviceRepo) UpdateLastParamSyncAt(_ context.Context, _ uuid.UUID, _ time.Time) error {
+	return nil
+}
 func (m *svcMockDeviceRepo) ListSerialsByIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]string, error) {
 	return map[uuid.UUID]string{}, nil
 }

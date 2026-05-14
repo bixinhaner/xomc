@@ -156,9 +156,29 @@ func initProvisionModule(c *Container) error {
 		syncSvc := provision.NewSyncService(
 			c.ParamRepo, discoveryLogRepo, c.TaskSvc, planStore,
 			c.Cfg.Provision.AutoSync, c.Cfg.Provision.AutoSync.GPVBatchSize, logger,
-		).WithParamRegistry(c.ParamRegistry, c.ProductRegistry, true).SetRedisClient(c.Redis)
+		).WithParamRegistry(c.ParamRegistry, c.ProductRegistry, true).
+			SetRedisClient(c.Redis).
+			SetParamSyncWriter(c.DeviceRepo) // T-0124: 注入 last_param_sync_at 回写器
 		provisionEngine.SetSyncService(syncSvc)
 		logger.Info("auto-sync service enabled")
+
+		// T-0124: 周期性参数同步兜底（默认 Enabled=false 灰度）。
+		// PG advisory lock 协调多副本 leader，保证同一时刻只有一个 app 副本扫描入队。
+		if c.Cfg.Provision.PeriodicSync.Enabled {
+			leader := provision.NewPGAdvisoryLeaderElector(c.PgPool, "periodic_param_syncer", logger)
+			periodicSyncer := provision.NewPeriodicSyncer(
+				c.DeviceRepo, syncSvc, leader,
+				c.Cfg.Provision.PeriodicSync, logger,
+			)
+			go func() {
+				if err := periodicSyncer.Start(context.Background()); err != nil && err != context.Canceled {
+					logger.Warn("periodic syncer exited with error", zap.Error(err))
+				}
+			}()
+			logger.Info("periodic syncer scheduled",
+				zap.Duration("interval", c.Cfg.Provision.PeriodicSync.Interval),
+				zap.Int("batch_size", c.Cfg.Provision.PeriodicSync.BatchSize))
+		}
 	}
 
 	if err := provisionEngine.Subscribe(c.EventBus); err != nil {

@@ -130,6 +130,12 @@ func (m *fakeDeviceRepo) SearchDevices(_ context.Context, _ string, _ int) ([]Ge
 func (m *fakeDeviceRepo) FindStaleDevices(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
 	return nil, nil
 }
+func (m *fakeDeviceRepo) ListStaleForParamSync(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
+	return nil, nil
+}
+func (m *fakeDeviceRepo) UpdateLastParamSyncAt(_ context.Context, _ uuid.UUID, _ time.Time) error {
+	return nil
+}
 func (m *fakeDeviceRepo) ListSerialsByIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]string, error) {
 	return map[uuid.UUID]string{}, nil
 }

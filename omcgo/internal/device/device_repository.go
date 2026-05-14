@@ -127,6 +127,9 @@ type DeviceReader interface {
 	// FindStaleDevices finds active devices that haven't sent Inform within the threshold.
 	// Used by OfflineDetector to mark devices as offline.
 	FindStaleDevices(ctx context.Context, threshold time.Time, limit int) ([]*model.Device, error)
+	// ListStaleForParamSync 找 last_param_sync_at IS NULL 或 < threshold 的 active 设备，
+	// 供 PeriodicSyncer 按 interval 入队 Path B 同步（NULLS FIRST：从未同步过的设备优先）。
+	ListStaleForParamSync(ctx context.Context, threshold time.Time, limit int) ([]*model.Device, error)
 	// ListSerialsByIDs 按 ID 列表查 serial_number，供 service 层在批量删除/恢复
 	// 操作前后拿到受影响的 SN 列表，统一调 cache.Delete 维护 cache 一致性。
 	// 返回 map[id]sn，找不到的 ID 不在 map 中。
@@ -143,6 +146,9 @@ type DeviceWriter interface {
 	BatchDelete(ctx context.Context, ids []uuid.UUID, deletedBy string) (int64, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status model.DeviceStatus) error
 	UpdateLastInform(ctx context.Context, sn string, at time.Time, events []string) error
+	// UpdateLastParamSyncAt 回写 last_param_sync_at（HandleSyncResultPathB BatchUpsert
+	// 成功后调；不区分触发源统一口径，回写口径详见 PRD F09 §2.6）。
+	UpdateLastParamSyncAt(ctx context.Context, id uuid.UUID, at time.Time) error
 	// RecordBoot atomically increments boot_count and sets last_boot_at for the device
 	// identified by serial number. Invoked when the ACS receives a "1 BOOT" or
 	// "M Reboot" Inform. Returns the updated boot_count.
@@ -629,6 +635,7 @@ func (r *PgDeviceRepository) scanDevice(ctx context.Context, query string, args 
 
 func deviceColumns() []string {
 	// T-0098 P5-02：移除 data_model_id（列已 DROP）。
+	// T-0124：新增 last_param_sync_at（HandleSyncResultPathB 回写；PeriodicSyncer 据此找过期设备）。
 	return []string{
 		"d.id", "d.serial_number", "d.oui", "d.product_class", "d.manufacturer", "d.model_name",
 		"d.carrier", "d.technology", "d.status", "d.firmware_version",
@@ -638,6 +645,7 @@ func deviceColumns() []string {
 		"d.last_boot_at", "d.boot_count",
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
 		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at", "d.deleted_by",
+		"d.last_param_sync_at",
 	}
 }
 
@@ -664,6 +672,7 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 		&d.LastBootAt, &d.BootCount,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
+		&d.LastParamSyncAt,
 	)
 	if err != nil {
 		return nil, err
@@ -735,6 +744,7 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 		&d.LastBootAt, &d.BootCount,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
+		&d.LastParamSyncAt,
 	)
 
 	if deletedBy != nil {
@@ -1305,6 +1315,60 @@ func (r *PgDeviceRepository) PermanentDelete(ctx context.Context, ids []uuid.UUI
 	}
 
 	return tag.RowsAffected(), nil
+}
+
+// ListStaleForParamSync finds active devices whose last_param_sync_at IS NULL or < threshold.
+// Used by PeriodicSyncer (T-0124) to enqueue Path B sync per device.
+// NULLS FIRST ensures devices that have never been synced are prioritized.
+func (r *PgDeviceRepository) ListStaleForParamSync(ctx context.Context, threshold time.Time, limit int) ([]*model.Device, error) {
+	builder := storage.Psql.Select(deviceColumns()...).
+		From("devices d").
+		Where(sq.Eq{"d.status": model.DeviceActive}).
+		Where(sq.Or{
+			sq.Eq{"d.last_param_sync_at": nil},
+			sq.Lt{"d.last_param_sync_at": threshold},
+		}).
+		Where(notDeleted).
+		OrderBy("d.last_param_sync_at ASC NULLS FIRST").
+		Limit(uint64(limit))
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list stale param sync devices query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list stale param sync devices: %w", err)
+	}
+	defer rows.Close()
+
+	var devices []*model.Device
+	for rows.Next() {
+		d, err := scanDeviceRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan stale param sync device: %w", err)
+		}
+		devices = append(devices, d)
+	}
+	return devices, nil
+}
+
+// UpdateLastParamSyncAt 单列更新 — 由 HandleSyncResultPathB BatchUpsert 成功后调用。
+// 不区分触发源（device_online / periodic / firmware_changed / manual）统一回写口径。
+func (r *PgDeviceRepository) UpdateLastParamSyncAt(ctx context.Context, id uuid.UUID, at time.Time) error {
+	query, args, err := storage.Psql.Update("devices").
+		Set("last_param_sync_at", at).
+		Where(sq.Eq{"id": id}).
+		Where(sq.Eq{"deleted_at": nil}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update last_param_sync_at query: %w", err)
+	}
+	if _, err := r.pool.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("update last_param_sync_at: %w", err)
+	}
+	return nil
 }
 
 // FindStaleDevices finds active devices that haven't sent Inform within the threshold.
