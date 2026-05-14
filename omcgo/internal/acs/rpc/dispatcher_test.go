@@ -23,9 +23,10 @@ func TestNewDispatcher_AllHandlersRegistered(t *testing.T) {
 		"FactoryReset",
 		"GetParameterAttributes",
 		"SetParameterAttributes",
+		"GetRPCMethods",
 	}
 
-	assert.Len(t, d.handlers, 11)
+	assert.Len(t, d.handlers, 12)
 	for _, method := range expectedMethods {
 		_, ok := d.handlers[method]
 		assert.True(t, ok, "handler missing for %s", method)
@@ -146,6 +147,28 @@ func TestFactoryResetHandler(t *testing.T) {
 	require.NoError(t, err)
 	body := string(result)
 	assert.Contains(t, body, "cwmp:FactoryReset")
+}
+
+// TestGetRPCMethodsHandler verifies the TR-069 §A.3.1.2 GetRPCMethods RPC
+// renders as an empty <cwmp:GetRPCMethods/> tag with the cwmp:ID header.
+// Triggered from ops side by action="get_rpc_methods" (T-0102-c map).
+func TestGetRPCMethodsHandler(t *testing.T) {
+	d := NewDispatcher()
+	cmd := &Command{
+		Method:     "GetRPCMethods",
+		CommandKey: "rpc-methods-key-1", // CommandKey 不用于此 RPC，但 schema 上保留
+		Params:     json.RawMessage(`{}`),
+	}
+
+	result, err := d.BuildRequest(cmd, "cwmp-id-grpcm")
+
+	require.NoError(t, err)
+	body := string(result)
+	assert.Contains(t, body, "<cwmp:GetRPCMethods/>")
+	// cwmp:ID 走 SOAP Header 注入
+	assert.Contains(t, body, "cwmp-id-grpcm")
+	// 不应有任何 body 内 child element（empty self-closing tag）
+	assert.NotContains(t, body, "</cwmp:GetRPCMethods>")
 }
 
 func TestDownloadHandler(t *testing.T) {

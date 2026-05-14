@@ -416,15 +416,18 @@ func initMiscModules(c *Container) error {
 		// 本进程的 bridge 订阅后驱动 ResultAggregator 更新 mml_tasks 统计并推送 SSE。
 		aggregator := mml.NewResultAggregator(mmlTaskRepo, mmlScriptRepo, messageHub, logger)
 		if c.EventBus != nil {
-			completionRouter := task.NewCompletionRouter(logger)
-			completionRouter.Register(task.TaskSourceMML, aggregator)
-			completionRouter.Register(task.TaskSourceMML, sequencer) // Sprint B Q-V3-3
+			// 注：completionRouter 通过 miscDeps 持有，方便 ops 模块（在本块之后初始化）
+			// 也注册自己的 TaskSourceOps 聚合器。CompletionRouter.Register 是 mutex-safe，
+			// 允许 bridge.Subscribe 之后再追加 handler — 启动序无 race（pre-traffic 阶段）。
+			c.miscDeps.completionRouter = task.NewCompletionRouter(logger)
+			c.miscDeps.completionRouter.Register(task.TaskSourceMML, aggregator)
+			c.miscDeps.completionRouter.Register(task.TaskSourceMML, sequencer) // Sprint B Q-V3-3
 			// D2 修复：provision 创建的 device_task（GPV / Upload / SPV / Reboot）source=system，
 			// 失败时由 ProvisioningEngine 回查 source_id（=ProvisioningTask.id）联动 fail。
 			if c.miscDeps.provisionEngine != nil {
-				completionRouter.Register(task.TaskSourceSystem, c.miscDeps.provisionEngine)
+				c.miscDeps.completionRouter.Register(task.TaskSourceSystem, c.miscDeps.provisionEngine)
 			}
-			bridge := task.NewCompletionEventBridge(logger, completionRouter, c.Deduper)
+			bridge := task.NewCompletionEventBridge(logger, c.miscDeps.completionRouter, c.Deduper)
 			if err := bridge.Subscribe(c.EventBus); err != nil {
 				logger.Warn("subscribe task completion bridge", zap.Error(err))
 			}
@@ -578,6 +581,26 @@ func initMiscModules(c *Container) error {
 		opsExecutor, opsApprovalSvc, opsBGSvc, opsInspectionSvc,
 		opsSvc, opsSSEHub, logger,
 	)
+
+	// T-0102 残债 2 / B′：completion ACS→ops 桥。
+	// 当 device_task (source=ops) 进入终态时，更新 ops_task_executions 行 +
+	// 发 SSE command.completed / command.failed 事件，闭合入队侧 SSE 通路
+	// (publishDispatchEvent → publishCompletionEvent)。
+	// 与 MML 模块的 ResultAggregator 共享同一个 CompletionRouter，
+	// router.Register 是 mutex-safe 允许 bridge.Subscribe 之后再追加。
+	if c.miscDeps.taskSvc != nil {
+		opsAggregator := ops.NewResultAggregator(opsExecRepo, opsSSEHub, logger)
+		if c.miscDeps.completionRouter != nil {
+			// 多进程：NATS bridge 路由
+			c.miscDeps.completionRouter.Register(task.TaskSourceOps, opsAggregator)
+			logger.Info("ops completion aggregator registered to CompletionRouter (multi-process)")
+		} else {
+			// 单进程：直接挂到 taskSvc completion callback
+			c.miscDeps.taskSvc.AddCompletionCallback(opsAggregator)
+			logger.Info("ops completion aggregator registered to taskSvc (single-process)")
+		}
+	}
+
 	logger.Info("ops tools module initialized (incl. F06 ext T-0101..T-0112)")
 
 	// Report module
@@ -668,8 +691,9 @@ type miscDeps struct {
 	provisionEngine *provision.ProvisioningEngine
 
 	// Task
-	taskHandler *task.Handler
-	taskSvc     *task.TaskService
+	taskHandler      *task.Handler
+	taskSvc          *task.TaskService
+	completionRouter *task.CompletionRouter // 由 MML 模块创建；ops 模块在自己 init 时也注册
 
 	// Backup
 	backupHandler       *backup.Handler

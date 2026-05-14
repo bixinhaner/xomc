@@ -24,6 +24,7 @@ var (
 	AutonomousTransferCompleteRespTmpl    *template.Template
 	GetParameterAttributesTmpl            *template.Template
 	SetParameterAttributesTmpl            *template.Template
+	GetRPCMethodsTmpl                     *template.Template
 )
 
 func init() {
@@ -43,6 +44,7 @@ func init() {
 	AutonomousTransferCompleteRespTmpl = template.Must(template.New("AutonomousTransferCompleteResponse").Parse(autonomousTransferCompleteResponseXML))
 	GetParameterAttributesTmpl = template.Must(template.New("GetParameterAttributes").Parse(getParameterAttributesXML))
 	SetParameterAttributesTmpl = template.Must(template.New("SetParameterAttributes").Parse(setParameterAttributesXML))
+	GetRPCMethodsTmpl = template.Must(template.New("GetRPCMethods").Parse(getRPCMethodsXML))
 }
 
 // RenderResponse executes a SOAP template with the given data and returns the XML bytes.
@@ -178,6 +180,14 @@ type FactoryResetData struct {
 	NoMoreRequests int // 0=more requests coming, 1=last request
 }
 
+// GetRPCMethodsData contains data for GetRPCMethods template.
+// TR-069 §A.3.1.2: ACS 询问 CPE 支持的 RPC 方法列表，请求体仅含空标签
+// `<cwmp:GetRPCMethods/>`，无任何参数。
+type GetRPCMethodsData struct {
+	ID             string
+	NoMoreRequests int // 0=more requests coming, 1=last request
+}
+
 type SetParameterAttributeData struct {
 	Name               string
 	NotificationChange bool
@@ -277,6 +287,11 @@ const rebootXML = soapEnvelopeOpen +
 
 const factoryResetXML = soapEnvelopeOpen +
 	`<cwmp:FactoryReset/>` + soapEnvelopeClose
+
+// TR-069 §A.3.1.2 GetRPCMethods 请求：空标签，无参数；
+// 响应由 CPE 返回 supported methods 列表（由 ACS 的 inform/response 处理回路读取）。
+const getRPCMethodsXML = soapEnvelopeOpen +
+	`<cwmp:GetRPCMethods/>` + soapEnvelopeClose
 
 const scheduleInformXML = soapEnvelopeOpen +
 	`<cwmp:ScheduleInform>` +

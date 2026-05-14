@@ -53,6 +53,7 @@ func NewDispatcher(cfgs ...DispatcherConfig) *Dispatcher {
 	d.Register("FactoryReset", &FactoryResetHandler{})
 	d.Register("GetParameterAttributes", &GetParameterAttributesHandler{})
 	d.Register("SetParameterAttributes", &SetParameterAttributesHandler{})
+	d.Register("GetRPCMethods", &GetRPCMethodsHandler{})
 
 	return d
 }
@@ -228,6 +229,19 @@ type FactoryResetHandler struct{}
 func (h *FactoryResetHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	data := soap.FactoryResetData{ID: cmd.CWMPID}
 	return soap.RenderResponse(soap.FactoryResetTmpl, data)
+}
+
+// GetRPCMethodsHandler 处理 GetRPCMethods RPC（TR-069 §A.3.1.2）。
+// ACS 询问 CPE 支持的 RPC 方法列表 — 请求体仅 <cwmp:GetRPCMethods/> 空标签，
+// 无 params；与 FactoryReset 同样的最小骨架。
+//
+// 由 ops 的 action="get_rpc_methods" 触发（T-0102-c actionToRPCMethod 映射），
+// 用于运维侧探测设备实际支持哪些 RPC 方法，便于排查协议兼容性。
+type GetRPCMethodsHandler struct{}
+
+func (h *GetRPCMethodsHandler) BuildRequest(cmd *Command) ([]byte, error) {
+	data := soap.GetRPCMethodsData{ID: cmd.CWMPID}
+	return soap.RenderResponse(soap.GetRPCMethodsTmpl, data)
 }
 
 type GetParameterAttributesHandler struct{}
