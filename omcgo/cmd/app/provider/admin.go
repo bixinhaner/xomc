@@ -39,6 +39,11 @@ func initAdminModule(c *Container) error {
 
 	captchaService := admin.NewCaptchaService(c.Redis)
 	loginGuard := admin.NewLoginGuard(c.Redis)
+	// 让 LoginGuard 从 sys_configs (category='security') 读 sumTimes / unlockMinu
+	// 替代硬编码常量；30s in-memory cache，FE 改配置后最多等 30s 生效。
+	// sysConfigRepo 在下方 System config module 里也用 — 这里直接复用一份。
+	sysConfigRepoForGuard := admin.NewPgSysConfigRepository(c.PgPool)
+	loginGuard.SetSysConfigQuerier(sysConfigRepoForGuard)
 	adminHandler.SetCaptchaService(captchaService)
 	adminHandler.SetLoginGuard(loginGuard)
 	adminHandler.SetRoleDeviceGroupRepo(roleRepo)

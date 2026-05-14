@@ -121,7 +121,8 @@
       "Bash(bash -n scripts/diag_mml_orphan_codes.sh)",
       "Bash(bash scripts/diag_mml_orphan_codes.sh --help)",
       "Bash(bash scripts/diag_mml_orphan_codes.sh)",
-      "Bash(awk 'NR>=95 && NR<=240' webcode/src/components/Layout/Header/Header.module.css)"
+      "Bash(awk 'NR>=95 && NR<=240' webcode/src/components/Layout/Header/Header.module.css)",
+      "Bash(awk '/=== RUN   TestRequireResourcePermission_MapsMethodToAction$/,/^FAIL|^ok/')"
     ],
     "deny": [
       "Bash(git push -f)",

@@ -128,8 +128,12 @@ func (h *Handler) Login(c *gin.Context) {
 
 		if h.loginGuard != nil {
 			count, _ := h.loginGuard.RecordFailure(ctx, req.Username)
-			if h.loginGuard.ShouldLock(count) {
-				h.service.LockUserByUsername(ctx, req.Username, h.loginGuard.LockDuration())
+			// 阈值与锁定时长从 sys_configs (category='security') 读：
+			//   sumTimes   → ShouldLock 阈值
+			//   unlockMinu → LockDuration（分钟）
+			// 读失败或未注入 SysConfigQuerier 时 LoginGuard 内部退化到 default 常量。
+			if h.loginGuard.ShouldLock(ctx, count) {
+				h.service.LockUserByUsername(ctx, req.Username, h.loginGuard.LockDuration(ctx))
 				log.Warn("account auto-locked due to brute force",
 					zap.String("username", req.Username),
 					zap.Int64("failed_count", count),
