@@ -273,8 +273,6 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0080 | migration 000038 重复 hotfix（rename `000038_upgrade_tasks_firmware_id_nullable.sql` → `000049_*.sql` 让 goose 可解析；pre-existing 历史遗留，T-0072 review-agent 发现）| fix | infra/migration | P0 | done | Claude | S | — | CLAUDE.md §5.5 / T-0072 review finding | sprint-07 | 2026-04-29 |
 | T-0027 | 拓扑自动分组规则引擎激活（三路径全闭环：手工 ApplyRule + cron @hourly + device.registered EventBus；A4 SQL 守护；6 metric + 7 log key + FE 来源列；R-104 关闭）| feat | F06/topology | P1 | done | Claude | M | — | R-104 关闭 / `prd/F06-topology-auto-grouping.md` / `docs/review-report/20260506/verify-T-0027.md` | sprint-09 | 2026-05-06 |
 | T-0100-P0 | license_logs 表迁移 + LogWriter + 5 处写入点接入（handler import/activate/revoke + enforcer EnforceCapacity/Expiry + monitor capacity/expiry/auto_expire）— umbrella T-0100 子任务（详 §4.2） | feat | F06/license | P1 | done | Claude | M | T-0015 ✅ | R-109 关闭 / `prd/F06-license.md` §6.2 §9.3 | wave-3-finishing | 2026-05-09 |
-| T-0123 | F09 参数同步触发链 — device.online 事件 + firmware 二选一挡板 + Provision 订阅 + Redis token bucket（**含 T-0127 合并** Path B 差异日志，共享 Path B 测试场景）| feat | F09+F06/device | P1 | planned | Claude | S | — | `prd/F09-param-sync-trigger-chain.md` §1+§5 | sprint-11 (stretch) | 2026-05-14 |
-| T-0127 | F09 Path B 同步差异日志（跨 §1/§2/§3/§4 触发源共用）— **MERGED INTO T-0123**（同笔 commit 同时关闭，避免重复跑同一组测试）| feat | F09 | P1 | planned | Claude | S | — | `prd/F09-param-sync-trigger-chain.md` §5 | sprint-11 (stretch) | 2026-05-14 |
 
 **说明**：
 - T-0009 是外部凭据申请，不编码但走流水线（作为前置项，保证 T-0014 不被卡）。
