@@ -1,4 +1,4 @@
-import type { Domain, Site, TopoNode, TopoEdge } from '../../types/topology';
+import type { Domain, Site, TopoNode, TopoEdge, TopoStatistics, TopoGraph } from '../../types/topology';
 import { mockDomains, mockSites, mockTopoNodes, mockTopoEdges } from '../data/topology';
 import { delay } from '../utils';
 
@@ -46,11 +46,29 @@ export const topologyService = {
     return mockTopoEdges;
   },
 
-  async getTopoGraph(): Promise<{ nodes: TopoNode[]; edges: TopoEdge[] }> {
+  async getTopoGraph(): Promise<TopoGraph> {
     await delay(100, 200);
+    // Calculate mock statistics
+    const nodeTypeCounts: Record<string, number> = {};
+    mockTopoNodes.forEach((n) => {
+      nodeTypeCounts[n.type] = (nodeTypeCounts[n.type] || 0) + 1;
+    });
+    const statistics: TopoStatistics = {
+      totalNodes: mockTopoNodes.length,
+      onlineNodes: mockTopoNodes.filter((n) => n.status === 'online').length,
+      offlineNodes: mockTopoNodes.filter((n) => n.status === 'offline').length,
+      alarmNodes: mockTopoNodes.filter((n) => n.status === 'alarm').length,
+      maintenanceNodes: mockTopoNodes.filter((n) => n.status === 'maintenance').length,
+      totalEdges: mockTopoEdges.length,
+      activeEdges: mockTopoEdges.filter((e) => e.status === 'active').length,
+      inactiveEdges: mockTopoEdges.filter((e) => e.status === 'inactive').length,
+      degradedEdges: mockTopoEdges.filter((e) => e.status === 'degraded').length,
+      nodeTypeCounts: nodeTypeCounts,
+    };
     return {
       nodes: mockTopoNodes,
       edges: mockTopoEdges,
+      statistics,
     };
   },
 

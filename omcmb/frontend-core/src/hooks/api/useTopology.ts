@@ -81,12 +81,12 @@ export function useTopoEdges(params?: {
   });
 }
 
-export function useTopoGraph(params?: { domainId?: string }) {
+export function useTopoGraph(params?: { domainId?: string; layoutType?: string; nodeType?: NodeType; status?: NodeStatus }) {
   return useQuery({
     queryKey: ['topology', 'graph', params],
     queryFn: () =>
       useMock ? topologyService.getTopoGraph() : topologyApi.getTopoGraph(params),
-    refetchInterval: 30000,
+    refetchInterval: 60000, // 降低到 60 秒，减少服务端压力
   });
 }
 

@@ -43,3 +43,22 @@ export interface TopoEdge {
   label?: string;
   status: EdgeStatus;
 }
+
+export interface TopoStatistics {
+  totalNodes: number;
+  onlineNodes: number;
+  offlineNodes: number;
+  alarmNodes: number;
+  maintenanceNodes: number;
+  totalEdges: number;
+  activeEdges: number;
+  inactiveEdges: number;
+  degradedEdges: number;
+  nodeTypeCounts: Record<string, number>;
+}
+
+export interface TopoGraph {
+  nodes: TopoNode[];
+  edges: TopoEdge[];
+  statistics?: TopoStatistics;
+}

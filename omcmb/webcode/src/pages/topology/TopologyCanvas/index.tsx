@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Button, Input, List, Select, Space, Tag, Tooltip, Typography, message } from 'antd';
+import { useState, useEffect } from 'react';
+import { Button, Card, Col, Input, List, Row, Select, Space, Statistic, Tag, Tooltip, Typography, message } from 'antd';
 import {
   SearchOutlined,
   ZoomInOutlined,
@@ -13,7 +13,7 @@ import {
 import MapPageLayout from '@/components/Layout/MapPageLayout';
 import TopologyCanvas from '@/components/TopologyCanvas';
 import { useTopoGraph } from '@core/hooks/api/useTopology';
-import type { TopoNode } from '@core/types/topology';
+import type { TopoNode, TopoStatistics, NodeType, NodeStatus } from '@core/types/topology';
 import { useT } from '@/hooks/useT';
 
 const LAYOUT_OPTIONS_KEYS = [
@@ -51,23 +51,36 @@ export default function TopologyCanvasPage() {
   const [showLabels, setShowLabels] = useState(true);
   const [_zoomLevel, setZoomLevel] = useState(1);
 
-  const { data: graphData, refetch } = useTopoGraph();
+  // 使用服务端筛选：将 nodeType 和 status 传递给 API
+  const { data: graphData, refetch } = useTopoGraph({
+    layoutType,
+    nodeType: nodeTypeFilter as NodeType,
+    status: statusFilter as NodeStatus,
+  });
 
   const nodes = graphData?.nodes ?? [];
   const edges = graphData?.edges ?? [];
+  const statistics = graphData?.statistics;
 
+  // 搜索仍在客户端进行（支持按标签或设备序列号搜索）
   const filteredNodes = nodes.filter((n) => {
     const matchSearch = !searchValue || n.label.includes(searchValue) || (n.deviceSn ?? '').includes(searchValue);
-    const matchType = !nodeTypeFilter || n.type === nodeTypeFilter;
-    const matchStatus = !statusFilter || n.status === statusFilter;
-    return matchSearch && matchType && matchStatus;
+    return matchSearch;
   });
 
   const filteredEdges = edges.filter((e) =>
     filteredNodes.some((n) => n.id === e.source) && filteredNodes.some((n) => n.id === e.target),
   );
 
+  // 获取所有节点类型（用于筛选器选项）
   const nodeTypes = [...new Set(nodes.map((n) => n.type))];
+
+  // 数据量警告提示
+  useEffect(() => {
+    if (nodes.length > 1000) {
+      void message.warning(t('topology.largeDataWarning') || `当前加载 ${nodes.length} 个节点，建议使用筛选功能优化显示`);
+    }
+  }, [nodes.length, t]);
 
   const leftPanel = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -94,7 +107,7 @@ export default function TopologyCanvasPage() {
           allowClear
           value={nodeTypeFilter || undefined}
           onChange={(val) => setNodeTypeFilter(val ?? '')}
-          options={nodeTypes.map((t) => ({ label: t, value: t }))}
+          options={nodeTypes.map((type) => ({ label: type, value: type }))}
         />
         <Select
           size="small"
@@ -155,8 +168,67 @@ export default function TopologyCanvasPage() {
 
   return (
     <MapPageLayout panel={leftPanel} defaultPanelWidth={280}>
-      <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-        <TopologyCanvas
+      <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
+        {/* Statistics Panel */}
+        {statistics && (
+          <Card
+            size="small"
+            style={{
+              margin: '0 0 12px 0',
+              borderRadius: 8,
+              boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+            }}
+            bodyStyle={{ padding: '12px 16px' }}
+          >
+            <Row gutter={16}>
+              <Col span={6}>
+                <Statistic
+                  title={<span style={{ fontSize: 12, color: '#8c8c8c' }}>{t('topology.stats.totalNodes')}</span>}
+                  value={statistics.totalNodes}
+                  valueStyle={{ fontSize: 20, fontWeight: 600, color: '#1890ff' }}
+                />
+              </Col>
+              <Col span={6}>
+                <Statistic
+                  title={<span style={{ fontSize: 12, color: '#8c8c8c' }}>{t('topology.stats.onlineNodes')}</span>}
+                  value={statistics.onlineNodes}
+                  valueStyle={{ fontSize: 20, fontWeight: 600, color: '#52c41a' }}
+                  suffix={`/ ${statistics.totalNodes}`}
+                />
+              </Col>
+              <Col span={6}>
+                <Statistic
+                  title={<span style={{ fontSize: 12, color: '#8c8c8c' }}>{t('topology.stats.totalEdges')}</span>}
+                  value={statistics.totalEdges}
+                  valueStyle={{ fontSize: 20, fontWeight: 600, color: '#722ed1' }}
+                />
+              </Col>
+              <Col span={6}>
+                <Statistic
+                  title={<span style={{ fontSize: 12, color: '#8c8c8c' }}>{t('topology.stats.activeEdges')}</span>}
+                  value={statistics.activeEdges}
+                  valueStyle={{ fontSize: 20, fontWeight: 600, color: '#13c2c2' }}
+                  suffix={`/ ${statistics.totalEdges}`}
+                />
+              </Col>
+            </Row>
+            {/* Node type breakdown */}
+            {statistics.nodeTypeCounts && Object.keys(statistics.nodeTypeCounts).length > 0 && (
+              <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #f0f0f0' }}>
+                <Typography.Text style={{ fontSize: 11, color: '#8c8c8c', marginRight: 8 }}>
+                  {t('topology.stats.nodeTypeBreakdown')}:
+                </Typography.Text>
+                {Object.entries(statistics.nodeTypeCounts).map(([type, count]) => (
+                  <Tag key={type} color={NODE_TYPE_COLORS[type] ?? 'default'} style={{ fontSize: 10, marginBottom: 2 }}>
+                    {type}: {count}
+                  </Tag>
+                ))}
+              </div>
+            )}
+          </Card>
+        )}
+        <div style={{ flex: 1, position: 'relative' }}>
+          <TopologyCanvas
           nodes={filteredNodes}
           edges={filteredEdges}
           height="100%"
@@ -228,7 +300,7 @@ export default function TopologyCanvasPage() {
           }}
         >
           <PartitionOutlined style={{ fontSize: 12, color: '#8c8c8c' }} />
-          <Typography.Text style={{ fontSize: 12 }}>{t('table.type')}:</Typography.Text>
+          <Typography.Text style={{ fontSize: 12 }}>{t('topology.settings.layoutAlgorithm')}:</Typography.Text>
           <Space size={4}>
             {LAYOUT_OPTIONS_KEYS.map((opt) => (
               <Button
@@ -240,10 +312,11 @@ export default function TopologyCanvasPage() {
                 }}
                 style={{ fontSize: 11 }}
               >
-                {opt.value}
+                {t(opt.labelKey)}
               </Button>
             ))}
           </Space>
+        </div>
         </div>
       </div>
     </MapPageLayout>

@@ -1,5 +1,5 @@
 import http from '../http';
-import type { Domain, DomainLevel, Site, TopoNode, TopoEdge, NodeType, NodeStatus, SiteStatus, EdgeStatus } from '../../types/topology';
+import type { Domain, DomainLevel, Site, TopoNode, TopoEdge, NodeType, NodeStatus, SiteStatus, EdgeStatus, TopoStatistics, TopoGraph } from '../../types/topology';
 import type { PageResponse } from '../../types/pagination';
 import type {
   DeviceGeo,
@@ -104,6 +104,35 @@ function mapBackendTopoEdge(be: BackendTopoEdge): TopoEdge {
     target: be.target_id,
     label: be.label || undefined,
     status: be.status,
+  };
+}
+
+// Backend topology statistics model (snake_case from Go)
+interface BackendTopoStatistics {
+  total_nodes: number;
+  online_nodes: number;
+  offline_nodes: number;
+  alarm_nodes: number;
+  maintenance_nodes: number;
+  total_edges: number;
+  active_edges: number;
+  inactive_edges: number;
+  degraded_edges: number;
+  node_type_counts: Record<string, number>;
+}
+
+function mapBackendTopoStatistics(bs: BackendTopoStatistics): TopoStatistics {
+  return {
+    totalNodes: bs.total_nodes,
+    onlineNodes: bs.online_nodes,
+    offlineNodes: bs.offline_nodes,
+    alarmNodes: bs.alarm_nodes,
+    maintenanceNodes: bs.maintenance_nodes,
+    totalEdges: bs.total_edges,
+    activeEdges: bs.active_edges,
+    inactiveEdges: bs.inactive_edges,
+    degradedEdges: bs.degraded_edges,
+    nodeTypeCounts: bs.node_type_counts,
   };
 }
 
@@ -265,13 +294,19 @@ export const topologyApi = {
     };
   },
 
-  async getTopoGraph(params?: { domainId?: string }): Promise<{ nodes: TopoNode[]; edges: TopoEdge[] }> {
-    const { data } = await http.get<{ nodes: BackendTopoNode[]; edges: BackendTopoEdge[] }>('/topology/graph', {
-      params: { domain_id: params?.domainId },
+  async getTopoGraph(params?: { domainId?: string; layoutType?: string; nodeType?: NodeType; status?: NodeStatus }): Promise<{ nodes: TopoNode[]; edges: TopoEdge[]; statistics?: TopoStatistics }> {
+    const { data } = await http.get<{ nodes: BackendTopoNode[]; edges: BackendTopoEdge[]; statistics?: BackendTopoStatistics }>('/topology/graph', {
+      params: {
+        domain_id: params?.domainId,
+        layout_type: params?.layoutType,
+        node_type: params?.nodeType,
+        status: params?.status,
+      },
     });
     return {
       nodes: (data.nodes || []).map(mapBackendTopoNode),
       edges: (data.edges || []).map(mapBackendTopoEdge),
+      statistics: data.statistics ? mapBackendTopoStatistics(data.statistics) : undefined,
     };
   },
 
