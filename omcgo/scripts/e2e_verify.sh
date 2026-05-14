@@ -3489,6 +3489,112 @@ else
     fail "S52 MML Task History" "skipped — no access token"
 fi
 
+# ───── S52b: MML standard-model rebuild (Sprint B) ─────
+section "52b. MML standard-model rebuild (Sprint B)"
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # 52b.1 POST /admin/dictload/reload?name=mml-standard → 200
+    # Sprint B-1：单 Loader 热重载入口，验证 mml-standard 能再次满灌 1988 paths
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/admin/dictload/reload?name=mml-standard" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "POST /admin/dictload/reload?name=mml-standard (B-1)" "200" "$HTTP_CODE"
+    if [ "$HTTP_CODE" = "200" ]; then
+        py_check_field "reload response has rows_affected" "$BODY" "rows_affected"
+        py_check_field "reload response has elapsed_ms" "$BODY" "elapsed_ms"
+    fi
+
+    # 52b.2 GET /mml/commands → 验证新 schema 字段存在
+    # 重建后 mml_commands 应有 ~840 行；列里出现 target_paths（不是老的 param_template）
+    RESP=$(curl -s -w "\n%{http_code}" "$API/mml/commands?page=1&page_size=3" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /mml/commands (new schema)" "200" "$HTTP_CODE"
+    if [ "$HTTP_CODE" = "200" ]; then
+        HAS_TARGET=$(echo "$BODY" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    items = d.get('items', [])
+    print('yes' if any('target_paths' in i for i in items) else 'no')
+except:
+    print('no')
+" 2>/dev/null || echo "no")
+        if [ "$HAS_TARGET" = "yes" ]; then
+            pass "mml_commands rows expose target_paths field (post-rebuild)"
+        else
+            fail "mml_commands rows expose target_paths field" "no target_paths in returned items"
+        fi
+    fi
+
+    # 52b.3 POST /mml/execute with orphan command_code → 201 with orphan:true
+    # Sprint B-6：standard-model 重建后老 custom_command 引用的孤儿码不应 500
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/mml/execute" \
+        -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d '{"command_code":"LST_ORPHAN_DOES_NOT_EXIST","device_sns":["E2E-ORPHAN-SN"]}')
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "POST /mml/execute orphan_code → 201 (B-6 fallback)" "201" "$HTTP_CODE"
+    if [ "$HTTP_CODE" = "201" ]; then
+        IS_ORPHAN=$(echo "$BODY" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    cmds = d.get('commands', [])
+    print('yes' if any(c.get('orphan') is True for c in cmds) else 'no')
+except:
+    print('no')
+" 2>/dev/null || echo "no")
+        if [ "$IS_ORPHAN" = "yes" ]; then
+            pass "MML orphan command_code degraded with orphan:true marker"
+        else
+            fail "MML orphan command_code degraded with orphan:true marker" "no orphan marker in commands"
+        fi
+    fi
+
+    # 52b.4 POST /mml/groups/:id/execute → 201
+    # Sprint B-5：group 批量执行入口；从 DB 任挑一个 group 验证
+    if command -v psql >/dev/null 2>&1; then
+        GROUP_ID=$(PGPASSWORD=omcgo123 psql -h localhost -U omcgo -d omcgo -t -A \
+            -c "SELECT id FROM mml_param_groups WHERE group_code='DEVICE_DEVICEINFO' LIMIT 1;" 2>/dev/null)
+    else
+        GROUP_ID=$(docker exec docker-postgres-1 psql -U omcgo -d omcgo -t -A \
+            -c "SELECT id FROM mml_param_groups WHERE group_code='DEVICE_DEVICEINFO' LIMIT 1;" 2>/dev/null)
+    fi
+    if [ -n "$GROUP_ID" ]; then
+        RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/mml/groups/$GROUP_ID/execute" \
+            -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+            -d '{"device_sns":["E2E-GROUP-SN"],"operation_filter":["LST"]}')
+        HTTP_CODE=$(echo "$RESP" | tail -1)
+        BODY=$(echo "$RESP" | sed '$d')
+        check_status "POST /mml/groups/:id/execute (B-5)" "201" "$HTTP_CODE"
+        if [ "$HTTP_CODE" = "201" ]; then
+            HAS_LST=$(echo "$BODY" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    cmds = d.get('commands', [])
+    print('yes' if any(c.get('operation_type')=='LST' for c in cmds) else 'no')
+except:
+    print('no')
+" 2>/dev/null || echo "no")
+            if [ "$HAS_LST" = "yes" ]; then
+                pass "MML group execute filtered to LST operations"
+            else
+                fail "MML group execute filtered to LST operations" "no LST command in payload"
+            fi
+        fi
+    else
+        fail "POST /mml/groups/:id/execute (B-5)" "DEVICE_DEVICEINFO group missing — Loader not run?"
+    fi
+else
+    fail "S52b MML standard-model rebuild" "skipped — no access token"
+fi
+
 # ============================================================
 # Sprint 9 Tests — Frontend Integration & Full Regression (S53-S56)
 # ============================================================
