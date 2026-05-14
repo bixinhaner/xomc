@@ -12,6 +12,7 @@ import {
   Select,
   Space,
   Switch,
+  Tooltip,
   TreeSelect,
   Radio,
 } from 'antd';
@@ -25,6 +26,7 @@ import {
   PlusOutlined,
   MoreOutlined,
   DeleteOutlined,
+  ExclamationCircleOutlined,
 } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
@@ -502,20 +504,21 @@ export default function MenuManagement() {
       key: 'icon',
       title: '图标',
       dataIndex: 'icon',
-      width: 100,
+      width: 60,
       render: (val: string | undefined) => {
         if (!val) return <span style={{ color: 'var(--color-text-secondary)' }}>-</span>;
         const Icon = resolveIcon(val);
         // Icon === null：DB 写了 icon 名但不在 IconPicker 白名单（历史脏数据）；
-        // 显示 icon 名让运营能立刻定位需要 fixup 的项。
-        return Icon ? (
-          <Space size={4}>
-            <Icon style={{ fontSize: 16 }} />
-            <span style={{ color: 'var(--color-text-secondary)', fontSize: 12 }}>{val}</span>
-          </Space>
-        ) : (
-          <span style={{ color: 'var(--color-error)', fontSize: 12 }}>{val}（未在白名单）</span>
-        );
+        // 视觉上仍只渲染一个图标（与"只显示图标"一致），通过 Tooltip 暴露原始
+        // icon 名给运营定位 fixup 项。
+        if (!Icon) {
+          return (
+            <Tooltip title={`${val}（未在白名单）`}>
+              <ExclamationCircleOutlined style={{ color: 'var(--color-error)', fontSize: 16 }} />
+            </Tooltip>
+          );
+        }
+        return <Icon style={{ fontSize: 16 }} />;
       },
     },
     {
