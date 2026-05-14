@@ -1,6 +1,21 @@
 import http from '../http';
 import type { MMLCommand, MMLScript, MMLTask, MMLParam, MMLCustomCommand, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef } from '../../types/mml';
 import type { PageRequest, PageResponse } from '../../types/pagination';
+import type {
+  BackendStatement,
+  BackendGroupTreeNode,
+  BackendSubField,
+  BackendParseError,
+  GroupTreeNode,
+  GroupTreeCommand,
+  SubFieldDef,
+  Statement,
+  ParseError,
+  RenderRequest,
+  ParseRequest,
+  ParseResponse,
+  ExecuteStatementsRequest,
+} from '../../types/mmlConsole';
 
 // ---------------------------------------------------------------------------
 // Backend response types  (snake_case, matching omcgo/internal/omcr/mml/model.go)
@@ -814,4 +829,172 @@ export const mmlApi = {
     );
     return mapBackendCustomCommand(data);
   },
+
+  // --- T-0123-P2 Console 5 端点 ---
+
+  /** GET /mml/group-tree?root=&lang= — 命令分组树。 */
+  async buildGroupTree(
+    root?: string,
+    lang: string = 'zh-CN'
+  ): Promise<GroupTreeNode[]> {
+    const params: Record<string, string> = { lang };
+    if (root) params.root = root;
+    const { data } = await http.get<{ tree: BackendGroupTreeNode[] } | BackendGroupTreeNode[]>(
+      '/mml/group-tree',
+      { params }
+    );
+    // 后端响应可能是 { tree: [...] } 或 [...] 形态；兼容两种
+    const arr = Array.isArray(data) ? data : (data?.tree ?? []);
+    return arr.map(mapGroupTreeNode);
+  },
+
+  /** GET /mml/commands/:id/sub-fields?lang= — 命令的 sub-fields。 */
+  async getCommandSubFields(
+    commandId: string,
+    lang: string = 'zh-CN'
+  ): Promise<SubFieldDef[]> {
+    const { data } = await http.get<{ sub_fields: BackendSubField[] } | BackendSubField[]>(
+      `/mml/commands/${commandId}/sub-fields`,
+      { params: { lang } }
+    );
+    const arr = Array.isArray(data) ? data : (data?.sub_fields ?? []);
+    return arr.map(mapSubField);
+  },
+
+  /** POST /mml/render — Statement → mml 字符串片段。 */
+  async renderMML(req: RenderRequest): Promise<string> {
+    const payload = {
+      command_id: req.commandId,
+      operation_type: req.operationType,
+      selected_sub_field_ids: req.selectedSubFieldIds,
+      values: req.values,
+      rmv_instance_index: req.rmvInstanceIndex,
+    };
+    const { data } = await http.post<{ mml_string: string }>('/mml/render', payload);
+    return data.mml_string;
+  },
+
+  /** POST /mml/parse — mml 字符串 → Statement[]。始终 200，parse_errors 在 body。 */
+  async parseMML(req: ParseRequest): Promise<ParseResponse> {
+    const payload = {
+      mml_string: req.mmlString,
+      lang: req.lang ?? 'zh-CN',
+    };
+    const { data } = await http.post<{
+      statements: BackendStatement[];
+      parse_errors: BackendParseError[];
+    }>('/mml/parse', payload);
+    return {
+      statements: (data.statements ?? []).map(mapBackendStatement),
+      parseErrors: (data.parse_errors ?? []).map(mapBackendParseError),
+    };
+  },
+
+  /** POST /mml/execute-statements — N 设备 × M statements 扇出执行。 */
+  async executeStatements(req: ExecuteStatementsRequest): Promise<MMLTask> {
+    const payload = {
+      statements: req.statements.map(stmtToBackend),
+      device_sns: req.deviceSns,
+      task_name: req.taskName,
+      creator: req.creator,
+      executor: req.executor,
+      execute_type: req.executeType,
+    };
+    const { data } = await http.post<BackendMMLTask>('/mml/execute-statements', payload);
+    return mapBackendTask(data);
+  },
 };
+
+// ---------------------------------------------------------------------------
+// T-0123-P2-a Console mappers — backend snake_case ↔ frontend camelCase
+// ---------------------------------------------------------------------------
+
+function mapGroupTreeNode(n: BackendGroupTreeNode): GroupTreeNode {
+  return {
+    id: n.id,
+    groupCode: n.group_code,
+    path: n.path,
+    displayName: n.display_name,
+    displayOrder: n.display_order,
+    commands: (n.commands ?? []).map(mapGroupTreeCommand),
+    children: (n.children ?? []).map(mapGroupTreeNode),
+  };
+}
+
+function mapGroupTreeCommand(c: BackendGroupTreeNode['commands'][number]): GroupTreeCommand {
+  return {
+    id: c.id,
+    commandCode: c.command_code,
+    logicalCode: c.logical_code,
+    operationType: c.operation_type as MMLOperationType,
+    displayName: c.display_name,
+    targetObject: c.target_object || undefined,
+    requireConfirm: c.require_confirm,
+  };
+}
+
+function mapSubField(s: BackendSubField): SubFieldDef {
+  return {
+    id: s.id,
+    commandId: s.command_id,
+    paramId: s.param_id,
+    mmlCode: s.mml_code,
+    label: s.label,
+    labelI18n: s.label_i18n ?? {},
+    tr069Path: s.tr069_path,
+    valueType: s.value_type,
+    accessType: s.access_type,
+    isObject: s.is_object,
+    supportsAdd: s.supports_add,
+    supportsDelete: s.supports_delete,
+    changeApplies: s.change_applies,
+    constraintText: s.constraint_text,
+    constraintTextI18n: s.constraint_text_i18n ?? {},
+    defaultValue: s.default_value || undefined,
+    jsRegex: s.js_regex || undefined,
+    defaultSelected: s.default_selected,
+    isRequired: s.is_required,
+    sortOrder: s.sort_order,
+  };
+}
+
+function mapBackendStatement(b: BackendStatement): Statement {
+  // 注：parser 返回的 Statement 没有 commandCode / logicalNameI18n / subFields。
+  // 这些是 P2-a 组件层在 appendStatement 时通过 GET /commands/:id 与
+  // GET /commands/:id/sub-fields 补齐。此处保守填空，让 store 决定何时 enrich。
+  return {
+    uid: typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `stmt-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    commandId: b.command_id,
+    commandCode: '', // 待 store 层 enrich
+    logicalCode: b.logical_code,
+    operationType: b.operation_type as MMLOperationType,
+    logicalNameI18n: {}, // 待 store 层 enrich
+    subFields: [],       // 待 store 层 enrich
+    selectedSubFieldIds: b.selected_sub_field_ids ?? [],
+    values: b.values ?? {},
+    rmvInstanceIndex: b.rmv_instance_index,
+    unknownCodes: b.unknown_codes ?? [],
+  };
+}
+
+function mapBackendParseError(e: BackendParseError): ParseError {
+  return {
+    statementIndex: e.statement_index,
+    raw: e.raw,
+    reason: e.reason,
+  };
+}
+
+/** 把前端 Statement 序列化为后端 BackendStatement wire 格式。 */
+function stmtToBackend(s: Statement): BackendStatement {
+  return {
+    command_id: s.commandId,
+    logical_code: s.logicalCode,
+    operation_type: s.operationType,
+    selected_sub_field_ids: s.selectedSubFieldIds.length > 0 ? s.selectedSubFieldIds : undefined,
+    values: Object.keys(s.values).length > 0 ? s.values : undefined,
+    rmv_instance_index: s.rmvInstanceIndex,
+  };
+}
