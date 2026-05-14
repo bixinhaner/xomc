@@ -36,6 +36,18 @@ func registerDictLoadAdminRoutes(c *Container, superAdmin *gin.RouterGroup) {
 
 	logger := c.Logger.Named("dictload-admin")
 
+	// reloadDictLoader 热重载单 Loader handler — swag-style godoc 供未来 swag init 拾取。
+	//
+	// @Summary      热重载单个 dictload Loader
+	// @Description  调用 dictloader.Registry.ReloadOne；mml-standard 支持 sha256 增量重载毫秒级 skip
+	// @Tags         Admin, MML
+	// @Security     BearerAuth
+	// @Param        name  query  string  true  "Loader name (mml-standard | param-model | indicator | alarm-definition | product)"
+	// @Success      200  {object}  map[string]any  "{loader, rows_affected, files_loaded, files_skipped, elapsed_ms, errors}"
+	// @Failure      400  {string}  string  "name 参数缺失"
+	// @Failure      401  {string}  string  "未授权"
+	// @Failure      403  {string}  string  "需 superAdmin"
+	// @Router       /api/v1/admin/dictload/reload [post]
 	superAdmin.POST("/admin/dictload/reload", func(ctx *gin.Context) {
 		name := ctx.Query("name")
 		if name == "" {

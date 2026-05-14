@@ -354,6 +354,18 @@ type ExecuteGroupHTTPRequest struct {
 // ExecuteGroup handles POST /api/v1/mml/groups/:id/execute.
 // 把指定 mml_param_group 下的全部命令一次性下发（操作类型过滤可选）。
 // device_sns 必填；其他字段缺省走 ExecuteImmediate。
+//
+// @Summary      按组批量执行 mml_param_groups 下的全部命令
+// @Description  Fanouter + Sequencer 串行下发；operation_filter 可挑 LST/MOD/ADD/RMV 子集
+// @Tags         MML
+// @Security     BearerAuth
+// @Param        id    path  string                        true   "mml_param_groups.id (uuid)"
+// @Param        body  body  ExecuteGroupHTTPRequest       true   "执行参数"
+// @Success      201  {object}  MMLTask
+// @Failure      400  {string}  string  "device_sns 缺失 / group_id 无效"
+// @Failure      401  {string}  string  "未授权"
+// @Failure      404  {string}  string  "group 不存在"
+// @Router       /api/v1/mml/groups/{id}/execute [post]
 func (h *Handler) ExecuteGroup(c *gin.Context) {
 	groupID, err := uuid.Parse(c.Param("id"))
 	if err != nil {

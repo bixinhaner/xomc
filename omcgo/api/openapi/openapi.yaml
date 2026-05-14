@@ -2852,6 +2852,124 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
+  # ===========================================================================
+  # MML standard-model rebuild endpoints (T-0119 Sprint B)
+  # ===========================================================================
+
+  /api/v1/admin/dictload/reload:
+    post:
+      tags: [Admin, MML]
+      summary: 热重载单个 dictload Loader（Sprint B-1）
+      description: |
+        触发指定 dictload Loader 重新加载，仅 superAdmin 可调用。
+        `mml-standard` Loader 支持基于 sha256 的增量重载：内容未变化时
+        毫秒级返回 `rows_affected:0`（F-3 增量重载）。
+        其他可选 loader：`param-model` / `indicator` / `alarm-definition` /
+        `product`。
+      parameters:
+        - in: query
+          name: name
+          required: true
+          schema:
+            type: string
+            enum: [mml-standard, param-model, indicator, alarm-definition, product]
+          description: 要重载的 Loader 名（dictloader.Registry 注册名）
+      responses:
+        "200":
+          description: 重载完成
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  loader:
+                    type: string
+                    example: mml-standard
+                  rows_affected:
+                    type: integer
+                    example: 3093
+                  files_loaded:
+                    type: integer
+                    example: 1
+                  files_skipped:
+                    type: integer
+                    example: 0
+                  elapsed_ms:
+                    type: integer
+                    example: 464
+                  errors:
+                    type: array
+                    nullable: true
+                    items:
+                      type: string
+        "400":
+          description: name 参数缺失或不在白名单
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: 仅 superAdmin 可调用
+
+  /api/v1/mml/groups/{id}/execute:
+    post:
+      tags: [MML]
+      summary: 按组批量执行 mml_param_groups 下的全部命令（Sprint B-5）
+      description: |
+        将指定 `mml_param_groups.id` 下的所有 mml_commands 一次性展开为一个
+        mml_task。Fanouter + Sequencer 负责按 command_index 顺序串行下发到
+        目标设备。`operation_filter` 可挑选执行子集（如仅 LST 或仅 MOD）。
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: mml_param_groups.id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_sns]
+              properties:
+                device_sns:
+                  type: array
+                  items: { type: string }
+                  example: ["BAICELLS-SN-001"]
+                parameters:
+                  type: object
+                  additionalProperties: true
+                  description: MOD/ADD 操作的入参（按 command 透传）
+                task_name:
+                  type: string
+                operation_filter:
+                  type: array
+                  items:
+                    type: string
+                    enum: [LST, MOD, ADD, RMV]
+                  description: 仅执行特定 operation_type 的命令；空则全部
+                execute_type:
+                  type: string
+                  enum: [immediate, scheduled, periodic]
+                  default: immediate
+                scheduled_at:
+                  type: string
+                  format: date-time
+      responses:
+        "201":
+          description: mml_task 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MMLTaskBrief"
+        "400":
+          description: device_sns 缺失 / group_id 无效 / operation_filter 过滤后无命令
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: group 不存在
+
 # =============================================================================
 # Components
 # =============================================================================
@@ -4076,3 +4194,48 @@ components:
           enum: [read, write, delete, admin]
         description:
           type: string
+
+    # MML rebuild schemas (T-0119)
+    MMLTaskBrief:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        task_name:
+          type: string
+        device_sns:
+          type: array
+          items: { type: string }
+        commands:
+          type: array
+          description: |
+            后端展开的命令明细。每个元素包含 command_code / rpc_method /
+            operation_type / parameters；Sprint B-6 之后 orphan command 会
+            额外标记 orphan:true。
+          items:
+            type: object
+            properties:
+              command_code: { type: string }
+              rpc_method:
+                type: string
+                enum: [GetParameterValues, SetParameterValues, AddObject, DeleteObject, Reboot, FactoryReset, Download, Upload, GetRPCMethods]
+              operation_type:
+                type: string
+                enum: [LST, MOD, ADD, RMV, DSP, ACT, DEA, RST, CLR, UPG]
+              parameters:
+                type: object
+                additionalProperties: true
+              orphan:
+                type: boolean
+                description: Sprint B-6：standard-model 重建后该 command_code 已不存在
+        status:
+          type: string
+          enum: [pending, running, completed, failed, paused, cancelled]
+        execute_type:
+          type: string
+        total_devices: { type: integer }
+        success_count: { type: integer }
+        failed_count:  { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
