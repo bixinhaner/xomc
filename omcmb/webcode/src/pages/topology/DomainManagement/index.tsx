@@ -1,10 +1,12 @@
 import { useState, useMemo } from 'react';
-import { Button, Descriptions, Form, Input, InputNumber, Modal, Space, Tag, Tree, Typography, message } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Button, Form, Input, Modal, Space, Tag, Tree, Typography, message, Tabs, Select } from 'antd';
+import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
+import FilterBar from '@/components/FilterBar';
+import type { FilterField } from '@/components/FilterBar';
 import { useDomainTree } from '@core/hooks/api/useTopology';
 import type { Domain } from '@core/types/topology';
 import { useT } from '@/hooks/useT';
@@ -17,69 +19,157 @@ interface DomainNode {
   deviceCount: number;
   siteCount: number;
   status: 'active' | 'inactive';
+  carrier?: string;
   children?: DomainNode[];
 }
 
+// Mock domain tree data matching the structure in image 1
 const MOCK_DOMAIN_TREE: DomainNode[] = [
   {
-    id: 'cn',
-    name: '中国区',
-    level: 1,
+    id: 'root',
+    name: 'omc-topo',
+    level: 0,
     parentName: '-',
-    deviceCount: 120,
-    siteCount: 45,
+    deviceCount: 30000,
+    siteCount: 150,
     status: 'active',
     children: [
       {
-        id: 'bj',
-        name: '北京市',
-        level: 2,
-        parentName: '中国区',
-        deviceCount: 35,
-        siteCount: 12,
+        id: 'cmcc-domain',
+        name: '设备域',
+        level: 1,
+        parentName: 'omc-topo',
+        deviceCount: 12000,
+        siteCount: 50,
         status: 'active',
+        carrier: 'cmcc',
         children: [
-          { id: 'bj-cy', name: '朝阳区', level: 3, parentName: '北京市', deviceCount: 18, siteCount: 6, status: 'active' },
-          { id: 'bj-hd', name: '海淀区', level: 3, parentName: '北京市', deviceCount: 17, siteCount: 6, status: 'active' },
+          {
+            id: 'cmcc-bj',
+            name: '北京移动',
+            level: 2,
+            parentName: '设备域',
+            deviceCount: 2000,
+            siteCount: 10,
+            status: 'active',
+            carrier: 'cmcc',
+          },
+          {
+            id: 'cmcc-sh',
+            name: '上海移动',
+            level: 2,
+            parentName: '设备域',
+            deviceCount: 1500,
+            siteCount: 8,
+            status: 'active',
+            carrier: 'cmcc',
+          },
+          {
+            id: 'cmcc-gd',
+            name: '广东移动',
+            level: 2,
+            parentName: '设备域',
+            deviceCount: 1800,
+            siteCount: 12,
+            status: 'active',
+            carrier: 'cmcc',
+          },
         ],
       },
       {
-        id: 'sh',
-        name: '上海市',
-        level: 2,
-        parentName: '中国区',
-        deviceCount: 42,
-        siteCount: 15,
+        id: 'ctcc-domain',
+        name: '域',
+        level: 1,
+        parentName: 'omc-topo',
+        deviceCount: 10000,
+        siteCount: 40,
         status: 'active',
+        carrier: 'ctcc',
         children: [
-          { id: 'sh-pd', name: '浦东新区', level: 3, parentName: '上海市', deviceCount: 22, siteCount: 8, status: 'active' },
-          { id: 'sh-ja', name: '静安区', level: 3, parentName: '上海市', deviceCount: 20, siteCount: 7, status: 'active' },
+          {
+            id: 'ctcc-js',
+            name: '江苏电信',
+            level: 2,
+            parentName: '域',
+            deviceCount: 1500,
+            siteCount: 8,
+            status: 'active',
+            carrier: 'ctcc',
+          },
+          {
+            id: 'ctcc-zj',
+            name: '浙江电信',
+            level: 2,
+            parentName: '域',
+            deviceCount: 1200,
+            siteCount: 7,
+            status: 'active',
+            carrier: 'ctcc',
+          },
         ],
       },
       {
-        id: 'gd',
-        name: '广东省',
-        level: 2,
-        parentName: '中国区',
-        deviceCount: 43,
-        siteCount: 18,
+        id: 'cucc-domain',
+        name: '未分组设备',
+        level: 1,
+        parentName: 'omc-topo',
+        deviceCount: 8000,
+        siteCount: 30,
         status: 'active',
-        children: [
-          { id: 'gz', name: '广州市', level: 3, parentName: '广东省', deviceCount: 20, siteCount: 8, status: 'active' },
-          { id: 'sz', name: '深圳市', level: 3, parentName: '广东省', deviceCount: 23, siteCount: 10, status: 'active' },
-        ],
+        carrier: 'cucc',
       },
     ],
   },
 ];
+
+interface DeviceRow extends Record<string, unknown> {
+  id: string;
+  serialNumber: string;
+  manufacturer: string;
+  modelName: string;
+  ipAddress: string;
+  status: string;
+  carrier: string;
+  technology: string;
+  siteName: string;
+}
+
+// Mock device data
+const generateMockDevices = (carrier: string, count: number): DeviceRow[] => {
+  const manufacturers = ['Huawei', 'ZTE', 'Ericsson', 'Nokia', 'BaiCells'];
+  const models = ['AAU5613', 'ZXSDR-B8200', 'AIR6488', 'FXEB', 'BC-ENB-100'];
+  const sites = ['Beijing-Site-01', 'Beijing-Site-02', 'Shanghai-Site-01', 'Guangzhou-Site-01'];
+  const statuses = ['online', 'offline', 'active', 'inactive'];
+
+  return Array.from({ length: count }, (_, i) => ({
+    id: `dev-${carrier}-${i}`,
+    serialNumber: `${carrier.toUpperCase()}-${String(i + 1).padStart(6, '0')}`,
+    manufacturer: manufacturers[Math.floor(Math.random() * manufacturers.length)],
+    modelName: models[Math.floor(Math.random() * models.length)],
+    ipAddress: `10.${carrier === 'cmcc' ? '1' : carrier === 'ctcc' ? '2' : '3'}.${Math.floor(i / 256)}.${i % 256}`,
+    status: statuses[Math.floor(Math.random() * statuses.length)],
+    carrier,
+    technology: Math.random() > 0.5 ? 'LTE' : 'NR',
+    siteName: sites[Math.floor(Math.random() * sites.length)],
+  }));
+};
+
+const MOCK_DEVICES: Record<string, DeviceRow[]> = {
+  'cmcc': generateMockDevices('cmcc', 50),
+  'ctcc': generateMockDevices('ctcc', 30),
+  'cucc': generateMockDevices('cucc', 20),
+};
 
 function buildAntTreeData(nodes: DomainNode[]): DataNode[] {
   return nodes.map((n) => ({
     title: (
       <span>
         {n.name}
-        <Tag color="blue" style={{ marginLeft: 4, fontSize: 10 }}>L{n.level}</Tag>
-        <span style={{ fontSize: 10, color: '#8c8c8c', marginLeft: 4 }}>{n.deviceCount}设备</span>
+        {n.deviceCount > 0 && (
+          <span style={{ fontSize: 11, color: '#8c8c8c', marginLeft: 6 }}>
+            {n.deviceCount}
+          </span>
+        )}
       </span>
     ),
     key: n.id,
@@ -98,62 +188,168 @@ function findDomain(nodes: DomainNode[], id: string): DomainNode | null {
   return null;
 }
 
-function flattenDomains(nodes: DomainNode[]): DomainNode[] {
-  const result: DomainNode[] = [];
-  for (const n of nodes) {
-    result.push(n);
-    if (n.children) result.push(...flattenDomains(n.children));
-  }
-  return result;
-}
-
-interface DeviceRow extends Record<string, unknown> {
-  id: string;
-  sn: string;
-  name: string;
-  type: string;
-  status: string;
-}
-
-const MOCK_DEVICES: DeviceRow[] = [
-  { id: '1', sn: 'ENB00001', name: '北京朝阳基站01', type: 'eNB', status: 'online' },
-  { id: '2', sn: 'ENB00002', name: '北京朝阳基站02', type: 'eNB', status: 'online' },
-  { id: '3', sn: 'GNB00001', name: '北京5G基站01', type: 'gNB', status: 'online' },
-];
-
 export default function DomainManagement() {
   const t = useT();
   const [selectedDomainId, setSelectedDomainId] = useState<string>('');
   const [modalVisible, setModalVisible] = useState(false);
   const [editingDomain, setEditingDomain] = useState<DomainNode | null>(null);
-  const [viewMode, setViewMode] = useState<'form' | 'devices'>('form');
   const [form] = Form.useForm();
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(20);
+  const [filters, setFilters] = useState<Record<string, unknown>>({});
+  const [activeTab, setActiveTab] = useState<'devices' | 'sites'>('devices');
 
   const { data: domainTreeData } = useDomainTree();
   void (null as unknown as Domain);
   void domainTreeData;
 
   const selectedDomain = findDomain(MOCK_DOMAIN_TREE, selectedDomainId);
-  const allDomains = flattenDomains(MOCK_DOMAIN_TREE);
+  const carrier = selectedDomain?.carrier || 'cmcc';
+  const deviceData = MOCK_DEVICES[carrier] || MOCK_DEVICES.cmcc;
 
-  const deviceColumns: DataTableColumn<DeviceRow>[] = useMemo(() => [
-    { key: 'sn', title: 'SN', dataIndex: 'sn', width: 130, mono: true, copyable: true },
-    { key: 'name', title: t('device.name'), dataIndex: 'name', width: 200 },
-    { key: 'type', title: t('table.type'), dataIndex: 'type', width: 90, render: (val) => <Tag color="blue">{val as string}</Tag> },
-    { key: 'status', title: t('table.status'), dataIndex: 'status', width: 90, render: (val) => <Tag color={val === 'online' ? 'success' : 'default'}>{val === 'online' ? t('status.online') : t('status.offline')}</Tag> },
+  // Filter fields matching image 2
+  const filterFields: FilterField[] = useMemo(() => [
+    {
+      name: 'manufacturer',
+      label: t('table.manufacturer') || '厂商',
+      type: 'select',
+      options: [
+        { label: 'Huawei', value: 'Huawei' },
+        { label: 'ZTE', value: 'ZTE' },
+        { label: 'Ericsson', value: 'Ericsson' },
+        { label: 'Nokia', value: 'Nokia' },
+        { label: 'BaiCells', value: 'BaiCells' },
+      ],
+    },
+    {
+      name: 'status',
+      label: t('table.status'),
+      type: 'select',
+      options: [
+        { label: t('status.online') || '在线', value: 'online' },
+        { label: t('status.offline') || '离线', value: 'offline' },
+        { label: t('status.active') || '激活', value: 'active' },
+        { label: t('status.inactive') || '未激活', value: 'inactive' },
+      ],
+    },
+    {
+      name: 'technology',
+      label: t('device.technology') || '制式',
+      type: 'select',
+      options: [
+        { label: 'LTE', value: 'LTE' },
+        { label: 'NR', value: 'NR' },
+      ],
+    },
   ], [t]);
 
-  const openCreate = () => {
-    setEditingDomain(null);
-    form.resetFields();
-    setModalVisible(true);
-  };
+  const filteredDevices = useMemo(() => {
+    return deviceData.filter((device) => {
+      if (filters.manufacturer && device.manufacturer !== filters.manufacturer) return false;
+      if (filters.status && device.status !== filters.status) return false;
+      if (filters.technology && device.technology !== filters.technology) return false;
+      return true;
+    });
+  }, [deviceData, filters]);
+
+  const deviceColumns: DataTableColumn<DeviceRow>[] = useMemo(() => [
+    {
+      key: 'serialNumber',
+      title: t('device.sn') || '设备SN',
+      dataIndex: 'serialNumber',
+      width: 140,
+      mono: true,
+      copyable: true
+    },
+    {
+      key: 'manufacturer',
+      title: t('table.manufacturer') || '厂商',
+      dataIndex: 'manufacturer',
+      width: 100
+    },
+    {
+      key: 'modelName',
+      title: t('device.model') || '型号',
+      dataIndex: 'modelName',
+      width: 130
+    },
+    {
+      key: 'ipAddress',
+      title: 'IP地址',
+      dataIndex: 'ipAddress',
+      width: 130,
+      mono: true,
+    },
+    {
+      key: 'technology',
+      title: t('device.technology') || '制式',
+      dataIndex: 'technology',
+      width: 80,
+      render: (val) => <Tag color={val === 'NR' ? 'blue' : 'green'}>{val as string}</Tag>,
+    },
+    {
+      key: 'siteName',
+      title: t('topology.site.name') || '站点',
+      dataIndex: 'siteName',
+      width: 150,
+      ellipsis: true,
+    },
+    {
+      key: 'status',
+      title: t('table.status'),
+      dataIndex: 'status',
+      width: 90,
+      render: (val) => {
+        const colorMap: Record<string, string> = {
+          online: 'success',
+          offline: 'default',
+          active: 'processing',
+          inactive: 'error',
+        };
+        const labelMap: Record<string, string> = {
+          online: '在线',
+          offline: '离线',
+          active: '激活',
+          inactive: '未激活',
+        };
+        return <Tag color={colorMap[val as string]}>{labelMap[val as string] || val}</Tag>;
+      },
+    },
+    {
+      key: 'action',
+      title: t('table.operation'),
+      width: 120,
+      fixed: 'right',
+      render: (_, record) => (
+        <Space size={4}>
+          <Button type="link" size="small" onClick={() => void message.info(`查看设备: ${record.serialNumber}`)}>
+            {t('common.view')}
+          </Button>
+          <Button type="link" size="small" onClick={() => void message.info(`配置设备: ${record.serialNumber}`)}>
+            {t('common.config')}
+          </Button>
+        </Space>
+      ),
+    },
+  ], [t]);
+
+  // Site columns for sites tab
+  const siteColumns: DataTableColumn<Record<string, unknown>>[] = useMemo(() => [
+    { key: 'name', title: t('table.name'), dataIndex: 'name', width: 200 },
+    { key: 'address', title: t('topology.site.address'), dataIndex: 'address', width: 250 },
+    { key: 'deviceCount', title: t('topology.site.deviceCount'), dataIndex: 'deviceCount', width: 100 },
+    {
+      key: 'status',
+      title: t('table.status'),
+      dataIndex: 'status',
+      width: 90,
+      render: (val) => <Tag color="success">{val as string}</Tag>,
+    },
+  ], [t]);
 
   const openEdit = (domain: DomainNode) => {
     setEditingDomain(domain);
-    form.setFieldsValue({ name: domain.name, level: domain.level });
+    form.setFieldsValue({ name: domain.name });
     setModalVisible(true);
   };
 
@@ -166,16 +362,20 @@ export default function DomainManagement() {
 
   const treePanel = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ padding: '12px 12px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ padding: '12px 12px 8px', borderBottom: '1px solid #f0f0f0' }}>
         <Typography.Text strong style={{ fontSize: 13 }}>{t('nav.topology.domain')}</Typography.Text>
-        <Button size="small" type="primary" icon={<PlusOutlined />} onClick={openCreate}>{t('common.add')}</Button>
       </div>
-      <div style={{ flex: 1, overflow: 'auto', padding: '0 4px' }}>
+      <div style={{ flex: 1, overflow: 'auto', padding: '8px 4px' }}>
         <Tree
           treeData={buildAntTreeData(MOCK_DOMAIN_TREE)}
-          onSelect={(keys) => setSelectedDomainId(keys[0] as string ?? '')}
+          onSelect={(keys) => {
+            setSelectedDomainId(keys[0] as string ?? '');
+            setActiveTab('devices');
+            setFilters({});
+          }}
           defaultExpandAll
           showLine
+          selectedKeys={selectedDomainId ? [selectedDomainId] : []}
         />
       </div>
     </div>
@@ -185,53 +385,120 @@ export default function DomainManagement() {
     <TreeListPageLayout tree={treePanel}>
       {selectedDomain ? (
         <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Typography.Text strong style={{ fontSize: 14 }}>{selectedDomain.name}</Typography.Text>
+          {/* Header matching image 2 */}
+          <div style={{
+            padding: '12px 16px',
+            borderBottom: '1px solid #f0f0f0',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            background: '#fafafa'
+          }}>
+            <Space direction="vertical" size={0}>
+              <Typography.Text strong style={{ fontSize: 15 }}>
+                {t('nav.topology.domain')} - {selectedDomain.name}
+              </Typography.Text>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {t('table.total')}: {selectedDomain.deviceCount} | {t('topology.site.name')}: {selectedDomain.siteCount}
+              </Typography.Text>
+            </Space>
             <Space>
-              <Button.Group size="small">
-                <Button type={viewMode === 'form' ? 'primary' : 'default'} onClick={() => setViewMode('form')}>{t('common.detail')}</Button>
-                <Button type={viewMode === 'devices' ? 'primary' : 'default'} onClick={() => setViewMode('devices')}>{t('common.view')}</Button>
-              </Button.Group>
-              <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(selectedDomain)}>{t('common.edit')}</Button>
-              <Button size="small" danger icon={<DeleteOutlined />} onClick={() => void message.warning(t('common.confirmDelete'))}>{t('common.delete')}</Button>
+              <Button size="small" icon={<ReloadOutlined />} onClick={() => void message.info(t('common.refresh'))}>
+                {t('common.refresh')}
+              </Button>
+              <Button
+                size="small"
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => void message.info('添加设备')}
+              >
+                {t('common.add')}
+              </Button>
+              <Button
+                size="small"
+                icon={<EditOutlined />}
+                onClick={() => openEdit(selectedDomain)}
+              >
+                {t('common.edit')}
+              </Button>
             </Space>
           </div>
-          <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
-            {viewMode === 'form' ? (
-              <Descriptions bordered column={2} size="small">
-                <Descriptions.Item label={t('table.name')}>{selectedDomain.name}</Descriptions.Item>
-                <Descriptions.Item label={t('table.type')}>L{selectedDomain.level}</Descriptions.Item>
-                <Descriptions.Item label={t('table.region')}>{selectedDomain.parentName}</Descriptions.Item>
-                <Descriptions.Item label={t('table.status')}>
-                  <Tag color={selectedDomain.status === 'active' ? 'success' : 'default'}>
-                    {selectedDomain.status === 'active' ? t('status.enabled') : t('status.disabled')}
-                  </Tag>
-                </Descriptions.Item>
-                <Descriptions.Item label={t('table.total')}>{selectedDomain.deviceCount}</Descriptions.Item>
-                <Descriptions.Item label={t('table.site')}>{selectedDomain.siteCount}</Descriptions.Item>
-                <Descriptions.Item label={t('table.total')} span={2}>
-                  {selectedDomain.children?.length ?? 0}
-                </Descriptions.Item>
-              </Descriptions>
-            ) : (
+
+          {/* Tabs for devices and sites */}
+          <Tabs
+            activeKey={activeTab}
+            onChange={(key) => setActiveTab(key as 'devices' | 'sites')}
+            style={{ margin: 0 }}
+            items={[
+              {
+                key: 'devices',
+                label: `${t('device.list')} (${filteredDevices.length})`,
+              },
+              {
+                key: 'sites',
+                label: `${t('nav.topology.site')} (${selectedDomain.siteCount})`,
+              },
+            ]}
+          />
+
+          {/* Filter bar */}
+          <div style={{ padding: '12px 16px 8px' }}>
+            <FilterBar
+              filterId="domain-devices"
+              fields={filterFields}
+              onSearch={(vals) => setFilters(vals)}
+              onReset={() => setFilters({})}
+            />
+          </div>
+
+          {/* Data table */}
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            {activeTab === 'devices' ? (
               <DataTable<DeviceRow>
                 tableId="domain-devices"
                 columns={deviceColumns}
-                dataSource={MOCK_DEVICES}
+                dataSource={filteredDevices}
                 rowKey="id"
-                total={MOCK_DEVICES.length}
+                total={filteredDevices.length}
                 currentPage={page}
                 pageSize={pageSize}
                 onPageChange={(p) => setPage(p)}
-                showPagination={false}
+                onRefresh={() => void message.info(t('common.refresh'))}
+                scroll={{ x: 1000 }}
+              />
+            ) : (
+              <DataTable
+                tableId="domain-sites"
+                columns={siteColumns}
+                dataSource={[]}
+                rowKey="id"
+                total={0}
+                currentPage={1}
+                pageSize={20}
+                scroll={{ x: 800 }}
               />
             )}
           </div>
         </div>
       ) : (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 8 }}>
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexDirection: 'column',
+          gap: 12
+        }}>
+          <img
+            src="/images/empty-tree.svg"
+            alt=""
+            style={{ width: 120, height: 120, opacity: 0.5 }}
+            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+          />
           <Typography.Text type="secondary">{t('common.pleaseSelect')}</Typography.Text>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>{t('table.total')}: {allDomains.length}</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {t('nav.topology.domain')} {t('common.tree')}
+          </Typography.Text>
         </div>
       )}
 
@@ -247,10 +514,11 @@ export default function DomainManagement() {
             <Input placeholder={t('common.placeholder')} />
           </Form.Item>
           <Form.Item label={t('table.type')} name="level" rules={[{ required: true }]}>
-            <InputNumber min={1} max={5} style={{ width: '100%' }} placeholder="1-5" />
-          </Form.Item>
-          <Form.Item label={t('table.region')} name="parentId">
-            <InputNumber style={{ width: '100%' }} placeholder={t('common.placeholder')} />
+            <Select style={{ width: '100%' }} placeholder="请选择">
+              <Select.Option value={1}>一级域</Select.Option>
+              <Select.Option value={2}>二级域</Select.Option>
+              <Select.Option value={3}>三级域</Select.Option>
+            </Select>
           </Form.Item>
         </Form>
       </Modal>
