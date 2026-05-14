@@ -2,8 +2,11 @@ package mmlstandardloader
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -87,12 +90,67 @@ func (l *Loader) Reload(ctx context.Context) (dictloader.Report, error) {
 	return l.run(ctx)
 }
 
+// computeFileHash 算 XML 文件 sha256 hex；失败返空串让上游退化为全量 UPSERT。
+func computeFileHash(path string) (string, error) {
+	bytes, err := os.ReadFile(path) //nolint:gosec
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(bytes)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// readStoredHash 取 STANDARD version 行已存的 content_hash；row 不存在 / 列为 NULL
+// 都返空串（首次跑路径）。
+func readStoredHash(ctx context.Context, pool *pgxpool.Pool) (string, error) {
+	var stored *string
+	err := pool.QueryRow(ctx,
+		`SELECT content_hash FROM mml_param_versions WHERE version_code = $1`,
+		VersionCode,
+	).Scan(&stored)
+	if err == pgx.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if stored == nil {
+		return "", nil
+	}
+	return *stored, nil
+}
+
 func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	rep := dictloader.NewReport(LoaderName)
 	defer rep.Finish()
 
 	start := time.Now()
 	xmlPath := filepath.Join(l.baseDir, l.dirName, l.file)
+
+	// Sprint B / F-3 增量重载：先算文件 sha256，对比上次入库值；相同直接 skip
+	// 全量 UPSERT。Hash 算 + DB 一次 SELECT 通常 <10ms vs 全量 ~500ms。
+	currentHash, hashErr := computeFileHash(xmlPath)
+	if hashErr != nil {
+		// 读不到文件就让下面 ParseStandardXMLFile 走原路径报错；不在这里返
+		l.logger.Warn("mml standard loader: hash precompute failed (fallback to full UPSERT)",
+			zap.String("xml_path", xmlPath), zap.Error(hashErr))
+	} else {
+		storedHash, storedErr := readStoredHash(ctx, l.pool)
+		if storedErr != nil {
+			l.logger.Warn("mml standard loader: read stored hash failed (fallback to full UPSERT)",
+				zap.Error(storedErr))
+		} else if storedHash != "" && storedHash == currentHash {
+			elapsed := time.Since(start)
+			rep.RowsAffected = 0
+			rep.FilesLoaded = 1
+			l.metrics.recordSuccess(elapsed, 0, 0, 0)
+			l.logger.Info("mml standard loader: skipped (content unchanged)",
+				zap.String("xml_path", xmlPath),
+				zap.String("hash", currentHash[:12]+"…"),
+				zap.Duration("elapsed", elapsed))
+			return rep, nil
+		}
+	}
 
 	l.logger.Info("mml standard loader: phase start",
 		zap.String("phase", "parse_xml"),
@@ -124,7 +182,7 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	if err := upsertVersion(ctx, tx); err != nil {
+	if err := upsertVersion(ctx, tx, currentHash); err != nil {
 		l.metrics.recordFailure("upsert_version")
 		l.logger.Error("mml standard loader: upsert_version failed",
 			zap.String("phase", "upsert_version"), zap.Error(err))
@@ -183,18 +241,27 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 // UPSERT helpers
 // ============================================================
 
-func upsertVersion(ctx context.Context, tx pgx.Tx) error {
+// upsertVersion 维护 STANDARD version 行。content_hash 由 caller 提供（来自当前
+// XML 文件 sha256），若为空字符串则不写入此列保留之前的值（兜底）。
+func upsertVersion(ctx context.Context, tx pgx.Tx, contentHash string) error {
+	var hashArg interface{}
+	if contentHash == "" {
+		hashArg = nil
+	} else {
+		hashArg = contentHash
+	}
 	_, err := tx.Exec(ctx, `
-		INSERT INTO mml_param_versions (id, version_code, version_name, description, source, is_active, is_deprecated)
-		VALUES (gen_random_uuid(), $1, $2, $3, 'standard', true, false)
+		INSERT INTO mml_param_versions (id, version_code, version_name, description, source, is_active, is_deprecated, content_hash)
+		VALUES (gen_random_uuid(), $1, $2, $3, 'standard', true, false, $4)
 		ON CONFLICT (version_code) DO UPDATE
-		SET version_name = EXCLUDED.version_name,
-		    description  = EXCLUDED.description,
-		    source       = EXCLUDED.source,
-		    is_active    = true,
+		SET version_name  = EXCLUDED.version_name,
+		    description   = EXCLUDED.description,
+		    source        = EXCLUDED.source,
+		    is_active     = true,
 		    is_deprecated = false,
-		    updated_at   = NOW()
-	`, VersionCode, "TR-069 Standard Model", "由 standard-model.xml 派生，loader 自动维护")
+		    content_hash  = COALESCE(EXCLUDED.content_hash, mml_param_versions.content_hash),
+		    updated_at    = NOW()
+	`, VersionCode, "TR-069 Standard Model", "由 standard-model.xml 派生，loader 自动维护", hashArg)
 	return err
 }
 
