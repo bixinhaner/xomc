@@ -1929,6 +1929,29 @@ const messages: Record<string, string> = {
   'topology.nodeType.site':   'Site',
   'topology.status': 'Status',
 
+  // Topology edge status
+  'topology.edgeStatus.active':   'Active',
+  'topology.edgeStatus.inactive': 'Inactive',
+  'topology.edgeStatus.degraded': 'Degraded',
+
+  // Topology layout types
+  'topology.layout.force':     'Force-Directed',
+  'topology.layout.tree':      'Tree',
+  'topology.layout.circular':  'Circular',
+  'topology.layout.hierarchy': 'Hierarchy',
+
+  // Topology statistics
+  'topology.stats.totalNodes':        'Total Nodes',
+  'topology.stats.onlineNodes':       'Online Nodes',
+  'topology.stats.offlineNodes':      'Offline Nodes',
+  'topology.stats.alarmNodes':        'Alarm Nodes',
+  'topology.stats.maintenanceNodes':  'Maintenance Nodes',
+  'topology.stats.totalEdges':        'Total Edges',
+  'topology.stats.activeEdges':       'Active Edges',
+  'topology.stats.inactiveEdges':     'Inactive Edges',
+  'topology.stats.degradedEdges':     'Degraded Edges',
+  'topology.stats.nodeTypeBreakdown': 'Node Type Distribution',
+
   // -------------------------------------------------------------------------
   // Topology Settings
   // -------------------------------------------------------------------------

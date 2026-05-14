@@ -1946,6 +1946,24 @@ const messages: Record<string, string> = {
   'topology.edgeStatus.inactive': '未激活',
   'topology.edgeStatus.degraded': '降级',
 
+  // Topology layout types
+  'topology.layout.force':     '力导向',
+  'topology.layout.tree':      '树形',
+  'topology.layout.circular':  '环形',
+  'topology.layout.hierarchy': '分层',
+
+  // Topology statistics
+  'topology.stats.totalNodes':        '总节点数',
+  'topology.stats.onlineNodes':       '在线节点',
+  'topology.stats.offlineNodes':      '离线节点',
+  'topology.stats.alarmNodes':        '告警节点',
+  'topology.stats.maintenanceNodes':  '维护中节点',
+  'topology.stats.totalEdges':        '总连线数',
+  'topology.stats.activeEdges':       '活跃连线',
+  'topology.stats.inactiveEdges':     '未激活连线',
+  'topology.stats.degradedEdges':     '降级连线',
+  'topology.stats.nodeTypeBreakdown': '节点类型分布',
+
   // -------------------------------------------------------------------------
   // Topology Settings
   // -------------------------------------------------------------------------
