@@ -116,7 +116,11 @@
       "Bash(bash omcgo/scripts/trigger_device_config_upload.sh --help)",
       "Bash(awk '/code: leafPath/||/group_code/||/GroupCode/' internal/config/parammodel/mmlstandardloader/*.go)",
       "Bash(find . -path ./*/node_modules -prune -o -name \"*.tsx\" -print)",
-      "Bash(bash scripts/e2e_verify.sh http://localhost:8081)"
+      "Bash(bash scripts/e2e_verify.sh http://localhost:8081)",
+      "Bash(chmod +x scripts/diag_mml_orphan_codes.sh)",
+      "Bash(bash -n scripts/diag_mml_orphan_codes.sh)",
+      "Bash(bash scripts/diag_mml_orphan_codes.sh --help)",
+      "Bash(bash scripts/diag_mml_orphan_codes.sh)"
     ],
     "deny": [
       "Bash(git push -f)",
