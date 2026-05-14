@@ -4260,6 +4260,16 @@ const messages: Record<string, string> = {
   'mml.console.subField.onReboot':             'Requires reboot',
   'mml.console.subField.readOnly':             'Read-only',
   'mml.console.subField.required':             'Required',
+  'mml.console.editor.execute':                'DO',
+  'mml.console.editor.parsing':                'Parsing...',
+  'mml.console.editor.onRebootConfirm':        'Current command contains fields requiring reboot. Confirm execution?',
+  'mml.console.input.constraint':              'Constraint',
+  'mml.console.picker.indexLabel':             'Instance index',
+  'mml.console.picker.indexHelp':              'Starts at 0; use LST to view current instance count',
+  'mml.console.stepBar.step1':                 'Select device',
+  'mml.console.stepBar.step2':                 'Select command',
+  'mml.console.stepBar.step3':                 'Configure',
+  'mml.console.stepBar.step4':                 'View result',
 };
 
 export default messages;

@@ -4280,6 +4280,16 @@ const messages: Record<string, string> = {
   'mml.console.subField.onReboot':             '需重启生效',
   'mml.console.subField.readOnly':             '只读',
   'mml.console.subField.required':             '必填',
+  'mml.console.editor.execute':                'DO',
+  'mml.console.editor.parsing':                '解析中...',
+  'mml.console.editor.onRebootConfirm':        '当前命令包含需重启生效字段，确认执行？',
+  'mml.console.input.constraint':              '约束',
+  'mml.console.picker.indexLabel':             '实例 index',
+  'mml.console.picker.indexHelp':              '从 0 开始；可通过 LST 查询当前实例数量',
+  'mml.console.stepBar.step1':                 '选择设备',
+  'mml.console.stepBar.step2':                 '选择命令',
+  'mml.console.stepBar.step3':                 '配置参数',
+  'mml.console.stepBar.step4':                 '查看结果',
 };
 
 export default messages;

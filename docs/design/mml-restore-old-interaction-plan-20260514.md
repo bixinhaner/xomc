@@ -1855,3 +1855,159 @@ S3 出口门复用 §B3：build / test 全绿 / 无新 TODO/FIXME / 无新 any�
 S2 PASS。
 
 ---
+
+# 设计备忘（T-0123-P2-b S2 设计定稿，2026-05-14）
+
+> P2-b 范围：仅**新增** 5 个 UI 组件（PRD §7.2 表格逐项），**不动** `Console/index.tsx`（那是 P2-c 三栏重构的范围）。
+> 业务层（types / store / hooks / api）已由 P2-a `commit 3c760ce9` 全量落地，本期组件直接消费 `@core/*` 引用。
+
+## O.1 文件清单（S3 实施输出）
+
+5 个新组件，全部位于 `omcmb/webcode/src/pages/mml/Console/components/`：
+
+| 文件 | 行数预估 | 主依赖 |
+|------|----------|--------|
+| `MmlEditor.tsx` | ~120 | antd `Input.TextArea`/`Button`/`Spin` + useMmlConsoleStore + useParseMML + useExecuteStatements |
+| `SubFieldChecklist.tsx` | ~110 | antd `Checkbox`/`Tag`/`Tooltip` + useMmlConsoleStore (toggleSubField) |
+| `SubFieldInputList.tsx` | ~130 | antd `Input`/`Tag` + useMmlConsoleStore (setValue) + READ_ONLY 过滤逻辑 |
+| `InstancePicker.tsx` | ~80 | antd `Select` + useMmlConsoleStore (setRmvIndex) — GPV 探测延 P4 |
+| `StepBar.tsx` | ~40 | antd `Steps` — 纯展示无 store 订阅 |
+
+单测同目录 `__tests__/`（Vitest），每组件至少 2-3 case 覆盖正常路径 + 元数据差异化。
+
+## O.2 5 组件 Props 与 store 接通
+
+```ts
+// MmlEditor — Step3 顶部 textbox + DO 按钮，与 mmlText 双向
+interface MmlEditorProps {
+  deviceSns: string[];                          // 上层（index.tsx）传入；DO 时附给 execute
+  onExecuted?: (task: MMLTask) => void;         // 用于上层导航到任务详情
+}
+// 订阅：mmlText / parsePending / parseErrors
+// 写入：setMmlTextDebounced(text, useParseMML.mutateAsync)
+// 内置：DO onClick → 若 statements 含 changeApplies==='OnReboot' → Modal.confirm 后 execute
+
+// SubFieldChecklist — LST 视图，勾选 sub_field
+interface SubFieldChecklistProps {
+  statement: Statement;                         // 上层按 activeStatementUid 取
+}
+// 订阅：statement.subFields / statement.selectedSubFieldIds
+// 写入：toggleSubField(statement.uid, subFieldId)
+// 默认勾选：subField.defaultSelected===true（PRD §1.3 LST 全勾选语义）
+
+// SubFieldInputList — MOD/ADD 视图，输入框列表
+interface SubFieldInputListProps {
+  statement: Statement;                         // operationType in ('MOD','ADD')
+}
+// 订阅：statement.subFields / statement.values
+// 写入：setValue(statement.uid, mmlCode, value)
+// 过滤：MOD 跳过 accessType==='READ_ONLY' 的 sub_field（PRD §7.3）
+// ADD：保留全部输入项（含 target_object 行，由 statement.commandCode 携带）
+
+// InstancePicker — RMV 视图，选要删的实例 index
+interface InstancePickerProps {
+  statement: Statement;                         // operationType==='RMV'
+}
+// 订阅：statement.rmvInstanceIndex
+// 写入：setRmvIndex(statement.uid, index)
+// P2-b 实现：手输 index Number 输入 + min=0 校验（GPV 自动探测延 P4，§O.9 待定点 1）
+
+// StepBar — 顶部 1-2-3-4 进度指示，纯 props 驱动
+interface StepBarProps {
+  current: 1 | 2 | 3 | 4;
+  labels?: { step1: string; step2: string; step3: string; step4: string };
+}
+// 不订阅 store；index.tsx 按"设备选过 / 命令选过 / 有 statements / 有结果"派生 current
+```
+
+## O.3 元数据驱动 UI 差异化落地（PRD §7.3 → 具体规则）
+
+| sub_field 元数据 | SubFieldChecklist（LST） | SubFieldInputList（MOD） | SubFieldInputList（ADD） |
+|------------------|--------------------------|---------------------------|---------------------------|
+| `accessType==='READ_ONLY'` | 勾选行 + 锁 icon | **过滤掉**（不渲染） | **过滤掉** |
+| `accessType==='READ_WRITE'` | 勾选行 + 编辑 icon | 输入框 | 输入框 |
+| `isObject && supportsAdd` | 行内 "实例" 提示文案 | — | — |
+| `changeApplies==='OnReboot'` | 行末黄色 Tag "需重启生效" | 输入框右侧同 Tag | 同 MOD |
+| `isRequired===true` | — | label 前红色 `*` | label 前红色 `*` |
+| `constraintText` 非空 | — | 输入框下方灰色 hint | 同 MOD |
+| `defaultSelected===true` | 初次进入自动勾上 | — | — |
+| `defaultValue` 非空 | — | 输入框 placeholder=`defaultValue` | 同 MOD |
+
+## O.4 i18n key 清单（zh-CN + en-US 同步）
+
+新增 keys（落 `frontend-core/src/i18n/{zh-CN,en-US}/mml.ts`，与 P2-a 11 keys 同文件追加）：
+
+```ts
+'mml.console.editor.execute': 'DO' / 'DO'                            // DO 按钮（中英均保留 DO 字样匹配老 OMC）
+'mml.console.editor.parsing': '解析中...' / 'Parsing...'
+'mml.console.editor.onRebootConfirm': '当前命令包含需重启生效字段，确认执行？' / '...'
+'mml.console.checklist.readOnly': '只读' / 'Read-only'
+'mml.console.checklist.onReboot': '需重启生效' / 'Requires reboot'
+'mml.console.input.required': '必填' / 'Required'
+'mml.console.input.constraint': '约束' / 'Constraint'
+'mml.console.picker.indexLabel': '实例 index' / 'Instance index'
+'mml.console.picker.indexHelp': '从 0 开始；可通过 LST 查询当前实例数量' / 'Starts at 0; use LST to view current instance count'
+'mml.console.stepBar.step1': '选择设备' / 'Select device'
+'mml.console.stepBar.step2': '选择命令' / 'Select command'
+'mml.console.stepBar.step3': '配置参数' / 'Configure'
+'mml.console.stepBar.step4': '查看结果' / 'View result'
+```
+
+12 个新 key × 2 lang = 24 行 i18n 增量。
+
+## O.5 单测策略（Vitest + Testing Library）
+
+每组件最少 3 case（共 ≥ 15 case）：
+
+| 组件 | case 1 | case 2 | case 3 |
+|------|--------|--------|--------|
+| MmlEditor | 输入 → 300ms 防抖后 parseFn 被调一次 | parseErrors 非空时显示红条 | DO 按钮含 OnReboot 弹 Modal.confirm |
+| SubFieldChecklist | READ_ONLY 项默认勾选不可改 | 点击 toggle 调 store.toggleSubField | OnReboot 字段显示 Tag |
+| SubFieldInputList | MOD 模式过滤 READ_ONLY | required 字段缺值时 label `*` 红 | constraintText 显示在 hint 处 |
+| InstancePicker | 输入 5 → store.setRmvIndex(uid, 5) | 负数被拒（min=0） | 空 → setRmvIndex(uid, undefined) |
+| StepBar | current=3 时第 3 步高亮 | labels prop 覆盖默认 i18n | 不订阅 store（无 re-render 噪声） |
+
+Store / API 走 Vitest mock，不依赖真后端。
+
+## O.6 多皮肤兼容
+
+5 个组件都通过 `@core/*` 引用业务层：
+- `@core/types/mmlConsole` — Statement / SubFieldDef / MMLOperationType
+- `@core/store/mmlConsoleStore` — useMmlConsoleStore + Statement 类型
+- `@core/hooks/api/useMmlConsole` — useParseMML / useExecuteStatements
+
+组件文件本身只在 `webcode/src/`，**不进 `frontend-core/`**（按 §7.5：UI 壳本期只动主皮肤）。
+webcode-v2 / webcode-v3 不需要镜像该组件——它们若需要 MML Console 自行实现 UI 即可。
+
+## O.7 OnReboot 二次确认 + DO 按钮责任划分
+
+- **DO 按钮**只挂在 `MmlEditor`（PRD §7.1 ASCII 图锁定位置）
+- DO onClick 内部：扫 `statements[].subFields.find(sf => sf.changeApplies==='OnReboot' && (selectedSubFieldIds.includes(sf.id) || values[sf.mmlCode]!==undefined))` → 命中则 Modal.confirm 后再 mutate
+- `SubFieldChecklist` / `SubFieldInputList` 只负责显示 OnReboot Tag，不做确认动作
+
+## O.8 P2-b 不做项（边界澄清，避免 scope creep）
+
+1. **不重写 `Console/index.tsx`**（属 P2-c）
+2. **不删除 `CommandTree.tsx` / `ParamPathPanel.tsx` / `ParamFormRenderer.tsx`**（属 P2-c）
+3. **不接入 GPV 探测实例**（InstancePicker 自动列表，属 P4）
+4. **不做 Customized PrivateTemplate adapter**（属 P4）
+5. **不做 admin Catalog 管理 UI**（属 P3）
+6. **不做 E2E spec / DoD 验收**（属 P2-d）
+
+## O.9 待定点
+
+1. **InstancePicker GPV 自动探测延后**：P2-b 仅手输 index + min=0 校验；P4 接入 `/ops/commands/rpc` GPV 探测，反查实例列表填 antd Select。当前文案明确提示"可通过 LST 查询"。
+
+**待定点合计 = 1**（< 3 ✅）
+
+## O.10 S2 出口门核查
+
+- [✓] 接口契约明确（§O.2 5 组件 Props + store actions 绑定一一锁定）
+- [N/A] 迁移草案（前端无 DB 变更）
+- [✓] Carrier 差异点列出（§0.5 锁定三家一致，本任务无 carrier 分支代码）
+- [✓] 观测埋点（前端组件按需 `console.warn` parse 错误；遥测埋点延 P4 统一接入）
+- [✓] 待定点 < 3（§O.9 列 1 个）
+
+S2 PASS。
+
+---

@@ -1,5 +1,22 @@
 import '@testing-library/jest-dom'
 
+// antd 在 jsdom 环境下依赖 window.matchMedia（Grid/Steps 等组件 useBreakpoint）。
+// 提供 stub；具体响应式测试（useResponsive.test.tsx）自己 Object.defineProperty 覆盖。
+Object.defineProperty(globalThis, 'matchMedia', {
+  writable: true,
+  configurable: true,
+  value: (query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  }),
+})
+
 // jsdom 自带 localStorage，但在 vitest 的 jsdom 环境里 zustand persist middleware
 // 偶发读到 storage.setItem is not a function。统一用稳定的内存实现覆盖，
 // 保证测试隔离、可预测。
