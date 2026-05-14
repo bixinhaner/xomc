@@ -149,3 +149,51 @@ func TestGenerateCommands_RealData_Distribution(t *testing.T) {
 	assert.Positive(t, ops[OpADD])
 	assert.Positive(t, ops[OpRMV])
 }
+
+
+// F-A 短 display name 规则覆盖：每条规则一个 testcase
+func TestGroupDisplayName_Aliases(t *testing.T) {
+	cases := []struct {
+		path string
+		zh   string
+		en   string
+	}{
+		// CellConfig 子树 — 高频且最深
+		{"Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PhyCellID", "小区.LTE.RAN.PhyCellID", "Cell.LTE.RAN.PhyCellID"},
+		{"Device.Services.FAPService.{i}.CellConfig.{i}.NR.Foo.Bar", "小区.NR.Foo.Bar", "Cell.NR.Foo.Bar"},
+		// FAPService 其它子树
+		{"Device.Services.FAPService.{i}.Transport.SCTP", "FAP.Transport.SCTP", "FAP.Transport.SCTP"},
+		// Device.* 顶级业务实体
+		{"Device.DeviceInfo.AntennaInfo", "设备.AntennaInfo", "Device.AntennaInfo"},
+		{"Device.Time.NTPServer1", "时间.NTPServer1", "Time.NTPServer1"},
+		{"Device.IP.Interface", "网络.Interface", "IP.Interface"},
+		{"Device.Ethernet.Interface", "以太网.Interface", "Ethernet.Interface"},
+		{"Device.FAP.GPS", "FAP.GPS", "FAP.GPS"},
+		{"Device.FaultMgmt.CurrentAlarm", "告警.CurrentAlarm", "Fault.CurrentAlarm"},
+		{"Device.ManagementServer.URL", "TR069.URL", "TR069.URL"},
+		// DeviceGSM
+		{"DeviceGSM.Bts.{i}.RFParam", "GSM.Bts.RFParam", "GSM.Bts.RFParam"},
+		// 兜底
+		{"Device.UnknownNamespace.Foo", "UnknownNamespace.Foo", "UnknownNamespace.Foo"},
+		{"AlienRoot.Foo", "AlienRoot.Foo", "AlienRoot.Foo"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			zh, en := groupDisplayName(GroupSpec{Path: tc.path})
+			assert.Equal(t, tc.zh, zh)
+			assert.Equal(t, tc.en, en)
+		})
+	}
+}
+
+// 反退化：缩写后 name 长度上限远低于 command_code（145+ vs 30+ 数量级）
+func TestGroupDisplayName_LengthBudget(t *testing.T) {
+	// standard-model 里最深 path 实测
+	deepest := "Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.BWP.BWPDL.PDSCH.PdschDedicatedTimeDomainResourceAllocationList"
+	zh, en := groupDisplayName(GroupSpec{Path: deepest})
+	assert.Less(t, len(zh), 80, "zh 缩写不超过 80 char 让 UI 表格可读")
+	assert.Less(t, len(en), 100, "en 缩写不超过 100 char")
+	t.Logf("deepest path zh: %q (%d chars)", zh, len(zh))
+	t.Logf("deepest path en: %q (%d chars)", en, len(en))
+}
+

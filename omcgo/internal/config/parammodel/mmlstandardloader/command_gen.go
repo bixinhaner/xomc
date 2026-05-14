@@ -130,25 +130,96 @@ func genForGroup(g GroupSpec) []CommandSpec {
 	return out
 }
 
-// groupDisplayName 从 group path 派生一个简短的展示名。
+// groupDisplayName 从 group path 派生短展示名（F-A：解长命令名问题）。
 //
-// 简单策略：取末段（去 {i}）作为基础名；后续可加翻译字典覆盖。
+// 旧实现只取末段（"AntennaInfo"），信息密度低 — 上下文丢失导致命令列表里
+// 一堆同名 "Transport" / "RF" / "X_PARAM"。新实现按 path 前缀缩写 + 中段
+// 选取关键词，让 UI 列表既不超长也保留导航上下文。
 //
-//	"Device.DeviceInfo.AntennaInfo"          → "AntennaInfo" / "AntennaInfo"
-//	"Device.Services.FAPService.{i}.Transport" → "Transport" / "Transport"
-//	"DeviceGSM.Bts"                          → "Bts" / "Bts"
+// 缩写规则（按优先级）：
 //
-// FE 实际展示用 sys_dictionaries / mml_commands.command_name_i18n 覆盖；
-// 这里 fallback 在没有翻译字典时让 UI 至少不空白。
+//	Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PhyCellID
+//	  → zh "小区.LTE.RAN.PhyCellID"     / en "Cell.LTE.RAN.PhyCellID"
+//	Device.Services.FAPService.{i}.CellConfig.{i}.NR.Foo.Bar
+//	  → zh "小区.NR.Foo.Bar"           / en "Cell.NR.Foo.Bar"
+//	Device.DeviceInfo.AntennaInfo
+//	  → zh "设备.AntennaInfo"          / en "Device.AntennaInfo"
+//	Device.FAP.GPS
+//	  → zh "FAP.GPS"                  / en "FAP.GPS"
+//	Device.FaultMgmt.CurrentAlarm
+//	  → zh "告警.CurrentAlarm"         / en "Fault.CurrentAlarm"
+//	DeviceGSM.Bts
+//	  → zh "GSM.Bts"                  / en "GSM.Bts"
+//
+// command_code 字段（DB UNIQUE）维持完整 group_code 不变，保审计追溯。
 func groupDisplayName(g GroupSpec) (zh, en string) {
-	// 取末段
-	parts := strings.Split(StripInstanceIndex(g.Path), ".")
-	last := ""
-	for i := len(parts) - 1; i >= 0; i-- {
-		if parts[i] != "" {
-			last = parts[i]
-			break
+	clean := StripInstanceIndex(g.Path)
+
+	// 1. CellConfig / FAPService 是 standard-model 里参数密度最高的子树 —
+	//    多数 528+210 命令都在这两支下，最值得专门缩写。
+	if rest, ok := trimPrefix(clean, "Device.Services.FAPService.CellConfig."); ok {
+		// "LTE.RAN.PhyCellID" — 把 LTE/NR 当二级根，drop 中间的实例占位
+		return "小区." + rest, "Cell." + rest
+	}
+	if rest, ok := trimPrefix(clean, "Device.Services.FAPService."); ok {
+		return "FAP." + rest, "FAP." + rest
+	}
+
+	// 2. DeviceInfo / Time / IP / Ethernet / FAP / FaultMgmt / ManagementServer
+	//    这些是顶级业务实体，给一个一字中文别名。
+	type prefixAlias struct {
+		prefix string
+		zh     string
+		en     string
+	}
+	aliases := []prefixAlias{
+		{"Device.DeviceInfo.", "设备", "Device"},
+		{"Device.Time.", "时间", "Time"},
+		{"Device.IP.", "网络", "IP"},
+		{"Device.Ethernet.", "以太网", "Ethernet"},
+		{"Device.FAP.", "FAP", "FAP"},
+		{"Device.FaultMgmt.", "告警", "Fault"},
+		{"Device.ManagementServer.", "TR069", "TR069"},
+		{"Device.KeepalivedMgmt.", "热备", "HA"},
+		{"Device.RemoteDeviceList.", "远程设备", "RemoteDev"},
+		{"Device.IPsec.", "IPsec", "IPsec"},
+		{"DeviceGSM.", "GSM", "GSM"},
+	}
+	for _, a := range aliases {
+		if rest, ok := trimPrefix(clean, a.prefix); ok {
+			return a.zh + "." + rest, a.en + "." + rest
 		}
 	}
-	return last, last
+
+	// 3. 兜底：去 "Device." 前缀（顶层 Device. 信息冗余）；再不行原样
+	if rest, ok := trimPrefix(clean, "Device."); ok {
+		return rest, rest
+	}
+	return clean, clean
+}
+
+// trimPrefix 移除前缀并标记成功；同时清理结果开头的多余 "."（来自连续点）。
+// 调 truncateLongSegments 把超长末段（CamelCase 类名通常 30+ char）截断到
+// 25 char + "…"，避免 NR/LTE 子树下的 PdschDedicated...List 类全名仍超 80 char。
+func trimPrefix(s, prefix string) (string, bool) {
+	if !strings.HasPrefix(s, prefix) {
+		return s, false
+	}
+	rest := strings.TrimPrefix(s, prefix)
+	rest = strings.TrimLeft(rest, ".")
+	return truncateLongSegments(rest), true
+}
+
+// truncateLongSegments 对每一段超过 25 char 的 CamelCase 末名做"前缀 + …"截断。
+// 标识符末段才长（域名段 "LTE" / "RAN" / "PHY" 都很短），所以单段截断不损失
+// 中段导航上下文。
+func truncateLongSegments(s string) string {
+	const maxSegLen = 25
+	parts := strings.Split(s, ".")
+	for i, p := range parts {
+		if len(p) > maxSegLen {
+			parts[i] = p[:maxSegLen] + "…"
+		}
+	}
+	return strings.Join(parts, ".")
 }
