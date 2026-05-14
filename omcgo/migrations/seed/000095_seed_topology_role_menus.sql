@@ -26,6 +26,7 @@ WHERE m.id::text LIKE 'aaaa0004-1000-%'
   );
 
 -- 2. 绑定 5 个缺失的拓扑子菜单到 super_admin 角色（如果存在）
+-- +goose StatementBegin
 DO $$
 DECLARE
   super_admin_role_id UUID;
@@ -49,6 +50,7 @@ BEGIN
       );
   END IF;
 END $$;
+-- +goose StatementEnd
 
 -- +goose Down
 -- ============================================================
@@ -67,6 +69,7 @@ WHERE role_id = '10000000-0000-0000-0000-000000000001'::uuid
   );
 
 -- 删除 super_admin 角色的绑定（如果存在）
+-- +goose StatementBegin
 DO $$
 DECLARE
   super_admin_role_id UUID;
@@ -85,3 +88,4 @@ BEGIN
       );
   END IF;
 END $$;
+-- +goose StatementEnd
