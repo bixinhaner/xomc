@@ -337,7 +337,9 @@
 .userName {
   font-size: 13px;
   font-weight: 510;
-  color: #d0d6e0;
+  /* 早期版本硬编码 #d0d6e0（浅灰）只适合暗色 header；light mode 下背景
+     #FFFFFF 时几乎隐形。改走主题变量 — light 下 #292524，dark 下 #f7f8f8。 */
+  color: var(--color-header-text);
   letter-spacing: -0.13px;
   max-width: 100px;
   overflow: hidden;
@@ -347,7 +349,8 @@
 
 .userRole {
   font-size: 11px;
-  color: #62666d;
+  /* 同 .userName 主题适配；dim 级别在 light 下 #A8A29E，dark 下 #62666d */
+  color: var(--color-header-text-muted);
   letter-spacing: -0.12px;
 }
 
