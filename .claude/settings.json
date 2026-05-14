@@ -113,7 +113,10 @@
       "Bash(git -C .. status --short)",
       "Bash(chmod +x omcgo/scripts/trigger_device_config_upload.sh)",
       "Bash(bash -n omcgo/scripts/trigger_device_config_upload.sh)",
-      "Bash(bash omcgo/scripts/trigger_device_config_upload.sh --help)"
+      "Bash(bash omcgo/scripts/trigger_device_config_upload.sh --help)",
+      "Bash(awk '/code: leafPath/||/group_code/||/GroupCode/' internal/config/parammodel/mmlstandardloader/*.go)",
+      "Bash(find . -path ./*/node_modules -prune -o -name \"*.tsx\" -print)",
+      "Bash(bash scripts/e2e_verify.sh http://localhost:8081)"
     ],
     "deny": [
       "Bash(git push -f)",
