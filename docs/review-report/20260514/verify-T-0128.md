@@ -1,6 +1,6 @@
-# T-0123 + T-0127 合并 — S4 本地验证报告
+# T-0128 + T-0127 合并 — S4 本地验证报告
 
-**任务**：T-0123（device.online 事件 + firmware 二选一挡板 + Provision 订阅 + Redis token bucket）合并 T-0127（Path B 同步差异日志）
+**任务**：T-0128（device.online 事件 + firmware 二选一挡板 + Provision 订阅 + Redis token bucket）合并 T-0127（Path B 同步差异日志）
 **PRD**：`docs/project/prd/F09-param-sync-trigger-chain.md#§1+§5`
 **Sprint**：sprint-11 stretch
 **Owner**：Claude
@@ -96,8 +96,8 @@ grep -rn "provision:syncreason" omcgo/internal/ → 命中 5（sync.go doc + syn
 
 ## 6. Out of Scope / 诚实碎片
 
-1. **`provision_online_throttle_total` Prometheus counter 未实施** — S2 备忘列出但生产代码未加（provision 包无现有 Prometheus DI 链路）。token bucket 命中率可通过 grep `"device.online throttled by token bucket"` 日志计数获得。**Follow-up**：T-0123-x 加 metrics 包注册（小改 ~10 行）
-2. **`SubjectDeviceFirmwareChanged` 事件本身未发布** — T-0123 仅在 UpdateFromInform 内做挡板（log "firmware_changed_suppresses_online" 不发 online），真正的 firmware.changed 事件发布留到 T-0125 实施。**临时降级**：firmware 变化设备短期内不触发 Path B 同步（与 pre-T-0123 行为相同，不引入回归）
+1. **`provision_online_throttle_total` Prometheus counter 未实施** — S2 备忘列出但生产代码未加（provision 包无现有 Prometheus DI 链路）。token bucket 命中率可通过 grep `"device.online throttled by token bucket"` 日志计数获得。**Follow-up**：T-0128-x 加 metrics 包注册（小改 ~10 行）
+2. **`SubjectDeviceFirmwareChanged` 事件本身未发布** — T-0128 仅在 UpdateFromInform 内做挡板（log "firmware_changed_suppresses_online" 不发 online），真正的 firmware.changed 事件发布留到 T-0125 实施。**临时降级**：firmware 变化设备短期内不触发 Path B 同步（与 pre-T-0128 行为相同，不引入回归）
 3. **`offline_detector.go:133` 字面量未迁移到 `SubjectDeviceOffline` 常量** — S2 备忘指出"顺手补但不强迁旧代码"。常量已加，迁移留 follow-up（一行替换，零业务变化）
 4. **E2E 用例未补到 `scripts/e2e_verify.sh`** — 本任务依赖 cpe_simulator 模拟 11min 离线 + 上线流程，跨大型脚本改动；留到 T-0125 firmware 路径完成时一起补（设计方案 §8.2 计划）
 5. **golangci-lint 本地未跑** — 本机未装；CI / S5 阶段补
@@ -112,7 +112,7 @@ grep -rn "provision:syncreason" omcgo/internal/ → 命中 5（sync.go doc + syn
 | Reason 传递 | Redis 临时映射 `provision:syncreason:{deviceID}` TTL=10min | 不破坏 sourceID 作为 task_id 追溯的契约；不引入新组件；异步回流端可读 |
 | Redis 注入 | Setter 模式 `SetRedisClient` 不改构造函数 | 保 T-0098/既有调用方不破；nil-safe 降级 |
 | `pathBOptions` Functional option | `WithReason("...")` | 4 个现有 caller 不动；新调用方按需附加；Go-idiomatic |
-| firmware 变化挡板 | log "firmware_changed_suppresses_online" 不发任何事件 | T-0125 实施前不引入"firmware-change 触发 online sync"的临时错误行为；与 pre-T-0123 行为一致 |
+| firmware 变化挡板 | log "firmware_changed_suppresses_online" 不发任何事件 | T-0125 实施前不引入"firmware-change 触发 online sync"的临时错误行为；与 pre-T-0128 行为一致 |
 | `SubjectDeviceOffline` 补常量但不迁旧代码 | 添加常量 + 文档注释 + 保留 offline_detector.go:133 字面量 | 控制本任务范围；为后续清理留好钩子 |
 | 差异日志 `missing_paths_sample` 截断到前 20 | 不再加查询端点 | 设计方案 §5.5 明示；运维需全量时另开端点（不在本方案） |
 

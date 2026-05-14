@@ -1,6 +1,6 @@
 # F09 基站参数同步触发链补强（Umbrella PRD）
 
-> Umbrella PRD — 覆盖 T-0123 / T-0124 / T-0125 / T-0126 / T-0127 五个子任务。
+> Umbrella PRD — 覆盖 T-0128 / T-0124 / T-0125 / T-0126 / T-0127 五个子任务。
 > 五任务共享同一份业务背景、验收口径、运营商差异、依赖与度量；技术实施细节按章节拆到下面"## 实施方案"§1-§9。
 > 子任务通过 `PRD: docs/project/prd/F09-param-sync-trigger-chain.md#实施方案-§N` 锚点引用。
 
@@ -13,7 +13,7 @@
 **最后更新**：2026-05-14
 **状态**：Approved（设计方案对话内已对齐七字段判决）
 **关联 Milestone**：`docs/project/milestone/2026Q2-to-RC.md`（GA 准备期）
-**关联 Sprint**：`docs/project/sprint/sprint-11.md`（T-0123 stretch 候选；T-0124/T-0125/T-0126 后续 sprint）
+**关联 Sprint**：`docs/project/sprint/sprint-11.md`（T-0128 stretch 候选；T-0124/T-0125/T-0126 后续 sprint）
 **关联 Risk**：无新建 — 设计方案 §9 风险已被现有机制（Redis token bucket / PG advisory lock / feature flag）缓解，不构成 P0/P1
 
 ---
@@ -54,7 +54,7 @@
 
 ## 3. 验收标准（Given/When/Then）
 
-### AC-1（T-0123 — device.online 触发 Path B）
+### AC-1（T-0128 — device.online 触发 Path B）
 
 ```
 Given: 设备 D-001 状态为 active，CPE 离线超过 10 分钟被 OfflineDetector 标记 offline
@@ -67,7 +67,7 @@ Then:  - device.online 事件在 1 秒内发布到 EventBus
        - 同一设备 60s 内第二次 offline→active 不会再次入队
 ```
 
-### AC-2（T-0123 firmware 与 online 二选一兜底）
+### AC-2（T-0128 firmware 与 online 二选一兜底）
 
 ```
 Given: 设备 D-002 状态 offline，FirmwareVersion="v1.0"
@@ -77,7 +77,7 @@ Then:  - device.online 事件**不发布**（被 firmware 变化挡板拦截）
        - 日志输出 zap Info："firmware_changed_suppresses_online" device_id=D-002 old=v1.0 new=v1.1
 ```
 
-### AC-3（T-0127 — Path B 完成时输出差异日志，与 T-0123 合并实现）
+### AC-3（T-0127 — Path B 完成时输出差异日志，与 T-0128 合并实现）
 
 ```
 Given: 设备 D-003 device_parameters 表已有 500 条 standardPath
@@ -144,7 +144,7 @@ Then:  - 第一次：device.online 发布 + Path B 入队 + Redis token 占位
 ### 被阻塞项（本功能不完成会影响什么）
 
 - T-0124 周期同步：可独立实现，但实际触发的 Path B 链路需要本任务的差异日志（T-0127）才有完整可观测性
-- T-0125 firmware 变化重新交集：依赖本任务（T-0123）的 UpdateFromInform 改造（共享 oldVersion / newVersion 比对逻辑）
+- T-0125 firmware 变化重新交集：依赖本任务（T-0128）的 UpdateFromInform 改造（共享 oldVersion / newVersion 比对逻辑）
 - T-0126 手动同步端点：可独立实现，但完成时同样依赖 T-0127 的差异日志输出
 
 ### 外部依赖
@@ -192,7 +192,7 @@ Then:  - 第一次：device.online 发布 + Path B 入队 + Redis token 占位
 
 ### 预计工作量
 
-- T-0123 + T-0127 合并：**S**（共享 UpdateFromInform 改造 + 共享 Path B 完成测试场景）
+- T-0128 + T-0127 合并：**S**（共享 UpdateFromInform 改造 + 共享 Path B 完成测试场景）
 - T-0124：**L**（含 PG advisory lock + LeaderElector 接口设计）
 - T-0125：**S**（共享 UpdateFromInform 改造）
 - T-0126：**S**（后端端点 + 前端按钮）
@@ -214,7 +214,7 @@ Then:  - 第一次：device.online 发布 + Path B 入队 + Redis token 占位
 
 | 日期 | 版本 | 变更摘要 | 作者 |
 |------|------|---------|------|
-| 2026-05-14 | v1.0 | 初稿 — 设计方案完整拷入作为实施方案附录；T-0123/T-0124/T-0125/T-0126/T-0127 五任务合并 umbrella PRD | Claude + user |
+| 2026-05-14 | v1.0 | 初稿 — 设计方案完整拷入作为实施方案附录；T-0128/T-0124/T-0125/T-0126/T-0127 五任务合并 umbrella PRD | Claude + user |
 
 ---
 
@@ -224,7 +224,7 @@ Then:  - 第一次：device.online 发布 + Path B 入队 + Redis token 占位
 
 > 以下 §1-§9 为原设计方案逐字拷入。任何技术细节以本节为准；上面 §1-§7 是 PRD 七要素抽象。
 
-### 实施方案 §1. 设备"上线"事件 + 已有设备上线参数刷新（T-0123）
+### 实施方案 §1. 设备"上线"事件 + 已有设备上线参数刷新（T-0128）
 
 #### 1.1 现状盘点
 
@@ -465,7 +465,7 @@ syncDeviceParams(deviceID: string, opts?: { force?: boolean })
 
 ---
 
-### 实施方案 §5. Path B 同步差异日志（T-0127 — 与 T-0123 合并实现）
+### 实施方案 §5. Path B 同步差异日志（T-0127 — 与 T-0128 合并实现）
 
 #### 5.1 设计目标
 
@@ -517,7 +517,7 @@ syncDeviceParams(deviceID: string, opts?: { force?: boolean })
 
 #### 5.8 任务登记
 
-T-0127 与 T-0123 合并实现（共享 Path B 测试场景）。
+T-0127 与 T-0128 合并实现（共享 Path B 测试场景）。
 
 ---
 
@@ -540,12 +540,12 @@ T-0127 与 T-0123 合并实现（共享 Path B 测试场景）。
 
 | 任务编号 | 描述 | 依赖 | 工作量估算 |
 |---------|------|------|----------|
-| T-0123 (T-A) | `SubjectDeviceOnline` 事件（含与 firmware.changed 二选一逻辑）+ Provision 订阅 + `HandleDeviceOnline` | 无 | S |
+| T-0128 (T-A) | `SubjectDeviceOnline` 事件（含与 firmware.changed 二选一逻辑）+ Provision 订阅 + `HandleDeviceOnline` | 无 | S |
 | T-0124 (T-B) | 周期同步：迁移 + PeriodicSyncer + **PG advisory lock leader 锁（LeaderElector 接口先行）**+ 配置 + 启动注册 | 无 | **L**（含 leader 接口设计） |
-| T-0125 (T-C) | 固件版本变化检测 + Redis 串行锁 + 重新交集 + 同步 | T-0123 完成后接入更顺 | S |
+| T-0125 (T-C) | 固件版本变化检测 + Redis 串行锁 + 重新交集 + 同步 | T-0128 完成后接入更顺 | S |
 | T-0126 (T-D) | `POST /devices/:id/sync-params` + 前端按钮 | 无（可与 T-0124 并行） | S |
 | T-E | Value Change 真机测试 | 需真机环境就绪 | M（取决于设备协调） |
-| T-0127 (T-F) | Path B 同步差异日志（跨 §1/§2/§3/§4 触发源共用） | 无（**与 T-0123 合并实现**） | S |
+| T-0127 (T-F) | Path B 同步差异日志（跨 §1/§2/§3/§4 触发源共用） | 无（**与 T-0128 合并实现**） | S |
 | **T-G** | OfflineDetector 迁移到 `LeaderElector` 抽象，统一 leader 选举（**post-RC**，依赖 T-0124 完成） | T-0124 | S |
 
 ---
@@ -554,7 +554,7 @@ T-0127 与 T-0123 合并实现（共享 Path B 测试场景）。
 
 #### 8.1 单元测试
 
-- T-0123 + T-0127（合并）：
+- T-0128 + T-0127（合并）：
   - `TestUpdateFromInform_OfflineToActive_PublishesOnlineEvent`
   - `TestUpdateFromInform_FirmwareChangedSuppressesOnlineEvent`（二选一逻辑）
   - `TestHandleDeviceOnline_TriggersPathBSync`
@@ -599,9 +599,9 @@ T-0127 与 T-0123 合并实现（共享 Path B 测试场景）。
 
 ---
 
-## 设计备忘（T-0123 + T-0127 合并实现，2026-05-14 S2 产出）
+## 设计备忘（T-0128 + T-0127 合并实现，2026-05-14 S2 产出）
 
-> 本节为 S2 阶段对设计方案 §1 + §5 的具体代码层落地备忘。**仅覆盖 T-0123 + T-0127 合并范围**；T-0124/T-0125/T-0126 留到各自 S2 阶段补充。
+> 本节为 S2 阶段对设计方案 §1 + §5 的具体代码层落地备忘。**仅覆盖 T-0128 + T-0127 合并范围**；T-0124/T-0125/T-0126 留到各自 S2 阶段补充。
 
 ### 1. 现状勘察结论
 
@@ -690,19 +690,19 @@ T-0127 与 T-0123 合并实现（共享 Path B 测试场景）。
 
 ## 设计备忘（T-0125，2026-05-14 S2 产出）
 
-> 接力 T-0123，覆盖设计方案 §3。**核心：把 T-0123 在 UpdateFromInform 末端的 firmware 挡板从 log-only 改造为真发 `SubjectDeviceFirmwareChanged` 事件 + Provision 引擎订阅触发"重新交集 + Path B"流程**。
+> 接力 T-0128，覆盖设计方案 §3。**核心：把 T-0128 在 UpdateFromInform 末端的 firmware 挡板从 log-only 改造为真发 `SubjectDeviceFirmwareChanged` 事件 + Provision 引擎订阅触发"重新交集 + Path B"流程**。
 
 ### 1. 现状勘察
 
 | 检查点 | 文件 | 现状 |
 |--------|------|------|
 | `SubjectDeviceFirmwareChanged` 常量 | `internal/core/event/subjects.go` | 不存在；本任务新增 |
-| T-0123 firmware 挡板 | `device_service.go:670-686` | 当前仅 log "firmware_changed_suppresses_online"，**未发任何事件**；本任务替换为真发 event |
+| T-0128 firmware 挡板 | `device_service.go:670-686` | 当前仅 log "firmware_changed_suppresses_online"，**未发任何事件**；本任务替换为真发 event |
 | `RequestModelUpload` 签名 | `model_upload.go:78` | `(ctx, dev, sourceID) (*ParameterDiscoveryLog, error)`；`product.EnableFileType11=false` 时返回 log.Status=DiscoveryCompleted + reason="skipped: enable_filetype11=false"；其余正常入队 Upload RPC |
 | `handleDataModelFileReceived` auto-sync | `engine.go:701-721` | Upload 完成后 `e.config.AutoSync.Enabled` 时自动调 `StartPathBSync(ctx, dev, sourceID)`，**不带 WithReason** → 默认 reason 标签缺失 |
-| Redis 串行锁基础设施 | T-0123 已注入 `e.redisClient` | 复用 |
+| Redis 串行锁基础设施 | T-0128 已注入 `e.redisClient` | 复用 |
 
-### 2. Reason 传递机制（关键 — 复用 T-0123 Redis 协议）
+### 2. Reason 传递机制（关键 — 复用 T-0128 Redis 协议）
 
 设计方案 §3.2 流程：
 1. HandleFirmwareChanged 调 RequestModelUpload（异步入队 Upload）
@@ -711,7 +711,7 @@ T-0127 与 T-0123 合并实现（共享 Path B 测试场景）。
 
 **问题**：handleDataModelFileReceived 内的 auto-sync 不知道当前是 firmware 触发还是首次 bootstrap 触发。
 
-**方案**：HandleFirmwareChanged 入口先**预设 reason hint** —— `SET provision:syncreason:{deviceID} = "firmware_changed" TTL=10min`（与 T-0123 路径同 key）。`StartPathBSync` 内 `if pbOpts.reason != "" { SET key reason }` 仅在显式 `WithReason` 时覆盖；handleDataModelFileReceived 现行调用不带 opts → **不覆盖** → HandleSyncResultPathB 完成时读到正确的 firmware_changed。
+**方案**：HandleFirmwareChanged 入口先**预设 reason hint** —— `SET provision:syncreason:{deviceID} = "firmware_changed" TTL=10min`（与 T-0128 路径同 key）。`StartPathBSync` 内 `if pbOpts.reason != "" { SET key reason }` 仅在显式 `WithReason` 时覆盖；handleDataModelFileReceived 现行调用不带 opts → **不覆盖** → HandleSyncResultPathB 完成时读到正确的 firmware_changed。
 
 ### 3. HandleFirmwareChanged 控制流
 
@@ -764,13 +764,13 @@ T-0127 与 T-0123 合并实现（共享 Path B 测试场景）。
 - [x] 迁移草案：N/A
 - [x] Carrier 差异点：无新增
 - [x] 观测埋点名字列出（4 log key + 1 Redis key）
-- [x] 待定点 < 3（实际 0 个 — T-0123 已铺好 Redis 注入 + sync 服务）
+- [x] 待定点 < 3（实际 0 个 — T-0128 已铺好 Redis 注入 + sync 服务）
 
 ---
 
 ## 设计备忘（T-0124，2026-05-14 S2 产出）
 
-> 接力 T-0123/T-0125，覆盖设计方案 §2 — 周期性参数同步兜底。**最大工作量 L** — 含迁移 + LeaderElector 抽象 + PeriodicSyncer + 回写口径统一 + DI + 配置。
+> 接力 T-0128/T-0125，覆盖设计方案 §2 — 周期性参数同步兜底。**最大工作量 L** — 含迁移 + LeaderElector 抽象 + PeriodicSyncer + 回写口径统一 + DI + 配置。
 
 ### 1. 现状勘察
 
@@ -863,7 +863,7 @@ type PathBSyncStarter interface {
 
 ## 设计备忘（T-0126，2026-05-14 S2 产出）
 
-> 收官 F09 触发链 5/5。覆盖设计方案 §4 — 手动同步端点 + 前端按钮。**最小工作量 S**：复用 T-0123/T-0124/T-0125/T-0127 全套基础设施，仅需新端点 + narrow interface + 前端 1 行 URL 切换 + 旧端点下线。
+> 收官 F09 触发链 5/5。覆盖设计方案 §4 — 手动同步端点 + 前端按钮。**最小工作量 S**：复用 T-0128/T-0124/T-0125/T-0127 全套基础设施，仅需新端点 + narrow interface + 前端 1 行 URL 切换 + 旧端点下线。
 
 ### 1. 现状勘察（关键）
 
@@ -965,7 +965,7 @@ Response 503: Path B unavailable (no MappingSet) — 设备 productClass 未路�
 
 | Task | 触发源 | reason 标签 |
 |------|--------|-----------|
-| T-0123 | device.online 事件 | "device_online" |
+| T-0128 | device.online 事件 | "device_online" |
 | T-0124 | PeriodicSyncer ticker | "periodic" |
 | T-0125 | device.firmware.changed | "firmware_changed" |
 | **T-0126** | 手动端点 | **"manual"** |
