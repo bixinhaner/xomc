@@ -41,6 +41,13 @@
 
 **sprint-11 主线候选项稳定**：T-0090 a/b/c/d 4 sub-task + T-0101-d + T-0102-a 仍是 ~8-10d 容量主体；新 stretch 候选见 §3 扩展。
 
+### 2026-05-14 D-x 进度更新（T-0123 双闭环单日推进）
+
+| 事件 | 影响 sprint-11 主线 |
+|------|---------------------|
+| **T-0123-P0 数据层 + T-0123-P1 Console 后端 同日 pull-forward 全闭环**（PRD v2 APPROVED → S1-S7 双任务 7 阶段门控全过 → 5 commits 总计 42 files / +12207 LOC） | sprint-11 §2 #7 + #8 全 done；R-206 续推 Mitigating；**sprint-12 主线腾出 ~3d 容量**：原计划 sprint-12 主线 T-0123-P1 提前完成，sprint-12 可承接 T-0123-P2 Console 前端 + 部分 T-0123-P3 admin UI 准备 |
+| **R-206 状态续推 P0+P1 同日双闭环** | 风险仍 Mitigating（待 P2/P3/P4 完成全栈还原老 OMC 三栏交互）；下次复盘 sprint-11 close 2026-06-08 |
+
 ---
 
 ## 1. Sprint 目标候选（Sprint Goal）
@@ -69,8 +76,9 @@
 | **5** | **T-0101-d** | **状态机集成（pending → approved/rejected → running/cancelled）** ← sprint-11 draft 原误描述为 "步骤路由"（实为 T-0101-b） | Claude | S | F06 ops 4 眼审批闭环 / R-O01 mitigation | P0 | **done 2026-05-12（pull-forward sprint-10 buffer；commit `1743e8d1`；ApprovalService.Approve 删 TODO 兑现；详 `backlog/done/2026Q2.md`）** |
 | **6** | **T-0102-a** | **`/ops/commands/rpc` 实 RPC 派发到 acs**（替换 stub 占位） | Claude | M (~2d) | F06 ops P-1 通路 / unlock GWT V1 | P1 | planned |
 | **7** | **T-0123-P0** | **MML 老交互恢复 — 数据层**：migration 000095 + 4 admin repo + 13 endpoint + omcctl 工具 + seed/000096 2001 行 + seed/000097 RBAC | Claude | M (~3d) | T-0123 umbrella / R-206 Open→Mitigating / unlock T-0123-P1..P4 | P1 | **done 2026-05-14（pull-forward 进 sprint-10 buffer + sprint-11 主线全部单晚完成；commits `00a48cad`+`bf53cb3b`+`e0d31cce` 3 段 / 23 files / +7404 LOC；用户 migrate-seed 实测通过 ✓；详 `backlog/done/2026Q2.md`）** |
+| **8** | **T-0123-P1** | **MML 老交互恢复 — Console 后端**：5 endpoints (GET /mml/group-tree / GET /mml/commands/:id/sub-fields / POST /mml/render / POST /mml/parse / POST /mml/execute-statements) + Go renderer/parser/executor + ConsoleService 5 方法 + DI/Router | Claude | M (~3d) | T-0123 umbrella / R-206 Mitigating 续推 / unlock T-0123-P2 前端 | P1 | **done 2026-05-14（pull-forward 进 sprint-10 buffer + sprint-11 主线单晚完成 — 同日 P0+P1 双闭环；commits `3eb5cee6`+`0d5867ad` 2 段 / 19 files / +4803/-5 LOC；48 测试 race 全 PASS（mml 包覆盖率 24.9%→33.3% +8.4pp）；S5 W1/W2 in-loop 修复 ErrInvalidRequest sentinel + ADD passthrough 注释；5 e2e claim；详 `backlog/done/2026Q2.md`）** |
 
-**容量小计**：~11-13 工作日 / 11 可用工作日（**T-0123-P0 加入后 stretch 余量耗尽**；T-0102-a + T-0123-P0 = 5d 主线，T-0090 全 done 不占容量；总主线 5-7d；其余 stretch 候选区如 T-0103-c/T-0113 视 sprint-11 D5 进度再决定加塞）
+**容量小计**：~11-13 工作日 / 11 可用工作日（**T-0123-P0+P1 加入后 stretch 余量耗尽**；T-0102-a + T-0123-P0 + T-0123-P1 = 8d 主线，T-0090 全 done 不占容量；总主线 8-10d；其余 stretch 候选区如 T-0103-c/T-0113 视 sprint-11 D5 进度再决定加塞）
 
 **工作量规则**：
 - T-0090 a/b/c/d 4 sub-task 估算合计 ~4-6d
@@ -123,9 +131,12 @@ T-0113 强调：**纯文档/纪要清账**，无代码改动，可在 sprint 任
 **2026-06-04 周三**：T-0102-a 实施 D1
 **2026-06-05 周四**：T-0102-a D2 收尾 + GWT V1 实测
 **2026-06-06 周五**：T-0123-P0 D1 — migration 000095 + admin API 骨架；Stretch（T-0113 / T-0103-c）穿插
-**2026-06-08 周一**：T-0123-P0 D2 — `omcctl mml import-standard-xml` 工具 + seed import + 启动 loader 下线；sprint-11 close + sprint-12 plan（F06 ops P-1 通路收尾 + T-0103 前端 UI 整组 + **T-0123-P1/P2 排入 sprint-12 主线**）
+**2026-06-08 周一**：T-0123-P0 D2 — `omcctl mml import-standard-xml` 工具 + seed import + 启动 loader 下线；sprint-11 close + sprint-12 plan（F06 ops P-1 通路收尾 + T-0103 前端 UI 整组 + **T-0123-P2 前端排入 sprint-12 主线 / T-0123-P3 admin UI sprint-12 候选**）
 
-> **2026-05-14 实际推进备忘**：T-0123-P0 由 `/dev-pipeline pick T-0123-P0` 提前进 S1，正式 sprint 窗口前（2026-05-26 之前）若 sprint-10 buffer 富余可 pull-forward；否则按上述 D11-D12 时间槽执行。
+> **2026-05-14 实际推进备忘**：
+> - T-0123-P0 由 `/dev-pipeline pick T-0123-P0` 提前进 S1，sprint-10 buffer 富余 pull-forward 完成（3 commits / +7404 LOC）。
+> - **T-0123-P1 由 `/dev-pipeline pick T-0123-P1` 同日续接 S1-S7 全闭环**，2 commits / +4803 LOC / 48 测试 race 全 PASS；本质上把"原计划进 sprint-12 主线"的 P1 提前完成 → sprint-12 主线腾出 ~3d 容量，可承接 T-0123-P2 Console 前端 + 部分 T-0123-P3 admin Catalog UI 准备工作。
+> - R-206 状态续推 P0+P1 同日双闭环 → Mitigating 中（待 P2/P3/P4）。
 
 ---
 
