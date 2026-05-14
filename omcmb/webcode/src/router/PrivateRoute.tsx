@@ -7,6 +7,8 @@ interface PrivateRouteProps {
   children: React.ReactNode;
   /** T-0098-P4-02：true 时仅 super_admin 可访问，否则跳 /403。 */
   requireSuperAdmin?: boolean;
+  /** true 时仅 admin 角色可访问，否则跳 /403。 */
+  requireAdmin?: boolean;
 }
 
 // 路径白名单：即使不在用户菜单也可访问。
@@ -44,6 +46,7 @@ function isPathAllowedByMenu(routePaths: Set<string>, pathname: string): boolean
 export default function PrivateRoute({
   children,
   requireSuperAdmin = false,
+  requireAdmin = false,
 }: PrivateRouteProps) {
   const { isAuthenticated, accessToken, refreshToken, isTokenExpired, currentUser } =
     useUserStore();
@@ -68,6 +71,10 @@ export default function PrivateRoute({
 
   // T-0098-P4-02：super_admin 治理路由组守卫
   if (requireSuperAdmin && !currentUser?.isSuperAdmin) {
+    return <Navigate to="/403" replace />;
+  }
+
+  if (requireAdmin && currentUser?.role !== 'admin' && !currentUser?.isSuperAdmin) {
     return <Navigate to="/403" replace />;
   }
 

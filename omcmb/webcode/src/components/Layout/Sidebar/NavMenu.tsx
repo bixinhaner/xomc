@@ -279,7 +279,9 @@ export default function NavMenu({
   const { isMobile } = useResponsive();
   const t = useT();
   const intl = useIntl();
+  const currentUser = useUserStore((s) => s.currentUser);
   const isSuperAdmin = useUserStore((s) => s.currentUser?.isSuperAdmin === true);
+  const isAdmin = currentUser?.role === 'admin' || isSuperAdmin;
   // sys_configs.system.show_menu_icon → appStore.showMenuIcon（MenuBootstrap 启动期同步）。
   // 关掉后整个动态菜单不渲染图标，运维在「菜单管理」页顶部 Switch 改即时生效。
   const showMenuIcon = useAppStore((s) => s.showMenuIcon);
@@ -310,8 +312,14 @@ export default function NavMenu({
   // T-0098-P4-02：静态分支 NAV_CONFIG 按 super_admin 过滤（产品中心仅超管可见）。
   // 动态分支由后端 service 层完成同等过滤，无需前端二次处理。
   const filteredNav = useMemo(
-    () => NAV_CONFIG.filter((g) => !g.requireSuperAdmin || isSuperAdmin),
-    [isSuperAdmin],
+    () => NAV_CONFIG
+      .filter((g) => !g.requireSuperAdmin || isSuperAdmin)
+      .map((group) => ({
+        ...group,
+        children: group.children.filter((child) => !child.requireAdmin || isAdmin),
+      }))
+      .filter((group) => group.children.length > 0),
+    [isAdmin, isSuperAdmin],
   );
 
   const menuItems = useMemo(

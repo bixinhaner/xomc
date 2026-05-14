@@ -106,6 +106,10 @@ export const componentRegistry: Record<string, ComponentType> = {
   'software/FirmwareUpload': lazy(() => import('@/pages/software/FirmwareUpload')),
   'software/VersionRollback': lazy(() => import('@/pages/software/VersionRollback')),
 
+  // Unified File Transfer Preview
+  'transfer/FileTransferCenter': lazy(() => import('@/pages/transfer/FileTransferCenter')),
+  'transfer/TemplateDefinitionManagement': lazy(() => import('@/pages/transfer/TemplateDefinitionManagement')),
+
   // File Management
   'file/ConfigRetrieval': lazy(() => import('@/pages/file/ConfigRetrieval')),
   'file/ConfigDistribution': lazy(() => import('@/pages/file/ConfigDistribution')),

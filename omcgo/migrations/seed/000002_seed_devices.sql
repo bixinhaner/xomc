@@ -106,7 +106,7 @@ BEGIN
         VALUES (dev_id, dev_sn, oui_v, pc_v, mfr_v, model_v, 'cmcc', tech_v, status_v, fw_v, ('10.1.' || ((i/256)::int % 256) || '.' || (i%256))::inet, CASE WHEN status_v='offline' THEN 600 ELSE 300 END, site_v, lat_v, lon_v,
             CASE WHEN status_v IN ('active','maintenance') THEN NOW()-(random()*INTERVAL '30 minutes') WHEN status_v='offline' THEN NOW()-(random()*INTERVAL '7 days') ELSE NULL END,
             NOW()-(random()*INTERVAL '90 days'), NOW()-(random()*INTERVAL '7 days'))
-        ON CONFLICT (serial_number, carrier) DO NOTHING;
+        ON CONFLICT DO NOTHING;
     END LOOP;
     RAISE NOTICE 'CMCC devices: 12000 inserted';
 END;
@@ -139,7 +139,7 @@ BEGIN
         VALUES (dev_id, dev_sn, oui_v, pc_v, mfr_v, model_v, 'ctcc', tech_v, status_v, fw_v, ('10.2.' || ((i/256)::int % 256) || '.' || (i%256))::inet, CASE WHEN status_v='offline' THEN 600 ELSE 300 END, site_v, lat_v, lon_v,
             CASE WHEN status_v IN ('active','maintenance') THEN NOW()-(random()*INTERVAL '30 minutes') WHEN status_v='offline' THEN NOW()-(random()*INTERVAL '7 days') ELSE NULL END,
             NOW()-(random()*INTERVAL '90 days'), NOW()-(random()*INTERVAL '7 days'))
-        ON CONFLICT (serial_number, carrier) DO NOTHING;
+        ON CONFLICT DO NOTHING;
     END LOOP;
     RAISE NOTICE 'CTCC devices: 10000 inserted';
 END;
@@ -171,7 +171,7 @@ BEGIN
         VALUES (dev_id, dev_sn, oui_v, pc_v, mfr_v, model_v, 'cucc', tech_v, status_v, fw_v, ('10.3.' || ((i/256)::int % 256) || '.' || (i%256))::inet, CASE WHEN status_v='offline' THEN 600 ELSE 300 END, site_v, lat_v, lon_v,
             CASE WHEN status_v IN ('active','maintenance') THEN NOW()-(random()*INTERVAL '30 minutes') WHEN status_v='offline' THEN NOW()-(random()*INTERVAL '7 days') ELSE NULL END,
             NOW()-(random()*INTERVAL '90 days'), NOW()-(random()*INTERVAL '7 days'))
-        ON CONFLICT (serial_number, carrier) DO NOTHING;
+        ON CONFLICT DO NOTHING;
     END LOOP;
     RAISE NOTICE 'CUCC devices: 8000 inserted';
 END;
@@ -234,21 +234,21 @@ BEGIN
         ELSE tech_v := 'lte'; oui_v := '001A2B'; pc_v := 'SmallCell-LTE'; mfr_v := 'BaiCells'; model_v := 'BC-ENB-100'; END IF;
         INSERT INTO devices (id, serial_number, oui, product_class, manufacturer, model_name, carrier, technology, status, firmware_version, ip_address, inform_interval, site_name, latitude, longitude, last_inform_at, deleted_at, deleted_by, created_at, updated_at)
         VALUES (dev_id, dev_sn, oui_v, pc_v, mfr_v, model_v, 'cmcc', tech_v, 'offline', 'V1.0.0', ('192.168.1.'||(i+100))::inet, 600, 'Retired-Site', 39.0+i*0.01, 116.0+i*0.01, NOW()-INTERVAL '30 days', NOW()-(random()*INTERVAL '30 days'), 'admin', NOW()-INTERVAL '180 days', NOW()-INTERVAL '30 days')
-        ON CONFLICT (serial_number, carrier) DO NOTHING;
+        ON CONFLICT DO NOTHING;
     END LOOP;
     FOR i IN 1..10 LOOP
         dev_sn := 'CTCC-DEL-' || lpad(i::text, 4, '0');
         dev_id := uuid_generate_v5(ns, 'ctcc-del-' || i::text);
         INSERT INTO devices (id, serial_number, oui, product_class, manufacturer, model_name, carrier, technology, status, firmware_version, ip_address, inform_interval, site_name, latitude, longitude, last_inform_at, deleted_at, deleted_by, created_at, updated_at)
         VALUES (dev_id, dev_sn, '001E4F', 'FAP-LTE-200', 'ZTE', 'ZXSDR-B8200', 'ctcc', 'lte', 'offline', 'V2.0.0', ('192.168.2.'||(i+100))::inet, 600, 'Retired-Site', 31.0+i*0.01, 121.0+i*0.01, NOW()-INTERVAL '30 days', NOW()-(random()*INTERVAL '30 days'), 'admin', NOW()-INTERVAL '180 days', NOW()-INTERVAL '30 days')
-        ON CONFLICT (serial_number, carrier) DO NOTHING;
+        ON CONFLICT DO NOTHING;
     END LOOP;
     FOR i IN 1..10 LOOP
         dev_sn := 'CUCC-DEL-' || lpad(i::text, 4, '0');
         dev_id := uuid_generate_v5(ns, 'cucc-del-' || i::text);
         INSERT INTO devices (id, serial_number, oui, product_class, manufacturer, model_name, carrier, technology, status, firmware_version, ip_address, inform_interval, site_name, latitude, longitude, last_inform_at, deleted_at, deleted_by, created_at, updated_at)
         VALUES (dev_id, dev_sn, '58FB96', 'FAP-LTE-100', 'Comba', 'CB-ENB-200', 'cucc', 'lte', 'offline', 'V1.5.0', ('192.168.3.'||(i+100))::inet, 600, 'Retired-Site', 36.0+i*0.01, 117.0+i*0.01, NOW()-INTERVAL '30 days', NOW()-(random()*INTERVAL '30 days'), 'admin', NOW()-INTERVAL '180 days', NOW()-INTERVAL '30 days')
-        ON CONFLICT (serial_number, carrier) DO NOTHING;
+        ON CONFLICT DO NOTHING;
     END LOOP;
     RAISE NOTICE 'Recycled devices: 30 inserted';
 END;

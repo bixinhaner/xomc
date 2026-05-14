@@ -31,6 +31,8 @@ END $$;
 -- +goose StatementBegin
 DO $$
 BEGIN
+    -- 先删父表索引（依赖方），再删分区索引（被依赖方）
+    EXECUTE 'DROP INDEX IF EXISTS idx_devices_serial_number';
     EXECUTE 'DROP INDEX IF EXISTS devices_cmcc_serial_number_carrier_idx';
     EXECUTE 'DROP INDEX IF EXISTS devices_ctcc_serial_number_carrier_idx';
     EXECUTE 'DROP INDEX IF EXISTS devices_cucc_serial_number_carrier_idx';

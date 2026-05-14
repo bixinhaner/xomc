@@ -129,7 +129,7 @@ export default function UpgradePlan() {
   const [activeTab, setActiveTab] = useState<'task' | 'device'>('task');
 
   // ---- Fetch main upgrade tasks from backend ----
-  const { data: tasksData, isLoading: tasksLoading } = useUpgradeTasks({
+  const { data: tasksData, isLoading: tasksLoading, refetch: refetchTasks } = useUpgradeTasks({
     page,
     pageSize,
     taskType: 1, // Only show upgrade tasks (not rollback)
@@ -139,7 +139,7 @@ export default function UpgradePlan() {
   const [devicePage, setDevicePage] = useState(1);
   const [devicePageSize, setDevicePageSize] = useState(20);
   const [deviceFilters, setDeviceFilters] = useState<Record<string, unknown>>({});
-  const { data: deviceSubTasksData, isLoading: deviceSubTasksLoading } = useAllSubTasks({
+  const { data: deviceSubTasksData, isLoading: deviceSubTasksLoading, refetch: refetchDeviceSubTasks } = useAllSubTasks({
     page: devicePage,
     pageSize: devicePageSize,
     taskName: (deviceFilters.keyword as string) || undefined,
@@ -986,11 +986,14 @@ export default function UpgradePlan() {
       <Radio.Group
         value={activeTab}
         onChange={(e) => {
-          setActiveTab(e.target.value);
+          const nextTab = e.target.value;
+          setActiveTab(nextTab);
           setFilters({});
           setPage(1);
           setDeviceFilters({});
           setDevicePage(1);
+          if (nextTab === 'task') void refetchTasks();
+          else void refetchDeviceSubTasks();
         }}
         optionType="button"
         buttonStyle="solid"

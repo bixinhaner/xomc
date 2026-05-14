@@ -622,7 +622,7 @@ func (s *SoftwareService) ResumeUpgrade(ctx context.Context, taskID uuid.UUID) e
 
 	subTasks := make([]*UpgradeSubTask, len(subResult.Items))
 	for i := range subResult.Items {
-		subTasks[i] = &subResult.Items[i]
+		subTasks[i] = &subResult.Items[i].UpgradeSubTask
 	}
 
 	if err := s.taskRepo.UpdateStatus(ctx, taskID, TaskInProgress, ""); err != nil {

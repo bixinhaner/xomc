@@ -164,6 +164,7 @@ const messages: Record<string, string> = {
   'nav.backup':        '备份恢复',
   'nav.software':      '软件管理',
   'nav.file':          '文件管理',
+  'nav.transfer':      '文件传输',
   'nav.log':           '日志管理',
   'nav.system':        '系统管理',
   'nav.product':       '产品中心',
@@ -284,6 +285,8 @@ const messages: Record<string, string> = {
   'nav.file.mrRetrieval':        'MR文件采集',
   'nav.file.userFiles':          '用户文件',
   'nav.file.deviceFiles':        '设备文件',
+  'nav.transfer.taskCreate':     '任务创建',
+  'nav.transfer.templateConfig': '模板配置',
 
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Log

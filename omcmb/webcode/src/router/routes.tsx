@@ -93,6 +93,10 @@ const ActivationPlan     = React.lazy(() => import('@/pages/software/ActivationP
 const FirmwareUpload     = React.lazy(() => import('@/pages/software/FirmwareUpload'));
 const VersionRollback    = React.lazy(() => import('@/pages/software/VersionRollback'));
 
+// Unified File Transfer Preview
+const FileTransferCenter = React.lazy(() => import('@/pages/transfer/FileTransferCenter'));
+const TransferTemplateManagement = React.lazy(() => import('@/pages/transfer/TemplateDefinitionManagement'));
+
 // File Management
 const ConfigRetrieval    = React.lazy(() => import('@/pages/file/ConfigRetrieval'));
 const ConfigDistribution = React.lazy(() => import('@/pages/file/ConfigDistribution'));
@@ -186,6 +190,18 @@ function withSuspense(Component: React.ComponentType) {
 function withSuperAdmin(Component: React.ComponentType) {
   return (
     <PrivateRoute requireSuperAdmin>
+      <ErrorBoundary>
+        <Suspense fallback={<PageLoader />}>
+          <Component />
+        </Suspense>
+      </ErrorBoundary>
+    </PrivateRoute>
+  );
+}
+
+function withAdminRole(Component: React.ComponentType) {
+  return (
+    <PrivateRoute requireAdmin>
       <ErrorBoundary>
         <Suspense fallback={<PageLoader />}>
           <Component />
@@ -351,6 +367,10 @@ export const routes: RouteObject[] = [
 
       // Notifications
       { path: 'notifications',         element: withSuspense(NotificationsPage) },
+
+      // Transfer Management
+      { path: 'transfer/center',             element: withSuspense(FileTransferCenter) },
+      { path: 'transfer/template-management', element: withAdminRole(TransferTemplateManagement) },
 
       // Ops Management
       { path: 'ops/templates',         element: withSuspense(OpsTemplates) },

@@ -2,6 +2,7 @@ export interface NavChild {
   key: string;
   label: string;
   path: string;
+  requireAdmin?: boolean;
 }
 
 export interface NavGroup {
@@ -151,6 +152,15 @@ export const NAV_CONFIG: NavConfig = [
       // { key: 'sw-activate', label: 'nav.software.activation',   path: '/software/activation' },    // 隐藏激活计划
       { key: 'sw-upload',   label: 'nav.software.upgradeFile',     path: '/software/firmware' },
       { key: 'sw-rollback', label: 'nav.software.versionRollback', path: '/software/rollback' },
+    ],
+  },
+  {
+    key: 'transfer',
+    label: 'nav.transfer',
+    iconName: 'CloudServerOutlined',
+    children: [
+      { key: 'transfer-task-create', label: 'nav.transfer.taskCreate', path: '/transfer/center' },
+      { key: 'transfer-template-config', label: 'nav.transfer.templateConfig', path: '/transfer/template-management', requireAdmin: true },
     ],
   },
   // {

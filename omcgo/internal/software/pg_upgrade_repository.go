@@ -254,20 +254,30 @@ func (r *PgSubTaskRepository) Update(ctx context.Context, task *UpgradeSubTask) 
 	return nil
 }
 
-func (r *PgSubTaskRepository) List(ctx context.Context, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTask], error) {
+func (r *PgSubTaskRepository) List(ctx context.Context, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
 	return r.ListByTaskID(ctx, filter.TaskID, filter)
 }
 
-func (r *PgSubTaskRepository) ListByTaskID(ctx context.Context, taskID uuid.UUID, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTask], error) {
-	base := storage.Psql.Select(subTaskColumns...).From("upgrade_sub_tasks")
-	countBase := storage.Psql.Select("COUNT(*)").From("upgrade_sub_tasks")
+func (r *PgSubTaskRepository) ListByTaskID(ctx context.Context, taskID uuid.UUID, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
+	cols := make([]string, len(subTaskColumns))
+	cols[0] = "ust." + subTaskColumns[0]
+	for i := 1; i < len(subTaskColumns); i++ {
+		cols[i] = "ust." + subTaskColumns[i]
+	}
+	cols = append(cols, "ut.task_name")
 
-	base = base.Where(sq.Eq{"task_id": taskID})
-	countBase = countBase.Where(sq.Eq{"task_id": taskID})
+	base := storage.Psql.Select(cols...).
+		From("upgrade_sub_tasks ust").
+		Join("upgrade_tasks ut ON ust.task_id = ut.id")
+	countBase := storage.Psql.Select("COUNT(*)").
+		From("upgrade_sub_tasks ust").
+		Where(sq.Eq{"ust.task_id": taskID})
+
+	base = base.Where(sq.Eq{"ust.task_id": taskID})
 
 	if filter.Status != nil {
-		base = base.Where(sq.Eq{"status": *filter.Status})
-		countBase = countBase.Where(sq.Eq{"status": *filter.Status})
+		base = base.Where(sq.Eq{"ust.status": *filter.Status})
+		countBase = countBase.Where(sq.Eq{"ust.status": *filter.Status})
 	}
 
 	countSQL, countArgs, err := countBase.ToSql()
@@ -293,7 +303,7 @@ func (r *PgSubTaskRepository) ListByTaskID(ctx context.Context, taskID uuid.UUID
 	offset := (page - 1) * pageSize
 
 	query, args, err := base.
-		OrderBy("created_at DESC").
+		OrderBy("ust.created_at DESC").
 		Limit(uint64(pageSize)).
 		Offset(uint64(offset)).
 		ToSql()
@@ -307,13 +317,65 @@ func (r *PgSubTaskRepository) ListByTaskID(ctx context.Context, taskID uuid.UUID
 	}
 	defer rows.Close()
 
-	var items []UpgradeSubTask
+	var items []UpgradeSubTaskWithTaskName
 	for rows.Next() {
-		t, err := scanSubTaskRow(rows)
+		var t UpgradeSubTaskWithTaskName
+		var firmwareID sql.NullString
+		var errorMsg, deviceSN, oriVer, destVer, cmdKey, failReason, preSuspend, taskName sql.NullString
+		var startedAt, completedAt sql.NullTime
+		var createdAt, updatedAt time.Time
+
+		err := rows.Scan(
+			&t.ID, &t.TaskID, &t.DeviceID, &firmwareID, &t.Status,
+			&errorMsg, &t.RetryCount, &t.MaxRetries,
+			&deviceSN, &oriVer, &destVer,
+			&cmdKey, &failReason, &preSuspend,
+			&startedAt, &completedAt, &createdAt, &updatedAt,
+			&taskName,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("scan sub-task row: %w", err)
 		}
-		items = append(items, *t)
+
+		if firmwareID.Valid {
+			fid, _ := uuid.Parse(firmwareID.String)
+			t.FirmwareID = &fid
+		}
+		if errorMsg.Valid {
+			t.ErrorMessage = errorMsg.String
+		}
+		if deviceSN.Valid {
+			t.DeviceSN = deviceSN.String
+		}
+		if oriVer.Valid {
+			t.OriVersion = oriVer.String
+		}
+		if destVer.Valid {
+			t.DestVersion = destVer.String
+		}
+		if cmdKey.Valid {
+			t.CommandKey = cmdKey.String
+		}
+		if failReason.Valid {
+			t.FailureReason = failReason.String
+		}
+		if preSuspend.Valid {
+			t.PreSuspendStatus = preSuspend.String
+		}
+		if startedAt.Valid {
+			jt := JSONTime(startedAt.Time)
+			t.StartedAt = &jt
+		}
+		if completedAt.Valid {
+			jt := JSONTime(completedAt.Time)
+			t.CompletedAt = &jt
+		}
+		if taskName.Valid {
+			t.TaskName = taskName.String
+		}
+		t.CreatedAt = JSONTime(createdAt)
+		t.UpdatedAt = JSONTime(updatedAt)
+		items = append(items, t)
 	}
 
 	totalPages := int(total) / pageSize
@@ -321,7 +383,7 @@ func (r *PgSubTaskRepository) ListByTaskID(ctx context.Context, taskID uuid.UUID
 		totalPages++
 	}
 
-	return &model.ListResponse[UpgradeSubTask]{
+	return &model.ListResponse[UpgradeSubTaskWithTaskName]{
 		Items:      items,
 		Total:      total,
 		Page:       page,

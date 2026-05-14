@@ -45,17 +45,24 @@ ON CONFLICT DO NOTHING;
 --    分别由 seed/000066_seed_role_menus_builtin.sql 与 seed/000067_seed_role_api_permissions_viewer.sql
 --    （及 v1.0 路线 admin/operator 全集 seed）兜底。
 
--- 6. OUI 厂商注册
-INSERT INTO oui_registry (oui, manufacturer, short_name, country) VALUES
-    ('00E0FC', 'Huawei Technologies Co., Ltd.', 'Huawei', 'China'),
-    ('001E7E', 'ZTE Corporation', 'ZTE', 'China'),
-    ('000DB9', 'Ericsson AB', 'Ericsson', 'Sweden'),
-    ('0004F2', 'Nokia Corporation', 'Nokia', 'Finland'),
-    ('58FB96', 'Comba Telecom Systems', 'Comba', 'China'),
-    ('D4612E', 'Datang Mobile Communications', 'Datang', 'China'),
-    ('00259C', 'Cisco-Linksys LLC', 'Cisco', 'USA'),
-    ('7C7A53', 'Ruijie Networks Co., Ltd.', 'Ruijie', 'China')
-ON CONFLICT (oui) DO NOTHING;
+-- 6. OUI 厂商注册（000063 已 DROP oui_registry，条件跳过）
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'oui_registry') THEN
+        INSERT INTO oui_registry (oui, manufacturer, short_name, country) VALUES
+            ('00E0FC', 'Huawei Technologies Co., Ltd.', 'Huawei', 'China'),
+            ('001E7E', 'ZTE Corporation', 'ZTE', 'China'),
+            ('000DB9', 'Ericsson AB', 'Ericsson', 'Sweden'),
+            ('0004F2', 'Nokia Corporation', 'Nokia', 'Finland'),
+            ('58FB96', 'Comba Telecom Systems', 'Comba', 'China'),
+            ('D4612E', 'Datang Mobile Communications', 'Datang', 'China'),
+            ('00259C', 'Cisco-Linksys LLC', 'Cisco', 'USA'),
+            ('7C7A53', 'Ruijie Networks Co., Ltd.', 'Ruijie', 'China')
+        ON CONFLICT (oui) DO NOTHING;
+    END IF;
+END $$;
+-- +goose StatementEnd
 
 -- 7. 默认设备组
 INSERT INTO device_groups (id, name, parent_id, level, is_default, status, remark, created_by) VALUES
@@ -93,8 +100,12 @@ INSERT INTO kpi_definitions (id, name, display_name, formula, unit, category, ca
 ('30000000-0002-4000-8000-000000000006', 'NR_RLC_LOSS_RATE', 'NR RLC丢包率', '(rlc_retx_dl / rlc_tx_dl) * 100', '%', 'retainability', NULL, 'nr', '["rlc_retx_dl", "rlc_tx_dl"]'::jsonb)
 ON CONFLICT (name) DO NOTHING;
 
--- 9. 默认数据模型 (carrier_default scope)
-INSERT INTO data_model_definitions (id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description) VALUES
+-- 9. 默认数据模型（000063 已 DROP data_model_definitions，条件跳过）
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'data_model_definitions') THEN
+        INSERT INTO data_model_definitions (id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description) VALUES
 ('30000047-0001-4000-8000-000000000001', 'cmcc', 'lte', '1.0', NULL, NULL, 'carrier_default', 'active', true, '{"Device.DeviceInfo": {"access": "r"}, "Device.DeviceInfo.SoftwareVersion": {"access": "r", "type": "string"}, "Device.DeviceInfo.HardwareVersion": {"access": "r", "type": "string"}, "Device.ManagementServer": {"access": "rw"}, "Device.Services.FAPService.1": {"access": "rw"}, "Device.Services.FAPService.1.FAPControl.LTE": {"access": "rw"}, "Device.FAP.GPS": {"access": "r"}}'::jsonb, '中国移动 LTE 默认数据模型')
 ON CONFLICT DO NOTHING;
 
@@ -119,6 +130,9 @@ ON CONFLICT DO NOTHING;
 INSERT INTO data_model_definitions (id, carrier, technology, version, oui, product_class, scope, status, is_active, parameter_tree, description) VALUES
 ('30000047-0003-4000-8000-000000000001', 'cmcc', 'lte', '1.0', '001A2B', 'SmallCell-LTE', 'product', 'active', true, '{"Device.DeviceInfo": {"access": "r"}, "Device.DeviceInfo.SoftwareVersion": {"access": "r", "type": "string"}, "Device.DeviceInfo.HardwareVersion": {"access": "r", "type": "string"}, "Device.ManagementServer": {"access": "rw"}, "Device.Services.FAPService.1": {"access": "rw"}, "Device.Services.FAPService.1.FAPControl.LTE": {"access": "rw"}, "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus": {"access": "rw", "type": "boolean"}, "Device.FAP.GPS": {"access": "r"}}'::jsonb, 'BaiCells SmallCell-LTE 产品数据模型')
 ON CONFLICT DO NOTHING;
+    END IF;
+END $$;
+-- +goose StatementEnd
 
 -- 10. 字典数据
 INSERT INTO sys_dictionaries (name, type, status, description) VALUES
@@ -132,7 +146,8 @@ ON CONFLICT DO NOTHING;
 
 INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUES
 ('男', '1', 1, (SELECT id FROM sys_dictionaries WHERE type = 'gender')),
-('女', '2', 2, (SELECT id FROM sys_dictionaries WHERE type = 'gender'));
+('女', '2', 2, (SELECT id FROM sys_dictionaries WHERE type = 'gender'))
+ON CONFLICT DO NOTHING;
 
 INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUES
 ('int', '1', 1, (SELECT id FROM sys_dictionaries WHERE type = 'int')),
@@ -147,20 +162,25 @@ INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUE
 ('uint32', '10', 10, (SELECT id FROM sys_dictionaries WHERE type = 'int')),
 ('uint64', '11', 11, (SELECT id FROM sys_dictionaries WHERE type = 'int')),
 ('uintptr', '12', 12, (SELECT id FROM sys_dictionaries WHERE type = 'int')),
-('byte', '13', 13, (SELECT id FROM sys_dictionaries WHERE type = 'int'));
+('byte', '13', 13, (SELECT id FROM sys_dictionaries WHERE type = 'int'))
+ON CONFLICT DO NOTHING;
 
 INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUES
-('time.Time', '1', 1, (SELECT id FROM sys_dictionaries WHERE type = 'time.Time'));
+('time.Time', '1', 1, (SELECT id FROM sys_dictionaries WHERE type = 'time.Time'))
+ON CONFLICT DO NOTHING;
 
 INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUES
 ('float32', '1', 1, (SELECT id FROM sys_dictionaries WHERE type = 'float64')),
-('float64', '2', 2, (SELECT id FROM sys_dictionaries WHERE type = 'float64'));
+('float64', '2', 2, (SELECT id FROM sys_dictionaries WHERE type = 'float64'))
+ON CONFLICT DO NOTHING;
 
 INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUES
-('string', '1', 1, (SELECT id FROM sys_dictionaries WHERE type = 'string'));
+('string', '1', 1, (SELECT id FROM sys_dictionaries WHERE type = 'string'))
+ON CONFLICT DO NOTHING;
 
 INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id) VALUES
-('bool', '1', 1, (SELECT id FROM sys_dictionaries WHERE type = 'bool'));
+('bool', '1', 1, (SELECT id FROM sys_dictionaries WHERE type = 'bool'))
+ON CONFLICT DO NOTHING;
 
 -- 11. 系统配置
 INSERT INTO sys_configs (category, key, value, value_type, description, is_public) VALUES
@@ -185,7 +205,7 @@ DELETE FROM users WHERE username = 'admin';
 -- v0.2 起仅 admin 为 is_system=TRUE，operator/viewer 改为非系统角色 → 按名称精确删除。
 DELETE FROM roles WHERE name IN ('admin', 'operator', 'viewer');
 DELETE FROM kpi_definitions;
-DELETE FROM data_model_definitions;
-DELETE FROM oui_registry;
+DELETE FROM data_model_definitions WHERE 1=0;  -- 表已 DROP（000063），跳过
+DELETE FROM oui_registry WHERE 1=0;             -- 表已 DROP（000063），跳过
 DELETE FROM device_group_members WHERE group_id = '00000000-0000-0000-0000-000000000002';
 DELETE FROM device_groups WHERE is_default = TRUE;

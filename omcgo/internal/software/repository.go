@@ -41,8 +41,8 @@ type SubTaskRepository interface {
 	UpdateStatus(ctx context.Context, id uuid.UUID, status UpgradeState, errorMsg string) error
 	UpdateStatusWithCode(ctx context.Context, id uuid.UUID, status UpgradeState, errorMsg string, code FailureCode) error
 	Update(ctx context.Context, task *UpgradeSubTask) error
-	List(ctx context.Context, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTask], error)
-	ListByTaskID(ctx context.Context, taskID uuid.UUID, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTask], error)
+	List(ctx context.Context, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error)
+	ListByTaskID(ctx context.Context, taskID uuid.UUID, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error)
 	ListAll(ctx context.Context, filter AllSubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error)
 	GetActiveByDeviceID(ctx context.Context, deviceID uuid.UUID) (*UpgradeSubTask, error)
 	GetByCommandKey(ctx context.Context, commandKey string) (*UpgradeSubTask, error)

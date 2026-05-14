@@ -164,6 +164,7 @@ const messages: Record<string, string> = {
   'nav.backup':        'Backup & Restore',
   'nav.software':      'Software Management',
   'nav.file':          'File Management',
+  'nav.transfer':      'File Transfer',
   'nav.log':           'Log Management',
   'nav.system':        'System Management',
   'nav.product':       'Product Center',
@@ -283,6 +284,8 @@ const messages: Record<string, string> = {
   'nav.file.mrRetrieval':        'MR Retrieval',
   'nav.file.userFiles':          'User Files',
   'nav.file.deviceFiles':        'Device Files',
+  'nav.transfer.taskCreate':     'Task Creation',
+  'nav.transfer.templateConfig': 'Template Configuration',
 
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Log
