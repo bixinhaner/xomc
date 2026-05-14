@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/event"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/pkg/tr069"
@@ -713,4 +714,146 @@ func TestFindParamValue(t *testing.T) {
 		val := findParamValue(nil, "Device.DeviceInfo.SoftwareVersion")
 		assert.Equal(t, "", val)
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Tests: T-0123 device.online 事件 + firmware 二选一挡板
+// ---------------------------------------------------------------------------
+
+// newTestDeviceServiceWithBus 构造一个挂事件总线的 DeviceService（T-0123 测试用）。
+func newTestDeviceServiceWithBus(deviceRepo *mockDeviceRepo, paramRepo *mockParamRepo, bus event.EventBus) *DeviceService {
+	return NewDeviceService(deviceRepo, paramRepo, nil, bus, zap.NewNop())
+}
+
+// captureOnlineEvent 订阅 device.online 主题，把收到的事件压进 channel。
+func captureOnlineEvent(t *testing.T, bus event.EventBus) chan event.Event {
+	t.Helper()
+	ch := make(chan event.Event, 1)
+	_, err := bus.Subscribe(event.SubjectDeviceOnline, func(_ context.Context, evt event.Event) error {
+		ch <- evt
+		return nil
+	})
+	require.NoError(t, err)
+	return ch
+}
+
+func TestUpdateFromInform_OfflineToActive_PublishesOnlineEvent(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:              deviceID,
+				SerialNumber:    sn,
+				ProductClass:    "SmallCell",
+				Status:          model.DeviceOffline,
+				FirmwareVersion: "1.0.0", // same as Inform → no firmware change
+				InformInterval:  300,
+			}, nil
+		},
+		updateFn: func(_ context.Context, _ *model.Device) error { return nil },
+	}
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	onlineCh := captureOnlineEvent(t, bus)
+	svc := newTestDeviceServiceWithBus(deviceRepo, &mockParamRepo{}, bus)
+
+	dev, err := svc.UpdateFromInform(context.Background(), sampleInform("SN-ONLINE-001"))
+	require.NoError(t, err)
+	require.NotNil(t, dev)
+	assert.Equal(t, model.DeviceActive, dev.Status)
+
+	select {
+	case evt := <-onlineCh:
+		assert.Equal(t, event.SubjectDeviceOnline, evt.Subject)
+		var payload DeviceOnlineEvent
+		require.NoError(t, evt.DecodePayload(&payload))
+		assert.Equal(t, deviceID, payload.DeviceID)
+		assert.Equal(t, "SN-ONLINE-001", payload.SerialNumber)
+		assert.Equal(t, "SmallCell", payload.ProductClass)
+		assert.Equal(t, "1.0.0", payload.SwVersion)
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected device.online event not published within 2s")
+	}
+}
+
+func TestUpdateFromInform_FirmwareChangedSuppressesOnlineEvent(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:              deviceID,
+				SerialNumber:    sn,
+				ProductClass:    "SmallCell",
+				Status:          model.DeviceOffline,
+				FirmwareVersion: "0.9.0", // != Inform "1.0.0" → firmware changed
+				InformInterval:  300,
+			}, nil
+		},
+		updateFn: func(_ context.Context, _ *model.Device) error { return nil },
+	}
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	onlineCh := captureOnlineEvent(t, bus)
+	svc := newTestDeviceServiceWithBus(deviceRepo, &mockParamRepo{}, bus)
+
+	dev, err := svc.UpdateFromInform(context.Background(), sampleInform("SN-FW-001"))
+	require.NoError(t, err)
+	require.NotNil(t, dev)
+	assert.Equal(t, "1.0.0", dev.FirmwareVersion)
+	assert.Equal(t, model.DeviceActive, dev.Status)
+
+	// 挡板：firmware 变化时不发 device.online（T-0125 会在此处发 firmware.changed）
+	select {
+	case evt := <-onlineCh:
+		t.Fatalf("expected NO device.online event when firmware changed, got %v", evt.Subject)
+	case <-time.After(200 * time.Millisecond):
+		// 期望路径：等不到事件即视为挡板生效
+	}
+}
+
+func TestUpdateFromInform_ActiveStaysActive_NoOnlineEvent(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:              deviceID,
+				SerialNumber:    sn,
+				ProductClass:    "SmallCell",
+				Status:          model.DeviceActive, // already active
+				FirmwareVersion: "1.0.0",
+				InformInterval:  300,
+			}, nil
+		},
+		updateFn: func(_ context.Context, _ *model.Device) error { return nil },
+	}
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	onlineCh := captureOnlineEvent(t, bus)
+	svc := newTestDeviceServiceWithBus(deviceRepo, &mockParamRepo{}, bus)
+
+	_, err := svc.UpdateFromInform(context.Background(), sampleInform("SN-STILL-ACTIVE"))
+	require.NoError(t, err)
+
+	select {
+	case evt := <-onlineCh:
+		t.Fatalf("expected NO device.online event when active stays active, got %v", evt.Subject)
+	case <-time.After(200 * time.Millisecond):
+		// 期望路径
+	}
+}
+
+func TestUpdateFromInform_NilEventBus_NoCrash(t *testing.T) {
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:              uuid.New(),
+				SerialNumber:    sn,
+				Status:          model.DeviceOffline,
+				FirmwareVersion: "1.0.0",
+				InformInterval:  300,
+			}, nil
+		},
+		updateFn: func(_ context.Context, _ *model.Device) error { return nil },
+	}
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{}) // eventBus = nil
+
+	_, err := svc.UpdateFromInform(context.Background(), sampleInform("SN-NIL-BUS"))
+	assert.NoError(t, err)
 }

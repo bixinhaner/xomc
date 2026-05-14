@@ -15,6 +15,7 @@ import (
 	"github.com/omcgo/omcgo/pkg/tr069"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -31,9 +32,33 @@ type SyncService struct {
 	paramRegistry        *parammodel.Registry
 	productRegistry      *product.Registry
 	paramRegistryEnabled bool
+	redisClient          redis.UniversalClient
 	config               appconfig.AutoSyncConfig
 	batchSize            int
 	logger               *zap.Logger
+}
+
+// SetRedisClient 注入 Redis 客户端供 Path B 同步 reason 标签传递与差异日志使用（T-0123/T-0127）。
+// nil 表示禁用 reason 标签（差异日志 reason 字段会降级为 "unknown"，仍正常输出）。
+func (s *SyncService) SetRedisClient(client redis.UniversalClient) *SyncService {
+	s.redisClient = client
+	return s
+}
+
+// pathBOptions 收集 StartPathBSync 的可选配置（T-0123 引入）。
+type pathBOptions struct {
+	reason string // "device_online" / "periodic" / "firmware_changed" / "manual" / ""
+}
+
+// PathBOption 是 StartPathBSync 的 functional option。
+type PathBOption func(*pathBOptions)
+
+// WithReason 设置 Path B 同步触发原因。HandleSyncResultPathB 完成时据此打差异日志（T-0127）。
+// reason 通过 Redis 临时映射 provision:syncreason:{deviceID} 传递，TTL=10min。
+func WithReason(reason string) PathBOption {
+	return func(o *pathBOptions) {
+		o.reason = reason
+	}
 }
 
 // NewSyncService creates a new SyncService.

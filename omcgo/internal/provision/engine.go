@@ -16,6 +16,7 @@ import (
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/pkg/tr069"
+	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
@@ -38,6 +39,7 @@ type ProvisioningEngine struct {
 	syncService        *SyncService
 	productRegistry    *product.Registry
 	productRepo        *product.PgRepository
+	redisClient        redis.UniversalClient
 	config             appconfig.ProvisionConfig
 	logger             *zap.Logger
 }
@@ -73,6 +75,12 @@ func (e *ProvisioningEngine) SetModelUploadService(svc *ModelUploadService) {
 // SetSyncService sets the sync service for parameter synchronization.
 func (e *ProvisioningEngine) SetSyncService(svc *SyncService) {
 	e.syncService = svc
+}
+
+// SetRedisClient 注入 Redis 客户端供 device.online 节流与 Path B 同步差异日志使用（T-0123）。
+// nil 表示禁用 token bucket 节流（仍可正常处理事件，幂等性由下游 GPV/UPSERT 保证）。
+func (e *ProvisioningEngine) SetRedisClient(client redis.UniversalClient) {
+	e.redisClient = client
 }
 
 // SetDeduper enables idempotent event handling for the provisioning engine.
@@ -176,6 +184,97 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 
 	// T-0098 P5-01：GPN response 订阅删除（two-phase sync 已移除）。
 
+	// T-0123: 订阅 device.online — 已存在设备从 offline 恢复时触发 Path B 全量同步。
+	onlineHandler := func(ctx context.Context, evt event.Event) error {
+		var onlineEvt device.DeviceOnlineEvent
+		if err := evt.DecodePayload(&onlineEvt); err != nil {
+			e.logger.Error("decode device.online event", zap.Error(err),
+				zap.String("event_id", evt.ID))
+			return err
+		}
+		return e.HandleDeviceOnline(ctx, onlineEvt)
+	}
+	if e.deduper != nil {
+		onlineHandler = e.deduper.Wrap("provision-online-sync", onlineHandler)
+	}
+	if _, err := bus.QueueSubscribe(event.SubjectDeviceOnline, "provision-online-sync", onlineHandler); err != nil {
+		e.logger.Warn("failed to subscribe to device.online", zap.Error(err))
+	} else {
+		e.logger.Info("provisioning engine subscribed to device.online events")
+	}
+
+	return nil
+}
+
+// HandleDeviceOnline 处理已存在设备从 offline 恢复 active 的事件（T-0123）。
+//
+// 与 HandleBootstrap 的差异：不重跑 FileType=11 上传与产品路由（首次工作已完成），
+// 直接调 syncService.StartPathBSync 拉一遍参数检测离线期间漂移。
+//
+// 节流：Redis token bucket key=provision:online_sync:{deviceID} TTL=60s，
+// 60s 内同一设备的重复 device.online 事件直接跳过（防 ACS 抖动/multiple Inform 触发）。
+func (e *ProvisioningEngine) HandleDeviceOnline(ctx context.Context, evt device.DeviceOnlineEvent) error {
+	ctx, span := tracing.StartSpan(ctx, tracing.ProvisionTracerName, "Provision HandleDeviceOnline",
+		attribute.String("provision.device_sn", evt.SerialNumber),
+		attribute.String("provision.device_id", evt.DeviceID.String()),
+	)
+	defer span.End()
+
+	// Token bucket 节流：60s 内重复 device.online 跳过
+	if e.redisClient != nil {
+		key := fmt.Sprintf("provision:online_sync:%s", evt.DeviceID.String())
+		acquired, err := e.redisClient.SetNX(ctx, key, "1", 60*time.Second).Result()
+		if err != nil {
+			// Redis 失败不阻断主流程：log warn 后继续（容忍 Redis 抖动期间允许重复同步）
+			e.logger.Warn("device.online token bucket SetNX failed",
+				zap.String("device_id", evt.DeviceID.String()),
+				zap.Error(err))
+		} else if !acquired {
+			e.logger.Debug("device.online throttled by token bucket",
+				zap.String("device_id", evt.DeviceID.String()),
+				zap.String("serial_number", evt.SerialNumber))
+			return nil
+		}
+	}
+
+	if e.syncService == nil {
+		e.logger.Debug("device.online received but syncService unavailable, skipping",
+			zap.String("device_id", evt.DeviceID.String()))
+		return nil
+	}
+
+	dev, err := e.deviceService.GetDevice(ctx, evt.DeviceID)
+	if err != nil {
+		e.logger.Warn("device.online: lookup device failed",
+			zap.String("device_id", evt.DeviceID.String()),
+			zap.Error(err))
+		return nil
+	}
+	if dev == nil {
+		e.logger.Warn("device.online: device not found, skipping",
+			zap.String("device_id", evt.DeviceID.String()))
+		return nil
+	}
+
+	// Reason 标签写 Redis 临时映射，供 HandleSyncResultPathB 完成时读取打差异日志（T-0127）。
+	sourceID := fmt.Sprintf("device_online:%s", evt.DeviceID.String())
+	used, err := e.syncService.StartPathBSync(ctx, dev, sourceID, WithReason("device_online"))
+	if err != nil {
+		e.logger.Warn("device.online: StartPathBSync failed",
+			zap.String("device_id", evt.DeviceID.String()),
+			zap.Error(err))
+		return nil
+	}
+	if !used {
+		e.logger.Debug("device.online: Path B unavailable (no MappingSet), skipping",
+			zap.String("device_id", evt.DeviceID.String()))
+		return nil
+	}
+
+	e.logger.Info("device.online: Path B sync initiated",
+		zap.String("device_id", evt.DeviceID.String()),
+		zap.String("serial_number", evt.SerialNumber),
+	)
 	return nil
 }
 

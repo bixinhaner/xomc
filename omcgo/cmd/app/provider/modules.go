@@ -133,6 +133,9 @@ func initProvisionModule(c *Container) error {
 		c.Carriers, c.TaskSvc, c.EventBus, c.Cfg.Provision, logger,
 	)
 	provisionEngine.SetDeduper(c.Deduper)
+	// T-0123: 注入 Redis 客户端供 device.online 节流（provision:online_sync:{deviceID} TTL=60s）+
+	// Path B 同步 reason 标签（provision:syncreason:{deviceID} TTL=10min）。
+	provisionEngine.SetRedisClient(c.Redis)
 	// B1：identify 阶段路由产品并回写 product_id/param_model_id。
 	if c.ProductRegistry != nil && c.ProductRepo != nil {
 		provisionEngine.SetProductBinder(c.ProductRegistry, c.ProductRepo)
@@ -153,7 +156,7 @@ func initProvisionModule(c *Container) error {
 		syncSvc := provision.NewSyncService(
 			c.ParamRepo, discoveryLogRepo, c.TaskSvc, planStore,
 			c.Cfg.Provision.AutoSync, c.Cfg.Provision.AutoSync.GPVBatchSize, logger,
-		).WithParamRegistry(c.ParamRegistry, c.ProductRegistry, true)
+		).WithParamRegistry(c.ParamRegistry, c.ProductRegistry, true).SetRedisClient(c.Redis)
 		provisionEngine.SetSyncService(syncSvc)
 		logger.Info("auto-sync service enabled")
 	}

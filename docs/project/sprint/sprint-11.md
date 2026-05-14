@@ -100,8 +100,9 @@
 | 4 | T-0103-d | Templates 页接 API + Edit modal（模板导入导出可后置）| M (~1d) | 同上 | 中 |
 | 5 | T-0102-b | MML 命令流式输出（多帧推送 SSE）| M (~1.5d) | sprint-12 主线，可仅做调研放 stretch | 低（sprint-12 主线，不进 sprint-11 committed）|
 | 6 | T-0102-c | per-device RPC 限流（rate.Limiter）| S (~0.5d) | 同 T-0102-b | 低 |
+| 7 | T-0123 + T-0127（合并）| F09 参数同步触发链 §1+§5 — device.online 事件 + firmware 二选一挡板 + Provision 订阅 + Redis token bucket + Path B 差异日志（umbrella PRD `prd/F09-param-sync-trigger-chain.md`）| S (~0.5-1d) | 2026-05-14 user 拍板 ad-hoc 加入 stretch；T-0125 deps 本任务（共享 UpdateFromInform 改造） | **中** — 给后续 T-0124/T-0125/T-0126 提供 device.online 事件 + Path B 完成回调差异日志基础设施 |
 
-**Stretch 容量约束**：sprint-11 主线 ~8-10d / 总 11d → 实际 stretch 余量 1-3d。**建议吸纳顺序**：T-0103-c（同 sprint 配对 T-0102-a 天然，1d 内可做）→ T-0113 清账（0.5d）→ T-0103-b 或 T-0103-d（1d）。**不应**今晚就升 committed — 等 sprint-11 D5 看主线进度再加塞。
+**Stretch 容量约束**：sprint-11 主线 ~8-10d / 总 11d → 实际 stretch 余量 1-3d。**建议吸纳顺序**：T-0103-c（同 sprint 配对 T-0102-a 天然，1d 内可做）→ T-0113 清账（0.5d）→ T-0103-b 或 T-0103-d（1d）→ **T-0123+T-0127 合并（2026-05-14 加入；S 估算，给 F09 后续 3 task 提供基础设施）**。**不应**今晚就升 committed — 等 sprint-11 D5 看主线进度再加塞。
 
 T-0113 强调：**纯文档/纪要清账**，无代码改动，可在 sprint 任意阶段穿插做。
 

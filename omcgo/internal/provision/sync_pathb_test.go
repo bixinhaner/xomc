@@ -1,12 +1,21 @@
 package provision
 
 import (
+	"context"
+	"errors"
 	"sort"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/omcgo/omcgo/internal/config/parammodel"
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 func TestExtractStorablePrefixes_HappyPath(t *testing.T) {
@@ -175,4 +184,234 @@ func TestInstantiateStandardPath_NoPlaceholderInTemplate(t *testing.T) {
 		"Device.WiFi.SSID.Enable",
 	)
 	assert.Equal(t, "Device.WiFi.SSID.Enable", got)
+}
+
+// ---------------------------------------------------------------------------
+// Tests: T-0127 Path B 同步差异日志
+// ---------------------------------------------------------------------------
+
+// fakeParamRepoForDiff 提供 GetByDevice 桩供 snapshotStandardPaths 测试用。
+type fakeParamRepoForDiff struct {
+	deviceParameterRepoStub
+	paths []string
+	err   error
+}
+
+func (f *fakeParamRepoForDiff) GetByDevice(_ context.Context, _ uuid.UUID) ([]model.DeviceParameter, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	params := make([]model.DeviceParameter, 0, len(f.paths))
+	for _, p := range f.paths {
+		params = append(params, model.DeviceParameter{ParameterPath: p})
+	}
+	return params, nil
+}
+
+// deviceParameterRepoStub 实现 device.DeviceParameterRepository 接口的空桩（仅用 GetByDevice）。
+type deviceParameterRepoStub struct{}
+
+func (deviceParameterRepoStub) BatchUpsert(_ context.Context, _ uuid.UUID, _ []model.DeviceParameter) error {
+	return nil
+}
+func (deviceParameterRepoStub) GetByDevice(_ context.Context, _ uuid.UUID) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
+func (deviceParameterRepoStub) GetByPath(_ context.Context, _ uuid.UUID, _ string) (*model.DeviceParameter, error) {
+	return nil, nil
+}
+func (deviceParameterRepoStub) DeleteByDevice(_ context.Context, _ uuid.UUID) error { return nil }
+func (deviceParameterRepoStub) GetByPathPrefix(_ context.Context, _ uuid.UUID, _ string) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
+func (deviceParameterRepoStub) CountByPathPrefix(_ context.Context, _ uuid.UUID, _ string) (int, error) {
+	return 0, nil
+}
+func (deviceParameterRepoStub) SearchByKeyword(_ context.Context, _ uuid.UUID, _ string, _ int) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
+func (deviceParameterRepoStub) GetDirectChildLeaves(_ context.Context, _ uuid.UUID, _ string, _ int, _ int) ([]model.DeviceParameter, int, error) {
+	return nil, 0, nil
+}
+func (deviceParameterRepoStub) GetByGroup(_ context.Context, _ uuid.UUID, _ string) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
+func (deviceParameterRepoStub) GetByFAPInstance(_ context.Context, _ uuid.UUID, _ int) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
+func (deviceParameterRepoStub) GetByFAPInstanceAndGroup(_ context.Context, _ uuid.UUID, _ int, _ string) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
+
+// newDiffTestService 构造一个可观测 logger + 可注入 paramRepo/redisClient 的 SyncService。
+func newDiffTestService(t *testing.T, paths []string, paramErr error) (*SyncService, *observer.ObservedLogs, *miniredis.Miniredis) {
+	t.Helper()
+	core, recorded := observer.New(zap.InfoLevel)
+	logger := zap.New(core)
+
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	t.Cleanup(mr.Close)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	svc := &SyncService{
+		paramRepo:   &fakeParamRepoForDiff{paths: paths, err: paramErr},
+		redisClient: rdb,
+		logger:      logger,
+	}
+	return svc, recorded, mr
+}
+
+func TestLogPathBSyncDiff_LogsMissingPaths_InfoLevel(t *testing.T) {
+	svc, recorded, mr := newDiffTestService(t, nil, nil)
+	deviceID := uuid.New()
+	dev := &model.Device{ID: deviceID, SerialNumber: "SN-DIFF-001"}
+
+	// 写 reason 标签
+	require.NoError(t, mr.Set("provision:syncreason:"+deviceID.String(), "device_online"))
+
+	prev := map[string]struct{}{
+		"Device.WiFi.SSID.1.Enable": {},
+		"Device.WiFi.SSID.2.Enable": {},
+		"Device.WiFi.SSID.3.Enable": {},
+		"Device.WiFi.SSID.4.Enable": {},
+	}
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.WiFi.SSID.1.Enable"},
+		{ParameterPath: "Device.WiFi.SSID.2.Enable"},
+		{ParameterPath: "Device.WiFi.SSID.3.Enable"},
+		// SSID.4 缺失
+	}
+	svc.logPathBSyncDiff(context.Background(), dev, prev, params)
+
+	entries := recorded.FilterMessage("param_sync_missing").All()
+	require.Len(t, entries, 1, "应产出一条 param_sync_missing 日志")
+	assert.Equal(t, zap.InfoLevel, entries[0].Level)
+
+	fields := entries[0].ContextMap()
+	assert.Equal(t, "device_online", fields["reason"])
+	assert.Equal(t, int64(4), fields["prev_total"])
+	assert.Equal(t, int64(3), fields["current_total"])
+	assert.Equal(t, int64(1), fields["missing_count"])
+}
+
+func TestLogPathBSyncDiff_SkipsOnFirstSync(t *testing.T) {
+	svc, recorded, _ := newDiffTestService(t, nil, nil)
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-FIRST"}
+
+	prev := map[string]struct{}{} // 空 — 首次同步
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.X.Y.1.A"},
+	}
+	svc.logPathBSyncDiff(context.Background(), dev, prev, params)
+
+	assert.Empty(t, recorded.FilterMessage("param_sync_missing").All(),
+		"集合 B 为空（首次同步）应跳过差异日志避免噪声")
+}
+
+func TestLogPathBSyncDiff_NoMissing_NoLog(t *testing.T) {
+	svc, recorded, _ := newDiffTestService(t, nil, nil)
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-NOMISS"}
+
+	prev := map[string]struct{}{
+		"Device.X.A": {},
+		"Device.X.B": {},
+	}
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.X.A"},
+		{ParameterPath: "Device.X.B"},
+		{ParameterPath: "Device.X.C"}, // 多出的不算 missing
+	}
+	svc.logPathBSyncDiff(context.Background(), dev, prev, params)
+
+	assert.Empty(t, recorded.FilterMessage("param_sync_missing").All(),
+		"无 missing 时不应输出日志")
+}
+
+func TestLogPathBSyncDiff_WarnLevel_WhenSetTooSmall(t *testing.T) {
+	svc, recorded, _ := newDiffTestService(t, nil, nil)
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-WARN"}
+
+	prev := make(map[string]struct{}, 10)
+	for i := 0; i < 10; i++ {
+		prev[uuid.New().String()] = struct{}{}
+	}
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.X.A"}, // 仅 1 个 — 远小于 prev 的一半（5）
+	}
+	svc.logPathBSyncDiff(context.Background(), dev, prev, params)
+
+	entries := recorded.FilterMessage("param_sync_missing").All()
+	require.Len(t, entries, 1)
+	assert.Equal(t, zap.WarnLevel, entries[0].Level,
+		"current < prev/2 时应升级到 Warn 级别")
+}
+
+func TestLogPathBSyncDiff_SamplingTruncatesTo20(t *testing.T) {
+	svc, recorded, _ := newDiffTestService(t, nil, nil)
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-SAMPLE"}
+
+	prev := make(map[string]struct{}, 50)
+	for i := 0; i < 50; i++ {
+		prev[uuid.New().String()] = struct{}{}
+	}
+	params := []model.DeviceParameter{} // 全部缺失 — 50 个
+
+	svc.logPathBSyncDiff(context.Background(), dev, prev, params)
+
+	entries := recorded.FilterMessage("param_sync_missing").All()
+	require.Len(t, entries, 1)
+
+	// missing_paths_sample 在 ObservedLogs.ContextMap() 中类型为 []interface{}（zap.Strings 序列化）
+	fields := entries[0].ContextMap()
+	sample, ok := fields["missing_paths_sample"].([]interface{})
+	if !ok {
+		// 兼容路径：某些 zap 版本保留 []string
+		if s, isStr := fields["missing_paths_sample"].([]string); isStr {
+			assert.Equal(t, 20, len(s), "采样应截断到前 20 条")
+		} else {
+			t.Fatalf("missing_paths_sample 类型预期 []interface{} 或 []string，实际 %T", fields["missing_paths_sample"])
+		}
+	} else {
+		assert.Equal(t, 20, len(sample), "采样应截断到前 20 条")
+	}
+	assert.Equal(t, int64(50), fields["missing_count"])
+}
+
+func TestLogPathBSyncDiff_ReasonUnknownWhenRedisKeyAbsent(t *testing.T) {
+	svc, recorded, _ := newDiffTestService(t, nil, nil) // mr 上无 reason key
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-UNKNOWN-REASON"}
+
+	prev := map[string]struct{}{"Device.X.A": {}, "Device.X.B": {}}
+	params := []model.DeviceParameter{{ParameterPath: "Device.X.A"}}
+	svc.logPathBSyncDiff(context.Background(), dev, prev, params)
+
+	entries := recorded.FilterMessage("param_sync_missing").All()
+	require.Len(t, entries, 1)
+	assert.Equal(t, "unknown", entries[0].ContextMap()["reason"],
+		"Redis 无 reason key 时应降级为 unknown")
+}
+
+func TestSnapshotStandardPaths_ReturnsNilOnError(t *testing.T) {
+	svc, _, _ := newDiffTestService(t, nil, errors.New("db down"))
+	got := svc.snapshotStandardPaths(context.Background(), uuid.New())
+	assert.Nil(t, got, "GetByDevice 失败应返 nil（差异日志静默跳过）")
+}
+
+func TestSnapshotStandardPaths_ReturnsEmptyOnNoRows(t *testing.T) {
+	svc, _, _ := newDiffTestService(t, nil, nil) // paths empty
+	got := svc.snapshotStandardPaths(context.Background(), uuid.New())
+	assert.Nil(t, got, "无现有 standardPath 应返 nil（首次同步等价）")
+}
+
+func TestSnapshotStandardPaths_BuildsMap(t *testing.T) {
+	paths := []string{"Device.X.A", "Device.X.B", "Device.X.C"}
+	svc, _, _ := newDiffTestService(t, paths, nil)
+	got := svc.snapshotStandardPaths(context.Background(), uuid.New())
+	require.Len(t, got, 3)
+	for _, p := range paths {
+		_, ok := got[p]
+		assert.Truef(t, ok, "path %s should be in snapshot map", p)
+	}
 }

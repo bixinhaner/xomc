@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/config/parammodel"
@@ -44,9 +45,12 @@ func (s *SyncService) PathBEnabled(ctx context.Context, dev *model.Device) bool 
 //  2. 抽 is_storable=true 的 privatePath → 去重前缀（ParamMapping 列表已含全部参数）
 //  3. 直接 enqueue GPV 对象前缀；CPE 自动返回所有实例
 //
+// T-0123: opts 支持 WithReason("device_online"/"periodic"/"firmware_changed"/"manual")
+// 通过 Redis 临时映射传递到 HandleSyncResultPathB 完成时打差异日志。
+//
 // 返回 (true, nil) 表示已切到 Path B；(false, nil) 表示无法走新栈，调用方应降级旧栈；
 // (false, err) 表示新栈选中后执行出错（不再降级，由 engine 处理）。
-func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sourceID string) (bool, error) {
+func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sourceID string, opts ...PathBOption) (bool, error) {
 	set, ok := s.resolveMappingSet(ctx, dev)
 	if !ok {
 		return false, nil
@@ -66,6 +70,22 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 		return true, nil
 	}
 
+	// T-0123: 提取 reason 写 Redis 临时映射供 HandleSyncResultPathB 完成时读取（TTL=10min 覆盖 GPV 上界）。
+	var pbOpts pathBOptions
+	for _, opt := range opts {
+		opt(&pbOpts)
+	}
+	if pbOpts.reason != "" && s.redisClient != nil {
+		key := fmt.Sprintf("provision:syncreason:%s", dev.ID.String())
+		if err := s.redisClient.Set(ctx, key, pbOpts.reason, 10*time.Minute).Err(); err != nil {
+			// Reason 写入失败不阻断 sync，差异日志降级为 reason=unknown
+			s.logger.Warn("write path-b sync reason failed",
+				zap.String("device_sn", dev.SerialNumber),
+				zap.String("reason", pbOpts.reason),
+				zap.Error(err))
+		}
+	}
+
 	if err := s.enqueueGPVPrefixes(ctx, dev, prefixes, sourceID); err != nil {
 		return true, fmt.Errorf("enqueue path-b GPV: %w", err)
 	}
@@ -73,6 +93,7 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 	s.logger.Info("path-b sync started",
 		zap.String("device_sn", dev.SerialNumber),
 		zap.String("source", string(set.Source)),
+		zap.String("reason", pbOpts.reason),
 		zap.Int("prefixes", len(prefixes)),
 		zap.Int("total_mappings", len(set.Mappings)),
 	)
@@ -85,6 +106,10 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 //   - 通过 Translator + MappingValidator 把设备返回的 privatePath 翻译为 standardPath
 //   - is_storable=false 的条目直接丢弃（不写入参数仓库）
 //   - 翻译未命中的条目降级为原 privatePath 写入（容错），加 WARN log
+//
+// T-0127: BatchUpsert 完成后对比"DB 已有 standardPath"与"本次落地 standardPath"，
+// 把差集（之前上报过、本次未上报）写应用日志便于运维追溯参数漂移；不改动数据库行
+// （"设备没报就当不变"原则）。
 //
 // 返回 nil 即视为成功；底层 BatchUpsert 错误向上传。
 func (s *SyncService) HandleSyncResultPathB(ctx context.Context, dev *model.Device,
@@ -101,6 +126,9 @@ func (s *SyncService) HandleSyncResultPathB(ctx context.Context, dev *model.Devi
 	if validator == nil {
 		return false, nil
 	}
+
+	// T-0127: 同步前 snapshot 现有 standardPath 集合 B（供差集计算）。
+	prevPaths := s.snapshotStandardPaths(ctx, dev.ID)
 
 	params := make([]model.DeviceParameter, 0, len(paramValues))
 	now := time.Now()
@@ -159,7 +187,100 @@ func (s *SyncService) HandleSyncResultPathB(ctx context.Context, dev *model.Devi
 		zap.Int("untranslated", untranslated),
 		zap.Int("dropped_non_storable", dropped),
 	)
+
+	// T-0127: 差异日志 — 把"之前上报、本次未上报"的 standardPath 差集写应用日志。
+	s.logPathBSyncDiff(ctx, dev, prevPaths, params)
+
 	return true, nil
+}
+
+// snapshotStandardPaths 拉取 device_parameters 中本设备的 standardPath 集合（T-0127 差异日志用）。
+//
+// 失败时返回 nil（差异日志降级跳过，不阻塞主流程）。
+func (s *SyncService) snapshotStandardPaths(ctx context.Context, deviceID uuid.UUID) map[string]struct{} {
+	existing, err := s.paramRepo.GetByDevice(ctx, deviceID)
+	if err != nil {
+		s.logger.Debug("snapshot standardPaths failed (diff log skipped)",
+			zap.String("device_id", deviceID.String()),
+			zap.Error(err))
+		return nil
+	}
+	if len(existing) == 0 {
+		return nil
+	}
+	paths := make(map[string]struct{}, len(existing))
+	for _, p := range existing {
+		paths[p.ParameterPath] = struct{}{}
+	}
+	return paths
+}
+
+// logPathBSyncDiff 比对 BatchUpsert 前后的 standardPath 集合差集并打应用日志（T-0127）。
+//
+// 集合 B = prevPaths（同步前 snapshot）；集合 A = 本次 Upsert 的 standardPath。
+// 差集 = B − A（之前上报、本次未上报）。
+//
+// 跳过场景：
+//   - prevPaths 为空（首次同步 / B 为空）— 避免噪声
+//   - missing 为空（所有旧路径都重新上报）— 无漂移
+//
+// reason 通过 Redis 临时映射 provision:syncreason:{deviceID} 读取（StartPathBSync 入队时写入，TTL 10min）；
+// 读取失败或 key 不存在则 reason = "unknown"。
+//
+// 异常小子集（current < 0.5 × prev）日志级别提升到 Warn 提示可能 GPV 不完整。
+func (s *SyncService) logPathBSyncDiff(ctx context.Context, dev *model.Device,
+	prevPaths map[string]struct{}, params []model.DeviceParameter) {
+	if len(prevPaths) == 0 {
+		return
+	}
+	currentPaths := make(map[string]struct{}, len(params))
+	for _, p := range params {
+		currentPaths[p.ParameterPath] = struct{}{}
+	}
+	missing := make([]string, 0)
+	for path := range prevPaths {
+		if _, ok := currentPaths[path]; !ok {
+			missing = append(missing, path)
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+
+	// 截断采样到前 20 条
+	sample := missing
+	if len(sample) > 20 {
+		sample = sample[:20]
+	}
+
+	// 读 reason（best-effort，失败降级为 "unknown"）
+	reason := "unknown"
+	if s.redisClient != nil {
+		key := fmt.Sprintf("provision:syncreason:%s", dev.ID.String())
+		if val, err := s.redisClient.Get(ctx, key).Result(); err == nil && val != "" {
+			reason = val
+		}
+	}
+
+	prevTotal := len(prevPaths)
+	currentTotal := len(currentPaths)
+	missingCount := len(missing)
+
+	// 异常小子集 → Warn；常规 → Info
+	fields := []zap.Field{
+		zap.String("device_id", dev.ID.String()),
+		zap.String("device_sn", dev.SerialNumber),
+		zap.String("reason", reason),
+		zap.Int("prev_total", prevTotal),
+		zap.Int("current_total", currentTotal),
+		zap.Int("missing_count", missingCount),
+		zap.Strings("missing_paths_sample", sample),
+	}
+	if currentTotal < prevTotal/2 {
+		s.logger.Warn("param_sync_missing", fields...)
+	} else {
+		s.logger.Info("param_sync_missing", fields...)
+	}
 }
 
 // ResolveTranslator 公共接口：返回 device 当前 ProductClass + FirmwareVersion 对应的 Translator。

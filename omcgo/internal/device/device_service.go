@@ -550,6 +550,9 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 
 	// Update fields from Inform
 	now := time.Now()
+	// T-0123: 在覆盖字段前捕获旧值，UpdateFromInform 收尾时据此判断 firmware 变化 / offline→active。
+	oldStatus := device.Status
+	oldVersion := device.FirmwareVersion
 	device.OUI = inform.DeviceId.OUI
 	device.ProductClass = inform.DeviceId.ProductClass
 	device.Manufacturer = inform.DeviceId.Manufacturer
@@ -587,7 +590,7 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	if shouldActivate {
 		// Validate that the transition is allowed by state machine
 		if err := ValidateTransition(device.Status, model.DeviceActive); err == nil {
-			oldStatus := device.Status
+			// T-0123: 复用外层 oldStatus（line 552 之前已捕获），不再 shadow 内层声明。
 			device.Status = model.DeviceActive
 			device.OpState = model.DeriveOpState(model.DeviceActive)
 
@@ -660,6 +663,24 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	// Refresh heartbeat
 	if s.heartbeat != nil {
 		s.heartbeat.RefreshHeartbeat(ctx, device.SerialNumber, device.InformInterval)
+	}
+
+	// T-0123: 检测 firmware 变化与 offline→active 二选一发布事件。
+	// 同一 Inform 满足两者时，挡板优先：log "firmware_changed_suppresses_online" 不发 device.online
+	// （T-0125 实施时会在挡板处发 firmware.changed；本任务仅记录抑制日志）。
+	newVersion := device.FirmwareVersion
+	firmwareChanged := oldVersion != "" && newVersion != "" && oldVersion != newVersion
+	becameOnline := oldStatus == model.DeviceOffline && device.Status == model.DeviceActive
+	if firmwareChanged {
+		s.logger.Info("firmware_changed_suppresses_online",
+			zap.String("device_id", device.ID.String()),
+			zap.String("serial_number", device.SerialNumber),
+			zap.String("old_version", oldVersion),
+			zap.String("new_version", newVersion),
+			zap.Bool("became_online", becameOnline),
+		)
+	} else if becameOnline {
+		s.publishDeviceOnlineEvent(ctx, device)
 	}
 
 	return device, nil
@@ -810,6 +831,48 @@ func (s *DeviceService) storeInformParameters(ctx context.Context, deviceID uuid
 			zap.String("device_id", deviceID.String()),
 		)
 	}
+}
+
+// DeviceOnlineEvent 已存在设备从 offline 恢复 active 时发布（T-0123）。
+//
+// 与 DeviceOfflineEvent 对称；订阅者：provision.Engine.HandleDeviceOnline。
+// 载荷不含 lastOfflineDuration（devices 表无 last_offline_at 字段，超本任务范围）。
+type DeviceOnlineEvent struct {
+	DeviceID     uuid.UUID `json:"device_id"`
+	SerialNumber string    `json:"serial_number"`
+	ProductClass string    `json:"product_class"`
+	SwVersion    string    `json:"sw_version"`
+}
+
+// publishDeviceOnlineEvent 发布 device.online 事件（T-0123）。
+//
+// 不阻塞主流程：EventBus nil / 序列化失败 / Publish 失败均仅 log Warn，
+// 不影响 UpdateFromInform 后续步骤。
+func (s *DeviceService) publishDeviceOnlineEvent(ctx context.Context, device *model.Device) {
+	if s.eventBus == nil {
+		return
+	}
+	payload := DeviceOnlineEvent{
+		DeviceID:     device.ID,
+		SerialNumber: device.SerialNumber,
+		ProductClass: device.ProductClass,
+		SwVersion:    device.FirmwareVersion,
+	}
+	evt, err := event.NewEvent(event.SubjectDeviceOnline, payload)
+	if err != nil {
+		s.logger.Error("create device.online event", zap.Error(err),
+			zap.String("device_id", device.ID.String()))
+		return
+	}
+	if err := s.eventBus.Publish(ctx, event.SubjectDeviceOnline, evt); err != nil {
+		s.logger.Warn("publish device.online event", zap.Error(err),
+			zap.String("device_id", device.ID.String()))
+		return
+	}
+	s.logger.Info("device.online published",
+		zap.String("device_id", device.ID.String()),
+		zap.String("serial_number", device.SerialNumber),
+	)
 }
 
 // PublishDeviceRegistered publishes a device.registered event for the given device.

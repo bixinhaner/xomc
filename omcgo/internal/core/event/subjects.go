@@ -65,6 +65,19 @@ const (
 	// 发布者：device.Service.RegisterDevice，订阅者：provision.Engine（触发自动开站流程）
 	SubjectDeviceRegistered = "device.registered"
 
+	// SubjectDeviceOffline 是已存在设备状态由 active 跌为 offline 时发布。
+	// 发布者：device.OfflineDetector（last_inform_at 超阈值时扫描标记）；
+	// 订阅者：暂无（保留为通用基础设施事件）。
+	// 注：当前 offline_detector.go 仍用字面量 "device.offline" 发布；常量定义在此处供未来迁移。
+	SubjectDeviceOffline = "device.offline"
+
+	// SubjectDeviceOnline 是已存在设备从 offline 状态恢复 active 时发布（T-0123）。
+	// 发布者：device.DeviceService.UpdateFromInform；
+	// 订阅者：provision.Engine.HandleDeviceOnline — 触发 Path B 全量同步检测离线期间参数漂移。
+	// 与 SubjectDeviceFirmwareChanged 二选一：同一 Inform 若 swVersion 也变化则只发 firmware.changed
+	// 不发 online（避免两路 Path B 重复同步）。
+	SubjectDeviceOnline = "device.online"
+
 	// SubjectDeviceRebootAbnormal 是检测到设备异常重启（"1 BOOT" 不伴随 "M Reboot"）时发布。
 	// 发布者：device.DeviceService.RecordBootFromInform；
 	// 订阅者：alarm.RebootMonitor — 滑动窗口内累计 >=阈值触发 FREQUENT_ABNORMAL_REBOOT 告警。
