@@ -936,3 +936,67 @@ cmd/app/provider/modules.go 在 dictload ModuleGraph 加一条
 | type 分布 | STRING 1509 / U_INT 284 / INT 102 / BOOLEAN 81 / DATE_TIME 12 |
 | 最大子树 | Device.Services.FAPService.{i}.CellConfig.* (779 params) |
 | 含 `{i}` | 多数 Services 路径，需 ADD/RMV 命令 |
+
+---
+
+## 12. 实施回填（implementation actual，2026-05-14 补）
+
+> 设计文档原写于设计期；本节回填 Sprint A + B 实际落地的关键差异、踩坑、与原设计不一致处。
+
+### 12.1 落地节奏与 commit 索引
+
+| 阶段 | 范围 | Commit |
+|------|------|--------|
+| Sprint A | migration 000090 + mmlstandardloader 包 + 47 tests | `65142e22` |
+| Sprint B | 7 子项（B-1 ~ B-7） | `5ec3a2d1` + `8d1733bd` |
+| 尾巴对齐 | Go MMLCommand + migration 000092 + FE 类型 + E2E | 本会话 commit（pending） |
+
+### 12.2 尾巴 fix —— 设计期未识别的 3 项
+
+| 项 | 现象 | 根因 | 修复 |
+|---|------|------|------|
+| Go MMLCommand 列不齐 | `GET /mml/commands` 500 `column "param_template" does not exist` | Sprint A 改了 schema 但 Go struct + commandColumns + scanCommand 没跟改 | 删 4 老字段加 6 新字段；commandColumns 重写；scanCommandFields 抽 row/rows 复用 helper；GetCommandParamPaths 改读 TargetPaths 单 op 派生 |
+| group_code 列宽不够 | Loader 启动 SQLSTATE 22001 `value too long for type character varying(100)` | 最长 group_code `DEVICE_SERVICES_FAPSERVICE_..._CCEREGMAPPINGTYPE` 107 char 溢出 VARCHAR(100) | migration 000092 放宽 group_code + command_code 到 VARCHAR(255)，*_name 列到 500 防御 |
+| FE 类型仍引老字段 | `tsc --noEmit` 老字段失效 | FE 与后端 schema 解耦但 mapBackendCommand 还在读 product_types/param_paths 老形态 | mmlApi 加 deriveWritableFromOp + 优先消费 target_paths；MMLCommand productTypes 改 @deprecated 可选 + 加 6 新字段 |
+
+**经验**：schema 重建任务的 S2 design 阶段必须包含"读取代码影响面 grep + 列举所有引用列名/字段名的 Go/TS 文件"清单，否则 Sprint A 的 schema 大改会留 silent dead code 到运行时炸。
+
+### 12.3 与原设计的偏差
+
+1. **§6.5 多行脚本严格序列**：原设计选 "B — fanout 内 channel 串行（不动 internal/task）"。实际落地走 **task.CompletionRouter 链式 enqueue**：
+   - Fanouter 仅入队 `command_index=0` 任务（sequentialMode=true）
+   - 通过 `internal/mml/sequencer.go` 实现 `task.TaskCompletionCallback`，命令 i 完成 → 取 i+1 命令拼请求 enqueue
+   - 跨进程 via `completionRouter.Register(TaskSourceMML, sequencer)`；单进程 fallback via `taskSvc.AddCompletionCallback(sequencer)`
+   - 优势：零 schema 变更（不加 depends_on 列），复用既有任务终态信号
+   - 与原设计差异：不是"fanout 内 channel 串行"，是"分发链外 callback 串行"
+
+2. **§6.3 fanout `{i}` 透明展开**：原设计模糊提到"channel 串行"。实际选 **TR-069 §A.3.2.7 partial path 透明展开**：
+   - `internal/mml/tr069_payload.go` 加 `expandInstancePaths`：`Device.X.{i}.Y.Z` → `Device.X.` partial path
+   - GPN 返完整子树，无需先 GPN 再 GPV 两轮通信
+   - 复用既有 `BuildTR069Params` 路径，0 schema 变更
+
+3. **§6.4 脚本 fail-fast**：实际加 `ScriptParseError{LineNumber,Raw,Reason}` 类型 + 老 `splitScriptLines` 退化路径返 nil 保 caller 不破。`errors.As` 友好（FE 可识别）。
+
+4. **B-6 孤儿 command_code**：原设计未提，实际加上 — standard-model 重建后老 mml_custom_command 引用的码可能已下线，FE Console 触发会 500。降级为 `orphan=true` 透传 entry，下游 Fanouter 已有 "skip without rpc_method" 逻辑兜底，FE 看到任务创建成功但 0 RPC 派发（vs 红框报错）。
+
+### 12.4 实测数据 vs 设计期望
+
+| 项 | 设计 | 实际 |
+|---|------|------|
+| params | 1988 | 1988 ✓ |
+| groups | ~260 | build=264 → UPSERT=260（ON CONFLICT 折叠 4） |
+| commands | ~840 | build=841 → UPSERT=831（ON CONFLICT 折叠 10） |
+| Loader 启动耗时 | < 1s | 0.55s ✓ |
+| reload 端点耗时 | < 1s | 464ms ✓ |
+
+ON CONFLICT 折叠属正常 — 同 path 不同 i18n 形态会撞 UNIQUE(param_version, group_code)。
+
+### 12.5 仍未做的项（follow-up backlog）
+
+1. **FE Console "按组执行" 按钮**：API 已通（`POST /mml/groups/:id/execute`），UI 增强为 follow-up
+2. **FE Console orphan toast**：目前 orphan=true 任务创建成功但 UI 不提示"该命令已下线"
+3. **Loader 增量重载**：当前仅全量 UPSERT，未支持 diff 模式
+4. **mml_custom_command 反查孤儿码自动迁移**：手工 SQL 比工具化更经济
+5. **浏览器 E2E**：本地 python3 cryptography + dev server :3000 缺，CI 环境补
+6. **swagger 注解**：2 个新端点（reload / group execute）未补 `// @Summary`
+7. **本任务流程债**：未走 /dev-pipeline，无 T-NNNN（事后补 T-0119）、无 PRD、无 Sprint 归属
