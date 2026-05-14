@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { ParameterFilter, ParameterUpdateRequest, ParameterSyncOptions } from '../../types/deviceParameter';
+import type { ParameterFilter, ParameterUpdateRequest } from '../../types/deviceParameter';
 import type { PageRequest } from '../../types/pagination';
 import { deviceParameterService } from '../../mock/services/deviceParameterService';
 import { deviceParameterApi } from '../../services/api/deviceParameterApi';
@@ -53,23 +53,8 @@ export function useUpdateParameters() {
   });
 }
 
-export function useSyncParameters() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      deviceId,
-      options,
-    }: {
-      deviceId: string;
-      options?: ParameterSyncOptions;
-    }) => api.syncParameters(deviceId, options),
-    onSuccess: (_result, { deviceId }) => {
-      void queryClient.invalidateQueries({
-        queryKey: ['devices', 'sync-status', deviceId],
-      });
-    },
-  });
-}
+// T-0126: useSyncParameters 已下线（Path A）。
+// 切换到 useDevices.useSyncDeviceParams（Path B + reason="manual" 完整接入 F09 触发链）。
 
 export function useDiscoverParameters() {
   const queryClient = useQueryClient();

@@ -510,3 +510,139 @@ func TestHandler_GetStats(t *testing.T) {
 	assert.Equal(t, float64(2), counts["active"])
 	assert.Equal(t, float64(1), counts["offline"])
 }
+
+// ---------------------------------------------------------------------------
+// Tests: T-0126 SyncDeviceParams（手动 Path B 同步端点）
+// ---------------------------------------------------------------------------
+
+// fakeParamSyncStarter 实现 ParamSyncStarter 接口供 SyncDeviceParams 单测使用。
+type fakeParamSyncStarter struct {
+	calls      []syncStarterCall
+	defaultUsed bool
+	defaultErr  error
+}
+
+type syncStarterCall struct {
+	deviceID uuid.UUID
+	sourceID string
+}
+
+func (f *fakeParamSyncStarter) StartManualSync(_ context.Context, dev *model.Device, sourceID string) (bool, error) {
+	f.calls = append(f.calls, syncStarterCall{deviceID: dev.ID, sourceID: sourceID})
+	return f.defaultUsed, f.defaultErr
+}
+
+func TestHandler_SyncDeviceParams_Success(t *testing.T) {
+	h, deviceRepo, _ := newTestHandler()
+	starter := &fakeParamSyncStarter{defaultUsed: true}
+	h.service.SetParamSyncStarter(starter)
+	router := setupRouter(h)
+
+	id := uuid.New()
+	seedDevice(deviceRepo, id, "SN-SYNC-001", model.CarrierCMCC, model.TechLTE, model.DeviceActive)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/"+id.String()+"/sync-params",
+		bytes.NewReader([]byte(`{"force": false}`)))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusAccepted, w.Code)
+
+	var resp map[string]interface{}
+	response.DecodeData(t, w.Body, &resp)
+	assert.Equal(t, "queued", resp["status"])
+	assert.Equal(t, id.String(), resp["device_id"])
+	assert.Equal(t, "SN-SYNC-001", resp["serial_number"])
+	assert.Contains(t, resp["source_id"].(string), "manual:", "source_id 应以 manual: 前缀")
+
+	require.Len(t, starter.calls, 1, "应调一次 StartManualSync")
+	assert.Equal(t, id, starter.calls[0].deviceID)
+	assert.Contains(t, starter.calls[0].sourceID, "manual:")
+}
+
+func TestHandler_SyncDeviceParams_NoBody_OK(t *testing.T) {
+	h, deviceRepo, _ := newTestHandler()
+	h.service.SetParamSyncStarter(&fakeParamSyncStarter{defaultUsed: true})
+	router := setupRouter(h)
+
+	id := uuid.New()
+	seedDevice(deviceRepo, id, "SN-NOBODY", model.CarrierCMCC, model.TechLTE, model.DeviceActive)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/"+id.String()+"/sync-params", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusAccepted, w.Code, "body 为空应仍返 202（force 字段容错）")
+}
+
+func TestHandler_SyncDeviceParams_NotFound(t *testing.T) {
+	h, _, _ := newTestHandler()
+	h.service.SetParamSyncStarter(&fakeParamSyncStarter{defaultUsed: true})
+	router := setupRouter(h)
+
+	id := uuid.New() // 未 seed → 不存在
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/"+id.String()+"/sync-params", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestHandler_SyncDeviceParams_InvalidUUID(t *testing.T) {
+	h, _, _ := newTestHandler()
+	router := setupRouter(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/not-a-uuid/sync-params", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandler_SyncDeviceParams_PathBUnavailable_503(t *testing.T) {
+	h, deviceRepo, _ := newTestHandler()
+	// starter 返 used=false（MappingSet 缺失模拟）
+	h.service.SetParamSyncStarter(&fakeParamSyncStarter{defaultUsed: false})
+	router := setupRouter(h)
+
+	id := uuid.New()
+	seedDevice(deviceRepo, id, "SN-NO-MAPPING", model.CarrierCMCC, model.TechLTE, model.DeviceActive)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/"+id.String()+"/sync-params", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	var resp map[string]interface{}
+	response.DecodeData(t, w.Body, &resp)
+	assert.Equal(t, "unavailable", resp["status"])
+	assert.Contains(t, resp["message"].(string), "path-b sync unavailable")
+}
+
+func TestHandler_SyncDeviceParams_NilStarter_500(t *testing.T) {
+	h, deviceRepo, _ := newTestHandler()
+	// 不注入 starter — h.service.paramSyncStarter == nil
+	router := setupRouter(h)
+
+	id := uuid.New()
+	seedDevice(deviceRepo, id, "SN-NIL-STARTER", model.CarrierCMCC, model.TechLTE, model.DeviceActive)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/"+id.String()+"/sync-params", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestHandler_SyncDeviceParams_RoutesOldEndpointGone(t *testing.T) {
+	h, _, _ := newTestHandler()
+	router := setupRouter(h)
+
+	// 旧端点 /param-sync 已下线，应返 404
+	id := uuid.New()
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/"+id.String()+"/param-sync", nil)
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code, "旧 /param-sync 路由应已下线")
+}

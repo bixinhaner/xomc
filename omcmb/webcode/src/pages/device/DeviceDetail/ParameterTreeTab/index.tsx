@@ -4,11 +4,11 @@ import { SearchOutlined, SyncOutlined } from '@ant-design/icons';
 import {
   useObjectTree,
   useDirectChildren,
-  useSyncParameters,
   useSyncStatus,
   useAddObject,
   useDeleteObject,
 } from '@core/hooks/api/useDeviceParameters';
+import { useSyncDeviceParams } from '@core/hooks/api/useDevices';
 import ObjectTreePanel from './ObjectTreePanel';
 import ChildParamTable from './ChildParamTable';
 import SyncStatusBar from './SyncStatusBar';
@@ -40,21 +40,24 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
   }, [syncStatus]);
 
   // Mutations
-  const syncMutation = useSyncParameters();
+  // T-0126: 切换到 useSyncDeviceParams（Path B + reason="manual"），替代旧 useSyncParameters (Path A)
+  const syncMutation = useSyncDeviceParams();
   const addObjectMutation = useAddObject();
   const deleteObjectMutation = useDeleteObject();
 
-  // 同步参数 - 刷新设备参数值（创建 GetParameterValues RPC）
+  // 同步参数 - 触发 Path B 全量同步（完整接入 F09 触发链：差异日志 + 回写口径 + Translator）
   const handleSync = useCallback(() => {
     syncMutation.mutate(
       { deviceId },
       {
-        onSuccess: () => {
-          message.success('参数同步已触发');
+        onSuccess: (data) => {
+          message.success(`参数同步已入队（${data.sourceId}）`);
           setIsSyncing(true);
         },
-        onError: () => {
-          message.error('参数同步触发失败');
+        onError: (err) => {
+          // Path B 不可用（503）/ 设备 404 / starter nil（500）— 显示明确错误
+          const errorMsg = err instanceof Error ? err.message : '参数同步触发失败';
+          message.error(errorMsg);
         },
       }
     );

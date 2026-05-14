@@ -5,7 +5,6 @@ import type {
   ParameterSyncStatus,
   ParameterFilter,
   ParameterUpdateRequest,
-  ParameterSyncOptions,
   ParameterSchemaResponse,
   ParameterUpdateResponse,
   ChildParameter,
@@ -924,50 +923,35 @@ export const deviceParameterService = {
     };
   },
 
-  async syncParameters(
-    deviceId: string,
-    _options?: ParameterSyncOptions
-  ): Promise<void> {
-    await delay(100, 200);
-    const allParams = generateMockParameters();
+  // T-0126: syncParameters (Path A) 已下线，迁移到 deviceService mock 的 syncDeviceParams (Path B + reason="manual")。
+  // discoverParameters 保留但内部走最小 stub（不再 fallback 调 syncParameters）。
+
+  async discoverParameters(deviceId: string): Promise<void> {
+    await delay(200, 400);
+    // 简化 mock：标记 syncing 状态供 SyncStatusBar 展示
     syncStates.set(deviceId, {
       deviceId,
       status: 'syncing',
-      totalBatches: 5,
+      totalBatches: 1,
       completedBatches: 0,
-      totalParameters: allParams.length,
+      totalParameters: 100,
       syncedParameters: 0,
       percentage: 0,
       startedAt: new Date().toISOString(),
     });
-
-    let batch = 0;
-    const interval = setInterval(() => {
-      batch++;
+    setTimeout(() => {
       const state = syncStates.get(deviceId);
-      if (!state) {
-        clearInterval(interval);
-        return;
+      if (state) {
+        syncStates.set(deviceId, {
+          ...state,
+          status: 'completed',
+          completedBatches: 1,
+          syncedParameters: 100,
+          percentage: 100,
+          completedAt: new Date().toISOString(),
+        });
       }
-      const synced = Math.min(
-        Math.round((batch / 5) * allParams.length),
-        allParams.length
-      );
-      syncStates.set(deviceId, {
-        ...state,
-        completedBatches: batch,
-        syncedParameters: synced,
-        percentage: Math.round((batch / 5) * 100),
-        status: batch >= 5 ? 'completed' : 'syncing',
-        completedAt: batch >= 5 ? new Date().toISOString() : undefined,
-      });
-      if (batch >= 5) clearInterval(interval);
     }, 1500);
-  },
-
-  async discoverParameters(deviceId: string): Promise<void> {
-    await delay(200, 400);
-    return this.syncParameters(deviceId);
   },
 
   async getSyncStatus(deviceId: string): Promise<ParameterSyncStatus> {

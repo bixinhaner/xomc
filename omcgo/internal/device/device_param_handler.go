@@ -95,7 +95,8 @@ func (h *ParameterTreeHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		devices.GET("/:id/parameters/search", h.SearchParameters)
 		devices.GET("/:id/parameters/schema", h.GetParameterSchema)
 		devices.PUT("/:id/parameters", h.SetParameterValues)
-		devices.POST("/:id/parameters/sync", h.TriggerSync)
+		// T-0126: 旧 /parameters/sync (Path A) 已下线，替换为 /sync-params (Path B + reason="manual")
+		// 由 device_handler.go 注册；本处仅保留 discover/sync-status（discovery flow 与 Path B 全量同步并存）
 		devices.POST("/:id/parameters/discover", h.TriggerDiscover)
 		devices.GET("/:id/parameters/sync-status", h.GetSyncStatus)
 		devices.POST("/:id/objects/add", h.AddObject)
@@ -311,67 +312,10 @@ func (h *ParameterTreeHandler) SetParameterValues(c *gin.Context) {
 	})
 }
 
-// TriggerSync handles POST /api/v1/devices/:id/parameters/sync.
-func (h *ParameterTreeHandler) TriggerSync(c *gin.Context) {
-	id, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
-		return
-	}
-
-	dev, err := h.deviceService.GetDevice(c.Request.Context(), id)
-	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-		return
-	}
-	if dev == nil {
-		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
-		return
-	}
-
-	params, err := h.paramRepo.GetByDevice(c.Request.Context(), id)
-	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-		return
-	}
-
-	if len(params) == 0 {
-		response.OKWithMsg(c, nil, "no parameters to sync")
-		return
-	}
-
-	paths := make([]string, 0, len(params))
-	for _, p := range params {
-		paths = append(paths, p.ParameterPath)
-	}
-
-	gpvParams, _ := json.Marshal(map[string]interface{}{
-		"names": paths,
-	})
-
-	taskSvc := h.deviceService.GetTaskService()
-	if taskSvc == nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("task service not configured"))
-		return
-	}
-
-	if _, err := taskSvc.CreateTask(c.Request.Context(), &task.CreateTaskRequest{
-		DeviceSN:   dev.SerialNumber,
-		Method:     "GetParameterValues",
-		Params:     gpvParams,
-		Priority:   5,
-		CommandKey: fmt.Sprintf("manual-sync-%s", uuid.New().String()[:8]),
-		Source:     task.TaskSourceAPI,
-	}); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-		return
-	}
-
-	response.OKWithStatus(c, http.StatusAccepted, gin.H{
-		"message":    "parameter sync command queued",
-		"parameters": len(paths),
-	})
-}
+// T-0126: TriggerSync (POST /api/v1/devices/:id/parameters/sync) 已下线。
+// 替换为 device_handler.go 的 SyncDeviceParams (POST /devices/:id/sync-params) 走 Path B。
+// 旧实现是 Path A —— 查 device_parameters 现有路径列表 + 单 batch GPV，
+// 不走 Translator / 不写 last_param_sync_at / 不发差异日志。
 
 // TriggerDiscover handles POST /api/v1/devices/:id/parameters/discover.
 func (h *ParameterTreeHandler) TriggerDiscover(c *gin.Context) {

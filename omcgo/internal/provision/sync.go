@@ -61,6 +61,15 @@ func (s *SyncService) SetParamSyncWriter(w ParamSyncWriter) *SyncService {
 	return s
 }
 
+// StartManualSync 用户手动触发 Path B 全量同步的便捷 wrapper（T-0126 设计 §4）。
+//
+// 等价于 StartPathBSync(WithReason("manual"))，存在的意义：让 device 包能通过
+// 消费者驱动的 narrow interface（ParamSyncStarter，1 方法）注入本服务，
+// 不需要 device 包 import provision.PathBOption 类型（避免 device → provision 循环依赖）。
+func (s *SyncService) StartManualSync(ctx context.Context, dev *model.Device, sourceID string) (bool, error) {
+	return s.StartPathBSync(ctx, dev, sourceID, WithReason("manual"))
+}
+
 // pathBOptions 收集 StartPathBSync 的可选配置（T-0123 引入）。
 type pathBOptions struct {
 	reason string // "device_online" / "periodic" / "firmware_changed" / "manual" / ""

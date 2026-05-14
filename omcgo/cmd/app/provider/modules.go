@@ -160,6 +160,10 @@ func initProvisionModule(c *Container) error {
 			SetRedisClient(c.Redis).
 			SetParamSyncWriter(c.DeviceRepo) // T-0124: 注入 last_param_sync_at 回写器
 		provisionEngine.SetSyncService(syncSvc)
+		// T-0126: 注入 ParamSyncStarter 让 device.handler.SyncDeviceParams 调 Path B 手动同步（reason="manual"）
+		if c.DeviceService != nil {
+			c.DeviceService.SetParamSyncStarter(syncSvc)
+		}
 		logger.Info("auto-sync service enabled")
 
 		// T-0124: 周期性参数同步兜底（默认 Enabled=false 灰度）。

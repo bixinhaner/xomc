@@ -2,6 +2,7 @@ package device
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -60,7 +61,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		devices.PUT("/:id", h.UpdateDevice)
 		devices.DELETE("/:id", h.DeleteDevice)
 		devices.POST("/:id/reboot", h.RebootDevice)
-		devices.POST("/:id/param-sync", h.TriggerParamSync)
+		// T-0126: 旧 /param-sync (Path A) 已下线，替换为 /sync-params (Path B + reason="manual")
+		devices.POST("/:id/sync-params", h.SyncDeviceParams)
 		devices.PUT("/:id/rf-switch", h.SetRFSwitch)
 	}
 }
@@ -500,20 +502,56 @@ func (h *Handler) SearchDevices(c *gin.Context) {
 	response.OK(c, gin.H{"items": devices})
 }
 
-// TriggerParamSync handles POST /api/v1/devices/:id/param-sync.
-func (h *Handler) TriggerParamSync(c *gin.Context) {
+// SyncDeviceParams T-0126: 手动触发设备参数 Path B 全量同步。
+//
+// POST /api/v1/devices/:id/sync-params
+// Body (可选)：{"force": true}（预留供未来节流绕过；当前 manual 端点天然不走 Redis 节流）
+// 响应 202：{"status": "queued", "source_id": "manual:UUID", "device_id": "UUID"}
+// 响应 404：device 不存在
+// 响应 503：Path B 不可用（设备 productClass 未路由 / MappingSet 缺失）
+//
+// 替代旧 /param-sync 端点（Path A 已下线），完整接入触发链：
+// reason="manual" → 差异日志 (T-0127) + last_param_sync_at 回写 (T-0124) + Translator (T-0098)。
+func (h *Handler) SyncDeviceParams(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
 		return
 	}
 
-	if err := h.service.TriggerParamSync(c.Request.Context(), id); err != nil {
+	// force 字段可选，当前 no-op 但 log 记录供未来扩展
+	var req struct {
+		Force bool `json:"force"`
+	}
+	_ = c.ShouldBindJSON(&req) // 容错：body 为空仍 OK
+
+	sourceID := fmt.Sprintf("manual:%s", uuid.New().String())
+	used, dev, err := h.service.SyncDeviceParamsManual(c.Request.Context(), id, sourceID)
+	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
+	if !used {
+		// Path B 不可用 — 设备 productClass 未路由到 product / MappingSet 为空
+		response.OKWithStatus(c, http.StatusServiceUnavailable, gin.H{
+			"status":    "unavailable",
+			"message":   "path-b sync unavailable: device product not routed or mapping set missing",
+			"device_id": id.String(),
+		})
+		return
+	}
 
-	response.OKWithStatus(c, http.StatusAccepted, gin.H{"message": "parameter sync command queued"})
+	deviceSN := ""
+	if dev != nil {
+		deviceSN = dev.SerialNumber
+	}
+	response.OKWithStatus(c, http.StatusAccepted, gin.H{
+		"status":        "queued",
+		"source_id":     sourceID,
+		"device_id":     id.String(),
+		"serial_number": deviceSN,
+		"force":         req.Force,
+	})
 }
 
 // SetRFSwitch handles PUT /api/v1/devices/:id/rf-switch.

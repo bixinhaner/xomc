@@ -278,12 +278,8 @@ export const deviceParameterApi = {
     };
   },
 
-  async syncParameters(
-    deviceId: string,
-    options?: ParameterSyncOptions
-  ): Promise<void> {
-    await http.post(`/devices/${deviceId}/parameters/sync`, options ?? {});
-  },
+  // T-0126: syncParameters (Path A) 已下线，迁移到 deviceApi.syncDeviceParams (Path B + reason="manual")。
+  // discoverParameters 保留 — discovery flow 与 Path B 全量同步并存。
 
   async discoverParameters(deviceId: string): Promise<void> {
     await http.post(`/devices/${deviceId}/parameters/discover`);

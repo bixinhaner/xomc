@@ -859,4 +859,118 @@ type PathBSyncStarter interface {
 - [x] 观测埋点列出（5 log key）
 - [x] 待定点 0 个
 
+---
+
+## 设计备忘（T-0126，2026-05-14 S2 产出）
+
+> 收官 F09 触发链 5/5。覆盖设计方案 §4 — 手动同步端点 + 前端按钮。**最小工作量 S**：复用 T-0123/T-0124/T-0125/T-0127 全套基础设施，仅需新端点 + narrow interface + 前端 1 行 URL 切换 + 旧端点下线。
+
+### 1. 现状勘察（关键）
+
+| 检查点 | 现状 |
+|--------|------|
+| 旧端点 `POST /devices/:id/param-sync` (`TriggerParamSync`) | `device_handler.go:63,503` 已存在；**无前端调用方**；旧 Path A `GPV "Device."` 根，不走 Translator |
+| 旧端点 `POST /devices/:id/parameters/sync` (`TriggerSync`) | `device_param_handler.go:314` 已存在；**前端 ParameterTreeTab "同步参数"按钮调用此端点**；旧 Path A 查 `device_parameters` 现有路径 list 后批量 GPV |
+| 前端调用方 | `useSyncParameters` (`hooks/api/useDeviceParameters.ts`) → `deviceParameterApi.syncParameters` → `POST /devices/:id/parameters/sync` |
+| 循环依赖 | `provision` 已 import `device`；device 不能 import provision |
+
+### 2. 关键决策
+
+**(a) 升级范围（用户拍板 b）**：
+- 删旧 `/param-sync` 端点（无前端调用方）+ 旧 `TriggerParamSync` service 方法
+- 删旧 `/parameters/sync` 端点 + 旧 `TriggerSync` handler
+- 新加 `POST /devices/:id/sync-params` 端点走 Path B（设计方案 §4.1 原文 URL）
+- 前端 `useSyncParameters` 切换为新 `useSyncDeviceParams`（调新端点）
+- `TriggerDiscover` + `GetSyncStatus` 保留不动（与 Path B 全量同步并存，discovery flow 仍用）
+
+**(b) 循环依赖处理**：在 provision/sync.go 加 `StartManualSync(ctx, dev, sourceID)` wrapper（内部调 `StartPathBSync(WithReason("manual"))`）；device 包定义 narrow `ParamSyncStarter` interface 含此方法；DeviceService 加 `paramSyncStarter` 字段 + setter；DI 时注入 syncSvc。**不暴露 provision.PathBOption 类型给 device 包**。
+
+**(c) 响应不返单一 taskID**：StartPathBSync 内部 enqueueGPVPrefixes 创建多个 batch GPV task，无单一 taskID。响应改为 `{"status": "queued", "source_id": "manual:UUID", "device_id": "..."}`，前端用 source_id 作为 correlation 标识。
+
+**(d) `force=true` 当前 no-op**：设计方案 §4.1 提到该字段但当前没有 manual-side 节流可绕过（manual 端点天然不走 Redis token bucket），仅 log 字段供未来扩展。
+
+**(e) SyncStatusBar 保留**：前端旧的 `useSyncStatus` (`GET /parameters/sync-status`) 是 discovery flow 进度条，与 Path B 全量同步并存（discovery 仍用）。新端点不联动 SyncStatusBar — 改用 toast 提示"参数同步已入队"，Path B 完成时间分钟级用户感知可接受。
+
+**(f) RBAC**：设计方案 §4.1 写"操作员及以上角色"。复用既有路由 RBAC 中间件——device 路由组在 `permGroup("device")` 下注册，权限点 `system:device:update` 操作员可用。本任务不引入新权限点。
+
+### 3. 改动点清单
+
+| 文件 | 改动 | 估算行 |
+|------|------|------|
+| `internal/provision/sync.go` | 新增 `StartManualSync(ctx, dev, sourceID)` wrapper（调 StartPathBSync + WithReason("manual")） | +10 |
+| `internal/device/device_handler.go` | 删 `TriggerParamSync` handler + 路由行；新增 `SyncDeviceParams` handler + 路由 `POST /:id/sync-params`；删 `service.TriggerParamSync` 调用 | +50 / -25 |
+| `internal/device/device_service.go` | 删 `TriggerParamSync` 方法；新增 `paramSyncStarter ParamSyncStarter` 字段 + `SetParamSyncStarter` setter | +20 / -40 |
+| `internal/device/param_sync_starter.go` | **新增** — `ParamSyncStarter` narrow interface（消费者驱动，1 方法） | +15 |
+| `internal/device/device_param_handler.go` | 删 `TriggerSync` handler + 路由行 | -60 |
+| `cmd/app/provider/modules.go` | DI wiring：deviceService.SetParamSyncStarter(syncSvc) | +3 |
+| `omcmb/frontend-core/src/services/api/deviceApi.ts` | 新增 `syncDeviceParams(deviceId, options?: { force?: boolean })` | +12 |
+| `omcmb/frontend-core/src/hooks/api/useDevices.ts` | 新增 `useSyncDeviceParams` Hook | +25 |
+| `omcmb/frontend-core/src/services/api/deviceParameterApi.ts` | 删 `syncParameters` 方法 | -10 |
+| `omcmb/frontend-core/src/hooks/api/useDeviceParameters.ts` | 删 `useSyncParameters` Hook | -15 |
+| `omcmb/frontend-core/src/mock/services/deviceParameterService.ts` | 删 mock syncParameters 方法 | -15 |
+| `omcmb/webcode/src/pages/device/DeviceDetail/ParameterTreeTab/index.tsx` | 切换 import `useSyncParameters` → `useSyncDeviceParams`；toast 文案 "参数同步已入队" | +5 / -5 |
+| 测试 | handler_test.go SyncDeviceParams 用例（鉴权 + Path B 调用 + 响应 + 404） | +80 |
+
+**估算总改动**：~+220 行 / -170 行净 +50；符合 **S 工作量**（旧端点删除节省 ~170 行抵消新端点）。
+
+### 4. 接口契约
+
+```go
+// device/param_sync_starter.go (消费者驱动)
+type ParamSyncStarter interface {
+    StartManualSync(ctx context.Context, dev *model.Device, sourceID string) (bool, error)
+}
+
+// provision/sync.go
+func (s *SyncService) StartManualSync(ctx context.Context, dev *model.Device, sourceID string) (bool, error) {
+    return s.StartPathBSync(ctx, dev, sourceID, WithReason("manual"))
+}
+```
+
+### 5. 端点契约
+
+```
+POST /api/v1/devices/:id/sync-params
+Authorization: Bearer <token>
+Content-Type: application/json
+
+Request:
+  { "force": true }  // 可选，预留供未来节流绕过
+
+Response 202:
+  { "status": "queued", "source_id": "manual:UUID", "device_id": "UUID" }
+
+Response 404: device not found
+Response 503: Path B unavailable (no MappingSet) — 设备 productClass 未路由
+```
+
+### 6. 观测埋点
+
+| 类型 | 名称 | 文件 |
+|------|------|------|
+| log | `manual sync requested` (info) | device_handler.go |
+| log | `manual sync: Path B unavailable` (warn) | device_handler.go（fallback 提示） |
+| sourceID 前缀 | `manual:UUID` | device_handler.go |
+| Path B 触发后 reason | `manual` | provision/sync.go（既有差异日志会读到） |
+
+### 7. 出口门（S2）
+
+- [x] 接口契约明确（ParamSyncStarter narrow interface + StartManualSync wrapper）
+- [x] 迁移草案 N/A
+- [x] Carrier 差异点：无新增
+- [x] 观测埋点列出
+- [x] 待定点 0 个
+
+### 8. 收官总结：F09 触发链 5/5
+
+| Task | 触发源 | reason 标签 |
+|------|--------|-----------|
+| T-0123 | device.online 事件 | "device_online" |
+| T-0124 | PeriodicSyncer ticker | "periodic" |
+| T-0125 | device.firmware.changed | "firmware_changed" |
+| **T-0126** | 手动端点 | **"manual"** |
+| T-0127 | Path B 差异日志 | 共用 reason 通道 |
+
+5 触发源全部用 Path B 全量同步 → 统一的 last_param_sync_at 回写口径（T-0124）+ 统一的差异日志（T-0127）+ 统一的 Translator 翻译。**F09 参数同步触发链补强完整闭环**。
+
 

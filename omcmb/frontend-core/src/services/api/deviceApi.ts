@@ -480,6 +480,36 @@ export const deviceApi = {
     await http.post(`/devices/${id}/reboot`);
   },
 
+  // T-0126: 手动触发 Path B 全量参数同步（reason="manual"）。
+  // 替代旧 deviceParameterApi.syncParameters（Path A 已下线）。
+  // 后端 POST /api/v1/devices/:id/sync-params 响应 202 {status, source_id, device_id, serial_number, force}
+  // force: 预留供未来节流绕过；当前 manual 端点天然不走节流。
+  async syncDeviceParams(
+    id: string,
+    options?: { force?: boolean }
+  ): Promise<{
+    status: string;
+    sourceId: string;
+    deviceId: string;
+    serialNumber: string;
+    force: boolean;
+  }> {
+    const { data } = await http.post<{
+      status: string;
+      source_id: string;
+      device_id: string;
+      serial_number: string;
+      force: boolean;
+    }>(`/devices/${id}/sync-params`, options ?? {});
+    return {
+      status: data.status,
+      sourceId: data.source_id,
+      deviceId: data.device_id,
+      serialNumber: data.serial_number,
+      force: data.force,
+    };
+  },
+
   async getNEList(params: { keyword?: string } & PageRequest): Promise<PageResponse<NE>> {
     const query: Record<string, unknown> = {
       page: params.page,

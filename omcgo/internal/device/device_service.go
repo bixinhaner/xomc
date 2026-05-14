@@ -41,8 +41,9 @@ type DeviceService struct {
 	cache           *DeviceCache
 	metrics         *DeviceMetrics
 	licenseEnforcer LicenseEnforcer
-	carrierRegistry *carrier.CarrierRegistry // T-0029: RF control path lookup by carrier+tech
-	logger          *zap.Logger
+	carrierRegistry  *carrier.CarrierRegistry // T-0029: RF control path lookup by carrier+tech
+	paramSyncStarter ParamSyncStarter         // T-0126: 注入 *provision.SyncService 触发 Path B 手动同步
+	logger           *zap.Logger
 }
 
 // LicenseEnforcer is the narrow interface DeviceService consumes from the
@@ -186,45 +187,58 @@ func (s *DeviceService) RebootDevice(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// TriggerParamSync queues a GetParameterValues command to sync all parameters from the device.
-func (s *DeviceService) TriggerParamSync(ctx context.Context, deviceID uuid.UUID) error {
-	device, err := s.deviceRepo.GetByID(ctx, deviceID)
+// SyncDeviceParamsManual T-0126: 手动触发设备参数 Path B 全量同步。
+//
+// 流程：
+//  1. 查 device（404 if not found）
+//  2. 通过 ParamSyncStarter 调 Path B（reason="manual"）
+//  3. used=false 时返 ErrServiceUnavailable（Path B 不可用 — MappingSet 缺失）
+//  4. 后台异步唤醒设备（已有 connReq 链路）
+//
+// 替代旧 TriggerParamSync 方法（Path A 已下线），完整接入 T-0123/T-0124/T-0125/T-0127
+// 触发链：reason 通道 + 差异日志 + last_param_sync_at 回写 + Translator 翻译。
+//
+// sourceID 由 caller 构造（"manual:UUID"），供 HandleSyncResultPathB 写差异日志时
+// 通过 Redis hint 读取 reason 标签。
+func (s *DeviceService) SyncDeviceParamsManual(ctx context.Context, deviceID uuid.UUID, sourceID string) (used bool, dev *model.Device, err error) {
+	dev, err = s.deviceRepo.GetByID(ctx, deviceID)
 	if err != nil {
-		return fmt.Errorf("get device for param sync: %w", err)
+		return false, nil, fmt.Errorf("get device for manual sync: %w", err)
 	}
-	if device == nil {
-		return commonerrors.ErrNotFound
+	if dev == nil {
+		return false, nil, commonerrors.ErrNotFound
 	}
-	if s.taskSvc == nil {
-		return fmt.Errorf("task service not configured")
-	}
-
-	paramsJSON, _ := json.Marshal(map[string]interface{}{
-		"ParameterNames": []string{"Device."},
-	})
-	commandKey := uuid.New().String()
-	if _, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
-		DeviceSN:   device.SerialNumber,
-		Method:     "GetParameterValues",
-		Params:     paramsJSON,
-		CommandKey: commandKey,
-		Source:     task.TaskSourceAPI,
-	}); err != nil {
-		return fmt.Errorf("queue param sync command: %w", err)
+	if s.paramSyncStarter == nil {
+		return false, dev, fmt.Errorf("paramSyncStarter not configured")
 	}
 
-	s.logger.Info("param sync command queued",
+	used, err = s.paramSyncStarter.StartManualSync(ctx, dev, sourceID)
+	if err != nil {
+		return used, dev, fmt.Errorf("start manual sync: %w", err)
+	}
+
+	s.logger.Info("manual sync requested",
 		zap.String("device_id", deviceID.String()),
-		zap.String("serial_number", device.SerialNumber))
+		zap.String("serial_number", dev.SerialNumber),
+		zap.String("source_id", sourceID),
+		zap.Bool("path_b_used", used))
 
-	// Wake the device.
-	if s.connReq != nil && device.ConnectionRequestURL != "" {
+	// 唤醒设备（与旧 TriggerParamSync 一致；Connection Request 仅在 Path B 入队成功后发起）
+	if used && s.connReq != nil && dev.ConnectionRequestURL != "" {
+		sn := dev.SerialNumber
+		url := dev.ConnectionRequestURL
 		go func() {
-			s.connReq.Send(context.Background(), device.SerialNumber, device.ConnectionRequestURL)
+			_ = s.connReq.Send(context.Background(), sn, url)
 		}()
 	}
 
-	return nil
+	return used, dev, nil
+}
+
+// SetParamSyncStarter T-0126: 注入 Path B 同步 starter（消费者驱动 narrow interface）。
+// 唯一实现者 *provision.SyncService。nil 时 SyncDeviceParamsManual 会返错。
+func (s *DeviceService) SetParamSyncStarter(starter ParamSyncStarter) {
+	s.paramSyncStarter = starter
 }
 
 // SetRFSwitch queues a SetParameterValues command to enable/disable the
