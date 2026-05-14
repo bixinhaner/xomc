@@ -84,6 +84,10 @@ func initDeviceModule(c *Container) error {
 	// InformHandler (subscribes to events)
 	informHandler := device.NewInformHandler(deviceService, c.Carriers, model.CarrierCMCC, logger)
 	if batchProcessor != nil {
+		// T-0123 / T-0125 batch path：注入 transition publisher，让 batch flush 完成后能
+		// 触发 device.online / device.firmware.changed 事件（与 UpdateFromInform 非 batch
+		// 路径对齐）。08754f89 收官 PR 漏挂导致这两个触发源在 batch 模式下全失效。
+		batchProcessor.SetTransitionPublisher(deviceService)
 		informHandler.SetBatchProcessor(batchProcessor)
 	}
 	if err := informHandler.Subscribe(c.EventBus); err != nil {

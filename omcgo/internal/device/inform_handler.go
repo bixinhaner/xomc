@@ -248,8 +248,13 @@ func (h *InformHandler) handlePeriodic(ctx context.Context, evt event.Event) err
 	// Step 3: Device exists → update
 	// 如果启用了批量处理器，走异步批量路径
 	if h.batchProcessor != nil {
+		// T-0123 / T-0125 batch path 补完：在 prepareDeviceUpdate 覆盖字段前捕获旧值，
+		// 让 batch flush 完成后能基于 oldStatus / oldVersion 判断是否发
+		// device.online / device.firmware.changed 事件（与 UpdateFromInform 非 batch 路径对齐）。
+		oldStatus := device.Status
+		oldVersion := device.FirmwareVersion
 		params, _ := prepareDeviceUpdate(device, inform)
-		h.batchProcessor.Submit(device, inform, params)
+		h.batchProcessor.Submit(device, inform, params, oldStatus, oldVersion)
 		h.logger.Debug("handlePeriodic: submitted to batch processor",
 			zap.String("device_id", device.ID.String()),
 			zap.String("serial_number", device.SerialNumber))

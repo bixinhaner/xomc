@@ -687,9 +687,9 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	firmwareChanged := oldVersion != "" && newVersion != "" && oldVersion != newVersion
 	becameOnline := oldStatus == model.DeviceOffline && device.Status == model.DeviceActive
 	if firmwareChanged {
-		s.publishDeviceFirmwareChangedEvent(ctx, device, oldVersion, newVersion, becameOnline)
+		s.PublishDeviceFirmwareChangedEvent(ctx, device, oldVersion, newVersion, becameOnline)
 	} else if becameOnline {
-		s.publishDeviceOnlineEvent(ctx, device)
+		s.PublishDeviceOnlineEvent(ctx, device)
 	}
 
 	return device, nil
@@ -856,10 +856,12 @@ type DeviceFirmwareChangedEvent struct {
 	BecameOnline bool      `json:"became_online"` // 二选一抑制的 online 事件
 }
 
-// publishDeviceFirmwareChangedEvent 发布 device.firmware.changed 事件（T-0125）。
+// PublishDeviceFirmwareChangedEvent 发布 device.firmware.changed 事件（T-0125）。
 //
 // 不阻塞主流程：EventBus nil / 序列化失败 / Publish 失败均仅 log Warn。
-func (s *DeviceService) publishDeviceFirmwareChangedEvent(ctx context.Context, device *model.Device,
+//
+// 导出供 BatchInformProcessor.doFlush 在 PG 写入成功后调用（T-0125 batch path 补完）。
+func (s *DeviceService) PublishDeviceFirmwareChangedEvent(ctx context.Context, device *model.Device,
 	oldVersion, newVersion string, becameOnline bool) {
 	if s.eventBus == nil {
 		return
@@ -903,11 +905,13 @@ type DeviceOnlineEvent struct {
 	SwVersion    string    `json:"sw_version"`
 }
 
-// publishDeviceOnlineEvent 发布 device.online 事件（T-0123）。
+// PublishDeviceOnlineEvent 发布 device.online 事件（T-0123）。
 //
 // 不阻塞主流程：EventBus nil / 序列化失败 / Publish 失败均仅 log Warn，
 // 不影响 UpdateFromInform 后续步骤。
-func (s *DeviceService) publishDeviceOnlineEvent(ctx context.Context, device *model.Device) {
+//
+// 导出供 BatchInformProcessor.doFlush 在 PG 写入成功后调用（T-0123 batch path 补完）。
+func (s *DeviceService) PublishDeviceOnlineEvent(ctx context.Context, device *model.Device) {
 	if s.eventBus == nil {
 		return
 	}

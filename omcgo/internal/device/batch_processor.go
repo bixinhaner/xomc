@@ -21,9 +21,11 @@ import (
 
 // informUpdate 封装单次 Inform 更新的所有数据。
 type informUpdate struct {
-	device   *model.Device                // 已查到的设备（含 ID）
-	inform   *tr069.InformMessage         // 原始 Inform 数据
-	params   []model.DeviceParameter      // 转换后的参数列表
+	device     *model.Device           // 已查到的设备（含 ID，prepareDeviceUpdate 已写入新字段）
+	inform     *tr069.InformMessage    // 原始 Inform 数据
+	params     []model.DeviceParameter // 转换后的参数列表
+	oldStatus  model.DeviceStatus      // T-0123 batch path：调 prepareDeviceUpdate 前捕获的旧 status
+	oldVersion string                  // T-0125 batch path：调 prepareDeviceUpdate 前捕获的旧 firmware_version
 }
 
 // BatchInformProcessor 批量处理 Periodic Inform 的设备更新。
@@ -45,6 +47,18 @@ type BatchInformProcessor struct {
 	workerChans []chan *informUpdate
 	wg          sync.WaitGroup
 	stopCh      chan struct{}
+
+	// transitionPublisher: T-0123 / T-0125 batch path 补完 — flush 成功后发布
+	// device.online / device.firmware.changed 事件。允许 nil（test 场景）。
+	transitionPublisher TransitionEventPublisher
+}
+
+// TransitionEventPublisher 是 BatchInformProcessor 调 DeviceService 发布
+// device.online / device.firmware.changed 事件的窄接口（避免反向依赖 DeviceService 整体）。
+type TransitionEventPublisher interface {
+	PublishDeviceOnlineEvent(ctx context.Context, device *model.Device)
+	PublishDeviceFirmwareChangedEvent(ctx context.Context, device *model.Device,
+		oldVersion, newVersion string, becameOnline bool)
 }
 
 // NewBatchInformProcessor creates a new BatchInformProcessor.
@@ -131,18 +145,29 @@ func (p *BatchInformProcessor) Stop() {
 	}
 }
 
+// SetTransitionPublisher 注入 transition 事件发布器（T-0123/T-0125 batch path）。
+// nil 表示不发事件（test 场景或灰度关闭）。
+func (p *BatchInformProcessor) SetTransitionPublisher(pub TransitionEventPublisher) {
+	p.transitionPublisher = pub
+}
+
 // Submit dispatches an inform update to the appropriate worker.
 // Heartbeat is refreshed immediately (not deferred to flush).
-func (p *BatchInformProcessor) Submit(device *model.Device, inform *tr069.InformMessage, params []model.DeviceParameter) {
+// oldStatus / oldVersion 由 caller（InformHandler）在调 prepareDeviceUpdate 之前捕获，
+// 用于 flush 后判断是否发 device.online / firmware.changed 事件。
+func (p *BatchInformProcessor) Submit(device *model.Device, inform *tr069.InformMessage,
+	params []model.DeviceParameter, oldStatus model.DeviceStatus, oldVersion string) {
 	// 心跳立即刷新，不等 flush
 	if p.heartbeat != nil {
 		p.heartbeat.RefreshHeartbeat(context.Background(), device.SerialNumber, device.InformInterval)
 	}
 
 	update := &informUpdate{
-		device: device,
-		inform: inform,
-		params: params,
+		device:     device,
+		inform:     inform,
+		params:     params,
+		oldStatus:  oldStatus,
+		oldVersion: oldVersion,
 	}
 
 	workerID := p.dispatchToWorker(device.SerialNumber)
@@ -277,6 +302,24 @@ func (p *BatchInformProcessor) doFlush(ctx context.Context, buffer map[string]*i
 
 	// 3. 批量 Redis 操作（仅 hit，避免把 stale device 写回 cache）
 	p.batchRedisOps(ctx, hit)
+
+	// 4. T-0123/T-0125: PG + cache 写入成功后发 transition 事件。
+	// 与 UpdateFromInform 非 batch 路径行为对齐（device_service.go §UpdateFromInform 末尾）。
+	// 同一 Inform 满足两者时优先发 firmware.changed（不发 device.online），由
+	// HandleFirmwareChanged 触发的重新交集 + Path B 覆盖 online 的能力，避免双 Path B。
+	if p.transitionPublisher != nil {
+		for _, u := range hit {
+			newVersion := u.device.FirmwareVersion
+			firmwareChanged := u.oldVersion != "" && newVersion != "" && u.oldVersion != newVersion
+			becameOnline := u.oldStatus == model.DeviceOffline && u.device.Status == model.DeviceActive
+			switch {
+			case firmwareChanged:
+				p.transitionPublisher.PublishDeviceFirmwareChangedEvent(ctx, u.device, u.oldVersion, newVersion, becameOnline)
+			case becameOnline:
+				p.transitionPublisher.PublishDeviceOnlineEvent(ctx, u.device)
+			}
+		}
+	}
 
 	return nil
 }
