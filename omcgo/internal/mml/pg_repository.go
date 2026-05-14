@@ -46,10 +46,16 @@ var taskAllowedSortColumns = map[string]bool{
 
 // ---- column lists ----
 
+// commandColumns 对齐 migration 000090 后的 mml_commands schema：
+// 老列 (param_template / param_paths / supported_operations / product_types) 已 DROP；
+// 新列 (target_paths / target_object / group_id / command_name_i18n / require_confirm /
+// confirm_msg_i18n) 由 mmlstandardloader 从 standard-model.xml 写入。
 var commandColumns = []string{
 	"id", "command_name", "command_code", "category",
-	"description", "rpc_method", "operation_type", "param_template", "param_paths",
-	"supported_operations", "help_doc", "notes", "product_types",
+	"description", "rpc_method", "operation_type",
+	"help_doc", "notes",
+	"target_paths", "target_object", "group_id",
+	"command_name_i18n", "require_confirm", "confirm_msg_i18n",
 	"created_at",
 }
 
@@ -261,84 +267,65 @@ func parseStringArray(data []byte) []string {
 	return []string{string(data)}
 }
 
-func scanCommand(row pgx.Row) (*MMLCommand, error) {
+// scanCommandFields 把 commandColumns 顺序的 row.Scan 结果填入 MMLCommand。
+// 抽出来让 row / rows 两种调用复用，避免维护两份字段映射。
+func scanCommandFields(scan func(...any) error) (*MMLCommand, error) {
 	var c MMLCommand
-	var paramTemplateJSON, paramPathsJSON, productTypesJSON []byte
-	var supportedOpsJSON []byte
+	var targetPathsJSON, nameI18nJSON, confirmMsgI18nJSON []byte
+	var targetObject *string
+	var groupID *uuid.UUID
 
-	err := row.Scan(
+	if err := scan(
 		&c.ID, &c.CommandName, &c.CommandCode, &c.Category,
-		&c.Description, &c.RPCMethod, &c.OperationType, &paramTemplateJSON, &paramPathsJSON,
-		&supportedOpsJSON, &c.HelpDoc, &c.Notes, &productTypesJSON,
+		&c.Description, &c.RPCMethod, &c.OperationType,
+		&c.HelpDoc, &c.Notes,
+		&targetPathsJSON, &targetObject, &groupID,
+		&nameI18nJSON, &c.RequireConfirm, &confirmMsgI18nJSON,
 		&c.CreatedAt,
-	)
-	if err != nil {
+	); err != nil {
 		return nil, err
 	}
-	if paramTemplateJSON != nil {
-		if err := json.Unmarshal(paramTemplateJSON, &c.ParamTemplate); err != nil {
-			return nil, fmt.Errorf("unmarshal param_template: %w", err)
-		}
+
+	c.TargetPaths = unmarshalStringArray(targetPathsJSON)
+	if targetObject != nil {
+		c.TargetObject = *targetObject
 	}
-	if c.ParamTemplate == nil {
-		c.ParamTemplate = map[string]interface{}{}
-	}
-	if paramPathsJSON != nil {
-		c.ParamPaths = append(c.ParamPaths[:0], paramPathsJSON...)
-	}
-	if c.ParamPaths == nil {
-		c.ParamPaths = json.RawMessage("[]")
-	}
-	c.SupportedOperations = parseStringArray(supportedOpsJSON)
-	if productTypesJSON != nil {
-		if err := json.Unmarshal(productTypesJSON, &c.ProductTypes); err != nil {
-			return nil, fmt.Errorf("unmarshal product_types: %w", err)
-		}
-	}
-	if c.ProductTypes == nil {
-		c.ProductTypes = []string{}
-	}
+	c.GroupID = groupID
+	c.CommandNameI18n = unmarshalStringMap(nameI18nJSON)
+	c.ConfirmMsgI18n = unmarshalStringMap(confirmMsgI18nJSON)
 	return &c, nil
 }
 
-func scanCommandRow(rows pgx.Rows) (*MMLCommand, error) {
-	var c MMLCommand
-	var paramTemplateJSON, paramPathsJSON, productTypesJSON []byte
-	var supportedOpsJSON []byte
+// unmarshalStringArray decodes a JSONB string array column; bad / null → empty slice.
+func unmarshalStringArray(raw []byte) []string {
+	if len(raw) == 0 {
+		return []string{}
+	}
+	var arr []string
+	if err := json.Unmarshal(raw, &arr); err != nil {
+		return []string{}
+	}
+	return arr
+}
 
-	err := rows.Scan(
-		&c.ID, &c.CommandName, &c.CommandCode, &c.Category,
-		&c.Description, &c.RPCMethod, &c.OperationType, &paramTemplateJSON, &paramPathsJSON,
-		&supportedOpsJSON, &c.HelpDoc, &c.Notes, &productTypesJSON,
-		&c.CreatedAt,
-	)
-	if err != nil {
-		return nil, err
+// unmarshalStringMap decodes a JSONB string→string map column; bad / null → empty map.
+func unmarshalStringMap(raw []byte) map[string]string {
+	if len(raw) == 0 {
+		return map[string]string{}
 	}
-	if paramTemplateJSON != nil {
-		if err := json.Unmarshal(paramTemplateJSON, &c.ParamTemplate); err != nil {
-			return nil, fmt.Errorf("unmarshal param_template: %w", err)
-		}
+	var m map[string]string
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return map[string]string{}
 	}
-	if c.ParamTemplate == nil {
-		c.ParamTemplate = map[string]interface{}{}
-	}
-	if paramPathsJSON != nil {
-		c.ParamPaths = append(c.ParamPaths[:0], paramPathsJSON...)
-	}
-	if c.ParamPaths == nil {
-		c.ParamPaths = json.RawMessage("[]")
-	}
-	c.SupportedOperations = parseStringArray(supportedOpsJSON)
-	if productTypesJSON != nil {
-		if err := json.Unmarshal(productTypesJSON, &c.ProductTypes); err != nil {
-			return nil, fmt.Errorf("unmarshal product_types: %w", err)
-		}
-	}
-	if c.ProductTypes == nil {
-		c.ProductTypes = []string{}
-	}
-	return &c, nil
+	return m
+}
+
+func scanCommand(row pgx.Row) (*MMLCommand, error) {
+	return scanCommandFields(row.Scan)
+}
+
+func scanCommandRow(rows pgx.Rows) (*MMLCommand, error) {
+	return scanCommandFields(rows.Scan)
 }
 
 // ======================================================================

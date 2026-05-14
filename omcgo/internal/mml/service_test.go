@@ -323,21 +323,22 @@ func TestService_GetCommand(t *testing.T) {
 	assert.Equal(t, expected, result)
 }
 
-func TestService_GetCommandParamPaths_StringPaths(t *testing.T) {
+// 000090 schema 重建后 mml_commands.target_paths 是 []string；label 由 service 兜底
+// 等于 path；writable 完全由 operation_type 派生。下面两个测试覆盖 LST（只读）和
+// MOD（可写）两个典型形态。
+func TestService_GetCommandParamPaths_LST_ReadOnly(t *testing.T) {
 	cmdID := uuid.New()
-	paramPathsJSON := json.RawMessage(`[
-		"Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.RF"
-	]`)
 	expected := &MMLCommand{
-		ID:                  cmdID,
-		CommandCode:         "MOD CELL",
-		OperationType:       "MOD",
-		ParamPaths:          paramPathsJSON,
-		SupportedOperations: []string{"LST", "MOD"},
+		ID:            cmdID,
+		CommandCode:   "LST_CELL_CONFIG",
+		OperationType: "LST",
+		TargetPaths: []string{
+			"Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.RF",
+		},
 	}
 
 	cmdRepo := &mockCommandRepo{
-		getByIDFn: func(ctx context.Context, id uuid.UUID) (*MMLCommand, error) {
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*MMLCommand, error) {
 			assert.Equal(t, cmdID, id)
 			return expected, nil
 		},
@@ -348,31 +349,29 @@ func TestService_GetCommandParamPaths_StringPaths(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	assert.Equal(t, "MOD CELL", result.CommandCode)
-	assert.Equal(t, "MOD", result.OperationType)
-	assert.Equal(t, []string{"LST", "MOD"}, result.SupportedOperations)
+	assert.Equal(t, "LST_CELL_CONFIG", result.CommandCode)
+	assert.Equal(t, "LST", result.OperationType)
+	assert.Equal(t, []string{"LST"}, result.SupportedOperations, "single op derived from operation_type")
 	require.Len(t, result.ParamPaths, 1)
 	assert.Equal(t, "Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.RF", result.ParamPaths[0].Path)
-	assert.Equal(t, "Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.RF", result.ParamPaths[0].Label)
-	assert.True(t, result.ParamPaths[0].Writable)
+	assert.Equal(t, result.ParamPaths[0].Path, result.ParamPaths[0].Label)
+	assert.False(t, result.ParamPaths[0].Writable, "LST is read-only")
 }
 
-func TestService_GetCommandParamPaths_ObjectPaths(t *testing.T) {
+func TestService_GetCommandParamPaths_MOD_Writable_MultiPaths(t *testing.T) {
 	cmdID := uuid.New()
-	paramPathsJSON := json.RawMessage(`[
-		{"path":"Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.RF","label":"LTE射频参数","writable":true},
-		{"path":"Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.CellState","label":"CellState"}
-	]`)
 	expected := &MMLCommand{
-		ID:                  cmdID,
-		CommandCode:         "MOD CELL",
-		OperationType:       "MOD",
-		ParamPaths:          paramPathsJSON,
-		SupportedOperations: []string{"LST", "MOD"},
+		ID:            cmdID,
+		CommandCode:   "MOD_CELL_CONFIG",
+		OperationType: "MOD",
+		TargetPaths: []string{
+			"Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.RF",
+			"Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.CellState",
+		},
 	}
 
 	cmdRepo := &mockCommandRepo{
-		getByIDFn: func(ctx context.Context, id uuid.UUID) (*MMLCommand, error) {
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*MMLCommand, error) {
 			assert.Equal(t, cmdID, id)
 			return expected, nil
 		},
@@ -384,10 +383,10 @@ func TestService_GetCommandParamPaths_ObjectPaths(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Len(t, result.ParamPaths, 2)
-	assert.Equal(t, "LTE射频参数", result.ParamPaths[0].Label)
-	assert.True(t, result.ParamPaths[0].Writable)
-	assert.Equal(t, "CellState", result.ParamPaths[1].Label)
-	assert.True(t, result.ParamPaths[1].Writable)
+	for _, p := range result.ParamPaths {
+		assert.True(t, p.Writable, "MOD operation is writable")
+		assert.Equal(t, p.Path, p.Label, "label falls back to path absent i18n")
+	}
 }
 
 // --- Tests: GetCommandByCode ---

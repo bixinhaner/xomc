@@ -25,16 +25,23 @@ interface BackendMMLCommand {
   category: string;
   description: string;
   rpc_method: string;
-  param_template: Record<string, unknown> | null;
-  product_types: string[] | null;
   created_at: string;
-  // Extended fields (may be absent in older backend versions)
   operation_type?: string;
-  param_paths?: Array<string | { path: string; label?: string; writable?: boolean }> | null;
-  supported_operations?: string[] | null;
   help_doc?: string;
   notes?: string;
   params?: BackendMMLParamRef[] | null;
+  // standard-model 重建后由 mmlstandardloader 写入的新字段（migration 000090）
+  target_paths?: string[] | null;
+  target_object?: string | null;
+  group_id?: string | null;
+  command_name_i18n?: Record<string, string> | null;
+  require_confirm?: boolean;
+  confirm_msg_i18n?: Record<string, string> | null;
+  // 老字段，向后兼容已死无返回；保留 type 防 axios 误转
+  param_template?: Record<string, unknown> | null;
+  product_types?: string[] | null;
+  param_paths?: Array<string | { path: string; label?: string; writable?: boolean }> | null;
+  supported_operations?: string[] | null;
 }
 
 interface BackendMMLScript {
@@ -178,24 +185,48 @@ function mapBackendParamRef(bp: BackendMMLParamRef): MMLParamRef {
   };
 }
 
+// 由 backend.operation_type 派生 writable —— 与后端 isWritableOperation 对齐。
+function deriveWritableFromOp(op: string | undefined): boolean {
+  if (!op) return false;
+  const upper = op.toUpperCase();
+  return upper === 'MOD' || upper === 'ADD' || upper === 'RMV'
+      || upper === 'ACT' || upper === 'DEA' || upper === 'RST'
+      || upper === 'CLR' || upper === 'UPG';
+}
+
 function mapBackendCommand(bc: BackendMMLCommand): MMLCommand {
+  const op = bc.operation_type;
+  const writable = deriveWritableFromOp(op);
+
+  // 优先 target_paths（新 schema）；老 param_paths 形态降级兼容
   let paramPaths: ParamPath[] | undefined;
-  if (Array.isArray(bc.param_paths)) {
+  if (Array.isArray(bc.target_paths) && bc.target_paths.length > 0) {
+    paramPaths = bc.target_paths
+      .map((p) => (typeof p === 'string' && p.trim() ? { path: p, label: p, writable } : null))
+      .filter((v): v is ParamPath => v !== null);
+  } else if (Array.isArray(bc.param_paths)) {
     paramPaths = bc.param_paths
       .map((item) => {
         if (typeof item === 'string') {
           const path = item.trim();
           if (!path) return null;
-          return { path, label: path, writable: true } as ParamPath;
+          return { path, label: path, writable } as ParamPath;
         }
         if (!item.path) return null;
         return {
           path: item.path,
           label: item.label || item.path,
-          writable: item.writable ?? true,
+          writable: item.writable ?? writable,
         } as ParamPath;
       })
       .filter((v): v is ParamPath => v !== null);
+  }
+
+  // standard-model 重建后单命令绑单 operation_type；supportedOperations 派生单值
+  // 以兼容 ParamPathPanel 等老消费方
+  let supportedOperations: string[] | undefined = bc.supported_operations || undefined;
+  if (!supportedOperations && op) {
+    supportedOperations = [op];
   }
 
   return {
@@ -205,13 +236,18 @@ function mapBackendCommand(bc: BackendMMLCommand): MMLCommand {
     category: bc.category,
     description: bc.description,
     params: mapParamTemplate(bc.param_template),
-    productTypes: bc.product_types || [],
-    operationType: bc.operation_type as MMLOperationType | undefined,
+    operationType: op as MMLOperationType | undefined,
     paramPaths,
-    supportedOperations: bc.supported_operations || undefined,
+    supportedOperations,
     helpDoc: bc.help_doc || undefined,
     notes: bc.notes || undefined,
     paramRefs: dedupeParamRefs(bc.params?.map(mapBackendParamRef)),
+    targetObject: bc.target_object || undefined,
+    groupId: bc.group_id || undefined,
+    commandNameI18n: bc.command_name_i18n || undefined,
+    requireConfirm: bc.require_confirm,
+    confirmMsgI18n: bc.confirm_msg_i18n || undefined,
+    productTypes: bc.product_types || [],
   };
 }
 

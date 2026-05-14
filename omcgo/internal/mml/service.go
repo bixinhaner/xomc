@@ -196,19 +196,31 @@ type CommandParamPathsResponse struct {
 }
 
 // GetCommandParamPaths retrieves TR-069 parameter paths for a predefined MML command.
+//
+// 自 migration 000090 schema 重建后：
+//   - 单条命令只绑定一个 operation_type（standard-model 已为每个操作发独立 code）
+//   - 路径列表存在 mml_commands.target_paths（JSONB []string）
+//   - 老 supported_operations 字段已下线 — response 中保留单元素数组以兼容 FE
 func (s *Service) GetCommandParamPaths(ctx context.Context, id uuid.UUID) (*CommandParamPathsResponse, error) {
 	cmd, err := s.GetCommand(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 
-	supportedOperations := make([]string, 0, len(cmd.SupportedOperations))
-	supportedOperations = append(supportedOperations, cmd.SupportedOperations...)
-
-	paramPaths, err := normalizeCommandParamPaths(cmd.ParamPaths, cmd.OperationType, supportedOperations)
-	if err != nil {
-		return nil, fmt.Errorf("parse command param paths: %w", err)
+	writable := isWritableOperation(cmd.OperationType)
+	paramPaths := make([]CommandParamPath, 0, len(cmd.TargetPaths))
+	for _, p := range cmd.TargetPaths {
+		if p == "" {
+			continue
+		}
+		paramPaths = append(paramPaths, CommandParamPath{
+			Path:     p,
+			Label:    p,
+			Writable: writable,
+		})
 	}
+
+	supportedOperations := []string{cmd.OperationType}
 
 	return &CommandParamPathsResponse{
 		CommandCode:         cmd.CommandCode,

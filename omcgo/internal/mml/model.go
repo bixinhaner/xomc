@@ -1,7 +1,6 @@
 package mml
 
 import (
-	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -39,23 +38,38 @@ const (
 	ResultFailed  TaskResult = "failed"
 )
 
-// MMLCommand represents a predefined MML command template.
+// MMLCommand represents a predefined MML command, generated from standard-model.xml
+// by mmlstandardloader (Sprint A schema rebuild — migration 000090).
+//
+// Old fields (param_template / param_paths / supported_operations / product_types)
+// were dropped in 000090. New layout pivots on:
+//   - target_paths  : TR-069 paths the command operates on (JSONB array of strings)
+//   - target_object : add/delete object path (for ADD/RMV) — nullable
+//   - group_id      : FK → mml_param_groups.id (NULL for ungrouped legacy)
+//   - command_name_i18n / confirm_msg_i18n : {"zh-CN": "...", "en-US": "..."}
+//   - require_confirm : 危险命令二次确认标志
+//
+// One command now binds to exactly one operation_type (LST/MOD/ADD/RMV/...);
+// the "supported_operations" multi-op concept is gone because the standard model
+// already emits separate command_codes per operation.
 type MMLCommand struct {
-	ID                  uuid.UUID              `json:"id"`
-	CommandName         string                 `json:"command_name"`
-	CommandCode         string                 `json:"command_code"`
-	Category            string                 `json:"category"`
-	Description         string                 `json:"description"`
-	RPCMethod           string                 `json:"rpc_method"`
-	OperationType       string                 `json:"operation_type" db:"operation_type"`
-	ParamTemplate       map[string]interface{} `json:"param_template"`
-	ParamPaths          json.RawMessage        `json:"param_paths" db:"param_paths"`
-	SupportedOperations []string               `json:"supported_operations" db:"supported_operations"`
-	HelpDoc             string                 `json:"help_doc" db:"help_doc"`
-	Notes               string                 `json:"notes" db:"notes"`
-	ProductTypes        []string               `json:"product_types"`
-	CreatedAt           time.Time              `json:"created_at"`
-	Params              []MMLParamRef          `json:"params,omitempty"`
+	ID              uuid.UUID         `json:"id"`
+	CommandName     string            `json:"command_name"`
+	CommandCode     string            `json:"command_code"`
+	Category        string            `json:"category"`
+	Description     string            `json:"description"`
+	RPCMethod       string            `json:"rpc_method"`
+	OperationType   string            `json:"operation_type" db:"operation_type"`
+	HelpDoc         string            `json:"help_doc" db:"help_doc"`
+	Notes           string            `json:"notes" db:"notes"`
+	TargetPaths     []string          `json:"target_paths"`
+	TargetObject    string            `json:"target_object,omitempty"`
+	GroupID         *uuid.UUID        `json:"group_id,omitempty"`
+	CommandNameI18n map[string]string `json:"command_name_i18n"`
+	RequireConfirm  bool              `json:"require_confirm"`
+	ConfirmMsgI18n  map[string]string `json:"confirm_msg_i18n"`
+	CreatedAt       time.Time         `json:"created_at"`
+	Params          []MMLParamRef     `json:"params,omitempty"`
 }
 
 // ScriptStatus represents the current state of an MML script.

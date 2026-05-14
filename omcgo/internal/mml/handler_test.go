@@ -236,15 +236,14 @@ func TestHandler_GetCommand(t *testing.T) {
 	cmdRepo := &hCmdRepo{
 		GetByIDFn: func(_ context.Context, id uuid.UUID) (*MMLCommand, error) {
 			return &MMLCommand{
-				ID:            cmdID,
-				CommandName:   "Query Cell",
-				CommandCode:   "LST CELL",
-				Category:      "query",
-				Description:   "List cell information",
-				RPCMethod:     "GetParameterValues",
-				ParamTemplate: map[string]interface{}{"cell_id": ""},
-				ProductTypes:  []string{"eNB", "gNB"},
-				CreatedAt:     now,
+				ID:          cmdID,
+				CommandName: "Query Cell",
+				CommandCode: "LST CELL",
+				Category:    "query",
+				Description: "List cell information",
+				RPCMethod:   "GetParameterValues",
+				TargetPaths: []string{"Device.Services.FAPService.{i}.CellConfig.{i}"},
+				CreatedAt:   now,
 			}, nil
 		},
 	}
@@ -275,11 +274,12 @@ func TestHandler_GetCommandParamPaths(t *testing.T) {
 		GetByIDFn: func(_ context.Context, id uuid.UUID) (*MMLCommand, error) {
 			assert.Equal(t, cmdID, id)
 			return &MMLCommand{
-				ID:                  cmdID,
-				CommandCode:         "MOD CELL",
-				OperationType:       "MOD",
-				ParamPaths:          json.RawMessage(`[{"path":"Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.RF","label":"LTE射频参数","writable":true}]`),
-				SupportedOperations: []string{"LST", "MOD"},
+				ID:            cmdID,
+				CommandCode:   "MOD CELL",
+				OperationType: "MOD",
+				TargetPaths: []string{
+					"Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.RF",
+				},
 			}, nil
 		},
 	}
@@ -301,11 +301,12 @@ func TestHandler_GetCommandParamPaths(t *testing.T) {
 	response.DecodeData(t, w.Body, &data)
 	assert.Equal(t, "MOD CELL", data.CommandCode)
 	assert.Equal(t, "MOD", data.OperationType)
-	assert.Equal(t, []string{"LST", "MOD"}, data.SupportedOperations)
+	// 000090 后 supported_operations 由 operation_type 派生（单值数组），label=path 兜底
+	assert.Equal(t, []string{"MOD"}, data.SupportedOperations)
 	require.Len(t, data.ParamPaths, 1)
 	assert.Equal(t, "Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.RF", data.ParamPaths[0].Path)
-	assert.Equal(t, "LTE射频参数", data.ParamPaths[0].Label)
-	assert.True(t, data.ParamPaths[0].Writable)
+	assert.Equal(t, data.ParamPaths[0].Path, data.ParamPaths[0].Label)
+	assert.True(t, data.ParamPaths[0].Writable, "MOD operation is writable")
 }
 
 func TestHandler_Execute(t *testing.T) {

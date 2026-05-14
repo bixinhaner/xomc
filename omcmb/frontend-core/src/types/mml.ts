@@ -53,14 +53,31 @@ export interface MMLCommand {
   category: string;
   description: string;
   params: MMLParam[];
-  productTypes: string[];
-  // Extended fields aligned with backend model
+  // Extended fields aligned with backend model (migration 000090 重建后的 schema)
   operationType?: MMLOperationType;
+  /** 派生自 backend.target_paths（string[] → ParamPath[]）；writable 由 operationType 推断 */
   paramPaths?: ParamPath[];
+  /** 派生自 operationType 单元素数组，保留是为兼容 ParamPathPanel 旧逻辑 */
   supportedOperations?: string[];
   helpDoc?: string;
   notes?: string;
   paramRefs?: MMLParamRef[];
+  // 新增字段（standard-model 重建后由 mmlstandardloader 写入）
+  /** ADD/RMV 操作的目标对象路径，nullable */
+  targetObject?: string;
+  /** 所属 mml_param_groups.id，nullable */
+  groupId?: string;
+  /** i18n 命令名 {"zh-CN":"...", "en-US":"..."} */
+  commandNameI18n?: Record<string, string>;
+  /** 危险命令二次确认标志 */
+  requireConfirm?: boolean;
+  /** i18n 确认提示文案 */
+  confirmMsgI18n?: Record<string, string>;
+  /**
+   * @deprecated migration 000090 后 mml_commands.product_types 列已下线；
+   * 字段保留为可选仅供页面兜底渲染（永远为 undefined / []）。
+   */
+  productTypes?: string[];
 }
 
 export interface MMLResult {
