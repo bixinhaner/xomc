@@ -38,6 +38,7 @@ import (
 	"github.com/omcgo/omcgo/internal/syslog"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/topology"
+	"github.com/omcgo/omcgo/internal/ufte"
 )
 
 // initMRModule 初始化 F05 测量报告模块。
@@ -92,8 +93,31 @@ func initSoftwareModule(c *Container) error {
 	softwareHandler := software.NewHandler(softwareService, firmwareRepo, taskRepo, subTaskRepo, logger)
 
 	c.miscDeps.softwareHandler = softwareHandler
+	c.miscDeps.softwareService = softwareService
+	c.miscDeps.softwareTaskRepo = taskRepo
+	c.miscDeps.softwareSubTaskRepo = subTaskRepo
 
 	logger.Info("software management module initialized with canary monitor")
+	return nil
+}
+
+func initUFTEModule(c *Container) error {
+	logger := c.Logger.Named("ufte")
+	taskTypeRepo := ufte.NewPgTaskTypeRepository(c.PgPool)
+	service := ufte.NewService(
+		c.miscDeps.softwareService,
+		taskTypeRepo,
+		c.miscDeps.softwareTaskRepo,
+		c.miscDeps.softwareSubTaskRepo,
+		c.DeviceRepo,
+		logger,
+	)
+	inserted, err := service.EnsureBuiltInTaskTypes(context.Background())
+	if err != nil {
+		return err
+	}
+	c.miscDeps.ufteHandler = ufte.NewHandler(service, logger)
+	logger.Info("UFTE adapter module initialized", zap.Int("built_in_task_types_inserted", inserted))
 	return nil
 }
 
@@ -479,8 +503,8 @@ func initMiscModules(c *Container) error {
 	licenseEnforcer.SetLogWriter(licenseLogWriter)
 	licenseMonitor.SetLogWriter(licenseLogWriter)
 	licenseHandler.SetLogWriter(licenseLogWriter)
-	licenseHandler.SetLogRepo(licenseLogRepo)  // T-0100-P1：让 GET /licenses/logs 走真实 repo
-	licenseSvc.SetLogRepo(licenseLogRepo)      // T-0100-P2：让 Summary 卡 enforcement_hits_7d 走真实 count
+	licenseHandler.SetLogRepo(licenseLogRepo) // T-0100-P1：让 GET /licenses/logs 走真实 repo
+	licenseSvc.SetLogRepo(licenseLogRepo)     // T-0100-P2：让 Summary 卡 enforcement_hits_7d 走真实 count
 	c.miscDeps.licenseLogRepo = licenseLogRepo
 
 	// T-0100-P4-C：OEM 公钥加载 + 注入 SignatureVerifier。dev 默认 strict=false
@@ -683,8 +707,12 @@ type miscDeps struct {
 	mrMapRepo *mr.PgMappingRepository
 
 	// Software
-	softwareHandler *software.Handler
-	canaryMonitor   *software.CanaryMonitor
+	softwareHandler     *software.Handler
+	softwareService     *software.SoftwareService
+	softwareTaskRepo    software.TaskRepository
+	softwareSubTaskRepo software.SubTaskRepository
+	canaryMonitor       *software.CanaryMonitor
+	ufteHandler         *ufte.Handler
 
 	// Provision
 	provisionRepo   *provision.PgProvisioningTaskRepository

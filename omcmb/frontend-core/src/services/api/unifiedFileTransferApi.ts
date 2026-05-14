@@ -38,7 +38,7 @@ export const unifiedFileTransferApi = {
   },
 
   async getDevices(
-    params: { status?: string; typeCode?: string; keyword?: string; category?: string } & PageRequest,
+    params: { status?: string; typeCode?: string; keyword?: string; category?: string; productType?: string } & PageRequest,
   ): Promise<PageResponse<UnifiedFileTransferDeviceItem>> {
     const { data } = await http.get<PageResponse<UnifiedFileTransferDeviceItem>>('/ufte/devices', {
       params: {
@@ -47,6 +47,22 @@ export const unifiedFileTransferApi = {
         status: params.status,
         typeCode: params.typeCode,
         category: params.category,
+        productType: params.productType,
+        keyword: params.keyword,
+      },
+    });
+    return data;
+  },
+
+  async getDeviceCandidates(
+    params: { keyword?: string; category?: string; productType?: string } & PageRequest,
+  ): Promise<PageResponse<UnifiedFileTransferDeviceItem>> {
+    const { data } = await http.get<PageResponse<UnifiedFileTransferDeviceItem>>('/ufte/device-candidates', {
+      params: {
+        page: params.page,
+        pageSize: params.pageSize,
+        category: params.category,
+        productType: params.productType,
         keyword: params.keyword,
       },
     });

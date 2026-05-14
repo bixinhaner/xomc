@@ -124,16 +124,8 @@ export default function TemplateDefinitionManagement() {
         enabled: record.enabled,
         platformScope: record.platformScope,
         fileType: record.fileType,
-        fileTypeLabel: record.fileTypeLabel,
         fileTypeEditable: record.fileTypeEditable,
-        urlTemplate: record.urlTemplate,
-        targetFileNameTemplate: record.targetFileNameTemplate,
-        fileNameTemplate: record.fileNameTemplate,
-        fileSizeField: record.fileSizeField,
-        checksumField: record.checksumField,
-        rawMode: record.rawMode,
         delaySeconds: record.delaySeconds,
-        transportPath: record.transportPath,
       });
     } else {
       typeForm.setFieldsValue({
@@ -164,16 +156,16 @@ export default function TemplateDefinitionManagement() {
       enabled: values.enabled,
       platformScope: values.platformScope,
       fileType: values.fileType,
-      fileTypeLabel: values.fileTypeLabel,
+      fileTypeLabel: editingType?.fileTypeLabel ?? values.fileType,
       fileTypeEditable: values.fileTypeEditable,
-      urlTemplate: values.urlTemplate,
-      targetFileNameTemplate: values.targetFileNameTemplate,
-      fileNameTemplate: values.fileNameTemplate,
-      fileSizeField: values.fileSizeField,
-      checksumField: values.checksumField,
-      rawMode: values.rawMode,
+      urlTemplate: editingType?.urlTemplate,
+      targetFileNameTemplate: editingType?.targetFileNameTemplate,
+      fileNameTemplate: editingType?.fileNameTemplate,
+      fileSizeField: editingType?.fileSizeField,
+      checksumField: editingType?.checksumField,
+      rawMode: editingType?.rawMode,
       delaySeconds: values.delaySeconds,
-      transportPath: values.transportPath,
+      transportPath: editingType?.transportPath,
     };
 
     let savedType: UnifiedFileTransferTaskType;
@@ -197,11 +189,10 @@ export default function TemplateDefinitionManagement() {
 
   const renderTemplateSection = (
     title: string,
-    description: string,
     items: UnifiedFileTransferTaskType[],
     emptyDescription: string,
   ) => (
-    <Card title={title} extra={<Text type="secondary">{description}</Text>} loading={taskTypesLoading}>
+    <Card title={title} loading={taskTypesLoading}>
       {items.length === 0 ? (
         <Empty description={emptyDescription} image={Empty.PRESENTED_IMAGE_SIMPLE} />
       ) : (
@@ -234,7 +225,6 @@ export default function TemplateDefinitionManagement() {
   return (
     <ListPageLayout
       title="传输模板管理"
-      subtitle="模板定义、字段治理和业务扩展统一收敛到这个独立页面。菜单建议仅给管理员角色勾选后显示。"
       extra={(
         <Button type="primary" icon={<PlusOutlined />} onClick={() => openTypeDrawer()}>
           新增自定义模板
@@ -244,12 +234,7 @@ export default function TemplateDefinitionManagement() {
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
         <Card>
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Space direction="vertical" size={4}>
-              <Title level={4} style={{ margin: 0 }}>模板定义与治理</Title>
-              <Paragraph style={{ marginBottom: 0 }}>
-                文件传输中心只负责业务发任务，这里单独维护内置模板和自定义模板，避免业务操作与协议定义混排。内置模板侧重标准场景调整，自定义模板侧重新增扩展能力。
-              </Paragraph>
-            </Space>
+            <Title level={4} style={{ margin: 0 }}>模板配置</Title>
             <Tabs
               activeKey={selectedCategory}
               items={categories.map((item) => ({ key: item.category, label: item.categoryLabel }))}
@@ -262,7 +247,6 @@ export default function TemplateDefinitionManagement() {
           <Col xs={24} xl={14}>
             {renderTemplateSection(
               '内置模板',
-              '面向标准业务能力，允许按运营商或产品特性做受控调整。',
               builtInTypes,
               '当前业务暂无内置模板',
             )}
@@ -270,7 +254,6 @@ export default function TemplateDefinitionManagement() {
           <Col xs={24} xl={10}>
             {renderTemplateSection(
               '自定义模板',
-              '面向项目场景和差异化需求，可新增并持续演进。',
               customTypes,
               '当前业务暂无自定义模板',
             )}
@@ -299,31 +282,23 @@ export default function TemplateDefinitionManagement() {
               <Descriptions.Item label="业务视图">{detailType.categoryLabel}</Descriptions.Item>
               <Descriptions.Item label="类型编码">{detailType.typeCode}</Descriptions.Item>
               <Descriptions.Item label="RPC 类型">{detailType.rpcType}</Descriptions.Item>
-              <Descriptions.Item label="FileType">{detailType.fileType} / {detailType.fileTypeLabel}</Descriptions.Item>
+              <Descriptions.Item label="FileType">{detailType.fileType}</Descriptions.Item>
               <Descriptions.Item label="权限编码">{detailType.permissionCode}</Descriptions.Item>
               <Descriptions.Item label="平台范围">{detailType.platformScope.join(' / ')}</Descriptions.Item>
               <Descriptions.Item label="最近编辑人">{detailType.lastEditor}</Descriptions.Item>
               <Descriptions.Item label="30天任务量">{detailType.taskCount30d}</Descriptions.Item>
               <Descriptions.Item label="30天成功率">{detailType.successRate30d}%</Descriptions.Item>
+              <Descriptions.Item label="后置事件">{detailType.postTcEventCode || '-'}</Descriptions.Item>
             </Descriptions>
             <Paragraph style={{ marginBottom: 0 }}>{detailType.description}</Paragraph>
-            <Card size="small" title="RPC 参数配置">
-              <Descriptions column={2} size="small">
-                <Descriptions.Item label="FileType 可编辑">
-                  <Tag color={detailType.fileTypeEditable ? 'green' : 'default'}>
-                    {detailType.fileTypeEditable ? '支持' : '固定'}
-                  </Tag>
-                </Descriptions.Item>
-                <Descriptions.Item label="DelaySeconds">{detailType.delaySeconds ?? 0}</Descriptions.Item>
-                <Descriptions.Item label="URL 模板">{detailType.urlTemplate || 'Upload 场景自动拼接服务地址'}</Descriptions.Item>
-                <Descriptions.Item label="目标文件名">{detailType.targetFileNameTemplate || '按设备或文件模板生成'}</Descriptions.Item>
-                <Descriptions.Item label="文件名模板">{detailType.fileNameTemplate || '无'}</Descriptions.Item>
-                <Descriptions.Item label="传输端点">{detailType.transportPath || '由服务端统一路由'}</Descriptions.Item>
-                <Descriptions.Item label="文件大小字段">{detailType.fileSizeField || '无'}</Descriptions.Item>
-                <Descriptions.Item label="校验字段">{detailType.checksumField || '无'}</Descriptions.Item>
-                <Descriptions.Item label="RawMode">{detailType.rawMode || '无'}</Descriptions.Item>
-              </Descriptions>
-            </Card>
+            <Descriptions column={2} size="small" bordered>
+              <Descriptions.Item label="FileType 可编辑">
+                <Tag color={detailType.fileTypeEditable ? 'green' : 'default'}>
+                  {detailType.fileTypeEditable ? '支持' : '固定'}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="DelaySeconds">{detailType.delaySeconds ?? 0}</Descriptions.Item>
+            </Descriptions>
             <div>
               <Text strong>步骤链</Text>
               <div style={{ marginTop: 8 }}>
@@ -336,14 +311,6 @@ export default function TemplateDefinitionManagement() {
                 </Space>
               </div>
             </div>
-            {detailType.postTcEventCode ? (
-              <Card size="small">
-                <Text strong>TransferComplete 后事件</Text>
-                <Paragraph style={{ marginBottom: 0, marginTop: 8 }}>
-                  {detailType.postTcEventCode}。适用于 5G 升级等在 TransferComplete 后仍需等待设备上报 Inform 事件的场景。
-                </Paragraph>
-              </Card>
-            ) : null}
           </Space>
         ) : null}
       </Drawer>
@@ -409,30 +376,6 @@ export default function TemplateDefinitionManagement() {
           </Form.Item>
           <Form.Item label="FileType" name="fileType" rules={[{ required: true, message: '请输入 FileType' }]}> 
             <Input placeholder="例如：1 / 3 / 6 / 8" />
-          </Form.Item>
-          <Form.Item label="FileType 说明" name="fileTypeLabel" rules={[{ required: true, message: '请输入 FileType 说明' }]}> 
-            <Input placeholder="例如：Firmware Upgrade Image / 运行日志" />
-          </Form.Item>
-          <Form.Item label="URL 模板" name="urlTemplate">
-            <Input placeholder="Download 场景例如：firmware/{minio_path}" />
-          </Form.Item>
-          <Form.Item label="目标文件名模板" name="targetFileNameTemplate">
-            <Input placeholder="例如：backup-{task_id8}-{sn}.xml" />
-          </Form.Item>
-          <Form.Item label="文件名模板" name="fileNameTemplate">
-            <Input placeholder="例如：{firmware_name}" />
-          </Form.Item>
-          <Form.Item label="文件大小字段" name="fileSizeField">
-            <Input placeholder="例如：firmware.fileSize" />
-          </Form.Item>
-          <Form.Item label="校验字段" name="checksumField">
-            <Input placeholder="例如：firmware.md5" />
-          </Form.Item>
-          <Form.Item label="RawMode" name="rawMode">
-            <Input placeholder="例如：true / false" />
-          </Form.Item>
-          <Form.Item label="传输端点模板" name="transportPath">
-            <Input placeholder="例如：/smallcell/FileUploadService?fileType={fileType}&filename={targetFileName}" />
           </Form.Item>
           <Form.Item label="DelaySeconds" name="delaySeconds">
             <InputNumber min={0} max={86400} style={{ width: '100%' }} />

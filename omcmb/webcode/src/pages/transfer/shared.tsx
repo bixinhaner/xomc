@@ -205,12 +205,6 @@ export function TransferTemplateCard({
           <Tag color={taskType.enabled ? 'green' : 'default'}>{taskType.enabled ? '已启用' : '已停用'}</Tag>
         </Space>
         <Text type="secondary">{taskType.description}</Text>
-        <Space size={16} wrap>
-          <Text type="secondary">{taskType.fileTypeLabel}</Text>
-          <Text type="secondary">步骤数 {taskType.stepChain.length}</Text>
-          <Text type="secondary">30天任务 {taskType.taskCount30d}</Text>
-          <Text type="secondary">成功率 {taskType.successRate30d}%</Text>
-        </Space>
       </Space>
     </Card>
   );

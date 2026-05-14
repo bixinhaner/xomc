@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   Button,
   Card,
+  Checkbox,
   Drawer,
   Form,
   Input,
-  InputNumber,
   Progress,
   Radio,
   Select,
@@ -23,6 +23,7 @@ import { useNavigate } from 'react-router-dom';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import {
   useCreateUnifiedFileTransferTask,
+  useUnifiedFileTransferDeviceCandidates,
   useUnifiedFileTransferDevices,
   useUnifiedFileTransferTasks,
   useUnifiedFileTransferTaskTypes,
@@ -44,10 +45,21 @@ import {
   UPGRADE_LIKE_CATEGORIES,
 } from '../shared';
 
-const { Paragraph, Text, Title } = Typography;
+const { Text, Title } = Typography;
+
+function isUpgradeTaskCategory(category?: string) {
+  return category === 'gnb_upgrade' || category === 'enb_upgrade';
+}
+
+function splitDeviceTypes(deviceType?: string) {
+  return (deviceType ?? '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
 
 function needsFirmwareSelection(taskType?: UnifiedFileTransferTaskType) {
-  return Boolean(taskType && taskType.rpcType === 'DOWNLOAD' && UPGRADE_LIKE_CATEGORIES.has(taskType.category));
+  return Boolean(taskType && taskType.rpcType === 'DOWNLOAD' && isUpgradeTaskCategory(taskType.category));
 }
 
 function buildFirmwareCandidateList(
@@ -131,10 +143,13 @@ export default function FileTransferCenter() {
   const [deviceKeywordInput, setDeviceKeywordInput] = useState('');
   const [deviceStatusFilter, setDeviceStatusFilter] = useState<string>();
   const [deviceTypeFilter, setDeviceTypeFilter] = useState<string>();
+  const [deviceProductTypeFilter, setDeviceProductTypeFilter] = useState<string>();
   const [viewMode, setViewMode] = useState<'tasks' | 'devices'>('tasks');
   const [taskDrawerOpen, setTaskDrawerOpen] = useState(false);
   const [taskForm] = Form.useForm<CreateUnifiedFileTransferTaskInput>();
   const drawerTypeCode = Form.useWatch('typeCode', taskForm);
+  const drawerProductType = Form.useWatch('productType', taskForm);
+  const drawerDeviceIds = Form.useWatch('deviceIds', taskForm) ?? [];
 
   const { data: tasksData, isLoading: tasksLoading } = useUnifiedFileTransferTasks({
     page: taskPage,
@@ -152,9 +167,12 @@ export default function FileTransferCenter() {
     keyword: deviceKeyword || undefined,
     status: deviceStatusFilter,
     typeCode: deviceTypeFilter,
+    productType: deviceProductTypeFilter,
   });
 
   const createTaskMutation = useCreateUnifiedFileTransferTask();
+  const recentTasks = tasksData?.items ?? [];
+  const recentDevices = devicesData?.items ?? [];
 
   const filteredTaskTypes = useMemo(
     () => taskTypes.filter((item) => item.category === selectedCategory),
@@ -171,17 +189,80 @@ export default function FileTransferCenter() {
     [drawerTypeCode, filteredTaskTypes, taskTypes],
   );
 
+  const createExecutionModeOptions = useMemo(
+    () => EXECUTION_MODE_OPTIONS.filter((item) => item.value !== 'scheduled'),
+    [],
+  );
+
+  const { data: drawerDevicesData, isLoading: drawerDevicesLoading } = useUnifiedFileTransferDeviceCandidates({
+    page: 1,
+    pageSize: 200,
+    category: selectedCategory || undefined,
+    productType: needsFirmwareSelection(drawerTaskType) ? drawerProductType : undefined,
+  });
+
+  const drawerDeviceCandidates = drawerDevicesData?.items ?? [];
+
   const firmwareCandidates = useMemo(
     () => buildFirmwareCandidateList(firmwareData?.items ?? [], drawerTaskType),
     [drawerTaskType, firmwareData?.items],
   );
 
+  const drawerProductTypeOptions = useMemo(() => {
+    const values = new Set<string>();
+    firmwareCandidates.forEach((item) => {
+      splitDeviceTypes(item.deviceType).forEach((entry) => values.add(entry));
+    });
+    if (values.size === 0) {
+      (drawerTaskType?.platformScope ?? []).forEach((entry) => values.add(entry));
+    }
+    return Array.from(values).map((item) => ({ label: item, value: item }));
+  }, [drawerTaskType?.platformScope, firmwareCandidates]);
+
+  const filteredFirmwareCandidates = useMemo(
+    () => (drawerProductType
+      ? firmwareCandidates.filter((item) => {
+          const deviceTypes = splitDeviceTypes(item.deviceType);
+          return deviceTypes.length === 0 || deviceTypes.includes(drawerProductType);
+        })
+      : []),
+    [drawerProductType, firmwareCandidates],
+  );
+
   const firmwareOptions = useMemo(
-    () => firmwareCandidates.map((item) => ({
+    () => filteredFirmwareCandidates.map((item) => ({
       label: `${item.versionCode} / ${item.deviceType || '未标识型号'} / ${item.fileName}`,
       value: item.id,
     })),
-    [firmwareCandidates],
+    [filteredFirmwareCandidates],
+  );
+
+  const deviceProductTypeOptions = useMemo(() => {
+    const values = new Set<string>();
+    recentDevices.forEach((item) => {
+      if (item.productType) {
+        values.add(item.productType);
+      }
+    });
+    filteredTaskTypes.forEach((item) => {
+      (item.platformScope ?? []).forEach((entry) => values.add(entry));
+    });
+    return Array.from(values).map((item) => ({ label: item, value: item }));
+  }, [filteredTaskTypes, recentDevices]);
+
+  const drawerSelectedDevices = useMemo(
+    () => drawerDeviceCandidates.filter((item) => drawerDeviceIds.includes(item.id)),
+    [drawerDeviceCandidates, drawerDeviceIds],
+  );
+
+  const drawerDeviceColumns: ColumnsType<UnifiedFileTransferDeviceItem> = useMemo(
+    () => [
+      { title: '设备名称', dataIndex: 'deviceName', key: 'deviceName', ellipsis: true },
+      { title: '设备 SN', dataIndex: 'deviceSn', key: 'deviceSn', width: 120 },
+      { title: '产品类型', dataIndex: 'productType', key: 'productType', width: 120 },
+      { title: '当前版本', dataIndex: 'currentVersion', key: 'currentVersion', width: 120 },
+    ],
+    [],
   );
 
   useEffect(() => {
@@ -208,10 +289,8 @@ export default function FileTransferCenter() {
   useEffect(() => {
     setTaskPage(1);
     setDevicePage(1);
-  }, [selectedCategory, taskKeyword, taskStatusFilter, taskTypeFilter, deviceKeyword, deviceStatusFilter, deviceTypeFilter]);
+  }, [selectedCategory, taskKeyword, taskStatusFilter, taskTypeFilter, deviceKeyword, deviceStatusFilter, deviceTypeFilter, deviceProductTypeFilter]);
 
-  const recentTasks = tasksData?.items ?? [];
-  const recentDevices = devicesData?.items ?? [];
   const isUpgradeLikeCategory = UPGRADE_LIKE_CATEGORIES.has(selectedCategory);
 
   const getTypeDef = (typeCode: string) => taskTypes.find((item) => item.typeCode === typeCode);
@@ -471,9 +550,12 @@ export default function FileTransferCenter() {
     }
     taskForm.setFieldsValue({
       typeCode: nextTypeCode,
+      productType: undefined,
       firmwareId: undefined,
+      isKeepConfig: true,
+      deviceIds: [],
       executionMode: 'immediate',
-      deviceCount: 20,
+      deviceCount: 0,
     });
     setSelectedTypeCode(nextTypeCode);
     setTaskDrawerOpen(true);
@@ -484,18 +566,45 @@ export default function FileTransferCenter() {
       return;
     }
     if (!needsFirmwareSelection(drawerTaskType)) {
+      taskForm.setFieldValue('productType', undefined);
       taskForm.setFieldValue('firmwareId', undefined);
+      taskForm.setFieldValue('isKeepConfig', undefined);
+    } else {
+      if (taskForm.getFieldValue('isKeepConfig') === undefined) {
+        taskForm.setFieldValue('isKeepConfig', true);
+      }
+      if (!drawerProductType && drawerProductTypeOptions.length === 1) {
+        taskForm.setFieldValue('productType', drawerProductTypeOptions[0].value);
+        return;
+      }
+      const selectedFirmwareId = taskForm.getFieldValue('firmwareId') as string | undefined;
+      if (selectedFirmwareId && !firmwareOptions.some((item) => item.value === selectedFirmwareId)) {
+        taskForm.setFieldValue('firmwareId', undefined);
+      }
+    }
+
+    const validDeviceIds = drawerDeviceIds.filter((deviceId) => drawerDeviceCandidates.some((item) => item.id === deviceId));
+    if (validDeviceIds.length !== drawerDeviceIds.length) {
+      taskForm.setFieldValue('deviceIds', validDeviceIds);
+      taskForm.setFieldValue('deviceCount', validDeviceIds.length);
       return;
     }
-    const selectedFirmwareId = taskForm.getFieldValue('firmwareId') as string | undefined;
-    if (selectedFirmwareId && !firmwareOptions.some((item) => item.value === selectedFirmwareId)) {
-      taskForm.setFieldValue('firmwareId', undefined);
+    if (taskForm.getFieldValue('deviceCount') !== drawerDeviceIds.length) {
+      taskForm.setFieldValue('deviceCount', drawerDeviceIds.length);
     }
-  }, [drawerTaskType, firmwareOptions, taskDrawerOpen, taskForm]);
+  }, [drawerDeviceCandidates, drawerDeviceIds, drawerProductType, drawerProductTypeOptions, drawerTaskType, firmwareOptions, taskDrawerOpen, taskForm]);
 
   const handleCreateTask = async () => {
     const values = await taskForm.validateFields();
-    await createTaskMutation.mutateAsync(values);
+    const selectedDeviceIds = values.deviceIds ?? [];
+    if (selectedDeviceIds.length === 0) {
+      void message.warning('请选择设备。');
+      return;
+    }
+    await createTaskMutation.mutateAsync({
+      ...values,
+      deviceCount: selectedDeviceIds.length,
+    });
     void message.success('演示任务已创建。');
     setTaskDrawerOpen(false);
     taskForm.resetFields();
@@ -504,7 +613,6 @@ export default function FileTransferCenter() {
   return (
     <ListPageLayout
       title="任务创建"
-      subtitle="任务创建页只保留业务 Tab、任务列表和设备列表。模板定义与字段治理已完全收敛到“模板配置”菜单。"
       extra={(
         <Button type="primary" icon={<PlusOutlined />} onClick={() => openTaskDrawer()}>
           新建任务
@@ -514,12 +622,7 @@ export default function FileTransferCenter() {
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
         <Card>
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Space direction="vertical" size={4}>
-              <Title level={4} style={{ margin: 0 }}>统一任务创建中心</Title>
-              <Paragraph style={{ marginBottom: 0 }}>
-                业务用户先选择业务 Tab，再直接查看任务列表和设备列表。模板配置不再在本页展示，创建任务时仅在弹窗里选择任务类型；升级类任务会额外选择软件管理中的升级文件。
-              </Paragraph>
-            </Space>
+            <Title level={4} style={{ margin: 0 }}>任务创建</Title>
             <Tabs
               activeKey={selectedCategory}
               items={categories.map((item) => ({ key: item.category, label: item.categoryLabel }))}
@@ -528,7 +631,7 @@ export default function FileTransferCenter() {
           </Space>
         </Card>
 
-        <Card title="执行视图" extra={<Text type="secondary">任务执行与设备执行分开查看，便于按任务和按设备追踪。</Text>}>
+        <Card title="执行视图">
           <Tabs
             activeKey={viewMode}
             onChange={(key) => setViewMode(key as 'tasks' | 'devices')}
@@ -614,6 +717,14 @@ export default function FileTransferCenter() {
                       />
                       <Select
                         allowClear
+                        placeholder="按产品类型过滤"
+                        value={deviceProductTypeFilter}
+                        onChange={(value) => setDeviceProductTypeFilter(value)}
+                        options={deviceProductTypeOptions}
+                        style={{ width: 220 }}
+                      />
+                      <Select
+                        allowClear
                         placeholder="按状态过滤"
                         value={deviceStatusFilter}
                         onChange={(value) => setDeviceStatusFilter(value)}
@@ -681,33 +792,68 @@ export default function FileTransferCenter() {
             />
           </Form.Item>
           {needsFirmwareSelection(drawerTaskType) ? (
-            <Form.Item
-              label="升级文件"
-              name="firmwareId"
-              rules={[{ required: true, message: '请选择升级文件' }]}
-              extra={(
-                <Space size={8} wrap>
-                  <Text type="secondary">文件来源：软件管理 / 升级文件。</Text>
+            <>
+              <Form.Item label="产品类型" name="productType" rules={[{ required: true, message: '请选择产品类型' }]}> 
+                <Select
+                  allowClear
+                  placeholder="请选择产品类型"
+                  options={drawerProductTypeOptions}
+                />
+              </Form.Item>
+              <Form.Item
+                label="升级文件"
+                name="firmwareId"
+                rules={[{ required: true, message: '请选择升级文件' }]}
+                extra={(
                   <Button type="link" style={{ paddingInline: 0 }} onClick={() => navigate('/software/firmware')}>
-                    去维护升级文件
+                    维护升级文件
                   </Button>
-                </Space>
-              )}
-            >
-              <Select
-                showSearch
-                allowClear
-                placeholder={firmwareOptions.length > 0 ? '请选择升级文件' : '暂无可用升级文件，请先到软件管理上传'}
-                options={firmwareOptions}
-                optionFilterProp="label"
-              />
-            </Form.Item>
+                )}
+              >
+                <Select
+                  showSearch
+                  allowClear
+                  disabled={!drawerProductType}
+                  placeholder={
+                    !drawerProductType
+                      ? '请先选择产品类型'
+                      : firmwareOptions.length > 0
+                        ? '请选择升级文件'
+                        : '暂无可用升级文件，请先到软件管理上传'
+                  }
+                  options={firmwareOptions}
+                  optionFilterProp="label"
+                />
+              </Form.Item>
+              <Form.Item name="isKeepConfig" valuePropName="checked">
+                <Checkbox>保留配置</Checkbox>
+              </Form.Item>
+            </>
           ) : null}
-          <Form.Item label="设备数量" name="deviceCount" rules={[{ required: true, message: '请输入设备数量' }]}> 
-            <InputNumber min={1} max={10000} style={{ width: '100%' }} />
+          <Form.Item label="选择设备" required>
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Text type="secondary">已选 {drawerSelectedDevices.length} 台</Text>
+              <Table<UnifiedFileTransferDeviceItem>
+                size="small"
+                rowKey="id"
+                loading={drawerDevicesLoading}
+                columns={drawerDeviceColumns}
+                dataSource={drawerDeviceCandidates}
+                pagination={false}
+                rowSelection={{
+                  selectedRowKeys: drawerDeviceIds,
+                  onChange: (selectedRowKeys) => {
+                    const nextIds = selectedRowKeys.map((item) => String(item));
+                    taskForm.setFieldValue('deviceIds', nextIds);
+                    taskForm.setFieldValue('deviceCount', nextIds.length);
+                  },
+                }}
+                scroll={{ y: 220 }}
+              />
+            </Space>
           </Form.Item>
           <Form.Item label="执行方式" name="executionMode" rules={[{ required: true, message: '请选择执行方式' }]}> 
-            <Radio.Group options={EXECUTION_MODE_OPTIONS} optionType="button" buttonStyle="solid" />
+            <Radio.Group options={createExecutionModeOptions} optionType="button" buttonStyle="solid" />
           </Form.Item>
           <Form.Item label="备注" name="note">
             <Input.TextArea rows={4} placeholder="可填写灰度范围、验证目标或领导评审备注" />

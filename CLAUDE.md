@@ -482,7 +482,41 @@ npm run test:e2e    # Playwright E2E
 
 ---
 
-## 15. 子系统文档索引
+## 15. Skill 自然语言触发规则
+
+当用户用自然语言表达意图时，直接执行对应操作，无需手动输入斜杠命令：
+
+### 构建部署
+
+智能构建脚本 `scripts/smart-docker-build.sh` 自动优化 Dockerfile（不修改原文件），用户只需说大白话：
+
+| 用户说法 | 执行 |
+|---------|------|
+| 部署整个项目 / 部署全部 / 构建所有 / 更新所有 / 重新部署 | `bash scripts/smart-docker-build.sh`（构建 acs app worker web） |
+| 部署 acs / 构建 acs / 更新 acs / 重启 acs | `bash scripts/smart-docker-build.sh acs` |
+| 部署 app / 构建 app / 更新 app | `bash scripts/smart-docker-build.sh app` |
+| 部署 worker / 构建 worker / 更新 worker | `bash scripts/smart-docker-build.sh worker` |
+| 部署前端 / 构建前端 / 打包前端 / 更新前端 | `bash scripts/smart-docker-build.sh web` |
+| 部署某几个（如"部署 acs 和 worker"） | `bash scripts/smart-docker-build.sh acs worker` |
+
+**执行流程**：
+1. 后端服务先本地编译验证（`go build -o /dev/null ./cmd/<entry>`），编译不过则停止
+2. 智能构建脚本自动检测 Dockerfile 是否已优化，未优化则生成临时补丁版本
+3. Docker 构建镜像 → 重启容器 → 清理
+
+### 其他操作
+
+| 用户说法 | 触发 Skill |
+|---------|-----------|
+| 跑一下 E2E/端到端测试 | `/e2e` |
+| 提交/commit | `/commit` |
+| 更新代码/拉取代码/拉代码/pull/同步代码/拉最新/拉取分支 | `/pull` |
+| 代码审查/review | `/review` |
+| 压测/压力测试 | `/acs-stress-test` |
+
+---
+
+## 16. 子系统文档索引
 
 | 文档 | 路径 |
 |------|------|
@@ -502,7 +536,7 @@ npm run test:e2e    # Playwright E2E
 
 ---
 
-## 16. 专家角色（Expert Personas）
+## 17. 专家角色（Expert Personas）
 
 AI 在处理不同领域的代码变更时，应自动激活对应专家视角进行审查。每个专家角色包含：领域知识、审查清单、决策原则。
 
@@ -547,7 +581,7 @@ docs/project/risk-register.md                 → 项目经理（PgM）
 
 ---
 
-### 16.1 架构专家（Architecture Expert）
+### 17.1 架构专家（Architecture Expert）
 
 **职责**：守护系统整体架构一致性和演进方向。
 
@@ -573,7 +607,7 @@ docs/project/risk-register.md                 → 项目经理（PgM）
 
 ---
 
-### 16.2 Go 工程专家（Go Engineering Expert）
+### 17.2 Go 工程专家（Go Engineering Expert）
 
 **职责**：确保 Go 代码质量、并发安全性和性能。
 
@@ -598,7 +632,7 @@ docs/project/risk-register.md                 → 项目经理（PgM）
 
 ---
 
-### 16.3 TR-069 协议栈专家（TR-069 Protocol Stack Expert）
+### 17.3 TR-069 协议栈专家（TR-069 Protocol Stack Expert）
 
 **职责**：保障 TR-069/CWMP 协议实现的正确性和合规性。
 
@@ -628,7 +662,7 @@ docs/project/risk-register.md                 → 项目经理（PgM）
 
 ---
 
-### 16.4 电信业务专家（Telecom Domain Expert）
+### 17.4 电信业务专家（Telecom Domain Expert）
 
 **职责**：确保功能实现符合运营商业务需求和行业标准。
 
@@ -656,7 +690,7 @@ docs/project/risk-register.md                 → 项目经理（PgM）
 
 ---
 
-### 16.5 数据与存储专家（Data & Storage Expert）
+### 17.5 数据与存储专家（Data & Storage Expert）
 
 **职责**：保障数据层的正确性、性能和可扩展性。
 
@@ -686,7 +720,7 @@ docs/project/risk-register.md                 → 项目经理（PgM）
 
 ---
 
-### 16.6 前端专家（Frontend Expert）
+### 17.6 前端专家（Frontend Expert）
 
 **职责**：确保前端代码质量、用户体验和前后端一致性。
 
@@ -712,7 +746,7 @@ docs/project/risk-register.md                 → 项目经理（PgM）
 
 ---
 
-### 16.7 测试专家（Testing Expert）
+### 17.7 测试专家（Testing Expert）
 
 **职责**：保障测试覆盖率、测试质量和测试基础设施可靠性。
 
@@ -742,7 +776,7 @@ docs/project/risk-register.md                 → 项目经理（PgM）
 
 ---
 
-### 16.8 安全合规专家（Security & Compliance Expert）
+### 17.8 安全合规专家（Security & Compliance Expert）
 
 **职责**：确保系统满足运营商级安全要求。
 
@@ -763,7 +797,7 @@ docs/project/risk-register.md                 → 项目经理（PgM）
 
 ---
 
-### 16.9 运维与可观测性专家（Operations & Observability Expert）
+### 17.9 运维与可观测性专家（Operations & Observability Expert）
 
 **职责**：保障系统可运维性、可观测性和故障恢复能力。
 
@@ -786,7 +820,7 @@ docs/project/risk-register.md                 → 项目经理（PgM）
 
 ---
 
-### 16.10 产品经理（Product Manager）
+### 17.10 产品经理（Product Manager）
 
 **职责**：定义"做什么、为什么做、算做完"。对齐用户价值与范围边界，避免功能飘移和半成品。
 
@@ -816,7 +850,7 @@ docs/project/risk-register.md                 → 项目经理（PgM）
 
 ---
 
-### 16.11 项目经理（Project Manager）
+### 17.11 项目经理（Project Manager）
 
 **职责**：保证"何时做、谁做、怎么协同"。管理排期、依赖、风险，让多个并行工作不互相绊倒。
 
@@ -851,7 +885,7 @@ docs/project/risk-register.md                 → 项目经理（PgM）
 
 ---
 
-### 16.12 QA / 发布经理（QA & Release Manager）
+### 17.12 QA / 发布经理（QA & Release Manager）
 
 **职责**：守门。确保"算完成"有明确标准、有证据、有回归保障。管理 DoD 与 Release Gate。
 

@@ -66,6 +66,7 @@ export interface UnifiedFileTransferTask {
   firmwareId?: string;
   targetVersion?: string;
   productType?: string;
+  isKeepConfig?: boolean;
   status: TransferTaskStatus;
   result?: TransferTaskResult;
   progress: number;
@@ -111,7 +112,10 @@ export interface UnifiedFileTransferDeviceItem {
 export interface CreateUnifiedFileTransferTaskInput {
   taskName: string;
   typeCode: string;
+  productType?: string;
   firmwareId?: string;
+  isKeepConfig?: boolean;
+  deviceIds?: string[];
   deviceCount: number;
   executionMode: TransferExecutionMode;
   note?: string;

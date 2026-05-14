@@ -70,6 +70,11 @@ func Setup(r *gin.Engine, c *Container) error {
 		Init:    func() error { return initSoftwareModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
+		Name:    "ufte",
+		Depends: []string{"software", "device"},
+		Init:    func() error { return initUFTEModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
 		Name:    "provision",
 		Depends: []string{"device", "config"},
 		Init:    func() error { return initProvisionModule(c) },
@@ -402,6 +407,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- Software routes → resource "firmware" -----
 	md.softwareHandler.RegisterRoutes(permGroup("firmware"))
+	md.ufteHandler.RegisterRoutes(permGroup("firmware"))
 
 	// ----- Task routes → resource "devices" -----
 	md.taskHandler.RegisterRoutes(permGroup("devices"))

@@ -6,32 +6,12 @@ import type {
   CreateUnifiedFileTransferTypeInput,
   UpdateUnifiedFileTransferTaskTypeInput,
 } from '../../types/unifiedFileTransfer';
-import { useMock } from '../../services/apiSwitch';
 import { unifiedFileTransferApi } from '../../services/api/unifiedFileTransferApi';
-import { unifiedFileTransferService } from '../../mock/services/unifiedFileTransferService';
-
-async function requestWithPreviewFallback<T>(
-  realRequest: () => Promise<T>,
-  mockRequest: () => Promise<T>,
-): Promise<T> {
-  if (useMock) {
-    return mockRequest();
-  }
-  try {
-    return await realRequest();
-  } catch {
-    return mockRequest();
-  }
-}
 
 export function useUnifiedFileTransferOverview() {
   return useQuery({
     queryKey: ['ufte', 'overview'],
-    queryFn: () =>
-      requestWithPreviewFallback(
-        () => unifiedFileTransferApi.getOverview(),
-        () => unifiedFileTransferService.getOverview(),
-      ),
+    queryFn: () => unifiedFileTransferApi.getOverview(),
     staleTime: 60_000,
   });
 }
@@ -39,11 +19,7 @@ export function useUnifiedFileTransferOverview() {
 export function useUnifiedFileTransferTaskTypes() {
   return useQuery({
     queryKey: ['ufte', 'task-types'],
-    queryFn: () =>
-      requestWithPreviewFallback(
-        () => unifiedFileTransferApi.getTaskTypes(),
-        () => unifiedFileTransferService.getTaskTypes(),
-      ),
+    queryFn: () => unifiedFileTransferApi.getTaskTypes(),
     staleTime: 60_000,
   });
 }
@@ -53,25 +29,27 @@ export function useUnifiedFileTransferTasks(
 ) {
   return useQuery({
     queryKey: ['ufte', 'tasks', params],
-    queryFn: () =>
-      requestWithPreviewFallback(
-        () => unifiedFileTransferApi.getTasks(params),
-        () => unifiedFileTransferService.getTasks(params),
-      ),
+    queryFn: () => unifiedFileTransferApi.getTasks(params),
     refetchInterval: 10_000,
   });
 }
 
 export function useUnifiedFileTransferDevices(
-  params: { status?: string; typeCode?: string; keyword?: string; category?: string } & PageRequest,
+  params: { status?: string; typeCode?: string; keyword?: string; category?: string; productType?: string } & PageRequest,
 ) {
   return useQuery({
     queryKey: ['ufte', 'devices', params],
-    queryFn: () =>
-      requestWithPreviewFallback(
-        () => unifiedFileTransferApi.getDevices(params),
-        () => unifiedFileTransferService.getDevices(params),
-      ),
+    queryFn: () => unifiedFileTransferApi.getDevices(params),
+    refetchInterval: 10_000,
+  });
+}
+
+export function useUnifiedFileTransferDeviceCandidates(
+  params: { keyword?: string; category?: string; productType?: string } & PageRequest,
+) {
+  return useQuery({
+    queryKey: ['ufte', 'device-candidates', params],
+    queryFn: () => unifiedFileTransferApi.getDeviceCandidates(params),
     refetchInterval: 10_000,
   });
 }
@@ -79,11 +57,7 @@ export function useUnifiedFileTransferDevices(
 export function useCreateUnifiedFileTransferTask() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: CreateUnifiedFileTransferTaskInput) =>
-      requestWithPreviewFallback(
-        () => unifiedFileTransferApi.createTask(input),
-        () => unifiedFileTransferService.createTask(input),
-      ),
+    mutationFn: (input: CreateUnifiedFileTransferTaskInput) => unifiedFileTransferApi.createTask(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['ufte'] });
     },
@@ -93,11 +67,7 @@ export function useCreateUnifiedFileTransferTask() {
 export function useCreateUnifiedFileTransferTaskType() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: CreateUnifiedFileTransferTypeInput) =>
-      requestWithPreviewFallback(
-        () => unifiedFileTransferApi.createTaskType(input),
-        () => unifiedFileTransferService.createTaskType(input),
-      ),
+    mutationFn: (input: CreateUnifiedFileTransferTypeInput) => unifiedFileTransferApi.createTaskType(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['ufte'] });
     },
@@ -107,11 +77,7 @@ export function useCreateUnifiedFileTransferTaskType() {
 export function useUpdateUnifiedFileTransferTaskType() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: UpdateUnifiedFileTransferTaskTypeInput) =>
-      requestWithPreviewFallback(
-        () => unifiedFileTransferApi.updateTaskType(input),
-        () => unifiedFileTransferService.updateTaskType(input),
-      ),
+    mutationFn: (input: UpdateUnifiedFileTransferTaskTypeInput) => unifiedFileTransferApi.updateTaskType(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['ufte'] });
     },
