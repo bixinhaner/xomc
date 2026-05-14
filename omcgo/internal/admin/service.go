@@ -73,6 +73,7 @@ type AdminService struct {
 	revoker         *TokenRevoker
 	permInvalidator PermissionInvalidator
 	metrics         *AdminMetrics
+	policy          *SecurityPolicy // 可选；nil 时单点登录 / 密码策略等走 default
 	logger          *zap.Logger
 }
 
@@ -110,6 +111,12 @@ func NewAdminService(
 // 不调用时 ForceLogout 退化为 no-op（仅记录日志），以便单元测试无需 Redis 也能跑。
 func (s *AdminService) SetTokenRevoker(r *TokenRevoker) {
 	s.revoker = r
+}
+
+// SetSecurityPolicy 注入共享安全策略；用于 Login / ChangePassword 等流程读取
+// sys_configs (category='security') 的运行时配置（如单点登录开关、密码强度）。
+func (s *AdminService) SetSecurityPolicy(p *SecurityPolicy) {
+	s.policy = p
 }
 
 // SetPermissionInvalidator 注入权限缓存失效器；用户角色 / 运营商 / 删除等写操作后会调用。
@@ -215,6 +222,25 @@ func (s *AdminService) Login(ctx context.Context, username, password string) (*T
 	roleNames := make([]string, len(roles))
 	for i, r := range roles {
 		roleNames[i] = r.Name
+	}
+
+	// ⑩ 单点登录（sys_configs security.isOnlyOneUserLoginEnable）：
+	//   FE 字段语义为"允许多端并发登录"，true=允许多端 / false=单点登录。
+	//   policy.AllowConcurrent=false 时，新登录前先把该用户所有现存 token 标
+	//   记为撤销（写 redis revokedAt=now）。新 token iat>=now，IsRevoked 用
+	//   严格 < 比较，新 token 不会被自己踢；旧 token iat<now 一定被踢。
+	//   Revoker / Policy 任一未注入则跳过（fail-safe — 不阻塞登录）。
+	if s.policy != nil && s.revoker != nil {
+		if !s.policy.Get(ctx).AllowConcurrent {
+			if err := s.revoker.Revoke(ctx, user.ID); err != nil {
+				s.logger.Warn("single-session revoke failed (non-fatal)",
+					zap.String("username", user.Username),
+					zap.Error(err),
+				)
+				// 不返错 — 单点登录失败比"用户登不进来"风险低，且失败原因通常
+				// 是 redis 短暂不可用，下次登录会自动重试。
+			}
+		}
 	}
 
 	tokenPair, err := s.jwt.GenerateTokenPair(&Claims{

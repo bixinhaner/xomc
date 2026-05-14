@@ -46,6 +46,7 @@ type Handler struct {
 	service            *AdminService
 	captcha            *CaptchaService
 	loginGuard         *LoginGuard
+	ipGuard            *IPGuard // P0-③ Redis 滑动窗口 IP 限流 + 黑名单（替代旧 in-memory token-bucket）
 	roleGroupRepo      RoleDeviceGroupRepository
 	apiPermRepo        RoleApiPermissionRepository
 	permService        *PermissionService
@@ -76,6 +77,13 @@ func (h *Handler) SetCaptchaService(cs *CaptchaService) {
 // SetLoginGuard sets the brute-force login guard.
 func (h *Handler) SetLoginGuard(lg *LoginGuard) {
 	h.loginGuard = lg
+}
+
+// SetIPGuard sets the Redis-backed IP rate limiter (sliding window + blacklist).
+// P0-③：替代 getIPLimiter 的旧 in-memory token-bucket。
+// nil 安全：未注入时 Login handler 退化到旧 token-bucket（兜底）。
+func (h *Handler) SetIPGuard(ig *IPGuard) {
+	h.ipGuard = ig
 }
 
 // SetRoleDeviceGroupRepo sets the role-device-group repository.

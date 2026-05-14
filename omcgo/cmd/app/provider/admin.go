@@ -37,17 +37,29 @@ func initAdminModule(c *Container) error {
 	adminService.SetMetrics(admin.NewAdminMetrics(c.MetricsReg))
 	adminHandler := admin.NewHandler(adminService, logger)
 
+	// 共享 SecurityPolicy 实例 — sys_configs (category='security') 全部字段
+	// 30s 缓存；LoginGuard / IPGuard / AdminService(单点登录/密码策略) 共用一份。
+	// 任一字段（FE SecuritySettings 保存）变化后最多 30s 生效。
+	sysConfigRepoForPolicy := admin.NewPgSysConfigRepository(c.PgPool)
+	securityPolicy := admin.NewSecurityPolicy(sysConfigRepoForPolicy)
+
 	captchaService := admin.NewCaptchaService(c.Redis)
 	loginGuard := admin.NewLoginGuard(c.Redis)
-	// 让 LoginGuard 从 sys_configs (category='security') 读 sumTimes / unlockMinu
-	// 替代硬编码常量；30s in-memory cache，FE 改配置后最多等 30s 生效。
-	// sysConfigRepo 在下方 System config module 里也用 — 这里直接复用一份。
-	sysConfigRepoForGuard := admin.NewPgSysConfigRepository(c.PgPool)
-	loginGuard.SetSysConfigQuerier(sysConfigRepoForGuard)
+	loginGuard.SetPolicy(securityPolicy)
+
+	// P0-③ IP 限流（Redis 滑动窗口 + 黑名单 TTL）— 替代旧 in-memory token-bucket。
+	// 字段映射：limitMinus(窗口) / limitCount(阈值) / limitTimes(锁时长)。
+	ipGuard := admin.NewIPGuard(c.Redis)
+	ipGuard.SetPolicy(securityPolicy)
+
 	adminHandler.SetCaptchaService(captchaService)
 	adminHandler.SetLoginGuard(loginGuard)
+	adminHandler.SetIPGuard(ipGuard)
 	adminHandler.SetRoleDeviceGroupRepo(roleRepo)
 	adminHandler.SetApiPermRepo(roleRepo)
+
+	// P0-① 单点登录：AdminService.Login 读 policy.AllowConcurrent 决定是否撤旧 token。
+	adminService.SetSecurityPolicy(securityPolicy)
 
 	// 登录类接口的密码 RSA-OAEP 加密：keystore 启动时加载或生成私钥；
 	// 失败为 fatal —— 没有密钥所有登录请求都会拒绝，不能静默降级到明文。

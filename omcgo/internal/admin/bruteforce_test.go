@@ -67,12 +67,12 @@ func TestLoginGuard_WithQuerier_OverridesDefaults(t *testing.T) {
 	assert.True(t, g.ShouldLock(ctx, 5), "刚到 sumTimes=5 锁")
 	assert.Equal(t, 15*time.Minute, g.LockDuration(ctx))
 
-	// RequiresCaptcha 走 attemptTimes — 但这个需要 Redis 才能验证 GetFailedCount
-	// 此处仅断言常量加载正确，覆盖 loadConfig 全字段
-	cfg := g.loadConfig(ctx)
-	assert.Equal(t, int64(2), cfg.captchaThreshold)
-	assert.Equal(t, int64(5), cfg.lockThreshold)
-	assert.Equal(t, 15*time.Minute, cfg.lockDuration)
+	// RequiresCaptcha 走 attemptTimes — 这个需要 Redis 才能完整测；
+	// 此处只断言 SecurityPolicy 字段加载正确，绕过 GetFailedCount。
+	p := g.snapshot(ctx)
+	assert.Equal(t, int64(2), p.CaptchaThreshold)
+	assert.Equal(t, int64(5), p.LockThreshold)
+	assert.Equal(t, 15*time.Minute, p.LockDuration)
 }
 
 // 配置值非法（负数 / 非数字 / 0 / 空串）→ 退化到 default 常量。
@@ -173,8 +173,8 @@ func TestLoginGuard_ConcurrentLoad_OnlyOneDBHit(t *testing.T) {
 	}
 	wg.Wait()
 
-	// 首次进来 3 个 key（sumTimes / unlockMinu / attemptTimes）= 3 hit
-	// 并发竞争允许少量重复加载（double-check 之间），但不该多次跑完整 3-key 扫描
-	// 保守上限：6 hits（两轮加载）
-	assert.LessOrEqual(t, q.hits, 6, "并发 50 次 ShouldLock 最多触发 2 轮 3-key 加载")
+	// SecurityPolicy 加载所有 21 个 security.* 字段（含 userSessionExpirationMin
+	// 由于 0 值合法做了二次 GetByKey 探测，~22 hits/轮）。
+	// 并发 50 次 ShouldLock 在 double-check 下最多触发 2 轮加载 → 上限 44 hits。
+	assert.LessOrEqual(t, q.hits, 44, "并发 50 次 ShouldLock 最多触发 2 轮全字段加载")
 }

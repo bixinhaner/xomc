@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -17,15 +18,33 @@ import (
 
 func (h *Handler) Login(c *gin.Context) {
 	clientIP := c.ClientIP()
+	ctxEarly := c.Request.Context()
 
-	// Per-IP login rate limiting: reject if too many attempts.
-	if limiter := h.getIPLimiter(clientIP); !limiter.Allow() {
-		logger.L(c.Request.Context()).Warn("login rate limited",
-			zap.String("ip", clientIP),
-		)
-		commonerrors.AbortWithError(c, http.StatusTooManyRequests,
-			errors.New("too many login attempts, please try again later"))
-		return
+	// ⑥ IP 限流（sys_configs security.limitMinus / limitCount / limitTimes）：
+	// 优先用 Redis 实现的 IPGuard（滑动窗口 + 黑名单 TTL，跨进程一致）；
+	// 未注入时退化到旧 in-memory token-bucket 兜底（单进程，仅控总请求速率）。
+	if h.ipGuard != nil {
+		allowed, remaining, _ := h.ipGuard.CheckAllowed(ctxEarly, clientIP)
+		if !allowed {
+			logger.L(ctxEarly).Warn("ip locked",
+				zap.String("ip", clientIP),
+				zap.Duration("retry_after", remaining),
+			)
+			c.Header("Retry-After", fmt.Sprintf("%.0f", remaining.Seconds()))
+			commonerrors.AbortWithError(c, http.StatusTooManyRequests,
+				fmt.Errorf("ip locked: retry after %s", remaining.Round(time.Second)))
+			return
+		}
+	} else {
+		// 兜底：进程内 token-bucket，节奏由硬编码 loginRateLimit/Window 控制
+		if limiter := h.getIPLimiter(clientIP); !limiter.Allow() {
+			logger.L(ctxEarly).Warn("login rate limited",
+				zap.String("ip", clientIP),
+			)
+			commonerrors.AbortWithError(c, http.StatusTooManyRequests,
+				errors.New("too many login attempts, please try again later"))
+			return
+		}
 	}
 
 	var req LoginRequest
@@ -38,26 +57,32 @@ func (h *Handler) Login(c *gin.Context) {
 	log := logger.L(ctx)
 	userAgent := c.Request.UserAgent()
 
-	// TODO: captcha verification temporarily disabled
-	// // Brute-force protection: check if CAPTCHA is required for this username.
-	// if h.loginGuard != nil && h.captcha != nil {
-	// 	if h.loginGuard.RequiresCaptcha(ctx, req.Username) {
-	// 		if req.CaptchaID == "" || req.CaptchaAnswer == "" {
-	// 			c.AbortWithStatusJSON(http.StatusPreconditionRequired, gin.H{
-	// 				"code":    7010,
-	// 				"message": "captcha required due to multiple failed attempts",
-	// 			})
-	// 			return
-	// 		}
-	// 		if !h.captcha.Verify(ctx, req.CaptchaID, req.CaptchaAnswer) {
-	// 			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
-	// 				"code":    7011,
-	// 				"message": "invalid captcha answer",
-	// 			})
-	// 			return
-	// 		}
-	// 	}
-	// }
+	// ⑤ 图形验证码（sys_configs security.verifyEnable + attemptTimes）：
+	//   LoginGuard.RequiresCaptcha 内部已读 verifyEnable 总开关；只有当
+	//   开关打开 AND 失败次数 >= attemptTimes 时才要求 CAPTCHA。
+	//   captchaService nil 时跳过（部署不带验证码服务的容错降级）。
+	if h.loginGuard != nil && h.captcha != nil && h.loginGuard.RequiresCaptcha(ctx, req.Username) {
+		if req.CaptchaID == "" || req.CaptchaAnswer == "" {
+			h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, "captcha_required")
+			c.AbortWithStatusJSON(http.StatusPreconditionRequired, gin.H{
+				"ret":  0,
+				"msg":  "captcha required due to multiple failed attempts",
+				"data": nil,
+				"biz_code": 7010,
+			})
+			return
+		}
+		if !h.captcha.Verify(ctx, req.CaptchaID, req.CaptchaAnswer) {
+			h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, "captcha_invalid")
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+				"ret":  0,
+				"msg":  "invalid captcha answer",
+				"data": nil,
+				"biz_code": 7011,
+			})
+			return
+		}
+	}
 
 	// T-0120 双路径密码解析：
 	//   - 加密路径：EncryptedPassword + KeyID 同时非空 → loginCipher.Decrypt
@@ -140,6 +165,13 @@ func (h *Handler) Login(c *gin.Context) {
 				)
 			}
 		}
+		// P0-③ IP 限流：登录失败时同步 +1 IP 计数器；达到 limitCount 后该 IP
+		// 立即拉黑 limitTimes 分钟。failure 不阻塞 — 单纯计数。
+		if h.ipGuard != nil {
+			if err := h.ipGuard.RecordFailure(ctx, clientIP); err != nil {
+				log.Warn("ip guard record failure", zap.String("ip", clientIP), zap.Error(err))
+			}
+		}
 
 		status := commonerrors.HTTPStatusFromError(err)
 		commonerrors.AbortWithError(c, status, err)
@@ -148,6 +180,10 @@ func (h *Handler) Login(c *gin.Context) {
 
 	if h.loginGuard != nil {
 		h.loginGuard.Reset(ctx, req.Username)
+	}
+	// 登录成功清零该 IP 失败计数器（黑名单 TTL 不动 — 锁了就锁了）
+	if h.ipGuard != nil {
+		h.ipGuard.Reset(ctx, clientIP)
 	}
 
 	log.Info("login success",
