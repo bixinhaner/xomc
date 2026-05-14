@@ -76,8 +76,23 @@ type TopoEdge struct {
 
 // TopoGraph combines nodes and edges for the graph endpoint.
 type TopoGraph struct {
-	Nodes []TopoNode `json:"nodes"`
-	Edges []TopoEdge `json:"edges"`
+	Nodes      []TopoNode      `json:"nodes"`
+	Edges      []TopoEdge      `json:"edges"`
+	Statistics *TopoStatistics `json:"statistics,omitempty"`
+}
+
+// TopoStatistics provides aggregate statistics about the topology graph.
+type TopoStatistics struct {
+	TotalNodes      int               `json:"total_nodes"`
+	OnlineNodes     int               `json:"online_nodes"`
+	OfflineNodes    int               `json:"offline_nodes"`
+	AlarmNodes      int               `json:"alarm_nodes"`
+	MaintenanceNodes int              `json:"maintenance_nodes"`
+	TotalEdges      int               `json:"total_edges"`
+	ActiveEdges     int               `json:"active_edges"`
+	InactiveEdges   int               `json:"inactive_edges"`
+	DegradedEdges   int               `json:"degraded_edges"`
+	NodeTypeCounts  map[string]int    `json:"node_type_counts"`
 }
 
 // GeoData combines sites and nodes that have coordinates for the GIS endpoint.

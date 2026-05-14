@@ -1,7 +1,9 @@
 package topology
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -9,6 +11,7 @@ import (
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
+	"go.uber.org/zap"
 )
 
 // Handler provides HTTP handlers for topology (device group) REST API.
@@ -18,11 +21,13 @@ type Handler struct {
 	siteRepo SiteRepository
 	nodeRepo TopoNodeRepository
 	edgeRepo TopoEdgeRepository
+	syncSvc  *DeviceSyncService
+	logger   *zap.Logger
 }
 
 // NewHandler creates a new topology REST API handler.
-func NewHandler(repo DeviceGroupRepository, service *DeviceGroupService, siteRepo SiteRepository, nodeRepo TopoNodeRepository, edgeRepo TopoEdgeRepository) *Handler {
-	return &Handler{repo: repo, service: service, siteRepo: siteRepo, nodeRepo: nodeRepo, edgeRepo: edgeRepo}
+func NewHandler(repo DeviceGroupRepository, service *DeviceGroupService, siteRepo SiteRepository, nodeRepo TopoNodeRepository, edgeRepo TopoEdgeRepository, syncSvc *DeviceSyncService, logger *zap.Logger) *Handler {
+	return &Handler{repo: repo, service: service, siteRepo: siteRepo, nodeRepo: nodeRepo, edgeRepo: edgeRepo, syncSvc: syncSvc, logger: logger}
 }
 
 // RegisterRoutes registers topology routes on the given router group.
@@ -81,6 +86,9 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		topo.POST("/nodes/batch", h.BatchCreateTopoNodes)
 		topo.GET("/graph", h.GetTopoGraph)
 		topo.GET("/geo", h.GetGeoData)
+
+		topo.POST("/sync", h.SyncDevicesFromTopology)
+		topo.GET("/statistics", h.GetTopologyStatistics)
 	}
 }
 
@@ -532,6 +540,11 @@ func (h *Handler) ListTopoEdges(c *gin.Context) {
 }
 
 // GetTopoGraph handles GET /api/v1/topology/graph.
+// Supports ?layout_type=hierarchy|force|circular to apply layout algorithm.
+// Supports ?domain_id to filter by domain.
+// Supports ?node_type to filter by node type (eNB, gNB, CPE, etc.).
+// Supports ?status to filter by node status (online, offline, alarm, maintenance).
+// Supports ?limit=N to cap node count (default: 1000, max: 5000).
 func (h *Handler) GetTopoGraph(c *gin.Context) {
 	var domainID *uuid.UUID
 	if did := c.Query("domain_id"); did != "" {
@@ -543,10 +556,46 @@ func (h *Handler) GetTopoGraph(c *gin.Context) {
 		domainID = &id
 	}
 
-	nodes, err := h.nodeRepo.ListAll(c.Request.Context(), domainID)
+	var nodeType *string
+	if nt := c.Query("node_type"); nt != "" {
+		nodeType = &nt
+	}
+
+	var status *string
+	if st := c.Query("status"); st != "" {
+		// Validate status value
+		validStatuses := map[string]bool{
+			"online":      true,
+			"offline":     true,
+			"alarm":       true,
+			"maintenance": true,
+		}
+		if !validStatuses[st] {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+		status = &st
+	}
+
+	limit := 1000
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	if limit > 5000 {
+		limit = 5000
+	}
+
+	nodes, err := h.nodeRepo.ListAll(c.Request.Context(), domainID, nodeType, status)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
+	}
+
+	// Apply limit if specified
+	if len(nodes) > limit {
+		nodes = nodes[:limit]
 	}
 
 	edges, err := h.edgeRepo.ListAll(c.Request.Context())
@@ -555,9 +604,27 @@ func (h *Handler) GetTopoGraph(c *gin.Context) {
 		return
 	}
 
+	// Apply layout algorithm if requested
+	layoutType := c.Query("layout_type")
+	if layoutType != "" {
+		cfg := DefaultLayoutConfig()
+		cfg.Type = layoutType
+		algorithm := NewLayoutAlgorithm(cfg, h.logger)
+
+		nodes, err = algorithm.Apply(c.Request.Context(), nodes, edges)
+		if err != nil {
+			h.logger.Warn("failed to apply layout", zap.String("type", layoutType), zap.Error(err))
+			// Continue without layout
+		}
+	}
+
+	// Calculate statistics
+	statistics := CalculateStatistics(nodes, edges)
+
 	response.OK(c, TopoGraph{
-		Nodes: nodes,
-		Edges: edges,
+		Nodes:      nodes,
+		Edges:      edges,
+		Statistics: statistics,
 	})
 }
 
@@ -569,7 +636,7 @@ func (h *Handler) GetGeoData(c *gin.Context) {
 		return
 	}
 
-	nodes, err := h.nodeRepo.ListAll(c.Request.Context(), nil)
+	nodes, err := h.nodeRepo.ListAll(c.Request.Context(), nil, nil, nil)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -908,4 +975,67 @@ func (h *Handler) BatchCreateTopoNodes(c *gin.Context) {
 	}
 
 	response.OK(c, gin.H{"created": len(nodes), "nodes": nodes})
+}
+
+// SyncDevicesFromTopology handles POST /api/v1/topology/sync.
+// Synchronizes devices from the devices table to topology nodes.
+func (h *Handler) SyncDevicesFromTopology(c *gin.Context) {
+	var domainID *uuid.UUID
+	if did := c.Query("domain_id"); did != "" {
+		id, err := uuid.Parse(did)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+		domainID = &id
+	}
+
+	limit := 100
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+
+	if h.syncSvc == nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, fmt.Errorf("sync service not available"))
+		return
+	}
+
+	result, err := h.syncSvc.SyncFromDevices(c.Request.Context(), domainID, limit)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	response.OK(c, result)
+}
+
+// GetTopologyStatistics handles GET /api/v1/topology/statistics.
+// Returns topology statistics with optional domain filtering.
+func (h *Handler) GetTopologyStatistics(c *gin.Context) {
+	var domainID *uuid.UUID
+	if did := c.Query("domain_id"); did != "" {
+		id, err := uuid.Parse(did)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+			return
+		}
+		domainID = &id
+	}
+
+	nodes, err := h.nodeRepo.ListAll(c.Request.Context(), domainID, nil, nil)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	edges, err := h.edgeRepo.ListAll(c.Request.Context())
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	statistics := CalculateStatistics(nodes, edges)
+	response.OK(c, statistics)
 }

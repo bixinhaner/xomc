@@ -501,10 +501,18 @@ func (r *PgTopoNodeRepository) List(ctx context.Context, filter TopoNodeFilter) 
 	return model.NewListResponse(items, total, filter.Page, filter.PageSize), nil
 }
 
-func (r *PgTopoNodeRepository) ListAll(ctx context.Context, domainID *uuid.UUID) ([]TopoNode, error) {
+// ListAll returns all topology nodes, optionally filtered by domain, node type, and status.
+// This is used by the topology graph endpoint which needs all nodes for rendering.
+func (r *PgTopoNodeRepository) ListAll(ctx context.Context, domainID *uuid.UUID, nodeType *string, status *string) ([]TopoNode, error) {
 	base := storage.Psql.Select(topoNodeColumns...).From("topo_nodes")
 	if domainID != nil {
 		base = base.Where(sq.Eq{"domain_id": *domainID})
+	}
+	if nodeType != nil {
+		base = base.Where(sq.Eq{"node_type": *nodeType})
+	}
+	if status != nil {
+		base = base.Where(sq.Eq{"status": *status})
 	}
 	base = base.OrderBy("label ASC")
 

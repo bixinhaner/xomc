@@ -332,7 +332,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- Topology routes → resource "devices" -----
 	th := c.topologyHandlerDeps
-	topologyHandler := topology.NewHandler(th.groupRepo, th.groupService, th.siteRepo, th.topoNodeRepo, th.topoEdgeRepo)
+	topologyHandler := topology.NewHandler(th.groupRepo, th.groupService, th.siteRepo, th.topoNodeRepo, th.topoEdgeRepo, th.syncSvc, th.logger)
 	topologyHandler.RegisterRoutes(permGroup("devices"))
 
 	// ----- Device Rules routes → resource "devices" -----

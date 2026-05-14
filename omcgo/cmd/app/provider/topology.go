@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/omcgo/omcgo/internal/topology"
+	"go.uber.org/zap"
 )
 
 // initTopologyModule 初始化 F06 拓扑管理模块。
@@ -17,6 +18,9 @@ func initTopologyModule(c *Container) error {
 	topoNodeRepo := topology.NewPgTopoNodeRepository(c.PgPool)
 	topoEdgeRepo := topology.NewPgTopoEdgeRepository(c.PgPool)
 	groupService := topology.NewDeviceGroupService(groupRepo, topoNodeRepo, c.PgPool, logger)
+
+	// Create device sync service
+	syncSvc := topology.NewDeviceSyncService(c.PgPool, topoNodeRepo, topoEdgeRepo, logger)
 
 	// Set shared services
 	c.GroupRepo = groupRepo
@@ -37,6 +41,8 @@ func initTopologyModule(c *Container) error {
 		siteRepo:     siteRepo,
 		topoNodeRepo: topoNodeRepo,
 		topoEdgeRepo: topoEdgeRepo,
+		syncSvc:      syncSvc,
+		logger:       logger,
 	}
 
 	logger.Info("topology module initialized")
@@ -49,4 +55,6 @@ type topologyHandlerDeps struct {
 	siteRepo     *topology.PgSiteRepository
 	topoNodeRepo *topology.PgTopoNodeRepository
 	topoEdgeRepo *topology.PgTopoEdgeRepository
+	syncSvc      *topology.DeviceSyncService
+	logger       *zap.Logger
 }
