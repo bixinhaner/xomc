@@ -686,3 +686,84 @@ T-0127 与 T-0123 合并实现（共享 Path B 测试场景）。
 - [x] 观测埋点名字列出（5 log key + 1 新 metric `provision_online_throttle_total`）
 - [x] 待定点 < 3（实际 3 个，均 S3 实施时立刻解决）
 
+---
+
+## 设计备忘（T-0125，2026-05-14 S2 产出）
+
+> 接力 T-0123，覆盖设计方案 §3。**核心：把 T-0123 在 UpdateFromInform 末端的 firmware 挡板从 log-only 改造为真发 `SubjectDeviceFirmwareChanged` 事件 + Provision 引擎订阅触发"重新交集 + Path B"流程**。
+
+### 1. 现状勘察
+
+| 检查点 | 文件 | 现状 |
+|--------|------|------|
+| `SubjectDeviceFirmwareChanged` 常量 | `internal/core/event/subjects.go` | 不存在；本任务新增 |
+| T-0123 firmware 挡板 | `device_service.go:670-686` | 当前仅 log "firmware_changed_suppresses_online"，**未发任何事件**；本任务替换为真发 event |
+| `RequestModelUpload` 签名 | `model_upload.go:78` | `(ctx, dev, sourceID) (*ParameterDiscoveryLog, error)`；`product.EnableFileType11=false` 时返回 log.Status=DiscoveryCompleted + reason="skipped: enable_filetype11=false"；其余正常入队 Upload RPC |
+| `handleDataModelFileReceived` auto-sync | `engine.go:701-721` | Upload 完成后 `e.config.AutoSync.Enabled` 时自动调 `StartPathBSync(ctx, dev, sourceID)`，**不带 WithReason** → 默认 reason 标签缺失 |
+| Redis 串行锁基础设施 | T-0123 已注入 `e.redisClient` | 复用 |
+
+### 2. Reason 传递机制（关键 — 复用 T-0123 Redis 协议）
+
+设计方案 §3.2 流程：
+1. HandleFirmwareChanged 调 RequestModelUpload（异步入队 Upload）
+2. Upload 完成 → datamodel.file.received 事件 → handleDataModelFileReceived → IntersectCPEModel → auto-sync Path B
+3. Path B 完成 → HandleSyncResultPathB 打差异日志（应携带 reason="firmware_changed"）
+
+**问题**：handleDataModelFileReceived 内的 auto-sync 不知道当前是 firmware 触发还是首次 bootstrap 触发。
+
+**方案**：HandleFirmwareChanged 入口先**预设 reason hint** —— `SET provision:syncreason:{deviceID} = "firmware_changed" TTL=10min`（与 T-0123 路径同 key）。`StartPathBSync` 内 `if pbOpts.reason != "" { SET key reason }` 仅在显式 `WithReason` 时覆盖；handleDataModelFileReceived 现行调用不带 opts → **不覆盖** → HandleSyncResultPathB 完成时读到正确的 firmware_changed。
+
+### 3. HandleFirmwareChanged 控制流
+
+```
+1. Redis 串行锁：SetNX provision:firmware_handling:{deviceID} = "1" TTL=10min
+   - 未拿到锁 → log debug "firmware handling already in progress, skip" → return（防设备升级期间不稳定 swVersion 多次 Inform 引发并发交集）
+2. 预设 reason hint：SET provision:syncreason:{deviceID} = "firmware_changed" TTL=10min
+3. e.deviceService.GetDevice(ctx, evt.DeviceID) — nil/error → log warn 跳过
+4. 调 e.modelUploadService.RequestModelUpload(ctx, dev, sourceID="firmware_changed:UUID")
+   - log.Status == DiscoveryDiscovering → Upload 真正入队，handleDataModelFileReceived 完成时会触发 Path B（reason 由 hint 决定）→ return
+   - log.Status == DiscoveryCompleted (skipped: enable_filetype11=false) OR err != nil → 走 step 5 兜底
+5. 兜底 Path B：调 e.syncService.StartPathBSync(ctx, dev, sourceID, WithReason("firmware_changed"))
+   - 直接全量同步用 default 映射；旧 standardPath 设备没报就当不变（T-0127 差异日志兜底）
+6. 锁不主动释放 — TTL=10min 自然过期防短时间内重复触发；Path B 完成后差异日志读 reason 仍可用（5min reason TTL 内）
+```
+
+**为何不强制锁内等 Upload 完成**：Upload→Intersect→Path B 是异步事件链，HandleFirmwareChanged 同步等待会阻塞 EventBus handler；锁的作用是**防并发触发**而非协调步骤，TTL 自然过期即可。
+
+### 4. 改动点清单
+
+| 文件 | 改动 | 估算行 |
+|------|------|------|
+| `internal/core/event/subjects.go` | 新增 `SubjectDeviceFirmwareChanged = "device.firmware.changed"` 常量 + doc comment | +6 |
+| `internal/device/device_service.go` | 把 `firmware_changed_suppresses_online` log 块替换为：log "firmware_changed event published" → 调 publishDeviceFirmwareChangedEvent；新增 `DeviceFirmwareChangedEvent` 类型（DeviceID/SerialNumber/ProductClass/OldVersion/NewVersion 5 字段）+ `publishDeviceFirmwareChangedEvent` helper | +50 / -8 |
+| `internal/provision/engine.go` | Subscribe 追加 `SubjectDeviceFirmwareChanged` 订阅；新增 `HandleFirmwareChanged(ctx, DeviceFirmwareChangedEvent)` 方法（含 §3 控制流） | +90 |
+| `internal/device/service_test.go` | 新增 `TestUpdateFromInform_FirmwareChanged_PublishesEvent` 替换原 `TestUpdateFromInform_FirmwareChangedSuppressesOnlineEvent` 的"无事件"断言为"firmware.changed 事件"断言 | +50 |
+| `internal/provision/engine_test.go` | 新增 4 testcase：HandleFirmwareChanged_RedisSerialLockSkipsConcurrent / HandleFirmwareChanged_RequestModelUploadEnqueued / HandleFirmwareChanged_FileType11Disabled_DirectPathBFallback / HandleFirmwareChanged_DeviceNotFound_NoOp | +120 |
+
+**估算总改动**：~310 行，符合 S 工作量。
+
+### 5. 观测埋点
+
+| 类型 | 名称 | 文件 |
+|------|------|------|
+| log key | `firmware.changed event published` | device_service.go info |
+| log key | `firmware handling already in progress, skip` | engine.go debug |
+| log key | `firmware.changed: RequestModelUpload result` | engine.go info（含 log.Status / DiscoveryStatus） |
+| log key | `firmware.changed: direct Path B fallback` | engine.go info（enable_filetype11=false 路径） |
+| Redis key | `provision:firmware_handling:{deviceID}` TTL=10min | engine.go HandleFirmwareChanged |
+
+### 6. 兼容性
+
+- 旧 `discovered_param_mappings` 行不删除（车队混合版本兼容；设计方案 §3.3）
+- 设备升级后不再上报的旧 standardPath 在 `device_parameters` 中保留不动；漂移由 T-0127 差异日志记录
+- `enable_filetype11=false` 设备：跳过 Upload，直接走 default 映射 Path B 同步（不会"卡住"）
+
+### 7. 出口门（S2）
+
+- [x] 接口契约明确（DeviceFirmwareChangedEvent / Subscribe 追加 / HandleFirmwareChanged 5 步控制流）
+- [x] 迁移草案：N/A
+- [x] Carrier 差异点：无新增
+- [x] 观测埋点名字列出（4 log key + 1 Redis key）
+- [x] 待定点 < 3（实际 0 个 — T-0123 已铺好 Redis 注入 + sync 服务）
+
+

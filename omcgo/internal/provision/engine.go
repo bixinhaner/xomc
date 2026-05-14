@@ -203,6 +203,25 @@ func (e *ProvisioningEngine) Subscribe(bus event.EventBus) error {
 		e.logger.Info("provisioning engine subscribed to device.online events")
 	}
 
+	// T-0125: 订阅 device.firmware.changed — 固件升级后重新交集 + Path B 同步。
+	firmwareHandler := func(ctx context.Context, evt event.Event) error {
+		var fwEvt device.DeviceFirmwareChangedEvent
+		if err := evt.DecodePayload(&fwEvt); err != nil {
+			e.logger.Error("decode device.firmware.changed event", zap.Error(err),
+				zap.String("event_id", evt.ID))
+			return err
+		}
+		return e.HandleFirmwareChanged(ctx, fwEvt)
+	}
+	if e.deduper != nil {
+		firmwareHandler = e.deduper.Wrap("provision-firmware-changed", firmwareHandler)
+	}
+	if _, err := bus.QueueSubscribe(event.SubjectDeviceFirmwareChanged, "provision-firmware-changed", firmwareHandler); err != nil {
+		e.logger.Warn("failed to subscribe to device.firmware.changed", zap.Error(err))
+	} else {
+		e.logger.Info("provisioning engine subscribed to device.firmware.changed events")
+	}
+
 	return nil
 }
 
@@ -275,6 +294,122 @@ func (e *ProvisioningEngine) HandleDeviceOnline(ctx context.Context, evt device.
 		zap.String("device_id", evt.DeviceID.String()),
 		zap.String("serial_number", evt.SerialNumber),
 	)
+	return nil
+}
+
+// HandleFirmwareChanged 处理设备固件版本变化事件（T-0125）。
+//
+// 流程（设计方案 §3.2）：
+//  1. Redis 串行锁 SetNX provision:firmware_handling:{deviceID} TTL=10min — 防设备升级期间
+//     不稳定 swVersion 多次 Inform 引发并发交集。锁不主动释放，TTL 自然过期。
+//  2. 预设 reason hint Set provision:syncreason:{deviceID}="firmware_changed" TTL=10min —
+//     让 handleDataModelFileReceived 内 auto-sync Path B 完成时差异日志能读到正确 reason。
+//  3. 调 modelUploadService.RequestModelUpload → 入队 Upload(FileType=11) → 异步回到
+//     handleDataModelFileReceived → IntersectCPEModel 写新代次 discovered_param_mappings →
+//     auto-sync Path B（reason 由 hint 决定）。
+//  4. 若 RequestModelUpload 返 log.Status=DiscoveryCompleted（enable_filetype11=false 跳过）
+//     或 err 不为 nil → 兜底直接调 StartPathBSync(WithReason("firmware_changed"))，
+//     用 default 映射全量同步（旧 standardPath 不删除，漂移由 T-0127 差异日志记录）。
+func (e *ProvisioningEngine) HandleFirmwareChanged(ctx context.Context, evt device.DeviceFirmwareChangedEvent) error {
+	ctx, span := tracing.StartSpan(ctx, tracing.ProvisionTracerName, "Provision HandleFirmwareChanged",
+		attribute.String("provision.device_sn", evt.SerialNumber),
+		attribute.String("provision.device_id", evt.DeviceID.String()),
+		attribute.String("provision.old_version", evt.OldVersion),
+		attribute.String("provision.new_version", evt.NewVersion),
+	)
+	defer span.End()
+
+	// 1. Redis 串行锁：防短时间内重复 firmware Inform 引发并发交集
+	if e.redisClient != nil {
+		lockKey := fmt.Sprintf("provision:firmware_handling:%s", evt.DeviceID.String())
+		acquired, err := e.redisClient.SetNX(ctx, lockKey, "1", 10*time.Minute).Result()
+		if err != nil {
+			// Redis 失败不阻断：log warn 后继续推进（容忍 Redis 抖动）
+			e.logger.Warn("firmware.changed lock SetNX failed",
+				zap.String("device_id", evt.DeviceID.String()),
+				zap.Error(err))
+		} else if !acquired {
+			e.logger.Debug("firmware handling already in progress, skip",
+				zap.String("device_id", evt.DeviceID.String()),
+				zap.String("serial_number", evt.SerialNumber))
+			return nil
+		}
+	}
+
+	// 2. 预设 reason hint：让 Upload 完成后 handleDataModelFileReceived auto-sync 也能读到正确 reason
+	if e.redisClient != nil {
+		reasonKey := fmt.Sprintf("provision:syncreason:%s", evt.DeviceID.String())
+		if err := e.redisClient.Set(ctx, reasonKey, "firmware_changed", 10*time.Minute).Err(); err != nil {
+			e.logger.Warn("firmware.changed reason hint write failed",
+				zap.String("device_id", evt.DeviceID.String()),
+				zap.Error(err))
+		}
+	}
+
+	// 3. 查 device
+	dev, err := e.deviceService.GetDevice(ctx, evt.DeviceID)
+	if err != nil {
+		e.logger.Warn("firmware.changed: lookup device failed",
+			zap.String("device_id", evt.DeviceID.String()),
+			zap.Error(err))
+		return nil
+	}
+	if dev == nil {
+		e.logger.Warn("firmware.changed: device not found, skipping",
+			zap.String("device_id", evt.DeviceID.String()))
+		return nil
+	}
+
+	// 4. 调 RequestModelUpload：log.Status=Discovering → Upload 真入队（handleDataModelFileReceived 会自动触发 Path B）；
+	//    log.Status=Completed (enable_filetype11=false) 或 err → 走 step 5 兜底
+	sourceID := fmt.Sprintf("firmware_changed:%s", evt.DeviceID.String())
+	var modelUploadEnqueued bool
+	if e.modelUploadService != nil {
+		log, uploadErr := e.modelUploadService.RequestModelUpload(ctx, dev, sourceID)
+		if uploadErr != nil {
+			e.logger.Warn("firmware.changed: RequestModelUpload failed, fallback to direct Path B",
+				zap.String("device_id", evt.DeviceID.String()),
+				zap.Error(uploadErr))
+		} else if log != nil && log.Status == DiscoveryDiscovering {
+			modelUploadEnqueued = true
+			e.logger.Info("firmware.changed: model upload enqueued (Path B will be triggered after Upload completes)",
+				zap.String("device_id", evt.DeviceID.String()),
+				zap.String("discovery_id", log.ID.String()),
+				zap.String("old_version", evt.OldVersion),
+				zap.String("new_version", evt.NewVersion))
+		} else if log != nil {
+			e.logger.Info("firmware.changed: model upload skipped, will fallback to direct Path B",
+				zap.String("device_id", evt.DeviceID.String()),
+				zap.String("discovery_status", string(log.Status)),
+				zap.String("discovery_message", log.ErrorMessage))
+		}
+	}
+
+	// 5. 兜底 Path B：当 Upload 未真正入队（enable_filetype11=false / err / modelUploadService nil）时
+	//    直接全量同步使用 default 映射；reason 标签已由 step 2 预设
+	if !modelUploadEnqueued {
+		if e.syncService == nil {
+			e.logger.Debug("firmware.changed: syncService nil, skipping Path B fallback",
+				zap.String("device_id", evt.DeviceID.String()))
+			return nil
+		}
+		used, syncErr := e.syncService.StartPathBSync(ctx, dev, sourceID, WithReason("firmware_changed"))
+		if syncErr != nil {
+			e.logger.Warn("firmware.changed: direct Path B fallback failed",
+				zap.String("device_id", evt.DeviceID.String()),
+				zap.Error(syncErr))
+			return nil
+		}
+		if !used {
+			e.logger.Debug("firmware.changed: Path B fallback skipped (no MappingSet)",
+				zap.String("device_id", evt.DeviceID.String()))
+			return nil
+		}
+		e.logger.Info("firmware.changed: direct Path B fallback initiated",
+			zap.String("device_id", evt.DeviceID.String()),
+			zap.String("serial_number", evt.SerialNumber))
+	}
+
 	return nil
 }
 

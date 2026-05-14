@@ -1102,3 +1102,132 @@ func TestHandleDeviceOnline_RedisDown_StillProceeds(t *testing.T) {
 	err := engine.HandleDeviceOnline(context.Background(), evt)
 	assert.NoError(t, err, "Redis 失败应不阻塞主流程（容忍 Redis 抖动）")
 }
+
+// ---------------------------------------------------------------------------
+// Tests: T-0125 HandleFirmwareChanged — Redis 串行锁 + reason hint + fallback Path B
+// ---------------------------------------------------------------------------
+
+func TestHandleFirmwareChanged_RedisSerialLockSkipsConcurrent(t *testing.T) {
+	deviceID := uuid.New()
+	lookupCount := 0
+	deviceRepo := &mockDeviceRepo{
+		GetByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+			lookupCount++
+			return &model.Device{
+				ID:              deviceID,
+				SerialNumber:    "SN-FW-LOCK",
+				ProductClass:    "SmallCell",
+				FirmwareVersion: "1.0.0",
+			}, nil
+		},
+	}
+	engine, _ := newOnlineHarness(t, deviceRepo)
+
+	evt := device.DeviceFirmwareChangedEvent{
+		DeviceID:     deviceID,
+		SerialNumber: "SN-FW-LOCK",
+		ProductClass: "SmallCell",
+		OldVersion:   "0.9.0",
+		NewVersion:   "1.0.0",
+	}
+
+	// 第一次：拿到锁，进入 device lookup（modelUploadService=nil 不影响锁逻辑）
+	err := engine.HandleFirmwareChanged(context.Background(), evt)
+	require.NoError(t, err)
+	firstLookup := lookupCount
+
+	// 10min 内第二次：被串行锁拦截，不进 device lookup
+	err = engine.HandleFirmwareChanged(context.Background(), evt)
+	require.NoError(t, err)
+	assert.Equal(t, firstLookup, lookupCount, "second call within 10min should be skipped by serial lock")
+}
+
+func TestHandleFirmwareChanged_WritesReasonHintToRedis(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{
+		GetByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+			return &model.Device{ID: deviceID, SerialNumber: "SN-FW-HINT"}, nil
+		},
+	}
+	engine, mr := newOnlineHarness(t, deviceRepo)
+
+	evt := device.DeviceFirmwareChangedEvent{
+		DeviceID:     deviceID,
+		SerialNumber: "SN-FW-HINT",
+		OldVersion:   "0.9.0",
+		NewVersion:   "1.0.0",
+	}
+	err := engine.HandleFirmwareChanged(context.Background(), evt)
+	require.NoError(t, err)
+
+	// 验证 reason hint 写入 Redis
+	val, getErr := mr.Get("provision:syncreason:" + deviceID.String())
+	require.NoError(t, getErr)
+	assert.Equal(t, "firmware_changed", val, "reason hint 应写入 Redis 供 handleDataModelFileReceived auto-sync 读取")
+}
+
+func TestHandleFirmwareChanged_DeviceNotFound_NoOp(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{
+		GetByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+			return nil, nil // not found
+		},
+	}
+	engine, _ := newOnlineHarness(t, deviceRepo)
+
+	evt := device.DeviceFirmwareChangedEvent{
+		DeviceID:     deviceID,
+		SerialNumber: "SN-FW-GONE",
+		OldVersion:   "0.9.0",
+		NewVersion:   "1.0.0",
+	}
+	err := engine.HandleFirmwareChanged(context.Background(), evt)
+	assert.NoError(t, err, "device-not-found should be no-op without error")
+}
+
+func TestHandleFirmwareChanged_NilModelUpload_FallbackPathBSkippedWhenSyncNil(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{
+		GetByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+			return &model.Device{
+				ID:           deviceID,
+				SerialNumber: "SN-FW-FALLBACK",
+				ProductClass: "SmallCell",
+			}, nil
+		},
+	}
+	engine, _ := newOnlineHarness(t, deviceRepo)
+	// modelUploadService 和 syncService 都 nil — 验证 fallback 路径不 panic + 早返
+
+	evt := device.DeviceFirmwareChangedEvent{
+		DeviceID:     deviceID,
+		SerialNumber: "SN-FW-FALLBACK",
+		OldVersion:   "0.9.0",
+		NewVersion:   "1.0.0",
+	}
+	err := engine.HandleFirmwareChanged(context.Background(), evt)
+	assert.NoError(t, err, "nil modelUploadService + nil syncService 应无 panic 无 error")
+}
+
+func TestHandleFirmwareChanged_RedisDown_StillProceeds(t *testing.T) {
+	deviceID := uuid.New()
+	lookupCount := 0
+	deviceRepo := &mockDeviceRepo{
+		GetByIDFn: func(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+			lookupCount++
+			return &model.Device{ID: deviceID, SerialNumber: "SN-FW-REDIS-DOWN"}, nil
+		},
+	}
+	engine, mr := newOnlineHarness(t, deviceRepo)
+	mr.Close() // 模拟 Redis 不可达
+
+	evt := device.DeviceFirmwareChangedEvent{
+		DeviceID:     deviceID,
+		SerialNumber: "SN-FW-REDIS-DOWN",
+		OldVersion:   "0.9.0",
+		NewVersion:   "1.0.0",
+	}
+	err := engine.HandleFirmwareChanged(context.Background(), evt)
+	assert.NoError(t, err)
+	assert.Equal(t, 1, lookupCount, "Redis 失败仍应推进到 device lookup")
+}

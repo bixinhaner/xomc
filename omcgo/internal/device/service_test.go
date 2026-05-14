@@ -792,6 +792,12 @@ func TestUpdateFromInform_FirmwareChangedSuppressesOnlineEvent(t *testing.T) {
 	}
 	bus := event.NewChannelEventBus(16, zap.NewNop())
 	onlineCh := captureOnlineEvent(t, bus)
+	firmwareCh := make(chan event.Event, 1)
+	_, subErr := bus.Subscribe(event.SubjectDeviceFirmwareChanged, func(_ context.Context, e event.Event) error {
+		firmwareCh <- e
+		return nil
+	})
+	require.NoError(t, subErr)
 	svc := newTestDeviceServiceWithBus(deviceRepo, &mockParamRepo{}, bus)
 
 	dev, err := svc.UpdateFromInform(context.Background(), sampleInform("SN-FW-001"))
@@ -800,12 +806,63 @@ func TestUpdateFromInform_FirmwareChangedSuppressesOnlineEvent(t *testing.T) {
 	assert.Equal(t, "1.0.0", dev.FirmwareVersion)
 	assert.Equal(t, model.DeviceActive, dev.Status)
 
-	// 挡板：firmware 变化时不发 device.online（T-0125 会在此处发 firmware.changed）
+	// T-0125: firmware 变化 → 发 firmware.changed 含 oldVersion/newVersion + becameOnline=true
+	select {
+	case evt := <-firmwareCh:
+		assert.Equal(t, event.SubjectDeviceFirmwareChanged, evt.Subject)
+		var payload DeviceFirmwareChangedEvent
+		require.NoError(t, evt.DecodePayload(&payload))
+		assert.Equal(t, deviceID, payload.DeviceID)
+		assert.Equal(t, "0.9.0", payload.OldVersion)
+		assert.Equal(t, "1.0.0", payload.NewVersion)
+		assert.True(t, payload.BecameOnline, "同 Inform 也满足 offline→active，BecameOnline 应为 true")
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected firmware.changed event not published within 2s")
+	}
+
+	// 二选一：firmware 变化时不发 device.online
 	select {
 	case evt := <-onlineCh:
 		t.Fatalf("expected NO device.online event when firmware changed, got %v", evt.Subject)
 	case <-time.After(200 * time.Millisecond):
-		// 期望路径：等不到事件即视为挡板生效
+		// 期望路径
+	}
+}
+
+func TestUpdateFromInform_FirmwareChanged_ActiveStaysActive_BecameOnlineFalse(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:              deviceID,
+				SerialNumber:    sn,
+				ProductClass:    "SmallCell",
+				Status:          model.DeviceActive, // 一直在线
+				FirmwareVersion: "0.9.0",            // != Inform "1.0.0"
+				InformInterval:  300,
+			}, nil
+		},
+		updateFn: func(_ context.Context, _ *model.Device) error { return nil },
+	}
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	firmwareCh := make(chan event.Event, 1)
+	_, subErr := bus.Subscribe(event.SubjectDeviceFirmwareChanged, func(_ context.Context, e event.Event) error {
+		firmwareCh <- e
+		return nil
+	})
+	require.NoError(t, subErr)
+	svc := newTestDeviceServiceWithBus(deviceRepo, &mockParamRepo{}, bus)
+
+	_, err := svc.UpdateFromInform(context.Background(), sampleInform("SN-FW-ACTIVE"))
+	require.NoError(t, err)
+
+	select {
+	case evt := <-firmwareCh:
+		var payload DeviceFirmwareChangedEvent
+		require.NoError(t, evt.DecodePayload(&payload))
+		assert.False(t, payload.BecameOnline, "active→active 时 BecameOnline 应为 false")
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected firmware.changed event even when status didn't change")
 	}
 }
 

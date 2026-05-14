@@ -665,20 +665,15 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 		s.heartbeat.RefreshHeartbeat(ctx, device.SerialNumber, device.InformInterval)
 	}
 
-	// T-0123: 检测 firmware 变化与 offline→active 二选一发布事件。
-	// 同一 Inform 满足两者时，挡板优先：log "firmware_changed_suppresses_online" 不发 device.online
-	// （T-0125 实施时会在挡板处发 firmware.changed；本任务仅记录抑制日志）。
+	// T-0123/T-0125: 检测 firmware 变化与 offline→active 二选一发布事件。
+	// 同一 Inform 满足两者时优先发 firmware.changed（不发 device.online），
+	// 由 provision.HandleFirmwareChanged 触发的重新交集 + Path B 同步覆盖 online 的能力，
+	// 避免两路 Path B 重复同步。
 	newVersion := device.FirmwareVersion
 	firmwareChanged := oldVersion != "" && newVersion != "" && oldVersion != newVersion
 	becameOnline := oldStatus == model.DeviceOffline && device.Status == model.DeviceActive
 	if firmwareChanged {
-		s.logger.Info("firmware_changed_suppresses_online",
-			zap.String("device_id", device.ID.String()),
-			zap.String("serial_number", device.SerialNumber),
-			zap.String("old_version", oldVersion),
-			zap.String("new_version", newVersion),
-			zap.Bool("became_online", becameOnline),
-		)
+		s.publishDeviceFirmwareChangedEvent(ctx, device, oldVersion, newVersion, becameOnline)
 	} else if becameOnline {
 		s.publishDeviceOnlineEvent(ctx, device)
 	}
@@ -831,6 +826,56 @@ func (s *DeviceService) storeInformParameters(ctx context.Context, deviceID uuid
 			zap.String("device_id", deviceID.String()),
 		)
 	}
+}
+
+// DeviceFirmwareChangedEvent 设备 swVersion 变化时发布（T-0125）。
+//
+// 订阅者：provision.Engine.HandleFirmwareChanged — Redis 串行锁 + RequestModelUpload
+// 重新交集 + Path B 同步。BecameOnline 字段记录该次 Inform 是否同时从 offline 恢复 active
+// （二选一逻辑下不发 device.online，但下游可参考此字段做指标/审计区分）。
+type DeviceFirmwareChangedEvent struct {
+	DeviceID     uuid.UUID `json:"device_id"`
+	SerialNumber string    `json:"serial_number"`
+	ProductClass string    `json:"product_class"`
+	OldVersion   string    `json:"old_version"`
+	NewVersion   string    `json:"new_version"`
+	BecameOnline bool      `json:"became_online"` // 二选一抑制的 online 事件
+}
+
+// publishDeviceFirmwareChangedEvent 发布 device.firmware.changed 事件（T-0125）。
+//
+// 不阻塞主流程：EventBus nil / 序列化失败 / Publish 失败均仅 log Warn。
+func (s *DeviceService) publishDeviceFirmwareChangedEvent(ctx context.Context, device *model.Device,
+	oldVersion, newVersion string, becameOnline bool) {
+	if s.eventBus == nil {
+		return
+	}
+	payload := DeviceFirmwareChangedEvent{
+		DeviceID:     device.ID,
+		SerialNumber: device.SerialNumber,
+		ProductClass: device.ProductClass,
+		OldVersion:   oldVersion,
+		NewVersion:   newVersion,
+		BecameOnline: becameOnline,
+	}
+	evt, err := event.NewEvent(event.SubjectDeviceFirmwareChanged, payload)
+	if err != nil {
+		s.logger.Error("create device.firmware.changed event", zap.Error(err),
+			zap.String("device_id", device.ID.String()))
+		return
+	}
+	if err := s.eventBus.Publish(ctx, event.SubjectDeviceFirmwareChanged, evt); err != nil {
+		s.logger.Warn("publish device.firmware.changed event", zap.Error(err),
+			zap.String("device_id", device.ID.String()))
+		return
+	}
+	s.logger.Info("firmware.changed event published",
+		zap.String("device_id", device.ID.String()),
+		zap.String("serial_number", device.SerialNumber),
+		zap.String("old_version", oldVersion),
+		zap.String("new_version", newVersion),
+		zap.Bool("became_online_suppressed", becameOnline),
+	)
 }
 
 // DeviceOnlineEvent 已存在设备从 offline 恢复 active 时发布（T-0123）。

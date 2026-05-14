@@ -78,6 +78,12 @@ const (
 	// 不发 online（避免两路 Path B 重复同步）。
 	SubjectDeviceOnline = "device.online"
 
+	// SubjectDeviceFirmwareChanged 是设备固件版本变化时发布（T-0125）。
+	// 发布者：device.DeviceService.UpdateFromInform — 比对 oldVersion vs newVersion 不同时触发；
+	// 订阅者：provision.Engine.HandleFirmwareChanged — Redis 串行锁 + RequestModelUpload 重新交集 + Path B 同步。
+	// 与 SubjectDeviceOnline 二选一：firmware 变化时优先，避免两路 Path B 重复同步。
+	SubjectDeviceFirmwareChanged = "device.firmware.changed"
+
 	// SubjectDeviceRebootAbnormal 是检测到设备异常重启（"1 BOOT" 不伴随 "M Reboot"）时发布。
 	// 发布者：device.DeviceService.RecordBootFromInform；
 	// 订阅者：alarm.RebootMonitor — 滑动窗口内累计 >=阈值触发 FREQUENT_ABNORMAL_REBOOT 告警。
