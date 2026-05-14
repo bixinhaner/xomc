@@ -23,18 +23,3 @@ omcmb/webcode/dist/
 
 # Go build cache
 omcgo/bin/
-
-# omcmb 下 Docker 不需要的目录（只保留 webcode/ 和 frontend-core/）
-omcmb/original-omc/
-omcmb/jx/
-omcmb/design/
-omcmb/analysis/
-omcmb/OMC/
-omcmb/webcode-v2/
-omcmb/webcode-v3/
-omcmb/广研院/
-omcmb/package.json
-omcmb/package-lock.json
-omcmb/eslint.config.js
-omcmb/.gitignore
-omcmb/docs/

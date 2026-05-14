@@ -79,17 +79,17 @@ minio:
     ui_assets: "ui-assets"
 
 upload:
-  base_url: "http://172.21.170.34:8080"   # CPE 可访问的 ACS 地址
+  base_url: "http://localhost:8080"   # CPE 可访问的 ACS 地址
   path: "/smallcell/FileUploadService"
   username: "upload_user"             # HTTP Basic Auth 用户名
   password: "secure_upload_password_123"  # HTTP Basic Auth 密码
   max_file_size: 104857600            # 100MB
 
 download:
-  base_url: "http://172.21.170.34:8080"   # CPE 可访问的 ACS 地址（网关代理到 ACS）
+  base_url: "http://localhost:8080"   # CPE 可访问的 ACS 地址（网关代理到 ACS）
   path: "/smallcell/FileDownloadService"
-  username: ""                        # 留空 = 下载接口不需要鉴权（CPE 直接 HTTP GET 下载固件）
-  password: ""
+  username: "download_user"           # HTTP Basic Auth 用户名
+  password: "secure_download_password_123"  # HTTP Basic Auth 密码
 
 metrics:
   port: 9090
