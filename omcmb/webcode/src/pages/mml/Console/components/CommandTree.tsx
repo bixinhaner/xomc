@@ -1,322 +1,206 @@
-import { useState, useCallback, useMemo } from 'react';
-import { Input, Tree, Typography, Empty, Spin, Button } from 'antd';
-import { SearchOutlined, FolderOutlined, CodeOutlined, PlusOutlined, UserOutlined } from '@ant-design/icons';
-import type { TreeProps } from 'antd';
-import type { MMLCommand, MMLParamRef } from '@core/types/mml';
-import { useThemeToken } from '@/hooks/useThemeToken';
+import { useState, useMemo, useCallback } from 'react';
+import type { Key, ReactNode } from 'react';
+import { Input, Tree, Empty, Spin, message } from 'antd';
+import { SearchOutlined, FolderOutlined, CodeOutlined } from '@ant-design/icons';
+import type { TreeDataNode } from 'antd';
+import { useQueryClient } from '@tanstack/react-query';
+import { useGroupTree } from '@core/hooks/api/useMmlConsole';
+import { mmlApi } from '@core/services/api/mmlApi';
+import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
+import type {
+  GroupTreeNode,
+  GroupTreeCommand,
+  Statement,
+  SubFieldDef,
+} from '@core/types/mmlConsole';
 import { useT } from '@/hooks/useT';
-import type { CommandTreeNode } from '../hooks/useCommandSelection';
 
-interface CommandTreeProps {
-  commands: MMLCommand[];
-  selectedCommand: MMLCommand | null;
-  treeData: CommandTreeNode[];
-  searchText: string;
-  isLoading?: boolean;
-  onSearchChange: (text: string) => void;
-  onSelectCommand: (command: MMLCommand | null, param?: MMLParamRef | null) => void | Promise<void>;
-  onAddPublicTemplate?: () => void;
-  onAddPrivateTemplate?: () => void;
-}
+const GROUP_KEY_PREFIX = 'group:';
+const CMD_KEY_PREFIX = 'cmd:';
 
-export default function CommandTree({
-  commands,
-  selectedCommand,
-  treeData,
-  searchText,
-  isLoading = false,
-  onSearchChange,
-  onSelectCommand,
-  onAddPublicTemplate,
-  onAddPrivateTemplate,
-}: CommandTreeProps) {
-  const t = useT();
-  const token = useThemeToken();
-
-  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
-
-  const renderAddButton = (onClick?: () => void) => {
-    if (!onClick) return null;
-    return (
-      <Button
-        type="text"
-        size="small"
-        icon={<PlusOutlined />}
-        style={{ marginLeft: 4, padding: '0 4px', fontSize: 11 }}
-        onClick={(e) => {
-          e.stopPropagation();
-          onClick();
-        }}
-      />
-    );
-  };
-
-  const renderCommandLeaf = (node: CommandTreeNode) => ({
-    key: node.key,
-    isLeaf: true,
+function buildTreeData(nodes: GroupTreeNode[]): TreeDataNode[] {
+  const sorted = [...nodes].sort((a, b) => a.displayOrder - b.displayOrder);
+  return sorted.map((g) => ({
+    key: `${GROUP_KEY_PREFIX}${g.id}`,
     title: (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          width: '100%',
-          paddingRight: 8,
-          gap: 8,
-        }}
-      >
-        <span style={{ display: 'flex', alignItems: 'center', minWidth: 0 }}>
-          <CodeOutlined style={{ marginRight: 6, color: node.template ? '#722ed1' : '#52c41a' }} />
-          <span style={{ fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {node.label}
-          </span>
-        </span>
-        <span
-          style={{
-            fontSize: 11,
-            color: '#8c8c8c',
-            fontFamily: 'monospace',
-            flexShrink: 0,
-          }}
-        >
-          {node.commandCode}
-        </span>
-      </div>
+      <span>
+        <FolderOutlined style={{ marginRight: 4 }} />
+        {g.displayName}
+      </span>
     ),
-  });
-
-  const renderedTreeData = useMemo<TreeProps['treeData']>(() => {
-    return treeData.map((topNode) => {
-      // Custom template root node
-      if (topNode.nodeType === 'custom_root') {
-        return {
-          key: topNode.key,
-          selectable: false,
+    selectable: false,
+    children: [
+      ...buildTreeData(g.children ?? []),
+      ...[...(g.commands ?? [])]
+        .sort((a, b) => a.displayName.localeCompare(b.displayName))
+        .map<TreeDataNode>((c) => ({
+          key: `${CMD_KEY_PREFIX}${c.id}`,
           title: (
-            <span style={{ fontWeight: 500 }}>
-              <FolderOutlined style={{ marginRight: 6, color: token.colorPrimary }} />
-              {topNode.label}
+            <span>
+              <CodeOutlined style={{ marginRight: 4 }} />
+              {c.displayName}
             </span>
           ),
-          children: (topNode.children ?? []).map((subNode) => {
-            const isPublic = subNode.nodeType === 'custom_public';
-            const isPrivate = subNode.nodeType === 'custom_private';
+          isLeaf: true,
+        })),
+    ],
+  }));
+}
 
-            return {
-              key: subNode.key,
-              selectable: false,
-              title: (
-                <span style={{ fontWeight: 500, display: 'inline-flex', alignItems: 'center' }}>
-                  <FolderOutlined style={{ marginRight: 6, color: isPublic ? '#52c41a' : '#fa8c16' }} />
-                  {subNode.label}
-                  <span style={{ marginLeft: 8, fontSize: 12, color: '#8c8c8c', fontWeight: 'normal' }}>
-                    ({subNode.count ?? subNode.children?.length ?? 0})
-                  </span>
-                  {renderAddButton(isPublic ? onAddPublicTemplate : isPrivate ? onAddPrivateTemplate : undefined)}
-                </span>
-              ),
-              children: (subNode.children ?? []).map((leafNode) => {
-                // User directory node
-                if (leafNode.nodeType === 'user_dir') {
-                  return {
-                    key: leafNode.key,
-                    selectable: false,
-                    title: (
-                      <span style={{ fontWeight: 400 }}>
-                        <UserOutlined style={{ marginRight: 6, color: '#8c8c8c' }} />
-                        {leafNode.label}
-                        <span style={{ marginLeft: 8, fontSize: 12, color: '#8c8c8c' }}>
-                          ({leafNode.count ?? leafNode.children?.length ?? 0})
-                        </span>
-                      </span>
-                    ),
-                    children: (leafNode.children ?? []).map(renderCommandLeaf),
-                  };
-                }
-                // Template leaf node
-                return renderCommandLeaf(leafNode);
-              }),
-            };
-          }),
-        };
-      }
-
-      // Built-in category nodes
-      return {
-        key: topNode.key,
-        selectable: false,
-        title: (
-          <span style={{ fontWeight: 500 }}>
-            <FolderOutlined style={{ marginRight: 6, color: token.colorPrimary }} />
-            {topNode.label}
-            <span style={{ marginLeft: 8, fontSize: 12, color: '#8c8c8c', fontWeight: 'normal' }}>
-              ({topNode.count ?? topNode.children?.length ?? 0})
-            </span>
-          </span>
-        ),
-        children: (topNode.children ?? []).map(renderCommandLeaf),
-      };
-    });
-  }, [token.colorPrimary, treeData, onAddPublicTemplate, onAddPrivateTemplate]);
-
-  const commandMap = useMemo(() => {
-    function flatten(nodes: CommandTreeNode[]): CommandTreeNode[] {
-      return nodes.flatMap((n) => [n, ...flatten(n.children ?? [])]);
-    }
-    const allNodes = flatten(treeData);
-
-    // Map for all selectable nodes: key → { command }
-    type CommandEntry = { command: MMLCommand };
-    const entries: Array<[string, CommandEntry]> = [];
-
-    for (const node of allNodes) {
-      if (node.nodeType === 'command' && node.command) {
-        entries.push([String(node.key), { command: node.command }]);
-      }
-    }
-
-    // Build a lookup from commandCode to command definition for metadata inheritance
-    const commandByCode = new Map<string, MMLCommand>();
-    for (const cmd of commands) {
-      commandByCode.set(cmd.commandCode, cmd);
-    }
-
-    // Also include template nodes — convert template to a synthetic MMLCommand
-    const templateEntries = allNodes
-      .filter((node): node is CommandTreeNode & { template: NonNullable<CommandTreeNode['template']> } => Boolean(node.template))
-      .map((node) => {
-        const tmpl = node.template;
-        // Look up the matching command definition to inherit parameter metadata
-        const matchedCmd = commandByCode.get(tmpl.commandCode);
-
-        const params = Object.entries(tmpl.parameters).map(([name, defaultValue]) => {
-          // Inherit metadata from the matched command's param definition
-          const matchedParam = matchedCmd?.params?.find((p) => p.name === name);
-          if (matchedParam) {
-            return {
-              ...matchedParam,
-              defaultValue: defaultValue ?? matchedParam.defaultValue,
-            };
-          }
-          return {
-            name,
-            type: 'string' as const,
-            required: false,
-            description: '',
-            defaultValue,
-          };
-        });
-
-        const syntheticCommand: MMLCommand = {
-          id: `tmpl-${tmpl.id}`,
-          commandName: tmpl.commandName,
-          commandCode: tmpl.commandCode,
-          category: tmpl.categoryGroup || t('mml.console.customTemplates'),
-          description: tmpl.description,
-          params,
-          productTypes: tmpl.productTypes,
-          operationType: tmpl.operationType,
-          paramPaths: matchedCmd?.paramPaths,
-          supportedOperations: matchedCmd?.supportedOperations,
-          helpDoc: matchedCmd?.helpDoc,
-          notes: matchedCmd?.notes,
-        };
-        return [String(node.key), { command: syntheticCommand } as CommandEntry] as const;
+function collectMatches(
+  nodes: GroupTreeNode[],
+  needle: string,
+): { matchedKeys: Set<string>; expandKeys: string[] } {
+  const matchedKeys = new Set<string>();
+  const expandKeys: string[] = [];
+  const lower = needle.toLowerCase();
+  const walk = (arr: GroupTreeNode[], ancestors: string[]) => {
+    arr.forEach((g) => {
+      const groupKey = `${GROUP_KEY_PREFIX}${g.id}`;
+      const path = [...ancestors, groupKey];
+      (g.commands ?? []).forEach((c) => {
+        if (c.displayName.toLowerCase().includes(lower)) {
+          matchedKeys.add(`${CMD_KEY_PREFIX}${c.id}`);
+          path.forEach((k) => {
+            if (!expandKeys.includes(k)) expandKeys.push(k);
+          });
+        }
       });
+      if (g.children?.length) walk(g.children, path);
+    });
+  };
+  walk(nodes, []);
+  return { matchedKeys, expandKeys };
+}
 
-    return new Map<string, CommandEntry>([...entries, ...templateEntries]);
-  }, [commands, treeData]);
+function flattenCommandsById(nodes: GroupTreeNode[]): Map<string, GroupTreeCommand> {
+  const map = new Map<string, GroupTreeCommand>();
+  const walk = (arr: GroupTreeNode[]) => {
+    arr.forEach((g) => {
+      (g.commands ?? []).forEach((c) => map.set(c.id, c));
+      if (g.children?.length) walk(g.children);
+    });
+  };
+  walk(nodes);
+  return map;
+}
 
-  const handleSelect: TreeProps['onSelect'] = useCallback(
-    (selectedKeys) => {
-      if (selectedKeys.length === 0) {
+export interface CommandTreeProps {
+  lang?: 'zh-CN' | 'en-US';
+}
+
+export default function CommandTree({ lang }: CommandTreeProps) {
+  const t = useT();
+  const storeLang = useMmlConsoleStore((s) => s.lang);
+  const appendStatement = useMmlConsoleStore((s) => s.appendStatement);
+  const effectiveLang = lang ?? storeLang;
+
+  const { data: tree = [], isLoading } = useGroupTree(undefined, effectiveLang);
+  const queryClient = useQueryClient();
+
+  const [searchText, setSearchText] = useState('');
+  const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
+  const [autoExpand, setAutoExpand] = useState(true);
+
+  const treeData = useMemo(() => buildTreeData(tree), [tree]);
+  const commandsById = useMemo(() => flattenCommandsById(tree), [tree]);
+  const matched = useMemo(() => {
+    if (!searchText.trim()) return { matchedKeys: new Set<string>(), expandKeys: [] };
+    return collectMatches(tree, searchText.trim());
+  }, [searchText, tree]);
+
+  const onSearchChange = useCallback(
+    (value: string) => {
+      setSearchText(value);
+      if (!value.trim()) {
+        setExpandedKeys([]);
+        setAutoExpand(true);
         return;
       }
-
-      const entry = commandMap.get(String(selectedKeys[0]));
-      if (entry) {
-        void onSelectCommand(entry.command);
-      }
+      const { expandKeys } = collectMatches(tree, value.trim());
+      setExpandedKeys(expandKeys);
+      setAutoExpand(false);
     },
-    [commandMap, onSelectCommand]
+    [tree],
   );
 
+  const handleSelect = useCallback(
+    async (selectedKeys: Key[]) => {
+      const key = selectedKeys[0];
+      if (typeof key !== 'string' || !key.startsWith(CMD_KEY_PREFIX)) return;
+      const commandId = key.slice(CMD_KEY_PREFIX.length);
+      const cmd = commandsById.get(commandId);
+      if (!cmd) return;
+
+      try {
+        const subFields = await queryClient.fetchQuery<SubFieldDef[]>({
+          queryKey: ['mml', 'console', 'sub-fields', commandId, effectiveLang],
+          queryFn: () => mmlApi.getCommandSubFields(commandId, effectiveLang),
+          staleTime: 30 * 60 * 1000,
+        });
+
+        const stmt: Statement = {
+          uid: crypto.randomUUID(),
+          commandId: cmd.id,
+          commandCode: cmd.commandCode,
+          logicalCode: cmd.logicalCode,
+          operationType: cmd.operationType,
+          logicalNameI18n: {
+            'zh-CN': cmd.displayName,
+            'en-US': cmd.displayName,
+          },
+          subFields,
+          selectedSubFieldIds: subFields
+            .filter((sf) => sf.defaultSelected)
+            .map((sf) => sf.id),
+          values: {},
+          unknownCodes: [],
+        };
+        appendStatement(stmt);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        message.error(msg);
+      }
+    },
+    [appendStatement, commandsById, effectiveLang, queryClient],
+  );
+
+  if (isLoading) {
+    return <Spin />;
+  }
+  if (tree.length === 0) {
+    return <Empty description={t('mml.console.commandTree.empty')} />;
+  }
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div
-        style={{
-          padding: '10px 12px',
-          borderBottom: `1px solid ${token.colorBorderSecondary}`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          background: token.colorBgLayout,
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <Input
+        prefix={<SearchOutlined />}
+        placeholder={t('mml.console.commandTree.searchPlaceholder')}
+        value={searchText}
+        onChange={(e) => onSearchChange(e.target.value)}
+        allowClear
+      />
+      <Tree
+        treeData={treeData}
+        expandedKeys={expandedKeys}
+        autoExpandParent={autoExpand}
+        onExpand={(keys) => {
+          setExpandedKeys(keys);
+          setAutoExpand(false);
         }}
-      >
-        <Typography.Text strong style={{ fontSize: 13 }}>
-          {t('nav.mml.commands')}
-        </Typography.Text>
-        {selectedCommand && (
-          <span
-            style={{
-              fontSize: 10,
-              padding: '2px 8px',
-              background: token.colorPrimaryBg,
-              border: `1px solid ${token.colorPrimaryBorder}`,
-              borderRadius: 10,
-              fontFamily: 'monospace',
-              color: token.colorPrimary,
-            }}
-          >
-            {selectedCommand.commandCode}
-          </span>
-        )}
-      </div>
-
-      <div style={{ padding: '10px 12px', background: token.colorBgContainer }}>
-        <Input.Search
-          size="small"
-          style={{ borderRadius: 4 }}
-          placeholder={t('common.search')}
-          prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
-          value={searchText}
-          onChange={(e) => onSearchChange(e.target.value)}
-          allowClear
-        />
-      </div>
-
-      <div
-        className="no-scrollbar"
-        style={{
-          flex: 1,
-          minHeight: 80,
-          overflow: 'auto',
-          padding: '8px 4px',
-          background: token.colorBgContainer,
+        onSelect={handleSelect}
+        selectedKeys={[]}
+        showLine
+        style={{ minHeight: 320, overflow: 'auto' }}
+        titleRender={(node) => {
+          const key = node.key;
+          if (typeof key === 'string' && matched.matchedKeys.has(key)) {
+            return <span style={{ background: '#fff2b8' }}>{node.title as ReactNode}</span>;
+          }
+          return node.title as ReactNode;
         }}
-      >
-        {isLoading ? (
-          <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 48 }}>
-            <Spin size="small" />
-          </div>
-        ) : renderedTreeData && renderedTreeData.length > 0 ? (
-          <Tree
-            showLine={{ showLeafIcon: false }}
-            expandedKeys={expandedKeys}
-            onExpand={setExpandedKeys}
-            selectedKeys={selectedCommand ? [selectedCommand.id] : []}
-            onSelect={handleSelect}
-            treeData={renderedTreeData}
-            style={{ background: 'transparent', fontSize: 11 }}
-          />
-        ) : (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={t('mml.console.noMatchingCommands')}
-            style={{ marginTop: 40 }}
-          />
-        )}
-      </div>
+      />
     </div>
   );
 }

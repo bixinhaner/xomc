@@ -2011,3 +2011,111 @@ webcode-v2 / webcode-v3 不需要镜像该组件——它们若需要 MML Consol
 S2 PASS。
 
 ---
+
+# 设计备忘（T-0123-P2-c S2 设计定稿，2026-05-14）
+
+> P2-c 范围：把 `Console/index.tsx` 与 `CommandTree.tsx` 从"老 MML 平铺命令列表"重写为"PRD §7.1 三栏 + group-tree 嵌套渲染"形态；新建 `RightPanel.tsx` Tab 切换 Control/ParamPath；重命名 `ParamPathPanel` → `ParamPathExpert`；删 `ParamFormRenderer.tsx`。
+> **不在范围**（P2-d 验证 / P3 admin / P4 收尾）：E2E spec、admin Catalog UI、ADD/RMV GPV 自动探测、Customized adapter。
+
+## P.1 文件清单（S3 实施输出）
+
+| 操作 | 路径 | 用途 |
+|------|------|------|
+| 重写 | `omcmb/webcode/src/pages/mml/Console/index.tsx` | 三栏 + StepBar 顶 + store 派生 |
+| 重写 | `omcmb/webcode/src/pages/mml/Console/components/CommandTree.tsx` | 拉 `/groups/tree` 渲染嵌套；点击叶子 `appendStatement` |
+| 新建 | `omcmb/webcode/src/pages/mml/Console/components/RightPanel.tsx` | antd Tabs Control ⇄ ParamPath；Control 内含 MmlEditor + per-statement sub-view + TerminalPanel |
+| 重命名 | `ParamPathPanel.tsx` → `ParamPathExpert.tsx` | 保留专家视图 props 接口；只改文件名 + 内部 component name |
+| 删除 | `ParamFormRenderer.tsx` | 旧 form 渲染器，被 P2-b 5 组件取代 |
+| 修改 | `Console/components/index.ts` | 导出列表对齐 |
+| 删除（如确认无引用） | 旧 `useCommandSelection.ts` / `useCommandExecution.ts` / 旧 selection state | store 主导后 imperative 选择 hook 不再需要 |
+
+## P.2 新 / 重写组件 Props 签名
+
+```ts
+// CommandTree — 重写
+export interface CommandTreeProps {
+  /** lang 派生 i18n 文案（继承自 store.lang） */
+  lang?: 'zh-CN' | 'en-US';
+}
+// 内部：useGroupTree(undefined, lang) 拉树；click leaf → useQueryClient.fetchQuery 拉 sub-fields →
+//      构造 Statement (uid = crypto.randomUUID, defaultSelectedSubFieldIds 按 sf.defaultSelected 过滤) →
+//      useMmlConsoleStore.appendStatement(stmt)
+
+// RightPanel — 新建
+export interface RightPanelProps {
+  onExecuted?: (task: MMLTask) => void;
+}
+// 内部：activeStatement = store.statements.find(uid==activeStatementUid)；
+//      Tabs activeKey 用 local useState ('control' | 'paramPath')；
+//      Control 子视图按 activeStatement.operationType 路由：
+//        LST → SubFieldChecklist
+//        MOD/ADD → SubFieldInputList
+//        RMV → InstancePicker
+//        其他/null → 无 sub view（仅 MmlEditor + TerminalPanel）
+
+// ParamPathExpert — rename（props 不变）
+export interface ParamPathExpertProps {
+  command: MMLCommand | null;
+  onChange?: (payload: ParamPathChangePayload) => void;
+}
+
+// MMLConsole (index.tsx 顶层) — 重写
+// 不接受 props；内部派生：
+//   const current = deriveStep(selectedDeviceSns.length, statements.length, hasTerminalOutput)
+//     selectedDeviceSns.length===0 → 1
+//     statements.length===0 → 2
+//     hasTerminalOutput === false → 3
+//     else → 4
+```
+
+## P.3 数据流（store 主导）
+
+```
+DeviceTree     → store.setSelectedDeviceSns
+CommandTree    → store.appendStatement (含 subFields + defaultSelected initial)
+SubFieldChecklist/InputList/InstancePicker
+               → store.toggleSubField / setValue / setRmvIndex
+MmlEditor      → store.setMmlTextDebounced  (与 mmlText 双向)
+               ↓
+              store.mmlText / statements / parseErrors
+               ↓
+              RightPanel 订阅 activeStatementUid 派生 active sub-view
+               ↓
+              StepBar.current 派生自 (selectedDeviceSns.length, statements.length, terminal)
+```
+
+index.tsx 不再持有本地 statements/selectedFields/parameters/paramPaths/paramValues 等 state — 全部下沉到 store。仅保留：
+- BatchSnModal open 状态（modal 局部）
+- AddTemplateModal open 状态 + scope（modal 局部）
+- ScriptTaskDrawer open 状态（modal 局部）
+- `activeTab` 已迁入 RightPanel 内部，index 不再持有
+
+## P.4 P2-c 不做项（边界澄清）
+
+1. **不接入 GPV 自动探测**（InstancePicker 仍手输 fallback，留 P4）
+2. **不做 E2E spec**（属 P2-d）
+3. **不做 admin Catalog UI**（属 P3）
+4. **不做 Customized PrivateTemplate adapter**（留 P4）
+5. **不动后端 5 endpoints**（P2-a/b 已就绪）
+6. **不动 frontend-core 业务层**（除非 type 极小补丁；重大改动需 P4）
+
+## P.5 待定点
+
+1. **保留 useCommandSelection / useCommandExecution 还是删？**
+   - 现状：旧 hooks 服务于旧 ParamPathPanel + index.tsx 的 useState 大杂烩
+   - 决策：**保留** 作为 ParamPathExpert（rename 后）的内部数据源（command + paramRefs），index.tsx 不再直接消费；future P4 收尾时再考虑彻底下线
+2. **CommandTree 搜索框语义**：旧 commands 平铺 + searchText 模糊匹配 → 新 group-tree 嵌套需重新设计搜索。本期实现：**仅按 displayName 客户端过滤命中节点 + 自动展开命中路径**；服务端搜索延后。
+
+**待定点 = 2**（< 3 ✅）
+
+## P.6 S2 出口门核查
+
+- [✓] 接口契约明确（§P.2 4 组件 Props 签名 + §P.3 数据流图）
+- [N/A] 迁移草案（前端无 DB 变更）
+- [✓] Carrier 差异点（§0.5 锁定三家一致）
+- [✓] 观测埋点（沿用 §O；本任务无新增）
+- [✓] 待定点 < 3（§P.5 列 2 个）
+
+S2 PASS。
+
+---

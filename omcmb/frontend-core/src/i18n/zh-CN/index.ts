@@ -4290,6 +4290,10 @@ const messages: Record<string, string> = {
   'mml.console.stepBar.step2':                 '选择命令',
   'mml.console.stepBar.step3':                 '配置参数',
   'mml.console.stepBar.step4':                 '查看结果',
+  'mml.console.tab.control':                   'Control Panel',
+  'mml.console.tab.paramPath':                 'ParamPath Expert',
+  'mml.console.commandTree.searchPlaceholder': '搜索命令...',
+  'mml.console.commandTree.empty':             '暂无命令',
 };
 
 export default messages;
