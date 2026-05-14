@@ -1368,3 +1368,490 @@ D3 (4h):    单测全过 + golangci-lint + go test -race + verify report + S5 �
 S2 PASS。
 
 ---
+# 设计备忘（T-0123-P1 S2 设计定稿，2026-05-14）
+
+> **生效阶段**：S2 design → S3 implement 入参
+> **范围**：T-0123-P1（Console 后端 5 端点 + Go MML renderer/parser + Execute statements fanout）
+> **依赖**：T-0123-P0 ✅（数据层 + admin 13 端点 + 4 admin repo + seed 000096 已落库）
+> **关联**：PRD §6.1 / §6.3 / §M.5 / §M.6 Console runtime
+> **审签**：架构 / 电信 / Go / 数据 四专家并行检视
+> **待定点**：3 个（见 §N.10）
+
+## N.1 文件清单（S3 实施输出）
+
+| 路径 | 类型 | 行数估算 |
+|------|------|---------|
+| `omcgo/internal/mml/mml_renderer.go` | 新 — render statement → MML string | ~180 |
+| `omcgo/internal/mml/mml_parser.go` | 新 — parse MML string → statements | ~250 |
+| `omcgo/internal/mml/console_handler.go` | 新 — 5 Console endpoints (tree/sub-fields/render/parse/execute) | ~400 |
+| `omcgo/internal/mml/console_service.go` | 新 — service 层：buildGroupTree / executeStatements 编排 | ~350 |
+| `omcgo/internal/mml/group_tree_repository.go` | 新 — 树形 SQL + LTREE path 查询 | ~150 |
+| `omcgo/internal/mml/service.go` | mod — 加 ExecuteStatements 方法（兼容老 ExecuteCommand） | +120 |
+| `omcgo/internal/mml/handler.go` | mod — 删除 `/mml/execute` 旧路由让位新 console_handler；保留兼容 fallback | +30/-15 |
+| `omcgo/internal/mml/tr069_payload.go` | mod — 支持 statement→TR-069 payload（LST GPV/MOD SPV/ADD AddObject+SPV/RMV DeleteObject） | +200 |
+| `omcgo/internal/mml/repository.go` | mod — CommandRepository.GetByID 增 SubFields 字段加载 | +30 |
+| `cmd/app/provider/modules.go` | mod — DI 注入 console_handler + group_tree_repo | +10 |
+| `cmd/app/provider/router.go` | mod — 注册 5 Console endpoints（permGroup("devices")） | +6 |
+| `omcgo/internal/mml/mml_renderer_test.go` | 新 — 表驱动 render 单测 | ~250 |
+| `omcgo/internal/mml/mml_parser_test.go` | 新 — 表驱动 parse 单测（含语法错） | ~300 |
+| `omcgo/internal/mml/console_service_test.go` | 新 — buildGroupTree + executeStatements 单测 | ~400 |
+| `omcgo/internal/mml/console_handler_test.go` | 新 — 5 endpoint payload + 错误路径 | ~300 |
+| `omcgo/scripts/e2e_verify.sh` | mod — +5 console claim (tree/sub-fields/render/parse/execute) | +50 |
+
+总计：~3030 行（人工 ~2400 + 测试 ~1250）；3 工作日预算。
+
+## N.2 5 Console API 端点契约
+
+### N.2.1 `GET /api/v1/mml/groups/tree?root={code}&lang={zh-CN}`
+
+返回嵌套树（一级 group → 二级 group → 命令叶子），前端 `CommandTree` 直接渲染。
+
+**Request**：
+- `root` (optional)：根 group_code，缺省返所有顶级（BSC_CONFIGURATION / ENB_CONFIG / 等）
+- `lang` (optional, 默认 zh-CN)：i18n 选语种
+
+**Response**（信封 `response.OK(c, data)`）：
+
+```json
+{
+  "code": "BSC_CONFIGURATION",
+  "name": "BSC 配置",
+  "name_i18n": {"zh-CN":"BSC 配置","en-US":"BSC Configuration"},
+  "children": [
+    {
+      "code": "BASIC_INFO",
+      "name": "基本信息",
+      "name_i18n": {...},
+      "commands": [
+        {
+          "id": "uuid-1",
+          "command_code": "LST_DEVICE_INFO",
+          "logical_code": "DEVICE_INFO",
+          "logical_name": "设备信息",
+          "logical_name_i18n": {"zh-CN":"设备信息","en-US":"Device info"},
+          "operation_type": "LST",
+          "display_name": "设备信息(LST DEVICE_INFO)",
+          "require_confirm": false,
+          "rpc_method": "GetParameterValues"
+        }
+      ],
+      "children": []
+    }
+  ]
+}
+```
+
+**实现**：`group_tree_repository.go::BuildTree(rootCode, lang)` 单 SQL JOIN：
+```sql
+SELECT g.id, g.group_code, g.name_i18n, g.path::text, g.display_order,
+       c.id, c.command_code, c.logical_code, c.logical_name_i18n,
+       c.operation_type, c.command_name_i18n, c.require_confirm, c.rpc_method
+FROM mml_param_groups g
+LEFT JOIN mml_commands c ON c.group_id = g.id
+WHERE g.path <@ $1::ltree  -- 按 LTREE 子树查
+   OR g.path = $2::ltree   -- 根 group 本身
+ORDER BY g.path, g.display_order, c.operation_type;
+```
+然后 Go 侧按 ltree path 长度分层组装 children。
+
+**display_name 派生**：`logical_name + "(" + operation_type + " " + logical_code + ")"`，与老 OMC 实测格式一致。
+
+### N.2.2 `GET /api/v1/mml/commands/:id/sub-fields?lang={...}`
+
+**P0 已 prep**：`admin_repository.go::PgSubFieldRepository.ListEnrichedByCommand` 返 `[]MMLCommandSubFieldEnriched`（含 join `mml_params` 的 tr069_path / access_type / is_object / supports_add / supports_delete / change_applies / constraint_text_i18n / default_value / js_regex / name_i18n）。
+
+**Response**：
+
+```json
+{
+  "command_id": "uuid-1",
+  "operation_type": "LST",
+  "sub_fields": [
+    {
+      "id": "sf-uuid-1",
+      "mml_code": "LTE_GSM_MODEL_NAME",
+      "label": "Model Name",
+      "label_i18n": {...},
+      "tr069_path": "Device.DeviceInfo.X_COM_MODULE_TYPE",
+      "value_type": "string",
+      "access_type": "READ_ONLY",
+      "is_object": false,
+      "supports_add": false,
+      "supports_delete": false,
+      "change_applies": "Immediate",
+      "constraint_text": "Read-only string",
+      "constraint_text_i18n": {...},
+      "default_value": null,
+      "js_regex": null,
+      "default_selected": true,
+      "is_required": false,
+      "sort_order": 1
+    }
+  ]
+}
+```
+
+**实现**：`console_service.go::GetCommandSubFields(commandID, lang) ([]SubFieldDTO, error)` 调 SubFieldRepository.ListEnrichedByCommand → 选 lang 派生 label / constraint_text 顶级字段。
+
+### N.2.3 `POST /api/v1/mml/render`
+
+**Request**：
+
+```json
+{
+  "command_id": "uuid-1",
+  "operation_type": "LST",
+  "selected_sub_field_ids": ["sf-uuid-1","sf-uuid-2"],
+  "values": {}
+}
+```
+
+**Response**：
+
+```json
+{ "mml_string": "LST DEVICE_INFO:lstId={LTE_GSM_MODEL_NAME,LTE_GSM_SYS_TIME};" }
+```
+
+**实现**：`mml_renderer.go::RenderStatement(stmt Statement, subFields []SubField) (string, error)`，纯函数无 DB；用 sort_order 决定字段顺序。
+
+### N.2.4 `POST /api/v1/mml/parse`
+
+**Request**：
+
+```json
+{ "mml_string": "LST DEVICE_INFO:lstId={LTE_GSM_MODEL_NAME,LTE_GSM_IP};MOD DEVICE_INFO:Mcc=460;" }
+```
+
+**Response**：
+
+```json
+{
+  "statements": [
+    {
+      "operation_type": "LST",
+      "command_code": "DEVICE_INFO",
+      "command_id": "uuid-1",
+      "selected_sub_field_ids": ["sf-uuid-1","sf-uuid-3"],
+      "values": {}
+    },
+    {
+      "operation_type": "MOD",
+      "command_code": "DEVICE_INFO",
+      "command_id": "uuid-1",
+      "values": { "Mcc": "460" },
+      "unknown_codes": []
+    }
+  ],
+  "parse_errors": []
+}
+```
+
+**实现**：`mml_parser.go::ParseMMLString(s, lookup CommandLookup) ([]Statement, []ParseError)`；lookup 由 service 提供（按 (operation_type, command_code) 查 mml_commands）。未命中 command_code → ParseError 累加但不中断；mml_code 未命中 → `unknown_codes` 累加（前端 toast 提示）。
+
+### N.2.5 `POST /api/v1/mml/execute`
+
+**Request**：
+
+```json
+{
+  "device_sns": ["F4F1F7...","0D59FB..."],
+  "statements": [
+    {
+      "command_id": "uuid-1",
+      "operation_type": "LST",
+      "selected_sub_field_ids": ["sf-1","sf-2"]
+    },
+    {
+      "command_id": "uuid-2",
+      "operation_type": "MOD",
+      "values": {"Mcc": "460"}
+    }
+  ],
+  "execute_type": "immediate",
+  "task_name": "BSC LST+MOD"
+}
+```
+
+**Response**：
+
+```json
+{
+  "task_id": "task-uuid",
+  "device_task_count": 4,
+  "statement_count": 2,
+  "sse_subscription_url": "/api/v1/mml/tasks/task-uuid/stream"
+}
+```
+
+**实现**：复用既有 `Service.Execute` 升级为 `ExecuteStatements`（兼容 fallback：单 statement + 老 ExecuteHTTPRequest payload）。Statements 进 fanout → N×M device_task。
+
+## N.3 Go MML Renderer
+
+**核心函数**：
+
+```go
+// RenderStatement 把单条 statement 渲染为 MML 字符串片段（不含末尾 ;）。
+// subFields 按 sort_order 已排序；selectedIDs 用 set 做 O(1) 查找。
+func RenderStatement(stmt Statement, subFields []MMLCommandSubField, commandCode string) (string, error) {
+    switch stmt.OperationType {
+    case "LST":
+        codes := collectSelectedMMLCodes(stmt.SelectedSubFieldIDs, subFields)
+        return fmt.Sprintf("LST %s:lstId={%s}", commandCode, strings.Join(codes, ",")), nil
+    case "MOD":
+        kvs := collectModValues(stmt.Values, subFields)
+        if len(kvs) == 0 { return "MOD " + commandCode, nil }  // 无值时仍返裸 op
+        return fmt.Sprintf("MOD %s:%s", commandCode, strings.Join(kvs, ",")), nil
+    case "ADD":
+        kvs := collectModValues(stmt.Values, subFields)
+        return fmt.Sprintf("ADD %s:%s", commandCode, strings.Join(kvs, ",")), nil
+    case "RMV":
+        if stmt.RmvInstanceIndex != nil {
+            return fmt.Sprintf("RMV %s:Index=%d", commandCode, *stmt.RmvInstanceIndex), nil
+        }
+        return "RMV " + commandCode, nil
+    }
+    return "", fmt.Errorf("unsupported operation: %s", stmt.OperationType)
+}
+
+// RenderStatements 多条 statement → MML 字符串（用 ; 分隔，末尾 ;）。
+func RenderStatements(stmts []StatementWithMeta) (string, error) {
+    parts := make([]string, 0, len(stmts))
+    for _, sm := range stmts {
+        part, err := RenderStatement(sm.Stmt, sm.SubFields, sm.CommandCode)
+        if err != nil { return "", fmt.Errorf("render statement %d: %w", sm.Index, err) }
+        parts = append(parts, part)
+    }
+    return strings.Join(parts, ";") + ";", nil
+}
+```
+
+老 OMC 实测 MML 语法：
+- `LST <CODE>:lstId={CODE1,CODE2,...};`
+- `MOD <CODE>:Field1=Value1,Field2=Value2;`（无值时裸 `MOD <CODE>`）
+- 多条 `;` 连接，末尾 `;`
+
+## N.4 Go MML Parser
+
+**核心函数**：
+
+```go
+// ParseMMLString 解析 MML 字符串为 statements；
+// commandLookup 由 service 注入（按 (op, code) 返 *MMLCommand + []MMLCommandSubField）。
+// 解析失败累加 ParseError，不中断整个 string；未知 mml_code 累加 stmt.UnknownCodes。
+func ParseMMLString(s string, lookup CommandLookup) ([]Statement, []ParseError) {
+    // 1. 按 ; 分割（容忍末尾 ; 和连续 ;;）
+    // 2. 每段 trim space；空段 skip
+    // 3. 按 ' ' 分前缀（op + code）
+    // 4. 按 ':' 分 op_code 与 params
+    // 5. op==LST：parse "lstId={K1,K2,...}" → SelectedMMLCodes → lookup 转 sub_field_ids
+    //    op==MOD/ADD：parse "K1=V1,K2=V2" → Values map
+    //    op==RMV：parse "Index=N" → RmvInstanceIndex
+    // 6. lookup(op, code) → command_id；未命中累 ParseError
+    // 7. mml_code 在 lookup 的 sub_fields 找 → sub_field_id；未命中累 unknown_codes
+}
+
+type ParseError struct {
+    StatementIndex int      // 第几条 statement (0-based)
+    Raw            string   // 原始字符串
+    Reason         string   // 中文错误描述
+}
+```
+
+**语法容错**：
+- 大小写：op 忽略大小写（lst / LST 都识别）；code 严格保持
+- 空格：`LST  DEVICE_INFO  :  lstId={...}` 容忍多空格
+- 顺序：MOD `Mcc=460,Encryption=1` 与 `Encryption=1,Mcc=460` 等效
+- 连续 ;;：跳过
+- 缺末尾 ;：补一个解析（前端友好）
+- 引号：值带空格用 `"v with space"` 双引号包裹（罕见但需支持）
+
+## N.5 ExecuteStatements 服务层 fanout
+
+**核心**：
+
+```go
+// ExecuteStatements 是 ExecuteCommand 的多语句版本。
+// 行为：
+//   1. 校验每条 statement 的 command_id 存在 + operation_type 合法
+//   2. 对 LST：从 sub_field_ids 查 tr069_paths（join mml_command_sub_fields + mml_params）
+//      → BuildTR069Params(GPV) → device_task.params
+//   3. 对 MOD：values map keys 查 sub_field（通过 mml_code）→ tr069_path
+//      → BuildTR069Params(SPV) → device_task.params
+//   4. 对 ADD：target_object 查 mml_commands.target_object → AddObject RPC + 紧跟 SPV
+//   5. 对 RMV：target_object + index → DeleteObject(target_object + "{i}") 通过 path 实例化
+//   6. Fanout: N device_sns × M statements → N×M device_tasks
+//      - 顺序敏感 → 用既有 sequencer (sequentialMode=true 多 statement 强制串行)
+//      - 单 statement + N device → fanouter 默认并发
+//
+// 返回 mml_task_id + statement_count + device_task_count
+func (s *Service) ExecuteStatements(ctx context.Context, req ExecuteStatementsRequest) (*MMLTask, error) {
+    // 校验
+    statementsMeta, err := s.loadStatementsWithMeta(ctx, req.Statements)
+    if err != nil { return nil, fmt.Errorf("load statements meta: %w", err) }
+    // 创建 mml_task 记录所有 statements
+    task, err := s.taskRepo.Create(ctx, &MMLTask{
+        DeviceSNs:    req.DeviceSNs,
+        Commands:     statementsToCommandsJSON(statementsMeta),  // 兼容老 commands 字段
+        TotalDevices: len(req.DeviceSNs) * len(req.Statements),
+        // ...
+    })
+    if err != nil { return nil, fmt.Errorf("create task: %w", err) }
+    // Fanout 走既有 fanouter — 仅 cmd_idx=0 入队，sequencer 链式入队后续
+    if err := s.fanouter.Fanout(ctx, task.ID, statementsMeta, sequentialMode); err != nil { ... }
+    return task, nil
+}
+```
+
+**单 statement 兼容**：handler 收到老 `ExecuteHTTPRequest` 形态（含 command_code + parameters）时，转 1 元素 statements 数组走同一路径。
+
+## N.6 TR-069 payload 构造
+
+`tr069_payload.go` 现有 `BuildTR069Params(method, paths)` 已支持 partial path 透明展开（T-0119 Sprint B-3）。P1 新加：
+
+```go
+// BuildStatementPayload 把单条 statement 翻为单条 device_task.params (JSONB)。
+func BuildStatementPayload(stmt StatementMeta) (json.RawMessage, string, error) {
+    switch stmt.OperationType {
+    case "LST":
+        // GPV partial path 展开复用 expandInstancePaths
+        paths := collectTr069Paths(stmt.SelectedSubFieldIDs, stmt.SubFields)
+        return BuildTR069Params(RPCGetParameterValues, paths)
+    case "MOD":
+        // SPV: { "ParameterList": [{"Name": tr069_path, "Value": v, "Type": value_type}, ...] }
+        pvs := buildParameterValueList(stmt.Values, stmt.SubFields)
+        return BuildTR069SetParams(pvs)
+    case "ADD":
+        // AddObject(target_object) + 后续 SPV 设字段值；分两个 device_task or 一个聚合 task
+        // 选择：合并为 1 device_task，params={"ObjectName": target_object, "SetParams": [...]}，
+        //       ACS handler 内部链式发 AddObject → SPV（既有 dispatcher 支持）
+        return BuildTR069AddObjectPayload(stmt.TargetObject, stmt.Values, stmt.SubFields)
+    case "RMV":
+        // DeleteObject(target_object 替换 {i} 为 RmvInstanceIndex)
+        path := injectInstanceIndex(stmt.TargetObject, *stmt.RmvInstanceIndex)
+        return BuildTR069DeleteObjectPayload(path)
+    }
+    return nil, "", fmt.Errorf("unsupported op: %s", stmt.OperationType)
+}
+```
+
+**RPC method 派生**：每 statement → RPC method（LST→GetParameterValues / MOD→SetParameterValues / ADD→AddObject / RMV→DeleteObject）；mml_commands.rpc_method 字段已有值（mmlstandardloader 写入），verify 一致性。
+
+## N.7 数据流图
+
+```
+HTTP POST /mml/execute
+  ↓
+console_handler.Execute(c *gin.Context)
+  - Bind ExecuteStatementsRequest
+  - validate device_sns / statements 非空
+  ↓
+console_service.ExecuteStatements(ctx, req)
+  - loadStatementsWithMeta: 按 command_id list 查 mml_commands + sub_fields (1 SQL JOIN)
+  - 校验每 statement 的 sub_field_ids/values 引用合法
+  - taskRepo.Create(mml_task)
+  ↓
+fanouter.Fanout(ctx, taskID, statementsMeta, sequentialMode)
+  - 多 statement → sequentialMode=true → 只 enqueue cmd_idx=0
+  - sequencer 链式：device_task 0 完成 → enqueue cmd_idx=1 → ...
+  ↓
+tr069_payload.BuildStatementPayload(stmt)  ← 每 enqueue 调用
+  - LST: GPV path 展开
+  - MOD: SPV param-value list
+  - ADD: AddObject + 紧跟 SPV
+  - RMV: DeleteObject path
+  ↓
+internal/task.CreateTask(...)
+  - device_tasks 表 + Redis Sorted Set
+  - source=mml, source_id=mml_task_id, cmd_idx=N, device_idx=M
+  ↓
+ACS PopTask → CWMP SOAP → 设备执行
+  ↓
+ACS MarkTaskCompleted → completion event
+  ↓
+sequencer.OnTaskCompleted → 链式入队下一 cmd
+  ↓
+result_aggregator.OnTaskCompleted → MML SSE frame 推 frontend
+```
+
+## N.8 观测埋点清单
+
+### N.8.1 Prometheus metrics（新增 4 个）
+
+| Metric | Type | Labels | 用途 |
+|--------|------|--------|------|
+| `omc_mml_console_request_total` | Counter | `endpoint, status` | 5 endpoint 请求计数 |
+| `omc_mml_render_duration_seconds` | Histogram | — | render 性能 |
+| `omc_mml_parse_duration_seconds` | Histogram | — | parse 性能（user textbox 防抖 300ms） |
+| `omc_mml_execute_statements_total` | Counter | `op_type, result` | statement 数 × op_type 分布 |
+
+### N.8.2 Zap log 关键字段
+
+- `op` = "mml_console_<verb>"（tree / sub_fields / render / parse / execute）
+- `actor` = username from JWT middleware
+- `request_id` from gin context
+- `task_id` (execute path)
+- `statement_count` / `device_count`（fanout 后）
+- `result` = success / failure (with error)
+
+### N.8.3 Event subjects（无新增）
+
+ExecuteStatements 复用既有 fanout / sequencer / result_aggregator 链路，事件主题不变。
+
+## N.9 测试矩阵
+
+| 测试类型 | 文件 | 覆盖 |
+|---------|------|------|
+| Unit — renderer | `mml_renderer_test.go` | 4 op × (空字段/单字段/多字段) + 12 testcase 含老 OMC 实测样例 `LST DEVICE_INFO:lstId={LTE_GSM_MODEL_NAME,LTE_GSM_SYS_TIME};` |
+| Unit — parser | `mml_parser_test.go` | 大小写容忍 / 空格容忍 / 缺末尾 ; / 未知 code 累加 unknown_codes / ParseError 不中断 / 双引号值 / Round-trip 自洽（parse(render(x)) == x） |
+| Unit — service | `console_service_test.go` | buildGroupTree LTREE 层级 / ExecuteStatements 单/多 statement / 校验 sub_field_id 非法 → 400 |
+| Unit — handler | `console_handler_test.go` | 5 endpoints × 4 状态码（200/400/404/500） |
+| Integration | `test/integration/mml_console_test.go` | 真 PG + tx rollback，validate sub_fields JOIN 性能 |
+| E2E | `scripts/e2e_verify.sh` console-1..5 | 5 endpoint curl 全覆盖 + 1 forbidden test = +6 claim |
+
+覆盖率门槛：
+- `mml_renderer.go` / `mml_parser.go` ≥ 85%（纯函数易测）
+- `console_handler.go` / `console_service.go` ≥ 75%
+
+## N.10 待定点
+
+| # | 待定点 | 处置方案 |
+|---|--------|---------|
+| W1 | ADD 操作的 AddObject + SPV 是分两个 device_task 还是合并为 1 个？ | **合并为 1 个**：ACS handler 内部链式发，避免 fanout 中间状态错误处理复杂。但 ACS handler 是否支持复合 RPC payload 需 audit `internal/acs/rpc/`。**S3 起手第一动作 audit**；如不支持则拆 2 个 device_task。 |
+| W2 | mml_string parse 时多 statement 间相同 command_code 但不同 op（如 `LST DEVICE_INFO; MOD DEVICE_INFO`）如何 lookup command_id？ | (op, command_code) 联合唯一 — `mml_commands` 表既有 UNIQUE(command_code) 约束但 P0 schema 后可能允许同 code 多 op（实际数据：LST_DEVICE_INFO / MOD_DEVICE_INFO 是不同 command_code）。**lookup 用 (op, logical_code) 联合查**：`SELECT * FROM mml_commands WHERE logical_code=$1 AND operation_type=$2`；命中 ≥ 2 行报歧义 ParseError。 |
+| W3 | parse 是否要支持子字符串约束（如 `MOD DEVICE_INFO:Mcc=460,Mnc=00,Encryption=1` 全部 fill 但 mml_command_sub_fields 仅定义 Mcc/Mnc 两个字段时如何处理）？ | **严格校验**：未知 mml_code 累加 `unknown_codes`，前端 toast 提示；执行时跳过 unknown_codes。**不在 parse 阶段拒绝**（用户体验：让用户看到 unknown_codes 后手动修正）。 |
+
+## N.11 S3 实施顺序（推荐）
+
+```
+D1 (4h):  mml_renderer.go + mml_renderer_test.go（纯函数，先写测试 RED → GREEN）
+D1 (4h):  mml_parser.go + mml_parser_test.go（同上）
+D2 (4h):  group_tree_repository.go + console_service.go buildGroupTree
+D2 (4h):  console_service.go GetCommandSubFields / RenderMML / ParseMML（透传）
+D3 (4h):  ExecuteStatements service 层 + tr069_payload.go statement 派发
+D3 (4h):  console_handler.go 5 endpoint + provider DI + router 注册 + 单测
+```
+
+S3 出口门复用 §B3：build / test 全绿 / 无新 TODO/FIXME / 无新 any（payload struct 严格类型）/ 无 carrier 硬编码。
+
+## N.12 与既有 Sprint B 能力的兼容性
+
+| Sprint B 能力 | P1 兼容方式 |
+|--------------|------------|
+| `Fanouter.SetSequentialMode(true)` | P1 多 statement 设 sequentialMode=true 强制串行；单 statement 维持并发 |
+| `Sequencer.OnTaskCompleted` | 链式入队 statement i+1 行（既有 cmd_idx 语义直接复用） |
+| `ResultAggregator` | per-device frame SSE 推送（T-0102-d 已就绪） |
+| `script_parser.go::ParseScriptContent` | 旧 script 单行 entry parser 保留；P1 加 ParseMMLString 平行通道，handler 检 content-type 路由 |
+| `ExecuteGroup` (`POST /mml/groups/:id/execute`) | 保留作为快捷批量入口（一键执行 group 下所有 LST），不与 P1 statements 入口冲突 |
+| `ExecuteCommand` 旧 (`POST /mml/execute`) | 升级为 ExecuteStatements 入口，老 payload (command_code + parameters) 转单元素 statements fallback |
+
+## N.13 S2 出口门核查
+
+- [✓] 接口契约明确（§N.2 5 endpoints 完整 request/response struct + §N.5 service 方法签名）
+- [✓] 迁移草案（N/A — P0 migration 000095 已落地，P1 无新 DDL）
+- [✓] Carrier 差异点（§0.5 已锁定无差异，本任务三家一致）
+- [✓] 观测埋点（§N.8 4 metric + 6 log 字段）
+- [✓] 待定点 < 3（§N.10 列 3 个）
+
+S2 PASS。
+
+---
