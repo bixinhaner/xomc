@@ -837,6 +837,66 @@ func (s *Service) ExecuteCommand(ctx context.Context, req ExecuteRequest) (*MMLT
 	return task, nil
 }
 
+// CreateAndFanoutTask 是 ConsoleService.ExecuteStatements 的桥接入口（T-0123-P1 S3-D2）。
+// 持久化 *MMLTask 并按 sequential 选择 fanouter 模式：
+//   - sequential=true → SetSequentialMode 仅入队 cmd_idx=0 device_task，
+//     Sequencer 在前一条完成后追加入队，实现多 statement 严格序列
+//   - sequential=false → 单 statement 默认并发扇出到 N 设备
+//
+// 与 ExecuteCommand 区别：调用方已编译完 commands[] entry，跳过 command_code 解析、
+// resolveRPCMethods 兜底、param_paths 合成等老入口的兼容逻辑——直接 Create + Fanout。
+func (s *Service) CreateAndFanoutTask(ctx context.Context, task *MMLTask, sequential bool) error {
+	if task == nil {
+		return fmt.Errorf("CreateAndFanoutTask: nil task")
+	}
+	if task.ExecuteType == "" {
+		task.ExecuteType = ExecuteImmediate
+	}
+	if task.Status == "" {
+		task.Status = TaskPending
+	}
+	if task.Results == nil {
+		task.Results = []map[string]interface{}{}
+	}
+	if task.TotalDevices == 0 {
+		task.TotalDevices = len(task.DeviceSNs)
+	}
+
+	if err := s.taskRepo.Create(ctx, task); err != nil {
+		return fmt.Errorf("create mml task: %w", err)
+	}
+
+	s.logger.Info("mml console task created",
+		zap.String("task_id", task.ID.String()),
+		zap.String("task_name", task.TaskName),
+		zap.Int("statement_count", len(task.Commands)),
+		zap.Int("device_count", len(task.DeviceSNs)),
+		zap.Bool("sequential", sequential),
+	)
+
+	s.writeAuditLogs(ctx, task)
+
+	if task.Status == TaskPending && task.ExecuteType == ExecuteImmediate && s.fanouter != nil {
+		prev := s.fanouter.sequentialMode
+		s.fanouter.SetSequentialMode(sequential)
+		created, err := s.fanouter.Fanout(ctx, task)
+		s.fanouter.SetSequentialMode(prev)
+		if err != nil {
+			s.logger.Error("fanout console task failed", zap.Error(err))
+		} else if created > 0 {
+			if err := s.taskRepo.UpdateStatus(ctx, task.ID, TaskRunning); err != nil {
+				s.logger.Error("update console task to running", zap.Error(err))
+			}
+			task.Status = TaskRunning
+		}
+	}
+
+	if s.hub != nil && task.Executor != "" {
+		s.publishTaskStatus(task.Executor, task.ID.String(), "", string(task.Status))
+	}
+	return nil
+}
+
 // fanoutClaimed 在 Scheduler 认领并把 status 改为 running 之后被调用，
 // 只负责写 device_tasks。不做状态机转换（认领阶段已完成）。
 // 失败时记 error 日志，不改回 pending——Scheduler 再次循环时会重试，且

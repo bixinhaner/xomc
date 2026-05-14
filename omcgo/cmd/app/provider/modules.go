@@ -392,6 +392,12 @@ func initMiscModules(c *Container) error {
 	)
 	c.miscDeps.mmlAdminHandler = mml.NewAdminHandler(mmlAdminService, mmlCmdRepo, logger)
 
+	// T-0123-P1：Console 5 端点（group-tree / sub-fields / render / parse / execute-statements）。
+	// 复用 T-0123-P0 的 SubFieldRepo + 既有 CommandRepo；新增 GroupTreeRepo（带 ltree JOIN 子树）。
+	mmlGroupTreeRepo := mml.NewPgGroupTreeRepository(c.PgPool)
+	mmlConsoleSvc := mml.NewConsoleService(mmlGroupTreeRepo, mmlSubFieldRepo, mmlCmdRepo, logger)
+	c.miscDeps.mmlConsoleHandler = mml.NewConsoleHandler(mmlConsoleSvc, mmlService, logger)
+
 	// Wire MML fan-out to device tasks. misc 模块在 router.go 声明 Depends=["task"]，
 	// 保证此处 c.miscDeps.taskSvc 一定已就绪。
 	if c.miscDeps.taskSvc != nil {
@@ -688,9 +694,10 @@ type miscDeps struct {
 	fileHandler *filemanager.Handler
 
 	// MML
-	mmlHandler      *mml.Handler
-	mmlService      *mml.Service
-	mmlAdminHandler *mml.AdminHandler // T-0123-P0 catalog 管理 13 端点
+	mmlHandler        *mml.Handler
+	mmlService        *mml.Service
+	mmlAdminHandler   *mml.AdminHandler   // T-0123-P0 catalog 管理 13 端点
+	mmlConsoleHandler *mml.ConsoleHandler // T-0123-P1 Console 5 端点（group-tree / sub-fields / render / parse / execute-statements）
 
 	// Param Library
 	paramHandler *mml.ParamHandler

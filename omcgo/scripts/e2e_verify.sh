@@ -5520,6 +5520,36 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     "$API/mml/commands/$W2D_BAD_UUID" -H "$W2D_AUTH")
 check_status_in "W2D mml-6: GET /mml/commands/<not-found>" "404 401" "$HTTP_CODE"
 
+# T-0123-P1：Console 5 端点契约层校验
+# 仅核 HTTP shape（200/4xx），happy-path 深度断言留待 standard-model 命令种子落地后补。
+claim "T-0123-P1 mml-console: GET /mml/group-tree returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/mml/group-tree" -H "$W2D_AUTH")
+check_status_in "T-0123-P1 mml-console-1: GET /mml/group-tree" "200 401" "$HTTP_CODE"
+
+claim "T-0123-P1 mml-console: GET /mml/commands/:id/sub-fields not-found returns 200/404/401 (空集 200 / 路由未挂 404)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/mml/commands/$W2D_BAD_UUID/sub-fields" -H "$W2D_AUTH")
+check_status_in "T-0123-P1 mml-console-2: GET /mml/commands/:id/sub-fields" "200 404 401" "$HTTP_CODE"
+
+claim "T-0123-P1 mml-console: POST /mml/render bad body returns 400/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    -X POST "$API/mml/render" -H "$W2D_AUTH" -H "Content-Type: application/json" \
+    -d '{"command_id":"not-a-uuid"}')
+check_status_in "T-0123-P1 mml-console-3: POST /mml/render bad body" "400 401" "$HTTP_CODE"
+
+claim "T-0123-P1 mml-console: POST /mml/parse with simple LST string returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    -X POST "$API/mml/parse" -H "$W2D_AUTH" -H "Content-Type: application/json" \
+    -d '{"mml_string":"LST UNKNOWN_CMD:lstId={X};","lang":"zh-CN"}')
+check_status_in "T-0123-P1 mml-console-4: POST /mml/parse" "200 401" "$HTTP_CODE"
+
+claim "T-0123-P1 mml-console: POST /mml/execute-statements empty statements returns 400/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    -X POST "$API/mml/execute-statements" -H "$W2D_AUTH" -H "Content-Type: application/json" \
+    -d '{"statements":[],"device_sns":["TEST00001"]}')
+check_status_in "T-0123-P1 mml-console-5: POST /mml/execute-statements empty body" "400 401" "$HTTP_CODE"
+
 # ------------------------------------------------------------
 section "W2.D.1 filemanager Domain (≥ 3 claims)"
 

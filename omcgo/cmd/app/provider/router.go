@@ -422,6 +422,10 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	if md.mmlAdminHandler != nil {
 		md.mmlAdminHandler.RegisterRoutes(permGroup("devices"))
 	}
+	// T-0123-P1：MML Console 5 端点（group-tree / sub-fields / render / parse / execute-statements）
+	if md.mmlConsoleHandler != nil {
+		md.mmlConsoleHandler.RegisterRoutes(permGroup("devices"))
+	}
 
 	// ----- SSE Stream endpoint (authenticated users, no permission check) -----
 	md.sseHandler.RegisterRoutes(v1)
