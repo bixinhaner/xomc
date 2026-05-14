@@ -379,6 +379,19 @@ func initMiscModules(c *Container) error {
 	c.miscDeps.mmlHandler = mml.NewHandler(mmlService, logger)
 	c.miscDeps.mmlService = mmlService
 
+	// T-0123-P0：catalog 管理 admin 13 端点（mml_admin api_group）。
+	// catalog_protected 守护 / sentinel error → HTTP 403/404/409 翻译。
+	mmlSubFieldRepo := mml.NewPgSubFieldRepository(c.PgPool)
+	mmlAdminGroupRepo := mml.NewPgAdminGroupRepository(c.PgPool)
+	mmlAdminCmdRepo := mml.NewPgAdminCommandRepository(c.PgPool)
+	mmlAdminParamRepo := mml.NewPgAdminParamRepository(c.PgPool)
+	mmlAdminService := mml.NewAdminService(
+		mmlAdminGroupRepo, mmlAdminCmdRepo, mmlSubFieldRepo, mmlAdminParamRepo,
+		nil, // AuditWriter — TODO: wire internal/admin/auditlog when admin module exposes interface
+		logger,
+	)
+	c.miscDeps.mmlAdminHandler = mml.NewAdminHandler(mmlAdminService, mmlCmdRepo, logger)
+
 	// Wire MML fan-out to device tasks. misc 模块在 router.go 声明 Depends=["task"]，
 	// 保证此处 c.miscDeps.taskSvc 一定已就绪。
 	if c.miscDeps.taskSvc != nil {
@@ -675,8 +688,9 @@ type miscDeps struct {
 	fileHandler *filemanager.Handler
 
 	// MML
-	mmlHandler *mml.Handler
-	mmlService *mml.Service
+	mmlHandler      *mml.Handler
+	mmlService      *mml.Service
+	mmlAdminHandler *mml.AdminHandler // T-0123-P0 catalog 管理 13 端点
 
 	// Param Library
 	paramHandler *mml.ParamHandler

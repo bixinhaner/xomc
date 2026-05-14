@@ -287,9 +287,15 @@ func upsertParams(ctx context.Context, tx pgx.Tx, params []ParamSpec) error {
 		return nil
 	}
 	// 一条一条 UPSERT — 1988 行可接受（~3-5s）；可改为 batch 后续优化。
+	//
+	// T-0123-P0 migration 000095：is_writable 是 GENERATED ALWAYS AS STORED 派生列，
+	// 不能直接 INSERT/UPDATE；改写 access_type，由 PG 自动派生 is_writable。
 	for _, p := range params {
 		valueType, constraint := mapValueType(p)
-		writable := p.IsWritable()
+		accessType := AccessReadOnly
+		if p.IsWritable() {
+			accessType = AccessReadWrite
+		}
 
 		// param_code = 末段（去 {i}）
 		segs := strings.Split(StripInstanceIndex(p.StandardPath), ".")
@@ -298,7 +304,7 @@ func upsertParams(ctx context.Context, tx pgx.Tx, params []ParamSpec) error {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO mml_params (
 				id, param_code, param_name_zh, param_name_en, tr069_path,
-				value_type, value_constraint, is_writable, is_leaf,
+				value_type, value_constraint, access_type, is_leaf,
 				param_version, name_i18n, explanation_i18n,
 				display_order, is_active
 			) VALUES (
@@ -311,12 +317,12 @@ func upsertParams(ctx context.Context, tx pgx.Tx, params []ParamSpec) error {
 			SET param_code    = EXCLUDED.param_code,
 			    value_type    = EXCLUDED.value_type,
 			    value_constraint = EXCLUDED.value_constraint,
-			    is_writable   = EXCLUDED.is_writable,
+			    access_type   = EXCLUDED.access_type,
 			    name_i18n     = EXCLUDED.name_i18n,
 			    is_active     = true,
 			    updated_at    = NOW()
 		`, paramCode, paramCode, p.StandardPath,
-			valueType, constraint, writable,
+			valueType, constraint, accessType,
 			VersionCode, nameI18nJSON(paramCode, paramCode))
 		if err != nil {
 			return fmt.Errorf("upsert param %s: %w", p.StandardPath, err)

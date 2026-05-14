@@ -47,15 +47,15 @@ func initDictLoadModule(c *Container) error {
 	indicatorLoader := indicator.NewLoader(c.PgPool, c.Cfg.DictLoader.Indicator, baseDir, logger)
 	alarmLoader := alarmdef.NewLoader(c.PgPool, c.Cfg.DictLoader.AlarmDefinition, baseDir, logger)
 	productLoader := product.NewLoader(c.PgPool, c.Cfg.DictLoader.Product, baseDir, logger)
-	// MML 标准模型 Loader — 复用 ParamModel 的 directory + standard_model_file 配置（同一 XML）。
-	// 数据消费目标不同：parammodel Loader 写 standard_params；mmlstandardloader 写 mml_params/groups/commands。
-	mmlLoader := mmlstandardloader.NewLoader(
-		c.PgPool, baseDir,
-		c.Cfg.DictLoader.ParamModel.Directory,
-		c.Cfg.DictLoader.ParamModel.StandardModelFile,
-		logger, c.MetricsReg)
+	// T-0123-P0：mmlstandardloader 启动期注册下线。
+	// 改为一次性 SQL seed 导入（migrations/seed/000096_mml_standard_params_import.sql，
+	// 由 `omcctl mml import-standard-xml` 离线生成）。
+	// 后续 catalog 通过 admin UI 增删改（migrations/000095 + admin_*.go）维护，DB 是单一权威源。
+	// 包 mmlstandardloader/ 整包保留作为 omcctl 工具的解析引擎，不再 ModuleGraph 注册。
+	// 关联：docs/design/mml-restore-old-interaction-plan-20260514.md §M.6 / R-206 mitigation
+	_ = mmlstandardloader.LoaderName // 显式引用防止 import 被 goimports 移除
 
-	for _, ld := range []dictloader.Loader{paramLoader, indicatorLoader, alarmLoader, productLoader, mmlLoader} {
+	for _, ld := range []dictloader.Loader{paramLoader, indicatorLoader, alarmLoader, productLoader} {
 		if err := registry.Register(ld); err != nil {
 			return fmt.Errorf("register %s loader: %w", ld.Name(), err)
 		}
@@ -107,23 +107,11 @@ func initDictLoadModule(c *Container) error {
 			zap.Error(err))
 		return err
 	})
-	g.Go(func() error {
-		t0 := time.Now()
-		rep, err := mmlLoader.LoadOnce(gctx)
-		logger.Info("mml-standard load done",
-			zap.Int("rows", rep.RowsAffected),
-			zap.Int("files_loaded", rep.FilesLoaded),
-			zap.Duration("duration", time.Since(t0)),
-			zap.Error(err))
-		// mml-standard 失败不阻塞启动（与既有 dictloader 一致 — 命令字典缺失仅影响 MML 控制台展示，不致命）
-		if err != nil {
-			logger.Warn("mml-standard loader failed; MML console may show empty command tree",
-				zap.Error(err))
-		}
-		return nil
-	})
+	// T-0123-P0：mml-standard 启动期 LoadOnce 下线。
+	// MML 命令字典通过 migrations/seed/000096_mml_standard_params_import.sql 一次性 DB 导入；
+	// 后续 admin UI 维护。详 docs/design/mml-restore-old-interaction-plan-20260514.md §M.6。
 	if err := g.Wait(); err != nil {
-		return fmt.Errorf("dictload phase 1 (4 dicts in parallel): %w", err)
+		return fmt.Errorf("dictload phase 1 (3 dicts in parallel): %w", err)
 	}
 
 	// Phase 2：products（依赖 Phase 1 结果做引用校验）

@@ -62,7 +62,12 @@ type MMLCommand struct {
 	OperationType   string            `json:"operation_type" db:"operation_type"`
 	HelpDoc         string            `json:"help_doc" db:"help_doc"`
 	Notes           string            `json:"notes" db:"notes"`
+
+	// TargetPaths：自 migration 000095 起语义降级为"派生缓存"，
+	// 由 mml_command_sub_fields trigger (trg_mml_sub_fields_target_paths) 自动维护；
+	// 仍可直接 SELECT，但 admin/import 写入 sub_fields 后自动重算，避免手动同步。
 	TargetPaths     []string          `json:"target_paths"`
+
 	TargetObject    string            `json:"target_object,omitempty"`
 	GroupID         *uuid.UUID        `json:"group_id,omitempty"`
 	CommandNameI18n map[string]string `json:"command_name_i18n"`
@@ -70,6 +75,20 @@ type MMLCommand struct {
 	ConfirmMsgI18n  map[string]string `json:"confirm_msg_i18n"`
 	CreatedAt       time.Time         `json:"created_at"`
 	Params          []MMLParamRef     `json:"params,omitempty"`
+
+	// T-0123-P0 catalog 元数据（migration 000095 新增）
+	// LogicalCode：去 op 前缀的逻辑命令码（"LST_DEVICE_INFO" → "DEVICE_INFO"）；
+	// 同 logical 不同 op 是命令树叶子同分支
+	LogicalCode      string            `json:"logical_code" db:"logical_code"`
+	// LogicalNameI18n：逻辑命令显示名（命令树叶子 label 前缀）
+	// 例：{"en-US":"Device info","zh-CN":"设备信息"} → 叶子 "Device info(LST DEVICE_INFO)"
+	LogicalNameI18n  map[string]string `json:"logical_name_i18n" db:"logical_name_i18n"`
+	Source           string            `json:"source" db:"source"`                       // standard / admin
+	CatalogProtected bool              `json:"catalog_protected" db:"catalog_protected"` // standard 行不可删除
+
+	// SubFields：T-0123-P0 命令 → sub-field 多对多关系
+	// 由 admin handler GET /sub-fields 端点加载；按 sort_order 排序；mml_command_sub_fields 表
+	SubFields []MMLCommandSubField `json:"sub_fields,omitempty"`
 }
 
 // ScriptStatus represents the current state of an MML script.
