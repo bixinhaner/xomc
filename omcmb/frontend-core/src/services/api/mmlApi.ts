@@ -307,6 +307,15 @@ function mapBackendResult(br: Record<string, unknown>): DeviceTaskResultItem {
 }
 
 function mapBackendTask(bt: BackendMMLTask): MMLTask {
+  // Sprint B-6：扫 commands 数组中 orphan=true 的条目，提取其 command_code
+  // 让 UI 给用户清晰提示"命令已下线"，否则 0 设备派发让人疑惑。
+  const orphanCommandCodes: string[] = [];
+  for (const c of bt.commands || []) {
+    if (c.orphan === true && typeof c.command_code === 'string') {
+      orphanCommandCodes.push(c.command_code as string);
+    }
+  }
+
   return {
     id: bt.id,
     taskName: bt.task_name,
@@ -318,6 +327,7 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
       if (typeof c.command_code === 'string') return c.command_code as string;
       return JSON.stringify(c);
     }),
+    orphanCommandCodes: orphanCommandCodes.length > 0 ? orphanCommandCodes : undefined,
     status: bt.status as MMLTask['status'],
     results: (bt.results || []).map(mapBackendResult),
     creator: bt.creator,
@@ -442,6 +452,40 @@ export const mmlApi = {
         : commandCodeOrPayload;
 
     const { data } = await http.post<BackendMMLTask>('/mml/execute', payload);
+    return mapBackendTask(data);
+  },
+
+  /**
+   * Sprint B-5：按组批量执行 mml_param_groups 下的全部命令。
+   * 后端会展开 group 下 N 条 mml_commands 为单 mml_task.commands[]，
+   * Fanouter 串行下发；operation_filter 可挑 ["LST"] / ["MOD"] 等。
+   */
+  async executeGroup(
+    groupId: string,
+    payload: {
+      deviceSns: string[];
+      parameters?: Record<string, unknown>;
+      taskName?: string;
+      operationFilter?: string[];
+      executeType?: string;
+      scheduledAt?: string;
+    }
+  ): Promise<MMLTask> {
+    const body: Record<string, unknown> = {
+      device_sns: payload.deviceSns,
+    };
+    if (payload.parameters) body.parameters = payload.parameters;
+    if (payload.taskName) body.task_name = payload.taskName;
+    if (payload.operationFilter && payload.operationFilter.length > 0) {
+      body.operation_filter = payload.operationFilter;
+    }
+    if (payload.executeType) body.execute_type = payload.executeType;
+    if (payload.scheduledAt) body.scheduled_at = payload.scheduledAt;
+
+    const { data } = await http.post<BackendMMLTask>(
+      `/mml/groups/${groupId}/execute`,
+      body
+    );
     return mapBackendTask(data);
   },
 

@@ -3878,6 +3878,16 @@ const messages: Record<string, string> = {
   'mml.console.confirmContinue':             '请确认是否继续执行此操作',
   'mml.console.deviceCount':                 '设备: {count}',
   'mml.console.deviceUnit':                  '{count} 台',
+  // Sprint B-5: Group execute button
+  'mml.console.executeGroup':                '执行整组',
+  'mml.console.executeGroupHint':            '一键执行该命令所在组下的全部命令（LST/MOD/ADD/RMV）',
+  'mml.console.executeGroupNoGroup':         '当前命令未绑定参数组，无法整组执行',
+  'mml.console.executeGroupNoDevice':        '请先选择目标设备',
+  'mml.console.executeGroupTaskName':        '组执行: {code} 同组',
+  'mml.console.executeGroupSubmitted':       '组任务已提交（{id}…），可在任务列表查看进度',
+  'mml.console.executeGroupFailed':          '组任务提交失败: {error}',
+  // Sprint B-6: Orphan command_code toast
+  'mml.console.orphanCommandWarning':        '命令 {code} 已下线（standard-model 重建后不存在），任务已提交但不会派发；请重新选择命令',
 
   // MML Console - Batch SN modal
   'mml.console.batchAddResult':              '批量添加结果',

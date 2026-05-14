@@ -187,6 +187,14 @@ export interface MMLTask {
   // parentTaskId: periodic 子实例指向模板；模板行为 null
   nextTriggerAt?: string;
   parentTaskId?: string;
+
+  /**
+   * Sprint B-6: standard-model 重建后老 mml_custom_command 引用的 command_code
+   * 在 mml_commands 表中已不存在；后端把这些孤儿码降级为 `orphan=true` 透传，
+   * task 仍创建成功但 Fanouter 会跳过下发。前端按此列表给用户 toast 提示
+   * "命令已下线"，避免任务列表显示"已提交但 0 设备成功"让人困惑。
+   */
+  orphanCommandCodes?: string[];
 }
 
 /**

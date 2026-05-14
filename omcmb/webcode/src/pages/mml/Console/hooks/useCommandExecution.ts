@@ -230,6 +230,19 @@ export function useCommandExecution() {
         timestamp: new Date().toLocaleTimeString(),
       });
 
+      // Sprint B-6: 后端把孤儿 command_code 降级为 orphan=true 透传，task 创建成功
+      // 但 Fanouter 跳过派发；前端在终端面板写一条警告并让 antd message 弹一个
+      // toast，避免用户看到"任务已提交但 0 设备成功"困惑。
+      if (task.orphanCommandCodes && task.orphanCommandCodes.length > 0) {
+        for (const orphanCode of task.orphanCommandCodes) {
+          addOutput({
+            type: 'stderr',
+            text: t('mml.console.orphanCommandWarning', { code: orphanCode }),
+            timestamp: new Date().toLocaleTimeString(),
+          });
+        }
+      }
+
       if (TERMINAL_STATES.has(task.status) && task.results && task.results.length > 0) {
         outputTaskResults(t, task, addOutput);
         addOutput({ type: 'info', text: '', timestamp: new Date().toLocaleTimeString() });

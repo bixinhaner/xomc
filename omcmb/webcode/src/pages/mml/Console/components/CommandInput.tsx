@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Button, Descriptions, Input, Modal, Space, Tabs, Typography } from 'antd';
-import { PlayCircleOutlined, ReloadOutlined, SaveOutlined, WarningOutlined } from '@ant-design/icons';
+import { AppstoreOutlined, PlayCircleOutlined, ReloadOutlined, SaveOutlined, WarningOutlined } from '@ant-design/icons';
 import type { ConsoleDevice } from '../types';
 import type { MMLCommand } from '@core/types/mml';
 import { useThemeToken } from '@/hooks/useThemeToken';
@@ -22,6 +22,8 @@ interface CommandInputProps {
   onCommandLineChange: (value: string) => void;
   onParamChange: (values: Record<string, unknown>) => void;
   onExecute: () => void;
+  /** Sprint B-5: 按选中命令所在 group 批量执行；selectedCommand?.groupId 为空时按钮 disabled */
+  onExecuteGroup?: () => void;
   onSaveScript?: () => void;
   onReset?: () => void;
   loading?: boolean;
@@ -39,6 +41,7 @@ export default function CommandInput({
   onCommandLineChange,
   onParamChange,
   onExecute,
+  onExecuteGroup,
   onSaveScript,
   onReset,
   loading,
@@ -304,6 +307,28 @@ export default function CommandInput({
               style={{ borderRadius: 4 }}
             >
               {executeButtonText}
+            </Button>
+          )}
+          {/* Sprint B-5：按命令所在 group 批量执行（LST + MOD + ADD + RMV 全部）。
+              selectedCommand?.groupId 为空（如纯参数路径模式、template 节点未匹配
+              group 等）时按钮 disabled。 */}
+          {onExecuteGroup && (
+            <Button
+              size="small"
+              icon={<AppstoreOutlined />}
+              onClick={onExecuteGroup}
+              disabled={!selectedCommand?.groupId || selectedDevices.length === 0}
+              loading={loading}
+              title={
+                !selectedCommand?.groupId
+                  ? t('mml.console.executeGroupNoGroup')
+                  : selectedDevices.length === 0
+                    ? t('mml.console.executeGroupNoDevice')
+                    : t('mml.console.executeGroupHint')
+              }
+              style={{ borderRadius: 4 }}
+            >
+              {t('mml.console.executeGroup')}
             </Button>
           )}
           {onReset && (

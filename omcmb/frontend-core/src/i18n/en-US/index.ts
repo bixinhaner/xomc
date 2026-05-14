@@ -3853,6 +3853,16 @@ const messages: Record<string, string> = {
   'mml.console.confirmContinue':             'Please confirm to continue this operation',
   'mml.console.deviceCount':                 'Devices: {count}',
   'mml.console.deviceUnit':                  '{count} device(s)',
+  // Sprint B-5: Group execute button
+  'mml.console.executeGroup':                'Execute Group',
+  'mml.console.executeGroupHint':            'Run all commands (LST/MOD/ADD/RMV) of the selected command\'s group',
+  'mml.console.executeGroupNoGroup':         'Selected command has no group binding',
+  'mml.console.executeGroupNoDevice':        'Please select target devices first',
+  'mml.console.executeGroupTaskName':        'Group exec: {code} cohort',
+  'mml.console.executeGroupSubmitted':       'Group task submitted ({id}…); track progress in task list',
+  'mml.console.executeGroupFailed':          'Group task submission failed: {error}',
+  // Sprint B-6: Orphan command_code toast
+  'mml.console.orphanCommandWarning':        'Command {code} has been retired (no longer in standard-model); task created but will not dispatch — please pick a current command',
 
   // MML Console - Batch SN modal
   'mml.console.batchAddResult':              'Batch Add Result',

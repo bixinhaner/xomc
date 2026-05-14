@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Card, message } from 'antd';
 import { useQueryClient } from '@tanstack/react-query';
+import { mmlApi } from '@core/services/api/mmlApi';
 import {
   DeviceTree,
   CommandTree,
@@ -237,6 +238,32 @@ export default function MMLConsole() {
     setBatchSnModalOpen(false);
   }, [deviceSelection]);
 
+  // Sprint B-5：按当前选中命令所在 group 批量执行（LST + MOD + ADD + RMV 全部）。
+  // 例如选了 LST_DEVICE_DEVICEINFO，点此按钮等价于一次性发起该 group 下所有 N 条
+  // mml_commands；后端 fanout + sequencer 串行下发，单 mml_task 聚合结果。
+  const handleExecuteGroup = useCallback(async () => {
+    const cmd = commandSelection.selectedCommand;
+    if (!cmd?.groupId) {
+      void message.warning(t('mml.console.executeGroupNoGroup'));
+      return;
+    }
+    if (deviceSelection.selectedDevices.length === 0) {
+      void message.warning(t('mml.console.executeGroupNoDevice'));
+      return;
+    }
+    try {
+      const task = await mmlApi.executeGroup(cmd.groupId, {
+        deviceSns: deviceSelection.selectedDevices.map((d) => d.sn),
+        taskName: t('mml.console.executeGroupTaskName', { code: cmd.commandCode }),
+      });
+      void message.success(t('mml.console.executeGroupSubmitted', { id: task.id.slice(0, 8) }));
+      void queryClient.invalidateQueries({ queryKey: ['mml', 'tasks'] });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      void message.error(t('mml.console.executeGroupFailed', { error: msg }));
+    }
+  }, [commandSelection.selectedCommand, deviceSelection.selectedDevices, queryClient, t]);
+
   const handleSaveScript = useCallback(() => {
     const cmd = commandSelection.selectedCommand;
     if (!cmd) {
@@ -380,6 +407,7 @@ export default function MMLConsole() {
               onActiveTabChange={setActiveTab}
               onCommandLineChange={handleCommandLineChange}
               onExecute={handleExecute}
+              onExecuteGroup={handleExecuteGroup}
               onParamChange={handleParamChange}
               onReset={handleReset}
               onSaveScript={handleSaveScript}
