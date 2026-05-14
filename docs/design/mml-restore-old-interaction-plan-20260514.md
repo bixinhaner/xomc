@@ -2119,3 +2119,143 @@ index.tsx 不再持有本地 statements/selectedFields/parameters/paramPaths/par
 S2 PASS。
 
 ---
+
+# 设计备忘（T-0123-P3 S2 设计定稿，2026-05-14）
+
+> P3 范围：在 `/mml/admin/catalog` 独立路由下落 4 Tab（Groups/Commands/Params/XML 导入）+ 元数据可视化 + i18n 行内编辑 + RBAC `mml.catalog.manage` 单点 + 写表后 `parammodel:cache_version` 失效跨实例缓存。
+> **依赖**：T-0123-P0 13 admin endpoints ✅；T-0123-P1 `/mml/group-tree` ✅（作 Tab 1/2 的 read 数据源复用）。
+> **工作量**：PRD §9 估 4d；单会话可推到 S2 完整 + S3 起步骨架；S3-S7 完整闭环建议跨 1-2 个会话。
+
+## Q.1 文件清单（S3 实施输出）
+
+| 操作 | 路径 | 用途 |
+|------|------|------|
+| 新建 | `omcmb/webcode/src/pages/mml/admin/catalog/index.tsx` | 4 Tab 顶层路由组件 |
+| 新建 | `omcmb/webcode/src/pages/mml/admin/catalog/GroupsTab.tsx` | Tab 1：Groups 树形增删改 |
+| 新建 | `omcmb/webcode/src/pages/mml/admin/catalog/CommandsTab.tsx` | Tab 2：Commands 列表 + sub-field 绑定面板 |
+| 新建 | `omcmb/webcode/src/pages/mml/admin/catalog/ParamsTab.tsx` | Tab 3：Params 字典 + 搜索 + "被哪些命令引用" 反向查 |
+| 新建 | `omcmb/webcode/src/pages/mml/admin/catalog/XmlImportTab.tsx` | Tab 4：XML 上传 + 预览 diff + 确认导入（后端 dry-run + apply 端点延 P3 末段） |
+| 新建 | `omcmb/webcode/src/pages/mml/admin/catalog/components/` | 共用子组件（I18nEditor / MetadataBadge / SubFieldBindingPanel 等） |
+| 新建 | `omcmb/frontend-core/src/services/api/mmlAdminApi.ts` | 13 endpoints 客户端封装 + camelCase ↔ snake_case |
+| 新建 | `omcmb/frontend-core/src/hooks/api/useMmlAdmin.ts` | React Query hooks（list/mutate × 4 资源）|
+| 新建 | `omcmb/frontend-core/src/types/mmlAdmin.ts` | Backend ↔ FE 类型对（GroupAdmin / CommandAdmin / SubFieldAdmin / ParamAdmin / I18n）|
+| 修改 | `omcmb/webcode/src/router/routes.tsx` | 加 `/mml/admin/catalog` 路由 + 权限守卫 `mml.catalog.manage` |
+| 修改 | `omcmb/frontend-core/src/i18n/{zh-CN,en-US}/index.ts` | 新增 admin.catalog.* keys（约 30-40 个 keys × 2 lang） |
+| 修改 | `omcmb/webcode/src/pages/mml/index.tsx` 或菜单 | 增加 "Catalog 管理" 入口（仅 admin 角色可见）|
+
+## Q.2 admin API 13 endpoints（T-0123-P0 已 ship）
+
+```
+POST   /admin/groups                                CreateGroup
+PATCH  /admin/groups/:id                            UpdateGroup
+DELETE /admin/groups/:id                            DeleteGroup
+POST   /admin/commands                              CreateCommand
+PATCH  /admin/commands/:id                          UpdateCommand
+DELETE /admin/commands/:id                          DeleteCommand
+POST   /admin/commands/:cid/sub-fields              CreateCommandSubField
+PATCH  /admin/commands/:cid/sub-fields/:sid         UpdateCommandSubField
+DELETE /admin/commands/:cid/sub-fields/:sid         DeleteCommandSubField
+GET    /admin/params                                ListParams (search/filter)
+POST   /admin/params                                CreateParam
+PATCH  /admin/params/:id                            UpdateParam
+DELETE /admin/params/:id                            DeleteParam
+```
+
+读端点复用 **P1 `/mml/group-tree`**（GroupsTab + CommandsTab 数据源）。
+
+## Q.3 4 Tab UI 设计要点
+
+### Tab 1: Groups (树形)
+- 数据源：`/mml/group-tree` (P1)，全树拉一次
+- 操作：右键菜单（新增子 group / 重命名 / 删除）+ 拖拽排序（react-dnd 或 antd Tree.draggable）
+- 行内 i18n 编辑：双击节点 → I18nEditor（zh-CN + en-US 两输入框 + "🟡 需翻译" badge）
+- catalog_protected=true 节点显示锁图标，禁用编辑/删除
+
+### Tab 2: Commands (列表 + 详情)
+- 数据源：`/mml/group-tree` 平铺 commands
+- 列表列：commandCode / logicalCode / operationType / displayName / groupPath / catalog_protected / 操作
+- 详情面板（右侧抽屉或选中行展开）：基本信息编辑 + sub-field 绑定面板
+- sub-field 绑定：拖拽排序 sortOrder + add/remove + 行内改 mml_code/label/access_type/change_applies/is_required/default_selected
+
+### Tab 3: Params 字典 (表格 + 搜索 + 反向查)
+- 数据源：`GET /admin/params`（支持 search/access_type/is_object 过滤）
+- 反向查"被哪些命令引用"：选中行 → 右侧抽屉显示该 paramId 的引用 commands 列表（**需新端点 `GET /admin/params/:id/references` — 后端建议 P3 后段补，本期前端先以"功能待上线"占位**）
+- 行内编辑元数据：access_type / is_object / supports_add / supports_delete / change_applies / catalog_protected
+
+### Tab 4: XML 导入预览 (上传 + diff + apply)
+- 上传 XML 文件 → POST 后端 `dry-run` 端点（**需新后端端点 `POST /admin/import/preview`** — 解析 XML 生成 diff，本期前端先以"功能待上线"占位）
+- 预览 diff：新增 / 修改 / 删除三栏
+- 确认导入：POST `apply` 端点（**需新后端端点 `POST /admin/import/apply`**）
+
+## Q.4 RBAC 集成
+
+- 单一权限点：`mml.catalog.manage`（PRD §12 决策 3 锁定）
+- 前端：路由守卫读 `useUserStore().permissions` 包含 `mml.catalog.manage` 才放行；无则跳 403 页
+- 后端：T-0123-P0 已在 13 endpoints 上做 RBAC 中间件（api_group='mml_admin' + role_api_permissions 表）
+- 菜单可见性：admin 用户菜单中显示 "Catalog 管理" 入口；非 admin 不显示
+
+## Q.5 cache_version 失效机制
+
+- 每次 admin POST/PATCH/DELETE 成功后，后端在 admin_service.go 已自动 `INCR parammodel:cache_version`（T-0123-P0 已 ship 触发器维护）
+- 前端：admin UI mutation 成功后 `queryClient.invalidateQueries({ queryKey: ['mml', 'console', 'group-tree'] })` + `['mml', 'admin', ...]`
+- 其他 ACS 实例：通过 Redis 监听 cache_version 失效本地缓存（基础设施已就绪）
+
+## Q.6 i18n keys 增量（zh-CN + en-US 同步）
+
+预估约 30-40 keys，分组：
+- `mml.admin.catalog.title` / `.tab.groups/commands/params/xmlImport`
+- `mml.admin.catalog.groups.*`（add/rename/delete/dragHint/locked）
+- `mml.admin.catalog.commands.*`（list 列名 + 详情字段 + subField 绑定面板）
+- `mml.admin.catalog.params.*`（搜索/过滤/反向查/元数据编辑）
+- `mml.admin.catalog.xmlImport.*`（上传/预览/确认/dry-run）
+- `mml.admin.catalog.common.*`（needsTranslation/lockedTooltip/saveSuccess/deleteConfirm）
+
+## Q.7 P3 不做项（边界澄清）
+
+1. **不在 P3 后端补 `GET /admin/params/:id/references` 反向查端点**（FE 先占位，P3 后段或 P4 接入）
+2. **不在 P3 后端补 `POST /admin/import/preview` + `apply` XML 导入端点**（FE Tab 4 先占位）
+3. **不做 Customized PrivateTemplate/PublicTemplate 管理**（属 P4 收尾）
+4. **不做 E2E spec 与 DoD 完整勾选**（属 P2-d）
+5. **不动 Console Tab**（P2-c 已落地，独立路由）
+6. **不接触 ACS / TR-069 层**（admin 写表后 cache_version 失效由基础设施处理）
+
+## Q.8 待定点
+
+1. **拖拽排序实现**：antd Tree 自带 draggable vs 引入 react-dnd？决策：用 antd Tree.draggable=true + onDrop 内部触发 admin PATCH，避免新依赖
+2. **i18n 行内编辑 UX**：双击节点弹 Popover vs 抽屉编辑？决策：双击 Popover（轻量符合"行内编辑"语义；批量编辑走抽屉但本期不做）
+3. **新后端端点是否在本任务范围**：~~参考标准化推荐在 P3 后段补~~ — 已锁定到 §Q.7 不做项 1+2，FE Tab 3/4 占位
+
+**待定点 = 2**（< 3 ✅）
+
+## Q.9 S2 出口门核查
+
+- [✓] 接口契约明确（§Q.2 13 endpoints 列表 + §Q.3 4 Tab UI 设计 + 占位策略）
+- [N/A] 迁移草案（无 DB 变更；P0 已 ship 全部 schema）
+- [✓] Carrier 差异点（§0.5 锁定三家一致）
+- [✓] 观测埋点（admin mutation 成功 → queryClient.invalidateQueries 失效；Prometheus 复用 axios 拦截器 telemetry）
+- [✓] 待定点 < 3（§Q.8 列 2 个）
+
+S2 PASS。
+
+## Q.10 S3 实施分批建议（本会话余量评估）
+
+**单会话能完整推完 P3 不现实**（实际 4d 工作量 + 4 Tab + 30-40 i18n keys + 路由 + 类型定义 + hooks）。建议分批：
+
+### 批次 A（本会话起步骨架）
+- 路由 `/mml/admin/catalog` 注册 + 权限守卫
+- 4 Tab 顶层 index.tsx 框架
+- mmlAdminApi.ts + types/mmlAdmin.ts + useMmlAdmin.ts 骨架（call 13 endpoints + types）
+- i18n 增量
+
+### 批次 B（下次会话）
+- Tab 1 Groups 完整（树形 + 增删改 + 拖拽）
+- Tab 2 Commands 完整（列表 + 详情 + sub-field 绑定）
+
+### 批次 C（下次会话或后续）
+- Tab 3 Params + 反向查占位
+- Tab 4 XML 导入占位
+- DoD 验收 + E2E spec
+
+**当前会话目标**：完成 §Q 设计备忘（本节）+ S1 backlog state writeback；S3 起步骨架若会话余量允许则继续，否则留下次会话 pick T-0123-P3 续推。
+
+---
