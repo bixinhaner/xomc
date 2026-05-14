@@ -29,6 +29,7 @@ func main() {
 		newAlarmCmd(),
 		newPMCmd(),
 		newSystemCmd(),
+		newMMLCmd(),
 	)
 
 	if err := rootCmd.Execute(); err != nil {
