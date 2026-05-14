@@ -109,6 +109,12 @@ func initAdminModule(c *Container) error {
 	authorizer.StartPeriodicRefresh(5 * time.Minute)
 	logger.Info("casbin RBAC engine initialized")
 
+	// P2-⑨ 长期未登录自动锁定（每天 03:30 跑）。policy.AutoLockUnusedEnabled=false
+	// 时 cron 仍跑但 RunOnce 立即返回；FE 改配置最多等下一天 03:30 生效。
+	inactiveLocker := admin.NewInactiveUserLocker(c.PgPool, securityPolicy, logger)
+	inactiveLocker.Start()
+	c.GS.Register("inactive-user-locker", 1, func(_ context.Context) error { inactiveLocker.Stop(); return nil })
+
 	// Set shared services
 	c.JWTService = jwtService
 	c.APIKeySvc = apiKeySvc

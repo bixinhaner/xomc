@@ -108,8 +108,12 @@ type TokenPair struct {
 	//   - PasswordExpiresInDays: 距密码过期还剩多少天 (>=0)；nil = 未启用过期 / 已过期已在 MustChange
 	//   FE 拿到 MustChangePassword=true 后强制跳改密页；
 	//   拿到 PasswordExpiresInDays<=promptBeforeDays 时弹"即将过期"toast。
-	MustChangePassword    bool  `json:"must_change_password,omitempty"`
-	PasswordExpiresInDays *int  `json:"password_expires_in_days,omitempty"`
+	MustChangePassword    bool `json:"must_change_password,omitempty"`
+	PasswordExpiresInDays *int `json:"password_expires_in_days,omitempty"`
+
+	// P2-⑪ 登录提示：sys_configs.security.enabledFlag=true 时附管理员配置的提示文案。
+	// FE 拿到非空 msg 时弹 Modal/Notification（用户首次见到后可关闭）。
+	LoginNotifyMsg string `json:"login_notify_msg,omitempty"`
 }
 
 // AuditLog records a user action for auditing purposes.

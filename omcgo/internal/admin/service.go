@@ -267,11 +267,23 @@ func (s *AdminService) Login(ctx context.Context, username, password string) (*T
 		s.logger.Warn("update last login", zap.Error(err))
 	}
 
-	// P1 ①+④ 密码策略派生字段，附在 Login 响应里让 FE 决定是否强制改密 / 弹提示。
-	// 单独抽 helper 让 Login 主流程保持线性可读。
+	// P1 ①+④ + P2-⑪ 把策略派生字段附在 Login 响应里让 FE 弹改密页 / 提示。
 	annotatePasswordPolicyState(ctx, user, s.policySnapshot(ctx), tokenPair)
+	annotateLoginNotice(s.policySnapshot(ctx), tokenPair)
 
 	return tokenPair, nil
+}
+
+// annotateLoginNotice 附"登录提示"文案（P2-⑪）。
+// FE 显示 Modal/Notification；msg 为空 → 静默；enabledFlag=false → 静默。
+func annotateLoginNotice(policy *securityPolicyValues, tp *TokenPair) {
+	if policy == nil || tp == nil || !policy.LoginNotifyEnabled {
+		return
+	}
+	if policy.LoginNotifyMsg == "" {
+		return
+	}
+	tp.LoginNotifyMsg = policy.LoginNotifyMsg
 }
 
 // annotatePasswordPolicyState 把"是否必须改密 / 离过期还剩几天"两个派生字段

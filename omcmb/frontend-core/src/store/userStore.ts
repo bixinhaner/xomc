@@ -14,6 +14,11 @@ export interface TokenPairResponse {
   refresh_token: string;
   expires_at: string;
   token_type?: string;
+  // P1 密码策略派生字段（仅 Login 响应；refresh 不带）
+  must_change_password?: boolean;
+  password_expires_in_days?: number;
+  // P2-⑪ 登录提示文案（管理员配置；空 / 未启用时不下发）
+  login_notify_msg?: string;
 }
 
 interface UserState {

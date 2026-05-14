@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { App, Form, Input, Button, Checkbox } from 'antd';
+import { App, Form, Input, Button, Checkbox, Modal } from 'antd';
 import { UserOutlined, LockOutlined } from '@ant-design/icons';
 import { useUserStore } from '@core/store/userStore';
 import { useT } from '@/hooks/useT';
 import { useMock } from '@core/services/apiSwitch';
 import { authApi } from '@core/services/api/authApi';
+import { usePublicSecuritySettings } from '@core/hooks/api/useSecuritySettings';
 import type { User } from '@core/types/system';
 import type { AxiosError } from 'axios';
 import styles from './Login.module.css';
@@ -47,6 +48,13 @@ export default function LoginPage() {
   const { login, setTokenPair } = useUserStore();
 
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/dashboard';
+
+  // P2-⑧ 浏览器记密：拉公开 security 配置，按 isBrowserAutoRecordPass=true 切
+  // autocomplete 属性。注意：现代浏览器（Chrome）会忽略 autocomplete=off，
+  // 此为 best-effort —— 严格合规仍需依赖客户端策略。
+  const { settings: publicSettings } = usePublicSecuritySettings();
+  const usernameAutocomplete = publicSettings?.preventBrowserAutofill ? 'off' : 'username';
+  const passwordAutocomplete = publicSettings?.preventBrowserAutofill ? 'new-password' : 'current-password';
 
   // 页面加载时填充记住的凭据
   useEffect(() => {
@@ -102,6 +110,32 @@ export default function LoginPage() {
     // Step 2: Fetch current user info
     const user = await authApi.getMe();
     login(user);
+
+    // P2-⑪ 登录提示：后端响应附 login_notify_msg → 弹 Modal（用户确认后才进首页）
+    if (tokenPair.login_notify_msg) {
+      Modal.info({
+        title: t('login.notifyTitle'),
+        content: tokenPair.login_notify_msg,
+        okText: t('common.confirm'),
+        onOk: () => navigate(from, { replace: true }),
+      });
+      message.success(t('login.success'));
+      return;
+    }
+
+    // P1-④ 密码即将过期 — 仅提示不阻塞
+    if (typeof tokenPair.password_expires_in_days === 'number') {
+      message.warning(
+        t('login.passwordExpiringSoon', { days: tokenPair.password_expires_in_days }),
+        6,
+      );
+    }
+    // P1-①/④ 必须改密 — 后端已置位 must_change_password=true 时，跳到改密页
+    if (tokenPair.must_change_password) {
+      message.warning(t('login.mustChangePassword'));
+      navigate('/change-password?force=1', { replace: true });
+      return;
+    }
 
     message.success(t('login.success'));
     navigate(from, { replace: true });
@@ -171,7 +205,7 @@ export default function LoginPage() {
               <Input
                 prefix={<UserOutlined style={{ color: 'var(--login-input-icon)' }} />}
                 placeholder={t('login.usernameTip')}
-                autoComplete="username"
+                autoComplete={usernameAutocomplete}
               />
             </Form.Item>
 
@@ -182,7 +216,7 @@ export default function LoginPage() {
               <Input.Password
                 prefix={<LockOutlined style={{ color: 'var(--login-input-icon)' }} />}
                 placeholder={t('login.passwordTip')}
-                autoComplete="current-password"
+                autoComplete={passwordAutocomplete}
               />
             </Form.Item>
 

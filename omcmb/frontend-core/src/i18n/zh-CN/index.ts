@@ -1070,6 +1070,10 @@ const messages: Record<string, string> = {
   'login.passwordTip':   '请输入密码',
   'login.success':       '登录成功',
   'login.failed':        '用户名或密码错误',
+  // P1+P2 安全策略相关
+  'login.notifyTitle':           '系统通知',
+  'login.mustChangePassword':    '请先修改密码后再使用系统',
+  'login.passwordExpiringSoon':  '您的密码将在 {days} 天后过期，请尽快修改',
 
   // -------------------------------------------------------------------------
   // Task panel
@@ -4243,6 +4247,21 @@ const messages: Record<string, string> = {
   'backup.restore.completedAt':                '完成时间',
   'backup.restore.createdBy':                  '操作人',
   'backup.restore.pathTraversal':              '路径包含 ".." 或绝对路径，被禁止',
+
+  // -------------------------------------------------------------------------
+  // T-0123-P2-a MML Console（业务层最小骨架，UI 文本待 P2-b 组件层增补）
+  // -------------------------------------------------------------------------
+  'mml.console.parseError.unknownCommand':     '未识别命令：{logicalCode}',
+  'mml.console.parseError.syntax':             'MML 语法错（第 {index} 段）：{reason}',
+  'mml.console.parseError.unknownSubField':    '未识别的 sub-field：{mmlCode}',
+  'mml.console.execute.success':               '执行任务已创建（task_id: {taskId}）',
+  'mml.console.execute.partial':               '部分设备执行失败：{failed}/{total}',
+  'mml.console.execute.failed':                '执行失败：{message}',
+  'mml.console.execute.noDevices':             '请选择至少一台设备',
+  'mml.console.execute.noStatements':          '请至少添加一条命令',
+  'mml.console.subField.onReboot':             '需重启生效',
+  'mml.console.subField.readOnly':             '只读',
+  'mml.console.subField.required':             '必填',
 };
 
 export default messages;

@@ -1064,6 +1064,10 @@ const messages: Record<string, string> = {
   'login.passwordTip':   'Please enter password',
   'login.success':       'Login successful',
   'login.failed':        'Invalid username or password',
+  // P1+P2 security policy
+  'login.notifyTitle':          'System Notice',
+  'login.mustChangePassword':   'Please change your password before continuing',
+  'login.passwordExpiringSoon': 'Your password will expire in {days} day(s); please update it soon',
 
   // -------------------------------------------------------------------------
   // Task panel
@@ -4218,6 +4222,21 @@ const messages: Record<string, string> = {
   'backup.restore.completedAt':                'Completed At',
   'backup.restore.createdBy':                  'Operator',
   'backup.restore.pathTraversal':              'Path contains ".." or absolute path; forbidden',
+
+  // -------------------------------------------------------------------------
+  // T-0123-P2-a MML Console (business layer skeleton; UI text added in P2-b)
+  // -------------------------------------------------------------------------
+  'mml.console.parseError.unknownCommand':     'Unknown command: {logicalCode}',
+  'mml.console.parseError.syntax':             'MML syntax error (statement #{index}): {reason}',
+  'mml.console.parseError.unknownSubField':    'Unknown sub-field: {mmlCode}',
+  'mml.console.execute.success':               'Execution task created (task_id: {taskId})',
+  'mml.console.execute.partial':               'Partial failure: {failed}/{total} devices failed',
+  'mml.console.execute.failed':                'Execution failed: {message}',
+  'mml.console.execute.noDevices':             'Please select at least one device',
+  'mml.console.execute.noStatements':          'Please add at least one command',
+  'mml.console.subField.onReboot':             'Requires reboot',
+  'mml.console.subField.readOnly':             'Read-only',
+  'mml.console.subField.required':             'Required',
 };
 
 export default messages;

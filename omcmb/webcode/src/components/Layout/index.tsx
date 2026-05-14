@@ -1,6 +1,8 @@
 import { useEffect, useCallback } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { useAppStore } from '@core/store/appStore';
+import { useSecuritySettings } from '@core/hooks/api/useSecuritySettings';
+import { useIdleLogout } from '@core/hooks/useIdleLogout';
 import { SIDEBAR_WIDTH, SIDEBAR_COLLAPSED_WIDTH } from '@/theme/tokens';
 import { useResponsive } from '@/hooks/useResponsive';
 import { useIsTouchDevice } from '@/hooks/useIsTouchDevice';
@@ -23,6 +25,12 @@ export default function AppShell() {
   const { isMobile, isTablet } = useResponsive();
   const { isTouchPrimary } = useIsTouchDevice();
   const _location = useLocation();
+
+  // P2-⑦ 屏幕锁定：监听 sys_configs.security.userSessionExpirationMin。
+  // 0 = 禁用；非 0 表示 N 分钟无操作后强制登出。AppShell 仅在登录态渲染，
+  // 因此 hook 在此挂载是正确时机（LoginPage 上不会跑）。
+  const { settings: securitySettings } = useSecuritySettings();
+  useIdleLogout(securitySettings?.idleLockMinutes ?? 0);
 
   // 隐藏任务面板
   const hideTaskPanel = true;
