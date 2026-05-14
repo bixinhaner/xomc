@@ -13,7 +13,7 @@ export interface ParamPathChangePayload {
   paramValues: string[];
 }
 
-interface ParamPathPanelProps {
+interface ParamPathExpertProps {
   command: MMLCommand | null;
   onChange?: (payload: ParamPathChangePayload) => void;
 }
@@ -46,7 +46,7 @@ interface PathRow {
 let rowIdSeq = 1;
 const newRow = (path = '', value = ''): PathRow => ({ id: rowIdSeq++, path, value });
 
-export default function ParamPathPanel({ command, onChange }: ParamPathPanelProps) {
+export default function ParamPathExpert({ command, onChange }: ParamPathExpertProps) {
   const t = useT();
   const defaultOperation = useMemo(() => resolveOperationType(command), [command]);
 
