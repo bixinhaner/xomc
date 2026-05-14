@@ -454,6 +454,17 @@
 - **等级**：P2（功能扩展）
 - **Owner**：电信业务专家 + 数据与存储专家
 
+### R-206 MML 老交互被 Sprint A 数据模型重构破坏
+- **描述**：T-0119 Sprint A `mml_schema_rebuild` (migration 000090) DROP `mml_command_params_rel` junction 表，命令→sub-field 关系仅剩 `target_paths JSONB` 数组，丢了 (mml_code, label_i18n, default_selected, is_required, sort_order) 等 UI 核心元数据；前端 ParamPathPanel/ParamFormRenderer 不是老系统勾选/输入双态面板。结果：老 OMC `Maintenance > MML List > BSC Configuration` 三栏交互（LST 勾选式 + MOD 输入式 + MML textbox 双向绑定 + 分号串联批量）回归
+- **等级**：P1（用户体验下降；不阻塞 RC 但阻塞 GA 体验）
+- **概率**：高（已发生）
+- **影响**：MML 控制台仍可点击，但 sub-field 勾选/输入完全丢失；用户切回老 OMC 系统使用 MML
+- **关联 Task**：**T-0123**（整改 umbrella，5 sub-task P0-P4 共 18d；不回退 Sprint A/B）+ T-0119 ✅ (起因 commit `65142e22`+`5ec3a2d1`+`8d1733bd`)
+- **Mitigation**：v2 PRD APPROVED `docs/design/mml-restore-old-interaction-plan-20260514.md`。① 复活 `mml_command_sub_fields` 表（替代 DROP 的 `mml_command_params_rel`）+ 扩展 mml_params 7 列元数据（access_type/is_object/supports_add/supports_delete/change_applies/constraint_text_i18n/catalog_protected）+ 扩展 mml_commands 4 列（logical_code/logical_name_i18n/source/catalog_protected）；② 一次性 SQL 导入 standard-model.xml → DB，启动期 mmlstandardloader 下线；③ admin Catalog UI 4 Tab 管理；④ 前端重构 SubFieldChecklist + SubFieldInputList + MmlEditor 双向绑定。**5 阶段拆分**：P0 数据层 (3d) → P1 后端 (3d) → P2 前端 Console (4d) → P3 admin Catalog UI (4d) → P4 收尾 ADD/RMV+Customized+DoD (4d)
+- **状态**：Open（2026-05-14 登记；T-0123-P0 已升 planned 进 sprint-11）
+- **Owner**：Claude
+- **下次复盘**：sprint-11 close 2026-06-08
+
 ---
 
 ## 关闭的风险

@@ -68,8 +68,9 @@
 | 4 | T-0090-d | FE 私有命令页（复用公有页面组件 + 切换私有/公有 tab） | Claude | S (~0.5d) | T-0090 主线 / R-NEW-4 | P2 | **done 2026-05-12（pull-forward sprint-10 buffer 单晚；commit `396cb76d`；T-0090 umbrella 4/4 全闭）** |
 | **5** | **T-0101-d** | **状态机集成（pending → approved/rejected → running/cancelled）** ← sprint-11 draft 原误描述为 "步骤路由"（实为 T-0101-b） | Claude | S | F06 ops 4 眼审批闭环 / R-O01 mitigation | P0 | **done 2026-05-12（pull-forward sprint-10 buffer；commit `1743e8d1`；ApprovalService.Approve 删 TODO 兑现；详 `backlog/done/2026Q2.md`）** |
 | **6** | **T-0102-a** | **`/ops/commands/rpc` 实 RPC 派发到 acs**（替换 stub 占位） | Claude | M (~2d) | F06 ops P-1 通路 / unlock GWT V1 | P1 | planned |
+| **7** | **T-0123-P0** | **MML 老交互恢复 — 数据层**：migration 000095 (mml_command_sub_fields 新表 + mml_params/commands/groups 元数据列 13 列) + `omcctl mml import-standard-xml` 工具 + seed/000NNN_mml_standard_import.sql 一次性导入 standard-model.xml ~2001 条 + 启动期 mmlstandardloader 下线 + admin CRUD API 骨架 (groups/commands/sub-fields/params 13 端点) | Claude | M (~3d) | T-0123 MML 老交互恢复 umbrella / R-206 Open / unlock T-0123-P1..P4 | P1 | **planned (2026-05-14 dev-pipeline pick S1 入选)** |
 
-**容量小计**：~8-10 工作日 / 11 可用工作日（buffer 20%，含 1 工作日 buffer）
+**容量小计**：~11-13 工作日 / 11 可用工作日（**T-0123-P0 加入后 stretch 余量耗尽**；T-0102-a + T-0123-P0 = 5d 主线，T-0090 全 done 不占容量；总主线 5-7d；其余 stretch 候选区如 T-0103-c/T-0113 视 sprint-11 D5 进度再决定加塞）
 
 **工作量规则**：
 - T-0090 a/b/c/d 4 sub-task 估算合计 ~4-6d
@@ -121,8 +122,10 @@ T-0113 强调：**纯文档/纪要清账**，无代码改动，可在 sprint 任
 **2026-06-03 周二**：T-0101-d D2 收尾
 **2026-06-04 周三**：T-0102-a 实施 D1
 **2026-06-05 周四**：T-0102-a D2 收尾 + GWT V1 实测
-**2026-06-06 周五**：Stretch（T-0113 / T-0103-c）或 buffer / sprint 回顾准备
-**2026-06-08 周一**：sprint-11 close + sprint-12 plan（F06 ops P-1 通路收尾 + T-0103 前端 UI 整组）
+**2026-06-06 周五**：T-0123-P0 D1 — migration 000095 + admin API 骨架；Stretch（T-0113 / T-0103-c）穿插
+**2026-06-08 周一**：T-0123-P0 D2 — `omcctl mml import-standard-xml` 工具 + seed import + 启动 loader 下线；sprint-11 close + sprint-12 plan（F06 ops P-1 通路收尾 + T-0103 前端 UI 整组 + **T-0123-P1/P2 排入 sprint-12 主线**）
+
+> **2026-05-14 实际推进备忘**：T-0123-P0 由 `/dev-pipeline pick T-0123-P0` 提前进 S1，正式 sprint 窗口前（2026-05-26 之前）若 sprint-10 buffer 富余可 pull-forward；否则按上述 D11-D12 时间槽执行。
 
 ---
 
