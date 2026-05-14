@@ -45,6 +45,25 @@ func (b *rcvMockEventBus) QueueSubscribe(subject, queue string, handler event.Ev
 }
 func (b *rcvMockEventBus) Close() error { return nil }
 
+type rcvMockDeviceReader struct {
+	deviceByID map[uuid.UUID]*model.Device
+	deviceBySN map[string]*model.Device
+}
+
+func (r *rcvMockDeviceReader) GetByID(_ context.Context, id uuid.UUID) (*model.Device, error) {
+	if r.deviceByID == nil {
+		return nil, nil
+	}
+	return r.deviceByID[id], nil
+	}
+
+func (r *rcvMockDeviceReader) GetBySerialNumber(_ context.Context, sn string) (*model.Device, error) {
+	if r.deviceBySN == nil {
+		return nil, nil
+	}
+	return r.deviceBySN[sn], nil
+}
+
 func makeRcvEvent(t *testing.T, payload interface{}) event.Event {
 	t.Helper()
 	data, err := json.Marshal(payload)
@@ -143,4 +162,40 @@ func TestHandleAlarmEvent_InvalidDeviceID(t *testing.T) {
 	err := receiver.handleAlarmEvent(context.Background(), evt)
 	require.Error(t, err)
 	assert.Len(t, store.active, 0)
+}
+
+func TestHandleAlarmEvent_BackfillsTechnologyFromDevice(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	deviceID := uuid.New()
+	receiver := NewAlarmReceiver(engine, nil, zap.NewNop()).WithDeviceReader(&rcvMockDeviceReader{
+		deviceByID: map[uuid.UUID]*model.Device{
+			deviceID: {
+				ID:         deviceID,
+				SerialNumber: "SN-RCV-003",
+				Technology: model.TechNR,
+			},
+		},
+	})
+
+	payload := AlarmPayload{
+		DeviceID:        deviceID.String(),
+		DeviceSN:        "SN-RCV-003",
+		Carrier:         "cmcc",
+		AlarmIdentifier: "ALM_TEST_03",
+		AlarmType:       "equipment",
+		Description:     "alarm without technology payload",
+		Severity:        2,
+		RaisedAt:        time.Now(),
+	}
+
+	evt := makeRcvEvent(t, payload)
+	err := receiver.handleAlarmEvent(context.Background(), evt)
+	require.NoError(t, err)
+
+	require.Len(t, store.active, 1)
+	for _, alarm := range store.active {
+		require.NotNil(t, alarm.Technology)
+		assert.Equal(t, string(model.TechNR), *alarm.Technology)
+	}
 }

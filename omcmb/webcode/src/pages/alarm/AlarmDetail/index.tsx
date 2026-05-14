@@ -11,6 +11,7 @@ import {
 } from '@ant-design/icons';
 import type { Alarm, DealState, EventType } from '@core/types/alarm';
 import { useT } from '@/hooks/useT';
+import { formatBaseStationTypeLabel } from '../utils/baseStationType';
 
 const { Text, Paragraph } = Typography;
 
@@ -156,8 +157,8 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
           </Text>
           <Descriptions column={1} size="small" bordered>
             {/* 9. 告警源 */}
-            <Descriptions.Item label={t('alarm.neType')}>
-              {alarm.neType}
+            <Descriptions.Item label={t('alarm.neTypeCol')}>
+              {formatBaseStationTypeLabel(alarm.neType)}
             </Descriptions.Item>
             {/* 10. 网元定位 */}
             <Descriptions.Item label={t('alarm.equipInfo')}>

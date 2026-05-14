@@ -105,6 +105,40 @@ func TestHandler_ListActive_InvalidDeviceID(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestHandler_ListActive_WithTimeFilter(t *testing.T) {
+	_, store, _, router := setupHandlerTest()
+
+	start := time.Now().Add(-24 * time.Hour).UTC().Truncate(time.Second)
+	end := time.Now().UTC().Truncate(time.Second)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(
+		http.MethodGet,
+		fmt.Sprintf("/alarms/active?start_time=%s&end_time=%s", start.Format(time.RFC3339), end.Format(time.RFC3339)),
+		nil,
+	)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	if assert.NotNil(t, store.lastActiveFilter.StartTime) {
+		assert.True(t, store.lastActiveFilter.StartTime.Equal(start))
+	}
+	if assert.NotNil(t, store.lastActiveFilter.EndTime) {
+		assert.True(t, store.lastActiveFilter.EndTime.Equal(end))
+	}
+}
+
+func TestHandler_ListActive_WithNeTypeFilter(t *testing.T) {
+	_, store, _, router := setupHandlerTest()
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/alarms/active?ne_type=gNB", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, []string{"gNB"}, store.lastActiveFilter.Technologies)
+}
+
 // ---------- ListHistory ----------
 
 func TestHandler_ListHistory_OK(t *testing.T) {

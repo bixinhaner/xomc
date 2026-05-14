@@ -361,6 +361,18 @@ function buildAlarmQuery(
     const eventType = Array.isArray(filter.eventType) ? filter.eventType[0] : filter.eventType;
     if (eventType) query.event_type = eventType;
   }
+  if (filter.dealState) {
+    const dealState = Array.isArray(filter.dealState) ? filter.dealState[0] : filter.dealState;
+    if (dealState === '0') {
+      query.status = 'active';
+    } else if (dealState === '1') {
+      query.status = 'acknowledged';
+    }
+  }
+  if (filter.unread !== undefined && filter.unread !== '') {
+    query.is_read = filter.unread === '0' ? 'true' : 'false';
+  }
+  if (filter.neType) query.ne_type = filter.neType;
   if (filter.deviceSn) query.device_sn = filter.deviceSn;
   if (filter.timeRange) {
     query.start_time = filter.timeRange[0];

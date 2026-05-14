@@ -14,6 +14,7 @@ import { DownOutlined, SearchOutlined, UpOutlined } from '@ant-design/icons';
 import styles from './FilterBar.module.css';
 
 const { RangePicker } = DatePicker;
+type FormFieldValues = Record<string, {} | undefined>;
 
 export interface FilterField {
   name: string;
@@ -74,6 +75,38 @@ function hydrateFormValues(
   return hydratedValues;
 }
 
+function serializeFormValues(
+  values: Record<string, unknown>,
+  fields: FilterField[]
+): Record<string, unknown> {
+  const serializedValues = { ...values };
+
+  fields.forEach((field) => {
+    if (field.type !== 'date-range') {
+      return;
+    }
+
+    const rawValue = serializedValues[field.name];
+    if (!Array.isArray(rawValue)) {
+      return;
+    }
+
+    serializedValues[field.name] = rawValue.map((item) => {
+      if (item == null) {
+        return item;
+      }
+
+      if (dayjs.isDayjs(item)) {
+        return item.toISOString();
+      }
+
+      return item;
+    });
+  });
+
+  return serializedValues;
+}
+
 const FilterBar: React.FC<FilterBarProps> = ({
   filterId,
   fields,
@@ -102,7 +135,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
           const stored = sessionStorage.getItem(storageKey);
           if (stored) {
             const parsed = JSON.parse(stored) as Record<string, unknown>;
-            form.setFieldsValue(hydrateFormValues(parsed, fields));
+            form.setFieldsValue(hydrateFormValues(parsed, fields) as FormFieldValues);
             initializedRef.current = true;
             return;
           }
@@ -121,7 +154,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
         form.setFieldsValue(resetValues);
       } else {
         // 非空 initialValues，直接设置
-        form.setFieldsValue(hydrateFormValues(initialValues, fields));
+        form.setFieldsValue(hydrateFormValues(initialValues, fields) as FormFieldValues);
       }
       initializedRef.current = true;
       return;
@@ -131,7 +164,7 @@ const FilterBar: React.FC<FilterBarProps> = ({
       const stored = sessionStorage.getItem(storageKey);
       if (stored) {
         const parsed = JSON.parse(stored) as Record<string, unknown>;
-        form.setFieldsValue(hydrateFormValues(parsed, fields));
+        form.setFieldsValue(hydrateFormValues(parsed, fields) as FormFieldValues);
       }
     } catch {
       // ignore
@@ -140,14 +173,17 @@ const FilterBar: React.FC<FilterBarProps> = ({
   }, [form, storageKey, initialValues, fields]);
 
   const handleSearch = useCallback(() => {
-    const values = form.getFieldsValue() as Record<string, unknown>;
+    const values = serializeFormValues(
+      form.getFieldsValue() as Record<string, unknown>,
+      fields
+    );
     try {
       sessionStorage.setItem(storageKey, JSON.stringify(values));
     } catch {
       // ignore
     }
     onSearch(values);
-  }, [form, onSearch, storageKey]);
+  }, [fields, form, onSearch, storageKey]);
 
   const handleReset = useCallback(() => {
     form.resetFields();

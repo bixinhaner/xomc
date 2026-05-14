@@ -49,3 +49,41 @@ func TestNormalizedEventTypeExprIncludesAliases(t *testing.T) {
 	assert.Contains(t, sql, "LOWER(COALESCE(event_type, ''))")
 	assert.Equal(t, []interface{}{"30003", "device", "equipment", "devicealarm", "equipmentalarm"}, args)
 }
+
+func TestNormalizedTechnologyAliases(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{
+			name:     "enb option maps to lte bucket",
+			input:    "eNB",
+			expected: []string{"enb", "lte", "enodeb"},
+		},
+		{
+			name:     "lte raw value maps to same bucket",
+			input:    "lte",
+			expected: []string{"enb", "lte", "enodeb"},
+		},
+		{
+			name:     "gnb option maps to nr bucket",
+			input:    "gNB",
+			expected: []string{"gnb", "nr", "5gnr", "gnodeb"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, normalizedTechnologyAliases(tt.input))
+		})
+	}
+}
+
+func TestNormalizedTechnologyExprIncludesAliases(t *testing.T) {
+	sqlizer := normalizedTechnologyExpr("technology", []string{"eNB"})
+	sql, args, err := sqlizer.ToSql()
+	require.NoError(t, err)
+	assert.Contains(t, sql, "LOWER(COALESCE(technology, ''))")
+	assert.Equal(t, []interface{}{"enb", "lte", "enodeb"}, args)
+}

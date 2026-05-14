@@ -44,9 +44,15 @@ type AlarmReceiver struct {
 	engine           *AlarmEngine
 	eventBus         event.EventBus
 	logger           *zap.Logger
+	deviceReader     deviceReader
 	alarmDefRegistry *definition.Registry
 	productResolver  definition.ProductResolver
 	defMetrics       fallbackMetrics // 取自 alarmDefRegistry.Metrics() 的最小子集
+}
+
+type deviceReader interface {
+	GetByID(ctx context.Context, id uuid.UUID) (*model.Device, error)
+	GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error)
 }
 
 // fallbackMetrics 是 receiver 需要的 alarm_unknown_total 计数接口。
@@ -58,6 +64,13 @@ type fallbackMetrics interface {
 // NewAlarmReceiver creates a new AlarmReceiver.
 func NewAlarmReceiver(engine *AlarmEngine, eventBus event.EventBus, logger *zap.Logger) *AlarmReceiver {
 	return &AlarmReceiver{engine: engine, eventBus: eventBus, logger: logger}
+}
+
+// WithDeviceReader enables alarm field backfill from the device table when the
+// incoming alarm payload omits device-derived fields such as technology.
+func (r *AlarmReceiver) WithDeviceReader(reader deviceReader) *AlarmReceiver {
+	r.deviceReader = reader
+	return r
 }
 
 // WithAlarmDefRegistry 启用 T-0098 P2-10 fallback 决策（设计 §3.5）。
@@ -115,6 +128,7 @@ func (r *AlarmReceiver) handleAlarmEvent(ctx context.Context, evt event.Event) e
 		RaisedAt:       payload.RaisedAt,
 		AdditionalInfo: payload.Additional,
 	}
+	r.backfillDeviceFields(ctx, alarm)
 
 	// T-0098 P2-10 fallback 决策：identifier 不在 alarm_definitions → 查 product.enable_unknown_alarm
 	if drop, err := r.applyFallback(ctx, alarm, payload); err != nil {
@@ -145,6 +159,25 @@ func (r *AlarmReceiver) handleAlarmEvent(ctx context.Context, evt event.Event) e
 	}
 
 	return nil
+}
+
+func (r *AlarmReceiver) backfillDeviceFields(ctx context.Context, alarm *model.Alarm) {
+	if r.deviceReader == nil || alarm.Technology != nil || alarm.DeviceSN == "" {
+		return
+	}
+
+	var device *model.Device
+	var err error
+	device, err = r.deviceReader.GetByID(ctx, alarm.DeviceID)
+	if err != nil || device == nil {
+		device, err = r.deviceReader.GetBySerialNumber(ctx, alarm.DeviceSN)
+	}
+	if err != nil || device == nil || device.Technology == "" {
+		return
+	}
+
+	technology := string(device.Technology)
+	alarm.Technology = &technology
 }
 
 // applyFallback 执行 §3.5 fallback 决策。

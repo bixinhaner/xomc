@@ -48,18 +48,18 @@ func (s *PgAlarmStore) SaveActive(ctx context.Context, alarm *model.Alarm) error
 }
 
 func (s *PgAlarmStore) GetActiveByID(ctx context.Context, id uuid.UUID) (*model.Alarm, error) {
-	return s.scanActiveAlarm(ctx, storage.Psql.Select(activeColumns...).From("alarms_active").Where(squirrel.Eq{"id": id}))
+	return s.scanActiveAlarm(ctx, activeAlarmSelect().Where(squirrel.Eq{"alarms_active.id": id}))
 }
 
 func (s *PgAlarmStore) GetActiveByDeviceAndIdentifier(ctx context.Context, deviceSN string, alarmIdentifier string) (*model.Alarm, error) {
-	return s.scanActiveAlarm(ctx, storage.Psql.Select(activeColumns...).From("alarms_active").
-		Where(squirrel.Eq{"device_sn": deviceSN, "alarm_identifier": alarmIdentifier}).
+	return s.scanActiveAlarm(ctx, activeAlarmSelect().
+		Where(squirrel.Eq{"alarms_active.device_sn": deviceSN, "alarms_active.alarm_identifier": alarmIdentifier}).
 		Where(squirrel.NotEq{"status": "cleared"}))
 }
 
 func (s *PgAlarmStore) GetActiveByDeviceSN(ctx context.Context, deviceSN string) ([]*model.Alarm, error) {
-	q := storage.Psql.Select(activeColumns...).From("alarms_active").
-		Where(squirrel.Eq{"device_sn": deviceSN}).
+	q := activeAlarmSelect().
+		Where(squirrel.Eq{"alarms_active.device_sn": deviceSN}).
 		Where(squirrel.NotEq{"status": "cleared"})
 
 	query, args, err := q.ToSql()
@@ -116,8 +116,8 @@ func (s *PgAlarmStore) RemoveActive(ctx context.Context, id uuid.UUID) error {
 }
 
 func (s *PgAlarmStore) ListActive(ctx context.Context, filter AlarmFilter) (*model.ListResponse[model.Alarm], error) {
-	qb := storage.Psql.Select(activeColumns...).From("alarms_active")
-	countQb := storage.Psql.Select("COUNT(*)").From("alarms_active")
+	qb := activeAlarmSelect()
+	countQb := storage.Psql.Select("COUNT(*)").From("alarms_active").LeftJoin("devices d ON d.id = alarms_active.device_id")
 
 	qb = applyActiveFilters(qb, filter)
 	countQb = applyActiveFilters(countQb, filter)
@@ -171,15 +171,15 @@ func (s *PgAlarmStore) Archive(ctx context.Context, alarm *model.Alarm) error {
 
 func (s *PgAlarmStore) ListHistory(ctx context.Context, filter AlarmFilter) (*model.ListResponse[model.Alarm], error) {
 	qb := storage.Psql.Select(
-		"time", "alarm_id", "device_id", "device_sn", "carrier", "severity",
-		"alarm_type", "alarm_identifier", "description", "status", "raised_at",
-		"acknowledged_at", "cleared_at", "acknowledged_by", "ack_note",
-		"device_name", "technology", "alarm_source", "event_type",
-		"ack_count", "updated_at",
-		"cleared_by", "clear_note",
-		"probable_cause",
-	).From("alarms_history")
-	countQb := storage.Psql.Select("COUNT(*)").From("alarms_history")
+		"alarms_history.time", "alarms_history.alarm_id", "alarms_history.device_id", "alarms_history.device_sn", "alarms_history.carrier", "alarms_history.severity",
+		"alarms_history.alarm_type", "alarms_history.alarm_identifier", "alarms_history.description", "alarms_history.status", "alarms_history.raised_at",
+		"alarms_history.acknowledged_at", "alarms_history.cleared_at", "alarms_history.acknowledged_by", "alarms_history.ack_note",
+		"alarms_history.device_name", "COALESCE(alarms_history.technology, d.technology) AS technology", "alarms_history.alarm_source", "alarms_history.event_type",
+		"alarms_history.ack_count", "alarms_history.updated_at",
+		"alarms_history.cleared_by", "alarms_history.clear_note",
+		"alarms_history.probable_cause",
+	).From("alarms_history").LeftJoin("devices d ON d.id = alarms_history.device_id")
+	countQb := storage.Psql.Select("COUNT(*)").From("alarms_history").LeftJoin("devices d ON d.id = alarms_history.device_id")
 
 	qb = applyHistoryFilters(qb, filter)
 	countQb = applyHistoryFilters(countQb, filter)
@@ -271,15 +271,19 @@ func (s *PgAlarmStore) Statistics(ctx context.Context, filter AlarmFilter) (*Ala
 // helpers
 
 var activeColumns = []string{
-	"id", "device_id", "device_sn", "carrier", "severity", "alarm_type", "alarm_identifier",
-	"description", "status", "raised_at", "acknowledged_at", "acknowledged_by", "ack_note",
-	"additional_info", "created_at", "updated_at",
+	"alarms_active.id", "alarms_active.device_id", "alarms_active.device_sn", "alarms_active.carrier", "alarms_active.severity", "alarms_active.alarm_type", "alarms_active.alarm_identifier",
+	"alarms_active.description", "alarms_active.status", "alarms_active.raised_at", "alarms_active.acknowledged_at", "alarms_active.acknowledged_by", "alarms_active.ack_note",
+	"alarms_active.additional_info", "alarms_active.created_at", "alarms_active.updated_at",
 	// 增强字段
-	"device_name", "technology", "alarm_source", "event_type",
-	"network_location", "explicit_cause", "is_read", "ack_count",
-	"first_raised_at", "last_updated_at", "probable_cause",
+	"alarms_active.device_name", "COALESCE(alarms_active.technology, d.technology) AS technology", "alarms_active.alarm_source", "alarms_active.event_type",
+	"alarms_active.network_location", "alarms_active.explicit_cause", "alarms_active.is_read", "alarms_active.ack_count",
+	"alarms_active.first_raised_at", "alarms_active.last_updated_at", "alarms_active.probable_cause",
 	// T-0098 P2-10
-	"is_unknown",
+	"alarms_active.is_unknown",
+}
+
+func activeAlarmSelect() squirrel.SelectBuilder {
+	return storage.Psql.Select(activeColumns...).From("alarms_active").LeftJoin("devices d ON d.id = alarms_active.device_id")
 }
 
 func (s *PgAlarmStore) HistoryStatistics(ctx context.Context, filter AlarmFilter) (*AlarmStatistics, error) {
@@ -322,90 +326,96 @@ func (s *PgAlarmStore) HistoryStatistics(ctx context.Context, filter AlarmFilter
 
 func applyActiveFilters(qb squirrel.SelectBuilder, f AlarmFilter) squirrel.SelectBuilder {
 	if f.DeviceID != nil {
-		qb = qb.Where(squirrel.Eq{"device_id": *f.DeviceID})
+		qb = qb.Where(squirrel.Eq{"alarms_active.device_id": *f.DeviceID})
 	}
 	if f.DeviceSN != nil {
-		qb = qb.Where(squirrel.Eq{"device_sn": *f.DeviceSN})
+		qb = qb.Where(squirrel.Eq{"alarms_active.device_sn": *f.DeviceSN})
 	}
 	if f.Carrier != nil {
-		qb = qb.Where(squirrel.Eq{"carrier": *f.Carrier})
+		qb = qb.Where(squirrel.Eq{"alarms_active.carrier": *f.Carrier})
 	}
 	if f.Severity != nil {
-		qb = qb.Where(squirrel.Eq{"severity": *f.Severity})
+		qb = qb.Where(squirrel.Eq{"alarms_active.severity": *f.Severity})
 	}
 	if f.Status != nil {
-		qb = qb.Where(squirrel.Eq{"status": *f.Status})
+		qb = qb.Where(squirrel.Eq{"alarms_active.status": *f.Status})
 	}
 	if f.StartTime != nil {
-		qb = qb.Where(squirrel.GtOrEq{"raised_at": *f.StartTime})
+		qb = qb.Where(squirrel.GtOrEq{"alarms_active.raised_at": *f.StartTime})
 	}
 	if f.EndTime != nil {
-		qb = qb.Where(squirrel.LtOrEq{"raised_at": *f.EndTime})
+		qb = qb.Where(squirrel.LtOrEq{"alarms_active.raised_at": *f.EndTime})
 	}
 	if f.AlarmType != nil {
-		qb = qb.Where(squirrel.Eq{"alarm_type": *f.AlarmType})
+		qb = qb.Where(squirrel.Eq{"alarms_active.alarm_type": *f.AlarmType})
 	}
 	if f.EventType != nil {
-		qb = qb.Where(normalizedEventTypeExpr("event_type", *f.EventType))
+		qb = qb.Where(normalizedEventTypeExpr("alarms_active.event_type", *f.EventType))
 	}
 	if f.IsRead != nil {
-		qb = qb.Where(squirrel.Eq{"is_read": *f.IsRead})
+		qb = qb.Where(squirrel.Eq{"alarms_active.is_read": *f.IsRead})
 	}
 	if f.IsUnknown != nil {
-		qb = qb.Where(squirrel.Eq{"is_unknown": *f.IsUnknown})
+		qb = qb.Where(squirrel.Eq{"alarms_active.is_unknown": *f.IsUnknown})
 	}
 	if f.DeviceName != nil {
-		qb = qb.Where(squirrel.Like{"device_name": "%" + *f.DeviceName + "%"})
+		qb = qb.Where(squirrel.Like{"alarms_active.device_name": "%" + *f.DeviceName + "%"})
+	}
+	if technologyExpr := normalizedTechnologyExpr("COALESCE(alarms_active.technology, d.technology)", f.Technologies); technologyExpr != nil {
+		qb = qb.Where(technologyExpr)
 	}
 	if f.Keyword != nil {
 		kw := "%" + *f.Keyword + "%"
 		qb = qb.Where(squirrel.Or{
-			squirrel.Like{"alarm_identifier": kw},
-			squirrel.Like{"device_sn": kw},
-			squirrel.Like{"device_name": kw},
-			squirrel.Like{"description": kw},
+			squirrel.Like{"alarms_active.alarm_identifier": kw},
+			squirrel.Like{"alarms_active.device_sn": kw},
+			squirrel.Like{"alarms_active.device_name": kw},
+			squirrel.Like{"alarms_active.description": kw},
 		})
 	}
 	if len(f.AlarmIdentifiers) > 0 {
-		qb = qb.Where(squirrel.Eq{"alarm_identifier": f.AlarmIdentifiers})
+		qb = qb.Where(squirrel.Eq{"alarms_active.alarm_identifier": f.AlarmIdentifiers})
 	}
 	if len(f.AlarmSources) > 0 {
-		qb = qb.Where(squirrel.Eq{"alarm_source": f.AlarmSources})
+		qb = qb.Where(squirrel.Eq{"alarms_active.alarm_source": f.AlarmSources})
 	}
 	if len(f.DeviceIDs) > 0 {
-		qb = qb.Where(squirrel.Eq{"device_id": f.DeviceIDs})
+		qb = qb.Where(squirrel.Eq{"alarms_active.device_id": f.DeviceIDs})
 	}
 	return qb
 }
 
 func applyHistoryFilters(qb squirrel.SelectBuilder, f AlarmFilter) squirrel.SelectBuilder {
 	if f.DeviceID != nil {
-		qb = qb.Where(squirrel.Eq{"device_id": *f.DeviceID})
+		qb = qb.Where(squirrel.Eq{"alarms_history.device_id": *f.DeviceID})
 	}
 	if f.DeviceSN != nil {
-		qb = qb.Where(squirrel.Eq{"device_sn": *f.DeviceSN})
+		qb = qb.Where(squirrel.Eq{"alarms_history.device_sn": *f.DeviceSN})
 	}
 	if f.Carrier != nil {
-		qb = qb.Where(squirrel.Eq{"carrier": *f.Carrier})
+		qb = qb.Where(squirrel.Eq{"alarms_history.carrier": *f.Carrier})
 	}
 	if f.Severity != nil {
-		qb = qb.Where(squirrel.Eq{"severity": *f.Severity})
+		qb = qb.Where(squirrel.Eq{"alarms_history.severity": *f.Severity})
 	}
 	if f.StartTime != nil {
-		qb = qb.Where(squirrel.GtOrEq{"time": *f.StartTime})
+		qb = qb.Where(squirrel.GtOrEq{"alarms_history.time": *f.StartTime})
 	}
 	if f.EndTime != nil {
-		qb = qb.Where(squirrel.LtOrEq{"time": *f.EndTime})
+		qb = qb.Where(squirrel.LtOrEq{"alarms_history.time": *f.EndTime})
 	}
 	if f.EventType != nil {
-		qb = qb.Where(normalizedEventTypeExpr("event_type", *f.EventType))
+		qb = qb.Where(normalizedEventTypeExpr("alarms_history.event_type", *f.EventType))
+	}
+	if technologyExpr := normalizedTechnologyExpr("COALESCE(alarms_history.technology, d.technology)", f.Technologies); technologyExpr != nil {
+		qb = qb.Where(technologyExpr)
 	}
 	if f.Keyword != nil {
 		kw := "%" + *f.Keyword + "%"
 		qb = qb.Where(squirrel.Or{
-			squirrel.Like{"alarm_identifier": kw},
-			squirrel.Like{"device_sn": kw},
-			squirrel.Like{"description": kw},
+			squirrel.Like{"alarms_history.alarm_identifier": kw},
+			squirrel.Like{"alarms_history.device_sn": kw},
+			squirrel.Like{"alarms_history.description": kw},
 		})
 	}
 	return qb
@@ -426,6 +436,56 @@ func normalizedEventTypeExpr(column string, raw string) squirrel.Sqlizer {
 		strings.Join(placeholders, ", "),
 	)
 	return squirrel.Expr(expr, args...)
+}
+
+func normalizedTechnologyExpr(column string, values []string) squirrel.Sqlizer {
+	var exprs squirrel.Or
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		aliases := normalizedTechnologyAliases(trimmed)
+		placeholders := make([]string, 0, len(aliases))
+		args := make([]interface{}, 0, len(aliases))
+		for _, alias := range aliases {
+			placeholders = append(placeholders, "?")
+			args = append(args, alias)
+		}
+
+		expr := fmt.Sprintf(
+			"REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(LOWER(COALESCE(%s, '')), ' ', ''), '-', ''), '_', ''), '(', ''), ')', '') IN (%s)",
+			column,
+			strings.Join(placeholders, ", "),
+		)
+		exprs = append(exprs, squirrel.Expr(expr, args...))
+	}
+	if len(exprs) == 0 {
+		return nil
+	}
+	if len(exprs) == 1 {
+		return exprs[0]
+	}
+	return exprs
+}
+
+func normalizedTechnologyAliases(raw string) []string {
+	key := normalizeTechnologyToken(raw)
+	buckets := map[string][]string{
+		"enb":    {"enb", "lte", "enodeb"},
+		"lte":    {"enb", "lte", "enodeb"},
+		"enodeb": {"enb", "lte", "enodeb"},
+		"gnb":    {"gnb", "nr", "5gnr", "gnodeb"},
+		"nr":     {"gnb", "nr", "5gnr", "gnodeb"},
+		"5gnr":   {"gnb", "nr", "5gnr", "gnodeb"},
+		"gnodeb": {"gnb", "nr", "5gnr", "gnodeb"},
+		"gsm":    {"gsm"},
+	}
+
+	if aliases, ok := buckets[key]; ok {
+		return aliases
+	}
+	return []string{key}
 }
 
 func normalizedEventTypeAliases(raw string) []string {
@@ -468,6 +528,11 @@ func normalizedEventTypeAliases(raw string) []string {
 
 func normalizeEventTypeToken(raw string) string {
 	replacer := strings.NewReplacer(" ", "", "-", "", "_", "")
+	return replacer.Replace(strings.ToLower(strings.TrimSpace(raw)))
+}
+
+func normalizeTechnologyToken(raw string) string {
+	replacer := strings.NewReplacer(" ", "", "-", "", "_", "", "(", "", ")", "")
 	return replacer.Replace(strings.ToLower(strings.TrimSpace(raw)))
 }
 

@@ -128,7 +128,8 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 
 	// T-0098 P2-10：构造 AlarmDefinition Registry + ProductRegistry adapter，启用 fallback 决策。
 	// 任何一步失败都仅记 WARN 后退化到旧路径（不阻塞 worker 启动）。
-	alarmReceiver := alarm.NewAlarmReceiver(alarmEngine, w.EventBus, logger)
+	alarmDeviceRepo := device.NewPgDeviceRepository(w.PgPool)
+	alarmReceiver := alarm.NewAlarmReceiver(alarmEngine, w.EventBus, logger).WithDeviceReader(alarmDeviceRepo)
 	alarmDefRepo := definition.NewPgRepository(w.PgPool)
 	alarmDefMetrics := definition.NewRegistryMetrics(w.MetricsReg)
 	alarmDefRegistry := definition.NewRegistry(alarmDefRepo, alarmDefMetrics, logger)

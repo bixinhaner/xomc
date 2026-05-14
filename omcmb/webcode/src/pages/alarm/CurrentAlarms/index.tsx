@@ -26,6 +26,7 @@ import type { AlarmFilter } from '@core/types/alarm';
 import AlarmDetail from '../AlarmDetail';
 import ExportModal, { type ExportParams } from './ExportModal';
 import ConfirmWithNoteModal from '../components/ConfirmWithNoteModal';
+import { BASE_STATION_TYPE_OPTIONS, formatBaseStationTypeLabel } from '../utils/baseStationType';
 import styles from './CurrentAlarms.module.css';
 
 const { Text } = Typography;
@@ -54,13 +55,6 @@ const EVENT_TYPE_CONFIG: Record<EventType, string> = {
   device: 'alarm.eventType.device',
   environment: 'alarm.eventType.environment',
   performance: 'alarm.eventType.performance',
-};
-
-// 基站制式配置
-const NE_TYPE_CONFIG: Record<string, string> = {
-  'eNB': 'eNB',
-  'gNB': 'gNB',
-  'GSM': 'GSM',
 };
 
 // 快捷筛选选项
@@ -172,10 +166,11 @@ export default function CurrentAlarms() {
     },
     {
       name: 'neType',
-      label: t('alarm.neType'),
+      label: t('alarm.neTypeCol'),
       type: 'select',
       options: [
         { label: t('common.all'), value: '' },
+        ...BASE_STATION_TYPE_OPTIONS,
       ],
     },
     {
@@ -613,10 +608,10 @@ export default function CurrentAlarms() {
       },
       {
         key: 'neType',
-        title: t('alarm.neType'),
+        title: t('alarm.neTypeCol'),
         dataIndex: 'neType',
         width: 120,
-        render: (val: string) => NE_TYPE_CONFIG[val] || val || '-',
+        render: (val: string) => formatBaseStationTypeLabel(val),
       },
       {
         key: 'equipInfo',

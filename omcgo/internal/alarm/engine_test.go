@@ -16,8 +16,9 @@ import (
 
 // mockAlarmStore implements AlarmStore for testing.
 type mockAlarmStore struct {
-	active  map[uuid.UUID]*model.Alarm
-	history []*model.Alarm
+	active           map[uuid.UUID]*model.Alarm
+	history          []*model.Alarm
+	lastActiveFilter AlarmFilter
 }
 
 func newMockAlarmStore() *mockAlarmStore {
@@ -66,7 +67,8 @@ func (m *mockAlarmStore) RemoveActive(_ context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (m *mockAlarmStore) ListActive(_ context.Context, _ AlarmFilter) (*model.ListResponse[model.Alarm], error) {
+func (m *mockAlarmStore) ListActive(_ context.Context, filter AlarmFilter) (*model.ListResponse[model.Alarm], error) {
+	m.lastActiveFilter = filter
 	var items []model.Alarm
 	for _, a := range m.active {
 		items = append(items, *a)
