@@ -113,17 +113,21 @@ log:
     keep_uncompressed: 10 # 最新 N 个 .log 不压缩供 tail/less 直读；其余 .log → .log.gz
 
 protocol_log:
+  # 生产默认关闭 — TR-069 SOAP 报文含 CPE 凭据敏感字段，等保/安全审计要求不长期落盘。
+  # 排障时由 admin 显式开启（建议同步加限时计划任务关闭，避免遗忘）。
   enabled: false
   file_path: "/run/logs/acs/protocol.log"
   max_body_size: 0
   rotation:
+    # rotation 配置在 enabled=false 时不生效；保留供 admin 临时启用时使用。
+    # T-0134 切 compactor 模式：与主 acs.log 一致，自动 gzip 压缩 + max_age 删旧。
     enabled: true
     max_size_mb: 50
     rotate_interval: 5m # 与 max_size_mb 为 OR：任一条件满足都切
     max_age_days: 7
-    max_backups: 30
     compress: true
     local_time: true
+    keep_uncompressed: 10 # T-0134 compactor 模式接入
 
 request_id_prefix: "acs"
 

@@ -88,7 +88,7 @@ func NewLogger(cfg appconfig.LogConfig) (*zap.Logger, error) {
 				}
 
 				if cfg.Rotation.Enabled {
-					writer = newLumberjackWriter(path, cfg.Rotation)
+					writer = NewLumberjackWriter(path, cfg.Rotation)
 				} else {
 					file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 					if err != nil {
@@ -123,7 +123,7 @@ func NewLogger(cfg appconfig.LogConfig) (*zap.Logger, error) {
 	return logger, nil
 }
 
-// newLumberjackWriter 构造日志轮转写入器，支持两种归档管理模式：
+// NewLumberjackWriter 构造日志轮转写入器，支持两种归档管理模式：
 //
 //   Compactor 模式（cfg.KeepUncompressed > 0）：
 //     - lumberjack 仅做切割（MaxBackups=0 / MaxAge=0 / Compress=false 都禁用）
@@ -131,15 +131,15 @@ func NewLogger(cfg appconfig.LogConfig) (*zap.Logger, error) {
 //         · mtime > MaxAgeDays → 删
 //         · 最新 KeepUncompressed 个 → 保持 .log 形式，rename 到分钟精度
 //         · 其余 .log → gzip 为 .log.gz，删原文件
-//     - 用于 app/acs/worker 三个主日志
+//     - 用于 app/acs/worker 三个主日志 + acs protocol_log
 //
 //   Legacy 模式（cfg.KeepUncompressed == 0）：
 //     - 完全沿用 lumberjack 原生 MaxBackups + MaxAge + Compress 行为
-//     - 用于 protocol_log 等暂未启用 compactor 的场景
+//     - 仅在极少数需保留 lumberjack 原生归档语义的场景下使用
 //
 // MaxSizeMB 与 RotateInterval 是 OR 关系：任一满足都触发切割。空文件保护防止
 // 低流量环境下每个 tick 产生空 .gz 归档。
-func newLumberjackWriter(path string, cfg appconfig.RotationConfig) io.Writer {
+func NewLumberjackWriter(path string, cfg appconfig.RotationConfig) io.Writer {
 	maxSize := cfg.MaxSizeMB
 	if maxSize <= 0 {
 		maxSize = 50 // default 50MB

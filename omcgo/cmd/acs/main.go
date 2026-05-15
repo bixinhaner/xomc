@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/omcgo/omcgo/internal/acs"
 	"github.com/omcgo/omcgo/internal/acs/connreq"
@@ -22,6 +21,7 @@ import (
 	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/components"
+	"github.com/omcgo/omcgo/internal/core/components/logger"
 	miniocomp "github.com/omcgo/omcgo/internal/core/components/minio"
 	"github.com/omcgo/omcgo/internal/core/health"
 	"github.com/omcgo/omcgo/internal/task"
@@ -331,6 +331,11 @@ func (s *acsConnReqSender) Send(ctx context.Context, deviceSN, httpURL string) e
 
 // newProtocolLogger creates a dedicated zap logger for ACS protocol interaction logging.
 // It writes structured JSON to a separate file with its own rotation settings.
+//
+// Rotation 走 logger.NewLumberjackWriter 共用入口 — 按 cfg.Rotation.KeepUncompressed
+// 自动路由 compactor / legacy 双模式（与主 acs.log 同款）。protocol_log 体积大且
+// 含 SOAP 凭据敏感，dev/test 用 compactor 自动 gzip 压缩 + max_age 删旧；prod 默认
+// enabled=false 等保合规。
 func newProtocolLogger(cfg appconfig.ProtocolLogConfig) (*zap.Logger, error) {
 	dir := filepath.Dir(cfg.FilePath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -339,26 +344,7 @@ func newProtocolLogger(cfg appconfig.ProtocolLogConfig) (*zap.Logger, error) {
 
 	var writer io.Writer
 	if cfg.Rotation.Enabled {
-		maxSize := cfg.Rotation.MaxSizeMB
-		if maxSize <= 0 {
-			maxSize = 50
-		}
-		maxAge := cfg.Rotation.MaxAgeDays
-		if maxAge <= 0 {
-			maxAge = 7
-		}
-		maxBackups := cfg.Rotation.MaxBackups
-		if maxBackups <= 0 {
-			maxBackups = 5
-		}
-		writer = &lumberjack.Logger{
-			Filename:   cfg.FilePath,
-			MaxSize:    maxSize,
-			MaxAge:     maxAge,
-			MaxBackups: maxBackups,
-			Compress:   cfg.Rotation.Compress,
-			LocalTime:  cfg.Rotation.LocalTime,
-		}
+		writer = logger.NewLumberjackWriter(cfg.FilePath, cfg.Rotation)
 	} else {
 		f, err := os.OpenFile(cfg.FilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if err != nil {

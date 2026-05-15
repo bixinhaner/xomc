@@ -123,9 +123,9 @@ protocol_log:
     max_size_mb: 50    # 协议日志文件较大
     rotate_interval: 5m # 与 max_size_mb 为 OR：任一条件满足都切
     max_age_days: 7
-    max_backups: 30
     compress: true
     local_time: true
+    keep_uncompressed: 10 # 最新 N 个 .log 不压缩；其余 .log → .log.gz，max_age 超时自动删（T-0134 compactor 模式接入）
 
 request_id_prefix: "acs"
 
