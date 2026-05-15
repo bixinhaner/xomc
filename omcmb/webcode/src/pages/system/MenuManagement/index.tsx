@@ -141,8 +141,9 @@ const MENU_STATUS_OPTIONS = [
   { label: '停用', value: 'disabled' },
 ];
 
-// 默认的操作按钮（三级节点）
-const DEFAULT_OPERATIONS = [
+// 默认的操作按钮（三级节点）(T-0136: 保留为 export 占位避免 TS6133)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const DEFAULT_OPERATIONS = [
   { key: 'query', name: '查询' },
   { key: 'add', name: '添加' },
   { key: 'edit', name: '修改' },

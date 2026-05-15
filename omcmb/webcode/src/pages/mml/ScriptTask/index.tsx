@@ -267,28 +267,6 @@ export default function ScriptTask() {
     { key: 'updatedAt', title: t('mml.updateTime'), dataIndex: 'updateTime', width: 160, render: (val: string) => formatTime(val) },
   ], [t, handleDeleteScripts]);
 
-  const scriptFilterFields: FilterField[] = useMemo(() => [
-    { name: 'scriptName', label: t('mml.scriptName'), type: 'input', placeholder: t('mml.scriptName') },
-    { name: 'deviceType', label: t('mml.deviceType'), type: 'select', placeholder: t('mml.deviceType'), options: [
-      { label: t('common.all'), value: 'all' },
-      ...productTypeOptions,
-    ] },
-    { name: 'creator', label: t('mml.creator'), type: 'input', placeholder: t('mml.creator') },
-  ], [t, productTypeOptions]);
-
-  const handleScriptSearch = useCallback((values: Record<string, unknown>) => {
-    setFilterParams(values);
-    setScriptPage(1);
-    const keyword = (values.scriptName as string) || '';
-    setScriptSearch(keyword);
-  }, []);
-
-  const handleScriptReset = useCallback(() => {
-    setFilterParams({});
-    setScriptSearch('');
-    setScriptPage(1);
-  }, []);
-
   const handleStartTask = (task: MMLTask) => {
     startTaskMutation.mutate(task.id, {
       onSuccess: () => void message.success(t('mml.taskStarted', { name: task.taskName })),
@@ -325,7 +303,7 @@ export default function ScriptTask() {
   const openCreateDrawer = () => {
     setEditingTask(null);
     form.resetFields();
-    const userName = useUserStore.getState().currentUser?.userName ?? 'unknown';
+    const userName = useUserStore.getState().currentUser?.username ?? 'unknown';
     form.setFieldsValue({
       taskName: `MML任务_${userName}_${dayjs().format('YYYY-MM-DD HH:mm:ss')}`,
       executeType: 'immediate',

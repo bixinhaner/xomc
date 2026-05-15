@@ -878,8 +878,6 @@ export default function GISMapView() {
                     {/* 可滚动的结果列表 */}
                     <div style={searchResultsListStyle}>
                       {deviceSearchResults.map((result, index) => {
-                        // onlineActive 和 onlineInactive 都算在线
-                        const _isOnline = result.status === 'onlineActive' || result.status === 'onlineInactive';
                         // 状态颜色：在线激活=绿色，在线未激活=黄色，离线=红色
                         const statusColor = result.status === 'onlineActive'
                           ? 'linear-gradient(180deg, #73D13D 0%, #52C41A 100%)'

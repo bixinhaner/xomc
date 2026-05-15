@@ -75,8 +75,9 @@ const TASK_STATUS_COLORS: Record<number, string> = {
   4: 'success',     // ended
 };
 
-// Task result display color
-const TASK_RESULT_COLORS: Record<string, string> = {
+// Task result display color (T-0136: 保留为 export 占位避免 TS6133)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const TASK_RESULT_COLORS: Record<string, string> = {
   success: 'success',
   partial: 'warning',
   failed: 'error',
@@ -91,8 +92,9 @@ const TASK_TYPE_COLORS: Record<number, string> = {
   6: 'purple',  // FPGA
 };
 
-// Sub-task status display color
-const SUB_TASK_STATUS_COLORS: Record<string, string> = {
+// Sub-task status display color (T-0136: 保留为 export 占位避免 TS6133)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const SUB_TASK_STATUS_COLORS: Record<string, string> = {
   pending: 'default',
   downloading: 'processing',
   rebooting: 'processing',
@@ -123,7 +125,7 @@ export default function UpgradePlan() {
   // ---- Pagination & filter state ----
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [filters, setFilters] = useState<Record<string, unknown>>({});
+  const [, setFilters] = useState<Record<string, unknown>>({});
 
   // ---- Tab state ----
   const [activeTab, setActiveTab] = useState<'task' | 'device'>('task');
@@ -580,11 +582,6 @@ export default function UpgradePlan() {
         void message.error(t('common.operationFailed') + ': ' + String(err));
       },
     });
-  };
-
-  const handleEditTask = (_record: UpgradeTaskInfo) => {
-    // Edit is not yet supported via API, placeholder
-    void message.info(t('common.featureNotAvailable') ?? '功能暂未开放');
   };
 
   const handleViewTaskDetail = (record: UpgradeTaskInfo) => {
