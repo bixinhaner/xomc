@@ -26,7 +26,7 @@ VALUES
  'DOWNLOAD', true, true,
  '["CHECK_PERMISSION","CHECK_ONLINE","CHECK_CONFLICT","SEND_RPC","WAIT_RPC_RESPONSE","WAIT_FILE_TRANSFER","WAIT_TRANSFER_COMPLETE"]',
  '', 'CODE_ENB_UPGRADE_PATCH',
- '["4G eNB","QAFA","QAFB","PATCH"]', '1 Firmware Upgrade Image', '1 Firmware Upgrade Image', true,
+ '["4G eNB","QAFA","QAFB","PATCH"]', 'X {OUI} Software Upgrade Patch', 'X {OUI} Software Upgrade Patch', true,
  'firmware/{patch_path}', '{patch_name}', '{patch_name}',
  'firmware.fileSize', 'firmware.md5', 'true', 0,
  '/smallcell/FileDownloadService/firmware/patch/{path}', 'system')
