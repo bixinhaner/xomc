@@ -1,5 +1,5 @@
 import { useEffect, useCallback } from 'react';
-import { Outlet, useLocation } from 'react-router-dom';
+import { Outlet } from 'react-router-dom';
 import { useAppStore } from '@core/store/appStore';
 import { useSecuritySettings } from '@core/hooks/api/useSecuritySettings';
 import { useIdleLogout } from '@core/hooks/useIdleLogout';
@@ -24,7 +24,6 @@ export default function AppShell() {
 
   const { isMobile, isTablet } = useResponsive();
   const { isTouchPrimary } = useIsTouchDevice();
-  const _location = useLocation();
 
   // P2-⑦ 屏幕锁定：监听 sys_configs.security.userSessionExpirationMin。
   // 0 = 禁用；非 0 表示 N 分钟无操作后强制登出。AppShell 仅在登录态渲染，

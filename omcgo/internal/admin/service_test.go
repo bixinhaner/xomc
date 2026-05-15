@@ -5,9 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -667,4 +669,117 @@ func TestAdminService_SetRoleMenus_ExpandsAncestors(t *testing.T) {
 			assert.ElementsMatch(t, tc.wantIn, captured)
 		})
 	}
+}
+
+// ===================== P0-④ 单点登录 — 登录时撤销旧 token =====================
+//
+// service.Login 当 policy.AllowConcurrent=false 时调用 TokenRevoker.Revoke 把
+// 该用户所有旧 token 标记失效。验证：
+//   1. 默认 AllowConcurrent=true → 不调用 Revoke
+//   2. AllowConcurrent=false → 调用 Revoke 且 Redis 写入了撤销时间戳
+//   3. Revoker / Policy 任一未注入 → 不阻塞登录（fail-safe）
+//   4. Revoker 抛错 → 登录仍成功（fail-safe，下次会重试）
+
+func newSingleSessionTestService(
+	t *testing.T,
+	userRepo *mockUserRepo,
+	roleRepo *mockRoleRepo,
+	allowConcurrent string, // "true"/"false"/""=不设
+) (*AdminService, *miniredis.Miniredis) {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+
+	jwt, err := NewJWTService("test-secret-minimum-32-characters!!")
+	require.NoError(t, err)
+
+	svc := NewAdminService(userRepo, roleRepo, &mockMenuRepo{}, &mockAuditRepo{}, jwt, zap.NewNop())
+	svc.SetTokenRevoker(NewTokenRevoker(client, 24*time.Hour))
+
+	if allowConcurrent != "" {
+		policy := NewSecurityPolicy(&policyMockQuerier{entries: map[string]string{
+			"security.isOnlyOneUserLoginEnable": allowConcurrent,
+		}})
+		svc.SetSecurityPolicy(policy)
+	}
+	return svc, mr
+}
+
+func TestAdminService_Login_SingleSession_DefaultAllowConcurrent_NoRevoke(t *testing.T) {
+	userID := uuid.New()
+	userRepo := &mockUserRepo{
+		getByUsernameFn: func(_ context.Context, u string) (*User, error) {
+			return &User{ID: userID, Username: u, PasswordHash: hashPassword("p"), Status: UserStatusActive}, nil
+		},
+	}
+	roleRepo := &mockRoleRepo{getUserRolesFn: func(_ context.Context, _ uuid.UUID) ([]Role, error) {
+		return []Role{{Name: "admin"}}, nil
+	}}
+
+	svc, mr := newSingleSessionTestService(t, userRepo, roleRepo, "true") // 允许多端
+	_, err := svc.Login(context.Background(), "admin", "p")
+	require.NoError(t, err)
+
+	// 默认允许多端 → 不应写撤销 key
+	assert.False(t, mr.Exists("auth:revoked_at:user:"+userID.String()),
+		"AllowConcurrent=true 时不应触发 revoke")
+}
+
+func TestAdminService_Login_SingleSession_RevokesOldTokens(t *testing.T) {
+	userID := uuid.New()
+	userRepo := &mockUserRepo{
+		getByUsernameFn: func(_ context.Context, u string) (*User, error) {
+			return &User{ID: userID, Username: u, PasswordHash: hashPassword("p"), Status: UserStatusActive}, nil
+		},
+	}
+	roleRepo := &mockRoleRepo{getUserRolesFn: func(_ context.Context, _ uuid.UUID) ([]Role, error) {
+		return []Role{{Name: "admin"}}, nil
+	}}
+
+	svc, mr := newSingleSessionTestService(t, userRepo, roleRepo, "false") // 单点登录
+	tp, err := svc.Login(context.Background(), "admin", "p")
+	require.NoError(t, err)
+	assert.NotEmpty(t, tp.AccessToken, "登录仍成功")
+
+	// 单点 → 应写撤销 key
+	assert.True(t, mr.Exists("auth:revoked_at:user:"+userID.String()),
+		"AllowConcurrent=false 时必须 revoke 旧 token")
+}
+
+func TestAdminService_Login_SingleSession_NoPolicy_NoRevoke(t *testing.T) {
+	userID := uuid.New()
+	userRepo := &mockUserRepo{
+		getByUsernameFn: func(_ context.Context, u string) (*User, error) {
+			return &User{ID: userID, Username: u, PasswordHash: hashPassword("p"), Status: UserStatusActive}, nil
+		},
+	}
+	roleRepo := &mockRoleRepo{getUserRolesFn: func(_ context.Context, _ uuid.UUID) ([]Role, error) {
+		return []Role{{Name: "admin"}}, nil
+	}}
+
+	// 不注入 policy（""）
+	svc, mr := newSingleSessionTestService(t, userRepo, roleRepo, "")
+	_, err := svc.Login(context.Background(), "admin", "p")
+	require.NoError(t, err, "policy 未注入应 fail-safe 走默认（不 revoke）")
+	assert.False(t, mr.Exists("auth:revoked_at:user:"+userID.String()))
+}
+
+func TestAdminService_Login_SingleSession_RevokerError_DoesNotFailLogin(t *testing.T) {
+	userID := uuid.New()
+	userRepo := &mockUserRepo{
+		getByUsernameFn: func(_ context.Context, u string) (*User, error) {
+			return &User{ID: userID, Username: u, PasswordHash: hashPassword("p"), Status: UserStatusActive}, nil
+		},
+	}
+	roleRepo := &mockRoleRepo{getUserRolesFn: func(_ context.Context, _ uuid.UUID) ([]Role, error) {
+		return []Role{{Name: "admin"}}, nil
+	}}
+
+	svc, mr := newSingleSessionTestService(t, userRepo, roleRepo, "false")
+	mr.Close() // 模拟 redis 故障
+
+	tp, err := svc.Login(context.Background(), "admin", "p")
+	require.NoError(t, err, "revoker 抛错时登录应仍成功（fail-safe — 单点登录失败比锁死用户风险低）")
+	assert.NotEmpty(t, tp.AccessToken)
 }

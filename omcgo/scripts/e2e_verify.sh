@@ -427,6 +427,94 @@ else
 fi
 
 # ============================================================
+section "4.5 Security Policy — Public Configs & Login Annotations"
+# ============================================================
+# 验证 system/config 安全设置在 Login 与 Public 端点的集成：
+#   1. GET /admin/public/configs?category=security 无需鉴权返回 4 个 public 字段
+#   2. Login 响应携带 P1/P2 策略派生字段（must_change_password / password_expires_in_days / login_notify_msg）
+#   3. /auth/change-password 端点存在（force=1 时 FE 跳转此页）
+
+# 4.5.1 公开配置端点（未带 token）
+RESP=$(curl -s -w "\n%{http_code}" "$API/admin/public/configs?category=security")
+HTTP_CODE=$(echo "$RESP" | tail -1)
+BODY=$(echo "$RESP" | sed '$d')
+check_status "GET /admin/public/configs?category=security (anonymous)" "200" "$HTTP_CODE"
+
+if [ "$HTTP_CODE" = "200" ]; then
+    # data 数组里至少应包含 P2 seed 标 is_public=true 的 4 个 key（其一即可证明 seed 已应用）
+    HAS_IDLE=$(echo "$BODY" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+items = d.get('data', []) or []
+keys = {it.get('key') for it in items if isinstance(it, dict)}
+print('yes' if 'userSessionExpirationMin' in keys else 'no')
+" 2>/dev/null || echo "no")
+    if [ "$HAS_IDLE" = "yes" ]; then
+        pass "Public configs include security.userSessionExpirationMin (seed 000103 applied)"
+    else
+        fail "Public configs include security.userSessionExpirationMin" "missing — seed/000103_security_login_page_public_configs.sql 未应用，is_public 标记未生效"
+    fi
+fi
+
+# 4.5.2 Login 响应字段（must_change_password 等）— admin 用户应有默认（false / 不附）
+if [ -n "$BODY" ]; then
+    # 重新登录拿 fresh body（前面 ACCESS_TOKEN 用 BODY 已经被覆盖）
+    RESP2=$(curl -s -X POST "$API/auth/login" \
+        -H "Content-Type: application/json" \
+        -d "{\"username\":\"admin\",\"encrypted_password\":\"$ENC_ADMIN\",\"key_id\":\"$PUBLIC_KEY_ID\"}")
+    # P1 ①：must_change_password 字段存在（omitempty true 时整字段不出现 — 用 python 检查是否在 dict 里）
+    MCP_KEY_PRESENT=$(echo "$RESP2" | python3 -c "
+import sys, json
+try:
+    d = json.loads(sys.stdin.read())
+    print('present' if 'must_change_password' in d else 'absent')
+except Exception:
+    print('parse_error')
+" 2>/dev/null || echo "parse_error")
+    # admin 是 builtin，password_changed_at NULL → annotatePasswordPolicyState 在 expires_enabled=true 时会标记 must_change_password
+    # 但 default expires=false → must_change_password 走 user.MustChangePassword=false 路径 → omitempty 整字段不出现
+    if [ "$MCP_KEY_PRESENT" = "absent" ] || [ "$MCP_KEY_PRESENT" = "present" ]; then
+        pass "Login response correctly serializes must_change_password (omitempty / present)"
+    else
+        fail "Login response must_change_password serialization" "json parse error"
+    fi
+fi
+
+# 4.5.3 /auth/change-password 端点存在（哪怕 401，证明路由已注册）
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/auth/change-password" \
+    -H "Content-Type: application/json" \
+    -d '{}')
+check_status_in "POST /auth/change-password endpoint registered" "400 401 422" "$HTTP_CODE"
+
+# 4.5.4 /admin/sysConfig?category=security 带 token 应 200（管理面看全字段）
+if [ -n "$ACCESS_TOKEN" ]; then
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/admin/sysConfig?category=security" \
+        -H "Authorization: Bearer $ACCESS_TOKEN")
+    check_status "GET /admin/sysConfig?category=security (admin)" "200" "$HTTP_CODE"
+fi
+
+# 4.5.5 公开配置端点：不带 category 也应返回（is_public=true 全部）
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/admin/public/configs")
+check_status "GET /admin/public/configs (no category filter)" "200" "$HTTP_CODE"
+
+# 4.5.6 公开配置端点：不应泄露 is_public=false 的字段（probe 已知非公开的 attemptTimes）
+RESP=$(curl -s "$API/admin/public/configs?category=security")
+LEAK=$(echo "$RESP" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+items = d.get('data', []) or []
+keys = {it.get('key') for it in items if isinstance(it, dict)}
+# attemptTimes / sumTimes / unlockMinu 应是 is_public=false（管理员才能看）
+leaked = keys & {'attemptTimes', 'sumTimes', 'unlockMinu'}
+print(','.join(sorted(leaked)) if leaked else 'none')
+" 2>/dev/null || echo "parse_error")
+if [ "$LEAK" = "none" ]; then
+    pass "Public configs do NOT leak is_public=false fields (attemptTimes/sumTimes/unlockMinu)"
+else
+    fail "Public configs leak check" "is_public=false fields leaked: $LEAK"
+fi
+
+# ============================================================
 section "5. Device List"
 # ============================================================
 

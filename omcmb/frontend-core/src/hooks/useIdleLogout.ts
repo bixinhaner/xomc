@@ -17,7 +17,9 @@ import { useUserStore } from '../store/userStore';
  */
 export function useIdleLogout(idleMinutes: number): void {
   const logout = useUserStore((s) => s.logout);
-  const lastActivityRef = useRef<number>(Date.now());
+  // null = 未初始化；effect 挂载时由 recordActivity 写入第一个时间戳。
+  // 不在 useRef 初始值里调 Date.now() — React 19 purity 规则禁止 render 时调非纯函数。
+  const lastActivityRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!idleMinutes || idleMinutes <= 0) {
@@ -25,6 +27,7 @@ export function useIdleLogout(idleMinutes: number): void {
     }
 
     const idleMs = idleMinutes * 60 * 1000;
+    lastActivityRef.current = Date.now();
 
     const recordActivity = (): void => {
       lastActivityRef.current = Date.now();
@@ -44,7 +47,8 @@ export function useIdleLogout(idleMinutes: number): void {
     // 每 30s 检查一次：足够及时（远小于通常 idleMinutes ≥ 5）且开销低
     const checkInterval = window.setInterval(() => {
       const now = Date.now();
-      if (now - lastActivityRef.current >= idleMs) {
+      const last = lastActivityRef.current ?? now; // effect 挂载时已写入，正常情况下非空
+      if (now - last >= idleMs) {
         // 超时 — 登出 + 主动跳登录页（避免依赖 store 内的 navigate 副作用）
         logout();
         if (window.location.pathname !== '/login') {
