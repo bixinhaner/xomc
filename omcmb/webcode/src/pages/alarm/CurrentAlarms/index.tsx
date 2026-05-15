@@ -558,7 +558,7 @@ export default function CurrentAlarms() {
         title: t('alarm.alarmId'),
         dataIndex: 'id',
         width: 100,
-        render: (val, record) => (
+        render: (val: unknown, record) => (
           <Space size={4}>
             {record.unread === '1' && <Badge status="error" style={{ marginLeft: -4 }} />}
             <Button
@@ -567,7 +567,7 @@ export default function CurrentAlarms() {
               style={{ padding: 0, height: 'auto' }}
               onClick={() => handleShowDetail(record)}
             >
-              {val}
+              {String(val ?? '')}
             </Button>
           </Space>
         ),
@@ -611,7 +611,7 @@ export default function CurrentAlarms() {
         title: t('alarm.neTypeCol'),
         dataIndex: 'neType',
         width: 120,
-        render: (val: string) => formatBaseStationTypeLabel(val),
+        render: (val: unknown) => formatBaseStationTypeLabel(String(val ?? '')),
       },
       {
         key: 'equipInfo',
@@ -626,7 +626,7 @@ export default function CurrentAlarms() {
         dataIndex: 'eventType',
         width: 160,
         ellipsis: true,
-        render: (val: EventType) => t(EVENT_TYPE_CONFIG[val] || 'common.unknown'),
+        render: (val: unknown) => t(EVENT_TYPE_CONFIG[val as EventType] || 'common.unknown'),
       },
       {
         key: 'dealState',
@@ -634,8 +634,8 @@ export default function CurrentAlarms() {
         dataIndex: 'dealState',
         width: 190,
         ellipsis: true,
-        render: (val: DealState) => {
-          const config = DEAL_STATE_CONFIG[val];
+        render: (val: unknown) => {
+          const config = DEAL_STATE_CONFIG[val as DealState];
           return (
             <span style={{ color: config?.color || '#666' }}>
               {t(config?.label || 'common.unknown')}
