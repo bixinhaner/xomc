@@ -46,7 +46,7 @@ export interface DeviceDialogsProps {
   onSaveDevices: () => void;
   onDownloadTemplate: () => void;
 
-  t: (id: string, values?: Record<string, unknown>) => string;
+  t: (id: string, values?: Record<string, string | number>) => string;
 }
 
 export default function DeviceDialogs({

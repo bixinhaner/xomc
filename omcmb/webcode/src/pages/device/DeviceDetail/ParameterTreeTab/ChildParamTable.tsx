@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useMemo, useRef } from 'react';
+import { useCallback, useState, useMemo, useRef } from 'react';
 import {
   Table,
   Tag,
@@ -128,6 +128,7 @@ function getParamName(fullPath: string): string {
 // Virtual table row height constant
 const ROW_HEIGHT = 40;
 const _HEADER_HEIGHT = 39;
+void _HEADER_HEIGHT;
 // Max visible rows for virtual scroll area
 const MAX_VISIBLE_ROWS = 15;
 const VIRTUAL_SCROLL_HEIGHT = ROW_HEIGHT * MAX_VISIBLE_ROWS;
@@ -355,7 +356,7 @@ export default function ChildParamTable({
             {v}
           </Text>
         ) : (
-          <Text type="quaternary" style={{ fontSize: 11 }}>
+          <Text type="secondary" style={{ fontSize: 11 }}>
             -
           </Text>
         ),
@@ -374,7 +375,7 @@ export default function ChildParamTable({
             </Text>
           </Tooltip>
         ) : (
-          <Text type="quaternary" style={{ fontSize: 11 }}>
+          <Text type="secondary" style={{ fontSize: 11 }}>
             -
           </Text>
         );
@@ -520,7 +521,7 @@ export default function ChildParamTable({
       {/* Performance hint for large datasets */}
       {shouldVirtualize && (
         <div style={{ marginTop: 8, textAlign: 'right' }}>
-          <Text type="quaternary" style={{ fontSize: 11 }}>
+          <Text type="secondary" style={{ fontSize: 11 }}>
             已启用虚拟滚动优化
           </Text>
         </div>

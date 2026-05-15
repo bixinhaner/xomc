@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Space, Tag, Switch, Dropdown, Input, App, Typography, Card, Select } from 'antd';
 import type { MenuProps } from 'antd';
@@ -789,7 +789,7 @@ export default function PlugAndPlay() {
             dataIndex: 'executeProcedure',
             width: 200,
             ellipsis: true,
-            render: (val: string) => translateProcedure(val),
+            render: (val: unknown) => translateProcedure(val as string),
           }];
         case '1': // Software Upgrade - show original/target version
           return [
@@ -798,14 +798,14 @@ export default function PlugAndPlay() {
               title: t('provision.originalVersion'),
               dataIndex: 'originalVersion',
               width: 120,
-              render: (val: string) => val || '-',
+              render: (val: unknown) => (val as string) || '-',
             },
             {
               key: 'targetVersion',
               title: t('provision.targetVersion'),
               dataIndex: 'targetVersion',
               width: 120,
-              render: (val: string) => val || '-',
+              render: (val: unknown) => (val as string) || '-',
             },
           ];
         case '2': // License - show license file
@@ -815,7 +815,7 @@ export default function PlugAndPlay() {
             dataIndex: 'licenseFile',
             width: 200,
             ellipsis: true,
-            render: (val: string) => val || '-',
+            render: (val: unknown) => (val as string) || '-',
           }];
         default: // Self Config - no extra columns
           return [];
@@ -828,7 +828,8 @@ export default function PlugAndPlay() {
         title: t('table.status'),
         dataIndex: 'status',
         width: 90,
-        render: (val: TaskStatus) => {
+        render: (raw: unknown) => {
+          const val = raw as TaskStatus;
           const cfg = STATUS_CONFIG[val];
           return <Tag color={cfg.color} icon={cfg.icon}>{cfg.label}</Tag>;
         },
@@ -839,7 +840,7 @@ export default function PlugAndPlay() {
         dataIndex: 'failureReason',
         width: 200,
         ellipsis: true,
-        render: (val: string) => translateFailureReason(val),
+        render: (val: unknown) => translateFailureReason(val as string),
       },
     ];
 

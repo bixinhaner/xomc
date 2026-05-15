@@ -26,7 +26,7 @@ export interface DeviceListPanelProps {
   onImport: (fileList: UploadFile[]) => void;
   onDownloadTemplate: () => void;
   onEditDevice: (device: Device) => void;
-  t: (id: string, values?: Record<string, unknown>) => string;
+  t: (id: string, values?: Record<string, string | number>) => string;
 }
 
 export default function DeviceListPanel({

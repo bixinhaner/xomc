@@ -7,6 +7,7 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { Checkbox, Spin, Empty } from 'antd';
 import { SearchOutlined, PlusOutlined, MinusOutlined } from '@ant-design/icons';
 import GISMap, { MAP_CONFIG } from '@/components/GISMap';
+import type { GISMapRef } from '@/components/GISMap';
 import type { MapDevice, DeviceGroupNode, DeviceGeo, DeviceSearchResult } from '@core/types/map';
 import type { Domain } from '@core/types/topology';
 import { useThemeToken } from '@/hooks/useThemeToken';
@@ -81,7 +82,7 @@ export default function GISMapView() {
   const [deviceSearchExpanded, setDeviceSearchExpanded] = useState(false);
 
   // 地图组件引用
-  const mapRef = useRef<{ highlightAndFlyTo: (device: MapDevice) => void }>(null);
+  const mapRef = useRef<GISMapRef>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
@@ -543,7 +544,7 @@ export default function GISMapView() {
             borderBottom: '1px solid #E8E8E8',
           }}
         >
-          <span style={{ fontSize: 18, fontWeight: 600, color: '#262626' }}>筛选</span>
+          <span style={{ fontSize: 18, fontWeight: 600, color: 'var(--color-neutral-800)' }}>筛选</span>
         </div>
 
         {/* 搜索设备组 */}
@@ -615,7 +616,7 @@ export default function GISMapView() {
                 margin: '0 8px 0 12px',
               }}
             />
-            <span style={{ fontSize: 14, color: '#262626' }}>在线激活</span>
+            <span style={{ fontSize: 14, color: 'var(--color-neutral-800)' }}>在线激活</span>
             <span style={{ marginLeft: 'auto', fontSize: 14, color: '#52C41A' }}>
               {stats.onlineActive.toLocaleString()}
             </span>
@@ -636,7 +637,7 @@ export default function GISMapView() {
                 margin: '0 8px 0 12px',
               }}
             />
-            <span style={{ fontSize: 14, color: '#262626' }}>在线未激活</span>
+            <span style={{ fontSize: 14, color: 'var(--color-neutral-800)' }}>在线未激活</span>
             <span style={{ marginLeft: 'auto', fontSize: 14, color: '#FAAD14' }}>
               {stats.onlineInactive.toLocaleString()}
             </span>
@@ -657,7 +658,7 @@ export default function GISMapView() {
                 margin: '0 8px 0 12px',
               }}
             />
-            <span style={{ fontSize: 14, color: '#262626' }}>离线</span>
+            <span style={{ fontSize: 14, color: 'var(--color-neutral-800)' }}>离线</span>
             <span style={{ marginLeft: 'auto', fontSize: 14, color: '#b60808' }}>
               {stats.offline.toLocaleString()}
             </span>
@@ -682,7 +683,7 @@ export default function GISMapView() {
                   boxShadow: '0 0 0 1px #E8E8E8',
                 }}
               />
-              <span style={{ marginLeft: 8, fontSize: 12, color: '#595959' }}>在线激活</span>
+              <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>在线激活</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center' }}>
               <div
@@ -695,7 +696,7 @@ export default function GISMapView() {
                   boxShadow: '0 0 0 1px #E8E8E8',
                 }}
               />
-              <span style={{ marginLeft: 8, fontSize: 12, color: '#595959' }}>在线未激活</span>
+              <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>在线未激活</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center' }}>
               <div
@@ -708,7 +709,7 @@ export default function GISMapView() {
                   boxShadow: '0 0 0 1px #E8E8E8',
                 }}
               />
-              <span style={{ marginLeft: 8, fontSize: 12, color: '#595959' }}>离线设备</span>
+              <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>离线设备</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center' }}>
               <div
@@ -726,7 +727,7 @@ export default function GISMapView() {
               >
                 <span style={{ fontSize: 9, fontWeight: 700, color: '#FFF' }}>N</span>
               </div>
-              <span style={{ marginLeft: 8, fontSize: 12, color: '#595959' }}>设备聚合</span>
+              <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>设备聚合</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center' }}>
               <div
@@ -742,7 +743,7 @@ export default function GISMapView() {
               >
                 <span style={{ fontSize: 9, fontWeight: 700, color: '#FFF' }}>3</span>
               </div>
-              <span style={{ marginLeft: 8, fontSize: 12, color: '#595959' }}>告警数量</span>
+              <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>告警数量</span>
             </div>
           </div>
         </div>
@@ -819,7 +820,7 @@ export default function GISMapView() {
                   border: 'none',
                   outline: 'none',
                   fontSize: 13,
-                  color: '#262626',
+                  color: 'var(--color-neutral-800)',
                   background: 'transparent',
                 }}
               />
@@ -921,7 +922,7 @@ export default function GISMapView() {
                                   background: statusColor,
                                 }}
                               />
-                              <span style={{ fontSize: 13, fontWeight: 500, color: '#262626' }}>
+                              <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-neutral-800)' }}>
                                 {result.name}
                               </span>
                             </div>
@@ -967,7 +968,7 @@ export default function GISMapView() {
             onMouseLeave={(e) => (e.currentTarget.style.background = '#F5F5F5')}
             onClick={() => console.log('Zoom in')}
           >
-            <span style={{ fontSize: 16, fontWeight: 600, color: '#262626' }}>+</span>
+            <span style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-neutral-800)' }}>+</span>
           </button>
           <div style={{ width: 24, height: 1, background: '#F0F0F0' }} />
           <button
@@ -976,20 +977,20 @@ export default function GISMapView() {
             onMouseLeave={(e) => (e.currentTarget.style.background = '#F5F5F5')}
             onClick={() => console.log('Zoom out')}
           >
-            <span style={{ fontSize: 16, fontWeight: 600, color: '#262626' }}>−</span>
+            <span style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-neutral-800)' }}>−</span>
           </button>
         </div>
 
         {/* 统计面板 */}
         <div style={statsPanelStyle}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: '#262626', marginBottom: 8 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-neutral-800)', marginBottom: 8 }}>
             设备统计
           </div>
           <div style={{ borderTop: '1px solid #F0F0F0', margin: '8px 0 16px' }} />
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: 12, color: '#8C8C8C' }}>总设备</span>
-            <span style={{ fontSize: 22, fontWeight: 700, color: '#262626' }}>
+            <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--color-neutral-800)' }}>
               {stats.total.toLocaleString()}
             </span>
           </div>
@@ -1012,7 +1013,7 @@ export default function GISMapView() {
                   marginRight: 8,
                 }}
               />
-              <span style={{ fontSize: 12, color: '#595959' }}>在线激活</span>
+              <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>在线激活</span>
             </div>
             <span style={{ fontSize: 14, fontWeight: 600, color: '#52C41A' }}>
               {stats.onlineActive.toLocaleString()}
@@ -1037,7 +1038,7 @@ export default function GISMapView() {
                   marginRight: 8,
                 }}
               />
-              <span style={{ fontSize: 12, color: '#595959' }}>在线未激活</span>
+              <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>在线未激活</span>
             </div>
             <span style={{ fontSize: 14, fontWeight: 600, color: '#FAAD14' }}>
               {stats.onlineInactive.toLocaleString()}
@@ -1062,7 +1063,7 @@ export default function GISMapView() {
                   marginRight: 8,
                 }}
               />
-              <span style={{ fontSize: 12, color: '#595959' }}>离线</span>
+              <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>离线</span>
             </div>
             <span style={{ fontSize: 14, fontWeight: 600, color: '#8C8C8C' }}>
               {stats.offline.toLocaleString()}

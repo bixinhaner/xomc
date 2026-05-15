@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { topologyService } from '../../mock/services/topologyService';
 import { topologyApi } from '../../services/api/topologyApi';
 import { useMock } from '../../services/apiSwitch';
-import type { MapFilterParams, MapBounds } from '../../types/map';
+import type { MapFilterParams, MapBounds, MapStats } from '../../types/map';
 import type { SiteStatus, NodeType, NodeStatus, EdgeStatus } from '../../types/topology';
 
 export function useDomains() {
@@ -254,11 +254,11 @@ export function useMapAggregation(params: {
  * 获取地图统计数据
  */
 export function useMapStats(params?: { groupIds?: string[]; bounds?: string }) {
-  return useQuery({
+  return useQuery<MapStats>({
     queryKey: ['topology', 'map', 'stats', params],
     queryFn: () =>
       useMock
-        ? Promise.resolve({ total: 0, statusCount: {}, alarmCount: 0 }) // Mock 实现
+        ? Promise.resolve<MapStats>({ total: 0, statusCount: { onlineActive: 0, onlineInactive: 0, offline: 0 }, alarmCount: 0 }) // Mock 实现
         : topologyApi.getMapStats(params),
     staleTime: 5 * 60 * 1000,
     refetchInterval: 60 * 1000, // 每分钟刷新

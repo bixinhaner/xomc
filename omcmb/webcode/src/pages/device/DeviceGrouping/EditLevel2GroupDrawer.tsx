@@ -15,7 +15,7 @@ export interface EditLevel2GroupDrawerProps {
   onClose: () => void;
   onSave: () => void;
   onNameFiltersChange: React.Dispatch<React.SetStateAction<NameFilterItem[]>>;
-  t: (id: string, values?: Record<string, unknown>) => string;
+  t: (id: string, values?: Record<string, string | number>) => string;
 }
 
 /**

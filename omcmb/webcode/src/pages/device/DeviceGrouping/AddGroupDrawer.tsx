@@ -9,7 +9,7 @@ export interface AddGroupDrawerProps {
   groups: GroupItem[];
   onOk: () => void;
   onCancel: () => void;
-  t: (id: string, values?: Record<string, unknown>) => string;
+  t: (id: string, values?: Record<string, string | number>) => string;
 }
 
 /**
