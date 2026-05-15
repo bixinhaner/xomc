@@ -4,6 +4,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { useParamsList } from '@core/hooks/api/useMmlAdmin';
 import type { ParamAdmin } from '@core/types/mmlAdmin';
 import { useT } from '@/hooks/useT';
+import ParamReferencesDrawer from './ParamReferencesDrawer';
 
 const PAGE_SIZE = 20;
 
@@ -11,6 +12,8 @@ export default function ParamsTab() {
   const t = useT();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
+  const [refsDrawerOpen, setRefsDrawerOpen] = useState(false);
+  const [activeParam, setActiveParam] = useState<ParamAdmin | undefined>();
 
   const { data, isLoading } = useParamsList({ search, page, pageSize: PAGE_SIZE });
 
@@ -30,6 +33,22 @@ export default function ParamsTab() {
           {r.changeApplies === 'OnReboot' && <Tag color="warning">OnReboot</Tag>}
           {r.catalogProtected && <Tag color="default">protected</Tag>}
         </span>
+      ),
+    },
+    {
+      title: t('mml.admin.catalog.params.references'),
+      key: 'refs',
+      width: 120,
+      render: (_, r) => (
+        <a
+          onClick={(e) => {
+            e.stopPropagation();
+            setActiveParam(r);
+            setRefsDrawerOpen(true);
+          }}
+        >
+          {t('mml.admin.catalog.params.references')}
+        </a>
       ),
     },
   ];
@@ -71,6 +90,11 @@ export default function ParamsTab() {
           total: data.total,
           onChange: setPage,
         }}
+      />
+      <ParamReferencesDrawer
+        open={refsDrawerOpen}
+        param={activeParam}
+        onClose={() => setRefsDrawerOpen(false)}
       />
     </div>
   );

@@ -536,6 +536,19 @@ type AdminParamRepository interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 	GetByID(ctx context.Context, id uuid.UUID) (*Param, error)
 	List(ctx context.Context, f AdminParamFilter) ([]Param, int64, error)
+	// ListReferences 反向查：返回引用该 param_id 的命令列表（admin Tab 3 Params 行点击抽屉用，T-0131）
+	ListReferences(ctx context.Context, paramID uuid.UUID) ([]ParamReference, error)
+}
+
+// ParamReference 是 admin Tab 3 反向查的一条记录：某个 param 被哪些命令引用。
+type ParamReference struct {
+	CommandID       uuid.UUID         `json:"command_id"`
+	CommandCode     string            `json:"command_code"`
+	LogicalCode     string            `json:"logical_code"`
+	OperationType   string            `json:"operation_type"`
+	CommandNameI18n map[string]string `json:"command_name_i18n"`
+	GroupID         uuid.UUID         `json:"group_id"`
+	GroupPath       string            `json:"group_path"`
 }
 
 // PgAdminParamRepository PostgreSQL 实现。
@@ -750,6 +763,52 @@ func (r *PgAdminParamRepository) List(ctx context.Context, f AdminParamFilter) (
 		return nil, 0, fmt.Errorf("iterate params rows: %w", err)
 	}
 	return out, total, nil
+}
+
+// ListReferences 反向查询：返回引用该 param_id 的命令列表（T-0131 admin Tab 3 反向查抽屉用）。
+// JOIN 链：mml_command_sub_fields → mml_commands → mml_param_groups。
+// ORDER BY command_code 保持稳定顺序便于 UI 渲染。
+func (r *PgAdminParamRepository) ListReferences(ctx context.Context, paramID uuid.UUID) ([]ParamReference, error) {
+	const sqlText = `
+SELECT c.id, c.command_code, c.logical_code, c.operation_type,
+       c.command_name_i18n, g.id, g.path
+FROM mml_command_sub_fields sf
+JOIN mml_commands c       ON c.id = sf.command_id
+JOIN mml_param_groups g   ON g.id = c.group_id
+WHERE sf.param_id = $1
+ORDER BY c.command_code`
+	rows, err := r.pool.Query(ctx, sqlText, paramID)
+	if err != nil {
+		return nil, fmt.Errorf("query param references: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]ParamReference, 0, 8)
+	for rows.Next() {
+		var ref ParamReference
+		var nameI18nBytes []byte
+		if err := rows.Scan(
+			&ref.CommandID,
+			&ref.CommandCode,
+			&ref.LogicalCode,
+			&ref.OperationType,
+			&nameI18nBytes,
+			&ref.GroupID,
+			&ref.GroupPath,
+		); err != nil {
+			return nil, fmt.Errorf("scan param reference: %w", err)
+		}
+		if len(nameI18nBytes) > 0 {
+			if err := json.Unmarshal(nameI18nBytes, &ref.CommandNameI18n); err != nil {
+				return nil, fmt.Errorf("unmarshal command_name_i18n: %w", err)
+			}
+		}
+		out = append(out, ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate param references rows: %w", err)
+	}
+	return out, nil
 }
 
 // ============================================================

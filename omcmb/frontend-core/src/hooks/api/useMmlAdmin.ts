@@ -16,6 +16,7 @@ import type {
   CommandAdmin,
   SubFieldAdmin,
   ParamAdmin,
+  ParamReference,
   CreateGroupRequest,
   UpdateGroupRequest,
   CreateCommandRequest,
@@ -44,6 +45,19 @@ export function useParamsList(req: ListParamsRequest = {}) {
   return useQuery<ListParamsResponse>({
     queryKey: [...QK_ADMIN_PARAMS, req],
     queryFn: () => mmlAdminApi.listParams(req),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * T-0131: param 反向查 — 返回引用该 param 的命令列表（admin Tab 3 抽屉用）。
+ * enabled = Boolean(paramId) 避免首次渲染抽屉关闭时空查。
+ */
+export function useParamReferences(paramId: string | undefined) {
+  return useQuery<ParamReference[]>({
+    queryKey: [...QK_ADMIN_PARAMS, paramId ?? '', 'references'],
+    queryFn: () => mmlAdminApi.listParamReferences(paramId!),
+    enabled: Boolean(paramId),
     staleTime: 5 * 60 * 1000,
   });
 }

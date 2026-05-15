@@ -30,10 +30,12 @@ import type {
   BackendCommandAdmin,
   BackendSubFieldAdmin,
   BackendParamAdmin,
+  BackendParamReference,
   GroupAdmin,
   CommandAdmin,
   SubFieldAdmin,
   ParamAdmin,
+  ParamReference,
   CreateGroupRequest,
   UpdateGroupRequest,
   CreateCommandRequest,
@@ -50,6 +52,7 @@ import {
   mapBackendCommand,
   mapBackendSubField,
   mapBackendParam,
+  mapBackendParamReference,
 } from '../../types/mmlAdmin';
 
 const BASE = '/admin';
@@ -143,5 +146,16 @@ export const mmlAdminApi = {
 
   async deleteParam(id: string): Promise<void> {
     await http.delete<void>(`${BASE}/params/${id}`);
+  },
+
+  /**
+   * 反向查：返回引用该 param 的命令列表（T-0131 admin Tab 3 抽屉用）。
+   * 不分页（单 param 的引用集通常 ≤ 50，全量返回足够）。
+   */
+  async listParamReferences(paramId: string): Promise<ParamReference[]> {
+    const { data } = await http.get<{ items: BackendParamReference[] }>(
+      `${BASE}/params/${paramId}/references`,
+    );
+    return (data.items ?? []).map(mapBackendParamReference);
   },
 };

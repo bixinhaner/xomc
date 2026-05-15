@@ -241,6 +241,30 @@ export interface ListParamsResponse {
 }
 
 // ============================================================
+// ParamReference (T-0131 admin Tab 3 反向查)
+// ============================================================
+
+export interface BackendParamReference {
+  command_id: string;
+  command_code: string;
+  logical_code: string;
+  operation_type: string;
+  command_name_i18n: Record<string, string>;
+  group_id: string;
+  group_path: string;
+}
+
+export interface ParamReference {
+  commandId: string;
+  commandCode: string;
+  logicalCode: string;
+  operationType: string;
+  commandNameI18n: I18nMap;
+  groupId: string;
+  groupPath: string;
+}
+
+// ============================================================
 // Mappers (Backend snake_case → FE camelCase)
 // ============================================================
 
@@ -288,6 +312,18 @@ export function mapBackendSubField(b: BackendSubFieldAdmin): SubFieldAdmin {
     defaultSelected: b.default_selected,
     isRequired: b.is_required,
     sortOrder: b.sort_order,
+  };
+}
+
+export function mapBackendParamReference(b: BackendParamReference): ParamReference {
+  return {
+    commandId: b.command_id,
+    commandCode: b.command_code,
+    logicalCode: b.logical_code,
+    operationType: b.operation_type,
+    commandNameI18n: b.command_name_i18n ?? {},
+    groupId: b.group_id,
+    groupPath: b.group_path,
   };
 }
 

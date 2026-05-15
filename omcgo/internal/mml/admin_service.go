@@ -586,6 +586,11 @@ func (s *AdminService) ListParams(ctx context.Context, f AdminParamFilter) ([]Pa
 	return s.paramRepo.List(ctx, f)
 }
 
+// ListParamReferences 反向查：返回引用该 param 的命令列表（T-0131 admin Tab 3 抽屉用）。
+func (s *AdminService) ListParamReferences(ctx context.Context, paramID uuid.UUID) ([]ParamReference, error) {
+	return s.paramRepo.ListReferences(ctx, paramID)
+}
+
 // ============================================================
 // Helpers
 // ============================================================

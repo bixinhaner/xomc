@@ -90,6 +90,7 @@ func (h *AdminHandler) RegisterRoutes(rg *gin.RouterGroup) {
 
 	params := admin.Group("/params")
 	params.GET("", h.ListParams)
+	params.GET("/:id/references", h.ListParamReferences)
 	params.POST("", h.CreateParam)
 	params.PATCH("/:id", h.UpdateParam)
 	params.DELETE("/:id", h.DeleteParam)
@@ -298,6 +299,30 @@ func (h *AdminHandler) ListParams(c *gin.Context) {
 		PageNum:  f.PageNum,
 		PageSize: f.PageSize,
 	})
+}
+
+// ListParamReferencesResp 是 GET /admin/params/:id/references 的响应体（T-0131）。
+type ListParamReferencesResp struct {
+	Items []ParamReference `json:"items"`
+}
+
+// ListParamReferences GET /api/v1/mml/admin/params/:id/references
+//
+//	反向查：返回引用该 param 的命令列表（admin Tab 3 抽屉用，T-0131）。
+//	不分页（单 param 的引用集通常 ≤ 50，全量返回足够）。
+func (h *AdminHandler) ListParamReferences(c *gin.Context) {
+	idStr := c.Param("id")
+	paramID, err := uuid.Parse(idStr)
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid param id: "+idStr)
+		return
+	}
+	refs, err := h.service.ListParamReferences(c.Request.Context(), paramID)
+	if err != nil {
+		h.respondAdminError(c, err)
+		return
+	}
+	response.OK(c, ListParamReferencesResp{Items: refs})
 }
 
 // CreateParam POST /api/v1/mml/admin/params
