@@ -16,6 +16,7 @@ import {
   Table,
   Tag,
   Tabs,
+  Tooltip,
   Typography,
   message,
 } from 'antd';
@@ -323,6 +324,22 @@ export default function FileTransferCenter() {
     [],
   );
 
+  const deviceActionColumn = {
+    title: '操作',
+    key: 'action',
+    width: 88,
+    align: 'center' as const,
+    render: (_: unknown, record: UnifiedFileTransferDeviceItem) => (
+      <Space size={0}>
+        <Tooltip title={`SN: ${record.deviceSn} | ${record.productType}`}>
+          <Button type="link" size="small" icon={<EyeOutlined />} style={{ paddingInline: 0 }}>
+            详情
+          </Button>
+        </Tooltip>
+      </Space>
+    ),
+  };
+
   const failureReasonColumn = {
     title: '失败原因',
     dataIndex: 'failureReason',
@@ -385,15 +402,27 @@ export default function FileTransferCenter() {
   const taskActionColumn = {
     title: '操作',
     key: 'action',
-    width: 160,
-    fixed: 'right' as const,
+    width: 108,
+    align: 'center' as const,
     render: (_: unknown, record: UnifiedFileTransferTask) => (
-      <Space size={4}>
-        <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => openDetailDrawer(record)}>
+      <Space size={0}>
+        <Button
+          type="link"
+          size="small"
+          icon={<EyeOutlined />}
+          onClick={() => openDetailDrawer(record)}
+          style={{ paddingInline: 0 }}
+        >
           详情
         </Button>
         <Dropdown menu={{ items: buildTaskActionItems(record) }} trigger={['click']}>
-          <Button type="link" size="small" icon={<MoreOutlined />} loading={taskActionLoading} />
+          <Button
+            type="link"
+            size="small"
+            icon={<MoreOutlined />}
+            loading={taskActionLoading}
+            style={{ paddingInline: 4 }}
+          />
         </Dropdown>
       </Space>
     ),
@@ -452,6 +481,7 @@ export default function FileTransferCenter() {
   const taskColumns: ColumnsType<UnifiedFileTransferTask> = useMemo(() => {
     if (isUpgradeLikeCategory) {
       return [
+        taskActionColumn,
         {
           title: '任务名称',
           dataIndex: 'taskName',
@@ -525,11 +555,11 @@ export default function FileTransferCenter() {
           width: 180,
           render: (_, record) => record.status === 'ended' ? new Date(record.createdAt).toLocaleString('zh-CN') : '-',
         },
-        taskActionColumn,
       ];
     }
 
     return [
+      taskActionColumn,
       {
         title: '任务名称',
         dataIndex: 'taskName',
@@ -598,13 +628,13 @@ export default function FileTransferCenter() {
         width: 180,
         render: (value: string) => new Date(value).toLocaleString('zh-CN'),
       },
-      taskActionColumn,
     ];
   }, [isUpgradeLikeCategory, taskTypes]);
 
   const deviceColumns: ColumnsType<UnifiedFileTransferDeviceItem> = useMemo(() => {
     if (isUpgradeLikeCategory) {
       return [
+        deviceActionColumn,
         { title: '基站编码', dataIndex: 'deviceSn', key: 'deviceSn', width: 120 },
         { title: '任务名称', dataIndex: 'taskName', key: 'taskName', width: 180, ellipsis: true },
         { title: '源版本', dataIndex: 'currentVersion', key: 'currentVersion', width: 120 },
@@ -650,6 +680,7 @@ export default function FileTransferCenter() {
     }
 
     return [
+      deviceActionColumn,
       {
         title: '设备名称',
         dataIndex: 'deviceName',

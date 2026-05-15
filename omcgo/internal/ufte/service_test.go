@@ -122,6 +122,7 @@ func TestBuiltInTaskTypes_CoversRequiredTemplates(t *testing.T) {
 	assert.Equal(t, "config_backup", seen["CONFIG_BACKUP"].Category)
 	assert.Equal(t, "config_restore", seen["CONFIG_RESTORE"].Category)
 	assert.Equal(t, "1 Firmware Upgrade Image", seen["ENB_IMG_UPGRADE"].FileType)
+	assert.Equal(t, "X {OUI} Software Upgrade Patch", seen["ENB_PATCH_UPGRADE"].FileType)
 	assert.Equal(t, "Firmware Upgrade Fpga", seen["ENB_FPGA_UPGRADE"].FileType)
 	_, has5GFpga := seen["GNB_FPGA_UPGRADE"]
 	assert.False(t, has5GFpga)
