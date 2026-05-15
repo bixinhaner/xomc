@@ -63,10 +63,11 @@ log:
     - "/run/logs/worker/worker.log"
   rotation:
     enabled: true
-    max_size_mb: 5
+    max_size_mb: 50
+    rotate_interval: 5m # 与 max_size_mb 为 OR：任一条件满足都切
     max_age_days: 7
-    max_backups: 3
     compress: true
     local_time: true
+    keep_uncompressed: 10 # 最新 N 个 .log 不压缩供 tail/less 直读；其余 .log → .log.gz
 
 request_id_prefix: "worker"

@@ -580,18 +580,26 @@ type LogConfig struct {
 	Rotation    RotationConfig `mapstructure:"rotation"`     // log rotation settings
 }
 
-// RotationConfig 配置日志文件轮转策略（基于 lumberjack）。
-// MaxSizeMB：文件超过此大小触发轮转；MaxAgeDays：保留最近 N 天日志；
-// MaxBackups：保留最多 N 个历史文件；Compress：历史文件是否 gzip 压缩。
-// RotateInterval 支持按时间强制轮转（如每 5 分钟），适用于高频日志场景。
+// RotationConfig 配置日志文件轮转策略。
+//
+// 两种归档管理模式：
+//   * Compactor 模式（KeepUncompressed > 0）：lumberjack 仅负责切割；后台 compactor
+//     goroutine 每 1 分钟扫描归档目录，保留最新 KeepUncompressed 个 .log 不压缩供
+//     `tail -f`/`less` 直读，其余 .log 压缩为 .log.gz，超 MaxAgeDays 整体删除。
+//     归档文件名精确到分钟（compactor rename 截断 lumberjack 的秒.毫秒）。
+//   * Legacy 模式（KeepUncompressed = 0）：完全沿用 lumberjack 原生 MaxBackups +
+//     MaxAge + Compress 三件套。用于 protocol_log 等暂未启用 compactor 的场景。
+//
+// MaxSizeMB 与 RotateInterval 是 OR 关系：任一满足都触发切割。
 type RotationConfig struct {
-	Enabled        bool          `mapstructure:"enabled"`         // enable log rotation
-	MaxSizeMB      int           `mapstructure:"max_size_mb"`     // max size in MB before rotation (default: 20)
-	MaxAgeDays     int           `mapstructure:"max_age_days"`    // max days to retain old log files (default: 7)
-	MaxBackups     int           `mapstructure:"max_backups"`     // max number of old log files to retain (default: 100)
-	Compress       bool          `mapstructure:"compress"`        // compress rotated files
-	LocalTime      bool          `mapstructure:"local_time"`      // use local time for rotation
-	RotateInterval time.Duration `mapstructure:"rotate_interval"` // time-based rotation interval (e.g., "5m" for 5 minutes)
+	Enabled          bool          `mapstructure:"enabled"`           // enable log rotation
+	MaxSizeMB        int           `mapstructure:"max_size_mb"`       // max size in MB before rotation (default: 50)
+	MaxAgeDays       int           `mapstructure:"max_age_days"`      // max days to retain old log files (default: 7)
+	MaxBackups       int           `mapstructure:"max_backups"`       // legacy 模式总归档数上限；compactor 模式忽略
+	Compress         bool          `mapstructure:"compress"`          // legacy 模式 lumberjack 自动 gzip；compactor 模式忽略（compactor 自行管理压缩）
+	LocalTime        bool          `mapstructure:"local_time"`        // use local time for rotation
+	RotateInterval   time.Duration `mapstructure:"rotate_interval"`   // time-based rotation interval (e.g., "5m" for 5 minutes)
+	KeepUncompressed int           `mapstructure:"keep_uncompressed"` // > 0 启用 compactor 模式，保留最新 N 个 .log 不压缩
 }
 
 // ProtocolLogConfig 配置 ACS 协议交互原始日志（独立于结构化日志）。
