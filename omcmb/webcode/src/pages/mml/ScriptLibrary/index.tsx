@@ -14,8 +14,8 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
-import type { MMLScript } from '@/types/mml';
-import { useMMLScripts, useDeleteMMLScripts } from '@/hooks/api/useMML';
+import type { MMLScript } from '@core/types/mml';
+import { useMMLScripts, useDeleteMMLScripts } from '@core/hooks/api/useMML';
 import { useDictionary } from '@/hooks/api/useSystem';
 import { useT } from '@/hooks/useT';
 
