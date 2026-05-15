@@ -65,8 +65,8 @@ interface NameFilterItem {
   andOr?: 'and' | 'or';
 }
 
-// 设备组选项（扁平化）
-interface _DeviceGroupOption {
+// 设备组选项（扁平化）—— 历史保留，类型导出后无消费方时 TS6196 仍报；用 export 避免
+export interface _DeviceGroupOption {
   id: string;
   name: string;
   level: number;
@@ -531,10 +531,10 @@ export default function DeviceRules() {
           try {
             const updatedTask = await deviceRulesApi.getTask(currentEditingRule.id, task.id);
             setMigrationTasks((prev) =>
-              prev.map((t) =>
-                t.id === task.id
+              prev.map((mt) =>
+                mt.id === task.id
                   ? {
-                      ...t,
+                      ...mt,
                       status: updatedTask.status as MigrationStatus,
                       progress:
                         updatedTask.totalDevices > 0
@@ -552,7 +552,7 @@ export default function DeviceRules() {
                             })
                           : updatedTask.errorMessage || '',
                     }
-                  : t
+                  : mt
               )
             );
 
@@ -741,14 +741,14 @@ export default function DeviceRules() {
         title: t('table.createTime'),
         dataIndex: 'createdAt',
         width: 160,
-        render: (val) => (val ? new Date(val).toLocaleString('zh-CN') : ''),
+        render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : ''),
       },
       {
         key: 'updatedAt',
         title: t('table.updateTime'),
         dataIndex: 'updatedAt',
         width: 160,
-        render: (val) => (val ? new Date(val).toLocaleString('zh-CN') : ''),
+        render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : ''),
       },
     ],
     [handleToggle, handleEdit, handleDelete, handleActive, handleMoveUp, handleMoveDown, filteredRules.length, t]
@@ -914,7 +914,6 @@ export default function DeviceRules() {
             loading={rulesLoading}
             rowKey="id"
             total={filteredRules.length}
-            pagination={false}
             showPagination={false}
             defaultDensity="default"
           />
@@ -1140,7 +1139,7 @@ export default function DeviceRules() {
         confirmLoading={applyMutation.isPending}
       >
         <div style={{ marginBottom: 12, color: 'var(--color-text-secondary)' }}>
-          {t('device.rules.applyConfirm', { name: currentEditingRule?.name })}
+          {t('device.rules.applyConfirm', { name: currentEditingRule?.name ?? '' })}
         </div>
         <div
           style={{
