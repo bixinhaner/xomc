@@ -206,6 +206,7 @@ type IndicatorListItem struct {
 	PerfIndicator
 	IsEnabled bool   `json:"is_enabled"`
 	CustName  string `json:"cust_name,omitempty"`
+	GroupName string `json:"group_name,omitempty"` // 来自 indicator_group_* JOIN，前端列表显示分组用
 }
 
 type CreateIndicatorRequest struct {

@@ -42,17 +42,20 @@ func (r *PgIndicatorRepository) List(ctx context.Context, filter IndicatorListFi
 
 	table := dt.IndicatorTable()
 	enabledTable := dt.EnabledTable()
+	groupTable := dt.GroupTable()
 
 	cols := indicatorColumnsForDevice(dt)
 	selectCols := append(cols,
 		"CASE WHEN e.indicator_id IS NOT NULL THEN true ELSE false END AS is_enabled",
 		"COALESCE(cn.cust_name, '') AS cust_name",
+		"COALESCE(g.cn_name, g.en_name, '') AS group_name",
 	)
 
 	builder := storage.Psql.Select(selectCols...).
 		From(table+" AS i").
 		LeftJoin(enabledTable+" e ON e.indicator_id = i.id AND e.operator_code = ?", filter.OperatorCode).
-		LeftJoin("perf_cust_name cn ON cn.perf_id = i.id AND cn.operator_code = ?", filter.OperatorCode)
+		LeftJoin("perf_cust_name cn ON cn.perf_id = i.id AND cn.operator_code = ?", filter.OperatorCode).
+		LeftJoin(groupTable + " g ON g.id = i.group_id")
 
 	builder = applyIndicatorFilters(builder, filter, dt)
 
@@ -425,17 +428,20 @@ func (r *PgIndicatorRepository) ListAll(ctx context.Context, filter IndicatorLis
 
 	table := dt.IndicatorTable()
 	enabledTable := dt.EnabledTable()
+	groupTable := dt.GroupTable()
 
 	cols := indicatorColumnsForDevice(dt)
 	selectCols := append(cols,
 		"CASE WHEN e.indicator_id IS NOT NULL THEN true ELSE false END AS is_enabled",
 		"COALESCE(cn.cust_name, '') AS cust_name",
+		"COALESCE(g.cn_name, g.en_name, '') AS group_name",
 	)
 
 	builder := storage.Psql.Select(selectCols...).
 		From(table+" AS i").
 		LeftJoin(enabledTable+" e ON e.indicator_id = i.id AND e.operator_code = ?", filter.OperatorCode).
-		LeftJoin("perf_cust_name cn ON cn.perf_id = i.id AND cn.operator_code = ?", filter.OperatorCode)
+		LeftJoin("perf_cust_name cn ON cn.perf_id = i.id AND cn.operator_code = ?", filter.OperatorCode).
+		LeftJoin(groupTable + " g ON g.id = i.group_id")
 
 	builder = applyIndicatorFilters(builder, filter, dt)
 	builder = builder.OrderBy("i.en_name")
@@ -596,7 +602,7 @@ func scanIndicatorListItem(rows pgx.Rows, dt DeviceType) (*IndicatorListItem, er
 			&item.IsBuildIn, &item.IsCounter, &item.Arithmetic, &item.StatisType,
 			&item.CalculatingStatus, &item.ProductTypes, &item.IndicatorLevel,
 			&item.CreatedAt, &item.UpdatedAt,
-			&item.IsEnabled, &item.CustName,
+			&item.IsEnabled, &item.CustName, &item.GroupName,
 		)
 	} else {
 		err = rows.Scan(
@@ -605,7 +611,7 @@ func scanIndicatorListItem(rows pgx.Rows, dt DeviceType) (*IndicatorListItem, er
 			&item.IsBuildIn, &item.IsCounter, &item.Arithmetic, &item.StatisType,
 			&item.CalculatingStatus,
 			&item.CreatedAt, &item.UpdatedAt,
-			&item.IsEnabled, &item.CustName,
+			&item.IsEnabled, &item.CustName, &item.GroupName,
 		)
 	}
 	if err != nil {
