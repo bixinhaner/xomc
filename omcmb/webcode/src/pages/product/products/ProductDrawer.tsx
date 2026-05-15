@@ -80,6 +80,8 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
   const [form] = Form.useForm<FormValues>();
   const [activeTab, setActiveTab] = useState('basic');
   const [newPattern, setNewPattern] = useState('');
+  // 新增模式下暂存的正则数组；提交时随 Create 接口一并落库（后端事务原子）
+  const [pendingPatterns, setPendingPatterns] = useState<string[]>([]);
 
   const { data: detail } = useProductDetail(isEdit ? product?.id : undefined);
   const { data: paramModels } = useParamModelList();
@@ -132,6 +134,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
     }
     setActiveTab('basic');
     setNewPattern('');
+    setPendingPatterns([]);
   }, [open, product, form]);
 
   const buildOverride = (v: FormValues): DeviceAttrsOverride => ({
@@ -177,6 +180,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
           enableUnknownAlarm: v.enableUnknownAlarm,
           deviceAttrsOverride: buildOverride(v),
           paramModelId: v.paramModelId,
+          patterns: pendingPatterns.length > 0 ? pendingPatterns : undefined,
         };
         await createMut.mutateAsync(input);
         message.success('已创建');
@@ -433,50 +437,113 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
             {
               key: 'patterns',
               label: '正则模式',
-              disabled: !isEdit,
-              children: (
+              children: !isEdit ? (
                 <>
-                  {!isEdit ? (
-                    <Text type="secondary">先保存产品后再添加正则规则</Text>
-                  ) : (
-                    <>
-                      <Space style={{ marginBottom: 12 }}>
-                        <Input
-                          placeholder="新规则（如 PicoCell-LTE-.+）"
-                          value={newPattern}
-                          onChange={(e) => setNewPattern(e.target.value)}
-                          style={{ width: 320 }}
-                        />
-                        <Button
-                          type="primary"
-                          loading={addPatMut.isPending}
-                          disabled={!newPattern.trim() || !product}
-                          onClick={async () => {
-                            if (!product) return;
-                            try {
-                              await addPatMut.mutateAsync({
-                                productId: product.id,
-                                productClass: newPattern.trim(),
-                              });
-                              setNewPattern('');
-                              message.success('已添加');
-                            } catch (er) {
-                              message.error((er as Error).message);
-                            }
-                          }}
-                        >
-                          添加
-                        </Button>
-                      </Space>
-                      <Table<ProductPattern>
-                        rowKey="id"
-                        size="small"
-                        columns={patternColumns}
-                        dataSource={patterns}
-                        pagination={false}
-                      />
-                    </>
-                  )}
+                  <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+                    在此填写的正则将随产品一并保存（后端事务原子）。保存后可在编辑模式下调整顺序、启停。
+                  </Text>
+                  <Space style={{ marginBottom: 12 }}>
+                    <Input
+                      placeholder="新规则（如 PicoCell-LTE-.+）"
+                      value={newPattern}
+                      onChange={(e) => setNewPattern(e.target.value)}
+                      onPressEnter={() => {
+                        const v = newPattern.trim();
+                        if (!v) return;
+                        if (pendingPatterns.includes(v)) {
+                          message.warning('正则已存在');
+                          return;
+                        }
+                        setPendingPatterns([...pendingPatterns, v]);
+                        setNewPattern('');
+                      }}
+                      style={{ width: 320 }}
+                    />
+                    <Button
+                      type="primary"
+                      disabled={!newPattern.trim()}
+                      onClick={() => {
+                        const v = newPattern.trim();
+                        if (!v) return;
+                        if (pendingPatterns.includes(v)) {
+                          message.warning('正则已存在');
+                          return;
+                        }
+                        setPendingPatterns([...pendingPatterns, v]);
+                        setNewPattern('');
+                      }}
+                    >
+                      添加
+                    </Button>
+                  </Space>
+                  <Table<{ key: number; productClass: string }>
+                    rowKey="key"
+                    size="small"
+                    columns={[
+                      {
+                        title: '序号',
+                        dataIndex: 'key',
+                        width: 70,
+                        render: (v: number) => <Tag color="blue">{v + 1}</Tag>,
+                      },
+                      { title: '正则', dataIndex: 'productClass' },
+                      {
+                        title: '操作',
+                        width: 80,
+                        render: (_: unknown, _row, idx: number) => (
+                          <Button
+                            size="small"
+                            danger
+                            icon={<DeleteOutlined />}
+                            onClick={() => {
+                              setPendingPatterns(pendingPatterns.filter((_, i) => i !== idx));
+                            }}
+                          />
+                        ),
+                      },
+                    ]}
+                    dataSource={pendingPatterns.map((pc, idx) => ({ key: idx, productClass: pc }))}
+                    pagination={false}
+                    locale={{ emptyText: '尚未添加正则' }}
+                  />
+                </>
+              ) : (
+                <>
+                  <Space style={{ marginBottom: 12 }}>
+                    <Input
+                      placeholder="新规则（如 PicoCell-LTE-.+）"
+                      value={newPattern}
+                      onChange={(e) => setNewPattern(e.target.value)}
+                      style={{ width: 320 }}
+                    />
+                    <Button
+                      type="primary"
+                      loading={addPatMut.isPending}
+                      disabled={!newPattern.trim() || !product}
+                      onClick={async () => {
+                        if (!product) return;
+                        try {
+                          await addPatMut.mutateAsync({
+                            productId: product.id,
+                            productClass: newPattern.trim(),
+                          });
+                          setNewPattern('');
+                          message.success('已添加');
+                        } catch (er) {
+                          message.error((er as Error).message);
+                        }
+                      }}
+                    >
+                      添加
+                    </Button>
+                  </Space>
+                  <Table<ProductPattern>
+                    rowKey="id"
+                    size="small"
+                    columns={patternColumns}
+                    dataSource={patterns}
+                    pagination={false}
+                  />
                 </>
               ),
             },

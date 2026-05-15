@@ -76,6 +76,7 @@ export interface CreateProductInput {
   enableFiletype11?: boolean;
   deviceAttrsOverride?: DeviceAttrsOverride;
   enableUnknownAlarm?: boolean;
+  patterns?: string[]; // 可选；后端事务内随 product 一并创建
 }
 
 export interface UpdateProductInput extends Partial<CreateProductInput> {

@@ -32,6 +32,7 @@ type CreateProductInput struct {
 	EnableFileType11    bool
 	DeviceAttrsOverride map[string]any
 	EnableUnknownAlarm  bool
+	Patterns            []string // 可选；事务内随 products 一并插入 product_class_patterns
 }
 
 // UpdateProductInput nil 字段保留原值。
@@ -99,6 +100,8 @@ func (r *PgRepository) LookupParamModelIDByName(ctx context.Context, name string
 // ── Product CRUD ────────────────────────────────────────────────────
 
 // CreateProduct 新建 products 行；data_attrs_override.data_type=true 拒绝。
+// 若 in.Patterns 非空，则事务内同时插入 product_class_patterns（sort_order 取全局当前
+// max+1 起递增）；任一 pattern 插入失败则整体回滚，products 不会半成品落库。
 func (r *PgRepository) CreateProduct(ctx context.Context, in CreateProductInput) (*Product, error) {
 	if strings.TrimSpace(in.Name) == "" {
 		return nil, fmt.Errorf("product_name required")
@@ -108,10 +111,31 @@ func (r *PgRepository) CreateProduct(ctx context.Context, in CreateProductInput)
 			return nil, fmt.Errorf("device_attrs_override.data_type=true is not allowed")
 		}
 	}
+	// 预清洗 patterns：trim + 去空 + 去重，保证报错前置且事务内不再补救
+	cleanPatterns := make([]string, 0, len(in.Patterns))
+	seen := make(map[string]struct{}, len(in.Patterns))
+	for _, p := range in.Patterns {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
+		cleanPatterns = append(cleanPatterns, p)
+	}
+
 	overrideJSON, err := json.Marshal(in.DeviceAttrsOverride)
 	if err != nil {
 		return nil, fmt.Errorf("marshal device_attrs_override: %w", err)
 	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	const insertSQL = `
 INSERT INTO products (
@@ -121,12 +145,34 @@ INSERT INTO products (
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 RETURNING id`
 	var id uuid.UUID
-	if err := r.pool.QueryRow(ctx, insertSQL,
+	if err := tx.QueryRow(ctx, insertSQL,
 		in.Name, in.Vendor, in.Tech, in.RadioModes, in.Description,
 		in.ParamModelID, in.IndicatorDeviceType, in.IndicatorPlatform, in.AlarmNeType,
 		in.EnableFileType11, overrideJSON, in.EnableUnknownAlarm,
 	).Scan(&id); err != nil {
 		return nil, fmt.Errorf("insert product: %w", err)
+	}
+
+	if len(cleanPatterns) > 0 {
+		var baseOrder int
+		if err := tx.QueryRow(ctx,
+			`SELECT COALESCE(MAX(sort_order), 0) FROM product_class_patterns WHERE is_active`,
+		).Scan(&baseOrder); err != nil {
+			return nil, fmt.Errorf("compute base sort_order: %w", err)
+		}
+		for i, pc := range cleanPatterns {
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO product_class_patterns (product_id, product_class, sort_order, is_active)
+				 VALUES ($1, $2, $3, TRUE)`,
+				id, pc, baseOrder+i+1,
+			); err != nil {
+				return nil, fmt.Errorf("insert pattern %q: %w", pc, err)
+			}
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit create product: %w", err)
 	}
 	return r.GetProductByID(ctx, id)
 }

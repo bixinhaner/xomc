@@ -54,7 +54,13 @@ export const productService = {
       deviceCount: 0,
     };
     products.push(newP);
-    patterns[newP.id] = [];
+    patterns[newP.id] = (input.patterns || []).map((pc, idx) => ({
+      id: `pat-${Date.now()}-${idx}`,
+      productId: newP.id,
+      productClass: pc,
+      sortOrder: idx + 1,
+      isActive: true,
+    }));
     return clone(newP);
   },
 

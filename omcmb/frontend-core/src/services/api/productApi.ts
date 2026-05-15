@@ -125,6 +125,7 @@ function buildCreatePayload(input: CreateProductInput): Record<string, unknown> 
   if (input.enableFiletype11 !== undefined) payload.enable_filetype11 = input.enableFiletype11;
   if (input.deviceAttrsOverride !== undefined) payload.device_attrs_override = input.deviceAttrsOverride;
   if (input.enableUnknownAlarm !== undefined) payload.enable_unknown_alarm = input.enableUnknownAlarm;
+  if (input.patterns && input.patterns.length > 0) payload.patterns = input.patterns;
   return payload;
 }
 

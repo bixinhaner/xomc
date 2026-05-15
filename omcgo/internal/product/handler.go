@@ -202,6 +202,7 @@ type createProductReq struct {
 	EnableFileType11    *bool          `json:"enable_filetype11"`
 	DeviceAttrsOverride map[string]any `json:"device_attrs_override"`
 	EnableUnknownAlarm  *bool          `json:"enable_unknown_alarm"`
+	Patterns            []string       `json:"patterns"` // 可选；事务内随 product 一并落库
 }
 
 func (h *Handler) Create(c *gin.Context) {
@@ -230,6 +231,7 @@ func (h *Handler) Create(c *gin.Context) {
 		EnableFileType11:    true,
 		DeviceAttrsOverride: req.DeviceAttrsOverride,
 		EnableUnknownAlarm:  false,
+		Patterns:            req.Patterns,
 	}
 	if req.EnableFileType11 != nil {
 		in.EnableFileType11 = *req.EnableFileType11
