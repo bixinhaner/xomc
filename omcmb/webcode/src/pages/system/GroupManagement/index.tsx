@@ -346,7 +346,7 @@ export default function GroupManagement() {
               placeholder={t('common.pleaseSelect')}
               value={selectedUserIds}
               onChange={setSelectedUserIds}
-              options={(allUsers ?? []).map((u) => ({ label: u.userName, value: u.id }))}
+              options={(allUsers ?? []).map((u) => ({ label: u.username, value: u.id }))}
               style={{ width: '100%' }}
             />
           </Form.Item>
@@ -416,7 +416,7 @@ export default function GroupManagement() {
               placeholder={t('common.pleaseSelect')}
               value={selectedUserIds}
               onChange={setSelectedUserIds}
-              options={(allUsers ?? []).map((u) => ({ label: u.userName, value: u.id }))}
+              options={(allUsers ?? []).map((u) => ({ label: u.username, value: u.id }))}
               style={{ width: '100%' }}
             />
           </Form.Item>

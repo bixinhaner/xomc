@@ -145,8 +145,10 @@ export default function ApiManagement() {
       dataIndex: 'apiGroup',
       key: 'apiGroup',
       width: 120,
-      render: (val: string) =>
-        val ? <Tag color="cyan">{val}</Tag> : <span style={{ color: '#999' }}>-</span>,
+      render: (val: unknown) => {
+        const v = val as string;
+        return v ? <Tag color="cyan">{v}</Tag> : <span style={{ color: '#999' }}>-</span>;
+      },
     },
     {
       title: t('api.name'),
@@ -165,9 +167,10 @@ export default function ApiManagement() {
       dataIndex: 'method',
       key: 'method',
       width: 100,
-      render: (val: string) => (
-        <Tag color={METHOD_COLORS[val] ?? 'default'}>{val}</Tag>
-      ),
+      render: (val: unknown) => {
+        const v = String(val ?? '');
+        return <Tag color={METHOD_COLORS[v] ?? 'default'}>{v}</Tag>;
+      },
     },
     {
       title: t('common.operation'),

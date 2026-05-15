@@ -15,6 +15,7 @@ import {
   Checkbox,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, SaveOutlined } from '@ant-design/icons';
+import type { ColumnsType } from 'antd/es/table';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
 
@@ -107,7 +108,7 @@ export default function NotificationSettings() {
     });
   };
 
-  const ruleColumns = [
+  const ruleColumns: ColumnsType<NotificationRule> = [
     { title: t('table.name'), dataIndex: 'name', key: 'name', ellipsis: true },
     { title: t('table.type'), dataIndex: 'triggerEvent', key: 'triggerEvent', width: 160, render: (val: string) => triggerEventLabelMap[val] ?? val },
     {
@@ -139,7 +140,7 @@ export default function NotificationSettings() {
     },
   ];
 
-  const groupColumns = [
+  const groupColumns: ColumnsType<RecipientGroup> = [
     { title: t('table.name'), dataIndex: 'name', key: 'name', width: 130 },
     { title: t('user.email'), dataIndex: 'emails', key: 'emails', ellipsis: true },
     { title: t('user.phone'), dataIndex: 'phones', key: 'phones', ellipsis: true },

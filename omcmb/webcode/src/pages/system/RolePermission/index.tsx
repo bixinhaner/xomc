@@ -124,7 +124,7 @@ const buildDeviceGroupTreeData = (
         children,
       };
     })
-    .filter((node): node is TreeDataNode => node !== null);
+    .filter((node) => node !== null) as TreeDataNode[];
 };
 
 // 菜单树驱动的辅助函数（替代 PERMISSION_MODULES 派生常量）。
@@ -356,6 +356,7 @@ export default function RoleManagement() {
   const getRoleDetail = useMutation({
     mutationFn: (roleId: string) => adminApi.getRoleById(roleId),
   });
+  void getRoleDetail;
   const getRoleDeviceGroupsMut = useMutation({
     mutationFn: (roleId: string) => adminApi.getRoleDeviceGroups(roleId),
   });
@@ -566,7 +567,7 @@ export default function RoleManagement() {
           deviceGroupIds: selectedDeviceGroupIds,
           networkTypes: selectedNetworkTypes,
           builtIn: 0,
-        },
+        } as unknown as Parameters<typeof createRole.mutate>[0],
         {
           onSuccess: (newRole) => {
             if (newRole?.id) {
@@ -765,22 +766,22 @@ export default function RoleManagement() {
         );
       },
     },
-    { key: 'description', title: t('role.roleDescription'), dataIndex: 'description', width: 150, ellipsis: true, render: (v) => v || '-' },
-    { key: 'createUser', title: t('role.createUser'), dataIndex: 'createUser', width: 100, render: (v) => v || '-' },
+    { key: 'description', title: t('role.roleDescription'), dataIndex: 'description', width: 150, ellipsis: true, render: (v) => (v as string) || '-' },
+    { key: 'createUser', title: t('role.createUser'), dataIndex: 'createUser', width: 100, render: (v) => (v as string) || '-' },
     {
       key: 'createTime',
       title: t('role.createTime'),
       dataIndex: 'createTime',
       width: 160,
-      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '-'),
+      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '-') as string,
     },
-    { key: 'updateUser', title: t('role.updateUser'), dataIndex: 'updateUser', width: 100, render: (v) => v || '-' },
+    { key: 'updateUser', title: t('role.updateUser'), dataIndex: 'updateUser', width: 100, render: (v) => (v as string) || '-' },
     {
       key: 'updateTime',
       title: t('role.updateTime'),
       dataIndex: 'updateTime',
       width: 160,
-      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '-'),
+      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '-') as string,
     },
   ], [t, isBuiltIn, handleDelete, handleCopy, loadRoleDetailToForm]);
 

@@ -556,7 +556,7 @@ export default function UserManagement() {
       },
     },
     { key: 'email', title: t('user.email'), dataIndex: 'email', ellipsis: true },
-    { key: 'phone', title: t('user.phone'), dataIndex: 'phone', width: 120, render: (v) => v || '-' },
+    { key: 'phone', title: t('user.phone'), dataIndex: 'phone', width: 120, render: (v) => (v as string) || '-' },
     {
       key: 'roles',
       title: '角色',
@@ -597,14 +597,14 @@ export default function UserManagement() {
       title: '过期时间',
       dataIndex: 'expireTime',
       width: 160,
-      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '永久'),
+      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '永久') as string,
     },
     {
       key: 'lastLoginTime',
       title: t('user.lastLoginTime'),
       dataIndex: 'lastLoginTime',
       width: 160,
-      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '—'),
+      render: (val) => (val ? new Date(String(val)).toLocaleString('zh-CN') : '—') as string,
     },
     {
       key: 'createTime',
