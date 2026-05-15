@@ -34,7 +34,7 @@ import LineChart from '@/components/Charts/LineChart';
 import GISMap from '@/components/GISMap';
 import type { MapDevice } from '@/components/GISMap';
 import { useDashboardData } from '@core/hooks/api/useDashboard';
-import { useAlarmCount } from '@core/hooks/api/useAlarms';
+import { useAlarmCount, useCurrentAlarms } from '@core/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { TiltCard } from '@/components/Effects';
@@ -48,6 +48,24 @@ const SEVERITY_COLOR: Record<string, string> = {
   minor: '#FADB14',
   warning: '#1677FF',
 };
+
+function formatAlarmTime(value: string | undefined): string {
+  if (!value) {
+    return '--';
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+}
 
 const QUICK_ACCESS_ITEMS = [
   { labelKey: 'nav.device.list',       icon: <AppstoreOutlined />,    path: '/device/list',               color: '#1677FF' },
@@ -81,6 +99,10 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const { data: dashboardData, isLoading } = useDashboardData();
   const { data: alarmCount } = useAlarmCount();
+  const { data: currentAlarmData, isLoading: isCurrentAlarmsLoading } = useCurrentAlarms({
+    page: 1,
+    pageSize: 6,
+  });
   const t = useT();
   const token = useThemeToken();
 
@@ -103,17 +125,17 @@ export default function DashboardPage() {
     warning: t('alarm.severity.warning'),
   }), [t]);
 
-  // Mock recent alarms
+  // Recent active alarms
   const recentAlarms = useMemo(
-    () => [
-      { id: '1', alarmName: 'CPU占用率超阈值', deviceName: '北京基站-001', severity: 'critical', eventTime: '09:32:15' },
-      { id: '2', alarmName: '链路丢包率异常', deviceName: '上海基站-002', severity: 'major', eventTime: '09:28:41' },
-      { id: '3', alarmName: '温度过高告警', deviceName: '广州基站-003', severity: 'major', eventTime: '09:21:03' },
-      { id: '4', alarmName: '光模块接收功率低', deviceName: '成都基站-005', severity: 'minor', eventTime: '09:15:58' },
-      { id: '5', alarmName: '软件版本不匹配', deviceName: '西安基站-007', severity: 'warning', eventTime: '09:10:22' },
-      { id: '6', alarmName: '磁盘空间不足', deviceName: '南京基站-008', severity: 'warning', eventTime: '09:05:11' },
-    ],
-    []
+    () =>
+      (currentAlarmData?.items || []).map((alarm) => ({
+        id: alarm.id,
+        alarmName: alarm.alarmName || alarm.alarmIdentifier,
+        deviceName: alarm.deviceName || alarm.deviceSn,
+        severity: alarm.severity,
+        eventTime: formatAlarmTime(alarm.eventTime),
+      })),
+    [currentAlarmData]
   );
 
   // Donut chart data for alarm severity
@@ -287,6 +309,7 @@ export default function DashboardPage() {
             {/* Recent alarm list */}
             <List
               size="small"
+              loading={isCurrentAlarmsLoading}
               dataSource={recentAlarms}
               style={{ padding: '0 8px 8px' }}
               renderItem={(alarm) => (
