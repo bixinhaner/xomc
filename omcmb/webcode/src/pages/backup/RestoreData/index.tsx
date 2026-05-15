@@ -58,7 +58,7 @@ function parseSnList(raw: string): string[] {
 }
 
 export default function RestoreData() {
-  const { t } = useT();
+  const t = useT();
   const { message } = App.useApp();
 
   const [page, setPage] = useState(1);

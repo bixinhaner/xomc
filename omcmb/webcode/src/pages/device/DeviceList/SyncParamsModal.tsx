@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Checkbox, Collapse, Divider, Modal, Tag, Typography } from 'antd';
 import type { CheckboxChangeEvent } from 'antd/es/checkbox';
 import { useT } from '@/hooks/useT';

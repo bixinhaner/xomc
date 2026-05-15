@@ -112,7 +112,7 @@ export default function DeviceRegistration() {
       ...networkData,
     };
     try {
-      await createDevice.mutateAsync(input);
+      await createDevice.mutateAsync(input as unknown as Parameters<typeof createDevice.mutateAsync>[0]);
       setSubmitted(true);
       void message.success(t('status.success'));
     } catch (err: unknown) {

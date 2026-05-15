@@ -109,7 +109,7 @@ export default function SystemLogPage() {
       title: t('table.type'),
       dataIndex: 'source',
       width: 110,
-      render: (val) => <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#595959' }}>{String(val)}</span>,
+      render: (val) => <span style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--color-neutral-600)' }}>{String(val)}</span>,
     },
     {
       key: 'level',
@@ -135,7 +135,7 @@ export default function SystemLogPage() {
         <span style={{
           fontSize: 13,
           fontFamily: 'monospace',
-          color: '#262626',
+          color: 'var(--color-neutral-800)',
           display: 'block',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -153,7 +153,7 @@ export default function SystemLogPage() {
       fixed: 'right',
       render: (_, record) => {
         const log = record as SystemLogDetail;
-        const hasDetail = log.level === 'error' || log.level === 'fatal' || Boolean(log.stackTrace);
+        const hasDetail = (log.level as string).toLowerCase() === 'error' || (log.level as string).toLowerCase() === 'fatal' || Boolean(log.stackTrace);
         return hasDetail ? (
           <Button type="link" size="small"
             onClick={() => { setSelectedLog(log); setDetailVisible(true); }}>

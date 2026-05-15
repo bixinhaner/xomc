@@ -513,7 +513,7 @@ export default function BackupTasks() {
         backupType: 'full',
         storageLocation: '',
         creator: '',
-      },
+      } as Parameters<typeof createTask.mutate>[0],
       {
         onSuccess: () => {
           const deviceInfo = t('backup.deviceCountUnit', { count: drawerDevices.length });
@@ -721,9 +721,9 @@ export default function BackupTasks() {
       dataIndex: 'taskName',
       width: 180,
       ellipsis: true,
-      render: (val: string, record: BackupTaskRow) => (
+      render: (val: unknown, record: BackupTaskRow) => (
         <Button type="link" size="small" onClick={() => setTaskDetailId(record.id)} style={{ padding: 0 }}>
-          {val || '-'}
+          {(val as string) || '-'}
         </Button>
       ),
     },
@@ -741,7 +741,8 @@ export default function BackupTasks() {
       title: t('common.status'),
       dataIndex: 'status',
       width: 100,
-      render: (val: TaskStatus) => {
+      render: (raw: unknown) => {
+        const val = raw as TaskStatus;
         const cfg = TASK_STATUS_KEYS[val] ?? { color: 'default', key: '' };
         return <Tag color={cfg.color}>{t(cfg.key) || String(val)}</Tag>;
       },
@@ -751,7 +752,7 @@ export default function BackupTasks() {
       title: t('backup.taskProgress'),
       dataIndex: 'progress',
       width: 120,
-      render: (val: number) => <Progress percent={val} size="small" status={val === 100 ? 'success' : 'active'} />,
+      render: (raw: unknown) => { const val = raw as number; return <Progress percent={val} size="small" status={val === 100 ? 'success' : 'active'} />; },
     },
     {
       key: 'result',
@@ -788,10 +789,12 @@ export default function BackupTasks() {
       title: t('backup.configFile'),
       dataIndex: 'fileSize',
       width: 180,
-      render: (val: number, record: BackupDeviceRow) =>
-        record.status === 'success' && val > 0
+      render: (raw: unknown, record: BackupDeviceRow) => {
+        const val = raw as number;
+        return record.status === 'success' && val > 0
           ? <Button type="link" size="small" icon={<DownloadOutlined />} onClick={() => void message.success(t('backup.startDownload', { sn: record.deviceSn }))}>{record.deviceSn}_CFG.xml</Button>
-          : '-',
+          : '-';
+      },
     },
     {
       key: 'status',
@@ -809,7 +812,7 @@ export default function BackupTasks() {
       dataIndex: 'failureReason',
       width: 150,
       ellipsis: true,
-      render: (val: string) => val ? <span style={{ color: '#ff4d4f' }}>{val}</span> : '-',
+      render: (val: unknown) => val ? <span style={{ color: '#ff4d4f' }}>{val as string}</span> : '-',
     },
     { key: 'startTime', title: t('table.startTime'), dataIndex: 'startTime', width: 160 },
     { key: 'endTime', title: t('table.endTime'), dataIndex: 'endTime', width: 160 },

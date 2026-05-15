@@ -13,7 +13,7 @@ import {
 import MapPageLayout from '@/components/Layout/MapPageLayout';
 import TopologyCanvas from '@/components/TopologyCanvas';
 import { useTopoGraph } from '@core/hooks/api/useTopology';
-import type { TopoNode, TopoStatistics, NodeType, NodeStatus } from '@core/types/topology';
+import type { TopoNode, NodeType, NodeStatus } from '@core/types/topology';
 import { useT } from '@/hooks/useT';
 
 const LAYOUT_OPTIONS_KEYS = [

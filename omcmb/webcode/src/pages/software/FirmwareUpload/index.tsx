@@ -220,11 +220,6 @@ export default function FirmwareUpload() {
           },
         },
         {
-          onUploadProgress: (event) => {
-            if (event.total) {
-              setUploadProgress(Math.round((event.loaded * 100) / event.total));
-            }
-          },
           onSuccess: () => {
             void message.success(t('software.firmware.importSuccess'));
             handleCloseImportDrawer();

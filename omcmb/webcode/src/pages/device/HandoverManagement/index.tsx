@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Button, Form, Input, Modal, Space, Tag, Typography, message } from 'antd';
 import {
   CheckOutlined,
@@ -13,7 +13,7 @@ import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
 
-const { Text, _TextArea } = Typography;
+const { Text } = Typography;
 
 interface HandoverTask {
   id: string;

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Badge, Button, Card, Col, Input, Progress, Row, Select, Space, Tag, Typography } from 'antd';
 import {
@@ -40,7 +40,7 @@ function DeviceCard({
 }: {
   device: Device;
   onView: (sn: string) => void;
-  t: (id: string, values?: Record<string, unknown>) => string;
+  t: (id: string, values?: Record<string, string | number>) => string;
 }) {
   const metrics = useMemo(() => getMockMetrics(device.sn), [device.sn]);
   const isOnline = device.connStatus === 'online';

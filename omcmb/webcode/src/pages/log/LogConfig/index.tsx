@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Button, InputNumber, Progress, Table, message } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import { SaveOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
@@ -47,7 +48,7 @@ export default function LogConfig() {
     }));
   };
 
-  const columns = [
+  const columns: ColumnsType<LogConfigRow> = [
     {
       title: t('table.type'),
       dataIndex: 'logType',

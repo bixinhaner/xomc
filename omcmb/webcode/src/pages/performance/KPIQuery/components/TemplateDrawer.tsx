@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Drawer,
   Form,
@@ -350,7 +350,8 @@ export default function TemplateDrawer({
   };
 
   // 查询粒度变化
-  const handleReportPeriodChange = (e: { target: { value: unknown } }) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleReportPeriodChange = (e: any) => {
     const value = e.target.value as '15' | '60' | '1440';
     setReportPeriod(value);
     if (value === '1440') {

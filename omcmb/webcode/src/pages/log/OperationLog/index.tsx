@@ -271,7 +271,7 @@ export default function OperationLogPage() {
       title: t('log.logName'),
       dataIndex: 'logName',
       width: 200,
-      render: (val) => val || '-',
+      render: (val) => (val as string) || '-',
     },
     {
       key: 'detail',

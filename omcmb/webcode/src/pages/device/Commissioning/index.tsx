@@ -18,7 +18,7 @@ import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
 import AddDrawer from './AddDrawer';
 
-const { _Text } = Typography;
+void Typography;
 
 type StationType = 'eNB' | 'gNB' | 'GSM';
 type TaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
@@ -266,7 +266,7 @@ export default function Commissioning() {
         width: 110,
         render: (v) => {
           const typeConfig = STATION_TYPE_MAP[v as StationType];
-          return <Tag color={typeConfig?.color}>{typeConfig?.label || v}</Tag>;
+          return <Tag color={typeConfig?.color}>{typeConfig?.label || String(v ?? '')}</Tag>;
         },
       },
       {

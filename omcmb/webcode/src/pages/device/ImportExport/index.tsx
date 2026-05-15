@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   Alert,
   Button,
@@ -29,7 +29,7 @@ import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useT } from '@/hooks/useT';
 
 const { Dragger } = Upload;
-const { Text, Title, _Paragraph } = Typography;
+const { Text, Title } = Typography;
 
 interface ImportRecord {
   fileName: string;

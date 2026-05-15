@@ -1393,7 +1393,7 @@ export default function DeviceList() {
               batchActions={batchActions}
               onRefresh={() => void refetch()}
               defaultDensity="default"
-              scroll={{ x: true, y: 470 }}
+              scroll={{ x: 'max-content', y: 470 }}
               showRowNumber
               rowNumberTitle={t('table.rowNumber')}
             />

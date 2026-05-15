@@ -73,6 +73,7 @@ const _initial5GValues = {
   pci: '',
   coreIp: '',
 };
+void _initial5GValues;
 
 // 2G表单初始值
 const _initial2GValues = {
@@ -80,6 +81,7 @@ const _initial2GValues = {
   bscIp: '',
   wanIp: '',
 };
+void _initial2GValues;
 
 // IP地址验证正则
 const IP_REGEX = /^((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)$/;
