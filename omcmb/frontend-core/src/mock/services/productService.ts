@@ -180,4 +180,14 @@ export const productService = {
   async importDirectory() {
     return { reloaded: 'product' };
   },
+
+  async listIndicatorPlatforms(deviceType: string): Promise<string[]> {
+    const dt = (deviceType || '').toUpperCase();
+    if (dt === 'ENB') return ['enb-default', 'enb-comba', 'enb-baicells'];
+    return [];
+  },
+
+  async listAlarmNeTypes(): Promise<string[]> {
+    return ['ENB', 'GNB', 'OMC', 'EPC', 'EGW', 'CPE', 'UPS'];
+  },
 };

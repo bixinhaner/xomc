@@ -284,4 +284,19 @@ export const productApi = {
     const { data } = await http.post<{ reloaded: string }>('/products/import-directory');
     return data;
   },
+
+  async listIndicatorPlatforms(deviceType: string): Promise<string[]> {
+    const { data } = await http.get<{ items: string[]; total: number; device_type: string }>(
+      '/products/indicator-platforms',
+      { params: { deviceType } }
+    );
+    return data.items || [];
+  },
+
+  async listAlarmNeTypes(): Promise<string[]> {
+    const { data } = await http.get<{ items: string[]; total: number }>(
+      '/products/alarm-ne-types'
+    );
+    return data.items || [];
+  },
 };

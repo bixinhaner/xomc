@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -108,6 +109,61 @@ func (r *PgRepository) FetchIndicatorPlatformsByDeviceType(ctx context.Context, 
 		out[s] = struct{}{}
 	}
 	return out, rows.Err()
+}
+
+// ListIndicatorPlatforms 返回某 indicator_device_type 在 KPI 公式表中已存在的
+// platform_name 集合（distinct + 排序）。供产品创建/编辑表单的下拉框使用。
+// deviceType 不区分大小写；未识别 deviceType 返回空切片。
+func (r *PgRepository) ListIndicatorPlatforms(ctx context.Context, deviceType string) ([]string, error) {
+	table, ok := formulaTableByDeviceType(strings.ToLower(strings.TrimSpace(deviceType)))
+	if !ok {
+		return []string{}, nil
+	}
+	q := fmt.Sprintf(`SELECT DISTINCT platform_name FROM %s
+		WHERE platform_name IS NOT NULL AND platform_name <> ''
+		ORDER BY platform_name`, table)
+	rows, err := r.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("query %s platforms: %w", table, err)
+	}
+	defer rows.Close()
+	out := make([]string, 0, 8)
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return nil, fmt.Errorf("scan platform: %w", err)
+		}
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ListAlarmNeTypes 返回 alarm_definitions 中已存在的 ne_type（distinct + 排序）。
+// 供产品创建/编辑表单的下拉框使用。
+func (r *PgRepository) ListAlarmNeTypes(ctx context.Context) ([]string, error) {
+	const q = `SELECT DISTINCT ne_type FROM alarm_definitions
+		WHERE ne_type IS NOT NULL AND ne_type <> ''
+		ORDER BY ne_type`
+	rows, err := r.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("query alarm ne_types: %w", err)
+	}
+	defer rows.Close()
+	out := make([]string, 0, 8)
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return nil, fmt.Errorf("scan ne_type: %w", err)
+		}
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // FetchAlarmNeTypes 实现 Repository。

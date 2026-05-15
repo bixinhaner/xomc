@@ -78,6 +78,9 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	g.PUT("/orphan-devices/:deviceId/bind", h.BindOrphan)
 	g.POST("/cache/refresh", h.CacheRefresh)
 	g.POST("/import-directory", h.ImportDirectory)
+	// 枚举字典（产品表单下拉框用）
+	g.GET("/indicator-platforms", h.ListIndicatorPlatforms)
+	g.GET("/alarm-ne-types", h.ListAlarmNeTypes)
 
 	// 单产品
 	g.GET("/:id", h.Get)
@@ -194,7 +197,7 @@ type createProductReq struct {
 	ParamModelName      string         `json:"param_model_name"` // 反查 param_models.id
 	ParamModelID        *string        `json:"param_model_id"`   // 直接给 ID 也接受
 	IndicatorDeviceType string         `json:"indicator_device_type" binding:"required"`
-	IndicatorPlatform   string         `json:"indicator_platform" binding:"required"`
+	IndicatorPlatform   string         `json:"indicator_platform"` // 仅 ENB 必填，由 service 层按 device_type 校验
 	AlarmNeType         string         `json:"alarm_ne_type" binding:"required"`
 	EnableFileType11    *bool          `json:"enable_filetype11"`
 	DeviceAttrsOverride map[string]any `json:"device_attrs_override"`
@@ -205,6 +208,13 @@ func (h *Handler) Create(c *gin.Context) {
 	var req createProductReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	// indicator_platform 仅 ENB 类型必填；GNB / GSM 不收集（前端表单也对应隐藏）
+	if strings.EqualFold(strings.TrimSpace(req.IndicatorDeviceType), "ENB") &&
+		strings.TrimSpace(req.IndicatorPlatform) == "" {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("indicator_platform is required when indicator_device_type=ENB"))
 		return
 	}
 	in := CreateProductInput{
@@ -280,6 +290,14 @@ func (h *Handler) Update(c *gin.Context) {
 	var req updateProductReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	// 若本次更新把 device_type 改为 ENB，必须同时提供非空 indicator_platform
+	if req.IndicatorDeviceType != nil &&
+		strings.EqualFold(strings.TrimSpace(*req.IndicatorDeviceType), "ENB") &&
+		(req.IndicatorPlatform == nil || strings.TrimSpace(*req.IndicatorPlatform) == "") {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("indicator_platform is required when indicator_device_type=ENB"))
 		return
 	}
 	in := UpdateProductInput{
@@ -634,6 +652,40 @@ func (h *Handler) ImportDirectory(c *gin.Context) {
 		}
 	}
 	response.OK(c, gin.H{"reloaded": "product"})
+}
+
+// ── Enums (form dropdowns) ──────────────────────────────────────────
+
+// ListIndicatorPlatforms GET /api/v1/products/indicator-platforms?deviceType=ENB|GSM|GNB
+// 仅 ENB 当前有多平台（default / comba / ...），其他类型可能返回空集；前端据此控制可见性。
+func (h *Handler) ListIndicatorPlatforms(c *gin.Context) {
+	deviceType := strings.TrimSpace(c.Query("deviceType"))
+	if deviceType == "" {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("deviceType query parameter required"))
+		return
+	}
+	items, err := h.repo.ListIndicatorPlatforms(c.Request.Context(), deviceType)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OK(c, gin.H{
+		"device_type": deviceType,
+		"items":       items,
+		"total":       len(items),
+	})
+}
+
+// ListAlarmNeTypes GET /api/v1/products/alarm-ne-types
+// 返回 alarm_definitions.ne_type 字典（如 ENB / GNB / OMC / EPC / EGW / CPE / UPS）。
+func (h *Handler) ListAlarmNeTypes(c *gin.Context) {
+	items, err := h.repo.ListAlarmNeTypes(c.Request.Context())
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OK(c, gin.H{"items": items, "total": len(items)})
 }
 
 // ── helpers ─────────────────────────────────────────────────────────

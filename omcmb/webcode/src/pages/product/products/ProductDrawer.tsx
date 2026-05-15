@@ -24,6 +24,8 @@ import {
   useUpdatePattern,
   useDeletePattern,
   useMovePattern,
+  useIndicatorPlatforms,
+  useAlarmNeTypes,
 } from '@core/hooks/api/useProducts';
 import { useParamModelList } from '@core/hooks/api/useParamModels';
 import type {
@@ -81,6 +83,11 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
 
   const { data: detail } = useProductDetail(isEdit ? product?.id : undefined);
   const { data: paramModels } = useParamModelList();
+
+  const indicatorDeviceType = Form.useWatch('indicatorDeviceType', form);
+  const isENB = (indicatorDeviceType || '').toUpperCase() === 'ENB';
+  const { data: indicatorPlatforms } = useIndicatorPlatforms(isENB ? indicatorDeviceType : undefined);
+  const { data: alarmNeTypes } = useAlarmNeTypes();
 
   const createMut = useCreateProduct();
   const updateMut = useUpdateProduct();
@@ -320,18 +327,39 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                     rules={[{ required: true }]}
                     extra="决定 KPI 库 5 Tabs 中加载哪一类计数器/公式"
                   >
-                    <Select options={DEVICE_TYPE_OPTIONS} />
+                    <Select
+                      options={DEVICE_TYPE_OPTIONS}
+                      onChange={(val) => {
+                        if ((val || '').toUpperCase() !== 'ENB') {
+                          form.setFieldValue('indicatorPlatform', undefined);
+                        }
+                      }}
+                    />
                   </Form.Item>
-                  <Form.Item
-                    name="indicatorPlatform"
-                    label="指标平台名"
-                    rules={[{ required: true }]}
-                    extra="对应 KPI 库公式的 platform_name（如 enb-comba / gnb-default）"
-                  >
-                    <Input placeholder="enb-default / enb-comba / ..." />
-                  </Form.Item>
+                  {isENB && (
+                    <Form.Item
+                      name="indicatorPlatform"
+                      label="指标平台名"
+                      rules={[{ required: true, message: '指标平台名必填' }]}
+                      extra="对应 KPI 库公式的 platform_name（仅 ENB 类型需要）"
+                    >
+                      <Select
+                        placeholder="选择指标平台"
+                        options={(indicatorPlatforms || []).map((p) => ({ label: p, value: p }))}
+                        showSearch
+                        optionFilterProp="label"
+                        notFoundContent={indicatorPlatforms ? '无可用平台，请先在 KPI 公式表中维护' : '加载中...'}
+                      />
+                    </Form.Item>
+                  )}
                   <Form.Item name="alarmNeType" label="告警网元类型" rules={[{ required: true }]}>
-                    <Input placeholder="eNodeB / gNodeB / BTS / ..." />
+                    <Select
+                      placeholder="选择告警网元类型"
+                      options={(alarmNeTypes || []).map((n) => ({ label: n, value: n }))}
+                      showSearch
+                      optionFilterProp="label"
+                      notFoundContent={alarmNeTypes ? '告警定义库为空' : '加载中...'}
+                    />
                   </Form.Item>
                 </>
               ),

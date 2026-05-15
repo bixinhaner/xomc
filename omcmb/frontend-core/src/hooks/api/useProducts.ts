@@ -191,3 +191,20 @@ export function useProductImportDirectory() {
     },
   });
 }
+
+export function useIndicatorPlatforms(deviceType: string | undefined) {
+  return useQuery({
+    queryKey: [...PRODUCTS_KEY, 'indicator-platforms', deviceType],
+    queryFn: () => api.listIndicatorPlatforms(deviceType as string),
+    enabled: Boolean(deviceType && deviceType.trim()),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useAlarmNeTypes() {
+  return useQuery({
+    queryKey: [...PRODUCTS_KEY, 'alarm-ne-types'],
+    queryFn: () => api.listAlarmNeTypes(),
+    staleTime: 5 * 60 * 1000,
+  });
+}
