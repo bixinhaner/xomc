@@ -365,18 +365,20 @@ func classifyLoginFailure(err error) string {
 
 // loginErrorToFriendlyError 把内部登录错误翻译为面向用户的友好消息。
 //
-// 安全考虑：合并"用户不存在"和"密码错误"为同一文案——避免向攻击者透露
-// 用户名是否存在（防枚举）。直接返 *BusinessError 让 AbortWithError 走
-// BizCode + Message 分支，不再泄露 errors.Wrap 链字符串。
+// 文案策略：字面拆分（用户不存在 vs 密码错误）以提升 UX；安全侧靠
+// LoginGuard 失败计数 + IPGuard 限流 + CAPTCHA 兜底用户名枚举风险。
+// 直接返 *BusinessError 让 AbortWithError 走 BizCode + Message 分支，
+// 不再泄露 errors.Wrap 链字符串。
 func loginErrorToFriendlyError(err error) error {
 	switch {
-	case errors.Is(err, errLoginUserNotFound),
-		errors.Is(err, errLoginWrongPassword):
-		return commonerrors.NewBusinessError(7001, "用户名或密码错误", err)
+	case errors.Is(err, errLoginUserNotFound):
+		return commonerrors.NewBusinessError(7001, "用户不存在", err)
+	case errors.Is(err, errLoginWrongPassword):
+		return commonerrors.NewBusinessError(7005, "密码错误", err)
 	case errors.Is(err, errLoginAccountDisabled):
 		return commonerrors.NewBusinessError(7002, "账号已被禁用，请联系管理员", err)
 	case errors.Is(err, commonerrors.ErrUnauthorized):
-		return commonerrors.NewBusinessError(7000, "用户名或密码错误", err)
+		return commonerrors.NewBusinessError(7000, "登录凭据无效，请重试", err)
 	default:
 		return commonerrors.NewBusinessError(7099, "登录失败，请稍后重试", err)
 	}

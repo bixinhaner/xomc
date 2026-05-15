@@ -38,8 +38,8 @@ function clearRemembered() {
 
 export default function LoginPage() {
   const t = useT();
-  // T-0117: antd v5 静态 message 在某些场景下脱 ConfigProvider/App 上下文丢失（同 T-0097 修复模式）。
-  // 切到 App.useApp().message scoped 实例后，encryptPassword 抛错的 toast 才能稳定显示给用户。
+  // antd v5 静态 message 在某些场景下脱 ConfigProvider/App 上下文丢失，
+  // 切到 App.useApp().message scoped 实例后 toast 才能稳定显示给用户。
   const { message } = App.useApp();
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm<LoginFormValues>();

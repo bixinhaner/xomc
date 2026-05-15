@@ -568,6 +568,9 @@ func TestClassifyLoginFailure(t *testing.T) {
 
 // TestLoginErrorToFriendlyError 验证内部 error → 用户面文案的翻译表，并防回归
 // "wrong password: unauthorized" 泄露 Go 错误链字符串。
+//
+// 文案策略：字面拆分（密码错误 vs 用户不存在），UX 优先；用户名枚举防护
+// 由 LoginGuard 失败计数 + IPGuard 限流 + CAPTCHA 兜底。
 func TestLoginErrorToFriendlyError(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -577,17 +580,17 @@ func TestLoginErrorToFriendlyError(t *testing.T) {
 		shouldMatch bool // BusinessError 应能被 errors.As 匹配
 	}{
 		{
-			name:        "wrong password 合并到 用户名或密码错误（防枚举）",
+			name:        "wrong password → 密码错误",
 			err:         fmt.Errorf("%w: %w", errLoginWrongPassword, commonerrors.ErrUnauthorized),
-			wantCode:    7001,
-			wantMsg:     "用户名或密码错误",
+			wantCode:    7005,
+			wantMsg:     "密码错误",
 			shouldMatch: true,
 		},
 		{
-			name:        "user not found 合并到 用户名或密码错误（防枚举）",
+			name:        "user not found → 用户不存在",
 			err:         fmt.Errorf("%w: %w", errLoginUserNotFound, commonerrors.ErrUnauthorized),
 			wantCode:    7001,
-			wantMsg:     "用户名或密码错误",
+			wantMsg:     "用户不存在",
 			shouldMatch: true,
 		},
 		{
@@ -598,10 +601,10 @@ func TestLoginErrorToFriendlyError(t *testing.T) {
 			shouldMatch: true,
 		},
 		{
-			name:        "纯 ErrUnauthorized 也走友好文案",
+			name:        "纯 ErrUnauthorized fallback",
 			err:         commonerrors.ErrUnauthorized,
 			wantCode:    7000,
-			wantMsg:     "用户名或密码错误",
+			wantMsg:     "登录凭据无效，请重试",
 			shouldMatch: true,
 		},
 		{
@@ -621,7 +624,7 @@ func TestLoginErrorToFriendlyError(t *testing.T) {
 			if ok {
 				assert.Equal(t, tt.wantCode, bErr.Code)
 				assert.Equal(t, tt.wantMsg, bErr.Message)
-				// 防回归：友好 msg 中不应包含 Go 错误链字符串（"wrong password" / "unauthorized" 等）
+				// 防回归：友好 msg 中不应包含 Go 错误链字符串
 				assert.NotContains(t, bErr.Message, "wrong password")
 				assert.NotContains(t, bErr.Message, "unauthorized")
 				assert.NotContains(t, bErr.Message, ":")

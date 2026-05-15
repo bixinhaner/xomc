@@ -3,7 +3,6 @@ import type { TokenPairResponse } from '../../store/userStore';
 import type { User } from '../../types/system';
 import {
   preparePasswordPayload,
-  isPlaintextPayload,
   invalidatePublicKeyCache,
 } from '../crypto/passwordCipher';
 
@@ -41,16 +40,12 @@ function mapBackendUserToFrontend(bu: BackendUser): User {
 
 export const authApi = {
   async login(username: string, password: string): Promise<TokenPairResponse> {
-    // T-0120 双路径：secure context → RSA-OAEP 加密；非 secure context →
-    // 明文 fallback（后端需 LoginCrypto.AllowPlaintext=true）
-    const payload = await preparePasswordPayload(password);
-    const body: Record<string, unknown> = { username };
-    if (isPlaintextPayload(payload)) {
-      body.password = payload.plaintextPassword;
-    } else {
-      body.encrypted_password = payload.encryptedPassword;
-      body.key_id = payload.keyId;
-    }
+    const { encryptedPassword, keyId } = await preparePasswordPayload(password);
+    const body: Record<string, unknown> = {
+      username,
+      encrypted_password: encryptedPassword,
+      key_id: keyId,
+    };
     try {
       const { data } = await http.post<TokenPairResponse>('/auth/login', body);
       return data;

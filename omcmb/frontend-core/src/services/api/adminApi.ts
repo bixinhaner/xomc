@@ -1,8 +1,5 @@
 import http from '../http';
-import {
-  preparePasswordPayload,
-  isPlaintextPayload,
-} from '../crypto/passwordCipher';
+import { preparePasswordPayload } from '../crypto/passwordCipher';
 import type {
   User,
   UserRole,
@@ -556,8 +553,7 @@ export const adminApi = {
       roleIds?: string[];
     }
   ): Promise<User> {
-    // T-0120 双路径：secure context → RSA-OAEP；非 secure context → plaintext fallback
-    const payload = await preparePasswordPayload(data.password);
+    const { encryptedPassword, keyId } = await preparePasswordPayload(data.password);
     const body: Record<string, unknown> = {
       username: data.username,
       email: data.email || undefined,
@@ -567,13 +563,9 @@ export const adminApi = {
       display_name: data.displayName || data.username,
       status: data.status,
       role_ids: data.roleIds && data.roleIds.length > 0 ? data.roleIds : undefined,
+      encrypted_password: encryptedPassword,
+      key_id: keyId,
     };
-    if (isPlaintextPayload(payload)) {
-      body.password = payload.plaintextPassword;
-    } else {
-      body.encrypted_password = payload.encryptedPassword;
-      body.key_id = payload.keyId;
-    }
     const { data: bu } = await http.post<BackendUser>('/admin/users', body);
     return mapBackendUser(bu);
   },
@@ -594,16 +586,11 @@ export const adminApi = {
   },
 
   async resetPassword(id: string, newPassword: string): Promise<void> {
-    // T-0120 双路径：secure context → RSA-OAEP；非 secure context → plaintext fallback
-    const payload = await preparePasswordPayload(newPassword);
-    const body: Record<string, unknown> = {};
-    if (isPlaintextPayload(payload)) {
-      body.new_password = payload.plaintextPassword;
-    } else {
-      body.encrypted_new_password = payload.encryptedPassword;
-      body.key_id = payload.keyId;
-    }
-    await http.post(`/admin/users/${id}/reset-password`, body);
+    const { encryptedPassword, keyId } = await preparePasswordPayload(newPassword);
+    await http.post(`/admin/users/${id}/reset-password`, {
+      encrypted_new_password: encryptedPassword,
+      key_id: keyId,
+    });
   },
 
   async lockUser(id: string): Promise<void> {
@@ -1052,25 +1039,15 @@ export const adminApi = {
   },
 
   // Change password (current user)
-  // T-0120 双路径：secure context → RSA-OAEP；非 secure context → plaintext fallback
-  // 后端需 LoginCrypto.AllowPlaintext=true 才接受明文路径。
   async changePassword(data: { old_password: string; new_password: string }): Promise<void> {
     const oldPayload = await preparePasswordPayload(data.old_password);
     const newPayload = await preparePasswordPayload(data.new_password);
-    const body: Record<string, unknown> = {};
-    if (isPlaintextPayload(oldPayload) && isPlaintextPayload(newPayload)) {
-      body.old_password = oldPayload.plaintextPassword;
-      body.new_password = newPayload.plaintextPassword;
-    } else if (!isPlaintextPayload(oldPayload) && !isPlaintextPayload(newPayload)) {
-      // 两次 preparePasswordPayload 共用同一公钥缓存 → keyId 必然相同；取其一即可。
-      body.encrypted_old_password = oldPayload.encryptedPassword;
-      body.encrypted_new_password = newPayload.encryptedPassword;
-      body.key_id = oldPayload.keyId;
-    } else {
-      // 理论不可达：单次 secure context 状态稳定 — 两次调用返回同 path
-      throw new Error('changePassword: payload mode mismatch (mixed secure/insecure context)');
-    }
-    await http.post('/auth/change-password', body);
+    // 两次 preparePasswordPayload 共用同一公钥缓存 → keyId 必然相同；取其一即可。
+    await http.post('/auth/change-password', {
+      encrypted_old_password: oldPayload.encryptedPassword,
+      encrypted_new_password: newPayload.encryptedPassword,
+      key_id: oldPayload.keyId,
+    });
   },
 
   // ---- System Config (KV by category, batch upsert) ----
