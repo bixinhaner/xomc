@@ -47,7 +47,9 @@ import {
 const { Paragraph, Text, Title } = Typography;
 
 export default function TemplateDefinitionManagement() {
-  const { data: taskTypes = [], isLoading: taskTypesLoading } = useUnifiedFileTransferTaskTypes();
+  const { data: taskTypes = [], isLoading: taskTypesLoading } = useUnifiedFileTransferTaskTypes({
+    refetchOnMount: 'always',
+  });
   const categories = useMemo(() => buildCategoryTabs(taskTypes), [taskTypes]);
   const [selectedCategory, setSelectedCategory] = useState('gnb_upgrade');
   const [selectedTypeCode, setSelectedTypeCode] = useState('');

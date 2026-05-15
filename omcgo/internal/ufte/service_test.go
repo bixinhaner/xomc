@@ -4,16 +4,29 @@ import (
 	"context"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	coremodel "github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/software"
 )
 
 type ensureBuiltInTaskTypeRepo struct {
 	items    []TaskType
 	upserted []TaskType
+}
+
+type stubDeviceRepo struct {
+	device.DeviceRepository
+	listResponse *coremodel.ListResponse[coremodel.Device]
+	listError    error
+}
+
+func (s *stubDeviceRepo) List(_ context.Context, _ device.DeviceFilter) (*coremodel.ListResponse[coremodel.Device], error) {
+	return s.listResponse, s.listError
 }
 
 func (r *ensureBuiltInTaskTypeRepo) List(_ context.Context) ([]TaskType, error) {
@@ -68,13 +81,13 @@ func TestService_EnsureBuiltInTaskTypes_InsertsOnlyMissingDefaults(t *testing.T)
 func TestBuiltInTaskTypes_CoversRequiredTemplates(t *testing.T) {
 	defaults := builtInTaskTypes()
 	required := map[string]struct{}{
-		"ENB_IMG_UPGRADE":      {},
-		"GNB_IMG_UPGRADE":      {},
-		"VERSION_ROLLBACK":     {},
-		"RUNTIME_LOG_COLLECT":  {},
-		"FAULT_LOG_COLLECT":    {},
-		"CONFIG_BACKUP":        {},
-		"CONFIG_RESTORE":       {},
+		"ENB_IMG_UPGRADE":     {},
+		"GNB_IMG_UPGRADE":     {},
+		"VERSION_ROLLBACK":    {},
+		"RUNTIME_LOG_COLLECT": {},
+		"FAULT_LOG_COLLECT":   {},
+		"CONFIG_BACKUP":       {},
+		"CONFIG_RESTORE":      {},
 	}
 
 	seen := make(map[string]TaskType, len(defaults))
@@ -99,36 +112,36 @@ func TestService_LoadTaskTypeCatalog_UsesStoredRowsAsSourceOfTruth(t *testing.T)
 	repo := &ensureBuiltInTaskTypeRepo{
 		items: []TaskType{
 			{
-				TypeCode:         "ENB_IMG_UPGRADE",
-				Category:         "enb_upgrade",
-				CategoryLabel:    "4G升级",
-				DisplayName:      "库里的 4G 升级模板",
-				Description:      "from db",
-				RPCType:          "DOWNLOAD",
-				BuiltIn:          true,
-				Enabled:          true,
-				StepChain:        []string{"CHECK_PERMISSION", "SEND_RPC"},
-				PermissionCode:   "CODE_ENB_UPGRADE_IMAGE",
-				PlatformScope:    []string{"4G eNB"},
-				FileType:         "1",
-				FileTypeLabel:    "Firmware Upgrade Image",
-				LastEditor:       "system",
+				TypeCode:       "ENB_IMG_UPGRADE",
+				Category:       "enb_upgrade",
+				CategoryLabel:  "4G升级",
+				DisplayName:    "库里的 4G 升级模板",
+				Description:    "from db",
+				RPCType:        "DOWNLOAD",
+				BuiltIn:        true,
+				Enabled:        true,
+				StepChain:      []string{"CHECK_PERMISSION", "SEND_RPC"},
+				PermissionCode: "CODE_ENB_UPGRADE_IMAGE",
+				PlatformScope:  []string{"4G eNB"},
+				FileType:       "1",
+				FileTypeLabel:  "Firmware Upgrade Image",
+				LastEditor:     "system",
 			},
 			{
-				TypeCode:         "CUSTOM_UPLOAD_SAMPLE",
-				Category:         "custom_upload",
-				CategoryLabel:    "自定义上传",
-				DisplayName:      "自定义上传模板",
-				Description:      "custom",
-				RPCType:          "UPLOAD",
-				BuiltIn:          false,
-				Enabled:          true,
-				StepChain:        []string{"SEND_RPC", "WAIT_RPC_RESPONSE"},
-				PermissionCode:   "CODE_CUSTOM_UPLOAD_SAMPLE",
-				PlatformScope:    []string{"5G gNB"},
-				FileType:         "9",
-				FileTypeLabel:    "Custom Upload",
-				LastEditor:       "tester",
+				TypeCode:       "CUSTOM_UPLOAD_SAMPLE",
+				Category:       "custom_upload",
+				CategoryLabel:  "自定义上传",
+				DisplayName:    "自定义上传模板",
+				Description:    "custom",
+				RPCType:        "UPLOAD",
+				BuiltIn:        false,
+				Enabled:        true,
+				StepChain:      []string{"SEND_RPC", "WAIT_RPC_RESPONSE"},
+				PermissionCode: "CODE_CUSTOM_UPLOAD_SAMPLE",
+				PlatformScope:  []string{"5G gNB"},
+				FileType:       "9",
+				FileTypeLabel:  "Custom Upload",
+				LastEditor:     "tester",
 			},
 		},
 	}
@@ -149,4 +162,46 @@ func TestService_LoadTaskTypeCatalog_UsesStoredRowsAsSourceOfTruth(t *testing.T)
 	assert.Equal(t, "自定义上传模板", custom.DisplayName)
 	assert.Zero(t, custom.softwareTaskType)
 	assert.Nil(t, custom.techHint)
+}
+
+func TestService_ListDeviceCandidates_FiltersByTypeScope(t *testing.T) {
+	taskTypeRepo := &ensureBuiltInTaskTypeRepo{
+		items: builtInTaskTypes(),
+	}
+	deviceRepo := &stubDeviceRepo{listResponse: &coremodel.ListResponse[coremodel.Device]{
+		Items: []coremodel.Device{
+			{
+				ID:              uuid.New(),
+				SerialNumber:    "ENB00001",
+				ProductClass:    "QAFA",
+				Technology:      coremodel.TechLTE,
+				FirmwareVersion: "V1.0.0",
+				SiteName:        "北京 4G 站点",
+			},
+			{
+				ID:              uuid.New(),
+				SerialNumber:    "GNB00001",
+				ProductClass:    "BBU-XSS",
+				Technology:      coremodel.TechNR,
+				FirmwareVersion: "V9.0.0",
+				SiteName:        "上海 5G 站点",
+			},
+		},
+		Total:    2,
+		Page:     1,
+		PageSize: 200,
+	}}
+
+	svc := NewService(nil, taskTypeRepo, nil, nil, deviceRepo, zap.NewNop())
+
+	result, err := svc.ListDeviceCandidates(context.Background(), DeviceCandidateFilter{
+		Category: "enb_upgrade",
+		TypeCode: "ENB_PATCH_UPGRADE",
+		Page:     1,
+		PageSize: 200,
+	})
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	assert.Equal(t, "ENB00001", result.Items[0].DeviceSN)
+	assert.Equal(t, "QAFA", result.Items[0].ProductType)
 }

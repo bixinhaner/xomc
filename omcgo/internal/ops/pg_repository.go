@@ -454,6 +454,18 @@ func (r *PgTaskRepository) List(ctx context.Context, filter TaskFilter) (*model.
 		base = base.Where(sq.Eq{"template_id": *filter.TemplateID})
 		countBase = countBase.Where(sq.Eq{"template_id": *filter.TemplateID})
 	}
+	if filter.Keyword != "" {
+		like := "%" + filter.Keyword + "%"
+		cond := sq.ILike{"task_name": like}
+		base = base.Where(cond)
+		countBase = countBase.Where(cond)
+	}
+	if filter.Creator != "" {
+		like := "%" + filter.Creator + "%"
+		cond := sq.ILike{"creator": like}
+		base = base.Where(cond)
+		countBase = countBase.Where(cond)
+	}
 
 	// Count total
 	countSQL, countArgs, err := countBase.ToSql()

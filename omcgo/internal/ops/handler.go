@@ -94,14 +94,14 @@ type CreateTaskRequest struct {
 
 // CreateCommandRecordRequest defines the request body for creating a command record.
 type CreateCommandRecordRequest struct {
-	CommandText  string `json:"command_text" binding:"required"`
-	DeviceSN     string `json:"device_sn" binding:"required"`
-	DeviceName   string `json:"device_name"`
-	Operator     string `json:"operator"`
-	ExecuteTime  string `json:"execute_time"`
-	Duration     int    `json:"duration"`
-	Success      bool   `json:"success"`
-	Output       string `json:"output"`
+	CommandText  string  `json:"command_text" binding:"required"`
+	DeviceSN     string  `json:"device_sn" binding:"required"`
+	DeviceName   string  `json:"device_name"`
+	Operator     string  `json:"operator"`
+	ExecuteTime  string  `json:"execute_time"`
+	Duration     int     `json:"duration"`
+	Success      bool    `json:"success"`
+	Output       string  `json:"output"`
 	ErrorMessage *string `json:"error_message"`
 }
 
@@ -306,6 +306,12 @@ func (h *Handler) ListTasks(c *gin.Context) {
 	if status := c.Query("status"); status != "" {
 		s := OpsTaskStatus(status)
 		filter.Status = &s
+	}
+	if keyword := c.Query("keyword"); keyword != "" {
+		filter.Keyword = keyword
+	}
+	if creator := c.Query("creator"); creator != "" {
+		filter.Creator = creator
 	}
 	if templateID := c.Query("templateId"); templateID != "" {
 		id, err := uuid.Parse(templateID)

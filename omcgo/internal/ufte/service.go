@@ -300,6 +300,17 @@ func (s *Service) ListDeviceCandidates(ctx context.Context, filter DeviceCandida
 	if err != nil {
 		return nil, err
 	}
+	var typeDef *TaskType
+	if filter.TypeCode != "" {
+		item, ok := findTaskTypeByCode(catalog, filter.TypeCode)
+		if !ok {
+			return nil, fmt.Errorf("%w: unsupported type_code: %s", commonerrors.ErrInvalidInput, filter.TypeCode)
+		}
+		typeDef = &item
+		if filter.Category == "" {
+			filter.Category = item.Category
+		}
+	}
 	deviceFilter := device.DeviceFilter{
 		ListRequest: coremodel.ListRequest{
 			Page:     filter.Page,
@@ -324,6 +335,9 @@ func (s *Service) ListDeviceCandidates(ctx context.Context, filter DeviceCandida
 	}
 	items := make([]DeviceItem, 0, len(devices.Items))
 	for _, item := range devices.Items {
+		if typeDef != nil && !matchesTaskTypeScope(*typeDef, item.ProductClass) {
+			continue
+		}
 		currentVersion := item.FirmwareVersion
 		if currentVersion == "" {
 			currentVersion = "-"

@@ -5,13 +5,19 @@ import { opsToolsService } from '../../mock/services/opsToolsService';
 import { opsToolsApi } from '../../services/api/opsToolsApi';
 import { useMock } from '../../services/apiSwitch';
 
+type QueryMountOptions = {
+  refetchOnMount?: boolean | 'always';
+};
+
 export function useOpsTemplates(
-  params: { category?: string; keyword?: string; targetDeviceType?: string } & PageRequest
+  params: { category?: string; keyword?: string; targetDeviceType?: string } & PageRequest,
+  options?: QueryMountOptions,
 ) {
   return useQuery({
     queryKey: ['opsTools', 'templates', params],
     queryFn: () =>
       useMock ? opsToolsService.getTemplates(params) : opsToolsApi.getTemplates(params),
+    refetchOnMount: options?.refetchOnMount,
   });
 }
 
@@ -79,12 +85,14 @@ export function useAddOpsCommandRecord() {
 }
 
 export function useOpsTasks(
-  params: { status?: string; templateId?: string } & PageRequest
+  params: { status?: string; templateId?: string; keyword?: string; creator?: string } & PageRequest,
+  options?: QueryMountOptions,
 ) {
   return useQuery({
     queryKey: ['opsTools', 'tasks', params],
     queryFn: () =>
       useMock ? opsToolsService.getTasks(params) : opsToolsApi.getTasks(params),
+    refetchOnMount: options?.refetchOnMount,
   });
 }
 

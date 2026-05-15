@@ -55,12 +55,12 @@ func (m *hTemplateRepo) IncrementUseCount(ctx context.Context, id uuid.UUID) err
 }
 
 type mockOpsTaskRepo struct {
-	CreateFn            func(ctx context.Context, task *OpsTask) error
-	GetByIDFn           func(ctx context.Context, id uuid.UUID) (*OpsTask, error)
-	UpdateStatusFn      func(ctx context.Context, task *OpsTask) error
-	ListFn              func(ctx context.Context, filter TaskFilter) (*model.ListResponse[OpsTask], error)
-	UpdateApprovalFn    func(ctx context.Context, taskID, approverID uuid.UUID, approve bool, decidedAt time.Time) error
-	TransitionStatusFn  func(ctx context.Context, taskID uuid.UUID, validFrom []OpsTaskStatus, to OpsTaskStatus, setStartedAt, setCompletedAt bool) error
+	CreateFn           func(ctx context.Context, task *OpsTask) error
+	GetByIDFn          func(ctx context.Context, id uuid.UUID) (*OpsTask, error)
+	UpdateStatusFn     func(ctx context.Context, task *OpsTask) error
+	ListFn             func(ctx context.Context, filter TaskFilter) (*model.ListResponse[OpsTask], error)
+	UpdateApprovalFn   func(ctx context.Context, taskID, approverID uuid.UUID, approve bool, decidedAt time.Time) error
+	TransitionStatusFn func(ctx context.Context, taskID uuid.UUID, validFrom []OpsTaskStatus, to OpsTaskStatus, setStartedAt, setCompletedAt bool) error
 }
 
 func (m *mockOpsTaskRepo) Create(ctx context.Context, task *OpsTask) error {
@@ -334,6 +334,34 @@ func TestHandler_CreateTask(t *testing.T) {
 	assert.Equal(t, 3, resp.TotalCount)
 	assert.Equal(t, 0, resp.CurrentStep)
 	assert.Equal(t, 0, resp.Progress)
+}
+
+func TestHandler_ListTasks_WithKeywordAndCreatorFilters(t *testing.T) {
+	tmplRepo := &hTemplateRepo{}
+	taskRepo := &mockOpsTaskRepo{
+		ListFn: func(_ context.Context, filter TaskFilter) (*model.ListResponse[OpsTask], error) {
+			require.Equal(t, "升级任务", filter.Keyword)
+			require.Equal(t, "alice", filter.Creator)
+			require.NotNil(t, filter.Status)
+			require.Equal(t, OpsTaskRunning, *filter.Status)
+			return model.NewListResponse([]OpsTask{}, 0, 1, 20), nil
+		},
+	}
+	cmdRepo := &mockCmdRecordRepo{}
+
+	h := newOpsTestHandler(tmplRepo, taskRepo, cmdRepo)
+	router := setupOpsRouter(h)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ops/tasks?page=1&page_size=20&status=running&keyword=%E5%8D%87%E7%BA%A7%E4%BB%BB%E5%8A%A1&creator=alice", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp model.ListResponse[OpsTask]
+	response.DecodeData(t, w.Body, &resp)
+	assert.Equal(t, int64(0), resp.Total)
+	assert.Len(t, resp.Items, 0)
 }
 
 func TestHandler_CancelTask(t *testing.T) {

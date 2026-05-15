@@ -266,7 +266,7 @@ export const opsToolsApi = {
   // --- Tasks (6 endpoints) ---
 
   async getTasks(
-    params: { status?: string; templateId?: string } & PageRequest
+    params: { status?: string; templateId?: string; keyword?: string; creator?: string } & PageRequest
   ): Promise<PageResponse<OpsTask>> {
     const query: Record<string, unknown> = {
       page: params.page,
@@ -274,6 +274,8 @@ export const opsToolsApi = {
     };
     if (params.status) query.status = params.status;
     if (params.templateId) query.templateId = params.templateId;
+    if (params.keyword) query.keyword = params.keyword;
+    if (params.creator) query.creator = params.creator;
 
     const { data } = await http.get<BackendListResponse<BackendOpsTask>>(
       '/ops/tasks',

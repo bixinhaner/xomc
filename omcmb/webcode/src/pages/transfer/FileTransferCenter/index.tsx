@@ -126,7 +126,7 @@ function getUpgradeTypeLabel(category: string, fallback: string) {
 
 export default function FileTransferCenter() {
   const navigate = useNavigate();
-  const { data: taskTypes = [] } = useUnifiedFileTransferTaskTypes();
+  const { data: taskTypes = [], isLoading: taskTypesLoading } = useUnifiedFileTransferTaskTypes();
   const { data: firmwareData } = useSoftwareVersions({ page: 1, pageSize: 200 });
   const categories = useMemo(() => buildCategoryTabs(taskTypes), [taskTypes]);
   const [selectedCategory, setSelectedCategory] = useState('gnb_upgrade');
@@ -136,13 +136,11 @@ export default function FileTransferCenter() {
   const [taskKeyword, setTaskKeyword] = useState('');
   const [taskKeywordInput, setTaskKeywordInput] = useState('');
   const [taskStatusFilter, setTaskStatusFilter] = useState<string>();
-  const [taskTypeFilter, setTaskTypeFilter] = useState<string>();
   const [devicePage, setDevicePage] = useState(1);
   const [devicePageSize, setDevicePageSize] = useState(10);
   const [deviceKeyword, setDeviceKeyword] = useState('');
   const [deviceKeywordInput, setDeviceKeywordInput] = useState('');
   const [deviceStatusFilter, setDeviceStatusFilter] = useState<string>();
-  const [deviceTypeFilter, setDeviceTypeFilter] = useState<string>();
   const [deviceProductTypeFilter, setDeviceProductTypeFilter] = useState<string>();
   const [viewMode, setViewMode] = useState<'tasks' | 'devices'>('tasks');
   const [taskDrawerOpen, setTaskDrawerOpen] = useState(false);
@@ -157,7 +155,7 @@ export default function FileTransferCenter() {
     category: selectedCategory || undefined,
     keyword: taskKeyword || undefined,
     status: taskStatusFilter,
-    typeCode: taskTypeFilter,
+    typeCode: selectedTypeCode || undefined,
   });
 
   const { data: devicesData, isLoading: devicesLoading } = useUnifiedFileTransferDevices({
@@ -166,7 +164,7 @@ export default function FileTransferCenter() {
     category: selectedCategory || undefined,
     keyword: deviceKeyword || undefined,
     status: deviceStatusFilter,
-    typeCode: deviceTypeFilter,
+    typeCode: selectedTypeCode || undefined,
     productType: deviceProductTypeFilter,
   });
 
@@ -184,9 +182,14 @@ export default function FileTransferCenter() {
     [filteredTaskTypes],
   );
 
+  const activeTaskType = useMemo(
+    () => filteredTaskTypes.find((item) => item.typeCode === selectedTypeCode) ?? filteredTaskTypes[0],
+    [filteredTaskTypes, selectedTypeCode],
+  );
+
   const drawerTaskType = useMemo(
-    () => taskTypes.find((item) => item.typeCode === drawerTypeCode) ?? filteredTaskTypes[0],
-    [drawerTypeCode, filteredTaskTypes, taskTypes],
+    () => taskTypes.find((item) => item.typeCode === drawerTypeCode) ?? activeTaskType,
+    [activeTaskType, drawerTypeCode, taskTypes],
   );
 
   const createExecutionModeOptions = useMemo(
@@ -198,6 +201,7 @@ export default function FileTransferCenter() {
     page: 1,
     pageSize: 200,
     category: selectedCategory || undefined,
+    typeCode: drawerTaskType?.typeCode || selectedTypeCode || undefined,
     productType: needsFirmwareSelection(drawerTaskType) ? drawerProductType : undefined,
   });
 
@@ -244,11 +248,22 @@ export default function FileTransferCenter() {
         values.add(item.productType);
       }
     });
-    filteredTaskTypes.forEach((item) => {
-      (item.platformScope ?? []).forEach((entry) => values.add(entry));
-    });
+    (activeTaskType?.platformScope ?? []).forEach((entry) => values.add(entry));
     return Array.from(values).map((item) => ({ label: item, value: item }));
-  }, [filteredTaskTypes, recentDevices]);
+  }, [activeTaskType?.platformScope, recentDevices]);
+
+  const templateTabItems = useMemo(
+    () => filteredTaskTypes.map((item) => ({
+      key: item.typeCode,
+      label: (
+        <Space size={6}>
+          <span>{item.displayName}</span>
+          <Tag color={item.builtIn ? 'blue' : 'gold'}>{item.builtIn ? '内置' : '自定义'}</Tag>
+        </Space>
+      ),
+    })),
+    [filteredTaskTypes],
+  );
 
   const drawerSelectedDevices = useMemo(
     () => drawerDeviceCandidates.filter((item) => drawerDeviceIds.includes(item.id)),
@@ -289,7 +304,11 @@ export default function FileTransferCenter() {
   useEffect(() => {
     setTaskPage(1);
     setDevicePage(1);
-  }, [selectedCategory, taskKeyword, taskStatusFilter, taskTypeFilter, deviceKeyword, deviceStatusFilter, deviceTypeFilter, deviceProductTypeFilter]);
+  }, [selectedCategory, selectedTypeCode, taskKeyword, taskStatusFilter, deviceKeyword, deviceStatusFilter, deviceProductTypeFilter]);
+
+  useEffect(() => {
+    setDeviceProductTypeFilter(undefined);
+  }, [selectedTypeCode]);
 
   const isUpgradeLikeCategory = UPGRADE_LIKE_CATEGORIES.has(selectedCategory);
 
@@ -543,7 +562,7 @@ export default function FileTransferCenter() {
   }, [isUpgradeLikeCategory]);
 
   const openTaskDrawer = (typeCode?: string) => {
-    const nextTypeCode = typeCode || selectedTypeCode || filteredTaskTypes[0]?.typeCode;
+    const nextTypeCode = typeCode || selectedTypeCode || activeTaskType?.typeCode;
     if (!nextTypeCode) {
       void message.warning('当前业务视图下还没有模板，请联系管理员先维护模板。');
       return;
@@ -614,7 +633,12 @@ export default function FileTransferCenter() {
     <ListPageLayout
       title="任务创建"
       extra={(
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => openTaskDrawer()}>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={() => openTaskDrawer()}
+          disabled={taskTypesLoading || !activeTaskType}
+        >
           新建任务
         </Button>
       )}
@@ -627,6 +651,11 @@ export default function FileTransferCenter() {
               activeKey={selectedCategory}
               items={categories.map((item) => ({ key: item.category, label: item.categoryLabel }))}
               onChange={(key) => setSelectedCategory(key)}
+            />
+            <Tabs
+              activeKey={selectedTypeCode}
+              items={templateTabItems}
+              onChange={(key) => setSelectedTypeCode(key)}
             />
           </Space>
         </Card>
@@ -651,12 +680,10 @@ export default function FileTransferCenter() {
                         style={{ width: 280 }}
                       />
                       <Select
-                        allowClear
-                        placeholder="按模板过滤"
-                        value={taskTypeFilter}
-                        onChange={(value) => setTaskTypeFilter(value)}
+                        value={selectedTypeCode}
+                        onChange={(value) => setSelectedTypeCode(value)}
                         options={taskTypeOptions}
-                        style={{ width: 220 }}
+                        style={{ width: 260 }}
                       />
                       <Select
                         allowClear
@@ -708,12 +735,10 @@ export default function FileTransferCenter() {
                         style={{ width: 280 }}
                       />
                       <Select
-                        allowClear
-                        placeholder="按模板过滤"
-                        value={deviceTypeFilter}
-                        onChange={(value) => setDeviceTypeFilter(value)}
+                        value={selectedTypeCode}
+                        onChange={(value) => setSelectedTypeCode(value)}
                         options={taskTypeOptions}
-                        style={{ width: 220 }}
+                        style={{ width: 260 }}
                       />
                       <Select
                         allowClear

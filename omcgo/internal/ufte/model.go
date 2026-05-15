@@ -13,40 +13,40 @@ import (
 )
 
 type Overview struct {
-	EnabledTypeCount int     `json:"enabled_type_count"`
-	RunningTaskCount int     `json:"running_task_count"`
-	CustomTypeCount  int     `json:"custom_type_count"`
-	SuccessRate30d   float64 `json:"success_rate_30d"`
+	EnabledTypeCount int     `json:"enabledTypeCount"`
+	RunningTaskCount int     `json:"runningTaskCount"`
+	CustomTypeCount  int     `json:"customTypeCount"`
+	SuccessRate30d   float64 `json:"successRate30d"`
 }
 
 type TaskType struct {
-	TypeCode               string   `json:"type_code"`
+	TypeCode               string   `json:"typeCode"`
 	Category               string   `json:"category"`
-	CategoryLabel          string   `json:"category_label"`
-	DisplayName            string   `json:"display_name"`
+	CategoryLabel          string   `json:"categoryLabel"`
+	DisplayName            string   `json:"displayName"`
 	Description            string   `json:"description"`
-	RPCType                string   `json:"rpc_type"`
-	BuiltIn                bool     `json:"built_in"`
+	RPCType                string   `json:"rpcType"`
+	BuiltIn                bool     `json:"builtIn"`
 	Enabled                bool     `json:"enabled"`
-	StepChain              []string `json:"step_chain"`
-	PostTCEventCode        string   `json:"post_tc_event_code,omitempty"`
-	PermissionCode         string   `json:"permission_code"`
-	PlatformScope          []string `json:"platform_scope"`
-	FileType               string   `json:"file_type"`
-	FileTypeLabel          string   `json:"file_type_label"`
-	FileTypeEditable       bool     `json:"file_type_editable"`
-	URLTemplate            string   `json:"url_template,omitempty"`
-	TargetFileNameTemplate string   `json:"target_file_name_template,omitempty"`
-	FileNameTemplate       string   `json:"file_name_template,omitempty"`
-	FileSizeField          string   `json:"file_size_field,omitempty"`
-	ChecksumField          string   `json:"checksum_field,omitempty"`
-	RawMode                string   `json:"raw_mode,omitempty"`
-	DelaySeconds           int      `json:"delay_seconds,omitempty"`
-	TransportPath          string   `json:"transport_path,omitempty"`
-	LastEditor             string   `json:"last_editor"`
-	TaskCount30d           int      `json:"task_count_30d"`
-	SuccessRate30d         float64  `json:"success_rate_30d"`
-	UpdatedAt              string   `json:"updated_at"`
+	StepChain              []string `json:"stepChain"`
+	PostTCEventCode        string   `json:"postTcEventCode,omitempty"`
+	PermissionCode         string   `json:"permissionCode"`
+	PlatformScope          []string `json:"platformScope"`
+	FileType               string   `json:"fileType"`
+	FileTypeLabel          string   `json:"fileTypeLabel"`
+	FileTypeEditable       bool     `json:"fileTypeEditable"`
+	URLTemplate            string   `json:"urlTemplate,omitempty"`
+	TargetFileNameTemplate string   `json:"targetFileNameTemplate,omitempty"`
+	FileNameTemplate       string   `json:"fileNameTemplate,omitempty"`
+	FileSizeField          string   `json:"fileSizeField,omitempty"`
+	ChecksumField          string   `json:"checksumField,omitempty"`
+	RawMode                string   `json:"rawMode,omitempty"`
+	DelaySeconds           int      `json:"delaySeconds,omitempty"`
+	TransportPath          string   `json:"transportPath,omitempty"`
+	LastEditor             string   `json:"lastEditor"`
+	TaskCount30d           int      `json:"taskCount30d"`
+	SuccessRate30d         float64  `json:"successRate30d"`
+	UpdatedAt              string   `json:"updatedAt"`
 
 	softwareTaskType software.TaskType
 	techHint         *coremodel.Technology
@@ -54,82 +54,82 @@ type TaskType struct {
 
 type Task struct {
 	ID              string `json:"id"`
-	TaskName        string `json:"task_name"`
+	TaskName        string `json:"taskName"`
 	Category        string `json:"category"`
-	CategoryLabel   string `json:"category_label"`
-	TypeCode        string `json:"type_code"`
-	TypeDisplayName string `json:"type_display_name"`
-	FirmwareID      string `json:"firmware_id,omitempty"`
-	TargetVersion   string `json:"target_version,omitempty"`
-	ProductType     string `json:"product_type,omitempty"`
-	IsKeepConfig    bool   `json:"is_keep_config,omitempty"`
+	CategoryLabel   string `json:"categoryLabel"`
+	TypeCode        string `json:"typeCode"`
+	TypeDisplayName string `json:"typeDisplayName"`
+	FirmwareID      string `json:"firmwareId,omitempty"`
+	TargetVersion   string `json:"targetVersion,omitempty"`
+	ProductType     string `json:"productType,omitempty"`
+	IsKeepConfig    bool   `json:"isKeepConfig,omitempty"`
 	Status          string `json:"status"`
 	Result          string `json:"result,omitempty"`
 	Progress        int    `json:"progress"`
-	TotalCount      int    `json:"total_count"`
-	SuccessCount    int    `json:"success_count"`
-	FailCount       int    `json:"fail_count"`
-	CurrentStep     string `json:"current_step"`
-	ExecutionMode   string `json:"execution_mode"`
-	CreateUser      string `json:"create_user"`
-	CreatedAt       string `json:"created_at"`
-	ScheduledAt     string `json:"scheduled_at,omitempty"`
-	OperatorScope   string `json:"operator_scope"`
+	TotalCount      int    `json:"totalCount"`
+	SuccessCount    int    `json:"successCount"`
+	FailCount       int    `json:"failCount"`
+	CurrentStep     string `json:"currentStep"`
+	ExecutionMode   string `json:"executionMode"`
+	CreateUser      string `json:"createUser"`
+	CreatedAt       string `json:"createdAt"`
+	ScheduledAt     string `json:"scheduledAt,omitempty"`
+	OperatorScope   string `json:"operatorScope"`
 }
 
 type DeviceItem struct {
 	ID              string `json:"id"`
-	TaskID          string `json:"task_id"`
-	TaskName        string `json:"task_name"`
+	TaskID          string `json:"taskId"`
+	TaskName        string `json:"taskName"`
 	Category        string `json:"category"`
-	CategoryLabel   string `json:"category_label"`
-	TypeCode        string `json:"type_code"`
-	TypeDisplayName string `json:"type_display_name"`
-	DeviceName      string `json:"device_name"`
-	DeviceSN        string `json:"device_sn"`
-	ProductType     string `json:"product_type"`
-	CurrentVersion  string `json:"current_version"`
-	TargetVersion   string `json:"target_version"`
+	CategoryLabel   string `json:"categoryLabel"`
+	TypeCode        string `json:"typeCode"`
+	TypeDisplayName string `json:"typeDisplayName"`
+	DeviceName      string `json:"deviceName"`
+	DeviceSN        string `json:"deviceSN"`
+	ProductType     string `json:"productType"`
+	CurrentVersion  string `json:"currentVersion"`
+	TargetVersion   string `json:"targetVersion"`
 	Status          string `json:"status"`
 	Result          string `json:"result,omitempty"`
 	Progress        int    `json:"progress"`
-	LastReportAt    string `json:"last_report_at"`
-	OperatorScope   string `json:"operator_scope"`
+	LastReportAt    string `json:"lastReportAt"`
+	OperatorScope   string `json:"operatorScope"`
 }
 
 type CreateTaskRequest struct {
-	TaskName      string      `json:"task_name" binding:"required"`
-	TypeCode      string      `json:"type_code" binding:"required"`
-	ProductType   string      `json:"product_type"`
-	FirmwareID    *uuid.UUID  `json:"firmware_id,omitempty"`
-	IsKeepConfig  bool        `json:"is_keep_config"`
-	DeviceIDs     []uuid.UUID `json:"device_ids" binding:"required,min=1"`
-	DeviceCount   int         `json:"device_count"`
-	ExecutionMode string      `json:"execution_mode" binding:"required"`
+	TaskName      string      `json:"taskName" binding:"required"`
+	TypeCode      string      `json:"typeCode" binding:"required"`
+	ProductType   string      `json:"productType"`
+	FirmwareID    *uuid.UUID  `json:"firmwareId,omitempty"`
+	IsKeepConfig  bool        `json:"isKeepConfig"`
+	DeviceIDs     []uuid.UUID `json:"deviceIds" binding:"required,min=1"`
+	DeviceCount   int         `json:"deviceCount"`
+	ExecutionMode string      `json:"executionMode" binding:"required"`
 	Note          string      `json:"note"`
 }
 
 type TaskTypeWriteRequest struct {
 	Category               string   `json:"category" binding:"required"`
-	CategoryLabel          string   `json:"category_label" binding:"required"`
-	DisplayName            string   `json:"display_name" binding:"required"`
+	CategoryLabel          string   `json:"categoryLabel" binding:"required"`
+	DisplayName            string   `json:"displayName" binding:"required"`
 	Description            string   `json:"description"`
-	RPCType                string   `json:"rpc_type" binding:"required"`
-	StepChain              []string `json:"step_chain" binding:"required,min=1"`
-	PostTCEventCode        string   `json:"post_tc_event_code"`
+	RPCType                string   `json:"rpcType" binding:"required"`
+	StepChain              []string `json:"stepChain" binding:"required,min=1"`
+	PostTCEventCode        string   `json:"postTcEventCode"`
 	Enabled                bool     `json:"enabled"`
-	PlatformScope          []string `json:"platform_scope"`
-	FileType               string   `json:"file_type" binding:"required"`
-	FileTypeLabel          string   `json:"file_type_label" binding:"required"`
-	FileTypeEditable       bool     `json:"file_type_editable"`
-	URLTemplate            string   `json:"url_template"`
-	TargetFileNameTemplate string   `json:"target_file_name_template"`
-	FileNameTemplate       string   `json:"file_name_template"`
-	FileSizeField          string   `json:"file_size_field"`
-	ChecksumField          string   `json:"checksum_field"`
-	RawMode                string   `json:"raw_mode"`
-	DelaySeconds           int      `json:"delay_seconds"`
-	TransportPath          string   `json:"transport_path"`
+	PlatformScope          []string `json:"platformScope"`
+	FileType               string   `json:"fileType" binding:"required"`
+	FileTypeLabel          string   `json:"fileTypeLabel" binding:"required"`
+	FileTypeEditable       bool     `json:"fileTypeEditable"`
+	URLTemplate            string   `json:"urlTemplate"`
+	TargetFileNameTemplate string   `json:"targetFileNameTemplate"`
+	FileNameTemplate       string   `json:"fileNameTemplate"`
+	FileSizeField          string   `json:"fileSizeField"`
+	ChecksumField          string   `json:"checksumField"`
+	RawMode                string   `json:"rawMode"`
+	DelaySeconds           int      `json:"delaySeconds"`
+	TransportPath          string   `json:"transportPath"`
 }
 
 type TaskListFilter struct {
@@ -153,6 +153,7 @@ type DeviceListFilter struct {
 
 type DeviceCandidateFilter struct {
 	Category    string `form:"category"`
+	TypeCode    string `form:"typeCode"`
 	ProductType string `form:"productType"`
 	Keyword     string `form:"keyword"`
 	Page        int    `form:"page"`

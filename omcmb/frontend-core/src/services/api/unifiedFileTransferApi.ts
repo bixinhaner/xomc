@@ -10,6 +10,31 @@ import type {
   UnifiedFileTransferTaskType,
 } from '../../types/unifiedFileTransfer';
 
+type BackendUnifiedFileTransferDeviceItem = Omit<UnifiedFileTransferDeviceItem, 'deviceSn'> & {
+  deviceSn?: string;
+  deviceSN?: string;
+};
+
+function normalizeDeviceItem(item: BackendUnifiedFileTransferDeviceItem): UnifiedFileTransferDeviceItem {
+  return {
+    ...item,
+    deviceSn: item.deviceSn ?? item.deviceSN ?? '',
+  };
+}
+
+function normalizeDevicePageResponse(
+  data: PageResponse<BackendUnifiedFileTransferDeviceItem> | undefined,
+  page: number,
+  pageSize: number,
+): PageResponse<UnifiedFileTransferDeviceItem> {
+  return {
+    items: (data?.items ?? []).map(normalizeDeviceItem),
+    total: data?.total ?? 0,
+    page: data?.page ?? page,
+    pageSize: data?.pageSize ?? pageSize,
+  };
+}
+
 export const unifiedFileTransferApi = {
   async getOverview(): Promise<UnifiedFileTransferOverview> {
     const { data } = await http.get<UnifiedFileTransferOverview>('/ufte/overview');
@@ -40,7 +65,7 @@ export const unifiedFileTransferApi = {
   async getDevices(
     params: { status?: string; typeCode?: string; keyword?: string; category?: string; productType?: string } & PageRequest,
   ): Promise<PageResponse<UnifiedFileTransferDeviceItem>> {
-    const { data } = await http.get<PageResponse<UnifiedFileTransferDeviceItem>>('/ufte/devices', {
+    const { data } = await http.get<PageResponse<BackendUnifiedFileTransferDeviceItem>>('/ufte/devices', {
       params: {
         page: params.page,
         pageSize: params.pageSize,
@@ -51,22 +76,23 @@ export const unifiedFileTransferApi = {
         keyword: params.keyword,
       },
     });
-    return data;
+    return normalizeDevicePageResponse(data, params.page, params.pageSize);
   },
 
   async getDeviceCandidates(
-    params: { keyword?: string; category?: string; productType?: string } & PageRequest,
+    params: { keyword?: string; category?: string; typeCode?: string; productType?: string } & PageRequest,
   ): Promise<PageResponse<UnifiedFileTransferDeviceItem>> {
-    const { data } = await http.get<PageResponse<UnifiedFileTransferDeviceItem>>('/ufte/device-candidates', {
+    const { data } = await http.get<PageResponse<BackendUnifiedFileTransferDeviceItem>>('/ufte/device-candidates', {
       params: {
         page: params.page,
         pageSize: params.pageSize,
         category: params.category,
+        typeCode: params.typeCode,
         productType: params.productType,
         keyword: params.keyword,
       },
     });
-    return data;
+    return normalizeDevicePageResponse(data, params.page, params.pageSize);
   },
 
   async createTask(input: CreateUnifiedFileTransferTaskInput): Promise<UnifiedFileTransferTask> {

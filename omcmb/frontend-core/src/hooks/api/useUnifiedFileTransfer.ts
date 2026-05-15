@@ -8,6 +8,10 @@ import type {
 } from '../../types/unifiedFileTransfer';
 import { unifiedFileTransferApi } from '../../services/api/unifiedFileTransferApi';
 
+type QueryMountOptions = {
+  refetchOnMount?: boolean | 'always';
+};
+
 export function useUnifiedFileTransferOverview() {
   return useQuery({
     queryKey: ['ufte', 'overview'],
@@ -16,11 +20,12 @@ export function useUnifiedFileTransferOverview() {
   });
 }
 
-export function useUnifiedFileTransferTaskTypes() {
+export function useUnifiedFileTransferTaskTypes(options?: QueryMountOptions) {
   return useQuery({
     queryKey: ['ufte', 'task-types'],
     queryFn: () => unifiedFileTransferApi.getTaskTypes(),
     staleTime: 60_000,
+    refetchOnMount: options?.refetchOnMount,
   });
 }
 
@@ -45,7 +50,7 @@ export function useUnifiedFileTransferDevices(
 }
 
 export function useUnifiedFileTransferDeviceCandidates(
-  params: { keyword?: string; category?: string; productType?: string } & PageRequest,
+  params: { keyword?: string; category?: string; typeCode?: string; productType?: string } & PageRequest,
 ) {
   return useQuery({
     queryKey: ['ufte', 'device-candidates', params],

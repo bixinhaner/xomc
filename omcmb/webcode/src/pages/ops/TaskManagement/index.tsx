@@ -63,19 +63,29 @@ export default function TaskManagement() {
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  const [keyword, setKeyword] = useState<string>();
+  const [creator, setCreator] = useState<string>();
   const [status, setStatus] = useState<OpsTask['status'] | undefined>(undefined);
   const [createVisible, setCreateVisible] = useState(false);
   const [detailVisible, setDetailVisible] = useState(false);
   const [selectedTask, setSelectedTask] = useState<OpsTask | null>(null);
   const [form] = Form.useForm();
 
-  const queryParams = useMemo(() => ({ status, page, pageSize }), [status, page, pageSize]);
-  const { data: tasksData, isLoading, refetch } = useOpsTasks(queryParams);
+  const queryParams = useMemo(
+    () => ({ status, keyword, creator, page, pageSize }),
+    [creator, keyword, page, pageSize, status],
+  );
+  const { data: tasksData, isLoading, refetch } = useOpsTasks(queryParams, {
+    refetchOnMount: 'always',
+  });
   const tasks: OpsTask[] = tasksData?.items ?? [];
   const total = tasksData?.total ?? 0;
 
   // 模板下拉数据（仅供创建任务时关联）
-  const { data: templatesData } = useOpsTemplates({ page: 1, pageSize: 200 });
+  const { data: templatesData } = useOpsTemplates(
+    { page: 1, pageSize: 200 },
+    { refetchOnMount: 'always' },
+  );
   const templates = templatesData?.items ?? [];
   const templateNameMap = useMemo(
     () => Object.fromEntries(templates.map((t) => [t.id, t.templateName])),
@@ -271,10 +281,14 @@ export default function TaskManagement() {
         filterId="ops-task-filter"
         fields={filterFields}
         onSearch={(vals) => {
+          setKeyword(((vals.keyword as string) || '').trim() || undefined);
+          setCreator(((vals.creator as string) || '').trim() || undefined);
           setStatus(((vals.status as string) || undefined) as OpsTask['status'] | undefined);
           setPage(1);
         }}
         onReset={() => {
+          setKeyword(undefined);
+          setCreator(undefined);
           setStatus(undefined);
           setPage(1);
         }}
