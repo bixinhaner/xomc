@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Badge,
   Button,
@@ -489,9 +490,29 @@ export default function DeviceDetail() {
   const t = useT();
   const { sn = '' } = useParams<{ sn: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState('basic');
 
   const { data: device, isLoading, refetch } = useDeviceBySn(sn);
+
+  const handleHeaderRefresh = useCallback(() => {
+    void refetch();
+    const deviceId = device?.id;
+    switch (activeTab) {
+      case 'parameters':
+        if (deviceId) {
+          void queryClient.invalidateQueries({ queryKey: ['devices', 'object-tree', deviceId] });
+          void queryClient.invalidateQueries({ queryKey: ['devices', 'children', deviceId] });
+          void queryClient.invalidateQueries({ queryKey: ['devices', 'parameters', deviceId] });
+        }
+        break;
+      case 'alarms':
+        void queryClient.invalidateQueries({ queryKey: ['alarms', 'current'] });
+        break;
+      default:
+        break;
+    }
+  }, [activeTab, refetch, queryClient, device?.id]);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
@@ -613,7 +634,7 @@ export default function DeviceDetail() {
             )}
           </div>
           <Space>
-            <Button icon={<ReloadOutlined />} onClick={() => void refetch()}>
+            <Button icon={<ReloadOutlined />} onClick={handleHeaderRefresh}>
               {t('common.refresh')}
             </Button>
           </Space>
