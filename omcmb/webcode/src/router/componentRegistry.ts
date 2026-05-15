@@ -44,7 +44,6 @@ export const componentRegistry: Record<string, ComponentType> = {
   'alarm/HistoricalAlarms': lazy(() => import('@/pages/alarm/HistoricalAlarms')),
   'alarm/AlarmStatistics': lazy(() => import('@/pages/alarm/AlarmStatistics')),
   'alarm/AlarmRules': lazy(() => import('@/pages/alarm/AlarmRules')),
-  'alarm/AlarmSupportLibrary': lazy(() => import('@/pages/alarm/AlarmSupportLibrary')),
   'alarm/AlarmSync': lazy(() => import('@/pages/alarm/AlarmSync')),
   'alarm/CustomAlarmStats': lazy(() => import('@/pages/alarm/CustomAlarmStats')),
 
@@ -59,7 +58,6 @@ export const componentRegistry: Record<string, ComponentType> = {
   'config/BaselineManagement': lazy(() => import('@/pages/config/BaselineManagement')),
   'config/CommonConfig': lazy(() => import('@/pages/config/CommonConfig')),
   'config/NeighborParams': lazy(() => import('@/pages/config/NeighborParams')),
-  'config/DataModelManagement': lazy(() => import('@/pages/config/DataModelManagement')),
   'config/NorthboundManagement': lazy(() => import('@/pages/config/NorthboundManagement')),
   'config/AutoProvisioning': lazy(() => import('@/pages/config/AutoProvisioning')),
   'config/InteropTesting': lazy(() => import('@/pages/config/InteropTesting')),

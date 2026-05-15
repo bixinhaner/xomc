@@ -120,7 +120,6 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     onDeviceHover,
     onViewportChange,
     onClusterClick,
-    _onZoomChange,
     onMapClick,
   } = options;
 

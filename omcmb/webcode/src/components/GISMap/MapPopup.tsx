@@ -6,7 +6,6 @@
 
 import React from 'react';
 import { useThemeToken } from '@/hooks/useThemeToken';
-import { useT } from '@/hooks/useT';
 import type { MapDevice } from '@core/types/map';
 import { DEVICE_STATUS_CONFIG, COLORS } from './constants';
 
@@ -35,9 +34,7 @@ const MapPopup: React.FC<MapPopupProps> = ({
   device,
   visible = true,
   position,
-  _onClose,
 }) => {
-  const _t = useT();
   const token = useThemeToken();
 
   if (!visible || !device) return null;

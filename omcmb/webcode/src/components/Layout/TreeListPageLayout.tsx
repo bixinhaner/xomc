@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useThemeToken } from '@/hooks/useThemeToken';
 
@@ -25,42 +25,10 @@ export default function TreeListPageLayout({
   children,
   defaultTreeWidth = 260,
   minTreeWidth = 160,
-  maxTreeWidth = 480,
 }: Props) {
   const token = useThemeToken();
-  const [treeWidth, setTreeWidth] = useState(defaultTreeWidth);
+  const [treeWidth] = useState(defaultTreeWidth);
   const containerRef = useRef<HTMLDivElement>(null);
-  const isDragging = useRef(false);
-
-  const _handleDividerMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      isDragging.current = true;
-      const startX = e.clientX;
-      const startWidth = treeWidth;
-
-      const onMouseMove = (moveEvent: MouseEvent) => {
-        if (!isDragging.current) return;
-        const delta = moveEvent.clientX - startX;
-        const newWidth = Math.min(maxTreeWidth, Math.max(minTreeWidth, startWidth + delta));
-        setTreeWidth(newWidth);
-      };
-
-      const onMouseUp = () => {
-        isDragging.current = false;
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mouseup', onMouseUp);
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-      };
-
-      document.addEventListener('mousemove', onMouseMove);
-      document.addEventListener('mouseup', onMouseUp);
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
-    },
-    [treeWidth, minTreeWidth, maxTreeWidth],
-  );
 
   return (
     <div

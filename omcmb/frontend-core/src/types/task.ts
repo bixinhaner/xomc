@@ -36,4 +36,6 @@ export interface ExportTask {
   startTime: string;
   endTime?: string;
   resultDetail: string;
+  /** 导出结果下载链接（MinIO presigned URL，仅 success 状态有值） */
+  downloadUrl?: string;
 }

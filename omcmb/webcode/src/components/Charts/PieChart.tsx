@@ -71,7 +71,7 @@ const PieChart: React.FC<PieChartProps> = ({
             top: 'middle',
           }
         : { show: false },
-      graphic: donut && centerText
+      graphic: (donut && centerText
         ? [
             {
               type: 'text',
@@ -86,7 +86,7 @@ const PieChart: React.FC<PieChartProps> = ({
               },
             },
           ]
-        : undefined,
+        : undefined) as EChartsOption['graphic'],
       series: [
         {
           type: 'pie',

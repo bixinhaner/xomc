@@ -51,12 +51,12 @@ export default function BatchTaskTab() {
       width: 120,
       render: (_: unknown, record: BatchTask) => (
         <span style={{ fontSize: 12 }}>
-          <span style={{ color: token.colorText }}>{record.total}</span>
+          <span style={{ color: token.colorText }}>{record.totalCount}</span>
           {' / '}
-          <span style={{ color: '#52c41a' }}>{record.success}</span>
+          <span style={{ color: '#52c41a' }}>{record.successCount}</span>
           {' / '}
-          <span style={{ color: record.failed > 0 ? '#f5222d' : token.colorTextDisabled }}>
-            {record.failed}
+          <span style={{ color: record.failCount > 0 ? '#f5222d' : token.colorTextDisabled }}>
+            {record.failCount}
           </span>
         </span>
       ),

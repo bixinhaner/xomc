@@ -253,7 +253,7 @@ export function createDeviceMarkerDataUrl(
   const config = DEVICE_STATUS_CONFIG[status] || DEVICE_STATUS_CONFIG.offline;
   const radius = MARKER_SIZE_CONFIG[size].radius;
   const strokeWidth = MARKER_SIZE_CONFIG.strokeWidth;
-  const showAlarm = status === 'online' && alarmCount && alarmCount > 0;
+  const showAlarm = status === 'onlineActive' && alarmCount && alarmCount > 0;
 
   let alarmBadgeSvg = '';
   let viewBoxWidth = radius * 2 + strokeWidth * 2;
@@ -277,7 +277,7 @@ export function createDeviceMarkerDataUrl(
   }
 
   const centerOffset = showAlarm ? radius + strokeWidth : radius + strokeWidth;
-  const gradientDef = status === 'online'
+  const gradientDef = status === 'onlineActive'
     ? `
       <defs>
         <linearGradient id="markerGrad" x1="0%" y1="0%" x2="0%" y2="100%">
@@ -287,7 +287,7 @@ export function createDeviceMarkerDataUrl(
       </defs>`
     : '';
 
-  const fillColor = status === 'online' ? 'url(#markerGrad)' : config.color;
+  const fillColor = status === 'onlineActive' ? 'url(#markerGrad)' : config.color;
 
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="${viewBoxWidth}" height="${viewBoxHeight}" viewBox="0 0 ${viewBoxWidth} ${viewBoxHeight}">

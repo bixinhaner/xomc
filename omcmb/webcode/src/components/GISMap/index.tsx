@@ -7,7 +7,6 @@
 import React, { useState, useEffect, useMemo, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { Spin } from 'antd';
 import { useThemeToken } from '@/hooks/useThemeToken';
-import { useT } from '@/hooks/useT';
 import type { GISMapProps, MapDevice, MapViewport, MapStats } from '@core/types/map';
 import { MAP_CONFIG } from './constants';
 import { useOLMap } from './useOLMap';
@@ -46,11 +45,10 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   className,
   style,
 }, ref) => {
-  const _t = useT();
   const token = useThemeToken();
   const [hoveredDevice, setHoveredDevice] = useState<MapDevice | null>(null);
   const [popupPosition, setPopupPosition] = useState<{ x: number; y: number } | null>(null);
-  const [_highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [, setHighlightedId] = useState<string | null>(null);
   const [viewport, setViewport] = useState<MapViewport | null>(null);
 
   // 使用 OpenLayers Hook
@@ -60,12 +58,9 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     updateDevices,
     getViewport,
     flyTo,
-    _highlightDevice,
     clearHighlight,
     isReady,
     updateSize,
-    _getZoom,
-    _fitBounds,
     highlightAndSpiderfyIfNeeded,
   } = useOLMap({
     center: defaultCenter,
@@ -243,7 +238,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
 
 // 导出组件和类型
 export default GISMap;
-export type { GISMapProps, GISMapRef, MapDevice, MapViewport, MapStats } from '@core/types/map';
+export type { GISMapProps, MapDevice, MapViewport, MapStats } from '@core/types/map';
 
 // 导出子组件（可选）
 export { default as MapPopup } from './MapPopup';

@@ -5,12 +5,10 @@ import type { ColumnsType } from 'antd/es/table';
 import { useTaskStore } from '@core/store/taskStore';
 import type { SingleTask, TaskStatus } from '@core/store/taskStore';
 import { useT } from '@/hooks/useT';
-import { useThemeToken } from '@/hooks/useThemeToken';
 
 export default function SingleTaskTab() {
   const singleTasks = useTaskStore((s) => s.singleTasks);
   const t = useT();
-  const _token = useThemeToken();
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [currentTask, setCurrentTask] = useState<SingleTask | null>(null);
 

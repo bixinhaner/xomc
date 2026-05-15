@@ -5,7 +5,6 @@
  */
 
 import React from 'react';
-import { useThemeToken } from '@/hooks/useThemeToken';
 import styles from './styles.module.css';
 
 interface MapControlsProps {
@@ -32,8 +31,6 @@ const MapControls: React.FC<MapControlsProps> = ({
   zoomInDisabled = false,
   zoomOutDisabled = false,
 }) => {
-  const _token = useThemeToken();
-
   const containerStyle: React.CSSProperties = {
     position: 'absolute',
     right: 24,

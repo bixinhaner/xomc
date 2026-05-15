@@ -152,7 +152,7 @@ function DataTable<T>(
     for (const [key, filterVal] of Object.entries(columnFilters)) {
       if (!filterVal) continue;
       data = data.filter((record) => {
-        const cellVal = record[key];
+        const cellVal = (record as Record<string, unknown>)[key];
         if (cellVal === null || cellVal === undefined) return false;
         return String(cellVal).toLowerCase().includes(filterVal.toLowerCase());
       });

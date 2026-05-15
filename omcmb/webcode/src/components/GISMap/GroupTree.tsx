@@ -78,11 +78,6 @@ const GroupTree: React.FC<GroupTreeProps> = ({
     return ids;
   };
 
-  // 处理复选框变化
-  const _handleCheck = (checked: React.Key[], _info: unknown) => {
-    onSelect(checked as string[]);
-  };
-
   // 切换展开/收起
   const toggleExpand = (key: string) => {
     setExpandedKeys(prev =>

@@ -34,6 +34,8 @@ export interface User {
   updaterUsername?: string;
   department?: string;
   description?: string;
+  /** 头像 URL（前端 UserDropdown 显示用，optional；后端未存储 → undefined 走 fallback initial） */
+  avatar?: string;
 }
 
 /** 派生：是否为内置用户。用于 UI 操作权限判定（删除/禁用按钮 disable）。 */
