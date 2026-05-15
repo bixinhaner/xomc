@@ -94,12 +94,9 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
       {/* 用户 */}
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.security.user')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
-          <Space>
-            <span style={{ fontWeight: 500 }}>{t('common.username')}：</span>
-            <span style={{ color: 'rgba(0, 0, 0, 0.45)' }}>
-              {t('system.security.usernameRule')}
-            </span>
-          </Space>
+          <span style={{ color: 'rgba(0, 0, 0, 0.45)' }}>
+            {t('system.security.usernameRule')}
+          </span>
         </div>
       </Card>
 
