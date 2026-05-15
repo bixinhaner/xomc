@@ -1,0 +1,124 @@
+import { useEffect } from 'react';
+import { Modal, Form, Input, InputNumber, message } from 'antd';
+import { useCreateGroup, useUpdateGroup } from '@core/hooks/api/useMmlAdmin';
+import { useT } from '@/hooks/useT';
+
+export type GroupEditorMode = 'create-root' | 'create-child' | 'rename';
+
+export interface GroupEditorModalProps {
+  open: boolean;
+  mode: GroupEditorMode;
+  /** create-child / rename 时必填 — 父节点 id 或自身 id */
+  targetGroup?: { id: string; groupCode: string; displayNameI18n: Record<string, string>; displayOrder: number };
+  onClose: () => void;
+  onSuccess?: () => void;
+}
+
+interface FormValues {
+  groupCode: string;
+  displayNameZh: string;
+  displayNameEn: string;
+  displayOrder: number;
+}
+
+export default function GroupEditorModal({
+  open,
+  mode,
+  targetGroup,
+  onClose,
+  onSuccess,
+}: GroupEditorModalProps) {
+  const t = useT();
+  const [form] = Form.useForm<FormValues>();
+  const createMut = useCreateGroup();
+  const updateMut = useUpdateGroup();
+
+  useEffect(() => {
+    if (!open) return;
+    if (mode === 'rename' && targetGroup) {
+      form.setFieldsValue({
+        groupCode: targetGroup.groupCode,
+        displayNameZh: targetGroup.displayNameI18n['zh-CN'] ?? '',
+        displayNameEn: targetGroup.displayNameI18n['en-US'] ?? '',
+        displayOrder: targetGroup.displayOrder,
+      });
+    } else {
+      form.resetFields();
+      form.setFieldsValue({ displayOrder: 100 });
+    }
+  }, [open, mode, targetGroup, form]);
+
+  const titleKey =
+    mode === 'rename'
+      ? 'mml.admin.catalog.groups.rename'
+      : mode === 'create-child'
+        ? 'mml.admin.catalog.groups.addChild'
+        : 'mml.admin.catalog.groups.addRoot';
+
+  const handleOk = async () => {
+    try {
+      const values = await form.validateFields();
+      const displayNameI18n: Record<string, string> = {
+        'zh-CN': values.displayNameZh,
+        'en-US': values.displayNameEn,
+      };
+      if (mode === 'rename') {
+        if (!targetGroup) return;
+        await updateMut.mutateAsync({
+          id: targetGroup.id,
+          req: {
+            groupCode: values.groupCode,
+            displayNameI18n,
+            displayOrder: values.displayOrder,
+          },
+        });
+      } else {
+        await createMut.mutateAsync({
+          groupCode: values.groupCode,
+          parentId: mode === 'create-child' ? targetGroup?.id : undefined,
+          displayNameI18n,
+          displayOrder: values.displayOrder,
+        });
+      }
+      message.success(t('mml.admin.catalog.common.saveSuccess'));
+      onSuccess?.();
+      onClose();
+    } catch (e) {
+      if (e instanceof Error) {
+        message.error(e.message);
+      }
+    }
+  };
+
+  return (
+    <Modal
+      open={open}
+      title={t(titleKey)}
+      onCancel={onClose}
+      onOk={handleOk}
+      confirmLoading={createMut.isPending || updateMut.isPending}
+      okText={t('mml.admin.catalog.common.save')}
+      cancelText={t('mml.admin.catalog.common.cancel')}
+      destroyOnHidden
+    >
+      <Form form={form} layout="vertical">
+        <Form.Item
+          name="groupCode"
+          label="group_code"
+          rules={[{ required: true }, { pattern: /^[A-Z0-9_]+$/, message: 'UPPER_SNAKE_CASE only' }]}
+        >
+          <Input placeholder="BSC_CONFIGURATION" disabled={mode === 'rename' && targetGroup?.groupCode === 'ROOT'} />
+        </Form.Item>
+        <Form.Item name="displayNameZh" label="zh-CN" rules={[{ required: true }]}>
+          <Input placeholder="基站配置" />
+        </Form.Item>
+        <Form.Item name="displayNameEn" label="en-US" rules={[{ required: true }]}>
+          <Input placeholder="BSC Configuration" />
+        </Form.Item>
+        <Form.Item name="displayOrder" label={t('mml.admin.catalog.subField.sortOrder')}>
+          <InputNumber min={0} step={10} style={{ width: 160 }} />
+        </Form.Item>
+      </Form>
+    </Modal>
+  );
+}
