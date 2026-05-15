@@ -39,10 +39,10 @@ import {
   buildCategoryPayload,
   buildCategoryTabs,
   STEP_LABELS,
-  TaskTypeFormValues,
   TransferTemplateCard,
   TYPE_DRAWER_DEFAULT_STEPS,
 } from '../shared';
+import type { TaskTypeFormValues } from '../shared';
 
 const { Paragraph, Text, Title } = Typography;
 

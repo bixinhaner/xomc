@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Avatar,
@@ -65,16 +65,16 @@ const QUICK_ACCESS_ITEMS = [
 ];
 
 const MOCK_MAP_DEVICES: MapDevice[] = [
-  { id: '1', lat: 39.9, lng: 116.4, status: 'online', name: '北京基站-001', sn: 'SN-BJ001' },
-  { id: '2', lat: 31.2, lng: 121.5, status: 'online', name: '上海基站-002', sn: 'SN-SH002' },
-  { id: '3', lat: 23.1, lng: 113.3, status: 'online', name: '广州基站-003', sn: 'SN-GZ003', alarmCount: 2 },
-  { id: '4', lat: 22.5, lng: 114.1, status: 'online', name: '深圳基站-004', sn: 'SN-SZ004' },
+  { id: '1', lat: 39.9, lng: 116.4, status: 'onlineActive', name: '北京基站-001', sn: 'SN-BJ001' },
+  { id: '2', lat: 31.2, lng: 121.5, status: 'onlineActive', name: '上海基站-002', sn: 'SN-SH002' },
+  { id: '3', lat: 23.1, lng: 113.3, status: 'onlineActive', name: '广州基站-003', sn: 'SN-GZ003', alarmCount: 2 },
+  { id: '4', lat: 22.5, lng: 114.1, status: 'onlineActive', name: '深圳基站-004', sn: 'SN-SZ004' },
   { id: '5', lat: 30.7, lng: 104.1, status: 'offline', name: '成都基站-005', sn: 'SN-CD005', alarmCount: 5 },
   { id: '6', lat: 36.1, lng: 103.8, status: 'offline', name: '兰州基站-006', sn: 'SN-LZ006' },
-  { id: '7', lat: 34.3, lng: 108.9, status: 'online', name: '西安基站-007', sn: 'SN-XA007' },
-  { id: '8', lat: 32.0, lng: 118.8, status: 'online', name: '南京基站-008', sn: 'SN-NJ008' },
+  { id: '7', lat: 34.3, lng: 108.9, status: 'onlineActive', name: '西安基站-007', sn: 'SN-XA007' },
+  { id: '8', lat: 32.0, lng: 118.8, status: 'onlineActive', name: '南京基站-008', sn: 'SN-NJ008' },
   { id: '9', lat: 45.8, lng: 126.5, status: 'offline', name: '哈尔滨基站-009', sn: 'SN-HRB009' },
-  { id: '10', lat: 25.0, lng: 102.7, status: 'online', name: '昆明基站-010', sn: 'SN-KM010', alarmCount: 1 },
+  { id: '10', lat: 25.0, lng: 102.7, status: 'onlineActive', name: '昆明基站-010', sn: 'SN-KM010', alarmCount: 1 },
 ];
 
 export default function DashboardPage() {

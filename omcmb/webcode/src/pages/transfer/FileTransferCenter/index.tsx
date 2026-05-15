@@ -44,6 +44,7 @@ import {
   STEP_LABELS,
   UPGRADE_LIKE_CATEGORIES,
 } from '../shared';
+import type { TransferStepId } from '@core/types/unifiedFileTransfer';
 
 const { Text, Title } = Typography;
 
@@ -434,7 +435,7 @@ export default function FileTransferCenter() {
         dataIndex: 'currentStep',
         key: 'currentStep',
         width: 170,
-        render: (value) => STEP_LABELS[value],
+        render: (value: TransferStepId) => STEP_LABELS[value],
       },
       {
         title: '进度',
