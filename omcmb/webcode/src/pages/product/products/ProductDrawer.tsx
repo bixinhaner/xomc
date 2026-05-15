@@ -64,9 +64,9 @@ interface FormValues {
 }
 
 const DEVICE_TYPE_OPTIONS = [
-  { label: 'ENB (LTE)', value: 'ENB' },
-  { label: 'GNB (5G NR)', value: 'GNB' },
-  { label: 'GSM', value: 'GSM' },
+  { label: 'ENB (LTE)', value: 'enb' },
+  { label: 'GNB (5G NR)', value: 'gnb' },
+  { label: 'GSM', value: 'gsm' },
 ];
 
 const TECH_OPTIONS = [

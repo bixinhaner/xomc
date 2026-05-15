@@ -80,7 +80,7 @@ export default function ProductsPage() {
       title: '指标设备类型',
       dataIndex: 'indicatorDeviceType',
       width: 130,
-      render: (v: string) => <Tag color="cyan">{v}</Tag>,
+      render: (v: string) => <Tag color="cyan">{v?.toUpperCase()}</Tag>,
     },
     {
       title: '指标平台',

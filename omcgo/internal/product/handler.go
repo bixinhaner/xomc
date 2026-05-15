@@ -210,11 +210,12 @@ func (h *Handler) Create(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
+	// indicator_device_type 入库前归一化为小写（与 XML loader / 表名 switch case / DB 现状一致）
+	req.IndicatorDeviceType = strings.ToLower(strings.TrimSpace(req.IndicatorDeviceType))
 	// indicator_platform 仅 ENB 类型必填；GNB / GSM 不收集（前端表单也对应隐藏）
-	if strings.EqualFold(strings.TrimSpace(req.IndicatorDeviceType), "ENB") &&
-		strings.TrimSpace(req.IndicatorPlatform) == "" {
+	if req.IndicatorDeviceType == "enb" && strings.TrimSpace(req.IndicatorPlatform) == "" {
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("indicator_platform is required when indicator_device_type=ENB"))
+			fmt.Errorf("indicator_platform is required when indicator_device_type=enb"))
 		return
 	}
 	in := CreateProductInput{
@@ -292,12 +293,16 @@ func (h *Handler) Update(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	// 若本次更新把 device_type 改为 ENB，必须同时提供非空 indicator_platform
-	if req.IndicatorDeviceType != nil &&
-		strings.EqualFold(strings.TrimSpace(*req.IndicatorDeviceType), "ENB") &&
+	// indicator_device_type 入库前归一化为小写
+	if req.IndicatorDeviceType != nil {
+		v := strings.ToLower(strings.TrimSpace(*req.IndicatorDeviceType))
+		req.IndicatorDeviceType = &v
+	}
+	// 若本次更新把 device_type 改为 enb，必须同时提供非空 indicator_platform
+	if req.IndicatorDeviceType != nil && *req.IndicatorDeviceType == "enb" &&
 		(req.IndicatorPlatform == nil || strings.TrimSpace(*req.IndicatorPlatform) == "") {
 		commonerrors.AbortWithError(c, http.StatusBadRequest,
-			fmt.Errorf("indicator_platform is required when indicator_device_type=ENB"))
+			fmt.Errorf("indicator_platform is required when indicator_device_type=enb"))
 		return
 	}
 	in := UpdateProductInput{
