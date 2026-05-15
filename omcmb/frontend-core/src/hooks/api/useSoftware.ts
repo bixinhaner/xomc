@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { SoftwareVersion, UpgradePlan, UpgradeTaskInfo, UpgradeSubTaskInfo } from '../../mock/data/software';
+import type { SoftwareVersion, UpgradePlan } from '../../mock/data/software';
 import type { PageRequest } from '../../types/pagination';
 import { softwareService } from '../../mock/services/softwareService';
 import { softwareApi } from '../../services/api/softwareApi';
