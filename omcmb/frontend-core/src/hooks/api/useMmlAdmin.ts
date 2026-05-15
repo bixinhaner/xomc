@@ -17,6 +17,8 @@ import type {
   SubFieldAdmin,
   ParamAdmin,
   ParamReference,
+  ImportPreviewResp,
+  ImportApplyResp,
   CreateGroupRequest,
   UpdateGroupRequest,
   CreateCommandRequest,
@@ -180,6 +182,41 @@ export function useDeleteParam() {
   const qc = useQueryClient();
   return useMutation<void, Error, string>({
     mutationFn: (id) => mmlAdminApi.deleteParam(id),
+    onSuccess: () => invalidateAfterWrite(qc),
+  });
+}
+
+// ============================================================
+// T-0132 admin Tab 4 XML 导入：preview + apply
+// ============================================================
+
+/**
+ * dry-run 预览：上传 XML → 后端解析 + 三桶 diff。不写表，可重复调用。
+ * 不 invalidate（preview 是只读 + diff 视图，不影响 group-tree / params 数据）。
+ */
+export function useImportPreview() {
+  return useMutation<
+    ImportPreviewResp,
+    Error,
+    { file: File; versionCode: string }
+  >({
+    mutationFn: ({ file, versionCode }) => mmlAdminApi.importPreview(file, versionCode),
+  });
+}
+
+/**
+ * 真写入：批量 UPSERT 后强制 invalidate group-tree + params list 让 UI 拉新数据。
+ * Apply 与 Preview 是独立两步调用（防 server-side session）；UI 应让用户在 Preview 完成后
+ * 显式点 "确认导入" 按钮。
+ */
+export function useImportApply() {
+  const qc = useQueryClient();
+  return useMutation<
+    ImportApplyResp,
+    Error,
+    { file: File; versionCode: string }
+  >({
+    mutationFn: ({ file, versionCode }) => mmlAdminApi.importApply(file, versionCode),
     onSuccess: () => invalidateAfterWrite(qc),
   });
 }

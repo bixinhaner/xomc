@@ -31,11 +31,15 @@ import type {
   BackendSubFieldAdmin,
   BackendParamAdmin,
   BackendParamReference,
+  BackendImportPreviewResp,
+  BackendImportApplyResp,
   GroupAdmin,
   CommandAdmin,
   SubFieldAdmin,
   ParamAdmin,
   ParamReference,
+  ImportPreviewResp,
+  ImportApplyResp,
   CreateGroupRequest,
   UpdateGroupRequest,
   CreateCommandRequest,
@@ -53,6 +57,8 @@ import {
   mapBackendSubField,
   mapBackendParam,
   mapBackendParamReference,
+  mapBackendImportPreview,
+  mapBackendImportApply,
 } from '../../types/mmlAdmin';
 
 const BASE = '/admin';
@@ -157,5 +163,47 @@ export const mmlAdminApi = {
       `${BASE}/params/${paramId}/references`,
     );
     return (data.items ?? []).map(mapBackendParamReference);
+  },
+
+  // ---------------- T-0132 XML 导入 (Tab 4) ----------------
+  // 注：后端路径是 /api/v1/mml/admin/import/... 字面量；既有 BASE='/admin' 与后端 /mml/admin 路径漂移
+  // 是 T-0123-P3 verify report 留的"真后端实测时统一修"遗留 bug，本期 import 端点用正确字面量绕开。
+
+  /**
+   * dry-run 预览：上传 XML → 后端解析 + 三桶 diff → 返 summary + 前 200 行详情。不写表。
+   * 客户端可重复调用（每次重新上传同一文件即可，无 server-side 缓存）。
+   */
+  async importPreview(
+    file: File,
+    versionCode: string,
+  ): Promise<ImportPreviewResp> {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('version_code', versionCode);
+    const { data } = await http.post<BackendImportPreviewResp>(
+      '/mml/admin/import/preview',
+      form,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+    return mapBackendImportPreview(data);
+  },
+
+  /**
+   * 真写入：上传 XML → 后端批量 UPSERT；catalog_protected=true 行被覆盖，false 的 admin 行被守护跳过。
+   * Apply 与 Preview 是独立两步调用（防 server-side session），UI 应在 Apply 完成后 invalidate group-tree。
+   */
+  async importApply(
+    file: File,
+    versionCode: string,
+  ): Promise<ImportApplyResp> {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('version_code', versionCode);
+    const { data } = await http.post<BackendImportApplyResp>(
+      '/mml/admin/import/apply',
+      form,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+    return mapBackendImportApply(data);
   },
 };

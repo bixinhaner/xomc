@@ -221,6 +221,21 @@ func (m *mockAdminParamRepo) List(ctx context.Context, f AdminParamFilter) ([]Pa
 	return out, int64(len(out)), nil
 }
 
+// ListReferences 空 stub（T-0131 interface 引入；admin_service_test.go 不覆盖此场景）。
+func (m *mockAdminParamRepo) ListReferences(ctx context.Context, paramID uuid.UUID) ([]ParamReference, error) {
+	return nil, nil
+}
+
+// ListPathStateByVersion 空 stub（T-0132 interface 引入；admin_service_test.go 不覆盖 XML import 场景，由 xml_import_service_test.go 单独 stubParamRepo 覆盖）。
+func (m *mockAdminParamRepo) ListPathStateByVersion(ctx context.Context, paramVersion string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
+// BatchUpsertStandardParams 空 stub（T-0132 interface 引入；同上）。
+func (m *mockAdminParamRepo) BatchUpsertStandardParams(ctx context.Context, rows []ImportRow, paramVersion string) (int64, error) {
+	return 0, nil
+}
+
 type mockAuditWriter struct {
 	calls []auditCall
 }

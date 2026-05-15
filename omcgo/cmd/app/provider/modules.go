@@ -441,7 +441,9 @@ func initMiscModules(c *Container) error {
 		nil, // AuditWriter — TODO: wire internal/admin/auditlog when admin module exposes interface
 		logger,
 	)
-	c.miscDeps.mmlAdminHandler = mml.NewAdminHandler(mmlAdminService, mmlCmdRepo, logger)
+	// T-0132 admin Tab 4 XML 导入 — Preview/Apply service。
+	mmlXMLImportSvc := mml.NewXMLImportService(mmlAdminParamRepo, nil, logger)
+	c.miscDeps.mmlAdminHandler = mml.NewAdminHandler(mmlAdminService, mmlCmdRepo, mmlXMLImportSvc, logger)
 
 	// T-0123-P1：Console 5 端点（group-tree / sub-fields / render / parse / execute-statements）。
 	// 复用 T-0123-P0 的 SubFieldRepo + 既有 CommandRepo；新增 GroupTreeRepo（带 ltree JOIN 子树）。

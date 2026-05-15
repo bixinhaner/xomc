@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
@@ -538,6 +539,28 @@ type AdminParamRepository interface {
 	List(ctx context.Context, f AdminParamFilter) ([]Param, int64, error)
 	// ListReferences 反向查：返回引用该 param_id 的命令列表（admin Tab 3 Params 行点击抽屉用，T-0131）
 	ListReferences(ctx context.Context, paramID uuid.UUID) ([]ParamReference, error)
+	// ListPathStateByVersion 返回指定 param_version 下所有 path → catalog_protected 映射（T-0132 XML 导入 diff 用）。
+	// 仅返必要字段（tr069_path / catalog_protected）以最小化网络/内存开销，10K 行 ~200KB。
+	ListPathStateByVersion(ctx context.Context, paramVersion string) (map[string]bool, error)
+	// BatchUpsertStandardParams 批量 UPSERT standard 来源 params（T-0132 XML 导入 apply 用）。
+	// 对 catalog_protected=true 行执行 UPDATE；对 catalog_protected=false 行被守护跳过。
+	// 返回 rowsAffected（INSERT + UPDATE 总数，跳过的不计）。
+	BatchUpsertStandardParams(ctx context.Context, rows []ImportRow, paramVersion string) (int64, error)
+}
+
+// ImportRow 是 T-0132 XML 导入向 mml_params 的批量 UPSERT 行（与 xml_import_helpers.go::importRow 同步）。
+// 导出版本供 repo interface 跨包消费。
+type ImportRow struct {
+	ParamCode          string
+	Tr069Path          string
+	ValueType          string
+	AccessType         string
+	IsObject           bool
+	SupportsAdd        bool
+	SupportsDelete     bool
+	ChangeApplies      string
+	NameI18n           map[string]string
+	ConstraintTextI18n map[string]string
 }
 
 // ParamReference 是 admin Tab 3 反向查的一条记录：某个 param 被哪些命令引用。
@@ -901,3 +924,120 @@ const (
 	SourceStandard = "standard"
 	SourceAdmin    = "admin"
 )
+
+// ============================================================
+// T-0132 XML 导入 — PG 实现（ListPathStateByVersion + BatchUpsertStandardParams）
+// ============================================================
+
+// ListPathStateByVersion 见 AdminParamRepository.ListPathStateByVersion。
+func (r *PgAdminParamRepository) ListPathStateByVersion(ctx context.Context, paramVersion string) (map[string]bool, error) {
+	const sqlText = `SELECT tr069_path, catalog_protected FROM mml_params WHERE param_version = $1`
+	rows, err := r.pool.Query(ctx, sqlText, paramVersion)
+	if err != nil {
+		return nil, fmt.Errorf("list path state: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]bool, 2000)
+	for rows.Next() {
+		var path string
+		var protected bool
+		if err := rows.Scan(&path, &protected); err != nil {
+			return nil, fmt.Errorf("scan path state: %w", err)
+		}
+		out[path] = protected
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate path state: %w", err)
+	}
+	return out, nil
+}
+
+// BatchUpsertStandardParams 见 AdminParamRepository.BatchUpsertStandardParams。
+//
+// SQL 行为（与 omcctl/mml.go::renderImportSQL 保持一致 Q2=C 决议）：
+//   - INSERT 新行：tr069_path 未存在 → 直接插入 catalog_protected=true source='standard'
+//   - UPDATE 旧 standard 行：(param_version, tr069_path) 命中 + catalog_protected=true → 更新 8 个元数据列
+//   - 跳过 admin 改过的行：(param_version, tr069_path) 命中 + catalog_protected=false → ON CONFLICT 触发但 WHERE 不满足 → 行不变（不计入 rowsAffected）
+//
+// 批量大小：单批 ~500 行（standard-model.xml ~2000 行需 4 批）。
+func (r *PgAdminParamRepository) BatchUpsertStandardParams(ctx context.Context, rows []ImportRow, paramVersion string) (int64, error) {
+	if len(rows) == 0 {
+		return 0, nil
+	}
+	const batchSize = 500
+	var totalAffected int64
+	for start := 0; start < len(rows); start += batchSize {
+		end := start + batchSize
+		if end > len(rows) {
+			end = len(rows)
+		}
+		affected, err := r.upsertBatch(ctx, rows[start:end], paramVersion)
+		if err != nil {
+			return totalAffected, fmt.Errorf("batch [%d:%d]: %w", start, end, err)
+		}
+		totalAffected += affected
+	}
+	return totalAffected, nil
+}
+
+func (r *PgAdminParamRepository) upsertBatch(ctx context.Context, batch []ImportRow, paramVersion string) (int64, error) {
+	var b strings.Builder
+	b.WriteString(`INSERT INTO mml_params (
+    id, param_version, param_code, param_name_zh, param_name_en, tr069_path, value_type,
+    access_type, is_object, supports_add, supports_delete, change_applies,
+    name_i18n, explanation_i18n, constraint_text_i18n,
+    catalog_protected, source, display_order
+) VALUES `)
+
+	args := make([]any, 0, len(batch)*15)
+	for i, row := range batch {
+		nameZh := row.NameI18n["zh-CN"]
+		nameEn := row.NameI18n["en-US"]
+		if nameZh == "" {
+			nameZh = nameEn
+		}
+		if nameZh == "" {
+			nameZh = row.ParamCode
+		}
+		nameI18nJSON, err := marshalI18n(row.NameI18n)
+		if err != nil {
+			return 0, fmt.Errorf("marshal name_i18n for %s: %w", row.Tr069Path, err)
+		}
+		constraintI18nJSON, err := marshalI18n(row.ConstraintTextI18n)
+		if err != nil {
+			return 0, fmt.Errorf("marshal constraint_text_i18n for %s: %w", row.Tr069Path, err)
+		}
+
+		base := i * 15
+		if i > 0 {
+			b.WriteString(",\n")
+		}
+		fmt.Fprintf(&b,
+			"(gen_random_uuid(), $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d::jsonb, $%d::jsonb, $%d::jsonb, true, 'standard', $%d)",
+			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9, base+10, base+11, base+12, base+13, base+14, base+15,
+		)
+		args = append(args,
+			paramVersion, row.ParamCode, nameZh, nameEn, row.Tr069Path,
+			row.ValueType, row.AccessType, row.IsObject, row.SupportsAdd, row.SupportsDelete,
+			row.ChangeApplies, nameI18nJSON, []byte("{}"), constraintI18nJSON, i,
+		)
+	}
+
+	b.WriteString(`
+ON CONFLICT (param_version, tr069_path) DO UPDATE SET
+    access_type          = EXCLUDED.access_type,
+    is_object            = EXCLUDED.is_object,
+    supports_add         = EXCLUDED.supports_add,
+    supports_delete      = EXCLUDED.supports_delete,
+    change_applies       = EXCLUDED.change_applies,
+    constraint_text_i18n = EXCLUDED.constraint_text_i18n,
+    name_i18n            = EXCLUDED.name_i18n,
+    value_type           = EXCLUDED.value_type
+WHERE mml_params.catalog_protected = true`)
+
+	tag, err := r.pool.Exec(ctx, b.String(), args...)
+	if err != nil {
+		return 0, fmt.Errorf("exec batch upsert: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}

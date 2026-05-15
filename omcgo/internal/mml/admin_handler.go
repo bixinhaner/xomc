@@ -3,6 +3,7 @@ package mml
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -46,21 +47,24 @@ type commandLookup func(ctx context.Context, id uuid.UUID) (*MMLCommand, error)
 
 // AdminHandler 提供 catalog 管理的 HTTP 入口。
 type AdminHandler struct {
-	service        *AdminService
-	commandLookup  commandLookup
-	logger         *zap.Logger
+	service       *AdminService
+	xmlImport     *XMLImportService
+	commandLookup commandLookup
+	logger        *zap.Logger
 }
 
 // NewAdminHandler 构造 AdminHandler。
 // commandReader 任意实现 GetByID 的对象（既有 CommandRepository 满足）。
+// xmlImport 可为 nil（T-0132 import 端点 fallback 返 500 — 兼容历史 caller 未传入场景）。
 func NewAdminHandler(service *AdminService, commandReader interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*MMLCommand, error)
-}, logger *zap.Logger) *AdminHandler {
+}, xmlImport *XMLImportService, logger *zap.Logger) *AdminHandler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	return &AdminHandler{
 		service:       service,
+		xmlImport:     xmlImport,
 		commandLookup: commandReader.GetByID,
 		logger:        logger.Named("mml-admin-handler"),
 	}
@@ -94,6 +98,11 @@ func (h *AdminHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	params.POST("", h.CreateParam)
 	params.PATCH("/:id", h.UpdateParam)
 	params.DELETE("/:id", h.DeleteParam)
+
+	// T-0132 admin Tab 4 XML 导入 — dry-run preview + 写表 apply 两端点。
+	imp := admin.Group("/import")
+	imp.POST("/preview", h.ImportPreview)
+	imp.POST("/apply", h.ImportApply)
 }
 
 // ============================================================
@@ -414,4 +423,104 @@ func parsePositiveInt(s string, def int) int {
 		n = n*10 + int(r-'0')
 	}
 	return n
+}
+
+// ============================================================
+// T-0132 XML 导入 handlers
+// ============================================================
+
+// maxImportUploadBytes 单次 XML 上传体积上限（防 OOM / DoS）。
+// standard-model.xml ~500KB；预留 4x 余量 = 2MB。
+const maxImportUploadBytes = 2 << 20 // 2 MiB
+
+// ImportPreview POST /api/v1/mml/admin/import/preview
+//
+// multipart/form-data:
+//   - file: standard-model.xml
+//   - version_code: form value (e.g. "STANDARD")
+//
+// 返 dry-run JSON：summary 三桶（add/modify/skipped）+ 前 200 行 diff 详情 + truncated 标志。
+// 不写表，可重复调用。
+func (h *AdminHandler) ImportPreview(c *gin.Context) {
+	if h.xmlImport == nil {
+		response.Fail(c, http.StatusInternalServerError, "xml import service not wired")
+		return
+	}
+	versionCode := c.PostForm("version_code")
+	if versionCode == "" {
+		response.Fail(c, http.StatusBadRequest, "version_code is required")
+		return
+	}
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "file is required: "+err.Error())
+		return
+	}
+	if fileHeader.Size > maxImportUploadBytes {
+		response.Fail(c, http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("file size %d exceeds limit %d", fileHeader.Size, maxImportUploadBytes))
+		return
+	}
+	f, err := fileHeader.Open()
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "open uploaded file: "+err.Error())
+		return
+	}
+	defer f.Close()
+
+	resp, err := h.xmlImport.Preview(c.Request.Context(), f, versionCode)
+	if err != nil {
+		h.logger.Warn("xml import preview failed",
+			zap.String("version_code", versionCode),
+			zap.Error(err))
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	response.OK(c, resp)
+}
+
+// ImportApply POST /api/v1/mml/admin/import/apply
+//
+// multipart/form-data:
+//   - file: standard-model.xml（重传 — 防 server-side session）
+//   - version_code: form value
+//
+// 执行批量 UPSERT；catalog_protected=true 的 standard 行被更新；catalog_protected=false 的
+// admin 改过的行被守护跳过（Q2=C 决议）。
+func (h *AdminHandler) ImportApply(c *gin.Context) {
+	if h.xmlImport == nil {
+		response.Fail(c, http.StatusInternalServerError, "xml import service not wired")
+		return
+	}
+	versionCode := c.PostForm("version_code")
+	if versionCode == "" {
+		response.Fail(c, http.StatusBadRequest, "version_code is required")
+		return
+	}
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "file is required: "+err.Error())
+		return
+	}
+	if fileHeader.Size > maxImportUploadBytes {
+		response.Fail(c, http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("file size %d exceeds limit %d", fileHeader.Size, maxImportUploadBytes))
+		return
+	}
+	f, err := fileHeader.Open()
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "open uploaded file: "+err.Error())
+		return
+	}
+	defer f.Close()
+
+	resp, err := h.xmlImport.Apply(c.Request.Context(), f, versionCode)
+	if err != nil {
+		h.logger.Error("xml import apply failed",
+			zap.String("version_code", versionCode),
+			zap.Error(err))
+		response.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.OKWithStatus(c, http.StatusOK, resp)
 }

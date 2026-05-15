@@ -346,3 +346,100 @@ export function mapBackendParam(b: BackendParamAdmin): ParamAdmin {
     catalogProtected: b.catalog_protected,
   };
 }
+
+// ============================================================
+// T-0132 admin Tab 4 XML 导入：preview + apply
+// ============================================================
+
+/** 单行 diff 桶：add (新增) / modify (覆盖 standard 行) / skipped (admin 改过 被守护跳过)。 */
+export type ImportBucket = 'add' | 'modify' | 'skipped';
+
+export interface BackendImportDiff {
+  bucket: string;
+  param_code: string;
+  tr069_path: string;
+  value_type: string;
+  access_type: string;
+  is_object: boolean;
+}
+
+export interface BackendImportSummary {
+  add: number;
+  modify: number;
+  skipped: number;
+  total: number;
+}
+
+export interface BackendImportPreviewResp {
+  version_code: string;
+  summary: BackendImportSummary;
+  diffs: BackendImportDiff[];
+  truncated: boolean;
+  total: number;
+}
+
+export interface BackendImportApplyResp {
+  version_code: string;
+  rows_affected: number;
+  total: number;
+}
+
+export interface ImportDiff {
+  bucket: ImportBucket;
+  paramCode: string;
+  tr069Path: string;
+  valueType: string;
+  accessType: string;
+  isObject: boolean;
+}
+
+export interface ImportSummary {
+  add: number;
+  modify: number;
+  skipped: number;
+  total: number;
+}
+
+export interface ImportPreviewResp {
+  versionCode: string;
+  summary: ImportSummary;
+  diffs: ImportDiff[];
+  truncated: boolean;
+  total: number;
+}
+
+export interface ImportApplyResp {
+  versionCode: string;
+  rowsAffected: number;
+  total: number;
+}
+
+export function mapBackendImportPreview(b: BackendImportPreviewResp): ImportPreviewResp {
+  return {
+    versionCode: b.version_code,
+    summary: {
+      add: b.summary.add,
+      modify: b.summary.modify,
+      skipped: b.summary.skipped,
+      total: b.summary.total,
+    },
+    diffs: (b.diffs || []).map((d) => ({
+      bucket: d.bucket as ImportBucket,
+      paramCode: d.param_code,
+      tr069Path: d.tr069_path,
+      valueType: d.value_type,
+      accessType: d.access_type,
+      isObject: d.is_object,
+    })),
+    truncated: b.truncated,
+    total: b.total,
+  };
+}
+
+export function mapBackendImportApply(b: BackendImportApplyResp): ImportApplyResp {
+  return {
+    versionCode: b.version_code,
+    rowsAffected: b.rows_affected,
+    total: b.total,
+  };
+}
