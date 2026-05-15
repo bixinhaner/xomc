@@ -14,7 +14,13 @@ interface Props {
 
 export default function IndicatorTab({ deviceType }: Props) {
   const [keyword, setKeyword] = useState('');
-  const { data, isLoading } = useIndicatorList(deviceType, { keyword: keyword || undefined });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const { data, isLoading } = useIndicatorList(deviceType, {
+    keyword: keyword || undefined,
+    page,
+    pageSize,
+  });
   const deleteMut = useDeleteIndicator();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -83,7 +89,10 @@ export default function IndicatorTab({ deviceType }: Props) {
           placeholder="搜索 ID / 名称"
           allowClear
           value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
+          onChange={(e) => {
+            setKeyword(e.target.value);
+            setPage(1);
+          }}
           style={{ width: 260 }}
         />
       }
@@ -94,7 +103,17 @@ export default function IndicatorTab({ deviceType }: Props) {
         columns={columns}
         dataSource={items}
         size="small"
-        pagination={{ pageSize: 50, showSizeChanger: true }}
+        pagination={{
+          current: page,
+          pageSize,
+          total: data?.total || 0,
+          showSizeChanger: true,
+          showTotal: (t) => `共 ${t} 条`,
+          onChange: (p, ps) => {
+            setPage(p);
+            setPageSize(ps);
+          },
+        }}
       />
       <IndicatorDrawer
         open={drawerOpen}

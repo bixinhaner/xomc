@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -109,6 +110,22 @@ func (h *RESTHandler) ListIndicators(c *gin.Context) {
 	filter := IndicatorListFilter{
 		DeviceType:  string(dt),
 		ListRequest: model.DefaultListRequest(),
+	}
+	// 前端 axios 自动转 pageSize → page_size、sortField → sort_by；同时兼容 camelCase
+	if v := strings.TrimSpace(c.Query("page_size")); v == "" {
+		v = strings.TrimSpace(c.Query("pageSize"))
+		if v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				filter.PageSize = n
+			}
+		}
+	} else if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		filter.PageSize = n
+	}
+	if v := strings.TrimSpace(c.Query("page")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			filter.Page = n
+		}
 	}
 	if v := strings.TrimSpace(c.Query("groupId")); v != "" {
 		filter.GroupID = &v
