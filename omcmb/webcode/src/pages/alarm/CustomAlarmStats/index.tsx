@@ -51,8 +51,8 @@ const DEAL_STATE_CONFIG: Record<DealState, { label: string; color: string }> = {
   '3': { label: 'alarm.dealState.confirmedCleared', color: '#67D972' },
 };
 
-// 事件类型配置
-const EVENT_TYPE_CONFIG: Record<EventType, string> = {
+// 事件类型配置（T-0136: keys 是 X.733 数字代码，非 EventType union；用 Record<string,string>）
+const EVENT_TYPE_CONFIG: Record<string, string> = {
   '30000': 'alarm.eventType.communication',
   '30001': 'alarm.eventType.qualityOfService',
   '30002': 'alarm.eventType.processingError',
@@ -648,7 +648,7 @@ export default function CustomAlarmStats() {
     }
     modal.confirm({
       title: t('common.confirmDelete'),
-      content: t('alarm.confirmDeleteGroup', { name: group?.name }),
+      content: t('alarm.confirmDeleteGroup', { name: group?.name ?? '' }),
       okText: t('common.confirm'),
       okType: 'danger',
       onOk: () => {

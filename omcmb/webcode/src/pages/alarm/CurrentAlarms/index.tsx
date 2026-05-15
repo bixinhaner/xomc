@@ -74,7 +74,7 @@ const exportAlarmApi: typeof alarmApi = createApiSwitch(
   alarmService as unknown as typeof alarmApi,
   alarmApi,
 );
-const exportDeviceApi = createApiSwitch(deviceService, deviceApi);
+const exportDeviceApi = createApiSwitch(deviceService as unknown as typeof deviceApi, deviceApi);
 const EXPORT_PAGE_SIZE = 500;
 
 function escapeCsvCell(value: unknown): string {
@@ -217,7 +217,7 @@ export default function CurrentAlarms() {
     [filterParams, currentPage, pageSize]
   );
 
-  const { data, isLoading, refetch } = useCurrentAlarms(queryParams);
+  const { data, isLoading, refetch } = useCurrentAlarms(queryParams as unknown as Parameters<typeof useCurrentAlarms>[0]);
   const acknowledgeAlarms = useAcknowledgeAlarms();
   const clearAlarms = useClearAlarms();
   const markAlarmRead = useMarkAlarmRead();

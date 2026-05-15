@@ -58,7 +58,7 @@ const exportAlarmApi: typeof alarmApi = createApiSwitch(
   alarmService as unknown as typeof alarmApi,
   alarmApi,
 );
-const exportDeviceApi = createApiSwitch(deviceService, deviceApi);
+const exportDeviceApi = createApiSwitch(deviceService as unknown as typeof deviceApi, deviceApi);
 const EXPORT_PAGE_SIZE = 500;
 
 function escapeCsvCell(value: unknown): string {
@@ -161,7 +161,7 @@ export default function HistoricalAlarms() {
     [filterParams, currentPage, pageSize]
   );
 
-  const { data, isLoading, refetch } = useHistoricalAlarms(queryParams);
+  const { data, isLoading, refetch } = useHistoricalAlarms(queryParams as unknown as Parameters<typeof useHistoricalAlarms>[0]);
   const acknowledgeHistoryAlarms = useAcknowledgeHistoryAlarms();
   const unacknowledgeHistoryAlarms = useUnacknowledgeHistoryAlarms();
   const deleteHistoryAlarms = useDeleteHistoryAlarms();
