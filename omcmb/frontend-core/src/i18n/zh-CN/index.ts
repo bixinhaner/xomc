@@ -4276,6 +4276,7 @@ const messages: Record<string, string> = {
   'mml.console.tab.paramPath':                 'ParamPath Expert',
   'mml.console.commandTree.searchPlaceholder': '搜索命令...',
   'mml.console.commandTree.empty':             '暂无命令',
+  'mml.console.commandTree.customized':        'Customized',
   'mml.admin.catalog.title':                   'MML Catalog 管理',
   'mml.admin.catalog.tab.groups':              'Groups',
   'mml.admin.catalog.tab.commands':            'Commands',
