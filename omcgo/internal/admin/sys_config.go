@@ -242,14 +242,32 @@ SET value = EXCLUDED.value, updated_at = NOW()
 
 // --- SysConfigService ---
 
+// SysConfigSavedHook 是 BatchUpsert 提交成功后触发的回调。
+// 典型用途：让 in-memory policy cache（如 SecurityPolicy / PeriodicSyncPolicy）
+// 在配置保存后立刻失效，避免等 30s TTL 自然过期。
+//
+// 多个 hook 按注册顺序串行调用；任一 hook panic 不影响其它 hook（recover）。
+// hook 收到的 category 是本次保存的 category 名，回调侧自行判定是否相关。
+type SysConfigSavedHook func(ctx context.Context, category string)
+
 // SysConfigService provides business logic for system configuration.
 type SysConfigService struct {
-	repo SysConfigRepository
+	repo  SysConfigRepository
+	hooks []SysConfigSavedHook
 }
 
 // NewSysConfigService creates a new SysConfigService.
 func NewSysConfigService(repo SysConfigRepository) *SysConfigService {
 	return &SysConfigService{repo: repo}
+}
+
+// RegisterSavedHook 注册一个 BatchUpsert 后回调。仅在进程启动 wiring 阶段调用，
+// 无并发保护（运行期不再修改 hooks 切片）。
+func (s *SysConfigService) RegisterSavedHook(h SysConfigSavedHook) {
+	if h == nil {
+		return
+	}
+	s.hooks = append(s.hooks, h)
 }
 
 // Create creates a new config entry.
@@ -311,7 +329,25 @@ func (s *SysConfigService) Delete(ctx context.Context, id uuid.UUID) error {
 	return s.repo.Delete(ctx, id)
 }
 
-// BatchUpsert 按 PRD config.md §5.2 把整个 category 的 KV 批量写入。
+// BatchUpsert 按 PRD config.md §5.2 把整个 category 的 KV 批量写入，commit 成功后
+// 顺序触发已注册的 SysConfigSavedHook（hook 异常被 recover 隔离，不阻塞接口返回）。
 func (s *SysConfigService) BatchUpsert(ctx context.Context, req BatchUpdateSysConfigRequest) (int, error) {
-	return s.repo.BatchUpsert(ctx, req.Category, req.Items)
+	n, err := s.repo.BatchUpsert(ctx, req.Category, req.Items)
+	if err != nil {
+		return n, err
+	}
+	s.fireSavedHooks(ctx, req.Category)
+	return n, nil
+}
+
+// fireSavedHooks 串行调用注册的 SavedHook。单 hook panic 不影响后续 hook 与 caller。
+func (s *SysConfigService) fireSavedHooks(ctx context.Context, category string) {
+	for _, h := range s.hooks {
+		func(hook SysConfigSavedHook) {
+			defer func() {
+				_ = recover() // hook 失败仅丢弃，保存动作已落库
+			}()
+			hook(ctx, category)
+		}(h)
+	}
 }

@@ -144,6 +144,18 @@ func initAdminModule(c *Container) error {
 	sysConfigService := admin.NewSysConfigService(sysConfigRepo)
 	sysConfigHandler := admin.NewSysConfigHandler(sysConfigService)
 
+	// FE 保存"安全设置"页（category='security'）后立刻让 SecurityPolicy 30s 缓存失效，
+	// 避免管理员看到设置变更但实际生效要等 ≤30s 的体验断层。
+	sysConfigService.RegisterSavedHook(func(_ context.Context, category string) {
+		if category == "security" {
+			securityPolicy.InvalidateCache()
+		}
+	})
+
+	// 暴露到 Container 让其他模块（如 provision.PeriodicSyncPolicy）也能挂 hook。
+	c.SysConfigSvc = sysConfigService
+	c.SecurityPolicy = securityPolicy
+
 	// UI 定制化资产上传 / 公开下载（参 docs/prd/system/ui-customization.md）
 	uiAssetHandler := admin.NewUIAssetHandler(c.MinIO, c.Cfg.MinIO.Buckets.UIAssets)
 

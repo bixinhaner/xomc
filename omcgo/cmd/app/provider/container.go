@@ -86,12 +86,14 @@ type Container struct {
 	GroupService *topology.DeviceGroupService
 
 	// AdminModule 设置
-	JWTService  *admin.JWTService
-	APIKeySvc   *admin.APIKeyService
-	UserRepo    *admin.PgUserRepository
-	RoleRepo    *admin.PgRoleRepository
-	AuditRepo   *admin.PgAuditRepository
-	PermService *admin.PermissionService
+	JWTService     *admin.JWTService
+	APIKeySvc      *admin.APIKeyService
+	UserRepo       *admin.PgUserRepository
+	RoleRepo       *admin.PgRoleRepository
+	AuditRepo      *admin.PgAuditRepository
+	PermService    *admin.PermissionService
+	SysConfigSvc   *admin.SysConfigService // 提供 RegisterSavedHook 给其他模块挂 cache invalidate
+	SecurityPolicy *admin.SecurityPolicy   // 让其他模块可注册 InvalidateCache hook
 
 	// DeviceModule 设置
 	DeviceService  *device.DeviceService

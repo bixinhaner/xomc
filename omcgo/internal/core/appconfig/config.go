@@ -326,24 +326,13 @@ type NEDirectConfig struct {
 //  2. 匹配参数模板 → 自动下发配置（AutoConfigure=true 时）
 //  3. 参数同步（AutoSync）→ GPV 批量读取设备当前值存入 device_parameters 表
 type ProvisionConfig struct {
-	Enabled       bool               `mapstructure:"enabled"`
-	AutoConfigure bool               `mapstructure:"auto_configure"` // Path A: 匹配模版后自动下发配置（需要参数路径映射层）
-	TaskTimeout   time.Duration      `mapstructure:"task_timeout"`   // 超时自动 fail 非终态 task（默认 15 分钟）
-	ModelUpload   ModelUploadConfig  `mapstructure:"model_upload"`
-	AutoSync      AutoSyncConfig     `mapstructure:"auto_sync"`
-	PeriodicSync  PeriodicSyncConfig `mapstructure:"periodic_sync"`
-}
-
-// PeriodicSyncConfig 配置周期性参数同步兜底机制（T-0124 设计 §2.4）。
-// 由 PeriodicSyncer 按 Interval 扫描 last_param_sync_at NULL 或过期的 active 设备，
-// 入队 Path B 全量同步（reason="periodic"），作为配置漂移检测的兜底链路。
-// 生产建议先 Enabled=true + Interval=72h + BatchSize=50 灰度观察一周再调整。
-type PeriodicSyncConfig struct {
-	Enabled       bool          `mapstructure:"enabled"`        // 默认 false（dev 关）；生产建议灰度后开
-	Interval      time.Duration `mapstructure:"interval"`       // 默认 24h；扫描周期 + last_param_sync_at 过期判定
-	BatchSize     int           `mapstructure:"batch_size"`     // 默认 200；单轮处理设备数上限
-	MaxConcurrent int           `mapstructure:"max_concurrent"` // 默认 10；CreateTask 入队并发度（防 PG 写入毛刺，非 GPV 并发）
-	StaggerWindow time.Duration `mapstructure:"stagger_window"` // 默认 0；非 0 时把 batch 内入队动作在窗口内打散
+	Enabled       bool              `mapstructure:"enabled"`
+	AutoConfigure bool              `mapstructure:"auto_configure"` // Path A: 匹配模版后自动下发配置（需要参数路径映射层）
+	TaskTimeout   time.Duration     `mapstructure:"task_timeout"`   // 超时自动 fail 非终态 task（默认 15 分钟）
+	ModelUpload   ModelUploadConfig `mapstructure:"model_upload"`
+	AutoSync      AutoSyncConfig    `mapstructure:"auto_sync"`
+	// 周期性参数同步配置从 sys_configs (category='device') 读，不再走 YAML。
+	// 参 internal/provision/periodic_sync_policy.go。
 }
 
 // UpgradeConfig 配置固件升级/回退的超时和并发策略。

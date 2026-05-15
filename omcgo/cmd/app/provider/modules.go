@@ -166,23 +166,41 @@ func initProvisionModule(c *Container) error {
 		}
 		logger.Info("auto-sync service enabled")
 
-		// T-0124: 周期性参数同步兜底（默认 Enabled=false 灰度）。
+		// T-0124: 周期性参数同步兜底。
+		// 配置从 sys_configs (category='device') 读，Enabled / Interval / BatchSize /
+		// MaxConcurrent / StaggerWindow 全部 runtime 动态生效（30s 缓存 + 1min 轮询）。
+		// 总是启动 scheduler；Enabled=false 时 scheduler 空跑等切换 — 这样用户在 FE
+		// 系统配置 → 设备设置面板里开关 enabled 不需要重启进程。
 		// PG advisory lock 协调多副本 leader，保证同一时刻只有一个 app 副本扫描入队。
-		if c.Cfg.Provision.PeriodicSync.Enabled {
-			leader := provision.NewPGAdvisoryLeaderElector(c.PgPool, "periodic_param_syncer", logger)
-			periodicSyncer := provision.NewPeriodicSyncer(
-				c.DeviceRepo, syncSvc, leader,
-				c.Cfg.Provision.PeriodicSync, logger,
-			)
-			go func() {
-				if err := periodicSyncer.Start(context.Background()); err != nil && err != context.Canceled {
-					logger.Warn("periodic syncer exited with error", zap.Error(err))
+		sysCfgRepo := admin.NewPgSysConfigRepository(c.PgPool)
+		periodicSyncLookup := provision.SysConfigLookup(func(ctx context.Context, cat, key string) (string, bool) {
+			cfg, err := sysCfgRepo.GetByKey(ctx, cat, key)
+			if err != nil || cfg == nil {
+				return "", false
+			}
+			return cfg.Value, true
+		})
+		periodicSyncPolicy := provision.NewPeriodicSyncPolicy(periodicSyncLookup, logger)
+		// FE 保存"设备设置"页后立即让 PeriodicSyncPolicy 30s 缓存失效，
+		// scheduler 下次 tick（≤ 1 分钟）就读到最新配置；无 hook 时要等 ≤90s 才生效。
+		if c.SysConfigSvc != nil {
+			c.SysConfigSvc.RegisterSavedHook(func(_ context.Context, category string) {
+				if category == "device" {
+					periodicSyncPolicy.InvalidateCache()
 				}
-			}()
-			logger.Info("periodic syncer scheduled",
-				zap.Duration("interval", c.Cfg.Provision.PeriodicSync.Interval),
-				zap.Int("batch_size", c.Cfg.Provision.PeriodicSync.BatchSize))
+			})
 		}
+		leader := provision.NewPGAdvisoryLeaderElector(c.PgPool, "periodic_param_syncer", logger)
+		periodicSyncer := provision.NewPeriodicSyncer(
+			c.DeviceRepo, syncSvc, leader,
+			periodicSyncPolicy, logger,
+		)
+		go func() {
+			if err := periodicSyncer.Start(context.Background()); err != nil && err != context.Canceled {
+				logger.Warn("periodic syncer exited with error", zap.Error(err))
+			}
+		}()
+		logger.Info("periodic syncer scheduler started (driven by sys_configs category=device)")
 	}
 
 	if err := provisionEngine.Subscribe(c.EventBus); err != nil {

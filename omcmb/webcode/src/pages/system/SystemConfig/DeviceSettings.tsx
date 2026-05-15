@@ -1,4 +1,4 @@
-import { Form, InputNumber, Checkbox, Select, Card, Space } from 'antd';
+import { Form, InputNumber, Checkbox, Select, Card, Space, Typography } from 'antd';
 import { useT } from '@/hooks/useT';
 
 const { Option } = Select;
@@ -35,6 +35,12 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
       deviceOfflineSaveDay: 90,
       locationDetection: true,
       latitudeToleranceRange: 1000,
+      // 设备参数同步设置（与后端 internal/provision/periodic_sync_policy.go default 对齐）
+      periodicSyncEnabled: false,
+      periodicSyncIntervalHours: 24,
+      periodicSyncBatchSize: 200,
+      periodicSyncMaxConcurrent: 10,
+      periodicSyncStaggerWindowMinutes: 0,
     }}>
       {/* 设备Inform周期 */}
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.device.informPeriod')}</span>} style={{ marginBottom: 16 }}>
@@ -195,7 +201,7 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
       </Card>
 
       {/* eNB位置移动检测 */}
-      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.device.enbLocationDetection')}</span>}>
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.device.enbLocationDetection')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Space wrap>
             <Form.Item name="locationDetection" valuePropName="checked" noStyle>
@@ -205,6 +211,54 @@ export default function DeviceSettings({ form }: DeviceSettingsProps) {
               <InputNumber min={10} max={10000} style={{ width: 70 }} />
             </Form.Item>
             <span>{t('system.device.thenEnbWillBeLocked')}</span>
+          </Space>
+        </div>
+      </Card>
+
+      {/* 设备参数同步设置（T-0124 周期性参数同步兜底） */}
+      <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.device.periodicSync.title')}</span>}>
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 12, fontSize: 12 }}>
+          {t('system.device.periodicSync.intro')}
+        </Typography.Paragraph>
+        <div style={settingRowStyle}>
+          <Form.Item name="periodicSyncEnabled" valuePropName="checked" noStyle>
+            <Checkbox>{t('system.device.periodicSync.enabledLabel')}</Checkbox>
+          </Form.Item>
+        </div>
+        <div style={settingRowStyle}>
+          <Space wrap>
+            <span>{t('system.device.periodicSync.intervalPrefix')}</span>
+            <Form.Item name="periodicSyncIntervalHours" noStyle>
+              <InputNumber min={1} max={168} style={{ width: 80 }} />
+            </Form.Item>
+            <span>{t('system.device.periodicSync.intervalSuffix')}</span>
+          </Space>
+        </div>
+        <div style={settingRowStyle}>
+          <Space wrap>
+            <span>{t('system.device.periodicSync.batchSizePrefix')}</span>
+            <Form.Item name="periodicSyncBatchSize" noStyle>
+              <InputNumber min={1} max={1000} style={{ width: 80 }} />
+            </Form.Item>
+            <span>{t('system.device.periodicSync.batchSizeSuffix')}</span>
+          </Space>
+        </div>
+        <div style={settingRowStyle}>
+          <Space wrap>
+            <span>{t('system.device.periodicSync.maxConcurrentPrefix')}</span>
+            <Form.Item name="periodicSyncMaxConcurrent" noStyle>
+              <InputNumber min={1} max={50} style={{ width: 80 }} />
+            </Form.Item>
+            <span>{t('system.device.periodicSync.maxConcurrentSuffix')}</span>
+          </Space>
+        </div>
+        <div style={settingRowStyle}>
+          <Space wrap>
+            <span>{t('system.device.periodicSync.staggerPrefix')}</span>
+            <Form.Item name="periodicSyncStaggerWindowMinutes" noStyle>
+              <InputNumber min={0} max={120} style={{ width: 80 }} />
+            </Form.Item>
+            <span>{t('system.device.periodicSync.staggerSuffix')}</span>
           </Space>
         </div>
       </Card>
