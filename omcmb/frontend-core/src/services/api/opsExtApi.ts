@@ -376,7 +376,16 @@ export function subscribeSSE(
   }
   if (opts.onEvent) {
     // 已知事件类型
-    const knownEvents = ['open', 'ping', 'command.dispatched', 'task.progress', 'task.completed'];
+    // T-0130: mml_device_frame 由 ResultAggregator.publishDeviceFrame (commit 3f802ef7) 发送，
+    // payload 含 task_id / device_task_id / device_sn / method / status / result / error_message。
+    const knownEvents = [
+      'open',
+      'ping',
+      'command.dispatched',
+      'task.progress',
+      'task.completed',
+      'mml_device_frame',
+    ];
     knownEvents.forEach((evt) => {
       source.addEventListener(evt, (e: MessageEvent) => {
         try {

@@ -306,6 +306,7 @@ export default function CommandTree({ lang }: CommandTreeProps) {
             .map((sf) => sf.id),
           values: {},
           unknownCodes: [],
+          targetObject: cmd.targetObject,
         };
         appendStatement(stmt);
       } catch (e) {

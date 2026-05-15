@@ -180,6 +180,12 @@ export interface Statement {
   values: Record<string, string>;      // MOD/ADD：mml_code → value
   rmvInstanceIndex?: number;           // RMV
   unknownCodes: string[];              // parser/lookup 未命中
+  /**
+   * T-0130: RMV statement 用于 GPV 探测的目标对象路径（例 "Device.IP.Interface."）。
+   * 在 CommandTree 构造 Statement 时从 command.targetObject 透传；InstancePicker 据此调
+   * POST /ops/commands/rpc (action="get_param") 探测当前设备实例集合。
+   */
+  targetObject?: string;
 }
 
 /** parse 错误（不阻塞 statement 显示，前端 toast 提示） */
