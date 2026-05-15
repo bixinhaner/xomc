@@ -70,7 +70,9 @@ const { TextArea } = Input;
 
 const PERM_LICENSE_OPERATE = 'system:license:operate';
 
-const logTypeColorMap: Record<LicenseLogType, string> = {
+// 注：auto_revoke_by_activate 不在 LicenseLogType union（后端规划中），用 partial map
+// + Tag 默认色兜底，避免 union 类型扩张导致全局 Record 漏键。T-0136 后续 batch 修。
+const logTypeColorMap: Partial<Record<LicenseLogType, string>> & Record<string, string> = {
   import: 'blue',
   activate: 'green',
   revoke: 'orange',
@@ -110,7 +112,7 @@ interface ImportFormValues {
 export default function LicenseOperations() {
   const t = useT();
   const canOperate = usePermission(PERM_LICENSE_OPERATE);
-  const currentUserId = useUserStore((s) => s.user?.id);
+  const currentUserId = useUserStore((s) => s.currentUser?.id);
 
   // ------------------- queries -------------------
   const activeLicensesQuery = useLicenses({ status: 'active', page: 1, pageSize: 200 });

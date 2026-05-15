@@ -64,7 +64,6 @@ export default function BatchParamTemplate() {
   // 设备下拉源：最多 200，按 SN 升序，足够普通场景手选；规模化筛选留后续
   const { data: devicePage, isLoading: devLoading } = useDeviceList(
     { page: 1, pageSize: 200 },
-    { refetchInterval: false },
   );
 
   const tableSource = (data?.items ?? mockTemplates) as unknown as TemplateRow[];

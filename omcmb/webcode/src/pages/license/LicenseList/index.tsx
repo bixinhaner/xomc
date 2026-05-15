@@ -334,7 +334,7 @@ interface LicenseDetailTabsProps {
   logTypeLabelMap: Record<LicenseLogType, string>;
   resultLabelMap: Record<LicenseLogResult, string>;
   onJumpToLogs: () => void;
-  t: (key: string, vars?: Record<string, unknown>) => string;
+  t: (key: string, vars?: Record<string, string | number>) => string;
 }
 
 function LicenseDetailTabs({
@@ -465,7 +465,7 @@ interface LicenseAuditListProps {
   logTypeLabelMap: Record<LicenseLogType, string>;
   resultLabelMap: Record<LicenseLogResult, string>;
   onJumpToFull: () => void;
-  t: (key: string, vars?: Record<string, unknown>) => string;
+  t: (key: string, vars?: Record<string, string | number>) => string;
 }
 
 function LicenseAuditList({

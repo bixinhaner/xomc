@@ -162,7 +162,7 @@ export function createHoverStyle(device: MapDevice, zoom: number): Style {
 /**
  * OpenLayers StyleFunction for device layer
  */
-export function deviceStyleFunction(feature: Feature, resolution: number): Style {
+export function deviceStyleFunction(feature: Feature, resolution: number): Style | Style[] {
   const zoom = Math.round(Math.log2(40075016.686 / (resolution * 256)));
   const device = feature.getProperties() as MapDevice;
 
