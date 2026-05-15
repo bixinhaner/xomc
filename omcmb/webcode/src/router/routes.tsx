@@ -70,6 +70,7 @@ const MMLScript          = React.lazy(() => import('@/pages/mml/ScriptTask'));
 const MMLTaskRecord      = React.lazy(() => import('@/pages/mml/TaskRecord'));
 const MMLCommands        = React.lazy(() => import('@/pages/mml/CommandTree'));
 const MMLPrivateCommand  = React.lazy(() => import('@/pages/mml/PrivateCommand'));
+const MMLAdminCatalog    = React.lazy(() => import('@/pages/mml/admin/catalog'));
 
 // Topology Management
 const GISMapView         = React.lazy(() => import('@/pages/topology/GISMapView'));
@@ -287,6 +288,7 @@ export const routes: RouteObject[] = [
       { path: 'mml/task-records',    element: withSuspense(MMLTaskRecord) },
       { path: 'mml/commands',        element: withSuspense(MMLCommands) },
       { path: 'mml/private-command', element: withSuspense(MMLPrivateCommand) },
+      { path: 'mml/admin/catalog',   element: withAdminRole(MMLAdminCatalog) },
 
       // Topology Management
       { path: 'topology/gis-map',  element: withSuspense(GISMapView) },
