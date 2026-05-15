@@ -242,6 +242,7 @@ export default function AlarmLibraryPage() {
             pageSize: data?.pageSize || 20,
             total: data?.total || 0,
             showSizeChanger: true,
+            showTotal: (t) => `共 ${t} 条`,
             onChange: (page, pageSize) => setFilter((f) => ({ ...f, page, pageSize })),
           }}
         />

@@ -272,7 +272,7 @@ export default function ProductsPage() {
           loading={isLoading}
           columns={columns}
           dataSource={items}
-          pagination={{ pageSize: 20, showSizeChanger: true }}
+          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
           size="small"
         />
       </Card>

@@ -126,7 +126,7 @@ export default function StandardParamsTab() {
         columns={columns}
         dataSource={items}
         size="small"
-        pagination={{ pageSize: 50, showSizeChanger: true }}
+        pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
       />
       <Modal
         title={editing ? '编辑标准参数' : '新增标准参数'}

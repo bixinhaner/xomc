@@ -216,7 +216,7 @@ export default function MappingsTab({ selectedName }: Props) {
         columns={columns}
         dataSource={filtered}
         size="small"
-        pagination={{ pageSize: 50, showSizeChanger: true }}
+        pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
       />
       <Modal
         title={editing ? '编辑映射' : '新增映射'}

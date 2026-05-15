@@ -100,7 +100,7 @@ export default function ModelsTab({ selectedName, onSelect }: Props) {
         columns={columns}
         dataSource={items}
         size="small"
-        pagination={{ pageSize: 20 }}
+        pagination={{ pageSize: 20, showTotal: (t) => `共 ${t} 条` }}
       />
       <Modal
         title={`编辑参数模型：${editing?.name}`}
