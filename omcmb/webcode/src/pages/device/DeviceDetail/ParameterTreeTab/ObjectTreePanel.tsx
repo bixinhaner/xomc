@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Typography, Spin, Empty, Tooltip, Button } from 'antd';
+import { Typography, Spin, Empty, Tooltip, Button, theme } from 'antd';
 import {
   PlusOutlined,
   DeleteOutlined,
@@ -40,14 +40,22 @@ interface ObjectTreePanelProps {
   onDeleteObject?: (objectPath: string) => void;
 }
 
-function highlightText(text: string, keyword: string): React.ReactNode {
-  if (!keyword) return text;
+function HighlightText({ text, keyword }: { text: string; keyword: string }) {
+  const { token } = theme.useToken();
+  if (!keyword) return <>{text}</>;
   const idx = text.toLowerCase().indexOf(keyword.toLowerCase());
-  if (idx === -1) return text;
+  if (idx === -1) return <>{text}</>;
   return (
     <>
       {text.slice(0, idx)}
-      <mark style={{ background: '#fff1b8', padding: 0, borderRadius: 2 }}>
+      <mark
+        style={{
+          background: token.colorWarningBg,
+          color: token.colorWarningText,
+          padding: 0,
+          borderRadius: 2,
+        }}
+      >
         {text.slice(idx, idx + keyword.length)}
       </mark>
       {text.slice(idx + keyword.length)}
@@ -270,9 +278,9 @@ const TreeNodeItem = React.memo<TreeNodeItemProps>(
           {node.isLeaf ? (
             <span style={{ width: 14, display: 'inline-block' }} />
           ) : node.isExpanded ? (
-            <CaretDownOutlined style={{ fontSize: 10, color: '#8c8c8c' }} />
+            <CaretDownOutlined style={{ fontSize: 10 }} />
           ) : (
-            <CaretRightOutlined style={{ fontSize: 10, color: '#8c8c8c' }} />
+            <CaretRightOutlined style={{ fontSize: 10 }} />
           )}
         </span>
 
@@ -283,9 +291,11 @@ const TreeNodeItem = React.memo<TreeNodeItemProps>(
               <span className="tree-node-instance-name">#{node.name}</span>
             ) : (
               <span className="tree-node-name">
-                {searchKeyword
-                  ? highlightText(node.name, searchKeyword)
-                  : node.name}
+                {searchKeyword ? (
+                  <HighlightText text={node.name} keyword={searchKeyword} />
+                ) : (
+                  node.name
+                )}
               </span>
             )}
             {node.isMultiInstanceContainer && (

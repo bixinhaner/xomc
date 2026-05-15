@@ -1,5 +1,5 @@
-import React, { useCallback, useState } from 'react';
-import { Button, Input, Space, Tooltip, message } from 'antd';
+import React, { useCallback, useMemo, useState } from 'react';
+import { Button, Input, Space, Tooltip, message, theme } from 'antd';
 import { SearchOutlined, SyncOutlined } from '@ant-design/icons';
 import {
   useObjectTree,
@@ -18,11 +18,42 @@ interface ParameterTreeTabProps {
 }
 
 export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
+  const { token } = theme.useToken();
   const [selectedPath, setSelectedPath] = useState<string>('');
   const [searchKeyword, setSearchKeyword] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [isSyncing, setIsSyncing] = useState(false);
+
+  const treePanelStyle = useMemo<React.CSSProperties>(
+    () => ({
+      width: 320,
+      flexShrink: 0,
+      border: `1px solid ${token.colorBorderSecondary}`,
+      borderRadius: 8,
+      overflow: 'hidden',
+      maxHeight: 700,
+      boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+      background: token.colorBgContainer,
+      ['--otp-bg' as string]: token.colorBgContainer,
+      ['--otp-bg-soft' as string]: token.colorFillAlter,
+      ['--otp-bg-hover' as string]: token.colorBgTextHover,
+      ['--otp-bg-selected' as string]: token.controlItemBgActive,
+      ['--otp-border' as string]: token.colorBorderSecondary,
+      ['--otp-border-soft' as string]: token.colorSplit,
+      ['--otp-text' as string]: token.colorText,
+      ['--otp-text-secondary' as string]: token.colorTextSecondary,
+      ['--otp-text-disabled' as string]: token.colorTextTertiary,
+      ['--otp-primary' as string]: token.colorPrimary,
+      ['--otp-primary-border' as string]: token.colorPrimaryBorder,
+      ['--otp-success' as string]: token.colorSuccess,
+      ['--otp-success-bg' as string]: token.colorSuccessBg,
+      ['--otp-error' as string]: token.colorError,
+      ['--otp-error-bg' as string]: token.colorErrorBg,
+      ['--otp-scrollbar' as string]: token.colorFill,
+    }),
+    [token]
+  );
 
   const treeQuery = useObjectTree(deviceId);
   const childrenQuery = useDirectChildren(deviceId, selectedPath, page, pageSize);
@@ -138,18 +169,7 @@ export default function ParameterTreeTab({ deviceId }: ParameterTreeTabProps) {
 
       {/* Split Layout: Tree + Table */}
       <div style={{ display: 'flex', gap: 16, minHeight: 500 }}>
-        <div
-          style={{
-            width: 320,
-            flexShrink: 0,
-            border: '1px solid #e8e8e8',
-            borderRadius: 8,
-            overflow: 'hidden',
-            maxHeight: 700,
-            boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
-            background: '#fff',
-          }}
-        >
+        <div style={treePanelStyle}>
           <ObjectTreePanel
             treeData={treeQuery.data}
             loading={treeQuery.isLoading}
