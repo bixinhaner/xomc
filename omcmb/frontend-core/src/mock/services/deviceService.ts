@@ -210,4 +210,28 @@ export const deviceService = {
   async reboot(_id: string): Promise<void> {
     await delay(200, 500);
   },
+
+  /**
+   * T-0129 mock 类型对齐：与 deviceApi.syncDeviceParams (T-0126) 签名一致。
+   * 返回 fake task envelope, force 参数透传无效果。
+   */
+  async syncDeviceParams(
+    _deviceId: string,
+    _options?: { force?: boolean },
+  ): Promise<{
+    status: string;
+    sourceId: string;
+    deviceId: string;
+    serialNumber: string;
+    force: boolean;
+  }> {
+    await delay(200, 500);
+    return {
+      status: 'queued',
+      sourceId: `manual:mock-${Date.now()}`,
+      deviceId: _deviceId,
+      serialNumber: 'MOCK-SN',
+      force: _options?.force ?? false,
+    };
+  },
 };

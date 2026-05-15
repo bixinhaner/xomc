@@ -192,19 +192,19 @@ export const softwareService = {
   async createRollback(req: {
     deviceIds: string[];
     taskName: string;
-    operatorCode: string;
     createUser: string;
+    createSuspended?: boolean;
   }): Promise<UpgradeTaskInfo> {
     await delay(200, 400);
     const task = createMockTask({
       taskName: req.taskName,
       productClass: 'PM-B4860',
       taskType: 2,
-      status: 'in_progress',
+      status: req.createSuspended ? 'paused' : 'in_progress',
       totalCount: req.deviceIds.length,
       successCount: 0,
       failCount: 0,
-      operatorCode: req.operatorCode,
+      operatorCode: '',
       createUser: req.createUser,
     });
     mockUpgradeTasks.unshift(task);
@@ -279,5 +279,99 @@ export const softwareService = {
       passed: Math.random() > 0.15,
       issues: Math.random() > 0.8 ? ['磁盘空间不足，需要2GB', '当前版本不支持直升'] : [],
     }));
+  },
+
+  // ---------------- T-0129 mock 类型对齐 (与 softwareApi 真签名一致) ----------------
+
+  /** 上传固件，签名对齐 softwareApi.uploadFirmware (T-0129)。 */
+  async uploadFirmware(
+    _file: File,
+    metadata: {
+      version: string;
+      productClass?: string;
+      releaseNotes?: string;
+      fileType?: number;
+      recommend?: boolean;
+      uploader?: string;
+      manufacturer?: string;
+      description?: string;
+    },
+  ): Promise<SoftwareVersion> {
+    await delay(500, 1500);
+    return {
+      id: `mock-firmware-${Date.now()}`,
+      versionName: metadata.version,
+      versionCode: metadata.version,
+      deviceType: metadata.productClass ?? 'mock-product',
+      vendor: 'MockVendor',
+      releaseDate: new Date().toISOString(),
+      status: 'current',
+      fileName: _file.name || `firmware-${metadata.version}.bin`,
+      fileSize: _file.size || 10485760,
+      checksum: `mock-sha256-${Date.now()}`,
+      downloadUrl: '',
+      releaseNotes: metadata.releaseNotes ?? '',
+      minHardwareVersion: '',
+      features: [],
+      bugFixes: [],
+    };
+  },
+
+  /** 下载固件（mock 仅 delay）。 */
+  async downloadFirmware(_id: string, _fileName: string): Promise<void> {
+    await delay(200, 500);
+  },
+
+  /** 更新固件元数据，签名对齐 softwareApi.updateFirmware (T-0129)。 */
+  async updateFirmware(
+    id: string,
+    metadata: {
+      productClass?: string;
+      version?: string;
+      recommend?: boolean;
+      description?: string;
+      releaseNotes?: string;
+    },
+  ): Promise<SoftwareVersion> {
+    await delay(200, 500);
+    return {
+      id,
+      versionName: metadata.version ?? 'mock',
+      versionCode: metadata.version ?? 'mock',
+      deviceType: metadata.productClass ?? 'mock-product',
+      vendor: 'MockVendor',
+      releaseDate: new Date().toISOString(),
+      status: 'current',
+      fileName: 'mock.bin',
+      fileSize: 10485760,
+      checksum: '',
+      downloadUrl: '',
+      releaseNotes: metadata.releaseNotes ?? metadata.description ?? '',
+      minHardwareVersion: '',
+      features: [],
+      bugFixes: [],
+    };
+  },
+
+  /** 删除升级任务，签名对齐 softwareApi.deleteTask (T-0129)。 */
+  async deleteTask(_id: string): Promise<void> {
+    await delay(200, 500);
+  },
+
+  /**
+   * 列出所有子任务（跨 task 聚合），签名对齐 softwareApi.getAllSubTasks (T-0129)。
+   * mock 返回空 page，hooks 调用方按 PageResponse 解构不会爆。
+   */
+  async getAllSubTasks(
+    params: { taskName?: string; deviceSn?: string; status?: string; taskType?: number } & PageRequest,
+  ): Promise<PageResponse<UpgradeSubTaskInfo>> {
+    await delay(200, 500);
+    void params;
+    return {
+      items: [],
+      total: 0,
+      page: params.page ?? 1,
+      pageSize: params.pageSize ?? 20,
+    };
   },
 };

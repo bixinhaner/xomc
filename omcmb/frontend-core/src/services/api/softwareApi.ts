@@ -573,6 +573,7 @@ export const softwareApi = {
   // ---- Legacy compatibility (delegated to mock) ----
   cancelUpgradePlan: softwareService.cancelUpgradePlan.bind(softwareService),
   precheck: softwareService.precheck.bind(softwareService),
+  createUpgradePlan: softwareService.createUpgradePlan.bind(softwareService),
 
   // ---- Legacy UpgradePlan (for mock compatibility) ----
   async getUpgradePlans(
