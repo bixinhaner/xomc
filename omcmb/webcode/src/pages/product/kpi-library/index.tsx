@@ -6,7 +6,6 @@ import {
   useIndicatorCacheRefresh,
 } from '@core/hooks/api/useIndicatorsLibrary';
 import IndicatorTab from './IndicatorTab';
-import EnabledIndicatorsTab from './EnabledIndicatorsTab';
 import IndicatorUnitsTab from './IndicatorUnitsTab';
 
 export default function KpiLibraryPage() {
@@ -70,7 +69,6 @@ export default function KpiLibraryPage() {
           { key: 'ENB', label: 'ENB (LTE)', children: <IndicatorTab deviceType="ENB" /> },
           { key: 'GSM', label: 'GSM', children: <IndicatorTab deviceType="GSM" /> },
           { key: 'GNB', label: 'GNB (5G NR)', children: <IndicatorTab deviceType="GNB" /> },
-          { key: 'enabled', label: '启用指标', children: <EnabledIndicatorsTab /> },
           { key: 'units', label: '单位定义', children: <IndicatorUnitsTab /> },
         ]}
       />

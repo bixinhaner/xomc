@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react';
-import { Card, Table, Input, Tag, Button, Space, message, Popconfirm } from 'antd';
+import { Card, Table, Input, Switch, Button, Space, message, Popconfirm } from 'antd';
 import { EyeOutlined, DeleteOutlined } from '@ant-design/icons';
 import {
   useIndicatorList,
   useDeleteIndicator,
+  useEnabledIndicators,
+  useSetEnabledIndicators,
 } from '@core/hooks/api/useIndicatorsLibrary';
 import type { DeviceType, IndicatorInfo } from '@core/types/indicatorLibrary';
 import IndicatorDrawer from './IndicatorDrawer';
@@ -11,6 +13,9 @@ import IndicatorDrawer from './IndicatorDrawer';
 interface Props {
   deviceType: DeviceType;
 }
+
+// 启用状态走 default 行（XML 真相源；运营商覆盖能力后端保留但 UI 不暴露选择器）
+const OPERATOR_CODE = 'default';
 
 export default function IndicatorTab({ deviceType }: Props) {
   const [keyword, setKeyword] = useState('');
@@ -22,11 +27,15 @@ export default function IndicatorTab({ deviceType }: Props) {
     pageSize,
   });
   const deleteMut = useDeleteIndicator();
+  const { data: enabledData } = useEnabledIndicators(deviceType, OPERATOR_CODE);
+  const setMut = useSetEnabledIndicators();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selected, setSelected] = useState<IndicatorInfo | null>(null);
+  const [pendingId, setPendingId] = useState<string | null>(null);
 
   const items = useMemo(() => data?.items || [], [data]);
+  const enabledSet = useMemo(() => new Set(enabledData?.items || []), [enabledData]);
 
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 140 },
@@ -45,9 +54,30 @@ export default function IndicatorTab({ deviceType }: Props) {
     { title: '单位', dataIndex: 'unit', width: 80 },
     {
       title: '启用',
-      dataIndex: 'isEnabled',
+      dataIndex: 'id',
       width: 80,
-      render: (v: boolean) => (v ? <Tag color="success">是</Tag> : <Tag>否</Tag>),
+      render: (id: string) => (
+        <Switch
+          size="small"
+          checked={enabledSet.has(id)}
+          loading={setMut.isPending && pendingId === id}
+          onChange={(checked) => {
+            setPendingId(id);
+            setMut.mutate(
+              {
+                deviceType,
+                operatorCode: OPERATOR_CODE,
+                indicatorIds: [id],
+                enable: checked,
+              },
+              {
+                onSettled: () => setPendingId(null),
+                onError: (e) => message.error((e as Error).message),
+              }
+            );
+          }}
+        />
+      ),
     },
     {
       title: '操作',
