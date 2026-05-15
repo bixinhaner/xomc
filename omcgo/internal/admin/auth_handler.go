@@ -109,7 +109,8 @@ func (h *Handler) Login(c *gin.Context) {
 			)
 			// 对外仅以 401 暴露失败原因，不区分"密钥错"/"重放"/"过期"，避免给攻击者反馈。
 			h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, "decrypt_failed")
-			commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
+			commonerrors.AbortWithError(c, http.StatusUnauthorized,
+				commonerrors.NewBusinessError(7003, "登录凭据无效，请重试", err))
 			return
 		}
 	} else if req.Password != "" {
@@ -120,7 +121,7 @@ func (h *Handler) Login(c *gin.Context) {
 			)
 			h.recordAuthAuditLog(auditActionLoginFailed, req.Username, nil, clientIP, userAgent, "plaintext_disabled")
 			commonerrors.AbortWithError(c, http.StatusBadRequest,
-				errors.New("plaintext password login is disabled; please use encrypted_password+key_id or deploy TLS"))
+				commonerrors.NewBusinessError(7004, "明文密码登录已禁用，请使用 HTTPS 或 localhost 访问", nil))
 			return
 		}
 		plainPwd = req.Password
@@ -174,7 +175,7 @@ func (h *Handler) Login(c *gin.Context) {
 		}
 
 		status := commonerrors.HTTPStatusFromError(err)
-		commonerrors.AbortWithError(c, status, err)
+		commonerrors.AbortWithError(c, status, loginErrorToFriendlyError(err))
 		return
 	}
 
@@ -359,6 +360,25 @@ func classifyLoginFailure(err error) string {
 		return "wrong_password"
 	default:
 		return "unknown"
+	}
+}
+
+// loginErrorToFriendlyError 把内部登录错误翻译为面向用户的友好消息。
+//
+// 安全考虑：合并"用户不存在"和"密码错误"为同一文案——避免向攻击者透露
+// 用户名是否存在（防枚举）。直接返 *BusinessError 让 AbortWithError 走
+// BizCode + Message 分支，不再泄露 errors.Wrap 链字符串。
+func loginErrorToFriendlyError(err error) error {
+	switch {
+	case errors.Is(err, errLoginUserNotFound),
+		errors.Is(err, errLoginWrongPassword):
+		return commonerrors.NewBusinessError(7001, "用户名或密码错误", err)
+	case errors.Is(err, errLoginAccountDisabled):
+		return commonerrors.NewBusinessError(7002, "账号已被禁用，请联系管理员", err)
+	case errors.Is(err, commonerrors.ErrUnauthorized):
+		return commonerrors.NewBusinessError(7000, "用户名或密码错误", err)
+	default:
+		return commonerrors.NewBusinessError(7099, "登录失败，请稍后重试", err)
 	}
 }
 

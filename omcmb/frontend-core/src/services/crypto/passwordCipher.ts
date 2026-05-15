@@ -160,35 +160,21 @@ export async function encryptPassword(plain: string): Promise<EncryptedPasswordP
 }
 
 /**
- * preparePasswordPayload (T-0120) — 登录/改密的统一密码准备入口：
- *   - secure context（HTTPS / localhost）+ crypto.subtle 可用 → RSA-OAEP 加密
- *   - 非 secure context（如 http://内网IP）→ 返回明文 marker，由 authApi 切到
- *     后端 plaintext path（要求后端 LoginCrypto.AllowPlaintext=true）
+ * preparePasswordPayload — 登录/改密的统一密码准备入口。**永远走加密路径**。
  *
- * 调用方用 isPlaintextPayload 判分支映射到后端字段：
- *   - encrypted: encrypted_password + key_id
- *   - plaintext: password (login) 或 old_password+new_password (change)
+ * 历史：T-0120 一度引入 plaintext fallback（非 secure context 自动降级明文），
+ * 2026-05-15 移除——明文传输违反"密码不落明文 / 传输全加密"的商用品质门，
+ * fallback 形同虚设。
  *
- * 安全声明：plaintext path 是 escape hatch，专为内网受信网络部署设计；
- * 公网部署应通过 TLS 强制加密路径。后端默认 AllowPlaintext=false 拒绝明文。
+ * 当前行为：
+ *   - secure context（HTTPS / localhost / 127.0.0.1）→ RSA-OAEP 加密返回 {encryptedPassword, keyId}
+ *   - 非 secure context → 直接 throw，提示用户切到 HTTPS 或 localhost
+ *
+ * 调用方仍可用 isPlaintextPayload 兼容老接口（永远 false）。
  */
 export async function preparePasswordPayload(plain: string): Promise<PasswordPayload> {
   if (!plain) throw new Error('preparePasswordPayload: plain password is empty');
-
-  const insecure =
-    (typeof window !== 'undefined' && window.isSecureContext === false) ||
-    typeof crypto === 'undefined' ||
-    !crypto.subtle;
-
-  if (insecure) {
-    if (typeof console !== 'undefined' && console.warn) {
-      console.warn(
-        '[security] 非 secure context — 密码以明文传输；仅适用内网受信部署。' +
-        '生产环境请部署 TLS（参 deployments/docker/TLS-SETUP.md）。'
-      );
-    }
-    return { plaintextPassword: plain };
-  }
-
+  // encryptPassword 内部已 fail-fast 检查 isSecureContext + crypto.subtle，
+  // 这里不重复，让单一真相源在 encryptPassword。
   return await encryptPassword(plain);
 }

@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -561,6 +562,70 @@ func TestClassifyLoginFailure(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := classifyLoginFailure(tt.err)
 			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// TestLoginErrorToFriendlyError 验证内部 error → 用户面文案的翻译表，并防回归
+// "wrong password: unauthorized" 泄露 Go 错误链字符串。
+func TestLoginErrorToFriendlyError(t *testing.T) {
+	tests := []struct {
+		name        string
+		err         error
+		wantCode    int
+		wantMsg     string
+		shouldMatch bool // BusinessError 应能被 errors.As 匹配
+	}{
+		{
+			name:        "wrong password 合并到 用户名或密码错误（防枚举）",
+			err:         fmt.Errorf("%w: %w", errLoginWrongPassword, commonerrors.ErrUnauthorized),
+			wantCode:    7001,
+			wantMsg:     "用户名或密码错误",
+			shouldMatch: true,
+		},
+		{
+			name:        "user not found 合并到 用户名或密码错误（防枚举）",
+			err:         fmt.Errorf("%w: %w", errLoginUserNotFound, commonerrors.ErrUnauthorized),
+			wantCode:    7001,
+			wantMsg:     "用户名或密码错误",
+			shouldMatch: true,
+		},
+		{
+			name:        "account disabled",
+			err:         fmt.Errorf("%w: %w", errLoginAccountDisabled, commonerrors.ErrForbidden),
+			wantCode:    7002,
+			wantMsg:     "账号已被禁用，请联系管理员",
+			shouldMatch: true,
+		},
+		{
+			name:        "纯 ErrUnauthorized 也走友好文案",
+			err:         commonerrors.ErrUnauthorized,
+			wantCode:    7000,
+			wantMsg:     "用户名或密码错误",
+			shouldMatch: true,
+		},
+		{
+			name:        "未分类错误 fallback 友好文案",
+			err:         fmt.Errorf("some unexpected error"),
+			wantCode:    7099,
+			wantMsg:     "登录失败，请稍后重试",
+			shouldMatch: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			friendly := loginErrorToFriendlyError(tt.err)
+			var bErr *commonerrors.BusinessError
+			ok := errors.As(friendly, &bErr)
+			assert.Equal(t, tt.shouldMatch, ok)
+			if ok {
+				assert.Equal(t, tt.wantCode, bErr.Code)
+				assert.Equal(t, tt.wantMsg, bErr.Message)
+				// 防回归：友好 msg 中不应包含 Go 错误链字符串（"wrong password" / "unauthorized" 等）
+				assert.NotContains(t, bErr.Message, "wrong password")
+				assert.NotContains(t, bErr.Message, "unauthorized")
+				assert.NotContains(t, bErr.Message, ":")
+			}
 		})
 	}
 }
