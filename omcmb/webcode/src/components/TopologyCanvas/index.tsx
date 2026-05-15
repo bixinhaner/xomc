@@ -54,10 +54,26 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
   // Pan state
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(1);
-  const isDragging = useRef(false);
+  const [viewportSize, setViewportSize] = useState({ width: 800, height: 600 });
+  const [isDragging, setIsDragging] = useState(false);
   const lastMouse = useRef({ x: 0, y: 0 });
   const pinchStartDist = useRef(0);
   const pinchStartScale = useRef(1);
+
+  // 跟踪视口大小用于视口裁剪
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const updateSize = () => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (rect) {
+        setViewportSize({ width: rect.width, height: rect.height });
+      }
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
 
   // Update popup position when selected node, pan, or scale changes
   useEffect(() => {
@@ -105,12 +121,12 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if ((e.target as SVGElement).closest('.topo-node')) return;
-    isDragging.current = true;
+    setIsDragging(true);
     lastMouse.current = { x: e.clientX, y: e.clientY };
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging.current) return;
+    if (!isDragging) return;
     const dx = e.clientX - lastMouse.current.x;
     const dy = e.clientY - lastMouse.current.y;
     setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
@@ -118,7 +134,7 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
   };
 
   const handleMouseUp = () => {
-    isDragging.current = false;
+    setIsDragging(false);
   };
 
   const handleWheel = (e: React.WheelEvent) => {
@@ -131,11 +147,11 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 1) {
       if ((e.target as SVGElement).closest('.topo-node')) return;
-      isDragging.current = true;
+      setIsDragging(true);
       lastMouse.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     }
     if (e.touches.length === 2) {
-      isDragging.current = false;
+      setIsDragging(false);
       const dist = Math.hypot(
         e.touches[1].clientX - e.touches[0].clientX,
         e.touches[1].clientY - e.touches[0].clientY,
@@ -146,7 +162,7 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (e.touches.length === 1 && isDragging.current) {
+    if (e.touches.length === 1 && isDragging) {
       const dx = e.touches[0].clientX - lastMouse.current.x;
       const dy = e.touches[0].clientY - lastMouse.current.y;
       setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }));
@@ -163,12 +179,55 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
   };
 
   const handleTouchEnd = () => {
-    isDragging.current = false;
+    setIsDragging(false);
     pinchStartDist.current = 0;
   };
 
-  // Build node position map
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  // 视口裁剪：只渲染可见区域内的节点（带缓冲区）
+  const { visibleNodes, visibleEdges } = useMemo(() => {
+    // 缓冲区大小（像素），确保边缘节点也能显示
+    const BUFFER = 100;
+
+    // 计算可见区域的世界坐标边界
+    const leftWorld = (-pan.x - BUFFER) / scale;
+    const rightWorld = (-pan.x + viewportSize.width + BUFFER) / scale;
+    const topWorld = (-pan.y - BUFFER) / scale;
+    const bottomWorld = (-pan.y + viewportSize.height + BUFFER) / scale;
+
+    // 小数据量时不过滤（避免过度优化带来的复杂性）
+    if (nodes.length <= 100) {
+      return { visibleNodes: nodes, visibleEdges: edges };
+    }
+
+    // 过滤可见节点
+    const visibleNodeSet = new Set<string>();
+    const visibleNodesList: TopoNode[] = [];
+
+    for (const node of nodes) {
+      if (
+        node.x >= leftWorld &&
+        node.x <= rightWorld &&
+        node.y >= topWorld &&
+        node.y <= bottomWorld
+      ) {
+        visibleNodeSet.add(node.id);
+        visibleNodesList.push(node);
+      }
+    }
+
+    // 过滤边：至少有一个端点可见
+    const visibleEdgesList = edges.filter(
+      (e) => visibleNodeSet.has(e.source) || visibleNodeSet.has(e.target)
+    );
+
+    return { visibleNodes: visibleNodesList, visibleEdges: visibleEdgesList };
+  }, [nodes, edges, pan, scale, viewportSize]);
+
+  // Build node position map（使用可见节点）
+  const nodeMap = useMemo(
+    () => new Map(visibleNodes.map((n) => [n.id, n])),
+    [visibleNodes],
+  );
 
   // Calculate edge midpoint for label
   const getEdgeLabel = (edge: TopoEdge) => {
@@ -207,7 +266,7 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
         background: isDark ? '#2C2C2C' : '#F8FAFF',
         borderRadius: 8,
         overflow: 'visible',
-        cursor: isDragging.current ? 'grabbing' : 'grab',
+        cursor: isDragging ? 'grabbing' : 'grab',
         ...style,
       }}
     >
@@ -309,7 +368,7 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
 
         <g transform={`translate(${pan.x}, ${pan.y}) scale(${scale})`}>
           {/* Edges */}
-          {edges.map((edge) => {
+          {visibleEdges.map((edge) => {
             const src = nodeMap.get(edge.source);
             const tgt = nodeMap.get(edge.target);
             if (!src || !tgt) return null;
@@ -346,7 +405,7 @@ const TopologyCanvas: React.FC<TopologyCanvasProps> = ({
           })}
 
           {/* Nodes */}
-          {nodes.map((node) => {
+          {visibleNodes.map((node) => {
             const statusColor = NODE_STATUS_COLORS[node.status] ?? '#8C8C8C';
             const isHovered = hoveredNodeId === node.id;
             const isSelected = highlightedNodeId === node.id || selectedNodeId === node.id;

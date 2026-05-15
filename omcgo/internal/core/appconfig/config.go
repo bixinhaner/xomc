@@ -211,6 +211,7 @@ type AppConfig struct {
 	NEDirect        NEDirectConfig        `mapstructure:"ne_direct"`
 	Provision       ProvisionConfig       `mapstructure:"provision"`
 	Upgrade         UpgradeConfig         `mapstructure:"upgrade"`
+	Topology        TopologyConfig        `mapstructure:"topology"`
 	DataModelExpiry DataModelExpiryConfig `mapstructure:"datamodel_expiry"`
 	DictLoader      DictLoaderConfig      `mapstructure:"dict_loader"`
 	ParamRegistry   ParamRegistryConfig   `mapstructure:"param_registry"`
@@ -346,6 +347,23 @@ type UpgradeConfig struct {
 	MaxConcurrentPerBatch int           `mapstructure:"max_concurrent_per_batch"` // 每批最大并发，默认 5
 	ReaperInterval        time.Duration `mapstructure:"reaper_interval"`          // 超时扫描间隔，默认 2min
 	UpgradeLockTTL        time.Duration `mapstructure:"upgrade_lock_ttl"`         // Redis 升级锁 TTL，默认 1h
+}
+
+// TopologyConfig 配置拓扑管理模块（F06）的设备同步行为。
+// 拓扑模块负责维护 topo_nodes 和 topo_edges 表，用于前端拓扑图渲染。
+// DeviceSync 控制从 devices 表到 topo_nodes 表的自动同步策略。
+type TopologyConfig struct {
+	DeviceSync TopologyDeviceSyncConfig `mapstructure:"device_sync"` // 设备到拓扑节点的同步配置
+}
+
+// TopologyDeviceSyncConfig 配置设备同步到拓扑节点的策略。
+// 支持三种同步模式：事件驱动（实时）、启动时同步（历史数据）、定时兜底（容错）。
+type TopologyDeviceSyncConfig struct {
+	Enabled          bool          `mapstructure:"enabled"`           // 是否启用自动同步，默认 true
+	InitialSync      bool          `mapstructure:"initial_sync"`      // 启动时是否执行全量同步，默认 true
+	InitialSyncDelay time.Duration `mapstructure:"initial_sync_delay"` // 启动同步延迟，默认 10s（避免启动高峰）
+	FallbackInterval time.Duration `mapstructure:"fallback_interval"` // 兜底定时同步间隔，默认 1h（0 表示不启用）
+	BatchSize        int           `mapstructure:"batch_size"`        // 批量同步大小，默认 100
 }
 
 // ModelUploadConfig 配置数据模型上传流程（FileType=11）。

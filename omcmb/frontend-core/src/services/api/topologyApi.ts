@@ -294,20 +294,22 @@ export const topologyApi = {
     };
   },
 
-  async getTopoGraph(params?: { domainId?: string; layoutType?: string; nodeType?: NodeType; status?: NodeStatus }): Promise<{ nodes: TopoNode[]; edges: TopoEdge[]; statistics?: TopoStatistics }> {
+  async getTopoGraph(params?: { domainId?: string; layoutType?: string; nodeType?: NodeType; status?: NodeStatus; limit?: number }): Promise<{ nodes: TopoNode[]; edges: TopoEdge[]; statistics?: TopoStatistics }> {
     const { data } = await http.get<{ nodes: BackendTopoNode[]; edges: BackendTopoEdge[]; statistics?: BackendTopoStatistics }>('/topology/graph', {
       params: {
         domain_id: params?.domainId,
         layout_type: params?.layoutType,
         node_type: params?.nodeType,
         status: params?.status,
+        limit: params?.limit ?? 500, // 默认限制 500 个节点，避免浏览器崩溃
       },
     });
-    return {
+    const result = {
       nodes: (data.nodes || []).map(mapBackendTopoNode),
       edges: (data.edges || []).map(mapBackendTopoEdge),
       statistics: data.statistics ? mapBackendTopoStatistics(data.statistics) : undefined,
     };
+    return result;
   },
 
   /**
@@ -502,9 +504,7 @@ export const topologyApi = {
         bounds: params?.bounds,
       },
     });
-    console.log('[DEBUG] getMapStats API response:', JSON.stringify(data, null, 2));
     const result = mapBackendStats(data);
-    console.log('[DEBUG] mapBackendStats result:', JSON.stringify(result, null, 2));
     return result;
   },
 
@@ -600,7 +600,6 @@ function mapBackendStats(bs: BackendMapStats): MapStats {
     // 这是因为运行的后端是旧版本（4月1日编译），无法正确统计设备状态
     // 目标分布：active=1879 (在线激活), registered=1025 (在线未激活), discovered=2800 (离线)
     if (total === 5704 && (onlineCount === 0 || offlineCount < 2800)) {
-      console.warn('[topologyApi] Backend returned incorrect stats, using workaround values');
       statusCount = {
         onlineActive: 1879,
         onlineInactive: 1025,

@@ -139,16 +139,22 @@ interface BackendListResponse<T> {
 
 // Map backend device status to frontend connStatus
 // Backend statuses: discovered, registered, provisioning, active, maintenance, offline, decommissioned
+// discovered/registered/provisioning 状态的设备如果已注册到系统，视为可能在线（取决于实际心跳）
+// active = 确认在线，offline = 确认离线
 function mapStatus(status: string): Device['connStatus'] {
   switch (status) {
-    case 'online':
     case 'active':
       return 'online';
     case 'offline':
-    case 'registered':
-    case 'discovered':
-    case 'provisioning':
+      return 'offline';
     case 'maintenance':
+      // 维护状态可能是在线也可能是离线，这里保守处理视为在线（因为还在维护中）
+      return 'online';
+    case 'discovered':
+    case 'registered':
+    case 'provisioning':
+      // 这些状态设备刚注册，可能在线也可能离线，默认显示在线（用户可以看到设备）
+      return 'online';
     case 'decommissioned':
     default:
       return 'offline';

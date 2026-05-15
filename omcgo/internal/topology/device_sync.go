@@ -7,26 +7,287 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"go.uber.org/zap"
 )
 
+// DeviceSyncServiceConfig 配置设备同步服务行为。
+type DeviceSyncServiceConfig struct {
+	Enabled          bool          // 是否启用自动同步
+	InitialSync      bool          // 启动时是否执行全量同步
+	FallbackInterval time.Duration // 兜底定时同步间隔，0 表示不启用
+	InitialSyncDelay time.Duration // 启动同步延迟，避免启动高峰
+	BatchSize        int           // 批量同步大小
+}
+
+// DefaultDeviceSyncServiceConfig 返回默认配置。
+func DefaultDeviceSyncServiceConfig() DeviceSyncServiceConfig {
+	return DeviceSyncServiceConfig{
+		Enabled:          true,
+		InitialSync:      true,
+		FallbackInterval: 1 * time.Hour,
+		InitialSyncDelay: 10 * time.Second,
+		BatchSize:        100,
+	}
+}
+
 // DeviceSyncService synchronizes devices to topology nodes.
+// 支持事件驱动同步、启动时同步和定时兜底同步三种模式。
 type DeviceSyncService struct {
-	pool        *pgxpool.Pool
-	nodeRepo    TopoNodeRepository
-	edgeRepo    TopoEdgeRepository
-	logger      *zap.Logger
+	pool         *pgxpool.Pool
+	nodeRepo     TopoNodeRepository
+	edgeRepo     TopoEdgeRepository
+	eventBus     event.EventBus // 事件总线，用于订阅设备注册事件
+	logger       *zap.Logger
+	config       DeviceSyncServiceConfig
+	subscription event.Subscription // 事件订阅句柄
+	cronTicker   *time.Ticker       // 定时同步 ticker
+	stopCh       chan struct{}      // 停止信号
 }
 
 // NewDeviceSyncService creates a new DeviceSyncService.
-func NewDeviceSyncService(pool *pgxpool.Pool, nodeRepo TopoNodeRepository, edgeRepo TopoEdgeRepository, logger *zap.Logger) *DeviceSyncService {
+func NewDeviceSyncService(pool *pgxpool.Pool, nodeRepo TopoNodeRepository, edgeRepo TopoEdgeRepository, eventBus event.EventBus, logger *zap.Logger) *DeviceSyncService {
 	return &DeviceSyncService{
-		pool:     pool,
-		nodeRepo: nodeRepo,
-		edgeRepo: edgeRepo,
-		logger:   logger,
+		pool:       pool,
+		nodeRepo:   nodeRepo,
+		edgeRepo:   edgeRepo,
+		eventBus:   eventBus,
+		logger:     logger,
+		config:     DefaultDeviceSyncServiceConfig(),
+		stopCh:     make(chan struct{}),
 	}
+}
+
+// SetConfig 设置同步服务配置。
+func (s *DeviceSyncService) SetConfig(config DeviceSyncServiceConfig) {
+	s.config = config
+}
+
+// Start 启动设备同步服务。
+// 订阅设备注册事件，启动兜底定时同步，执行初始全量同步。
+func (s *DeviceSyncService) Start(ctx context.Context) error {
+	if !s.config.Enabled {
+		s.logger.Info("device sync service disabled")
+		return nil
+	}
+
+	s.logger.Info("starting device sync service",
+		zap.Bool("initial_sync", s.config.InitialSync),
+		zap.Duration("fallback_interval", s.config.FallbackInterval),
+		zap.Int("batch_size", s.config.BatchSize))
+
+	// 1. 订阅设备注册事件
+	if s.eventBus != nil {
+		if err := s.subscribeDeviceEvents(ctx); err != nil {
+			return fmt.Errorf("subscribe device events: %w", err)
+		}
+	} else {
+		s.logger.Warn("event bus not available, event-driven sync disabled")
+	}
+
+	// 2. 启动兜底定时同步
+	if s.config.FallbackInterval > 0 {
+		s.startFallbackSync(ctx)
+	}
+
+	// 3. 执行初始全量同步（异步延迟执行）
+	if s.config.InitialSync {
+		go func() {
+			// 使用 Timer 而非 time.After，确保可以及时释放资源
+			timer := time.NewTimer(s.config.InitialSyncDelay)
+			defer timer.Stop()
+
+			select {
+			case <-timer.C:
+				s.logger.Info("executing initial topology sync")
+				result, err := s.SyncFromDevices(ctx, nil, 0)
+				if err != nil {
+					s.logger.Error("initial sync failed", zap.Error(err))
+				} else {
+					s.logger.Info("initial sync completed",
+						zap.Int("created", result.Created),
+						zap.Int("updated", result.Updated),
+						zap.Int("failed", result.Failed),
+						zap.Int("total_processed", result.TotalProcessed))
+				}
+			case <-ctx.Done():
+				return
+			case <-s.stopCh:
+				return
+			}
+		}()
+	}
+
+	return nil
+}
+
+// Stop 停止设备同步服务。
+// 可安全地多次调用。
+func (s *DeviceSyncService) Stop() {
+	// 使用 select 避免重复关闭 channel 导致 panic
+	select {
+	case <-s.stopCh:
+		// 已经停止，直接返回
+		return
+	default:
+		close(s.stopCh)
+	}
+
+	if s.subscription != nil {
+		if err := s.subscription.Unsubscribe(); err != nil {
+			s.logger.Error("unsubscribe device events failed", zap.Error(err))
+		}
+		s.subscription = nil
+	}
+
+	if s.cronTicker != nil {
+		s.cronTicker.Stop()
+		s.cronTicker = nil
+	}
+
+	s.logger.Info("device sync service stopped")
+}
+
+// subscribeDeviceEvents 订阅设备相关事件。
+func (s *DeviceSyncService) subscribeDeviceEvents(ctx context.Context) error {
+	// 订阅设备注册事件
+	sub, err := s.eventBus.QueueSubscribe(
+		event.SubjectDeviceRegistered,
+		"topology-device-sync", // NATS Queue group，多实例负载均衡
+		func(evtCtx context.Context, evt event.Event) error {
+			return s.handleDeviceRegistered(evtCtx, evt)
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("subscribe device.registered: %w", err)
+	}
+	s.subscription = sub
+
+	s.logger.Info("subscribed to device events",
+		zap.String("subject", event.SubjectDeviceRegistered),
+		zap.String("queue", "topology-device-sync"))
+
+	return nil
+}
+
+// handleDeviceRegistered 处理设备注册事件。
+// 当新设备注册时，自动创建对应的拓扑节点。
+func (s *DeviceSyncService) handleDeviceRegistered(ctx context.Context, evt event.Event) error {
+	var payload struct {
+		DeviceID     uuid.UUID `json:"device_id"`
+		SerialNumber string    `json:"serial_number"`
+	}
+	if err := evt.DecodePayload(&payload); err != nil {
+		return fmt.Errorf("decode device.registered payload: %w", err)
+	}
+	if payload.DeviceID == uuid.Nil {
+		return fmt.Errorf("device.registered payload missing device_id")
+	}
+
+	s.logger.Debug("device registered, syncing to topology",
+		zap.String("device_id", payload.DeviceID.String()),
+		zap.String("serial_number", payload.SerialNumber))
+
+	// 获取设备详情
+	device, err := s.getDeviceBySN(ctx, payload.SerialNumber)
+	if err != nil {
+		s.logger.Error("failed to get device for topology sync",
+			zap.String("serial_number", payload.SerialNumber),
+			zap.Error(err))
+		return nil // 不返回错误，避免重试风暴
+	}
+
+	// 检查节点是否已存在
+	existingNodes, err := s.nodeRepo.ListAll(ctx, nil, nil, nil)
+	if err != nil {
+		s.logger.Error("failed to list existing nodes", zap.Error(err))
+		return nil
+	}
+
+	nodeByDeviceSN := make(map[string]*TopoNode)
+	for i := range existingNodes {
+		if existingNodes[i].DeviceSN != "" {
+			nodeByDeviceSN[existingNodes[i].DeviceSN] = &existingNodes[i]
+		}
+	}
+
+	// 同步设备到拓扑节点
+	result := &SyncResult{}
+	if err := s.syncDevice(ctx, device, nodeByDeviceSN, result); err != nil {
+		s.logger.Error("failed to sync device to topology",
+			zap.String("serial_number", payload.SerialNumber),
+			zap.Error(err))
+		return nil
+	}
+
+	s.logger.Info("device synced to topology",
+		zap.String("serial_number", payload.SerialNumber),
+		zap.String("action", map[bool]string{true: "created", false: "updated"}[result.Created > 0]))
+
+	return nil
+}
+
+// startFallbackSync 启动兜底定时同步。
+func (s *DeviceSyncService) startFallbackSync(ctx context.Context) {
+	s.cronTicker = time.NewTicker(s.config.FallbackInterval)
+
+	go func() {
+		for {
+			select {
+			case <-s.cronTicker.C:
+				s.logger.Info("executing fallback topology sync")
+				result, err := s.SyncFromDevices(ctx, nil, 0)
+				if err != nil {
+					s.logger.Error("fallback sync failed", zap.Error(err))
+				} else {
+					s.logger.Info("fallback sync completed",
+						zap.Int("created", result.Created),
+						zap.Int("updated", result.Updated),
+						zap.Int("failed", result.Failed))
+				}
+			case <-ctx.Done():
+				return
+			case <-s.stopCh:
+				return
+			}
+		}
+	}()
+
+	s.logger.Info("fallback sync started",
+		zap.Duration("interval", s.config.FallbackInterval))
+}
+
+// getDeviceBySN 根据序列号获取设备。
+func (s *DeviceSyncService) getDeviceBySN(ctx context.Context, serialNumber string) (model.Device, error) {
+	query := `
+		SELECT d.id, d.serial_number, d.oui, d.product_class, d.manufacturer,
+		       d.model_name, d.carrier, d.technology, d.status, d.firmware_version,
+		       d.ip_address::text, d.site_name, COALESCE(d.site_id, '')::text,
+		       d.created_at, d.updated_at, d.last_inform_at, d.last_boot_at
+		FROM devices d
+		WHERE d.serial_number = $1 AND d.deleted_at IS NULL
+	`
+
+	var d model.Device
+	var lastInformAt, lastBootAt *time.Time
+
+	err := s.pool.QueryRow(ctx, query, serialNumber).Scan(
+		&d.ID, &d.SerialNumber, &d.OUI, &d.ProductClass, &d.Manufacturer,
+		&d.ModelName, &d.Carrier, &d.Technology, &d.Status, &d.FirmwareVersion,
+		&d.IPAddress, &d.SiteName, &d.SiteID,
+		&d.CreatedAt, &d.UpdatedAt,
+		&lastInformAt, &lastBootAt,
+	)
+
+	if err != nil {
+		return model.Device{}, fmt.Errorf("query device: %w", err)
+	}
+
+	d.LastInformAt = lastInformAt
+	d.LastBootAt = lastBootAt
+
+	return d, nil
 }
 
 // SyncFromDevices synchronizes devices to topology nodes for a given domain.
@@ -161,8 +422,8 @@ func (s *DeviceSyncService) queryDevices(ctx context.Context, domainID *uuid.UUI
 	query := `
 		SELECT d.id, d.serial_number, d.oui, d.product_class, d.manufacturer,
 		       d.model_name, d.carrier, d.technology, d.status, d.firmware_version,
-		       d.ip_address, d.site_name, d.site_id, d.latitude, d.longitude,
-		       d.created_at, d.updated_at
+		       d.ip_address::text, d.site_name, COALESCE(d.site_id, '')::text,
+		       d.created_at, d.updated_at, d.last_inform_at, d.last_boot_at
 		FROM devices d
 		WHERE d.deleted_at IS NULL
 	`
@@ -193,12 +454,11 @@ func (s *DeviceSyncService) queryDevices(ctx context.Context, domainID *uuid.UUI
 	for rows.Next() {
 		var d model.Device
 		var lastInformAt, lastBootAt *time.Time
-		var lat, lng *float64
 
 		err := rows.Scan(
 			&d.ID, &d.SerialNumber, &d.OUI, &d.ProductClass, &d.Manufacturer,
 			&d.ModelName, &d.Carrier, &d.Technology, &d.Status, &d.FirmwareVersion,
-			&d.IPAddress, &d.SiteName, &d.SiteID, &lat, &lng,
+			&d.IPAddress, &d.SiteName, &d.SiteID,
 			&d.CreatedAt, &d.UpdatedAt,
 			&lastInformAt, &lastBootAt,
 		)
@@ -208,13 +468,6 @@ func (s *DeviceSyncService) queryDevices(ctx context.Context, domainID *uuid.UUI
 
 		d.LastInformAt = lastInformAt
 		d.LastBootAt = lastBootAt
-		if lat != nil {
-			d.Latitude = *lat
-		}
-		if lng != nil {
-			d.Longitude = *lng
-		}
-
 		devices = append(devices, d)
 	}
 

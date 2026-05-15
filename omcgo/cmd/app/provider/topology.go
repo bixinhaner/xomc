@@ -3,13 +3,14 @@ package provider
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/omcgo/omcgo/internal/topology"
 	"go.uber.org/zap"
 )
 
 // initTopologyModule 初始化 F06 拓扑管理模块。
-// 设置: GroupRepo, GroupService
+// 设置: GroupRepo, GroupService, DeviceSyncService
 func initTopologyModule(c *Container) error {
 	logger := c.Logger.Named("topology")
 
@@ -19,8 +20,8 @@ func initTopologyModule(c *Container) error {
 	topoEdgeRepo := topology.NewPgTopoEdgeRepository(c.PgPool)
 	groupService := topology.NewDeviceGroupService(groupRepo, topoNodeRepo, c.PgPool, logger)
 
-	// Create device sync service
-	syncSvc := topology.NewDeviceSyncService(c.PgPool, topoNodeRepo, topoEdgeRepo, logger)
+	// Create device sync service with EventBus
+	syncSvc := topology.NewDeviceSyncService(c.PgPool, topoNodeRepo, topoEdgeRepo, c.EventBus, logger)
 
 	// Set shared services
 	c.GroupRepo = groupRepo
@@ -45,7 +46,42 @@ func initTopologyModule(c *Container) error {
 		logger:       logger,
 	}
 
-	logger.Info("topology module initialized")
+	// Configure and start device sync service
+	syncConfig := topology.DeviceSyncServiceConfig{
+		Enabled:          c.Cfg.Topology.DeviceSync.Enabled,
+		InitialSync:      c.Cfg.Topology.DeviceSync.InitialSync,
+		FallbackInterval: c.Cfg.Topology.DeviceSync.FallbackInterval,
+		InitialSyncDelay: c.Cfg.Topology.DeviceSync.InitialSyncDelay,
+		BatchSize:        c.Cfg.Topology.DeviceSync.BatchSize,
+	}
+	// Apply defaults if not set
+	if syncConfig.InitialSyncDelay == 0 {
+		syncConfig.InitialSyncDelay = 10 * time.Second
+	}
+	if syncConfig.BatchSize == 0 {
+		syncConfig.BatchSize = 100
+	}
+	if syncConfig.FallbackInterval == 0 {
+		syncConfig.FallbackInterval = 1 * time.Hour // Default fallback interval
+	}
+
+	syncSvc.SetConfig(syncConfig)
+
+	if err := syncSvc.Start(context.Background()); err != nil {
+		return fmt.Errorf("start device sync service: %w", err)
+	}
+
+	// Register shutdown hook for sync service
+	c.GS.Register("topology-device-sync", 50, func(ctx context.Context) error {
+		syncSvc.Stop()
+		return nil
+	})
+
+	logger.Info("topology module initialized",
+		zap.Bool("sync_enabled", syncConfig.Enabled),
+		zap.Bool("initial_sync", syncConfig.InitialSync),
+		zap.Duration("fallback_interval", syncConfig.FallbackInterval))
+
 	return nil
 }
 
