@@ -181,20 +181,31 @@ export default function AlarmLibraryPage() {
                 未识别频次
               </Button>
             </Tooltip>
-            <Tooltip title="POST /alarm-definitions/import-directory；从后端 datamodels/ 重新加载告警 XML">
-              <Button
-                icon={<CloudDownloadOutlined />}
-                loading={importMut.isPending}
-                onClick={() =>
-                  importMut
-                    .mutateAsync()
-                    .then((r) => message.success(`已重载：${r.reloaded}`))
-                    .catch((e) => message.error((e as Error).message))
-                }
-              >
+            <Popconfirm
+              title="确认重载 XML？"
+              description={
+                <div style={{ maxWidth: 320 }}>
+                  将从 <code>datamodels/</code> 重新加载所有告警定义 XML。
+                  <br />
+                  UI 中对告警定义的编辑将被 XML 值覆盖；操作不可撤销。
+                </div>
+              }
+              okText="确认重载"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+              placement="bottomRight"
+              onConfirm={() => {
+                // 不返回 Promise — 让 Popconfirm 立即关闭；loading 反馈交给触发按钮
+                importMut
+                  .mutateAsync()
+                  .then((r) => message.success(`已重载：${r.reloaded}`))
+                  .catch((e) => message.error((e as Error).message));
+              }}
+            >
+              <Button icon={<CloudDownloadOutlined />} loading={importMut.isPending} danger>
                 重载 XML
               </Button>
-            </Tooltip>
+            </Popconfirm>
             <Button
               icon={<ReloadOutlined />}
               loading={cacheMut.isPending}

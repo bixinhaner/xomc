@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Tabs, Card, Button, Space, message, Tooltip } from 'antd';
+import { Tabs, Card, Button, Space, message, Popconfirm } from 'antd';
 import { CloudDownloadOutlined, ReloadOutlined } from '@ant-design/icons';
 import {
   useParamModelImportDirectory,
@@ -23,20 +23,31 @@ export default function ParamModelPage() {
         title="参数模型浏览器 / Parameter Models"
         extra={
           <Space>
-            <Tooltip title="POST /param-models/import-directory；从后端 datamodels/ 重新加载所有 XML 模型">
-              <Button
-                icon={<CloudDownloadOutlined />}
-                loading={importMut.isPending}
-                onClick={() =>
-                  importMut
-                    .mutateAsync()
-                    .then((r) => message.success(`已重载：${r.reloaded}`))
-                    .catch((e) => message.error((e as Error).message))
-                }
-              >
+            <Popconfirm
+              title="确认重载 XML？"
+              description={
+                <div style={{ maxWidth: 320 }}>
+                  将从 <code>datamodels/</code> 重新加载所有参数模型 XML。
+                  <br />
+                  UI 中对参数模型 / 映射的编辑将被 XML 值覆盖；操作不可撤销。
+                </div>
+              }
+              okText="确认重载"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+              placement="bottomRight"
+              onConfirm={() => {
+                // 不返回 Promise — 让 Popconfirm 立即关闭；loading 反馈交给触发按钮
+                importMut
+                  .mutateAsync()
+                  .then((r) => message.success(`已重载：${r.reloaded}`))
+                  .catch((e) => message.error((e as Error).message));
+              }}
+            >
+              <Button icon={<CloudDownloadOutlined />} loading={importMut.isPending} danger>
                 XML 导入 / 重载
               </Button>
-            </Tooltip>
+            </Popconfirm>
             <Button
               icon={<ReloadOutlined />}
               loading={cacheMut.isPending}

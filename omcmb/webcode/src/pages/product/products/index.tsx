@@ -210,20 +210,31 @@ export default function ProductsPage() {
             <Button icon={<AppstoreOutlined />} onClick={() => setMatchOrderOpen(true)}>
               全局匹配顺序
             </Button>
-            <Tooltip title="POST /products/import-directory；从后端 datamodels/ 重新加载产品 XML">
-              <Button
-                icon={<CloudDownloadOutlined />}
-                loading={importMut.isPending}
-                onClick={() =>
-                  importMut
-                    .mutateAsync()
-                    .then((r) => message.success(`已重载：${r.reloaded}`))
-                    .catch((e) => message.error((e as Error).message))
-                }
-              >
+            <Popconfirm
+              title="确认重载 XML？"
+              description={
+                <div style={{ maxWidth: 320 }}>
+                  将从 <code>datamodels/param-mappings/products.xml</code> 重新装配所有产品。
+                  <br />
+                  UI 中对 <b>指标平台 / 告警网元类型 / 正则规则</b> 等字段的手工修改将被 XML 值覆盖。
+                </div>
+              }
+              okText="确认重载"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+              placement="bottomRight"
+              onConfirm={() => {
+                // 不返回 Promise — 让 Popconfirm 立即关闭；loading 反馈交给触发按钮
+                importMut
+                  .mutateAsync()
+                  .then((r) => message.success(`已重载：${r.reloaded}`))
+                  .catch((e) => message.error((e as Error).message));
+              }}
+            >
+              <Button icon={<CloudDownloadOutlined />} loading={importMut.isPending} danger>
                 重载 XML
               </Button>
-            </Tooltip>
+            </Popconfirm>
             <Button
               icon={<ReloadOutlined />}
               loading={cacheRefMut.isPending}
