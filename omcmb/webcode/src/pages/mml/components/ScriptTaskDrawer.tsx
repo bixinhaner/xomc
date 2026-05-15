@@ -79,7 +79,7 @@ const SECTION_DOT: React.CSSProperties = {
 const SECTION_HEADER: React.CSSProperties = {
   marginBottom: 8,
   fontWeight: 500,
-  color: '#333',
+  color: 'var(--color-neutral-700)',
 };
 
 export default function ScriptTaskDrawer({
@@ -228,7 +228,7 @@ export default function ScriptTaskDrawer({
               ? values.periodTime.format('HH:mm:ss')
               : undefined,
         };
-        await createTaskMutation.mutateAsync(payload);
+        await createTaskMutation.mutateAsync(payload as Parameters<typeof createTaskMutation.mutateAsync>[0]);
         toast.success(t('mml.taskCreated'));
 
         onSuccess?.();

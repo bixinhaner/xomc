@@ -157,6 +157,7 @@ export default function ScriptTask() {
     const details = productTypeDict?.sysDictionaryDetails;
     return details?.length ? details.map((d) => ({ label: d.label, value: d.value })) : [];
   }, [productTypeDict]);
+  void productTypeOptions;
 
   const { data, isLoading, refetch } = useMMLTasks({
     page,
@@ -260,11 +261,11 @@ export default function ScriptTask() {
       ),
     },
     { key: 'scriptName', title: t('mml.scriptName'), dataIndex: 'scriptName', ellipsis: true },
-    { key: 'description', title: t('mml.description'), dataIndex: 'description', ellipsis: true, render: (v: string) => v || '-' },
-    { key: 'deviceType', title: t('mml.deviceType'), dataIndex: 'deviceType', width: 120, render: (v: string) => v || '-' },
+    { key: 'description', title: t('mml.description'), dataIndex: 'description', ellipsis: true, render: (v: unknown) => (v as string) || '-' },
+    { key: 'deviceType', title: t('mml.deviceType'), dataIndex: 'deviceType', width: 120, render: (v: unknown) => (v as string) || '-' },
     { key: 'creator', title: t('mml.creator'), dataIndex: 'creator', width: 100 },
-    { key: 'tags', title: t('mml.tags'), dataIndex: 'tags', width: 180, render: (tags: string[]) => tags?.length ? tags.map((tag) => <Tag key={tag}>{tag}</Tag>) : '-' },
-    { key: 'updatedAt', title: t('mml.updateTime'), dataIndex: 'updateTime', width: 160, render: (val: string) => formatTime(val) },
+    { key: 'tags', title: t('mml.tags'), dataIndex: 'tags', width: 180, render: (tags: unknown) => Array.isArray(tags) && tags.length ? (tags as string[]).map((tag) => <Tag key={tag}>{tag}</Tag>) : '-' },
+    { key: 'updatedAt', title: t('mml.updateTime'), dataIndex: 'updateTime', width: 160, render: (val: unknown) => formatTime(val as string) },
   ], [t, handleDeleteScripts]);
 
   const handleStartTask = (task: MMLTask) => {
@@ -363,7 +364,7 @@ export default function ScriptTask() {
         periodEnd: values.executeType === 'periodic' && values.periodEndTime ? values.periodEndTime.toISOString() : undefined,
         periodTime: values.executeType === 'periodic' && values.periodTime ? values.periodTime.format('HH:mm:ss') : undefined,
       };
-      createTaskMutation.mutate(payload, {
+      createTaskMutation.mutate(payload as Parameters<typeof createTaskMutation.mutate>[0], {
         onSuccess: () => {
           void message.success(editingTask ? t('mml.taskUpdated') : t('mml.taskCreated'));
           setDrawerVisible(false);
@@ -429,13 +430,13 @@ export default function ScriptTask() {
     },
     { key: 'taskName', title: t('mml.taskName'), dataIndex: 'taskName', ellipsis: true },
     { key: 'creator', title: t('mml.creator'), dataIndex: 'creator', width: 100 },
-    { key: 'createdAt', title: t('mml.createTime'), dataIndex: 'createdAt', width: 160, render: (val: string) => formatTime(val) },
-    { key: 'executeType', title: t('mml.type'), dataIndex: 'executeType', width: 100, render: (val: MMLExecuteType) => { const e = EXECUTE_TYPE_KEYS[val]; return e ? <Tag color={e.color}>{t(e.key)}</Tag> : <Tag>{val}</Tag>; } },
-    { key: 'status', title: t('mml.status'), dataIndex: 'status', width: 100, render: (val: MMLTaskStatus) => { const e = TASK_STATUS_KEYS[val]; return e ? <Tag color={e.color}>{t(e.key)}</Tag> : <Tag>{val}</Tag>; } },
+    { key: 'createdAt', title: t('mml.createTime'), dataIndex: 'createdAt', width: 160, render: (val: unknown) => formatTime(val as string) },
+    { key: 'executeType', title: t('mml.type'), dataIndex: 'executeType', width: 100, render: (val: unknown) => { const v = val as MMLExecuteType; const e = EXECUTE_TYPE_KEYS[v]; return e ? <Tag color={e.color}>{t(e.key)}</Tag> : <Tag>{v}</Tag>; } },
+    { key: 'status', title: t('mml.status'), dataIndex: 'status', width: 100, render: (val: unknown) => { const v = val as MMLTaskStatus; const e = TASK_STATUS_KEYS[v]; return e ? <Tag color={e.color}>{t(e.key)}</Tag> : <Tag>{v}</Tag>; } },
     { key: 'progress', title: t('mml.progress'), width: 80, render: (_: unknown, record: MMLTask) => computeProgress(record) },
-    { key: 'result', title: t('mml.result'), dataIndex: 'result', width: 100, render: (val?: MMLTaskResult) => { if (!val) return '-'; const e = TASK_RESULT_KEYS[val]; return e ? <Tag color={e.color}>{t(e.key)}</Tag> : <Tag>{val}</Tag>; } },
-    { key: 'startedAt', title: t('mml.startTime'), dataIndex: 'startedAt', width: 140, render: (val?: string) => formatTime(val) || '-' },
-    { key: 'finishedAt', title: t('mml.endTime'), dataIndex: 'finishedAt', width: 140, render: (val?: string) => formatTime(val) || '-' },
+    { key: 'result', title: t('mml.result'), dataIndex: 'result', width: 100, render: (val: unknown) => { const v = val as MMLTaskResult | undefined; if (!v) return '-'; const e = TASK_RESULT_KEYS[v]; return e ? <Tag color={e.color}>{t(e.key)}</Tag> : <Tag>{v}</Tag>; } },
+    { key: 'startedAt', title: t('mml.startTime'), dataIndex: 'startedAt', width: 140, render: (val: unknown) => formatTime(val as string | undefined) || '-' },
+    { key: 'finishedAt', title: t('mml.endTime'), dataIndex: 'finishedAt', width: 140, render: (val: unknown) => formatTime(val as string | undefined) || '-' },
   ], [t, getActionMenu]);
 
   return (
@@ -597,7 +598,7 @@ export default function ScriptTask() {
         }
       >
         <Form form={form} layout="vertical">
-          <div style={{ marginBottom: 8, fontWeight: 500, color: '#333' }}>
+          <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--color-neutral-700)' }}>
             <span style={{ display: 'inline-block', width: 4, height: 14, background: '#1890ff', borderRadius: 2, marginRight: 8, verticalAlign: 'middle' }} />
             {t('mml.basicInfo')}
           </div>
@@ -658,7 +659,7 @@ export default function ScriptTask() {
 
           <Divider />
 
-          <div style={{ marginBottom: 8, fontWeight: 500, color: '#333' }}>
+          <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--color-neutral-700)' }}>
             <span style={{ display: 'inline-block', width: 4, height: 14, background: '#1890ff', borderRadius: 2, marginRight: 8, verticalAlign: 'middle' }} />
             {t('mml.selectExecuteMethod')}
           </div>
@@ -695,7 +696,7 @@ export default function ScriptTask() {
 
           <Divider />
 
-          <div style={{ marginBottom: 8, fontWeight: 500, color: '#333' }}>
+          <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--color-neutral-700)' }}>
             <span style={{ display: 'inline-block', width: 4, height: 14, background: '#1890ff', borderRadius: 2, marginRight: 8, verticalAlign: 'middle' }} />
             {t('mml.executionStrategy')}
           </div>

@@ -67,6 +67,7 @@ export default function DeviceTree({
     });
     return map;
   }, [paginatedDevices]);
+  void _devicesByType;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>

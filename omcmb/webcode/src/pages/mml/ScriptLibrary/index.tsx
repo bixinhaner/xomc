@@ -16,7 +16,7 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import type { MMLScript } from '@core/types/mml';
 import { useMMLScripts, useDeleteMMLScripts } from '@core/hooks/api/useMML';
-import { useDictionary } from '@/hooks/api/useSystem';
+import { useDictionary } from '@core/hooks/api/useSystem';
 import { useT } from '@/hooks/useT';
 
 function formatTime(iso?: string): string {
@@ -86,11 +86,11 @@ export default function ScriptLibrary() {
       ),
     },
     { key: 'scriptName', title: t('mml.scriptName'), dataIndex: 'scriptName', ellipsis: true },
-    { key: 'description', title: t('mml.description'), dataIndex: 'description', ellipsis: true, render: (v: string) => v || '-' },
-    { key: 'deviceType', title: t('mml.deviceType'), dataIndex: 'deviceType', width: 120, render: (v: string) => v || '-' },
+    { key: 'description', title: t('mml.description'), dataIndex: 'description', ellipsis: true, render: (v: unknown) => (v as string) || '-' },
+    { key: 'deviceType', title: t('mml.deviceType'), dataIndex: 'deviceType', width: 120, render: (v: unknown) => (v as string) || '-' },
     { key: 'creator', title: t('mml.creator'), dataIndex: 'creator', width: 100 },
-    { key: 'tags', title: t('mml.tags'), dataIndex: 'tags', width: 180, render: (tags: string[]) => tags?.length ? tags.map((tag) => <Tag key={tag}>{tag}</Tag>) : '-' },
-    { key: 'updatedAt', title: t('mml.updateTime'), dataIndex: 'updateTime', width: 160, render: (val: string) => formatTime(val) },
+    { key: 'tags', title: t('mml.tags'), dataIndex: 'tags', width: 180, render: (tags: unknown) => Array.isArray(tags) && tags.length ? (tags as string[]).map((tag) => <Tag key={tag}>{tag}</Tag>) : '-' },
+    { key: 'updatedAt', title: t('mml.updateTime'), dataIndex: 'updateTime', width: 160, render: (val: unknown) => formatTime(val as string) },
   ], [t, handleDeleteScripts]);
 
   const scriptFilterFields: FilterField[] = useMemo(() => [
@@ -132,7 +132,7 @@ export default function ScriptLibrary() {
           <div style={{ padding: '16px 0' }}>
             <p><strong>{t('mml.scriptNameLabel')}</strong>{viewingScript.scriptName}</p>
             <p><strong>{t('mml.description')}</strong>{viewingScript.description || '-'}</p>
-            <p><strong>{t('mml.deviceType')}</strong>{viewingScript.deviceType || '-'}</p>
+            <p><strong>{t('mml.deviceType')}</strong>{(viewingScript as MMLScript & { deviceType?: string }).deviceType || '-'}</p>
             <p><strong>{t('mml.creatorLabel')}</strong>{viewingScript.creator}</p>
             <p><strong>{t('mml.updateTime')}</strong>{formatTime(viewingScript.updateTime)}</p>
             <div style={{ marginTop: 12 }}>

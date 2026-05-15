@@ -12,6 +12,7 @@ export function useDeviceSelection() {
   const [total, setTotal] = useState(0);
   const [isLoadingDevices, setIsLoadingDevices] = useState(false);
   const _abortRef = useRef<AbortController | null>(null);
+  void _abortRef;
 
   // Fetch devices from API — server-side pagination + filter
   const fetchDevices = useCallback(async (page: number, search?: string, productType?: string) => {
@@ -28,7 +29,7 @@ export function useDeviceSelection() {
         name: d.siteName || d.sn,
         type: d.networkType === 'nr' ? 'gNB' : 'eNB',
         productType: d.productType || '',
-        status: (d.connStatus === 'online' ? 'online' : d.connStatus === 'alarm' ? 'alarm' : 'offline') as ConsoleDevice['status'],
+        status: (d.connStatus === 'online' ? 'online' : 'offline') as ConsoleDevice['status'],
       }));
       // 后端分页边界或缓存异常偶发会带回同 SN 重复项；此处按 SN 排重，
       // 避免 Checkbox/Tag 渲染两条相同设备（to-do-list #6）。
