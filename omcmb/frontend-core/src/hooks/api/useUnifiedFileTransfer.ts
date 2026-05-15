@@ -6,16 +6,20 @@ import type {
   CreateUnifiedFileTransferTypeInput,
   UpdateUnifiedFileTransferTaskTypeInput,
 } from '../../types/unifiedFileTransfer';
+import { unifiedFileTransferService } from '../../mock/services/unifiedFileTransferService';
+import { createApiSwitch } from '../../services/apiSwitch';
 import { unifiedFileTransferApi } from '../../services/api/unifiedFileTransferApi';
 
 type QueryMountOptions = {
   refetchOnMount?: boolean | 'always';
 };
 
+const api = createApiSwitch(unifiedFileTransferService, unifiedFileTransferApi);
+
 export function useUnifiedFileTransferOverview() {
   return useQuery({
     queryKey: ['ufte', 'overview'],
-    queryFn: () => unifiedFileTransferApi.getOverview(),
+    queryFn: () => api.getOverview(),
     staleTime: 60_000,
   });
 }
@@ -23,7 +27,7 @@ export function useUnifiedFileTransferOverview() {
 export function useUnifiedFileTransferTaskTypes(options?: QueryMountOptions) {
   return useQuery({
     queryKey: ['ufte', 'task-types'],
-    queryFn: () => unifiedFileTransferApi.getTaskTypes(),
+    queryFn: () => api.getTaskTypes(),
     staleTime: 60_000,
     refetchOnMount: options?.refetchOnMount,
   });
@@ -34,7 +38,7 @@ export function useUnifiedFileTransferTasks(
 ) {
   return useQuery({
     queryKey: ['ufte', 'tasks', params],
-    queryFn: () => unifiedFileTransferApi.getTasks(params),
+    queryFn: () => api.getTasks(params),
     refetchInterval: 10_000,
   });
 }
@@ -44,7 +48,7 @@ export function useUnifiedFileTransferDevices(
 ) {
   return useQuery({
     queryKey: ['ufte', 'devices', params],
-    queryFn: () => unifiedFileTransferApi.getDevices(params),
+    queryFn: () => api.getDevices(params),
     refetchInterval: 10_000,
   });
 }
@@ -54,7 +58,7 @@ export function useUnifiedFileTransferDeviceCandidates(
 ) {
   return useQuery({
     queryKey: ['ufte', 'device-candidates', params],
-    queryFn: () => unifiedFileTransferApi.getDeviceCandidates(params),
+    queryFn: () => api.getDeviceCandidates(params),
     refetchInterval: 10_000,
   });
 }
@@ -62,7 +66,7 @@ export function useUnifiedFileTransferDeviceCandidates(
 export function useCreateUnifiedFileTransferTask() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: CreateUnifiedFileTransferTaskInput) => unifiedFileTransferApi.createTask(input),
+    mutationFn: (input: CreateUnifiedFileTransferTaskInput) => api.createTask(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['ufte'] });
     },
@@ -72,7 +76,7 @@ export function useCreateUnifiedFileTransferTask() {
 export function useCreateUnifiedFileTransferTaskType() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: CreateUnifiedFileTransferTypeInput) => unifiedFileTransferApi.createTaskType(input),
+    mutationFn: (input: CreateUnifiedFileTransferTypeInput) => api.createTaskType(input),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['ufte'] });
     },
@@ -82,7 +86,67 @@ export function useCreateUnifiedFileTransferTaskType() {
 export function useUpdateUnifiedFileTransferTaskType() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: UpdateUnifiedFileTransferTaskTypeInput) => unifiedFileTransferApi.updateTaskType(input),
+    mutationFn: (input: UpdateUnifiedFileTransferTaskTypeInput) => api.updateTaskType(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['ufte'] });
+    },
+  });
+}
+
+export function useDeleteUnifiedFileTransferTaskType() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (typeCode: string) => api.deleteTaskType(typeCode),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['ufte'] });
+    },
+  });
+}
+
+export function useStartUfteTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.startTask(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['ufte'] });
+    },
+  });
+}
+
+export function useSuspendUfteTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.suspendTask(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['ufte'] });
+    },
+  });
+}
+
+export function useTerminateUfteTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.terminateTask(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['ufte'] });
+    },
+  });
+}
+
+export function useDeleteUfteTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteTask(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['ufte'] });
+    },
+  });
+}
+
+export function useRetryUfteTask() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.retryTask(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['ufte'] });
     },

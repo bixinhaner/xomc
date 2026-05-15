@@ -3,9 +3,12 @@ import {
   Button,
   Card,
   Checkbox,
+  Descriptions,
   Drawer,
+  Dropdown,
   Form,
   Input,
+  Popconfirm,
   Progress,
   Radio,
   Select,
@@ -17,21 +20,27 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { PlusOutlined } from '@ant-design/icons';
+import { EyeOutlined, MoreOutlined, PlusOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import {
   useCreateUnifiedFileTransferTask,
+  useDeleteUfteTask,
+  useStartUfteTask,
+  useSuspendUfteTask,
+  useTerminateUfteTask,
   useUnifiedFileTransferDeviceCandidates,
   useUnifiedFileTransferDevices,
   useUnifiedFileTransferTasks,
   useUnifiedFileTransferTaskTypes,
 } from '@core/hooks/api/useUnifiedFileTransfer';
+import { useProductClasses } from '@core/hooks/api/useDevices';
 import { useSoftwareVersions } from '@core/hooks/api/useSoftware';
 import type { SoftwareVersion } from '@core/mock/data/software';
 import type {
   CreateUnifiedFileTransferTaskInput,
+  TransferStepId,
   UnifiedFileTransferDeviceItem,
   UnifiedFileTransferTask,
   UnifiedFileTransferTaskType,
@@ -50,6 +59,21 @@ const { Text, Title } = Typography;
 
 function isUpgradeTaskCategory(category?: string) {
   return category === 'gnb_upgrade' || category === 'enb_upgrade';
+}
+
+function matchesScope(scope: string[], _category: string, productClass: string): boolean {
+  const upper = productClass.toUpperCase();
+  for (const s of scope) {
+    const su = s.toUpperCase();
+    if (upper === su || upper.includes(su) || su.includes(upper)) return true;
+    if (su.includes(' ')) {
+      const tokens = su.split(/\s+/).filter((t) => t.length >= 2);
+      for (const token of tokens) {
+        if (upper.includes(token)) return true;
+      }
+    }
+  }
+  return false;
 }
 
 function splitDeviceTypes(deviceType?: string) {
@@ -128,9 +152,10 @@ function getUpgradeTypeLabel(category: string, fallback: string) {
 export default function FileTransferCenter() {
   const navigate = useNavigate();
   const { data: taskTypes = [], isLoading: taskTypesLoading } = useUnifiedFileTransferTaskTypes();
+  const { data: productClasses = [] } = useProductClasses();
   const { data: firmwareData } = useSoftwareVersions({ page: 1, pageSize: 200 });
   const categories = useMemo(() => buildCategoryTabs(taskTypes), [taskTypes]);
-  const [selectedCategory, setSelectedCategory] = useState('gnb_upgrade');
+  const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedTypeCode, setSelectedTypeCode] = useState('');
   const [taskPage, setTaskPage] = useState(1);
   const [taskPageSize, setTaskPageSize] = useState(10);
@@ -148,7 +173,11 @@ export default function FileTransferCenter() {
   const [taskForm] = Form.useForm<CreateUnifiedFileTransferTaskInput>();
   const drawerTypeCode = Form.useWatch('typeCode', taskForm);
   const drawerProductType = Form.useWatch('productType', taskForm);
-  const drawerDeviceIds = Form.useWatch('deviceIds', taskForm) ?? [];
+  const [selectedDrawerDeviceIds, setSelectedDrawerDeviceIds] = useState<string[]>([]);
+  const [drawerDeviceKeyword, setDrawerDeviceKeyword] = useState('');
+  const [drawerDeviceKeywordInput, setDrawerDeviceKeywordInput] = useState('');
+  const [detailTask, setDetailTask] = useState<UnifiedFileTransferTask | null>(null);
+  const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
 
   const { data: tasksData, isLoading: tasksLoading } = useUnifiedFileTransferTasks({
     page: taskPage,
@@ -170,6 +199,10 @@ export default function FileTransferCenter() {
   });
 
   const createTaskMutation = useCreateUnifiedFileTransferTask();
+  const startTaskMutation = useStartUfteTask();
+  const suspendTaskMutation = useSuspendUfteTask();
+  const terminateTaskMutation = useTerminateUfteTask();
+  const deleteTaskMutation = useDeleteUfteTask();
   const recentTasks = tasksData?.items ?? [];
   const recentDevices = devicesData?.items ?? [];
 
@@ -204,6 +237,7 @@ export default function FileTransferCenter() {
     category: selectedCategory || undefined,
     typeCode: drawerTaskType?.typeCode || selectedTypeCode || undefined,
     productType: needsFirmwareSelection(drawerTaskType) ? drawerProductType : undefined,
+    keyword: drawerDeviceKeyword || undefined,
   });
 
   const drawerDeviceCandidates = drawerDevicesData?.items ?? [];
@@ -214,15 +248,23 @@ export default function FileTransferCenter() {
   );
 
   const drawerProductTypeOptions = useMemo(() => {
-    const values = new Set<string>();
-    firmwareCandidates.forEach((item) => {
-      splitDeviceTypes(item.deviceType).forEach((entry) => values.add(entry));
+    const scope = drawerTaskType?.platformScope ?? [];
+    const category = drawerTaskType?.category ?? '';
+    const realClasses = new Set<string>();
+    productClasses.forEach((pc) => {
+      if (scope.length === 0 || matchesScope(scope, category, pc)) {
+        realClasses.add(pc);
+      }
     });
-    if (values.size === 0) {
-      (drawerTaskType?.platformScope ?? []).forEach((entry) => values.add(entry));
-    }
-    return Array.from(values).map((item) => ({ label: item, value: item }));
-  }, [drawerTaskType?.platformScope, firmwareCandidates]);
+    firmwareCandidates.forEach((item) => {
+      splitDeviceTypes(item.deviceType).forEach((entry) => {
+        if (scope.length === 0 || matchesScope(scope, category, entry)) {
+          realClasses.add(entry);
+        }
+      });
+    });
+    return Array.from(realClasses).map((item) => ({ label: item, value: item }));
+  }, [drawerTaskType, firmwareCandidates, productClasses]);
 
   const filteredFirmwareCandidates = useMemo(
     () => (drawerProductType
@@ -236,14 +278,14 @@ export default function FileTransferCenter() {
 
   const firmwareOptions = useMemo(
     () => filteredFirmwareCandidates.map((item) => ({
-      label: `${item.versionCode} / ${item.deviceType || '未标识型号'} / ${item.fileName}`,
+      label: item.fileName || item.versionCode,
       value: item.id,
     })),
     [filteredFirmwareCandidates],
   );
 
   const deviceProductTypeOptions = useMemo(() => {
-    const values = new Set<string>();
+    const values = new Set<string>(productClasses);
     recentDevices.forEach((item) => {
       if (item.productType) {
         values.add(item.productType);
@@ -251,7 +293,7 @@ export default function FileTransferCenter() {
     });
     (activeTaskType?.platformScope ?? []).forEach((entry) => values.add(entry));
     return Array.from(values).map((item) => ({ label: item, value: item }));
-  }, [activeTaskType?.platformScope, recentDevices]);
+  }, [activeTaskType?.platformScope, productClasses, recentDevices]);
 
   const templateTabItems = useMemo(
     () => filteredTaskTypes.map((item) => ({
@@ -267,19 +309,95 @@ export default function FileTransferCenter() {
   );
 
   const drawerSelectedDevices = useMemo(
-    () => drawerDeviceCandidates.filter((item) => drawerDeviceIds.includes(item.id)),
-    [drawerDeviceCandidates, drawerDeviceIds],
+    () => drawerDeviceCandidates.filter((item) => selectedDrawerDeviceIds.includes(item.id)),
+    [drawerDeviceCandidates, selectedDrawerDeviceIds],
   );
 
   const drawerDeviceColumns: ColumnsType<UnifiedFileTransferDeviceItem> = useMemo(
     () => [
-      { title: '设备名称', dataIndex: 'deviceName', key: 'deviceName', ellipsis: true },
-      { title: '设备 SN', dataIndex: 'deviceSn', key: 'deviceSn', width: 120 },
+      { title: '设备 SN', dataIndex: 'deviceSn', key: 'deviceSn', width: 160 },
+      { title: '站点名称', dataIndex: 'deviceName', key: 'deviceName', ellipsis: true },
       { title: '产品类型', dataIndex: 'productType', key: 'productType', width: 120 },
       { title: '当前版本', dataIndex: 'currentVersion', key: 'currentVersion', width: 120 },
     ],
     [],
   );
+
+  const failureReasonColumn = {
+    title: '失败原因',
+    dataIndex: 'failureReason',
+    key: 'failureReason',
+    width: 180,
+    ellipsis: true,
+    render: (value: string) => value || '-',
+  };
+
+  const taskActionLoading = startTaskMutation.isPending || suspendTaskMutation.isPending
+    || terminateTaskMutation.isPending || deleteTaskMutation.isPending;
+
+  const handleStartTask = (record: UnifiedFileTransferTask) => {
+    void startTaskMutation.mutateAsync(record.id)
+      .then(() => void message.success('任务已启动'));
+  };
+
+  const handleSuspendTask = (record: UnifiedFileTransferTask) => {
+    void suspendTaskMutation.mutateAsync(record.id)
+      .then(() => void message.success('任务已暂停'));
+  };
+
+  const handleTerminateTask = (record: UnifiedFileTransferTask) => {
+    void terminateTaskMutation.mutateAsync(record.id)
+      .then(() => void message.success('任务已终止'));
+  };
+
+  const handleDeleteTask = (record: UnifiedFileTransferTask) => {
+    void deleteTaskMutation.mutateAsync(record.id)
+      .then(() => void message.success('任务已删除'));
+  };
+
+  const openDetailDrawer = (record: UnifiedFileTransferTask) => {
+    setDetailTask(record);
+    setDetailDrawerOpen(true);
+  };
+
+  const buildTaskActionItems = (record: UnifiedFileTransferTask) => {
+    const status = record.status;
+    const showStart = status === 'pending' || status === 'suspended';
+    const showSuspend = status === 'in_progress';
+    const showTerminate = status !== 'ended';
+    const showDelete = status !== 'in_progress';
+    const items = [];
+    if (showStart) {
+      items.push({ key: 'start', label: <Button type="link" size="small" loading={taskActionLoading}>开始</Button> });
+    }
+    if (showSuspend) {
+      items.push({ key: 'suspend', label: <Button type="link" size="small" loading={taskActionLoading}>暂停</Button> });
+    }
+    if (showTerminate) {
+      items.push({ key: 'terminate', label: <Popconfirm title="确认终止该任务？" onConfirm={() => handleTerminateTask(record)}><Button type="link" size="small" danger loading={taskActionLoading}>终止</Button></Popconfirm> });
+    }
+    if (showDelete) {
+      items.push({ key: 'delete', label: <Popconfirm title="确认删除该任务？" onConfirm={() => handleDeleteTask(record)}><Button type="link" size="small" danger loading={taskActionLoading}>删除</Button></Popconfirm> });
+    }
+    return items;
+  };
+
+  const taskActionColumn = {
+    title: '操作',
+    key: 'action',
+    width: 160,
+    fixed: 'right' as const,
+    render: (_: unknown, record: UnifiedFileTransferTask) => (
+      <Space size={4}>
+        <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => openDetailDrawer(record)}>
+          详情
+        </Button>
+        <Dropdown menu={{ items: buildTaskActionItems(record) }} trigger={['click']}>
+          <Button type="link" size="small" icon={<MoreOutlined />} loading={taskActionLoading} />
+        </Dropdown>
+      </Space>
+    ),
+  };
 
   useEffect(() => {
     if (categories.length === 0) {
@@ -407,6 +525,7 @@ export default function FileTransferCenter() {
           width: 180,
           render: (_, record) => record.status === 'ended' ? new Date(record.createdAt).toLocaleString('zh-CN') : '-',
         },
+        taskActionColumn,
       ];
     }
 
@@ -479,6 +598,7 @@ export default function FileTransferCenter() {
         width: 180,
         render: (value: string) => new Date(value).toLocaleString('zh-CN'),
       },
+      taskActionColumn,
     ];
   }, [isUpgradeLikeCategory, taskTypes]);
 
@@ -518,6 +638,7 @@ export default function FileTransferCenter() {
           render: (_, record) => renderDeviceStatus(record.status),
         },
         { title: '操作人', dataIndex: 'operatorScope', key: 'operatorScope', width: 120, render: (value: string) => value || '-' },
+        failureReasonColumn,
         {
           title: '操作时间',
           dataIndex: 'lastReportAt',
@@ -552,6 +673,7 @@ export default function FileTransferCenter() {
         render: (_, record) => renderDeviceStatus(record.status),
       },
       { title: '进度', dataIndex: 'progress', key: 'progress', width: 180, render: (value: number) => <Progress percent={value} size="small" status={value === 100 ? 'success' : 'active'} /> },
+      failureReasonColumn,
       {
         title: '上报时间',
         dataIndex: 'lastReportAt',
@@ -573,10 +695,11 @@ export default function FileTransferCenter() {
       productType: undefined,
       firmwareId: undefined,
       isKeepConfig: true,
-      deviceIds: [],
       executionMode: 'immediate',
-      deviceCount: 0,
     });
+    setSelectedDrawerDeviceIds([]);
+    setDrawerDeviceKeyword('');
+    setDrawerDeviceKeywordInput('');
     setSelectedTypeCode(nextTypeCode);
     setTaskDrawerOpen(true);
   };
@@ -603,30 +726,26 @@ export default function FileTransferCenter() {
       }
     }
 
-    const validDeviceIds = drawerDeviceIds.filter((deviceId) => drawerDeviceCandidates.some((item) => item.id === deviceId));
-    if (validDeviceIds.length !== drawerDeviceIds.length) {
-      taskForm.setFieldValue('deviceIds', validDeviceIds);
-      taskForm.setFieldValue('deviceCount', validDeviceIds.length);
-      return;
+    const validIds = selectedDrawerDeviceIds.filter((id) => drawerDeviceCandidates.some((item) => item.id === id));
+    if (validIds.length !== selectedDrawerDeviceIds.length) {
+      setSelectedDrawerDeviceIds(validIds);
     }
-    if (taskForm.getFieldValue('deviceCount') !== drawerDeviceIds.length) {
-      taskForm.setFieldValue('deviceCount', drawerDeviceIds.length);
-    }
-  }, [drawerDeviceCandidates, drawerDeviceIds, drawerProductType, drawerProductTypeOptions, drawerTaskType, firmwareOptions, taskDrawerOpen, taskForm]);
+  }, [drawerDeviceCandidates, drawerProductType, drawerProductTypeOptions, drawerTaskType, firmwareOptions, selectedDrawerDeviceIds, taskDrawerOpen, taskForm]);
 
   const handleCreateTask = async () => {
     const values = await taskForm.validateFields();
-    const selectedDeviceIds = values.deviceIds ?? [];
-    if (selectedDeviceIds.length === 0) {
+    if (selectedDrawerDeviceIds.length === 0) {
       void message.warning('请选择设备。');
       return;
     }
     await createTaskMutation.mutateAsync({
       ...values,
-      deviceCount: selectedDeviceIds.length,
+      deviceIds: selectedDrawerDeviceIds,
+      deviceCount: selectedDrawerDeviceIds.length,
     });
     void message.success('演示任务已创建。');
     setTaskDrawerOpen(false);
+    setSelectedDrawerDeviceIds([]);
     taskForm.resetFields();
   };
 
@@ -743,10 +862,12 @@ export default function FileTransferCenter() {
                       />
                       <Select
                         allowClear
+                        showSearch
                         placeholder="按产品类型过滤"
                         value={deviceProductTypeFilter}
                         onChange={(value) => setDeviceProductTypeFilter(value)}
                         options={deviceProductTypeOptions}
+                        optionFilterProp="label"
                         style={{ width: 220 }}
                       />
                       <Select
@@ -822,8 +943,10 @@ export default function FileTransferCenter() {
               <Form.Item label="产品类型" name="productType" rules={[{ required: true, message: '请选择产品类型' }]}> 
                 <Select
                   allowClear
+                  showSearch
                   placeholder="请选择产品类型"
                   options={drawerProductTypeOptions}
+                  optionFilterProp="label"
                 />
               </Form.Item>
               <Form.Item
@@ -858,7 +981,17 @@ export default function FileTransferCenter() {
           ) : null}
           <Form.Item label="选择设备" required>
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
-              <Text type="secondary">已选 {drawerSelectedDevices.length} 台</Text>
+              <Space>
+                <Input.Search
+                  placeholder="按 SN 搜索设备"
+                  allowClear
+                  style={{ width: 240 }}
+                  value={drawerDeviceKeywordInput}
+                  onChange={(e) => setDrawerDeviceKeywordInput(e.target.value)}
+                  onSearch={(value) => setDrawerDeviceKeyword(value.trim())}
+                />
+                <Text type="secondary">已选 {drawerSelectedDevices.length} 台</Text>
+              </Space>
               <Table<UnifiedFileTransferDeviceItem>
                 size="small"
                 rowKey="id"
@@ -867,14 +1000,12 @@ export default function FileTransferCenter() {
                 dataSource={drawerDeviceCandidates}
                 pagination={false}
                 rowSelection={{
-                  selectedRowKeys: drawerDeviceIds,
+                  selectedRowKeys: selectedDrawerDeviceIds,
                   onChange: (selectedRowKeys) => {
-                    const nextIds = selectedRowKeys.map((item) => String(item));
-                    taskForm.setFieldValue('deviceIds', nextIds);
-                    taskForm.setFieldValue('deviceCount', nextIds.length);
+                    setSelectedDrawerDeviceIds(selectedRowKeys.map((item) => String(item)));
                   },
                 }}
-                scroll={{ y: 220 }}
+                scroll={{ x: 600, y: 240 }}
               />
             </Space>
           </Form.Item>
@@ -885,6 +1016,51 @@ export default function FileTransferCenter() {
             <Input.TextArea rows={4} placeholder="可填写灰度范围、验证目标或领导评审备注" />
           </Form.Item>
         </Form>
+      </Drawer>
+
+      <Drawer
+        title={detailTask ? `任务详情 · ${detailTask.taskName}` : '任务详情'}
+        width={640}
+        open={detailDrawerOpen}
+        onClose={() => { setDetailDrawerOpen(false); setDetailTask(null); }}
+        destroyOnClose
+      >
+        {detailTask ? (
+          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Descriptions column={2} size="small" bordered>
+              <Descriptions.Item label="任务名称">{detailTask.taskName}</Descriptions.Item>
+              <Descriptions.Item label="任务类型">{detailTask.typeDisplayName}</Descriptions.Item>
+              <Descriptions.Item label="状态">{renderTaskStatus(detailTask.status)}</Descriptions.Item>
+              <Descriptions.Item label="结果">
+                {detailTask.result
+                  ? <Tag color={detailTask.result === 'success' ? 'success' : detailTask.result === 'partial' ? 'warning' : 'error'}>{detailTask.result === 'success' ? '成功' : detailTask.result === 'partial' ? '部分成功' : detailTask.result === 'terminated' ? '已终止' : '失败'}</Tag>
+                  : '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="目标版本">{getTaskTargetVersion(detailTask)}</Descriptions.Item>
+              <Descriptions.Item label="产品类型">{getTaskProductType(detailTask)}</Descriptions.Item>
+              <Descriptions.Item label="执行方式">
+                <Tag>{EXECUTION_MODE_OPTIONS.find((o) => o.value === detailTask.executionMode)?.label ?? detailTask.executionMode}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="当前步骤">{STEP_LABELS[detailTask.currentStep as TransferStepId] ?? '-'}</Descriptions.Item>
+              <Descriptions.Item label="操作人">{detailTask.createUser}</Descriptions.Item>
+              <Descriptions.Item label="创建时间">{new Date(detailTask.createdAt).toLocaleString('zh-CN')}</Descriptions.Item>
+            </Descriptions>
+            <Card title="执行进度" size="small">
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                <Progress
+                  type="circle"
+                  percent={detailTask.progress}
+                  format={() => `${detailTask.progress}%`}
+                />
+                <Space wrap>
+                  <Tag color="success">成功 {detailTask.successCount}</Tag>
+                  <Tag color="error">失败 {detailTask.failCount}</Tag>
+                  <Tag>总数 {detailTask.totalCount}</Tag>
+                </Space>
+              </Space>
+            </Card>
+          </Space>
+        ) : null}
       </Drawer>
     </ListPageLayout>
   );

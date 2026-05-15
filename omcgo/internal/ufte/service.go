@@ -178,6 +178,44 @@ func (s *Service) UpdateTaskType(ctx context.Context, typeCode string, req TaskT
 	return &updated, nil
 }
 
+func (s *Service) StartTask(ctx context.Context, taskID uuid.UUID) error {
+	return s.softwareService.ResumeUpgrade(ctx, taskID)
+}
+
+func (s *Service) SuspendTask(ctx context.Context, taskID uuid.UUID) error {
+	return s.softwareService.SuspendUpgrade(ctx, taskID)
+}
+
+func (s *Service) TerminateTask(ctx context.Context, taskID uuid.UUID) error {
+	return s.softwareService.TerminateUpgrade(ctx, taskID)
+}
+
+func (s *Service) DeleteTask(ctx context.Context, taskID uuid.UUID) error {
+	return s.softwareService.DeleteUpgrade(ctx, taskID)
+}
+
+func (s *Service) RetryTask(ctx context.Context, taskID uuid.UUID) error {
+	return s.softwareService.RetryUpgrade(ctx, taskID)
+}
+
+func (s *Service) DeleteTaskType(ctx context.Context, typeCode string) error {
+	catalog, err := s.loadTaskTypeCatalog(ctx)
+	if err != nil {
+		return err
+	}
+	existing, ok := findTaskTypeByCode(catalog, typeCode)
+	if !ok {
+		return commonerrors.ErrNotFound
+	}
+	if existing.BuiltIn {
+		return fmt.Errorf("%w: built-in UFTE task type cannot be deleted", commonerrors.ErrForbidden)
+	}
+	if err := s.taskTypeRepo.Delete(ctx, typeCode); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createUser string) (*Task, error) {
 	catalog, err := s.loadTaskTypeCatalog(ctx)
 	if err != nil {
@@ -215,12 +253,13 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 			return nil, fmt.Errorf("%w: firmware_id is required for upgrade tasks", commonerrors.ErrInvalidInput)
 		}
 		createdTask, err = s.softwareService.BatchUpgrade(ctx, software.BatchUpgradeRequest{
-			DeviceIDs:       req.DeviceIDs,
-			FirmwareID:      *req.FirmwareID,
-			TaskName:        req.TaskName,
-			TaskType:        typeDef.softwareTaskType,
-			IsKeepConfig:    req.IsKeepConfig,
-			CreateSuspended: createSuspended,
+			DeviceIDs:        req.DeviceIDs,
+			FirmwareID:       *req.FirmwareID,
+			TaskName:         req.TaskName,
+			TaskType:         typeDef.softwareTaskType,
+			DownloadFileType: typeDef.FileType,
+			IsKeepConfig:     req.IsKeepConfig,
+			CreateSuspended:  createSuspended,
 		})
 	}
 	if err != nil {
@@ -548,6 +587,7 @@ func (s *Service) mapDeviceItem(
 		Progress:        progressForDeviceStatus(status),
 		LastReportAt:    formatTime(lastReport),
 		OperatorScope:   parent.CreateUser,
+		FailureReason:   subTask.FailureReason,
 	}, nil
 }
 
@@ -692,21 +732,27 @@ func (s *Service) buildTaskTypeStats(ctx context.Context, catalog []TaskType) (m
 
 func taskTypeFromWriteRequest(typeCode, permissionCode string, builtIn bool, req TaskTypeWriteRequest, editor string) TaskType {
 	updatedAt := formatTime(time.Now())
+	rpcType := strings.TrimSpace(req.RPCType)
+	fileType := normalizeTaskTypeFileType(rpcType, strings.TrimSpace(req.FileType))
+	fileTypeLabel := strings.TrimSpace(req.FileTypeLabel)
+	if fileTypeLabel == "" || fileTypeLabel == strings.TrimSpace(req.FileType) {
+		fileTypeLabel = fileType
+	}
 	return TaskType{
 		TypeCode:               typeCode,
 		Category:               strings.TrimSpace(req.Category),
 		CategoryLabel:          strings.TrimSpace(req.CategoryLabel),
 		DisplayName:            strings.TrimSpace(req.DisplayName),
 		Description:            strings.TrimSpace(req.Description),
-		RPCType:                strings.TrimSpace(req.RPCType),
+		RPCType:                rpcType,
 		BuiltIn:                builtIn,
 		Enabled:                req.Enabled,
 		StepChain:              normalizeStringSlice(req.StepChain),
 		PostTCEventCode:        strings.TrimSpace(req.PostTCEventCode),
 		PermissionCode:         permissionCode,
 		PlatformScope:          normalizeStringSlice(req.PlatformScope),
-		FileType:               strings.TrimSpace(req.FileType),
-		FileTypeLabel:          strings.TrimSpace(req.FileTypeLabel),
+		FileType:               fileType,
+		FileTypeLabel:          fileTypeLabel,
 		FileTypeEditable:       req.FileTypeEditable,
 		URLTemplate:            strings.TrimSpace(req.URLTemplate),
 		TargetFileNameTemplate: strings.TrimSpace(req.TargetFileNameTemplate),
@@ -718,5 +764,26 @@ func taskTypeFromWriteRequest(typeCode, permissionCode string, builtIn bool, req
 		TransportPath:          strings.TrimSpace(req.TransportPath),
 		LastEditor:             strings.TrimSpace(editor),
 		UpdatedAt:              updatedAt,
+	}
+}
+
+func normalizeTaskTypeFileType(rpcType, fileType string) string {
+	if strings.ToUpper(strings.TrimSpace(rpcType)) != "DOWNLOAD" {
+		return fileType
+	}
+
+	switch strings.TrimSpace(fileType) {
+	case "1", "firmware", "Firmware Upgrade Image":
+		return "1 Firmware Upgrade Image"
+	case "2", "web", "Web Content":
+		return "2 Web Content"
+	case "3", "config", "Vendor Configuration File":
+		return "3 Vendor Configuration File"
+	case "101", "script", "Script File":
+		return "101 Script File"
+	case "103", "startup", "Base Station Startup File":
+		return "103 Base Station Startup File"
+	default:
+		return fileType
 	}
 }

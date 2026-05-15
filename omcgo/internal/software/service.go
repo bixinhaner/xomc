@@ -162,18 +162,19 @@ func (s *SoftwareService) BatchUpgrade(ctx context.Context, req BatchUpgradeRequ
 	}
 
 	mainTask := &UpgradeTask{
-		TaskName:      req.TaskName,
-		TaskType:      taskType,
-		FirmwareID:    &req.FirmwareID,
-		FileName:      fw.FileName,
-		FileMD5:       fw.MD5Val,
-		Status:        TaskPending,
-		ProductClass:  fw.ProductClass,
-		IsKeepConfig:  req.IsKeepConfig,
-		CreateStatus:  "active",
-		CreateUser:    "system",
-		TotalCount:    len(req.DeviceIDs),
-		MaxConcurrent: concurrency,
+		TaskName:         req.TaskName,
+		TaskType:         taskType,
+		FirmwareID:       &req.FirmwareID,
+		DownloadFileType: req.DownloadFileType,
+		FileName:         fw.FileName,
+		FileMD5:          fw.MD5Val,
+		Status:           TaskPending,
+		ProductClass:     fw.ProductClass,
+		IsKeepConfig:     req.IsKeepConfig,
+		CreateStatus:     "active",
+		CreateUser:       "system",
+		TotalCount:       len(req.DeviceIDs),
+		MaxConcurrent:    concurrency,
 	}
 	if err := s.taskRepo.Create(ctx, mainTask); err != nil {
 		return nil, fmt.Errorf("create main task: %w", err)
@@ -370,7 +371,7 @@ func (s *SoftwareService) startExecution(mainTask *UpgradeTask, subTasks []*Upgr
 						zap.Any("recover", r))
 				}
 			}()
-			s.executor.ExecuteOne(context.Background(), st, fw, isKeepConfig)
+			s.executor.ExecuteOne(context.Background(), st, fw, isKeepConfig, mainTask.DownloadFileType)
 		}(subTasks[i])
 	}
 }

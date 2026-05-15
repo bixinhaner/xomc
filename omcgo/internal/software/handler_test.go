@@ -112,11 +112,11 @@ func (m *swHSubTaskRepo) UpdateStatus(_ context.Context, _ uuid.UUID, _ UpgradeS
 	return nil
 }
 func (m *swHSubTaskRepo) Update(_ context.Context, _ *UpgradeSubTask) error { return nil }
-func (m *swHSubTaskRepo) List(_ context.Context, _ SubTaskFilter) (*model.ListResponse[UpgradeSubTask], error) {
-	return model.NewListResponse([]UpgradeSubTask{}, 0, 1, 20), nil
+func (m *swHSubTaskRepo) List(_ context.Context, _ SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
+	return model.NewListResponse([]UpgradeSubTaskWithTaskName{}, 0, 1, 20), nil
 }
-func (m *swHSubTaskRepo) ListByTaskID(_ context.Context, _ uuid.UUID, _ SubTaskFilter) (*model.ListResponse[UpgradeSubTask], error) {
-	return model.NewListResponse([]UpgradeSubTask{}, 0, 1, 20), nil
+func (m *swHSubTaskRepo) ListByTaskID(_ context.Context, _ uuid.UUID, _ SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
+	return model.NewListResponse([]UpgradeSubTaskWithTaskName{}, 0, 1, 20), nil
 }
 func (m *swHSubTaskRepo) ListAll(_ context.Context, _ AllSubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
 	return model.NewListResponse([]UpgradeSubTaskWithTaskName{}, 0, 1, 20), nil

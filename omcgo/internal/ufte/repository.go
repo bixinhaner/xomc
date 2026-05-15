@@ -18,6 +18,7 @@ type TaskTypeRepository interface {
 	List(ctx context.Context) ([]TaskType, error)
 	GetByCode(ctx context.Context, typeCode string) (*TaskType, error)
 	Upsert(ctx context.Context, item *TaskType) error
+	Delete(ctx context.Context, typeCode string) error
 }
 
 type PgTaskTypeRepository struct {
@@ -207,6 +208,23 @@ func (r *PgTaskTypeRepository) Upsert(ctx context.Context, item *TaskType) error
 		return fmt.Errorf("upsert UFTE task type: %w", err)
 	}
 	item.UpdatedAt = formatTime(now)
+	return nil
+}
+
+func (r *PgTaskTypeRepository) Delete(ctx context.Context, typeCode string) error {
+	query, args, err := storage.Psql.Delete("ufte_task_types").
+		Where(sq.Eq{"type_code": typeCode}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build delete UFTE task type SQL: %w", err)
+	}
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("delete UFTE task type: %w", err)
+	}
+	if result.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
 	return nil
 }
 

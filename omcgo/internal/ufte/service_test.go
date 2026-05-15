@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	coremodel "github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/software"
@@ -17,6 +18,7 @@ import (
 type ensureBuiltInTaskTypeRepo struct {
 	items    []TaskType
 	upserted []TaskType
+	deleted  []string
 }
 
 type stubDeviceRepo struct {
@@ -51,6 +53,18 @@ func (r *ensureBuiltInTaskTypeRepo) Upsert(_ context.Context, item *TaskType) er
 	return nil
 }
 
+func (r *ensureBuiltInTaskTypeRepo) Delete(_ context.Context, typeCode string) error {
+	for index := range r.items {
+		if r.items[index].TypeCode != typeCode {
+			continue
+		}
+		r.deleted = append(r.deleted, typeCode)
+		r.items = append(r.items[:index], r.items[index+1:]...)
+		return nil
+	}
+	return nil
+}
+
 func TestService_EnsureBuiltInTaskTypes_InsertsOnlyMissingDefaults(t *testing.T) {
 	defaults := builtInTaskTypes()
 	repo := &ensureBuiltInTaskTypeRepo{
@@ -82,6 +96,7 @@ func TestBuiltInTaskTypes_CoversRequiredTemplates(t *testing.T) {
 	defaults := builtInTaskTypes()
 	required := map[string]struct{}{
 		"ENB_IMG_UPGRADE":     {},
+		"ENB_FPGA_UPGRADE":    {},
 		"GNB_IMG_UPGRADE":     {},
 		"VERSION_ROLLBACK":    {},
 		"RUNTIME_LOG_COLLECT": {},
@@ -106,6 +121,10 @@ func TestBuiltInTaskTypes_CoversRequiredTemplates(t *testing.T) {
 	assert.Equal(t, "station_log", seen["RUNTIME_LOG_COLLECT"].Category)
 	assert.Equal(t, "config_backup", seen["CONFIG_BACKUP"].Category)
 	assert.Equal(t, "config_restore", seen["CONFIG_RESTORE"].Category)
+	assert.Equal(t, "1 Firmware Upgrade Image", seen["ENB_IMG_UPGRADE"].FileType)
+	assert.Equal(t, "Firmware Upgrade Fpga", seen["ENB_FPGA_UPGRADE"].FileType)
+	_, has5GFpga := seen["GNB_FPGA_UPGRADE"]
+	assert.False(t, has5GFpga)
 }
 
 func TestService_LoadTaskTypeCatalog_UsesStoredRowsAsSourceOfTruth(t *testing.T) {
@@ -123,8 +142,8 @@ func TestService_LoadTaskTypeCatalog_UsesStoredRowsAsSourceOfTruth(t *testing.T)
 				StepChain:      []string{"CHECK_PERMISSION", "SEND_RPC"},
 				PermissionCode: "CODE_ENB_UPGRADE_IMAGE",
 				PlatformScope:  []string{"4G eNB"},
-				FileType:       "1",
-				FileTypeLabel:  "Firmware Upgrade Image",
+				FileType:       "1 Firmware Upgrade Image",
+				FileTypeLabel:  "1 Firmware Upgrade Image",
 				LastEditor:     "system",
 			},
 			{
@@ -164,6 +183,13 @@ func TestService_LoadTaskTypeCatalog_UsesStoredRowsAsSourceOfTruth(t *testing.T)
 	assert.Nil(t, custom.techHint)
 }
 
+func TestNormalizeTaskTypeFileType_DownloadTemplatesUseFinalCWMPString(t *testing.T) {
+	assert.Equal(t, "1 Firmware Upgrade Image", normalizeTaskTypeFileType("DOWNLOAD", "1"))
+	assert.Equal(t, "3 Vendor Configuration File", normalizeTaskTypeFileType("DOWNLOAD", "config"))
+	assert.Equal(t, "Firmware Upgrade Fpga", normalizeTaskTypeFileType("DOWNLOAD", "Firmware Upgrade Fpga"))
+	assert.Equal(t, "6", normalizeTaskTypeFileType("UPLOAD", "6"))
+}
+
 func TestService_ListDeviceCandidates_FiltersByTypeScope(t *testing.T) {
 	taskTypeRepo := &ensureBuiltInTaskTypeRepo{
 		items: builtInTaskTypes(),
@@ -177,6 +203,14 @@ func TestService_ListDeviceCandidates_FiltersByTypeScope(t *testing.T) {
 				Technology:      coremodel.TechLTE,
 				FirmwareVersion: "V1.0.0",
 				SiteName:        "北京 4G 站点",
+			},
+			{
+				ID:              uuid.New(),
+				SerialNumber:    "ENB00002",
+				ProductClass:    "FAP/BU1810",
+				Technology:      coremodel.TechLTE,
+				FirmwareVersion: "V1.0.1",
+				SiteName:        "广州 4G 站点",
 			},
 			{
 				ID:              uuid.New(),
@@ -201,7 +235,39 @@ func TestService_ListDeviceCandidates_FiltersByTypeScope(t *testing.T) {
 		PageSize: 200,
 	})
 	require.NoError(t, err)
-	require.Len(t, result.Items, 1)
+	require.Len(t, result.Items, 2)
 	assert.Equal(t, "ENB00001", result.Items[0].DeviceSN)
 	assert.Equal(t, "QAFA", result.Items[0].ProductType)
+	assert.Equal(t, "ENB00002", result.Items[1].DeviceSN)
+	assert.Equal(t, "FAP/BU1810", result.Items[1].ProductType)
+}
+
+func TestService_DeleteTaskType_DeletesCustomTypeOnly(t *testing.T) {
+	repo := &ensureBuiltInTaskTypeRepo{
+		items: []TaskType{
+			{
+				TypeCode:      "ENB_IMG_UPGRADE",
+				Category:      "enb_upgrade",
+				CategoryLabel: "4G升级",
+				DisplayName:   "4G 基站软件升级",
+				BuiltIn:       true,
+			},
+			{
+				TypeCode:      "CUSTOM_UPLOAD_SAMPLE",
+				Category:      "custom_upload",
+				CategoryLabel: "自定义上传",
+				DisplayName:   "自定义上传模板",
+				BuiltIn:       false,
+			},
+		},
+	}
+	svc := NewService(nil, repo, nil, nil, nil, zap.NewNop())
+
+	err := svc.DeleteTaskType(context.Background(), "CUSTOM_UPLOAD_SAMPLE")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"CUSTOM_UPLOAD_SAMPLE"}, repo.deleted)
+
+	err = svc.DeleteTaskType(context.Background(), "ENB_IMG_UPGRADE")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, commonerrors.ErrForbidden)
 }
