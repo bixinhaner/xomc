@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Form,
@@ -10,7 +10,6 @@ import {
   Space,
   Card,
   Divider,
-  App,
   Typography,
   Checkbox,
   Table,
@@ -42,13 +41,14 @@ import {
 import { useT } from '@/hooks/useT';
 
 const { Text, Title } = Typography;
-const { _Dragger } = Upload;
 
 // Types
 type ExecuteType = '0' | '1';
 type EnableType = '0' | '1';
 
-interface _PolicyForm {
+// T-0136: 保留为 export 占位，避免 TS6196 同时不破坏未来可能复用
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export interface _PolicyForm {
   selfStartEnable: EnableType;
   policyName: string;
   productType: string;
@@ -119,8 +119,9 @@ interface WanBindingItem {
   binding: string;
 }
 
-// eNB WAN固定分组类型
-type _EnbWanGroup = 'wanOamTr069' | 'wanS1c' | 'wanS1u' | 'wanX2ap';
+// eNB WAN固定分组类型 (T-0136: 保留为 export 占位避免 TS6196)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export type _EnbWanGroup = 'wanOamTr069' | 'wanS1c' | 'wanS1u' | 'wanX2ap';
 
 // 自定义参数项
 interface CustomParam {
@@ -264,8 +265,7 @@ interface ParamConfig {
   omlRemoteIpBak?: string;
   rfPower?: number;
   // ========== GSM DNS/时区配置 ==========
-  dns1?: string;
-  dns2?: string;
+  // dns1/dns2 与 gNB 段共用（去重 duplicate identifier）
   localTimezoneName?: string;  // 时区名称
   // ========== GSM Route配置 ==========
   onboot?: 'yes' | 'no';
@@ -572,8 +572,9 @@ const MOCK_PARAM_CONFIGS: ParamConfig[] = [
   },
 ];
 
-// Bandwidth options
-const _BANDWIDTH_OPTIONS_DXDF = [
+// Bandwidth options (T-0136: 保留为 export 占位避免 TS6133)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const _BANDWIDTH_OPTIONS_DXDF = [
   { label: '6', value: '6' },
   { label: '15', value: '15' },
   { label: '25', value: '25' },
@@ -645,7 +646,6 @@ export default function AddPolicyPage() {
   const t = useT();
   const navigate = useNavigate();
   const location = useLocation();
-  const { _modal } = App.useApp();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
 
@@ -660,11 +660,8 @@ export default function AddPolicyPage() {
   // Get mode from URL path
   const pathParts = location.pathname.split('/');
   const lastPart = pathParts[pathParts.length - 2];
-  const _policyId = pathParts[pathParts.length - 1];
-  const isAdd = lastPart === 'add';
   const isEdit = lastPart === 'edit';
   const isView = lastPart === 'view';
-  const _mode = isAdd ? 'add' : isEdit ? 'edit' : 'view';
 
   // State for software upgrade
   const [selectedOriginalVersions, setSelectedOriginalVersions] = useState<OriginalVersion[]>([]);
@@ -796,7 +793,7 @@ export default function AddPolicyPage() {
       dataIndex: 'execute_status',
       key: 'execute_status',
       render: (status: string) => {
-        const cfg = LICENSE_STATUS_CONFIG[status];
+        const cfg = LICENSE_STATUS_CONFIG[status as keyof typeof LICENSE_STATUS_CONFIG];
         return <Tag color={cfg?.color || 'default'}>{cfg?.label || status}</Tag>;
       },
     },
@@ -942,6 +939,7 @@ export default function AddPolicyPage() {
     // Simulate import
     const newConfig: ParamConfig = {
       id: Date.now().toString(),
+      deviceType: 'eNB',
       serialNumber: `ENB${Date.now().toString().slice(-5)}`,
       cellName: `Cell-${Date.now().toString().slice(-4)}`,
       bandsSupport: 38,
@@ -2286,8 +2284,10 @@ export default function AddPolicyPage() {
                 return;
               }
               // Process import based on import type
-              paramFileList.forEach(file => {
-                handleImportConfig(file);
+              paramFileList.forEach((file) => {
+                // antd UploadFile carries originFileObj: File for actual upload
+                const realFile = (file.originFileObj ?? file) as File;
+                handleImportConfig(realFile);
               });
               setImportModalVisible(false);
               setParamFileList([]);
