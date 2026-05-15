@@ -84,7 +84,6 @@ export interface AlarmFilter {
   neType?: string;                        // 告警源
   unread?: '0' | '1';                     // 阅读状态
   deviceSn?: string;
-  alarmIdentifier?: string;
   alarmName?: string;                     // 可能原因（模糊查询）
   alarmIdentifier?: string;               // 告警唯一标识（精确查询）
   equipInfo?: string;                     // 网元定位（模糊查询）

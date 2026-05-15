@@ -1,7 +1,6 @@
 import http from '../http';
 import type {
   SoftwareVersion,
-  UpgradePlan,
   UpgradeTaskInfo,
   UpgradeSubTaskInfo,
   VersionStatus,

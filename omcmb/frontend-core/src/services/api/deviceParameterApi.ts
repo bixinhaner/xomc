@@ -5,7 +5,6 @@ import type {
   ParameterSyncStatus,
   ParameterFilter,
   ParameterUpdateRequest,
-  ParameterSyncOptions,
   ParameterSchemaResponse,
   ParameterUpdateResponse,
   ParameterConstraints,

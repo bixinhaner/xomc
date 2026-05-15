@@ -398,7 +398,7 @@ export const backupApi = {
       // null → ftpConfigId null, preserved.
       // T-0088 fallback: pre-T-0084 backend may not return alertSeverity;
       // default to 'major' so the form Select renders deterministically.
-      return { alertSeverity: 'major', ...data };
+      return { ...data, alertSeverity: data.alertSeverity ?? 'major' };
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status === 404) return { ...DEFAULT_BACKUP_POLICY };
@@ -443,7 +443,6 @@ export const backupApi = {
       total: data.total,
       page: data.page,
       pageSize: data.page_size,
-      totalPages: data.total_pages,
     };
   },
 

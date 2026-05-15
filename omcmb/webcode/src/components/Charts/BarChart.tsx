@@ -104,8 +104,8 @@ const BarChart: React.FC<BarChartProps> = ({
         ...(base.grid as object),
         top: title ? 56 : 40,
       },
-      xAxis: horizontal ? valueAxis : categoryAxis,
-      yAxis: horizontal ? categoryAxis : valueAxis,
+      xAxis: (horizontal ? valueAxis : categoryAxis) as EChartsOption['xAxis'],
+      yAxis: (horizontal ? categoryAxis : valueAxis) as EChartsOption['yAxis'],
       series: series.map((s, i) => {
         // 计算该系列的圆角：优先使用系列自身的 borderRadius，否则使用全局 borderRadius
         let seriesBorderRadius: number | [number, number, number, number];

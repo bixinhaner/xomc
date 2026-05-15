@@ -369,7 +369,7 @@ function buildAlarmQuery(
       query.status = 'acknowledged';
     }
   }
-  if (filter.unread !== undefined && filter.unread !== '') {
+  if (filter.unread !== undefined) {
     query.is_read = filter.unread === '0' ? 'true' : 'false';
   }
   if (filter.neType) query.ne_type = filter.neType;
@@ -380,7 +380,7 @@ function buildAlarmQuery(
   }
   if (filter.keyword) query.keyword = filter.keyword;
   // 未识别告警过滤（设计 §3.3 治理闭环）：'true'/'false' 字符串透传给后端 form:"is_unknown"
-  if (filter.isUnknown !== undefined && filter.isUnknown !== '') {
+  if (filter.isUnknown !== undefined) {
     query.is_unknown = filter.isUnknown;
   }
 

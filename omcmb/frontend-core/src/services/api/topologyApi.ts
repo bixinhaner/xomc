@@ -1,5 +1,5 @@
 import http from '../http';
-import type { Domain, DomainLevel, Site, TopoNode, TopoEdge, NodeType, NodeStatus, SiteStatus, EdgeStatus, TopoStatistics, TopoGraph } from '../../types/topology';
+import type { Domain, DomainLevel, Site, TopoNode, TopoEdge, NodeType, NodeStatus, SiteStatus, EdgeStatus, TopoStatistics } from '../../types/topology';
 import type { PageResponse } from '../../types/pagination';
 import type {
   DeviceGeo,

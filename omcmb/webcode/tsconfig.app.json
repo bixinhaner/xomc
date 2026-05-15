@@ -29,5 +29,15 @@
       "@core/*": ["../frontend-core/src/*"]
     }
   },
-  "include": ["src", "../frontend-core/src"]
+  "include": ["src", "../frontend-core/src"],
+  "exclude": [
+    "src/**/__tests__/**",
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/**/*.spec.ts",
+    "src/**/*.spec.tsx",
+    "../frontend-core/src/**/__tests__/**",
+    "../frontend-core/src/**/*.test.ts",
+    "../frontend-core/src/**/*.test.tsx"
+  ]
 }
