@@ -10,8 +10,8 @@ import type {
   CustNameUpdateParams,
   IndicatorUnit,
   IndicatorType,
-} from '@/types/indicator';
-import type { PageResponse } from '@/types/pagination';
+} from '../../types/indicator';
+import type { PageResponse } from '../../types/pagination';
 import { mockIndicatorGroups, mockIndicators, mockIndicatorUnits, mockIndicatorTypes } from '../data/indicator';
 import { delay, paginate, generateId } from '../utils';
 

@@ -7,7 +7,6 @@ let versions = [...mockSoftwareVersions];
 const upgradePlans = [...mockUpgradePlans];
 
 // Mock upgrade tasks (simulates upgrade_tasks table)
-let taskIdCounter = 100;
 const mockUpgradeTasks: UpgradeTaskInfo[] = [];
 
 // Helper: create a mock UpgradeTaskInfo
@@ -20,7 +19,6 @@ function createMockTask(overrides: Partial<UpgradeTaskInfo> & { taskName: string
     taskType: 1,
     status: 'ended',
     result: fail === 0 ? 'success' : success === 0 ? 'failed' : 'partial',
-    operatorCode: 'cmcc',
     isKeepConfig: true,
     createStatus: 'active',
     createUser: 'admin',
@@ -200,11 +198,10 @@ export const softwareService = {
       taskName: req.taskName,
       productClass: 'PM-B4860',
       taskType: 2,
-      status: req.createSuspended ? 'paused' : 'in_progress',
+      status: req.createSuspended ? 'suspended' : 'in_progress',
       totalCount: req.deviceIds.length,
       successCount: 0,
       failCount: 0,
-      operatorCode: '',
       createUser: req.createUser,
     });
     mockUpgradeTasks.unshift(task);

@@ -11,8 +11,8 @@ import type {
   CustNameUpdateParams,
   IndicatorUnit,
   IndicatorType,
-} from '@/types/indicator';
-import type { PageResponse } from '@/types/pagination';
+} from '../../types/indicator';
+import type { PageResponse } from '../../types/pagination';
 
 // ── Backend response types ───────────────────────────────────────────────────
 

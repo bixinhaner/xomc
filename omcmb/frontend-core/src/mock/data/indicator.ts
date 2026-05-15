@@ -1,4 +1,4 @@
-import type { IndicatorGroup, PerfIndicator, IndicatorUnit, IndicatorType } from '@/types/indicator';
+import type { IndicatorGroup, PerfIndicator, IndicatorUnit, IndicatorType } from '../../types/indicator';
 
 // ── Mock Indicator Group Trees ───────────────────────────────────────────────
 

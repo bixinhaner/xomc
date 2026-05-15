@@ -134,7 +134,7 @@ export const mmlService = {
           (s.description ?? '').toLowerCase().includes(kw)
       );
     }
-    if (p.deviceType) filtered = filtered.filter((s) => s.deviceType === p.deviceType);
+    // T-0129 batch B: MMLScript 已无 deviceType 字段 (mml.ts 移除), p.deviceType filter 失效跳过
     if (p.creator) filtered = filtered.filter((s) => s.creator === p.creator);
     return paginate(filtered, p.page, p.pageSize);
   },

@@ -575,19 +575,10 @@ export const softwareApi = {
   precheck: softwareService.precheck.bind(softwareService),
   createUpgradePlan: softwareService.createUpgradePlan.bind(softwareService),
 
-  // ---- Legacy UpgradePlan (for mock compatibility) ----
-  async getUpgradePlans(
-    params: { status?: string; taskType?: number } & PageRequest
-  ): Promise<PageResponse<UpgradeTaskInfo>> {
-    return softwareApi.getUpgradeTasks({
-      page: params.page,
-      pageSize: params.pageSize,
-      taskType: params.taskType,
-      status: params.status,
-    });
-  },
-
-  async getUpgradePlanById(id: string): Promise<UpgradeTaskInfo | null> {
-    return softwareApi.getUpgradeTaskById(id);
-  },
+  // ---- Legacy UpgradePlan (delegated to mock for type consistency, T-0129 batch A-2) ----
+  // 注：mock UpgradePlan vs real UpgradeTaskInfo 是不同 schema (planName/targetVersionId vs taskName/firmwareId 等)。
+  // hook 端 useUpgradePlans 期望 UpgradePlan 类型，所以 real 端 delegate mock 保类型一致。
+  // 若要真后端联调升级计划，需先做 schema 统一改造（est M 独立任务）。
+  getUpgradePlans: softwareService.getUpgradePlans.bind(softwareService),
+  getUpgradePlanById: softwareService.getUpgradePlanById.bind(softwareService),
 };
