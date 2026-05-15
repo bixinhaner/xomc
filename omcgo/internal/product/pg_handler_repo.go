@@ -303,6 +303,28 @@ func (r *PgRepository) CountDevicesByProduct(ctx context.Context) (map[uuid.UUID
 	return out, rows.Err()
 }
 
+// ListPatternsAllByProduct 返回所有 active 正则按 product_id 分组（按 sort_order 升序）。
+// 供产品列表页一次性拉取后端 join，避免 N+1 调 GET /products/:id。
+func (r *PgRepository) ListPatternsAllByProduct(ctx context.Context) (map[uuid.UUID][]string, error) {
+	const q = `SELECT product_id, product_class FROM product_class_patterns
+	           WHERE is_active = TRUE ORDER BY sort_order ASC`
+	rows, err := r.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("list patterns by product: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[uuid.UUID][]string, 16)
+	for rows.Next() {
+		var pid uuid.UUID
+		var pc string
+		if err := rows.Scan(&pid, &pc); err != nil {
+			return nil, fmt.Errorf("scan pattern row: %w", err)
+		}
+		out[pid] = append(out[pid], pc)
+	}
+	return out, rows.Err()
+}
+
 // ── Pattern CRUD ────────────────────────────────────────────────────
 
 // CreatePattern 追加正则到全局尾部（sort_order = max+1）。

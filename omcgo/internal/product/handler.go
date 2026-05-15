@@ -111,9 +111,13 @@ type productView struct {
 	DeviceAttrsOverride map[string]any `json:"device_attrs_override"`
 	EnableUnknownAlarm  bool           `json:"enable_unknown_alarm"`
 	DeviceCount         int            `json:"device_count,omitempty"`
+	Patterns            []string       `json:"patterns"` // 该产品 active 正则（按 sort_order 升序），无则空数组
 }
 
-func toProductView(p *Product, deviceCount int) productView {
+func toProductView(p *Product, deviceCount int, patterns []string) productView {
+	if patterns == nil {
+		patterns = []string{}
+	}
 	return productView{
 		ID: p.ID, Name: p.Name, Vendor: p.Vendor, Tech: p.Tech, RadioModes: p.RadioModes,
 		Description: p.Description, ParamModelID: p.ParamModelID,
@@ -123,6 +127,7 @@ func toProductView(p *Product, deviceCount int) productView {
 		DeviceAttrsOverride: p.DeviceAttrsOverride,
 		EnableUnknownAlarm:  p.EnableUnknownAlarm,
 		DeviceCount:         deviceCount,
+		Patterns:            patterns,
 	}
 }
 
@@ -139,6 +144,12 @@ func (h *Handler) List(c *gin.Context) {
 		// 非致命：列表照常返回，只是 device_count 缺
 		h.logger.Warn("CountDevicesByProduct failed", zap.Error(err))
 		counts = map[uuid.UUID]int{}
+	}
+	patternsByProduct, err := h.repo.ListPatternsAllByProduct(c.Request.Context())
+	if err != nil {
+		// 非致命：列表照常返回，只是 patterns 缺
+		h.logger.Warn("ListPatternsAllByProduct failed", zap.Error(err))
+		patternsByProduct = map[uuid.UUID][]string{}
 	}
 	vendor := strings.TrimSpace(c.Query("vendor"))
 	tech := strings.TrimSpace(c.Query("tech"))
@@ -158,7 +169,7 @@ func (h *Handler) List(c *gin.Context) {
 				continue
 			}
 		}
-		views = append(views, toProductView(p, counts[p.ID]))
+		views = append(views, toProductView(p, counts[p.ID], patternsByProduct[p.ID]))
 	}
 	response.OK(c, gin.H{"items": views, "total": len(views)})
 }
@@ -180,8 +191,14 @@ func (h *Handler) Get(c *gin.Context) {
 	}
 	patterns, _ := h.repo.ListPatternsByProduct(c.Request.Context(), id)
 	counts, _ := h.repo.CountDevicesByProduct(c.Request.Context())
+	pcStrings := make([]string, 0, len(patterns))
+	for _, pv := range patterns {
+		if pv.IsActive {
+			pcStrings = append(pcStrings, pv.ProductClass)
+		}
+	}
 	response.OK(c, gin.H{
-		"product":  toProductView(p, counts[id]),
+		"product":  toProductView(p, counts[id], pcStrings),
 		"patterns": patterns,
 	})
 }
@@ -264,7 +281,7 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 	h.refreshAsync(c.Request.Context(), "create-product")
-	response.OKWithStatus(c, http.StatusCreated, toProductView(p, 0))
+	response.OKWithStatus(c, http.StatusCreated, toProductView(p, 0, in.Patterns))
 }
 
 type updateProductReq struct {
@@ -344,7 +361,15 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 	h.refreshAsync(c.Request.Context(), "update-product")
-	response.OK(c, toProductView(p, 0))
+	// Update 不动 patterns，回读一次以便返回值与 List 视图保持一致
+	curPatterns, _ := h.repo.ListPatternsByProduct(c.Request.Context(), id)
+	pcStrings := make([]string, 0, len(curPatterns))
+	for _, pv := range curPatterns {
+		if pv.IsActive {
+			pcStrings = append(pcStrings, pv.ProductClass)
+		}
+	}
+	response.OK(c, toProductView(p, 0, pcStrings))
 }
 
 func (h *Handler) Delete(c *gin.Context) {
@@ -525,7 +550,7 @@ func (h *Handler) Match(c *gin.Context) {
 	}
 	response.OK(c, gin.H{
 		"matched":         true,
-		"product":         toProductView(mr.Product, 0),
+		"product":         toProductView(mr.Product, 0, nil),
 		"matched_pattern": mr.MatchedPattern,
 		"global_order":    mr.GlobalOrder,
 		"product_class":   productClass,

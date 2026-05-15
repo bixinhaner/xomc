@@ -93,6 +93,33 @@ export default function ProductsPage() {
       width: 120,
     },
     {
+      title: '正则规则',
+      dataIndex: 'patterns',
+      width: 280,
+      render: (list?: string[]) => {
+        const items = list || [];
+        if (items.length === 0) {
+          return <Text type="secondary">—</Text>;
+        }
+        const visible = items.slice(0, 3);
+        const rest = items.slice(3);
+        return (
+          <Space size={[0, 4]} wrap>
+            {visible.map((p) => (
+              <Tag key={p} color="geekblue">
+                {p}
+              </Tag>
+            ))}
+            {rest.length > 0 && (
+              <Tooltip title={rest.join('\n')} overlayStyle={{ whiteSpace: 'pre' }}>
+                <Tag color="default">+{rest.length}</Tag>
+              </Tooltip>
+            )}
+          </Space>
+        );
+      },
+    },
+    {
       title: '上传',
       dataIndex: 'enableFiletype11',
       width: 70,

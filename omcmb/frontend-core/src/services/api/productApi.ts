@@ -27,6 +27,7 @@ interface BackendProduct {
   device_attrs_override: DeviceAttrsOverride;
   enable_unknown_alarm: boolean;
   device_count?: number;
+  patterns?: string[];
 }
 
 // 后端 PatternView 字段缺 json tag，序列化为 PascalCase
@@ -73,6 +74,7 @@ function mapBackendProduct(bp: BackendProduct): Product {
     deviceAttrsOverride: bp.device_attrs_override || {},
     enableUnknownAlarm: bp.enable_unknown_alarm,
     deviceCount: bp.device_count ?? 0,
+    patterns: bp.patterns ?? [],
   };
 }
 

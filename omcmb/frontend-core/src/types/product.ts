@@ -25,6 +25,7 @@ export interface Product {
   deviceAttrsOverride: DeviceAttrsOverride;
   enableUnknownAlarm: boolean;
   deviceCount: number;
+  patterns: string[]; // active 正则（按 sort_order 升序）；列表页直接展示用
 }
 
 export interface ProductPattern {

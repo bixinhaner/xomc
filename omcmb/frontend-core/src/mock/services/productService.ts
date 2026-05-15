@@ -37,6 +37,7 @@ export const productService = {
   },
 
   async create(input: CreateProductInput): Promise<Product> {
+    const inputPatterns = input.patterns || [];
     const newP: Product = {
       id: `p-${Date.now()}`,
       name: input.name,
@@ -52,9 +53,10 @@ export const productService = {
       deviceAttrsOverride: input.deviceAttrsOverride || {},
       enableUnknownAlarm: input.enableUnknownAlarm ?? false,
       deviceCount: 0,
+      patterns: [...inputPatterns],
     };
     products.push(newP);
-    patterns[newP.id] = (input.patterns || []).map((pc, idx) => ({
+    patterns[newP.id] = inputPatterns.map((pc, idx) => ({
       id: `pat-${Date.now()}-${idx}`,
       productId: newP.id,
       productClass: pc,
