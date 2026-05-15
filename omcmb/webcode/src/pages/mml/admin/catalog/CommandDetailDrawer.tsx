@@ -98,6 +98,14 @@ export default function CommandDetailDrawer({ open, command, onClose }: CommandD
             <Descriptions.Item label="require_confirm" span={2}>
               {command.requireConfirm ? <Tag color="warning">true</Tag> : 'false'}
             </Descriptions.Item>
+            <Descriptions.Item label="source">
+              <Tag color={command.source === 'admin' ? 'blue' : 'default'}>
+                {command.source ?? 'standard'}
+              </Tag>
+            </Descriptions.Item>
+            <Descriptions.Item label="catalog_protected">
+              {command.catalogProtected ? <Tag color="default">locked</Tag> : '-'}
+            </Descriptions.Item>
           </Descriptions>
 
           <h4>{t('mml.admin.catalog.commands.subFieldsTitle')}</h4>

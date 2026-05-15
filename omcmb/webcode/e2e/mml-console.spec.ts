@@ -39,18 +39,25 @@ async function mockBackend(page: Page): Promise<{ parseCalls: number; executeCal
         data: [
           {
             id: MOCK_GROUP_ID,
-            group_code: 'BSC_BASIC',
+            code: 'BSC_BASIC',
+            name: 'BSC Configuration',
+            name_i18n: { 'zh-CN': '基站配置', 'en-US': 'BSC Configuration' },
             path: 'BSC_BASIC',
-            display_name: 'BSC Configuration',
             display_order: 0,
+            source: 'standard',
+            catalog_protected: true,
             commands: [
               {
                 id: MOCK_CMD_ID,
                 command_code: 'LST_DEVICE_INFO',
                 logical_code: 'DEVICE_INFO',
+                logical_name: 'Device Info',
                 operation_type: 'LST',
                 display_name: 'Device Info (LST)',
+                rpc_method: 'GetParameterValues',
                 require_confirm: false,
+                source: 'standard',
+                catalog_protected: true,
               },
             ],
             children: [],

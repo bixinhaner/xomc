@@ -912,10 +912,13 @@ export const mmlApi = {
 function mapGroupTreeNode(n: BackendGroupTreeNode): GroupTreeNode {
   return {
     id: n.id,
-    groupCode: n.group_code,
+    groupCode: n.code,
     path: n.path,
-    displayName: n.display_name,
+    displayName: n.name,
+    displayNameI18n: n.name_i18n,
     displayOrder: n.display_order,
+    source: n.source,
+    catalogProtected: n.catalog_protected,
     commands: (n.commands ?? []).map(mapGroupTreeCommand),
     children: (n.children ?? []).map(mapGroupTreeNode),
   };
@@ -926,10 +929,15 @@ function mapGroupTreeCommand(c: BackendGroupTreeNode['commands'][number]): Group
     id: c.id,
     commandCode: c.command_code,
     logicalCode: c.logical_code,
+    logicalName: c.logical_name,
+    logicalNameI18n: c.logical_name_i18n,
     operationType: c.operation_type as MMLOperationType,
     displayName: c.display_name,
+    rpcMethod: c.rpc_method,
     targetObject: c.target_object || undefined,
     requireConfirm: c.require_confirm,
+    source: c.source,
+    catalogProtected: c.catalog_protected,
   };
 }
 

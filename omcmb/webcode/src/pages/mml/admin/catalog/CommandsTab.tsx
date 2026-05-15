@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Input, Table, Tag, Spin, Empty, Space, Modal, message } from 'antd';
+import { Input, Table, Tag, Spin, Empty, Space, Modal, Tooltip, message } from 'antd';
+import { LockOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useGroupTree } from '@core/hooks/api/useMmlConsole';
 import { useDeleteCommand } from '@core/hooks/api/useMmlAdmin';
@@ -45,6 +46,10 @@ export default function CommandsTab() {
   }, [tree, search]);
 
   const handleDelete = (cmd: CommandRow) => {
+    if (cmd.catalogProtected) {
+      message.warning(t('mml.admin.catalog.common.lockedTooltip'));
+      return;
+    }
     Modal.confirm({
       title: `${t('mml.admin.catalog.common.delete')} ${cmd.commandCode}?`,
       okButtonProps: { danger: true },
@@ -87,6 +92,16 @@ export default function CommandsTab() {
       dataIndex: 'displayName',
       key: 'displayName',
       ellipsis: true,
+      render: (name: string, cmd) => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          {name}
+          {cmd.catalogProtected && (
+            <Tooltip title={t('mml.admin.catalog.common.lockedTooltip')}>
+              <LockOutlined style={{ color: '#999' }} />
+            </Tooltip>
+          )}
+        </span>
+      ),
     },
     {
       title: t('mml.admin.catalog.commands.groupPath'),
@@ -109,7 +124,12 @@ export default function CommandsTab() {
           >
             {t('mml.admin.catalog.common.edit')}
           </a>
-          <a onClick={() => handleDelete(cmd)}>{t('mml.admin.catalog.common.delete')}</a>
+          <a
+            onClick={() => handleDelete(cmd)}
+            style={{ color: cmd.catalogProtected ? '#bfbfbf' : undefined, cursor: cmd.catalogProtected ? 'not-allowed' : 'pointer' }}
+          >
+            {t('mml.admin.catalog.common.delete')}
+          </a>
         </Space>
       ),
     },

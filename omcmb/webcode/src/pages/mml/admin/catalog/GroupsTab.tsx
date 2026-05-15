@@ -1,10 +1,11 @@
 import { useMemo, useState, useCallback } from 'react';
-import { Tree, Empty, Spin, Alert, Button, Dropdown, Modal, message, Space, Tag } from 'antd';
+import { Tree, Empty, Spin, Alert, Button, Dropdown, Modal, message, Space, Tag, Tooltip } from 'antd';
 import {
   FolderOutlined,
   CodeOutlined,
   PlusOutlined,
   EllipsisOutlined,
+  LockOutlined,
 } from '@ant-design/icons';
 import type { TreeDataNode, MenuProps } from 'antd';
 import type { Key } from 'react';
@@ -45,11 +46,12 @@ function buildAdminTreeData(
 ): TreeDataNode[] {
   const sorted = [...nodes].sort((a, b) => a.displayOrder - b.displayOrder);
   return sorted.map((g) => {
+    const locked = g.catalogProtected === true;
     const items: MenuProps['items'] = [
       { key: 'addChild', label: t('mml.admin.catalog.groups.addChild') },
-      { key: 'rename', label: t('mml.admin.catalog.groups.rename') },
+      { key: 'rename', label: t('mml.admin.catalog.groups.rename'), disabled: locked },
       { type: 'divider' },
-      { key: 'delete', label: t('mml.admin.catalog.groups.delete'), danger: true },
+      { key: 'delete', label: t('mml.admin.catalog.groups.delete'), danger: true, disabled: locked },
     ];
     return {
       key: `group:${g.id}`,
@@ -57,6 +59,11 @@ function buildAdminTreeData(
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <FolderOutlined />
           <span>{g.displayName}</span>
+          {locked && (
+            <Tooltip title={t('mml.admin.catalog.common.lockedTooltip')}>
+              <LockOutlined style={{ color: '#999' }} />
+            </Tooltip>
+          )}
           <Tag style={{ marginLeft: 2 }}>{g.path}</Tag>
           <Dropdown
             menu={{ items, onClick: ({ key, domEvent }) => { domEvent.stopPropagation(); onAction(key, g); } }}
@@ -103,10 +110,18 @@ export default function GroupsTab() {
 
   const handleAction = useCallback(
     (action: string, g: GroupTreeNode) => {
+      // catalog_protected 锁定 rename/delete（addChild 仍允许）
+      if (g.catalogProtected && (action === 'rename' || action === 'delete')) {
+        message.warning(t('mml.admin.catalog.common.lockedTooltip'));
+        return;
+      }
       const target: GroupTargetForEdit = {
         id: g.id,
         groupCode: g.groupCode,
-        displayNameI18n: { 'zh-CN': g.displayName, 'en-US': g.displayName },
+        displayNameI18n: g.displayNameI18n ?? {
+          'zh-CN': g.displayName,
+          'en-US': g.displayName,
+        },
         displayOrder: g.displayOrder,
       };
       if (action === 'addChild') {

@@ -27,13 +27,21 @@ export interface BackendStatement {
   unknown_codes?: string[];            // lookup 后未命中的 mml_code（FE toast）
 }
 
-/** GET /mml/group-tree 响应的子节点（递归结构）。 */
+/** GET /mml/group-tree 响应的子节点（递归结构）。后端 Go json tag 见 `omcgo/internal/mml/group_tree_repository.go GroupTreeNode`。 */
 export interface BackendGroupTreeNode {
   id: string;
-  group_code: string;
+  /** 后端 json tag = "code"（GroupCode 在 Go struct） */
+  code: string;
+  /** 当前 lang 派生显示名 — "设备信息(LST DEVICE_INFO)" */
+  name: string;
+  /** 完整 i18n map (zh-CN/en-US) */
+  name_i18n?: Record<string, string>;
   path: string;
-  display_name: string;                // "设备信息(LST DEVICE_INFO)" 老 OMC 格式
   display_order: number;
+  /** 'standard' | 'admin' — 来源标记 */
+  source?: string;
+  /** catalog_protected=true 的节点不可由 admin 修改/删除 */
+  catalog_protected?: boolean;
   commands: BackendGroupTreeCommand[];
   children: BackendGroupTreeNode[];
 }
@@ -42,10 +50,15 @@ export interface BackendGroupTreeCommand {
   id: string;
   command_code: string;
   logical_code: string;
+  logical_name?: string;
+  logical_name_i18n?: Record<string, string>;
   operation_type: string;
   display_name: string;
+  rpc_method?: string;
   target_object?: string;
   require_confirm: boolean;
+  source?: string;
+  catalog_protected?: boolean;
 }
 
 /** GET /mml/commands/:id/sub-fields 响应的单条 sub-field。 */
@@ -93,7 +106,12 @@ export interface GroupTreeNode {
   groupCode: string;
   path: string;                        // ltree path "BSC_CONFIGURATION.BASIC_INFO"
   displayName: string;                 // "设备信息(LST DEVICE_INFO)"
+  displayNameI18n?: Record<string, string>;  // 完整 i18n
   displayOrder: number;
+  /** 'standard' | 'admin' — 来源标记，admin UI 用于显示来源 */
+  source?: 'standard' | 'admin' | string;
+  /** catalog_protected=true 时 admin 不可改/删（PRD §7.3 元数据差异化） */
+  catalogProtected?: boolean;
   commands: GroupTreeCommand[];
   children: GroupTreeNode[];
 }
@@ -102,10 +120,16 @@ export interface GroupTreeCommand {
   id: string;
   commandCode: string;
   logicalCode: string;
+  logicalName?: string;
+  logicalNameI18n?: Record<string, string>;
   operationType: MMLOperationType;
   displayName: string;
+  rpcMethod?: string;
   targetObject?: string;
   requireConfirm: boolean;
+  source?: 'standard' | 'admin' | string;
+  /** catalog_protected=true 时 admin 不可改/删（PRD §7.3） */
+  catalogProtected?: boolean;
 }
 
 /**
