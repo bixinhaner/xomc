@@ -1186,6 +1186,7 @@ func (s *DeviceService) CreateDevice(ctx context.Context, req CreateDeviceReques
 		Carrier:      req.Carrier,
 		Technology:   req.Technology,
 		Status:       model.DeviceRegistered,
+		IPAddress:    req.IPAddress,
 		SiteName:     req.SiteName,
 		SiteID:       req.SiteID,
 		Latitude:     req.Latitude,

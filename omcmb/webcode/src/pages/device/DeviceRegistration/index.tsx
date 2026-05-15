@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Alert,
@@ -7,6 +7,7 @@ import {
   Col,
   Form,
   Input,
+  InputNumber,
   Row,
   Select,
   Space,
@@ -23,38 +24,58 @@ import {
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useCreateDevice } from '@core/hooks/api/useDevices';
 import { useT } from '@/hooks/useT';
+import type { CarrierCode, DeviceTechnology, CreateDeviceInput } from '@core/types/device';
 
 const { Title, Text } = Typography;
-const { _TextArea } = Input;
 
-interface BasicInfoFormValues {
-  sn: string;
-  name: string;
-  vendor: string;
-  productType: string;
-  networkType: string;
-  deviceModel: string;
+interface BasicFormValues {
+  serialNumber: string;
+  oui: string;
+  carrier: CarrierCode;
+  technology: DeviceTechnology;
+  manufacturer?: string;
+  productClass?: string;
+  modelName?: string;
 }
 
 interface NetworkFormValues {
-  ipAddress: string;
-  subnet: string;
-  region: string;
-  site: string;
+  ipAddress?: string;
+  siteName?: string;
+  siteId?: string;
   latitude?: number;
   longitude?: number;
 }
 
 type Step = 'basic' | 'network' | 'confirm';
 
+const CARRIER_OPTIONS: { label: string; value: CarrierCode }[] = [
+  { label: '中国移动 (cmcc)', value: 'cmcc' },
+  { label: '中国电信 (ctcc)', value: 'ctcc' },
+  { label: '中国联通 (cucc)', value: 'cucc' },
+];
+
+const TECHNOLOGY_OPTIONS: { label: string; value: DeviceTechnology }[] = [
+  { label: 'LTE (4G)', value: 'lte' },
+  { label: 'NR (5G)', value: 'nr' },
+];
+
+// productClass 是 ProductRegistry 路由 key（CPE 通过 TR-069 Inform 上报真实值后会覆盖此处占位）。
+// 这里给的几个粗分类供运维预登记时选一个，CPE 上线后自动更新。
+const PRODUCT_CLASS_OPTIONS = [
+  { label: 'eNB (LTE 基站)', value: 'eNB' },
+  { label: 'gNB (5G 基站)', value: 'gNB' },
+  { label: 'CPE', value: 'CPE' },
+  { label: 'eGW', value: 'eGW' },
+];
+
 export default function DeviceRegistration() {
   const t = useT();
   const navigate = useNavigate();
   const createDevice = useCreateDevice();
   const [currentStep, setCurrentStep] = useState(0);
-  const [basicForm] = Form.useForm<BasicInfoFormValues>();
+  const [basicForm] = Form.useForm<BasicFormValues>();
   const [networkForm] = Form.useForm<NetworkFormValues>();
-  const [basicData, setBasicData] = useState<BasicInfoFormValues | null>(null);
+  const [basicData, setBasicData] = useState<BasicFormValues | null>(null);
   const [networkData, setNetworkData] = useState<NetworkFormValues | null>(null);
   const [submitted, setSubmitted] = useState(false);
 
@@ -70,7 +91,7 @@ export default function DeviceRegistration() {
       setBasicData(values);
       setCurrentStep(1);
     } catch {
-      // validation error handled by form
+      // validation error shown by form
     }
   }, [basicForm]);
 
@@ -80,23 +101,24 @@ export default function DeviceRegistration() {
       setNetworkData(values);
       setCurrentStep(2);
     } catch {
-      // validation error handled by form
+      // validation error shown by form
     }
   }, [networkForm]);
 
   const handleSubmit = useCallback(async () => {
     if (!basicData || !networkData) return;
+    const input: CreateDeviceInput = {
+      ...basicData,
+      ...networkData,
+    };
     try {
-      await createDevice.mutateAsync({
-        ...basicData,
-        ...networkData,
-        longitude: Number(networkData.longitude ?? 0),
-        latitude: Number(networkData.latitude ?? 0),
-      } as Parameters<typeof createDevice.mutateAsync>[0]);
+      await createDevice.mutateAsync(input);
       setSubmitted(true);
       void message.success(t('status.success'));
-    } catch {
-      void message.error(t('status.failed'));
+    } catch (err: unknown) {
+      // 把后端 BizCode/Message 显式露给用户，否则只能看到通用 failed
+      const msg = err instanceof Error ? err.message : t('status.failed');
+      void message.error(msg);
     }
   }, [basicData, networkData, createDevice, t]);
 
@@ -105,84 +127,68 @@ export default function DeviceRegistration() {
       <Row gutter={24}>
         <Col span={12}>
           <Form.Item
-            name="sn"
+            name="serialNumber"
             label={t('device.sn')}
             rules={[
               { required: true, message: t('common.placeholder') },
               { pattern: /^[A-Za-z0-9-_]+$/, message: 'SN: A-Z, 0-9, -, _' },
             ]}
           >
-            <Input placeholder={t('common.placeholder')} style={{ fontFamily: 'monospace' }} />
+            <Input placeholder="例如 BCL2024001234" style={{ fontFamily: 'monospace' }} />
           </Form.Item>
         </Col>
         <Col span={12}>
           <Form.Item
-            name="name"
-            label={t('device.name')}
-            rules={[{ required: true, message: t('common.placeholder') }]}
+            name="oui"
+            label={t('device.oui')}
+            tooltip={t('device.ouiHint')}
+            rules={[
+              { required: true, message: t('common.placeholder') },
+              { pattern: /^[0-9A-Fa-f]{6}$/, message: 'OUI: 6-hex (e.g. 48575A)' },
+            ]}
           >
-            <Input placeholder={t('common.placeholder')} />
+            <Input placeholder="48575A" maxLength={6} style={{ fontFamily: 'monospace', textTransform: 'uppercase' }} />
           </Form.Item>
         </Col>
         <Col span={12}>
           <Form.Item
-            name="vendor"
-            label={t('device.vendor')}
+            name="carrier"
+            label={t('device.carrier')}
             rules={[{ required: true, message: t('common.pleaseSelect') }]}
           >
-            <Select
-              placeholder={t('common.pleaseSelect')}
-              options={[
-                { label: '华为', value: '华为' },
-                { label: '中兴', value: '中兴' },
-                { label: '爱立信', value: '爱立信' },
-                { label: '大唐', value: '大唐' },
-                { label: '京信', value: '京信' },
-              ]}
-            />
+            <Select placeholder={t('common.pleaseSelect')} options={CARRIER_OPTIONS} />
           </Form.Item>
         </Col>
         <Col span={12}>
           <Form.Item
-            name="productType"
-            label={t('device.productType')}
-            rules={[{ required: true, message: t('common.pleaseSelect') }]}
-          >
-            <Select
-              placeholder={t('common.pleaseSelect')}
-              options={[
-                { label: 'eNB (LTE)', value: 'eNB' },
-                { label: 'gNB (5G)', value: 'gNB' },
-                { label: 'CPE', value: 'CPE' },
-                { label: 'eGW', value: 'eGW' },
-              ]}
-            />
-          </Form.Item>
-        </Col>
-        <Col span={12}>
-          <Form.Item
-            name="networkType"
+            name="technology"
             label={t('device.networkType')}
             rules={[{ required: true, message: t('common.pleaseSelect') }]}
           >
-            <Select
-              placeholder={t('common.pleaseSelect')}
-              options={[
-                { label: 'LTE-FDD', value: 'LTE-FDD' },
-                { label: 'LTE-TDD', value: 'LTE-TDD' },
-                { label: 'NR (5G)', value: 'NR' },
-                { label: 'NB-IoT', value: 'NB-IoT' },
-              ]}
-            />
+            <Select placeholder={t('common.pleaseSelect')} options={TECHNOLOGY_OPTIONS} />
+          </Form.Item>
+        </Col>
+        <Col span={12}>
+          <Form.Item name="manufacturer" label={t('device.vendor')}>
+            <Input placeholder="Baicells" />
           </Form.Item>
         </Col>
         <Col span={12}>
           <Form.Item
-            name="deviceModel"
-            label={t('device.model')}
-            rules={[{ required: true, message: t('common.placeholder') }]}
+            name="productClass"
+            label={t('device.productType')}
+            tooltip={t('device.productClassHint')}
           >
-            <Input placeholder="BBU3910, AAU5613" />
+            <Select
+              placeholder={t('common.pleaseSelect')}
+              options={PRODUCT_CLASS_OPTIONS}
+              allowClear
+            />
+          </Form.Item>
+        </Col>
+        <Col span={12}>
+          <Form.Item name="modelName" label={t('device.model')}>
+            <Input placeholder="BBU3910 / AAU5613" />
           </Form.Item>
         </Col>
       </Row>
@@ -191,67 +197,57 @@ export default function DeviceRegistration() {
 
   const renderNetworkStep = () => (
     <Form form={networkForm} layout="vertical" size="middle">
+      <Alert
+        type="info"
+        showIcon
+        message={t('device.networkStepHint')}
+        style={{ marginBottom: 16 }}
+      />
       <Row gutter={24}>
         <Col span={12}>
           <Form.Item
             name="ipAddress"
             label={t('device.ipAddress')}
             rules={[
-              { required: true, message: t('common.placeholder') },
-              {
-                pattern: /^(\d{1,3}\.){3}\d{1,3}$/,
-                message: 'IP',
-              },
+              { pattern: /^(\d{1,3}\.){3}\d{1,3}$/, message: 'IPv4 dotted quad' },
             ]}
           >
             <Input placeholder="192.168.1.100" style={{ fontFamily: 'monospace' }} />
           </Form.Item>
         </Col>
         <Col span={12}>
-          <Form.Item
-            name="subnet"
-            label={t('table.description')}
-            rules={[{ required: true, message: t('common.placeholder') }]}
-          >
-            <Input placeholder="192.168.1.0/24" style={{ fontFamily: 'monospace' }} />
-          </Form.Item>
-        </Col>
-        <Col span={12}>
-          <Form.Item
-            name="region"
-            label={t('device.region')}
-            rules={[{ required: true, message: t('common.pleaseSelect') }]}
-          >
-            <Select
-              placeholder={t('common.pleaseSelect')}
-              options={[
-                { label: '华北区', value: '华北区' },
-                { label: '华东区', value: '华东区' },
-                { label: '华南区', value: '华南区' },
-                { label: '西南区', value: '西南区' },
-                { label: '西北区', value: '西北区' },
-                { label: '东北区', value: '东北区' },
-              ]}
-            />
-          </Form.Item>
-        </Col>
-        <Col span={12}>
-          <Form.Item
-            name="site"
-            label={t('table.site')}
-            rules={[{ required: true, message: t('common.placeholder') }]}
-          >
+          <Form.Item name="siteName" label={t('table.site')}>
             <Input placeholder={t('common.placeholder')} />
           </Form.Item>
         </Col>
         <Col span={12}>
-          <Form.Item name="latitude" label={t('alarm.location')}>
-            <Input placeholder="39.9042" type="number" />
+          <Form.Item name="siteId" label={t('device.siteId')}>
+            <Input placeholder="SITE-001" />
           </Form.Item>
         </Col>
         <Col span={12}>
-          <Form.Item name="longitude" label={t('alarm.location')}>
-            <Input placeholder="116.4074" type="number" />
+          {/* placeholder spacer to align grid */}
+        </Col>
+        <Col span={12}>
+          <Form.Item name="latitude" label={t('device.latitude')}>
+            <InputNumber
+              placeholder="39.9042"
+              style={{ width: '100%' }}
+              min={-90}
+              max={90}
+              step={0.0001}
+            />
+          </Form.Item>
+        </Col>
+        <Col span={12}>
+          <Form.Item name="longitude" label={t('device.longitude')}>
+            <InputNumber
+              placeholder="116.4074"
+              style={{ width: '100%' }}
+              min={-180}
+              max={180}
+              step={0.0001}
+            />
           </Form.Item>
         </Col>
       </Row>
@@ -272,12 +268,13 @@ export default function DeviceRegistration() {
             <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
               <tbody>
                 {[
-                  { label: t('device.sn'), value: basicData?.sn },
-                  { label: t('device.name'), value: basicData?.name },
-                  { label: t('device.vendor'), value: basicData?.vendor },
-                  { label: t('device.productType'), value: basicData?.productType },
-                  { label: t('device.networkType'), value: basicData?.networkType },
-                  { label: t('device.model'), value: basicData?.deviceModel },
+                  { label: t('device.sn'), value: basicData?.serialNumber },
+                  { label: t('device.oui'), value: basicData?.oui?.toUpperCase() },
+                  { label: t('device.carrier'), value: basicData?.carrier },
+                  { label: t('device.networkType'), value: basicData?.technology },
+                  { label: t('device.vendor'), value: basicData?.manufacturer || '-' },
+                  { label: t('device.productType'), value: basicData?.productClass || '-' },
+                  { label: t('device.model'), value: basicData?.modelName || '-' },
                 ].map(({ label, value }) => (
                   <tr key={label} style={{ borderBottom: '1px solid #f0f0f0' }}>
                     <td style={{ padding: '8px 0', color: '#8c8c8c', width: '40%' }}>{label}</td>
@@ -293,12 +290,11 @@ export default function DeviceRegistration() {
             <table style={{ width: '100%', fontSize: 14, borderCollapse: 'collapse' }}>
               <tbody>
                 {[
-                  { label: t('device.ipAddress'), value: networkData?.ipAddress },
-                  { label: t('table.description'), value: networkData?.subnet },
-                  { label: t('device.region'), value: networkData?.region },
-                  { label: t('table.site'), value: networkData?.site },
-                  { label: 'Lat', value: networkData?.latitude ?? '-' },
-                  { label: 'Lng', value: networkData?.longitude ?? '-' },
+                  { label: t('device.ipAddress'), value: networkData?.ipAddress || '-' },
+                  { label: t('table.site'), value: networkData?.siteName || '-' },
+                  { label: t('device.siteId'), value: networkData?.siteId || '-' },
+                  { label: t('device.latitude'), value: networkData?.latitude ?? '-' },
+                  { label: t('device.longitude'), value: networkData?.longitude ?? '-' },
                 ].map(({ label, value }) => (
                   <tr key={label} style={{ borderBottom: '1px solid #f0f0f0' }}>
                     <td style={{ padding: '8px 0', color: '#8c8c8c', width: '40%' }}>{label}</td>
@@ -320,12 +316,12 @@ export default function DeviceRegistration() {
         {t('status.success')}
       </Title>
       <Text type="secondary" style={{ display: 'block', marginBottom: 24 }}>
-        {basicData?.sn}
+        {basicData?.serialNumber}
       </Text>
       <Space size={12}>
         <Button
           type="primary"
-          onClick={() => void navigate(`/device/detail/${basicData?.sn ?? ''}`)}
+          onClick={() => void navigate(`/device/detail/${basicData?.serialNumber ?? ''}`)}
         >
           {t('common.view')}
         </Button>

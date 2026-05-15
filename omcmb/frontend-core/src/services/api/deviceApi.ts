@@ -1,5 +1,5 @@
 import http from '../http';
-import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter } from '../../types/device';
+import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter, CreateDeviceInput } from '../../types/device';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 
 // Backend device model from Go struct
@@ -360,22 +360,23 @@ export const deviceApi = {
     return result.items.length > 0 ? result.items[0] : null;
   },
 
-  async create(data: Omit<Device, 'id' | 'createTime'>): Promise<Device> {
+  async create(input: CreateDeviceInput): Promise<Device> {
+    // payload 字段名严格对齐后端 device.CreateDeviceRequest（device_handler.go）。
+    // 后端 binding:"required,oneof=cmcc ctcc cucc"/oneof=lte nr，前端 dropdown 提交
+    // 同一组枚举值，非法值会被 422 拦在 BE。
     const payload: Record<string, unknown> = {
-      serial_number: data.sn,
-      oui: '',
-      product_class: data.productType,
-      manufacturer: data.vendor,
-      model_name: data.deviceModel,
-      carrier: '',
-      technology: data.networkType,
-      status: data.connStatus === 'online' ? 'active' : 'offline',
-      firmware_version: data.softwareVersion,
-      ip_address: data.ipAddress,
-      site_name: data.site || data.name,
-      site_id: data.stationId,
-      latitude: data.latitude,
-      longitude: data.longitude,
+      serial_number: input.serialNumber,
+      oui: input.oui,
+      carrier: input.carrier,
+      technology: input.technology,
+      product_class: input.productClass || undefined,
+      manufacturer: input.manufacturer || undefined,
+      model_name: input.modelName || undefined,
+      ip_address: input.ipAddress || undefined,
+      site_name: input.siteName || undefined,
+      site_id: input.siteId || undefined,
+      latitude: input.latitude,
+      longitude: input.longitude,
     };
     const { data: created } = await http.post<BackendDevice>('/devices', payload);
     return mapBackendDevice(created);
