@@ -292,9 +292,9 @@ func writeMessageXML(buf *bytes.Buffer, m *Message, payload string, index int) {
 		cwmpID = "-"
 	}
 	// 方向标签靠人眼易识别
-	dirLabel := "CPE→ACS"
+	dirLabel := "Device→ACS"
 	if m.Direction == DirectionOut {
-		dirLabel = "ACS→CPE"
+		dirLabel = "ACS→Device"
 	}
 	buf.WriteString("\n")
 	buf.WriteString("<!-- ──────────────────────────────────────────────────────────────────────── -->\n")
