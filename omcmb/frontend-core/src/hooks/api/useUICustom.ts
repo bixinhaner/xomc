@@ -4,15 +4,15 @@ import { adminApi } from '../../services/api/adminApi';
 import type { SysConfigItem } from '../../types/system';
 
 /**
- * UI 定制化运行时值：登录背景图、Logo、产品名。
+ * UI 定制化运行时值：登录背景图、Logo。
  *
- * 与后端 sys_configs (category='ui_custom') 4 个 key 一一对应；
+ * 与后端 sys_configs (category='ui_custom') 的 key 一一对应；
  * seed 默认值（migrations/seed/000065_seed_ui_custom.sql）保证字段始终非空。
  *
+ * 产品名称（OMC名称）由「系统配置 > 基本设置」统一维护，不在此处。
  * 主题色不在此处管理 — 全局只用 Header 右上角两主题切换（tech ↔ fresh）。
  */
 export interface UICustomSettings {
-  omcName: string;
   loginBackground: string;
   menuLogoUp: string;
   menuLogoDown: string;
@@ -21,7 +21,6 @@ export interface UICustomSettings {
 // 默认值（与 omcmb/webcode/src/pages/system/SystemConfig/uiCustomConstants.ts
 // 的 UI_CUSTOM_DEFAULTS 保持一致；后端 seed 失败 / 网络异常时兜底使用）。
 export const UI_CUSTOM_DEFAULTS: UICustomSettings = {
-  omcName: 'BaiOMC',
   loginBackground: './images/login/login_bg.png',
   menuLogoUp: './images/login/nav_logo_collapse.png',
   menuLogoDown: './images/login/logo_big.png',
@@ -61,7 +60,6 @@ export function usePublicUICustom(enabled = true): { settings: UICustomSettings 
       return v && v.trim() !== '' ? v : fallback;
     };
     return {
-      omcName: nonEmpty('ui_omc_name', UI_CUSTOM_DEFAULTS.omcName),
       loginBackground: nonEmpty('ui_login_background', UI_CUSTOM_DEFAULTS.loginBackground),
       menuLogoUp: nonEmpty('ui_menu_logo_up', UI_CUSTOM_DEFAULTS.menuLogoUp),
       menuLogoDown: nonEmpty('ui_menu_logo_down', UI_CUSTOM_DEFAULTS.menuLogoDown),

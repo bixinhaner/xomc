@@ -76,18 +76,6 @@ export default function UICustomSettings({
       size="small"
       initialValues={initialValues ?? UI_CUSTOM_DEFAULTS}
     >
-      <Row gutter={24}>
-        <Col span={24}>
-          <Form.Item
-            name="ui_omc_name"
-            label={t('system.ui.omcName')}
-            rules={[{ required: true, message: t('system.ui.pleaseInputOmcName') }]}
-          >
-            <Input placeholder={t('system.ui.pleaseInputSystemName')} maxLength={32} />
-          </Form.Item>
-        </Col>
-      </Row>
-
       <Divider orientation="left" plain>
         {t('system.ui.imageUpload')}
       </Divider>
