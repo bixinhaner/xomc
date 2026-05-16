@@ -66,6 +66,11 @@ type Task struct {
 	SourceID     string `json:"source_id,omitempty"`
 	CommandIndex int    `json:"command_index"` // MML 扇出时在 commands[] 中的索引
 	DeviceIndex  int    `json:"device_index"`  // MML 扇出时在 device_sns[] 中的索引
+
+	// 路径翻译元数据（Stage 1 — fanout 入队前 standardPath → privatePath 翻译）
+	// 仅 MML fanout 阶段写入；其它来源任务保持默认 false / 0。
+	HasPathTranslationMiss   bool `json:"has_path_translation_miss"`   // 任意 path 未命中 → 用 standardPath 兜底
+	PathTranslationMissCount int  `json:"path_translation_miss_count"` // 未命中的 path 数量
 }
 
 // CreateTaskRequest 创建任务请求
@@ -87,6 +92,10 @@ type CreateTaskRequest struct {
 	SourceID     string `json:"source_id"`
 	CommandIndex int    `json:"command_index"`
 	DeviceIndex  int    `json:"device_index"`
+
+	// 路径翻译元数据（MML fanout 阶段写入；详见 Task.HasPathTranslationMiss 注释）
+	HasPathTranslationMiss   bool `json:"has_path_translation_miss"`
+	PathTranslationMissCount int  `json:"path_translation_miss_count"`
 }
 
 // TaskHistoryOptions 任务历史查询选项
@@ -122,9 +131,11 @@ func NewTask(req *CreateTaskRequest) *Task {
 		Source:       TaskSourceAPI,
 		CreatorID:    req.CreatorID,
 		Description:  req.Description,
-		SourceID:     req.SourceID,
-		CommandIndex: req.CommandIndex,
-		DeviceIndex:  req.DeviceIndex,
+		SourceID:                 req.SourceID,
+		CommandIndex:             req.CommandIndex,
+		DeviceIndex:              req.DeviceIndex,
+		HasPathTranslationMiss:   req.HasPathTranslationMiss,
+		PathTranslationMissCount: req.PathTranslationMissCount,
 	}
 
 	// 设置默认值

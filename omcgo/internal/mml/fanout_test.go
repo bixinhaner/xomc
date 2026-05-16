@@ -24,7 +24,7 @@ import (
 
 func TestFanouter_BuildDeviceTaskRequests_GetParameterValues_TR069Shape(t *testing.T) {
 	stub := &stubDeviceTaskCreator{}
-	f := NewFanouter(stub, zap.NewNop())
+	f := NewFanouter(stub, nil, nil, nil, zap.NewNop())
 
 	// 模拟 service 已经把 param_refs 挂到 entry 上
 	mmlTask := &MMLTask{
@@ -78,7 +78,7 @@ func TestFanouter_BuildDeviceTaskRequests_GetParameterValues_TR069Shape(t *testi
 
 func TestFanouter_BuildDeviceTaskRequests_SetParameterValues(t *testing.T) {
 	stub := &stubDeviceTaskCreator{}
-	f := NewFanouter(stub, zap.NewNop())
+	f := NewFanouter(stub, nil, nil, nil, zap.NewNop())
 
 	mmlTask := &MMLTask{
 		ID:        uuid.New(),
@@ -119,7 +119,7 @@ func TestFanouter_BuildDeviceTaskRequests_SetParameterValues(t *testing.T) {
 
 func TestFanouter_BuildDeviceTaskRequests_NoParamRefs_GetSkipped(t *testing.T) {
 	stub := &stubDeviceTaskCreator{}
-	f := NewFanouter(stub, zap.NewNop())
+	f := NewFanouter(stub, nil, nil, nil, zap.NewNop())
 
 	mmlTask := &MMLTask{
 		ID:        uuid.New(),

@@ -473,8 +473,18 @@ func initMiscModules(c *Container) error {
 
 	// Wire MML fan-out to device tasks. misc 模块在 router.go 声明 Depends=["task"]，
 	// 保证此处 c.miscDeps.taskSvc 一定已就绪。
+	//
+	// Stage 1 (T-0123 v5)：fanout 阶段 standardPath → privatePath 翻译需要
+	// ProductRegistry / ParamRegistry / DeviceService 三方协作；任一未注入
+	// 则 fanouter 走 fallback（standardPath 直接下发）。生产部署必须三者齐全。
 	if c.miscDeps.taskSvc != nil {
-		fanouter := mml.NewFanouter(c.miscDeps.taskSvc, logger)
+		fanouter := mml.NewFanouter(
+			c.miscDeps.taskSvc,
+			c.ProductRegistry,
+			c.ParamRegistry,
+			c.DeviceService,
+			logger,
+		)
 		// Sprint B Q-V3-3：脚本多行严格序列 — 初次 fanout 仅入队 cmd_idx=0；
 		// Sequencer 通过 completion callback 链式入队后续行。
 		fanouter.SetSequentialMode(true)

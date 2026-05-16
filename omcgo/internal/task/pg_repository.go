@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -41,6 +42,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 			"result", "error_code", "error_message",
 			"source", "creator_id", "description",
 			"source_id", "command_index", "device_index",
+			"has_path_translation_miss", "path_translation_miss_count",
 		).
 		Values(
 			task.ID, task.DeviceSN, task.Method, task.Params, task.Priority,
@@ -49,6 +51,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 			task.Result, task.ErrorCode, task.ErrorMessage,
 			task.Source, task.CreatorID, task.Description,
 			nilUUID(task.SourceID), task.CommandIndex, task.DeviceIndex,
+			task.HasPathTranslationMiss, task.PathTranslationMissCount,
 		).
 		ToSql()
 	if err != nil {
@@ -322,6 +325,7 @@ func (r *PgTaskRepository) BatchCreate(ctx context.Context, tasks []*Task) error
 		"result", "error_code", "error_message",
 		"source", "creator_id", "description",
 		"source_id", "command_index", "device_index",
+		"has_path_translation_miss", "path_translation_miss_count",
 	}
 
 	insertBuilder := storage.Psql.Insert("device_tasks").Columns(columns...)
@@ -334,6 +338,7 @@ func (r *PgTaskRepository) BatchCreate(ctx context.Context, tasks []*Task) error
 			task.Result, task.ErrorCode, task.ErrorMessage,
 			task.Source, task.CreatorID, task.Description,
 			task.SourceID, task.CommandIndex, task.DeviceIndex,
+			task.HasPathTranslationMiss, task.PathTranslationMissCount,
 		)
 	}
 
@@ -412,6 +417,7 @@ func taskColumns() []string {
 		"result", "error_code", "error_message",
 		"source", "creator_id", "description",
 		"source_id", "command_index", "device_index",
+		"has_path_translation_miss", "path_translation_miss_count",
 	}
 }
 
@@ -425,6 +431,9 @@ func (r *PgTaskRepository) scanTask(ctx context.Context, query string, args ...a
 func (r *PgTaskRepository) scanTaskRow(row pgx.Row) (*Task, error) {
 	var task Task
 	var params, result []byte
+	// source_id 列允许 NULL（pre-existing 任务可能没 source_id）；
+	// pgx 直接 Scan NULL 到 *string 会失败，用 NullString 中介。
+	var sourceID sql.NullString
 
 	err := row.Scan(
 		&task.ID, &task.DeviceSN, &task.Method, &params, &task.Priority,
@@ -432,7 +441,8 @@ func (r *PgTaskRepository) scanTaskRow(row pgx.Row) (*Task, error) {
 		&task.CreatedAt, &task.SentAt, &task.CompletedAt, &task.ExpiresAt,
 		&result, &task.ErrorCode, &task.ErrorMessage,
 		&task.Source, &task.CreatorID, &task.Description,
-		&task.SourceID, &task.CommandIndex, &task.DeviceIndex,
+		&sourceID, &task.CommandIndex, &task.DeviceIndex,
+		&task.HasPathTranslationMiss, &task.PathTranslationMissCount,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -446,6 +456,9 @@ func (r *PgTaskRepository) scanTaskRow(row pgx.Row) (*Task, error) {
 	}
 	if len(result) > 0 {
 		task.Result = json.RawMessage(result)
+	}
+	if sourceID.Valid {
+		task.SourceID = sourceID.String
 	}
 
 	return &task, nil

@@ -824,7 +824,7 @@ func TestService_ExecuteCommand_EmptyExecuteType_DefaultsToImmediateAndFansOut(t
 	})
 
 	stub := &stubDeviceTaskCreator{}
-	svc.SetFanouter(NewFanouter(stub, zap.NewNop()))
+	svc.SetFanouter(NewFanouter(stub, nil, nil, nil, zap.NewNop()))
 
 	req := ExecuteRequest{
 		CommandCode: "LST DEVICE_INFO",
@@ -866,7 +866,7 @@ func TestService_ExecuteCommand_RawParamPaths_LST(t *testing.T) {
 	svc := newTestService(cmdRepo, &mockScriptRepo{}, taskRepo)
 
 	stub := &stubDeviceTaskCreator{}
-	svc.SetFanouter(NewFanouter(stub, zap.NewNop()))
+	svc.SetFanouter(NewFanouter(stub, nil, nil, nil, zap.NewNop()))
 
 	req := ExecuteRequest{
 		// CommandCode 故意留空
@@ -914,7 +914,7 @@ func TestService_ExecuteCommand_RawParamPaths_DSP_DefaultsToLST(t *testing.T) {
 	}
 	svc := newTestService(cmdRepo, &mockScriptRepo{}, taskRepo)
 	stub := &stubDeviceTaskCreator{}
-	svc.SetFanouter(NewFanouter(stub, zap.NewNop()))
+	svc.SetFanouter(NewFanouter(stub, nil, nil, nil, zap.NewNop()))
 
 	req := ExecuteRequest{
 		DeviceSNs:  []string{"SN-A"},
@@ -937,7 +937,7 @@ func TestService_ExecuteCommand_RawParamPaths_MOD(t *testing.T) {
 	}
 	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
 	stub := &stubDeviceTaskCreator{}
-	svc.SetFanouter(NewFanouter(stub, zap.NewNop()))
+	svc.SetFanouter(NewFanouter(stub, nil, nil, nil, zap.NewNop()))
 
 	req := ExecuteRequest{
 		DeviceSNs:     []string{"SN-A"},
@@ -993,7 +993,7 @@ func TestService_ExecuteCommand_RawParamPaths_ADD(t *testing.T) {
 	}
 	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
 	stub := &stubDeviceTaskCreator{}
-	svc.SetFanouter(NewFanouter(stub, zap.NewNop()))
+	svc.SetFanouter(NewFanouter(stub, nil, nil, nil, zap.NewNop()))
 
 	req := ExecuteRequest{
 		DeviceSNs:     []string{"SN-A"},
@@ -1051,7 +1051,7 @@ func TestService_ExecuteCommand_RawParamPaths_RMV(t *testing.T) {
 	}
 	svc := newTestService(&mockCommandRepo{}, &mockScriptRepo{}, taskRepo)
 	stub := &stubDeviceTaskCreator{}
-	svc.SetFanouter(NewFanouter(stub, zap.NewNop()))
+	svc.SetFanouter(NewFanouter(stub, nil, nil, nil, zap.NewNop()))
 
 	req := ExecuteRequest{
 		DeviceSNs:     []string{"SN-A"},

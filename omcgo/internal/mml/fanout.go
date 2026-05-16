@@ -3,10 +3,15 @@ package mml
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/config/parammodel"
+	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/task"
 )
 
@@ -16,22 +21,77 @@ type DeviceTaskCreator interface {
 	BatchCreateTasks(ctx context.Context, reqs []*task.CreateTaskRequest) ([]*task.Task, error)
 }
 
+// ProductMatcher routes a productClass string to a product (with ParamModelID).
+//
+// Implemented by *product.Registry. Defined here (consumer-side) to keep mml
+// from a hard dependency on the concrete Registry constructor.
+type ProductMatcher interface {
+	MatchProductClass(ctx context.Context, productClass string) (*product.MatchResult, error)
+}
+
+// ParamModelTranslatorFactory builds a Translator for (productID, swVersion).
+//
+// Implemented by *parammodel.Registry (its ``Translator`` method) — the
+// per-(product, sw) MappingSet is fetched & cached internally.
+type ParamModelTranslatorFactory interface {
+	Translator(ctx context.Context, productID uuid.UUID, swVersion string) (*parammodel.Translator, error)
+}
+
+// DeviceLookup resolves a device serial number to its routing metadata.
+//
+// Only ProductClass + FirmwareVersion are consumed by fanout; passing the
+// full Device is convenient since callers (device.DeviceService) already
+// have it cached.
+type DeviceLookup interface {
+	GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error)
+}
+
 // Fanouter fans out an MML task into individual device_tasks.
 //
 // Sprint B Q-V3-3：sequentialMode=true 时，初次 fanout 仅入队
 // **每个设备的 command_index=0** device_task；后续命令由 Sequencer
 // 在前一行完成回调中追加入队，实现严格序列。
+//
+// Stage 1 (T-0123 v5): MML 命令的 sub_fields 自 migration 000113 起改挂
+// standard_params（系统级标准 path 字典）。fanout 阶段需把 standardPath
+// 翻译为 device 对应的 privatePath 后再入 device_tasks.params；翻译路径：
+//
+//   device.SerialNumber → DeviceLookup.GetBySerialNumber → Device.ProductClass
+//   → ProductMatcher.MatchProductClass → Product.ParamModelID
+//   → ParamModelTranslatorFactory.Translator(productID, swVersion)
+//   → Translator.ToPrivate(standardPath)
+//
+// 任何一步失败（设备未注册 / product 未匹配 / mapping 不存在 / path 未命中）
+// 都 fallback：用 standardPath 直接当 privatePath 下发，并在 device_task 上
+// 标记 has_path_translation_miss=true + path_translation_miss_count，前端
+// 任务详情页据此显示"路径翻译警告"标签（用户决策 Q1 选项 B）。
 type Fanouter struct {
-	taskCreator    DeviceTaskCreator
-	sequentialMode bool
-	logger         *zap.Logger
+	taskCreator       DeviceTaskCreator
+	productMatcher    ProductMatcher              // 可空 → 所有路径走 fallback
+	translatorFactory ParamModelTranslatorFactory // 可空 → 所有路径走 fallback
+	deviceLookup      DeviceLookup                // 可空 → 所有路径走 fallback
+	sequentialMode    bool
+	logger            *zap.Logger
 }
 
 // NewFanouter creates a new Fanouter.
-func NewFanouter(taskCreator DeviceTaskCreator, logger *zap.Logger) *Fanouter {
+//
+// productMatcher / translatorFactory / deviceLookup 任一为 nil 时，fanout
+// 跳过 standardPath ↔ privatePath 翻译，原 standardPath 直接下发；适合早期
+// 集成 / 测试场景。生产部署必须三者齐全。
+func NewFanouter(
+	taskCreator DeviceTaskCreator,
+	productMatcher ProductMatcher,
+	translatorFactory ParamModelTranslatorFactory,
+	deviceLookup DeviceLookup,
+	logger *zap.Logger,
+) *Fanouter {
 	return &Fanouter{
-		taskCreator: taskCreator,
-		logger:      logger.Named("mml-fanout"),
+		taskCreator:       taskCreator,
+		productMatcher:    productMatcher,
+		translatorFactory: translatorFactory,
+		deviceLookup:      deviceLookup,
+		logger:            logger.Named("mml-fanout"),
 	}
 }
 
@@ -47,7 +107,7 @@ func (f *Fanouter) Fanout(ctx context.Context, mmlTask *MMLTask) (int, error) {
 		return 0, nil
 	}
 
-	reqs := f.buildDeviceTaskRequests(mmlTask)
+	reqs := f.buildDeviceTaskRequests(ctx, mmlTask)
 	if len(reqs) == 0 {
 		return 0, nil
 	}
@@ -84,14 +144,17 @@ func (f *Fanouter) Fanout(ctx context.Context, mmlTask *MMLTask) (int, error) {
 	return len(created), nil
 }
 
-// buildDeviceTaskRequests converts an MML task into individual device task creation requests.
+// buildDeviceTaskRequests converts an MML task into per-device CreateTaskRequest.
 //
-// 每条 command 经 BuildTR069Params 翻译为 TR-069 wire 格式（{"names":[...]} /
-// {"values":[...]} 等），写入 device_tasks.params。翻译失败的 command 会被跳过
-// 并打 Warn 日志（payload 不合规会让 ACS 在 BuildRequest 阶段就报错，不如这里
-// 直接拒绝下发）。每条成功翻译的 command 还会打 Info 级 schema 摘要，方便排查
-// "device_tasks 下发了什么形态的报文"。
-func (f *Fanouter) buildDeviceTaskRequests(mmlTask *MMLTask) []*task.CreateTaskRequest {
+// 与早期版本相比，本函数已变为 **per-device** 渲染（先按设备解析 Translator，
+// 再为该设备单独构造 TR-069 params）。原因：mml_command_sub_fields 自
+// migration 000113 起携带 standardPath；fanout 阶段必须按 device 把
+// standardPath → privatePath 翻译后再入 device_tasks，否则 CPE 收到的将是
+// IETF 标准 path 而非厂商私有 path，参数操作会返回 Fault 9005。
+//
+// Translator 解析任一阶段失败均不阻塞下发：fallback 用 standardPath 兜底，
+// device_task 打 miss 标记，前端任务详情可见警告（用户决策 Q1=B）。
+func (f *Fanouter) buildDeviceTaskRequests(ctx context.Context, mmlTask *MMLTask) []*task.CreateTaskRequest {
 	var reqs []*task.CreateTaskRequest
 	parentID := mmlTask.ID.String()
 
@@ -111,44 +174,48 @@ func (f *Fanouter) buildDeviceTaskRequests(mmlTask *MMLTask) []*task.CreateTaskR
 		operationType, _ := cmd["operation_type"].(string)
 		commandCode, _ := cmd["command_code"].(string)
 
-		params, err := BuildTR069Params(rpcMethod, paramRefs, formValues, operationType)
-		if err != nil {
-			f.logger.Warn("build tr069 params failed, skip command",
-				zap.String("mml_task_id", parentID),
-				zap.Int("cmd_idx", cmdIdx),
-				zap.String("command_code", commandCode),
-				zap.String("rpc_method", rpcMethod),
-				zap.String("operation_type", operationType),
-				zap.Int("param_refs_count", len(paramRefs)),
-				zap.Int("form_values_count", len(formValues)),
-				zap.Error(err),
-			)
-			continue
-		}
-
-		summary := SummarizeSchema(params)
-		f.logger.Info("device_task params built",
-			zap.String("mml_task_id", parentID),
-			zap.Int("cmd_idx", cmdIdx),
-			zap.String("command_code", commandCode),
-			zap.String("rpc_method", rpcMethod),
-			zap.String("operation_type", operationType),
-			zap.Int("payload_size", summary.PayloadSize),
-			zap.Bool("has_names", summary.HasNames),
-			zap.Int("names_count", summary.NamesCount),
-			zap.Bool("has_values", summary.HasValues),
-			zap.Int("values_count", summary.ValuesCount),
-			zap.Bool("has_object_name", summary.HasObjectName),
-			zap.Bool("has_attributes", summary.HasAttributes),
-			zap.Bool("has_path", summary.HasPath),
-		)
-
 		description := fmt.Sprintf("MML %s", commandCode)
 		if mmlTask.TaskName != "" {
 			description = fmt.Sprintf("MML %s: %s", commandCode, mmlTask.TaskName)
 		}
 
 		for devIdx, sn := range mmlTask.DeviceSNs {
+			translated, missCount, translator := f.translateParamRefs(ctx, sn, paramRefs)
+
+			params, err := BuildTR069Params(rpcMethod, translated, formValues, operationType)
+			if err != nil {
+				f.logger.Warn("build tr069 params failed, skip device",
+					zap.String("mml_task_id", parentID),
+					zap.Int("cmd_idx", cmdIdx),
+					zap.String("device_sn", sn),
+					zap.String("command_code", commandCode),
+					zap.String("rpc_method", rpcMethod),
+					zap.String("operation_type", operationType),
+					zap.Int("param_refs_count", len(translated)),
+					zap.Int("form_values_count", len(formValues)),
+					zap.Error(err),
+				)
+				continue
+			}
+
+			if devIdx == 0 {
+				// 一条 command 打一次 schema 摘要日志（per-cmd 而非 per-device）。
+				summary := SummarizeSchema(params)
+				f.logger.Info("device_task params built",
+					zap.String("mml_task_id", parentID),
+					zap.Int("cmd_idx", cmdIdx),
+					zap.String("command_code", commandCode),
+					zap.String("rpc_method", rpcMethod),
+					zap.String("operation_type", operationType),
+					zap.String("translator_source", translatorSourceLabel(translator)),
+					zap.Int("payload_size", summary.PayloadSize),
+					zap.Bool("has_names", summary.HasNames),
+					zap.Int("names_count", summary.NamesCount),
+					zap.Bool("has_values", summary.HasValues),
+					zap.Int("values_count", summary.ValuesCount),
+				)
+			}
+
 			reqs = append(reqs, &task.CreateTaskRequest{
 				DeviceSN:    sn,
 				Method:      rpcMethod,
@@ -161,6 +228,9 @@ func (f *Fanouter) buildDeviceTaskRequests(mmlTask *MMLTask) []*task.CreateTaskR
 				SourceID:     parentID,
 				CommandIndex: cmdIdx,
 				DeviceIndex:  devIdx,
+
+				HasPathTranslationMiss:   missCount > 0,
+				PathTranslationMissCount: missCount,
 			})
 		}
 	}
@@ -168,25 +238,111 @@ func (f *Fanouter) buildDeviceTaskRequests(mmlTask *MMLTask) []*task.CreateTaskR
 	return reqs
 }
 
+// translateParamRefs 把 standardPath 形态的 paramRefs 翻译为 device 对应的
+// privatePath 形态。返回 (翻译后副本, missCount, 使用的 translator)。
+//
+// 任一步骤失败（设备查询、product 匹配、mapping 构造）都退化为：直接返回
+// 原 paramRefs + missCount=len(paramRefs)（全部用 standardPath 兜底）。
+// Translator 命中失败的单条 path 同样累入 missCount。
+//
+// 当 fanouter 的依赖未注入（早期集成 / 测试场景）时，跳过翻译，原样返回
+// 且 missCount=0（视为"无需翻译"，与生产 fallback 区分由日志注解）。
+func (f *Fanouter) translateParamRefs(
+	ctx context.Context, sn string, refs []MMLParamRef,
+) ([]MMLParamRef, int, *parammodel.Translator) {
+	if len(refs) == 0 || f.productMatcher == nil || f.translatorFactory == nil || f.deviceLookup == nil {
+		return refs, 0, nil
+	}
+
+	device, err := f.deviceLookup.GetBySerialNumber(ctx, sn)
+	if err != nil || device == nil {
+		f.logger.Warn("path translation fallback: device lookup failed",
+			zap.String("device_sn", sn),
+			zap.Error(err),
+		)
+		return refs, len(refs), nil
+	}
+
+	matchRes, err := f.productMatcher.MatchProductClass(ctx, device.ProductClass)
+	if err != nil || matchRes == nil || matchRes.Product == nil || matchRes.Product.ParamModelID == nil {
+		f.logger.Warn("path translation fallback: product/param_model unresolved",
+			zap.String("device_sn", sn),
+			zap.String("product_class", device.ProductClass),
+			zap.Error(err),
+		)
+		return refs, len(refs), nil
+	}
+
+	translator, err := f.translatorFactory.Translator(ctx, *matchRes.Product.ParamModelID, device.FirmwareVersion)
+	if err != nil || translator == nil {
+		// ErrNoMapping 是合法业务态（无 discovered 也无 default），不算错误。
+		if !errors.Is(err, parammodel.ErrNoMapping) && err != nil {
+			f.logger.Warn("path translation fallback: translator build failed",
+				zap.String("device_sn", sn),
+				zap.String("product_id", matchRes.Product.ID.String()),
+				zap.String("sw_version", device.FirmwareVersion),
+				zap.Error(err),
+			)
+		}
+		return refs, len(refs), nil
+	}
+
+	out := make([]MMLParamRef, 0, len(refs))
+	missCount := 0
+	for _, r := range refs {
+		if r.Tr069Path == "" {
+			out = append(out, r)
+			continue
+		}
+		res := translator.ToPrivate(r.Tr069Path)
+		copy := r
+		copy.Tr069Path = res.Translated
+		if !res.Found {
+			missCount++
+		}
+		out = append(out, copy)
+	}
+	return out, missCount, translator
+}
+
+// translatorSourceLabel 给日志生成一个简短的 Translator 状态字串。
+// nil → "fallback"（fanout 跳过翻译，原样下发 standardPath）。
+func translatorSourceLabel(t *parammodel.Translator) string {
+	if t == nil {
+		return "fallback"
+	}
+	return "param_model"
+}
+
 // paramRefsFromEntry pulls param_refs out of a commands[] entry, tolerating
-// both the typed []MMLParamRef form (when service stashed it in-process) and
-// the JSON-roundtrip form ([]interface{} of map[string]interface{}, after the
-// task has been written to mml_tasks.commands JSONB and read back).
+// the JSON-roundtrip form where the slice arrives as []interface{} of map[string]interface{}.
 func paramRefsFromEntry(cmd map[string]interface{}) []MMLParamRef {
 	raw, ok := cmd["param_refs"]
-	if !ok || raw == nil {
+	if !ok {
 		return nil
 	}
-	if typed, ok := raw.([]MMLParamRef); ok {
-		return typed
-	}
-	bs, err := json.Marshal(raw)
-	if err != nil {
+	switch v := raw.(type) {
+	case []MMLParamRef:
+		return v
+	case []interface{}:
+		out := make([]MMLParamRef, 0, len(v))
+		for _, item := range v {
+			itemMap, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			b, err := json.Marshal(itemMap)
+			if err != nil {
+				continue
+			}
+			var ref MMLParamRef
+			if err := json.Unmarshal(b, &ref); err != nil {
+				continue
+			}
+			out = append(out, ref)
+		}
+		return out
+	default:
 		return nil
 	}
-	var refs []MMLParamRef
-	if err := json.Unmarshal(bs, &refs); err != nil {
-		return nil
-	}
-	return refs
 }

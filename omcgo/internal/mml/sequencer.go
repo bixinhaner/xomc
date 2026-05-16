@@ -95,7 +95,7 @@ func (s *Sequencer) OnTaskCompleted(ctx context.Context, t *task.Task) {
 	}
 
 	// 构造下一行 device_task — 复用 fanouter 的单 command 翻译能力
-	nextReq, err := s.buildNextRequest(mmlTask, t.DeviceSN, t.DeviceIndex, nextIdx)
+	nextReq, err := s.buildNextRequest(ctx, mmlTask, t.DeviceSN, t.DeviceIndex, nextIdx)
 	if err != nil {
 		s.logger.Warn("sequencer: build next request failed",
 			zap.String("mml_task_id", mmlTaskID.String()),
@@ -144,7 +144,7 @@ func (s *Sequencer) OnTaskCompleted(ctx context.Context, t *task.Task) {
 
 // buildNextRequest 用 fanouter 的逻辑构造单条 device_task 请求。
 // 单命令单设备 → 返回单 request；不合规 / 翻译失败 → 返 nil（caller 跳过）。
-func (s *Sequencer) buildNextRequest(mmlTask *MMLTask, deviceSN string, deviceIdx, cmdIdx int) (*task.CreateTaskRequest, error) {
+func (s *Sequencer) buildNextRequest(ctx context.Context, mmlTask *MMLTask, deviceSN string, deviceIdx, cmdIdx int) (*task.CreateTaskRequest, error) {
 	if cmdIdx < 0 || cmdIdx >= len(mmlTask.Commands) {
 		return nil, fmt.Errorf("cmd_idx %d out of range [0, %d)", cmdIdx, len(mmlTask.Commands))
 	}
@@ -158,7 +158,7 @@ func (s *Sequencer) buildNextRequest(mmlTask *MMLTask, deviceSN string, deviceId
 		DeviceSNs: []string{deviceSN},
 		Commands:  []map[string]interface{}{mmlTask.Commands[cmdIdx]},
 	}
-	reqs := s.fanouter.buildDeviceTaskRequests(view)
+	reqs := s.fanouter.buildDeviceTaskRequests(ctx, view)
 	if len(reqs) == 0 {
 		return nil, nil
 	}
