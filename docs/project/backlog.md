@@ -273,7 +273,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0080 | migration 000038 重复 hotfix（rename `000038_upgrade_tasks_firmware_id_nullable.sql` → `000049_*.sql` 让 goose 可解析；pre-existing 历史遗留，T-0072 review-agent 发现）| fix | infra/migration | P0 | done | Claude | S | — | CLAUDE.md §5.5 / T-0072 review finding | sprint-07 | 2026-04-29 |
 | T-0027 | 拓扑自动分组规则引擎激活（三路径全闭环：手工 ApplyRule + cron @hourly + device.registered EventBus；A4 SQL 守护；6 metric + 7 log key + FE 来源列；R-104 关闭）| feat | F06/topology | P1 | done | Claude | M | — | R-104 关闭 / `prd/F06-topology-auto-grouping.md` / `docs/review-report/20260506/verify-T-0027.md` | sprint-09 | 2026-05-06 |
 | T-0100-P0 | license_logs 表迁移 + LogWriter + 5 处写入点接入（handler import/activate/revoke + enforcer EnforceCapacity/Expiry + monitor capacity/expiry/auto_expire）— umbrella T-0100 子任务（详 §4.2） | feat | F06/license | P1 | done | Claude | M | T-0015 ✅ | R-109 关闭 / `prd/F06-license.md` §6.2 §9.3 | wave-3-finishing | 2026-05-09 |
-| T-0137 | TR069 报文跟踪（Message Trace）— 老 OMC 移植（任务 CRUD + ACS 拦截 + 落库 TimescaleDB hypertable + 在线查看/下载 + WebSocket 通知 + 跨 ACS 实例聚合查询；3 天保留；10 项设计决策已定稿；M1/M2/M3 三阶段 sub-task 在 S3 进入前由 dev-pipeline 拆分）| feat | F01 | P2 | planned | Claude | XL→拆 M1/M2/M3 | — | `prd/F01-tr069-message-trace.md` / `docs/design/TR069报文跟踪-设计.md` | sprint-13 | 2026-05-15 |
+| T-0137 | TR069 报文跟踪（Message Trace）— 老 OMC 移植（任务 CRUD + ACS 拦截 + 落库 TimescaleDB hypertable + 在线查看/下载 + WebSocket 通知 + 跨 ACS 实例聚合查询；3 天保留；10 项设计决策已定稿）**2026-05-15 拆 M1/M2/M3 共 3 sub-task** 详 §4.4；T-0137-M1 已升 planned/Owner=Claude/sprint-13，T-0137-M2/M3 triaged 等 M1 落地后下次 planning | feat | F01 | P2 | planned | Claude | XL（M1+M2+M3） | — | `prd/F01-tr069-message-trace.md` / `docs/design/TR069报文跟踪-设计.md` / `backlog/subtasks/T-0137-trace.md` | sprint-13 | 2026-05-15 |
 
 **说明**：
 - T-0009 是外部凭据申请，不编码但走流水线（作为前置项，保证 T-0014 不被卡）。
@@ -340,6 +340,15 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0123-P1 | Console 后端：5 API 端点（GET `/mml/group-tree` ⊳rename from `/mml/groups/tree` / GET `/mml/commands/:id/sub-fields` / POST `/mml/render` / POST `/mml/parse` / POST `/mml/execute-statements` ⊳rename from `/mml/execute` 避碰既有端点）+ Go 侧 MML renderer/parser (`internal/mml/mml_renderer.go` + `mml_parser.go`) + Execute 支持 statements 数组 (N 设备 × M statements fanout) + sub-field 触发器维护 mml_commands.target_paths 派生缓存 **— done 2026-05-14 commits `3eb5cee6`+`0d5867ad` 2 段 / 19 files / +4803/-5 LOC；48 测试 race 全 PASS（mml 包覆盖率 24.9%→33.3% +8.4pp）；5 e2e claim（T-0123-P1 mml-console-1..5）；S5 W1/W2 in-loop 修复（ErrInvalidRequest sentinel + ADD passthrough 注释强化）；R-206 Mitigating (P0+P1 done / P2-P4 仍 triaged)；详 `backlog/done/2026Q2.md`** | feat | F06/mml | P1 | done | Claude | M (~3d) | T-0123-P0 ✅ | PRD §6.1 / §6.3 / §8.1 / §N / R-206 Mitigating | sprint-11 | 2026-05-14 |
 | T-0123-P2 | **umbrella (拆 4 sub-task 2026-05-14 ULTRATHINK：L 不可单 session)**：Console 前端三栏 + Step Bar + MmlEditor + Sub*Checklist/InputList + Zustand 双向绑定 + 多皮肤兼容；详 P2-a/b/c/d | feat | frontend+F06/mml | P1 | triaged | — | L (~4d, split) | T-0123-P1 ✅ | PRD §7.1-7.4 / §7.5 多皮肤兼容 | sprint-11 候选 | 2026-05-14 |
 | T-0123-P2-a | **frontend-core 业务层**：types/mmlConsole.ts (Statement/SubFieldDef/GroupTreeNode) + services/api/mmlApi.ts 扩 5 端点 methods (buildGroupTree/getCommandSubFields/renderMML/parseMML/executeStatements) + hooks/api/useMmlConsole.ts (5 React Query hooks) + store/mmlConsoleStore.ts (Zustand：Statement[] + mmlText 双向同步 + 12 actions + 防 sync 循环 syncSource enum + 300ms debounce + race-loser drop + 本地 renderStatementLocal 与后端 renderer 对齐) + i18n/{zh-CN,en-US} 11 keys **— done 2026-05-14 commit `3c760ce9` 1 段 / 6 files / +1164/-4 LOC；4 mappers + 1 stmtToBackend reverse-serializer；24 单测覆盖 4 op + 排序 + 双引号转义 + store actions；webcode/v2/v3 三皮肤 typecheck ✓；nanoid → crypto.randomUUID (零新增依赖)；local-parse 延后 P2-b；详 `backlog/done/2026Q2.md`** | feat | frontend-core+F06/mml | P1 | done | Claude | M (~1d) | T-0123-P1 ✅ | PRD §7.4 store + §7.2 组件总览 (业务层依赖) | sprint-11 | 2026-05-14 |
+
+### 4.4 T-0137 子任务（TR069 报文跟踪）
+
+> 3 子任务（M1 / M2 / M3）按设计文档 §9 实施分期拆出。
+> 完整 sub-task 表 → [`backlog/subtasks/T-0137-trace.md`](backlog/subtasks/T-0137-trace.md)
+>
+> **2026-05-15 S3 implement 起步**：T-0137-M1 已 **State=planned / Owner=Claude / Sprint=sprint-13** 开车（M1 MVP 范围：任务 CRUD + ACS 拦截 + PG inline 落库 + 同步查询 + 简单前端，**不含** MinIO 外置 / NATS / worker / WebSocket / 异步下载 / Prometheus 指标）。T-0137-M2（工程化）+ M3（加固）仍 triaged，等 M1 落地后下次 planning 决策准入。
+>
+> **关键约束（设计 §10 D1-D10 不重新评审）**：D6 独立 `internal/trace/` / D8 retention 3 天 / D9 不限流 / D10 不限用户上限 / D3 不 mask 原文落库。
 
 ---
 

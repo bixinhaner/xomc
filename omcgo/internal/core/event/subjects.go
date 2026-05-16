@@ -390,3 +390,37 @@ const (
 	// 发布者：nedirect.Service，订阅者：暂无
 	SubjectNEDirectCommand = "nedirect.command.sent"
 )
+
+// Trace events (T-0137 M2)
+//
+// TR069 报文跟踪模块跨进程协作事件。`trace.task.*` 用 InterestPolicy（fan-out 多
+// 订阅者：ACS 各实例维护白名单 + app 进程做 SSE 推送）；`trace.message.captured` 用
+// WorkQueuePolicy（worker 群组消费 + 批量落库）。
+const (
+	// SubjectTraceTaskStarted 是抓包任务创建时发布。
+	// 发布者：app.trace.Service.CreateTask，订阅者：acs.WhitelistCache（加 SN）+
+	// app.MessageHub（推 SSE 给在线用户）。
+	// Payload：trace.TaskEvent {task_id, device_sn, status, expires_at, operator_code, created_by}
+	SubjectTraceTaskStarted = "trace.task.started"
+
+	// SubjectTraceTaskStopped 是抓包任务停止（手动/超时）时发布。
+	// 发布者：app.trace.Service.StopTask 或 worker 巡检 Sweeper，
+	// 订阅者：acs.WhitelistCache（删 SN）+ app.MessageHub。
+	SubjectTraceTaskStopped = "trace.task.stopped"
+
+	// SubjectTraceTaskPurged 是抓包任务清理报文时发布。
+	// 发布者：app.trace.Service.StopTask(purge=true)，
+	// 订阅者：worker（DELETE PG + 删 MinIO 对象）+ app.MessageHub。
+	SubjectTraceTaskPurged = "trace.task.purged"
+
+	// SubjectTraceMessageCaptured 是 ACS 命中白名单抓到一条 SOAP 报文时发布。
+	// 发布者：acs.handler.maybeCaptureTrace（JetStream WorkQueue），
+	// 订阅者：worker.TraceCaptureConsumer（QueueSubscribe 批量落库 + MinIO 外置）。
+	// Payload：trace.Message（含 payload_inline；大报文由 worker 转 MinIO）。
+	SubjectTraceMessageCaptured = "trace.message.captured"
+
+	// SubjectTraceExportRequested 是用户触发异步导出时发布。
+	// 发布者：app.trace.Handler.ExportXML 异步路径，
+	// 订阅者：worker.TraceExporter（生成 XML 写 MinIO exchange + 更新 job 状态）。
+	SubjectTraceExportRequested = "trace.export.requested"
+)

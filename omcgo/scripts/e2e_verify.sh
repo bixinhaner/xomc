@@ -6123,6 +6123,44 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
 check_status_in "T-0012 dlq-1: GET /admin/dead-letters" "200 401 403" "$HTTP_CODE"
 
 # ------------------------------------------------------------
+# T-0137 TR069 报文跟踪（M3-03，对齐 PRD AC-1..AC-6）
+# AC-1 启动抓包 / AC-2 报文落库 / AC-3 在线查看 / AC-4 下载 / AC-5 超时 / AC-6 跨实例聚合
+# 这里覆盖端点契约层面（200/401/404 路由可达性 + 数据形状），不真打通 ACS hook
+# （活体打通需要 CPE 模拟器，留给 M3-04 压测脚本）。
+# ------------------------------------------------------------
+section "T-0137 TR069 报文跟踪 (≥ 6 claims)"
+
+claim "trace: GET /trace/tasks list returns 200/401 (AC-1 准入)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/trace/tasks?page=1&page_size=5" -H "$W2D_AUTH")
+check_status_in "T-0137 trace-1: GET /trace/tasks" "200 401" "$HTTP_CODE"
+
+claim "trace: GET nonexistent task returns 404/401 (AC-3 错误路径)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/trace/tasks/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "T-0137 trace-2: GET /trace/tasks/<not-found>" "404 401" "$HTTP_CODE"
+
+claim "trace: GET messages of nonexistent task returns 200/404/401 (AC-3)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/trace/tasks/$W2D_BAD_UUID/messages?page=1&page_size=10" -H "$W2D_AUTH")
+check_status_in "T-0137 trace-3: GET /trace/tasks/<id>/messages" "200 404 401" "$HTTP_CODE"
+
+claim "trace: GET device active-task always 200/401 (AC-1/AC-6 设备详情)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/trace/devices/BLQ-NONEXIST/active-task" -H "$W2D_AUTH")
+check_status_in "T-0137 trace-4: GET /trace/devices/<sn>/active-task" "200 401" "$HTTP_CODE"
+
+claim "trace: POST async export for nonexistent task returns 404/401 (AC-4)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    -X POST "$API/trace/tasks/$W2D_BAD_UUID/export" -H "$W2D_AUTH")
+check_status_in "T-0137 trace-5: POST /trace/tasks/<id>/export" "404 401" "$HTTP_CODE"
+
+claim "trace: GET nonexistent export job returns 404/401 (AC-4 轮询)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/trace/exports/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "T-0137 trace-6: GET /trace/exports/<id>" "404 401" "$HTTP_CODE"
+
+# ------------------------------------------------------------
 # W2.D.1 段尾打印分段统计，方便 verify 报告引用
 echo ""
 echo -e "${YELLOW}=== W2.D.1 段累计 claim 总数 ${CLAIM_COUNT}（≥ 100 即合规）===${NC}"

@@ -185,6 +185,8 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'log-device',    label: 'nav.log.device',     path: '/log/device' },
       { key: 'log-exception', label: 'nav.log.exception',  path: '/log/exception' },
       { key: 'log-event',     label: 'nav.log.event',      path: '/log/event' },
+      // T-0137 / M1: TR069 报文跟踪入口
+      { key: 'log-message-trace', label: 'nav.ops.messageTrace', path: '/ops/message-trace' },
       // { key: 'log-operation',label: 'nav.log.operation',  path: '/log/operation' },  // 隐藏
       // { key: 'log-system',   label: 'nav.log.system',     path: '/log/system' },       // 隐藏
       // { key: 'log-config',   label: 'nav.log.config',     path: '/log/config' },       // 隐藏

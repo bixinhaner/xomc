@@ -83,6 +83,8 @@
 - [ ] 查询键层级：`['domain', 'action', params]`
 - [ ] 用户可见文本通过 `react-intl`
 - [ ] 错误有页面级 ErrorBoundary 或提示
+- [ ] **新页面 → `menus` 表 seed migration**（T-0137 教训）：动态菜单守卫开启时，仅注册路由不够，必须在 `omcgo/migrations/seed/000NNN_*.sql` 注入菜单行 + role_menus 绑定，否则 PrivateRoute 重定向 /403
+- [ ] **新组件用到的 `t('xxx.yyy')` key 必须存在于 `frontend-core/src/i18n/{zh-CN,en-US}/index.ts`**（T-0137 教训）：表格"操作"列约定用 `table.action`，DataTable / 通用对话框等模式参考既有页面，不要凭直觉自创 `common.action` 这类未在 catalog 注册的 key
 
 ### 告警（`internal/alarm/**`）
 - [ ] 去重键符合 `alarm:active:{device_sn}:{code}` 模式

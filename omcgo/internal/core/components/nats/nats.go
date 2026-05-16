@@ -53,6 +53,13 @@ func DefaultStreams() []StreamDef {
 		{Name: "REPORT", Subjects: []string{"report.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "NEDIRECT", Subjects: []string{"nedirect.>"}, Retention: nats.WorkQueuePolicy},
 		{Name: "SYS", Subjects: []string{"sys.>"}, Retention: nats.WorkQueuePolicy},
+		// T-0137 M2: TR069 报文跟踪。
+		// TRACE_TASK 走 InterestPolicy — ACS 实例 + app SSE 推送 + worker（purge 处理）三类订阅者都需独立 fan-out。
+		// TRACE_MSG 走 WorkQueuePolicy — worker QueueSubscribe 群组消费 + 批量落库。
+		// TRACE_EXPORT 走 WorkQueuePolicy — worker 单 consumer 顺序执行异步导出。
+		{Name: "TRACE_TASK", Subjects: []string{"trace.task.>"}, Retention: nats.InterestPolicy},
+		{Name: "TRACE_MSG", Subjects: []string{"trace.message.>"}, Retention: nats.WorkQueuePolicy},
+		{Name: "TRACE_EXPORT", Subjects: []string{"trace.export.>"}, Retention: nats.WorkQueuePolicy},
 	}
 }
 

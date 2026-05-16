@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
+	"github.com/omcgo/omcgo/internal/admin"
+	"github.com/omcgo/omcgo/internal/admin/audit"
 	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/alarm/definition"
 	"github.com/omcgo/omcgo/internal/backup"
@@ -26,6 +28,7 @@ import (
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/report"
 	"github.com/omcgo/omcgo/internal/task"
+	"github.com/omcgo/omcgo/internal/trace"
 	"github.com/omcgo/omcgo/internal/transfer"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -83,6 +86,12 @@ func runWorker(cmd *cobra.Command, args []string) error {
 
 func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	logger := w.Logger
+
+	// L-10：worker 端也注入 audit sink，让 Sweeper 自动 stop / Exporter 异步导出
+	// 等系统级操作能写 audit_logs（actor=system，与 handler 的 actor=username 区分）。
+	auditRepo := admin.NewPgAuditRepository(w.PgPool)
+	audit.SetDefault(admin.NewAuditSink(auditRepo))
+	audit.SetFallbackLogger(logger.Named("audit"))
 
 	// PM Collector — wraps handler with retry+DLQ runner (T-0012 / R-106).
 	counterRepo := counter.NewPgCounterRepository(w.TsPool)
@@ -217,6 +226,54 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 		logger.Warn("subscribe backup executor", zap.Error(err))
 	}
 	logger.Info("backup executor started (with T-0073 failure-alarm enforcement)")
+
+	// T-0137 / M2: TR069 报文跟踪 capture 消费者 + 超时巡检 + purge 处理。
+	// JetStream WorkQueuePolicy 群组消费 trace.message.captured，批量去抖动后写 trace_messages。
+	// 多 worker 实例靠 QueueSubscribe 自动负载均衡互不重复。
+	traceRepo := trace.NewPgRepository(w.PgPool)
+	var traceBulk *trace.BulkStore
+	if w.MinIO != nil && cfg.MinIO.Buckets.TraceBulk != "" {
+		traceBulk = trace.NewBulkStore(w.MinIO, cfg.MinIO.Buckets.TraceBulk)
+		logger.Info("trace bulk store enabled",
+			zap.String("bucket", cfg.MinIO.Buckets.TraceBulk),
+			zap.Int("inline_max_bytes", trace.MaxInlinePayloadBytes))
+	}
+	traceConsumer := trace.NewCaptureConsumer(traceRepo, trace.DefaultCaptureConsumerConfig(), logger)
+	if traceBulk != nil {
+		traceConsumer.SetBulkStore(traceBulk)
+	}
+	// M3-01：Prometheus 指标 — worker 端是落库主力，captured/dropped 计数都从这里出
+	traceMetrics := trace.NewMetrics(w.MetricsReg)
+	traceConsumer.SetMetrics(traceMetrics)
+	if _, err := traceConsumer.Subscribe(w.EventBus); err != nil {
+		logger.Warn("subscribe trace capture consumer", zap.Error(err))
+	} else {
+		logger.Info("trace capture consumer started (T-0137 M2)")
+	}
+	// 巡检：60s 周期把 expires_at<now 的 running 任务转 stopped + 发事件
+	// 订阅 trace.task.purged：worker 异步 DELETE PG + 删 MinIO 对象（注入 traceBulk 后启用）
+	var sweeperBulk trace.BulkObjectDeleter
+	if traceBulk != nil {
+		sweeperBulk = traceBulk
+	}
+	traceSweeper := trace.NewSweeper(traceRepo, w.EventBus, sweeperBulk, trace.DefaultSweeperConfig(), logger)
+	traceSweeper.SetMetrics(traceMetrics)
+	if _, err := traceSweeper.Start(context.Background()); err != nil {
+		logger.Warn("start trace sweeper", zap.Error(err))
+	} else {
+		logger.Info("trace sweeper started (T-0137 M2)")
+	}
+	// 异步导出：订阅 trace.export.requested → 生成 XML 写 MinIO exchange
+	if w.MinIO != nil && cfg.MinIO.Buckets.Exchange != "" {
+		traceExporter := trace.NewExporter(traceRepo, traceBulk, w.MinIO,
+			trace.DefaultExporterConfig(cfg.MinIO.Buckets.Exchange), logger)
+		if _, err := traceExporter.Subscribe(w.EventBus); err != nil {
+			logger.Warn("subscribe trace exporter", zap.Error(err))
+		} else {
+			logger.Info("trace exporter subscribed (T-0137 M2-08)",
+				zap.String("exchange_bucket", cfg.MinIO.Buckets.Exchange))
+		}
+	}
 
 	// Report Generator
 	reportDefRepo := report.NewPgDefinitionRepository(w.PgPool)

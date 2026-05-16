@@ -27,6 +27,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/middleware"
 	"github.com/omcgo/omcgo/internal/core/tracing"
 	"github.com/omcgo/omcgo/internal/task"
+	"github.com/omcgo/omcgo/internal/trace"
 	"github.com/omcgo/omcgo/pkg/soap"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"github.com/redis/go-redis/v9"
@@ -88,6 +89,10 @@ type Handler struct {
 	// nil 表示协议日志关闭。
 	protocolLogger *zap.Logger
 	maxBodySize    int // 协议日志 XML 截断阈值（0=不截断）
+	// T-0137 / M1: TR069 报文跟踪 — 命中白名单时旁路投递 capture，热路径开销 < 1ms。
+	// 两个字段都为 nil 表示跟踪关闭（默认）。
+	traceWhitelist *trace.WhitelistCache
+	traceService   *trace.Service
 	// connSessions 映射 HTTP RemoteAddr → connSessionEntry，用于连接级会话追踪。
 	// 条目在会话完成时或由后台清理器清除。
 	connSessions sync.Map
@@ -248,6 +253,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				zap.String("request_xml", reqXML),
 				zap.String("response_xml", respXML),
 			)
+
+			// T-0137 / M1: 命中跟踪白名单则旁路落库
+			h.maybeCaptureTrace(logEntry, capturer.StatusCode(), reqXML, respXML)
 		}()
 	}
 

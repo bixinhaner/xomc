@@ -13,6 +13,7 @@ import (
 	"github.com/omcgo/omcgo/internal/config"
 	"github.com/omcgo/omcgo/internal/config/baseline"
 	"github.com/omcgo/omcgo/internal/core/components"
+	minioinfra "github.com/omcgo/omcgo/internal/core/components/minio"
 	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/omcgo/omcgo/internal/core/reliability/dlq"
 	"github.com/omcgo/omcgo/internal/core/reliability/runner"
@@ -38,6 +39,7 @@ import (
 	"github.com/omcgo/omcgo/internal/syslog"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/topology"
+	"github.com/omcgo/omcgo/internal/trace"
 	"github.com/omcgo/omcgo/internal/ufte"
 )
 
@@ -742,6 +744,49 @@ func initMiscModules(c *Container) error {
 	c.miscDeps.deadLetterHandler = dlqHandler
 	logger.Info("dead-letter admin handler initialized")
 
+	// T-0137 / M2: TR069 报文跟踪 — app 端管理面。
+	//   - 任务 CRUD + 查询接口
+	//   - CreateTask/StopTask 通过 EventBus 发 trace.task.{started,stopped,purged} 事件，
+	//     ACS 实例订阅后实时增删 SN 白名单；worker 订阅 purged 异步清理报文。
+	//   - 注入 BulkStore：handler 的 GetMessagePayload 端点遇到 external 报文时按需拉 MinIO
+	traceRepo := trace.NewPgRepository(c.PgPool)
+	traceSvc := trace.NewService(traceRepo, trace.DefaultConfig(), logger)
+	if c.EventBus != nil {
+		traceSvc.SetEventBus(c.EventBus)
+	}
+	if c.MinIO != nil && c.Cfg.MinIO.Buckets.TraceBulk != "" {
+		traceSvc.SetPayloadFetcher(trace.NewBulkStore(c.MinIO, c.Cfg.MinIO.Buckets.TraceBulk))
+	}
+	// M3-01：Prometheus 指标（app 端 publish 失败 drop 计数 + 兜底）
+	traceSvc.SetMetrics(trace.NewMetrics(c.MetricsReg))
+	c.miscDeps.traceService = traceSvc
+	traceHandler := trace.NewHandler(traceSvc, logger)
+	if c.MinIO != nil {
+		// L-8：预签名 URL 必须用 PublicEndpoint 签出来浏览器才能直接打开。
+		// c.MinIO 是内部 client（endpoint=minio:9000 / k8s ClusterIP），用它签的
+		// URL host 浏览器解析不了；NewPresignClient 在 PublicEndpoint 非空时切到
+		// 公网 host 重签，空时回退内部 endpoint（保持兼容）。
+		presignClient, err := minioinfra.NewPresignClient(c.Cfg.MinIO)
+		if err != nil {
+			logger.Warn("create MinIO presign client failed, falling back to internal client",
+				zap.Error(err))
+			traceHandler.SetMinIO(c.MinIO)
+		} else {
+			traceHandler.SetMinIO(presignClient)
+		}
+	}
+	c.miscDeps.traceHandler = traceHandler
+	// SSE 通知：订阅 trace.task.* 事件转发给在线用户
+	if c.EventBus != nil && c.miscDeps.messageHub != nil {
+		traceNotifier := trace.NewSSENotifier(c.miscDeps.messageHub, logger)
+		if _, err := traceNotifier.Subscribe(c.EventBus); err != nil {
+			logger.Warn("trace SSE notifier subscribe failed", zap.Error(err))
+		} else {
+			logger.Info("trace SSE notifier subscribed (T-0137 M2-07)")
+		}
+	}
+	logger.Info("trace module initialized (T-0137 M2)")
+
 	return nil
 }
 
@@ -838,6 +883,10 @@ type miscDeps struct {
 
 	// T-0012 / R-106: worker retry + dead-letter queue admin
 	deadLetterHandler *admin.DeadLetterHandler
+
+	// T-0137 / M1: TR069 报文跟踪 handler（app 侧仅管 CRUD，capture flusher 在 ACS 侧）
+	traceHandler *trace.Handler
+	traceService *trace.Service
 }
 
 // taskDeviceLookup adapts device.DeviceReader to task.DeviceLookup.

@@ -25,6 +25,7 @@ import (
 	miniocomp "github.com/omcgo/omcgo/internal/core/components/minio"
 	"github.com/omcgo/omcgo/internal/core/health"
 	"github.com/omcgo/omcgo/internal/task"
+	"github.com/omcgo/omcgo/internal/trace"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -248,6 +249,52 @@ func runACS(cmd *cobra.Command, args []string) error {
 			inf.Logger.Info("protocol logging enabled",
 				zap.String("file_path", cfg.ProtocolLog.FilePath),
 				zap.Int("max_body_size", cfg.ProtocolLog.MaxBodySize))
+		}
+	}
+
+	// T-0137 / M2: TR069 报文跟踪 — ACS 端旁路 hook。
+	//   - WhitelistCache 启动加载 + 订阅 trace.task.* 实时增删 SN（30s 兜底轮询保活）
+	//   - Service 注入 EventBus，EnqueueCapture 改为 publish trace.message.captured 到 JetStream，
+	//     worker 群组消费 + 批量落库（ACS 不再写 PG，hot path < 1ms）
+	if inf.PgPool != nil {
+		traceRepo := trace.NewPgRepository(inf.PgPool)
+		traceSvc := trace.NewService(traceRepo, trace.DefaultConfig(), inf.Logger)
+		if inf.EventBus != nil {
+			traceSvc.SetEventBus(inf.EventBus)
+		}
+		// M3-01：Prometheus 指标（ACS 端 capture latency histogram + drop 计数）
+		traceSvc.SetMetrics(trace.NewMetrics(inf.MetricsReg))
+		traceSvc.Start(context.Background())
+
+		wlCfg := trace.DefaultWhitelistConfig()
+		if inf.EventBus != nil {
+			wlCfg = trace.M2WhitelistConfig()
+		}
+		traceWL := trace.NewWhitelistCache(traceRepo, wlCfg, inf.Logger)
+		if err := traceWL.Start(context.Background()); err != nil {
+			inf.Logger.Warn("trace whitelist initial load failed; capture disabled", zap.Error(err))
+		} else {
+			var unsubTrace func()
+			if inf.EventBus != nil {
+				if cleanup, subErr := traceWL.Subscribe(inf.EventBus); subErr != nil {
+					inf.Logger.Warn("trace whitelist NATS subscribe failed; falling back to poll-only",
+						zap.Error(subErr))
+				} else {
+					unsubTrace = cleanup
+				}
+			}
+			deps.TraceWhitelist = traceWL
+			deps.TraceService = traceSvc
+			inf.GS.Register("trace-capture", 3, func(ctx context.Context) error {
+				if unsubTrace != nil {
+					unsubTrace()
+				}
+				traceWL.Stop()
+				traceSvc.Stop()
+				return nil
+			})
+			inf.Logger.Info("TR069 message trace capture enabled (T-0137 M2)",
+				zap.Bool("nats", inf.EventBus != nil))
 		}
 	}
 

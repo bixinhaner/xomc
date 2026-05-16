@@ -77,6 +77,7 @@ minio:
     reports: "reports"
     exchange: "omc-exchange"
     ui_assets: "ui-assets"
+    trace_bulk: "trace-bulk"
 
 upload:
   base_url: "http://localhost:8080"   # CPE 可访问的 ACS 地址

@@ -513,11 +513,17 @@ type NATSConfig struct {
 // 配置备份、设备日志、数据模型 XML、北向报表等。
 // Buckets 定义不同类型文件使用的 Bucket 名称。
 type MinIOConfig struct {
-	Endpoint  string       `mapstructure:"endpoint"`
-	AccessKey string       `mapstructure:"access_key"`
-	SecretKey string       `mapstructure:"secret_key"`
-	UseSSL    bool         `mapstructure:"use_ssl"`
-	Buckets   BucketConfig `mapstructure:"buckets"`
+	Endpoint  string `mapstructure:"endpoint"`
+	AccessKey string `mapstructure:"access_key"`
+	SecretKey string `mapstructure:"secret_key"`
+	UseSSL    bool   `mapstructure:"use_ssl"`
+	// PublicEndpoint 浏览器可达的 MinIO 公网地址（host:port，无 scheme）。
+	// 可空：留空时预签名 URL 用 Endpoint，适合后端 + MinIO 同进程或同主机场景。
+	// 非空时：预签名 URL 用 PublicEndpoint 签发，浏览器 / 外部 SDK 能直接访问。
+	// 典型用法：dev 环境 Endpoint="minio:9000"（docker 内网），PublicEndpoint="localhost:9000"
+	// （宿主机浏览器）；生产环境 Endpoint=k8s service ClusterIP，PublicEndpoint=对外域名。
+	PublicEndpoint string       `mapstructure:"public_endpoint"`
+	Buckets        BucketConfig `mapstructure:"buckets"`
 }
 
 // BucketConfig 定义各类文件在 MinIO 中的 Bucket 分配。
@@ -539,6 +545,9 @@ type BucketConfig struct {
 	Reports      string `mapstructure:"reports"`
 	Exchange     string `mapstructure:"exchange"`
 	UIAssets     string `mapstructure:"ui_assets"`
+	// TraceBulk T-0137 M2：TR069 报文跟踪大报文外置 bucket（payload > 32KB 时 GZIP 存此处）。
+	// 默认 "trace-bulk"；空时禁用外置（所有报文 inline）。
+	TraceBulk string `mapstructure:"trace_bulk"`
 }
 
 // MetricsConfig 配置 Prometheus 指标暴露端口。

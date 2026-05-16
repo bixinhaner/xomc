@@ -78,22 +78,33 @@ func RequireAuthWithAPIKey(jwt *JWTService, apiKeySvc *APIKeyService, userRepo U
 			return
 		}
 
-		// Fall back to Bearer JWT
+		// Fall back to Bearer JWT.
+		//
+		// L-3 修复：浏览器 EventSource 不支持自定义 header，SSE 端点必须用
+		// ?token= query 鉴权。如果 Authorization header 缺失，再 fallback 到
+		// ?token= query。注意 token 进 URL 会被 access log / referer 记录，
+		// 仅推荐给 SSE / 浏览器下载等无法发 header 的场景。
+		var tokenStr string
 		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
+		switch {
+		case authHeader != "":
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) != 2 || parts[0] != "Bearer" {
+				commonerrors.AbortWithError(c, http.StatusUnauthorized,
+					errors.New("invalid authorization header format"))
+				return
+			}
+			tokenStr = parts[1]
+		default:
+			tokenStr = c.Query("token")
+		}
+		if tokenStr == "" {
 			commonerrors.AbortWithError(c, http.StatusUnauthorized,
 				errors.New("missing authorization header"))
 			return
 		}
 
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			commonerrors.AbortWithError(c, http.StatusUnauthorized,
-				errors.New("invalid authorization header format"))
-			return
-		}
-
-		claims, err := jwt.ValidateAccessToken(parts[1])
+		claims, err := jwt.ValidateAccessToken(tokenStr)
 		if err != nil {
 			commonerrors.AbortWithError(c, http.StatusUnauthorized,
 				errors.New("invalid or expired token"))

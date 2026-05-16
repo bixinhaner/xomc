@@ -46,6 +46,7 @@ minio:
     reports: "reports"
     exchange: "omc-exchange"
     ui_assets: "ui-assets"
+    trace_bulk: "trace-bulk"
 
 metrics:
   port: 9092

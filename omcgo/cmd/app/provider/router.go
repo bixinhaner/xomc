@@ -439,6 +439,11 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// ----- Notifications → resource "devices" -----
 	md.notificationHandler.RegisterRoutes(permGroup("devices"))
 
+	// ----- T-0137 / M1: TR069 报文跟踪 → resource "devices" -----
+	if md.traceHandler != nil {
+		md.traceHandler.RegisterRoutes(permGroup("devices"))
+	}
+
 	// ----- W2.A.4 / T-0043: Notification template + history → resource "alarms" -----
 	// 路径前缀 /notifications，handler 内部挂 /templates 和 /history 子路由：
 	//   final paths: /api/v1/notifications/templates[...] + /api/v1/notifications/history[...]

@@ -47,6 +47,10 @@ nats:
 
 minio:
   endpoint: "minio:9000"
+  # L-8：浏览器从宿主机访问预签名 URL 用的 host。dev 用 localhost:9000（docker
+  # 端口映射出来的），生产改成对外域名 / SLB VIP。留空 → 用 endpoint 签发
+  # （适合后端 + MinIO 同主机部署）。
+  public_endpoint: "localhost:9000"
   access_key: "minioadmin"
   secret_key: "minioadmin"
   use_ssl: false
@@ -59,6 +63,7 @@ minio:
     reports: "reports"
     exchange: "omc-exchange"
     ui_assets: "ui-assets"
+    trace_bulk: "trace-bulk"
 
 conn_req:
   server_addr: "acs:7547"  # ACS external address for CPE UDP CR URL

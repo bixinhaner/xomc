@@ -15,6 +15,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/health"
 	"github.com/omcgo/omcgo/internal/task"
+	"github.com/omcgo/omcgo/internal/trace"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -48,6 +49,9 @@ type ServerDeps struct {
 	StunStore               *stun.Store                 // STUN address cache (shared with STUN server)
 	ProtocolLogger          *zap.Logger                 // dedicated logger for protocol XML (nil = disabled)
 	MaxBodySize             int                         // XML truncation threshold for protocol log (0 = no truncation)
+	// T-0137 / M1: TR069 报文跟踪。两个都为 nil 表示跟踪关闭。
+	TraceWhitelist          *trace.WhitelistCache
+	TraceService            *trace.Service
 	Logger                  *zap.Logger
 	RequestIDPrefix         string // prefix for request IDs, e.g., "acs"
 	EnableTestTaskInjection bool   // enable random test task injection (for testing only)
@@ -79,6 +83,8 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 		stunStore:               deps.StunStore,
 		protocolLogger:          deps.ProtocolLogger,
 		maxBodySize:             deps.MaxBodySize,
+		traceWhitelist:          deps.TraceWhitelist,
+		traceService:            deps.TraceService,
 	}
 
 	mux := http.NewServeMux()

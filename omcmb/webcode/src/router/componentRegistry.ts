@@ -166,6 +166,7 @@ export const componentRegistry: Record<string, ComponentType> = {
   'ops/TaskManagement': lazy(() => import('@/pages/ops/TaskManagement')),
   'ops/NetworkDiagnosis': lazy(() => import('@/pages/ops/NetworkDiagnosis')),
   'ops/Downloads': lazy(() => import('@/pages/ops/Downloads')),
+  'ops/MessageTrace': lazy(() => import('@/pages/ops/MessageTrace')),
 };
 
 /** 是否注册了某个 component_path（菜单创建/校验工具用）。 */
