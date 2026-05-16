@@ -132,7 +132,7 @@ func (r *PgGroupTreeRepository) BuildTree(ctx context.Context, rootCode, lang st
 					Source:           strOrEmpty(row.CommandSource),
 					CatalogProtected: row.CommandCatalogProtected,
 				}
-				cmd.DisplayName = buildDisplayName(cmd.LogicalName, cmd.OperationType, cmd.LogicalCode)
+				cmd.DisplayName = buildDisplayName(cmd.LogicalName, cmd.OperationType, cmd.LogicalCode, lang)
 				node.Commands = append(node.Commands, cmd)
 				commandSeen[*row.CommandID] = struct{}{}
 			}
@@ -412,11 +412,45 @@ func strOrEmpty(s *string) string {
 	return *s
 }
 
-// buildDisplayName 派生命令树叶子显示名（老 OMC 格式）：
-//   "设备信息(LST DEVICE_INFO)"
-func buildDisplayName(logicalName, op, logicalCode string) string {
+// verbLabel 把 op 翻译为业务化中文/英文动词。lang 走 i18n fallback：
+//   - zh-CN → 查询/修改/添加/删除
+//   - en-US → Query/Modify/Add/Delete
+//   - 其他 / 未识别 op → 原 op 字串
+func verbLabel(op, lang string) string {
+	switch lang {
+	case "en-US":
+		switch op {
+		case "LST":
+			return "Query"
+		case "MOD":
+			return "Modify"
+		case "ADD":
+			return "Add"
+		case "RMV":
+			return "Delete"
+		}
+	default:
+		switch op {
+		case "LST":
+			return "查询"
+		case "MOD":
+			return "修改"
+		case "ADD":
+			return "添加"
+		case "RMV":
+			return "删除"
+		}
+	}
+	return op
+}
+
+// buildDisplayName 派生命令树叶子显示名（业务化命名，T-0123 v3）：
+//   "查询 设备信息"  /  "Query Device Info"
+// 替代老格式 "设备信息(LST DEVICE_INFO)" — 用户决策 2026-05-16：去掉 path 风格
+// 的 logical_code 后缀，让命令叶子直接呈现"做什么+对哪个对象"。
+func buildDisplayName(logicalName, op, logicalCode, lang string) string {
 	if logicalName == "" {
 		logicalName = logicalCode
 	}
-	return fmt.Sprintf("%s(%s %s)", logicalName, op, logicalCode)
+	return fmt.Sprintf("%s %s", verbLabel(op, lang), logicalName)
 }
