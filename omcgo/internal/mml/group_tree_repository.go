@@ -151,13 +151,20 @@ func (r *PgGroupTreeRepository) BuildTree(ctx context.Context, rootCode, lang st
 // queryGroupsAndCommands 单 SQL JOIN 抓 groups + commands。
 // rootCode 为空时拉全表；非空时按 LTREE @> 拉子树。
 func (r *PgGroupTreeRepository) queryGroupsAndCommands(ctx context.Context, rootCode string) ([]groupTreeRow, error) {
+	// LEFT JOIN：父容器 group（无 commands）扫出的 c.* 列全为 NULL。Scan 到
+	// 非指针 bool（RequireConfirm / CommandCatalogProtected）会报
+	// "cannot scan NULL into *bool"。用 COALESCE 在 SQL 侧兜底 false，避免
+	// 改 Go 层 Scan 字段为 *bool 引发的连锁改造。
 	const baseSQL = `
 SELECT
     g.id, g.group_code, g.group_name_zh, g.group_name_en, g.name_i18n,
     g.path::text AS path_text, g.display_order, g.source, g.catalog_protected,
     c.id, c.command_code, c.logical_code, c.logical_name_i18n,
-    c.operation_type, c.rpc_method, c.require_confirm, c.target_object,
-    c.source AS cmd_source, c.catalog_protected AS cmd_catalog_protected
+    c.operation_type, c.rpc_method,
+    COALESCE(c.require_confirm, false) AS require_confirm,
+    c.target_object,
+    c.source AS cmd_source,
+    COALESCE(c.catalog_protected, false) AS cmd_catalog_protected
 FROM mml_param_groups g
 LEFT JOIN mml_commands c ON c.group_id = g.id
 %s
