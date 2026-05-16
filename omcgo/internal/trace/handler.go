@@ -294,6 +294,10 @@ func (h *Handler) GetExportJob(c *gin.Context) {
 		fname := exportFilename(task, job)
 		reqParams := url.Values{}
 		reqParams.Set("response-content-disposition", `attachment; filename="`+fname+`"`)
+		// Content-Type 在 Exporter 上传时已经写成 application/octet-stream（见
+		// internal/trace/exporter.go），不要在预签名 URL 上覆盖 — minio-go 客户端
+		// 对 reqParams 的 SigV4 处理与 MinIO server 不完全一致，覆盖后会得到
+		// SignatureDoesNotMatch 403。
 		signed, sErr := h.presignClient.PresignedGetObject(c.Request.Context(),
 			job.ObjectBucket, job.ObjectKey, h.presignTTL, reqParams)
 		if sErr != nil {
@@ -306,17 +310,19 @@ func (h *Handler) GetExportJob(c *gin.Context) {
 	response.OK(c, job)
 }
 
-// exportFilename 文件名 "{sn}_{taskID-short}_{jobID-short}.xml"
+// exportFilename 文件名 "trace_{sn}_{startTime YYYYMMDD-HHmm}.xml"，
+// 含设备 SN + 抓包开始时间，对运维归档/检索友好。无 task 上下文时回退到
+// "trace_{jobID-short}.xml"。
 func exportFilename(task *Task, job *ExportJob) string {
-	sn := "trace"
 	if task != nil && task.DeviceSN != "" {
-		sn = task.DeviceSN
+		ts := task.StartTime.Format("20060102-1504")
+		return "trace_" + task.DeviceSN + "_" + ts + ".xml"
 	}
 	jobShort := job.ID.String()
 	if len(jobShort) >= 8 {
 		jobShort = jobShort[:8]
 	}
-	return sn + "_" + jobShort + ".xml"
+	return "trace_" + jobShort + ".xml"
 }
 
 // identity 从 gin context 提取 username / operator_code（与 notification 模块一致）。

@@ -6,16 +6,18 @@ import {
   Space,
   Modal,
   Form,
-  Input,
   InputNumber,
+  Select,
   Drawer,
   message,
   Typography,
   Tooltip,
   Popconfirm,
+  theme,
 } from 'antd';
 import { PlusOutlined, EyeOutlined, StopOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
+import { useDebounce } from 'ahooks';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
@@ -28,6 +30,7 @@ import {
   useTraceExportJob,
   useTraceSseRefresh,
 } from '@core/hooks/api/useTrace';
+import { useDeviceList } from '@core/hooks/api/useDevices';
 import { traceApi } from '@core/services/api/traceApi';
 import type {
   TraceTask,
@@ -35,6 +38,37 @@ import type {
   TraceTaskStatus,
 } from '@core/types/trace';
 import { useT } from '@/hooks/useT';
+
+// prettyXML 简单美化：按 tag 边界拆行 + 计算缩进。
+// SOAP 报文里 CDATA / 自闭合 / 文本节点 各 case 都覆盖，极端复杂报文（嵌套
+// CDATA、含 <> 字面量的属性）不保证完美但远好于单行。
+function prettyXML(xml: string): string {
+  if (!xml || !xml.trim()) return xml;
+  // 把 ><  替换成 >\n<，保留 CDATA 内部不动
+  const cdataPlaceholders: string[] = [];
+  const safe = xml.replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, (m) => {
+    cdataPlaceholders.push(m);
+    return `__CDATA_${cdataPlaceholders.length - 1}__`;
+  });
+  const broken = safe.replace(/>\s*</g, '>\n<');
+  let depth = 0;
+  const lines = broken.split('\n').map((raw) => {
+    const line = raw.trim();
+    if (!line) return '';
+    const isClose = /^<\//.test(line);
+    const isSelfClose = /\/>$/.test(line);
+    const isDeclaration = /^<\?|^<!/.test(line); // <?xml ...?>  <!DOCTYPE
+    // <tag>text</tag> 同一行的不动缩进
+    const isOpenCloseInline = /^<[^/!?][^>]*>[^<]*<\/[^>]+>$/.test(line);
+    if (isClose) depth = Math.max(0, depth - 1);
+    const indented = '  '.repeat(depth) + line;
+    if (!isClose && !isSelfClose && !isDeclaration && !isOpenCloseInline) depth++;
+    return indented;
+  });
+  return lines
+    .join('\n')
+    .replace(/__CDATA_(\d+)__/g, (_, i) => cdataPlaceholders[Number(i)]);
+}
 
 const STATUS_COLOR: Record<TraceTaskStatus, string> = {
   running: 'processing',
@@ -242,7 +276,7 @@ export default function MessageTrace() {
             label={t('trace.column.deviceSn')}
             rules={[{ required: true }]}
           >
-            <Input placeholder="例如 BLQ-001" />
+            <DeviceSnSelect />
           </Form.Item>
           <Form.Item
             name="durationMinutes"
@@ -294,6 +328,26 @@ interface ExportProgressModalProps {
   t: ReturnType<typeof useT>;
 }
 
+// triggerDownload 直接 navigate 到预签名 URL，浏览器看到响应的
+// Content-Disposition: attachment + Content-Type: application/octet-stream
+// 自动下载到默认下载目录。
+//
+// 关键：必须在 user-click 的同步调用栈内执行 a.click() — async/await 跳出
+// 当前 task 会丢失 user gesture 上下文，Chrome 拒绝触发下载（即使有 <a download>
+// 属性也只会 navigate 而非 download）。所以这里**不**做 fetch+blob 转换。
+//
+// 服务器侧已通过预签名 URL query 参数注入 response-content-disposition +
+// response-content-type=application/octet-stream，浏览器无论 navigate 还是
+// click 都会按 attachment 头下载。
+function triggerDownload(url: string): void {
+  const a = document.createElement('a');
+  a.href = url;
+  a.rel = 'noopener noreferrer';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 function ExportProgressModal({ jobId, onClose, t }: ExportProgressModalProps) {
   const { data: job } = useTraceExportJob(jobId);
   // 用 ref 跟踪已自动打开的 job_id — 避免 setState in effect 的 lint 警告
@@ -305,7 +359,7 @@ function ExportProgressModal({ jobId, onClose, t }: ExportProgressModalProps) {
       autoOpenedRef.current !== job.id
     ) {
       autoOpenedRef.current = job.id;
-      window.open(job.downloadUrl, '_blank');
+      triggerDownload(job.downloadUrl);
     }
   }, [job]);
   return (
@@ -331,7 +385,7 @@ function ExportProgressModal({ jobId, onClose, t }: ExportProgressModalProps) {
             <Button
               type="primary"
               icon={<DownloadOutlined />}
-              onClick={() => window.open(job.downloadUrl, '_blank')}
+              onClick={() => triggerDownload(job.downloadUrl!)}
             >
               {t('trace.action.exportXml')}
             </Button>
@@ -354,6 +408,7 @@ interface MessageDetailProps {
 }
 
 function MessageDetail({ msg, t }: MessageDetailProps) {
+  const { token } = theme.useToken();
   // external 报文（inline 空 + 有 object_key）→ React Query 自动 lazy fetch
   const isExternal = !msg.payloadInline && Boolean(msg.payloadObjectKey);
   const { data: fetched, isLoading, error } = useQuery({
@@ -361,7 +416,8 @@ function MessageDetail({ msg, t }: MessageDetailProps) {
     queryFn: () => traceApi.getMessagePayload(msg.taskId, msg.id),
     enabled: isExternal,
   });
-  const payload = msg.payloadInline || fetched || '';
+  const rawPayload = msg.payloadInline || fetched || '';
+  const payload = useMemo(() => prettyXML(rawPayload), [rawPayload]);
   const errorMsg = error instanceof Error ? error.message : null;
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="small">
@@ -375,23 +431,75 @@ function MessageDetail({ msg, t }: MessageDetailProps) {
         {msg.rpcMethod && <Tag style={{ marginLeft: 8 }}>{msg.rpcMethod}</Tag>}
         {msg.payloadObjectKey && <Tag color="gold">external</Tag>}
       </div>
-      <Typography.Paragraph>
-        <pre
-          style={{
-            background: 'var(--color-surface-2, #f5f5f5)',
-            padding: 12,
-            borderRadius: 4,
-            maxHeight: 560,
-            overflow: 'auto',
-            fontSize: 12,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-all',
-          }}
-        >
-          {isLoading ? t('trace.export.running') : errorMsg ? errorMsg : payload || '(empty)'}
-        </pre>
-      </Typography.Paragraph>
+      <pre
+        style={{
+          background: token.colorFillTertiary,
+          color: token.colorText,
+          border: `1px solid ${token.colorBorderSecondary}`,
+          padding: 12,
+          borderRadius: token.borderRadius,
+          maxHeight: 560,
+          overflow: 'auto',
+          fontSize: 12,
+          fontFamily: 'Menlo, Consolas, "Courier New", monospace',
+          whiteSpace: 'pre',
+          margin: 0,
+        }}
+      >
+        {isLoading ? t('trace.export.running') : errorMsg ? errorMsg : payload || '(empty)'}
+      </pre>
     </Space>
+  );
+}
+
+// DeviceSnSelect 设备 SN 选择器 — AutoComplete 范式：
+//   - 不输入不预加载（10 万级规模下避免大批量 fetch）
+//   - 输入 ≥ 1 字符触发搜索；ahooks useDebounce 300ms 减抖
+//   - 后端 searchText 覆盖 SN/名称/IP/MAC；最多回 20 条
+//   - 同时支持粘贴完整 SN（运维场景常见）
+interface DeviceSnSelectProps {
+  value?: string;
+  onChange?: (sn: string) => void;
+}
+function DeviceSnSelect({ value, onChange }: DeviceSnSelectProps) {
+  const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, { wait: 300 });
+  const enabled = debouncedSearch.trim().length >= 1;
+  const { data, isFetching } = useDeviceList(
+    {
+      searchText: debouncedSearch || undefined,
+      page: 1,
+      pageSize: 20,
+    },
+    { enabled }
+  );
+  const options = useMemo(
+    () =>
+      enabled
+        ? (data?.items ?? []).map((d) => ({
+            label: d.sn + (d.name && d.name !== d.sn ? ` (${d.name})` : ''),
+            value: d.sn,
+          }))
+        : [],
+    [data, enabled]
+  );
+  let notFoundContent = '输入 SN / 站点名搜索设备';
+  if (enabled) {
+    notFoundContent = isFetching ? '搜索中...' : '无匹配设备';
+  }
+  return (
+    <Select
+      showSearch
+      allowClear
+      placeholder="输入 SN / 站点名搜索设备（支持粘贴完整 SN）"
+      value={value}
+      onChange={onChange}
+      onSearch={setSearch}
+      filterOption={false}
+      loading={isFetching && enabled}
+      options={options}
+      notFoundContent={notFoundContent}
+    />
   );
 }
 

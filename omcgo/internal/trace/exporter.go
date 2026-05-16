@@ -143,11 +143,16 @@ func (e *Exporter) run(ctx context.Context, jobID uuid.UUID) {
 		return
 	}
 
-	// 写 MinIO exchange/trace-export/{job_id}.xml
+	// 写 MinIO exchange/trace-export/{job_id}.xml。
+	// Content-Type 故意用 application/octet-stream（而非 application/xml）：
+	// 浏览器对 XML MIME 会忽略 <a download> 属性、改在新 tab inline 渲染，
+	// 导致用户找不到下载文件。在预签名 URL 上覆盖 response-content-type 会
+	// 破坏 SigV4 签名（实测 403 SignatureDoesNotMatch），所以在上传源对象时
+	// 就定 octet-stream 一劳永逸。
 	key := fmt.Sprintf("trace-export/%s.xml", job.ID.String())
 	if _, err := e.minio.PutObject(ctx, e.bucket, key,
 		bytes.NewReader(xml), int64(len(xml)),
-		minio.PutObjectOptions{ContentType: "application/xml"}); err != nil {
+		minio.PutObjectOptions{ContentType: "application/octet-stream"}); err != nil {
 		e.failJob(ctx, job, fmt.Sprintf("put object: %v", err))
 		return
 	}

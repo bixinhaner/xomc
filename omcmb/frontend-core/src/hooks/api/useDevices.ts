@@ -32,6 +32,8 @@ export interface UpdateGroupRequest {
 export interface UseDeviceListOptions {
   /** 自动刷新间隔（毫秒），不传或 0 表示不自动刷新 */
   refetchInterval?: number;
+  /** 是否启用 query；false 时不发请求（AutoComplete 异步搜索场景：用户未输入时跳过） */
+  enabled?: boolean;
 }
 
 export function useDeviceList(
@@ -42,6 +44,7 @@ export function useDeviceList(
     queryKey: ['devices', 'list', params],
     queryFn: () => api.getList(params),
     refetchInterval: options?.refetchInterval || false,
+    enabled: options?.enabled ?? true,
   });
 }
 
