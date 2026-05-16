@@ -352,24 +352,35 @@ export default function FileTransferCenter() {
   const taskActionLoading = startTaskMutation.isPending || suspendTaskMutation.isPending
     || terminateTaskMutation.isPending || deleteTaskMutation.isPending;
 
+  const getTaskActionErrorMessage = (error: unknown, fallback: string) => {
+    if (error instanceof Error && error.message.trim().length > 0) {
+      return error.message;
+    }
+    return fallback;
+  };
+
   const handleStartTask = (record: UnifiedFileTransferTask) => {
     void startTaskMutation.mutateAsync(record.id)
-      .then(() => void message.success('任务已启动'));
+      .then(() => void message.success('任务已启动'))
+      .catch((error: unknown) => void message.error(getTaskActionErrorMessage(error, '任务启动失败')));
   };
 
   const handleSuspendTask = (record: UnifiedFileTransferTask) => {
     void suspendTaskMutation.mutateAsync(record.id)
-      .then(() => void message.success('任务已暂停'));
+      .then(() => void message.success('任务已暂停'))
+      .catch((error: unknown) => void message.error(getTaskActionErrorMessage(error, '任务暂停失败')));
   };
 
   const handleTerminateTask = (record: UnifiedFileTransferTask) => {
     void terminateTaskMutation.mutateAsync(record.id)
-      .then(() => void message.success('任务已终止'));
+      .then(() => void message.success('任务已终止'))
+      .catch((error: unknown) => void message.error(getTaskActionErrorMessage(error, '任务终止失败')));
   };
 
   const handleDeleteTask = (record: UnifiedFileTransferTask) => {
     void deleteTaskMutation.mutateAsync(record.id)
-      .then(() => void message.success('任务已删除'));
+      .then(() => void message.success('任务已删除'))
+      .catch((error: unknown) => void message.error(getTaskActionErrorMessage(error, '任务删除失败')));
   };
 
   const openDetailDrawer = (record: UnifiedFileTransferTask) => {
@@ -385,10 +396,18 @@ export default function FileTransferCenter() {
     const showDelete = status !== 'in_progress';
     const items = [];
     if (showStart) {
-      items.push({ key: 'start', label: <Button type="link" size="small" loading={taskActionLoading}>开始</Button> });
+      items.push({
+        key: 'start',
+        label: '开始',
+        onClick: () => handleStartTask(record),
+      });
     }
     if (showSuspend) {
-      items.push({ key: 'suspend', label: <Button type="link" size="small" loading={taskActionLoading}>暂停</Button> });
+      items.push({
+        key: 'suspend',
+        label: '暂停',
+        onClick: () => handleSuspendTask(record),
+      });
     }
     if (showTerminate) {
       items.push({ key: 'terminate', label: <Popconfirm title="确认终止该任务？" onConfirm={() => handleTerminateTask(record)}><Button type="link" size="small" danger loading={taskActionLoading}>终止</Button></Popconfirm> });

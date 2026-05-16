@@ -57,12 +57,11 @@ const fallbackProductTypeOptions = [
 ];
 
 // 文件类型枚举
-type FileType = 'upgrade' | 'ca' | 'fpga' | 'ap';
+type FileType = 'upgrade' | 'fpga' | 'ap';
 
 // 文件类型 tab 到后端 fileType 的映射
-const fileTypeParamMap: Record<FileType, 0 | 1 | 5 | 6> = {
+const fileTypeParamMap: Record<FileType, 0 | 5 | 6> = {
   upgrade: 0,
-  ca: 1,
   fpga: 6,
   ap: 5,
 };
@@ -381,7 +380,6 @@ export default function FirmwareUpload() {
           buttonStyle="solid"
         >
           <Radio.Button value="upgrade">IMAGE</Radio.Button>
-          <Radio.Button value="ca">{t('software.firmware.caVersion')}</Radio.Button>
           <Radio.Button value="fpga">{t('software.firmware.fpgaFile')}</Radio.Button>
           <Radio.Button value="ap">{t('software.firmware.apFile')}</Radio.Button>
         </Radio.Group>
@@ -483,7 +481,7 @@ export default function FirmwareUpload() {
                 {t('software.firmware.fileName')}
                 {importMode === 'add' && (
                   <span style={{ color: '#999', fontSize: 12 }}>
-                    ({t('software.firmware.supportFormat', { format: fileType === 'upgrade' ? 'IMG / EXT' : fileType === 'ca' ? 'Patch' : 'IMG' })})
+                    ({t('software.firmware.supportFormat', { format: fileType === 'upgrade' ? 'IMG / EXT' : 'IMG' })})
                   </span>
                 )}
               </Space>
