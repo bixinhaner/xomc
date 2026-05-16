@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import { Button, Modal, Space, Table, Tag, message } from 'antd';
-import { DownloadOutlined, PlusOutlined } from '@ant-design/icons';
+import { DownloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 
 import ListPageLayout from '@/components/Layout/ListPageLayout';
@@ -8,7 +8,6 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
-import ScriptTaskDrawer from '../components/ScriptTaskDrawer';
 import { useT } from '@/hooks/useT';
 
 import type {
@@ -185,8 +184,8 @@ export default function TaskRecord() {
     });
   }, [deleteTaskMutation, t]);
 
-  // ---- 新建任务抽屉 / 查看 modal state -------------------------------------
-  const [taskDrawerOpen, setTaskDrawerOpen] = useState(false);
+  // ---- 查看 modal state ----------------------------------------------------
+  // 任务记录为只读：记录由"执行 MML 命令 / 脚本任务执行"被动产生，不提供新建/编辑。
   const [viewing, setViewing] = useState<MMLTask | null>(null);
   const { data: resultsData, isLoading: resultsLoading } = useMMLTaskResults(
     viewing?.id ?? null,
@@ -352,18 +351,7 @@ export default function TaskRecord() {
   ], [t]);
 
   return (
-    <ListPageLayout
-      title={t('nav.mml.taskRecord')}
-      extra={
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => setTaskDrawerOpen(true)}
-        >
-          {t('mml.newMmlTask')}
-        </Button>
-      }
-    >
+    <ListPageLayout title={t('nav.mml.taskRecord')}>
       <FilterBar
         filterId="mml-task-record"
         fields={filterFields}
@@ -419,12 +407,6 @@ export default function TaskRecord() {
           </>
         )}
       </Modal>
-
-      <ScriptTaskDrawer
-        open={taskDrawerOpen}
-        onClose={() => setTaskDrawerOpen(false)}
-        onSuccess={() => void refetch()}
-      />
     </ListPageLayout>
   );
 }

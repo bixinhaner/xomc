@@ -6,6 +6,7 @@ import dayjs from 'dayjs';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
+import ScriptTaskDrawer from '../components/ScriptTaskDrawer';
 import { useT } from '@/hooks/useT';
 
 import type { MMLScript } from '@core/types/mml';
@@ -55,6 +56,11 @@ export default function ScriptTask() {
   const scripts = useMemo(() => data?.items ?? [], [data]);
 
   const [viewing, setViewing] = useState<MMLScript | null>(null);
+
+  // 执行脚本：打开 ScriptTaskDrawer 预填该脚本内容，由用户选设备 + 执行方式
+  // （立即=手动执行 / 定时 / 周期=自动执行）后提交。提交即 POST /mml/tasks，
+  // 由后端 scheduler 调度，每次执行在 mml_tasks 落一条任务记录。
+  const [execScript, setExecScript] = useState<MMLScript | null>(null);
 
   // ---- 新增/编辑脚本弹窗 ----------------------------------------------------
   const [editing, setEditing] = useState<MMLScript | null>(null);
@@ -167,11 +173,12 @@ export default function ScriptTask() {
       key: 'operation',
       title: t('table.operation'),
       dataIndex: 'id',
-      width: 170,
+      width: 220,
       fixed: 'right',
       render: (_, record) => (
         <Space size={4}>
           <Button type="link" size="small" onClick={() => setViewing(record)}>{t('mml.info')}</Button>
+          <Button type="link" size="small" onClick={() => setExecScript(record)}>{t('common.execute')}</Button>
           <Button type="link" size="small" onClick={() => openEdit(record)}>{t('common.edit')}</Button>
           <Button type="link" size="small" danger onClick={() => handleDelete(record)}>{t('common.delete')}</Button>
         </Space>
@@ -271,6 +278,19 @@ export default function ScriptTask() {
           </div>
         )}
       </Modal>
+
+      {/* 执行脚本：预填脚本内容，用户补设备 + 执行方式后提交生成任务记录 */}
+      <ScriptTaskDrawer
+        open={Boolean(execScript)}
+        onClose={() => setExecScript(null)}
+        prefillContent={execScript?.content ?? ''}
+        prefillTaskName={
+          execScript
+            ? `${execScript.scriptName}_${dayjs().format('YYYYMMDD_HHmmss')}`
+            : undefined
+        }
+        onSuccess={() => void refetch()}
+      />
     </ListPageLayout>
   );
 }
