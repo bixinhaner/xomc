@@ -59,6 +59,18 @@ OMC 采用**「构建侧编译、运维侧只跑二进制」**：
 | Docker | 支持 `docker pull --platform` 多架构拉取 |
 | 网络 | 公网（用于拉取 Go/npm 依赖与 Docker 镜像）；构建机若也离线见 §8 |
 | 架构产出 | **每个版本固定同时产出 amd64 与 arm64 两套二进制与镜像**，对应两个交付包 |
+| 运行身份 | **普通用户**运行，不要 `sudo`（见下方说明） |
+
+> ⚠️ **不要用 `sudo` 运行 `build-release.sh`**：
+> - 它是构建脚本，`go build` / `npm build` 都不需要 root；
+> - `sudo` 会重置 `PATH`（sudoers 的 `secure_path`），导致脚本找不到 `go`/`npm`
+>   —— 即使 `go version` 在你的 shell 里能跑，仍会报"缺少构建工具：go"；
+> - `sudo` 还会让 `dist/`、Go 构建缓存、`node_modules` 归 root，后续难处理。
+>
+> `docker` 所需权限请用 **docker 组**解决，而非 sudo 整个脚本：
+> ```bash
+> sudo usermod -aG docker $USER && newgrp docker   # 或重新登录
+> ```
 
 ---
 
@@ -109,54 +121,85 @@ omc-release-<版本>-<架构>/
 
 ---
 
-## 5. 一键构建（推荐）
+## 5. 构建工具与流程
 
-构建流程已固化为工具 **`deployments/release/build-release.sh`**。
+构建工具位于 `deployments/release/`，**拆成两个独立脚本**——因为基础设施镜像
+不常变、二进制要频繁发版：
 
 ```
 deployments/release/
-├── README.md                 # 工具说明
-├── release.conf              # 配置：镜像清单、目标架构
-├── build-release.sh          # ⭐ 生成交付物的工具
+├── release.conf              # 配置：基线版本号、基础设施镜像清单
+├── build-images.sh           # ① 基础设施镜像构建（不常跑）
+├── build-release.sh          # ② 交付包构建 / 发版（常跑）
 ├── bundle/                   # 进交付包的静态模板（docker/ + deploy/）
+├── images-cache/             # build-images.sh 产物，build-release.sh 复用（git 忽略）
 └── dist/                     # 交付包产出目录（git 忽略）
 ```
 
-**步骤**：
+| 工具 | 职责 | 运行频率 |
+|------|------|---------|
+| `build-images.sh` | 拉取并导出基础设施 Docker 镜像 → `images-cache/` | **低**：仅在 `release.conf` 调整镜像版本时 |
+| `build-release.sh` | 编译二进制 + 构建前端 + 组装交付包（复用 `images-cache/`） | **高**：每次发版 |
+
+> ⚠️ 两个脚本都**用普通用户运行，不要 sudo**（见 §3）。
+
+### 5.1 第一步：构建基础设施镜像（首次 / 镜像版本变更时）
+
+```bash
+cd deployments/release
+# 一次性准备：把 Docker 静态二进制包放进 bundle/docker/
+#   从 https://download.docker.com/linux/static/stable/ 下载对应架构的
+#   docker-<版本>.tgz（amd64 用 x86_64/，arm64 用 aarch64/），详见 bundle/docker/README.md。
+
+./build-images.sh                  # 产出 images-cache/infra-images-{amd64,arm64}.tar
+#   --arch amd64        只构建指定架构
+#   --with-monitoring   额外导出监控栈镜像
+```
+
+镜像缓存生成一次后可反复复用，日常发版无需重跑本步。
+
+### 5.2 第二步：构建交付包（每次发版）
 
 ```bash
 cd deployments/release
 
-# 1) 一次性准备：把 Docker 静态二进制包放进 bundle/docker/
-#    从 https://download.docker.com/linux/static/stable/ 下载对应架构的
-#    docker-<版本>.tgz（amd64 用 x86_64/，arm64 用 aarch64/），
-#    详见 bundle/docker/README.md。
+# 小版本（日常）：不带 -v，版本自动生成
+./build-release.sh
 
-# 2) 生成交付包（默认同时产出 amd64 + arm64）
-./build-release.sh -v 1.2.0
+# 大版本：用 -v 手动指定
+./build-release.sh -v 2.0.0
 
-#    可选参数：
-#      -v <版本>          版本号（缺省取 git describe）
-#      --arch amd64       只构建指定架构
-#      --with-monitoring  额外打包监控栈镜像
+#   --arch amd64        只构建指定架构（缺省 amd64 + arm64）
 ```
 
 产出：
 
 ```
-dist/omc-release-1.2.0-amd64.tar.gz   + .sha256
-dist/omc-release-1.2.0-arm64.tar.gz   + .sha256
+dist/omc-release-<版本>-amd64.tar.gz   + .sha256
+dist/omc-release-<版本>-arm64.tar.gz   + .sha256
 ```
 
 交付包通过移动介质（U 盘 / 光盘 / 堡垒机文件摆渡）送入内网。
+
+### 5.3 版本号规则
+
+| 场景 | 命令 | 版本号 |
+|------|------|--------|
+| **小版本**（频繁发布） | `./build-release.sh`（不带 `-v`） | 自动生成 `<RELEASE_BASE_VERSION>-<YYYYMMDD-HHMM>`，如 `1.0.0-20260516-1430` |
+| **大版本** | `./build-release.sh -v 2.0.0` | 手动指定 |
+
+- 基线版本 `RELEASE_BASE_VERSION` 在 `release.conf` 维护。
+- 发大版本时，建议同步把 `release.conf` 的 `RELEASE_BASE_VERSION` 更新为该版本号，
+  使之后的小版本基线对齐。
 
 ---
 
 ## 6. 构建流程详解
 
-> 本章是 `build-release.sh` 内部流程的展开说明，便于理解与排错；也可据此手动构建。
+> 本章是两个构建脚本内部流程的展开说明，便于理解与排错；也可据此手动构建。
+> §6.3 属 `build-images.sh`（基础设施，不常跑）；其余属 `build-release.sh`（发版，常跑）。
 
-### 6.1 编译 Go 二进制（amd64 + arm64 双架构）
+### 6.1 编译 Go 二进制（amd64 + arm64 双架构）—— build-release.sh
 
 Go 原生支持交叉编译，**每个版本必须同时编译 amd64 与 arm64**，与构建机自身架构无关：
 
@@ -174,7 +217,7 @@ done
 
 > Go 第三方组件（130 个，见 `go.mod`）在此步由 `go build` 自动拉取并**编译进二进制**，运维侧不再需要它们。
 
-### 6.2 构建前端（架构无关，只做一次）
+### 6.2 构建前端（架构无关，只做一次）—— build-release.sh
 
 ```bash
 cd omcmb/webcode
@@ -184,31 +227,36 @@ npm run build                              # 产出 dist/（纯静态）
 
 两个架构的交付包复用同一份 `web/dist`。
 
-### 6.3 收集 Docker 镜像（amd64 + arm64 双架构）
+### 6.3 收集 Docker 镜像（amd64 + arm64 双架构）—— build-images.sh
+
+> 本步由独立工具 `build-images.sh` 完成，产物落 `images-cache/`，不常跑；
+> `build-release.sh` 只是复用 `images-cache/` 里的 tar，不重复拉取。
 
 Docker 镜像按架构区分。镜像导出**不依赖构建机自身架构**——用 `docker pull --platform`
 显式逐架构拉取（拉取只下载分层、不执行，跨架构可行）。但 `docker save` 读的是
 构建机本地镜像库，故每个架构在 pull 前先 `docker rmi` 清本地同名镜像，保证导出确定：
 
 ```bash
-IMAGES="timescale/timescaledb:<具体版本>-pg16 redis:7-alpine nats:2.10-alpine \
-        minio/minio:RELEASE.<具体日期> nginx:alpine"
 for ARCH in amd64 arm64; do
-  for IMG in $IMAGES; do
-    docker rmi -f "$IMG" >/dev/null 2>&1 || true   # 清缓存，使 save 架构确定
+  for IMG in "${INFRA_IMAGES[@]}"; do            # 镜像清单来自 release.conf
+    docker rmi -f "$IMG" >/dev/null 2>&1 || true # 清缓存，使 save 架构确定
     docker pull --platform linux/$ARCH "$IMG"
   done
-  docker save -o images/infra-images-$ARCH.tar $IMAGES
+  docker save -o images-cache/infra-images-$ARCH.tar "${INFRA_IMAGES[@]}"
 done
 ```
 
-### 6.4 打包与校验
+### 6.4 组装与打包 —— build-release.sh
+
+`build-release.sh` 逐架构组装交付包：编译产物 + 前端 + `data/configs/migrations/etc`
++ `bundle/` 部署模板 + **从 `images-cache/` 复用的镜像 tar** + 运维侧文档，
+生成 `VERSION` / `README` / `checksums.sha256` 后打包：
 
 ```bash
 for ARCH in amd64 arm64; do
   PKG=omc-release-<版本>-$ARCH
-  # 组装：bin/<架构> + images/<架构> + web/data/configs/migrations/etc/deploy/docs
-  ...
+  # 组装 bin/ web/ data/ configs/ migrations/ etc/ deploy/ docker/ docs/，
+  # images/ 直接 cp images-cache/infra-images-$ARCH.tar
   ( cd "$PKG" && find . -type f ! -name checksums.sha256 -exec sha256sum {} + > checksums.sha256 )
   tar czf $PKG.tar.gz $PKG/
   sha256sum $PKG.tar.gz > $PKG.tar.gz.sha256
@@ -252,6 +300,7 @@ done
 
 ## 9. 交付前自检清单
 
+- [ ] `images-cache/` 已由 `build-images.sh` 生成，且镜像版本为本次发布所需
 - [ ] 版本号正确，`VERSION` 文件与交付包名一致
 - [ ] amd64、arm64 两个交付包均已产出
 - [ ] 镜像标签已固化为具体版本（非 `latest`），且 `deploy/.env` 与之一致
