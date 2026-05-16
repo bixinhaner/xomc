@@ -23,6 +23,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import { EyeOutlined, MoreOutlined, PlusOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import { useT } from '@/hooks/useT';
 
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import {
@@ -152,6 +153,7 @@ function getUpgradeTypeLabel(category: string, fallback: string) {
 
 export default function FileTransferCenter() {
   const navigate = useNavigate();
+  const t = useT();
   const { data: taskTypes = [], isLoading: taskTypesLoading } = useUnifiedFileTransferTaskTypes();
   const { data: productClasses = [] } = useProductClasses();
   const { data: firmwareData } = useSoftwareVersions({ page: 1, pageSize: 200 });
@@ -340,13 +342,23 @@ export default function FileTransferCenter() {
     ),
   };
 
+  // Failure reason i18n — mirrors UpgradePlan renderFailureReason
+  const DEVICE_CODES = new Set(['DOWNLOAD_FAULT', 'TC_FAULT', 'UPGRADE_5G_FAILED']);
+  const TIMEOUT_CODES = new Set(['DOWNLOAD_TIMEOUT', 'TASK_TIMEOUT']);
+
   const failureReasonColumn = {
-    title: '失败原因',
+    title: t('software.failureReason'),
     dataIndex: 'failureReason',
     key: 'failureReason',
-    width: 180,
-    ellipsis: true,
-    render: (value: string) => value || '-',
+    width: 260,
+    render: (value: string) => {
+      if (!value) return '-';
+      const i18nLabel = t(`software.failureCode.${value}` as Parameters<typeof t>[0]);
+      if (i18nLabel && i18nLabel !== `software.failureCode.${value}`) {
+        return <span style={{ color: '#ff4d4f' }}>{i18nLabel}</span>;
+      }
+      return <span style={{ color: '#ff4d4f' }}>{value}</span>;
+    },
   };
 
   const taskActionLoading = startTaskMutation.isPending || suspendTaskMutation.isPending
