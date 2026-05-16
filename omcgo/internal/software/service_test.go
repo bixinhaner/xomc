@@ -119,11 +119,11 @@ func (m *svcMockSubTaskRepo) UpdateStatus(ctx context.Context, id uuid.UUID, sta
 	return nil
 }
 func (m *svcMockSubTaskRepo) Update(_ context.Context, _ *UpgradeSubTask) error { return nil }
-func (m *svcMockSubTaskRepo) List(_ context.Context, _ SubTaskFilter) (*model.ListResponse[UpgradeSubTask], error) {
-	return model.NewListResponse([]UpgradeSubTask{}, 0, 1, 20), nil
+func (m *svcMockSubTaskRepo) List(_ context.Context, _ SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
+	return model.NewListResponse([]UpgradeSubTaskWithTaskName{}, 0, 1, 20), nil
 }
-func (m *svcMockSubTaskRepo) ListByTaskID(_ context.Context, _ uuid.UUID, _ SubTaskFilter) (*model.ListResponse[UpgradeSubTask], error) {
-	return model.NewListResponse([]UpgradeSubTask{}, 0, 1, 20), nil
+func (m *svcMockSubTaskRepo) ListByTaskID(_ context.Context, _ uuid.UUID, _ SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
+	return model.NewListResponse([]UpgradeSubTaskWithTaskName{}, 0, 1, 20), nil
 }
 func (m *svcMockSubTaskRepo) ListAll(_ context.Context, _ AllSubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
 	return model.NewListResponse([]UpgradeSubTaskWithTaskName{}, 0, 1, 20), nil

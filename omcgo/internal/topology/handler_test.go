@@ -280,7 +280,7 @@ func (m *mockTopoNodeRepo) List(_ context.Context, filter TopoNodeFilter) (*mode
 	return model.NewListResponse(items, int64(len(items)), filter.Page, filter.PageSize), nil
 }
 
-func (m *mockTopoNodeRepo) ListAll(_ context.Context, _ *uuid.UUID) ([]TopoNode, error) {
+func (m *mockTopoNodeRepo) ListAll(_ context.Context, _ *uuid.UUID, _ *string, _ *string) ([]TopoNode, error) {
 	items := make([]TopoNode, 0, len(m.nodes))
 	for _, n := range m.nodes {
 		items = append(items, n)
@@ -391,7 +391,7 @@ func newTestHandler() (*Handler, *mockDeviceGroupRepo, *mockSiteRepo, *mockTopoN
 	edgeRepo := newMockTopoEdgeRepo()
 	logger := zap.NewNop()
 	service := NewDeviceGroupService(groupRepo, nodeRepo, nil, logger)
-	h := NewHandler(groupRepo, service, siteRepo, nodeRepo, edgeRepo)
+	h := NewHandler(groupRepo, service, siteRepo, nodeRepo, edgeRepo, nil, logger)
 	return h, groupRepo, siteRepo, nodeRepo, edgeRepo
 }
 

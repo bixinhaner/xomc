@@ -256,18 +256,18 @@ const deleteObjectXML = soapEnvelopeOpen +
 
 const downloadXML = soapEnvelopeOpen +
 	`<cwmp:Download>` +
-	`<CommandKey>{{.CommandKey}}</CommandKey>` +
-	`<FileType>{{.FileType}}</FileType>` +
-	`<URL>{{.URL}}</URL>` +
-	`<Username>{{.Username}}</Username>` +
-	`<Password>{{.Password}}</Password>` +
-	`<FileSize>{{.FileSize}}</FileSize>` +
-	`<TargetFileName>{{.TargetFileName}}</TargetFileName>` +
-	`<DelaySeconds>{{.DelaySeconds}}</DelaySeconds>` +
-	`<Md5>{{.Md5}}</Md5>` +
-	`<RawMode>{{.RawMode}}</RawMode>` +
-	`<SuccessURL></SuccessURL>` +
-	`<FailureURL></FailureURL>` +
+	`<cwmp:CommandKey>{{.CommandKey}}</cwmp:CommandKey>` +
+	`<cwmp:FileType>{{.FileType}}</cwmp:FileType>` +
+	`<cwmp:URL>{{.URL}}</cwmp:URL>` +
+	`<cwmp:Username>{{.Username}}</cwmp:Username>` +
+	`<cwmp:Password>{{.Password}}</cwmp:Password>` +
+	`<cwmp:FileSize>{{.FileSize}}</cwmp:FileSize>` +
+	`<cwmp:TargetFileName>{{.TargetFileName}}</cwmp:TargetFileName>` +
+	`<cwmp:DelaySeconds>{{.DelaySeconds}}</cwmp:DelaySeconds>` +
+	`<cwmp:Md5>{{.Md5}}</cwmp:Md5>` +
+	`<cwmp:RawMode>{{.RawMode}}</cwmp:RawMode>` +
+	`<cwmp:SuccessURL></cwmp:SuccessURL>` +
+	`<cwmp:FailureURL></cwmp:FailureURL>` +
 	`</cwmp:Download>` + soapEnvelopeClose
 
 const uploadXML = soapEnvelopeOpen +

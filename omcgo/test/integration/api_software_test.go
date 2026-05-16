@@ -351,11 +351,11 @@ func (s *swHSubTaskRepoStub) UpdateStatus(_ context.Context, _ uuid.UUID, _ soft
 	return nil
 }
 func (s *swHSubTaskRepoStub) Update(_ context.Context, _ *software.UpgradeSubTask) error { return nil }
-func (s *swHSubTaskRepoStub) List(_ context.Context, _ software.SubTaskFilter) (*model.ListResponse[software.UpgradeSubTask], error) {
-	return model.NewListResponse([]software.UpgradeSubTask{}, 0, 1, 20), nil
+func (s *swHSubTaskRepoStub) List(_ context.Context, _ software.SubTaskFilter) (*model.ListResponse[software.UpgradeSubTaskWithTaskName], error) {
+	return model.NewListResponse([]software.UpgradeSubTaskWithTaskName{}, 0, 1, 20), nil
 }
-func (s *swHSubTaskRepoStub) ListByTaskID(_ context.Context, _ uuid.UUID, _ software.SubTaskFilter) (*model.ListResponse[software.UpgradeSubTask], error) {
-	return model.NewListResponse([]software.UpgradeSubTask{}, 0, 1, 20), nil
+func (s *swHSubTaskRepoStub) ListByTaskID(_ context.Context, _ uuid.UUID, _ software.SubTaskFilter) (*model.ListResponse[software.UpgradeSubTaskWithTaskName], error) {
+	return model.NewListResponse([]software.UpgradeSubTaskWithTaskName{}, 0, 1, 20), nil
 }
 func (s *swHSubTaskRepoStub) GetActiveByDeviceID(_ context.Context, _ uuid.UUID) (*software.UpgradeSubTask, error) {
 	return nil, nil
