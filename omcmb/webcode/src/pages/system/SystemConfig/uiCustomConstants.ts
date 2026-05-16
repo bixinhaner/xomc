@@ -4,7 +4,6 @@
 
 export const UI_CUSTOM_KEYS = [
   'ui_omc_name',
-  'ui_color',
   'ui_login_background',
   'ui_menu_logo_up',
   'ui_menu_logo_down',
@@ -12,7 +11,6 @@ export const UI_CUSTOM_KEYS = [
 
 export const UI_CUSTOM_DEFAULTS: Record<string, string> = {
   ui_omc_name: 'BaiOMC',
-  ui_color: '#FF4614',
   ui_login_background: './images/login/login_bg.png',
   ui_menu_logo_up: './images/login/nav_logo_collapse.png',
   ui_menu_logo_down: './images/login/logo_big.png',

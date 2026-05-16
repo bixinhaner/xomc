@@ -118,7 +118,7 @@ const MapPopup: React.FC<MapPopupProps> = ({
 
   // 值样式
   const valueStyle: React.CSSProperties = {
-    color: '#262626',
+    color: 'var(--color-neutral-800)',
     flex: 1,
   };
 
@@ -145,7 +145,7 @@ const MapPopup: React.FC<MapPopupProps> = ({
       <div style={cardStyle}>
         {/* Header */}
         <div style={headerStyle}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: '#262626' }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-neutral-800)' }}>
             📍 {device.name}
           </span>
         </div>
@@ -172,7 +172,7 @@ const MapPopup: React.FC<MapPopupProps> = ({
           <span style={{ fontSize: 12, color: '#D9D9D9' }}>|</span>
 
           {/* 告警 */}
-          <span style={{ fontSize: 12, color: '#595959' }}>告警:</span>
+          <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>告警:</span>
           {hasAlarm ? (
             <span style={alarmBadgeStyle}>
               {device.alarmCount! > 99 ? '99+' : device.alarmCount}

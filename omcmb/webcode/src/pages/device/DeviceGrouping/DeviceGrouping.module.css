@@ -23,6 +23,11 @@
   color: #262626;
 }
 
+:global([data-theme='tech']) .groupNodeLevel1 .treeNodeText,
+:global([data-theme='cyberpunk']) .groupNodeLevel1 .treeNodeText {
+  color: #e8e8e8;
+}
+
 .groupNodeLevel2 {
   padding-left: 20px;
 }
@@ -30,6 +35,11 @@
 .groupNodeLevel2 .treeNodeText {
   font-size: 13px;
   color: #595959;
+}
+
+:global([data-theme='tech']) .groupNodeLevel2 .treeNodeText,
+:global([data-theme='cyberpunk']) .groupNodeLevel2 .treeNodeText {
+  color: #a6a6a6;
 }
 
 /* 分组统计标签 */

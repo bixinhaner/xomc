@@ -2,7 +2,6 @@ import {
   App,
   Form,
   Input,
-  ColorPicker,
   Upload,
   Button,
   Divider,
@@ -12,7 +11,7 @@ import {
   Col,
   Card,
 } from 'antd';
-import { InboxOutlined, EyeOutlined, UndoOutlined } from '@ant-design/icons';
+import { InboxOutlined, UndoOutlined } from '@ant-design/icons';
 import type { RcFile } from 'antd/es/upload';
 import { useT } from '@/hooks/useT';
 import { useUploadUIAsset } from '@core/hooks/api/useSystem';
@@ -48,15 +47,6 @@ export default function UICustomSettings({
   const logoSmallUrl = (Form.useWatch('ui_menu_logo_up', form) as string | undefined) ?? '';
   const logoLargeUrl = (Form.useWatch('ui_menu_logo_down', form) as string | undefined) ?? '';
 
-  // 主题色实时预览：动态注入 CSS 变量；只在当前会话生效，刷新页面还原。
-  const handlePreviewColor = () => {
-    const raw = form.getFieldValue('ui_color') as unknown;
-    const hex = typeof raw === 'string' ? raw : '';
-    if (!hex) return;
-    document.documentElement.style.setProperty('--ant-color-primary', hex);
-    void message.success(t('system.ui.previewApplied'));
-  };
-
   // 通用上传 before-upload 钩子：体积/类型预校验通过 → 调后端上传 → 写回 form 字段。
   const buildBeforeUpload = (key: string, kind: UIAssetKind, sizeLimit: number) => {
     return (file: RcFile): boolean => {
@@ -87,29 +77,13 @@ export default function UICustomSettings({
       initialValues={initialValues ?? UI_CUSTOM_DEFAULTS}
     >
       <Row gutter={24}>
-        <Col span={12}>
+        <Col span={24}>
           <Form.Item
             name="ui_omc_name"
             label={t('system.ui.omcName')}
             rules={[{ required: true, message: t('system.ui.pleaseInputOmcName') }]}
           >
             <Input placeholder={t('system.ui.pleaseInputSystemName')} maxLength={32} />
-          </Form.Item>
-        </Col>
-        <Col span={12}>
-          <Form.Item
-            name="ui_color"
-            label={t('system.ui.themeColor')}
-            rules={[{ required: true }]}
-            // antd v5 ColorPicker 的 onChange 第二参为 hex 字符串；用它把表单值固化为 string。
-            getValueFromEvent={(_color: unknown, hex: string) => hex}
-          >
-            <Space>
-              <ColorPicker format="hex" />
-              <Button icon={<EyeOutlined />} onClick={handlePreviewColor}>
-                {t('common.preview')}
-              </Button>
-            </Space>
           </Form.Item>
         </Col>
       </Row>

@@ -13,7 +13,7 @@ export const groupTitleStyle: React.CSSProperties = {
   margin: '0 0 12px 0',
   paddingLeft: 12,
   position: 'relative',
-  color: '#333',
+  color: 'var(--color-neutral-700)',
 };
 
 // 一级分组容器样式
