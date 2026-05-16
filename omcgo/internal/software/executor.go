@@ -58,7 +58,7 @@ func NewUpgradeExecutor(
 
 // ExecuteOne runs the upgrade flow for a single sub-task.
 // Flow: Step 1 (online check) → Step 2 (send Download cmd) → Step 3 (monitor download) → wait for events.
-func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTask, fw *FirmwareVersion, isKeepConfig bool) {
+func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTask, fw *FirmwareVersion, isKeepConfig bool, downloadFileType string) {
 	dev, err := e.deviceRepo.GetByID(ctx, subTask.DeviceID)
 	if err != nil {
 		e.failSubTask(ctx, subTask, "Upgrade can not be started, device not found.", FailureDeviceNotFound)
@@ -103,6 +103,10 @@ func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTas
 	// Step 2: Build and push Download command
 	commandKey := e.adapter.DownloadCommandKey(subTask.ID.String())
 	downloadURL := "firmware/" + fw.MinIOPath
+	effectiveDownloadFileType := downloadFileType
+	if effectiveDownloadFileType == "" {
+		effectiveDownloadFileType = e.adapter.DownloadFileType(fw.FileType)
+	}
 
 	rawMode := "true"
 	if isKeepConfig {
@@ -111,7 +115,7 @@ func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTas
 
 	paramsJSON, err := json.Marshal(map[string]interface{}{
 		"command_key":     commandKey,
-		"file_type":       e.adapter.DownloadFileType(fw.FileType),
+		"file_type":       effectiveDownloadFileType,
 		"url":             downloadURL,
 		"file_size":       fw.FileSize,
 		"file_name":       fw.FileName,
@@ -169,7 +173,7 @@ func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTas
 		zap.String("device_sn", dev.SerialNumber),
 		zap.String("command_key", commandKey),
 		zap.String("download_url", downloadURL),
-		zap.String("file_type", e.adapter.DownloadFileType(fw.FileType)),
+		zap.String("file_type", effectiveDownloadFileType),
 		zap.String("file_name", fw.FileName),
 		zap.Int64("file_size", fw.FileSize),
 		zap.String("md5", fw.MD5Val),
@@ -419,15 +423,17 @@ func (e *UpgradeExecutor) HandleDeviceOnline(ctx context.Context, evt event.Even
 			return nil
 		}
 
-		// Get isKeepConfig from parent task
 		isKeepConfig := true
+		downloadFileType := ""
 		if task, err := e.taskRepo.GetByID(ctx, subTask.TaskID); err == nil {
 			isKeepConfig = task.IsKeepConfig
+			downloadFileType = task.DownloadFileType
 		}
 
 		// Reset status to pending for re-execution
 		e.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradePending, "")
-		go e.ExecuteOne(context.Background(), subTask, fw, isKeepConfig)
+
+		go e.ExecuteOne(context.Background(), subTask, fw, isKeepConfig, downloadFileType)
 	}
 
 	return nil

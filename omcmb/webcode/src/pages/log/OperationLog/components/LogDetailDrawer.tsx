@@ -59,7 +59,7 @@ export default function LogDetailDrawer({ open, log, onClose }: LogDetailDrawerP
           </Tag>
         </Descriptions.Item>
         <Descriptions.Item label={t('log.reason')}>
-          <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: log.result === '0' ? '#ff4d4f' : undefined }}>
+          <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: log.result === 'failure' ? '#ff4d4f' : undefined }}>
             {log.reason || log.message || '-'}
           </div>
         </Descriptions.Item>

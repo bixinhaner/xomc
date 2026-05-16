@@ -131,6 +131,15 @@ export const NAV_CONFIG: NavConfig = [
     ],
   },
   {
+    key: 'transfer',
+    label: 'nav.transfer',
+    iconName: 'CloudServerOutlined',
+    children: [
+      { key: 'transfer-task-create', label: 'nav.transfer.taskCreate', path: '/transfer/center' },
+      { key: 'transfer-template-config', label: 'nav.transfer.templateConfig', path: '/transfer/template-management', requireAdmin: true },
+    ],
+  },
+  {
     key: 'backup',
     label: 'nav.backup',
     iconName: 'SaveOutlined',
@@ -142,27 +151,19 @@ export const NAV_CONFIG: NavConfig = [
       // { key: 'backup-strategy', label: 'nav.backup.policy',    path: '/backup/policy' },
     ],
   },
-  {
-    key: 'software',
-    label: 'nav.software',
-    iconName: 'CloudUploadOutlined',
-    children: [
-      // { key: 'sw-query',    label: 'nav.software.version',      path: '/software/version' },      // 隐藏版本查询
-      { key: 'sw-upgrade',  label: 'nav.software.versionUpgrade',  path: '/software/upgrade-plan' },
-      // { key: 'sw-activate', label: 'nav.software.activation',   path: '/software/activation' },    // 隐藏激活计划
-      { key: 'sw-upload',   label: 'nav.software.upgradeFile',     path: '/software/firmware' },
-      { key: 'sw-rollback', label: 'nav.software.versionRollback', path: '/software/rollback' },
-    ],
-  },
-  {
-    key: 'transfer',
-    label: 'nav.transfer',
-    iconName: 'CloudServerOutlined',
-    children: [
-      { key: 'transfer-task-create', label: 'nav.transfer.taskCreate', path: '/transfer/center' },
-      { key: 'transfer-template-config', label: 'nav.transfer.templateConfig', path: '/transfer/template-management', requireAdmin: true },
-    ],
-  },
+  // 软件管理菜单已移除，升级功能已整合到文件传输模块
+  // {
+  //   key: 'software',
+  //   label: 'nav.software',
+  //   iconName: 'CloudUploadOutlined',
+  //   children: [
+  //     // { key: 'sw-query',    label: 'nav.software.version',      path: '/software/version' },
+  //     // { key: 'sw-upgrade',  label: 'nav.software.versionUpgrade',  path: '/software/upgrade-plan' },
+  //     // { key: 'sw-activate', label: 'nav.software.activation',   path: '/software/activation' },
+  //     // { key: 'sw-upload',   label: 'nav.software.upgradeFile',     path: '/software/firmware' },
+  //     // { key: 'sw-rollback', label: 'nav.software.versionRollback', path: '/software/rollback' },
+  //   ],
+  // },
   // {
   //   key: 'file',
   //   label: 'nav.file',

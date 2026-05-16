@@ -116,7 +116,7 @@ const ExportDrawer: React.FC<ExportDrawerProps> = ({
   };
 
   // 获取进度条状态
-  const getProgressStatus = (status: TaskStatus): '' | 'exception' | 'normal' | 'active' | 'success' => {
+  const getProgressStatus = (status: TaskStatus): 'exception' | 'normal' | 'active' | 'success' => {
     if (status === 'failed') return 'exception';
     if (status === 'completed') return 'success';
     if (status === 'processing') return 'active';

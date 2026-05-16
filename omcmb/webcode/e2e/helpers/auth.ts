@@ -21,8 +21,8 @@ export async function login(
   await page.goto('/login');
 
   // Fill in the login form
-  await page.getByPlaceholder(/username|user/i).first().fill(credentials.username);
-  await page.getByPlaceholder(/password/i).first().fill(credentials.password);
+  await page.getByPlaceholder(/username|user|用户名/i).first().fill(credentials.username);
+  await page.getByPlaceholder(/password|密码/i).first().fill(credentials.password);
 
   // Submit
   await page.locator('button[type="submit"]').click();

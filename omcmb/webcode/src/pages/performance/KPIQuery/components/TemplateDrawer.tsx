@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Drawer,
   Form,
@@ -350,7 +350,8 @@ export default function TemplateDrawer({
   };
 
   // 查询粒度变化
-  const handleReportPeriodChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleReportPeriodChange = (e: any) => {
     const value = e.target.value as '15' | '60' | '1440';
     setReportPeriod(value);
     if (value === '1440') {
@@ -362,7 +363,7 @@ export default function TemplateDrawer({
   };
 
   // 时段模式变化
-  const handleCheckAllChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCheckAllChange = (e: { target: { checked?: boolean } }) => {
     const value = e.target.checked ? '1' : '0';
     setCheckAll(value);
     if (value === '1') {
@@ -398,6 +399,7 @@ export default function TemplateDrawer({
     const keys = Array.isArray(checkedKeys) ? checkedKeys : checkedKeys.checked;
     setSelectedKpis(keys as string[]);
   };
+  void _handleKpiTreeCheck;
 
   // 打开批量输入弹窗
   const handleOpenBatchInput = () => {
@@ -531,6 +533,7 @@ export default function TemplateDrawer({
 
     return filterTree(MOCK_KPI_CATEGORIES);
   }, [kpiSearchText, MOCK_KPI_CATEGORIES]);
+  void _filteredKpiCategories;
 
   // 过滤后的设备列表
   const filteredDevices = useMemo(() => {
@@ -595,6 +598,7 @@ export default function TemplateDrawer({
     const end = start + devicePageSize;
     return filteredDevices.slice(start, end);
   }, [filteredDevices, deviceCurrentPage, devicePageSize]);
+  void _paginatedDevices;
 
   // 分页后的设备组列表
   const _paginatedGroups = useMemo(() => {
@@ -602,6 +606,7 @@ export default function TemplateDrawer({
     const end = start + devicePageSize;
     return filteredGroups.slice(start, end);
   }, [filteredGroups, deviceCurrentPage, devicePageSize]);
+  void _paginatedGroups;
 
   // Modal 中过滤后的设备列表（排除已选设备）
   const filteredModalDevices = useMemo(() => {

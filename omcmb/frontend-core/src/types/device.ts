@@ -6,6 +6,32 @@ export type EngStatus = 'commissioned' | 'uncommissioned' | 'decommissioned';
 
 export type MgmtStatus = 'managed' | 'unmanaged' | 'pre-managed';
 
+// 运营商代码 — 与后端 global.CarrierCode 对齐（cmcc/ctcc/cucc）。
+export type CarrierCode = 'cmcc' | 'ctcc' | 'cucc';
+
+// 制式 — 与后端 model.Technology 对齐（lte/nr）。
+export type DeviceTechnology = 'lte' | 'nr';
+
+// 手动注册设备入参（与后端 device.CreateDeviceRequest 一一对应）。
+// 字段语义：
+//   - serialNumber / oui / carrier / technology 后端 required + oneof 校验
+//   - productClass / manufacturer / modelName 自由文本，可空（CPE Bootstrap 时 RegisterFromInform 会用真实值 UPDATE 覆盖）
+//   - 其余字段为站点 / 经纬度 / IP，可空
+export interface CreateDeviceInput {
+  serialNumber: string;
+  oui: string;
+  carrier: CarrierCode;
+  technology: DeviceTechnology;
+  productClass?: string;
+  manufacturer?: string;
+  modelName?: string;
+  ipAddress?: string;
+  siteName?: string;
+  siteId?: string;
+  latitude?: number;
+  longitude?: number;
+}
+
 export interface Device {
   id: string;
   sn: string;

@@ -250,7 +250,7 @@ export default function KPIStandardReport() {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
 
   // Custom tree nodes state
-  const [customNodes, setCustomNodes] = useState<{ key: string; parentKey: string; title: string }[]>([]);
+  const [customNodes] = useState<{ key: string; parentKey: string; title: string }[]>([]);
 
   const levelOptions = useMemo(() => [
     { label: t('kpi.all'), value: '' },
@@ -601,7 +601,7 @@ export default function KPIStandardReport() {
           custName: values.custName,
           indicatorLevel: values.indicatorLevel,
           arithmetic: editCalcFormula,
-          updater: currentUser?.userName || currentUser?.username || 'system',
+          updater: currentUser?.username || 'system',
           deviceType,
         });
       }
@@ -629,7 +629,7 @@ export default function KPIStandardReport() {
       dataIndex: 'kpiId',
       width: 120,
       fixed: 'right',
-      render: (_, row) => (
+      render: (_: unknown, row: KPIIndicatorRow) => (
         <Space size={4} style={{ display: 'inline-flex', flexWrap: 'nowrap', whiteSpace: 'nowrap' }}>
           <Button
             type="link"
@@ -638,7 +638,7 @@ export default function KPIStandardReport() {
           >
             {t('common.edit')}
           </Button>
-          {row.isCustomize && (
+          {Boolean(row.isCustomize) && (
             <Button
               type="link"
               size="small"
@@ -656,7 +656,7 @@ export default function KPIStandardReport() {
       title: t('kpi.measure'),
       dataIndex: 'isEnable',
       width: 55,
-      render: (val) => (
+      render: (val: unknown) => (
         <Tag color={val ? 'success' : 'default'}>
           {val ? t('common.yes') : t('common.no')}
         </Tag>
@@ -669,7 +669,7 @@ export default function KPIStandardReport() {
       width: 130,
       mono: true,
       copyable: true,
-      render: (val) => (
+      render: (val: unknown) => (
         <Link
           style={{ fontFamily: 'monospace', fontSize: 11, fontWeight: 500 }}
           onClick={() => void navigate(`/performance/kpi-standard/detail/${deviceType}/${String(val)}`)}
@@ -690,7 +690,7 @@ export default function KPIStandardReport() {
       dataIndex: 'custName',
       width: 120,
       ellipsis: true,
-      render: (val) => val || '-',
+      render: (val: unknown) => val || '-',
     },
     {
       key: 'productType',
@@ -703,7 +703,7 @@ export default function KPIStandardReport() {
       title: t('kpi.level'),
       dataIndex: 'indicatorLevel',
       width: 65,
-      render: (val) => val === 'device' ? 'Device' : 'PLMN',
+      render: (val: unknown) => val === 'device' ? 'Device' : 'PLMN',
     },
     {
       key: 'unit',
@@ -715,7 +715,7 @@ export default function KPIStandardReport() {
       key: 'isCustomize',
       title: t('kpi.indicatorType'),
       width: 120,
-      render: (_, row) => (
+      render: (_: unknown, row: KPIIndicatorRow) => (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 0 }}>
           <Tag style={{ marginRight: 0 }} color={row.indicatorType === 'counter' ? 'green' : 'blue'}>
             {row.indicatorType === 'counter' ? 'Counter' : 'KPI'}
@@ -737,7 +737,7 @@ export default function KPIStandardReport() {
       title: t('kpi.updateTime'),
       dataIndex: 'updateTime',
       width: 160,
-      render: (val) => formatDateTime(val),
+      render: (val: unknown) => formatDateTime(val as string | undefined),
     },
   ].filter((col) => {
     if (isGNB && (col.key === 'productType' || col.key === 'indicatorLevel')) return false;
@@ -832,7 +832,7 @@ export default function KPIStandardReport() {
         custName: values.custName,
         indicatorLevel: values.indicatorLevel,
         arithmetic: calcFormula,
-        updater: currentUser?.userName || currentUser?.username || 'system',
+        updater: currentUser?.username || 'system',
         deviceType,
       });
       void message.success(t('common.success'));

@@ -18,7 +18,7 @@ export interface AddChildGroupDrawerProps {
   onAddFilter: () => void;
   onRemoveFilter: (id: string) => void;
   onUpdateFilter: (id: string, field: keyof NameFilterItem, value: string) => void;
-  t: (id: string, values?: Record<string, unknown>) => string;
+  t: (id: string, values?: Record<string, string | number>) => string;
 }
 
 /**

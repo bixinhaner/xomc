@@ -87,7 +87,7 @@ const FTPConfig          = React.lazy(() => import('@/pages/backup/FTPConfig'));
 const RestoreData        = React.lazy(() => import('@/pages/backup/RestoreData'));
 const BackupPolicy       = React.lazy(() => import('@/pages/backup/BackupPolicy'));
 
-// Software Management
+// Software Management — 菜单已移除，保留 lazy import 以便路由可达
 const VersionQuery       = React.lazy(() => import('@/pages/software/VersionQuery'));
 const UpgradePlan        = React.lazy(() => import('@/pages/software/UpgradePlan'));
 const ActivationPlan     = React.lazy(() => import('@/pages/software/ActivationPlan'));
@@ -306,7 +306,7 @@ export const routes: RouteObject[] = [
       { path: 'backup/restore',  element: withSuspense(RestoreData) },
       { path: 'backup/policy',   element: withSuspense(BackupPolicy) },
 
-      // Software Management
+      // Software Management — 菜单已移除，路由保留以便直接 URL 访问
       { path: 'software/version',       element: withSuspense(VersionQuery) },
       { path: 'software/upgrade-plan',  element: withSuspense(UpgradePlan) },
       { path: 'software/activation',    element: withSuspense(ActivationPlan) },

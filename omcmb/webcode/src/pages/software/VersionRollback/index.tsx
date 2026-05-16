@@ -67,16 +67,18 @@ const TASK_STATUS_COLORS: Record<number, string> = {
   4: 'success',     // ended
 };
 
-// Task result display color
-const TASK_RESULT_COLORS: Record<string, string> = {
+// Task result display color (T-0136: 保留为 export 占位避免 TS6133)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const TASK_RESULT_COLORS: Record<string, string> = {
   success: 'success',
   partial: 'warning',
   failed: 'error',
   terminated: 'default',
 };
 
-// Sub-task status display color
-const SUB_TASK_STATUS_COLORS: Record<string, string> = {
+// Sub-task status display color (T-0136: 保留为 export 占位避免 TS6133)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const SUB_TASK_STATUS_COLORS: Record<string, string> = {
   pending: 'default',
   downloading: 'processing',
   rebooting: 'processing',
@@ -107,7 +109,7 @@ export default function VersionRollback() {
   // ---- Pagination & filter state ----
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [filters, setFilters] = useState<Record<string, unknown>>({});
+  const [, setFilters] = useState<Record<string, unknown>>({});
 
   // ---- Tab state ----
   const [activeTab, setActiveTab] = useState<'task' | 'device'>('task');
@@ -145,7 +147,7 @@ export default function VersionRollback() {
   const retryMutation = useRetryTask();
 
   // ---- Task status config with i18n ----
-  const TASK_STATUS_CONFIG = useMemo(() => ({
+  const TASK_STATUS_CONFIG = useMemo((): Record<number, { color: string; text: string }> => ({
     1: { color: TASK_STATUS_COLORS[1], text: t('software.status.waiting') },
     2: { color: TASK_STATUS_COLORS[2], text: t('software.status.inProgress') },
     3: { color: TASK_STATUS_COLORS[3], text: t('software.status.paused') },
@@ -442,7 +444,7 @@ export default function VersionRollback() {
       {
         onSuccess: () => {
           const execMethodText = executionMethod === 'immediate' ? t('software.upgrade.immediateExecText') :
-                                executionMethod === 'suspend' ? t('software.upgrade.suspendExecText') : t('software.upgrade.scheduledExecText', { time: scheduledTime?.format('YYYY-MM-DD HH:mm') });
+                                executionMethod === 'suspend' ? t('software.upgrade.suspendExecText') : t('software.upgrade.scheduledExecText', { time: scheduledTime?.format('YYYY-MM-DD HH:mm') ?? '' });
           const deviceCount = selectAllOfType ? allDevicesCountOfType : drawerDevices.length;
           const deviceInfo = selectAllOfType
             ? t('software.upgrade.productTypeAll', { type: drawerProductType, count: deviceCount })
@@ -601,25 +603,26 @@ export default function VersionRollback() {
       dataIndex: 'taskName',
       width: 150,
       ellipsis: true,
-      render: (val: string, record: UpgradeTaskInfo) => (
+      render: (val: unknown, record: UpgradeTaskInfo) => (
         <Button
           type="link"
           size="small"
           onClick={() => handleViewTaskDetail(record)}
           style={{ padding: 0 }}
         >
-          {val || '-'}
+          {(val as string) || '-'}
         </Button>
       ),
     },
     { key: 'operator', title: t('table.operator'), dataIndex: 'createUser', width: 100 },
-    { key: 'operateTime', title: t('software.operateTime'), dataIndex: 'createdAt', width: 160, render: (val: string) => val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-' },
+    { key: 'operateTime', title: t('software.operateTime'), dataIndex: 'createdAt', width: 160, render: (val: unknown) => val ? dayjs(val as string).format('YYYY-MM-DD HH:mm:ss') : '-' },
     {
       key: 'status',
       title: t('software.taskStatus'),
       dataIndex: 'status',
       width: 100,
-      render: (val: string) => {
+      render: (raw: unknown) => {
+        const val = raw as string;
         const code = mapTaskStatusToCode(val);
         const cfg = TASK_STATUS_CONFIG[code] ?? { color: 'default', text: String(val) };
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
@@ -640,14 +643,15 @@ export default function VersionRollback() {
       title: t('table.result'),
       dataIndex: 'result',
       width: 100,
-      render: (val: string | undefined) => {
+      render: (raw: unknown) => {
+        const val = raw as string | undefined;
         if (!val) return '-';
         const cfg = TASK_RESULT_MAP[val as keyof typeof TASK_RESULT_MAP] ?? { color: 'default', text: val };
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
     },
-    { key: 'startTime', title: t('software.startTime'), dataIndex: 'startedAt', width: 160, render: (val: string) => val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-' },
-    { key: 'endTime', title: t('software.endTime'), dataIndex: 'endedAt', width: 160, render: (val: string) => val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-' },
+    { key: 'startTime', title: t('software.startTime'), dataIndex: 'startedAt', width: 160, render: (val: unknown) => val ? dayjs(val as string).format('YYYY-MM-DD HH:mm:ss') : '-' },
+    { key: 'endTime', title: t('software.endTime'), dataIndex: 'endedAt', width: 160, render: (val: unknown) => val ? dayjs(val as string).format('YYYY-MM-DD HH:mm:ss') : '-' },
   ], [t, TASK_STATUS_CONFIG, TASK_RESULT_MAP, resumeMutation, suspendMutation, terminateMutation]);
 
   // ---- Device list tab columns (sub-tasks for selected rollback task) ----
@@ -673,9 +677,9 @@ export default function VersionRollback() {
         return null;
       },
     },
-    { key: 'deviceSn', title: t('software.stationCode'), dataIndex: 'deviceSn', width: 120, render: (val: string) => val || '-' },
-    { key: 'deviceName', title: t('software.stationName'), dataIndex: 'deviceSn', width: 150, render: (val: string) => val || '-' },
-    { key: 'targetVersion', title: t('software.rollback.originalVersion'), dataIndex: 'destVersion', width: 100, render: (val: string) => val || '-' },
+    { key: 'deviceSn', title: t('software.stationCode'), dataIndex: 'deviceSn', width: 120, render: (val: unknown) => (val as string) || '-' },
+    { key: 'deviceName', title: t('software.stationName'), dataIndex: 'deviceSn', width: 150, render: (val: unknown) => (val as string) || '-' },
+    { key: 'targetVersion', title: t('software.rollback.originalVersion'), dataIndex: 'destVersion', width: 100, render: (val: unknown) => (val as string) || '-' },
     {
       key: 'progress',
       title: t('software.rollback.rollbackProgress'),
@@ -700,19 +704,20 @@ export default function VersionRollback() {
       title: t('table.result'),
       dataIndex: 'status',
       width: 100,
-      render: (val: string) => {
+      render: (raw: unknown) => {
+        const val = raw as string;
         const cfg = SUB_TASK_STATUS_MAP[val as keyof typeof SUB_TASK_STATUS_MAP] ?? { color: 'default', text: val };
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
     },
-    { key: 'failureReason', title: t('software.failureReason'), dataIndex: 'errorMessage', width: 150, ellipsis: true, render: (val: string, record: UpgradeSubTaskInfo) => {
-      const text = record.failureReason || val;
+    { key: 'failureReason', title: t('software.failureReason'), dataIndex: 'errorMessage', width: 150, ellipsis: true, render: (val: unknown, record: UpgradeSubTaskInfo) => {
+      const text = record.failureReason || (val as string);
       return text ? <span style={{ color: '#ff4d4f' }}>{text}</span> : '-';
     }},
     { key: 'operator', title: t('table.operator'), width: 100, render: () => '-' },
-    { key: 'operateTime', title: t('software.operateTime'), dataIndex: 'createdAt', width: 160, render: (val: string) => val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-' },
-    { key: 'startTime', title: t('software.startTime'), dataIndex: 'startedAt', width: 160, render: (val: string) => val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-' },
-    { key: 'endTime', title: t('software.endTime'), dataIndex: 'completedAt', width: 160, render: (val: string) => val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-' },
+    { key: 'operateTime', title: t('software.operateTime'), dataIndex: 'createdAt', width: 160, render: (val: unknown) => val ? dayjs(val as string).format('YYYY-MM-DD HH:mm:ss') : '-' },
+    { key: 'startTime', title: t('software.startTime'), dataIndex: 'startedAt', width: 160, render: (val: unknown) => val ? dayjs(val as string).format('YYYY-MM-DD HH:mm:ss') : '-' },
+    { key: 'endTime', title: t('software.endTime'), dataIndex: 'completedAt', width: 160, render: (val: unknown) => val ? dayjs(val as string).format('YYYY-MM-DD HH:mm:ss') : '-' },
   ], [t, SUB_TASK_STATUS_MAP]);
 
   // ---- Header buttons ----
@@ -1213,19 +1218,19 @@ export default function VersionRollback() {
                       title: t('software.stationCode'),
                       dataIndex: 'deviceSn',
                       width: 100,
-                      render: (val: string) => val || '-',
+                      render: (val: unknown) => (val as string) || '-',
                     },
                     {
                       title: t('software.stationName'),
                       dataIndex: 'deviceSn',
                       ellipsis: true,
-                      render: (val: string) => val || '-',
+                      render: (val: unknown) => (val as string) || '-',
                     },
                     {
                       title: t('software.upgrade.currentVersion'),
                       dataIndex: 'oriVersion',
                       width: 80,
-                      render: (val: string) => val || '-',
+                      render: (val: unknown) => (val as string) || '-',
                     },
                     {
                       title: t('software.progress'),

@@ -28,6 +28,7 @@ export const STEP_LABELS: Record<TransferStepId, string> = {
   WAIT_FILE_TRANSFER: '等待文件传输',
   WAIT_TRANSFER_COMPLETE: '等待 TransferComplete',
   WAIT_INFORM_EVENT: '等待 Inform 事件',
+  WAIT_REBOOT_COMPLETE: '等待重启完成',
 };
 
 export const EXECUTION_MODE_OPTIONS: Array<{ label: string; value: TransferExecutionMode }> = [

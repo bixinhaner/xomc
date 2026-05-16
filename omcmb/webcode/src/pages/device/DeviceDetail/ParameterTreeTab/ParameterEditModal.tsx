@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Modal, Form, Input, Select, Typography, Alert, Space, Tag } from 'antd';
 import type { ParameterType, ParameterConstraints } from '@core/types/deviceParameter';
 import { useUpdateParameters } from '@core/hooks/api/useDeviceParameters';

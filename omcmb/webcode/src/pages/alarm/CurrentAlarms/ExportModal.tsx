@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { DatePicker, Modal, Spin, Tree, Typography } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
@@ -23,10 +23,12 @@ interface ExportModalProps {
   confirmLoading?: boolean;
 }
 
-// 构建树形数据，支持 checkable
+// 构建树形数据，支持 checkable（T-0136: checkedKeys 由调用方传入但本函数不直接消费，
+// 通过 Tree.checkedKeys prop 由 antd 自带处理；保留参数兼容签名）
 function buildTreeData(
   groups: DeviceGroup[],
-  checkedKeys: string[]
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _checkedKeys: string[]
 ): DataNode[] {
   // 找出根节点：允许 null / undefined / 空字符串，或父节点不在当前可见集合内。
   // 后一种情况用于兼容权限裁剪后的残缺树，避免整棵树空白。
@@ -35,7 +37,6 @@ function buildTreeData(
 
   function buildNode(group: DeviceGroup): DataNode {
     const children = groups.filter((g) => g.parentId === group.id);
-    const _isChecked = checkedKeys.includes(group.id);
 
     return {
       key: group.id,
@@ -76,7 +77,7 @@ export default function ExportModal({ open, onClose, onConfirm, confirmLoading }
     }
   }, [open]);
 
-  const handleCheck: TreeProps['onCheck'] = useCallback((checked, _info) => {
+  const handleCheck: TreeProps['onCheck'] = useCallback((checked: React.Key[] | { checked: React.Key[]; halfChecked: React.Key[] }, _info: unknown) => {
     // checked 可能是字符串数组或 { checked: string[], halfChecked: string[] }
     if (Array.isArray(checked)) {
       setCheckedKeys(checked as string[]);

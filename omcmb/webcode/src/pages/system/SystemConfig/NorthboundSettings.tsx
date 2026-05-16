@@ -42,6 +42,7 @@ const mockUsers: NorthboundUser[] = [
 const _settingRowStyle: React.CSSProperties = {
   marginBottom: 16,
 };
+void _settingRowStyle;
 
 // 信息项样式
 const infoItemStyle: React.CSSProperties = {
@@ -245,6 +246,7 @@ export default function NorthboundSettings({ form }: NorthboundSettingsProps) {
     setUsers(users.filter(u => u.id !== id));
     void message.success(t('common.deleteSuccess'));
   };
+  void _handleDeleteUser;
 
   const handleToggleEnable = (user: NorthboundUser) => {
     const newEnable = user.userEnable === '1' ? '0' : '1';

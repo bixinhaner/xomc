@@ -32,6 +32,7 @@ import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn, BatchAction } from '@/components/DataTable';
+import type { ColumnsType } from 'antd/es/table';
 import { useT } from '@/hooks/useT';
 
 // 任务状态类型
@@ -498,7 +499,7 @@ export default function DeviceLog() {
       title: t('log.deviceCode'),
       dataIndex: 'deviceCode',
       width: 140,
-      render: (val: string) => <Typography.Text style={{ fontFamily: 'monospace' }}>{val}</Typography.Text>,
+      render: (val: unknown) => <Typography.Text style={{ fontFamily: 'monospace' }}>{val as string}</Typography.Text>,
     },
     {
       key: 'deviceName',
@@ -512,7 +513,8 @@ export default function DeviceLog() {
       title: t('log.collectionStatus'),
       dataIndex: 'taskStatus',
       width: 180,
-      render: (val: TaskStatus) => {
+      render: (raw: unknown) => {
+        const val = raw as TaskStatus;
         const cfg = statusKeys[val];
         return <Tag color={cfg.color}>{t(cfg.key)}</Tag>;
       },
@@ -528,14 +530,14 @@ export default function DeviceLog() {
       title: t('log.executeMethod'),
       dataIndex: 'executeType',
       width: 120,
-      render: (val: ExecuteType) => val === 'Immediately' ? t('log.immediateExecute') : t('log.periodicExecute'),
+      render: (val: unknown) => (val as ExecuteType) === 'Immediately' ? t('log.immediateExecute') : t('log.periodicExecute'),
     },
     {
       key: 'reportPeriod',
       title: t('log.period'),
       dataIndex: 'reportPeriod',
       width: 120,
-      render: (val?: string) => val ?? '-',
+      render: (val: unknown) => (val as string | undefined) ?? '-',
     },
     {
       key: 'failureReason',
@@ -543,7 +545,7 @@ export default function DeviceLog() {
       dataIndex: 'failureReason',
       width: 200,
       ellipsis: true,
-      render: (val?: string) => val ?? '-',
+      render: (val: unknown) => (val as string | undefined) ?? '-',
     },
     {
       key: 'updateTime',
@@ -554,7 +556,7 @@ export default function DeviceLog() {
   ], [t]);
 
   // 结果表格列
-  const resultColumns = [
+  const resultColumns: ColumnsType<LogResultItem> = [
     {
       title: t('log.logFileName'),
       dataIndex: 'fileName',

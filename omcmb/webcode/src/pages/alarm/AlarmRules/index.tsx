@@ -247,10 +247,10 @@ export default function AlarmRules() {
         dataIndex: 'ruleName',
         width: 200,
         ellipsis: true,
-        render: (val: string, record) => (
+        render: (val: unknown, record) => (
           <Space size={4}>
             {record.isDefault && <Tag color="blue">{t('alarm.defaultRule')}</Tag>}
-            <span>{val}</span>
+            <span>{String(val ?? '')}</span>
           </Space>
         ),
       },
@@ -259,11 +259,12 @@ export default function AlarmRules() {
         title: t('alarm.deviceType'),
         dataIndex: 'deviceType',
         width: 120,
-        render: (val: string, record) => {
+        render: (val: unknown, record) => {
           if (record.isDefault) {
             return <Text type="secondary">ALL</Text>;
           }
-          return DEVICE_TYPE_CONFIG[val] || val || '-';
+          const s = String(val ?? '');
+          return DEVICE_TYPE_CONFIG[s] || s || '-';
         },
       },
       {
@@ -271,11 +272,12 @@ export default function AlarmRules() {
         title: t('alarm.ruleType'),
         dataIndex: 'ruleType',
         width: 140,
-        render: (val: string) => {
-          const config = RULE_TYPE_CONFIG[val];
+        render: (val: unknown) => {
+          const s = String(val ?? '');
+          const config = RULE_TYPE_CONFIG[s];
           return (
             <Tag color={config?.color || 'default'}>
-              {config ? t(config.label) : val}
+              {config ? t(config.label) : s}
             </Tag>
           );
         },
@@ -285,7 +287,7 @@ export default function AlarmRules() {
         title: t('alarm.operator'),
         dataIndex: 'userCode',
         width: 120,
-        render: (val: string) => val || '-',
+        render: (val: unknown) => String(val ?? '') || '-',
       },
       {
         key: 'updateTime',

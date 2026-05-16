@@ -85,7 +85,7 @@ const MapControls: React.FC<MapControlsProps> = ({
           e.currentTarget.style.background = '#F5F5F5';
         }}
       >
-        <span style={{ fontSize: 16, fontWeight: 600, color: '#262626' }}>+</span>
+        <span style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-neutral-800)' }}>+</span>
       </button>
 
       <div style={dividerStyle} />
@@ -104,7 +104,7 @@ const MapControls: React.FC<MapControlsProps> = ({
           e.currentTarget.style.background = '#F5F5F5';
         }}
       >
-        <span style={{ fontSize: 16, fontWeight: 600, color: '#262626' }}>−</span>
+        <span style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-neutral-800)' }}>−</span>
       </button>
     </div>
   );

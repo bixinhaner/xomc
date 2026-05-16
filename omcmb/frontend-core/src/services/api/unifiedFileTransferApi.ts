@@ -109,4 +109,28 @@ export const unifiedFileTransferApi = {
     const { data } = await http.put<UnifiedFileTransferTaskType>(`/ufte/task-types/${input.typeCode}`, input);
     return data;
   },
+
+  async deleteTaskType(typeCode: string): Promise<void> {
+	await http.delete(`/ufte/task-types/${typeCode}`);
+  },
+
+  async startTask(id: string): Promise<void> {
+    await http.put(`/ufte/tasks/${id}/start`);
+  },
+
+  async suspendTask(id: string): Promise<void> {
+    await http.put(`/ufte/tasks/${id}/suspend`);
+  },
+
+  async terminateTask(id: string): Promise<void> {
+    await http.put(`/ufte/tasks/${id}/terminate`);
+  },
+
+  async deleteTask(id: string): Promise<void> {
+    await http.delete(`/ufte/tasks/${id}`);
+  },
+
+  async retryTask(id: string): Promise<void> {
+    await http.post(`/ufte/tasks/${id}/retry`);
+  },
 };

@@ -35,6 +35,7 @@ export interface BatchAction {
   label: string;
   icon?: React.ReactNode;
   danger?: boolean;
+  disabled?: boolean;
   onClick: (selectedKeys: React.Key[]) => void;
 }
 

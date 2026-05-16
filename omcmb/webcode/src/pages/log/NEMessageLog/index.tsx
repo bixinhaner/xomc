@@ -176,7 +176,7 @@ export default function NEMessageLog() {
       ellipsis: true,
       render: (val) => (
         <Tooltip title={String(val)}>
-          <span style={{ fontSize: 12, color: '#595959' }}>{truncate(String(val), 50)}</span>
+          <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>{truncate(String(val), 50)}</span>
         </Tooltip>
       ),
     },
@@ -187,7 +187,7 @@ export default function NEMessageLog() {
       ellipsis: true,
       render: (val) => (
         <Tooltip title={String(val)}>
-          <span style={{ fontSize: 12, color: '#595959' }}>{truncate(String(val), 40)}</span>
+          <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>{truncate(String(val), 40)}</span>
         </Tooltip>
       ),
     },

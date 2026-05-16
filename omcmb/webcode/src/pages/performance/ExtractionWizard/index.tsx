@@ -177,7 +177,7 @@ export default function ExtractionWizard() {
                 <Select options={GRANULARITY_OPTIONS} />
               </Form.Item>
               <Form.Item label={t('common.more')}>
-                <SchedulePicker value={scheduleValue} onChange={setScheduleValue} />
+                <SchedulePicker value={scheduleValue as Parameters<typeof SchedulePicker>[0]['value']} onChange={setScheduleValue} />
               </Form.Item>
             </Form>
             {timeConfig.granularity && (

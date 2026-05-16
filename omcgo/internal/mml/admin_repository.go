@@ -229,20 +229,35 @@ func (r *PgSubFieldRepository) ListByCommand(ctx context.Context, commandID uuid
 	return out, nil
 }
 
-// ListEnrichedByCommand 返回 sub_fields JOIN mml_params 富集后的视图，
+// ListEnrichedByCommand 返回 sub_fields JOIN standard_params 富集后的视图，
 // 供 GET /mml/commands/:id/sub-fields API 直接 marshal 给前端 SubFieldChecklist /
 // SubFieldInputList 渲染使用，无需前端再发查 param 元数据。
+//
+// migration 000113 之后 sub_fields.standard_path_id 直接挂 standard_params
+// （系统级标准 path 字典）；MML 模块不再持有独立 path 字典。standard_params
+// 字段更少（无 is_writable / supports_add / js_regex / constraint_text_i18n），
+// 这里补默认值兜底，前端 SubFieldChecklist / SubFieldInputList 接口不变。
 func (r *PgSubFieldRepository) ListEnrichedByCommand(ctx context.Context, commandID uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
 	const sqlText = `
 SELECT
-    csf.id, csf.command_id, csf.param_id, csf.mml_code, csf.label_i18n,
+    csf.id, csf.command_id, csf.standard_path_id AS param_id, csf.mml_code, csf.label_i18n,
     csf.default_selected, csf.is_required, csf.sort_order, csf.created_at, csf.updated_at,
-    p.tr069_path, p.value_type,
-    p.access_type, p.is_object, p.supports_add, p.supports_delete,
-    p.change_applies, p.constraint_text_i18n,
-    p.default_value, p.js_regex, p.name_i18n
+    sp.standard_path                      AS tr069_path,
+    COALESCE(sp.data_type, 'string')      AS value_type,
+    COALESCE(sp.access, 'READ_ONLY')      AS access_type,
+    (sp.entry_type = 'object')            AS is_object,
+    false                                 AS supports_add,
+    false                                 AS supports_delete,
+    COALESCE(sp.change_applies, 'Immediate') AS change_applies,
+    '{}'::jsonb                           AS constraint_text_i18n,
+    NULL::text                            AS default_value,
+    NULL::text                            AS js_regex,
+    jsonb_build_object(
+        'zh-CN', sp.standard_path,
+        'en-US', sp.standard_path
+    )                                     AS name_i18n
 FROM mml_command_sub_fields csf
-JOIN mml_params p ON p.id = csf.param_id
+JOIN standard_params sp ON sp.id = csf.standard_path_id
 WHERE csf.command_id = $1
 ORDER BY csf.sort_order ASC, csf.mml_code ASC`
 

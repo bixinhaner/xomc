@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Empty, Input, Modal, Tree, Typography } from 'antd';
 import { FolderOutlined, SearchOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
@@ -68,7 +68,7 @@ export default function MoveToGroupModal({
 }: MoveToGroupModalProps) {
   const t = useT();
   const { data: groupsData, isLoading } = useDeviceGroups();
-  const groups: GroupItem[] = groupsData ?? [];
+  const groups: GroupItem[] = (groupsData && 'groups' in groupsData ? (groupsData as { groups: GroupItem[] }).groups : (groupsData as unknown as GroupItem[] | undefined)) ?? [];
 
   const [selectedGroupId, setSelectedGroupId] = useState<string>('');
   const [searchText, setSearchText] = useState('');

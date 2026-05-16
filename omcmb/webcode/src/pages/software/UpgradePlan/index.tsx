@@ -75,8 +75,9 @@ const TASK_STATUS_COLORS: Record<number, string> = {
   4: 'success',     // ended
 };
 
-// Task result display color
-const TASK_RESULT_COLORS: Record<string, string> = {
+// Task result display color (T-0136: 保留为 export 占位避免 TS6133)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const TASK_RESULT_COLORS: Record<string, string> = {
   success: 'success',
   partial: 'warning',
   failed: 'error',
@@ -91,8 +92,9 @@ const TASK_TYPE_COLORS: Record<number, string> = {
   6: 'purple',  // FPGA
 };
 
-// Sub-task status display color
-const SUB_TASK_STATUS_COLORS: Record<string, string> = {
+// Sub-task status display color (T-0136: 保留为 export 占位避免 TS6133)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const SUB_TASK_STATUS_COLORS: Record<string, string> = {
   pending: 'default',
   downloading: 'processing',
   rebooting: 'processing',
@@ -123,7 +125,7 @@ export default function UpgradePlan() {
   // ---- Pagination & filter state ----
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [filters, setFilters] = useState<Record<string, unknown>>({});
+  const [, setFilters] = useState<Record<string, unknown>>({});
 
   // ---- Tab state ----
   const [activeTab, setActiveTab] = useState<'task' | 'device'>('task');
@@ -530,7 +532,7 @@ export default function UpgradePlan() {
       {
         onSuccess: () => {
           const execMethodText = executionMethod === 'immediate' ? t('software.upgrade.immediateExecText') :
-                                executionMethod === 'suspend' ? t('software.upgrade.suspendExecText') : t('software.upgrade.scheduledExecText', { time: scheduledTime?.format('YYYY-MM-DD HH:mm') });
+                                executionMethod === 'suspend' ? t('software.upgrade.suspendExecText') : t('software.upgrade.scheduledExecText', { time: scheduledTime?.format('YYYY-MM-DD HH:mm') ?? '' });
           const deviceCount = selectAllOfType ? allDevicesCountOfType : drawerDevices.length;
           const deviceInfo = selectAllOfType
             ? t('software.upgrade.productTypeAll', { type: drawerProductType, count: deviceCount })
@@ -580,11 +582,6 @@ export default function UpgradePlan() {
         void message.error(t('common.operationFailed') + ': ' + String(err));
       },
     });
-  };
-
-  const handleEditTask = (_record: UpgradeTaskInfo) => {
-    // Edit is not yet supported via API, placeholder
-    void message.info(t('common.featureNotAvailable') ?? '功能暂未开放');
   };
 
   const handleViewTaskDetail = (record: UpgradeTaskInfo) => {
@@ -743,31 +740,32 @@ export default function UpgradePlan() {
       dataIndex: 'taskName',
       width: 150,
       ellipsis: true,
-      render: (val: string, record: UpgradeTaskInfo) => (
+      render: (val: unknown, record: UpgradeTaskInfo) => (
         <Button
           type="link"
           size="small"
           onClick={() => handleViewTaskDetail(record)}
           style={{ padding: 0 }}
         >
-          {val || '-'}
+          {(val as string) || '-'}
         </Button>
       ),
     },
     { key: 'operator', title: t('table.operator'), dataIndex: 'createUser', width: 100 },
-    { key: 'operateTime', title: t('software.operateTime'), dataIndex: 'createdAt', width: 160, render: (val: string) => val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-' },
+    { key: 'operateTime', title: t('software.operateTime'), dataIndex: 'createdAt', width: 160, render: (val: unknown) => val ? dayjs(val as string).format('YYYY-MM-DD HH:mm:ss') : '-' },
     {
       key: 'status',
       title: t('software.taskStatus'),
       dataIndex: 'status',
       width: 100,
-      render: (val: string) => {
+      render: (raw: unknown) => {
+        const val = raw as string;
         const code = mapTaskStatusToCode(val);
         const cfg = TASK_STATUS_CONFIG[code] ?? { color: 'default', text: String(val) };
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
     },
-    { key: 'targetVersion', title: t('software.upgrade.targetVersion'), dataIndex: 'fileName', width: 120, render: (val: string) => val || '-' },
+    { key: 'targetVersion', title: t('software.upgrade.targetVersion'), dataIndex: 'fileName', width: 120, render: (val: unknown) => (val as string) || '-' },
     {
       key: 'canaryStage',
       title: t('software.canary.stage') || '灰度阶段',
@@ -803,7 +801,8 @@ export default function UpgradePlan() {
       title: t('software.upgrade.upgradeType'),
       dataIndex: 'taskType',
       width: 100,
-      render: (val: number) => {
+      render: (raw: unknown) => {
+        const val = raw as number;
         const cfg = TASK_TYPE_MAP[val as keyof typeof TASK_TYPE_MAP] ?? { color: 'default', text: String(val) };
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
@@ -833,14 +832,15 @@ export default function UpgradePlan() {
       title: t('table.result'),
       dataIndex: 'result',
       width: 100,
-      render: (val: string | undefined) => {
+      render: (raw: unknown) => {
+        const val = raw as string | undefined;
         if (!val) return '-';
         const cfg = TASK_RESULT_MAP[val as keyof typeof TASK_RESULT_MAP] ?? { color: 'default', text: val };
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
     },
-    { key: 'startTime', title: t('software.startTime'), dataIndex: 'startedAt', width: 160, render: (val: string) => val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-' },
-    { key: 'endTime', title: t('software.endTime'), dataIndex: 'endedAt', width: 160, render: (val: string) => val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-' },
+    { key: 'startTime', title: t('software.startTime'), dataIndex: 'startedAt', width: 160, render: (val: unknown) => val ? dayjs(val as string).format('YYYY-MM-DD HH:mm:ss') : '-' },
+    { key: 'endTime', title: t('software.endTime'), dataIndex: 'endedAt', width: 160, render: (val: unknown) => val ? dayjs(val as string).format('YYYY-MM-DD HH:mm:ss') : '-' },
   ], [t, TASK_STATUS_CONFIG, TASK_TYPE_MAP, TASK_RESULT_MAP, resumeMutation, suspendMutation, terminateMutation]);
 
   // ---- Device list tab columns (sub-tasks for selected main task) ----
@@ -866,10 +866,10 @@ export default function UpgradePlan() {
         return null;
       },
     },
-    { key: 'deviceSn', title: t('software.stationCode'), dataIndex: 'deviceSn', width: 120, render: (val: string) => val || '-' },
-    { key: 'taskName', title: t('software.taskName'), dataIndex: 'taskName', width: 150, ellipsis: true, render: (val: string) => val || '-' },
-    { key: 'sourceVersion', title: t('software.upgrade.sourceVersion'), dataIndex: 'oriVersion', width: 100, render: (val: string) => val || '-' },
-    { key: 'targetVersion', title: t('software.upgrade.targetVersion'), dataIndex: 'destVersion', width: 100, render: (val: string) => val || '-' },
+    { key: 'deviceSn', title: t('software.stationCode'), dataIndex: 'deviceSn', width: 120, render: (val: unknown) => (val as string) || '-' },
+    { key: 'taskName', title: t('software.taskName'), dataIndex: 'taskName', width: 150, ellipsis: true, render: (val: unknown) => (val as string) || '-' },
+    { key: 'sourceVersion', title: t('software.upgrade.sourceVersion'), dataIndex: 'oriVersion', width: 100, render: (val: unknown) => (val as string) || '-' },
+    { key: 'targetVersion', title: t('software.upgrade.targetVersion'), dataIndex: 'destVersion', width: 100, render: (val: unknown) => (val as string) || '-' },
     {
       key: 'upgradeType',
       title: t('software.upgrade.upgradeType'),
@@ -916,16 +916,17 @@ export default function UpgradePlan() {
       title: t('table.result'),
       dataIndex: 'status',
       width: 100,
-      render: (val: string) => {
+      render: (raw: unknown) => {
+        const val = raw as string;
         const cfg = SUB_TASK_STATUS_MAP[val as keyof typeof SUB_TASK_STATUS_MAP] ?? { color: 'default', text: val };
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
     },
     { key: 'failureReason', title: t('software.failureReason'), dataIndex: 'failureReason', width: 200, render: (_: unknown, record: UpgradeSubTaskInfo) => renderFailureReason(record) },
     { key: 'operator', title: t('table.operator'), dataIndex: 'taskId', width: 100, render: () => '-' },
-    { key: 'operateTime', title: t('software.operateTime'), dataIndex: 'createdAt', width: 160, render: (val: string) => val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-' },
-    { key: 'startTime', title: t('software.startTime'), dataIndex: 'startedAt', width: 160, render: (val: string) => val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-' },
-    { key: 'endTime', title: t('software.endTime'), dataIndex: 'completedAt', width: 160, render: (val: string) => val ? dayjs(val).format('YYYY-MM-DD HH:mm:ss') : '-' },
+    { key: 'operateTime', title: t('software.operateTime'), dataIndex: 'createdAt', width: 160, render: (val: unknown) => val ? dayjs(val as string).format('YYYY-MM-DD HH:mm:ss') : '-' },
+    { key: 'startTime', title: t('software.startTime'), dataIndex: 'startedAt', width: 160, render: (val: unknown) => val ? dayjs(val as string).format('YYYY-MM-DD HH:mm:ss') : '-' },
+    { key: 'endTime', title: t('software.endTime'), dataIndex: 'completedAt', width: 160, render: (val: unknown) => val ? dayjs(val as string).format('YYYY-MM-DD HH:mm:ss') : '-' },
   ], [t, SUB_TASK_STATUS_MAP, TASK_TYPE_MAP]);
 
   // Failure reason renderer with i18n and source classification
@@ -1532,19 +1533,19 @@ export default function UpgradePlan() {
                       title: t('software.stationCode'),
                       dataIndex: 'deviceSn',
                       width: 100,
-                      render: (val: string) => val || '-',
+                      render: (val: unknown) => (val as string) || '-',
                     },
                     {
                       title: t('software.upgrade.targetVersion'),
                       dataIndex: 'destVersion',
                       width: 100,
-                      render: (val: string) => val || '-',
+                      render: (val: unknown) => (val as string) || '-',
                     },
                     {
                       title: t('software.upgrade.sourceVersion'),
                       dataIndex: 'oriVersion',
                       width: 100,
-                      render: (val: string) => val || '-',
+                      render: (val: unknown) => (val as string) || '-',
                     },
                     {
                       title: t('software.upgrade.upgradeProgress'),

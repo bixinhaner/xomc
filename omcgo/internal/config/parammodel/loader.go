@@ -348,9 +348,14 @@ func (l *Loader) loadStandardModelFile(ctx context.Context, path string) (int, e
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if _, err := tx.Exec(ctx, `TRUNCATE standard_params RESTART IDENTITY`); err != nil {
-		return 0, fmt.Errorf("truncate standard_params: %w", err)
-	}
+	// TRUNCATE 不行：mml_command_sub_fields.standard_path_id 反向 FK 引用
+	// standard_params（migration 000113），即使 ON DELETE RESTRICT 也会被
+	// CLAUDE.md §5.5.9 拒绝。改为 ON CONFLICT UPSERT — 同 standard_path 行
+	// 元属性可能因 XML 演化更新；不存在的行新增；不再清空既有 sub_field
+	// 引用的目标行（FK 完整性保留）。删除被 XML 移除的 path 留给 admin UI
+	// 手工处理（T-0132 Catalog 管理已支持）。
+	// 旧逻辑 (TRUNCATE) 移除，新逻辑由下方 batchInsertStandardEntries 的
+	// ON CONFLICT 子句承接。
 
 	rows := 0
 	if n, err := batchInsertStandardEntries(ctx, tx, doc.Objects, "object"); err != nil {
@@ -398,12 +403,18 @@ func batchInsertStandardEntries(ctx context.Context, tx pgx.Tx, entries []xmlSta
 		if err != nil {
 			return total, fmt.Errorf("build sql standard_params (%s, batch %d-%d): %w", entryType, i, end, err)
 		}
+		// UPSERT 替代 TRUNCATE 路径（详见 loadStandardModel 注释）。
+		// standard_params.standard_path UNIQUE → ON CONFLICT 触发更新元属性。
+		sqlStr += ` ON CONFLICT (standard_path) DO UPDATE SET
+            entry_type     = EXCLUDED.entry_type,
+            access         = EXCLUDED.access,
+            data_type      = EXCLUDED.data_type,
+            change_applies = EXCLUDED.change_applies,
+            min_value      = EXCLUDED.min_value,
+            max_value      = EXCLUDED.max_value,
+            updated_at     = NOW()`
 		if _, err := tx.Exec(ctx, sqlStr, args...); err != nil {
-			// 容错：standard_params 唯一索引在 standard_path 上，重复条目（多文件可能产生）跳过
-			if strings.Contains(err.Error(), "duplicate key") {
-				continue
-			}
-			return total, fmt.Errorf("batch insert standard_params (%s, batch %d-%d): %w", entryType, i, end, err)
+			return total, fmt.Errorf("batch upsert standard_params (%s, batch %d-%d): %w", entryType, i, end, err)
 		}
 		total += end - i
 	}

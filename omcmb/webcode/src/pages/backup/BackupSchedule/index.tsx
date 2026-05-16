@@ -8,7 +8,7 @@
 //
 // 非目标（PRD §5）：cron 解析依赖 / 下次执行时间预测 / 调度执行历史 / clone / template
 
-import { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Button,
   Form,
@@ -125,7 +125,7 @@ const BACKUP_TYPE_LABEL_KEY: Record<BackupSchedule['backupType'], string> = {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function BackupSchedulePage(): JSX.Element {
+export default function BackupSchedulePage(): React.JSX.Element {
   const t = useT();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);

@@ -1,6 +1,6 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, type ChangeEvent } from 'react';
 import { Input, Modal, Space, Typography } from 'antd';
-import type { InputTextAreaProps } from 'antd/es/input/TextArea';
+import type { TextAreaProps } from 'antd/es/input/TextArea';
 import { useT } from '@/hooks/useT';
 
 const { TextArea } = Input;
@@ -50,9 +50,9 @@ export default function ConfirmWithNoteModal({
     onCancel();
   }, [onCancel]);
 
-  const textAreaProps: InputTextAreaProps = {
+  const textAreaProps: TextAreaProps = {
     value: note,
-    onChange: (e) => setNote(e.target.value),
+    onChange: (e: ChangeEvent<HTMLTextAreaElement>) => setNote(e.target.value),
     placeholder: notePlaceholder || t('alarm.notePlaceholder'),
     rows: 3,
     maxLength: 500,

@@ -24,8 +24,8 @@ import { useT } from '@/hooks/useT';
 import { toast } from '@/utils/toast';
 
 // -----------------------------------------------------------------------------
-// "新建 MML 脚本任务" Drawer —— ScriptTask / MML Console 两个入口复用，
-// 布局对齐 docs/design/image-10.png。
+// "新建 MML 脚本任务" Drawer —— 由 任务记录（TaskRecord）页"新建任务"入口调用；
+// 同时保留 prefill* 入参，供 MML 控制台后续接入复用。布局对齐 docs/design/image-10.png。
 //
 // 一律提交到 mml_tasks（POST /api/v1/mml/tasks），包含：
 //   基本信息（任务名 + 设备 SN + 脚本）
@@ -79,7 +79,7 @@ const SECTION_DOT: React.CSSProperties = {
 const SECTION_HEADER: React.CSSProperties = {
   marginBottom: 8,
   fontWeight: 500,
-  color: '#333',
+  color: 'var(--color-neutral-700)',
 };
 
 export default function ScriptTaskDrawer({
@@ -228,7 +228,7 @@ export default function ScriptTaskDrawer({
               ? values.periodTime.format('HH:mm:ss')
               : undefined,
         };
-        await createTaskMutation.mutateAsync(payload);
+        await createTaskMutation.mutateAsync(payload as Parameters<typeof createTaskMutation.mutateAsync>[0]);
         toast.success(t('mml.taskCreated'));
 
         onSuccess?.();

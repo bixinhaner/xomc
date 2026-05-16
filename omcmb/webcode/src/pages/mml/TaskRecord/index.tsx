@@ -185,6 +185,7 @@ export default function TaskRecord() {
   }, [deleteTaskMutation, t]);
 
   // ---- 查看 modal state ----------------------------------------------------
+  // 任务记录为只读：记录由"执行 MML 命令 / 脚本任务执行"被动产生，不提供新建/编辑。
   const [viewing, setViewing] = useState<MMLTask | null>(null);
   const { data: resultsData, isLoading: resultsLoading } = useMMLTaskResults(
     viewing?.id ?? null,
@@ -192,7 +193,10 @@ export default function TaskRecord() {
     200,
   );
 
-  const resultRows = useMemo(() => resultsData?.items ?? viewing?.results ?? [], [resultsData, viewing]);
+  const resultRows = useMemo<DeviceTaskResultItem[]>(
+    () => (resultsData?.items ?? (viewing?.results as DeviceTaskResultItem[] | undefined) ?? []),
+    [resultsData, viewing]
+  );
 
   const handleExportResults = useCallback(() => {
     if (!viewing || resultRows.length === 0) return;
@@ -254,7 +258,8 @@ export default function TaskRecord() {
       title: t('mml.type'),
       dataIndex: 'executeType',
       width: 100,
-      render: (v: MMLExecuteType) => {
+      render: (val: unknown) => {
+        const v = val as MMLExecuteType;
         const tag = EXECUTE_TYPE_TAGS[v];
         return tag ? <Tag color={tag.color}>{t(tag.key)}</Tag> : <Tag>{v || '-'}</Tag>;
       },
@@ -264,7 +269,8 @@ export default function TaskRecord() {
       title: t('mml.status'),
       dataIndex: 'status',
       width: 100,
-      render: (v: MMLTaskStatus) => {
+      render: (val: unknown) => {
+        const v = val as MMLTaskStatus;
         const tag = TASK_STATUS_TAGS[v];
         return tag ? <Tag color={tag.color}>{t(tag.key)}</Tag> : <Tag>{v || '-'}</Tag>;
       },
@@ -283,7 +289,8 @@ export default function TaskRecord() {
       title: t('mml.result'),
       dataIndex: 'result',
       width: 100,
-      render: (v?: MMLTaskResult) => {
+      render: (val: unknown) => {
+        const v = val as MMLTaskResult | undefined;
         if (!v) return '-';
         const tag = TASK_RESULT_TAGS[v];
         return tag ? <Tag color={tag.color}>{t(tag.key)}</Tag> : <Tag>{v}</Tag>;
@@ -294,21 +301,21 @@ export default function TaskRecord() {
       title: t('mml.startTime'),
       dataIndex: 'startedAt',
       width: 160,
-      render: (v?: string) => formatTime(v),
+      render: (val: unknown) => formatTime(val as string | undefined),
     },
     {
       key: 'finishedAt',
       title: t('mml.endTime'),
       dataIndex: 'finishedAt',
       width: 160,
-      render: (v?: string) => formatTime(v),
+      render: (val: unknown) => formatTime(val as string | undefined),
     },
     {
       key: 'createdAt',
       title: t('mml.createTime'),
       dataIndex: 'createdAt',
       width: 160,
-      render: (v: string) => formatTime(v),
+      render: (val: unknown) => formatTime(val as string),
     },
   ], [t, handleDelete]);
 
@@ -344,7 +351,7 @@ export default function TaskRecord() {
   ], [t]);
 
   return (
-    <ListPageLayout>
+    <ListPageLayout title={t('nav.mml.taskRecord')}>
       <FilterBar
         filterId="mml-task-record"
         fields={filterFields}

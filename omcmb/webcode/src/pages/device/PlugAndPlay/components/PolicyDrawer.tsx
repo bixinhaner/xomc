@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { Drawer, Form, Input, Select, Switch, Space, Button, Divider, App, Typography, Radio } from 'antd';
 import { useT } from '@/hooks/useT';
 
@@ -46,7 +46,7 @@ const LICENSE_SUPPORTED_TYPES = ['QAFA', 'QAFB', 'QAFC'];
 export default function PolicyDrawer({ open, mode, policy, onClose, onSubmit }: Props) {
   const t = useT();
   const [form] = Form.useForm();
-  const { _message } = App.useApp();
+  void App.useApp();
 
   const isView = mode === 'view';
   const title = useMemo(() => {

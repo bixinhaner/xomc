@@ -223,7 +223,7 @@ export default function CommandTree({ lang }: CommandTreeProps) {
   // Customized PrivateTemplate / PublicTemplate (T-0123-P4 集成)
   const { data: customResp } = useQuery({
     queryKey: ['mml', 'console', 'custom-commands'],
-    queryFn: () => mmlApi.listTemplates({ pageSize: 100 }),
+    queryFn: () => mmlApi.getTemplates({ page: 1, pageSize: 100 }),
     staleTime: 5 * 60 * 1000,
   });
   const customCommands = useMemo(() => customResp?.items ?? [], [customResp]);

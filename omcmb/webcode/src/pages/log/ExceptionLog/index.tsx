@@ -390,8 +390,10 @@ export default function ExceptionLog() {
         if (items.length === 0) return '-';
         if (items.length === 1) {
           const item = items[0] as NonNullable<MenuProps['items']>[number];
-          if ('label' in item && 'onClick' in item) {
-            return <Button type="link" size="small" onClick={() => item.onClick?.()}>{item.label as string}</Button>;
+          if (item && 'label' in item && 'onClick' in item) {
+            type ClickFn = (e?: unknown) => void;
+            const handler = (item as { onClick?: ClickFn }).onClick;
+            return <Button type="link" size="small" onClick={() => handler?.()}>{item.label as string}</Button>;
           }
         }
         return (
@@ -406,18 +408,21 @@ export default function ExceptionLog() {
       title: t('log.exception.column.deviceCode'),
       dataIndex: 'deviceCode',
       width: 140,
-      render: (val: string) => <Typography.Text style={{ fontFamily: 'monospace' }}>{val}</Typography.Text>,
+      render: (val: unknown) => <Typography.Text style={{ fontFamily: 'monospace' }}>{val as string}</Typography.Text>,
     },
     {
       key: 'onlineStatus',
       title: t('log.exception.onlineStatus'),
       dataIndex: 'onlineStatus',
       width: 100,
-      render: (val: OnlineStatus) => (
-        <Tag color={val === '1' ? 'success' : 'default'}>
-          {val === '1' ? t('log.exception.online') : t('log.exception.offline')}
-        </Tag>
-      ),
+      render: (raw: unknown) => {
+        const val = raw as OnlineStatus;
+        return (
+          <Tag color={val === '1' ? 'success' : 'default'}>
+            {val === '1' ? t('log.exception.online') : t('log.exception.offline')}
+          </Tag>
+        );
+      },
     },
     {
       key: 'deviceName',
@@ -437,7 +442,7 @@ export default function ExceptionLog() {
       title: t('log.exception.column.baseIp'),
       dataIndex: 'operateIp',
       width: 140,
-      render: (val: string) => <Typography.Text style={{ fontFamily: 'monospace' }}>{val}</Typography.Text>,
+      render: (val: unknown) => <Typography.Text style={{ fontFamily: 'monospace' }}>{val as string}</Typography.Text>,
     },
     {
       key: 'product',
@@ -456,14 +461,15 @@ export default function ExceptionLog() {
       title: t('log.exception.column.exceptionType'),
       dataIndex: 'operationName',
       width: 100,
-      render: (val: string) => <Tag color="orange">{val}</Tag>,
+      render: (val: unknown) => <Tag color="orange">{val as string}</Tag>,
     },
     {
       key: 'manualCollectionStatus',
       title: t('log.exception.collectStatus'),
       dataIndex: 'manualCollectionStatus',
       width: 100,
-      render: (val: CollectStatus) => {
+      render: (raw: unknown) => {
+        const val = raw as CollectStatus;
         const cfg = collectStatusConfig[val];
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
@@ -474,7 +480,7 @@ export default function ExceptionLog() {
       dataIndex: 'fileName',
       width: 200,
       ellipsis: true,
-      render: (val?: string) => val ?? '-',
+      render: (val: unknown) => (val as string | undefined) ?? '-',
     },
     {
       key: 'opStartTime',
@@ -487,7 +493,7 @@ export default function ExceptionLog() {
       title: t('log.exception.column.runtime'),
       dataIndex: 'runtimeBeforeReboot',
       width: 120,
-      render: (val?: string) => val ?? '-',
+      render: (val: unknown) => (val as string | undefined) ?? '-',
     },
     {
       key: 'haltDetailReason',
@@ -495,7 +501,7 @@ export default function ExceptionLog() {
       dataIndex: 'haltDetailReason',
       width: 140,
       ellipsis: true,
-      render: (val?: string) => val ?? '-',
+      render: (val: unknown) => (val as string | undefined) ?? '-',
     },
   ], [t, collectStatusConfig, getActionMenu]);
 

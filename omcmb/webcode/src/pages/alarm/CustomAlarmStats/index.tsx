@@ -51,8 +51,8 @@ const DEAL_STATE_CONFIG: Record<DealState, { label: string; color: string }> = {
   '3': { label: 'alarm.dealState.confirmedCleared', color: '#67D972' },
 };
 
-// 事件类型配置
-const EVENT_TYPE_CONFIG: Record<EventType, string> = {
+// 事件类型配置（T-0136: keys 是 X.733 数字代码，非 EventType union；用 Record<string,string>）
+const EVENT_TYPE_CONFIG: Record<string, string> = {
   '30000': 'alarm.eventType.communication',
   '30001': 'alarm.eventType.qualityOfService',
   '30002': 'alarm.eventType.processingError',
@@ -648,7 +648,7 @@ export default function CustomAlarmStats() {
     }
     modal.confirm({
       title: t('common.confirmDelete'),
-      content: t('alarm.confirmDeleteGroup', { name: group?.name }),
+      content: t('alarm.confirmDeleteGroup', { name: group?.name ?? '' }),
       okText: t('common.confirm'),
       okType: 'danger',
       onOk: () => {
@@ -789,11 +789,11 @@ export default function CustomAlarmStats() {
       title: t('alarm.alarmId'),
       dataIndex: 'id',
       width: 100,
-      render: (val, record) => (
+      render: (val: unknown, record) => (
         <Space size={4}>
           {record.unread === '1' && <Badge status="error" style={{ marginLeft: -4 }} />}
           <Button type="link" size="small" style={{ padding: 0, height: 'auto' }} onClick={() => handleShowDetail(record)}>
-            {val}
+            {String(val ?? '')}
           </Button>
         </Space>
       ),
@@ -831,7 +831,7 @@ export default function CustomAlarmStats() {
       title: t('alarm.neType'),
       dataIndex: 'neType',
       width: 100,
-      render: (val: string) => NE_TYPE_CONFIG[val] || val || '-',
+      render: (val: unknown) => { const s = String(val ?? ''); return NE_TYPE_CONFIG[s] || s || '-'; },
     },
     {
       key: 'equipInfo',
@@ -846,7 +846,7 @@ export default function CustomAlarmStats() {
       dataIndex: 'eventType',
       width: 120,
       ellipsis: true,
-      render: (val: EventType) => t(EVENT_TYPE_CONFIG[val] || 'common.unknown'),
+      render: (val: unknown) => t(EVENT_TYPE_CONFIG[val as EventType] || 'common.unknown'),
     },
     {
       key: 'alarmType',
@@ -865,8 +865,8 @@ export default function CustomAlarmStats() {
       dataIndex: 'dealState',
       width: 150,
       ellipsis: true,
-      render: (val: DealState) => {
-        const config = DEAL_STATE_CONFIG[val];
+      render: (val: unknown) => {
+        const config = DEAL_STATE_CONFIG[val as DealState];
         return <span style={{ color: config?.color || '#666' }}>{t(config?.label || 'common.unknown')}</span>;
       },
     },

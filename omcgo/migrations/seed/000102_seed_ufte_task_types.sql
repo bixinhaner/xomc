@@ -13,7 +13,7 @@ VALUES
  'DOWNLOAD', true, true,
  '["CHECK_PERMISSION","CHECK_ONLINE","CHECK_CONFLICT","SEND_RPC","WAIT_RPC_RESPONSE","WAIT_FILE_TRANSFER","WAIT_TRANSFER_COMPLETE"]',
  '', 'CODE_ENB_UPGRADE_IMAGE',
- '["4G eNB","QAFA","QAFB"]', '1', 'Firmware Upgrade Image', true,
+ '["4G eNB","QAFA","QAFB"]', '1 Firmware Upgrade Image', '1 Firmware Upgrade Image', true,
  'firmware/{minio_path}', '{firmware_name}', '{firmware_name}',
  'firmware.fileSize', 'firmware.md5', 'false', 0,
  '/smallcell/FileDownloadService/firmware/img/{path}', 'system')
@@ -26,10 +26,23 @@ VALUES
  'DOWNLOAD', true, true,
  '["CHECK_PERMISSION","CHECK_ONLINE","CHECK_CONFLICT","SEND_RPC","WAIT_RPC_RESPONSE","WAIT_FILE_TRANSFER","WAIT_TRANSFER_COMPLETE"]',
  '', 'CODE_ENB_UPGRADE_PATCH',
- '["4G eNB","QAFA","QAFB","PATCH"]', '1', 'Patch Package', true,
+ '["4G eNB","QAFA","QAFB","PATCH"]', 'X {OUI} Software Upgrade Patch', 'X {OUI} Software Upgrade Patch', true,
  'firmware/{patch_path}', '{patch_name}', '{patch_name}',
  'firmware.fileSize', 'firmware.md5', 'true', 0,
  '/smallcell/FileDownloadService/firmware/patch/{path}', 'system')
+ON CONFLICT (type_code) DO NOTHING;
+
+INSERT INTO ufte_task_types (type_code, category, category_label, display_name, description, rpc_type, built_in, enabled, step_chain, post_tc_event_code, permission_code, platform_scope, file_type, file_type_label, file_type_editable, url_template, target_file_name_template, file_name_template, file_size_field, checksum_field, raw_mode, delay_seconds, transport_path, last_editor)
+VALUES
+('ENB_FPGA_UPGRADE',  'enb_upgrade',     '4G升级',       '4G FPGA 升级',
+ '复用 4G 侧 FPGA 升级任务链路，统一到 UFTE 任务中心。',
+ 'DOWNLOAD', true, true,
+ '["CHECK_PERMISSION","CHECK_ONLINE","CHECK_CONFLICT","SEND_RPC","WAIT_RPC_RESPONSE","WAIT_FILE_TRANSFER","WAIT_TRANSFER_COMPLETE"]',
+ '', 'CODE_ENB_UPGRADE_FPGA',
+ '["4G eNB","QAFA","QAFB","FPGA"]', 'Firmware Upgrade Fpga', 'Firmware Upgrade Fpga', true,
+ 'firmware/{fpga_path}', '{fpga_name}', '{fpga_name}',
+ 'firmware.fileSize', 'firmware.md5', 'false', 0,
+ '/smallcell/FileDownloadService/firmware/fpga/{path}', 'system')
 ON CONFLICT (type_code) DO NOTHING;
 
 -- 5G 升级
@@ -40,38 +53,38 @@ VALUES
  'DOWNLOAD', true, true,
  '["CHECK_PERMISSION","CHECK_ONLINE","CHECK_CONFLICT","SEND_RPC","WAIT_RPC_RESPONSE","WAIT_FILE_TRANSFER","WAIT_TRANSFER_COMPLETE","WAIT_INFORM_EVENT"]',
  '102 UPGRADE FINISH', 'CODE_GNB_UPGRADE_IMAGE',
- '["5G gNB","BBU-XSS","BBU-QSS"]', '1', 'Firmware Upgrade Image', true,
+ '["5G gNB","BBU-XSS","BBU-QSS"]', '1 Firmware Upgrade Image', '1 Firmware Upgrade Image', true,
  'firmware/{minio_path}', '{firmware_name}', '{firmware_name}',
  'firmware.fileSize', 'firmware.md5', 'false', 0,
  '/smallcell/FileDownloadService/firmware/img/{path}', 'system')
 ON CONFLICT (type_code) DO NOTHING;
 
-INSERT INTO ufte_task_types (type_code, category, category_label, display_name, description, rpc_type, built_in, enabled, step_chain, post_tc_event_code, permission_code, platform_scope, file_type, file_type_label, file_type_editable, url_template, target_file_name_template, file_name_template, file_size_field, checksum_field, raw_mode, delay_seconds, transport_path, last_editor)
-VALUES
-('GNB_FPGA_UPGRADE',  'gnb_upgrade',     '5G升级',       '5G FPGA 升级',
- '复用 5G 侧 FPGA 升级任务链路，统一到 UFTE 任务中心。',
- 'DOWNLOAD', true, true,
- '["CHECK_PERMISSION","CHECK_ONLINE","CHECK_CONFLICT","SEND_RPC","WAIT_RPC_RESPONSE","WAIT_FILE_TRANSFER","WAIT_TRANSFER_COMPLETE","WAIT_INFORM_EVENT"]',
- '102 UPGRADE FINISH', 'CODE_GNB_UPGRADE_FPGA',
- '["5G gNB","BBU-XSS","BBU-QSS","FPGA"]', '1', 'FPGA Package', true,
- 'firmware/{fpga_path}', '{fpga_name}', '{fpga_name}',
- 'firmware.fileSize', 'firmware.md5', 'false', 0,
- '/smallcell/FileDownloadService/firmware/fpga/{path}', 'system')
-ON CONFLICT (type_code) DO NOTHING;
-
--- 版本回退
+-- 版本回退（通过 SetParameterValues 触发设备侧回退，不经过 Download）
 INSERT INTO ufte_task_types (type_code, category, category_label, display_name, description, rpc_type, built_in, enabled, step_chain, post_tc_event_code, permission_code, platform_scope, file_type, file_type_label, file_type_editable, url_template, target_file_name_template, file_name_template, file_size_field, checksum_field, raw_mode, delay_seconds, transport_path, last_editor)
 VALUES
 ('VERSION_ROLLBACK',  'version_rollback', '基站版本回退', '基站版本回退',
- '复用现网已验证的版本回退链路，实现 UFTE 统一入口下的回退任务创建。',
- 'DOWNLOAD', true, true,
- '["CHECK_PERMISSION","CHECK_ONLINE","CHECK_CONFLICT","PRE_VALIDATE","SEND_RPC","WAIT_RPC_RESPONSE","WAIT_TRANSFER_COMPLETE"]',
+ '通过 TR069 SetParameterValues 触发设备回退到上一版本，不需要下载文件。',
+ 'SET_PARAM_VALUES', true, true,
+ '["CHECK_PERMISSION","CHECK_ONLINE","CHECK_CONFLICT","SEND_RPC","WAIT_RPC_RESPONSE","WAIT_REBOOT_COMPLETE"]',
  '', 'CODE_VERSION_ROLLBACK',
- '["4G eNB","5G gNB","QAFA","QAFB","BBU-XSS","BBU-QSS"]', '1', 'Rollback Image', true,
- 'firmware/rollback/{rollback_path}', '{rollback_name}', '{rollback_name}',
- 'rollback.fileSize', 'rollback.md5', 'false', 0,
- '/smallcell/FileDownloadService/firmware/rollback/{path}', 'system')
-ON CONFLICT (type_code) DO NOTHING;
+ '["4G eNB","5G gNB","QAFA","QAFB","BBU-XSS","BBU-QSS"]', '', '版本回退', false,
+ '', '', '',
+ '', '', '', 0,
+ '', 'system')
+ON CONFLICT (type_code) DO UPDATE SET
+  rpc_type = EXCLUDED.rpc_type,
+  step_chain = EXCLUDED.step_chain,
+  file_type = EXCLUDED.file_type,
+  file_type_label = EXCLUDED.file_type_label,
+  file_type_editable = EXCLUDED.file_type_editable,
+  url_template = EXCLUDED.url_template,
+  target_file_name_template = EXCLUDED.target_file_name_template,
+  file_name_template = EXCLUDED.file_name_template,
+  file_size_field = EXCLUDED.file_size_field,
+  checksum_field = EXCLUDED.checksum_field,
+  raw_mode = EXCLUDED.raw_mode,
+  transport_path = EXCLUDED.transport_path,
+  description = EXCLUDED.description;
 
 -- 日志采集
 INSERT INTO ufte_task_types (type_code, category, category_label, display_name, description, rpc_type, built_in, enabled, step_chain, post_tc_event_code, permission_code, platform_scope, file_type, file_type_label, file_type_editable, url_template, target_file_name_template, file_name_template, file_size_field, checksum_field, raw_mode, delay_seconds, transport_path, last_editor)
@@ -121,7 +134,7 @@ VALUES
  'DOWNLOAD', true, true,
  '["CHECK_PERMISSION","CHECK_ONLINE","CHECK_CONFLICT","PRE_VALIDATE","SEND_RPC","WAIT_RPC_RESPONSE","WAIT_TRANSFER_COMPLETE"]',
  '', 'CODE_CONFIG_RESTORE',
- '["4G eNB","5G gNB","QAFA","QAFB","BBU-XSS","BBU-QSS"]', '3', 'Vendor Configuration File', false,
+ '["4G eNB","5G gNB","QAFA","QAFB","BBU-XSS","BBU-QSS"]', '3 Vendor Configuration File', '3 Vendor Configuration File', false,
  'config_backup/{object_path}', '{file_name}', '{file_name}',
  '', '', '', 0,
  '/smallcell/FileDownloadService/config_backup/{object_path}', 'system')

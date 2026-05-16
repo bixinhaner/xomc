@@ -232,7 +232,7 @@ export default function LicenseLogs() {
       <FilterBar
         filterId="license-logs-filter"
         fields={filterFields}
-        defaultValues={initialLicenseId ? { licenseId: initialLicenseId } : undefined}
+        initialValues={initialLicenseId ? { licenseId: initialLicenseId } : undefined}
         onSearch={(vals) => {
           setFilters(vals);
           setPage(1);

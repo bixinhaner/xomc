@@ -8,7 +8,7 @@ import type { UploadFile } from 'antd';
  */
 export function useImportExportHandlers(deps: {
   message: ReturnType<typeof AppNS.useApp>['message'];
-  t: (id: string, values?: Record<string, unknown>) => string;
+  t: (id: string, values?: Record<string, string | number>) => string;
   refetch: () => Promise<unknown>;
 }) {
   const { message, t, refetch } = deps;

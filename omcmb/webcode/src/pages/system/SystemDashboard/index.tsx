@@ -142,7 +142,7 @@ export default function SystemDashboard() {
                       <Tag color={typeColors[op.type] ?? 'default'} style={{ fontSize: 11, margin: 0 }}>{op.user}</Tag>
                       <span style={{ color: '#999' }}>{op.time}</span>
                     </div>
-                    <div style={{ color: '#595959' }}>{op.action}</div>
+                    <div style={{ color: 'var(--color-neutral-600)' }}>{op.action}</div>
                   </div>
                 ),
               }))}

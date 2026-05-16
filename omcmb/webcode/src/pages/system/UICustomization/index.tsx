@@ -18,7 +18,7 @@ import { UI_CUSTOM_DEFAULTS, UI_CUSTOM_KEYS } from '../SystemConfig/uiCustomCons
 function UICustomizationContent() {
   const t = useT();
   const { message } = App.useApp();
-  const [form] = Form.useForm<Record<string, string>>();
+  const [form] = Form.useForm();
 
   const { data: configs, isLoading, isError, refetch } = useSysConfigsByCategory('ui_custom');
   const batchUpdate = useBatchUpdateSysConfigs();
@@ -28,7 +28,7 @@ function UICustomizationContent() {
     const merged: Record<string, string> = { ...UI_CUSTOM_DEFAULTS };
     if (configs) {
       for (const c of configs) {
-        if (UI_CUSTOM_KEYS.includes(c.key)) merged[c.key] = c.value ?? '';
+        if ((UI_CUSTOM_KEYS as readonly string[]).includes(c.key)) merged[c.key] = c.value ?? '';
       }
     }
     return merged;

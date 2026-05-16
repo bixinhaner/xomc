@@ -18,6 +18,7 @@ import LineString from 'ol/geom/LineString';
 import { fromLonLat, toLonLat } from 'ol/proj';
 import { defaults as defaultControls } from 'ol/control';
 import { Style, Stroke, Circle, Fill, Text } from 'ol/style';
+import type { StyleLike } from 'ol/style/Style';
 import type { MapDevice, MapViewport, MapBounds } from '@core/types/map';
 import {
   MAP_CONFIG,
@@ -80,7 +81,7 @@ interface UseOLMapOptions {
 
 interface UseOLMapReturn {
   /** 地图容器 ref */
-  mapRef: React.RefObject<HTMLDivElement>;
+  mapRef: React.RefObject<HTMLDivElement | null>;
   /** 地图实例 ref */
   mapInstanceRef: React.MutableRefObject<Map | null>;
   /** 更新设备数据 */
@@ -201,7 +202,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     // 创建设备图层
     deviceLayerRef.current = new VectorLayer({
       source: clusterSourceRef.current,
-      style: clusterStyleFunction,
+      style: clusterStyleFunction as StyleLike,
       zIndex: 10,
     });
     layers.push(deviceLayerRef.current);
@@ -210,7 +211,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     spiderfySourceRef.current = new VectorSource();
     spiderfyLayerRef.current = new VectorLayer({
       source: spiderfySourceRef.current,
-      style: spiderfyStyleFunction,
+      style: spiderfyStyleFunction as StyleLike,
       zIndex: 11, // 确保在设备图层之上
     });
     layers.push(spiderfyLayerRef.current);

@@ -5,7 +5,7 @@ import { deviceService } from '../../mock/services/deviceService';
 import { deviceApi } from '../../services/api/deviceApi';
 import { createApiSwitch } from '../../services/apiSwitch';
 
-const api = createApiSwitch(deviceService, deviceApi);
+const api = createApiSwitch(deviceService as unknown as typeof deviceApi, deviceApi);
 
 // 创建分组的请求类型
 export interface CreateGroupRequest {

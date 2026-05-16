@@ -57,14 +57,13 @@ const fallbackProductTypeOptions = [
 ];
 
 // 文件类型枚举
-type FileType = 'upgrade' | 'ca' | 'fpga' | 'ap';
+type FileType = 'upgrade' | 'patch' | 'fpga';
 
 // 文件类型 tab 到后端 fileType 的映射
-const fileTypeParamMap: Record<FileType, 0 | 1 | 5 | 6> = {
+const fileTypeParamMap: Record<FileType, 0 | 1 | 6> = {
   upgrade: 0,
-  ca: 1,
+  patch: 1,
   fpga: 6,
-  ap: 5,
 };
 
 function formatFileSize(bytes: number): string {
@@ -221,11 +220,6 @@ export default function FirmwareUpload() {
           },
         },
         {
-          onUploadProgress: (event) => {
-            if (event.total) {
-              setUploadProgress(Math.round((event.loaded * 100) / event.total));
-            }
-          },
           onSuccess: () => {
             void message.success(t('software.firmware.importSuccess'));
             handleCloseImportDrawer();
@@ -357,9 +351,8 @@ export default function FirmwareUpload() {
   const fileTypeName = useMemo(() => {
     const nameMap: Record<FileType, string> = {
       upgrade: 'IMAGE',
-      ca: t('software.firmware.caVersion'),
+      patch: 'PATCH',
       fpga: t('software.firmware.fpgaFile'),
-      ap: t('software.firmware.apFile'),
     };
     return nameMap[fileType];
   }, [fileType, t]);
@@ -381,9 +374,8 @@ export default function FirmwareUpload() {
           buttonStyle="solid"
         >
           <Radio.Button value="upgrade">IMAGE</Radio.Button>
-          <Radio.Button value="ca">{t('software.firmware.caVersion')}</Radio.Button>
+          <Radio.Button value="patch">PATCH</Radio.Button>
           <Radio.Button value="fpga">{t('software.firmware.fpgaFile')}</Radio.Button>
-          <Radio.Button value="ap">{t('software.firmware.apFile')}</Radio.Button>
         </Radio.Group>
         <Button type="primary" icon={<InboxOutlined />} onClick={() => handleOpenImportDrawer('add')}>
           {t('software.firmware.importFile')}
@@ -453,9 +445,8 @@ export default function FirmwareUpload() {
           size="small"
           disabled={importMode === 'view'}
         >
-          {/* 产品类型标识 - AP类型不显示 */}
-          {fileType !== 'ap' && (
-            <Form.Item
+          {/* 产品类型标识 */}
+          <Form.Item
               name="product"
               label={t('software.firmware.productType')}
               rules={[{ required: true, message: t('software.firmware.selectProductType') }]}
@@ -474,7 +465,6 @@ export default function FirmwareUpload() {
                 />
               )}
             </Form.Item>
-          )}
 
           {/* 文件名 */}
           <Form.Item
@@ -483,7 +473,7 @@ export default function FirmwareUpload() {
                 {t('software.firmware.fileName')}
                 {importMode === 'add' && (
                   <span style={{ color: '#999', fontSize: 12 }}>
-                    ({t('software.firmware.supportFormat', { format: fileType === 'upgrade' ? 'IMG / EXT' : fileType === 'ca' ? 'Patch' : 'IMG' })})
+                    ({t('software.firmware.supportFormat', { format: fileType === 'upgrade' ? 'IMG / EXT' : fileType === 'patch' ? 'Patch' : 'IMG' })})
                   </span>
                 )}
               </Space>

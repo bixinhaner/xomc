@@ -111,7 +111,7 @@ export default function LTEStandardReport() {
     {
       key: 'status', title: t('table.status'), dataIndex: 'status', width: 100,
       render: (val) => {
-        const s = val as ReportStatus;
+        const s = val as LTEReportStatus;
         return <Tag color={statusColorMap[s]}>{s === 'generated' ? t('status.success') : s === 'generating' ? t('status.running') : s === 'failed' ? t('status.failed') : t('status.pending')}</Tag>;
       },
     },

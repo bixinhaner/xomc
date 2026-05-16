@@ -174,11 +174,12 @@ function _collectAllKeys(nodes: ParameterTreeNode[]): string[] {
   for (const node of nodes) {
     if (node.isObject) {
       keys.push(node.fullPath);
-      if (node.children) keys.push(...collectAllKeys(node.children));
+      if (node.children) keys.push(..._collectAllKeys(node.children));
     }
   }
   return keys;
 }
+void _collectAllKeys;
 
 // Collect keys that match search or have matching descendants
 function collectSearchMatchKeys(

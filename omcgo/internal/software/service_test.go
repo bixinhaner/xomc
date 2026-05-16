@@ -337,6 +337,60 @@ func TestService_BatchUpgrade_Success(t *testing.T) {
 	assert.Equal(t, "SmallCell-LTE", task.ProductClass)
 }
 
+func TestService_BatchUpgrade_PersistsDownloadFileTypeOverride(t *testing.T) {
+	deviceID := uuid.New()
+	firmwareID := uuid.New()
+	var createdTask *UpgradeTask
+
+	fwRepo := &svcMockFirmwareRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*FirmwareVersion, error) {
+			require.Equal(t, firmwareID, id)
+			return &FirmwareVersion{
+				ID:           firmwareID,
+				Version:      "V1.0.0",
+				FileName:     "fpga.bin",
+				MD5Val:       "abc123",
+				MinIOPath:    "firmware/cmcc/SC/V1.0.0/fpga.bin",
+				FileSize:     2048,
+				ProductClass: "SmallCell-LTE",
+			}, nil
+		},
+	}
+	taskRepo := &svcMockTaskRepo{
+		createFn: func(_ context.Context, task *UpgradeTask) error {
+			task.ID = uuid.New()
+			copyTask := *task
+			createdTask = &copyTask
+			return nil
+		},
+	}
+
+	svc := NewSoftwareService(
+		fwRepo,
+		taskRepo,
+		&svcMockSubTaskRepo{},
+		&svcMockDeviceRepo{},
+		&svcMockCmdQueue{},
+		nil,
+		nil,
+		"test-bucket",
+		&svcMockEventBus{},
+		nil,
+		zap.NewNop(),
+	)
+
+	_, err := svc.BatchUpgrade(context.Background(), BatchUpgradeRequest{
+		DeviceIDs:        []uuid.UUID{deviceID},
+		FirmwareID:       firmwareID,
+		TaskName:         "test-fpga-upgrade",
+		TaskType:         TaskTypeFPGA,
+		DownloadFileType: "Firmware Upgrade Fpga",
+		CreateSuspended:  true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, createdTask)
+	assert.Equal(t, "Firmware Upgrade Fpga", createdTask.DownloadFileType)
+}
 func TestService_BatchUpgrade_FirmwareNotFound(t *testing.T) {
 	svc := NewSoftwareService(
 		&svcMockFirmwareRepo{},

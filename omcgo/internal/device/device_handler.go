@@ -68,18 +68,26 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 }
 
 // CreateDeviceRequest defines the request body for creating a device.
+//
+// 用于"手动预登记"场景：在 CPE 通过 TR-069 Bootstrap 自动注册之前，由运维人员
+// 在 FE /device/register 页面录入设备。Bootstrap Inform 到达后，
+// DeviceService.RegisterFromInform 会根据 serial_number 找到本行 UPDATE 而非
+// INSERT（参 device_service.go RegisterFromInform 注释）。
 type CreateDeviceRequest struct {
 	SerialNumber string            `json:"serial_number" binding:"required"`
 	OUI          string            `json:"oui" binding:"required"`
 	ProductClass string            `json:"product_class"`
 	Manufacturer string            `json:"manufacturer"`
 	ModelName    string            `json:"model_name"`
-	Carrier      model.CarrierCode `json:"carrier" binding:"required"`
-	Technology   model.Technology  `json:"technology" binding:"required"`
-	SiteName     string            `json:"site_name"`
-	SiteID       string            `json:"site_id"`
-	Latitude     float64           `json:"latitude"`
-	Longitude    float64           `json:"longitude"`
+	// Carrier / Technology 用 binding oneof 让非法值前置成 400，
+	// 比插库后才发现外键违反更友好。
+	Carrier    model.CarrierCode `json:"carrier" binding:"required,oneof=cmcc ctcc cucc"`
+	Technology model.Technology  `json:"technology" binding:"required,oneof=lte nr"`
+	IPAddress  string            `json:"ip_address"`
+	SiteName   string            `json:"site_name"`
+	SiteID     string            `json:"site_id"`
+	Latitude   float64           `json:"latitude"`
+	Longitude  float64           `json:"longitude"`
 }
 
 // UpdateDeviceRequest defines the request body for updating a device.

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Button, Card, Col, Input, List, Row, Select, Space, Statistic, Tag, Tooltip, Typography, message } from 'antd';
 import {
   SearchOutlined,
@@ -13,7 +13,7 @@ import {
 import MapPageLayout from '@/components/Layout/MapPageLayout';
 import TopologyCanvas from '@/components/TopologyCanvas';
 import { useTopoGraph } from '@core/hooks/api/useTopology';
-import type { TopoNode, TopoStatistics, NodeType, NodeStatus } from '@core/types/topology';
+import type { TopoNode, NodeType, NodeStatus } from '@core/types/topology';
 import { useT } from '@/hooks/useT';
 
 const LAYOUT_OPTIONS_KEYS = [
@@ -50,12 +50,14 @@ export default function TopologyCanvasPage() {
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [showLabels, setShowLabels] = useState(true);
   const [_zoomLevel, setZoomLevel] = useState(1);
+  const [limit, setLimit] = useState(500); // 默认 500 个节点
 
-  // 使用服务端筛选：将 nodeType 和 status 传递给 API
+  // 使用服务端筛选：将 nodeType、status 和 limit 传递给 API
   const { data: graphData, refetch } = useTopoGraph({
     layoutType,
     nodeType: nodeTypeFilter as NodeType,
     status: statusFilter as NodeStatus,
+    limit,
   });
 
   const nodes = graphData?.nodes ?? [];
@@ -63,13 +65,25 @@ export default function TopologyCanvasPage() {
   const statistics = graphData?.statistics;
 
   // 搜索仍在客户端进行（支持按标签或设备序列号搜索）
-  const filteredNodes = nodes.filter((n) => {
-    const matchSearch = !searchValue || n.label.includes(searchValue) || (n.deviceSn ?? '').includes(searchValue);
-    return matchSearch;
-  });
+  const filteredNodes = useMemo(
+    () => nodes.filter((n) => {
+      const matchSearch = !searchValue || n.label.includes(searchValue) || (n.deviceSn ?? '').includes(searchValue);
+      return matchSearch;
+    }),
+    [nodes, searchValue],
+  );
 
-  const filteredEdges = edges.filter((e) =>
-    filteredNodes.some((n) => n.id === e.source) && filteredNodes.some((n) => n.id === e.target),
+  const filteredEdges = useMemo(
+    () => edges.filter((e) =>
+      filteredNodes.some((n) => n.id === e.source) && filteredNodes.some((n) => n.id === e.target),
+    ),
+    [edges, filteredNodes],
+  );
+
+  // 侧边栏分页：使用 key 让 List 内部状态在筛选变化时重置
+  const sidebarListKey = useMemo(
+    () => `sidebar-${searchValue}-${nodeTypeFilter}-${statusFilter}`,
+    [searchValue, nodeTypeFilter, statusFilter],
   );
 
   // 获取所有节点类型（用于筛选器选项）
@@ -77,10 +91,13 @@ export default function TopologyCanvasPage() {
 
   // 数据量警告提示
   useEffect(() => {
-    if (nodes.length > 1000) {
-      void message.warning(t('topology.largeDataWarning') || `当前加载 ${nodes.length} 个节点，建议使用筛选功能优化显示`);
+    if (nodes.length >= limit) {
+      void message.warning(
+        t('topology.largeDataWarning') ||
+        `已加载 ${nodes.length} 个节点（达到上限），请使用筛选功能或增加限制来查看更多`
+      );
     }
-  }, [nodes.length, t]);
+  }, [nodes.length, limit, t]);
 
   const leftPanel = (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -130,8 +147,15 @@ export default function TopologyCanvasPage() {
       {/* Node list */}
       <div style={{ flex: 1, overflow: 'auto' }}>
         <List
+          key={sidebarListKey}
           size="small"
           dataSource={filteredNodes}
+          pagination={{
+            pageSize: 50,
+            size: 'small',
+            showSizeChanger: false,
+            showTotal: (total) => `${t('table.total')}: ${total}`,
+          }}
           renderItem={(node) => (
             <List.Item
               style={{
@@ -180,36 +204,51 @@ export default function TopologyCanvasPage() {
             }}
             bodyStyle={{ padding: '12px 16px' }}
           >
-            <Row gutter={16}>
-              <Col span={6}>
+            <Row gutter={16} align="middle">
+              <Col span={4}>
                 <Statistic
-                  title={<span style={{ fontSize: 12, color: '#8c8c8c' }}>{t('topology.stats.totalNodes')}</span>}
+                  title={<span style={{ fontSize: 11, color: '#8c8c8c' }}>已加载/限制</span>}
+                  value={`${nodes.length} / ${limit}`}
+                  valueStyle={{ fontSize: 16, fontWeight: 600, color: nodes.length >= limit ? '#faad14' : '#1890ff' }}
+                />
+              </Col>
+              <Col span={5}>
+                <Statistic
+                  title={<span style={{ fontSize: 11, color: '#8c8c8c' }}>{t('topology.stats.totalNodes')}</span>}
                   value={statistics.totalNodes}
-                  valueStyle={{ fontSize: 20, fontWeight: 600, color: '#1890ff' }}
+                  valueStyle={{ fontSize: 16, fontWeight: 600, color: '#1890ff' }}
                 />
               </Col>
-              <Col span={6}>
+              <Col span={5}>
                 <Statistic
-                  title={<span style={{ fontSize: 12, color: '#8c8c8c' }}>{t('topology.stats.onlineNodes')}</span>}
+                  title={<span style={{ fontSize: 11, color: '#8c8c8c' }}>{t('topology.stats.onlineNodes')}</span>}
                   value={statistics.onlineNodes}
-                  valueStyle={{ fontSize: 20, fontWeight: 600, color: '#52c41a' }}
-                  suffix={`/ ${statistics.totalNodes}`}
+                  valueStyle={{ fontSize: 16, fontWeight: 600, color: '#52c41a' }}
                 />
               </Col>
-              <Col span={6}>
+              <Col span={5}>
                 <Statistic
-                  title={<span style={{ fontSize: 12, color: '#8c8c8c' }}>{t('topology.stats.totalEdges')}</span>}
+                  title={<span style={{ fontSize: 11, color: '#8c8c8c' }}>{t('topology.stats.totalEdges')}</span>}
                   value={statistics.totalEdges}
-                  valueStyle={{ fontSize: 20, fontWeight: 600, color: '#722ed1' }}
+                  valueStyle={{ fontSize: 16, fontWeight: 600, color: '#722ed1' }}
                 />
               </Col>
-              <Col span={6}>
-                <Statistic
-                  title={<span style={{ fontSize: 12, color: '#8c8c8c' }}>{t('topology.stats.activeEdges')}</span>}
-                  value={statistics.activeEdges}
-                  valueStyle={{ fontSize: 20, fontWeight: 600, color: '#13c2c2' }}
-                  suffix={`/ ${statistics.totalEdges}`}
-                />
+              <Col span={5}>
+                <Space size="small" style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+                  <Select
+                    size="small"
+                    value={limit}
+                    onChange={(val) => setLimit(val)}
+                    style={{ width: 100 }}
+                    options={[
+                      { label: '100 节点', value: 100 },
+                      { label: '500 节点', value: 500 },
+                      { label: '1000 节点', value: 1000 },
+                      { label: '2000 节点', value: 2000 },
+                    ]}
+                  />
+                  <Typography.Text style={{ fontSize: 11, color: '#8c8c8c' }}>节点限制</Typography.Text>
+                </Space>
               </Col>
             </Row>
             {/* Node type breakdown */}

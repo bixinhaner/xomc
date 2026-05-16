@@ -1,11 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, Col, Row, Typography, DatePicker, Radio, Space } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import BarChart from '@/components/Charts/BarChart';
 import { useT } from '@/hooks/useT';
 
-const { Title, _Text } = Typography;
+const { Title } = Typography;
 
 // 告警级别颜色 - 专业配色方案
 export const SEVERITY_COLORS = {
@@ -164,9 +164,8 @@ export default function AlarmStatistics() {
                   <BarChart
                     title=""
                     xData={xData}
-                    series={series}
+                    series={series.map((s) => ({ ...s, stack: 'all' }))}
                     height="100%"
-                    stacked
                     barWidth={10}
                     borderRadius={0}
                   />

@@ -7,7 +7,7 @@ import type { Device, EngStatus } from '@core/types/device';
 
 export interface UseDeviceColumnsOptions {
   onEditDevice: (device: Device) => void;
-  t: (id: string, values?: Record<string, unknown>) => string;
+  t: (id: string, values?: Record<string, string | number>) => string;
 }
 
 const REMARK_LABEL_STORAGE_KEY = 'omc_grouping_remark_label';

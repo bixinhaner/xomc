@@ -16,7 +16,7 @@ interface CommandRow extends Record<string, unknown> {
   category: string;
   description: string;
   paramCount: number;
-  productTypes: string[];
+  productTypes?: string[];
 }
 
 const CATEGORY_KEYS = [
@@ -93,7 +93,7 @@ export default function CommandTree() {
   const columns: DataTableColumn<CommandRow>[] = useMemo(() => [
     { key: 'commandName', title: t('table.name'), dataIndex: 'commandName', width: 180 },
     { key: 'commandCode', title: t('config.paramCode'), dataIndex: 'commandCode', width: 150, mono: true, copyable: true },
-    { key: 'category', title: t('perf.category'), dataIndex: 'category', width: 110, render: (val: string) => getCatLabel(val) },
+    { key: 'category', title: t('perf.category'), dataIndex: 'category', width: 110, render: (val: unknown) => getCatLabel(val as string) },
     { key: 'description', title: t('table.description'), dataIndex: 'description', width: 280, ellipsis: true },
     { key: 'paramCount', title: t('table.total'), dataIndex: 'paramCount', width: 90 },
     {
@@ -208,7 +208,7 @@ export default function CommandTree() {
               </Descriptions.Item>
               <Descriptions.Item label={t('perf.category')}>{getCatLabel(selectedCommand.category)}</Descriptions.Item>
               <Descriptions.Item label={t('device.productType')}>
-                {selectedCommand.productTypes.map((tp) => <Tag key={tp} color="blue">{tp}</Tag>)}
+                {selectedCommand.productTypes?.map((tp) => <Tag key={tp} color="blue">{tp}</Tag>)}
               </Descriptions.Item>
               <Descriptions.Item label={t('table.description')}>{selectedCommand.description}</Descriptions.Item>
             </Descriptions>

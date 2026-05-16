@@ -58,7 +58,7 @@ const exportAlarmApi: typeof alarmApi = createApiSwitch(
   alarmService as unknown as typeof alarmApi,
   alarmApi,
 );
-const exportDeviceApi = createApiSwitch(deviceService, deviceApi);
+const exportDeviceApi = createApiSwitch(deviceService as unknown as typeof deviceApi, deviceApi);
 const EXPORT_PAGE_SIZE = 500;
 
 function escapeCsvCell(value: unknown): string {
@@ -161,7 +161,7 @@ export default function HistoricalAlarms() {
     [filterParams, currentPage, pageSize]
   );
 
-  const { data, isLoading, refetch } = useHistoricalAlarms(queryParams);
+  const { data, isLoading, refetch } = useHistoricalAlarms(queryParams as unknown as Parameters<typeof useHistoricalAlarms>[0]);
   const acknowledgeHistoryAlarms = useAcknowledgeHistoryAlarms();
   const unacknowledgeHistoryAlarms = useUnacknowledgeHistoryAlarms();
   const deleteHistoryAlarms = useDeleteHistoryAlarms();
@@ -478,7 +478,7 @@ export default function HistoricalAlarms() {
         title: t('alarm.alarmId'),
         dataIndex: 'id',
         width: 100,
-        render: (val, record) => (
+        render: (val: unknown, record) => (
           <Space size={4}>
             {record.unread === '1' && <Badge status="error" style={{ marginLeft: -4 }} />}
             <Button
@@ -487,7 +487,7 @@ export default function HistoricalAlarms() {
               style={{ padding: 0, height: 'auto' }}
               onClick={() => handleShowDetail(record)}
             >
-              {val}
+              {String(val ?? '')}
             </Button>
           </Space>
         ),
@@ -531,7 +531,7 @@ export default function HistoricalAlarms() {
         title: t('alarm.neTypeCol'),
         dataIndex: 'neType',
         width: 120,
-        render: (val: string) => formatBaseStationTypeLabel(val),
+        render: (val: unknown) => formatBaseStationTypeLabel(String(val ?? '')),
       },
       {
         key: 'equipInfo',
@@ -546,7 +546,7 @@ export default function HistoricalAlarms() {
         dataIndex: 'eventType',
         width: 160,
         ellipsis: true,
-        render: (val: EventType) => t(EVENT_TYPE_CONFIG[val] || 'common.unknown'),
+        render: (val: unknown) => t(EVENT_TYPE_CONFIG[val as EventType] || 'common.unknown'),
       },
       {
         key: 'dealState',
@@ -554,8 +554,8 @@ export default function HistoricalAlarms() {
         dataIndex: 'dealState',
         width: 190,
         ellipsis: true,
-        render: (val: DealState) => {
-          const config = DEAL_STATE_CONFIG[val];
+        render: (val: unknown) => {
+          const config = DEAL_STATE_CONFIG[val as DealState];
           return (
             <span style={{ color: config?.color || '#666' }}>
               {t(config?.label || 'common.unknown')}

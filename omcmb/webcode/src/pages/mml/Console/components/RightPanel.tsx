@@ -53,15 +53,28 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
           children: (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <MmlEditor onExecuted={onExecuted} />
-              {activeStatement ? (
-                <ActiveSubView statement={activeStatement} />
-              ) : (
-                <Empty
-                  description={t('mml.console.stepBar.step2')}
-                  style={{ padding: 12 }}
-                />
-              )}
+              {/* 终端输出位置：MmlEditor 下方、参数列表上方（恢复 2026-05-14
+                  之前的布局；da6c1c68 重构曾把它挪到末尾）。 */}
               <TerminalPanel lines={[]} />
+              {/* 参数列表（LST/MOD/ADD/RMV 因 op 不同换皮）：选中长命令
+                  如 LST DEVICE_INFO 可能有 200+ sub_fields，包一层
+                  max-height + overflow:auto 防撑长页面。 */}
+              <div
+                style={{
+                  maxHeight: 'calc(100vh - 360px)',
+                  overflowY: 'auto',
+                  paddingRight: 4,
+                }}
+              >
+                {activeStatement ? (
+                  <ActiveSubView statement={activeStatement} />
+                ) : (
+                  <Empty
+                    description={t('mml.console.stepBar.step2')}
+                    style={{ padding: 12 }}
+                  />
+                )}
+              </div>
             </div>
           ),
         },

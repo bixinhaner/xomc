@@ -23,7 +23,7 @@ export interface AddDeviceFormValues {
  */
 export function useDeviceActions(deps: {
   message: ReturnType<typeof AppNS.useApp>['message'];
-  t: (id: string, values?: Record<string, unknown>) => string;
+  t: (id: string, values?: Record<string, string | number>) => string;
   refetch: () => Promise<unknown>;
   selectedDeviceIds: React.Key[];
   setSelectedDeviceIds: React.Dispatch<React.SetStateAction<React.Key[]>>;

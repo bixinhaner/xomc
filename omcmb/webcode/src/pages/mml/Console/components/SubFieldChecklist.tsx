@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { Checkbox, Tag, Tooltip, Empty } from 'antd';
 import { EyeOutlined, EditOutlined } from '@ant-design/icons';
-import type { CheckboxValueType } from 'antd/es/checkbox/Group';
+type CheckboxValueType = string | number | boolean;
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
 import type { Statement, SubFieldDef } from '@core/types/mmlConsole';
 import { useT } from '@/hooks/useT';

@@ -11,7 +11,8 @@ export type TransferStepId =
   | 'WAIT_RPC_RESPONSE'
   | 'WAIT_FILE_TRANSFER'
   | 'WAIT_TRANSFER_COMPLETE'
-  | 'WAIT_INFORM_EVENT';
+  | 'WAIT_INFORM_EVENT'
+  | 'WAIT_REBOOT_COMPLETE';
 
 export type TransferTaskStatus = 'pending' | 'in_progress' | 'suspended' | 'ended';
 
@@ -107,6 +108,7 @@ export interface UnifiedFileTransferDeviceItem {
   progress: number;
   lastReportAt: string;
   operatorScope: string;
+  failureReason?: string;
 }
 
 export interface CreateUnifiedFileTransferTaskInput {

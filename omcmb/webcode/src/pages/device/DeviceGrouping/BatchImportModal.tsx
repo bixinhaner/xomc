@@ -11,7 +11,7 @@ export interface BatchImportModalProps {
   onClose: () => void;
   onImport: (fileList: UploadFile[]) => void;
   onDownloadTemplate: () => void;
-  t: (id: string, values?: Record<string, unknown>) => string;
+  t: (id: string, values?: Record<string, string | number>) => string;
 }
 
 /**

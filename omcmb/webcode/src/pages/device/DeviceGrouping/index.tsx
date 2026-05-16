@@ -144,9 +144,9 @@ export default function DeviceGrouping() {
     t,
     selectedGroupId,
     setSelectedGroupId,
-    createGroupMutation,
-    updateGroupMutation,
-    deleteGroupMutation,
+    createGroupMutation: createGroupMutation as unknown as Parameters<typeof useGroupActions>[0]['createGroupMutation'],
+    updateGroupMutation: updateGroupMutation as unknown as Parameters<typeof useGroupActions>[0]['updateGroupMutation'],
+    deleteGroupMutation: deleteGroupMutation as unknown as Parameters<typeof useGroupActions>[0]['deleteGroupMutation'],
     childNameFilters,
     editLevel2NameFilters,
   });

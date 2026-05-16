@@ -42,7 +42,7 @@ export interface GroupDialogsProps {
   onSaveEditLevel2: () => void;
   onEditLevel2NameFiltersChange: React.Dispatch<React.SetStateAction<NameFilterItem[]>>;
 
-  t: (id: string, values?: Record<string, unknown>) => string;
+  t: (id: string, values?: Record<string, string | number>) => string;
 }
 
 /**

@@ -10,7 +10,7 @@
 // 加密 / 告警）头部加 "尚未生效" Tag — 字段持久化到 DB，但 backup executor 还未
 // 集成对应能力。executor 集成是 follow-up（T-0073 / T-0074 / T-0075）。
 
-import { useEffect } from 'react';
+import React, { useEffect } from 'react';
 import {
   Alert,
   Button,
@@ -51,7 +51,7 @@ function getErrMsg(e: unknown): string {
 // that the executor doesn't yet enforce (per T-0071 PRD §2). The encryption
 // panel passes `severity="warning"` to make the security false-trust risk
 // visually distinct from the neutral cleanup/compression panels.
-function PersistedOnlyTag({ severity = 'info' }: { severity?: 'info' | 'warning' }): JSX.Element {
+function PersistedOnlyTag({ severity = 'info' }: { severity?: 'info' | 'warning' }): React.JSX.Element {
   const t = useT();
   const color = severity === 'warning' ? 'orange' : 'default';
   return (
@@ -79,7 +79,7 @@ function EncryptionStatusTag({
 }: {
   enabled: boolean;
   algorithm: string;
-}): JSX.Element {
+}): React.JSX.Element {
   const t = useT();
   if (!enabled) {
     return (
@@ -106,7 +106,7 @@ function EncryptionStatusTag({
   );
 }
 
-export default function BackupPolicyPage(): JSX.Element {
+export default function BackupPolicyPage(): React.JSX.Element {
   const t = useT();
   const [form] = Form.useForm<BackupPolicy>();
   const { data: policy, isLoading, isError, refetch } = useBackupPolicy();

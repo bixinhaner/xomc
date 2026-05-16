@@ -460,6 +460,10 @@ func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*mo
 		builder = builder.Where(cond)
 		countBuilder = countBuilder.Where(cond)
 	}
+	if filter.ProductClass != nil && *filter.ProductClass != "" {
+		builder = builder.Where(sq.Eq{"d.product_class": *filter.ProductClass})
+		countBuilder = countBuilder.Where(sq.Eq{"d.product_class": *filter.ProductClass})
+	}
 
 	// Count total
 	countQuery, countArgs, _ := countBuilder.ToSql()
@@ -1432,19 +1436,13 @@ func (r *PgDeviceRepository) ListSerialsByIDs(ctx context.Context, ids []uuid.UU
 	return out, rows.Err()
 }
 
-// mandatoryProductClasses are always returned even if no devices exist in the database.
-var mandatoryProductClasses = []string{"QAFA", "QAFB", "BM", "BNQ", "MLQ", "MLN", "BLQ"}
-
-// ListProductClasses returns distinct product_class values from devices,
-// merged with mandatory types, sorted alphabetically.
+// ListProductClasses returns distinct product_class values from real device data, sorted alphabetically.
 func (r *PgDeviceRepository) ListProductClasses(ctx context.Context) ([]string, error) {
-	query := `SELECT product_class FROM (
-		SELECT DISTINCT product_class FROM devices WHERE product_class IS NOT NULL AND product_class != ''
-		UNION
-		SELECT unnest($1::text[])
-	) sub ORDER BY product_class`
+	query := `SELECT DISTINCT product_class FROM devices
+		WHERE product_class IS NOT NULL AND product_class != ''
+		ORDER BY product_class`
 
-	rows, err := r.pool.Query(ctx, query, mandatoryProductClasses)
+	rows, err := r.pool.Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("list product classes: %w", err)
 	}

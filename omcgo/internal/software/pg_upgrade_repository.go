@@ -496,11 +496,14 @@ func (r *PgSubTaskRepository) DeleteByTaskID(ctx context.Context, taskID uuid.UU
 
 func (r *PgSubTaskRepository) FailStale(ctx context.Context, cutoff time.Time) (map[uuid.UUID]int64, error) {
 	query := `WITH failed AS (
-		UPDATE upgrade_sub_tasks
+		UPDATE upgrade_sub_tasks ust
 		SET status = 'failed', error_message = 'Upgrade failed, can not receive TransferComplete msg from device.', completed_at = NOW(), updated_at = NOW()
-		WHERE status NOT IN ('completed', 'failed', 'terminated')
-		  AND updated_at < $1
-		RETURNING task_id
+		FROM upgrade_tasks ut
+		WHERE ust.task_id = ut.id
+		  AND ust.status NOT IN ('completed', 'failed', 'terminated')
+		  AND ut.status NOT IN ('pending', 'suspended')
+		  AND ust.updated_at < $1
+		RETURNING ust.task_id
 	)
 	SELECT task_id, COUNT(*)::bigint AS cnt
 	FROM failed

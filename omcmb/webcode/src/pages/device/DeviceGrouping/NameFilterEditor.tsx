@@ -13,7 +13,7 @@ export interface NameFilterEditorProps {
   onAdd: () => void;
   /** Remove a filter row. */
   onRemove: (id: string) => void;
-  t: (id: string, values?: Record<string, unknown>) => string;
+  t: (id: string, values?: Record<string, string | number>) => string;
   maxConditions?: number;
 }
 

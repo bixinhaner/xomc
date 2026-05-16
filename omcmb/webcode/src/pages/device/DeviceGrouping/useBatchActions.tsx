@@ -11,7 +11,7 @@ import type { MutationLike } from './useGroupActions';
 export function useBatchActions(deps: {
   modal: ReturnType<typeof AppNS.useApp>['modal'];
   message: ReturnType<typeof AppNS.useApp>['message'];
-  t: (id: string, values?: Record<string, unknown>) => string;
+  t: (id: string, values?: Record<string, string | number>) => string;
   refetch: () => Promise<unknown>;
   deleteDevicesMutation: MutationLike<string[]>;
   setSelectedDeviceIds: React.Dispatch<React.SetStateAction<React.Key[]>>;

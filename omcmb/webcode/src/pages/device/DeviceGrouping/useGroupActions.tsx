@@ -47,7 +47,7 @@ export function useGroupActions(deps: {
   refetchGroups: () => Promise<unknown>;
   modal: ReturnType<typeof App.useApp>['modal'];
   message: ReturnType<typeof App.useApp>['message'];
-  t: (id: string, values?: Record<string, unknown>) => string;
+  t: (id: string, values?: Record<string, string | number>) => string;
   selectedGroupId: string | null;
   setSelectedGroupId: React.Dispatch<React.SetStateAction<string | null>>;
   createGroupMutation: MutationLike<CreateGroupArgs>;

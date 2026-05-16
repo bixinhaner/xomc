@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { Button, Form, Input, Modal, Space, Tag, Tree, Typography, message, Tabs, Select } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons';
 import type { DataNode } from 'antd/es/tree';
 import TreeListPageLayout from '@/components/Layout/TreeListPageLayout';
 import DataTable from '@/components/DataTable';
@@ -195,7 +195,7 @@ export default function DomainManagement() {
   const [editingDomain, setEditingDomain] = useState<DomainNode | null>(null);
   const [form] = Form.useForm();
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize] = useState(20);
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [activeTab, setActiveTab] = useState<'devices' | 'sites'>('devices');
 
@@ -312,7 +312,7 @@ export default function DomainManagement() {
           active: '激活',
           inactive: '未激活',
         };
-        return <Tag color={colorMap[val as string]}>{labelMap[val as string] || val}</Tag>;
+        return <Tag color={colorMap[val as string]}>{labelMap[val as string] || String(val ?? '')}</Tag>;
       },
     },
     {

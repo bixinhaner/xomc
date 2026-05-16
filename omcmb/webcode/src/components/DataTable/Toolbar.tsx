@@ -14,6 +14,7 @@ interface BatchAction {
   label: string;
   icon?: React.ReactNode;
   danger?: boolean;
+  disabled?: boolean;
   onClick: (selectedKeys: React.Key[]) => void;
 }
 
@@ -77,7 +78,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
                 size="small"
                 danger={action.danger}
                 icon={action.icon}
-                disabled={!hasSelection}
+                disabled={!hasSelection || action.disabled}
                 onClick={() => action.onClick(selectedRowKeys)}
               >
                 {action.label}

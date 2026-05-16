@@ -9,6 +9,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Popconfirm,
   Row,
   Select,
   Space,
@@ -19,6 +20,7 @@ import {
   message,
 } from 'antd';
 import {
+  DeleteOutlined,
   EditOutlined,
   EyeOutlined,
   PlusOutlined,
@@ -27,9 +29,11 @@ import {
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import {
   useCreateUnifiedFileTransferTaskType,
+  useDeleteUnifiedFileTransferTaskType,
   useUnifiedFileTransferTaskTypes,
   useUpdateUnifiedFileTransferTaskType,
 } from '@core/hooks/api/useUnifiedFileTransfer';
+import { useProductClasses } from '@core/hooks/api/useDevices';
 import type {
   CreateUnifiedFileTransferTypeInput,
   UnifiedFileTransferTaskType,
@@ -50,8 +54,9 @@ export default function TemplateDefinitionManagement() {
   const { data: taskTypes = [], isLoading: taskTypesLoading } = useUnifiedFileTransferTaskTypes({
     refetchOnMount: 'always',
   });
+  const { data: productClasses = [] } = useProductClasses();
   const categories = useMemo(() => buildCategoryTabs(taskTypes), [taskTypes]);
-  const [selectedCategory, setSelectedCategory] = useState('gnb_upgrade');
+  const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedTypeCode, setSelectedTypeCode] = useState('');
   const [detailType, setDetailType] = useState<UnifiedFileTransferTaskType | null>(null);
   const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
@@ -61,6 +66,7 @@ export default function TemplateDefinitionManagement() {
 
   const createTaskTypeMutation = useCreateUnifiedFileTransferTaskType();
   const updateTaskTypeMutation = useUpdateUnifiedFileTransferTaskType();
+  const deleteTaskTypeMutation = useDeleteUnifiedFileTransferTaskType();
 
   const filteredTaskTypes = useMemo(
     () => taskTypes.filter((item) => item.category === selectedCategory),
@@ -79,6 +85,15 @@ export default function TemplateDefinitionManagement() {
     () => categories.map((item) => ({ label: item.categoryLabel, value: item.category })),
     [categories],
   );
+
+  const platformScopeOptions = useMemo(() => {
+    const values = new Set<string>(productClasses);
+    editingType?.platformScope.forEach((entry) => values.add(entry));
+    return Array.from(values)
+      .filter(Boolean)
+      .sort((left, right) => left.localeCompare(right, 'zh-CN'))
+      .map((item) => ({ label: item, value: item }));
+  }, [editingType?.platformScope, productClasses]);
 
   useEffect(() => {
     if (categories.length === 0) {
@@ -158,7 +173,7 @@ export default function TemplateDefinitionManagement() {
       enabled: values.enabled,
       platformScope: values.platformScope,
       fileType: values.fileType,
-      fileTypeLabel: editingType?.fileTypeLabel ?? values.fileType,
+      fileTypeLabel: values.fileType,
       fileTypeEditable: values.fileTypeEditable,
       urlTemplate: editingType?.urlTemplate,
       targetFileNameTemplate: editingType?.targetFileNameTemplate,
@@ -189,6 +204,20 @@ export default function TemplateDefinitionManagement() {
     typeForm.resetFields();
   };
 
+  const handleDeleteType = async (taskType: UnifiedFileTransferTaskType) => {
+    await deleteTaskTypeMutation.mutateAsync(taskType.typeCode);
+    if (detailType?.typeCode === taskType.typeCode) {
+      setDetailDrawerOpen(false);
+      setDetailType(null);
+    }
+    if (editingType?.typeCode === taskType.typeCode) {
+      setTypeDrawerOpen(false);
+      setEditingType(null);
+      typeForm.resetFields();
+    }
+    void message.success('自定义模板已删除。');
+  };
+
   const renderTemplateSection = (
     title: string,
     items: UnifiedFileTransferTaskType[],
@@ -214,6 +243,17 @@ export default function TemplateDefinitionManagement() {
                     <Button type="link" icon={<EditOutlined />} onClick={() => openTypeDrawer(taskType)}>
                       {taskType.builtIn ? '调整模板' : '编辑模板'}
                     </Button>
+                    {!taskType.builtIn ? (
+                      <Popconfirm
+                        title="确认删除这个自定义模板吗？"
+                        description="删除后将无法恢复。"
+                        onConfirm={() => void handleDeleteType(taskType)}
+                      >
+                        <Button type="link" icon={<DeleteOutlined />} danger loading={deleteTaskTypeMutation.isPending}>
+                          删除模板
+                        </Button>
+                      </Popconfirm>
+                    ) : null}
                   </Space>
                 </Space>
               );
@@ -270,12 +310,25 @@ export default function TemplateDefinitionManagement() {
         onClose={() => setDetailDrawerOpen(false)}
         destroyOnClose
         extra={detailType ? (
-          <Button type="primary" onClick={() => {
-            setDetailDrawerOpen(false);
-            openTypeDrawer(detailType);
-          }}>
-            {detailType.builtIn ? '调整模板' : '编辑模板'}
-          </Button>
+          <Space>
+            {!detailType.builtIn ? (
+              <Popconfirm
+                title="确认删除这个自定义模板吗？"
+                description="删除后将无法恢复。"
+                onConfirm={() => void handleDeleteType(detailType)}
+              >
+                <Button icon={<DeleteOutlined />} danger loading={deleteTaskTypeMutation.isPending}>
+                  删除模板
+                </Button>
+              </Popconfirm>
+            ) : null}
+            <Button type="primary" onClick={() => {
+              setDetailDrawerOpen(false);
+              openTypeDrawer(detailType);
+            }}>
+              {detailType.builtIn ? '调整模板' : '编辑模板'}
+            </Button>
+          </Space>
         ) : null}
       >
         {detailType ? (
@@ -336,7 +389,7 @@ export default function TemplateDefinitionManagement() {
             </Button>
             <Button
               type="primary"
-              loading={createTaskTypeMutation.isPending || updateTaskTypeMutation.isPending}
+              loading={createTaskTypeMutation.isPending || updateTaskTypeMutation.isPending || deleteTaskTypeMutation.isPending}
               onClick={() => void handleSaveType()}
             >
               {editingType ? '保存' : '创建'}
@@ -374,10 +427,16 @@ export default function TemplateDefinitionManagement() {
             />
           </Form.Item>
           <Form.Item label="平台范围" name="platformScope" rules={[{ required: true, message: '请至少输入一个平台范围' }]}> 
-            <Select mode="tags" placeholder="例如：4G eNB、5G gNB、IMG、FPGA" />
+            <Select
+              mode="tags"
+              showSearch
+              optionFilterProp="label"
+              options={platformScopeOptions}
+              placeholder="输入产品类型关键字，可从设备库联想选择，例如：FAP/BU1810、QAFA、BBU-XSS"
+            />
           </Form.Item>
           <Form.Item label="FileType" name="fileType" rules={[{ required: true, message: '请输入 FileType' }]}> 
-            <Input placeholder="例如：1 / 3 / 6 / 8" />
+                <Input placeholder="例如：1 Firmware Upgrade Image / 3 Vendor Configuration File / Firmware Upgrade Fpga" />
           </Form.Item>
           <Form.Item label="DelaySeconds" name="delaySeconds">
             <InputNumber min={0} max={86400} style={{ width: '100%' }} />

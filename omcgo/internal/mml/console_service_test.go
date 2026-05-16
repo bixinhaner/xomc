@@ -417,10 +417,17 @@ func TestGetCommandSubFields_LangFallbackToEn(t *testing.T) {
 // ============================================================
 
 func TestBuildDisplayName(t *testing.T) {
-	assert.Equal(t, "设备信息(LST DEVICE_INFO)",
-		buildDisplayName("设备信息", "LST", "DEVICE_INFO"))
-	assert.Equal(t, "DEVICE_INFO(LST DEVICE_INFO)",
-		buildDisplayName("", "LST", "DEVICE_INFO"))
+	// 业务化命名（T-0123 v3）：verb 中文/英文 + logicalName
+	assert.Equal(t, "查询 设备信息",
+		buildDisplayName("设备信息", "LST", "DEVICE_INFO", "zh-CN"))
+	assert.Equal(t, "Query Device Info",
+		buildDisplayName("Device Info", "LST", "DEVICE_INFO", "en-US"))
+	// logicalName 空时 fallback 到 logicalCode
+	assert.Equal(t, "查询 DEVICE_INFO",
+		buildDisplayName("", "LST", "DEVICE_INFO", "zh-CN"))
+	// 未知 op 时保留原值
+	assert.Equal(t, "FOO BAR",
+		buildDisplayName("BAR", "FOO", "BAR_CODE", "zh-CN"))
 }
 
 func TestDeriveLogicalCodeFromCommandCode(t *testing.T) {

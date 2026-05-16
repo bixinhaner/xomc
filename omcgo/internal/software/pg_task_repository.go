@@ -18,7 +18,7 @@ import (
 )
 
 var taskColumns = []string{
-	"id", "task_name", "task_type", "firmware_id", "file_name", "file_md5",
+	"id", "task_name", "task_type", "firmware_id", "download_file_type", "file_name", "file_md5",
 	"status", "result", "product_class", "is_keep_config",
 	"create_status", "create_user", "total_count", "success_count", "fail_count",
 	"max_concurrent", "started_at", "ended_at", "created_at", "updated_at",
@@ -41,6 +41,7 @@ func NewPgTaskRepository(pool *pgxpool.Pool) *PgTaskRepository {
 func scanUpgradeTask(row pgx.Row) (*UpgradeTask, error) {
 	var task UpgradeTask
 	var firmwareID sql.NullString
+	var downloadFileType sql.NullString
 	var fileName, fileMD5, result sql.NullString
 	var startedAt, endedAt sql.NullTime
 	var createdAt, updatedAt time.Time
@@ -49,7 +50,7 @@ func scanUpgradeTask(row pgx.Row) (*UpgradeTask, error) {
 	var rollbackTargetFW sql.NullString
 
 	err := row.Scan(
-		&task.ID, &task.TaskName, &task.TaskType, &firmwareID, &fileName, &fileMD5,
+		&task.ID, &task.TaskName, &task.TaskType, &firmwareID, &downloadFileType, &fileName, &fileMD5,
 		&task.Status, &result, &task.ProductClass, &task.IsKeepConfig,
 		&task.CreateStatus, &task.CreateUser, &task.TotalCount, &task.SuccessCount, &task.FailCount,
 		&task.MaxConcurrent, &startedAt, &endedAt, &createdAt, &updatedAt,
@@ -62,6 +63,9 @@ func scanUpgradeTask(row pgx.Row) (*UpgradeTask, error) {
 	if firmwareID.Valid {
 		fid, _ := uuid.Parse(firmwareID.String)
 		task.FirmwareID = &fid
+	}
+	if downloadFileType.Valid {
+		task.DownloadFileType = downloadFileType.String
 	}
 	if fileName.Valid {
 		task.FileName = fileName.String
@@ -113,11 +117,11 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *UpgradeTask) error 
 	}
 
 	builder := storage.Psql.Insert("upgrade_tasks").
-		Columns("task_name", "task_type", "firmware_id", "file_name", "file_md5",
+		Columns("task_name", "task_type", "firmware_id", "download_file_type", "file_name", "file_md5",
 			"status", "product_class", "is_keep_config",
 			"create_status", "create_user", "total_count", "max_concurrent",
 			"rollback_reason", "rollback_source", "rollback_target_firmware_id").
-		Values(task.TaskName, task.TaskType, task.FirmwareID, task.FileName, task.FileMD5,
+		Values(task.TaskName, task.TaskType, task.FirmwareID, task.DownloadFileType, task.FileName, task.FileMD5,
 			task.Status, task.ProductClass, task.IsKeepConfig,
 			task.CreateStatus, task.CreateUser, task.TotalCount, task.MaxConcurrent,
 			rollbackReason, rollbackSource, rollbackTargetFW).
@@ -161,6 +165,7 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *UpgradeTask) error 
 		Set("task_name", task.TaskName).
 		Set("task_type", task.TaskType).
 		Set("firmware_id", task.FirmwareID).
+		Set("download_file_type", task.DownloadFileType).
 		Set("file_name", task.FileName).
 		Set("file_md5", task.FileMD5).
 		Set("status", task.Status).
@@ -330,6 +335,7 @@ func (r *PgTaskRepository) Delete(ctx context.Context, id uuid.UUID) error {
 func scanUpgradeTaskRow(rows pgx.Rows) (*UpgradeTask, error) {
 	var task UpgradeTask
 	var firmwareID sql.NullString
+	var downloadFileType sql.NullString
 	var fileName, fileMD5, result sql.NullString
 	var startedAt, endedAt sql.NullTime
 	var createdAt, updatedAt time.Time
@@ -338,7 +344,7 @@ func scanUpgradeTaskRow(rows pgx.Rows) (*UpgradeTask, error) {
 	var rollbackTargetFW sql.NullString
 
 	err := rows.Scan(
-		&task.ID, &task.TaskName, &task.TaskType, &firmwareID, &fileName, &fileMD5,
+		&task.ID, &task.TaskName, &task.TaskType, &firmwareID, &downloadFileType, &fileName, &fileMD5,
 		&task.Status, &result, &task.ProductClass, &task.IsKeepConfig,
 		&task.CreateStatus, &task.CreateUser, &task.TotalCount, &task.SuccessCount, &task.FailCount,
 		&task.MaxConcurrent, &startedAt, &endedAt, &createdAt, &updatedAt,
@@ -350,6 +356,9 @@ func scanUpgradeTaskRow(rows pgx.Rows) (*UpgradeTask, error) {
 	if firmwareID.Valid {
 		fid, _ := uuid.Parse(firmwareID.String)
 		task.FirmwareID = &fid
+	}
+	if downloadFileType.Valid {
+		task.DownloadFileType = downloadFileType.String
 	}
 	if fileName.Valid {
 		task.FileName = fileName.String

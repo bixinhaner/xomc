@@ -122,26 +122,27 @@ type FirmwareVersion struct {
 // UpgradeTask represents a main upgrade task (upgrade_tasks table).
 // Frontend "任务列表" Tab queries this.
 type UpgradeTask struct {
-	ID            uuid.UUID   `json:"id"`
-	TaskName      string      `json:"task_name"`
-	TaskType      TaskType    `json:"task_type"`
-	FirmwareID    *uuid.UUID  `json:"firmware_id,omitempty"`
-	FileName      string      `json:"file_name,omitempty"`
-	FileMD5       string      `json:"file_md5,omitempty"`
-	Status        TaskStatus  `json:"status"`
-	Result        TaskResult  `json:"result,omitempty"`
-	ProductClass  string      `json:"product_class"`
-	IsKeepConfig  bool        `json:"is_keep_config"`
-	CreateStatus  string      `json:"create_status"`
-	CreateUser    string      `json:"create_user"`
-	TotalCount    int         `json:"total_count"`
-	SuccessCount  int         `json:"success_count"`
-	FailCount     int         `json:"fail_count"`
-	MaxConcurrent int         `json:"max_concurrent"`
-	StartedAt     *model.Time `json:"started_at,omitempty"`
-	EndedAt       *model.Time `json:"ended_at,omitempty"`
-	CreatedAt     model.Time  `json:"created_at"`
-	UpdatedAt     model.Time  `json:"updated_at"`
+	ID               uuid.UUID   `json:"id"`
+	TaskName         string      `json:"task_name"`
+	TaskType         TaskType    `json:"task_type"`
+	FirmwareID       *uuid.UUID  `json:"firmware_id,omitempty"`
+	DownloadFileType string      `json:"download_file_type,omitempty"`
+	FileName         string      `json:"file_name,omitempty"`
+	FileMD5          string      `json:"file_md5,omitempty"`
+	Status           TaskStatus  `json:"status"`
+	Result           TaskResult  `json:"result,omitempty"`
+	ProductClass     string      `json:"product_class"`
+	IsKeepConfig     bool        `json:"is_keep_config"`
+	CreateStatus     string      `json:"create_status"`
+	CreateUser       string      `json:"create_user"`
+	TotalCount       int         `json:"total_count"`
+	SuccessCount     int         `json:"success_count"`
+	FailCount        int         `json:"fail_count"`
+	MaxConcurrent    int         `json:"max_concurrent"`
+	StartedAt        *model.Time `json:"started_at,omitempty"`
+	EndedAt          *model.Time `json:"ended_at,omitempty"`
+	CreatedAt        model.Time  `json:"created_at"`
+	UpdatedAt        model.Time  `json:"updated_at"`
 
 	// Rollback metadata (T-0021 / R-101). Populated for TaskTypeRollback rows;
 	// for upgrade rows the columns carry their DB defaults (rollback_source='manual',
@@ -214,13 +215,14 @@ type AllSubTaskFilter struct {
 
 // BatchUpgradeRequest is the JSON body for triggering a batch upgrade.
 type BatchUpgradeRequest struct {
-	DeviceIDs       []uuid.UUID `json:"device_ids" binding:"required,min=1"`
-	FirmwareID      uuid.UUID   `json:"firmware_id" binding:"required"`
-	Concurrency     int         `json:"concurrency"`
-	TaskName        string      `json:"task_name" binding:"required"`
-	TaskType        TaskType    `json:"task_type"`
-	IsKeepConfig    bool        `json:"is_keep_config"`
-	CreateSuspended bool        `json:"create_suspended"`
+	DeviceIDs        []uuid.UUID `json:"device_ids" binding:"required,min=1"`
+	FirmwareID       uuid.UUID   `json:"firmware_id" binding:"required"`
+	Concurrency      int         `json:"concurrency"`
+	TaskName         string      `json:"task_name" binding:"required"`
+	TaskType         TaskType    `json:"task_type"`
+	DownloadFileType string      `json:"download_file_type,omitempty"`
+	IsKeepConfig     bool        `json:"is_keep_config"`
+	CreateSuspended  bool        `json:"create_suspended"`
 
 	// Canary strategy (T-0018 / R-101). Strategy defaults to "full" (legacy
 	// path); when "canary", CanaryStages drives stage progression. Empty

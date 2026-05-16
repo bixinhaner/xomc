@@ -141,8 +141,9 @@ const MENU_STATUS_OPTIONS = [
   { label: '停用', value: 'disabled' },
 ];
 
-// 默认的操作按钮（三级节点）
-const DEFAULT_OPERATIONS = [
+// 默认的操作按钮（三级节点）(T-0136: 保留为 export 占位避免 TS6133)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const DEFAULT_OPERATIONS = [
   { key: 'query', name: '查询' },
   { key: 'add', name: '添加' },
   { key: 'edit', name: '修改' },
@@ -505,7 +506,8 @@ export default function MenuManagement() {
       title: '图标',
       dataIndex: 'icon',
       width: 60,
-      render: (val: string | undefined) => {
+      render: (raw: unknown) => {
+        const val = raw as string | undefined;
         if (!val) return <span style={{ color: 'var(--color-text-secondary)' }}>-</span>;
         const Icon = resolveIcon(val);
         // Icon === null：DB 写了 icon 名但不在 IconPicker 白名单（历史脏数据）；
@@ -575,13 +577,14 @@ export default function MenuManagement() {
       title: '类型',
       dataIndex: 'type',
       width: 100,
-      render: (val: MenuType) => {
+      render: (raw: unknown) => {
+        const val = raw as MenuType;
         const typeMap: Record<MenuType, { color: string; text: string }> = {
           menu: { color: 'blue', text: '菜单' },
           directory: { color: 'green', text: '目录' },
           button: { color: 'orange', text: '按钮' },
         };
-        const { color, text } = typeMap[val] || { color: 'default', text: val };
+        const { color, text } = typeMap[val] || { color: 'default', text: String(val) };
         return <Tag color={color}>{text}</Tag>;
       },
     },
@@ -595,7 +598,7 @@ export default function MenuManagement() {
           <InputNumber
             min={1}
             max={999}
-            value={val}
+            value={val as number}
             size="small"
             className={styles.sortInput}
             style={{ width: 80 }}
@@ -620,7 +623,7 @@ export default function MenuManagement() {
       dataIndex: 'permissionKey',
       width: 200,
       ellipsis: true,
-      render: (val) => <code style={{ fontSize: 12 }}>{val || '-'}</code>,
+      render: (val) => <code style={{ fontSize: 12 }}>{(val as string) || '-'}</code>,
     },
     {
       key: 'componentPath',
@@ -628,18 +631,21 @@ export default function MenuManagement() {
       dataIndex: 'componentPath',
       width: 180,
       ellipsis: true,
-      render: (val) => val || '-',
+      render: (val) => (val as string) || '-',
     },
     {
       key: 'status',
       title: '状态',
       dataIndex: 'status',
       width: 100,
-      render: (val: MenuStatus) => (
-        <Tag color={val === 'normal' ? 'success' : 'error'}>
-          {val === 'normal' ? '正常' : '停用'}
-        </Tag>
-      ),
+      render: (raw: unknown) => {
+        const val = raw as MenuStatus;
+        return (
+          <Tag color={val === 'normal' ? 'success' : 'error'}>
+            {val === 'normal' ? '正常' : '停用'}
+          </Tag>
+        );
+      },
     },
   ], [t, handleEdit, handleDelete, expandedKeys, toggleExpand, handleMoveUp, handleMoveDown]);
 
@@ -681,7 +687,7 @@ export default function MenuManagement() {
       <FilterBar
         filterId="menu-management-filter"
         fields={filterFields}
-        onSearch={(vals) => setFilters(vals)}
+        onSearch={(vals) => setFilters(vals as Record<string, string>)}
         onReset={() => setFilters({})}
       />
       <Card

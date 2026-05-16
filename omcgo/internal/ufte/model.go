@@ -95,6 +95,7 @@ type DeviceItem struct {
 	Progress        int    `json:"progress"`
 	LastReportAt    string `json:"lastReportAt"`
 	OperatorScope   string `json:"operatorScope"`
+	FailureReason   string `json:"failureReason,omitempty"`
 }
 
 type CreateTaskRequest struct {
@@ -138,7 +139,7 @@ type TaskListFilter struct {
 	Keyword  string `form:"keyword"`
 	Category string `form:"category"`
 	Page     int    `form:"page"`
-	PageSize int    `form:"pageSize"`
+	PageSize int    `form:"page_size"`
 }
 
 type DeviceListFilter struct {
@@ -148,7 +149,7 @@ type DeviceListFilter struct {
 	Category    string `form:"category"`
 	ProductType string `form:"productType"`
 	Page        int    `form:"page"`
-	PageSize    int    `form:"pageSize"`
+	PageSize    int    `form:"page_size"`
 }
 
 type DeviceCandidateFilter struct {
@@ -157,7 +158,7 @@ type DeviceCandidateFilter struct {
 	ProductType string `form:"productType"`
 	Keyword     string `form:"keyword"`
 	Page        int    `form:"page"`
-	PageSize    int    `form:"pageSize"`
+	PageSize    int    `form:"page_size"`
 }
 
 func builtInTaskTypes() []TaskType {
@@ -177,8 +178,8 @@ func builtInTaskTypes() []TaskType {
 			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"},
 			PermissionCode:         "CODE_ENB_UPGRADE_IMAGE",
 			PlatformScope:          []string{"4G eNB", "QAFA", "QAFB"},
-			FileType:               "1",
-			FileTypeLabel:          "Firmware Upgrade Image",
+			FileType:               "1 Firmware Upgrade Image",
+			FileTypeLabel:          "1 Firmware Upgrade Image",
 			FileTypeEditable:       true,
 			URLTemplate:            "firmware/{minio_path}",
 			TargetFileNameTemplate: "{firmware_name}",
@@ -204,8 +205,8 @@ func builtInTaskTypes() []TaskType {
 			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"},
 			PermissionCode:         "CODE_ENB_UPGRADE_PATCH",
 			PlatformScope:          []string{"4G eNB", "QAFA", "QAFB", "PATCH"},
-			FileType:               "1",
-			FileTypeLabel:          "Patch Package",
+			FileType:               "X {OUI} Software Upgrade Patch",
+			FileTypeLabel:          "X {OUI} Software Upgrade Patch",
 			FileTypeEditable:       true,
 			URLTemplate:            "firmware/{patch_path}",
 			TargetFileNameTemplate: "{patch_name}",
@@ -217,6 +218,33 @@ func builtInTaskTypes() []TaskType {
 			LastEditor:             "system",
 			UpdatedAt:              now,
 			softwareTaskType:       software.TaskTypePatch,
+			techHint:               &lte,
+		},
+		{
+			TypeCode:               "ENB_FPGA_UPGRADE",
+			Category:               "enb_upgrade",
+			CategoryLabel:          "4G升级",
+			DisplayName:            "4G FPGA 升级",
+			Description:            "复用 4G 侧 FPGA 升级任务链路，统一到 UFTE 任务中心。",
+			RPCType:                "DOWNLOAD",
+			BuiltIn:                true,
+			Enabled:                true,
+			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE"},
+			PermissionCode:         "CODE_ENB_UPGRADE_FPGA",
+			PlatformScope:          []string{"4G eNB", "QAFA", "QAFB", "FPGA"},
+			FileType:               "Firmware Upgrade Fpga",
+			FileTypeLabel:          "Firmware Upgrade Fpga",
+			FileTypeEditable:       true,
+			URLTemplate:            "firmware/{fpga_path}",
+			TargetFileNameTemplate: "{fpga_name}",
+			FileNameTemplate:       "{fpga_name}",
+			FileSizeField:          "firmware.fileSize",
+			ChecksumField:          "firmware.md5",
+			RawMode:                "false",
+			TransportPath:          "/smallcell/FileDownloadService/firmware/fpga/{path}",
+			LastEditor:             "system",
+			UpdatedAt:              now,
+			softwareTaskType:       software.TaskTypeFPGA,
 			techHint:               &lte,
 		},
 		{
@@ -232,8 +260,8 @@ func builtInTaskTypes() []TaskType {
 			PostTCEventCode:        "102 UPGRADE FINISH",
 			PermissionCode:         "CODE_GNB_UPGRADE_IMAGE",
 			PlatformScope:          []string{"5G gNB", "BBU-XSS", "BBU-QSS"},
-			FileType:               "1",
-			FileTypeLabel:          "Firmware Upgrade Image",
+			FileType:               "1 Firmware Upgrade Image",
+			FileTypeLabel:          "1 Firmware Upgrade Image",
 			FileTypeEditable:       true,
 			URLTemplate:            "firmware/{minio_path}",
 			TargetFileNameTemplate: "{firmware_name}",
@@ -248,58 +276,23 @@ func builtInTaskTypes() []TaskType {
 			techHint:               &nr,
 		},
 		{
-			TypeCode:               "GNB_FPGA_UPGRADE",
-			Category:               "gnb_upgrade",
-			CategoryLabel:          "5G升级",
-			DisplayName:            "5G FPGA 升级",
-			Description:            "复用 5G 侧 FPGA 升级任务链路，统一到 UFTE 任务中心。",
-			RPCType:                "DOWNLOAD",
-			BuiltIn:                true,
-			Enabled:                true,
-			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_TRANSFER", "WAIT_TRANSFER_COMPLETE", "WAIT_INFORM_EVENT"},
-			PostTCEventCode:        "102 UPGRADE FINISH",
-			PermissionCode:         "CODE_GNB_UPGRADE_FPGA",
-			PlatformScope:          []string{"5G gNB", "BBU-XSS", "BBU-QSS", "FPGA"},
-			FileType:               "1",
-			FileTypeLabel:          "FPGA Package",
-			FileTypeEditable:       true,
-			URLTemplate:            "firmware/{fpga_path}",
-			TargetFileNameTemplate: "{fpga_name}",
-			FileNameTemplate:       "{fpga_name}",
-			FileSizeField:          "firmware.fileSize",
-			ChecksumField:          "firmware.md5",
-			RawMode:                "false",
-			TransportPath:          "/smallcell/FileDownloadService/firmware/fpga/{path}",
-			LastEditor:             "system",
-			UpdatedAt:              now,
-			softwareTaskType:       software.TaskTypeFPGA,
-			techHint:               &nr,
-		},
-		{
-			TypeCode:               "VERSION_ROLLBACK",
-			Category:               "version_rollback",
-			CategoryLabel:          "基站版本回退",
-			DisplayName:            "基站版本回退",
-			Description:            "复用现网已验证的版本回退链路，实现 UFTE 统一入口下的回退任务创建。",
-			RPCType:                "DOWNLOAD",
-			BuiltIn:                true,
-			Enabled:                true,
-			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"},
-			PermissionCode:         "CODE_VERSION_ROLLBACK",
-			PlatformScope:          []string{"4G eNB", "5G gNB", "QAFA", "QAFB", "BBU-XSS", "BBU-QSS"},
-			FileType:               "1",
-			FileTypeLabel:          "Rollback Image",
-			FileTypeEditable:       true,
-			URLTemplate:            "firmware/rollback/{rollback_path}",
-			TargetFileNameTemplate: "{rollback_name}",
-			FileNameTemplate:       "{rollback_name}",
-			FileSizeField:          "rollback.fileSize",
-			ChecksumField:          "rollback.md5",
-			RawMode:                "false",
-			TransportPath:          "/smallcell/FileDownloadService/firmware/rollback/{path}",
-			LastEditor:             "system",
-			UpdatedAt:              now,
-			softwareTaskType:       software.TaskTypeRollback,
+			TypeCode:         "VERSION_ROLLBACK",
+			Category:         "version_rollback",
+			CategoryLabel:    "基站版本回退",
+			DisplayName:      "基站版本回退",
+			Description:      "通过 TR069 SetParameterValues 触发设备回退到上一版本，不需要下载文件。",
+			RPCType:          "SET_PARAM_VALUES",
+			BuiltIn:          true,
+			Enabled:          true,
+			StepChain:        []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_REBOOT_COMPLETE"},
+			PermissionCode:   "CODE_VERSION_ROLLBACK",
+			PlatformScope:    []string{"4G eNB", "5G gNB", "QAFA", "QAFB", "BBU-XSS", "BBU-QSS"},
+			FileType:         "",
+			FileTypeLabel:    "版本回退",
+			FileTypeEditable: false,
+			LastEditor:       "system",
+			UpdatedAt:        now,
+			softwareTaskType: software.TaskTypeRollback,
 		},
 		{
 			TypeCode:               "RUNTIME_LOG_COLLECT",
@@ -376,8 +369,8 @@ func builtInTaskTypes() []TaskType {
 			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"},
 			PermissionCode:         "CODE_CONFIG_RESTORE",
 			PlatformScope:          []string{"4G eNB", "5G gNB", "QAFA", "QAFB", "BBU-XSS", "BBU-QSS"},
-			FileType:               "3",
-			FileTypeLabel:          "Vendor Configuration File",
+			FileType:               "3 Vendor Configuration File",
+			FileTypeLabel:          "3 Vendor Configuration File",
 			FileTypeEditable:       false,
 			URLTemplate:            "config_backup/{object_path}",
 			TargetFileNameTemplate: "{file_name}",
@@ -434,7 +427,7 @@ func matchesTaskTypeScope(item TaskType, productClass string) bool {
 	case coremodel.TechNR:
 		return strings.Contains(upper, "5G") || strings.Contains(upper, "GNB") || strings.Contains(upper, "QSS") || strings.Contains(upper, "XSS") || strings.Contains(upper, "BBU")
 	case coremodel.TechLTE:
-		return strings.Contains(upper, "4G") || strings.Contains(upper, "ENB") || strings.Contains(upper, "QAFA") || strings.Contains(upper, "QAFB")
+		return strings.Contains(upper, "4G") || strings.Contains(upper, "ENB") || strings.Contains(upper, "QAFA") || strings.Contains(upper, "QAFB") || strings.Contains(upper, "FAP") || strings.Contains(upper, "BM") || strings.Contains(upper, "BNQ") || strings.Contains(upper, "MLQ") || strings.Contains(upper, "MLN") || strings.Contains(upper, "BLQ")
 	default:
 		return false
 	}
@@ -496,6 +489,9 @@ func stepForTask(item TaskType, status software.TaskStatus) string {
 	if status == software.TaskPending || status == software.TaskSuspended {
 		return "SEND_RPC"
 	}
+	if item.softwareTaskType == software.TaskTypeRollback {
+		return "WAIT_REBOOT_COMPLETE"
+	}
 	if item.PostTCEventCode != "" {
 		return "WAIT_INFORM_EVENT"
 	}
@@ -526,13 +522,7 @@ func defaultDeviceName(siteName, serialNumber, productClass string) string {
 	if strings.TrimSpace(siteName) != "" {
 		return siteName
 	}
-	if strings.TrimSpace(serialNumber) != "" {
-		return serialNumber
-	}
-	if strings.TrimSpace(productClass) != "" {
-		return productClass
-	}
-	return "未命名设备"
+	return "-"
 }
 
 func materializeTaskTypes(stored []TaskType) []TaskType {
@@ -550,6 +540,8 @@ func materializeTaskTypes(stored []TaskType) []TaskType {
 			item.BuiltIn = item.BuiltIn || base.BuiltIn
 			item.softwareTaskType = base.softwareTaskType
 			item.techHint = base.techHint
+			item.RPCType = base.RPCType
+			item.StepChain = base.StepChain
 		}
 		result = append(result, item)
 	}

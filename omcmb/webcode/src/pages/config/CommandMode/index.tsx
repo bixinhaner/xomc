@@ -111,9 +111,10 @@ export default function CommandMode() {
         { commandCode: selectedCommand.commandCode, deviceSns: ['ENB00001'], params: vals as Record<string, string | number | boolean> },
         {
           onSuccess: (result) => {
+            const r = result as unknown as { success?: boolean; rawOutput?: string; executionTime?: number };
             appendOutput([
-              { type: result.success ? 'success' : 'stderr', text: result.rawOutput, timestamp: new Date().toLocaleString() },
-              { type: 'info', text: `${t('status.success')}, ${result.executionTime}ms`, timestamp: new Date().toLocaleString() },
+              { type: r.success ? 'success' : 'stderr', text: r.rawOutput ?? '', timestamp: new Date().toLocaleString() },
+              { type: 'info', text: `${t('status.success')}, ${r.executionTime ?? 0}ms`, timestamp: new Date().toLocaleString() },
             ]);
           },
           onError: () => {

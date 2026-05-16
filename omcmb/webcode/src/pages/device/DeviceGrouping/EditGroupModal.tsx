@@ -10,7 +10,7 @@ export interface EditGroupModalProps {
   editingGroupId?: string;
   onOk: () => void;
   onCancel: () => void;
-  t: (id: string, values?: Record<string, unknown>) => string;
+  t: (id: string, values?: Record<string, string | number>) => string;
 }
 
 /**
