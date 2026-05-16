@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -14,6 +15,13 @@ import (
 
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+)
+
+// prettyXML 用的正则，编译期初始化避免热路径反复编译。
+var (
+	cdataRE       = regexp.MustCompile(`(?s)<!\[CDATA\[.*?\]\]>`)
+	tagBoundaryRE = regexp.MustCompile(`>\s*<`)
+	inlineTagRE   = regexp.MustCompile(`^<[^/!?][^>]*>[^<]*</[^>]+>$`)
 )
 
 // Exporter worker 进程订阅 trace.export.requested，生成单个 XML 文件写 MinIO exchange bucket。
@@ -193,9 +201,30 @@ func (e *Exporter) failJob(ctx context.Context, job *ExportJob, msg string) {
 
 // buildXML 分页拉所有 messages → 拼 XML（CDATA 包裹原文）。
 // external 报文走 BulkStore 回读；BulkStore 未注入时 external 报文输出 placeholder 注释。
+//
+// 文件可读性增强：
+//   - 顶部增加任务元信息注释（task_id / device_sn / 抓包时间窗口 / 总条数）
+//   - 每条 Message 上方加分隔线注释 `#NNN | direction | rpc_method | captured_at`，
+//     运维滚浏览时一眼定位时间和方向
+//   - CDATA 内的 SOAP 原文做缩进美化（prettyXML），多行排列方便对比 diff
 func (e *Exporter) buildXML(ctx context.Context, task *Task) ([]byte, int, error) {
 	var buf bytes.Buffer
 	buf.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
+	// 文件头元信息块
+	buf.WriteString("<!-- ════════════════════════════════════════════════════════════════════════ -->\n")
+	buf.WriteString("<!--  OMC TR-069 报文跟踪导出文件\n")
+	buf.WriteString("       task_id   : " + task.ID.String() + "\n")
+	buf.WriteString("       device_sn : " + task.DeviceSN + "\n")
+	buf.WriteString("       start_time: " + task.StartTime.Format(time.RFC3339) + "\n")
+	if task.StoppedAt != nil {
+		buf.WriteString("       stop_time : " + task.StoppedAt.Format(time.RFC3339) + "\n")
+	} else {
+		buf.WriteString("       expires_at: " + task.ExpiresAt.Format(time.RFC3339) + "\n")
+	}
+	buf.WriteString("       exported  : " + time.Now().Format(time.RFC3339) + "\n")
+	buf.WriteString("       message_count: " + fmt.Sprintf("%d", task.MessageCount) + "\n")
+	buf.WriteString("  -->\n")
+	buf.WriteString("<!-- ════════════════════════════════════════════════════════════════════════ -->\n")
 	buf.WriteString(`<TraceExport task_id="` + task.ID.String() + `" device_sn="` + task.DeviceSN + `">` + "\n")
 
 	count := 0
@@ -224,8 +253,8 @@ func (e *Exporter) buildXML(ctx context.Context, task *Task) ([]byte, int, error
 				e.logger.Warn("trace exporter: fetch external payload failed",
 					zap.String("msg_id", msg.ID.String()), zap.Error(fetchErr))
 			}
-			writeMessageXML(&buf, msg, payload)
 			count++
+			writeMessageXML(&buf, msg, payload, count)
 			if count > e.maxRows {
 				return nil, count, fmt.Errorf("message count exceeds limit %d (use M3 streaming export)", e.maxRows)
 			}
@@ -252,7 +281,25 @@ func (e *Exporter) fetchPayload(ctx context.Context, m *Message) (string, error)
 	return e.bulk.Get(ctx, m.PayloadObjectKey)
 }
 
-func writeMessageXML(buf *bytes.Buffer, m *Message, payload string) {
+func writeMessageXML(buf *bytes.Buffer, m *Message, payload string, index int) {
+	// 分隔线 + 摘要注释 — 让运维滚浏览时一眼定位
+	rpc := m.RPCMethod
+	if rpc == "" {
+		rpc = "-"
+	}
+	cwmpID := m.CwmpID
+	if cwmpID == "" {
+		cwmpID = "-"
+	}
+	// 方向标签靠人眼易识别
+	dirLabel := "CPE→ACS"
+	if m.Direction == DirectionOut {
+		dirLabel = "ACS→CPE"
+	}
+	buf.WriteString("\n")
+	buf.WriteString("<!-- ──────────────────────────────────────────────────────────────────────── -->\n")
+	buf.WriteString(fmt.Sprintf("<!-- #%03d  %s  %-10s  %s  cwmp_id=%s -->\n",
+		index, dirLabel, rpc, m.CapturedAt.Format("2006-01-02 15:04:05.000"), cwmpID))
 	buf.WriteString(`<Message captured_at="` + m.CapturedAt.Format(time.RFC3339Nano) +
 		`" direction="` + string(m.Direction) + `"`)
 	if m.RPCMethod != "" {
@@ -262,9 +309,62 @@ func writeMessageXML(buf *bytes.Buffer, m *Message, payload string) {
 		buf.WriteString(` cwmp_id="` + m.CwmpID + `"`)
 	}
 	buf.WriteString(">\n")
-	buf.WriteString("<![CDATA[")
-	// CDATA 内禁止出现 "]]>"；做一次安全替换
-	buf.WriteString(strings.ReplaceAll(payload, "]]>", "]]]]><![CDATA[>"))
+	// CDATA 内 SOAP 原文按 tag 缩进美化；CDATA 边界"]]>" 安全替换
+	pretty := prettyXML(payload)
+	pretty = strings.ReplaceAll(pretty, "]]>", "]]]]><![CDATA[>")
+	buf.WriteString("<![CDATA[\n")
+	buf.WriteString(pretty)
+	if !strings.HasSuffix(pretty, "\n") {
+		buf.WriteString("\n")
+	}
 	buf.WriteString("]]>\n</Message>\n")
+}
+
+// prettyXML 简单美化：按 tag 边界拆行 + 计算缩进。
+// 同 webcode/MessageTrace 前端 ts 版本镜像实现，保证后端导出文件与前端预览
+// 体验一致。CDATA 内的内容用占位符保护不破坏。空字符串或单行注释/声明保留原样。
+func prettyXML(xml string) string {
+	if xml == "" || strings.TrimSpace(xml) == "" {
+		return xml
+	}
+	// 保护 CDATA：先抠出来用占位符替换，最后还原
+	var cdatas []string
+	safe := cdataRE.ReplaceAllStringFunc(xml, func(m string) string {
+		cdatas = append(cdatas, m)
+		return fmt.Sprintf("__CDATA_%d__", len(cdatas)-1)
+	})
+	// 在 > 和 < 之间的空白替换成一个 \n，方便按行处理
+	broken := tagBoundaryRE.ReplaceAllString(safe, ">\n<")
+	lines := strings.Split(broken, "\n")
+	depth := 0
+	var out bytes.Buffer
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		isClose := strings.HasPrefix(line, "</")
+		isSelfClose := strings.HasSuffix(line, "/>")
+		isDecl := strings.HasPrefix(line, "<?") || strings.HasPrefix(line, "<!")
+		// <tag>text</tag> 同行的不动缩进
+		isInline := inlineTagRE.MatchString(line)
+		if isClose && depth > 0 {
+			depth--
+		}
+		for i := 0; i < depth; i++ {
+			out.WriteString("  ")
+		}
+		out.WriteString(line)
+		out.WriteString("\n")
+		if !isClose && !isSelfClose && !isDecl && !isInline {
+			depth++
+		}
+	}
+	result := out.String()
+	// 还原 CDATA 占位符
+	for i, cd := range cdatas {
+		result = strings.Replace(result, fmt.Sprintf("__CDATA_%d__", i), cd, 1)
+	}
+	return strings.TrimRight(result, "\n")
 }
 
