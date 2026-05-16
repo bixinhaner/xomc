@@ -471,6 +471,32 @@ func initMiscModules(c *Container) error {
 	mmlConsoleSvc := mml.NewConsoleService(mmlGroupTreeRepo, mmlSubFieldRepo, mmlCmdRepo, logger)
 	c.miscDeps.mmlConsoleHandler = mml.NewConsoleHandler(mmlConsoleSvc, mmlService, logger)
 
+	// Stage 3（T-0123 v5）：装配 mml.Service 的 device_tasks 路径翻译 miss 聚合
+	// 接口；适配器 mmlPathMissAdapter（本文件末尾）把 task 包的
+	// PathTranslationMissStats 转换为 mml 包的视图类型，让 GET /mml/tasks/:id
+	// 返回 path_translation_warning 字段供前端任务详情警告标签使用。
+	if c.miscDeps.taskSvc != nil {
+		mmlService.SetDeviceTaskPathMissAggregator(&mmlPathMissAdapter{svc: c.miscDeps.taskSvc})
+	}
+
+	// Stage 2（T-0123 v5）：上行 RPC 响应订阅者 — ACS 进程发 EventBus 后，
+	// 本进程订阅 command.get_parameters.response，把 privatePath 翻译为
+	// standardPath 再写 device_parameters。
+	if c.EventBus != nil && c.DeviceService != nil && c.ParamRepo != nil {
+		rpcRespSub := device.NewRPCResponseSubscriber(
+			c.EventBus,
+			c.ProductRegistry,
+			c.ParamRegistry,
+			c.DeviceService,
+			c.ParamRepo,
+			logger,
+		)
+		if err := rpcRespSub.Start(); err != nil {
+			logger.Warn("start rpc response subscriber failed; uplink path translation disabled",
+				zap.Error(err))
+		}
+	}
+
 	// Wire MML fan-out to device tasks. misc 模块在 router.go 声明 Depends=["task"]，
 	// 保证此处 c.miscDeps.taskSvc 一定已就绪。
 	//
@@ -923,4 +949,26 @@ type taskCRSender struct {
 
 func (a *taskCRSender) Send(ctx context.Context, deviceSN, httpURL string) error {
 	return a.dispatcher.Send(ctx, deviceSN, httpURL, a.serverAddr, true)
+}
+
+// mmlPathMissAdapter 把 task.TaskService 的 AggregatePathTranslationMissBySourceID
+// 适配为 mml.DeviceTaskPathMissAggregator 接口。task 包与 mml 包分别定义统计
+// struct（消费者驱动接口），适配器在装配层完成字段映射，避免 mml 包反向依赖
+// task 包的具体类型。
+type mmlPathMissAdapter struct {
+	svc *task.TaskService
+}
+
+func (a *mmlPathMissAdapter) AggregatePathTranslationMissBySourceID(
+	ctx context.Context, sourceID string,
+) (mml.PathTranslationMissStatsView, error) {
+	stats, err := a.svc.AggregatePathTranslationMissBySourceID(ctx, sourceID)
+	if err != nil {
+		return mml.PathTranslationMissStatsView{}, err
+	}
+	return mml.PathTranslationMissStatsView{
+		DeviceCount: stats.DeviceCount,
+		PathCount:   stats.PathCount,
+		AnyMiss:     stats.AnyMiss,
+	}, nil
 }

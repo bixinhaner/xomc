@@ -52,6 +52,15 @@ func NewTaskService(queue *RedisTaskQueue, repo *PgTaskRepository, log *zap.Logg
 	}
 }
 
+// AggregatePathTranslationMissBySourceID 透传到底层 PgTaskRepository，
+// 供 mml.Service 在 GET /mml/tasks/:id 聚合 device_tasks 的 path translation
+// miss 元数据（整改方案 Stage 3 — UI 警告标签）。
+func (s *TaskService) AggregatePathTranslationMissBySourceID(
+	ctx context.Context, sourceID string,
+) (PathTranslationMissStats, error) {
+	return s.repo.AggregatePathTranslationMissBySourceID(ctx, sourceID)
+}
+
 // SetMetrics attaches Prometheus metrics to the service.
 func (s *TaskService) SetMetrics(m *TaskMetrics) {
 	s.metrics = m

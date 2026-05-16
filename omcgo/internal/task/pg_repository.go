@@ -355,6 +355,36 @@ func (r *PgTaskRepository) BatchCreate(ctx context.Context, tasks []*Task) error
 	return nil
 }
 
+// PathTranslationMissStats 是按 source_id 聚合的 device_tasks 路径翻译 miss 统计。
+//
+// 用于 MML 任务详情接口（GET /api/v1/mml/tasks/:id）—前端任务详情页据此显示
+// "路径翻译警告" 标签 + 详细计数（被影响 device 数 / miss path 总数）。
+type PathTranslationMissStats struct {
+	DeviceCount int   `json:"device_count"`
+	PathCount   int64 `json:"path_count"`
+	AnyMiss     bool  `json:"any_miss"`
+}
+
+// AggregatePathTranslationMissBySourceID 聚合特定 source_id (mml_task.id) 下
+// 所有 device_tasks 的 has_path_translation_miss / path_translation_miss_count，
+// 用于 MML 任务详情聚合显示（Stage 3 — 整改方案 UI 警告标签）。
+func (r *PgTaskRepository) AggregatePathTranslationMissBySourceID(
+	ctx context.Context, sourceID string,
+) (PathTranslationMissStats, error) {
+	const q = `
+SELECT
+    COUNT(*) FILTER (WHERE has_path_translation_miss) AS device_count,
+    COALESCE(SUM(path_translation_miss_count), 0)::bigint AS path_count
+FROM device_tasks
+WHERE source = 'mml' AND source_id = $1`
+	var stats PathTranslationMissStats
+	if err := r.pool.QueryRow(ctx, q, sourceID).Scan(&stats.DeviceCount, &stats.PathCount); err != nil {
+		return PathTranslationMissStats{}, fmt.Errorf("aggregate path translation miss: %w", err)
+	}
+	stats.AnyMiss = stats.DeviceCount > 0 || stats.PathCount > 0
+	return stats, nil
+}
+
 // CountByStatus 统计各状态任务数量
 func (r *PgTaskRepository) CountByStatus(ctx context.Context, deviceSN string) (map[TaskStatus]int64, error) {
 	query, args, err := storage.Psql.Select("status", "COUNT(*) as count").

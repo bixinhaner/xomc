@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -10,10 +11,36 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
 
 	"github.com/omcgo/omcgo/internal/config/parammodel/mmlstandardloader"
 )
+
+// contextWithTimeout 返回 (context.Context, cancel) 并设定超时。
+// omcctl 一次性命令使用，外部捕获 SIGINT 不重要（cobra 会终止进程）。
+func contextWithTimeout(d time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), d)
+}
+
+// openPgPool 打开 pgxpool（小池子，omcctl 单次命令用 4 个连接足够）。
+func openPgPool(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("parse dsn: %w", err)
+	}
+	cfg.MaxConns = 4
+	cfg.MinConns = 1
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("create pool: %w", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("ping: %w", err)
+	}
+	return pool, nil
+}
 
 // newMMLCmd 注册 `omcctl mml` 父命令 + 子命令。
 //
@@ -29,7 +56,123 @@ func newMMLCmd() *cobra.Command {
 		Long:  "MML 命令字典工具：standard-model.xml → seed SQL 一次性导入",
 	}
 	cmd.AddCommand(newMMLImportCmd())
+	cmd.AddCommand(newMMLMigrateDeviceParamsCmd())
 	return cmd
+}
+
+// newMMLMigrateDeviceParamsCmd 注册 `omcctl mml migrate-device-params` 子命令。
+//
+// 整改方案 Stage 2（用户决策 2026-05-16）：device_parameters.parameter_path
+// 历史值可能是 privatePath（旧 Inform 直接入库），新写入都是 standardPath
+// （rpc_response_subscriber 翻译后入库 + Path B 同步）。本命令把历史 private
+// 行翻译为 standard，按 (device_id, parameter_path) 行级 UPDATE。
+//
+// 路径：device.product_class → products.product_class regex 匹配 → product.id
+//      → param_mappings.private_path == dp.parameter_path → standard_path
+//
+// 翻译失败的行（未匹配到 product / 未在 param_mappings 中找到 private_path）
+// 保持不变，由运维通过 admin UI 补 discovered_param_mappings 后重跑命令。
+//
+// Flags：
+//   --dsn       连接串（必填）
+//   --dry-run   仅扫描+报告，不写入（默认）
+//   --apply     真执行 UPDATE
+//   --batch     批大小（默认 500，超大表分批避免长事务）
+func newMMLMigrateDeviceParamsCmd() *cobra.Command {
+	var (
+		dsn     string
+		dryRun  bool
+		apply   bool
+		batch   int
+	)
+	c := &cobra.Command{
+		Use:   "migrate-device-params",
+		Short: "Translate legacy privatePath rows in device_parameters to standardPath",
+		Long: `把 device_parameters 表中历史 privatePath 行翻译为 standardPath。
+
+读 products + param_mappings 现有数据，按 (device.product_class regex 匹配
+product) + (private_path 精确匹配) 重写 parameter_path。
+
+默认 --dry-run 只报告会改多少行，--apply 才真改。--batch 控制每次 UPDATE
+的行数上限（默认 500）。`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runMMLMigrateDeviceParams(dsn, dryRun, apply, batch)
+		},
+	}
+	c.Flags().StringVar(&dsn, "dsn", "postgres://omcgo:omcgo123@localhost:5432/omcgo?sslmode=disable", "PostgreSQL DSN")
+	c.Flags().BoolVar(&dryRun, "dry-run", true, "Only count affected rows; default true")
+	c.Flags().BoolVar(&apply, "apply", false, "Actually execute UPDATE (overrides --dry-run)")
+	c.Flags().IntVar(&batch, "batch", 500, "Max rows per UPDATE statement")
+	return c
+}
+
+func runMMLMigrateDeviceParams(dsn string, dryRun, apply bool, batch int) error {
+	if apply {
+		dryRun = false
+	}
+	ctx, cancel := contextWithTimeout(5 * time.Minute)
+	defer cancel()
+
+	pool, err := openPgPool(ctx, dsn)
+	if err != nil {
+		return fmt.Errorf("connect pg: %w", err)
+	}
+	defer pool.Close()
+
+	// 1. 扫描可翻译候选数
+	// 注：products 用 product_class_patterns 表存正则（pattern 一对多）。
+	const candidateSQL = `
+SELECT COUNT(*) FROM device_parameters dp
+JOIN devices d ON d.id = dp.device_id
+JOIN product_class_patterns pcp ON d.product_class ~ pcp.product_class AND pcp.is_active
+JOIN products p ON p.id = pcp.product_id
+JOIN param_mappings pm ON pm.param_model_id = p.param_model_id
+WHERE pm.private_path = dp.parameter_path
+  AND dp.parameter_path <> pm.standard_path`
+	var candidates int64
+	if err := pool.QueryRow(ctx, candidateSQL).Scan(&candidates); err != nil {
+		return fmt.Errorf("count candidates: %w", err)
+	}
+	fmt.Printf("Found %d device_parameters rows translatable (privatePath → standardPath)\n", candidates)
+
+	if dryRun {
+		fmt.Println("Dry-run mode; no rows modified. Pass --apply to execute.")
+		return nil
+	}
+
+	// 2. 真执行 UPDATE（分批，避免长事务锁太多行）
+	const updateSQL = `
+UPDATE device_parameters dp
+SET parameter_path = sub.standard_path,
+    last_updated_at = NOW()
+FROM (
+    SELECT dp.device_id, dp.parameter_path AS old_path, pm.standard_path
+    FROM device_parameters dp
+    JOIN devices d ON d.id = dp.device_id
+    JOIN product_class_patterns pcp ON d.product_class ~ pcp.product_class AND pcp.is_active
+    JOIN products p ON p.id = pcp.product_id
+    JOIN param_mappings pm ON pm.param_model_id = p.param_model_id
+    WHERE pm.private_path = dp.parameter_path
+      AND dp.parameter_path <> pm.standard_path
+    LIMIT $1
+) sub
+WHERE dp.device_id = sub.device_id
+  AND dp.parameter_path = sub.old_path`
+	totalUpdated := int64(0)
+	for {
+		ct, err := pool.Exec(ctx, updateSQL, batch)
+		if err != nil {
+			return fmt.Errorf("update batch: %w", err)
+		}
+		n := ct.RowsAffected()
+		totalUpdated += n
+		fmt.Printf("  batch updated %d rows (cumulative %d)\n", n, totalUpdated)
+		if n == 0 {
+			break
+		}
+	}
+	fmt.Printf("Done. Total %d rows translated to standardPath.\n", totalUpdated)
+	return nil
 }
 
 func newMMLImportCmd() *cobra.Command {

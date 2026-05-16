@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Button, Modal, Space, Table, Tag, message } from 'antd';
+import { Alert, Button, Modal, Space, Table, Tag, message } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 
@@ -389,6 +389,18 @@ export default function TaskRecord() {
       >
         {viewing && (
           <>
+            {viewing.pathTranslationWarning?.anyMiss && (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message={t('mml.pathTranslationWarning')}
+                description={t('mml.pathTranslationWarningDetail', {
+                  deviceCount: viewing.pathTranslationWarning.deviceCount,
+                  pathCount: viewing.pathTranslationWarning.pathCount,
+                })}
+              />
+            )}
             {resultRows.length > 0 ? (
               <Table
                 size="small"

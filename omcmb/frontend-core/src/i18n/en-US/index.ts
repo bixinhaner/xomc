@@ -3736,6 +3736,8 @@ const messages: Record<string, string> = {
   'mml.cancelledStatus':                     'Cancelled',
   'mml.failedStatus':                        'Failed',
   'mml.partialSuccess':                      'Partial Success',
+  'mml.pathTranslationWarning':              'Path Translation Warning',
+  'mml.pathTranslationWarningDetail':        '{deviceCount} device(s), {pathCount} path(s) untranslated — fell back to standardPath',
   'mml.taskDetail':                          'Task Detail',
   'mml.newMmlTask':                          'New MML Script Task',
   'mml.basicInfo':                           'Basic Information',

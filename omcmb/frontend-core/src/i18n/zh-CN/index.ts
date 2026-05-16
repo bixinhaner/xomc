@@ -3762,6 +3762,8 @@ const messages: Record<string, string> = {
   'mml.cancelledStatus':                     '已终止',
   'mml.failedStatus':                        '失败',
   'mml.partialSuccess':                      '部分成功',
+  'mml.pathTranslationWarning':              '路径翻译警告',
+  'mml.pathTranslationWarningDetail':        '{deviceCount} 个设备共 {pathCount} 条 path 未翻译，已用 standardPath 兜底下发',
   'mml.taskDetail':                          '任务详情',
   'mml.newMmlTask':                          '新建MML脚本任务',
   'mml.basicInfo':                           '基本信息',

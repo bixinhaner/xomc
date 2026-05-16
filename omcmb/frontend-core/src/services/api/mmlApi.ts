@@ -114,6 +114,12 @@ interface BackendMMLTask {
   // P2/P3 Scheduler fields
   next_trigger_at?: string | null;
   parent_task_id?: string | null;
+  // 整改方案 Stage 3 — 路径翻译警告（GetTask 聚合 device_tasks 后填充）
+  path_translation_warning?: {
+    any_miss: boolean;
+    device_count: number;
+    path_count: number;
+  } | null;
 }
 
 interface BackendListResponse<T> {
@@ -371,6 +377,13 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
     // Scheduler fields (P2/P3)
     nextTriggerAt: bt.next_trigger_at || undefined,
     parentTaskId: bt.parent_task_id || undefined,
+    pathTranslationWarning: bt.path_translation_warning
+      ? {
+          anyMiss: bt.path_translation_warning.any_miss,
+          deviceCount: bt.path_translation_warning.device_count,
+          pathCount: bt.path_translation_warning.path_count,
+        }
+      : undefined,
   };
 }
 

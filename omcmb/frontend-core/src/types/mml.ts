@@ -195,6 +195,20 @@ export interface MMLTask {
    * "命令已下线"，避免任务列表显示"已提交但 0 设备成功"让人困惑。
    */
   orphanCommandCodes?: string[];
+
+  /**
+   * 整改方案 Stage 3 — 路径翻译警告（standardPath ↔ privatePath）。
+   * 由后端 GetTask 聚合 device_tasks.has_path_translation_miss 计数后填充；
+   * undefined 表示无 miss 或后端未启用聚合（兼容旧版）。
+   *
+   * AnyMiss=true 时前端任务详情页显示警告 Tag："{deviceCount} 个设备共 {pathCount}
+   * 条 path 未翻译，用 standardPath 兜底下发"。
+   */
+  pathTranslationWarning?: {
+    anyMiss: boolean;
+    deviceCount: number;
+    pathCount: number;
+  };
 }
 
 /**

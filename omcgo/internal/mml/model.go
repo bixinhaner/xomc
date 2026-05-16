@@ -186,6 +186,21 @@ type MMLTask struct {
 	// NextTriggerAt: 下次触发时刻；PeriodicParentID: periodic 子实例指向模板。
 	NextTriggerAt    *time.Time `json:"next_trigger_at,omitempty"`
 	PeriodicParentID *uuid.UUID `json:"parent_task_id,omitempty"`
+
+	// PathTranslationWarning — 整改方案 Stage 3 — UI 警告标签。
+	// 不入库，由 GetTask handler 聚合 device_tasks 的 has_path_translation_miss
+	// 计数后填充；nil = 任务非 MML 来源或者聚合未启用；AnyMiss=true 时前端
+	// 任务详情页显示"路径翻译警告"标签。
+	PathTranslationWarning *PathTranslationWarning `json:"path_translation_warning,omitempty"`
+}
+
+// PathTranslationWarning 是 MML 任务详情中关于 standardPath ↔ privatePath 翻译
+// 未命中的聚合视图。来源：device_tasks 表的 has_path_translation_miss /
+// path_translation_miss_count 列（migration 000114）。
+type PathTranslationWarning struct {
+	AnyMiss     bool  `json:"any_miss"`     // 任意 device 出现 fallback
+	DeviceCount int   `json:"device_count"` // 受影响的 device 数
+	PathCount   int64 `json:"path_count"`   // 全部 miss 的 path 累计计数
 }
 
 // CommandFilter specifies criteria for listing MML commands.

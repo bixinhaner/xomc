@@ -36,6 +36,7 @@ type Service struct {
 	fanouter         *Fanouter
 	hub              SSEPublisher
 	roleQuerier      RoleQuerier // optional; nil 时 ListCustomCommands fallback creator-only 过滤
+	deviceTaskPathMissAggregator DeviceTaskPathMissAggregator // Stage 3 路径翻译警告字段聚合
 	logger           *zap.Logger
 }
 
@@ -1041,8 +1042,50 @@ func (s *Service) writeAuditLogs(ctx context.Context, task *MMLTask) {
 }
 
 // GetTask retrieves an MML task by ID.
+//
+// Stage 3 — 聚合 device_tasks.has_path_translation_miss 填充
+// PathTranslationWarning 字段供前端任务详情页显示警告标签。aggregator 未注入
+// 或聚合失败均不阻塞主流程，task 仍正常返回。
 func (s *Service) GetTask(ctx context.Context, id uuid.UUID) (*MMLTask, error) {
-	return s.taskRepo.GetByID(ctx, id)
+	t, err := s.taskRepo.GetByID(ctx, id)
+	if err != nil || t == nil {
+		return t, err
+	}
+	if s.deviceTaskPathMissAggregator != nil {
+		stats, aggErr := s.deviceTaskPathMissAggregator.AggregatePathTranslationMissBySourceID(ctx, t.ID.String())
+		if aggErr != nil {
+			s.logger.Warn("aggregate path translation miss",
+				zap.String("mml_task_id", t.ID.String()),
+				zap.Error(aggErr))
+		} else if stats.AnyMiss {
+			t.PathTranslationWarning = &PathTranslationWarning{
+				AnyMiss:     true,
+				DeviceCount: stats.DeviceCount,
+				PathCount:   stats.PathCount,
+			}
+		}
+	}
+	return t, nil
+}
+
+// DeviceTaskPathMissAggregator 提供按 MML task ID 聚合 device_tasks 的
+// has_path_translation_miss / path_translation_miss_count 接口。
+// 由 task.PgTaskRepository.AggregatePathTranslationMissBySourceID 实现。
+type DeviceTaskPathMissAggregator interface {
+	AggregatePathTranslationMissBySourceID(ctx context.Context, sourceID string) (PathTranslationMissStatsView, error)
+}
+
+// PathTranslationMissStatsView 屏蔽 task 包的具体类型，让 mml 包不直接 import
+// task 包的内部 stats 结构（消费者驱动接口）。字段语义与 task 包一致。
+type PathTranslationMissStatsView struct {
+	DeviceCount int
+	PathCount   int64
+	AnyMiss     bool
+}
+
+// SetDeviceTaskPathMissAggregator 装配 device_tasks 聚合查询（DI Setter）。
+func (s *Service) SetDeviceTaskPathMissAggregator(agg DeviceTaskPathMissAggregator) {
+	s.deviceTaskPathMissAggregator = agg
 }
 
 // ListRunsByScript 返回脚本关联的全部执行实例（模板 + 子实例），分页倒序。
