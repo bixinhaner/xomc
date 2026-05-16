@@ -1,0 +1,18 @@
+[Unit]
+Description=OMC App Service (omcgo-app)
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+# WorkingDirectory 必须是 current 软链：omcgo-app 按相对路径加载 data/、configs/
+WorkingDirectory=/opt/omc/current
+ExecStart=/opt/omc/current/bin/omcgo-app --config /opt/omc/etc/app.prod.yaml
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=65536
+Environment=OMCGO_ENV=prod
+Environment=TZ=Asia/Shanghai
+
+[Install]
+WantedBy=multi-user.target

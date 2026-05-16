@@ -1,0 +1,91 @@
+# OMC 基础设施 —— 内网离线部署用（postgres / redis / nats / minio）
+#
+# 镜像由 `docker load` 离线导入；镜像标签来自同目录 .env（由 build-release.sh
+# 依 release.conf 生成，与 docker save 的镜像一致，勿手改成不一致的值）。
+#
+# OMC 三进程跑宿主机二进制，经回环 127.0.0.1 连接本栈（见部署方案 §5 步骤 4）。
+#
+# ⚠️ 部署前必须修改 POSTGRES_PASSWORD / MINIO_ROOT_USER / MINIO_ROOT_PASSWORD
+#    为强口令，并与 /opt/omc/etc/*.prod.yaml 保持一致。
+
+services:
+  postgres:
+    image: ${IMAGE_POSTGRES}
+    restart: unless-stopped
+    environment:
+      TZ: "Asia/Shanghai"
+      POSTGRES_USER: omcgo
+      POSTGRES_PASSWORD: omcgo123          # ← 改强密码
+      POSTGRES_DB: omcgo
+    ports:
+      - "127.0.0.1:5432:5432"              # 仅本机回环可达
+    command: ["postgres", "-c", "timezone=Asia/Shanghai", "-c", "log_timezone=Asia/Shanghai"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data    # 生产建议改为数据盘 bind mount，如 /data/omc/pg
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omcgo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: ${IMAGE_REDIS}
+    restart: unless-stopped
+    environment:
+      TZ: "Asia/Shanghai"
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  nats:
+    image: ${IMAGE_NATS}
+    restart: unless-stopped
+    environment:
+      TZ: "Asia/Shanghai"
+    ports:
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
+    command: --jetstream --store_dir /data --http_port 8222
+    volumes:
+      - natsdata:/data
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: ${IMAGE_MINIO}
+    restart: unless-stopped
+    environment:
+      TZ: "Asia/Shanghai"
+      MINIO_ROOT_USER: minioadmin          # ← 改强账号
+      MINIO_ROOT_PASSWORD: minioadmin      # ← 改强密码
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    command: server /data --console-address ":9001"
+    volumes:
+      - miniodata:/data
+      - /etc/localtime:/etc/localtime:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+  redisdata:
+  natsdata:
+  miniodata:

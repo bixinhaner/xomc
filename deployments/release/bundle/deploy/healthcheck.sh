@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# OMC 启动校验 —— 部署完成后执行（对应部署方案 §5 步骤 10）
+#   bash /opt/omc/current/deploy/healthcheck.sh
+set -u
+
+DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
+ok=0; fail=0
+check() {  # check <描述> <命令...>
+  local desc="$1"; shift
+  if "$@" >/dev/null 2>&1; then
+    echo "  [OK]   $desc"; ok=$((ok+1))
+  else
+    echo "  [FAIL] $desc"; fail=$((fail+1))
+  fi
+}
+
+echo "== OMC 三进程（systemd）=="
+for svc in omcgo-app omcgo-acs omcgo-worker; do
+  check "$svc active" systemctl is-active --quiet "$svc"
+done
+
+echo "== 基础设施容器 =="
+docker compose -f "$DEPLOY_DIR/docker-compose.infra.yml" ps 2>/dev/null || \
+  echo "  (无法读取 compose 状态，请手动检查)"
+
+echo "== 服务健康端点 =="
+check "app  /health  (:8081)"   curl -fsS http://127.0.0.1:8081/health
+check "acs  存活      (:7557)"   curl -fsS http://127.0.0.1:7557/
+check "app  metrics  (:9091)"   curl -fsS http://127.0.0.1:9091/metrics
+check "前端 (:8080)"             curl -fsS http://127.0.0.1:8080/
+
+echo
+echo "结果：通过 $ok 项，失败 $fail 项"
+[ "$fail" -eq 0 ] || { echo "存在失败项，参见部署方案 §10 故障排查。"; exit 1; }
+echo "校验通过。"
