@@ -2,8 +2,8 @@
 
 > **适用对象**：研发 / 发布工程师。
 > **执行环境**：有公网、装有 Go / Node / Docker 的**构建机**。
-> **产出**：可送入内网的离线交付包 `omc-release-<版本>-<架构>.tar.gz`（amd64 + arm64 各一）。
-> **配套文档**：运维侧部署见《OMC内网离线部署手册（运维侧）》。
+> **产出**：可送入内网的离线交付包 `omc-release-<版本>-<架构>.tar.xz`（amd64 + arm64 各一），按版本归档到 `archive/`，可经 HTTP 服务下载。
+> **配套文档**：命令速查见《OMC交付构建快速上手》；运维侧部署见《OMC内网离线部署手册（运维侧）》。
 > **配套工具**：构建工具位于仓库 `deployments/release/`。
 > **文档状态**：v1.0，需随产品版本迭代同步维护。
 
@@ -76,8 +76,9 @@ OMC 采用**「构建侧编译、运维侧只跑二进制」**：
 
 ## 4. 交付包形态（构建产物结构）
 
-> **每个版本产出两个交付包**：`omc-release-<版本>-amd64.tar.gz` 与 `omc-release-<版本>-arm64.tar.gz`。
-> 两包结构完全相同，仅 `bin/` 二进制与 `images/` 镜像为对应架构。
+> **每个版本产出两个交付包**：`omc-release-<版本>-amd64.tar.xz` 与 `omc-release-<版本>-arm64.tar.xz`
+> （压缩方式由 `release.conf` 的 `PKG_COMPRESS` 决定，默认 `xz`）。
+> 两包结构完全相同，仅 `bin/` 二进制与 `images/` 镜像为对应架构。下方为**解压后**的目录结构。
 
 ```
 omc-release-<版本>-<架构>/
@@ -123,25 +124,30 @@ omc-release-<版本>-<架构>/
 
 ## 5. 构建工具与流程
 
-构建工具位于 `deployments/release/`，**拆成两个独立脚本**——因为基础设施镜像
-不常变、二进制要频繁发版：
+构建工具位于 `deployments/release/`，**三个脚本**——基础设施与项目版本两条线
+（构建周期不同），外加一个下载服务：
 
 ```
 deployments/release/
-├── release.conf              # 配置：基线版本号、基础设施镜像清单
+├── release.conf              # 配置：基础设施版本、项目基线版本、压缩方式、镜像清单
 ├── build-images.sh           # ① 基础设施镜像构建（不常跑）
 ├── build-release.sh          # ② 交付包构建 / 发版（常跑）
+├── serve.sh                  # ③ HTTP 下载服务
 ├── bundle/                   # 进交付包的静态模板（docker/ + deploy/）
-├── images-cache/             # build-images.sh 产物，build-release.sh 复用（git 忽略）
-└── dist/                     # 交付包产出目录（git 忽略）
+├── images-cache/             # ① 的产物，② 复用（git 忽略）
+├── dist/                     # 构建临时工作区（git 忽略）
+└── archive/                  # 版本化归档 = HTTP 服务根目录（git 忽略）
+    ├── index.html            #   自动生成的版本下载索引
+    └── <项目版本>/ …          #   交付包按版本归档
 ```
 
 | 工具 | 职责 | 运行频率 |
 |------|------|---------|
-| `build-images.sh` | 拉取并导出基础设施 Docker 镜像 → `images-cache/` | **低**：仅在 `release.conf` 调整镜像版本时 |
-| `build-release.sh` | 编译二进制 + 构建前端 + 组装交付包（复用 `images-cache/`） | **高**：每次发版 |
+| `build-images.sh` | 拉取并导出基础设施 Docker 镜像 → `images-cache/` | **低**：仅镜像版本变更时 |
+| `build-release.sh` | 编译二进制 + 前端 + 组装 + 压缩，按版本归档到 `archive/` | **高**：每次发版 |
+| `serve.sh` | 起 HTTP 服务暴露 `archive/`，供使用者浏览器下载 | 常驻 |
 
-> ⚠️ 两个脚本都**用普通用户运行，不要 sudo**（见 §3）。
+> ⚠️ `build-images.sh` / `build-release.sh` 都**用普通用户运行，不要 sudo**（见 §3）。
 
 ### 5.1 第一步：构建基础设施镜像（首次 / 镜像版本变更时）
 
@@ -151,46 +157,58 @@ cd deployments/release
 #   从 https://download.docker.com/linux/static/stable/ 下载对应架构的
 #   docker-<版本>.tgz（amd64 用 x86_64/，arm64 用 aarch64/），详见 bundle/docker/README.md。
 
-./build-images.sh                  # 产出 images-cache/infra-images-{amd64,arm64}.tar
-#   --arch amd64        只构建指定架构
+./build-images.sh                  # 基础设施版本取 release.conf 的 INFRA_VERSION
+#   -v infra-1.1        手动指定基础设施版本
 #   --with-monitoring   额外导出监控栈镜像
 ```
 
-镜像缓存生成一次后可反复复用，日常发版无需重跑本步。
+镜像缓存（含基础设施版本号）生成一次后可反复复用，日常发版无需重跑本步。
 
 ### 5.2 第二步：构建交付包（每次发版）
 
 ```bash
 cd deployments/release
-
-# 小版本（日常）：不带 -v，版本自动生成
-./build-release.sh
-
-# 大版本：用 -v 手动指定
-./build-release.sh -v 2.0.0
-
+./build-release.sh                 # 小版本：版本自动生成
+./build-release.sh -v 2.0.0        # 大版本：手动指定
 #   --arch amd64        只构建指定架构（缺省 amd64 + arm64）
 ```
 
-产出：
+产物按版本归档：
 
 ```
-dist/omc-release-<版本>-amd64.tar.gz   + .sha256
-dist/omc-release-<版本>-arm64.tar.gz   + .sha256
+archive/<项目版本>/
+├── omc-release-<版本>-amd64.tar.xz   + .sha256
+├── omc-release-<版本>-arm64.tar.xz   + .sha256
+└── RELEASE.txt                       # 版本构建说明
 ```
 
-交付包通过移动介质（U 盘 / 光盘 / 堡垒机文件摆渡）送入内网。
+并自动刷新 `archive/index.html`。压缩方式由 `release.conf` 的 `PKG_COMPRESS`
+控制（默认 `xz`，体积最小）。
 
-### 5.3 版本号规则
+### 5.3 版本号规则（基础设施 / 项目 各自独立命名）
 
-| 场景 | 命令 | 版本号 |
-|------|------|--------|
-| **小版本**（频繁发布） | `./build-release.sh`（不带 `-v`） | 自动生成 `<RELEASE_BASE_VERSION>-<YYYYMMDD-HHMM>`，如 `1.0.0-20260516-1430` |
-| **大版本** | `./build-release.sh -v 2.0.0` | 手动指定 |
+| 维度 | 取值 | 维护方式 |
+|------|------|---------|
+| **基础设施版本** | `release.conf` 的 `INFRA_VERSION`（或 `build-images.sh -v`） | 手动；改镜像清单后递增（如 `infra-1.0`→`infra-1.1`） |
+| **项目小版本**（频繁） | `build-release.sh` 不带 `-v` → `<RELEASE_BASE_VERSION>-<YYYYMMDD-HHMM>` | 自动生成 |
+| **项目大版本** | `build-release.sh -v 2.0.0` | 手动指定 |
 
-- 基线版本 `RELEASE_BASE_VERSION` 在 `release.conf` 维护。
-- 发大版本时，建议同步把 `release.conf` 的 `RELEASE_BASE_VERSION` 更新为该版本号，
-  使之后的小版本基线对齐。
+- 二者**独立追溯**：每个交付包内 `VERSION` / `RELEASE.txt` 同时记录项目版本与
+  基础设施版本，`RELEASE.txt` 还说明本次基础设施相对上次发布**是否更新**。
+- 发大版本时，建议同步把 `release.conf` 的 `RELEASE_BASE_VERSION` 更新为该版本号。
+
+### 5.4 第三步：起 HTTP 下载服务
+
+构建产物归档在 `archive/` 后，用 `serve.sh` 在构建机上起一个 HTTP 服务，
+使用者用浏览器（或 wget/curl）即可下载，无需登录构建机拷文件：
+
+```bash
+./serve.sh                         # 默认端口 8000
+# 后台常驻： nohup ./serve.sh 8000 >/tmp/omc-serve.log 2>&1 &
+```
+
+使用者浏览器访问 `http://<构建机IP>:8000/` → `archive/index.html` 列出全部
+版本（项目版本 / 基础设施版本 / 构建时间 / 下载链接）→ 点击下载对应架构的包。
 
 ---
 
@@ -246,11 +264,12 @@ for ARCH in amd64 arm64; do
 done
 ```
 
-### 6.4 组装与打包 —— build-release.sh
+### 6.4 组装、压缩、归档 —— build-release.sh
 
 `build-release.sh` 逐架构组装交付包：编译产物 + 前端 + `data/configs/migrations/etc`
 + `bundle/` 部署模板 + **从 `images-cache/` 复用的镜像 tar** + 运维侧文档，
-生成 `VERSION` / `README` / `checksums.sha256` 后打包：
+生成 `VERSION` / `README` / `checksums.sha256`，再**按 `PKG_COMPRESS` 压缩**
+（默认 `xz`，体积最小）并**按版本归档**到 `archive/<版本>/`：
 
 ```bash
 for ARCH in amd64 arm64; do
@@ -258,10 +277,13 @@ for ARCH in amd64 arm64; do
   # 组装 bin/ web/ data/ configs/ migrations/ etc/ deploy/ docker/ docs/，
   # images/ 直接 cp images-cache/infra-images-$ARCH.tar
   ( cd "$PKG" && find . -type f ! -name checksums.sha256 -exec sha256sum {} + > checksums.sha256 )
-  tar czf $PKG.tar.gz $PKG/
-  sha256sum $PKG.tar.gz > $PKG.tar.gz.sha256
+  tar -cJf archive/<版本>/$PKG.tar.xz $PKG/        # xz 压缩，减小体积
+  sha256sum $PKG.tar.xz > $PKG.tar.xz.sha256
 done
 ```
+
+打包后写 `archive/<版本>/RELEASE.txt`（版本构建说明：项目版本 / 基础设施版本 /
+是否更新 / 镜像清单），并刷新 `archive/index.html` 供 `serve.sh` HTTP 下载。
 
 ---
 
@@ -300,12 +322,14 @@ done
 
 ## 9. 交付前自检清单
 
-- [ ] `images-cache/` 已由 `build-images.sh` 生成，且镜像版本为本次发布所需
-- [ ] 版本号正确，`VERSION` 文件与交付包名一致
+- [ ] `images-cache/` 已由 `build-images.sh` 生成，基础设施版本为本次发布所需
+- [ ] 项目版本号正确，`archive/<版本>/` 已生成、`RELEASE.txt` 内容无误
 - [ ] amd64、arm64 两个交付包均已产出
 - [ ] 镜像标签已固化为具体版本（非 `latest`），且 `deploy/.env` 与之一致
 - [ ] `bundle/docker/` 已放入对应架构的 `docker-<版本>.tgz`
-- [ ] `checksums.sha256` 与 `*.tar.gz.sha256` 校验通过
+- [ ] 交付包与 `*.<压缩>.sha256` 校验通过
+- [ ] `RELEASE.txt` 已说明本次基础设施版本及是否更新
+- [ ] `archive/index.html` 已刷新，`serve.sh` 可正常下载
 - [ ] 交付包内 `docs/` 含最新版《OMC内网离线部署手册（运维侧）》
 - [ ] 在测试环境用交付包完整走通一遍部署（见运维侧手册）
 

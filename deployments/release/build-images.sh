@@ -6,9 +6,12 @@
 # build-release.sh 复用。
 #
 # 基础设施镜像（postgres/redis/nats/minio/nginx）【不常变更】——仅在调整
-# release.conf 里的镜像版本时才需运行本工具；日常发版只跑 build-release.sh。
+# release.conf 的镜像版本时运行本工具；日常发版只跑 build-release.sh。
 #
-# 用法： ./build-images.sh [--arch amd64|arm64] [--with-monitoring]
+# 基础设施有【独立版本号】INFRA_VERSION（见 release.conf），与项目版本无关。
+#
+# 用法： ./build-images.sh [-v 基础设施版本] [--arch amd64|arm64] [--with-monitoring]
+#   ★ 用普通用户运行（docker 权限靠 docker 组，勿 sudo 整个脚本）。
 # =============================================================================
 set -euo pipefail
 
@@ -24,9 +27,10 @@ die()  { echo -e "\033[1;31m[images][错误]\033[0m $*" >&2; exit 1; }
 WITH_MONITORING=0
 while [ $# -gt 0 ]; do
   case "$1" in
+    -v|--version)      INFRA_VERSION="$2"; shift 2 ;;
     --arch)            ARCHES="$2"; shift 2 ;;
     --with-monitoring) WITH_MONITORING=1; shift ;;
-    -h|--help)         sed -n '3,14p' "$0"; exit 0 ;;
+    -h|--help)         sed -n '3,15p' "$0"; exit 0 ;;
     *)                 die "未知参数：$1（-h 查看用法）" ;;
   esac
 done
@@ -42,7 +46,7 @@ fi
 CACHE="$SCRIPT_DIR/images-cache"
 mkdir -p "$CACHE"
 
-log "目标架构：$ARCHES   监控栈：$([ "$WITH_MONITORING" = 1 ] && echo 含 || echo 不含)"
+log "基础设施版本：$INFRA_VERSION   架构：$ARCHES   监控栈：$([ "$WITH_MONITORING" = 1 ] && echo 含 || echo 不含)"
 
 # ── 逐架构拉取并导出 ────────────────────────────────────────────────────
 # 镜像导出【不依赖构建机自身架构】：用 `docker pull --platform linux/$ARCH`
@@ -66,8 +70,9 @@ for ARCH in $ARCHES; do
   fi
 done
 
-# ── 记录本批镜像清单与构建时间（供 build-release.sh 带入交付包、供排错追溯）──
+# ── 记录基础设施版本与镜像清单（供 build-release.sh 读取、带入交付包）──────
 {
+  echo "infra_version=$INFRA_VERSION"
   echo "built_at=$(date -Is)"
   echo "arches=$ARCHES"
   echo "with_monitoring=$WITH_MONITORING"
@@ -79,5 +84,5 @@ done
   fi
 } > "$CACHE/images.manifest"
 
-log "完成。镜像缓存位于 images-cache/，可被 build-release.sh 反复复用。"
+log "完成。基础设施版本 $INFRA_VERSION 已就绪于 images-cache/，可被 build-release.sh 反复复用。"
 ls -lh "$CACHE"/*.tar 2>/dev/null || true

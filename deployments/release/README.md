@@ -1,76 +1,86 @@
 # deployments/release — OMC 离线交付包
 
-本目录用于**生成、存放交付给运维的离线交付包**。配套文档：
+本目录用于**生成、归档、分发交付给运维的离线交付包**。配套文档：
 
-- 构建侧（本目录工具的完整说明）：[`docs/operations/OMC离线交付包构建手册（构建侧）.md`](../../docs/operations/OMC离线交付包构建手册（构建侧）.md)
+- **快速上手**（怎么用本目录的脚本）：[`docs/operations/OMC交付构建快速上手.md`](../../docs/operations/OMC交付构建快速上手.md)
+- 构建侧完整说明：[`docs/operations/OMC离线交付包构建手册（构建侧）.md`](../../docs/operations/OMC离线交付包构建手册（构建侧）.md)
 - 运维侧（随交付包发给运维）：[`docs/operations/OMC内网离线部署手册（运维侧）.md`](../../docs/operations/OMC内网离线部署手册（运维侧）.md)
 
-## 两个独立的构建工具
+## 三个脚本
 
-构建拆成两步，因为**基础设施镜像不常变、二进制要频繁发版**：
+构建拆分为**基础设施**与**项目版本**两条线（构建周期不同），外加一个下载服务：
 
-| 工具 | 职责 | 运行频率 |
+| 脚本 | 职责 | 运行频率 |
 |------|------|---------|
-| `build-images.sh` | 拉取并导出基础设施 Docker 镜像 → `images-cache/` | **低**：仅在 `release.conf` 调整镜像版本时 |
-| `build-release.sh` | 编译二进制 + 构建前端 + 组装交付包（复用 `images-cache/`） | **高**：每次发版 |
+| `build-images.sh` | 拉取并导出基础设施 Docker 镜像 → `images-cache/`（带独立的基础设施版本号） | **低**：仅镜像版本变更时 |
+| `build-release.sh` | 编译二进制 + 前端 + 组装 + 压缩，按版本归档到 `archive/` | **高**：每次发版 |
+| `serve.sh` | 起 HTTP 服务暴露 `archive/`，使用者用浏览器下载 | 常驻 |
 
 ## 目录结构
 
 ```
 deployments/release/
-├── README.md                 # 本文件
-├── release.conf              # 配置：基线版本号、基础设施镜像清单
+├── release.conf              # 配置：基础设施版本、项目基线版本、压缩方式、镜像清单
 ├── build-images.sh           # ① 基础设施镜像构建（不常跑）
 ├── build-release.sh          # ② 交付包构建 / 发版（常跑）
+├── serve.sh                  # ③ HTTP 下载服务
 ├── bundle/                   # 进交付包的静态模板（docker/ + deploy/）
-├── images-cache/             # build-images.sh 的产物，build-release.sh 复用（git 忽略）
-└── dist/                     # 交付包产出目录（git 忽略）
+├── images-cache/             # ① 的产物，② 复用（git 忽略）
+├── dist/                     # 构建临时工作区（git 忽略）
+└── archive/                  # 版本化归档 = HTTP 服务根目录（git 忽略）
+    ├── index.html            #   自动生成的版本下载索引
+    └── <项目版本>/
+        ├── omc-release-<版本>-amd64.tar.xz (+ .sha256)
+        ├── omc-release-<版本>-arm64.tar.xz (+ .sha256)
+        └── RELEASE.txt       #   版本构建说明（项目/基础设施版本、镜像清单）
 ```
 
 ## 使用
 
-> ⚠️ **用普通用户运行，不要 `sudo`**。脚本是构建脚本、不需要 root；`sudo` 会重置
-> PATH 导致找不到 `go`/`npm`，还会让产物归 root。`docker` 权限请用
-> `sudo usermod -aG docker $USER && newgrp docker` 把当前用户加入 docker 组解决。
+> ⚠️ `build-images.sh` / `build-release.sh` **用普通用户运行，不要 `sudo`**
+> （sudo 重置 PATH 会找不到 go/npm，产物归 root）。`docker` 权限用
+> `sudo usermod -aG docker $USER && newgrp docker` 解决。
 
-### 第一步：构建基础设施镜像（首次，或镜像版本变更时）
+### ① 构建基础设施镜像（首次 / 镜像版本变更时）
 
 ```bash
 cd deployments/release
 # 一次性：把 Docker 静态二进制包放进 bundle/docker/（见 bundle/docker/README.md）
-./build-images.sh                       # 产出 images-cache/infra-images-{amd64,arm64}.tar
-#   --arch amd64        只构建指定架构
+./build-images.sh                  # 基础设施版本取 release.conf 的 INFRA_VERSION
+#   -v infra-1.1        手动指定基础设施版本
 #   --with-monitoring   额外导出监控栈镜像
 ```
 
-### 第二步：构建交付包（每次发版）
+### ② 构建交付包（每次发版）
 
 ```bash
-cd deployments/release
-
-# 小版本（日常）：不带 -v，版本自动生成 = <基线版本>-<构建时间戳>
-./build-release.sh
-
-# 大版本：用 -v 手动指定
-./build-release.sh -v 2.0.0
-
-#   --arch amd64        只构建指定架构（缺省 amd64 + arm64）
+./build-release.sh                 # 小版本：版本自动生成
+./build-release.sh -v 2.0.0        # 大版本：手动指定
 ```
 
-产出：`dist/omc-release-<版本>-{amd64,arm64}.tar.gz` + `.sha256`。
+产物归档到 `archive/<版本>/`，并自动刷新 `archive/index.html`。
 
-> `build-release.sh` 复用 `images-cache/` 里的镜像；若缓存不存在会提示先跑
-> `build-images.sh`。基础设施镜像不常变，无需每次发版重拉。
+### ③ 起下载服务
 
-## 版本号规则
+```bash
+./serve.sh                         # 默认端口 8000
+```
 
-- **小版本（频繁）**：`build-release.sh` 不带 `-v`，自动生成
-  `<release.conf 的 RELEASE_BASE_VERSION>-<YYYYMMDD-HHMM>`，每次构建唯一可追溯。
-- **大版本**：`build-release.sh -v X.Y.Z` 手动指定；发大版本时建议同步把
-  `release.conf` 的 `RELEASE_BASE_VERSION` 更新为该版本，使之后的小版本基线对齐。
+使用者浏览器访问 `http://<构建机IP>:8000/` → 看到版本列表 → 点击下载。
+
+## 版本号规则（基础设施 / 项目 各自独立）
+
+| 维度 | 取值 | 说明 |
+|------|------|------|
+| 基础设施版本 | `release.conf` 的 `INFRA_VERSION`，或 `build-images.sh -v` | 不常变，手动维护；改镜像清单后递增 |
+| 项目版本（小版本） | `build-release.sh` 不带 `-v` → `<RELEASE_BASE_VERSION>-<时间戳>` | 频繁发布，自动生成 |
+| 项目版本（大版本） | `build-release.sh -v X.Y.Z` | 手动指定 |
+
+每个交付包内 `VERSION` / `RELEASE.txt` 同时记录**项目版本**与**基础设施版本**，
+并说明本次基础设施是否更新。
 
 ## 注意
 
-- **镜像版本固化**：`release.conf` 的镜像标签发布前改为具体版本号，不要用
-  `latest` / `latest-pg16`（详见《构建手册》§7）。
-- `images-cache/` 与 `dist/` 是构建产物（含大体积 tar），已被 `.gitignore` 忽略。
+- **镜像版本固化**：`release.conf` 镜像标签发布前改为具体版本号，不要用 `latest`。
+- **压缩方式**：`release.conf` 的 `PKG_COMPRESS` 控制交付包压缩（默认 `xz`，体积最小）。
+- `images-cache/`、`dist/`、`archive/` 为构建产物，已被 `.gitignore` 忽略。

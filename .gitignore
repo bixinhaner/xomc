@@ -50,4 +50,5 @@ deployments/docker/default-tls.conf
 deployments/release/dist/*
 !deployments/release/dist/.gitkeep
 deployments/release/images-cache/
+deployments/release/archive/
 deployments/release/bundle/docker/docker-*.tgz
