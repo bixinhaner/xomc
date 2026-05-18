@@ -44,6 +44,26 @@ import type {
  *   - 含字段时按 sort_order 排序：sub_fields 已在 store 内按 sort_order 存放
  *   - 特殊字符（, ; : = { } 空格 "）双引号包裹 + 内部 \" escape
  */
+/**
+ * 剥离 mml_code 末尾的 `_<8 个 hex 字符>` 后缀。
+ *
+ * 背景：seed/000111_mml_old_catalog_import.sql 为保 `UNIQUE (command_id, mml_code)`
+ * 给每个 sub_field 的 mml_code 追加了 `_<standard_params.id 前 8 hex>`
+ * （脚本 line 615-628 注释明确）。但 wire 格式 MML 字串里这个后缀**不应出现**——
+ * CPE 不认 hash 形式，且用户视觉上像乱码。
+ *
+ * 这是纯渲染层 strip，不改 DB。执行链路走 `statements` 不走 mml_text，
+ * wire 字串纯属显示用，剥后缀不影响 SOAP 下发的正确性。
+ *
+ * 副作用：用户手动编辑 TextArea 后回填到 parse 时，需要把简短 mml_code 解析
+ * 回带 hash 的 DB 形式。当前 backend parser 用 `WHERE mml_code = ?` 精确匹配，
+ * 用户手编的 stripped form 会进 unknownCodes 列表——典型流程是点 checkbox/输入框
+ * 走 `statements`，不会触发此副作用。
+ */
+function stripMmlCodeHash(code: string): string {
+  return code.replace(/_[0-9a-f]{8}$/, '');
+}
+
 export function renderStatementLocal(stmt: Statement): string {
   const op = stmt.operationType.toUpperCase() as ConsoleSupportedOp;
   // 用户决策 2026-05-18 实测 bug：部分命令 backend 返回 logical_code 为空字符串
@@ -63,7 +83,7 @@ export function renderStatementLocal(stmt: Statement): string {
             ? a.sortOrder - b.sortOrder
             : a.mmlCode.localeCompare(b.mmlCode)
         )
-        .map((sf) => sf.mmlCode);
+        .map((sf) => stripMmlCodeHash(sf.mmlCode));
       if (codes.length === 0) return `LST ${code}`;
       return `LST ${code}:lstId={${codes.join(',')}}`;
     }
@@ -80,7 +100,9 @@ export function renderStatementLocal(stmt: Statement): string {
       // sub_fields 顺序优先
       for (const sf of sorted) {
         if (stmt.values[sf.mmlCode] !== undefined) {
-          pairs.push(`${sf.mmlCode}=${quoteValueIfNeeded(stmt.values[sf.mmlCode])}`);
+          pairs.push(
+            `${stripMmlCodeHash(sf.mmlCode)}=${quoteValueIfNeeded(stmt.values[sf.mmlCode])}`
+          );
           seen.add(sf.mmlCode);
         }
       }
@@ -88,7 +110,7 @@ export function renderStatementLocal(stmt: Statement): string {
       const unknownKeys = Object.keys(stmt.values).filter((k) => !seen.has(k));
       unknownKeys.sort();
       for (const k of unknownKeys) {
-        pairs.push(`${k}=${quoteValueIfNeeded(stmt.values[k])}`);
+        pairs.push(`${stripMmlCodeHash(k)}=${quoteValueIfNeeded(stmt.values[k])}`);
       }
       if (pairs.length === 0) return `${op} ${code}`;
       return `${op} ${code}:${pairs.join(',')}`;
