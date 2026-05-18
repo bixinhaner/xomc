@@ -54,13 +54,13 @@ func (s *PgAlarmStore) GetActiveByID(ctx context.Context, id uuid.UUID) (*model.
 func (s *PgAlarmStore) GetActiveByDeviceAndIdentifier(ctx context.Context, deviceSN string, alarmIdentifier string) (*model.Alarm, error) {
 	return s.scanActiveAlarm(ctx, activeAlarmSelect().
 		Where(squirrel.Eq{"alarms_active.device_sn": deviceSN, "alarms_active.alarm_identifier": alarmIdentifier}).
-		Where(squirrel.NotEq{"status": "cleared"}))
+		Where(squirrel.NotEq{"alarms_active.status": "cleared"}))
 }
 
 func (s *PgAlarmStore) GetActiveByDeviceSN(ctx context.Context, deviceSN string) ([]*model.Alarm, error) {
 	q := activeAlarmSelect().
 		Where(squirrel.Eq{"alarms_active.device_sn": deviceSN}).
-		Where(squirrel.NotEq{"status": "cleared"})
+		Where(squirrel.NotEq{"alarms_active.status": "cleared"})
 
 	query, args, err := q.ToSql()
 	if err != nil {
@@ -491,33 +491,33 @@ func normalizedTechnologyAliases(raw string) []string {
 func normalizedEventTypeAliases(raw string) []string {
 	key := normalizeEventTypeToken(raw)
 	buckets := map[string][]string{
-		"30000":               {"30000", "communication", "communications", "communicationalarm", "communicationsalarm"},
-		"communication":       {"30000", "communication", "communications", "communicationalarm", "communicationsalarm"},
-		"communications":      {"30000", "communication", "communications", "communicationalarm", "communicationsalarm"},
-		"communicationalarm":  {"30000", "communication", "communications", "communicationalarm", "communicationsalarm"},
-		"communicationsalarm": {"30000", "communication", "communications", "communicationalarm", "communicationsalarm"},
+		"30000":                 {"30000", "communication", "communications", "communicationalarm", "communicationsalarm"},
+		"communication":         {"30000", "communication", "communications", "communicationalarm", "communicationsalarm"},
+		"communications":        {"30000", "communication", "communications", "communicationalarm", "communicationsalarm"},
+		"communicationalarm":    {"30000", "communication", "communications", "communicationalarm", "communicationsalarm"},
+		"communicationsalarm":   {"30000", "communication", "communications", "communicationalarm", "communicationsalarm"},
 		"30001":                 {"30001", "qualityofservice", "qualityofservicealarm"},
-		"qualityofservice":       {"30001", "qualityofservice", "qualityofservicealarm"},
-		"qualityofservicealarm":  {"30001", "qualityofservice", "qualityofservicealarm"},
-		"30002":               {"30002", "processingerror", "processingerroralarm"},
-		"processingerror":     {"30002", "processingerror", "processingerroralarm"},
-		"processingerroralarm": {"30002", "processingerror", "processingerroralarm"},
-		"30003":          {"30003", "device", "equipment", "devicealarm", "equipmentalarm"},
-		"device":         {"30003", "device", "equipment", "devicealarm", "equipmentalarm"},
-		"equipment":      {"30003", "device", "equipment", "devicealarm", "equipmentalarm"},
-		"devicealarm":    {"30003", "device", "equipment", "devicealarm", "equipmentalarm"},
-		"equipmentalarm": {"30003", "device", "equipment", "devicealarm", "equipmentalarm"},
-		"30004":             {"30004", "environment", "environmental", "environmentalarm", "environmentalalarm"},
-		"environment":        {"30004", "environment", "environmental", "environmentalarm", "environmentalalarm"},
-		"environmental":      {"30004", "environment", "environmental", "environmentalarm", "environmentalalarm"},
-		"environmentalarm":   {"30004", "environment", "environmental", "environmentalarm", "environmentalalarm"},
-		"environmentalalarm": {"30004", "environment", "environmental", "environmentalarm", "environmentalalarm"},
-		"30006":           {"30006", "30007", "performance", "service", "performancealarm", "servicealarm"},
-		"30007":           {"30006", "30007", "performance", "service", "performancealarm", "servicealarm"},
-		"performance":     {"30006", "30007", "performance", "service", "performancealarm", "servicealarm"},
-		"service":         {"30006", "30007", "performance", "service", "performancealarm", "servicealarm"},
-		"performancealarm": {"30006", "30007", "performance", "service", "performancealarm", "servicealarm"},
-		"servicealarm":    {"30006", "30007", "performance", "service", "performancealarm", "servicealarm"},
+		"qualityofservice":      {"30001", "qualityofservice", "qualityofservicealarm"},
+		"qualityofservicealarm": {"30001", "qualityofservice", "qualityofservicealarm"},
+		"30002":                 {"30002", "processingerror", "processingerroralarm"},
+		"processingerror":       {"30002", "processingerror", "processingerroralarm"},
+		"processingerroralarm":  {"30002", "processingerror", "processingerroralarm"},
+		"30003":                 {"30003", "device", "equipment", "devicealarm", "equipmentalarm"},
+		"device":                {"30003", "device", "equipment", "devicealarm", "equipmentalarm"},
+		"equipment":             {"30003", "device", "equipment", "devicealarm", "equipmentalarm"},
+		"devicealarm":           {"30003", "device", "equipment", "devicealarm", "equipmentalarm"},
+		"equipmentalarm":        {"30003", "device", "equipment", "devicealarm", "equipmentalarm"},
+		"30004":                 {"30004", "environment", "environmental", "environmentalarm", "environmentalalarm"},
+		"environment":           {"30004", "environment", "environmental", "environmentalarm", "environmentalalarm"},
+		"environmental":         {"30004", "environment", "environmental", "environmentalarm", "environmentalalarm"},
+		"environmentalarm":      {"30004", "environment", "environmental", "environmentalarm", "environmentalalarm"},
+		"environmentalalarm":    {"30004", "environment", "environmental", "environmentalarm", "environmentalalarm"},
+		"30006":                 {"30006", "30007", "performance", "service", "performancealarm", "servicealarm"},
+		"30007":                 {"30006", "30007", "performance", "service", "performancealarm", "servicealarm"},
+		"performance":           {"30006", "30007", "performance", "service", "performancealarm", "servicealarm"},
+		"service":               {"30006", "30007", "performance", "service", "performancealarm", "servicealarm"},
+		"performancealarm":      {"30006", "30007", "performance", "service", "performancealarm", "servicealarm"},
+		"servicealarm":          {"30006", "30007", "performance", "service", "performancealarm", "servicealarm"},
 	}
 
 	if aliases, ok := buckets[key]; ok {

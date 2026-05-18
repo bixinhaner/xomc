@@ -35,13 +35,14 @@ type compiledPattern struct {
 //   - patterns slice：atomic.Pointer 持有不可变快照，Refresh 整体替换；零锁热路径
 //   - product 详情：sync.Map L1（按 ID）+ Cache L2（Redis）+ DB read-through
 type Registry struct {
-	repo     Repository
-	cache    Cache
-	logger   *zap.Logger
-	metrics  *registryMetrics
+	repo    Repository
+	cache   Cache
+	logger  *zap.Logger
+	metrics *registryMetrics
 
-	patterns    atomic.Pointer[[]compiledPattern] // 全局 sort_order 升序
-	productByID sync.Map                          // map[uuid.UUID]*Product
+	patterns     atomic.Pointer[[]compiledPattern] // 全局 sort_order 升序
+	productByID  sync.Map                          // map[uuid.UUID]*Product
+	cacheVersion atomic.Int64
 }
 
 // NewRegistry 构造一个未加载状态的 Registry。
@@ -70,6 +71,25 @@ func NewRegistry(repo Repository, cache Cache, metrics *registryMetrics, logger 
 	return r
 }
 
+func (r *Registry) ensureFresh(ctx context.Context) error {
+	if r.cache == nil {
+		return nil
+	}
+	version, err := r.cache.GetVersion(ctx)
+	if err != nil {
+		r.logger.Warn("get cache version failed; using current registry snapshot", zap.Error(err))
+		return nil
+	}
+	if version == 0 || version == r.cacheVersion.Load() {
+		return nil
+	}
+	if err := r.refresh(ctx, false); err != nil {
+		return fmt.Errorf("refresh after cache version change %d->%d: %w", r.cacheVersion.Load(), version, err)
+	}
+	r.cacheVersion.Store(version)
+	return nil
+}
+
 // Refresh 重新加载 patterns 全集 + 清空 product L1 + 触发 cache 版本递增。
 //
 // 调用顺序（无锁）：
@@ -79,6 +99,10 @@ func NewRegistry(repo Repository, cache Cache, metrics *registryMetrics, logger 
 //  4. drop L1 productByID（避免读到旧 product 详情）
 //  5. cache.BumpVersion 通知其他实例
 func (r *Registry) Refresh(ctx context.Context) error {
+	return r.refresh(ctx, true)
+}
+
+func (r *Registry) refresh(ctx context.Context, bumpVersion bool) error {
 	t0 := time.Now()
 	rows, err := r.repo.ListActivePatterns(ctx)
 	if err != nil {
@@ -111,10 +135,16 @@ func (r *Registry) Refresh(ctx context.Context) error {
 	// drop L1 product details — 后续读会按需 read-through 重建
 	r.productByID.Range(func(k, _ any) bool { r.productByID.Delete(k); return true })
 
-	if _, err := r.cache.BumpVersion(ctx); err != nil {
-		// 版本递增失败不阻塞 Refresh — patterns 已 swap 完毕；其他实例下次心跳会发现版本未变跳过 Refresh。
-		// 这是可接受的弱一致：单实例无影响，多实例最差表现是这次失效信号丢失。
-		r.logger.Warn("bump cache version failed (non-fatal)", zap.Error(err))
+	if bumpVersion {
+		if _, err := r.cache.BumpVersion(ctx); err != nil {
+			// 版本递增失败不阻塞 Refresh — patterns 已 swap 完毕；其他实例下次心跳会发现版本未变跳过 Refresh。
+			// 这是可接受的弱一致：单实例无影响，多实例最差表现是这次失效信号丢失。
+			r.logger.Warn("bump cache version failed (non-fatal)", zap.Error(err))
+		} else if version, err := r.cache.GetVersion(ctx); err != nil {
+			r.logger.Warn("read cache version after bump failed (non-fatal)", zap.Error(err))
+		} else {
+			r.cacheVersion.Store(version)
+		}
 	}
 
 	r.metrics.refreshOK()
@@ -130,6 +160,9 @@ func (r *Registry) Refresh(ctx context.Context) error {
 func (r *Registry) MatchProductClass(ctx context.Context, productClass string) (*MatchResult, error) {
 	t0 := time.Now()
 	defer func() { r.metrics.matchDuration.Observe(time.Since(t0).Seconds()) }()
+	if err := r.ensureFresh(ctx); err != nil {
+		return nil, err
+	}
 
 	patternsPtr := r.patterns.Load()
 	if patternsPtr == nil || len(*patternsPtr) == 0 {
@@ -165,6 +198,9 @@ func (r *Registry) MatchProductClass(ctx context.Context, productClass string) (
 // GetProductByID 按 L1 → L2 → DB 顺序加载 Product 详情。命中后回填上层缓存。
 // 不存在 → (nil, nil)。
 func (r *Registry) GetProductByID(ctx context.Context, id uuid.UUID) (*Product, error) {
+	if err := r.ensureFresh(ctx); err != nil {
+		return nil, err
+	}
 	// L1
 	if v, ok := r.productByID.Load(id); ok {
 		r.metrics.cacheHit("L1")

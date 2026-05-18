@@ -114,19 +114,19 @@ func (r *AlarmReceiver) handleAlarmEvent(ctx context.Context, evt event.Event) e
 	}
 
 	alarm := &model.Alarm{
-		DeviceID:       deviceID,
-		DeviceSN:       payload.DeviceSN,
-		DeviceName:     strPtr(payload.DeviceName),
-		Carrier:        model.CarrierCode(payload.Carrier),
-		Technology:     strPtr(payload.Technology),
+		DeviceID:        deviceID,
+		DeviceSN:        payload.DeviceSN,
+		DeviceName:      strPtr(payload.DeviceName),
+		Carrier:         model.CarrierCode(payload.Carrier),
+		Technology:      strPtr(payload.Technology),
 		AlarmIdentifier: payload.AlarmIdentifier,
-		AlarmType:      payload.AlarmType,
-		AlarmSource:    strPtr(payload.AlarmSource),
-		EventType:      strPtr(payload.EventType),
-		Description:    payload.Description,
-		Severity:       model.AlarmSeverity(payload.Severity),
-		RaisedAt:       payload.RaisedAt,
-		AdditionalInfo: payload.Additional,
+		AlarmType:       payload.AlarmType,
+		AlarmSource:     strPtr(payload.AlarmSource),
+		EventType:       strPtr(payload.EventType),
+		Description:     payload.Description,
+		Severity:        model.AlarmSeverity(payload.Severity),
+		RaisedAt:        payload.RaisedAt,
+		AdditionalInfo:  payload.Additional,
 	}
 	r.backfillDeviceFields(ctx, alarm)
 
@@ -188,42 +188,8 @@ func (r *AlarmReceiver) backfillDeviceFields(ctx context.Context, alarm *model.A
 //
 // alarmDefRegistry 或 productResolver 未注入时直接返回 (false, nil)，行为与 P2-10 之前一致。
 func (r *AlarmReceiver) applyFallback(ctx context.Context, alarm *model.Alarm, payload AlarmPayload) (bool, error) {
-	if r.alarmDefRegistry == nil || r.productResolver == nil {
-		return false, nil
-	}
-	if _, err := r.alarmDefRegistry.Lookup(ctx, alarm.AlarmIdentifier); err == nil {
-		return false, nil
-	} else if !errors.Is(err, definition.ErrUnknownIdentifier) {
-		return false, err
-	}
-
-	// 未命中：查 product.enable_unknown_alarm
 	productClass := payload.AlarmSource // 约定 alarm_source 透传 device.ProductClass
-	if productClass == "" {
-		r.dropUnknown(alarm, "no product_class in payload")
-		return true, nil
-	}
-	prod, err := r.productResolver.ResolveByProductClass(ctx, productClass)
-	if err != nil {
-		return false, fmt.Errorf("resolve product %s: %w", productClass, err)
-	}
-	if prod == nil || !prod.EnableUnknownAlarm {
-		r.dropUnknown(alarm, "enable_unknown_alarm=false")
-		return true, nil
-	}
-
-	// 保留为 Warning（severity_code=31004）+ IsUnknown=true
-	alarm.Severity = model.AlarmSeverity(31004)
-	alarm.IsUnknown = true
-	if r.defMetrics != nil {
-		r.defMetrics.UnknownKept()
-	}
-	r.logger.Info("unknown alarm kept as fallback",
-		zap.String("alarm_identifier", alarm.AlarmIdentifier),
-		zap.String("device_sn", alarm.DeviceSN),
-		zap.String("product_class", productClass),
-	)
-	return false, nil
+	return applyUnknownAlarmFallback(ctx, r.alarmDefRegistry, r.productResolver, r.defMetrics, r.logger, alarm, productClass)
 }
 
 func (r *AlarmReceiver) dropUnknown(alarm *model.Alarm, reason string) {
@@ -235,4 +201,65 @@ func (r *AlarmReceiver) dropUnknown(alarm *model.Alarm, reason string) {
 		zap.String("device_sn", alarm.DeviceSN),
 		zap.String("reason", reason),
 	)
+}
+
+func applyUnknownAlarmFallback(
+	ctx context.Context,
+	alarmDefRegistry *definition.Registry,
+	productResolver definition.ProductResolver,
+	metrics fallbackMetrics,
+	logger *zap.Logger,
+	alarm *model.Alarm,
+	productClass string,
+) (bool, error) {
+	if alarmDefRegistry == nil || productResolver == nil {
+		return false, nil
+	}
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	if _, err := alarmDefRegistry.Lookup(ctx, alarm.AlarmIdentifier); err == nil {
+		return false, nil
+	} else if !errors.Is(err, definition.ErrUnknownIdentifier) {
+		return false, err
+	}
+
+	if productClass == "" {
+		if metrics != nil {
+			metrics.UnknownDropped()
+		}
+		logger.Info("unknown alarm dropped",
+			zap.String("alarm_identifier", alarm.AlarmIdentifier),
+			zap.String("device_sn", alarm.DeviceSN),
+			zap.String("reason", "no product_class in payload"),
+		)
+		return true, nil
+	}
+	prod, err := productResolver.ResolveByProductClass(ctx, productClass)
+	if err != nil {
+		return false, fmt.Errorf("resolve product %s: %w", productClass, err)
+	}
+	if prod == nil || !prod.EnableUnknownAlarm {
+		if metrics != nil {
+			metrics.UnknownDropped()
+		}
+		logger.Info("unknown alarm dropped",
+			zap.String("alarm_identifier", alarm.AlarmIdentifier),
+			zap.String("device_sn", alarm.DeviceSN),
+			zap.String("reason", "enable_unknown_alarm=false"),
+		)
+		return true, nil
+	}
+
+	alarm.Severity = model.AlarmSeverity(31004)
+	alarm.IsUnknown = true
+	if metrics != nil {
+		metrics.UnknownKept()
+	}
+	logger.Info("unknown alarm kept as fallback",
+		zap.String("alarm_identifier", alarm.AlarmIdentifier),
+		zap.String("device_sn", alarm.DeviceSN),
+		zap.String("product_class", productClass),
+	)
+	return false, nil
 }

@@ -16,14 +16,14 @@ import (
 // ─── 内存 Fake Repository ────────────────────────────────────────────
 
 type fakeRepo struct {
-	patterns         []ProductClassPattern
-	products         map[uuid.UUID]*Product
-	indicatorByDev   map[string]map[string]struct{}
-	alarmNeTypes     map[string]struct{}
+	patterns          []ProductClassPattern
+	products          map[uuid.UUID]*Product
+	indicatorByDev    map[string]map[string]struct{}
+	alarmNeTypes      map[string]struct{}
 	listPatternsCalls int32
 	getProductCalls   int32
-	listPatternsErr  error
-	getProductErr    error
+	listPatternsErr   error
+	getProductErr     error
 }
 
 func newFakeRepo() *fakeRepo {
@@ -228,14 +228,18 @@ func TestRegistry_Match_DanglingPatternFallsThrough(t *testing.T) {
 // ─── GetProductByID 缓存层级测试 ───────────────────────────────────
 
 type spyCache struct {
-	store      map[uuid.UUID]*Product
-	getCount   int32
-	setCount   int32
-	bumpCount  int32
-	failGet    bool
+	store     map[uuid.UUID]*Product
+	storeVer  map[uuid.UUID]int64
+	getCount  int32
+	setCount  int32
+	bumpCount int32
+	failGet   bool
+	version   int64
 }
 
-func newSpyCache() *spyCache { return &spyCache{store: make(map[uuid.UUID]*Product)} }
+func newSpyCache() *spyCache {
+	return &spyCache{store: make(map[uuid.UUID]*Product), storeVer: make(map[uuid.UUID]int64)}
+}
 
 func (s *spyCache) GetProduct(_ context.Context, id uuid.UUID) (*Product, error) {
 	atomic.AddInt32(&s.getCount, 1)
@@ -243,6 +247,9 @@ func (s *spyCache) GetProduct(_ context.Context, id uuid.UUID) (*Product, error)
 		return nil, errors.New("redis down")
 	}
 	if p, ok := s.store[id]; ok {
+		if s.storeVer[id] != s.version {
+			return nil, nil
+		}
 		cp := *p
 		return &cp, nil
 	}
@@ -252,16 +259,19 @@ func (s *spyCache) SetProduct(_ context.Context, p *Product) error {
 	atomic.AddInt32(&s.setCount, 1)
 	cp := *p
 	s.store[p.ID] = &cp
+	s.storeVer[p.ID] = s.version
 	return nil
 }
 func (s *spyCache) InvalidateProduct(_ context.Context, id uuid.UUID) error {
 	delete(s.store, id)
+	delete(s.storeVer, id)
 	return nil
 }
-func (s *spyCache) GetVersion(_ context.Context) (int64, error) { return 0, nil }
+func (s *spyCache) GetVersion(_ context.Context) (int64, error) { return s.version, nil }
 func (s *spyCache) BumpVersion(_ context.Context) (int64, error) {
 	atomic.AddInt32(&s.bumpCount, 1)
-	return 1, nil
+	s.version++
+	return s.version, nil
 }
 
 func TestRegistry_GetProductByID_L1HitAfterFirstLoad(t *testing.T) {
@@ -353,6 +363,31 @@ func TestRegistry_Refresh_ClearsL1AndBumpsVersion(t *testing.T) {
 	// L2 仍有，所以 DB 不一定走；但至少 L1 已清；这里仅验证不 panic 即可
 	_ = dbAfter
 	_ = dbBefore
+}
+
+func TestRegistry_MatchProductClass_RefreshesOnVersionChange(t *testing.T) {
+	repo := newFakeRepo()
+	pid := repo.addProduct("BM", "Baicells", "enb", "BLQ", "ENB")
+	repo.products[pid].EnableUnknownAlarm = false
+	repo.addPattern(pid, "^FAP/BU1810$", 1)
+	cache := newSpyCache()
+
+	r := NewRegistry(repo, cache, NewRegistryMetrics(nil), zap.NewNop())
+	require.NoError(t, r.Refresh(context.Background()))
+
+	match, err := r.MatchProductClass(context.Background(), "FAP/BU1810")
+	require.NoError(t, err)
+	require.NotNil(t, match)
+	assert.False(t, match.Product.EnableUnknownAlarm)
+
+	// 模拟产品中心改开关并 bump 版本；当前实例不主动 Refresh。
+	repo.products[pid].EnableUnknownAlarm = true
+	cache.version++
+
+	match, err = r.MatchProductClass(context.Background(), "FAP/BU1810")
+	require.NoError(t, err)
+	require.NotNil(t, match)
+	assert.True(t, match.Product.EnableUnknownAlarm)
 }
 
 // ─── ValidateReferences 测试 ────────────────────────────────────────

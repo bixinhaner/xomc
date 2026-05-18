@@ -87,6 +87,31 @@ func TestRedisCache_Version(t *testing.T) {
 	assert.Equal(t, int64(2), got)
 }
 
+func TestRedisCache_ProductMissesAfterVersionBump(t *testing.T) {
+	client := newMiniRedis(t)
+	c := NewRedisCache(client)
+	ctx := context.Background()
+
+	p := &Product{
+		ID:                 uuid.New(),
+		Name:               "BM 产品",
+		EnableUnknownAlarm: false,
+	}
+
+	require.NoError(t, c.SetProduct(ctx, p))
+	got, err := c.GetProduct(ctx, p.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.False(t, got.EnableUnknownAlarm)
+
+	_, err = c.BumpVersion(ctx)
+	require.NoError(t, err)
+
+	got, err = c.GetProduct(ctx, p.ID)
+	require.NoError(t, err)
+	assert.Nil(t, got)
+}
+
 func TestRedisCache_SetNilProductRejected(t *testing.T) {
 	client := newMiniRedis(t)
 	c := NewRedisCache(client)

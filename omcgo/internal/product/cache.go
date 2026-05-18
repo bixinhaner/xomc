@@ -38,6 +38,11 @@ type RedisCache struct {
 	client redis.UniversalClient
 }
 
+type cachedProduct struct {
+	Version int64   `json:"version"`
+	Product Product `json:"product"`
+}
+
 // NewRedisCache 构造一个绑定到给定 Redis 客户端的 Cache。
 func NewRedisCache(client redis.UniversalClient) *RedisCache {
 	return &RedisCache{client: client}
@@ -53,11 +58,18 @@ func (c *RedisCache) GetProduct(ctx context.Context, id uuid.UUID) (*Product, er
 		}
 		return nil, fmt.Errorf("get product cache %s: %w", key, err)
 	}
-	var p Product
-	if err := json.Unmarshal(data, &p); err != nil {
+	var entry cachedProduct
+	if err := json.Unmarshal(data, &entry); err != nil {
 		return nil, fmt.Errorf("unmarshal product cache %s: %w", key, err)
 	}
-	return &p, nil
+	version, err := c.GetVersion(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if entry.Version != version {
+		return nil, nil
+	}
+	return &entry.Product, nil
 }
 
 // SetProduct 实现 Cache。
@@ -66,7 +78,11 @@ func (c *RedisCache) SetProduct(ctx context.Context, p *Product) error {
 		return errors.New("nil product")
 	}
 	key := redisx.Keys.ProductByID(p.ID.String())
-	data, err := json.Marshal(p)
+	version, err := c.GetVersion(ctx)
+	if err != nil {
+		return err
+	}
+	data, err := json.Marshal(cachedProduct{Version: version, Product: *p})
 	if err != nil {
 		return fmt.Errorf("marshal product %s: %w", p.ID, err)
 	}
@@ -112,8 +128,8 @@ func (c *RedisCache) BumpVersion(ctx context.Context) (int64, error) {
 // 纯 L1 sync.Map + DB read-through。
 type NopCache struct{}
 
-func (NopCache) GetProduct(context.Context, uuid.UUID) (*Product, error)  { return nil, nil }
-func (NopCache) SetProduct(context.Context, *Product) error               { return nil }
-func (NopCache) InvalidateProduct(context.Context, uuid.UUID) error       { return nil }
-func (NopCache) GetVersion(context.Context) (int64, error)                { return 0, nil }
-func (NopCache) BumpVersion(context.Context) (int64, error)               { return 0, nil }
+func (NopCache) GetProduct(context.Context, uuid.UUID) (*Product, error) { return nil, nil }
+func (NopCache) SetProduct(context.Context, *Product) error              { return nil }
+func (NopCache) InvalidateProduct(context.Context, uuid.UUID) error      { return nil }
+func (NopCache) GetVersion(context.Context) (int64, error)               { return 0, nil }
+func (NopCache) BumpVersion(context.Context) (int64, error)              { return 0, nil }

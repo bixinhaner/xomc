@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/alarm/definition"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/pkg/tr069"
@@ -27,10 +28,13 @@ type DeviceLookup interface {
 // ExpeditedEventReceiver subscribes to expedited alarm events and routes them
 // to the appropriate alarm engine method based on NotificationType.
 type ExpeditedEventReceiver struct {
-	engine       *AlarmEngine
-	deviceLookup DeviceLookup
-	eventBus     event.EventBus
-	logger       *zap.Logger
+	engine           *AlarmEngine
+	deviceLookup     DeviceLookup
+	eventBus         event.EventBus
+	logger           *zap.Logger
+	alarmDefRegistry *definition.Registry
+	productResolver  definition.ProductResolver
+	defMetrics       fallbackMetrics
 }
 
 // NewExpeditedEventReceiver creates a new ExpeditedEventReceiver.
@@ -41,6 +45,17 @@ func NewExpeditedEventReceiver(engine *AlarmEngine, deviceLookup DeviceLookup, e
 		eventBus:     eventBus,
 		logger:       logger,
 	}
+}
+
+// WithAlarmDefRegistry 启用 expedited NewAlarm 的 unknown fallback。
+func (r *ExpeditedEventReceiver) WithAlarmDefRegistry(alarmDefReg *definition.Registry, productResolver definition.ProductResolver) *ExpeditedEventReceiver {
+	if alarmDefReg == nil || productResolver == nil {
+		return r
+	}
+	r.alarmDefRegistry = alarmDefReg
+	r.productResolver = productResolver
+	r.defMetrics = alarmDefReg.Metrics()
+	return r
 }
 
 // Subscribe registers the receiver for device.inform.expedited_alarm events.
@@ -105,6 +120,14 @@ func (r *ExpeditedEventReceiver) handleExpeditedAlarmEvent(ctx context.Context, 
 		switch exp.NotificationType {
 		case NotificationNewAlarm:
 			alarm := exp.ToModel(dev.ID, payload.DeviceSN, dev.Carrier)
+			drop, err := applyUnknownAlarmFallback(ctx, r.alarmDefRegistry, r.productResolver, r.defMetrics, r.logger, alarm, dev.ProductClass)
+			if err != nil {
+				r.logger.Warn("apply expedited alarm fallback failed (proceed without fallback)",
+					zap.Error(err),
+					zap.String("alarm_identifier", exp.AlarmIdentifier))
+			} else if drop {
+				continue
+			}
 			if err := r.engine.Process(ctx, alarm); err != nil {
 				r.logger.Error("process NewAlarm",
 					zap.Error(err),

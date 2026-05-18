@@ -139,6 +139,8 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// 任何一步失败都仅记 WARN 后退化到旧路径（不阻塞 worker 启动）。
 	alarmDeviceRepo := device.NewPgDeviceRepository(w.PgPool)
 	alarmReceiver := alarm.NewAlarmReceiver(alarmEngine, w.EventBus, logger).WithDeviceReader(alarmDeviceRepo)
+	expeditedDeviceRepo := device.NewPgDeviceRepository(w.PgPool)
+	expeditedReceiver := alarm.NewExpeditedEventReceiver(alarmEngine, expeditedDeviceRepo, w.EventBus, logger)
 	alarmDefRepo := definition.NewPgRepository(w.PgPool)
 	alarmDefMetrics := definition.NewRegistryMetrics(w.MetricsReg)
 	alarmDefRegistry := definition.NewRegistry(alarmDefRepo, alarmDefMetrics, logger)
@@ -147,13 +149,15 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	} else {
 		productRepo := product.NewPgRepository(w.PgPool)
 		productMetrics := product.NewRegistryMetrics(w.MetricsReg)
-		// worker 进程告警频率低，无需 Redis L2，直接 NopCache。
-		productRegistry := product.NewRegistry(productRepo, product.NopCache{}, productMetrics, logger)
+		productCache := product.Cache(product.NopCache{})
+		if w.Redis != nil {
+			productCache = product.NewRedisCache(w.Redis)
+		}
+		productRegistry := product.NewRegistry(productRepo, productCache, productMetrics, logger)
 		if err := productRegistry.Refresh(context.Background()); err != nil {
 			logger.Warn("product registry refresh failed in worker; alarm fallback disabled", zap.Error(err))
 		} else {
-			productResolver := &definition.ProductRegistryAdapter{Registry: productRegistry}
-			alarmReceiver = alarmReceiver.WithAlarmDefRegistry(alarmDefRegistry, productResolver)
+			alarmReceiver, expeditedReceiver, _ = wireUnknownAlarmFallback(alarmReceiver, expeditedReceiver, alarmDefRegistry, productRegistry)
 			logger.Info("alarm-definition fallback enabled",
 				zap.Int("definitions_loaded", alarmDefRegistry.Count()))
 		}
@@ -164,10 +168,6 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	logger.Info("alarm receiver + sync started")
 
 	// Expedited Alarm Receiver (real-time alarm notifications via VALUE CHANGE ExpeditedEvent)
-	// Uses deviceRepo from below (created early for transfer bridge); create a separate instance
-	// here since deviceRepo is declared later in this function.
-	expeditedDeviceRepo := device.NewPgDeviceRepository(w.PgPool)
-	expeditedReceiver := alarm.NewExpeditedEventReceiver(alarmEngine, expeditedDeviceRepo, w.EventBus, logger)
 	if err := expeditedReceiver.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe expedited alarm receiver", zap.Error(err))
 	}
@@ -291,6 +291,21 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 		logger.Warn("subscribe report generator", zap.Error(err))
 	}
 	logger.Info("report generator started")
+}
+
+func wireUnknownAlarmFallback(
+	alarmReceiver *alarm.AlarmReceiver,
+	expeditedReceiver *alarm.ExpeditedEventReceiver,
+	alarmDefRegistry *definition.Registry,
+	productRegistry *product.Registry,
+) (*alarm.AlarmReceiver, *alarm.ExpeditedEventReceiver, definition.ProductResolver) {
+	if alarmReceiver == nil || expeditedReceiver == nil || alarmDefRegistry == nil || productRegistry == nil {
+		return alarmReceiver, expeditedReceiver, nil
+	}
+	productResolver := &definition.ProductRegistryAdapter{Registry: productRegistry}
+	alarmReceiver = alarmReceiver.WithAlarmDefRegistry(alarmDefRegistry, productResolver)
+	expeditedReceiver = expeditedReceiver.WithAlarmDefRegistry(alarmDefRegistry, productResolver)
+	return alarmReceiver, expeditedReceiver, productResolver
 }
 
 // parseStringSlice parses a comma-separated string into a slice.

@@ -8,8 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/alarm/definition"
 	"github.com/omcgo/omcgo/internal/core/event"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,6 +28,17 @@ func (m *mockDeviceLookup) GetBySerialNumber(_ context.Context, sn string) (*mod
 		return nil, fmt.Errorf("device not found: %s", sn)
 	}
 	return d, nil
+}
+
+type mockProductResolver struct {
+	products map[string]*definition.ProductSnapshot
+}
+
+func (m *mockProductResolver) ResolveByProductClass(_ context.Context, productClass string) (*definition.ProductSnapshot, error) {
+	if prod, ok := m.products[productClass]; ok {
+		return prod, nil
+	}
+	return nil, nil
 }
 
 // mockEventBus for ExpeditedEventReceiver tests.
@@ -239,6 +251,51 @@ func TestExpeditedEventReceiver_InvalidNotificationType(t *testing.T) {
 	err := receiver.handleExpeditedAlarmEvent(context.Background(), evt)
 	require.NoError(t, err)
 	assert.Len(t, store.active, 0)
+}
+
+func TestExpeditedEventReceiver_NewAlarm_UnknownFallback(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	bus := newMockEventBus()
+	device := newTestDevice()
+	device.ProductClass = "FAP/BU1810"
+	deviceLookup := &mockDeviceLookup{
+		devices: map[string]*model.Device{"SN-TEST": device},
+	}
+	alarmDefRegistry := definition.NewRegistry(nil, nil, zap.NewNop())
+	productResolver := &mockProductResolver{
+		products: map[string]*definition.ProductSnapshot{
+			"FAP/BU1810": {
+				ID:                 uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+				Name:               "BM",
+				EnableUnknownAlarm: true,
+			},
+		},
+	}
+	receiver := NewExpeditedEventReceiver(engine, deviceLookup, bus, zap.NewNop()).WithAlarmDefRegistry(alarmDefRegistry, productResolver)
+
+	params := []tr069.ParameterValueStruct{
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.NotificationType", "NewAlarm"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.AlarmIdentifier", "70013"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.PerceivedSeverity", "Critical"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.ProbableCause", "unsupported alarm"),
+	}
+
+	payload := ExpeditedEventPayload{
+		DeviceSN:        "SN-TEST",
+		ParameterValues: params,
+	}
+	payloadJSON, _ := json.Marshal(payload)
+	evt := event.Event{ID: "test-6", Subject: event.SubjectDeviceExpeditedAlarm, Payload: payloadJSON}
+
+	err := receiver.handleExpeditedAlarmEvent(context.Background(), evt)
+	require.NoError(t, err)
+	require.Len(t, store.active, 1)
+	for _, a := range store.active {
+		assert.Equal(t, "70013", a.AlarmIdentifier)
+		assert.True(t, a.IsUnknown)
+		assert.Equal(t, model.AlarmSeverity(31004), a.Severity)
+	}
 }
 
 func mustParseTime(t *testing.T, s string) time.Time {
