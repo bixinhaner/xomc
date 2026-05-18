@@ -124,17 +124,19 @@ omc-release-<版本>-<架构>/
 
 ## 5. 构建工具与流程
 
-构建工具位于 `deployments/release/`，**三个脚本**——基础设施与项目版本两条线
-（构建周期不同），外加一个下载服务：
+构建工具位于 `deployments/release/`，**四个脚本**——基础设施准备（Docker 引擎、
+镜像）与项目发版分离（构建周期不同），外加一个下载服务：
 
 ```
 deployments/release/
-├── release.conf              # 配置：基础设施版本、项目基线版本、压缩方式、镜像清单
-├── build-images.sh           # ① 基础设施镜像构建（不常跑）
-├── build-release.sh          # ② 交付包构建 / 发版（常跑）
-├── serve.sh                  # ③ HTTP 下载服务
-├── bundle/                   # 进交付包的静态模板（docker/ + deploy/）
-├── images-cache/             # ① 的产物，② 复用（git 忽略）
+├── release.conf              # 配置：版本号、压缩方式、Docker 版本与地址、镜像清单
+├── download-docker.sh        # ① Docker 引擎离线包下载（不常跑）
+├── build-images.sh           # ② 基础设施镜像构建（不常跑）
+├── build-release.sh          # ③ 交付包构建 / 发版（常跑）
+├── serve.sh                  # ④ HTTP 下载服务
+├── bundle/                   # 进交付包的静态模板（docker/install-docker.sh + deploy/）
+├── docker-cache/             # ① 的产物：docker-cache/<arch>/docker-<版本>.tgz（git 忽略）
+├── images-cache/             # ② 的产物，③ 复用（git 忽略）
 ├── dist/                     # 构建临时工作区（git 忽略）
 └── archive/                  # 版本化归档 = HTTP 服务根目录（git 忽略）
     ├── index.html            #   自动生成的版本下载索引
@@ -143,26 +145,29 @@ deployments/release/
 
 | 工具 | 职责 | 运行频率 |
 |------|------|---------|
+| `download-docker.sh` | 按 `release.conf` 下载 Docker 引擎离线包 → `docker-cache/` | **低**：仅 Docker 版本变更时 |
 | `build-images.sh` | 拉取并导出基础设施 Docker 镜像 → `images-cache/` | **低**：仅镜像版本变更时 |
 | `build-release.sh` | 编译二进制 + 前端 + 组装 + 压缩，按版本归档到 `archive/` | **高**：每次发版 |
 | `serve.sh` | 起 HTTP 服务暴露 `archive/`，供使用者浏览器下载 | 常驻 |
 
-> ⚠️ `build-images.sh` / `build-release.sh` 都**用普通用户运行，不要 sudo**（见 §3）。
+> ⚠️ `download-docker.sh` / `build-images.sh` / `build-release.sh` 都**用普通用户运行，不要 sudo**（见 §3）。
 
-### 5.1 第一步：构建基础设施镜像（首次 / 镜像版本变更时）
+### 5.1 第一步：准备基础设施（首次 / Docker 或镜像版本变更时）
 
 ```bash
 cd deployments/release
-# 一次性准备：把 Docker 静态二进制包放进 bundle/docker/
-#   从 https://download.docker.com/linux/static/stable/ 下载对应架构的
-#   docker-<版本>.tgz（amd64 用 x86_64/，arm64 用 aarch64/），详见 bundle/docker/README.md。
 
+# (a) 下载 Docker 引擎离线包（供运维侧离线装 Docker；版本/地址见 release.conf）
+./download-docker.sh               # → docker-cache/{amd64,arm64}/docker-<版本>.tgz
+#   --force   已存在也重下
+
+# (b) 拉取基础设施镜像
 ./build-images.sh                  # 基础设施版本取 release.conf 的 INFRA_VERSION
 #   -v infra-1.1        手动指定基础设施版本
 #   --with-monitoring   额外导出监控栈镜像
 ```
 
-镜像缓存（含基础设施版本号）生成一次后可反复复用，日常发版无需重跑本步。
+Docker 包与镜像缓存生成一次后可反复复用，日常发版无需重跑本步。
 
 ### 5.2 第二步：构建交付包（每次发版）
 

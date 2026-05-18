@@ -6,13 +6,14 @@
 - 构建侧完整说明：[`docs/operations/OMC离线交付包构建手册（构建侧）.md`](../../docs/operations/OMC离线交付包构建手册（构建侧）.md)
 - 运维侧（随交付包发给运维）：[`docs/operations/OMC内网离线部署手册（运维侧）.md`](../../docs/operations/OMC内网离线部署手册（运维侧）.md)
 
-## 三个脚本
+## 四个脚本
 
-构建拆分为**基础设施**与**项目版本**两条线（构建周期不同），外加一个下载服务：
+基础设施准备（Docker 引擎、镜像）与项目发版分离（构建周期不同），外加下载服务：
 
 | 脚本 | 职责 | 运行频率 |
 |------|------|---------|
-| `build-images.sh` | 拉取并导出基础设施 Docker 镜像 → `images-cache/`（带独立的基础设施版本号） | **低**：仅镜像版本变更时 |
+| `download-docker.sh` | 按 `release.conf` 下载 Docker 引擎离线包 → `docker-cache/` | **低**：仅 Docker 版本变更时 |
+| `build-images.sh` | 拉取并导出基础设施 Docker 镜像 → `images-cache/`（带独立基础设施版本号） | **低**：仅镜像版本变更时 |
 | `build-release.sh` | 编译二进制 + 前端 + 组装 + 压缩，按版本归档到 `archive/` | **高**：每次发版 |
 | `serve.sh` | 起 HTTP 服务暴露 `archive/`，使用者用浏览器下载 | 常驻 |
 
@@ -20,12 +21,14 @@
 
 ```
 deployments/release/
-├── release.conf              # 配置：基础设施版本、项目基线版本、压缩方式、镜像清单
-├── build-images.sh           # ① 基础设施镜像构建（不常跑）
-├── build-release.sh          # ② 交付包构建 / 发版（常跑）
-├── serve.sh                  # ③ HTTP 下载服务
-├── bundle/                   # 进交付包的静态模板（docker/ + deploy/）
-├── images-cache/             # ① 的产物，② 复用（git 忽略）
+├── release.conf              # 配置：版本号、压缩方式、Docker 版本与下载地址、镜像清单
+├── download-docker.sh        # ① Docker 引擎离线包下载（不常跑）
+├── build-images.sh           # ② 基础设施镜像构建（不常跑）
+├── build-release.sh          # ③ 交付包构建 / 发版（常跑）
+├── serve.sh                  # ④ HTTP 下载服务
+├── bundle/                   # 进交付包的静态模板（docker/install-docker.sh + deploy/）
+├── docker-cache/             # ① 的产物：docker-cache/<arch>/docker-<版本>.tgz（git 忽略）
+├── images-cache/             # ② 的产物，③ 复用（git 忽略）
 ├── dist/                     # 构建临时工作区（git 忽略）
 └── archive/                  # 版本化归档 = HTTP 服务根目录（git 忽略）
     ├── index.html            #   自动生成的版本下载索引
@@ -41,17 +44,24 @@ deployments/release/
 > （sudo 重置 PATH 会找不到 go/npm，产物归 root）。`docker` 权限用
 > `sudo usermod -aG docker $USER && newgrp docker` 解决。
 
-### ① 构建基础设施镜像（首次 / 镜像版本变更时）
+### ① 下载 Docker 引擎离线包（首次 / Docker 版本变更时）
 
 ```bash
 cd deployments/release
-# 一次性：把 Docker 静态二进制包放进 bundle/docker/（见 bundle/docker/README.md）
+./download-docker.sh               # 按 release.conf 的 DOCKER_VERSION 下载 amd64 + arm64
+#   → docker-cache/{amd64,arm64}/docker-<版本>.tgz
+#   --force   已存在也重下
+```
+
+### ② 构建基础设施镜像（首次 / 镜像版本变更时）
+
+```bash
 ./build-images.sh                  # 基础设施版本取 release.conf 的 INFRA_VERSION
 #   -v infra-1.1        手动指定基础设施版本
 #   --with-monitoring   额外导出监控栈镜像
 ```
 
-### ② 构建交付包（每次发版）
+### ③ 构建交付包（每次发版）
 
 ```bash
 ./build-release.sh                 # 小版本：版本自动生成
@@ -60,7 +70,7 @@ cd deployments/release
 
 产物归档到 `archive/<版本>/`，并自动刷新 `archive/index.html`。
 
-### ③ 起下载服务
+### ④ 起下载服务
 
 ```bash
 ./serve.sh                         # 默认端口 8000
@@ -82,5 +92,6 @@ cd deployments/release
 ## 注意
 
 - **镜像版本固化**：`release.conf` 镜像标签发布前改为具体版本号，不要用 `latest`。
+- **Docker 版本**：`release.conf` 的 `DOCKER_VERSION` / `DOCKER_URL_TEMPLATE` 控制下载。
 - **压缩方式**：`release.conf` 的 `PKG_COMPRESS` 控制交付包压缩（默认 `xz`，体积最小）。
-- `images-cache/`、`dist/`、`archive/` 为构建产物，已被 `.gitignore` 忽略。
+- `docker-cache/`、`images-cache/`、`dist/`、`archive/` 为构建产物，已被 `.gitignore` 忽略。

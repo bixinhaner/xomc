@@ -7,17 +7,18 @@
 
 ---
 
-## 1. 三个脚本一览
+## 1. 四个脚本一览
 
 | 脚本 | 干什么 | 多久跑一次 | 依赖 |
 |------|--------|-----------|------|
+| `download-docker.sh` | 下载 Docker 引擎离线包 → `docker-cache/` | **低**：仅 Docker 版本变更时 | curl/wget + 公网 |
 | `build-images.sh` | 拉取并导出基础设施 Docker 镜像 → `images-cache/` | **低**：仅镜像版本变更时 | docker + 公网 |
 | `build-release.sh` | 编译二进制 + 前端 + 组装压缩 → 归档到 `archive/` | **高**：每次发版 | go + npm + 公网 |
 | `serve.sh` | 起 HTTP 服务，让使用者用浏览器下载交付包 | 常驻 | python3 |
 
-> 一句话：**`build-images.sh` 偶尔跑、`build-release.sh` 每次发版跑、`serve.sh` 一直开着。**
+> 一句话：**`download-docker.sh`/`build-images.sh` 偶尔跑、`build-release.sh` 每次发版跑、`serve.sh` 一直开着。**
 
-> ⚠️ 三个脚本都**用普通用户运行，不要 `sudo`**。`sudo` 会重置 `PATH`，导致脚本
+> ⚠️ 这些脚本都**用普通用户运行，不要 `sudo`**。`sudo` 会重置 `PATH`，导致脚本
 > 找不到 `go`/`npm`，并让产物归 `root`。`docker` 权限用 docker 组解决（见 §2）。
 
 ---
@@ -30,18 +31,16 @@ cd <仓库>/deployments/release
 # (1) 把当前用户加入 docker 组（build-images.sh 要用 docker）
 sudo usermod -aG docker $USER && newgrp docker
 
-# (2) 下载 Docker 静态二进制包，放进 bundle/docker/
-#     来源： https://download.docker.com/linux/static/stable/
-#       amd64 → x86_64/docker-<版本>.tgz
-#       arm64 → aarch64/docker-<版本>.tgz
-#     用于运维侧离线安装 Docker；目标机已装 Docker 可跳过。
-#     详见 bundle/docker/README.md。
-
-# (3) 按需编辑 release.conf：
+# (2) 按需编辑 release.conf：
+#     DOCKER_VERSION        Docker 引擎版本（download-docker.sh 用）
+#     DOCKER_URL_TEMPLATE   Docker 下载地址模板
 #     INFRA_VERSION         基础设施版本号（如 infra-1.0）
 #     RELEASE_BASE_VERSION  项目基线版本号（如 1.0.0）
 #     IMAGE_*               基础设施镜像 —— 发布前把 latest 改成具体版本号
 #     PKG_COMPRESS          交付包压缩方式（默认 xz，体积最小）
+
+# (3) 下载 Docker 引擎离线包（供运维侧离线装 Docker；目标机已装可跳过）
+./download-docker.sh        # 按 release.conf 下载 amd64 + arm64 → docker-cache/
 ```
 
 ---
@@ -134,7 +133,8 @@ nohup ./serve.sh 8000 >/tmp/omc-serve.log 2>&1 &
 
 ```
 deployments/release/
-├── images-cache/                       # build-images.sh 产物（中间件，可复用）
+├── docker-cache/                       # download-docker.sh 产物（Docker 引擎包，可复用）
+├── images-cache/                       # build-images.sh 产物（基础设施镜像，可复用）
 └── archive/                            # build-release.sh 产物（交付包归档）
     ├── index.html                      #   HTTP 下载首页（自动生成）
     └── <项目版本>/
@@ -153,10 +153,11 @@ deployments/release/
 ```bash
 cd deployments/release
 
-# —— 首次：准备 + 建镜像 ——
+# —— 首次：准备 + 下载 Docker + 建镜像 ——
 sudo usermod -aG docker $USER && newgrp docker
-# （把 docker-*.tgz 放进 bundle/docker/，编辑 release.conf）
-./build-images.sh
+# （编辑 release.conf）
+./download-docker.sh                     # 下载 Docker 引擎离线包
+./build-images.sh                        # 拉取基础设施镜像
 
 # —— 日常：发版 ——
 ./build-release.sh                       # 小版本
@@ -165,9 +166,10 @@ sudo usermod -aG docker $USER && newgrp docker
 # —— 分发 ——
 ./serve.sh &                             # 起服务，保持开启
 
-# —— 某次升级了基础设施 ——
+# —— 某次升级了基础设施 / Docker ——
 # 改 release.conf 后：
-./build-images.sh
+./download-docker.sh                     # 若改了 DOCKER_VERSION
+./build-images.sh                        # 若改了镜像版本
 ./build-release.sh -v 2.0.0
 ```
 
@@ -186,5 +188,5 @@ sudo usermod -aG docker $USER && newgrp docker
 
 ---
 
-**速记**：`build-images.sh`（偶尔）→ `build-release.sh`（每次发版）→ `serve.sh`（常开）。
+**速记**：`download-docker.sh` + `build-images.sh`（偶尔）→ `build-release.sh`（每次发版）→ `serve.sh`（常开）。
 深入内容见《OMC离线交付包构建手册（构建侧）》。

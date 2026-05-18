@@ -153,8 +153,7 @@ for ARCH in $ARCHES; do
 
   # 2.3 部署模板 + Docker 离线安装件 + nginx 配置
   log "[$ARCH] 拷入部署模板 ..."
-  cp -r "$SCRIPT_DIR/bundle/deploy"  "$STAGE/deploy"
-  cp -r "$SCRIPT_DIR/bundle/docker"  "$STAGE/docker"
+  cp -r "$SCRIPT_DIR/bundle/deploy" "$STAGE/deploy"
   cp "$REPO_ROOT/deployments/docker/nginx.conf"   "$STAGE/deploy/nginx.conf"
   cp "$REPO_ROOT/deployments/docker/default.conf" "$STAGE/deploy/default.conf"
   cat > "$STAGE/deploy/.env" <<EOF
@@ -164,8 +163,15 @@ IMAGE_NATS=$IMAGE_NATS
 IMAGE_MINIO=$IMAGE_MINIO
 IMAGE_NGINX=$IMAGE_NGINX
 EOF
-  if ! ls "$STAGE"/docker/docker-*.tgz >/dev/null 2>&1; then
-    warn "[$ARCH] bundle/docker/ 内未放置 docker-*.tgz —— 交付包将不含 Docker 引擎离线安装件。"
+  # docker/：install-docker.sh（静态模板）+ 对应架构的 Docker 引擎包
+  # （由 download-docker.sh 下载到 docker-cache/<arch>/）
+  mkdir -p "$STAGE/docker"
+  cp "$SCRIPT_DIR/bundle/docker/install-docker.sh" "$STAGE/docker/"
+  if ls "$SCRIPT_DIR/docker-cache/$ARCH"/docker-*.tgz >/dev/null 2>&1; then
+    cp "$SCRIPT_DIR/docker-cache/$ARCH"/docker-*.tgz "$STAGE/docker/"
+  else
+    warn "[$ARCH] docker-cache/$ARCH/ 无 Docker 引擎包 —— 交付包不含离线装 Docker 的包。"
+    warn "        若目标机未装 Docker，请先运行： ./download-docker.sh"
   fi
 
   # 2.4 运维侧部署文档
