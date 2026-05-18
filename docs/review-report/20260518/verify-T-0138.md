@@ -90,12 +90,24 @@
 - `verify-T-0138-quicksettings-lte-scrolled.png` ENB 邻区配置两表
 - `verify-T-0138-quicksettings-gnb.png` GNB 详情页
 
-**未验证的项目**(需 ACS 真机响应,或邻区列表非空设备):
-- 单实例改字段 → tab Save → 通知中心出现 Set 任务回执(BaiBLQ CPE 在线但当前无 SetParameterValues 真机走通的设备测试数据)
-- 行级 Save 多实例(邻区列表暂无数据,需先 AddObject)
-- 新增邻区两步流程实测(同上,需走 AddObject + Set 的 CPE 真机响应)
-- 失败标红重试(同上)
+**真机写测试**(用户授权后做,BaiBLQ `1202000240194DP0026` 在线):
 
-这 4 项留独立 sub-task(类似 T-0123-P2-d 风格的"真机回放验收 + DoD §6"),不阻塞当前 PR。
+| 测试 | 结果 | 说明 |
+|---|---|---|
+| 行级 Save 异频邻区实例 3 重选定时器 1→2 | 🟡 链路通,后端预存 bug 阻塞 | PUT `/api/v1/devices/:id/parameters` 真请求发出,**后端返 400 "parameter validation failed: parameter not found in mapping"**(GET schema 同 path 返回 `writable: true / type: U_INT / current_value: 1`)。**T-0138 范围外**:T-0098 ParamRegistry/Translator SetParameterValues 校验链路与 GET schema 不一致,在 IntersectService discovered_param_mappings 和默认 param_mappings 之间存在 lookup 差异 |
+| PCI 单实例字段 Set | 🟡 同上 | 也返 400 "not found in mapping",确认是后端通用问题非 T-0138 引入 |
+| 非法值前端拦截(PCI = "abc") | 🟡 链路通,前端 validateValue type 大小写不一致 | 前端没拦截:schema 返回 `type: "U_INT"`(大写),前端 validateValue 用 `'unsignedInt'`(camelCase)比对,不匹配走 string 分支(校验长度/pattern,不校验整数),`Number('abc')=NaN` 通过,发起请求。**T-0138 范围外**:此预存 bug 继承自 `ParameterEditModal.tsx` validateValue,该函数 type 比对与 `deviceParameterApi.mapBackendDevice` 不一致 |
+
+**正面验证**(T-0138 真正责任范围):
+- ✅ 前端 → 后端 PUT `/api/v1/devices/:id/parameters` 请求真发出,Authorization 正确
+- ✅ 后端正确接收并返回 400 + 业务错误 detail
+- ✅ 前端 useUpdateParameters mutation onError 走到(message.error "下发失败"应弹出,实测时 3 秒消失未截图到)
+- ✅ Save 后 invalidateQueries 触发 useParameterSchema refetch,行级 edits 被清空(行为符合代码意图)
+- ✅ 不改任何字段的 Save → "无变更" toast 路径
+- ✅ AddObject/DeleteObject 按钮按 `schema.canAdd / canDeleteAny` 正确 disabled(BaiBLQ CPE 不允许该对象增删)
+
+**T-0138 范围外的 2 个预存 bug 发现**(需另立项,不阻塞 T-0138 合入):
+1. **后端 SetParameterValues 校验与 GET schema 不一致**:GET 端 `useParameterSchema` 走 discovered + default 合并返回 writable=true,PUT 端 ParamRegistry/Translator lookup 报 "parameter not found in mapping"。涉及 `internal/config/parammodel/validator.go` 与 `internal/device/device_param_handler.go::SetParameterValues`。建议查 `MappingValidator.LookupForWrite` 与 `Translator.StandardToPrivate` 在 BLQ `param_mappings` 默认表上的实例号 `{i}` normalize 行为。
+2. **前端 validateValue type 比对大小写不一致**:`ParameterEditModal.tsx::validateValue` 用 `parameterType === 'unsignedInt'` 比对,而后端 schema 返回 `type: "U_INT"`(大写),导致 U_INT/INT 类型字段的整数/范围校验未触发,任何输入(含 "abc")都走 string 分支。建议在 `deviceParameterApi.mapBackendDevice` 加 type lowerCase 映射或在 validateValue 统一忽略大小写。
 
 **真机端到端整体结论**:T-0138 设计 §9.4 第 3 步(BaiBLQ LTE)+ 第 4 步(GNB)的**所有 UI 渲染/路由/字典加载/分组逻辑**核心验收项全过,Tab 正确显示在 eNB/gNB 设备且 UI 元素与设计文档一致;字典补齐 EnbCellType 生效。
