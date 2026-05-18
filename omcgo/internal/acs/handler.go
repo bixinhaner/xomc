@@ -92,7 +92,7 @@ type Handler struct {
 	// T-0137 / M1: TR069 报文跟踪 — 命中白名单时旁路投递 capture，热路径开销 < 1ms。
 	// 两个字段都为 nil 表示跟踪关闭（默认）。
 	traceWhitelist *trace.WhitelistCache
-	traceService   *trace.Service
+	traceService   traceCaptureSink
 	// connSessions 映射 HTTP RemoteAddr → connSessionEntry，用于连接级会话追踪。
 	// 条目在会话完成时或由后台清理器清除。
 	connSessions sync.Map
