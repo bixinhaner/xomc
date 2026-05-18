@@ -253,6 +253,15 @@ export const NAV_CONFIG: NavConfig = [
   //     { key: 'mr-file',   label: 'nav.mr.files',          path: '/mr/files' },
   //   ],
   // },  // 隐藏MR管理一级菜单
+  // F06 System License 重构 Step 4：单例 license 模型，菜单收敛为单页。
+  // 老 list/operations/logs 已下线（路由仍保留至 Step 5 一并删）。
+  {
+    key: 'license',
+    label: 'nav.systemLicense',
+    iconName: 'SafetyOutlined',
+    path: '/license',
+  },
+  // // 老多 license 菜单（已废弃）：
   // {
   //   key: 'license',
   //   label: 'nav.license',

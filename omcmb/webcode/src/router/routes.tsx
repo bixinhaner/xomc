@@ -143,6 +143,10 @@ const MRTasks            = React.lazy(() => import('@/pages/mr/Tasks'));
 const MRFiles            = React.lazy(() => import('@/pages/mr/Files'));
 
 // License Management
+// F06 System License 重构 Step 4：新单例页 /license + /license/history。
+// 老 /license/{list,operations,logs} 暂保留路由直到 Step 5 整体下线（菜单已隐藏，仅供旧 bookmark）。
+const SystemLicensePage         = React.lazy(() => import('@/pages/SystemLicense'));
+const SystemLicenseHistoryPage  = React.lazy(() => import('@/pages/SystemLicense/History'));
 const LicenseList        = React.lazy(() => import('@/pages/license/LicenseList'));
 const LicenseOperations  = React.lazy(() => import('@/pages/license/LicenseOperations'));
 const LicenseLogs        = React.lazy(() => import('@/pages/license/LicenseLogs'));
@@ -357,7 +361,11 @@ export const routes: RouteObject[] = [
       { path: 'mr/tasks',          element: withSuspense(MRTasks) },
       { path: 'mr/files',          element: withSuspense(MRFiles) },
 
-      // License Management
+      // License Management — F06 重构 Step 4
+      // 单例 license 主页 + history 子页（PRD F06-system-license-redesign §6）
+      { path: 'license',            element: withSuspense(SystemLicensePage) },
+      { path: 'license/history',    element: withSuspense(SystemLicenseHistoryPage) },
+      // 老 multi-license 页面暂保留（菜单已隐藏，Step 5 一并下线）
       { path: 'license/list',       element: withSuspense(LicenseList) },
       { path: 'license/operations', element: withSuspense(LicenseOperations) },
       { path: 'license/logs',       element: withSuspense(LicenseLogs) },
