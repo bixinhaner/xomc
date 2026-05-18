@@ -97,6 +97,20 @@ func (r *PgRepository) LookupParamModelIDByName(ctx context.Context, name string
 	return id, nil
 }
 
+// LookupParamModelNameByID 反查 param_models.name by id；T-0138 quicksettings handler
+// device→product→paramModel 链路解析用。
+func (r *PgRepository) LookupParamModelNameByID(ctx context.Context, id uuid.UUID) (string, error) {
+	var name string
+	err := r.pool.QueryRow(ctx, `SELECT name FROM param_models WHERE id = $1`, id).Scan(&name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("param_model id %s not found", id)
+	}
+	if err != nil {
+		return "", fmt.Errorf("lookup param_model name %s: %w", id, err)
+	}
+	return name, nil
+}
+
 // ── Product CRUD ────────────────────────────────────────────────────
 
 // CreateProduct 新建 products 行；data_attrs_override.data_type=true 拒绝。

@@ -26,6 +26,7 @@ import type { DataTableColumn } from '@/components/DataTable';
 import LineChart from '@/components/Charts/LineChart';
 import StatusIndicator from '@/components/StatusIndicator';
 import { useDeviceBySn } from '@core/hooks/api/useDevices';
+import { useQuickSettingsGroups } from '@core/hooks/api/useQuickSettings';
 import { useCurrentAlarms } from '@core/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 import type { Alarm } from '@core/types/alarm';
@@ -496,6 +497,11 @@ export default function DeviceDetail() {
 
   const { data: device, isLoading, refetch } = useDeviceBySn(sn);
 
+  // T-0138:快速设置 tab 显示规则 —— 只在该设备对应 paramModel 有 quicksettings XML 时显示
+  // (后端 GET /quicksettings/groups?device_id=... 返回空 groups 即视为未配置)
+  const { data: quickSettingsData } = useQuickSettingsGroups(device?.id);
+  const showQuickSettingsTab = (quickSettingsData?.groups?.length ?? 0) > 0;
+
   const handleHeaderRefresh = useCallback(() => {
     void refetch();
     const deviceId = device?.id;
@@ -666,7 +672,7 @@ export default function DeviceDetail() {
               label: t('device.parameterTree'),
               children: <ParameterTreeTab deviceId={device.id} />,
             },
-            ...((device.networkType === 'lte' || device.networkType === 'nr')
+            ...(showQuickSettingsTab
               ? [{
                   key: 'quickSettings',
                   label: t('device.quickSettings.tabTitle'),

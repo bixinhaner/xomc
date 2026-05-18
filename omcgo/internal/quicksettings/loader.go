@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -16,20 +17,14 @@ import (
 // LoaderName 是 dictloader.Registry 中的注册名。
 const LoaderName = "quick-settings"
 
-// fileTechMap 把 XML 文件名映射到制式。新增制式时在此扩展。
-var fileTechMap = map[string]TechCode{
-	"enb.xml": TechLTE,
-	"gnb.xml": TechNR,
-}
-
-// Loader 实现 dictloader.Loader 接口（T-0138）。
+// Loader 实现 dictloader.Loader 接口(T-0138)。
 //
-// 加载语义：
-//  1. 扫描 {XMLBaseDir}/{Directory}/ 下白名单文件（enb.xml / gnb.xml）
+// 加载语义:
+//  1. 扫描 {XMLBaseDir}/{Directory}/*.xml(文件名去 .xml = paramModel name)
 //  2. 解析为 Group 列表
-//  3. 写入 Registry（按制式索引，原子替换）
+//  3. 写入 Registry(按 paramModel name 索引,原子替换)
 //
-// 不写 PG / 不写 Redis；55 项常量级数据，进程内 sync.RWMutex 足够。
+// 不写 PG / 不写 Redis;每 paramModel 数十项常量级数据,进程内 sync.RWMutex 足够。
 type Loader struct {
 	cfg      appconfig.QuickSettingsLoaderConfig
 	base     string
@@ -37,7 +32,7 @@ type Loader struct {
 	logger   *zap.Logger
 }
 
-// NewLoader 构造 Loader。registry 必须非空（由调用方注入，便于路由 handler 共用同一实例）。
+// NewLoader 构造 Loader。registry 必须非空(由调用方注入,便于路由 handler 共用同一实例)。
 func NewLoader(cfg appconfig.QuickSettingsLoaderConfig, baseDir string, registry *Registry, logger *zap.Logger) *Loader {
 	if cfg.Directory == "" {
 		cfg.Directory = "quicksettings"
@@ -57,7 +52,7 @@ func (l *Loader) Directory() string { return l.cfg.Directory }
 func (l *Loader) LoadOnce(ctx context.Context) (dictloader.Report, error) { return l.run(ctx) }
 func (l *Loader) Reload(ctx context.Context) (dictloader.Report, error)   { return l.run(ctx) }
 
-// Registry 返回 Loader 持有的 Registry，路由 handler 可直接用同一实例。
+// Registry 返回 Loader 持有的 Registry,路由 handler 可直接用同一实例。
 func (l *Loader) Registry() *Registry { return l.registry }
 
 func (l *Loader) run(_ context.Context) (dictloader.Report, error) {
@@ -65,35 +60,60 @@ func (l *Loader) run(_ context.Context) (dictloader.Report, error) {
 	defer rep.Finish()
 
 	dir := filepath.Join(l.base, l.cfg.Directory)
-	for fileName, tech := range fileTechMap {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		rep.AddError(l.cfg.Directory, "read_dir", err)
+		// 目录不存在不阻塞启动(quicksettings 是可选功能)
+		l.logger.Warn("quicksettings: directory not found, no params loaded",
+			zap.String("dir", dir), zap.Error(err))
+		return rep, nil
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".xml") {
+			continue
+		}
+		paramModel := strings.TrimSuffix(name, ".xml")
 		rep.FilesScanned++
-		path := filepath.Join(dir, fileName)
+
+		path := filepath.Join(dir, name)
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			rep.FilesSkipped++
-			rep.AddError(fileName, "read", err)
+			rep.AddError(name, "read", err)
 			l.logger.Warn("quicksettings: skip file", zap.String("file", path), zap.Error(err))
 			continue
 		}
 
 		var doc xmlQuickSettings
 		if err := xml.Unmarshal(raw, &doc); err != nil {
-			rep.AddError(fileName, "parse", err)
+			rep.AddError(name, "parse", err)
 			return rep, fmt.Errorf("xml unmarshal %s: %w", path, err)
 		}
 
-		groups, err := buildGroups(doc, fileName)
+		// 文件名 vs XML 顶层 paramModel 属性一致性校验(可选属性,缺省时只用文件名)
+		if doc.ParamModel != "" && doc.ParamModel != paramModel {
+			err := fmt.Errorf("xml paramModel=%q mismatches file name=%q", doc.ParamModel, paramModel)
+			rep.AddError(name, "validate", err)
+			return rep, err
+		}
+
+		groups, err := buildGroups(doc, name)
 		if err != nil {
-			rep.AddError(fileName, "validate", err)
+			rep.AddError(name, "validate", err)
 			return rep, fmt.Errorf("validate %s: %w", path, err)
 		}
 
-		l.registry.Replace(tech, groups)
+		l.registry.Replace(paramModel, groups)
 		rep.FilesLoaded++
 		rep.RowsAffected += len(groups)
 		l.logger.Info("quicksettings: loaded",
-			zap.String("file", fileName),
-			zap.String("tech", string(tech)),
+			zap.String("file", name),
+			zap.String("paramModel", paramModel),
 			zap.Int("groups", len(groups)))
 	}
 
@@ -102,9 +122,9 @@ func (l *Loader) run(_ context.Context) (dictloader.Report, error) {
 
 // xmlQuickSettings 镜像 XML 顶层结构。
 type xmlQuickSettings struct {
-	XMLName xml.Name   `xml:"quickSettings"`
-	Tech    string     `xml:"tech,attr"`
-	Groups  []xmlGroup `xml:"group"`
+	XMLName    xml.Name   `xml:"quickSettings"`
+	ParamModel string     `xml:"paramModel,attr"` // 可选,缺省时用文件名
+	Groups     []xmlGroup `xml:"group"`
 }
 
 type xmlGroup struct {
@@ -124,7 +144,7 @@ type xmlParam struct {
 	Leaf         string `xml:"leaf,attr"`
 }
 
-// buildGroups 把 XML 解码结果转换为领域 Group 列表，并做最小一致性校验。
+// buildGroups 把 XML 解码结果转换为领域 Group 列表,并做最小一致性校验。
 func buildGroups(doc xmlQuickSettings, fileName string) ([]Group, error) {
 	out := make([]Group, 0, len(doc.Groups))
 	for _, g := range doc.Groups {

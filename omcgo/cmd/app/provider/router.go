@@ -318,8 +318,13 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	paramTreeHandler.RegisterRoutes(permGroup("devices"))
 
 	// T-0138：「快速设置」分组元数据（设备运维人员可读）
-	if c.QuickSettingsRegistry != nil {
-		quickSettingsHandler := quicksettings.NewHandler(c.QuickSettingsRegistry)
+	if c.QuickSettingsRegistry != nil && c.DeviceService != nil && c.ProductRegistry != nil && c.ProductRepo != nil {
+		quickSettingsHandler := quicksettings.NewHandler(
+			c.QuickSettingsRegistry,
+			c.DeviceService,
+			c.ProductRegistry,
+			c.ProductRepo,
+		)
 		quickSettingsHandler.RegisterRoutes(permGroup("devices"))
 	}
 

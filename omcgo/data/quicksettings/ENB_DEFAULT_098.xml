@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ENB_DEFAULT_098 paramModel 快速设置(从 BLQ.xml 模板按字典命中过滤生成)。
+  仅保留 ENB_DEFAULT_098.xml 字典中实际存在的 standardPath,缺失字段跳过。
+-->
+<quickSettings paramModel="ENB_DEFAULT_098">
+  <group id="enb-cell" titleZh="小区参数" titleEn="Cell Parameters">
+    <param name="ECI" titleZh="ECI" titleEn="ECI"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.CellIdentity"/>
+    <param name="CellName" titleZh="小区名称" titleEn="Cell Name"
+           standardPath="Device.Services.FAPService.{i}.AccessMgmt.LTE.HNBName"/>
+    <param name="TAC" titleZh="TAC" titleEn="TAC"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.TAC"/>
+    <param name="PCI" titleZh="PCI" titleEn="PCI"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID"/>
+    <param name="MaxTxPower" titleZh="最大发射功率" titleEn="Max Tx Power"
+           standardPath="Device.Services.FAPService.{i}.Capabilities.MaxTxPower"/>
+    <param name="BandIndicator" titleZh="频段标识" titleEn="Band Indicator"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.FreqBandIndicator"/>
+    <param name="DLEarfcn" titleZh="下行频点" titleEn="DL EARFCN"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNDL"/>
+    <param name="ULEarfcn" titleZh="上行频点" titleEn="UL EARFCN"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNUL"/>
+    <param name="DLBandWidth" titleZh="下行带宽" titleEn="DL Bandwidth"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth"/>
+    <param name="ULBandWidth" titleZh="上行带宽" titleEn="UL Bandwidth"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth"/>
+    <param name="SubFrameAssignment" titleZh="子帧配比" titleEn="SubFrame Assignment"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment"/>
+    <param name="SpecialSubFramePatterns" titleZh="特殊子帧配置" titleEn="Special SubFrame Patterns"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SpecialSubframePatterns"/>
+    <param name="RootSequenceIndex" titleZh="根序列索引" titleEn="Root Sequence Index"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.RootSequenceIndex"/>
+  </group>
+  <group id="enb-neighbor-cell" titleZh="邻区列表" titleEn="Neighbor Cell List"
+         multiInstance="true"
+         objectPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.">
+    <param name="CellID" titleZh="小区ID" titleEn="Cell ID" leaf="CID"/>
+    <param name="PLMN" titleZh="PLMN" titleEn="PLMN" leaf="PLMNID"/>
+    <param name="EARFCN" titleZh="频点" titleEn="EARFCN" leaf="EUTRACarrierARFCN"/>
+    <param name="PCI" titleZh="PCI" titleEn="PCI" leaf="PhyCellID"/>
+    <param name="QOffset" titleZh="QOffset" titleEn="QOffset" leaf="QOffset"/>
+    <param name="CIO" titleZh="CIO" titleEn="CIO" leaf="CIO"/>
+    <param name="Blacklisted" titleZh="黑名单" titleEn="Blacklisted" leaf="Blacklisted"/>
+  </group>
+</quickSettings>

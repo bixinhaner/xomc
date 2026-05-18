@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  MLN paramModel 快速设置(从 BLQ.xml 模板按字典命中过滤生成)。
+  仅保留 MLN.xml 字典中实际存在的 standardPath,缺失字段跳过。
+-->
+<quickSettings paramModel="MLN">
+  <group id="enb-cell" titleZh="小区参数" titleEn="Cell Parameters">
+    <param name="ECI" titleZh="ECI" titleEn="ECI"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.CellIdentity"/>
+    <param name="CellName" titleZh="小区名称" titleEn="Cell Name"
+           standardPath="Device.Services.FAPService.{i}.AccessMgmt.LTE.HNBName"/>
+    <param name="TAC" titleZh="TAC" titleEn="TAC"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.TAC"/>
+    <param name="PCI" titleZh="PCI" titleEn="PCI"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID"/>
+    <param name="MaxTxPower" titleZh="最大发射功率" titleEn="Max Tx Power"
+           standardPath="Device.Services.FAPService.{i}.Capabilities.MaxTxPower"/>
+    <param name="BandSupport" titleZh="频段支持" titleEn="Band Support"
+           standardPath="Device.Services.FAPService.{i}.Capabilities.LTE.BandsSupported"/>
+    <param name="BandIndicator" titleZh="频段标识" titleEn="Band Indicator"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.FreqBandIndicator"/>
+    <param name="DLEarfcn" titleZh="下行频点" titleEn="DL EARFCN"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNDL"/>
+    <param name="ULEarfcn" titleZh="上行频点" titleEn="UL EARFCN"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNUL"/>
+    <param name="DLBandWidth" titleZh="下行带宽" titleEn="DL Bandwidth"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth"/>
+    <param name="ULBandWidth" titleZh="上行带宽" titleEn="UL Bandwidth"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth"/>
+    <param name="SubFrameAssignment" titleZh="子帧配比" titleEn="SubFrame Assignment"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment"/>
+    <param name="SpecialSubFramePatterns" titleZh="特殊子帧配置" titleEn="Special SubFrame Patterns"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SpecialSubframePatterns"/>
+    <param name="RootSequenceIndex" titleZh="根序列索引" titleEn="Root Sequence Index"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.RootSequenceIndex"/>
+    <param name="CellType" titleZh="小区类型" titleEn="Cell Type"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EnbCellType"/>
+    <param name="PowerClass" titleZh="功率等级(*2dbm)" titleEn="Power Class (*2dbm)"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_MaxTxPowerExpanded"/>
+  </group>
+  <group id="enb-neighbor-freq" titleZh="异频邻区频点列表" titleEn="Inter-Frequency Neighbor Carrier List"
+         multiInstance="true"
+         objectPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.">
+    <param name="EARFCN" titleZh="频点" titleEn="EARFCN" leaf="EUTRACarrierARFCN"/>
+    <param name="QOffsetRange" titleZh="频点偏移" titleEn="Q-OffsetRange" leaf="QOffsetFreq"/>
+    <param name="qRxLevMinSib5" titleZh="最小接收电平" titleEn="qRxLevMinSib5" leaf="QRxLevMinSIB5"/>
+    <param name="PMax" titleZh="最大发射功率" titleEn="PMax" leaf="PMax"/>
+    <param name="tReselectionEutra" titleZh="重选定时器" titleEn="tReselectionEutra" leaf="TReselectionEUTRA"/>
+    <param name="ReselThreshHigh" titleZh="重选高门限" titleEn="Resel Thresh High" leaf="ThreshXHigh"/>
+    <param name="ReselThreshLow" titleZh="重选低门限" titleEn="Resel Thresh Low" leaf="ThreshXLow"/>
+    <param name="ReselectionPriority" titleZh="重选优先级" titleEn="Reselection Priority" leaf="CellReselectionPriority"/>
+  </group>
+  <group id="enb-neighbor-cell" titleZh="邻区列表" titleEn="Neighbor Cell List"
+         multiInstance="true"
+         objectPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.">
+    <param name="CellID" titleZh="小区ID" titleEn="Cell ID" leaf="CID"/>
+    <param name="PLMN" titleZh="PLMN" titleEn="PLMN" leaf="PLMNID"/>
+    <param name="EARFCN" titleZh="频点" titleEn="EARFCN" leaf="EUTRACarrierARFCN"/>
+    <param name="PCI" titleZh="PCI" titleEn="PCI" leaf="PhyCellID"/>
+    <param name="QOffset" titleZh="QOffset" titleEn="QOffset" leaf="QOffset"/>
+    <param name="CIO" titleZh="CIO" titleEn="CIO" leaf="CIO"/>
+  </group>
+</quickSettings>

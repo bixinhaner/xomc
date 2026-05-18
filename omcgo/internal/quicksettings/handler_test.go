@@ -1,73 +1,193 @@
 package quicksettings
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/product"
 )
 
-func setupRouter(reg *Registry) *gin.Engine {
+// ── mock fixtures ───────────────────────────────────────────────
+
+type mockDeviceLookup struct {
+	device *model.Device
+	err    error
+}
+
+func (m *mockDeviceLookup) GetDevice(_ context.Context, _ uuid.UUID) (*model.Device, error) {
+	return m.device, m.err
+}
+
+type mockProductMatcher struct {
+	result *product.MatchResult
+	err    error
+}
+
+func (m *mockProductMatcher) MatchProductClass(_ context.Context, _ string) (*product.MatchResult, error) {
+	return m.result, m.err
+}
+
+type mockPMNameLookup struct {
+	name string
+	err  error
+}
+
+func (m *mockPMNameLookup) LookupParamModelNameByID(_ context.Context, _ uuid.UUID) (string, error) {
+	return m.name, m.err
+}
+
+func setupRouter(h *Handler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	api := r.Group("/api/v1")
-	NewHandler(reg).RegisterRoutes(api)
+	h.RegisterRoutes(api)
 	return r
 }
 
-func TestHandler_GetGroups_LTE(t *testing.T) {
+// makeMatchResult 构造一个含有 ParamModelID 的 MatchResult fixture。
+func makeMatchResult(t *testing.T, productClass string, paramModelID *uuid.UUID) *product.MatchResult {
+	t.Helper()
+	return &product.MatchResult{
+		Product: &product.Product{
+			ID:           uuid.New(),
+			Name:         "TestProduct",
+			ParamModelID: paramModelID,
+		},
+		MatchedPattern: productClass,
+	}
+}
+
+// ── tests ───────────────────────────────────────────────
+
+func TestHandler_GetGroups_HappyPath(t *testing.T) {
+	pmID := uuid.New()
+	deviceID := uuid.New()
+
 	reg := NewRegistry()
-	reg.Replace(TechLTE, []Group{
+	reg.Replace("BLQ", []Group{
 		{ID: "enb-cell", TitleZh: "小区参数", Params: []Param{{Name: "ECI", StandardPath: "Device.X.CellIdentity"}}},
 	})
 
-	r := setupRouter(reg)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/quicksettings/groups?tech=lte", nil)
+	h := NewHandler(
+		reg,
+		&mockDeviceLookup{device: &model.Device{ProductClass: "FAP/mBS31001/SC"}},
+		&mockProductMatcher{result: makeMatchResult(t, "FAP/mBS31001/SC", &pmID)},
+		&mockPMNameLookup{name: "BLQ"},
+	)
+	r := setupRouter(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/quicksettings/groups?device_id="+deviceID.String(), nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp struct {
-		Groups []Group `json:"groups"`
+		ParamModel string  `json:"param_model"`
+		Groups     []Group `json:"groups"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "BLQ", resp.ParamModel)
 	require.Len(t, resp.Groups, 1)
 	assert.Equal(t, "enb-cell", resp.Groups[0].ID)
-	assert.Equal(t, "小区参数", resp.Groups[0].TitleZh)
 }
 
-func TestHandler_GetGroups_NR_Empty(t *testing.T) {
-	reg := NewRegistry()
-	r := setupRouter(reg)
+func TestHandler_GetGroups_UnknownParamModel_ReturnsEmptyGroups(t *testing.T) {
+	// quicksettings/<name>.xml 缺失场景:Registry 没该 paramModel,GetByParamModel 返空
+	pmID := uuid.New()
+	deviceID := uuid.New()
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/quicksettings/groups?tech=nr", nil)
+	reg := NewRegistry() // 不预填任何 paramModel
+	h := NewHandler(
+		reg,
+		&mockDeviceLookup{device: &model.Device{ProductClass: "Unknown-Product"}},
+		&mockProductMatcher{result: makeMatchResult(t, "Unknown-Product", &pmID)},
+		&mockPMNameLookup{name: "BM"}, // BM 的 XML 不存在
+	)
+	r := setupRouter(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/quicksettings/groups?device_id="+deviceID.String(), nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp struct {
-		Groups []Group `json:"groups"`
+		ParamModel string  `json:"param_model"`
+		Groups     []Group `json:"groups"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Len(t, resp.Groups, 0)
+	assert.Equal(t, "BM", resp.ParamModel)
+	assert.Len(t, resp.Groups, 0, "前端凭 groups.length==0 决定是否显示 tab")
 }
 
-func TestHandler_GetGroups_InvalidTech_400(t *testing.T) {
-	r := setupRouter(NewRegistry())
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/quicksettings/groups?tech=cdma", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestHandler_GetGroups_MissingTech_400(t *testing.T) {
-	r := setupRouter(NewRegistry())
+func TestHandler_GetGroups_MissingDeviceID_400(t *testing.T) {
+	h := NewHandler(NewRegistry(), &mockDeviceLookup{}, &mockProductMatcher{}, &mockPMNameLookup{})
+	r := setupRouter(h)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/quicksettings/groups", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandler_GetGroups_InvalidDeviceID_400(t *testing.T) {
+	h := NewHandler(NewRegistry(), &mockDeviceLookup{}, &mockProductMatcher{}, &mockPMNameLookup{})
+	r := setupRouter(h)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/quicksettings/groups?device_id=not-a-uuid", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandler_GetGroups_DeviceNotFound_404(t *testing.T) {
+	deviceID := uuid.New()
+	h := NewHandler(
+		NewRegistry(),
+		&mockDeviceLookup{err: errors.New("not found")},
+		&mockProductMatcher{},
+		&mockPMNameLookup{},
+	)
+	r := setupRouter(h)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/quicksettings/groups?device_id="+deviceID.String(), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestHandler_GetGroups_ProductClassUnmatched_404(t *testing.T) {
+	deviceID := uuid.New()
+	h := NewHandler(
+		NewRegistry(),
+		&mockDeviceLookup{device: &model.Device{ProductClass: "Unknown"}},
+		&mockProductMatcher{err: errors.New("orphan")},
+		&mockPMNameLookup{},
+	)
+	r := setupRouter(h)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/quicksettings/groups?device_id="+deviceID.String(), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestHandler_GetGroups_NoParamModel_422(t *testing.T) {
+	deviceID := uuid.New()
+	h := NewHandler(
+		NewRegistry(),
+		&mockDeviceLookup{device: &model.Device{ProductClass: "FAP"}},
+		&mockProductMatcher{result: makeMatchResult(t, "FAP", nil)}, // ParamModelID = nil
+		&mockPMNameLookup{},
+	)
+	r := setupRouter(h)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/quicksettings/groups?device_id="+deviceID.String(), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
 }

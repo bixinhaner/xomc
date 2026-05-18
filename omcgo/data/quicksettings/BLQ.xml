@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<quickSettings tech="lte">
+<quickSettings paramModel="BLQ">
   <group id="enb-cell" titleZh="小区参数" titleEn="Cell Parameters">
     <param name="ECI" titleZh="ECI" titleEn="ECI"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.CellIdentity"/>
