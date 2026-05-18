@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/minio/minio-go/v7"
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/backup"
@@ -24,10 +25,11 @@ import (
 // Authentication: HTTP Basic Auth with global credentials from config.
 // CPE accesses this endpoint using the URL and credentials provided in the Download SOAP RPC.
 type Handler struct {
-	minioClient *minio.Client
-	logger      *zap.Logger
-	username    string
-	password    string
+	minioClient     *minio.Client
+	logger          *zap.Logger
+	username        string
+	password        string
+	runtimeProvider transfercfg.Provider
 	// T-0072: optional metrics for on-the-fly decompression. nil-safe — Record*
 	// methods short-circuit on nil receiver, so wiring is optional.
 	metrics *DecompressMetrics
@@ -50,6 +52,10 @@ func NewHandler(minioClient *minio.Client, username, password string, logger *za
 		password:    password,
 		logger:      logger,
 	}
+}
+
+func (h *Handler) SetRuntimeProvider(provider transfercfg.Provider) {
+	h.runtimeProvider = provider
 }
 
 // SetDecompressMetrics wires Prometheus collectors for on-the-fly decompression.
@@ -85,10 +91,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate Basic Auth if configured (constant-time comparison to prevent timing attacks)
-	if h.username != "" {
+	runtimeCfg := h.currentSettings(r.Context())
+	if runtimeCfg.Username != "" {
 		username, password, ok := r.BasicAuth()
-		userMatch := subtle.ConstantTimeCompare([]byte(username), []byte(h.username)) == 1
-		passMatch := subtle.ConstantTimeCompare([]byte(password), []byte(h.password)) == 1
+		userMatch := subtle.ConstantTimeCompare([]byte(username), []byte(runtimeCfg.Username)) == 1
+		passMatch := subtle.ConstantTimeCompare([]byte(password), []byte(runtimeCfg.Password)) == 1
 		if !ok || !userMatch || !passMatch {
 			w.Header().Set("WWW-Authenticate", `Basic realm="FileDownload"`)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -273,6 +280,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			zap.Error(err),
 			zap.String("bucket", bucket),
 			zap.String("path", objectPath))
+	}
+}
+
+func (h *Handler) currentSettings(ctx context.Context) transfercfg.DownloadSettings {
+	if h.runtimeProvider != nil {
+		return h.runtimeProvider.Snapshot(ctx).Download
+	}
+	return transfercfg.DownloadSettings{
+		Username: h.username,
+		Password: h.password,
 	}
 }
 

@@ -7,6 +7,7 @@ import {
 } from 'antd';
 
 import type {
+  FirmwareLibraryFileType,
   TransferExecutionMode,
   TransferRpcType,
   TransferStepId,
@@ -75,6 +76,7 @@ export interface TaskTypeFormValues {
   fileType: string;
   fileTypeLabel: string;
   fileTypeEditable: boolean;
+  firmwareFileType?: FirmwareLibraryFileType;
   urlTemplate?: string;
   targetFileNameTemplate?: string;
   fileNameTemplate?: string;
@@ -83,6 +85,20 @@ export interface TaskTypeFormValues {
   rawMode?: string;
   delaySeconds?: number;
   transportPath?: string;
+}
+
+export const SOFTWARE_LIBRARY_FILE_TYPE_OPTIONS: Array<{ label: string; value: FirmwareLibraryFileType }> = [
+  { label: '软件主镜像', value: 0 },
+  { label: 'PATCH 补丁包', value: 1 },
+  { label: 'AP 固件', value: 5 },
+  { label: 'FPGA 文件', value: 6 },
+];
+
+export function getSoftwareLibraryFileTypeLabel(value?: FirmwareLibraryFileType) {
+  if (value === undefined) {
+    return '-';
+  }
+  return SOFTWARE_LIBRARY_FILE_TYPE_OPTIONS.find((item) => item.value === value)?.label ?? `类型 ${value}`;
 }
 
 export function renderTaskStatus(status: UnifiedFileTransferTask['status']) {
@@ -203,6 +219,9 @@ export function TransferTemplateCard({
           <Tag color={taskType.builtIn ? 'blue' : 'gold'}>{taskType.builtIn ? '内置' : '自定义'}</Tag>
           <Tag>{taskType.rpcType}</Tag>
           <Tag color="cyan">FileType {taskType.fileType}</Tag>
+          {taskType.firmwareFileType !== undefined ? (
+            <Tag color="geekblue">文件库 {getSoftwareLibraryFileTypeLabel(taskType.firmwareFileType)}</Tag>
+          ) : null}
           <Tag color={taskType.enabled ? 'green' : 'default'}>{taskType.enabled ? '已启用' : '已停用'}</Tag>
         </Space>
         <Text type="secondary">{taskType.description}</Text>

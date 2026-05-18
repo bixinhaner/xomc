@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/admin/loginpwd"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/topology"
 	"go.uber.org/zap"
 )
@@ -151,6 +152,18 @@ func initAdminModule(c *Container) error {
 			securityPolicy.InvalidateCache()
 		}
 	})
+	if c.EventBus != nil {
+		sysConfigService.RegisterSavedHook(func(ctx context.Context, category string) {
+			evt, err := event.NewEvent(event.SubjectSysConfigSaved, event.SysConfigSavedPayload{Category: category})
+			if err != nil {
+				logger.Warn("build sys config saved event", zap.String("category", category), zap.Error(err))
+				return
+			}
+			if err := c.EventBus.Publish(ctx, event.SubjectSysConfigSaved, evt); err != nil {
+				logger.Warn("publish sys config saved event", zap.String("category", category), zap.Error(err))
+			}
+		})
+	}
 
 	// 暴露到 Container 让其他模块（如 provision.PeriodicSyncPolicy）也能挂 hook。
 	c.SysConfigSvc = sysConfigService

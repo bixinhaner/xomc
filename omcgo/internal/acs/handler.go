@@ -20,6 +20,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/rpc"
 	"github.com/omcgo/omcgo/internal/acs/rpclog"
 	"github.com/omcgo/omcgo/internal/acs/stun"
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/components/logger"
 	"github.com/omcgo/omcgo/internal/core/components/redisx"
@@ -75,6 +76,7 @@ type Handler struct {
 	enableTestTaskInjection bool                      // 启用随机测试任务注入（仅测试用）
 	uploadConfig            *appconfig.UploadConfig   // 上传服务器配置，用于生成上传 URL
 	downloadConfig          *appconfig.DownloadConfig // 下载服务器配置，用于生成下载 URL
+	transferConfigProvider  transfercfg.Provider
 	// maxRPCPerSession 限制每个 TR069 会话的 RPC 交互次数。
 	// 达到上限后优雅结束会话；剩余命令留在队列中，通过会话后续唤在后续会话中下发。
 	// 0 表示不限制。建议：≤15，避免触发 CPE 的单会话交互上限。
@@ -1240,8 +1242,8 @@ func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformM
 	// Additional: if VALUE CHANGE contains ExpeditedEvent parameters, publish expedited alarm event.
 	if tr069.IsValueChange(inform.Event) && hasExpeditedEventParams(inform.ParameterList) {
 		expPayload := map[string]interface{}{
-			"device_sn":         inform.DeviceId.SerialNumber,
-			"parameter_values":  filterExpeditedEventParams(inform.ParameterList),
+			"device_sn":        inform.DeviceId.SerialNumber,
+			"parameter_values": filterExpeditedEventParams(inform.ParameterList),
 		}
 		expEvt, err := event.NewEvent(event.SubjectDeviceExpeditedAlarm, expPayload)
 		if err != nil {
@@ -1540,7 +1542,8 @@ func (h *Handler) injectRandomTestTasks(r *http.Request, deviceSN string, log *z
 // 如果 base_url 是 localhost，会替换为请求的 host。
 // 上传配置不可用时返回 nil。
 func (h *Handler) createPMUploadTask(r *http.Request, deviceSN string) *rpcTaskTemplate {
-	if h.uploadConfig == nil || h.uploadConfig.BaseURL == "" {
+	uploadCfg := h.currentUploadSettings(r.Context())
+	if uploadCfg.BaseURL == "" {
 		return nil
 	}
 
@@ -1549,7 +1552,7 @@ func (h *Handler) createPMUploadTask(r *http.Request, deviceSN string) *rpcTaskT
 	filename := fmt.Sprintf("%s_%s.xml.gz", deviceSN, timestamp)
 
 	// 获取基础 URL，如需要则将 localhost 替换为请求的 host
-	baseURL := h.uploadConfig.BaseURL
+	baseURL := uploadCfg.BaseURL
 	// if isLocalhost(baseURL) {
 	// 	// 使用请求的 host 替代 localhost
 	// 	scheme := "http"
@@ -1562,7 +1565,7 @@ func (h *Handler) createPMUploadTask(r *http.Request, deviceSN string) *rpcTaskT
 	// 构建上传 URL
 	uploadURL := fmt.Sprintf("%s%s?fileType=PM&filename=%s",
 		baseURL,
-		h.uploadConfig.Path,
+		uploadCfg.Path,
 		filename,
 	)
 
@@ -1576,9 +1579,9 @@ func (h *Handler) createPMUploadTask(r *http.Request, deviceSN string) *rpcTaskT
 		"url":           uploadURL,
 		"delay_seconds": 0,
 	}
-	if h.uploadConfig.Username != "" {
-		params["username"] = h.uploadConfig.Username
-		params["password"] = h.uploadConfig.Password
+	if uploadCfg.Username != "" {
+		params["username"] = uploadCfg.Username
+		params["password"] = uploadCfg.Password
 	}
 
 	paramsJSON, err := json.Marshal(params)
@@ -1590,6 +1593,22 @@ func (h *Handler) createPMUploadTask(r *http.Request, deviceSN string) *rpcTaskT
 		method:   "Upload",
 		params:   json.RawMessage(paramsJSON),
 		priority: 10,
+	}
+}
+
+func (h *Handler) currentUploadSettings(ctx context.Context) transfercfg.UploadSettings {
+	if h.transferConfigProvider != nil {
+		return h.transferConfigProvider.Snapshot(ctx).Upload
+	}
+	if h.uploadConfig == nil {
+		return transfercfg.UploadSettings{}
+	}
+	return transfercfg.UploadSettings{
+		BaseURL:     strings.TrimRight(strings.TrimSpace(h.uploadConfig.BaseURL), "/"),
+		Path:        h.uploadConfig.Path,
+		Username:    h.uploadConfig.Username,
+		Password:    h.uploadConfig.Password,
+		MaxFileSize: h.uploadConfig.MaxFileSize,
 	}
 }
 

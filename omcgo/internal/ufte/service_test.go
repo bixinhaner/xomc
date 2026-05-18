@@ -124,6 +124,12 @@ func TestBuiltInTaskTypes_CoversRequiredTemplates(t *testing.T) {
 	assert.Equal(t, "1 Firmware Upgrade Image", seen["ENB_IMG_UPGRADE"].FileType)
 	assert.Equal(t, "X {OUI} Software Upgrade Patch", seen["ENB_PATCH_UPGRADE"].FileType)
 	assert.Equal(t, "Firmware Upgrade Fpga", seen["ENB_FPGA_UPGRADE"].FileType)
+	require.NotNil(t, seen["ENB_IMG_UPGRADE"].FirmwareFileType)
+	assert.Equal(t, software.FileTypeIMG, *seen["ENB_IMG_UPGRADE"].FirmwareFileType)
+	require.NotNil(t, seen["ENB_PATCH_UPGRADE"].FirmwareFileType)
+	assert.Equal(t, software.FileTypePATCH, *seen["ENB_PATCH_UPGRADE"].FirmwareFileType)
+	require.NotNil(t, seen["ENB_FPGA_UPGRADE"].FirmwareFileType)
+	assert.Equal(t, software.FileTypeFPGA, *seen["ENB_FPGA_UPGRADE"].FirmwareFileType)
 	_, has5GFpga := seen["GNB_FPGA_UPGRADE"]
 	assert.False(t, has5GFpga)
 }
@@ -132,20 +138,21 @@ func TestService_LoadTaskTypeCatalog_UsesStoredRowsAsSourceOfTruth(t *testing.T)
 	repo := &ensureBuiltInTaskTypeRepo{
 		items: []TaskType{
 			{
-				TypeCode:       "ENB_IMG_UPGRADE",
-				Category:       "enb_upgrade",
-				CategoryLabel:  "4G升级",
-				DisplayName:    "库里的 4G 升级模板",
-				Description:    "from db",
-				RPCType:        "DOWNLOAD",
-				BuiltIn:        true,
-				Enabled:        true,
-				StepChain:      []string{"CHECK_PERMISSION", "SEND_RPC"},
-				PermissionCode: "CODE_ENB_UPGRADE_IMAGE",
-				PlatformScope:  []string{"4G eNB"},
-				FileType:       "1 Firmware Upgrade Image",
-				FileTypeLabel:  "1 Firmware Upgrade Image",
-				LastEditor:     "system",
+				TypeCode:         "ENB_IMG_UPGRADE",
+				Category:         "enb_upgrade",
+				CategoryLabel:    "4G升级",
+				DisplayName:      "库里的 4G 升级模板",
+				Description:      "from db",
+				RPCType:          "DOWNLOAD",
+				BuiltIn:          true,
+				Enabled:          true,
+				StepChain:        []string{"CHECK_PERMISSION", "SEND_RPC"},
+				PermissionCode:   "CODE_ENB_UPGRADE_IMAGE",
+				PlatformScope:    []string{"4G eNB"},
+				FileType:         "1 Firmware Upgrade Image",
+				FileTypeLabel:    "1 Firmware Upgrade Image",
+				FirmwareFileType: firmwareFileTypePtr(software.FileTypeIMG),
+				LastEditor:       "system",
 			},
 			{
 				TypeCode:       "CUSTOM_UPLOAD_SAMPLE",
@@ -176,12 +183,52 @@ func TestService_LoadTaskTypeCatalog_UsesStoredRowsAsSourceOfTruth(t *testing.T)
 	assert.Equal(t, "库里的 4G 升级模板", first.DisplayName)
 	assert.Equal(t, software.TaskTypeUpgrade, first.softwareTaskType)
 	require.NotNil(t, first.techHint)
+	require.NotNil(t, first.FirmwareFileType)
+	assert.Equal(t, software.FileTypeIMG, *first.FirmwareFileType)
 
 	custom, ok := findTaskTypeByCode(catalog, "CUSTOM_UPLOAD_SAMPLE")
 	require.True(t, ok)
 	assert.Equal(t, "自定义上传模板", custom.DisplayName)
 	assert.Zero(t, custom.softwareTaskType)
 	assert.Nil(t, custom.techHint)
+}
+
+func TestMaterializeTaskTypes_FillsMissingFirmwareFileType(t *testing.T) {
+	catalog := materializeTaskTypes([]TaskType{
+		{
+			TypeCode:      "ENB_PATCH_UPGRADE",
+			Category:      "enb_upgrade",
+			CategoryLabel: "4G升级",
+			DisplayName:   "库里的补丁模板",
+			RPCType:       "DOWNLOAD",
+			BuiltIn:       true,
+			Enabled:       true,
+			StepChain:     []string{"SEND_RPC"},
+			PlatformScope: []string{"QAFA"},
+			FileType:      "X {OUI} Software Upgrade Patch",
+		},
+		{
+			TypeCode:      "CUSTOM_IMG_TEMPLATE",
+			Category:      "enb_upgrade",
+			CategoryLabel: "4G升级",
+			DisplayName:   "自定义镜像模板",
+			RPCType:       "DOWNLOAD",
+			Enabled:       true,
+			StepChain:     []string{"SEND_RPC"},
+			PlatformScope: []string{"QAFA"},
+			FileType:      "1 Firmware Upgrade Image",
+		},
+	})
+
+	patch, ok := findTaskTypeByCode(catalog, "ENB_PATCH_UPGRADE")
+	require.True(t, ok)
+	require.NotNil(t, patch.FirmwareFileType)
+	assert.Equal(t, software.FileTypePATCH, *patch.FirmwareFileType)
+
+	custom, ok := findTaskTypeByCode(catalog, "CUSTOM_IMG_TEMPLATE")
+	require.True(t, ok)
+	require.NotNil(t, custom.FirmwareFileType)
+	assert.Equal(t, software.FileTypeIMG, *custom.FirmwareFileType)
 }
 
 func TestNormalizeTaskTypeFileType_DownloadTemplatesUseFinalCWMPString(t *testing.T) {

@@ -42,7 +42,7 @@ import { useSoftwareVersions } from '@core/hooks/api/useSoftware';
 import type { SoftwareVersion } from '@core/mock/data/software';
 import type {
   CreateUnifiedFileTransferTaskInput,
-  TransferStepId,
+  FirmwareLibraryFileType,
   UnifiedFileTransferDeviceItem,
   UnifiedFileTransferTask,
   UnifiedFileTransferTaskType,
@@ -50,6 +50,7 @@ import type {
 import {
   buildCategoryTabs,
   EXECUTION_MODE_OPTIONS,
+  getSoftwareLibraryFileTypeLabel,
   renderDeviceStatus,
   renderTaskStatus,
   STEP_LABELS,
@@ -89,14 +90,7 @@ function needsFirmwareSelection(taskType?: UnifiedFileTransferTaskType) {
   return Boolean(taskType && taskType.rpcType === 'DOWNLOAD' && isUpgradeTaskCategory(taskType.category));
 }
 
-function buildFirmwareCandidateList(
-  versions: SoftwareVersion[],
-  taskType?: UnifiedFileTransferTaskType,
-) {
-  if (!taskType) {
-    return versions;
-  }
-
+function buildFirmwareCandidateList(versions: SoftwareVersion[]) {
   const sorted = [...versions].sort((left, right) => {
     if (left.recommend !== right.recommend) {
       return left.recommend ? -1 : 1;
@@ -108,37 +102,24 @@ function buildFirmwareCandidateList(
     return right.releaseDate.localeCompare(left.releaseDate);
   });
 
-  const haystack = (version: SoftwareVersion) =>
-    `${version.deviceType} ${version.versionName} ${version.versionCode} ${version.fileName}`.toLowerCase();
+  return sorted;
+}
 
-  const primaryKeyword = taskType.category === 'gnb_upgrade'
-    ? 'gnb'
-    : taskType.category === 'enb_upgrade'
-      ? 'enb'
-      : '';
-
-  let filtered = sorted;
-  if (primaryKeyword) {
-    const matched = sorted.filter((item) => haystack(item).includes(primaryKeyword));
-    if (matched.length > 0) {
-      filtered = matched;
-    }
+function resolveFirmwareLibraryFileType(taskType?: UnifiedFileTransferTaskType): FirmwareLibraryFileType | undefined {
+  if (taskType?.firmwareFileType !== undefined) {
+    return taskType.firmwareFileType;
   }
-
-  const displayName = `${taskType.displayName} ${taskType.fileTypeLabel}`.toLowerCase();
-  const subtypeKeyword = displayName.includes('fpga')
-    ? 'fpga'
-    : displayName.includes('patch')
-      ? 'patch'
-      : '';
-  if (subtypeKeyword) {
-    const matched = filtered.filter((item) => haystack(item).includes(subtypeKeyword));
-    if (matched.length > 0) {
-      filtered = matched;
-    }
+  const haystack = `${taskType?.typeCode ?? ''} ${taskType?.displayName ?? ''} ${taskType?.fileType ?? ''} ${taskType?.fileTypeLabel ?? ''}`.toLowerCase();
+  if (haystack.includes('fpga')) {
+    return 6;
   }
-
-  return filtered;
+  if (haystack.includes('patch')) {
+    return 1;
+  }
+  if (taskType && isUpgradeTaskCategory(taskType.category)) {
+    return 0;
+  }
+  return undefined;
 }
 
 function getUpgradeTypeLabel(category: string, fallback: string) {
@@ -156,7 +137,6 @@ export default function FileTransferCenter() {
   const t = useT();
   const { data: taskTypes = [], isLoading: taskTypesLoading } = useUnifiedFileTransferTaskTypes();
   const { data: productClasses = [] } = useProductClasses();
-  const { data: firmwareData } = useSoftwareVersions({ page: 1, pageSize: 200 });
   const categories = useMemo(() => buildCategoryTabs(taskTypes), [taskTypes]);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedTypeCode, setSelectedTypeCode] = useState('');
@@ -228,6 +208,12 @@ export default function FileTransferCenter() {
     () => taskTypes.find((item) => item.typeCode === drawerTypeCode) ?? activeTaskType,
     [activeTaskType, drawerTypeCode, taskTypes],
   );
+  const firmwareLibraryFileType = resolveFirmwareLibraryFileType(drawerTaskType);
+  const { data: firmwareData } = useSoftwareVersions({
+    page: 1,
+    pageSize: 200,
+    fileType: firmwareLibraryFileType,
+  });
 
   const createExecutionModeOptions = useMemo(
     () => EXECUTION_MODE_OPTIONS.filter((item) => item.value !== 'scheduled'),
@@ -246,8 +232,8 @@ export default function FileTransferCenter() {
   const drawerDeviceCandidates = drawerDevicesData?.items ?? [];
 
   const firmwareCandidates = useMemo(
-    () => buildFirmwareCandidateList(firmwareData?.items ?? [], drawerTaskType),
-    [drawerTaskType, firmwareData?.items],
+    () => buildFirmwareCandidateList(firmwareData?.items ?? []),
+    [firmwareData?.items],
   );
 
   const drawerProductTypeOptions = useMemo(() => {
@@ -1016,9 +1002,12 @@ export default function FileTransferCenter() {
                 name="firmwareId"
                 rules={[{ required: true, message: '请选择升级文件' }]}
                 extra={(
-                  <Button type="link" style={{ paddingInline: 0 }} onClick={() => navigate('/software/firmware')}>
-                    维护升级文件
-                  </Button>
+                  <Space direction="vertical" size={0}>
+                    <Text type="secondary">当前模板查询的软件库分类：{getSoftwareLibraryFileTypeLabel(firmwareLibraryFileType)}</Text>
+                    <Button type="link" style={{ paddingInline: 0 }} onClick={() => navigate('/software/firmware')}>
+                      维护升级文件
+                    </Button>
+                  </Space>
                 )}
               >
                 <Select
@@ -1030,7 +1019,7 @@ export default function FileTransferCenter() {
                       ? '请先选择产品类型'
                       : firmwareOptions.length > 0
                         ? '请选择升级文件'
-                        : '暂无可用升级文件，请先到软件管理上传'
+                        : `暂无可用${getSoftwareLibraryFileTypeLabel(firmwareLibraryFileType)}，请先到软件管理对应分类上传`
                   }
                   options={firmwareOptions}
                   optionFilterProp="label"

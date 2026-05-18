@@ -42,6 +42,8 @@ import type {
 import {
   buildCategoryPayload,
   buildCategoryTabs,
+  getSoftwareLibraryFileTypeLabel,
+  SOFTWARE_LIBRARY_FILE_TYPE_OPTIONS,
   STEP_LABELS,
   TransferTemplateCard,
   TYPE_DRAWER_DEFAULT_STEPS,
@@ -63,6 +65,7 @@ export default function TemplateDefinitionManagement() {
   const [typeDrawerOpen, setTypeDrawerOpen] = useState(false);
   const [editingType, setEditingType] = useState<UnifiedFileTransferTaskType | null>(null);
   const [typeForm] = Form.useForm<TaskTypeFormValues>();
+  const formRpcType = Form.useWatch('rpcType', typeForm);
 
   const createTaskTypeMutation = useCreateUnifiedFileTransferTaskType();
   const updateTaskTypeMutation = useUpdateUnifiedFileTransferTaskType();
@@ -142,6 +145,7 @@ export default function TemplateDefinitionManagement() {
         platformScope: record.platformScope,
         fileType: record.fileType,
         fileTypeEditable: record.fileTypeEditable,
+        firmwareFileType: record.firmwareFileType,
         delaySeconds: record.delaySeconds,
       });
     } else {
@@ -152,6 +156,7 @@ export default function TemplateDefinitionManagement() {
         enabled: true,
         platformScope: [],
         fileTypeEditable: true,
+        firmwareFileType: undefined,
         delaySeconds: 0,
         stepChain: TYPE_DRAWER_DEFAULT_STEPS,
       });
@@ -175,6 +180,7 @@ export default function TemplateDefinitionManagement() {
       fileType: values.fileType,
       fileTypeLabel: values.fileType,
       fileTypeEditable: values.fileTypeEditable,
+      firmwareFileType: values.firmwareFileType,
       urlTemplate: editingType?.urlTemplate,
       targetFileNameTemplate: editingType?.targetFileNameTemplate,
       fileNameTemplate: editingType?.fileNameTemplate,
@@ -338,6 +344,7 @@ export default function TemplateDefinitionManagement() {
               <Descriptions.Item label="类型编码">{detailType.typeCode}</Descriptions.Item>
               <Descriptions.Item label="RPC 类型">{detailType.rpcType}</Descriptions.Item>
               <Descriptions.Item label="FileType">{detailType.fileType}</Descriptions.Item>
+              <Descriptions.Item label="软件库分类">{getSoftwareLibraryFileTypeLabel(detailType.firmwareFileType)}</Descriptions.Item>
               <Descriptions.Item label="权限编码">{detailType.permissionCode}</Descriptions.Item>
               <Descriptions.Item label="平台范围">{detailType.platformScope.join(' / ')}</Descriptions.Item>
               <Descriptions.Item label="最近编辑人">{detailType.lastEditor}</Descriptions.Item>
@@ -437,6 +444,14 @@ export default function TemplateDefinitionManagement() {
           </Form.Item>
           <Form.Item label="FileType" name="fileType" rules={[{ required: true, message: '请输入 FileType' }]}> 
                 <Input placeholder="例如：1 Firmware Upgrade Image / 3 Vendor Configuration File / Firmware Upgrade Fpga" />
+          </Form.Item>
+          <Form.Item label="软件库分类" name="firmwareFileType" extra={formRpcType === 'DOWNLOAD' ? '用于关联软件管理中的镜像/PATCH/FPGA 文件分类，避免按文件名猜测。' : '仅 DOWNLOAD 模板需要配置；其他 RPC 类型会忽略该值。'}>
+            <Select
+              allowClear
+              placeholder={formRpcType === 'DOWNLOAD' ? '请选择软件库分类' : '当前 RPC 类型无需配置'}
+              options={SOFTWARE_LIBRARY_FILE_TYPE_OPTIONS}
+              disabled={formRpcType !== 'DOWNLOAD'}
+            />
           </Form.Item>
           <Form.Item label="DelaySeconds" name="delaySeconds">
             <InputNumber min={0} max={86400} style={{ width: '100%' }} />

@@ -1,10 +1,12 @@
 package rpc
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/pkg/soap"
 )
 
@@ -20,10 +22,11 @@ type Dispatcher struct {
 
 // DispatcherConfig holds optional configuration for the RPC dispatcher.
 type DispatcherConfig struct {
-	DownloadBaseURL string // Download server base URL, e.g. "http://localhost:8080"
-	DownloadPath    string // Download path prefix, e.g. "/smallcell/FileDownloadService"
-	DownloadUser    string // Download HTTP Basic Auth username
-	DownloadPass    string // Download HTTP Basic Auth password
+	DownloadBaseURL        string // Download server base URL, e.g. "http://localhost:8080"
+	DownloadPath           string // Download path prefix, e.g. "/smallcell/FileDownloadService"
+	DownloadUser           string // Download HTTP Basic Auth username
+	DownloadPass           string // Download HTTP Basic Auth password
+	TransferConfigProvider transfercfg.Provider
 }
 
 // NewDispatcher creates a new RPC dispatcher with all standard handlers registered.
@@ -47,6 +50,7 @@ func NewDispatcher(cfgs ...DispatcherConfig) *Dispatcher {
 		DownloadPath:    cfg.DownloadPath,
 		DownloadUser:    cfg.DownloadUser,
 		DownloadPass:    cfg.DownloadPass,
+		ConfigProvider:  cfg.TransferConfigProvider,
 	})
 	d.Register("Upload", &UploadHandler{})
 	d.Register("Reboot", &RebootHandler{})
@@ -177,6 +181,7 @@ type DownloadHandler struct {
 	DownloadPath    string // e.g. "/smallcell/FileDownloadService"
 	DownloadUser    string // HTTP Basic Auth credentials injected into download URL
 	DownloadPass    string
+	ConfigProvider  transfercfg.Provider
 }
 
 func (h *DownloadHandler) BuildRequest(cmd *Command) ([]byte, error) {
@@ -191,18 +196,31 @@ func (h *DownloadHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	// Plain path (no "://" scheme) is treated as MinIO bucket/object path:
 	//   firmware/v2.0.bin → {BaseURL}{Path}/firmware/v2.0.bin
 	// URLs with a scheme (http://, https://, ftp://) are passed through unchanged.
-	if h.DownloadBaseURL != "" && params.URL != "" && !strings.Contains(params.URL, "://") {
-		params.URL = strings.TrimRight(h.DownloadBaseURL, "/") + h.DownloadPath + "/" + params.URL
+	current := h.currentSettings()
+	if current.BaseURL != "" && params.URL != "" && !strings.Contains(params.URL, "://") {
+		params.URL = strings.TrimRight(current.BaseURL, "/") + current.Path + "/" + params.URL
 		// Inject download credentials if not already set
-		if params.Username == "" && h.DownloadUser != "" {
-			params.Username = h.DownloadUser
+		if params.Username == "" && current.Username != "" {
+			params.Username = current.Username
 		}
-		if params.Password == "" && h.DownloadPass != "" {
-			params.Password = h.DownloadPass
+		if params.Password == "" && current.Password != "" {
+			params.Password = current.Password
 		}
 	}
 
 	return soap.RenderResponse(soap.DownloadTmpl, params)
+}
+
+func (h *DownloadHandler) currentSettings() transfercfg.DownloadSettings {
+	if h.ConfigProvider != nil {
+		return h.ConfigProvider.Snapshot(context.Background()).Download
+	}
+	return transfercfg.DownloadSettings{
+		BaseURL:  h.DownloadBaseURL,
+		Path:     h.DownloadPath,
+		Username: h.DownloadUser,
+		Password: h.DownloadPass,
+	}
 }
 
 type UploadHandler struct{}

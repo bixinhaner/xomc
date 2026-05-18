@@ -111,6 +111,12 @@ const (
 	// 订阅者：所有运行 CasbinAuthorizer 的进程（app / 未来拆分到 acs/worker
 	// 的 RBAC 实例）。
 	SubjectSysCasbinPolicyReload = "sys.casbin.policy.reload"
+
+	// SubjectSysConfigSaved is published after sys_configs BatchUpsert commits.
+	// Payload: SysConfigSavedPayload{Category}.
+	// 发布者：app 进程的 sys_config 保存 wiring；
+	// 订阅者：需要立即失效本地运行时配置缓存的各部署单元。
+	SubjectSysConfigSaved = "sys.config.saved"
 )
 
 // Command 请求型事件的 Subject 常量已移除（2026-04-22）：

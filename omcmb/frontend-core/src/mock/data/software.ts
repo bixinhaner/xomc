@@ -10,7 +10,7 @@ export type SubTaskStatusType = 'pending' | 'downloading' | 'rebooting' | 'verif
 // Task type (maps to backend TaskType)
 export type TaskTypeValue = 1 | 2 | 4 | 6 | 8;
 // File type (maps to backend FileType)
-export type FileTypeValue = 0 | 1 | 6;
+export type FileTypeValue = 0 | 1 | 5 | 6;
 
 export interface SoftwareVersion {
   id: string;

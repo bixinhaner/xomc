@@ -20,33 +20,34 @@ type Overview struct {
 }
 
 type TaskType struct {
-	TypeCode               string   `json:"typeCode"`
-	Category               string   `json:"category"`
-	CategoryLabel          string   `json:"categoryLabel"`
-	DisplayName            string   `json:"displayName"`
-	Description            string   `json:"description"`
-	RPCType                string   `json:"rpcType"`
-	BuiltIn                bool     `json:"builtIn"`
-	Enabled                bool     `json:"enabled"`
-	StepChain              []string `json:"stepChain"`
-	PostTCEventCode        string   `json:"postTcEventCode,omitempty"`
-	PermissionCode         string   `json:"permissionCode"`
-	PlatformScope          []string `json:"platformScope"`
-	FileType               string   `json:"fileType"`
-	FileTypeLabel          string   `json:"fileTypeLabel"`
-	FileTypeEditable       bool     `json:"fileTypeEditable"`
-	URLTemplate            string   `json:"urlTemplate,omitempty"`
-	TargetFileNameTemplate string   `json:"targetFileNameTemplate,omitempty"`
-	FileNameTemplate       string   `json:"fileNameTemplate,omitempty"`
-	FileSizeField          string   `json:"fileSizeField,omitempty"`
-	ChecksumField          string   `json:"checksumField,omitempty"`
-	RawMode                string   `json:"rawMode,omitempty"`
-	DelaySeconds           int      `json:"delaySeconds,omitempty"`
-	TransportPath          string   `json:"transportPath,omitempty"`
-	LastEditor             string   `json:"lastEditor"`
-	TaskCount30d           int      `json:"taskCount30d"`
-	SuccessRate30d         float64  `json:"successRate30d"`
-	UpdatedAt              string   `json:"updatedAt"`
+	TypeCode               string             `json:"typeCode"`
+	Category               string             `json:"category"`
+	CategoryLabel          string             `json:"categoryLabel"`
+	DisplayName            string             `json:"displayName"`
+	Description            string             `json:"description"`
+	RPCType                string             `json:"rpcType"`
+	BuiltIn                bool               `json:"builtIn"`
+	Enabled                bool               `json:"enabled"`
+	StepChain              []string           `json:"stepChain"`
+	PostTCEventCode        string             `json:"postTcEventCode,omitempty"`
+	PermissionCode         string             `json:"permissionCode"`
+	PlatformScope          []string           `json:"platformScope"`
+	FileType               string             `json:"fileType"`
+	FileTypeLabel          string             `json:"fileTypeLabel"`
+	FileTypeEditable       bool               `json:"fileTypeEditable"`
+	FirmwareFileType       *software.FileType `json:"firmwareFileType,omitempty"`
+	URLTemplate            string             `json:"urlTemplate,omitempty"`
+	TargetFileNameTemplate string             `json:"targetFileNameTemplate,omitempty"`
+	FileNameTemplate       string             `json:"fileNameTemplate,omitempty"`
+	FileSizeField          string             `json:"fileSizeField,omitempty"`
+	ChecksumField          string             `json:"checksumField,omitempty"`
+	RawMode                string             `json:"rawMode,omitempty"`
+	DelaySeconds           int                `json:"delaySeconds,omitempty"`
+	TransportPath          string             `json:"transportPath,omitempty"`
+	LastEditor             string             `json:"lastEditor"`
+	TaskCount30d           int                `json:"taskCount30d"`
+	SuccessRate30d         float64            `json:"successRate30d"`
+	UpdatedAt              string             `json:"updatedAt"`
 
 	softwareTaskType software.TaskType
 	techHint         *coremodel.Technology
@@ -111,26 +112,27 @@ type CreateTaskRequest struct {
 }
 
 type TaskTypeWriteRequest struct {
-	Category               string   `json:"category" binding:"required"`
-	CategoryLabel          string   `json:"categoryLabel" binding:"required"`
-	DisplayName            string   `json:"displayName" binding:"required"`
-	Description            string   `json:"description"`
-	RPCType                string   `json:"rpcType" binding:"required"`
-	StepChain              []string `json:"stepChain" binding:"required,min=1"`
-	PostTCEventCode        string   `json:"postTcEventCode"`
-	Enabled                bool     `json:"enabled"`
-	PlatformScope          []string `json:"platformScope"`
-	FileType               string   `json:"fileType" binding:"required"`
-	FileTypeLabel          string   `json:"fileTypeLabel" binding:"required"`
-	FileTypeEditable       bool     `json:"fileTypeEditable"`
-	URLTemplate            string   `json:"urlTemplate"`
-	TargetFileNameTemplate string   `json:"targetFileNameTemplate"`
-	FileNameTemplate       string   `json:"fileNameTemplate"`
-	FileSizeField          string   `json:"fileSizeField"`
-	ChecksumField          string   `json:"checksumField"`
-	RawMode                string   `json:"rawMode"`
-	DelaySeconds           int      `json:"delaySeconds"`
-	TransportPath          string   `json:"transportPath"`
+	Category               string             `json:"category" binding:"required"`
+	CategoryLabel          string             `json:"categoryLabel" binding:"required"`
+	DisplayName            string             `json:"displayName" binding:"required"`
+	Description            string             `json:"description"`
+	RPCType                string             `json:"rpcType" binding:"required"`
+	StepChain              []string           `json:"stepChain" binding:"required,min=1"`
+	PostTCEventCode        string             `json:"postTcEventCode"`
+	Enabled                bool               `json:"enabled"`
+	PlatformScope          []string           `json:"platformScope"`
+	FileType               string             `json:"fileType" binding:"required"`
+	FileTypeLabel          string             `json:"fileTypeLabel" binding:"required"`
+	FileTypeEditable       bool               `json:"fileTypeEditable"`
+	FirmwareFileType       *software.FileType `json:"firmwareFileType,omitempty"`
+	URLTemplate            string             `json:"urlTemplate"`
+	TargetFileNameTemplate string             `json:"targetFileNameTemplate"`
+	FileNameTemplate       string             `json:"fileNameTemplate"`
+	FileSizeField          string             `json:"fileSizeField"`
+	ChecksumField          string             `json:"checksumField"`
+	RawMode                string             `json:"rawMode"`
+	DelaySeconds           int                `json:"delaySeconds"`
+	TransportPath          string             `json:"transportPath"`
 }
 
 type TaskListFilter struct {
@@ -181,6 +183,7 @@ func builtInTaskTypes() []TaskType {
 			FileType:               "1 Firmware Upgrade Image",
 			FileTypeLabel:          "1 Firmware Upgrade Image",
 			FileTypeEditable:       true,
+			FirmwareFileType:       firmwareFileTypePtr(software.FileTypeIMG),
 			URLTemplate:            "firmware/{minio_path}",
 			TargetFileNameTemplate: "{firmware_name}",
 			FileNameTemplate:       "{firmware_name}",
@@ -208,6 +211,7 @@ func builtInTaskTypes() []TaskType {
 			FileType:               "X {OUI} Software Upgrade Patch",
 			FileTypeLabel:          "X {OUI} Software Upgrade Patch",
 			FileTypeEditable:       true,
+			FirmwareFileType:       firmwareFileTypePtr(software.FileTypePATCH),
 			URLTemplate:            "firmware/{patch_path}",
 			TargetFileNameTemplate: "{patch_name}",
 			FileNameTemplate:       "{patch_name}",
@@ -235,6 +239,7 @@ func builtInTaskTypes() []TaskType {
 			FileType:               "Firmware Upgrade Fpga",
 			FileTypeLabel:          "Firmware Upgrade Fpga",
 			FileTypeEditable:       true,
+			FirmwareFileType:       firmwareFileTypePtr(software.FileTypeFPGA),
 			URLTemplate:            "firmware/{fpga_path}",
 			TargetFileNameTemplate: "{fpga_name}",
 			FileNameTemplate:       "{fpga_name}",
@@ -263,6 +268,7 @@ func builtInTaskTypes() []TaskType {
 			FileType:               "1 Firmware Upgrade Image",
 			FileTypeLabel:          "1 Firmware Upgrade Image",
 			FileTypeEditable:       true,
+			FirmwareFileType:       firmwareFileTypePtr(software.FileTypeIMG),
 			URLTemplate:            "firmware/{minio_path}",
 			TargetFileNameTemplate: "{firmware_name}",
 			FileNameTemplate:       "{firmware_name}",
@@ -536,16 +542,25 @@ func materializeTaskTypes(stored []TaskType) []TaskType {
 	for _, item := range stored {
 		item.StepChain = normalizeStringSlice(item.StepChain)
 		item.PlatformScope = normalizeStringSlice(item.PlatformScope)
+		item.FirmwareFileType = normalizeTaskTypeFirmwareFileType(item.RPCType, item.FirmwareFileType, item.FileType)
 		if base, ok := defaultByCode[item.TypeCode]; ok {
 			item.BuiltIn = item.BuiltIn || base.BuiltIn
 			item.softwareTaskType = base.softwareTaskType
 			item.techHint = base.techHint
 			item.RPCType = base.RPCType
 			item.StepChain = base.StepChain
+			if item.FirmwareFileType == nil && base.FirmwareFileType != nil {
+				item.FirmwareFileType = firmwareFileTypePtr(*base.FirmwareFileType)
+			}
 		}
 		result = append(result, item)
 	}
 	return result
+}
+
+func firmwareFileTypePtr(value software.FileType) *software.FileType {
+	copyValue := value
+	return &copyValue
 }
 
 func taskTypeFilterKeys(catalog []TaskType, filter TaskListFilter) (map[software.TaskType]struct{}, error) {

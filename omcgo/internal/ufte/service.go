@@ -734,6 +734,7 @@ func taskTypeFromWriteRequest(typeCode, permissionCode string, builtIn bool, req
 	updatedAt := formatTime(time.Now())
 	rpcType := strings.TrimSpace(req.RPCType)
 	fileType := normalizeTaskTypeFileType(rpcType, strings.TrimSpace(req.FileType))
+	firmwareFileType := normalizeTaskTypeFirmwareFileType(rpcType, req.FirmwareFileType, fileType)
 	fileTypeLabel := strings.TrimSpace(req.FileTypeLabel)
 	if fileTypeLabel == "" || fileTypeLabel == strings.TrimSpace(req.FileType) {
 		fileTypeLabel = fileType
@@ -754,6 +755,7 @@ func taskTypeFromWriteRequest(typeCode, permissionCode string, builtIn bool, req
 		FileType:               fileType,
 		FileTypeLabel:          fileTypeLabel,
 		FileTypeEditable:       req.FileTypeEditable,
+		FirmwareFileType:       firmwareFileType,
 		URLTemplate:            strings.TrimSpace(req.URLTemplate),
 		TargetFileNameTemplate: strings.TrimSpace(req.TargetFileNameTemplate),
 		FileNameTemplate:       strings.TrimSpace(req.FileNameTemplate),
@@ -785,5 +787,34 @@ func normalizeTaskTypeFileType(rpcType, fileType string) string {
 		return "103 Base Station Startup File"
 	default:
 		return fileType
+	}
+}
+
+func normalizeTaskTypeFirmwareFileType(rpcType string, firmwareFileType *software.FileType, fileType string) *software.FileType {
+	if strings.ToUpper(strings.TrimSpace(rpcType)) != "DOWNLOAD" {
+		return nil
+	}
+	if firmwareFileType != nil {
+		if *firmwareFileType < 0 {
+			return nil
+		}
+		return firmwareFileTypePtr(*firmwareFileType)
+	}
+	return inferTaskTypeFirmwareFileType(fileType)
+}
+
+func inferTaskTypeFirmwareFileType(fileType string) *software.FileType {
+	normalized := strings.ToUpper(strings.TrimSpace(fileType))
+	switch {
+	case normalized == "":
+		return nil
+	case strings.Contains(normalized, "FPGA"):
+		return firmwareFileTypePtr(software.FileTypeFPGA)
+	case strings.Contains(normalized, "PATCH"):
+		return firmwareFileTypePtr(software.FileTypePATCH)
+	case strings.HasPrefix(normalized, "1 "), normalized == "1", strings.Contains(normalized, "FIRMWARE UPGRADE IMAGE"):
+		return firmwareFileTypePtr(software.FileTypeIMG)
+	default:
+		return nil
 	}
 }

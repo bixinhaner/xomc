@@ -17,12 +17,15 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/download"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
 	"github.com/omcgo/omcgo/internal/acs/stun"
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/acs/upload"
+	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/components"
 	"github.com/omcgo/omcgo/internal/core/components/logger"
 	miniocomp "github.com/omcgo/omcgo/internal/core/components/minio"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/health"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/trace"
@@ -106,16 +109,27 @@ func runACS(cmd *cobra.Command, args []string) error {
 	// （未配 PG/MinIO）下误报。检查列表与 components.HealthChecker.Register 同源，
 	// 但这里独立组装是为了让 ACS HTTP server（非 metrics 端口）也能直接探测。
 	deps.ReadinessCheckers = buildACSReadinessCheckers(inf)
-
-	// Override dispatcher with download config for MinIO path → HTTP URL translation.
-	if cfg.Download.BaseURL != "" {
-		deps.RPCDispatcher = rpc.NewDispatcher(rpc.DispatcherConfig{
-			DownloadBaseURL: cfg.Download.BaseURL,
-			DownloadPath:    cfg.Download.Path,
-			DownloadUser:    cfg.Download.Username,
-			DownloadPass:    cfg.Download.Password,
-		})
+	transferPolicy := transfercfg.NewPolicy(
+		transfercfg.DefaultsFromACSConfig(cfg),
+		newTransferSysConfigLookup(admin.NewPgSysConfigRepository(inf.PgPool)),
+	)
+	deps.TransferConfigProvider = transferPolicy
+	if inf.EventBus != nil {
+		sub, err := inf.EventBus.Subscribe(
+			event.SubjectSysConfigSaved,
+			transfercfg.HandleSysConfigSavedEvent(transferPolicy, inf.Logger.Named("transfercfg")),
+		)
+		if err != nil {
+			inf.Logger.Warn("subscribe sys config saved events for transfer config", zap.Error(err))
+		} else {
+			inf.GS.Register("transfercfg-sysconfig-sub", 1, func(ctx context.Context) error {
+				_ = ctx
+				return sub.Unsubscribe()
+			})
+		}
 	}
+
+	deps.RPCDispatcher = rpc.NewDispatcher(rpc.DispatcherConfig{TransferConfigProvider: transferPolicy})
 
 	// Setup upload handler for CPE file upload (PM/MR/DataModel files).
 	if inf.MinIO != nil {
@@ -131,6 +145,7 @@ func runACS(cmd *cobra.Command, args []string) error {
 			cfg.Upload.Username, cfg.Upload.Password,
 			inf.EventBus, inf.Logger,
 		)
+		uploadHandler.SetRuntimeProvider(transferPolicy)
 		// T-0074: enable streaming compression for FileTypeConfig backup uploads.
 		// PolicyGetter pulls live policy from PG; metrics track ratio/duration.
 		// Both args are nil-safe — PolicyService.Get always returns DefaultPolicy
@@ -175,6 +190,7 @@ func runACS(cmd *cobra.Command, args []string) error {
 			cfg.Download.Username, cfg.Download.Password,
 			inf.Logger,
 		)
+		downloadHandler.SetRuntimeProvider(transferPolicy)
 		// T-0072: enable on-the-fly decompression for compressed backup objects
 		// (.gz/.zst/.lz4/.bz2). Mirrors the streaming compression added in T-0074
 		// on the upload side. Metrics are nil-safe.
@@ -427,6 +443,18 @@ func parseStringSlice(s string) []string {
 		}
 	}
 	return result
+}
+
+func newTransferSysConfigLookup(repo interface {
+	GetByKey(context.Context, string, string) (*admin.SysConfig, error)
+}) transfercfg.SysConfigLookup {
+	return func(ctx context.Context, category, key string) (string, bool) {
+		cfg, err := repo.GetByKey(ctx, category, key)
+		if err != nil || cfg == nil {
+			return "", false
+		}
+		return cfg.Value, true
+	}
 }
 
 // decryptDefaultLimit reads OMC_BACKUP_DECRYPT_CONCURRENCY (T-0089). Empty

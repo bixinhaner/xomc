@@ -17,6 +17,7 @@ import NotificationSettings from './NotificationSettings';
 import StorageSettings from './StorageSettings';
 import OmcSettings from './OmcSettings';
 import NorthboundSettings from './NorthboundSettings';
+import TransferSettings from './TransferSettings';
 import {
   useSysConfigsByCategory,
   useBatchUpdateSysConfigs,
@@ -28,7 +29,7 @@ import type {
 } from '@core/types/system';
 
 // 设置子页签类型（v1.0：移除 sas / ldap，参 omgo/docs/prd/system/config.md）
-type SettingsTab = 'basic' | 'security' | 'device' | 'notify' | 'storage' | 'omc' | 'northbound';
+type SettingsTab = 'basic' | 'security' | 'device' | 'notify' | 'storage' | 'omc' | 'acs_transfer' | 'northbound';
 
 // 设置子页签配置
 const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
@@ -38,6 +39,7 @@ const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
   { key: 'notify', labelKey: 'system.config.notify' },
   { key: 'storage', labelKey: 'system.config.storage' },
   { key: 'omc', labelKey: 'system.config.omc' },
+  { key: 'acs_transfer', labelKey: 'system.config.acsTransfer' },
   { key: 'northbound', labelKey: 'system.config.northbound' },
 ];
 
@@ -97,6 +99,7 @@ export default function SystemConfig() {
   const [notifyForm] = Form.useForm();
   const [storageForm] = Form.useForm();
   const [omcForm] = Form.useForm();
+  const [transferForm] = Form.useForm();
   const [northboundForm] = Form.useForm();
 
   // tab → form 映射（稳定引用，因为每个 form 都来自 useForm()）
@@ -108,9 +111,10 @@ export default function SystemConfig() {
       notify: notifyForm,
       storage: storageForm,
       omc: omcForm,
+      acs_transfer: transferForm,
       northbound: northboundForm,
     }),
-    [basicForm, securityForm, deviceForm, notifyForm, storageForm, omcForm, northboundForm],
+    [basicForm, securityForm, deviceForm, notifyForm, storageForm, omcForm, transferForm, northboundForm],
   );
 
   // 拉当前 tab 的所有 KV（按 category）。切 tab 自动重发请求。
@@ -192,6 +196,8 @@ export default function SystemConfig() {
         return <StorageSettings form={storageForm} />;
       case 'omc':
         return <OmcSettings form={omcForm} />;
+      case 'acs_transfer':
+		return <TransferSettings form={transferForm} />;
       case 'northbound':
         return <NorthboundSettings form={northboundForm} />;
       default:

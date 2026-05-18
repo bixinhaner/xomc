@@ -2,6 +2,7 @@ package ufte
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/storage"
+	"github.com/omcgo/omcgo/internal/software"
 )
 
 type TaskTypeRepository interface {
@@ -45,6 +47,7 @@ var taskTypeColumns = []string{
 	"file_type",
 	"file_type_label",
 	"file_type_editable",
+	"firmware_file_type",
 	"url_template",
 	"target_file_name_template",
 	"file_name_template",
@@ -135,6 +138,7 @@ func (r *PgTaskTypeRepository) Upsert(ctx context.Context, item *TaskType) error
 			"file_type",
 			"file_type_label",
 			"file_type_editable",
+			"firmware_file_type",
 			"url_template",
 			"target_file_name_template",
 			"file_name_template",
@@ -163,6 +167,7 @@ func (r *PgTaskTypeRepository) Upsert(ctx context.Context, item *TaskType) error
 			item.FileType,
 			item.FileTypeLabel,
 			item.FileTypeEditable,
+			item.FirmwareFileType,
 			item.URLTemplate,
 			item.TargetFileNameTemplate,
 			item.FileNameTemplate,
@@ -190,6 +195,7 @@ func (r *PgTaskTypeRepository) Upsert(ctx context.Context, item *TaskType) error
 			file_type = EXCLUDED.file_type,
 			file_type_label = EXCLUDED.file_type_label,
 			file_type_editable = EXCLUDED.file_type_editable,
+			firmware_file_type = EXCLUDED.firmware_file_type,
 			url_template = EXCLUDED.url_template,
 			target_file_name_template = EXCLUDED.target_file_name_template,
 			file_name_template = EXCLUDED.file_name_template,
@@ -236,6 +242,7 @@ func scanTaskType(scanner taskTypeScanner) (*TaskType, error) {
 	var item TaskType
 	var stepChainRaw []byte
 	var platformScopeRaw []byte
+	var firmwareFileType sql.NullInt32
 	var createdAt time.Time
 	var updatedAt time.Time
 	if err := scanner.Scan(
@@ -254,6 +261,7 @@ func scanTaskType(scanner taskTypeScanner) (*TaskType, error) {
 		&item.FileType,
 		&item.FileTypeLabel,
 		&item.FileTypeEditable,
+		&firmwareFileType,
 		&item.URLTemplate,
 		&item.TargetFileNameTemplate,
 		&item.FileNameTemplate,
@@ -273,6 +281,10 @@ func scanTaskType(scanner taskTypeScanner) (*TaskType, error) {
 	}
 	if err := json.Unmarshal(platformScopeRaw, &item.PlatformScope); err != nil {
 		return nil, fmt.Errorf("unmarshal UFTE platform scope: %w", err)
+	}
+	if firmwareFileType.Valid {
+		value := software.FileType(firmwareFileType.Int32)
+		item.FirmwareFileType = firmwareFileTypePtr(value)
 	}
 	item.StepChain = normalizeStringSlice(item.StepChain)
 	item.PlatformScope = normalizeStringSlice(item.PlatformScope)

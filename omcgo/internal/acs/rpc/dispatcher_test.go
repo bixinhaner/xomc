@@ -1,12 +1,22 @@
 package rpc
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type staticTransferProvider struct {
+	snapshot transfercfg.Snapshot
+}
+
+func (s staticTransferProvider) Snapshot(context.Context) transfercfg.Snapshot {
+	return s.snapshot
+}
 
 func TestNewDispatcher_AllHandlersRegistered(t *testing.T) {
 	d := NewDispatcher()
@@ -194,9 +204,40 @@ func TestDownloadHandler(t *testing.T) {
 	assert.Contains(t, body, "cwmp:Download")
 	assert.Contains(t, body, "1 Firmware Upgrade Image")
 	assert.Contains(t, body, "http://fileserver.example.com/firmware.bin")
-	assert.Contains(t, body, "<cwmp:CommandKey>dl-key-1</cwmp:CommandKey>")
-	assert.Contains(t, body, "<cwmp:Username>dluser</cwmp:Username>")
-	assert.Contains(t, body, "<cwmp:Password>dlpass</cwmp:Password>")
-	assert.Contains(t, body, "<cwmp:FileSize>1048576</cwmp:FileSize>")
-	assert.Contains(t, body, "<cwmp:TargetFileName>firmware.bin</cwmp:TargetFileName>")
+	assert.Contains(t, body, "<CommandKey>dl-key-1</CommandKey>")
+	assert.Contains(t, body, "<Username>dluser</Username>")
+	assert.Contains(t, body, "<Password>dlpass</Password>")
+	assert.Contains(t, body, "<FileSize>1048576</FileSize>")
+	assert.Contains(t, body, "<TargetFileName>firmware.bin</TargetFileName>")
+}
+
+func TestDownloadHandler_RuntimeTransferConfigOverride(t *testing.T) {
+	d := NewDispatcher(DispatcherConfig{
+		TransferConfigProvider: staticTransferProvider{snapshot: transfercfg.Snapshot{
+			Download: transfercfg.DownloadSettings{
+				BaseURL:  "http://gateway.example.com",
+				Path:     "/smallcell/FileDownloadService",
+				Username: "runtime-user",
+				Password: "runtime-pass",
+			},
+		}},
+	})
+	cmd := &Command{
+		Method:     "Download",
+		CommandKey: "dl-key-2",
+		Params: json.RawMessage(`{
+			"file_type": "1 Firmware Upgrade Image",
+			"url": "firmware/QAFA/V1/pkg.bin",
+			"file_size": 2048,
+			"target_file_name": "pkg.bin",
+			"delay_seconds": 0
+		}`),
+	}
+
+	result, err := d.BuildRequest(cmd, "cwmp-id-runtime")
+	require.NoError(t, err)
+	body := string(result)
+	assert.Contains(t, body, "http://gateway.example.com/smallcell/FileDownloadService/firmware/QAFA/V1/pkg.bin")
+	assert.Contains(t, body, "<Username>runtime-user</Username>")
+	assert.Contains(t, body, "<Password>runtime-pass</Password>")
 }

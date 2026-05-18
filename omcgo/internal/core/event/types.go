@@ -28,6 +28,13 @@ type Event struct {
 // EventHandler processes a received event.
 type EventHandler func(ctx context.Context, event Event) error
 
+// SysConfigSavedPayload is the payload for sys.config.saved control-plane events.
+// Category matches sys_configs.category and lets subscribers invalidate only the
+// runtime policy slice they care about.
+type SysConfigSavedPayload struct {
+	Category string `json:"category"`
+}
+
 // NewEvent creates a new Event with a generated ID and current timestamp.
 func NewEvent(subject string, payload interface{}) (Event, error) {
 	data, err := json.Marshal(payload)

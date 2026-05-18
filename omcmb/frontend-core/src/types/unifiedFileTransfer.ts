@@ -1,5 +1,7 @@
 export type TransferRpcType = 'DOWNLOAD' | 'UPLOAD' | 'SET_PARAM_VALUES';
 
+export type FirmwareLibraryFileType = 0 | 1 | 5 | 6;
+
 export type UnifiedFileTransferCategory = string;
 
 export type TransferStepId =
@@ -43,6 +45,7 @@ export interface UnifiedFileTransferTaskType {
   fileType: string;
   fileTypeLabel: string;
   fileTypeEditable: boolean;
+  firmwareFileType?: FirmwareLibraryFileType;
   urlTemplate?: string;
   targetFileNameTemplate?: string;
   fileNameTemplate?: string;
@@ -136,6 +139,7 @@ export interface CreateUnifiedFileTransferTypeInput {
   fileType: string;
   fileTypeLabel: string;
   fileTypeEditable: boolean;
+  firmwareFileType?: FirmwareLibraryFileType;
   urlTemplate?: string;
   targetFileNameTemplate?: string;
   fileNameTemplate?: string;

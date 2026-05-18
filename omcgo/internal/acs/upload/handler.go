@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/minio/minio-go/v7"
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
@@ -35,8 +36,9 @@ type Handler struct {
 	eventBus     event.EventBus
 	logger       *zap.Logger
 	// Global credentials for upload authentication
-	username string
-	password string
+	username        string
+	password        string
+	runtimeProvider transfercfg.Provider
 	// T-0074: optional backup compression hooks. When both fields are set and
 	// the inbound file_type is FileTypeConfig with policy.EnableCompression=true,
 	// the body stream is wrapped with the configured compressor before MinIO
@@ -75,6 +77,10 @@ func NewHandler(
 	}
 }
 
+func (h *Handler) SetRuntimeProvider(provider transfercfg.Provider) {
+	h.runtimeProvider = provider
+}
+
 // ServeHTTP handles upload requests.
 // Route: POST /smallcell/FileUploadService?fileType={type}&filename={name}
 // Auth: HTTP Basic Authentication with global credentials
@@ -87,7 +93,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. Validate Basic Auth credentials (skip if no credentials configured)
-	if h.username != "" {
+	runtimeCfg := h.currentSettings(r.Context())
+	if runtimeCfg.Username != "" {
 		username, password, ok := r.BasicAuth()
 		if !ok {
 			h.logger.Warn("missing basic auth credentials")
@@ -96,8 +103,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if subtle.ConstantTimeCompare([]byte(username), []byte(h.username)) != 1 ||
-			subtle.ConstantTimeCompare([]byte(password), []byte(h.password)) != 1 {
+		if subtle.ConstantTimeCompare([]byte(username), []byte(runtimeCfg.Username)) != 1 ||
+			subtle.ConstantTimeCompare([]byte(password), []byte(runtimeCfg.Password)) != 1 {
 			h.logger.Warn("invalid upload credentials",
 				zap.String("username", username),
 			)
@@ -129,7 +136,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. Check file size
-	if h.maxFileSize > 0 && r.ContentLength > h.maxFileSize {
+	if runtimeCfg.MaxFileSize > 0 && r.ContentLength > runtimeCfg.MaxFileSize {
 		http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
 		return
 	}
@@ -267,6 +274,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, `{"status":"ok","path":"%s","size":%d}`, objectPath, info.Size)
+}
+
+func (h *Handler) currentSettings(ctx context.Context) transfercfg.UploadSettings {
+	if h.runtimeProvider != nil {
+		return h.runtimeProvider.Snapshot(ctx).Upload
+	}
+	return transfercfg.UploadSettings{
+		Username:    h.username,
+		Password:    h.password,
+		MaxFileSize: h.maxFileSize,
+	}
 }
 
 // normalizeFileType converts the fileType query parameter to a tr069.FileType.
@@ -499,12 +517,12 @@ func (h *Handler) publishBackupFileReceivedEvent(
 	taskIDPrefix, deviceSN := parseBackupFilename(filename)
 
 	payload := map[string]interface{}{
-		"bucket":                 bucket,
-		"object_path":            objectPath,
-		"filename":               filename,
-		"backup_task_id_prefix":  taskIDPrefix,
-		"device_sn":              deviceSN,
-		"file_size":              fileSize,
+		"bucket":                bucket,
+		"object_path":           objectPath,
+		"filename":              filename,
+		"backup_task_id_prefix": taskIDPrefix,
+		"device_sn":             deviceSN,
+		"file_size":             fileSize,
 	}
 
 	evt, err := event.NewEvent(event.SubjectBackupFileReceived, payload)
@@ -524,9 +542,10 @@ func (h *Handler) publishBackupFileReceivedEvent(
 
 // backupFilenameRe matches the executor's `backup-{taskID8}-{deviceSN}.xml`
 // pattern with optional T-0074/T-0077 compression extension. Capture groups:
-//   1: taskID8 (8 hex chars)
-//   2: deviceSN (any chars up to .xml)
-//   3: optional compression extension (.gz/.zst/.lz4/.bz2) — discarded
+//
+//	1: taskID8 (8 hex chars)
+//	2: deviceSN (any chars up to .xml)
+//	3: optional compression extension (.gz/.zst/.lz4/.bz2) — discarded
 var backupFilenameRe = regexp.MustCompile(`^backup-([0-9a-f]{8})-(.+)\.xml(\.[a-z0-9]+)?$`)
 
 // parseBackupFilename returns (taskIDPrefix, deviceSN) extracted from a

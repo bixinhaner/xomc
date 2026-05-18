@@ -10,6 +10,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/download"
 	"github.com/omcgo/omcgo/internal/acs/rpc"
 	"github.com/omcgo/omcgo/internal/acs/stun"
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/acs/upload"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
@@ -39,11 +40,12 @@ type ServerDeps struct {
 	RateLimiter             *DeviceRateLimiter
 	Admission               *AdmissionController
 	Metrics                 *ACSMetrics
-	UploadHandler           *upload.Handler             // CPE file upload handler (supports query params and path-based token)
-	UploadConfig            *appconfig.UploadConfig     // upload server configuration for generating upload URLs
-	DownloadHandler         *download.Handler           // CPE file download handler (MinIO → CPE proxy)
-	DownloadConfig          *appconfig.DownloadConfig   // download server configuration for generating download URLs
-	ConnReqSender           ConnectionRequester         // post-session wake: send CR when queue not empty
+	UploadHandler           *upload.Handler                 // CPE file upload handler (supports query params and path-based token)
+	UploadConfig            *appconfig.UploadConfig         // upload server configuration for generating upload URLs
+	DownloadHandler         *download.Handler               // CPE file download handler (MinIO → CPE proxy)
+	DownloadConfig          *appconfig.DownloadConfig       // download server configuration for generating download URLs
+	TransferConfigProvider  transfercfg.Provider            // runtime-overridable transfer endpoint settings
+	ConnReqSender           ConnectionRequester             // post-session wake: send CR when queue not empty
 	PostSessionWakeCfg      appconfig.PostSessionWakeConfig // post-session wake configuration
 	RedisClient             redis.Cmdable               // Redis client for continuous wake counter
 	StunStore               *stun.Store                 // STUN address cache (shared with STUN server)
@@ -76,6 +78,7 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 		enableTestTaskInjection: deps.EnableTestTaskInjection,
 		uploadConfig:            deps.UploadConfig,
 		downloadConfig:          deps.DownloadConfig,
+		transferConfigProvider:  deps.TransferConfigProvider,
 		maxRPCPerSession:        cfg.Session.MaxRPCPerSession,
 		connReqSender:           deps.ConnReqSender,
 		postSessionWakeCfg:      deps.PostSessionWakeCfg,
