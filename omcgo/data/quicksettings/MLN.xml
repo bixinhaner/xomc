@@ -1,42 +1,40 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  MLN paramModel 快速设置(从 BLQ.xml 模板按字典命中过滤生成)。
-  仅保留 MLN.xml 字典中实际存在的 standardPath,缺失字段跳过。
+  MLN paramModel 快速设置。
+  小区参数组按 MLN 设备真值(notes/参数设置页/MLN参数整理.md)编排,字段顺序与真值一致。
+  注: UlMaxOffset / DlMaxOffset 当前不在 param-mappings/MLN.xml 字典中,需要后续补字典。
+  邻区配置组沿用模板生成结果,真值未提供,待校验。
 -->
 <quickSettings paramModel="MLN">
   <group id="enb-cell" titleZh="小区参数" titleEn="Cell Parameters">
-    <param name="ECI" titleZh="ECI" titleEn="ECI"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.CellIdentity"/>
-    <param name="CellName" titleZh="小区名称" titleEn="Cell Name"
-           standardPath="Device.Services.FAPService.{i}.AccessMgmt.LTE.HNBName"/>
-    <param name="TAC" titleZh="TAC" titleEn="TAC"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.TAC"/>
-    <param name="PCI" titleZh="PCI" titleEn="PCI"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID"/>
-    <param name="MaxTxPower" titleZh="最大发射功率" titleEn="Max Tx Power"
-           standardPath="Device.Services.FAPService.{i}.Capabilities.MaxTxPower"/>
-    <param name="BandSupport" titleZh="频段支持" titleEn="Band Support"
-           standardPath="Device.Services.FAPService.{i}.Capabilities.LTE.BandsSupported"/>
-    <param name="BandIndicator" titleZh="频段标识" titleEn="Band Indicator"
+    <param name="BandIndicator" titleZh="频段" titleEn="Band"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.FreqBandIndicator"/>
-    <param name="DLEarfcn" titleZh="下行频点" titleEn="DL EARFCN"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNDL"/>
+    <param name="Bandwidth" titleZh="带宽" titleEn="Bandwidth(MHz)"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth"/>
     <param name="ULEarfcn" titleZh="上行频点" titleEn="UL EARFCN"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNUL"/>
-    <param name="DLBandWidth" titleZh="下行带宽" titleEn="DL Bandwidth"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth"/>
-    <param name="ULBandWidth" titleZh="上行带宽" titleEn="UL Bandwidth"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth"/>
+    <param name="DLEarfcn" titleZh="下行频点" titleEn="DL EARFCN"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNDL"/>
     <param name="SubFrameAssignment" titleZh="子帧配比" titleEn="SubFrame Assignment"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment"/>
     <param name="SpecialSubFramePatterns" titleZh="特殊子帧配置" titleEn="Special SubFrame Patterns"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SpecialSubframePatterns"/>
-    <param name="RootSequenceIndex" titleZh="根序列索引" titleEn="Root Sequence Index"
+    <param name="PCI" titleZh="PCI" titleEn="PCI"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID"/>
+    <param name="ECI" titleZh="ECI" titleEn="ECI"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.CellIdentity"/>
+    <param name="TAC" titleZh="TAC" titleEn="TAC"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.TAC"/>
+    <param name="UlMaxDelay" titleZh="上行最大时延" titleEn="UL Max Delay"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.UlMaxOffset"/>
+    <param name="TxOffsetCompensation" titleZh="发射偏移补偿" titleEn="Tx Offset Compensation"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DlMaxOffset"/>
+    <param name="RootSequenceIndex" titleZh="根序列索引" titleEn="rootSequenceIndex"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.RootSequenceIndex"/>
-    <param name="CellType" titleZh="小区类型" titleEn="Cell Type"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EnbCellType"/>
-    <param name="PowerClass" titleZh="功率等级(*2dbm)" titleEn="Power Class (*2dbm)"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_MaxTxPowerExpanded"/>
+    <param name="PLMN" titleZh="PLMN" titleEn="PLMN"
+           standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.Gateway.ExistPlmnidList"/>
+    <param name="CellName" titleZh="小区名称" titleEn="Cell Name"
+           standardPath="Device.Services.FAPService.{i}.AccessMgmt.LTE.HNBName"/>
   </group>
   <group id="enb-neighbor-freq" titleZh="异频邻区频点列表" titleEn="Inter-Frequency Neighbor Carrier List"
          multiInstance="true"
