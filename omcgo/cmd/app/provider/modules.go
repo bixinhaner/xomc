@@ -578,10 +578,14 @@ func initMiscModules(c *Container) error {
 	licenseRepo := license.NewPgLicenseRepository(c.PgPool)
 	licenseSvc := license.NewService(licenseRepo, logger)
 	licenseMetrics := license.NewEnforcementMetrics(c.MetricsReg)
-	licenseEnforcer := license.NewEnforcer(licenseRepo, logger, licenseMetrics)
+	// F06 重构 Step 3：enforcer / monitor 已切到 SystemLicenseRepository；
+	// CountDevices 仍复用 licenseRepo（SELECT COUNT(*) FROM devices，与 license
+	// 表无关，Step 5 删老 repo 时换成独立 DeviceCounter 实现即可）。
+	systemLicenseRepoForEnforcer := license.NewPgSystemLicenseRepository(c.PgPool)
+	licenseEnforcer := license.NewEnforcer(systemLicenseRepoForEnforcer, licenseRepo, logger, licenseMetrics)
 	licenseSvc.SetEnforcer(licenseEnforcer)
 	licenseHandler := license.NewHandler(licenseSvc, logger)
-	licenseMonitor := license.NewMonitor(licenseRepo, license.NoopAlertSink{}, licenseMetrics, logger)
+	licenseMonitor := license.NewMonitor(systemLicenseRepoForEnforcer, licenseRepo, license.NoopAlertSink{}, licenseMetrics, logger)
 
 	// T-0100-P0：审计日志（license_logs 表）。enforcer / monitor / handler 三处写入点
 	// 通过 SetLogWriter 注入；NewLogWriter 内部失败降级 warn 不阻断主业务（详见
@@ -641,12 +645,13 @@ func initMiscModules(c *Container) error {
 	c.miscDeps.licenseEnforcer = licenseEnforcer
 	c.miscDeps.licenseMonitor = licenseMonitor
 
-	// F06 System License 重构 Step 2：singleton service/handler 并存装配。
-	// 复用上面已构造好的 licenseVerifier（同一 OEM 公钥与 strict 配置）。
-	// Step 3 才接 enforcer 缓存失效；Step 5 才删老 handler。
-	systemLicenseRepo := license.NewPgSystemLicenseRepository(c.PgPool)
-	systemLicenseSvc := license.NewSystemLicenseService(systemLicenseRepo, logger)
+	// F06 System License 重构 Step 2/3：singleton service/handler 并存装配。
+	// 复用上面已构造好的 licenseVerifier（同一 OEM 公钥与 strict 配置）+
+	// licenseEnforcer（Step 3 让 Update 后立刻失效 enforcer 缓存）。
+	// Step 5 才删老 handler。
+	systemLicenseSvc := license.NewSystemLicenseService(systemLicenseRepoForEnforcer, logger)
 	systemLicenseSvc.SetSignatureVerifier(licenseVerifier)
+	systemLicenseSvc.SetEnforcer(licenseEnforcer)
 	c.miscDeps.systemLicenseHandler = license.NewSystemLicenseHandler(systemLicenseSvc, logger)
 
 	// Wire enforcer into DeviceService so device.create / future write ops

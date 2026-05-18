@@ -2,7 +2,6 @@ package license
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -15,293 +14,256 @@ import (
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 )
 
-// fixedClock returns a stable nowFunc for deterministic tests.
+// fixedClock returns a stable nowFunc for deterministic tests + cleanup.
 func fixedClock(t time.Time) func() {
 	prev := nowFunc
 	nowFunc = func() time.Time { return t }
 	return func() { nowFunc = prev }
 }
 
-func newSubscription(maxDevices int, expiresIn time.Duration, grace int) *License {
-	exp := nowFunc().Add(expiresIn)
-	return &License{
-		ID:              uuid.New(),
-		LicenseType:     TypeSubscription,
-		Status:          StatusActive,
-		MaxDevices:      maxDevices,
-		LicenseCode:     "TEST-SUB",
-		ExpiryDate:      &exp,
-		GracePeriodDays: grace,
-	}
+// fakeDeviceCounter — DeviceCounter 简化 mock。
+type fakeDeviceCounter struct {
+	count int
+	err   error
 }
 
-func newPerpetual(maxDevices int) *License {
-	return &License{
-		ID:          uuid.New(),
-		LicenseType: TypePerpetual,
-		Status:      StatusActive,
-		MaxDevices:  maxDevices,
-		LicenseCode: "TEST-PERP",
+func (f *fakeDeviceCounter) CountDevices(_ context.Context) (int, error) {
+	if f.err != nil {
+		return 0, f.err
 	}
+	return f.count, nil
 }
 
-func TestEnforcer_EnforceCapacity_Allowed(t *testing.T) {
-	repo := &mockLicenseRepo{
-		getActiveFn: func(ctx context.Context) (*License, error) {
-			return newPerpetual(100), nil
+// systemLicense 构造一个 active system_license fixture。
+func systemLicense(licID string, devicesSupport DevicesSupport, expiryIn time.Duration) *SystemLicense {
+	lic := &SystemLicense{
+		ID:             uuid.New(),
+		LicenseID:      licID,
+		LicenseType:    SystemLicenseTypeCommercial,
+		IsCurrent:      true,
+		DevicesSupport: devicesSupport,
+		IssuedAt:       nowFunc(),
+	}
+	if expiryIn != 0 {
+		t := nowFunc().Add(expiryIn)
+		lic.ExpiryDate = &t
+	}
+	return lic
+}
+
+func TestEnforcer_EnforceCapacity(t *testing.T) {
+	tests := []struct {
+		name       string
+		licCurrent *SystemLicense
+		used       int
+		additional int
+		wantErr    error
+	}{
+		{
+			name:       "no license configured → default allow",
+			licCurrent: nil,
+			used:       9999,
+			additional: 1,
+			wantErr:    nil,
 		},
-		countDevFn: func(ctx context.Context) (int, error) { return 50, nil },
-	}
-	e := NewEnforcer(repo, zap.NewNop(), nil)
-
-	require.NoError(t, e.EnforceCapacity(context.Background(), 1))
-}
-
-func TestEnforcer_EnforceCapacity_AtBoundary(t *testing.T) {
-	// used 99 + additional 1 == max 100 → allowed
-	repo := &mockLicenseRepo{
-		getActiveFn: func(ctx context.Context) (*License, error) {
-			return newPerpetual(100), nil
+		{
+			name:       "well under capacity allowed",
+			licCurrent: systemLicense("L1", DevicesSupport{"eNB": 100, "gNB": 100}, 0),
+			used:       50,
+			additional: 1,
+			wantErr:    nil,
 		},
-		countDevFn: func(ctx context.Context) (int, error) { return 99, nil },
-	}
-	e := NewEnforcer(repo, zap.NewNop(), nil)
-
-	require.NoError(t, e.EnforceCapacity(context.Background(), 1))
-}
-
-func TestEnforcer_EnforceCapacity_Exceeded(t *testing.T) {
-	repo := &mockLicenseRepo{
-		getActiveFn: func(ctx context.Context) (*License, error) {
-			return newPerpetual(100), nil
+		{
+			name:       "exactly at total boundary allowed",
+			licCurrent: systemLicense("L2", DevicesSupport{"eNB": 50, "gNB": 50}, 0),
+			used:       99,
+			additional: 1,
+			wantErr:    nil,
 		},
-		countDevFn: func(ctx context.Context) (int, error) { return 100, nil },
+		{
+			name:       "over total capacity rejected",
+			licCurrent: systemLicense("L3", DevicesSupport{"eNB": 10, "gNB": 10}, 0),
+			used:       20,
+			additional: 1,
+			wantErr:    commonerrors.ErrLicenseCapacityExceeded,
+		},
+		{
+			name:       "zero capacity = unlimited (degenerate, not gated)",
+			licCurrent: systemLicense("L4", DevicesSupport{}, 0),
+			used:       1000000,
+			additional: 1,
+			wantErr:    nil,
+		},
 	}
-	e := NewEnforcer(repo, zap.NewNop(), nil)
-
-	err := e.EnforceCapacity(context.Background(), 1)
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, commonerrors.ErrLicenseCapacityExceeded))
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &mockSystemLicenseRepo{current: tc.licCurrent}
+			dev := &fakeDeviceCounter{count: tc.used}
+			e := NewEnforcer(repo, dev, zap.NewNop(), nil)
+			err := e.EnforceCapacity(context.Background(), tc.additional)
+			if tc.wantErr == nil {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, tc.wantErr), "expected wrap of %v, got %v", tc.wantErr, err)
+		})
+	}
 }
 
-func TestEnforcer_EnforceCapacity_NoActiveLicense_DefaultAllow(t *testing.T) {
-	repo := &mockLicenseRepo{
-		getActiveFn: func(ctx context.Context) (*License, error) { return nil, nil },
-	}
-	e := NewEnforcer(repo, zap.NewNop(), nil)
-
-	require.NoError(t, e.EnforceCapacity(context.Background(), 99999))
-}
-
-func TestEnforcer_EnforceCapacity_NegativeAdditional_RejectsAsInvalidInput(t *testing.T) {
-	repo := &mockLicenseRepo{}
-	e := NewEnforcer(repo, zap.NewNop(), nil)
-
+func TestEnforcer_EnforceCapacity_NegativeAdditional(t *testing.T) {
+	repo := &mockSystemLicenseRepo{}
+	dev := &fakeDeviceCounter{}
+	e := NewEnforcer(repo, dev, zap.NewNop(), nil)
 	err := e.EnforceCapacity(context.Background(), -1)
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, commonerrors.ErrInvalidInput))
 }
 
-func TestEnforcer_EnforceExpiry_Perpetual_AlwaysAllowed(t *testing.T) {
-	repo := &mockLicenseRepo{
-		getActiveFn: func(ctx context.Context) (*License, error) { return newPerpetual(100), nil },
-	}
-	e := NewEnforcer(repo, zap.NewNop(), nil)
+func TestEnforcer_EnforceExpiry(t *testing.T) {
+	now := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
+	defer fixedClock(now)()
 
-	require.NoError(t, e.EnforceExpiry(context.Background(), "device.create"))
-}
-
-func TestEnforcer_EnforceExpiry_FutureSubscription_Allowed(t *testing.T) {
-	defer fixedClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))()
-	lic := newSubscription(100, 30*24*time.Hour, 0)
-	repo := &mockLicenseRepo{
-		getActiveFn: func(ctx context.Context) (*License, error) { return lic, nil },
-	}
-	e := NewEnforcer(repo, zap.NewNop(), nil)
-
-	require.NoError(t, e.EnforceExpiry(context.Background(), "device.create"))
-}
-
-func TestEnforcer_EnforceExpiry_PastExpiry_Denied(t *testing.T) {
-	defer fixedClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))()
-	lic := newSubscription(100, -24*time.Hour, 0) // expired yesterday
-	repo := &mockLicenseRepo{
-		getActiveFn: func(ctx context.Context) (*License, error) { return lic, nil },
-	}
-	e := NewEnforcer(repo, zap.NewNop(), nil)
-
-	err := e.EnforceExpiry(context.Background(), "device.create")
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, commonerrors.ErrLicenseExpired))
-}
-
-func TestEnforcer_EnforceExpiry_WithinGracePeriod_Allowed(t *testing.T) {
-	defer fixedClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))()
-	// expired 5 days ago, grace 7 days → still allowed
-	lic := newSubscription(100, -5*24*time.Hour, 7)
-	repo := &mockLicenseRepo{
-		getActiveFn: func(ctx context.Context) (*License, error) { return lic, nil },
-	}
-	e := NewEnforcer(repo, zap.NewNop(), nil)
-
-	require.NoError(t, e.EnforceExpiry(context.Background(), "device.create"))
-}
-
-func TestEnforcer_EnforceExpiry_StatusExpired_DeniedEvenIfDateFuture(t *testing.T) {
-	defer fixedClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))()
-	lic := newSubscription(100, 30*24*time.Hour, 0)
-	lic.Status = StatusExpired // explicitly expired by cron
-	repo := &mockLicenseRepo{
-		getActiveFn: func(ctx context.Context) (*License, error) { return lic, nil },
-	}
-	e := NewEnforcer(repo, zap.NewNop(), nil)
-
-	err := e.EnforceExpiry(context.Background(), "device.create")
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, commonerrors.ErrLicenseExpired))
-}
-
-func TestEnforcer_Cache_TTL(t *testing.T) {
-	calls := 0
-	repo := &mockLicenseRepo{
-		getActiveFn: func(ctx context.Context) (*License, error) {
-			calls++
-			return newPerpetual(10), nil
+	tests := []struct {
+		name       string
+		licCurrent *SystemLicense
+		wantErr    error
+	}{
+		{
+			name:       "no license → default allow",
+			licCurrent: nil,
+			wantErr:    nil,
+		},
+		{
+			name:       "NULL expiry (perpetual) allowed",
+			licCurrent: &SystemLicense{ID: uuid.New(), LicenseID: "PERP", LicenseType: SystemLicenseTypeCommercial},
+			wantErr:    nil,
+		},
+		{
+			name:       "future expiry allowed",
+			licCurrent: systemLicense("FUT", DevicesSupport{}, 24*time.Hour),
+			wantErr:    nil,
+		},
+		{
+			name:       "past expiry rejected",
+			licCurrent: systemLicense("OLD", DevicesSupport{}, -24*time.Hour),
+			wantErr:    commonerrors.ErrLicenseExpired,
 		},
 	}
-	e := NewEnforcer(repo, zap.NewNop(), nil)
-	e.SetCacheTTL(50 * time.Millisecond)
-
-	_, err := e.ActiveLicense(context.Background())
-	require.NoError(t, err)
-	_, err = e.ActiveLicense(context.Background())
-	require.NoError(t, err)
-	assert.Equal(t, 1, calls, "second call should hit cache")
-
-	// Move clock forward beyond TTL.
-	defer fixedClock(time.Now().Add(100 * time.Millisecond))()
-	_, err = e.ActiveLicense(context.Background())
-	require.NoError(t, err)
-	assert.Equal(t, 2, calls, "expired cache should refresh")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &mockSystemLicenseRepo{current: tc.licCurrent}
+			dev := &fakeDeviceCounter{}
+			e := NewEnforcer(repo, dev, zap.NewNop(), nil)
+			err := e.EnforceExpiry(context.Background(), "device.create")
+			if tc.wantErr == nil {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.True(t, errors.Is(err, tc.wantErr))
+		})
+	}
 }
 
-func TestEnforcer_Invalidate_ForcesReload(t *testing.T) {
-	calls := 0
-	repo := &mockLicenseRepo{
-		getActiveFn: func(ctx context.Context) (*License, error) {
-			calls++
-			return newPerpetual(10), nil
-		},
-	}
-	e := NewEnforcer(repo, zap.NewNop(), nil)
+func TestEnforcer_Quota(t *testing.T) {
+	now := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
+	defer fixedClock(now)()
+
+	t.Run("no license", func(t *testing.T) {
+		repo := &mockSystemLicenseRepo{}
+		dev := &fakeDeviceCounter{count: 0}
+		e := NewEnforcer(repo, dev, zap.NewNop(), nil)
+		q, err := e.Quota(context.Background())
+		require.NoError(t, err)
+		assert.False(t, q.HasActiveLicense)
+	})
+
+	t.Run("with license + per-type map", func(t *testing.T) {
+		lic := systemLicense("L1", DevicesSupport{"eNB": 100, "gNB": 200}, 30*24*time.Hour)
+		repo := &mockSystemLicenseRepo{current: lic}
+		dev := &fakeDeviceCounter{count: 50}
+		e := NewEnforcer(repo, dev, zap.NewNop(), nil)
+		q, err := e.Quota(context.Background())
+		require.NoError(t, err)
+		assert.True(t, q.HasActiveLicense)
+		assert.Equal(t, 300, q.MaxDevices, "total = 100 + 200")
+		assert.Equal(t, 50, q.UsedDevices)
+		assert.InDelta(t, 50.0/300.0, q.UsageRatio, 1e-9)
+		assert.Equal(t, 30, q.DaysRemaining)
+		assert.Len(t, q.PerType, 2)
+		assert.Equal(t, 100, q.PerType["eNB"].Max)
+		assert.Equal(t, 200, q.PerType["gNB"].Max)
+	})
+
+	t.Run("perpetual (NULL expiry) days_remaining=-1", func(t *testing.T) {
+		lic := &SystemLicense{
+			ID:             uuid.New(),
+			LicenseID:      "PERP",
+			LicenseType:    SystemLicenseTypeCommercial,
+			DevicesSupport: DevicesSupport{"eNB": 10},
+		}
+		repo := &mockSystemLicenseRepo{current: lic}
+		dev := &fakeDeviceCounter{count: 5}
+		e := NewEnforcer(repo, dev, zap.NewNop(), nil)
+		q, err := e.Quota(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, -1, q.DaysRemaining)
+	})
+}
+
+func TestEnforcer_Caching(t *testing.T) {
+	now := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
+	defer fixedClock(now)()
+
+	lic := systemLicense("L1", DevicesSupport{"eNB": 100}, 24*time.Hour)
+	repo := &countingRepo{mockSystemLicenseRepo: mockSystemLicenseRepo{current: lic}}
+	dev := &fakeDeviceCounter{count: 1}
+	e := NewEnforcer(repo, dev, zap.NewNop(), nil)
+	e.SetCacheTTL(1 * time.Hour)
+	_ = lic
+
+	// 第一次 → repo 调一次
 	_, err := e.ActiveLicense(context.Background())
 	require.NoError(t, err)
+	assert.Equal(t, 1, repo.getCurrentCalls, "first call should hit repo")
 
+	// 立即第二次 → 命中缓存
+	_, _ = e.ActiveLicense(context.Background())
+	assert.Equal(t, 1, repo.getCurrentCalls, "second call should hit cache")
+
+	// Invalidate → 强制刷新
 	e.Invalidate()
-	_, err = e.ActiveLicense(context.Background())
+	_, _ = e.ActiveLicense(context.Background())
+	assert.Equal(t, 2, repo.getCurrentCalls, "after Invalidate, should hit repo")
+}
+
+func TestEnforcer_EmptyTable_CachedAsNil(t *testing.T) {
+	now := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
+	defer fixedClock(now)()
+
+	repo := &countingRepo{} // 空表
+	dev := &fakeDeviceCounter{count: 0}
+	e := NewEnforcer(repo, dev, zap.NewNop(), nil)
+	e.SetCacheTTL(1 * time.Hour)
+
+	lic1, err := e.ActiveLicense(context.Background())
 	require.NoError(t, err)
+	assert.Nil(t, lic1)
 
-	assert.Equal(t, 2, calls)
+	// 第二次：缓存命中 nil，不重打 DB
+	lic2, _ := e.ActiveLicense(context.Background())
+	assert.Nil(t, lic2)
+	assert.Equal(t, 1, repo.getCurrentCalls, "nil-cache should not re-query")
 }
 
-func TestEnforcer_Quota_NoActiveLicense(t *testing.T) {
-	repo := &mockLicenseRepo{
-		getActiveFn: func(ctx context.Context) (*License, error) { return nil, nil },
-	}
-	e := NewEnforcer(repo, zap.NewNop(), nil)
-
-	q, err := e.Quota(context.Background())
-	require.NoError(t, err)
-	assert.False(t, q.HasActiveLicense)
+// countingRepo 复用 mockSystemLicenseRepo 但加 call counter，专测缓存路径。
+type countingRepo struct {
+	mockSystemLicenseRepo
+	getCurrentCalls int
 }
 
-func TestEnforcer_Quota_PerpetualSetsDaysRemainingNegativeOne(t *testing.T) {
-	repo := &mockLicenseRepo{
-		getActiveFn: func(ctx context.Context) (*License, error) { return newPerpetual(100), nil },
-		countDevFn:  func(ctx context.Context) (int, error) { return 25, nil },
-	}
-	e := NewEnforcer(repo, zap.NewNop(), nil)
-
-	q, err := e.Quota(context.Background())
-	require.NoError(t, err)
-	assert.True(t, q.HasActiveLicense)
-	assert.Equal(t, 100, q.MaxDevices)
-	assert.Equal(t, 25, q.UsedDevices)
-	assert.InDelta(t, 0.25, q.UsageRatio, 0.001)
-	assert.Equal(t, -1, q.DaysRemaining)
-	assert.Equal(t, "perpetual", q.LicenseType)
-}
-
-func TestEnforcer_Quota_SubscriptionDaysRemaining(t *testing.T) {
-	defer fixedClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))()
-	lic := newSubscription(50, 30*24*time.Hour, 0)
-	repo := &mockLicenseRepo{
-		getActiveFn: func(ctx context.Context) (*License, error) { return lic, nil },
-		countDevFn:  func(ctx context.Context) (int, error) { return 10, nil },
-	}
-	e := NewEnforcer(repo, zap.NewNop(), nil)
-
-	q, err := e.Quota(context.Background())
-	require.NoError(t, err)
-	// 30 days - 1 hour rounding = 29 or 30 depending on integer division.
-	assert.GreaterOrEqual(t, q.DaysRemaining, 29)
-	assert.LessOrEqual(t, q.DaysRemaining, 30)
-}
-
-func TestEnforcer_RepoErrorPropagates(t *testing.T) {
-	repoErr := errors.New("db unreachable")
-	repo := &mockLicenseRepo{
-		getActiveFn: func(ctx context.Context) (*License, error) { return nil, repoErr },
-	}
-	e := NewEnforcer(repo, zap.NewNop(), nil)
-
-	err := e.EnforceCapacity(context.Background(), 1)
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, repoErr))
-}
-
-func TestEnforcementError_Classification(t *testing.T) {
-	// capacity error
-	kind, ok := EnforcementError(commonerrors.ErrLicenseCapacityExceeded)
-	assert.True(t, ok)
-	assert.Equal(t, "capacity_exceeded", kind)
-
-	// expiry error
-	kind, ok = EnforcementError(commonerrors.ErrLicenseExpired)
-	assert.True(t, ok)
-	assert.Equal(t, "expired", kind)
-
-	// non-enforcement error
-	_, ok = EnforcementError(errors.New("other"))
-	assert.False(t, ok)
-}
-
-func TestEnforcer_ExpiryWithoutDate_Allowed(t *testing.T) {
-	// Subscription license with nil expiry date — treat as not-expired.
-	lic := &License{
-		ID:          uuid.New(),
-		LicenseType: TypeSubscription,
-		Status:      StatusActive,
-		MaxDevices:  100,
-		ExpiryDate:  nil,
-	}
-	repo := &mockLicenseRepo{
-		getActiveFn: func(ctx context.Context) (*License, error) { return lic, nil },
-	}
-	e := NewEnforcer(repo, zap.NewNop(), nil)
-
-	require.NoError(t, e.EnforceExpiry(context.Background(), "device.create"))
-}
-
-// Sanity-check parseThresholds (used by Monitor) — included here because
-// monitor_test.go is the natural home but this guards a small contract.
-func TestParseThresholds_HappyAndMalformed(t *testing.T) {
-	out := parseThresholds(json.RawMessage(`[80, 90, 95]`))
-	assert.Equal(t, []int{80, 90, 95}, out)
-
-	out = parseThresholds(json.RawMessage(`malformed`))
-	assert.Nil(t, out)
-
-	out = parseThresholds(nil)
-	assert.Nil(t, out)
+func (r *countingRepo) GetCurrent(ctx context.Context) (*SystemLicense, error) {
+	r.getCurrentCalls++
+	return r.mockSystemLicenseRepo.GetCurrent(ctx)
 }

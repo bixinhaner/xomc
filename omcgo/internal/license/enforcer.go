@@ -5,16 +5,19 @@
 // EnforceCapacity / EnforceExpiry before any state-mutating operation that
 // counts toward the license quota.
 //
-// Design (T-0015 / R-103, see PRD F06-license-enforcement.md):
+// F06 System License 重构（PRD F06-system-license-redesign, Step 3）：
+// 内部已由老 multi-license 模型切到 singleton system_license 模型。
 //
-//   - Multi-active-license rule: pick the license with the largest
-//     MaxDevices as the canonical enforcement license. Other actives are
-//     ignored for enforcement decisions (they remain queryable).
-//   - No active license => default-allow + warn log + metric=0.
-//     dev-friendly; prod operators are expected to import a license.
-//   - Permanent licenses (TypePerpetual) skip expiry checks unconditionally.
-//   - Cached active license with 5min TTL; invalidated on Import/Activate/
-//     Revoke via Service hook.
+//   - 数据源：`SystemLicenseRepository.GetCurrent` — 全系统唯一 license 行；
+//     空表 = default-allow + warn（与老逻辑一致，dev 友好）
+//   - 容量：`SystemLicense.DevicesSupport` 是 map[device_type]int；本期
+//     `EnforceCapacity(ctx, additional)` 暂用所有 type 容量**之和**作为总容量
+//     （接口签名保留，device.Service 零改动），per-type 精细 gating 留给
+//     Phase 7 RBAC 联动 sprint
+//   - 过期：`SystemLicense.ExpiryDate` 直接判断（新模型无 grace_period_days
+//     / 无 perpetual 类型；NULL expiry_date 视为永不过期，对应老 perpetual 语义）
+//   - 缓存：5min TTL，Replace（POST /system-license）后由 SystemLicenseService
+//     调 Invalidate 显式失效
 package license
 
 import (
@@ -33,55 +36,76 @@ import (
 // device package) define their own narrower interface and accept this
 // implementation; this avoids forcing every consumer to import the full
 // license model.
+//
+// Step 3：接口签名完全保留向后兼容 — device.LicenseEnforcer 接口（在
+// internal/device/device_service.go 上定义）仍是 EnforceCapacity(ctx, additional)
+// + EnforceExpiry(ctx, op)，caller 端零改动。
 type Enforcer interface {
 	// EnforceCapacity returns ErrLicenseCapacityExceeded if adding `additional`
-	// devices would cross MaxDevices. Returns nil when no active license
-	// exists (default-allow).
+	// devices would cross the system-license total capacity (sum of all
+	// device_type quotas). Returns nil when no license is configured
+	// (default-allow).
 	EnforceCapacity(ctx context.Context, additional int) error
 
-	// EnforceExpiry returns ErrLicenseExpired if the active license is past
-	// expiry + grace_period_days. Operation name is passed through for
-	// metric labels and audit. Returns nil for perpetual licenses or when
-	// no active license exists.
+	// EnforceExpiry returns ErrLicenseExpired if the current license is past
+	// expiry_date. Operation name is passed through for metric labels +
+	// audit. Returns nil when no license is configured or expiry_date is NULL.
 	EnforceExpiry(ctx context.Context, operation string) error
 
-	// ActiveLicense returns the canonical enforcement license (max
-	// MaxDevices among actives), or nil if none exist.
-	ActiveLicense(ctx context.Context) (*License, error)
+	// ActiveLicense returns the current system license, or nil if none
+	// configured (default-allow scenario).
+	//
+	// 注意：返回类型由老 License 改为 SystemLicense（Step 3 breaking 变更，
+	// 但唯一 caller 是 enforcer 自身 / handler / test，已同步更新）。
+	ActiveLicense(ctx context.Context) (*SystemLicense, error)
 
 	// Quota returns the current enforcement state for /quota endpoint.
 	Quota(ctx context.Context) (*Quota, error)
 
-	// Invalidate clears the cached active license. Called by Service after
-	// Import / Activate / Revoke to force re-read on next enforcement.
+	// Invalidate clears the cached system license. Called by SystemLicenseService
+	// after Update（POST /system-license）to force re-read on next enforcement.
 	Invalidate()
 }
 
-// DefaultCacheTTL is the active-license cache lifetime. Five minutes balances
-// responsiveness (operators see new licenses promptly) against PG load.
+// DefaultCacheTTL is the system-license cache lifetime. Five minutes balances
+// responsiveness (operators see new license promptly) against PG load.
 const DefaultCacheTTL = 5 * time.Minute
 
 // nowFunc is overridden in tests. Production always uses time.Now.
 var nowFunc = time.Now
 
+// DeviceCounter abstracts "how many registered devices exist". Defined at the
+// enforcer consumer side so enforcer doesn't import the device package
+// directly (avoids module cycle). Satisfied by PgLicenseRepository.CountDevices.
+type DeviceCounter interface {
+	CountDevices(ctx context.Context) (int, error)
+}
+
 // EnforcerImpl is the concrete Enforcer.
 type EnforcerImpl struct {
-	repo      LicenseRepository
+	repo      SystemLicenseRepository
+	devices   DeviceCounter
 	logger    *zap.Logger
 	metrics   *EnforcementMetrics
 	logWriter LogWriter // T-0100-P0：拒绝事件审计；nil 时退化为 NoopLogWriter
 
 	cacheMu      sync.RWMutex
-	cachedActive *License
+	cachedActive *SystemLicense
 	cachedAt     time.Time
 	cacheTTL     time.Duration
 }
 
 // NewEnforcer constructs an EnforcerImpl with the default 5min cache TTL.
 // metrics may be nil (degrades to no-op recording).
-func NewEnforcer(repo LicenseRepository, logger *zap.Logger, metrics *EnforcementMetrics) *EnforcerImpl {
+//
+// repo 是新 SystemLicenseRepository（singleton 模型）；devices 是一个独立的
+// CountDevices 提供方（通常注入 PgLicenseRepository — 它的 CountDevices 只
+// SELECT COUNT(*) FROM devices，与 license 表完全无关）。这种解耦让 Step 5
+// 删 LicenseRepository 时只需把 devices 改为另一个 DeviceCounter 实现。
+func NewEnforcer(repo SystemLicenseRepository, devices DeviceCounter, logger *zap.Logger, metrics *EnforcementMetrics) *EnforcerImpl {
 	return &EnforcerImpl{
 		repo:      repo,
+		devices:   devices,
 		logger:    logger.Named("license-enforcer"),
 		metrics:   metrics,
 		logWriter: NoopLogWriter{}, // 默认 noop；DI 通过 SetLogWriter 注入真实实现
@@ -105,7 +129,7 @@ func (e *EnforcerImpl) SetCacheTTL(ttl time.Duration) {
 	e.cacheTTL = ttl
 }
 
-// Invalidate clears the cached active license.
+// Invalidate clears the cached system license.
 func (e *EnforcerImpl) Invalidate() {
 	e.cacheMu.Lock()
 	e.cachedActive = nil
@@ -113,9 +137,9 @@ func (e *EnforcerImpl) Invalidate() {
 	e.cacheMu.Unlock()
 }
 
-// ActiveLicense returns the cached active license, refreshing if stale.
-// Returns nil if no active license exists (default-allow scenario).
-func (e *EnforcerImpl) ActiveLicense(ctx context.Context) (*License, error) {
+// ActiveLicense returns the cached current system license, refreshing if stale.
+// Returns nil if no license is configured (default-allow scenario).
+func (e *EnforcerImpl) ActiveLicense(ctx context.Context) (*SystemLicense, error) {
 	e.cacheMu.RLock()
 	if !e.cachedAt.IsZero() && nowFunc().Sub(e.cachedAt) < e.cacheTTL {
 		lic := e.cachedActive
@@ -124,7 +148,7 @@ func (e *EnforcerImpl) ActiveLicense(ctx context.Context) (*License, error) {
 	}
 	e.cacheMu.RUnlock()
 
-	// Slow path: refresh.
+	// Slow path: refresh under write lock.
 	e.cacheMu.Lock()
 	defer e.cacheMu.Unlock()
 	// Re-check after acquiring write lock (another goroutine may have
@@ -133,17 +157,42 @@ func (e *EnforcerImpl) ActiveLicense(ctx context.Context) (*License, error) {
 		return e.cachedActive, nil
 	}
 
-	lic, err := e.repo.GetActiveLicenseWithMaxDevices(ctx)
+	lic, err := e.repo.GetCurrent(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("load active license: %w", err)
+		if errors.Is(err, ErrSystemLicenseNotFound) {
+			// 空表 = default-allow；缓存 nil 避免每次 Enforce 都打 DB。
+			e.cachedActive = nil
+			e.cachedAt = nowFunc()
+			return nil, nil
+		}
+		return nil, fmt.Errorf("load current system license: %w", err)
 	}
 	e.cachedActive = lic
 	e.cachedAt = nowFunc()
 	return lic, nil
 }
 
-// EnforceCapacity rejects when current device count + additional exceeds
-// MaxDevices. Returns nil if no active license (default-allow + log).
+// totalCapacity 返回 license.DevicesSupport map 所有 type 容量之和。
+//
+// 设计取舍：Step 3 阶段 EnforceCapacity 接口签名保留（无 device_type 入参），
+// 内部用总和近似总容量。语义在 device.create+1 场景与老多 license 模型保持一致；
+// per-type 精细 gating 留给 Phase 7 RBAC 联动 sprint。
+func totalCapacity(lic *SystemLicense) int {
+	if lic == nil {
+		return 0
+	}
+	total := 0
+	for _, v := range lic.DevicesSupport {
+		if v > 0 {
+			total += v
+		}
+	}
+	return total
+}
+
+// EnforceCapacity rejects when current device count + additional exceeds the
+// total capacity (sum of all device_type quotas). Returns nil if no license
+// (default-allow + log).
 func (e *EnforcerImpl) EnforceCapacity(ctx context.Context, additional int) error {
 	if additional < 0 {
 		return fmt.Errorf("additional must be >= 0: %w", commonerrors.ErrInvalidInput)
@@ -155,46 +204,50 @@ func (e *EnforcerImpl) EnforceCapacity(ctx context.Context, additional int) erro
 	}
 	if lic == nil {
 		e.recordEnforcement("capacity", "no_active_license")
-		e.logger.Warn("license enforcement skipped: no active license")
+		e.logger.Warn("license enforcement skipped: no system license configured")
 		return nil
 	}
 
-	used, err := e.repo.CountDevices(ctx)
+	used, err := e.devices.CountDevices(ctx)
 	if err != nil {
 		return fmt.Errorf("count devices for enforcement: %w", err)
 	}
 
-	if used+additional > lic.MaxDevices {
+	maxDevices := totalCapacity(lic)
+	if maxDevices > 0 && used+additional > maxDevices {
 		e.recordEnforcement("capacity", "denied_capacity")
-		e.logger.Warn("license capacity exceeded",
-			zap.String("license_id", lic.ID.String()),
-			zap.Int("max_devices", lic.MaxDevices),
+		e.logger.Warn("system license capacity exceeded",
+			zap.String("license_id", lic.LicenseID),
+			zap.Int("total_capacity", maxDevices),
 			zap.Int("used_devices", used),
 			zap.Int("additional", additional),
 		)
 		// 审计：拒绝事件落 license_logs（T-0100-P0 / R-109）
-		licID := lic.ID
+		// 注：licenseLogs.license_id 是 UUID FK，新 system_license 模型的 ID 也是
+		// UUID，但 logger 写入用的是新表的 PK；老 license_logs 表 FK 是老
+		// licenses 表，Step 5 才统一审计 schema。此处暂不带 LicenseID（nil）。
 		e.logWriter.Write(ctx, LicenseLogEntry{
-			LicenseID: &licID,
-			LogType:   LogTypeEnforcementCapacity,
-			Result:    LogResultDenied,
+			LogType: LogTypeEnforcementCapacity,
+			Result:  LogResultDenied,
 			Details: map[string]any{
-				"summary":      "device.create denied: capacity exceeded",
-				"max_devices":  lic.MaxDevices,
-				"used_devices": used,
-				"additional":   additional,
+				"summary":        "device.create denied: capacity exceeded",
+				"license_id":     lic.LicenseID,
+				"total_capacity": maxDevices,
+				"used_devices":   used,
+				"additional":     additional,
+				"devices_support": lic.DevicesSupport,
 			},
 		})
 		return fmt.Errorf("used=%d, max=%d, additional=%d: %w",
-			used, lic.MaxDevices, additional, commonerrors.ErrLicenseCapacityExceeded)
+			used, maxDevices, additional, commonerrors.ErrLicenseCapacityExceeded)
 	}
 
 	e.recordEnforcement("capacity", "allowed")
 	return nil
 }
 
-// EnforceExpiry rejects when the active license is past expiry + grace.
-// Permanent licenses always pass. No active license = default-allow.
+// EnforceExpiry rejects when the current license is past expiry_date.
+// NULL expiry_date or no license configured = default-allow.
 func (e *EnforcerImpl) EnforceExpiry(ctx context.Context, operation string) error {
 	lic, err := e.ActiveLicense(ctx)
 	if err != nil {
@@ -204,40 +257,31 @@ func (e *EnforcerImpl) EnforceExpiry(ctx context.Context, operation string) erro
 		e.recordEnforcement(operation, "no_active_license")
 		return nil
 	}
-	if lic.LicenseType == TypePerpetual {
-		e.recordEnforcement(operation, "allowed")
-		return nil
-	}
 	if lic.ExpiryDate == nil {
-		// Subscription/trial without expiry date — treat as not-expired.
+		// NULL = perpetual / no expiry。与老 TypePerpetual 语义一致。
 		e.recordEnforcement(operation, "allowed")
 		return nil
 	}
-
-	graceDeadline := lic.ExpiryDate.Add(time.Duration(lic.GracePeriodDays) * 24 * time.Hour)
-	if nowFunc().After(graceDeadline) || lic.Status == StatusExpired {
+	if nowFunc().After(*lic.ExpiryDate) {
 		e.recordEnforcement(operation, "denied_expired")
-		e.logger.Warn("license expired blocking write operation",
-			zap.String("license_id", lic.ID.String()),
+		e.logger.Warn("system license expired blocking write operation",
+			zap.String("license_id", lic.LicenseID),
 			zap.String("operation", operation),
 			zap.Time("expiry_date", *lic.ExpiryDate),
-			zap.Int("grace_period_days", lic.GracePeriodDays),
 		)
-		// 审计：拒绝事件落 license_logs（T-0100-P0 / R-109）
-		licID := lic.ID
+		// 审计：拒绝事件落 license_logs
 		e.logWriter.Write(ctx, LicenseLogEntry{
-			LicenseID: &licID,
-			LogType:   LogTypeEnforcementExpiry,
-			Result:    LogResultDenied,
+			LogType: LogTypeEnforcementExpiry,
+			Result:  LogResultDenied,
 			Details: map[string]any{
-				"summary":           "write operation denied: license expired",
-				"operation":         operation,
-				"expiry_date":       lic.ExpiryDate.Format(time.RFC3339),
-				"grace_period_days": lic.GracePeriodDays,
+				"summary":     "write operation denied: license expired",
+				"license_id":  lic.LicenseID,
+				"operation":   operation,
+				"expiry_date": lic.ExpiryDate.Format(time.RFC3339),
 			},
 		})
-		return fmt.Errorf("license %s expired at %s (grace=%dd): %w",
-			lic.ID, lic.ExpiryDate.Format(time.RFC3339), lic.GracePeriodDays,
+		return fmt.Errorf("system license %s expired at %s: %w",
+			lic.LicenseID, lic.ExpiryDate.Format(time.RFC3339),
 			commonerrors.ErrLicenseExpired)
 	}
 
@@ -246,7 +290,11 @@ func (e *EnforcerImpl) EnforceExpiry(ctx context.Context, operation string) erro
 }
 
 // Quota returns the current enforcement state. has_active_license=false
-// when no active license exists.
+// when no license is configured.
+//
+// 兼容老字段（MaxDevices/UsedDevices/UsageRatio/DaysRemaining）按总和填写，
+// 新增 PerType map 暴露每个 device_type 的子配额。Used 在 Phase 7 per-type
+// gating 上线前固定 0（精细化时再按 type 计数）。
 func (e *EnforcerImpl) Quota(ctx context.Context) (*Quota, error) {
 	lic, err := e.ActiveLicense(ctx)
 	if err != nil {
@@ -256,25 +304,32 @@ func (e *EnforcerImpl) Quota(ctx context.Context) (*Quota, error) {
 		return &Quota{HasActiveLicense: false}, nil
 	}
 
-	used, err := e.repo.CountDevices(ctx)
+	used, err := e.devices.CountDevices(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("count devices for quota: %w", err)
 	}
 
+	maxDevices := totalCapacity(lic)
 	q := &Quota{
 		HasActiveLicense: true,
-		MaxDevices:       lic.MaxDevices,
+		MaxDevices:       maxDevices,
 		UsedDevices:      used,
 		LicenseType:      string(lic.LicenseType),
-		GracePeriodDays:  lic.GracePeriodDays,
-		DaysRemaining:    -1, // perpetual / no expiry
+		GracePeriodDays:  0, // 新模型无 grace；保留字段为 JSON 兼容
+		DaysRemaining:    -1,
 	}
-	if lic.MaxDevices > 0 {
-		q.UsageRatio = float64(used) / float64(lic.MaxDevices)
+	if maxDevices > 0 {
+		q.UsageRatio = float64(used) / float64(maxDevices)
 	}
-	if lic.LicenseType != TypePerpetual && lic.ExpiryDate != nil {
+	if lic.ExpiryDate != nil {
 		days := int(lic.ExpiryDate.Sub(nowFunc()).Hours() / 24)
 		q.DaysRemaining = days
+	}
+	if len(lic.DevicesSupport) > 0 {
+		q.PerType = make(map[string]TypeQuotaItem, len(lic.DevicesSupport))
+		for t, m := range lic.DevicesSupport {
+			q.PerType[t] = TypeQuotaItem{Max: m}
+		}
 	}
 	return q, nil
 }

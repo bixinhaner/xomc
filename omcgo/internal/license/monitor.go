@@ -1,21 +1,27 @@
 // Package license — Monitor (cron-driven expiry + capacity checker)
 //
-// The Monitor runs three independent checks on a schedule:
+// F06 System License 重构 Step 3 起：监视器从扫多张老 licenses 行改为扫
+// system_license 唯一一行。
 //
-//	daily 00:00 UTC  expiry checker  — flips licenses past expiry+grace to expired status
-//	daily 01:00 UTC  expiring soon   — raises 30/7/1-day warnings for active subscription licenses
-//	hourly 0 min     capacity check  — raises capacity threshold alerts (80/90/95%) with 6h dedup
+// 调度（保持与老 monitor 一致，便于运维认知不变）：
 //
-// Alerts are dispatched via the AlertSink callback (defaults to no-op for
-// dev/test). The Monitor never imports `internal/alarm` directly; the wiring
-// happens in cmd/app/provider/modules.go via a sink adapter.
+//	daily 00:00 UTC  expiring soon  — 30/7/1d 过期阈值告警（已过期同 1d critical）
+//	hourly 0 min     capacity check — 80/90/95% 容量阈值告警，6h dedup
+//
+// 老 daily-01:00 expiry-sweep（把过期 license 翻状态）在新模型不再需要：
+// system_license 没有"status"字段，过期 = expiry_date < now() 直接判断，
+// 翻转动作纯冗余。已移除。
+//
+// Alerts 通过 AlertSink 派发（dev/test 默认 NoopAlertSink）；Monitor 不直接
+// 引用 internal/alarm，wiring 在 cmd/app/provider/modules.go 走 adapter。
 package license
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -35,6 +41,8 @@ const (
 )
 
 // Alert describes a license event the Monitor wants to publish.
+//
+// 新模型 system_license 主键是 UUID，告警里 LicenseID 用 SystemLicense.ID。
 type Alert struct {
 	LicenseID  uuid.UUID
 	Identifier string // e.g. "license_expiring_30d", "license_capacity_80pct"
@@ -72,28 +80,44 @@ var ExpiryWindowsDays = []struct {
 	{30, AlertSeverityWarning, "30d"},
 }
 
+// DefaultCapacityThresholds — system_license 不再像老 licenses 表那样按行
+// 配置阈值，统一用 80/90/95%（PRD F06-license-enforcement 留存的运维约定）。
+var DefaultCapacityThresholds = []int{80, 90, 95}
+
 // Monitor runs the periodic expiry+capacity checks.
 type Monitor struct {
-	repo             LicenseRepository
-	sink             AlertSink
-	metrics          *EnforcementMetrics
-	logger           *zap.Logger
-	logWriter        LogWriter // T-0100-P0：cron 触发的告警 / 自动过期审计
-	archiver         *LogArchiver // T-0100-P4-B：license_logs 6 月归档；nil 时跳过
-	archiveSchedule  string       // T-0100-P4-B：归档 cron expression；空时不注册
+	repo            SystemLicenseRepository
+	devices         DeviceCounter
+	sink            AlertSink
+	metrics         *EnforcementMetrics
+	logger          *zap.Logger
+	logWriter       LogWriter    // T-0100-P0：cron 触发的告警审计
+	archiver        *LogArchiver // T-0100-P4-B：license_logs 6 月归档；nil 时跳过
+	archiveSchedule string       // T-0100-P4-B：归档 cron expression；空时不注册
 
 	cron   *cron.Cron
 	cancel context.CancelFunc
+
+	// in-memory capacity dedup state（新模型无 last_capacity_alert_at 列，
+	// 改为进程内 6h dedup；运维重启会重置，但 hourly tick 下一轮就重新触发，
+	// 影响可接受）
+	capacityDedupMu sync.Mutex
+	lastCapAlertAt  time.Time
+	lastCapAlertPct int
 }
 
 // NewMonitor constructs a Monitor. sink defaults to NoopAlertSink when nil.
 // metrics may be nil (no-op recording).
-func NewMonitor(repo LicenseRepository, sink AlertSink, metrics *EnforcementMetrics, logger *zap.Logger) *Monitor {
+//
+// repo 是 SystemLicenseRepository；devices 是独立的 CountDevices 提供方
+// （通常与 enforcer 共用同一 PgLicenseRepository 实例）。
+func NewMonitor(repo SystemLicenseRepository, devices DeviceCounter, sink AlertSink, metrics *EnforcementMetrics, logger *zap.Logger) *Monitor {
 	if sink == nil {
 		sink = NoopAlertSink{}
 	}
 	return &Monitor{
 		repo:      repo,
+		devices:   devices,
 		sink:      sink,
 		metrics:   metrics,
 		logger:    logger.Named("license-monitor"),
@@ -102,7 +126,6 @@ func NewMonitor(repo LicenseRepository, sink AlertSink, metrics *EnforcementMetr
 }
 
 // SetLogWriter 注入真实的 LogWriter（T-0100-P0）。
-// bootstrap 早期 / 测试不注入时保持 NoopLogWriter，写入路径无 nil 风险。
 func (m *Monitor) SetLogWriter(w LogWriter) {
 	if w == nil {
 		w = NoopLogWriter{}
@@ -122,26 +145,14 @@ func (m *Monitor) SetArchiver(a *LogArchiver, schedule string) {
 
 // Start launches the cron schedule:
 //
-//   - daily 00:00 UTC  CheckExpiry
 //   - daily 01:00 UTC  CheckExpiringSoon
 //   - hourly @ 0 min   CheckCapacity
-//
-// The parent ctx scopes all check invocations; callers shut Monitor down
-// via Stop() (typically wired to graceful shutdown).
+//   - weekly (optional) license_logs archive
 func (m *Monitor) Start(ctx context.Context) error {
 	scoped, cancel := context.WithCancel(ctx)
 	m.cancel = cancel
 	m.cron = cron.New(cron.WithLocation(time.UTC))
 
-	if _, err := m.cron.AddFunc("0 0 * * *", func() {
-		c, c2 := context.WithTimeout(scoped, 5*time.Minute)
-		defer c2()
-		if err := m.CheckExpiry(c); err != nil {
-			m.logger.Warn("daily expiry sweep failed", zap.Error(err))
-		}
-	}); err != nil {
-		return fmt.Errorf("schedule expiry sweep: %w", err)
-	}
 	if _, err := m.cron.AddFunc("0 1 * * *", func() {
 		c, c2 := context.WithTimeout(scoped, 5*time.Minute)
 		defer c2()
@@ -161,9 +172,7 @@ func (m *Monitor) Start(ctx context.Context) error {
 		return fmt.Errorf("schedule capacity check: %w", err)
 	}
 
-	// T-0100-P4-B：周级归档 cron。仅在 SetArchiver 注入后注册；超时 30min（PRD
-	// 没规定单 tick 上限，但批 10000 条 + gzip 压缩 + MinIO 上传 + DELETE 通常 <
-	// 几分钟，30min 是 generous 上限）。
+	// T-0100-P4-B：周级归档 cron。仅在 SetArchiver 注入后注册。
 	if m.archiver != nil {
 		if _, err := m.cron.AddFunc(m.archiveSchedule, func() {
 			c, c2 := context.WithTimeout(scoped, 30*time.Minute)
@@ -178,14 +187,13 @@ func (m *Monitor) Start(ctx context.Context) error {
 
 	m.cron.Start()
 	logFields := []zap.Field{
-		zap.String("expiry_schedule", "0 0 * * * UTC"),
 		zap.String("expiring_soon_schedule", "0 1 * * * UTC"),
 		zap.String("capacity_schedule", "0 * * * * (hourly)"),
 	}
 	if m.archiver != nil {
 		logFields = append(logFields, zap.String("archive_schedule", m.archiveSchedule))
 	}
-	m.logger.Info("license monitor cron started", logFields...)
+	m.logger.Info("license monitor cron started (system_license model)", logFields...)
 	return nil
 }
 
@@ -199,122 +207,80 @@ func (m *Monitor) Stop() {
 	}
 }
 
-// CheckExpiry flips active licenses past expiry+grace to expired status.
-// Idempotent: safe to call repeatedly.
-func (m *Monitor) CheckExpiry(ctx context.Context) error {
-	licenses, err := m.repo.ListActiveLicenses(ctx)
-	if err != nil {
-		return fmt.Errorf("list active licenses: %w", err)
-	}
-	now := nowFunc()
-	expired := 0
-	for _, lic := range licenses {
-		if lic.LicenseType == TypePerpetual || lic.ExpiryDate == nil {
-			continue
-		}
-		grace := lic.ExpiryDate.Add(time.Duration(lic.GracePeriodDays) * 24 * time.Hour)
-		if now.After(grace) {
-			if err := m.repo.MarkExpired(ctx, lic.ID); err != nil {
-				m.logger.Error("mark expired failed",
-					zap.String("license_id", lic.ID.String()),
-					zap.Error(err))
-				continue
-			}
-			expired++
-			m.logger.Info("license marked expired",
-				zap.String("license_id", lic.ID.String()),
-				zap.Time("expiry_date", *lic.ExpiryDate),
-				zap.Int("grace_period_days", lic.GracePeriodDays),
-			)
-			// 审计：自动过期事件落 license_logs（T-0100-P0 / R-109）
-			licID := lic.ID
-			m.logWriter.Write(ctx, LicenseLogEntry{
-				LicenseID: &licID,
-				LogType:   LogTypeAutoExpire,
-				Result:    LogResultSuccess,
-				Details: map[string]any{
-					"summary":           "license auto-expired by daily cron",
-					"license_code":      lic.LicenseCode,
-					"expiry_date":       lic.ExpiryDate.Format(time.RFC3339),
-					"grace_period_days": lic.GracePeriodDays,
-				},
-			})
-		}
-	}
-	if expired > 0 {
-		m.logger.Info("expiry sweep complete", zap.Int("expired_count", expired))
-	}
-	return nil
-}
-
-// CheckExpiringSoon raises 30/7/1-day warnings for active subscription
-// licenses approaching expiry.
-func (m *Monitor) CheckExpiringSoon(ctx context.Context) error {
-	licenses, err := m.repo.ListActiveLicenses(ctx)
-	if err != nil {
-		return fmt.Errorf("list active licenses: %w", err)
-	}
-	now := nowFunc()
-	for _, lic := range licenses {
-		if lic.LicenseType == TypePerpetual || lic.ExpiryDate == nil {
-			m.metrics.SetExpiryDaysRemaining(lic.ID.String(), -1)
-			continue
-		}
-		days := int(lic.ExpiryDate.Sub(now).Hours() / 24)
-		m.metrics.SetExpiryDaysRemaining(lic.ID.String(), days)
-
-		// Find the matching window; only emit one alert per check, the
-		// most-severe (smallest-day) window we cross.
-		for _, w := range ExpiryWindowsDays {
-			if days <= w.Days && days >= 0 {
-				alert := Alert{
-					LicenseID:  lic.ID,
-					Identifier: "license_expiring_" + w.Suffix,
-					Severity:   w.Severity,
-					Summary:    fmt.Sprintf("License %s expires in %d days", lic.LicenseCode, days),
-					Details: map[string]interface{}{
-						"license_id":     lic.ID.String(),
-						"license_code":   lic.LicenseCode,
-						"expiry_date":    lic.ExpiryDate.Format(time.RFC3339),
-						"days_remaining": days,
-					},
-				}
-				if sendErr := m.sink.Send(ctx, alert); sendErr != nil {
-					m.logger.Warn("send expiry alert failed",
-						zap.String("license_id", lic.ID.String()),
-						zap.Error(sendErr))
-				}
-				// 审计：过期阈值告警事件落 license_logs（T-0100-P0 / R-109）
-				licID := lic.ID
-				m.logWriter.Write(ctx, LicenseLogEntry{
-					LicenseID: &licID,
-					LogType:   LogTypeExpiryAlert,
-					Result:    LogResultWarning,
-					Details: map[string]any{
-						"summary":        alert.Summary,
-						"identifier":     alert.Identifier,
-						"severity":       alert.Severity,
-						"license_code":   lic.LicenseCode,
-						"expiry_date":    lic.ExpiryDate.Format(time.RFC3339),
-						"days_remaining": days,
-					},
-				})
-				break
-			}
-		}
-	}
-	return nil
-}
-
-// CheckCapacity emits capacity-threshold alerts (80/90/95% by default).
+// CheckExpiringSoon 检查当前 system_license 是否进入 30/7/1d 过期窗口；
+// 已过期（days < 0）同样触发 1d critical 告警。
 //
-// Dedup rule: skip if the same threshold was alerted within
-// CapacityDedupWindow. A higher threshold crossing always fires immediately
-// (it's a more urgent signal).
-func (m *Monitor) CheckCapacity(ctx context.Context) error {
-	lic, err := m.repo.GetActiveLicenseWithMaxDevices(ctx)
+// 无 license（表空）→ noop（保留 expiry_days_remaining=-1 指标）。
+// expiry_date 为 NULL（永久）→ noop。
+func (m *Monitor) CheckExpiringSoon(ctx context.Context) error {
+	lic, err := m.getCurrentOrNil(ctx)
 	if err != nil {
-		return fmt.Errorf("get active license: %w", err)
+		return err
+	}
+	if lic == nil || lic.ExpiryDate == nil {
+		m.metrics.SetExpiryDaysRemaining("system", -1)
+		return nil
+	}
+	now := nowFunc()
+	days := int(lic.ExpiryDate.Sub(now).Hours() / 24)
+	m.metrics.SetExpiryDaysRemaining("system", days)
+
+	// 过期或在 30/7/1d 窗口内：发告警。已过期视为 1d critical。
+	if days > 30 {
+		return nil
+	}
+	severity := AlertSeverityCritical
+	suffix := "1d"
+	for _, w := range ExpiryWindowsDays {
+		if days <= w.Days {
+			severity = w.Severity
+			suffix = w.Suffix
+			break
+		}
+	}
+
+	alert := Alert{
+		LicenseID:  lic.ID,
+		Identifier: "license_expiring_" + suffix,
+		Severity:   severity,
+		Summary:    fmt.Sprintf("System license %s expires in %d days", lic.LicenseID, days),
+		Details: map[string]interface{}{
+			"license_id":     lic.LicenseID,
+			"license_pk":     lic.ID.String(),
+			"expiry_date":    lic.ExpiryDate.Format(time.RFC3339),
+			"days_remaining": days,
+		},
+	}
+	if sendErr := m.sink.Send(ctx, alert); sendErr != nil {
+		m.logger.Warn("send expiry alert failed",
+			zap.String("license_id", lic.LicenseID),
+			zap.Error(sendErr))
+	}
+	// 审计
+	licPK := lic.ID
+	m.logWriter.Write(ctx, LicenseLogEntry{
+		LicenseID: &licPK,
+		LogType:   LogTypeExpiryAlert,
+		Result:    LogResultWarning,
+		Details: map[string]any{
+			"summary":        alert.Summary,
+			"identifier":     alert.Identifier,
+			"severity":       alert.Severity,
+			"license_id":     lic.LicenseID,
+			"expiry_date":    lic.ExpiryDate.Format(time.RFC3339),
+			"days_remaining": days,
+		},
+	})
+	return nil
+}
+
+// CheckCapacity 容量阈值告警（80/90/95% 默认）+ 6h dedup。
+//
+// 无 license → SetActiveCount(0) + noop。
+func (m *Monitor) CheckCapacity(ctx context.Context) error {
+	lic, err := m.getCurrentOrNil(ctx)
+	if err != nil {
+		return err
 	}
 	if lic == nil {
 		m.metrics.SetActiveCount(0)
@@ -322,29 +288,26 @@ func (m *Monitor) CheckCapacity(ctx context.Context) error {
 	}
 	m.metrics.SetActiveCount(1)
 
-	used, err := m.repo.CountDevices(ctx)
+	used, err := m.devices.CountDevices(ctx)
 	if err != nil {
 		return fmt.Errorf("count devices: %w", err)
 	}
 
+	maxDevices := totalCapacity(lic)
 	var ratio float64
-	if lic.MaxDevices > 0 {
-		ratio = float64(used) / float64(lic.MaxDevices)
+	if maxDevices > 0 {
+		ratio = float64(used) / float64(maxDevices)
 	}
-	m.metrics.SetCapacity(used, lic.MaxDevices, ratio)
+	m.metrics.SetCapacity(used, maxDevices, ratio)
 
-	thresholds := parseThresholds(lic.CapacityAlertThresholds)
-	if len(thresholds) == 0 {
+	if maxDevices == 0 {
 		return nil
 	}
-	// Sort ascending so we can find the highest threshold currently crossed.
-	sort.Ints(thresholds)
 
-	// Find the highest threshold the current usage has crossed (% int compare).
-	usagePct := 0
-	if lic.MaxDevices > 0 {
-		usagePct = used * 100 / lic.MaxDevices
-	}
+	// 按 DefaultCapacityThresholds（80/90/95）寻最高已穿越档位。
+	thresholds := append([]int(nil), DefaultCapacityThresholds...)
+	sort.Ints(thresholds)
+	usagePct := used * 100 / maxDevices
 	highestCrossed := -1
 	for _, t := range thresholds {
 		if usagePct >= t {
@@ -355,79 +318,76 @@ func (m *Monitor) CheckCapacity(ctx context.Context) error {
 		return nil
 	}
 
-	// Dedup: same threshold within window? Skip.
+	// 6h dedup（进程内）：相同档位 6h 内不重复发；跨档位短路重发。
 	now := nowFunc()
-	if lic.LastCapacityAlertAt != nil &&
-		lic.LastCapacityAlertThreshold != nil &&
-		*lic.LastCapacityAlertThreshold == highestCrossed &&
-		now.Sub(*lic.LastCapacityAlertAt) < CapacityDedupWindow {
+	m.capacityDedupMu.Lock()
+	if m.lastCapAlertPct == highestCrossed &&
+		!m.lastCapAlertAt.IsZero() &&
+		now.Sub(m.lastCapAlertAt) < CapacityDedupWindow {
+		m.capacityDedupMu.Unlock()
 		return nil
 	}
+	m.lastCapAlertPct = highestCrossed
+	m.lastCapAlertAt = now
+	m.capacityDedupMu.Unlock()
 
 	severity := capacitySeverity(highestCrossed, thresholds)
 	alert := Alert{
 		LicenseID:  lic.ID,
 		Identifier: fmt.Sprintf("license_capacity_%dpct", highestCrossed),
 		Severity:   severity,
-		Summary:    fmt.Sprintf("License capacity %d%% (%d/%d)", usagePct, used, lic.MaxDevices),
+		Summary:    fmt.Sprintf("System license capacity %d%% (%d/%d)", usagePct, used, maxDevices),
 		Details: map[string]interface{}{
-			"license_id":   lic.ID.String(),
+			"license_id":   lic.LicenseID,
+			"license_pk":   lic.ID.String(),
 			"used_devices": used,
-			"max_devices":  lic.MaxDevices,
+			"max_devices":  maxDevices,
 			"usage_ratio":  ratio,
 			"threshold":    highestCrossed,
 		},
 	}
 	if sendErr := m.sink.Send(ctx, alert); sendErr != nil {
 		m.logger.Warn("send capacity alert failed",
-			zap.String("license_id", lic.ID.String()),
+			zap.String("license_id", lic.LicenseID),
 			zap.Error(sendErr))
-		// Persist anyway? No — re-emit on next tick if dispatch failed.
 		return nil
 	}
 
-	// 审计：容量阈值告警事件落 license_logs（T-0100-P0 / R-109）
-	licID := lic.ID
+	// 审计
+	licPK := lic.ID
 	m.logWriter.Write(ctx, LicenseLogEntry{
-		LicenseID: &licID,
+		LicenseID: &licPK,
 		LogType:   LogTypeCapacityAlert,
 		Result:    LogResultWarning,
 		Details: map[string]any{
 			"summary":      alert.Summary,
 			"identifier":   alert.Identifier,
 			"severity":     alert.Severity,
+			"license_id":   lic.LicenseID,
 			"used_devices": used,
-			"max_devices":  lic.MaxDevices,
+			"max_devices":  maxDevices,
 			"usage_ratio":  ratio,
 			"threshold":    highestCrossed,
 		},
 	})
-
-	if updErr := m.repo.UpdateCapacityAlert(ctx, lic.ID, highestCrossed, now); updErr != nil {
-		m.logger.Warn("update capacity alert dedup state failed",
-			zap.String("license_id", lic.ID.String()),
-			zap.Error(updErr))
-	}
 	return nil
 }
 
-// parseThresholds extracts an ascending []int from JSON like "[80, 90, 95]".
-// Returns nil on malformed input (caller treats as "no thresholds").
-func parseThresholds(raw json.RawMessage) []int {
-	if len(raw) == 0 {
-		return nil
+// getCurrentOrNil 拉当前 system_license；表空返 (nil, nil)；其它错误透传。
+func (m *Monitor) getCurrentOrNil(ctx context.Context) (*SystemLicense, error) {
+	lic, err := m.repo.GetCurrent(ctx)
+	if err != nil {
+		if errors.Is(err, ErrSystemLicenseNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get current system license: %w", err)
 	}
-	var out []int
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil
-	}
-	return out
+	return lic, nil
 }
 
 // capacitySeverity picks Warning/Major/Critical based on threshold position
 // among the configured thresholds. Highest threshold => critical.
 func capacitySeverity(threshold int, thresholds []int) AlertSeverity {
-	// thresholds is sorted ascending by caller.
 	if len(thresholds) == 0 {
 		return AlertSeverityWarning
 	}

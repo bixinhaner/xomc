@@ -34,6 +34,7 @@ type SystemLicenseService struct {
 	repo        SystemLicenseRepository
 	logger      *zap.Logger
 	sigVerifier *SignatureVerifier // 可选；nil 时退化为 unverified 放过
+	enforcer    Enforcer           // 可选；Update 成功后调 Invalidate 让 enforcer 重读
 }
 
 // NewSystemLicenseService 构造 service。sigVerifier 可后置 SetSignatureVerifier。
@@ -50,6 +51,13 @@ func NewSystemLicenseService(repo SystemLicenseRepository, logger *zap.Logger) *
 // 字段控制（与老 license 共用同一 verifier 实例，配置走 license.signing.strict）。
 func (s *SystemLicenseService) SetSignatureVerifier(v *SignatureVerifier) {
 	s.sigVerifier = v
+}
+
+// SetEnforcer 注入 Enforcer，让 Update 成功后能调 Invalidate 让 enforcer 立即
+// 拉新 license（避免 5min cache TTL 内 device.create 仍用旧容量裁决）。
+// nil 安全：Update 路径跳过 Invalidate。
+func (s *SystemLicenseService) SetEnforcer(e Enforcer) {
+	s.enforcer = e
 }
 
 // GetCurrent 返回当前生效 license。无 license 时返业务错误 12113 +
@@ -191,6 +199,12 @@ func (s *SystemLicenseService) Update(ctx context.Context, req UpdateRequest) (*
 			)
 		}
 		return nil, fmt.Errorf("replace system license: %w", err)
+	}
+
+	// Step 3：Update 成功立即让 enforcer 失效缓存，避免 5min TTL 内 device.create
+	// 仍走旧容量裁决。nil-safe（enforcer 未注入时 noop）。
+	if s.enforcer != nil {
+		s.enforcer.Invalidate()
 	}
 
 	s.logger.Info("system license updated",

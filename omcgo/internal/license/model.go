@@ -71,14 +71,34 @@ type License struct {
 
 // Quota describes the current license enforcement state, returned by
 // GET /api/v1/licenses/quota.
+//
+// F06 System License 重构 Step 3 起：
+//   - MaxDevices / UsedDevices / UsageRatio 现在反映 **所有 device_type 容量
+//     之和 / 总设备数**（兼容老 /quota 端点的 caller 与 PDF 导出）
+//   - PerType 是新增字段，列出每个 device_type 的子配额；前端展示 / 精细化
+//     enforcement 走这个 map
+//   - GracePeriodDays 新模型不再使用，保留字段以避免 JSON 兼容性破坏，
+//     恒为 0
 type Quota struct {
-	HasActiveLicense bool    `json:"has_active_license"`
-	MaxDevices       int     `json:"max_devices"`
-	UsedDevices      int     `json:"used_devices"`
-	UsageRatio       float64 `json:"usage_ratio"`
-	DaysRemaining    int     `json:"days_remaining"` // -1 = perpetual / no expiry
-	LicenseType      string  `json:"license_type"`
-	GracePeriodDays  int     `json:"grace_period_days"`
+	HasActiveLicense bool                     `json:"has_active_license"`
+	MaxDevices       int                      `json:"max_devices"`
+	UsedDevices      int                      `json:"used_devices"`
+	UsageRatio       float64                  `json:"usage_ratio"`
+	DaysRemaining    int                      `json:"days_remaining"` // -1 = perpetual / no expiry
+	LicenseType      string                   `json:"license_type"`
+	GracePeriodDays  int                      `json:"grace_period_days"`
+	PerType          map[string]TypeQuotaItem `json:"per_type,omitempty"`
+}
+
+// TypeQuotaItem 是 device_type 维度配额条目（新 system_license 模型）。
+//
+// Max 来自 SystemLicense.DevicesSupport[type]；Used 实际由 enforcer 在做
+// per-type 精细化校验时填充。Step 3 仅保留 Max（Used 暂为 0），精细化 gating
+// 在 Phase 7 RBAC 联动 sprint 上线。
+type TypeQuotaItem struct {
+	Max   int     `json:"max"`
+	Used  int     `json:"used"`
+	Ratio float64 `json:"ratio"`
 }
 
 // LicenseSummary contains aggregated license statistics.
