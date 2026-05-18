@@ -3462,6 +3462,12 @@ if [ -n "$ACCESS_TOKEN" ]; then
         check_status "GET /mml/commands/:id (detail)" "200" "$HTTP_CODE"
         if [ "$HTTP_CODE" = "200" ]; then
             py_check_field "MML command has command_code" "$CMD_BODY" "command_code"
+            # 回归：migration 000090 DROP mml_command_params_rel + 000095/000113 用
+            # sub_fields 替代后，PgCommandParamRepository.ListByCommandIDs 仍 JOIN 老
+            # 表会导致 attachParamRefs 静默失败 → fanout 创建 0 device_tasks。
+            # 此处断言命令详情包含 params/param_refs，并至少一条带 tr069_path。
+            py_check_field_or_empty "MML command detail has params[0].tr069_path (regression: dead-table JOIN)" \
+                "$CMD_BODY" "params.0.tr069_path"
         fi
     fi
 

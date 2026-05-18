@@ -71,6 +71,7 @@ type Fanouter struct {
 	translatorFactory ParamModelTranslatorFactory // 可空 → 所有路径走 fallback
 	deviceLookup      DeviceLookup                // 可空 → 所有路径走 fallback
 	sequentialMode    bool
+	metrics           *FanoutMetrics // 可空 → 跳过 metric 累加（测试场景）
 	logger            *zap.Logger
 }
 
@@ -99,6 +100,11 @@ func NewFanouter(
 // 启用后初次 fanout 只入队第一行；Sequencer 通过 completion callback 链式
 // 入队后续行。需要在 DI 层把 Sequencer 注册到 CompletionRouter。
 func (f *Fanouter) SetSequentialMode(enabled bool) { f.sequentialMode = enabled }
+
+// SetMetrics 挂接 Prometheus 指标集合。可重复调用；nil 则跳过累加。
+// Stage 1 整改方案 §3：每次 path 翻译 fallback 都需累加 mml_path_translation_miss_total
+// 供 alert 监控（详见 deployments/monitoring/alerts/omc-rules.yml）。
+func (f *Fanouter) SetMetrics(m *FanoutMetrics) { f.metrics = m }
 
 // Fanout creates device_tasks for each (command, device) pair in the MML task.
 // Only called for immediate execution; scheduled/periodic tasks are fan-outed when started.
@@ -260,6 +266,9 @@ func (f *Fanouter) translateParamRefs(
 			zap.String("device_sn", sn),
 			zap.Error(err),
 		)
+		if f.metrics != nil {
+			f.metrics.missDeviceLookup()
+		}
 		return refs, len(refs), nil
 	}
 
@@ -270,6 +279,9 @@ func (f *Fanouter) translateParamRefs(
 			zap.String("product_class", device.ProductClass),
 			zap.Error(err),
 		)
+		if f.metrics != nil {
+			f.metrics.missProductUnresolved()
+		}
 		return refs, len(refs), nil
 	}
 
@@ -283,6 +295,9 @@ func (f *Fanouter) translateParamRefs(
 				zap.String("sw_version", device.FirmwareVersion),
 				zap.Error(err),
 			)
+		}
+		if f.metrics != nil {
+			f.metrics.missTranslatorUnavail()
 		}
 		return refs, len(refs), nil
 	}
@@ -301,6 +316,9 @@ func (f *Fanouter) translateParamRefs(
 			missCount++
 		}
 		out = append(out, copy)
+	}
+	if f.metrics != nil {
+		f.metrics.missPathUnmapped(missCount)
 	}
 	return out, missCount, translator
 }

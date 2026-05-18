@@ -12,18 +12,25 @@ import (
 // 替代关系：替代 000090 DROP 的 mml_command_params_rel junction 表；
 // 新增字段：(mml_code, label_i18n, default_selected, is_required, sort_order)
 //
+// migration 000113：列 param_id（FK mml_params）改名为 standard_path_id（FK
+// standard_params 系统级标准 path 字典）。结构体字段名保留 ParamID 做 soft
+// alias（语义已从 mml_params.id 切换为 standard_params.id），repository 层在
+// INSERT 列名用 standard_path_id，SELECT 用 `standard_path_id AS param_id` 别名。
+//
 // 设计要点：
-//   - 一条 sub-field 行 = (command, param) 组合 + 命令上下文的 mml_code / label 覆盖
+//   - 一条 sub-field 行 = (command, standard_path) 组合 + 命令上下文的 mml_code / label 覆盖
 //   - MMLCode 命令内唯一（UNIQUE (command_id, mml_code)）
-//   - ParamID 命令内唯一（UNIQUE (command_id, param_id)）
-//   - LabelI18n 覆盖 mml_params.name_i18n 全局默认（例：同一 path 在不同命令显示名可不同）
+//   - ParamID 命令内唯一（UNIQUE (command_id, standard_path_id)，migration 000113 替代 (command_id, param_id)）
+//   - LabelI18n 覆盖全局默认 label（例：同一 path 在不同命令显示名可不同）
 //   - DefaultSelected 控制 LST 命令的勾选 UI 默认值
 //   - IsRequired 控制 MOD/ADD 命令的输入框必填红 *
 //   - 写入 sub_fields 后由触发器自动重算 mml_commands.target_paths
 type MMLCommandSubField struct {
 	ID        uuid.UUID `json:"id"        db:"id"`
 	CommandID uuid.UUID `json:"command_id" db:"command_id"`
-	ParamID   uuid.UUID `json:"param_id"   db:"param_id"`
+	// ParamID 字段名为 soft alias，自 migration 000113 起 DB 列名为
+	// standard_path_id（FK standard_params.id）。保留字段名避免上层调用面爆改。
+	ParamID uuid.UUID `json:"param_id"   db:"param_id"`
 
 	// 老系统 MML 字符串内部使用的 code（命令上下文相关）
 	// 例：path=Device.DeviceInfo.X_COM_MODULE_TYPE 在 DEVICE_INFO 命令叫 LTE_GSM_MODEL_NAME

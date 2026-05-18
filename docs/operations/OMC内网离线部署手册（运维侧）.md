@@ -2,7 +2,7 @@
 
 > **适用对象**：现场实施工程师、运维工程师。
 > **适用场景**：OMC 无线网管系统交付到运营商**内网环境**，目标网络**不通公网**。
-> **配套交付物**：离线交付包 `omc-release-<版本号>-<架构>.tar.gz`。
+> **配套交付物**：离线交付包 `omc-release-<版本号>-<架构>.tar.xz`（可从构建机 HTTP 服务下载）。
 > **配套文档**：交付包的制作见《OMC离线交付包构建手册（构建侧）》（运维侧无需关心）。
 > **文档状态**：v1.0，需随产品版本迭代同步维护。
 
@@ -78,7 +78,7 @@ OMC 由 **3 个业务进程 + 1 个前端 + 4 个基础设施 + 可选监控栈*
 
 ### 3.1 交付包目录结构
 
-> **每个版本提供两个交付包**：`omc-release-<版本>-amd64.tar.gz` 与 `-arm64.tar.gz`。
+> **每个版本提供两个交付包**：`omc-release-<版本>-amd64.tar.xz` 与 `-arm64.tar.xz`。
 > 两包结构相同，仅 `bin/` 二进制与 `images/` 镜像为对应架构；按目标机架构二选一。
 
 ```
@@ -192,7 +192,7 @@ OMC 采用**「版本目录 + `current` 软链」**方式存放**不同版本的
 │   ├── app.prod.yaml  acs.prod.yaml  worker.prod.yaml
 │   └── keys/                       #   登录 RSA 私钥等，绝不随版本走
 ├── run/logs/                       # 运行日志（跨版本保留）
-└── packages/                       # （可选）交付包 tar.gz 原始存档备查
+└── packages/                       # （可选）交付包压缩档原始存档备查
 ```
 
 **三类内容的存放原则**：
@@ -223,11 +223,11 @@ ARCH=<架构>             # amd64 或 arm64
 # 按 §5.0 布局：本版本解压到独立的 releases/<版本>/ 目录
 mkdir -p /opt/omc/releases/$VER /opt/omc/etc /opt/omc/run/logs /opt/omc/packages
 cd /opt/omc/releases/$VER
-# 将 omc-release-$VER-$ARCH.tar.gz 上传至此（架构须与上面 uname -m 匹配）
-sha256sum -c omc-release-$VER-$ARCH.tar.gz.sha256        # 校验完整性，必须 OK
-tar xzf omc-release-$VER-$ARCH.tar.gz --strip-components=1
+# 将 omc-release-$VER-$ARCH.tar.xz 上传至此（架构须与上面 uname -m 匹配）
+sha256sum -c omc-release-$VER-$ARCH.tar.xz.sha256        # 校验完整性，必须 OK
+tar xf omc-release-$VER-$ARCH.tar.xz --strip-components=1  # tar 自动识别 xz/gz 压缩
 sha256sum -c checksums.sha256                             # 校验包内文件
-mv omc-release-$VER-$ARCH.tar.gz /opt/omc/packages/       # 原始包存档备查（可选）
+mv omc-release-$VER-$ARCH.tar.xz /opt/omc/packages/       # 原始包存档备查（可选）
 
 # 把本版本设为"当前版本"——current 软链是后续所有步骤的统一入口
 ln -sfn /opt/omc/releases/$VER /opt/omc/current
@@ -496,7 +496,7 @@ cp -r /opt/omc/etc /opt/omc/packages/etc-backup-$(date +%F)
 
 # 2) 解压新版本到独立目录（current 暂不动，老版本仍在运行）
 mkdir -p /opt/omc/releases/$VER && cd /opt/omc/releases/$VER
-tar xzf omc-release-$VER-$ARCH.tar.gz --strip-components=1
+tar xf omc-release-$VER-$ARCH.tar.xz --strip-components=1
 sha256sum -c checksums.sha256
 
 # 3) 配置：比对新版本模板有无新增项，按需手工合并到 /opt/omc/etc/（不要整体覆盖）
@@ -506,6 +506,17 @@ diff -ru /opt/omc/etc /opt/omc/releases/$VER/etc
 /opt/omc/releases/$VER/bin/omcgo-migrate --dsn "$DSN" --path /opt/omc/releases/$VER/migrations up
 GOOSE_TABLE=goose_db_version_seed /opt/omc/releases/$VER/bin/omcgo-migrate \
   --dsn "$DSN" --path /opt/omc/releases/$VER/migrations/seed up
+
+# 4.1)（可选，仅首次升级到含 Stage 2 路径翻译的版本时执行）
+#     历史 device_parameters 行的 parameter_path 是基站私有 path（privatePath），
+#     从该版本起改写为系统级 standardPath。dry-run 预览 → apply 真实迁移。
+#     无脏数据 / 老版本本来就走 standardPath 的环境可跳过本步。
+/opt/omc/releases/$VER/bin/omcctl --config /opt/omc/etc/omcgo-app.prod.yaml \
+  mml migrate-device-params                       # 默认 dry-run，输出"would update N rows"
+/opt/omc/releases/$VER/bin/omcctl --config /opt/omc/etc/omcgo-app.prod.yaml \
+  mml migrate-device-params --apply --batch=500   # 真实执行；--batch 控制单事务行数
+# 校验：psql -d omcgo -c "SELECT count(*) FROM device_parameters WHERE parameter_path LIKE 'Device.X_%';"
+# 期望：0（或仅剩无 mapping 的私有路径）
 
 # 5) 切 current 软链 + 重启三进程（systemd 单元无需改动）
 systemctl stop omcgo-app omcgo-acs omcgo-worker

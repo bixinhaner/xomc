@@ -53,3 +53,35 @@ groups:
             Affected instance: {{ $labels.instance }}.
             Impact: PM/MR 文件处理与 KPI 计算延迟，告警/数据同步不实时。
             Action: 查看 run/logs/worker/worker.log。
+
+  - name: omc.mml_translation
+    interval: 30s
+    rules:
+      - alert: MMLPathTranslationMissSustained
+        # mml_path_translation_miss_total 由 internal/mml/fanout.go 在 standardPath→
+        # privatePath 翻译任一步骤 fallback 时累加，label `reason` ∈
+        # {device_lookup | product_unresolved | translator_unavail | path_unmapped}。
+        # 任何 reason 在 5min 内持续累加，意味着 ParamModel 字典 / discovered_param_mappings
+        # 与设备实际不同步，CPE 收到的 SOAP body 是 IETF 标准 path 而非厂商私有 path，
+        # 大概率被 CPE 拒为 Fault 9005。
+        expr: sum(rate(mml_path_translation_miss_total[5m])) by (reason) > 0
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: mml
+        annotations:
+          summary: "MML 路径翻译持续 fallback（reason={{ $labels.reason }}）"
+          description: |
+            过去 5 分钟内 mml_path_translation_miss_total{reason="{{ $labels.reason }}"}
+            速率持续 > 0，标准 path → 私有 path 翻译用 fallback 兜底下发。
+            Reason 含义：
+              · device_lookup       — 设备 SN 在 devices 表查不到（基站未注册）
+              · product_unresolved  — productClass 未匹配任何 product_class_patterns 正则
+              · translator_unavail  — Translator 构造失败（mapping 表数据异常）
+              · path_unmapped       — 单条 path 在 discovered / default mapping 中均无映射
+            Action:
+              1. 跑 `omcctl mml migrate-device-params --dry-run` 看哪些 device_parameters
+                 是 privatePath（说明历史脏数据未迁移）
+              2. 看 `parammodel_intersect_*` 指标确认 discovered_param_mappings 是否被填充
+              3. 必要时用 admin Tab 3 补充缺失映射并重试任务

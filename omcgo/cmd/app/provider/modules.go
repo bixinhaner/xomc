@@ -514,6 +514,9 @@ func initMiscModules(c *Container) error {
 		// Sprint B Q-V3-3：脚本多行严格序列 — 初次 fanout 仅入队 cmd_idx=0；
 		// Sequencer 通过 completion callback 链式入队后续行。
 		fanouter.SetSequentialMode(true)
+		// Stage 1 整改方案 §3：累加 mml_path_translation_miss_total 供
+		// `deployments/monitoring/alerts/omc-rules.yml MMLPathTranslationMissSustained` 告警。
+		fanouter.SetMetrics(mml.NewFanoutMetrics(c.MetricsReg))
 		mmlService.SetFanouter(fanouter)
 
 		// Sequencer：与 ResultAggregator 并行挂到 MML completion 通路，

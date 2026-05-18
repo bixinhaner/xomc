@@ -105,8 +105,11 @@ func (r *PgSubFieldRepository) Create(ctx context.Context, sf *MMLCommandSubFiel
 	if err != nil {
 		return fmt.Errorf("marshal label_i18n: %w", err)
 	}
+	// migration 000113 后 sub_fields.param_id 改名 standard_path_id；
+	// 保留结构体字段名 ParamID 做 soft alias，与 admin_repository:243 SELECT
+	// AS 别名策略保持一致。
 	query, args, err := storage.Psql.Insert("mml_command_sub_fields").
-		Columns("id", "command_id", "param_id", "mml_code", "label_i18n",
+		Columns("id", "command_id", "standard_path_id", "mml_code", "label_i18n",
 			"default_selected", "is_required", "sort_order").
 		Values(sf.ID, sf.CommandID, sf.ParamID, sf.MMLCode, labelI18n,
 			sf.DefaultSelected, sf.IsRequired, sf.SortOrder).
@@ -165,7 +168,7 @@ func (r *PgSubFieldRepository) Delete(ctx context.Context, id uuid.UUID) error {
 
 func (r *PgSubFieldRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLCommandSubField, error) {
 	query, args, err := storage.Psql.Select(
-		"id", "command_id", "param_id", "mml_code", "label_i18n",
+		"id", "command_id", "standard_path_id AS param_id", "mml_code", "label_i18n",
 		"default_selected", "is_required", "sort_order", "created_at", "updated_at",
 	).From("mml_command_sub_fields").
 		Where(sq.Eq{"id": id}).
@@ -193,7 +196,7 @@ func (r *PgSubFieldRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLC
 
 func (r *PgSubFieldRepository) ListByCommand(ctx context.Context, commandID uuid.UUID) ([]MMLCommandSubField, error) {
 	query, args, err := storage.Psql.Select(
-		"id", "command_id", "param_id", "mml_code", "label_i18n",
+		"id", "command_id", "standard_path_id AS param_id", "mml_code", "label_i18n",
 		"default_selected", "is_required", "sort_order", "created_at", "updated_at",
 	).From("mml_command_sub_fields").
 		Where(sq.Eq{"command_id": commandID}).
@@ -298,11 +301,13 @@ ORDER BY csf.sort_order ASC, csf.mml_code ASC`
 	return out, nil
 }
 
+// CountByParam returns the number of sub_fields referencing a given standard_path.
+// 入参 paramID 在 migration 000113 后语义切换为 standard_params.id（保留参数名做 soft alias）。
 func (r *PgSubFieldRepository) CountByParam(ctx context.Context, paramID uuid.UUID) (int64, error) {
-	const sqlText = `SELECT COUNT(*) FROM mml_command_sub_fields WHERE param_id = $1`
+	const sqlText = `SELECT COUNT(*) FROM mml_command_sub_fields WHERE standard_path_id = $1`
 	var n int64
 	if err := r.pool.QueryRow(ctx, sqlText, paramID).Scan(&n); err != nil {
-		return 0, fmt.Errorf("count sub_fields by param: %w", err)
+		return 0, fmt.Errorf("count sub_fields by standard_path: %w", err)
 	}
 	return n, nil
 }
@@ -803,7 +808,8 @@ func (r *PgAdminParamRepository) List(ctx context.Context, f AdminParamFilter) (
 	return out, total, nil
 }
 
-// ListReferences 反向查询：返回引用该 param_id 的命令列表（T-0131 admin Tab 3 反向查抽屉用）。
+// ListReferences 反向查询：返回引用该 standard_path 的命令列表（T-0131 admin Tab 3 反向查抽屉用）。
+// 入参 paramID 在 migration 000113 后语义切换为 standard_params.id。
 // JOIN 链：mml_command_sub_fields → mml_commands → mml_param_groups。
 // ORDER BY command_code 保持稳定顺序便于 UI 渲染。
 func (r *PgAdminParamRepository) ListReferences(ctx context.Context, paramID uuid.UUID) ([]ParamReference, error) {
@@ -813,7 +819,7 @@ SELECT c.id, c.command_code, c.logical_code, c.operation_type,
 FROM mml_command_sub_fields sf
 JOIN mml_commands c       ON c.id = sf.command_id
 JOIN mml_param_groups g   ON g.id = c.group_id
-WHERE sf.param_id = $1
+WHERE sf.standard_path_id = $1
 ORDER BY c.command_code`
 	rows, err := r.pool.Query(ctx, sqlText, paramID)
 	if err != nil {

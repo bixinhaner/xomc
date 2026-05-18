@@ -1632,7 +1632,12 @@ func (r *PgAuditRepository) CreateBatch(ctx context.Context, entries []*MMLAudit
 }
 
 // PgCommandParamRepository is a PostgreSQL implementation of CommandParamRepository.
-// Commands reference mml_params directly via mml_command_params_rel.
+//
+// Migration 000090 DROP mml_command_params_rel；migration 000095 用
+// mml_command_sub_fields 替代；migration 000113 又把 sub_fields.param_id 切换为
+// standard_path_id FK 指向 standard_params（系统级标准 path 字典）。
+// 本仓库的读路径据此重写为 JOIN mml_command_sub_fields + standard_params，
+// 不再走老的 mml_params + mml_command_params_rel。
 type PgCommandParamRepository struct {
 	pool *pgxpool.Pool
 }
@@ -1641,28 +1646,40 @@ func NewPgCommandParamRepository(pool *pgxpool.Pool) *PgCommandParamRepository {
 	return &PgCommandParamRepository{pool: pool}
 }
 
+// paramRefSelectExpr 是 ListByCommandID / ListByCommandIDs 共享的 SELECT
+// 列表达式（不含 command_id 与 FROM/WHERE）；保持两个 query 字段顺序一致，
+// Scan 才能复用同一序列。
+//
+// 字段映射（standard_params + sub_field → MMLParamRef）：
+//
+//	ID            ← csf.id              sub_field 行 id
+//	ParamCode     ← csf.mml_code        命令上下文 code（BuildTR069Params MOD 用作 form values key）
+//	ParamNameZh   ← label_i18n.zh-CN 或回退 standard_path
+//	Tr069Path     ← sp.standard_path    Fanouter 翻译为 privatePath 下发
+//	ValueType     ← lower(sp.data_type)
+//	IsWritable    ← sp.access = 'READ_WRITE'
+//	DefaultValue  ← ''                  standard_params 无此字段
+//	JsRegex       ← ''                  standard_params 无此字段
+//	ValueConstraint ← '{}'              standard_params 仅提供 min/max，BuildTR069Params 暂不消费
+const paramRefSelectExpr = `csf.id,
+       csf.mml_code,
+       COALESCE(csf.label_i18n->>'zh-CN', sp.standard_path) AS param_name_zh,
+       sp.standard_path AS tr069_path,
+       lower(COALESCE(sp.data_type, 'string'))    AS value_type,
+       (sp.access = 'READ_WRITE')                  AS is_writable,
+       ''::text                                    AS default_value,
+       ''::text                                    AS js_regex,
+       '{}'::jsonb                                 AS value_constraint`
+
 func (r *PgCommandParamRepository) ListByCommandID(ctx context.Context, commandID uuid.UUID) ([]MMLParamRef, error) {
-	// 历史种子数据中，同一 tr069_path 在 mml_params 里会有多个版本行（不同 param_version），
-	// 关联表对每行各插一条 rel，导致 JOIN 出来同一参数返回多次（同 paramCode 多次显示）。
-	// 用窗口函数按 tr069_path 取第一条（sort_order 升序，version 升序作 tiebreak），
-	// 保证 API 永远不返回重复参数；DB 侧的 dedup 见 migrations/000036。
-	rows, err := r.pool.Query(ctx,
-		`SELECT id, param_code, param_name_zh, tr069_path, value_type, is_writable,
-		        default_value, js_regex, value_constraint
-		 FROM (
-		   SELECT p.id, p.param_code, p.param_name_zh, p.tr069_path,
-		          p.value_type, p.is_writable,
-		          COALESCE(p.default_value, '') AS default_value,
-		          COALESCE(p.js_regex, '')      AS js_regex,
-		          p.value_constraint, r.sort_order,
-		          ROW_NUMBER() OVER (PARTITION BY p.tr069_path
-		                             ORDER BY r.sort_order, p.param_version) AS rn
-		   FROM mml_params p
-		   JOIN mml_command_params_rel r ON r.param_id = p.id
-		   WHERE r.command_id = $1
-		 ) t
-		 WHERE t.rn = 1
-		 ORDER BY t.sort_order`, commandID)
+	// UNIQUE(command_id, standard_path_id)（migration 000113）保证同命令下
+	// 每个 standardPath 只有一行，无需 ROW_NUMBER 去重。
+	query := `SELECT ` + paramRefSelectExpr + `
+FROM mml_command_sub_fields csf
+JOIN standard_params sp ON sp.id = csf.standard_path_id
+WHERE csf.command_id = $1
+ORDER BY csf.sort_order ASC, csf.mml_code ASC`
+	rows, err := r.pool.Query(ctx, query, commandID)
 	if err != nil {
 		return nil, fmt.Errorf("list params by command: %w", err)
 	}
@@ -1681,6 +1698,9 @@ func (r *PgCommandParamRepository) ListByCommandID(ctx context.Context, commandI
 		}
 		result = append(result, pr)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate param refs: %w", err)
+	}
 	return result, nil
 }
 
@@ -1690,23 +1710,11 @@ func (r *PgCommandParamRepository) ListByCommandIDs(ctx context.Context, command
 		return result, nil
 	}
 
-	// 同 ListByCommandID：按 (command_id, tr069_path) 分区取第一条，避免重复。
-	query := `SELECT command_id, id, param_code, param_name_zh, tr069_path,
-	                value_type, is_writable, default_value, js_regex, value_constraint
-	          FROM (
-	            SELECT r.command_id, p.id, p.param_code, p.param_name_zh, p.tr069_path,
-	                   p.value_type, p.is_writable,
-	                   COALESCE(p.default_value, '') AS default_value,
-	                   COALESCE(p.js_regex, '')      AS js_regex,
-	                   p.value_constraint, r.sort_order,
-	                   ROW_NUMBER() OVER (PARTITION BY r.command_id, p.tr069_path
-	                                      ORDER BY r.sort_order, p.param_version) AS rn
-	            FROM mml_params p
-	            JOIN mml_command_params_rel r ON r.param_id = p.id
-	            WHERE r.command_id = ANY($1)
-	          ) t
-	          WHERE t.rn = 1
-	          ORDER BY t.command_id, t.sort_order`
+	query := `SELECT csf.command_id, ` + paramRefSelectExpr + `
+FROM mml_command_sub_fields csf
+JOIN standard_params sp ON sp.id = csf.standard_path_id
+WHERE csf.command_id = ANY($1)
+ORDER BY csf.command_id, csf.sort_order ASC, csf.mml_code ASC`
 
 	rows, err := r.pool.Query(ctx, query, commandIDs)
 	if err != nil {
@@ -1726,6 +1734,9 @@ func (r *PgCommandParamRepository) ListByCommandIDs(ctx context.Context, command
 			_ = json.Unmarshal(constraintJSON, &pr.ValueConstraint)
 		}
 		result[cmdID] = append(result[cmdID], pr)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate param refs: %w", err)
 	}
 	return result, nil
 }
