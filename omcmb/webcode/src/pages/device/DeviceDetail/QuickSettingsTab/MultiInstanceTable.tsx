@@ -40,10 +40,13 @@ interface RowEditState {
  *  7. 失败标红保留输入值，"重试"按钮原值重发
  */
 export default function MultiInstanceTable({ deviceId, fapInstance, group, locale }: MultiInstanceTableProps) {
-  const objectPath = useMemo(
-    () => applyFapInstance(group.objectPath || '', fapInstance),
-    [group, fapInstance],
-  );
+  // group.objectPath 形如 "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}."
+  // - 外层 FAPService.{i} → 用 fapInstance 替换
+  // - 内层 Carrier.{i}. 末段是实例号占位符 — 剥离后得到父对象路径,用于查 schema.objects / AddObject / 拼接行 path 前缀
+  const objectPath = useMemo(() => {
+    const fapped = applyFapInstance(group.objectPath || '', fapInstance);
+    return fapped.replace(/\{i\}\.$/, '');
+  }, [group, fapInstance]);
   const { data: schemaResp, isLoading, refetch } = useParameterSchema(deviceId, objectPath);
   const updateMutation = useUpdateParameters();
   const addMutation = useAddObject();
