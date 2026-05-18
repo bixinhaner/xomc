@@ -1,0 +1,16 @@
+{
+  "license_name": "即将过期测试 — 还剩 7 天",
+  "license_code": "TEST-EXPIRING-7D",
+  "product_name": "OMC eNB Management",
+  "license_type": "subscription",
+  "status": "pending",
+  "max_devices": 200,
+  "used_devices": 0,
+  "features": ["base", "alarm"],
+  "issue_date": "2025-05-25T00:00:00Z",
+  "expiry_date": "2026-05-25T00:00:00Z",
+  "licensor": "Baicells OEM",
+  "device_type": "eNB",
+  "region": "test-expiry",
+  "notes": "测试样本：到期前 7 天。激活后用于测试 monitor.go 的 expiry_alert 触发（默认阈值 7d/3d/1d）。"
+}

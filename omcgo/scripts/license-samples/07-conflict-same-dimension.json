@@ -1,0 +1,16 @@
+{
+  "license_name": "同维度冲突测试 — eNB/cmcc 第二张",
+  "license_code": "TEST-CONFLICT-ENB-CMCC-200",
+  "product_name": "OMC eNB Management",
+  "license_type": "subscription",
+  "status": "pending",
+  "max_devices": 200,
+  "used_devices": 0,
+  "features": ["base", "alarm"],
+  "issue_date": "2026-05-18T00:00:00Z",
+  "expiry_date": "2027-05-18T00:00:00Z",
+  "licensor": "Baicells OEM",
+  "device_type": "eNB",
+  "region": "cmcc",
+  "notes": "测试样本：与场景 01 (TEST-PERP-ENB-CMCC-100) 同 (device_type=eNB, region=cmcc) 维度。先激活 01，再激活本张 → 应返 409 ActivateConflict；用户点 \"强制激活\" → 后端 auto_revoke 01 后激活 07。"
+}

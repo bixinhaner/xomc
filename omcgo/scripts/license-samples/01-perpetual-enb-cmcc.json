@@ -1,0 +1,16 @@
+{
+  "license_name": "CMCC eNB 永久授权 100 台",
+  "license_code": "TEST-PERP-ENB-CMCC-100",
+  "product_name": "OMC eNB Management",
+  "license_type": "perpetual",
+  "status": "pending",
+  "max_devices": 100,
+  "used_devices": 0,
+  "features": ["base", "alarm", "performance", "configuration"],
+  "issue_date": "2026-05-18T00:00:00Z",
+  "expiry_date": null,
+  "licensor": "Baicells OEM",
+  "device_type": "eNB",
+  "region": "cmcc",
+  "notes": "测试样本：永久授权，无过期时间。用于测试 perpetual 类型 + 设备类型/运营商组合。"
+}

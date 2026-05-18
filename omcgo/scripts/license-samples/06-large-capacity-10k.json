@@ -1,0 +1,16 @@
+{
+  "license_name": "大容量授权 — 10000 台",
+  "license_code": "TEST-LARGE-CAP-10K",
+  "product_name": "OMC Multi-vendor",
+  "license_type": "subscription",
+  "status": "pending",
+  "max_devices": 10000,
+  "used_devices": 0,
+  "features": ["base", "alarm", "performance", "configuration", "northbound", "topology", "mr"],
+  "issue_date": "2026-05-18T00:00:00Z",
+  "expiry_date": "2029-05-18T00:00:00Z",
+  "licensor": "Baicells OEM",
+  "device_type": "eNB",
+  "region": "test-large",
+  "notes": "测试样本：10000 设备规模。用于测试容量告警阈值（默认 60/80/95%）+ 全特性 features 数组。"
+}

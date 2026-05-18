@@ -1,0 +1,16 @@
+{
+  "license_name": "已过期测试授权",
+  "license_code": "TEST-EXPIRED-30D-AGO",
+  "product_name": "OMC eNB Management",
+  "license_type": "subscription",
+  "status": "pending",
+  "max_devices": 100,
+  "used_devices": 0,
+  "features": ["base"],
+  "issue_date": "2025-04-18T00:00:00Z",
+  "expiry_date": "2026-04-18T00:00:00Z",
+  "licensor": "Baicells OEM",
+  "device_type": "eNB",
+  "region": "test-expired",
+  "notes": "测试样本：expiry_date 在当前时间之前 30 天。用于测试 monitor 的 auto_expire 自动状态切换 + enforcer.go 的 grace_period 宽限期逻辑。"
+}

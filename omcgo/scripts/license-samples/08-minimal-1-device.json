@@ -1,0 +1,16 @@
+{
+  "license_name": "边界测试 — 仅 1 设备",
+  "license_code": "TEST-MIN-1-DEV",
+  "product_name": "OMC Single Device",
+  "license_type": "subscription",
+  "status": "pending",
+  "max_devices": 1,
+  "used_devices": 0,
+  "features": ["base"],
+  "issue_date": "2026-05-18T00:00:00Z",
+  "expiry_date": "2027-05-18T00:00:00Z",
+  "licensor": "Baicells OEM",
+  "device_type": "eNB",
+  "region": "test-minimal",
+  "notes": "测试样本：max_devices=1 边界值。用于测试 enforcer 的容量上限拒绝（已用 = 上限时再上线 1 台触发 enforcement_capacity 日志）。"
+}

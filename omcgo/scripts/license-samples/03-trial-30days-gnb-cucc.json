@@ -1,0 +1,16 @@
+{
+  "license_name": "CUCC gNB 试用 30 天 50 台",
+  "license_code": "TEST-TRIAL-30D-GNB-CUCC-50",
+  "product_name": "OMC gNB Management",
+  "license_type": "trial",
+  "status": "pending",
+  "max_devices": 50,
+  "used_devices": 0,
+  "features": ["base", "alarm", "performance"],
+  "issue_date": "2026-05-18T00:00:00Z",
+  "expiry_date": "2026-06-17T00:00:00Z",
+  "licensor": "Baicells OEM",
+  "device_type": "gNB",
+  "region": "cucc",
+  "notes": "测试样本：30 天试用授权。用于测试 trial 类型 + gNB 设备类型 + 较短有效期。"
+}

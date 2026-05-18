@@ -1,0 +1,16 @@
+{
+  "license_name": "CTCC eNB 1 年订阅 500 台",
+  "license_code": "TEST-SUB-1Y-ENB-CTCC-500",
+  "product_name": "OMC eNB Management",
+  "license_type": "subscription",
+  "status": "pending",
+  "max_devices": 500,
+  "used_devices": 0,
+  "features": ["base", "alarm", "performance", "configuration", "northbound"],
+  "issue_date": "2026-05-18T00:00:00Z",
+  "expiry_date": "2027-05-18T00:00:00Z",
+  "licensor": "Baicells OEM",
+  "device_type": "eNB",
+  "region": "ctcc",
+  "notes": "测试样本：1 年订阅授权。用于测试 subscription 类型 + 与场景 01 不同维度（运营商）共存。"
+}
