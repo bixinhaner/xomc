@@ -19,6 +19,9 @@ ARCHIVE="$SCRIPT_DIR/archive"
 mkdir -p "$ARCHIVE"
 command -v python3 >/dev/null 2>&1 || { echo "错误：需要 python3 提供 HTTP 服务"; exit 1; }
 
+# 启动前刷新下载索引，确保 index.html 与 archive/ 实际内容一致。
+[ -x "$SCRIPT_DIR/gen-index.sh" ] && "$SCRIPT_DIR/gen-index.sh" >/dev/null 2>&1 || true
+
 IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
 echo "──────────────────────────────────────────────"
 echo " OMC 交付包下载服务"

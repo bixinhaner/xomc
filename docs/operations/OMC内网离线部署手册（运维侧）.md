@@ -2,20 +2,27 @@
 
 > **适用对象**：现场实施工程师、运维工程师。
 > **适用场景**：OMC 无线网管系统交付到运营商**内网环境**，目标网络**不通公网**。
-> **配套交付物**：离线交付包 `omc-release-<版本号>-<架构>.tar.xz`（可从构建机 HTTP 服务下载）。
+> **配套交付物**：两个互相独立的离线交付包（可从构建机 HTTP 服务下载）——
+> **项目包** `omc-<test|release>-<版本号>-<架构>.tar.xz`（OMC 本体）与
+> **基础设施包** `omc-infra-<版本号>-<架构>.tar.xz`（Docker 引擎 + 基础镜像）。
 > **配套文档**：交付包的制作见《OMC离线交付包构建手册（构建侧）》（运维侧无需关心）。
-> **文档状态**：v1.0，需随产品版本迭代同步维护。
+> **文档状态**：v2.0（双包拆分），需随产品版本迭代同步维护。
 
 ---
 
 ## 1. 概述
 
-OMC 采用「构建侧编译、运维侧只跑二进制」的交付模式。**运维侧拿到的是一个自包含的
+OMC 采用「构建侧编译、运维侧只跑二进制」的交付模式。**运维侧拿到两个互相独立的
 离线交付包**，照本手册第 5 章逐步执行即可把系统跑起来：
 
-- **不需要 Go**、不需要 130 个 Go 三方组件、不需要 Node/npm——交付物是已编译的静态二进制。
-- **不需要联网**——所有依赖（含 Docker 引擎、基础设施镜像）都在交付包内。
-- 唯一需要在内网安装的"基础软件"是 **Docker**，它本身也打进交付包离线安装。
+- **项目包** `omc-<test|release>-<版本>-<架构>.tar.xz`——OMC 二进制 + 前端 + 配置 + 数据库迁移 + 部署模板。发版频繁。
+- **基础设施包** `omc-infra-<版本>-<架构>.tar.xz`——Docker 引擎离线安装包 + 基础镜像。不常变更。
+
+两个包**各自独立的版本号**，首次部署两个都要；之后日常升级通常只更新项目包。
+
+- **不需要 Go**、不需要 Go 三方组件、不需要 Node/npm——交付物是已编译的静态二进制。
+- **不需要联网**——所有依赖（含 Docker 引擎、基础设施镜像）都在两个交付包内。
+- 唯一需要在内网安装的"基础软件"是 **Docker**，它本身也打进基础设施包离线安装。
 
 | 组件 | 交付形态 | 运维侧操作 |
 |------|---------|-----------|
@@ -76,32 +83,26 @@ OMC 由 **3 个业务进程 + 1 个前端 + 4 个基础设施 + 可选监控栈*
 
 ## 3. 交付包内容说明
 
-### 3.1 交付包目录结构
+交付物是**两个独立交付包**，各自每架构一份（amd64 / arm64），按目标机架构二选一。
 
-> **每个版本提供两个交付包**：`omc-release-<版本>-amd64.tar.xz` 与 `-arm64.tar.xz`。
-> 两包结构相同，仅 `bin/` 二进制与 `images/` 镜像为对应架构；按目标机架构二选一。
+### 3.1 项目包 `omc-<test|release>-<版本>-<架构>/`
+
+OMC 本体。发版频繁，走"版本目录 + `current` 软链"管理（见 §5.0）。
 
 ```
-omc-release-<版本>-<架构>/
-├── README.md                      # 交付包说明 + 版本号
-├── VERSION                        # 版本号 / 构建时间 / git commit
+omc-<test|release>-<版本>-<架构>/
+├── README.md                      # 项目包说明 + 版本号 + 渠道
+├── VERSION                        # 项目版本 / 渠道 / 架构 / 构建时间 / git commit
 ├── checksums.sha256               # 全部文件 SHA256，用于校验完整性
 │
-├── docker/                        # ① Docker 引擎离线安装
-│   ├── docker-<ver>.tgz           #   Docker 静态二进制包
-│   └── install-docker.sh          #   离线安装脚本
-├── images/                        # ② Docker 镜像离线包
-│   ├── infra-images-<架构>.tar    #   postgres/redis/nats/minio/nginx
-│   ├── monitoring-images-<架构>.tar #  监控栈（可选）
-│   └── images.manifest            #   镜像清单
-├── bin/                           # ③ OMC 已编译二进制
+├── bin/                           # ① OMC 已编译二进制
 │   └── omcgo-app / omcgo-acs / omcgo-worker / omcgo-migrate / omcgo-seed / omcctl
-├── web/dist/                      # ④ 前端已编译静态资源
-├── etc/                           # ⑤ 配置模板（app/acs/worker.prod.yaml，需现场修改）
-├── data/                          # ⑥ 启动期加载的字典 XML
-├── configs/                       # ⑦ Casbin RBAC 模型 casbin_model.conf
-├── migrations/                    # ⑧ 数据库迁移 SQL（schema + seed/）
-├── deploy/                        # ⑨ 部署脚本与模板
+├── web/dist/                      # ② 前端已编译静态资源
+├── etc/                           # ③ 配置模板（app/acs/worker.prod.yaml，需现场修改）
+├── data/                          # ④ 启动期加载的字典 XML
+├── configs/                       # ⑤ Casbin RBAC 模型 casbin_model.conf
+├── migrations/                    # ⑥ 数据库迁移 SQL（schema + seed/）
+├── deploy/                        # ⑦ 部署脚本与模板
 │   ├── docker-compose.infra.yml / docker-compose.web.yml / .env
 │   ├── nginx.conf / default.conf
 │   ├── systemd/                   #   omcgo-app/acs/worker.service 模板
@@ -110,14 +111,38 @@ omc-release-<版本>-<架构>/
     └── OMC内网离线部署手册（运维侧）.md   # 本文档
 ```
 
-### 3.2 关键内容说明
+### 3.2 基础设施包 `omc-infra-<版本>-<架构>/`
 
-| 目录 | 说明 |
-|------|------|
-| `bin/` | OMC 核心二进制，静态编译，直接运行 |
-| `etc/*.prod.yaml` | 配置**模板**，含开发默认值，部署时**必须修改**密码与连接地址 |
-| `data/` `configs/` `migrations/` | 与 `bin/` **强绑定同版本**，严禁跨版本混用 |
-| `images/` | 基础设施 Docker 镜像，`docker load` 导入 |
+Docker 引擎 + 基础镜像。不常变更，**一台机器装一次**（不随项目版本走）。
+
+```
+omc-infra-<版本>-<架构>/
+├── README.md                      # 基础设施包说明 + 安装步骤
+├── VERSION                        # 基础设施版本 / 架构 / Docker 版本 / 构建时间
+├── checksums.sha256               # 全部文件 SHA256
+│
+├── docker/                        # ① Docker 引擎离线安装
+│   ├── docker-<ver>.tgz           #   Docker 静态二进制包
+│   └── install-docker.sh          #   离线安装脚本
+└── images/                        # ② Docker 镜像离线包
+    ├── infra-images-<架构>.tar     #   postgres/redis/nats/minio/nginx
+    ├── monitoring-images-<架构>.tar #  监控栈（可选）
+    └── images.manifest             #   镜像清单
+```
+
+### 3.3 关键内容说明
+
+| 目录 | 所属包 | 说明 |
+|------|--------|------|
+| `bin/` | 项目包 | OMC 核心二进制，静态编译，直接运行 |
+| `etc/*.prod.yaml` | 项目包 | 配置**模板**，含开发默认值，部署时**必须修改**密码与连接地址 |
+| `data/` `configs/` `migrations/` | 项目包 | 与 `bin/` **强绑定同版本**，严禁跨版本混用 |
+| `docker/` | 基础设施包 | Docker 引擎离线安装包 + 安装脚本 |
+| `images/` | 基础设施包 | 基础设施 Docker 镜像，`docker load` 导入 |
+
+> **两个包版本号互相独立**：项目包版本（`omc-test/omc-release-...`）与基础设施包版本
+> （`omc-infra-...`）各自演进。`deploy/.env`（项目包内）记录基础设施镜像标签，须与
+> 已 `docker load` 的基础设施包镜像一致——同源同构建侧固化，正常无需关心。
 
 ---
 
@@ -175,19 +200,20 @@ omc-release-<版本>-<架构>/
 
 ### 5.0 目录布局与版本管理约定
 
-OMC 采用**「版本目录 + `current` 软链」**方式存放**不同版本的二进制**，便于保留历史
-版本、秒级切换、快速回滚——每个交付版本独立一个目录，互不覆盖；`current` 软链指向
-当前运行版本。
+OMC 采用**「版本目录 + `current` 软链」**方式存放**不同版本的项目包**，便于保留历史
+版本、秒级切换、快速回滚——每个项目交付版本独立一个目录，互不覆盖；`current` 软链指向
+当前运行版本。基础设施包（Docker 引擎 + 镜像）一台机器只装一次，不随项目版本走。
 
 ```
 /opt/omc/
-├── releases/                       # 各版本独立目录，互不覆盖
-│   ├── 1.0.0/                      #   一个交付包解压成一个版本目录
-│   │   ├── bin/  web/  data/  configs/  migrations/  deploy/  docker/  images/
+├── releases/                       # 各项目版本独立目录，互不覆盖
+│   ├── 0.0.1-20260518-1030/        #   一个项目包解压成一个版本目录
+│   │   ├── bin/  web/  data/  configs/  migrations/  deploy/
 │   │   └── VERSION
-│   ├── 1.1.0/
-│   └── 1.2.0/                      #   ← 最新版本
-├── current  ->  releases/1.2.0     # 软链：指向"当前运行版本"，升级/回滚只切它
+│   ├── 0.0.2/
+│   └── 1.0.0/                      #   ← 最新版本
+├── current  ->  releases/1.0.0     # 软链：指向"当前运行版本"，升级/回滚只切它
+├── infra/                          # 基础设施包解压处（docker/ + images/），装一次
 ├── etc/                            # 实例配置（跨版本保留，不随交付包覆盖）
 │   ├── app.prod.yaml  acs.prod.yaml  worker.prod.yaml
 │   └── keys/                       #   登录 RSA 私钥等，绝不随版本走
@@ -195,11 +221,12 @@ OMC 采用**「版本目录 + `current` 软链」**方式存放**不同版本的
 └── packages/                       # （可选）交付包压缩档原始存档备查
 ```
 
-**三类内容的存放原则**：
+**四类内容的存放原则**：
 
 | 类别 | 内容 | 存放位置 | 升级时行为 |
 |------|------|---------|-----------|
-| **版本相关** | `bin/`、`web/`、`data/`、`configs/`、`migrations/`、`deploy/` | `releases/<版本>/` | 新版本进新目录，旧目录保留 |
+| **项目版本相关** | `bin/`、`web/`、`data/`、`configs/`、`migrations/`、`deploy/` | `releases/<版本>/` | 新版本进新目录，旧目录保留 |
+| **基础设施** | Docker 引擎、基础镜像（来自基础设施包） | `/opt/omc/infra/` | 装一次；仅基础设施包升级时才更新 |
 | **实例配置** | `*.prod.yaml`、`keys/`（站点密码/IP/密钥） | `/opt/omc/etc/` | 不覆盖；新版本模板在 `releases/<版本>/etc/`，按需 diff 合并 |
 | **持久数据** | 运行日志；数据库 / MinIO 数据（docker 卷内） | `/opt/omc/run/`、docker volume | 不随版本走 |
 
@@ -213,23 +240,39 @@ OMC 采用**「版本目录 + `current` 软链」**方式存放**不同版本的
 
 ### 步骤 1 — 上传与解压交付包
 
+首次部署需**两个包**：基础设施包解压到 `/opt/omc/infra/`（装一次），项目包解压到
+版本目录 `/opt/omc/releases/<版本>/`。
+
 ```bash
 # 先确认目标机架构，选用对应交付包：x86_64→amd64，aarch64→arm64
 uname -m
 
-VER=<版本号>            # 例如 1.2.0，与交付包 VERSION 文件一致
-ARCH=<架构>             # amd64 或 arm64
+ARCH=<架构>              # amd64 或 arm64
+PROJ=<项目包文件名>      # 如 omc-test-0.0.1-20260518-1030-$ARCH（测试阶段）
+                         # 或 omc-release-1.0.0-$ARCH（正式发布）
+INFRA=<基础设施包文件名> # 如 omc-infra-0.0.1-$ARCH
+VER=<项目版本号>         # 项目包 VERSION 文件的 project_version，作为 releases/ 目录名
 
-# 按 §5.0 布局：本版本解压到独立的 releases/<版本>/ 目录
-mkdir -p /opt/omc/releases/$VER /opt/omc/etc /opt/omc/run/logs /opt/omc/packages
+mkdir -p /opt/omc/releases/$VER /opt/omc/infra /opt/omc/etc /opt/omc/run/logs /opt/omc/packages
+
+# (1) 基础设施包 —— 解压到 /opt/omc/infra/（一台机器装一次；已装过可跳过本步）
+cd /opt/omc/infra
+# 将 $INFRA.tar.xz 上传至此
+sha256sum -c $INFRA.tar.xz.sha256                  # 校验完整性，必须 OK
+tar xf $INFRA.tar.xz --strip-components=1          # tar 自动识别 xz/gz 压缩
+sha256sum -c checksums.sha256                      # 校验包内文件
+
+# (2) 项目包 —— 解压到独立的 releases/<版本>/ 目录
 cd /opt/omc/releases/$VER
-# 将 omc-release-$VER-$ARCH.tar.xz 上传至此（架构须与上面 uname -m 匹配）
-sha256sum -c omc-release-$VER-$ARCH.tar.xz.sha256        # 校验完整性，必须 OK
-tar xf omc-release-$VER-$ARCH.tar.xz --strip-components=1  # tar 自动识别 xz/gz 压缩
-sha256sum -c checksums.sha256                             # 校验包内文件
-mv omc-release-$VER-$ARCH.tar.xz /opt/omc/packages/       # 原始包存档备查（可选）
+# 将 $PROJ.tar.xz 上传至此（架构须与上面 uname -m 匹配）
+sha256sum -c $PROJ.tar.xz.sha256
+tar xf $PROJ.tar.xz --strip-components=1
+sha256sum -c checksums.sha256
 
-# 把本版本设为"当前版本"——current 软链是后续所有步骤的统一入口
+# 原始包存档备查（可选）
+mv /opt/omc/infra/$INFRA.tar.xz* /opt/omc/releases/$VER/$PROJ.tar.xz* /opt/omc/packages/ 2>/dev/null || true
+
+# 把本项目版本设为"当前版本"——current 软链是后续所有步骤的统一入口
 ln -sfn /opt/omc/releases/$VER /opt/omc/current
 ```
 
@@ -270,12 +313,12 @@ sysctl net.ipv4.ip_forward net.bridge.bridge-nf-call-iptables net.bridge.bridge-
 
 > 若目标机**已装** Docker 且版本满足（≥ 20.10），跳过本小节。
 
-`install-docker.sh` **全程离线、不联网下载**——它只解压交付包 `docker/` 目录内
+`install-docker.sh` **全程离线、不联网下载**——它只解压基础设施包 `docker/` 目录内
 **随包带来的** `docker-<版本>.tgz`（Docker 官方静态二进制，构建侧已预先下载好）。
-若该目录缺 `docker-*.tgz`，脚本会直接报错而非联网，需联系交付方补齐交付包。
+若该目录缺 `docker-*.tgz`，脚本会直接报错而非联网，需联系交付方补齐基础设施包。
 
 ```bash
-cd /opt/omc/current/docker
+cd /opt/omc/infra/docker
 bash install-docker.sh        # 解压随包的 docker-*.tgz 到 /usr/local/bin，装 systemd 单元
 systemctl enable --now docker
 docker version                # 确认 Client/Server 均正常
@@ -283,8 +326,10 @@ docker version                # 确认 Client/Server 均正常
 
 ### 步骤 3 — 导入 Docker 镜像
 
+镜像来自基础设施包，导入到本机一次即可（项目升级不需重导）。
+
 ```bash
-cd /opt/omc/current/images
+cd /opt/omc/infra/images
 docker load -i infra-images-<架构>.tar
 docker load -i monitoring-images-<架构>.tar      # 若部署监控
 docker images                                     # 对照 images.manifest 核对
@@ -484,10 +529,15 @@ docker compose -f /opt/omc/current/deploy/docker-compose.infra.yml ps   # 基础
 升级/回滚基于 §5.0 的「版本目录 + `current` 软链」：新版本进新的 `releases/<版本>/`
 目录，切软链即生效，旧版本目录原样留存、可秒级回退。systemd 单元一次安装后无需再改。
 
-### 8.1 升级
+> 本节是**项目包升级**（日常）。基础设施包很少升级；需要时（基础设施包出了新版本）
+> 重新执行 §5 步骤 1(1) + 步骤 3，把新基础设施包解压到 `/opt/omc/infra/` 并
+> `docker load` 新镜像，与项目包升级互不影响。
+
+### 8.1 升级（项目包）
 
 ```bash
-VER=<新版本号> ; ARCH=<架构>
+VER=<新项目版本号> ; ARCH=<架构>
+PROJ=<新项目包文件名>     # 如 omc-test-<版本>-$ARCH 或 omc-release-<版本>-$ARCH
 DSN="postgres://omcgo:<密码>@127.0.0.1:5432/omcgo?sslmode=disable"
 
 # 1) 备份（不可省）：数据库 + 当前实例配置（MinIO 数据按客户备份方案另行快照）
@@ -496,7 +546,7 @@ cp -r /opt/omc/etc /opt/omc/packages/etc-backup-$(date +%F)
 
 # 2) 解压新版本到独立目录（current 暂不动，老版本仍在运行）
 mkdir -p /opt/omc/releases/$VER && cd /opt/omc/releases/$VER
-tar xf omc-release-$VER-$ARCH.tar.xz --strip-components=1
+tar xf $PROJ.tar.xz --strip-components=1
 sha256sum -c checksums.sha256
 
 # 3) 配置：比对新版本模板有无新增项，按需手工合并到 /opt/omc/etc/（不要整体覆盖）
