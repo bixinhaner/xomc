@@ -641,6 +641,14 @@ func initMiscModules(c *Container) error {
 	c.miscDeps.licenseEnforcer = licenseEnforcer
 	c.miscDeps.licenseMonitor = licenseMonitor
 
+	// F06 System License 重构 Step 2：singleton service/handler 并存装配。
+	// 复用上面已构造好的 licenseVerifier（同一 OEM 公钥与 strict 配置）。
+	// Step 3 才接 enforcer 缓存失效；Step 5 才删老 handler。
+	systemLicenseRepo := license.NewPgSystemLicenseRepository(c.PgPool)
+	systemLicenseSvc := license.NewSystemLicenseService(systemLicenseRepo, logger)
+	systemLicenseSvc.SetSignatureVerifier(licenseVerifier)
+	c.miscDeps.systemLicenseHandler = license.NewSystemLicenseHandler(systemLicenseSvc, logger)
+
 	// Wire enforcer into DeviceService so device.create / future write ops
 	// gate on capacity + expiry. Read-only operations are unaffected (D1).
 	if c.DeviceService != nil {
@@ -894,6 +902,10 @@ type miscDeps struct {
 	licenseMonitor  *license.Monitor
 	// T-0100-P0：审计日志 repo（暴露给 P1 GET /licenses/logs handler 复用）
 	licenseLogRepo license.LicenseLogRepository
+
+	// F06 System License 重构（PRD F06-system-license-redesign Step 2）：
+	// singleton 模型 handler，与上面老 multi-license handler 并存，Step 5 才下线老的。
+	systemLicenseHandler *license.SystemLicenseHandler
 
 	// Ops
 	opsHandler    *ops.Handler

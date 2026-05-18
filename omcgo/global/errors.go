@@ -150,6 +150,14 @@ const (
 	ErrCodeLicenseExportFormatInvalid     = 12107 // 原 9107：单条导出 format 不合法
 	ErrCodeLicenseBulkExportFormatInvalid = 12108 // 原 9108：批量导出 format 不合法
 	ErrCodeLicenseSignatureVerifyFailed   = 12109 // 原 9109：strict 模式签名校验失败
+
+	// 12110-12119 段 — System License 重构（F06-system-license-redesign PRD §5.3）。
+	// 这一组错误码服务于 singleton system_license 模型；旧 multi-license 错误码
+	// （12100-12109）在 Step 5 删除老 handler 时再下线。
+	ErrCodeSystemLicenseIDExists      = 12110 // license_id 已存在于 current 或 history，拒绝重复上传
+	ErrCodeSystemLicenseInvalidFormat = 12111 // license JSON 解析失败 / 必填字段缺失
+	ErrCodeSystemLicenseDowngrade     = 12112 // 新 license 容量小于已用，需 force 或先降容（Step 3 enforcer 落地）
+	ErrCodeSystemLicenseNotConfigured = 12113 // GetCurrent 时 system_license 表空
 )
 
 // Reports (13000-13999)

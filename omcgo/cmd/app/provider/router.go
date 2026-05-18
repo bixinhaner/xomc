@@ -469,6 +469,12 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// ----- License routes → resource "devices" -----
 	md.licenseHandler.RegisterRoutes(permGroup("devices"))
 
+	// ----- System License (singleton) routes → resource "devices" -----
+	// F06 重构 Step 2：与上面老 /licenses 完全并存；老接口预计 Step 5 下线。
+	if md.systemLicenseHandler != nil {
+		md.systemLicenseHandler.RegisterRoutes(permGroup("devices"))
+	}
+
 	// ----- OpsTools routes → resource "devices" -----
 	md.opsHandler.RegisterRoutes(permGroup("devices"))
 	if md.opsExtHandler != nil {
