@@ -1,11 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Col, Form, Input, Row, Space, Typography, message } from 'antd';
+import { Button, Card, Col, Form, Input, Row, Space, Tag, Typography, message, notification } from 'antd';
+import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
 import { useParameterSchema, useUpdateParameters } from '@core/hooks/api/useDeviceParameters';
 import type { ParameterSchemaItem, ParameterUpdateRequest } from '@core/types/deviceParameter';
 import type { QuickSettingsGroup } from '@core/types/quicksettings';
 import { applyFapInstance, validateValue } from './validators';
 
 const { Text } = Typography;
+
+/** Save 操作的"上次提交"状态摘要(持久化反馈,不依赖一闪而过的 toast)。 */
+interface LastSubmitState {
+  status: 'success' | 'failed';
+  count: number;
+  at: Date;
+  errorMsg?: string;
+}
+
+function formatTime(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
 
 interface CellParameterFormProps {
   deviceId: string;
@@ -28,6 +42,7 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
   const [form] = Form.useForm();
   const updateMutation = useUpdateParameters();
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [lastSubmit, setLastSubmit] = useState<LastSubmitState | null>(null);
 
   // 单实例分组：每条 standardPath 单独查 schema（少量字段，不批量优化）
   // 注：useParameterSchema 接受 pathPrefix，前缀匹配即可；这里以分组共用前缀粗查再过滤
@@ -79,21 +94,32 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
 
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
-      message.error('校验失败，请检查标红字段');
+      message.error({ content: '校验失败,请检查标红字段', duration: 6 });
       return;
     }
 
     if (updates.length === 0) {
-      message.info('无变更');
+      message.info({ content: '无变更', duration: 4 });
       return;
     }
 
     setFieldErrors({});
     try {
       await updateMutation.mutateAsync({ deviceId, parameters: updates });
-      message.success(`已下发 ${updates.length} 项变更`);
+      message.success({
+        content: `已下发 ${updates.length} 项变更,请在右上角铃铛查看任务结果`,
+        duration: 6,
+      });
+      setLastSubmit({ status: 'success', count: updates.length, at: new Date() });
     } catch (err) {
-      message.error('下发失败');
+      const errMsg = err instanceof Error ? err.message : String(err);
+      // T-0144 改用 notification.error 持久化弹窗(用户需点击关闭,失败信息不丢)
+      notification.error({
+        message: `下发失败(${group.titleZh})`,
+        description: `${updates.length} 项变更下发失败:${errMsg}。输入值已保留,可修正后重试。`,
+        duration: 0, // 不自动消失
+      });
+      setLastSubmit({ status: 'failed', count: updates.length, at: new Date(), errorMsg: errMsg });
       console.error('CellParameterForm: update failed', err);
     }
   };
@@ -106,8 +132,16 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
       size="small"
       extra={
         <Space>
+          {lastSubmit && (
+            <Tag
+              icon={lastSubmit.status === 'success' ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
+              color={lastSubmit.status === 'success' ? 'success' : 'error'}
+            >
+              上次提交:{lastSubmit.status === 'success' ? '成功' : '失败'} {lastSubmit.count} 项 · {formatTime(lastSubmit.at)}
+            </Tag>
+          )}
           <Button type="primary" onClick={handleSave} loading={updateMutation.isPending}>
-            保存
+            {updateMutation.isPending ? '下发中...' : '保 存'}
           </Button>
         </Space>
       }
