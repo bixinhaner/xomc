@@ -116,11 +116,20 @@ export default function LicenseOperations() {
 
   // ------------------- queries -------------------
   const activeLicensesQuery = useLicenses({ status: 'active', page: 1, pageSize: 200 });
+  // BUG 修复 2026-05-18：原 startTime 直接写 `dayjs().subtract(30, 'day').toISOString()`
+  // 每次 render 都重算（毫秒级 ISO 字串），React Query 当 key 变化 → 每次 render
+  // 都 refetch。本页有 4 个 mutation hook 的 isPending 状态 + Tab/Upload/Form
+  // 输入都会触发 re-render，调用频率极高。useMemo 固化挂载时算一次即可
+  // ——审计日志 30 天滚动窗口实时性不敏感。
+  const myLogsStartTime = useMemo(
+    () => dayjs().subtract(30, 'day').toISOString(),
+    [],
+  );
   const myLogsQuery = useLicenseLogs({
     page: 1,
     pageSize: 50,
     actorUserId: currentUserId,
-    startTime: dayjs().subtract(30, 'day').toISOString(),
+    startTime: myLogsStartTime,
   });
 
   // ------------------- mutations -------------------
