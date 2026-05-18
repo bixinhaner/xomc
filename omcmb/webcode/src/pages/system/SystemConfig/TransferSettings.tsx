@@ -25,13 +25,9 @@ export default function TransferSettings({ form }: TransferSettingsProps) {
 			initialValues={{
 				uploadBaseURL: '',
 				uploadPath: '',
-				uploadUsername: '',
-				uploadPassword: '',
 				uploadMaxFileSize: undefined,
 				downloadBaseURL: '',
 				downloadPath: '',
-				downloadUsername: '',
-				downloadPassword: '',
 			}}
 		>
 			<Alert
@@ -61,12 +57,6 @@ export default function TransferSettings({ form }: TransferSettingsProps) {
 							extra={t('system.transfer.pathHelp')}
 						>
 							<Input placeholder="/smallcell/FileUploadService" />
-						</Form.Item>
-						<Form.Item name="uploadUsername" label={t('system.transfer.uploadUsername')}>
-							<Input placeholder={t('common.username')} />
-						</Form.Item>
-						<Form.Item name="uploadPassword" label={t('system.transfer.uploadPassword')}>
-							<Input.Password placeholder={t('common.password')} />
 						</Form.Item>
 						<Form.Item
 							name="uploadMaxFileSize"
@@ -98,12 +88,6 @@ export default function TransferSettings({ form }: TransferSettingsProps) {
 							extra={t('system.transfer.pathHelp')}
 						>
 							<Input placeholder="/smallcell/FileDownloadService" />
-						</Form.Item>
-						<Form.Item name="downloadUsername" label={t('system.transfer.downloadUsername')}>
-							<Input placeholder={t('common.username')} />
-						</Form.Item>
-						<Form.Item name="downloadPassword" label={t('system.transfer.downloadPassword')}>
-							<Input.Password placeholder={t('common.password')} />
 						</Form.Item>
 					</Space>
 				</div>
