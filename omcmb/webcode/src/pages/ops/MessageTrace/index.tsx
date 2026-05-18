@@ -578,6 +578,7 @@ function MessageList({ task, onSelect, t }: MessageListProps) {
         setPageSize(s);
       }}
       defaultDensity="compact"
+      scroll={{ x: 'max-content', y: 'calc(100vh - 260px)' }}
     />
   );
 }
