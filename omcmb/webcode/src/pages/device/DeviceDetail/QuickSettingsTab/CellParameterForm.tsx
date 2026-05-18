@@ -1,16 +1,24 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button, Card, Col, Form, Input, Row, Space, Tag, Typography, message, notification } from 'antd';
-import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import { useParameterSchema, useUpdateParameters } from '@core/hooks/api/useDeviceParameters';
+import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
 import type { ParameterSchemaItem, ParameterUpdateRequest } from '@core/types/deviceParameter';
+import type { DeviceTaskStatus } from '@core/types/deviceTask';
 import type { QuickSettingsGroup } from '@core/types/quicksettings';
 import { applyFapInstance, validateValue } from './validators';
 
 const { Text } = Typography;
 
-/** Save 操作的"上次提交"状态摘要(持久化反馈,不依赖一闪而过的 toast)。 */
+/**
+ * Save 操作的"上次提交"状态摘要(持久化反馈,不依赖一闪而过的 toast)。
+ *
+ * T-0146:`taskId` 用于驱动 useDeviceTaskStatus 轮询真实 CPE 应答状态;
+ * `submitStatus` 是请求入队是否成功(PUT 202/4xx/5xx 的本地判断,不是 CPE 应答状态)。
+ */
 interface LastSubmitState {
-  status: 'success' | 'failed';
+  submitStatus: 'queued' | 'failed_to_queue';
+  taskId?: string;
   count: number;
   at: Date;
   errorMsg?: string;
@@ -19,6 +27,35 @@ interface LastSubmitState {
 function formatTime(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+/** T-0146:状态机 Tag 显示规则。 */
+interface StatusTagSpec {
+  color: string;
+  icon: React.ReactNode;
+  label: string;
+}
+function statusTagSpec(submit: LastSubmitState, taskStatus: DeviceTaskStatus | undefined): StatusTagSpec {
+  if (submit.submitStatus === 'failed_to_queue') {
+    return { color: 'error', icon: <CloseCircleOutlined />, label: '入队失败' };
+  }
+  // submitStatus = 'queued' 后,根据 task 真实状态分支
+  switch (taskStatus) {
+    case 'completed':
+      return { color: 'success', icon: <CheckCircleOutlined />, label: '基站应答成功' };
+    case 'failed':
+      return { color: 'error', icon: <CloseCircleOutlined />, label: '基站应答失败' };
+    case 'expired':
+      return { color: 'warning', icon: <ClockCircleOutlined />, label: '超时' };
+    case 'cancelled':
+      return { color: 'default', icon: <CloseCircleOutlined />, label: '已取消' };
+    case 'sent':
+      return { color: 'processing', icon: <SendOutlined />, label: '已发送给基站' };
+    case 'pending':
+    default:
+      // pending 或 task 还没拉到(刚 mutateAsync 完)
+      return { color: 'processing', icon: <SyncOutlined spin />, label: '已入队,等待下发' };
+  }
 }
 
 interface CellParameterFormProps {
@@ -105,24 +142,50 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
 
     setFieldErrors({});
     try {
-      await updateMutation.mutateAsync({ deviceId, parameters: updates });
+      const result = await updateMutation.mutateAsync({ deviceId, parameters: updates });
       message.success({
-        content: `已下发 ${updates.length} 项变更,请在右上角铃铛查看任务结果`,
+        content: `已下发 ${updates.length} 项变更,正在等待基站应答(Tag 状态会自动刷新)`,
         duration: 6,
       });
-      setLastSubmit({ status: 'success', count: updates.length, at: new Date() });
+      setLastSubmit({
+        submitStatus: 'queued',
+        taskId: result.taskId,
+        count: updates.length,
+        at: new Date(),
+      });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       // T-0144 改用 notification.error 持久化弹窗(用户需点击关闭,失败信息不丢)
       notification.error({
         message: `下发失败(${group.titleZh})`,
-        description: `${updates.length} 项变更下发失败:${errMsg}。输入值已保留,可修正后重试。`,
+        description: `${updates.length} 项变更入队失败:${errMsg}。输入值已保留,可修正后重试。`,
         duration: 0, // 不自动消失
       });
-      setLastSubmit({ status: 'failed', count: updates.length, at: new Date(), errorMsg: errMsg });
+      setLastSubmit({
+        submitStatus: 'failed_to_queue',
+        count: updates.length,
+        at: new Date(),
+        errorMsg: errMsg,
+      });
       console.error('CellParameterForm: update failed', err);
     }
   };
+
+  // T-0146:Save 后用 task_id 轮询真实 CPE 应答状态;到终态后停轮询。
+  const { data: lastTask } = useDeviceTaskStatus(lastSubmit?.taskId);
+
+  // T-0146:基站应答失败时弹一次 notification(只在 status 第一次变成 failed 时触发,避免重复弹)
+  const [notifiedFailedTaskId, setNotifiedFailedTaskId] = useState<string | null>(null);
+  useEffect(() => {
+    if (lastTask && lastTask.status === 'failed' && lastTask.id !== notifiedFailedTaskId) {
+      notification.error({
+        message: `基站应答失败(${group.titleZh})`,
+        description: lastTask.errorMessage || '未知错误,可在通知中心查看任务详情',
+        duration: 0,
+      });
+      setNotifiedFailedTaskId(lastTask.id);
+    }
+  }, [lastTask, group.titleZh, notifiedFailedTaskId]);
 
   const title = locale === 'zh-CN' ? group.titleZh : group.titleEn;
 
@@ -132,14 +195,14 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
       size="small"
       extra={
         <Space>
-          {lastSubmit && (
-            <Tag
-              icon={lastSubmit.status === 'success' ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
-              color={lastSubmit.status === 'success' ? 'success' : 'error'}
-            >
-              上次提交:{lastSubmit.status === 'success' ? '成功' : '失败'} {lastSubmit.count} 项 · {formatTime(lastSubmit.at)}
-            </Tag>
-          )}
+          {lastSubmit && (() => {
+            const spec = statusTagSpec(lastSubmit, lastTask?.status);
+            return (
+              <Tag icon={spec.icon} color={spec.color}>
+                {spec.label} · {lastSubmit.count} 项 · {formatTime(lastSubmit.at)}
+              </Tag>
+            );
+          })()}
           <Button type="primary" onClick={handleSave} loading={updateMutation.isPending}>
             {updateMutation.isPending ? '下发中...' : '保 存'}
           </Button>

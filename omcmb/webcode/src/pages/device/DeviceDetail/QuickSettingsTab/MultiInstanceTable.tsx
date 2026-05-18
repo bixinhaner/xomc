@@ -1,6 +1,6 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Card, Input, Modal, Popconfirm, Space, Table, Tag, Typography, message, notification } from 'antd';
-import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import type { ColumnType } from 'antd/es/table';
 import {
   useAddObject,
@@ -8,16 +8,25 @@ import {
   useParameterSchema,
   useUpdateParameters,
 } from '@core/hooks/api/useDeviceParameters';
+import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
 import type { ParameterSchemaItem, ParameterUpdateRequest } from '@core/types/deviceParameter';
+import type { DeviceTaskStatus } from '@core/types/deviceTask';
 import type { QuickSettingsGroup } from '@core/types/quicksettings';
 import { applyFapInstance, validateValue } from './validators';
 
 const { Text } = Typography;
 
-/** 行级 Save / Add / Delete 的"上次提交"状态摘要。 */
+/**
+ * 行级 Save / Add / Delete 的"上次操作"状态摘要。
+ *
+ * T-0146:Save 类操作携带 taskId 用于轮询真实 CPE 应答状态;
+ * AddObject/DeleteObject 当前后端不返 taskId(它们走 useAddObject/useDeleteObject Hook 不返 task),
+ * 故 add/delete 操作仅保留入队结果反馈(submitStatus),无 task 轮询。
+ */
 interface LastActionState {
   action: 'save' | 'add' | 'delete';
-  status: 'success' | 'failed';
+  submitStatus: 'queued' | 'failed_to_queue';
+  taskId?: string;
   detail: string;
   at: Date;
 }
@@ -25,6 +34,38 @@ interface LastActionState {
 function formatTime(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+/** T-0146:状态机 Tag 显示规则(与 CellParameterForm 一致)。 */
+interface StatusTagSpec {
+  color: string;
+  icon: React.ReactNode;
+  label: string;
+}
+function statusTagSpec(action: LastActionState, taskStatus: DeviceTaskStatus | undefined): StatusTagSpec {
+  const actionLabel = action.action === 'save' ? '保存' : action.action === 'add' ? '新增' : '删除';
+  if (action.submitStatus === 'failed_to_queue') {
+    return { color: 'error', icon: <CloseCircleOutlined />, label: `${actionLabel}入队失败` };
+  }
+  // AddObject / DeleteObject 当前不返 task_id;仅 Save 走完整状态机
+  if (!action.taskId) {
+    return { color: 'processing', icon: <SyncOutlined spin />, label: `${actionLabel}已入队` };
+  }
+  switch (taskStatus) {
+    case 'completed':
+      return { color: 'success', icon: <CheckCircleOutlined />, label: `${actionLabel}成功` };
+    case 'failed':
+      return { color: 'error', icon: <CloseCircleOutlined />, label: `${actionLabel}基站应答失败` };
+    case 'expired':
+      return { color: 'warning', icon: <ClockCircleOutlined />, label: `${actionLabel}超时` };
+    case 'cancelled':
+      return { color: 'default', icon: <CloseCircleOutlined />, label: `${actionLabel}已取消` };
+    case 'sent':
+      return { color: 'processing', icon: <SendOutlined />, label: `${actionLabel}已发送给基站` };
+    case 'pending':
+    default:
+      return { color: 'processing', icon: <SyncOutlined spin />, label: `${actionLabel}已入队,等待下发` };
+  }
 }
 
 interface MultiInstanceTableProps {
@@ -161,12 +202,18 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
       return;
     }
     try {
-      await updateMutation.mutateAsync({ deviceId, parameters: updates });
+      const result = await updateMutation.mutateAsync({ deviceId, parameters: updates });
       message.success({
-        content: `第 ${instId} 行已下发 ${updates.length} 项变更,请在右上角铃铛查看任务结果`,
+        content: `第 ${instId} 行已下发 ${updates.length} 项变更,正在等待基站应答(Tag 会自动刷新)`,
         duration: 6,
       });
-      setLastAction({ action: 'save', status: 'success', detail: `第 ${instId} 行 ${updates.length} 项`, at: new Date() });
+      setLastAction({
+        action: 'save',
+        submitStatus: 'queued',
+        taskId: result.taskId,
+        detail: `第 ${instId} 行 ${updates.length} 项`,
+        at: new Date(),
+      });
       // 清空 edits(schema 重新拉取时会同步当前值)
       setRowEdits((prev) => {
         const next = new Map(prev);
@@ -177,11 +224,16 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       notification.error({
-        message: `第 ${instId} 行下发失败(${group.titleZh})`,
-        description: `${updates.length} 项变更失败:${errMsg}。输入值已保留,可修正后重试。`,
+        message: `第 ${instId} 行入队失败(${group.titleZh})`,
+        description: `${updates.length} 项变更入队失败:${errMsg}。输入值已保留,可修正后重试。`,
         duration: 0,
       });
-      setLastAction({ action: 'save', status: 'failed', detail: `第 ${instId} 行:${errMsg}`, at: new Date() });
+      setLastAction({
+        action: 'save',
+        submitStatus: 'failed_to_queue',
+        detail: `第 ${instId} 行:${errMsg}`,
+        at: new Date(),
+      });
       console.error('MultiInstanceTable: row save failed', err);
     }
   };
@@ -194,19 +246,38 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
         content: '已下发 AddObject,请在新行填值后点击保存完成 SetParameterValues',
         duration: 6,
       });
-      setLastAction({ action: 'add', status: 'success', detail: '新增实例', at: new Date() });
+      // AddObject 后端当前不返 taskId,Tag 仅显示"新增已入队"
+      setLastAction({ action: 'add', submitStatus: 'queued', detail: '新增实例', at: new Date() });
       void refetch();
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       notification.error({
-        message: `AddObject 失败(${group.titleZh})`,
+        message: `AddObject 入队失败(${group.titleZh})`,
         description: errMsg,
         duration: 0,
       });
-      setLastAction({ action: 'add', status: 'failed', detail: errMsg, at: new Date() });
+      setLastAction({ action: 'add', submitStatus: 'failed_to_queue', detail: errMsg, at: new Date() });
       console.error('MultiInstanceTable: AddObject failed', err);
     }
   };
+
+  // T-0146:Save 后用 task_id 轮询真实 CPE 应答状态;到终态后停轮询。
+  // AddObject / DeleteObject 暂不走 taskId(后端 useAddObject/useDeleteObject 未返 task),
+  // Tag 只显示"入队成功/失败"语义。
+  const { data: lastTask } = useDeviceTaskStatus(lastAction?.taskId);
+
+  // T-0146:基站应答失败时弹一次 notification(仅在 status 第一次变成 failed 时触发)
+  const [notifiedFailedTaskId, setNotifiedFailedTaskId] = useState<string | null>(null);
+  useEffect(() => {
+    if (lastTask && lastTask.status === 'failed' && lastTask.id !== notifiedFailedTaskId) {
+      notification.error({
+        message: `基站应答失败(${group.titleZh})`,
+        description: lastTask.errorMessage || '未知错误,可在通知中心查看任务详情',
+        duration: 0,
+      });
+      setNotifiedFailedTaskId(lastTask.id);
+    }
+  }, [lastTask, group.titleZh, notifiedFailedTaskId]);
 
   const handleDelete = async (instId: string) => {
     Modal.confirm({
@@ -220,16 +291,21 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
             content: `已下发 DeleteObject(${instId}),请在右上角铃铛查看任务结果`,
             duration: 6,
           });
-          setLastAction({ action: 'delete', status: 'success', detail: `实例 ${instId}`, at: new Date() });
+          setLastAction({ action: 'delete', submitStatus: 'queued', detail: `实例 ${instId}`, at: new Date() });
           void refetch();
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
           notification.error({
-            message: `DeleteObject 失败(${group.titleZh})`,
+            message: `DeleteObject 入队失败(${group.titleZh})`,
             description: `实例 ${instId} 删除失败:${errMsg}`,
             duration: 0,
           });
-          setLastAction({ action: 'delete', status: 'failed', detail: `实例 ${instId}:${errMsg}`, at: new Date() });
+          setLastAction({
+            action: 'delete',
+            submitStatus: 'failed_to_queue',
+            detail: `实例 ${instId}:${errMsg}`,
+            at: new Date(),
+          });
           console.error('MultiInstanceTable: DeleteObject failed', err);
         }
       },
@@ -296,15 +372,14 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
       size="small"
       extra={
         <Space>
-          {lastAction && (
-            <Tag
-              icon={lastAction.status === 'success' ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
-              color={lastAction.status === 'success' ? 'success' : 'error'}
-            >
-              上次{lastAction.action === 'save' ? '保存' : lastAction.action === 'add' ? '新增' : '删除'}:
-              {lastAction.status === 'success' ? '成功' : '失败'} · {lastAction.detail} · {formatTime(lastAction.at)}
-            </Tag>
-          )}
+          {lastAction && (() => {
+            const spec = statusTagSpec(lastAction, lastTask?.status);
+            return (
+              <Tag icon={spec.icon} color={spec.color}>
+                {spec.label} · {lastAction.detail} · {formatTime(lastAction.at)}
+              </Tag>
+            );
+          })()}
           <Button type="primary" onClick={() => void handleAdd()} disabled={!canAdd} loading={addMutation.isPending}>
             {addMutation.isPending ? '下发中...' : '新 增'}
           </Button>

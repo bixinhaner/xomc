@@ -300,7 +300,8 @@ func (h *ParameterTreeHandler) SetParameterValues(c *gin.Context) {
 		}
 	}
 
-	if err := h.deviceService.SetParameters(c.Request.Context(), id, req.Parameters); err != nil {
+	taskID, err := h.deviceService.SetParameters(c.Request.Context(), id, req.Parameters)
+	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
@@ -309,6 +310,7 @@ func (h *ParameterTreeHandler) SetParameterValues(c *gin.Context) {
 		"message":         "set parameter values command queued",
 		"parameters":      len(req.Parameters),
 		"reboot_required": rebootRequired,
+		"task_id":         taskID, // T-0146:前端用 useTaskStatus 轮询真实 CPE 应答状态
 	})
 }
 

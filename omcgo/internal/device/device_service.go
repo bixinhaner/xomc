@@ -315,17 +315,18 @@ func (s *DeviceService) SetRFSwitch(ctx context.Context, deviceID uuid.UUID, ena
 }
 
 // SetParameters queues a SetParameterValues RPC command for the given device.
-func (s *DeviceService) SetParameters(ctx context.Context, deviceID uuid.UUID, params []ParameterValueItem) error {
+// 返回任务 ID(T-0146:供前端用 useTaskStatus 轮询真实 CPE 应答状态)。
+func (s *DeviceService) SetParameters(ctx context.Context, deviceID uuid.UUID, params []ParameterValueItem) (string, error) {
 	device, err := s.deviceRepo.GetByID(ctx, deviceID)
 	if err != nil {
-		return fmt.Errorf("get device for set params: %w", err)
+		return "", fmt.Errorf("get device for set params: %w", err)
 	}
 	if device == nil {
-		return commonerrors.ErrNotFound
+		return "", commonerrors.ErrNotFound
 	}
 
 	if s.taskSvc == nil {
-		return fmt.Errorf("task service not configured")
+		return "", fmt.Errorf("task service not configured")
 	}
 
 	// Build SPV parameter list.
@@ -347,27 +348,29 @@ func (s *DeviceService) SetParameters(ctx context.Context, deviceID uuid.UUID, p
 		"parameter_key":  fmt.Sprintf("ui-spv-%d", time.Now().Unix()),
 	})
 	if err != nil {
-		return fmt.Errorf("marshal SPV params: %w", err)
+		return "", fmt.Errorf("marshal SPV params: %w", err)
 	}
 
-	if _, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+	createdTask, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
 		DeviceSN:   device.SerialNumber,
 		Method:     "SetParameterValues",
 		Params:     paramsJSON,
 		Priority:   5,
 		CommandKey: fmt.Sprintf("ui-spv-%s", uuid.New().String()[:8]),
 		Source:     task.TaskSourceAPI,
-	}); err != nil {
-		return fmt.Errorf("queue SPV command: %w", err)
+	})
+	if err != nil {
+		return "", fmt.Errorf("queue SPV command: %w", err)
 	}
 
 	s.logger.Info("set parameter values command queued",
 		zap.String("device_id", deviceID.String()),
 		zap.String("serial_number", device.SerialNumber),
 		zap.Int("param_count", len(params)),
+		zap.String("task_id", createdTask.ID),
 	)
 
-	return nil
+	return createdTask.ID, nil
 }
 
 // ParameterValueItem represents a single parameter to set.
