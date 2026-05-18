@@ -28,50 +28,53 @@
 -- ============================================================
 
 -- ---------- Step 1: 10 个新顶（固定 UUID 便于 Step 3 映射引用） ----------
+-- 列集对齐 seed/000111_mml_old_catalog_import.sql 已用的 11 列；migration
+-- 000090 把 level / parent_id / 一堆 BOOLEAN 元属性 DROP 掉了，本表当前
+-- schema 不含 level（fix 自 SQLSTATE 42703 失败回滚）。
 INSERT INTO mml_param_groups
-    (id, group_code, group_name_zh, group_name_en, name_i18n, path, level,
+    (id, group_code, group_name_zh, group_name_en, name_i18n, path,
      param_version, display_order, is_active, source, catalog_protected)
 VALUES
     ('b0c0d0e0-0001-4000-8000-000000000001'::uuid, 'top_btsinfo',
         '设备信息', 'BTS Info',
         '{"zh-CN":"设备信息","en-US":"BTS Info"}'::jsonb,
-        'top_btsinfo'::ltree, 0, 'STANDARD', 0, true, 'standard', true),
+        'top_btsinfo'::ltree, 'STANDARD', 0, true, 'standard', true),
     ('b0c0d0e0-0001-4000-8000-000000000002'::uuid, 'top_btssetting',
         '设备设置', 'BTS Setting',
         '{"zh-CN":"设备设置","en-US":"BTS Setting"}'::jsonb,
-        'top_btssetting'::ltree, 0, 'STANDARD', 1, true, 'standard', true),
+        'top_btssetting'::ltree, 'STANDARD', 1, true, 'standard', true),
     ('b0c0d0e0-0001-4000-8000-000000000003'::uuid, 'top_network',
         '网络', 'Network',
         '{"zh-CN":"网络","en-US":"Network"}'::jsonb,
-        'top_network'::ltree, 0, 'STANDARD', 2, true, 'standard', true),
+        'top_network'::ltree, 'STANDARD', 2, true, 'standard', true),
     ('b0c0d0e0-0001-4000-8000-000000000004'::uuid, 'top_system',
         '系统', 'System',
         '{"zh-CN":"系统","en-US":"System"}'::jsonb,
-        'top_system'::ltree, 0, 'STANDARD', 3, true, 'standard', true),
+        'top_system'::ltree, 'STANDARD', 3, true, 'standard', true),
     ('b0c0d0e0-0001-4000-8000-000000000005'::uuid, 'top_lte',
         'LTE 配置', 'LTE Setting',
         '{"zh-CN":"LTE 配置","en-US":"LTE Setting"}'::jsonb,
-        'top_lte'::ltree, 0, 'STANDARD', 4, true, 'standard', true),
+        'top_lte'::ltree, 'STANDARD', 4, true, 'standard', true),
     ('b0c0d0e0-0001-4000-8000-000000000006'::uuid, 'top_special',
         '高级配置', 'Special Configuration',
         '{"zh-CN":"高级配置","en-US":"Special Configuration"}'::jsonb,
-        'top_special'::ltree, 0, 'STANDARD', 5, true, 'standard', true),
+        'top_special'::ltree, 'STANDARD', 5, true, 'standard', true),
     ('b0c0d0e0-0001-4000-8000-000000000007'::uuid, 'top_maintenance',
         '维护', 'Maintenance',
         '{"zh-CN":"维护","en-US":"Maintenance"}'::jsonb,
-        'top_maintenance'::ltree, 0, 'STANDARD', 6, true, 'standard', true),
+        'top_maintenance'::ltree, 'STANDARD', 6, true, 'standard', true),
     ('b0c0d0e0-0001-4000-8000-000000000008'::uuid, 'top_elecadj',
         '电调天线', 'Electric Adjustment Configuration',
         '{"zh-CN":"电调天线","en-US":"Electric Adjustment Configuration"}'::jsonb,
-        'top_elecadj'::ltree, 0, 'STANDARD', 7, true, 'standard', true),
+        'top_elecadj'::ltree, 'STANDARD', 7, true, 'standard', true),
     ('b0c0d0e0-0001-4000-8000-000000000009'::uuid, 'top_euru',
         'EU&RU', 'EU&RU Setting',
         '{"zh-CN":"EU&RU","en-US":"EU&RU Setting"}'::jsonb,
-        'top_euru'::ltree, 0, 'STANDARD', 8, true, 'standard', true),
+        'top_euru'::ltree, 'STANDARD', 8, true, 'standard', true),
     ('b0c0d0e0-0001-4000-8000-00000000000a'::uuid, 'top_vswr',
         '驻波比', 'VSWR',
         '{"zh-CN":"驻波比","en-US":"VSWR"}'::jsonb,
-        'top_vswr'::ltree, 0, 'STANDARD', 9, true, 'standard', true)
+        'top_vswr'::ltree, 'STANDARD', 9, true, 'standard', true)
 ON CONFLICT (param_version, group_code) DO NOTHING;
 
 -- ---------- Step 2: 删除 DROP 类目下的所有命令 ----------
