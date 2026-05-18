@@ -80,12 +80,24 @@
 ```bash
 cd omcgo/scripts/license-samples
 
-# 默认 localhost:8081 admin/admin123
+# 默认 localhost:8081 admin/admin123（脚本自动走 RSA-OAEP 加密登录）
 ./seed-licenses.sh
 
-# 或自定义
-API=http://172.21.175.129:8081 USER=admin PASS=OMC@123456 ./seed-licenses.sh
+# 或自定义（注意：变量名是 OMC_USER / OMC_PASS，不是 USER / PASS——
+#         避免与系统已 export 的 $USER=cb 冲突）
+API=http://172.21.175.129:8081 OMC_USER=admin OMC_PASS=OMC@123456 ./seed-licenses.sh
+
+# 也可以从浏览器 DevTools 拷贝 Authorization 头里的 Bearer token 直接传入
+# 跳过加密登录步骤：
+TOKEN=eyJhbGciOiJIUzI1Ni... ./seed-licenses.sh
 ```
+
+**依赖**：`openssl 1.1.1+`（或 LibreSSL 3.x，macOS 默认有）+ `python3`。
+
+**登录原理**：后端禁用明文密码（biz_code 7004 "明文密码登录已禁用"）。脚本自动：
+1. `GET /auth/public-key` 拿 RSA 公钥（PEM）+ key_id
+2. 构造 `{password, ts, nonce}` JSON，`openssl pkeyutl` 用 RSA-OAEP/SHA-256 加密 → base64
+3. `POST /auth/login` 带 `{username, encrypted_password, key_id}` → 拿 access_token
 
 脚本输出形式：
 ```
