@@ -710,6 +710,15 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 					log.Error("mark task completed", zap.Error(markErr), zap.String("task_id", taskItem.ID))
 				}
 				log.Info("task completed", zap.String("task_id", taskItem.ID), zap.String("method", taskItem.Method))
+
+				// T-0147:SetParameterValues 成功后,自动入队 GPV 回读改过的 path。
+				// 原因:SetParameterValuesResponse 仅含 Status(无 path/value),CPE 端真已应用但
+				// OMC device_parameters.current_value 未更新;期望 Inform 自动同步但
+				// BaiBLQ inform_interval=300s + Inform 不全量上报 → UI 长时间看到旧值。
+				// 回读由已有 RPCResponseSubscriber.handleGPVResponse 写库,本 hook 仅入队。
+				if method == soap.MethodSetParameterValuesResp {
+					h.queueAutoGPVAfterSPV(r.Context(), taskItem, log)
+				}
 			}
 		}
 	}
@@ -1338,6 +1347,74 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 	if err := h.eventBus.Publish(ctx, subject, evt); err != nil {
 		log.Error("publish RPC response event", zap.Error(err), zap.String("subject", subject))
 	}
+}
+
+// queueAutoGPVAfterSPV 在 SetParameterValuesResponse 成功完成后,自动入队一个
+// GetParameterValues task 拉取本次改过的 path 列表,触发 device_parameters.current_value 同步。
+//
+// 触发条件:T-0147 在 SPV task completed 后调用本函数。
+// 工作流:
+//  1. 从 SPV task.Params 解析 values: [{name, value, type}, ...](与 dispatcher BuildRequest 期望对齐)
+//  2. 提取 path 列表
+//  3. 调 task service 入队 GPV(method=GetParameterValues, params={names: [...]});
+//     command_key 关联原 SPV task_id 便于追溯
+//  4. GPV 完成后由已有 RPCResponseSubscriber.handleGPVResponse 自动写 device_parameters
+//
+// 失败语义:解析/入队失败 仅 log Warn,不阻塞主流程(SPV 主任务已完成)。
+func (h *Handler) queueAutoGPVAfterSPV(ctx context.Context, spvTask *task.Task, log *zap.Logger) {
+	if h.taskService == nil || spvTask == nil || len(spvTask.Params) == 0 {
+		return
+	}
+
+	var spvParams struct {
+		Values []struct {
+			Name string `json:"name"`
+		} `json:"values"`
+	}
+	if err := json.Unmarshal(spvTask.Params, &spvParams); err != nil {
+		log.Warn("T-0147 auto GPV after SPV: parse spv params failed",
+			zap.Error(err), zap.String("spv_task_id", spvTask.ID))
+		return
+	}
+	if len(spvParams.Values) == 0 {
+		return
+	}
+
+	names := make([]string, 0, len(spvParams.Values))
+	for _, v := range spvParams.Values {
+		if v.Name != "" {
+			names = append(names, v.Name)
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+
+	gpvParams, err := json.Marshal(map[string]interface{}{"names": names})
+	if err != nil {
+		log.Warn("T-0147 auto GPV after SPV: marshal gpv params failed",
+			zap.Error(err), zap.String("spv_task_id", spvTask.ID))
+		return
+	}
+
+	gpvTask, err := h.taskService.CreateTask(ctx, &task.CreateTaskRequest{
+		DeviceSN:    spvTask.DeviceSN,
+		Method:      "GetParameterValues",
+		Params:      gpvParams,
+		Priority:    5,
+		CommandKey:  fmt.Sprintf("auto-gpv-after-spv-%s", spvTask.ID[:8]),
+		Source:      task.TaskSourceSystem,
+		Description: "auto GPV after SPV (T-0147)",
+	})
+	if err != nil {
+		log.Warn("T-0147 auto GPV after SPV: enqueue gpv failed",
+			zap.Error(err), zap.String("spv_task_id", spvTask.ID))
+		return
+	}
+	log.Info("T-0147 auto GPV after SPV: enqueued",
+		zap.String("spv_task_id", spvTask.ID),
+		zap.String("gpv_task_id", gpvTask.ID),
+		zap.Int("param_count", len(names)))
 }
 
 func (h *Handler) sendInformResponse(w http.ResponseWriter, cwmpID string, log *zap.Logger) {
