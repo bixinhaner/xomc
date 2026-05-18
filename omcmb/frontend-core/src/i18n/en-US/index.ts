@@ -2274,6 +2274,8 @@ const messages: Record<string, string> = {
   'license.signatureVerifyFailedTitle':     'Signature Verification Failed (code 12109)',
   'license.signatureVerifyFailedMsg':       'Backend strict mode rejected the license: signature verification failed. Please upload a license file with a valid OEM signature, or contact OEM for re-signing.',
   'license.noFileSelected':                 'Please select a license file first',
+  'license.fileParseFailed':                'File is not valid JSON, cannot auto-fill fields (you may still click Import to retry)',
+  'license.fileReadFailed':                 'Failed to read file',
   'license.exportLicense':                  'Export License',
   'license.exportSuccess':                  'Exported',
   'license.exportJson':                     'Export JSON',

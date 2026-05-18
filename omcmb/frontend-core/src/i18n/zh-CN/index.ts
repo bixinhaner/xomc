@@ -2298,6 +2298,8 @@ const messages: Record<string, string> = {
   'license.signatureVerifyFailedTitle':     '签名校验失败（错误码 12109）',
   'license.signatureVerifyFailedMsg':       '后端 strict 模式下签名校验未通过，license 已被拒绝导入。请确认上传的是带有效 OEM 签名的 license 文件，或联系 OEM 重新签发。',
   'license.noFileSelected':                 '请先选择 license 文件',
+  'license.fileParseFailed':                '文件不是合法 JSON，无法自动填充字段（仍可点导入手动尝试）',
+  'license.fileReadFailed':                 '文件读取失败',
   'license.exportLicense':                  '导出 License',
   'license.exportSuccess':                  '导出成功',
   'license.exportJson':                     '导出 JSON',

@@ -144,12 +144,18 @@ export default function LicenseOperations() {
   const [importMode, setImportMode] = useState<'file' | 'paste'>('file');
 
   const handleImport = async () => {
-    if (!canOperate) return;
+    if (!canOperate) {
+      void message.warning(t('license.noOperatePermission'));
+      return;
+    }
 
     // 文件模式 + 有上传文件 → 走 P5-c 签名导入路径
     if (importMode === 'file' && importFiles.length > 0) {
-      const file = importFiles[0].originFileObj as RcFile | undefined;
-      if (!file) {
+      // 兼容两种插入路径：beforeUpload 直接塞 RcFile（旧 bug），
+      // 或正规 UploadFile 含 originFileObj（修复后）。
+      const upload = importFiles[0];
+      const file = (upload.originFileObj as RcFile | undefined) ?? (upload as unknown as RcFile);
+      if (!file || typeof file.text !== 'function') {
         void message.error(t('license.noFileSelected'));
         return;
       }
@@ -467,10 +473,50 @@ export default function LicenseOperations() {
                   <Dragger
                     fileList={importFiles}
                     beforeUpload={(file: RcFile) => {
-                      setImportFiles([file]);
-                      return false;
+                      // 包装成完整 UploadFile（含 originFileObj），避免 handleImport
+                      // 里读 .originFileObj 拿到 undefined 触发"未选择文件"假错误。
+                      // 用户反馈 2026-05-18：导入按钮"无反应"的根因即此。
+                      const uploadFile: UploadFile = {
+                        uid: file.uid,
+                        name: file.name,
+                        size: file.size,
+                        type: file.type,
+                        status: 'done',
+                        originFileObj: file,
+                      };
+                      setImportFiles([uploadFile]);
+
+                      // 自动解析 JSON 并填充下方表单字段，让用户视觉确认
+                      // file 内容；导入时 file mode 走 signed_license_json 路径，
+                      // 表单字段仅用于显示（导入按钮仍可继续走 file 路径）。
+                      file
+                        .text()
+                        .then((content) => {
+                          try {
+                            const parsed = JSON.parse(content) as Record<string, unknown>;
+                            importForm.setFieldsValue({
+                              licenseName: (parsed.license_name as string) ?? '',
+                              licenseCode: (parsed.license_code as string) ?? '',
+                              productName: (parsed.product_name as string) ?? '',
+                              maxDevices: (parsed.max_devices as number) ?? 0,
+                              issueDate: (parsed.issue_date as string) ?? '',
+                              expiryDate: (parsed.expiry_date as string) ?? '',
+                              notes: (parsed.notes as string) ?? '',
+                            });
+                          } catch {
+                            void message.warning(t('license.fileParseFailed'));
+                          }
+                        })
+                        .catch(() => {
+                          void message.warning(t('license.fileReadFailed'));
+                        });
+
+                      return false; // 阻止 antd 自动上传
                     }}
-                    onRemove={() => setImportFiles([])}
+                    onRemove={() => {
+                      setImportFiles([]);
+                      importForm.resetFields();
+                    }}
                     maxCount={1}
                     accept=".lic,.dat,.xml,.key,.json"
                     style={{ maxWidth: 720, marginBottom: 16 }}
