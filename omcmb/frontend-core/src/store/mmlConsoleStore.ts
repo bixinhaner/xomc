@@ -46,7 +46,10 @@ import type {
  */
 export function renderStatementLocal(stmt: Statement): string {
   const op = stmt.operationType.toUpperCase() as ConsoleSupportedOp;
-  const code = stmt.logicalCode;
+  // 用户决策 2026-05-18 实测 bug：部分命令 backend 返回 logical_code 为空字符串
+  // （TypeScript 标的是 required string 但运行时仍可能空），导致 TextArea 显示空。
+  // fallback 到 commandCode（mml_commands.command_code 是 NOT NULL，必定非空）。
+  const code = stmt.logicalCode || stmt.commandCode;
   if (!code) return '';
 
   switch (op) {

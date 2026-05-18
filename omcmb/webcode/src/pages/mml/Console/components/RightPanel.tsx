@@ -43,49 +43,52 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
   );
 
   return (
-    <Tabs
-      activeKey={tab}
-      onChange={(k) => setTab(k as RightTab)}
-      items={[
-        {
-          key: 'control',
-          label: t('mml.console.tab.control'),
-          children: (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {/* 终端输出：用户决策 2026-05-18 — 移到 Control Panel(MmlEditor) 上方，
-                  固定高度 + 滚动条。TerminalPanel 内部 height 由本组件控制。 */}
-              <div style={{ height: 240, flexShrink: 0 }}>
-                <TerminalPanel lines={[]} />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* 终端输出：用户决策 2026-05-18 + 二次确认 — 必须放在整个 RightPanel 顶端，
+          Tabs 外。在 Tabs 内部时看起来"插在 tab 栏和 Control Panel 中间"；外置后
+          它跨 Control / ParamPath 两个 tab 永远可见，更接近真终端的固定区域感。 */}
+      <div style={{ height: 240, flexShrink: 0 }}>
+        <TerminalPanel lines={[]} />
+      </div>
+      <Tabs
+        activeKey={tab}
+        onChange={(k) => setTab(k as RightTab)}
+        items={[
+          {
+            key: 'control',
+            label: t('mml.console.tab.control'),
+            children: (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <MmlEditor onExecuted={onExecuted} />
+                {/* 参数列表（LST/MOD/ADD/RMV 因 op 不同换皮）：选中长命令
+                    如 LST DEVICE_INFO 可能有 200+ sub_fields，包一层
+                    max-height + overflow:auto 防撑长页面。 */}
+                <div
+                  style={{
+                    maxHeight: 'calc(100vh - 540px)',
+                    overflowY: 'auto',
+                    paddingRight: 4,
+                  }}
+                >
+                  {activeStatement ? (
+                    <ActiveSubView statement={activeStatement} />
+                  ) : (
+                    <Empty
+                      description={t('mml.console.stepBar.step2')}
+                      style={{ padding: 12 }}
+                    />
+                  )}
+                </div>
               </div>
-              <MmlEditor onExecuted={onExecuted} />
-              {/* 参数列表（LST/MOD/ADD/RMV 因 op 不同换皮）：选中长命令
-                  如 LST DEVICE_INFO 可能有 200+ sub_fields，包一层
-                  max-height + overflow:auto 防撑长页面。 */}
-              <div
-                style={{
-                  maxHeight: 'calc(100vh - 540px)',
-                  overflowY: 'auto',
-                  paddingRight: 4,
-                }}
-              >
-                {activeStatement ? (
-                  <ActiveSubView statement={activeStatement} />
-                ) : (
-                  <Empty
-                    description={t('mml.console.stepBar.step2')}
-                    style={{ padding: 12 }}
-                  />
-                )}
-              </div>
-            </div>
-          ),
-        },
-        {
-          key: 'paramPath',
-          label: t('mml.console.tab.paramPath'),
-          children: <ParamPathExpert command={null} />,
-        },
-      ]}
-    />
+            ),
+          },
+          {
+            key: 'paramPath',
+            label: t('mml.console.tab.paramPath'),
+            children: <ParamPathExpert command={null} />,
+          },
+        ]}
+      />
+    </div>
   );
 }
