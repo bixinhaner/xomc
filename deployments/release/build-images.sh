@@ -3,17 +3,18 @@
 # OMC 基础设施镜像构建工具
 #
 # 拉取基础设施 Docker 镜像并导出为离线 tar，产物存入 images-cache/，供
-# build-release.sh 复用。
-#
-# 基础设施镜像（postgres/redis/nats/minio/nginx）【不常变更】——仅在调整
-# release.conf 的镜像版本时运行本工具；日常发版只跑 build-release.sh。
+# build-release.sh 复用。基础设施镜像【不常变更】——仅在调整 release.conf
+# 的镜像版本时运行本工具；日常发版只跑 build-release.sh。
 #
 # 基础设施有【独立版本号】INFRA_VERSION（见 release.conf），与项目版本无关。
 #
 # 本工具【跑完不留痕】：镜像 docker save 进 tar 后，会把拉进本地 docker 镜像库
-# 的副本 docker rmi 清掉，避免污染本地镜像库、影响 docker compose 等其它操作。
+# 的副本 docker rmi 清掉，避免污染本地镜像库、影响 docker compose 等操作。
 #
-# 用法： ./build-images.sh [-v 基础设施版本] [--arch amd64|arm64] [--with-monitoring]
+# 用法： ./build-images.sh [-v 基础设施版本] [--arch amd64|arm64]
+#                          [--with-monitoring | --monitoring-only]
+#   --with-monitoring   基础设施 + 监控栈镜像都构建
+#   --monitoring-only   只补监控栈镜像（不重拉基础设施，infra-images-*.tar 不动）
 #   ★ 用普通用户运行（docker 权限靠 docker 组，勿 sudo 整个脚本）。
 # =============================================================================
 set -euo pipefail
@@ -28,12 +29,14 @@ die()  { echo -e "\033[1;31m[images][错误]\033[0m $*" >&2; exit 1; }
 
 # ── 参数解析 ────────────────────────────────────────────────────────────
 WITH_MONITORING=0
+MONITORING_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -v|--version)      INFRA_VERSION="$2"; shift 2 ;;
     --arch)            ARCHES="$2"; shift 2 ;;
     --with-monitoring) WITH_MONITORING=1; shift ;;
-    -h|--help)         sed -n '3,15p' "$0"; exit 0 ;;
+    --monitoring-only) MONITORING_ONLY=1; WITH_MONITORING=1; shift ;;
+    -h|--help)         sed -n '3,18p' "$0"; exit 0 ;;
     *)                 die "未知参数：$1（-h 查看用法）" ;;
   esac
 done
@@ -49,6 +52,26 @@ fi
 CACHE="$SCRIPT_DIR/images-cache"
 mkdir -p "$CACHE"
 
+# --monitoring-only：基础设施必须已构建过；版本与构建时间沿用既有 manifest
+if [ "$MONITORING_ONLY" = 1 ]; then
+  for ARCH in $ARCHES; do
+    [ -f "$CACHE/infra-images-$ARCH.tar" ] || \
+      die "缺 images-cache/infra-images-$ARCH.tar —— --monitoring-only 需先有基础设施镜像。
+      请先不带该参数跑一次 ./build-images.sh 构建基础设施。"
+  done
+  if [ -f "$CACHE/images.manifest" ]; then
+    INFRA_VERSION="$(grep -E '^infra_version=' "$CACHE/images.manifest" | cut -d= -f2 || echo "$INFRA_VERSION")"
+    BUILT_AT="$(grep -E '^built_at=' "$CACHE/images.manifest" | cut -d= -f2 || date -Is)"
+  else
+    BUILT_AT="$(date -Is)"
+  fi
+else
+  BUILT_AT="$(date -Is)"
+fi
+
+if [ "$MONITORING_ONLY" = 1 ]; then
+  log "模式：仅补监控栈（基础设施 infra-images-*.tar 保持不动）"
+fi
 log "基础设施版本：$INFRA_VERSION   架构：$ARCHES   监控栈：$([ "$WITH_MONITORING" = 1 ] && echo 含 || echo 不含)"
 
 # ── 逐架构拉取并导出 ────────────────────────────────────────────────────
@@ -57,16 +80,26 @@ log "基础设施版本：$INFRA_VERSION   架构：$ARCHES   监控栈：$([ "$
 # `docker save` 导出的就是本架构（不受遗留缓存 / containerd 多架构混存影响）。
 for ARCH in $ARCHES; do
   log "=================== 架构 $ARCH ==================="
-  IMG_LIST=( "${INFRA_IMAGES[@]}" )
-  [ "$WITH_MONITORING" = 1 ] && IMG_LIST+=( "${MONITORING_IMAGES[@]}" )
+
+  # 本架构本次要拉的镜像清单
+  if [ "$MONITORING_ONLY" = 1 ]; then
+    IMG_LIST=( "${MONITORING_IMAGES[@]}" )
+  else
+    IMG_LIST=( "${INFRA_IMAGES[@]}" )
+    [ "$WITH_MONITORING" = 1 ] && IMG_LIST+=( "${MONITORING_IMAGES[@]}" )
+  fi
 
   for IMG in "${IMG_LIST[@]}"; do
     docker rmi -f "$IMG" >/dev/null 2>&1 || true   # 清缓存，使 save 架构确定
     docker pull --platform "linux/$ARCH" "$IMG"
   done
 
-  docker save -o "$CACHE/infra-images-$ARCH.tar" "${INFRA_IMAGES[@]}"
-  log "[$ARCH] 导出 → images-cache/infra-images-$ARCH.tar"
+  # 基础设施 tar：monitoring-only 模式下不动它
+  if [ "$MONITORING_ONLY" = 0 ]; then
+    docker save -o "$CACHE/infra-images-$ARCH.tar" "${INFRA_IMAGES[@]}"
+    log "[$ARCH] 导出 → images-cache/infra-images-$ARCH.tar"
+  fi
+  # 监控 tar：--with-monitoring / --monitoring-only 都会产出
   if [ "$WITH_MONITORING" = 1 ]; then
     docker save -o "$CACHE/monitoring-images-$ARCH.tar" "${MONITORING_IMAGES[@]}"
     log "[$ARCH] 导出 → images-cache/monitoring-images-$ARCH.tar"
@@ -76,7 +109,7 @@ done
 # ── 记录基础设施版本与镜像清单（供 build-release.sh 读取、带入交付包）──────
 {
   echo "infra_version=$INFRA_VERSION"
-  echo "built_at=$(date -Is)"
+  echo "built_at=$BUILT_AT"
   echo "arches=$ARCHES"
   echo "with_monitoring=$WITH_MONITORING"
   echo "# infra images:"
@@ -92,8 +125,12 @@ done
 # 清掉它们使本工具【跑完不留痕】——不污染本地镜像库，不影响 docker compose
 # 等使用同一 dockerd 的操作（pull --platform 会按架构覆盖同名标签，残留会串架构）。
 log "清理本地镜像库（已 save 进 tar，副本无需保留）..."
-CLEAN_IMAGES=( "${INFRA_IMAGES[@]}" )
-[ "$WITH_MONITORING" = 1 ] && CLEAN_IMAGES+=( "${MONITORING_IMAGES[@]}" )
+if [ "$MONITORING_ONLY" = 1 ]; then
+  CLEAN_IMAGES=( "${MONITORING_IMAGES[@]}" )
+else
+  CLEAN_IMAGES=( "${INFRA_IMAGES[@]}" )
+  [ "$WITH_MONITORING" = 1 ] && CLEAN_IMAGES+=( "${MONITORING_IMAGES[@]}" )
+fi
 for IMG in "${CLEAN_IMAGES[@]}"; do
   docker rmi -f "$IMG" >/dev/null 2>&1 || true
 done

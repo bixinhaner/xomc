@@ -58,7 +58,8 @@ cd deployments/release
 ```bash
 ./build-images.sh                  # 基础设施版本取 release.conf 的 INFRA_VERSION
 #   -v infra-1.1        手动指定基础设施版本
-#   --with-monitoring   额外导出监控栈镜像
+#   --with-monitoring   基础设施 + 监控栈镜像都导出
+#   --monitoring-only   只补监控栈镜像（不重拉基础设施，infra-images-*.tar 不动）
 ```
 
 ### ③ 构建交付包（每次发版）

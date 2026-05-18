@@ -93,7 +93,9 @@ sudo usermod -aG docker $USER && newgrp docker
 ### 场景 E —— 带监控栈
 
 ```bash
-./build-images.sh --with-monitoring     # 额外导出 prometheus/grafana/loki 等镜像
+./build-images.sh --with-monitoring     # 基础设施 + 监控栈一起导出
+# 若已建好基础设施、之后才想补监控（不重拉基础设施）：
+./build-images.sh --monitoring-only     # 只补 monitoring-images-*.tar
 ```
 
 ---

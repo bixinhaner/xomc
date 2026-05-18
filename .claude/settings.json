@@ -144,7 +144,18 @@
       "Bash(docker start *)",
       "Bash(awk 'BEGIN{block=\"none\"} *)",
       "Bash(sed -n '78,90p' omcmb/webcode/src/pages/mml/components/ScriptTaskDrawer.tsx)",
-      "Bash(sed -n '12,22p' omcmb/webcode/src/pages/system/SystemConfig/styles.tsx)"
+      "Bash(sed -n '12,22p' omcmb/webcode/src/pages/system/SystemConfig/styles.tsx)",
+      "Bash(bash -n deployments/release/build-release.sh)",
+      "Bash(bash -n deployments/release/bundle/docker/install-docker.sh)",
+      "Bash(chmod +x deployments/release/build-images.sh deployments/release/build-release.sh)",
+      "Bash(bash -n deployments/release/build-images.sh)",
+      "Bash(git check-ignore *)",
+      "Bash(bash -n download-docker.sh)",
+      "Bash(bash -n build-release.sh)",
+      "Bash(bash -c 'source release.conf; for A in $ARCHES; do case $A in amd64\\) D=x86_64;; arm64\\) D=aarch64;; esac; echo \"  $A → ${DOCKER_URL_TEMPLATE//\\\\{arch\\\\}/$D}\"; done')",
+      "Bash(bash -c 'source release.conf && echo \"当前生效地址: $DOCKER_URL_TEMPLATE\"')",
+      "Bash(awk -F_ '$1>=\"000105\"')",
+      "Bash(git ls-tree *)"
     ],
     "deny": [
       "Bash(git push -f)",
