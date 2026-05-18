@@ -156,6 +156,12 @@ interface MmlConsoleState {
 
   // Statement 操作（UI 触发 → 'ui' source）
   appendStatement(stmt: Statement): void;
+  /**
+   * 用单条 statement 替换全部 statements（覆盖语义）。
+   * MML 控制台命令树要求：连续点击命令时，控制面板显示 **最近一条** 而不是
+   * 累加列表。多语句脚本场景仍用 textbox 直接编辑或 setMmlText 进入。
+   */
+  replaceStatement(stmt: Statement): void;
   removeStatement(uid: string): void;
   updateStatement(uid: string, patch: Partial<Statement>): void;
   toggleSubField(uid: string, subFieldId: string): void;
@@ -205,6 +211,15 @@ export const useMmlConsoleStore = create<MmlConsoleState>((set, get) => ({
       statements: newStatements,
       activeStatementUid: stmt.uid,
       mmlText: renderStatementsLocal(newStatements),
+      syncSource: 'ui',
+    });
+  },
+
+  replaceStatement(stmt) {
+    set({
+      statements: [stmt],
+      activeStatementUid: stmt.uid,
+      mmlText: renderStatementsLocal([stmt]),
       syncSource: 'ui',
     });
   },

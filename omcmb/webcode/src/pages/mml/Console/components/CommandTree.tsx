@@ -20,6 +20,23 @@ const GROUP_KEY_PREFIX = 'group:';
 const CMD_KEY_PREFIX = 'cmd:';
 const CUSTOM_KEY_PREFIX = 'custom:';
 
+/**
+ * 把后端返回的 N 层 LTREE 拍平为「一级大类 → 命令」两层。
+ *
+ * 用户决策（2026-05-18）："命令分组只保留一层，完全参考老 OMC 命令树"。
+ * 后端 `mml_param_groups` 字典仍允许多层（admin 维护用），但 console 前端
+ * 只展示**根节点 = 一级大类**，把所有后代命令收集挂到同一个根下。
+ *
+ * 例：原结构「设备信息 → 设备基础信息 → 基础查询」此处压平为「设备信息 → 基础查询」。
+ */
+function collectAllCommands(group: GroupTreeNode): GroupTreeCommand[] {
+  const out: GroupTreeCommand[] = [...(group.commands ?? [])];
+  for (const child of group.children ?? []) {
+    out.push(...collectAllCommands(child));
+  }
+  return out;
+}
+
 function buildTreeData(nodes: GroupTreeNode[]): TreeDataNode[] {
   const sorted = [...nodes].sort((a, b) => a.displayOrder - b.displayOrder);
   return sorted.map((g) => ({
@@ -31,21 +48,18 @@ function buildTreeData(nodes: GroupTreeNode[]): TreeDataNode[] {
       </span>
     ),
     selectable: false,
-    children: [
-      ...buildTreeData(g.children ?? []),
-      ...[...(g.commands ?? [])]
-        .sort((a, b) => a.displayName.localeCompare(b.displayName))
-        .map<TreeDataNode>((c) => ({
-          key: `${CMD_KEY_PREFIX}${c.id}`,
-          title: (
-            <span>
-              <CodeOutlined style={{ marginRight: 4 }} />
-              {c.displayName}
-            </span>
-          ),
-          isLeaf: true,
-        })),
-    ],
+    children: collectAllCommands(g)
+      .sort((a, b) => a.displayName.localeCompare(b.displayName))
+      .map<TreeDataNode>((c) => ({
+        key: `${CMD_KEY_PREFIX}${c.id}`,
+        title: (
+          <span>
+            <CodeOutlined style={{ marginRight: 4 }} />
+            {c.displayName}
+          </span>
+        ),
+        isLeaf: true,
+      })),
   }));
 }
 
@@ -214,7 +228,9 @@ export interface CommandTreeProps {
 export default function CommandTree({ lang }: CommandTreeProps) {
   const t = useT();
   const storeLang = useMmlConsoleStore((s) => s.lang);
-  const appendStatement = useMmlConsoleStore((s) => s.appendStatement);
+  // 用户决策（2026-05-18）：连续点击命令是**覆盖**而非追加。
+  // 老 OMC 行为：用户点一个命令 → 控制面板只显示这一条；要多语句脚本走 textbox。
+  const replaceStatement = useMmlConsoleStore((s) => s.replaceStatement);
   const effectiveLang = lang ?? storeLang;
 
   const { data: tree = [], isLoading } = useGroupTree(undefined, effectiveLang);
@@ -274,7 +290,7 @@ export default function CommandTree({ lang }: CommandTreeProps) {
         const customId = key.slice(CUSTOM_KEY_PREFIX.length);
         const cc = customById.get(customId);
         if (!cc) return;
-        appendStatement(customCommandToStatement(cc));
+        replaceStatement(customCommandToStatement(cc));
         return;
       }
 
@@ -308,13 +324,13 @@ export default function CommandTree({ lang }: CommandTreeProps) {
           unknownCodes: [],
           targetObject: cmd.targetObject,
         };
-        appendStatement(stmt);
+        replaceStatement(stmt);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         message.error(msg);
       }
     },
-    [appendStatement, commandsById, customById, effectiveLang, queryClient],
+    [replaceStatement, commandsById, customById, effectiveLang, queryClient],
   );
 
   if (isLoading) {

@@ -274,7 +274,11 @@ func (f *Fanouter) translateParamRefs(
 
 	matchRes, err := f.productMatcher.MatchProductClass(ctx, device.ProductClass)
 	if err != nil || matchRes == nil || matchRes.Product == nil || matchRes.Product.ParamModelID == nil {
-		f.logger.Warn("path translation fallback: product/param_model unresolved",
+		// 用户决策 2026-05-18：找不到设备对应的 product/param_model 是异常态
+		// （命令树不做兼容性过滤，用户可以对任何设备下发任何命令；落到这里
+		// 说明 product_class_patterns 缺规则或新设备型号未登记）。升级到
+		// Error 级 + 累加 metric，运维 / Prometheus alert 能立刻发现。
+		f.logger.Error("path translation fallback: product/param_model unresolved",
 			zap.String("device_sn", sn),
 			zap.String("product_class", device.ProductClass),
 			zap.Error(err),

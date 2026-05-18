@@ -52,16 +52,18 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
           label: t('mml.console.tab.control'),
           children: (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {/* 终端输出：用户决策 2026-05-18 — 移到 Control Panel(MmlEditor) 上方，
+                  固定高度 + 滚动条。TerminalPanel 内部 height 由本组件控制。 */}
+              <div style={{ height: 240, flexShrink: 0 }}>
+                <TerminalPanel lines={[]} />
+              </div>
               <MmlEditor onExecuted={onExecuted} />
-              {/* 终端输出位置：MmlEditor 下方、参数列表上方（恢复 2026-05-14
-                  之前的布局；da6c1c68 重构曾把它挪到末尾）。 */}
-              <TerminalPanel lines={[]} />
               {/* 参数列表（LST/MOD/ADD/RMV 因 op 不同换皮）：选中长命令
                   如 LST DEVICE_INFO 可能有 200+ sub_fields，包一层
                   max-height + overflow:auto 防撑长页面。 */}
               <div
                 style={{
-                  maxHeight: 'calc(100vh - 360px)',
+                  maxHeight: 'calc(100vh - 540px)',
                   overflowY: 'auto',
                   paddingRight: 4,
                 }}

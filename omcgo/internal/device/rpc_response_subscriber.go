@@ -204,6 +204,13 @@ func (s *RPCResponseSubscriber) resolveTranslator(ctx context.Context, device *m
 	}
 	matchRes, err := s.productMatcher.MatchProductClass(ctx, device.ProductClass)
 	if err != nil || matchRes == nil || matchRes.Product == nil || matchRes.Product.ParamModelID == nil {
+		// 用户决策 2026-05-18：找不到设备对应 product/param_model 是异常态
+		// （命令树不做兼容性过滤）。上行 GPV 持久化路径同样升级到 Error 级。
+		s.logger.Error("uplink path translation fallback: product/param_model unresolved",
+			zap.String("device_sn", device.SerialNumber),
+			zap.String("product_class", device.ProductClass),
+			zap.Error(err),
+		)
 		return nil
 	}
 	translator, err := s.translatorFactory.Translator(ctx, *matchRes.Product.ParamModelID, device.FirmwareVersion)
