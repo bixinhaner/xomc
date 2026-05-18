@@ -235,3 +235,30 @@ export const SystemLicenseErrorCodes = {
   Downgrade: 12112,
   NotConfigured: 12113,
 } as const;
+
+// ---------------------------------------------------------------------------
+// 错误码提取（Step 5 从老 licenseApi.ts 迁入；老文件已删除）
+// ---------------------------------------------------------------------------
+
+/**
+ * 从 Axios error / Error / 后端业务错误里抽出 biz_code。
+ *
+ * 兼容：
+ *   - Error & { bizCode: number }       (http interceptor 抛出的业务失败)
+ *   - Axios error: error.response.data.biz_code
+ *   - 其他形式 → 返 0（unknown）
+ */
+export function extractLicenseErrorCode(err: unknown): number {
+  if (!err || typeof err !== 'object') return 0;
+  const e = err as Record<string, unknown>;
+  if (typeof e.bizCode === 'number') return e.bizCode;
+  const resp = e.response as Record<string, unknown> | undefined;
+  if (resp && typeof resp === 'object') {
+    const data = resp.data as Record<string, unknown> | undefined;
+    if (data && typeof data === 'object') {
+      if (typeof data.biz_code === 'number') return data.biz_code;
+      if (typeof data.bizCode === 'number') return data.bizCode as number;
+    }
+  }
+  return 0;
+}

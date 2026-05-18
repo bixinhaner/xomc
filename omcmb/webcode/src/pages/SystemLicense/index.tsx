@@ -41,8 +41,10 @@ import type {
   SystemLicense,
   SystemLicenseSignatureStatus,
 } from '@core/services/api/systemLicenseApi';
-import { extractLicenseErrorCode } from '@core/services/api/licenseApi';
-import { SystemLicenseErrorCodes } from '@core/services/api/systemLicenseApi';
+import {
+  SystemLicenseErrorCodes,
+  extractLicenseErrorCode,
+} from '@core/services/api/systemLicenseApi';
 import UpdateModal from './UpdateModal';
 import { FeatureListView } from './FeatureListView';
 

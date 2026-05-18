@@ -15,8 +15,10 @@ import type { UploadFile } from 'antd/es/upload/interface';
 
 import { useT } from '@/hooks/useT';
 import { useUpdateSystemLicense } from '@core/hooks/api/useSystemLicense';
-import { extractLicenseErrorCode } from '@core/services/api/licenseApi';
-import { SystemLicenseErrorCodes } from '@core/services/api/systemLicenseApi';
+import {
+  SystemLicenseErrorCodes,
+  extractLicenseErrorCode,
+} from '@core/services/api/systemLicenseApi';
 
 const { Dragger } = Upload;
 const { Text } = Typography;
