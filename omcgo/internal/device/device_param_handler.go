@@ -256,24 +256,12 @@ func (h *ParameterTreeHandler) SetParameterValues(c *gin.Context) {
 		return
 	}
 
-	// Verify all parameters are writable.
-	existingParams, err := h.paramRepo.GetByDevice(c.Request.Context(), id)
-	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-		return
-	}
-	writableMap := make(map[string]bool, len(existingParams))
-	for _, p := range existingParams {
-		writableMap[p.ParameterPath] = p.Writable
-	}
-	for _, item := range req.Parameters {
-		writable, exists := writableMap[item.Path]
-		if exists && !writable {
-			commonerrors.AbortWithError(c, http.StatusBadRequest,
-				fmt.Errorf("parameter %s is not writable", item.Path))
-			return
-		}
-	}
+	// T-0148:移除 device_parameters.writable 预检 — 与 XML schema 双真值源冲突。
+	// 原检查:GetByDevice 拉本设备所有路径 → 拒掉 writable=false 的路径。
+	// 冲突:device_parameters.writable 由 CPE 早期 GetParameterNames 写入,可能反映运行态锁(如 cell 工作时 PCI 锁定),
+	//      而 XML 字典(MappingValidator)说 READ_WRITE → 前端"快速设置"展示可编辑,后端却 400 阻断,UX 撕裂。
+	// 新策略:① XML schema (MappingValidator.access) 作唯一真值源 ② CPE 运行态拒绝由 SetParameterValuesResponse
+	//        Status≠0 在 T-0146 状态机里显示"应答失败"。
 
 	// Mapping-based validation（T-0098 P5-01：已无 dmRegistry 兜底，未命中即跳过）。
 	var rebootRequired bool
