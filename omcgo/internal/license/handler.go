@@ -145,26 +145,111 @@ type ImportResponse struct {
 // ImportRequest defines the request body for importing a new license.
 //
 // SignedLicenseJSON（T-0100-P4-C）：可选，原始签名 license JSON 文件内容。
-// 当存在时，handler 用 SignatureVerifier 做 RSA-PSS 验证；strict 模式下未通过
-// 直接拒绝；非 strict 模式下放过但反映 signature_status。其他结构化字段仍以
-// 显式传入为准（前端可能基于 file 解析后再让用户编辑），verifier 仅校验"原文
-// 是否被合法签名"，不强制 license 字段一致——这是审计 + 法务追责的设计取舍。
+// 当存在时：
+//   - 用 SignatureVerifier 做 RSA-PSS 验证（strict 模式下未通过直接拒绝）
+//   - mergeFromSignedJSON 把 JSON 里的 license 字段填到 req 中为空的位置
+//     （操作员显式传入的字段不被覆盖；该设计支持"上传签名文件后用户在 UI
+//     再编辑某些字段"的场景）
+//
+// 必填字段（LicenseName/LicenseCode/ProductName/IssueDate）走**后置 validate**，
+// 不用 binding:"required"——因为前端 importSignedLicense 可能只传 SignedLicenseJSON
+// 而不传结构化字段，required 标签会让 bind 阶段直接 400。validate 在 merge 后
+// 调用，能命中 signed_license_json 里解出的字段。
 type ImportRequest struct {
-	LicenseName       string          `json:"license_name" binding:"required"`
-	LicenseCode       string          `json:"license_code" binding:"required"`
-	ProductName       string          `json:"product_name" binding:"required"`
+	LicenseName       string          `json:"license_name"`
+	LicenseCode       string          `json:"license_code"`
+	ProductName       string          `json:"product_name"`
 	LicenseType       LicenseType     `json:"license_type"`
 	Status            LicenseStatus   `json:"status"`
 	MaxDevices        int             `json:"max_devices"`
 	UsedDevices       int             `json:"used_devices"`
 	Features          json.RawMessage `json:"features"`
-	IssueDate         time.Time       `json:"issue_date" binding:"required"`
+	IssueDate         time.Time       `json:"issue_date"`
 	ExpiryDate        *time.Time      `json:"expiry_date"`
 	Licensor          *string         `json:"licensor"`
 	DeviceType        *string         `json:"device_type"`
 	Region            *string         `json:"region"`
 	Notes             *string         `json:"notes"`
 	SignedLicenseJSON string          `json:"signed_license_json,omitempty"`
+}
+
+// mergeFromSignedJSON 解析 SignedLicenseJSON 字段并把解析结果填入 req 中
+// 为空的字段（操作员显式传入的字段保留不被覆盖）。
+//
+// SignedLicenseJSON 为空时直接返 nil（无操作）；解析失败返 error，调用方
+// 应返 400 让前端看清根因。
+func (req *ImportRequest) mergeFromSignedJSON() error {
+	if req.SignedLicenseJSON == "" {
+		return nil
+	}
+	var p ImportRequest
+	if err := json.Unmarshal([]byte(req.SignedLicenseJSON), &p); err != nil {
+		return fmt.Errorf("parse signed_license_json: %w", err)
+	}
+	if req.LicenseName == "" {
+		req.LicenseName = p.LicenseName
+	}
+	if req.LicenseCode == "" {
+		req.LicenseCode = p.LicenseCode
+	}
+	if req.ProductName == "" {
+		req.ProductName = p.ProductName
+	}
+	if req.LicenseType == "" {
+		req.LicenseType = p.LicenseType
+	}
+	if req.Status == "" {
+		req.Status = p.Status
+	}
+	if req.MaxDevices == 0 {
+		req.MaxDevices = p.MaxDevices
+	}
+	if req.UsedDevices == 0 {
+		req.UsedDevices = p.UsedDevices
+	}
+	if len(req.Features) == 0 {
+		req.Features = p.Features
+	}
+	if req.IssueDate.IsZero() {
+		req.IssueDate = p.IssueDate
+	}
+	if req.ExpiryDate == nil {
+		req.ExpiryDate = p.ExpiryDate
+	}
+	if req.Licensor == nil {
+		req.Licensor = p.Licensor
+	}
+	if req.DeviceType == nil {
+		req.DeviceType = p.DeviceType
+	}
+	if req.Region == nil {
+		req.Region = p.Region
+	}
+	if req.Notes == nil {
+		req.Notes = p.Notes
+	}
+	return nil
+}
+
+// validate 检查必填字段；缺任一返 error，调用方返 400。
+//
+// 替代 binding:"required"——后者会在 bind 阶段直接拒，让前端只传
+// signed_license_json 的合法场景失败。validate 在 mergeFromSignedJSON 之后
+// 调用，能识别 signed JSON 中解出的字段。
+func (req *ImportRequest) validate() error {
+	if req.LicenseName == "" {
+		return fmt.Errorf("license_name is required")
+	}
+	if req.LicenseCode == "" {
+		return fmt.Errorf("license_code is required")
+	}
+	if req.ProductName == "" {
+		return fmt.Errorf("product_name is required")
+	}
+	if req.IssueDate.IsZero() {
+		return fmt.Errorf("issue_date is required")
+	}
+	return nil
 }
 
 // ---- Handlers ----
@@ -636,6 +721,21 @@ func valueOrSystem(s string) string {
 func (h *Handler) Import(c *gin.Context) {
 	var req ImportRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	// 用户决策 2026-05-18：前端 importSignedLicense 只传 signed_license_json
+	// 字段（不传 license_name/code/product_name/issue_date 结构化字段）。先合并
+	// signed JSON 里的字段到 req 中**为空**的位置（操作员显式传入的不被覆盖），
+	// 再做必填字段校验。
+	if err := req.mergeFromSignedJSON(); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			commonerrors.NewBusinessError(global.ErrCodeLicenseSignatureVerifyFailed,
+				"parse signed_license_json: "+err.Error(), commonerrors.ErrInvalidInput))
+		return
+	}
+	if err := req.validate(); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}

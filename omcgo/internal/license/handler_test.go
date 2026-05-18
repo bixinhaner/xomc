@@ -606,3 +606,125 @@ func TestHandler_ExportAll_InvalidFormat(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code,
 		"bulk export rejects format != csv")
 }
+
+// 用户决策 2026-05-18：前端 importSignedLicense 只传 signed_license_json
+// 字段，不传 license_name/license_code/product_name/issue_date 结构化字段。
+// 后端必须从 signed_license_json 解析出字段并填充，否则 binding required
+// 直接 400 拒绝（实测错误：Key: 'ImportRequest.LicenseName' Error:Field
+// validation for 'LicenseName' failed on the 'required' tag）。
+func TestImportRequest_MergeFromSignedJSON_FillsEmptyFields(t *testing.T) {
+	signed := `{
+		"license_name": "From Signed",
+		"license_code": "SIGNED-001",
+		"product_name": "OMC eNB",
+		"license_type": "perpetual",
+		"status": "pending",
+		"max_devices": 100,
+		"used_devices": 0,
+		"features": ["base"],
+		"issue_date": "2026-05-18T00:00:00Z",
+		"expiry_date": null,
+		"licensor": "Baicells",
+		"device_type": "eNB",
+		"region": "cmcc",
+		"notes": "from signed json"
+	}`
+
+	req := ImportRequest{SignedLicenseJSON: signed}
+	require.NoError(t, req.mergeFromSignedJSON())
+	require.NoError(t, req.validate())
+
+	assert.Equal(t, "From Signed", req.LicenseName)
+	assert.Equal(t, "SIGNED-001", req.LicenseCode)
+	assert.Equal(t, "OMC eNB", req.ProductName)
+	assert.Equal(t, LicenseType("perpetual"), req.LicenseType)
+	assert.Equal(t, StatusPending, req.Status)
+	assert.Equal(t, 100, req.MaxDevices)
+	assert.False(t, req.IssueDate.IsZero())
+	require.NotNil(t, req.Licensor)
+	assert.Equal(t, "Baicells", *req.Licensor)
+	require.NotNil(t, req.DeviceType)
+	assert.Equal(t, "eNB", *req.DeviceType)
+	require.NotNil(t, req.Region)
+	assert.Equal(t, "cmcc", *req.Region)
+}
+
+// 显式传入的字段不被 signed_license_json 覆盖（操作员覆盖语义）。
+func TestImportRequest_MergeFromSignedJSON_DoesNotOverrideExplicit(t *testing.T) {
+	signed := `{"license_name":"FromSigned","license_code":"FROM-SIGNED"}`
+	customName := "OperatorEdited"
+	customCode := "OPERATOR-001"
+
+	req := ImportRequest{
+		LicenseName:       customName,
+		LicenseCode:       customCode,
+		SignedLicenseJSON: signed,
+	}
+	require.NoError(t, req.mergeFromSignedJSON())
+
+	// 显式传入的不被覆盖
+	assert.Equal(t, "OperatorEdited", req.LicenseName)
+	assert.Equal(t, "OPERATOR-001", req.LicenseCode)
+}
+
+// 空 signed_license_json + 缺必填字段 → validate 报 required。
+func TestImportRequest_Validate_RequiresFields(t *testing.T) {
+	cases := []struct {
+		name    string
+		req     ImportRequest
+		wantErr string
+	}{
+		{"no license_name", ImportRequest{LicenseCode: "X", ProductName: "Y", IssueDate: time.Now()}, "license_name"},
+		{"no license_code", ImportRequest{LicenseName: "X", ProductName: "Y", IssueDate: time.Now()}, "license_code"},
+		{"no product_name", ImportRequest{LicenseName: "X", LicenseCode: "Y", IssueDate: time.Now()}, "product_name"},
+		{"no issue_date", ImportRequest{LicenseName: "X", LicenseCode: "Y", ProductName: "Z"}, "issue_date"},
+		{"all present", ImportRequest{LicenseName: "X", LicenseCode: "Y", ProductName: "Z", IssueDate: time.Now()}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.req.validate()
+			if tc.wantErr == "" {
+				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+			}
+		})
+	}
+}
+
+// 完整端到端：前端 importSignedLicense 风格（只传 signed_license_json）→ 导入成功。
+func TestHandler_Import_SignedLicenseJSONOnly(t *testing.T) {
+	h, _ := newTestLicenseHandler()
+	router := setupLicenseRouter(h)
+
+	signed := `{
+		"license_name": "End-to-end Signed",
+		"license_code": "E2E-SIGNED-001",
+		"product_name": "OMC eNB Management",
+		"license_type": "perpetual",
+		"status": "pending",
+		"max_devices": 100,
+		"features": ["base"],
+		"issue_date": "2026-05-18T00:00:00Z",
+		"licensor": "Baicells OEM",
+		"device_type": "eNB",
+		"region": "cmcc"
+	}`
+	body := map[string]string{"signed_license_json": signed}
+	bs, _ := json.Marshal(body)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/licenses/import", bytes.NewReader(bs))
+	r.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusCreated, w.Code,
+		"前端 importSignedLicense（只传 signed_license_json）应当 201 成功；实测响应 body=%s", w.Body.String())
+
+	var resp ImportResponse
+	response.DecodeData(t, w.Body, &resp)
+	require.NotNil(t, resp.License)
+	assert.Equal(t, "E2E-SIGNED-001", resp.License.LicenseCode)
+	assert.Equal(t, "End-to-end Signed", resp.License.LicenseName)
+}
