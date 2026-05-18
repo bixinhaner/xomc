@@ -266,9 +266,20 @@ export const deviceParameterApi = {
     deviceId: string,
     parameters: ParameterUpdateRequest[]
   ): Promise<ParameterUpdateResponse> {
+    // 后端 ParameterValueItem JSON 字段是 `path/value/type`(见 device_service.go:374);
+    // 前端 ParameterUpdateRequest 字段是 `parameterPath/parameterValue/parameterType`。
+    // axios 通用 camelCase→snake_case 会把它们转成 `parameter_path/...`,后端 unmarshal 不上
+    // 导致 `item.Path = ""` → MappingValidator.LookupParam("") 必然返 not_found
+    // → 全部 PUT 都返 400 "parameter not found in mapping"。
+    // 显式映射成后端 JSON 形态,绕开 axios 通用转换。
+    const backendParameters = parameters.map((p) => ({
+      path: p.parameterPath,
+      value: p.parameterValue,
+      type: p.parameterType,
+    }));
     const { data } = await http.put<BackendUpdateResponse>(
       `/devices/${deviceId}/parameters`,
-      { parameters }
+      { parameters: backendParameters }
     );
     return {
       message: data.message,
