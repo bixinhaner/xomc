@@ -264,6 +264,11 @@ for ARCH in amd64 arm64; do
 done
 ```
 
+> **跑完不留痕**：`build-images.sh` 在全部 `docker save` 完成后，会把拉进本地
+> docker 镜像库的镜像 `docker rmi` 清掉。因为 `docker pull --platform` 会按架构
+> 覆盖同名标签，残留会让本机的 `docker compose` 等操作误用到错架构镜像；清理后
+> 本工具与本机其它 docker 操作互不影响。
+
 ### 6.4 组装、压缩、归档 —— build-release.sh
 
 `build-release.sh` 逐架构组装交付包：编译产物 + 前端 + `data/configs/migrations/etc`

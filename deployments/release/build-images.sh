@@ -10,6 +10,9 @@
 #
 # 基础设施有【独立版本号】INFRA_VERSION（见 release.conf），与项目版本无关。
 #
+# 本工具【跑完不留痕】：镜像 docker save 进 tar 后，会把拉进本地 docker 镜像库
+# 的副本 docker rmi 清掉，避免污染本地镜像库、影响 docker compose 等其它操作。
+#
 # 用法： ./build-images.sh [-v 基础设施版本] [--arch amd64|arm64] [--with-monitoring]
 #   ★ 用普通用户运行（docker 权限靠 docker 组，勿 sudo 整个脚本）。
 # =============================================================================
@@ -84,5 +87,17 @@ done
   fi
 } > "$CACHE/images.manifest"
 
+# ── 清理：删除本工具拉进本地 docker 镜像库的镜像 ─────────────────────────
+# 镜像已 docker save 进 images-cache/*.tar，本地镜像库里的副本不再需要。
+# 清掉它们使本工具【跑完不留痕】——不污染本地镜像库，不影响 docker compose
+# 等使用同一 dockerd 的操作（pull --platform 会按架构覆盖同名标签，残留会串架构）。
+log "清理本地镜像库（已 save 进 tar，副本无需保留）..."
+CLEAN_IMAGES=( "${INFRA_IMAGES[@]}" )
+[ "$WITH_MONITORING" = 1 ] && CLEAN_IMAGES+=( "${MONITORING_IMAGES[@]}" )
+for IMG in "${CLEAN_IMAGES[@]}"; do
+  docker rmi -f "$IMG" >/dev/null 2>&1 || true
+done
+
 log "完成。基础设施版本 $INFRA_VERSION 已就绪于 images-cache/，可被 build-release.sh 反复复用。"
+log "本地 docker 镜像库已清理，不影响本机 docker compose 等操作。"
 ls -lh "$CACHE"/*.tar 2>/dev/null || true

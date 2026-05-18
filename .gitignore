@@ -46,9 +46,8 @@ backups/
 deployments/docker/certs/
 deployments/docker/default-tls.conf
 
-# 离线交付构建产物（大体积，勿入库）
-deployments/release/dist/*
-!deployments/release/dist/.gitkeep
+# 离线交付构建产物（勿入库；目录由构建脚本自动创建）
+deployments/release/dist/
 deployments/release/images-cache/
 deployments/release/archive/
 deployments/release/bundle/docker/docker-*.tgz
