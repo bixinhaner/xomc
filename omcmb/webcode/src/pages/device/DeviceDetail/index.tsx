@@ -666,7 +666,7 @@ export default function DeviceDetail() {
               label: t('device.parameterTree'),
               children: <ParameterTreeTab deviceId={device.id} />,
             },
-            ...((device.networkType === 'eNB' || device.networkType === 'gNB')
+            ...((device.networkType === 'lte' || device.networkType === 'nr')
               ? [{
                   key: 'quickSettings',
                   label: t('device.quickSettings.tabTitle'),

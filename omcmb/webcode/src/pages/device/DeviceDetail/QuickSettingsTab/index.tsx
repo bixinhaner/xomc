@@ -10,13 +10,16 @@ const { Text } = Typography;
 
 interface QuickSettingsTabProps {
   deviceId: string;
-  /** 设备 networkType：'eNB' | 'gNB' | 其他 */
+  /**
+   * 设备 networkType 字段值（deviceApi mapBackendDevice 直接取后端 technology）。
+   * 实际取值为 'lte' / 'nr' / 其他，对应 TechCode 类型。
+   */
   networkType: string;
 }
 
 const NETWORK_TYPE_TO_TECH: Record<string, TechCode> = {
-  eNB: 'lte',
-  gNB: 'nr',
+  lte: 'lte',
+  nr: 'nr',
 };
 
 /**
