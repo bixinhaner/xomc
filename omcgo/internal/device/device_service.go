@@ -330,6 +330,10 @@ func (s *DeviceService) SetParameters(ctx context.Context, deviceID uuid.UUID, p
 	}
 
 	// Build SPV parameter list.
+	// 注意:ACS dispatcher `SetParameterValuesHandler.BuildRequest`(rpc/dispatcher.go:103)
+	// 期望 JSON 字段名 `values`(不是 parameter_list)。字段错配会导致 json.Unmarshal 静默
+	// 拿到空 slice → SOAP ParameterList 渲染为空 → CPE 收到空命令但 Status=0 应答。
+	// (T-0147 真机 TR069 报文跟踪发现此 bug)。
 	spvParams := make([]map[string]string, 0, len(params))
 	for _, p := range params {
 		paramType := p.Type
@@ -344,8 +348,8 @@ func (s *DeviceService) SetParameters(ctx context.Context, deviceID uuid.UUID, p
 	}
 
 	paramsJSON, err := json.Marshal(map[string]interface{}{
-		"parameter_list": spvParams,
-		"parameter_key":  fmt.Sprintf("ui-spv-%d", time.Now().Unix()),
+		"values":        spvParams,
+		"parameter_key": fmt.Sprintf("ui-spv-%d", time.Now().Unix()),
 	})
 	if err != nil {
 		return "", fmt.Errorf("marshal SPV params: %w", err)
