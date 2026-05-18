@@ -513,6 +513,7 @@ const messages: Record<string, string> = {
   'device.group.status':        '状态信息',
   'device.group.other':         '其他信息',
   'device.parameterTree':       '参数树',
+  'device.quickSettings.tabTitle': '快速设置',
   'device.type.eNB':        'eNB基站',
   'device.type.gNB':        'gNB基站',
   'device.type.CPE':        'CPE终端',

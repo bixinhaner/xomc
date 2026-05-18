@@ -19,6 +19,7 @@ import (
 	"github.com/omcgo/omcgo/internal/mr"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/provision"
+	"github.com/omcgo/omcgo/internal/quicksettings"
 	"github.com/omcgo/omcgo/internal/topology"
 )
 
@@ -315,6 +316,12 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// T-0098 P5-01：dmRegistry 已删除，直接注入 ParamRegistry / ProductRegistry。
 	paramTreeHandler := device.NewParameterTreeHandler(c.DeviceService, c.ParamRepo, c.ParamRegistry, c.ProductRegistry, c.Logger)
 	paramTreeHandler.RegisterRoutes(permGroup("devices"))
+
+	// T-0138：「快速设置」分组元数据（设备运维人员可读）
+	if c.QuickSettingsRegistry != nil {
+		quickSettingsHandler := quicksettings.NewHandler(c.QuickSettingsRegistry)
+		quickSettingsHandler.RegisterRoutes(permGroup("devices"))
+	}
 
 	// T-0098-P5-01：旧 /api/v1/datamodels CRUD 已下线，治理走 /api/v1/products + /api/v1/param-models（super_admin）。
 

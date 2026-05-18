@@ -144,6 +144,7 @@ type DictLoaderConfig struct {
 	Indicator        IndicatorLoaderConfig        `mapstructure:"indicator"`
 	AlarmDefinition  AlarmDefinitionLoaderConfig  `mapstructure:"alarm_definition"`
 	Product          ProductLoaderConfig          `mapstructure:"product"`
+	QuickSettings    QuickSettingsLoaderConfig    `mapstructure:"quick_settings"`
 }
 
 // ParamModelLoaderConfig 控制参数模型 Loader 行为（T-0098 P1-06）。
@@ -175,6 +176,13 @@ type AlarmDefinitionLoaderConfig struct {
 type ProductLoaderConfig struct {
 	Directory string `mapstructure:"directory"` // 默认 "param-mappings"（与 paramModel 同目录）
 	File      string `mapstructure:"file"`      // 默认 "products.xml"
+}
+
+// QuickSettingsLoaderConfig 控制「快速设置」分组 Loader 行为（T-0138）。
+// 扫描 {XMLBaseDir}/{Directory}/{enb.xml,gnb.xml}，加载到进程内存 Registry，
+// 不写 DB；REST 端点 GET /api/v1/quicksettings/groups?tech={lte|nr} 直接读 Registry。
+type QuickSettingsLoaderConfig struct {
+	Directory string `mapstructure:"directory"` // 默认 "quicksettings"
 }
 
 // ParamRegistryConfig 控制 ParamRegistry 运行期行为（T-0098 P2-02）。

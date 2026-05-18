@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  GNB（5G NR）小区参数。
+  约定：
+    - FAPService 仅 1 个实例，路径中外层占位符固定为 FAPService.1（由后端 Loader 输出时已替换）。
+    - CellConfig.{i} 表示 NR 小区索引，由前端结合设备数据决定（v1 PR 落地时按数据形态决定 UX）。
+    - NumOfTxAntenna 的 standardPath 形似 LTE 路径，属规范历史原因，实际下发由后端 Translator 翻译为正确的 NR 私有路径，前端不感知。
+-->
+<quickSettings tech="nr">
+  <group id="gnb-cell" titleZh="小区参数" titleEn="Cell Parameters">
+    <param name="Band" titleZh="频段" titleEn="Band"
+           standardPath="Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.{i}.FreqBandIndicatorNR"/>
+    <param name="DLCarrierBandWidth" titleZh="下行载波带宽" titleEn="DL Carrier Bandwidth"
+           standardPath="Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.CarrierBandwidth"/>
+    <param name="DLSubCarrierSpacing" titleZh="下行子载波间隔" titleEn="DL SubCarrier Spacing"
+           standardPath="Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.SubcarrierSpacing"/>
+    <param name="NRARFCNDL" titleZh="NR 下行频点" titleEn="NRARFCNDL"
+           standardPath="Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.RF.NRARFCNDL"/>
+    <param name="NRARFCNUL" titleZh="NR 上行频点" titleEn="NRARFCNUL"
+           standardPath="Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.RF.NRARFCNUL"/>
+    <param name="NumOfRxAntenna" titleZh="接收天线数" titleEn="Num Of Rx Antenna"
+           standardPath="Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.PHY.Antenna.NumOfRxAntenna"/>
+    <param name="NumOfTxAntenna" titleZh="发射天线数" titleEn="Num Of Tx Antenna"
+           standardPath="Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.AntennaInfo.AntennaPortsCount"/>
+    <param name="OffsetToPointA" titleZh="OffsetToPointA" titleEn="Offset To Point A"
+           standardPath="Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoDLSIB.OffsetToPointA"/>
+    <param name="PCI" titleZh="PCI" titleEn="PCI"
+           standardPath="Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.RF.PhyCellID"/>
+    <param name="PowerModify" titleZh="功率调整" titleEn="Power Modify"
+           standardPath="Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.PowerModify"/>
+    <param name="PowerMaxLimit" titleZh="最大功率限制" titleEn="Power Max Limit"
+           standardPath="Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.PowerMaxLimit"/>
+    <param name="PowerRange" titleZh="功率范围" titleEn="Power Range"
+           standardPath="Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.PowerMinLimit"/>
+    <param name="RFEnable" titleZh="射频启用" titleEn="RF Enable"
+           standardPath="Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.rftxEnable"/>
+    <param name="SsbSubcarrierOffset" titleZh="SSB 子载波偏移" titleEn="SSB Subcarrier Offset"
+           standardPath="Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.PHY.SSB.SsbSubcarrierOffset"/>
+    <param name="ULCarrierBandWidth" titleZh="上行载波带宽" titleEn="UL Carrier Bandwidth"
+           standardPath="Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoULSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.CarrierBandwidth"/>
+    <param name="ULSubCarrierSpacing" titleZh="上行子载波间隔" titleEn="UL SubCarrier Spacing"
+           standardPath="Device.Services.FAPService.1.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoULSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.SubcarrierSpacing"/>
+  </group>
+</quickSettings>

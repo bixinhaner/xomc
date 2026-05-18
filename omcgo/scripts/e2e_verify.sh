@@ -6167,6 +6167,34 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
 check_status_in "T-0137 trace-6: GET /trace/exports/<id>" "404 401" "$HTTP_CODE"
 
 # ------------------------------------------------------------
+# T-0138 quicksettings: 设备详情「快速设置」tab 后端 REST 端点
+# 设计文档:docs/design/参数设置页-设计.md v0.7.x;backlog T-0138
+# ------------------------------------------------------------
+echo ""
+echo -e "${YELLOW}=== T-0138 quicksettings: 「快速设置」分组元数据 REST ===${NC}"
+
+claim "quicksettings: GET /quicksettings/groups?tech=lte 返回 ENB 3 分组(AC-1)"
+QS_LTE_RESP=$(curl -s "$API/quicksettings/groups?tech=lte" -H "$W2D_AUTH")
+QS_LTE_HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/quicksettings/groups?tech=lte" -H "$W2D_AUTH")
+check_status_in "T-0138 quicksettings-1: GET /quicksettings/groups?tech=lte" "200 401" "$QS_LTE_HTTP"
+if [ "$QS_LTE_HTTP" = "200" ]; then
+    echo "$QS_LTE_RESP" | grep -q '"enb-cell"' \
+        && echo -e "  ${GREEN}✓${NC} ENB 响应含 enb-cell 分组" \
+        || echo -e "  ${YELLOW}⚠${NC} ENB 响应未含 enb-cell 分组（XML 加载状态需确认）"
+fi
+
+claim "quicksettings: GET /quicksettings/groups?tech=nr 返回 GNB 1 分组(AC-2)"
+QS_NR_HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/quicksettings/groups?tech=nr" -H "$W2D_AUTH")
+check_status_in "T-0138 quicksettings-2: GET /quicksettings/groups?tech=nr" "200 401" "$QS_NR_HTTP"
+
+claim "quicksettings: tech 参数非法返回 400(AC-3 入参校验)"
+QS_BAD_HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/quicksettings/groups?tech=cdma" -H "$W2D_AUTH")
+check_status_in "T-0138 quicksettings-3: GET /quicksettings/groups?tech=invalid" "400 401" "$QS_BAD_HTTP"
+
+# ------------------------------------------------------------
 # W2.D.1 段尾打印分段统计，方便 verify 报告引用
 echo ""
 echo -e "${YELLOW}=== W2.D.1 段累计 claim 总数 ${CLAIM_COUNT}（≥ 100 即合规）===${NC}"

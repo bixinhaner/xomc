@@ -169,6 +169,9 @@ dict_loader:
   product:
     directory: "param-mappings"
     file: "products.xml"
+  # T-0138 快速设置分组元数据（进程内存 cache，不写 DB）
+  quick_settings:
+    directory: "quicksettings"
 
 batch_processor:
   enabled: true           # 启用 Periodic Inform 批量处理

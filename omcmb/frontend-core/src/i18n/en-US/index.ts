@@ -511,6 +511,7 @@ const messages: Record<string, string> = {
   'device.group.status':      'Status Info',
   'device.group.other':       'Other Info',
   'device.parameterTree':     'Parameter Tree',
+  'device.quickSettings.tabTitle': 'Quick Settings',
   'device.type.eNB':        'eNB Base Station',
   'device.type.gNB':        'gNB Base Station',
   'device.type.CPE':        'CPE Terminal',

@@ -24,6 +24,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/product"
+	"github.com/omcgo/omcgo/internal/quicksettings"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/topology"
 )
@@ -59,6 +60,9 @@ type Container struct {
 
 	// ProductRegistry 模块设置（T-0098 P2-01）
 	ProductRegistry *product.Registry
+
+	// QuickSettingsRegistry 模块设置（T-0138）
+	QuickSettingsRegistry *quicksettings.Registry
 
 	// ParamRegistry 模块设置（T-0098 P2-02）
 	ParamRegistry *parammodel.Registry

@@ -31,6 +31,7 @@ import { useT } from '@/hooks/useT';
 import type { Alarm } from '@core/types/alarm';
 import type { Device } from '@core/types/device';
 import ParameterTreeTab from './ParameterTreeTab';
+import QuickSettingsTab from './QuickSettingsTab';
 
 const { Title, Text } = Typography;
 
@@ -665,6 +666,13 @@ export default function DeviceDetail() {
               label: t('device.parameterTree'),
               children: <ParameterTreeTab deviceId={device.id} />,
             },
+            ...((device.networkType === 'eNB' || device.networkType === 'gNB')
+              ? [{
+                  key: 'quickSettings',
+                  label: t('device.quickSettings.tabTitle'),
+                  children: <QuickSettingsTab deviceId={device.id} networkType={device.networkType} />,
+                }]
+              : []),
             {
               key: 'alarms',
               label: (
