@@ -82,12 +82,15 @@ type DeviceCounter interface {
 }
 
 // EnforcerImpl is the concrete Enforcer.
+//
+// Step 5 起：老 license_logs 表与 LogWriter 已删除；拒绝事件改纯 zap.Warn +
+// Prometheus counter（recordEnforcement(…, "denied_capacity"/"denied_expired")）。
+// 合规审计在生产部署里由 Loki/journald 抓 stdout 日志归档。
 type EnforcerImpl struct {
-	repo      SystemLicenseRepository
-	devices   DeviceCounter
-	logger    *zap.Logger
-	metrics   *EnforcementMetrics
-	logWriter LogWriter // T-0100-P0：拒绝事件审计；nil 时退化为 NoopLogWriter
+	repo    SystemLicenseRepository
+	devices DeviceCounter
+	logger  *zap.Logger
+	metrics *EnforcementMetrics
 
 	cacheMu      sync.RWMutex
 	cachedActive *SystemLicense
@@ -98,28 +101,17 @@ type EnforcerImpl struct {
 // NewEnforcer constructs an EnforcerImpl with the default 5min cache TTL.
 // metrics may be nil (degrades to no-op recording).
 //
-// repo 是新 SystemLicenseRepository（singleton 模型）；devices 是一个独立的
-// CountDevices 提供方（通常注入 PgLicenseRepository — 它的 CountDevices 只
-// SELECT COUNT(*) FROM devices，与 license 表完全无关）。这种解耦让 Step 5
-// 删 LicenseRepository 时只需把 devices 改为另一个 DeviceCounter 实现。
+// repo 是 SystemLicenseRepository（singleton 模型）；devices 是独立的 CountDevices
+// 提供方（DeviceCounter）— 与 license 表完全无关，由 caller wiring 自由选择
+// （Step 5 起注入 device 模块的实现）。
 func NewEnforcer(repo SystemLicenseRepository, devices DeviceCounter, logger *zap.Logger, metrics *EnforcementMetrics) *EnforcerImpl {
 	return &EnforcerImpl{
-		repo:      repo,
-		devices:   devices,
-		logger:    logger.Named("license-enforcer"),
-		metrics:   metrics,
-		logWriter: NoopLogWriter{}, // 默认 noop；DI 通过 SetLogWriter 注入真实实现
-		cacheTTL:  DefaultCacheTTL,
+		repo:     repo,
+		devices:  devices,
+		logger:   logger.Named("license-enforcer"),
+		metrics:  metrics,
+		cacheTTL: DefaultCacheTTL,
 	}
-}
-
-// SetLogWriter 注入真实的 LogWriter（T-0100-P0）。
-// bootstrap 早期 / 测试不注入时保持 NoopLogWriter，写入路径无 nil 风险。
-func (e *EnforcerImpl) SetLogWriter(w LogWriter) {
-	if w == nil {
-		w = NoopLogWriter{}
-	}
-	e.logWriter = w
 }
 
 // SetCacheTTL overrides the cache TTL. Test-only convenience.
@@ -216,28 +208,14 @@ func (e *EnforcerImpl) EnforceCapacity(ctx context.Context, additional int) erro
 	maxDevices := totalCapacity(lic)
 	if maxDevices > 0 && used+additional > maxDevices {
 		e.recordEnforcement("capacity", "denied_capacity")
-		e.logger.Warn("system license capacity exceeded",
+		e.logger.Warn("license capacity exceeded — device.create denied",
+			zap.String("audit", "enforcement_capacity"),
 			zap.String("license_id", lic.LicenseID),
 			zap.Int("total_capacity", maxDevices),
 			zap.Int("used_devices", used),
 			zap.Int("additional", additional),
+			zap.Any("devices_support", lic.DevicesSupport),
 		)
-		// 审计：拒绝事件落 license_logs（T-0100-P0 / R-109）
-		// 注：licenseLogs.license_id 是 UUID FK，新 system_license 模型的 ID 也是
-		// UUID，但 logger 写入用的是新表的 PK；老 license_logs 表 FK 是老
-		// licenses 表，Step 5 才统一审计 schema。此处暂不带 LicenseID（nil）。
-		e.logWriter.Write(ctx, LicenseLogEntry{
-			LogType: LogTypeEnforcementCapacity,
-			Result:  LogResultDenied,
-			Details: map[string]any{
-				"summary":        "device.create denied: capacity exceeded",
-				"license_id":     lic.LicenseID,
-				"total_capacity": maxDevices,
-				"used_devices":   used,
-				"additional":     additional,
-				"devices_support": lic.DevicesSupport,
-			},
-		})
 		return fmt.Errorf("used=%d, max=%d, additional=%d: %w",
 			used, maxDevices, additional, commonerrors.ErrLicenseCapacityExceeded)
 	}
@@ -264,22 +242,12 @@ func (e *EnforcerImpl) EnforceExpiry(ctx context.Context, operation string) erro
 	}
 	if nowFunc().After(*lic.ExpiryDate) {
 		e.recordEnforcement(operation, "denied_expired")
-		e.logger.Warn("system license expired blocking write operation",
+		e.logger.Warn("license expired — operation denied",
+			zap.String("audit", "enforcement_expiry"),
 			zap.String("license_id", lic.LicenseID),
 			zap.String("operation", operation),
 			zap.Time("expiry_date", *lic.ExpiryDate),
 		)
-		// 审计：拒绝事件落 license_logs
-		e.logWriter.Write(ctx, LicenseLogEntry{
-			LogType: LogTypeEnforcementExpiry,
-			Result:  LogResultDenied,
-			Details: map[string]any{
-				"summary":     "write operation denied: license expired",
-				"license_id":  lic.LicenseID,
-				"operation":   operation,
-				"expiry_date": lic.ExpiryDate.Format(time.RFC3339),
-			},
-		})
 		return fmt.Errorf("system license %s expired at %s: %w",
 			lic.LicenseID, lic.ExpiryDate.Format(time.RFC3339),
 			commonerrors.ErrLicenseExpired)

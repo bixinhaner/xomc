@@ -85,15 +85,15 @@ var ExpiryWindowsDays = []struct {
 var DefaultCapacityThresholds = []int{80, 90, 95}
 
 // Monitor runs the periodic expiry+capacity checks.
+//
+// Step 5 起：老 license_logs 表与 LogArchiver 已删除；告警事件改纯 zap.Warn +
+// AlertSink（通过 adapter 路由到 alarm 模块）。
 type Monitor struct {
-	repo            SystemLicenseRepository
-	devices         DeviceCounter
-	sink            AlertSink
-	metrics         *EnforcementMetrics
-	logger          *zap.Logger
-	logWriter       LogWriter    // T-0100-P0：cron 触发的告警审计
-	archiver        *LogArchiver // T-0100-P4-B：license_logs 6 月归档；nil 时跳过
-	archiveSchedule string       // T-0100-P4-B：归档 cron expression；空时不注册
+	repo    SystemLicenseRepository
+	devices DeviceCounter
+	sink    AlertSink
+	metrics *EnforcementMetrics
+	logger  *zap.Logger
 
 	cron   *cron.Cron
 	cancel context.CancelFunc
@@ -109,38 +109,18 @@ type Monitor struct {
 // NewMonitor constructs a Monitor. sink defaults to NoopAlertSink when nil.
 // metrics may be nil (no-op recording).
 //
-// repo 是 SystemLicenseRepository；devices 是独立的 CountDevices 提供方
-// （通常与 enforcer 共用同一 PgLicenseRepository 实例）。
+// repo 是 SystemLicenseRepository；devices 是独立的 CountDevices 提供方。
 func NewMonitor(repo SystemLicenseRepository, devices DeviceCounter, sink AlertSink, metrics *EnforcementMetrics, logger *zap.Logger) *Monitor {
 	if sink == nil {
 		sink = NoopAlertSink{}
 	}
 	return &Monitor{
-		repo:      repo,
-		devices:   devices,
-		sink:      sink,
-		metrics:   metrics,
-		logger:    logger.Named("license-monitor"),
-		logWriter: NoopLogWriter{}, // 默认 noop；DI 通过 SetLogWriter 注入真实实现
+		repo:    repo,
+		devices: devices,
+		sink:    sink,
+		metrics: metrics,
+		logger:  logger.Named("license-monitor"),
 	}
-}
-
-// SetLogWriter 注入真实的 LogWriter（T-0100-P0）。
-func (m *Monitor) SetLogWriter(w LogWriter) {
-	if w == nil {
-		w = NoopLogWriter{}
-	}
-	m.logWriter = w
-}
-
-// SetArchiver 注入 LogArchiver（T-0100-P4-B）。nil 等价于不注册归档 cron。
-// schedule 为空时使用默认 "0 3 * * 0"（每周日 03:00 UTC）。
-func (m *Monitor) SetArchiver(a *LogArchiver, schedule string) {
-	m.archiver = a
-	if schedule == "" {
-		schedule = "0 3 * * 0"
-	}
-	m.archiveSchedule = schedule
 }
 
 // Start launches the cron schedule:
@@ -172,28 +152,11 @@ func (m *Monitor) Start(ctx context.Context) error {
 		return fmt.Errorf("schedule capacity check: %w", err)
 	}
 
-	// T-0100-P4-B：周级归档 cron。仅在 SetArchiver 注入后注册。
-	if m.archiver != nil {
-		if _, err := m.cron.AddFunc(m.archiveSchedule, func() {
-			c, c2 := context.WithTimeout(scoped, 30*time.Minute)
-			defer c2()
-			if _, err := m.archiver.ArchiveOnce(c); err != nil {
-				m.logger.Warn("license log archive run failed", zap.Error(err))
-			}
-		}); err != nil {
-			return fmt.Errorf("schedule log archive: %w", err)
-		}
-	}
-
 	m.cron.Start()
-	logFields := []zap.Field{
+	m.logger.Info("license monitor cron started (system_license model)",
 		zap.String("expiring_soon_schedule", "0 1 * * * UTC"),
 		zap.String("capacity_schedule", "0 * * * * (hourly)"),
-	}
-	if m.archiver != nil {
-		logFields = append(logFields, zap.String("archive_schedule", m.archiveSchedule))
-	}
-	m.logger.Info("license monitor cron started (system_license model)", logFields...)
+	)
 	return nil
 }
 
@@ -256,37 +219,29 @@ func (m *Monitor) CheckExpiringSoon(ctx context.Context) error {
 			zap.String("license_id", lic.LicenseID),
 			zap.Error(sendErr))
 	}
-	// 审计
-	licPK := lic.ID
-	m.logWriter.Write(ctx, LicenseLogEntry{
-		LicenseID: &licPK,
-		LogType:   LogTypeExpiryAlert,
-		Result:    LogResultWarning,
-		Details: map[string]any{
-			"summary":        alert.Summary,
-			"identifier":     alert.Identifier,
-			"severity":       alert.Severity,
-			"license_id":     lic.LicenseID,
-			"expiry_date":    lic.ExpiryDate.Format(time.RFC3339),
-			"days_remaining": days,
-		},
-	})
+	m.logger.Warn("license expiring",
+		zap.String("audit", "expiry_alert"),
+		zap.String("identifier", alert.Identifier),
+		zap.String("severity", string(alert.Severity)),
+		zap.String("license_id", lic.LicenseID),
+		zap.Int("days_remaining", days),
+		zap.Time("expiry_date", *lic.ExpiryDate),
+	)
 	return nil
 }
 
 // CheckCapacity 容量阈值告警（80/90/95% 默认）+ 6h dedup。
 //
-// 无 license → SetActiveCount(0) + noop。
+// 无 license → SetCapacity(0,0,0) + noop（max=0 暗示 unprotected mode）。
 func (m *Monitor) CheckCapacity(ctx context.Context) error {
 	lic, err := m.getCurrentOrNil(ctx)
 	if err != nil {
 		return err
 	}
 	if lic == nil {
-		m.metrics.SetActiveCount(0)
+		m.metrics.SetCapacity(0, 0, 0)
 		return nil
 	}
-	m.metrics.SetActiveCount(1)
 
 	used, err := m.devices.CountDevices(ctx)
 	if err != nil {
@@ -353,23 +308,16 @@ func (m *Monitor) CheckCapacity(ctx context.Context) error {
 		return nil
 	}
 
-	// 审计
-	licPK := lic.ID
-	m.logWriter.Write(ctx, LicenseLogEntry{
-		LicenseID: &licPK,
-		LogType:   LogTypeCapacityAlert,
-		Result:    LogResultWarning,
-		Details: map[string]any{
-			"summary":      alert.Summary,
-			"identifier":   alert.Identifier,
-			"severity":     alert.Severity,
-			"license_id":   lic.LicenseID,
-			"used_devices": used,
-			"max_devices":  maxDevices,
-			"usage_ratio":  ratio,
-			"threshold":    highestCrossed,
-		},
-	})
+	m.logger.Warn("license capacity threshold crossed",
+		zap.String("audit", "capacity_alert"),
+		zap.String("identifier", alert.Identifier),
+		zap.String("severity", string(alert.Severity)),
+		zap.String("license_id", lic.LicenseID),
+		zap.Int("used_devices", used),
+		zap.Int("max_devices", maxDevices),
+		zap.Float64("usage_ratio", ratio),
+		zap.Int("threshold", highestCrossed),
+	)
 	return nil
 }
 

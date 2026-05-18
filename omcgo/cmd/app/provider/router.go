@@ -463,14 +463,18 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	md.notifTemplateHandler.RegisterRoutes(notifGroup)
 	md.notifHistoryHandler.RegisterRoutes(notifGroup)
 
+	// ----- T-0141: Alertmanager 告警 webhook → publicV1（无 JWT）-----
+	// Alertmanager 无法携带 JWT，故挂在无鉴权的 publicV1 上；可选 Bearer token
+	// 校验由 notification.alert_webhook.token 配置。最终路径 /api/v1/alerts/webhook。
+	if md.alertWebhookHandler != nil {
+		md.alertWebhookHandler.RegisterRoutes(publicV1)
+	}
+
 	// ----- Config Baseline routes → resource "config" -----
 	md.baselineHandler.RegisterRoutes(permGroup("config"))
 
-	// ----- License routes → resource "devices" -----
-	md.licenseHandler.RegisterRoutes(permGroup("devices"))
-
 	// ----- System License (singleton) routes → resource "devices" -----
-	// F06 重构 Step 2：与上面老 /licenses 完全并存；老接口预计 Step 5 下线。
+	// F06 重构 Step 5：老 /licenses/* multi-license 路由已下线；本路由是唯一入口。
 	if md.systemLicenseHandler != nil {
 		md.systemLicenseHandler.RegisterRoutes(permGroup("devices"))
 	}

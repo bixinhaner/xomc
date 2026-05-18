@@ -15,12 +15,27 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
 )
+
+// actorIDFromContext 从 gin.Context 取当前用户 UUID（admin middleware 设置）。
+// 找不到 / 类型错误时返 nil（视为 system 操作）。
+func actorIDFromContext(c *gin.Context) *uuid.UUID {
+	v, ok := c.Get("user_id")
+	if !ok {
+		return nil
+	}
+	id, ok := v.(uuid.UUID)
+	if !ok {
+		return nil
+	}
+	return &id
+}
 
 // SystemLicenseHandler — gin 层 thin wrapper，仅做绑定 / 转发，业务逻辑在 service。
 type SystemLicenseHandler struct {

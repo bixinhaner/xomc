@@ -1,26 +1,20 @@
 // Package license — Prometheus metrics for enforcement and capacity.
 //
-// All metrics are registered via WithMetrics; nil metrics degrades to no-op
-// recording so tests and lightweight environments don't need a registry.
+// Step 5 起：老 license_active_count gauge（multi-license 模型 active 数量）
+// 已删除；system_license singleton 模型下"是否有 license"由 capacity_max=0
+// 反映（max=0 = 无 license / unprotected mode），不必单列 active_count。
+//
+// All metrics are registered via NewEnforcementMetrics; nil metrics degrades
+// to no-op recording so tests and lightweight environments don't need a registry.
 package license
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 )
-
-// T-0100-P5-a I3 — 归档字节数按月度统计；监控大对象月度爆增（某月日志异常增大
-// 可能预示告警风暴 / 攻击）。用 promauto 注册到 DefaultRegisterer 一次，进程级
-// 单例。
-var archiveBytesByMonth = promauto.NewCounterVec(prometheus.CounterOpts{
-	Name: "omc_license_archive_bytes_per_month",
-	Help: "License logs archived bytes per YYYY-MM month bucket.",
-}, []string{"month"})
 
 // EnforcementMetrics exposes Prometheus metrics for license enforcement
 // decisions and capacity state.
 type EnforcementMetrics struct {
-	activeCount        prometheus.Gauge
 	usedDevices        prometheus.Gauge
 	maxDevices         prometheus.Gauge
 	usageRatio         prometheus.Gauge
@@ -33,17 +27,13 @@ type EnforcementMetrics struct {
 // prometheus.DefaultRegisterer; tests typically pass a fresh Registry.
 func NewEnforcementMetrics(reg prometheus.Registerer) *EnforcementMetrics {
 	m := &EnforcementMetrics{
-		activeCount: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "license_active_count",
-			Help: "Current number of active licenses (0 = unprotected mode).",
-		}),
 		usedDevices: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "license_capacity_used_devices",
 			Help: "Current registered device count used as the license-quota numerator.",
 		}),
 		maxDevices: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "license_capacity_max_devices",
-			Help: "Largest MaxDevices among active licenses (the enforcement ceiling).",
+			Help: "Sum of system_license.devices_support quotas (0 = no license / unprotected).",
 		}),
 		usageRatio: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "license_capacity_usage_ratio",
@@ -51,7 +41,7 @@ func NewEnforcementMetrics(reg prometheus.Registerer) *EnforcementMetrics {
 		}),
 		expiryDaysByID: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "license_expiry_days_remaining",
-			Help: "Days until license expiry (-1 for perpetual or unset).",
+			Help: "Days until license expiry (-1 for perpetual or unset). Label is always 'system'.",
 		}, []string{"license_id"}),
 		enforcementByLabel: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "license_enforcement_total",
@@ -61,7 +51,6 @@ func NewEnforcementMetrics(reg prometheus.Registerer) *EnforcementMetrics {
 
 	if reg != nil {
 		reg.MustRegister(
-			m.activeCount,
 			m.usedDevices,
 			m.maxDevices,
 			m.usageRatio,
@@ -80,16 +69,8 @@ func (m *EnforcementMetrics) RecordEnforcement(operation, result string) {
 	m.enforcementByLabel.WithLabelValues(operation, result).Inc()
 }
 
-// SetActiveCount sets the active license gauge.
-func (m *EnforcementMetrics) SetActiveCount(n int) {
-	if m == nil {
-		return
-	}
-	m.activeCount.Set(float64(n))
-}
-
 // SetCapacity sets the capacity gauges in one shot. ratio is computed by the
-// caller (Quota method) and may be 0 when max == 0.
+// caller (Quota/CheckCapacity path) and may be 0 when max == 0.
 func (m *EnforcementMetrics) SetCapacity(used, max int, ratio float64) {
 	if m == nil {
 		return
@@ -99,8 +80,8 @@ func (m *EnforcementMetrics) SetCapacity(used, max int, ratio float64) {
 	m.usageRatio.Set(ratio)
 }
 
-// SetExpiryDaysRemaining records days-remaining for a single license.
-// Pass -1 to indicate perpetual/no-expiry.
+// SetExpiryDaysRemaining records days-remaining for the (singleton) system
+// license. Pass -1 to indicate perpetual/no-expiry.
 func (m *EnforcementMetrics) SetExpiryDaysRemaining(licenseID string, days int) {
 	if m == nil {
 		return

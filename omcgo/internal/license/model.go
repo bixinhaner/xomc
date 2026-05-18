@@ -1,84 +1,22 @@
+// model.go — F06 System License 重构 Step 5 之后的最小化模型层。
+//
+// 老 multi-license 类型（License/LicenseStatus/LicenseType/LicenseFilter/
+// LicenseSummary）已在 Step 5 完整删除。本文件现仅保留 enforcer/handler 仍要
+// 用的 Quota 类型 — 它是 GET /quota 端点的响应体（system_license 模型下
+// 由 enforcer 填出），与 system_license_model.go 上的 SystemLicense 是两回事
+// （SystemLicense 是 DB 行；Quota 是 enforcement 状态视图）。
 package license
 
-import (
-	"encoding/json"
-	"time"
-
-	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/core/model"
-)
-
-// LicenseStatus represents the current state of a license.
-type LicenseStatus string
-
-const (
-	StatusActive  LicenseStatus = "active"
-	StatusExpired LicenseStatus = "expired"
-	StatusPending LicenseStatus = "pending"
-	StatusTrial   LicenseStatus = "trial"
-	StatusRevoked LicenseStatus = "revoked"
-)
-
-// LicenseType represents the type of a license.
-type LicenseType string
-
-const (
-	TypePerpetual    LicenseType = "perpetual"
-	TypeSubscription LicenseType = "subscription"
-	TypeTrial        LicenseType = "trial"
-	TypeEvaluation   LicenseType = "evaluation"
-)
-
-// License represents a single license record.
-type License struct {
-	ID          uuid.UUID       `json:"id"`
-	LicenseName string          `json:"license_name"`
-	LicenseCode string          `json:"license_code"`
-	ProductName string          `json:"product_name"`
-	LicenseType LicenseType     `json:"license_type"`
-	Status      LicenseStatus   `json:"status"`
-	MaxDevices  int             `json:"max_devices"`
-	UsedDevices int             `json:"used_devices"`
-	Features    json.RawMessage `json:"features"`
-	IssueDate   time.Time       `json:"issue_date"`
-	ExpiryDate  *time.Time      `json:"expiry_date"`
-	Licensor    *string         `json:"licensor"`
-	DeviceType  *string         `json:"device_type"`
-	Region      *string         `json:"region"`
-	Notes       *string         `json:"notes"`
-	CreatedAt   time.Time       `json:"created_at"`
-	UpdatedAt   time.Time       `json:"updated_at"`
-
-	// Enforcement extension (T-0015 / R-103, migration 000043).
-
-	// GracePeriodDays is the number of days after ExpiryDate that the license
-	// is still considered active (0 = no grace). Range [0, 365].
-	GracePeriodDays int `json:"grace_period_days"`
-
-	// CapacityAlertThresholds is a JSON array of percentage breakpoints (e.g.
-	// [80, 90, 95]) that trigger capacity alerts when used_devices/max_devices
-	// crosses each threshold.
-	CapacityAlertThresholds json.RawMessage `json:"capacity_alert_thresholds"`
-
-	// LastCapacityAlertAt tracks the most recent capacity alert dispatch for
-	// dedup (6h window per threshold). Nil if never alerted.
-	LastCapacityAlertAt *time.Time `json:"last_capacity_alert_at"`
-
-	// LastCapacityAlertThreshold records the threshold percentage of the most
-	// recent alert so the monitor can detect threshold crossings.
-	LastCapacityAlertThreshold *int `json:"last_capacity_alert_threshold"`
-}
-
 // Quota describes the current license enforcement state, returned by
-// GET /api/v1/licenses/quota.
+// GET /api/v1/licenses/quota (老路由仍可保留，handler 在 Step 5 已删，路由
+// 同时下线；前端不再消费此端点，但保留类型给 Phase 7 RBAC 改造期复用)。
 //
-// F06 System License 重构 Step 3 起：
-//   - MaxDevices / UsedDevices / UsageRatio 现在反映 **所有 device_type 容量
-//     之和 / 总设备数**（兼容老 /quota 端点的 caller 与 PDF 导出）
-//   - PerType 是新增字段，列出每个 device_type 的子配额；前端展示 / 精细化
-//     enforcement 走这个 map
-//   - GracePeriodDays 新模型不再使用，保留字段以避免 JSON 兼容性破坏，
-//     恒为 0
+// 字段语义（system_license singleton 模型下）：
+//   - MaxDevices / UsedDevices / UsageRatio 反映 **所有 device_type 容量
+//     之和 / 总设备数**
+//   - PerType 列出每个 device_type 子配额；前端展示 / 精细化 enforcement 走它
+//   - DaysRemaining = -1 表示 perpetual（NULL expiry_date）
+//   - GracePeriodDays 新模型无此概念，恒为 0（字段保留为防止旧调用方 panic）
 type Quota struct {
 	HasActiveLicense bool                     `json:"has_active_license"`
 	MaxDevices       int                      `json:"max_devices"`
@@ -90,36 +28,12 @@ type Quota struct {
 	PerType          map[string]TypeQuotaItem `json:"per_type,omitempty"`
 }
 
-// TypeQuotaItem 是 device_type 维度配额条目（新 system_license 模型）。
+// TypeQuotaItem 是 device_type 维度配额条目。
 //
-// Max 来自 SystemLicense.DevicesSupport[type]；Used 实际由 enforcer 在做
-// per-type 精细化校验时填充。Step 3 仅保留 Max（Used 暂为 0），精细化 gating
-// 在 Phase 7 RBAC 联动 sprint 上线。
+// Max 来自 SystemLicense.DevicesSupport[type]；Used 在 Phase 7 RBAC 联动
+// per-type 精细化 gating 上线前固定 0。
 type TypeQuotaItem struct {
 	Max   int     `json:"max"`
 	Used  int     `json:"used"`
 	Ratio float64 `json:"ratio"`
-}
-
-// LicenseSummary contains aggregated license statistics.
-//
-// EnforcementHits7d 是 T-0100-P2 加的字段：近 7 天 enforcement 拒绝次数
-// （license_logs WHERE result='denied' AND created_at >= now()-7d）。
-// 用于 LicenseList 顶部"近 7 天 enforcement 命中"卡片，让运维一眼看到
-// 拦截次数趋势。值不可用时（如 license_logs 表不存在）退化为 0。
-type LicenseSummary struct {
-	Total             int64 `json:"total"`
-	Active            int64 `json:"active"`
-	Expired           int64 `json:"expired"`
-	Pending           int64 `json:"pending"`
-	ExpiringSoon      int64 `json:"expiring_soon"`
-	EnforcementHits7d int64 `json:"enforcement_hits_7d"`
-}
-
-// LicenseFilter specifies criteria for listing licenses.
-type LicenseFilter struct {
-	Status      *LicenseStatus
-	LicenseType *LicenseType
-	DeviceType  *string
-	model.ListRequest
 }

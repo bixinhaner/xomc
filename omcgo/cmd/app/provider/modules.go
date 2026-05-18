@@ -429,7 +429,26 @@ func initMiscModules(c *Container) error {
 	historyService := notification.NewHistoryService(historyRepo, logger)
 	c.miscDeps.notifHistoryHandler = notification.NewHistoryHandler(historyService, logger)
 
-	logger.Info("notification module initialized")
+	// T-0141: SMTP 邮件发送器 + Mailer（模板渲染→发送→历史）+ Alertmanager
+	// 告警 webhook 入口。SMTP 默认 disabled，配好邮件服务器后由配置启用。
+	emailSender := notification.NewEmailSender(notification.SMTPOptions{
+		Enabled:  c.Cfg.Notification.SMTP.Enabled,
+		Host:     c.Cfg.Notification.SMTP.Host,
+		Port:     c.Cfg.Notification.SMTP.Port,
+		Username: c.Cfg.Notification.SMTP.Username,
+		Password: c.Cfg.Notification.SMTP.Password,
+		From:     c.Cfg.Notification.SMTP.From,
+		StartTLS: c.Cfg.Notification.SMTP.StartTLS,
+		Timeout:  c.Cfg.Notification.SMTP.Timeout,
+	}, logger)
+	mailer := notification.NewMailer(templateService, historyService, emailSender, logger)
+	c.miscDeps.alertWebhookHandler = notification.NewAlertWebhookHandler(mailer, notification.AlertWebhookOptions{
+		Token:      c.Cfg.Notification.AlertWebhook.Token,
+		Recipients: c.Cfg.Notification.AlertWebhook.Recipients,
+	}, logger)
+
+	logger.Info("notification module initialized",
+		zap.Bool("smtp_enabled", c.Cfg.Notification.SMTP.Enabled))
 
 	// MML Console module
 	mmlCmdRepo := mml.NewPgCommandRepository(c.PgPool)
@@ -570,38 +589,19 @@ func initMiscModules(c *Container) error {
 	c.miscDeps.baselineHandler = baseline.NewHandler(baselineSvc, logger)
 	logger.Info("config baseline module initialized")
 
-	// License module + Enforcer (T-0015 / R-103).
-	// Enforcer is registered with the global Prometheus registry so the
-	// 6 license metrics are scraped without further wiring. Enforcer is
-	// wired into Service for cache invalidation and also exposed via
-	// Container so DeviceService can pick it up via SetLicenseEnforcer.
-	licenseRepo := license.NewPgLicenseRepository(c.PgPool)
-	licenseSvc := license.NewService(licenseRepo, logger)
+	// F06 System License 重构 Step 5 起：老 multi-license 模型整体下线。
+	// 现在的 license 模块只剩 singleton system_license 链路：
+	//   PgSystemLicenseRepository → SystemLicenseService → SystemLicenseHandler
+	//   PgSystemLicenseRepository + PgDeviceCounter → Enforcer / Monitor
+	systemLicenseRepo := license.NewPgSystemLicenseRepository(c.PgPool)
+	deviceCounter := license.NewPgDeviceCounter(c.PgPool)
 	licenseMetrics := license.NewEnforcementMetrics(c.MetricsReg)
-	// F06 重构 Step 3：enforcer / monitor 已切到 SystemLicenseRepository；
-	// CountDevices 仍复用 licenseRepo（SELECT COUNT(*) FROM devices，与 license
-	// 表无关，Step 5 删老 repo 时换成独立 DeviceCounter 实现即可）。
-	systemLicenseRepoForEnforcer := license.NewPgSystemLicenseRepository(c.PgPool)
-	licenseEnforcer := license.NewEnforcer(systemLicenseRepoForEnforcer, licenseRepo, logger, licenseMetrics)
-	licenseSvc.SetEnforcer(licenseEnforcer)
-	licenseHandler := license.NewHandler(licenseSvc, logger)
-	licenseMonitor := license.NewMonitor(systemLicenseRepoForEnforcer, licenseRepo, license.NoopAlertSink{}, licenseMetrics, logger)
+	licenseEnforcer := license.NewEnforcer(systemLicenseRepo, deviceCounter, logger, licenseMetrics)
+	licenseMonitor := license.NewMonitor(systemLicenseRepo, deviceCounter, license.NoopAlertSink{}, licenseMetrics, logger)
 
-	// T-0100-P0：审计日志（license_logs 表）。enforcer / monitor / handler 三处写入点
-	// 通过 SetLogWriter 注入；NewLogWriter 内部失败降级 warn 不阻断主业务（详见
-	// internal/license/log_writer.go）。
-	licenseLogRepo := license.NewPgLicenseLogRepository(c.PgPool)
-	licenseLogWriter := license.NewLogWriter(licenseLogRepo, logger)
-	licenseEnforcer.SetLogWriter(licenseLogWriter)
-	licenseMonitor.SetLogWriter(licenseLogWriter)
-	licenseHandler.SetLogWriter(licenseLogWriter)
-	licenseHandler.SetLogRepo(licenseLogRepo) // T-0100-P1：让 GET /licenses/logs 走真实 repo
-	licenseSvc.SetLogRepo(licenseLogRepo)     // T-0100-P2：让 Summary 卡 enforcement_hits_7d 走真实 count
-	c.miscDeps.licenseLogRepo = licenseLogRepo
-
-	// T-0100-P4-C：OEM 公钥加载 + 注入 SignatureVerifier。dev 默认 strict=false
-	// + 空 PublicKeyDir → 等价于 P3 stub（unverified 放过）；prod 推荐配置
-	// configs/oem_public_keys/*.pem + strict=true 收紧。
+	// OEM 公钥加载 + 注入 SignatureVerifier。dev 默认 strict=false + 空
+	// PublicKeyDir → 退化为 unverified 放过；prod 推荐配置 OEM 公钥目录 +
+	// strict=true 收紧。
 	licenseVerifier := license.NewSignatureVerifier(c.Cfg.License.Signing.Strict)
 	if dir := c.Cfg.License.Signing.PublicKeyDir; dir != "" {
 		if loadErr := licenseVerifier.LoadKeysFromDir(dir); loadErr != nil {
@@ -613,43 +613,19 @@ func initMiscModules(c *Container) error {
 			zap.Int("key_count", licenseVerifier.KeyCount()),
 			zap.Bool("strict", c.Cfg.License.Signing.Strict))
 	}
-	// T-0100-P5-a W4：strict=true 但实际 0 keys 启动是高风险静默失败（所有
-	// import 都会被拒，运维不知原因）。strict 模式必须有至少 1 个公钥，否则
-	// Fatal 阻止启动让运维立刻定位（config.yaml license.signing.public_key_dir
-	// 误配 / 公钥文件缺失 等场景）。
+	// strict=true 但实际 0 keys 启动是高风险静默失败 — 所有 Update 都会被拒，
+	// 运维不知原因。Fatal 阻止启动让运维立刻定位 license.signing.public_key_dir 误配。
 	if c.Cfg.License.Signing.Strict && licenseVerifier.KeyCount() == 0 {
 		logger.Fatal("license strict mode requires at least 1 OEM public key but none loaded; check license.signing.public_key_dir",
 			zap.String("dir", c.Cfg.License.Signing.PublicKeyDir))
 	}
-	licenseHandler.SetSignatureVerifier(licenseVerifier)
 
-	// T-0100-P4-B：周级 license_logs 归档 cron。MinIO bucket 默认走 logs；
-	// retention=0 / nil minio / 空 bucket → 静默禁用归档（dev 友好）。
-	archiveBucket := c.Cfg.License.LogArchive.MinIOBucket
-	if archiveBucket == "" {
-		archiveBucket = c.Cfg.MinIO.Buckets.Logs
-	}
-	if c.Cfg.License.LogArchive.RetentionMonths > 0 && archiveBucket != "" && c.MinIO != nil {
-		licenseArchiver := license.NewLogArchiver(
-			licenseLogRepo, c.MinIO, archiveBucket,
-			c.Cfg.License.LogArchive.RetentionMonths, logger,
-		)
-		licenseMonitor.SetArchiver(licenseArchiver, c.Cfg.License.LogArchive.Schedule)
-		logger.Info("license log archive cron configured",
-			zap.Int("retention_months", c.Cfg.License.LogArchive.RetentionMonths),
-			zap.String("bucket", archiveBucket),
-			zap.String("schedule", c.Cfg.License.LogArchive.Schedule))
-	}
-
-	c.miscDeps.licenseHandler = licenseHandler
 	c.miscDeps.licenseEnforcer = licenseEnforcer
 	c.miscDeps.licenseMonitor = licenseMonitor
 
-	// F06 System License 重构 Step 2/3：singleton service/handler 并存装配。
-	// 复用上面已构造好的 licenseVerifier（同一 OEM 公钥与 strict 配置）+
-	// licenseEnforcer（Step 3 让 Update 后立刻失效 enforcer 缓存）。
-	// Step 5 才删老 handler。
-	systemLicenseSvc := license.NewSystemLicenseService(systemLicenseRepoForEnforcer, logger)
+	// SystemLicense service/handler — 复用 verifier + enforcer（Update 后调
+	// Invalidate 让 enforcer 立即拉新 license，避开 5min cache TTL）。
+	systemLicenseSvc := license.NewSystemLicenseService(systemLicenseRepo, logger)
 	systemLicenseSvc.SetSignatureVerifier(licenseVerifier)
 	systemLicenseSvc.SetEnforcer(licenseEnforcer)
 	c.miscDeps.systemLicenseHandler = license.NewSystemLicenseHandler(systemLicenseSvc, logger)
@@ -901,15 +877,13 @@ type miscDeps struct {
 	// Baseline
 	baselineHandler *baseline.Handler
 
-	// License + enforcement (T-0015 / R-103)
-	licenseHandler  *license.Handler
+	// License + enforcement (F06 重构 Step 5：multi-license 模型已下线，
+	// 仅剩 singleton system_license 链路)
 	licenseEnforcer *license.EnforcerImpl
 	licenseMonitor  *license.Monitor
-	// T-0100-P0：审计日志 repo（暴露给 P1 GET /licenses/logs handler 复用）
-	licenseLogRepo license.LicenseLogRepository
 
-	// F06 System License 重构（PRD F06-system-license-redesign Step 2）：
-	// singleton 模型 handler，与上面老 multi-license handler 并存，Step 5 才下线老的。
+	// F06 System License 重构（PRD F06-system-license-redesign Step 5）：
+	// singleton 模型 handler，唯一的 license REST 入口。
 	systemLicenseHandler *license.SystemLicenseHandler
 
 	// Ops
@@ -936,6 +910,9 @@ type miscDeps struct {
 	// W2.A.4 / T-0043: Notification template + history
 	notifTemplateHandler *notification.TemplateHandler
 	notifHistoryHandler  *notification.HistoryHandler
+
+	// T-0141: Alertmanager 告警 webhook 入口（SMTP 邮件发送链）
+	alertWebhookHandler *notification.AlertWebhookHandler
 
 	// T-0012 / R-106: worker retry + dead-letter queue admin
 	deadLetterHandler *admin.DeadLetterHandler
