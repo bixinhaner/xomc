@@ -64,7 +64,7 @@ ON CONFLICT (id) DO UPDATE SET
 -- ============================================================
 -- 4. 新 /api/v1/system-license/* api_endpoints
 -- ============================================================
-INSERT INTO api_endpoints (id, path, method, name, description, module, deprecated)
+INSERT INTO api_endpoints (id, path, method, name, description, api_group, is_auto)
 VALUES
     ('50000000-0001-0000-0000-000000000010'::uuid, '/api/v1/system-license',         'GET',  'GET /api/v1/system-license',         '系统级 License - 获取当前生效 license', 'license', FALSE),
     ('50000000-0001-0000-0000-000000000011'::uuid, '/api/v1/system-license',         'POST', 'POST /api/v1/system-license',        '系统级 License - 上传新文件覆盖当前', 'license', FALSE),
