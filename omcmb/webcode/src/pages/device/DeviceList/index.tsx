@@ -12,7 +12,6 @@ import {
   EyeOutlined,
   FileTextOutlined,
   ReloadOutlined,
-  SyncOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
@@ -458,7 +457,6 @@ export default function DeviceList() {
 
           // 任务类型映射
           const taskTypeMap: Record<string, string> = {
-            'batch-sync': t('common.batchSync'),
             'batch-reboot': t('common.batchReboot'),
             'batch-tr069-collect': t('device.action.tr069Collect'),
             'batch-log-collect': t('device.action.logCollect'),
@@ -1139,12 +1137,6 @@ export default function DeviceList() {
   );
 
   const batchActions = useMemo((): BatchAction[] => [
-    {
-      key: 'batch-sync',
-      label: t('common.batchSync'),
-      icon: <SyncOutlined />,
-      onClick: (keys) => handleBatchAction(t('common.batchSync'), keys, 'batch-sync'),
-    },
     {
       key: 'batch-reboot',
       label: t('common.batchReboot'),
