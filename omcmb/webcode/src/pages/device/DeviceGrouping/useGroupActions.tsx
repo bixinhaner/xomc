@@ -63,6 +63,42 @@ export function useGroupActions(deps: {
     childNameFilters, editLevel2NameFilters,
   } = deps;
 
+  // ── 保存错误分类与提示 ──
+  //
+  // antd Form.validateFields() reject 时返回 { errorFields: [...] } —— 字段
+  // 自身已渲染红色提示，此时不再弹 Modal。其余视为 API error：
+  //   - biz_code 1107 (ErrCodeGroupNameDuplicate)：同父级下同名分组冲突，
+  //     用 Modal 明确告诉用户"换一个名称"
+  //   - 其他：fall back 显示后端 msg 或通用失败文案
+  //
+  // 之前 4 个 catch 块全部空，导致重名失败"静默无反馈"——这是用户报告的核心
+  // bug。统一抽到一个 helper，4 处 catch 共享。
+  const handleSaveError = useCallback(
+    (err: unknown) => {
+      if (err && typeof err === 'object' && 'errorFields' in err) {
+        // antd 表单 validation 错误 — 字段红色提示已渲染，不再弹 Modal。
+        return;
+      }
+      // 兼容两种 axios 错误形态：
+      //   - HTTP 200 + envelope ret=0：http.ts 拦截器抛 Error 时挂 err.bizCode
+      //   - HTTP 4xx：axios 抛 AxiosError，biz_code 在 err.response.data.biz_code
+      const bizCode = extractBizCode(err);
+      const msg = extractErrorMessage(err);
+      let content: string;
+      if (bizCode === 1107) {
+        // ErrCodeGroupNameDuplicate — backend topology.Service.CreateGroup 抛
+        content = t('device.group.nameDuplicate');
+      } else {
+        content = msg || t('common.operationFailed');
+      }
+      modal.error({
+        title: t('device.group.saveFailed'),
+        content,
+      });
+    },
+    [modal, t]
+  );
+
   // ── Modal/drawer open state ──
   const [addModalOpen, setAddModalOpen] = React.useState(false);
   const [editModalOpen, setEditModalOpen] = React.useState(false);
@@ -168,10 +204,10 @@ export function useGroupActions(deps: {
       });
       void message.success(t('common.success'));
       setAddModalOpen(false);
-    } catch {
-      // validation or API error
+    } catch (err) {
+      handleSaveError(err);
     }
-  }, [addForm, createGroupMutation, message, t]);
+  }, [addForm, createGroupMutation, message, t, handleSaveError]);
 
   const handleEditGroup = useCallback(async () => {
     try {
@@ -188,10 +224,10 @@ export function useGroupActions(deps: {
       void message.success(t('common.success'));
       setEditModalOpen(false);
       void refetchGroups();
-    } catch {
-      // validation or API error
+    } catch (err) {
+      handleSaveError(err);
     }
-  }, [editForm, editingGroupId, updateGroupMutation, message, t, refetchGroups]);
+  }, [editForm, editingGroupId, updateGroupMutation, message, t, refetchGroups, handleSaveError]);
 
   const handleSaveChildGroup = useCallback(async () => {
     try {
@@ -224,10 +260,10 @@ export function useGroupActions(deps: {
       });
       void message.success(t('common.success'));
       setAddChildDrawerOpen(false);
-    } catch {
-      // validation or API error
+    } catch (err) {
+      handleSaveError(err);
     }
-  }, [addChildForm, parentGroupId, createGroupMutation, message, t, childNameFilters.filters]);
+  }, [addChildForm, parentGroupId, createGroupMutation, message, t, childNameFilters.filters, handleSaveError]);
 
   const handleSaveEditLevel2 = useCallback(async () => {
     try {
@@ -239,10 +275,10 @@ export function useGroupActions(deps: {
       });
       void message.success(t('common.success'));
       setEditLevel2DrawerOpen(false);
-    } catch {
-      // validation or API error
+    } catch (err) {
+      handleSaveError(err);
     }
-  }, [editLevel2Form, editLevel2GroupId, updateGroupMutation, message, t]);
+  }, [editLevel2Form, editLevel2GroupId, updateGroupMutation, message, t, handleSaveError]);
 
   const handleMatchingModeChange = useCallback(() => {
     childNameFilters.reset();
@@ -283,4 +319,50 @@ export function useGroupActions(deps: {
       onMatchingModeChange: handleMatchingModeChange,
     },
   };
+}
+
+// ── 错误抽取辅助（文件内私有） ──
+
+/**
+ * 从 axios / 业务 error 上抽 biz_code。
+ *
+ * 兼容三种路径：
+ *   1. http.ts 拦截器手工抛的 Error & { bizCode: number }（HTTP 200 + ret=0）
+ *   2. AxiosError.response.data.biz_code（HTTP 4xx 响应体仍是 envelope）
+ *   3. AxiosError.response.data.bizCode（camelCase 防御性兜底）
+ *
+ * 未识别返 0（caller 走通用失败文案）。
+ */
+function extractBizCode(err: unknown): number {
+  if (!err || typeof err !== 'object') return 0;
+  const e = err as Record<string, unknown>;
+  if (typeof e.bizCode === 'number') return e.bizCode;
+  const resp = e.response as Record<string, unknown> | undefined;
+  if (resp && typeof resp === 'object') {
+    const data = resp.data as Record<string, unknown> | undefined;
+    if (data && typeof data === 'object') {
+      if (typeof data.biz_code === 'number') return data.biz_code;
+      if (typeof data.bizCode === 'number') return data.bizCode;
+    }
+  }
+  return 0;
+}
+
+/**
+ * 从 error 取后端 msg（envelope.msg 字段），fallback 到 Error.message。
+ *
+ * 优先级：response.data.msg > Error.message > 空字符串
+ */
+function extractErrorMessage(err: unknown): string {
+  if (!err || typeof err !== 'object') return '';
+  const e = err as Record<string, unknown>;
+  const resp = e.response as Record<string, unknown> | undefined;
+  if (resp && typeof resp === 'object') {
+    const data = resp.data as Record<string, unknown> | undefined;
+    if (data && typeof data === 'object' && typeof data.msg === 'string') {
+      return data.msg;
+    }
+  }
+  if (err instanceof Error) return err.message;
+  return '';
 }
