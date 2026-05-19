@@ -146,6 +146,98 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
 
   const [isReady, setIsReady] = useState(false);
 
+  // 收起 Spiderfy 展开（必须在 useEffect 之前定义，供 bindMapEvents 使用）
+  const unspiderfy = useCallback(() => {
+    if (!isSpiderfiedRef.current || !spiderfySourceRef.current) return;
+
+    // 清除 spiderfy 图层的所有 feature
+    spiderfySourceRef.current.clear();
+    isSpiderfiedRef.current = false;
+    spiderfiedCenterRef.current = null;
+
+    // 注意：VectorSource.clear() 会自动触发渲染，手动调用 render() 可能冗余
+    // 保留此行以确保兼容性，后续可移除并测试验证
+    mapInstanceRef.current?.render();
+  }, []);
+
+  // 展开 Spiderfy（扇形方式）（必须在 useEffect 之前定义，供 bindMapEvents 使用）
+  const spiderfy = useCallback((_clusterFeature: Feature, center: number[], features: Feature[]) => {
+    if (!mapInstanceRef.current || !spiderfySourceRef.current) return;
+
+    // 如果已经展开，先收起
+    if (isSpiderfiedRef.current) {
+      unspiderfy();
+    }
+
+    const count = features.length;
+    if (count <= 1) return;
+
+    // 创建 spiderfy 图层的 feature
+    const spiderfyFeatures: Feature[] = [];
+
+    // 中心点 feature
+    const centerFeature = new Feature({
+      geometry: new Point(center),
+      spiderfyCenter: true,
+      count,
+    });
+    spiderfyFeatures.push(centerFeature);
+
+    // 扇形展开点
+    const angleStep = (2 * Math.PI) / count;
+    const startAngle = -Math.PI / 2; // 从顶部开始
+
+    features.forEach((f, index) => {
+      const device = f.getProperties() as MapDevice;
+      const angle = startAngle + index * angleStep;
+
+      // 计算展开点的坐标（像素偏移转换为地图坐标）
+      const pixelOffset = [
+        Math.cos(angle) * SPIDERFY_CONFIG.radius,
+        Math.sin(angle) * SPIDERFY_CONFIG.radius,
+      ];
+
+      // 将像素偏移转换为地图坐标偏移
+      const map = mapInstanceRef.current!;
+      const resolution = map.getView().getResolution()!;
+      const coordinateOffset = [
+        pixelOffset[0] * resolution,
+        pixelOffset[1] * resolution,
+      ];
+
+      const pointCoordinate = [
+        center[0] + coordinateOffset[0],
+        center[1] - coordinateOffset[1], // Y 轴反向
+      ];
+
+      // 创建连线 feature
+      const lineFeature = new Feature({
+        geometry: new LineString([center, pointCoordinate]),
+        spiderfyLine: true,
+      });
+      spiderfyFeatures.push(lineFeature);
+
+      // 创建展开点 feature
+      const pointFeature = new Feature({
+        geometry: new Point(pointCoordinate),
+        spiderfyPoint: true,
+        device: device,
+        index: index,
+        total: count,
+      });
+      spiderfyFeatures.push(pointFeature);
+    });
+
+    // 添加所有 feature 到 spiderfy 图层
+    spiderfySourceRef.current.addFeatures(spiderfyFeatures);
+
+    isSpiderfiedRef.current = true;
+    spiderfiedCenterRef.current = center;
+
+    // 触发地图重新渲染
+    mapInstanceRef.current.render();
+  }, [unspiderfy]);
+
   // 根据缩放级别动态调整聚合距离
   const updateClusterDistance = useCallback((zoom: number) => {
     if (!clusterSourceRef.current) return;
@@ -275,19 +367,6 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // 仅在挂载时执行
 
-  // 收起 Spiderfy 展开（必须在 updateDevices 和 spiderfy 之前定义）
-  const unspiderfy = useCallback(() => {
-    if (!isSpiderfiedRef.current || !spiderfySourceRef.current) return;
-
-    // 清除 spiderfy 图层的所有 feature
-    spiderfySourceRef.current.clear();
-    isSpiderfiedRef.current = false;
-    spiderfiedCenterRef.current = null;
-
-    // 触发地图重新渲染
-    mapInstanceRef.current?.render();
-  }, []);
-
   // 更新设备数据
   const updateDevices = useCallback((devices: MapDevice[]) => {
     if (!deviceSourceRef.current) return;
@@ -374,84 +453,6 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
       highlightFeatureRef.current = null;
     }
   }, []);
-
-  // 展开 Spiderfy（扇形方式）
-  const spiderfy = useCallback((_clusterFeature: Feature, center: number[], features: Feature[]) => {
-    if (!mapInstanceRef.current || !spiderfySourceRef.current) return;
-
-    // 如果已经展开，先收起
-    if (isSpiderfiedRef.current) {
-      unspiderfy();
-    }
-
-    const count = features.length;
-    if (count <= 1) return;
-
-    // 创建 spiderfy 图层的 feature
-    const spiderfyFeatures: Feature[] = [];
-
-    // 中心点 feature
-    const centerFeature = new Feature({
-      geometry: new Point(center),
-      spiderfyCenter: true,
-      count,
-    });
-    spiderfyFeatures.push(centerFeature);
-
-    // 扇形展开点
-    const angleStep = (2 * Math.PI) / count;
-    const startAngle = -Math.PI / 2; // 从顶部开始
-
-    features.forEach((f, index) => {
-      const device = f.getProperties() as MapDevice;
-      const angle = startAngle + index * angleStep;
-
-      // 计算展开点的坐标（像素偏移转换为地图坐标）
-      const pixelOffset = [
-        Math.cos(angle) * SPIDERFY_CONFIG.radius,
-        Math.sin(angle) * SPIDERFY_CONFIG.radius,
-      ];
-
-      // 将像素偏移转换为地图坐标偏移
-      const map = mapInstanceRef.current!;
-      const resolution = map.getView().getResolution()!;
-      const coordinateOffset = [
-        pixelOffset[0] * resolution,
-        pixelOffset[1] * resolution,
-      ];
-
-      const pointCoordinate = [
-        center[0] + coordinateOffset[0],
-        center[1] - coordinateOffset[1], // Y 轴反向
-      ];
-
-      // 创建连线 feature
-      const lineFeature = new Feature({
-        geometry: new LineString([center, pointCoordinate]),
-        spiderfyLine: true,
-      });
-      spiderfyFeatures.push(lineFeature);
-
-      // 创建展开点 feature
-      const pointFeature = new Feature({
-        geometry: new Point(pointCoordinate),
-        spiderfyPoint: true,
-        device: device,
-        index: index,
-        total: count,
-      });
-      spiderfyFeatures.push(pointFeature);
-    });
-
-    // 添加所有 feature 到 spiderfy 图层
-    spiderfySourceRef.current.addFeatures(spiderfyFeatures);
-
-    isSpiderfiedRef.current = true;
-    spiderfiedCenterRef.current = center;
-
-    // 触发地图重新渲染
-    mapInstanceRef.current.render();
-  }, [unspiderfy]);
 
   // 高亮设备（水波纹动画）
   const highlightDevice = useCallback((deviceId: string) => {
