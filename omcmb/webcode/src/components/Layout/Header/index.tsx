@@ -1,4 +1,5 @@
-import { Badge } from 'antd';
+import { useState } from 'react';
+import { Badge, Popover } from 'antd';
 import {
   BellOutlined,
   MenuOutlined,
@@ -8,8 +9,10 @@ import {
   MenuUnfoldOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '@core/store/appStore';
+import { useNotificationUnreadCount } from '@core/hooks/api/useNotificationCenter';
 import { useResponsive } from '@/hooks/useResponsive';
 import { useT } from '@/hooks/useT';
+import NotificationCenter from '@/components/NotificationCenter';
 import AlarmBadges from './AlarmBadges';
 import TimezoneSelector from './TimezoneSelector';
 import UserDropdown from './UserDropdown';
@@ -33,6 +36,10 @@ export default function Header() {
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const { isMobile } = useResponsive();
   const t = useT();
+  // T-0157 C9: 消息中心 — 铃铛 Popover 受控开关 + 未读数 10s 轮询徽标
+  const [notifOpen, setNotifOpen] = useState(false);
+  const unreadQuery = useNotificationUnreadCount();
+  const unreadCount = unreadQuery.data ?? 0;
 
   const deviceLabel = DEVICE_TYPE_KEY[deviceType] ? t(DEVICE_TYPE_KEY[deviceType]) : deviceType;
 
@@ -81,12 +88,21 @@ export default function Header() {
 
         <div className={styles.divider} />
 
-        {/* Notification bell */}
-        <button className={styles.headerAction} title={t('header.notification')} type="button">
-          <Badge count={0} size="small">
-            <BellOutlined style={{ fontSize: 16 }} />
-          </Badge>
-        </button>
+        {/* Notification bell (T-0157 C9 — 消息中心 Popover) */}
+        <Popover
+          trigger="click"
+          placement="bottomRight"
+          open={notifOpen}
+          onOpenChange={setNotifOpen}
+          content={<NotificationCenter onClose={() => setNotifOpen(false)} />}
+          overlayInnerStyle={{ padding: 0 }}
+        >
+          <button className={styles.headerAction} title={t('header.notification')} type="button">
+            <Badge count={unreadCount} size="small" overflowCount={99}>
+              <BellOutlined style={{ fontSize: 16 }} />
+            </Badge>
+          </button>
+        </Popover>
 
         <div className={styles.divider} />
 
