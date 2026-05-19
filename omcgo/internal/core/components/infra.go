@@ -22,6 +22,7 @@ import (
 	natscomp "github.com/omcgo/omcgo/internal/core/components/nats"
 	"github.com/omcgo/omcgo/internal/core/components/postgres"
 	"github.com/omcgo/omcgo/internal/core/components/redisx"
+	"github.com/omcgo/omcgo/internal/core/components/sdnotify"
 	"github.com/omcgo/omcgo/internal/core/event"
 	healthpkg "github.com/omcgo/omcgo/internal/core/health"
 )
@@ -247,6 +248,15 @@ func (inf *Infra) startMetrics() {
 }
 
 func (inf *Infra) waitForShutdown(errCh <-chan error) error {
+	// systemd 集成（T-0150）：此处所有初始化已完成（HTTP / metrics 监听已启动），
+	// 通知 systemd 启动就绪（Type=notify 必需），并启动看门狗喂狗 goroutine。
+	// 非 systemd 环境（dev / 裸跑 / 测试）下 sdnotify 全部为 no-op，
+	// 同一二进制在各部署形态下行为一致。
+	wdCtx, wdCancel := context.WithCancel(context.Background())
+	defer wdCancel()
+	sdnotify.Ready()
+	sdnotify.StartWatchdog(wdCtx)
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -263,6 +273,11 @@ func (inf *Infra) waitForShutdown(errCh <-chan error) error {
 		sig := <-sigCh
 		inf.Logger.Info("received signal, shutting down", zap.String("signal", sig.String()))
 	}
+
+	// 通知 systemd 进入停止阶段：systemd 随即不再期待看门狗心跳，改用
+	// TimeoutStopSec 约束停止耗时；同时停止本进程的喂狗 goroutine。
+	sdnotify.Stopping()
+	wdCancel()
 
 	if err := inf.GS.Shutdown(context.Background()); err != nil {
 		inf.Logger.Error("shutdown error", zap.Error(err))

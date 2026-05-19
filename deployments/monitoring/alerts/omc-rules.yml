@@ -1,9 +1,12 @@
-# OMC starter 告警规则 — 仅覆盖三进程存活，业务级告警在后续 Wave 补
+# OMC 告警规则 — 三进程存活 + 崩溃循环 + 监控心跳 + 业务级告警
 #
 # 注意：
 #   - 以 up{job="..."} == 0 作为存活信号
 #   - critical: 影响主链路（app / acs）
 #   - warning: 异步 worker，短暂 down 不立即升级
+#   - omc.meta（T-0149）：DeadMansSwitch 监控栈心跳
+#   - omc.business（T-0153）：业务级告警，基于各模块已注册的 Prometheus 指标；
+#     阈值为初始经验值，须随真实运行基线调整。
 
 groups:
   - name: omc.process_liveness
@@ -54,6 +57,26 @@ groups:
             Impact: PM/MR 文件处理与 KPI 计算延迟，告警/数据同步不实时。
             Action: 查看 run/logs/worker/worker.log。
 
+      - alert: OMCProcessCrashLooping
+        # up 在 0/1 间反复跳变 = 进程崩溃后被 systemd 反复拉起。一次「崩溃+拉起」
+        # 产生 2 次 changes；15min 内 > 4 次 ≈ 2 轮以上重启，属异常（正常发版
+        # 重启仅 2 次）。systemd StartLimitBurst（见 omcgo-*.service，T-0150）
+        # 熔断后 up 稳定为 0，转由上面的 *Down 规则接管。
+        expr: changes(up{job=~"omc-app|omc-acs|omc-worker"}[15m]) > 4
+        for: 1m
+        labels:
+          severity: critical
+          domain: omc
+        annotations:
+          summary: "{{ $labels.job }} 正在崩溃循环（{{ $labels.instance }}）"
+          description: |
+            过去 15 分钟内 {{ $labels.job }} 的存活状态反复跳变（> 4 次），
+            进程崩溃后被反复重启 —— 大概率存在无法自愈的故障。
+            Impact: 服务实际不可用或频繁中断。
+            Action: journalctl -u omcgo-app|omcgo-acs|omcgo-worker -n 200 定位
+                    崩溃根因；若 systemd 已因 StartLimitBurst 进入 failed 态，
+                    修复后用 systemctl reset-failed <unit> 恢复。
+
   - name: omc.mml_translation
     interval: 30s
     rules:
@@ -85,3 +108,95 @@ groups:
                  是 privatePath（说明历史脏数据未迁移）
               2. 看 `parammodel_intersect_*` 指标确认 discovered_param_mappings 是否被填充
               3. 必要时用 admin Tab 3 补充缺失映射并重试任务
+
+  - name: omc.meta
+    interval: 30s
+    rules:
+      # DeadMansSwitch（T-0149）—— 常驻 firing 的心跳告警（expr 恒为真）。
+      # 用途：解决「谁来监控监控系统」。外部看门狗应「持续收到」本告警经
+      # AlertManager 转发的心跳；一旦在约定窗口（建议 ≤ AlertManager
+      # repeat_interval 的 2 倍）内收不到，说明 Prometheus / AlertManager /
+      # 整个监控栈已死 —— 由外部系统反向告警「监控失联」。
+      # AlertManager 侧已配 alertname=DeadMansSwitch 专用路由 → deadmansswitch
+      # receiver（webhook），repeat_interval=1m。
+      - alert: DeadMansSwitch
+        expr: vector(1)
+        labels:
+          severity: none
+          domain: omc
+        annotations:
+          summary: "监控栈心跳 —— 此告警应始终 firing"
+          description: |
+            DeadMansSwitch 是常驻心跳信号，正常情况下永远处于 firing 状态。
+            外部看门狗应持续收到本告警的转发；若在约定窗口内未收到，
+            说明 Prometheus 或 AlertManager 已停止工作，监控链已失效，
+            需人工立即介入检查监控栈本身。
+
+  # 业务级告警（T-0153）—— 基于各模块已注册的 Prometheus 指标。
+  # 阈值为初始经验值，须随真实运行基线调整。
+  - name: omc.business
+    interval: 30s
+    rules:
+      - alert: OMCDeviceBatchDropping
+        # omc_device_batch_dropped_total：Periodic Inform 批量处理器因 worker
+        # channel 满而丢弃的 Inform 事件 —— 任何丢弃都意味着设备上报数据丢失。
+        expr: rate(omc_device_batch_dropped_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          domain: omc
+          subsystem: device
+        annotations:
+          summary: "Periodic Inform 批量处理器正在丢弃事件"
+          description: |
+            omc_device_batch_dropped_total 在过去 5 分钟持续增长 —— 批量处理器
+            的 worker 输入通道已满，设备 Inform 数据正在丢失。
+            Impact: 设备心跳 / 参数变更上报丢失，设备状态与实际不一致。
+            Action: 调大 batch_processor.workers / input_buffer（config.*.yaml）；
+                    排查 DB 写入是否变慢导致 flush 跟不上。
+
+      - alert: OMCDeviceBatchFlushFailing
+        expr: rate(omc_device_batch_flush_failed_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: device
+        annotations:
+          summary: "Periodic Inform 批量 flush 重试后仍失败"
+          description: |
+            omc_device_batch_flush_failed_total 持续增长，批量写库重试后仍失败。
+            Impact: 部分设备状态更新未落库。
+            Action: 检查 PostgreSQL 可用性与写入延迟（见 infra-alerts.yml）。
+
+      - alert: OMCTaskQueueBacklog
+        # omc_tasks_pending_total：统一任务队列当前待执行任务数（Gauge）。
+        # 阈值 2000 为初始经验值，须按实际设备规模与下发节奏调整。
+        expr: omc_tasks_pending_total > 2000
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: task
+        annotations:
+          summary: "任务队列积压（待执行 > 2000）"
+          description: |
+            待执行任务数已持续 10 分钟超过 2000。
+            Impact: MML / 固件 / 配置下发等指令派发延迟变大。
+            Action: 看 worker 是否健康、设备是否大面积离线导致任务无法送达；
+                    评估是否存在批量操作引发的任务风暴。
+
+      - alert: OMCPMProcessingSlow
+        # omc_pm_processing_duration_seconds 是 Histogram，按 le 桶统计 p95。
+        expr: histogram_quantile(0.95, rate(omc_pm_processing_duration_seconds_bucket[10m])) > 60
+        for: 10m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: pm
+        annotations:
+          summary: "PM 文件处理 p95 耗时 > 60s"
+          description: |
+            PM 文件处理 p95 耗时持续 10 分钟超过 60 秒。
+            Impact: KPI 计算与时序数据入库滞后，性能看板不实时。
+            Action: 看 worker CPU / TimescaleDB 写入压力；评估 PM 文件体积与并发。

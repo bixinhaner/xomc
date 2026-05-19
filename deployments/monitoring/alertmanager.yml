@@ -1,22 +1,77 @@
-# AlertManager 最小配置 — placeholder webhook
+# AlertManager 配置 — OMC 告警通知
 #
-# 注意：
-#   - placeholder-webhook 故意指向不可达 URL (example.invalid)，避免误投递
-#   - W1.5（通知中心）落地后，请把 webhook url 换成 omcgo-app 的真实告警入口
-#   - 邮件 / 钉钉 / 飞书等渠道在通知中心统一配置，AlertManager 仅作为 Prometheus
-#     端的兜底转发层
+# 通知链：Prometheus 规则触发 → AlertManager 分组/抑制/路由 → receiver 投递。
+#
+# ⚠️ 部署期必改：下方所有 <尖括号占位符> 必须替换为现场真实值，否则告警发不出。
+#    SMTP 服务器、收件邮箱、看门狗地址由运营商内网环境提供。
+#
+# 设计（T-0149）：
+#   · AlertManager 直接发邮件 —— 进程宕机、连接池耗尽等系统级告警的兜底通道，
+#     不依赖应用侧通知中心，部署即可用。
+#   · 应用通知中心 webhook（omc-notification-center）已预留 —— 待 T-0152
+#     （notification SMTP 发送器）落地后，把 route.receiver 切到它即可统一出口
+#     （邮件/短信/站内信 + 前端可管理模板与发送历史）。
+#   · DeadMansSwitch —— 常驻心跳告警，转发给外部看门狗，解决「谁来监控监控系统」。
+
+global:
+  resolve_timeout: 5m
+  # SMTP 全局配置 —— 部署期替换为内网邮件服务器。
+  # 内网 SMTP 无需认证时，删除 smtp_auth_* 三行即可。
+  smtp_smarthost: '<SMTP-HOST>:<SMTP-PORT>'      # 例：smtp.example.com:25
+  smtp_from: '<omc-alert@example.com>'
+  smtp_auth_username: '<SMTP-USER>'
+  smtp_auth_password: '<SMTP-PASSWORD>'
+  smtp_require_tls: false                        # 内网明文 SMTP 常见；走 TLS 改 true
 
 route:
-  receiver: "placeholder-webhook"
-  group_by: ["alertname", "service"]
+  receiver: 'default-email'                      # 兜底：所有未分类告警至少发邮件
+  group_by: ['alertname', 'service']
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
+  routes:
+    # critical —— 即时通知、短重复间隔（影响主链路的 app/acs 宕机等）
+    - matchers:
+        - severity = "critical"
+      receiver: 'critical-email'
+      group_wait: 10s
+      repeat_interval: 1h
+    # DeadMansSwitch 心跳 —— 只转发给外部看门狗，不发邮件（避免每分钟刷邮件）
+    - matchers:
+        - alertname = "DeadMansSwitch"
+      receiver: 'deadmansswitch'
+      group_wait: 0s
+      group_interval: 1m
+      repeat_interval: 1m
 
 receivers:
-  - name: "placeholder-webhook"
+  # 兜底邮件 —— warning 级与未分类告警
+  - name: 'default-email'
+    email_configs:
+      - to: '<ops-team@example.com>'
+        send_resolved: true
+
+  # critical 邮件 —— 可填多个收件人/值班邮箱（逗号分隔），按需加抄送
+  - name: 'critical-email'
+    email_configs:
+      - to: '<ops-oncall@example.com>'
+        send_resolved: true
+
+  # DeadMansSwitch —— 转发给外部看门狗。外部系统应「持续收到」此心跳，
+  # 一旦在约定窗口（建议 ≤ repeat_interval 的 2 倍 = 2min）内收不到，
+  # 说明 Prometheus/AlertManager 本身已死，由外部系统反向告警「监控失联」。
+  # 看门狗可用：第三方 Dead Man's Snitch / 内网另一台机器上的 cron 检查脚本。
+  - name: 'deadmansswitch'
     webhook_configs:
-      - url: "http://example.invalid/webhook"
+      - url: '<deadmansswitch-watchdog-url>'
+        send_resolved: false
+
+  # 应用通知中心 webhook —— T-0152（notification SMTP 发送器）落地后启用：
+  # 把上方 route.receiver 改为 'omc-notification-center'，告警即经通知中心
+  # 统一出口（邮件/短信/Webhook/站内信），并可在前端管理模板、查发送历史。
+  - name: 'omc-notification-center'
+    webhook_configs:
+      - url: 'http://omcgo-app:8081/api/v1/alerts/webhook'
         send_resolved: true
 
 inhibit_rules:
@@ -25,4 +80,4 @@ inhibit_rules:
       - severity = "critical"
     target_matchers:
       - severity = "warning"
-    equal: ["service", "alertname"]
+    equal: ['service', 'alertname']

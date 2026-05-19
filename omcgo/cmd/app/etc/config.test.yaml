@@ -121,6 +121,21 @@ batch_processor:
   input_buffer: 500
   shutdown_timeout: 10s
 
+# 通知中心（T-0152）：SMTP 邮件发送器 + Alertmanager 告警 webhook 入口
+notification:
+  smtp:
+    enabled: false
+    host: ""
+    port: 25
+    username: ""
+    password: ""
+    from: "omc-alert@example.com"
+    starttls: false
+    timeout: 10s
+  alert_webhook:
+    token: ""
+    recipients: []
+
 metrics:
   port: 9091
 

@@ -463,7 +463,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	md.notifTemplateHandler.RegisterRoutes(notifGroup)
 	md.notifHistoryHandler.RegisterRoutes(notifGroup)
 
-	// ----- T-0141: Alertmanager 告警 webhook → publicV1（无 JWT）-----
+	// ----- T-0152: Alertmanager 告警 webhook → publicV1（无 JWT）-----
 	// Alertmanager 无法携带 JWT，故挂在无鉴权的 publicV1 上；可选 Bearer token
 	// 校验由 notification.alert_webhook.token 配置。最终路径 /api/v1/alerts/webhook。
 	if md.alertWebhookHandler != nil {

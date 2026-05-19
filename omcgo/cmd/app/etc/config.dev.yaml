@@ -181,6 +181,21 @@ batch_processor:
   input_buffer: 2500      # 每个 worker 输入通道缓冲
   shutdown_timeout: 30s   # 优雅关闭超时
 
+# 通知中心（T-0152）：SMTP 邮件发送器 + Alertmanager 告警 webhook 入口
+notification:
+  smtp:
+    enabled: false              # 配好内网 SMTP 服务器后改 true
+    host: ""                    # SMTP 服务器地址
+    port: 25
+    username: ""                # 留空 = 不做 SMTP AUTH
+    password: ""
+    from: "omc-alert@example.com"
+    starttls: false             # SMTP 支持 STARTTLS 时改 true
+    timeout: 10s
+  alert_webhook:
+    token: ""                   # 非空时校验 Authorization: Bearer <token>
+    recipients: []              # 告警邮件收件人，如 ["ops@example.com"]
+
 metrics:
   port: 9091
 

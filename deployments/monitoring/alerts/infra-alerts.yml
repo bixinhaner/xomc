@@ -1,0 +1,94 @@
+# OMC 基础服务告警规则（T-0151）
+#
+# 覆盖 postgres / redis / nats / minio —— 经各自 exporter 纳入 Prometheus 后，
+# 基础服务健康首次进入统一告警链（此前仅 docker healthcheck 自检，不可观测）。
+#
+# 信号说明：
+#   - up{job="..."} == 0 由 Prometheus 合成，最可靠：exporter 容器或被监控的
+#     基础服务任一不可达即为 0。NATS、MinIO 的存活即由 InfraExporterDown 覆盖。
+#   - pg_up / redis_up 是 exporter 与目标服务之间的连通信号（exporter 在线但
+#     连不上 DB/Redis 时为 0），比 up 更精确地指向「服务本身」异常。
+
+groups:
+  - name: omc.infra_liveness
+    interval: 30s
+    rules:
+      - alert: InfraExporterDown
+        expr: up{job=~"postgres|redis|nats|minio"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+        annotations:
+          summary: "基础服务监控目标 {{ $labels.job }} 不可达"
+          description: |
+            job={{ $labels.job }} 的 scrape 目标已 2 分钟无法抓取。
+            可能是 exporter 容器退出，或被监控的基础服务本身已宕。
+            Impact: 该基础服务健康已不可观测，且大概率服务本身异常。
+            Action: docker compose ps 查 {{ $labels.job }} 与对应 exporter 容器状态。
+
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          domain: omc
+          service: postgres
+        annotations:
+          summary: "PostgreSQL 不可用"
+          description: |
+            postgres_exporter 无法连接 PostgreSQL（pg_up=0）已 1 分钟。
+            Impact: 设备/配置/告警等业务数据读写全停，app/acs/worker 级联报错。
+            Action: docker compose logs postgres；检查磁盘、连接数、是否 OOM。
+
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          domain: omc
+          service: redis
+        annotations:
+          summary: "Redis 不可用"
+          description: |
+            redis_exporter 无法连接 Redis（redis_up=0）已 1 分钟。
+            Impact: TR-069 会话、命令队列、缓存全停，ACS 南向受影响。
+            Action: docker compose logs redis；检查内存与持久化。
+
+  - name: omc.infra_capacity
+    interval: 30s
+    rules:
+      - alert: PostgresConnectionsHigh
+        expr: sum(pg_stat_database_numbackends) / max(pg_settings_max_connections) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          service: postgres
+        annotations:
+          summary: "PostgreSQL 连接数接近上限（> 80%）"
+          description: |
+            后端连接数已超过 max_connections 的 80%，持续 5 分钟。
+            Impact: 新连接可能被拒，应用侧 pgxpool 取连接排队、p99 抖动。
+            Action: 查连接泄漏 / 慢查询占用连接；评估调大 max_connections 或连接池配额。
+
+      - alert: RedisMemoryHigh
+        # redis_memory_max_bytes=0 表示未设 maxmemory —— 用 and 守卫，避免除零误报。
+        expr: (redis_memory_used_bytes / redis_memory_max_bytes > 0.85) and (redis_memory_max_bytes > 0)
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          service: redis
+        annotations:
+          summary: "Redis 内存使用接近 maxmemory（> 85%）"
+          description: |
+            Redis 已用内存超过 maxmemory 的 85%，持续 5 分钟。
+            Impact: 触及上限后按 maxmemory-policy 逐出 key，会话/缓存可能丢失。
+            Action: 查大 key 与 TTL 设置；评估调大 maxmemory。
+
+# TODO（留 T-0153 续）：NATS JetStream 积压告警。
+# prometheus-nats-exporter 的 JetStream 指标名随 exporter 版本而异，需在监控栈
+# 实际部署后用 `curl nats-exporter:7777/metrics | grep -i jetstream` 确认指标名，
+# 再补「JetStream 消费滞后 / stream 消息积压」规则。NATS 服务存活已由上方
+# InfraExporterDown（job=nats）覆盖。

@@ -140,11 +140,11 @@ type DictLoaderConfig struct {
 
 	// T-0098 P1-06：4 域 Loader 子配置。
 	// 默认值由各 Loader 包构造期 fallback（避免 yaml 缺省即崩）。
-	ParamModel       ParamModelLoaderConfig       `mapstructure:"param_model"`
-	Indicator        IndicatorLoaderConfig        `mapstructure:"indicator"`
-	AlarmDefinition  AlarmDefinitionLoaderConfig  `mapstructure:"alarm_definition"`
-	Product          ProductLoaderConfig          `mapstructure:"product"`
-	QuickSettings    QuickSettingsLoaderConfig    `mapstructure:"quick_settings"`
+	ParamModel      ParamModelLoaderConfig      `mapstructure:"param_model"`
+	Indicator       IndicatorLoaderConfig       `mapstructure:"indicator"`
+	AlarmDefinition AlarmDefinitionLoaderConfig `mapstructure:"alarm_definition"`
+	Product         ProductLoaderConfig         `mapstructure:"product"`
+	QuickSettings   QuickSettingsLoaderConfig   `mapstructure:"quick_settings"`
 }
 
 // ParamModelLoaderConfig 控制参数模型 Loader 行为（T-0098 P1-06）。
@@ -225,10 +225,38 @@ type AppConfig struct {
 	ParamRegistry   ParamRegistryConfig   `mapstructure:"param_registry"`
 	BatchProcessor  BatchProcessorConfig  `mapstructure:"batch_processor"`
 	License         LicenseConfig         `mapstructure:"license"`
+	Notification    NotificationConfig    `mapstructure:"notification"`
 	Metrics         MetricsConfig         `mapstructure:"metrics"`
 	Tracer          TracerConfig          `mapstructure:"tracer"`
 	Log             LogConfig             `mapstructure:"log"`
 	RequestIDPrefix string                `mapstructure:"request_id_prefix"` // 请求 ID 前缀，如 "app"
+}
+
+// NotificationConfig 配置通知中心（T-0152）：SMTP 邮件发送器 + Alertmanager
+// 告警 webhook 入口。SMTP 默认 disabled，部署期配好邮件服务器后再启用。
+type NotificationConfig struct {
+	SMTP         SMTPConfig         `mapstructure:"smtp"`
+	AlertWebhook AlertWebhookConfig `mapstructure:"alert_webhook"`
+}
+
+// SMTPConfig 配置 SMTP 邮件发送。Username 为空表示不做 SMTP AUTH；
+// StartTLS 由 SMTP 服务器能力决定。
+type SMTPConfig struct {
+	Enabled  bool          `mapstructure:"enabled"`
+	Host     string        `mapstructure:"host"`
+	Port     int           `mapstructure:"port"`
+	Username string        `mapstructure:"username"`
+	Password string        `mapstructure:"password"`
+	From     string        `mapstructure:"from"`
+	StartTLS bool          `mapstructure:"starttls"`
+	Timeout  time.Duration `mapstructure:"timeout"`
+}
+
+// AlertWebhookConfig 配置 Alertmanager → POST /api/v1/alerts/webhook 入口。
+// Token 非空时校验 Bearer；Recipients 为告警邮件收件人。
+type AlertWebhookConfig struct {
+	Token      string   `mapstructure:"token"`
+	Recipients []string `mapstructure:"recipients"`
 }
 
 // LicenseConfig 配置 license 子系统的可调参数（T-0100 P4）。
@@ -367,11 +395,11 @@ type TopologyConfig struct {
 // TopologyDeviceSyncConfig 配置设备同步到拓扑节点的策略。
 // 支持三种同步模式：事件驱动（实时）、启动时同步（历史数据）、定时兜底（容错）。
 type TopologyDeviceSyncConfig struct {
-	Enabled          bool          `mapstructure:"enabled"`           // 是否启用自动同步，默认 true
-	InitialSync      bool          `mapstructure:"initial_sync"`      // 启动时是否执行全量同步，默认 true
+	Enabled          bool          `mapstructure:"enabled"`            // 是否启用自动同步，默认 true
+	InitialSync      bool          `mapstructure:"initial_sync"`       // 启动时是否执行全量同步，默认 true
 	InitialSyncDelay time.Duration `mapstructure:"initial_sync_delay"` // 启动同步延迟，默认 10s（避免启动高峰）
-	FallbackInterval time.Duration `mapstructure:"fallback_interval"` // 兜底定时同步间隔，默认 1h（0 表示不启用）
-	BatchSize        int           `mapstructure:"batch_size"`        // 批量同步大小，默认 100
+	FallbackInterval time.Duration `mapstructure:"fallback_interval"`  // 兜底定时同步间隔，默认 1h（0 表示不启用）
+	BatchSize        int           `mapstructure:"batch_size"`         // 批量同步大小，默认 100
 }
 
 // ModelUploadConfig 配置数据模型上传流程（FileType=11）。
@@ -607,11 +635,11 @@ type LogConfig struct {
 // RotationConfig 配置日志文件轮转策略。
 //
 // 两种归档管理模式：
-//   * Compactor 模式（KeepUncompressed > 0）：lumberjack 仅负责切割；后台 compactor
+//   - Compactor 模式（KeepUncompressed > 0）：lumberjack 仅负责切割；后台 compactor
 //     goroutine 每 1 分钟扫描归档目录，保留最新 KeepUncompressed 个 .log 不压缩供
 //     `tail -f`/`less` 直读，其余 .log 压缩为 .log.gz，超 MaxAgeDays 整体删除。
 //     归档文件名精确到分钟（compactor rename 截断 lumberjack 的秒.毫秒）。
-//   * Legacy 模式（KeepUncompressed = 0）：完全沿用 lumberjack 原生 MaxBackups +
+//   - Legacy 模式（KeepUncompressed = 0）：完全沿用 lumberjack 原生 MaxBackups +
 //     MaxAge + Compress 三件套。用于 protocol_log 等暂未启用 compactor 的场景。
 //
 // MaxSizeMB 与 RotateInterval 是 OR 关系：任一满足都触发切割。

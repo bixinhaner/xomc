@@ -25,7 +25,7 @@ docker compose -f "$DEPLOY_DIR/docker-compose.infra.yml" ps 2>/dev/null || \
 
 echo "== 服务健康端点 =="
 check "app  /health  (:8081)"   curl -fsS http://127.0.0.1:8081/health
-check "acs  存活      (:7557)"   curl -fsS http://127.0.0.1:7557/
+check "acs  /healthz (:9090)"   curl -fsS http://127.0.0.1:9090/healthz
 check "app  metrics  (:9091)"   curl -fsS http://127.0.0.1:9091/metrics
 check "前端 (:8080)"             curl -fsS http://127.0.0.1:8080/
 

@@ -58,3 +58,35 @@ scrape_configs:
           - "localhost:9090"
         labels:
           service: "prometheus"
+
+  # ── 基础服务 exporter（T-0151）──────────────────────────────────────
+  # postgres/redis/nats 经各自 exporter 转 Prometheus 格式；minio 自带指标端点。
+  # exporter 定义见 deployments/docker/docker-compose.yml「基础服务 exporter」。
+  - job_name: "postgres"
+    static_configs:
+      - targets:
+          - "postgres-exporter:9187"
+        labels:
+          service: "postgres"
+
+  - job_name: "redis"
+    static_configs:
+      - targets:
+          - "redis-exporter:9121"
+        labels:
+          service: "redis"
+
+  - job_name: "nats"
+    static_configs:
+      - targets:
+          - "nats-exporter:7777"
+        labels:
+          service: "nats"
+
+  - job_name: "minio"
+    metrics_path: /minio/v2/metrics/cluster
+    static_configs:
+      - targets:
+          - "minio:9000"
+        labels:
+          service: "minio"

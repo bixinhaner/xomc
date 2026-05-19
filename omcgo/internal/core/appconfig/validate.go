@@ -42,6 +42,9 @@ func (c *AppConfig) Validate() error {
 	if err := c.ParamRegistry.validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
+	if err := c.Notification.validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
 
 	if len(errs) > 0 {
 		return fmt.Errorf("config validation failed:\n  - %s", strings.Join(errs, "\n  - "))
@@ -185,6 +188,23 @@ func (c DictLoaderConfig) validate() error {
 	}
 	if c.CacheVersionPollInterval < 0 {
 		return fmt.Errorf("dict_loader.cache_version_poll_interval must not be negative, got %s", c.CacheVersionPollInterval)
+	}
+	return nil
+}
+
+func (c NotificationConfig) validate() error {
+	// SMTP 启用时必须配齐发信所需字段，否则启动期就暴露问题（fail fast），
+	// 而非等到第一封告警邮件发不出才发现。disabled 时不校验。
+	if c.SMTP.Enabled {
+		if c.SMTP.Host == "" {
+			return fmt.Errorf("notification.smtp.host must not be empty when smtp.enabled=true")
+		}
+		if c.SMTP.Port < 1 || c.SMTP.Port > 65535 {
+			return fmt.Errorf("notification.smtp.port must be between 1 and 65535 when smtp.enabled=true, got %d", c.SMTP.Port)
+		}
+		if c.SMTP.From == "" {
+			return fmt.Errorf("notification.smtp.from must not be empty when smtp.enabled=true")
+		}
 	}
 	return nil
 }
