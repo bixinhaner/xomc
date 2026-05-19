@@ -12,6 +12,14 @@
 --         ② 再重跑 seed/000111 §4 的 789 条 sub_field 生成（ON CONFLICT DO NOTHING
 --           幂等；对 000111 已应用过的旧库与全新库均生效）。
 -- 注：seed/000111 §4 自身保留不动（全新库它仍跑出 0 行，由本迁移补正）。
+--
+-- 二次修复（FK 违例）：seed/000116 会按"性能/防疫中台"顶层类目删除部分
+-- mml_commands（FK ON DELETE CASCADE 会顺带带走 sub_fields）。原 §4 INSERT
+-- 用硬编码 command_id 引用这些已删命令 → FK 违例 → migrate-seed 直接 fail
+-- → acs/app/worker 依赖链全部起不来。修复：每条 INSERT 的 WHERE 追加
+-- `AND EXISTS (SELECT 1 FROM mml_commands WHERE id = '<UUID>'::uuid)`，命令
+-- 已删时 0 行不触发 FK 检查；命令仍在时为 no-op。789 条 INSERT 由
+-- scripts/... 内嵌的一次性脚本批量打过 guard（见 git blame 同次提交）。
 
 -- +goose Up
 
@@ -2172,7 +2180,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MemoryUsage', 'Memory', 'Usage']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MemoryUsage', 'Memory', 'Usage']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bfbf1956-aa56-e99e-99c1-07d760cd06e4'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2204,7 +2212,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CpuUsage', 'Cpu', 'Usage']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CpuUsage', 'Cpu', 'Usage']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1f7d686-69dd-6a5a-b34c-6b832d1f1cfa'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2236,7 +2244,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanCheck', 'Wan', 'Check']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanCheck', 'Wan', 'Check']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc37aee2-8ba2-d3ef-81b3-7d1fb51b4f8f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2268,7 +2276,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanCheck', 'Wan', 'Check']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanCheck', 'Wan', 'Check']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba6e1f16-be18-26a9-bcfc-2c6341b0b951'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2300,7 +2308,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ntp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ntp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd176444-9b21-dc63-1558-88d9cad21cc0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2332,7 +2340,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ntp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ntp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1f2fe51-4eee-63e7-fc93-ee3ec8ad1244'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2364,7 +2372,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be3f9f67-d0b0-c6a2-d46e-4108bae820f1'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2396,7 +2404,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8a7bb15-6a2f-2b95-a47d-3248e8bb1fb0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2428,7 +2436,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecEnable', 'Ipsec', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecEnable', 'Ipsec', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7bbb53d-51cc-b794-010d-2fafc8082051'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2460,7 +2468,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecEnable', 'Ipsec', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecEnable', 'Ipsec', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7b746c3-e782-7844-4e9f-28d57cdbc9ad'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2492,7 +2500,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecSetting', 'Ipsec', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecSetting', 'Ipsec', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bbfab234-5f49-6ca0-e7b5-4b80b8dd2573'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2524,7 +2532,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecSetting', 'Ipsec', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecSetting', 'Ipsec', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6c4b004-8aeb-104a-6707-82338c411cfc'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2556,7 +2564,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecSetting', 'Ipsec', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecSetting', 'Ipsec', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b76ca9d1-1cdd-d435-708e-6bbccbf3ef1a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2588,7 +2596,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecSetting', 'Ipsec', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecSetting', 'Ipsec', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb9f4549-6135-0889-0577-d090dbffe5e9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2620,7 +2628,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiConfig', 'Kpi']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiConfig', 'Kpi']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b57b45ea-ee61-db52-7240-efae4c1c1ea6'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2652,7 +2660,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiConfig', 'Kpi']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiConfig', 'Kpi']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bef1e1cb-3a44-f550-1d4c-56995790a830'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2684,7 +2692,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Lgw']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Lgw']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1171823-2131-236d-8ba8-d89e05c8e820'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2716,7 +2724,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Lgw']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Lgw']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b10fd890-6d76-554f-a2f9-0b42bb1786f7'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2748,7 +2756,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CloudEpc', 'Cloud', 'Epc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CloudEpc', 'Cloud', 'Epc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bbd2689e-6c73-a8a3-f779-deafe1192d37'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2780,7 +2788,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CloudEpc', 'Cloud', 'Epc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CloudEpc', 'Cloud', 'Epc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6dc1a8b-f8f8-07bd-a994-18cb13d77056'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2812,7 +2820,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RfConfigSwitch', 'Rf', 'Switch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RfConfigSwitch', 'Rf', 'Switch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b855d18f-2b68-6f54-8636-8f07be86ff63'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2844,7 +2852,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RfConfigSwitch', 'Rf', 'Switch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RfConfigSwitch', 'Rf', 'Switch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1e54fc7-2b9e-1238-a012-e08a25dc03fb'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2876,7 +2884,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Cell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Cell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bde0fe21-9255-7aad-7a9d-ff62f5b045dd'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2908,7 +2916,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Cell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Cell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bfa69705-0493-34e7-d1c3-ca7968715ed7'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2940,7 +2948,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.EPC.PLMNList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Plmn']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.EPC.PLMNList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Plmn']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1fa3ae8-6bfa-be0c-6b12-ada7c9bfaddc'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -2972,7 +2980,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.EPC.PLMNList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Plmn']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.EPC.PLMNList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Plmn']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2b19d00-6b11-f184-99ee-70035662ad17'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3004,7 +3012,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.EPC.PLMNList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Plmn']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.EPC.PLMNList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Plmn']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bce35a5e-ec23-54c9-6f05-e5cc1c6557de'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3036,7 +3044,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.EPC.PLMNList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Plmn']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.EPC.PLMNList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Plmn']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bdaab662-c4f8-1a50-3e59-ec82b8f66437'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3068,7 +3076,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Mme']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Mme']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc0184bf-8462-9bc4-14f2-98547dd65ae8'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3100,7 +3108,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Mme']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Mme']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b779dd27-ded8-211e-5339-7b7bd74528ec'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3132,7 +3140,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Mme']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Mme']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf2794df-6aca-5c35-0988-17dac309b5f5'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3164,7 +3172,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Mme']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Mme']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b896f035-fbc1-4291-aecf-0011ddcf068d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3196,7 +3204,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Security']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Security']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba066ffb-eeac-dba7-1089-182e689523d0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3228,7 +3236,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Security']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Security']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc0631c3-da93-b680-702a-fda395ec2c49'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3260,7 +3268,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Uetimer']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Uetimer']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba8c1028-a67c-4de3-701d-58ca8dbad978'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3292,7 +3300,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Uetimer']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Uetimer']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b5cca1e0-9dca-8aa8-1482-2d4e55fae4da'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3324,7 +3332,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tatimer']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tatimer']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b09765cf-125d-cb1f-670f-6b3a00ca1296'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3356,7 +3364,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tatimer']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tatimer']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9a3b93b-c33c-a608-f070-85c96958cf92'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3388,7 +3396,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Pcch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Pcch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b75f71a0-de8e-249d-b379-ebb3a9c76fe1'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3420,7 +3428,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Pcch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Pcch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b66b3fe8-97b5-07f9-376e-204332e2573e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3452,7 +3460,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Cellsel']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Cellsel']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b5aea63c-c0bf-7d71-41a4-7a39fee130a8'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3484,7 +3492,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Cellsel']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Cellsel']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b296e18a-210b-f788-bea0-ea6bd5a9cbbe'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3516,7 +3524,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Cellresel']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Cellresel']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2577e47-d0cf-64e3-fa30-4431cb252a17'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3548,7 +3556,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Cellresel']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Cellresel']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b09e21db-d401-8a2c-a4d5-1c876849d9a6'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3580,7 +3588,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A3']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A3']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc2d13c6-3ff0-a8e2-ab3c-cb62587e34c8'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3612,7 +3620,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A3']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A3']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b66505d6-0269-8956-3d8c-07d4c081cf92'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3644,7 +3652,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b17939bf-2411-6549-351e-a43cdea0505b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3676,7 +3684,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bff6d11e-e523-d903-dd92-62037e53b069'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3708,7 +3716,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf71afec-42bf-6e2d-ac3a-7d88f2b93007'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3740,7 +3748,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb67f623-2559-5aba-1028-9bce5090dcc4'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3772,7 +3780,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b778964d-d9a0-a3be-aefc-214b5576a1af'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3804,7 +3812,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b54521ae-3624-0e25-885a-ab95e6ffa710'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3836,7 +3844,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2f0aad8-e33b-8777-dbf2-a8a7548aaff0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3868,7 +3876,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf9601e4-da9e-4e38-0fd0-24ca9d9ddb45'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3900,7 +3908,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A4']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A4']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9f21478-a83a-a0f5-aed3-53a20caa3d02'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3932,7 +3940,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A4']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A4']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b187da96-c48b-fde9-ce14-d1c638b5c71c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3964,7 +3972,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A5']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A5']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8360cc9-556c-bfb1-fa91-fb5d38c29c7f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -3996,7 +4004,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A5']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A5']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4bd65f5-539d-5ce3-1cdc-ba374b833296'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4028,7 +4036,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A5']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A5']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b47fa248-4838-0a38-22d7-e913f81de2a7'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4060,7 +4068,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A5']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['A5']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4b5bff9-4474-a96d-7839-d5bc70de75b2'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4092,7 +4100,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['B2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['B2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b02b41f3-6107-4783-3713-653294abe4a8'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4124,7 +4132,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['B2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['B2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7509a1a-7704-2999-9d42-9742eeaad28c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4156,7 +4164,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Eutrannfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Eutrannfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b601e0c7-e197-c42d-0edd-10df3be13944'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4188,7 +4196,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Eutrannfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Eutrannfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bed2860d-4cf1-9f20-2d46-dd19f1021aa2'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4220,7 +4228,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Eutrannfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Eutrannfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4036162-0e94-4eb6-72ac-f464fee8937a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4252,7 +4260,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Eutrannfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Eutrannfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b17b6210-faa6-8523-49a3-8a7640954c7a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4284,7 +4292,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.X_COM_UTRANTDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tdsnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.X_COM_UTRANTDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tdsnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4867f64-5e29-e30a-1039-4c706a99e7cc'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4316,7 +4324,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.X_COM_UTRANTDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tdsnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.X_COM_UTRANTDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tdsnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb8ebfd6-5e33-19d2-9e42-be575f7cb984'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4348,7 +4356,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.X_COM_UTRANTDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tdsnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.X_COM_UTRANTDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tdsnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'beebed3a-1b5b-53fc-d0db-89d65e34490d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4380,7 +4388,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.X_COM_UTRANTDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tdsnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.X_COM_UTRANTDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tdsnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc495182-537b-d557-eb89-56e4b703b0a0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4412,7 +4420,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gsmnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gsmnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bfa3f970-1b0a-ca56-aef5-298d86cfb58b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4444,7 +4452,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gsmnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gsmnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b5259376-bfe6-f3bf-e3ca-5d753c909f89'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4476,7 +4484,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gsmnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gsmnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b151b794-27b4-1df4-3797-a94584da91c0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4508,7 +4516,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gsmnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gsmnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3606546-1423-f66c-e610-b62302e25ed9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4540,7 +4548,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Eutranncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Eutranncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b660d259-1b74-0967-3c41-a7a2cd780e42'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4572,7 +4580,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Eutranncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Eutranncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b931b3bc-733a-5e73-661a-6e3ebf48e5a1'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4604,7 +4612,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Eutranncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Eutranncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4c41a09-18a6-f899-6ce5-09850785fab3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4636,7 +4644,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Eutranncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Eutranncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b50bad56-9479-dd3c-b52a-a2d5631bf486'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4668,7 +4676,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.X_COM_UMTSTDD.cell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tdsncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.X_COM_UMTSTDD.cell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tdsncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6c50fae-c338-9b03-8a31-4156a586a9d4'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4700,7 +4708,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.X_COM_UMTSTDD.cell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tdsncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.X_COM_UMTSTDD.cell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tdsncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b891c6e8-0a6a-336f-33bc-142cf23a3a1b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4732,7 +4740,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.X_COM_UMTSTDD.cell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tdsncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.X_COM_UMTSTDD.cell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tdsncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6194db2-94ea-031f-58c4-2392205f85c2'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4764,7 +4772,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.X_COM_UMTSTDD.cell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tdsncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.X_COM_UMTSTDD.cell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tdsncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2c4775e-0261-b19a-c6ad-eca94df18b0b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4796,7 +4804,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.InterRATCell.GSM.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gsmncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.InterRATCell.GSM.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gsmncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4322b6e-9269-cdd9-f5b9-eb7898e08ac7'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4828,7 +4836,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.InterRATCell.GSM.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gsmncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.InterRATCell.GSM.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gsmncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b67ae1c1-d32d-8ca6-9133-3bfe60eec7b7'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4860,7 +4868,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.InterRATCell.GSM.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gsmncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.InterRATCell.GSM.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gsmncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf6dce1b-2a64-94e8-365f-4fd8a478779d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4892,7 +4900,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.InterRATCell.GSM.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gsmncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.InterRATCell.GSM.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gsmncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b73414b7-a3b5-5933-047d-6059f8708cea'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4924,7 +4932,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Selfconfig']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Selfconfig']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be862471-89ed-8b99-bac6-ae3fa9f06810'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4956,7 +4964,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Selfconfig']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Selfconfig']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf950b26-1d37-79ce-87e8-a6d7510bf215'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -4988,7 +4996,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Rssiconfig']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Rssiconfig']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd8dd48a-bd76-4cce-964a-ebac698ce4ad'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5020,7 +5028,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Rssiconfig']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Rssiconfig']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b63759f2-c040-cd1d-7c35-5b613c533cd1'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5052,7 +5060,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Rrcsconfig']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Rrcsconfig']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4e809e5-258c-f9ad-1edd-c4cf22e7e378'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5084,7 +5092,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Rrcsconfig']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Rrcsconfig']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb6e0537-7a99-f56e-7a66-1234ce3c7720'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5116,7 +5124,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PowerControl', 'Power', 'Control']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PowerControl', 'Power', 'Control']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd3a30ce-c404-252d-6956-923aa389234b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5148,7 +5156,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PowerControl', 'Power', 'Control']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PowerControl', 'Power', 'Control']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6cf7db1-6515-eafb-65ae-58acca76d0c0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5180,7 +5188,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MeasGap', 'Meas', 'Gap']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MeasGap', 'Meas', 'Gap']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b991d7e5-3941-3a8c-d5bb-f0c55e10bc67'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5212,7 +5220,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MeasGap', 'Meas', 'Gap']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MeasGap', 'Meas', 'Gap']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6f0250a-d2a2-2d43-d8e3-a5e730877d42'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5244,7 +5252,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PciRange', 'Pci', 'Range']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PciRange', 'Pci', 'Range']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b34a0c11-a3f7-9ac3-8b45-d7dcb71a5943'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5276,7 +5284,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PciRange', 'Pci', 'Range']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PciRange', 'Pci', 'Range']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b02fa1b4-9e3d-c509-c3e4-a875e4a1f92b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5308,7 +5316,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RrcStatus', 'Rrc', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RrcStatus', 'Rrc', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'baf6a584-c9f2-f68e-d99f-d7a58f323159'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5340,7 +5348,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RrcStatus', 'Rrc', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RrcStatus', 'Rrc', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf43e58d-78bb-a9c8-aff4-e8bafef484cb'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5372,7 +5380,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PhyRxgain', 'Phy', 'Rxgain']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PhyRxgain', 'Phy', 'Rxgain']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bdceff92-f567-b27d-35dd-6b5bf11570b5'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5404,7 +5412,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PhyRxgain', 'Phy', 'Rxgain']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PhyRxgain', 'Phy', 'Rxgain']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bbd13a13-e5cb-f5ce-de99-e011c91f55d9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5436,7 +5444,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RandomAccess', 'Random', 'Access']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RandomAccess', 'Random', 'Access']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bbf7c9cd-068c-fb1c-4e10-17f12cc599dd'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5468,7 +5476,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RandomAccess', 'Random', 'Access']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RandomAccess', 'Random', 'Access']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bbdea7c9-e1eb-e00e-120e-5a50aed24795'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5500,7 +5508,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Capacity']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Capacity']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba377601-f25d-714d-92c1-553ffee18b99'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5532,7 +5540,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Capacity']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Capacity']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b37de209-2fe1-8c64-2a6f-c70065f807ce'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5564,7 +5572,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ulpowercontrl']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ulpowercontrl']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf803ff4-c151-593c-f01c-aca3b5dfef22'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5596,7 +5604,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ulpowercontrl']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ulpowercontrl']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b96ac95d-a280-6a4d-c5e5-51c22a62170b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5628,7 +5636,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Schd']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Schd']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b5408a55-1de0-cdaf-2f1c-eaf8ddfc8356'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5660,7 +5668,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Schd']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Schd']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0d42253-3577-7f53-6f9e-8b0fe70ccd38'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5692,7 +5700,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SyncAdjust', 'Sync', 'Adjust']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SyncAdjust', 'Sync', 'Adjust']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bdf9055a-94d8-944d-d2b7-9e0bb28ac6ac'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5724,7 +5732,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SyncAdjust', 'Sync', 'Adjust']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SyncAdjust', 'Sync', 'Adjust']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bdb928f1-32e1-9fb4-8d73-71724a5b25bf'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5756,7 +5764,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Drx']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Drx']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b346013d-6d1d-1e0b-7abf-dfe98fb67e66'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5788,7 +5796,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Drx']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Drx']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bdde9c93-6458-ac4d-b9f6-ae93d60733a6'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5820,7 +5828,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MeasurementControl', 'Measurement', 'Control']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MeasurementControl', 'Measurement', 'Control']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bcc51218-f016-751a-ea37-862fcd35b213'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5852,7 +5860,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MeasurementControl', 'Measurement', 'Control']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MeasurementControl', 'Measurement', 'Control']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b82de7bb-e449-9fcb-0b2b-0dbef087caae'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5884,7 +5892,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Http']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Http']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b59e8a9e-bdf7-44c6-21ab-fb6ede8352d1'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5916,7 +5924,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Http']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Http']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be3c977f-8d6e-8123-eea3-6eaa5b184670'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5948,7 +5956,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Sas']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Sas']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc2494dc-811a-3fca-c148-1a0cb207a7ed'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -5980,7 +5988,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Sas']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Sas']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b57a5987-919e-09dd-572a-ce68c5b6355a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6012,7 +6020,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['X2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['X2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b284ba24-b655-d6a2-874f-9c5ef0b9eb3c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6044,7 +6052,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['X2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['X2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3ce03b6-241d-9f54-6c95-dd0c3c2be402'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6076,7 +6084,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['X2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['X2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bda7177f-e31c-e3ae-9388-6bda9b6a562c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6108,7 +6116,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['X2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['X2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b013fc9b-955e-eba9-481c-a031b5ed26c5'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6140,7 +6148,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LmtLoginFailed', 'Lmt', 'Login', 'Failed']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LmtLoginFailed', 'Lmt', 'Login', 'Failed']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8ae2da4-6f1f-bb25-01f3-09557626c3bf'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6172,7 +6180,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LmtLoginFailed', 'Lmt', 'Login', 'Failed']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LmtLoginFailed', 'Lmt', 'Login', 'Failed']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be72c402-8710-c9bc-4a1f-904776feabae'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6204,7 +6212,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NtpSync', 'Ntp', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NtpSync', 'Ntp', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b01957a3-f1f1-7922-6a9b-1006108456ef'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6236,7 +6244,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NtpSync', 'Ntp', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NtpSync', 'Ntp', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9ea5ba4-32e3-0242-d2eb-0dee95c458c7'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6268,7 +6276,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RemSync', 'Rem', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RemSync', 'Rem', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba61907f-6637-a8e5-876e-56b7ec9d199b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6300,7 +6308,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RemSync', 'Rem', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RemSync', 'Rem', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b74135bc-32d3-4bec-4875-ada873bc511a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6332,7 +6340,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['StatsFlow', 'Stats', 'Flow']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['StatsFlow', 'Stats', 'Flow']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2b88e00-45cb-45d0-54ba-39394cc4addb'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6364,7 +6372,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['StatsFlow', 'Stats', 'Flow']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['StatsFlow', 'Stats', 'Flow']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba0d54cf-7515-f02d-b0b8-4b1334b18e61'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6396,7 +6404,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ManagementServer', 'Management', 'Server']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ManagementServer', 'Management', 'Server']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bccf5fae-84ed-7bce-9859-96c1ee8128c0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6428,7 +6436,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ManagementServer', 'Management', 'Server']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ManagementServer', 'Management', 'Server']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be9ce9a0-677b-8042-10bd-624feb829dcb'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6460,7 +6468,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SonSelfConfig', 'Son', 'Self']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SonSelfConfig', 'Son', 'Self']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0d5a76d-c7e4-aa37-09fb-07020d08be0a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6492,7 +6500,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SonSelfConfig', 'Son', 'Self']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SonSelfConfig', 'Son', 'Self']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b48711df-f5d0-3d2c-f157-1ca2213efbe3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6524,7 +6532,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Anr']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Anr']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b04da2a2-dc8d-5309-cd44-39f5606e7c03'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6556,7 +6564,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Anr']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Anr']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b92d5f37-1be7-112a-d74b-3f57812a7c87'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6588,7 +6596,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Prach']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Prach']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4756218-a6e0-82e7-b28b-509b5b5dd9ca'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6620,7 +6628,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Prach']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Prach']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b772a002-0eca-3db2-01c8-2642ddaa1cb3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6652,7 +6660,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MmePool', 'Mme', 'Pool']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MmePool', 'Mme', 'Pool']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b24c3590-38ec-b567-9360-1e8b20f64896'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6684,7 +6692,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MmePool', 'Mme', 'Pool']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MmePool', 'Mme', 'Pool']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf217a1e-5c0b-f775-2f96-aa79c11bc2fd'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6716,7 +6724,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EnbConfig', 'Enb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EnbConfig', 'Enb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3ccdd5d-fbcf-c554-ce47-9feb72663d34'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6748,7 +6756,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EnbConfig', 'Enb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EnbConfig', 'Enb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd4776df-5c8b-53e8-e7e8-934fca269051'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6780,7 +6788,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LgwConfig', 'Lgw']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LgwConfig', 'Lgw']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b57e3923-ecb8-9460-a245-009ee0397a79'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6812,7 +6820,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LgwConfig', 'Lgw']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LgwConfig', 'Lgw']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba9e16d7-b079-0e6a-ee11-017fa7d4deea'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6844,7 +6852,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Carrier']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Carrier']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b5214b75-d2ab-49b3-78a6-c53a6625ba44'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6876,7 +6884,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Carrier']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Carrier']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1bf4845-a204-325b-d52f-77c55c142b8a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6908,7 +6916,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Halob']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Halob']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be4c8019-feb4-bc7b-cb9b-8aa0d3228939'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6940,7 +6948,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Halob']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Halob']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b876cda3-8e4f-583c-d9d7-727804eebeef'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -6972,7 +6980,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.FAP.NL.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NlConfig', 'Nl']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.FAP.NL.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NlConfig', 'Nl']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd6177a7-425e-3b84-047b-6cee17612668'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7004,7 +7012,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.FAP.NL.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NlConfig', 'Nl']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.FAP.NL.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NlConfig', 'Nl']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8c06cd6-3284-cfe0-8276-836202522fc5'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7036,7 +7044,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MtuConfig', 'Mtu']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MtuConfig', 'Mtu']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b785e86f-65e5-6e66-4be4-908ab4101811'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7068,7 +7076,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MtuConfig', 'Mtu']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MtuConfig', 'Mtu']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bea2bb73-6548-b5df-816f-db212df13cc5'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7100,7 +7108,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Dscp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Dscp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba8bca24-d329-76eb-ede2-23c8e904ff01'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7132,7 +7140,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Dscp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Dscp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'beb3b512-b260-f36a-1773-cfe0506f87ad'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7164,7 +7172,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SyncMode', 'Sync', 'Mode']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SyncMode', 'Sync', 'Mode']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4e8e8b6-cfe3-53cd-62ec-1d317b553e86'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7196,7 +7204,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SyncMode', 'Sync', 'Mode']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SyncMode', 'Sync', 'Mode']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b94b9694-ea87-3ce3-0ced-711e10c991de'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7228,7 +7236,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.NR.NRFreqList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['5gnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.NR.NRFreqList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['5gnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b179c06f-99fd-f25d-0bbc-44131283ebde'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7260,7 +7268,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.NR.NRFreqList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['5gnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.NR.NRFreqList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['5gnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf19b09b-1197-52be-ea0b-f350fdb04041'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7292,7 +7300,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.NR.NRFreqList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['5gnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.NR.NRFreqList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['5gnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb6ade4d-43aa-e53f-d9e2-61e74548e1bb'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7324,7 +7332,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.NR.NRFreqList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['5gnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.NR.NRFreqList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['5gnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6e0634f-a326-4a33-93fe-39f49fcfdd20'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7356,7 +7364,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NRCell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['5gncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NRCell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['5gncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7581a3a-62f4-8c20-6141-b4983d4c6c6b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7388,7 +7396,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NRCell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['5gncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NRCell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['5gncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2b3cb22-fe91-00aa-c1f0-507ce45b883d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7420,7 +7428,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NRCell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['5gncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NRCell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['5gncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2fda16b-679f-8873-4591-e4d5942f41cb'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7452,7 +7460,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NRCell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['5gncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NRCell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['5gncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bdd6bc85-b306-145c-2aad-34f61435def4'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7484,7 +7492,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BasicInfo', 'Basic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BasicInfo', 'Basic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc84c055-b16b-7903-e905-9b92400a0bf1'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7516,7 +7524,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['StatusInfo', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['StatusInfo', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba387999-400f-c26f-5c61-6b031132434e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7548,7 +7556,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['StatusInfo', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['StatusInfo', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb5831a1-0af8-eaae-6733-989a5bcb2a76'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7580,7 +7588,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b89e9733-56eb-c24e-a976-d634e8f5b10f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7612,7 +7620,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b750e3e6-e9a8-f925-bb26-3a603b53737c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7644,7 +7652,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0370795-208c-dbd6-f963-e8785e45621f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7676,7 +7684,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bdbff49a-3451-a501-d63f-13efbcad4f11'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7708,7 +7716,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.DeviceInfo.OpticalModInfo.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SfpInfo', 'Sfp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.DeviceInfo.OpticalModInfo.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SfpInfo', 'Sfp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b39557fa-9cd2-9d53-bf81-bd7763186fff'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7740,7 +7748,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.FAP.Ipsec.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecTunnel', 'Ipsec', 'Tunnel']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.FAP.Ipsec.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecTunnel', 'Ipsec', 'Tunnel']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b83239ee-2c35-9dd7-a971-23ab2cc128bf'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7772,7 +7780,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.FAP.Ipsec.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecTunnel', 'Ipsec', 'Tunnel']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.FAP.Ipsec.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecTunnel', 'Ipsec', 'Tunnel']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6e490ab-0d3c-1166-41ff-301c590d3c45'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7804,7 +7812,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.FAP.Ipsec.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecTunnel', 'Ipsec', 'Tunnel']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.FAP.Ipsec.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecTunnel', 'Ipsec', 'Tunnel']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd83c140-8724-1969-01c1-c02d6b24a407'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7836,7 +7844,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.FAP.Ipsec.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecTunnel', 'Ipsec', 'Tunnel']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.FAP.Ipsec.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecTunnel', 'Ipsec', 'Tunnel']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be066aa6-e243-0ac2-0618-35ae2293bb2a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7868,7 +7876,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LgwSetting', 'Lgw', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LgwSetting', 'Lgw', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b20356d9-c250-86fd-21fe-6cd797ed0db3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7900,7 +7908,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LgwSetting', 'Lgw', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LgwSetting', 'Lgw', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1cd4568-8b29-bb22-a0a2-4d425aee18c2'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7932,7 +7940,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.EMBEDDED_EPCBearerLBOTft.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['TftList', 'Tft', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.EMBEDDED_EPCBearerLBOTft.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['TftList', 'Tft', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba7ee637-56cb-5668-dc1c-6562f9781a9e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7964,7 +7972,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.EMBEDDED_EPCBearerLBOTft.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['TftList', 'Tft', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.EMBEDDED_EPCBearerLBOTft.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['TftList', 'Tft', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b77a6317-8984-2a33-e31a-0601ff882ca0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -7996,7 +8004,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.EMBEDDED_EPCBearerLBOTft.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['TftList', 'Tft', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.EMBEDDED_EPCBearerLBOTft.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['TftList', 'Tft', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0108f0b-f29c-6011-9153-df1e3dd74ea3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8028,7 +8036,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.EMBEDDED_EPCBearerLBOTft.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['TftList', 'Tft', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.EMBEDDED_EPCBearerLBOTft.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['TftList', 'Tft', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be767a76-8163-ca41-f6c3-6990f14c5e88'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8060,7 +8068,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.EMBEDDED_EPCBearerLBOQos.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosList', 'Qos', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.EMBEDDED_EPCBearerLBOQos.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosList', 'Qos', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b40eb719-f2a5-f981-33d9-c4a52f74206f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8092,7 +8100,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.EMBEDDED_EPCBearerLBOQos.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosList', 'Qos', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.EMBEDDED_EPCBearerLBOQos.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosList', 'Qos', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b018e25b-d421-1c57-014d-e5b9ee173e04'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8124,7 +8132,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.EMBEDDED_EPCBearerLBOQos.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosList', 'Qos', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.EMBEDDED_EPCBearerLBOQos.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosList', 'Qos', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0a8b125-1895-327e-28d5-9544304e297f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8156,7 +8164,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.EMBEDDED_EPCBearerLBOQos.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosList', 'Qos', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.EMBEDDED_EPCBearerLBOQos.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosList', 'Qos', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b692ddff-1d7f-2e02-0d1e-a7b85819ba78'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8188,7 +8196,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['GeographicLocation', 'Geographic', 'Location']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['GeographicLocation', 'Geographic', 'Location']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb89b136-a1fc-5298-ce70-1e3abf6a5f46'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8220,7 +8228,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LicenseList', 'License', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.LTE.X_COM_LICENSE.Capacity.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LicenseList', 'License', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1611894-7c43-b86d-fd55-8308f8f2c05d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8252,7 +8260,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Umtsfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Umtsfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6c9586d-c85e-70b3-28dd-2e2c089fc392'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8284,7 +8292,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Umtsfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Umtsfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9496073-8ddb-2af5-6b1f-4c07dd08fc43'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8316,7 +8324,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Umtsfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Umtsfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6734ff3-f2e0-cd55-37e0-06b7f6a6a21a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8348,7 +8356,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Umtsfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Umtsfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3560acf-cc84-fef5-604a-9d1381a83cbb'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8380,7 +8388,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Umtscell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Umtscell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b378c2c7-8a7d-b580-bd42-cfb3726f3561'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8412,7 +8420,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Umtscell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Umtscell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b52880eb-6482-9bc8-e554-c2a9b555bf31'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8444,7 +8452,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Umtscell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Umtscell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b469e794-cf56-64dd-b864-dc19e07bd1bc'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8476,7 +8484,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Umtscell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Umtscell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0135a81-808d-756a-2ffe-6e94d89b985a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8508,7 +8516,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LinkActiveState', 'Link', 'Active', 'State']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LinkActiveState', 'Link', 'Active', 'State']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb28c51f-b50f-ee25-f34e-ff71c1491886'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8540,7 +8548,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LinkActiveState', 'Link', 'Active', 'State']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LinkActiveState', 'Link', 'Active', 'State']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4666ac8-575b-1976-f10b-426167881ec3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8572,7 +8580,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UeNumber', 'Ue', 'Number']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UeNumber', 'Ue', 'Number']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b41b39df-ddb1-efb2-7123-1ddb306030b3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8604,7 +8612,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UeNumber', 'Ue', 'Number']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UeNumber', 'Ue', 'Number']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba3ff573-a149-1868-6924-85fe382b92d0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8636,7 +8644,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.DeviceInfo.EU.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EuList', 'Eu', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.DeviceInfo.EU.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EuList', 'Eu', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b918f593-d3d8-52cb-68ab-6e8792c0e0b4'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8668,7 +8676,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.DeviceInfo.EU.{i}.RU.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RuList', 'Ru', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.DeviceInfo.EU.{i}.RU.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RuList', 'Ru', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b05b01d2-4c32-3c5e-e30d-ae22e434e04d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8700,7 +8708,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PhyParam', 'Phy', 'Param']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PhyParam', 'Phy', 'Param']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b913cdd7-d415-806a-afb5-769ee37caac8'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8732,7 +8740,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DataSlogLevel', 'Data', 'Slog', 'Level']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DataSlogLevel', 'Data', 'Slog', 'Level']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b67661df-c483-bb9f-b3f8-6040b938033c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8764,7 +8772,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DataSlogLevel', 'Data', 'Slog', 'Level']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DataSlogLevel', 'Data', 'Slog', 'Level']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bda595ec-cea8-496e-7755-38f830b87b36'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8796,7 +8804,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DataL3logLevel', 'Data', 'L3log', 'Level']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DataL3logLevel', 'Data', 'L3log', 'Level']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b39c7a35-b159-6b68-44fa-172400d0018b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8828,7 +8836,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DataL3logLevel', 'Data', 'L3log', 'Level']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DataL3logLevel', 'Data', 'L3log', 'Level']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba11fbeb-52ee-1ca6-6ced-781325b19b4b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8860,7 +8868,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteSlogMask', 'Lte', 'Slog', 'Mask']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteSlogMask', 'Lte', 'Slog', 'Mask']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b058365d-1da0-cf9f-2885-c1a509ea2ce0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8892,7 +8900,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteSlogMask', 'Lte', 'Slog', 'Mask']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteSlogMask', 'Lte', 'Slog', 'Mask']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc644ed8-9253-7f36-435e-20d3edb8a531'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8924,7 +8932,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteEnblogMask', 'Lte', 'Enblog', 'Mask']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteEnblogMask', 'Lte', 'Enblog', 'Mask']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b04aa771-1cde-dae3-8086-71010e9ea948'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8956,7 +8964,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteEnblogMask', 'Lte', 'Enblog', 'Mask']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteEnblogMask', 'Lte', 'Enblog', 'Mask']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd4cc10d-483b-ff35-303b-40008bf67ea7'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -8988,7 +8996,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Lbt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Lbt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc965e96-a9b5-956f-f7eb-85fc3a2b41c6'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9020,7 +9028,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Lbt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Lbt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bafba3c2-d2ee-a511-2073-0425a697d807'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9052,7 +9060,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BackhaulConfig', 'Backhaul']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BackhaulConfig', 'Backhaul']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b51e3270-c59a-a20d-8eec-1b0274e996f9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9084,7 +9092,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BackhaulConfig', 'Backhaul']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BackhaulConfig', 'Backhaul']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3550694-0220-897d-7a6b-e888cc3c09b2'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9116,7 +9124,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Qam']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Qam']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1be53f8-e6e9-95e4-b846-fe2255b63a9d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9148,7 +9156,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Qam']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Qam']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bad58c00-35a9-c56e-f524-67a8fb69d35d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9180,7 +9188,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PowerLevel', 'Power', 'Level']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PowerLevel', 'Power', 'Level']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc137155-78de-d938-f188-7d5819cea321'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9212,7 +9220,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PowerLevel', 'Power', 'Level']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PowerLevel', 'Power', 'Level']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7dddd97-7958-31fc-b523-bebc67af1aed'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9244,7 +9252,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EnbPwdUpdate', 'Enb', 'Pwd', 'Update']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EnbPwdUpdate', 'Enb', 'Pwd', 'Update']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b97d3fbb-4533-23c2-3bbd-1095bcd039d0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9276,7 +9284,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BalanceSetting', 'Balance', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BalanceSetting', 'Balance', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b96435d2-e8d0-d9d1-749e-a4d595b62810'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9308,7 +9316,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BalanceSetting', 'Balance', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BalanceSetting', 'Balance', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd593822-941c-fadf-95ac-088f442b04d3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9340,7 +9348,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['HalodConfig', 'Halod']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['HalodConfig', 'Halod']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b650086c-ea26-289f-014c-cc127882e7a1'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9372,7 +9380,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['HalodConfig', 'Halod']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['HalodConfig', 'Halod']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b64a4cce-e763-4c74-cbd1-5afa53c05caa'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9404,7 +9412,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'aldconfig.status.tiltStatus.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AntennaTilt', 'Antenna', 'Tilt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'aldconfig.status.tiltStatus.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AntennaTilt', 'Antenna', 'Tilt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3714587-1e99-552b-a99f-ea8f40be5aa6'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9436,7 +9444,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'aldconfig.status.tiltStatus.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AntennaTilt', 'Antenna', 'Tilt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'aldconfig.status.tiltStatus.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AntennaTilt', 'Antenna', 'Tilt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb7917f2-49af-66ac-3b63-f3ae5426377e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9468,7 +9476,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.DeviceInfo.ROUTE_CONFIG{j}_%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RouteConfig', 'Route']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.DeviceInfo.ROUTE_CONFIG{j}_%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RouteConfig', 'Route']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9c7c263-6816-3cee-d260-4fe1e36dc3ea'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9500,7 +9508,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.DeviceInfo.ROUTE_CONFIG{j}_%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RouteConfig', 'Route']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.DeviceInfo.ROUTE_CONFIG{j}_%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RouteConfig', 'Route']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'baf13e25-bc2e-9eca-ce23-04a5df7405af'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9532,7 +9540,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.DeviceInfo.ROUTE_CONFIG{j}_%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RouteConfig', 'Route']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.DeviceInfo.ROUTE_CONFIG{j}_%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RouteConfig', 'Route']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb89714a-1b17-718b-ce05-ddd1c0a8bea9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9564,7 +9572,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.DeviceInfo.ROUTE_CONFIG{j}_%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RouteConfig', 'Route']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.DeviceInfo.ROUTE_CONFIG{j}_%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RouteConfig', 'Route']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1fed713-dc0f-29d3-99ca-56360dc8dd57'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9596,7 +9604,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanConfig', 'Wan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanConfig', 'Wan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6d2d1e6-77c4-6d90-8138-d8f4cb4db494'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9628,7 +9636,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanConfig', 'Wan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanConfig', 'Wan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bcbfaaa2-4564-93d9-c9b9-57d709d306b2'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9660,7 +9668,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DnsConfig', 'Dns']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DnsConfig', 'Dns']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1d8fbe6-8af6-a3e2-0568-9665963161fd'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9692,7 +9700,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DnsConfig', 'Dns']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DnsConfig', 'Dns']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc735f90-4783-7a89-336b-8a7a54f0a35a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9724,7 +9732,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VswrSettings', 'Vswr', 'Settings']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VswrSettings', 'Vswr', 'Settings']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0abd1d9-ca0b-71c7-0f1b-de4c7ca26a51'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9756,7 +9764,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VswrSettings', 'Vswr', 'Settings']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VswrSettings', 'Vswr', 'Settings']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be9cbf35-b63d-1dea-727e-5c5c71015db2'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9788,7 +9796,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.DeviceInfo.VSWR.ANTENNA.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VswrAntenna', 'Vswr', 'Antenna']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.DeviceInfo.VSWR.ANTENNA.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VswrAntenna', 'Vswr', 'Antenna']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be1fd041-8f94-f701-18e7-b3fdc1a6924e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9820,7 +9828,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RrcCellSwitch', 'Rrc', 'Cell', 'Switch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RrcCellSwitch', 'Rrc', 'Cell', 'Switch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0e8f3f6-e3c0-00b0-0ab9-361eabb09d1a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9852,7 +9860,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RrcCellSwitch', 'Rrc', 'Cell', 'Switch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RrcCellSwitch', 'Rrc', 'Cell', 'Switch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd3ebeea-8f3b-24c7-b04d-4adf7def022a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9884,7 +9892,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.QOS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RrcCellStatusParameters', 'Rrc', 'Cell', 'Status', 'Parameters']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.QOS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RrcCellStatusParameters', 'Rrc', 'Cell', 'Status', 'Parameters']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4b44f19-faf6-9fa4-e117-e585e3218a6b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9916,7 +9924,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.QOS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RrcCellStatusParameters', 'Rrc', 'Cell', 'Status', 'Parameters']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.QOS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RrcCellStatusParameters', 'Rrc', 'Cell', 'Status', 'Parameters']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b997650a-bd01-8800-3861-555dd44804fb'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9948,7 +9956,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.QOS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RrcCellStatusParameters', 'Rrc', 'Cell', 'Status', 'Parameters']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.QOS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RrcCellStatusParameters', 'Rrc', 'Cell', 'Status', 'Parameters']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6cfac44-8162-e055-d7e5-6ad4f53fb126'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -9980,7 +9988,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.QOS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RrcCellStatusParameters', 'Rrc', 'Cell', 'Status', 'Parameters']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.LTE.EPC.QOS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RrcCellStatusParameters', 'Rrc', 'Cell', 'Status', 'Parameters']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc4264b6-fd26-358a-f4e1-28720736bbfd'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10012,7 +10020,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EndcSetting', 'Endc', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EndcSetting', 'Endc', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9311ace-8a82-4484-7d6d-57d299c4f820'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10044,7 +10052,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EndcSetting', 'Endc', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EndcSetting', 'Endc', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b69d01dc-d2d6-1316-699d-88a5b9add3b0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10076,7 +10084,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AmbrSetting', 'Ambr', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AmbrSetting', 'Ambr', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba39be07-675c-ead2-6b09-6fca9b826da4'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10108,7 +10116,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AmbrSetting', 'Ambr', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AmbrSetting', 'Ambr', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b78943a7-7bab-2765-b396-3c39f3b8b6e7'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10140,7 +10148,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RaterelatedParameterSettings', 'Raterelated', 'Parameter', 'Settings']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RaterelatedParameterSettings', 'Raterelated', 'Parameter', 'Settings']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b04a7ffa-c11d-3d9b-968e-105fcb5f3416'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10172,7 +10180,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RaterelatedParameterSettings', 'Raterelated', 'Parameter', 'Settings']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RaterelatedParameterSettings', 'Raterelated', 'Parameter', 'Settings']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b306bf05-10de-076a-841f-aa86dc182425'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10204,7 +10212,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UeConfig', 'Ue']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UeConfig', 'Ue']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be255481-7d4d-afc4-277f-c16afa8d768a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10236,7 +10244,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UeConfig', 'Ue']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UeConfig', 'Ue']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3b6b2de-14e6-9dd9-2760-1a87e67523ad'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10268,7 +10276,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Epc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Epc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b28ea5c3-077f-adb0-8845-b8d9e89ff55c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10300,7 +10308,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Epc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Epc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b45b2af0-afcf-7500-62a0-c511d867d7ed'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10332,7 +10340,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.IntraNBCell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IntraCell', 'Intra', 'Cell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.IntraNBCell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IntraCell', 'Intra', 'Cell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b31e0f14-ac81-a491-6f6f-5c742a595bfc'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10364,7 +10372,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.IntraNBCell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IntraCell', 'Intra', 'Cell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.IntraNBCell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IntraCell', 'Intra', 'Cell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1f6f149-589f-e355-d405-fb5a4ad9c7a5'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10396,7 +10404,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Nprach']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Nprach']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7175117-3169-8670-f6ca-1845a5413284'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10428,7 +10436,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Nprach']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Nprach']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b074e6d4-cfaf-b36a-9886-1749140a66f0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10460,7 +10468,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UlSchd', 'Ul', 'Schd']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UlSchd', 'Ul', 'Schd']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b20a5737-e2ad-aade-781e-90876b3a326e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10492,7 +10500,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UlSchd', 'Ul', 'Schd']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UlSchd', 'Ul', 'Schd']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b086842a-4550-a130-5317-abba530fb69a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10524,7 +10532,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DlSchd', 'Dl', 'Schd']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DlSchd', 'Dl', 'Schd']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc8afd8c-32d1-b25c-70c5-7af52554863a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10556,7 +10564,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DlSchd', 'Dl', 'Schd']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DlSchd', 'Dl', 'Schd']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b56efd79-d686-875c-b85a-b4fb7d61c782'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10588,7 +10596,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Npusch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Npusch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b13d5b58-65f4-9297-2b30-7cb4d2618dc7'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10620,7 +10628,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Npusch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Npusch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf7bb6f2-fb14-2a16-8167-71c9b9028e62'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10652,7 +10660,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Npdcch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Npdcch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4ec88bf-3f52-1274-e57e-50c2d3a1b1fd'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10684,7 +10692,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Npdcch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Npdcch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd89587b-a883-4a43-7d0a-903bee32b269'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10716,7 +10724,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PDCCHList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NpdcchList', 'Npdcch', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PDCCHList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NpdcchList', 'Npdcch', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b34de837-92ea-4cc4-5b69-75a0ee2e49b0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10748,7 +10756,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PDCCHList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NpdcchList', 'Npdcch', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PDCCHList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NpdcchList', 'Npdcch', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9e61d0b-b997-d116-3720-fd5d57cdec65'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10780,7 +10788,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Rach']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Rach']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b34dcca1-54cd-df0b-d0f2-e4ba57a613ce'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10812,7 +10820,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Rach']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Rach']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b5871383-606a-c6d4-41ba-0d9cdb78fda0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10844,7 +10852,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.NPRACHList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NprachList', 'Nprach', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.NPRACHList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NprachList', 'Nprach', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be92a4a9-d583-b95a-8aa8-bfd86f1b1415'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10876,7 +10884,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.NPRACHList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NprachList', 'Nprach', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.NPRACHList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NprachList', 'Nprach', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6e13a2c-97a3-bc5f-d946-96bb41e46f03'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10908,7 +10916,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ulsch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ulsch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba59583a-45ba-f4b9-5746-77046cb8b398'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10940,7 +10948,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ulsch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ulsch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b501dca7-7593-1116-140c-f1298b3b3578'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -10972,7 +10980,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Amc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Amc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd2dd2a1-97f3-b11d-7e8e-2f44b85de9fc'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11004,7 +11012,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Amc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Amc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba125b7a-87ee-8731-6da5-385f9f753729'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11036,7 +11044,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CellBarredInfo', 'Cell', 'Barred']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CellBarredInfo', 'Cell', 'Barred']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0d287a0-e7cd-5765-e2fb-cbf1b993070e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11068,7 +11076,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CellBarredInfo', 'Cell', 'Barred']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CellBarredInfo', 'Cell', 'Barred']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8f41cc3-581c-13c1-3cb8-fd6af837ab75'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11100,7 +11108,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CellAccessControlSetting', 'Cell', 'Access', 'Control', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CellAccessControlSetting', 'Cell', 'Access', 'Control', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb383bb4-cc62-3182-ea22-b718ba670dbd'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11132,7 +11140,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CellAccessControlSetting', 'Cell', 'Access', 'Control', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CellAccessControlSetting', 'Cell', 'Access', 'Control', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6f2b61f-5f4c-833a-767b-25b2f5160f3d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11164,7 +11172,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SonConfig', 'Son']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SonConfig', 'Son']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3ed2321-fc09-fe96-4dd5-db505982c723'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11196,7 +11204,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SonConfig', 'Son']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SonConfig', 'Son']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be1ec45b-ce95-15b7-8771-f97f3d1ddba5'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11228,7 +11236,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AutoStartEnable', 'Auto', 'Start', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AutoStartEnable', 'Auto', 'Start', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf8557ef-6de3-8c04-f485-20728107952b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11260,7 +11268,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AutoStartEnable', 'Auto', 'Start', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AutoStartEnable', 'Auto', 'Start', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'becd2a65-d5f7-21f7-5029-775f768badf1'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11292,7 +11300,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['InitManagementServer', 'Init', 'Management', 'Server']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['InitManagementServer', 'Init', 'Management', 'Server']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc918b5c-cbf5-9d24-51f2-31bba8192823'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11324,7 +11332,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['InitManagementServer', 'Init', 'Management', 'Server']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['InitManagementServer', 'Init', 'Management', 'Server']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be1dc318-21e3-e58d-5f31-0116adc58d08'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11356,7 +11364,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['GpsSync', 'Gps', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['GpsSync', 'Gps', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba53d539-d91e-2a67-3c06-5141cc89fba9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11388,7 +11396,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['GpsSync', 'Gps', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['GpsSync', 'Gps', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b61cc4c3-7765-dc4c-138e-ebb9da7663de'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11420,7 +11428,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Satellitecell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Satellitecell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1b4db10-e16a-3f60-f9e0-2d4f1edbac5f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11452,7 +11460,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Satellitecell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Satellitecell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b119dccb-5b43-09d0-e57a-9098a45daa4a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11484,7 +11492,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.Qos.SdapMap.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SdapMap', 'Sdap', 'Map']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.Qos.SdapMap.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SdapMap', 'Sdap', 'Map']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b60a591b-e36e-50fb-bf46-082d16a5c07f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11516,7 +11524,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.Qos.SdapMap.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SdapMap', 'Sdap', 'Map']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.Qos.SdapMap.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SdapMap', 'Sdap', 'Map']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bfc8cce7-f3b4-51cd-3de9-7de31678aea3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11548,7 +11556,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.Qos.SdapMap.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SdapMap', 'Sdap', 'Map']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.Qos.SdapMap.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SdapMap', 'Sdap', 'Map']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf29ed47-26a1-dab8-a1af-1f323c0b7939'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11580,7 +11588,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.Qos.SdapMap.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SdapMap', 'Sdap', 'Map']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.Qos.SdapMap.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SdapMap', 'Sdap', 'Map']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb337727-a1e8-d80f-6743-5d0c5cdc4b94'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11612,7 +11620,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.Qos.QosSstInfo.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosSstList', 'Qos', 'Sst', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.Qos.QosSstInfo.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosSstList', 'Qos', 'Sst', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bcc1d1bb-398a-f182-b529-2779aa4646c5'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11644,7 +11652,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.Qos.QosSstInfo.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosSstList', 'Qos', 'Sst', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.Qos.QosSstInfo.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosSstList', 'Qos', 'Sst', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b300f24b-9291-311c-9acd-8b7e18159b65'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11676,7 +11684,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.Qos.QosSstInfo.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosSstList', 'Qos', 'Sst', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.Qos.QosSstInfo.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosSstList', 'Qos', 'Sst', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd213adf-ac46-7aa8-a254-31823e347091'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11708,7 +11716,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.Qos.QosSstInfo.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosSstList', 'Qos', 'Sst', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.Qos.QosSstInfo.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosSstList', 'Qos', 'Sst', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b68379e8-05c6-58e4-9c6a-ece931760795'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11740,7 +11748,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrNcell', 'Nr', 'Ncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrNcell', 'Nr', 'Ncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b62f1c5f-f39e-f39c-440d-5d030149cd37'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11772,7 +11780,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrNcell', 'Nr', 'Ncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrNcell', 'Nr', 'Ncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b878a6e7-1094-1b1e-c53b-610f335ded71'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11804,7 +11812,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrNcell', 'Nr', 'Ncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrNcell', 'Nr', 'Ncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc8b3401-07ee-216d-9e19-a55167d505e1'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11836,7 +11844,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrNcell', 'Nr', 'Ncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrNcell', 'Nr', 'Ncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b74de153-6eac-e352-4fbc-2a13b14d05d5'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11868,7 +11876,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrNfreq', 'Nr', 'Nfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrNfreq', 'Nr', 'Nfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1014345-3809-3aae-a103-6058c5fef838'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11900,7 +11908,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrNfreq', 'Nr', 'Nfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrNfreq', 'Nr', 'Nfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd34d1d9-c665-79de-c8e3-b55b17d0be50'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11932,7 +11940,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrNfreq', 'Nr', 'Nfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrNfreq', 'Nr', 'Nfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba93d766-5f88-96ed-4a1b-d9f3fb956c82'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11964,7 +11972,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrNfreq', 'Nr', 'Nfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrNfreq', 'Nr', 'Nfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b98adffe-c6b9-ae81-fb35-0698bf53b8ac'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -11996,7 +12004,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteNcell', 'Lte', 'Ncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteNcell', 'Lte', 'Ncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6275d42-bb4b-cbc4-15dd-840eb98c7cf4'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12028,7 +12036,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteNcell', 'Lte', 'Ncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteNcell', 'Lte', 'Ncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7c147d9-c572-4ea8-7bc7-9890b7e2821f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12060,7 +12068,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteNcell', 'Lte', 'Ncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteNcell', 'Lte', 'Ncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd9d7bd2-a9d3-49ef-f9e7-856809828719'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12092,7 +12100,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteNcell', 'Lte', 'Ncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteNcell', 'Lte', 'Ncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bfe91b4f-9e58-d8fc-84ab-128ed9c807d7'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12124,7 +12132,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteNfreq', 'Lte', 'Nfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteNfreq', 'Lte', 'Nfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b03cc985-0c88-cb68-15fc-b5d711825648'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12156,7 +12164,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteNfreq', 'Lte', 'Nfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteNfreq', 'Lte', 'Nfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b93b658b-ecd3-8ada-1a19-772dd1bcff9c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12188,7 +12196,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteNfreq', 'Lte', 'Nfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteNfreq', 'Lte', 'Nfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd27ef2a-920e-c0c2-c3f4-5b1ffc656489'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12220,7 +12228,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteNfreq', 'Lte', 'Nfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteNfreq', 'Lte', 'Nfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b636876e-b6f2-cec8-f9d6-b0df1f5f8be3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12252,7 +12260,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BasicConfig', 'Basic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BasicConfig', 'Basic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b5c5eff5-4ba1-61bc-e67e-fa6d6a0f5a13'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12284,7 +12292,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BasicConfig', 'Basic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BasicConfig', 'Basic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd8316ac-48d3-ad7b-0929-085197d62c25'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12316,7 +12324,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RuleConfig', 'Rule']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RuleConfig', 'Rule']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4c19918-0be3-a5ea-95ee-974f3eaa6b22'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12348,7 +12356,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RuleConfig', 'Rule']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RuleConfig', 'Rule']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b664c17e-9adb-9487-cf94-49bd0d47d39e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12380,7 +12388,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrEnergySave', 'Nr', 'Energy', 'Save']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrEnergySave', 'Nr', 'Energy', 'Save']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7ac14cc-42b7-f188-de4e-6da4a36b6b0f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12412,7 +12420,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrEnergySave', 'Nr', 'Energy', 'Save']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrEnergySave', 'Nr', 'Energy', 'Save']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b24caaa6-6cdc-c548-3281-0f420ed17d70'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12444,7 +12452,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrSctpStatus', 'Nr', 'Sctp', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrSctpStatus', 'Nr', 'Sctp', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b93726d8-9bf7-35a6-0832-523dbe2317d4'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12476,7 +12484,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SlotSleepTime', 'Slot', 'Sleep', 'Time']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SlotSleepTime', 'Slot', 'Sleep', 'Time']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b434663d-0545-aa96-4bbe-5590e71bd1be'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12508,7 +12516,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SlotSleepTime', 'Slot', 'Sleep', 'Time']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SlotSleepTime', 'Slot', 'Sleep', 'Time']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b94e0050-de05-396b-fcd1-e2ea6fd8baa9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12540,7 +12548,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CellIdentity', 'Cell', 'Identity']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CellIdentity', 'Cell', 'Identity']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b66d443d-1b3d-b369-8807-3b646979597f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12572,7 +12580,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CellIdentity', 'Cell', 'Identity']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CellIdentity', 'Cell', 'Identity']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba670c22-7fb9-12a3-f325-7865a6f03f42'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12604,7 +12612,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['XnList', 'Xn', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['XnList', 'Xn', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7462ad4-3126-6ad3-a69a-52205fe2bfb7'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12636,7 +12644,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['XnList', 'Xn', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['XnList', 'Xn', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc6d94f4-1185-97de-470e-fe4d8d7ca811'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12668,7 +12676,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['XnList', 'Xn', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['XnList', 'Xn', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9e7175f-24dd-af41-f81c-1738c3875fb2'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12700,7 +12708,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['XnList', 'Xn', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.XnIpAddrMapInfo.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['XnList', 'Xn', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bdcf3c07-de29-4fbd-fb48-be43d350f118'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12732,7 +12740,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.XnBlackList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['XnBlackList', 'Xn', 'Black', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.XnBlackList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['XnBlackList', 'Xn', 'Black', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b10b7124-36e8-fbe0-75c8-47d184dfa602'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12764,7 +12772,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.XnBlackList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['XnBlackList', 'Xn', 'Black', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.XnBlackList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['XnBlackList', 'Xn', 'Black', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b71981c1-4ff2-1d11-21fd-254526314e5c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12796,7 +12804,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.XnBlackList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['XnBlackList', 'Xn', 'Black', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.XnBlackList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['XnBlackList', 'Xn', 'Black', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b55d8259-719f-0873-27c2-9470f798abfa'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12828,7 +12836,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.XnBlackList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['XnBlackList', 'Xn', 'Black', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.XnBlackList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['XnBlackList', 'Xn', 'Black', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b033eaa1-f093-812e-e88c-f0966f9e67ca'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12860,7 +12868,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SsbConfig', 'Ssb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SsbConfig', 'Ssb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc921a51-e94f-3705-ed7d-64cda595e4e4'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12892,7 +12900,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SsbConfig', 'Ssb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SsbConfig', 'Ssb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b672acb1-b343-31de-3d7f-1f430c162e64'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12924,7 +12932,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tdduldlconfigurationcommon']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tdduldlconfigurationcommon']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb3ca2a1-8eb1-7d7d-5396-c396e0adc242'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12956,7 +12964,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tdduldlconfigurationcommon']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Tdduldlconfigurationcommon']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b37642b5-c322-9ab2-1e0b-a62b356e336e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -12988,7 +12996,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DlGeneric', 'Dl', 'Generic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DlGeneric', 'Dl', 'Generic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd6a9fcd-c7d6-b81e-0838-230d588d5241'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13020,7 +13028,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DlGeneric', 'Dl', 'Generic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DlGeneric', 'Dl', 'Generic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb8fc3c3-291a-ddd0-2f91-06bfb34d224b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13052,7 +13060,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UlGeneric', 'Ul', 'Generic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UlGeneric', 'Ul', 'Generic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0e5c623-2bf8-a9b8-6000-49ad233f2d72'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13084,7 +13092,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UlGeneric', 'Ul', 'Generic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UlGeneric', 'Ul', 'Generic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb550517-5210-3a38-ca56-91a9d1a5f3eb'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13116,7 +13124,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CsirsReporting', 'Csirs', 'Reporting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CsirsReporting', 'Csirs', 'Reporting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b83243f0-ccf8-b289-2e3a-7893637e6786'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13148,7 +13156,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CsirsReporting', 'Csirs', 'Reporting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CsirsReporting', 'Csirs', 'Reporting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bec1df3d-27f4-98ab-9ace-f47f4d3b1d61'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13180,7 +13188,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UlBwplistConfig', 'Ul', 'Bwplist']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UlBwplistConfig', 'Ul', 'Bwplist']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4355693-c3dc-d242-1f69-b428ed5e3b74'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13212,7 +13220,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UlBwplistConfig', 'Ul', 'Bwplist']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UlBwplistConfig', 'Ul', 'Bwplist']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be952e3e-523f-dc85-f7ea-3be693bc498f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13244,7 +13252,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RachConfigGeneric', 'Rach', 'Generic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RachConfigGeneric', 'Rach', 'Generic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'baee0b9d-1578-c477-e4ed-40f5f37e2c09'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13276,7 +13284,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RachConfigGeneric', 'Rach', 'Generic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RachConfigGeneric', 'Rach', 'Generic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b909bb6a-0bbc-0a31-36da-ce16ddd422dc'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13308,7 +13316,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RachConfigCommon', 'Rach', 'Common']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RachConfigCommon', 'Rach', 'Common']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc09215b-fc34-5e92-278d-abf64b99b1e8'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13340,7 +13348,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RachConfigCommon', 'Rach', 'Common']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RachConfigCommon', 'Rach', 'Common']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b5c25e2e-b151-0615-dc6b-25b92afde764'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13372,7 +13380,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PuschConfigCommon', 'Pusch', 'Common']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PuschConfigCommon', 'Pusch', 'Common']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb3ea9de-ac3c-57bf-15cf-c5e24e9cc6ae'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13404,7 +13412,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PuschConfigCommon', 'Pusch', 'Common']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PuschConfigCommon', 'Pusch', 'Common']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b5b40d39-c413-fd6b-d00d-d5516d9c18ff'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13436,7 +13444,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PuschTimedomainResourceAllocation', 'Pusch', 'Timedomain', 'Resource', 'Allocation']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PuschTimedomainResourceAllocation', 'Pusch', 'Timedomain', 'Resource', 'Allocation']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b71c9e9b-0254-9861-0dcb-e6d49a816bd6'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13468,7 +13476,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PuschTimedomainResourceAllocation', 'Pusch', 'Timedomain', 'Resource', 'Allocation']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PuschTimedomainResourceAllocation', 'Pusch', 'Timedomain', 'Resource', 'Allocation']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b26217f5-c5a8-6e02-ae30-e5a5d99c0c3f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13500,7 +13508,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PucchConfigCommon', 'Pucch', 'Common']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PucchConfigCommon', 'Pucch', 'Common']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b90c8bb9-106b-ad9f-f4ab-446395077cf4'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13532,7 +13540,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PucchConfigCommon', 'Pucch', 'Common']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PucchConfigCommon', 'Pucch', 'Common']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b140a343-c778-1742-cd0e-a6264ed901c0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13564,7 +13572,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PucchConfig', 'Pucch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PucchConfig', 'Pucch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7f15c1f-9f0d-7b4e-ab4a-79cf3907b56b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13596,7 +13604,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PucchConfig', 'Pucch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PucchConfig', 'Pucch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf5862e5-ecc2-1754-7879-8ae37ac1dc83'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13628,7 +13636,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PuschDedicatedTimedomainAllocation', 'Pusch', 'Dedicated', 'Timedomain', 'Allocation']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PuschDedicatedTimedomainAllocation', 'Pusch', 'Dedicated', 'Timedomain', 'Allocation']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc251ad8-3449-3955-94ea-331a773cd94b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13660,7 +13668,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PuschDedicatedTimedomainAllocation', 'Pusch', 'Dedicated', 'Timedomain', 'Allocation']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PuschDedicatedTimedomainAllocation', 'Pusch', 'Dedicated', 'Timedomain', 'Allocation']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3061fd5-4446-5605-7ddc-c99038e95668'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13692,7 +13700,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DlBwplisConfig', 'Dl', 'Bwplis']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DlBwplisConfig', 'Dl', 'Bwplis']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b78e1550-bb3f-0e28-75c1-378a7b9c77b0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13724,7 +13732,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DlBwplisConfig', 'Dl', 'Bwplis']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DlBwplisConfig', 'Dl', 'Bwplis']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba284257-0472-15f2-76b1-fc581cf6288b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13756,7 +13764,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PdcchConfigCommon', 'Pdcch', 'Common']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PdcchConfigCommon', 'Pdcch', 'Common']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf62772c-aafa-7bc4-624d-d1b0b458bc47'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13788,7 +13796,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PdcchConfigCommon', 'Pdcch', 'Common']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PdcchConfigCommon', 'Pdcch', 'Common']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4700bf2-db40-95fe-c3a8-96feb3628f1e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13820,7 +13828,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CommonSearchSpace', 'Common', 'Search', 'Space']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CommonSearchSpace', 'Common', 'Search', 'Space']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf8689a7-64e5-1782-47e5-2cbfda1800ec'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13852,7 +13860,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CommonSearchSpace', 'Common', 'Search', 'Space']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CommonSearchSpace', 'Common', 'Search', 'Space']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0cbf08f-ded6-f142-51a7-b4bc59bc7e77'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13884,7 +13892,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PdschTimedomainResourceAllocation', 'Pdsch', 'Timedomain', 'Resource', 'Allocation']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PdschTimedomainResourceAllocation', 'Pdsch', 'Timedomain', 'Resource', 'Allocation']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b211787d-f969-4da6-04e4-45784ca02987'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13916,7 +13924,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PdschTimedomainResourceAllocation', 'Pdsch', 'Timedomain', 'Resource', 'Allocation']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PdschTimedomainResourceAllocation', 'Pdsch', 'Timedomain', 'Resource', 'Allocation']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf437ad6-09a4-b40c-ba40-0587da0e0b77'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13948,7 +13956,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PdschDedicatedTimedomainAllocation', 'Pdsch', 'Dedicated', 'Timedomain', 'Allocation']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PdschDedicatedTimedomainAllocation', 'Pdsch', 'Dedicated', 'Timedomain', 'Allocation']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3687446-4153-2c93-c9a5-aac497b2a401'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -13980,7 +13988,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PdschDedicatedTimedomainAllocation', 'Pdsch', 'Dedicated', 'Timedomain', 'Allocation']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PdschDedicatedTimedomainAllocation', 'Pdsch', 'Dedicated', 'Timedomain', 'Allocation']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba5b97f4-0bd1-fd34-9f3d-e820ef082a2a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14012,7 +14020,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosList5g', 'Qos', 'List', '5g']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosList5g', 'Qos', 'List', '5g']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'baace661-7d36-dec8-6125-0900662368b6'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14044,7 +14052,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosList5g', 'Qos', 'List', '5g']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosList5g', 'Qos', 'List', '5g']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be6e5732-b4bc-4d47-0a5f-8e77c04ebe48'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14076,7 +14084,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosList5g', 'Qos', 'List', '5g']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosList5g', 'Qos', 'List', '5g']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3b0d799-1c05-bde9-a7c9-2aa970950266'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14108,7 +14116,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosList5g', 'Qos', 'List', '5g']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.QOS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['QosList5g', 'Qos', 'List', '5g']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd3fbdb1-7667-87e4-9468-9e4eeadf46e4'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14140,7 +14148,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AdvanceGnbConfig', 'Advance', 'Gnb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AdvanceGnbConfig', 'Advance', 'Gnb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd564d1f-633f-ade5-949b-691bcaf655f9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14172,7 +14180,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AdvanceGnbConfig', 'Advance', 'Gnb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AdvanceGnbConfig', 'Advance', 'Gnb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be842405-bd29-b436-325a-fdf5c1b152f9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14204,7 +14212,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VoiceConfig', 'Voice']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VoiceConfig', 'Voice']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b54d6a71-0bdc-c90d-e055-8bcd487eaccf'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14236,7 +14244,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VoiceConfig', 'Voice']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VoiceConfig', 'Voice']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b362ccc1-b1b4-bf59-56d1-6df557565f5e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14268,7 +14276,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecBind', 'Ipsec', 'Bind']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecBind', 'Ipsec', 'Bind']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0d2f514-c14e-9a02-eec4-f48d5c86c5ba'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14300,7 +14308,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecBind', 'Ipsec', 'Bind']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecBind', 'Ipsec', 'Bind']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bdd52156-7bfd-4598-d33e-fcc9e8186563'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14332,7 +14340,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['StrongSwan', 'Strong', 'Swan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['StrongSwan', 'Strong', 'Swan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b5a0920a-0f90-cbcb-a306-8e2e206b76a1'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14364,7 +14372,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['StrongSwan', 'Strong', 'Swan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['StrongSwan', 'Strong', 'Swan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4352e3e-eab5-5cbd-b51f-06c286a0c589'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14396,7 +14404,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AdvanceSsbConfig', 'Advance', 'Ssb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AdvanceSsbConfig', 'Advance', 'Ssb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf24a0bb-95c0-4100-ec59-a6ae46f0fdec'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14428,7 +14436,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AdvanceSsbConfig', 'Advance', 'Ssb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AdvanceSsbConfig', 'Advance', 'Ssb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4759986-1fcd-9047-392b-f4422fe1b773'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14460,7 +14468,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SoftUsim', 'Soft', 'Usim']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SoftUsim', 'Soft', 'Usim']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4a9d78c-e6aa-fa0e-9f28-a690e9441dd8'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14492,7 +14500,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SoftUsim', 'Soft', 'Usim']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SoftUsim', 'Soft', 'Usim']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3676534-eb9f-3481-bd28-71c9f1c1bc1c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14524,7 +14532,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WebConfig', 'Web']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WebConfig', 'Web']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8ef21e5-866a-537f-1300-32bf520479aa'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14556,7 +14564,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WebConfig', 'Web']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WebConfig', 'Web']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2bdfa12-6b11-1cc8-6033-6d039336c259'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14588,7 +14596,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SshEnable', 'Ssh', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SshEnable', 'Ssh', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3849fb5-f8e0-523a-ecfb-61a401eccfc2'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14620,7 +14628,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SshEnable', 'Ssh', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SshEnable', 'Ssh', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b00fbf36-8c4b-ecbf-c1a7-a529b0b3c41a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14652,7 +14660,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['InterfaceDefaultRoute', 'Interface', 'Default', 'Route']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['InterfaceDefaultRoute', 'Interface', 'Default', 'Route']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3e7247d-557c-33e3-0220-dd36dd62ca76'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14684,7 +14692,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['InterfaceDefaultRoute', 'Interface', 'Default', 'Route']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['InterfaceDefaultRoute', 'Interface', 'Default', 'Route']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba528506-f527-0abc-e6eb-904cb369986a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14716,7 +14724,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.{i}.PppoeAddress.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PppoeDialling', 'Pppoe', 'Dialling']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.{i}.PppoeAddress.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PppoeDialling', 'Pppoe', 'Dialling']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba156196-468a-6f22-65ce-1e4856315d09'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14748,7 +14756,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.{i}.PppoeAddress.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PppoeDialling', 'Pppoe', 'Dialling']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.{i}.PppoeAddress.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PppoeDialling', 'Pppoe', 'Dialling']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bdb31efc-b59d-0737-49d9-8fa0e25de905'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14780,7 +14788,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.{i}.PppoeAddress.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PppoeDialling', 'Pppoe', 'Dialling']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.{i}.PppoeAddress.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PppoeDialling', 'Pppoe', 'Dialling']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b84e54f7-700b-2fe8-a07a-a2649e4b8537'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14812,7 +14820,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.{i}.PppoeAddress.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PppoeDialling', 'Pppoe', 'Dialling']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.{i}.PppoeAddress.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PppoeDialling', 'Pppoe', 'Dialling']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b508fbff-1bed-e874-481c-8735d647eb73'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14844,7 +14852,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VlanPppoeDialling', 'Vlan', 'Pppoe', 'Dialling']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VlanPppoeDialling', 'Vlan', 'Pppoe', 'Dialling']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9961fec-f88c-56e4-33aa-e9c931001a7b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14876,7 +14884,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VlanPppoeDialling', 'Vlan', 'Pppoe', 'Dialling']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VlanPppoeDialling', 'Vlan', 'Pppoe', 'Dialling']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b783b7dd-f0c9-3134-a04a-71fa3ee9beae'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14908,7 +14916,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Sfp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Sfp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b872f900-5791-8be7-8e2c-b592ba719bc6'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14940,7 +14948,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Sfp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Sfp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b814c3c2-6ea0-b708-aaf4-bf445fc1d383'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -14972,7 +14980,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.FAP.NrTxInfo.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['StandingWave', 'Standing', 'Wave']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.FAP.NrTxInfo.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['StandingWave', 'Standing', 'Wave']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bcf84867-f52d-2d05-c3c0-0cee393b5760'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15004,7 +15012,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NetworkIperfTestg', 'Network', 'Iperf', 'Testg']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NetworkIperfTestg', 'Network', 'Iperf', 'Testg']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b51d7ec2-bd53-7bb9-f44c-410662c1e6ec'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15036,7 +15044,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NetworkIperfTestg', 'Network', 'Iperf', 'Testg']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NetworkIperfTestg', 'Network', 'Iperf', 'Testg']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bcff3e55-3980-286b-26a6-b49ba7d096d0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15068,7 +15076,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AldStatus', 'Ald', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AldStatus', 'Ald', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0a6c4c2-811a-1b07-286f-879e4fb0906e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15100,7 +15108,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AldStatus', 'Ald', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AldStatus', 'Ald', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be57ae9a-38f1-86a2-9796-020c6efd2775'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15132,7 +15140,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpv4Config', 'Wan', 'Ipv4']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpv4Config', 'Wan', 'Ipv4']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b083fd6b-3597-4706-0db4-928998c73f1f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15164,7 +15172,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpv4Config', 'Wan', 'Ipv4']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpv4Config', 'Wan', 'Ipv4']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b092e27f-14e4-230e-0a5c-e4ba251f6b66'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15196,7 +15204,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpv4Config', 'Wan', 'Ipv4']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpv4Config', 'Wan', 'Ipv4']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6e2ce45-60ff-ac5e-71ae-2d75f5c22c2e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15228,7 +15236,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpv4Config', 'Wan', 'Ipv4']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpv4Config', 'Wan', 'Ipv4']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb646bec-c340-1387-71ed-93fe2273df91'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15260,7 +15268,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpv6Config', 'Wan', 'Ipv6']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpv6Config', 'Wan', 'Ipv6']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4e402ef-f6c0-8440-dd41-05036487afda'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15292,7 +15300,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpv6Config', 'Wan', 'Ipv6']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpv6Config', 'Wan', 'Ipv6']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7b86195-ca35-2531-35a9-2d66d294a62e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15324,7 +15332,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpv6Config', 'Wan', 'Ipv6']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpv6Config', 'Wan', 'Ipv6']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf104514-aed6-c43b-3c35-f23d2b6992ec'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15356,7 +15364,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpv6Config', 'Wan', 'Ipv6']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Ethernet.Interface.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpv6Config', 'Wan', 'Ipv6']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b97f2315-039f-1e62-4265-cf453a788bfa'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15388,7 +15396,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.GnbIdLengthArray.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrAnrGnbidList', 'Nr', 'Anr', 'Gnbid', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.GnbIdLengthArray.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrAnrGnbidList', 'Nr', 'Anr', 'Gnbid', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be5462ef-827e-3285-deb7-3d3e4b77bafe'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15420,7 +15428,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.GnbIdLengthArray.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrAnrGnbidList', 'Nr', 'Anr', 'Gnbid', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.GnbIdLengthArray.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrAnrGnbidList', 'Nr', 'Anr', 'Gnbid', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b223aa3d-6c70-9e09-0cd5-eb976d3b3435'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15452,7 +15460,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.GnbIdLengthArray.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrAnrGnbidList', 'Nr', 'Anr', 'Gnbid', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.GnbIdLengthArray.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrAnrGnbidList', 'Nr', 'Anr', 'Gnbid', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bbdacc2e-aa2b-35b2-acca-7cec7a552f9f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15484,7 +15492,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.GnbIdLengthArray.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrAnrGnbidList', 'Nr', 'Anr', 'Gnbid', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.GnbIdLengthArray.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrAnrGnbidList', 'Nr', 'Anr', 'Gnbid', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b90d8199-6f10-a41f-a4c4-77dc6241e679'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15516,7 +15524,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.EnbIdLengthArray.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrAnrEnbidList', 'Nr', 'Anr', 'Enbid', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.EnbIdLengthArray.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrAnrEnbidList', 'Nr', 'Anr', 'Enbid', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b713e267-90da-900b-579a-25d9cbb7b8f5'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15548,7 +15556,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.EnbIdLengthArray.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrAnrEnbidList', 'Nr', 'Anr', 'Enbid', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.EnbIdLengthArray.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrAnrEnbidList', 'Nr', 'Anr', 'Enbid', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b07bf445-8e6e-1351-90f5-e305974f17fa'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15580,7 +15588,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.EnbIdLengthArray.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrAnrEnbidList', 'Nr', 'Anr', 'Enbid', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.EnbIdLengthArray.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrAnrEnbidList', 'Nr', 'Anr', 'Enbid', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3607eb3-68ea-8132-a2d3-bdce23494627'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15612,7 +15620,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.EnbIdLengthArray.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrAnrEnbidList', 'Nr', 'Anr', 'Enbid', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.EnbIdLengthArray.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NrAnrEnbidList', 'Nr', 'Anr', 'Enbid', 'List']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be001db3-d223-6e4f-0451-ff8754acef08'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15644,7 +15652,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AmfConfig', 'Amf']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AmfConfig', 'Amf']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b57a13b9-0b13-f8bd-657f-660432cff571'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15676,7 +15684,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AmfConfig', 'Amf']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AmfConfig', 'Amf']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9d22ac5-7f6b-3bfe-d3cc-912c5c3f538f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15708,7 +15716,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AmfConfig', 'Amf']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AmfConfig', 'Amf']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6e72133-9c33-3b9d-d8f8-94839d99cf1d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15740,7 +15748,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AmfConfig', 'Amf']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.Services.FAPService.{i}.FAPControl.NR.AMFPoolConfigParam.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AmfConfig', 'Amf']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'beb5bc8d-472f-7ec1-4f12-2545cd8487f3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15772,7 +15780,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['StandingWaveSwitch', 'Standing', 'Wave', 'Switch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['StandingWaveSwitch', 'Standing', 'Wave', 'Switch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3c98cd4-0ced-c75d-d9fe-a4bdb305f44d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15804,7 +15812,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['StandingWaveSwitch', 'Standing', 'Wave', 'Switch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['StandingWaveSwitch', 'Standing', 'Wave', 'Switch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b173671b-1eac-54ef-f545-def23f3281b3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15836,7 +15844,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ltecell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ltecell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb9cb01e-81c7-bc33-add8-1082521c18e9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15868,7 +15876,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ltecell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ltecell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1aef240-3932-2c66-d2e9-1df4c3094fc2'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15900,7 +15908,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ltecell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ltecell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b87f0a13-23fc-d6ee-65b7-4f1901b9c0bb'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15932,7 +15940,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ltecell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ltecell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb5fee1d-3dbd-ddad-f946-b37030fc08f9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15964,7 +15972,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpConfig', 'Wan', 'Ip']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpConfig', 'Wan', 'Ip']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb8b7e4c-ac03-f4b5-a563-c6e109868428'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -15996,7 +16004,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpConfig', 'Wan', 'Ip']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpConfig', 'Wan', 'Ip']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b06460c2-f1d2-6a5c-72e1-0fc3c8b7413a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16028,7 +16036,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpConfig', 'Wan', 'Ip']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpConfig', 'Wan', 'Ip']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb7785f8-504b-8874-872c-5d4a9e59fcd8'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16060,7 +16068,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpConfig', 'Wan', 'Ip']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanIpConfig', 'Wan', 'Ip']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd2a5493-f3db-3771-815c-9e90816ebb66'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16092,7 +16100,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DeviceInfo', 'Device']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DeviceInfo', 'Device']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b30637d3-8450-ef02-ac81-ad6d38e44410'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16124,7 +16132,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DeviceInfo', 'Device']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DeviceInfo', 'Device']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4946486-8b86-b5d0-1ce6-c4bf2cc634dc'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16156,7 +16164,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Bts.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BtsInfo', 'Bts']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Bts.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BtsInfo', 'Bts']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b874eb68-ddb0-141b-ac6f-77bbe068f330'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16188,7 +16196,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Bts.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BtsInfo', 'Bts']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'DeviceGSM.Bts.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BtsInfo', 'Bts']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba002a43-0d8f-e748-f54c-df1d7cfb92d6'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16220,7 +16228,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Bts.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BtsInfo', 'Bts']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Bts.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BtsInfo', 'Bts']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4660be0-b661-2ddb-7d6f-c47d619f3d52'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16252,7 +16260,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Bts.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BtsInfo', 'Bts']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Bts.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BtsInfo', 'Bts']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b95f3bf0-d0fa-f38d-2d41-3d44cafeadb3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16284,7 +16292,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Bts.{i}.Trx.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BtsTrx', 'Bts', 'Trx']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Bts.{i}.Trx.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BtsTrx', 'Bts', 'Trx']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9a41538-b3b1-41bf-b9ab-3aba868f9d2b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16316,7 +16324,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Bts.{i}.Trx.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BtsTrx', 'Bts', 'Trx']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'DeviceGSM.Bts.{i}.Trx.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BtsTrx', 'Bts', 'Trx']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6951ebb-0046-3590-c34a-1f1d0ca242d8'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16348,7 +16356,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Bts.{i}.Trx.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BtsTrx', 'Bts', 'Trx']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Bts.{i}.Trx.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BtsTrx', 'Bts', 'Trx']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd969636-3d73-08e3-81ca-ba048b548493'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16380,7 +16388,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Bts.{i}.Trx.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BtsTrx', 'Bts', 'Trx']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Bts.{i}.Trx.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BtsTrx', 'Bts', 'Trx']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7d6bba6-8e24-9dad-87e5-19acdb7892d7'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16412,7 +16420,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Msc.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MscInfo', 'Msc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Msc.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MscInfo', 'Msc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b798457e-c19d-6d0b-f6d5-60274323c5a0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16444,7 +16452,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Msc.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MscInfo', 'Msc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'DeviceGSM.Msc.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MscInfo', 'Msc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b336b2cc-a2d0-880d-d73b-80ff387da579'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16476,7 +16484,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Msc.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MscInfo', 'Msc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Msc.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MscInfo', 'Msc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b70e8966-b373-f85b-ba4d-f5aa8426d246'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16508,7 +16516,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Msc.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MscInfo', 'Msc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Msc.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MscInfo', 'Msc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3462c5c-a65f-6e99-eee5-105874fe1a94'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16540,7 +16548,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Cs7Info', 'Cs7']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Cs7Info', 'Cs7']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4764e01-b4bc-3e79-a9e4-1daed3471367'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16572,7 +16580,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Cs7Info', 'Cs7']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Cs7Info', 'Cs7']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b47500d6-b764-0ebd-3758-da545274fb06'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16604,7 +16612,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Cs7Info', 'Cs7']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Cs7Info', 'Cs7']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b706fbe8-b1df-3a56-f4ba-8caebf946e99'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16636,7 +16644,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Cs7Info', 'Cs7']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Cs7Info', 'Cs7']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b363c83f-4e85-228c-d1fb-1e715859087c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16668,7 +16676,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MgwInfo', 'Mgw']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MgwInfo', 'Mgw']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7b469c1-2846-577a-1b3e-7a8e70ed8fa4'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16700,7 +16708,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MgwInfo', 'Mgw']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MgwInfo', 'Mgw']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b775e663-c775-b5da-f4d5-8fc115d4625a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16732,7 +16740,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Bts.{i}.Trx.{i}.Ts.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BtsTs', 'Bts', 'Ts']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Bts.{i}.Trx.{i}.Ts.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BtsTs', 'Bts', 'Ts']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2e5f746-bd3e-23f0-3522-6cfc1fed0916'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16764,7 +16772,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Bts.{i}.Trx.{i}.Ts.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BtsTs', 'Bts', 'Ts']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'DeviceGSM.Bts.{i}.Trx.{i}.Ts.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BtsTs', 'Bts', 'Ts']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b225b291-8ad7-dc00-e48e-f1ef47a2bf07'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16796,7 +16804,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KeepalivedmgmtConfig', 'Keepalivedmgmt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KeepalivedmgmtConfig', 'Keepalivedmgmt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b54e55ac-2bf1-662b-8a8d-31991ceb85c7'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16828,7 +16836,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KeepalivedmgmtConfig', 'Keepalivedmgmt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KeepalivedmgmtConfig', 'Keepalivedmgmt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b5721e94-b7e6-fca2-5296-973da560a4bc'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16860,7 +16868,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.KeepalivedMgmt.VrrpMgmt.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VrrpmgmtConfig', 'Vrrpmgmt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.KeepalivedMgmt.VrrpMgmt.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VrrpmgmtConfig', 'Vrrpmgmt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1740bf5-2070-6d21-51da-3c339f8257e3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16892,7 +16900,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.KeepalivedMgmt.VrrpMgmt.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VrrpmgmtConfig', 'Vrrpmgmt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.KeepalivedMgmt.VrrpMgmt.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VrrpmgmtConfig', 'Vrrpmgmt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b03ec9a3-703c-7bc8-725a-04c448196ef6'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16924,7 +16932,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.KeepalivedMgmt.VrrpMgmt.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VrrpmgmtConfig', 'Vrrpmgmt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.KeepalivedMgmt.VrrpMgmt.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VrrpmgmtConfig', 'Vrrpmgmt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b85a1ffa-65b7-a969-ff30-1d6732e96845'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16956,7 +16964,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.KeepalivedMgmt.VrrpMgmt.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VrrpmgmtConfig', 'Vrrpmgmt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.KeepalivedMgmt.VrrpMgmt.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VrrpmgmtConfig', 'Vrrpmgmt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b012bd5d-2a9a-f8c0-4b90-64e2f975f080'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -16988,7 +16996,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VirtualiplistConfig', 'Virtualiplist']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VirtualiplistConfig', 'Virtualiplist']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'beb3d3dd-e939-43a6-0fbb-f313b0e8c7f2'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17020,7 +17028,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VirtualiplistConfig', 'Virtualiplist']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VirtualiplistConfig', 'Virtualiplist']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b247373a-2a92-f98b-6f2e-5c4687180eeb'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17052,7 +17060,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VirtualiplistConfig', 'Virtualiplist']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VirtualiplistConfig', 'Virtualiplist']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be48c98c-ca77-74cc-cc55-0545f35b1bc8'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17084,7 +17092,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VirtualiplistConfig', 'Virtualiplist']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'Device.KeepalivedMgmt.VrrpMgmt.{i}.VirtualIpList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['VirtualiplistConfig', 'Virtualiplist']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba947ae4-77c1-12de-c876-b2b1ab482a34'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17116,7 +17124,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.Asp.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AspInfo', 'Asp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.Asp.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AspInfo', 'Asp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bde4648a-e4fe-ed4c-17aa-4c8e444c6971'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17148,7 +17156,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.Asp.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AspInfo', 'Asp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.Asp.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AspInfo', 'Asp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6b0ca09-5029-18ea-c0b5-6d169c1a8191'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17180,7 +17188,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.Asp.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AspInfo', 'Asp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.Asp.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AspInfo', 'Asp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b04e862c-7f56-0ab2-7aac-461a4e8ecf4d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17212,7 +17220,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.Asp.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AspInfo', 'Asp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.Asp.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AspInfo', 'Asp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6a91f6a-7ba9-6733-3668-c76abdb3ff43'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17244,7 +17252,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.As.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AsInfo', 'As']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.As.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AsInfo', 'As']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b64144a9-36a1-768d-1c02-0e145a766940'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17276,7 +17284,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.As.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AsInfo', 'As']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.As.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AsInfo', 'As']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bdabf30a-5a06-95f4-8927-8295f348388f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17308,7 +17316,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.As.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AsInfo', 'As']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.As.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AsInfo', 'As']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b99cf8a7-4c7a-4a40-2e81-4318a2510a32'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17340,7 +17348,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.As.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AsInfo', 'As']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.As.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AsInfo', 'As']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be287ccb-f4bd-02d3-4d09-bf8ec167e9b4'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17372,7 +17380,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.SccpAddr.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SccpaddrInfo', 'Sccpaddr']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.SccpAddr.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SccpaddrInfo', 'Sccpaddr']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bff5432b-59d3-0099-d3ca-b0ff675a7fb6'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17404,7 +17412,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.SccpAddr.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SccpaddrInfo', 'Sccpaddr']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.SccpAddr.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SccpaddrInfo', 'Sccpaddr']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b274da60-6ddf-5cc6-ffb1-3bae84397c33'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17436,7 +17444,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.SccpAddr.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SccpaddrInfo', 'Sccpaddr']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.SccpAddr.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SccpaddrInfo', 'Sccpaddr']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6ee0f27-b101-4b43-86be-7ab53aba4d26'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17468,7 +17476,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.SccpAddr.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SccpaddrInfo', 'Sccpaddr']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'DeviceGSM.Cs7Instance.{i}.SccpAddr.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SccpaddrInfo', 'Sccpaddr']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd81d4d6-cc3b-cb96-aa04-8d153fe08fb2'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17500,7 +17508,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['HandoverConfig', 'Handover']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['HandoverConfig', 'Handover']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd07109a-32c6-f0a2-1931-baafc77d34ea'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17532,7 +17540,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['HandoverConfig', 'Handover']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['HandoverConfig', 'Handover']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0d3c24d-f53d-e1b5-192c-1b1cb97045fc'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17564,7 +17572,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route1Config', 'Route1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route1Config', 'Route1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bbe2e423-394a-bcb0-dff9-e63bed47ead3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17596,7 +17604,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route1Config', 'Route1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route1Config', 'Route1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b056eb10-b4ed-a920-4582-935d980442dd'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17628,7 +17636,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route2Config', 'Route2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route2Config', 'Route2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd523f99-86a8-b645-558a-1013660c3c4f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17660,7 +17668,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route2Config', 'Route2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route2Config', 'Route2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bba2ec63-0728-697d-65a0-c0c7bb66e579'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17692,7 +17700,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route3Config', 'Route3']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route3Config', 'Route3']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b59c3b67-fa3a-c2e3-d4e4-084e7cc4e4c6'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17724,7 +17732,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route3Config', 'Route3']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route3Config', 'Route3']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2467302-6e85-d533-64c0-2a00ce309cd5'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17756,7 +17764,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route4Config', 'Route4']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route4Config', 'Route4']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc5505e7-055c-3f44-11cd-8a3be328e140'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17788,7 +17796,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route4Config', 'Route4']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route4Config', 'Route4']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4ba0f77-0c72-3d8a-d92f-ca508103078a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17820,7 +17828,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route5Config', 'Route5']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route5Config', 'Route5']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b67567ec-9579-9f76-80ff-6d64c13fe54f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17852,7 +17860,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route5Config', 'Route5']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route5Config', 'Route5']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb68c85a-f9b6-172d-0c23-f078b56cecba'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17884,7 +17892,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route6Config', 'Route6']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route6Config', 'Route6']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7ae5a43-2d8f-3f57-4c5d-d1472ff736d8'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17916,7 +17924,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route6Config', 'Route6']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route6Config', 'Route6']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4b967b3-31ce-9c0e-c8ca-5d075bc9b6ce'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17948,7 +17956,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route7Config', 'Route7']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route7Config', 'Route7']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bcd572ff-c93a-69ca-bac7-dfc015b007dd'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -17980,7 +17988,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route7Config', 'Route7']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route7Config', 'Route7']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b5150811-f713-6176-790f-4a47021abc0c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18012,7 +18020,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route8Config', 'Route8']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route8Config', 'Route8']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bffd7f87-b6bd-4d9c-82a6-09447b93b876'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18044,7 +18052,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route8Config', 'Route8']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route8Config', 'Route8']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8df547d-a2e0-9d60-45d5-d9ad8fafb4ee'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18076,7 +18084,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route9Config', 'Route9']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route9Config', 'Route9']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd397ef0-58cb-1ea1-ddd5-9ce6bf4a9abd'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18108,7 +18116,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route9Config', 'Route9']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route9Config', 'Route9']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb69bb74-b969-91ee-d4d7-5506c2538369'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18140,7 +18148,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route10Config', 'Route10']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route10Config', 'Route10']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb3c89b1-7498-2d5b-2abe-5d246cdf013c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18172,7 +18180,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route10Config', 'Route10']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route10Config', 'Route10']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd507544-8ecc-bf59-ecf8-2ed3b7b32ea9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18204,7 +18212,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route11Config', 'Route11']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route11Config', 'Route11']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9d208bb-591a-67ea-a192-3d2728cf363a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18236,7 +18244,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route11Config', 'Route11']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route11Config', 'Route11']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b32103d6-904c-d9c7-3b28-730deb676ebb'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18268,7 +18276,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route12Config', 'Route12']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route12Config', 'Route12']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bdb553d2-40e8-bf51-57fa-d8822d8f91cd'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18300,7 +18308,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route12Config', 'Route12']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Route12Config', 'Route12']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b23ab15f-27a8-034f-a36b-a32edd446367'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18332,7 +18340,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan1Config', 'Wan1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan1Config', 'Wan1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bda17874-49fd-0c4c-d361-74387d9d263c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18364,7 +18372,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan1Config', 'Wan1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan1Config', 'Wan1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b739b0ed-7f3c-8e5d-5dba-f1a05daf24dd'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18396,7 +18404,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan2Config', 'Wan2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan2Config', 'Wan2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4ece1c4-d43f-6373-e2e5-23f8dc3ac8dd'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18428,7 +18436,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan2Config', 'Wan2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan2Config', 'Wan2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b581362a-5bd3-40d8-ea8d-6ed456429fdd'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18460,7 +18468,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan3Config', 'Wan3']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan3Config', 'Wan3']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd1832d4-0821-b8a5-2e6e-3cb21aee9470'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18492,7 +18500,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan3Config', 'Wan3']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan3Config', 'Wan3']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b32f8d1e-12fa-db87-e8c6-44fda8f57064'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18524,7 +18532,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan4Config', 'Wan4']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan4Config', 'Wan4']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bafbd445-e173-b24d-fcb7-dd6dd3f80ce6'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18556,7 +18564,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan4Config', 'Wan4']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan4Config', 'Wan4']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b27cdd52-fc0b-c447-e289-8bad82b6088a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18588,7 +18596,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan5Config', 'Wan5']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan5Config', 'Wan5']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b32f1f5c-0eeb-5c2f-c095-eb98a5177616'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18620,7 +18628,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan5Config', 'Wan5']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan5Config', 'Wan5']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3fa3406-b668-c530-f2fa-c7c63434b034'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18652,7 +18660,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan6Config', 'Wan6']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan6Config', 'Wan6']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba8a1368-7bb1-a750-f973-89a74ff0e24c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18684,7 +18692,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan6Config', 'Wan6']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan6Config', 'Wan6']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b318a743-6c36-2112-ae81-6874a1dd8b71'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18716,7 +18724,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan7Config', 'Wan7']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan7Config', 'Wan7']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b86dab6d-e673-b78e-93be-0ca2d2c6e589'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18748,7 +18756,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan7Config', 'Wan7']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan7Config', 'Wan7']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b434c791-4d14-2ae6-12ac-ca5dab8bf446'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18780,7 +18788,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan8Config', 'Wan8']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan8Config', 'Wan8']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b85afdeb-17cc-7555-165d-59c77d53c169'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18812,7 +18820,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan8Config', 'Wan8']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan8Config', 'Wan8']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9255cdf-b495-9452-d59b-afcf445ee47a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18844,7 +18852,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan9Config', 'Wan9']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan9Config', 'Wan9']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be241a6f-fe93-bdfa-f0ea-21ce7d8891e0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18876,7 +18884,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan9Config', 'Wan9']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan9Config', 'Wan9']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b468fd0e-36de-7b20-a8fa-8f446b2e9bec'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18908,7 +18916,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan10Config', 'Wan10']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan10Config', 'Wan10']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8a7d4e7-7135-eb1e-f953-f90518868b5e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18940,7 +18948,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan10Config', 'Wan10']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan10Config', 'Wan10']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b44c9760-5be7-a4ae-4825-2fc5eba42690'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -18972,7 +18980,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan11Config', 'Wan11']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan11Config', 'Wan11']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b5296d28-a572-ee64-a788-747db61b247d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19004,7 +19012,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan11Config', 'Wan11']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan11Config', 'Wan11']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bafa581a-ae04-b405-e628-2edb6f76b918'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19036,7 +19044,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan12Config', 'Wan12']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan12Config', 'Wan12']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0875733-4595-d8a9-f54a-4c311cea35ba'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19068,7 +19076,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan12Config', 'Wan12']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan12Config', 'Wan12']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b12588da-989b-aa08-94a0-ecdf4f514735'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19100,7 +19108,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4195ab6-ef5a-beeb-b2ea-48c1cf27931f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19132,7 +19140,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteAdminState', 'Lte', 'Admin', 'State']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteAdminState', 'Lte', 'Admin', 'State']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc000def-764b-c621-87c6-08cc75ad5837'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19164,7 +19172,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AcbarringMoData', 'Acbarring', 'Mo', 'Data']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AcbarringMoData', 'Acbarring', 'Mo', 'Data']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3b0bd9f-ef68-245b-6c75-940c8c39fceb'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19196,7 +19204,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AcbarringMoData', 'Acbarring', 'Mo', 'Data']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AcbarringMoData', 'Acbarring', 'Mo', 'Data']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b64c36c0-7452-ea40-34d0-1d24f5bfe6df'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19228,7 +19236,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LanInternetEnable', 'Lan', 'Internet', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LanInternetEnable', 'Lan', 'Internet', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bccc6dac-8296-a521-a3bc-46097ec9fc08'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19260,7 +19268,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LanInternetEnable', 'Lan', 'Internet', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LanInternetEnable', 'Lan', 'Internet', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9b39baa-9726-5aff-c647-25de6b13f64e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19292,7 +19300,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CellResel', 'Cell', 'Resel']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CellResel', 'Cell', 'Resel']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b890ade8-975e-561b-783e-4ae996473d09'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19324,7 +19332,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CellResel', 'Cell', 'Resel']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CellResel', 'Cell', 'Resel']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1825b5f-0f66-9b60-ecd6-ed3453f3d33c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19356,7 +19364,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.AdditionalMeasEvent.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AdditionalMeasurementParameter', 'Additional', 'Measurement', 'Parameter']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.AdditionalMeasEvent.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AdditionalMeasurementParameter', 'Additional', 'Measurement', 'Parameter']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0048018-c7de-f32d-25be-edfde5e41b50'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19388,7 +19396,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.AdditionalMeasEvent.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AdditionalMeasurementParameter', 'Additional', 'Measurement', 'Parameter']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.AdditionalMeasEvent.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AdditionalMeasurementParameter', 'Additional', 'Measurement', 'Parameter']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6b6e47f-54be-7bd0-16a8-e429bb4c1ee4'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19420,7 +19428,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.AdditionalMeasEvent.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AdditionalMeasurementParameter', 'Additional', 'Measurement', 'Parameter']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.AdditionalMeasEvent.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AdditionalMeasurementParameter', 'Additional', 'Measurement', 'Parameter']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b68498a9-bb9e-934b-8357-149301dcdf71'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19452,7 +19460,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.AdditionalMeasEvent.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AdditionalMeasurementParameter', 'Additional', 'Measurement', 'Parameter']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.AdditionalMeasEvent.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AdditionalMeasurementParameter', 'Additional', 'Measurement', 'Parameter']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b46eeaa5-ee2b-90ca-6aa2-a593fa612cfc'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19484,7 +19492,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EutraConnmode', 'Eutra', 'Connmode']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EutraConnmode', 'Eutra', 'Connmode']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b32dcb0b-d142-764d-01c8-5d553fff77aa'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19516,7 +19524,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EutraConnmode', 'Eutra', 'Connmode']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EutraConnmode', 'Eutra', 'Connmode']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b138f023-e103-cc3f-efe4-3520aeb03d89'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19548,7 +19556,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LogLevel', 'Log', 'Level']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LogLevel', 'Log', 'Level']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6b239a8-5a17-5951-0576-4eda690bb879'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19580,7 +19588,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LogLevel', 'Log', 'Level']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LogLevel', 'Log', 'Level']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0d78211-f43f-7575-c202-9b8d401db477'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19612,7 +19620,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PhytraceConfig', 'Phytrace']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PhytraceConfig', 'Phytrace']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8eb6a8b-6543-8101-c69b-e36ec88c8f64'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19644,7 +19652,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PhytraceConfig', 'Phytrace']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PhytraceConfig', 'Phytrace']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba446f52-be9c-ab80-3bd4-5a27f50e6e3d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19676,7 +19684,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteRrcGuardTimer', 'Lte', 'Rrc', 'Guard', 'Timer']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteRrcGuardTimer', 'Lte', 'Rrc', 'Guard', 'Timer']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc597471-6706-f093-a6a0-bea1e1549612'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19708,7 +19716,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteRrcGuardTimer', 'Lte', 'Rrc', 'Guard', 'Timer']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteRrcGuardTimer', 'Lte', 'Rrc', 'Guard', 'Timer']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6e81075-06d1-ebb8-e809-89cd2b10fd86'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19740,7 +19748,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['S1ap']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['S1ap']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8bf5355-781b-257d-789b-48feb2d06937'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19772,7 +19780,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['S1ap']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['S1ap']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b5e23391-0c9c-35ef-3e52-3a20e983eff0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19804,7 +19812,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteSonTpmConfig', 'Lte', 'Son', 'Tpm']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteSonTpmConfig', 'Lte', 'Son', 'Tpm']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf42c68a-a50b-4a43-2ff5-1a0f93400840'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19836,7 +19844,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteSonTpmConfig', 'Lte', 'Son', 'Tpm']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteSonTpmConfig', 'Lte', 'Son', 'Tpm']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bdfb70a5-dad8-605b-c8ef-0f33b70f2a94'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19868,7 +19876,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteUsonMroConfig', 'Lte', 'Uson', 'Mro']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteUsonMroConfig', 'Lte', 'Uson', 'Mro']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0755f2c-f2a9-d167-25d1-fcaf1b122100'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19900,7 +19908,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteUsonMroConfig', 'Lte', 'Uson', 'Mro']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteUsonMroConfig', 'Lte', 'Uson', 'Mro']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba4af96f-89b6-3258-e51a-7510c6e83962'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19932,7 +19940,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['TfcsSync', 'Tfcs', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['TfcsSync', 'Tfcs', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bfd9682d-51b0-a450-46f1-1229d2cb5fff'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19964,7 +19972,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['TfcsSync', 'Tfcs', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['TfcsSync', 'Tfcs', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4f13bc5-b7c3-f6aa-ec91-d0eb95d4f054'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -19996,7 +20004,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.X_QUALCOMM_NlSyncAppCellParams.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NlSyncApp', 'Nl', 'Sync', 'App']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.X_QUALCOMM_NlSyncAppCellParams.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NlSyncApp', 'Nl', 'Sync', 'App']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b347ef27-8875-f806-a3e4-3de14f64bc39'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20028,7 +20036,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.X_QUALCOMM_NlSyncAppCellParams.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NlSyncApp', 'Nl', 'Sync', 'App']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.X_QUALCOMM_NlSyncAppCellParams.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NlSyncApp', 'Nl', 'Sync', 'App']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b61bfc1c-b761-d242-fd47-bdd916901224'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20060,7 +20068,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.X_QUALCOMM_NlSyncAppCellParams.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NlSyncApp', 'Nl', 'Sync', 'App']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.X_QUALCOMM_NlSyncAppCellParams.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NlSyncApp', 'Nl', 'Sync', 'App']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6eda4df-e6a0-042a-f3d6-f45bab761cd3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20092,7 +20100,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.X_QUALCOMM_NlSyncAppCellParams.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NlSyncApp', 'Nl', 'Sync', 'App']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.X_QUALCOMM_NlSyncAppCellParams.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NlSyncApp', 'Nl', 'Sync', 'App']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be5c1d3c-a7af-2501-a29f-d17c376b4ce7'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20124,7 +20132,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['GpsSyncApp', 'Gps', 'Sync', 'App']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['GpsSyncApp', 'Gps', 'Sync', 'App']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b92da443-ebfe-da92-005e-189d517595de'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20156,7 +20164,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.FAP.GPS.Satellite.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['GpsSyncStatus', 'Gps', 'Sync', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.FAP.GPS.Satellite.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['GpsSyncStatus', 'Gps', 'Sync', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b945fa9d-ecf7-a892-64a6-6efe8886bc69'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20188,7 +20196,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NtpSyncApp', 'Ntp', 'Sync', 'App']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NtpSyncApp', 'Ntp', 'Sync', 'App']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bbbeb93e-48b8-d87d-db9c-8094cc49627a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20220,7 +20228,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NtpSyncApp', 'Ntp', 'Sync', 'App']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NtpSyncApp', 'Ntp', 'Sync', 'App']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bbb0b2f7-6951-58d0-fa45-2f14856c2024'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20252,7 +20260,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SoftwareVersion', 'Software', 'Version']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SoftwareVersion', 'Software', 'Version']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc2b9991-8b03-971a-6005-fa938d7f5c1e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20284,7 +20292,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanMultiLinkConfig', 'Wan', 'Multi', 'Link']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanMultiLinkConfig', 'Wan', 'Multi', 'Link']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8e6aae5-8220-38ff-7544-d87eb141ac96'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20316,7 +20324,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanMultiLinkConfig', 'Wan', 'Multi', 'Link']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanMultiLinkConfig', 'Wan', 'Multi', 'Link']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9643b35-5df3-d874-0830-5473b9fb9f09'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20348,7 +20356,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan1Status', 'Wan1', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan1Status', 'Wan1', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2b5c03d-43b8-4a41-95d6-0094dfd9e4c2'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20380,7 +20388,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan2Status', 'Wan2', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan2Status', 'Wan2', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b37de7c2-66e7-3eb8-07b9-46482f1c2588'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20412,7 +20420,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan3Status', 'Wan3', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan3Status', 'Wan3', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b642148d-36d0-1035-0564-003cf71e0ea3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20444,7 +20452,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan4Status', 'Wan4', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan4Status', 'Wan4', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bcb48f2b-662e-3e3c-61cb-1cbc19920b26'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20476,7 +20484,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'boardconf.status.routeStatus.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RouteStatus', 'Route', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'boardconf.status.routeStatus.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RouteStatus', 'Route', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b92c9f4a-d797-148c-7bd1-71ef47e24615'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20508,7 +20516,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['HostConfig', 'Host']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['HostConfig', 'Host']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b035d222-0a54-a237-ac80-fea7e19016d1'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20540,7 +20548,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['HostConfig', 'Host']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['HostConfig', 'Host']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b37db77a-dae6-7ab6-0bef-6b2127a8b167'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20572,7 +20580,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['GapConfig', 'Gap']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['GapConfig', 'Gap']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8355946-d30c-5228-dd4e-d87d0276da34'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20604,7 +20612,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['GapConfig', 'Gap']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['GapConfig', 'Gap']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8697829-f548-5ae5-543a-564ff6aa0128'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20636,7 +20644,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WebSwitch', 'Web', 'Switch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WebSwitch', 'Web', 'Switch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2462be5-e68a-681d-4526-b3110c71ba1b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20668,7 +20676,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WebSwitch', 'Web', 'Switch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WebSwitch', 'Web', 'Switch']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b276afca-aabb-8689-4376-1e64cfbbd417'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20700,7 +20708,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LanConfig', 'Lan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LanConfig', 'Lan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf532aee-a488-41df-c14e-3881ec1b0c40'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20732,7 +20740,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LanConfig', 'Lan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LanConfig', 'Lan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb8c8dec-6090-f6e8-8f9b-b3087f4ce6a4'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20764,7 +20772,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LanInternetConfig', 'Lan', 'Internet']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LanInternetConfig', 'Lan', 'Internet']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba486904-8ba2-f375-a993-aa3060916ab9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20796,7 +20804,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LanInternetConfig', 'Lan', 'Internet']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LanInternetConfig', 'Lan', 'Internet']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bfa6a8aa-61dd-0172-ef25-0492fb11af73'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20828,7 +20836,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecConfig', 'Ipsec']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecConfig', 'Ipsec']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b800356d-7b17-a8c0-bc34-f2bf697fea38'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20860,7 +20868,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecConfig', 'Ipsec']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecConfig', 'Ipsec']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bdedf420-5929-0459-0a84-ad9e858759fc'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20892,7 +20900,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecTunnel1', 'Ipsec', 'Tunnel1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecTunnel1', 'Ipsec', 'Tunnel1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3931586-311e-c63a-3ed0-5a7e1c8bdba7'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20924,7 +20932,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecTunnel1', 'Ipsec', 'Tunnel1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecTunnel1', 'Ipsec', 'Tunnel1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b200900e-e209-a634-7fc1-5b264b32014e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20956,7 +20964,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecTunnel2', 'Ipsec', 'Tunnel2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecTunnel2', 'Ipsec', 'Tunnel2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6cc85a5-011c-f516-03b2-52e8fc5f7d6e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -20988,7 +20996,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecTunnel2', 'Ipsec', 'Tunnel2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecTunnel2', 'Ipsec', 'Tunnel2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bef26df8-a4e3-1b19-e466-b6d937e386f7'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21020,7 +21028,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecStatus', 'Ipsec', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecStatus', 'Ipsec', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bbba2504-e257-885b-f27e-206704c4739b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21052,7 +21060,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SecuritySetting', 'Security', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SecuritySetting', 'Security', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'badd3eab-2d5b-56b2-660f-9b8d39cbf27d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21084,7 +21092,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SecuritySetting', 'Security', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SecuritySetting', 'Security', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bda8d6aa-c26d-30d1-837b-d58d2d4ca018'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21116,7 +21124,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['OmcConfig', 'Omc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['OmcConfig', 'Omc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b15418cd-616b-bb73-d1b9-ef46b3b28caa'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21148,7 +21156,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['OmcConfig', 'Omc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['OmcConfig', 'Omc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8509f8b-a682-cd72-c75d-f4ab2a3f2039'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21180,7 +21188,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Snmp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Snmp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bfd4dd85-2e45-6337-26d0-73e8f316250d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21212,7 +21220,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Snmp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Snmp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b17a3bc0-82b0-83a6-d752-d6a1d0e5e30a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21244,7 +21252,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Com2secConfiguration', 'Com2sec', 'Configuration']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Com2secConfiguration', 'Com2sec', 'Configuration']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b516dce8-be10-c8dc-8d18-bbabb129f7f9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21276,7 +21284,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Com2secConfiguration', 'Com2sec', 'Configuration']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Com2secConfiguration', 'Com2sec', 'Configuration']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b638e9de-defe-1653-013b-faa847bc7eb4'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21308,7 +21316,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['TrapConfiguration', 'Trap', 'Configuration']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['TrapConfiguration', 'Trap', 'Configuration']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bbbeb7e8-e838-4b38-9820-d6be317bebde'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21340,7 +21348,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['TrapConfiguration', 'Trap', 'Configuration']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['TrapConfiguration', 'Trap', 'Configuration']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bfe6c148-b011-2599-9321-956ec407df35'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21372,7 +21380,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'boardconf.status.license.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LicenseConfig', 'License']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'boardconf.status.license.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LicenseConfig', 'License']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b349c6fd-9fea-1359-893f-5d8e36e3f2ee'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21404,7 +21412,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['HalobConfig', 'Halob']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['HalobConfig', 'Halob']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1d09313-0b04-9051-068c-b07547f1377e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21436,7 +21444,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['HalobConfig', 'Halob']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['HalobConfig', 'Halob']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b74ce302-4c29-d38c-9b24-c1f8d857bd92'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21468,7 +21476,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['HotspotDisabled', 'Hotspot', 'Disabled']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['HotspotDisabled', 'Hotspot', 'Disabled']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bcd816a0-5289-a1c2-366f-531650f67b3e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21500,7 +21508,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['HotspotDisabled', 'Hotspot', 'Disabled']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['HotspotDisabled', 'Hotspot', 'Disabled']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b69abcea-2ca7-7f5f-cb49-391d810ea077'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21532,7 +21540,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['3gnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['3gnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b84eed99-f4b5-1d08-7106-88280168c6aa'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21564,7 +21572,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['3gnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['3gnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba2c70d2-00e3-188e-b14d-97f21d09043b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21596,7 +21604,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['3gnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['3gnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be13d444-374f-d4ec-ac54-e92f7c0f49c4'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21628,7 +21636,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['3gnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['3gnfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b5516344-f432-638c-ca38-3973d1fa5419'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21660,7 +21668,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['3gncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['3gncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2bb5d2b-09ed-42a3-d63b-195ff0732fa9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21692,7 +21700,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['3gncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['3gncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4e8972f-01ce-e7f9-a5d5-d0663e9fb85c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21724,7 +21732,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['3gncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['3gncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b83326dd-0757-75a5-ae99-7d36c061c0c5'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21756,7 +21764,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['3gncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['3gncell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9e3dd71-e7a3-ce6b-a676-1842fd8febb3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21788,7 +21796,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborListInUse.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['4gNeighbourCellStatus', '4g', 'Neighbour', 'Cell', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborListInUse.LTECell.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['4gNeighbourCellStatus', '4g', 'Neighbour', 'Cell', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0e201ea-79fe-ff1c-0bc9-ab87d69d2c81'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21820,7 +21828,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborListInUse.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['3gNeighbourCellStatus', '3g', 'Neighbour', 'Cell', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborListInUse.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['3gNeighbourCellStatus', '3g', 'Neighbour', 'Cell', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb7eaf29-bef0-410f-7f29-5d3d900538c0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21852,7 +21860,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborListInUse.InterRATCell.GSM.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['2gNeighbourCellStatus', '2g', 'Neighbour', 'Cell', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborListInUse.InterRATCell.GSM.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['2gNeighbourCellStatus', '2g', 'Neighbour', 'Cell', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b549a895-a67c-421b-01d9-afd069c317be'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21884,7 +21892,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EnodebConfig', 'Enodeb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EnodebConfig', 'Enodeb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b01466d2-aeec-0192-0608-06061bb2817f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21916,7 +21924,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EnodebConfig', 'Enodeb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EnodebConfig', 'Enodeb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b77a69a1-5c2c-4cf9-2f15-a76f107b3a8e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21948,7 +21956,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SchdAlgorithm', 'Schd', 'Algorithm']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SchdAlgorithm', 'Schd', 'Algorithm']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b66ea900-1fb2-a02c-f834-d18a30a55457'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -21980,7 +21988,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SchdAlgorithm', 'Schd', 'Algorithm']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SchdAlgorithm', 'Schd', 'Algorithm']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2a8970a-2e7b-18de-e196-446e2acbb652'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22012,7 +22020,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.X_QUALCOMM_Sysmonitor.PingReports.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BackhaulStatistics', 'Backhaul', 'Statistics']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.X_QUALCOMM_Sysmonitor.PingReports.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BackhaulStatistics', 'Backhaul', 'Statistics']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b612b29b-2961-0df5-29ef-e6412487be15'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22044,7 +22052,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BackhaulStatus', 'Backhaul', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BackhaulStatus', 'Backhaul', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba30b5a9-e976-054a-71ba-2217da0e8c77'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22076,7 +22084,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BackhaulState', 'Backhaul', 'State']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BackhaulState', 'Backhaul', 'State']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b43d1c61-0e49-5fc5-45d0-ac595175f042'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22108,7 +22116,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MocnConfig', 'Mocn']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MocnConfig', 'Mocn']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b301aa0a-6f38-150f-568d-15873aaef500'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22140,7 +22148,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MocnConfig', 'Mocn']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MocnConfig', 'Mocn']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b323f731-2aa6-1ec8-8d50-a74982da451d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22172,7 +22180,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MocnConfig', 'Mocn']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MocnConfig', 'Mocn']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2dcf6d5-06b4-a559-ad16-e4bed5d5e8b6'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22204,7 +22212,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MocnConfig', 'Mocn']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MocnConfig', 'Mocn']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be02f262-4547-b8d2-020d-fcb268ec81da'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22236,7 +22244,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.EPC.QoS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RrcConfig', 'Rrc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.EPC.QoS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RrcConfig', 'Rrc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b15ba7bd-bf01-ca2c-d241-b82a1e8d5367'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22268,7 +22276,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.EPC.QoS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RrcConfig', 'Rrc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.EPC.QoS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RrcConfig', 'Rrc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bfef741e-cef3-b899-a096-8244bde658e3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22300,7 +22308,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AccessCapacityConfig', 'Access', 'Capacity']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AccessCapacityConfig', 'Access', 'Capacity']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b67096ed-d2ff-a7c4-d58e-06150ccb12dd'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22332,7 +22340,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AccessCapacityConfig', 'Access', 'Capacity']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AccessCapacityConfig', 'Access', 'Capacity']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b96b6df7-d22c-7b68-18af-567a9c670232'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22364,7 +22372,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PhytraceNetworkCaptureConfig', 'Phytrace', 'Network', 'Capture']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PhytraceNetworkCaptureConfig', 'Phytrace', 'Network', 'Capture']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8aafbe9-d6df-4438-c877-bce18d8456b5'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22396,7 +22404,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PhytraceNetworkCaptureConfig', 'Phytrace', 'Network', 'Capture']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PhytraceNetworkCaptureConfig', 'Phytrace', 'Network', 'Capture']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b44635df-9c6b-2419-a880-481aac1b5a88'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22428,7 +22436,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiMacPms', 'Kpi', 'Mac', 'Pms']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiMacPms', 'Kpi', 'Mac', 'Pms']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3bfacff-df8a-22d0-a472-1eb2caa6e7a7'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22460,7 +22468,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiPdcpPms', 'Kpi', 'Pdcp', 'Pms']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiPdcpPms', 'Kpi', 'Pdcp', 'Pms']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b71a21d3-e12f-c7b1-fd1f-b9bd2c4afc0a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22492,7 +22500,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiSumPdcpThpStats', 'Kpi', 'Sum', 'Pdcp', 'Thp', 'Stats']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiSumPdcpThpStats', 'Kpi', 'Sum', 'Pdcp', 'Thp', 'Stats']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1488ba5-1e92-cb68-3d55-81204549ac84'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22524,7 +22532,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiSumRrcConnectionStats', 'Kpi', 'Sum', 'Rrc', 'Connection', 'Stats']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiSumRrcConnectionStats', 'Kpi', 'Sum', 'Rrc', 'Connection', 'Stats']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8a63c19-c330-3361-4075-feed1c1cfec2'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22556,7 +22564,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiRrcConnectionStats', 'Kpi', 'Rrc', 'Connection', 'Stats']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiRrcConnectionStats', 'Kpi', 'Rrc', 'Connection', 'Stats']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0d98cc4-82f7-051d-12a1-2e42102ee09c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22588,7 +22596,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiErabSetupPms', 'Kpi', 'Erab', 'Pms']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiErabSetupPms', 'Kpi', 'Erab', 'Pms']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2911f53-bcd6-79c2-1e66-54a7751f6a81'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22620,7 +22628,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiIntraFreqHoPms', 'Kpi', 'Intra', 'Freq', 'Ho', 'Pms']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiIntraFreqHoPms', 'Kpi', 'Intra', 'Freq', 'Ho', 'Pms']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b35d20d9-6436-bd67-821e-d73c914b6e18'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22652,7 +22660,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiInterFreqHoPms', 'Kpi', 'Inter', 'Freq', 'Ho', 'Pms']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiInterFreqHoPms', 'Kpi', 'Inter', 'Freq', 'Ho', 'Pms']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b62573f7-8121-7a5a-34c2-5f144f86d700'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22684,7 +22692,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiIratHoPms', 'Kpi', 'Irat', 'Ho', 'Pms']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiIratHoPms', 'Kpi', 'Irat', 'Ho', 'Pms']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf4ff2d7-fe30-d443-6b03-d89006a88e51'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22716,7 +22724,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiUeAssocS1ConnPms', 'Kpi', 'Ue', 'Assoc', 'S1', 'Conn', 'Pms']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiUeAssocS1ConnPms', 'Kpi', 'Ue', 'Assoc', 'S1', 'Conn', 'Pms']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be7c3d38-7365-e170-7b6a-4f61d5ed5620'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22748,7 +22756,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiPagingPms', 'Kpi', 'Paging', 'Pms']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiPagingPms', 'Kpi', 'Paging', 'Pms']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc394e43-ff5d-b2d3-56f8-836f8b4c72b2'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22780,7 +22788,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiErabRelPms', 'Kpi', 'Erab', 'Rel', 'Pms']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiErabRelPms', 'Kpi', 'Erab', 'Rel', 'Pms']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bcb78e80-7fb8-6c81-69d5-b5cbff2a5f0b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22812,7 +22820,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiErabModPms', 'Kpi', 'Erab', 'Mod', 'Pms']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['KpiErabModPms', 'Kpi', 'Erab', 'Mod', 'Pms']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf007569-df43-582b-bb2a-78346323badf'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22844,7 +22852,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CellBarring', 'Cell', 'Barring']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CellBarring', 'Cell', 'Barring']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b874fe52-ec39-9a1d-4b39-ee65f1f04eb7'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22876,7 +22884,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CellBarring', 'Cell', 'Barring']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CellBarring', 'Cell', 'Barring']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1963848-0fe0-41ef-7338-1333f083edc6'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22908,7 +22916,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CqiReportMode', 'Cqi', 'Report', 'Mode']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CqiReportMode', 'Cqi', 'Report', 'Mode']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb780299-5023-f423-68a4-1581817ead72'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22940,7 +22948,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CqiReportMode', 'Cqi', 'Report', 'Mode']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CqiReportMode', 'Cqi', 'Report', 'Mode']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b463370c-6a83-506c-177a-49e53094cb8a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -22972,7 +22980,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BearerRestriction', 'Bearer', 'Restriction']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BearerRestriction', 'Bearer', 'Restriction']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7e808a6-3d22-89ca-bba3-b67c829ea198'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23004,7 +23012,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BearerRestriction', 'Bearer', 'Restriction']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['BearerRestriction', 'Bearer', 'Restriction']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b96dce8c-3513-de31-636f-31d9569827f9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23036,7 +23044,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['TransmissionMode', 'Transmission', 'Mode']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['TransmissionMode', 'Transmission', 'Mode']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd86bb56-6b50-db34-5de3-1417d24219e9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23068,7 +23076,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['TransmissionMode', 'Transmission', 'Mode']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['TransmissionMode', 'Transmission', 'Mode']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba984b32-4aa8-30cf-140c-b7e98cb833e9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23100,7 +23108,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ConnectionRetry', 'Connection', 'Retry']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ConnectionRetry', 'Connection', 'Retry']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b32860f1-b5a6-d021-8b6d-043bc6fac159'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23132,7 +23140,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ConnectionRetry', 'Connection', 'Retry']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ConnectionRetry', 'Connection', 'Retry']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b931c24c-f612-3b92-327f-b631c052f327'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23164,7 +23172,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SrsPowerControl', 'Srs', 'Power', 'Control']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SrsPowerControl', 'Srs', 'Power', 'Control']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc6651c4-ef62-27f6-ce74-cffc20905d78'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23196,7 +23204,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SrsPowerControl', 'Srs', 'Power', 'Control']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SrsPowerControl', 'Srs', 'Power', 'Control']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd5e228c-307d-a324-5c4e-73a64915b1d6'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23228,7 +23236,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['S1apNmsTraffic', 'S1ap', 'Nms', 'Traffic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['S1apNmsTraffic', 'S1ap', 'Nms', 'Traffic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b885d825-7184-c7d8-b36a-5e62a80ce99e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23260,7 +23268,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['S1apNmsTraffic', 'S1ap', 'Nms', 'Traffic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['S1apNmsTraffic', 'S1ap', 'Nms', 'Traffic']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc9eb73a-3e78-4947-9109-0be392d81a3c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23292,7 +23300,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SetAntennaTilt', 'Antenna', 'Tilt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SetAntennaTilt', 'Antenna', 'Tilt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0ee2b17-4d4e-a461-fe7e-d4487493cce7'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23324,7 +23332,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AcbarringMoSignalling', 'Acbarring', 'Mo', 'Signalling']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AcbarringMoSignalling', 'Acbarring', 'Mo', 'Signalling']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b65eb5de-1079-90b1-308e-584f00a75a03'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23356,7 +23364,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AcbarringMoSignalling', 'Acbarring', 'Mo', 'Signalling']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AcbarringMoSignalling', 'Acbarring', 'Mo', 'Signalling']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b58cb475-98f9-f9c4-084b-78ba7e63aeb5'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23388,7 +23396,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LmtSetting', 'Lmt', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LmtSetting', 'Lmt', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'baf555b6-dd03-9250-bebc-86f1682580df'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23420,7 +23428,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LmtSetting', 'Lmt', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LmtSetting', 'Lmt', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3038a89-9954-4084-b226-7885901f8cc9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23452,7 +23460,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecTunnel3', 'Ipsec', 'Tunnel3']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecTunnel3', 'Ipsec', 'Tunnel3']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be7e5d43-ad2f-4040-9532-31c1723ecb1a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23484,7 +23492,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecTunnel3', 'Ipsec', 'Tunnel3']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['IpsecTunnel3', 'Ipsec', 'Tunnel3']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf7804a4-6655-c1d0-bd37-6c069d5c1c6b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23516,7 +23524,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DrxConfig', 'Drx']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DrxConfig', 'Drx']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1a13847-d72c-d035-d560-ee6b09265439'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23548,7 +23556,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DrxConfig', 'Drx']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DrxConfig', 'Drx']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b70e8e14-56ff-1c76-9c19-951fcc362d03'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23580,7 +23588,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UlLossTimer', 'Ul', 'Loss', 'Timer']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UlLossTimer', 'Ul', 'Loss', 'Timer']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2424067-7525-6d25-7cdf-381cffebf8db'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23612,7 +23620,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UlLossTimer', 'Ul', 'Loss', 'Timer']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UlLossTimer', 'Ul', 'Loss', 'Timer']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf2fde5b-29eb-7dcb-826b-c7bdfd053d87'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23644,7 +23652,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EapAkaOpenEncryption', 'Eap', 'Aka', 'Open', 'Encryption']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EapAkaOpenEncryption', 'Eap', 'Aka', 'Open', 'Encryption']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bbe2186d-daf1-08cb-7212-ec80660759de'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23676,7 +23684,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EapAkaOpenEncryption', 'Eap', 'Aka', 'Open', 'Encryption']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EapAkaOpenEncryption', 'Eap', 'Aka', 'Open', 'Encryption']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8d65b54-5b52-b41c-5432-95abf388d633'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23708,7 +23716,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['1588Sync', '1588', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['1588Sync', '1588', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba1b5fee-3d42-f54f-fd4c-6f5fc8d3865e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23740,7 +23748,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['1588Sync', '1588', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['1588Sync', '1588', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2daf559-39b7-a439-c967-636bba8b2ddf'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23772,7 +23780,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WorkingMode', 'Working', 'Mode']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WorkingMode', 'Working', 'Mode']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb1d6b53-8aa1-4d97-8cb9-db1e68867779'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23804,7 +23812,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WorkingMode', 'Working', 'Mode']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WorkingMode', 'Working', 'Mode']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bcf0add5-d851-d854-ef4c-ac8ff00aa48d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23836,7 +23844,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LogLevelSetting', 'Log', 'Level', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LogLevelSetting', 'Log', 'Level', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b32ebfc1-895d-ac64-ddb8-48122d49c548'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23868,7 +23876,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LogLevelSetting', 'Log', 'Level', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LogLevelSetting', 'Log', 'Level', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2a2a7ea-7e0a-bfd4-00ce-a377f1731444'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23900,7 +23908,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RssiMeasureSetting', 'Rssi', 'Measure', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RssiMeasureSetting', 'Rssi', 'Measure', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3fe8812-d8e3-2a4d-e4cd-e63121775fe2'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23932,7 +23940,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SctpSetting', 'Sctp', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SctpSetting', 'Sctp', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7710684-fb15-81f3-53d6-6a2a2b1ef784'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23964,7 +23972,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SctpSetting', 'Sctp', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SctpSetting', 'Sctp', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'baf4e131-2d9b-0b12-0877-7d3e8ff66498'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -23996,7 +24004,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SshSetting', 'Ssh', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SshSetting', 'Ssh', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc9b33fe-2f66-d73e-a521-ee49358895f3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24028,7 +24036,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SshSetting', 'Ssh', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SshSetting', 'Ssh', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf4944c8-55fa-5f53-424a-612c422d41d3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24060,7 +24068,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PortSetting', 'Port', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PortSetting', 'Port', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9604a59-a88c-6b3e-c357-b25aae08d6b9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24092,7 +24100,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PortSetting', 'Port', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PortSetting', 'Port', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2e39893-2308-c877-dc47-62da2ff2869e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24124,7 +24132,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanPortAccessLmt', 'Wan', 'Port', 'Access', 'Lmt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanPortAccessLmt', 'Wan', 'Port', 'Access', 'Lmt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b09ed4b3-fc56-ed42-2f1f-abfe1feaa04d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24156,7 +24164,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanPortAccessLmt', 'Wan', 'Port', 'Access', 'Lmt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WanPortAccessLmt', 'Wan', 'Port', 'Access', 'Lmt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b82e35aa-dfb4-e054-20fc-9e9a9978fc29'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24188,7 +24196,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LbSet', 'Lb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LbSet', 'Lb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc53d881-849c-47dd-8830-7f83f79d3453'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24220,7 +24228,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LbSet', 'Lb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LbSet', 'Lb']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bcbf6a7d-5acc-6851-b972-5941be57c111'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24252,7 +24260,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AldAction', 'Ald', 'Action']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AldAction', 'Ald', 'Action']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b17e8aa6-c620-3f09-7c32-27e318bfa49b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24284,7 +24292,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AldPower', 'Ald', 'Power']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AldPower', 'Ald', 'Power']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b14d1921-60e1-e3ec-5b17-8c61310fdbaa'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24316,7 +24324,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AldScan', 'Ald', 'Scan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AldScan', 'Ald', 'Scan']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b18dc635-d7b5-b3f8-4954-68ee81d5ae70'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24348,7 +24356,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'aldconfig.antenna.ret.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AldScanResult', 'Ald', 'Scan', 'Result']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'aldconfig.antenna.ret.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AldScanResult', 'Ald', 'Scan', 'Result']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b93052c6-6991-5dc5-b750-48bf8273ed22'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24380,7 +24388,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AldAdd', 'Ald', 'Add']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AldAdd', 'Ald', 'Add']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9193c89-b781-fd5f-8850-7f3fbd39db84'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24412,7 +24420,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CurrentAld', 'Current', 'Ald']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CurrentAld', 'Current', 'Ald']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b5e98082-bf0c-cc99-92da-bb2a1ce94589'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24444,7 +24452,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AldTilt', 'Ald', 'Tilt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['AldTilt', 'Ald', 'Tilt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b55b9915-d184-e828-7e71-1ffa6a39b655'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24476,7 +24484,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SelectAldTilt', 'Select', 'Ald', 'Tilt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SelectAldTilt', 'Select', 'Ald', 'Tilt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b859b563-f090-218e-98b3-347cf2ac88d3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24508,7 +24516,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ShowAldTilt', 'Show', 'Ald', 'Tilt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ShowAldTilt', 'Show', 'Ald', 'Tilt']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b97290e9-d115-03f5-a4f0-b807ef798d44'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24540,7 +24548,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteCellStartOnBoot', 'Lte', 'Cell', 'Start', 'On', 'Boot']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteCellStartOnBoot', 'Lte', 'Cell', 'Start', 'On', 'Boot']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3c3a6aa-06ac-75f5-8da8-96d6c298f2f6'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24572,7 +24580,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteCellStartOnBoot', 'Lte', 'Cell', 'Start', 'On', 'Boot']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LteCellStartOnBoot', 'Lte', 'Cell', 'Start', 'On', 'Boot']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc3ebff9-0c4d-4e12-e014-7d977f5ecf49'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24604,7 +24612,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EnbIdentifyRange', 'Enb', 'Identify', 'Range']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EnbIdentifyRange', 'Enb', 'Identify', 'Range']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2487831-ec99-2242-30e6-7c08d62ed428'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24636,7 +24644,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EnbIdentifyRange', 'Enb', 'Identify', 'Range']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EnbIdentifyRange', 'Enb', 'Identify', 'Range']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0c319f0-f60b-11d4-4482-06415dab40a1'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24668,7 +24676,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Sctp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Sctp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b316fec5-3a9e-b3e4-bbe9-bc4c7696bd13'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24700,7 +24708,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Sctp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Sctp']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9e2484a-7669-273b-2193-59c346ca3eeb'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24732,7 +24740,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SonNlScanningSetting', 'Son', 'Nl', 'Scanning', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SonNlScanningSetting', 'Son', 'Nl', 'Scanning', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4a2b547-0068-81d4-686d-e7e83098f7a7'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24764,7 +24772,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SonNlScanningSetting', 'Son', 'Nl', 'Scanning', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SonNlScanningSetting', 'Son', 'Nl', 'Scanning', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba8a5567-164c-5989-0e36-1174d009d8fa'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24796,7 +24804,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.X_QUALCOMM_ULTRASON_CONFIG.NlBandScanConfig.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SonBandScanningSetting', 'Son', 'Band', 'Scanning', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.X_QUALCOMM_ULTRASON_CONFIG.NlBandScanConfig.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SonBandScanningSetting', 'Son', 'Band', 'Scanning', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3780f7b-25d7-232e-7792-7b1e7f2be1ca'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24828,7 +24836,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.X_QUALCOMM_ULTRASON_CONFIG.NlBandScanConfig.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SonBandScanningSetting', 'Son', 'Band', 'Scanning', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.X_QUALCOMM_ULTRASON_CONFIG.NlBandScanConfig.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['SonBandScanningSetting', 'Son', 'Band', 'Scanning', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b08a6494-b027-d6a9-231d-d9e29714c533'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24860,7 +24868,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NlSync', 'Nl', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NlSync', 'Nl', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bf1d9e92-9f99-be3f-9ed7-7a47d4905173'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24892,7 +24900,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NlSync', 'Nl', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['NlSync', 'Nl', 'Sync']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be6a687d-2901-c082-c759-2c00a0a66bd6'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24924,7 +24932,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Utranfddfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Utranfddfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9f286e2-27ce-efab-f599-3dade0c3a86f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24956,7 +24964,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Utranfddfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Utranfddfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8c37e35-ea3d-72ca-d649-83ba8c3bb0df'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -24988,7 +24996,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Utranfddfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Utranfddfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b5515b22-7b3d-136d-13de-6138654d67e2'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25020,7 +25028,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Utranfddfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Utranfddfreq']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b125ff7d-70da-bf83-0582-3a7005f0f3cb'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25052,7 +25060,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Geranfreqgroup']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Geranfreqgroup']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b00f5475-25c8-d953-d51b-b37e0ce37c2a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25084,7 +25092,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Geranfreqgroup']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Geranfreqgroup']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd71dcb7-34c0-4d45-1eb7-32dfbed69dfd'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25116,7 +25124,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Geranfreqgroup']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Geranfreqgroup']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8c86072-b3ee-09f9-91c3-f65803e5850d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25148,7 +25156,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Geranfreqgroup']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Geranfreqgroup']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9d424b2-3437-bf2a-d1af-9c3feda5c336'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25180,7 +25188,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Utranfddcell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Utranfddcell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b68a3ea3-0e1f-53ba-f166-dc4ac0974b22'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25212,7 +25220,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Utranfddcell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Utranfddcell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b4e9df17-4abc-1dd1-8798-c44c19c76279'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25244,7 +25252,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Utranfddcell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Utranfddcell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7b129be-fa94-9719-304b-6e1d006cb3d4'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25276,7 +25284,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Utranfddcell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Utranfddcell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2d0d5e5-31ff-5a98-1e0c-41f033baeacc'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25308,7 +25316,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gerancell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gerancell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bbb38e46-e07e-b2f6-ba15-91284d104079'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25340,7 +25348,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gerancell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gerancell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bfabc441-03ca-3dd1-a907-eea85fddd712'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25372,7 +25380,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gerancell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gerancell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7fb1cdc-b2ec-ca5f-2928-9e5bc1f4d3ce'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25404,7 +25412,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gerancell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Gerancell']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb32ee45-579f-645e-a33a-1aaff272a300'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25436,7 +25444,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ipv4RouteDefaultConfig', 'Ipv4', 'Route', 'Default']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ipv4RouteDefaultConfig', 'Ipv4', 'Route', 'Default']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bed353d6-6b64-d2e4-22d0-058768479abd'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25468,7 +25476,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ipv4RouteDefaultConfig', 'Ipv4', 'Route', 'Default']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ipv4RouteDefaultConfig', 'Ipv4', 'Route', 'Default']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'baac3cc0-fe5c-7c46-438b-28a64ba8b513'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25500,7 +25508,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ipv6RouteDefaultConfig', 'Ipv6', 'Route', 'Default']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ipv6RouteDefaultConfig', 'Ipv6', 'Route', 'Default']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be0c2d28-0baf-23f2-6205-56cd3480718c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25532,7 +25540,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ipv6RouteDefaultConfig', 'Ipv6', 'Route', 'Default']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ipv6RouteDefaultConfig', 'Ipv6', 'Route', 'Default']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bbb77f85-caf5-7849-9e5f-6715ef4308e3'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25564,7 +25572,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'boardconf.status.ipv6RouteStatus.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ipv6RouteConfig', 'Ipv6', 'Route']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'boardconf.status.ipv6RouteStatus.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Ipv6RouteConfig', 'Ipv6', 'Route']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6c352aa-8d3a-2b44-ada5-75b6c76cb0b4'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25596,7 +25604,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan5Status', 'Wan5', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan5Status', 'Wan5', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b41c4c6a-a6a4-d015-5eb4-53d7f8b5cf04'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25628,7 +25636,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan6Status', 'Wan6', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Wan6Status', 'Wan6', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b122a726-b5dd-9523-db78-3b17936787b5'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25660,7 +25668,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DnsIpv6Config', 'Dns', 'Ipv6']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DnsIpv6Config', 'Dns', 'Ipv6']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1cc14b7-07d7-f9a0-daa5-c86db011f469'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25692,7 +25700,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DnsIpv6Config', 'Dns', 'Ipv6']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DnsIpv6Config', 'Dns', 'Ipv6']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b3a87e59-dae2-b0ce-5a7c-50787b60d254'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25724,7 +25732,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ProtocolStackLinkConfig1', 'Protocol', 'Stack', 'Link', 'Config1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ProtocolStackLinkConfig1', 'Protocol', 'Stack', 'Link', 'Config1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bae4e8a4-ebf2-79a5-599a-a09206416433'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25756,7 +25764,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ProtocolStackLinkConfig1', 'Protocol', 'Stack', 'Link', 'Config1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ProtocolStackLinkConfig1', 'Protocol', 'Stack', 'Link', 'Config1']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6f03f14-5167-2ac5-7187-d84e7fbdcaa4'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25788,7 +25796,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ProtocolStackLinkConfig2', 'Protocol', 'Stack', 'Link', 'Config2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ProtocolStackLinkConfig2', 'Protocol', 'Stack', 'Link', 'Config2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b9470ceb-6757-0f94-ff4c-7372a0bd45cc'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25820,7 +25828,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ProtocolStackLinkConfig2', 'Protocol', 'Stack', 'Link', 'Config2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ProtocolStackLinkConfig2', 'Protocol', 'Stack', 'Link', 'Config2']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc321edc-e29f-205b-67dc-1c6e786b322c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25852,7 +25860,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ProtocolStackLinkConfig3', 'Protocol', 'Stack', 'Link', 'Config3']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ProtocolStackLinkConfig3', 'Protocol', 'Stack', 'Link', 'Config3']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b76f6b78-eefe-4b7a-a769-e5ecc4efb040'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25884,7 +25892,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ProtocolStackLinkConfig3', 'Protocol', 'Stack', 'Link', 'Config3']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ProtocolStackLinkConfig3', 'Protocol', 'Stack', 'Link', 'Config3']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b1473dca-c834-a795-f106-6adcbfc72355'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25916,7 +25924,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LimitSpeedConfig', 'Limit', 'Speed']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LimitSpeedConfig', 'Limit', 'Speed']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc52b3c1-fb3f-4640-1bda-5ca0440d368f'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25948,7 +25956,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LimitSpeedConfig', 'Limit', 'Speed']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LimitSpeedConfig', 'Limit', 'Speed']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7c9cdb8-c7b4-b59a-119a-e0c5c6930d9e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -25980,7 +25988,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.X_QUALCOMM_ICIC_PARAMS.dynamic_icic_info.dl_resource_partition_info.cell_center_region.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DlPrbSettints', 'Dl', 'Prb', 'Settints']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.X_QUALCOMM_ICIC_PARAMS.dynamic_icic_info.dl_resource_partition_info.cell_center_region.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DlPrbSettints', 'Dl', 'Prb', 'Settints']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b04ca86a-821e-5fd8-c682-a30066b39c4c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26012,7 +26020,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.X_QUALCOMM_ICIC_PARAMS.dynamic_icic_info.dl_resource_partition_info.cell_center_region.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DlPrbSettints', 'Dl', 'Prb', 'Settints']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.X_QUALCOMM_ICIC_PARAMS.dynamic_icic_info.dl_resource_partition_info.cell_center_region.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DlPrbSettints', 'Dl', 'Prb', 'Settints']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be23257d-f244-d445-3428-2ab087a37411'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26044,7 +26052,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.X_QUALCOMM_ICIC_PARAMS.dynamic_icic_info.ul_resource_partition_info.cell_center_region.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UlPrbSettints', 'Ul', 'Prb', 'Settints']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.X_QUALCOMM_ICIC_PARAMS.dynamic_icic_info.ul_resource_partition_info.cell_center_region.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UlPrbSettints', 'Ul', 'Prb', 'Settints']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bdc3f3b4-b434-8d62-f3a6-15e734459689'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26076,7 +26084,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.X_QUALCOMM_ICIC_PARAMS.dynamic_icic_info.ul_resource_partition_info.cell_center_region.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UlPrbSettints', 'Ul', 'Prb', 'Settints']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.X_QUALCOMM_ICIC_PARAMS.dynamic_icic_info.ul_resource_partition_info.cell_center_region.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['UlPrbSettints', 'Ul', 'Prb', 'Settints']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be1d642a-1e8f-81ff-5243-b670a5e3a532'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26108,7 +26116,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.PHR.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PhySetting', 'Phy', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.PHR.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PhySetting', 'Phy', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b43ec39c-c0e4-ce75-ffd5-27da89f21d93'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26140,7 +26148,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.PHR.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PhySetting', 'Phy', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.PHR.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PhySetting', 'Phy', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b0d87852-e94e-cd46-e5fa-8d09a35cbcdf'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26172,7 +26180,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RankSetting', 'Rank', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RankSetting', 'Rank', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7e26595-954a-9275-781d-d04d884de4ee'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26204,7 +26212,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RankSetting', 'Rank', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['RankSetting', 'Rank', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba9a34c6-64e4-2e84-76c6-a0bc3248e5f9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26236,7 +26244,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WifiSetting', 'Wifi', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WifiSetting', 'Wifi', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b43bfa32-8285-104c-11e7-7717f6a917f0'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26268,7 +26276,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WifiSetting', 'Wifi', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['WifiSetting', 'Wifi', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b627e218-3bf7-fca2-2299-479d3c744381'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26300,7 +26308,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PtpSetting', 'Ptp', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PtpSetting', 'Ptp', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8b61dc1-3313-561e-ac39-3790946125f5'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26332,7 +26340,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PtpSetting', 'Ptp', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['PtpSetting', 'Ptp', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b50d743b-e467-820e-eab8-1146f51ec857'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26364,7 +26372,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CertSetting', 'Cert', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CertSetting', 'Cert', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b08e2ecc-1a06-1d76-f5d8-0b94bd73c86d'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26396,7 +26404,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CertSetting', 'Cert', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CertSetting', 'Cert', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bbe80f01-54a6-38fd-2377-77bfdaddcccc'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26428,7 +26436,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CertStatus', 'Cert', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CertStatus', 'Cert', 'Status']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba57530f-a44e-fe28-efed-d592bae67449'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26460,7 +26468,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.config.serverConfig.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CenterConfig', 'Center']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.config.serverConfig.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CenterConfig', 'Center']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b733976e-6245-0bff-56c0-4d6a1bea3ac9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26492,7 +26500,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE (sp.standard_path LIKE 'InternetGatewayDevice.config.serverConfig.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CenterConfig', 'Center']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE (sp.standard_path LIKE 'InternetGatewayDevice.config.serverConfig.%' OR (ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CenterConfig', 'Center']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b7f2f556-2779-4f2e-25b1-7f305a856663'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26524,7 +26532,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['OriginalCenterConfig', 'Original', 'Center']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['OriginalCenterConfig', 'Original', 'Center']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b6cac7a6-0fb8-aad3-d255-074e02de3e76'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26556,7 +26564,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['OriginalCenterConfig', 'Original', 'Center']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['OriginalCenterConfig', 'Original', 'Center']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be5cdd66-1909-dde6-07e5-ff32bd172e82'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26588,7 +26596,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Currentmac']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Currentmac']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b27c0c7f-e49d-36fd-8acb-5e8664fae015'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26620,7 +26628,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DrxEnable', 'Drx', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DrxEnable', 'Drx', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'ba34736f-09f2-4925-5f3f-e13f22710811'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26652,7 +26660,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DrxEnable', 'Drx', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['DrxEnable', 'Drx', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'babb7f04-0e42-6617-4409-97b2832025dd'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26684,7 +26692,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ModeCommon', 'Mode', 'Common']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ModeCommon', 'Mode', 'Common']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b61c1156-c2c0-216c-da3c-de5d700ad693'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26716,7 +26724,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ModeCommon', 'Mode', 'Common']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ModeCommon', 'Mode', 'Common']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b94b57d2-8cbc-6eab-ffbe-562cd362ef66'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26748,7 +26756,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ModeEutra', 'Mode', 'Eutra']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ModeEutra', 'Mode', 'Eutra']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bfb121a1-eec7-64a0-aaea-0b43b63b5641'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26780,7 +26788,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ModeEutra', 'Mode', 'Eutra']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['ModeEutra', 'Mode', 'Eutra']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb111ba5-d719-4178-5b12-8dff2646081c'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26812,7 +26820,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LoadConfiguration', 'Load', 'Configuration']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LoadConfiguration', 'Load', 'Configuration']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b13889f1-4dea-6e37-40e8-5a09890ad936'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26844,7 +26852,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LoadConfiguration', 'Load', 'Configuration']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LoadConfiguration', 'Load', 'Configuration']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b946bbe2-bc36-25e2-04f2-5c5912662630'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26876,7 +26884,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Vswr']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Vswr']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bcbd7308-923b-0e11-614c-de91e48fa5a1'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26908,7 +26916,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Mtu']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Mtu']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b63f1f6d-53e8-f848-f9df-35a986a9e71b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26940,7 +26948,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Mtu']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Mtu']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2f44fef-0b17-e770-7cb1-d29fcc823736'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -26972,7 +26980,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MtuAutoDetection', 'Mtu', 'Auto', 'Detection']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MtuAutoDetection', 'Mtu', 'Auto', 'Detection']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bdb7a6d2-1e48-4d3a-5a89-196e8915a21b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -27004,7 +27012,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MtuAutoDetection', 'Mtu', 'Auto', 'Detection']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['MtuAutoDetection', 'Mtu', 'Auto', 'Detection']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bfb06517-e2d5-cf71-918a-3637fe77efed'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -27036,7 +27044,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Anr23gEnable', 'Anr', '23g', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Anr23gEnable', 'Anr', '23g', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b13401ee-ea87-9bb5-eaf9-2c4df03d495b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -27068,7 +27076,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Anr23gEnable', 'Anr', '23g', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Anr23gEnable', 'Anr', '23g', 'Enable']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b772f157-7a97-d1e8-d8e8-bafb97fa5d79'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -27100,7 +27108,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CsfbPlmn', 'Csfb', 'Plmn']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CsfbPlmn', 'Csfb', 'Plmn']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b090581e-dfb4-3f6e-e9ea-218ba7a0d297'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -27132,7 +27140,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CsfbPlmn', 'Csfb', 'Plmn']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['CsfbPlmn', 'Csfb', 'Plmn']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b91a45bd-9d21-5a5f-c09b-99f625f6de75'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -27164,7 +27172,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Halod']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Halod']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b51be19d-8cc4-8410-0939-4585902a810a'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -27196,7 +27204,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Halod']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Halod']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b5a1967a-2694-65d9-f5b2-c04a6d3674d2'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -27228,7 +27236,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Bridge']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Bridge']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bb12bc19-b3c0-0542-0233-898296371fcb'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -27260,7 +27268,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Bridge']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['Bridge']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'be43b066-e057-c6df-7369-f44ef145da4b'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -27292,7 +27300,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LboSetting', 'Lbo', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LboSetting', 'Lbo', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bc860817-35e6-9e88-b2b5-3e3c2571f439'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -27324,7 +27332,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LboSetting', 'Lbo', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['LboSetting', 'Lbo', 'Setting']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b2c74722-bff8-2efa-f1c6-5f8713d26ca9'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -27356,7 +27364,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EmbeddedEpc', 'Embedded', 'Epc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter'
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EmbeddedEpc', 'Embedded', 'Epc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'bd3ce969-3d63-7900-e8ec-c70533eb9b0e'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
@@ -27388,7 +27396,7 @@ SELECT
     false,
     ROW_NUMBER() OVER (ORDER BY sp.standard_path) - 1
 FROM standard_params sp
-WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EmbeddedEpc', 'Embedded', 'Epc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
+WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EmbeddedEpc', 'Embedded', 'Epc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY') AND EXISTS (SELECT 1 FROM mml_commands WHERE id = 'b8aa64ed-acdc-bbe0-7ebe-dfd91a2ad564'::uuid)
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
 
 -- T-0157 C10 兜底收尾：清掉 FK 暂卸期间插入的孤儿 sub_fields，再恢复约束。
