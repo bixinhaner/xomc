@@ -53,6 +53,19 @@ func (s *Service) CreateNotification(ctx context.Context, notif *Notification) (
 	return notif, nil
 }
 
+// UpsertByDedup 按 dedup_key upsert 一条 notification（T-0157 C3）。
+// 用于 task → notification 订阅器：同一 task 多次状态变更 upsert 到同一行。
+// 成功后通过 SSE 推送（如已配 hub），与 CreateNotification 行为一致。
+func (s *Service) UpsertByDedup(ctx context.Context, notif *Notification) (*Notification, error) {
+	if err := s.repo.UpsertByDedup(ctx, notif); err != nil {
+		return nil, fmt.Errorf("upsert notification by dedup: %w", err)
+	}
+	if s.hub != nil {
+		s.pushSSEEvent(notif)
+	}
+	return notif, nil
+}
+
 // MarkRead marks a single notification as read.
 func (s *Service) MarkRead(ctx context.Context, id uuid.UUID, userID string) error {
 	return s.repo.MarkRead(ctx, id, userID)

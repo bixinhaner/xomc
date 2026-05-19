@@ -23,8 +23,8 @@ var notifAllowedSortColumns = map[string]bool{
 }
 
 var notifColumns = []string{
-	"id", "user_id", "type", "priority",
-	"title", "content", "link", "sender",
+	"id", "user_id", "type", "status", "priority",
+	"title", "content", "link", "sender", "dedup_key",
 	"is_read", "read_at", "created_at",
 }
 
@@ -131,10 +131,16 @@ func (r *PgRepository) GetByID(ctx context.Context, id uuid.UUID) (*Notification
 }
 
 // Create inserts a new notification and updates the struct with DB-generated fields.
+// Status 默认 'completed'（与 DB 默认值一致），适配非 task 类消息（告警 / 公告）。
+// task 类消息应使用 UpsertByDedup 走 dedup_key 路径。
 func (r *PgRepository) Create(ctx context.Context, notif *Notification) error {
+	status := notif.Status
+	if status == "" {
+		status = StatusCompleted
+	}
 	query, args, err := storage.Psql.Insert("notifications").
-		Columns("user_id", "type", "priority", "title", "content", "link", "sender").
-		Values(notif.UserID, notif.Type, notif.Priority, notif.Title, notif.Content, notif.Link, notif.Sender).
+		Columns("user_id", "type", "status", "priority", "title", "content", "link", "sender", "dedup_key").
+		Values(notif.UserID, notif.Type, status, notif.Priority, notif.Title, notif.Content, notif.Link, notif.Sender, notif.DedupKey).
 		Suffix("RETURNING " + joinColumns(notifColumns)).
 		ToSql()
 	if err != nil {
@@ -144,6 +150,50 @@ func (r *PgRepository) Create(ctx context.Context, notif *Notification) error {
 	created, err := scanNotification(r.pool.QueryRow(ctx, query, args...))
 	if err != nil {
 		return fmt.Errorf("create notification: %w", err)
+	}
+	*notif = *created
+	return nil
+}
+
+// UpsertByDedup 按 (user_id, dedup_key) upsert notification（T-0157 C3）。
+//
+// 用于 task → notification 订阅器：同一 task 多次状态变更（queued → sent → completed
+// 等）upsert 到同一行，状态 / 标题 / 内容 / 优先级被刷新，is_read / read_at / created_at
+// 保留首次插入值。
+//
+// 前置：notif.DedupKey 必须非空（否则降级走 Create）；user_id 必须非空。
+// 行为：依赖 migration 000128 建的部分唯一索引 uniq_notifications_user_dedup
+// （WHERE dedup_key IS NOT NULL），ON CONFLICT 用 INFER 形式匹配该索引。
+func (r *PgRepository) UpsertByDedup(ctx context.Context, notif *Notification) error {
+	if notif.DedupKey == nil || *notif.DedupKey == "" {
+		return r.Create(ctx, notif)
+	}
+	status := notif.Status
+	if status == "" {
+		status = StatusQueued
+	}
+	// 原生 SQL 用 ON CONFLICT INFER（部分唯一索引需要 INFER 形式）
+	// uniq_notifications_user_dedup 索引在 (user_id, dedup_key) WHERE dedup_key IS NOT NULL
+	query := `
+INSERT INTO notifications (user_id, type, status, priority, title, content, link, sender, dedup_key)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (user_id, dedup_key) WHERE dedup_key IS NOT NULL
+DO UPDATE SET
+    status   = EXCLUDED.status,
+    priority = EXCLUDED.priority,
+    title    = EXCLUDED.title,
+    content  = EXCLUDED.content,
+    link     = EXCLUDED.link,
+    type     = EXCLUDED.type,
+    sender   = EXCLUDED.sender
+RETURNING ` + joinColumns(notifColumns)
+
+	created, err := scanNotification(r.pool.QueryRow(ctx, query,
+		notif.UserID, notif.Type, status, notif.Priority,
+		notif.Title, notif.Content, notif.Link, notif.Sender, notif.DedupKey,
+	))
+	if err != nil {
+		return fmt.Errorf("upsert notification by dedup: %w", err)
 	}
 	*notif = *created
 	return nil
@@ -231,8 +281,8 @@ func (r *PgRepository) Delete(ctx context.Context, id uuid.UUID, userID string) 
 func scanNotification(row interface{ Scan(dest ...any) error }) (*Notification, error) {
 	var n Notification
 	err := row.Scan(
-		&n.ID, &n.UserID, &n.Type, &n.Priority,
-		&n.Title, &n.Content, &n.Link, &n.Sender,
+		&n.ID, &n.UserID, &n.Type, &n.Status, &n.Priority,
+		&n.Title, &n.Content, &n.Link, &n.Sender, &n.DedupKey,
 		&n.IsRead, &n.ReadAt, &n.CreatedAt,
 	)
 	if err != nil {

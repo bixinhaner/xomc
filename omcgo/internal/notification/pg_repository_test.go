@@ -81,21 +81,23 @@ func TestScanNotification_OK(t *testing.T) {
 	now := time.Now()
 	row := &fakeRow{
 		scanFn: func(dest ...any) error {
-			// pg_repository scans 11 columns:
-			// id, user_id, type, priority, title, content, link, sender,
+			// pg_repository scans 13 columns (T-0157 C3 +status +dedup_key):
+			// id, user_id, type, status, priority, title, content, link, sender, dedup_key,
 			// is_read, read_at, created_at
-			require.Len(t, dest, 11)
+			require.Len(t, dest, 13)
 			*dest[0].(*uuid.UUID) = id
 			*dest[1].(*string) = "alice"
 			*dest[2].(*NotificationType) = NotifTypeAlarm
-			*dest[3].(*NotificationPriority) = PriorityHigh
-			*dest[4].(*string) = "title"
-			*dest[5].(*string) = "content"
-			*dest[6].(*string) = "/x"
-			*dest[7].(*string) = "system"
-			*dest[8].(*bool) = false
-			*dest[9].(**time.Time) = nil
-			*dest[10].(*time.Time) = now
+			*dest[3].(*NotificationStatus) = StatusCompleted
+			*dest[4].(*NotificationPriority) = PriorityHigh
+			*dest[5].(*string) = "title"
+			*dest[6].(*string) = "content"
+			*dest[7].(*string) = "/x"
+			*dest[8].(*string) = "system"
+			*dest[9].(**string) = nil // dedup_key nil
+			*dest[10].(*bool) = false
+			*dest[11].(**time.Time) = nil
+			*dest[12].(*time.Time) = now
 			return nil
 		},
 	}
@@ -104,7 +106,9 @@ func TestScanNotification_OK(t *testing.T) {
 	assert.Equal(t, id, got.ID)
 	assert.Equal(t, "alice", got.UserID)
 	assert.Equal(t, NotifTypeAlarm, got.Type)
+	assert.Equal(t, StatusCompleted, got.Status)
 	assert.Equal(t, PriorityHigh, got.Priority)
+	assert.Nil(t, got.DedupKey)
 	assert.False(t, got.IsRead)
 }
 

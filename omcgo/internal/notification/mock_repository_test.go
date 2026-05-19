@@ -22,6 +22,7 @@ type mockRepository struct {
 	listErr           error
 	getByIDErr        error
 	createErr         error
+	upsertErr         error // T-0157 C3: UpsertByDedup 失败注入
 	markReadErr       error
 	markAllReadErr    error
 	getUnreadCountErr error
@@ -104,6 +105,47 @@ func (m *mockRepository) Create(_ context.Context, notif *Notification) error {
 	if m.onCreate != nil {
 		m.onCreate(notif)
 	}
+	if notif.ID == uuid.Nil {
+		notif.ID = uuid.New()
+	}
+	if notif.CreatedAt.IsZero() {
+		notif.CreatedAt = time.Now()
+	}
+	cp := *notif
+	m.items[notif.ID] = &cp
+	return nil
+}
+
+// UpsertByDedup T-0157 C3: 按 (user_id, dedup_key) upsert；DedupKey 为空降级走 Create。
+func (m *mockRepository) UpsertByDedup(ctx context.Context, notif *Notification) error {
+	if m.upsertErr != nil {
+		return m.upsertErr
+	}
+	if notif.DedupKey == nil || *notif.DedupKey == "" {
+		return m.Create(ctx, notif)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// 查找已存在的 (user_id, dedup_key)
+	for _, n := range m.items {
+		if n.UserID != notif.UserID || n.DedupKey == nil {
+			continue
+		}
+		if *n.DedupKey == *notif.DedupKey {
+			// 升级 status / title / content / link / priority；保留 id / created_at / is_read
+			n.Status = notif.Status
+			n.Type = notif.Type
+			n.Priority = notif.Priority
+			n.Title = notif.Title
+			n.Content = notif.Content
+			n.Link = notif.Link
+			n.Sender = notif.Sender
+			cp := *n
+			*notif = cp
+			return nil
+		}
+	}
+	// 不存在则插入
 	if notif.ID == uuid.Nil {
 		notif.ID = uuid.New()
 	}
