@@ -87,22 +87,25 @@ function buildStaticMenuItems(groups: NavGroup[], t: (id: string) => string): Me
     if (children.length === 1) {
       const child = children[0];
       return {
+        type: 'item' as const,
         key: child.key,
         icon: STATIC_ICON_MAP[group.iconName],
         label: t(group.label),
-      } as MenuItem;
+      };
     }
     return {
+      type: 'submenu' as const,
       key: group.key,
       icon: STATIC_ICON_MAP[group.iconName],
       label: t(group.label),
       children: children.map(
         (child: NavChild): MenuItem => ({
+          type: 'item' as const,
           key: child.key,
           label: t(child.label),
         }),
       ),
-    } as MenuItem;
+    };
   });
 }
 
@@ -186,28 +189,31 @@ function buildDynamicMenuItems(
       // 叶子菜单
       if (m.type === 'menu' || visibleChildren.length === 0) {
         return {
+          type: 'item' as const,
           key: m.routePath || m.id,
           icon: icon(m),
           label: label(m),
-        } as MenuItem;
+        };
       }
 
       // 单子节点目录扁平化
       if (visibleChildren.length === 1) {
         const only = visibleChildren[0];
         return {
+          type: 'item' as const,
           key: only.routePath || only.id,
           icon: icon(m),
           label: label(m),
-        } as MenuItem;
+        };
       }
 
       return {
+        type: 'submenu' as const,
         key: m.id,
         icon: icon(m),
         label: label(m),
         children: buildDynamicMenuItems(visibleChildren, label, showIcon),
-      } as MenuItem;
+      };
     });
 }
 
@@ -381,12 +387,12 @@ export default function NavMenu({
     if (useDynamic) {
       const leaf = dynamicKeyToLeaf.get(key);
       if (!leaf) return;
-      openTab({ key: leaf.key, label: leaf.label, path: leaf.path, closable: true });
+      openTab({ key: leaf.key, label: leaf.label, path: leaf.path, closable: true, labelRaw: true });
       void navigate(leaf.path);
     } else {
       const child = staticKeyToChild.get(key);
       if (!child) return;
-      openTab({ key: child.key, label: child.label, path: child.path, closable: true });
+      openTab({ key: child.key, label: child.label, path: child.path, closable: true, labelRaw: true });
       void navigate(child.path);
     }
     if (isMobile) setMobileOverlayOpen(false);
