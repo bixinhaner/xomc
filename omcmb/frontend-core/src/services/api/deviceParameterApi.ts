@@ -382,16 +382,21 @@ export const deviceParameterApi = {
     };
   },
 
-  async addObject(deviceId: string, objectPath: string): Promise<void> {
-    await http.post(`/devices/${deviceId}/objects/add`, {
-      object_path: objectPath,
-    });
+  // T-0157 C7: 后端改为返回 task_id，前端透传供 useDeviceTaskStatus 轮询状态机使用
+  async addObject(deviceId: string, objectPath: string): Promise<{ taskId: string }> {
+    const { data } = await http.post<{ task_id: string; message: string }>(
+      `/devices/${deviceId}/objects/add`,
+      { object_path: objectPath },
+    );
+    return { taskId: data.task_id };
   },
 
-  async deleteObject(deviceId: string, objectPath: string): Promise<void> {
-    await http.post(`/devices/${deviceId}/objects/delete`, {
-      object_path: objectPath,
-    });
+  async deleteObject(deviceId: string, objectPath: string): Promise<{ taskId: string }> {
+    const { data } = await http.post<{ task_id: string; message: string }>(
+      `/devices/${deviceId}/objects/delete`,
+      { object_path: objectPath },
+    );
+    return { taskId: data.task_id };
   },
 
   // 同步配置文件 - 创建 filetype=11 的 Upload RPC 任务

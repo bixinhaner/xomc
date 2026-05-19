@@ -894,19 +894,25 @@ func (h *ParameterTreeHandler) AddObject(c *gin.Context) {
 		return
 	}
 
-	if _, err := taskSvc.CreateTask(c.Request.Context(), &task.CreateTaskRequest{
+	createdTask, err := taskSvc.CreateTask(c.Request.Context(), &task.CreateTaskRequest{
 		DeviceSN:   dev.SerialNumber,
 		Method:     "AddObject",
 		Params:     addParams,
 		Priority:   3,
 		CommandKey: fmt.Sprintf("add-object-%s", uuid.New().String()[:8]),
 		Source:     task.TaskSourceAPI,
-	}); err != nil {
+		CreatorID:  admin.UserIDStringFromCtx(c), // T-0157 C5/C7: 消息中心 user_id
+	})
+	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 
-	response.OKWithStatus(c, http.StatusAccepted, gin.H{"message": "add object command queued"})
+	// T-0157 C7: 返回 task_id 让前端 useAddObject 走 useDeviceTaskStatus 状态机
+	response.OKWithStatus(c, http.StatusAccepted, gin.H{
+		"task_id": createdTask.ID,
+		"message": "add object command queued",
+	})
 }
 
 // DeleteObjectRequest defines the request body for deleting a multi-instance object.
@@ -960,19 +966,24 @@ func (h *ParameterTreeHandler) DeleteObject(c *gin.Context) {
 		return
 	}
 
-	if _, err := taskSvc.CreateTask(c.Request.Context(), &task.CreateTaskRequest{
+	createdTask, err := taskSvc.CreateTask(c.Request.Context(), &task.CreateTaskRequest{
 		DeviceSN:   dev.SerialNumber,
 		Method:     "DeleteObject",
 		Params:     delParams,
 		Priority:   3,
 		CommandKey: fmt.Sprintf("del-object-%s", uuid.New().String()[:8]),
 		Source:     task.TaskSourceAPI,
-	}); err != nil {
+		CreatorID:  admin.UserIDStringFromCtx(c), // T-0157 C5/C7
+	})
+	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 
-	response.OKWithStatus(c, http.StatusAccepted, gin.H{"message": "delete object command queued"})
+	response.OKWithStatus(c, http.StatusAccepted, gin.H{
+		"task_id": createdTask.ID,
+		"message": "delete object command queued",
+	})
 }
 
 // countInstances counts the number of distinct instances under an object path prefix.

@@ -1053,15 +1053,18 @@ export const deviceParameterService = {
     return { ...paged, subObjects: [] };
   },
 
-  async addObject(deviceId: string, objectPath: string): Promise<void> {
+  // T-0157 C7: mock 也对齐真实 API 返回 taskId（供 useDeviceTaskStatus 状态机）
+  async addObject(deviceId: string, objectPath: string): Promise<{ taskId: string }> {
     await delay(300, 500);
     void deviceId;
     void objectPath;
+    return { taskId: `mock-add-${Date.now()}` };
   },
 
-  async deleteObject(deviceId: string, objectPath: string): Promise<void> {
+  async deleteObject(deviceId: string, objectPath: string): Promise<{ taskId: string }> {
     await delay(300, 500);
     void deviceId;
     void objectPath;
+    return { taskId: `mock-del-${Date.now()}` };
   },
 };
