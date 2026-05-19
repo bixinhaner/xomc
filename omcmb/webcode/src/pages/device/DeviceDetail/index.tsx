@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTabStore } from '@core/store/tabStore';
+import { useQuickSettingsFeedbackStore } from '@core/store/quickSettingsFeedbackStore';
 import {
   Badge,
   Button,
@@ -529,6 +530,20 @@ export default function DeviceDetail() {
       closable: true,
     });
   }, [sn, location.search, device?.name, openTab, t]);
+
+  // 关闭"详情"页（用户点 × 关 device-detail tab）时清掉该设备的 form 草稿 + 反馈状态。
+  // 与"切到其他 tab"区分：切走时 tabStore 里 device-detail tab 仍存在；关闭后才被移除。
+  // unmount 时检查 tabStore 当前 state，按存在性判断意图。
+  const did = device?.id;
+  useEffect(() => {
+    if (!did) return;
+    return () => {
+      const hasTab = useTabStore.getState().tabs.some((tb) => tb.key === 'device-detail');
+      if (!hasTab) {
+        useQuickSettingsFeedbackStore.getState().clearByDevice(did);
+      }
+    };
+  }, [did]);
 
   // T-0138:快速设置 tab 显示规则 —— 只在该设备对应 paramModel 有 quicksettings XML 时显示
   // (后端 GET /quicksettings/groups?device_id=... 返回空 groups 即视为未配置)
