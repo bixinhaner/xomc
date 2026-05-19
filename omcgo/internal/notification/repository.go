@@ -20,4 +20,7 @@ type Repository interface {
 	MarkAllRead(ctx context.Context, userID string) error
 	GetUnreadCount(ctx context.Context, userID string) (int64, error)
 	Delete(ctx context.Context, id uuid.UUID, userID string) error
+	// DeleteAllByUser 删除当前用户的全部消息 (T-0157 C4)。
+	// 返回删除行数；用户没有任何消息时返回 0 但不算错误。
+	DeleteAllByUser(ctx context.Context, userID string) (int64, error)
 }

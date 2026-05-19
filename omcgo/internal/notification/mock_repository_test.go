@@ -27,6 +27,7 @@ type mockRepository struct {
 	markAllReadErr    error
 	getUnreadCountErr error
 	deleteErr         error
+	deleteAllErr      error // T-0157 C4
 
 	// Optional intercept hook called on Create before storing.
 	onCreate func(*Notification)
@@ -216,6 +217,23 @@ func (m *mockRepository) Delete(_ context.Context, id uuid.UUID, userID string) 
 	}
 	delete(m.items, id)
 	return nil
+}
+
+// DeleteAllByUser T-0157 C4: 删除指定用户的全部消息。
+func (m *mockRepository) DeleteAllByUser(_ context.Context, userID string) (int64, error) {
+	if m.deleteAllErr != nil {
+		return 0, m.deleteAllErr
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var deleted int64
+	for id, n := range m.items {
+		if n.UserID == userID {
+			delete(m.items, id)
+			deleted++
+		}
+	}
+	return deleted, nil
 }
 
 // errBoom is a shared sentinel for failure-path testing.

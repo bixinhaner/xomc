@@ -35,6 +35,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	notifs.PUT("/:id/read", h.MarkRead)
 	notifs.PUT("/read-all", h.MarkAllRead)
 	notifs.DELETE("/:id", h.Delete)
+	notifs.DELETE("", h.DeleteAll) // T-0157 C4: 一键清空当前用户全部消息
 }
 
 // ---- Request types ----
@@ -148,6 +149,25 @@ func (h *Handler) MarkAllRead(c *gin.Context) {
 	}
 
 	response.OK(c, nil)
+}
+
+// DeleteAll handles DELETE /notifications — 一键清空当前用户全部消息 (T-0157 C4)。
+// 返回 { "deleted": <int64> } 给前端"清空"按钮显示删除数。
+func (h *Handler) DeleteAll(c *gin.Context) {
+	username, _ := c.Get("username")
+	userID, _ := username.(string)
+	if userID == "" {
+		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
+		return
+	}
+
+	deleted, err := h.service.DeleteAllByUser(c.Request.Context(), userID)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+
+	response.OK(c, gin.H{"deleted": deleted})
 }
 
 // Delete handles DELETE /notifications/:id.

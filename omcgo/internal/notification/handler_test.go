@@ -287,6 +287,64 @@ func TestHandler_Delete_NotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
+// ---------- DeleteAll (T-0157 C4) ----------
+
+func TestHandler_DeleteAll_OK(t *testing.T) {
+	r, repo := setupHandlerTest(t, "alice")
+	repo.seed(&Notification{UserID: "alice", Type: NotifTypeAlarm, Title: "a1"})
+	repo.seed(&Notification{UserID: "alice", Type: NotifTypeSystem, Title: "a2"})
+	repo.seed(&Notification{UserID: "alice", Type: NotifTypeTaskComplete, Title: "a3"})
+	bobMsg := repo.seed(&Notification{UserID: "bob", Title: "b1"})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodDelete, "/notifications", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Deleted int64 `json:"deleted"`
+	}
+	response.DecodeData(t, w.Body, &resp)
+	assert.Equal(t, int64(3), resp.Deleted)
+
+	// 验证 bob 的消息未受影响（user 隔离）
+	_, err := repo.GetByID(t.Context(), bobMsg.ID)
+	assert.NoError(t, err, "bob 的消息应该还在")
+}
+
+func TestHandler_DeleteAll_NoMessages_ReturnsZero(t *testing.T) {
+	r, _ := setupHandlerTest(t, "alice")
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodDelete, "/notifications", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var resp struct {
+		Deleted int64 `json:"deleted"`
+	}
+	response.DecodeData(t, w.Body, &resp)
+	assert.Equal(t, int64(0), resp.Deleted)
+}
+
+func TestHandler_DeleteAll_Unauthorized(t *testing.T) {
+	r, _ := setupHandlerTest(t, "")
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodDelete, "/notifications", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestHandler_DeleteAll_RepoError(t *testing.T) {
+	r, repo := setupHandlerTest(t, "alice")
+	repo.deleteAllErr = errBoom
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodDelete, "/notifications", nil)
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
 // ---------- RegisterRoutes ----------
 
 func TestHandler_RegisterRoutes_AllPathsReachable(t *testing.T) {

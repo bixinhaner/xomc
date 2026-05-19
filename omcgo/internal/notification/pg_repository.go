@@ -257,6 +257,22 @@ func (r *PgRepository) GetUnreadCount(ctx context.Context, userID string) (int64
 	return count, nil
 }
 
+// DeleteAllByUser 删除当前用户的全部消息 (T-0157 C4)。
+// 一行 SQL：DELETE FROM notifications WHERE user_id = ?；返回受影响行数。
+func (r *PgRepository) DeleteAllByUser(ctx context.Context, userID string) (int64, error) {
+	query, args, err := storage.Psql.Delete("notifications").
+		Where(sq.Eq{"user_id": userID}).
+		ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build delete-all SQL: %w", err)
+	}
+	result, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("delete-all notifications: %w", err)
+	}
+	return result.RowsAffected(), nil
+}
+
 // Delete removes a notification. It also validates user ownership.
 func (r *PgRepository) Delete(ctx context.Context, id uuid.UUID, userID string) error {
 	query, args, err := storage.Psql.Delete("notifications").

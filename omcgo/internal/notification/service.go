@@ -86,6 +86,11 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID, userID string) error
 	return s.repo.Delete(ctx, id, userID)
 }
 
+// DeleteAllByUser 删除当前用户的全部消息 (T-0157 C4)。返回删除数。
+func (s *Service) DeleteAllByUser(ctx context.Context, userID string) (int64, error) {
+	return s.repo.DeleteAllByUser(ctx, userID)
+}
+
 // pushSSEEvent publishes a notification event to the user's SSE channel.
 func (s *Service) pushSSEEvent(notif *Notification) {
 	data, err := json.Marshal(notif)
