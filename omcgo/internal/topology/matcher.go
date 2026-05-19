@@ -28,10 +28,11 @@ func NewDeviceMatcher(repo DeviceGroupRepository, pool *pgxpool.Pool, logger *za
 
 // MatchRequest 匹配请求参数
 type MatchRequest struct {
-	DeviceID   uuid.UUID // 设备 ID
-	DeviceName string    // 设备名称（device_info.device_name 或 devices.serial_number）
-	LAC        *int      // LAC 位置区码（可选）
-	TAC        *int      // TAC 跟踪区码（可选）
+	DeviceID     uuid.UUID // 设备 ID
+	DeviceName   string    // 设备名称（device_info.device_name 或 devices.serial_number）
+	SerialNumber string    // 设备序列号 — serialNumber 模式精确匹配（migration 000124）
+	LAC          *int      // LAC 位置区码（可选）
+	TAC          *int      // TAC 跟踪区码（可选）
 }
 
 // MatchResult 匹配结果
@@ -95,9 +96,25 @@ func (m *DeviceMatcher) matchGroup(ctx context.Context, group DeviceGroup, req M
 			return false, nil
 		}
 		return m.matchByCode(group.TACList, *req.TAC), nil
+	case MatchingModeSerialNumber:
+		if req.SerialNumber == "" {
+			return false, nil
+		}
+		return m.matchBySerialNumber(group.SerialNumberList, req.SerialNumber), nil
 	default:
 		return false, nil
 	}
+}
+
+// matchBySerialNumber 序列号精确成员匹配（migration 000124）。
+// 设计为简单线性扫描——SN 列表预期百级以内，list lookup 比建 map 还快。
+func (m *DeviceMatcher) matchBySerialNumber(list []string, sn string) bool {
+	for _, item := range list {
+		if item == sn {
+			return true
+		}
+	}
+	return false
 }
 
 // matchByDeviceName 根据设备名称规则匹配
@@ -193,6 +210,47 @@ func (m *DeviceMatcher) AssignDeviceToGroup(ctx context.Context, req MatchReques
 	)
 
 	return result, nil
+}
+
+// HeartbeatAssigner 是 DeviceMatcher 的轻量 wrapper，用于 device 包的
+// "心跳后自动分组"钩子（device.GroupAssigner 接口）。
+//
+// 仅暴露一个方法 AssignDeviceToGroup(ctx, deviceID/sn/name/lac/tac)，结构
+// 字段刻意对齐 device.GroupAssignRequest，让 wiring 一行 caller 即可。
+type HeartbeatAssigner struct {
+	matcher *DeviceMatcher
+}
+
+// NewHeartbeatAssigner 构造心跳路径分组适配器。
+func NewHeartbeatAssigner(m *DeviceMatcher) *HeartbeatAssigner {
+	return &HeartbeatAssigner{matcher: m}
+}
+
+// HeartbeatRequest — 与 device.GroupAssignRequest 字段对齐的小 DTO。
+type HeartbeatRequest struct {
+	DeviceID     uuid.UUID
+	DeviceName   string
+	SerialNumber string
+	LAC          *int
+	TAC          *int
+}
+
+// AssignByHeartbeat — 与 device.GroupAssigner 接口几乎同名同参；caller 在
+// modules.go 里用一个 closure 把 device.GroupAssignRequest 转换为 MatchRequest。
+//
+// 此方法保留供其他 caller 直接使用；device 包用 closure 适配避免循环依赖。
+func (a *HeartbeatAssigner) AssignByHeartbeat(ctx context.Context, req HeartbeatRequest) error {
+	if a.matcher == nil {
+		return nil
+	}
+	_, err := a.matcher.AssignDeviceToGroup(ctx, MatchRequest{
+		DeviceID:     req.DeviceID,
+		DeviceName:   req.DeviceName,
+		SerialNumber: req.SerialNumber,
+		LAC:          req.LAC,
+		TAC:          req.TAC,
+	})
+	return err
 }
 
 // BatchMatchDevices 批量匹配设备

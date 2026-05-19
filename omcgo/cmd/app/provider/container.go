@@ -106,6 +106,10 @@ type Container struct {
 	DeviceInfoRepo device.DeviceInfoRepository
 	ConnReqClient  *connreq.Client
 	StunStore      *stun.Store
+	// InformHandler 暴露给后续模块（如 topology matcher）注入"心跳自动分组"钩子。
+	// 在 initDeviceModule 创建时尚无 matcher，由 initMiscModules 创建 matcher 后
+	// 反向注入 SetGroupAssigner — 避免循环依赖（device → topology）。
+	InformHandler *device.InformHandler
 
 	// AlarmModule 设置
 	AlarmPgStore *alarm.PgAlarmStore

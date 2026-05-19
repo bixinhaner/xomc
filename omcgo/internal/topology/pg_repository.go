@@ -24,6 +24,7 @@ var groupColumns = []string{
 	"level", "status", "is_default", "remark", "created_by", "updated_by",
 	"created_at", "updated_at",
 	"matching_mode", "name_rule_list", "lac_list", "tac_list",
+	"serial_number_list", // migration 000124
 }
 
 // PgDeviceGroupRepository implements DeviceGroupRepository using PostgreSQL.
@@ -77,6 +78,7 @@ func (r *PgDeviceGroupRepository) Create(ctx context.Context, group *DeviceGroup
 			nullableJSONB(nameRuleListJSON),
 			nullableIntArray(group.LACList),
 			nullableIntArray(group.TACList),
+			nullableStringArray(group.SerialNumberList),
 		).
 		ToSql()
 	if err != nil {
@@ -133,6 +135,7 @@ func (r *PgDeviceGroupRepository) Update(ctx context.Context, group *DeviceGroup
 		Set("name_rule_list", nullableJSONB(nameRuleListJSON)).
 		Set("lac_list", nullableIntArray(group.LACList)).
 		Set("tac_list", nullableIntArray(group.TACList)).
+		Set("serial_number_list", nullableStringArray(group.SerialNumberList)).
 		Where(sq.Eq{"id": group.ID}).
 		ToSql()
 	if err != nil {
@@ -232,6 +235,7 @@ func (r *PgDeviceGroupRepository) GetTreeWithCounts(ctx context.Context) ([]Devi
 		       dg.level, dg.status, dg.is_default, dg.remark, dg.created_by, dg.updated_by,
 		       dg.created_at, dg.updated_at,
 		       dg.matching_mode, dg.name_rule_list, dg.lac_list, dg.tac_list,
+		       dg.serial_number_list,
 		       COALESCE(device_counts.count, 0) AS device_count
 		FROM device_groups dg
 		LEFT JOIN LATERAL (
@@ -670,19 +674,29 @@ func nullableIntArray(arr []int) interface{} {
 	return arr
 }
 
+// nullableStringArray 处理 TEXT[] 列：空切片 → NULL，否则原样下传。
+// SerialNumberList 等 PG TEXT[] 类型字段统一走这里（migration 000124）。
+func nullableStringArray(arr []string) interface{} {
+	if len(arr) == 0 {
+		return nil
+	}
+	return arr
+}
+
 func scanGroup(row pgx.Row) (*DeviceGroup, error) {
 	var g DeviceGroup
 	var (
-		parentID       sql.NullString
-		carrier        sql.NullString
-		description    sql.NullString
-		remark         sql.NullString
-		createdBy      sql.NullString
-		updatedBy      sql.NullString
-		matchingMode   sql.NullString
-		nameRuleList   []byte
-		lacList        []int
-		tacList        []int
+		parentID         sql.NullString
+		carrier          sql.NullString
+		description      sql.NullString
+		remark           sql.NullString
+		createdBy        sql.NullString
+		updatedBy        sql.NullString
+		matchingMode     sql.NullString
+		nameRuleList     []byte
+		lacList          []int
+		tacList          []int
+		serialNumberList []string // migration 000124
 	)
 
 	err := row.Scan(
@@ -690,7 +704,7 @@ func scanGroup(row pgx.Row) (*DeviceGroup, error) {
 		&g.SortOrder, &g.Level, &g.Status, &g.IsDefault,
 		&remark, &createdBy, &updatedBy,
 		&g.CreatedAt, &g.UpdatedAt,
-		&matchingMode, &nameRuleList, &lacList, &tacList,
+		&matchingMode, &nameRuleList, &lacList, &tacList, &serialNumberList,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -728,6 +742,7 @@ func scanGroup(row pgx.Row) (*DeviceGroup, error) {
 	}
 	g.LACList = lacList
 	g.TACList = tacList
+	g.SerialNumberList = serialNumberList
 
 	return &g, nil
 }
@@ -737,16 +752,17 @@ func scanGroups(rows pgx.Rows) ([]DeviceGroup, error) {
 	for rows.Next() {
 		var g DeviceGroup
 		var (
-			parentID     sql.NullString
-			carrier      sql.NullString
-			description  sql.NullString
-			remark       sql.NullString
-			createdBy    sql.NullString
-			updatedBy    sql.NullString
-			matchingMode sql.NullString
-			nameRuleList []byte
-			lacList      []int
-			tacList      []int
+			parentID         sql.NullString
+			carrier          sql.NullString
+			description      sql.NullString
+			remark           sql.NullString
+			createdBy        sql.NullString
+			updatedBy        sql.NullString
+			matchingMode     sql.NullString
+			nameRuleList     []byte
+			lacList          []int
+			tacList          []int
+			serialNumberList []string // migration 000124
 		)
 
 		err := rows.Scan(
@@ -754,7 +770,7 @@ func scanGroups(rows pgx.Rows) ([]DeviceGroup, error) {
 			&g.SortOrder, &g.Level, &g.Status, &g.IsDefault,
 			&remark, &createdBy, &updatedBy,
 			&g.CreatedAt, &g.UpdatedAt,
-			&matchingMode, &nameRuleList, &lacList, &tacList,
+			&matchingMode, &nameRuleList, &lacList, &tacList, &serialNumberList,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan group row: %w", err)
@@ -789,6 +805,7 @@ func scanGroups(rows pgx.Rows) ([]DeviceGroup, error) {
 		}
 		g.LACList = lacList
 		g.TACList = tacList
+		g.SerialNumberList = serialNumberList
 
 		items = append(items, g)
 	}
@@ -800,16 +817,17 @@ func scanGroupsWithCount(rows pgx.Rows) ([]DeviceGroup, error) {
 	for rows.Next() {
 		var g DeviceGroup
 		var (
-			parentID     sql.NullString
-			carrier      sql.NullString
-			description  sql.NullString
-			remark       sql.NullString
-			createdBy    sql.NullString
-			updatedBy    sql.NullString
-			matchingMode sql.NullString
-			nameRuleList []byte
-			lacList      []int
-			tacList      []int
+			parentID         sql.NullString
+			carrier          sql.NullString
+			description      sql.NullString
+			remark           sql.NullString
+			createdBy        sql.NullString
+			updatedBy        sql.NullString
+			matchingMode     sql.NullString
+			nameRuleList     []byte
+			lacList          []int
+			tacList          []int
+			serialNumberList []string // migration 000124
 		)
 
 		err := rows.Scan(
@@ -817,7 +835,7 @@ func scanGroupsWithCount(rows pgx.Rows) ([]DeviceGroup, error) {
 			&g.SortOrder, &g.Level, &g.Status, &g.IsDefault,
 			&remark, &createdBy, &updatedBy,
 			&g.CreatedAt, &g.UpdatedAt,
-			&matchingMode, &nameRuleList, &lacList, &tacList,
+			&matchingMode, &nameRuleList, &lacList, &tacList, &serialNumberList,
 			&g.DeviceCount,
 		)
 		if err != nil {
@@ -853,6 +871,7 @@ func scanGroupsWithCount(rows pgx.Rows) ([]DeviceGroup, error) {
 		}
 		g.LACList = lacList
 		g.TACList = tacList
+		g.SerialNumberList = serialNumberList
 
 		items = append(items, g)
 	}

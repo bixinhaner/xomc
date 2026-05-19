@@ -96,6 +96,7 @@ func initDeviceModule(c *Container) error {
 
 	// Set shared services
 	c.DeviceService = deviceService
+	c.InformHandler = informHandler // 后续 initMiscModules 注入 GroupAssigner（matcher 适配器）
 	c.DeviceRepo = deviceRepo
 	c.ParamRepo = paramRepo
 	c.DeviceInfoRepo = deviceInfoRepo

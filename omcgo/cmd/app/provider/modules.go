@@ -429,7 +429,7 @@ func initMiscModules(c *Container) error {
 	historyService := notification.NewHistoryService(historyRepo, logger)
 	c.miscDeps.notifHistoryHandler = notification.NewHistoryHandler(historyService, logger)
 
-	// T-0141: SMTP 邮件发送器 + Mailer（模板渲染→发送→历史）+ Alertmanager
+	// T-0152: SMTP 邮件发送器 + Mailer（模板渲染→发送→历史）+ Alertmanager
 	// 告警 webhook 入口。SMTP 默认 disabled，配好邮件服务器后由配置启用。
 	emailSender := notification.NewEmailSender(notification.SMTPOptions{
 		Enabled:  c.Cfg.Notification.SMTP.Enabled,
@@ -732,6 +732,16 @@ func initMiscModules(c *Container) error {
 	ruleRepo := topology.NewPgDeviceRuleRepository(c.PgPool)
 	ruleTaskRepo := topology.NewPgRuleTaskRepository(c.PgPool)
 	matcher := topology.NewDeviceMatcher(c.GroupRepo, c.PgPool, logger)
+
+	// migration 000124 / SN 规则：把 matcher 注入到 device.InformHandler，
+	// 让心跳异步路径在更新设备信息后自动跑分组匹配。
+	// 用 closure 包装避免 device 包反向依赖 topology — closure 实现
+	// device.GroupAssigner 接口的 1 个方法。
+	if c.InformHandler != nil {
+		hbAssigner := topology.NewHeartbeatAssigner(matcher)
+		c.InformHandler.SetGroupAssigner(groupAssignerAdapter{a: hbAssigner})
+		logger.Info("device inform handler wired with topology heartbeat group assigner")
+	}
 	ruleService := topology.NewDeviceRuleService(ruleRepo, ruleTaskRepo, c.GroupRepo, matcher, c.PgPool, 4, logger)
 	// T-0027 S3 Day 4：注入 PgDeviceLister 替换 getAllDevices stub
 	// 见 prd/F06-topology-auto-grouping.md §12.1，让 ApplyRule 能扫描真实设备
@@ -911,7 +921,7 @@ type miscDeps struct {
 	notifTemplateHandler *notification.TemplateHandler
 	notifHistoryHandler  *notification.HistoryHandler
 
-	// T-0141: Alertmanager 告警 webhook 入口（SMTP 邮件发送链）
+	// T-0152: Alertmanager 告警 webhook 入口（SMTP 邮件发送链）
 	alertWebhookHandler *notification.AlertWebhookHandler
 
 	// T-0012 / R-106: worker retry + dead-letter queue admin
@@ -968,4 +978,25 @@ func (a *mmlPathMissAdapter) AggregatePathTranslationMissBySourceID(
 		PathCount:   stats.PathCount,
 		AnyMiss:     stats.AnyMiss,
 	}, nil
+}
+
+// groupAssignerAdapter — 实现 device.GroupAssigner 接口的 1 行适配器。
+//
+// 作用：让 device 包不直接 import topology（否则形成 device → topology 循环依赖
+// — topology 包已经直接 import device 类型用于规则匹配）。device 包定义自己的
+// GroupAssigner 接口和 GroupAssignRequest DTO，wiring 时把 topology.HeartbeatAssigner
+// 包装成符合该接口的本地 struct。
+type groupAssignerAdapter struct {
+	a *topology.HeartbeatAssigner
+}
+
+// AssignDeviceToGroup 转发到 topology 适配器；字段一一映射。
+func (g groupAssignerAdapter) AssignDeviceToGroup(ctx context.Context, req device.GroupAssignRequest) error {
+	return g.a.AssignByHeartbeat(ctx, topology.HeartbeatRequest{
+		DeviceID:     req.DeviceID,
+		DeviceName:   req.DeviceName,
+		SerialNumber: req.SerialNumber,
+		LAC:          req.LAC,
+		TAC:          req.TAC,
+	})
 }

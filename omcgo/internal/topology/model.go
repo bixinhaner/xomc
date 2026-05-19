@@ -12,9 +12,10 @@ import (
 type MatchingMode string
 
 const (
-	MatchingModeDeviceName MatchingMode = "deviceName" // 设备名称匹配
-	MatchingModeLAC        MatchingMode = "lac"        // LAC 位置区码匹配
-	MatchingModeTAC        MatchingMode = "tac"        // TAC 跟踪区码匹配
+	MatchingModeDeviceName   MatchingMode = "deviceName"   // 设备名称匹配
+	MatchingModeLAC          MatchingMode = "lac"          // LAC 位置区码匹配
+	MatchingModeTAC          MatchingMode = "tac"          // TAC 跟踪区码匹配
+	MatchingModeSerialNumber MatchingMode = "serialNumber" // 序列号精确成员匹配（migration 000124）
 )
 
 // NameRule 设备名称匹配规则
@@ -80,10 +81,11 @@ type DeviceGroup struct {
 	CreatedAt    time.Time         `json:"created_at"`
 	UpdatedAt    time.Time         `json:"updated_at"`
 	// 匹配规则（仅 L2 分组使用）
-	MatchingMode MatchingMode `json:"matching_mode,omitempty"`
-	NameRuleList []NameRule   `json:"name_rule_list,omitempty"`
-	LACList      []int        `json:"lac_list,omitempty"`
-	TACList      []int        `json:"tac_list,omitempty"`
+	MatchingMode     MatchingMode `json:"matching_mode,omitempty"`
+	NameRuleList     []NameRule   `json:"name_rule_list,omitempty"`
+	LACList          []int        `json:"lac_list,omitempty"`
+	TACList          []int        `json:"tac_list,omitempty"`
+	SerialNumberList []string     `json:"serial_number_list,omitempty"` // serialNumber 模式专用（migration 000124）
 }
 
 // DeviceGroupMember represents a device's membership in a group.
