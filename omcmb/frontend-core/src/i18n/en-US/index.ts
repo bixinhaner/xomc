@@ -733,7 +733,7 @@ const messages: Record<string, string> = {
   'alarm.name':         'Alarm Name',
   'alarm.identifier':   'Alarm Identifier',
   'alarm.severity':     'Severity',
-  'alarm.deviceSn':     'Device SN',
+  'alarm.deviceSn':     'SN',
   'alarm.deviceName':   'Device Name',
   'alarm.neType':       'Alarm Source',
   'alarm.content':      'Alarm Content',
@@ -2176,6 +2176,7 @@ const messages: Record<string, string> = {
   'alarm.ruleNameDuplicate': 'Rule name already exists',
   'alarm.selectAtLeastOne': 'Please select at least one alarm',
   'alarm.deviceSelection': 'Device Selection',
+  'alarm.searchSnPlaceholder': 'Search device SN',
   'alarm.searchDeviceSnPlaceholder': 'Search device SN/Name',
   'alarm.deviceTypeFilter': 'Device Type',
 

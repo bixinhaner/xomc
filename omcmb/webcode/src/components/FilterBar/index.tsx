@@ -24,6 +24,8 @@ export interface FilterField {
   options?: { label: string; value: string | number }[];
   treeData?: { title: string; value: string; children?: unknown[] }[];
   span?: number;
+  /** 固定宽度字段。设置后不再按 flex:1 拉伸。 */
+  width?: number;
   /** 覆盖默认 min-width（140px）。传较小数值可让筛选框更紧凑（如类型/状态筛选） */
   minWidth?: number;
   defaultValue?: unknown;
@@ -268,8 +270,17 @@ const FilterBar: React.FC<FilterBarProps> = ({
               key={field.name}
               className={styles.fieldItem}
               style={{
-                flex: field.span ?? 1,
-                ...(field.minWidth !== undefined ? { minWidth: field.minWidth } : {}),
+                ...(field.width !== undefined
+                  ? {
+                      flex: `0 0 ${field.width}px`,
+                      width: field.width,
+                      minWidth: field.width,
+                      maxWidth: field.width,
+                    }
+                  : {
+                      flex: field.span ?? 1,
+                      ...(field.minWidth !== undefined ? { minWidth: field.minWidth } : {}),
+                    }),
               }}
             >
               <Form.Item

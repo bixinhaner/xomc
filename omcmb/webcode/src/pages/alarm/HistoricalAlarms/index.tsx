@@ -103,12 +103,22 @@ export default function HistoricalAlarms() {
   }), [t]);
 
   const FILTER_FIELDS: FilterField[] = useMemo(() => [
-    { name: 'keyword', label: t('alarm.search'), type: 'input', placeholder: t('alarm.searchPlaceholderNew') },
-    { name: 'timeRange', label: t('alarm.eventTime'), type: 'date-range' },
+    { name: 'deviceSn', label: t('alarm.deviceSn'), type: 'input', placeholder: t('alarm.searchSnPlaceholder'), width: 180 },
+    {
+      name: 'neType',
+      label: t('alarm.neTypeCol'),
+      type: 'select',
+      width: 96,
+      options: [
+        { label: t('common.all'), value: '' },
+        ...BASE_STATION_TYPE_OPTIONS,
+      ],
+    },
     {
       name: 'severity',
       label: t('alarm.severity'),
       type: 'multi-select',
+      width: 120,
       options: [
         { label: t('alarm.severity.critical'), value: 'critical' },
         { label: t('alarm.severity.major'), value: 'major' },
@@ -116,6 +126,7 @@ export default function HistoricalAlarms() {
         { label: t('alarm.severity.warning'), value: 'warning' },
       ],
     },
+    { name: 'alarmIdentifier', label: t('alarm.alarmIdentifier'), type: 'input', width: 120 },
     {
       name: 'eventType',
       label: t('alarm.eventType'),
@@ -130,15 +141,6 @@ export default function HistoricalAlarms() {
       ],
     },
     {
-      name: 'neType',
-      label: t('alarm.neTypeCol'),
-      type: 'select',
-      options: [
-        { label: t('common.all'), value: '' },
-        ...BASE_STATION_TYPE_OPTIONS,
-      ],
-    },
-    {
       name: 'dealState',
       label: t('alarm.dealState'),
       type: 'select',
@@ -148,6 +150,7 @@ export default function HistoricalAlarms() {
         { label: t('alarm.dealState.confirmedCleared'), value: '3' },
       ],
     },
+    { name: 'timeRange', label: t('alarm.eventTime'), type: 'date-range' },
   ], [t]);
 
   const queryParams = useMemo(
@@ -191,11 +194,12 @@ export default function HistoricalAlarms() {
 
   const handleSearch = useCallback((values: Record<string, unknown>) => {
     setFilterParams({
+      deviceSn: values.deviceSn as string,
       severity: values.severity as AlarmFilter['severity'],
+      alarmIdentifier: values.alarmIdentifier as string,
       eventType: values.eventType as AlarmFilter['eventType'],
       neType: values.neType as string,
       dealState: values.dealState as AlarmFilter['dealState'],
-      keyword: values.keyword as string,
       timeRange: values.timeRange as [string, string] | undefined,
     });
     setCurrentPage(1);
@@ -474,10 +478,10 @@ export default function HistoricalAlarms() {
   const columns = useMemo(
     (): DataTableColumn<Alarm>[] => [
       {
-        key: 'id',
-        title: t('alarm.alarmId'),
-        dataIndex: 'id',
-        width: 100,
+        key: 'deviceSn',
+        title: t('alarm.deviceSn'),
+        dataIndex: 'deviceSn',
+        width: 160,
         render: (val: unknown, record) => (
           <Space size={4}>
             {record.unread === '1' && <Badge status="error" style={{ marginLeft: -4 }} />}
@@ -491,6 +495,13 @@ export default function HistoricalAlarms() {
             </Button>
           </Space>
         ),
+      },
+      {
+        key: 'neType',
+        title: t('alarm.neTypeCol'),
+        dataIndex: 'neType',
+        width: 120,
+        render: (val: unknown) => formatBaseStationTypeLabel(String(val ?? '')),
       },
       {
         key: 'severity',
@@ -524,20 +535,6 @@ export default function HistoricalAlarms() {
         title: t('alarm.possibleCause'),
         dataIndex: 'alarmName',
         width: 180,
-        ellipsis: true,
-      },
-      {
-        key: 'neType',
-        title: t('alarm.neTypeCol'),
-        dataIndex: 'neType',
-        width: 120,
-        render: (val: unknown) => formatBaseStationTypeLabel(String(val ?? '')),
-      },
-      {
-        key: 'equipInfo',
-        title: t('alarm.equipInfo'),
-        dataIndex: 'equipInfo',
-        width: 250,
         ellipsis: true,
       },
       {
@@ -705,7 +702,7 @@ export default function HistoricalAlarms() {
         fields={FILTER_FIELDS}
         onSearch={handleSearch}
         onReset={handleReset}
-        collapsedRows={1}
+        collapsedRows={2}
       />
 
       {/* 列表卡片 */}

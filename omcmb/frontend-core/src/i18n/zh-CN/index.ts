@@ -736,7 +736,7 @@ const messages: Record<string, string> = {
   'alarm.possibleCause': '可能原因',
   'alarm.status':        '告警状态',
   'alarm.severity':     '告警级别',
-  'alarm.deviceSn':     '设备序列号',
+  'alarm.deviceSn':     'SN',
   'alarm.deviceName':   '设备名称',
   'alarm.neType':       '网元类型',
   'alarm.content':      '告警内容',
@@ -2200,6 +2200,7 @@ const messages: Record<string, string> = {
   'alarm.ruleNameDuplicate': '规则名称已存在',
   'alarm.selectAtLeastOne': '请至少选择一条告警',
   'alarm.deviceSelection': '设备选择',
+  'alarm.searchSnPlaceholder': '搜索设备SN',
   'alarm.searchDeviceSnPlaceholder': '搜索设备SN/名称',
   'alarm.deviceTypeFilter': '设备类型',
 

@@ -62,7 +62,6 @@ export const NAV_CONFIG: NavConfig = [
       // { key: 'alarm-sync',         label: 'nav.alarm.sync',           path: '/alarm/sync' },           // 隐藏
       // { key: 'alarm-notification', label: 'nav.alarm.notification',   path: '/alarm/notification' },  // 隐藏告警通知
       // { key: 'alarm-interface',    label: 'nav.alarm.interfaceFault', path: '/alarm/interface-fault' }, // 隐藏
-      { key: 'alarm-custom-stats', label: 'nav.alarm.customAlarm',    path: '/alarm/custom-stats' },
     ],
   },
   // {

@@ -138,12 +138,22 @@ export default function CurrentAlarms() {
   }), [t]);
 
   const FILTER_FIELDS: FilterField[] = useMemo(() => [
-    { name: 'keyword', label: t('alarm.search'), type: 'input', placeholder: t('alarm.searchPlaceholderNew') },
-    { name: 'timeRange', label: t('alarm.eventTime'), type: 'date-range' },
+    { name: 'deviceSn', label: t('alarm.deviceSn'), type: 'input', placeholder: t('alarm.searchSnPlaceholder'), width: 180 },
+    {
+      name: 'neType',
+      label: t('alarm.neTypeCol'),
+      type: 'select',
+      width: 96,
+      options: [
+        { label: t('common.all'), value: '' },
+        ...BASE_STATION_TYPE_OPTIONS,
+      ],
+    },
     {
       name: 'severity',
       label: t('alarm.severity'),
       type: 'multi-select',
+      width: 120,
       options: [
         { label: t('alarm.severity.critical'), value: 'critical' },
         { label: t('alarm.severity.major'), value: 'major' },
@@ -151,6 +161,7 @@ export default function CurrentAlarms() {
         { label: t('alarm.severity.warning'), value: 'warning' },
       ],
     },
+    { name: 'alarmIdentifier', label: t('alarm.alarmIdentifier'), type: 'input', width: 120 },
     {
       name: 'eventType',
       label: t('alarm.eventType'),
@@ -165,14 +176,16 @@ export default function CurrentAlarms() {
       ],
     },
     {
-      name: 'neType',
-      label: t('alarm.neTypeCol'),
+      name: 'dealState',
+      label: t('alarm.dealState'),
       type: 'select',
       options: [
         { label: t('common.all'), value: '' },
-        ...BASE_STATION_TYPE_OPTIONS,
+        { label: t('alarm.dealState.unconfirmedUncleared'), value: '0' },
+        { label: t('alarm.dealState.confirmedUncleared'), value: '1' },
       ],
     },
+    { name: 'timeRange', label: t('alarm.eventTime'), type: 'date-range' },
     {
       name: 'unread',
       label: t('alarm.readStatus'),
@@ -181,16 +194,6 @@ export default function CurrentAlarms() {
         { label: t('common.all'), value: '' },
         { label: t('alarm.readStatus.read'), value: '0' },
         { label: t('alarm.readStatus.unread'), value: '1' },
-      ],
-    },
-    {
-      name: 'dealState',
-      label: t('alarm.dealState'),
-      type: 'select',
-      options: [
-        { label: t('common.all'), value: '' },
-        { label: t('alarm.dealState.unconfirmedUncleared'), value: '0' },
-        { label: t('alarm.dealState.confirmedUncleared'), value: '1' },
       ],
     },
     {
@@ -261,13 +264,14 @@ export default function CurrentAlarms() {
 
   const handleSearch = useCallback((values: Record<string, unknown>) => {
     setFilterParams({
+      deviceSn: values.deviceSn as string,
       severity: values.severity as AlarmFilter['severity'],
+      alarmIdentifier: values.alarmIdentifier as string,
       eventType: values.eventType as AlarmFilter['eventType'],
       neType: values.neType as string,
       unread: values.unread as '0' | '1',
       dealState: values.dealState as AlarmFilter['dealState'],
       isUnknown: values.isUnknown as AlarmFilter['isUnknown'],
-      keyword: values.keyword as string,
       timeRange: values.timeRange as [string, string] | undefined,
     });
     setCurrentPage(1);
@@ -554,10 +558,10 @@ export default function CurrentAlarms() {
   const columns = useMemo(
     (): DataTableColumn<Alarm>[] => [
       {
-        key: 'id',
-        title: t('alarm.alarmId'),
-        dataIndex: 'id',
-        width: 100,
+        key: 'deviceSn',
+        title: t('alarm.deviceSn'),
+        dataIndex: 'deviceSn',
+        width: 160,
         render: (val: unknown, record) => (
           <Space size={4}>
             {record.unread === '1' && <Badge status="error" style={{ marginLeft: -4 }} />}
@@ -571,6 +575,13 @@ export default function CurrentAlarms() {
             </Button>
           </Space>
         ),
+      },
+      {
+        key: 'neType',
+        title: t('alarm.neTypeCol'),
+        dataIndex: 'neType',
+        width: 120,
+        render: (val: unknown) => formatBaseStationTypeLabel(String(val ?? '')),
       },
       {
         key: 'severity',
@@ -604,20 +615,6 @@ export default function CurrentAlarms() {
         title: t('alarm.possibleCause'),
         dataIndex: 'alarmName',
         width: 180,
-        ellipsis: true,
-      },
-      {
-        key: 'neType',
-        title: t('alarm.neTypeCol'),
-        dataIndex: 'neType',
-        width: 120,
-        render: (val: unknown) => formatBaseStationTypeLabel(String(val ?? '')),
-      },
-      {
-        key: 'equipInfo',
-        title: t('alarm.equipInfo'),
-        dataIndex: 'equipInfo',
-        width: 250,
         ellipsis: true,
       },
       {
@@ -821,7 +818,7 @@ export default function CurrentAlarms() {
         fields={FILTER_FIELDS}
         onSearch={handleSearch}
         onReset={handleReset}
-        collapsedRows={1}
+        collapsedRows={2}
       />
 
       {/* 列表卡片 */}

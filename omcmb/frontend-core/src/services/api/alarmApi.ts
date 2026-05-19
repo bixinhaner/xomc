@@ -378,7 +378,11 @@ function buildAlarmQuery(
     query.start_time = filter.timeRange[0];
     query.end_time = filter.timeRange[1];
   }
-  if (filter.keyword) query.keyword = filter.keyword;
+  if (filter.alarmIdentifier) {
+    query.keyword = filter.alarmIdentifier;
+  } else if (filter.keyword) {
+    query.keyword = filter.keyword;
+  }
   // 未识别告警过滤（设计 §3.3 治理闭环）：'true'/'false' 字符串透传给后端 form:"is_unknown"
   if (filter.isUnknown !== undefined) {
     query.is_unknown = filter.isUnknown;
