@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button, Card, Col, Form, Input, Row, Space, Spin, Tag, Typography, message, notification } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
+import { useQueryClient } from '@tanstack/react-query';
 import { useParameterSchema, useUpdateParameters } from '@core/hooks/api/useDeviceParameters';
 import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
+import { notificationKeys } from '@core/hooks/api/useNotificationCenter';
 import {
   feedbackKey,
   useQuickSettingsFeedbackStore,
@@ -73,6 +75,7 @@ interface CellParameterFormProps {
 export default function CellParameterForm({ deviceId, fapInstance, group, locale }: CellParameterFormProps) {
   const [form] = Form.useForm();
   const updateMutation = useUpdateParameters();
+  const queryClient = useQueryClient();
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   // lastSubmit 由 zustand store 托管 —— DeviceDetail 整个被卸载(切顶层 tab)也保留反馈。
@@ -173,6 +176,11 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
         errorMsg: errMsg,
       });
       console.error('CellParameterForm: update failed', err);
+    } finally {
+      // T-0157 C10: 无论成功失败都触发消息中心 invalidate ——
+      // 成功路径：后端 task.created publish → 订阅器写"进行中"消息，~50ms 内拉回
+      // 失败路径：CreateFailureNotifier 兜底写"入队失败"消息，~50ms 内拉回
+      void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
     }
   };
 

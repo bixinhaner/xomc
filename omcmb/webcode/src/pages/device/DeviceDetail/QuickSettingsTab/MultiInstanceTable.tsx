@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Card, Input, Modal, Popconfirm, Space, Table, Tag, Typography, message, notification } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import type { ColumnType } from 'antd/es/table';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   useAddObject,
   useDeleteObject,
@@ -9,6 +10,7 @@ import {
   useUpdateParameters,
 } from '@core/hooks/api/useDeviceParameters';
 import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
+import { notificationKeys } from '@core/hooks/api/useNotificationCenter';
 import {
   feedbackKey,
   useQuickSettingsFeedbackStore,
@@ -100,6 +102,7 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
   const updateMutation = useUpdateParameters();
   const addMutation = useAddObject();
   const deleteMutation = useDeleteObject();
+  const queryClient = useQueryClient();
 
   // 行编辑状态：以 instanceId 为 key，仅保留用户编辑过的字段（避免 effect 同步 schema 触发级联 render）
   const [rowEdits, setRowEdits] = useState<Map<string, RowEditState>>(new Map());
@@ -238,19 +241,28 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
         at: Date.now(),
       });
       console.error('MultiInstanceTable: row save failed', err);
+    } finally {
+      void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
     }
   };
 
   const handleAdd = async () => {
     try {
       // objectPath 已含尾部 "."(AddObject 后端期望同样形态,参考 useAddObject 现有调用)
-      await addMutation.mutateAsync({ deviceId, objectPath });
+      // T-0157 C7: 后端现返回 { taskId } → 消费 taskId 让 Tag 走完整状态机
+      const result = await addMutation.mutateAsync({ deviceId, objectPath });
       message.success({
         content: '已下发 AddObject,请在新行填值后点击保存完成 SetParameterValues',
         duration: 6,
       });
-      // AddObject 后端当前不返 taskId,Tag 仅显示"新增已入队"
-      setFeedback(fbKey, { kind: 'multi', action: 'add', submitStatus: 'queued', detail: '新增实例', at: Date.now() });
+      setFeedback(fbKey, {
+        kind: 'multi',
+        action: 'add',
+        submitStatus: 'queued',
+        taskId: result.taskId, // C7+C10: 走 useDeviceTaskStatus 状态机
+        detail: '新增实例',
+        at: Date.now(),
+      });
       void refetch();
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -261,6 +273,8 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
       });
       setFeedback(fbKey, { kind: 'multi', action: 'add', submitStatus: 'failed_to_queue', detail: errMsg, at: Date.now() });
       console.error('MultiInstanceTable: AddObject failed', err);
+    } finally {
+      void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
     }
   };
 
@@ -294,12 +308,20 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
       okType: 'danger',
       onOk: async () => {
         try {
-          await deleteMutation.mutateAsync({ deviceId, objectPath: `${objectPath}${instId}.` });
+          // T-0157 C7: 后端现返回 { taskId } → 消费 taskId 让 Tag 走完整状态机
+          const result = await deleteMutation.mutateAsync({ deviceId, objectPath: `${objectPath}${instId}.` });
           message.success({
             content: `已下发 DeleteObject(${instId}),请在右上角铃铛查看任务结果`,
             duration: 6,
           });
-          setFeedback(fbKey, { kind: 'multi', action: 'delete', submitStatus: 'queued', detail: `实例 ${instId}`, at: Date.now() });
+          setFeedback(fbKey, {
+            kind: 'multi',
+            action: 'delete',
+            submitStatus: 'queued',
+            taskId: result.taskId,
+            detail: `实例 ${instId}`,
+            at: Date.now(),
+          });
           void refetch();
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
@@ -316,6 +338,8 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
             at: Date.now(),
           });
           console.error('MultiInstanceTable: DeleteObject failed', err);
+        } finally {
+          void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
         }
       },
     });
