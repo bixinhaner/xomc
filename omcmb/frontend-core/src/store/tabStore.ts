@@ -37,9 +37,13 @@ export const useTabStore = create<TabState>()(
 
       openTab: (tab) => {
         const { tabs } = get();
-        const exists = tabs.find((t) => t.key === tab.key);
-        if (exists) {
-          set({ activeTabKey: tab.key });
+        const existsIdx = tabs.findIndex((t) => t.key === tab.key);
+        if (existsIdx !== -1) {
+          // 命中同 key 时，同步更新 path/label/labelRaw/closable，
+          // 让"复用 tab 显示不同记录详情"场景的 URL 与标题正确刷新。
+          const merged = tabs.slice();
+          merged[existsIdx] = { ...merged[existsIdx], ...tab, closable: tab.closable ?? merged[existsIdx].closable };
+          set({ tabs: merged, activeTabKey: tab.key });
           return;
         }
         // Enforce max tabs — remove the oldest non-dashboard, non-active tab if at limit

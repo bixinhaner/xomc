@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo } from 'react';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import { useTabStore } from '@core/store/tabStore';
 import {
   Badge,
   Button,
@@ -491,11 +492,42 @@ function KPITabContent({ device, t }: KPITabContentProps) {
 export default function DeviceDetail() {
   const t = useT();
   const { sn = '' } = useParams<{ sn: string }>();
+  const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState('basic');
+  const openTab = useTabStore((s) => s.openTab);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const { data: device, isLoading, refetch } = useDeviceBySn(sn);
+
+  // 内部 tab 以 URL ?tab= 作为单一真相源 ——
+  // 1) 离开详情页（组件卸载）再切回时，能从 URL 还原内部 tab，不丢状态；
+  // 2) TabBar 上注册的详情 tab path 也带 ?tab=，确保切回时 navigate 的 URL 正确；
+  // 3) 列表里点告警 Tag/GPS Link 跳 ?tab=alarm/gps 的深链接同样生效。
+  const urlTab = searchParams.get('tab') ?? 'basic';
+  const activeTab = urlTab;
+  const setActiveTab = useCallback((key: string) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('tab', key);
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  // 将设备详情页注册为 TabBar 的共享 tab（key='device-detail'）。
+  // 同 key 复用槽位、按 sn 替换 path/label —— 避免每台设备各占一个 tab；
+  // path 带 location.search 以保留 ?tab=alarm/gps 等深链接进入时的子 tab。
+  useEffect(() => {
+    if (!sn) return;
+    const displayName = device?.name || sn;
+    openTab({
+      key: 'device-detail',
+      label: `${t('common.detail')} · ${displayName}`,
+      labelRaw: true,
+      path: `/device/detail/${sn}${location.search}`,
+      closable: true,
+    });
+  }, [sn, location.search, device?.name, openTab, t]);
 
   // T-0138:快速设置 tab 显示规则 —— 只在该设备对应 paramModel 有 quicksettings XML 时显示
   // (后端 GET /quicksettings/groups?device_id=... 返回空 groups 即视为未配置)
@@ -676,6 +708,9 @@ export default function DeviceDetail() {
               ? [{
                   key: 'quickSettings',
                   label: t('device.quickSettings.tabTitle'),
+                  // 保活：用户在此 tab 改参数后看到"入队成功 / 基站应答"Tag,
+                  // 切到其他内部 tab 再切回时必须保留反馈状态(state 在子组件 useState 中)。
+                  forceRender: true,
                   children: <QuickSettingsTab deviceId={device.id} networkType={device.networkType} />,
                 }]
               : []),

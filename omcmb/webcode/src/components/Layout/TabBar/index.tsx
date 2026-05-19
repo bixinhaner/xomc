@@ -76,7 +76,7 @@ export default function TabBar() {
 
   const overflowMenuItems: MenuProps['items'] = overflowTabs.map((tab) => ({
     key: tab.key,
-    label: t(tab.label),
+    label: tab.labelRaw ? tab.label : t(tab.label),
     onClick: () => handleTabClick(tab),
   }));
 

@@ -36,4 +36,7 @@ export interface TabItem {
   label: string;
   path: string;
   closable: boolean;
+  // 当 label 为已本地化的纯文本（含动态片段如 SN/名称）时设为 true，
+  // 渲染时跳过 react-intl 翻译，避免触发 missing translation 报错。
+  labelRaw?: boolean;
 }

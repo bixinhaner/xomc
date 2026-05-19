@@ -48,7 +48,7 @@ export default function TabItem({ tab, isActive, onClose, onClick }: Props) {
     .filter(Boolean)
     .join(' ');
 
-  const resolvedLabel = t(tab.label);
+  const resolvedLabel = tab.labelRaw ? tab.label : t(tab.label);
 
   return (
     <TabContextMenu tab={tab}>
