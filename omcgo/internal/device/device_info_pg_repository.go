@@ -265,19 +265,23 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		}
 	}
 
-	// Multi-field fuzzy search (G07)
-	if filter.Search != nil && *filter.Search != "" {
-		keyword := "%" + *filter.Search + "%"
-		cond := sq.Or{
-			sq.ILike{"d.serial_number": keyword},
-			sq.ILike{"d.site_name": keyword},
-			sq.ILike{"d.manufacturer": keyword},
-			sq.ILike{"d.model_name": keyword},
-			sq.ILike{"di.device_name": keyword},
-			sq.ILike{"di.address": keyword},
+	// Multi-field fuzzy search (G07) — 升级为多关键字（英文逗号分隔，最多 50）。
+	// 任一关键字命中任一字段即匹配（设备级 OR）。单值场景与老行为完全等价。
+	// caller 端 UX：前端搜索框 placeholder "SN/名称/IP/MAC/PCI"，目前后端实际
+	// 匹配 SN/site_name/manufacturer/model_name/device_name/address 6 字段，
+	// IP/MAC/PCI 字段扩展是另一个独立 task（见 search.go 文件头注释）。
+	if filter.Search != nil {
+		if cond := BuildSearchOR(*filter.Search, []string{
+			"d.serial_number",
+			"d.site_name",
+			"d.manufacturer",
+			"d.model_name",
+			"di.device_name",
+			"di.address",
+		}); cond != nil {
+			builder = builder.Where(cond)
+			countBuilder = countBuilder.Where(cond)
 		}
-		builder = builder.Where(cond)
-		countBuilder = countBuilder.Where(cond)
 	}
 
 	// Count total

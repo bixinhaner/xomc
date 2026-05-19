@@ -328,11 +328,13 @@ export default function DeviceList() {
 
   const FILTER_FIELDS: FilterField[] = useMemo(() => [
     // --- 搜索项：文本搜索覆盖 SN/名称/IP/MAC/ECI/PCI ---
+    // 后端 BuildSearchOR 支持英文逗号分隔多关键字（最多 50 个），
+    // placeholder 提示用户可粘多 SN 一次搜。
     {
       name: 'searchText',
       label: t('filter.searchText'),
       type: 'input',
-      placeholder: 'SN / ' + t('device.hostName') + ' / IP / MAC / PCI',
+      placeholder: t('filter.searchText.multiHint'),
     },
 
     // --- 筛选项：三制式公共（默认显示） ---
