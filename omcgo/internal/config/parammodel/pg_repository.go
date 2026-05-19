@@ -167,13 +167,17 @@ func (r *PgRepository) UpsertDiscoveredMappings(ctx context.Context, productID u
 			Columns(
 				"product_id", "software_version", "standard_path", "private_path",
 				"entry_type", "access", "data_type", "change_applies",
-				"min_value", "max_value", "is_storable", "is_active", "is_supported",
+				"min_value", "max_value",
+				"enum_values", "enum_labels", // T-0158
+				"is_storable", "is_active", "is_supported",
 			)
 		for _, m := range mappings {
 			ib = ib.Values(
 				productID, swVersion, m.StandardPath, m.PrivatePath,
 				m.EntryType, nilIfEmpty(m.Access), nilIfEmpty(m.DataType), nilIfEmpty(m.ChangeApplies),
-				m.MinValue, m.MaxValue, m.IsStorable, m.IsActive, m.IsSupported,
+				m.MinValue, m.MaxValue,
+				m.EnumValues, m.EnumLabels, // T-0158
+				m.IsStorable, m.IsActive, m.IsSupported,
 			)
 		}
 		insSQL, insArgs, err := ib.ToSql()
