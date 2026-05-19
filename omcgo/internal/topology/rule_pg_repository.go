@@ -41,11 +41,13 @@ func (r *PgDeviceRuleRepository) Create(ctx context.Context, rule *DeviceRule) e
 		Columns(
 			"name", "priority", "target_group_id", "enabled",
 			"matching_mode", "name_rule_list", "lac_list", "tac_list",
+			"serial_number_list", // migration 000124
 			"description", "operators", "created_by", "updated_by",
 		).
 		Values(
 			rule.Name, rule.Priority, rule.TargetGroupID, rule.Enabled,
 			rule.MatchingMode, nameRuleListJSON, rule.LACList, rule.TACList,
+			pq.Array(rule.SerialNumberList),
 			rule.Description, rule.Operators, rule.CreatedBy, rule.UpdatedBy,
 		).
 		Suffix("RETURNING id, created_at, updated_at").
@@ -68,6 +70,7 @@ func (r *PgDeviceRuleRepository) GetByID(ctx context.Context, id uuid.UUID) (*De
 	query, args, err := sq.Select(
 		"dr.id", "dr.name", "dr.priority", "dr.target_group_id", "dr.enabled",
 		"dr.matching_mode", "dr.name_rule_list", "dr.lac_list", "dr.tac_list",
+		"dr.serial_number_list", // migration 000124
 		"dr.description", "dr.operators", "dr.created_by", "dr.updated_by", "dr.created_at", "dr.updated_at",
 		"COALESCE(dg.name, '') as target_group_name",
 	).
@@ -85,10 +88,12 @@ func (r *PgDeviceRuleRepository) GetByID(ctx context.Context, id uuid.UUID) (*De
 	var nameRuleListJSON []byte
 	var targetGroupID *uuid.UUID
 	var createdBy, updatedBy, description, operators *string
+	var serialNumberList []string // migration 000124
 
 	err = r.pool.QueryRow(ctx, query, args...).Scan(
 		&rule.ID, &rule.Name, &rule.Priority, &targetGroupID, &rule.Enabled,
 		&matchingMode, &nameRuleListJSON, &rule.LACList, &rule.TACList,
+		&serialNumberList,
 		&description, &operators, &createdBy, &updatedBy, &rule.CreatedAt, &rule.UpdatedAt,
 		&rule.TargetGroupName,
 	)
@@ -115,6 +120,7 @@ func (r *PgDeviceRuleRepository) GetByID(ctx context.Context, id uuid.UUID) (*De
 	if operators != nil {
 		rule.Operators = *operators
 	}
+	rule.SerialNumberList = serialNumberList // migration 000124
 
 	// 解析 name_rule_list
 	if len(nameRuleListJSON) > 0 {
@@ -149,6 +155,7 @@ func (r *PgDeviceRuleRepository) Update(ctx context.Context, rule *DeviceRule) e
 		Set("name_rule_list", nullableJSONB(nameRuleListJSON)).
 		Set("lac_list", pq.Array(rule.LACList)).
 		Set("tac_list", pq.Array(rule.TACList)).
+		Set("serial_number_list", pq.Array(rule.SerialNumberList)). // migration 000124
 		Set("description", rule.Description).
 		Set("operators", rule.Operators).
 		Set("updated_by", rule.UpdatedBy).
@@ -223,6 +230,7 @@ func (r *PgDeviceRuleRepository) List(ctx context.Context, req *RuleListRequest)
 	query, args, err := sq.Select(
 		"dr.id", "dr.name", "dr.priority", "dr.target_group_id", "dr.enabled",
 		"dr.matching_mode", "dr.name_rule_list", "dr.lac_list", "dr.tac_list",
+		"dr.serial_number_list", // migration 000124
 		"dr.description", "dr.operators", "dr.created_by", "dr.updated_by", "dr.created_at", "dr.updated_at",
 		"COALESCE(dg.name, '') as target_group_name",
 	).
@@ -250,10 +258,12 @@ func (r *PgDeviceRuleRepository) List(ctx context.Context, req *RuleListRequest)
 		var nameRuleListJSON []byte
 		var targetGroupID *uuid.UUID
 		var createdBy, updatedBy, description, operators *string
+		var serialNumberList []string // migration 000124
 
 		err := rows.Scan(
 			&rule.ID, &rule.Name, &rule.Priority, &targetGroupID, &rule.Enabled,
 			&matchingMode, &nameRuleListJSON, &rule.LACList, &rule.TACList,
+			&serialNumberList,
 			&description, &operators, &createdBy, &updatedBy, &rule.CreatedAt, &rule.UpdatedAt,
 			&rule.TargetGroupName,
 		)
@@ -277,6 +287,7 @@ func (r *PgDeviceRuleRepository) List(ctx context.Context, req *RuleListRequest)
 		if operators != nil {
 			rule.Operators = *operators
 		}
+		rule.SerialNumberList = serialNumberList // migration 000124
 
 		// 解析 name_rule_list
 		if len(nameRuleListJSON) > 0 {
@@ -296,6 +307,7 @@ func (r *PgDeviceRuleRepository) GetAll(ctx context.Context) ([]DeviceRule, erro
 	query, args, err := sq.Select(
 		"id", "name", "priority", "target_group_id", "enabled",
 		"matching_mode", "name_rule_list", "lac_list", "tac_list",
+		"serial_number_list", // migration 000124
 		"description", "operators", "created_by", "updated_by", "created_at", "updated_at",
 	).
 		From("device_rules").
@@ -319,10 +331,12 @@ func (r *PgDeviceRuleRepository) GetAll(ctx context.Context) ([]DeviceRule, erro
 		var nameRuleListJSON []byte
 		var targetGroupID *uuid.UUID
 		var createdBy, updatedBy, description, operators *string
+		var serialNumberList []string // migration 000124
 
 		err := rows.Scan(
 			&rule.ID, &rule.Name, &rule.Priority, &targetGroupID, &rule.Enabled,
 			&matchingMode, &nameRuleListJSON, &rule.LACList, &rule.TACList,
+			&serialNumberList,
 			&description, &operators, &createdBy, &updatedBy, &rule.CreatedAt, &rule.UpdatedAt,
 		)
 		if err != nil {
@@ -345,6 +359,7 @@ func (r *PgDeviceRuleRepository) GetAll(ctx context.Context) ([]DeviceRule, erro
 		if operators != nil {
 			rule.Operators = *operators
 		}
+		rule.SerialNumberList = serialNumberList // migration 000124
 
 		if len(nameRuleListJSON) > 0 {
 			if err := json.Unmarshal(nameRuleListJSON, &rule.NameRuleList); err != nil {
@@ -363,6 +378,7 @@ func (r *PgDeviceRuleRepository) GetEnabledByPriority(ctx context.Context) ([]De
 	query, args, err := sq.Select(
 		"id", "name", "priority", "target_group_id", "enabled",
 		"matching_mode", "name_rule_list", "lac_list", "tac_list",
+		"serial_number_list", // migration 000124
 		"description", "operators", "created_by", "updated_by", "created_at", "updated_at",
 	).
 		From("device_rules").
@@ -387,10 +403,12 @@ func (r *PgDeviceRuleRepository) GetEnabledByPriority(ctx context.Context) ([]De
 		var nameRuleListJSON []byte
 		var targetGroupID *uuid.UUID
 		var createdBy, updatedBy, description, operators *string
+		var serialNumberList []string // migration 000124
 
 		err := rows.Scan(
 			&rule.ID, &rule.Name, &rule.Priority, &targetGroupID, &rule.Enabled,
 			&matchingMode, &nameRuleListJSON, &rule.LACList, &rule.TACList,
+			&serialNumberList,
 			&description, &operators, &createdBy, &updatedBy, &rule.CreatedAt, &rule.UpdatedAt,
 		)
 		if err != nil {
@@ -413,6 +431,7 @@ func (r *PgDeviceRuleRepository) GetEnabledByPriority(ctx context.Context) ([]De
 		if operators != nil {
 			rule.Operators = *operators
 		}
+		rule.SerialNumberList = serialNumberList // migration 000124
 
 		if len(nameRuleListJSON) > 0 {
 			if err := json.Unmarshal(nameRuleListJSON, &rule.NameRuleList); err != nil {

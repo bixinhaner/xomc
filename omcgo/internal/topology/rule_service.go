@@ -124,23 +124,24 @@ func (s *DeviceRuleService) CreateRule(ctx context.Context, req CreateRuleReques
 	}
 
 	// 3. 生成规则描述
-	operators := s.generateOperators(req.MatchingMode, req.NameRuleList, req.LACList, req.TACList)
+	operators := s.generateOperators(req.MatchingMode, req.NameRuleList, req.LACList, req.TACList, req.SerialNumberList)
 
 	// 4. 创建规则
 	rule := &DeviceRule{
-		ID:           uuid.New(),
-		Name:         req.Name,
-		Priority:     req.Priority,
-		TargetGroupID: &groupID,
-		Enabled:      req.Enabled,
-		MatchingMode: MatchingMode(req.MatchingMode),
-		NameRuleList: req.NameRuleList,
-		LACList:      req.LACList,
-		TACList:      req.TACList,
-		Description:  req.Description,
-		Operators:    operators,
-		CreatedBy:    operator,
-		UpdatedBy:    operator,
+		ID:               uuid.New(),
+		Name:             req.Name,
+		Priority:         req.Priority,
+		TargetGroupID:    &groupID,
+		Enabled:          req.Enabled,
+		MatchingMode:     MatchingMode(req.MatchingMode),
+		NameRuleList:     req.NameRuleList,
+		LACList:          req.LACList,
+		TACList:          req.TACList,
+		SerialNumberList: req.SerialNumberList, // migration 000124：SN 模式专用列表
+		Description:      req.Description,
+		Operators:        operators,
+		CreatedBy:        operator,
+		UpdatedBy:        operator,
 	}
 
 	if err := s.repo.Create(ctx, rule); err != nil {
@@ -158,7 +159,41 @@ func (s *DeviceRuleService) CreateRule(ctx context.Context, req CreateRuleReques
 	}
 
 	rule.TargetGroupName = group.Name
+
+	// 6. 异步触发一次匹配 + 入组（PRD: 创建规则立即把满足条件的设备入组，
+	//    不论 enabled 状态。enabled=false 时仅本次入组生效，后续心跳不会持续
+	//    匹配此规则；用户可在前端 ToggleRule 启用后走常规心跳路径）。
+	//
+	// fire-and-forget goroutine：不阻塞 HTTP 响应；失败 warn 不影响 CreateRule
+	// 成功。force=true 绕过 ApplyRule 内部的 !enabled 拒绝。
+	s.triggerCreateApply(rule.ID, operator)
+
 	return rule, nil
+}
+
+// triggerCreateApply CreateRule 内部异步钩子 — 起一个 goroutine 跑 force apply。
+//
+// 设计要点：
+//   - 独立 ctx + 60s 超时（apply 走 worker 队列 + 全表扫描，比心跳慢）
+//   - 触发 force=true 模式：即使 rule.enabled=false 也跑一次（满足 PRD 需求）
+//   - apply 本身已是异步（写 task 入队即返回），这里再加一层 goroutine 只是为
+//     了不阻塞 HTTP 请求 + 失败仅 warn
+func (s *DeviceRuleService) triggerCreateApply(ruleID uuid.UUID, operator string) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		task, err := s.applyRuleInternal(ctx, ruleID, ApplyRuleRequest{}, operator, true)
+		if err != nil {
+			s.logger.Warn("auto apply on rule create failed",
+				zap.String("rule_id", ruleID.String()),
+				zap.String("operator", operator),
+				zap.Error(err))
+			return
+		}
+		s.logger.Info("auto apply on rule create scheduled",
+			zap.String("rule_id", ruleID.String()),
+			zap.String("task_id", task.ID.String()))
+	}()
 }
 
 // UpdateRule 更新规则
@@ -237,6 +272,10 @@ func (s *DeviceRuleService) UpdateRule(ctx context.Context, id uuid.UUID, req Up
 	if req.TACList != nil {
 		rule.TACList = req.TACList
 	}
+	if req.SerialNumberList != nil {
+		// migration 000124：SerialNumber 模式更新；传 [] 也认为是清空意图。
+		rule.SerialNumberList = req.SerialNumberList
+	}
 	if req.Description != nil {
 		rule.Description = *req.Description
 	}
@@ -244,7 +283,7 @@ func (s *DeviceRuleService) UpdateRule(ctx context.Context, id uuid.UUID, req Up
 	rule.UpdatedBy = operator
 
 	// 3. 重新生成规则描述
-	rule.Operators = s.generateOperators(string(rule.MatchingMode), rule.NameRuleList, rule.LACList, rule.TACList)
+	rule.Operators = s.generateOperators(string(rule.MatchingMode), rule.NameRuleList, rule.LACList, rule.TACList, rule.SerialNumberList)
 
 	// 4. 保存更新
 	if err := s.repo.Update(ctx, rule); err != nil {
@@ -314,7 +353,7 @@ func (s *DeviceRuleService) ListRules(ctx context.Context, req RuleListRequest) 
 	// 填充 operators 字段（如果为空则动态生成）
 	for i := range items {
 		if items[i].Operators == "" && len(items[i].NameRuleList) > 0 {
-			items[i].Operators = s.generateOperators(string(items[i].MatchingMode), items[i].NameRuleList, items[i].LACList, items[i].TACList)
+			items[i].Operators = s.generateOperators(string(items[i].MatchingMode), items[i].NameRuleList, items[i].LACList, items[i].TACList, items[i].SerialNumberList)
 		}
 	}
 
@@ -329,11 +368,25 @@ func (s *DeviceRuleService) BatchSortRules(ctx context.Context, items []RuleSort
 	return s.repo.BatchUpdatePriority(ctx, items)
 }
 
-// ApplyRule 应用规则（异步）
+// ApplyRule 应用规则（异步）— 公开 API 入口，强制 rule.enabled=true。
+//
+// handler 端点调用此方法；CreateRule 内部钩子走 applyRuleInternal(force=true)。
 func (s *DeviceRuleService) ApplyRule(ctx context.Context, ruleID uuid.UUID, req ApplyRuleRequest, operator string) (*RuleTask, error) {
+	return s.applyRuleInternal(ctx, ruleID, req, operator, false)
+}
+
+// applyRuleInternal 应用规则的内部实现。
+//
+// force=true 时绕过 enabled 检查 — 用于 CreateRule 创建后自动跑一次"补全已存在
+// 的匹配设备入组"，即使规则状态为未启动（PRD: 创建即异步入组，与心跳路径解耦）。
+//
+// force=false 时（公开 ApplyRule 入口）严格 gate on rule.Enabled，避免管理员手
+// 动 Apply 一个被禁用的规则把不该入的设备拉进去。
+func (s *DeviceRuleService) applyRuleInternal(ctx context.Context, ruleID uuid.UUID, req ApplyRuleRequest, operator string, force bool) (*RuleTask, error) {
 	s.logger.Info("topology.rule.evaluating", // PRD §12.5 log key
 		zap.String("rule_id", ruleID.String()),
 		zap.String("operator", operator),
+		zap.Bool("force", force),
 	)
 	// 1. 获取规则
 	rule, err := s.repo.GetByID(ctx, ruleID)
@@ -341,8 +394,8 @@ func (s *DeviceRuleService) ApplyRule(ctx context.Context, ruleID uuid.UUID, req
 		return nil, err
 	}
 
-	// 2. 检查是否启用
-	if !rule.Enabled {
+	// 2. 检查是否启用（force 模式跳过 — 创建规则后允许 enabled=false 时一次性补匹配）
+	if !force && !rule.Enabled {
 		return nil, commonerrors.NewBusinessError(global.ErrCodeRuleNotEnabled, "rule is not enabled", nil)
 	}
 
@@ -354,10 +407,10 @@ func (s *DeviceRuleService) ApplyRule(ctx context.Context, ruleID uuid.UUID, req
 
 	// 4. 创建任务
 	task := &RuleTask{
-		ID:       uuid.New(),
-		RuleID:   ruleID,
-		RuleName: rule.Name,
-		Status:   "pending",
+		ID:        uuid.New(),
+		RuleID:    ruleID,
+		RuleName:  rule.Name,
+		Status:    "pending",
 		CreatedBy: operator,
 	}
 
@@ -372,6 +425,7 @@ func (s *DeviceRuleService) ApplyRule(ctx context.Context, ruleID uuid.UUID, req
 		zap.String("task_id", task.ID.String()),
 		zap.String("rule_id", ruleID.String()),
 		zap.String("rule_name", rule.Name),
+		zap.Bool("force", force),
 	)
 
 	return task, nil
@@ -476,10 +530,11 @@ func (s *DeviceRuleService) processTask(ctx context.Context, taskID uuid.UUID) {
 
 				device := devices[idx]
 				matched, err := s.matcher.matchRule(ctx, rule, MatchRequest{
-					DeviceID:   device.ID,
-					DeviceName: device.Name,
-					LAC:        device.LAC,
-					TAC:        device.TAC,
+					DeviceID:     device.ID,
+					DeviceName:   device.Name,
+					SerialNumber: device.SerialNumber, // migration 000124 SN 模式
+					LAC:          device.LAC,
+					TAC:          device.TAC,
 				})
 
 				results <- matchResult{matched: matched, err: err}
@@ -581,10 +636,11 @@ func (s *DeviceRuleService) failTask(ctx context.Context, task *RuleTask, errMsg
 
 // DeviceForMatch 用于匹配的设备信息
 type DeviceForMatch struct {
-	ID   uuid.UUID
-	Name string
-	LAC  *int
-	TAC  *int
+	ID           uuid.UUID
+	Name         string
+	SerialNumber string // migration 000124：serialNumber 匹配模式需要
+	LAC          *int
+	TAC          *int
 }
 
 // SetDeviceLister 注入设备列举器，替换默认 stub 行为。
@@ -696,8 +752,9 @@ func (s *DeviceRuleService) handleDeviceRegistered(ctx context.Context, evt even
 	for i := range rules {
 		rule := &rules[i]
 		matched, err := s.matcher.matchRule(ctx, rule, MatchRequest{
-			DeviceID:   payload.DeviceID,
-			DeviceName: payload.SerialNumber,
+			DeviceID:     payload.DeviceID,
+			DeviceName:   payload.SerialNumber,
+			SerialNumber: payload.SerialNumber, // migration 000124 SN 模式
 		})
 		if err != nil {
 			s.logger.Warn("match rule failed",
@@ -798,13 +855,18 @@ func (m *DeviceMatcher) matchRule(ctx context.Context, rule *DeviceRule, req Mat
 			return false, nil
 		}
 		return m.matchByCode(rule.TACList, *req.TAC), nil
+	case MatchingModeSerialNumber:
+		if req.SerialNumber == "" {
+			return false, nil
+		}
+		return m.matchBySerialNumber(rule.SerialNumberList, req.SerialNumber), nil
 	default:
 		return false, nil
 	}
 }
 
 // generateOperators 生成规则描述
-func (s *DeviceRuleService) generateOperators(mode string, nameRules []NameRule, lacList, tacList []int) string {
+func (s *DeviceRuleService) generateOperators(mode string, nameRules []NameRule, lacList, tacList []int, snList []string) string {
 	switch mode {
 	case "deviceName", "and", "or":
 		return s.generateNameOperators(nameRules)
@@ -812,6 +874,12 @@ func (s *DeviceRuleService) generateOperators(mode string, nameRules []NameRule,
 		return fmt.Sprintf("LAC: %v", lacList)
 	case "tac":
 		return fmt.Sprintf("TAC: %v", tacList)
+	case "serialNumber":
+		// migration 000124：精确成员列表，截断超长以防 UI 撑爆。
+		if len(snList) > 5 {
+			return fmt.Sprintf("SN(%d): %v ...", len(snList), snList[:5])
+		}
+		return fmt.Sprintf("SN(%d): %v", len(snList), snList)
 	}
 	return ""
 }

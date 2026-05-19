@@ -38,7 +38,8 @@ func NewPgDeviceLister(pool *pgxpool.Pool, logger *zap.Logger) *PgDeviceLister {
 // （PRD §7 反例监控目标 cron CPU < 50% 隐含分批要求）— 后续优化项。
 func (l *PgDeviceLister) ListAllForRuleEval(ctx context.Context) ([]DeviceForMatch, error) {
 	const sqlText = `
-		SELECT d.id, COALESCE(NULLIF(di.device_name, ''), d.serial_number) AS name
+		SELECT d.id, COALESCE(NULLIF(di.device_name, ''), d.serial_number) AS name,
+		       d.serial_number
 		FROM devices d
 		LEFT JOIN device_info di ON di.device_id = d.id
 	`
@@ -52,7 +53,8 @@ func (l *PgDeviceLister) ListAllForRuleEval(ctx context.Context) ([]DeviceForMat
 	devices := make([]DeviceForMatch, 0)
 	for rows.Next() {
 		var d DeviceForMatch
-		if err := rows.Scan(&d.ID, &d.Name); err != nil {
+		// migration 000124：补 serial_number 字段供 SN 模式匹配。
+		if err := rows.Scan(&d.ID, &d.Name, &d.SerialNumber); err != nil {
 			return nil, fmt.Errorf("scan device row: %w", err)
 		}
 		devices = append(devices, d)

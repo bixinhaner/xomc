@@ -8,48 +8,51 @@ import (
 
 // DeviceRule 设备归属规则
 type DeviceRule struct {
-	ID            uuid.UUID   `json:"id"`
-	Name          string      `json:"name"`
-	Priority      int         `json:"priority"`
-	TargetGroupID *uuid.UUID  `json:"target_group_id,omitempty"`
-	TargetGroupName string    `json:"target_group_name,omitempty"`
-	Enabled       bool        `json:"enabled"`
-	MatchingMode  MatchingMode `json:"matching_mode,omitempty"`
-	NameRuleList  []NameRule  `json:"name_rule_list,omitempty"`
-	LACList       []int       `json:"lac_list,omitempty"`
-	TACList       []int       `json:"tac_list,omitempty"`
-	Description   string      `json:"description,omitempty"`
-	Operators     string      `json:"operators"` // 生成的规则描述
-	CreatedBy     string      `json:"created_by,omitempty"`
-	UpdatedBy     string      `json:"updated_by,omitempty"`
-	CreatedAt     time.Time   `json:"created_at"`
-	UpdatedAt     time.Time   `json:"updated_at"`
+	ID               uuid.UUID    `json:"id"`
+	Name             string       `json:"name"`
+	Priority         int          `json:"priority"`
+	TargetGroupID    *uuid.UUID   `json:"target_group_id,omitempty"`
+	TargetGroupName  string       `json:"target_group_name,omitempty"`
+	Enabled          bool         `json:"enabled"`
+	MatchingMode     MatchingMode `json:"matching_mode,omitempty"`
+	NameRuleList     []NameRule   `json:"name_rule_list,omitempty"`
+	LACList          []int        `json:"lac_list,omitempty"`
+	TACList          []int        `json:"tac_list,omitempty"`
+	SerialNumberList []string     `json:"serial_number_list,omitempty"` // serialNumber 模式（migration 000124）
+	Description      string       `json:"description,omitempty"`
+	Operators        string       `json:"operators"` // 生成的规则描述
+	CreatedBy        string       `json:"created_by,omitempty"`
+	UpdatedBy        string       `json:"updated_by,omitempty"`
+	CreatedAt        time.Time    `json:"created_at"`
+	UpdatedAt        time.Time    `json:"updated_at"`
 }
 
 // CreateRuleRequest 创建规则请求
 type CreateRuleRequest struct {
-	Name          string       `json:"name" binding:"required"`
-	Priority      int          `json:"priority"`
-	TargetGroupID string       `json:"target_group_id" binding:"required"`
-	Enabled       bool         `json:"enabled"`
-	MatchingMode  string       `json:"matching_mode" binding:"required"`
-	NameRuleList  []NameRule   `json:"name_rule_list"`
-	LACList       []int        `json:"lac_list"`
-	TACList       []int        `json:"tac_list"`
-	Description   string       `json:"description"`
+	Name             string     `json:"name" binding:"required"`
+	Priority         int        `json:"priority"`
+	TargetGroupID    string     `json:"target_group_id" binding:"required"`
+	Enabled          bool       `json:"enabled"`
+	MatchingMode     string     `json:"matching_mode" binding:"required"`
+	NameRuleList     []NameRule `json:"name_rule_list"`
+	LACList          []int      `json:"lac_list"`
+	TACList          []int      `json:"tac_list"`
+	SerialNumberList []string   `json:"serial_number_list"`
+	Description      string     `json:"description"`
 }
 
 // UpdateRuleRequest 更新规则请求
 type UpdateRuleRequest struct {
-	Name          *string      `json:"name"`
-	Priority      *int         `json:"priority"`
-	TargetGroupID *string      `json:"target_group_id"`
-	Enabled       *bool        `json:"enabled"`
-	MatchingMode  *string      `json:"matching_mode"`
-	NameRuleList  []NameRule   `json:"name_rule_list"`
-	LACList       []int        `json:"lac_list"`
-	TACList       []int        `json:"tac_list"`
-	Description   *string      `json:"description"`
+	Name             *string    `json:"name"`
+	Priority         *int       `json:"priority"`
+	TargetGroupID    *string    `json:"target_group_id"`
+	Enabled          *bool      `json:"enabled"`
+	MatchingMode     *string    `json:"matching_mode"`
+	NameRuleList     []NameRule `json:"name_rule_list"`
+	LACList          []int      `json:"lac_list"`
+	TACList          []int      `json:"tac_list"`
+	SerialNumberList []string   `json:"serial_number_list"`
+	Description      *string    `json:"description"`
 }
 
 // RuleListRequest 规则列表查询请求
