@@ -295,6 +295,44 @@ func (r *PgTaskRepository) ListPendingAllDevices(ctx context.Context, limit int)
 	return tasks, nil
 }
 
+// ListExpiredCandidates 查找已过期但仍处于活跃态(pending/sent)的任务（T-0157 C2）。
+//
+// 条件：expires_at IS NOT NULL AND expires_at < now() AND status IN (pending, sent)。
+// 排序：expires_at ASC（最早过期的先处理）。limit > 0 时限制单批数量防 worker 长事务。
+//
+// 调用方（worker/task_sweeper）拿到后调 task.MarkExpired + Update + publish task.expired。
+func (r *PgTaskRepository) ListExpiredCandidates(ctx context.Context, now time.Time, limit int) ([]*Task, error) {
+	q := storage.Psql.Select(taskColumns()...).
+		From("device_tasks").
+		Where(sq.NotEq{"expires_at": nil}).
+		Where(sq.Lt{"expires_at": now}).
+		Where(sq.Eq{"status": []TaskStatus{TaskStatusPending, TaskStatusSent}}).
+		OrderBy("expires_at ASC")
+	if limit > 0 {
+		q = q.Limit(uint64(limit))
+	}
+	query, args, err := q.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list expired query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query expired tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*Task
+	for rows.Next() {
+		t, err := r.scanTaskRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, nil
+}
+
 // Delete 删除任务
 func (r *PgTaskRepository) Delete(ctx context.Context, id string) error {
 	query, args, err := storage.Psql.Delete("device_tasks").

@@ -217,8 +217,10 @@ DLEarfcn: 55340 → 55320
      sweep_interval_seconds: 10       # expired 扫描周期
    ```
 2. **CreateTask 默认值兜底**：若 `req.ExpiresIn == 0` 且配置中有默认值，用配置默认值；调用方可显式传 0 表示"永不超时"（仅限运维场景，必须显式声明）。各业务保留覆盖能力（如告警同步仍可传 600）
-3. **worker 进程新增扫描器**：周期扫 `ExpiresAt < now() AND status IN ('pending', 'sent')` 的 task → `MarkExpired` + publish `task.expired` 事件 → 消息中心 subscriber 自动接到
+3. **worker 进程新增扫描器**：周期扫 `ExpiresAt < now() AND status IN ('pending', 'sent')` 的 task → `MarkExpired` + publish 终态事件 → 消息中心 subscriber 自动接到
 4. 现有 ops / alarm 等硬编码 `ExpiresIn` 的位置**保留**（业务定制值），不强行替换为全局默认
+
+> **C2 实施期发现**：`SubjectForStatus(expired)` 已映射到 `event.SubjectTaskFailed`（与 failed 共用 NATS 主题）。新建独立 `task.expired` 主题会牵动 CompletionRouter / event_bridge 等订阅方，零侵入价值不大。**实际做法**：sweeper 直接复用现有 `notifyCompletion` 路径走 `task.failed` 主题；消息中心 subscriber 收到事件后**按 task.Status 字段**区分 `failed` vs `expired`（C5 实施时按此对接）。订阅器逻辑简单一行 switch，比新增主题省事。
 
 **为什么默认 120s**
 

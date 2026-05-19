@@ -187,6 +187,23 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	}
 	logger.Info("reboot task closer started")
 
+	// T-0157 C2: 任务过期扫描器 — 周期把 expires_at < now 且仍 pending/sent 的任务标记为 expired，
+	// 并 publish 终态事件供消息中心订阅器消费（事件复用 task.failed 主题，订阅器按 status 区分）。
+	// SweepInterval <= 0 时跳过启动（生产配置见 cmd/app/etc/config.*.yaml task 段）。
+	if cfg.Task.SweepIntervalSeconds > 0 {
+		taskSweeper := task.NewExpiredSweeper(
+			w.TaskRepo, w.TaskService,
+			time.Duration(cfg.Task.SweepIntervalSeconds)*time.Second,
+			0, // batchSize 默认 100
+			logger,
+		)
+		go taskSweeper.Run(context.Background())
+		logger.Info("task expired sweeper started (T-0157 C2)",
+			zap.Int("interval_seconds", cfg.Task.SweepIntervalSeconds))
+	} else {
+		logger.Info("task expired sweeper disabled (sweep_interval_seconds <= 0)")
+	}
+
 	// MR Collector
 	mrStore := mr.NewPgMRStore(w.PgPool, w.TsPool)
 	mrCollector := mrcollector.NewMRCollector(w.MinIO, cfg.MinIO.Buckets.MRFiles, mrStore, w.EventBus, logger)

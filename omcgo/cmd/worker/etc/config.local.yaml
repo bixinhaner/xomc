@@ -47,6 +47,11 @@ minio:
     exchange: "omc-exchange"
     ui_assets: "ui-assets"
 
+# T-0157 C2: 任务过期扫描器配置
+task:
+  default_expires_in_seconds: 120
+  sweep_interval_seconds: 10
+
 metrics:
   port: 9092
 

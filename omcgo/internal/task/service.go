@@ -308,6 +308,46 @@ func (s *TaskService) MarkTaskFailed(ctx context.Context, taskID string, errorCo
 	return nil
 }
 
+// ExpireTask 把单个任务标记为 expired（T-0157 C2）。
+//
+// 与 MarkTaskFailed 不同：调用方已通过 repo.ListExpiredCandidates 持有完整 Task 对象，
+// 跳过 GetByID 一次往返。流程：MarkExpired → repo.Update → queue.Delete（可能已被 popper
+// 清掉，warn 不中断）→ metrics 计数 → notifyCompletion 广播（复用 task.failed 主题，
+// 订阅器按 task.Status 区分 failed / expired —— 详见 SubjectForStatus）。
+//
+// 用于 worker 进程的 ExpiredSweeper；其他场景请用 MarkTaskFailed 走 Redis 真相源。
+func (s *TaskService) ExpireTask(ctx context.Context, task *Task) error {
+	if task == nil {
+		return nil
+	}
+	task.MarkExpired()
+	if err := s.repo.Update(ctx, task); err != nil {
+		return fmt.Errorf("update task to expired: %w", err)
+	}
+	if err := s.queue.Delete(ctx, task.ID); err != nil {
+		s.logger.Warn("queue delete expired task",
+			zap.String("task_id", task.ID),
+			zap.Error(err))
+	}
+	if s.metrics != nil {
+		s.metrics.CompletedTotal.WithLabelValues("expired").Inc()
+		s.metrics.PendingTotal.Dec()
+	}
+	s.logger.Info("task expired by sweeper",
+		zap.String("task_id", task.ID),
+		zap.String("device_sn", task.DeviceSN),
+		zap.Time("expires_at", deref(task.ExpiresAt)))
+	s.notifyCompletion(ctx, task)
+	return nil
+}
+
+func deref(t *time.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return *t
+}
+
 // CancelTask 取消任务
 func (s *TaskService) CancelTask(ctx context.Context, taskID string) error {
 	task, err := s.GetTask(ctx, taskID)

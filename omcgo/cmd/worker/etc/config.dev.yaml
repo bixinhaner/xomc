@@ -48,6 +48,12 @@ minio:
     ui_assets: "ui-assets"
     trace_bulk: "trace-bulk"
 
+# T-0157 C2: 任务过期扫描器配置（worker 进程消费）。
+# default_expires_in_seconds 在 worker 不使用（CreateTask 在 app 端兜底），保留占位让两端一致。
+task:
+  default_expires_in_seconds: 120
+  sweep_interval_seconds: 10
+
 metrics:
   port: 9092
 

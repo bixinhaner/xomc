@@ -469,6 +469,7 @@ type WorkerConfig struct {
 	Redis           RedisConfig    `mapstructure:"redis"`
 	NATS            NATSConfig     `mapstructure:"nats"`
 	MinIO           MinIOConfig    `mapstructure:"minio"`
+	Task            TaskConfig     `mapstructure:"task"` // T-0157 C2: 任务过期扫描器配置
 	Metrics         MetricsConfig  `mapstructure:"metrics"`
 	Tracer          TracerConfig   `mapstructure:"tracer"`
 	Log             LogConfig      `mapstructure:"log"`
