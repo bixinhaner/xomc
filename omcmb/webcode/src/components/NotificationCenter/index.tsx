@@ -176,19 +176,23 @@ function NotificationItem({ item, onClick }: ItemProps) {
       <div style={{ display: 'flex', gap: 10, width: '100%' }}>
         <div style={{ paddingTop: 2, fontSize: 18, color, flexShrink: 0 }}>{icon}</div>
         <div style={{ flex: 1, minWidth: 0 }}>
+          {/* 标题完整显示 —— 长内容自动换行（含 break-all 处理 device SN 等连续字符） */}
           <Text
             strong={!item.isRead}
             type={item.isRead ? 'secondary' : undefined}
-            style={{ display: 'block' }}
-            ellipsis={{ tooltip: item.title }}
+            style={{ display: 'block', whiteSpace: 'normal', wordBreak: 'break-all' }}
           >
             {item.title}
           </Text>
           {item.content ? (
             <Paragraph
               type="secondary"
-              style={{ fontSize: 12, margin: '4px 0', whiteSpace: 'pre-line' }}
-              ellipsis={{ rows: 3, tooltip: item.content }}
+              style={{
+                fontSize: 12,
+                margin: '4px 0',
+                whiteSpace: 'pre-line',
+                wordBreak: 'break-all',
+              }}
             >
               {item.content}
             </Paragraph>
