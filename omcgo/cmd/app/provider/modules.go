@@ -461,6 +461,9 @@ func initMiscModules(c *Container) error {
 	// Notification module
 	notifRepo := notification.NewPgRepository(c.PgPool)
 	notifService := notification.NewService(notifRepo, messageHub, logger)
+	// T-0157 stale sync: 注入 task lookup 让 SyncStaleByUser 能反查 task 状态修正卡死消息。
+	// 用 task.PgTaskRepository (复用同一 PgPool；适配器避免 notification → task 直接依赖)。
+	notifService.SetStaleTaskLookup(task.NewStaleNotificationLookup(task.NewPgTaskRepository(c.PgPool)))
 	c.miscDeps.notificationHandler = notification.NewHandler(notifService, logger)
 
 	// W2.A.4 / T-0043: Notification template + history submodules

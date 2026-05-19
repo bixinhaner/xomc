@@ -257,6 +257,57 @@ func (r *PgRepository) GetUnreadCount(ctx context.Context, userID string) (int64
 	return count, nil
 }
 
+// ListStaleByUser 列出当前用户非终态 (queued/sent) 且带 dedup_key 的消息 (T-0157 stale sync)。
+// 用于 Popover 打开时反查 task 实际状态修正卡死消息（典型场景：subscriber 启动前
+// publish 的事件丢失，消息永远卡 queued）。
+func (r *PgRepository) ListStaleByUser(ctx context.Context, userID string) ([]Notification, error) {
+	query, args, err := storage.Psql.Select(notifColumns...).
+		From("notifications").
+		Where(sq.Eq{"user_id": userID}).
+		Where(sq.Eq{"status": []NotificationStatus{StatusQueued, StatusSent}}).
+		Where(sq.NotEq{"dedup_key": nil}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list stale SQL: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list stale notifications: %w", err)
+	}
+	defer rows.Close()
+	var out []Notification
+	for rows.Next() {
+		n, err := scanNotification(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *n)
+	}
+	return out, nil
+}
+
+// UpdateStatusByID 局部更新 status / priority / title / content (T-0157 stale sync)。
+// 不动 is_read / read_at / created_at / user_id / dedup_key 等核心字段。
+func (r *PgRepository) UpdateStatusByID(
+	ctx context.Context, id uuid.UUID,
+	status NotificationStatus, priority NotificationPriority, title, content string,
+) error {
+	query, args, err := storage.Psql.Update("notifications").
+		Set("status", status).
+		Set("priority", priority).
+		Set("title", title).
+		Set("content", content).
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update-status SQL: %w", err)
+	}
+	if _, err := r.pool.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("update notification status: %w", err)
+	}
+	return nil
+}
+
 // DeleteAllByUser 删除当前用户的全部消息 (T-0157 C4)。
 // 一行 SQL：DELETE FROM notifications WHERE user_id = ?；返回受影响行数。
 func (r *PgRepository) DeleteAllByUser(ctx context.Context, userID string) (int64, error) {

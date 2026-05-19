@@ -14,9 +14,10 @@ import (
 
 // Service provides business logic for notification management.
 type Service struct {
-	repo   Repository
-	hub    *events.MessageHub
-	logger *zap.Logger
+	repo       Repository
+	hub        *events.MessageHub
+	logger     *zap.Logger
+	staleTask  StaleTaskLookup // T-0157 stale sync; nil=禁用 SyncStaleByUser
 }
 
 // NewService creates a new notification Service.
@@ -89,6 +90,121 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID, userID string) error
 // DeleteAllByUser 删除当前用户的全部消息 (T-0157 C4)。返回删除数。
 func (s *Service) DeleteAllByUser(ctx context.Context, userID string) (int64, error) {
 	return s.repo.DeleteAllByUser(ctx, userID)
+}
+
+// StaleTaskLookup 抽象 task 表查询，便于单测 mock。
+// 实现端 = task.PgTaskRepository.GetByID 的包装（避免 notification → task 直接依赖）。
+type StaleTaskLookup interface {
+	LookupTaskStatus(ctx context.Context, taskID string) (status string, errMsg string, found bool, err error)
+}
+
+// SetStaleTaskLookup 注入 task 状态查询器（T-0157 stale sync）。
+// 由 cmd/app/bootstrap.go 在 wire 时调用，注入 task.PgTaskRepository 的适配器。
+func (s *Service) SetStaleTaskLookup(l StaleTaskLookup) {
+	s.staleTask = l
+}
+
+// SyncStaleByUser 拉当前用户所有非终态 (queued/sent) 消息，反查对应 task 实际状态。
+// 若 task 已终态且与 notification 状态不一致 → 更新 notification (T-0157 stale sync)。
+// 用于 Popover 打开 / 用户主动刷新场景，兜底 subscriber 漏接事件导致的卡死消息。
+// 返回更新条数。
+func (s *Service) SyncStaleByUser(ctx context.Context, userID string) (int, error) {
+	if s.staleTask == nil {
+		return 0, nil // 未注入查询器，no-op
+	}
+	stale, err := s.repo.ListStaleByUser(ctx, userID)
+	if err != nil {
+		return 0, fmt.Errorf("list stale: %w", err)
+	}
+	updated := 0
+	for _, n := range stale {
+		if n.DedupKey == nil || *n.DedupKey == "" {
+			continue
+		}
+		status, errMsg, found, err := s.staleTask.LookupTaskStatus(ctx, *n.DedupKey)
+		if err != nil {
+			s.logger.Warn("lookup task for stale sync", zap.String("task_id", *n.DedupKey), zap.Error(err))
+			continue
+		}
+		if !found {
+			// task 已被 PurgeOldTasks 清掉但消息仍在 → 标 expired（视为运行期超时无人收尾）
+			if err := s.repo.UpdateStatusByID(ctx, n.ID, StatusExpired, PriorityHigh,
+				n.Title+"（任务记录已过期）", n.Content); err != nil {
+				s.logger.Warn("update stale notification (task gone)", zap.Error(err))
+				continue
+			}
+			updated++
+			continue
+		}
+		// task 还在运行（pending/sent），状态没变，跳过
+		if status == "pending" || status == "sent" {
+			continue
+		}
+		// task 已终态，映射回 notification 状态 + 升 priority
+		var ns NotificationStatus
+		var prio NotificationPriority
+		switch status {
+		case "completed":
+			ns = StatusCompleted
+			prio = PriorityNormal
+		case "failed":
+			ns = StatusFailed
+			prio = PriorityHigh
+		case "expired":
+			ns = StatusExpired
+			prio = PriorityHigh
+		case "cancelled":
+			ns = StatusCancelled
+			prio = PriorityNormal
+		default:
+			continue
+		}
+		// 标题中"进行中"→ 实际状态对应中文（简单替换；UI 视觉以 status 字段为准）
+		title := replaceStatusVerb(n.Title, ns)
+		content := n.Content
+		if (ns == StatusFailed || ns == StatusExpired) && errMsg != "" && content == "" {
+			content = "错误：" + errMsg
+		}
+		if err := s.repo.UpdateStatusByID(ctx, n.ID, ns, prio, title, content); err != nil {
+			s.logger.Warn("update stale notification", zap.String("task_id", *n.DedupKey), zap.Error(err))
+			continue
+		}
+		updated++
+	}
+	return updated, nil
+}
+
+// replaceStatusVerb 把标题里的"进行中"替换为终态文案。
+// 与 task_subscriber.statusVerb 保持一致。
+func replaceStatusVerb(title string, s NotificationStatus) string {
+	verb := "已完成"
+	switch s {
+	case StatusFailed:
+		verb = "失败"
+	case StatusExpired:
+		verb = "超时"
+	case StatusCancelled:
+		verb = "已取消"
+	}
+	// 简单字符串替换：原 title 含"· 进行中 ·"
+	return replaceOnce(title, "· 进行中 ·", "· "+verb+" ·")
+}
+
+func replaceOnce(s, old, new string) string {
+	i := indexOf(s, old)
+	if i < 0 {
+		return s
+	}
+	return s[:i] + new + s[i+len(old):]
+}
+
+func indexOf(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
 }
 
 // pushSSEEvent publishes a notification event to the user's SSE channel.

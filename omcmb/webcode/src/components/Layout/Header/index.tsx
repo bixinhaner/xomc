@@ -9,7 +9,7 @@ import {
   MenuUnfoldOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '@core/store/appStore';
-import { useNotificationUnreadCount } from '@core/hooks/api/useNotificationCenter';
+import { useNotificationUnreadCount, useSyncStaleNotifications } from '@core/hooks/api/useNotificationCenter';
 import { useResponsive } from '@/hooks/useResponsive';
 import { useT } from '@/hooks/useT';
 import NotificationCenter from '@/components/NotificationCenter';
@@ -40,6 +40,8 @@ export default function Header() {
   const [notifOpen, setNotifOpen] = useState(false);
   const unreadQuery = useNotificationUnreadCount();
   const unreadCount = unreadQuery.data ?? 0;
+  // T-0157 stale sync: 打开 Popover 时反查 task 状态修正卡死的 queued/sent 消息
+  const syncStale = useSyncStaleNotifications();
 
   const deviceLabel = DEVICE_TYPE_KEY[deviceType] ? t(DEVICE_TYPE_KEY[deviceType]) : deviceType;
 
@@ -93,7 +95,13 @@ export default function Header() {
           trigger="click"
           placement="bottomRight"
           open={notifOpen}
-          onOpenChange={setNotifOpen}
+          onOpenChange={(open) => {
+            setNotifOpen(open);
+            // 打开时触发 stale sync — 失败不阻塞列表加载（hook 内部 onSuccess 自动 invalidate）
+            if (open) {
+              syncStale.mutate();
+            }
+          }}
           content={<NotificationCenter onClose={() => setNotifOpen(false)} />}
           overlayInnerStyle={{ padding: 0 }}
         >

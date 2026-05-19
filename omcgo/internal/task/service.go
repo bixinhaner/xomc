@@ -720,6 +720,30 @@ func (s *TaskService) notifyCompletion(ctx context.Context, task *Task) {
 	}
 }
 
+// StaleNotificationLookup 实现 notification.StaleTaskLookup 接口（T-0157 stale sync）。
+// 把 PgTaskRepository.GetByID 包装成与 notification 包解耦的查询函数，
+// 解决"消息中心 stale sync 要反查 task 状态"的跨包依赖（notification → task 单向）。
+type StaleNotificationLookup struct {
+	repo *PgTaskRepository
+}
+
+func NewStaleNotificationLookup(repo *PgTaskRepository) *StaleNotificationLookup {
+	return &StaleNotificationLookup{repo: repo}
+}
+
+// LookupTaskStatus 返回 task 的当前 status / error message。
+// found=false 表示 task 已不存在（被 PurgeOldTasks 清理 / 测试数据被重置等）。
+func (l *StaleNotificationLookup) LookupTaskStatus(ctx context.Context, taskID string) (string, string, bool, error) {
+	t, err := l.repo.GetByID(ctx, taskID)
+	if err != nil {
+		return "", "", false, err
+	}
+	if t == nil {
+		return "", "", false, nil
+	}
+	return string(t.Status), t.ErrorMessage, true, nil
+}
+
 // SubjectForStatus maps a terminal TaskStatus to its event subject.
 // Returns "" for non-terminal statuses so callers can skip publishing.
 func SubjectForStatus(status TaskStatus) string {

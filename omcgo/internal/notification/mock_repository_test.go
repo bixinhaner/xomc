@@ -236,5 +236,39 @@ func (m *mockRepository) DeleteAllByUser(_ context.Context, userID string) (int6
 	return deleted, nil
 }
 
+// ListStaleByUser T-0157 stale sync mock。
+func (m *mockRepository) ListStaleByUser(_ context.Context, userID string) ([]Notification, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []Notification
+	for _, n := range m.items {
+		if n.UserID != userID {
+			continue
+		}
+		if n.Status != StatusQueued && n.Status != StatusSent {
+			continue
+		}
+		if n.DedupKey == nil || *n.DedupKey == "" {
+			continue
+		}
+		out = append(out, *n)
+	}
+	return out, nil
+}
+
+// UpdateStatusByID T-0157 stale sync mock。
+func (m *mockRepository) UpdateStatusByID(_ context.Context, id uuid.UUID,
+	status NotificationStatus, priority NotificationPriority, title, content string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if n, ok := m.items[id]; ok {
+		n.Status = status
+		n.Priority = priority
+		n.Title = title
+		n.Content = content
+	}
+	return nil
+}
+
 // errBoom is a shared sentinel for failure-path testing.
 var errBoom = errors.New("boom")

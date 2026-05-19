@@ -118,4 +118,18 @@ export const notificationCenterService = {
     items = [];
     return n;
   },
+
+  async syncStale(): Promise<number> {
+    await delay(30, 80);
+    // mock: 假装把 queued/sent 升级到 completed
+    let updated = 0;
+    items = items.map((n) => {
+      if (n.status === 'queued' || n.status === 'sent') {
+        updated++;
+        return { ...n, status: 'completed' as const, title: n.title.replace('· 进行中 ·', '· 已完成 ·') };
+      }
+      return n;
+    });
+    return updated;
+  },
 };

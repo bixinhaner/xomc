@@ -19,6 +19,7 @@ type appInfra struct {
 	*components.Infra
 	Carriers *carrier.CarrierRegistry
 	TaskSvc  *task.TaskService
+	NotifSvc *notification.Service // T-0157 stale sync: handler 需复用同一实例（已注入 task lookup）
 }
 
 // initApp initializes all infrastructure for the main application.
@@ -66,6 +67,9 @@ func initApp(ctx context.Context, cfg *appconfig.AppConfig) (*appInfra, error) {
 	notifRepo := notification.NewPgRepository(inf.PgPool)
 	notifSvc := notification.NewService(notifRepo, nil, inf.Logger)
 	app.TaskSvc.SetCreateFailureNotifier(notification.NewCreateFailureNotifier(notifSvc, inf.Logger))
+	// T-0157 stale sync: 注入 task lookup 让 SyncStaleByUser 能反查 task 状态修正卡死消息。
+	notifSvc.SetStaleTaskLookup(task.NewStaleNotificationLookup(taskRepo))
+	app.NotifSvc = notifSvc
 
 	return app, nil
 }

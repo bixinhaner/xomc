@@ -117,4 +117,14 @@ export const notificationCenterApi = {
     const { data } = await http.delete<{ deleted: number }>('/notifications');
     return data.deleted;
   },
+
+  /**
+   * 反查 task 状态修正卡死消息（T-0157 stale sync）。
+   * 用于 Popover 打开时兜底 — 后端 subscriber 漏接事件导致的 queued/sent 消息会被同步到当前 task 状态。
+   * 返回更新条数。
+   */
+  async syncStale(): Promise<number> {
+    const { data } = await http.post<{ updated: number }>('/notifications/sync-stale');
+    return data.updated;
+  },
 };

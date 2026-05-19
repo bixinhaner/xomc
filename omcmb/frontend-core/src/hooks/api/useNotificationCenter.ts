@@ -109,3 +109,20 @@ export function useClearAllNotifications() {
     },
   });
 }
+
+/**
+ * 反查 task 状态修正卡死消息（T-0157 stale sync）。
+ * 用法：NotificationCenter Popover onOpenChange(true) 时调用一次。
+ * onSuccess 时 invalidate notifications 让 UI 拉到最新状态。
+ */
+export function useSyncStaleNotifications() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.syncStale(),
+    onSuccess: (updated) => {
+      if (updated > 0) {
+        void qc.invalidateQueries({ queryKey: notificationKeys.all });
+      }
+    },
+  });
+}
