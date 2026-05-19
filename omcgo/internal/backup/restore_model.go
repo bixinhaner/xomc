@@ -37,4 +37,11 @@ type RestoreTask struct {
 	CreatedAt         time.Time     `json:"created_at"`
 	UpdatedAt         time.Time     `json:"updated_at"`
 	CreatedBy         *string       `json:"created_by,omitempty"`
+
+	// M1 of backup-restore-alignment-plan: 运营商规范字段，全部可空。
+	TaskSeq      *int64  `json:"task_seq,omitempty"`
+	TaskName     *string `json:"task_name,omitempty"`
+	TaskResult   *int16  `json:"task_result,omitempty"`
+	OperatorCode *string `json:"operator_code,omitempty"`
+	CreateUser   *string `json:"create_user,omitempty"`
 }

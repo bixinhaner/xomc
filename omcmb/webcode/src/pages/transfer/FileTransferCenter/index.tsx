@@ -781,9 +781,17 @@ export default function FileTransferCenter() {
   }, [drawerDeviceCandidates, drawerProductType, drawerProductTypeOptions, drawerTaskType, firmwareOptions, selectedDrawerDeviceIds, taskDrawerOpen, taskForm]);
 
   const handleCreateTask = async () => {
+    // 防止用户连续点击「创建」按钮重复提交：mutation 进行中直接忽略后续点击。
+    // 仅靠按钮 loading 不够 —— validateFields 是异步的，期间 isPending 仍为 false。
+    if (createTaskMutation.isPending) {
+      return;
+    }
     const values = await taskForm.validateFields();
     if (selectedDrawerDeviceIds.length === 0) {
       void message.warning('请选择设备。');
+      return;
+    }
+    if (createTaskMutation.isPending) {
       return;
     }
     await createTaskMutation.mutateAsync({

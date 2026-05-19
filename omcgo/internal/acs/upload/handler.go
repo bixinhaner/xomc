@@ -267,7 +267,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// backup_tasks.file_path. Decoupled via EventBus to keep the ACS process
 	// from importing backup module directly.
 	if ft == tr069.FileTypeConfig && h.eventBus != nil {
-		h.publishBackupFileReceivedEvent(ctx, bucket, objectPath, filename, info.Size)
+		h.publishBackupFileReceivedEvent(ctx, bucket, objectPath, filename, info.Size, info.ETag)
 	}
 
 	// 6.3. For station log uploads (FileType "6" running log, "8" fault log),
@@ -518,10 +518,20 @@ func (c *countingReader) Read(p []byte) (int, error) {
 // Filenames not matching the pattern still publish the event with empty
 // backup_task_id_prefix; the subscriber treats that as "no-match skip" and
 // won't error — this preserves operator-uploaded ad-hoc config files (rare).
+//
+// M1 of backup-restore-alignment-plan: 透传 MinIO ETag 作为 MD5。单块 PutObject
+// 下 ETag = MD5(hex)；multipart 上传时 ETag 带 `-N` 后缀，订阅者据此过滤。
 func (h *Handler) publishBackupFileReceivedEvent(
-	ctx context.Context, bucket, objectPath, filename string, fileSize int64,
+	ctx context.Context, bucket, objectPath, filename string, fileSize int64, etag string,
 ) {
 	taskIDPrefix, deviceSN := parseBackupFilename(filename)
+
+	// 仅当 ETag 形如 32-hex 字符串时视为可信 MD5；multipart ETag 形如
+	// "xxxxxxxxx-N" — 后缀带块数，与 MD5 不符。
+	md5 := ""
+	if isHexMD5(etag) {
+		md5 = etag
+	}
 
 	payload := map[string]interface{}{
 		"bucket":                bucket,
@@ -530,6 +540,7 @@ func (h *Handler) publishBackupFileReceivedEvent(
 		"backup_task_id_prefix": taskIDPrefix,
 		"device_sn":             deviceSN,
 		"file_size":             fileSize,
+		"md5":                   md5,
 	}
 
 	evt, err := event.NewEvent(event.SubjectBackupFileReceived, payload)
@@ -545,6 +556,24 @@ func (h *Handler) publishBackupFileReceivedEvent(
 		zap.String("path", objectPath),
 		zap.String("backup_task_id_prefix", taskIDPrefix),
 		zap.String("device_sn", deviceSN))
+}
+
+// isHexMD5 reports whether s 由 32 位十六进制字符组成 (大小写均可)。
+func isHexMD5(s string) bool {
+	if len(s) != 32 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= '0' && c <= '9':
+		case c >= 'a' && c <= 'f':
+		case c >= 'A' && c <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // backupFilenameRe matches the executor's `backup-{taskID8}-{deviceSN}.xml`

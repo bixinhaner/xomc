@@ -23,6 +23,8 @@ var taskColumns = []string{
 	"id", "task_type", "target_type", "target_ids",
 	"status", "progress", "file_path", "error_message",
 	"started_at", "completed_at", "created_at", "updated_at",
+	// M1 alignment columns — appended at end so scanTask just appends targets.
+	"task_seq", "task_name", "task_result", "operator_code", "create_user",
 }
 
 var scheduleColumns = []string{
@@ -49,11 +51,14 @@ func NewPgTaskRepository(pool *pgxpool.Pool) *PgTaskRepository {
 func (r *PgTaskRepository) Create(ctx context.Context, task *BackupTask) error {
 	targetIDsJSON, _ := json.Marshal(task.TargetIDs)
 
+	// task_seq is auto-generated (BIGSERIAL); operator never supplies it.
 	query, args, err := storage.Psql.Insert("backup_tasks").
 		Columns("task_type", "target_type", "target_ids", "status", "progress",
-			"file_path", "error_message", "started_at", "completed_at").
+			"file_path", "error_message", "started_at", "completed_at",
+			"task_name", "task_result", "operator_code", "create_user").
 		Values(task.TaskType, task.TargetType, targetIDsJSON, task.Status, task.Progress,
-			task.FilePath, task.ErrorMessage, task.StartedAt, task.CompletedAt).
+			task.FilePath, task.ErrorMessage, task.StartedAt, task.CompletedAt,
+			task.TaskName, task.TaskResult, task.OperatorCode, task.CreateUser).
 		Suffix("RETURNING " + joinColumns(taskColumns)).
 		ToSql()
 	if err != nil {
@@ -99,6 +104,10 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *BackupTask) error {
 		Set("progress", task.Progress).
 		Set("file_path", task.FilePath).
 		Set("error_message", task.ErrorMessage).
+		Set("task_name", task.TaskName).
+		Set("task_result", task.TaskResult).
+		Set("operator_code", task.OperatorCode).
+		Set("create_user", task.CreateUser).
 		Set("started_at", task.StartedAt).
 		Set("completed_at", task.CompletedAt).
 		Where(sq.Eq{"id": task.ID}).
@@ -393,6 +402,7 @@ func scanTask(row pgx.Row) (*BackupTask, error) {
 		&t.ID, &t.TaskType, &t.TargetType, &targetIDsJSON,
 		&t.Status, &t.Progress, &t.FilePath, &t.ErrorMessage,
 		&t.StartedAt, &t.CompletedAt, &t.CreatedAt, &t.UpdatedAt,
+		&t.TaskSeq, &t.TaskName, &t.TaskResult, &t.OperatorCode, &t.CreateUser,
 	)
 	if err != nil {
 		return nil, err
@@ -414,6 +424,7 @@ func scanTaskRow(rows pgx.Rows) (*BackupTask, error) {
 		&t.ID, &t.TaskType, &t.TargetType, &targetIDsJSON,
 		&t.Status, &t.Progress, &t.FilePath, &t.ErrorMessage,
 		&t.StartedAt, &t.CompletedAt, &t.CreatedAt, &t.UpdatedAt,
+		&t.TaskSeq, &t.TaskName, &t.TaskResult, &t.OperatorCode, &t.CreateUser,
 	)
 	if err != nil {
 		return nil, err

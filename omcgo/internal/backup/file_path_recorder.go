@@ -35,15 +35,26 @@ type BackupFileReceivedPayload struct {
 	BackupTaskIDPrefix string `json:"backup_task_id_prefix"`
 	DeviceSN           string `json:"device_sn"`
 	FileSize           int64  `json:"file_size"`
+	// MD5 — M1 of backup-restore-alignment-plan: ACS 侧使用 MinIO PutObject
+	// 返回的 ETag。单块 PutObject (未启用 multipart) 下 ETag = MD5(hex)；
+	// 备份配置文件一般远小于 multipart 阈值 (5MiB)，因此在实际场景
+	// 中 ETag 可靠。遇到 multipart ETag (带 -N 后缀) 时消费者应忽略。
+	MD5 string `json:"md5,omitempty"`
 }
 
 // FilePathRecorder subscribes to SubjectBackupFileReceived and writes the
 // originating backup_tasks row's file_path. Lives on the App side (not ACS)
 // so the ACS process stays decoupled from the backup module.
+//
+// M1 of backup-restore-alignment-plan: 额外 upsert backup_restore_file
+// 元数据表 (SN/file_name/md5/size/operator_code/update_time)，以供后续
+// queryCellInfos / single/exportFile 查询。fileRepo 可为 nil（向下兼容
+// 老部署）。
 type FilePathRecorder struct {
-	repo    TaskRepository
-	metrics *RestoreMetrics
-	logger  *zap.Logger
+	repo     TaskRepository
+	fileRepo FileRepository // optional (M1)
+	metrics  *RestoreMetrics
+	logger   *zap.Logger
 }
 
 // NewFilePathRecorder constructs a FilePathRecorder. metrics may be nil
@@ -58,6 +69,13 @@ func NewFilePathRecorder(
 		metrics: metrics,
 		logger:  logger.Named("backup-file-path-recorder"),
 	}
+}
+
+// SetFileRepository wires the backup_restore_file repository post-construction
+// so the recorder also persists per-file metadata (M1). Pass nil to disable
+// (default behavior — only backup_tasks.file_path is recorded).
+func (r *FilePathRecorder) SetFileRepository(fr FileRepository) {
+	r.fileRepo = fr
 }
 
 // Subscribe wires the recorder into the EventBus. Uses QueueSubscribe so
@@ -142,6 +160,9 @@ func (r *FilePathRecorder) handleFileReceived(ctx context.Context, evt event.Eve
 			zap.String("task_id", target.ID.String()),
 			zap.String("path", fullPath),
 			zap.String("device_sn", p.DeviceSN))
+		// M1: 同步落库 backup_restore_file 元数据。失败不阻断主路径 ——
+		// file_path 已在 backup_tasks 中记录，元数据表是补充查询面。
+		r.upsertFileMetadata(ctx, target, p, fullPath)
 		return nil
 	case errors.Is(err, ErrFilePathAlreadySet):
 		// CAS lost: another concurrent recorder won. This is the TOCTOU-safe
@@ -163,4 +184,50 @@ func (r *FilePathRecorder) handleFileReceived(ctx context.Context, evt event.Eve
 		r.metrics.RecordFilePathRecord("error")
 		return fmt.Errorf("update backup_task %s file_path: %w", target.ID, err)
 	}
+}
+
+// upsertFileMetadata writes / refreshes a backup_restore_file row keyed by
+// (serial_number, file_name). Best-effort: failure is logged but does not
+// propagate so the backup_tasks.file_path success path remains the source
+// of truth. No-op when fileRepo is nil (deployment did not wire it).
+func (r *FilePathRecorder) upsertFileMetadata(
+	ctx context.Context,
+	target *BackupTask,
+	p BackupFileReceivedPayload,
+	fullPath string,
+) {
+	if r.fileRepo == nil {
+		return
+	}
+	if p.DeviceSN == "" || p.Filename == "" {
+		return
+	}
+	var md5 *string
+	if p.MD5 != "" {
+		v := p.MD5
+		md5 = &v
+	}
+	var operatorCode *string
+	if target.OperatorCode != nil && *target.OperatorCode != "" {
+		operatorCode = target.OperatorCode
+	}
+	f := &BackupRestoreFile{
+		SerialNumber: p.DeviceSN,
+		FileName:     p.Filename,
+		ObjectPath:   fullPath,
+		MD5:          md5,
+		FileSize:     p.FileSize,
+		OperatorCode: operatorCode,
+	}
+	if err := r.fileRepo.Upsert(ctx, f); err != nil {
+		r.logger.Warn("upsert backup_restore_file failed (best-effort)",
+			zap.String("device_sn", p.DeviceSN),
+			zap.String("filename", p.Filename),
+			zap.Error(err))
+		return
+	}
+	r.logger.Debug("backup_restore_file upserted",
+		zap.String("device_sn", p.DeviceSN),
+		zap.String("filename", p.Filename),
+		zap.Int64("file_size", p.FileSize))
 }

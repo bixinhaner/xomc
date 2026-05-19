@@ -165,6 +165,11 @@ export default function TemplateDefinitionManagement() {
   };
 
   const handleSaveType = async () => {
+    // 防止双击重复提交：mutation 进行中直接忽略。
+    // validateFields 是异步的，仅靠按钮 loading 不能阻止第二次点击在 isPending=false 窗口期内进入。
+    if (createTaskTypeMutation.isPending || updateTaskTypeMutation.isPending) {
+      return;
+    }
     const values = await typeForm.validateFields();
     const categoryPayload = buildCategoryPayload(values, categories, editingType);
     const payload: CreateUnifiedFileTransferTypeInput = {

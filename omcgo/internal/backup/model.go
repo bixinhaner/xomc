@@ -41,6 +41,14 @@ type BackupTask struct {
 	CompletedAt  *time.Time `json:"completed_at,omitempty"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
+
+	// M1 of backup-restore-alignment-plan: 运营商规范字段。
+	// 全部可空 —— 历史行迁移后由 backfill / 后续操作填充。
+	TaskSeq      *int64  `json:"task_seq,omitempty"`      // BIGSERIAL，对外暴露作为规范 task_id
+	TaskName     *string `json:"task_name,omitempty"`     // 人可读任务名
+	TaskResult   *int16  `json:"task_result,omitempty"`   // 1=成功 / 2=失败
+	OperatorCode *string `json:"operator_code,omitempty"` // 运营商编码
+	CreateUser   *string `json:"create_user,omitempty"`   // 创建人
 }
 
 // BackupSchedule represents a scheduled recurring backup.

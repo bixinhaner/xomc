@@ -324,6 +324,9 @@ func initBackupModule(c *Container) error {
 	// after CPE finishes uploading. Both wire onto the same RestoreMetrics.
 	restoreService.SetBackupTaskFinder(backupTaskRepo)
 	filePathRecorder := backup.NewFilePathRecorder(backupTaskRepo, restoreMetrics, logger)
+	// M1 of backup-restore-alignment-plan: 同步落库 backup_restore_file 元数据
+	// （SN/file_name/md5/size/operator_code/update_time），支撑后续查询与导出。
+	filePathRecorder.SetFileRepository(backup.NewPgFileRepository(c.PgPool))
 	if err := filePathRecorder.Subscribe(c.EventBus); err != nil {
 		logger.Warn("subscribe backup file path recorder", zap.Error(err))
 	}

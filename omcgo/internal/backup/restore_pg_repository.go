@@ -34,6 +34,8 @@ var restoreColumns = []string{
 	"id", "source_bucket", "source_object_path", "target_device_sns",
 	"status", "progress", "error_message",
 	"started_at", "completed_at", "created_at", "updated_at", "created_by",
+	// M1 alignment columns.
+	"task_seq", "task_name", "task_result", "operator_code", "create_user",
 }
 
 // PgRestoreTaskRepository is the PostgreSQL implementation of RestoreTaskRepository.
@@ -56,10 +58,12 @@ func (r *PgRestoreTaskRepository) Create(ctx context.Context, task *RestoreTask)
 	query, args, err := storage.Psql.Insert("restore_tasks").
 		Columns("source_bucket", "source_object_path", "target_device_sns",
 			"status", "progress", "error_message",
-			"started_at", "completed_at", "created_by").
+			"started_at", "completed_at", "created_by",
+			"task_name", "task_result", "operator_code", "create_user").
 		Values(task.SourceBucket, task.SourceObjectPath, snsJSON,
 			task.Status, task.Progress, task.ErrorMessage,
-			task.StartedAt, task.CompletedAt, task.CreatedBy).
+			task.StartedAt, task.CompletedAt, task.CreatedBy,
+			task.TaskName, task.TaskResult, task.OperatorCode, task.CreateUser).
 		Suffix("RETURNING " + joinColumns(restoreColumns)).
 		ToSql()
 	if err != nil {
@@ -153,6 +157,7 @@ func scanRestoreTask(row pgx.Row) (*RestoreTask, error) {
 	var snsJSON []byte
 	if err := row.Scan(
 		&t.ID, &t.SourceBucket, &t.SourceObjectPath, &snsJSON,
+		&t.TaskSeq, &t.TaskName, &t.TaskResult, &t.OperatorCode, &t.CreateUser,
 		&t.Status, &t.Progress, &t.ErrorMessage,
 		&t.StartedAt, &t.CompletedAt, &t.CreatedAt, &t.UpdatedAt, &t.CreatedBy,
 	); err != nil {
