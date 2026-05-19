@@ -9,6 +9,11 @@ import {
   useUpdateParameters,
 } from '@core/hooks/api/useDeviceParameters';
 import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
+import {
+  feedbackKey,
+  useQuickSettingsFeedbackStore,
+  type MultiFeedback,
+} from '@core/store/quickSettingsFeedbackStore';
 import type { ParameterSchemaItem, ParameterUpdateRequest } from '@core/types/deviceParameter';
 import type { DeviceTaskStatus } from '@core/types/deviceTask';
 import type { QuickSettingsGroup } from '@core/types/quicksettings';
@@ -16,22 +21,11 @@ import { applyFapInstance, validateValue } from './validators';
 
 const { Text } = Typography;
 
-/**
- * 行级 Save / Add / Delete 的"上次操作"状态摘要。
- *
- * T-0146:Save 类操作携带 taskId 用于轮询真实 CPE 应答状态;
- * AddObject/DeleteObject 当前后端不返 taskId(它们走 useAddObject/useDeleteObject Hook 不返 task),
- * 故 add/delete 操作仅保留入队结果反馈(submitStatus),无 task 轮询。
- */
-interface LastActionState {
-  action: 'save' | 'add' | 'delete';
-  submitStatus: 'queued' | 'failed_to_queue';
-  taskId?: string;
-  detail: string;
-  at: Date;
-}
+// "上次操作"状态形状由 frontend-core/store/quickSettingsFeedbackStore (MultiFeedback) 定义,
+// 提升至 store 持久化,顶层 TabBar 切走再切回不丢反馈。
 
-function formatTime(d: Date): string {
+function formatTime(at: number): string {
+  const d = new Date(at);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
@@ -42,7 +36,7 @@ interface StatusTagSpec {
   icon: React.ReactNode;
   label: string;
 }
-function statusTagSpec(action: LastActionState, taskStatus: DeviceTaskStatus | undefined): StatusTagSpec {
+function statusTagSpec(action: MultiFeedback, taskStatus: DeviceTaskStatus | undefined): StatusTagSpec {
   const actionLabel = action.action === 'save' ? '保存' : action.action === 'add' ? '新增' : '删除';
   if (action.submitStatus === 'failed_to_queue') {
     return { color: 'error', icon: <CloseCircleOutlined />, label: `${actionLabel}入队失败` };
@@ -109,8 +103,15 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
 
   // 行编辑状态：以 instanceId 为 key，仅保留用户编辑过的字段（避免 effect 同步 schema 触发级联 render）
   const [rowEdits, setRowEdits] = useState<Map<string, RowEditState>>(new Map());
-  // T-0144:上次操作摘要(持久化反馈)
-  const [lastAction, setLastAction] = useState<LastActionState | null>(null);
+
+  // lastAction 由 zustand store 托管 —— DeviceDetail 卸载(切顶层 tab)也保留反馈。
+  const fbKey = feedbackKey(deviceId, group.id, fapInstance);
+  const lastAction = useQuickSettingsFeedbackStore((s) => {
+    const f = s.entries[fbKey];
+    return f && f.kind === 'multi' ? f : null;
+  });
+  const setFeedback = useQuickSettingsFeedbackStore((s) => s.setFeedback);
+  const patchFeedback = useQuickSettingsFeedbackStore((s) => s.patchFeedback);
 
   // schema.objects 给出 currentInstances；schema.parameters 给出值
   const objectEntry = useMemo(
@@ -207,12 +208,13 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
         content: `第 ${instId} 行已下发 ${updates.length} 项变更,正在等待基站应答(Tag 会自动刷新)`,
         duration: 6,
       });
-      setLastAction({
+      setFeedback(fbKey, {
+        kind: 'multi',
         action: 'save',
         submitStatus: 'queued',
         taskId: result.taskId,
         detail: `第 ${instId} 行 ${updates.length} 项`,
-        at: new Date(),
+        at: Date.now(),
       });
       // 清空 edits(schema 重新拉取时会同步当前值)
       setRowEdits((prev) => {
@@ -228,11 +230,12 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
         description: `${updates.length} 项变更入队失败:${errMsg}。输入值已保留,可修正后重试。`,
         duration: 0,
       });
-      setLastAction({
+      setFeedback(fbKey, {
+        kind: 'multi',
         action: 'save',
         submitStatus: 'failed_to_queue',
         detail: `第 ${instId} 行:${errMsg}`,
-        at: new Date(),
+        at: Date.now(),
       });
       console.error('MultiInstanceTable: row save failed', err);
     }
@@ -247,7 +250,7 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
         duration: 6,
       });
       // AddObject 后端当前不返 taskId,Tag 仅显示"新增已入队"
-      setLastAction({ action: 'add', submitStatus: 'queued', detail: '新增实例', at: new Date() });
+      setFeedback(fbKey, { kind: 'multi', action: 'add', submitStatus: 'queued', detail: '新增实例', at: Date.now() });
       void refetch();
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -256,7 +259,7 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
         description: errMsg,
         duration: 0,
       });
-      setLastAction({ action: 'add', submitStatus: 'failed_to_queue', detail: errMsg, at: new Date() });
+      setFeedback(fbKey, { kind: 'multi', action: 'add', submitStatus: 'failed_to_queue', detail: errMsg, at: Date.now() });
       console.error('MultiInstanceTable: AddObject failed', err);
     }
   };
@@ -267,17 +270,22 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
   const { data: lastTask } = useDeviceTaskStatus(lastAction?.taskId);
 
   // T-0146:基站应答失败时弹一次 notification(仅在 status 第一次变成 failed 时触发)
-  const [notifiedFailedTaskId, setNotifiedFailedTaskId] = useState<string | null>(null);
+  // notifiedFailedTaskId 同样存 store —— 切顶层 tab 再切回不会重复弹。
   useEffect(() => {
-    if (lastTask && lastTask.status === 'failed' && lastTask.id !== notifiedFailedTaskId) {
+    if (
+      lastTask &&
+      lastTask.status === 'failed' &&
+      lastAction &&
+      lastAction.notifiedFailedTaskId !== lastTask.id
+    ) {
       notification.error({
         message: `基站应答失败(${group.titleZh})`,
         description: lastTask.errorMessage || '未知错误,可在通知中心查看任务详情',
         duration: 0,
       });
-      setNotifiedFailedTaskId(lastTask.id);
+      patchFeedback(fbKey, { notifiedFailedTaskId: lastTask.id });
     }
-  }, [lastTask, group.titleZh, notifiedFailedTaskId]);
+  }, [lastTask, lastAction, group.titleZh, patchFeedback, fbKey]);
 
   const handleDelete = async (instId: string) => {
     Modal.confirm({
@@ -291,7 +299,7 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
             content: `已下发 DeleteObject(${instId}),请在右上角铃铛查看任务结果`,
             duration: 6,
           });
-          setLastAction({ action: 'delete', submitStatus: 'queued', detail: `实例 ${instId}`, at: new Date() });
+          setFeedback(fbKey, { kind: 'multi', action: 'delete', submitStatus: 'queued', detail: `实例 ${instId}`, at: Date.now() });
           void refetch();
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
@@ -300,11 +308,12 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
             description: `实例 ${instId} 删除失败:${errMsg}`,
             duration: 0,
           });
-          setLastAction({
+          setFeedback(fbKey, {
+            kind: 'multi',
             action: 'delete',
             submitStatus: 'failed_to_queue',
             detail: `实例 ${instId}:${errMsg}`,
-            at: new Date(),
+            at: Date.now(),
           });
           console.error('MultiInstanceTable: DeleteObject failed', err);
         }

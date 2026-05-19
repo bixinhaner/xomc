@@ -12,3 +12,6 @@ export type { SingleTask, BatchTask, ExportTask, TaskStatus, TaskType } from './
 
 export { useUserStore } from './userStore';
 export type { UserInfo, UserRole } from './userStore';
+
+export { useQuickSettingsFeedbackStore, feedbackKey } from './quickSettingsFeedbackStore';
+export type { Feedback, CellFeedback, MultiFeedback } from './quickSettingsFeedbackStore';

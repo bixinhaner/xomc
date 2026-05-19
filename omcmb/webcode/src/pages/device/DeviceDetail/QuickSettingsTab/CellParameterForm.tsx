@@ -1,8 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Col, Form, Input, Row, Space, Tag, Typography, message, notification } from 'antd';
+import { Button, Card, Col, Form, Input, Row, Space, Spin, Tag, Typography, message, notification } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import { useParameterSchema, useUpdateParameters } from '@core/hooks/api/useDeviceParameters';
 import { useDeviceTaskStatus } from '@core/hooks/api/useDeviceTask';
+import {
+  feedbackKey,
+  useQuickSettingsFeedbackStore,
+  type CellFeedback,
+} from '@core/store/quickSettingsFeedbackStore';
 import type { ParameterSchemaItem, ParameterUpdateRequest } from '@core/types/deviceParameter';
 import type { DeviceTaskStatus } from '@core/types/deviceTask';
 import type { QuickSettingsGroup } from '@core/types/quicksettings';
@@ -10,21 +15,11 @@ import { applyFapInstance, validateValue } from './validators';
 
 const { Text } = Typography;
 
-/**
- * Save 操作的"上次提交"状态摘要(持久化反馈,不依赖一闪而过的 toast)。
- *
- * T-0146:`taskId` 用于驱动 useDeviceTaskStatus 轮询真实 CPE 应答状态;
- * `submitStatus` 是请求入队是否成功(PUT 202/4xx/5xx 的本地判断,不是 CPE 应答状态)。
- */
-interface LastSubmitState {
-  submitStatus: 'queued' | 'failed_to_queue';
-  taskId?: string;
-  count: number;
-  at: Date;
-  errorMsg?: string;
-}
+// "上次提交"状态形状由 frontend-core/store/quickSettingsFeedbackStore (CellFeedback) 定义,
+// 提升至 store 持久化,顶层 TabBar 切走再切回不丢反馈。
 
-function formatTime(d: Date): string {
+function formatTime(at: number): string {
+  const d = new Date(at);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
@@ -35,7 +30,7 @@ interface StatusTagSpec {
   icon: React.ReactNode;
   label: string;
 }
-function statusTagSpec(submit: LastSubmitState, taskStatus: DeviceTaskStatus | undefined): StatusTagSpec {
+function statusTagSpec(submit: CellFeedback, taskStatus: DeviceTaskStatus | undefined): StatusTagSpec {
   if (submit.submitStatus === 'failed_to_queue') {
     return { color: 'error', icon: <CloseCircleOutlined />, label: '入队失败' };
   }
@@ -79,7 +74,15 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
   const [form] = Form.useForm();
   const updateMutation = useUpdateParameters();
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [lastSubmit, setLastSubmit] = useState<LastSubmitState | null>(null);
+
+  // lastSubmit 由 zustand store 托管 —— DeviceDetail 整个被卸载(切顶层 tab)也保留反馈。
+  const fbKey = feedbackKey(deviceId, group.id, fapInstance);
+  const lastSubmit = useQuickSettingsFeedbackStore((s) => {
+    const f = s.entries[fbKey];
+    return f && f.kind === 'cell' ? f : null;
+  });
+  const setFeedback = useQuickSettingsFeedbackStore((s) => s.setFeedback);
+  const patchFeedback = useQuickSettingsFeedbackStore((s) => s.patchFeedback);
 
   // 单实例分组：每条 standardPath 单独查 schema（少量字段，不批量优化）
   // 注：useParameterSchema 接受 pathPrefix，前缀匹配即可；这里以分组共用前缀粗查再过滤
@@ -147,11 +150,12 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
         content: `已下发 ${updates.length} 项变更,正在等待基站应答(Tag 状态会自动刷新)`,
         duration: 6,
       });
-      setLastSubmit({
+      setFeedback(fbKey, {
+        kind: 'cell',
         submitStatus: 'queued',
         taskId: result.taskId,
         count: updates.length,
-        at: new Date(),
+        at: Date.now(),
       });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -161,10 +165,11 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
         description: `${updates.length} 项变更入队失败:${errMsg}。输入值已保留,可修正后重试。`,
         duration: 0, // 不自动消失
       });
-      setLastSubmit({
+      setFeedback(fbKey, {
+        kind: 'cell',
         submitStatus: 'failed_to_queue',
         count: updates.length,
-        at: new Date(),
+        at: Date.now(),
         errorMsg: errMsg,
       });
       console.error('CellParameterForm: update failed', err);
@@ -175,17 +180,22 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
   const { data: lastTask } = useDeviceTaskStatus(lastSubmit?.taskId);
 
   // T-0146:基站应答失败时弹一次 notification(只在 status 第一次变成 failed 时触发,避免重复弹)
-  const [notifiedFailedTaskId, setNotifiedFailedTaskId] = useState<string | null>(null);
+  // notifiedFailedTaskId 同样存 store —— 切顶层 tab 再切回不会重复弹。
   useEffect(() => {
-    if (lastTask && lastTask.status === 'failed' && lastTask.id !== notifiedFailedTaskId) {
+    if (
+      lastTask &&
+      lastTask.status === 'failed' &&
+      lastSubmit &&
+      lastSubmit.notifiedFailedTaskId !== lastTask.id
+    ) {
       notification.error({
         message: `基站应答失败(${group.titleZh})`,
         description: lastTask.errorMessage || '未知错误,可在通知中心查看任务详情',
         duration: 0,
       });
-      setNotifiedFailedTaskId(lastTask.id);
+      patchFeedback(fbKey, { notifiedFailedTaskId: lastTask.id });
     }
-  }, [lastTask, group.titleZh, notifiedFailedTaskId]);
+  }, [lastTask, lastSubmit, group.titleZh, patchFeedback, fbKey]);
 
   const title = locale === 'zh-CN' ? group.titleZh : group.titleEn;
 
@@ -208,9 +218,9 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
           </Button>
         </Space>
       }
-      loading={isLoading}
       style={{ marginBottom: 16 }}
     >
+      <Spin spinning={isLoading}>
       <Form form={form} layout="vertical">
         <Row gutter={16}>
           {group.params.map((p) => {
@@ -239,6 +249,7 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
           })}
         </Row>
       </Form>
+      </Spin>
     </Card>
   );
 }
