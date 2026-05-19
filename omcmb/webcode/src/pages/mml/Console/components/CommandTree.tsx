@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import type { Key, ReactNode } from 'react';
-import { Input, Tree, Empty, Spin, message } from 'antd';
-import { SearchOutlined, FolderOutlined, CodeOutlined, UserOutlined } from '@ant-design/icons';
+import { Input, Tree, Empty, Spin, message, Tooltip } from 'antd';
+import { SearchOutlined, FolderOutlined, CodeOutlined, UserOutlined, PlusOutlined } from '@ant-design/icons';
 import type { TreeDataNode } from 'antd';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { useGroupTree } from '@core/hooks/api/useMmlConsole';
@@ -15,6 +15,10 @@ import type {
 } from '@core/types/mmlConsole';
 import type { MMLCustomCommand } from '@core/types/mml';
 import { useT } from '@/hooks/useT';
+import AddTemplateModal from './AddTemplateModal';
+
+/** Customized 子树「+」按钮的目标 scope；null = 模态关闭。 */
+type AddScope = 'public' | 'private' | null;
 
 const GROUP_KEY_PREFIX = 'group:';
 const CMD_KEY_PREFIX = 'cmd:';
@@ -102,15 +106,17 @@ function flattenCommandsById(nodes: GroupTreeNode[]): Map<string, GroupTreeComma
 }
 
 /**
- * 构造 Customized 子树（PrivateTemplate + PublicTemplate）— T-0123-P4 集成。
- * 结构：Customized > Private (admin/wangyunqi/…)> template / Public > template
+ * 构造 Customized 子树（PrivateTemplate + PublicTemplate）。
+ * 结构：Customized > PrivateTemplate (按 creator 分组) / PublicTemplate
+ *
+ * PrivateTemplate / PublicTemplate 两个节点**恒显示**（空集时也在），标题尾部带
+ * 「+」；点击「+」经 onAdd(scope) 打开 AddTemplateModal 新增私有 / 公共命令。
  */
 function buildCustomTreeData(
   customs: MMLCustomCommand[],
   t: (id: string) => string,
-): TreeDataNode | null {
-  if (customs.length === 0) return null;
-
+  onAdd: (scope: 'public' | 'private') => void,
+): TreeDataNode {
   const privateGroup: MMLCustomCommand[] = [];
   const publicGroup: MMLCustomCommand[] = [];
   customs.forEach((c) => {
@@ -136,6 +142,21 @@ function buildCustomTreeData(
     isLeaf: true,
   });
 
+  // 标题尾部「+」：stopPropagation 阻止冒泡触发节点展开 / 选中。
+  const addBtn = (scope: 'public' | 'private') => (
+    <Tooltip
+      title={scope === 'public' ? t('mml.console.addPublicTemplate') : t('mml.console.addPrivateTemplate')}
+    >
+      <PlusOutlined
+        style={{ color: '#1677ff', marginLeft: 6 }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onAdd(scope);
+        }}
+      />
+    </Tooltip>
+  );
+
   const privateChildren: TreeDataNode[] = Array.from(byCreator.entries()).map(
     ([creator, items]) => ({
       key: `${CUSTOM_KEY_PREFIX}user:${creator}`,
@@ -150,35 +171,40 @@ function buildCustomTreeData(
     }),
   );
 
-  const children: TreeDataNode[] = [];
-  if (privateGroup.length > 0) {
-    children.push({
+  const publicLeaves = publicGroup
+    .sort((a, b) => a.commandName.localeCompare(b.commandName))
+    .map(renderLeaf);
+
+  // PrivateTemplate / PublicTemplate 恒显示；空集时 isLeaf=true（无展开箭头），
+  // 仅保留标题行 + 「+」，供用户添加第一条。
+  const children: TreeDataNode[] = [
+    {
       key: `${CUSTOM_KEY_PREFIX}root:private`,
       title: (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           <FolderOutlined style={{ color: '#fa8c16' }} />
           PrivateTemplate ({privateGroup.length})
+          {addBtn('private')}
         </span>
       ),
       selectable: false,
-      children: privateChildren,
-    });
-  }
-  if (publicGroup.length > 0) {
-    children.push({
+      isLeaf: privateChildren.length === 0,
+      children: privateChildren.length ? privateChildren : undefined,
+    },
+    {
       key: `${CUSTOM_KEY_PREFIX}root:public`,
       title: (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           <FolderOutlined style={{ color: '#52c41a' }} />
           PublicTemplate ({publicGroup.length})
+          {addBtn('public')}
         </span>
       ),
       selectable: false,
-      children: publicGroup
-        .sort((a, b) => a.commandName.localeCompare(b.commandName))
-        .map(renderLeaf),
-    });
-  }
+      isLeaf: publicLeaves.length === 0,
+      children: publicLeaves.length ? publicLeaves : undefined,
+    },
+  ];
 
   return {
     key: `${CUSTOM_KEY_PREFIX}root`,
@@ -247,6 +273,8 @@ export default function CommandTree({ lang }: CommandTreeProps) {
   const [searchText, setSearchText] = useState('');
   const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
   const [autoExpand, setAutoExpand] = useState(true);
+  // Customized 子树「+」点击后打开 AddTemplateModal；null = 关闭。
+  const [addScope, setAddScope] = useState<AddScope>(null);
 
   const customById = useMemo(() => {
     const m = new Map<string, MMLCustomCommand>();
@@ -256,8 +284,10 @@ export default function CommandTree({ lang }: CommandTreeProps) {
 
   const treeData = useMemo(() => {
     const groups = buildTreeData(tree);
-    const customRoot = buildCustomTreeData(customCommands, t);
-    return customRoot ? [...groups, customRoot] : groups;
+    // Customized 恒显示（含空 Private/PublicTemplate + 「+」）；setAddScope 由 useState
+    // 保证引用稳定，无需进依赖数组。
+    const customRoot = buildCustomTreeData(customCommands, t, setAddScope);
+    return [...groups, customRoot];
   }, [tree, customCommands, t]);
   const commandsById = useMemo(() => flattenCommandsById(tree), [tree]);
   const matched = useMemo(() => {
@@ -367,6 +397,14 @@ export default function CommandTree({ lang }: CommandTreeProps) {
             return <span style={{ background: '#fff2b8' }}>{node.title as ReactNode}</span>;
           }
           return node.title as ReactNode;
+        }}
+      />
+      <AddTemplateModal
+        open={addScope !== null}
+        scope={addScope ?? 'private'}
+        onClose={() => setAddScope(null)}
+        onSuccess={() => {
+          void queryClient.invalidateQueries({ queryKey: ['mml', 'console', 'custom-commands'] });
         }}
       />
     </div>
