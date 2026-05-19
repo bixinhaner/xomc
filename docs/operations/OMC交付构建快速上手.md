@@ -98,6 +98,12 @@ sudo usermod -aG docker $USER && newgrp docker
 
 项目包不受影响，无需重出。
 
+> **镜像缓存复用**：`build-images.sh` 通过 `<image>:<tag>-<arch>-saved` 后缀 tag
+> 把跨架构镜像与本机原 tag **命名隔离**，构建结束后**不再 `docker rmi` 清理**——
+> `*-saved` tag 留作本地缓存，下次构建命中即跳过 `docker pull`；本机原 tag 始终
+> 指向本机架构镜像，可与同主机的 `docker compose` 并存运行，互不干扰。详见构建
+> 手册 §6.3。
+
 ### 场景 D —— 只出单架构
 
 ```bash
@@ -208,6 +214,7 @@ sudo usermod -aG docker $USER && newgrp docker
 | 交付包很大 | `release.conf` 设 `PKG_COMPRESS=xz`（默认，体积最小）；gzip 更快但略大 |
 | 浏览器打不开下载页 | `serve.sh` 是否在跑；构建机防火墙是否放行该端口 |
 | 不同批次镜像不一致 | `release.conf` 的镜像标签别用 `latest`，固化为具体版本号 |
+| 本地 `*-saved` 镜像太多想清理 | 这些是 `build-images.sh` 的本地缓存（命名隔离、不影响 docker compose），可保留以加速下次构建；如需手工回收：`docker images \| grep -- '-saved' \| awk '{print $1":"$2}' \| xargs docker rmi -f`，或运行 `docker image prune` |
 
 ---
 

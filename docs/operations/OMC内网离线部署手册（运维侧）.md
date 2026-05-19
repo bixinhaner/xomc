@@ -335,6 +335,11 @@ docker load -i monitoring-images-<架构>.tar      # 若部署监控
 docker images                                     # 对照 images.manifest 核对
 ```
 
+> **关于 tar 内双 tag**：`docker load` 后会看到两套引用——原 tag（如
+> `redis:7-alpine`）与 `*-saved` 后缀 tag（如 `redis:7-alpine-amd64-saved`）。
+> **运维只需关心原 tag**，`docker-compose.yml` 里 `image: redis:7-alpine` 直接可用；
+> `*-saved` tag 是构建侧本地缓存用的命名隔离标识，运维不需手工清理。
+
 ### 步骤 4 — 规划与修改配置（**安全关键，必做**）
 
 配置模板随版本走（在 `/opt/omc/current/etc/`），实例配置统一放**跨版本保留**的
@@ -406,23 +411,38 @@ GOOSE_TABLE=goose_db_version_seed ./bin/omcgo-migrate --dsn "$DSN" --path migrat
 
 ```ini
 [Unit]
-Description=OMC App Service
+Description=OMC App Service (omcgo-app)
 After=network.target docker.service
 Requires=docker.service
+StartLimitIntervalSec=300                          # 崩溃循环熔断窗口
+StartLimitBurst=5                                  # 300s 内重启达 5 次即进 failed 停止重试
 
 [Service]
-Type=simple
-WorkingDirectory=/opt/omc/current                # 关键：软链，相对路径 data/、configs/ 在此解析
+Type=notify                                        # 进程经 sd_notify 上报 READY=1 后才算启动完成
+NotifyAccess=main
+WorkingDirectory=/opt/omc/current                  # 关键：软链，相对路径 data/、configs/ 在此解析
 ExecStart=/opt/omc/current/bin/omcgo-app --config /opt/omc/etc/app.prod.yaml
 Restart=on-failure
 RestartSec=5s
-LimitNOFILE=65536                                 # 文件描述符上限（见 §9 #8）
+WatchdogSec=30s                                    # 看门狗：30s 未喂狗（进程卡死）即重启
+TimeoutStartSec=300s                               # 启动期上限（含 DB/字典加载）
+LimitNOFILE=65536                                  # 文件描述符上限（见 §9 #8）
 Environment=OMCGO_ENV=prod
 Environment=TZ=Asia/Shanghai
 
 [Install]
 WantedBy=multi-user.target
 ```
+
+> **自动重启与故障暴露（单元已内置，运维无需改）**：
+> - `Restart=on-failure` —— 进程崩溃退出后 5s 自动拉起。
+> - `WatchdogSec=30s` + `Type=notify` —— 进程**卡死**（死锁、不退出但无响应）时，
+>   程序内的喂狗 goroutine 停止上报心跳，systemd 超 30s 即判定卡死并重启。
+>   这是 `Restart=on-failure` 抓不到的故障（进程没退出）。
+> - `StartLimitBurst=5` —— 若进程**崩溃循环**（起来又挂），300s 内重启 5 次后进入
+>   `failed` 态、**停止重试**。这是有意为之：让 Prometheus `OMCAppDown` 告警明确
+>   暴露「这台修不好了」并通过邮件通知人工介入，而非无限重启刷日志掩盖故障。
+>   人工修复后用 `systemctl reset-failed omcgo-app && systemctl start omcgo-app` 恢复。
 
 安装并启动（acs、worker 同理，分别指向 `acs.prod.yaml`、`worker.prod.yaml`）：
 
@@ -454,7 +474,9 @@ cd /opt/omc/current/deploy
 docker compose -f docker-compose.monitoring.yml up -d
 ```
 
-Prometheus 采集三进程 metrics（9090/9091/9092），Grafana 看板、Loki 收集日志。非必需，可后置。
+Prometheus 采集三进程 metrics（9090/9091/9092）+ 基础服务 exporter（postgres/redis/nats
+经 exporter、minio 自带指标端点），Grafana 看板、Loki 收集日志。告警规则含进程存活、
+连接池、基础服务存活/容量（见 `monitoring/alerts/`），经 AlertManager 邮件通知。非必需，可后置。
 
 ### 步骤 10 — 启动校验
 
@@ -635,6 +657,8 @@ docker compose -f /opt/omc/current/deploy/docker-compose.web.yml up -d --force-r
 | 现象 | 排查方向 |
 |------|---------|
 | 三进程起不来 | `journalctl -u omcgo-app -n 100`；检查 `WorkingDirectory` 是否 `/opt/omc/current`、`current` 软链是否指向有效版本目录（否则 `data/`、`configs/` 加载失败） |
+| 进程状态 `failed`、`systemctl start` 不再拉起 | 崩溃循环触发了 `StartLimitBurst` 熔断（300s 内挂 5 次）。先 `journalctl -u omcgo-app -n 200` 定位根因并修复，再 `systemctl reset-failed omcgo-app && systemctl start omcgo-app` 恢复 |
+| 进程被反复重启但无崩溃日志 | 多半是卡死被 `WatchdogSec` 命中（`journalctl` 见 `watchdog timeout`）。查是否依赖（DB/Redis）长时间无响应导致主流程阻塞；确认基础设施容器 `healthy` |
 | 端点对非超管返回 500 `casbin authorizer not configured` | `configs/casbin_model.conf` 缺失或路径不对 |
 | 启动报字典 XML 加载失败 | `data/` 目录缺失或 `WorkingDirectory` 不对 |
 | 连不上数据库/Redis | `*.prod.yaml` 地址是否改成 `127.0.0.1`；基础设施容器是否 `healthy` |

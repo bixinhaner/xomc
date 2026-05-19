@@ -39,7 +39,7 @@ deployments/release/
 ├── serve.sh                  # ⑤ HTTP 下载服务
 ├── bundle/                   # 进交付包的静态模板（docker/install-docker.sh + deploy/）
 ├── docker-cache/             # ① 的产物：docker-cache/<arch>/docker-<版本>.tgz（git 忽略）
-├── images-cache/             # ② 的中间产物（基础镜像 tar，git 忽略）
+├── images-cache/             # ② 的中间产物（基础镜像 tar，含 *-<arch>-saved 双 tag；git 忽略）
 ├── dist/                     # 构建临时工作区（git 忽略）
 └── archive/                  # 版本化归档 = HTTP 服务根目录（git 忽略）
     ├── index.html            #   自动生成的下载索引（项目包、基础设施包两张表 + 操作步骤）
@@ -114,4 +114,5 @@ cd deployments/release
 - **Docker 版本**：`release.conf` 的 `DOCKER_VERSION` / `DOCKER_URL_TEMPLATE` 控制下载。
 - **压缩方式**：`release.conf` 的 `PKG_COMPRESS` 控制交付包压缩（默认 `xz`，体积最小）。
 - **首次部署**需基础设施包 + 项目包**两个都下载**（同架构），先装 Docker、导基础镜像，再部署项目包。
+- **镜像缓存策略**：`build-images.sh` 通过 `<image>:<tag>-<arch>-saved` 后缀 tag 实现跨架构镜像**命名隔离**；本机原 tag 始终指向本机架构镜像，**可与同主机的 `docker compose` 并存**，互不干扰。构建结束**不再 `docker rmi` 清理**：`*-saved` tag 作为本地缓存，下次构建命中即跳 `docker pull`。打出的 tar 同时包含 `*-saved` 与原 tag（**双 tag tar**），运维侧 `docker load` 后直接用原 tag 即可。详见《构建手册》§6.3。
 - `docker-cache/`、`images-cache/`、`dist/`、`archive/` 为构建产物，已被 `.gitignore` 忽略。

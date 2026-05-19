@@ -13,8 +13,11 @@
 # 基础设施包内容：Docker 引擎离线安装包（docker-cache/ 由 download-docker.sh
 # 下载）+ 基础镜像 tar（docker save）+ install-docker.sh。
 #
-# 本工具【跑完不留痕】：镜像 docker save 进 tar 后，会把拉进本地 docker 镜像库
-# 的副本 docker rmi 清掉，避免污染本地镜像库、影响 docker compose 等操作。
+# === 镜像缓存策略 ===
+# 1. 跨架构镜像通过 *-arch-saved 后缀 tag 隔离，避免覆盖 redis:7-alpine 等原 tag
+# 2. 本机架构原 tag 始终保持本机架构镜像，docker-compose 可同时使用
+# 3. 镜像不在脚本中删除，作为下次构建的本地缓存
+# 4. tar 内同时包含 *-saved 与原 tag，docker load 后部署侧可直接使用原 tag
 #
 # 用法： ./build-images.sh [-v 基础设施版本] [--arch amd64|arm64]
 #                          [--with-monitoring | --monitoring-only]
@@ -23,6 +26,9 @@
 #   ★ 用普通用户运行（docker 权限靠 docker 组，勿 sudo 整个脚本）。
 # =============================================================================
 set -euo pipefail
+
+# 本机架构（用于跨架构 pull 后修复原 tag，保护 docker-compose）
+HOST_ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=release.conf
@@ -41,7 +47,7 @@ while [ $# -gt 0 ]; do
     --arch)            ARCHES="$2"; shift 2 ;;
     --with-monitoring) WITH_MONITORING=1; shift ;;
     --monitoring-only) MONITORING_ONLY=1; WITH_MONITORING=1; shift ;;
-    -h|--help)         sed -n '3,23p' "$0"; exit 0 ;;
+    -h|--help)         sed -n '3,26p' "$0"; exit 0 ;;
     *)                 die "未知参数：$1（-h 查看用法）" ;;
   esac
 done
@@ -89,12 +95,49 @@ fi
 if [ "$MONITORING_ONLY" = 1 ]; then
   log "模式：仅补监控栈（基础设施 infra-images-*.tar 保持不动）"
 fi
-log "基础设施版本：$INFRA_VERSION   架构：$ARCHES   监控栈：$([ "$WITH_MONITORING" = 1 ] && echo 含 || echo 不含)"
+log "本机架构：$HOST_ARCH   构建架构：$ARCHES   监控栈：$([ "$WITH_MONITORING" = 1 ] && echo 含 || echo 不含)"
+log "基础设施版本：$INFRA_VERSION"
+
+# ── 拉取并打 *-saved tag ─────────────────────────────────────────────────
+# 命名隔离：每架构镜像在本机以 <image>-<arch>-saved 留存，避免互相覆盖；命中即跳 pull。
+# 跨架构 pull 后立即用本机架构再 pull 一次，把原 tag 修复回本机架构（保护 docker-compose）。
+prepare_image() {
+  local IMG="$1" ARCH="$2"
+  local SAVED_TAG="${IMG}-${ARCH}-saved"
+  if docker image inspect "$SAVED_TAG" >/dev/null 2>&1; then
+    log "✓ 复用本地缓存: $SAVED_TAG"
+    return 0
+  fi
+  docker pull --platform "linux/$ARCH" "$IMG"
+  docker tag "$IMG" "$SAVED_TAG"
+  log "✓ 已拉取并打标: $IMG → $SAVED_TAG"
+  if [ "$ARCH" != "$HOST_ARCH" ]; then
+    docker pull --platform "linux/$HOST_ARCH" "$IMG"
+    log "✓ 已修复本机架构原 tag: $IMG (${HOST_ARCH})"
+  fi
+}
+
+# 双 tag 导出：tar 内同时包含 *-saved 与原 tag。
+# 实现：save 前先把原 tag 临时指向当前架构 *-saved（在 docker 索引层），save 后
+# 若是跨架构循环再用本机架构 pull 修复回原 tag。HOST_ARCH 循环则原 tag 已对应。
+save_with_dual_tags() {
+  local OUT_TAR="$1" ARCH="$2"; shift 2
+  local IMGS=("$@") REFS=() IMG SAVED_TAG
+  for IMG in "${IMGS[@]}"; do
+    SAVED_TAG="${IMG}-${ARCH}-saved"
+    docker tag "$SAVED_TAG" "$IMG"
+    REFS+=( "$SAVED_TAG" "$IMG" )
+  done
+  docker save -o "$OUT_TAR" "${REFS[@]}"
+  if [ "$ARCH" != "$HOST_ARCH" ]; then
+    for IMG in "${IMGS[@]}"; do
+      docker pull --platform "linux/$HOST_ARCH" "$IMG"
+      log "✓ 已修复本机架构原 tag: $IMG (${HOST_ARCH})"
+    done
+  fi
+}
 
 # ── 逐架构拉取并导出 ────────────────────────────────────────────────────
-# 镜像导出【不依赖构建机自身架构】：用 `docker pull --platform linux/$ARCH`
-# 显式逐架构拉取。每个架构 pull 前先 `docker rmi` 清本地同名镜像，确保
-# `docker save` 导出的就是本架构（不受遗留缓存 / containerd 多架构混存影响）。
 for ARCH in $ARCHES; do
   log "=================== 架构 $ARCH ==================="
 
@@ -107,19 +150,18 @@ for ARCH in $ARCHES; do
   fi
 
   for IMG in "${IMG_LIST[@]}"; do
-    docker rmi -f "$IMG" >/dev/null 2>&1 || true   # 清缓存，使 save 架构确定
-    docker pull --platform "linux/$ARCH" "$IMG"
+    prepare_image "$IMG" "$ARCH"
   done
 
   # 基础设施 tar：monitoring-only 模式下不动它
   if [ "$MONITORING_ONLY" = 0 ]; then
-    docker save -o "$CACHE/infra-images-$ARCH.tar" "${INFRA_IMAGES[@]}"
-    log "[$ARCH] 导出 → images-cache/infra-images-$ARCH.tar"
+    save_with_dual_tags "$CACHE/infra-images-$ARCH.tar" "$ARCH" "${INFRA_IMAGES[@]}"
+    log "[$ARCH] 导出 → images-cache/infra-images-$ARCH.tar （含 *-saved + 原 tag）"
   fi
   # 监控 tar：--with-monitoring / --monitoring-only 都会产出
   if [ "$WITH_MONITORING" = 1 ]; then
-    docker save -o "$CACHE/monitoring-images-$ARCH.tar" "${MONITORING_IMAGES[@]}"
-    log "[$ARCH] 导出 → images-cache/monitoring-images-$ARCH.tar"
+    save_with_dual_tags "$CACHE/monitoring-images-$ARCH.tar" "$ARCH" "${MONITORING_IMAGES[@]}"
+    log "[$ARCH] 导出 → images-cache/monitoring-images-$ARCH.tar （含 *-saved + 原 tag）"
   fi
 done
 
@@ -136,22 +178,6 @@ done
     printf '  %s\n' "${MONITORING_IMAGES[@]}"
   fi
 } > "$CACHE/images.manifest"
-
-# ── 清理：删除本工具拉进本地 docker 镜像库的镜像 ─────────────────────────
-# 镜像已 docker save 进 images-cache/*.tar，本地镜像库里的副本不再需要。
-# 清掉它们使本工具【跑完不留痕】——不污染本地镜像库，不影响 docker compose
-# 等使用同一 dockerd 的操作（pull --platform 会按架构覆盖同名标签，残留会串架构）。
-log "清理本地镜像库（已 save 进 tar，副本无需保留）..."
-if [ "$MONITORING_ONLY" = 1 ]; then
-  CLEAN_IMAGES=( "${MONITORING_IMAGES[@]}" )
-else
-  CLEAN_IMAGES=( "${INFRA_IMAGES[@]}" )
-  [ "$WITH_MONITORING" = 1 ] && CLEAN_IMAGES+=( "${MONITORING_IMAGES[@]}" )
-fi
-for IMG in "${CLEAN_IMAGES[@]}"; do
-  docker rmi -f "$IMG" >/dev/null 2>&1 || true
-done
-log "本地 docker 镜像库已清理，不影响本机 docker compose 等操作。"
 
 # ── 组装并压缩基础设施交付包 → archive/infra/<版本>/ ──────────────────────
 # 内容：基础镜像 tar + Docker 引擎离线包 + install-docker.sh。
@@ -213,7 +239,7 @@ MinIO / Nginx）。与项目包 omc-test-* / omc-release-* 相互独立，各自
 sha256sum -c checksums.sha256
 # 1. 安装 Docker（目标机未装时）
 cd docker && sudo bash install-docker.sh && cd ..
-# 2. 导入基础镜像
+# 2. 导入基础镜像（tar 内同时含 *-saved 与原 tag，运维只需关心原 tag）
 docker load -i images/infra-images-$ARCH.tar
 \`\`\`
 之后再部署项目包，详见项目包内 \`docs/OMC内网离线部署手册（运维侧）.md\`。
@@ -260,6 +286,17 @@ log "全部完成。"
 log "  基础设施版本 ：$INFRA_VERSION"
 log "  归档位置     ：archive/infra/$INFRA_VERSION/"
 ls -lh "$OUT"/omc-infra-*."$EXT" 2>/dev/null || true
+
+# ── 本地缓存汇总 ───────────────────────────────────────────────────────
+# *-saved tag 留作下次构建的本地缓存（命中即跳 pull）；脚本不再 docker rmi。
+SAVED_COUNT=$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null \
+              | grep -E -- '-(amd64|arm64)-saved$' | wc -l | tr -d ' ' || echo 0)
+echo
+log "── 本地缓存汇总 ───────────────────────────────────────────"
+log "  保留 *-saved tag 数量：$SAVED_COUNT"
+log "  说明：本工具不再清理本地镜像，*-saved tag 作为下次增量构建的缓存。"
+log "        本机架构原 tag 始终指向本机架构镜像，docker-compose 可同时使用。"
+log "        如需手工清理：docker images | grep -- '-saved' | awk '{print \$1\":\"\$2}' | xargs docker rmi -f"
 echo
 log "项目交付包由 ./build-release.sh 生成，与本包独立。"
 log "起 HTTP 下载服务： ./serve.sh    然后浏览器访问 http://<构建机IP>:8000/"
