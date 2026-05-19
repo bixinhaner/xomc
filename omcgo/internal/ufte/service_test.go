@@ -250,7 +250,7 @@ func TestService_ListDeviceCandidates_FiltersByTypeScope(t *testing.T) {
 				ProductClass:    "QAFA",
 				Technology:      coremodel.TechLTE,
 				FirmwareVersion: "V1.0.0",
-				SiteName:        "北京 4G 站点",
+				DeviceName:      "北京 4G 站点",
 			},
 			{
 				ID:              uuid.New(),
@@ -258,7 +258,7 @@ func TestService_ListDeviceCandidates_FiltersByTypeScope(t *testing.T) {
 				ProductClass:    "FAP/BU1810",
 				Technology:      coremodel.TechLTE,
 				FirmwareVersion: "V1.0.1",
-				SiteName:        "广州 4G 站点",
+				DeviceName:      "广州 4G 站点",
 			},
 			{
 				ID:              uuid.New(),
@@ -266,7 +266,7 @@ func TestService_ListDeviceCandidates_FiltersByTypeScope(t *testing.T) {
 				ProductClass:    "BBU-XSS",
 				Technology:      coremodel.TechNR,
 				FirmwareVersion: "V9.0.0",
-				SiteName:        "上海 5G 站点",
+				DeviceName:      "上海 5G 站点",
 			},
 		},
 		Total:    2,

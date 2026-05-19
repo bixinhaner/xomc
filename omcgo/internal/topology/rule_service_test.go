@@ -253,10 +253,12 @@ func TestHandleDeviceRegistered_MatchedDevice_AssignsToTargetGroup(t *testing.T)
 
 	deviceID := uuid.New()
 	targetGroup := uuid.New()
+	// 注册时设备尚无 site_name（站点名称为配置项），名称匹配交由 cron @hourly 接力，
+	// 故实时路径用 SN 模式校验注册→入组流程（site_name 名称匹配见下方 _NameMode_ 测试）。
 	rule := DeviceRule{
-		ID: uuid.New(), Name: "name-rule", Priority: 50, Enabled: true,
-		TargetGroupID: &targetGroup, MatchingMode: MatchingModeDeviceName,
-		NameRuleList: []NameRule{{Condition: "contain", Value: "ABC123"}},
+		ID: uuid.New(), Name: "sn-rule", Priority: 50, Enabled: true,
+		TargetGroupID: &targetGroup, MatchingMode: MatchingModeSerialNumber,
+		SerialNumberList: []string{"SN-ABC123-001"},
 	}
 
 	// Mock: GetEnabledByPriority 返一条规则；命中后 AddDeviceWithSource
@@ -294,11 +296,11 @@ func TestHandleDeviceRegistered_MultiRuleMatch_LowestPriorityWins(t *testing.T) 
 	g1 := uuid.New()
 	g2 := uuid.New()
 	r1 := DeviceRule{ID: uuid.New(), Name: "r1-pri10", Priority: 10, Enabled: true,
-		TargetGroupID: &g1, MatchingMode: MatchingModeDeviceName,
-		NameRuleList: []NameRule{{Condition: "contain", Value: "ABC"}}}
+		TargetGroupID: &g1, MatchingMode: MatchingModeSerialNumber,
+		SerialNumberList: []string{"SN-ABC-X"}}
 	r2 := DeviceRule{ID: uuid.New(), Name: "r2-pri20", Priority: 20, Enabled: true,
-		TargetGroupID: &g2, MatchingMode: MatchingModeDeviceName,
-		NameRuleList: []NameRule{{Condition: "contain", Value: "ABC"}}}
+		TargetGroupID: &g2, MatchingMode: MatchingModeSerialNumber,
+		SerialNumberList: []string{"SN-ABC-X"}}
 
 	// repo 已按 priority 升序返回（GetEnabledByPriority 契约）
 	repo.EXPECT().GetEnabledByPriority(gomock.Any()).Return([]DeviceRule{r1, r2}, nil)
@@ -329,6 +331,38 @@ func TestHandleDeviceRegistered_NoMatchingRule_NoOp(t *testing.T) {
 	evt, err := event.NewEvent(event.SubjectDeviceRegistered, map[string]interface{}{
 		"device_id":     uuid.New(),
 		"serial_number": "SN-X",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, svc.handleDeviceRegistered(context.Background(), evt))
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// 反退化 — 名称匹配（deviceName 模式）以 devices.site_name 为匹配字段。
+// 设备首次注册时 site_name 尚未配置（站点名称为管理面配置项），实时路径不做名称
+// 匹配，DeviceName 传空串 → matchByDeviceName 安全降级不命中 → 不入组。
+// 名称匹配交由 cron @hourly 在用户填好 site_name 后接力。
+// 守护 rule_service.go handleDeviceRegistered 不再用 SN 冒充设备名称。
+// ──────────────────────────────────────────────────────────────────────────────
+func TestHandleDeviceRegistered_NameMode_DeferredToCron_NotMatchedAtRegister(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	svc, repo, _, _ := newTestRuleService(t, ctrl)
+
+	// 名称规则 contain "SN-ABC123" —— 若实时路径仍用 SN 冒充名称，会误命中
+	rule := DeviceRule{
+		ID: uuid.New(), Name: "name-rule", Priority: 50, Enabled: true,
+		TargetGroupID: func() *uuid.UUID { id := uuid.New(); return &id }(),
+		MatchingMode:  MatchingModeDeviceName,
+		NameRuleList:  []NameRule{{Condition: "contain", Value: "SN-ABC123"}},
+	}
+	repo.EXPECT().GetEnabledByPriority(gomock.Any()).Return([]DeviceRule{rule}, nil)
+	// 关键断言：groupRepo.AddDeviceWithSource 不应被调用（无 EXPECT 即不可调用）
+
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, map[string]interface{}{
+		"device_id":     uuid.New(),
+		"serial_number": "SN-ABC123-001", // SN 含规则子串，但名称匹配不应用 SN
 	})
 	require.NoError(t, err)
 

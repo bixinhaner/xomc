@@ -26,7 +26,7 @@ export interface CreateDeviceInput {
   manufacturer?: string;
   modelName?: string;
   ipAddress?: string;
-  siteName?: string;
+  deviceName?: string;
   siteId?: string;
   latitude?: number;
   longitude?: number;
@@ -76,7 +76,7 @@ export interface Device {
   upTime: string;
   firstOnlineTime: string;
   lastInformTime: string;
-  siteName: string;
+  deviceName: string;
   gpsVersion: string;
   rom: string;
   remark: string;

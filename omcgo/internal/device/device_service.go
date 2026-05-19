@@ -27,20 +27,20 @@ type GroupAssigner interface {
 
 // DeviceService provides business logic for device management.
 type DeviceService struct {
-	deviceRepo      DeviceRepository
-	paramRepo       DeviceParameterRepository
-	deviceInfoRepo  DeviceInfoRepository
-	regRepo         RegistrationRepository
-	groupAssigner   GroupAssigner
-	infoSyncer      *InfoSyncer
-	heartbeat       *HeartbeatMonitor
-	eventBus        event.EventBus
-	taskSvc         task.Enqueuer
-	connReq         ConnectionRequester
-	stunUpdater     StunAddressUpdater
-	cache           *DeviceCache
-	metrics         *DeviceMetrics
-	licenseEnforcer LicenseEnforcer
+	deviceRepo       DeviceRepository
+	paramRepo        DeviceParameterRepository
+	deviceInfoRepo   DeviceInfoRepository
+	regRepo          RegistrationRepository
+	groupAssigner    GroupAssigner
+	infoSyncer       *InfoSyncer
+	heartbeat        *HeartbeatMonitor
+	eventBus         event.EventBus
+	taskSvc          task.Enqueuer
+	connReq          ConnectionRequester
+	stunUpdater      StunAddressUpdater
+	cache            *DeviceCache
+	metrics          *DeviceMetrics
+	licenseEnforcer  LicenseEnforcer
 	carrierRegistry  *carrier.CarrierRegistry // T-0029: RF control path lookup by carrier+tech
 	paramSyncStarter ParamSyncStarter         // T-0126: 注入 *provision.SyncService 触发 Path B 手动同步
 	logger           *zap.Logger
@@ -1196,7 +1196,7 @@ func (s *DeviceService) CreateDevice(ctx context.Context, req CreateDeviceReques
 		Technology:   req.Technology,
 		Status:       model.DeviceRegistered,
 		IPAddress:    req.IPAddress,
-		SiteName:     req.SiteName,
+		DeviceName:   req.DeviceName,
 		SiteID:       req.SiteID,
 		Latitude:     req.Latitude,
 		Longitude:    req.Longitude,
@@ -1225,8 +1225,8 @@ func (s *DeviceService) UpdateDevice(ctx context.Context, id uuid.UUID, req Upda
 		return nil, nil
 	}
 
-	if req.SiteName != nil {
-		device.SiteName = *req.SiteName
+	if req.DeviceName != nil {
+		device.DeviceName = *req.DeviceName
 	}
 	if req.SiteID != nil {
 		device.SiteID = *req.SiteID

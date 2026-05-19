@@ -74,17 +74,17 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 // DeviceService.RegisterFromInform 会根据 serial_number 找到本行 UPDATE 而非
 // INSERT（参 device_service.go RegisterFromInform 注释）。
 type CreateDeviceRequest struct {
-	SerialNumber string            `json:"serial_number" binding:"required"`
-	OUI          string            `json:"oui" binding:"required"`
-	ProductClass string            `json:"product_class"`
-	Manufacturer string            `json:"manufacturer"`
-	ModelName    string            `json:"model_name"`
+	SerialNumber string `json:"serial_number" binding:"required"`
+	OUI          string `json:"oui" binding:"required"`
+	ProductClass string `json:"product_class"`
+	Manufacturer string `json:"manufacturer"`
+	ModelName    string `json:"model_name"`
 	// Carrier / Technology 用 binding oneof 让非法值前置成 400，
 	// 比插库后才发现外键违反更友好。
 	Carrier    model.CarrierCode `json:"carrier" binding:"required,oneof=cmcc ctcc cucc"`
 	Technology model.Technology  `json:"technology" binding:"required,oneof=lte nr"`
 	IPAddress  string            `json:"ip_address"`
-	SiteName   string            `json:"site_name"`
+	DeviceName string            `json:"device_name"`
 	SiteID     string            `json:"site_id"`
 	Latitude   float64           `json:"latitude"`
 	Longitude  float64           `json:"longitude"`
@@ -92,12 +92,12 @@ type CreateDeviceRequest struct {
 
 // UpdateDeviceRequest defines the request body for updating a device.
 type UpdateDeviceRequest struct {
-	SiteName  *string             `json:"site_name"`
-	SiteID    *string             `json:"site_id"`
-	ModelName *string             `json:"model_name"`
-	Latitude  *float64            `json:"latitude"`
-	Longitude *float64            `json:"longitude"`
-	Status    *model.DeviceStatus `json:"status"`
+	DeviceName *string             `json:"device_name"`
+	SiteID     *string             `json:"site_id"`
+	ModelName  *string             `json:"model_name"`
+	Latitude   *float64            `json:"latitude"`
+	Longitude  *float64            `json:"longitude"`
+	Status     *model.DeviceStatus `json:"status"`
 }
 
 // CreateDevice handles POST /api/v1/devices.

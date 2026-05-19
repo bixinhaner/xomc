@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -161,50 +164,37 @@ func TestDeviceSyncService_handleDeviceRegistered(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockPool := NewMockPgPool(ctrl)
 	mockNodeRepo := NewMockTopoNodeRepository(ctrl)
 	mockEdgeRepo := NewMockTopoEdgeRepository(ctrl)
 	mockEventBus := NewMockEventBus(ctrl)
 
-	service := NewDeviceSyncService(mockPool, mockNodeRepo, mockEdgeRepo, mockEventBus, zaptest.NewLogger(t))
-
 	deviceID := uuid.New()
 	serialNumber := "TEST-SN-001"
 
-	// 创建测试事件
-	payload := map[string]interface{}{
+	// fake pool：getDeviceBySN 的 QueryRow 返回一行设备数据。
+	// 列顺序与 device_sync.go getDeviceBySN 的 SELECT 完全一致（17 列）。
+	pool := &fakeDBPool{row: &mockRow{values: []any{
+		deviceID, serialNumber, "TEST-OUI", "TestProduct", "TestManu",
+		"TestModel", "cmcc", "lte", "active", "1.0",
+		"192.168.1.1", "TestSite", "site-001",
+		time.Now(), time.Now(),
+		(*time.Time)(nil), (*time.Time)(nil),
+	}}}
+
+	service := NewDeviceSyncService(pool, mockNodeRepo, mockEdgeRepo, mockEventBus, zaptest.NewLogger(t))
+
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, map[string]any{
 		"device_id":     deviceID,
 		"serial_number": serialNumber,
-	}
-	payloadBytes, err := json.Marshal(payload)
+	})
 	require.NoError(t, err)
 
-	testEvent := &testEvent{payload: payloadBytes}
-
-	// Mock 设备查询
-	mockPool.EXPECT().QueryRow(gomock.Any(), gomock.Any(), serialNumber).Return(
-		&mockRow{
-			values: []interface{}{
-				deviceID, serialNumber, "TEST-OUI", "TestProduct", "TestManu",
-				"TestModel", "cmcc", "lte", "active", "1.0",
-				"192.168.1.1", "TestSite", "site-001", 39.9, 116.4,
-				time.Now(), time.Now(), nil, nil,
-			},
-		},
-		nil,
-	)
-
-	// Mock 查询现有节点（空列表）
+	// 无现有节点 → syncDevice 走创建分支
 	mockNodeRepo.EXPECT().ListAll(gomock.Any(), (*uuid.UUID)(nil), (*string)(nil), (*string)(nil)).
 		Return([]TopoNode{}, nil)
-
-	// Mock 创建节点
 	mockNodeRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
-	ctx := context.Background()
-	err = service.handleDeviceRegistered(ctx, testEvent)
-
-	assert.NoError(t, err)
+	require.NoError(t, service.handleDeviceRegistered(context.Background(), evt))
 }
 
 // TestDeviceSyncService_handleDeviceRegistered_InvalidPayload 测试无效负载处理。
@@ -218,10 +208,10 @@ func TestDeviceSyncService_handleDeviceRegistered_InvalidPayload(t *testing.T) {
 
 	service := NewDeviceSyncService(nil, mockNodeRepo, mockEdgeRepo, mockEventBus, zaptest.NewLogger(t))
 
-	testEvent := &testEvent{payload: []byte("invalid json")}
+	// Payload 为非法 JSON → DecodePayload 失败
+	evt := event.Event{Subject: event.SubjectDeviceRegistered, Payload: json.RawMessage("invalid json")}
 
-	ctx := context.Background()
-	err := service.handleDeviceRegistered(ctx, testEvent)
+	err := service.handleDeviceRegistered(context.Background(), evt)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "decode device.registered payload")
@@ -238,16 +228,13 @@ func TestDeviceSyncService_handleDeviceRegistered_MissingDeviceID(t *testing.T) 
 
 	service := NewDeviceSyncService(nil, mockNodeRepo, mockEdgeRepo, mockEventBus, zaptest.NewLogger(t))
 
-	payload := map[string]interface{}{
+	// Payload 缺 device_id → handleDeviceRegistered 返回 missing device_id 错误
+	evt, err := event.NewEvent(event.SubjectDeviceRegistered, map[string]any{
 		"serial_number": "TEST-SN-001",
-	}
-	payloadBytes, err := json.Marshal(payload)
+	})
 	require.NoError(t, err)
 
-	testEvent := &testEvent{payload: payloadBytes}
-
-	ctx := context.Background()
-	err = service.handleDeviceRegistered(ctx, testEvent)
+	err = service.handleDeviceRegistered(context.Background(), evt)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "missing device_id")
@@ -415,86 +402,52 @@ func TestDeviceSyncService_CalculateStatistics(t *testing.T) {
 	assert.Equal(t, 2, stats.NodeTypeCounts["CPE"])
 }
 
-// === Mock 辅助类型 ===
+// === 测试辅助类型 ===
 
-// testEvent 实现 event.Event 接口用于测试
-type testEvent struct {
-	payload []byte
+// fakeDBPool 实现 topology.DBPool，供 device_sync 单测注入。
+// 仅覆盖被测路径用到的方法：getDeviceBySN 走 QueryRow，Query 不被调用。
+type fakeDBPool struct {
+	row pgx.Row
 }
 
-func (e *testEvent) DecodePayload(v interface{}) error {
-	return json.Unmarshal(e.payload, v)
+func (f *fakeDBPool) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return f.row
 }
 
-// mockRow 实现 pgx.Row 用于测试
+func (f *fakeDBPool) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	return nil, errors.New("fakeDBPool.Query not implemented")
+}
+
+// mockRow 实现 pgx.Row。Scan 用反射把 values 逐列写入 dest，
+// 自动处理 string → 具名字符串类型（DeviceStatus / Technology 等）的转换，
+// 以及 nil → 零值，避免为每个字段类型手写 type switch。
 type mockRow struct {
-	values []interface{}
+	values []any
 }
 
-func (r *mockRow) Scan(dest ...interface{}) error {
+func (r *mockRow) Scan(dest ...any) error {
 	if len(r.values) != len(dest) {
-		return errors.New("column count mismatch")
+		return fmt.Errorf("mockRow.Scan: 列数不匹配 dest=%d values=%d", len(dest), len(r.values))
 	}
 	for i, v := range r.values {
-		switch d := dest[i].(type) {
-		case *uuid.UUID:
-			if val, ok := v.(uuid.UUID); ok {
-				*d = val
-			}
-		case *string:
-			if val, ok := v.(string); ok {
-				*d = val
-			}
-		case *time.Time:
-			if val, ok := v.(time.Time); ok {
-				*d = val
-			}
-		case *float64:
-			if val, ok := v.(float64); ok {
-				*d = val
-			}
+		dptr := reflect.ValueOf(dest[i])
+		if dptr.Kind() != reflect.Ptr || dptr.IsNil() {
+			return fmt.Errorf("mockRow.Scan: dest[%d] 不是非空指针", i)
+		}
+		target := dptr.Elem()
+		if v == nil {
+			target.Set(reflect.Zero(target.Type()))
+			continue
+		}
+		val := reflect.ValueOf(v)
+		switch {
+		case val.Type().AssignableTo(target.Type()):
+			target.Set(val)
+		case val.Type().ConvertibleTo(target.Type()):
+			target.Set(val.Convert(target.Type()))
 		default:
-			return errors.New("unsupported type")
+			return fmt.Errorf("mockRow.Scan: dest[%d] 类型 %s 无法由 %s 赋值", i, target.Type(), val.Type())
 		}
 	}
 	return nil
-}
-
-// MockPgPool 是 pgxpool.Pool 的 mock 接口
-type MockPgPool struct {
-	ctrl *gomock.Controller
-}
-
-func NewMockPgPool(ctrl *gomock.Controller) *MockPgPool {
-	return &MockPgPool{ctrl: ctrl}
-}
-
-func (m *MockPgPool) QueryRow(ctx context.Context, sql string, args ...interface{}) pgxRow {
-	return &mockRow{}
-}
-
-func (m *MockPgPool) Query(ctx context.Context, sql string, args ...interface{}) pgxRows {
-	return &mockRows{}
-}
-
-type pgxRow interface {
-	Scan(dest ...interface{}) error
-}
-
-type pgxRows interface {
-	Close() error
-	Next() bool
-	Scan(...interface{}) error
-}
-
-type mockRows struct{}
-
-func (m *mockRows) Close() error                     { return nil }
-func (m *mockRows) Next() bool                       { return false }
-func (m *mockRows) Scan(...interface{}) error       { return nil }
-
-// PgPool 接口定义
-type PgPool interface {
-	QueryRow(ctx context.Context, sql string, args ...interface{}) pgxRow
-	Query(ctx context.Context, sql string, args ...interface{}) pgxRows
 }

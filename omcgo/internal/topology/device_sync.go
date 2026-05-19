@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"go.uber.org/zap"
@@ -32,10 +32,17 @@ func DefaultDeviceSyncServiceConfig() DeviceSyncServiceConfig {
 	}
 }
 
+// DBPool 是 DeviceSyncService 所需的最小数据库访问接口。
+// *pgxpool.Pool 天然满足该接口；抽成接口便于单元测试注入 fake。
+type DBPool interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
 // DeviceSyncService synchronizes devices to topology nodes.
 // 支持事件驱动同步、启动时同步和定时兜底同步三种模式。
 type DeviceSyncService struct {
-	pool         *pgxpool.Pool
+	pool         DBPool
 	nodeRepo     TopoNodeRepository
 	edgeRepo     TopoEdgeRepository
 	eventBus     event.EventBus // 事件总线，用于订阅设备注册事件
@@ -47,15 +54,15 @@ type DeviceSyncService struct {
 }
 
 // NewDeviceSyncService creates a new DeviceSyncService.
-func NewDeviceSyncService(pool *pgxpool.Pool, nodeRepo TopoNodeRepository, edgeRepo TopoEdgeRepository, eventBus event.EventBus, logger *zap.Logger) *DeviceSyncService {
+func NewDeviceSyncService(pool DBPool, nodeRepo TopoNodeRepository, edgeRepo TopoEdgeRepository, eventBus event.EventBus, logger *zap.Logger) *DeviceSyncService {
 	return &DeviceSyncService{
-		pool:       pool,
-		nodeRepo:   nodeRepo,
-		edgeRepo:   edgeRepo,
-		eventBus:   eventBus,
-		logger:     logger,
-		config:     DefaultDeviceSyncServiceConfig(),
-		stopCh:     make(chan struct{}),
+		pool:     pool,
+		nodeRepo: nodeRepo,
+		edgeRepo: edgeRepo,
+		eventBus: eventBus,
+		logger:   logger,
+		config:   DefaultDeviceSyncServiceConfig(),
+		stopCh:   make(chan struct{}),
 	}
 }
 
@@ -275,7 +282,7 @@ func (s *DeviceSyncService) getDeviceBySN(ctx context.Context, serialNumber stri
 	err := s.pool.QueryRow(ctx, query, serialNumber).Scan(
 		&d.ID, &d.SerialNumber, &d.OUI, &d.ProductClass, &d.Manufacturer,
 		&d.ModelName, &d.Carrier, &d.Technology, &d.Status, &d.FirmwareVersion,
-		&d.IPAddress, &d.SiteName, &d.SiteID,
+		&d.IPAddress, &d.DeviceName, &d.SiteID,
 		&d.CreatedAt, &d.UpdatedAt,
 		&lastInformAt, &lastBootAt,
 	)
@@ -362,7 +369,7 @@ func (s *DeviceSyncService) syncDevice(ctx context.Context, device model.Device,
 	// Check if node already exists
 	if existingNode, ok := nodeByDeviceSN[device.SerialNumber]; ok {
 		// Update existing node
-		existingNode.Label = device.SiteName
+		existingNode.Label = device.DeviceName
 		if existingNode.Label == "" {
 			existingNode.Label = device.SerialNumber
 		}
@@ -389,7 +396,7 @@ func (s *DeviceSyncService) syncDevice(ctx context.Context, device model.Device,
 
 	node := &TopoNode{
 		ID:        uuid.New(),
-		Label:     device.SiteName,
+		Label:     device.DeviceName,
 		NodeType:  nodeType,
 		X:         x,
 		Y:         y,
@@ -458,7 +465,7 @@ func (s *DeviceSyncService) queryDevices(ctx context.Context, domainID *uuid.UUI
 		err := rows.Scan(
 			&d.ID, &d.SerialNumber, &d.OUI, &d.ProductClass, &d.Manufacturer,
 			&d.ModelName, &d.Carrier, &d.Technology, &d.Status, &d.FirmwareVersion,
-			&d.IPAddress, &d.SiteName, &d.SiteID,
+			&d.IPAddress, &d.DeviceName, &d.SiteID,
 			&d.CreatedAt, &d.UpdatedAt,
 			&lastInformAt, &lastBootAt,
 		)

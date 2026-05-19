@@ -22,8 +22,10 @@ type DeviceWithInfo struct {
 
 	// ===== device_info 运维标识（可能为空）=====
 
-	// DeviceName 设备名称
-	DeviceName *string `json:"device_name"`
+	// InfoDeviceName device_info 表的运维设备名。
+	// 注意与嵌入的 model.Device.DeviceName（devices 表，json device_name）区分：
+	// 那个是设备名称主字段；本字段是 device_info 运维扩展里另填的名字。
+	InfoDeviceName *string `json:"info_device_name"`
 
 	// InfoAddress 安装地址（原 InfoAddress，改名消除歧义）
 	InfoAddress *string `json:"device_address"`
@@ -129,22 +131,22 @@ type DeviceWithInfo struct {
 // DeviceListItem 简化的设备列表项，用于前端表格展示。
 // 相比 DeviceWithInfo，移除了不常用的字段，减少数据传输量。
 type DeviceListItem struct {
-	ID             uuid.UUID          `json:"id"`
-	SerialNumber   string             `json:"serial_number"`
-	DeviceName     *string            `json:"device_name"`
-	Status         model.DeviceStatus `json:"status"`
-	Carrier        model.CarrierCode  `json:"carrier"`
-	Technology     model.Technology   `json:"technology"`
-	Manufacturer   string             `json:"manufacturer"`
-	ModelName      string             `json:"model_name"`
-	FirmwareVersion string            `json:"firmware_version"`
-	IPAddress      string             `json:"ip_address"`
-	SiteName       string             `json:"site_name"`
-	LastInformAt   *time.Time         `json:"last_inform_at"`
-	RFStatus       *string            `json:"rf_status"`
-	AlarmSeverity  *string            `json:"alarm_severity"`
-	GroupName      *string            `json:"group_name"`
-	CreatedAt      time.Time          `json:"created_at"`
+	ID              uuid.UUID          `json:"id"`
+	SerialNumber    string             `json:"serial_number"`
+	InfoDeviceName  *string            `json:"info_device_name"` // device_info 运维设备名
+	Status          model.DeviceStatus `json:"status"`
+	Carrier         model.CarrierCode  `json:"carrier"`
+	Technology      model.Technology   `json:"technology"`
+	Manufacturer    string             `json:"manufacturer"`
+	ModelName       string             `json:"model_name"`
+	FirmwareVersion string             `json:"firmware_version"`
+	IPAddress       string             `json:"ip_address"`
+	DeviceName      string             `json:"device_name"` // devices 表设备名称（原 SiteName）
+	LastInformAt    *time.Time         `json:"last_inform_at"`
+	RFStatus        *string            `json:"rf_status"`
+	AlarmSeverity   *string            `json:"alarm_severity"`
+	GroupName       *string            `json:"group_name"`
+	CreatedAt       time.Time          `json:"created_at"`
 }
 
 // DeviceSummary 设备汇总统计，用于仪表盘展示。

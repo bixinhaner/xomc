@@ -238,7 +238,7 @@ func (r *PgDeviceRepository) Create(ctx context.Context, device *model.Device) e
 			device.ConnectionRequestURL, device.NatDetected, udpAddr,
 			device.LastInformAt, eventsData,
 			device.LastBootAt, device.BootCount,
-			device.InformInterval, device.SiteName, device.SiteID,
+			device.InformInterval, device.DeviceName, device.SiteID,
 			device.Latitude, device.Longitude, extData, device.CreatedAt, device.UpdatedAt).
 		ToSql()
 	if err != nil {
@@ -311,7 +311,7 @@ func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) e
 		Set("last_inform_at", device.LastInformAt).
 		Set("last_inform_events", eventsData).
 		Set("inform_interval", device.InformInterval).
-		Set("site_name", device.SiteName).
+		Set("site_name", device.DeviceName).
 		Set("latitude", device.Latitude).
 		Set("longitude", device.Longitude).
 		Set("extension_data", extData).
@@ -708,7 +708,7 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 		d.UDPConnectionRequestAddress = *udpAddr
 	}
 	if siteName != nil {
-		d.SiteName = *siteName
+		d.DeviceName = *siteName
 	}
 	if siteID != nil {
 		d.SiteID = *siteID
@@ -780,7 +780,7 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 		d.UDPConnectionRequestAddress = *udpAddr
 	}
 	if siteName != nil {
-		d.SiteName = *siteName
+		d.DeviceName = *siteName
 	}
 	if siteID != nil {
 		d.SiteID = *siteID
@@ -1111,7 +1111,7 @@ func scanRecycleBinRow(rows pgx.Rows) (*model.Device, error) {
 		d.UDPConnectionRequestAddress = *udpAddr
 	}
 	if siteName != nil {
-		d.SiteName = *siteName
+		d.DeviceName = *siteName
 	}
 	if siteID != nil {
 		d.SiteID = *siteID
@@ -1237,11 +1237,11 @@ func (r *PgDeviceRepository) ListRecycleBin(ctx context.Context, filter RecycleB
 	var devices []model.Device
 	for rows.Next() {
 		d, err := scanRecycleBinRow(rows)
-        if err != nil {
-            return nil, fmt.Errorf("scan recycle bin device: %w", err)
-        }
-        devices = append(devices, *d)
-    }
+		if err != nil {
+			return nil, fmt.Errorf("scan recycle bin device: %w", err)
+		}
+		devices = append(devices, *d)
+	}
 
 	if devices == nil {
 		devices = []model.Device{}

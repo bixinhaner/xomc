@@ -2575,7 +2575,7 @@ const messages: Record<string, string> = {
   'device.rules.searchPlaceholder': 'Search by rule content',
   'device.rules.ruleName':          'Rule Name',
   'device.rules.inputRuleName':     'Please enter rule name',
-  'device.rules.nameMatch':         'Name Match',
+  'device.rules.nameMatch':         'Device Name',
   'device.rules.mustEnableFirst':   'Please enable the rule first',
   'device.rules.taskInProgress':    'Task in progress',
   'device.rules.taskCompleted':     'Task completed, {matched} devices matched, {failed} failed',

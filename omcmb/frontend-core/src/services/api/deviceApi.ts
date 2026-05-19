@@ -19,7 +19,7 @@ interface BackendDevice {
   connection_request_url: string;
   last_inform_at?: string;
   inform_interval: number;
-  site_name: string;
+  device_name: string;
   site_id: string;
   latitude: number;
   longitude: number;
@@ -165,12 +165,12 @@ function mapBackendDevice(bd: BackendDevice): Device {
   return {
     id: bd.id,
     sn: bd.serial_number,
-    name: bd.site_name || bd.serial_number,
+    name: bd.device_name || bd.serial_number,
     vendor: bd.manufacturer,
     productType: bd.product_class,
     networkType: bd.technology,
     deviceModel: bd.model_name,
-    region: bd.site_name,
+    region: bd.device_name,
     stationId: bd.site_id,
     connStatus: mapStatus(bd.status),
     alarmLevel: 'none',
@@ -179,7 +179,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     lastOnlineTime: bd.last_inform_at || '',
     ipAddress: bd.ip_address,
     subnet: '',
-    site: bd.site_name,
+    site: bd.device_name,
     longitude: bd.longitude,
     latitude: bd.latitude,
     softwareVersion: bd.firmware_version,
@@ -198,7 +198,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     upTime: bd.up_time || '',
     firstOnlineTime: bd.first_online_at || '',
     lastInformTime: bd.last_inform_at || '',
-    siteName: bd.site_name || '',
+    deviceName: bd.device_name || '',
     gpsVersion: bd.gps_version || '',
     rom: bd.rom || '',
     remark: bd.remark || '',
@@ -373,7 +373,7 @@ export const deviceApi = {
       manufacturer: input.manufacturer || undefined,
       model_name: input.modelName || undefined,
       ip_address: input.ipAddress || undefined,
-      site_name: input.siteName || undefined,
+      device_name: input.deviceName || undefined,
       site_id: input.siteId || undefined,
       latitude: input.latitude,
       longitude: input.longitude,
@@ -392,8 +392,8 @@ export const deviceApi = {
     if (data.connStatus !== undefined) payload.status = data.connStatus === 'online' ? 'active' : 'offline';
     if (data.softwareVersion !== undefined) payload.firmware_version = data.softwareVersion;
     if (data.ipAddress !== undefined) payload.ip_address = data.ipAddress;
-    if (data.site !== undefined) payload.site_name = data.site;
-    if (data.name !== undefined) payload.site_name = data.name;
+    if (data.site !== undefined) payload.device_name = data.site;
+    if (data.name !== undefined) payload.device_name = data.name;
     if (data.stationId !== undefined) payload.site_id = data.stationId;
     if (data.latitude !== undefined) payload.latitude = data.latitude;
     if (data.longitude !== undefined) payload.longitude = data.longitude;
@@ -530,13 +530,13 @@ export const deviceApi = {
     return {
       items: (data.items || []).map((bd) => ({
         id: bd.id,
-        neName: bd.site_name || bd.serial_number,
+        neName: bd.device_name || bd.serial_number,
         sn: bd.serial_number,
         neType: bd.product_class,
         vendor: bd.manufacturer,
-        region: bd.site_name,
+        region: bd.device_name,
         subnet: '',
-        site: bd.site_name,
+        site: bd.device_name,
         connStatus: mapStatus(bd.status),
         alarmLevel: 'none' as const,
       })),

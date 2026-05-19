@@ -400,7 +400,7 @@ func (s *Service) ListDeviceCandidates(ctx context.Context, filter DeviceCandida
 			CategoryLabel:   categoryLabelForCandidate(catalog, filter.Category),
 			TypeCode:        "",
 			TypeDisplayName: "",
-			DeviceName:      defaultDeviceName(item.SiteName, item.SerialNumber, item.ProductClass),
+			DeviceName:      defaultDeviceName(item.DeviceName, item.SerialNumber, item.ProductClass),
 			DeviceSN:        item.SerialNumber,
 			ProductType:     item.ProductClass,
 			CurrentVersion:  currentVersion,
@@ -552,7 +552,7 @@ func (s *Service) mapDeviceItem(
 	productType := parent.ProductClass
 	currentVersion := subTask.OriVersion
 	if dev != nil {
-		deviceName = defaultDeviceName(dev.SiteName, dev.SerialNumber, dev.ProductClass)
+		deviceName = defaultDeviceName(dev.DeviceName, dev.SerialNumber, dev.ProductClass)
 		if dev.ProductClass != "" {
 			productType = dev.ProductClass
 		}

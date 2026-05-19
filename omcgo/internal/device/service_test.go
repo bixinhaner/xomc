@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/core/event"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"github.com/stretchr/testify/assert"
@@ -412,7 +412,7 @@ func TestDeviceService_CreateDevice_Success(t *testing.T) {
 		ModelName:    "Femto-X1",
 		Carrier:      model.CarrierCTCC,
 		Technology:   model.TechNR,
-		SiteName:     "SiteA",
+		DeviceName:   "SiteA",
 		SiteID:       "SITE-001",
 		Latitude:     31.23,
 		Longitude:    121.47,
@@ -426,7 +426,7 @@ func TestDeviceService_CreateDevice_Success(t *testing.T) {
 	assert.Equal(t, model.DeviceRegistered, device.Status, "new API-created device should be in registered status")
 	assert.Equal(t, model.CarrierCTCC, device.Carrier)
 	assert.Equal(t, model.TechNR, device.Technology)
-	assert.Equal(t, "SiteA", device.SiteName)
+	assert.Equal(t, "SiteA", device.DeviceName)
 	assert.NotNil(t, created)
 }
 
@@ -462,7 +462,7 @@ func TestDeviceService_UpdateDevice_Success(t *testing.T) {
 			return &model.Device{
 				ID:           deviceID,
 				SerialNumber: "SN-UPD",
-				SiteName:     "OldSite",
+				DeviceName:   "OldSite",
 				Latitude:     0.0,
 			}, nil
 		},
@@ -476,15 +476,15 @@ func TestDeviceService_UpdateDevice_Success(t *testing.T) {
 	newSite := "NewSite"
 	newLat := 39.9
 	req := UpdateDeviceRequest{
-		SiteName: &newSite,
-		Latitude: &newLat,
+		DeviceName: &newSite,
+		Latitude:   &newLat,
 	}
 
 	device, err := svc.UpdateDevice(context.Background(), deviceID, req)
 	require.NoError(t, err)
 	require.NotNil(t, device)
 
-	assert.Equal(t, "NewSite", device.SiteName)
+	assert.Equal(t, "NewSite", device.DeviceName)
 	assert.InDelta(t, 39.9, device.Latitude, 0.001)
 	// Unchanged field stays the same
 	assert.Equal(t, "SN-UPD", device.SerialNumber)

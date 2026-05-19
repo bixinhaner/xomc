@@ -343,7 +343,7 @@ func (h *InformHandler) triggerGroupAssign(device *model.Device) {
 	}
 	req := GroupAssignRequest{
 		DeviceID:     device.ID,
-		DeviceName:   device.SiteName, // 与现有 matcher 约定 deviceName 字段对齐；若空则用 SN 兜底
+		DeviceName:   device.DeviceName, // 与现有 matcher 约定 deviceName 字段对齐；若空则用 SN 兜底
 		SerialNumber: device.SerialNumber,
 	}
 	if req.DeviceName == "" {

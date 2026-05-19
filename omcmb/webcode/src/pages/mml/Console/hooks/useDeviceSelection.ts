@@ -26,7 +26,7 @@ export function useDeviceSelection() {
       });
       const mapped: ConsoleDevice[] = result.items.map((d) => ({
         sn: d.sn,
-        name: d.siteName || d.sn,
+        name: d.deviceName || d.sn,
         type: d.networkType === 'nr' ? 'gNB' : 'eNB',
         productType: d.productType || '',
         status: (d.connStatus === 'online' ? 'online' : 'offline') as ConsoleDevice['status'],

@@ -359,7 +359,7 @@ const getOtherFields = (t: ReturnType<typeof useT>, networkType: string): FieldG
     { key: 'firstOnlineTime', label: t('device.firstOnlineTime'), render: (d) => fmtTime(d.firstOnlineTime) },
     { key: 'lastInformTime', label: t('device.lastInformTime'), render: (d) => fmtTime(d.lastInformTime) },
     // 站址信息
-    { key: 'siteName', label: t('device.siteName'), render: (d) => d.siteName || '-' },
+    { key: 'siteName', label: t('device.siteName'), render: (d) => d.deviceName || '-' },
     // 位置信息
     { key: 'longitude', label: t('device.longitude'), render: (d) => d.longitude?.toFixed(4) || '-' },
     { key: 'latitude', label: t('device.latitude'), render: (d) => d.latitude?.toFixed(4) || '-' },
@@ -674,9 +674,12 @@ export default function DeviceDetail() {
             )}
           </div>
           <Space>
-            <Button icon={<ReloadOutlined />} onClick={handleHeaderRefresh}>
-              {t('common.refresh')}
-            </Button>
+            {/* license tab 自带"刷新"按钮，此处头部刷新隐藏，避免同页两个刷新按钮 */}
+            {activeTab !== 'license' && (
+              <Button icon={<ReloadOutlined />} onClick={handleHeaderRefresh}>
+                {t('common.refresh')}
+              </Button>
+            )}
           </Space>
         </div>
       </Card>

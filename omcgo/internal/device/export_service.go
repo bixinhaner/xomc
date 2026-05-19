@@ -48,13 +48,13 @@ func (s *ExportService) ExportCSV(ctx context.Context, filter DeviceFilter, w io
 	for _, d := range result.Items {
 		row := []string{
 			d.SerialNumber,
-			derefStr(d.DeviceName),
+			derefStr(d.InfoDeviceName),
 			string(d.Status),
 			string(d.Carrier),
 			string(d.Technology),
 			d.ModelName,
 			d.Manufacturer,
-			d.SiteName,
+			d.DeviceName,
 			d.IPAddress,
 			d.FirmwareVersion,
 			derefStr(d.RFStatus),

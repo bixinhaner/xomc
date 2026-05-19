@@ -29,7 +29,7 @@ func NewDeviceMatcher(repo DeviceGroupRepository, pool *pgxpool.Pool, logger *za
 // MatchRequest 匹配请求参数
 type MatchRequest struct {
 	DeviceID     uuid.UUID // 设备 ID
-	DeviceName   string    // 设备名称（device_info.device_name 或 devices.serial_number）
+	DeviceName   string    // 设备名称 = devices.site_name（"名称匹配"模式的匹配字段）
 	SerialNumber string    // 设备序列号 — serialNumber 模式精确匹配（migration 000124）
 	LAC          *int      // LAC 位置区码（可选）
 	TAC          *int      // TAC 跟踪区码（可选）

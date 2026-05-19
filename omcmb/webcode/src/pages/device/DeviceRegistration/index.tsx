@@ -40,7 +40,7 @@ interface BasicFormValues {
 
 interface NetworkFormValues {
   ipAddress?: string;
-  siteName?: string;
+  deviceName?: string;
   siteId?: string;
   latitude?: number;
   longitude?: number;
@@ -216,7 +216,7 @@ export default function DeviceRegistration() {
           </Form.Item>
         </Col>
         <Col span={12}>
-          <Form.Item name="siteName" label={t('table.site')}>
+          <Form.Item name="deviceName" label={t('table.site')}>
             <Input placeholder={t('common.placeholder')} />
           </Form.Item>
         </Col>
@@ -291,7 +291,7 @@ export default function DeviceRegistration() {
               <tbody>
                 {[
                   { label: t('device.ipAddress'), value: networkData?.ipAddress || '-' },
-                  { label: t('table.site'), value: networkData?.siteName || '-' },
+                  { label: t('table.site'), value: networkData?.deviceName || '-' },
                   { label: t('device.siteId'), value: networkData?.siteId || '-' },
                   { label: t('device.latitude'), value: networkData?.latitude ?? '-' },
                   { label: t('device.longitude'), value: networkData?.longitude ?? '-' },

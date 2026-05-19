@@ -726,8 +726,10 @@ func (s *DeviceRuleService) Stop() {
 // 调 AddDeviceWithSource('rule', &rule.ID) 入目标分组；A4 manual 守护已 SQL 层。
 // 单设备路径不创建 RuleTask（task 表用于审计批量 ApplyRule）；用 debug log 记录。
 //
-// LAC/TAC 当前 nil（W3 待定点）；Name = serial_number（与 PgDeviceLister
-// fallback 一致）。device_info.device_name 由 cron @hourly 在用户填后接力。
+// LAC/TAC 当前 nil（W3 待定点）。
+// DeviceName 留空：设备首次注册时尚无 site_name（站点名称为配置项，注册时未知），
+// 名称匹配在此刻无意义；待用户填好 site_name 后由 cron @hourly 接力按名称匹配。
+// SN 匹配模式不受影响（仍传 SerialNumber）。
 func (s *DeviceRuleService) handleDeviceRegistered(ctx context.Context, evt event.Event) error {
 	var payload struct {
 		DeviceID     uuid.UUID `json:"device_id"`
@@ -753,7 +755,7 @@ func (s *DeviceRuleService) handleDeviceRegistered(ctx context.Context, evt even
 		rule := &rules[i]
 		matched, err := s.matcher.matchRule(ctx, rule, MatchRequest{
 			DeviceID:     payload.DeviceID,
-			DeviceName:   payload.SerialNumber,
+			DeviceName:   "", // 注册时无 site_name，名称匹配交由 cron @hourly 接力
 			SerialNumber: payload.SerialNumber, // migration 000124 SN 模式
 		})
 		if err != nil {

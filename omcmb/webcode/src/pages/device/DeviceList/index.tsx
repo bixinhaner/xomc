@@ -855,7 +855,8 @@ export default function DeviceList() {
           return <Tag color={color}>{label}</Tag>;
         },
       },
-      { key: 'hostName', title: t('device.hostName'), dataIndex: 'hostName', width: 150, ellipsis: true, group: 'common' },
+      // "名称" 列绑定 device_name（设备名称），而非 host_name。
+      { key: 'hostName', title: t('device.hostName'), dataIndex: 'deviceName', width: 150, ellipsis: true, group: 'common' },
       {
         key: 'networkType',
         title: t('device.radioMode'),
@@ -1065,7 +1066,7 @@ export default function DeviceList() {
         group: 'common',
         render: (_val, record) => fmtTime(record.lastOnlineTime),
       },
-      { key: 'siteName', title: t('device.siteName'), dataIndex: 'siteName', width: 130, hidden: true, ellipsis: true, group: 'common' },
+      { key: 'siteName', title: t('device.siteName'), dataIndex: 'deviceName', width: 130, hidden: true, ellipsis: true, group: 'common' },
       { key: 'remark', title: t('device.remark'), dataIndex: 'remark', width: 185, hidden: true, ellipsis: true, group: 'common', headerRender: remarkHeaderRender },
       {
         key: 'longitude',

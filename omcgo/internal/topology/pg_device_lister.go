@@ -10,7 +10,8 @@ import (
 
 // PgDeviceLister DeviceLister 的 PostgreSQL 实现。
 //
-// 用 LEFT JOIN devices + device_info 取出供 rule 匹配的最小信息集（ID + Name）。
+// 从 devices 表取出供 rule 匹配的最小信息集（ID + Name + SerialNumber）。
+// Name = devices.site_name（站点名称），即"名称匹配"模式的匹配字段。
 // LAC / TAC 字段返 nil — 见 PRD §12.8 W3 待定点（pre-existing 缺口：
 // devices/device_info/sites 三表均无 lac/tac 列），后续 carve out T-0098 处理。
 //
@@ -31,17 +32,17 @@ func NewPgDeviceLister(pool *pgxpool.Pool, logger *zap.Logger) *PgDeviceLister {
 
 // ListAllForRuleEval 返回所有可被规则匹配的设备的最小信息集。
 //
-// SQL：LEFT JOIN device_info 取 device_name；缺失时 fallback 到
-// devices.serial_number 作为 Name（确保 Name 字段非空可参与 NameRule 匹配）。
+// SQL：Name 取 devices.site_name（"名称匹配"模式的匹配字段，与设备列表"名称"列
+// 一致）。site_name 为空时 Name 为空串 —— matchByDeviceName 对空串安全降级
+// 不命中（见 matcher.go），未配站点名的设备天然不参与名称匹配。SN 匹配走
+// 独立的 serial_number 字段（MatchingModeSerialNumber）。
 //
 // 性能：当前一次性返全部设备；100 万规模下需切换流式 cursor 或分批 OFFSET
 // （PRD §7 反例监控目标 cron CPU < 50% 隐含分批要求）— 后续优化项。
 func (l *PgDeviceLister) ListAllForRuleEval(ctx context.Context) ([]DeviceForMatch, error) {
 	const sqlText = `
-		SELECT d.id, COALESCE(NULLIF(di.device_name, ''), d.serial_number) AS name,
-		       d.serial_number
+		SELECT d.id, COALESCE(d.site_name, '') AS name, d.serial_number
 		FROM devices d
-		LEFT JOIN device_info di ON di.device_id = d.id
 	`
 
 	rows, err := l.pool.Query(ctx, sqlText)

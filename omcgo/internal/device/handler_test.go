@@ -244,7 +244,7 @@ func seedDevice(repo *fakeDeviceRepo, id uuid.UUID, sn string, carrier model.Car
 		Carrier:      carrier,
 		Technology:   tech,
 		Status:       status,
-		SiteName:     "Site-A",
+		DeviceName:   "Site-A",
 		SiteID:       "SITE-001",
 		Latitude:     39.9042,
 		Longitude:    116.4074,
@@ -279,7 +279,7 @@ func TestHandler_CreateDevice_Success(t *testing.T) {
 		ModelName:    "PicoCell-100",
 		Carrier:      model.CarrierCMCC,
 		Technology:   model.TechLTE,
-		SiteName:     "Site-A",
+		DeviceName:   "Site-A",
 		SiteID:       "SITE-001",
 		Latitude:     39.9042,
 		Longitude:    116.4074,
@@ -396,8 +396,8 @@ func TestHandler_UpdateDevice_Success(t *testing.T) {
 	newSite := "Site-B"
 	newLat := 31.2304
 	body := UpdateDeviceRequest{
-		SiteName: &newSite,
-		Latitude: &newLat,
+		DeviceName: &newSite,
+		Latitude:   &newLat,
 	}
 
 	w := httptest.NewRecorder()
@@ -409,7 +409,7 @@ func TestHandler_UpdateDevice_Success(t *testing.T) {
 
 	var resp model.Device
 	response.DecodeData(t, w.Body, &resp)
-	assert.Equal(t, "Site-B", resp.SiteName)
+	assert.Equal(t, "Site-B", resp.DeviceName)
 	assert.Equal(t, 31.2304, resp.Latitude)
 	// Unchanged fields should remain the same.
 	assert.Equal(t, "SN-UPD-001", resp.SerialNumber)
@@ -517,7 +517,7 @@ func TestHandler_GetStats(t *testing.T) {
 
 // fakeParamSyncStarter 实现 ParamSyncStarter 接口供 SyncDeviceParams 单测使用。
 type fakeParamSyncStarter struct {
-	calls      []syncStarterCall
+	calls       []syncStarterCall
 	defaultUsed bool
 	defaultErr  error
 }

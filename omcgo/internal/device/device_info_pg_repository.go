@@ -503,7 +503,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		d.UDPConnectionRequestAddress = *udpAddr
 	}
 	if siteName != nil {
-		d.SiteName = *siteName
+		d.DeviceName = *siteName
 	}
 	if siteID != nil {
 		d.SiteID = *siteID
@@ -517,7 +517,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	}
 
 	// Assign device_info fields
-	d.DeviceName = diDeviceName
+	d.InfoDeviceName = diDeviceName
 	d.InfoAddress = diAddress
 	d.Remark = diRemark
 	d.ProjectStatus = diProjectStatus
