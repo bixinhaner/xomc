@@ -72,19 +72,49 @@ func (h *ParameterTreeHandler) resolveMappingValidator(ctx context.Context, dev 
 }
 
 // Constraints 是参数取值范围的简化表示，对齐前端字段（路径上 JSON key=constraints）。
-// 仅承载数值上下限；字符串长度/枚举/正则不在 ParamMapping 范畴内。
+// 承载数值上下限 + 枚举 (T-0158)；字符串长度复用 min_value/max_value 由前端按 type 解释；
+// 正则 / 显式 minLength/maxLength 暂不支持（§11 L-04）。
 type Constraints struct {
-	MinValue *int64 `json:"min_value,omitempty"`
-	MaxValue *int64 `json:"max_value,omitempty"`
+	MinValue   *int64   `json:"min_value,omitempty"`
+	MaxValue   *int64   `json:"max_value,omitempty"`
+	EnumValues []string `json:"enum_values,omitempty"` // T-0158: 下发设备的实际值列表
+	EnumLabels []string `json:"enum_labels,omitempty"` // T-0158: UI 显示标签，与 EnumValues 一一对应
 }
 
-// constraintsFromMapping 把 ParamMapping 的 MinValue/MaxValue 收集为 Constraints；
-// 二者全空返回 nil（避免返回无意义对象）。
+// constraintsFromMapping 把 ParamMapping 的 MinValue/MaxValue/EnumValues/EnumLabels
+// 收集为 Constraints；全空返回 nil（避免无意义对象）。
 func constraintsFromMapping(m *parammodel.ParamMapping) *Constraints {
-	if m == nil || (m.MinValue == nil && m.MaxValue == nil) {
+	if m == nil {
 		return nil
 	}
-	return &Constraints{MinValue: m.MinValue, MaxValue: m.MaxValue}
+	hasRange := m.MinValue != nil || m.MaxValue != nil
+	hasEnum := m.EnumValues != nil && *m.EnumValues != ""
+	if !hasRange && !hasEnum {
+		return nil
+	}
+	c := &Constraints{MinValue: m.MinValue, MaxValue: m.MaxValue}
+	if hasEnum {
+		c.EnumValues = splitCSV(*m.EnumValues)
+		if m.EnumLabels != nil && *m.EnumLabels != "" {
+			c.EnumLabels = splitCSV(*m.EnumLabels)
+		}
+	}
+	return c
+}
+
+// splitCSV 把 "a,b,c" 切成 []string，剔除首尾空白；空串返回 nil。
+func splitCSV(s string) []string {
+	out := []string{}
+	for _, p := range strings.Split(s, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // RegisterRoutes registers parameter tree routes.

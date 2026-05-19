@@ -297,7 +297,9 @@ func batchInsertMappings(ctx context.Context, tx pgx.Tx, modelID string, entries
 		ib := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).Insert("param_mappings").Columns(
 			"param_model_id", "standard_path", "private_path", "entry_type",
 			"access", "data_type", "change_applies",
-			"min_value", "max_value", "is_storable", "is_active", "is_supported",
+			"min_value", "max_value",
+			"enum_values", "enum_labels", // T-0158
+			"is_storable", "is_active", "is_supported",
 		)
 		for _, e := range entries[i:end] {
 			std := e.StandardPath
@@ -314,6 +316,8 @@ func batchInsertMappings(ctx context.Context, tx pgx.Tx, modelID string, entries
 				nullIfEmpty(e.ChangeApplies),
 				parseNullableInt(e.Min),
 				parseNullableInt(e.Max),
+				nullIfEmpty(e.EnumValues), // T-0158: 枚举值 CSV
+				nullIfEmpty(e.EnumLabels), // T-0158: 枚举标签 CSV
 				!strings.EqualFold(strings.TrimSpace(e.Store), "false"),     // 缺省 / 任意非 "false" → true
 				true,                                                        // is_active
 				!strings.EqualFold(strings.TrimSpace(e.Supported), "false"), // T-0103: 缺省 / 任意非 "false" → true

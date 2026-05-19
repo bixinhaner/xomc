@@ -16,6 +16,8 @@ export interface ParameterConstraints {
   minValue?: number;
   maxValue?: number;
   enumValues?: string[];
+  /** T-0158: 与 enumValues 一一对应的 UI 显示标签（前端显示值 ≠ 下发值场景） */
+  enumLabels?: string[];
   pattern?: string;
   maxLength?: number;
   minLength?: number;

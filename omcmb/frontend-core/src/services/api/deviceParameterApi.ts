@@ -28,6 +28,7 @@ interface BackendConstraints {
   min_value?: number;
   max_value?: number;
   enum_values?: string[];
+  enum_labels?: string[]; // T-0158
   pattern?: string;
   max_length?: number;
   min_length?: number;
@@ -139,6 +140,7 @@ function mapBackendConstraints(bc: BackendConstraints | undefined): ParameterCon
     minValue: bc.min_value,
     maxValue: bc.max_value,
     enumValues: bc.enum_values,
+    enumLabels: bc.enum_labels, // T-0158
     pattern: bc.pattern,
     maxLength: bc.max_length,
     minLength: bc.min_length,

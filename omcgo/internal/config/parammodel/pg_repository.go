@@ -27,7 +27,9 @@ func (r *PgRepository) ListMappingsByParamModel(ctx context.Context, paramModelI
 	sqlStr, args, err := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).
 		Select("id", "param_model_id", "standard_path", "private_path",
 			"entry_type", "access", "data_type", "change_applies",
-			"min_value", "max_value", "is_storable", "is_active", "is_supported").
+			"min_value", "max_value",
+			"enum_values", "enum_labels", // T-0158
+			"is_storable", "is_active", "is_supported").
 		From("param_mappings").
 		Where(sq.Eq{"param_model_id": paramModelID, "is_active": true}).
 		OrderBy("standard_path").
@@ -51,7 +53,9 @@ func (r *PgRepository) ListDiscoveredMappings(ctx context.Context, productID uui
 	sqlStr, args, err := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).
 		Select("id", "product_id", "software_version", "standard_path", "private_path",
 			"entry_type", "access", "data_type", "change_applies",
-			"min_value", "max_value", "is_storable", "is_active", "is_supported").
+			"min_value", "max_value",
+			"enum_values", "enum_labels", // T-0158
+			"is_storable", "is_active", "is_supported").
 		From("discovered_param_mappings").
 		Where(sq.Eq{"product_id": productID, "software_version": swVersion, "is_active": true}).
 		OrderBy("standard_path").
@@ -75,7 +79,9 @@ func scanDefaultMappings(rows pgx.Rows) ([]ParamMapping, error) {
 		if err := rows.Scan(
 			&m.ID, &m.ParamModelID, &m.StandardPath, &m.PrivatePath,
 			&m.EntryType, &access, &dataType, &changeApplies,
-			&m.MinValue, &m.MaxValue, &m.IsStorable, &m.IsActive, &m.IsSupported,
+			&m.MinValue, &m.MaxValue,
+			&m.EnumValues, &m.EnumLabels, // T-0158
+			&m.IsStorable, &m.IsActive, &m.IsSupported,
 		); err != nil {
 			return nil, fmt.Errorf("scan default mapping: %w", err)
 		}
@@ -104,7 +110,9 @@ func scanDiscoveredMappings(rows pgx.Rows) ([]ParamMapping, error) {
 		if err := rows.Scan(
 			&m.ID, &productID, &swVersion, &m.StandardPath, &m.PrivatePath,
 			&m.EntryType, &access, &dataType, &changeApplies,
-			&m.MinValue, &m.MaxValue, &m.IsStorable, &m.IsActive, &m.IsSupported,
+			&m.MinValue, &m.MaxValue,
+			&m.EnumValues, &m.EnumLabels, // T-0158
+			&m.IsStorable, &m.IsActive, &m.IsSupported,
 		); err != nil {
 			return nil, fmt.Errorf("scan discovered mapping: %w", err)
 		}

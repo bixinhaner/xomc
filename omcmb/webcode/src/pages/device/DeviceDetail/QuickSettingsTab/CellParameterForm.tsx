@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Col, Form, Input, Row, Space, Spin, Tag, Typography, message, notification } from 'antd';
+import { Button, Card, Col, Form, Input, Row, Select, Space, Spin, Tag, Typography, message, notification } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { useParameterSchema, useUpdateParameters } from '@core/hooks/api/useDeviceParameters';
@@ -293,6 +293,9 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
                 )}
               </Space>
             );
+            const enumVals = item?.constraints?.enumValues;
+            const enumLabels = item?.constraints?.enumLabels;
+            const isEnum = Array.isArray(enumVals) && enumVals.length > 0;
             return (
               <Col span={12} key={p.name}>
                 <Form.Item
@@ -301,7 +304,18 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
                   validateStatus={error ? 'error' : undefined}
                   help={error}
                 >
-                  <Input disabled={!writable} placeholder={item?.defaultValue || ''} />
+                  {isEnum ? (
+                    <Select
+                      disabled={!writable}
+                      placeholder={item?.defaultValue || ''}
+                      options={enumVals.map((v, idx) => ({
+                        value: v,
+                        label: enumLabels?.[idx] || v,
+                      }))}
+                    />
+                  ) : (
+                    <Input disabled={!writable} placeholder={item?.defaultValue || ''} />
+                  )}
                 </Form.Item>
               </Col>
             );
@@ -320,8 +334,10 @@ function formatConstraintHint(schema?: ParameterSchemaItem): string {
   if (!schema?.constraints) return '';
   const c = schema.constraints;
   if (c.enumValues && c.enumValues.length > 0) {
-    const list = c.enumValues.slice(0, 5).join(' | ');
-    return c.enumValues.length > 5 ? `{${list} | ...}` : `{${list}}`;
+    // 优先用 labels 给用户看（如 "Macro | home"），fallback 用 values
+    const items = c.enumLabels && c.enumLabels.length === c.enumValues.length ? c.enumLabels : c.enumValues;
+    const list = items.slice(0, 5).join(' | ');
+    return items.length > 5 ? `{${list} | ...}` : `{${list}}`;
   }
   const isString = schema.type === 'string';
   // 优先用显式 maxLength/minLength；fallback 到 minValue/maxValue (按类型解释)
