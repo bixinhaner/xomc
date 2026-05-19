@@ -519,6 +519,7 @@ docker compose -f /opt/omc/current/deploy/docker-compose.infra.yml ps   # 基础
 | `batch_processor` | `workers` | Periodic Inform 批量并发，建议 = CPU 核数/2 |
 | `log` | `level` / `output_paths` / `rotation` | 日志级别（prod 建议 `warn`）、路径、轮转 |
 | `license` | `signing.public_key_dir` / `strict` | License 治理；strict=true 需放 OEM 公钥 |
+| `notification` | `smtp.*` / `alert_webhook.*` | 告警邮件通知。默认 `smtp.enabled: false`；需告警邮件时填 `smtp.host`/`from` 并置 `enabled: true`，收件人填 `alert_webhook.recipients`（详见《告警处置Runbook.md》与 `monitoring/alertmanager.yml`） |
 
 ### 6.3 TLS 与密钥
 
@@ -670,6 +671,9 @@ docker compose -f /opt/omc/current/deploy/docker-compose.web.yml up -d --force-r
 | 容器起不来 / 端口映射不通 / 报 `IPv4 forwarding is disabled` | 内核 IP 转发未开，按 §5 步骤 2.1 配置 `net.ipv4.ip_forward=1` |
 
 日志位置：`/opt/omc/run/logs/{app,acs,worker,nginx}/`，zap JSON 格式，lumberjack 自动轮转。
+
+> **Prometheus 告警的逐条处置**（进程崩溃/卡死、基础服务、连接池、业务积压等
+> 20 条告警的含义、排查、处置、升级路径）见 [`告警处置Runbook.md`](./告警处置Runbook.md)。
 
 ---
 
