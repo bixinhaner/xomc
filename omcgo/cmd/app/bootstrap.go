@@ -56,6 +56,8 @@ func initApp(ctx context.Context, cfg *appconfig.AppConfig) (*appInfra, error) {
 	taskQueue := task.NewRedisTaskQueue(inf.Redis)
 	taskRepo := task.NewPgTaskRepository(inf.PgPool)
 	app.TaskSvc = task.NewTaskService(taskQueue, taskRepo, inf.Logger)
+	// T-0157 C1: 注入默认超时兜底（详见 appconfig.TaskConfig 注释）
+	app.TaskSvc.SetDefaultExpiresIn(cfg.Task.DefaultExpiresInSeconds)
 
 	return app, nil
 }

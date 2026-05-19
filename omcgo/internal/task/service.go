@@ -41,6 +41,10 @@ type TaskService struct {
 	callbacks    []TaskCompletionCallback
 	eventBus     event.EventBus
 	logger       *zap.Logger
+
+	// defaultExpiresIn: T-0157 C1 — CreateTask 兜底默认超时秒数。
+	// 调用方语义见 appconfig.TaskConfig.DefaultExpiresInSeconds。0 表示未配置（不兜底）。
+	defaultExpiresIn int
 }
 
 // NewTaskService 创建任务服务
@@ -92,6 +96,17 @@ func (s *TaskService) SetEventBus(bus event.EventBus) {
 	s.eventBus = bus
 }
 
+// SetDefaultExpiresIn 配置 CreateTask 的默认超时兜底秒数（T-0157 C1）。
+// 仅当 CreateTaskRequest.ExpiresIn == 0 时生效；调用方显式传 0 等价于声明"永不超时"
+// 但本兜底仍会覆盖（如需真正永不超时，调用方需显式传一个极大值如 86400）。
+// 负值或 0 表示不启用兜底，等价于历史行为。
+func (s *TaskService) SetDefaultExpiresIn(seconds int) {
+	if seconds < 0 {
+		seconds = 0
+	}
+	s.defaultExpiresIn = seconds
+}
+
 // CreateTask 创建新任务
 func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*Task, error) {
 	ctx, span := tracing.StartSpan(ctx, tracing.TaskTracerName, "Task CreateTask",
@@ -99,6 +114,11 @@ func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*
 		attribute.String("task.method", req.Method),
 	)
 	defer span.End()
+
+	// T-0157 C1: 兜底默认超时（调用方未传 → 用配置默认；保留显式覆盖能力）
+	if req.ExpiresIn == 0 && s.defaultExpiresIn > 0 {
+		req.ExpiresIn = s.defaultExpiresIn
+	}
 
 	task := NewTask(req)
 

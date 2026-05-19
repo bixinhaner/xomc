@@ -221,6 +221,10 @@ func newTestableService() *testableTaskService {
 // This is necessary because TaskService uses concrete types.
 
 func (ts *testableTaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*Task, error) {
+	// T-0157 C1: 同步真实 TaskService.CreateTask 的默认超时兜底行为
+	if req.ExpiresIn == 0 && ts.svc.defaultExpiresIn > 0 {
+		req.ExpiresIn = ts.svc.defaultExpiresIn
+	}
 	task := NewTask(req)
 	if err := ts.repo.Create(ctx, task); err != nil {
 		return nil, fmt.Errorf("persist task: %w", err)

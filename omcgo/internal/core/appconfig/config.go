@@ -225,11 +225,28 @@ type AppConfig struct {
 	ParamRegistry   ParamRegistryConfig   `mapstructure:"param_registry"`
 	BatchProcessor  BatchProcessorConfig  `mapstructure:"batch_processor"`
 	License         LicenseConfig         `mapstructure:"license"`
+	Task            TaskConfig            `mapstructure:"task"`
 	Notification    NotificationConfig    `mapstructure:"notification"`
 	Metrics         MetricsConfig         `mapstructure:"metrics"`
 	Tracer          TracerConfig          `mapstructure:"tracer"`
 	Log             LogConfig             `mapstructure:"log"`
 	RequestIDPrefix string                `mapstructure:"request_id_prefix"` // 请求 ID 前缀，如 "app"
+}
+
+// TaskConfig 配置 task 子系统的全局默认行为（T-0157 C1 引入）。
+//
+// DefaultExpiresInSeconds: CreateTask 调用方未显式传 ExpiresIn 时使用的默认超时秒数。
+//   调用方语义:
+//     - req.ExpiresIn > 0  → 直接采用该值
+//     - req.ExpiresIn == 0 → 用本配置默认值兜底；本配置 <= 0 时表示"永不超时"
+//   实测 CPE 应答落在 5-60 秒区间，默认 120s 给慢响应留两倍缓冲又不让用户傻等。
+//   各业务（ops/alarm）可在 CreateTaskRequest 中显式覆盖（如告警同步 600s）。
+//
+// SweepIntervalSeconds: worker 进程 task_sweeper 周期扫描过期 task 的间隔（秒）。
+//   <= 0 时 sweeper 不启动（C2 引入；C1 阶段先建配置项占位）。
+type TaskConfig struct {
+	DefaultExpiresInSeconds int `mapstructure:"default_expires_in_seconds"`
+	SweepIntervalSeconds    int `mapstructure:"sweep_interval_seconds"`
 }
 
 // NotificationConfig 配置通知中心（T-0152）：SMTP 邮件发送器 + Alertmanager

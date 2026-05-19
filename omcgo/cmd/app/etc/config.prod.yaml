@@ -102,6 +102,12 @@ ne_direct:
   host: "0.0.0.0"
   port: 7549
 
+# Task 默认行为（T-0157 C1 引入），详见 config.dev.yaml 注释。
+# prod 与 dev/test 取同一默认值（120s）；若现场设备 RTT 偏长可在此覆盖。
+task:
+  default_expires_in_seconds: 120
+  sweep_interval_seconds: 10
+
 provision:
   enabled: true
   auto_configure: false
