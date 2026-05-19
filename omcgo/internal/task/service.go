@@ -685,7 +685,11 @@ func (s *TaskService) wakeDevice(deviceSN string) {
 // 仍保留 source_id 非空判断——匿名 / 临时任务（如 Console 执行命令按钮
 // 产生的 api-source 任务）没有回流目标，不必占用广播带宽。
 func (s *TaskService) notifyCompletion(ctx context.Context, task *Task) {
-	if task.SourceID == "" {
+	// T-0157 C5: 原条件 SourceID=="" 跳过排除了普通用户操作 (device.SetParameters 等
+	// 不填 SourceID)，导致消息中心 subscriber 永远收不到 task.completed/failed 事件。
+	// 新条件: SourceID 或 CreatorID 任一非空都广播——前者承担业务回流 (mml/ops 聚合器),
+	// 后者承担消息中心通知。匿名/临时任务两个都空 → 跳过 (不占用广播带宽)。
+	if task.SourceID == "" && task.CreatorID == "" {
 		return
 	}
 

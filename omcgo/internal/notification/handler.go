@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/admin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
@@ -55,8 +56,10 @@ type CreateNotificationRequest struct {
 
 // List handles GET /notifications.
 func (h *Handler) List(c *gin.Context) {
-	username, _ := c.Get("username")
-	userID, _ := username.(string)
+	// T-0157 C5/C10: user_id 统一用 admin 中间件 c.Set(CtxKeyUserID, uuid) 的 uuid string，
+	// 与 task subscriber (写入侧) 一致；旧逻辑用 c.Get("username") 拿到的是 username 字符串，
+	// 与 task.CreatorID = admin.UserIDStringFromCtx 写入的 uuid 字段错配 → 查不到消息。
+	userID := admin.UserIDStringFromCtx(c)
 	if userID == "" {
 		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
 		return
@@ -95,8 +98,10 @@ func (h *Handler) List(c *gin.Context) {
 
 // GetUnreadCount handles GET /notifications/unread-count.
 func (h *Handler) GetUnreadCount(c *gin.Context) {
-	username, _ := c.Get("username")
-	userID, _ := username.(string)
+	// T-0157 C5/C10: user_id 统一用 admin 中间件 c.Set(CtxKeyUserID, uuid) 的 uuid string，
+	// 与 task subscriber (写入侧) 一致；旧逻辑用 c.Get("username") 拿到的是 username 字符串，
+	// 与 task.CreatorID = admin.UserIDStringFromCtx 写入的 uuid 字段错配 → 查不到消息。
+	userID := admin.UserIDStringFromCtx(c)
 	if userID == "" {
 		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
 		return
@@ -119,8 +124,10 @@ func (h *Handler) MarkRead(c *gin.Context) {
 		return
 	}
 
-	username, _ := c.Get("username")
-	userID, _ := username.(string)
+	// T-0157 C5/C10: user_id 统一用 admin 中间件 c.Set(CtxKeyUserID, uuid) 的 uuid string，
+	// 与 task subscriber (写入侧) 一致；旧逻辑用 c.Get("username") 拿到的是 username 字符串，
+	// 与 task.CreatorID = admin.UserIDStringFromCtx 写入的 uuid 字段错配 → 查不到消息。
+	userID := admin.UserIDStringFromCtx(c)
 	if userID == "" {
 		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
 		return
@@ -136,8 +143,10 @@ func (h *Handler) MarkRead(c *gin.Context) {
 
 // MarkAllRead handles PUT /notifications/read-all.
 func (h *Handler) MarkAllRead(c *gin.Context) {
-	username, _ := c.Get("username")
-	userID, _ := username.(string)
+	// T-0157 C5/C10: user_id 统一用 admin 中间件 c.Set(CtxKeyUserID, uuid) 的 uuid string，
+	// 与 task subscriber (写入侧) 一致；旧逻辑用 c.Get("username") 拿到的是 username 字符串，
+	// 与 task.CreatorID = admin.UserIDStringFromCtx 写入的 uuid 字段错配 → 查不到消息。
+	userID := admin.UserIDStringFromCtx(c)
 	if userID == "" {
 		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
 		return
@@ -154,8 +163,10 @@ func (h *Handler) MarkAllRead(c *gin.Context) {
 // DeleteAll handles DELETE /notifications — 一键清空当前用户全部消息 (T-0157 C4)。
 // 返回 { "deleted": <int64> } 给前端"清空"按钮显示删除数。
 func (h *Handler) DeleteAll(c *gin.Context) {
-	username, _ := c.Get("username")
-	userID, _ := username.(string)
+	// T-0157 C5/C10: user_id 统一用 admin 中间件 c.Set(CtxKeyUserID, uuid) 的 uuid string，
+	// 与 task subscriber (写入侧) 一致；旧逻辑用 c.Get("username") 拿到的是 username 字符串，
+	// 与 task.CreatorID = admin.UserIDStringFromCtx 写入的 uuid 字段错配 → 查不到消息。
+	userID := admin.UserIDStringFromCtx(c)
 	if userID == "" {
 		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
 		return
@@ -178,8 +189,10 @@ func (h *Handler) Delete(c *gin.Context) {
 		return
 	}
 
-	username, _ := c.Get("username")
-	userID, _ := username.(string)
+	// T-0157 C5/C10: user_id 统一用 admin 中间件 c.Set(CtxKeyUserID, uuid) 的 uuid string，
+	// 与 task subscriber (写入侧) 一致；旧逻辑用 c.Get("username") 拿到的是 username 字符串，
+	// 与 task.CreatorID = admin.UserIDStringFromCtx 写入的 uuid 字段错配 → 查不到消息。
+	userID := admin.UserIDStringFromCtx(c)
 	if userID == "" {
 		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
 		return

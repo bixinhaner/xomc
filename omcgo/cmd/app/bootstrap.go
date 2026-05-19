@@ -59,6 +59,9 @@ func initApp(ctx context.Context, cfg *appconfig.AppConfig) (*appInfra, error) {
 	app.TaskSvc = task.NewTaskService(taskQueue, taskRepo, inf.Logger)
 	// T-0157 C1: 注入默认超时兜底（详见 appconfig.TaskConfig 注释）
 	app.TaskSvc.SetDefaultExpiresIn(cfg.Task.DefaultExpiresInSeconds)
+	// T-0157 C5: 注入 EventBus —— 没有它 CreateTask 末尾 publish task.created
+	// 会因 eventBus==nil 静默跳过，notification subscriber 永远收不到事件。
+	app.TaskSvc.SetEventBus(inf.EventBus)
 	// T-0157 C6: 注入入队失败兜底通知（avoid"点了没反应"，覆盖所有 CreateTask 调用点）
 	notifRepo := notification.NewPgRepository(inf.PgPool)
 	notifSvc := notification.NewService(notifRepo, nil, inf.Logger)

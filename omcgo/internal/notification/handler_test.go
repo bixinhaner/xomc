@@ -16,8 +16,12 @@ import (
 )
 
 // setupHandlerTest builds a gin router with notification handler routes
-// registered. The optional userID is injected as the Gin context "username"
-// before each request, simulating an authenticated session.
+// registered. The optional userID is injected as the Gin context user_id
+// (UUID derived from userID string for deterministic test data) so handler
+// can read it via admin.UserIDStringFromCtx (T-0157 C5/C10)。
+//
+// 实现细节：userID 字符串（如 "alice"）被映射到稳定的 uuid v5，再 c.Set 进
+// CtxKeyUserID；mockRepository.seed 时也需要传同一 uuid string 形式作为 UserID。
 func setupHandlerTest(t *testing.T, userID string) (*gin.Engine, *mockRepository) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -28,13 +32,23 @@ func setupHandlerTest(t *testing.T, userID string) (*gin.Engine, *mockRepository
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
 		if userID != "" {
-			c.Set("username", userID)
+			c.Set("user_id", testUUIDForUser(userID))
+			c.Set("username", userID) // 保留旧 key 兼容审计日志等
 		}
 		c.Next()
 	})
 	h.RegisterRoutes(r.Group(""))
 	return r, repo
 }
+
+// testUUIDForUser 把测试用户名映射到稳定 uuid（同名一致），供 setupHandlerTest 和
+// 测试断言数据共用。基于 namespace + name 的 uuid v5 保证跨测试可复现。
+func testUUIDForUser(name string) uuid.UUID {
+	return uuid.NewSHA1(uuid.NameSpaceDNS, []byte("test-user:"+name))
+}
+
+// testUserID 给测试代码取 string 形式（mock seed / 断言用）。
+func testUserID(name string) string { return testUUIDForUser(name).String() }
 
 // ---------- NewHandler ----------
 
@@ -51,9 +65,9 @@ func TestNewHandler_Basic(t *testing.T) {
 
 func TestHandler_List_OK(t *testing.T) {
 	r, repo := setupHandlerTest(t, "alice")
-	repo.seed(&Notification{UserID: "alice", Type: NotifTypeAlarm, Title: "n1"})
-	repo.seed(&Notification{UserID: "alice", Type: NotifTypeSystem, Title: "n2"})
-	repo.seed(&Notification{UserID: "bob", Type: NotifTypeAlarm, Title: "n3"})
+	repo.seed(&Notification{UserID: testUserID("alice"), Type: NotifTypeAlarm, Title: "n1"})
+	repo.seed(&Notification{UserID: testUserID("alice"), Type: NotifTypeSystem, Title: "n2"})
+	repo.seed(&Notification{UserID: testUserID("bob"), Type: NotifTypeAlarm, Title: "n3"})
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/notifications", nil)
@@ -75,8 +89,8 @@ func TestHandler_List_Unauthorized(t *testing.T) {
 
 func TestHandler_List_FilterByType(t *testing.T) {
 	r, repo := setupHandlerTest(t, "alice")
-	repo.seed(&Notification{UserID: "alice", Type: NotifTypeAlarm, Title: "a1"})
-	repo.seed(&Notification{UserID: "alice", Type: NotifTypeSystem, Title: "s1"})
+	repo.seed(&Notification{UserID: testUserID("alice"), Type: NotifTypeAlarm, Title: "a1"})
+	repo.seed(&Notification{UserID: testUserID("alice"), Type: NotifTypeSystem, Title: "s1"})
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/notifications?type=alarm", nil)
@@ -91,8 +105,8 @@ func TestHandler_List_FilterByType(t *testing.T) {
 
 func TestHandler_List_FilterByIsRead_True(t *testing.T) {
 	r, repo := setupHandlerTest(t, "alice")
-	repo.seed(&Notification{UserID: "alice", Type: NotifTypeAlarm, IsRead: true, Title: "read"})
-	repo.seed(&Notification{UserID: "alice", Type: NotifTypeAlarm, IsRead: false, Title: "unread"})
+	repo.seed(&Notification{UserID: testUserID("alice"), Type: NotifTypeAlarm, IsRead: true, Title: "read"})
+	repo.seed(&Notification{UserID: testUserID("alice"), Type: NotifTypeAlarm, IsRead: false, Title: "unread"})
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/notifications?is_read=true", nil)
@@ -107,8 +121,8 @@ func TestHandler_List_FilterByIsRead_True(t *testing.T) {
 
 func TestHandler_List_FilterByIsRead_False(t *testing.T) {
 	r, repo := setupHandlerTest(t, "alice")
-	repo.seed(&Notification{UserID: "alice", IsRead: true})
-	repo.seed(&Notification{UserID: "alice", IsRead: false})
+	repo.seed(&Notification{UserID: testUserID("alice"), IsRead: true})
+	repo.seed(&Notification{UserID: testUserID("alice"), IsRead: false})
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/notifications?is_read=false", nil)
@@ -145,9 +159,9 @@ func TestHandler_List_RepoError(t *testing.T) {
 
 func TestHandler_GetUnreadCount_OK(t *testing.T) {
 	r, repo := setupHandlerTest(t, "alice")
-	repo.seed(&Notification{UserID: "alice", IsRead: false})
-	repo.seed(&Notification{UserID: "alice", IsRead: false})
-	repo.seed(&Notification{UserID: "alice", IsRead: true})
+	repo.seed(&Notification{UserID: testUserID("alice"), IsRead: false})
+	repo.seed(&Notification{UserID: testUserID("alice"), IsRead: false})
+	repo.seed(&Notification{UserID: testUserID("alice"), IsRead: true})
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, "/notifications/unread-count", nil)
@@ -181,7 +195,7 @@ func TestHandler_GetUnreadCount_RepoError(t *testing.T) {
 
 func TestHandler_MarkRead_OK(t *testing.T) {
 	r, repo := setupHandlerTest(t, "alice")
-	n := repo.seed(&Notification{UserID: "alice"})
+	n := repo.seed(&Notification{UserID: testUserID("alice")})
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodPut, "/notifications/"+n.ID.String()+"/read", nil)
@@ -220,8 +234,8 @@ func TestHandler_MarkRead_NotFound(t *testing.T) {
 
 func TestHandler_MarkAllRead_OK(t *testing.T) {
 	r, repo := setupHandlerTest(t, "alice")
-	repo.seed(&Notification{UserID: "alice", IsRead: false})
-	repo.seed(&Notification{UserID: "alice", IsRead: false})
+	repo.seed(&Notification{UserID: testUserID("alice"), IsRead: false})
+	repo.seed(&Notification{UserID: testUserID("alice"), IsRead: false})
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodPut, "/notifications/read-all", nil)
@@ -252,7 +266,7 @@ func TestHandler_MarkAllRead_RepoError(t *testing.T) {
 
 func TestHandler_Delete_OK(t *testing.T) {
 	r, repo := setupHandlerTest(t, "alice")
-	n := repo.seed(&Notification{UserID: "alice"})
+	n := repo.seed(&Notification{UserID: testUserID("alice")})
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodDelete, "/notifications/"+n.ID.String(), nil)
@@ -291,10 +305,10 @@ func TestHandler_Delete_NotFound(t *testing.T) {
 
 func TestHandler_DeleteAll_OK(t *testing.T) {
 	r, repo := setupHandlerTest(t, "alice")
-	repo.seed(&Notification{UserID: "alice", Type: NotifTypeAlarm, Title: "a1"})
-	repo.seed(&Notification{UserID: "alice", Type: NotifTypeSystem, Title: "a2"})
-	repo.seed(&Notification{UserID: "alice", Type: NotifTypeTaskComplete, Title: "a3"})
-	bobMsg := repo.seed(&Notification{UserID: "bob", Title: "b1"})
+	repo.seed(&Notification{UserID: testUserID("alice"), Type: NotifTypeAlarm, Title: "a1"})
+	repo.seed(&Notification{UserID: testUserID("alice"), Type: NotifTypeSystem, Title: "a2"})
+	repo.seed(&Notification{UserID: testUserID("alice"), Type: NotifTypeTaskComplete, Title: "a3"})
+	bobMsg := repo.seed(&Notification{UserID: testUserID("bob"), Title: "b1"})
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodDelete, "/notifications", nil)
@@ -350,8 +364,8 @@ func TestHandler_DeleteAll_RepoError(t *testing.T) {
 func TestHandler_RegisterRoutes_AllPathsReachable(t *testing.T) {
 	r, repo := setupHandlerTest(t, "alice")
 	// seed a record so DELETE /:id returns 204 (not 404 due to no row).
-	n := repo.seed(&Notification{UserID: "alice"})
-	n2 := repo.seed(&Notification{UserID: "alice"})
+	n := repo.seed(&Notification{UserID: testUserID("alice")})
+	n2 := repo.seed(&Notification{UserID: testUserID("alice")})
 
 	// Each registered route should resolve to its handler — i.e. status code is not
 	// 404 because of "no matching route" (ie gin-level not-found, body empty),
