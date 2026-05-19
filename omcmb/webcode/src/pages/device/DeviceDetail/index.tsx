@@ -34,6 +34,7 @@ import type { Alarm } from '@core/types/alarm';
 import type { Device } from '@core/types/device';
 import ParameterTreeTab from './ParameterTreeTab';
 import QuickSettingsTab from './QuickSettingsTab';
+import LicenseParamsTab from './LicenseParamsTab';
 
 const { Title, Text } = Typography;
 
@@ -747,84 +748,10 @@ export default function DeviceDetail() {
             },
             {
               key: 'license',
-              label: t('nav.license.list').replace('管理', '').trim(),
+              label: t('device.licenseParam.title'),
               children: (
                 <div style={{ padding: '0 0 16px' }}>
-                  <Table
-                    size="small"
-                    dataSource={[
-                      {
-                        key: '1',
-                        version: 'V2.1.0',
-                        generatedTime: '2025-01-15 10:30:00',
-                        mode: '永久',
-                        featureId: 'BASIC-001',
-                        description: '基础功能授权',
-                        capacity: '不限',
-                        expiryDate: '永久',
-                        remainingDays: '-',
-                      },
-                      {
-                        key: '2',
-                        version: 'V2.1.0',
-                        generatedTime: '2025-01-15 10:30:00',
-                        mode: '时间限制',
-                        featureId: 'HALOB-001',
-                        description: 'HaloB License',
-                        capacity: '100',
-                        expiryDate: '2027-12-31',
-                        remainingDays: 652,
-                      },
-                      {
-                        key: '3',
-                        version: 'V2.1.0',
-                        generatedTime: '2025-06-01 14:20:00',
-                        mode: '时间限制',
-                        featureId: '5GNR-001',
-                        description: '5G NR 授权',
-                        capacity: '50',
-                        expiryDate: '2027-06-30',
-                        remainingDays: 468,
-                      },
-                      {
-                        key: '4',
-                        version: 'V1.5.0',
-                        generatedTime: '2024-12-10 09:00:00',
-                        mode: '时间限制',
-                        featureId: 'LTE-ADV-001',
-                        description: 'LTE Advanced 功能',
-                        capacity: '200',
-                        expiryDate: '2026-06-30',
-                        remainingDays: 103,
-                      },
-                    ]}
-                    rowKey="key"
-                    pagination={false}
-                    scroll={{ x: 1100 }}
-                    columns={[
-                      { title: 'License版本', dataIndex: 'version', key: 'version', width: 100, fixed: 'left' },
-                      { title: '生成时间', dataIndex: 'generatedTime', key: 'generatedTime', width: 160 },
-                      { title: '模式', dataIndex: 'mode', key: 'mode', width: 100, render: (v: string) => <Tag color={v === '永久' ? 'success' : 'processing'}>{v}</Tag> },
-                      { title: '特性ID', dataIndex: 'featureId', key: 'featureId', width: 120, render: (v: string) => <Text style={{ fontFamily: 'monospace' }}>{v}</Text> },
-                      { title: '描述', dataIndex: 'description', key: 'description', width: 150 },
-                      { title: '数量', dataIndex: 'capacity', key: 'capacity', width: 80 },
-                      { title: '有效期', dataIndex: 'expiryDate', key: 'expiryDate', width: 120 },
-                      {
-                        title: '剩余天数',
-                        dataIndex: 'remainingDays',
-                        key: 'remainingDays',
-                        width: 100,
-                        render: (v: number | string) => {
-                          if (v === '-') return <Text type="secondary">-</Text>;
-                          const days = Number(v);
-                          let color = 'success';
-                          if (days <= 30) color = 'error';
-                          else if (days <= 90) color = 'warning';
-                          return <Tag color={color}>{days} 天</Tag>;
-                        },
-                      },
-                    ]}
-                  />
+                  <LicenseParamsTab deviceId={device.id} />
                 </div>
               ),
             },
