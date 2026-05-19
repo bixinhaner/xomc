@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -57,7 +58,127 @@ func newMMLCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newMMLImportCmd())
 	cmd.AddCommand(newMMLMigrateDeviceParamsCmd())
+	cmd.AddCommand(newMMLImportStandardParamsCmd())
 	return cmd
+}
+
+// newMMLImportStandardParamsCmd 注册 `omcctl mml import-standard-params` 子命令。
+//
+// 把 standard-model.xml 翻译为 standard_params 表的 INSERT SQL 片段。
+//
+// 背景：standard_params 运行期由 parammodel Loader 填充；但 seed/000111 在迁移期
+// 用 `SELECT FROM standard_params` 生成 mml_command_sub_fields —— 迁移先于
+// Loader，那时该表还空 → 0 sub_fields。本命令产出 seed 片段，供新迁移在
+// sub_field 生成之前先把 standard_params 种进去。
+func newMMLImportStandardParamsCmd() *cobra.Command {
+	var (
+		xmlPath string
+		outPath string
+	)
+	c := &cobra.Command{
+		Use:   "import-standard-params",
+		Short: "Convert standard-model.xml to standard_params seed SQL fragment",
+		Long: `把 TR-069 standard-model.xml 翻译为 standard_params 表的 INSERT SQL 片段。
+
+列与 parammodel Loader.batchInsertStandardEntries 完全一致：
+  standard_path / entry_type / access / data_type / change_applies / min_value / max_value
+ON CONFLICT (standard_path) DO UPDATE —— 与运行期 Loader 同锚点，幂等、互不冲突。
+输出为纯 SQL 片段（无 goose 标记），由调用者拼进迁移文件。`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runStandardParamsImport(xmlPath, outPath)
+		},
+	}
+	c.Flags().StringVar(&xmlPath, "xml", "omcgo/data/param-mappings/standard-model.xml", "Path to standard-model.xml input")
+	c.Flags().StringVar(&outPath, "out", "omcgo/migrations/seed/.standard_params_rows.sql", "Output SQL fragment path")
+	return c
+}
+
+// runStandardParamsImport 解析 XML → 生成 standard_params 批量 INSERT SQL 片段。
+func runStandardParamsImport(xmlPath, outPath string) error {
+	params, objects, err := mmlstandardloader.ParseStandardXMLFile(xmlPath)
+	if err != nil {
+		return fmt.Errorf("parse standard-model.xml: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "[omcctl mml import-standard-params] parsed %d params + %d objects from %s\n",
+		len(params), len(objects), xmlPath)
+
+	// standard_params.standard_path UNIQUE —— 同 path 在一条 INSERT 内出现两次会让
+	// ON CONFLICT DO UPDATE 报错，故先按 path 去重。objects 先放、params 后放，
+	// 同 path 重复（XML 正常无）以 params 为准（与 Loader「objects 批 + params 批」
+	// 先后顺序一致）。
+	type spRow struct {
+		path, entryType, access, dataType, change string
+		min, max                                  *int64
+	}
+	order := make([]string, 0, len(params)+len(objects))
+	byPath := make(map[string]spRow, len(params)+len(objects))
+	put := func(r spRow) {
+		if _, seen := byPath[r.path]; !seen {
+			order = append(order, r.path)
+		}
+		byPath[r.path] = r
+	}
+	for _, o := range objects {
+		put(spRow{path: o.StandardPath, entryType: "object", access: o.Access, change: o.ChangeApplies})
+	}
+	for _, p := range params {
+		put(spRow{path: p.StandardPath, entryType: "parameter", access: p.Access, dataType: p.Type, change: p.ChangeApplies, min: p.Min, max: p.Max})
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "-- 由 omcctl mml import-standard-params 生成\n")
+	fmt.Fprintf(&b, "-- 生成时间：%s\n", time.Now().UTC().Format(time.RFC3339))
+	fmt.Fprintf(&b, "-- standard_params 行数：%d（列与 parammodel Loader 一致）\n\n", len(order))
+
+	const chunk = 200
+	for i := 0; i < len(order); i += chunk {
+		end := i + chunk
+		if end > len(order) {
+			end = len(order)
+		}
+		fmt.Fprintln(&b, "INSERT INTO standard_params (standard_path, entry_type, access, data_type, change_applies, min_value, max_value) VALUES")
+		for j := i; j < end; j++ {
+			r := byPath[order[j]]
+			comma := ","
+			if j == end-1 {
+				comma = ""
+			}
+			fmt.Fprintf(&b, "    (%s, %s, %s, %s, %s, %s, %s)%s\n",
+				sqlString(r.path), sqlString(r.entryType),
+				sqlStringOrNull(r.access), sqlStringOrNull(r.dataType), sqlStringOrNull(r.change),
+				sqlIntOrNull(r.min), sqlIntOrNull(r.max), comma)
+		}
+		b.WriteString("ON CONFLICT (standard_path) DO UPDATE SET\n" +
+			"    entry_type     = EXCLUDED.entry_type,\n" +
+			"    access         = EXCLUDED.access,\n" +
+			"    data_type      = EXCLUDED.data_type,\n" +
+			"    change_applies = EXCLUDED.change_applies,\n" +
+			"    min_value      = EXCLUDED.min_value,\n" +
+			"    max_value      = EXCLUDED.max_value,\n" +
+			"    updated_at     = NOW();\n\n")
+	}
+
+	if err := os.WriteFile(outPath, []byte(b.String()), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", outPath, err)
+	}
+	fmt.Fprintf(os.Stderr, "[omcctl mml import-standard-params] wrote %d standard_params rows → %s\n", len(order), outPath)
+	return nil
+}
+
+// sqlStringOrNull 渲染 SQL 文本字面量；空串 → NULL（对齐 Loader.nullIfEmpty）。
+func sqlStringOrNull(s string) string {
+	if s == "" {
+		return "NULL"
+	}
+	return sqlString(s)
+}
+
+// sqlIntOrNull 渲染可空整数字面量；nil → NULL。
+func sqlIntOrNull(p *int64) string {
+	if p == nil {
+		return "NULL"
+	}
+	return strconv.FormatInt(*p, 10)
 }
 
 // newMMLMigrateDeviceParamsCmd 注册 `omcctl mml migrate-device-params` 子命令。
@@ -68,22 +189,24 @@ func newMMLCmd() *cobra.Command {
 // 行翻译为 standard，按 (device_id, parameter_path) 行级 UPDATE。
 //
 // 路径：device.product_class → products.product_class regex 匹配 → product.id
-//      → param_mappings.private_path == dp.parameter_path → standard_path
+//
+//	→ param_mappings.private_path == dp.parameter_path → standard_path
 //
 // 翻译失败的行（未匹配到 product / 未在 param_mappings 中找到 private_path）
 // 保持不变，由运维通过 admin UI 补 discovered_param_mappings 后重跑命令。
 //
 // Flags：
-//   --dsn       连接串（必填）
-//   --dry-run   仅扫描+报告，不写入（默认）
-//   --apply     真执行 UPDATE
-//   --batch     批大小（默认 500，超大表分批避免长事务）
+//
+//	--dsn       连接串（必填）
+//	--dry-run   仅扫描+报告，不写入（默认）
+//	--apply     真执行 UPDATE
+//	--batch     批大小（默认 500，超大表分批避免长事务）
 func newMMLMigrateDeviceParamsCmd() *cobra.Command {
 	var (
-		dsn     string
-		dryRun  bool
-		apply   bool
-		batch   int
+		dsn    string
+		dryRun bool
+		apply  bool
+		batch  int
 	)
 	c := &cobra.Command{
 		Use:   "migrate-device-params",
@@ -243,7 +366,7 @@ type importRow struct {
 	AccessType         string
 	IsObject           bool
 	SupportsAdd        bool
-	SupportsDelete    bool
+	SupportsDelete     bool
 	ChangeApplies      string
 	NameI18n           map[string]string
 	ConstraintTextI18n map[string]string
