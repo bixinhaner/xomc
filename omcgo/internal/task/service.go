@@ -45,7 +45,18 @@ type TaskService struct {
 	// defaultExpiresIn: T-0157 C1 — CreateTask 兜底默认超时秒数。
 	// 调用方语义见 appconfig.TaskConfig.DefaultExpiresInSeconds。0 表示未配置（不兜底）。
 	defaultExpiresIn int
+
+	// createFailureNotifier: T-0157 C6 — CreateTask 入队失败兜底通知。
+	// 由 cmd/app/bootstrap.go 通过 SetCreateFailureNotifier 注入；
+	// repo.Create / queue.Push 失败时调用，让消息中心 100% 覆盖用户操作。
+	// nil = 未注入（如 acs/worker 进程不调 CreateTask，无需注入）。
+	createFailureNotifier CreateFailureNotifier
 }
+
+// CreateFailureNotifier 在 CreateTask 入队失败时被调用，把失败信息写入消息中心。
+// 实现端（internal/notification）负责按 task.CreatorID 隔离 + 渲染文案 + UpsertByDedup。
+// closure 不返回 error —— 通知失败不应影响 CreateTask 的错误返回链路。
+type CreateFailureNotifier func(ctx context.Context, task *Task, errMsg string)
 
 // NewTaskService 创建任务服务
 func NewTaskService(queue *RedisTaskQueue, repo *PgTaskRepository, log *zap.Logger) *TaskService {
@@ -96,6 +107,12 @@ func (s *TaskService) SetEventBus(bus event.EventBus) {
 	s.eventBus = bus
 }
 
+// SetCreateFailureNotifier 注入入队失败通知 closure（T-0157 C6）。
+// 仅 cmd/app/bootstrap.go 调用（app 是唯一 CreateTask 入口）。
+func (s *TaskService) SetCreateFailureNotifier(fn CreateFailureNotifier) {
+	s.createFailureNotifier = fn
+}
+
 // SetDefaultExpiresIn 配置 CreateTask 的默认超时兜底秒数（T-0157 C1）。
 // 仅当 CreateTaskRequest.ExpiresIn == 0 时生效；调用方显式传 0 等价于声明"永不超时"
 // 但本兜底仍会覆盖（如需真正永不超时，调用方需显式传一个极大值如 86400）。
@@ -124,6 +141,8 @@ func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*
 
 	// 1. 持久化到 PostgreSQL
 	if err := s.repo.Create(ctx, task); err != nil {
+		// T-0157 C6: 入队失败兜底 → 写一条 status=failed 的消息（避免用户感知"点了没反应"）
+		s.notifyCreateFailure(ctx, task, err)
 		return nil, fmt.Errorf("persist task: %w", err)
 	}
 
@@ -131,6 +150,8 @@ func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*
 	if err := s.queue.Push(ctx, task); err != nil {
 		// 回滚 PostgreSQL 记录
 		s.repo.Delete(ctx, task.ID)
+		// T-0157 C6: 同上
+		s.notifyCreateFailure(ctx, task, err)
 		return nil, fmt.Errorf("enqueue task: %w", err)
 	}
 
@@ -359,6 +380,22 @@ func deref(t *time.Time) time.Time {
 		return time.Time{}
 	}
 	return *t
+}
+
+// notifyCreateFailure 在 CreateTask 失败路径上调 createFailureNotifier（T-0157 C6）。
+// 系统任务（CreatorID 为空）不通知；notifier 未注入也跳过；panic 隔离不影响主返回。
+func (s *TaskService) notifyCreateFailure(ctx context.Context, task *Task, err error) {
+	if s.createFailureNotifier == nil || task == nil || task.CreatorID == "" || err == nil {
+		return
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Warn("create failure notifier panicked",
+				zap.String("task_id", task.ID),
+				zap.Any("recover", r))
+		}
+	}()
+	s.createFailureNotifier(ctx, task, err.Error())
 }
 
 // CancelTask 取消任务

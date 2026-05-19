@@ -9,6 +9,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/carrier/ctcc"
 	"github.com/omcgo/omcgo/internal/core/carrier/cucc"
 	"github.com/omcgo/omcgo/internal/core/components"
+	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/task"
 	"go.uber.org/zap"
 )
@@ -58,6 +59,10 @@ func initApp(ctx context.Context, cfg *appconfig.AppConfig) (*appInfra, error) {
 	app.TaskSvc = task.NewTaskService(taskQueue, taskRepo, inf.Logger)
 	// T-0157 C1: 注入默认超时兜底（详见 appconfig.TaskConfig 注释）
 	app.TaskSvc.SetDefaultExpiresIn(cfg.Task.DefaultExpiresInSeconds)
+	// T-0157 C6: 注入入队失败兜底通知（avoid"点了没反应"，覆盖所有 CreateTask 调用点）
+	notifRepo := notification.NewPgRepository(inf.PgPool)
+	notifSvc := notification.NewService(notifRepo, nil, inf.Logger)
+	app.TaskSvc.SetCreateFailureNotifier(notification.NewCreateFailureNotifier(notifSvc, inf.Logger))
 
 	return app, nil
 }
