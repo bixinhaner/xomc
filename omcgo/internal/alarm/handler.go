@@ -158,6 +158,9 @@ func (h *Handler) ListHistory(c *gin.Context) {
 		}
 		filter.DeviceID = &id
 	}
+	if q.DeviceSN != "" {
+		filter.DeviceSN = &q.DeviceSN
+	}
 	if q.Carrier != "" {
 		cc := model.CarrierCode(q.Carrier)
 		filter.Carrier = &cc

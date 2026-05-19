@@ -19,6 +19,7 @@ type mockAlarmStore struct {
 	active           map[uuid.UUID]*model.Alarm
 	history          []*model.Alarm
 	lastActiveFilter AlarmFilter
+	lastHistoryFilter AlarmFilter
 }
 
 func newMockAlarmStore() *mockAlarmStore {
@@ -81,7 +82,8 @@ func (m *mockAlarmStore) Archive(_ context.Context, alarm *model.Alarm) error {
 	return nil
 }
 
-func (m *mockAlarmStore) ListHistory(_ context.Context, _ AlarmFilter) (*model.ListResponse[model.Alarm], error) {
+func (m *mockAlarmStore) ListHistory(_ context.Context, filter AlarmFilter) (*model.ListResponse[model.Alarm], error) {
+	m.lastHistoryFilter = filter
 	var items []model.Alarm
 	for _, a := range m.history {
 		items = append(items, *a)

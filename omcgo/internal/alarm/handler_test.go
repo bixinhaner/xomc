@@ -179,6 +179,19 @@ func TestHandler_ListHistory_WithTimeFilter(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
+func TestHandler_ListHistory_WithDeviceSNFilter(t *testing.T) {
+	_, store, _, router := setupHandlerTest()
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/alarms/history?device_sn=SN-HISTORY-001", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	if assert.NotNil(t, store.lastHistoryFilter.DeviceSN) {
+		assert.Equal(t, "SN-HISTORY-001", *store.lastHistoryFilter.DeviceSN)
+	}
+}
+
 // ---------- Statistics ----------
 
 func TestHandler_Statistics_OK(t *testing.T) {
