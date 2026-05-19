@@ -145,6 +145,38 @@ function mapBackendConstraints(bc: BackendConstraints | undefined): ParameterCon
   };
 }
 
+// 后端 type 字段实际返回多种形态：'STRING' / 'string' / 'BOOLEAN' / 'U_INT' / 'INT' 等。
+// 前端 ParameterType union 只接受归一化后的小写 camelCase，validateValue 才能 match 分支。
+// 这里统一在 mapper 标准化，确保所有 type 进入应用层都是规范值。
+function normalizeParameterType(t: unknown): import('../../types/deviceParameter').ParameterType {
+  if (typeof t !== 'string') return 'string';
+  const s = t.toUpperCase();
+  switch (s) {
+    case 'INT':
+      return 'int';
+    case 'U_INT':
+    case 'UINT':
+    case 'UNSIGNED_INT':
+    case 'UNSIGNEDINT':
+      return 'unsignedInt';
+    case 'BOOL':
+    case 'BOOLEAN':
+      return 'boolean';
+    case 'DATETIME':
+    case 'DATE_TIME':
+      return 'dateTime';
+    case 'BASE64':
+      return 'base64';
+    case 'HEXBINARY':
+    case 'HEX_BINARY':
+      return 'hexBinary';
+    case 'OBJECT':
+      return 'object';
+    default:
+      return 'string';
+  }
+}
+
 function mapBackendParameter(bp: BackendDeviceParameter): DeviceParameter {
   return {
     id: bp.id,
@@ -318,7 +350,7 @@ export const deviceParameterApi = {
     return {
       parameters: (data.parameters || []).map((p) => ({
         path: p.path,
-        type: p.type,
+        type: normalizeParameterType(p.type),
         writable: p.writable,
         description: p.description,
         defaultValue: p.default_value,
