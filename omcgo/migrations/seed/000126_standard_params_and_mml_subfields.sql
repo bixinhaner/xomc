@@ -2136,6 +2136,13 @@ ON CONFLICT (standard_path) DO UPDATE SET
 --    每条 INSERT ... SELECT 用 standard_path 段匹配 PascalCase keyword,
 --    或 add_path 严格前缀；depth ≤ 6 段防爆。
 -- ============================================================
+-- T-0157 C10 兜底（pre-existing FK fix，与 chenbo01 原修复正交）：
+-- 部分 commands 因 000111 的 mml_param_groups FK 失败被跳过（如 b3bfacff
+-- KPI_MAC_PMS），导致下文 789 个 INSERT 命中 FK violation 整体 rollback。
+-- 解法：暂卸 mml_command_sub_fields.command_id FK → 跑 INSERTs → 清孤儿行 →
+-- 恢复 FK。对 fresh DB 和已应用 000111 的库都安全（FK 恢复前已清完无效行）。
+ALTER TABLE mml_command_sub_fields DROP CONSTRAINT IF EXISTS mml_command_sub_fields_command_id_fkey;
+
 INSERT INTO mml_command_sub_fields (id, command_id, standard_path_id, mml_code, label_i18n, default_selected, is_required, sort_order)
 SELECT
     gen_random_uuid(),
@@ -27383,6 +27390,15 @@ SELECT
 FROM standard_params sp
 WHERE ((ARRAY(SELECT regexp_replace(s, '\{i\}', '', 'g') FROM unnest(string_to_array(sp.standard_path, '.')) AS s) && ARRAY['EmbeddedEpc', 'Embedded', 'Epc']::text[])) AND LENGTH(sp.standard_path) - LENGTH(REPLACE(sp.standard_path, '.', '')) <= 5 AND sp.entry_type = 'parameter' AND COALESCE(sp.access, '') IN ('READ_WRITE', 'WRITE_ONLY')
 ON CONFLICT (command_id, standard_path_id) DO NOTHING;
+
+-- T-0157 C10 兜底收尾：清掉 FK 暂卸期间插入的孤儿 sub_fields，再恢复约束。
+-- 孤儿 = command_id 在 mml_commands 中不存在的行（来自 000111 漏插的 commands）。
+DELETE FROM mml_command_sub_fields
+WHERE command_id NOT IN (SELECT id FROM mml_commands);
+
+ALTER TABLE mml_command_sub_fields
+    ADD CONSTRAINT mml_command_sub_fields_command_id_fkey
+    FOREIGN KEY (command_id) REFERENCES mml_commands(id) ON DELETE CASCADE;
 
 
 
