@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -288,7 +289,7 @@ func (h *ParameterTreeHandler) SetParameterValues(c *gin.Context) {
 		}
 	}
 
-	taskID, err := h.deviceService.SetParameters(c.Request.Context(), id, req.Parameters)
+	taskID, err := h.deviceService.SetParameters(c.Request.Context(), id, req.Parameters, admin.UserIDStringFromCtx(c))
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return

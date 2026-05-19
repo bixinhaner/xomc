@@ -316,7 +316,8 @@ func (s *DeviceService) SetRFSwitch(ctx context.Context, deviceID uuid.UUID, ena
 
 // SetParameters queues a SetParameterValues RPC command for the given device.
 // 返回任务 ID(T-0146:供前端用 useTaskStatus 轮询真实 CPE 应答状态)。
-func (s *DeviceService) SetParameters(ctx context.Context, deviceID uuid.UUID, params []ParameterValueItem) (string, error) {
+// creatorID: T-0157 C5 — 任务发起人（JWT user_id），用于消息中心按用户隔离；空串表示系统任务。
+func (s *DeviceService) SetParameters(ctx context.Context, deviceID uuid.UUID, params []ParameterValueItem, creatorID string) (string, error) {
 	device, err := s.deviceRepo.GetByID(ctx, deviceID)
 	if err != nil {
 		return "", fmt.Errorf("get device for set params: %w", err)
@@ -362,6 +363,7 @@ func (s *DeviceService) SetParameters(ctx context.Context, deviceID uuid.UUID, p
 		Priority:   5,
 		CommandKey: fmt.Sprintf("ui-spv-%s", uuid.New().String()[:8]),
 		Source:     task.TaskSourceAPI,
+		CreatorID:  creatorID, // T-0157 C5: 用于消息中心 user_id
 	})
 	if err != nil {
 		return "", fmt.Errorf("queue SPV command: %w", err)

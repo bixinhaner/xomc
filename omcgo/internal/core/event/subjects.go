@@ -289,6 +289,13 @@ const (
 // 终态推送给上层聚合器（如 MML ResultAggregator 更新 mml_tasks 统计）。
 // 载荷即 task.Task JSON，消费者自行 DecodePayload。
 const (
+	// SubjectTaskCreated 是 device_tasks 入队成功时发布（status=pending）。
+	// T-0157 C5 引入，专供消息中心订阅器消费写"进行中"状态消息。
+	// 发布者：internal/task.TaskService.CreateTask；
+	// 订阅者：internal/notification.TaskSubscriber → notification.UpsertByDedup。
+	// 注：CompletionRouter / event_bridge 不订阅该主题（仅关注终态），无影响。
+	SubjectTaskCreated = "task.created"
+
 	// SubjectTaskCompleted 是 device_tasks 任务成功完成时发布（status=completed）。
 	// 发布者：internal/task.TaskService.MarkTaskCompleted；
 	// 订阅者：worker.taskEventBridge → mml.ResultAggregator.OnTaskCompleted。

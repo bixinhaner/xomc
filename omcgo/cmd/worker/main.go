@@ -21,6 +21,7 @@ import (
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/mr"
 	mrcollector "github.com/omcgo/omcgo/internal/mr/collector"
+	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/collector"
 	"github.com/omcgo/omcgo/internal/pm/counter"
@@ -186,6 +187,18 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 		logger.Warn("subscribe reboot task closer", zap.Error(err))
 	}
 	logger.Info("reboot task closer started")
+
+	// T-0157 C5: 消息中心 task 订阅器 — 监听 task.created/completed/failed 事件，按 user_id
+	// 隔离写 notifications 表，dedup_key=task.ID 保证同 task 多次状态变更 upsert 同一行。
+	// 依赖 task.created 主题（service.CreateTask 末尾 publish）+ 已有 task.completed/failed。
+	notifRepo := notification.NewPgRepository(w.PgPool)
+	notifSvc := notification.NewService(notifRepo, nil, logger)
+	taskSubscriber := notification.NewTaskSubscriber(notifSvc, logger)
+	if err := taskSubscriber.Subscribe(w.EventBus); err != nil {
+		logger.Warn("subscribe notification task subscriber", zap.Error(err))
+	} else {
+		logger.Info("notification task subscriber started (T-0157 C5)")
+	}
 
 	// T-0157 C2: 任务过期扫描器 — 周期把 expires_at < now 且仍 pending/sent 的任务标记为 expired，
 	// 并 publish 终态事件供消息中心订阅器消费（事件复用 task.failed 主题，订阅器按 status 区分）。

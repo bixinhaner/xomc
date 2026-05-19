@@ -141,6 +141,19 @@ func (s *TaskService) CreateTask(ctx context.Context, req *CreateTaskRequest) (*
 	// 3. 异步触发 Connection Request 唤醒设备
 	s.wakeDevice(task.DeviceSN)
 
+	// 4. T-0157 C5: publish task.created 让消息中心订阅器写"进行中"消息
+	// 触发条件 CreatorID 非空（用户操作）—— 与订阅器 upsertFromTask 的 CreatorID 跳过逻辑一致。
+	// 系统任务（PeriodicSyncer / F09 等内部触发）CreatorID 为空，不广播也不打扰用户。
+	if s.eventBus != nil && task.CreatorID != "" {
+		if evt, err := event.NewEvent(event.SubjectTaskCreated, task); err == nil {
+			if perr := s.eventBus.Publish(ctx, event.SubjectTaskCreated, evt); perr != nil {
+				s.logger.Warn("publish task.created",
+					zap.String("task_id", task.ID),
+					zap.Error(perr))
+			}
+		}
+	}
+
 	logger.L(ctx).Info("task created",
 		zap.String("task_id", task.ID),
 		zap.String("device_sn", task.DeviceSN),
