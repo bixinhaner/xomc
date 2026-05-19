@@ -489,6 +489,13 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 		md.systemLicenseHandler.RegisterRoutes(permGroup("devices"))
 	}
 
+	// ----- DeviceDetail "License 参数" tab routes → resource "devices" -----
+	// GET  /api/v1/devices/:id/license-params          → ListLicenseParams
+	// POST /api/v1/devices/:id/license-params/refresh  → 下发 GPV 刷新
+	if md.licenseParamHandler != nil {
+		md.licenseParamHandler.RegisterRoutes(permGroup("devices"))
+	}
+
 	// ----- OpsTools routes → resource "devices" -----
 	md.opsHandler.RegisterRoutes(permGroup("devices"))
 	if md.opsExtHandler != nil {

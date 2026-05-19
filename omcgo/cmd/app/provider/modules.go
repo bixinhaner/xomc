@@ -174,6 +174,20 @@ func initProvisionModule(c *Container) error {
 		}
 		logger.Info("auto-sync service enabled")
 
+		// License Params Tab 后端装配（DeviceDetail "License 参数" tab）—
+		// 复用 syncSvc.StartSync 做局部 GPV，需要 syncSvc 在 scope 内，所以
+		// 在此处而非 initMiscModules 装配。
+		if c.DeviceRepo != nil && c.ParamRepo != nil &&
+			c.ProductRegistry != nil && c.ParamRegistry != nil {
+			licenseParamSvc := device.NewLicenseParamService(
+				c.DeviceRepo, c.ParamRepo,
+				c.ProductRegistry, c.ParamRegistry,
+				syncSvc, c.Redis, logger,
+			)
+			c.miscDeps.licenseParamHandler = device.NewLicenseParamHandler(licenseParamSvc, logger)
+			logger.Info("device license params handler initialized")
+		}
+
 		// T-0124: 周期性参数同步兜底。
 		// 配置从 sys_configs (category='device') 读，Enabled / Interval / BatchSize /
 		// MaxConcurrent / StaggerWindow 全部 runtime 动态生效（30s 缓存 + 1min 轮询）。
@@ -927,6 +941,9 @@ type miscDeps struct {
 	// F06 System License 重构（PRD F06-system-license-redesign Step 5）：
 	// singleton 模型 handler，唯一的 license REST 入口。
 	systemLicenseHandler *license.SystemLicenseHandler
+
+	// DeviceDetail "License 参数" tab 后端（device 模块 license_params.go）
+	licenseParamHandler *device.LicenseParamHandler
 
 	// Ops
 	opsHandler    *ops.Handler
