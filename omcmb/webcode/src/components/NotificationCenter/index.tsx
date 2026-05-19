@@ -14,7 +14,7 @@
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Empty, List, Spin, Tooltip, Typography, message } from 'antd';
+import { Button, Empty, List, Spin, theme, Tooltip, Typography, message } from 'antd';
 import {
   CheckCircleFilled,
   ClockCircleFilled,
@@ -49,6 +49,7 @@ interface Props {
 
 export default function NotificationCenter({ onClose }: Props) {
   const navigate = useNavigate();
+  const { token } = theme.useToken();
   const listQuery = useNotificationCenter({ page: 1, pageSize: 20 });
   const markRead = useMarkNotificationRead();
   const markAllRead = useMarkAllNotificationsRead();
@@ -97,12 +98,12 @@ export default function NotificationCenter({ onClose }: Props) {
   };
 
   return (
-    <div style={{ width: 360 }}>
+    <div style={{ width: 360, background: token.colorBgElevated, color: token.colorText }}>
       {/* 头部 */}
       <div
         style={{
           padding: '8px 12px',
-          borderBottom: '1px solid #f0f0f0',
+          borderBottom: `1px solid ${token.colorBorderSecondary}`,
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -150,12 +151,17 @@ interface ItemProps {
 }
 
 function NotificationItem({ item, onClick }: ItemProps) {
+  const { token } = theme.useToken();
   const ui = toUiState(item.status);
   const { icon, color } = uiVisuals(ui);
   // 标题已含"设备 SN"（§4.5 文案规范），副标题只显示相对时间避免重复
   const subtitleDate = dayjs(item.createdAt);
   const subtitle = subtitleDate.locale('zh-cn').fromNow();
 
+  // 视觉规则（明 / 暗主题都用 antd token 跟随）：
+  //   未读：colorBgElevated 底 + 左侧蓝竖条 + 标题加粗 colorText
+  //   已读：colorFillQuaternary 底（轻微变暗，明/暗都比未读底沉一点）+ 标题用 colorTextTertiary
+  // 不再硬编码 #fff / #fafafa / #000 / #666，避免暗模式背景仍为白、字体被覆盖看不见。
   return (
     <List.Item
       onClick={onClick}
@@ -163,9 +169,8 @@ function NotificationItem({ item, onClick }: ItemProps) {
         cursor: 'pointer',
         padding: '12px 12px 12px 14px',
         position: 'relative',
-        borderLeft: item.isRead ? 'none' : '3px solid #1677ff',
-        background: item.isRead ? '#fafafa' : '#fff',
-        opacity: item.isRead ? 0.75 : 1,
+        borderLeft: item.isRead ? 'none' : `3px solid ${token.colorPrimary}`,
+        background: item.isRead ? token.colorFillQuaternary : token.colorBgElevated,
       }}
     >
       <div style={{ display: 'flex', gap: 10, width: '100%' }}>
@@ -173,7 +178,8 @@ function NotificationItem({ item, onClick }: ItemProps) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <Text
             strong={!item.isRead}
-            style={{ display: 'block', color: item.isRead ? '#666' : '#000' }}
+            type={item.isRead ? 'secondary' : undefined}
+            style={{ display: 'block' }}
             ellipsis={{ tooltip: item.title }}
           >
             {item.title}
