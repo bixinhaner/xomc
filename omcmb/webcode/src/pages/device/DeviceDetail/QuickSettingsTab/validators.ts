@@ -37,11 +37,16 @@ export function validateValue(
   }
 
   if (parameterType === 'string' && constraints) {
-    if (constraints.maxLength && value.length > constraints.maxLength) {
-      return `最大长度为 ${constraints.maxLength}`;
+    // 后端 ParamMapping.MinValue/MaxValue 字段对 string 类型语义为"长度"（XML 同字段名
+    // 复用，按 parameterType 解释）。前端兼容显式 maxLength/minLength 优先，未给时退回
+    // 用 minValue/maxValue 当 length 边界。
+    const maxLen = constraints.maxLength ?? constraints.maxValue;
+    const minLen = constraints.minLength ?? constraints.minValue;
+    if (maxLen !== undefined && value.length > maxLen) {
+      return `最大长度为 ${maxLen}`;
     }
-    if (constraints.minLength && value.length < constraints.minLength) {
-      return `最小长度为 ${constraints.minLength}`;
+    if (minLen !== undefined && value.length < minLen) {
+      return `最小长度为 ${minLen}`;
     }
     if (constraints.pattern) {
       try {

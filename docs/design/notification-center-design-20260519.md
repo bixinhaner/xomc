@@ -559,6 +559,7 @@ Risk: R-01..R-04 / N/A  # 该 commit 涉及的 R 编号
 | L-01 | `device.Reboot` / `config.Sync` / `provision` / `upgrade` / `backup` 等模块的 CreateTask 调用点**未填 CreatorID**，订阅器跳过这些 task，消息中心**收不到**这些操作的通知 | C5 / device_service / config / provision 等模块 | — | Phase 1 范围聚焦快速设置（C5 已补 `device.SetParameters` + C7 补 `AddObject` / `DeleteObject`）；其他模块改造跨多领域代码量大 | T-0157 Phase 2 扩展接入（§7）；或前端用户报告"X 操作没消息"时单独补 |
 | L-02 | `notification.created_at` 取 DB `NOW()` 而非 `task.created_at`，跨进程订阅链路延迟（通常 <100ms）会让用户视角的"触发那一刻"略偏后 | C5 / pg_repository Create/UpsertByDedup 签名 | — | 改 Create/UpsertByDedup 签名接受 `createdAt` 参数 + 30+ 调用方传值，工作量与 100ms 偏移收益不匹配 | 用户反馈消息时间戳与"我点保存的时刻"明显错位时 |
 | L-03 | V1 文案**只显示新值无旧值**（如 `TAC = 4` 而非 `TAC: 3 → 4`），与 §4.5 文案规范的"旧值 → 新值"目标偏差 | C5 / task_subscriber.go renderNotifContent | — | 后端订阅器拿不到旧值（schema 在前端 Form 内存）；要么前端 mutation 多带 oldValue（侵入 API），要么后端读 device_parameters 表（多一次 DB 查询） | C10 实施 Tag 改造时一并评估前端发 oldValue 方案 |
+| L-04 | 快速设置参数取值范围校验**仅支持 minValue/maxValue**（按类型解释：string=长度 / 数字=值），**不支持 enum + length pattern**：后端 `ParamMapping` struct 只有 MinValue/MaxValue 两列复用，未透传 `enum_values / max_length / min_length / pattern`；XML 里有 `<enumeration>` 等但 dictloader 没解析；枚举显示值 ≠ 下发值场景需要 paramModel XML 补充 `label / value` 配对字段 | parammodel/pg_handler_repo.go ParamMapping struct + dictloader 解析逻辑 + device_param_handler constraintsFromMapping + 部分 XML 模板补 enum 元素 | — | 工作量约 0.5d 后端 +XML 补充；当前业务场景以数字范围为主，枚举可暂用 string + pattern 兜底 | 用户报告"想填枚举/字符串长度/正则但前端不校验"或具体 XML 需求时 |
 
 
 

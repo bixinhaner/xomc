@@ -255,6 +255,24 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
           for (const [name, value] of Object.entries(changedValues)) {
             setDraftField(fbKey, name, String(value ?? ''));
           }
+          // 实时按 schema 取值范围校验，更新 fieldErrors 让 Form.Item 即时标红
+          setFieldErrors((prev) => {
+            const next = { ...prev };
+            for (const [name, value] of Object.entries(changedValues)) {
+              const p = group.params.find((q) => q.name === name);
+              if (!p) continue;
+              const path = applyFapInstance(p.standardPath || '', fapInstance);
+              const sItem = schemaByPath.get(path);
+              const err = validateValue(
+                String(value ?? ''),
+                (sItem?.type as never) ?? 'string',
+                sItem?.constraints,
+              );
+              if (err) next[name] = err;
+              else delete next[name];
+            }
+            return next;
+          });
         }}
       >
         <Row gutter={16}>
@@ -263,10 +281,16 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
             const item = schemaByPath.get(path);
             const writable = item?.writable ?? false;
             const error = fieldErrors[p.name];
+            const constraintHint = formatConstraintHint(item);
             const label = (
               <Space size={4}>
                 <span>{locale === 'zh-CN' ? p.titleZh : p.titleEn}</span>
                 {!writable && <Text type="secondary" style={{ fontSize: 12 }}>(只读)</Text>}
+                {constraintHint && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {constraintHint}
+                  </Text>
+                )}
               </Space>
             );
             return (
@@ -287,6 +311,28 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
       </Spin>
     </Card>
   );
+}
+
+// formatConstraintHint 把 schema 取值范围渲染成 label 后的灰色提示。
+// 后端 MinValue/MaxValue 是按类型复用的字段：string → 长度边界；int/unsignedInt → 值范围。
+// 枚举：{a|b|c}；可空时返回 ''
+function formatConstraintHint(schema?: ParameterSchemaItem): string {
+  if (!schema?.constraints) return '';
+  const c = schema.constraints;
+  if (c.enumValues && c.enumValues.length > 0) {
+    const list = c.enumValues.slice(0, 5).join(' | ');
+    return c.enumValues.length > 5 ? `{${list} | ...}` : `{${list}}`;
+  }
+  const isString = schema.type === 'string';
+  // 优先用显式 maxLength/minLength；fallback 到 minValue/maxValue (按类型解释)
+  const min = c.minLength ?? (isString ? c.minValue : c.minValue);
+  const max = c.maxLength ?? (isString ? c.maxValue : c.maxValue);
+  if (min !== undefined || max !== undefined) {
+    const lo = min ?? '-∞';
+    const hi = max ?? '∞';
+    return isString ? `[长度 ${lo} ~ ${hi}]` : `[${lo} ~ ${hi}]`;
+  }
+  return '';
 }
 
 function commonPathPrefix(paths: string[]): string {
