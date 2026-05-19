@@ -254,11 +254,15 @@ export const NAV_CONFIG: NavConfig = [
   //   ],
   // },  // 隐藏MR管理一级菜单
   // F06 System License 重构 Step 5：单例 license 模型，菜单收敛为单页。
+  // NavGroup 必须带 children（无 path 字段）；单子节点会被 buildStaticMenuItems
+  // 扁平化为顶级叶子菜单，点击跳 /license。
   {
     key: 'license',
     label: 'nav.systemLicense',
     iconName: 'SafetyOutlined',
-    path: '/license',
+    children: [
+      { key: 'license', label: 'nav.systemLicense', path: '/license' },
+    ],
   },
   // {
   //   key: 'ops',
