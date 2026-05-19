@@ -158,10 +158,11 @@ function NotificationItem({ item, onClick }: ItemProps) {
   const subtitleDate = dayjs(item.createdAt);
   const subtitle = subtitleDate.locale('zh-cn').fromNow();
 
-  // 视觉规则（明 / 暗主题都用 antd token 跟随）：
-  //   未读：colorBgElevated 底 + 左侧蓝竖条 + 标题加粗 colorText
-  //   已读：colorFillQuaternary 底（轻微变暗，明/暗都比未读底沉一点）+ 标题用 colorTextTertiary
-  // 不再硬编码 #fff / #fafafa / #000 / #666，避免暗模式背景仍为白、字体被覆盖看不见。
+  // 视觉规则（强化已读/未读对比，跟随明/暗主题）：
+  //   未读：colorBgElevated 底 + 左侧 4px 蓝竖条 + 标题加粗 colorText + 右侧蓝色小圆点
+  //   已读：colorFillTertiary 底（比 quaternary 沉一档，对比更强）+ 标题 type=secondary
+  //         + 整行 opacity 0.55 让用户一眼区分
+  // 不再硬编码颜色，避免暗模式背景仍为白、字体被覆盖看不见。
   return (
     <List.Item
       onClick={onClick}
@@ -169,8 +170,9 @@ function NotificationItem({ item, onClick }: ItemProps) {
         cursor: 'pointer',
         padding: '12px 12px 12px 14px',
         position: 'relative',
-        borderLeft: item.isRead ? 'none' : `3px solid ${token.colorPrimary}`,
-        background: item.isRead ? token.colorFillQuaternary : token.colorBgElevated,
+        borderLeft: item.isRead ? 'none' : `4px solid ${token.colorPrimary}`,
+        background: item.isRead ? token.colorFillTertiary : token.colorBgElevated,
+        opacity: item.isRead ? 0.55 : 1,
       }}
     >
       <div style={{ display: 'flex', gap: 10, width: '100%' }}>
@@ -183,6 +185,20 @@ function NotificationItem({ item, onClick }: ItemProps) {
             style={{ display: 'block', whiteSpace: 'normal', wordBreak: 'break-all' }}
           >
             {item.title}
+            {!item.isRead && (
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: token.colorPrimary,
+                  marginLeft: 6,
+                  verticalAlign: 'middle',
+                }}
+                aria-label="未读"
+              />
+            )}
           </Text>
           {item.content ? (
             <Paragraph
