@@ -86,6 +86,11 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
   });
   const setFeedback = useQuickSettingsFeedbackStore((s) => s.setFeedback);
   const patchFeedback = useQuickSettingsFeedbackStore((s) => s.patchFeedback);
+  // 表单草稿（未保存）也持久化到 store —— 跨顶层 TabBar 切走切回时 DeviceDetail
+  // 整树卸载，form 内部 state 丢失；store 持久化让重挂载后能恢复用户输入。
+  const draft = useQuickSettingsFeedbackStore((s) => s.drafts[fbKey]);
+  const setDraftField = useQuickSettingsFeedbackStore((s) => s.setDraftField);
+  const clearDraft = useQuickSettingsFeedbackStore((s) => s.clearDraft);
 
   // 单实例分组：每条 standardPath 单独查 schema（少量字段，不批量优化）
   // 注：useParameterSchema 接受 pathPrefix，前缀匹配即可；这里以分组共用前缀粗查再过滤
@@ -99,17 +104,28 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
     return map;
   }, [schemaResp]);
 
-  // 初始化字段当前值
+  // 初始化字段值 —— 优先级：store draft > form 已 touched > schema 原值。
+  //
+  // 跨场景说明：
+  //  1) 跨顶层 TabBar 切走切回（DeviceDetail 整树卸载）：form state 全丢；从 store draft 恢复
+  //  2) 内部 tab 切走切回（forceRender 保活）：form state 仍在内存；isFieldTouched 跳过覆盖
+  //  3) schema refetch 触发 effect：上述两条规则都防止覆盖用户输入
   useEffect(() => {
     if (!schemaResp) return;
-    const initial: Record<string, string> = {};
     group.params.forEach((p) => {
+      // 优先级 1: store draft
+      if (draft && draft[p.name] !== undefined) {
+        form.setFieldValue(p.name, draft[p.name]);
+        return;
+      }
+      // 优先级 2: 用户在当前会话已 touched
+      if (form.isFieldTouched(p.name)) return;
+      // 优先级 3: schema 原值
       const path = applyFapInstance(p.standardPath || '', fapInstance);
       const item = schemaByPath.get(path);
-      initial[p.name] = item?.currentValue ?? '';
+      form.setFieldValue(p.name, item?.currentValue ?? '');
     });
-    form.setFieldsValue(initial);
-  }, [schemaResp, group, fapInstance, form, schemaByPath]);
+  }, [schemaResp, group, fapInstance, form, schemaByPath, draft]);
 
   const handleSave = async () => {
     const values = form.getFieldsValue() as Record<string, string>;
@@ -160,6 +176,8 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
         count: updates.length,
         at: Date.now(),
       });
+      // 保存成功后清 draft（避免下次进入仍恢复旧编辑值覆盖 schema 新值）
+      clearDraft(fbKey);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       // T-0144 改用 notification.error 持久化弹窗(用户需点击关闭,失败信息不丢)
@@ -229,7 +247,16 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
       style={{ marginBottom: 16 }}
     >
       <Spin spinning={isLoading}>
-      <Form form={form} layout="vertical">
+      <Form
+        form={form}
+        layout="vertical"
+        onValuesChange={(changedValues) => {
+          // 同步到 store draft，跨顶层 TabBar 切走切回可恢复
+          for (const [name, value] of Object.entries(changedValues)) {
+            setDraftField(fbKey, name, String(value ?? ''));
+          }
+        }}
+      >
         <Row gutter={16}>
           {group.params.map((p) => {
             const path = applyFapInstance(p.standardPath || '', fapInstance);

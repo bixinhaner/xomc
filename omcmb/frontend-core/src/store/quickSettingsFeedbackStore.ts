@@ -29,15 +29,26 @@ export function feedbackKey(deviceId: string, groupId: string, fapInstance: numb
 
 interface FeedbackState {
   entries: Record<string, Feedback>;
+  /**
+   * 未保存的表单草稿，按 feedbackKey 索引。
+   * 用于跨顶层 TabBar 切换时保留用户编辑（DeviceDetail 整树卸载，CellParameterForm 内部 form state 丢失）。
+   * 保存成功后由调用方 clearDraft 清掉。
+   */
+  drafts: Record<string, Record<string, string>>;
+
   setFeedback: (key: string, feedback: Feedback) => void;
   patchFeedback: (key: string, patch: Partial<Feedback>) => void;
   clearByDevice: (deviceId: string) => void;
+
+  setDraftField: (key: string, name: string, value: string) => void;
+  clearDraft: (key: string) => void;
 }
 
 export const useQuickSettingsFeedbackStore = create<FeedbackState>()(
   persist(
     (set, get) => ({
       entries: {},
+      drafts: {},
 
       setFeedback: (key, feedback) => {
         set({ entries: { ...get().entries, [key]: feedback } });
@@ -51,11 +62,26 @@ export const useQuickSettingsFeedbackStore = create<FeedbackState>()(
 
       clearByDevice: (deviceId) => {
         const next: Record<string, Feedback> = {};
+        const nextDrafts: Record<string, Record<string, string>> = {};
         const prefix = `${deviceId}::`;
         for (const [k, v] of Object.entries(get().entries)) {
           if (!k.startsWith(prefix)) next[k] = v;
         }
-        set({ entries: next });
+        for (const [k, v] of Object.entries(get().drafts)) {
+          if (!k.startsWith(prefix)) nextDrafts[k] = v;
+        }
+        set({ entries: next, drafts: nextDrafts });
+      },
+
+      setDraftField: (key, name, value) => {
+        const cur = get().drafts[key] ?? {};
+        set({ drafts: { ...get().drafts, [key]: { ...cur, [name]: value } } });
+      },
+
+      clearDraft: (key) => {
+        const next = { ...get().drafts };
+        delete next[key];
+        set({ drafts: next });
       },
     }),
     {
