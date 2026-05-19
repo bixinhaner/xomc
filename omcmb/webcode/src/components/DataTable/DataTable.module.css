@@ -170,10 +170,12 @@
 /* Pagination - Light mode */
 .paginationWrapper {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
   padding: 12px 20px;
   border-top: 1px solid #f0f0f0;
-  background: #fafafa;
+  background: #ffffff;
+  gap: 16px;
 }
 
 /* Pagination - Dark mode */
@@ -181,6 +183,41 @@
 :global([data-theme='cyberpunk']) .paginationWrapper {
   background: #1f1f1f;
   border-top-color: #303030;
+}
+
+/* 分页信息样式 */
+.paginationInfo {
+  font-size: 13px;
+  color: var(--color-neutral-600, #8c8c8c);
+}
+
+:global([data-theme='tech']) .paginationInfo,
+:global([data-theme='cyberpunk']) .paginationInfo {
+  color: rgba(255, 255, 255, 0.65);
+}
+
+/* 分页器容器 */
+.paginationControls {
+  display: flex;
+  align-items: center;
+}
+
+/* 优化分页器样式 */
+:global(.omc-data-table) :global(.ant-pagination) {
+  margin: 0;
+}
+
+:global(.omc-data-table) :global(.ant-pagination-item) {
+  border-radius: 6px;
+}
+
+:global(.omc-data-table) :global(.ant-pagination-item-active) {
+  border-color: var(--color-primary-600, #1677ff);
+  background-color: var(--color-primary-600, #1677ff);
+}
+
+:global(.omc-data-table) :global(.ant-pagination-item-active a) {
+  color: #ffffff;
 }
 
 /* Mono cell text */

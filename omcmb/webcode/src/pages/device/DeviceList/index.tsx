@@ -330,6 +330,24 @@ export default function DeviceList() {
     none: t('alarm.severity.none'),
   }), [t]);
 
+  // 状态值映射：兼容多种可能的数据格式，修复乱码问题
+  const mapConnStatus = useCallback((status: string | undefined | null): 'online' | 'offline' => {
+    if (!status) return 'offline';
+
+    // 标准化处理：转小写、去空格
+    const normalized = String(status).toLowerCase().trim();
+
+    // 兼容多种可能的状态值
+    const onlineValues = ['online', '1', 'true', 'yes', 'connected', 'active'];
+    const offlineValues = ['offline', '0', 'false', 'no', 'disconnected', 'inactive'];
+
+    if (onlineValues.includes(normalized)) return 'online';
+    if (offlineValues.includes(normalized)) return 'offline';
+
+    // 兜底：无法识别时返回 offline
+    return 'offline';
+  }, []);
+
 
   const FILTER_FIELDS: FilterField[] = useMemo(() => [
     // --- 搜索项：文本搜索覆盖 SN/名称/IP/MAC/ECI/PCI ---
@@ -807,12 +825,15 @@ export default function DeviceList() {
         width: 100,
         fixed: 'left',
         group: 'common',
-        render: (_val, record) => (
-          <StatusIndicator
-            status={record.connStatus === 'online' ? 'online' : 'offline'}
-            text={record.connStatus === 'online' ? t('status.online') : t('status.offline')}
-          />
-        ),
+        render: (_val, record) => {
+          const mappedStatus = mapConnStatus(record.connStatus);
+          return (
+            <StatusIndicator
+              status={mappedStatus}
+              text={mappedStatus === 'online' ? t('status.online') : t('status.offline')}
+            />
+          );
+        },
       },
       {
         key: 'alarmLevel',
@@ -1205,7 +1226,7 @@ export default function DeviceList() {
       },
 
     ],
-    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, SEVERITY_LABEL, remarkHeaderRender, message, downloadStationLog]
+    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, SEVERITY_LABEL, remarkHeaderRender, message, downloadStationLog, mapConnStatus]
   );
 
   const batchActions = useMemo((): BatchAction[] => [

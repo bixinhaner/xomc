@@ -359,16 +359,20 @@ function DataTable<T>(
 
       {showPagination && (
         <div className={styles.paginationWrapper}>
-          <Pagination
-            current={currentPage}
-            pageSize={pageSize}
-            total={total ?? filteredData.length}
-            showSizeChanger
-            showQuickJumper
-            showTotal={(total) => t('table.totalItems', { total })}
-            pageSizeOptions={['10', '20', '50', '100']}
-            onChange={onPageChange ?? (() => {})}
-          />
+          <div className={styles.paginationInfo}>
+            {t('table.totalItems', { total: total ?? filteredData.length })}
+          </div>
+          <div className={styles.paginationControls}>
+            <Pagination
+              current={currentPage}
+              pageSize={pageSize}
+              total={total ?? filteredData.length}
+              showSizeChanger
+              showQuickJumper
+              pageSizeOptions={['10', '20', '50', '100']}
+              onChange={onPageChange ?? (() => {})}
+            />
+          </div>
         </div>
       )}
     </div>
