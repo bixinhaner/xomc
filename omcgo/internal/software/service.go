@@ -144,6 +144,100 @@ func (s *SoftwareService) UploadFirmware(ctx context.Context, fw *FirmwareVersio
 	return nil
 }
 
+// SetUploadConfig 配置日志采集 Upload RPC 的 ACS 上传基础 URL（CPE 可达地址）。
+// 应在 NewSoftwareService 之后、第一次 BatchCollect 之前调用（通常由 DI 容器注入）。
+func (s *SoftwareService) SetUploadConfig(acsUploadBaseURL string) {
+	s.executor.SetUploadConfig(acsUploadBaseURL)
+}
+
+// BatchCollectRequest 日志采集任务创建请求。
+type BatchCollectRequest struct {
+	DeviceIDs              []uuid.UUID
+	TaskName               string
+	FileType               string // Upload RPC FileType，如 "6"（运行日志）、"8"（故障日志）
+	TargetFileNameTemplate string // 目标文件名模板，如 "runtime-{task_id8}-{sn}.tar.gz"
+	TransportPath          string // 上传路径模板，如 "/smallcell/FileUploadService?fileType={fileType}&filename={targetFileName}"
+	CreateUser             string
+	CreateSuspended        bool
+}
+
+// BatchCollect 创建日志采集主任务及各设备子任务，然后启动执行。
+// 与 BatchUpgrade 类似，但不需要固件，执行时发送 Upload RPC。
+func (s *SoftwareService) BatchCollect(ctx context.Context, req BatchCollectRequest) (*UpgradeTask, error) {
+	concurrency := 5
+
+	mainTask := &UpgradeTask{
+		TaskName:         req.TaskName,
+		TaskType:         TaskTypeLogCollect,
+		DownloadFileType: req.FileType,               // 复用字段存放 Upload FileType（如 "6"）
+		FileName:         req.TargetFileNameTemplate, // 复用字段存放目标文件名模板
+		Status:           TaskPending,
+		CreateStatus:     "active",
+		CreateUser:       req.CreateUser,
+		TotalCount:       len(req.DeviceIDs),
+		MaxConcurrent:    concurrency,
+	}
+	if err := s.taskRepo.Create(ctx, mainTask); err != nil {
+		return nil, fmt.Errorf("create log collect main task: %w", err)
+	}
+
+	subTasks := make([]*UpgradeSubTask, 0, len(req.DeviceIDs))
+	for _, deviceID := range req.DeviceIDs {
+		subTask := &UpgradeSubTask{
+			TaskID:     mainTask.ID,
+			DeviceID:   deviceID,
+			Status:     UpgradePending,
+			MaxRetries: 3,
+		}
+		if dev, err := s.deviceRepo.GetByID(ctx, deviceID); err == nil {
+			subTask.DeviceSN = dev.SerialNumber
+		}
+		subTasks = append(subTasks, subTask)
+	}
+
+	if err := s.subTaskRepo.BatchCreate(ctx, subTasks); err != nil {
+		return nil, fmt.Errorf("batch create log collect sub-tasks: %w", err)
+	}
+
+	if req.CreateSuspended {
+		s.logger.Info("log collect task created in pending (suspended) mode",
+			zap.String("task_id", mainTask.ID.String()),
+			zap.Int("device_count", len(req.DeviceIDs)))
+		return mainTask, nil
+	}
+
+	if err := s.taskRepo.UpdateStatus(ctx, mainTask.ID, TaskInProgress, ""); err != nil {
+		s.logger.Error("update log collect task to in_progress", zap.Error(err))
+	}
+	mainTask.Status = TaskInProgress
+
+	s.startCollectExecution(mainTask, subTasks, req.TransportPath, concurrency)
+
+	return mainTask, nil
+}
+
+// startCollectExecution 启动日志采集子任务的并发执行 goroutine。
+func (s *SoftwareService) startCollectExecution(mainTask *UpgradeTask, subTasks []*UpgradeSubTask, transportPath string, concurrency int) {
+	if concurrency < 1 {
+		concurrency = 5
+	}
+	sem := make(chan struct{}, concurrency)
+	for i := range subTasks {
+		sem <- struct{}{}
+		go func(st *UpgradeSubTask) {
+			defer func() { <-sem }()
+			defer func() {
+				if r := recover(); r != nil {
+					s.logger.Error("log collect executor panic",
+						zap.String("sub_task_id", st.ID.String()),
+						zap.Any("recover", r))
+				}
+			}()
+			s.executor.ExecuteOneUpload(context.Background(), st, mainTask.DownloadFileType, mainTask.FileName, transportPath)
+		}(subTasks[i])
+	}
+}
+
 // BatchUpgrade creates a main upgrade task and sub-tasks for each device, then starts execution.
 func (s *SoftwareService) BatchUpgrade(ctx context.Context, req BatchUpgradeRequest) (*UpgradeTask, error) {
 	fw, err := s.firmwareRepo.GetByID(ctx, req.FirmwareID)
@@ -523,6 +617,14 @@ func (s *SoftwareService) handleTCInform(ctx context.Context, deviceSN string) e
 
 // advanceAfterTC handles the 4G/5G branching after a successful TransferComplete.
 func (s *SoftwareService) advanceAfterTC(ctx context.Context, subTask *UpgradeSubTask, dev *model.Device) error {
+	// For log collection (Upload RPC), TransferComplete means the file was successfully
+	// uploaded by the device. No reboot is needed — just complete the subtask.
+	parentTask, err := s.taskRepo.GetByID(ctx, subTask.TaskID)
+	if err == nil && parentTask.TaskType == TaskTypeLogCollect {
+		s.executor.completeSubTask(ctx, subTask, dev.SerialNumber)
+		return nil
+	}
+
 	is5G := Is5G(dev)
 	nextState := NextStateAfterTC(is5G)
 

@@ -71,11 +71,12 @@ const (
 type TaskType int
 
 const (
-	TaskTypeUpgrade  TaskType = 1 // IMG 升级
-	TaskTypeRollback TaskType = 2 // 版本回退
-	TaskTypePatch    TaskType = 4 // PATCH 升级
-	TaskTypeFPGA     TaskType = 6 // FPGA 升级
-	TaskTypeReserved TaskType = 8 // 预留
+	TaskTypeUpgrade    TaskType = 1  // IMG 升级
+	TaskTypeRollback   TaskType = 2  // 版本回退
+	TaskTypePatch      TaskType = 4  // PATCH 升级
+	TaskTypeFPGA       TaskType = 6  // FPGA 升级
+	TaskTypeReserved   TaskType = 8  // 预留
+	TaskTypeLogCollect TaskType = 10 // 日志采集 (Upload RPC to ACS upload service)
 )
 
 // TaskStatus 主任务状态

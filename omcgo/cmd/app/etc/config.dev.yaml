@@ -115,6 +115,13 @@ ne_direct:
   host: "0.0.0.0"
   port: 7549
 
+# 固件升级与日志采集配置
+upgrade:
+  # CPE 可达的 ACS 上传服务基础 URL（不含路径），用于日志采集 Upload RPC 参数中的目标 URL 构造。
+  # 需与 ACS 服务 upload.base_url 一致（CPE 可访问的地址）。
+  # Docker 环境通常通过 nginx 网关代理，配置网关地址；本地开发配置本机地址。
+  acs_upload_base_url: "http://localhost:8080"
+
 provision:
   enabled: true
   auto_configure: false  # Path A 自动下发配置暂禁用（需参数路径映射层）

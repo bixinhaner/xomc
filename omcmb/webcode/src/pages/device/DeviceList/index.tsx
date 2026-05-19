@@ -23,6 +23,9 @@ import StatusIndicator from '@/components/StatusIndicator';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useDeviceList, useBatchRebootDevices } from '@core/hooks/api/useDevices';
 import { useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
+import { useCreateUnifiedFileTransferTask } from '@core/hooks/api/useUnifiedFileTransfer';
+import { useDownloadStationLog } from '@core/hooks/api/useStationLog';
+import { stationLogApi } from '@core/services/api/stationLogApi';
 import { useT } from '@/hooks/useT';
 import type { Device } from '@core/types/device';
 
@@ -313,6 +316,8 @@ export default function DeviceList() {
   });
   const batchReboot = useBatchRebootDevices();
   const triggerAlarmSync = useTriggerAlarmSync();
+  const createUfteTask = useCreateUnifiedFileTransferTask();
+  const downloadStationLog = useDownloadStationLog();
   const devices: Device[] = data?.items ?? [];
   const total = data?.total ?? 0;
   const stats = data?.stats ?? { total: 0, online: 0, offline: 0, alarmed: 0 };
@@ -490,8 +495,28 @@ export default function DeviceList() {
             hasDetail: actionKey === 'batch-tr069-collect' || actionKey === 'batch-log-collect', // 只有收集操作才有详情
           }));
 
+          // 日志采集：调用 UFTE 真实接口创建采集任务
+          if (actionKey === 'batch-log-collect') {
+            try {
+              const now = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+              await createUfteTask.mutateAsync({
+                taskName: `${t('device.action.logCollect')}-${now}`,
+                typeCode: 'RUNTIME_LOG_COLLECT',
+                deviceIds: selectedDevices.map((d) => d.id),
+                deviceCount: selectedDevices.length,
+                executionMode: 'immediate',
+              });
+              void message.success(t('ufte.taskCreatedAndNavigate', { defaultMessage: '日志采集任务已创建，正在跳转到任务详情页...' }));
+              navigate('/transfer/center?category=station_log');
+            } catch {
+              void message.error(t('common.operationFailed'));
+            }
+            setSelectedRowKeys([]);
+            return;
+          }
+
           // 判断是否为收集操作（使用抽屉）
-          const isCollectAction = actionKey === 'batch-tr069-collect' || actionKey === 'batch-log-collect';
+          const isCollectAction = actionKey === 'batch-tr069-collect';
 
           if (isCollectAction) {
             // 收集操作：使用右侧抽屉
@@ -640,7 +665,7 @@ export default function DeviceList() {
         },
       });
     },
-    [modal, message, t, batchReboot, triggerAlarmSync, devices]
+    [modal, message, t, batchReboot, triggerAlarmSync, createUfteTask, navigate, devices]
   );
 
   // 导出 — 直接选择格式后触发
@@ -1152,9 +1177,35 @@ export default function DeviceList() {
         }),
       },
       { key: 'ipsecAddr', title: t('device.ipsecAddr'), dataIndex: 'ipsecAddr', width: 140, hidden: true, mono: true, group: 'common' },
+      {
+        key: 'latestLog',
+        title: t('device.latestLog', '运行日志'),
+        dataIndex: 'id',
+        width: 100,
+        hidden: true,
+        group: 'common',
+        render: (_val, record) => (
+          <Button
+            type="link"
+            size="small"
+            loading={downloadStationLog.isPending}
+            onClick={async () => {
+              const res = await stationLogApi.list({ deviceId: record.id, logType: 'running', page: 1, pageSize: 1 });
+              const log = res.items[0];
+              if (!log) {
+                void message.info(t('device.noLogFile', '暂无日志文件'));
+                return;
+              }
+              downloadStationLog.mutate(log.id);
+            }}
+          >
+            {t('common.download', '下载')}
+          </Button>
+        ),
+      },
 
     ],
-    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, SEVERITY_LABEL, remarkHeaderRender, message]
+    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, SEVERITY_LABEL, remarkHeaderRender, message, downloadStationLog]
   );
 
   const batchActions = useMemo((): BatchAction[] => [

@@ -383,6 +383,10 @@ type UpgradeConfig struct {
 	MaxConcurrentPerBatch int           `mapstructure:"max_concurrent_per_batch"` // 每批最大并发，默认 5
 	ReaperInterval        time.Duration `mapstructure:"reaper_interval"`          // 超时扫描间隔，默认 2min
 	UpgradeLockTTL        time.Duration `mapstructure:"upgrade_lock_ttl"`         // Redis 升级锁 TTL，默认 1h
+	// ACSUploadBaseURL 是 CPE 可达的 ACS 上传服务基础 URL（不含路径），用于日志采集
+	// Upload RPC 参数中的目标 URL 构造。示例：http://localhost:8080
+	// 若为空，日志采集任务的 Upload RPC 将缺少目标 URL，设备将无法上传文件。
+	ACSUploadBaseURL string `mapstructure:"acs_upload_base_url"`
 }
 
 // TopologyConfig 配置拓扑管理模块（F06）的设备同步行为。

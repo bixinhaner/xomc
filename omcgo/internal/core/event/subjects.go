@@ -94,6 +94,12 @@ const (
 	// 发布者：acs/handler.go（检测到 Device.FaultMgmt.ExpeditedEvent.* 参数时）。
 	// 订阅者：alarm.ExpeditedEventReceiver（解析参数并路由到告警引擎）。
 	SubjectDeviceExpeditedAlarm = "device.inform.expedited_alarm"
+
+	// SubjectDeviceFaultDetected 是 ACS 检测到设备异常重启并携带故障原因时发布。
+	// Inform 事件码包含 "1 BOOT" 且 HaltReason.MainReason 不为空；或 5G 软重启（"4 VALUE_CHANGE" + soft_reboot）。
+	// 发布者：acs/handler.go publishInformEvents（当 IsBoot 且有故障原因参数时）。
+	// 订阅者：stationlog.FaultLogService（按收集模式决定是否自动下发 SetParam + FaultLogURL）。
+	SubjectDeviceFaultDetected = "device.fault.detected"
 )
 
 // System-wide control-plane events
@@ -333,6 +339,17 @@ const (
 	// 后写回 backup_tasks.file_path，建立 task↔path 链路供 restore_by_task_id
 	// 模式使用）。Payload 见 backup.BackupFileReceivedPayload。
 	SubjectBackupFileReceived = "backup.file.received"
+)
+
+// Station log events
+//
+// 基站日志采集文件事件。
+const (
+	// SubjectLogFileReceived 是 CPE 上传运行日志（FileType "6"）或故障日志（FileType "8"/"RL"）
+	// 成功落 MinIO 后，由 acs/upload/handler.go 发布。
+	// 订阅者：stationlog.Service（创建 station_log_files 记录 + 故障日志配额清理）。
+	// Payload：LogFileReceivedPayload
+	SubjectLogFileReceived = "log.file.received"
 )
 
 // Report events

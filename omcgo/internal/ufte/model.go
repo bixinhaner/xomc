@@ -320,6 +320,7 @@ func builtInTaskTypes() []TaskType {
 			TransportPath:          "/smallcell/FileUploadService?fileType={fileType}&filename={targetFileName}",
 			LastEditor:             "system",
 			UpdatedAt:              now,
+			softwareTaskType:       software.TaskTypeLogCollect,
 		},
 		{
 			TypeCode:               "FAULT_LOG_COLLECT",
@@ -341,6 +342,7 @@ func builtInTaskTypes() []TaskType {
 			TransportPath:          "/smallcell/FileUploadService?fileType={fileType}&filename={targetFileName}",
 			LastEditor:             "system",
 			UpdatedAt:              now,
+			softwareTaskType:       software.TaskTypeLogCollect,
 		},
 		{
 			TypeCode:               "CONFIG_BACKUP",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,6 +29,13 @@ type UpgradeExecutor struct {
 	eventBus     event.EventBus
 	adapter      UpgradeAdapter
 	logger       *zap.Logger
+	// Upload 配置（日志采集 Upload RPC 使用）
+	acsUploadBaseURL string // CPE 可达的 ACS 上传服务基础 URL，如 "http://localhost:8080"
+}
+
+// SetUploadConfig 注入日志采集所需的 ACS 上传基础 URL（CPE 可达地址）。
+func (e *UpgradeExecutor) SetUploadConfig(acsUploadBaseURL string) {
+	e.acsUploadBaseURL = acsUploadBaseURL
 }
 
 // NewUpgradeExecutor creates a new UpgradeExecutor.
@@ -232,6 +240,128 @@ func (e *UpgradeExecutor) monitorDownloadProgress(ctx context.Context, subTask *
 			}
 		}
 	}
+}
+
+// resolveTemplate 替换模板变量，支持 {task_id8}、{sn}、{fileType}、{targetFileName}。
+func resolveTemplate(tmpl string, vars map[string]string) string {
+	result := tmpl
+	for k, v := range vars {
+		result = strings.ReplaceAll(result, "{"+k+"}", v)
+	}
+	return result
+}
+
+// taskIDPrefix 提取任务 UUID 的前 8 位十六进制字符（不含连字符）。
+func taskIDPrefix(id uuid.UUID) string {
+	hex := strings.ReplaceAll(id.String(), "-", "")
+	if len(hex) > 8 {
+		return hex[:8]
+	}
+	return hex
+}
+
+// ExecuteOneUpload 执行日志采集类 Upload RPC 子任务。
+// 流程：设备在线检查 → 获取设备锁 → 构造上传 URL → 推送 Upload 命令 → 发送 Connection Request。
+// 当 CPE 上传完成后，ACS 收到 TransferComplete 事件，通过 handleTCBody 将子任务标记为 completed。
+func (e *UpgradeExecutor) ExecuteOneUpload(ctx context.Context, subTask *UpgradeSubTask, fileType, targetFileNameTemplate, transportPath string) {
+	dev, err := e.deviceRepo.GetByID(ctx, subTask.DeviceID)
+	if err != nil {
+		e.failSubTask(ctx, subTask, "Log collect can not be started, device not found.", FailureDeviceNotFound)
+		return
+	}
+
+	// 设备在线检查
+	if dev.Status != model.DeviceActive {
+		e.logger.Info("device offline, log collect sub-task pending",
+			zap.String("device_sn", dev.SerialNumber),
+			zap.String("sub_task_id", subTask.ID.String()))
+		waitKey := fmt.Sprintf("software:upgrade:wait:%s", dev.SerialNumber)
+		e.redis.Set(ctx, waitKey, subTask.ID.String(), time.Hour)
+		subTask.DeviceSN = dev.SerialNumber
+		e.subTaskRepo.Update(ctx, subTask)
+		e.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradeSuspended, "waiting for device online")
+		return
+	}
+
+	// 获取设备级锁
+	acquired, err := e.acquireDeviceLock(ctx, dev.SerialNumber, subTask.ID)
+	if err != nil {
+		e.logger.Warn("acquire device lock failed for log collect, proceeding without lock",
+			zap.String("device_sn", dev.SerialNumber), zap.Error(err))
+	} else if !acquired {
+		e.failLockedSubTask(ctx, subTask, dev.SerialNumber)
+		return
+	}
+
+	subTask.DeviceSN = dev.SerialNumber
+	if err := e.subTaskRepo.Update(ctx, subTask); err != nil {
+		e.logger.Error("update log collect sub-task device info", zap.Error(err))
+	}
+
+	// 构造目标文件名：替换 {task_id8} 和 {sn}
+	task_id8 := taskIDPrefix(subTask.TaskID)
+	targetFileName := resolveTemplate(targetFileNameTemplate, map[string]string{
+		"task_id8": task_id8,
+		"sn":       dev.SerialNumber,
+	})
+
+	// 构造完整上传 URL：先解析 transportPath 模板，再拼接基础 URL
+	resolvedPath := resolveTemplate(transportPath, map[string]string{
+		"fileType":       fileType,
+		"targetFileName": targetFileName,
+	})
+	baseURL := strings.TrimRight(e.acsUploadBaseURL, "/")
+	uploadURL := baseURL + resolvedPath
+
+	commandKey := subTask.ID.String()
+	paramsJSON, err := json.Marshal(map[string]interface{}{
+		"command_key":      commandKey,
+		"file_type":        fileType,
+		"url":              uploadURL,
+		"target_file_name": targetFileName,
+	})
+	if err != nil {
+		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.failSubTask(ctx, subTask, fmt.Sprintf("Log collect can not be started, internal error: %v", err), FailureInternalError)
+		return
+	}
+
+	if _, err := e.cmdQueue.CreateTask(ctx, &devtask.CreateTaskRequest{
+		DeviceSN:   dev.SerialNumber,
+		Method:     "Upload",
+		Params:     paramsJSON,
+		Source:     devtask.TaskSourceSystem,
+		CommandKey: commandKey,
+	}); err != nil {
+		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.failSubTask(ctx, subTask, "Log collect can not be started, failed to push Upload command.", FailureCommandPush)
+		return
+	}
+
+	subTask.CommandKey = commandKey
+	if err := e.subTaskRepo.Update(ctx, subTask); err != nil {
+		e.logger.Error("update log collect sub-task command_key", zap.Error(err))
+	}
+
+	// 发送 Connection Request 唤醒设备
+	if dev.ConnectionRequestURL != "" {
+		if err := e.connReq.Send(ctx, dev.SerialNumber, dev.ConnectionRequestURL); err != nil {
+			e.logger.Warn("send connection request for log collect",
+				zap.String("device_sn", dev.SerialNumber), zap.Error(err))
+		}
+	}
+
+	// 使用 UpgradeDownloading 状态表示"上传进行中"（与 Upload 语义吻合：从设备角度是在上传文件）
+	if err := e.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradeDownloading, ""); err != nil {
+		e.logger.Error("update log collect sub-task to downloading/uploading", zap.Error(err))
+	}
+
+	e.logger.Info("log collect Upload RPC pushed",
+		zap.String("sub_task_id", subTask.ID.String()),
+		zap.String("device_sn", dev.SerialNumber),
+		zap.String("file_type", fileType),
+		zap.String("upload_url", uploadURL),
+		zap.String("target_file_name", targetFileName))
 }
 
 // HandleDownloadResponse handles command.download.response events.

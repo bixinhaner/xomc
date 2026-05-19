@@ -225,9 +225,6 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 	if !ok {
 		return nil, fmt.Errorf("%w: unsupported UFTE type %s", commonerrors.ErrInvalidInput, req.TypeCode)
 	}
-	if typeDef.softwareTaskType == 0 {
-		return nil, fmt.Errorf("%w: UFTE type %s is not executable by the current backend adapter", commonerrors.ErrInvalidInput, req.TypeCode)
-	}
 	if req.ExecutionMode == "scheduled" {
 		return nil, fmt.Errorf("%w: scheduled execution is not supported by the current UFTE upgrade/rollback adapter", commonerrors.ErrInvalidInput)
 	}
@@ -238,8 +235,19 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 	var createdTask *software.UpgradeTask
 	createSuspended := req.ExecutionMode == "suspended"
 
-	switch typeDef.TypeCode {
-	case "VERSION_ROLLBACK":
+	switch {
+	case typeDef.softwareTaskType == software.TaskTypeLogCollect:
+		// 日志采集（Upload RPC）：不需要固件，直接通过 BatchCollect 下发 Upload 命令
+		createdTask, err = s.softwareService.BatchCollect(ctx, software.BatchCollectRequest{
+			DeviceIDs:              req.DeviceIDs,
+			TaskName:               req.TaskName,
+			FileType:               typeDef.FileType,
+			TargetFileNameTemplate: typeDef.TargetFileNameTemplate,
+			TransportPath:          typeDef.TransportPath,
+			CreateUser:             createUser,
+			CreateSuspended:        createSuspended,
+		})
+	case typeDef.TypeCode == "VERSION_ROLLBACK":
 		createdTask, err = s.softwareService.RollbackDevices(ctx, software.RollbackRequest{
 			DeviceIDs:       req.DeviceIDs,
 			TaskName:        req.TaskName,
@@ -248,7 +256,8 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 			Source:          software.RollbackSourceManual,
 			Reason:          req.Note,
 		})
-	default:
+	case typeDef.softwareTaskType != 0:
+		// 固件下载类任务（升级、PATCH、FPGA 等）
 		if req.FirmwareID == nil || *req.FirmwareID == uuid.Nil {
 			return nil, fmt.Errorf("%w: firmware_id is required for upgrade tasks", commonerrors.ErrInvalidInput)
 		}
@@ -261,6 +270,8 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 			IsKeepConfig:     req.IsKeepConfig,
 			CreateSuspended:  createSuspended,
 		})
+	default:
+		return nil, fmt.Errorf("%w: UFTE type %s is not executable by the current backend adapter", commonerrors.ErrInvalidInput, req.TypeCode)
 	}
 	if err != nil {
 		return nil, err

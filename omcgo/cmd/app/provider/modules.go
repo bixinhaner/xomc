@@ -14,6 +14,7 @@ import (
 	"github.com/omcgo/omcgo/internal/config/baseline"
 	"github.com/omcgo/omcgo/internal/core/components"
 	minioinfra "github.com/omcgo/omcgo/internal/core/components/minio"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/reliability"
 	"github.com/omcgo/omcgo/internal/core/reliability/dlq"
 	"github.com/omcgo/omcgo/internal/core/reliability/runner"
@@ -36,6 +37,7 @@ import (
 	"github.com/omcgo/omcgo/internal/provision"
 	"github.com/omcgo/omcgo/internal/report"
 	"github.com/omcgo/omcgo/internal/software"
+	"github.com/omcgo/omcgo/internal/stationlog"
 	"github.com/omcgo/omcgo/internal/syslog"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/topology"
@@ -75,6 +77,10 @@ func initSoftwareModule(c *Container) error {
 	}
 	softwareService.RestorePendingUpgrades(context.Background())
 	softwareService.StartTaskReaper()
+	// 注入 ACS 上传基础 URL，供日志采集 Upload RPC 构造目标 URL
+	if c.Cfg.Upgrade.ACSUploadBaseURL != "" {
+		softwareService.SetUploadConfig(c.Cfg.Upgrade.ACSUploadBaseURL)
+	}
 
 	// Canary monitor + metrics (T-0018 / R-101)
 	canaryMetrics := software.NewCanaryMetrics(c.MetricsReg)
@@ -318,6 +324,29 @@ func initBackupModule(c *Container) error {
 	c.miscDeps.backupHandler = backupHandler
 
 	logger.Info("backup module initialized")
+	return nil
+}
+
+// initStationLogModule 初始化基站日志采集模块（运行日志 + 故障日志下载 / 配额管理）。
+func initStationLogModule(c *Container) error {
+	logger := c.Logger.Named("stationlog")
+
+	runningRepo := stationlog.NewPgRunningRepository(c.PgPool)
+	faultRepo := stationlog.NewPgFaultRepository(c.PgPool)
+	svc := stationlog.NewService(runningRepo, faultRepo, c.DeviceService, c.MinIO, c.Cfg.MinIO.Buckets, logger)
+
+	// 订阅 SubjectLogFileReceived 事件，将上传的日志文件入库
+	if c.EventBus != nil {
+		if _, err := c.EventBus.Subscribe(event.SubjectLogFileReceived, func(ctx context.Context, evt event.Event) error {
+			return svc.HandleLogFileReceived(ctx, evt)
+		}); err != nil {
+			logger.Warn("subscribe log.file.received", zap.Error(err))
+		}
+	}
+
+	c.miscDeps.stationlogHandler = stationlog.NewHandler(svc, logger)
+
+	logger.Info("stationlog module initialized")
 	return nil
 }
 
@@ -856,6 +885,9 @@ type miscDeps struct {
 	// Backup
 	backupHandler       *backup.Handler
 	backupPolicyMonitor *backup.PolicyMonitor // T-0073 Phase 1
+
+	// StationLog
+	stationlogHandler *stationlog.Handler
 
 	// Dashboard
 	dashboardHandler *dashboard.Handler

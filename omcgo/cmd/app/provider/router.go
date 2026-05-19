@@ -90,6 +90,11 @@ func Setup(r *gin.Engine, c *Container) error {
 		Init: func() error { return initBackupModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
+		Name:    "stationlog",
+		Depends: []string{"device"},
+		Init:    func() error { return initStationLogModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
 		Name:    "dashboard",
 		Depends: []string{"device", "alarm", "pm", "topology"},
 		Init:    func() error { return initDashboardModule(c) },
@@ -429,6 +434,11 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- Backup routes → resource "devices" -----
 	md.backupHandler.RegisterRoutes(permGroup("devices"))
+
+	// ----- Station Log routes → resource "devices" -----
+	if md.stationlogHandler != nil {
+		md.stationlogHandler.RegisterRoutes(permGroup("devices"))
+	}
 
 	// ----- File Manager routes → resource "devices" -----
 	md.fileHandler.RegisterRoutes(permGroup("devices"))

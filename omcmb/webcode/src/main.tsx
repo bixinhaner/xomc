@@ -1,7 +1,3 @@
-// antd v5 在 React 19 下，静态方法（Modal.confirm / message / notification）
-// 依赖已被 React 19 移除的 ReactDOM.render 而失效 —— 此补丁恢复其可用性。
-// 必须在 antd 使用前最先导入。详见 https://u.ant.design/v5-for-19
-import '@ant-design/v5-patch-for-react-19';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles/global.css';
