@@ -470,7 +470,7 @@ export default function DeviceList() {
     (actionLabel: string, ids: React.Key[], actionKey?: string) => {
       modal.confirm({
         title: t('common.confirm'),
-        content: `${actionLabel} ${ids.length} ${t('device.count.unit')}`,
+        content: t('device.batch.actionConfirm', { action: actionLabel, count: ids.length }),
         okText: t('common.confirm'),
         cancelText: t('common.cancel'),
         onOk: async () => {

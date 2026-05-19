@@ -21,6 +21,7 @@ type AlarmSyncProcessor struct {
 	syncService  *AlarmSyncService
 	eventBus     event.EventBus
 	logger       *zap.Logger
+	deviceReader deviceReader
 }
 
 // NewAlarmSyncProcessor creates a new AlarmSyncProcessor.
@@ -38,6 +39,12 @@ func NewAlarmSyncProcessor(
 		eventBus:    eventBus,
 		logger:      logger,
 	}
+}
+
+// WithDeviceReader enables device field backfill for alarms created by sync.
+func (p *AlarmSyncProcessor) WithDeviceReader(reader deviceReader) *AlarmSyncProcessor {
+	p.deviceReader = reader
+	return p
 }
 
 // Start subscribes to GPV response events and processes alarm sync results.
@@ -133,19 +140,23 @@ func (p *AlarmSyncProcessor) processSync(ctx context.Context, deviceSN string, p
 		return result
 	}
 
-	// 2. Convert to model.Alarm
-	deviceID := uuid.Nil // Will be resolved from existing alarm or left as nil
-	remoteAlarms := make([]*model.Alarm, 0, len(tr069Alarms))
-	for i := range tr069Alarms {
-		remoteAlarms = append(remoteAlarms, tr069Alarms[i].ToModel(deviceID, deviceSN, ""))
-	}
-
-	// 3. Get local active alarms
+	// 2. Get local active alarms
 	localAlarms, err := p.store.GetActiveByDeviceSN(ctx, deviceSN)
 	if err != nil {
 		p.logger.Error("get local active alarms", zap.Error(err), zap.String("device_sn", deviceSN))
-		result.FailedAdd = len(remoteAlarms)
+		result.FailedAdd = len(tr069Alarms)
 		return result
+	}
+
+	// 3. Resolve device-derived fields for any newly added alarms.
+	deviceID, carrier, technology := p.resolveDeviceFields(ctx, deviceSN, localAlarms)
+	remoteAlarms := make([]*model.Alarm, 0, len(tr069Alarms))
+	for i := range tr069Alarms {
+		alarm := tr069Alarms[i].ToModel(deviceID, deviceSN, carrier)
+		if technology != "" {
+			alarm.Technology = &technology
+		}
+		remoteAlarms = append(remoteAlarms, alarm)
 	}
 
 	// 4. Compute diff
@@ -228,6 +239,47 @@ func (p *AlarmSyncProcessor) processSync(ctx context.Context, deviceSN string, p
 	}
 
 	return result
+}
+
+func (p *AlarmSyncProcessor) resolveDeviceFields(ctx context.Context, deviceSN string, localAlarms []*model.Alarm) (uuid.UUID, model.CarrierCode, string) {
+	deviceID := uuid.Nil
+	var carrier model.CarrierCode
+	technology := ""
+
+	for _, alarm := range localAlarms {
+		if alarm == nil {
+			continue
+		}
+		if deviceID == uuid.Nil && alarm.DeviceID != uuid.Nil {
+			deviceID = alarm.DeviceID
+		}
+		if carrier == "" && alarm.Carrier != "" {
+			carrier = alarm.Carrier
+		}
+		if technology == "" && alarm.Technology != nil && *alarm.Technology != "" {
+			technology = *alarm.Technology
+		}
+	}
+
+	if p.deviceReader == nil || (deviceID != uuid.Nil && carrier != "" && technology != "") {
+		return deviceID, carrier, technology
+	}
+
+	device, err := p.deviceReader.GetBySerialNumber(ctx, deviceSN)
+	if err != nil || device == nil {
+		return deviceID, carrier, technology
+	}
+	if deviceID == uuid.Nil {
+		deviceID = device.ID
+	}
+	if carrier == "" {
+		carrier = device.Carrier
+	}
+	if technology == "" && device.Technology != "" {
+		technology = string(device.Technology)
+	}
+
+	return deviceID, carrier, technology
 }
 
 // isAlarmGPVResponse checks if the GPV response contains alarm parameters.

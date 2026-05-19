@@ -70,6 +70,8 @@ func TestGetParameterValuesHandler(t *testing.T) {
 	require.NoError(t, err)
 	body := string(result)
 	assert.Contains(t, body, "cwmp:GetParameterValues")
+	assert.Contains(t, body, "<ParameterNames SOAP-ENC:arrayType=\"xsd:string[2]\">")
+	assert.NotContains(t, body, "<cwmp:ParameterNames")
 	assert.Contains(t, body, "Device.DeviceInfo.ModelName")
 	assert.Contains(t, body, "Device.DeviceInfo.SerialNumber")
 	// SOAP header cwmp:ID should be the cwmpID parameter, not CommandKey
@@ -124,8 +126,11 @@ func TestGetParameterNamesHandler(t *testing.T) {
 	require.NoError(t, err)
 	body := string(result)
 	assert.Contains(t, body, "cwmp:GetParameterNames")
+	assert.Contains(t, body, "<ParameterPath>Device.DeviceInfo.</ParameterPath>")
 	assert.Contains(t, body, "Device.DeviceInfo.")
-	assert.Contains(t, body, "<cwmp:NextLevel>true</cwmp:NextLevel>")
+	assert.Contains(t, body, "<NextLevel>true</NextLevel>")
+	assert.NotContains(t, body, "<cwmp:ParameterPath>")
+	assert.NotContains(t, body, "<cwmp:NextLevel>")
 }
 
 func TestRebootHandler(t *testing.T) {

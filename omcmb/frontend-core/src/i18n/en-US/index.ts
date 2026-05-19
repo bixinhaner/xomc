@@ -718,6 +718,7 @@ const messages: Record<string, string> = {
   'device.batch.recycle':              'Recycle Bin',
   'device.batch.recycleConfirm':       'Confirm Recycle Devices',
   'device.batch.recycleMsg':           '{count} device(s) will be moved to recycle bin. Devices in recycle bin will not be monitored. Continue?',
+  'device.batch.actionConfirm':        'Are you sure you want to perform {action} on {count} device(s)?',
   'device.batch.deleteWarning':        'All device data will be deleted (monitoring data, configuration, alarms, KPI, etc.)',
   'device.batch.selectGroup':           'Please select a target group',
   'device.batch.selectGroupPlaceholder': 'Select a device group',

@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/omcgo/omcgo/internal/alarm"
+	"github.com/omcgo/omcgo/internal/device"
 	"go.uber.org/zap"
 )
 
@@ -28,7 +29,8 @@ func initAlarmModule(c *Container) error {
 	}
 
 	// 告警同步处理器
-	alarmSyncProcessor := alarm.NewAlarmSyncProcessor(alarmEngine, alarmPgStore, alarmSyncService, c.EventBus, logger)
+	alarmDeviceRepo := device.NewPgDeviceRepository(c.PgPool)
+	alarmSyncProcessor := alarm.NewAlarmSyncProcessor(alarmEngine, alarmPgStore, alarmSyncService, c.EventBus, logger).WithDeviceReader(alarmDeviceRepo)
 	if err := alarmSyncProcessor.Start(context.Background()); err != nil {
 		logger.Warn("start alarm sync processor", zap.NamedError("err", err))
 	}

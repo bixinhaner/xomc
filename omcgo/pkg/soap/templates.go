@@ -220,9 +220,9 @@ const informResponseXML = soapEnvelopeOpen +
 
 const getParameterValuesXML = soapEnvelopeOpen +
 	`<cwmp:GetParameterValues>` +
-	`<cwmp:ParameterNames SOAP-ENC:arrayType="xsd:string[{{len .Params}}]">` +
+	`<ParameterNames SOAP-ENC:arrayType="xsd:string[{{len .Params}}]">` +
 	`{{- range .Params}}<string>{{.Name}}</string>{{end}}` +
-	`</cwmp:ParameterNames>` +
+	`</ParameterNames>` +
 	`</cwmp:GetParameterValues>` + soapEnvelopeClose
 
 const setParameterValuesXML = soapEnvelopeOpen +
@@ -238,8 +238,8 @@ const setParameterValuesXML = soapEnvelopeOpen +
 
 const getParameterNamesXML = soapEnvelopeOpen +
 	`<cwmp:GetParameterNames>` +
-	`<cwmp:ParameterPath>{{.Path}}</cwmp:ParameterPath>` +
-	`<cwmp:NextLevel>{{if .NextLevel}}true{{else}}false{{end}}</cwmp:NextLevel>` +
+	`<ParameterPath>{{.Path}}</ParameterPath>` +
+	`<NextLevel>{{if .NextLevel}}true{{else}}false{{end}}</NextLevel>` +
 	`</cwmp:GetParameterNames>` + soapEnvelopeClose
 
 const addObjectXML = soapEnvelopeOpen +

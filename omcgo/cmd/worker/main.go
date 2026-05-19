@@ -130,14 +130,14 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	}
 
 	// Alarm Sync Processor (handles GPV responses, applies diff)
-	alarmSyncProcessor := alarm.NewAlarmSyncProcessor(alarmEngine, alarmPgStore, alarmSyncService, w.EventBus, logger)
+	alarmDeviceRepo := device.NewPgDeviceRepository(w.PgPool)
+	alarmSyncProcessor := alarm.NewAlarmSyncProcessor(alarmEngine, alarmPgStore, alarmSyncService, w.EventBus, logger).WithDeviceReader(alarmDeviceRepo)
 	if err := alarmSyncProcessor.Start(context.Background()); err != nil {
 		logger.Warn("start alarm sync processor", zap.Error(err))
 	}
 
 	// T-0098 P2-10：构造 AlarmDefinition Registry + ProductRegistry adapter，启用 fallback 决策。
 	// 任何一步失败都仅记 WARN 后退化到旧路径（不阻塞 worker 启动）。
-	alarmDeviceRepo := device.NewPgDeviceRepository(w.PgPool)
 	alarmReceiver := alarm.NewAlarmReceiver(alarmEngine, w.EventBus, logger).WithDeviceReader(alarmDeviceRepo)
 	expeditedDeviceRepo := device.NewPgDeviceRepository(w.PgPool)
 	expeditedReceiver := alarm.NewExpeditedEventReceiver(alarmEngine, expeditedDeviceRepo, w.EventBus, logger)

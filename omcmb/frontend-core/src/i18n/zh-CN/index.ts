@@ -720,6 +720,7 @@ const messages: Record<string, string> = {
   'device.batch.recycle':               '回收站',
   'device.batch.recycleConfirm':        '确认批量回收',
   'device.batch.recycleMsg':            '确定将 {count} 台设备移入回收站？移入回收站的设备将不再进行数据监控。',
+  'device.batch.actionConfirm':         '确定对 {count} 台设备执行{action}吗？',
   'device.batch.deleteWarning':         '将会同时删除设备的所有数据。（监控数据，配置，告警，KPI等）',
   'device.batch.selectGroup':           '请选择目标设备组',
   'device.batch.selectGroupPlaceholder': '请选择设备组',
