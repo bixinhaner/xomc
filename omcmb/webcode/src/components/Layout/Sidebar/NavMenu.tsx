@@ -81,9 +81,11 @@ const STATIC_ICON_MAP: Record<string, React.ReactNode> = {
 // ---------------------------------------------------------------------------
 
 function buildStaticMenuItems(groups: NavGroup[], t: (id: string) => string): MenuItem[] {
+  if (!groups) return [];
   return groups.map((group) => {
-    if (group.children.length === 1) {
-      const child = group.children[0];
+    const children = group.children || [];
+    if (children.length === 1) {
+      const child = children[0];
       return {
         key: child.key,
         icon: STATIC_ICON_MAP[group.iconName],
@@ -94,7 +96,7 @@ function buildStaticMenuItems(groups: NavGroup[], t: (id: string) => string): Me
       key: group.key,
       icon: STATIC_ICON_MAP[group.iconName],
       label: t(group.label),
-      children: group.children.map(
+      children: children.map(
         (child: NavChild): MenuItem => ({
           key: child.key,
           label: t(child.label),
@@ -106,12 +108,14 @@ function buildStaticMenuItems(groups: NavGroup[], t: (id: string) => string): Me
 
 function buildStaticKeyToChild(groups: NavGroup[]): Map<string, NavChild> {
   const map = new Map<string, NavChild>();
+  if (!groups) return map;
   for (const group of groups) {
-    for (const child of group.children) {
+    const children = group.children || [];
+    for (const child of children) {
       map.set(child.key, child);
     }
-    if (group.children.length === 1) {
-      map.set(group.key, group.children[0]);
+    if (children.length === 1) {
+      map.set(group.key, children[0]);
     }
   }
   return map;
@@ -119,8 +123,10 @@ function buildStaticKeyToChild(groups: NavGroup[]): Map<string, NavChild> {
 
 function buildStaticPathToKey(groups: NavGroup[]): Map<string, string> {
   const map = new Map<string, string>();
+  if (!groups) return map;
   for (const group of groups) {
-    for (const child of group.children) {
+    const children = group.children || [];
+    for (const child of children) {
       map.set(child.path, child.key);
     }
   }
@@ -209,6 +215,7 @@ function buildDynamicMenuItems(
 function buildDynamicKeyToLeaf(menus: DynamicMenu[], label: MenuLabelResolver): Map<string, DynamicLeaf> {
   const map = new Map<string, DynamicLeaf>();
   const walk = (list: DynamicMenu[]) => {
+    if (!list) return;
     for (const m of list.filter(isVisible)) {
       if (m.type === 'menu' && m.routePath) {
         map.set(m.routePath, { key: m.routePath, label: label(m), path: m.routePath });
@@ -226,12 +233,14 @@ function buildDynamicKeyToLeaf(menus: DynamicMenu[], label: MenuLabelResolver): 
       if (m.children?.length) walk(m.children);
     }
   };
+  if (!menus) return map;
   walk(menus);
   return map;
 }
 
 /** 找到包含当前 path 的顶级目录 ID，作为 antd Menu defaultOpenKeys。 */
 function findDynamicTopOpenKey(menus: DynamicMenu[], pathname: string): string[] {
+  if (!menus) return [];
   const matchInSubtree = (list: DynamicMenu[]): boolean => {
     for (const m of list) {
       if (m.routePath === pathname) return true;
@@ -251,11 +260,13 @@ function findDynamicTopOpenKey(menus: DynamicMenu[], pathname: string): string[]
 function buildDynamicPathToKey(menus: DynamicMenu[]): Map<string, string> {
   const map = new Map<string, string>();
   const walk = (list: DynamicMenu[]) => {
+    if (!list) return;
     for (const m of list.filter(isVisible)) {
       if (m.routePath) map.set(m.routePath, m.routePath);
       if (m.children?.length) walk(m.children);
     }
   };
+  if (!menus) return map;
   walk(menus);
   return map;
 }
@@ -312,41 +323,41 @@ export default function NavMenu({
   // T-0098-P4-02：静态分支 NAV_CONFIG 按 super_admin 过滤（产品中心仅超管可见）。
   // 动态分支由后端 service 层完成同等过滤，无需前端二次处理。
   const filteredNav = useMemo(
-    () => NAV_CONFIG
+    () => (NAV_CONFIG || [])
       .filter((g) => !g.requireSuperAdmin || isSuperAdmin)
       .map((group) => ({
         ...group,
-        children: group.children.filter((child) => !child.requireAdmin || isAdmin),
+        children: (group.children || []).filter((child) => !child.requireAdmin || isAdmin),
       }))
-      .filter((group) => group.children.length > 0),
+      .filter((group) => (group.children || []).length > 0),
     [isAdmin, isSuperAdmin],
   );
 
   const menuItems = useMemo(
     () =>
       useDynamic
-        ? buildDynamicMenuItems(dynamicMenus, labelResolver, showMenuIcon)
-        : buildStaticMenuItems(filteredNav, t),
+        ? buildDynamicMenuItems(dynamicMenus || [], labelResolver, showMenuIcon)
+        : buildStaticMenuItems(filteredNav || [], t),
     [useDynamic, dynamicMenus, labelResolver, showMenuIcon, filteredNav, t],
   );
 
   const dynamicKeyToLeaf = useMemo(
     () =>
       useDynamic
-        ? buildDynamicKeyToLeaf(dynamicMenus, labelResolver)
+        ? buildDynamicKeyToLeaf(dynamicMenus || [], labelResolver)
         : new Map<string, DynamicLeaf>(),
     [useDynamic, dynamicMenus, labelResolver],
   );
   const dynamicPathToKey = useMemo(
-    () => (useDynamic ? buildDynamicPathToKey(dynamicMenus) : new Map<string, string>()),
+    () => (useDynamic ? buildDynamicPathToKey(dynamicMenus || []) : new Map<string, string>()),
     [useDynamic, dynamicMenus],
   );
   const staticKeyToChild = useMemo(
-    () => (useDynamic ? new Map<string, NavChild>() : buildStaticKeyToChild(filteredNav)),
+    () => (useDynamic ? new Map<string, NavChild>() : buildStaticKeyToChild(filteredNav || [])),
     [useDynamic, filteredNav],
   );
   const staticPathToKey = useMemo(
-    () => (useDynamic ? new Map<string, string>() : buildStaticPathToKey(filteredNav)),
+    () => (useDynamic ? new Map<string, string>() : buildStaticPathToKey(filteredNav || [])),
     [useDynamic, filteredNav],
   );
 
@@ -358,11 +369,11 @@ export default function NavMenu({
 
   const defaultOpenKeys = useMemo(() => {
     if (useDynamic) {
-      return findDynamicTopOpenKey(dynamicMenus, location.pathname);
+      return findDynamicTopOpenKey(dynamicMenus || [], location.pathname);
     }
     const selectedKey = staticPathToKey.get(location.pathname);
     if (!selectedKey) return [];
-    const group = filteredNav.find((g) => g.children.some((c) => c.key === selectedKey));
+    const group = (filteredNav || []).find((g) => (g.children || [])?.some((c) => c.key === selectedKey));
     return group ? [group.key] : [];
   }, [useDynamic, dynamicMenus, staticPathToKey, filteredNav, location.pathname]);
 
