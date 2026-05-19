@@ -275,6 +275,9 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0100-P0 | license_logs 表迁移 + LogWriter + 5 处写入点接入（handler import/activate/revoke + enforcer EnforceCapacity/Expiry + monitor capacity/expiry/auto_expire）— umbrella T-0100 子任务（详 §4.2） | feat | F06/license | P1 | done | Claude | M | T-0015 ✅ | R-109 关闭 / `prd/F06-license.md` §6.2 §9.3 | wave-3-finishing | 2026-05-09 |
 | T-0135 | webcode/src 端 pre-existing typecheck 错误大整理 + 主皮肤 typecheck 命令切换 | td | frontend | P2 | in_dev | Claude | L (~3d) | T-0133 ✅ | T-0133 followup / N/A (tech debt) | sprint-12 | 2026-05-15 |
 | T-0137 | TR069 报文跟踪（Message Trace）— 老 OMC 移植（任务 CRUD + ACS 拦截 + 落库 TimescaleDB hypertable + 在线查看/下载 + WebSocket 通知 + 跨 ACS 实例聚合查询；3 天保留；10 项设计决策已定稿）**2026-05-15 拆 M1/M2/M3 共 3 sub-task** 详 §4.4；T-0137-M1 已升 planned/Owner=Claude/sprint-13，T-0137-M2/M3 triaged 等 M1 落地后下次 planning | feat | F01 | P2 | planned | Claude | XL（M1+M2+M3） | — | `prd/F01-tr069-message-trace.md` / `docs/design/TR069报文跟踪-设计.md` / `backlog/subtasks/T-0137-trace.md` | sprint-13 | 2026-05-15 |
+| T-0155 | 设备详情 tab 共享槽位 + URL 内部 tab 状态（同一 key 复用 tab、internal tab 走 `?tab=`、`labelRaw` 跳过 i18n 支持动态 SN 标题）| feat | frontend | P2 | in_dev | Claude | S | — | N/A (UX) | sprint-13 | 2026-05-19 |
+| T-0156 | 快速设置切走切回 Tag 反馈消失 — Tag 状态提升至 zustand store 持久化 + Card loading 拆出避免骨架屏遮蔽 extra 区 | fix | frontend | P1 | in_dev | Claude | S | — | N/A (bugfix) | sprint-13 | 2026-05-19 |
+| T-0157 | 消息中心 V1（铃铛 Popover + 后端 task 事件桥 + 快速设置接入；§10 拆 C1-C10 共 10 commit 实施计划）— umbrella | feat | F04/notification + frontend | P1 | planned | Claude | L (~7.7d) | T-0156 ✅ | `docs/design/notification-center-design-20260519.md` | sprint-13 | 2026-05-19 |
 
 **说明**：
 - T-0009 是外部凭据申请，不编码但走流水线（作为前置项，保证 T-0014 不被卡）。
