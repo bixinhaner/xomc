@@ -29,12 +29,19 @@ export const notificationKeys = {
   unreadCount: () => ['notifications', 'unread-count'] as const,
 };
 
-/** 拉取消息列表（按 createdAt 倒序）。默认 page=1, pageSize=20 */
+/**
+ * 拉取消息列表（按 createdAt 倒序）。默认 page=1, pageSize=20。
+ *
+ * refetchInterval: 5 秒自动刷新，让 Popover 打开期间用户能看到 task 状态升级
+ * (queued → sent → completed/failed/expired) 而不需要手动操作。Popover 关闭时
+ * NotificationCenter 组件 unmount → hook 自动停轮询，不占资源。
+ */
 export function useNotificationCenter(opts?: {
   page?: number;
   pageSize?: number;
   filter?: NotificationCenterFilter;
   enabled?: boolean;
+  refetchIntervalMs?: number;
 }) {
   const page = opts?.page ?? 1;
   const pageSize = opts?.pageSize ?? 20;
@@ -49,6 +56,8 @@ export function useNotificationCenter(opts?: {
         filter: opts?.filter,
       }),
     enabled: opts?.enabled ?? true,
+    refetchInterval: opts?.refetchIntervalMs ?? 5_000,
+    refetchIntervalInBackground: false,
   });
 }
 
