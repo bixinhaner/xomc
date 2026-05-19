@@ -1807,7 +1807,8 @@ const messages: Record<string, string> = {
   // FilterBar — search & filter labels
   // -------------------------------------------------------------------------
   'filter.searchText':          'Search',
-  'filter.searchText.multiHint': 'SN / Name / IP / MAC / PCI (separate multiple values with commas)',
+  'filter.searchText.multiHint': 'SN / Name / IP / MAC / PCI (separate multiple values with commas, up to 50)',
+  'filter.searchText.tooManyKeywords': 'More than 50 keywords; truncated to the first 50.',
   'filter.conn.normal':         'Connected',
   'filter.conn.disconnected':   'Disconnected',
   'filter.conn.syncing':        'Syncing',

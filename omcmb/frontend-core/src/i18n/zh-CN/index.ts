@@ -1814,7 +1814,8 @@ const messages: Record<string, string> = {
   // FilterBar — search & filter labels
   // -------------------------------------------------------------------------
   'filter.searchText':          '搜索',
-  'filter.searchText.multiHint': 'SN / 名称 / IP / MAC / PCI（多个值用英文逗号分隔）',
+  'filter.searchText.multiHint': 'SN / 名称 / IP / MAC / PCI（多个值用英文逗号分隔，最多 50 个）',
+  'filter.searchText.tooManyKeywords': '关键字超过 50 个，已截断为前 50 个',
   'filter.conn.normal':         '连接正常',
   'filter.conn.disconnected':   '连接断开',
   'filter.conn.syncing':        '同步中',

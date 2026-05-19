@@ -420,11 +420,26 @@ export default function DeviceList() {
   ], [stats, t]);
 
   const handleSearch = useCallback((values: Record<string, unknown>) => {
-    setFilterParams(values);
+    // 关键字上限校验：后端 BuildSearchOR 限定 ≤50 keyword × 6 fields = 300 ILIKE
+    // 子句，超过会被静默截断。前端这里做截断 + 用户提示，让感知明确。
+    let effective: Record<string, unknown> = values;
+    const raw = values.searchText;
+    if (typeof raw === 'string' && raw.includes(',')) {
+      const keywords = raw
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (keywords.length > 50) {
+        void message.warning(t('filter.searchText.tooManyKeywords'));
+        effective = { ...values, searchText: keywords.slice(0, 50).join(',') };
+      }
+    }
+
+    setFilterParams(effective);
     setCurrentPage(1);
     // 同步到 URL
     const newParams = new URLSearchParams();
-    Object.entries(values).forEach(([key, value]) => {
+    Object.entries(effective).forEach(([key, value]) => {
       if (value !== undefined && value !== null && value !== '') {
         if (Array.isArray(value)) {
           if (value.length > 0) {
@@ -436,7 +451,7 @@ export default function DeviceList() {
       }
     });
     setSearchParams(newParams);
-  }, [setSearchParams]);
+  }, [setSearchParams, message, t]);
 
   const handleReset = useCallback(() => {
     setFilterParams({});
@@ -874,7 +889,11 @@ export default function DeviceList() {
         title: t('device.opState'),
         dataIndex: 'opState',
         width: 140,
-        hidden: true,
+        // 默认显示：激活状态（opState）和在线状态（connStatus）是两个独立维度：
+        //   - opState='1' = 已激活（完成 provisioning）
+        //   - connStatus='active' = 当前在线（最近 inform 过）
+        // 一台设备可以"已激活但暂时离线"，两列都应可见。
+        // 历史：commit ee12a32f9 把本列默认隐藏，本次按用户反馈恢复显示。
         group: 'common',
         // 原始 JSP: 支持多小区 "1,0,1"，汇总 + [N/M] Popover
         // 兼容 active/inactive 文本值和 1/0 数值
