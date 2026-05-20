@@ -10,6 +10,8 @@ const { Text } = Typography;
 export interface EditLevel2GroupDrawerProps {
   open: boolean;
   form: FormInstance<{ name: string; matchingMode: 'deviceName' | 'lac' | 'tac'; tacRag: string }>;
+  /** 上级（一级）分组名称，只读展示，自动填充。 */
+  parentGroupName?: string;
   matchingMode: string | undefined;
   nameFilters: NameFilterItem[];
   onClose: () => void;
@@ -28,6 +30,7 @@ export interface EditLevel2GroupDrawerProps {
 export default function EditLevel2GroupDrawer({
   open,
   form,
+  parentGroupName,
   matchingMode,
   nameFilters,
   onClose,
@@ -99,9 +102,12 @@ export default function EditLevel2GroupDrawer({
           <div style={{ marginBottom: 12, fontWeight: 500, color: 'var(--color-text)' }}>
             {t('device.basicInfo')}
           </div>
+          <Form.Item label={t('device.superiorGroup')} style={{ marginBottom: 12 }}>
+            <Input value={parentGroupName ?? ''} disabled />
+          </Form.Item>
           <Form.Item
             name="name"
-            label={t('device.groupName')}
+            label={t('device.groupNameLabel')}
             rules={[{ required: true, message: t('common.placeholder') }]}
             style={{ marginBottom: 0 }}
           >

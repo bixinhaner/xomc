@@ -88,16 +88,8 @@ function buildTreeData(
         },
       ];
     } else {
+      // 二级分组为叶子层级：只保留编辑、删除（不能再添加下级分组）。
       menuItems = [
-        {
-          key: 'add-device',
-          label: t('common.add'),
-          icon: <FolderAddOutlined />,
-          onClick: (info) => {
-            info.domEvent.stopPropagation();
-            onContextMenu(`add-device:${group.id}`);
-          },
-        },
         {
           key: 'edit-level2',
           label: t('common.edit'),

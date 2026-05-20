@@ -259,6 +259,7 @@ export default function DeviceGrouping() {
         onEditModalCancel={groupActions.close.edit}
         addChildDrawerOpen={groupActions.state.addChildDrawerOpen}
         addChildForm={groupActions.forms.addChildForm}
+        addChildParentName={groupActions.state.addChildParentName}
         matchingMode={groupActions.state.matchingMode}
         nameFilters={childNameFilters.filters}
         onAddChildDrawerClose={groupActions.close.addChild}
@@ -269,6 +270,7 @@ export default function DeviceGrouping() {
         onUpdateFilter={childNameFilters.update}
         editLevel2DrawerOpen={groupActions.state.editLevel2DrawerOpen}
         editLevel2Form={groupActions.forms.editLevel2Form}
+        editLevel2ParentName={groupActions.state.editLevel2ParentName}
         editLevel2MatchingMode={groupActions.state.editLevel2MatchingMode}
         editLevel2NameFilters={editLevel2NameFilters.filters}
         onEditLevel2DrawerClose={groupActions.close.editLevel2}

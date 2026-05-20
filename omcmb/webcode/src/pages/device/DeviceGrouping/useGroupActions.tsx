@@ -297,6 +297,11 @@ export function useGroupActions(deps: {
       editLevel2GroupId,
       matchingMode,
       editLevel2MatchingMode,
+      // 上级（一级）分组名称，供子分组新增/编辑抽屉只读展示。
+      addChildParentName: groups.find((g) => g.id === parentGroupId)?.name,
+      editLevel2ParentName: groups.find(
+        (g) => g.id === groups.find((x) => x.id === editLevel2GroupId)?.parentId
+      )?.name,
     },
     open: {
       add: openAdd,

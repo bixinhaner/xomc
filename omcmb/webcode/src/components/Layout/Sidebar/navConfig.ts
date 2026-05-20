@@ -45,7 +45,7 @@ export const NAV_CONFIG: NavConfig = [
       // { key: 'device-transfer',  label: 'nav.device.handover',    path: '/device/handover' },      // 隐藏
       // { key: 'device-resource',  label: 'nav.device.stats',       path: '/device/stats' },         // 隐藏
       // { key: 'device-import',    label: 'nav.device.import',      path: '/device/import' },        // 隐藏
-      { key: 'device-rule',      label: 'nav.device.rules',       path: '/device/rules' },
+      // { key: 'device-rule',      label: 'nav.device.rules',       path: '/device/rules' },  // 已下线：device_rules 功能并入设备分组，从菜单移除（路由/页面暂保留）
       { key: 'device-recycle',   label: 'nav.device.recycle',     path: '/device/recycle' },
     ],
   },

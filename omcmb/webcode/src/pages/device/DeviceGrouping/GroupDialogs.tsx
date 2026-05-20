@@ -24,6 +24,7 @@ export interface GroupDialogsProps {
   // Add Child Group (Level-2) Drawer
   addChildDrawerOpen: boolean;
   addChildForm: FormInstance<{ name: string; matchingMode: 'deviceName' | 'lac' | 'tac'; tacRag: string }>;
+  addChildParentName?: string;
   matchingMode: string | undefined;
   nameFilters: NameFilterItem[];
   onAddChildDrawerClose: () => void;
@@ -36,6 +37,7 @@ export interface GroupDialogsProps {
   // Edit Level-2 Group Drawer
   editLevel2DrawerOpen: boolean;
   editLevel2Form: FormInstance<{ name: string; matchingMode: 'deviceName' | 'lac' | 'tac'; tacRag: string }>;
+  editLevel2ParentName?: string;
   editLevel2MatchingMode: string | undefined;
   editLevel2NameFilters: NameFilterItem[];
   onEditLevel2DrawerClose: () => void;
@@ -62,6 +64,7 @@ export default function GroupDialogs({
   onEditModalCancel,
   addChildDrawerOpen,
   addChildForm,
+  addChildParentName,
   matchingMode,
   nameFilters,
   onAddChildDrawerClose,
@@ -72,6 +75,7 @@ export default function GroupDialogs({
   onUpdateFilter,
   editLevel2DrawerOpen,
   editLevel2Form,
+  editLevel2ParentName,
   editLevel2MatchingMode,
   editLevel2NameFilters,
   onEditLevel2DrawerClose,
@@ -103,6 +107,7 @@ export default function GroupDialogs({
       <AddChildGroupDrawer
         open={addChildDrawerOpen}
         form={addChildForm}
+        parentGroupName={addChildParentName}
         matchingMode={matchingMode}
         nameFilters={nameFilters}
         onClose={onAddChildDrawerClose}
@@ -117,6 +122,7 @@ export default function GroupDialogs({
       <EditLevel2GroupDrawer
         open={editLevel2DrawerOpen}
         form={editLevel2Form}
+        parentGroupName={editLevel2ParentName}
         matchingMode={editLevel2MatchingMode}
         nameFilters={editLevel2NameFilters}
         onClose={onEditLevel2DrawerClose}
