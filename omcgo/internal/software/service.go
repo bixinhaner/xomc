@@ -763,6 +763,31 @@ func (s *SoftwareService) TerminateUpgrade(ctx context.Context, taskID uuid.UUID
 		return commonerrors.NewBusinessError(8005, "task already ended", commonerrors.ErrInvalidInput)
 	}
 
+	for page := 1; ; page++ {
+		subResult, err := s.subTaskRepo.ListByTaskID(ctx, taskID, SubTaskFilter{
+			TaskID: taskID,
+			ListRequest: model.ListRequest{
+				Page:     page,
+				PageSize: 100,
+			},
+		})
+		if err != nil {
+			return fmt.Errorf("list sub-tasks for terminate: %w", err)
+		}
+		for i := range subResult.Items {
+			subTask := subResult.Items[i]
+			if IsUpgradeTerminal(subTask.Status) {
+				continue
+			}
+			if err := s.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradeTerminated, "task terminated by operator"); err != nil {
+				return fmt.Errorf("terminate sub-task %s: %w", subTask.ID.String(), err)
+			}
+		}
+		if len(subResult.Items) == 0 || page >= subResult.TotalPages {
+			break
+		}
+	}
+
 	if err := s.taskRepo.UpdateStatus(ctx, taskID, TaskEnded, TaskResultTerminated); err != nil {
 		return fmt.Errorf("terminate main task: %w", err)
 	}
@@ -771,15 +796,17 @@ func (s *SoftwareService) TerminateUpgrade(ctx context.Context, taskID uuid.UUID
 	return nil
 }
 
-// DeleteUpgrade permanently deletes an ended task and its sub-tasks.
+// DeleteUpgrade permanently deletes a task and its sub-tasks.
+// Allowed for ended, pending, and suspended tasks; in-progress tasks must be
+// terminated first.
 func (s *SoftwareService) DeleteUpgrade(ctx context.Context, taskID uuid.UUID) error {
 	task, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("get upgrade task: %w", err)
 	}
 
-	if task.Status != TaskEnded {
-		return commonerrors.NewBusinessError(8011, "can only delete ended tasks", commonerrors.ErrInvalidInput)
+	if task.Status == TaskInProgress {
+		return commonerrors.NewBusinessError(8011, "cannot delete a running task; terminate it first", commonerrors.ErrInvalidInput)
 	}
 
 	if err := s.subTaskRepo.DeleteByTaskID(ctx, taskID); err != nil {
@@ -790,6 +817,45 @@ func (s *SoftwareService) DeleteUpgrade(ctx context.Context, taskID uuid.UUID) e
 	}
 
 	s.logger.Info("upgrade task deleted", zap.String("task_id", taskID.String()))
+	return nil
+}
+
+// ResumeCollect resumes a suspended or pending log-collect / config-backup task.
+// transportPath is the Upload RPC path template stored in the UFTE task-type catalog;
+// callers (ufte.Service.StartTask) must look it up before calling this method.
+func (s *SoftwareService) ResumeCollect(ctx context.Context, taskID uuid.UUID, transportPath string) error {
+	task, err := s.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("get upgrade task: %w", err)
+	}
+
+	if task.Status != TaskSuspended && task.Status != TaskPending {
+		return commonerrors.NewBusinessError(8004, "task is not suspended or pending", commonerrors.ErrInvalidInput)
+	}
+
+	pendingStatus := UpgradeState(UpgradePending)
+	subResult, err := s.subTaskRepo.ListByTaskID(ctx, taskID, SubTaskFilter{
+		TaskID: taskID,
+		Status: &pendingStatus,
+	})
+	if err != nil {
+		return fmt.Errorf("list pending sub-tasks: %w", err)
+	}
+	if len(subResult.Items) == 0 {
+		return commonerrors.NewBusinessError(8010, "no pending sub-tasks to execute", commonerrors.ErrInvalidInput)
+	}
+
+	subTasks := make([]*UpgradeSubTask, len(subResult.Items))
+	for i := range subResult.Items {
+		subTasks[i] = &subResult.Items[i].UpgradeSubTask
+	}
+
+	if err := s.taskRepo.UpdateStatus(ctx, taskID, TaskInProgress, ""); err != nil {
+		return fmt.Errorf("resume collect task: %w", err)
+	}
+
+	s.startCollectExecution(task, subTasks, transportPath, task.MaxConcurrent)
+	s.logger.Info("collect task resumed", zap.String("task_id", taskID.String()))
 	return nil
 }
 

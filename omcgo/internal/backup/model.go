@@ -31,10 +31,10 @@ const (
 type BackupTask struct {
 	ID           uuid.UUID  `json:"id"`
 	TaskType     TaskType   `json:"task_type"`
-	TargetType   string     `json:"target_type"`             // "device" or "group"
+	TargetType   string     `json:"target_type"` // "device" or "group"
 	TargetIDs    []string   `json:"target_ids"`
 	Status       TaskStatus `json:"status"`
-	Progress     int        `json:"progress"`                // 0-100
+	Progress     int        `json:"progress"` // 0-100
 	FilePath     *string    `json:"file_path,omitempty"`
 	ErrorMessage *string    `json:"error_message,omitempty"`
 	StartedAt    *time.Time `json:"started_at,omitempty"`

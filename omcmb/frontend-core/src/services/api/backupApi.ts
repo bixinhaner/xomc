@@ -431,6 +431,17 @@ export const backupApi = {
     return mapBackendRestoreTask(data);
   },
 
+  async createRestoreByTaskID(req: {
+    backupTaskId: string;
+    targetDeviceSns: string[];
+  }): Promise<RestoreTask> {
+    const { data } = await http.post<BackendRestoreTask>('/backup/restore/by-task-id', {
+      backup_task_id: req.backupTaskId,
+      target_device_sns: req.targetDeviceSns,
+    });
+    return mapBackendRestoreTask(data);
+  },
+
   async listRestoreTasks(
     params: PageRequest & { status?: RestoreStatus }
   ): Promise<PageResponse<RestoreTask>> {

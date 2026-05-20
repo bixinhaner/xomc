@@ -18,13 +18,11 @@ import {
   Divider,
   Table,
   Card,
-  Dropdown,
   Descriptions,
 } from 'antd';
-import type { MenuProps } from 'antd';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
-import { PlayCircleOutlined, WarningOutlined, PlusOutlined, ReloadOutlined, DownloadOutlined, DeleteOutlined, PauseOutlined, StopOutlined, MoreOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, WarningOutlined, PlusOutlined, ReloadOutlined, DownloadOutlined, DeleteOutlined, PauseOutlined, StopOutlined } from '@ant-design/icons';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
@@ -591,30 +589,15 @@ export default function UpgradePlan() {
 
   const handleDeleteTaskConfirm = () => {
     if (deleteTaskRecord) {
-      const statusCode = mapTaskStatusToCode(deleteTaskRecord.status);
-      if (statusCode === 4) {
-        // Ended task: use delete API to permanently remove
-        deleteMutation.mutate(deleteTaskRecord.id, {
-          onSuccess: () => {
-            void message.success(t('software.upgrade.deletedTask', { name: deleteTaskRecord.taskName }));
-            setDeleteTaskRecord(null);
-          },
-          onError: (err) => {
-            void message.error(t('common.operationFailed') + ': ' + String(err));
-          },
-        });
-      } else {
-        // Active task: use terminate API to stop first
-        terminateMutation.mutate(deleteTaskRecord.id, {
-          onSuccess: () => {
-            void message.success(t('software.upgrade.deletedTask', { name: deleteTaskRecord.taskName }));
-            setDeleteTaskRecord(null);
-          },
-          onError: (err) => {
-            void message.error(t('common.operationFailed') + ': ' + String(err));
-          },
-        });
-      }
+      deleteMutation.mutate(deleteTaskRecord.id, {
+        onSuccess: () => {
+          void message.success(t('software.upgrade.deletedTask', { name: deleteTaskRecord.taskName }));
+          setDeleteTaskRecord(null);
+        },
+        onError: (err) => {
+          void message.error(t('common.operationFailed') + ': ' + String(err));
+        },
+      });
     }
   };
 
@@ -648,7 +631,7 @@ export default function UpgradePlan() {
     {
       key: 'operation',
       title: t('common.operation'),
-      width: 100,
+      width: 220,
       fixed: 'right',
       render: (_: unknown, record: UpgradeTaskInfo) => {
         const status = mapTaskStatusToCode(record.status);
@@ -665,71 +648,50 @@ export default function UpgradePlan() {
         const stageStatus = record.stageStatus ?? 'pending';
         const canaryRunning = isCanary && stageStatus === 'running';
         const canaryPaused = isCanary && stageStatus === 'paused';
-        const canaryTerminal = isCanary && (stageStatus === 'completed' || stageStatus === 'aborted');
-
-        const items: MenuProps['items'] = [
-          showStart ? {
-            key: 'start',
-            label: t('common.start'),
-            icon: <PlayCircleOutlined />,
-            onClick: () => handleStartTask(record),
-          } : null,
-          showPause ? {
-            key: 'pause',
-            label: t('common.pause'),
-            icon: <PauseOutlined />,
-            onClick: () => handlePauseTask(record),
-          } : null,
-          showTerminate ? {
-            key: 'terminate',
-            label: t('common.terminate'),
-            icon: <StopOutlined />,
-            danger: true,
-            onClick: () => handleTerminateTask(record),
-          } : null,
-          // T-0019: canary stage transitions
-          isCanary && !canaryTerminal ? { type: 'divider' as const } : null,
-          isCanary && canaryRunning ? {
-            key: 'canary-advance',
-            label: t('software.canary.advance') || '推进下一阶段',
-            icon: <PlayCircleOutlined />,
-            onClick: () => advanceCanaryMutation.mutate(record.id),
-          } : null,
-          isCanary && canaryRunning ? {
-            key: 'canary-pause',
-            label: t('software.canary.pause') || '暂停灰度',
-            icon: <PauseOutlined />,
-            onClick: () => pauseCanaryMutation.mutate(record.id),
-          } : null,
-          isCanary && canaryPaused ? {
-            key: 'canary-resume',
-            label: t('software.canary.resume') || '恢复灰度',
-            icon: <PlayCircleOutlined />,
-            onClick: () => resumeCanaryMutation.mutate(record.id),
-          } : null,
-          isCanary && (canaryRunning || canaryPaused) ? {
-            key: 'canary-abort',
-            label: t('software.canary.abort') || '终止灰度',
-            icon: <StopOutlined />,
-            danger: true,
-            onClick: () => abortCanaryMutation.mutate(record.id),
-          } : null,
-          (showStart || showPause || showTerminate || isCanary) && showDelete ? { type: 'divider' as const } : null,
-          showDelete ? {
-            key: 'delete',
-            label: t('common.delete'),
-            icon: <DeleteOutlined />,
-            danger: true,
-            onClick: () => setDeleteTaskRecord(record),
-          } : null,
-        ].filter(Boolean) as MenuProps['items'];
 
         return (
-          <Space size={4}>
+          <Space size={4} wrap={false}>
             <Button type="link" size="small" onClick={() => handleViewTaskDetail(record)}>{t('common.details')}</Button>
-            <Dropdown menu={{ items }} trigger={['click']}>
-              <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
-            </Dropdown>
+            {showStart ? (
+              <Button type="link" size="small" icon={<PlayCircleOutlined />} loading={resumeMutation.isPending} onClick={() => handleStartTask(record)}>
+                {t('common.start')}
+              </Button>
+            ) : null}
+            {showPause ? (
+              <Button type="link" size="small" icon={<PauseOutlined />} loading={suspendMutation.isPending} onClick={() => handlePauseTask(record)}>
+                {t('common.pause')}
+              </Button>
+            ) : null}
+            {showTerminate ? (
+              <Button type="link" size="small" danger icon={<StopOutlined />} loading={terminateMutation.isPending} onClick={() => handleTerminateTask(record)}>
+                {t('common.terminate')}
+              </Button>
+            ) : null}
+            {isCanary && canaryRunning ? (
+              <Button type="link" size="small" icon={<PlayCircleOutlined />} loading={advanceCanaryMutation.isPending} onClick={() => advanceCanaryMutation.mutate(record.id)}>
+                {t('software.canary.advance') || '推进下一阶段'}
+              </Button>
+            ) : null}
+            {isCanary && canaryRunning ? (
+              <Button type="link" size="small" icon={<PauseOutlined />} loading={pauseCanaryMutation.isPending} onClick={() => pauseCanaryMutation.mutate(record.id)}>
+                {t('software.canary.pause') || '暂停灰度'}
+              </Button>
+            ) : null}
+            {isCanary && canaryPaused ? (
+              <Button type="link" size="small" icon={<PlayCircleOutlined />} loading={resumeCanaryMutation.isPending} onClick={() => resumeCanaryMutation.mutate(record.id)}>
+                {t('software.canary.resume') || '恢复灰度'}
+              </Button>
+            ) : null}
+            {isCanary && (canaryRunning || canaryPaused) ? (
+              <Button type="link" size="small" danger icon={<StopOutlined />} loading={abortCanaryMutation.isPending} onClick={() => abortCanaryMutation.mutate(record.id)}>
+                {t('software.canary.abort') || '终止灰度'}
+              </Button>
+            ) : null}
+            {showDelete ? (
+              <Button type="link" size="small" danger icon={<DeleteOutlined />} loading={deleteMutation.isPending} onClick={() => setDeleteTaskRecord(record)}>
+                {t('common.delete')}
+              </Button>
+            ) : null}
           </Space>
         );
       },
@@ -841,7 +803,7 @@ export default function UpgradePlan() {
     },
     { key: 'startTime', title: t('software.startTime'), dataIndex: 'startedAt', width: 160, render: (val: unknown) => val ? dayjs(val as string).format('YYYY-MM-DD HH:mm:ss') : '-' },
     { key: 'endTime', title: t('software.endTime'), dataIndex: 'endedAt', width: 160, render: (val: unknown) => val ? dayjs(val as string).format('YYYY-MM-DD HH:mm:ss') : '-' },
-  ], [t, TASK_STATUS_CONFIG, TASK_TYPE_MAP, TASK_RESULT_MAP, resumeMutation, suspendMutation, terminateMutation]);
+  ], [t, TASK_STATUS_CONFIG, TASK_TYPE_MAP, TASK_RESULT_MAP, resumeMutation, suspendMutation, terminateMutation, deleteMutation, advanceCanaryMutation, pauseCanaryMutation, resumeCanaryMutation, abortCanaryMutation]);
 
   // ---- Device list tab columns (sub-tasks for selected main task) ----
   const deviceColumns: DataTableColumn<UpgradeSubTaskInfo>[] = useMemo(() => [
@@ -1182,7 +1144,7 @@ export default function UpgradePlan() {
         onOk={handleDeleteTaskConfirm}
         okText={t('common.confirm')}
         cancelText={t('common.cancel')}
-        okButtonProps={{ danger: true }}
+        okButtonProps={{ danger: true, loading: deleteMutation.isPending }}
       >
         <Alert
           type="warning"

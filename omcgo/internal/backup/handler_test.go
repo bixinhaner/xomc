@@ -82,6 +82,9 @@ func (m *fakeTaskRepo) UpdateFilePath(_ context.Context, _ uuid.UUID, _ string) 
 func (m *fakeTaskRepo) FindByIDPrefix(_ context.Context, _ string, _ int) ([]*BackupTask, error) {
 	return nil, nil
 }
+func (m *fakeTaskRepo) MarkComplete(_ context.Context, _ uuid.UUID, _ TaskStatus, _ int16, _ time.Time, _ string) error {
+	return nil
+}
 
 // ---------------------------------------------------------------------------
 // Mock: ScheduleRepository

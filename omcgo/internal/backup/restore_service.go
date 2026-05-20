@@ -64,12 +64,12 @@ type BackupTaskFinder interface {
 
 // RestoreService orchestrates restore_task creation + device task fan-out.
 type RestoreService struct {
-	repo            RestoreTaskRepository
-	deviceRepo      DeviceLookup
-	taskSvc         TaskCreator
-	stater          MinIOStater
-	metrics         *RestoreMetrics
-	logger          *zap.Logger
+	repo       RestoreTaskRepository
+	deviceRepo DeviceLookup
+	taskSvc    TaskCreator
+	stater     MinIOStater
+	metrics    *RestoreMetrics
+	logger     *zap.Logger
 	// T-0079: optional — when wired enables POST /backup/restore/by-task-id.
 	// nil-safe: nil disables the endpoint (handler returns 503).
 	backupTaskFinder BackupTaskFinder
@@ -178,13 +178,15 @@ func (s *RestoreService) Create(ctx context.Context, req *CreateRestoreRequest, 
 			return nil, fmt.Errorf("marshal Download params: %w", err)
 		}
 		if _, err := s.taskSvc.CreateTask(ctx, &devtask.CreateTaskRequest{
-			DeviceSN:   dev.SerialNumber,
-			Method:     "Download",
-			Params:     params,
-			Source:     devtask.TaskSourceSystem,
-			SourceID:   created.ID.String(),
-			CreatorID:  createdBy,
-			CommandKey: "restore-" + created.ID.String()[:8],
+			DeviceSN:  dev.SerialNumber,
+			Method:    "Download",
+			Params:    params,
+			Source:    devtask.TaskSourceSystem,
+			SourceID:  created.ID.String(),
+			CreatorID: createdBy,
+			// M2: 规范化 Download CommandKey 为 `{cellCode}_RESTORE_{taskID8}`，
+			// 由 TransferCompleteRouter 反解定位 restore_tasks 行。
+			CommandKey: BuildRestoreCommandKey(dev.SiteID, dev.SerialNumber, created.ID.String()),
 		}); err != nil {
 			skipped = append(skipped, sn)
 			s.logger.Warn("enqueue Download device task failed",
@@ -344,4 +346,3 @@ func validateRestorePath(bucket, objectPath string) error {
 	}
 	return nil
 }
-

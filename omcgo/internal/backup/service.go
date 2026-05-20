@@ -116,6 +116,8 @@ func (s *Service) CreateSchedule(ctx context.Context, schedule *BackupSchedule) 
 		zap.String("cron_expr", schedule.CronExpr),
 	)
 
+	s.notifyScheduleChanged(ctx, "create", schedule.ID.String())
+
 	return schedule, nil
 }
 
@@ -144,12 +146,40 @@ func (s *Service) UpdateSchedule(ctx context.Context, id uuid.UUID, schedule *Ba
 		zap.String("schedule_id", id.String()),
 	)
 
+	s.notifyScheduleChanged(ctx, "update", id.String())
+
 	return existing, nil
 }
 
 // DeleteSchedule deletes a backup schedule by ID.
 func (s *Service) DeleteSchedule(ctx context.Context, id uuid.UUID) error {
-	return s.scheduleRepo.Delete(ctx, id)
+	if err := s.scheduleRepo.Delete(ctx, id); err != nil {
+		return err
+	}
+	s.notifyScheduleChanged(ctx, "delete", id.String())
+	return nil
+}
+
+// notifyScheduleChanged 发布 backup.schedule.changed 事件，让
+// worker 侧的 PeriodScheduler 拉表刷新 cron。eventBus 未注入时 silent。
+func (s *Service) notifyScheduleChanged(ctx context.Context, action, scheduleID string) {
+	if s.eventBus == nil {
+		return
+	}
+	evt, err := event.NewEvent(event.SubjectBackupScheduleChanged, map[string]interface{}{
+		"action":      action,
+		"schedule_id": scheduleID,
+	})
+	if err != nil {
+		s.logger.Warn("build schedule.changed event", zap.Error(err))
+		return
+	}
+	if err := s.eventBus.Publish(ctx, event.SubjectBackupScheduleChanged, evt); err != nil {
+		s.logger.Warn("publish schedule.changed",
+			zap.String("action", action),
+			zap.String("schedule_id", scheduleID),
+			zap.Error(err))
+	}
 }
 
 // ListSchedules returns a paginated list of backup schedules.

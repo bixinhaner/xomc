@@ -97,6 +97,7 @@ func (m *svcMockTaskRepo) ListActiveCanaryTaskIDs(_ context.Context) ([]uuid.UUI
 type svcMockSubTaskRepo struct {
 	createFn            func(ctx context.Context, task *UpgradeSubTask) error
 	updateStatusFn      func(ctx context.Context, id uuid.UUID, status UpgradeState, msg string) error
+	listByTaskIDFn      func(ctx context.Context, taskID uuid.UUID, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error)
 	getActiveByDeviceFn func(ctx context.Context, deviceID uuid.UUID) (*UpgradeSubTask, error)
 	getByCommandKeyFn   func(ctx context.Context, commandKey string) (*UpgradeSubTask, error)
 	batchCreateFn       func(ctx context.Context, tasks []*UpgradeSubTask) error
@@ -122,7 +123,10 @@ func (m *svcMockSubTaskRepo) Update(_ context.Context, _ *UpgradeSubTask) error 
 func (m *svcMockSubTaskRepo) List(_ context.Context, _ SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
 	return model.NewListResponse([]UpgradeSubTaskWithTaskName{}, 0, 1, 20), nil
 }
-func (m *svcMockSubTaskRepo) ListByTaskID(_ context.Context, _ uuid.UUID, _ SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
+func (m *svcMockSubTaskRepo) ListByTaskID(ctx context.Context, taskID uuid.UUID, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
+	if m.listByTaskIDFn != nil {
+		return m.listByTaskIDFn(ctx, taskID, filter)
+	}
 	return model.NewListResponse([]UpgradeSubTaskWithTaskName{}, 0, 1, 20), nil
 }
 func (m *svcMockSubTaskRepo) ListAll(_ context.Context, _ AllSubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
@@ -1125,6 +1129,56 @@ func TestService_RollbackDevices_ReasonRoundTrip(t *testing.T) {
 	require.NotNil(t, capturedTask)
 	assert.Equal(t, reason, capturedTask.RollbackReason)
 	assert.Equal(t, RollbackSourceCanaryFailure, capturedTask.RollbackSource)
+}
+
+func TestService_TerminateUpgrade_TerminatesActiveSubTasks(t *testing.T) {
+	taskID := uuid.New()
+	pendingID := uuid.New()
+	downloadingID := uuid.New()
+	completedID := uuid.New()
+	updated := map[uuid.UUID]UpgradeState{}
+
+	taskRepo := &svcMockTaskRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*UpgradeTask, error) {
+			return &UpgradeTask{ID: id, Status: TaskInProgress}, nil
+		},
+		updateStatusFn: func(_ context.Context, id uuid.UUID, status TaskStatus, result TaskResult) error {
+			assert.Equal(t, taskID, id)
+			assert.Equal(t, TaskEnded, status)
+			assert.Equal(t, TaskResultTerminated, result)
+			return nil
+		},
+	}
+	subRepo := &svcMockSubTaskRepo{
+		listByTaskIDFn: func(_ context.Context, id uuid.UUID, filter SubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
+			assert.Equal(t, taskID, id)
+			assert.Equal(t, 1, filter.Page)
+			return model.NewListResponse([]UpgradeSubTaskWithTaskName{
+				{UpgradeSubTask: UpgradeSubTask{ID: pendingID, TaskID: taskID, Status: UpgradePending}},
+				{UpgradeSubTask: UpgradeSubTask{ID: downloadingID, TaskID: taskID, Status: UpgradeDownloading}},
+				{UpgradeSubTask: UpgradeSubTask{ID: completedID, TaskID: taskID, Status: UpgradeCompleted}},
+			}, 3, 1, 100), nil
+		},
+		updateStatusFn: func(_ context.Context, id uuid.UUID, status UpgradeState, msg string) error {
+			updated[id] = status
+			assert.Equal(t, "task terminated by operator", msg)
+			return nil
+		},
+	}
+
+	svc := NewSoftwareService(
+		&svcMockFirmwareRepo{}, taskRepo, subRepo,
+		&svcMockDeviceRepo{}, &svcMockCmdQueue{},
+		nil, nil, "test-bucket",
+		&svcMockEventBus{}, nil, zap.NewNop(),
+	)
+
+	require.NoError(t, svc.TerminateUpgrade(context.Background(), taskID))
+	assert.Equal(t, map[uuid.UUID]UpgradeState{
+		pendingID:     UpgradeTerminated,
+		downloadingID: UpgradeTerminated,
+	}, updated)
+	assert.NotContains(t, updated, completedID)
 }
 
 // TestIsValidRollbackSource sanity-checks the enum guard used by RollbackDevices.

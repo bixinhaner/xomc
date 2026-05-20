@@ -5,11 +5,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
+	"github.com/omcgo/omcgo/internal/device"
 )
 
 // Handler provides HTTP handlers for backup management REST API.
@@ -19,7 +21,13 @@ type Handler struct {
 	policyService  *PolicyService       // T-0071; nil-safe (UpdatePolicy/GetPolicy return 503 if unset)
 	restoreService *RestoreService      // T-0072; nil-safe (restore endpoints return 503 if unset)
 	ftpTester      *FTPConnectionTester // T-0032; nil-safe (TestFTPConnection returns stub when unset)
-	logger         *zap.Logger
+	// M4: ExportFile presigned URL support
+	fileRepo    FileRepository // nil-safe (ExportFile returns 503 if unset)
+	minioClient *minio.Client  // nil-safe (ExportFile returns 503 if unset)
+	// M4: device repo used by QueryCellInfos / QueryTaskDeviceList / GetProductType.
+	// nil-safe (those endpoints return 503 if unset).
+	deviceReader device.DeviceReader
+	logger       *zap.Logger
 }
 
 // NewHandler creates a new backup Handler.
@@ -44,6 +52,25 @@ func (h *Handler) SetPolicyService(s *PolicyService) {
 // instead of running a real probe.
 func (h *Handler) SetFTPTester(t *FTPConnectionTester) {
 	h.ftpTester = t
+}
+
+// SetFileRepository wires the BackupRestoreFile metadata repo used by
+// ExportFile (M4). When nil, ExportFile returns 503.
+func (h *Handler) SetFileRepository(r FileRepository) {
+	h.fileRepo = r
+}
+
+// SetMinioClient wires the MinIO client used to generate presigned GET URLs
+// in ExportFile (M4). When nil, ExportFile returns 503.
+func (h *Handler) SetMinioClient(c *minio.Client) {
+	h.minioClient = c
+}
+
+// SetDeviceReader wires the device repository used by M4 device-facing
+// endpoints (QueryCellInfos / QueryTaskDeviceList / GetProductType).
+// When nil, those endpoints return 503.
+func (h *Handler) SetDeviceReader(r device.DeviceReader) {
+	h.deviceReader = r
 }
 
 // RegisterRoutes registers backup routes on the given router group.
@@ -85,6 +112,18 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	restore.POST("/restore/by-task-id", h.CreateRestoreByTaskID)
 	restore.GET("/restore-tasks", h.ListRestoreTasks)
 	restore.GET("/restore-tasks/:id", h.GetRestoreTask)
+
+	// M4: 运营商规范 API 别名 — /task/enb/config/backupRestore/*
+	// 保留 /api/v1/backup/* 原路由，此处仅增加别名前缀，不修改处理逻辑。
+	alias := rg.Group("/task/enb/config/backupRestore")
+	alias.POST("/addBackupRestoreTask", h.CreateTask)
+	alias.POST("/queryTaskList", h.ListTasksAlias)
+	alias.POST("/terminateTask", h.TerminateTask)
+	alias.POST("/single/importFile", h.CreateRestore)
+	alias.GET("/single/exportFile", h.ExportFile)
+	alias.POST("/queryCellInfos", h.QueryCellInfos)
+	alias.POST("/queryTaskDeviceList", h.QueryTaskDeviceList)
+	alias.GET("/getProductType", h.GetProductType)
 }
 
 // ---- Task request types ----

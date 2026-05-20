@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
@@ -55,6 +56,12 @@ func (m *mockRestoreRepo) UpdateErrorMessage(_ context.Context, id uuid.UUID, ms
 		}
 	}
 	return commonerrors.ErrNotFound
+}
+func (m *mockRestoreRepo) FindByIDPrefix(_ context.Context, _ string, _ int) ([]*RestoreTask, error) {
+	return nil, nil
+}
+func (m *mockRestoreRepo) MarkComplete(_ context.Context, _ uuid.UUID, _ RestoreStatus, _ int16, _ time.Time, _ string) error {
+	return nil
 }
 
 // fakeDeviceLookup satisfies the DeviceLookup interface restored to the

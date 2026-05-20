@@ -4315,6 +4315,11 @@ const messages: Record<string, string> = {
   // T-0078 backup restore (RestoreData page)
   'backup.restore.title':                      'Data Restore',
   'backup.restore.create':                     'Create Restore',
+  'backup.restore.mode':                       'Restore Mode',
+  'backup.restore.modePath':                   'Restore by Path',
+  'backup.restore.modeTask':                  'Restore by Backup Task',
+  'backup.restore.backupTaskId':               'Backup Task ID',
+  'backup.restore.backupTaskIdHint':           'Enter backup_tasks.id; the backend resolves the matching file_path automatically',
   'backup.restore.bucket':                     'MinIO Bucket',
   'backup.restore.bucketHint':                 'Only "config_backup" is allowed (backend rejects other buckets)',
   'backup.restore.objectPath':                 'Object Path',

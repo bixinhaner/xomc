@@ -295,14 +295,16 @@ func (h *Handler) currentSettings(ctx context.Context) transfercfg.UploadSetting
 }
 
 // normalizeFileType converts the fileType query parameter to a tr069.FileType.
-// Handles both numeric codes ("4") and text aliases ("PM").
+// Handles both numeric codes ("4") and text aliases ("PM", "CONFIGBACKUP_XML", etc.).
 func normalizeFileType(raw string) tr069.FileType {
 	switch strings.ToUpper(strings.TrimSpace(raw)) {
 	case "1":
 		return tr069.FileTypeFirmware
 	case "2":
 		return tr069.FileTypePatch
-	case "3":
+	case "3", "CONFIGBACKUP_XML", "CONFIGBACKUP_NV":
+		// CONFIGBACKUP_XML / CONFIGBACKUP_NV 均为配置备份，路由到 config_backup bucket。
+		// 区别仅在于 CPE 侧的文件格式（XML vs NV）；从 ACS 视角两者都是配置文件。
 		return tr069.FileTypeConfig
 	case "4", "PM":
 		return tr069.FileTypePM

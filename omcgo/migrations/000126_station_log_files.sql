@@ -3,7 +3,7 @@
 
 -- 运行日志采集文件表（file_type="6"）
 -- 存储设备主动上传的运行日志元数据，与故障日志分表存储，便于独立扩展和清理。
-CREATE TABLE station_running_logs (
+CREATE TABLE IF NOT EXISTS station_running_logs (
     id           UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
     device_id    UUID,                                   -- 逻辑引用 devices(id)，分区表不支持 FK
     device_sn    TEXT        NOT NULL,
@@ -18,15 +18,15 @@ CREATE TABLE station_running_logs (
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_station_running_logs_device_id  ON station_running_logs(device_id);
-CREATE INDEX idx_station_running_logs_device_sn  ON station_running_logs(device_sn);
-CREATE INDEX idx_station_running_logs_active     ON station_running_logs(collected_at DESC)
+CREATE INDEX IF NOT EXISTS idx_station_running_logs_device_id  ON station_running_logs(device_id);
+CREATE INDEX IF NOT EXISTS idx_station_running_logs_device_sn  ON station_running_logs(device_sn);
+CREATE INDEX IF NOT EXISTS idx_station_running_logs_active     ON station_running_logs(collected_at DESC)
     WHERE is_deleted = FALSE;
 
 -- 故障日志采集文件表（file_type="8"/"RL"，即异常重启日志）
 -- 数据量相对较大（每次异常重启均触发上传），独立建表便于单独配额管理和清理。
 -- 全局最多保留 20 条（FaultLogMaxCount），超出时自动删除最旧文件。
-CREATE TABLE station_fault_logs (
+CREATE TABLE IF NOT EXISTS station_fault_logs (
     id           UUID        NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
     device_id    UUID,                                   -- 逻辑引用 devices(id)，分区表不支持 FK
     device_sn    TEXT        NOT NULL,
@@ -43,9 +43,9 @@ CREATE TABLE station_fault_logs (
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_station_fault_logs_device_id  ON station_fault_logs(device_id);
-CREATE INDEX idx_station_fault_logs_device_sn  ON station_fault_logs(device_sn);
-CREATE INDEX idx_station_fault_logs_active     ON station_fault_logs(collected_at DESC)
+CREATE INDEX IF NOT EXISTS idx_station_fault_logs_device_id  ON station_fault_logs(device_id);
+CREATE INDEX IF NOT EXISTS idx_station_fault_logs_device_sn  ON station_fault_logs(device_sn);
+CREATE INDEX IF NOT EXISTS idx_station_fault_logs_active     ON station_fault_logs(collected_at DESC)
     WHERE is_deleted = FALSE;
 
 -- +goose StatementEnd

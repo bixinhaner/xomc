@@ -346,6 +346,13 @@ const (
 	// 后写回 backup_tasks.file_path，建立 task↔path 链路供 restore_by_task_id
 	// 模式使用）。Payload 见 backup.BackupFileReceivedPayload。
 	SubjectBackupFileReceived = "backup.file.received"
+
+	// SubjectBackupScheduleChanged 在 backup_schedules 表发生 CRUD 后发布
+	// （backup-restore-alignment-plan M3 reload 通道）。
+	// 发布者：backup.Service.{Create,Update,Delete}Schedule（app 进程）
+	// 订阅者：backup.PeriodScheduler.Reload（worker 进程）—— 跨进程热更新 cron。
+	// Payload 为空（接收方只需重新拉表）。
+	SubjectBackupScheduleChanged = "backup.schedule.changed"
 )
 
 // Station log events

@@ -59,6 +59,9 @@ func (m *fakePrefixRepo) FindByIDPrefix(_ context.Context, prefix string, _ int)
 	}
 	return m.byPrefix[prefix], nil
 }
+func (m *fakePrefixRepo) MarkComplete(_ context.Context, _ uuid.UUID, _ TaskStatus, _ int16, _ time.Time, _ string) error {
+	return nil
+}
 
 func newRecorder(t *testing.T, repo *fakePrefixRepo) *FilePathRecorder {
 	t.Helper()
@@ -80,12 +83,12 @@ func TestHandleFileReceived_recorded(t *testing.T) {
 	rec := newRecorder(t, repo)
 
 	err := rec.handleFileReceived(context.Background(), makeEvent(t, map[string]interface{}{
-		"bucket":                 "config_backup",
-		"object_path":            "backup/2026/04/29/backup-abcdef12-SN001.xml.gz",
-		"filename":               "backup-abcdef12-SN001.xml.gz",
-		"backup_task_id_prefix":  "abcdef12",
-		"device_sn":              "SN001",
-		"file_size":              int64(2048),
+		"bucket":                "config_backup",
+		"object_path":           "backup/2026/04/29/backup-abcdef12-SN001.xml.gz",
+		"filename":              "backup-abcdef12-SN001.xml.gz",
+		"backup_task_id_prefix": "abcdef12",
+		"device_sn":             "SN001",
+		"file_size":             int64(2048),
 	}))
 	require.NoError(t, err)
 	require.Len(t, repo.updateCalls, 1)

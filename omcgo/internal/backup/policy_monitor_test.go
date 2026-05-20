@@ -48,6 +48,9 @@ func (m *monTaskRepo) UpdateFilePath(_ context.Context, _ uuid.UUID, _ string) e
 func (m *monTaskRepo) FindByIDPrefix(_ context.Context, _ string, _ int) ([]*BackupTask, error) {
 	return nil, nil
 }
+func (m *monTaskRepo) MarkComplete(_ context.Context, _ uuid.UUID, _ TaskStatus, _ int16, _ time.Time, _ string) error {
+	return nil
+}
 
 // monPolicyRepo lets tests dictate what BackupPolicy the monitor sees.
 type monPolicyRepo struct {

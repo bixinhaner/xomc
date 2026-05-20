@@ -316,6 +316,35 @@ func (r *PgTaskRepository) UpdateFilePath(ctx context.Context, id uuid.UUID, fil
 	return fmt.Errorf("backup_task %s: %w", id, commonerrors.ErrNotFound)
 }
 
+// MarkComplete — see TaskRepository.MarkComplete. Writes terminal status +
+// task_result + completed_at on backup_tasks. Idempotent. errMsg only on
+// failure path. (M2 of backup-restore-alignment-plan.)
+func (r *PgTaskRepository) MarkComplete(
+	ctx context.Context, id uuid.UUID, status TaskStatus, result int16, completedAt time.Time, errMsg string,
+) error {
+	upd := storage.Psql.Update("backup_tasks").
+		Set("status", status).
+		Set("task_result", result).
+		Set("completed_at", completedAt).
+		Set("progress", 100).
+		Where(sq.Eq{"id": id})
+	if status == TaskFailed && errMsg != "" {
+		upd = upd.Set("error_message", errMsg)
+	}
+	query, args, err := upd.ToSql()
+	if err != nil {
+		return fmt.Errorf("build mark backup_task complete SQL: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("mark backup_task complete: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("backup_task %s: %w", id, commonerrors.ErrNotFound)
+	}
+	return nil
+}
+
 // FindByIDPrefix returns up to `limit` backup_tasks whose UUID (without
 // dashes) starts with the given hex prefix. Used by FilePathRecorder to map
 // the {taskID8} prefix in an upload filename back to the originating task
@@ -388,6 +417,44 @@ func (r *PgTaskRepository) ListAllTaskIDPrefixes(ctx context.Context) (map[strin
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate backup_task id prefixes: %w", err)
+	}
+	return out, nil
+}
+
+// ListPendingOlderThan returns up to limit backup_tasks in "pending" status
+// with created_at < olderThan, ordered by created_at ASC. Used by TaskReaper
+// to re-publish SubjectBackupTaskCreated for event-loss recovery (M3 of
+// backup-restore-alignment-plan).
+func (r *PgTaskRepository) ListPendingOlderThan(ctx context.Context, olderThan time.Time, limit int) ([]*BackupTask, error) {
+	if limit < 1 {
+		limit = 1
+	}
+	q := storage.Psql.Select(taskColumns...).
+		From("backup_tasks").
+		Where(sq.Eq{"status": TaskPending}).
+		Where(sq.Lt{"created_at": olderThan}).
+		OrderBy("created_at ASC").
+		Limit(uint64(limit))
+	sqlStr, args, err := q.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list pending backup_tasks SQL: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query pending backup_tasks: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*BackupTask
+	for rows.Next() {
+		t, scanErr := scanTaskRow(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan pending backup_task: %w", scanErr)
+		}
+		out = append(out, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate pending backup_tasks: %w", err)
 	}
 	return out, nil
 }
@@ -598,6 +665,38 @@ func (r *PgScheduleRepository) List(ctx context.Context, filter ScheduleFilter) 
 	}
 
 	return model.NewListResponse(items, total, filter.Page, filter.PageSize), nil
+}
+
+// ListEnabled returns all enabled backup schedules ordered by created_at ASC.
+// Used by PeriodScheduler on startup and after Reload to register cron jobs
+// (M3 of backup-restore-alignment-plan).
+func (r *PgScheduleRepository) ListEnabled(ctx context.Context) ([]*BackupSchedule, error) {
+	q := storage.Psql.Select(scheduleColumns...).
+		From("backup_schedules").
+		Where(sq.Eq{"enabled": true}).
+		OrderBy("created_at ASC")
+	sqlStr, args, err := q.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list enabled backup_schedules SQL: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query enabled backup_schedules: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*BackupSchedule
+	for rows.Next() {
+		s, scanErr := scanScheduleRow(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan backup_schedule: %w", scanErr)
+		}
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate enabled backup_schedules: %w", err)
+	}
+	return out, nil
 }
 
 // ---- schedule scanning helpers ----

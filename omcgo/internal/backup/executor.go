@@ -11,9 +11,11 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/device"
 	devtask "github.com/omcgo/omcgo/internal/task"
+	"github.com/omcgo/omcgo/internal/ufte"
 )
 
 // taskIDPrefix returns the first 8 hex characters of a backup_task UUID with
@@ -25,6 +27,68 @@ func taskIDPrefix(id uuid.UUID) string {
 	return strings.ReplaceAll(id.String(), "-", "")[:8]
 }
 
+// BackupTypeSpec 是配置备份类型的路由表条目。
+// 仅保存"选哪个 UFTE 模板"所需的路由信息（TypeCode + ProductClass 前缀）和
+// URL/文件命名辅助参数。
+// TR-069 FileType 字符串来自 ufte.BuiltInTaskType(TypeCode).FileType，
+// 在执行时用设备 OUI 替换占位符 {OUI}，不在此处硬编码。
+type BackupTypeSpec struct {
+	TypeCode             string   // 对应 UFTE TypeCode，如 "CONFIG_BACKUP_XML"
+	URLFileTypeParam     string   // 上传 URL fileType= 参数值，供 upload handler 路由到正确 bucket
+	FileExtension        string   // 目标文件扩展名，如 ".xml" 或 ".nv"
+	ProductClassPrefixes []string // 匹配设备 ProductClass 的前缀列表；nil 表示兜底默认类型
+}
+
+// backupTypeSpecs 是配置备份类型路由表，按匹配优先级排列。
+// 仅负责 ProductClass → UFTE TypeCode 的映射；
+// TR-069 FileType 值从 ufte.BuiltInTaskType(TypeCode).FileType 读取，
+// 以 ufte/model.go 内置模板定义为唯一数据源，此处不重复维护。
+var backupTypeSpecs = []BackupTypeSpec{
+	{
+		TypeCode:             "CONFIG_BACKUP_NV",
+		URLFileTypeParam:     "CONFIGBACKUP_NV",
+		FileExtension:        ".nv",
+		ProductClassPrefixes: []string{"FAP/MLQ", "FAP/MLN_SC"},
+	},
+	{
+		TypeCode:         "CONFIG_BACKUP_XML",
+		URLFileTypeParam: "CONFIGBACKUP_XML",
+		FileExtension:    ".xml",
+		// nil ProductClassPrefixes = 兜底，覆盖所有其他平台
+	},
+}
+
+// selectBackupType 根据设备 ProductClass 选择对应的备份类型规格。
+// 按注册顺序匹配前缀；始终返回非 nil（兜底为 CONFIG_BACKUP_XML）。
+func selectBackupType(productClass string) *BackupTypeSpec {
+	for i := range backupTypeSpecs {
+		spec := &backupTypeSpecs[i]
+		if len(spec.ProductClassPrefixes) == 0 {
+			return spec // 兜底类型
+		}
+		for _, prefix := range spec.ProductClassPrefixes {
+			if strings.HasPrefix(productClass, prefix) {
+				return spec
+			}
+		}
+	}
+	return &backupTypeSpecs[len(backupTypeSpecs)-1]
+}
+
+// buildBackupUploadURL 根据上传配置（来自 transfercfg.Policy / sys_configs）、备份类型规格、
+// 设备 SN、任务 ID 和文件名构造 ACS 上传 URL。
+// URL 中的 fileType 参数来自 spec.URLFileTypeParam（如 CONFIGBACKUP_XML / CONFIGBACKUP_NV），
+// upload handler 通过该参数路由到 config_backup bucket。
+func buildBackupUploadURL(upload transfercfg.UploadSettings, spec *BackupTypeSpec, sn, taskID, filename string) string {
+	baseURL := strings.TrimRight(upload.BaseURL, "/")
+	path := upload.Path
+	if path == "" {
+		path = "/smallcell/FileUploadService"
+	}
+	return fmt.Sprintf("%s%s?fileType=%s&sn=%s&taskId=%s&filename=%s",
+		baseURL, path, spec.URLFileTypeParam, sn, taskID, filename)
+}
+
 // BackupExecutor subscribes to backup.task.created events and executes
 // backup tasks by pushing Upload commands to the unified device task queue.
 //
@@ -33,14 +97,15 @@ func taskIDPrefix(id uuid.UUID) string {
 // active BackupPolicy.AlertOnFailure flag. Both fields are optional (nil-safe)
 // to keep the constructor signature backward-compatible.
 type BackupExecutor struct {
-	taskRepo      TaskRepository
-	deviceRepo    device.DeviceRepository
-	taskSvc       devtask.Enqueuer
-	connReq       *connreq.Client
-	eventBus      event.EventBus
-	policyService PolicyGetter   // optional (T-0073)
-	metrics       *PolicyMetrics // optional (T-0073)
-	logger        *zap.Logger
+	taskRepo         TaskRepository
+	deviceRepo       device.DeviceRepository
+	taskSvc          devtask.Enqueuer
+	connReq          *connreq.Client
+	eventBus         event.EventBus
+	transferProvider transfercfg.Provider // ACS 上传配置（来自 sys_configs acs_transfer，UI 可配置）
+	policyService    PolicyGetter         // optional (T-0073)
+	metrics          *PolicyMetrics       // optional (T-0073)
+	logger           *zap.Logger
 }
 
 // NewBackupExecutor creates a new BackupExecutor.
@@ -60,6 +125,13 @@ func NewBackupExecutor(
 		eventBus:   eventBus,
 		logger:     logger.Named("backup-executor"),
 	}
+}
+
+// SetTransferProvider 注入 transfercfg.Provider，用于运行时读取 ACS 上传配置。
+// 配置来源为 sys_configs.category='acs_transfer'（界面「系统管理 → ACS 传输」），
+// 支持运行时修改无需重启。须在 Subscribe 前调用；未注入时 URL 为空。
+func (e *BackupExecutor) SetTransferProvider(p transfercfg.Provider) {
+	e.transferProvider = p
 }
 
 // SetPolicyEnforcement wires PolicyService + metrics post-construction so the
@@ -141,40 +213,74 @@ func (e *BackupExecutor) handleTaskCreated(ctx context.Context, evt event.Event)
 			continue
 		}
 
-		// Build Upload command. TR-069 FileType "3" = Vendor Configuration File
-		// (the canonical type for backup) — see pkg/tr069.FileTypeConfig.
-		// Historical bug fix (T-0074): previously sent "2" (Patch), causing the
-		// file to land in the firmware/patch bucket instead of config_backup.
+		// Build Upload command. TR-069 Upload RPC 需要：
+		// - FileType：厂商扩展格式，XML 平台 "10 {OUI} Configuration File"，
+		//             NV 平台（MLQ/MLN_SC 等）"12 {OUI} Configuration File"。
+		// - URL：CPE 上传目标，格式
+		//   {baseURL}{path}?fileType=CONFIGBACKUP_XML|CONFIGBACKUP_NV&sn={sn}&taskId={taskID}&filename={file}
+		//   upload handler 通过 fileType query 参数路由到 config_backup bucket。
 		//
-		// T-0079: target_file_name embeds the backup_task UUID prefix so the
-		// upload handler can route the MinIO object back to this task via the
-		// `backup.file.received` event subscriber. Pattern:
-		//   backup-{taskID8}-{deviceSN}.xml
-		// CommandKey + SourceID also link back so TransferComplete consumers
-		// can correlate without parsing filenames.
+		// T-0079: 文件名嵌入 backup_task UUID prefix，上传 handler 通过
+		// `backup.file.received` 事件将 MinIO 对象路由回对应任务。
+		// CommandKey + SourceID 也可用于 TransferComplete 回调定位。
 		idPrefix := taskIDPrefix(task.ID)
-		targetFilename := fmt.Sprintf("backup-%s-%s.xml", idPrefix, dev.SerialNumber)
-		paramsJSON, marshalErr := json.Marshal(map[string]interface{}{
-			"file_type":        "3",
-			"target_file_name": targetFilename,
-		})
+		spec := selectBackupType(dev.ProductClass)
+		targetFilename := fmt.Sprintf("backup-%s-%s%s", idPrefix, dev.SerialNumber, spec.FileExtension)
+
+		// 从 transfercfg.Provider 获取当前上传配置（sys_configs 动态值，UI 可配置）。
+		var uploadSettings transfercfg.UploadSettings
+		if e.transferProvider != nil {
+			uploadSettings = e.transferProvider.Snapshot(ctx).Upload
+		}
+		uploadURL := buildBackupUploadURL(uploadSettings, spec, dev.SerialNumber, task.ID.String(), targetFilename)
+
+		// TR-069 Upload FileType 来自 UFTE 内置模板（ufte/model.go 为唯一数据源），
+		// 运行时将模板中的 {OUI} 占位符替换为设备实际 OUI。
+		var fileType string
+		if tt, ok := ufte.BuiltInTaskType(spec.TypeCode); ok {
+			fileType = strings.ReplaceAll(tt.FileType, "{OUI}", dev.OUI)
+		} else {
+			// 不应命中：内置模板缺失时降级，避免下发空 FileType
+			e.logger.Warn("ufte built-in type not found, using fallback file_type",
+				zap.String("type_code", spec.TypeCode))
+			fileType = fmt.Sprintf("10 %s Configuration File", dev.OUI)
+		}
+
+		params := map[string]interface{}{
+			"file_type": fileType,
+			"url":       uploadURL,
+		}
+		if uploadSettings.Username != "" {
+			params["username"] = uploadSettings.Username
+			params["password"] = uploadSettings.Password
+		}
+		paramsJSON, marshalErr := json.Marshal(params)
 		if marshalErr != nil {
 			e.logger.Warn("marshal upload params", zap.String("device_sn", targetSN), zap.Error(marshalErr))
 			continue
 		}
 		if _, err := e.taskSvc.CreateTask(ctx, &devtask.CreateTaskRequest{
-			DeviceSN:   dev.SerialNumber,
-			Method:     "Upload",
-			Params:     paramsJSON,
-			Source:     devtask.TaskSourceSystem,
-			SourceID:   task.ID.String(),
-			CommandKey: "backup-" + idPrefix,
+			DeviceSN: dev.SerialNumber,
+			Method:   "Upload",
+			Params:   paramsJSON,
+			Source:   devtask.TaskSourceSystem,
+			SourceID: task.ID.String(),
+			// M2 of backup-restore-alignment-plan: 规范要求 CommandKey 格式
+			// 为 `{cellCode}_BACKUP`；为支持 TransferComplete 回写定位任务行，
+			// 实际写为 `{cellCode}_BACKUP_{taskID8}`。device.SiteID 作为 cellCode
+			// 兜底（无 site 时使用 SN）。
+			CommandKey: BuildBackupCommandKey(dev.SiteID, dev.SerialNumber, task.ID.String()),
 		}); err != nil {
 			e.logger.Warn("push upload command",
 				zap.String("device_sn", dev.SerialNumber),
 				zap.Error(err))
 			continue
 		}
+		e.logger.Info("backup upload command queued",
+			zap.String("device_sn", dev.SerialNumber),
+			zap.String("file_type", fileType),
+			zap.String("backup_type", spec.TypeCode),
+			zap.String("upload_url", uploadURL))
 
 		// Wake device via Connection Request
 		if dev.ConnectionRequestURL != "" {

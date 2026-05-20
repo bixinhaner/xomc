@@ -345,25 +345,48 @@ func builtInTaskTypes() []TaskType {
 			softwareTaskType:       software.TaskTypeLogCollect,
 		},
 		{
-			TypeCode:               "CONFIG_BACKUP",
+			TypeCode:               "CONFIG_BACKUP_XML",
 			Category:               "config_backup",
 			CategoryLabel:          "配置文件备份",
-			DisplayName:            "配置文件备份",
-			Description:            "复用现网配置备份 Upload 链路，提供 UFTE 内置的配置文件备份模板。",
+			DisplayName:            "配置文件备份（XML）",
+			Description:            "标准平台（BLQ/QLS 等）配置文件备份，TR-069 Upload FileType=10 {OUI} Configuration File。",
 			RPCType:                "UPLOAD",
 			BuiltIn:                true,
 			Enabled:                true,
 			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"},
 			PermissionCode:         "CODE_CONFIG_BACKUP",
 			PlatformScope:          []string{"4G eNB", "5G gNB", "QAFA", "QAFB", "BBU-XSS", "BBU-QSS"},
-			FileType:               "3",
-			FileTypeLabel:          "Vendor Configuration File",
+			FileType:               "10 {OUI} Configuration File",
+			FileTypeLabel:          "10 {OUI} Configuration File",
 			FileTypeEditable:       false,
 			TargetFileNameTemplate: "backup-{task_id8}-{sn}.xml",
 			FileNameTemplate:       "backup-{task_id8}-{sn}.xml",
-			TransportPath:          "/smallcell/FileUploadService?fileType={fileType}&filename={targetFileName}",
+			TransportPath:          "/smallcell/FileUploadService?fileType=CONFIGBACKUP_XML&sn={sn}&taskId={taskId}&filename={targetFileName}",
 			LastEditor:             "system",
 			UpdatedAt:              now,
+			softwareTaskType:       software.TaskTypeLogCollect,
+		},
+		{
+			TypeCode:               "CONFIG_BACKUP_NV",
+			Category:               "config_backup",
+			CategoryLabel:          "配置文件备份",
+			DisplayName:            "配置文件备份（NV）",
+			Description:            "NV 平台（MLQ/MLN_SC 等）配置文件备份，TR-069 Upload FileType=12 {OUI} Configuration File。",
+			RPCType:                "UPLOAD",
+			BuiltIn:                true,
+			Enabled:                true,
+			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"},
+			PermissionCode:         "CODE_CONFIG_BACKUP",
+			PlatformScope:          []string{"MLQ", "MLN_SC"},
+			FileType:               "12 {OUI} Configuration File",
+			FileTypeLabel:          "12 {OUI} Configuration File",
+			FileTypeEditable:       false,
+			TargetFileNameTemplate: "backup-{task_id8}-{sn}.nv",
+			FileNameTemplate:       "backup-{task_id8}-{sn}.nv",
+			TransportPath:          "/smallcell/FileUploadService?fileType=CONFIGBACKUP_NV&sn={sn}&taskId={taskId}&filename={targetFileName}",
+			LastEditor:             "system",
+			UpdatedAt:              now,
+			softwareTaskType:       software.TaskTypeLogCollect,
 		},
 		{
 			TypeCode:               "CONFIG_RESTORE",
@@ -399,17 +422,44 @@ func findTaskTypeByCode(catalog []TaskType, typeCode string) (TaskType, bool) {
 	return TaskType{}, false
 }
 
-func resolveTaskType(catalog []TaskType, taskType software.TaskType, productClass string) (TaskType, bool) {
+// BuiltInTaskType returns the built-in task type definition for the given type code.
+// Callers (e.g. backup.BackupExecutor) use this to read fields such as FileType
+// from the canonical template definition, avoiding duplication.
+// Returns nil, false if the type code is not found in the built-in catalog.
+func BuiltInTaskType(typeCode string) (*TaskType, bool) {
+	tt, ok := findTaskTypeByCode(builtInTaskTypes(), typeCode)
+	if !ok {
+		return nil, false
+	}
+	return &tt, true
+}
+
+func resolveTaskType(catalog []TaskType, taskType software.TaskType, productClass string, fileType string) (TaskType, bool) {
+	// When multiple catalog entries share the same softwareTaskType (e.g.
+	// RUNTIME_LOG_COLLECT, CONFIG_BACKUP_XML, CONFIG_BACKUP_NV, CONFIG_RESTORE
+	// all use TaskTypeLogCollect=10), disambiguate by matching the FileType
+	// stored on the upgrade_task row against each catalog entry's FileType.
+	var fallback TaskType
+	foundFallback := false
 	for _, item := range catalog {
 		if item.softwareTaskType != taskType {
 			continue
 		}
-		if item.techHint == nil {
+		if fileType != "" && item.FileType != "" && fileType == item.FileType {
 			return item, true
 		}
-		if matchesTaskTypeScope(item, productClass) {
-			return item, true
+		if !foundFallback {
+			if item.techHint == nil {
+				fallback = item
+				foundFallback = true
+			} else if matchesTaskTypeScope(item, productClass) {
+				fallback = item
+				foundFallback = true
+			}
 		}
+	}
+	if foundFallback {
+		return fallback, true
 	}
 	if taskType == software.TaskTypeUpgrade {
 		return findTaskTypeByCode(catalog, "ENB_IMG_UPGRADE")

@@ -101,7 +101,8 @@ func TestBuiltInTaskTypes_CoversRequiredTemplates(t *testing.T) {
 		"VERSION_ROLLBACK":    {},
 		"RUNTIME_LOG_COLLECT": {},
 		"FAULT_LOG_COLLECT":   {},
-		"CONFIG_BACKUP":       {},
+		"CONFIG_BACKUP_XML":   {},
+			"CONFIG_BACKUP_NV":    {},
 		"CONFIG_RESTORE":      {},
 	}
 
@@ -119,7 +120,7 @@ func TestBuiltInTaskTypes_CoversRequiredTemplates(t *testing.T) {
 	}
 
 	assert.Equal(t, "station_log", seen["RUNTIME_LOG_COLLECT"].Category)
-	assert.Equal(t, "config_backup", seen["CONFIG_BACKUP"].Category)
+	assert.Equal(t, "config_backup", seen["CONFIG_BACKUP_XML"].Category)
 	assert.Equal(t, "config_restore", seen["CONFIG_RESTORE"].Category)
 	assert.Equal(t, "1 Firmware Upgrade Image", seen["ENB_IMG_UPGRADE"].FileType)
 	assert.Equal(t, "X {OUI} Software Upgrade Patch", seen["ENB_PATCH_UPGRADE"].FileType)

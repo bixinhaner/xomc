@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/admin/audit"
 	"github.com/omcgo/omcgo/internal/alarm"
@@ -245,6 +246,20 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 		backupTaskRepo, deviceRepo, w.TaskService, connReqClient,
 		w.EventBus, logger,
 	)
+	// 从 sys_configs 读取 ACS 传输配置（界面「系统管理 → ACS 传输」可配置，运行时生效）。
+	// YAML 不再提供默认值，配置全部源自 DB。
+	sysConfigRepo := admin.NewPgSysConfigRepository(w.PgPool)
+	backupTransferPolicy := transfercfg.NewPolicy(
+		transfercfg.Snapshot{},
+		func(ctx context.Context, category, key string) (string, bool) {
+			cfg, err := sysConfigRepo.GetByKey(ctx, category, key)
+			if err != nil || cfg == nil {
+				return "", false
+			}
+			return cfg.Value, true
+		},
+	)
+	backupExecutor.SetTransferProvider(backupTransferPolicy)
 	// T-0073 Phase 1: opt-in backup-failure alarm publish via PolicyService.
 	// Worker shares the same backup_policies table as app; reads policy on each
 	// failure to honour latest AlertOnFailure flag.
@@ -321,6 +336,32 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 		logger.Warn("subscribe report generator", zap.Error(err))
 	}
 	logger.Info("report generator started")
+
+	// M2: TransferCompleteRouter — 订阅 device.inform.transfer_complete，按 CommandKey 回写 backup/restore_tasks 终态
+	restoreRepo := backup.NewPgRestoreTaskRepository(w.PgPool)
+	tcRouter := backup.NewTransferCompleteRouter(backupTaskRepo, restoreRepo, nil, logger)
+	if err := tcRouter.Subscribe(w.EventBus); err != nil {
+		logger.Warn("subscribe backup transfer-complete router", zap.Error(err))
+	}
+	logger.Info("backup transfer-complete router started")
+
+	// M3: 周期备份调度器 + 任务 reaper（event-loss 兜底恢复）
+	backupScheduleRepo := backup.NewPgScheduleRepository(w.PgPool)
+	backupService := backup.NewService(backupTaskRepo, backupScheduleRepo, w.EventBus, logger)
+	schedulerMetrics := backup.NewSchedulerMetrics(w.MetricsReg)
+	periodScheduler := backup.NewPeriodScheduler(backupScheduleRepo, backupService, schedulerMetrics, logger)
+	if err := periodScheduler.Start(context.Background()); err != nil {
+		logger.Warn("start backup period scheduler", zap.Error(err))
+	} else {
+		logger.Info("backup period scheduler started")
+	}
+	// Reload 通道：app 进程 schedule CRUD 后发布 SubjectBackupScheduleChanged
+	if err := periodScheduler.SubscribeReload(w.EventBus); err != nil {
+		logger.Warn("subscribe backup schedule reload", zap.Error(err))
+	}
+	taskReaper := backup.NewTaskReaper(backupTaskRepo, w.EventBus, schedulerMetrics, 0, 0, logger)
+	taskReaper.Start()
+	logger.Info("backup task reaper started")
 }
 
 func wireUnknownAlarmFallback(

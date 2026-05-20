@@ -5,6 +5,7 @@ import {
   Drawer,
   Form,
   Input,
+  Radio,
   Progress,
   Space,
   Tag,
@@ -23,6 +24,7 @@ import type { RestoreTask, RestoreStatus } from '@core/mock/data/backup';
 import {
   useBackupRestoreTasks,
   useCreateBackupRestore,
+  useCreateBackupRestoreByTaskID,
 } from '@core/hooks/api/useBackup';
 
 // T-0078: wholesale rewrite of the prior 1123-line mock page. The new page
@@ -40,6 +42,7 @@ const STATUS_TAG: Record<RestoreStatus, { color: string; key: string }> = {
 };
 
 interface RestoreFormValues {
+  backupTaskId: string;
   bucket: string;
   objectPath: string;
   targetDeviceSns: string;
@@ -64,6 +67,7 @@ export default function RestoreData() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [restoreMode, setRestoreMode] = useState<'path' | 'task'>('path');
   const [form] = Form.useForm<RestoreFormValues>();
 
   const { data, isLoading, refetch } = useBackupRestoreTasks({
@@ -71,6 +75,7 @@ export default function RestoreData() {
     pageSize,
   });
   const createMutation = useCreateBackupRestore();
+  const createByTaskIdMutation = useCreateBackupRestoreByTaskID();
 
   const items: RestoreTask[] = data?.items ?? [];
 
@@ -160,11 +165,18 @@ export default function RestoreData() {
       // SN list non-emptiness now enforced by the Form.Item validator below;
       // this guard is defense-in-depth in case validateFields is bypassed.
       if (sns.length === 0) return;
-      await createMutation.mutateAsync({
-        bucket: values.bucket,
-        objectPath: values.objectPath,
-        targetDeviceSns: sns,
-      });
+      if (restoreMode === 'task') {
+        await createByTaskIdMutation.mutateAsync({
+          backupTaskId: values.backupTaskId,
+          targetDeviceSns: sns,
+        });
+      } else {
+        await createMutation.mutateAsync({
+          bucket: values.bucket,
+          objectPath: values.objectPath,
+          targetDeviceSns: sns,
+        });
+      }
       message.success(t('backup.restore.submitSuccess'));
       setDrawerOpen(false);
       form.resetFields();
@@ -226,7 +238,10 @@ export default function RestoreData() {
         placement="right"
         width={520}
         open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
+        onClose={() => {
+          setDrawerOpen(false);
+          setRestoreMode('path');
+        }}
         destroyOnClose
         extra={
           <Space>
@@ -250,44 +265,73 @@ export default function RestoreData() {
           layout="vertical"
           initialValues={{ bucket: 'config_backup' }}
         >
-          <Form.Item
-            name="bucket"
-            label={t('backup.restore.bucket')}
-            extra={t('backup.restore.bucketHint')}
-            rules={[
-              { required: true },
-              {
-                pattern: /^config_backup$/,
-                message: t('backup.restore.bucketHint'),
-              },
-            ]}
-          >
-            <Input />
+          <Form.Item label={t('backup.restore.mode')}>
+            <Radio.Group
+              value={restoreMode}
+              onChange={(e) => {
+                setRestoreMode(e.target.value);
+                form.resetFields(['backupTaskId', 'bucket', 'objectPath']);
+                form.setFieldsValue({ bucket: 'config_backup', targetDeviceSns: '' });
+              }}
+            >
+              <Radio.Button value="path">{t('backup.restore.modePath')}</Radio.Button>
+              <Radio.Button value="task">{t('backup.restore.modeTask')}</Radio.Button>
+            </Radio.Group>
           </Form.Item>
 
-          <Form.Item
-            name="objectPath"
-            label={t('backup.restore.objectPath')}
-            extra={t('backup.restore.objectPathHint')}
-            rules={[
-              { required: true },
-              {
-                validator: (_, value: string) => {
-                  if (!value) return Promise.resolve();
-                  if (value.includes('..') || value.startsWith('/')) {
-                    return Promise.reject(
-                      new Error(t('backup.restore.pathTraversal'))
-                    );
-                  }
-                  return Promise.resolve();
-                },
-              },
-            ]}
-          >
-            <Input
-              placeholder={t('backup.restore.objectPathPlaceholder')}
-            />
-          </Form.Item>
+          {restoreMode === 'task' ? (
+            <Form.Item
+              name="backupTaskId"
+              label={t('backup.restore.backupTaskId')}
+              extra={t('backup.restore.backupTaskIdHint')}
+              rules={[{ required: true }]}
+            >
+              <Input />
+            </Form.Item>
+          ) : null}
+
+          {restoreMode === 'path' ? (
+            <>
+              <Form.Item
+                name="bucket"
+                label={t('backup.restore.bucket')}
+                extra={t('backup.restore.bucketHint')}
+                rules={[
+                  { required: true },
+                  {
+                    pattern: /^config_backup$/,
+                    message: t('backup.restore.bucketHint'),
+                  },
+                ]}
+              >
+                <Input />
+              </Form.Item>
+
+              <Form.Item
+                name="objectPath"
+                label={t('backup.restore.objectPath')}
+                extra={t('backup.restore.objectPathHint')}
+                rules={[
+                  { required: true },
+                  {
+                    validator: (_, value: string) => {
+                      if (!value) return Promise.resolve();
+                      if (value.includes('..') || value.startsWith('/')) {
+                        return Promise.reject(
+                          new Error(t('backup.restore.pathTraversal'))
+                        );
+                      }
+                      return Promise.resolve();
+                    },
+                  },
+                ]}
+              >
+                <Input
+                  placeholder={t('backup.restore.objectPathPlaceholder')}
+                />
+              </Form.Item>
+            </>
+          ) : null}
 
           <Form.Item
             name="targetDeviceSns"

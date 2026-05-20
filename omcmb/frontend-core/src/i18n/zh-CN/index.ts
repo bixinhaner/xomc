@@ -4340,6 +4340,11 @@ const messages: Record<string, string> = {
   // T-0078 备份恢复（数据恢复页面）
   'backup.restore.title':                      '数据恢复',
   'backup.restore.create':                     '创建恢复',
+  'backup.restore.mode':                       '恢复方式',
+  'backup.restore.modePath':                   '按路径恢复',
+  'backup.restore.modeTask':                  '按备份任务恢复',
+  'backup.restore.backupTaskId':               '备份任务 ID',
+  'backup.restore.backupTaskIdHint':           '填写 backup_tasks.id，后端会自动解析对应 file_path',
   'backup.restore.bucket':                     'MinIO Bucket',
   'backup.restore.bucketHint':                 '仅允许 config_backup（其他桶后端会拒绝）',
   'backup.restore.objectPath':                 '对象路径',

@@ -36,6 +36,7 @@ ALTER TABLE backup_tasks
 
 -- BIGSERIAL on an existing table won't auto-add UNIQUE; do it explicitly so
 -- task_seq behaves like the spec's int PK (mono-increasing, unique).
+-- +goose StatementBegin
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -47,6 +48,7 @@ BEGIN
         ALTER TABLE backup_tasks ADD CONSTRAINT backup_tasks_task_seq_key UNIQUE (task_seq);
     END IF;
 END$$;
+-- +goose StatementEnd
 
 CREATE INDEX IF NOT EXISTS idx_backup_tasks_operator_code ON backup_tasks(operator_code);
 CREATE INDEX IF NOT EXISTS idx_backup_tasks_create_user   ON backup_tasks(create_user);
@@ -62,6 +64,7 @@ ALTER TABLE restore_tasks
     ADD COLUMN IF NOT EXISTS operator_code VARCHAR(8),
     ADD COLUMN IF NOT EXISTS create_user   VARCHAR(64);
 
+-- +goose StatementBegin
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -73,6 +76,7 @@ BEGIN
         ALTER TABLE restore_tasks ADD CONSTRAINT restore_tasks_task_seq_key UNIQUE (task_seq);
     END IF;
 END$$;
+-- +goose StatementEnd
 
 CREATE INDEX IF NOT EXISTS idx_restore_tasks_operator_code ON restore_tasks(operator_code);
 CREATE INDEX IF NOT EXISTS idx_restore_tasks_create_user   ON restore_tasks(create_user);
@@ -109,6 +113,7 @@ CREATE INDEX IF NOT EXISTS idx_backup_restore_file_update_time   ON backup_resto
 -- =====================================================================
 -- Generated column keeps backend code untouched (still writes `enabled`)
 -- while spec-style queries can `SELECT is_enable FROM ...`.
+-- +goose StatementBegin
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -122,6 +127,14 @@ BEGIN
             GENERATED ALWAYS AS (CASE WHEN enabled THEN 1 ELSE 0 END) STORED;
     END IF;
 END$$;
+-- +goose StatementEnd
+
+-- =====================================================================
+-- 5. upgrade_tasks — allow TaskTypeLogCollect (10) for UFTE backup/collect
+-- =====================================================================
+ALTER TABLE upgrade_tasks DROP CONSTRAINT IF EXISTS chk_upgrade_tasks_task_type;
+ALTER TABLE upgrade_tasks ADD CONSTRAINT chk_upgrade_tasks_task_type
+    CHECK (task_type = ANY (ARRAY[1, 2, 4, 6, 8, 10]));
 
 -- +goose Down
 

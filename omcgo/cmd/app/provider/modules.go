@@ -338,6 +338,14 @@ func initBackupModule(c *Container) error {
 	// (port 990 style) handshake followed by FTP USER/PASS over TLS.
 	backupHandler.SetFTPTester(backup.NewFTPConnectionTester(nil, 0, logger))
 
+	// M4: ExportFile 依赖（按 SN 列文件 + 生成 MinIO presigned URL）
+	backupHandler.SetFileRepository(backup.NewPgFileRepository(c.PgPool))
+	if c.MinIO != nil {
+		backupHandler.SetMinioClient(c.MinIO)
+	}
+	// M4: device 相关端点（QueryCellInfos / QueryTaskDeviceList / GetProductType）
+	backupHandler.SetDeviceReader(c.DeviceRepo)
+
 	c.miscDeps.backupHandler = backupHandler
 
 	logger.Info("backup module initialized")

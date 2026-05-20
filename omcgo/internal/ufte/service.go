@@ -179,6 +179,27 @@ func (s *Service) UpdateTaskType(ctx context.Context, typeCode string, req TaskT
 }
 
 func (s *Service) StartTask(ctx context.Context, taskID uuid.UUID) error {
+	// For log-collect / config-backup tasks (Upload RPC), ResumeUpgrade can't
+	// resolve the transport path because it isn't stored on the task row.
+	// Look it up from the UFTE catalog and call ResumeCollect instead.
+	task, err := s.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("get task for start: %w", err)
+	}
+	if task.TaskType == software.TaskTypeLogCollect {
+		catalog, err := s.loadTaskTypeCatalog(ctx)
+		if err != nil {
+			return err
+		}
+		transportPath := ""
+		for _, tt := range catalog {
+			if tt.softwareTaskType == software.TaskTypeLogCollect && tt.FileType == task.DownloadFileType {
+				transportPath = tt.TransportPath
+				break
+			}
+		}
+		return s.softwareService.ResumeCollect(ctx, taskID, transportPath)
+	}
 	return s.softwareService.ResumeUpgrade(ctx, taskID)
 }
 
@@ -494,7 +515,7 @@ func (s *Service) loadAllSubTasks(ctx context.Context, catalog []TaskType, categ
 }
 
 func (s *Service) mapTask(catalog []TaskType, task *software.UpgradeTask) (*Task, error) {
-	typeDef, ok := resolveTaskType(catalog, task.TaskType, task.ProductClass)
+	typeDef, ok := resolveTaskType(catalog, task.TaskType, task.ProductClass, task.DownloadFileType)
 	if !ok {
 		return nil, fmt.Errorf("unsupported software task type %d", task.TaskType)
 	}
@@ -534,7 +555,7 @@ func (s *Service) mapDeviceItem(
 	parent *software.UpgradeTask,
 	deviceCache map[uuid.UUID]*coremodel.Device,
 ) (*DeviceItem, error) {
-	typeDef, ok := resolveTaskType(catalog, parent.TaskType, parent.ProductClass)
+	typeDef, ok := resolveTaskType(catalog, parent.TaskType, parent.ProductClass, parent.DownloadFileType)
 	if !ok {
 		return nil, fmt.Errorf("unsupported software task type %d", parent.TaskType)
 	}
@@ -722,7 +743,7 @@ func (s *Service) buildTaskTypeStats(ctx context.Context, catalog []TaskType) (m
 		if createdAt.Before(cutoff) {
 			continue
 		}
-		typeDef, ok := resolveTaskType(catalog, task.TaskType, task.ProductClass)
+		typeDef, ok := resolveTaskType(catalog, task.TaskType, task.ProductClass, task.DownloadFileType)
 		if !ok {
 			continue
 		}

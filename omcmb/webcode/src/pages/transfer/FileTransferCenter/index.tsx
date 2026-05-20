@@ -5,7 +5,6 @@ import {
   Checkbox,
   Descriptions,
   Drawer,
-  Dropdown,
   Form,
   Input,
   Popconfirm,
@@ -16,12 +15,11 @@ import {
   Table,
   Tag,
   Tabs,
-  Tooltip,
   Typography,
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { EyeOutlined, MoreOutlined, PlusOutlined } from '@ant-design/icons';
+import { EyeOutlined, PlusOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { useT } from '@/hooks/useT';
 
@@ -312,22 +310,6 @@ export default function FileTransferCenter() {
     [],
   );
 
-  const deviceActionColumn = {
-    title: '操作',
-    key: 'action',
-    width: 88,
-    align: 'center' as const,
-    render: (_: unknown, record: UnifiedFileTransferDeviceItem) => (
-      <Space size={0}>
-        <Tooltip title={`SN: ${record.deviceSn} | ${record.productType}`}>
-          <Button type="link" size="small" icon={<EyeOutlined />} style={{ paddingInline: 0 }}>
-            详情
-          </Button>
-        </Tooltip>
-      </Space>
-    ),
-  };
-
   // Failure reason i18n — mirrors UpgradePlan renderFailureReason
   const DEVICE_CODES = new Set(['DOWNLOAD_FAULT', 'TC_FAULT', 'UPGRADE_5G_FAILED']);
   const TIMEOUT_CODES = new Set(['DOWNLOAD_TIMEOUT', 'TASK_TIMEOUT']);
@@ -346,9 +328,6 @@ export default function FileTransferCenter() {
       return <span style={{ color: '#ff4d4f' }}>{value}</span>;
     },
   };
-
-  const taskActionLoading = startTaskMutation.isPending || suspendTaskMutation.isPending
-    || terminateTaskMutation.isPending || deleteTaskMutation.isPending;
 
   const getTaskActionErrorMessage = (error: unknown, fallback: string) => {
     if (error instanceof Error && error.message.trim().length > 0) {
@@ -386,43 +365,14 @@ export default function FileTransferCenter() {
     setDetailDrawerOpen(true);
   };
 
-  const buildTaskActionItems = (record: UnifiedFileTransferTask) => {
+  const renderTaskActions = (record: UnifiedFileTransferTask) => {
     const status = record.status;
     const showStart = status === 'pending' || status === 'suspended';
     const showSuspend = status === 'in_progress';
     const showTerminate = status !== 'ended';
-    const showDelete = status !== 'in_progress';
-    const items = [];
-    if (showStart) {
-      items.push({
-        key: 'start',
-        label: '开始',
-        onClick: () => handleStartTask(record),
-      });
-    }
-    if (showSuspend) {
-      items.push({
-        key: 'suspend',
-        label: '暂停',
-        onClick: () => handleSuspendTask(record),
-      });
-    }
-    if (showTerminate) {
-      items.push({ key: 'terminate', label: <Popconfirm title="确认终止该任务？" onConfirm={() => handleTerminateTask(record)}><Button type="link" size="small" danger loading={taskActionLoading}>终止</Button></Popconfirm> });
-    }
-    if (showDelete) {
-      items.push({ key: 'delete', label: <Popconfirm title="确认删除该任务？" onConfirm={() => handleDeleteTask(record)}><Button type="link" size="small" danger loading={taskActionLoading}>删除</Button></Popconfirm> });
-    }
-    return items;
-  };
-
-  const taskActionColumn = {
-    title: '操作',
-    key: 'action',
-    width: 108,
-    align: 'center' as const,
-    render: (_: unknown, record: UnifiedFileTransferTask) => (
-      <Space size={0}>
+    const showDelete = status === 'ended' || status === 'pending' || status === 'suspended';
+    return (
+      <Space size={4} wrap={false}>
         <Button
           type="link"
           size="small"
@@ -432,17 +382,52 @@ export default function FileTransferCenter() {
         >
           详情
         </Button>
-        <Dropdown menu={{ items: buildTaskActionItems(record) }} trigger={['click']}>
+        {showStart ? (
           <Button
             type="link"
             size="small"
-            icon={<MoreOutlined />}
-            loading={taskActionLoading}
-            style={{ paddingInline: 4 }}
-          />
-        </Dropdown>
+            loading={startTaskMutation.isPending}
+            onClick={() => handleStartTask(record)}
+            style={{ paddingInline: 0 }}
+          >
+            开始
+          </Button>
+        ) : null}
+        {showSuspend ? (
+          <Button
+            type="link"
+            size="small"
+            loading={suspendTaskMutation.isPending}
+            onClick={() => handleSuspendTask(record)}
+            style={{ paddingInline: 0 }}
+          >
+            暂停
+          </Button>
+        ) : null}
+        {showTerminate ? (
+          <Popconfirm title="确认终止该任务？" onConfirm={() => handleTerminateTask(record)}>
+            <Button type="link" size="small" danger loading={terminateTaskMutation.isPending} style={{ paddingInline: 0 }}>
+              终止
+            </Button>
+          </Popconfirm>
+        ) : null}
+        {showDelete ? (
+          <Popconfirm title="确认删除该任务？" onConfirm={() => handleDeleteTask(record)}>
+            <Button type="link" size="small" danger loading={deleteTaskMutation.isPending} style={{ paddingInline: 0 }}>
+              删除
+            </Button>
+          </Popconfirm>
+        ) : null}
       </Space>
-    ),
+    );
+  };
+
+  const taskActionColumn = {
+    title: '操作',
+    key: 'action',
+    width: 190,
+    align: 'center' as const,
+    render: (_: unknown, record: UnifiedFileTransferTask) => renderTaskActions(record),
   };
 
   useEffect(() => {
@@ -651,7 +636,6 @@ export default function FileTransferCenter() {
   const deviceColumns: ColumnsType<UnifiedFileTransferDeviceItem> = useMemo(() => {
     if (isUpgradeLikeCategory) {
       return [
-        deviceActionColumn,
         { title: '基站编码', dataIndex: 'deviceSn', key: 'deviceSn', width: 120 },
         { title: '任务名称', dataIndex: 'taskName', key: 'taskName', width: 180, ellipsis: true },
         { title: '源版本', dataIndex: 'currentVersion', key: 'currentVersion', width: 120 },
@@ -697,7 +681,6 @@ export default function FileTransferCenter() {
     }
 
     return [
-      deviceActionColumn,
       {
         title: '设备名称',
         dataIndex: 'deviceName',
@@ -794,15 +777,21 @@ export default function FileTransferCenter() {
     if (createTaskMutation.isPending) {
       return;
     }
-    await createTaskMutation.mutateAsync({
-      ...values,
-      deviceIds: selectedDrawerDeviceIds,
-      deviceCount: selectedDrawerDeviceIds.length,
-    });
-    void message.success('演示任务已创建。');
-    setTaskDrawerOpen(false);
-    setSelectedDrawerDeviceIds([]);
-    taskForm.resetFields();
+    void createTaskMutation
+      .mutateAsync({
+        ...values,
+        deviceIds: selectedDrawerDeviceIds,
+        deviceCount: selectedDrawerDeviceIds.length,
+      })
+      .then(() => {
+        void message.success('任务已创建。');
+        setTaskDrawerOpen(false);
+        setSelectedDrawerDeviceIds([]);
+        taskForm.resetFields();
+      })
+      .catch((error: unknown) => {
+        void message.error(getTaskActionErrorMessage(error, '创建任务失败，请稍后重试'));
+      });
   };
 
   return (

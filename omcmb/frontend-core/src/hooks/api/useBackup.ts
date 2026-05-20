@@ -266,3 +266,34 @@ export function useCreateBackupRestore() {
     },
   });
 }
+
+export function useCreateBackupRestoreByTaskID() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    RestoreTask,
+    Error,
+    { backupTaskId: string; targetDeviceSns: string[] }
+  >({
+    mutationFn: (req) => {
+      if (useMock) {
+        const now = new Date().toISOString();
+        return Promise.resolve<RestoreTask>({
+          id: `rt-mock-${Date.now()}`,
+          sourceBucket: 'config_backup',
+          sourceObjectPath: '',
+          targetDeviceSns: req.targetDeviceSns,
+          status: 'pending',
+          progress: 0,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      return backupApi.createRestoreByTaskID(req);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ['backup', 'restore-tasks'],
+      });
+    },
+  });
+}

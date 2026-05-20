@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
@@ -22,6 +23,18 @@ type RestoreTaskRepository interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*RestoreTask, error)
 	List(ctx context.Context, filter RestoreFilter) (*model.ListResponse[RestoreTask], error)
 	UpdateErrorMessage(ctx context.Context, id uuid.UUID, msg string) error
+
+	// FindByIDPrefix returns up to `limit` restore_tasks whose UUID (without
+	// dashes) starts with the given hex prefix. Used by TransferCompleteRouter
+	// to map the `{taskID8}` segment of a Download CommandKey back to the
+	// originating restore_task (M2 of backup-restore-alignment-plan).
+	FindByIDPrefix(ctx context.Context, prefix string, limit int) ([]*RestoreTask, error)
+
+	// MarkComplete writes the final status / task_result / completed_at of a
+	// restore_task. Used by TransferCompleteRouter after CPE acknowledges the
+	// Download. errMsg is appended only on failure (success path keeps any
+	// pre-existing skipped-devices note from UpdateErrorMessage intact).
+	MarkComplete(ctx context.Context, id uuid.UUID, status RestoreStatus, result int16, completedAt time.Time, errMsg string) error
 }
 
 // RestoreFilter mirrors TaskFilter but for the restore_tasks table.
@@ -157,9 +170,9 @@ func scanRestoreTask(row pgx.Row) (*RestoreTask, error) {
 	var snsJSON []byte
 	if err := row.Scan(
 		&t.ID, &t.SourceBucket, &t.SourceObjectPath, &snsJSON,
-		&t.TaskSeq, &t.TaskName, &t.TaskResult, &t.OperatorCode, &t.CreateUser,
 		&t.Status, &t.Progress, &t.ErrorMessage,
 		&t.StartedAt, &t.CompletedAt, &t.CreatedAt, &t.UpdatedAt, &t.CreatedBy,
+		&t.TaskSeq, &t.TaskName, &t.TaskResult, &t.OperatorCode, &t.CreateUser,
 	); err != nil {
 		return nil, err
 	}
@@ -172,4 +185,68 @@ func scanRestoreTask(row pgx.Row) (*RestoreTask, error) {
 		t.TargetDeviceSNs = []string{}
 	}
 	return &t, nil
+}
+
+// FindByIDPrefix — see RestoreTaskRepository interface. Mirrors the backup
+// repo helper of the same name (M2 of backup-restore-alignment-plan).
+func (r *PgRestoreTaskRepository) FindByIDPrefix(ctx context.Context, prefix string, limit int) ([]*RestoreTask, error) {
+	if prefix == "" {
+		return nil, nil
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	q := storage.Psql.Select(restoreColumns...).
+		From("restore_tasks").
+		Where("REPLACE(id::text, '-', '') LIKE ?", prefix+"%").
+		OrderBy("created_at DESC").
+		Limit(uint64(limit))
+	sqlStr, args, err := q.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build find restore_task by prefix SQL: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query restore_task by prefix: %w", err)
+	}
+	defer rows.Close()
+	out := make([]*RestoreTask, 0, limit)
+	for rows.Next() {
+		t, scanErr := scanRestoreTask(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan restore_task row: %w", scanErr)
+		}
+		out = append(out, t)
+	}
+	return out, nil
+}
+
+// MarkComplete — see RestoreTaskRepository interface. Sets terminal status +
+// task_result + completed_at on the row. Updates are idempotent (subsequent
+// calls re-write the same values); errMsg is only persisted on failure to
+// preserve any pre-existing skipped-devices note set by UpdateErrorMessage.
+func (r *PgRestoreTaskRepository) MarkComplete(
+	ctx context.Context, id uuid.UUID, status RestoreStatus, result int16, completedAt time.Time, errMsg string,
+) error {
+	upd := storage.Psql.Update("restore_tasks").
+		Set("status", status).
+		Set("task_result", result).
+		Set("completed_at", completedAt).
+		Set("progress", 100).
+		Where(sq.Eq{"id": id})
+	if status == RestoreFailed && errMsg != "" {
+		upd = upd.Set("error_message", errMsg)
+	}
+	query, args, err := upd.ToSql()
+	if err != nil {
+		return fmt.Errorf("build mark restore_task complete SQL: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("mark restore_task complete: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("restore_task %s: %w", id, commonerrors.ErrNotFound)
+	}
+	return nil
 }

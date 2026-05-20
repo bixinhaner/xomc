@@ -44,6 +44,12 @@ type TaskRepository interface {
 	// FilePathRecorder to map upload filename → backup_task.
 	// Empty prefix returns no rows. limit < 1 is treated as 1.
 	FindByIDPrefix(ctx context.Context, prefix string, limit int) ([]*BackupTask, error)
+
+	// MarkComplete writes the final status / task_result / completed_at of a
+	// backup_task. Used by TransferCompleteRouter after CPE finishes uploading
+	// the config file (M2 of backup-restore-alignment-plan). Idempotent.
+	// errMsg is persisted only when status==TaskFailed.
+	MarkComplete(ctx context.Context, id uuid.UUID, status TaskStatus, result int16, completedAt time.Time, errMsg string) error
 }
 
 // PgTaskRepository.ListAllTaskIDPrefixes (defined in pg_repository.go)

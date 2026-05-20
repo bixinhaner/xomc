@@ -3,15 +3,15 @@ package backup
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	devtask "github.com/omcgo/omcgo/internal/task"
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
+	devtask "github.com/omcgo/omcgo/internal/task"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -51,6 +51,9 @@ func (m *execTaskRepo) FindByIDPrefix(_ context.Context, _ string, _ int) ([]*Ba
 }
 func (m *execTaskRepo) CleanupOldRows(_ context.Context, _ time.Time, _ int) ([]string, int64, error) {
 	return nil, 0, nil
+}
+func (m *execTaskRepo) MarkComplete(_ context.Context, _ uuid.UUID, _ TaskStatus, _ int16, _ time.Time, _ string) error {
+	return nil
 }
 
 type execDeviceRepo struct {
@@ -145,6 +148,15 @@ func (m *execCmdQueue) GetQueueLength(_ context.Context, _ string) (int64, error
 	return int64(len(m.pushed)), nil
 }
 
+// execTransferProvider 是测试用的 transfercfg.Provider mock。
+type execTransferProvider struct {
+	upload transfercfg.UploadSettings
+}
+
+func (m *execTransferProvider) Snapshot(_ context.Context) transfercfg.Snapshot {
+	return transfercfg.Snapshot{Upload: m.upload}
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -221,11 +233,17 @@ func TestHandleTask_PushUploadCommand(t *testing.T) {
 	}
 	deviceRepo := &execDeviceRepo{
 		getBySNFn: func(_ context.Context, sn string) (*model.Device, error) {
-			return &model.Device{SerialNumber: sn}, nil
+			return &model.Device{SerialNumber: sn, OUI: "0000B9", ProductClass: "FAP/BLQ/SC"}, nil
 		},
 	}
 	cmdQ := &execCmdQueue{}
 	executor := newTestExecutor(taskRepo, deviceRepo, cmdQ)
+	executor.SetTransferProvider(&execTransferProvider{
+		upload: transfercfg.UploadSettings{
+			BaseURL: "http://acs:7557",
+			Path:    "/smallcell/FileUploadService",
+		},
+	})
 
 	payload, _ := json.Marshal(backupTaskPayload{TaskID: taskID.String()})
 	evt := event.Event{ID: uuid.New().String(), Subject: event.SubjectBackupTaskCreated, Payload: payload, Timestamp: time.Now()}
@@ -240,20 +258,61 @@ func TestHandleTask_PushUploadCommand(t *testing.T) {
 	assert.Equal(t, "SN002", cmdQ.pushed[1].DeviceSN)
 	assert.Equal(t, "Upload", cmdQ.pushed[1].Req.Method)
 
-	// Verify file_type in params (T-0074: changed from "2" Patch to "3"
-	// Vendor Configuration File so the file routes into config_backup bucket).
+	// Verify file_type：标准平台（非 NV）应为 "10 {OUI} Configuration File"
 	var params map[string]interface{}
 	_ = json.Unmarshal(cmdQ.pushed[0].Req.Params, &params)
-	assert.Equal(t, "3", params["file_type"])
+	assert.Equal(t, "10 0000B9 Configuration File", params["file_type"])
 
-	// T-0079: target_file_name embeds backup_task UUID prefix so the upload
-	// handler can route the MinIO object back to this task via
-	// `backup.file.received` event. Pattern: backup-{taskID8}-{SN}.xml
-	assert.Contains(t, params["target_file_name"], "backup-")
-	assert.Contains(t, params["target_file_name"], "-SN001.xml")
-	// CommandKey + SourceID linkage for TransferComplete correlation
+	// url 字段应包含 CONFIGBACKUP_XML 和设备 SN
+	assert.Contains(t, params["url"], "CONFIGBACKUP_XML")
+	assert.Contains(t, params["url"], "SN001")
+
+	// CommandKey + SourceID linkage for TransferComplete correlation.
+	// M2: CommandKey 格式含 _BACKUP_ 标记
 	assert.Equal(t, task.ID.String(), cmdQ.pushed[0].Req.SourceID)
-	assert.True(t, strings.HasPrefix(cmdQ.pushed[0].Req.CommandKey, "backup-"))
+	assert.Contains(t, cmdQ.pushed[0].Req.CommandKey, "_BACKUP_")
+}
+
+func TestHandleTask_NVPlatform(t *testing.T) {
+	taskID := uuid.New()
+	task := &BackupTask{
+		ID:        taskID,
+		Status:    TaskPending,
+		TargetIDs: []string{"SN_MLQ"},
+	}
+
+	taskRepo := &execTaskRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*BackupTask, error) { return task, nil },
+		updateFn:  func(_ context.Context, _ *BackupTask) error { return nil },
+	}
+	// MLQ 平台：ProductClass 以 "FAP/MLQ" 开头，应使用 NV 备份
+	deviceRepo := &execDeviceRepo{
+		getBySNFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{SerialNumber: sn, OUI: "0000B9", ProductClass: "FAP/MLQ/SC"}, nil
+		},
+	}
+	cmdQ := &execCmdQueue{}
+	executor := newTestExecutor(taskRepo, deviceRepo, cmdQ)
+	executor.SetTransferProvider(&execTransferProvider{
+		upload: transfercfg.UploadSettings{
+			BaseURL: "http://acs:7557",
+			Path:    "/smallcell/FileUploadService",
+		},
+	})
+
+	payload, _ := json.Marshal(backupTaskPayload{TaskID: taskID.String()})
+	evt := event.Event{ID: uuid.New().String(), Subject: event.SubjectBackupTaskCreated, Payload: payload, Timestamp: time.Now()}
+
+	err := executor.handleTaskCreated(context.Background(), evt)
+	require.NoError(t, err)
+
+	require.Len(t, cmdQ.pushed, 1)
+	var params map[string]interface{}
+	_ = json.Unmarshal(cmdQ.pushed[0].Req.Params, &params)
+	// NV 平台：FileType 应为 "12 {OUI} Configuration File"
+	assert.Equal(t, "12 0000B9 Configuration File", params["file_type"])
+	// URL 应包含 CONFIGBACKUP_NV
+	assert.Contains(t, params["url"], "CONFIGBACKUP_NV")
 }
 
 func TestHandleTask_ProgressUpdate(t *testing.T) {
