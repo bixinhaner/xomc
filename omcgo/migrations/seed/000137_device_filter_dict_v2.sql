@@ -9,9 +9,10 @@
 --   3) 修 network_type value 'eNB/gNB' → 'lte/nr'，与 devices.technology 对齐
 --   4) 新增 5 个字典：lifecycle_state / is_online / device_model /
 --      software_version / firmware_version
---      其中 device_model / software_version / firmware_version 初始化
---      数据从现有 devices / device_info 表 distinct 灌入，保证"用户在前端
---      选了一项后端 filter 一定能命中至少一条设备"。
+--      其中 device_model / firmware_version 初始化数据从 devices 表 distinct 灌入；
+--      software_version 从 device_parameters 表 (TR-069 路径 Device.DeviceInfo.SoftwareVersion)
+--      distinct 灌入（device_info 表无 software_version 列，软件版本走参数树）。
+--      保证"用户在前端选了一项后端 filter 一定能命中至少一条设备"。
 --
 -- 设计文档：docs/design/device-lifecycle-online-status-decouple-20260520.md §4.2
 -- ============================================================
@@ -42,7 +43,7 @@ INSERT INTO sys_dictionaries (name, type, status, description) VALUES
     ('设备生命周期', 'lifecycle_state',  TRUE, 'T-0162: 业务流程进度，6 状态（discovered/registered/provisioning/commissioned/maintenance/decommissioned）'),
     ('设备在线状态', 'is_online',        TRUE, 'T-0162: 实时心跳活跃，true=在线 false=离线'),
     ('设备型号',     'device_model',     TRUE, 'T-0162: 设备硬件型号，对齐 devices.model_name；初始化从设备表 distinct 灌入'),
-    ('软件版本',     'software_version', TRUE, 'T-0162: 软件版本号，对齐 device_info.software_version；初始化从 device_info 表 distinct 灌入'),
+    ('软件版本',     'software_version', TRUE, 'T-0162: 软件版本号，TR-069 参数 Device.DeviceInfo.SoftwareVersion；初始化从 device_parameters 表 distinct 灌入'),
     ('固件版本',     'firmware_version', TRUE, 'T-0162: 固件版本号，对齐 devices.firmware_version；初始化从设备表 distinct 灌入')
 ON CONFLICT DO NOTHING;
 
@@ -86,11 +87,14 @@ FROM d, sys_dictionaries sd
 WHERE sd.type = 'device_model'
 ON CONFLICT DO NOTHING;
 
--- ─── 8. software_version：从 device_info.software_version distinct 灌入 ─
+-- ─── 8. software_version：从 device_parameters 表 TR-069 路径 distinct 灌入 ─
+-- 设计文档原稿写 device_info.software_version 但该列不存在；软件版本作为 TR-069
+-- 标准参数走参数树，路径 Device.DeviceInfo.SoftwareVersion 存在 device_parameters。
 WITH s AS (
-    SELECT DISTINCT NULLIF(TRIM(software_version), '') AS v
-    FROM device_info
-    WHERE software_version IS NOT NULL AND TRIM(software_version) <> ''
+    SELECT DISTINCT NULLIF(TRIM(parameter_value), '') AS v
+    FROM device_parameters
+    WHERE parameter_path = 'Device.DeviceInfo.SoftwareVersion'
+      AND parameter_value IS NOT NULL AND TRIM(parameter_value) <> ''
 )
 INSERT INTO sys_dictionary_details (label, value, sort, sys_dictionary_id)
 SELECT s.v, s.v,
