@@ -10,7 +10,7 @@ T-0162: 批量补全 paramModel XML 的取值范围（min/max/enum）。
 - 不动未映射的 4197 条 product_model（QAFA/QAFB/CR-B4860/RTD/RTS/QB/Nova430i/Nova430/RTD-CA/NBIOT/DXDF/QATA）
 - 多 product 系列合并到同一 paramModel 时（BAIBLQ/BLX/QRTB → BLQ），同 path 不同 range 跳过 + 日志
 - 已有 min/max/enumValues 的 param 不动
-- type 冲突（JSON unsignedInt vs XML STRING）跳过 + 日志
+- type 冲突（JSON unsignedInt vs XML STRING 等）以 JSON 为准覆盖 XML 原 type + 日志（用户决定）
 - enum 不设上限（照实补，前端 AntD Select 支持 showSearch）
 - 文本级修改，保留 XML 原格式（属性顺序/缩进/换行）
 """
@@ -239,8 +239,8 @@ def process_xml(xml_path, path_to_entry):
     stats = {
         'applied': 0,
         'skipped_already': 0,
-        'skipped_type_conflict': 0,
-        'type_conflicts': [],
+        'type_overridden': 0,
+        'type_override_log': [],
         'applied_samples': [],
     }
     matched_paths = set()
@@ -271,22 +271,13 @@ def process_xml(xml_path, path_to_entry):
         c = entry['constraint']
         xml_type = attrs.get('type', '')
 
-        # type 冲突检测：JSON 想注入数值 type 但 XML 已是 STRING/BOOLEAN
+        # type 冲突：JSON 为准，原地覆盖 XML 原 type（保持属性顺序）
         if 'type' in c:
             wanted = c['type']
             if xml_type and xml_type != wanted:
-                # STRING 兜底 vs 数值：跳过
-                if xml_type in ('STRING', 'BOOLEAN') and wanted in ('INT', 'U_INT'):
-                    stats['skipped_type_conflict'] += 1
-                    stats['type_conflicts'].append((name, wanted, xml_type))
-                    new_lines.append(line)
-                    continue
-                # 其它冲突（INT vs U_INT 等）也保守跳过
-                if xml_type in ('INT', 'U_INT') and wanted in ('INT', 'U_INT') and xml_type != wanted:
-                    stats['skipped_type_conflict'] += 1
-                    stats['type_conflicts'].append((name, wanted, xml_type))
-                    new_lines.append(line)
-                    continue
+                attrs['type'] = wanted
+                stats['type_overridden'] += 1
+                stats['type_override_log'].append((name, xml_type, wanted))
 
         # 构造要插入的 kv（保持 type → min → max → enumValues → enumLabels 顺序）
         kvs = []
@@ -343,8 +334,8 @@ def main():
                 print(f'        ← {pm}: {c}')
     print()
 
-    grand_total = {'applied': 0, 'skipped_already': 0, 'skipped_type_conflict': 0, 'not_found_in_xml': 0}
-    all_type_conflicts = []
+    grand_total = {'applied': 0, 'skipped_already': 0, 'type_overridden': 0, 'not_found_in_xml': 0}
+    all_type_overrides = []
 
     dry_run = '--dry-run' in sys.argv
 
@@ -358,17 +349,17 @@ def main():
         stats, new_text = process_xml(xml_path, entries)
         print(f'  补充：{stats["applied"]}')
         print(f'  已有约束跳过：{stats["skipped_already"]}')
-        print(f'  type 冲突跳过：{stats["skipped_type_conflict"]}')
+        print(f'  type 覆盖（JSON 为准）：{stats["type_overridden"]}')
         print(f'  JSON 有路径但 XML 无对应：{stats["not_found_in_xml"]}')
         if stats['applied_samples']:
             print('  样例：')
             for name, kvs in stats['applied_samples']:
                 print(f'    {name} → {kvs}')
-        if stats['type_conflicts']:
-            print(f'  type 冲突明细（前 3）：')
-            for name, w, x in stats['type_conflicts'][:3]:
-                print(f'    {name}  JSON={w} XML={x}')
-            all_type_conflicts.extend([(target, n, w, x) for n, w, x in stats['type_conflicts']])
+        if stats['type_override_log']:
+            print(f'  type 覆盖明细（前 3）：')
+            for name, old, new in stats['type_override_log'][:3]:
+                print(f'    {name}  {old} → {new}')
+            all_type_overrides.extend([(target, n, o, w) for n, o, w in stats['type_override_log']])
 
         for k in grand_total:
             grand_total[k] += stats[k]
@@ -384,16 +375,15 @@ def main():
     print('=== 总计 ===')
     for k, v in grand_total.items():
         print(f'  {k}: {v}')
-    print(f'  type 冲突总数: {len(all_type_conflicts)}')
+    print(f'  type 覆盖总数: {len(all_type_overrides)}')
 
-    if all_type_conflicts:
-        # 写一份 type 冲突报告，便于人工抽查
-        report_path = '/tmp/T-0162-type-conflicts.txt'
+    if all_type_overrides:
+        report_path = '/tmp/T-0162-type-overrides.txt'
         with open(report_path, 'w', encoding='utf-8') as f:
-            f.write('paramModel\tparam_name\tjson_type\txml_type\n')
-            for tgt, n, w, x in all_type_conflicts:
-                f.write(f'{tgt}\t{n}\t{w}\t{x}\n')
-        print(f'  type 冲突清单：{report_path}')
+            f.write('paramModel\tparam_name\told_type\tnew_type\n')
+            for tgt, n, old, new in all_type_overrides:
+                f.write(f'{tgt}\t{n}\t{old}\t{new}\n')
+        print(f'  type 覆盖清单：{report_path}')
 
 
 if __name__ == '__main__':
