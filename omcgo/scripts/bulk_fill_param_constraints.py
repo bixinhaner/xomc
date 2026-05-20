@@ -77,18 +77,22 @@ def parse_data_type_range(raw):
         return None
     s = raw.strip().lstrip(' ')  # 去掉前缀空格（' enum-...'）
 
-    # 形态 1: enum-{...}-{...} 或 enum-{...}
+    # 形态 1: enum-{label_group}-{value_group} 或 enum-{value_group}
+    # 真实语义（基于 195 条 enum-{Enable,Disable}-{1,0} / {Up,NoLink,...} 等样本验证）：
+    #   第一组 = UI label（用户看到的文案）
+    #   第二组 = 下发到基站的实际值
+    # 单组形态（无第二组）时，第一组即下发值兼显示（无独立 label）
     m = re.match(r'^enum-\{(.*?)\}(?:-\{(.*?)\})?$', s)
     if m:
-        vals = m.group(1)
-        labels = m.group(2)
-        if vals == '' or vals is None:
+        first = m.group(1)
+        second = m.group(2)
+        if first == '' or first is None:
             return None
-        # 不强制改 type（enum 可能附着在 STRING 或 INT/U_INT 上）
-        result = {'enumValues': vals}
-        if labels is not None and labels != '':
-            result['enumLabels'] = labels
-        return result
+        if second is not None and second != '':
+            # 两组：第二组=value(下发)，第一组=label(显示)
+            return {'enumValues': second, 'enumLabels': first}
+        # 单组：作 value，无 label
+        return {'enumValues': first}
 
     # 形态 2: type-[min:max] 或 type[min:max] (容错)
     m = re.match(r'^([A-Za-z0-9_]+)-?\[([^:]+):([^\]]+)\]$', s)
@@ -315,9 +319,133 @@ def process_xml(xml_path, path_to_entry):
     return stats, '\n'.join(new_lines)
 
 
+def fix_enum_order(xml_path, path_to_entry):
+    """
+    --fix-enum-order 模式：扫描 XML 中已有 enumValues+enumLabels 的 param，
+    对照 JSON 真实语义（第二组=value，第一组=label）：
+      - JSON 给出的 (correct_values, correct_labels) 与 XML 当前 (xml_values, xml_labels)
+      - 若 (xml_values, xml_labels) == (correct_labels, correct_values) → 反了，对调
+      - 若 (xml_values, xml_labels) == (correct_values, correct_labels) → 已正确，不动
+      - 否则 → JSON 无此 path 或值不匹配（如 T-0158 手动补的内容不同），不动 + 日志
+
+    返回 (stats, new_text)。
+    """
+    with open(xml_path, encoding='utf-8') as f:
+        text = f.read()
+    lines = text.split('\n')
+
+    stats = {
+        'scanned_enum_pairs': 0,
+        'fixed': 0,
+        'already_correct': 0,
+        'no_json_ref': 0,
+        'mismatch_no_action': 0,
+        'fixed_samples': [],
+        'mismatch_samples': [],
+    }
+
+    new_lines = []
+    for line in lines:
+        m = PARAM_LINE_RE.match(line)
+        if not m:
+            new_lines.append(line)
+            continue
+        indent, attrs_str = m.group(1), m.group(2)
+        attrs = parse_attrs(attrs_str)
+        name = attrs.get('name', '')
+
+        xml_values = attrs.get('enumValues')
+        xml_labels = attrs.get('enumLabels')
+        if not xml_values or not xml_labels:
+            new_lines.append(line)
+            continue
+
+        stats['scanned_enum_pairs'] += 1
+        entry = path_to_entry.get(name)
+        if entry is None:
+            stats['no_json_ref'] += 1
+            new_lines.append(line)
+            continue
+
+        c = entry['constraint']
+        correct_values = c.get('enumValues')
+        correct_labels = c.get('enumLabels')
+        if correct_values is None or correct_labels is None:
+            stats['no_json_ref'] += 1
+            new_lines.append(line)
+            continue
+
+        if xml_values == correct_values and xml_labels == correct_labels:
+            stats['already_correct'] += 1
+            new_lines.append(line)
+            continue
+
+        if xml_values == correct_labels and xml_labels == correct_values:
+            # 反了 → 对调
+            attrs['enumValues'] = correct_values
+            attrs['enumLabels'] = correct_labels
+            new_line = f'{indent}<param {render_attrs(attrs)}/>'
+            new_lines.append(new_line)
+            stats['fixed'] += 1
+            if len(stats['fixed_samples']) < 5:
+                stats['fixed_samples'].append((name, xml_values, xml_labels, correct_values, correct_labels))
+            continue
+
+        # 内容既不正、也不正好反 → 不动（可能 T-0158 手动补的语义不同）
+        stats['mismatch_no_action'] += 1
+        if len(stats['mismatch_samples']) < 5:
+            stats['mismatch_samples'].append((name, xml_values, xml_labels, correct_values, correct_labels))
+        new_lines.append(line)
+
+    return stats, '\n'.join(new_lines)
+
+
 def main():
     print('=== T-0162 批量补全 paramModel XML 取值范围 ===\n')
     constraints, diag = load_json_constraints()
+
+    if '--fix-enum-order' in sys.argv:
+        print('[模式] --fix-enum-order：仅对调 enumValues/enumLabels 反掉的字段\n')
+        dry_run = '--dry-run' in sys.argv
+        grand = {'scanned': 0, 'fixed': 0, 'correct': 0, 'no_ref': 0, 'mismatch': 0}
+        all_mismatch = []
+        for target in sorted(set(PM_MAP.values())):
+            xml_path = os.path.join(XML_DIR, f'{target}.xml')
+            if not os.path.exists(xml_path):
+                continue
+            entries = constraints.get(target, {})
+            stats, new_text = fix_enum_order(xml_path, entries)
+            print(f'[{target}.xml] 已有 enum 对: {stats["scanned_enum_pairs"]}')
+            print(f'  对调修正：{stats["fixed"]}')
+            print(f'  已正确：{stats["already_correct"]}')
+            print(f'  JSON 无引用：{stats["no_json_ref"]}')
+            print(f'  内容不匹配（不动）：{stats["mismatch_no_action"]}')
+            for n, xv, xl, cv, cl in stats['fixed_samples']:
+                print(f'    fix: {n}  ({xv!r}→{cv!r} / {xl!r}→{cl!r})')
+            for n, xv, xl, cv, cl in stats['mismatch_samples']:
+                print(f'    mismatch: {n}  XML(v={xv!r},l={xl!r}) vs JSON(v={cv!r},l={cl!r})')
+                all_mismatch.append((target, n, xv, xl, cv, cl))
+            grand['scanned'] += stats['scanned_enum_pairs']
+            grand['fixed'] += stats['fixed']
+            grand['correct'] += stats['already_correct']
+            grand['no_ref'] += stats['no_json_ref']
+            grand['mismatch'] += stats['mismatch_no_action']
+            if not dry_run and stats['fixed'] > 0:
+                with open(xml_path, 'w', encoding='utf-8') as f:
+                    f.write(new_text)
+                print(f'  ✓ 写回')
+            print()
+        print('=== 总计 ===')
+        for k, v in grand.items():
+            print(f'  {k}: {v}')
+        if all_mismatch:
+            report_path = '/tmp/T-0162-enum-mismatch.txt'
+            with open(report_path, 'w', encoding='utf-8') as f:
+                f.write('paramModel\tparam_name\txml_values\txml_labels\tjson_values\tjson_labels\n')
+                for tgt, n, xv, xl, cv, cl in all_mismatch:
+                    f.write(f'{tgt}\t{n}\t{xv}\t{xl}\t{cv}\t{cl}\n')
+            print(f'  不匹配清单：{report_path}')
+        return
 
     print(f'[JSON 诊断]')
     print(f'  未映射 product_model 跳过：{diag["skip_unmapped_pm"]} 条')

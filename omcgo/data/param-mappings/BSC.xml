@@ -70,16 +70,16 @@
         <param name="Device.DeviceInfo.ROUTE_CONFIG1_GW" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_GW" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="256"/>
         <param name="Device.DeviceInfo.ROUTE_CONFIG1_NETADDR" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_NETADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="256"/>
         <param name="Device.DeviceInfo.ROUTE_CONFIG1_NETMASK" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="256"/>
-        <param name="Device.DeviceInfo.ROUTE_CONFIG1_ONBOOTENB" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_ONBOOTENB" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="Enable,Disable" enumLabels="1,0"/>
+        <param name="Device.DeviceInfo.ROUTE_CONFIG1_ONBOOTENB" standardPath="Device.DeviceInfo.ROUTE_CONFIG1_ONBOOTENB" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="1,0" enumLabels="Enable,Disable"/>
         <param name="Device.DeviceInfo.ROUTE_CONFIG2_GW" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_GW" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="256"/>
         <param name="Device.DeviceInfo.ROUTE_CONFIG2_NETADDR" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_NETADDR" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="256"/>
         <param name="Device.DeviceInfo.ROUTE_CONFIG2_NETMASK" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_NETMASK" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="0" max="256"/>
-        <param name="Device.DeviceInfo.ROUTE_CONFIG2_ONBOOTENB" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_ONBOOTENB" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="Enable,Disable" enumLabels="1,0"/>
-        <param name="Device.DeviceInfo.X_COM_MME_Status" standardPath="Device.DeviceInfo.X_COM_MME_Status" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="OFF,ON" enumLabels="0,1"/>
+        <param name="Device.DeviceInfo.ROUTE_CONFIG2_ONBOOTENB" standardPath="Device.DeviceInfo.ROUTE_CONFIG2_ONBOOTENB" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="1,0" enumLabels="Enable,Disable"/>
+        <param name="Device.DeviceInfo.X_COM_MME_Status" standardPath="Device.DeviceInfo.X_COM_MME_Status" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="OFF,ON"/>
         <param name="Device.KeepalivedMgmt.CounterCheck" standardPath="Device.KeepalivedMgmt.CounterCheck" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="10"/>
-        <param name="Device.KeepalivedMgmt.Enable" standardPath="Device.KeepalivedMgmt.Enable" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="OFF,ON" enumLabels="0,1"/>
+        <param name="Device.KeepalivedMgmt.Enable" standardPath="Device.KeepalivedMgmt.Enable" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="OFF,ON"/>
         <param name="Device.KeepalivedMgmt.LocalUplinkIpAddr" standardPath="Device.KeepalivedMgmt.LocalUplinkIpAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.KeepalivedMgmt.ManualSwitch" standardPath="Device.KeepalivedMgmt.ManualSwitch" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="Auto,Manual" enumLabels="0,1"/>
+        <param name="Device.KeepalivedMgmt.ManualSwitch" standardPath="Device.KeepalivedMgmt.ManualSwitch" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="Auto,Manual"/>
         <param name="Device.KeepalivedMgmt.MaxVrrpEntries" standardPath="Device.KeepalivedMgmt.MaxVrrpEntries" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="4"/>
         <param name="Device.KeepalivedMgmt.RemoteUplinkIpAddr" standardPath="Device.KeepalivedMgmt.RemoteUplinkIpAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.KeepalivedMgmt.RouterId" standardPath="Device.KeepalivedMgmt.RouterId" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="16"/>
@@ -87,7 +87,7 @@
         <param name="Device.KeepalivedMgmt.VrrpMgmt.Index" standardPath="Device.KeepalivedMgmt.VrrpMgmt.Index" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="4"/>
         <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.AdvertInt" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.AdvertInt" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="3600"/>
         <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.DstIpAddr" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.DstIpAddr" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.Enable" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Enable" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="OFF,ON" enumLabels="0,1"/>
+        <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.Enable" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Enable" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="OFF,ON"/>
         <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.Interface" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Interface" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="64"/>
         <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.MaxVirtualIpEntries" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.MaxVirtualIpEntries" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="2"/>
         <param name="Device.KeepalivedMgmt.VrrpMgmt.{i}.Name" standardPath="Device.KeepalivedMgmt.VrrpMgmt.{i}.Name" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="16"/>
@@ -128,9 +128,9 @@
         <param name="DeviceGSM.Bts.{i}.Si2quaterNeighborListDel" standardPath="DeviceGSM.Bts.{i}.Si2quaterNeighborListDel" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="DeviceGSM.Bts.{i}.Trx.{i}.Arfcn" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.Arfcn" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="1023"/>
         <param name="DeviceGSM.Bts.{i}.Trx.{i}.MaxPowerRed" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.MaxPowerRed" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="100"/>
-        <param name="DeviceGSM.Bts.{i}.Trx.{i}.RfLocked" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.RfLocked" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="Unlocked,Locked" enumLabels="0,1"/>
+        <param name="DeviceGSM.Bts.{i}.Trx.{i}.RfLocked" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.RfLocked" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="Unlocked,Locked"/>
         <param name="DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}.PhyChanConfig" standardPath="DeviceGSM.Bts.{i}.Trx.{i}.Ts.{i}.PhyChanConfig" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="NONE,CCCH,CCCH+SDCCH4,TCH/F,TCH/H,SDCCH8,PDCH,TCH/F_PDCH,UNKNOWN,CCCH+SDCCH4+CBCH,SDCCH8+CBCH,TCH/F_TCH/H_PDCH" enumLabels="NONE,CCCH,CCCH+SDCCH4,TCH/F,TCH/H,SDCCH8,PDCH,TCH/F_PDCH,UNKNOWN,CCCH+SDCCH4+CBCH,SDCCH8+CBCH,TCH/F_TCH/H_PDCH"/>
-        <param name="DeviceGSM.Bts.{i}.handover" standardPath="DeviceGSM.Bts.{i}.handover" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="Disabled,Enable" enumLabels="0,1"/>
+        <param name="DeviceGSM.Bts.{i}.handover" standardPath="DeviceGSM.Bts.{i}.handover" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="Disabled,Enable"/>
         <param name="DeviceGSM.Bts.{i}.handover1.maximum.distance" standardPath="DeviceGSM.Bts.{i}.handover1.maximum.distance" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="9999"/>
         <param name="DeviceGSM.Bts.{i}.handover1.power.budget.hysteresis" standardPath="DeviceGSM.Bts.{i}.handover1.power.budget.hysteresis" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="999"/>
         <param name="DeviceGSM.Bts.{i}.handover1.power.budget.interval" standardPath="DeviceGSM.Bts.{i}.handover1.power.budget.interval" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="99"/>
@@ -139,7 +139,7 @@
         <param name="DeviceGSM.Bts.{i}.handover1.window.rxqual.averaging" standardPath="DeviceGSM.Bts.{i}.handover1.window.rxqual.averaging" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="10"/>
         <param name="DeviceGSM.Bts.{i}.handover2.afs-bias.rxlev" standardPath="DeviceGSM.Bts.{i}.handover2.afs-bias.rxlev" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="20"/>
         <param name="DeviceGSM.Bts.{i}.handover2.afs-bias.rxqual" standardPath="DeviceGSM.Bts.{i}.handover2.afs-bias.rxqual" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="7"/>
-        <param name="DeviceGSM.Bts.{i}.handover2.assignment" standardPath="DeviceGSM.Bts.{i}.handover2.assignment" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="Disabled,Enable" enumLabels="0,1"/>
+        <param name="DeviceGSM.Bts.{i}.handover2.assignment" standardPath="DeviceGSM.Bts.{i}.handover2.assignment" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="Disabled,Enable"/>
         <param name="DeviceGSM.Bts.{i}.handover2.max-handovers" standardPath="DeviceGSM.Bts.{i}.handover2.max-handovers" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="9999"/>
         <param name="DeviceGSM.Bts.{i}.handover2.maximum.distance" standardPath="DeviceGSM.Bts.{i}.handover2.maximum.distance" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="9999"/>
         <param name="DeviceGSM.Bts.{i}.handover2.min-free-slots.tch-f" standardPath="DeviceGSM.Bts.{i}.handover2.min-free-slots.tch-f" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="9999"/>
@@ -214,10 +214,10 @@
         <param name="DeviceGSM.NriNullAdd" standardPath="DeviceGSM.NriNullAdd" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="16"/>
         <param name="DeviceGSM.NriNullDel" standardPath="DeviceGSM.NriNullDel" access="READ_ONLY" type="STRING" changeApplies="Immediate" min="0" max="16"/>
         <param name="DeviceGSM.TimerNetT3212" standardPath="DeviceGSM.TimerNetT3212" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="2147483647"/>
-        <param name="DeviceGSM.handover" standardPath="DeviceGSM.handover" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="Disabled,Enable" enumLabels="0,1"/>
+        <param name="DeviceGSM.handover" standardPath="DeviceGSM.handover" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="Disabled,Enable"/>
         <param name="DeviceGSM.handover2.afs-bias.rxlev" standardPath="DeviceGSM.handover2.afs-bias.rxlev" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="20"/>
         <param name="DeviceGSM.handover2.afs-bias.rxqual" standardPath="DeviceGSM.handover2.afs-bias.rxqual" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="7"/>
-        <param name="DeviceGSM.handover2.assignment" standardPath="DeviceGSM.handover2.assignment" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="Disabled,Enable" enumLabels="0,1"/>
+        <param name="DeviceGSM.handover2.assignment" standardPath="DeviceGSM.handover2.assignment" access="READ_ONLY" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="Disabled,Enable"/>
         <param name="DeviceGSM.handover2.max-handovers" standardPath="DeviceGSM.handover2.max-handovers" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="1" max="9999"/>
         <param name="DeviceGSM.handover2.maximum.distance" standardPath="DeviceGSM.handover2.maximum.distance" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="9999"/>
         <param name="DeviceGSM.handover2.min-free-slots.tch-f" standardPath="DeviceGSM.handover2.min-free-slots.tch-f" access="READ_ONLY" type="U_INT" changeApplies="Immediate" min="0" max="9999"/>
