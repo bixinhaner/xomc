@@ -15,7 +15,7 @@ import {
   Popconfirm,
   theme,
 } from 'antd';
-import { PlusOutlined, EyeOutlined, StopOutlined, DownloadOutlined } from '@ant-design/icons';
+import { PlusOutlined, EyeOutlined, StopOutlined, DownloadOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { useDebounce } from 'ahooks';
 import DataTable from '@/components/DataTable';
@@ -29,6 +29,8 @@ import {
   useRequestTraceExport,
   useTraceExportJob,
   useTraceSseRefresh,
+  useDeleteTraceTask,
+  useBatchDeleteTraceTasks,
 } from '@core/hooks/api/useTrace';
 import { useDeviceList } from '@core/hooks/api/useDevices';
 import { traceApi } from '@core/services/api/traceApi';
@@ -99,6 +101,9 @@ export default function MessageTrace() {
   const createMut = useCreateTraceTask();
   const stopMut = useStopTraceTask();
   const exportMut = useRequestTraceExport();
+  const deleteMut = useDeleteTraceTask();
+  const batchDeleteMut = useBatchDeleteTraceTasks();
+  const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const [activeExportId, setActiveExportId] = useState<string | undefined>(undefined);
   // SSE 实时刷新：trace.task.started/stopped/purged 事件触发 React Query invalidate
   useTraceSseRefresh();
@@ -143,6 +148,63 @@ export default function MessageTrace() {
       });
     },
     [exportMut, t]
+  );
+
+  // T-0161 单条删除：后端会拒 running，前端 disabled 兜底 + 服务端校验双保险
+  const handleDelete = useCallback(
+    (record: TraceTask) => {
+      deleteMut.mutate(record.id, {
+        onSuccess: () => {
+          void message.success(t('common.success'));
+          // 清除已选中的该条 key（如有）
+          setSelectedKeys((keys) => keys.filter((k) => k !== record.id));
+        },
+        onError: (err) =>
+          void message.error(err instanceof Error ? err.message : 'delete failed'),
+      });
+    },
+    [deleteMut, t]
+  );
+
+  // T-0161 批量删除：DataTable.batchActions onClick 不带二次确认，这里挂 Modal.confirm。
+  // 取 Modal.confirm 而非 Popconfirm 是因为 batchAction 按钮在 Toolbar 内由通用组件渲染，
+  // 不便就地包 Popconfirm；Modal.confirm 用法更解耦也更稳。
+  const handleBatchDelete = useCallback(
+    (keys: React.Key[]) => {
+      const ids = keys.map((k) => String(k));
+      if (ids.length === 0) return;
+      Modal.confirm({
+        title: t('trace.action.batchDelete'),
+        content: t('trace.confirm.batchDelete', { count: ids.length }),
+        okText: t('common.confirm'),
+        cancelText: t('common.cancel'),
+        okButtonProps: { danger: true },
+        onOk: () =>
+          new Promise<void>((resolve) => {
+            batchDeleteMut.mutate(ids, {
+              onSuccess: (result) => {
+                void message.success(
+                  t('trace.delete.result', {
+                    succeeded: result.succeeded,
+                    failed: result.failed,
+                  })
+                );
+                if (result.failed > 0 && result.errors.length > 0) {
+                  // 把第一条错误暴露给用户（多半是 running 拒绝）
+                  void message.warning(result.errors[0].message);
+                }
+                setSelectedKeys([]);
+                resolve();
+              },
+              onError: (err) => {
+                void message.error(err instanceof Error ? err.message : 'batch delete failed');
+                resolve();
+              },
+            });
+          }),
+      });
+    },
+    [batchDeleteMut, t]
   );
 
   const columns: DataTableColumn<TraceTask & Record<string, unknown>>[] = useMemo(
@@ -195,7 +257,7 @@ export default function MessageTrace() {
         key: 'actions',
         title: t('table.action'),
         fixed: 'right',
-        width: 280,
+        width: 340,
         render: (_v, r) => (
           <Space size="small">
             <Button
@@ -224,11 +286,29 @@ export default function MessageTrace() {
                 />
               </Tooltip>
             )}
+            {/* T-0161 单条删除：running 状态下禁用 + hint，避免发请求被后端拒 */}
+            {r.status === 'running' ? (
+              <Tooltip title={t('trace.delete.runningHint')}>
+                <Button size="small" icon={<DeleteOutlined />} danger disabled>
+                  {t('trace.action.delete')}
+                </Button>
+              </Tooltip>
+            ) : (
+              <Popconfirm
+                title={t('trace.confirm.delete')}
+                onConfirm={() => handleDelete(r)}
+                okButtonProps={{ danger: true, loading: deleteMut.isPending }}
+              >
+                <Button size="small" icon={<DeleteOutlined />} danger>
+                  {t('trace.action.delete')}
+                </Button>
+              </Popconfirm>
+            )}
           </Space>
         ),
       },
     ],
-    [t, handleStop, handleExport]
+    [t, handleStop, handleExport, handleDelete, deleteMut.isPending]
   );
 
   return (
@@ -247,7 +327,19 @@ export default function MessageTrace() {
           setPageSize(s);
         }}
         onRefresh={() => void refetch()}
-        scroll={{ x: 1200 }}
+        scroll={{ x: 1300 }}
+        selectable
+        selectedRowKeys={selectedKeys}
+        onSelectionChange={(keys) => setSelectedKeys(keys)}
+        batchActions={[
+          {
+            key: 'batchDelete',
+            label: t('trace.action.batchDelete'),
+            icon: <DeleteOutlined />,
+            danger: true,
+            onClick: handleBatchDelete,
+          },
+        ]}
         extraToolbarLeft={
           <Button
             type="primary"

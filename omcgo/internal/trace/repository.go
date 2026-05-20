@@ -25,6 +25,12 @@ type Repository interface {
 	// PurgeTaskMessages 物理删除任务下所有报文。
 	PurgeTaskMessages(ctx context.Context, taskID uuid.UUID) error
 
+	// DeleteTask 物理删除任务行（trace_tasks）。调用方需保证已
+	// PurgeTaskMessages（外置对象清理由调用方/sweeper 负责）。未找到返回 ErrNotFound。
+	DeleteTask(ctx context.Context, id uuid.UUID) error
+	// BatchDeleteTasks 批量物理删除任务行；返回成功删除的行数。
+	BatchDeleteTasks(ctx context.Context, ids []uuid.UUID) (int64, error)
+
 	InsertMessage(ctx context.Context, msg *Message) error
 	InsertMessages(ctx context.Context, msgs []*Message) error
 	ListMessages(ctx context.Context, filter MessageFilter) (*model.ListResponse[Message], error)

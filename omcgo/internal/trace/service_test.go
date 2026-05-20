@@ -57,6 +57,10 @@ func (c *captureMockRepo) ListExpired(_ context.Context, _ int) ([]Task, error) 
 func (c *captureMockRepo) PurgeTaskMessages(_ context.Context, _ uuid.UUID) error {
 	return errUnused
 }
+func (c *captureMockRepo) DeleteTask(_ context.Context, _ uuid.UUID) error { return errUnused }
+func (c *captureMockRepo) BatchDeleteTasks(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, errUnused
+}
 func (c *captureMockRepo) InsertMessage(_ context.Context, _ *Message) error { return errUnused }
 func (c *captureMockRepo) ListMessages(_ context.Context, _ MessageFilter) (*model.ListResponse[Message], error) {
 	return nil, errUnused

@@ -41,6 +41,8 @@ func (m *mockRepo) UpdateTaskStatus(_ context.Context, _ uuid.UUID, _ TaskStatus
 func (m *mockRepo) IncrementMessageCount(_ context.Context, _ uuid.UUID, _ int) error                  { return errUnused }
 func (m *mockRepo) ListExpired(_ context.Context, _ int) ([]Task, error)                               { return nil, errUnused }
 func (m *mockRepo) PurgeTaskMessages(_ context.Context, _ uuid.UUID) error                             { return errUnused }
+func (m *mockRepo) DeleteTask(_ context.Context, _ uuid.UUID) error                                    { return errUnused }
+func (m *mockRepo) BatchDeleteTasks(_ context.Context, _ []uuid.UUID) (int64, error)                   { return 0, errUnused }
 func (m *mockRepo) InsertMessage(_ context.Context, _ *Message) error                                  { return errUnused }
 func (m *mockRepo) InsertMessages(_ context.Context, _ []*Message) error                               { return errUnused }
 func (m *mockRepo) ListMessages(_ context.Context, _ MessageFilter) (*model.ListResponse[Message], error) {

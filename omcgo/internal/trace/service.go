@@ -306,6 +306,75 @@ func (s *Service) ListMessages(ctx context.Context, filter MessageFilter) (*mode
 	return s.repo.ListMessages(ctx, filter)
 }
 
+// DeleteResult 批量删除汇总。沿用 device 模块 BatchOperationResult 风格。
+type DeleteResult struct {
+	Total     int               `json:"total"`
+	Succeeded int               `json:"succeeded"`
+	Failed    int               `json:"failed"`
+	Errors    []DeleteItemError `json:"errors,omitempty"`
+}
+
+// DeleteItemError 单条失败原因。
+type DeleteItemError struct {
+	ID      string `json:"id"`
+	Message string `json:"message"`
+}
+
+// DeleteTask 物理删除单个抓包任务。
+//
+// 规则：
+//   - 任务必须先停止（status != running），running 任务直接拒绝（避免 ACS 白名单残留
+//     与 capture 仍在涌入 PG 时删除任务行）。调用方应先 StopTask。
+//   - 顺序：先 PG DELETE trace_messages → DELETE trace_tasks（trace_export_jobs 通过
+//     外键 ON DELETE CASCADE 自动清理）→ 发 trace.task.purged 事件让 sweeper 清 MinIO 对象。
+//   - 未找到返回 ErrNotFound。
+func (s *Service) DeleteTask(ctx context.Context, id uuid.UUID) (*Task, error) {
+	t, err := s.repo.GetTask(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if t.Status == TaskStatusRunning {
+		return nil, fmt.Errorf("%w: task is running, stop it first", commonerrors.ErrInvalidInput)
+	}
+	// 先清 messages（hypertable，无 FK CASCADE）
+	if err := s.repo.PurgeTaskMessages(ctx, id); err != nil {
+		return nil, fmt.Errorf("purge messages before delete: %w", err)
+	}
+	if err := s.repo.DeleteTask(ctx, id); err != nil {
+		return nil, err
+	}
+	// 发 purged 事件让 sweeper 异步清 MinIO 对象（M2-06 启用时才有内容）
+	// 注意 sweeper.handlePurgeEvent 走的也是 PurgeTaskMessages — 此处已删 messages 后
+	// sweeper 再 DELETE 等价于 0 行，幂等无副作用，但 MinIO 对象只有事件路径会清。
+	s.publishTaskEvent(ctx, event.SubjectTraceTaskPurged, t, "manual_delete")
+	s.logger.Info("trace: task deleted",
+		zap.String("task_id", id.String()),
+		zap.String("device_sn", t.DeviceSN))
+	return t, nil
+}
+
+// BatchDeleteTasks 批量删除任务。逐个调用 DeleteTask 以复用 running 拒绝 +
+// 消息清理 + 事件发布逻辑；返回汇总。
+func (s *Service) BatchDeleteTasks(ctx context.Context, ids []uuid.UUID) DeleteResult {
+	result := DeleteResult{Total: len(ids)}
+	for _, id := range ids {
+		if _, err := s.DeleteTask(ctx, id); err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, DeleteItemError{
+				ID:      id.String(),
+				Message: err.Error(),
+			})
+			continue
+		}
+		result.Succeeded++
+	}
+	s.logger.Info("trace: batch delete tasks",
+		zap.Int("total", result.Total),
+		zap.Int("succeeded", result.Succeeded),
+		zap.Int("failed", result.Failed))
+	return result
+}
+
 // GetMessage 查询单条报文（含 inline payload 或 object_key 元数据）。
 func (s *Service) GetMessage(ctx context.Context, taskID, msgID uuid.UUID) (*Message, error) {
 	return s.repo.GetMessage(ctx, taskID, msgID)

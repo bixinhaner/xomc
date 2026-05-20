@@ -69,6 +69,32 @@ export function useStopTraceTask() {
   });
 }
 
+// ----- T-0161: 删除 -----
+
+// useDeleteTraceTask 单条删除任务。任务必须先 stop（后端 service 层会拒绝 running）。
+// 成功后失效任务列表与详情 query。
+export function useDeleteTraceTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => traceApi.deleteTask(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: TASK_KEYS });
+    },
+  });
+}
+
+// useBatchDeleteTraceTasks 批量删除任务。返回 DeleteResult 汇总。
+// 调用方负责弹 Popconfirm 二次确认 + 上限校验。
+export function useBatchDeleteTraceTasks() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => traceApi.batchDeleteTasks(ids),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: TASK_KEYS });
+    },
+  });
+}
+
 // ----- Message query -----
 
 export function useTraceMessages(taskId: string | undefined, params: TraceMessageListParams) {

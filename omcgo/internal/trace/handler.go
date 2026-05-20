@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -52,19 +53,23 @@ func (h *Handler) SetMinIO(client *minio.Client) {
 
 // RegisterRoutes 在已含 /api/v1 与权限中间件的 RouterGroup 上挂载。
 //
-//	POST /trace/tasks
-//	GET  /trace/tasks
-//	GET  /trace/tasks/:id
-//	POST /trace/tasks/:id/stop
-//	GET  /trace/tasks/:id/messages
-//	POST /trace/tasks/:id/export        — M1 同步小批量 XML 直接流式返回
-//	GET  /trace/devices/:sn/active-task
+//	POST   /trace/tasks
+//	GET    /trace/tasks
+//	GET    /trace/tasks/:id
+//	POST   /trace/tasks/:id/stop
+//	DELETE /trace/tasks/:id              — T-0161 单条删除（任务必须先 stop）
+//	POST   /trace/tasks/batch-delete     — T-0161 批量删除（body: {"ids":["uuid",...]}）
+//	GET    /trace/tasks/:id/messages
+//	POST   /trace/tasks/:id/export       — M1 同步小批量 XML 直接流式返回
+//	GET    /trace/devices/:sn/active-task
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	g := rg.Group("/trace")
 	g.POST("/tasks", h.CreateTask)
 	g.GET("/tasks", h.ListTasks)
+	g.POST("/tasks/batch-delete", h.BatchDeleteTasks)
 	g.GET("/tasks/:id", h.GetTask)
 	g.POST("/tasks/:id/stop", h.StopTask)
+	g.DELETE("/tasks/:id", h.DeleteTask)
 	g.GET("/tasks/:id/messages", h.ListMessages)
 	g.GET("/tasks/:id/messages/:msgId/payload", h.GetMessagePayload)
 	g.POST("/tasks/:id/export", h.ExportXML)
@@ -123,6 +128,56 @@ func (h *Handler) GetTask(c *gin.Context) {
 		return
 	}
 	response.OK(c, t)
+}
+
+// DeleteTask DELETE /trace/tasks/:id — T-0161 单条删除。
+// 任务必须先停止（service 层会拒绝 running）。删除会清掉 trace_messages 与
+// trace_export_jobs（外键 CASCADE），并发 trace.task.purged 让 sweeper 清 MinIO。
+func (h *Handler) DeleteTask(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	task, err := h.service.DeleteTask(c.Request.Context(), id)
+	deviceSN := ""
+	if task != nil {
+		deviceSN = task.DeviceSN
+	}
+	h.audit(c, "trace_delete", task, deviceSN, err)
+	if err != nil {
+		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
+		return
+	}
+	response.OK(c, gin.H{"deleted": true, "task_id": id.String()})
+}
+
+// BatchDeleteTasksRequest 批量删除请求体。
+type BatchDeleteTasksRequest struct {
+	IDs []uuid.UUID `json:"ids" binding:"required"`
+}
+
+// BatchDeleteTasks POST /trace/tasks/batch-delete — T-0161 批量删除。
+// body: {"ids":["uuid", ...]}；上限 100，超出返 400。
+// 返回 DeleteResult（total / succeeded / failed / errors）。
+func (h *Handler) BatchDeleteTasks(c *gin.Context) {
+	var req BatchDeleteTasksRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	if len(req.IDs) == 0 {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.ErrInvalidInput)
+		return
+	}
+	if len(req.IDs) > 100 {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("%w: batch size must not exceed 100", commonerrors.ErrInvalidInput))
+		return
+	}
+	result := h.service.BatchDeleteTasks(c.Request.Context(), req.IDs)
+	h.auditBatchDelete(c, req.IDs, result)
+	response.OK(c, result)
 }
 
 // StopTask POST /trace/tasks/:id/stop
@@ -362,6 +417,35 @@ func (h *Handler) audit(c *gin.Context, action string, task *Task, deviceSN stri
 	}
 	if err != nil {
 		entry.ErrorMessage = err.Error()
+	}
+	audit.Log(c.Request.Context(), entry)
+}
+
+// auditBatchDelete T-0161 批量删除审计。一次操作一条记录，details 里携带
+// id_count / succeeded / failed，避免 N 个 ids → N 条审计记录刷屏。
+func (h *Handler) auditBatchDelete(c *gin.Context, ids []uuid.UUID, result DeleteResult) {
+	_, username := h.identity(c)
+	idStrs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		idStrs = append(idStrs, id.String())
+	}
+	entry := audit.Entry{
+		Username:     username,
+		Action:       "trace_delete",
+		ResourceType: "trace_task",
+		Details: map[string]interface{}{
+			"batch":     true,
+			"id_count":  len(ids),
+			"ids":       idStrs,
+			"succeeded": result.Succeeded,
+			"failed":    result.Failed,
+		},
+		IPAddress: c.ClientIP(),
+		UserAgent: c.Request.UserAgent(),
+		Success:   result.Failed == 0,
+	}
+	if result.Failed > 0 && len(result.Errors) > 0 {
+		entry.ErrorMessage = result.Errors[0].Message
 	}
 	audit.Log(c.Request.Context(), entry)
 }

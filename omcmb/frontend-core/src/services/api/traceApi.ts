@@ -199,7 +199,48 @@ export const traceApi = {
     );
     return data ?? '';
   },
+
+  // T-0161: 单条删除（任务必须先 stop；后端会拒绝 running 任务的删除请求）
+  async deleteTask(id: string): Promise<void> {
+    await http.delete(`/trace/tasks/${id}`);
+  },
+
+  // T-0161: 批量删除；上限 100，超出后端 400。
+  // 返回 DeleteResult（total / succeeded / failed / errors）。
+  async batchDeleteTasks(ids: string[]): Promise<TraceBatchDeleteResult> {
+    const { data } = await http.post<BackendTraceBatchDeleteResult>(
+      '/trace/tasks/batch-delete',
+      { ids }
+    );
+    return {
+      total: data.total ?? 0,
+      succeeded: data.succeeded ?? 0,
+      failed: data.failed ?? 0,
+      errors: (data.errors ?? []).map((e) => ({
+        id: e.id,
+        message: e.message,
+      })),
+    };
+  },
 };
+
+// ---------------------------------------------------------------------------
+// T-0161: Batch delete result
+// ---------------------------------------------------------------------------
+
+interface BackendTraceBatchDeleteResult {
+  total: number;
+  succeeded: number;
+  failed: number;
+  errors?: { id: string; message: string }[];
+}
+
+export interface TraceBatchDeleteResult {
+  total: number;
+  succeeded: number;
+  failed: number;
+  errors: { id: string; message: string }[];
+}
 
 // ---------------------------------------------------------------------------
 // Export job mapper

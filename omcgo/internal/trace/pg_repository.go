@@ -280,6 +280,42 @@ func (r *PgRepository) PurgeTaskMessages(ctx context.Context, taskID uuid.UUID) 
 	return nil
 }
 
+// DeleteTask 物理删除任务行（trace_tasks）。未找到返回 ErrNotFound。
+// 注意：trace_messages 由调用方先 PurgeTaskMessages 清理；export_jobs 通过
+// ON DELETE CASCADE / 外键级联自动清理（参见 migrations）。
+func (r *PgRepository) DeleteTask(ctx context.Context, id uuid.UUID) error {
+	query, args, err := storage.Psql.Delete("trace_tasks").
+		Where(sq.Eq{"id": id}).ToSql()
+	if err != nil {
+		return fmt.Errorf("build delete trace_task: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("delete trace_task: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+	return nil
+}
+
+// BatchDeleteTasks 批量删除任务行；返回受影响行数。空切片直接返回 0。
+func (r *PgRepository) BatchDeleteTasks(ctx context.Context, ids []uuid.UUID) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	query, args, err := storage.Psql.Delete("trace_tasks").
+		Where(sq.Eq{"id": ids}).ToSql()
+	if err != nil {
+		return 0, fmt.Errorf("build batch delete trace_tasks: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("batch delete trace_tasks: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // InsertMessage 单条插入。
 func (r *PgRepository) InsertMessage(ctx context.Context, msg *Message) error {
 	if msg.ID == uuid.Nil {
