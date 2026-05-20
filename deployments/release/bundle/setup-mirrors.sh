@@ -9,6 +9,17 @@
 #
 # 不下载任何东西，只改本地配置文件。
 #
+# 【Golang 生效说明 — 常见困惑】
+#   /etc/profile.d/*.sh 仅在 **login shell** 启动时自动加载（如 `ssh user@host` /
+#   `sudo -i` / 控制台登录）。`sudo -s`、`su`（不带 -）、已开着的 SSH 会话
+#   都【不是】login shell，**不会**自动 source。
+#   子进程（本脚本）也无法回写父 shell 的环境变量。
+#   配完 Golang 要立刻在当前 shell 生效，必须主动执行其一：
+#     · source /etc/profile.d/goproxy.sh        # 仅当前 shell
+#     · go env -w GOPROXY=https://goproxy.cn,direct \
+#                  GOSUMDB=sum.golang.google.cn # 写到 ~/.config/go/env，对 go 工具永久生效
+#     · 退出当前 shell 重新登录
+#
 # 用法：
 #   sudo bash setup-mirrors.sh                                     # 交互：逐项询问 3 项
 #   sudo bash setup-mirrors.sh --docker daocloud                   # 仅设 Docker
@@ -42,15 +53,20 @@
 # =============================================================================
 set -euo pipefail
 
-DAEMON_JSON="/etc/docker/daemon.json"
-NPMRC="/etc/npmrc"
-GOPROXY_FILE="/etc/profile.d/goproxy.sh"
+# 路径常量；允许通过环境变量覆盖以便测试（生产环境直接用默认值）
+DAEMON_JSON="${DAEMON_JSON:-/etc/docker/daemon.json}"
+NPMRC="${NPMRC:-/etc/npmrc}"
+GOPROXY_FILE="${GOPROXY_FILE:-/etc/profile.d/goproxy.sh}"
 
 log()  { echo -e "\033[1;36m[mirrors]\033[0m $*"; }
 warn() { echo -e "\033[1;33m[mirrors][警告]\033[0m $*" >&2; }
 die()  { echo -e "\033[1;31m[mirrors][错误]\033[0m $*" >&2; exit 1; }
 
-show_help() { sed -n '3,43p' "$0"; exit 0; }
+show_help() {
+  # 打印头部注释块（第 3 行到首个 "# ===" 闭合分隔行之前），与脚本同步演进，不写死行号
+  awk 'NR>=3 && /^# ====/ {exit} NR>=3 {print}' "$0"
+  exit 0
+}
 
 # ── 参数解析 ─────────────────────────────────────────────────────────────
 DOCKER_CHOICE=""
@@ -64,7 +80,7 @@ while [ $# -gt 0 ]; do
     --npm)    NPM_CHOICE="$2";    shift 2 ;;
     --golang) GOLANG_CHOICE="$2"; shift 2 ;;
     --mirror) DOCKER_CHOICE="$2"; shift 2
-              warn "--mirror 已废弃，等价 --docker $DOCKER_CHOICE，请改用 --docker" ;;
+              warn "--mirror 已废弃，等价 --docker ${DOCKER_CHOICE}，请改用 --docker" ;;
     --show)   SHOW=1; shift ;;
     --remove) REMOVE_ALL=1; shift ;;
     -h|--help) show_help ;;
@@ -73,9 +89,9 @@ while [ $# -gt 0 ]; do
 done
 
 # 校验 choice 取值
-case "$DOCKER_CHOICE"  in official|daocloud|xuanyuan|"") ;; *) die "--docker 取值非法：$DOCKER_CHOICE（应为 official/daocloud/xuanyuan）" ;; esac
-case "$NPM_CHOICE"     in official|taobao|"") ;;            *) die "--npm 取值非法：$NPM_CHOICE（应为 official/taobao）" ;; esac
-case "$GOLANG_CHOICE"  in official|goproxycn|"") ;;         *) die "--golang 取值非法：$GOLANG_CHOICE（应为 official/goproxycn）" ;; esac
+case "$DOCKER_CHOICE"  in official|daocloud|xuanyuan|"") ;; *) die "--docker 取值非法：${DOCKER_CHOICE}（应为 official/daocloud/xuanyuan）" ;; esac
+case "$NPM_CHOICE"     in official|taobao|"") ;;            *) die "--npm 取值非法：${NPM_CHOICE}（应为 official/taobao）" ;; esac
+case "$GOLANG_CHOICE"  in official|goproxycn|"") ;;         *) die "--golang 取值非法：${GOLANG_CHOICE}（应为 official/goproxycn）" ;; esac
 
 # --remove：等价于 3 个 official
 if [ "$REMOVE_ALL" = 1 ]; then
@@ -104,9 +120,32 @@ if [ "$SHOW" = 1 ]; then
   echo
   echo "── Golang GOPROXY ──"
   if [ -f "$GOPROXY_FILE" ]; then
-    sed 's/^/  /' "$GOPROXY_FILE"
+    echo "  [1] 文件 ${GOPROXY_FILE}（新 login shell 自动 source）："
+    sed 's/^/      /' "$GOPROXY_FILE"
   else
-    echo "  (未配置，$GOPROXY_FILE 不存在 — 走 Go 默认 proxy.golang.org)"
+    echo "  [1] 文件 ${GOPROXY_FILE}：(未配置 — 走 Go 默认 proxy.golang.org)"
+  fi
+  echo
+  echo "  [2] 当前 shell 环境变量（决定刚 spawn 的 go 子进程能否看到）："
+  echo "      GOPROXY=${GOPROXY:-(未设置)}"
+  echo "      GOSUMDB=${GOSUMDB:-(未设置)}"
+  if command -v go >/dev/null 2>&1; then
+    echo
+    echo "  [3] go env 实际最终值（go 工具真正用的值；~/.config/go/env 优先级最高）："
+    echo "      GOPROXY=$(go env GOPROXY 2>/dev/null || echo '(go env 读取失败)')"
+    echo "      GOSUMDB=$(go env GOSUMDB 2>/dev/null || echo '(go env 读取失败)')"
+  else
+    echo
+    echo "  [3] go env：未检测到 go 二进制，跳过"
+  fi
+  # 智能提示：文件配了但 shell env 没生效
+  if [ -f "$GOPROXY_FILE" ] && [ -z "${GOPROXY:-}" ]; then
+    echo
+    echo -e "  \033[1;33m⚠ 文件已配置但当前 shell 未生效。\033[0m 立刻激活请选一种："
+    echo "      · source $GOPROXY_FILE                                # 仅当前 shell"
+    echo "      · go env -w GOPROXY=\$(grep GOPROXY= $GOPROXY_FILE | cut -d= -f2-) \\"
+    echo "                 GOSUMDB=\$(grep GOSUMDB= $GOPROXY_FILE | cut -d= -f2-)   # 写入 go env，对 go 永久生效"
+    echo "      · 退出当前 shell 重新登录（profile.d 仅 login shell 自动加载）"
   fi
   exit 0
 fi
@@ -285,7 +324,7 @@ configure_golang() {
       if [ -f "$GOPROXY_FILE" ]; then
         cp -a "$GOPROXY_FILE" "$GOPROXY_FILE.bak.$(date +%Y%m%d%H%M%S)"
         rm -f "$GOPROXY_FILE"
-        log "Golang：已删除 $GOPROXY_FILE（回归官方 proxy.golang.org）"
+        log "Golang：已删除 ${GOPROXY_FILE}（回归官方 proxy.golang.org）"
       else
         log "Golang：$GOPROXY_FILE 不存在，无需操作"
       fi
@@ -298,18 +337,37 @@ export GOPROXY=https://goproxy.cn,direct
 export GOSUMDB=sum.golang.google.cn
 EOF
       chmod 0644 "$GOPROXY_FILE"
-      log "Golang：写入 $GOPROXY_FILE："
+      log "Golang：写入 ${GOPROXY_FILE}："
       sed 's/^/    /' "$GOPROXY_FILE"
-      log "Golang：**新登录的 shell 才生效**；当前 shell 立即生效请运行："
-      log "          source $GOPROXY_FILE   # 或：go env -w GOPROXY=https://goproxy.cn,direct"
+      GOLANG_NEEDS_ACTIVATION=1
       ;;
   esac
 }
 
 # ── 顺序应用 3 项 ───────────────────────────────────────────────────────
+GOLANG_NEEDS_ACTIVATION=0
 configure_docker  "$DOCKER_CHOICE"
 configure_npm     "$NPM_CHOICE"
 configure_golang  "$GOLANG_CHOICE"
+
+# ── Golang 激活提示（醒目框，避免淹没在普通日志里）─────────────────────
+if [ "$GOLANG_NEEDS_ACTIVATION" = 1 ]; then
+  echo
+  echo -e "\033[1;33m╔════════════════════════════════════════════════════════════════════╗\033[0m"
+  echo -e "\033[1;33m║  ⚠ Golang 配置文件已写入，但【当前 shell 不会自动生效】           ║\033[0m"
+  echo -e "\033[1;33m║                                                                    ║\033[0m"
+  echo -e "\033[1;33m║  /etc/profile.d/*.sh 仅 login shell 自动 source；当前 shell（如    ║\033[0m"
+  echo -e "\033[1;33m║  sudo -s / 已开的 SSH 会话）不会回头加载它。                       ║\033[0m"
+  echo -e "\033[1;33m║                                                                    ║\033[0m"
+  echo -e "\033[1;33m║  立刻激活，三选一：                                                ║\033[0m"
+  echo -e "\033[1;33m║    ① source /etc/profile.d/goproxy.sh        # 仅当前 shell        ║\033[0m"
+  echo -e "\033[1;33m║    ② go env -w GOPROXY=https://goproxy.cn,direct \\                ║\033[0m"
+  echo -e "\033[1;33m║                 GOSUMDB=sum.golang.google.cn  # 写入 go env 永久    ║\033[0m"
+  echo -e "\033[1;33m║    ③ 退出 shell 重新登录（ssh / sudo -i）                          ║\033[0m"
+  echo -e "\033[1;33m║                                                                    ║\033[0m"
+  echo -e "\033[1;33m║  验证：echo \$GOPROXY  或  go env GOPROXY                           ║\033[0m"
+  echo -e "\033[1;33m╚════════════════════════════════════════════════════════════════════╝\033[0m"
+fi
 
 echo
 log "完成。下次可单独运行：sudo bash $0 --show 查看当前 3 项配置。"
