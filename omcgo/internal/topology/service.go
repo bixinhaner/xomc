@@ -18,20 +18,56 @@ import (
 
 // DeviceGroupService provides business logic for device group management.
 type DeviceGroupService struct {
-	repo       DeviceGroupRepository
+	repo         DeviceGroupRepository
 	topoNodeRepo TopoNodeRepository
-	pool       *pgxpool.Pool
-	logger     *zap.Logger
+	pool         *pgxpool.Pool
+	logger       *zap.Logger
 
 	// PRD users.md §11.7 决议③ / roles.md §11.4：删除设备分组联动钩子。
 	// 两者均可为 nil（测试场景），DeleteGroup 退化为旧行为。
 	roleQuery       RoleAffectedQuery
 	roleCacheBuster RoleCachePurger
+
+	// groupMatchEngine：分组新增/编辑后异步回灌匹配设备。可为 nil（测试/未接线
+	// 时退化为不触发）。
+	groupMatchEngine groupMatcher
+}
+
+// groupMatcher 是 DeviceGroupService 消费的窄接口：分组增改后按其匹配规则
+// 异步回灌设备。由 *GroupMatchEngine 实现。
+type groupMatcher interface {
+	MatchGroup(ctx context.Context, groupID uuid.UUID) error
 }
 
 // NewDeviceGroupService creates a new DeviceGroupService.
 func NewDeviceGroupService(repo DeviceGroupRepository, topoNodeRepo TopoNodeRepository, pool *pgxpool.Pool, logger *zap.Logger) *DeviceGroupService {
 	return &DeviceGroupService{repo: repo, topoNodeRepo: topoNodeRepo, pool: pool, logger: logger}
+}
+
+// SetGroupMatchEngine 注入分组匹配引擎，使分组新增/编辑后异步触发设备回灌。
+func (s *DeviceGroupService) SetGroupMatchEngine(m groupMatcher) {
+	s.groupMatchEngine = m
+}
+
+// fireGroupMatch 在分组新增/编辑成功后异步回灌匹配设备。对传入分组及其子分组
+// 逐个调 MatchGroup（非 L2 / 未配匹配规则的分组会在 MatchGroup 内安全 no-op）。
+func (s *DeviceGroupService) fireGroupMatch(g *DeviceGroup) {
+	if s.groupMatchEngine == nil || g == nil {
+		return
+	}
+	ids := []uuid.UUID{g.ID}
+	for i := range g.Children {
+		ids = append(ids, g.Children[i].ID)
+	}
+	go func() {
+		ctx := context.Background()
+		for _, id := range ids {
+			if err := s.groupMatchEngine.MatchGroup(ctx, id); err != nil {
+				s.logger.Warn("group match after group CRUD failed",
+					zap.String("group_id", id.String()), zap.Error(err))
+			}
+		}
+	}()
 }
 
 // GetTree returns the full group tree with children nested under parents.
@@ -154,6 +190,8 @@ func (s *DeviceGroupService) CreateGroup(ctx context.Context, req CreateGroupReq
 		}
 	}
 
+	// 异步回灌：按新分组（及其子分组）的匹配规则把命中设备归入。
+	s.fireGroupMatch(group)
 	return group, nil
 }
 
@@ -241,6 +279,9 @@ func (s *DeviceGroupService) UpdateGroup(ctx context.Context, id uuid.UUID, req 
 	if err := s.repo.Update(ctx, group); err != nil {
 		return nil, fmt.Errorf("update group: %w", err)
 	}
+
+	// 异步回灌：按编辑后的匹配规则把命中设备归入本分组。
+	s.fireGroupMatch(group)
 	return group, nil
 }
 

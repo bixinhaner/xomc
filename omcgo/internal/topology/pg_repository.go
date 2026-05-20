@@ -408,6 +408,23 @@ func (r *PgDeviceGroupRepository) AddDeviceWithSource(ctx context.Context, group
 	return tag.RowsAffected(), nil
 }
 
+// AddDeviceAutoMatched 自动匹配命中：无条件 UPSERT 设备到 group，标 source_type='rule'。
+// 不带 manual 守护 —— 会覆盖手工分配（"最后编辑/匹配优先"语义，GroupMatchEngine 用）。
+func (r *PgDeviceGroupRepository) AddDeviceAutoMatched(ctx context.Context, groupID, deviceID uuid.UUID) error {
+	const rawSQL = `
+		INSERT INTO device_group_members (group_id, device_id, added_at, source_type)
+		VALUES ($1, $2, $3, 'rule')
+		ON CONFLICT (device_id) DO UPDATE SET
+			group_id = EXCLUDED.group_id,
+			added_at = EXCLUDED.added_at,
+			source_type = 'rule'`
+
+	if _, err := r.pool.Exec(ctx, rawSQL, groupID, deviceID, time.Now()); err != nil {
+		return fmt.Errorf("auto-match add device to group: %w", err)
+	}
+	return nil
+}
+
 func (r *PgDeviceGroupRepository) RemoveDevice(ctx context.Context, groupID, deviceID uuid.UUID) error {
 	query, args, err := storage.Psql.Delete("device_group_members").
 		Where(sq.And{

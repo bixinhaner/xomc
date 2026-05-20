@@ -55,6 +55,20 @@ func (mr *MockDeviceGroupRepositoryMockRecorder) AddDevice(ctx, groupID, deviceI
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddDevice", reflect.TypeOf((*MockDeviceGroupRepository)(nil).AddDevice), ctx, groupID, deviceID)
 }
 
+// AddDeviceAutoMatched mocks base method.
+func (m *MockDeviceGroupRepository) AddDeviceAutoMatched(ctx context.Context, groupID, deviceID uuid.UUID) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddDeviceAutoMatched", ctx, groupID, deviceID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// AddDeviceAutoMatched indicates an expected call of AddDeviceAutoMatched.
+func (mr *MockDeviceGroupRepositoryMockRecorder) AddDeviceAutoMatched(ctx, groupID, deviceID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddDeviceAutoMatched", reflect.TypeOf((*MockDeviceGroupRepository)(nil).AddDeviceAutoMatched), ctx, groupID, deviceID)
+}
+
 // AddDeviceWithSource mocks base method.
 func (m *MockDeviceGroupRepository) AddDeviceWithSource(ctx context.Context, groupID, deviceID uuid.UUID, sourceType string, sourceRuleID *uuid.UUID) (int64, error) {
 	m.ctrl.T.Helper()

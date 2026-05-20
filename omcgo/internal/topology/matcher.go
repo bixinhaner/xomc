@@ -3,6 +3,7 @@ package topology
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -51,30 +52,37 @@ func (m *DeviceMatcher) MatchDevice(ctx context.Context, req MatchRequest) (*Mat
 		return nil, fmt.Errorf("get groups: %w", err)
 	}
 
-	// 遍历所有 L2 分组进行匹配
+	// 收集所有配了匹配规则的 L2 分组，按 updated_at 降序排列 —— 最近新增/编辑的
+	// 分组优先匹配，首个命中即胜，实现"分组最后新增或编辑为优先"。
+	var l2Groups []DeviceGroup
 	for _, l1Group := range groups {
-		for _, l2Group := range l1Group.Children {
-			if l2Group.MatchingMode == "" {
-				continue
+		for _, g := range l1Group.Children {
+			if g.MatchingMode != "" {
+				l2Groups = append(l2Groups, g)
 			}
+		}
+	}
+	sort.SliceStable(l2Groups, func(i, j int) bool {
+		return l2Groups[i].UpdatedAt.After(l2Groups[j].UpdatedAt)
+	})
 
-			matched, err := m.matchGroup(ctx, l2Group, req)
-			if err != nil {
-				m.logger.Warn("match group failed",
-					zap.String("group_id", l2Group.ID.String()),
-					zap.String("group_name", l2Group.Name),
-					zap.Error(err),
-				)
-				continue
-			}
+	for _, l2Group := range l2Groups {
+		matched, err := m.matchGroup(ctx, l2Group, req)
+		if err != nil {
+			m.logger.Warn("match group failed",
+				zap.String("group_id", l2Group.ID.String()),
+				zap.String("group_name", l2Group.Name),
+				zap.Error(err),
+			)
+			continue
+		}
 
-			if matched {
-				return &MatchResult{
-					GroupID:   l2Group.ID,
-					GroupName: l2Group.Name,
-					MatchedBy: l2Group.MatchingMode,
-				}, nil
-			}
+		if matched {
+			return &MatchResult{
+				GroupID:   l2Group.ID,
+				GroupName: l2Group.Name,
+				MatchedBy: l2Group.MatchingMode,
+			}, nil
 		}
 	}
 
@@ -197,8 +205,8 @@ func (m *DeviceMatcher) AssignDeviceToGroup(ctx context.Context, req MatchReques
 		return nil, nil
 	}
 
-	// 将设备添加到匹配的分组
-	if err := m.repo.AddDevice(ctx, result.GroupID, req.DeviceID); err != nil {
+	// 将设备添加到匹配的分组（自动匹配：无条件覆盖，含手工分配）
+	if err := m.repo.AddDeviceAutoMatched(ctx, result.GroupID, req.DeviceID); err != nil {
 		return nil, fmt.Errorf("add device to group: %w", err)
 	}
 

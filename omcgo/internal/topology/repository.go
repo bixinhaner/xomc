@@ -44,6 +44,11 @@ type GroupMembership interface {
 	// 返回 rowsAffected：1 = inserted/updated；0 = manual override 跳过。
 	// sourceType 应为 "rule"；sourceRuleID 非 nil 时记录归属规则。
 	AddDeviceWithSource(ctx context.Context, groupID, deviceID uuid.UUID, sourceType string, sourceRuleID *uuid.UUID) (int64, error)
+
+	// AddDeviceAutoMatched 自动匹配命中后无条件 UPSERT 设备到指定 group，
+	// 标 source_type='rule'。与 AddDeviceWithSource 不同：**不带 A4 manual 守护**，
+	// 会覆盖手工分配 —— 符合"分组匹配规则最后编辑优先"语义（GroupMatchEngine 用）。
+	AddDeviceAutoMatched(ctx context.Context, groupID, deviceID uuid.UUID) error
 }
 
 // DeviceGroupRepository defines the full persistence interface for device groups.

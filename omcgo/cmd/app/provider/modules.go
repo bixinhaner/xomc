@@ -798,13 +798,27 @@ func initMiscModules(c *Container) error {
 	ruleService.SetEventBus(c.EventBus)
 	// T-0027 S3 Day 8：注入 RuleMetrics（PRD §12.5 — 6 metric / 7 log key）
 	ruleService.SetMetrics(topology.NewRuleMetrics(c.MetricsReg))
-	// T-0027 S3 Day 6：启动 cron @hourly reEvaluateAll
-	// PRD §12.1 §D2；A4 manual 守护已在 AddDeviceWithSource SQL 层强制
-	// ctx=Background — cron.Cron 自带 goroutine 生命周期，进程退出随之结束
-	if err := ruleService.Start(context.Background()); err != nil {
-		logger.Error("topology rule service Start failed", zap.Error(err))
-	}
+	// device_rules 引擎已下线：自动归组功能并入设备分组（GroupMatchEngine 接管）。
+	// ruleService 的 REST 接口仍保留（device_rules 表/CRUD 暂存、前端页面尚在），
+	// 故 ruleHandler 照常装配 —— 仅不再调 Start()：不挂 cron、不订阅 device.registered，
+	// 避免与 GroupMatchEngine 形成双引擎并跑。彻底退役 device_rules 留作后续单独立项。
 	c.miscDeps.ruleHandler = topology.NewRuleHandler(ruleService)
+
+	// 设备分组自动匹配引擎（GroupMatchEngine）：消费 L2 分组自带的匹配规则，
+	// 触发时机 = 分组新增/编辑 + 新设备注册 + 心跳 inform + cron @hourly。
+	groupMatchEngine := topology.NewGroupMatchEngine(
+		matcher, topology.NewPgDeviceLister(c.PgPool, logger), c.GroupRepo, logger)
+	groupMatchEngine.SetEventBus(c.EventBus)
+	if err := groupMatchEngine.Start(context.Background()); err != nil {
+		logger.Error("group match engine Start failed", zap.Error(err))
+	}
+	if c.GroupService != nil {
+		c.GroupService.SetGroupMatchEngine(groupMatchEngine)
+	}
+	c.GS.Register("topology-group-match", 1, func(_ context.Context) error {
+		groupMatchEngine.Stop()
+		return nil
+	})
 
 	// System Info endpoint
 	c.miscDeps.sysInfoHandler = components.NewSystemInfoHandler(c.PgPool, c.Redis, logger)
