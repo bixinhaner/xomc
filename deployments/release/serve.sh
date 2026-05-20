@@ -46,13 +46,40 @@ command -v python3 >/dev/null 2>&1 || { echo "错误：需要 python3 提供 HTT
 # 启动前刷新下载索引，确保 index.html 与 archive/ 实际内容一致。
 [ -x "$SCRIPT_DIR/gen-index.sh" ] && "$SCRIPT_DIR/gen-index.sh" >/dev/null 2>&1 || true
 
+# ── archive 内容扫描（每类一行 "版本号 (N 个文件)"；让用户启动时就能确认
+# 自己的 build-release.sh / build-images.sh 产物是否被检测到）────────────────
+list_archive() {
+  local kind="$1" label="$2" empty_hint="$3"
+  local root="$ARCHIVE/$kind"
+  local n=0 d v files
+  if [ -d "$root" ]; then
+    for d in "$root"/*/; do
+      [ -d "$d" ] || continue
+      n=$((n+1))
+    done
+  fi
+  if [ "$n" = 0 ]; then
+    printf '   %s ： 0 个    （%s）\n' "$label" "$empty_hint"
+    return
+  fi
+  printf '   %s ： %d 个\n' "$label" "$n"
+  for d in "$root"/*/; do
+    [ -d "$d" ] || continue
+    v=$(basename "$d")
+    files=$(find "$d" -maxdepth 1 -type f -name 'omc-*.tar.*' ! -name '*.sha256' 2>/dev/null | wc -l | tr -d ' ')
+    printf '       · %s   (%s 个交付文件)\n' "$v" "$files"
+  done
+}
+
 IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
 echo "──────────────────────────────────────────────"
 echo " OMC 交付包下载服务"
-echo "   根目录： $ARCHIVE"
-echo "   地址  ： http://${IP:-<构建机IP>}:$PORT/"
-echo "   说明  ： 浏览器打开上面地址即可看到版本列表并下载"
-echo "   停止  ： Ctrl-C"
+echo "   根目录 ： $ARCHIVE"
+echo "   地址   ： http://${IP:-<构建机IP>}:$PORT/"
+list_archive project "项目版本下载" "运行 ./build-release.sh 生成"
+list_archive infra   "基础设置下载" "运行 ./build-images.sh 生成"
+echo "   说明   ： 浏览器打开上面地址即可看到版本列表并下载"
+echo "   停止   ： Ctrl-C"
 echo "──────────────────────────────────────────────"
 
 cd "$ARCHIVE"
