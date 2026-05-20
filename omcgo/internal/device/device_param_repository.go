@@ -15,6 +15,9 @@ type DeviceParameterRepository interface {
 	GetByDevice(ctx context.Context, deviceID uuid.UUID) ([]model.DeviceParameter, error)
 	GetByPath(ctx context.Context, deviceID uuid.UUID, path string) (*model.DeviceParameter, error)
 	DeleteByDevice(ctx context.Context, deviceID uuid.UUID) error
+	// DeleteByPathPrefix 删除指定 deviceID 下 parameter_path 以 prefix 开头的所有记录，
+	// 用于 DeleteObject 成功后清理多实例对象的全部叶子参数。返回删除条数。
+	DeleteByPathPrefix(ctx context.Context, deviceID uuid.UUID, prefix string) (int64, error)
 	GetByPathPrefix(ctx context.Context, deviceID uuid.UUID, prefix string) ([]model.DeviceParameter, error)
 	CountByPathPrefix(ctx context.Context, deviceID uuid.UUID, prefix string) (int, error)
 	SearchByKeyword(ctx context.Context, deviceID uuid.UUID, keyword string, limit int) ([]model.DeviceParameter, error)

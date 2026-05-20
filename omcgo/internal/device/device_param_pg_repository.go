@@ -140,6 +140,21 @@ func (r *PgDeviceParameterRepository) DeleteByDevice(ctx context.Context, device
 	return nil
 }
 
+func (r *PgDeviceParameterRepository) DeleteByPathPrefix(ctx context.Context, deviceID uuid.UUID, prefix string) (int64, error) {
+	if prefix == "" {
+		return 0, fmt.Errorf("empty prefix not allowed (would delete all device parameters)")
+	}
+	query, args, _ := storage.Psql.Delete("device_parameters").
+		Where(sq.Eq{"device_id": deviceID}).
+		Where(sq.Like{"parameter_path": prefix + "%"}).
+		ToSql()
+	tag, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("delete device parameters by prefix: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 func (r *PgDeviceParameterRepository) GetByPathPrefix(ctx context.Context, deviceID uuid.UUID, prefix string) ([]model.DeviceParameter, error) {
 	query, args, err := storage.Psql.Select(paramColumns...).
 		From("device_parameters").

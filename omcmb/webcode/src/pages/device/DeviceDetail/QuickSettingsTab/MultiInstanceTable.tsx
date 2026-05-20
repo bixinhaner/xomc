@@ -319,6 +319,14 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
   // Tag 只显示"入队成功/失败"语义。
   const { data: lastTask } = useDeviceTaskStatus(lastAction?.taskId);
 
+  // CPE 真正应答完成后再次刷新 schema，让 UI 摘掉已删实例（仅入队后的乐观 refetch 拿到的还是旧 schema）
+  useEffect(() => {
+    if (lastTask && lastTask.status === 'completed') {
+      void refetch();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastTask?.id, lastTask?.status]);
+
   // T-0146:基站应答失败时弹一次 notification(仅在 status 第一次变成 failed 时触发)
   // notifiedFailedTaskId 同样存 store —— 切顶层 tab 再切回不会重复弹。
   useEffect(() => {

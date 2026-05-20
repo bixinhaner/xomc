@@ -577,6 +577,7 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 		// 更新会话状态
 		session.State = StateRPCPending
 		session.LastRPC = taskItem.Method
+		session.LastCommandParams = taskItem.Params
 		session.RPCCount++
 		session.UpdatedAt = time.Now()
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
@@ -755,6 +756,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 
 		session.State = StateRPCPending
 		session.LastRPC = nextTask.Method
+		session.LastCommandParams = nextTask.Params
 		session.RPCCount++
 		session.UpdatedAt = time.Now()
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
@@ -1301,13 +1303,19 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 		"method":    string(method),
 	}
 
-	// 从 lastCmdParams 提取原始命令路径（用于 GPN/GPV 关联）。
+	// 从 lastCmdParams 提取原始命令路径（用于 GPN/GPV 关联）+ object_name（AddObject/DeleteObject）。
 	if len(lastCmdParams) > 0 {
 		var cmdMeta struct {
-			Path string `json:"path"`
+			Path       string `json:"path"`
+			ObjectName string `json:"object_name"`
 		}
-		if err := json.Unmarshal(lastCmdParams, &cmdMeta); err == nil && cmdMeta.Path != "" {
-			payload["path"] = cmdMeta.Path
+		if err := json.Unmarshal(lastCmdParams, &cmdMeta); err == nil {
+			if cmdMeta.Path != "" {
+				payload["path"] = cmdMeta.Path
+			}
+			if cmdMeta.ObjectName != "" {
+				payload["object_name"] = cmdMeta.ObjectName
+			}
 		}
 	}
 

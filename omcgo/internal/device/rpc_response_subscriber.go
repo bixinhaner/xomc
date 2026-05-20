@@ -97,9 +97,57 @@ func (s *RPCResponseSubscriber) Start() error {
 		return fmt.Errorf("subscribe %s: %w", event.SubjectCommandGetParamsResponse, err)
 	}
 	s.subscriptions = append(s.subscriptions, sub)
+	delSub, err := s.bus.Subscribe(event.SubjectCommandDeleteObjectResponse, s.handleDeleteObjectResponse)
+	if err != nil {
+		return fmt.Errorf("subscribe %s: %w", event.SubjectCommandDeleteObjectResponse, err)
+	}
+	s.subscriptions = append(s.subscriptions, delSub)
 	s.logger.Info("RPC response subscriber started",
-		zap.String("subject", event.SubjectCommandGetParamsResponse),
+		zap.Strings("subjects", []string{
+			event.SubjectCommandGetParamsResponse,
+			event.SubjectCommandDeleteObjectResponse,
+		}),
 	)
+	return nil
+}
+
+// handleDeleteObjectResponse 处理 CPE 对 DeleteObject 的成功应答。
+//
+// ACS publish payload: { device_sn, method, object_name } (object_name 为
+// 已删除对象的路径，含末尾 ".")。本 handler 据此清理 device_parameters 表中
+// 所有路径以 object_name 开头的叶子参数 —— 否则前端 schema 查询仍会读到被
+// 删实例的旧数据，UI 显示与设备真实状态偏离。
+func (s *RPCResponseSubscriber) handleDeleteObjectResponse(ctx context.Context, evt event.Event) error {
+	var payload map[string]interface{}
+	if err := evt.DecodePayload(&payload); err != nil {
+		s.logger.Warn("delete_object.response: decode payload", zap.Error(err))
+		return nil
+	}
+	deviceSN, _ := payload["device_sn"].(string)
+	objectName, _ := payload["object_name"].(string)
+	if deviceSN == "" || objectName == "" {
+		s.logger.Warn("delete_object.response: missing device_sn or object_name",
+			zap.String("device_sn", deviceSN), zap.String("object_name", objectName))
+		return nil
+	}
+	device, err := s.deviceLookup.GetBySerialNumber(ctx, deviceSN)
+	if err != nil || device == nil {
+		s.logger.Warn("delete_object.response: device lookup failed",
+			zap.String("device_sn", deviceSN), zap.Error(err))
+		return nil
+	}
+	deleted, err := s.paramRepo.DeleteByPathPrefix(ctx, device.ID, objectName)
+	if err != nil {
+		s.logger.Error("delete_object.response: clean device_parameters failed",
+			zap.String("device_sn", deviceSN),
+			zap.String("object_name", objectName),
+			zap.Error(err))
+		return err
+	}
+	s.logger.Info("delete_object.response: device_parameters cleaned",
+		zap.String("device_sn", deviceSN),
+		zap.String("object_name", objectName),
+		zap.Int64("deleted_rows", deleted))
 	return nil
 }
 
