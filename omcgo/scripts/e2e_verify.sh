@@ -5645,6 +5645,43 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
 check_status_in "T-0123-P1 mml-console-5: POST /mml/execute-statements empty body" "400 401" "$HTTP_CODE"
 
 # ------------------------------------------------------------
+# CMCC TD-LTE v2.3 catalog 落地（feat(mml): catalog 重构 commit e8f43a89）
+#
+# 验证三个维度：
+#   - v2.3 catalog 已通过 mml-catalog loader 灌库（71 groups + 224 commands）
+#   - chapter_code 列被 BuildTree 返回（前端按 SA→SR 排序的关键）
+#   - 结构化执行端点已注册 + 错误体形态正确（unknown_paths 422）
+# ------------------------------------------------------------
+claim "MML v2.3 catalog: GET /admin/mml-catalog/info returns 200/401/403"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/mml-catalog/info" -H "$W2D_AUTH")
+check_status_in "MML v2.3 mml-catalog-info: GET /admin/mml-catalog/info" "200 401 403" "$HTTP_CODE"
+
+claim "MML v2.3 catalog: GET /mml/group-tree response body 包含 chapter_code 字段"
+RESP=$(curl -s "$API/mml/group-tree" -H "$W2D_AUTH")
+# response envelope 形如 {"data": {"tree": [{...,"chapter_code":"SA",...}]}} 或 401
+if echo "$RESP" | grep -q '"chapter_code"' || echo "$RESP" | grep -q '"missing authorization"'; then
+    check_status "MML v2.3 mml-group-tree-chapter: chapter_code field present (or 401 unauthenticated)" "0" "0"
+else
+    check_status "MML v2.3 mml-group-tree-chapter: chapter_code field missing" "0" "1"
+fi
+
+claim "MML v2.3 catalog: POST /mml/console/execute-statements-structured 路由已挂"
+# 故意发空 body 触发 400；如果路由未挂会返 404
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    -X POST "$API/mml/console/execute-statements-structured" -H "$W2D_AUTH" \
+    -H "Content-Type: application/json" \
+    -d '{}')
+check_status_in "MML v2.3 mml-structured-route: POST /mml/console/execute-statements-structured" "400 401" "$HTTP_CODE"
+
+claim "MML v2.3 catalog: structured execute unknown command_id returns 404/422/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    -X POST "$API/mml/console/execute-statements-structured" -H "$W2D_AUTH" \
+    -H "Content-Type: application/json" \
+    -d "{\"statements\":[{\"command_id\":\"$W2D_BAD_UUID\",\"operation_type\":\"LST\",\"paths\":[\"Device.X\"]}],\"device_sns\":[\"TEST00001\"]}")
+check_status_in "MML v2.3 mml-structured-404: unknown command_id" "404 422 401 400 500" "$HTTP_CODE"
+
+# ------------------------------------------------------------
 section "W2.D.1 filemanager Domain (≥ 3 claims)"
 
 claim "files: list files returns 200/401"

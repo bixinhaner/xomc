@@ -148,16 +148,22 @@ func upsertGroup(ctx context.Context, tx pgx.Tx, carrier, tech string, g *Group)
 			updated_at = NOW()
 		WHERE id = $1;
 	`
+	// migration 000131 把 path 列设为 NOT NULL；v2.3 catalog 行用
+	// `<chapter_code>.<normalized_groupCode>` 作为 ltree path（合法 ltree label：
+	// 仅字母数字下划线，由 normalizeForCommandCode 归一）。空 chapter 时退化到
+	// "Standard" 顶级，与老 catalog 风格兼容。
 	const insertSQL = `
 		INSERT INTO mml_param_groups (
 			id, group_code, group_name_zh, group_name_en, name_i18n,
 			param_version, display_order, source, catalog_protected,
 			object_path_template, chapter_code, instance_arity, instance_levels,
+			path,
 			deprecated_at, created_at, updated_at
 		) VALUES (
 			gen_random_uuid(), $1, $2, $3, $4::jsonb,
 			$5, $6, 'standard', true,
 			$7, $8, $9, $10::text[],
+			$11::ltree,
 			NULL, NOW(), NOW()
 		) RETURNING id;
 	`
@@ -188,11 +194,19 @@ func upsertGroup(ctx context.Context, tx pgx.Tx, carrier, tech string, g *Group)
 		return uuid.Nil, fmt.Errorf("select group: %w", err)
 	}
 	// 2. INSERT 新行
-	// 注意：旧 group_code 列保留兼容，与新 object_path_template 同值
+	// 注意：旧 group_code 列保留兼容，与新 object_path_template 同值。
+	// path：`<chapter>.<normalized_groupCode>`，由 normalizeForCommandCode 保证 ltree 合法
+	// （仅 [a-zA-Z0-9_]，无点/星号）。空 chapter 退化到 "Standard"。
+	chapter := g.ChapterCode
+	if chapter == "" {
+		chapter = "Standard"
+	}
+	ltreePath := chapter + "." + normalizeForCommandCode(g.GroupCode)
 	err = tx.QueryRow(ctx, insertSQL,
 		g.GroupCode, nameZH, nameEN, nameI18nJSON,
 		paramVersion, g.DisplayOrder,
 		g.GroupCode, g.ChapterCode, g.InstanceArity, levels,
+		ltreePath,
 	).Scan(&id)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("insert group %s: %w", g.GroupCode, err)

@@ -26,16 +26,8 @@ const OP_TAG_COLOR: Record<string, string> = {
   RMV: 'red',
 };
 
-// 解析 backend displayName。后端历史格式为 "设备信息(LST DEVICE_INFO)" — 把括号尾
-// 部去掉只保留对象名，与左侧 OP Tag 配合显示，避免 "LST 设备信息(LST DEVICE_INFO)"
-// 这种语义重复。括号未出现时原样返回。
-function stripOpSuffix(displayName: string): string {
-  const i = displayName.lastIndexOf('(');
-  if (i < 0) return displayName;
-  const closing = displayName.lastIndexOf(')');
-  if (closing < i) return displayName;
-  return displayName.slice(0, i).trimEnd();
-}
+// stripOpSuffix / chapterSortKey 已拆到 ./commandTreeUtils.ts；下方 import 复用。
+import { chapterSortKey, stripOpSuffix } from './commandTreeUtils';
 
 function renderOpLeafTitle(op: MMLOperationType, displayName: string): ReactNode {
   const color = OP_TAG_COLOR[op] ?? 'default';
@@ -72,12 +64,6 @@ function collectAllCommands(group: GroupTreeNode): GroupTreeCommand[] {
     out.push(...collectAllCommands(child));
   }
   return out;
-}
-
-// chapterSortKey 把章节码归一化为可排序字符串；空 / undefined（老 catalog 未分章）
-// 映射为高位 sentinel 排末位。与后端 chapterSortKey 行为对齐。
-function chapterSortKey(chapter: string | undefined): string {
-  return chapter && chapter !== '' ? chapter : '~~~~~';
 }
 
 function buildTreeData(nodes: GroupTreeNode[]): TreeDataNode[] {
