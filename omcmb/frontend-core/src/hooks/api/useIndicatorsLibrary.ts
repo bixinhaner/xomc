@@ -24,6 +24,14 @@ export function useIndicatorList(deviceType: DeviceType, filter?: IndicatorListF
   });
 }
 
+export function usePlatformList(deviceType: DeviceType) {
+  return useQuery({
+    queryKey: [...IL_KEY, 'platforms', deviceType],
+    queryFn: () => api.listPlatforms(deviceType),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function useIndicatorDetail(deviceType: DeviceType, id: string | undefined) {
   return useQuery({
     queryKey: [...IL_KEY, 'detail', deviceType, id],

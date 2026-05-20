@@ -164,6 +164,11 @@ func (s *IndicatorManagementService) ListIndicators(ctx context.Context, filter 
 	return s.indicatorRepo.List(ctx, filter)
 }
 
+// ListPlatformNames 返回指定 deviceType 在公式表里出现过的全部平台名（去重并按字典序排序）。
+func (s *IndicatorManagementService) ListPlatformNames(ctx context.Context, dt DeviceType) ([]string, error) {
+	return s.platformRepo.ListPlatformNames(ctx, dt)
+}
+
 func (s *IndicatorManagementService) GetIndicatorInfo(ctx context.Context, dt DeviceType, id string) (*PerfIndicator, error) {
 	return s.indicatorRepo.GetByID(ctx, dt, id)
 }

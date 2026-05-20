@@ -56,7 +56,21 @@ export const indicatorLibraryService = {
     }
     if (filter?.operatorCode) items = items.filter((i) => i.operatorCode === filter.operatorCode);
     if (filter?.isEnabled !== undefined) items = items.filter((i) => Boolean(i.isEnabled) === filter.isEnabled);
+    if (filter?.platformName) {
+      const platform = filter.platformName;
+      items = items.filter((i) => (formulas[i.id] || []).some((f) => f.platformName === platform));
+    }
     return { items: clone(items), total: items.length };
+  },
+
+  async listPlatforms(deviceType: DeviceType) {
+    const ids = new Set(indicators[deviceType].map((i) => i.id));
+    const names = new Set<string>();
+    for (const id of ids) {
+      for (const f of formulas[id] || []) names.add(f.platformName);
+    }
+    const items = Array.from(names).sort();
+    return { items, total: items.length };
   },
 
   async get(deviceType: DeviceType, id: string): Promise<IndicatorInfo> {

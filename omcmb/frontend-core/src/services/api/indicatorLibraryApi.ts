@@ -141,6 +141,7 @@ export const indicatorLibraryApi = {
     if (filter?.indicatorLevel) params.indicatorLevel = filter.indicatorLevel;
     if (filter?.isEnabled !== undefined) params.isEnabled = filter.isEnabled;
     if (filter?.isCounter !== undefined) params.isCounter = filter.isCounter;
+    if (filter?.platformName) params.platformName = filter.platformName;
     if (filter?.page) params.page = filter.page;
     if (filter?.pageSize) params.pageSize = filter.pageSize;
 
@@ -157,6 +158,13 @@ export const indicatorLibraryApi = {
   async get(deviceType: DeviceType, id: string): Promise<IndicatorInfo> {
     const { data } = await http.get<BackendIndicator>(`/indicators/${id}`, { params: { deviceType } });
     return mapIndicator(data, deviceType);
+  },
+
+  async listPlatforms(deviceType: DeviceType): Promise<{ items: string[]; total: number }> {
+    const { data } = await http.get<{ items: string[]; total: number }>('/indicators/platforms', {
+      params: { deviceType },
+    });
+    return { items: data.items || [], total: data.total || 0 };
   },
 
   async create(deviceType: DeviceType, input: CreateIndicatorInput): Promise<IndicatorInfo> {

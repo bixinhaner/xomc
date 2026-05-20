@@ -198,6 +198,7 @@ type IndicatorListFilter struct {
 	ProductType    *string `json:"product_type"`
 	IndicatorLevel *string `json:"indicator_level"`
 	IsEnabled      *string `json:"is_enabled"`
+	PlatformName   *string `json:"platform_name"`
 	model.ListRequest
 }
 

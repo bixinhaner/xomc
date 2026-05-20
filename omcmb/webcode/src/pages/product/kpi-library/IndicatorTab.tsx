@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
-import { Card, Table, Input, Switch, Button, Space, message, Popconfirm } from 'antd';
+import { Card, Table, Input, Switch, Button, Space, Select, message, Popconfirm } from 'antd';
 import { EyeOutlined, DeleteOutlined } from '@ant-design/icons';
 import {
   useIndicatorList,
   useDeleteIndicator,
   useEnabledIndicators,
   useSetEnabledIndicators,
+  usePlatformList,
 } from '@core/hooks/api/useIndicatorsLibrary';
 import type { DeviceType, IndicatorInfo } from '@core/types/indicatorLibrary';
 import IndicatorDrawer from './IndicatorDrawer';
@@ -19,10 +20,18 @@ const OPERATOR_CODE = 'default';
 
 export default function IndicatorTab({ deviceType }: Props) {
   const [keyword, setKeyword] = useState('');
+  const [platform, setPlatform] = useState<string | undefined>(undefined);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+  const { data: platformData } = usePlatformList(deviceType);
+  const platformOptions = useMemo(
+    () => (platformData?.items || []).map((p) => ({ label: p, value: p })),
+    [platformData]
+  );
+  const showPlatformFilter = platformOptions.length > 1;
   const { data, isLoading } = useIndicatorList(deviceType, {
     keyword: keyword || undefined,
+    platformName: platform,
     page,
     pageSize,
   });
@@ -115,16 +124,31 @@ export default function IndicatorTab({ deviceType }: Props) {
       size="small"
       title={`${deviceType} 指标列表`}
       extra={
-        <Input.Search
-          placeholder="搜索 ID / 名称"
-          allowClear
-          value={keyword}
-          onChange={(e) => {
-            setKeyword(e.target.value);
-            setPage(1);
-          }}
-          style={{ width: 260 }}
-        />
+        <Space>
+          {showPlatformFilter && (
+            <Select
+              placeholder="按平台筛选"
+              allowClear
+              value={platform}
+              onChange={(v) => {
+                setPlatform(v);
+                setPage(1);
+              }}
+              options={platformOptions}
+              style={{ width: 200 }}
+            />
+          )}
+          <Input.Search
+            placeholder="搜索 ID / 名称"
+            allowClear
+            value={keyword}
+            onChange={(e) => {
+              setKeyword(e.target.value);
+              setPage(1);
+            }}
+            style={{ width: 260 }}
+          />
+        </Space>
       }
     >
       <Table<IndicatorInfo>

@@ -508,6 +508,12 @@ func applyIndicatorFilters(builder sq.SelectBuilder, f IndicatorListFilter, dt D
 			builder = builder.Where("e.indicator_id IS NULL")
 		}
 	}
+	if f.PlatformName != nil && *f.PlatformName != "" {
+		builder = builder.Where(sq.Expr(
+			fmt.Sprintf("EXISTS (SELECT 1 FROM %s f WHERE f.indicator_id = i.id AND f.platform_name = ?)", dt.FormulaTable()),
+			*f.PlatformName,
+		))
+	}
 	return builder
 }
 

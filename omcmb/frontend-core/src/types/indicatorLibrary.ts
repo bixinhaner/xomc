@@ -29,6 +29,7 @@ export interface IndicatorListFilter {
   indicatorLevel?: string;
   isEnabled?: boolean;
   isCounter?: boolean;
+  platformName?: string;
   page?: number;
   pageSize?: number;
 }

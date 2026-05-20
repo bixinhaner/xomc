@@ -51,6 +51,7 @@ func (h *RESTHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	// indicators
 	ig := rg.Group("/indicators")
 	ig.GET("", h.ListIndicators)
+	ig.GET("/platforms", h.ListPlatforms)
 	ig.POST("/import-directory", h.ImportDirectory)
 	ig.POST("/cache/refresh", h.CacheRefresh)
 	ig.GET("/:id", h.GetIndicator)
@@ -148,12 +149,34 @@ func (h *RESTHandler) ListIndicators(c *gin.Context) {
 	if v := strings.TrimSpace(c.Query("isCounter")); v != "" {
 		filter.IsCounter = &v
 	}
+	if v := strings.TrimSpace(c.Query("platformName")); v != "" {
+		filter.PlatformName = &v
+	}
 	resp, err := h.svc.ListIndicators(c.Request.Context(), filter)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 	response.OK(c, resp)
+}
+
+// ListPlatforms 返回某 deviceType 下公式表中出现过的全部平台名。
+// 用于 KPI 指标库列表页的平台筛选下拉。
+func (h *RESTHandler) ListPlatforms(c *gin.Context) {
+	dt, err := parseDeviceTypeQuery(c)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	names, err := h.svc.ListPlatformNames(c.Request.Context(), dt)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if names == nil {
+		names = []string{}
+	}
+	response.OK(c, gin.H{"items": names, "total": len(names)})
 }
 
 func (h *RESTHandler) GetIndicator(c *gin.Context) {
