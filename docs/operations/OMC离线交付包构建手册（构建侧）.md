@@ -448,34 +448,48 @@ done
 | `build-release.sh` | 构建侧 | `-v <版本>` / `--channel test\|release` / `--arch` | 编译 + 组装项目包 |
 | `gen-index.sh` | 构建侧 | `--archive <dir>` | 重生成 `archive/index.html`（由前两个脚本自动调） |
 | `serve.sh` | 构建侧 | `-p\|--port <PORT>` | 起 HTTP 下载服务（默认 8000） |
-| `bundle/docker/install-docker.sh` | 交付侧 | `--mirror <name>` / `--no-mirror` / `--skip-if-installed` | 离线装 Docker + 引导加速镜像 |
-| `bundle/docker/setup-docker-mirror.sh` | 交付侧 | `--mirror <official\|daocloud\|xuanyuan>` / `--remove` / `--show` | 单独配 / 换 / 查 / 取消 Docker 加速镜像（v2 仅 3 选项） |
+| `bundle/docker/install-docker.sh` | 交付侧 | `--mirror <name>` / `--no-mirror` / `--skip-if-installed` | 离线装 Docker + 引导加速（末尾自动调 setup-mirrors.sh） |
+| `bundle/docker/setup-mirrors.sh` | 交付侧 | `--docker <official\|daocloud\|xuanyuan>` / `--npm <official\|taobao>` / `--golang <official\|goproxycn>` / `--show` / `--remove` | 单独配 / 换 / 查 / 取消 **Docker / npm / Golang** 三项加速 |
 | `bundle/deploy/deploy.sh` | 交付侧 | `--skip-infra` / `--skip-migrate` / `--skip-web` / `--check-only` / `--yes` | 一键部署 OMC 全栈 |
 | `bundle/deploy/healthcheck.sh` | 交付侧 | — | 部署完成后健康校验 |
 
 ---
 
-## 11. 加速镜像（registry-mirrors）方案
+## 11. 系统加速设置（Docker / npm / Golang 三合一）
 
 构建侧 `download-docker.sh` 把 Docker 引擎二进制装进 `docker-cache/`，
-`build-images.sh` 同时把 `install-docker.sh` 与 `setup-docker-mirror.sh` 打入
+`build-images.sh` 同时把 `install-docker.sh` 与 `setup-mirrors.sh` 打入
 基础设施包 `docker/` 目录。交付侧 `install-docker.sh` **离线**装完 Docker 后
-**主动引导**用户配置 Docker 镜像加速器：
+**主动引导**用户配置加速；`setup-mirrors.sh` 单独运行时一次性配齐三项。
 
-- 入口 1：`install-docker.sh` 末尾交互菜单（默认）
-- 入口 2：`install-docker.sh --mirror daocloud` 一气呵成（适合脚本/批处理）
-- 入口 3：任意时刻 `setup-docker-mirror.sh` 单独运行
-- 内置 3 选项（v2 精简）：
-  - `official`：不设置镜像，回归 docker hub 官方
-  - `daocloud`：`https://docker.m.daocloud.io`（国内推荐）
-  - `xuanyuan`：`https://docker.xuanyuan.me`
-- 实现：写 `/etc/docker/daemon.json` 的 `registry-mirrors` 字段；
-  使用 python3 merge 保留 daemon.json 其它键；备份原 daemon.json 为
-  `.bak.<时间戳>`；变更后自动 `systemctl restart docker`，内容无变则不重启
+### 11.1 三个目标 / 三个推荐
 
-> 在纯离线场景（镜像走 `docker load`）加速镜像不影响首次部署；但运维侧后续
-> 若有 `docker pull` 临时拉镜像的需求，加速器配好能显著提速。**因此 install
-> 默认主动询问**。客户网络绝对不可外出时选 `official`（不配加速）即可。
+| 目标 | 内置选项 | 推荐值 | 落地位置 |
+|------|---------|--------|---------|
+| **Docker** | `official` / `daocloud` / `xuanyuan` | `daocloud` (`https://docker.m.daocloud.io`) | `/etc/docker/daemon.json` 的 `registry-mirrors` |
+| **npm** | `official` / `taobao` | `taobao` (`https://registry.npmmirror.com`) | `/etc/npmrc`（含 `disturl` 指向 npmmirror node 镜像） |
+| **Golang** | `official` / `goproxycn` | `goproxycn` (`https://goproxy.cn,direct` + `GOSUMDB=sum.golang.google.cn`) | `/etc/profile.d/goproxy.sh` |
+
+三项相互独立，可任意组合启用 / 跳过；任一项选 `official` 即"不设置，回归官方"。
+
+### 11.2 入口
+
+- 入口 1：`install-docker.sh` 末尾交互菜单（仅 Docker；批处理可 `--mirror <name>` 跳过）
+- 入口 2：`setup-mirrors.sh` 交互式依次问 Docker / npm / Golang 三项
+- 入口 3：`setup-mirrors.sh --docker daocloud --npm taobao --golang goproxycn` 非交互一次过
+- 任意时刻可用 `setup-mirrors.sh --show` / `--remove` 查看 / 取消三项配置
+
+### 11.3 实现要点
+
+- **Docker**：用 `python3` 合并 `/etc/docker/daemon.json`，**保留其它键**；自动
+  备份 `daemon.json.bak.<时间戳>`；内容确变时 `systemctl restart docker`，未变则跳过
+- **npm**：写**系统级** `/etc/npmrc`（所有用户生效），不动用户 `~/.npmrc`
+- **Golang**：写 `/etc/profile.d/goproxy.sh`，导出 `GOPROXY` / `GOSUMDB`；新 shell
+  自动加载，当前 shell 需 `source` 或重新登录
+
+> 纯离线场景（镜像 / 包 / 模块都已随交付包给出）三项加速对**首次部署**没有影响；
+> 主要利于运维侧后续临时 `docker pull` / `npm install` / `go install` 提速。
+> **因此 install 默认主动询问**。客户网络绝对不可外出时三项均选 `official` 即可。
 
 ---
 

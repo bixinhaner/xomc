@@ -121,10 +121,10 @@ omc-infra-<版本>-<架构>/
 ├── VERSION                        # 基础设施版本 / 架构 / Docker 版本 / 构建时间
 ├── checksums.sha256               # 全部文件 SHA256
 │
-├── docker/                        # ① Docker 引擎离线安装 + 加速镜像配置
+├── docker/                        # ① Docker 引擎离线安装 + 系统加速设置
 │   ├── docker-<ver>.tgz           #   Docker 静态二进制包
-│   ├── install-docker.sh          #   离线安装脚本（含交互引导加速镜像）
-│   └── setup-docker-mirror.sh     #   单独配 / 换 / 查 / 取消加速镜像
+│   ├── install-docker.sh          #   离线安装脚本（含交互引导加速）
+│   └── setup-mirrors.sh           #   单独配 / 换 / 查 / 取消 Docker / npm / Golang 加速
 └── images/                        # ② Docker 镜像离线包
     ├── infra-images-<架构>.tar     #   postgres / redis / nats / minio / nginx
     ├── monitoring-images-<架构>.tar #   监控栈（v2 默认包含；用 build-images.sh
@@ -520,30 +520,43 @@ sudo bash /opt/omc/current/deploy/deploy.sh -h             # 看全部参数
 （`omcgo123` / `minioadmin`），存在时弹交互确认；生产部署务必在跑 deploy 前先按
 §4.1 改强口令。
 
-### 5.11 Docker 加速镜像（可选 / 安装后任意时刻可改）
+### 5.11 系统加速设置（可选 / 安装后任意时刻可改）
 
-`install-docker.sh` 装完 Docker 后会引导选择加速镜像；后期想换或单独配置：
+`install-docker.sh` 装完 Docker 后会引导选择加速；后期想换或单独配置：
 
 ```bash
-sudo bash /opt/omc/infra/docker/setup-docker-mirror.sh                    # 交互选单（3 项）
-sudo bash /opt/omc/infra/docker/setup-docker-mirror.sh --mirror daocloud  # 非交互
-sudo bash /opt/omc/infra/docker/setup-docker-mirror.sh --show             # 看当前
-sudo bash /opt/omc/infra/docker/setup-docker-mirror.sh --remove           # 取消加速
-sudo bash /opt/omc/infra/docker/setup-docker-mirror.sh -h                 # 全参数
+sudo bash /opt/omc/infra/docker/setup-mirrors.sh                    # 交互选单（依次问 Docker / npm / Golang）
+sudo bash /opt/omc/infra/docker/setup-mirrors.sh --docker daocloud  # 仅 Docker（非交互）
+sudo bash /opt/omc/infra/docker/setup-mirrors.sh --npm taobao       # 仅 npm
+sudo bash /opt/omc/infra/docker/setup-mirrors.sh --golang goproxycn # 仅 Golang
+sudo bash /opt/omc/infra/docker/setup-mirrors.sh \
+     --docker daocloud --npm taobao --golang goproxycn              # 三合一一次过
+sudo bash /opt/omc/infra/docker/setup-mirrors.sh --show             # 看当前三项
+sudo bash /opt/omc/infra/docker/setup-mirrors.sh --remove           # 取消全部
+sudo bash /opt/omc/infra/docker/setup-mirrors.sh -h                 # 全参数
 ```
 
-**内置 3 选项**（v2 精简）：
-- `official` — 不设置镜像，回归 docker hub 官方
-- `daocloud` — DaoCloud `https://docker.m.daocloud.io`（国内推荐）
-- `xuanyuan` — 轩辕镜像 `https://docker.xuanyuan.me`
+**三个目标各自的内置选项**：
+
+| 目标 | 选项 | 说明 |
+|------|------|------|
+| Docker | `official` | 不设置，回归 docker hub 官方 |
+| Docker | `daocloud` | DaoCloud `https://docker.m.daocloud.io`（推荐） |
+| Docker | `xuanyuan` | 轩辕镜像 `https://docker.xuanyuan.me` |
+| npm | `official` | 不设置，回归 `https://registry.npmjs.org` |
+| npm | `taobao` | 淘宝 `https://registry.npmmirror.com`（推荐） |
+| Golang | `official` | 不设置，使用 `proxy.golang.org` |
+| Golang | `goproxycn` | `https://goproxy.cn,direct` + `GOSUMDB=sum.golang.google.cn`（推荐） |
 
 **实现**：
-- 写 `/etc/docker/daemon.json` 的 `registry-mirrors` 字段，**保留**其它键（用
-  python3 merge；自动备份 `daemon.json.bak.<时间戳>`）
-- 内容确变时自动 `systemctl restart docker`；未变则跳过避免抖动
+- Docker：写 `/etc/docker/daemon.json` 的 `registry-mirrors`（python3 merge 保留
+  其它键，自动备份 `daemon.json.bak.<时间戳>`），变更时 `systemctl restart docker`
+- npm：写 `/etc/npmrc`（系统级，所有用户生效），不动用户 `~/.npmrc`
+- Golang：写 `/etc/profile.d/goproxy.sh`（导出 `GOPROXY` / `GOSUMDB`），新 shell
+  自动加载；当前 shell 需 `source` 或重新登录
 
-> 纯离线场景（镜像走 `docker load`）加速镜像不影响首次部署，但运维侧后续若有
-> `docker pull` 临时拉镜像的需求，配好加速能显著提速。
+> 纯离线场景下三项加速对**首次部署**没有影响（镜像 / npm 包 / Go 模块都已随包交付）；
+> 配置加速主要利于运维侧后续临时 `docker pull`、`npm install`、`go install` 提速。
 
 ### 5.12 部署后访问 + 初始账号
 
@@ -565,7 +578,7 @@ sudo bash /opt/omc/infra/docker/setup-docker-mirror.sh -h                 # 全�
 
 ```bash
 sudo bash /opt/omc/infra/docker/install-docker.sh -h         # 装 Docker
-sudo bash /opt/omc/infra/docker/setup-docker-mirror.sh -h    # 加速镜像
+sudo bash /opt/omc/infra/docker/setup-mirrors.sh -h          # Docker/npm/Golang 加速
 sudo bash /opt/omc/current/deploy/deploy.sh -h               # 一键部署
 bash /opt/omc/current/deploy/healthcheck.sh -h               # 健康校验
 ```

@@ -1,8 +1,24 @@
-# deployments/release 方案增强 — 交付侧 Docker 安装 / 镜像加速 / 一键部署 / 脚本可发现性 / 操作手册
+# deployments/release 方案增强 — 交付侧 Docker 安装 / 系统加速 / 一键部署 / 脚本可发现性 / 操作手册
 
-> 状态：**待审核**
+> 状态：**已落地（v2 收口）**
 > 提出时间：2026-05-20
 > 涉及代码：`deployments/release/**` + `docs/operations/**`
+
+---
+
+## v2 收口（2026-05-20 当日演进）
+
+本设计的"镜像加速"模块在落地当天进一步收口为**三合一加速**：
+
+- 脚本由 `setup-docker-mirror.sh` 重命名为 **`setup-mirrors.sh`**
+- 由 Docker 单一目标扩为 **Docker / npm / Golang** 三目标
+- 参数模型从 `--mirror <name>` 改为 `--docker <name>` / `--npm <name>` / `--golang <name>` 三段独立；
+  `--mirror` 保留为已废弃别名（等价 `--docker`）
+- 三目标各自的"不设置"选项均为 `official`；任意目标可独立跳过
+- 落地位置：Docker → `/etc/docker/daemon.json`；npm → `/etc/npmrc`；Golang → `/etc/profile.d/goproxy.sh`
+
+下面 §0–§6 保留 2026-05-20 提案原文（已把脚本名同步成 `setup-mirrors.sh`），
+但语义以 v2 收口为准——npm / Golang 两项是在此设计**落地当日补齐**的。
 
 ---
 
@@ -21,7 +37,7 @@
 | 维度 | 现状 | 与诉求差距 |
 |---|---|---|
 | Docker 离线安装 | `bundle/docker/install-docker.sh` 已支持：解包二进制 → 写 containerd / docker systemd 单元 → `systemctl enable --now` → `docker version` 验证 | ✅ 核心已有；缺：装完后**主动引导设置镜像加速**；缺：交互/非交互双模式 `--mirror <name>` |
-| 镜像加速 | **完全没有** | ❌ 需新增 `setup-docker-mirror.sh` |
+| 镜像加速 | **完全没有** | ❌ 需新增 `setup-mirrors.sh` |
 | 镜像导入 + 启动 | 仅文档 `docs/operations/OMC内网离线部署手册（运维侧）.md` 描述步骤，无脚本 | ❌ 需新增 `deploy.sh` 一键编排 |
 | 脚本 `-h` | `download-docker.sh` / `build-images.sh` / `build-release.sh` 有 `-h` ；`gen-index.sh` / `serve.sh` / `healthcheck.sh` / `install-docker.sh` **无 `-h`** | ⚠️ 部分缺；需补齐 |
 | `:8000` 操作手册 | `archive/index.html` 有 7 步流程；缺访问地址 / 初始账号 / 验证方式 / 文件清单 / 首次 vs 升级分流 | ⚠️ 需扩充 |
@@ -34,10 +50,10 @@
 |---|---|---|
 | D1 | 镜像加速器内置名单 | **v2 精简到 3 项**：`official`（不设置镜像）/ `daocloud`（`https://docker.m.daocloud.io`）/ `xuanyuan`（`https://docker.xuanyuan.me`）。其它历史选项（aliyun/tencent/ustc/netease/baidu/custom）已下线 |
 | D2 | 设置方式 | 修改 `/etc/docker/daemon.json` 的 `registry-mirrors`；若文件已有其它键则 **merge 而非覆盖** |
-| D3 | 镜像加速触发时机 | install-docker.sh **执行末尾自动提示** "是否配置加速？" → 是则调 setup-docker-mirror.sh；批处理可走 `--mirror <name>` 一次过；交付侧也可后期单独运行 setup-docker-mirror.sh |
+| D3 | 镜像加速触发时机 | install-docker.sh **执行末尾自动提示** "是否配置加速？" → 是则调 setup-mirrors.sh；批处理可走 `--mirror <name>` 一次过；交付侧也可后期单独运行 setup-mirrors.sh |
 | D4 | deploy.sh 自动化粒度 | 默认全套（load 镜像 → infra up → 等就绪 → migrate → seed → app/acs/worker systemd → web up → healthcheck）；提供 `--skip-*` 标志做精细控制 |
 | D5 | systemd 单元怎么装 | 项目包 `etc/systemd/*.service` 已存在 → `deploy.sh` 拷到 `/etc/systemd/system/`，`daemon-reload` + `enable --now` |
-| D6 | 必须 root 的脚本 | install-docker.sh / setup-docker-mirror.sh / deploy.sh 全部需要 root |
+| D6 | 必须 root 的脚本 | install-docker.sh / setup-mirrors.sh / deploy.sh 全部需要 root |
 | D7 | `daemon.json` 兜底 | 不强制使用 `jq`（很多内网无 jq）；用 python3 / awk fallback，按"无则建、有则改"双路径 |
 | D8 | 操作手册集成位置 | 主要扩 `gen-index.sh` 渲染的 `index.html`；细节链 docs/operations 两份手册 |
 | D9 | 初始账号密码展示口径 | 引用项目 `migrations/seed/000001_seed_data.sql` 的默认；密码标"**首次登录强制改**" |
@@ -49,18 +65,18 @@
 
 ### 3.1 新增脚本
 
-#### `bundle/docker/setup-docker-mirror.sh`
+#### `bundle/docker/setup-mirrors.sh`
 
 职责：写 `/etc/docker/daemon.json` 的 `registry-mirrors`，重启 docker。
 
 用法：
 ```bash
-sudo bash setup-docker-mirror.sh                    # 交互式选单（3 选项）
-sudo bash setup-docker-mirror.sh --mirror daocloud  # 非交互
-sudo bash setup-docker-mirror.sh --mirror xuanyuan
-sudo bash setup-docker-mirror.sh --mirror official  # 不设置镜像
-sudo bash setup-docker-mirror.sh --remove           # 等价 --mirror official
-sudo bash setup-docker-mirror.sh -h
+sudo bash setup-mirrors.sh                    # 交互式选单（3 选项）
+sudo bash setup-mirrors.sh --mirror daocloud  # 非交互
+sudo bash setup-mirrors.sh --mirror xuanyuan
+sudo bash setup-mirrors.sh --mirror official  # 不设置镜像
+sudo bash setup-mirrors.sh --remove           # 等价 --mirror official
+sudo bash setup-mirrors.sh -h
 ```
 
 内置 URL（决策 D1，**v2 精简到 3 项**）：
@@ -113,7 +129,7 @@ sudo bash deploy.sh -h
 #### `bundle/docker/install-docker.sh`
 
 - 增强 `-h` 块（list 所有参数）
-- 末尾自动调用 `setup-docker-mirror.sh`（交互；可 `--mirror <name>` 跳过）
+- 末尾自动调用 `setup-mirrors.sh`（交互；可 `--mirror <name>` 跳过）
 - 新增 `--no-mirror` 不配加速
 - 检测当前用户 → 提示加入 docker 组（仅 root 模式下提示 `usermod -aG docker $SUDO_USER`）
 
@@ -136,7 +152,7 @@ sudo bash deploy.sh -h
 ├─ 🔐 2. 校验完整性（sha256sum -c）
 ├─ 📦 3. 解压交付包（tar -xJf）
 ├─ 🐳 4. 安装 Docker（首次部署，sudo bash docker/install-docker.sh）
-├─ ⚡ 5. 配置镜像加速（可选；sudo bash docker/setup-docker-mirror.sh）
+├─ ⚡ 5. 配置镜像加速（可选；sudo bash docker/setup-mirrors.sh）
 ├─ 🚚 6. 一键部署（sudo bash deploy/deploy.sh）
 ├─ ✅ 7. 验证（bash deploy/healthcheck.sh）
 ├─ 🌐 8. 部署后访问地址
@@ -154,7 +170,7 @@ sudo bash deploy.sh -h
 ### 3.4 文档更新
 
 **构建侧** `docs/operations/OMC离线交付包构建手册（构建侧）.md`：
-- 新增 §X 镜像加速器：bundle/docker/setup-docker-mirror.sh 入参 / 流程 / 内置 URL
+- 新增 §X 镜像加速器：bundle/docker/setup-mirrors.sh 入参 / 流程 / 内置 URL
 - 新增 §X 一键部署：bundle/deploy/deploy.sh 介绍 + `--skip-*` 用法
 - 新增 §X 脚本 -h 对照表（每个脚本 → 关键参数 → 适用场景）
 - 与已有"两包独立"章节交叉引用
@@ -170,7 +186,7 @@ sudo bash deploy.sh -h
 ## 4. 实施顺序
 
 1. ✅ 本设计文档
-2. 新建 `bundle/docker/setup-docker-mirror.sh` + `-h`
+2. 新建 `bundle/docker/setup-mirrors.sh` + `-h`
 3. 增强 `bundle/docker/install-docker.sh`（调加速 + `-h` 强化）
 4. 新建 `bundle/deploy/deploy.sh` + `-h`
 5. 补 `gen-index.sh` / `serve.sh` / `healthcheck.sh` 的 `-h`
@@ -188,7 +204,7 @@ sudo bash deploy.sh -h
 | 镜像加速 URL 失效 | v2 内置 3 选项（official/daocloud/xuanyuan），用户随时可换；如需其它 URL 可单独编辑 `/etc/docker/daemon.json` |
 | deploy.sh 在已部署环境重跑 | 全幂等：load 镜像跳过同 digest；compose up -d 自动协调；migrate 内置版本号比对 |
 | systemd 单元覆盖已有 | 检测 `/etc/systemd/system/omcgo-*.service` 存在时备份 `.bak.<时间戳>` |
-| Docker 重启中断在运行的容器 | setup-docker-mirror.sh 在 daemon.json 未变化时跳过 restart |
+| Docker 重启中断在运行的容器 | setup-mirrors.sh 在 daemon.json 未变化时跳过 restart |
 | index.html 默认密码引出安全审计问题 | 显著红色提示"首次登录强制改"；密码可由 release.conf 配置默认值（生产 / 测试不同） |
 
 ---
@@ -200,7 +216,7 @@ sudo bash deploy.sh -h
 | 各脚本 `-h` 输出 | `bash <script> -h` 不报错、内容含全部参数 |
 | `bash -n` 语法 | CI / 手动 |
 | install-docker.sh 干跑 | docker 容器中模拟（先卸载再装）|
-| setup-docker-mirror.sh merge daemon.json | 单元：临时 daemon.json + python 合并断言 |
+| setup-mirrors.sh merge daemon.json | 单元：临时 daemon.json + python 合并断言 |
 | deploy.sh `--check-only` | 在 dev 环境跑通而不修改系统 |
 | index.html 渲染 | `bash gen-index.sh` → 检查 HTML 含 8 大段 |
 | 端口冲突 | serve.sh 探测 8000 占用时 fail-fast |

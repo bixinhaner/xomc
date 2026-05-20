@@ -142,14 +142,19 @@ sudo bash install-docker.sh --mirror daocloud       # 非交互：装完直接�
 sudo bash install-docker.sh -h                      # 查看所有参数</pre>
 <p class="tip">install-docker.sh 自动：解压二进制 → 写 containerd / docker 的 systemd 单元 → <code>enable --now</code> 开机自启 → 验证 → 引导加速镜像。</p>
 
-<h2>⚡ 5. 配置 Docker 加速镜像（可选）</h2>
-<p class="lead">安装 Docker 时已选过的可跳过；后期想换加速器单独运行：</p>
+<h2>⚡ 5. 系统加速设置（可选）— Docker / npm / Golang 三合一</h2>
+<p class="lead"><code>setup-mirrors.sh</code> 一次性配置 3 类加速器（每项可独立选择"不设置 = 走官方"）：</p>
 <pre>cd /opt/omc/infra/docker
-sudo bash setup-docker-mirror.sh                    # 交互选单（3 选项）
-sudo bash setup-docker-mirror.sh --mirror daocloud  # 非交互
-sudo bash setup-docker-mirror.sh --show             # 看当前配置
-sudo bash setup-docker-mirror.sh --remove           # 取消加速回归官方</pre>
-<p class="tip">内置：<code>official</code>（不设置镜像）/ <code>daocloud</code> <code>https://docker.m.daocloud.io</code> / <code>xuanyuan</code> <code>https://docker.xuanyuan.me</code>。</p>
+sudo bash setup-mirrors.sh                          # 交互：逐项询问 3 项
+sudo bash setup-mirrors.sh --docker daocloud --npm taobao --golang goproxycn   # 一气呵成
+sudo bash setup-mirrors.sh --show                   # 看当前 3 项配置
+sudo bash setup-mirrors.sh --remove                 # 全部取消，回归官方</pre>
+<p class="tip">
+推荐配置：<code>--docker daocloud</code>（<code>https://docker.m.daocloud.io</code>）／
+<code>--npm taobao</code>（<code>https://registry.npmmirror.com</code>）／
+<code>--golang goproxycn</code>（<code>https://goproxy.cn,direct</code>）。
+每项 <code>official</code> = 不设置（走该工具官方源）。
+</p>
 
 <h2>🚚 6. 一键部署 OMC（推荐）</h2>
 <pre>cd /opt/omc/releases/omc-&lt;test|release&gt;-&lt;版本&gt;-&lt;架构&gt;
@@ -188,7 +193,7 @@ sudo bash deploy/deploy.sh -h                       # 查看所有参数</pre>
 <li>服务日志：<code>journalctl -u omcgo-app -n 200 --no-pager</code>（acs / worker 同样）</li>
 <li>容器日志：<code>docker logs &lt;容器名&gt; --tail 200</code></li>
 <li>重跑健康检查：<code>bash /opt/omc/current/deploy/healthcheck.sh</code></li>
-<li>查看脚本帮助：<code>bash &lt;脚本&gt; -h</code>（install-docker.sh / setup-docker-mirror.sh / deploy.sh / healthcheck.sh 均支持）</li>
+<li>查看脚本帮助：<code>bash &lt;脚本&gt; -h</code>（install-docker.sh / setup-mirrors.sh / deploy.sh / healthcheck.sh 均支持）</li>
 <li>完整运维手册：见随项目包附带 <code>docs/OMC内网离线部署手册（运维侧）.md</code></li>
 </ul>
 
