@@ -33,6 +33,7 @@ const (
 	TechNR  = global.TechNR
 )
 
+// DeviceStatus 和 DeviceXxx 常量 — DEPRECATED (T-0162)，P3 整体删除
 type DeviceStatus = global.DeviceStatus
 
 const (
@@ -43,6 +44,18 @@ const (
 	DeviceMaintenance    = global.DeviceMaintenance
 	DeviceOffline        = global.DeviceOffline
 	DeviceDecommissioned = global.DeviceDecommissioned
+)
+
+// DeviceLifecycle 和 LifecycleXxx 常量 — T-0162 新引入
+type DeviceLifecycle = global.DeviceLifecycle
+
+const (
+	LifecycleDiscovered     = global.LifecycleDiscovered
+	LifecycleRegistered     = global.LifecycleRegistered
+	LifecycleProvisioning   = global.LifecycleProvisioning
+	LifecycleCommissioned   = global.LifecycleCommissioned
+	LifecycleMaintenance    = global.LifecycleMaintenance
+	LifecycleDecommissioned = global.LifecycleDecommissioned
 )
 
 type AlarmSeverity = global.AlarmSeverity

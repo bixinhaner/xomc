@@ -11,7 +11,10 @@ import (
 
 // Device 表示一台被管理的基站/小基站设备。
 // 对应数据库 devices 表，是设备全生命周期管理的核心实体。
-// 设备由 TR-069 Bootstrap Inform 自动注册入库，状态流转见 DeviceStatus。
+// 设备由 TR-069 Bootstrap Inform 自动注册入库。
+//
+// T-0162 解耦：状态流转见 DeviceLifecycle（业务进度）+ IsOnline（实时连接），
+// 不再用单字段 Status（DB 列已 DROP，Go 字段过渡期保留供 P3 渐进清理）。
 type Device struct {
 	ID           uuid.UUID   `json:"id" db:"id"`
 	SerialNumber string      `json:"serial_number" db:"serial_number"`
@@ -22,7 +25,14 @@ type Device struct {
 	Carrier      CarrierCode `json:"carrier" db:"carrier"`
 	Technology   Technology  `json:"technology" db:"technology"`
 	// T-0098 P5-02：DataModelID 字段已删除（devices.data_model_id 列 DROP，路由改由 productClass + ProductRegistry）。
-	Status DeviceStatus `json:"status" db:"status"`
+
+	// T-0162 新字段：业务生命周期（lifecycle_state 列）+ 实时在线（is_online 列）
+	LifecycleState DeviceLifecycle `json:"lifecycle_state" db:"lifecycle_state"`
+	IsOnline       bool            `json:"is_online" db:"is_online"`
+
+	// DEPRECATED (T-0162): Status DB 列已删除，Go 字段过渡期保留兼容老调用方，
+	// db tag "-" 让 ScanStruct 跳过；P3 完成所有调用方迁移后整体删除此字段。
+	Status DeviceStatus `json:"status,omitempty" db:"-"`
 	// OpState 激活状态（前端展示用，'1'=激活 / '0'=未激活）。
 	// 由 Status 派生，**不入库**：scan/Register/Update 后通过
 	// model.DeriveOpState(Status) 统一回填，保持 status='active' ↔ op_state='1'
