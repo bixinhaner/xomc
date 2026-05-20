@@ -4,6 +4,7 @@ import { Input, Tree, Empty, Spin, message, Popconfirm, Tooltip, Tag } from 'ant
 import {
   SearchOutlined,
   FolderOutlined,
+  FolderOpenOutlined,
   CodeOutlined,
   UserOutlined,
   PlusOutlined,
@@ -59,6 +60,8 @@ type AddScope = 'public' | 'private' | null;
 const GROUP_KEY_PREFIX = 'group:';
 const CMD_KEY_PREFIX = 'cmd:';
 const CUSTOM_KEY_PREFIX = 'custom:';
+// v2.4 D32+D38：family 虚拟父节点 key 前缀。与 group UUID key 隔离，避免冲突。
+const FAMILY_KEY_PREFIX = 'family:';
 
 /**
  * 把后端返回的 N 层 LTREE 拍平为「一级大类 → 命令」两层。
@@ -77,16 +80,9 @@ function collectAllCommands(group: GroupTreeNode): GroupTreeCommand[] {
   return out;
 }
 
-function buildTreeData(nodes: GroupTreeNode[]): TreeDataNode[] {
-  // R-1/R-2 排序：主键 chapterCode (SA→SB→...→SR，空末位)，副键 displayOrder。
-  // 让对象级 group 跨章节按 SA-SR 顺序排列，前端 UI 不渲染章节为节点。
-  const sorted = [...nodes].sort((a, b) => {
-    const ac = chapterSortKey(a.chapterCode);
-    const bc = chapterSortKey(b.chapterCode);
-    if (ac !== bc) return ac < bc ? -1 : 1;
-    return a.displayOrder - b.displayOrder;
-  });
-  return sorted.map((g) => ({
+/** 将单个 group 节点（含其所有平铺命令）转为 antd TreeDataNode。 */
+function groupToTreeDataNode(g: GroupTreeNode): TreeDataNode {
+  return {
     key: `${GROUP_KEY_PREFIX}${g.id}`,
     title: (
       <span>
@@ -110,7 +106,61 @@ function buildTreeData(nodes: GroupTreeNode[]): TreeDataNode[] {
         title: renderOpLeafTitle(c.operationType, c.displayName),
         isLeaf: true,
       })),
-  }));
+  };
+}
+
+function buildTreeData(nodes: GroupTreeNode[]): TreeDataNode[] {
+  // R-1/R-2 排序：主键 chapterCode (SA→SB→...→SR，空末位)，副键 displayOrder。
+  // 让对象级 group 跨章节按 SA-SR 顺序排列，前端 UI 不渲染章节为节点。
+  const sorted = [...nodes].sort((a, b) => {
+    const ac = chapterSortKey(a.chapterCode);
+    const bc = chapterSortKey(b.chapterCode);
+    if (ac !== bc) return ac < bc ? -1 : 1;
+    return a.displayOrder - b.displayOrder;
+  });
+
+  // v2.4 D32+D38：path-prefix family 聚合。
+  // 后端 group_tree_repository.go 已通过 InferFamily 在每个 group 上挂 familyCode；
+  // 这里把同 familyCode 的多个 group 折叠为一个家族父节点；familyCode 为空或同 family
+  // 只有 1 个 group 时，group 保持原顶层位置不变（行为与未聚合时一致）。
+  //
+  // 排序策略：family 节点的位置 = 该 family 内首个 group 在 sorted 中的位置；
+  // 后续 group 出现时跳过（已被首个 group 拉入 family children）。这样既不打散
+  // 原有 SA→SR 排序，又保证同 family 群组在 UI 上相邻。
+  const familyCounts = new Map<string, number>();
+  for (const g of sorted) {
+    const fc = g.familyCode;
+    if (!fc) continue;
+    familyCounts.set(fc, (familyCounts.get(fc) ?? 0) + 1);
+  }
+
+  const out: TreeDataNode[] = [];
+  const emittedFamilies = new Set<string>();
+  for (const g of sorted) {
+    const fc = g.familyCode;
+    // 1) 空 familyCode 或同 family 仅 1 个 group → 独立顶层节点
+    if (!fc || (familyCounts.get(fc) ?? 0) < 2) {
+      out.push(groupToTreeDataNode(g));
+      continue;
+    }
+    // 2) ≥2 个同 family group → 首个出现时建虚拟家族父节点；后续同 family group 静默跳过
+    if (emittedFamilies.has(fc)) continue;
+    emittedFamilies.add(fc);
+    const members = sorted.filter((s) => s.familyCode === fc);
+    const familyName = g.familyNameZh && g.familyNameZh !== '' ? g.familyNameZh : fc;
+    out.push({
+      key: `${FAMILY_KEY_PREFIX}${fc}`,
+      title: (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <FolderOpenOutlined style={{ marginRight: 4 }} />
+          {familyName} ({members.length})
+        </span>
+      ),
+      selectable: false,
+      children: members.map(groupToTreeDataNode),
+    });
+  }
+  return out;
 }
 
 function collectMatches(
@@ -120,10 +170,14 @@ function collectMatches(
   const matchedKeys = new Set<string>();
   const expandKeys: string[] = [];
   const lower = needle.toLowerCase();
+  // v2.4 D32+D38：family 聚合开启后，命中命令所在 group 若属于某 family，需把
+  // family 虚拟父节点一并加入 expandKeys，否则 antd Tree 不会展开到命令叶子。
   const walk = (arr: GroupTreeNode[], ancestors: string[]) => {
     arr.forEach((g) => {
       const groupKey = `${GROUP_KEY_PREFIX}${g.id}`;
-      const path = [...ancestors, groupKey];
+      const path = [...ancestors];
+      if (g.familyCode) path.push(`${FAMILY_KEY_PREFIX}${g.familyCode}`);
+      path.push(groupKey);
       (g.commands ?? []).forEach((c) => {
         if (c.displayName.toLowerCase().includes(lower)) {
           matchedKeys.add(`${CMD_KEY_PREFIX}${c.id}`);

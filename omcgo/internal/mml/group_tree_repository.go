@@ -39,7 +39,14 @@ type GroupTreeNode struct {
 	// ChapterCode：CMCC TD-LTE v2.3 章节码（SA/SB/SC/.../SR）。空字符串表示老 catalog
 	// 行不带章节信息。前端不渲染章节为节点，但用作主排序键（让对象级 group 按
 	// SA→SB→SC 顺序排列，避免跨章节顺序错乱）。详见 plan §6.6 "按 SA-SR 顺序排列"。
-	ChapterCode      string             `json:"chapter_code,omitempty"`
+	ChapterCode string `json:"chapter_code,omitempty"`
+	// FamilyCode：v2.4 D32+D38 path-prefix-family 聚合键。空字符串表示该 group 自成
+	// family。前端按此聚合：相同 FamilyCode 的多个 group 在 CommandTree 顶层折叠为
+	// 一个"家族节点"。映射规则见 §15.4 + omcgo/internal/mml/family.go InferFamily。
+	FamilyCode string `json:"family_code,omitempty"`
+	// FamilyNameZh：family 在 UI 上展示的中文名（如"设备信息"/"告警实例"）。
+	// 与 FamilyCode 同步出现，空字符串表示 fallback 到 Name。
+	FamilyNameZh     string             `json:"family_name_zh,omitempty"`
 	Source           string             `json:"source"`
 	CatalogProtected bool               `json:"catalog_protected"`
 	Commands         []GroupTreeCommand `json:"commands"`
@@ -146,7 +153,20 @@ func (r *PgGroupTreeRepository) BuildTree(ctx context.Context, rootCode, lang st
 
 	// 按 path 深度组装父子关系
 	nodes := assembleHierarchy(groupByID, pathToGroupID)
+	// v2.4 D32+D38：post-process 阶段按 group_code 推断 path-prefix-family，
+	// 不改 SQL / 不入库；前端按 FamilyCode 聚合 CommandTree 顶层。
+	// 详见 docs/design/mml-console-cmcc-tdlte-v23-adjustment-plan-20260519.md §15.4
+	attachFamily(nodes)
 	return nodes, nil
+}
+
+// attachFamily 递归遍历所有节点，按 GroupCode 推断 FamilyCode + FamilyNameZh 并填充。
+// 实现：见 family.go InferFamily（O(规则数) 线性扫描）。
+func attachFamily(nodes []GroupTreeNode) {
+	for i := range nodes {
+		nodes[i].FamilyCode, nodes[i].FamilyNameZh = InferFamily(nodes[i].GroupCode)
+		attachFamily(nodes[i].Children)
+	}
 }
 
 // ============================================================

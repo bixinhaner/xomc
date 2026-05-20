@@ -957,6 +957,8 @@ function mapGroupTreeNode(n: BackendGroupTreeNode): GroupTreeNode {
     displayNameI18n: n.name_i18n,
     displayOrder: n.display_order,
     chapterCode: n.chapter_code,
+    familyCode: n.family_code,
+    familyNameZh: n.family_name_zh,
     source: n.source,
     catalogProtected: n.catalog_protected,
     commands: (n.commands ?? []).map(mapGroupTreeCommand),

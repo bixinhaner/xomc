@@ -44,6 +44,14 @@ export interface BackendGroupTreeNode {
    * 让对象级 group 跨章节按 SA→SB→SC 顺序排列。
    */
   chapter_code?: string;
+  /**
+   * v2.4 D32+D38 path-prefix family 聚合键（后端 InferFamily 推断）。
+   * 空串/缺失 = 该 group 自成 family；CommandTree 顶层直接渲染。
+   * 后端字段：omcgo/internal/mml/group_tree_repository.go GroupTreeNode.FamilyCode
+   */
+  family_code?: string;
+  /** Family 中文显示名（如"设备信息"/"告警实例"）。与 family_code 同步出现。 */
+  family_name_zh?: string;
   /** 'standard' | 'admin' — 来源标记 */
   source?: string;
   /** catalog_protected=true 的节点不可由 admin 修改/删除 */
@@ -119,6 +127,15 @@ export interface GroupTreeNode {
    * CommandTree 排序时排末位。前端不渲染章节为节点，仅作主排序键。
    */
   chapterCode?: string;
+  /**
+   * v2.4 D32+D38 path-prefix family 聚合键。
+   * 空字符串/undefined 表示该 group 自成 family（CommandTree 顶层直接渲染）。
+   * 非空时多个 group 在 CommandTree 顶层折叠为一个家族节点。
+   * 后端推断规则见 omcgo/internal/mml/family.go InferFamily。
+   */
+  familyCode?: string;
+  /** Family 在 UI 上的中文显示名（如"设备信息"/"告警实例"）。与 familyCode 同步出现 */
+  familyNameZh?: string;
   /** 'standard' | 'admin' — 来源标记，admin UI 用于显示来源 */
   source?: 'standard' | 'admin' | string;
   /** catalog_protected=true 时 admin 不可改/删（PRD §7.3 元数据差异化） */
