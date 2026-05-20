@@ -74,14 +74,55 @@ list_archive() {
 IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
 echo "──────────────────────────────────────────────"
 echo " OMC 交付包下载服务"
-echo "   根目录 ： $ARCHIVE"
-echo "   地址   ： http://${IP:-<构建机IP>}:$PORT/"
+echo "   根目录   ： $ARCHIVE"
+echo "   地址     ： http://${IP:-<构建机IP>}:$PORT/"
 list_archive project "项目版本下载" "运行 ./build-release.sh 生成"
 list_archive infra   "基础设置下载" "运行 ./build-images.sh 生成"
-echo "   说明   ： 浏览器打开上面地址即可看到版本列表并下载"
-echo "   停止   ： Ctrl-C"
+echo "   下载行为 ： .tar.xz / .tar.gz / .tar.zst / .tgz / .sha256 自动加"
+echo "              Content-Disposition: attachment（强制浏览器下载而非内嵌展示）"
+echo "   日志     ： 每次 HTTP 请求打到本终端 stderr（404 / 200 可一眼分辨）"
+echo "   说明     ： 浏览器打开上面地址即可看到版本列表并下载"
+echo "   停止     ： Ctrl-C"
 echo "──────────────────────────────────────────────"
 
 cd "$ARCHIVE"
-# 有 index.html 时 http.server 自动作为首页；子目录无 index 时自动列目录。
-exec python3 -m http.server "$PORT"
+# 内联 Python HTTP 服务：强制为下载类后缀（.tar.* / .tgz / .sha256）发
+# Content-Disposition: attachment，并把 Content-Type 强制成 octet-stream，
+# 避免浏览器把交付包"在新 tab 里渲染成乱码"或被中间件接管而无法下载。
+# 不依赖额外文件，纯 stdlib，与 `python3 -m http.server` 100% 等价行为外延。
+exec python3 - "$PORT" <<'PYEOF'
+import os, sys, http.server, socketserver
+PORT = int(sys.argv[1])
+DOWNLOAD_EXTS = ('.tar.xz', '.tar.gz', '.tar.zst', '.tgz', '.sha256')
+
+def _is_download(url_path):
+    p = url_path.split('?', 1)[0].split('#', 1)[0]
+    return any(p.endswith(e) for e in DOWNLOAD_EXTS)
+
+class DownloadHandler(http.server.SimpleHTTPRequestHandler):
+    def guess_type(self, path):
+        # 凡是下载类后缀都返回 octet-stream，避免被浏览器 / 中间件按
+        # application/x-xz / application/x-tar 等做奇怪处理
+        if any(path.endswith(e) for e in DOWNLOAD_EXTS):
+            return 'application/octet-stream'
+        return super().guess_type(path)
+
+    def end_headers(self):
+        # 在 SimpleHTTPRequestHandler.send_head() 已发完 Content-Type / Length
+        # 之后追加 Content-Disposition: attachment
+        try:
+            if _is_download(self.path):
+                fn = os.path.basename(self.translate_path(self.path))
+                if fn:
+                    self.send_header(
+                        'Content-Disposition',
+                        f'attachment; filename="{fn}"')
+        except Exception:
+            pass
+        super().end_headers()
+
+socketserver.TCPServer.allow_reuse_address = True
+with socketserver.TCPServer(('', PORT), DownloadHandler) as srv:
+    print(f'Serving HTTP on 0.0.0.0 port {PORT} ...', flush=True)
+    srv.serve_forever()
+PYEOF
