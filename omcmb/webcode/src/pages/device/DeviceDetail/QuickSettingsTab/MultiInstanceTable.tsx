@@ -176,12 +176,16 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
   );
 
   const setCellValue = (instId: string, leaf: string, value: string) => {
+    // 实时校验：用 schema 元数据（type + constraints）跑 validateValue，错误直接挂到该格
+    const path = `${objectPath}${instId}.${leaf}`;
+    const item = schemaByPath.get(path);
+    const err = validateValue(value, (item?.type as never) ?? 'string', item?.constraints) ?? '';
     setRowEdits((prev) => {
       const next = new Map(prev);
       const row = next.get(instId) ?? { edits: {}, errors: {} };
       next.set(instId, {
         edits: { ...row.edits, [leaf]: value },
-        errors: { ...row.errors, [leaf]: '' },
+        errors: { ...row.errors, [leaf]: err },
       });
       return next;
     });
@@ -424,21 +428,18 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
           const enumVals = item?.constraints?.enumValues;
           const enumLabels = item?.constraints?.enumLabels;
           const isEnum = Array.isArray(enumVals) && enumVals.length > 0;
-          if (isEnum) {
-            return (
-              <Select
-                value={cellValue(instId, leaf) || undefined}
-                onChange={(v) => setCellValue(instId, leaf, String(v))}
-                status={error ? 'error' : undefined}
-                disabled={!writable}
-                size="small"
-                style={{ width: '100%' }}
-                options={enumVals.map((v, idx) => ({ value: v, label: enumLabels?.[idx] ?? v }))}
-                placeholder={item?.defaultValue || ''}
-              />
-            );
-          }
-          return (
+          const control = isEnum ? (
+            <Select
+              value={cellValue(instId, leaf) || undefined}
+              onChange={(v) => setCellValue(instId, leaf, String(v))}
+              status={error ? 'error' : undefined}
+              disabled={!writable}
+              size="small"
+              style={{ width: '100%' }}
+              options={enumVals.map((v, idx) => ({ value: v, label: enumLabels?.[idx] ?? v }))}
+              placeholder={item?.defaultValue || ''}
+            />
+          ) : (
             <Input
               value={cellValue(instId, leaf)}
               onChange={(e) => setCellValue(instId, leaf, e.target.value)}
@@ -446,6 +447,17 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
               disabled={!writable}
               size="small"
             />
+          );
+          // 错误文案显示：红框 + 单元格底部红字（150px 列宽不够横排，竖向显示）
+          return (
+            <div>
+              {control}
+              {error && (
+                <div style={{ color: '#ff4d4f', fontSize: 12, marginTop: 2, lineHeight: 1.3 }}>
+                  {error}
+                </div>
+              )}
+            </div>
           );
         },
       };
