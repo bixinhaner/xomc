@@ -3,7 +3,7 @@
 # OMC 交付包下载索引生成
 #
 # 扫描 archive/project/ 与 archive/infra/ 下的版本目录，生成 archive/index.html
-# —— 8000 端口下载页：项目交付包、基础设置下载各一张版本列表，并附完整交付侧
+# —— 8000 端口下载页：项目交付包、基础设施下载各一张版本列表，并附完整交付侧
 # 操作手册（文件清单 / 校验 / 安装 / 加速镜像 / 部署 / 验证 / 访问 / 账号）。
 #
 # 由 build-release.sh / build-images.sh 在归档后自动调用；serve.sh 启动时也会
@@ -71,7 +71,7 @@ scan_rows() {
 PROJECT_ROWS="$(scan_rows "$ARCHIVE/project" project)"
 INFRA_ROWS="$(scan_rows "$ARCHIVE/infra" infra)"
 [ -n "$PROJECT_ROWS" ] || PROJECT_ROWS='<tr><td colspan="4" class="empty">暂无项目版本下载 —— 运行 ./build-release.sh 生成</td></tr>'
-[ -n "$INFRA_ROWS" ]   || INFRA_ROWS='<tr><td colspan="4" class="empty">暂无基础设置下载 —— 运行 ./build-images.sh 生成</td></tr>'
+[ -n "$INFRA_ROWS" ]   || INFRA_ROWS='<tr><td colspan="4" class="empty">暂无基础设施下载 —— 运行 ./build-images.sh 生成</td></tr>'
 
 cat > "$ARCHIVE/index.html" <<HTML
 <!DOCTYPE html>
@@ -107,34 +107,30 @@ pre{background:#1f2937;color:#e5e7eb;padding:.7rem .9rem;border-radius:5px;overf
 ul.list{font-size:.88rem;line-height:1.8;margin:.3rem 0;padding-left:1.5rem}
 </style></head><body><div class="wrap">
 <h1>OMC 离线交付包下载</h1>
-<p class="lead">内网离线部署交付包。<b>项目包</b>与<b>基础设置下载</b>相互独立、各自版本号：
+<p class="lead">内网离线部署交付包。<b>项目包</b>与<b>基础设施下载</b>相互独立、各自版本号：
 首次部署两个都要下载；之后日常升级通常只需更新项目包。</p>
 
 <h2>📋 你应该下载哪些文件？</h2>
 <div class="tabs">
 <div class="tab"><b>🆕 首次部署</b>
-基础设置下载 <code>omc-infra-*.tar.xz</code> + <code>.sha256</code><br>
-项目包 <code>omc-&lt;test|release&gt;-*.tar.xz</code> + <code>.sha256</code><br>
-<span class="sz">两个包必须取<b>同一架构</b>（amd64 或 arm64）</span></div>
+基础设施下载 <code>omc-infra-*.tar.xz</code> + <code>.sha256</code><br>
+项目包 <code>omc-&lt;test|release&gt;-*.tar.xz</code> + <code>.sha256</code></div>
 <div class="tab"><b>♻️ 日常升级</b>
 仅项目包 <code>omc-&lt;test|release&gt;-*.tar.xz</code> + <code>.sha256</code><br>
 <span class="sz">基础设施已部署、Docker 已装时，只更新项目包</span></div>
 </div>
 
-<h2>📐 1. 确认目标机架构</h2>
-<p class="lead">在目标机执行 <code>uname -m</code>。结果 <code>x86_64</code> 下载 <code>amd64</code> 包；<code>aarch64</code> 下载 <code>arm64</code> 包。两个包必须取<b>同一架构</b>。</p>
-
-<h2>🔐 2. 校验完整性</h2>
+<h2>🔐 1. 校验完整性</h2>
 <pre>sha256sum -c omc-infra-&lt;版本&gt;-&lt;架构&gt;.tar.xz.sha256
 sha256sum -c omc-&lt;test|release&gt;-&lt;版本&gt;-&lt;架构&gt;.tar.xz.sha256</pre>
 
-<h2>📦 3. 解压交付包</h2>
+<h2>📦 2. 解压交付包</h2>
 <pre># 推荐目录布局：/opt/omc/infra/ 装一次；/opt/omc/releases/&lt;版本&gt;/ 按版本独立
 sudo mkdir -p /opt/omc/infra /opt/omc/releases
 sudo tar -xJf omc-infra-&lt;版本&gt;-&lt;架构&gt;.tar.xz -C /opt/omc/infra --strip-components=1
 sudo tar -xJf omc-&lt;test|release&gt;-&lt;版本&gt;-&lt;架构&gt;.tar.xz -C /opt/omc/releases</pre>
 
-<h2>🐳 4. 安装 Docker（仅首次部署）</h2>
+<h2>🐳 3. 安装 Docker（仅首次部署）</h2>
 <p class="lead">目标机已装 Docker（<code>docker --version</code> 返 ≥ 20.10）时跳过本步。</p>
 <pre>cd /opt/omc/infra/docker
 sudo bash install-docker.sh                         # 交互式：装完会引导选加速镜像
@@ -142,7 +138,7 @@ sudo bash install-docker.sh --mirror daocloud       # 非交互：装完直接�
 sudo bash install-docker.sh -h                      # 查看所有参数</pre>
 <p class="tip">install-docker.sh 自动：解压二进制 → 写 containerd / docker 的 systemd 单元 → <code>enable --now</code> 开机自启 → 验证 → 引导加速镜像。</p>
 
-<h2>⚡ 5. 系统加速设置（可选）— Docker / npm / Golang 三合一</h2>
+<h2>⚡ 4. 系统加速设置（可选）— Docker / npm / Golang 三合一</h2>
 <p class="lead"><code>setup-mirrors.sh</code> 位于 infra 包顶层（非 Docker 专属），一次性配置 3 类加速器（每项可独立选择"不设置 = 走官方"）：</p>
 <pre>cd /opt/omc/infra
 sudo bash setup-mirrors.sh                          # 交互：逐项询问 3 项
@@ -156,7 +152,7 @@ sudo bash setup-mirrors.sh --remove                 # 全部取消，回归官�
 每项 <code>official</code> = 不设置（走该工具官方源）。
 </p>
 
-<h2>🚚 6. 一键部署 OMC（推荐）</h2>
+<h2>🚚 5. 一键部署 OMC（推荐）</h2>
 <pre>cd /opt/omc/releases/omc-&lt;test|release&gt;-&lt;版本&gt;-&lt;架构&gt;
 sudo bash deploy/deploy.sh                          # 全套首次部署
 sudo bash deploy/deploy.sh --skip-infra             # 日常升级（基础设施已装）
@@ -165,11 +161,11 @@ sudo bash deploy/deploy.sh -h                       # 查看所有参数</pre>
 <p class="tip">deploy.sh 自动：环境检查 → 建立目录布局 → load 基础镜像 → 默认口令检查 → 启动 infra 容器 → 等就绪 → migrate → seed → 装 systemd → 起 web → 健康检查。</p>
 <div class="danger">⚠️ 生产环境首次部署前请编辑 <code>/opt/omc/current/deploy/docker-compose.infra.yml</code> 与 <code>/opt/omc/etc/*.prod.yaml</code>，改 <b>PostgreSQL / MinIO / JWT</b> 默认口令为强口令。</div>
 
-<h2>✅ 7. 验证部署</h2>
+<h2>✅ 6. 验证部署</h2>
 <pre>bash /opt/omc/current/deploy/healthcheck.sh</pre>
 <p class="lead">应输出全部 <code>[OK]</code>：3 个 systemd 服务（app/acs/worker）+ 4 个健康端点（app /health, acs /healthz, app /metrics, 前端首页）。</p>
 
-<h2>🌐 8. 部署后访问地址</h2>
+<h2>🌐 7. 部署后访问地址</h2>
 <div class="kv">
 <b>Web 管理页：</b>http://&lt;服务器IP&gt;:8080<br>
 <b>MinIO Console：</b>http://&lt;服务器IP&gt;:9001<br>
@@ -178,7 +174,7 @@ sudo bash deploy/deploy.sh -h                       # 查看所有参数</pre>
 <b>Grafana（监控）：</b>http://&lt;服务器IP&gt;:3000　<span class="sz">仅启用监控栈时</span>
 </div>
 
-<h2>👤 9. 初始账号 / 口令</h2>
+<h2>👤 8. 初始账号 / 口令</h2>
 <div class="danger">⚠️ 全部默认口令<b>首次登录后必须改</b>。生产部署前需重新生成强口令并同步到 docker-compose.infra.yml 与 *.prod.yaml。</div>
 <div class="kv">
 <b>Web 管理员：</b><code>admin</code> / <code>admin123</code><br>
@@ -203,11 +199,11 @@ sudo bash deploy/deploy.sh -h                       # 查看所有参数</pre>
 <table><thead><tr><th>项目版本</th><th>渠道</th><th>构建时间</th><th>下载</th></tr></thead>
 <tbody>$PROJECT_ROWS</tbody></table>
 
-<h2>🛠️ 基础设置下载</h2>
+<h2>🛠️ 基础设施下载</h2>
 <p class="lead">Docker 引擎离线安装包 + 基础镜像。不常变更，仅基础设施升级时更新。</p>
 <table><thead><tr><th>基础设施版本</th><th>Docker 版本</th><th>构建时间</th><th>下载</th></tr></thead>
 <tbody>$INFRA_ROWS</tbody></table>
 
-<p class="note">索引刷新于 $(date -u '+%Y-%m-%dT%H:%M:%SZ')　·　架构对照 <code>uname -m</code>：x86_64 → amd64，aarch64 → arm64</p>
+<p class="note">索引刷新于 $(date -u '+%Y-%m-%dT%H:%M:%SZ')</p>
 </div></body></html>
 HTML
