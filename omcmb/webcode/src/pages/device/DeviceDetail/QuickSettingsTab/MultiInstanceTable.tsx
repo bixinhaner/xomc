@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Card, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message, notification } from 'antd';
+import { Button, Card, Input, Popconfirm, Select, Space, Table, Tag, Typography, message, notification } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import type { ColumnType } from 'antd/es/table';
 import { useQueryClient } from '@tanstack/react-query';
@@ -337,55 +337,49 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
     }
   }, [lastTask, lastAction, group.titleZh, patchFeedback, fbKey]);
 
+  // 单层确认：外层 Popconfirm 已二次确认，这里直接执行删除逻辑（原 Modal.confirm 套层移除）。
   const handleDelete = async (instId: string) => {
-    Modal.confirm({
-      title: '确认删除',
-      content: `删除实例 ${instId} ?`,
-      okType: 'danger',
-      onOk: async () => {
-        try {
-          // T-0157 C7: 后端现返回 { taskId } → 消费 taskId 让 Tag 走完整状态机
-          const result = await deleteMutation.mutateAsync({ deviceId, objectPath: `${objectPath}${instId}.` });
-          message.success({
-            content: `已下发 DeleteObject(${instId}),请在右上角铃铛查看任务结果`,
-            duration: 6,
-          });
-          setFeedback(fbKey, {
-            kind: 'multi',
-            action: 'delete',
-            submitStatus: 'queued',
-            taskId: result.taskId,
-            detail: `实例 ${instId}`,
-            at: Date.now(),
-          });
-          // 实例已删 → 清该行可能残留的 draft + rowEdits（避免下次重挂载尝试恢复已不存在的实例）
-          clearDraftPrefix(fbKey, `${instId}.`);
-          setRowEdits((prev) => {
-            const next = new Map(prev);
-            next.delete(instId);
-            return next;
-          });
-          void refetch();
-        } catch (err) {
-          const errMsg = err instanceof Error ? err.message : String(err);
-          notification.error({
-            message: `DeleteObject 入队失败(${group.titleZh})`,
-            description: `实例 ${instId} 删除失败:${errMsg}`,
-            duration: 0,
-          });
-          setFeedback(fbKey, {
-            kind: 'multi',
-            action: 'delete',
-            submitStatus: 'failed_to_queue',
-            detail: `实例 ${instId}:${errMsg}`,
-            at: Date.now(),
-          });
-          console.error('MultiInstanceTable: DeleteObject failed', err);
-        } finally {
-          void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
-        }
-      },
-    });
+    try {
+      // T-0157 C7: 后端现返回 { taskId } → 消费 taskId 让 Tag 走完整状态机
+      const result = await deleteMutation.mutateAsync({ deviceId, objectPath: `${objectPath}${instId}.` });
+      message.success({
+        content: `已下发 DeleteObject(${instId}),请在右上角铃铛查看任务结果`,
+        duration: 6,
+      });
+      setFeedback(fbKey, {
+        kind: 'multi',
+        action: 'delete',
+        submitStatus: 'queued',
+        taskId: result.taskId,
+        detail: `实例 ${instId}`,
+        at: Date.now(),
+      });
+      // 实例已删 → 清该行可能残留的 draft + rowEdits（避免下次重挂载尝试恢复已不存在的实例）
+      clearDraftPrefix(fbKey, `${instId}.`);
+      setRowEdits((prev) => {
+        const next = new Map(prev);
+        next.delete(instId);
+        return next;
+      });
+      void refetch();
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      notification.error({
+        message: `DeleteObject 入队失败(${group.titleZh})`,
+        description: `实例 ${instId} 删除失败:${errMsg}`,
+        duration: 0,
+      });
+      setFeedback(fbKey, {
+        kind: 'multi',
+        action: 'delete',
+        submitStatus: 'failed_to_queue',
+        detail: `实例 ${instId}:${errMsg}`,
+        at: Date.now(),
+      });
+      console.error('MultiInstanceTable: DeleteObject failed', err);
+    } finally {
+      void queryClient.invalidateQueries({ queryKey: notificationKeys.all });
+    }
   };
 
   const columns: ColumnType<string>[] = [
