@@ -248,6 +248,8 @@ services:
       - "--web.console.libraries=/usr/share/prometheus/console_libraries"
       - "--web.console.templates=/usr/share/prometheus/consoles"
       - "--web.enable-lifecycle"
+      # T-0155 Phase 2b: 接收 otelcol prometheusremotewrite 推送的 pg/redis 指标
+      - "--web.enable-remote-write-receiver"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
       interval: 10s
@@ -389,6 +391,14 @@ services:
     depends_on:
       tempo:
         condition: service_healthy
+      # T-0155 Phase 2b: metrics pipeline 需要 pg/redis 已可连
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # prometheus 必须先起，否则 prometheusremotewrite 启动时连不上
+      prometheus:
+        condition: service_healthy
 
   tempo:
     image: grafana/tempo:2.5.0
@@ -408,35 +418,13 @@ services:
       start_period: 30s
 
   # ──────────────────────────────────────────────────────────────────
-  # 基础服务 exporter（T-0151）—— 把 postgres/redis/nats 的内部指标转成
-  # Prometheus 格式，使基础服务健康进入统一告警链。minio 自带 Prometheus
-  # 指标端点（见上方 MINIO_PROMETHEUS_AUTH_TYPE=public），无需独立 exporter。
-  # Prometheus 抓取目标见 monitoring/prometheus.yml，告警见 alerts/infra-alerts.yml。
-  # ⚠️ 镜像 tag 发布前需固化校验（同 release.conf 镜像固化纪律）。
+  # 基础服务 exporter（T-0151，剩余）—— pg/redis exporter 已于 T-0155 Phase 2b
+  # 下线，改由 otelcol 原生 postgresqlreceiver / redisreceiver 直连采集；
+  # nats / minio 暂留（otelcol 无原生 receiver，nats-exporter 仍负责把
+  # NATS 私有 :8222 监控端点转 Prom 格式；minio 自带 /minio/v2/metrics/cluster）。
+  # 详细决策与 trade-off 见
+  #   docs/design/observability-otelcol-migration-plan-20260520.md §5 §6
   # ──────────────────────────────────────────────────────────────────
-  postgres-exporter:
-    image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
-    environment:
-      TZ: "Asia/Shanghai"
-      # dev 口令；生产部署须与 docker-compose.infra.yml 的 POSTGRES_PASSWORD 一致
-      DATA_SOURCE_NAME: "postgresql://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
-    volumes:
-      - /etc/localtime:/etc/localtime:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  redis-exporter:
-    image: oliver006/redis_exporter:v1.62.0
-    environment:
-      TZ: "Asia/Shanghai"
-      REDIS_ADDR: "redis://redis:6379"
-    volumes:
-      - /etc/localtime:/etc/localtime:ro
-    depends_on:
-      redis:
-        condition: service_healthy
-
   nats-exporter:
     image: natsio/prometheus-nats-exporter:0.15.0
     environment:

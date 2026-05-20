@@ -1,20 +1,30 @@
-# OMC 基础服务告警规则（T-0151）
+# OMC 基础服务告警规则（T-0151 + T-0155 Phase 2b 改造）
 #
-# 覆盖 postgres / redis / nats / minio —— 经各自 exporter 纳入 Prometheus 后，
-# 基础服务健康首次进入统一告警链（此前仅 docker healthcheck 自检，不可观测）。
+# 覆盖 postgres / redis / nats / minio。
+#
+# T-0155 Phase 2b 后，pg / redis 由 otelcol postgresqlreceiver / redisreceiver
+# 直连数据库采集，再 prometheusremotewrite 推到 Prometheus（job="otelcol"）。
+# nats / minio 仍走 Prometheus 直接 scrape。
 #
 # 信号说明：
-#   - up{job="..."} == 0 由 Prometheus 合成，最可靠：exporter 容器或被监控的
-#     基础服务任一不可达即为 0。NATS、MinIO 的存活即由 InfraExporterDown 覆盖。
-#   - pg_up / redis_up 是 exporter 与目标服务之间的连通信号（exporter 在线但
-#     连不上 DB/Redis 时为 0），比 up 更精确地指向「服务本身」异常。
+#   - up{job="..."} == 0 仅对 Prometheus 自己 scrape 的 target 合成。
+#     P2b 后 pg/redis 走 remote_write 没有合成 up，所以 InfraExporterDown
+#     收窄到 nats / minio / otelcol 三个仍 scrape 的 target。
+#   - pg / redis 用 absent_over_time(关键指标[2m]) 判断"指标流断开"等价
+#     于"数据库连不上"。比原 boolean gauge `pg_up`/`redis_up` 多 30-90s 的
+#     检测延迟（取决于 scrape interval + for 持续时间），可接受。
+#   - PostgresConnectionsHigh / RedisMemoryHigh 用 metricstransform 别名
+#     `pg_stat_database_numbackends` / `pg_settings_max_connections` /
+#     `redis_memory_used_bytes` / `redis_memory_max_bytes`，表达式与旧版完全一致。
 
 groups:
   - name: omc.infra_liveness
     interval: 30s
     rules:
       - alert: InfraExporterDown
-        expr: up{job=~"postgres|redis|nats|minio"} == 0
+        # P2b 后只剩 nats / minio / otelcol 三个 scrape target；pg / redis 见
+        # PostgresMetricsAbsent / RedisMetricsAbsent
+        expr: up{job=~"nats|minio|otelcol"} == 0
         for: 2m
         labels:
           severity: critical
@@ -23,42 +33,59 @@ groups:
           summary: "基础服务监控目标 {{ $labels.job }} 不可达"
           description: |
             job={{ $labels.job }} 的 scrape 目标已 2 分钟无法抓取。
-            可能是 exporter 容器退出，或被监控的基础服务本身已宕。
+            可能是 exporter / otelcol 容器退出，或被监控的基础服务本身已宕。
             Impact: 该基础服务健康已不可观测，且大概率服务本身异常。
-            Action: docker compose ps 查 {{ $labels.job }} 与对应 exporter 容器状态。
+            Action: docker compose ps 查 {{ $labels.job }} 与对应容器状态。
+            若 job=otelcol 不可达，pg/redis 指标流亦会同步中断 → 触发
+            PostgresMetricsAbsent / RedisMetricsAbsent。
 
-      - alert: PostgresDown
-        expr: pg_up == 0
+      - alert: PostgresMetricsAbsent
+        # absent_over_time = 1 表示 2 分钟内 Prometheus 完全没收到该指标的
+        # 任何数据点。等价于 otelcol postgresqlreceiver 连不上 PG（或 otelcol
+        # 自身宕）。pg_stat_database_numbackends 是 P2b 重命名的关键 gauge，
+        # 任何 PG 实例存活都会以 collection_interval=30s 持续产值。
+        expr: absent_over_time(pg_stat_database_numbackends[2m]) == 1
         for: 1m
         labels:
           severity: critical
           domain: omc
           service: postgres
         annotations:
-          summary: "PostgreSQL 不可用"
+          summary: "PostgreSQL 指标流中断"
           description: |
-            postgres_exporter 无法连接 PostgreSQL（pg_up=0）已 1 分钟。
-            Impact: 设备/配置/告警等业务数据读写全停，app/acs/worker 级联报错。
-            Action: docker compose logs postgres；检查磁盘、连接数、是否 OOM。
+            过去 2 分钟未收到任何 pg_stat_database_numbackends 数据点。
+            等价于 otelcol postgresqlreceiver 连不上 PG ≥ 2 分钟。
+            Impact: 设备/配置/告警等业务数据读写大概率全停，
+                    app/acs/worker 级联报错。
+            Action: docker compose logs postgres；docker compose logs otelcol；
+                    检查 PG 磁盘、连接数、是否 OOM；
+                    若 PG 正常确认 otelcol 容器状态与 postgresqlreceiver 错误。
 
-      - alert: RedisDown
-        expr: redis_up == 0
+      - alert: RedisMetricsAbsent
+        # 同上，redis_uptime_in_seconds 是 P2b 重命名后的 redis.uptime 别名，
+        # Redis 存活时永远在涨；2 分钟无数据点等价于 Redis 不可达。
+        expr: absent_over_time(redis_uptime_in_seconds[2m]) == 1
         for: 1m
         labels:
           severity: critical
           domain: omc
           service: redis
         annotations:
-          summary: "Redis 不可用"
+          summary: "Redis 指标流中断"
           description: |
-            redis_exporter 无法连接 Redis（redis_up=0）已 1 分钟。
+            过去 2 分钟未收到任何 redis_uptime_in_seconds 数据点。
+            等价于 otelcol redisreceiver 连不上 Redis ≥ 2 分钟。
             Impact: TR-069 会话、命令队列、缓存全停，ACS 南向受影响。
-            Action: docker compose logs redis；检查内存与持久化。
+            Action: docker compose logs redis；docker compose logs otelcol；
+                    检查 Redis 内存与持久化；
+                    若 Redis 正常确认 otelcol 容器状态与 redisreceiver 错误。
 
   - name: omc.infra_capacity
     interval: 30s
     rules:
       - alert: PostgresConnectionsHigh
+        # 指标名经 otelcol metricstransform 由 postgresql.backends /
+        # postgresql.connection.max 重命名为 pg_* 别名，与 P2b 前完全兼容。
         expr: sum(pg_stat_database_numbackends) / max(pg_settings_max_connections) > 0.8
         for: 5m
         labels:
@@ -73,7 +100,8 @@ groups:
             Action: 查连接泄漏 / 慢查询占用连接；评估调大 max_connections 或连接池配额。
 
       - alert: RedisMemoryHigh
-        # redis_memory_max_bytes=0 表示未设 maxmemory —— 用 and 守卫，避免除零误报。
+        # redis_memory_max_bytes=0（或缺失）表示未设 maxmemory ——
+        # 用 and 守卫避免除零 / 缺失误报。dev 环境通常 maxmemory 未设。
         expr: (redis_memory_used_bytes / redis_memory_max_bytes > 0.85) and (redis_memory_max_bytes > 0)
         for: 5m
         labels:

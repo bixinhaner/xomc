@@ -130,6 +130,7 @@ ln -s "$(pwd)/omcmb/webcode/node_modules" \
 | 日志 | Zap |
 | 指标 | Prometheus |
 | 链路追踪 | OpenTelemetry SDK → OpenTelemetry Collector → Grafana Tempo（T-0155 Phase 1） |
+| 基础设施指标 | postgresql/redis 走 OpenTelemetry Collector receiver → Prometheus remote_write；nats 走 prometheus-nats-exporter；minio 自带 `/metrics`（T-0155 Phase 2b） |
 
 ### 前端 (omcmb/ — frontend-core 业务层 + webcode UI 壳)
 

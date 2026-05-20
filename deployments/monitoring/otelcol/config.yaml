@@ -1,75 +1,220 @@
-# OpenTelemetry Collector — OMC Phase 1（trace 后端补齐）
+# OpenTelemetry Collector — OMC Phase 1 + 2b
 #
 # 数据流：
-#   app/acs/worker (otlp gRPC) → otelcol :4317 → batch → tempo :4317
+#   ─── Traces（Phase 1）───────────────────────────────────────────
+#   app/acs/worker (OTLP gRPC) → otelcol :4317 → batch → tempo :4317
 #
-# 当前作用域仅 traces。metrics 仍由 Prometheus 直接 pull 各 /metrics 端点
-# 与 *-exporter；本文件后续若上 Phase 2 再扩 receivers/metrics pipeline。
+#   ─── Metrics（Phase 2b：替换 pg/redis exporter）─────────────────
+#   postgres :5432 (内置协议) → otelcol postgresqlreceiver
+#   redis :6379  (RESP)       → otelcol redisreceiver       ┐
+#                                                            ├→ metricstransform (重命名)
+#                                                            │  pg_* / redis_* 保兼容
+#                                                            ↓
+#                                                  prometheusremotewrite
+#                                                            ↓
+#                                                  prometheus :9090/api/v1/write
 #
-# 部署模式：单进程（dev/test/prod 通用），10 万设备规模够用；100 万规模时
-# 拆 agent + gateway 两层（DaemonSet agent + 中心 gateway 部署）。
-# 详见 docs/design/observability-otelcol-migration-plan-20260520.md §7 D3。
+# 仅 pg/redis 指标走 otelcol 中转；app/acs/worker /metrics、nats-exporter、
+# minio /metrics 仍由 Prometheus 直接 pull（无变动）。
+#
+# 部署模式：单进程（dev/test/prod 通用）。100 万规模时拆 agent + gateway 两层。
+# 详见 docs/design/observability-otelcol-migration-plan-20260520.md §5 §7 D3。
 
 receivers:
+  # ─── Traces ───────────────────────────────────────────────────────
   otlp:
     protocols:
       grpc:
         endpoint: 0.0.0.0:4317
       # http endpoint 暂不开启——本期所有上报方都是 Go SDK，gRPC 优于 HTTP
-      # 未来若引入前端 / 浏览器 trace（OTel JS SDK 只支持 HTTP/protobuf）再开
+
+  # ─── Metrics: PostgreSQL ──────────────────────────────────────────
+  # 直连 PG 内置协议；scrape 间隔 30s 与 Prometheus global 对齐
+  postgresql:
+    endpoint: postgres:5432
+    transport: tcp
+    username: omcgo
+    password: omcgo123
+    databases: [omcgo]
+    collection_interval: 30s
+    tls:
+      insecure: true
+    metrics:
+      # 显式打开默认关闭的扩展指标（0.103 receiver schema）
+      postgresql.database.locks:
+        enabled: true
+      postgresql.deadlocks:
+        enabled: true
+      postgresql.sequential_scans:
+        enabled: true
+      postgresql.wal.age:
+        enabled: true
+      postgresql.wal.lag:
+        enabled: true
+      postgresql.wal.delay:
+        enabled: true
+      # 关掉 index 维度指标——postgresqlreceiver 0.103 的已知问题：
+      # 多个表共享相同 index 名（如 `pkey`、`*_pkey`）时只用 index 名做
+      # 标签会触发 Prometheus "duplicate sample for timestamp"。本期用不
+      # 上 index 维度，关闭可避免每个 scrape 1700 次重复点全 batch 被拒。
+      postgresql.index.size:
+        enabled: false
+      postgresql.index.scans:
+        enabled: false
+
+  # ─── Metrics: Redis ───────────────────────────────────────────────
+  redis:
+    endpoint: redis:6379
+    collection_interval: 30s
+    tls:
+      insecure: true
+    # redisreceiver 默认全开主要 INFO 段，无需显式 enable
 
 processors:
-  # batch：合并 span 减少下游压力；timeout 决定 batch 最长等待
+  # batch：合并下游推送，减少 Prometheus 写入压力
   batch:
     send_batch_size: 1024
     timeout: 5s
     send_batch_max_size: 2048
 
   # memory_limiter：otelcol 自我保护，防止 OOM 拖垮宿主
-  # limit_mib 应小于容器 mem_limit（compose 里设 256MB → 这里设 200MB）
   memory_limiter:
     check_interval: 1s
     limit_mib: 200
     spike_limit_mib: 50
 
-  # resource：补 cluster label，与 Prometheus external_labels.cluster 对齐
-  resource:
+  # resource：补 cluster + service.name label
+  # cluster 与 Prometheus external_labels.cluster 对齐
+  resource/traces:
     attributes:
       - key: cluster
         value: omcgo-dev
         action: upsert
 
+  # metrics 流加 service / cluster label，与原 exporter 标签对齐
+  resource/metrics:
+    attributes:
+      - key: cluster
+        value: omcgo-dev
+        action: upsert
+
+  # transform/promote_resource：把 receiver 设置在 RESOURCE 维度的 PG 维度
+  # 属性（database / table / index）下沉为 DATAPOINT 属性。
+  # 原因：prometheusremotewriteexporter 默认只把 service.name /
+  # service.instance.id 等 semconv 标准 resource attrs 转 Prom label，其他
+  # OTel-native attrs 全部丢弃。这会让 100 个表的 `postgresql.table.size`
+  # 因为没 table 标签全部 collide 成同一 series → "duplicate sample for
+  # timestamp" 整批被 Prom 拒。下沉为 datapoint attribute 后，转换器会
+  # 无条件转成 label，碰撞消失。
+  transform/promote_pg_resource:
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(attributes["database"], resource.attributes["postgresql.database.name"]) where resource.attributes["postgresql.database.name"] != nil
+          - set(attributes["table"], resource.attributes["postgresql.table.name"]) where resource.attributes["postgresql.table.name"] != nil
+          - set(attributes["index"], resource.attributes["postgresql.index.name"]) where resource.attributes["postgresql.index.name"] != nil
+
+  # metricstransform：把 OTel semconv 命名重命名为旧 exporter 名字，
+  # 让现有告警 / Grafana 面板零修改延续使用。
+  #
+  # 规则：UPDATE 覆盖（替换名字，不保留 OTel 原名）。曾试过 INSERT 保留双名，
+  # 但 prometheusremotewrite 会因 resource attrs 差异以同 timestamp 写出
+  # "duplicate sample" 被 Prom 拒绝（HTTP 400）。UPDATE 单名干净无冲突。
+  # 未来若 dashboard 要用 OTel 原名再调整为 INSERT 并补 add_label 解冲突。
+  metricstransform:
+    transforms:
+      # ─── PostgreSQL 别名 ──────────────────────────────────────────
+      - include: postgresql.backends
+        action: update
+        new_name: pg_stat_database_numbackends
+      - include: postgresql.connection.max
+        action: update
+        new_name: pg_settings_max_connections
+      - include: postgresql.db_size
+        action: update
+        new_name: pg_database_size_bytes
+      - include: postgresql.commits
+        action: update
+        new_name: pg_stat_database_xact_commit
+      - include: postgresql.rollbacks
+        action: update
+        new_name: pg_stat_database_xact_rollback
+      - include: postgresql.deadlocks
+        action: update
+        new_name: pg_stat_database_deadlocks
+
+      # ─── Redis 别名 ───────────────────────────────────────────────
+      - include: redis.memory.used
+        action: update
+        new_name: redis_memory_used_bytes
+      - include: redis.memory.maxmemory
+        action: update
+        new_name: redis_memory_max_bytes
+      - include: redis.uptime
+        action: update
+        new_name: redis_uptime_in_seconds
+      - include: redis.clients.connected
+        action: update
+        new_name: redis_connected_clients
+      - include: redis.commands.processed
+        action: update
+        new_name: redis_commands_processed_total
+      - include: redis.keyspace.hits
+        action: update
+        new_name: redis_keyspace_hits_total
+      - include: redis.keyspace.misses
+        action: update
+        new_name: redis_keyspace_misses_total
+
 exporters:
-  # 推到 Tempo 的 OTLP gRPC 端点
+  # ─── Traces 出口：Tempo ───────────────────────────────────────────
   otlp/tempo:
     endpoint: tempo:4317
     tls:
       insecure: true
-    # 重试策略：网络抖动时不丢 trace
     retry_on_failure:
       enabled: true
       initial_interval: 1s
       max_interval: 30s
       max_elapsed_time: 5m
-    # 发送队列：otelcol 暂存 trace 数据应对 Tempo 短暂不可用
     sending_queue:
       enabled: true
       num_consumers: 4
       queue_size: 5000
 
-  # debug exporter：紧急调试用（默认 verbosity=basic 只打统计，不打 span 内容）
-  # 平时不挂在 pipeline 上；troubleshoot 时改 service.pipelines.traces.exporters
-  # 加入 [otlp/tempo, debug] 即可
+  # ─── Metrics 出口：Prometheus Remote Write ────────────────────────
+  # Prometheus 需启用 --web.enable-remote-write-receiver flag 来接受
+  prometheusremotewrite:
+    endpoint: http://prometheus:9090/api/v1/write
+    # 关闭 unit suffix 自动添加（保持指标名与 alert 表达式精确一致）
+    # 否则 `postgresql_backends` 会变成 `postgresql_backends_total` 之类
+    add_metric_suffixes: false
+    # 关闭 target_info / scope_info 元数据 metric——otelcol 默认会为每个
+    # resource 生成 `target_info{...}` 用来回查 resource 属性，但 pg/redis
+    # receiver 各 scrape 产生的 target_info labels 集合一致，会被 Prometheus
+    # 判定为同 timestamp 重复样本（HTTP 400 duplicate sample）。
+    target_info:
+      enabled: false
+    tls:
+      insecure: true
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 5m
+    # external_labels：给所有 remote_write 的指标补充 job 标签，模拟原
+    # Prometheus scrape job 语义，让告警按 job 维度过滤仍可工作
+    external_labels:
+      job: otelcol
+
+  # debug：紧急调试用；平时不挂 pipeline
   debug:
     verbosity: basic
 
 extensions:
-  # health_check：暴露 /health 给 docker-compose healthcheck
   health_check:
     endpoint: 0.0.0.0:13133
 
-  # zpages：本地 troubleshooting，访问 :55679/debug/tracez 看 in-flight span
-  # 仅容器内端口，不对外暴露
   zpages:
     endpoint: 0.0.0.0:55679
 
@@ -79,11 +224,14 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [memory_limiter, batch, resource]
+      processors: [memory_limiter, batch, resource/traces]
       exporters: [otlp/tempo]
 
-  # otelcol 自身的 telemetry 端口（暴露 otelcol_* metrics 给 Prometheus 采集）
-  # 后续 Prometheus 增加 scrape job 抓 otelcol:8888 即可
+    metrics:
+      receivers: [postgresql, redis]
+      processors: [memory_limiter, transform/promote_pg_resource, metricstransform, resource/metrics, batch]
+      exporters: [prometheusremotewrite]
+
   telemetry:
     metrics:
       level: basic

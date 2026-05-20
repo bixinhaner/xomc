@@ -18,7 +18,10 @@ deployments/monitoring/
 ├── promtail/
 │   └── promtail-config.yml       # 日志采集（zap JSON 解析 + level/service label）
 ├── otelcol/
-│   └── config.yaml               # OTel Collector：OTLP gRPC receiver → batch → Tempo（T-0155 Phase 1）
+│   └── config.yaml               # OTel Collector：
+│                                 #   ─ traces: OTLP gRPC :4317 → Tempo（Phase 1）
+│                                 #   ─ metrics: postgresql/redis receiver → metricstransform
+│                                 #             → prometheusremotewrite → Prometheus（Phase 2b）
 ├── tempo/
 │   └── tempo.yaml                # Grafana Tempo 单进程 monolithic 配置 + 本地存储
 ├── grafana/
@@ -122,6 +125,41 @@ tracer:
 ```
 
 tracer 关闭时 SDK 用 no-op Provider，零开销，与 trace 栈停机互不影响。
+
+## PG / Redis 指标链路（Phase 2b 改造）
+
+T-0155 Phase 2b 把 `postgres-exporter` / `redis-exporter` 替换为 otelcol
+原生 receiver 直连数据库采集，再 prometheusremotewrite 推到 Prometheus：
+
+```
+postgres :5432 ──┐  ┌─ metricstransform (重命名 pg_*) ─┐
+                 ├─►│                                   ├─► prometheusremotewrite ─► prometheus :9090/api/v1/write
+redis    :6379 ──┘  └─ transform/promote_pg_resource ──┘
+                       (resource attrs → datapoint attrs，避免 duplicate sample)
+```
+
+**关键配置点（坑过）**：
+- `target_info.enabled: false`：默认开会生成额外 metadata 指标，pg
+  per-table 多个 resource collision
+- `transform/promote_pg_resource`：把 `postgresql.database.name` /
+  `table.name` / `index.name` 从 resource attr 提到 datapoint attr，
+  否则 prometheusremotewrite 不会把这些转成 Prom label → 同名指标多个
+  表的样本碰撞 → HTTP 400 duplicate sample
+- `postgresql.index.size` / `postgresql.index.scans` 关掉：receiver 0.103
+  对多表同名 index（`pkey`）的处理不带 table 维度，会触发 collision
+- `add_metric_suffixes: false`：保持指标名与告警表达式精确一致，不让
+  prometheusremotewrite 自动加 `_total` 后缀
+
+**告警重设计**：
+- `pg_up == 0` / `redis_up == 0` boolean gauge 不再存在（otelcol receiver
+  不发健康指示，连不上就静默 fail scrape）→ 重写为
+  `absent_over_time(pg_stat_database_numbackends[2m]) == 1`
+  / `absent_over_time(redis_uptime_in_seconds[2m]) == 1`
+- `up{job=~"postgres|redis"}` 不再合成（remote_write 不产 synthetic up）
+  → InfraExporterDown 收窄到 `job=~"nats|minio|otelcol"`
+- `pg_stat_database_numbackends` / `pg_settings_max_connections` /
+  `redis_memory_used_bytes` / `redis_memory_max_bytes` 经 metricstransform
+  别名保留，原 PostgresConnectionsHigh / RedisMemoryHigh 表达式不变
 
 > ⚠️ **OMC 三进程未启动时**，Prometheus targets 会显示 `down`，这是预期行为，
 > 不影响监控栈自身 healthy。启动 `app/acs/worker` 三进程后，target 会在

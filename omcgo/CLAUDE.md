@@ -80,6 +80,7 @@ omcgo-worker  — 后台工作进程（PM/MR 文件处理、KPI 计算）
 | 链路追踪 SDK | `go.opentelemetry.io/otel` | 进程内 trace 产生与 OTLP gRPC 上报 |
 | Trace 采集器 | `otel/opentelemetry-collector-contrib:0.103.0` | 接收 SDK 上报、batch/retry/缓冲，转推后端（T-0155 Phase 1） |
 | Trace 后端 | `grafana/tempo:2.5.0` | trace 存储与查询，Grafana Tempo 数据源原生集成 + trace-to-logs 跳 Loki |
+| 基础设施指标采集 | otelcol contrib 0.103 内置 `postgresqlreceiver` + `redisreceiver` → metricstransform 别名 → prometheusremotewrite → Prometheus | postgres-exporter / redis-exporter 已下线（T-0155 Phase 2b） |
 | DB 驱动 | `github.com/jackc/pgx/v5` | PostgreSQL 高性能驱动 |
 | 连接池 | `github.com/jackc/pgx/v5/pgxpool` | 数据库连接池 |
 | Redis | `github.com/redis/go-redis/v9` | 缓存、会话、命令队列 |
