@@ -222,6 +222,9 @@ func (deviceParameterRepoStub) GetByPath(_ context.Context, _ uuid.UUID, _ strin
 	return nil, nil
 }
 func (deviceParameterRepoStub) DeleteByDevice(_ context.Context, _ uuid.UUID) error { return nil }
+func (deviceParameterRepoStub) DeleteByPathPrefix(_ context.Context, _ uuid.UUID, _ string) (int64, error) {
+	return 0, nil
+}
 func (deviceParameterRepoStub) GetByPathPrefix(_ context.Context, _ uuid.UUID, _ string) ([]model.DeviceParameter, error) {
 	return nil, nil
 }
@@ -262,6 +265,156 @@ func newDiffTestService(t *testing.T, paths []string, paramErr error) (*SyncServ
 		logger:      logger,
 	}
 	return svc, recorded, mr
+}
+
+// ---------------------------------------------------------------------------
+// Tests: line 52 reconcile 差集删除（全量同步语义）
+// ---------------------------------------------------------------------------
+
+// fakeParamRepoForReconcile 实现 DeleteByPathPrefix 跟踪以验证差集删除调用。
+type fakeParamRepoForReconcile struct {
+	deviceParameterRepoStub
+	getPaths     []string
+	deletedPaths []string
+	deleteErr    error
+}
+
+func (f *fakeParamRepoForReconcile) GetByDevice(_ context.Context, _ uuid.UUID) ([]model.DeviceParameter, error) {
+	out := make([]model.DeviceParameter, 0, len(f.getPaths))
+	for _, p := range f.getPaths {
+		out = append(out, model.DeviceParameter{ParameterPath: p})
+	}
+	return out, nil
+}
+
+func (f *fakeParamRepoForReconcile) DeleteByPathPrefix(_ context.Context, _ uuid.UUID, prefix string) (int64, error) {
+	if f.deleteErr != nil {
+		return 0, f.deleteErr
+	}
+	f.deletedPaths = append(f.deletedPaths, prefix)
+	return 1, nil
+}
+
+func TestNearestObjectPrefix_Cases(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		// 深层多实例：i=5，prefix 5 段，>=4 OK
+		{"Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.LTECell.2.Pci",
+			"Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.LTECell."},
+		// i=4，prefix 4 段，>=4 OK
+		{"Device.X.Y.Z.1.W", "Device.X.Y.Z."},
+		// i=3，prefix 3 段，<4 拒
+		{"Device.WiFi.SSID.1.Enable", ""},
+		// i=2，prefix 2 段，<4 拒 — 防误删大爆炸（实测 BLQ 触发场景）
+		{"Device.DeviceInfo.2.UE_Count", ""},
+		// 叶子（无数字段）→ 不参与
+		{"Device.System.Mode", ""},
+		{"Device.DeviceInfo.SoftwareVersion", ""},
+		{"", ""},
+		// 全数字段（不太可能但兜底）— i=2, 拒
+		{"1.2.3", ""},
+		// 多层嵌套实例：取最深的数字段 "2"（i=5），>=4 OK
+		{"Device.A.B.C.1.X.2.Y", "Device.A.B.C.1.X."},
+	}
+	for _, c := range cases {
+		t.Run(c.in, func(t *testing.T) {
+			assert.Equal(t, c.want, nearestObjectPrefix(c.in))
+		})
+	}
+}
+
+func TestDeriveObjectPrefixesFromParams_DedupAndSkipLeaves(t *testing.T) {
+	params := []model.DeviceParameter{
+		// 深层 prefix OK
+		{ParameterPath: "Device.A.B.C.1.X.Y"},
+		{ParameterPath: "Device.A.B.C.2.X.Y"},
+		{ParameterPath: "Device.A.B.D.1.X.Y"},
+		// 浅 prefix（<4 段）→ 拒
+		{ParameterPath: "Device.X.1.Y"},
+		// 叶子 → 跳过
+		{ParameterPath: "Device.System.Mode"},
+		{ParameterPath: ""},
+	}
+	got := deriveObjectPrefixesFromParams(params)
+	assert.ElementsMatch(t, []string{"Device.A.B.C.", "Device.A.B.D."}, got)
+}
+
+func TestPathInAnyPrefix(t *testing.T) {
+	prefixes := []string{"Device.WiFi.SSID.", "Device.WiFi.Radio."}
+	assert.True(t, pathInAnyPrefix("Device.WiFi.SSID.1.Enable", prefixes))
+	assert.True(t, pathInAnyPrefix("Device.WiFi.SSID.99.Name", prefixes))
+	assert.True(t, pathInAnyPrefix("Device.WiFi.Radio.1.Channel", prefixes))
+	assert.False(t, pathInAnyPrefix("Device.System.Mode", prefixes))
+	assert.False(t, pathInAnyPrefix("Device.Services.FAPService.1.X", prefixes))
+}
+
+func TestReconcileDeletedPaths_DeletesMissingInstances(t *testing.T) {
+	repo := &fakeParamRepoForReconcile{}
+	svc := &SyncService{paramRepo: repo, logger: zap.NewNop()}
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "BLQ-001"}
+	// 用真实 BLQ 场景 path（>=4 段深层多实例，nearestObjectPrefix 会推导出 prefix）
+	// CPE 返回 LTECell.1、LTECell.3；DB 中还有 LTECell.2、LTECell.4（被 CPE 删了）+ 其他范围数据
+	lt := "Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.LTECell."
+	prev := map[string]struct{}{
+		lt + "1.Pci":                   {},
+		lt + "2.Pci":                   {},
+		lt + "3.Pci":                   {},
+		lt + "4.Pci":                   {},
+		"Device.WiFi.SSID.1.Enable":    {}, // 浅 prefix（3 段）不在 reconcile 范围
+		"Device.System.Mode":           {}, // 叶子
+	}
+	params := []model.DeviceParameter{
+		{ParameterPath: lt + "1.Pci"},
+		{ParameterPath: lt + "3.Pci"},
+	}
+	svc.reconcileDeletedPaths(context.Background(), dev, prev, params)
+	assert.ElementsMatch(t, []string{
+		lt + "2.Pci",
+		lt + "4.Pci",
+	}, repo.deletedPaths)
+}
+
+func TestReconcileDeletedPaths_NoMissing_NoDelete(t *testing.T) {
+	repo := &fakeParamRepoForReconcile{}
+	svc := &SyncService{paramRepo: repo, logger: zap.NewNop()}
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "BLQ-001"}
+	lt := "Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.LTECell."
+	prev := map[string]struct{}{lt + "1.Pci": {}}
+	params := []model.DeviceParameter{{ParameterPath: lt + "1.Pci"}}
+	svc.reconcileDeletedPaths(context.Background(), dev, prev, params)
+	assert.Empty(t, repo.deletedPaths)
+}
+
+func TestReconcileDeletedPaths_AllLeavesNoOp(t *testing.T) {
+	// CPE 全返回叶子 path（无数字段）→ 推导不出 prefix → 不删
+	repo := &fakeParamRepoForReconcile{}
+	svc := &SyncService{paramRepo: repo, logger: zap.NewNop()}
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "BLQ-001"}
+	prev := map[string]struct{}{
+		"Device.System.Mode":                                                            {},
+		"Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.LTECell.5.Stale": {},
+	}
+	params := []model.DeviceParameter{{ParameterPath: "Device.System.Mode"}}
+	svc.reconcileDeletedPaths(context.Background(), dev, prev, params)
+	assert.Empty(t, repo.deletedPaths, "全叶子响应不应触发任何删除（避免误删未涵盖的多实例数据）")
+}
+
+func TestReconcileDeletedPaths_RejectsShallowInstances(t *testing.T) {
+	// 浅层 prefix（如 Device.DeviceInfo.2.UE_Count，数字段在第 2 位）门槛拒，不删
+	// 防止 BLQ 实测中 Device.DeviceInfo.2.* 路径推导出 Device.DeviceInfo. 覆盖整个子树
+	repo := &fakeParamRepoForReconcile{}
+	svc := &SyncService{paramRepo: repo, logger: zap.NewNop()}
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "BLQ-001"}
+	prev := map[string]struct{}{
+		"Device.DeviceInfo.WAN_CONFIG11_DEFAULTGW": {},
+		"Device.DeviceInfo.SoftwareVersion":        {},
+	}
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.DeviceInfo.2.UE_Count"}, // 浅 prefix（i=2 < 4 门槛）→ skip
+	}
+	svc.reconcileDeletedPaths(context.Background(), dev, prev, params)
+	assert.Empty(t, repo.deletedPaths)
 }
 
 func TestLogPathBSyncDiff_LogsMissingPaths_InfoLevel(t *testing.T) {

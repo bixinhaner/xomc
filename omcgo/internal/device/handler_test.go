@@ -200,6 +200,10 @@ func (m *fakeParamRepo) DeleteByDevice(ctx context.Context, deviceID uuid.UUID) 
 	return nil
 }
 
+func (m *fakeParamRepo) DeleteByPathPrefix(_ context.Context, _ uuid.UUID, _ string) (int64, error) {
+	return 0, nil
+}
+
 func (m *fakeParamRepo) GetByPathPrefix(_ context.Context, _ uuid.UUID, _ string) ([]model.DeviceParameter, error) {
 	return nil, nil
 }

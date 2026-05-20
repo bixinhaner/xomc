@@ -176,6 +176,10 @@ func (m *infMockParamRepo) DeleteByDevice(ctx context.Context, deviceID uuid.UUI
 	return nil
 }
 
+func (m *infMockParamRepo) DeleteByPathPrefix(_ context.Context, _ uuid.UUID, _ string) (int64, error) {
+	return 0, nil
+}
+
 func (m *infMockParamRepo) GetByPathPrefix(_ context.Context, _ uuid.UUID, _ string) ([]model.DeviceParameter, error) {
 	return nil, nil
 }
