@@ -11,16 +11,16 @@
 #
 # 用法：
 #   sudo bash install-docker.sh                          # 交互：装完后引导选加速镜像
-#   sudo bash install-docker.sh --mirror aliyun          # 一气呵成，装完直接配阿里云加速
+#   sudo bash install-docker.sh --mirror daocloud        # 一气呵成，装完直接配 DaoCloud 加速
 #   sudo bash install-docker.sh --no-mirror              # 装完不动 daemon.json，跳过加速
 #   sudo bash install-docker.sh --skip-if-installed      # 已装则静默 0 退出（脚本里调）
 #   sudo bash install-docker.sh -h | --help              # 本帮助
 #
 # 参数：
 #   --mirror <name>       装完后立即配置加速镜像并 restart docker。
-#                         取值：official / aliyun / tencent / ustc / netease / baidu
-#                         传 official 等价于不配加速。custom 模式请单独跑
-#                         setup-docker-mirror.sh --mirror custom --url ...
+#                         取值：official / daocloud / xuanyuan
+#                         传 official 等价于"不设置镜像"，回归 docker hub 官方。
+#                         其它任意 URL 请单独运行 setup-docker-mirror.sh 后手编 daemon.json
 #   --no-mirror           装完不引导加速、不动 daemon.json（用户后期可单独运行
 #                         setup-docker-mirror.sh）
 #   --skip-if-installed   已检测到 docker 时静默 0 退出（deploy.sh 调用时用）

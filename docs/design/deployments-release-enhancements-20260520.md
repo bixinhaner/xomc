@@ -32,7 +32,7 @@
 
 | # | 决策点 | 选定方案 |
 |---|---|---|
-| D1 | 镜像加速器内置名单 | 6 项：`official`（无加速）/ `aliyun` / `tencent` / `ustc`（中科大）/ `netease`（网易）/ `baidu`（百度云）+ `custom`（用户输入 URL） |
+| D1 | 镜像加速器内置名单 | **v2 精简到 3 项**：`official`（不设置镜像）/ `daocloud`（`https://docker.m.daocloud.io`）/ `xuanyuan`（`https://docker.xuanyuan.me`）。其它历史选项（aliyun/tencent/ustc/netease/baidu/custom）已下线 |
 | D2 | 设置方式 | 修改 `/etc/docker/daemon.json` 的 `registry-mirrors`；若文件已有其它键则 **merge 而非覆盖** |
 | D3 | 镜像加速触发时机 | install-docker.sh **执行末尾自动提示** "是否配置加速？" → 是则调 setup-docker-mirror.sh；批处理可走 `--mirror <name>` 一次过；交付侧也可后期单独运行 setup-docker-mirror.sh |
 | D4 | deploy.sh 自动化粒度 | 默认全套（load 镜像 → infra up → 等就绪 → migrate → seed → app/acs/worker systemd → web up → healthcheck）；提供 `--skip-*` 标志做精细控制 |
@@ -55,22 +55,20 @@
 
 用法：
 ```bash
-sudo bash setup-docker-mirror.sh                  # 交互式选单
-sudo bash setup-docker-mirror.sh --mirror aliyun  # 非交互
-sudo bash setup-docker-mirror.sh --mirror custom --url https://my-mirror.example.com
-sudo bash setup-docker-mirror.sh --remove         # 取消加速（回归官方）
+sudo bash setup-docker-mirror.sh                    # 交互式选单（3 选项）
+sudo bash setup-docker-mirror.sh --mirror daocloud  # 非交互
+sudo bash setup-docker-mirror.sh --mirror xuanyuan
+sudo bash setup-docker-mirror.sh --mirror official  # 不设置镜像
+sudo bash setup-docker-mirror.sh --remove           # 等价 --mirror official
 sudo bash setup-docker-mirror.sh -h
 ```
 
-内置 URL（决策 D1）：
+内置 URL（决策 D1，**v2 精简到 3 项**）：
 ```bash
 declare -A MIRRORS=(
   [official]=""
-  [aliyun]="https://registry.aliyuncs.com,https://hub-mirror.c.163.com"
-  [tencent]="https://mirror.ccs.tencentyun.com"
-  [ustc]="https://docker.mirrors.ustc.edu.cn"
-  [netease]="https://hub-mirror.c.163.com"
-  [baidu]="https://mirror.baidubce.com"
+  [daocloud]="https://docker.m.daocloud.io"
+  [xuanyuan]="https://docker.xuanyuan.me"
 )
 ```
 
@@ -187,7 +185,7 @@ sudo bash deploy.sh -h
 | 风险 | 缓解 |
 |---|---|
 | 客户内网无 python3 → daemon.json 合并失败 | 兜底：仅"无文件"场景写裸 JSON；存在文件时让用户手动 edit 并提示 |
-| 镜像加速 URL 失效 | 内置 5+ 选项，用户随时可换；提供 `--mirror custom --url ...` 自定义 |
+| 镜像加速 URL 失效 | v2 内置 3 选项（official/daocloud/xuanyuan），用户随时可换；如需其它 URL 可单独编辑 `/etc/docker/daemon.json` |
 | deploy.sh 在已部署环境重跑 | 全幂等：load 镜像跳过同 digest；compose up -d 自动协调；migrate 内置版本号比对 |
 | systemd 单元覆盖已有 | 检测 `/etc/systemd/system/omcgo-*.service` 存在时备份 `.bak.<时间戳>` |
 | Docker 重启中断在运行的容器 | setup-docker-mirror.sh 在 daemon.json 未变化时跳过 restart |

@@ -8,28 +8,26 @@
 # 设计来源：docs/design/deployments-release-enhancements-20260520.md §3.1
 #
 # 用法：
-#   sudo bash setup-docker-mirror.sh                          # 交互式选单
-#   sudo bash setup-docker-mirror.sh --mirror aliyun          # 非交互（推荐脚本里调）
-#   sudo bash setup-docker-mirror.sh --mirror custom --url https://my-mirror.example.com
-#   sudo bash setup-docker-mirror.sh --remove                 # 取消加速（回归官方）
+#   sudo bash setup-docker-mirror.sh                          # 交互式选单（3 选项）
+#   sudo bash setup-docker-mirror.sh --mirror daocloud        # 非交互（推荐脚本里调）
+#   sudo bash setup-docker-mirror.sh --mirror xuanyuan
+#   sudo bash setup-docker-mirror.sh --mirror official        # 不设置镜像（回归官方）
+#   sudo bash setup-docker-mirror.sh --remove                 # 等价 --mirror official
 #   sudo bash setup-docker-mirror.sh --show                   # 仅展示当前配置
 #   sudo bash setup-docker-mirror.sh -h | --help              # 本帮助
 #
 # 参数：
-#   --mirror <name>   加速器名称：official / aliyun / tencent / ustc / netease / baidu / custom
-#                     · official：清空 registry-mirrors，回归 docker hub 官方
-#                     · custom：必须配合 --url <URL>（可多次，逗号分隔多 URL）
-#   --url <URL>       仅 --mirror custom 时使用，自定义加速 URL
+#   --mirror <name>   加速器名称：official / daocloud / xuanyuan
+#                     · official：清空 registry-mirrors，回归 docker hub 官方（"不设置镜像"）
+#                     · daocloud：DaoCloud 公共镜像（稳定，国内推荐）
+#                     · xuanyuan：轩辕镜像
 #   --remove          删除 registry-mirrors 字段（等价 --mirror official）
 #   --show            仅展示当前 /etc/docker/daemon.json 的 registry-mirrors，不修改
 #   -h | --help       本帮助
 #
 # 内置加速 URL（每项之后会被原样写入 daemon.json）：
-#   aliyun   → https://registry.aliyuncs.com  +  https://hub-mirror.c.163.com（双备份）
-#   tencent  → https://mirror.ccs.tencentyun.com
-#   ustc     → https://docker.mirrors.ustc.edu.cn
-#   netease  → https://hub-mirror.c.163.com
-#   baidu    → https://mirror.baidubce.com
+#   daocloud → https://docker.m.daocloud.io
+#   xuanyuan → https://docker.xuanyuan.me
 #
 # 安全性：
 #   · 仅修改 /etc/docker/daemon.json 的 registry-mirrors 一项，其它键原样保留
@@ -45,17 +43,16 @@ warn() { echo -e "\033[1;33m[mirror][警告]\033[0m $*" >&2; }
 die()  { echo -e "\033[1;31m[mirror][错误]\033[0m $*" >&2; exit 1; }
 
 # ── 帮助 ────────────────────────────────────────────────────────────────
-show_help() { sed -n '3,38p' "$0"; exit 0; }
+show_help() { sed -n '3,33p' "$0"; exit 0; }
 
 # ── 参数解析 ─────────────────────────────────────────────────────────────
+# v2：精简到 3 个选项（official / daocloud / xuanyuan）。custom / --url 已下线。
 MIRROR=""
-URL=""
 REMOVE=0
 SHOW=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --mirror) MIRROR="$2"; shift 2 ;;
-    --url)    URL="$2"; shift 2 ;;
     --remove) REMOVE=1; shift ;;
     --show)   SHOW=1; shift ;;
     -h|--help) show_help ;;
@@ -81,16 +78,13 @@ fi
 command -v docker >/dev/null 2>&1 || die "未检测到 docker。请先安装 Docker（参考 install-docker.sh）。"
 
 # ── 加速器名 → URL 列表 ─────────────────────────────────────────────────
+# v2：仅保留 3 项（official / daocloud / xuanyuan）。其它选项 / custom 已下线。
 mirror_urls() {
   case "$1" in
     official) echo "" ;;
-    aliyun)   echo "https://registry.aliyuncs.com,https://hub-mirror.c.163.com" ;;
-    tencent)  echo "https://mirror.ccs.tencentyun.com" ;;
-    ustc)     echo "https://docker.mirrors.ustc.edu.cn" ;;
-    netease)  echo "https://hub-mirror.c.163.com" ;;
-    baidu)    echo "https://mirror.baidubce.com" ;;
-    custom)   echo "$URL" ;;
-    *) die "未知加速器：$1（应为 official/aliyun/tencent/ustc/netease/baidu/custom）" ;;
+    daocloud) echo "https://docker.m.daocloud.io" ;;
+    xuanyuan) echo "https://docker.xuanyuan.me" ;;
+    *) die "未知加速器：$1（应为 official / daocloud / xuanyuan）" ;;
   esac
 }
 
@@ -99,33 +93,21 @@ if [ -z "$MIRROR" ] && [ "$REMOVE" = 0 ]; then
   cat <<MENU
 ─────────────────────────────────────────────────
  请选择 Docker 加速镜像（输入数字）：
-   1) official  官方源（不配置加速）
-   2) aliyun    阿里云（推荐 / 国内默认）
-   3) tencent   腾讯云
-   4) ustc      中国科学技术大学
-   5) netease   网易
-   6) baidu     百度云
-   7) custom    自定义 URL
+   1) official  不设置镜像（走 docker hub 官方）
+   2) daocloud  https://docker.m.daocloud.io  （国内推荐）
+   3) xuanyuan  https://docker.xuanyuan.me
 ─────────────────────────────────────────────────
 MENU
-  read -rp "选择 [1-7]，默认 2： " choice
+  read -rp "选择 [1-3]，默认 2： " choice
   case "${choice:-2}" in
     1) MIRROR=official ;;
-    2) MIRROR=aliyun ;;
-    3) MIRROR=tencent ;;
-    4) MIRROR=ustc ;;
-    5) MIRROR=netease ;;
-    6) MIRROR=baidu ;;
-    7) MIRROR=custom
-       read -rp "请输入自定义加速 URL（多个用逗号分隔）： " URL
-       [ -n "$URL" ] || die "custom 模式必须输入 URL"
-       ;;
+    2) MIRROR=daocloud ;;
+    3) MIRROR=xuanyuan ;;
     *) die "无效选择：$choice" ;;
   esac
 fi
 
 [ "$REMOVE" = 1 ] && MIRROR="official"
-[ "$MIRROR" = "custom" ] && [ -z "$URL" ] && die "--mirror custom 必须配合 --url <URL>"
 
 URLS="$(mirror_urls "$MIRROR")"
 log "目标加速器：$MIRROR ${URLS:+($URLS)}"

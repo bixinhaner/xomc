@@ -449,7 +449,7 @@ done
 | `gen-index.sh` | 构建侧 | `--archive <dir>` | 重生成 `archive/index.html`（由前两个脚本自动调） |
 | `serve.sh` | 构建侧 | `-p\|--port <PORT>` | 起 HTTP 下载服务（默认 8000） |
 | `bundle/docker/install-docker.sh` | 交付侧 | `--mirror <name>` / `--no-mirror` / `--skip-if-installed` | 离线装 Docker + 引导加速镜像 |
-| `bundle/docker/setup-docker-mirror.sh` | 交付侧 | `--mirror <name>` / `--url <URL>` / `--remove` / `--show` | 单独配 / 换 / 查 / 取消 Docker 加速镜像 |
+| `bundle/docker/setup-docker-mirror.sh` | 交付侧 | `--mirror <official\|daocloud\|xuanyuan>` / `--remove` / `--show` | 单独配 / 换 / 查 / 取消 Docker 加速镜像（v2 仅 3 选项） |
 | `bundle/deploy/deploy.sh` | 交付侧 | `--skip-infra` / `--skip-migrate` / `--skip-web` / `--check-only` / `--yes` | 一键部署 OMC 全栈 |
 | `bundle/deploy/healthcheck.sh` | 交付侧 | — | 部署完成后健康校验 |
 
@@ -463,10 +463,12 @@ done
 **主动引导**用户配置 Docker 镜像加速器：
 
 - 入口 1：`install-docker.sh` 末尾交互菜单（默认）
-- 入口 2：`install-docker.sh --mirror aliyun` 一气呵成（适合脚本/批处理）
+- 入口 2：`install-docker.sh --mirror daocloud` 一气呵成（适合脚本/批处理）
 - 入口 3：任意时刻 `setup-docker-mirror.sh` 单独运行
-- 内置 7 选项：`official` / `aliyun`（推荐 / 国内默认）/ `tencent` / `ustc` /
-  `netease` / `baidu` / `custom`（任意 URL，可多个逗号分隔）
+- 内置 3 选项（v2 精简）：
+  - `official`：不设置镜像，回归 docker hub 官方
+  - `daocloud`：`https://docker.m.daocloud.io`（国内推荐）
+  - `xuanyuan`：`https://docker.xuanyuan.me`
 - 实现：写 `/etc/docker/daemon.json` 的 `registry-mirrors` 字段；
   使用 python3 merge 保留 daemon.json 其它键；备份原 daemon.json 为
   `.bak.<时间戳>`；变更后自动 `systemctl restart docker`，内容无变则不重启

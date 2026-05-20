@@ -138,18 +138,18 @@ sudo tar -xJf omc-&lt;test|release&gt;-&lt;版本&gt;-&lt;架构&gt;.tar.xz -C /
 <p class="lead">目标机已装 Docker（<code>docker --version</code> 返 ≥ 20.10）时跳过本步。</p>
 <pre>cd /opt/omc/infra/docker
 sudo bash install-docker.sh                         # 交互式：装完会引导选加速镜像
-sudo bash install-docker.sh --mirror aliyun         # 非交互：装完直接配阿里云加速
+sudo bash install-docker.sh --mirror daocloud       # 非交互：装完直接配 DaoCloud 加速
 sudo bash install-docker.sh -h                      # 查看所有参数</pre>
 <p class="tip">install-docker.sh 自动：解压二进制 → 写 containerd / docker 的 systemd 单元 → <code>enable --now</code> 开机自启 → 验证 → 引导加速镜像。</p>
 
 <h2>⚡ 5. 配置 Docker 加速镜像（可选）</h2>
 <p class="lead">安装 Docker 时已选过的可跳过；后期想换加速器单独运行：</p>
 <pre>cd /opt/omc/infra/docker
-sudo bash setup-docker-mirror.sh                    # 交互选单（6 选项 + custom）
-sudo bash setup-docker-mirror.sh --mirror tencent   # 非交互
+sudo bash setup-docker-mirror.sh                    # 交互选单（3 选项）
+sudo bash setup-docker-mirror.sh --mirror daocloud  # 非交互
 sudo bash setup-docker-mirror.sh --show             # 看当前配置
 sudo bash setup-docker-mirror.sh --remove           # 取消加速回归官方</pre>
-<p class="tip">内置：<code>aliyun</code>（阿里云推荐）/ <code>tencent</code> 腾讯云 / <code>ustc</code> 中科大 / <code>netease</code> 网易 / <code>baidu</code> 百度云 / <code>custom</code> 自定义。</p>
+<p class="tip">内置：<code>official</code>（不设置镜像）/ <code>daocloud</code> <code>https://docker.m.daocloud.io</code> / <code>xuanyuan</code> <code>https://docker.xuanyuan.me</code>。</p>
 
 <h2>🚚 6. 一键部署 OMC（推荐）</h2>
 <pre>cd /opt/omc/releases/omc-&lt;test|release&gt;-&lt;版本&gt;-&lt;架构&gt;

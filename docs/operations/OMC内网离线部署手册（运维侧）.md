@@ -525,21 +525,17 @@ sudo bash /opt/omc/current/deploy/deploy.sh -h             # 看全部参数
 `install-docker.sh` 装完 Docker 后会引导选择加速镜像；后期想换或单独配置：
 
 ```bash
-sudo bash /opt/omc/infra/docker/setup-docker-mirror.sh                    # 交互选单
-sudo bash /opt/omc/infra/docker/setup-docker-mirror.sh --mirror aliyun    # 非交互
+sudo bash /opt/omc/infra/docker/setup-docker-mirror.sh                    # 交互选单（3 项）
+sudo bash /opt/omc/infra/docker/setup-docker-mirror.sh --mirror daocloud  # 非交互
 sudo bash /opt/omc/infra/docker/setup-docker-mirror.sh --show             # 看当前
 sudo bash /opt/omc/infra/docker/setup-docker-mirror.sh --remove           # 取消加速
 sudo bash /opt/omc/infra/docker/setup-docker-mirror.sh -h                 # 全参数
 ```
 
-**内置 7 选项**（D1）：
-- `official` — 不配置加速，回归 docker hub 官方
-- `aliyun` — 阿里云（推荐 / 国内默认）：双备份 `registry.aliyuncs.com` + `hub-mirror.c.163.com`
-- `tencent` — 腾讯云 `mirror.ccs.tencentyun.com`
-- `ustc` — 中国科学技术大学 `docker.mirrors.ustc.edu.cn`
-- `netease` — 网易 `hub-mirror.c.163.com`
-- `baidu` — 百度云 `mirror.baidubce.com`
-- `custom` — 自定义 URL（多个用逗号分隔）
+**内置 3 选项**（v2 精简）：
+- `official` — 不设置镜像，回归 docker hub 官方
+- `daocloud` — DaoCloud `https://docker.m.daocloud.io`（国内推荐）
+- `xuanyuan` — 轩辕镜像 `https://docker.xuanyuan.me`
 
 **实现**：
 - 写 `/etc/docker/daemon.json` 的 `registry-mirrors` 字段，**保留**其它键（用
