@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# OMC 交付包下载 HTTP 服务
+# OMC 离线版本下载 HTTP 服务
 #
 # 在构建机上起一个 HTTP 服务，把 archive/ 目录（build-release.sh 按版本归档的
 # 交付包）暴露出来，使用者用浏览器（或 wget/curl）访问即可下载。
@@ -73,7 +73,7 @@ list_archive() {
 
 IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
 echo "──────────────────────────────────────────────"
-echo " OMC 交付包下载服务"
+echo " OMC 离线版本下载服务"
 echo "   根目录   ： $ARCHIVE"
 echo "   地址     ： http://${IP:-<构建机IP>}:$PORT/"
 list_archive project "项目版本下载" "运行 ./build-release.sh 生成"
