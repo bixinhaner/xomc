@@ -6,6 +6,24 @@
 
 ---
 
+## v3 收口（2026-05-20 当日演进 — 仅 amd64）
+
+`release.conf` 的 `ARCHES` 从 `"amd64 arm64"` 收紧为 `"amd64"`，三个构建脚本
+（`download-docker.sh` / `build-images.sh` / `build-release.sh`）在参数解析阶
+段加 amd64-only 校验，传入非 amd64 直接 die。理由：
+
+1. 现场交付目标设备全部为 amd64 服务器，arm64 没有真实用户
+2. arm64 跨架构 pull 在 amd64 host 上要拉 arm64 manifest + 镜像，磁盘翻倍；
+   baicells 构建机的 `/var` 切了 4.9G LV，跑双架构全栈直接撑爆 containerd
+   snapshot 目录（实测）
+3. 运维侧从未对 arm64 交付包做过 deploy + healthcheck 验证
+
+未来重启 arm64 步骤已记录在 `release.conf` 注释（改 ARCHES + 移除三脚本校验
++ 40GB 磁盘 + arm64 设备实测 deploy）。下面 v2 收口段及 §0-§6 提案原文保
+留作历史快照。
+
+---
+
 ## v2 收口（2026-05-20 当日演进）
 
 本设计的"镜像加速"模块在落地当天进一步收口为**三合一加速**：

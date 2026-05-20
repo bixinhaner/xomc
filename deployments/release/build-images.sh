@@ -31,7 +31,8 @@
 #
 # 参数：
 #   -v, --version <ver>     基础设施版本号（默认取 release.conf 的 INFRA_VERSION）
-#   --arch <amd64|arm64>    目标架构（默认双架构都构建）
+#   --arch <amd64>          目标架构。【当前只支持 amd64】，非法值会被拒绝；
+#                           原因见 release.conf 中"架构支持"注释
 #   --infra-only            仅拉 + 打包基础设施镜像，不要监控栈（v2 新增）
 #   --monitoring-only       仅补监控栈镜像，infra-images-*.tar 保持不动
 #   --with-monitoring       【已废弃】v2 起默认即含监控栈；保留为 no-op + 提示
@@ -67,6 +68,13 @@ while [ $# -gt 0 ]; do
     -h|--help)         sed -n '3,40p' "$0"; exit 0 ;;
     *)                 die "未知参数：$1（-h 查看用法）" ;;
   esac
+done
+
+# 仅支持 amd64（见 release.conf 注释 "架构支持"）
+for _a in $ARCHES; do
+  [ "$_a" = "amd64" ] || die "本工具仅支持 amd64 架构，传入：${_a}。
+        如确实需要 arm64：见 release.conf 中关于 架构支持 的注释，
+        改 ARCHES + 移除本脚本的校验后自行验证。"
 done
 
 # ── 前置检查 ────────────────────────────────────────────────────────────

@@ -1,5 +1,11 @@
 # deployments/release — OMC 离线交付包
 
+> ⚠️ **架构支持**：当前发布工具链**只支持 amd64（x86_64）**。`download-docker.sh` /
+> `build-images.sh` / `build-release.sh` 三个脚本都会在参数解析阶段校验，传入
+> 非 amd64 会被拒绝。原因见 `release.conf` 中"架构支持"注释；未来若要重启
+> arm64 需要：① 改 `ARCHES` 回双架构 ② 移除三脚本的校验 ③ 准备 ≥40GB Docker
+> 数据盘 ④ 在 arm64 目标设备上完整跑一遍 deploy + healthcheck 验证。
+
 本目录用于**生成、归档、分发交付给运维的离线交付包**。配套文档：
 
 - **快速上手**（怎么用本目录的脚本）：[`docs/operations/OMC交付构建快速上手.md`](../../docs/operations/OMC交付构建快速上手.md)

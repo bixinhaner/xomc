@@ -9,7 +9,8 @@
 # 下载版本与地址由 release.conf 的 DOCKER_VERSION / DOCKER_URL_TEMPLATE 控制。
 # Docker 引擎不常变更——仅在调整版本时运行本工具。
 #
-# 用法： ./download-docker.sh [--arch amd64|arm64] [--force]
+# 用法： ./download-docker.sh [--arch amd64] [--force]
+#   --arch   当前【只支持 amd64】，非法值会被拒绝（见 release.conf 注释）
 #   --force  已存在也重新下载
 # =============================================================================
 set -euo pipefail
@@ -35,6 +36,13 @@ done
 
 [ -n "${DOCKER_VERSION:-}" ]      || die "release.conf 未配置 DOCKER_VERSION"
 [ -n "${DOCKER_URL_TEMPLATE:-}" ] || die "release.conf 未配置 DOCKER_URL_TEMPLATE"
+
+# 仅支持 amd64（见 release.conf 注释 "架构支持"）
+for _a in $ARCHES; do
+  [ "$_a" = "amd64" ] || die "本工具仅支持 amd64 架构，传入：${_a}。
+        如确实需要 arm64：见 release.conf 中关于 架构支持 的注释，
+        改 ARCHES + 移除本脚本的校验后自行验证。"
+done
 
 # ── 下载工具：curl 优先，其次 wget ──────────────────────────────────────
 if command -v curl >/dev/null 2>&1; then

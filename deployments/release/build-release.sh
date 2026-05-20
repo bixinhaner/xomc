@@ -21,7 +21,8 @@
 # 产物：archive/project/<版本>/omc-<渠道>-<版本>-<架构>.tar.<压缩>（+ .sha256）
 #       并自动刷新 archive/index.html，供 serve.sh 起 HTTP 服务下载。
 #
-# 用法： ./build-release.sh [-v 版本] [--channel test|release] [--arch amd64|arm64]
+# 用法： ./build-release.sh [-v 版本] [--channel test|release] [--arch amd64]
+#   --arch  当前【只支持 amd64】，非法值会被拒绝；原因见 release.conf "架构支持" 注释。
 #   ★ 用普通用户运行，不要 sudo（sudo 重置 PATH 会找不到 go/npm，产物归 root）。
 # =============================================================================
 set -euo pipefail
@@ -52,6 +53,13 @@ case "$CHANNEL" in
   test|release) ;;
   *) die "--channel 取值非法：$CHANNEL（应为 test 或 release）" ;;
 esac
+
+# 仅支持 amd64（见 release.conf 注释 "架构支持"）
+for _a in $ARCHES; do
+  [ "$_a" = "amd64" ] || die "本工具仅支持 amd64 架构，传入：${_a}。
+        如确实需要 arm64：见 release.conf 中关于 架构支持 的注释,
+        改 ARCHES + 移除本脚本的校验后自行验证。"
+done
 
 # ── 前置检查 ────────────────────────────────────────────────────────────
 # 本工具是构建脚本，应以【普通用户】运行，不要 sudo。本工具【不需要 docker】。

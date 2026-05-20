@@ -2,12 +2,19 @@
 
 > **适用对象**：研发 / 发布工程师。
 > **执行环境**：有公网、装有 Go / Node / Docker 的**构建机**。
-> **产出**：两个互相独立的离线交付包——**项目包** `omc-<test|release>-<版本>-<架构>.tar.xz`
-> 与**基础设施包** `omc-infra-<版本>-<架构>.tar.xz`（amd64 + arm64 各一），
-> 按版本归档到 `archive/`，可经 HTTP 服务下载。
+> **产出**：两个互相独立的离线交付包——**项目包** `omc-<test|release>-<版本>-amd64.tar.xz`
+> 与**基础设施包** `omc-infra-<版本>-amd64.tar.xz`，按版本归档到 `archive/`，可经
+> HTTP 服务下载。
 > **配套文档**：命令速查见《OMC交付构建快速上手》；运维侧部署见《OMC内网离线部署手册（运维侧）》。
 > **配套工具**：构建工具位于仓库 `deployments/release/`。
 > **文档状态**：v2.0（双包拆分），需随产品版本迭代同步维护。
+>
+> ⚠️ **架构支持**：本工具链当前**只支持 amd64（x86_64）**。`release.conf` 的
+> `ARCHES` 固定为 `"amd64"`；三个构建脚本（download-docker.sh /
+> build-images.sh / build-release.sh）均在参数解析阶段做了 amd64-only 校验，
+> 传非 amd64 直接 die。原因：① 交付目标设备全为 amd64 服务器 ② arm64 跨架构
+> 构建在 amd64 host 上要双倍磁盘（全栈 ~40GB）并易撑爆紧凑分区 ③ 运维侧未对
+> arm64 包做过验证。**未来重启 arm64**：见 `release.conf` 中"架构支持"注释。
 
 ---
 
