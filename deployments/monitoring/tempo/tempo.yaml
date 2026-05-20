@@ -64,3 +64,46 @@ overrides:
       max_traces_per_user: 100000     # 单租户最大 trace 数（dev 充裕）
     global:
       max_bytes_per_trace: 5000000    # 单 trace 最大 5 MB，超过丢弃
+    # 允许 default tenant 跑 metrics_generator 的 span_metrics / service_graphs
+    metrics_generator:
+      processors:
+        - service-graphs
+        - span-metrics
+
+# metrics_generator：从 trace 实时生成 RED 指标（rate/error/duration）与
+# service graph 边——业务 SLO 度量基础。生成的指标推到 Prometheus
+# remote_write 端点（已开 --web.enable-remote-write-receiver flag，T-0155 P2b）。
+#
+# 产出指标：
+#   traces_spanmetrics_calls_total{service, span_kind, status_code, ...}
+#   traces_spanmetrics_duration_seconds_bucket{...}
+#   traces_service_graph_request_total{client, server, ...}
+#   traces_service_graph_request_failed_total{...}
+#   traces_service_graph_request_server_seconds_bucket{...}
+#
+# 即可在 Grafana 用 PromQL 算 RED：
+#   rate(traces_spanmetrics_calls_total[5m])  -- Request rate
+#   sum(rate(traces_spanmetrics_calls_total{status_code="STATUS_CODE_ERROR"}[5m]))
+#     / sum(rate(traces_spanmetrics_calls_total[5m]))  -- Error rate
+#   histogram_quantile(0.99, sum by(le)(rate(traces_spanmetrics_duration_seconds_bucket[5m])))
+#     -- P99 latency
+metrics_generator:
+  registry:
+    external_labels:
+      source: tempo
+      cluster: omcgo-dev
+  storage:
+    path: /var/tempo/generator/wal
+    remote_write:
+      - url: http://prometheus:9090/api/v1/write
+        send_exemplars: true
+  processor:
+    service_graphs:
+      max_items: 10000
+      wait: 10s
+    span_metrics:
+      dimensions:
+        - http.method
+        - http.status_code
+        - http.route
+      histogram_buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]

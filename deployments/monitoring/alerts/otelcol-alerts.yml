@@ -1,0 +1,109 @@
+# OMC OpenTelemetry Collector 自监控告警（T-0155 Phase 1+2b 收尾）
+#
+# 背景：otelcol 同时承担 trace 中转（OTLP→Tempo）和 metrics 采集
+# （postgres/redis→Prometheus remote_write）；下线 pg/redis exporter 后
+# 它成为单点。本规则文件覆盖 otelcol 自身管道健康度。
+#
+# 信号说明：
+#   - up{job="otelcol"} 已在 infra-alerts.yml InfraExporterDown 覆盖
+#   - 本文件覆盖「容器在跑但管道异常」的细分场景
+#
+# 暴露端点：otelcol :8888 self-telemetry（prometheus.yml job=otelcol）
+# 指标名前缀：otelcol_*
+
+groups:
+  - name: omc.otelcol_pipeline
+    interval: 30s
+    rules:
+      # ─── exporter 段健康 ────────────────────────────────────────────
+      - alert: OtelcolTraceExportFailing
+        # 5 分钟内有 span 发到 Tempo 失败 → 链路追踪丢数据
+        # 不用 rate>0 而用 increase>10 防止瞬态抖动误报
+        expr: increase(otelcol_exporter_send_failed_spans{exporter="otlp/tempo"}[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+          domain: omc
+          service: otelcol
+          pipeline: traces
+        annotations:
+          summary: "otelcol → Tempo trace 上报失败（5 分钟内 > 10 span 丢失）"
+          description: |
+            otelcol otlp/tempo exporter 持续把 trace 发送失败已 2 分钟。
+            Impact: 部分 span 在 Grafana Tempo 中查不到，trace-to-logs 关联失效。
+            Action: docker compose logs otelcol；docker compose logs tempo；
+                    检查 tempo:4317 连通性与 Tempo storage 磁盘。
+
+      - alert: OtelcolMetricExportFailing
+        # 同上，pg/redis 指标推 Prometheus 失败
+        expr: increase(otelcol_exporter_send_failed_metric_points{exporter="prometheusremotewrite"}[5m]) > 10
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          service: otelcol
+          pipeline: metrics
+        annotations:
+          summary: "otelcol → Prometheus metric 推送失败（5 分钟内 > 10 数据点丢失）"
+          description: |
+            otelcol prometheusremotewrite exporter 持续推送失败已 2 分钟。
+            Impact: PostgresMetricsAbsent / RedisMetricsAbsent 紧随其后会触发，
+                    pg/redis 健康检测失明。
+            Action: docker compose logs otelcol；
+                    确认 prometheus :9090/api/v1/write 可达；
+                    确认 Prometheus 启动 --web.enable-remote-write-receiver flag；
+                    若 logs 报 "duplicate sample for timestamp" 类错误，参考
+                    docs/design/observability-otelcol-migration-plan-20260520.md
+                    §5 Phase 2b 的 transform/promote_pg_resource 配置。
+
+      # ─── receiver 段健康 ────────────────────────────────────────────
+      - alert: OtelcolReceiverRefusing
+        # receiver 拒收数据通常因 memory_limiter 触发或 backend 反向压力
+        expr: increase(otelcol_receiver_refused_spans[5m]) > 0 or increase(otelcol_receiver_refused_metric_points[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          service: otelcol
+        annotations:
+          summary: "otelcol receiver 拒收数据 5 分钟"
+          description: |
+            otelcol receiver {{ $labels.receiver }} 持续拒收数据。
+            常见原因: memory_limiter processor 触发上游反压；后端不可用。
+            Impact: 部分 trace / metric 丢失。
+            Action: docker compose logs otelcol；检查内存与下游 Tempo/Prometheus 状态。
+
+      # ─── processor 段健康 ───────────────────────────────────────────
+      - alert: OtelcolMemoryLimiterDropping
+        # memory_limiter 主动丢数据 → otelcol 内存接近 limit_mib (config 200MB)
+        expr: increase(otelcol_processor_dropped_spans{processor="memory_limiter"}[5m]) > 0 or increase(otelcol_processor_dropped_metric_points{processor="memory_limiter"}[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+          domain: omc
+          service: otelcol
+        annotations:
+          summary: "otelcol memory_limiter 触发丢数据"
+          description: |
+            otelcol memory_limiter processor 因接近 limit_mib（默认 200MB）开始丢数据。
+            Impact: trace / metric 双管道都可能受影响。
+            Action: docker stats docker-otelcol-1 看实际 RSS；
+                    评估调高 monitoring/otelcol/config.yaml memory_limiter.limit_mib
+                    与 docker-compose.yml otelcol service 的 mem_limit；
+                    或检查上游 receiver 流量是否异常突增。
+
+      # ─── exporter 队列段水位 ────────────────────────────────────────
+      - alert: OtelcolExporterQueueHigh
+        # send queue 高水位 (>80%) 持续 5 分钟 → 下游 Tempo/Prometheus 跟不上
+        expr: (otelcol_exporter_queue_size / otelcol_exporter_queue_capacity) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          service: otelcol
+        annotations:
+          summary: "otelcol exporter {{ $labels.exporter }} 队列水位 > 80%"
+          description: |
+            otelcol 发送队列水位过高 5 分钟，下游摄取速度跟不上生产速度。
+            Impact: 队列满后开始拒收/丢弃数据（取决于 retry_on_failure 策略）。
+            Action: 检查下游 ({{ $labels.exporter }}) 性能；调高 queue_size 或下游扩容。

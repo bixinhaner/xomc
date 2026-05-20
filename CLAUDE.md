@@ -129,8 +129,10 @@ ln -s "$(pwd)/omcmb/webcode/node_modules" \
 | 对象存储 | MinIO (S3 兼容) |
 | 日志 | Zap |
 | 指标 | Prometheus |
-| 链路追踪 | OpenTelemetry SDK → OpenTelemetry Collector → Grafana Tempo（T-0155 Phase 1） |
+| 链路追踪 | OpenTelemetry SDK → OpenTelemetry Collector → Grafana Tempo（含 metrics_generator 产 RED 指标，T-0155 Phase 1 + 收尾） |
 | 基础设施指标 | postgresql/redis 走 OpenTelemetry Collector receiver → Prometheus remote_write；nats 走 prometheus-nats-exporter；minio 自带 `/metrics`（T-0155 Phase 2b） |
+| 日志采集 | OpenTelemetry Collector filelog → loki exporter → Loki（Promtail 已下线，T-0155 Phase 3） |
+| trace ↔ logs 关联 | `logger.L(ctx)` 注入 trace_id / span_id 到 zap 字段，Grafana Tempo → Loki 一键跳（T-0157） |
 
 ### 前端 (omcmb/ — frontend-core 业务层 + webcode UI 壳)
 

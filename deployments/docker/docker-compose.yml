@@ -348,19 +348,8 @@ services:
       retries: 10
       start_period: 30s
 
-  promtail:
-    image: grafana/promtail:3.0.0
-    environment:
-      TZ: "Asia/Shanghai"
-    volumes:
-      - ../monitoring/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
-      - ../../run/logs:/run/logs:ro
-      - promtaildata:/tmp
-      - /etc/localtime:/etc/localtime:ro
-    command: ["-config.file=/etc/promtail/promtail-config.yml"]
-    depends_on:
-      loki:
-        condition: service_healthy
+  # promtail：T-0155 Phase 3 下线，日志采集与 push Loki 改由 otelcol
+  # filelog receiver + loki exporter 接管。配置废弃移到 docs/historic/。
 
   # ──────────────────────────────────────────────────────────────────
   # Trace 栈：OpenTelemetry Collector + Grafana Tempo（T-0155 Phase 1）
@@ -381,6 +370,9 @@ services:
     # ports 故意不开：宿主侧的 trace 查询走 Grafana，不直连 otelcol。
     volumes:
       - ../monitoring/otelcol/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+      # Phase 3: 挂宿主日志目录给 filelog receiver 采集
+      # 与 promtail 旧挂载等价：readonly 防止误写
+      - ../../run/logs:/run/logs:ro
       - /etc/localtime:/etc/localtime:ro
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
     # 不配 healthcheck：otelcol-contrib 是 distroless 镜像（无 shell/wget/curl/nc），
@@ -398,6 +390,9 @@ services:
         condition: service_healthy
       # prometheus 必须先起，否则 prometheusremotewrite 启动时连不上
       prometheus:
+        condition: service_healthy
+      # Phase 3: loki 必须先 ready，否则 loki exporter 初始化报错
+      loki:
         condition: service_healthy
 
   tempo:
@@ -446,6 +441,7 @@ volumes:
   alertmanagerdata:
   grafanadata:
   lokidata:
+  # promtaildata volume kept for migration safety; remove on next compose down --volumes
   promtaildata:
   tempodata:
 

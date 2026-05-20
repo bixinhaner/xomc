@@ -1,8 +1,10 @@
 # OMC Monitoring Stack
 
-Prometheus + AlertManager + Grafana + Loki + Promtail + **otelcol + Tempo**
-一键起栈，覆盖 OMC 三进程（app / acs / worker）的**指标 + 日志 + 链路追踪**
-三通道可观测性。
+Prometheus + AlertManager + Grafana + Loki + **otelcol + Tempo** 一键起栈，
+覆盖 OMC 三进程（app / acs / worker）的**指标 + 日志 + 链路追踪**三通道可观测性。
+
+Promtail 已于 T-0155 Phase 3 下线，日志采集 → Loki 改由 otelcol filelog
+receiver + loki exporter 链路承担。
 
 ## 文件结构
 
@@ -12,18 +14,25 @@ deployments/monitoring/
 ├── alertmanager.yml              # AlertManager 路由 + receiver（占位 webhook）
 ├── alerts/
 │   ├── omc-rules.yml             # starter 告警规则（三进程存活）
-│   └── connection-pool-alerts.yml
+│   ├── connection-pool-alerts.yml
+│   ├── infra-alerts.yml          # pg/redis/nats/minio 基础服务（T-0155 P2b 改写）
+│   └── otelcol-alerts.yml        # otelcol 自身管道健康（T-0155 收尾）
 ├── loki/
 │   └── loki-config.yml           # Loki 单节点 filesystem 存储 + 7d retention
-├── promtail/
-│   └── promtail-config.yml       # 日志采集（zap JSON 解析 + level/service label）
+├── promtail/                      # 旧 Promtail 配置（T-0155 P3 后已下线，保留作历史参考）
+│   └── promtail-config.yml
 ├── otelcol/
 │   └── config.yaml               # OTel Collector：
-│                                 #   ─ traces: OTLP gRPC :4317 → Tempo（Phase 1）
-│                                 #   ─ metrics: postgresql/redis receiver → metricstransform
-│                                 #             → prometheusremotewrite → Prometheus（Phase 2b）
+│                                 #   ─ traces:  OTLP gRPC :4317 → Tempo（P1）
+│                                 #   ─ metrics: postgresql/redis receiver
+│                                 #             → metricstransform → prometheusremotewrite
+│                                 #             → Prometheus（P2b）
+│                                 #   ─ logs:   filelog receiver (/run/logs/*)
+│                                 #             → loki exporter → Loki（P3）
 ├── tempo/
-│   └── tempo.yaml                # Grafana Tempo 单进程 monolithic 配置 + 本地存储
+│   └── tempo.yaml                # Grafana Tempo monolithic + 本地存储 + metrics_generator
+│                                 #   service_graphs + span_metrics → Prometheus
+│                                 #   产 RED + service map 指标供 SLO 度量
 ├── grafana/
 │   ├── provisioning/
 │   │   ├── datasources/
@@ -108,9 +117,10 @@ trace-to-logs 关联：span 详情页右上角 → "Logs for this span"，自动
 label 跳 Loki 查同时段日志（详见 `grafana/provisioning/datasources/tempo.yml`
 的 `tracesToLogsV2` 配置）。
 
-> ⚠️ **当前阶段 trace_id 尚未注入 zap 日志字段**（待 T-0157 续）。
-> 暂时 trace-to-logs 会按服务名+时间窗口召回近似日志，精确匹配能力等
-> T-0157 完成后自动到位。
+trace-to-logs 关联：`logger.L(ctx)` 已在 T-0157 收尾时从 OTel context 抽取
+`trace_id` / `span_id` 注入 zap 字段；任何经过 Tracing middleware 的 HTTP
+请求所写日志都自动携带 trace_id，Grafana Tempo 数据源点 span → "Logs for
+this span" 用 `|= "<traceID>"` 精确匹配 Loki 日志。
 
 ## 应用侧 tracer 开关
 
@@ -125,6 +135,36 @@ tracer:
 ```
 
 tracer 关闭时 SDK 用 no-op Provider，零开销，与 trace 栈停机互不影响。
+
+## SLO 度量（Tempo metrics_generator）
+
+Tempo 通过 `metrics_generator` 把实时 trace 转化为 RED 指标推 Prometheus。
+配置见 `tempo/tempo.yaml` 末段，产出指标：
+
+| 指标 | 用途 |
+|------|------|
+| `traces_spanmetrics_calls_total{service, span_kind, status_code}` | 请求速率 |
+| `traces_spanmetrics_latency_bucket{...}` | 延迟直方图（P50/P90/P99） |
+| `traces_service_graph_request_total{client, server}` | 服务依赖边 |
+| `traces_service_graph_request_failed_total{...}` | 失败边（错误率） |
+| `traces_service_graph_request_server_seconds_*` | 边延迟分布 |
+
+PromQL 算 RED：
+```promql
+# Rate（每个服务的 QPS）
+sum by(service) (rate(traces_spanmetrics_calls_total[5m]))
+
+# Error rate（错误率）
+sum(rate(traces_spanmetrics_calls_total{status_code="STATUS_CODE_ERROR"}[5m]))
+  / sum(rate(traces_spanmetrics_calls_total[5m]))
+
+# P99 latency
+histogram_quantile(0.99,
+  sum by(le)(rate(traces_spanmetrics_latency_bucket[5m])))
+```
+
+Grafana 内置 "Tempo Service Graph" 面板（Explore → Tempo → Service Graph
+tab）会自动用上述指标渲染服务依赖图。
 
 ## PG / Redis 指标链路（Phase 2b 改造）
 

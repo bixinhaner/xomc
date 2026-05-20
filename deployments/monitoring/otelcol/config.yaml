@@ -70,6 +70,98 @@ receivers:
       insecure: true
     # redisreceiver 默认全开主要 INFO 段，无需显式 enable
 
+  # ─── Logs: filelog（Phase 3 — 替换 Promtail）──────────────────────
+  # 数据流：tail /run/logs/{app,acs,worker}/*.log（lumberjack 轮转后旧 *.log.gz
+  # 跳过）→ zap JSON 解析 → 提 timestamp / level / service / trace_id →
+  # loki exporter 推 :3100/loki/api/v1/push
+  filelog/app:
+    include: [/run/logs/app/app.log]
+    exclude: [/run/logs/app/*.log.gz, "/run/logs/app/*.log.[0-9]*"]
+    start_at: end                # 启动时从尾部开始，避免回灌历史
+    include_file_name: false
+    include_file_path: false
+    # storage: file_storage      # 暂不开（需 extension 加 file_storage），重启
+                                  # 时丢一小段 read offset 在 dev 可接受
+    operators:
+      - type: json_parser        # zap JSON 行 → 字段
+        timestamp:
+          parse_from: attributes.timestamp
+          # zap 默认 ISO8601 with timezone offset
+          layout: '2006-01-02T15:04:05.999-0700'
+          layout_type: gotime
+        severity:
+          parse_from: attributes.level
+      - type: add
+        field: resource["service.name"]
+        value: omcgo-app
+      - type: add
+        field: resource["deployment_unit"]
+        value: app
+
+  filelog/acs:
+    include: [/run/logs/acs/acs.log]
+    exclude: [/run/logs/acs/*.log.gz, "/run/logs/acs/*.log.[0-9]*"]
+    start_at: end
+    include_file_name: false
+    include_file_path: false
+    operators:
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.timestamp
+          layout: '2006-01-02T15:04:05.999-0700'
+          layout_type: gotime
+        severity:
+          parse_from: attributes.level
+      - type: add
+        field: resource["service.name"]
+        value: omcgo-acs
+      - type: add
+        field: resource["deployment_unit"]
+        value: acs
+
+  filelog/worker:
+    include: [/run/logs/worker/worker.log]
+    exclude: [/run/logs/worker/*.log.gz, "/run/logs/worker/*.log.[0-9]*"]
+    start_at: end
+    include_file_name: false
+    include_file_path: false
+    operators:
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.timestamp
+          layout: '2006-01-02T15:04:05.999-0700'
+          layout_type: gotime
+        severity:
+          parse_from: attributes.level
+      - type: add
+        field: resource["service.name"]
+        value: omcgo-worker
+      - type: add
+        field: resource["deployment_unit"]
+        value: worker
+
+  filelog/nginx:
+    include:
+      - /run/logs/nginx/*access.log
+      - /run/logs/nginx/*error.log
+    exclude:
+      - /run/logs/nginx/*.log.gz
+      - "/run/logs/nginx/*.log.[0-9]*"
+    start_at: end
+    include_file_name: false
+    include_file_path: false
+    operators:
+      # nginx 行非结构化，按整行原样保留，仅打 label
+      - type: add
+        field: resource["service.name"]
+        value: nginx
+      - type: add
+        field: resource["log_type"]
+        # log_type 由 promtail 旧配置区分 access/error；本期暂未拆，调用方
+        # 用 LogQL `|= "GET"` 之类二次过滤即可。下次迭代再加 file_path
+        # operator 按文件名分流。
+        value: nginx
+
 processors:
   # batch：合并下游推送，减少 Prometheus 写入压力
   batch:
@@ -211,6 +303,24 @@ exporters:
   debug:
     verbosity: basic
 
+  # ─── Logs 出口：Loki ──────────────────────────────────────────────
+  # 替换原 promtail → loki 链路；otelcol 直接 push Loki HTTP API。
+  #
+  # cardinality 死穴：禁止把 request_id / trace_id 这类高基数字段提为 label，
+  # 它们留在 log body 让 Loki 用 LogQL `| json | trace_id="..."` 过滤。
+  # 由 filelog operators 设的 resource["service.name"] 自动转为 Loki label
+  # `service_name`（lokiexporter 默认行为）；保留 default_labels_enabled
+  # 全开因为 Loki API 要求每 stream 至少 1 个 label。
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+    tls:
+      insecure: true
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 5m
+
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
@@ -231,6 +341,12 @@ service:
       receivers: [postgresql, redis]
       processors: [memory_limiter, transform/promote_pg_resource, metricstransform, resource/metrics, batch]
       exporters: [prometheusremotewrite]
+
+    # Logs pipeline（Phase 3 — Promtail 下线后由本管道承担）
+    logs:
+      receivers: [filelog/app, filelog/acs, filelog/worker, filelog/nginx]
+      processors: [memory_limiter, batch]
+      exporters: [loki]
 
   telemetry:
     metrics:

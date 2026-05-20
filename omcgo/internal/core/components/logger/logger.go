@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/omcgo/omcgo/internal/core/appconfig"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -403,8 +404,15 @@ func ParseStringSlice(s string) []string {
 	return result
 }
 
-// L returns a logger with request_id field if present in context.
-// This enables automatic request tracing across all log entries.
+// L returns a logger with request_id + trace_id/span_id fields populated from
+// context. request_id 由 RequestID middleware 写入 context；trace_id / span_id
+// 由 OTel Tracing middleware 透过 propagation.TraceContext 注入。
+//
+// 三件套同时存在时单次 logger.With 调用合并以避免多次 clone（zap 内部对
+// .With 链没做去重）。任一字段为空就不写，下游 Loki/Grafana 仍能查询。
+//
+// trace-to-logs 关联：trace_id 字段写入后，Grafana Tempo 数据源点 span →
+// 自动跳 Loki "{service=...} |= \"<traceID>\"" 精确匹配（详见 T-0155 §3）。
 func L(ctx context.Context) *zap.Logger {
 	// Get the global logger or fallback to nop logger
 	logger := zap.L()
@@ -412,11 +420,20 @@ func L(ctx context.Context) *zap.Logger {
 		return zap.NewNop()
 	}
 
-	// Add request_id if present
+	fields := make([]zap.Field, 0, 3)
 	if requestID := GetRequestID(ctx); requestID != "" {
-		return logger.With(zap.String("request_id", requestID))
+		fields = append(fields, zap.String("request_id", requestID))
 	}
-	return logger
+	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+		fields = append(fields,
+			zap.String("trace_id", sc.TraceID().String()),
+			zap.String("span_id", sc.SpanID().String()),
+		)
+	}
+	if len(fields) == 0 {
+		return logger
+	}
+	return logger.With(fields...)
 }
 
 // Info logs at INFO level with context-aware request_id.
