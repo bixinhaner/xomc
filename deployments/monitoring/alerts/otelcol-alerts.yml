@@ -1,8 +1,17 @@
 # OMC OpenTelemetry Collector 自监控告警（T-0155 Phase 1+2b 收尾）
 #
-# 背景：otelcol 同时承担 trace 中转（OTLP→Tempo）和 metrics 采集
-# （postgres/redis→Prometheus remote_write）；下线 pg/redis exporter 后
-# 它成为单点。本规则文件覆盖 otelcol 自身管道健康度。
+# 背景：otelcol 同时承担 trace 中转（OTLP→Tempo）+ metrics 采集
+# （postgres/redis→Prometheus remote_write）+ logs 转发（filelog→Loki）；
+# 下线 pg/redis exporter / Promtail 后它是观测层单点。本规则文件覆盖
+# otelcol 自身管道健康度。
+#
+# Live fault-injection 验证（2026-05-20）：
+#   pause docker-tempo-1 + 持续 HTTP 流量 5 min
+#     → otelcol_exporter_send_failed_spans 0 → 46
+#     → OtelcolTraceExportFailing: inactive → pending → firing ✓
+#   unpause Tempo + 等 6 min（increase[5m] 窗口走完）
+#     → 自动 inactive ✓
+# 其他 4 条规则用同一 increase/gauge 模式，PromQL 行为等价。
 #
 # 信号说明：
 #   - up{job="otelcol"} 已在 infra-alerts.yml InfraExporterDown 覆盖
