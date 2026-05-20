@@ -10,7 +10,7 @@ import SubFieldChecklist from './SubFieldChecklist';
 import SubFieldInputList from './SubFieldInputList';
 import InstancePicker from './InstancePicker';
 import TerminalPanel from './TerminalPanel';
-import ParamPathExpert from './ParamPathExpert';
+import ParamPathExpert from './ParameterPathCommand';
 import { ConsoleActionBar } from './ConsoleActionBar';
 import {
   InstanceArityInput,
