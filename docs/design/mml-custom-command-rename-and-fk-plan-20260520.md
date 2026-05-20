@@ -31,7 +31,7 @@
 
 | Migration | 内容 | 状态 |
 |---|---|---|
-| `000133_mml_commands_drop_unused_visibility.sql` | 删除 `mml_commands.visibility` + `owner_user_id`（v2.3 方案预留但未实现的合表脚手架） | ✅ 已落地 |
+| `000136_mml_commands_drop_unused_visibility.sql` | 删除 `mml_commands.visibility` + `owner_user_id`（v2.3 方案预留但未实现的合表脚手架） | ✅ 已落地 |
 | `000134_mml_custom_command_owner_user_id.sql` | 加 `mml_custom_command.owner_user_id UUID FK → users.id ON DELETE SET NULL` + 一次性 backfill + 索引 | ✅ 已落地 |
 | `internal/mml/model.go` | `MMLCustomCommand` 加 `OwnerUserID *uuid.UUID` 字段 | ✅ |
 | `internal/mml/pg_repository.go` | INSERT / scan 包含新列；Create 走 dual-write | ✅ |
@@ -226,5 +226,5 @@ ALTER TABLE mml_user_templates RENAME TO mml_custom_command;
 - `omcgo/migrations/000026_mml_table_restructure.sql` — 改名到 mml_custom_command（造成今日歧义的源头）
 - `omcgo/migrations/000095_mml_command_catalog_v2.sql` — mml_commands 升级为关系图节点
 - `omcgo/migrations/000132_mml_console_v23_catalog.sql` — 加 visibility / owner_user_id 到 mml_commands（已由 000133 撤销）
-- `omcgo/migrations/000133_mml_commands_drop_unused_visibility.sql` — 本期 #1
+- `omcgo/migrations/000136_mml_commands_drop_unused_visibility.sql` — 本期 #1
 - `omcgo/migrations/000134_mml_custom_command_owner_user_id.sql` — 本期 #3 Phase 1

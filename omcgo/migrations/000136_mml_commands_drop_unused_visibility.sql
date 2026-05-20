@@ -1,6 +1,12 @@
 -- ============================================================
--- 000133_mml_commands_drop_unused_visibility.sql
+-- 000136_mml_commands_drop_unused_visibility.sql
 -- 移除 v2.3 catalog 方案预留但实际未启用的 mml_commands 列。
+--
+-- 编号说明：原文件名 000133_mml_commands_drop_unused_visibility.sql，与
+-- 已合并的 000133_param_mappings_mirror.sql 撞号导致 goose CollectMigrations
+-- panic。本迁移不被 000134 / 000135（mml_custom_command_*）依赖（dev 环境实
+-- 测 134/135 在本迁移未应用时已成功），安全后移到 000136（紧跟已应用最大
+-- 版本 135 之后）。CLAUDE.md §5.5 多人协作 version 冲突惨痛教训案例。
 --
 -- 背景：方案 mml-console-cmcc-tdlte-v23-adjustment-plan-20260519.md §6.1
 -- 设想把 Customized（私有/公共模板）合并进 mml_commands，因此在 000132 给
