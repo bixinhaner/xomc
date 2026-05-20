@@ -85,7 +85,7 @@ cat > "$ARCHIVE/index.html" <<HTML
 <!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OMC 离线交付包下载</title>
+<title>OMC 离线版本下载</title>
 <style>
 body{font-family:-apple-system,"Segoe UI",sans-serif;margin:0;color:#1f2937;background:#f5f6f8}
 .wrap{max-width:1080px;margin:0 auto;padding:2rem 1.5rem}
@@ -114,7 +114,7 @@ pre{background:#1f2937;color:#e5e7eb;padding:.7rem .9rem;border-radius:5px;overf
 .tab b{display:block;color:#1668dc;margin-bottom:.3rem;font-size:.95rem}
 ul.list{font-size:.88rem;line-height:1.8;margin:.3rem 0;padding-left:1.5rem}
 </style></head><body><div class="wrap">
-<h1>OMC 离线交付包下载</h1>
+<h1>OMC 离线版本下载</h1>
 <p class="lead">内网离线部署交付包。<b>项目包</b>与<b>基础设施下载</b>相互独立、各自版本号：
 首次部署两个都要下载；之后日常升级通常只需更新项目包。</p>
 
