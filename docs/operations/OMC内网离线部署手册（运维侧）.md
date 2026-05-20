@@ -121,12 +121,14 @@ omc-infra-<版本>-<架构>/
 ├── VERSION                        # 基础设施版本 / 架构 / Docker 版本 / 构建时间
 ├── checksums.sha256               # 全部文件 SHA256
 │
-├── docker/                        # ① Docker 引擎离线安装
+├── docker/                        # ① Docker 引擎离线安装 + 加速镜像配置
 │   ├── docker-<ver>.tgz           #   Docker 静态二进制包
-│   └── install-docker.sh          #   离线安装脚本
+│   ├── install-docker.sh          #   离线安装脚本（含交互引导加速镜像）
+│   └── setup-docker-mirror.sh     #   单独配 / 换 / 查 / 取消加速镜像
 └── images/                        # ② Docker 镜像离线包
-    ├── infra-images-<架构>.tar     #   postgres/redis/nats/minio/nginx
-    ├── monitoring-images-<架构>.tar #  监控栈（可选）
+    ├── infra-images-<架构>.tar     #   postgres / redis / nats / minio / nginx
+    ├── monitoring-images-<架构>.tar #   监控栈（v2 默认包含；用 build-images.sh
+                                    #    --infra-only 可关闭）
     └── images.manifest             #   镜像清单
 ```
 

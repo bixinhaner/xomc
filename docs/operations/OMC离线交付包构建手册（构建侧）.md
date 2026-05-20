@@ -199,10 +199,11 @@ cd deployments/release
 #   --force   已存在也重下
 
 # (b) 拉取基础设施镜像 + 组装压缩基础设施包
-./build-images.sh                  # 基础设施版本取 release.conf 的 INFRA_VERSION
+./build-images.sh                  # v2 默认：基础设施 + 监控栈全套
 #   -v 0.0.2            手动指定基础设施版本
-#   --with-monitoring   基础设施 + 监控栈镜像都导出
+#   --infra-only        仅基础设施（不要监控栈）
 #   --monitoring-only   只补监控栈镜像（不重拉基础设施）并重新打包
+#   --with-monitoring   【已废弃】保留兼容；v2 默认即含监控栈，本标志为 no-op
 ```
 
 产出 `archive/infra/<基础设施版本>/omc-infra-<版本>-<架构>.tar.xz`。基础设施不常变，
@@ -443,7 +444,7 @@ done
 | 脚本 | 角色 | 关键参数 | 用途 |
 |------|------|---------|------|
 | `download-docker.sh` | 构建侧 | `--arch amd64\|arm64` / `--force` | 下载 Docker 静态二进制到 `docker-cache/` |
-| `build-images.sh` | 构建侧 | `-v <版本>` / `--with-monitoring` / `--monitoring-only` | 拉镜像 + 组装基础设施包 |
+| `build-images.sh` | 构建侧 | `-v <版本>` / `--infra-only` / `--monitoring-only`（v2 默认含监控栈） | 拉镜像 + 组装基础设施包 |
 | `build-release.sh` | 构建侧 | `-v <版本>` / `--channel test\|release` / `--arch` | 编译 + 组装项目包 |
 | `gen-index.sh` | 构建侧 | `--archive <dir>` | 重生成 `archive/index.html`（由前两个脚本自动调） |
 | `serve.sh` | 构建侧 | `-p\|--port <PORT>` | 起 HTTP 下载服务（默认 8000） |

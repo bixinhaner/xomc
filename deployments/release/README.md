@@ -71,10 +71,11 @@ cd deployments/release
 ### ② 构建基础设施包（首次 / 基础设施变更时）
 
 ```bash
-./build-images.sh                  # 基础设施版本取 release.conf 的 INFRA_VERSION
+./build-images.sh                  # v2 默认：基础设施 + 监控栈全套
 #   -v 0.0.2            手动指定基础设施版本
-#   --with-monitoring   基础设施 + 监控栈镜像都导出
+#   --infra-only        仅基础设施（不要监控栈）
 #   --monitoring-only   只补监控栈镜像（不重拉基础设施）
+#   --with-monitoring   【已废弃】保留兼容；v2 默认即含监控栈，本标志为 no-op
 #   → archive/infra/<版本>/omc-infra-<版本>-<架构>.tar.xz
 ```
 

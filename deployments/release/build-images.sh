@@ -19,11 +19,25 @@
 # 3. 镜像不在脚本中删除，作为下次构建的本地缓存
 # 4. tar 内同时包含 *-saved 与原 tag，docker load 后部署侧可直接使用原 tag
 #
-# 用法： ./build-images.sh [-v 基础设施版本] [--arch amd64|arm64]
-#                          [--with-monitoring | --monitoring-only]
-#   --with-monitoring   基础设施 + 监控栈镜像都构建
-#   --monitoring-only   只补监控栈镜像（不重拉基础设施，infra-images-*.tar 不动）
-#   ★ 用普通用户运行（docker 权限靠 docker 组，勿 sudo 整个脚本）。
+# 默认行为（v2 起调整）：拉取并打包 INFRA + MONITORING **全套镜像**。
+# 想去掉监控栈用 --infra-only。
+#
+# 用法：
+#   ./build-images.sh                            # 默认：基础设施 + 监控栈全套
+#   ./build-images.sh --infra-only               # 仅基础设施（不含监控栈）
+#   ./build-images.sh --monitoring-only          # 只补监控栈（不重拉 infra）
+#   ./build-images.sh -v 0.0.2 --arch amd64      # 指定版本 / 架构
+#   ./build-images.sh -h | --help                # 本帮助
+#
+# 参数：
+#   -v, --version <ver>     基础设施版本号（默认取 release.conf 的 INFRA_VERSION）
+#   --arch <amd64|arm64>    目标架构（默认双架构都构建）
+#   --infra-only            仅拉 + 打包基础设施镜像，不要监控栈（v2 新增）
+#   --monitoring-only       仅补监控栈镜像，infra-images-*.tar 保持不动
+#   --with-monitoring       【已废弃】v2 起默认即含监控栈；保留为 no-op + 提示
+#   -h, --help              本帮助
+#
+# ★ 用普通用户运行（docker 权限靠 docker 组，勿 sudo 整个脚本）。
 # =============================================================================
 set -euo pipefail
 
@@ -39,15 +53,18 @@ warn() { echo -e "\033[1;33m[images][警告]\033[0m $*" >&2; }
 die()  { echo -e "\033[1;31m[images][错误]\033[0m $*" >&2; exit 1; }
 
 # ── 参数解析 ────────────────────────────────────────────────────────────
-WITH_MONITORING=0
+# v2 默认：监控栈也含；--infra-only 关闭监控栈；--with-monitoring 兼容老调用。
+WITH_MONITORING=1
 MONITORING_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -v|--version)      INFRA_VERSION="$2"; shift 2 ;;
     --arch)            ARCHES="$2"; shift 2 ;;
-    --with-monitoring) WITH_MONITORING=1; shift ;;
+    --infra-only)      WITH_MONITORING=0; shift ;;
+    --with-monitoring) warn "--with-monitoring 已废弃：v2 起默认即含监控栈，本标志为 no-op"
+                       WITH_MONITORING=1; shift ;;
     --monitoring-only) MONITORING_ONLY=1; WITH_MONITORING=1; shift ;;
-    -h|--help)         sed -n '3,26p' "$0"; exit 0 ;;
+    -h|--help)         sed -n '3,40p' "$0"; exit 0 ;;
     *)                 die "未知参数：$1（-h 查看用法）" ;;
   esac
 done
