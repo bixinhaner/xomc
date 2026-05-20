@@ -4054,6 +4054,17 @@ const messages: Record<string, string> = {
   'mml.console.privateTemplateCreated':      'Private command created successfully',
   'mml.console.addPublicTemplate':           'Add Public Command',
   'mml.console.addPrivateTemplate':          'Add Private Command',
+
+  // mml-user-private-template-crud-20260520.md §5.4
+  'mml.template.editTitle':                  'Edit Private Template',
+  'mml.template.action.edit':                'Edit',
+  'mml.template.action.delete':              'Delete',
+  'mml.template.deleteConfirm':              'Delete template "{name}"? This cannot be undone',
+  'mml.template.error.nameDuplicated':       'A private template with this name already exists',
+  'mml.template.error.notOwner':             "You don't have permission to modify / delete this template",
+  'mml.template.deleted':                    'Template deleted',
+  'mml.template.updated':                    'Template updated',
+
   'mml.console.commandName':                 'Command Name',
   'mml.console.inputCommandName':            'Enter command name',
   'mml.console.commandCode':                 'Command Code',

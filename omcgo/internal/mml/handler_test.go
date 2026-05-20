@@ -127,11 +127,12 @@ func (m *hTaskRepo) ListByScriptID(ctx context.Context, scriptID uuid.UUID, req 
 }
 
 type hCustomCommandRepo struct {
-	CreateFn  func(ctx context.Context, tmpl *MMLCustomCommand) error
-	GetByIDFn func(ctx context.Context, id uuid.UUID) (*MMLCustomCommand, error)
-	UpdateFn  func(ctx context.Context, tmpl *MMLCustomCommand) error
-	DeleteFn  func(ctx context.Context, id uuid.UUID) error
-	ListFn    func(ctx context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error)
+	CreateFn          func(ctx context.Context, tmpl *MMLCustomCommand) error
+	GetByIDFn         func(ctx context.Context, id uuid.UUID) (*MMLCustomCommand, error)
+	UpdateFn          func(ctx context.Context, tmpl *MMLCustomCommand) error
+	DeleteFn          func(ctx context.Context, id uuid.UUID) error
+	ListFn            func(ctx context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error)
+	NameExistsFn      func(ctx context.Context, ownerID uuid.UUID, name string, excludeID *uuid.UUID) (bool, error)
 }
 
 func (m *hCustomCommandRepo) Create(ctx context.Context, tmpl *MMLCustomCommand) error {
@@ -163,6 +164,12 @@ func (m *hCustomCommandRepo) List(ctx context.Context, filter CustomCommandFilte
 		return m.ListFn(ctx, filter)
 	}
 	return nil, nil
+}
+func (m *hCustomCommandRepo) NameExistsForPrivate(ctx context.Context, ownerID uuid.UUID, name string, excludeID *uuid.UUID) (bool, error) {
+	if m.NameExistsFn != nil {
+		return m.NameExistsFn(ctx, ownerID, name, excludeID)
+	}
+	return false, nil
 }
 
 // ---------------------------------------------------------------------------

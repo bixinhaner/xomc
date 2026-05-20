@@ -4079,6 +4079,16 @@ const messages: Record<string, string> = {
   'mml.console.privateTemplateCreated':      '私有命令创建成功',
   'mml.console.addPublicTemplate':           '新增公有命令',
   'mml.console.addPrivateTemplate':          '新增私有命令',
+
+  // mml-user-private-template-crud-20260520.md §5.4
+  'mml.template.editTitle':                  '编辑私有模板',
+  'mml.template.action.edit':                '编辑',
+  'mml.template.action.delete':              '删除',
+  'mml.template.deleteConfirm':              '确认删除模板「{name}」？删除后无法恢复',
+  'mml.template.error.nameDuplicated':       '您已有同名的私有模板，请换个名字',
+  'mml.template.error.notOwner':             '您没有权限修改 / 删除此模板',
+  'mml.template.deleted':                    '模板已删除',
+  'mml.template.updated':                    '模板已更新',
   'mml.console.commandName':                 '命令名称',
   'mml.console.inputCommandName':            '请输入命令名称',
   'mml.console.commandCode':                 '命令编码',

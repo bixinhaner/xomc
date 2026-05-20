@@ -3,6 +3,7 @@ package mml
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -207,11 +208,12 @@ func (m *mockTaskRepo) ListByScriptID(ctx context.Context, scriptID uuid.UUID, r
 }
 
 type mockCustomCommandRepo struct {
-	createFn  func(ctx context.Context, tmpl *MMLCustomCommand) error
-	getByIDFn func(ctx context.Context, id uuid.UUID) (*MMLCustomCommand, error)
-	updateFn  func(ctx context.Context, tmpl *MMLCustomCommand) error
-	deleteFn  func(ctx context.Context, id uuid.UUID) error
-	listFn    func(ctx context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error)
+	createFn       func(ctx context.Context, tmpl *MMLCustomCommand) error
+	getByIDFn      func(ctx context.Context, id uuid.UUID) (*MMLCustomCommand, error)
+	updateFn       func(ctx context.Context, tmpl *MMLCustomCommand) error
+	deleteFn       func(ctx context.Context, id uuid.UUID) error
+	listFn         func(ctx context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error)
+	nameExistsFn   func(ctx context.Context, ownerID uuid.UUID, name string, excludeID *uuid.UUID) (bool, error)
 }
 
 func (m *mockCustomCommandRepo) Create(ctx context.Context, tmpl *MMLCustomCommand) error {
@@ -247,6 +249,13 @@ func (m *mockCustomCommandRepo) List(ctx context.Context, filter CustomCommandFi
 		return m.listFn(ctx, filter)
 	}
 	return nil, nil
+}
+
+func (m *mockCustomCommandRepo) NameExistsForPrivate(ctx context.Context, ownerID uuid.UUID, name string, excludeID *uuid.UUID) (bool, error) {
+	if m.nameExistsFn != nil {
+		return m.nameExistsFn(ctx, ownerID, name, excludeID)
+	}
+	return false, nil
 }
 
 // mockRoleQuerier 模拟 admin.PgRoleRepository.GetUserVisibleGroupIDs；T-0090-c
@@ -1411,3 +1420,208 @@ func TestService_ListCustomCommands_RBAC_NoQuerierInjected_FallbackToCreatorOnly
 type assertError string
 
 func (e assertError) Error() string { return string(e) }
+
+// ========================================================================
+// 私有模板 CRUD + 用户级唯一性 — mml-user-private-template-crud-20260520.md §6.1
+// ========================================================================
+
+func newCRUDServiceWithRepo(repo *mockCustomCommandRepo) *Service {
+	return NewService(&mockCommandRepo{}, &mockScriptRepo{}, &mockTaskRepo{}, repo, nil, zap.NewNop())
+}
+
+// case 1: CreateCustomCommand_PrivateNameDuplicate → 409
+func TestService_CreateCustomCommand_PrivateNameDuplicate(t *testing.T) {
+	ownerID := uuid.New()
+	repo := &mockCustomCommandRepo{
+		nameExistsFn: func(_ context.Context, oid uuid.UUID, name string, _ *uuid.UUID) (bool, error) {
+			assert.Equal(t, ownerID, oid)
+			assert.Equal(t, "重启", name)
+			return true, nil
+		},
+	}
+	svc := newCRUDServiceWithRepo(repo)
+
+	_, err := svc.CreateCustomCommand(context.Background(), &MMLCustomCommand{
+		CommandName:  "重启",
+		CommandScope: "private",
+		OwnerUserID:  &ownerID,
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrAlreadyExists), "should wrap ErrAlreadyExists → 409")
+}
+
+// case 2: 同名跨 owner 在 service pre-check 阶段允许（DB 索引也允许）
+func TestService_CreateCustomCommand_PrivateNameAcrossOwners_Allowed(t *testing.T) {
+	repo := &mockCustomCommandRepo{
+		nameExistsFn: func(_ context.Context, _ uuid.UUID, _ string, _ *uuid.UUID) (bool, error) {
+			return false, nil // 跨 owner 查询时返回 false
+		},
+	}
+	svc := newCRUDServiceWithRepo(repo)
+
+	ownerA := uuid.New()
+	_, err := svc.CreateCustomCommand(context.Background(), &MMLCustomCommand{
+		CommandName: "重启", CommandScope: "private", OwnerUserID: &ownerA,
+	})
+	require.NoError(t, err)
+}
+
+// case 3: public scope 不走唯一性检查
+func TestService_CreateCustomCommand_PublicSameNameAllowed(t *testing.T) {
+	calls := 0
+	repo := &mockCustomCommandRepo{
+		nameExistsFn: func(_ context.Context, _ uuid.UUID, _ string, _ *uuid.UUID) (bool, error) {
+			calls++
+			return true, nil
+		},
+	}
+	svc := newCRUDServiceWithRepo(repo)
+
+	ownerA := uuid.New()
+	_, err := svc.CreateCustomCommand(context.Background(), &MMLCustomCommand{
+		CommandName: "公共重启", CommandScope: "public", OwnerUserID: &ownerA,
+	})
+	require.NoError(t, err)
+	assert.Zero(t, calls, "public scope 不应触发 NameExistsForPrivate")
+}
+
+// case 4: 非 owner 修改私有模板 → 403
+func TestService_UpdateCustomCommand_NonOwner_Forbidden(t *testing.T) {
+	ownerID := uuid.New()
+	otherID := uuid.New()
+	existing := &MMLCustomCommand{
+		ID: uuid.New(), CommandName: "X", CommandScope: "private",
+		Creator: "alice", OwnerUserID: &ownerID,
+	}
+	repo := &mockCustomCommandRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*MMLCustomCommand, error) {
+			return existing, nil
+		},
+	}
+	svc := newCRUDServiceWithRepo(repo)
+
+	_, err := svc.UpdateCustomCommand(context.Background(), existing.ID,
+		&MMLCustomCommand{CommandName: "X2"}, otherID, "bob", false)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrForbidden), "non-owner update should be 403")
+}
+
+// case 5: owner 自己 update 同名（无变更）→ OK 且不查 NameExistsForPrivate
+func TestService_UpdateCustomCommand_OwnerSameName_OK(t *testing.T) {
+	ownerID := uuid.New()
+	existing := &MMLCustomCommand{
+		ID: uuid.New(), CommandName: "重启", CommandScope: "private",
+		Creator: "alice", OwnerUserID: &ownerID,
+	}
+	nameQueried := false
+	repo := &mockCustomCommandRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*MMLCustomCommand, error) { return existing, nil },
+		nameExistsFn: func(_ context.Context, _ uuid.UUID, _ string, _ *uuid.UUID) (bool, error) {
+			nameQueried = true
+			return true, nil
+		},
+		updateFn: func(_ context.Context, _ *MMLCustomCommand) error { return nil },
+	}
+	svc := newCRUDServiceWithRepo(repo)
+
+	_, err := svc.UpdateCustomCommand(context.Background(), existing.ID,
+		&MMLCustomCommand{CommandName: "重启"}, ownerID, "alice", false)
+	require.NoError(t, err)
+	assert.False(t, nameQueried, "name unchanged → 不查 NameExistsForPrivate")
+}
+
+// case 6: super_admin 跨用户 update → OK
+func TestService_UpdateCustomCommand_SuperAdmin_BypassOwner(t *testing.T) {
+	ownerID := uuid.New()
+	superID := uuid.New()
+	existing := &MMLCustomCommand{
+		ID: uuid.New(), CommandName: "X", CommandScope: "private",
+		Creator: "alice", OwnerUserID: &ownerID,
+	}
+	repo := &mockCustomCommandRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*MMLCustomCommand, error) { return existing, nil },
+		updateFn:  func(_ context.Context, _ *MMLCustomCommand) error { return nil },
+	}
+	svc := newCRUDServiceWithRepo(repo)
+
+	_, err := svc.UpdateCustomCommand(context.Background(), existing.ID,
+		&MMLCustomCommand{CommandName: "X"}, superID, "super", true)
+	require.NoError(t, err)
+}
+
+// case 7: owner 改名撞同 owner 已有私有名 → 409
+func TestService_UpdateCustomCommand_RenameToOtherExisting_409(t *testing.T) {
+	ownerID := uuid.New()
+	existing := &MMLCustomCommand{
+		ID: uuid.New(), CommandName: "X", CommandScope: "private",
+		Creator: "alice", OwnerUserID: &ownerID,
+	}
+	repo := &mockCustomCommandRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*MMLCustomCommand, error) { return existing, nil },
+		nameExistsFn: func(_ context.Context, oid uuid.UUID, name string, excludeID *uuid.UUID) (bool, error) {
+			assert.Equal(t, ownerID, oid)
+			assert.Equal(t, "Y", name)
+			require.NotNil(t, excludeID)
+			assert.Equal(t, existing.ID, *excludeID, "Update 改名时必须排除自身")
+			return true, nil
+		},
+	}
+	svc := newCRUDServiceWithRepo(repo)
+
+	_, err := svc.UpdateCustomCommand(context.Background(), existing.ID,
+		&MMLCustomCommand{CommandName: "Y"}, ownerID, "alice", false)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrAlreadyExists), "should be 409")
+}
+
+// case 8: Delete 私有 + 非 owner 非 super → 403（修复历史 G2）
+func TestService_DeleteCustomCommand_PrivateNonOwner_Forbidden(t *testing.T) {
+	ownerID := uuid.New()
+	otherID := uuid.New()
+	existing := &MMLCustomCommand{
+		ID: uuid.New(), CommandName: "X", CommandScope: "private",
+		Creator: "alice", OwnerUserID: &ownerID,
+	}
+	repo := &mockCustomCommandRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*MMLCustomCommand, error) { return existing, nil },
+	}
+	svc := newCRUDServiceWithRepo(repo)
+
+	err := svc.DeleteCustomCommand(context.Background(), existing.ID, otherID, "bob", false)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrForbidden), "non-owner private delete should be 403")
+}
+
+// case 9: Delete 私有 + owner → OK
+func TestService_DeleteCustomCommand_PrivateOwner_OK(t *testing.T) {
+	ownerID := uuid.New()
+	existing := &MMLCustomCommand{
+		ID: uuid.New(), CommandName: "X", CommandScope: "private",
+		Creator: "alice", OwnerUserID: &ownerID,
+	}
+	repo := &mockCustomCommandRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*MMLCustomCommand, error) { return existing, nil },
+		deleteFn:  func(_ context.Context, _ uuid.UUID) error { return nil },
+	}
+	svc := newCRUDServiceWithRepo(repo)
+
+	err := svc.DeleteCustomCommand(context.Background(), existing.ID, ownerID, "alice", false)
+	require.NoError(t, err)
+}
+
+// case 10: Delete + legacy NULL owner_user_id → 走 creator (username) 兜底鉴权
+func TestService_DeleteCustomCommand_LegacyNullOwner_CreatorFallback(t *testing.T) {
+	existing := &MMLCustomCommand{
+		ID: uuid.New(), CommandName: "X", CommandScope: "private",
+		Creator: "alice", OwnerUserID: nil, // 历史脏数据
+	}
+	repo := &mockCustomCommandRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*MMLCustomCommand, error) { return existing, nil },
+		deleteFn:  func(_ context.Context, _ uuid.UUID) error { return nil },
+	}
+	svc := newCRUDServiceWithRepo(repo)
+
+	// 任何 user_id 都行，关键是 username == creator
+	err := svc.DeleteCustomCommand(context.Background(), existing.ID, uuid.New(), "alice", false)
+	require.NoError(t, err, "owner_user_id 为 NULL 时应按 creator (username) 兜底放行")
+}

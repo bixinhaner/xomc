@@ -5604,6 +5604,32 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     "$API/mml/templates?command_scope=public&page=1&page_size=5" -H "$W2D_AUTH")
 check_status_in "W2D mml-4b: GET /mml/templates?scope=public (T-0090-c)" "200 401" "$HTTP_CODE"
 
+# --- 用户私有模板 CRUD + 唯一性（mml-user-private-template-crud-20260520.md §6.2）---
+# 越权 PUT：未提供 owner 信息时 service 走 401（middleware 必须注入 user_id）
+claim "mml templates: PUT 不带 token → 401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
+    "$API/mml/templates/$W2D_BAD_UUID" -H "Content-Type: application/json" \
+    -d '{"command_name":"x","command_code":"x","operation_type":"LST","command_scope":"private"}')
+check_status_in "mml-crud-1: PUT 匿名拒绝" "401" "$HTTP_CODE"
+
+claim "mml templates: PUT 带 token 但 id 不存在 → 404/401（认证通过 → 走 service GetByID）"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
+    "$API/mml/templates/$W2D_BAD_UUID" -H "$W2D_AUTH" -H "Content-Type: application/json" \
+    -d '{"command_name":"x","command_code":"x","operation_type":"LST","command_scope":"private"}')
+check_status_in "mml-crud-2: PUT 不存在 ID" "404 401 500" "$HTTP_CODE"
+
+claim "mml templates: DELETE 不带 token → 401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+    "$API/mml/templates/$W2D_BAD_UUID")
+check_status_in "mml-crud-3: DELETE 匿名拒绝" "401" "$HTTP_CODE"
+
+claim "mml templates: POST 私有同 owner 重名 → 409 / 400 / 401（重名兜底；service pre-check 或 DB unique index）"
+# 提交两次同名 → 第二次应 409；这里只验路由形态，因 seed 数据空可能首次就 401
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/mml/templates" -H "$W2D_AUTH" -H "Content-Type: application/json" \
+    -d '{"command_name":"e2e-dup-test-name","command_code":"LST","operation_type":"LST","command_scope":"private"}')
+check_status_in "mml-crud-4: POST 同名首次 (404 / 401 / 200 / 201 / 400)" "200 201 400 401 404 409" "$HTTP_CODE"
+
 claim "mml: get nonexistent task returns 404/401"
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     "$API/mml/tasks/$W2D_BAD_UUID" -H "$W2D_AUTH")

@@ -868,6 +868,9 @@ func (h *Handler) CreateTemplate(c *gin.Context) {
 
 	creator, _ := c.Get("username")
 	creatorStr, _ := creator.(string)
+	// migration 000134 Phase 1: dual-write owner_user_id；handler 从 gin ctx
+	// 注入 user_id，service 据此走唯一性检查 + 后续 Update/Delete 的鉴权基准。
+	ownerID := extractUserID(c)
 
 	tmpl := &MMLCustomCommand{
 		CommandName:   req.CommandName,
@@ -879,6 +882,7 @@ func (h *Handler) CreateTemplate(c *gin.Context) {
 		ParamPaths:    req.ParamPaths,
 		Description:   req.Description,
 		Creator:       creatorStr,
+		OwnerUserID:   ownerID,
 	}
 
 	created, err := h.service.CreateCustomCommand(c.Request.Context(), tmpl)
@@ -888,6 +892,31 @@ func (h *Handler) CreateTemplate(c *gin.Context) {
 	}
 
 	response.OKWithStatus(c, http.StatusCreated, created)
+}
+
+// extractUserID 从 gin ctx 取 user_id (UUID)；缺失返回 nil。
+// RequireAuth 中间件已保证认证请求都带该 key，所以正常路径不会返回 nil；
+// 兼容路径（如 API key 鉴权未注入）下保持 nil，让 service 层判定是否需要拒绝。
+func extractUserID(c *gin.Context) *uuid.UUID {
+	v, exists := c.Get("user_id")
+	if !exists {
+		return nil
+	}
+	uid, ok := v.(uuid.UUID)
+	if !ok || uid == uuid.Nil {
+		return nil
+	}
+	return &uid
+}
+
+// extractIsSuperAdmin 从 gin ctx 取 is_super_admin；缺失视为 false（最安全的默认）。
+func extractIsSuperAdmin(c *gin.Context) bool {
+	v, exists := c.Get("is_super_admin")
+	if !exists {
+		return false
+	}
+	b, ok := v.(bool)
+	return ok && b
 }
 
 // UpdateCustomCommandRequest defines the request body for updating a custom command.
@@ -903,6 +932,9 @@ type UpdateCustomCommandRequest struct {
 }
 
 // UpdateTemplate handles PUT /api/v1/mml/templates/:id.
+//
+// 鉴权 + 唯一性见 docs/design/mml-user-private-template-crud-20260520.md §4.3。
+// scope 在 service 层强制保留原值（用户决策 D6 — 不允许编辑模式切 scope）。
 func (h *Handler) UpdateTemplate(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -916,18 +948,29 @@ func (h *Handler) UpdateTemplate(c *gin.Context) {
 		return
 	}
 
+	creator, _ := c.Get("username")
+	creatorStr, _ := creator.(string)
+	userIDPtr := extractUserID(c)
+	if userIDPtr == nil {
+		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
+		return
+	}
+	isSuper := extractIsSuperAdmin(c)
+
 	tmpl := &MMLCustomCommand{
 		CommandName:   req.CommandName,
 		CommandCode:   req.CommandCode,
 		OperationType: req.OperationType,
-		CommandScope:  req.CommandScope,
+		CommandScope:  req.CommandScope, // service 层会强制保留原 scope
 		CategoryGroup: req.CategoryGroup,
 		Parameters:    req.Parameters,
 		ParamPaths:    req.ParamPaths,
 		Description:   req.Description,
 	}
 
-	updated, err := h.service.UpdateCustomCommand(c.Request.Context(), id, tmpl)
+	updated, err := h.service.UpdateCustomCommand(
+		c.Request.Context(), id, tmpl, *userIDPtr, creatorStr, isSuper,
+	)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -937,6 +980,9 @@ func (h *Handler) UpdateTemplate(c *gin.Context) {
 }
 
 // DeleteTemplate handles DELETE /api/v1/mml/templates/:id.
+//
+// 鉴权见 §4.3：仅 owner 或 super_admin 可删；private + public 同一规则
+// （修复历史 G2 — "删别人的 private"以前误放行）。
 func (h *Handler) DeleteTemplate(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -946,8 +992,16 @@ func (h *Handler) DeleteTemplate(c *gin.Context) {
 
 	creator, _ := c.Get("username")
 	creatorStr, _ := creator.(string)
+	userIDPtr := extractUserID(c)
+	if userIDPtr == nil {
+		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
+		return
+	}
+	isSuper := extractIsSuperAdmin(c)
 
-	if err := h.service.DeleteCustomCommand(c.Request.Context(), id, creatorStr); err != nil {
+	if err := h.service.DeleteCustomCommand(
+		c.Request.Context(), id, *userIDPtr, creatorStr, isSuper,
+	); err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
@@ -965,8 +1019,10 @@ func (h *Handler) CloneTemplate(c *gin.Context) {
 
 	creator, _ := c.Get("username")
 	creatorStr, _ := creator.(string)
+	// migration 000134 Phase 1: dual-write owner_user_id；缺失走兼容路径（落 NULL）。
+	ownerID := extractUserID(c)
 
-	cloned, err := h.service.CloneCustomCommand(c.Request.Context(), id, creatorStr)
+	cloned, err := h.service.CloneCustomCommand(c.Request.Context(), id, creatorStr, ownerID)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return

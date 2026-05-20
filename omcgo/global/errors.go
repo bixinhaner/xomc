@@ -205,4 +205,9 @@ const (
 	ErrCodeTranslationFailedAll = 17005
 	// R-9.3: devices.product_class 在 ProductRegistry 找不到匹配 product（孤儿设备）
 	ErrCodeProductClassUnresolved = 17006
+
+	// 用户私有模板命令名在同 owner 内重复（owner_user_id+command_name+private 三联唯一）
+	// 关联：docs/design/mml-user-private-template-crud-20260520.md §3
+	// HTTP 映射：→ 409 Conflict（通过 commonerrors.ErrAlreadyExists 链 wrap）
+	ErrCodeTemplateNameDuplicated = 17008
 )

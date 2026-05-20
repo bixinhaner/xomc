@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/global"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
@@ -1457,13 +1458,54 @@ func (s *Service) GetCustomCommand(ctx context.Context, id uuid.UUID) (*MMLCusto
 	return s.customCommandRepo.GetByID(ctx, id)
 }
 
+// isOwnerOrSuper 判定调用者是否对 cmd 有写权限。
+//
+// 鉴权语义（docs/design/mml-user-private-template-crud-20260520.md §4.3）：
+//   - super_admin 始终放行
+//   - 优先比对 owner_user_id (UUID)，是首选权威字段
+//   - owner_user_id 为 NULL（migration 000134 backfill 未命中的历史脏数据）→ 回退
+//     比对 creator (username)，避免老数据无法被任何人编辑/删除
+func isOwnerOrSuper(cmd *MMLCustomCommand, currentUserID uuid.UUID, currentUsername string, isSuperAdmin bool) bool {
+	if isSuperAdmin {
+		return true
+	}
+	if cmd.OwnerUserID != nil && *cmd.OwnerUserID != uuid.Nil {
+		return *cmd.OwnerUserID == currentUserID
+	}
+	return cmd.Creator != "" && cmd.Creator == currentUsername
+}
+
+// newTemplateNameDuplicatedErr 构造 17008 业务错误；wrap commonerrors.ErrAlreadyExists
+// 让 HTTPStatusFromError 自动映射为 409 Conflict。
+func newTemplateNameDuplicatedErr(name string) error {
+	return commonerrors.NewBusinessError(
+		global.ErrCodeTemplateNameDuplicated,
+		"您已有同名的私有模板，请换个名字",
+		fmt.Errorf("%w: %q", commonerrors.ErrAlreadyExists, name),
+	)
+}
+
 // CreateCustomCommand creates a new user-defined custom command.
+//
+// 私有模板用户级唯一性（docs/design/mml-user-private-template-crud-20260520.md §3 D1-D2）：
+// 在 scope='private' 且 owner_user_id 已设的前提下，service pre-check 同 owner 是否
+// 已有同名行；若有则返 17008（409 Conflict）。DB partial unique index 在 race 时兜底。
 func (s *Service) CreateCustomCommand(ctx context.Context, cmd *MMLCustomCommand) (*MMLCustomCommand, error) {
 	if cmd.Parameters == nil {
 		cmd.Parameters = map[string]interface{}{}
 	}
 	if cmd.ParamPaths == nil {
 		cmd.ParamPaths = []string{}
+	}
+
+	if cmd.CommandScope == "private" && cmd.OwnerUserID != nil && *cmd.OwnerUserID != uuid.Nil {
+		exists, err := s.customCommandRepo.NameExistsForPrivate(ctx, *cmd.OwnerUserID, cmd.CommandName, nil)
+		if err != nil {
+			return nil, fmt.Errorf("check duplicate name: %w", err)
+		}
+		if exists {
+			return nil, newTemplateNameDuplicatedErr(cmd.CommandName)
+		}
 	}
 
 	if err := s.customCommandRepo.Create(ctx, cmd); err != nil {
@@ -1478,16 +1520,47 @@ func (s *Service) CreateCustomCommand(ctx context.Context, cmd *MMLCustomCommand
 }
 
 // UpdateCustomCommand updates an existing user-defined custom command.
-func (s *Service) UpdateCustomCommand(ctx context.Context, id uuid.UUID, cmd *MMLCustomCommand) (*MMLCustomCommand, error) {
+//
+// 鉴权（§4.3）：非创建者且非 super_admin → 403。
+// 唯一性（§3）：scope='private' 且改名（或 owner 已设但本期名为新值）时，
+// 检查同 owner 是否已有同名行；excludeID=id 避免误判自身。
+func (s *Service) UpdateCustomCommand(
+	ctx context.Context,
+	id uuid.UUID,
+	cmd *MMLCustomCommand,
+	currentUserID uuid.UUID,
+	currentUsername string,
+	isSuperAdmin bool,
+) (*MMLCustomCommand, error) {
 	existing, err := s.customCommandRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get mml custom command: %w", err)
 	}
 
+	if !isOwnerOrSuper(existing, currentUserID, currentUsername, isSuperAdmin) {
+		return nil, fmt.Errorf("only creator or super_admin can update template: %w", commonerrors.ErrForbidden)
+	}
+
+	// scope 在编辑模式下不允许变更（§2 D6）— 强制保留原值，防 UI 误传
+	cmd.CommandScope = existing.CommandScope
+
+	// 仅当 (scope='private' 且 owner 已绑定 且 name 实际改变) 才走唯一性查询，避免无意义查 DB
+	if cmd.CommandScope == "private" &&
+		existing.OwnerUserID != nil &&
+		*existing.OwnerUserID != uuid.Nil &&
+		cmd.CommandName != existing.CommandName {
+		exists, dupErr := s.customCommandRepo.NameExistsForPrivate(ctx, *existing.OwnerUserID, cmd.CommandName, &id)
+		if dupErr != nil {
+			return nil, fmt.Errorf("check duplicate name: %w", dupErr)
+		}
+		if exists {
+			return nil, newTemplateNameDuplicatedErr(cmd.CommandName)
+		}
+	}
+
 	existing.CommandName = cmd.CommandName
 	existing.CommandCode = cmd.CommandCode
 	existing.OperationType = cmd.OperationType
-	existing.CommandScope = cmd.CommandScope
 	existing.CategoryGroup = cmd.CategoryGroup
 	existing.Description = cmd.Description
 	if cmd.Parameters != nil {
@@ -1501,32 +1574,56 @@ func (s *Service) UpdateCustomCommand(ctx context.Context, id uuid.UUID, cmd *MM
 		return nil, fmt.Errorf("update mml custom command: %w", err)
 	}
 
-	s.logger.Info("mml custom command updated", zap.String("command_id", id.String()))
+	s.logger.Info("mml custom command updated",
+		zap.String("command_id", id.String()),
+		zap.String("actor", currentUserID.String()),
+	)
 	return existing, nil
 }
 
 // DeleteCustomCommand deletes an MML custom command.
-// Only the creator or an admin can delete public commands.
-func (s *Service) DeleteCustomCommand(ctx context.Context, id uuid.UUID, currentUser string) error {
+//
+// 鉴权（§4.3 / 修复历史 §6 G2）：
+//   - 非创建者且非 super_admin → 403
+//   - public / private 走同一鉴权规则；不再区分 scope（修复"删别人 private 放行"bug）
+func (s *Service) DeleteCustomCommand(
+	ctx context.Context,
+	id uuid.UUID,
+	currentUserID uuid.UUID,
+	currentUsername string,
+	isSuperAdmin bool,
+) error {
 	cmd, err := s.customCommandRepo.GetByID(ctx, id)
 	if err != nil {
 		return fmt.Errorf("get mml custom command: %w", err)
 	}
 
-	if cmd.CommandScope == "public" && cmd.Creator != currentUser {
-		return fmt.Errorf("only creator can delete public commands: %w", ErrForbidden)
+	if !isOwnerOrSuper(cmd, currentUserID, currentUsername, isSuperAdmin) {
+		return fmt.Errorf("only creator or super_admin can delete template: %w", commonerrors.ErrForbidden)
 	}
 
 	if err := s.customCommandRepo.Delete(ctx, id); err != nil {
 		return fmt.Errorf("delete mml custom command: %w", err)
 	}
 
-	s.logger.Info("mml custom command deleted", zap.String("command_id", id.String()))
+	s.logger.Info("mml custom command deleted",
+		zap.String("command_id", id.String()),
+		zap.String("actor", currentUserID.String()),
+	)
 	return nil
 }
 
 // CloneCustomCommand clones a public custom command as a private copy for the current user.
-func (s *Service) CloneCustomCommand(ctx context.Context, id uuid.UUID, currentUser string) (*MMLCustomCommand, error) {
+//
+// ownerID 由 handler 从 gin context 提取（migration 000134 Phase 1 dual-write）。
+// 副本名 = source.CommandName + " (副本)"；若与 owner 私有命名空间冲突 → 由 Create 走
+// 唯一性检查返 17008，前端可提示用户改名重试。
+func (s *Service) CloneCustomCommand(
+	ctx context.Context,
+	id uuid.UUID,
+	currentUser string,
+	ownerID *uuid.UUID,
+) (*MMLCustomCommand, error) {
 	source, err := s.customCommandRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get mml custom command: %w", err)
@@ -1542,10 +1639,11 @@ func (s *Service) CloneCustomCommand(ctx context.Context, id uuid.UUID, currentU
 		ParamPaths:    source.ParamPaths,
 		Description:   source.Description,
 		Creator:       currentUser,
+		OwnerUserID:   ownerID,
 	}
 
-	if err := s.customCommandRepo.Create(ctx, clone); err != nil {
-		return nil, fmt.Errorf("clone mml custom command: %w", err)
+	if _, err := s.CreateCustomCommand(ctx, clone); err != nil {
+		return nil, err
 	}
 
 	s.logger.Info("mml custom command cloned",
@@ -1555,7 +1653,10 @@ func (s *Service) CloneCustomCommand(ctx context.Context, id uuid.UUID, currentU
 	return clone, nil
 }
 
-// ErrForbidden is returned when a user lacks permission for an operation.
+// ErrForbidden 已下线（v1.0：统一走 commonerrors.ErrForbidden）。保留 sentinel 以
+// 维持向后兼容，但新代码不应再使用。
+//
+// Deprecated: use commonerrors.ErrForbidden.
 var ErrForbidden = errors.New("forbidden")
 
 // ---- Dangerous command detection (Phase 2) ----

@@ -1,12 +1,23 @@
 import { useState, useMemo, useCallback } from 'react';
 import type { Key, ReactNode } from 'react';
-import { Input, Tree, Empty, Spin, message, Tooltip, Tag } from 'antd';
-import { SearchOutlined, FolderOutlined, CodeOutlined, UserOutlined, PlusOutlined } from '@ant-design/icons';
+import { Input, Tree, Empty, Spin, message, Popconfirm, Tooltip, Tag } from 'antd';
+import {
+  SearchOutlined,
+  FolderOutlined,
+  CodeOutlined,
+  UserOutlined,
+  PlusOutlined,
+  EditOutlined,
+  DeleteOutlined,
+} from '@ant-design/icons';
+import { AxiosError } from 'axios';
 import type { TreeDataNode } from 'antd';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { useGroupTree } from '@core/hooks/api/useMmlConsole';
+import { useDeleteMMLTemplate } from '@core/hooks/api/useMML';
 import { mmlApi } from '@core/services/api/mmlApi';
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
+import { useUserStore } from '@core/store/userStore';
 import type {
   GroupTreeNode,
   GroupTreeCommand,
@@ -146,11 +157,19 @@ function flattenCommandsById(nodes: GroupTreeNode[]): Map<string, GroupTreeComma
  *
  * PrivateTemplate / PublicTemplate 两个节点**恒显示**（空集时也在），标题尾部带
  * 「+」；点击「+」经 onAdd(scope) 打开 AddTemplateModal 新增私有 / 公共命令。
+ *
+ * Edit/Delete 入口（docs/design/mml-user-private-template-crud-20260520.md §5.1 D5）：
+ * 仅在 (commandScope='private' AND (creator===currentUsername || isSuperAdmin)) 时
+ * 在叶子右侧追加 ✏️ / 🗑️ 图标；其他模板（public / 非自己的 private）只显示文本。
  */
 function buildCustomTreeData(
   customs: MMLCustomCommand[],
   t: (id: string) => string,
   onAdd: (scope: 'public' | 'private') => void,
+  onEdit: (cc: MMLCustomCommand) => void,
+  onDelete: (cc: MMLCustomCommand) => void,
+  currentUsername: string,
+  isSuperAdmin: boolean,
 ): TreeDataNode {
   const privateGroup: MMLCustomCommand[] = [];
   const publicGroup: MMLCustomCommand[] = [];
@@ -168,11 +187,51 @@ function buildCustomTreeData(
 
   // R-2: Customized 叶子同样加 OP 前缀，与 standard 命令保持视觉一致。
   // 颜色边按 scope 微调（public/private 通过 OP Tag 颜色已能区分，无需额外标记）。
-  const renderLeaf = (cc: MMLCustomCommand): TreeDataNode => ({
-    key: `${CUSTOM_KEY_PREFIX}${cc.id}`,
-    title: renderOpLeafTitle(cc.operationType, cc.commandName),
-    isLeaf: true,
-  });
+  const renderLeaf = (cc: MMLCustomCommand): TreeDataNode => {
+    // 编辑/删除入口仅在私有 + 自己的（或 super_admin）时暴露
+    const canModify =
+      cc.commandScope === 'private' && (isSuperAdmin || cc.creator === currentUsername);
+    const titleEl = (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        {renderOpLeafTitle(cc.operationType, cc.commandName)}
+        {canModify && (
+          <span style={{ display: 'inline-flex', gap: 6, marginLeft: 8 }}>
+            <Tooltip title={t('mml.template.action.edit')}>
+              <EditOutlined
+                style={{ color: '#1677ff', cursor: 'pointer', fontSize: 12 }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEdit(cc);
+                }}
+              />
+            </Tooltip>
+            <Popconfirm
+              title={t('mml.template.deleteConfirm', { name: cc.commandName })}
+              okText={t('common.confirm')}
+              cancelText={t('common.cancel')}
+              onConfirm={(e) => {
+                e?.stopPropagation();
+                onDelete(cc);
+              }}
+              onCancel={(e) => e?.stopPropagation()}
+            >
+              <Tooltip title={t('mml.template.action.delete')}>
+                <DeleteOutlined
+                  style={{ color: '#ff4d4f', cursor: 'pointer', fontSize: 12 }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </Tooltip>
+            </Popconfirm>
+          </span>
+        )}
+      </span>
+    );
+    return {
+      key: `${CUSTOM_KEY_PREFIX}${cc.id}`,
+      title: titleEl,
+      isLeaf: true,
+    };
+  };
 
   // 标题尾部「+」：stopPropagation 阻止冒泡触发节点展开 / 选中。
   const addBtn = (scope: 'public' | 'private') => (
@@ -293,6 +352,11 @@ export default function CommandTree({ lang }: CommandTreeProps) {
 
   const { data: tree = [], isLoading } = useGroupTree(undefined, effectiveLang);
   const queryClient = useQueryClient();
+  const deleteMutation = useDeleteMMLTemplate();
+
+  // 当前用户上下文（用于编辑/删除入口暴露条件 §5.1 D5）
+  const currentUsername = useUserStore((s) => s.currentUser?.username ?? '');
+  const isSuperAdmin = useUserStore((s) => Boolean(s.currentUser?.isSuperAdmin));
 
   // Customized PrivateTemplate / PublicTemplate (T-0123-P4 集成)
   const { data: customResp } = useQuery({
@@ -307,6 +371,8 @@ export default function CommandTree({ lang }: CommandTreeProps) {
   const [autoExpand, setAutoExpand] = useState(true);
   // Customized 子树「+」点击后打开 AddTemplateModal；null = 关闭。
   const [addScope, setAddScope] = useState<AddScope>(null);
+  // 编辑模式：非空时 modal 打开走 update 路径（§5.2 D13）
+  const [editingTemplate, setEditingTemplate] = useState<MMLCustomCommand | null>(null);
 
   const customById = useMemo(() => {
     const m = new Map<string, MMLCustomCommand>();
@@ -314,13 +380,41 @@ export default function CommandTree({ lang }: CommandTreeProps) {
     return m;
   }, [customCommands]);
 
+  // 删除模板：成功后失效本地 query；后端 hook 已 invalidate ['mml','templates']，
+  // 这里再 invalidate ['mml','console','custom-commands']（CommandTree 用的 key）。
+  const handleDeleteTemplate = useCallback(
+    (cc: MMLCustomCommand) => {
+      deleteMutation.mutate(cc.id, {
+        onSuccess: () => {
+          void queryClient.invalidateQueries({ queryKey: ['mml', 'console', 'custom-commands'] });
+          void message.success(t('mml.template.deleted'));
+        },
+        onError: (err: unknown) => {
+          if (err instanceof AxiosError && err.response?.status === 403) {
+            void message.error(t('mml.template.error.notOwner'));
+            return;
+          }
+          const msg = err instanceof Error ? err.message : String(err ?? 'Unknown');
+          void message.error(msg);
+        },
+      });
+    },
+    [deleteMutation, queryClient, t],
+  );
+
   const treeData = useMemo(() => {
     const groups = buildTreeData(tree);
-    // Customized 恒显示（含空 Private/PublicTemplate + 「+」）；setAddScope 由 useState
-    // 保证引用稳定，无需进依赖数组。
-    const customRoot = buildCustomTreeData(customCommands, t, setAddScope);
+    const customRoot = buildCustomTreeData(
+      customCommands,
+      t,
+      setAddScope,
+      setEditingTemplate,
+      handleDeleteTemplate,
+      currentUsername,
+      isSuperAdmin,
+    );
     return [...groups, customRoot];
-  }, [tree, customCommands, t]);
+  }, [tree, customCommands, t, handleDeleteTemplate, currentUsername, isSuperAdmin]);
   const commandsById = useMemo(() => flattenCommandsById(tree), [tree]);
   const matched = useMemo(() => {
     if (!searchText.trim()) return { matchedKeys: new Set<string>(), expandKeys: [] };
@@ -432,9 +526,13 @@ export default function CommandTree({ lang }: CommandTreeProps) {
         }}
       />
       <AddTemplateModal
-        open={addScope !== null}
-        scope={addScope ?? 'private'}
-        onClose={() => setAddScope(null)}
+        open={addScope !== null || editingTemplate !== null}
+        scope={addScope ?? (editingTemplate?.commandScope as 'public' | 'private') ?? 'private'}
+        editingTemplate={editingTemplate}
+        onClose={() => {
+          setAddScope(null);
+          setEditingTemplate(null);
+        }}
         onSuccess={() => {
           void queryClient.invalidateQueries({ queryKey: ['mml', 'console', 'custom-commands'] });
         }}

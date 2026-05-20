@@ -227,6 +227,11 @@ type TaskFilter struct {
 }
 
 // MMLCustomCommand represents a user-defined custom command (renamed from MMLTemplate).
+//
+// OwnerUserID 是 migration 000134 加入的 FK 字段，正在替代历史 Creator(username)：
+//   - 写：Repository.Create 同时设 Creator + OwnerUserID（dual-write）
+//   - 读：Phase 1 visibility 过滤仍用 Creator；编辑 / 删除鉴权优先用 OwnerUserID（更准确）
+//   - 历史行可能 OwnerUserID=nil（000134 backfill 未命中）；isOwnerOrSuper 用 Creator 兜底
 type MMLCustomCommand struct {
 	ID            uuid.UUID              `json:"id"`
 	CommandName   string                 `json:"command_name"`
@@ -238,6 +243,7 @@ type MMLCustomCommand struct {
 	ParamPaths    []string               `json:"param_paths"`
 	Description   string                 `json:"description"`
 	Creator       string                 `json:"creator"`
+	OwnerUserID   *uuid.UUID             `json:"owner_user_id,omitempty"`
 	CreatedAt     time.Time              `json:"created_at"`
 	UpdatedAt     time.Time              `json:"updated_at"`
 }

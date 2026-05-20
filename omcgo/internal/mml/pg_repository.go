@@ -1272,10 +1272,12 @@ var customCommandAllowedSortColumns = map[string]bool{
 	"updated_at":    true,
 }
 
+// customCommandColumns 列出 SELECT / RETURNING 时返回的列。
+// owner_user_id 由 migration 000134 加入；与 creator(varchar) 共存于 Phase 1。
 var customCommandColumns = []string{
 	"id", "command_name", "command_code", "operation_type",
 	"command_scope", "category_group", "parameters", "param_paths",
-	"description", "creator",
+	"description", "creator", "owner_user_id",
 	"created_at", "updated_at",
 }
 
@@ -1299,13 +1301,15 @@ func (r *PgCustomCommandRepository) Create(ctx context.Context, cmd *MMLCustomCo
 		return fmt.Errorf("marshal param_paths: %w", err)
 	}
 
+	// migration 000134 Phase 1: dual-write owner_user_id（可 nil）。
+	// 历史调用方（如 CloneCustomCommand）未设 OwnerUserID 时落 NULL，与脏数据语义一致。
 	query, args, err := storage.Psql.Insert("mml_custom_command").
 		Columns("command_name", "command_code", "operation_type",
 			"command_scope", "category_group", "parameters", "param_paths",
-			"description", "creator").
+			"description", "creator", "owner_user_id").
 		Values(cmd.CommandName, cmd.CommandCode, cmd.OperationType,
 			cmd.CommandScope, cmd.CategoryGroup, parametersJSON, paramPathsJSON,
-			cmd.Description, cmd.Creator).
+			cmd.Description, cmd.Creator, cmd.OwnerUserID).
 		Suffix("RETURNING " + joinColumns(customCommandColumns)).
 		ToSql()
 	if err != nil {
@@ -1509,10 +1513,11 @@ func scanCustomCommand(row pgx.Row) (*MMLCustomCommand, error) {
 	var c MMLCustomCommand
 	var parametersJSON, paramPathsJSON []byte
 
+	// owner_user_id 可为 NULL → *uuid.UUID 直接接收 pgx 的 nil
 	err := row.Scan(
 		&c.ID, &c.CommandName, &c.CommandCode, &c.OperationType,
 		&c.CommandScope, &c.CategoryGroup, &parametersJSON, &paramPathsJSON,
-		&c.Description, &c.Creator,
+		&c.Description, &c.Creator, &c.OwnerUserID,
 		&c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
@@ -1544,7 +1549,7 @@ func scanCustomCommandRow(rows pgx.Rows) (*MMLCustomCommand, error) {
 	err := rows.Scan(
 		&c.ID, &c.CommandName, &c.CommandCode, &c.OperationType,
 		&c.CommandScope, &c.CategoryGroup, &parametersJSON, &paramPathsJSON,
-		&c.Description, &c.Creator,
+		&c.Description, &c.Creator, &c.OwnerUserID,
 		&c.CreatedAt, &c.UpdatedAt,
 	)
 	if err != nil {
@@ -1567,6 +1572,41 @@ func scanCustomCommandRow(rows pgx.Rows) (*MMLCustomCommand, error) {
 		c.ParamPaths = []string{}
 	}
 	return &c, nil
+}
+
+// NameExistsForPrivate 实现见 CustomCommandRepository 接口注释。
+// 关联 migration 000135 的 uq_mml_custom_command_private_name_per_owner 索引。
+func (r *PgCustomCommandRepository) NameExistsForPrivate(
+	ctx context.Context,
+	ownerID uuid.UUID,
+	name string,
+	excludeID *uuid.UUID,
+) (bool, error) {
+	if ownerID == uuid.Nil || name == "" {
+		return false, nil
+	}
+	q := storage.Psql.Select("1").
+		From("mml_custom_command").
+		Where(sq.Eq{"owner_user_id": ownerID}).
+		Where(sq.Eq{"command_name": name}).
+		Where(sq.Eq{"command_scope": "private"}).
+		Limit(1)
+	if excludeID != nil && *excludeID != uuid.Nil {
+		q = q.Where(sq.NotEq{"id": *excludeID})
+	}
+	sqlStr, args, err := q.ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build name-exists SQL: %w", err)
+	}
+	var dummy int
+	scanErr := r.pool.QueryRow(ctx, sqlStr, args...).Scan(&dummy)
+	if scanErr != nil {
+		if scanErr == pgx.ErrNoRows {
+			return false, nil
+		}
+		return false, fmt.Errorf("query name-exists: %w", scanErr)
+	}
+	return true, nil
 }
 
 

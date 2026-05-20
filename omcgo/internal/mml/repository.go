@@ -54,6 +54,12 @@ type CustomCommandRepository interface {
 	Update(ctx context.Context, cmd *MMLCustomCommand) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	List(ctx context.Context, filter CustomCommandFilter) (*model.ListResponse[MMLCustomCommand], error)
+
+	// NameExistsForPrivate 检查同 owner 私有命名空间内是否已存在该 command_name。
+	// excludeID 非空时排除自身（用于 Update 改名场景）。
+	// 仅在 (owner_user_id, command_name) WHERE command_scope='private' 子集内匹配。
+	// 关联：docs/design/mml-user-private-template-crud-20260520.md §4.2
+	NameExistsForPrivate(ctx context.Context, ownerID uuid.UUID, name string, excludeID *uuid.UUID) (bool, error)
 }
 
 // AuditRepository writes MML command execution audit records.
