@@ -367,3 +367,29 @@ func (mr *MockDeviceRepositoryMockRecorder) UpdateStatus(ctx, id, status any) *g
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateStatus", reflect.TypeOf((*MockDeviceRepository)(nil).UpdateStatus), ctx, id, status)
 }
+
+// T-0162 新接口方法 — 手写 gomock 桩（避免重新运行 go generate）
+
+func (m *MockDeviceRepository) UpdateLifecycle(ctx context.Context, id uuid.UUID, lifecycle model.DeviceLifecycle) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateLifecycle", ctx, id, lifecycle)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+func (mr *MockDeviceRepositoryMockRecorder) UpdateLifecycle(ctx, id, lifecycle any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateLifecycle", reflect.TypeOf((*MockDeviceRepository)(nil).UpdateLifecycle), ctx, id, lifecycle)
+}
+
+func (m *MockDeviceRepository) UpdateOnlineStatus(ctx context.Context, id uuid.UUID, isOnline bool) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateOnlineStatus", ctx, id, isOnline)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+func (mr *MockDeviceRepositoryMockRecorder) UpdateOnlineStatus(ctx, id, isOnline any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateOnlineStatus", reflect.TypeOf((*MockDeviceRepository)(nil).UpdateOnlineStatus), ctx, id, isOnline)
+}

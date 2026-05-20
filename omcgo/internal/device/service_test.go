@@ -86,6 +86,15 @@ func (m *mockDeviceRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status 
 	return nil
 }
 
+// T-0162: 新接口方法，测试中默认 no-op
+func (m *mockDeviceRepo) UpdateLifecycle(ctx context.Context, id uuid.UUID, lifecycle model.DeviceLifecycle) error {
+	return nil
+}
+
+func (m *mockDeviceRepo) UpdateOnlineStatus(ctx context.Context, id uuid.UUID, isOnline bool) error {
+	return nil
+}
+
 func (m *mockDeviceRepo) UpdateLastInform(ctx context.Context, sn string, at time.Time, events []string) error {
 	if m.updateLastInformFn != nil {
 		return m.updateLastInformFn(ctx, sn, at, events)

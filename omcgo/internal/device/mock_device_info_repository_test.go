@@ -101,6 +101,20 @@ func (mr *MockDeviceInfoRepositoryMockRecorder) ListDevicesWithInfo(ctx, filter 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListDevicesWithInfo", reflect.TypeOf((*MockDeviceInfoRepository)(nil).ListDevicesWithInfo), ctx, filter)
 }
 
+// T-0162: ComputeListStats 接口新增方法的 gomock 桩
+func (m *MockDeviceInfoRepository) ComputeListStats(ctx context.Context, filter DeviceFilter) (*DeviceListStats, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ComputeListStats", ctx, filter)
+	ret0, _ := ret[0].(*DeviceListStats)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+func (mr *MockDeviceInfoRepositoryMockRecorder) ComputeListStats(ctx, filter any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ComputeListStats", reflect.TypeOf((*MockDeviceInfoRepository)(nil).ComputeListStats), ctx, filter)
+}
+
 // UpdateManualFields mocks base method.
 func (m *MockDeviceInfoRepository) UpdateManualFields(ctx context.Context, deviceID uuid.UUID, req UpdateDeviceInfoRequest, updater string) error {
 	m.ctrl.T.Helper()

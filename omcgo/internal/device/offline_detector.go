@@ -118,9 +118,10 @@ func (d *OfflineDetector) detect(ctx context.Context) {
 func (d *OfflineDetector) markOffline(ctx context.Context, device *model.Device) error {
 	now := time.Now()
 
-	// 1. 更新设备状态为 offline
-	if err := d.deviceRepo.UpdateStatus(ctx, device.ID, model.DeviceOffline); err != nil {
-		return fmt.Errorf("update status: %w", err)
+	// 1. T-0162: 只更 is_online=false，**不动 lifecycle_state**。
+	// commissioned + is_online=false 是合法状态（已入网 + 当前掉线）。
+	if err := d.deviceRepo.UpdateOnlineStatus(ctx, device.ID, false); err != nil {
+		return fmt.Errorf("update online status: %w", err)
 	}
 
 	// 2. 记录离线时间

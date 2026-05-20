@@ -78,6 +78,15 @@ func (m *execDeviceRepo) List(_ context.Context, _ device.DeviceFilter) (*model.
 func (m *execDeviceRepo) UpdateStatus(_ context.Context, _ uuid.UUID, _ model.DeviceStatus) error {
 	return nil
 }
+
+// T-0162 新接口方法
+func (m *execDeviceRepo) UpdateLifecycle(_ context.Context, _ uuid.UUID, _ model.DeviceLifecycle) error {
+	return nil
+}
+
+func (m *execDeviceRepo) UpdateOnlineStatus(_ context.Context, _ uuid.UUID, _ bool) error {
+	return nil
+}
 func (m *execDeviceRepo) UpdateLastInform(_ context.Context, _ string, _ time.Time, _ []string) error {
 	return nil
 }

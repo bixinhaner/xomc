@@ -90,6 +90,21 @@ func (m *fakeDeviceRepo) List(ctx context.Context, filter DeviceFilter) (*model.
 	return model.NewListResponse(items, int64(len(items)), filter.Page, filter.PageSize), nil
 }
 
+// T-0162 新接口方法
+func (m *fakeDeviceRepo) UpdateLifecycle(_ context.Context, id uuid.UUID, lifecycle model.DeviceLifecycle) error {
+	if d, ok := m.devices[id]; ok {
+		d.LifecycleState = lifecycle
+	}
+	return nil
+}
+
+func (m *fakeDeviceRepo) UpdateOnlineStatus(_ context.Context, id uuid.UUID, isOnline bool) error {
+	if d, ok := m.devices[id]; ok {
+		d.IsOnline = isOnline
+	}
+	return nil
+}
+
 func (m *fakeDeviceRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status model.DeviceStatus) error {
 	if d, ok := m.devices[id]; ok {
 		d.Status = status

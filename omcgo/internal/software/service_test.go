@@ -193,6 +193,15 @@ func (m *svcMockDeviceRepo) List(_ context.Context, _ device.DeviceFilter) (*mod
 func (m *svcMockDeviceRepo) UpdateStatus(_ context.Context, _ uuid.UUID, _ model.DeviceStatus) error {
 	return nil
 }
+
+// T-0162 新接口方法
+func (m *svcMockDeviceRepo) UpdateLifecycle(_ context.Context, _ uuid.UUID, _ model.DeviceLifecycle) error {
+	return nil
+}
+
+func (m *svcMockDeviceRepo) UpdateOnlineStatus(_ context.Context, _ uuid.UUID, _ bool) error {
+	return nil
+}
 func (m *svcMockDeviceRepo) UpdateLastInform(_ context.Context, _ string, _ time.Time, _ []string) error {
 	return nil
 }

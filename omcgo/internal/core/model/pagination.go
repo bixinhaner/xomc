@@ -34,13 +34,20 @@ func (r *ListRequest) Limit() int {
 }
 
 // ListResponse 是分页列表接口的通用返回体。
-// 使用范例：
+//
+// Stats 是 T-0162 引入的**可选**通用统计 payload：当某个 list 接口需要除"当前
+// 页 items 之外的全量统计"时（例如设备列表的 在线/离线/告警 总数），handler
+// 在主查询完成后跑一个 group-by SQL 填充本字段；前端读 stats 而不是用 items
+// 自行计算（避免 page-only 统计偏差，详见 Q2 分析报告）。
+// 字段类型 interface{} 允许各 list 接口定义自己的 Stats 结构（device 用
+// DeviceListStats，alarm 可以用 AlarmListStats，等等），由消费侧按 json 解码。
 type ListResponse[T any] struct {
-	Items      []T   `json:"items"`
-	Total      int64 `json:"total"`
-	Page       int   `json:"page"`
-	PageSize   int   `json:"page_size"`
-	TotalPages int   `json:"total_pages"`
+	Items      []T         `json:"items"`
+	Total      int64       `json:"total"`
+	Page       int         `json:"page"`
+	PageSize   int         `json:"page_size"`
+	TotalPages int         `json:"total_pages"`
+	Stats      interface{} `json:"stats,omitempty"`
 }
 
 // NewListResponse 创建分页列表响应并自动计算总页数。

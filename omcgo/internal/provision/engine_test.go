@@ -275,6 +275,15 @@ func (m *mockDeviceRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status 
 	return nil
 }
 
+// T-0162 新接口方法
+func (m *mockDeviceRepo) UpdateLifecycle(_ context.Context, _ uuid.UUID, _ model.DeviceLifecycle) error {
+	return nil
+}
+
+func (m *mockDeviceRepo) UpdateOnlineStatus(_ context.Context, _ uuid.UUID, _ bool) error {
+	return nil
+}
+
 func (m *mockDeviceRepo) UpdateLastInform(ctx context.Context, sn string, at time.Time, events []string) error {
 	if m.UpdateLastInformFn != nil {
 		return m.UpdateLastInformFn(ctx, sn, at, events)

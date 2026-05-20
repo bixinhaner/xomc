@@ -31,4 +31,27 @@ type DeviceInfoRepository interface {
 	// 的 op_state（激活状态）及 device_info 扩展字段口径完全一致。
 	// 设备不存在或已软删返回 (nil, nil)。
 	GetByIDWithInfo(ctx context.Context, deviceID uuid.UUID) (*DeviceWithInfo, error)
+
+	// T-0162: ComputeListStats 计算筛选条件下的全量统计（与当前页 items 解耦，
+	// 修复 Q2 分析报告里"前端 fallback 用当前页 filter() 算 stats"的偏差）。
+	// 在主 list 查询同样的 WHERE 子句下，跑 group-by 拿 lifecycle/online/alarm
+	// 三维聚合。
+	ComputeListStats(ctx context.Context, filter DeviceFilter) (*DeviceListStats, error)
+}
+
+// DeviceListStats 是设备列表筛选条件下的全量统计 payload（T-0162 D5）。
+// 由 handler 填入 ListResponse[T].Stats 后回给前端，前端直读 stats 而不是从
+// items 自行 filter().length 估算（避免 page-only 偏差）。
+type DeviceListStats struct {
+	// Total = 筛选条件下符合的设备总数（= ListResponse.Total，便于前端不依赖 items 长度）
+	Total int64 `json:"total"`
+	// ByLifecycle 按 lifecycle_state 分组计数。key 为 6 个生命周期值之一。
+	ByLifecycle map[model.DeviceLifecycle]int64 `json:"by_lifecycle"`
+	// OnlineCount = is_online=TRUE 的设备数；OfflineCount = Total - OnlineCount。
+	// 不限定 lifecycle（"在线"语义是 is_online=TRUE，与生命周期解耦）。
+	OnlineCount  int64 `json:"online_count"`
+	OfflineCount int64 `json:"offline_count"`
+	// Alarmed = 含 active 告警的设备数（任何级别）。本期暂未 JOIN alarms 表，
+	// 占位字段，由后续 T-0162 follow-up commit 补 JOIN 逻辑；当前固定为 0。
+	Alarmed int64 `json:"alarmed"`
 }

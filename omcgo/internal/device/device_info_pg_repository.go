@@ -16,25 +16,27 @@ import (
 
 // allowedSortColumnsWithInfo maps user-facing sort keys to qualified column names
 // for the devices + device_info JOIN query.
+// T-0162: status 列已 DROP，加 lifecycle_state + is_online。
 var allowedSortColumnsWithInfo = map[string]string{
-	"created_at":     "d.created_at",
-	"updated_at":     "d.updated_at",
-	"serial_number":  "d.serial_number",
-	"status":         "d.status",
-	"carrier":        "d.carrier",
-	"technology":     "d.technology",
-	"model":          "d.model_name",
-	"manufacturer":   "d.manufacturer",
-	"last_inform_at": "d.last_inform_at",
-	"device_name":    "di.device_name",
-	"rf_status":      "di.rf_status",
-	"cell_status":    "di.cell_status",
-	"bandwidth":      "di.bandwidth",
-	"transmit_power": "di.transmit_power",
-	"num_of_cells":   "di.num_of_cells",
-	"gps_status":     "di.gps_status",
-	"alarm_severity": "di.alarm_severity",
-	"license_status": "di.license_status",
+	"created_at":      "d.created_at",
+	"updated_at":      "d.updated_at",
+	"serial_number":   "d.serial_number",
+	"lifecycle_state": "d.lifecycle_state",
+	"is_online":       "d.is_online",
+	"carrier":         "d.carrier",
+	"technology":      "d.technology",
+	"model":           "d.model_name",
+	"manufacturer":    "d.manufacturer",
+	"last_inform_at":  "d.last_inform_at",
+	"device_name":     "di.device_name",
+	"rf_status":       "di.rf_status",
+	"cell_status":     "di.cell_status",
+	"bandwidth":       "di.bandwidth",
+	"transmit_power":  "di.transmit_power",
+	"num_of_cells":    "di.num_of_cells",
+	"gps_status":      "di.gps_status",
+	"alarm_severity":  "di.alarm_severity",
+	"license_status":  "di.license_status",
 }
 
 // PgDeviceInfoRepository implements DeviceInfoRepository using PostgreSQL.
@@ -205,9 +207,36 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		builder = builder.Where(sq.Eq{"d.technology": *filter.Technology})
 		countBuilder = countBuilder.Where(sq.Eq{"d.technology": *filter.Technology})
 	}
+	// T-0162: filter.Status 老字段过渡兼容——翻译为 lifecycle_state + is_online
 	if filter.Status != nil {
-		builder = builder.Where(sq.Eq{"d.status": *filter.Status})
-		countBuilder = countBuilder.Where(sq.Eq{"d.status": *filter.Status})
+		lifecycle, isOnline := DeriveLifecycleFromStatus(*filter.Status)
+		builder = builder.Where(sq.Eq{"d.lifecycle_state": lifecycle})
+		countBuilder = countBuilder.Where(sq.Eq{"d.lifecycle_state": lifecycle})
+		if *filter.Status == model.DeviceActive || *filter.Status == model.DeviceOffline {
+			builder = builder.Where(sq.Eq{"d.is_online": isOnline})
+			countBuilder = countBuilder.Where(sq.Eq{"d.is_online": isOnline})
+		}
+	}
+	// T-0162: 新筛选维度
+	if len(filter.LifecycleState) > 0 {
+		builder = builder.Where(sq.Eq{"d.lifecycle_state": filter.LifecycleState})
+		countBuilder = countBuilder.Where(sq.Eq{"d.lifecycle_state": filter.LifecycleState})
+	}
+	if filter.IsOnline != nil {
+		builder = builder.Where(sq.Eq{"d.is_online": *filter.IsOnline})
+		countBuilder = countBuilder.Where(sq.Eq{"d.is_online": *filter.IsOnline})
+	}
+	if filter.ModelName != nil && *filter.ModelName != "" {
+		builder = builder.Where(sq.Eq{"d.model_name": *filter.ModelName})
+		countBuilder = countBuilder.Where(sq.Eq{"d.model_name": *filter.ModelName})
+	}
+	if filter.FirmwareVersion != nil && *filter.FirmwareVersion != "" {
+		builder = builder.Where(sq.Eq{"d.firmware_version": *filter.FirmwareVersion})
+		countBuilder = countBuilder.Where(sq.Eq{"d.firmware_version": *filter.FirmwareVersion})
+	}
+	if filter.SoftwareVersion != nil && *filter.SoftwareVersion != "" {
+		builder = builder.Where(sq.Eq{"di.software_version": *filter.SoftwareVersion})
+		countBuilder = countBuilder.Where(sq.Eq{"di.software_version": *filter.SoftwareVersion})
 	}
 	if filter.OUI != nil {
 		builder = builder.Where(sq.Eq{"d.oui": *filter.OUI})
@@ -364,6 +393,134 @@ func (r *PgDeviceInfoRepository) GetByIDWithInfo(ctx context.Context, deviceID u
 	return d, nil
 }
 
+// ComputeListStats 在 ListDevicesWithInfo 同样筛选条件下跑 group-by 聚合，
+// 返回 lifecycle/online/alarm 三维统计。T-0162 D5：取代前端用当前页 items
+// filter() 自行估算的不准做法。
+//
+// 注意：本方法用与 ListDevicesWithInfo 相同的 LEFT JOIN，但只 GROUP BY 设备
+// 维度（DISTINCT device_id），避免 dgm 一对多导致同设备被计数多次。
+func (r *PgDeviceInfoRepository) ComputeListStats(ctx context.Context, filter DeviceFilter) (*DeviceListStats, error) {
+	// 用子查询去重再聚合：先按筛选条件取所有命中设备的 (id, lifecycle, is_online)，
+	// 再 GROUP BY。避免 dgm/dg LEFT JOIN 引起的设备重复计数。
+	subBuilder := storage.Psql.Select("DISTINCT d.id", "d.lifecycle_state", "d.is_online").
+		From("devices d").
+		LeftJoin("device_info di ON di.device_id = d.id").
+		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
+		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
+		Where(sq.Eq{"d.deleted_at": nil})
+
+	// 复用 ListDevicesWithInfo 的过滤逻辑——直接调 buildListFilters 抽出来更好，
+	// 本期最小集：内联 carrier/technology/lifecycle/is_online/model_name 等核心
+	// 筛选条件（与 ListDevicesWithInfo 保持一致）。
+	subBuilder = applyDeviceFilters(subBuilder, filter)
+
+	// 包到外层 GROUP BY
+	subQ, subArgs, err := subBuilder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build stats subquery: %w", err)
+	}
+
+	groupQ := "SELECT lifecycle_state, is_online, COUNT(*) FROM (" + subQ +
+		") s GROUP BY lifecycle_state, is_online"
+
+	rows, err := r.pool.Query(ctx, groupQ, subArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("query device list stats: %w", err)
+	}
+	defer rows.Close()
+
+	stats := &DeviceListStats{
+		ByLifecycle: make(map[model.DeviceLifecycle]int64),
+	}
+	for rows.Next() {
+		var lifecycle model.DeviceLifecycle
+		var isOnline bool
+		var count int64
+		if err := rows.Scan(&lifecycle, &isOnline, &count); err != nil {
+			return nil, fmt.Errorf("scan device list stats: %w", err)
+		}
+		stats.Total += count
+		stats.ByLifecycle[lifecycle] += count
+		if isOnline {
+			stats.OnlineCount += count
+		} else {
+			stats.OfflineCount += count
+		}
+	}
+	// Alarmed 占位为 0（JOIN alarms 表的逻辑留 T-0162 follow-up）
+	return stats, nil
+}
+
+// applyDeviceFilters 把 DeviceFilter 的 WHERE 子句应用到 squirrel SelectBuilder
+// 上。抽出来供 ListDevicesWithInfo + ComputeListStats 共用，确保两个查询的
+// 筛选条件 1:1 对齐（否则 stats 与 list 数量不一致就是 P3 重蹈 Q2 覆辙）。
+func applyDeviceFilters(b sq.SelectBuilder, filter DeviceFilter) sq.SelectBuilder {
+	if filter.Carrier != nil {
+		b = b.Where(sq.Eq{"d.carrier": *filter.Carrier})
+	}
+	if filter.Technology != nil {
+		b = b.Where(sq.Eq{"d.technology": *filter.Technology})
+	}
+	if filter.Status != nil {
+		lifecycle, isOnline := DeriveLifecycleFromStatus(*filter.Status)
+		b = b.Where(sq.Eq{"d.lifecycle_state": lifecycle})
+		if *filter.Status == model.DeviceActive || *filter.Status == model.DeviceOffline {
+			b = b.Where(sq.Eq{"d.is_online": isOnline})
+		}
+	}
+	if len(filter.LifecycleState) > 0 {
+		b = b.Where(sq.Eq{"d.lifecycle_state": filter.LifecycleState})
+	}
+	if filter.IsOnline != nil {
+		b = b.Where(sq.Eq{"d.is_online": *filter.IsOnline})
+	}
+	if filter.ModelName != nil && *filter.ModelName != "" {
+		b = b.Where(sq.Eq{"d.model_name": *filter.ModelName})
+	}
+	if filter.FirmwareVersion != nil && *filter.FirmwareVersion != "" {
+		b = b.Where(sq.Eq{"d.firmware_version": *filter.FirmwareVersion})
+	}
+	if filter.SoftwareVersion != nil && *filter.SoftwareVersion != "" {
+		b = b.Where(sq.Eq{"di.software_version": *filter.SoftwareVersion})
+	}
+	if filter.OUI != nil {
+		b = b.Where(sq.Eq{"d.oui": *filter.OUI})
+	}
+	if filter.SN != nil && *filter.SN != "" {
+		b = b.Where(sq.Eq{"d.serial_number": *filter.SN})
+	}
+	if filter.Manufacturer != nil && *filter.Manufacturer != "" {
+		b = b.Where(sq.Eq{"d.manufacturer": *filter.Manufacturer})
+	}
+	if filter.ProductClass != nil && *filter.ProductClass != "" {
+		b = b.Where(sq.Eq{"d.product_class": *filter.ProductClass})
+	}
+	if filter.GroupID != nil {
+		b = b.Where(sq.Eq{"dgm.group_id": *filter.GroupID})
+	}
+	if filter.VisibleGroups != nil && len(filter.VisibleGroups) == 0 {
+		b = b.Where("FALSE")
+	} else if len(filter.VisibleGroups) > 0 {
+		b = b.Where(sq.Eq{"dgm.group_id": filter.VisibleGroups})
+	}
+	if filter.Search != nil {
+		if cond := BuildSearchOR(*filter.Search, []string{
+			"d.serial_number", "d.site_name", "d.manufacturer",
+			"d.model_name", "di.device_name", "di.address",
+		}); cond != nil {
+			b = b.Where(cond)
+		}
+	}
+	if filter.OpState != nil {
+		if *filter.OpState == "1" {
+			b = b.Where(sq.NotEq{"di.first_online_time": nil})
+		} else if *filter.OpState == "0" {
+			b = b.Where(sq.Eq{"di.first_online_time": nil})
+		}
+	}
+	return b
+}
+
 // deviceInfoColumns returns column names for the device_info table.
 func deviceInfoColumns() []string {
 	return []string{
@@ -379,11 +536,17 @@ func deviceInfoColumns() []string {
 }
 
 // deviceWithInfoSelectColumns returns qualified column names for the JOIN query.
+// T-0162: d.status → d.lifecycle_state + d.is_online；离线时长 CASE 改用 is_online。
 func deviceWithInfoSelectColumns() []string {
+	// "离线" 在 T-0162 解耦后定义为 d.is_online=FALSE（仅 commissioned 状态下才有
+	// "离线时长"概念；registered/provisioning 等还没入网的状态不计算"离线时长"）。
+	offlineCond := `d.lifecycle_state = 'commissioned' AND d.is_online = FALSE`
 	return []string{
 		// devices columns (aliased with d.)
 		"d.id", "d.serial_number", "d.oui", "d.product_class", "d.manufacturer", "d.model_name",
-		"d.carrier", "d.technology", "d.status", "d.firmware_version",
+		"d.carrier", "d.technology",
+		"d.lifecycle_state", "d.is_online", // T-0162: 替代 d.status
+		"d.firmware_version",
 		"host(d.ip_address) as ip_address", "d.connection_request_url",
 		"d.nat_detected", "d.udp_connection_request_address",
 		"d.last_inform_at", "d.last_inform_events",
@@ -399,25 +562,24 @@ func deviceWithInfoSelectColumns() []string {
 		"di.num_of_cells", "di.gps_status", "di.alarm_severity", "di.license_status",
 		"di.mac", "di.hardware_version",
 		"di.first_online_time", "di.last_online_time", "di.last_offline_time", "di.run_time",
-		// 离线时长计算（SQL层面，仅离线设备有值）
-		// 离线状态：offline, maintenance, decommissioned, discovered
+		// 离线时长计算（SQL层面）：T-0162 用 lifecycle+is_online 判定
 		`CASE
-			WHEN d.status NOT IN ('active', 'registered', 'provisioning') AND di.last_offline_time IS NOT NULL
+			WHEN ` + offlineCond + ` AND di.last_offline_time IS NOT NULL
 			THEN EXTRACT(EPOCH FROM (NOW() - di.last_offline_time))::bigint
 			ELSE NULL
 		END AS offline_seconds`,
 		`CASE
-			WHEN d.status NOT IN ('active', 'registered', 'provisioning') AND di.last_offline_time IS NOT NULL
+			WHEN ` + offlineCond + ` AND di.last_offline_time IS NOT NULL
 			THEN FLOOR(EXTRACT(EPOCH FROM (NOW() - di.last_offline_time)) / 86400)::bigint
 			ELSE NULL
 		END AS offline_days`,
 		`CASE
-			WHEN d.status NOT IN ('active', 'registered', 'provisioning') AND di.last_offline_time IS NOT NULL
+			WHEN ` + offlineCond + ` AND di.last_offline_time IS NOT NULL
 			THEN FLOOR((EXTRACT(EPOCH FROM (NOW() - di.last_offline_time)) % 86400) / 3600)::bigint
 			ELSE NULL
 		END AS offline_hours`,
 		`CASE
-			WHEN d.status NOT IN ('active', 'registered', 'provisioning') AND di.last_offline_time IS NOT NULL
+			WHEN ` + offlineCond + ` AND di.last_offline_time IS NOT NULL
 			THEN FLOOR((EXTRACT(EPOCH FROM (NOW() - di.last_offline_time)) % 3600) / 60)::bigint
 			ELSE NULL
 		END AS offline_minutes`,
@@ -489,7 +651,9 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	err := rows.Scan(
 		// devices fields
 		&d.ID, &d.SerialNumber, &d.OUI, &productClass, &manufacturer, &modelName,
-		&d.Carrier, &d.Technology, &d.Status, &firmwareVersion,
+		&d.Carrier, &d.Technology,
+		&d.LifecycleState, &d.IsOnline, // T-0162: 替代 &d.Status
+		&firmwareVersion,
 		&ipAddr, &connReqURL,
 		&d.NatDetected, &udpAddr,
 		&d.LastInformAt, &eventsData,
@@ -581,6 +745,9 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	d.OfflineDays = offlineDays
 	d.OfflineHours = offlineHours
 	d.OfflineMinutes = offlineMinutes
+	// T-0162: 派生老 Status 字段给读侧兼容（DeriveStatusFromLifecycle 用
+	// commissioned+online=Active / commissioned+offline=Offline / 等映射）
+	d.Status = DeriveStatusFromLifecycle(d.LifecycleState, d.IsOnline)
 	// 派生 op_state 给前端"激活状态"列展示。激活 = 设备曾首次上线
 	// （device_info.first_online_time 非空），一次性持久事实，与在线/离线解耦。
 	d.OpState = model.DeriveOpStateActivated(d.FirstOnlineTime)

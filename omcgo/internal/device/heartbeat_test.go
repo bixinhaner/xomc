@@ -28,6 +28,7 @@ type hbMockDeviceRepo struct {
 	deleteFn                 func(ctx context.Context, id uuid.UUID) error
 	listFn                   func(ctx context.Context, filter DeviceFilter) (*model.ListResponse[model.Device], error)
 	updateStatusFn           func(ctx context.Context, id uuid.UUID, status model.DeviceStatus) error
+	updateOnlineStatusFn     func(ctx context.Context, id uuid.UUID, isOnline bool) error // T-0162
 	updateLastInformFn       func(ctx context.Context, sn string, at time.Time, events []string) error
 	countByStatusFn          func(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error)
 	listActiveByLastInformFn func(ctx context.Context, cursorTime *time.Time, cursorID *uuid.UUID, limit int) ([]model.Device, error)
@@ -76,6 +77,18 @@ func (m *hbMockDeviceRepo) List(ctx context.Context, filter DeviceFilter) (*mode
 func (m *hbMockDeviceRepo) UpdateStatus(ctx context.Context, id uuid.UUID, status model.DeviceStatus) error {
 	if m.updateStatusFn != nil {
 		return m.updateStatusFn(ctx, id, status)
+	}
+	return nil
+}
+
+// T-0162 新接口方法
+func (m *hbMockDeviceRepo) UpdateLifecycle(_ context.Context, _ uuid.UUID, _ model.DeviceLifecycle) error {
+	return nil
+}
+
+func (m *hbMockDeviceRepo) UpdateOnlineStatus(ctx context.Context, id uuid.UUID, isOnline bool) error {
+	if m.updateOnlineStatusFn != nil {
+		return m.updateOnlineStatusFn(ctx, id, isOnline)
 	}
 	return nil
 }
@@ -182,14 +195,18 @@ func TestRefreshHeartbeat_MinTTL(t *testing.T) {
 
 func TestCheckHeartbeats_MarkOffline(t *testing.T) {
 	deviceID := uuid.New()
-	var markedStatus model.DeviceStatus
+	var markedOnline *bool // 期望被设为 false
 
 	repo := &hbMockDeviceRepo{
 		listActiveByLastInformFn: func(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]model.Device, error) {
-			return []model.Device{{ID: deviceID, SerialNumber: "SN-EXPIRED", Status: model.DeviceActive}}, nil
+			return []model.Device{{
+				ID: deviceID, SerialNumber: "SN-EXPIRED",
+				LifecycleState: model.LifecycleCommissioned, IsOnline: true,
+			}}, nil
 		},
-		updateStatusFn: func(_ context.Context, _ uuid.UUID, status model.DeviceStatus) error {
-			markedStatus = status
+		// T-0162: heartbeat 现在调 UpdateOnlineStatus(false)，不是 UpdateStatus(DeviceOffline)
+		updateOnlineStatusFn: func(_ context.Context, _ uuid.UUID, isOnline bool) error {
+			markedOnline = &isOnline
 			return nil
 		},
 	}
@@ -197,16 +214,22 @@ func TestCheckHeartbeats_MarkOffline(t *testing.T) {
 	hm, _ := newHBTestMonitor(t, repo)
 	hm.CheckHeartbeats(context.Background())
 
-	assert.Equal(t, model.DeviceOffline, markedStatus)
+	if assert.NotNil(t, markedOnline, "UpdateOnlineStatus should have been called") {
+		assert.False(t, *markedOnline, "device should be marked offline (is_online=false)")
+	}
 }
 
 func TestCheckHeartbeats_HeartbeatExists(t *testing.T) {
 	updateCalled := false
 	repo := &hbMockDeviceRepo{
 		listActiveByLastInformFn: func(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]model.Device, error) {
-			return []model.Device{{ID: uuid.New(), SerialNumber: "SN-ALIVE", Status: model.DeviceActive}}, nil
+			return []model.Device{{
+				ID: uuid.New(), SerialNumber: "SN-ALIVE",
+				LifecycleState: model.LifecycleCommissioned, IsOnline: true,
+			}}, nil
 		},
-		updateStatusFn: func(_ context.Context, _ uuid.UUID, _ model.DeviceStatus) error {
+		// T-0162: 心跳存在时应不调 UpdateOnlineStatus
+		updateOnlineStatusFn: func(_ context.Context, _ uuid.UUID, _ bool) error {
 			updateCalled = true
 			return nil
 		},

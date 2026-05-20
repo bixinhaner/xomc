@@ -791,6 +791,9 @@ func (s *DeviceService) CountByStatus(ctx context.Context, carrier *model.Carrie
 }
 
 // ListDevicesWithInfo returns a paginated list of devices joined with extended info.
+//
+// T-0162 D5: 返回时附带 Stats 字段（筛选条件下的全量统计），前端直读 stats
+// 而非用当前页 items 自行 filter() 估算（修复 Q2 分析里的偏差）。
 func (s *DeviceService) ListDevicesWithInfo(ctx context.Context, filter DeviceFilter) (*model.ListResponse[DeviceWithInfo], error) {
 	if s.deviceInfoRepo == nil {
 		// Fallback: if device_info repo not configured, use standard list
@@ -804,7 +807,16 @@ func (s *DeviceService) ListDevicesWithInfo(ctx context.Context, filter DeviceFi
 		}
 		return model.NewListResponse(items, result.Total, result.Page, result.PageSize), nil
 	}
-	return s.deviceInfoRepo.ListDevicesWithInfo(ctx, filter)
+	result, err := s.deviceInfoRepo.ListDevicesWithInfo(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	// T-0162: 同筛选条件下跑全量统计；stats 失败不阻断主 list 返回（降级返回
+	// items + Stats=nil，前端会回退到老 fallback 行为，与现状等价）。
+	if stats, statsErr := s.deviceInfoRepo.ComputeListStats(ctx, filter); statsErr == nil {
+		result.Stats = stats
+	}
+	return result, nil
 }
 
 // GetDeviceWithInfo retrieves a single device joined with extended info, for the

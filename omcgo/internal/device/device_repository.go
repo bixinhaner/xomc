@@ -22,10 +22,19 @@ import (
 type DeviceFilter struct {
 	Carrier    *model.CarrierCode
 	Technology *model.Technology
-	Status     *model.DeviceStatus
-	OUI        *string
-	SN         *string // exact match on serial_number
-	Search     *string // fuzzy search across serial_number/site_name/manufacturer/device_name/address
+
+	// DEPRECATED (T-0162): 用 LifecycleState / IsOnline 替代。保留过渡期供
+	// 老 query 参数自动翻译；handler 收到 `?status=` 会派生到 LifecycleState +
+	// IsOnline。新代码请直接用新字段，不要写 Filter.Status。
+	Status *model.DeviceStatus
+
+	// T-0162: 拆分原 Status 为两个正交字段
+	LifecycleState []model.DeviceLifecycle // 多选过滤；空切片表示不过滤
+	IsOnline       *bool                   // 三态：nil=不过滤；true=仅在线；false=仅离线
+
+	OUI    *string
+	SN     *string // exact match on serial_number
+	Search *string // fuzzy search across serial_number/site_name/manufacturer/device_name/address
 
 	// Group filters
 	GroupID       *uuid.UUID  // filter by specific device group
@@ -40,7 +49,12 @@ type DeviceFilter struct {
 	GPSStatus     *string // device_info.gps_status exact match
 	AlarmSeverity *string // device_info.alarm_severity exact match
 	LicenseStatus *string // device_info.license_status exact match
-	OpState       *string // "1" = active (status='active'), "0" = not active (status!='active')
+	OpState       *string // "1" = activated (first_online_time NOT NULL), "0" = not activated
+
+	// T-0162 新增 3 个 device list 筛选维度（之前前端下拉空、后端无字段）
+	ModelName       *string // devices.model_name exact match (字典 device_model)
+	SoftwareVersion *string // device_info.software_version exact match (字典 software_version)
+	FirmwareVersion *string // devices.firmware_version exact match (字典 firmware_version)
 
 	model.ListRequest
 }
@@ -144,7 +158,15 @@ type DeviceWriter interface {
 	// BatchDelete soft-deletes multiple devices and removes their group memberships
 	// and device_info records within a transaction. Returns the number of deleted devices.
 	BatchDelete(ctx context.Context, ids []uuid.UUID, deletedBy string) (int64, error)
+	// UpdateStatus is the LEGACY status update (DEPRECATED T-0162).
+	// 内部 shim 把 status 翻译为 lifecycle_state + is_online 双列。新代码请用
+	// UpdateLifecycle / UpdateOnlineStatus 之一。
 	UpdateStatus(ctx context.Context, id uuid.UUID, status model.DeviceStatus) error
+
+	// T-0162: 解耦后的两个独立 update。
+	UpdateLifecycle(ctx context.Context, id uuid.UUID, lifecycle model.DeviceLifecycle) error
+	UpdateOnlineStatus(ctx context.Context, id uuid.UUID, isOnline bool) error
+
 	UpdateLastInform(ctx context.Context, sn string, at time.Time, events []string) error
 	// UpdateLastParamSyncAt 回写 last_param_sync_at（HandleSyncResultPathB BatchUpsert
 	// 成功后调；不区分触发源统一口径，回写口径详见 PRD F09 §2.6）。
@@ -174,16 +196,18 @@ type DeviceRepository interface {
 // ===== PostgreSQL 实现 =====
 
 // allowedSortColumns prevents SQL injection in ORDER BY clauses.
+// T-0162: 移除 "status" (列已 DROP)，加 "lifecycle_state" + "is_online"。
 var allowedSortColumns = map[string]bool{
-	"created_at":     true,
-	"updated_at":     true,
-	"serial_number":  true,
-	"status":         true,
-	"carrier":        true,
-	"technology":     true,
-	"model":          true,
-	"manufacturer":   true,
-	"last_inform_at": true,
+	"created_at":      true,
+	"updated_at":      true,
+	"serial_number":   true,
+	"lifecycle_state": true,
+	"is_online":       true,
+	"carrier":         true,
+	"technology":      true,
+	"model":           true,
+	"manufacturer":    true,
+	"last_inform_at":  true,
 }
 
 // PgDeviceRepository implements DeviceRepository using PostgreSQL.
@@ -203,6 +227,10 @@ func (r *PgDeviceRepository) Create(ctx context.Context, device *model.Device) e
 	now := time.Now()
 	device.CreatedAt = now
 	device.UpdatedAt = now
+
+	// T-0162: 若调用方只设了老 Status 字段（P3 渐进迁移期间常见），从 Status
+	// 派生 LifecycleState + IsOnline；新调用方设了新字段则直传
+	normalizeDeviceForPersist(device)
 
 	extData, err := json.Marshal(device.ExtensionData)
 	if err != nil {
@@ -226,7 +254,9 @@ func (r *PgDeviceRepository) Create(ctx context.Context, device *model.Device) e
 
 	query, args, err := storage.Psql.Insert("devices").
 		Columns("id", "serial_number", "oui", "product_class", "manufacturer", "model_name",
-			"carrier", "technology", "status", "firmware_version", "ip_address",
+			"carrier", "technology",
+			"lifecycle_state", "is_online", // T-0162: 替代 status
+			"firmware_version", "ip_address",
 			"connection_request_url", "nat_detected", "udp_connection_request_address",
 			"last_inform_at", "last_inform_events",
 			"last_boot_at", "boot_count",
@@ -234,7 +264,8 @@ func (r *PgDeviceRepository) Create(ctx context.Context, device *model.Device) e
 			"extension_data", "created_at", "updated_at").
 		Values(device.ID, device.SerialNumber, device.OUI, device.ProductClass,
 			device.Manufacturer, device.ModelName, device.Carrier, device.Technology,
-			device.Status, device.FirmwareVersion, ipAddr,
+			device.LifecycleState, device.IsOnline, // T-0162: 替代 device.Status
+			device.FirmwareVersion, ipAddr,
 			device.ConnectionRequestURL, device.NatDetected, udpAddr,
 			device.LastInformAt, eventsData,
 			device.LastBootAt, device.BootCount,
@@ -297,12 +328,16 @@ func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) e
 		udpAddr = device.UDPConnectionRequestAddress
 	}
 
+	// T-0162: 若调用方只设了老 Status 字段，从 Status 派生 LifecycleState + IsOnline
+	normalizeDeviceForPersist(device)
+
 	query, args, err := storage.Psql.Update("devices").
 		Set("oui", device.OUI).
 		Set("product_class", device.ProductClass).
 		Set("manufacturer", device.Manufacturer).
 		Set("model_name", device.ModelName).
-		Set("status", device.Status).
+		Set("lifecycle_state", device.LifecycleState). // T-0162: 替代 status
+		Set("is_online", device.IsOnline).              // T-0162: 新增
 		Set("firmware_version", device.FirmwareVersion).
 		Set("ip_address", ipAddr).
 		Set("connection_request_url", device.ConnectionRequestURL).
@@ -442,10 +477,36 @@ func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*mo
 		builder = builder.Where(sq.Eq{"d.technology": *filter.Technology})
 		countBuilder = countBuilder.Where(sq.Eq{"d.technology": *filter.Technology})
 	}
+	// T-0162: filter.Status 老字段过渡兼容——翻译为 lifecycle_state + is_online
 	if filter.Status != nil {
-		builder = builder.Where(sq.Eq{"d.status": *filter.Status})
-		countBuilder = countBuilder.Where(sq.Eq{"d.status": *filter.Status})
+		lifecycle, isOnline := DeriveLifecycleFromStatus(*filter.Status)
+		builder = builder.Where(sq.Eq{"d.lifecycle_state": lifecycle})
+		countBuilder = countBuilder.Where(sq.Eq{"d.lifecycle_state": lifecycle})
+		// 只有 Active/Offline 同时蕴含 is_online；其他 status 不限制 is_online
+		if *filter.Status == model.DeviceActive || *filter.Status == model.DeviceOffline {
+			builder = builder.Where(sq.Eq{"d.is_online": isOnline})
+			countBuilder = countBuilder.Where(sq.Eq{"d.is_online": isOnline})
+		}
 	}
+	// T-0162: 新筛选维度
+	if len(filter.LifecycleState) > 0 {
+		builder = builder.Where(sq.Eq{"d.lifecycle_state": filter.LifecycleState})
+		countBuilder = countBuilder.Where(sq.Eq{"d.lifecycle_state": filter.LifecycleState})
+	}
+	if filter.IsOnline != nil {
+		builder = builder.Where(sq.Eq{"d.is_online": *filter.IsOnline})
+		countBuilder = countBuilder.Where(sq.Eq{"d.is_online": *filter.IsOnline})
+	}
+	if filter.ModelName != nil && *filter.ModelName != "" {
+		builder = builder.Where(sq.Eq{"d.model_name": *filter.ModelName})
+		countBuilder = countBuilder.Where(sq.Eq{"d.model_name": *filter.ModelName})
+	}
+	if filter.FirmwareVersion != nil && *filter.FirmwareVersion != "" {
+		builder = builder.Where(sq.Eq{"d.firmware_version": *filter.FirmwareVersion})
+		countBuilder = countBuilder.Where(sq.Eq{"d.firmware_version": *filter.FirmwareVersion})
+	}
+	// SoftwareVersion 在 device_info 表，本 Repository (devices-only) 不处理；
+	// 由 device_info_pg_repository 的 ListDevicesWithInfo 接力。
 	if filter.OUI != nil {
 		builder = builder.Where(sq.Eq{"d.oui": *filter.OUI})
 		countBuilder = countBuilder.Where(sq.Eq{"d.oui": *filter.OUI})
@@ -513,14 +574,59 @@ func (r *PgDeviceRepository) List(ctx context.Context, filter DeviceFilter) (*mo
 	return model.NewListResponse(devices, total, filter.Page, filter.PageSize), nil
 }
 
+// UpdateStatus is the LEGACY status update method.
+//
+// DEPRECATED (T-0162): 老 DeviceStatus 类型混淆生命周期+在线。本方法保留过渡
+// 期供 P3 调用方逐步迁到 UpdateLifecycle / UpdateOnlineStatus。当前实现是
+// shim：把 status 翻译为 (lifecycle, is_online) 后更新两列。
+//
+// 推荐：HeartbeatMonitor / OfflineDetector 调 UpdateOnlineStatus；管理面
+// maintenance / decommission 操作调 UpdateLifecycle。
 func (r *PgDeviceRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status model.DeviceStatus) error {
+	lifecycle, isOnline := DeriveLifecycleFromStatus(status)
 	query, args, _ := storage.Psql.Update("devices").
-		Set("status", status).
+		Set("lifecycle_state", lifecycle).
+		Set("is_online", isOnline).
 		Where(sq.Eq{"id": id}).
 		ToSql()
 	_, err := r.pool.Exec(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("update device status: %w", err)
+		return fmt.Errorf("update device status (shim): %w", err)
+	}
+	return nil
+}
+
+// UpdateLifecycle updates only the lifecycle_state column. is_online untouched.
+//
+// 使用场景：维护操作 (TransitionLifecycle to Maintenance) / 退役 / Provisioning
+// engine 推进到 Commissioned。
+func (r *PgDeviceRepository) UpdateLifecycle(ctx context.Context, id uuid.UUID, lifecycle model.DeviceLifecycle) error {
+	query, args, _ := storage.Psql.Update("devices").
+		Set("lifecycle_state", lifecycle).
+		Where(sq.Eq{"id": id}).
+		Where(sq.Eq{"deleted_at": nil}).
+		ToSql()
+	_, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update device lifecycle: %w", err)
+	}
+	return nil
+}
+
+// UpdateOnlineStatus updates only the is_online column. lifecycle_state untouched.
+//
+// 使用场景：HeartbeatMonitor 标记设备离线 (false)；OfflineDetector 同；
+// ACS Inform 接收时标记在线 (true) + 更新 last_inform_at。lifecycle 完全不动
+// （commissioned 设备 is_online=false 是合法状态：已入网但当前掉线）。
+func (r *PgDeviceRepository) UpdateOnlineStatus(ctx context.Context, id uuid.UUID, isOnline bool) error {
+	query, args, _ := storage.Psql.Update("devices").
+		Set("is_online", isOnline).
+		Where(sq.Eq{"id": id}).
+		Where(sq.Eq{"deleted_at": nil}).
+		ToSql()
+	_, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update device is_online: %w", err)
 	}
 	return nil
 }
@@ -564,8 +670,15 @@ func (r *PgDeviceRepository) RecordBoot(ctx context.Context, sn string, at time.
 	return bootCount, nil
 }
 
+// CountByStatus 兼容老格式返回 map[DeviceStatus]int64。
+//
+// T-0162: 内部走 lifecycle_state + is_online 双维度 GROUP BY，再聚合派生回
+// 老 DeviceStatus 取值给老调用方（dashboard/service.go 等）。新代码请用
+// CountByLifecycle + CountOnline 拿两维独立计数。
 func (r *PgDeviceRepository) CountByStatus(ctx context.Context, carrier *model.CarrierCode) (map[model.DeviceStatus]int64, error) {
-	builder := storage.Psql.Select("d.status", "COUNT(*)").From("devices d").Where(notDeleted).GroupBy("d.status")
+	builder := storage.Psql.Select("d.lifecycle_state", "d.is_online", "COUNT(*)").
+		From("devices d").Where(notDeleted).
+		GroupBy("d.lifecycle_state", "d.is_online")
 	if carrier != nil {
 		builder = builder.Where(sq.Eq{"d.carrier": *carrier})
 	}
@@ -579,19 +692,23 @@ func (r *PgDeviceRepository) CountByStatus(ctx context.Context, carrier *model.C
 
 	result := make(map[model.DeviceStatus]int64)
 	for rows.Next() {
-		var status model.DeviceStatus
+		var lifecycle model.DeviceLifecycle
+		var isOnline bool
 		var count int64
-		if err := rows.Scan(&status, &count); err != nil {
+		if err := rows.Scan(&lifecycle, &isOnline, &count); err != nil {
 			return nil, fmt.Errorf("scan device count: %w", err)
 		}
-		result[status] = count
+		status := DeriveStatusFromLifecycle(lifecycle, isOnline)
+		result[status] += count // 不同 (lifecycle, online) 可能映射到同一 status，累加
 	}
 	return result, nil
 }
 
 func (r *PgDeviceRepository) ListActiveByLastInform(ctx context.Context, cursorTime *time.Time, cursorID *uuid.UUID, limit int) ([]model.Device, error) {
+	// T-0162: "active" 语义 = lifecycle_state='commissioned' AND is_online=TRUE
 	builder := storage.Psql.Select(deviceColumns()...).From("devices d").
-		Where(sq.Eq{"d.status": model.DeviceActive}).
+		Where(sq.Eq{"d.lifecycle_state": model.LifecycleCommissioned}).
+		Where(sq.Eq{"d.is_online": true}).
 		Where(notDeleted).
 		OrderBy("d.last_inform_at ASC NULLS FIRST", "d.id ASC").
 		Limit(uint64(limit))
@@ -640,9 +757,12 @@ func (r *PgDeviceRepository) scanDevice(ctx context.Context, query string, args 
 func deviceColumns() []string {
 	// T-0098 P5-02：移除 data_model_id（列已 DROP）。
 	// T-0124：新增 last_param_sync_at（HandleSyncResultPathB 回写；PeriodicSyncer 据此找过期设备）。
+	// T-0162: status 列已 DROP，替换为 lifecycle_state + is_online 两列。
 	return []string{
 		"d.id", "d.serial_number", "d.oui", "d.product_class", "d.manufacturer", "d.model_name",
-		"d.carrier", "d.technology", "d.status", "d.firmware_version",
+		"d.carrier", "d.technology",
+		"d.lifecycle_state", "d.is_online", // T-0162: 替代 d.status
+		"d.firmware_version",
 		"host(d.ip_address) as ip_address", "d.connection_request_url",
 		"d.nat_detected", "d.udp_connection_request_address",
 		"d.last_inform_at", "d.last_inform_events",
@@ -669,7 +789,9 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 
 	err := row.Scan(
 		&d.ID, &d.SerialNumber, &d.OUI, &productClass, &manufacturer, &modelName,
-		&d.Carrier, &d.Technology, &d.Status, &firmwareVersion,
+		&d.Carrier, &d.Technology,
+		&d.LifecycleState, &d.IsOnline, // T-0162: 替代 &d.Status
+		&firmwareVersion,
 		&ipAddr, &connReqURL,
 		&d.NatDetected, &udpAddr,
 		&d.LastInformAt, &eventsData,
@@ -723,7 +845,8 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 			return nil, fmt.Errorf("unmarshal last_inform_events: %w", err)
 		}
 	}
-	d.OpState = model.DeriveOpState(d.Status)
+	// T-0162: 派生 Status + OpState 给老调用方
+	populateDeviceCompat(&d)
 	return &d, nil
 }
 
@@ -741,7 +864,9 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 
 	err := rows.Scan(
 		&d.ID, &d.SerialNumber, &d.OUI, &productClass, &manufacturer, &modelName,
-		&d.Carrier, &d.Technology, &d.Status, &firmwareVersion,
+		&d.Carrier, &d.Technology,
+		&d.LifecycleState, &d.IsOnline, // T-0162: 替代 &d.Status
+		&firmwareVersion,
 		&ipAddr, &connReqURL,
 		&d.NatDetected, &udpAddr,
 		&d.LastInformAt, &eventsData,
@@ -795,15 +920,18 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 			return nil, fmt.Errorf("unmarshal last_inform_events: %w", err)
 		}
 	}
-	d.OpState = model.DeriveOpState(d.Status)
+	// T-0162: 派生 Status + OpState 给老调用方
+	populateDeviceCompat(&d)
 	return &d, nil
 }
 
 // ListGeo returns devices with geographic coordinates for map display.
 func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter) ([]GeoDevice, int64, error) {
-	// Build base query with device group join
+	// T-0162: SELECT 改用 lifecycle_state + is_online，scan 后派生 Status 给老
+	// 调用方（前端 geo 接口仍按 onlineActive/onlineInactive/offline 三档使用）
 	builder := storage.Psql.Select(
-		"d.id", "d.serial_number", "d.serial_number as name", "d.status",
+		"d.id", "d.serial_number", "d.serial_number as name",
+		"d.lifecycle_state", "d.is_online",
 		"d.latitude", "d.longitude", "dg.id as group_id", "dg.name as group_name",
 		"d.site_name as address", "0 as alarm_count", "d.model_name as type",
 	).From("devices d").
@@ -816,8 +944,20 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 	if len(filter.GroupIDs) > 0 {
 		builder = builder.Where(sq.Eq{"dg.id": filter.GroupIDs})
 	}
+	// T-0162: filter.Status 翻译到 lifecycle + is_online。注意 GeoDeviceFilter.Status
+	// 是 []DeviceStatus 多选；按状态分组 OR 拼。语义对齐前端 GeoStats handler 的三档分类。
 	if len(filter.Status) > 0 {
-		builder = builder.Where(sq.Eq{"d.status": filter.Status})
+		var orClauses sq.Or
+		for _, s := range filter.Status {
+			lifecycle, isOnline := DeriveLifecycleFromStatus(s)
+			clause := sq.Eq{"d.lifecycle_state": lifecycle}
+			if s == model.DeviceActive || s == model.DeviceOffline {
+				orClauses = append(orClauses, sq.And{clause, sq.Eq{"d.is_online": isOnline}})
+			} else {
+				orClauses = append(orClauses, clause)
+			}
+		}
+		builder = builder.Where(orClauses)
 	}
 	if filter.Keyword != "" {
 		builder = builder.Where(sq.Or{
@@ -837,8 +977,19 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 	if len(filter.GroupIDs) > 0 {
 		countBuilder = countBuilder.Where(sq.Eq{"dg.id": filter.GroupIDs})
 	}
+	// T-0162: countBuilder 同样翻译 filter.Status
 	if len(filter.Status) > 0 {
-		countBuilder = countBuilder.Where(sq.Eq{"d.status": filter.Status})
+		var orClauses sq.Or
+		for _, s := range filter.Status {
+			lifecycle, isOnline := DeriveLifecycleFromStatus(s)
+			clause := sq.Eq{"d.lifecycle_state": lifecycle}
+			if s == model.DeviceActive || s == model.DeviceOffline {
+				orClauses = append(orClauses, sq.And{clause, sq.Eq{"d.is_online": isOnline}})
+			} else {
+				orClauses = append(orClauses, clause)
+			}
+		}
+		countBuilder = countBuilder.Where(orClauses)
 	}
 	if filter.Keyword != "" {
 		countBuilder = countBuilder.Where(sq.Or{
@@ -877,18 +1028,23 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 	var devices []GeoDevice
 	for rows.Next() {
 		var d GeoDevice
+		var lifecycle model.DeviceLifecycle
+		var isOnline bool
 		var groupID *uuid.UUID
 		var groupName, address, deviceType *string
 		var alarmCount int
 
 		err := rows.Scan(
-			&d.ID, &d.SerialNumber, &d.Name, &d.Status,
+			&d.ID, &d.SerialNumber, &d.Name,
+			&lifecycle, &isOnline, // T-0162: 替代 &d.Status
 			&d.Latitude, &d.Longitude, &groupID, &groupName,
 			&address, &alarmCount, &deviceType,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("scan geo device: %w", err)
 		}
+		// T-0162: 派生 Status 给老消费方
+		d.Status = DeriveStatusFromLifecycle(lifecycle, isOnline)
 
 		d.GroupID = groupID
 		if groupName != nil {
@@ -920,15 +1076,17 @@ func (r *PgDeviceRepository) GetGeoStats(ctx context.Context, groupIDs []string)
 		sq.NotEq{"d.longitude": nil},
 	}
 
-	// Query 1: Get status counts
-	// Use COUNT(DISTINCT d.id) to avoid counting devices multiple times
-	// when they belong to multiple groups due to LEFT JOIN
-	statusBuilder := storage.Psql.Select("d.status", "COUNT(DISTINCT d.id) as cnt").
+	// T-0162: 按 lifecycle_state + is_online 双维度 GROUP BY，scan 后派生回老
+	// DeviceStatus key 给前端 GeoStats handler（前端按 onlineActive/onlineInactive/
+	// offline 三档解释，详见 device_handler.go GetGeoStats）。
+	statusBuilder := storage.Psql.Select(
+		"d.lifecycle_state", "d.is_online", "COUNT(DISTINCT d.id) as cnt",
+	).
 		From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
 		Where(baseCondition).
-		GroupBy("d.status")
+		GroupBy("d.lifecycle_state", "d.is_online")
 
 	if len(groupIDs) > 0 {
 		statusBuilder = statusBuilder.Where(sq.Eq{"dg.id": groupIDs})
@@ -946,12 +1104,14 @@ func (r *PgDeviceRepository) GetGeoStats(ctx context.Context, groupIDs []string)
 	}
 
 	for rows.Next() {
-		var status model.DeviceStatus
+		var lifecycle model.DeviceLifecycle
+		var isOnline bool
 		var count int64
-		if err := rows.Scan(&status, &count); err != nil {
+		if err := rows.Scan(&lifecycle, &isOnline, &count); err != nil {
 			return nil, fmt.Errorf("scan geo stats: %w", err)
 		}
-		stats.StatusCount[status] = count
+		status := DeriveStatusFromLifecycle(lifecycle, isOnline)
+		stats.StatusCount[status] += count
 		stats.Total += count
 	}
 
@@ -995,8 +1155,10 @@ func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, 
 		limit = 20
 	}
 
+	// T-0162: 同 ListGeo，用 lifecycle_state + is_online
 	builder := storage.Psql.Select(
-		"d.id", "d.serial_number", "d.serial_number as name", "d.status",
+		"d.id", "d.serial_number", "d.serial_number as name",
+		"d.lifecycle_state", "d.is_online",
 		"d.latitude", "d.longitude", "dg.id as group_id", "dg.name as group_name",
 		"d.site_name as address", "0 as alarm_count", "d.model_name as type",
 	).From("devices d").
@@ -1026,14 +1188,19 @@ func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, 
 		var groupName, address, deviceType *string
 		var alarmCount int
 
+		var lifecycle model.DeviceLifecycle
+		var isOnline bool
 		err := rows.Scan(
-			&d.ID, &d.SerialNumber, &d.Name, &d.Status,
+			&d.ID, &d.SerialNumber, &d.Name,
+			&lifecycle, &isOnline, // T-0162: 替代 &d.Status
 			&d.Latitude, &d.Longitude, &groupID, &groupName,
 			&address, &alarmCount, &deviceType,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
 		}
+		// T-0162: 派生 Status 给老消费方
+		d.Status = DeriveStatusFromLifecycle(lifecycle, isOnline)
 
 		d.GroupID = groupID
 		if groupName != nil {
@@ -1076,7 +1243,9 @@ func scanRecycleBinRow(rows pgx.Rows) (*model.Device, error) {
 
 	err := rows.Scan(
 		&d.ID, &d.SerialNumber, &d.OUI, &productClass, &manufacturer, &modelName,
-		&d.Carrier, &d.Technology, &d.Status, &firmwareVersion,
+		&d.Carrier, &d.Technology,
+		&d.LifecycleState, &d.IsOnline, // T-0162: 替代 &d.Status
+		&firmwareVersion,
 		&ipAddr, &connReqURL,
 		&d.NatDetected, &udpAddr,
 		&d.LastInformAt, &eventsData,
@@ -1132,7 +1301,8 @@ func scanRecycleBinRow(rows pgx.Rows) (*model.Device, error) {
 			return nil, fmt.Errorf("unmarshal last_inform_events: %w", err)
 		}
 	}
-	d.OpState = model.DeriveOpState(d.Status)
+	// T-0162: 派生 Status + OpState 给老调用方
+	populateDeviceCompat(&d)
 	return &d, nil
 }
 
@@ -1325,9 +1495,11 @@ func (r *PgDeviceRepository) PermanentDelete(ctx context.Context, ids []uuid.UUI
 // Used by PeriodicSyncer (T-0124) to enqueue Path B sync per device.
 // NULLS FIRST ensures devices that have never been synced are prioritized.
 func (r *PgDeviceRepository) ListStaleForParamSync(ctx context.Context, threshold time.Time, limit int) ([]*model.Device, error) {
+	// T-0162: "active" 语义 = lifecycle_state='commissioned' AND is_online=TRUE
 	builder := storage.Psql.Select(deviceColumns()...).
 		From("devices d").
-		Where(sq.Eq{"d.status": model.DeviceActive}).
+		Where(sq.Eq{"d.lifecycle_state": model.LifecycleCommissioned}).
+		Where(sq.Eq{"d.is_online": true}).
 		Where(sq.Or{
 			sq.Eq{"d.last_param_sync_at": nil},
 			sq.Lt{"d.last_param_sync_at": threshold},
@@ -1377,10 +1549,14 @@ func (r *PgDeviceRepository) UpdateLastParamSyncAt(ctx context.Context, id uuid.
 
 // FindStaleDevices finds active devices that haven't sent Inform within the threshold.
 // Used by OfflineDetector to mark devices as offline.
+//
+// T-0162: "active" 语义 = lifecycle_state='commissioned' AND is_online=TRUE。
+// OfflineDetector 找到 stale 设备后只更 is_online=false（不动 lifecycle）。
 func (r *PgDeviceRepository) FindStaleDevices(ctx context.Context, threshold time.Time, limit int) ([]*model.Device, error) {
 	builder := storage.Psql.Select(deviceColumns()...).
 		From("devices d").
-		Where(sq.Eq{"d.status": model.DeviceActive}).
+		Where(sq.Eq{"d.lifecycle_state": model.LifecycleCommissioned}).
+		Where(sq.Eq{"d.is_online": true}).
 		Where(sq.Lt{"d.last_inform_at": threshold}).
 		Where(notDeleted).
 		OrderBy("d.last_inform_at ASC").

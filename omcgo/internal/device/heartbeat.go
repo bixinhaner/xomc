@@ -6,7 +6,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/components/redisx"
-	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/redis/go-redis/v9"
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
@@ -100,7 +99,11 @@ func (m *HeartbeatMonitor) CheckHeartbeats(ctx context.Context) {
 			}
 
 			if exists == 0 {
-				if err := m.deviceRepo.UpdateStatus(ctx, device.ID, model.DeviceOffline); err != nil {
+				// T-0162: 只更 is_online=false，**不动 lifecycle_state**。
+				// commissioned + is_online=false 是合法状态（已入网 + 当前掉线）。
+				// 老代码这里写 status='offline' 实际等价于"丢失 lifecycle 信息"，是
+				// status 字段双重语义的典型 bug 现场。
+				if err := m.deviceRepo.UpdateOnlineStatus(ctx, device.ID, false); err != nil {
 					m.logger.Error("mark device offline",
 						zap.Error(err),
 						zap.String("device_sn", device.SerialNumber))

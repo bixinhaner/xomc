@@ -206,9 +206,38 @@ func (h *Handler) ListDevices(c *gin.Context) {
 		t := model.Technology(tech)
 		filter.Technology = &t
 	}
+	// T-0162: 老 ?status= 兼容入口，DeviceFilter.Status 会在 Repository 层翻译
+	// 为 lifecycle_state + is_online。新前端代码请走 ?lifecycle_state= / ?is_online=。
 	if status := c.Query("status"); status != "" {
 		s := model.DeviceStatus(status)
 		filter.Status = &s
+	}
+	// T-0162: lifecycle_state 多选 CSV (?lifecycle_state=commissioned,maintenance)
+	if lifecycles := c.Query("lifecycle_state"); lifecycles != "" {
+		for _, v := range strings.Split(lifecycles, ",") {
+			v = strings.TrimSpace(v)
+			if v == "" {
+				continue
+			}
+			filter.LifecycleState = append(filter.LifecycleState, model.DeviceLifecycle(v))
+		}
+	}
+	// T-0162: is_online 布尔
+	if isOnlineStr := c.Query("is_online"); isOnlineStr != "" {
+		b := isOnlineStr == "true" || isOnlineStr == "1"
+		filter.IsOnline = &b
+	}
+	// T-0162: 新 3 个筛选维度（设备型号 / 软件版本 / 固件版本，字典 device_model
+	// / software_version / firmware_version 提供下拉选项；详见
+	// docs/design/device-lifecycle-online-status-decouple-20260520.md §3.2）
+	if modelName := c.Query("model_name"); modelName != "" {
+		filter.ModelName = &modelName
+	}
+	if softwareVersion := c.Query("software_version"); softwareVersion != "" {
+		filter.SoftwareVersion = &softwareVersion
+	}
+	if firmwareVersion := c.Query("firmware_version"); firmwareVersion != "" {
+		filter.FirmwareVersion = &firmwareVersion
 	}
 	if oui := c.Query("oui"); oui != "" {
 		filter.OUI = &oui
