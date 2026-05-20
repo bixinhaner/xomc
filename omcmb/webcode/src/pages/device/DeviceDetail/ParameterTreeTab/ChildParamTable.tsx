@@ -272,7 +272,7 @@ export default function ChildParamTable({
                   size="small"
                   value={editingValue}
                   onChange={(v) => handleValueChange(v, record.parameterType, record.constraints)}
-                  options={record.constraints.enumValues.map((v) => ({ label: v, value: v }))}
+                  options={record.constraints.enumValues.map((v, i) => ({ label: record.constraints!.enumLabels?.[i] ?? v, value: v }))}
                   style={{ width: '100%' }}
                   showSearch
                   autoFocus

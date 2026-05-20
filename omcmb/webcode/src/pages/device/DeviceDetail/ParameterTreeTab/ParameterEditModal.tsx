@@ -151,7 +151,7 @@ export default function ParameterEditModal({
         <Select
           value={newValue}
           onChange={handleValueChange}
-          options={constraints.enumValues.map((v) => ({ label: v, value: v }))}
+          options={constraints.enumValues.map((v, i) => ({ label: constraints.enumLabels?.[i] ?? v, value: v }))}
           style={{ width: '100%' }}
           showSearch
         />
