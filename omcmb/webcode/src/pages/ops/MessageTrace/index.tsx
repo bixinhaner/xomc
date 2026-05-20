@@ -1,6 +1,7 @@
 // T-0137 / M1: TR069 报文跟踪页面
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  App,
   Button,
   Tag,
   Space,
@@ -9,7 +10,6 @@ import {
   InputNumber,
   Select,
   Drawer,
-  message,
   Typography,
   Tooltip,
   Popconfirm,
@@ -97,6 +97,9 @@ export default function MessageTrace() {
   const [drawerTask, setDrawerTask] = useState<TraceTask | null>(null);
   const [detailMsg, setDetailMsg] = useState<TraceMessage | null>(null);
 
+  // T-0161 fix: antd 5 + React 19 静态 Modal.confirm/message API 在严格模式下不会拿到 ConfigProvider 上下文，
+  // 需通过 App.useApp() 获取实例。Popconfirm 是组件式不受影响（行内单删 OK）。
+  const { modal, message } = App.useApp();
   const { data, isLoading, refetch } = useTraceTasks({ page, pageSize });
   const createMut = useCreateTraceTask();
   const stopMut = useStopTraceTask();
@@ -173,7 +176,7 @@ export default function MessageTrace() {
     (keys: React.Key[]) => {
       const ids = keys.map((k) => String(k));
       if (ids.length === 0) return;
-      Modal.confirm({
+      modal.confirm({
         title: t('trace.action.batchDelete'),
         content: t('trace.confirm.batchDelete', { count: ids.length }),
         okText: t('common.confirm'),
