@@ -13,7 +13,14 @@ interface BackendDevice {
   carrier: string;
   technology: string;
   data_model_id?: string;
+  // T-0162 DEPRECATED: status 列已 DROP；后端读 lifecycle_state+is_online，scan
+  // 后 populateDeviceCompat() 派生 status 回老前端读侧。新前端读 lifecycle_state
+  // 和 is_online 字段，不要再用 status。
   status: string;
+  // T-0162: 业务生命周期（与后端 model.DeviceLifecycle 1:1）
+  lifecycle_state: string;
+  // T-0162: 实时在线
+  is_online: boolean;
   firmware_version: string;
   ip_address: string;
   connection_request_url: string;
@@ -128,42 +135,27 @@ interface BackendListResponse<T> {
   page: number;
   page_size: number;
   total_pages: number;
-  // 统计字段 — 后端返回筛选条件下的全量统计
+  // T-0162: 后端 service.ListDevicesWithInfo 在主查询同样筛选下跑 group-by
+  // 聚合，填充本字段；前端直读 stats 而不是用 items.filter() 自行估算（修
+  // Q2 分析里的"page-only 偏差"bug）。
   stats?: {
     total: number;
-    online: number;
-    offline: number;
+    by_lifecycle?: Record<string, number>;
+    online_count: number;
+    offline_count: number;
     alarmed: number;
   };
 }
 
-// Map backend device status to frontend connStatus
-// Backend statuses: discovered, registered, provisioning, active, maintenance, offline, decommissioned
-// discovered/registered/provisioning 状态的设备如果已注册到系统，视为可能在线（取决于实际心跳）
-// active = 确认在线，offline = 确认离线
-function mapStatus(status: string): Device['connStatus'] {
-  switch (status) {
-    case 'active':
-      return 'online';
-    case 'offline':
-      return 'offline';
-    case 'maintenance':
-      // 维护状态可能是在线也可能是离线，这里保守处理视为在线（因为还在维护中）
-      return 'online';
-    case 'discovered':
-    case 'registered':
-    case 'provisioning':
-      // inform 到达前的过渡态：设备一旦真正通信，后端会自动切到 active。
-      // 故停在这些状态 = 尚未确认在线 → 显示离线（不再默认猜"在线"，
-      // 避免与激活状态列出现"在线却未激活"自相矛盾）。
-      return 'offline';
-    case 'decommissioned':
-    default:
-      return 'offline';
-  }
-}
+// T-0162: 老 mapStatus 已删除（"乐观归类"5 种 status 全归 online 与筛选侧
+// 不对称引起 Q1 bug 的根因）。新 mapBackendDevice 直接读 bd.is_online
+// 派生 connStatus，与后端语义 1:1。
 
 function mapBackendDevice(bd: BackendDevice): Device {
+  // T-0162: 直读新字段；connStatus 由 isOnline 派生供老 UI 代码兼容（DEPRECATED）
+  const lifecycleState = (bd.lifecycle_state || 'registered') as Device['lifecycleState'];
+  const isOnline = Boolean(bd.is_online);
+
   return {
     id: bd.id,
     sn: bd.serial_number,
@@ -174,7 +166,15 @@ function mapBackendDevice(bd: BackendDevice): Device {
     deviceModel: bd.model_name,
     region: bd.device_name,
     stationId: bd.site_id,
-    connStatus: mapStatus(bd.status),
+
+    // T-0162 新字段
+    lifecycleState,
+    isOnline,
+
+    // T-0162 DEPRECATED: 派生 connStatus（is_online → online/offline 直翻；
+    // 不再用老 mapStatus 那种 5 种状态全归 online 的"乐观归类"做法）
+    connStatus: isOnline ? 'online' : 'offline',
+
     alarmLevel: 'none',
     engStatus: 'commissioned',
     mgmtStatus: 'managed',
@@ -280,13 +280,27 @@ function mapBackendDevice(bd: BackendDevice): Device {
 
 function mapListResponse(resp: BackendListResponse<BackendDevice>): DeviceListResponse {
   const items = (resp.items || []).map(mapBackendDevice);
-  // 优先使用后端返回的统计；如果后端未返回则从当前页数据估算
-  const stats: DeviceListStats = resp.stats ?? {
-    total: resp.total,
-    online: items.filter((d) => d.connStatus === 'online').length,
-    offline: items.filter((d) => d.connStatus === 'offline').length,
-    alarmed: items.filter((d) => d.alarmLevel !== 'none').length,
-  };
+  // T-0162: 优先用后端 stats（T-0162 P3 已实装 backend 真返回）；fallback
+  // 用当前页 items 估算是过渡兜底，新部署后绝大多数请求走前一路径。
+  const stats: DeviceListStats = resp.stats
+    ? {
+        total: resp.stats.total,
+        online_count: resp.stats.online_count,
+        offline_count: resp.stats.offline_count,
+        // T-0162 alias for backward compat
+        online: resp.stats.online_count,
+        offline: resp.stats.offline_count,
+        by_lifecycle: resp.stats.by_lifecycle as DeviceListStats['by_lifecycle'],
+        alarmed: resp.stats.alarmed,
+      }
+    : {
+        total: resp.total,
+        online_count: items.filter((d) => d.isOnline).length,
+        offline_count: items.filter((d) => !d.isOnline).length,
+        online: items.filter((d) => d.isOnline).length,
+        offline: items.filter((d) => !d.isOnline).length,
+        alarmed: items.filter((d) => d.alarmLevel !== 'none').length,
+      };
   return {
     items,
     total: resp.total,
@@ -324,15 +338,30 @@ export const deviceApi = {
     }
     // groupId → group_id (device group filter)
     if (params.groupId) query.group_id = params.groupId;
-    // connStatus: 前端值 '1'(在线)→'active', '0'(离线)→'offline', '2'(同步失败)→'offline', '3'(同步中)→'active'
-    if (params.connStatus) {
-      const connStatusMap: Record<string, string> = {
-        '1': 'active',
-        '0': 'offline',
-        '2': 'offline',  // 同步失败视为离线
-        '3': 'active',   // 同步中视为在线
+
+    // T-0162: 新筛选维度，直接 1:1 传给后端，前端不再翻译
+    if (params.lifecycleState && params.lifecycleState.length > 0) {
+      query.lifecycle_state = params.lifecycleState.join(','); // CSV 多选
+    }
+    if (typeof params.isOnline === 'boolean') {
+      query.is_online = params.isOnline ? 'true' : 'false';
+    }
+    if (params.modelName) query.model_name = params.modelName;
+    if (params.softwareVersion) query.software_version = params.softwareVersion;
+    if (params.firmwareVersion) query.firmware_version = params.firmwareVersion;
+
+    // T-0162 DEPRECATED: 老 connStatus 仍兼容，但仅在新字段都没传时才用
+    // （新前端代码直接用 lifecycleState/isOnline）
+    if (params.connStatus && typeof params.isOnline !== 'boolean' && !params.lifecycleState) {
+      // connStatus '1'(在线) → is_online=true，'0'(离线) → is_online=false
+      const onlineMap: Record<string, boolean> = {
+        '1': true, '0': false, '2': false, '3': true,
+        'online': true, 'offline': false,
       };
-      query.status = connStatusMap[params.connStatus] ?? params.connStatus;
+      const v = onlineMap[params.connStatus as string];
+      if (typeof v === 'boolean') {
+        query.is_online = v ? 'true' : 'false';
+      }
     }
     if (params.opState) query.op_state = params.opState;
     // productModel → product_class
@@ -565,7 +594,8 @@ export const deviceApi = {
         region: bd.device_name,
         subnet: '',
         site: bd.device_name,
-        connStatus: mapStatus(bd.status),
+        // T-0162: 直接用 is_online 派生（与 mapBackendDevice 一致）
+        connStatus: bd.is_online ? ('online' as const) : ('offline' as const),
         alarmLevel: 'none' as const,
       })),
       total: data.total,

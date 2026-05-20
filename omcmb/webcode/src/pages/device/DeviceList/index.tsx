@@ -341,11 +341,21 @@ export default function DeviceList() {
   }, [groupsResp]);
 
   // R6c: 字典驱动 — 在线状态 / 激活状态 / 网络制式 / 产品类型
-  // 字典 code 与种子数据在 migrations/000136 维护。
-  const { data: connStatusDict } = useDictionary('conn_status');
+  // 字典 code 与种子数据在 migrations/000136 / 000137 维护。
+  //
+  // T-0162: conn_status 字典已废弃，替换为：
+  //   - lifecycle_state（生命周期 6 状态）
+  //   - is_online（在线 2 状态：true/false）
+  // 新增 3 个字典（device_model / software_version / firmware_version）由
+  // seed/000137 初始化为现有 devices/device_parameters 表的 distinct 值。
+  const { data: lifecycleStateDict } = useDictionary('lifecycle_state');
+  const { data: isOnlineDict } = useDictionary('is_online');
   const { data: opStateDict } = useDictionary('op_state');
   const { data: networkTypeDict } = useDictionary('network_type');
   const { data: productTypeDict } = useDictionary('product_type');
+  const { data: deviceModelDict } = useDictionary('device_model');
+  const { data: softwareVersionDict } = useDictionary('software_version');
+  const { data: firmwareVersionDict } = useDictionary('firmware_version');
 
   const dictToOptions = useCallback(
     (dict: { sysDictionaryDetails?: { label: string; value: string }[] } | undefined) =>
@@ -393,14 +403,23 @@ export default function DeviceList() {
     },
 
     // --- 筛选项：三制式公共（默认显示） ---
-    // R6a + R6c: connStatus 改字典驱动；字典 conn_status 仅含 online/offline 两项，
-    // 同步中/同步失败收敛（device-list-and-group-improvements-20260520.md D4）
+    // T-0162: 拆出两个独立筛选项，与后端 lifecycle_state + is_online 1:1 对齐：
+    //   1) lifecycleState (多选): 6 个生命周期值
+    //   2) isOnline (单选): 在线 / 离线
+    // 老 connStatus 字典已删除，前端不再 "乐观归类"。
     {
-      name: 'connStatus',
-      label: t('device.connStatus'),
+      name: 'lifecycleState',
+      label: t('device.lifecycleState'),
       type: 'multi-select',
       width: 160,
-      options: dictToOptions(connStatusDict),
+      options: dictToOptions(lifecycleStateDict),
+    },
+    {
+      name: 'isOnline',
+      label: t('device.isOnline'),
+      type: 'select',
+      width: 160,
+      options: dictToOptions(isOnlineDict),
     },
     {
       name: 'opState',
@@ -425,50 +444,63 @@ export default function DeviceList() {
     },
 
     // --- 筛选项：三制式公共（默认折叠） ---
+    // T-0162: 3 个原本写死 [] 的下拉接入字典：device_model / software_version /
+    // firmware_version。字典初始化数据由 seed/000137 从现有 devices /
+    // device_parameters 表 distinct 灌入，保证用户任意选一项后端 filter 一定
+    // 命中至少一条设备。后续新版本进来时管理员手动补字典词条。
     {
       name: 'modelName',
       label: t('device.model'),
       type: 'multi-select',
       width: 160,
-      options: [],  // TODO: 动态加载 /cell/cpeinfos/getModelNameList.action
+      options: dictToOptions(deviceModelDict),
     },
     {
       name: 'softwareVersion',
       label: t('device.softwareVersion'),
       type: 'multi-select',
       width: 160,
-      options: [],  // TODO: 动态加载 /cell/cpeinfos/getCellVersionList.action
+      options: dictToOptions(softwareVersionDict),
     },
     {
       name: 'firmwareVersion',
       label: t('device.firmwareVersion'),
       type: 'multi-select',
       width: 160,
-      options: [],  // TODO: 动态加载 /cell/cpeinfos/getFirmwareVersionList.action
+      options: dictToOptions(firmwareVersionDict),
     },
-    // R4 + R6b: groupId 加 width:160 对齐 + 接入 useDeviceGroups
+    // R4 + R6b: groupId 接入 useDeviceGroups
+    // width:400 与第一行 searchText 输入框对齐——分组名称长度普遍超过 160（含层级
+    // "Region A / Subgroup B" 形式），160 时多选 chip 被截断成 "...""，体验差。
     {
       name: 'groupId',
       label: t('device.groupName'),
       type: 'multi-select',
-      width: 160,
+      width: 400,
       options: groupOptions,
     },
   ], [
     t,
-    connStatusDict,
+    lifecycleStateDict,
+    isOnlineDict,
     opStateDict,
     networkTypeDict,
     productTypeDict,
+    deviceModelDict,
+    softwareVersionDict,
+    firmwareVersionDict,
     groupOptions,
     dictToOptions,
   ]);
 
-  // 统计面板 — 基于筛选条件的全量统计（由后端/mock 返回，非当前页）
+  // 统计面板 — 基于筛选条件的全量统计（由后端 stats 字段返回，非当前页）
+  // T-0162: 优先用 online_count / offline_count（与 backend DeviceListStats 1:1）；
+  // 老 stats.online / stats.offline 字段在新前端不再使用（仅 mapListResponse 内部
+  // 当 fallback 保留），新 UI 直读 stats.online_count。
   const statsItems = useMemo(() => [
     { label: t('device.count.total'), value: stats.total },
-    { label: t('status.online'), value: stats.online, color: '#52C41A' },
-    { label: t('status.offline'), value: stats.offline, color: '#8C8C8C' },
+    { label: t('status.online'), value: stats.online_count ?? stats.online ?? 0, color: '#52C41A' },
+    { label: t('status.offline'), value: stats.offline_count ?? stats.offline ?? 0, color: '#8C8C8C' },
     { label: t('common.hasAlarm'), value: stats.alarmed, color: '#FA8C16' },
   ], [stats, t]);
 

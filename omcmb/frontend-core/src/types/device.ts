@@ -1,6 +1,21 @@
 import type { AlarmSeverity } from './common';
 
+// T-0162: ConnStatus 老类型保留过渡兼容；新代码请用 `lifecycleState` (业务进度)
+// 与 `isOnline` (实时连接) 两个正交字段。详见
+// docs/design/device-lifecycle-online-status-decouple-20260520.md
+//
+// 旧 `connStatus` 是"乐观归类"（5 种后端 status 全归 online），与筛选侧
+// 只发 status=active 的语义不对称，造成 device list 页统计数与列表数不一致 bug。
 export type ConnStatus = 'online' | 'offline';
+
+// T-0162: 业务生命周期 6 状态，与后端 model.DeviceLifecycle 1:1。
+export type DeviceLifecycle =
+  | 'discovered'
+  | 'registered'
+  | 'provisioning'
+  | 'commissioned'
+  | 'maintenance'
+  | 'decommissioned';
 
 export type EngStatus = 'commissioned' | 'uncommissioned' | 'decommissioned';
 
@@ -42,7 +57,15 @@ export interface Device {
   deviceModel: string;
   region: string;
   stationId: string;
+
+  // T-0162: 新解耦字段
+  lifecycleState: DeviceLifecycle;
+  isOnline: boolean;
+
+  // T-0162 DEPRECATED: 老 connStatus 派生自 isOnline；新代码请直接读 isOnline
+  // 与 lifecycleState。保留过渡期到所有调用点迁完后整体删除。
   connStatus: ConnStatus;
+
   alarmLevel: AlarmSeverity | 'none';
   engStatus: EngStatus;
   mgmtStatus: MgmtStatus;
@@ -213,7 +236,15 @@ export interface DeviceFilter {
   vendor?: string;
   productType?: string;
   networkType?: string;
+  /**
+   * T-0162 DEPRECATED: 用 `lifecycleState` + `isOnline` 替代。
+   * 保留过渡期供老 UI 代码工作。
+   */
   connStatus?: ConnStatus;
+  /** T-0162: 业务生命周期多选，对应后端 ?lifecycle_state= CSV 多选 */
+  lifecycleState?: DeviceLifecycle[];
+  /** T-0162: 实时在线，对应后端 ?is_online=true|false */
+  isOnline?: boolean;
   alarmLevel?: AlarmSeverity | 'none';
   region?: string;
   subnet?: string;
@@ -223,6 +254,12 @@ export interface DeviceFilter {
   opState?: string;
   /** 产品型号（如 PM-B4860, QAFA 等），对应后端 product_class */
   productModel?: string;
+  /** T-0162: 设备型号（字典 device_model 提供下拉），后端 ?model_name= */
+  modelName?: string;
+  /** T-0162: 软件版本（字典 software_version 提供下拉），后端 ?software_version= */
+  softwareVersion?: string;
+  /** T-0162: 固件版本（字典 firmware_version 提供下拉），后端 ?firmware_version= */
+  firmwareVersion?: string;
 }
 
 /** 设备统计数据 — 按状态分类的设备数量 */
@@ -240,11 +277,30 @@ export interface DeviceParameter {
   lastUpdatedAt: string;
 }
 
-/** 设备列表统计数据 — 基于筛选条件的全量统计（非当前页） */
+/**
+ * 设备列表统计数据 — 基于筛选条件的全量统计（非当前页）。
+ *
+ * T-0162 解耦后字段命名：
+ *   - online_count / offline_count: 实时在线/离线（is_online 双值统计）
+ *   - by_lifecycle: 按业务生命周期分组的计数（commissioned/maintenance/...）
+ *   - alarmed: 含 active 告警的设备数（占位字段，由后续 follow-up commit
+ *     真正 JOIN alarms 表统计，当前固定 0）
+ *   - online / offline: T-0162 DEPRECATED 别名，仍由后端兼容写入，新 UI 用
+ *     online_count / offline_count
+ */
 export interface DeviceListStats {
   total: number;
-  online: number;
-  offline: number;
+  /** T-0162 DEPRECATED: 用 onlineCount 替代 */
+  online?: number;
+  /** T-0162 DEPRECATED: 用 offlineCount 替代 */
+  offline?: number;
+  /** T-0162: is_online=true 的设备数 */
+  online_count: number;
+  /** T-0162: is_online=false 的设备数 */
+  offline_count: number;
+  /** T-0162: 按 lifecycle_state 分组计数 */
+  by_lifecycle?: Partial<Record<DeviceLifecycle, number>>;
+  /** 有 active 告警的设备数（任意级别） */
   alarmed: number;
 }
 

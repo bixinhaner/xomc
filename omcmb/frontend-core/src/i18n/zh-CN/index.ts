@@ -526,6 +526,9 @@ const messages: Record<string, string> = {
   'device.type.eGW':        '企业网关',
   'device.type.all':        '全部',
   'device.connStatus':      '连接状态',
+  // T-0162: 解耦后的两个新筛选项
+  'device.lifecycleState':  '生命周期',
+  'device.isOnline':        '在线状态',
   'device.online':          '在线',
   'device.offline':         '离线',
   'device.installStatus':   '安装状态',

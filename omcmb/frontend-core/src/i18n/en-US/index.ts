@@ -524,6 +524,9 @@ const messages: Record<string, string> = {
   'device.type.eGW':        'Enterprise Gateway',
   'device.type.all':        'All Types',
   'device.connStatus':      'Connection Status',
+  // T-0162: decoupled into two filter dropdowns
+  'device.lifecycleState':  'Lifecycle',
+  'device.isOnline':        'Connectivity',
   'device.online':          'Online',
   'device.offline':         'Offline',
   'device.installStatus':   'Install Status',
