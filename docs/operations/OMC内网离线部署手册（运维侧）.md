@@ -198,6 +198,10 @@ omc-infra-<版本>-<架构>/
 > 以下命令默认以 **root** 执行。安装根目录约定为 `/opt/omc`，数据盘约定为 `/data`。
 > 全程**无需联网**。先读 §5.0 目录布局约定，再按步骤执行。
 
+> 🚀 **快速通道**：如果你按 §5.0 / 步骤 1 准备好目录结构后，可以直接跑
+> `sudo bash /opt/omc/current/deploy/deploy.sh` **一键部署**，自动完成步骤 4-10。
+> 想精细控制每步、或第一次需要熟悉细节再按手动步骤走。详见 §5.10 一键部署。
+
 ### 5.0 目录布局与版本管理约定
 
 OMC 采用**「版本目录 + `current` 软链」**方式存放**不同版本的项目包**，便于保留历史
@@ -491,7 +495,84 @@ docker compose -f /opt/omc/current/deploy/docker-compose.infra.yml ps   # 基础
 
 浏览器访问 `http://<服务器IP>:8080`，用初始管理员账号登录（见交付包 `README.md`），完成首次登录改密。
 
-### 5.11 备选：全容器化部署
+### 5.10 一键部署（推荐）
+
+完成 §5.0 目录布局 + §5（步骤 1 解压）后，可直接跑 `deploy.sh` 自动化执行步骤 3-10：
+
+```bash
+sudo bash /opt/omc/current/deploy/deploy.sh                # 全套（推荐首次）
+sudo bash /opt/omc/current/deploy/deploy.sh --skip-infra   # 日常升级（基础设施已装）
+sudo bash /opt/omc/current/deploy/deploy.sh --check-only   # 只做环境 precheck
+sudo bash /opt/omc/current/deploy/deploy.sh -h             # 看全部参数
+```
+
+**10 步自动化覆盖**：precheck → 建立目录布局 → load 基础镜像（从 `/opt/omc/infra/images/`）
+→ 默认口令检查（含交互确认） → infra compose up → 等就绪（PG + Redis ping ≤ 90s）
+→ db migrate → db seed（首次自动打 `.seed.done` mark）→ install systemd 单元
+（app/acs/worker，开机自启） → web compose up → 调 healthcheck.sh。
+
+**幂等**：所有步骤均可重跑。二次运行视情况跳过已完成项（seed 看 mark 文件、
+镜像 load 跳过同 digest、systemd 单元差异比对后备份覆盖）。
+
+**安全要求**：deploy.sh **会主动检查** `docker-compose.infra.yml` 内默认口令
+（`omcgo123` / `minioadmin`），存在时弹交互确认；生产部署务必在跑 deploy 前先按
+§4.1 改强口令。
+
+### 5.11 Docker 加速镜像（可选 / 安装后任意时刻可改）
+
+`install-docker.sh` 装完 Docker 后会引导选择加速镜像；后期想换或单独配置：
+
+```bash
+sudo bash /opt/omc/infra/docker/setup-docker-mirror.sh                    # 交互选单
+sudo bash /opt/omc/infra/docker/setup-docker-mirror.sh --mirror aliyun    # 非交互
+sudo bash /opt/omc/infra/docker/setup-docker-mirror.sh --show             # 看当前
+sudo bash /opt/omc/infra/docker/setup-docker-mirror.sh --remove           # 取消加速
+sudo bash /opt/omc/infra/docker/setup-docker-mirror.sh -h                 # 全参数
+```
+
+**内置 7 选项**（D1）：
+- `official` — 不配置加速，回归 docker hub 官方
+- `aliyun` — 阿里云（推荐 / 国内默认）：双备份 `registry.aliyuncs.com` + `hub-mirror.c.163.com`
+- `tencent` — 腾讯云 `mirror.ccs.tencentyun.com`
+- `ustc` — 中国科学技术大学 `docker.mirrors.ustc.edu.cn`
+- `netease` — 网易 `hub-mirror.c.163.com`
+- `baidu` — 百度云 `mirror.baidubce.com`
+- `custom` — 自定义 URL（多个用逗号分隔）
+
+**实现**：
+- 写 `/etc/docker/daemon.json` 的 `registry-mirrors` 字段，**保留**其它键（用
+  python3 merge；自动备份 `daemon.json.bak.<时间戳>`）
+- 内容确变时自动 `systemctl restart docker`；未变则跳过避免抖动
+
+> 纯离线场景（镜像走 `docker load`）加速镜像不影响首次部署，但运维侧后续若有
+> `docker pull` 临时拉镜像的需求，配好加速能显著提速。
+
+### 5.12 部署后访问 + 初始账号
+
+| 端点 | URL | 初始账号 |
+|------|-----|---------|
+| **Web 管理页** | `http://<服务器IP>:8080` | `admin` / `admin123` |
+| MinIO Console | `http://<服务器IP>:9001` | `minioadmin` / `minioadmin` |
+| PostgreSQL | `127.0.0.1:5432` | `omcgo` / `omcgo123` |
+| Grafana（可选监控栈） | `http://<服务器IP>:3000` | `admin` / `admin` |
+| App 健康端点 | `http://<服务器IP>:8081/health` | — |
+| ACS 健康端点 | `http://<服务器IP>:9090/healthz` | — |
+
+> ⚠️ **生产部署前**：上述默认口令必须改强口令，并同步 `docker-compose.infra.yml`
+> 与 `*.prod.yaml`；用户首次登录 Web UI 强制改密。
+
+### 5.13 脚本帮助速查
+
+每个交付侧脚本都有 `-h | --help`：
+
+```bash
+sudo bash /opt/omc/infra/docker/install-docker.sh -h         # 装 Docker
+sudo bash /opt/omc/infra/docker/setup-docker-mirror.sh -h    # 加速镜像
+sudo bash /opt/omc/current/deploy/deploy.sh -h               # 一键部署
+bash /opt/omc/current/deploy/healthcheck.sh -h               # 健康校验
+```
+
+### 5.14 备选：全容器化部署
 
 若运维更倾向统一用 docker-compose 管理，可由构建侧额外把三进程二进制封装为极简镜像，
 随 `images/` 交付，运维侧 `docker compose up -d` 一把启动全部服务。仍满足"交付二进制"

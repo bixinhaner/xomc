@@ -5,15 +5,39 @@
 # 在构建机上起一个 HTTP 服务，把 archive/ 目录（build-release.sh 按版本归档的
 # 交付包）暴露出来，使用者用浏览器（或 wget/curl）访问即可下载。
 #
-# 用法： ./serve.sh [端口]            # 端口缺省 8000
+# 用法：
+#   ./serve.sh                       # 默认端口 8000
+#   ./serve.sh 9000                  # 位置参数指定端口（向后兼容）
+#   ./serve.sh -p 9000               # 选项形式
+#   ./serve.sh --port 9000           # 长选项
+#   ./serve.sh -h | --help           # 本帮助
 #
-# 后台常驻可用： nohup ./serve.sh 8000 >/tmp/omc-serve.log 2>&1 &
+# 参数：
+#   -p, --port <PORT>   监听端口（默认 8000）
+#   -h, --help          本帮助
+#
+# 后台常驻：
+#   nohup ./serve.sh 8000 >/tmp/omc-serve.log 2>&1 &
 # 或做成 systemd 服务长期运行。
 # =============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PORT="${1:-8000}"
+
+# ── 参数解析 ────────────────────────────────────────────────────────────
+PORT=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -p|--port) PORT="$2"; shift 2 ;;
+    -h|--help) sed -n '3,21p' "$0"; exit 0 ;;
+    -*)        echo "未知参数：$1（-h 查看用法）" >&2; exit 1 ;;
+    *)         # 位置参数兼容老用法 ./serve.sh 8000
+               [ -z "$PORT" ] || { echo "重复指定端口：$1" >&2; exit 1; }
+               PORT="$1"; shift ;;
+  esac
+done
+PORT="${PORT:-8000}"
+
 ARCHIVE="$SCRIPT_DIR/archive"
 
 mkdir -p "$ARCHIVE"

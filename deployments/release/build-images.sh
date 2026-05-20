@@ -205,7 +205,9 @@ for ARCH in $ARCHES; do
   [ -f "$CACHE/images.manifest" ] && cp "$CACHE/images.manifest" "$STAGE/images/"
 
   # Docker 引擎离线安装包（download-docker.sh 下载到 docker-cache/<arch>/）
-  cp "$SCRIPT_DIR/bundle/docker/install-docker.sh" "$STAGE/docker/"
+  # install-docker.sh 末尾会调用 setup-docker-mirror.sh 引导加速镜像，两个都拷
+  cp "$SCRIPT_DIR/bundle/docker/install-docker.sh"       "$STAGE/docker/"
+  cp "$SCRIPT_DIR/bundle/docker/setup-docker-mirror.sh"  "$STAGE/docker/"
   if ls "$DOCKER_CACHE/$ARCH"/docker-*.tgz >/dev/null 2>&1; then
     cp "$DOCKER_CACHE/$ARCH"/docker-*.tgz "$STAGE/docker/"
     DOCKER_IN_PKG="${DOCKER_VERSION:-未知}"

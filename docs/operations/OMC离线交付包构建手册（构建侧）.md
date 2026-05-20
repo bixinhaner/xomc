@@ -436,5 +436,68 @@ done
 
 ---
 
+## 10. 脚本帮助对照表（`-h` 全覆盖）
+
+每个脚本均支持 `-h | --help` 看完整用法。下表用于快速查阅：
+
+| 脚本 | 角色 | 关键参数 | 用途 |
+|------|------|---------|------|
+| `download-docker.sh` | 构建侧 | `--arch amd64\|arm64` / `--force` | 下载 Docker 静态二进制到 `docker-cache/` |
+| `build-images.sh` | 构建侧 | `-v <版本>` / `--with-monitoring` / `--monitoring-only` | 拉镜像 + 组装基础设施包 |
+| `build-release.sh` | 构建侧 | `-v <版本>` / `--channel test\|release` / `--arch` | 编译 + 组装项目包 |
+| `gen-index.sh` | 构建侧 | `--archive <dir>` | 重生成 `archive/index.html`（由前两个脚本自动调） |
+| `serve.sh` | 构建侧 | `-p\|--port <PORT>` | 起 HTTP 下载服务（默认 8000） |
+| `bundle/docker/install-docker.sh` | 交付侧 | `--mirror <name>` / `--no-mirror` / `--skip-if-installed` | 离线装 Docker + 引导加速镜像 |
+| `bundle/docker/setup-docker-mirror.sh` | 交付侧 | `--mirror <name>` / `--url <URL>` / `--remove` / `--show` | 单独配 / 换 / 查 / 取消 Docker 加速镜像 |
+| `bundle/deploy/deploy.sh` | 交付侧 | `--skip-infra` / `--skip-migrate` / `--skip-web` / `--check-only` / `--yes` | 一键部署 OMC 全栈 |
+| `bundle/deploy/healthcheck.sh` | 交付侧 | — | 部署完成后健康校验 |
+
+---
+
+## 11. 加速镜像（registry-mirrors）方案
+
+构建侧 `download-docker.sh` 把 Docker 引擎二进制装进 `docker-cache/`，
+`build-images.sh` 同时把 `install-docker.sh` 与 `setup-docker-mirror.sh` 打入
+基础设施包 `docker/` 目录。交付侧 `install-docker.sh` **离线**装完 Docker 后
+**主动引导**用户配置 Docker 镜像加速器：
+
+- 入口 1：`install-docker.sh` 末尾交互菜单（默认）
+- 入口 2：`install-docker.sh --mirror aliyun` 一气呵成（适合脚本/批处理）
+- 入口 3：任意时刻 `setup-docker-mirror.sh` 单独运行
+- 内置 7 选项：`official` / `aliyun`（推荐 / 国内默认）/ `tencent` / `ustc` /
+  `netease` / `baidu` / `custom`（任意 URL，可多个逗号分隔）
+- 实现：写 `/etc/docker/daemon.json` 的 `registry-mirrors` 字段；
+  使用 python3 merge 保留 daemon.json 其它键；备份原 daemon.json 为
+  `.bak.<时间戳>`；变更后自动 `systemctl restart docker`，内容无变则不重启
+
+> 在纯离线场景（镜像走 `docker load`）加速镜像不影响首次部署；但运维侧后续
+> 若有 `docker pull` 临时拉镜像的需求，加速器配好能显著提速。**因此 install
+> 默认主动询问**。客户网络绝对不可外出时选 `official`（不配加速）即可。
+
+---
+
+## 12. 一键部署 `deploy.sh`（交付侧）
+
+交付侧把项目包解压后，进入项目包根目录运行：
+
+```bash
+sudo bash deploy/deploy.sh                    # 全套首次部署
+sudo bash deploy/deploy.sh --skip-infra       # 已部署基础设施时仅升级 app
+sudo bash deploy/deploy.sh --check-only       # 只 precheck 不动手
+sudo bash deploy/deploy.sh -h                 # 查看完整参数
+```
+
+10 步自动化：precheck → 建立 `/opt/omc/{infra,releases,etc,current}` 布局 →
+load 基础镜像 → 默认口令检查 → infra compose up → 等就绪（PG + Redis ≤ 90s）→
+db migrate → db seed（首次自动打 mark 文件）→ install systemd（app/acs/worker，
+开机自启）→ web compose up → 调 healthcheck.sh。
+
+**幂等**：所有步骤均可重跑；二次运行视情况跳过已完成项：
+- seed 已跑过 → 跳过（按 `/opt/omc/etc/.seed.done` mark 文件判断）
+- systemd 单元已存在 → 差异比对后备份覆盖（`.bak.<时间戳>`）
+- 镜像已 load → docker 自动跳过同 digest
+
+---
+
 **文档结束。** 端口、配置项、镜像版本以实际交付版本的源码 `config.prod.yaml`、
 `deployments/` 为准。

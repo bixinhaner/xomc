@@ -1,6 +1,26 @@
 #!/usr/bin/env bash
-# OMC 启动校验 —— 部署完成后执行（对应部署方案 §5 步骤 10）
-#   bash /opt/omc/current/deploy/healthcheck.sh
+# =============================================================================
+# OMC 启动健康校验 — 部署完成后执行
+#
+# 检查内容：
+#   · omcgo-app / omcgo-acs / omcgo-worker 三个 systemd 服务是否 active
+#   · 基础设施 docker compose 容器状态（postgres / redis / nats / minio）
+#   · 4 个核心健康端点：app /health（:8081）/ acs /healthz（:9090）/
+#     app /metrics（:9091）/ 前端（:8080）
+#
+# 用法：
+#   bash healthcheck.sh                # 默认完整检查
+#   bash healthcheck.sh -h | --help    # 本帮助
+#
+# 参数：
+#   -h, --help    本帮助
+#
+# 退出码：0 全部通过 / 1 存在失败项
+# =============================================================================
+case "${1:-}" in
+  -h|--help) sed -n '3,19p' "$0"; exit 0 ;;
+esac
+
 set -u
 
 DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
