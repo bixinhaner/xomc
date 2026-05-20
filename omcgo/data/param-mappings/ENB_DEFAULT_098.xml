@@ -7,7 +7,7 @@
         <object name="InternetGatewayDevice.FaultMgmt.ExpeditedEvent." standardPath="Device.FaultMgmt.ExpeditedEvent." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS." access="READ_ONLY" changeApplies="Immediate"/>
-        <object name="InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell." access="READ_ONLY" changeApplies="Immediate"/>
+        <object name="InternetGatewayDevice.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell." access="READ_WRITE" changeApplies="Immediate"/>
     </objects>
     <parameters>
         <param name="InternetGatewayDevice.DeviceInfo.3GPPSpecVersion" standardPath="Device.DeviceInfo.3GPPSpecVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>

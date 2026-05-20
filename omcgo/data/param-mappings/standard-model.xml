@@ -5,13 +5,13 @@
         <object standardPath="Device.DeviceInfo.EU.{i}.RU." access="READ_ONLY" changeApplies="Immediate"/>
         <object standardPath="Device.FaultMgmt.CurrentAlarm." access="READ_ONLY" changeApplies="Immediate"/>
         <object standardPath="Device.FaultMgmt.ExpeditedEvent." access="READ_ONLY" changeApplies="Immediate"/>
-        <object standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier." access="READ_ONLY" changeApplies="Immediate"/>
+        <object standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier." access="READ_WRITE" changeApplies="Immediate"/>
         <object standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell." access="READ_WRITE" changeApplies="Immediate"/>
         <object standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM." access="READ_ONLY" changeApplies="Immediate"/>
         <object standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS." access="READ_ONLY" changeApplies="Immediate"/>
-        <object standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell." access="READ_ONLY" changeApplies="Immediate"/>
-        <object standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier." access="READ_ONLY" changeApplies="Immediate"/>
-        <object standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell." access="READ_ONLY" changeApplies="Immediate"/>
+        <object standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell." access="READ_WRITE" changeApplies="Immediate"/>
+        <object standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier." access="READ_WRITE" changeApplies="Immediate"/>
+        <object standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.LTE.RAN.NeighborList.LTECell." access="READ_WRITE" changeApplies="Immediate"/>
         <object standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE." access="READ_ONLY" changeApplies="Immediate"/>
         <object standardPath="Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Capacity." access="READ_ONLY" changeApplies="Immediate"/>
     </objects>
