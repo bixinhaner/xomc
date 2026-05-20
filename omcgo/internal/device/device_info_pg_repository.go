@@ -252,16 +252,15 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		countBuilder = countBuilder.Where(sq.Eq{"di.license_status": *filter.LicenseStatus})
 	}
 	if filter.OpState != nil {
-		// 契约同 model.DeriveOpState（device.go）：op_state 是生命周期状态，
-		// 与在线/离线解耦。已激活 = status ∈ {active, offline, maintenance}。
-		// 离线设备仍属"已激活"，不会因 OfflineDetector 翻 status 就掉到未激活。
-		activated := []string{"active", "offline", "maintenance"}
+		// 契约同 model.DeriveOpStateActivated：激活状态 = 设备是否曾首次上线
+		// （device_info.first_online_time 非空）。激活是一次性持久事实，与在线/
+		// 离线解耦——离线设备仍属已激活，不会因 OfflineDetector 翻 status 而掉。
 		if *filter.OpState == "1" {
-			builder = builder.Where(sq.Eq{"d.status": activated})
-			countBuilder = countBuilder.Where(sq.Eq{"d.status": activated})
+			builder = builder.Where(sq.NotEq{"di.first_online_time": nil})
+			countBuilder = countBuilder.Where(sq.NotEq{"di.first_online_time": nil})
 		} else if *filter.OpState == "0" {
-			builder = builder.Where(sq.NotEq{"d.status": activated})
-			countBuilder = countBuilder.Where(sq.NotEq{"d.status": activated})
+			builder = builder.Where(sq.Eq{"di.first_online_time": nil})
+			countBuilder = countBuilder.Where(sq.Eq{"di.first_online_time": nil})
 		}
 	}
 
@@ -330,6 +329,39 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 	}
 
 	return model.NewListResponse(items, total, filter.Page, filter.PageSize), nil
+}
+
+// GetByIDWithInfo 取单个设备 + device_info + 分组（与 ListDevicesWithInfo 同 JOIN）。
+// 设备不存在或已软删返回 (nil, nil)。
+func (r *PgDeviceInfoRepository) GetByIDWithInfo(ctx context.Context, deviceID uuid.UUID) (*DeviceWithInfo, error) {
+	query, args, err := storage.Psql.
+		Select(deviceWithInfoSelectColumns()...).
+		From("devices d").
+		LeftJoin("device_info di ON di.device_id = d.id").
+		LeftJoin("device_group_members dgm ON dgm.device_id = d.id").
+		LeftJoin("device_groups dg ON dg.id = dgm.group_id").
+		Where(sq.Eq{"d.id": deviceID}).
+		Where(sq.Eq{"d.deleted_at": nil}).
+		Limit(1). // 设备可能属多组，JOIN 可能出多行；详情只取一行
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build get device with info query: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query device with info: %w", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		return nil, nil // 不存在或已软删
+	}
+	d, err := scanDeviceWithInfoRow(rows)
+	if err != nil {
+		return nil, err
+	}
+	return d, nil
 }
 
 // deviceInfoColumns returns column names for the device_info table.
@@ -549,9 +581,9 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	d.OfflineDays = offlineDays
 	d.OfflineHours = offlineHours
 	d.OfflineMinutes = offlineMinutes
-	// T-FIX-OPSTATE: 派生 op_state 给前端 "激活状态" 列展示。
-	// 不入库，根据 status='active' 判断。embedded model.Device.Status 已 scan 完毕。
-	d.OpState = model.DeriveOpState(d.Status)
+	// 派生 op_state 给前端"激活状态"列展示。激活 = 设备曾首次上线
+	// （device_info.first_online_time 非空），一次性持久事实，与在线/离线解耦。
+	d.OpState = model.DeriveOpStateActivated(d.FirstOnlineTime)
 
 	return &d, nil
 }

@@ -57,23 +57,32 @@ type Device struct {
 	GroupName string `json:"group_name,omitempty" db:"group_name"`
 }
 
-// DeriveOpState 把设备 Status 翻译为前端"激活状态"展示值。
+// DeriveOpStateActivated 由"激活时间"派生前端"激活状态"展示值。
 //
-// 关键设计：**激活状态** ≠ **在线状态**。
-// 在 FE 数据模型里两者是独立列：
-//   - connStatus（在线/离线）由 status='active' 直接映射（deviceApi.ts:mapStatus）
-//   - opState（已激活/未激活）由本函数派生，表达**生命周期状态**
+// 这是激活状态的**权威口径**：激活是一次性、单调的持久事实 —— 设备首次上线
+// （inform）即激活，之后离线/维护/生命周期流转都不再改变它。
+// activatedAt（= device_info.first_online_time）非空 → "1"（已激活），否则 "0"。
 //
-// 因此设备离线（status='offline'）不应导致激活状态翻转 —— 离线是"曾经激活过的
-// 设备暂时失联"，仍属已激活。维护中（maintenance）同理。
-//
-// 契约（与 internal/device/device_info_pg_repository.go OpState filter 同步）：
-//
-//	active / offline / maintenance     → "1"（已激活，含临时失联或维护中）
-//	discovered / registered / provisioning / decommissioned / 空 / 未知 → "0"（未激活）
+// 相比 DeriveOpState(status)，本函数不从混合语义的 status 反推，因此不会出现
+// "在线却未激活 / 离线却激活" 之类自相矛盾。设备列表（DeviceWithInfo，已 JOIN
+// device_info 拿得到 first_online_time）一律用本函数。
 //
 // FE 渲染（omcmb/.../DeviceList/index.tsx）：opState ∈ {'1', 'active'} 显示 success，
 // 否则显示 error。
+func DeriveOpStateActivated(activatedAt *time.Time) string {
+	if activatedAt != nil {
+		return "1"
+	}
+	return "0"
+}
+
+// DeriveOpState 由 Status 派生"激活状态"——**回退口径**。
+//
+// 仅供拿不到 device_info.first_online_time 的裸 Device 扫描（设备详情 / 回收站）
+// 使用。优先用 DeriveOpStateActivated。规则：
+//
+//	active / offline / maintenance     → "1"（已激活，含临时失联或维护中）
+//	discovered / registered / provisioning / decommissioned / 空 / 未知 → "0"（未激活）
 func DeriveOpState(status DeviceStatus) string {
 	switch status {
 	case DeviceActive, DeviceOffline, DeviceMaintenance:

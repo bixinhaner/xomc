@@ -153,8 +153,10 @@ function mapStatus(status: string): Device['connStatus'] {
     case 'discovered':
     case 'registered':
     case 'provisioning':
-      // 这些状态设备刚注册，可能在线也可能离线，默认显示在线（用户可以看到设备）
-      return 'online';
+      // inform 到达前的过渡态：设备一旦真正通信，后端会自动切到 active。
+      // 故停在这些状态 = 尚未确认在线 → 显示离线（不再默认猜"在线"，
+      // 避免与激活状态列出现"在线却未激活"自相矛盾）。
+      return 'offline';
     case 'decommissioned':
     default:
       return 'offline';

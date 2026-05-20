@@ -71,6 +71,21 @@ func (mr *MockDeviceInfoRepositoryMockRecorder) GetByDeviceID(ctx, deviceID any)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByDeviceID", reflect.TypeOf((*MockDeviceInfoRepository)(nil).GetByDeviceID), ctx, deviceID)
 }
 
+// GetByIDWithInfo mocks base method.
+func (m *MockDeviceInfoRepository) GetByIDWithInfo(ctx context.Context, deviceID uuid.UUID) (*DeviceWithInfo, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetByIDWithInfo", ctx, deviceID)
+	ret0, _ := ret[0].(*DeviceWithInfo)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetByIDWithInfo indicates an expected call of GetByIDWithInfo.
+func (mr *MockDeviceInfoRepositoryMockRecorder) GetByIDWithInfo(ctx, deviceID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByIDWithInfo", reflect.TypeOf((*MockDeviceInfoRepository)(nil).GetByIDWithInfo), ctx, deviceID)
+}
+
 // ListDevicesWithInfo mocks base method.
 func (m *MockDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter DeviceFilter) (*model.ListResponse[DeviceWithInfo], error) {
 	m.ctrl.T.Helper()

@@ -3,10 +3,19 @@ package model
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// TestDeriveOpStateActivated — 权威激活口径：由"激活时间"（首次上线时刻）派生。
+// 激活是一次性持久事实——有时间戳即已激活，与在线/离线无关。
+func TestDeriveOpStateActivated(t *testing.T) {
+	ts := time.Date(2026, 5, 1, 8, 0, 0, 0, time.UTC)
+	assert.Equal(t, "1", DeriveOpStateActivated(&ts), "有首次上线时间 → 已激活")
+	assert.Equal(t, "0", DeriveOpStateActivated(nil), "从未上线（first_online_time 为空）→ 未激活")
+}
 
 // TestDeriveOpState — 派生函数语义反退化：op_state 表达生命周期"已激活"状态，
 // 与 status 的"当前在线"语义解耦。
@@ -15,6 +24,7 @@ import (
 //   - active: 在线运行中
 //   - offline: 已激活但当前离线（OfflineDetector 标记，不应翻成未激活）
 //   - maintenance: 已激活但维护中
+//
 // 未激活集合: {discovered, registered, provisioning, decommissioned, 空, 未知}
 func TestDeriveOpState(t *testing.T) {
 	cases := []struct {

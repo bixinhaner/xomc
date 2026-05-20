@@ -288,7 +288,9 @@ func (h *Handler) GetDevice(c *gin.Context) {
 		return
 	}
 
-	device, err := h.service.GetDevice(c.Request.Context(), id)
+	// 走 GetDeviceWithInfo（JOIN device_info）：详情页与列表的 op_state（激活
+	// 状态）及 rf/mme/sync/小区等扩展字段口径一致，避免详情返回裸 Device。
+	device, err := h.service.GetDeviceWithInfo(c.Request.Context(), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return

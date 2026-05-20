@@ -488,6 +488,17 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 			zap.Error(err))
 	}
 
+	// 记录激活时间：新设备首次 bootstrap inform 即激活，写 first_online_time，
+	// 使 op_state（激活状态）反映之。UpdateFromInform 的 shouldActivate 分支已有
+	// 同样调用；bootstrap 路径在此补齐——否则全程保持 active 的新设备永不写入。
+	if s.infoSyncer != nil {
+		if err := s.infoSyncer.RecordOnline(ctx, device.ID); err != nil {
+			s.logger.Warn("record online time for new device",
+				zap.String("device_id", device.ID.String()),
+				zap.Error(err))
+		}
+	}
+
 	// Check pre-registration: assign to specified group if found.
 	if s.regRepo != nil && s.groupAssigner != nil {
 		preReg, _ := s.regRepo.GetBySerialNumber(ctx, device.SerialNumber)
@@ -794,6 +805,20 @@ func (s *DeviceService) ListDevicesWithInfo(ctx context.Context, filter DeviceFi
 		return model.NewListResponse(items, result.Total, result.Page, result.PageSize), nil
 	}
 	return s.deviceInfoRepo.ListDevicesWithInfo(ctx, filter)
+}
+
+// GetDeviceWithInfo retrieves a single device joined with extended info, for the
+// device detail page. 使详情与列表的 op_state（激活状态）及 device_info 扩展
+// 字段口径一致。device_info repo 未配置时回退为裸 Device 包装（扩展字段为空）。
+func (s *DeviceService) GetDeviceWithInfo(ctx context.Context, id uuid.UUID) (*DeviceWithInfo, error) {
+	if s.deviceInfoRepo == nil {
+		d, err := s.deviceRepo.GetByID(ctx, id)
+		if err != nil || d == nil {
+			return nil, err
+		}
+		return &DeviceWithInfo{Device: *d}, nil
+	}
+	return s.deviceInfoRepo.GetByIDWithInfo(ctx, id)
 }
 
 // GetDeviceInfo retrieves extended info for a device.
