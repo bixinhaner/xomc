@@ -104,6 +104,17 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
     return map;
   }, [schemaResp]);
 
+  // T-0159: 交叉镜像 — 反查表 resolved standardPath → form field name，
+  // 让 onValuesChange 时能据 constraints.mirrorWith 找到对端 form field 并 setFieldValue 同步。
+  const paramNameByPath = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of group.params) {
+      const path = applyFapInstance(p.standardPath || '', fapInstance);
+      map.set(path, p.name);
+    }
+    return map;
+  }, [group, fapInstance]);
+
   // 初始化字段值 —— 优先级：store draft > form 已 touched > schema 原值。
   //
   // 跨场景说明：
@@ -255,6 +266,23 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
           for (const [name, value] of Object.entries(changedValues)) {
             setDraftField(fbKey, name, String(value ?? ''));
           }
+          // T-0159: 交叉镜像 — 改 A 字段时把 A 的新值同步写入镜像字段 B（如 TDD 上下行带宽必须相等）。
+          // antd Form.setFieldValue 不会触发 onValuesChange，故不会无限递归。
+          for (const [name, value] of Object.entries(changedValues)) {
+            const p = group.params.find((q) => q.name === name);
+            if (!p) continue;
+            const path = applyFapInstance(p.standardPath || '', fapInstance);
+            const sItem = schemaByPath.get(path);
+            const mirrorPath = sItem?.constraints?.mirrorWith;
+            if (!mirrorPath) continue;
+            const resolvedMirror = applyFapInstance(mirrorPath, fapInstance);
+            const mirrorName = paramNameByPath.get(resolvedMirror);
+            if (!mirrorName || mirrorName === name) continue;
+            const current = form.getFieldValue(mirrorName);
+            if (String(current ?? '') === String(value ?? '')) continue;
+            form.setFieldValue(mirrorName, value);
+            setDraftField(fbKey, mirrorName, String(value ?? ''));
+          }
           // 实时按 schema 取值范围校验，更新 fieldErrors 让 Form.Item 即时标红
           setFieldErrors((prev) => {
             const next = { ...prev };
@@ -270,6 +298,22 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
               );
               if (err) next[name] = err;
               else delete next[name];
+              // 镜像字段同时清/重新校验（值刚被程序性写入，旧 error 应失效）
+              const mirrorPath = sItem?.constraints?.mirrorWith;
+              if (mirrorPath) {
+                const resolvedMirror = applyFapInstance(mirrorPath, fapInstance);
+                const mirrorName = paramNameByPath.get(resolvedMirror);
+                if (mirrorName && mirrorName !== name) {
+                  const mItem = schemaByPath.get(resolvedMirror);
+                  const mErr = validateValue(
+                    String(value ?? ''),
+                    (mItem?.type as never) ?? 'string',
+                    mItem?.constraints,
+                  );
+                  if (mErr) next[mirrorName] = mErr;
+                  else delete next[mirrorName];
+                }
+              }
             }
             return next;
           });
@@ -329,15 +373,12 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
 
 // formatConstraintHint 把 schema 取值范围渲染成 label 后的灰色提示。
 // 后端 MinValue/MaxValue 是按类型复用的字段：string → 长度边界；int/unsignedInt → 值范围。
-// 枚举：{a|b|c}；可空时返回 ''
+// 枚举字段不渲染提示（Select 组件已展示候选项，避免重复占位）。
 function formatConstraintHint(schema?: ParameterSchemaItem): string {
   if (!schema?.constraints) return '';
   const c = schema.constraints;
   if (c.enumValues && c.enumValues.length > 0) {
-    // 优先用 labels 给用户看（如 "Macro | home"），fallback 用 values
-    const items = c.enumLabels && c.enumLabels.length === c.enumValues.length ? c.enumLabels : c.enumValues;
-    const list = items.slice(0, 5).join(' | ');
-    return items.length > 5 ? `{${list} | ...}` : `{${list}}`;
+    return '';
   }
   const isString = schema.type === 'string';
   // 优先用显式 maxLength/minLength；fallback 到 minValue/maxValue (按类型解释)

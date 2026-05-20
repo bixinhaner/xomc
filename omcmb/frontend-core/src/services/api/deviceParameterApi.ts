@@ -32,6 +32,7 @@ interface BackendConstraints {
   pattern?: string;
   max_length?: number;
   min_length?: number;
+  mirror_with?: string; // T-0159: 交叉镜像目标 standardPath
 }
 
 interface BackendParameterTreeNode {
@@ -144,6 +145,7 @@ function mapBackendConstraints(bc: BackendConstraints | undefined): ParameterCon
     pattern: bc.pattern,
     maxLength: bc.max_length,
     minLength: bc.min_length,
+    mirrorWith: bc.mirror_with, // T-0159
   };
 }
 

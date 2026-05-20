@@ -21,6 +21,8 @@ export interface ParameterConstraints {
   pattern?: string;
   maxLength?: number;
   minLength?: number;
+  /** T-0159: 交叉镜像目标 standardPath（含 {i}）。改本字段时前端应同步写镜像字段（如 TDD 上下行带宽必须相等） */
+  mirrorWith?: string;
 }
 
 /** 参数树节点 — 后端返回的树形结构 */

@@ -51,7 +51,10 @@ type ParamMapping struct {
 	EnumValues *string
 	// T-0158: 枚举显示标签（与 EnumValues 一一对应 CSV，如 "Macro,home" / "CELL_BW_25(5M),..."），
 	// nil 时前端用 EnumValues 作 label。
-	EnumLabels      *string
+	EnumLabels *string
+	// T-0159: 交叉镜像约束 — 完整 standardPath（含 {i}），指向被镜像字段；
+	// nil 表示无约束。语义对称：两端均填对方路径。典型用途 TDD 上下行带宽必须相等。
+	MirrorWith      *string
 	IsStorable      bool
 	IsActive        bool
 	IsSupported     bool    // T-0103 XML supported="false" → false；path-b sync 据此过滤
@@ -123,6 +126,8 @@ type xmlParamEntry struct {
 	// labels 与 values 一一对应；空 labels 时 UI 直接用 values 显示。
 	EnumValues string `xml:"enumValues,attr"`
 	EnumLabels string `xml:"enumLabels,attr"`
+	// T-0159: 交叉镜像 — 完整 standardPath（含 {i}），指向被镜像字段。两端对称填写。
+	MirrorWith string `xml:"mirrorWith,attr"`
 	Store      string `xml:"store,attr"`     // "true" | "false" | ""（缺省视 true）
 	Supported  string `xml:"supported,attr"` // T-0103 "false" → 标记设备不支持；缺省/其它视 true
 }

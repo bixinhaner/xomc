@@ -79,9 +79,12 @@ type Constraints struct {
 	MaxValue   *int64   `json:"max_value,omitempty"`
 	EnumValues []string `json:"enum_values,omitempty"` // T-0158: 下发设备的实际值列表
 	EnumLabels []string `json:"enum_labels,omitempty"` // T-0158: UI 显示标签，与 EnumValues 一一对应
+	// T-0159: 交叉镜像目标 standardPath（含 {i}）。前端 quicksettings 渲染该字段时，
+	// 任一端 onChange 应同步写另一端（典型场景 TDD 上下行带宽必须相等）。
+	MirrorWith *string `json:"mirror_with,omitempty"`
 }
 
-// constraintsFromMapping 把 ParamMapping 的 MinValue/MaxValue/EnumValues/EnumLabels
+// constraintsFromMapping 把 ParamMapping 的 MinValue/MaxValue/EnumValues/EnumLabels/MirrorWith
 // 收集为 Constraints；全空返回 nil（避免无意义对象）。
 func constraintsFromMapping(m *parammodel.ParamMapping) *Constraints {
 	if m == nil {
@@ -89,7 +92,8 @@ func constraintsFromMapping(m *parammodel.ParamMapping) *Constraints {
 	}
 	hasRange := m.MinValue != nil || m.MaxValue != nil
 	hasEnum := m.EnumValues != nil && *m.EnumValues != ""
-	if !hasRange && !hasEnum {
+	hasMirror := m.MirrorWith != nil && *m.MirrorWith != ""
+	if !hasRange && !hasEnum && !hasMirror {
 		return nil
 	}
 	c := &Constraints{MinValue: m.MinValue, MaxValue: m.MaxValue}
@@ -98,6 +102,9 @@ func constraintsFromMapping(m *parammodel.ParamMapping) *Constraints {
 		if m.EnumLabels != nil && *m.EnumLabels != "" {
 			c.EnumLabels = splitCSV(*m.EnumLabels)
 		}
+	}
+	if hasMirror {
+		c.MirrorWith = m.MirrorWith
 	}
 	return c
 }

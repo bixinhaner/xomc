@@ -29,6 +29,7 @@ func (r *PgRepository) ListMappingsByParamModel(ctx context.Context, paramModelI
 			"entry_type", "access", "data_type", "change_applies",
 			"min_value", "max_value",
 			"enum_values", "enum_labels", // T-0158
+			"mirror_with", // T-0159
 			"is_storable", "is_active", "is_supported").
 		From("param_mappings").
 		Where(sq.Eq{"param_model_id": paramModelID, "is_active": true}).
@@ -55,6 +56,7 @@ func (r *PgRepository) ListDiscoveredMappings(ctx context.Context, productID uui
 			"entry_type", "access", "data_type", "change_applies",
 			"min_value", "max_value",
 			"enum_values", "enum_labels", // T-0158
+			"mirror_with", // T-0159
 			"is_storable", "is_active", "is_supported").
 		From("discovered_param_mappings").
 		Where(sq.Eq{"product_id": productID, "software_version": swVersion, "is_active": true}).
@@ -81,6 +83,7 @@ func scanDefaultMappings(rows pgx.Rows) ([]ParamMapping, error) {
 			&m.EntryType, &access, &dataType, &changeApplies,
 			&m.MinValue, &m.MaxValue,
 			&m.EnumValues, &m.EnumLabels, // T-0158
+			&m.MirrorWith, // T-0159
 			&m.IsStorable, &m.IsActive, &m.IsSupported,
 		); err != nil {
 			return nil, fmt.Errorf("scan default mapping: %w", err)
@@ -112,6 +115,7 @@ func scanDiscoveredMappings(rows pgx.Rows) ([]ParamMapping, error) {
 			&m.EntryType, &access, &dataType, &changeApplies,
 			&m.MinValue, &m.MaxValue,
 			&m.EnumValues, &m.EnumLabels, // T-0158
+			&m.MirrorWith, // T-0159
 			&m.IsStorable, &m.IsActive, &m.IsSupported,
 		); err != nil {
 			return nil, fmt.Errorf("scan discovered mapping: %w", err)
@@ -169,6 +173,7 @@ func (r *PgRepository) UpsertDiscoveredMappings(ctx context.Context, productID u
 				"entry_type", "access", "data_type", "change_applies",
 				"min_value", "max_value",
 				"enum_values", "enum_labels", // T-0158
+				"mirror_with", // T-0159
 				"is_storable", "is_active", "is_supported",
 			)
 		for _, m := range mappings {
@@ -177,6 +182,7 @@ func (r *PgRepository) UpsertDiscoveredMappings(ctx context.Context, productID u
 				m.EntryType, nilIfEmpty(m.Access), nilIfEmpty(m.DataType), nilIfEmpty(m.ChangeApplies),
 				m.MinValue, m.MaxValue,
 				m.EnumValues, m.EnumLabels, // T-0158
+				m.MirrorWith, // T-0159
 				m.IsStorable, m.IsActive, m.IsSupported,
 			)
 		}
