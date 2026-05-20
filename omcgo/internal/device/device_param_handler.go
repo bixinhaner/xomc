@@ -71,6 +71,23 @@ func (h *ParameterTreeHandler) resolveMappingValidator(ctx context.Context, dev 
 	return parammodel.NewMappingValidator(set)
 }
 
+// resolveDefaultMappingValidator returns the product-bound default param model only.
+// Device-discovered mappings are intentionally excluded for UI tree/list rendering.
+func (h *ParameterTreeHandler) resolveDefaultMappingValidator(ctx context.Context, dev *model.Device) *parammodel.MappingValidator {
+	if h.paramRegistry == nil || h.productRegistry == nil || dev == nil || dev.ProductClass == "" {
+		return nil
+	}
+	match, err := h.productRegistry.MatchProductClass(ctx, dev.ProductClass)
+	if err != nil || match == nil || match.Product == nil || match.Product.ParamModelID == nil {
+		return nil
+	}
+	set, err := h.paramRegistry.GetByParamModel(ctx, *match.Product.ParamModelID)
+	if err != nil || set == nil {
+		return nil
+	}
+	return parammodel.NewMappingValidator(set)
+}
+
 // Constraints 是参数取值范围的简化表示，对齐前端字段（路径上 JSON key=constraints）。
 // 承载数值上下限 + 枚举 (T-0158)；字符串长度复用 min_value/max_value 由前端按 type 解释；
 // 正则 / 显式 minLength/maxLength 暂不支持（§11 L-04）。
@@ -204,27 +221,37 @@ func (h *ParameterTreeHandler) GetParameterTree(c *gin.Context) {
 		return
 	}
 
+	dev, err := h.deviceService.GetDevice(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if dev == nil {
+		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+		return
+	}
+
 	params, err := h.paramRepo.GetByDevice(c.Request.Context(), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 
+	displayMV := h.resolveDefaultMappingValidator(c.Request.Context(), dev)
+	displayParams := buildDisplayParameters(params, displayMV)
+
 	// Check if client wants flat or tree format.
 	format := c.DefaultQuery("format", "tree")
 	if format == "flat" {
-		response.OK(c, gin.H{"items": params, "total": len(params)})
+		response.OK(c, gin.H{"items": displayParams, "total": len(displayParams)})
 		return
 	}
 
-	tree := buildTree(params)
+	tree := buildTree(displayParams)
 
 	// Enrich tree with mapping metadata if available.
-	dev, devErr := h.deviceService.GetDevice(c.Request.Context(), id)
-	if devErr == nil && dev != nil {
-		if mv := h.resolveMappingValidator(c.Request.Context(), dev); mv != nil {
-			enrichTreeWithMapping(tree, mv)
-		}
+	if displayMV != nil {
+		enrichTreeWithMapping(tree, displayMV)
 	}
 
 	// objects_only=true 时只返回对象/文件夹节点，去掉所有叶子节点。
@@ -232,7 +259,7 @@ func (h *ParameterTreeHandler) GetParameterTree(c *gin.Context) {
 		tree = stripLeafNodes(tree)
 	}
 
-	response.OK(c, gin.H{"tree": tree, "total": len(params)})
+	response.OK(c, gin.H{"tree": tree, "total": len(displayParams)})
 }
 
 // SearchParameters handles GET /api/v1/devices/:id/parameter-tree/search.
@@ -525,6 +552,105 @@ func buildTree(params []model.DeviceParameter) []*ParameterTreeNode {
 	return root.Children
 }
 
+func buildDisplayParameters(params []model.DeviceParameter, mv *parammodel.MappingValidator) []model.DeviceParameter {
+	if mv == nil {
+		return params
+	}
+
+	actualByPath := make(map[string]model.DeviceParameter, len(params))
+	actualByTemplate := make(map[string][]model.DeviceParameter, len(params))
+	for _, p := range params {
+		actualByPath[p.ParameterPath] = p
+		normalized := normalizeDisplayPath(p.ParameterPath)
+		actualByTemplate[normalized] = append(actualByTemplate[normalized], p)
+	}
+
+	display := make([]model.DeviceParameter, 0, len(mv.Mappings()))
+	seen := make(map[string]struct{}, len(mv.Mappings()))
+
+	for _, mapping := range mv.Mappings() {
+		if mapping.EntryType != "parameter" {
+			continue
+		}
+
+		paths := []string{mapping.PrivatePath}
+		if strings.Contains(mapping.PrivatePath, "{i}") {
+			matched := actualByTemplate[normalizeDisplayPath(mapping.PrivatePath)]
+			if len(matched) == 0 {
+				continue
+			}
+			paths = paths[:0]
+			for _, actual := range matched {
+				paths = append(paths, actual.ParameterPath)
+			}
+		}
+
+		for _, path := range paths {
+			if _, ok := seen[path]; ok {
+				continue
+			}
+			if actual, ok := actualByPath[path]; ok {
+				display = append(display, actual)
+				seen[path] = struct{}{}
+				continue
+			}
+			display = append(display, model.DeviceParameter{
+				ParameterPath: path,
+				ParameterType: model.ParameterType(mapping.DataType),
+				Writable:      parammodel.IsAccessWritable(mapping.Access),
+			})
+			seen[path] = struct{}{}
+		}
+	}
+
+	sort.Slice(display, func(i, j int) bool {
+		return display[i].ParameterPath < display[j].ParameterPath
+	})
+	return display
+}
+
+func normalizeDisplayPath(path string) string {
+	parts := strings.Split(path, ".")
+	for i, part := range parts {
+		if isNumericName(part) {
+			parts[i] = "{i}"
+		}
+	}
+	return strings.Join(parts, ".")
+}
+
+func getDirectChildLeaves(params []model.DeviceParameter, pathPrefix string, pageSize, offset int) ([]model.DeviceParameter, int) {
+	if pathPrefix == "" {
+		return nil, 0
+	}
+
+	filtered := make([]model.DeviceParameter, 0)
+	for _, p := range params {
+		if !strings.HasPrefix(p.ParameterPath, pathPrefix) {
+			continue
+		}
+		suffix := strings.TrimPrefix(p.ParameterPath, pathPrefix)
+		if suffix == "" || strings.Contains(suffix, ".") {
+			continue
+		}
+		filtered = append(filtered, p)
+	}
+
+	sort.Slice(filtered, func(i, j int) bool {
+		return filtered[i].ParameterPath < filtered[j].ParameterPath
+	})
+
+	total := len(filtered)
+	if offset >= total {
+		return []model.DeviceParameter{}, total
+	}
+	end := offset + pageSize
+	if end > total {
+		end = total
+	}
+	return filtered[offset:end], total
+}
+
 // stripLeafNodes 递归移除树中的所有叶子节点，只保留对象/文件夹节点。
 // 同时过滤掉数据模型模板占位符（如 {i}），这些是多实例对象的模板路径。
 func stripLeafNodes(nodes []*ParameterTreeNode) []*ParameterTreeNode {
@@ -599,20 +725,31 @@ func (h *ParameterTreeHandler) GetDirectChildren(c *gin.Context) {
 	}
 	offset := (page - 1) * pageSize
 
-	leaves, total, err := h.paramRepo.GetDirectChildLeaves(c.Request.Context(), id, pathPrefix, pageSize, offset)
+	dev, err := h.deviceService.GetDevice(c.Request.Context(), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if dev == nil {
+		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
 		return
 	}
 
-	allDescendants, err := h.paramRepo.GetByPathPrefix(c.Request.Context(), id, pathPrefix)
+	params, err := h.paramRepo.GetByDevice(c.Request.Context(), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
+	displayMV := h.resolveDefaultMappingValidator(c.Request.Context(), dev)
+	displayParams := buildDisplayParameters(params, displayMV)
+
+	leaves, total := getDirectChildLeaves(displayParams, pathPrefix, pageSize, offset)
 
 	subObjectCounts := make(map[string]int)
-	for _, p := range allDescendants {
+	for _, p := range displayParams {
+		if !strings.HasPrefix(p.ParameterPath, pathPrefix) {
+			continue
+		}
 		suffix := strings.TrimPrefix(p.ParameterPath, pathPrefix)
 		if suffix == "" {
 			continue
@@ -638,11 +775,7 @@ func (h *ParameterTreeHandler) GetDirectChildren(c *gin.Context) {
 	})
 
 	items := make([]ChildParameterItem, 0, len(leaves))
-	var mv *parammodel.MappingValidator
-	dev, devErr := h.deviceService.GetDevice(c.Request.Context(), id)
-	if devErr == nil && dev != nil {
-		mv = h.resolveMappingValidator(c.Request.Context(), dev)
-	}
+	mv := displayMV
 
 	for _, p := range leaves {
 		item := ChildParameterItem{
@@ -650,7 +783,9 @@ func (h *ParameterTreeHandler) GetDirectChildren(c *gin.Context) {
 			ParameterValue: p.ParameterValue,
 			ParameterType:  string(p.ParameterType),
 			Writable:       p.Writable,
-			LastUpdatedAt:  p.LastUpdatedAt.Format(time.RFC3339),
+		}
+		if !p.LastUpdatedAt.IsZero() {
+			item.LastUpdatedAt = p.LastUpdatedAt.Format(time.RFC3339)
 		}
 		if mv != nil {
 			if def := mv.LookupParam(p.ParameterPath); def != nil {
@@ -696,36 +831,39 @@ func (h *ParameterTreeHandler) GetParameterSchema(c *gin.Context) {
 		return
 	}
 
-	var params []model.DeviceParameter
-	if pathPrefix != "" {
-		params, err = h.paramRepo.GetByPathPrefix(c.Request.Context(), id, pathPrefix)
-	} else {
-		params, err = h.paramRepo.GetByDevice(c.Request.Context(), id)
-	}
+	params, err := h.paramRepo.GetByDevice(c.Request.Context(), id)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
+	displayMV := h.resolveDefaultMappingValidator(c.Request.Context(), dev)
+	displayParams := buildDisplayParameters(params, displayMV)
 
 	var schemaItems []ParameterSchemaItem
 	var objectItems []ObjectSchemaItem
 
-	if mv := h.resolveMappingValidator(c.Request.Context(), dev); mv != nil {
-		schemaItems = mergeSchemaWithValues(mv, params, pathPrefix)
-		objectItems = buildObjectSchema(mv, params, pathPrefix)
+	if displayMV != nil {
+		schemaItems = mergeSchemaWithValues(displayMV, displayParams, pathPrefix)
+		objectItems = buildObjectSchema(displayMV, displayParams, pathPrefix)
 	}
 
 	if schemaItems == nil {
-		schemaItems = make([]ParameterSchemaItem, 0, len(params))
-		for _, p := range params {
+		schemaItems = make([]ParameterSchemaItem, 0, len(displayParams))
+		for _, p := range displayParams {
+			if pathPrefix != "" && !strings.HasPrefix(p.ParameterPath, pathPrefix) {
+				continue
+			}
 			val := p.ParameterValue
-			schemaItems = append(schemaItems, ParameterSchemaItem{
+			item := ParameterSchemaItem{
 				Path:         p.ParameterPath,
 				Type:         string(p.ParameterType),
 				Writable:     p.Writable,
 				CurrentValue: &val,
-				LastSyncedAt: &p.LastUpdatedAt,
-			})
+			}
+			if !p.LastUpdatedAt.IsZero() {
+				item.LastSyncedAt = &p.LastUpdatedAt
+			}
+			schemaItems = append(schemaItems, item)
 		}
 	}
 
@@ -750,7 +888,9 @@ func mergeSchemaWithValues(mv *parammodel.MappingValidator, params []model.Devic
 		item := ParameterSchemaItem{
 			Path:         p.ParameterPath,
 			CurrentValue: &val,
-			LastSyncedAt: &p.LastUpdatedAt,
+		}
+		if !p.LastUpdatedAt.IsZero() {
+			item.LastSyncedAt = &p.LastUpdatedAt
 		}
 
 		if def := mv.LookupParam(p.ParameterPath); def != nil {
