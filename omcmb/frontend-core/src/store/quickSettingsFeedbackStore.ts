@@ -42,6 +42,11 @@ interface FeedbackState {
 
   setDraftField: (key: string, name: string, value: string) => void;
   clearDraft: (key: string) => void;
+  /**
+   * 删除 drafts[key] 下所有以 prefix 开头的字段，用于 MultiInstanceTable 单行 save/delete
+   * 后只清理该行的草稿、保留其他行未保存编辑。
+   */
+  clearDraftPrefix: (key: string, prefix: string) => void;
 }
 
 export const useQuickSettingsFeedbackStore = create<FeedbackState>()(
@@ -81,6 +86,22 @@ export const useQuickSettingsFeedbackStore = create<FeedbackState>()(
       clearDraft: (key) => {
         const next = { ...get().drafts };
         delete next[key];
+        set({ drafts: next });
+      },
+
+      clearDraftPrefix: (key, prefix) => {
+        const cur = get().drafts[key];
+        if (!cur) return;
+        const filtered: Record<string, string> = {};
+        for (const [n, v] of Object.entries(cur)) {
+          if (!n.startsWith(prefix)) filtered[n] = v;
+        }
+        const next = { ...get().drafts };
+        if (Object.keys(filtered).length === 0) {
+          delete next[key];
+        } else {
+          next[key] = filtered;
+        }
         set({ drafts: next });
       },
     }),

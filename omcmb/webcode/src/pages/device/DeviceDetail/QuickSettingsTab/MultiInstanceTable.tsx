@@ -115,6 +115,12 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
   });
   const setFeedback = useQuickSettingsFeedbackStore((s) => s.setFeedback);
   const patchFeedback = useQuickSettingsFeedbackStore((s) => s.patchFeedback);
+  // 表单草稿（未保存）持久化到 store —— 跨顶层 TabBar 切走切回时 DeviceDetail
+  // 整树卸载、rowEdits 内部 useState 丢失；store 持久化让重挂载后能恢复用户输入。
+  // draft 内的字段名形态为 "${instId}.${leaf}"。
+  const draft = useQuickSettingsFeedbackStore((s) => s.drafts[fbKey]);
+  const setDraftField = useQuickSettingsFeedbackStore((s) => s.setDraftField);
+  const clearDraftPrefix = useQuickSettingsFeedbackStore((s) => s.clearDraftPrefix);
 
   // schema.objects 给出 currentInstances；schema.parameters 给出值
   const objectEntry = useMemo(
@@ -136,6 +142,29 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
     return objectEntry.currentInstances.map((n) => String(n)).sort((a, b) => Number(a) - Number(b));
   }, [objectEntry]);
 
+  // 跨顶层 TabBar 切走切回 DeviceDetail 整树卸载 → rowEdits 内部 useState 丢失；
+  // 重挂载后从 store draft 恢复。仅在 rowEdits 为空且 instance 仍存在时填充，避免覆盖当前会话已编辑的值。
+  useEffect(() => {
+    if (!schemaResp || !draft) return;
+    setRowEdits((prev) => {
+      if (prev.size > 0) return prev;
+      const next = new Map<string, RowEditState>();
+      for (const [name, val] of Object.entries(draft)) {
+        const dotIdx = name.indexOf('.');
+        if (dotIdx <= 0) continue;
+        const instId = name.slice(0, dotIdx);
+        const leaf = name.slice(dotIdx + 1);
+        if (!instanceIds.includes(instId)) continue; // 实例已被删除则丢弃
+        const row = next.get(instId) ?? { edits: {}, errors: {} };
+        row.edits[leaf] = val;
+        next.set(instId, row);
+      }
+      return next.size > 0 ? next : prev;
+    });
+    // 仅在 schema 首次到达 / 实例集变化时尝试恢复；之后 rowEdits 非空就不再覆盖。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [schemaResp, instanceIds]);
+
   const cellValue = useCallback(
     (instId: string, leaf: string): string => {
       const edit = rowEdits.get(instId);
@@ -156,6 +185,8 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
       });
       return next;
     });
+    // 同步到 store draft，跨顶层 TabBar 切走切回可恢复
+    setDraftField(fbKey, `${instId}.${leaf}`, value);
   };
 
   const collectRowUpdates = (instId: string): {
@@ -219,12 +250,13 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
         detail: `第 ${instId} 行 ${updates.length} 项`,
         at: Date.now(),
       });
-      // 清空 edits(schema 重新拉取时会同步当前值)
+      // 清空 edits(schema 重新拉取时会同步当前值) + 清该行 draft（避免下次重挂载又恢复旧编辑值覆盖 schema 新值）
       setRowEdits((prev) => {
         const next = new Map(prev);
         next.delete(instId);
         return next;
       });
+      clearDraftPrefix(fbKey, `${instId}.`);
       void refetch();
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -321,6 +353,13 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
             taskId: result.taskId,
             detail: `实例 ${instId}`,
             at: Date.now(),
+          });
+          // 实例已删 → 清该行可能残留的 draft + rowEdits（避免下次重挂载尝试恢复已不存在的实例）
+          clearDraftPrefix(fbKey, `${instId}.`);
+          setRowEdits((prev) => {
+            const next = new Map(prev);
+            next.delete(instId);
+            return next;
           });
           void refetch();
         } catch (err) {

@@ -36,7 +36,7 @@
     <param name="PowerClass" titleZh="功率等级(*2dbm)" titleEn="Power Class (*2dbm)"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_MaxTxPowerExpanded"/>
   </group>
-  <group id="enb-neighbor-freq" titleZh="异频邻区频点列表" titleEn="Inter-Frequency Neighbor Carrier List"
+  <group id="enb-neighbor-freq" titleZh="异频载波列表" titleEn="Inter-Frequency Carrier List"
          multiInstance="true"
          objectPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.">
     <param name="EARFCN" titleZh="频点" titleEn="EARFCN" leaf="EUTRACarrierARFCN"/>
