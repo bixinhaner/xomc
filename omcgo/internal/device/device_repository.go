@@ -52,8 +52,11 @@ type DeviceFilter struct {
 	OpState       *string // "1" = activated (first_online_time NOT NULL), "0" = not activated
 
 	// T-0162 新增 3 个 device list 筛选维度（之前前端下拉空、后端无字段）
-	ModelName       *string // devices.model_name exact match (字典 device_model)
-	SoftwareVersion *string // device_info.software_version exact match (字典 software_version)
+	ModelName *string // devices.model_name exact match (字典 device_model)
+	// SoftwareVersion 走 device_parameters 表的 TR-069 路径
+	// 'Device.DeviceInfo.SoftwareVersion'（不在 device_info 表，是 TR-069 标准参数走
+	// 参数树）。Repository 用 EXISTS 子查询过滤，避免 LEFT JOIN 引起的行膨胀。
+	SoftwareVersion *string // device_parameters.parameter_value (字典 software_version)
 	FirmwareVersion *string // devices.firmware_version exact match (字典 firmware_version)
 
 	model.ListRequest

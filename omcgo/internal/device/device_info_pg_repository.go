@@ -234,9 +234,14 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		builder = builder.Where(sq.Eq{"d.firmware_version": *filter.FirmwareVersion})
 		countBuilder = countBuilder.Where(sq.Eq{"d.firmware_version": *filter.FirmwareVersion})
 	}
+	// T-0162: software_version 走 device_parameters TR-069 标准路径，不在
+	// device_info 表（与 seed/000137 device_parameters 灌入 distinct 一致）
 	if filter.SoftwareVersion != nil && *filter.SoftwareVersion != "" {
-		builder = builder.Where(sq.Eq{"di.software_version": *filter.SoftwareVersion})
-		countBuilder = countBuilder.Where(sq.Eq{"di.software_version": *filter.SoftwareVersion})
+		sub := sq.Select("device_id").From("device_parameters").
+			Where(sq.Eq{"parameter_path": "Device.DeviceInfo.SoftwareVersion"}).
+			Where(sq.Eq{"parameter_value": *filter.SoftwareVersion})
+		builder = builder.Where(sq.Expr("d.id IN (?)", sub))
+		countBuilder = countBuilder.Where(sq.Expr("d.id IN (?)", sub))
 	}
 	if filter.OUI != nil {
 		builder = builder.Where(sq.Eq{"d.oui": *filter.OUI})
@@ -481,7 +486,10 @@ func applyDeviceFilters(b sq.SelectBuilder, filter DeviceFilter) sq.SelectBuilde
 		b = b.Where(sq.Eq{"d.firmware_version": *filter.FirmwareVersion})
 	}
 	if filter.SoftwareVersion != nil && *filter.SoftwareVersion != "" {
-		b = b.Where(sq.Eq{"di.software_version": *filter.SoftwareVersion})
+		sub := sq.Select("device_id").From("device_parameters").
+			Where(sq.Eq{"parameter_path": "Device.DeviceInfo.SoftwareVersion"}).
+			Where(sq.Eq{"parameter_value": *filter.SoftwareVersion})
+		b = b.Where(sq.Expr("d.id IN (?)", sub))
 	}
 	if filter.OUI != nil {
 		b = b.Where(sq.Eq{"d.oui": *filter.OUI})
