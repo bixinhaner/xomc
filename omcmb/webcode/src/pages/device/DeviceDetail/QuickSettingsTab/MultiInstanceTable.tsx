@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Card, Input, Modal, Popconfirm, Space, Table, Tag, Typography, message, notification } from 'antd';
+import { Button, Card, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message, notification } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import type { ColumnType } from 'antd/es/table';
 import { useQueryClient } from '@tanstack/react-query';
@@ -393,29 +393,63 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
       fixed: 'left',
       render: (_v: unknown, instId: string) => <Text strong>{instId}</Text>,
     },
-    ...group.params.map<ColumnType<string>>((p) => ({
-      title: locale === 'zh-CN' ? p.titleZh : p.titleEn,
-      key: p.leaf || p.name,
-      dataIndex: p.leaf || p.name,
-      width: 150,
-      render: (_v: unknown, instId: string) => {
-        const leaf = p.leaf || '';
-        const row = rowEdits.get(instId);
-        const error = row?.errors[leaf];
-        const path = `${objectPath}${instId}.${leaf}`;
-        const item = schemaByPath.get(path);
-        const writable = item?.writable ?? false;
-        return (
-          <Input
-            value={cellValue(instId, leaf)}
-            onChange={(e) => setCellValue(instId, leaf, e.target.value)}
-            status={error ? 'error' : undefined}
-            disabled={!writable}
-            size="small"
-          />
-        );
-      },
-    })),
+    ...group.params.map<ColumnType<string>>((p) => {
+      const leaf = p.leaf || '';
+      // 列内字段约束在同一组所有实例下一致（schema 走 {i} 模板）；优先取首个有 schema 的实例作为模板。
+      const titleHint = (() => {
+        for (const inst of instanceIds) {
+          const tplItem = schemaByPath.get(`${objectPath}${inst}.${leaf}`);
+          const hint = formatConstraintHint(tplItem);
+          if (hint) return hint;
+        }
+        return '';
+      })();
+      const baseTitle = locale === 'zh-CN' ? p.titleZh : p.titleEn;
+      return {
+        title: titleHint ? (
+          <Space size={4} wrap>
+            <span>{baseTitle}</span>
+            <Text type="secondary" style={{ fontSize: 12 }}>{titleHint}</Text>
+          </Space>
+        ) : baseTitle,
+        key: leaf || p.name,
+        dataIndex: leaf || p.name,
+        width: 150,
+        render: (_v: unknown, instId: string) => {
+          const row = rowEdits.get(instId);
+          const error = row?.errors[leaf];
+          const path = `${objectPath}${instId}.${leaf}`;
+          const item = schemaByPath.get(path);
+          const writable = item?.writable ?? false;
+          const enumVals = item?.constraints?.enumValues;
+          const enumLabels = item?.constraints?.enumLabels;
+          const isEnum = Array.isArray(enumVals) && enumVals.length > 0;
+          if (isEnum) {
+            return (
+              <Select
+                value={cellValue(instId, leaf) || undefined}
+                onChange={(v) => setCellValue(instId, leaf, String(v))}
+                status={error ? 'error' : undefined}
+                disabled={!writable}
+                size="small"
+                style={{ width: '100%' }}
+                options={enumVals.map((v, idx) => ({ value: v, label: enumLabels?.[idx] ?? v }))}
+                placeholder={item?.defaultValue || ''}
+              />
+            );
+          }
+          return (
+            <Input
+              value={cellValue(instId, leaf)}
+              onChange={(e) => setCellValue(instId, leaf, e.target.value)}
+              status={error ? 'error' : undefined}
+              disabled={!writable}
+              size="small"
+            />
+          );
+        },
+      };
+    }),
     {
       title: '操作',
       key: 'actions',
@@ -470,4 +504,20 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
       />
     </Card>
   );
+}
+
+// 与 CellParameterForm 同语义：枚举不输出（Select 候选项已自解释），数值/长度输出 [min ~ max]。
+function formatConstraintHint(schema?: ParameterSchemaItem): string {
+  if (!schema?.constraints) return '';
+  const c = schema.constraints;
+  if (c.enumValues && c.enumValues.length > 0) return '';
+  const isString = schema.type === 'string';
+  const min = c.minLength ?? c.minValue;
+  const max = c.maxLength ?? c.maxValue;
+  if (min !== undefined || max !== undefined) {
+    const lo = min ?? '-∞';
+    const hi = max ?? '∞';
+    return isString ? `[长度 ${lo} ~ ${hi}]` : `[${lo} ~ ${hi}]`;
+  }
+  return '';
 }

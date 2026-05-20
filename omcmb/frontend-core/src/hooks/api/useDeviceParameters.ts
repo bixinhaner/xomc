@@ -93,11 +93,11 @@ export function useDirectChildren(deviceId: string, pathPrefix: string, page: nu
   });
 }
 
-export function useParameterSchema(deviceId: string, pathPrefix?: string) {
+export function useParameterSchema(deviceId: string, pathPrefix?: string, enabled = true) {
   return useQuery({
     queryKey: ['devices', 'parameter-schema', deviceId, pathPrefix],
     queryFn: () => api.getParameterSchema(deviceId, pathPrefix),
-    enabled: Boolean(deviceId),
+    enabled: Boolean(deviceId) && enabled,
   });
 }
 
