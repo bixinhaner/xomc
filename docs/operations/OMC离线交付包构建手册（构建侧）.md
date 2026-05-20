@@ -449,7 +449,7 @@ done
 | `gen-index.sh` | 构建侧 | `--archive <dir>` | 重生成 `archive/index.html`（由前两个脚本自动调） |
 | `serve.sh` | 构建侧 | `-p\|--port <PORT>` | 起 HTTP 下载服务（默认 8000） |
 | `bundle/docker/install-docker.sh` | 交付侧 | `--mirror <name>` / `--no-mirror` / `--skip-if-installed` | 离线装 Docker + 引导加速（末尾自动调 setup-mirrors.sh） |
-| `bundle/docker/setup-mirrors.sh` | 交付侧 | `--docker <official\|daocloud\|xuanyuan>` / `--npm <official\|taobao>` / `--golang <official\|goproxycn>` / `--show` / `--remove` | 单独配 / 换 / 查 / 取消 **Docker / npm / Golang** 三项加速 |
+| `bundle/setup-mirrors.sh` | 交付侧 | `--docker <official\|daocloud\|xuanyuan>` / `--npm <official\|taobao>` / `--golang <official\|goproxycn>` / `--show` / `--remove` | 单独配 / 换 / 查 / 取消 **Docker / npm / Golang** 三项加速（infra 包顶层；运行时落到 `/opt/omc/infra/setup-mirrors.sh`） |
 | `bundle/deploy/deploy.sh` | 交付侧 | `--skip-infra` / `--skip-migrate` / `--skip-web` / `--check-only` / `--yes` | 一键部署 OMC 全栈 |
 | `bundle/deploy/healthcheck.sh` | 交付侧 | — | 部署完成后健康校验 |
 

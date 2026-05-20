@@ -143,8 +143,8 @@ sudo bash install-docker.sh -h                      # 查看所有参数</pre>
 <p class="tip">install-docker.sh 自动：解压二进制 → 写 containerd / docker 的 systemd 单元 → <code>enable --now</code> 开机自启 → 验证 → 引导加速镜像。</p>
 
 <h2>⚡ 5. 系统加速设置（可选）— Docker / npm / Golang 三合一</h2>
-<p class="lead"><code>setup-mirrors.sh</code> 一次性配置 3 类加速器（每项可独立选择"不设置 = 走官方"）：</p>
-<pre>cd /opt/omc/infra/docker
+<p class="lead"><code>setup-mirrors.sh</code> 位于 infra 包顶层（非 Docker 专属），一次性配置 3 类加速器（每项可独立选择"不设置 = 走官方"）：</p>
+<pre>cd /opt/omc/infra
 sudo bash setup-mirrors.sh                          # 交互：逐项询问 3 项
 sudo bash setup-mirrors.sh --docker daocloud --npm taobao --golang goproxycn   # 一气呵成
 sudo bash setup-mirrors.sh --show                   # 看当前 3 项配置
@@ -208,6 +208,6 @@ sudo bash deploy/deploy.sh -h                       # 查看所有参数</pre>
 <table><thead><tr><th>基础设施版本</th><th>Docker 版本</th><th>构建时间</th><th>下载</th></tr></thead>
 <tbody>$INFRA_ROWS</tbody></table>
 
-<p class="note">索引刷新于 $(date -Is)　·　架构对照 <code>uname -m</code>：x86_64 → amd64，aarch64 → arm64</p>
+<p class="note">索引刷新于 $(date -u '+%Y-%m-%dT%H:%M:%SZ')　·　架构对照 <code>uname -m</code>：x86_64 → amd64，aarch64 → arm64</p>
 </div></body></html>
 HTML

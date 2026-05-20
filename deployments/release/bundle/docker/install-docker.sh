@@ -20,9 +20,9 @@
 #   --mirror <name>       装完后立即配置加速镜像并 restart docker。
 #                         取值：official / daocloud / xuanyuan
 #                         传 official 等价于"不设置镜像"，回归 docker hub 官方。
-#                         其它任意 URL 请单独运行 setup-mirrors.sh 后手编 daemon.json
+#                         其它任意 URL 请单独运行 ../setup-mirrors.sh 后手编 daemon.json
 #   --no-mirror           装完不引导加速、不动 daemon.json（用户后期可单独运行
-#                         setup-mirrors.sh）
+#                         ../setup-mirrors.sh）
 #   --skip-if-installed   已检测到 docker 时静默 0 退出（deploy.sh 调用时用）
 #   -h | --help           本帮助
 #
@@ -69,7 +69,7 @@ if command -v docker >/dev/null 2>&1; then
     exit 0
   fi
   log "已检测到 Docker：$(docker --version)，跳过安装"
-  log "如需配置加速镜像：bash setup-mirrors.sh                   # 含 Docker / npm / Golang 三项"
+  log "如需配置加速：bash ../setup-mirrors.sh                    # Docker / npm / Golang 三合一"
   exit 0
 fi
 
@@ -157,21 +157,21 @@ log "Docker 安装完成。"
 
 # ── 加速镜像配置 ────────────────────────────────────────────────────────
 if [ "$NO_MIRROR" = 1 ]; then
-  log "--no-mirror：跳过加速镜像配置。后期可单独运行 bash setup-mirrors.sh"
+  log "--no-mirror：跳过加速配置。后期可单独运行 bash ../setup-mirrors.sh"
 elif [ -n "$MIRROR" ]; then
-  log "按 --mirror=$MIRROR 配置加速镜像 ..."
-  bash "$(dirname "$0")/setup-mirrors.sh" --docker "$MIRROR"
+  log "按 --mirror=$MIRROR 配置 Docker 加速镜像 ..."
+  bash "$(dirname "$0")/../setup-mirrors.sh" --docker "$MIRROR"
 else
   echo
   echo "─────────────────────────────────────────────────"
-  echo " Docker 已装好。要不要配置【加速镜像】？"
-  echo "  · 推荐配置（内网拉镜像 / 后续 docker pull 都会快很多）"
-  echo "  · 跳过也行（后期可单独运行 setup-mirrors.sh）"
+  echo " Docker 已装好。要不要配置【加速】（Docker / npm / Golang 三合一）？"
+  echo "  · 推荐配置（内网拉镜像 / npm install / go install 都会快很多）"
+  echo "  · 跳过也行（后期可单独运行 ../setup-mirrors.sh）"
   echo "─────────────────────────────────────────────────"
-  read -rp "现在配置加速镜像？[Y/n] " yn
+  read -rp "现在配置加速？[Y/n] " yn
   case "${yn:-Y}" in
-    [Yy]*|"") bash "$(dirname "$0")/setup-mirrors.sh" ;;
-    *)         log "跳过加速镜像配置" ;;
+    [Yy]*|"") bash "$(dirname "$0")/../setup-mirrors.sh" ;;
+    *)         log "跳过加速配置" ;;
   esac
 fi
 
@@ -188,5 +188,5 @@ fi
 echo
 log "全部完成。下一步建议："
 log "  · 一键部署 OMC：    sudo bash ../deploy/deploy.sh"
-log "  · 重新选择加速器：  sudo bash setup-mirrors.sh"
-log "  · 看当前加速配置：  bash setup-mirrors.sh --show"
+log "  · 重新选择加速器：  sudo bash ../setup-mirrors.sh"
+log "  · 看当前加速配置：  bash ../setup-mirrors.sh --show"

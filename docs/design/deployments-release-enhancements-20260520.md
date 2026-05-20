@@ -15,7 +15,11 @@
 - 参数模型从 `--mirror <name>` 改为 `--docker <name>` / `--npm <name>` / `--golang <name>` 三段独立；
   `--mirror` 保留为已废弃别名（等价 `--docker`）
 - 三目标各自的"不设置"选项均为 `official`；任意目标可独立跳过
-- 落地位置：Docker → `/etc/docker/daemon.json`；npm → `/etc/npmrc`；Golang → `/etc/profile.d/goproxy.sh`
+- 配置落地位置：Docker → `/etc/docker/daemon.json`；npm → `/etc/npmrc`；Golang → `/etc/profile.d/goproxy.sh`
+- **脚本位置**：从 `bundle/docker/setup-mirrors.sh` 上移到 `bundle/setup-mirrors.sh`（infra 包顶层），
+  运行时落到 `/opt/omc/infra/setup-mirrors.sh`。这一调整反映"系统加速 ≠ Docker 子组件"的语义：
+  `setup-mirrors.sh` 是基础设施包级别的通用工具，与 `docker/` / `images/` 平级。
+  `install-docker.sh` 内部的调用相应改为 `bash "$(dirname "$0")/../setup-mirrors.sh"`。
 
 下面 §0–§6 保留 2026-05-20 提案原文（已把脚本名同步成 `setup-mirrors.sh`），
 但语义以 v2 收口为准——npm / Golang 两项是在此设计**落地当日补齐**的。
@@ -65,7 +69,7 @@
 
 ### 3.1 新增脚本
 
-#### `bundle/docker/setup-mirrors.sh`
+#### `bundle/setup-mirrors.sh`
 
 职责：写 `/etc/docker/daemon.json` 的 `registry-mirrors`，重启 docker。
 
@@ -152,7 +156,7 @@ sudo bash deploy.sh -h
 ├─ 🔐 2. 校验完整性（sha256sum -c）
 ├─ 📦 3. 解压交付包（tar -xJf）
 ├─ 🐳 4. 安装 Docker（首次部署，sudo bash docker/install-docker.sh）
-├─ ⚡ 5. 配置镜像加速（可选；sudo bash docker/setup-mirrors.sh）
+├─ ⚡ 5. 配置系统加速（可选；sudo bash setup-mirrors.sh — 三合一，infra 包顶层）
 ├─ 🚚 6. 一键部署（sudo bash deploy/deploy.sh）
 ├─ ✅ 7. 验证（bash deploy/healthcheck.sh）
 ├─ 🌐 8. 部署后访问地址
@@ -170,7 +174,7 @@ sudo bash deploy.sh -h
 ### 3.4 文档更新
 
 **构建侧** `docs/operations/OMC离线交付包构建手册（构建侧）.md`：
-- 新增 §X 镜像加速器：bundle/docker/setup-mirrors.sh 入参 / 流程 / 内置 URL
+- 新增 §X 镜像加速器：bundle/setup-mirrors.sh 入参 / 流程 / 内置 URL
 - 新增 §X 一键部署：bundle/deploy/deploy.sh 介绍 + `--skip-*` 用法
 - 新增 §X 脚本 -h 对照表（每个脚本 → 关键参数 → 适用场景）
 - 与已有"两包独立"章节交叉引用
@@ -186,7 +190,7 @@ sudo bash deploy.sh -h
 ## 4. 实施顺序
 
 1. ✅ 本设计文档
-2. 新建 `bundle/docker/setup-mirrors.sh` + `-h`
+2. 新建 `bundle/setup-mirrors.sh` + `-h`
 3. 增强 `bundle/docker/install-docker.sh`（调加速 + `-h` 强化）
 4. 新建 `bundle/deploy/deploy.sh` + `-h`
 5. 补 `gen-index.sh` / `serve.sh` / `healthcheck.sh` 的 `-h`

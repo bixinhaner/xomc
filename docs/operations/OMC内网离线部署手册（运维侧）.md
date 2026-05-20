@@ -121,10 +121,10 @@ omc-infra-<版本>-<架构>/
 ├── VERSION                        # 基础设施版本 / 架构 / Docker 版本 / 构建时间
 ├── checksums.sha256               # 全部文件 SHA256
 │
-├── docker/                        # ① Docker 引擎离线安装 + 系统加速设置
+├── setup-mirrors.sh               # 系统加速三合一：Docker / npm / Golang 配 / 换 / 查 / 取消
+├── docker/                        # ① Docker 引擎离线安装
 │   ├── docker-<ver>.tgz           #   Docker 静态二进制包
-│   ├── install-docker.sh          #   离线安装脚本（含交互引导加速）
-│   └── setup-mirrors.sh           #   单独配 / 换 / 查 / 取消 Docker / npm / Golang 加速
+│   └── install-docker.sh          #   离线安装脚本（装完自动调用 ../setup-mirrors.sh 引导加速）
 └── images/                        # ② Docker 镜像离线包
     ├── infra-images-<架构>.tar     #   postgres / redis / nats / minio / nginx
     ├── monitoring-images-<架构>.tar #   监控栈（v2 默认包含；用 build-images.sh
@@ -525,15 +525,15 @@ sudo bash /opt/omc/current/deploy/deploy.sh -h             # 看全部参数
 `install-docker.sh` 装完 Docker 后会引导选择加速；后期想换或单独配置：
 
 ```bash
-sudo bash /opt/omc/infra/docker/setup-mirrors.sh                    # 交互选单（依次问 Docker / npm / Golang）
-sudo bash /opt/omc/infra/docker/setup-mirrors.sh --docker daocloud  # 仅 Docker（非交互）
-sudo bash /opt/omc/infra/docker/setup-mirrors.sh --npm taobao       # 仅 npm
-sudo bash /opt/omc/infra/docker/setup-mirrors.sh --golang goproxycn # 仅 Golang
-sudo bash /opt/omc/infra/docker/setup-mirrors.sh \
+sudo bash /opt/omc/infra/setup-mirrors.sh                    # 交互选单（依次问 Docker / npm / Golang）
+sudo bash /opt/omc/infra/setup-mirrors.sh --docker daocloud  # 仅 Docker（非交互）
+sudo bash /opt/omc/infra/setup-mirrors.sh --npm taobao       # 仅 npm
+sudo bash /opt/omc/infra/setup-mirrors.sh --golang goproxycn # 仅 Golang
+sudo bash /opt/omc/infra/setup-mirrors.sh \
      --docker daocloud --npm taobao --golang goproxycn              # 三合一一次过
-sudo bash /opt/omc/infra/docker/setup-mirrors.sh --show             # 看当前三项
-sudo bash /opt/omc/infra/docker/setup-mirrors.sh --remove           # 取消全部
-sudo bash /opt/omc/infra/docker/setup-mirrors.sh -h                 # 全参数
+sudo bash /opt/omc/infra/setup-mirrors.sh --show             # 看当前三项
+sudo bash /opt/omc/infra/setup-mirrors.sh --remove           # 取消全部
+sudo bash /opt/omc/infra/setup-mirrors.sh -h                 # 全参数
 ```
 
 **三个目标各自的内置选项**：
@@ -578,7 +578,7 @@ sudo bash /opt/omc/infra/docker/setup-mirrors.sh -h                 # 全参数
 
 ```bash
 sudo bash /opt/omc/infra/docker/install-docker.sh -h         # 装 Docker
-sudo bash /opt/omc/infra/docker/setup-mirrors.sh -h          # Docker/npm/Golang 加速
+sudo bash /opt/omc/infra/setup-mirrors.sh -h          # Docker/npm/Golang 加速
 sudo bash /opt/omc/current/deploy/deploy.sh -h               # 一键部署
 bash /opt/omc/current/deploy/healthcheck.sh -h               # 健康校验
 ```

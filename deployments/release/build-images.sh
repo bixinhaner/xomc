@@ -222,9 +222,10 @@ for ARCH in $ARCHES; do
   [ -f "$CACHE/images.manifest" ] && cp "$CACHE/images.manifest" "$STAGE/images/"
 
   # Docker 引擎离线安装包（download-docker.sh 下载到 docker-cache/<arch>/）
-  # install-docker.sh 末尾会调用 setup-mirrors.sh 引导 Docker / npm / Golang 三项加速
+  # setup-mirrors.sh 放在 infra 包顶层（Docker / npm / Golang 三合一加速，非 Docker 专属）
+  # install-docker.sh 末尾会调用 ../setup-mirrors.sh 引导用户配置
+  cp "$SCRIPT_DIR/bundle/setup-mirrors.sh"          "$STAGE/"
   cp "$SCRIPT_DIR/bundle/docker/install-docker.sh"  "$STAGE/docker/"
-  cp "$SCRIPT_DIR/bundle/docker/setup-mirrors.sh"   "$STAGE/docker/"
   if ls "$DOCKER_CACHE/$ARCH"/docker-*.tgz >/dev/null 2>&1; then
     cp "$DOCKER_CACHE/$ARCH"/docker-*.tgz "$STAGE/docker/"
     DOCKER_IN_PKG="${DOCKER_VERSION:-未知}"
