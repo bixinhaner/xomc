@@ -35,7 +35,13 @@ import (
 //   - SelectedSubFieldIDs 由 parser 通过 lookup 从 SelectedMMLCodes 解析填充；renderer 用此字段查 mml_code
 //   - SelectedMMLCodes 是 parser 解出的原始 LST 字段 code 列表；renderer 不用
 //   - Values 是 MOD/ADD 的 mml_code → 值 映射
-//   - RmvInstanceIndex 是 RMV 的实例编号
+//   - RmvInstanceIndex 是 RMV 单实例编号（用户决策 2026-05-20：RMV 保持单实例；
+//     R-7 多选已禁用 — 1 MML 命令 = 1 RPC 在协议层不可分批）
+//   - InstanceSelectors 是 R-4 多层 {i} 实例选择器。catalog 一律用通用 `.{i}.`
+//     占位符（不区分层级），selector key 仅作 UX 标签（如 iα/iβ/iγ），实际按 key
+//     字典序左到右映射到路径中的 `.{i}.` 位置。Executor 编译 commands[] entry 时
+//     调用 substituteInstanceSelectors 替换为具体实例号。
+//     数量不匹配（路径 `.{i}.` 计数 ≠ selector 数）→ ErrInvalidRequest。
 //   - UnknownCodes 是 parser 发现的未在 lookup 命中的 mml_code（前端 toast 提示）
 type Statement struct {
 	CommandID           *uuid.UUID        `json:"command_id,omitempty"`
@@ -45,6 +51,7 @@ type Statement struct {
 	SelectedMMLCodes    []string          `json:"selected_mml_codes,omitempty"`
 	Values              map[string]string `json:"values,omitempty"`
 	RmvInstanceIndex    *int              `json:"rmv_instance_index,omitempty"`
+	InstanceSelectors   map[string]string `json:"instance_selectors,omitempty"`
 	UnknownCodes        []string          `json:"unknown_codes,omitempty"`
 }
 

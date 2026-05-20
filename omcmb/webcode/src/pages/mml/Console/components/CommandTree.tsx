@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
 import type { Key, ReactNode } from 'react';
-import { Input, Tree, Empty, Spin, message, Tooltip } from 'antd';
+import { Input, Tree, Empty, Spin, message, Tooltip, Tag } from 'antd';
 import { SearchOutlined, FolderOutlined, CodeOutlined, UserOutlined, PlusOutlined } from '@ant-design/icons';
 import type { TreeDataNode } from 'antd';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
@@ -13,9 +13,42 @@ import type {
   Statement,
   SubFieldDef,
 } from '@core/types/mmlConsole';
-import type { MMLCustomCommand } from '@core/types/mml';
+import type { MMLCustomCommand, MMLOperationType } from '@core/types/mml';
 import { useT } from '@/hooks/useT';
 import AddTemplateModal from './AddTemplateModal';
+
+// R-2: per-op 命令树叶子统一前缀 `<OP> <Object>`。OpTagColor 按操作语义着色，
+// 便于用户在密集命令列表中快速辨别 LST(读) / MOD(改) / ADD(增) / RMV(删) 的危险等级。
+const OP_TAG_COLOR: Record<string, string> = {
+  LST: 'blue',
+  MOD: 'orange',
+  ADD: 'green',
+  RMV: 'red',
+};
+
+// 解析 backend displayName。后端历史格式为 "设备信息(LST DEVICE_INFO)" — 把括号尾
+// 部去掉只保留对象名，与左侧 OP Tag 配合显示，避免 "LST 设备信息(LST DEVICE_INFO)"
+// 这种语义重复。括号未出现时原样返回。
+function stripOpSuffix(displayName: string): string {
+  const i = displayName.lastIndexOf('(');
+  if (i < 0) return displayName;
+  const closing = displayName.lastIndexOf(')');
+  if (closing < i) return displayName;
+  return displayName.slice(0, i).trimEnd();
+}
+
+function renderOpLeafTitle(op: MMLOperationType, displayName: string): ReactNode {
+  const color = OP_TAG_COLOR[op] ?? 'default';
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <Tag color={color} style={{ marginRight: 0, fontSize: 10, padding: '0 4px' }}>
+        {op}
+      </Tag>
+      <CodeOutlined />
+      {stripOpSuffix(displayName)}
+    </span>
+  );
+}
 
 /** Customized 子树「+」按钮的目标 scope；null = 模态关闭。 */
 type AddScope = 'public' | 'private' | null;
@@ -41,8 +74,21 @@ function collectAllCommands(group: GroupTreeNode): GroupTreeCommand[] {
   return out;
 }
 
+// chapterSortKey 把章节码归一化为可排序字符串；空 / undefined（老 catalog 未分章）
+// 映射为高位 sentinel 排末位。与后端 chapterSortKey 行为对齐。
+function chapterSortKey(chapter: string | undefined): string {
+  return chapter && chapter !== '' ? chapter : '~~~~~';
+}
+
 function buildTreeData(nodes: GroupTreeNode[]): TreeDataNode[] {
-  const sorted = [...nodes].sort((a, b) => a.displayOrder - b.displayOrder);
+  // R-1/R-2 排序：主键 chapterCode (SA→SB→...→SR，空末位)，副键 displayOrder。
+  // 让对象级 group 跨章节按 SA-SR 顺序排列，前端 UI 不渲染章节为节点。
+  const sorted = [...nodes].sort((a, b) => {
+    const ac = chapterSortKey(a.chapterCode);
+    const bc = chapterSortKey(b.chapterCode);
+    if (ac !== bc) return ac < bc ? -1 : 1;
+    return a.displayOrder - b.displayOrder;
+  });
   return sorted.map((g) => ({
     key: `${GROUP_KEY_PREFIX}${g.id}`,
     title: (
@@ -53,15 +99,18 @@ function buildTreeData(nodes: GroupTreeNode[]): TreeDataNode[] {
     ),
     selectable: false,
     children: collectAllCommands(g)
-      .sort((a, b) => a.displayName.localeCompare(b.displayName))
+      // R-2: 命令叶子按 (op_type, displayName) 双键排序，让同一对象的不同 op
+      // 相邻显示（LST 设备信息 / MOD 设备信息 / ADD 设备信息 / RMV 设备信息）。
+      .sort((a, b) => {
+        const opOrder = ['LST', 'MOD', 'ADD', 'RMV'];
+        const ao = opOrder.indexOf(a.operationType);
+        const bo = opOrder.indexOf(b.operationType);
+        if (ao !== bo) return ao - bo;
+        return a.displayName.localeCompare(b.displayName);
+      })
       .map<TreeDataNode>((c) => ({
         key: `${CMD_KEY_PREFIX}${c.id}`,
-        title: (
-          <span>
-            <CodeOutlined style={{ marginRight: 4 }} />
-            {c.displayName}
-          </span>
-        ),
+        title: renderOpLeafTitle(c.operationType, c.displayName),
         isLeaf: true,
       })),
   }));
@@ -131,14 +180,11 @@ function buildCustomTreeData(
     byCreator.set(key, list);
   });
 
+  // R-2: Customized 叶子同样加 OP 前缀，与 standard 命令保持视觉一致。
+  // 颜色边按 scope 微调（public/private 通过 OP Tag 颜色已能区分，无需额外标记）。
   const renderLeaf = (cc: MMLCustomCommand): TreeDataNode => ({
     key: `${CUSTOM_KEY_PREFIX}${cc.id}`,
-    title: (
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-        <CodeOutlined style={{ color: cc.commandScope === 'public' ? '#52c41a' : '#fa8c16' }} />
-        {cc.commandName}
-      </span>
-    ),
+    title: renderOpLeafTitle(cc.operationType, cc.commandName),
     isLeaf: true,
   });
 

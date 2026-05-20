@@ -21,6 +21,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/dictloader"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/mml/catalogloader"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/product"
@@ -57,6 +58,10 @@ type Container struct {
 
 	// DictLoad 模块设置（T-0098 P1-06）
 	DictLoaderRegistry *dictloader.Registry
+
+	// MML 控制台 v2.3 catalog Loader（dictloader 模式第 5 个 Loader）
+	// 用于 admin REST API /api/v1/mml/catalog/{info,reload} 的引用
+	MMLCatalogLoader *catalogloader.Loader
 
 	// ProductRegistry 模块设置（T-0098 P2-01）
 	ProductRegistry *product.Registry

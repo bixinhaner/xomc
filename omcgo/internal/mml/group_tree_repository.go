@@ -30,14 +30,18 @@ import (
 
 // GroupTreeNode 是命令树的一个节点（group + 该 group 下的 commands + 子 groups）。
 type GroupTreeNode struct {
-	ID               uuid.UUID         `json:"id"`
-	GroupCode        string            `json:"code"`
-	Name             string            `json:"name"`           // 当前 lang 派生
-	NameI18n         map[string]string `json:"name_i18n"`      // 完整 i18n
-	Path             string            `json:"path"`           // LTREE path 字符串形式
-	DisplayOrder     int               `json:"display_order"`
-	Source           string            `json:"source"`
-	CatalogProtected bool              `json:"catalog_protected"`
+	ID           uuid.UUID         `json:"id"`
+	GroupCode    string            `json:"code"`
+	Name         string            `json:"name"`      // 当前 lang 派生
+	NameI18n     map[string]string `json:"name_i18n"` // 完整 i18n
+	Path         string            `json:"path"`      // LTREE path 字符串形式
+	DisplayOrder int               `json:"display_order"`
+	// ChapterCode：CMCC TD-LTE v2.3 章节码（SA/SB/SC/.../SR）。空字符串表示老 catalog
+	// 行不带章节信息。前端不渲染章节为节点，但用作主排序键（让对象级 group 按
+	// SA→SB→SC 顺序排列，避免跨章节顺序错乱）。详见 plan §6.6 "按 SA-SR 顺序排列"。
+	ChapterCode      string             `json:"chapter_code,omitempty"`
+	Source           string             `json:"source"`
+	CatalogProtected bool               `json:"catalog_protected"`
 	Commands         []GroupTreeCommand `json:"commands"`
 	Children         []GroupTreeNode    `json:"children"`
 }
@@ -48,10 +52,10 @@ type GroupTreeCommand struct {
 	ID               uuid.UUID         `json:"id"`
 	CommandCode      string            `json:"command_code"`
 	LogicalCode      string            `json:"logical_code"`
-	LogicalName      string            `json:"logical_name"`       // lang 派生
+	LogicalName      string            `json:"logical_name"` // lang 派生
 	LogicalNameI18n  map[string]string `json:"logical_name_i18n"`
 	OperationType    string            `json:"operation_type"`
-	DisplayName      string            `json:"display_name"`       // "设备信息(LST DEVICE_INFO)"
+	DisplayName      string            `json:"display_name"` // "设备信息(LST DEVICE_INFO)"
 	RPCMethod        string            `json:"rpc_method"`
 	RequireConfirm   bool              `json:"require_confirm"`
 	TargetObject     string            `json:"target_object,omitempty"`
@@ -107,6 +111,7 @@ func (r *PgGroupTreeRepository) BuildTree(ctx context.Context, rootCode, lang st
 				Name:             pickI18n(row.GroupNameI18n, lang, row.GroupNameZh, strOrEmpty(row.GroupNameEn), row.GroupCode),
 				Path:             row.GroupPath,
 				DisplayOrder:     row.GroupDisplayOrder,
+				ChapterCode:      row.GroupChapterCode,
 				Source:           row.GroupSource,
 				CatalogProtected: row.GroupCatalogProtected,
 				Commands:         []GroupTreeCommand{},
@@ -155,10 +160,14 @@ func (r *PgGroupTreeRepository) queryGroupsAndCommands(ctx context.Context, root
 	// 非指针 bool（RequireConfirm / CommandCatalogProtected）会报
 	// "cannot scan NULL into *bool"。用 COALESCE 在 SQL 侧兜底 false，避免
 	// 改 Go 层 Scan 字段为 *bool 引发的连锁改造。
+	// COALESCE(g.chapter_code, '') 把 NULL 兜底为空串，方便 Scan 进 string；
+	// 老 catalog 行没有章节码，前端渲染时按 "" 视为"未分章"统一末位排序。
 	const baseSQL = `
 SELECT
     g.id, g.group_code, g.group_name_zh, g.group_name_en, g.name_i18n,
-    g.path::text AS path_text, g.display_order, g.source, g.catalog_protected,
+    COALESCE(g.path::text, '') AS path_text, g.display_order,
+    COALESCE(g.chapter_code, '') AS chapter_code,
+    g.source, g.catalog_protected,
     c.id, c.command_code, c.logical_code, c.logical_name_i18n,
     c.operation_type, c.rpc_method,
     COALESCE(c.require_confirm, false) AS require_confirm,
@@ -167,6 +176,7 @@ SELECT
     COALESCE(c.catalog_protected, false) AS cmd_catalog_protected
 FROM mml_param_groups g
 LEFT JOIN mml_commands c ON c.group_id = g.id
+WHERE g.path IS NOT NULL
 %s
 ORDER BY g.path, g.display_order, c.operation_type, c.logical_code, c.command_code`
 
@@ -174,7 +184,7 @@ ORDER BY g.path, g.display_order, c.operation_type, c.logical_code, c.command_co
 	var args []any
 	if rootCode != "" {
 		// LTREE @> $1 匹配 path 等于 rootCode 或以 rootCode 为前缀
-		whereClause = "WHERE g.path <@ $1::ltree OR g.path ~ ($1::text || '.*')::lquery"
+		whereClause = "AND (g.path <@ $1::ltree OR g.path ~ ($1::text || '.*')::lquery)"
 		args = []any{rootCode}
 	}
 
@@ -191,7 +201,8 @@ ORDER BY g.path, g.display_order, c.operation_type, c.logical_code, c.command_co
 		var nameI18nBytes, cmdLogicalNameI18nBytes []byte
 		if err := dbRows.Scan(
 			&row.GroupID, &row.GroupCode, &row.GroupNameZh, &row.GroupNameEn, &nameI18nBytes,
-			&row.GroupPath, &row.GroupDisplayOrder, &row.GroupSource, &row.GroupCatalogProtected,
+			&row.GroupPath, &row.GroupDisplayOrder, &row.GroupChapterCode,
+			&row.GroupSource, &row.GroupCatalogProtected,
 			&row.CommandID, &row.CommandCode, &row.LogicalCode, &cmdLogicalNameI18nBytes,
 			&row.OperationType, &row.RPCMethod, &row.RequireConfirm, &row.TargetObject,
 			&row.CommandSource, &row.CommandCatalogProtected,
@@ -211,15 +222,17 @@ ORDER BY g.path, g.display_order, c.operation_type, c.logical_code, c.command_co
 // groupTreeRow 是单 SQL 的扫描结果（一行 = (group, command) 笛卡尔行；
 // command 列全 NULL 表示该 group 无任何命令）。
 type groupTreeRow struct {
-	GroupID                uuid.UUID
-	GroupCode              string
-	GroupNameZh            string
-	GroupNameEn            *string
-	GroupNameI18n          map[string]string
-	GroupPath              string
-	GroupDisplayOrder      int
-	GroupSource            string
-	GroupCatalogProtected  bool
+	GroupID           uuid.UUID
+	GroupCode         string
+	GroupNameZh       string
+	GroupNameEn       *string
+	GroupNameI18n     map[string]string
+	GroupPath         string
+	GroupDisplayOrder int
+	// 章节码（CMCC TD-LTE v2.3 SA/SB/SC/.../SR）；老 catalog NULL → SQL COALESCE 兜底空字串
+	GroupChapterCode      string
+	GroupSource           string
+	GroupCatalogProtected bool
 
 	CommandID               *uuid.UUID
 	CommandCode             *string
@@ -310,9 +323,10 @@ func assembleHierarchy(groupByID map[uuid.UUID]*GroupTreeNode, pathToGroupID map
 }
 
 // parentLTreePath 返回 LTREE 字符串 path 的父节点；顶级返回 ""。
-//   "A" → ""
-//   "A.B" → "A"
-//   "A.B.C" → "A.B"
+//
+//	"A" → ""
+//	"A.B" → "A"
+//	"A.B.C" → "A.B"
 func parentLTreePath(p string) string {
 	idx := strings.LastIndex(p, ".")
 	if idx < 0 {
@@ -334,13 +348,31 @@ func sortByDepthThenLex(paths []string) {
 	})
 }
 
+// sortNodesByDisplayOrder 同层节点排序。
+// 主键 ChapterCode（SA/SB/SC.../SR；空串排末位），副键 DisplayOrder，再副键 GroupCode。
+// 这让对象级 group 跨章节按"SA章节内所有对象 → SB章节内所有对象 → ..."顺序排列，
+// 而前端 CommandTree 不渲染章节为节点（plan §6.6 "object 一级 + 按 SA-SR 顺序"）。
 func sortNodesByDisplayOrder(nodes []GroupTreeNode) {
 	sortSlice(nodes, func(a, b GroupTreeNode) bool {
+		ac, bc := chapterSortKey(a.ChapterCode), chapterSortKey(b.ChapterCode)
+		if ac != bc {
+			return ac < bc
+		}
 		if a.DisplayOrder != b.DisplayOrder {
 			return a.DisplayOrder < b.DisplayOrder
 		}
 		return a.GroupCode < b.GroupCode
 	})
+}
+
+// chapterSortKey 把章节码归一化为可排序字符串。
+// 空字符串（老 catalog 未分章）映射为高位 sentinel "~"（ASCII 126），确保排末位。
+// 非空原样返回（"SA" < "SB" < ... < "SR" 字典序自然正确）。
+func chapterSortKey(chapter string) string {
+	if chapter == "" {
+		return "~~~~~"
+	}
+	return chapter
 }
 
 func sortCommandsByLogicalCode(cmds []GroupTreeCommand) {
@@ -445,7 +477,9 @@ func verbLabel(op, lang string) string {
 }
 
 // buildDisplayName 派生命令树叶子显示名（业务化命名，T-0123 v3）：
-//   "查询 设备信息"  /  "Query Device Info"
+//
+//	"查询 设备信息"  /  "Query Device Info"
+//
 // 替代老格式 "设备信息(LST DEVICE_INFO)" — 用户决策 2026-05-16：去掉 path 风格
 // 的 logical_code 后缀，让命令叶子直接呈现"做什么+对哪个对象"。
 func buildDisplayName(logicalName, op, logicalCode, lang string) string {

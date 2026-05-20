@@ -358,6 +358,7 @@ export default function DeviceList() {
       label: t('filter.searchText'),
       type: 'input',
       placeholder: t('filter.searchText.multiHint'),
+      width: 400,
     },
 
     // --- 筛选项：三制式公共（默认显示） ---
@@ -365,6 +366,7 @@ export default function DeviceList() {
       name: 'connStatus',
       label: t('device.connStatus'),
       type: 'multi-select',
+      width: 160,
       options: [
         { label: t('filter.conn.normal'), value: '1' },
         { label: t('filter.conn.disconnected'), value: '0' },
@@ -376,6 +378,7 @@ export default function DeviceList() {
       name: 'opState',
       label: t('device.opState'),
       type: 'select',
+      width: 160,
       options: [
         { label: t('status.active'), value: '1' },
         { label: t('status.inactive'), value: '0' },
@@ -385,6 +388,7 @@ export default function DeviceList() {
       name: 'networkType',
       label: t('device.radioMode'),
       type: 'select',
+      width: 160,
       options: [
         { label: 'eNB (LTE)', value: 'eNB' },
         { label: 'gNB (NR)', value: 'gNB' },
@@ -394,6 +398,7 @@ export default function DeviceList() {
       name: 'productModel',
       label: t('device.productType'),
       type: 'multi-select',
+      width: 160,
       options: [
         // eNB 产品类型（LTE）
         { label: 'PM-B4860', value: 'PM-B4860' },
@@ -1359,7 +1364,6 @@ export default function DeviceList() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div style={{ flex: '1 1 100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <ListPageLayout
-          title={t('nav.device.list')}
           extra={
             <Space>
               <div

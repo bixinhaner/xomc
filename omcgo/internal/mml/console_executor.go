@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/google/uuid"
@@ -41,10 +42,12 @@ var ErrInvalidRequest = errors.New("mml: invalid request")
 //          parameters = Values（map[string]string → map[string]interface{}）
 //   - ADD: rpc_method=AddObject
 //          parameters["object_name"] = command.TargetObject（必含尾点）
-//          W1 决议（A）：单 device_task 入口；SPV 字段值随 parameters 透传保留审计痕迹，
-//          AddObject 完成后的 SPV 链由后续迭代补齐（P1 不实现）
+//          用户决策 2026-05-20：1 MML = 1 RPC，**不做复合**。stmt.Values 透传到
+//          parameters 仅为审计；BuildTR069Params(AddObject) 只用 object_name。
+//          用户设置新实例参数需另行运行 MOD MML（手动复制 InstanceNumber）。
 //   - RMV: rpc_method=DeleteObject
-//          parameters["object_name"] = command.TargetObject + "{RmvInstanceIndex}."
+//          单实例：parameters["object_name"] = command.TargetObject + "{RmvInstanceIndex}."
+//          用户决策 2026-05-20：RMV 严格单实例（R-7 多选已禁用）。
 // ============================================================
 
 // ExecuteStatementsRequest 是 POST /mml/execute-statements 的请求体。
@@ -111,6 +114,8 @@ func (s *ConsoleService) ExecuteStatements(ctx context.Context, req ExecuteState
 	}
 
 	// 多 statement 走严格序列；单 statement 默认并发（fanouter 默认行为）。
+	// 用户决策（2026-05-20）：RMV 保持单实例，1 MML 命令 = 1 RPC 不再分批，
+	// 故按 statement 数量判定即可（无 R-7 多实例展开）。
 	sequential := len(req.Statements) > 1
 
 	if err := taskCreator.CreateAndFanoutTask(ctx, task, sequential); err != nil {
@@ -131,6 +136,9 @@ func (s *ConsoleService) ExecuteStatements(ctx context.Context, req ExecuteState
 //
 // 失败语义：任一 statement 编译失败 → 全体放弃；ParseError 已在 parser 阶段累加，
 // 这里遇到的错误属于 lookup 命中后 sub_field / target_object 缺失等运行期问题。
+//
+// 1 statement → 1 commands[] entry（用户决策 2026-05-20：1 MML 命令 = 1 RPC，
+// 不分批；多 RMV 实例已禁用）。
 func (s *ConsoleService) BuildStatementCommands(ctx context.Context, stmts []Statement) ([]map[string]interface{}, error) {
 	commands := make([]map[string]interface{}, 0, len(stmts))
 	for i, stmt := range stmts {
@@ -169,7 +177,9 @@ func (s *ConsoleService) resolveStatement(ctx context.Context, stmt Statement) (
 	return s.LookupByLogicalCode(ctx, stmt.OperationType, stmt.LogicalCode)
 }
 
-// buildStatementCommandEntry 把单条 statement 编译为 fanouter 可消费的 commands[] entry。
+// buildStatementCommandEntries 把单条 statement 编译为 fanouter 可消费的 commands[] entries。
+//
+// 1 statement → 1 entry（用户决策 2026-05-20：RMV 单实例，1 MML 命令 = 1 RPC）。
 //
 // entry shape（与 fanout.buildDeviceTaskRequests 期望一致）：
 //
@@ -202,6 +212,9 @@ func buildStatementCommandEntry(stmt Statement, cmd *MMLCommand, subFields []MML
 			return nil, fmt.Errorf("LST: no usable sub_fields (selected=%d, total=%d)",
 				len(stmt.SelectedSubFieldIDs), len(subFields))
 		}
+		if err := applyInstanceSelectorsToRefs(refs, stmt.InstanceSelectors); err != nil {
+			return nil, err
+		}
 		entry["rpc_method"] = "GetParameterValues"
 		entry["param_refs"] = refs
 
@@ -210,6 +223,9 @@ func buildStatementCommandEntry(stmt Statement, cmd *MMLCommand, subFields []MML
 			return nil, fmt.Errorf("MOD: empty values")
 		}
 		refs := buildMODParamRefs(subFields, cmd.Params)
+		if err := applyInstanceSelectorsToRefs(refs, stmt.InstanceSelectors); err != nil {
+			return nil, err
+		}
 		params := stringMapToInterface(stmt.Values)
 		entry["rpc_method"] = "SetParameterValues"
 		entry["param_refs"] = refs
@@ -223,13 +239,16 @@ func buildStatementCommandEntry(stmt Statement, cmd *MMLCommand, subFields []MML
 		if !strings.HasSuffix(targetObject, ".") {
 			targetObject += "."
 		}
+		// R-4：ADD 的 targetObject 是父级对象路径，可能含上层 `.{i}.` 占位符；
+		// instance_selectors 把这些占位符替换为具体实例号，新对象创建在指定层级下。
+		substitutedObject, err := substituteInstanceSelectors(targetObject, stmt.InstanceSelectors)
+		if err != nil {
+			return nil, fmt.Errorf("ADD: target_object: %w", err)
+		}
+		targetObject = substitutedObject
 		params := map[string]interface{}{"object_name": targetObject}
-		// W1 决议（A）：AddObject 协议层只用 object_name；SPV 字段值此处随 parameters
-		// 透传，目的是让 service.writeAuditLogs 在 mml_audit_logs 留下用户**完整意图**
-		//（哪些字段想设到新实例上），便于运维追溯。Fanout 调
-		// BuildTR069Params(AddObject) → buildObjectName 时这些 key 会被忽略，
-		// 不会污染 SOAP body。SPV 链（AddObject 完成 → 取新实例号 → SPV）
-		// 由后续迭代补齐（P1 范围外）。
+		// SPV 字段值随 parameters 透传保留审计痕迹（mml_audit_logs 记录用户完整意图）。
+		// SOAP 层 BuildTR069Params(AddObject) 只用 object_name，其它键不污染 wire。
 		for k, v := range stmt.Values {
 			if k == "object_name" {
 				continue // 避免覆盖
@@ -244,19 +263,67 @@ func buildStatementCommandEntry(stmt Statement, cmd *MMLCommand, subFields []MML
 		if targetObject == "" {
 			return nil, fmt.Errorf("RMV: command %s missing target_object", cmd.CommandCode)
 		}
+		// R-4：RMV 的 targetObject 是父对象路径；上层 `.{i}.` 由 selectors 替换。
+		// 用户决策 2026-05-20：RMV 保持单实例，不支持多选。
+		substitutedObject, err := substituteInstanceSelectors(targetObject, stmt.InstanceSelectors)
+		if err != nil {
+			return nil, fmt.Errorf("RMV: target_object: %w", err)
+		}
+		targetObject = substitutedObject
 		if stmt.RmvInstanceIndex == nil {
 			return nil, fmt.Errorf("RMV: missing instance index")
 		}
 		base := strings.TrimSuffix(targetObject, ".")
-		instance := fmt.Sprintf("%s.%d.", base, *stmt.RmvInstanceIndex)
 		entry["rpc_method"] = "DeleteObject"
-		entry["parameters"] = map[string]interface{}{"object_name": instance}
+		entry["parameters"] = map[string]interface{}{
+			"object_name": fmt.Sprintf("%s.%d.", base, *stmt.RmvInstanceIndex),
+		}
 
 	default:
 		return nil, fmt.Errorf("unsupported operation type %q", op)
 	}
-
 	return entry, nil
+}
+
+// substituteInstanceSelectors 把路径中 `.{i}.` 占位符按 selectors 替换为具体实例号。
+//
+// 约定：
+//   - selector key 仅作 UX 标签（plan §6.6.1：iα/iβ/iγ）；实际位置由 **字典序左到右**映射
+//     到路径的 `.{i}.` 出现顺序
+//   - selectors 数量必须严格 == 路径中 `.{i}.` 计数，否则 ErrInvalidRequest
+//   - 空 selectors + 路径无 `.{i}.` → 原样返回（兼容老路径无 instance 的场景）
+//
+// 示例：
+//   path = "Device.DeviceInfo.MU.{i}.Slot.{i}.3GPPSpecVersion"
+//   selectors = {iα: "1", iβ: "2"}  → 排序后 keys=[iα, iβ]
+//   result = "Device.DeviceInfo.MU.1.Slot.2.3GPPSpecVersion"
+func substituteInstanceSelectors(path string, selectors map[string]string) (string, error) {
+	placeholderCount := strings.Count(path, ".{i}.")
+	if placeholderCount == 0 && len(selectors) == 0 {
+		return path, nil
+	}
+	if placeholderCount != len(selectors) {
+		return "", fmt.Errorf("%w: instance_selectors count mismatch (path has %d .{i}. placeholders, selectors=%d)",
+			ErrInvalidRequest, placeholderCount, len(selectors))
+	}
+
+	keys := make([]string, 0, len(selectors))
+	for k := range selectors {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	result := path
+	for _, key := range keys {
+		val := selectors[key]
+		idx := strings.Index(result, ".{i}.")
+		if idx < 0 {
+			break // 防御性 — 上面计数已校验
+		}
+		// `.{i}.` 共 5 字符；replacement 保留外侧的两个 `.`，中间替换为 val
+		result = result[:idx] + "." + val + "." + result[idx+5:]
+	}
+	return result, nil
 }
 
 // buildLSTParamRefs 把 LST 选中的 sub_field 合成为 BuildTR069Params 可消费的 param_refs。
@@ -335,3 +402,34 @@ func stringMapToInterface(m map[string]string) map[string]interface{} {
 	}
 	return out
 }
+
+// applyInstanceSelectorsToRefs 把 selectors 应用到 LST/MOD param_refs 的 Tr069Path。
+//
+// 行为：
+//   - selectors 为空 → no-op（含路径仍带 `.{i}.` 的场景）
+//   - 任一 ref 的路径替换失败 → 整体放弃
+//
+// 注意：refs 是 slice of struct value（不是指针）；为安全 in-place 更新，遍历 idx 写回。
+func applyInstanceSelectorsToRefs(refs []MMLParamRef, selectors map[string]string) error {
+	if len(selectors) == 0 {
+		return nil
+	}
+	for i := range refs {
+		newPath, err := substituteInstanceSelectors(refs[i].Tr069Path, selectors)
+		if err != nil {
+			return fmt.Errorf("param_ref %s: %w", refs[i].ParamCode, err)
+		}
+		refs[i].Tr069Path = newPath
+	}
+	return nil
+}
+
+// 用户决策 2026-05-20 二次澄清：
+//   - 1 MML 命令 = 1 RPC，严格遵守，**不做复合命令支持**
+//   - ADD + SetParameterValues 拆分为两个独立 MML 命令分别执行
+//   - 原 AddCompoundInstancePlaceholder / AddCompoundFollowUp / buildAddCompoundFollowUp
+//     全部移除；ACS 端零业务编排
+//
+// ADD 分支当前行为：纯 AddObject — 用户后续若需设置新实例参数，自行运行 MOD MML 命令。
+// stmt.Values 在 ADD 时透传到 entry["parameters"] 仅用于审计日志（用户意图记录），
+// 协议层 BuildTR069Params(AddObject) 只消费 object_name，其它键被忽略不下发。

@@ -25,6 +25,7 @@ import type {
   ParseRequest,
   ParseResponse,
   ExecuteStatementsRequest,
+  StructuredExecuteRequest,
 } from '../../types/mmlConsole';
 import type { MMLTask } from '../../types/mml';
 
@@ -115,5 +116,24 @@ export function useExecuteStatements(): ReturnType<
 > {
   return useMutation({
     mutationFn: (req: ExecuteStatementsRequest) => mmlApi.executeStatements(req),
+  });
+}
+
+/**
+ * R-9.2 结构化通道 mutation：POST /mml/console/execute-statements-structured。
+ *
+ * 与 useExecuteStatements 的差异：
+ *   - 入参带 paths/values(key=standardPath)/instanceIndices，无需 MML 文本 round-trip
+ *   - 422 错误体附带 unknown_paths 元数据（http 拦截器透传到 error.response.data）
+ *
+ * 调用方：RightPanel.ConsoleActionBar.onExecute（命令树选中命令后走此通道）。
+ * MmlEditor（多语句脚本 / 裸 MML）继续走 useExecuteStatements（旧通道），因为
+ * parser-emitted statement 可能缺 subFields 元数据无法做 structured 转换。
+ */
+export function useExecuteStatementsStructured(): ReturnType<
+  typeof useMutation<MMLTask, Error, StructuredExecuteRequest>
+> {
+  return useMutation({
+    mutationFn: (req: StructuredExecuteRequest) => mmlApi.executeStatementsStructured(req),
   });
 }

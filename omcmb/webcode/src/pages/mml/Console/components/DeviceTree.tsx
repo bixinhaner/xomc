@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Button, Checkbox, Input, List, Pagination, Select, Space, Tag, Typography } from 'antd';
 import { SearchOutlined, UserAddOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ConsoleDevice } from '../types';
@@ -49,13 +49,24 @@ export default function DeviceTree({
 }: DeviceTreeProps) {
   const t = useT();
   const token = useThemeToken();
-  const { data: productTypeDict } = useDictionary('product_type');
+  const { data: productTypeDict, isLoading: isDictLoading } = useDictionary('product_type');
 
   // 产品类型选项（字典驱动）
   const productTypeOptions = useMemo(
     () => (productTypeDict?.sysDictionaryDetails ?? []).map((d) => ({ label: d.label, value: d.value })),
     [productTypeDict]
   );
+
+  // R-8.1: 字典加载完成后若 productTypeFilter 未设置，自动选中第一项
+  // R-8.2: 字典为空时禁用整个 DeviceTree 操作
+  useEffect(() => {
+    if (!isDictLoading && productTypeFilter === '' && productTypeOptions.length > 0) {
+      onFilterChange(productTypeOptions[0]?.label ?? '');
+    }
+  }, [isDictLoading, productTypeFilter, productTypeOptions, onFilterChange]);
+
+  const isDictEmpty = !isDictLoading && productTypeOptions.length === 0;
+  const isDisabled = isDictEmpty;
 
   // 按类型分组设备
   const _devicesByType = useMemo(() => {
@@ -121,11 +132,12 @@ export default function DeviceTree({
           onChange={(e) => onSearchChange(e.target.value)}
           allowClear
         />
+        {/* R-8: 产品类型必选，无 allowClear；字典空时禁用 + 文案提示 */}
         <Select
           size="small"
           style={{ width: '100%', borderRadius: 4 }}
-          placeholder={t('mml.productType')}
-          allowClear
+          placeholder={isDictEmpty ? t('mml.deviceTree.productClassDictEmpty') : t('mml.deviceTree.productClassRequired')}
+          disabled={isDisabled}
           options={productTypeOptions}
           value={productTypeOptions.find((o) => o.label === productTypeFilter)?.value || undefined}
           onChange={(val) => {
@@ -133,6 +145,11 @@ export default function DeviceTree({
             onFilterChange(selected?.label ?? '');
           }}
         />
+        {isDictEmpty && (
+          <div style={{ marginTop: 6, fontSize: 11, color: token.colorWarning }}>
+            ⚠ {t('mml.deviceTree.productClassDictEmpty')}
+          </div>
+        )}
       </div>
 
       {/* 全选 */}

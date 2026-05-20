@@ -523,6 +523,14 @@ func initMiscModules(c *Container) error {
 	if c.RoleRepo != nil {
 		mmlService.SetRoleQuerier(c.RoleRepo)
 	}
+	// R-8.4 + R-9.3（方案 §6.4 / §6.6）：注入 DeviceLookup + PathTranslator 适配器，
+	// 启用 CreateAndFanoutTask 入口的 product_class 一致性校验 + standardPath 翻译。
+	if c.DeviceService != nil {
+		mmlService.SetDeviceLookup(NewMMLDeviceLookup(c.DeviceService))
+	}
+	if c.ProductRegistry != nil && c.ParamRegistry != nil {
+		mmlService.SetPathTranslator(NewMMLPathTranslator(c.ProductRegistry, c.ParamRegistry, logger))
+	}
 	c.miscDeps.mmlHandler = mml.NewHandler(mmlService, logger)
 	c.miscDeps.mmlService = mmlService
 

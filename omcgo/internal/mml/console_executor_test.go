@@ -225,6 +225,11 @@ func TestBuildEntry_RMV_MissingIndex_Errors(t *testing.T) {
 	assert.Contains(t, err.Error(), "missing instance index")
 }
 
+// 用户决策 2026-05-20：RMV 保持单实例（1 MML 命令 = 1 RPC，禁止 R-7 多选展开）。
+// 原 TestResolveRMVIndices / TestBuildEntry_RMV_MultiInstance /
+// TestExecuteStatements_MultiRMV_TriggersSequential / TestExecuteStatements_SingleRMV_NotSequential
+// 已移除；单实例 RMV 行为由 TestBuildEntry_RMV (上方) 覆盖。
+
 func TestBuildEntry_UnsupportedOp(t *testing.T) {
 	cmd := &MMLCommand{ID: uuid.New(), OperationType: "DSP"}
 	stmt := Statement{OperationType: "DSP"}

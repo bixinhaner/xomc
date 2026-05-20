@@ -187,3 +187,22 @@ const (
 	ErrCodeMRMappingNotFound   = 16002
 	ErrCodeMRExportFailed      = 16003
 )
+
+// MML Console v2.3 catalog (17000-17999)
+//
+// 方案：docs/design/mml-console-cmcc-tdlte-v23-adjustment-plan-20260519.md §6.4
+// 需求：R-8.4 / R-9.2 / R-9.3 — 结构化执行入参 + Translator 翻译 + 产品类型一致性
+const (
+	// R-8.4: execute-statements 入参设备包含多种 product_class
+	ErrCodeDevicesMixedProductClass = 17001
+	// R-8.4: execute-statements 入参设备为空或全部失效
+	ErrCodeNoValidDevices = 17002
+	// R-3: statement.operation_type 与 command 自身 op_type 不一致
+	ErrCodeOperationMismatch = 17003
+	// R-9.2: 结构化入参缺字段、paths 与 command 路径集不匹配、values key 不在 paths 内等
+	ErrCodeInvalidStatementPayload = 17004
+	// R-9.3: 全部 path 翻译失败（passthrough 关闭时；理论 passthrough 兜底不触发）
+	ErrCodeTranslationFailedAll = 17005
+	// R-9.3: devices.product_class 在 ProductRegistry 找不到匹配 product（孤儿设备）
+	ErrCodeProductClassUnresolved = 17006
+)

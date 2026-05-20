@@ -37,7 +37,35 @@ type Service struct {
 	hub              SSEPublisher
 	roleQuerier      RoleQuerier // optional; nil 时 ListCustomCommands fallback creator-only 过滤
 	deviceTaskPathMissAggregator DeviceTaskPathMissAggregator // Stage 3 路径翻译警告字段聚合
+	deviceLookup     DeviceLookup // R-8.4 product_class 一致性校验；nil 时跳过（向后兼容）
+	pathTranslator   PathTranslator // R-9.3 per-device standardPath → privatePath 翻译；nil 时跳过
 	logger           *zap.Logger
+}
+
+// DeviceLookup 接口复用 fanout.go 已有定义（GetBySerialNumber → *model.Device，
+// 含 ProductClass / FirmwareVersion 字段）。R-8.4 一致性校验通过该接口逐 SN 查。
+
+// PathTranslator 让 mml.Service 在 fanout 前把 standardPath → privatePath。
+//
+// 消费者驱动小接口；实现在 internal/config/parammodel 包内提供薄包装：
+//
+//	type translatorAdapter struct { reg *parammodel.Registry; prodReg *product.Registry }
+//	func (a *translatorAdapter) TranslateForDevice(ctx, productClass, swVer, paths) ([]TranslatedPath, error) {...}
+//
+// nil 时跳过翻译（向后兼容 / dev / 单测）。
+type PathTranslator interface {
+	// TranslateForDevice 把 standardPaths 按 (productClass, swVersion) 翻译为 privatePath。
+	//   - 内部链路：productClass → ProductRegistry → product.id → Translator.ToPrivate
+	//   - 未命中（passthrough）时 Private = Standard
+	//   - product_class 解析失败 → 返回 ErrProductClassUnresolved
+	TranslateForDevice(ctx context.Context, productClass, softwareVersion string, standardPaths []string) ([]TranslatedPath, error)
+}
+
+// TranslatedPath 是 Translator 的单条结果。
+type TranslatedPath struct {
+	Standard string `json:"standard"`
+	Private  string `json:"private"`
+	Source   string `json:"source"` // discovered / default / passthrough
 }
 
 // SSEPublisher defines the interface for publishing SSE events.
@@ -101,6 +129,18 @@ func (s *Service) SetCmdParamRepo(repo CommandParamRepository) {
 // 不注入时 ListCustomCommands fallback 仅 creator-self 可见（即 T-0090-c 之前的行为）。
 func (s *Service) SetRoleQuerier(rq RoleQuerier) {
 	s.roleQuerier = rq
+}
+
+// SetDeviceLookup 注入设备查询适配器，启用 R-8.4 product_class 一致性校验。
+// nil 时跳过（向后兼容）。
+func (s *Service) SetDeviceLookup(d DeviceLookup) {
+	s.deviceLookup = d
+}
+
+// SetPathTranslator 注入 R-9.3 path 翻译适配器（per-device standardPath → privatePath）。
+// nil 时跳过翻译（向后兼容 / dev / 单测）。
+func (s *Service) SetPathTranslator(t PathTranslator) {
+	s.pathTranslator = t
 }
 
 // publishTaskStatus pushes a task status change event via SSE.
@@ -861,6 +901,18 @@ func (s *Service) CreateAndFanoutTask(ctx context.Context, task *MMLTask, sequen
 	}
 	if task.TotalDevices == 0 {
 		task.TotalDevices = len(task.DeviceSNs)
+	}
+
+	// R-8.4: device_sns → product_class 一致性校验（DeviceLookup 注入后启用）。
+	// 混类型直接拒绝，避免下游 fanout 后才发现路径不兼容。
+	if err := s.validateDeviceProductClassUniform(ctx, task.DeviceSNs); err != nil {
+		return err
+	}
+
+	// R-9.3: 把 task.Commands 内的 standardPath 按 device.product_class 翻译为 privatePath。
+	// PathTranslator nil 时跳过（向后兼容）；翻译结果写回 task.Commands 的 param_refs / parameters。
+	if err := s.translateTaskPaths(ctx, task); err != nil {
+		return err
 	}
 
 	if err := s.taskRepo.Create(ctx, task); err != nil {

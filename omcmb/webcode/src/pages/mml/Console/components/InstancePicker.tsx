@@ -1,20 +1,21 @@
 /**
- * T-0130 InstancePicker 完整版 — GPV SSE 闭环 + supports_delete 🗑 提示。
+ * T-0130 InstancePicker + R-7 多选删除。
  *
- * P2-b 简化版仅 InputNumber 手输；本期升级为：
- *   ① "探测实例"按钮 → POST /ops/commands/rpc (action="get_param") + SSE 订阅 mml_device_frame
- *   ② 探测成功 → antd Select options = 实例索引集合（用户选 index → store.setRmvIndex）
- *   ③ 探测失败/超时/多设备/未选设备 → 回退 InputNumber 手输 fallback（保 P2-b 兼容）
- *   ④ supports_delete=true 的实例旁 🗑 affordance 图标（提示该实例可删；点击高亮 setRmvIndex）
+ * 历史路径：探测态用 antd Select 单选 + 探测失败回退 InputNumber 单值；
+ * 升级后：统一 antd `Select mode="tags"` 同时支持
+ *   ① 探测后从下拉勾选（多选）
+ *   ② 探测失败/未启动时手输（粘贴 `1,3,5` 或回车追加）
+ * 数据出口走 store.setRmvIndices；空选 → setRmvIndices(uid, undefined) 同时把 rmvInstanceIndex 也清掉。
  *
  * 设计取舍：
  *   - 单设备探测：多设备时按钮 disabled，提示选单设备
- *   - supports_delete 仅作为 UI affordance，不直接派发 RMV 命令（用户仍走 DO 提交）
+ *   - supports_delete 仅作为 UI affordance，不直接派发 RMV 命令
  *   - cleanup race-safe：useGPVProbe 内部 SSE close + 60s timeout 兜底
+ *   - 验证：所有标签必须解析为非负整数；非法标签忽略（onChange 时过滤）
  */
 
 import { useMemo } from 'react';
-import { Button, InputNumber, Select, Space, Spin, Tooltip } from 'antd';
+import { Button, Select, Space, Spin, Tooltip } from 'antd';
 import { DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
 
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
@@ -27,12 +28,34 @@ export interface InstancePickerProps {
   statement: Statement;
 }
 
-export default function InstancePicker({ statement }: InstancePickerProps) {
+// 兼容旧 rmvInstanceIndex（MML parser 单 Index 入口）：union 出当前生效的实例号列表。
+// 导出供单元测试 — antd Select 在 jsdom 下的 tags 交互不易模拟，转而直测纯逻辑。
+export function effectiveIndices(stmt: Statement): number[] {
+  if (stmt.rmvInstanceIndices && stmt.rmvInstanceIndices.length > 0) {
+    return stmt.rmvInstanceIndices;
+  }
+  if (typeof stmt.rmvInstanceIndex === 'number') {
+    return [stmt.rmvInstanceIndex];
+  }
+  return [];
+}
+
+// antd tags 模式 onChange 给的是 string[]（即便 options.value 是 number）。
+// 解析为非负整数集合，drop 非法 / 重复。导出供单元测试。
+export function parseTagValues(raw: string[]): number[] {
+  const out = new Set<number>();
+  for (const r of raw) {
+    const n = Number.parseInt(String(r).trim(), 10);
+    if (Number.isFinite(n) && n >= 0) out.add(n);
+  }
+  return Array.from(out);
+}
+
+export default function InstancePicker({ statement }: InstancePickerProps): JSX.Element {
   const t = useT();
-  const setRmvIndex = useMmlConsoleStore((s) => s.setRmvIndex);
+  const setRmvIndices = useMmlConsoleStore((s) => s.setRmvIndices);
   const selectedDeviceSns = useMmlConsoleStore((s) => s.selectedDeviceSns);
 
-  // 单设备探测：多设备 / 0 设备时按钮 disabled
   const singleDeviceSn = selectedDeviceSns.length === 1 ? selectedDeviceSns[0] : undefined;
   const targetObject = statement.targetObject;
 
@@ -45,8 +68,6 @@ export default function InstancePicker({ statement }: InstancePickerProps) {
   const hasInstances = status === 'success' && instances.length > 0;
   const probeDisabled = !singleDeviceSn || !targetObject || probing;
 
-  // supports_delete：RMV 命令通常有一个 target sub-field（or 兜底从首个 sub-field 取）
-  // 仅当 sub_field 含 supportsDelete=true 时显示 🗑 affordance（PRD §6.4）。
   const supportsDelete = useMemo(
     () => statement.subFields.some((sf) => sf.supportsDelete),
     [statement.subFields],
@@ -60,19 +81,38 @@ export default function InstancePicker({ statement }: InstancePickerProps) {
         ? t('mml.console.picker.probing')
         : t('mml.console.picker.probeButton');
 
-  const handleSelect = (value: number | null) => {
-    if (value === null || value === undefined) {
-      setRmvIndex(statement.uid, undefined);
-      return;
-    }
-    if (value < 0) return;
-    setRmvIndex(statement.uid, value);
+  // tags 模式 value 用 string[]（antd 类型约束）；展示时再 stringify 一次保险。
+  const currentIndices = effectiveIndices(statement);
+  const tagValue = currentIndices.map((n) => String(n));
+
+  const handleChange = (raw: string[]): void => {
+    const parsed = parseTagValues(raw);
+    setRmvIndices(statement.uid, parsed.length === 0 ? undefined : parsed);
   };
 
-  const handleReset = () => {
+  const handleReset = (): void => {
     reset();
-    setRmvIndex(statement.uid, undefined);
+    setRmvIndices(statement.uid, undefined);
   };
+
+  // 探测命中的实例集合作为下拉候选；fallback 时 options 空，纯手输。
+  const options = useMemo(
+    () =>
+      instances.map((i) => ({
+        label: supportsDelete ? (
+          <Space size={4}>
+            <span>{i}</span>
+            <Tooltip title={t('mml.console.picker.deleteHint')}>
+              <DeleteOutlined style={{ color: '#ff7875' }} />
+            </Tooltip>
+          </Space>
+        ) : (
+          String(i)
+        ),
+        value: String(i),
+      })),
+    [instances, supportsDelete, t],
+  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -102,9 +142,14 @@ export default function InstancePicker({ statement }: InstancePickerProps) {
             </span>
           </Tooltip>
         )}
+        {currentIndices.length > 1 && (
+          <span style={{ fontSize: 12, color: '#1677ff' }}>
+            {t('mml.console.picker.multiSelected', { count: currentIndices.length })}
+          </span>
+        )}
       </Space>
 
-      {/* Row 2: Instance picker (Select if probed, else InputNumber fallback) */}
+      {/* Row 2: 多选实例号输入 — tags 模式同时支持下拉勾选与手动粘贴 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ flex: '0 0 200px', fontWeight: 500 }}>
           <span style={{ color: '#ff4d4f', marginRight: 4 }} aria-label="required">
@@ -112,39 +157,21 @@ export default function InstancePicker({ statement }: InstancePickerProps) {
           </span>
           {t('mml.console.picker.indexLabel')}
         </span>
-        {hasInstances ? (
-          <Select<number>
-            value={statement.rmvInstanceIndex ?? undefined}
-            onChange={(v) => handleSelect(v)}
-            placeholder={t('mml.console.picker.selectInstance')}
-            style={{ width: 200 }}
-            allowClear
-            options={instances.map((i) => ({
-              label: supportsDelete ? (
-                <Space size={4}>
-                  <span>{i}</span>
-                  <Tooltip title={t('mml.console.picker.deleteHint')}>
-                    <DeleteOutlined style={{ color: '#ff7875' }} />
-                  </Tooltip>
-                </Space>
-              ) : (
-                String(i)
-              ),
-              value: i,
-            }))}
-            data-testid="instance-picker-select"
-          />
-        ) : (
-          <InputNumber
-            value={statement.rmvInstanceIndex ?? null}
-            onChange={handleSelect}
-            min={0}
-            step={1}
-            precision={0}
-            style={{ width: 200 }}
-            data-testid="instance-picker-input"
-          />
-        )}
+        <Select<string[]>
+          mode="tags"
+          value={tagValue}
+          onChange={handleChange}
+          placeholder={
+            hasInstances
+              ? t('mml.console.picker.selectInstance')
+              : t('mml.console.picker.indexHelp')
+          }
+          style={{ width: 320 }}
+          options={options}
+          allowClear
+          tokenSeparators={[',', ' ']}
+          data-testid="instance-picker-select"
+        />
         {hasInstances && (
           <Tooltip title={t('mml.console.picker.resetHint')}>
             <Button size="small" onClick={handleReset}>

@@ -192,6 +192,10 @@ interface MmlConsoleState {
   toggleSubField(uid: string, subFieldId: string): void;
   setValue(uid: string, mmlCode: string, value: string): void;
   setRmvIndex(uid: string, index: number | undefined): void;
+  /** R-7：写多实例选删数组；与 setRmvIndex 互斥（写其一会清掉对方）。 */
+  setRmvIndices(uid: string, indices: number[] | undefined): void;
+  /** R-4：写多层 {i} 实例选择器（InstanceArityInput）。空 / undefined 视为清空。 */
+  setInstanceSelectors(uid: string, selectors: Record<string, string> | undefined): void;
 
   // 文本操作（textbox 触发 → 'text' source）
   setMmlText(text: string): void;
@@ -308,8 +312,49 @@ export const useMmlConsoleStore = create<MmlConsoleState>((set, get) => ({
   },
 
   setRmvIndex(uid, index) {
+    // R-7 互斥不变量：写单 Index 时同步清掉 indices；反之亦然（setRmvIndices）。
+    // 避免两字段同时出现导致后端 resolveRMVIndices 取舍歧义。
     const newStatements = get().statements.map((s) =>
-      s.uid === uid ? { ...s, rmvInstanceIndex: index } : s
+      s.uid === uid
+        ? { ...s, rmvInstanceIndex: index, rmvInstanceIndices: undefined }
+        : s,
+    );
+    set({
+      statements: newStatements,
+      mmlText: renderStatementsLocal(newStatements),
+      syncSource: 'ui',
+    });
+  },
+
+  setRmvIndices(uid, indices) {
+    // 空数组 / undefined → 清空（statement 回到"未填实例号"态）；
+    // 非空 → 写 indices，同步清单 Index。前端不强制排序 — 后端兜底按降序展开。
+    const next =
+      indices && indices.length > 0
+        ? Array.from(new Set(indices)).filter((n) => Number.isFinite(n) && n >= 0)
+        : undefined;
+    const newStatements = get().statements.map((s) =>
+      s.uid === uid
+        ? { ...s, rmvInstanceIndices: next, rmvInstanceIndex: undefined }
+        : s,
+    );
+    set({
+      statements: newStatements,
+      mmlText: renderStatementsLocal(newStatements),
+      syncSource: 'ui',
+    });
+  },
+
+  setInstanceSelectors(uid, selectors) {
+    // 空 / undefined / 全部值为空 → 清空 instanceSelectors（statement 不带该字段）。
+    // 否则写入完整副本（component 已生成正确 key 命名 iα/iβ/iγ）。
+    const hasNonEmpty =
+      selectors && Object.values(selectors).some((v) => v !== '' && v != null);
+    const next: Record<string, string> | undefined = hasNonEmpty
+      ? { ...selectors }
+      : undefined;
+    const newStatements = get().statements.map((s) =>
+      s.uid === uid ? { ...s, instanceSelectors: next } : s,
     );
     set({
       statements: newStatements,

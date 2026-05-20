@@ -12,9 +12,12 @@ import (
 	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/config/parammodel/mmlstandardloader"
 	"github.com/omcgo/omcgo/internal/core/dictloader"
+	"github.com/omcgo/omcgo/internal/mml/catalogloader"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/quicksettings"
+
+	"path/filepath"
 )
 
 // initDictLoadModule 初始化 T-0098 P1-06 字典加载模块。
@@ -53,6 +56,15 @@ func initDictLoadModule(c *Container) error {
 	quickSettingsRegistry := quicksettings.NewRegistry()
 	c.QuickSettingsRegistry = quickSettingsRegistry
 	quickSettingsLoader := quicksettings.NewLoader(c.Cfg.DictLoader.QuickSettings, baseDir, quickSettingsRegistry, logger)
+
+	// MML 控制台 v2.3 catalog Loader（dictloader 模式第 5 个 Loader）
+	// 方案：docs/design/mml-console-cmcc-tdlte-v23-adjustment-plan-20260519.md §6.7
+	mmlCatalogDir := c.Cfg.DictLoader.MMLCatalog.Directory
+	if mmlCatalogDir == "" {
+		mmlCatalogDir = catalogloader.DefaultDirectory
+	}
+	mmlCatalogLoader := catalogloader.NewLoader(c.PgPool, filepath.Join(baseDir, mmlCatalogDir), logger)
+	c.MMLCatalogLoader = mmlCatalogLoader
 	// T-0123-P0：mmlstandardloader 启动期注册下线。
 	// 改为一次性 SQL seed 导入（migrations/seed/000096_mml_standard_params_import.sql，
 	// 由 `omcctl mml import-standard-xml` 离线生成）。
@@ -61,7 +73,7 @@ func initDictLoadModule(c *Container) error {
 	// 关联：docs/design/mml-restore-old-interaction-plan-20260514.md §M.6 / R-206 mitigation
 	_ = mmlstandardloader.LoaderName // 显式引用防止 import 被 goimports 移除
 
-	for _, ld := range []dictloader.Loader{paramLoader, indicatorLoader, alarmLoader, productLoader, quickSettingsLoader} {
+	for _, ld := range []dictloader.Loader{paramLoader, indicatorLoader, alarmLoader, productLoader, quickSettingsLoader, mmlCatalogLoader} {
 		if err := registry.Register(ld); err != nil {
 			return fmt.Errorf("register %s loader: %w", ld.Name(), err)
 		}
@@ -120,6 +132,17 @@ func initDictLoadModule(c *Container) error {
 			zap.Int("rows", rep.RowsAffected),
 			zap.Int("files_loaded", rep.FilesLoaded),
 			zap.Int("files_skipped", rep.FilesSkipped),
+			zap.Duration("duration", time.Since(t0)),
+			zap.Error(err))
+		return err
+	})
+	g.Go(func() error {
+		t0 := time.Now()
+		rep, err := mmlCatalogLoader.LoadOnce(gctx)
+		logger.Info("mml-catalog load done",
+			zap.Int("rows", rep.RowsAffected),
+			zap.Int("files_loaded", rep.FilesLoaded),
+			zap.Int("non_fatal_errors", len(rep.Errors)),
 			zap.Duration("duration", time.Since(t0)),
 			zap.Error(err))
 		return err

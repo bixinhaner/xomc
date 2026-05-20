@@ -57,7 +57,10 @@ func NewConsoleHandler(svc *ConsoleService, taskCreator MMLTaskCreator, logger *
 	}
 }
 
-// RegisterRoutes 注册 5 端点。父 router group 应为 v1 + RequireAPIPermission。
+// RegisterRoutes 注册 5+1 端点。父 router group 应为 v1 + RequireAPIPermission。
+//
+// R-9.2 新增 `/mml/console/execute-statements-structured` — 与旧 `/execute-statements`
+// 并存兼容期；前缀 /console/ 物理隔离便于未来下线旧端点。
 func (h *ConsoleHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	mml := rg.Group("/mml")
 
@@ -66,6 +69,7 @@ func (h *ConsoleHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	mml.POST("/render", h.PostRender)
 	mml.POST("/parse", h.PostParse)
 	mml.POST("/execute-statements", h.PostExecuteStatements)
+	mml.POST("/console/execute-statements-structured", h.PostExecuteStatementsStructured)
 }
 
 // ============================================================
@@ -188,15 +192,25 @@ func (h *ConsoleHandler) PostExecuteStatements(c *gin.Context) {
 	task, err := h.svc.ExecuteStatements(c.Request.Context(), req, h.taskCreator)
 	if err != nil {
 		// 错误分级（sentinel）：
-		//   ErrCommandNotFound  → 404（command_id 未命中 / op_logical_code 查不到）
-		//   ErrInvalidRequest   → 400（空 statements / 空 devices / 编译时 sub_field 缺失 /
-		//                              target_object 缺失 / RMV 缺 index 等用户输入错）
-		//   其余                  → 500（DB 故障 / fanout 内部错误）
+		//   ErrCommandNotFound        → 404
+		//   ErrInvalidRequest         → 400
+		//   ErrMixedProductClass      → 400 (R-8.4)
+		//   ErrNoValidDevices         → 400 (R-8.4)
+		//   ErrProductClassUnresolved → 422 (R-9.3 孤儿设备)
+		//   其余                        → 500
+		var mixedErr *ErrMixedProductClass
+		var orphanErr *ErrProductClassUnresolved
 		switch {
 		case errors.Is(err, ErrCommandNotFound):
 			response.Fail(c, http.StatusNotFound, err.Error())
 		case errors.Is(err, ErrInvalidRequest):
 			response.Fail(c, http.StatusBadRequest, err.Error())
+		case errors.Is(err, ErrNoValidDevices):
+			response.Fail(c, http.StatusBadRequest, err.Error())
+		case errors.As(err, &mixedErr):
+			response.Fail(c, http.StatusBadRequest, mixedErr.Error())
+		case errors.As(err, &orphanErr):
+			response.Fail(c, http.StatusUnprocessableEntity, orphanErr.Error())
 		default:
 			h.logger.Error("execute statements", zap.Error(err))
 			response.Fail(c, http.StatusInternalServerError, err.Error())
@@ -209,6 +223,59 @@ func (h *ConsoleHandler) PostExecuteStatements(c *gin.Context) {
 // ============================================================
 // Helpers
 // ============================================================
+
+// ============================================================
+// POST /api/v1/mml/console/execute-statements-structured (R-9.2)
+// ============================================================
+
+// PostExecuteStatementsStructured 接收结构化入参（paths/values/instanceIndices）执行。
+//
+// 与旧 PostExecuteStatements 错误映射的差异：
+//   - ErrUnknownPaths / ErrInstanceSelectorsNotImplemented → 422 + unknown_paths 元数据
+//   - 其余错误（ErrCommandNotFound / ErrMixedProductClass / ...）复用旧 handler 同款映射
+func (h *ConsoleHandler) PostExecuteStatementsStructured(c *gin.Context) {
+	var req StructuredExecuteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+
+	if req.Creator == "" {
+		if u := c.GetString("username"); u != "" {
+			req.Creator = u
+		}
+	}
+	if req.Executor == "" {
+		req.Executor = req.Creator
+	}
+
+	task, err := h.svc.ExecuteStructured(c.Request.Context(), req, h.taskCreator)
+	if err != nil {
+		var unknownErr *ErrUnknownPaths
+		var mixedErr *ErrMixedProductClass
+		var orphanErr *ErrProductClassUnresolved
+		switch {
+		case errors.As(err, &unknownErr):
+			response.FailWithData(c, http.StatusUnprocessableEntity, unknownErr.Error(),
+				gin.H{"unknown_paths": unknownErr.Paths, "command_id": unknownErr.CommandID})
+		case errors.Is(err, ErrCommandNotFound):
+			response.Fail(c, http.StatusNotFound, err.Error())
+		case errors.Is(err, ErrInvalidRequest):
+			response.Fail(c, http.StatusBadRequest, err.Error())
+		case errors.Is(err, ErrNoValidDevices):
+			response.Fail(c, http.StatusBadRequest, err.Error())
+		case errors.As(err, &mixedErr):
+			response.Fail(c, http.StatusBadRequest, mixedErr.Error())
+		case errors.As(err, &orphanErr):
+			response.Fail(c, http.StatusUnprocessableEntity, orphanErr.Error())
+		default:
+			h.logger.Error("execute structured statements", zap.Error(err))
+			response.Fail(c, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	response.OKWithStatus(c, http.StatusCreated, task)
+}
 
 // parseUUIDPathParam 解析 path param 为 UUID；失败 400 并直接终止。
 func parseUUIDPathParam(c *gin.Context, key string) (uuid.UUID, bool) {

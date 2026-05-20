@@ -15,6 +15,8 @@ import type {
   ParseRequest,
   ParseResponse,
   ExecuteStatementsRequest,
+  StructuredExecuteRequest,
+  StructuredStatement,
 } from '../../types/mmlConsole';
 
 // ---------------------------------------------------------------------------
@@ -916,6 +918,30 @@ export const mmlApi = {
     const { data } = await http.post<BackendMMLTask>('/mml/execute-statements', payload);
     return mapBackendTask(data);
   },
+
+  /**
+   * POST /mml/console/execute-statements-structured (R-9.2)
+   * 结构化通道：用户直接传 standardPath + value，后端按设备 product_class 翻译为
+   * privatePath 并下发。与 executeStatements（MML 文本 round-trip）的主要差异：
+   *   - StructuredStatement.paths 取 sub_field.tr069Path 列表（前端 statementToStructured 转出）
+   *   - values key 同样是 standardPath
+   *   - 错误体含 unknown_paths 元数据 → 调用方据此呈现 422 报错精确位置
+   */
+  async executeStatementsStructured(req: StructuredExecuteRequest): Promise<MMLTask> {
+    const payload = {
+      statements: req.statements.map(structuredStmtToBackend),
+      device_sns: req.deviceSns,
+      task_name: req.taskName,
+      creator: req.creator,
+      executor: req.executor,
+      execute_type: req.executeType,
+    };
+    const { data } = await http.post<BackendMMLTask>(
+      '/mml/console/execute-statements-structured',
+      payload,
+    );
+    return mapBackendTask(data);
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -930,6 +956,7 @@ function mapGroupTreeNode(n: BackendGroupTreeNode): GroupTreeNode {
     displayName: n.name,
     displayNameI18n: n.name_i18n,
     displayOrder: n.display_order,
+    chapterCode: n.chapter_code,
     source: n.source,
     catalogProtected: n.catalog_protected,
     commands: (n.commands ?? []).map(mapGroupTreeCommand),
@@ -1018,4 +1045,26 @@ function stmtToBackend(s: Statement): BackendStatement {
     values: Object.keys(s.values).length > 0 ? s.values : undefined,
     rmv_instance_index: s.rmvInstanceIndex,
   };
+}
+
+/**
+ * R-9.2 结构化 statement → backend wire 格式（snake_case）。
+ * Axios 拦截器虽然会做通用 camelCase ↔ snake_case，但显式 mapper 保留
+ * 字段意图（避免 instanceIndices 被错误改名）。
+ */
+function structuredStmtToBackend(s: StructuredStatement): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    command_id: s.commandId,
+    operation_type: s.operationType,
+    paths: s.paths,
+  };
+  if (s.commandCode) out.command_code = s.commandCode;
+  if (s.values && Object.keys(s.values).length > 0) out.values = s.values;
+  if (s.instanceSelectors && Object.keys(s.instanceSelectors).length > 0) {
+    out.instance_selectors = s.instanceSelectors;
+  }
+  if (s.instanceIndices && s.instanceIndices.length > 0) {
+    out.instance_indices = s.instanceIndices;
+  }
+  return out;
 }

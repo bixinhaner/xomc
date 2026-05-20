@@ -49,16 +49,23 @@ export function useDeviceSelection() {
     }
   }, []);
 
-  // 首次加载
+  // R-8.1: 首次加载延后到产品类型默认值就绪（由组件传入 setProductTypeFilter 触发）。
+  // R-8.2: 不再用空 productTypeFilter 首拉，避免回到"未筛选 = 跨类型"语义。
   useEffect(() => {
-    void fetchDevices(1, undefined, productTypeFilter || undefined);
-  }, []);
+    if (productTypeFilter) {
+      void fetchDevices(1, undefined, productTypeFilter);
+    }
+    // 依赖 productTypeFilter：首次默认值就绪即触发一次加载
+  }, [productTypeFilter, fetchDevices]);
 
-  // 产品类型切换时重置到第 1 页并请求
+  // R-8.3: 产品类型切换时除重置分页外，**清空已选设备**（不允许跨类型累积）。
   const handleFilterChange = useCallback((filter: string) => {
     setProductTypeFilter(filter);
     setCurrentPage(1);
-    void fetchDevices(1, searchText || undefined, filter || undefined);
+    setSelectedDevices([]); // R-8.3 清空已选
+    if (filter) {
+      void fetchDevices(1, searchText || undefined, filter);
+    }
   }, [fetchDevices, searchText]);
 
   // 搜索文本变化时重置到第 1 页并请求（防抖在组件层处理）

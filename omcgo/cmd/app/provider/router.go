@@ -392,6 +392,9 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// ----- Sprint B Q-V3-7：dictload admin reload 端点（含 mml-standard）-----
 	registerDictLoadAdminRoutes(c, superAdminGroup)
 
+	// ----- MML 控制台 v2.3 catalog admin info 端点（reload 复用 dictload/reload?name=mml-catalog）-----
+	registerMMLCatalogAdminRoutes(c, superAdminGroup)
+
 	// ----- Alarm filter rule routes → resource "alarms" -----
 	alarmFilterHandler := alarm.NewFilterHandler(ah.alarmFilterRuleRepo, c.Logger)
 	alarmFilterHandler.RegisterRoutes(permGroup("alarms").Group("/alarms/alarm-filters"))
