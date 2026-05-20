@@ -10,7 +10,8 @@
 # 设计来源：docs/design/deployments-release-enhancements-20260520.md §3.2
 #
 # 用法：
-#   sudo bash install-docker.sh                          # 交互：装完后引导选加速镜像
+#   sudo bash install-docker.sh                          # 交互：装完后引导选加速镜像；
+#                                                          /var 可用 < 15G 时还会问要不要把数据目录切到 /home
 #   sudo bash install-docker.sh --mirror daocloud        # 一气呵成，装完直接配 DaoCloud 加速
 #   sudo bash install-docker.sh --no-mirror              # 装完不动 daemon.json，跳过加速
 #   sudo bash install-docker.sh --skip-if-installed      # 已装则静默 0 退出（脚本里调）
@@ -26,14 +27,24 @@
 #   --skip-if-installed   已检测到 docker 时静默 0 退出（deploy.sh 调用时用）
 #   -h | --help           本帮助
 #
+# 数据目录（自动检测 + 交互选择，无 CLI 选项）：
+#   默认 docker → /var/lib/docker，containerd → /var/lib/containerd。
+#   /var 可用空间 < 15G 时，脚本会询问是否切换到：
+#     docker      → /home/docker-data        （写入 /etc/docker/daemon.json）
+#     containerd  → /home/containerd-data   （写入 containerd.service ExecStart --root）
+#   适用 baicells 等紧凑 /var 分区场景（避免装完一拉镜像就撑爆 /var）。
+#   非交互（stdin 非 TTY，例如被 deploy.sh 调起）：自动按 Y 切换。
+#
 # 行为：
 #   1. 校验 root + 本目录有且仅一个 docker-*.tgz
-#   2. tar 解压到 /usr/local/bin/{docker,dockerd,containerd,...}
-#   3. 写 containerd.service + docker.service systemd 单元
-#   4. systemctl daemon-reload + enable --now 两服务（开机自启）
-#   5. docker version 验证
-#   6. （除非 --no-mirror）引导 / 直接配置加速镜像
-#   7. 提示当前用户加入 docker 组（如有 $SUDO_USER）
+#   2. 检测 /var 可用空间；< 15G 时引导改用 /home/{docker,containerd}-data
+#   3. tar 解压到 /usr/local/bin/{docker,dockerd,containerd,...}
+#   4. 写 containerd.service（含可选 --root）+ docker.service systemd 单元
+#   5. 如选切换：写 /etc/docker/daemon.json 的 data-root（python3 merge 保其它键）
+#   6. systemctl daemon-reload + enable --now 两服务（开机自启）
+#   7. docker version 验证
+#   8. （除非 --no-mirror）引导 / 直接配置加速镜像
+#   9. 提示当前用户加入 docker 组（如有 $SUDO_USER）
 # =============================================================================
 set -euo pipefail
 
@@ -53,7 +64,7 @@ while [ $# -gt 0 ]; do
     --mirror)              MIRROR="$2"; shift 2 ;;
     --no-mirror)           NO_MIRROR=1; shift ;;
     --skip-if-installed)   SKIP_IF_INSTALLED=1; shift ;;
-    -h|--help)             sed -n '3,38p' "$SELF"; exit 0 ;;
+    -h|--help)             awk 'NR>=3 && /^# ====/ {exit} NR>=3 {print}' "$SELF"; exit 0 ;;
     *)                     die "未知参数：$1（-h 查看用法）" ;;
   esac
 done
@@ -90,6 +101,60 @@ fi
 TGZ="$(ls docker-*.tgz)"
 log "使用 Docker 安装包：$TGZ"
 
+# ── 数据目录选择（/var 紧时引导切到 /home，避免装完撑爆）─────────────────
+# 默认 docker → /var/lib/docker，containerd → /var/lib/containerd（不动）。
+# /var 可用 < 15G 时打 warn 并交互询问，确认后写 /home/{docker,containerd}-data。
+# 详见 design doc deployments-release-enhancements-20260520.md "数据目录" 段。
+DATA_ROOT=""           # 空 = 走 docker 默认 /var/lib/docker
+CONTAINERD_ROOT=""     # 空 = 走 containerd 默认 /var/lib/containerd
+THRESHOLD_GB=15
+
+avail_gb() {
+  local kb
+  kb=$(df -k "$1" 2>/dev/null | tail -1 | awk '{print $4+0}')
+  [ -z "$kb" ] && kb=0
+  echo $((kb / 1024 / 1024))
+}
+
+VAR_AVAIL_GB=$(avail_gb /var)
+if [ "$VAR_AVAIL_GB" -lt "$THRESHOLD_GB" ]; then
+  HOME_AVAIL_GB=$(avail_gb /home)
+  echo
+  warn "/var 可用空间 ${VAR_AVAIL_GB}G < ${THRESHOLD_GB}G —— docker 数据放 /var 容易撑爆"
+  echo
+  echo "  建议改用 /home（/home 可用 ${HOME_AVAIL_GB}G）："
+  echo "    docker 数据    → /home/docker-data"
+  echo "    containerd 数据 → /home/containerd-data"
+  if [ "$HOME_AVAIL_GB" -lt "$THRESHOLD_GB" ]; then
+    echo
+    warn "/home 可用 ${HOME_AVAIL_GB}G 也 < ${THRESHOLD_GB}G —— 两个分区都紧张，仍可切但风险类似"
+  fi
+  echo
+
+  if [ -t 0 ]; then
+    read -rp "切换到 /home？[Y/n] " yn
+  else
+    yn=""
+    log "（非交互模式：stdin 非 TTY → 自动按 Y 处理）"
+  fi
+
+  case "${yn:-Y}" in
+    [Yy]*|"")
+      DATA_ROOT="/home/docker-data"
+      CONTAINERD_ROOT="/home/containerd-data"
+      log "已切换：docker data-root → ${DATA_ROOT}"
+      log "         containerd root  → ${CONTAINERD_ROOT}"
+      ;;
+    *)
+      warn "继续使用默认 /var/lib，docker 装完后磁盘可能很快撑爆"
+      ;;
+  esac
+fi
+
+# 如选切换：建目录并设权限（docker 数据目录权限通常 0711）
+if [ -n "$DATA_ROOT" ];       then mkdir -p "$DATA_ROOT";       chmod 0711 "$DATA_ROOT";       fi
+if [ -n "$CONTAINERD_ROOT" ]; then mkdir -p "$CONTAINERD_ROOT"; chmod 0711 "$CONTAINERD_ROOT"; fi
+
 # ── 解压二进制 ──────────────────────────────────────────────────────────
 log "解压 $TGZ ..."
 tar xzf "$TGZ"
@@ -103,14 +168,18 @@ if [ -f docker-compose ]; then
 fi
 
 # ── systemd 单元：containerd ────────────────────────────────────────────
-cat > /etc/systemd/system/containerd.service <<'EOF'
+# ExecStart 按需附加 --root <DIR>（来自上面的数据目录选择）
+CONTAINERD_EXEC="/usr/local/bin/containerd"
+[ -n "$CONTAINERD_ROOT" ] && CONTAINERD_EXEC="${CONTAINERD_EXEC} --root ${CONTAINERD_ROOT}"
+
+cat > /etc/systemd/system/containerd.service <<EOF
 [Unit]
 Description=containerd container runtime
 After=network.target
 
 [Service]
 ExecStartPre=-/sbin/modprobe overlay
-ExecStart=/usr/local/bin/containerd
+ExecStart=${CONTAINERD_EXEC}
 Restart=always
 RestartSec=5
 Delegate=yes
@@ -143,6 +212,39 @@ KillMode=process
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# ── docker data-root 写入 daemon.json（仅当用户选了切换）─────────────────
+# 用 python3 merge 保留 daemon.json 其它键（后续 setup-mirrors.sh 写
+# registry-mirrors 不会被覆盖）。
+if [ -n "$DATA_ROOT" ]; then
+  DAEMON_JSON=/etc/docker/daemon.json
+  mkdir -p /etc/docker
+  [ -f "$DAEMON_JSON" ] && cp -a "$DAEMON_JSON" "$DAEMON_JSON.bak.$(date +%Y%m%d%H%M%S)"
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$DAEMON_JSON" "$DATA_ROOT" <<'PYEOF'
+import json, os, sys
+p, dr = sys.argv[1], sys.argv[2]
+data = {}
+if os.path.exists(p) and os.path.getsize(p) > 0:
+    try:
+        data = json.load(open(p))
+    except json.JSONDecodeError:
+        data = {}
+data['data-root'] = dr
+with open(p, 'w') as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+    f.write('\n')
+PYEOF
+  else
+    if [ -s "$DAEMON_JSON" ]; then
+      warn "未装 python3 且 daemon.json 已有内容；data-root 未写入。
+            请手动在 $DAEMON_JSON 加： \"data-root\": \"$DATA_ROOT\""
+    else
+      printf '{\n  "data-root": "%s"\n}\n' "$DATA_ROOT" > "$DAEMON_JSON"
+    fi
+  fi
+  log "已写入 ${DAEMON_JSON}：data-root = ${DATA_ROOT}"
+fi
 
 # ── 启用并启动（开机自启）────────────────────────────────────────────────
 getent group docker >/dev/null 2>&1 || groupadd docker
@@ -185,6 +287,13 @@ if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
   fi
 fi
 
+echo
+DATA_ROOT_DISPLAY="${DATA_ROOT:-/var/lib/docker (默认)}"
+CONTAINERD_ROOT_DISPLAY="${CONTAINERD_ROOT:-/var/lib/containerd (默认)}"
+log "数据目录："
+log "  · docker data-root  ：${DATA_ROOT_DISPLAY}"
+log "  · containerd root   ：${CONTAINERD_ROOT_DISPLAY}"
+log "  · 校验：docker info | grep -E 'Docker Root Dir|Containerd'"
 echo
 log "全部完成。下一步建议："
 log "  · 一键部署 OMC：    sudo bash ../deploy/deploy.sh"

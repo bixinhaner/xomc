@@ -333,6 +333,26 @@ systemctl enable --now docker
 docker version                # 确认 Client/Server 均正常
 ```
 
+**自动检测 `/var` 容量**：脚本在解压二进制前会 `df` 检查 `/var` 可用空间。
+**可用 < 15G 时弹出提示**：
+
+```
+⚠ /var 可用空间 4G < 15G —— docker 数据放 /var 容易撑爆
+  建议改用 /home（/home 可用 35G）：
+    docker 数据    → /home/docker-data
+    containerd 数据 → /home/containerd-data
+切换到 /home？[Y/n]
+```
+
+- **回车（默认 Y）** → 自动建 `/home/{docker,containerd}-data` 并配置：
+  - `/etc/docker/daemon.json` 的 `data-root` 指向 `/home/docker-data`
+  - `containerd.service` 的 `ExecStart` 加 `--root /home/containerd-data`
+- **输入 n** → 继续走默认 `/var/lib/{docker,containerd}`（自担撑爆风险）
+- **非交互模式**（stdin 非 TTY，例如被 deploy.sh 调起）：自动按 Y 切换
+
+装完用 `docker info | grep -E 'Docker Root Dir|Containerd'` 复核两个路径生效。
+`/var` 可用 ≥ 15G 时不弹提示，行为与之前一致。
+
 ### 步骤 3 — 导入 Docker 镜像
 
 镜像来自基础设施包，导入到本机一次即可（项目升级不需重导）。

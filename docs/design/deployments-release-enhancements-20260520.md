@@ -6,6 +6,31 @@
 
 ---
 
+## v4 收口（2026-05-20 当日演进 — install-docker.sh 数据目录智能检测）
+
+baicells 构建机 `/var` 仅 4.9G LV，跑 `build-images.sh` 拉镜像直接撑爆
+`/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/`。
+针对"紧凑 `/var`"这类常见 Linux server 配置，给 `install-docker.sh` 加自动检测：
+
+- **触发**：解压二进制前 `df -k /var` 取可用 KB → 换算 GB → < 15G 触发提示
+- **提示内容**：报告 /var 实际可用 + /home 实际可用 + 推荐路径
+  - docker → `/home/docker-data`
+  - containerd → `/home/containerd-data`
+- **默认行为**：回车（默认 Y）切到 /home；输入 n 保留 /var/lib；非 TTY 自动按 Y
+- **/home 也紧张时**：仍切，但额外打一条"两个分区都紧张"warn
+- **落地**：
+  - containerd：`containerd.service` 的 `ExecStart` 拼 `--root /home/containerd-data`
+  - docker：python3 merge `/etc/docker/daemon.json`，`data-root: /home/docker-data`
+    （与 setup-mirrors.sh 写 `registry-mirrors` 同款 merge，两键共存不冲突）
+- **不加 CLI flag**：用户决定后由脚本内置路径执行，简化 UX；CI / 自动化场景靠
+  非 TTY → 自动 Y 兜底
+
+阈值 15G 由"基础栈镜像 ~3G + 监控栈 ~5G + 中间层 + 容器运行时余量"推算而来。
+未来若要做更激进的容量预估，可在 `build-images.sh` / `deploy.sh` 起始同样加
+`df` 预检（目前 `build-images.sh` 仍只把 containerd 原始错误冒泡出来）。
+
+---
+
 ## v3 收口（2026-05-20 当日演进 — 仅 amd64）
 
 `release.conf` 的 `ARCHES` 从 `"amd64 arm64"` 收紧为 `"amd64"`，三个构建脚本
