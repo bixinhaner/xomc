@@ -28,7 +28,20 @@ interface CreateGroupArgs {
 
 interface UpdateGroupArgs {
   id: string;
-  data: { name?: string; parent_id?: string; remark?: string };
+  data: {
+    name?: string;
+    parent_id?: string;
+    remark?: string;
+    /**
+     * 匹配规则字段（device-list-and-group-improvements-20260520.md R1.1）：
+     * 之前类型只允许 name/parent_id/remark，导致 L2 编辑改匹配规则时被 TS 静默
+     * 截断 → 后端收不到 → fireGroupMatch 跑旧规则 → 设备不重新入组。
+     */
+    matching_mode?: 'deviceName' | 'lac' | 'tac';
+    name_rule_list?: NameFilterItem[];
+    lac_list?: number[];
+    tac_list?: number[];
+  };
 }
 
 export interface MutationLike<TArgs> {
@@ -155,8 +168,35 @@ export function useGroupActions(deps: {
       if (!grp) return;
       setEditLevel2GroupId(groupId);
       editLevel2Form.resetFields();
-      editLevel2Form.setFieldsValue({ name: grp.name, matchingMode: 'deviceName', tacRag: '' });
-      editLevel2NameFilters.reset();
+
+      // R1.2: 回填当前分组的匹配规则到表单。之前这里硬编码 'deviceName' + 空
+      // tacRag，无视 grp 的真实规则，导致用户打开编辑抽屉看到的就是空白。
+      const mode: AddChildFormValues['matchingMode'] =
+        grp.matchingMode === 'lac' || grp.matchingMode === 'tac' ? grp.matchingMode : 'deviceName';
+
+      let tacRag = '';
+      if (mode === 'lac' && grp.lacList && grp.lacList.length > 0) {
+        tacRag = grp.lacList.join(',');
+      } else if (mode === 'tac' && grp.tacList && grp.tacList.length > 0) {
+        tacRag = grp.tacList.join(',');
+      }
+
+      editLevel2Form.setFieldsValue({ name: grp.name, matchingMode: mode, tacRag });
+
+      // 回填 name_rule_list 到 NameFilters hook 的内部状态
+      if (mode === 'deviceName' && Array.isArray(grp.nameRuleList) && grp.nameRuleList.length > 0) {
+        // 注入既有规则；保持原 ID 让 React key 稳定（避免不必要重渲染）
+        editLevel2NameFilters.setFilters(grp.nameRuleList.map((r, i) => ({
+          // 后端返回的 NameFilterItem 可能缺 id（仅 condition/value/andOr）；缺失时补一个
+          id: r.id || `r-${i}-${Date.now()}`,
+          condition: r.condition,
+          value: r.value,
+          andOr: r.andOr,
+        })));
+      } else {
+        editLevel2NameFilters.reset();
+      }
+
       setEditLevel2DrawerOpen(true);
     },
     [editLevel2Form, editLevel2NameFilters, groups]
@@ -269,16 +309,53 @@ export function useGroupActions(deps: {
     try {
       const values = await editLevel2Form.validateFields();
       if (!editLevel2GroupId) return;
+
+      // R1.3: 全量替换语义 — 用户在表单上看到的就是最终落库的，避免增量合并歧义。
+      // 切换 matchingMode 时显式清空非当前模式的列表字段，让后端覆盖为空数组。
+      let matching_mode: 'deviceName' | 'lac' | 'tac' | undefined;
+      let name_rule_list: NameFilterItem[] = [];
+      let lac_list: number[] = [];
+      let tac_list: number[] = [];
+
+      if (values.matchingMode === 'deviceName') {
+        matching_mode = 'deviceName';
+        name_rule_list = editLevel2NameFilters.filters.filter(
+          (f) => f.value && f.value.trim() !== ''
+        );
+      } else if (values.matchingMode === 'lac') {
+        matching_mode = 'lac';
+        lac_list = parseRangeString(values.tacRag || '');
+      } else if (values.matchingMode === 'tac') {
+        matching_mode = 'tac';
+        tac_list = parseRangeString(values.tacRag || '');
+      }
+
       await updateGroupMutation.mutateAsync({
         id: editLevel2GroupId,
-        data: { name: values.name },
+        data: {
+          name: values.name,
+          matching_mode,
+          name_rule_list,
+          lac_list,
+          tac_list,
+        },
       });
       void message.success(t('common.success'));
       setEditLevel2DrawerOpen(false);
+      void refetchGroups();
     } catch (err) {
       handleSaveError(err);
     }
-  }, [editLevel2Form, editLevel2GroupId, updateGroupMutation, message, t, handleSaveError]);
+  }, [
+    editLevel2Form,
+    editLevel2GroupId,
+    editLevel2NameFilters.filters,
+    updateGroupMutation,
+    message,
+    t,
+    refetchGroups,
+    handleSaveError,
+  ]);
 
   const handleMatchingModeChange = useCallback(() => {
     childNameFilters.reset();

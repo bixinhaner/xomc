@@ -194,6 +194,15 @@ export interface DeviceGroup {
   networkType?: string;
   /** 产品类型 */
   productType?: string;
+  /**
+   * 设备分组匹配规则字段（来自后端 device_groups 表）。L2 子分组编辑入口
+   * （DeviceGrouping/useGroupActions.tsx openEditLevel2）需要这些字段才能
+   * 把原规则回填到表单 — 缺失就是 bug 入口（用户改"匹配规则"但表单显示空）。
+   */
+  matchingMode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+  nameRuleList?: NameFilterItem[];
+  lacList?: number[];
+  tacList?: number[];
 }
 
 export interface DeviceFilter {

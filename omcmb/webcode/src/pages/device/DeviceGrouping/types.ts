@@ -11,6 +11,14 @@ export interface GroupItem {
   description: string;
   /** 是否为内置设备组：1=内置, 0=自定义 */
   builtIn: number;
+  /**
+   * 匹配规则字段 — 由 deviceApi.getGroups() walk() 透传后端 device_groups 表。
+   * L2 子分组编辑入口（useGroupActions.openEditLevel2）回填表单依赖这些字段。
+   */
+  matchingMode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+  nameRuleList?: NameFilterItem[];
+  lacList?: number[];
+  tacList?: number[];
 }
 
 // Filter condition options helper

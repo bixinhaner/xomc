@@ -21,7 +21,8 @@ import type { FilterField } from '@/components/FilterBar';
 import StatisticsPanel from '@/components/StatisticsPanel';
 import StatusIndicator from '@/components/StatusIndicator';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
-import { useDeviceList, useBatchRebootDevices } from '@core/hooks/api/useDevices';
+import { useDeviceList, useBatchRebootDevices, useDeviceGroups } from '@core/hooks/api/useDevices';
+import { useDictionary } from '@core/hooks/api/useSystem';
 import { useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
 import { useCreateUnifiedFileTransferTask } from '@core/hooks/api/useUnifiedFileTransfer';
 import { useDownloadStationLog } from '@core/hooks/api/useStationLog';
@@ -322,6 +323,36 @@ export default function DeviceList() {
   const total = data?.total ?? 0;
   const stats = data?.stats ?? { total: 0, online: 0, offline: 0, alarmed: 0 };
 
+  // R6b: 设备分组下拉接入 device/group API（device-list-and-group-improvements-20260520.md R6b）
+  const { data: groupsResp } = useDeviceGroups();
+  const groupOptions = useMemo(() => {
+    const groups = groupsResp?.groups ?? [];
+    // 仅 L2 子分组可作为设备过滤目标（L1 是容器）；用 parentName / name 双层展示便于辨识
+    const byId = new Map(groups.map((g) => [g.id, g]));
+    return groups
+      .filter((g) => g.parentId !== null) // 排除 L1 根分组
+      .map((g) => {
+        const parent = g.parentId ? byId.get(g.parentId) : null;
+        return {
+          label: parent ? `${parent.name} / ${g.name}` : g.name,
+          value: g.id,
+        };
+      });
+  }, [groupsResp]);
+
+  // R6c: 字典驱动 — 在线状态 / 激活状态 / 网络制式 / 产品类型
+  // 字典 code 与种子数据在 migrations/000136 维护。
+  const { data: connStatusDict } = useDictionary('conn_status');
+  const { data: opStateDict } = useDictionary('op_state');
+  const { data: networkTypeDict } = useDictionary('network_type');
+  const { data: productTypeDict } = useDictionary('product_type');
+
+  const dictToOptions = useCallback(
+    (dict: { sysDictionaryDetails?: { label: string; value: string }[] } | undefined) =>
+      (dict?.sysDictionaryDetails ?? []).map((d) => ({ label: d.label, value: d.value })),
+    [],
+  );
+
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
     major: t('alarm.severity.major'),
@@ -362,54 +393,35 @@ export default function DeviceList() {
     },
 
     // --- 筛选项：三制式公共（默认显示） ---
+    // R6a + R6c: connStatus 改字典驱动；字典 conn_status 仅含 online/offline 两项，
+    // 同步中/同步失败收敛（device-list-and-group-improvements-20260520.md D4）
     {
       name: 'connStatus',
       label: t('device.connStatus'),
       type: 'multi-select',
       width: 160,
-      options: [
-        { label: t('filter.conn.normal'), value: '1' },
-        { label: t('filter.conn.disconnected'), value: '0' },
-        { label: t('filter.conn.syncing'), value: '3' },
-        { label: t('filter.conn.syncFailed'), value: '2' },
-      ],
+      options: dictToOptions(connStatusDict),
     },
     {
       name: 'opState',
       label: t('device.opState'),
       type: 'select',
       width: 160,
-      options: [
-        { label: t('status.active'), value: '1' },
-        { label: t('status.inactive'), value: '0' },
-      ],
+      options: dictToOptions(opStateDict),
     },
     {
       name: 'networkType',
       label: t('device.radioMode'),
       type: 'select',
       width: 160,
-      options: [
-        { label: 'eNB (LTE)', value: 'eNB' },
-        { label: 'gNB (NR)', value: 'gNB' },
-      ],
+      options: dictToOptions(networkTypeDict),
     },
     {
       name: 'productModel',
       label: t('device.productType'),
       type: 'multi-select',
       width: 160,
-      options: [
-        // eNB 产品类型（LTE）
-        { label: 'PM-B4860', value: 'PM-B4860' },
-        { label: 'QAFA', value: 'QAFA' },
-        { label: 'QATA', value: 'QATA' },
-        { label: 'QAFB', value: 'QAFB' },
-        { label: 'RTD', value: 'RTD' },
-        // gNB 产品类型（NR）
-        { label: 'BaiBNX', value: 'BaiBNX' },
-        { label: 'BaiBNQ', value: 'BaiBNQ' },
-      ],
+      options: dictToOptions(productTypeDict),
     },
 
     // --- 筛选项：三制式公共（默认折叠） ---
@@ -417,27 +429,40 @@ export default function DeviceList() {
       name: 'modelName',
       label: t('device.model'),
       type: 'multi-select',
+      width: 160,
       options: [],  // TODO: 动态加载 /cell/cpeinfos/getModelNameList.action
     },
     {
       name: 'softwareVersion',
       label: t('device.softwareVersion'),
       type: 'multi-select',
+      width: 160,
       options: [],  // TODO: 动态加载 /cell/cpeinfos/getCellVersionList.action
     },
     {
       name: 'firmwareVersion',
       label: t('device.firmwareVersion'),
       type: 'multi-select',
+      width: 160,
       options: [],  // TODO: 动态加载 /cell/cpeinfos/getFirmwareVersionList.action
     },
+    // R4 + R6b: groupId 加 width:160 对齐 + 接入 useDeviceGroups
     {
       name: 'groupId',
       label: t('device.groupName'),
       type: 'multi-select',
-      options: [],  // TODO: 动态加载 /cell/cpeinfos/getDeviceGroupListByCell.action
+      width: 160,
+      options: groupOptions,
     },
-  ], [t]);
+  ], [
+    t,
+    connStatusDict,
+    opStateDict,
+    networkTypeDict,
+    productTypeDict,
+    groupOptions,
+    dictToOptions,
+  ]);
 
   // 统计面板 — 基于筛选条件的全量统计（由后端/mock 返回，非当前页）
   const statsItems = useMemo(() => [
@@ -1360,92 +1385,92 @@ export default function DeviceList() {
     },
   ], [t, handleViewLog]);
 
+  // R3: 导出按钮挪到 FilterBar 搜索按钮右侧（device-list-and-group-improvements-20260520.md R3）。
+  // ListPageLayout.extra 不再承载，让筛选区与导出动作在视觉上一行对齐。
+  const exportButton = (
+    <div
+      ref={exportMenuRef}
+      style={{ position: 'relative', display: 'inline-flex' }}
+    >
+      <Button
+        type="primary"
+        icon={<ExportOutlined />}
+        aria-haspopup="menu"
+        aria-expanded={exportMenuOpen}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setExportMenuOpen((open) => !open);
+        }}
+      >
+        {t('common.export')}
+      </Button>
+
+      {exportMenuOpen && (
+        <div
+          role="menu"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 8px)',
+            right: 0,
+            minWidth: 96,
+            padding: 6,
+            borderRadius: 8,
+            border: '1px solid var(--color-border-secondary, #303030)',
+            background: 'var(--color-bg-elevated, #1f1f1f)',
+            boxShadow: '0 12px 32px rgba(0, 0, 0, 0.28)',
+            zIndex: 40,
+          }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => handleExport('xlsx')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              width: '100%',
+              padding: '8px 12px',
+              border: 'none',
+              borderRadius: 6,
+              background: 'transparent',
+              color: 'var(--color-text, rgba(255,255,255,0.88))',
+              cursor: 'pointer',
+              font: 'inherit',
+              textAlign: 'left',
+            }}
+          >
+            XLSX
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => handleExport('csv')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              width: '100%',
+              padding: '8px 12px',
+              border: 'none',
+              borderRadius: 6,
+              background: 'transparent',
+              color: 'var(--color-text, rgba(255,255,255,0.88))',
+              cursor: 'pointer',
+              font: 'inherit',
+              textAlign: 'left',
+            }}
+          >
+            CSV
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <div style={{ flex: '1 1 100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <ListPageLayout
-          extra={
-            <Space>
-              <div
-                ref={exportMenuRef}
-                style={{ position: 'relative', display: 'inline-flex' }}
-              >
-                <Button
-                  type="primary"
-                  icon={<ExportOutlined />}
-                  aria-haspopup="menu"
-                  aria-expanded={exportMenuOpen}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    setExportMenuOpen((open) => !open);
-                  }}
-                >
-                  {t('common.export')}
-                </Button>
-
-                {exportMenuOpen && (
-                  <div
-                    role="menu"
-                    style={{
-                      position: 'absolute',
-                      top: 'calc(100% + 8px)',
-                      right: 0,
-                      minWidth: 96,
-                      padding: 6,
-                      borderRadius: 8,
-                      border: '1px solid var(--color-border-secondary, #303030)',
-                      background: 'var(--color-bg-elevated, #1f1f1f)',
-                      boxShadow: '0 12px 32px rgba(0, 0, 0, 0.28)',
-                      zIndex: 40,
-                    }}
-                  >
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => handleExport('xlsx')}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        width: '100%',
-                        padding: '8px 12px',
-                        border: 'none',
-                        borderRadius: 6,
-                        background: 'transparent',
-                        color: 'var(--color-text, rgba(255,255,255,0.88))',
-                        cursor: 'pointer',
-                        font: 'inherit',
-                        textAlign: 'left',
-                      }}
-                    >
-                      XLSX
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => handleExport('csv')}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        width: '100%',
-                        padding: '8px 12px',
-                        border: 'none',
-                        borderRadius: 6,
-                        background: 'transparent',
-                        color: 'var(--color-text, rgba(255,255,255,0.88))',
-                        cursor: 'pointer',
-                        font: 'inherit',
-                        textAlign: 'left',
-                      }}
-                    >
-                      CSV
-                    </button>
-                  </div>
-                )}
-              </div>
-            </Space>
-          }
-        >
+        <ListPageLayout>
           <FilterBar
             filterId="device-list"
             fields={FILTER_FIELDS}
@@ -1453,6 +1478,7 @@ export default function DeviceList() {
             onReset={handleReset}
             collapsedRows={1}
             initialValues={filterParams}
+            extra={exportButton}
           />
 
           <StatisticsPanel items={statsItems} style={{ marginBottom: 8 }} />

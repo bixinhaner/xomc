@@ -1,5 +1,5 @@
 import http from '../http';
-import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter, CreateDeviceInput } from '../../types/device';
+import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter, CreateDeviceInput, NameFilterItem } from '../../types/device';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 
 // Backend device model from Go struct
@@ -416,7 +416,8 @@ export const deviceApi = {
 
   async getGroups(): Promise<{ groups: DeviceGroup[]; stats: { totalDevices: number } }> {
     // Backend GET /device-groups/tree returns nested tree with device counts.
-    // We flatten it to a flat list so the frontend tree builder works.
+    // 我们摊平为列表给前端树构造器；同时**保留 matching rule 字段**（matching_mode /
+    // name_rule_list / lac_list / tac_list），让 L2 编辑入口能回填原规则。
     interface BackendGroupItem {
       id: string;
       name: string;
@@ -426,6 +427,11 @@ export const deviceApi = {
       remark: string;
       is_default: boolean;
       level: number;
+      // 匹配规则字段（service.go DeviceGroup 反序列化）
+      matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
+      name_rule_list?: NameFilterItem[];
+      lac_list?: number[];
+      tac_list?: number[];
       children?: BackendGroupItem[];
     }
     interface TreeResponse {
@@ -443,6 +449,10 @@ export const deviceApi = {
           deviceCount: g.device_count ?? 0,
           description: g.remark || g.description || '',
           builtIn: g.is_default ? 1 : 0,
+          matchingMode: g.matching_mode,
+          nameRuleList: g.name_rule_list,
+          lacList: g.lac_list,
+          tacList: g.tac_list,
         });
         if (g.children?.length) walk(g.children);
       }
@@ -453,12 +463,28 @@ export const deviceApi = {
     return { groups: flat, stats: { totalDevices } };
   },
 
-  async createGroup(data: { name: string; parent_id?: string; remark?: string }): Promise<DeviceGroup> {
+  async createGroup(data: {
+    name: string;
+    parent_id?: string;
+    remark?: string;
+    matching_mode?: 'deviceName' | 'lac' | 'tac';
+    name_rule_list?: NameFilterItem[];
+    lac_list?: number[];
+    tac_list?: number[];
+  }): Promise<DeviceGroup> {
     const { data: created } = await http.post<DeviceGroup>('/device-groups', data);
     return created;
   },
 
-  async updateGroup(id: string, data: { name?: string; remark?: string }): Promise<DeviceGroup> {
+  async updateGroup(id: string, data: {
+    name?: string;
+    parent_id?: string;
+    remark?: string;
+    matching_mode?: 'deviceName' | 'lac' | 'tac';
+    name_rule_list?: NameFilterItem[];
+    lac_list?: number[];
+    tac_list?: number[];
+  }): Promise<DeviceGroup> {
     const { data: updated } = await http.put<DeviceGroup>(`/device-groups/${id}`, data);
     return updated;
   },
