@@ -1,19 +1,37 @@
 # 阶段1: 安装依赖（利用 Docker 层缓存，package.json 不变时跳过）
-# node_modules 安装在 /app 层（父目录），这样 frontend-core 里 `import 'zustand'`
-# 之类的模块解析能按 Node 标准行为向上查找到 /app/node_modules。
+#
+# omcmb/ 是 npm workspaces 根（见 omcmb/package.json 的 workspaces 字段），
+# 唯一权威 lock 文件是 omcmb/package-lock.json。webcode/ 已不再是独立包，
+# 不能再单独 `npm ci`——必须把 workspace 根 + 全部 member 的 package.json
+# 都拷进来，npm 才能验证 workspace 树并按根 lock 安装。
+#
+# node_modules 由 workspace hoist 到 /app/node_modules，这样 frontend-core
+# 里 `import 'zustand'` 之类的模块解析能按 Node 标准行为向上查找到 /app/node_modules。
 FROM node:20-alpine AS deps
 
 # 显式声明为 development，避免宿主机 / CI / buildx 把 NODE_ENV=production 传入，
 # 导致 `npm ci` 跳过 devDependencies——本项目的 vite / typescript / vitest
-# 等构建工具都在 devDependencies，一旦被跳过下一 stage 就会 `sh: vite: not found`
-# （参见本轮 to-do-list 报告的服务器报错）。
+# 等构建工具都在 devDependencies，一旦被跳过下一 stage 就会 `sh: vite: not found`。
 ENV NODE_ENV=development
 
 WORKDIR /app
 
-RUN npm config set registry https://registry.npmmirror.com
+RUN npm config set registry https://registry.npmmirror.com \
+    && npm config set fetch-retries 5 \
+    && npm config set fetch-retry-mintimeout 20000 \
+    && npm config set fetch-retry-maxtimeout 120000 \
+    && npm config set fetch-timeout 300000 \
+    && npm config set maxsockets 3
 
-COPY omcmb/webcode/package.json omcmb/webcode/package-lock.json ./
+# Workspace 根的 package.json + 唯一权威 lock 文件
+COPY omcmb/package.json omcmb/package-lock.json ./
+
+# 全部 4 个 workspace member 的 package.json——少一个 npm ci 会报
+# "workspace not found" 拒绝安装
+COPY omcmb/frontend-core/package.json ./frontend-core/
+COPY omcmb/webcode/package.json       ./webcode/
+COPY omcmb/webcode-v2/package.json    ./webcode-v2/
+COPY omcmb/webcode-v3/package.json    ./webcode-v3/
 
 # --include=dev：进一步兜底强制安装 devDependencies（即使 NODE_ENV 意外被改）
 # --legacy-peer-deps：跳过 peer dependency 版本冲突检查
@@ -29,35 +47,28 @@ FROM node:20-alpine AS builder
 # vite build 本身会把产物里的 process.env.NODE_ENV 写为 production，不受本 ENV 影响。
 ENV NODE_ENV=development
 
-# 保留 webcode / frontend-core 同级目录结构：vite.config.ts 中的 `@core` alias
-# 指向 `../frontend-core/src`，必须把 frontend-core 也拷入构建上下文。node_modules
-# 放在共同父目录 /app 使 frontend-core 源文件也能解析到 webcode 声明的依赖。
 WORKDIR /app
 
-# 先放置 node_modules（在 /app 层），再拷贝 webcode / frontend-core 源码。
-COPY --from=deps /app/node_modules ./node_modules
+# 从 deps 拷整个 /app（含 workspace 根 package.json、根 lock、hoist 后的 node_modules
+# 以及各 member 目录下的占位 package.json + 可能的小 node_modules）
+COPY --from=deps /app/ ./
 
-# 复制 webcode 源码到 /app/webcode（.dockerignore 已排除 node_modules / dist）
+# 覆盖源码：webcode（构建目标）+ frontend-core（@core alias 依赖源）
+# webcode-v2/v3 不参与本次构建，跳过
+# .dockerignore 已排除 node_modules / dist，不会污染 deps 装出来的 node_modules
 COPY omcmb/webcode/       ./webcode/
-# 复制 frontend-core 源码到 /app/frontend-core（@core alias 依赖）
 COPY omcmb/frontend-core/ ./frontend-core/
 
-# 清除可能残留的旧构建产物与 webcode 内已有的 node_modules（避免覆盖 /app 层）
-RUN rm -rf webcode/dist webcode/node_modules
+# 清除可能残留的旧构建产物
+RUN rm -rf webcode/dist
 
-# 在 webcode 目录里跑 build；vite 通过 Node 的模块向上查找命中 /app/node_modules。
-WORKDIR /app/webcode
-
-# npm 只会把"项目根"下的 node_modules/.bin 加入 PATH（不会向上回溯父目录的
-# node_modules/.bin）。而依赖安装在 /app/node_modules，所以必须显式把 /app
-# 层的 .bin 注入 PATH，否则 `npm run build` 会报 `sh: vite: not found`。
-ENV PATH=/app/node_modules/.bin:$PATH
-
-RUN npm run build
+# 通过 workspace 入口构建 webcode；npm 会自动把 /app/node_modules/.bin
+# 注入到子 workspace 的执行环境，所以不需要手动设置 PATH
+RUN npm run build --workspace webcode
 
 # 验证构建产物完整性：index.html 引用的主入口文件必须存在
-RUN grep -oE '/assets/[^"]+\.js' dist/index.html | while read f; do \
-      test -f "dist$f" || { echo "ERROR: build output missing: dist$f"; exit 1; }; \
+RUN grep -oE '/assets/[^"]+\.js' webcode/dist/index.html | while read f; do \
+      test -f "webcode/dist$f" || { echo "ERROR: build output missing: webcode/dist$f"; exit 1; }; \
     done
 
 # 阶段3: Nginx 静态服务
