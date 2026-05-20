@@ -1273,3 +1273,169 @@ P1.c 完成后即可跑端到端验证：
 ---
 
 > 审核通过后，按 §10 拆 P1 Sprint（P1.a/P1.b/P1.c 三轨并行），P2/P3 按依赖顺序后续滚动。
+
+---
+
+## 15. v2.4 修订 — 命令分组进一步合并 + 操作面板精简（2026-05-20）
+
+### 15.1 背景
+
+v2.3 主方案落地后，用户在浏览器实测反馈 11 项 UX / 数据组织上的问题，
+集中在 **(A) 命令分组层颗粒度过细**（72 个 group 滑动列表过长 + 重复语义）、
+**(B) 命令详情层**（path 列图标语义不清、MOD 命令出现空 path 列表）、
+**(C) 操作面板**（两个全选按钮、冗余 DO 按钮、用户感知不到的拼接命令 TextArea）。
+
+本节给出**收口合并方案**，作为 v2.4 增量；不推翻 v2.3 的 R-1~R-10 与
+catalog loader 架构，只在**展示维度**与**生成校验**上做合并 / 精简。
+
+### 15.2 用户原始问题（11 项）
+
+**A. 命令分组合并诉求（6 项）**
+- A1. `设备信息` + `设备版本升级` → 合并为 `设备信息`
+- A2. `当前/实时/历史/队列/支持告警实例` → 合并为 `告警实例`
+- A3. 两个"能力集"分组合并（FAPService Capabilities + CellConfig Capabilities）
+- A4. `SCTP` + `SCTP Assoc` 合并（类似的还有很多）
+- A5. `A1 测量控制 / A2 / A3 / A4 / A5 / B1 / B2 / 周期测量控制` 高度重复
+- A6. `IPv4 地址` + `IPv6 地址` 等 IP 相关合并
+
+**B. 命令详情问题（2 项）**
+- B1. path 列表后面的"图标"含义不明（特别是"笔"图标），表面看可编辑但无法编辑
+- B2. 切到"修改 设备信息"命令时**无 path 可勾选** —— 设备信息真不支持修改 / 还是 UI bug？
+  推论：**没有任何可修改 path 的"修改 X"命令本就不应该存在**
+
+**C. 操作面板问题（3 项）**
+- C1. 右侧 path 列表下方 `全选` + `全不选` 两个按钮 → 应合为单按钮，按状态显示文案
+- C2. `DO` 按钮删除（历史 MML 交互式 console 遗留）
+- C3. 底部 TextArea 显示拼接后的 MML 命令字符串 → **隐藏**（用户无感，后端 API 走结构化通道传 path 数组即可）
+
+### 15.3 决策清单（v2.4 增量，沿用 D-NN 编号）
+
+| 编号 | 决策点 | 取向 |
+|------|--------|------|
+| **D32** | 分组合并粒度 | 用 **"path prefix family"** 抽象层把多个 spec H4 block 合并为同一 family，family 作 catalog 一级（取代当前 1:1 映射 H4 的 group 一级）；每个 family 下保留多个 LST/MOD/ADD/RMV 子命令变体 |
+| **D33** | 合并范围 | 见 §15.4 的 9 个 family 合并表；catalog 命令清单从 **72 → 约 40 family**（再砍约 32 个） |
+| **D34** | 命令生成校验（应对 B2） | catalog loader **强约束**：生成 MOD 命令前必须先验证 target_paths 非空；空 RW 集合 → **完全不生成** MOD 命令（catalog JSON 里也不输出该 op_type 行）。已有 R-3 规则的实现侧 hardening |
+| **D35** | path 图标 legend（应对 B1） | path 列前 emoji 图标语义化 + 鼠标 hover tooltip：📖 只读 / 📝 可读可写 / 🔢 多实例占位。**笔图标 ✏️ 只在 MOD 命令上下文显示**，点击展开内联输入框（input new value）；LST 上下文下不渲染笔 |
+| **D36** | 全选按钮合一（应对 C1） | `ConsoleActionBar` 的 `selectAll` + `clearAll` 两个 callback 合并为单个 `onToggleAll`；按钮文案动态：未全选 → "全选" / 已全选 → "全部取消" |
+| **D37** | DO 按钮 + TextArea 去除（应对 C2、C3） | 删除 `MmlEditor` 组件整体 —— 它是 R-9.2 之前的旧文本通道残留，结构化通道（ConsoleActionBar）已替代。`RightPanel` 不再引用 MmlEditor |
+| **D38** | catalog 与前端 contract | family 字段加在 catalog JSON 的 group level：`"family": "device_info"` 等；前端 `group_tree` API 响应增加 family 维度；group_tree_repository 按 family 聚合后回前端 |
+
+### 15.4 Path-prefix-family 合并表（9 类，72 → 40 估计）
+
+| Family | 中文名 | 涉及 spec H4 group ID | 路径前缀公共子串 | 合并后命令构成 |
+|--------|--------|-----------------------|------------------|----------------|
+| `device_info` | 设备信息 | G-01 + G-02 | `Device.DeviceInfo.*` (≠ MU.*) | LST/MOD 设备信息 (17/2 paths) + LST 设备版本升级 (3 paths) |
+| `alarm_instances` | 告警实例 | G-05 + G-06 + G-07 + G-08 + G-09 + G-10 | `Device.FaultMgmt.*` | LST 故障管理统计 (6) + LST 当前/实时/历史/队列/支持告警 (11/11/11/11/5) + MOD/ADD/RMV 支持告警 (1) |
+| `capabilities` | 能力集 | G-18 + G-19 | `.Capabilities.*` (FAPService + CellConfig) | LST/MOD FAPService Capabilities (1) + LST/MOD CellConfig Capabilities (3/1) |
+| `sctp` | SCTP | G-23 + G-24 | `.Transport.SCTP.*` | LST/MOD SCTP 配置 (9/9) + LST SCTP Assoc (4) |
+| `measure_ctrl` | 测量控制 | G-36~G-44 (A1-A5/B1-B2/Periodic/IRAT) | `...ConnMode.*MeasureCtrl.*` | LST/MOD A1/A2/A3/A4/A5/B1/B2 测量控制 (11/10 各) + LST/MOD 周期测量 (4/4) + LST/MOD ConnMode IRAT (4/4) |
+| `ethernet_ip` | 以太网/IP | G-52~G-58 | `Device.Ethernet.*` | LST/MOD 接口 (9/4) + LST/MOD IPv4/IPv6 地址 (5/5 各) + LST/MOD VLAN 接口 (3) + LST/MOD VLAN IPv4/IPv6 (5/5) + LST/MOD IP 路由 (5) |
+| `idle_mode` | 空闲态移动性 | G-45 + G-46 + G-47 + G-48 + G-49 | `...Mobility.IdleMode.*` | LST/MOD IdleMode (28) + LST/MOD IRAT (2) + LST/MOD GERAN/UTRA 频组 (6) + LST/MOD 异频载波 (13) |
+| `hardware_units` | 硬件单元 | G-64 + G-65 + G-66 + G-67 + G-68 | `Device.DeviceInfo.MU.*` (非升级) | LST/MOD MU/Slot/EU/RU/RFChannel (24/16/13/16/2) |
+| `hardware_upgrade` | 硬件升级 | G-69 + G-70 + G-71 + G-72 | `Device.DeviceInfo.MU.*.SwUpgrade.*` | LST RU/EU/Slot/MU 升级 (3 各) |
+
+**合并前**：72 个 group / 一级菜单展开冗长
+**合并后**：~40 个 group / 一级菜单清爽；每个 family 下命令更多但语义相关性强
+
+未列入合并的 group（保留独立）：
+- 单点对象 group（如 G-03 软件控制、G-04 网管参数、G-11 日志管理、G-12 FAPControl LTE、G-13 安全/接入网关、G-14 MME 池、G-15 S1U、G-16 X2 IP 映射、G-17 FAPService 载波、G-25 RRC Timers、G-26 MAC、G-27 DRX、G-28 PHY、G-29 PHY MBSFN、G-30 MBSFN SFConfigList、G-31~G-34 邻区族 GSM/NR/UMTS/LTE、G-35 ConnMode EUTRA、G-50 SON、G-51 自配置启动、G-59 IPsec、G-60 时间、G-61 GPS、G-62 MR、G-63 PM、G-20 EPC、G-21 PLMNList、G-22 VoLTE PDCP）—— 单独保留是合理的，没有同类语义可合并
+
+> **邻区族（G-31~G-34）是否合并到 `neighbor_list` family**：可做但风险——4 个邻区类型 RW 字段差别较大（GSM=7, NR=12, UMTS=10, LTE=10），命令同名易混淆。**保留 4 个独立 group 暂不合并**，由用户在浏览器实测后另行判断。
+
+### 15.5 catalog 数据 schema 变更
+
+```diff
+ omcgo/datamodels/mml-catalog/cmcc-tdlte-v23.json:
+ {
+   "version": "v2.3",
+   "spec_doc_sha256": "...",
+   "groups": [
+     {
+       "group_code": "Device.DeviceInfo.*",
+       "name_zh": "设备信息",
++      "family": "device_info",        // ← 新增：family 标识，前端按此聚合
++      "family_name_zh": "设备信息",   // ← family 在 UI 上显示的中文名
+       "chapter": "SA",
+       "commands": [
+         { "op_type": "LST", "name_zh": "LST 设备信息", "target_paths": [...] },
+-        { "op_type": "MOD", "name_zh": "MOD 设备信息", "target_paths": [...] }  // RW=2
++        { "op_type": "MOD", "name_zh": "MOD 设备信息", "target_paths": [...] }
++        // ↑ D34：若 target_paths 为空，本行不应该出现（catalog loader 强制校验）
+       ]
+     },
+     ...
+   ]
+ }
+```
+
+family 标识可由 catalog loader 按 §15.4 表机械生成（不需 spec MD 改动），
+也可在 spec MD 里加 frontmatter 显式声明。**选机械生成**更安全（spec MD 是
+运营商规范原件，最小化改动）。
+
+### 15.6 后端改动
+
+**`internal/mml/catalogloader/`**：
+- `parser.go` 增加 family 推断函数 `inferFamily(groupCode string) (familyCode, familyNameZh string)`，按 §15.4 9 类规则做 path-prefix 匹配
+- `loader.go` 在 upsert group 前注入 `family_*` 字段
+- 校验：若 group.commands 含 MOD/ADD/RMV 但 target_paths 为空，loader 直接 die 并指向 §15.3 D34
+
+**`internal/mml/group_tree_repository.go`**：
+- 现状：每个 group 直接返回作为一级
+- 改后：按 group.family 二次聚合，family 作为一级返回，原 group 退到二级（"子 group"），命令在三级（per-op）
+
+DB schema：
+- `mml_command_groups` 表新增 `family_code VARCHAR(64)` + `family_name_zh VARCHAR(128)` 两列（迁移 000138 或下一编号；非破坏性）
+
+### 15.7 前端改动
+
+**目录**：`omcmb/webcode/src/pages/mml/Console/components/`
+
+**1. `RightPanel.tsx`**：
+- 删除 `import MmlEditor from './MmlEditor'` 与 `<MmlEditor onExecuted={onExecuted} />` 渲染（应对 C2 + C3）
+- `MmlEditor.tsx` 整个文件可标 `@deprecated` 但保留至少一个 Sprint 后再物理删除（防意外回滚需求）
+
+**2. `ConsoleActionBar.tsx`**：
+- props 变更：`selectAll` + `clearAll` → 合一为 `onToggleAll`（应对 D36 / C1）
+- 内部按当前 selectedCount vs totalCount 比较，按钮文案动态切换"全选" / "全部取消"
+
+**3. `SubFieldChecklist.tsx` + 路径列渲染**：
+- path 行的"笔图标"只在 MOD 上下文渲染（依据传入的 op_type prop）（应对 B1）
+- LST 模式：path 行只显示 emoji legend + path text，无任何编辑控件
+- 所有图标加 antd `Tooltip` 说明含义
+
+**4. `CommandTree.tsx`**：
+- 树形结构改为 3 层：family / sub-group / command（应对 D32+D38）
+- family 节点不可选（只能 expand），sub-group 节点点击展开命令列表，命令叶子点击进入操作面板
+
+### 15.8 路线图
+
+**P1（本轮立即落地，纯前端，不依赖 catalog 重建）**：
+- ✅ D36 全选按钮合一（ConsoleActionBar）
+- ✅ D37 删 MmlEditor 引用（RightPanel）+ DO 按钮 + TextArea
+- 风险：低；测试：现有 ConsoleActionBar.test.tsx 同步更新
+- 工作量：~半天
+
+**P2（catalog 重建 + 后端聚合 + 前端三级树）**：
+- D32+D33+D38 family 抽象层全链路
+- D34 MOD 空 path 校验（catalog loader 加 die）
+- D35 path 列图标 legend + 笔图标条件渲染
+- 风险：中；测试：catalog loader 测试 + group_tree_repository 测试 + Console e2e
+- 工作量：~1.5 周
+
+**P3（数据迁移）**：
+- 已部署环境的 `mml_command_groups` 表加 family_code 列 + 回填
+- 历史 mml_tasks 关联到旧 group 的不影响（任务记录引用 command_id 不引用 group_id）
+- 工作量：~1 天
+
+### 15.9 风险与回滚
+
+| 风险 | 概率 | 影响 | 缓解 |
+|------|------|------|------|
+| family 合并破坏现有 mml_commands.id 引用 | 低 | 高 | catalog loader 用 `path` 而非 `group_id` 作为命令稳定键；已有架构 |
+| 旧"修改 X"命令在生产数据库中存在但 target_paths 为空（D34 收紧后被剔除） | 中 | 中 | loader 入库前 dry-run 报告"将剔除 N 个空 MOD"，二次确认后 commit |
+| family 三级树导致命令路径变长（family.subgroup.command） | 低 | 低 | 面包屑显示 family + command 简写 |
+| 历史 mml_user_template 引用的命令被剔除 | 低 | 中 | 迁移脚本检测引用，标 deprecated 但不删 |
+
+回滚：v2.4 backout = 取消 family 字段读取 + 恢复 MmlEditor 引用 + 还原 ConsoleActionBar prop schema。3 次提交可全部 revert。
+
+---

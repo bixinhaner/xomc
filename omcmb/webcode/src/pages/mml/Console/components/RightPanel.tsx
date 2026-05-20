@@ -5,7 +5,8 @@ import { useExecuteStatementsStructured } from '@core/hooks/api/useMmlConsole';
 import { statementToStructured } from '@core/types/mmlConsole';
 import type { Statement } from '@core/types/mmlConsole';
 import type { MMLTask } from '@core/types/mml';
-import MmlEditor from './MmlEditor';
+// v2.4 D37：MmlEditor (拼接命令 textarea + DO 按钮) 已下线，结构化通道由
+// ConsoleActionBar 承担；不再 import。
 import SubFieldChecklist from './SubFieldChecklist';
 import SubFieldInputList from './SubFieldInputList';
 import InstancePicker from './InstancePicker';
@@ -144,18 +145,23 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
     [activeStatement, setInstanceSelectors],
   );
 
-  // LST 全选 / 全不选只对当前 activeStatement 的 subFields 操作
-  const handleSelectAll = useCallback(() => {
+  // v2.4 D36：LST 全选/全部取消 合一为 toggleAll 单按钮，按当前选中比例切换文案。
+  const allSelected = useMemo(() => {
+    if (!activeStatement || activeStatement.operationType !== 'LST') return false;
+    return (
+      activeStatement.subFields.length > 0 &&
+      activeStatement.selectedSubFieldIds.length === activeStatement.subFields.length
+    );
+  }, [activeStatement]);
+
+  const handleToggleAll = useCallback(() => {
     if (!activeStatement || activeStatement.operationType !== 'LST') return;
     updateStatement(activeStatement.uid, {
-      selectedSubFieldIds: activeStatement.subFields.map((sf) => sf.id),
+      selectedSubFieldIds: allSelected
+        ? []
+        : activeStatement.subFields.map((sf) => sf.id),
     });
-  }, [activeStatement, updateStatement]);
-
-  const handleClearAll = useCallback(() => {
-    if (!activeStatement || activeStatement.operationType !== 'LST') return;
-    updateStatement(activeStatement.uid, { selectedSubFieldIds: [] });
-  }, [activeStatement, updateStatement]);
+  }, [activeStatement, allSelected, updateStatement]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -174,7 +180,9 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
             label: t('mml.tabs.controlPanel'),
             children: (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <MmlEditor onExecuted={onExecuted} />
+                {/* v2.4 D37：MmlEditor (拼接命令 textarea + DO 执行按钮) 已下线，
+                    结构化通道由下方 ConsoleActionBar 承担；用户在 SubField 区勾选 path
+                    → 后端 API 通过结构化 standardPath[] 传，不再生成 MML 文本 */}
                 {/* 参数列表（LST/MOD/ADD/RMV 因 op 不同换皮）：选中长命令
                     如 LST DEVICE_INFO 可能有 200+ sub_fields，包一层
                     max-height + overflow:auto 防撑长页面。 */}
@@ -214,12 +222,10 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
                     deviceCount={selectedDeviceSns.length}
                     disabled={selectedDeviceSns.length === 0 || statements.length === 0}
                     loading={executeMutation.isPending}
-                    onSelectAll={
-                      activeStatement.operationType === 'LST' ? handleSelectAll : undefined
+                    onToggleAll={
+                      activeStatement.operationType === 'LST' ? handleToggleAll : undefined
                     }
-                    onClearAll={
-                      activeStatement.operationType === 'LST' ? handleClearAll : undefined
-                    }
+                    allSelected={allSelected}
                     onExecute={handleExecute}
                   />
                 )}

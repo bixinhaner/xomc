@@ -1,3 +1,10 @@
+/**
+ * @deprecated v2.4 D37（见 adjustment-plan §15）：本组件下线。
+ *   原职责：① TextArea 显示拼接的 MML 命令文本 ② "DO" 执行按钮直接走 useExecuteStatements 旧通道
+ *   下线原因：结构化通道（ConsoleActionBar + statementToStructured）已替代；用户不需要看到
+ *           拼接的 MML 文本（后端 API 直接收 structured path[]），TextArea 是冗余 UI。
+ *   去向：RightPanel.tsx 已移除引用；本文件保留 1 个 Sprint 后物理删除（防意外回滚需求）。
+ */
 import { useCallback, useMemo, type ChangeEvent } from 'react';
 import { Input, Button, Modal, Spin, Alert, message, Space } from 'antd';
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';

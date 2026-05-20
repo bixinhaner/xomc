@@ -29,10 +29,13 @@ export interface ConsoleActionBarProps {
   loading?: boolean;
   /** 校验所有值（MOD/ADD 模式可选） */
   onValidate?: () => void;
-  /** 全选 path / 字段 */
-  onSelectAll?: () => void;
-  /** 全不选 path / 字段 */
-  onClearAll?: () => void;
+  /**
+   * 切换全选/全部取消（v2.4 D36 — 合并 onSelectAll + onClearAll 为单个 toggle）。
+   * undefined 时按钮不渲染（如 MOD/ADD/RMV 模式下不需要全选）。
+   */
+  onToggleAll?: () => void;
+  /** 当前是否已经全部选中（决定按钮文案：未全选 → "全选"；已全选 → "全部取消"） */
+  allSelected?: boolean;
   /** 执行回调 */
   onExecute: () => void;
 }
@@ -44,8 +47,8 @@ export function ConsoleActionBar({
   disabled,
   loading,
   onValidate,
-  onSelectAll,
-  onClearAll,
+  onToggleAll,
+  allSelected,
   onExecute,
 }: ConsoleActionBarProps): JSX.Element {
   const t = useT();
@@ -84,14 +87,11 @@ export function ConsoleActionBar({
             {t('mml.console.actionBar.validate')}
           </Button>
         )}
-        {onSelectAll && (
-          <Button size="small" onClick={onSelectAll} disabled={loading}>
-            {t('mml.console.actionBar.selectAll')}
-          </Button>
-        )}
-        {onClearAll && (
-          <Button size="small" onClick={onClearAll} disabled={loading}>
-            {t('mml.console.actionBar.clearAll')}
+        {onToggleAll && (
+          <Button size="small" onClick={onToggleAll} disabled={loading}>
+            {allSelected
+              ? t('mml.console.actionBar.clearAll')
+              : t('mml.console.actionBar.selectAll')}
           </Button>
         )}
         <Button

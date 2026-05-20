@@ -59,28 +59,42 @@ describe('ConsoleActionBar', () => {
     expect(onExecute).not.toHaveBeenCalled();
   });
 
-  it('omits selectAll/clearAll/validate buttons when callbacks are undefined', () => {
+  it('omits toggleAll/validate buttons when callbacks are undefined', () => {
     render(<ConsoleActionBar operationType="LST" onExecute={() => undefined} />);
     expect(screen.queryByText('mml.console.actionBar.selectAll')).toBeNull();
     expect(screen.queryByText('mml.console.actionBar.clearAll')).toBeNull();
     expect(screen.queryByText('mml.console.actionBar.validate')).toBeNull();
   });
 
-  it('renders selectAll + clearAll only when callbacks provided', () => {
-    const onSelectAll = vi.fn();
-    const onClearAll = vi.fn();
+  it('renders toggleAll as "全选" when allSelected=false', () => {
+    const onToggleAll = vi.fn();
     render(
       <ConsoleActionBar
         operationType="LST"
-        onSelectAll={onSelectAll}
-        onClearAll={onClearAll}
+        onToggleAll={onToggleAll}
+        allSelected={false}
         onExecute={() => undefined}
       />,
     );
     fireEvent.click(screen.getByText('mml.console.actionBar.selectAll'));
+    expect(onToggleAll).toHaveBeenCalledOnce();
+    // 反向不应出现"全部取消"
+    expect(screen.queryByText('mml.console.actionBar.clearAll')).toBeNull();
+  });
+
+  it('renders toggleAll as "全部取消" when allSelected=true', () => {
+    const onToggleAll = vi.fn();
+    render(
+      <ConsoleActionBar
+        operationType="LST"
+        onToggleAll={onToggleAll}
+        allSelected={true}
+        onExecute={() => undefined}
+      />,
+    );
     fireEvent.click(screen.getByText('mml.console.actionBar.clearAll'));
-    expect(onSelectAll).toHaveBeenCalledOnce();
-    expect(onClearAll).toHaveBeenCalledOnce();
+    expect(onToggleAll).toHaveBeenCalledOnce();
+    expect(screen.queryByText('mml.console.actionBar.selectAll')).toBeNull();
   });
 
   it('renders deviceCount summary in the left side', () => {
@@ -111,18 +125,19 @@ describe('ConsoleActionBar', () => {
   });
 
   it('loading=true disables auxiliary buttons but execute shows loading state', () => {
-    const onSelectAll = vi.fn();
+    const onToggleAll = vi.fn();
     render(
       <ConsoleActionBar
         operationType="LST"
         loading
-        onSelectAll={onSelectAll}
+        onToggleAll={onToggleAll}
+        allSelected={false}
         onExecute={() => undefined}
       />,
     );
-    const selectAllBtn = screen
+    const toggleAllBtn = screen
       .getByText('mml.console.actionBar.selectAll')
       .closest('button');
-    expect(selectAllBtn).toHaveAttribute('disabled');
+    expect(toggleAllBtn).toHaveAttribute('disabled');
   });
 });
