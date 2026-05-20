@@ -198,10 +198,10 @@ export const NAV_CONFIG: NavConfig = [
     iconName: 'AppstoreAddOutlined',
     requireSuperAdmin: true,  // T-0098-P4-02：仅超管可见的字典治理菜单
     children: [
-      { key: 'product-products',       label: 'nav.product.products',       path: '/product/products' },
       { key: 'product-param-model',    label: 'nav.product.paramModel',     path: '/product/param-model' },
       { key: 'product-kpi-library',    label: 'nav.product.kpiLibrary',     path: '/product/kpi-library' },
       { key: 'product-alarm-library',  label: 'nav.product.alarmLibrary',   path: '/product/alarm-library' },
+      { key: 'product-products',       label: 'nav.product.products',       path: '/product/products' },
       { key: 'product-orphan-devices', label: 'nav.product.orphanDevices',  path: '/product/orphan-devices' },
     ],
   },
