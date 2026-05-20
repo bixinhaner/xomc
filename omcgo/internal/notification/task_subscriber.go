@@ -146,10 +146,15 @@ func renderNotifTitle(t *task.Task, status NotificationStatus) string {
 	method := translateMethod(t.Method)
 	verb := statusVerb(status)
 	base := fmt.Sprintf("%s · 设备 %s · %s", method, t.DeviceSN, verb)
-	if t.Method == "SetParameterValues" {
+	switch t.Method {
+	case "SetParameterValues":
 		n := len(extractSPVParams(t.Params))
 		if n > 0 {
 			base = fmt.Sprintf("%s · %d 项", base, n)
+		}
+	case "DeleteObject":
+		if name := extractObjectName(t.Params); name != "" {
+			base = fmt.Sprintf("%s · %s", base, shortObjectName(name))
 		}
 	}
 	return base
@@ -159,7 +164,8 @@ func renderNotifContent(t *task.Task, status NotificationStatus) string {
 	const maxLines = 5
 	var lines []string
 
-	if t.Method == "SetParameterValues" {
+	switch t.Method {
+	case "SetParameterValues":
 		items := extractSPVParams(t.Params)
 		for i, p := range items {
 			if i >= maxLines {
@@ -167,6 +173,10 @@ func renderNotifContent(t *task.Task, status NotificationStatus) string {
 				break
 			}
 			lines = append(lines, fmt.Sprintf("%s = %s", p.Name, p.Value))
+		}
+	case "DeleteObject":
+		if name := extractObjectName(t.Params); name != "" {
+			lines = append(lines, "对象路径："+name)
 		}
 	}
 
@@ -234,4 +244,30 @@ func extractSPVParams(raw json.RawMessage) []spvParam {
 		return nil
 	}
 	return wrapper.Values
+}
+
+// extractObjectName 解析 AddObject / DeleteObject task.Params 中的 object_name。
+// task.Params 形如 `{"object_name": "Device.X.Y.{i}."}`。
+func extractObjectName(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var wrapper struct {
+		ObjectName string `json:"object_name"`
+	}
+	if err := json.Unmarshal(raw, &wrapper); err != nil {
+		return ""
+	}
+	return wrapper.ObjectName
+}
+
+// shortObjectName 取对象路径末尾 2 段，用于通知标题显示。
+// 例：`Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.LTECell.14.` → `LTECell.14`
+func shortObjectName(path string) string {
+	trimmed := strings.TrimSuffix(path, ".")
+	parts := strings.Split(trimmed, ".")
+	if len(parts) <= 2 {
+		return trimmed
+	}
+	return parts[len(parts)-2] + "." + parts[len(parts)-1]
 }

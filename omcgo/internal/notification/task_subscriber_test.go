@@ -211,6 +211,51 @@ func Test_TaskSubscriber_MultiParam_DetailFormat(t *testing.T) {
 	assert.Contains(t, lines[5], "...共 7 项")
 }
 
+// Test_TaskSubscriber_DeleteObject_ShowsObjectPath 验证 DeleteObject 通知补出对象 path（line 51）。
+func Test_TaskSubscriber_DeleteObject_ShowsObjectPath(t *testing.T) {
+	repo := newMockRepository()
+	svc := NewService(repo, nil, zap.NewNop())
+	sub := NewTaskSubscriber(svc, zap.NewNop())
+
+	objPath := "Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.LTECell.14."
+	tk := &task.Task{
+		ID:        "task-del-001",
+		DeviceSN:  "BLQ-001",
+		Method:    "DeleteObject",
+		CreatorID: "alice",
+		Status:    task.TaskStatusCompleted,
+		Params:    json.RawMessage(`{"object_name":"` + objPath + `"}`),
+	}
+	evt, _ := event.NewEvent(event.SubjectTaskCompleted, tk)
+	require.NoError(t, sub.handleCompleted(context.Background(), evt))
+
+	list, _ := svc.List(context.Background(), NotificationFilter{UserID: "alice"})
+	require.Len(t, list.Items, 1)
+	got := list.Items[0]
+	assert.Contains(t, got.Title, "删除对象")
+	assert.Contains(t, got.Title, "BLQ-001")
+	assert.Contains(t, got.Title, "已完成")
+	assert.Contains(t, got.Title, "LTECell.14", "标题末尾应显示对象短名")
+	assert.Contains(t, got.Content, objPath, "内容应含完整对象路径")
+}
+
+// Test_ShortObjectName 验证 shortObjectName 各种边界。
+func Test_ShortObjectName(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.LTECell.14.", "LTECell.14"},
+		{"Device.X.Y.", "X.Y"},
+		{"Device.", "Device"},
+		{"Device", "Device"},
+		{"", ""},
+		{"A.B", "A.B"},
+	}
+	for _, c := range cases {
+		assert.Equal(t, c.want, shortObjectName(c.in), "input=%q", c.in)
+	}
+}
+
 func splitLines(s string) []string {
 	var out []string
 	cur := ""
