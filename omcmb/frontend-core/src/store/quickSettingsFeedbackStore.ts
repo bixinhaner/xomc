@@ -35,6 +35,12 @@ interface FeedbackState {
    * 保存成功后由调用方 clearDraft 清掉。
    */
   drafts: Record<string, Record<string, string>>;
+  /**
+   * 强制 remount 计数器，按 deviceId 索引。
+   * 头部"刷新"按钮 bump 后，QuickSettingsTab 把它拼进子组件 key，触发 CellParameterForm / MultiInstanceTable
+   * 整体重挂载，让 form.touched / rowEdits 等组件内 state 全部归零，回到 schema 服务器值。
+   */
+  refreshTicks: Record<string, number>;
 
   setFeedback: (key: string, feedback: Feedback) => void;
   patchFeedback: (key: string, patch: Partial<Feedback>) => void;
@@ -47,6 +53,8 @@ interface FeedbackState {
    * 后只清理该行的草稿、保留其他行未保存编辑。
    */
   clearDraftPrefix: (key: string, prefix: string) => void;
+
+  bumpRefreshTick: (deviceId: string) => void;
 }
 
 export const useQuickSettingsFeedbackStore = create<FeedbackState>()(
@@ -54,6 +62,7 @@ export const useQuickSettingsFeedbackStore = create<FeedbackState>()(
     (set, get) => ({
       entries: {},
       drafts: {},
+      refreshTicks: {},
 
       setFeedback: (key, feedback) => {
         set({ entries: { ...get().entries, [key]: feedback } });
@@ -103,6 +112,11 @@ export const useQuickSettingsFeedbackStore = create<FeedbackState>()(
           next[key] = filtered;
         }
         set({ drafts: next });
+      },
+
+      bumpRefreshTick: (deviceId) => {
+        const cur = get().refreshTicks[deviceId] ?? 0;
+        set({ refreshTicks: { ...get().refreshTicks, [deviceId]: cur + 1 } });
       },
     }),
     {

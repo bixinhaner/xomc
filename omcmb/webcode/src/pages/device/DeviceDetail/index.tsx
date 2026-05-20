@@ -564,6 +564,18 @@ export default function DeviceDetail() {
       case 'alarms':
         void queryClient.invalidateQueries({ queryKey: ['alarms', 'current'] });
         break;
+      case 'quickSettings':
+        if (deviceId) {
+          // 方案 B：刷新 = 回到服务器状态，丢前端临时编辑（drafts + 组件内 form/rowEdits 全清）
+          useQuickSettingsFeedbackStore.getState().clearByDevice(deviceId);
+          // bump refreshTick → QuickSettingsTab 拼进子组件 key 触发 CellParameterForm / MultiInstanceTable 整体 remount，
+          // 清掉 form.isFieldTouched / rowEdits 等组件内 state；React Query schema 失效后会重拉最新值
+          useQuickSettingsFeedbackStore.getState().bumpRefreshTick(deviceId);
+          void queryClient.invalidateQueries({ queryKey: ['quicksettings', 'groups', deviceId] });
+          // CellParameterForm + MultiInstanceTable 都用 useParameterSchema(deviceId, prefix) — 按 deviceId 前缀失效
+          void queryClient.invalidateQueries({ queryKey: ['devices', 'parameter-schema', deviceId] });
+        }
+        break;
       default:
         break;
     }

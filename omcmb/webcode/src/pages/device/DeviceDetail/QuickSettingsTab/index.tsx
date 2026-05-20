@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Alert, Empty, InputNumber, Space, Spin, Typography } from 'antd';
 import { useIntl } from 'react-intl';
 import { useQuickSettingsGroups } from '@core/hooks/api/useQuickSettings';
+import { useQuickSettingsFeedbackStore } from '@core/store/quickSettingsFeedbackStore';
 import CellParameterForm from './CellParameterForm';
 import MultiInstanceTable from './MultiInstanceTable';
 
@@ -34,6 +35,9 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
 
   // ENB:实例 1~12,默认 1;GNB:固定 1
   const [fapInstance, setFapInstance] = useState<number>(1);
+
+  // 头部"刷新"按钮 bump 的 tick → 拼进子组件 key 强制 remount，清掉 form/rowEdits 等组件内 state
+  const refreshTick = useQuickSettingsFeedbackStore((s) => s.refreshTicks[deviceId] ?? 0);
 
   const { data, isLoading, error } = useQuickSettingsGroups(deviceId);
 
@@ -91,7 +95,7 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
       {groups.map((group) =>
         group.multiInstance ? (
           <MultiInstanceTable
-            key={group.id}
+            key={`${group.id}::${refreshTick}`}
             deviceId={deviceId}
             fapInstance={fapInstance}
             group={group}
@@ -99,7 +103,7 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
           />
         ) : (
           <CellParameterForm
-            key={group.id}
+            key={`${group.id}::${refreshTick}`}
             deviceId={deviceId}
             fapInstance={fapInstance}
             group={group}
