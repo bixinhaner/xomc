@@ -299,6 +299,8 @@ services:
         condition: service_healthy
       loki:
         condition: service_healthy
+      tempo:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/api/health || exit 1"]
       interval: 10s
@@ -359,6 +361,53 @@ services:
         condition: service_healthy
 
   # ──────────────────────────────────────────────────────────────────
+  # Trace 栈：OpenTelemetry Collector + Grafana Tempo（T-0155 Phase 1）
+  #
+  # 数据流：
+  #   app/acs/worker (OTel SDK, OTLP gRPC) → otelcol:4317 → tempo:4317
+  #                                       → tempo 本地存储 → Grafana Tempo 数据源
+  #
+  # 仅本期开启 traces pipeline；metrics/logs 仍走原 Prometheus/Loki 链路不动。
+  # 详细设计：docs/design/observability-otelcol-migration-plan-20260520.md
+  # ⚠️ 镜像 tag 已固化到 release.conf MONITORING_IMAGES。
+  # ──────────────────────────────────────────────────────────────────
+  otelcol:
+    image: otel/opentelemetry-collector-contrib:0.103.0
+    environment:
+      TZ: "Asia/Shanghai"
+    # 仅容器内对接 SDK 与 Tempo，不对外暴露端口（trace 不上公网）。
+    # ports 故意不开：宿主侧的 trace 查询走 Grafana，不直连 otelcol。
+    volumes:
+      - ../monitoring/otelcol/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - /etc/localtime:/etc/localtime:ro
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    # 不配 healthcheck：otelcol-contrib 是 distroless 镜像（无 shell/wget/curl/nc），
+    # CMD healthcheck 无可执行物。otelcol 是无状态转发器，crash 后 app SDK 端
+    # 自带 retry 缓冲（见 internal/core/components/tracer.go WithBatcher），
+    # 无需 readiness gate。容器存活由 docker restart policy 兜底，liveness
+    # 经 zpages :55679/debug/tracez 或 telemetry metrics :8888 间接观察。
+    depends_on:
+      tempo:
+        condition: service_healthy
+
+  tempo:
+    image: grafana/tempo:2.5.0
+    environment:
+      TZ: "Asia/Shanghai"
+    # http 3200 是查询入口；Grafana 通过 docker network 内部访问，不需要对外
+    volumes:
+      - ../monitoring/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempodata:/var/tempo
+      - /etc/localtime:/etc/localtime:ro
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3200/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ──────────────────────────────────────────────────────────────────
   # 基础服务 exporter（T-0151）—— 把 postgres/redis/nats 的内部指标转成
   # Prometheus 格式，使基础服务健康进入统一告警链。minio 自带 Prometheus
   # 指标端点（见上方 MINIO_PROMETHEUS_AUTH_TYPE=public），无需独立 exporter。
@@ -410,6 +459,7 @@ volumes:
   grafanadata:
   lokidata:
   promtaildata:
+  tempodata:
 
 networks:
   default:

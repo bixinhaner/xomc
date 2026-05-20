@@ -56,9 +56,9 @@ metrics:
   port: 9092
 
 tracer:
-  enabled: false
-  endpoint: "localhost:4317"
-  sample_rate: 1.0
+  enabled: true
+  endpoint: "otelcol:4317"
+  sample_rate: 0.1
 
 log:
   level: "warn"

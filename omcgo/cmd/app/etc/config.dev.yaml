@@ -217,8 +217,8 @@ metrics:
   port: 9091
 
 tracer:
-  enabled: false
-  endpoint: "localhost:4317"
+  enabled: true
+  endpoint: "otelcol:4317"
   sample_rate: 1.0
 
 log:

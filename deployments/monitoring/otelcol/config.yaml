@@ -1,0 +1,93 @@
+# OpenTelemetry Collector — OMC Phase 1（trace 后端补齐）
+#
+# 数据流：
+#   app/acs/worker (otlp gRPC) → otelcol :4317 → batch → tempo :4317
+#
+# 当前作用域仅 traces。metrics 仍由 Prometheus 直接 pull 各 /metrics 端点
+# 与 *-exporter；本文件后续若上 Phase 2 再扩 receivers/metrics pipeline。
+#
+# 部署模式：单进程（dev/test/prod 通用），10 万设备规模够用；100 万规模时
+# 拆 agent + gateway 两层（DaemonSet agent + 中心 gateway 部署）。
+# 详见 docs/design/observability-otelcol-migration-plan-20260520.md §7 D3。
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      # http endpoint 暂不开启——本期所有上报方都是 Go SDK，gRPC 优于 HTTP
+      # 未来若引入前端 / 浏览器 trace（OTel JS SDK 只支持 HTTP/protobuf）再开
+
+processors:
+  # batch：合并 span 减少下游压力；timeout 决定 batch 最长等待
+  batch:
+    send_batch_size: 1024
+    timeout: 5s
+    send_batch_max_size: 2048
+
+  # memory_limiter：otelcol 自我保护，防止 OOM 拖垮宿主
+  # limit_mib 应小于容器 mem_limit（compose 里设 256MB → 这里设 200MB）
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 200
+    spike_limit_mib: 50
+
+  # resource：补 cluster label，与 Prometheus external_labels.cluster 对齐
+  resource:
+    attributes:
+      - key: cluster
+        value: omcgo-dev
+        action: upsert
+
+exporters:
+  # 推到 Tempo 的 OTLP gRPC 端点
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+    # 重试策略：网络抖动时不丢 trace
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 5m
+    # 发送队列：otelcol 暂存 trace 数据应对 Tempo 短暂不可用
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: 5000
+
+  # debug exporter：紧急调试用（默认 verbosity=basic 只打统计，不打 span 内容）
+  # 平时不挂在 pipeline 上；troubleshoot 时改 service.pipelines.traces.exporters
+  # 加入 [otlp/tempo, debug] 即可
+  debug:
+    verbosity: basic
+
+extensions:
+  # health_check：暴露 /health 给 docker-compose healthcheck
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+  # zpages：本地 troubleshooting，访问 :55679/debug/tracez 看 in-flight span
+  # 仅容器内端口，不对外暴露
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, zpages]
+
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [otlp/tempo]
+
+  # otelcol 自身的 telemetry 端口（暴露 otelcol_* metrics 给 Prometheus 采集）
+  # 后续 Prometheus 增加 scrape job 抓 otelcol:8888 即可
+  telemetry:
+    metrics:
+      level: basic
+      address: 0.0.0.0:8888
+    logs:
+      level: info
+      encoding: json

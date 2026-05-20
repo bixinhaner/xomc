@@ -129,7 +129,7 @@ ln -s "$(pwd)/omcmb/webcode/node_modules" \
 | 对象存储 | MinIO (S3 兼容) |
 | 日志 | Zap |
 | 指标 | Prometheus |
-| 链路追踪 | OpenTelemetry |
+| 链路追踪 | OpenTelemetry SDK → OpenTelemetry Collector → Grafana Tempo（T-0155 Phase 1） |
 
 ### 前端 (omcmb/ — frontend-core 业务层 + webcode UI 壳)
 

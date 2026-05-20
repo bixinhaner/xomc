@@ -108,12 +108,17 @@ proxy_url() {
 install_git() {
   if command -v git >/dev/null 2>&1; then
     log "git 已存在：$(git --version)"
-  else
-    log "apt-get install git curl ca-certificates openssh-client"
-    APT update -y
-    APT install -y git curl ca-certificates openssh-client
-    log "git 安装完成：$(git --version)"
+    return
   fi
+  log "apt-get install git curl ca-certificates openssh-client"
+  # apt-get update 在私有/本地 repo 损坏时会以 exit=100 失败（典型：内网源
+  # Packages 缺失、_apt 用户读不到 /home 下的本地 repo）。这种 update 失败
+  # 不应致命——缓存里通常已经有 git/curl，install 仍能成功；只有 install
+  # 真的拿不到包才视为硬错误。
+  APT update -y \
+    || warn "apt-get update 部分源失败（多见于本地/私有 repo 损坏），继续使用缓存"
+  APT install -y git curl ca-certificates openssh-client
+  log "git 安装完成：$(git --version)"
 }
 
 configure_git() {

@@ -77,7 +77,9 @@ omcgo-worker  — 后台工作进程（PM/MR 文件处理、KPI 计算）
 | CLI | `github.com/spf13/cobra` | omcctl 命令行管理工具 |
 | 日志 | `go.uber.org/zap` | 结构化高性能日志 |
 | 指标 | `github.com/prometheus/client_golang` | Prometheus 指标暴露 |
-| 链路追踪 | `go.opentelemetry.io/otel` | 分布式链路追踪 |
+| 链路追踪 SDK | `go.opentelemetry.io/otel` | 进程内 trace 产生与 OTLP gRPC 上报 |
+| Trace 采集器 | `otel/opentelemetry-collector-contrib:0.103.0` | 接收 SDK 上报、batch/retry/缓冲，转推后端（T-0155 Phase 1） |
+| Trace 后端 | `grafana/tempo:2.5.0` | trace 存储与查询，Grafana Tempo 数据源原生集成 + trace-to-logs 跳 Loki |
 | DB 驱动 | `github.com/jackc/pgx/v5` | PostgreSQL 高性能驱动 |
 | 连接池 | `github.com/jackc/pgx/v5/pgxpool` | 数据库连接池 |
 | Redis | `github.com/redis/go-redis/v9` | 缓存、会话、命令队列 |

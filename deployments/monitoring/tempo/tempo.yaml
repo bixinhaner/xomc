@@ -1,0 +1,66 @@
+# Grafana Tempo — OMC Phase 1 trace 后端（单进程 monolithic 模式）
+#
+# 数据流：
+#   otelcol → tempo :4317 (otlp gRPC) → 本地 wal/blocks 存储 → Grafana 查询
+#
+# 单进程模式（target=all）适合 10 万设备规模 dev/test/prod；100 万规模时
+# 拆 distributor/ingester/querier/compactor 多组件部署（参考 grafana/tempo
+# microservices 部署模板）。
+#
+# 容量假设：dev sample_rate=1.0 全采，保留 24h；prod sample_rate=0.1，保留 7d。
+# 实际磁盘占用以 docker volume tempodata 监控为准。
+
+target: all
+
+# HTTP API（Grafana 数据源查询入口）+ gRPC（仅 distributor 收发用）
+server:
+  http_listen_port: 3200
+  grpc_listen_port: 9095
+  log_level: info
+
+# distributor：接收 OTLP / Jaeger / Zipkin 协议的 trace
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        # http 协议同上：本期不开启，需要时加 endpoint: 0.0.0.0:4318
+  # log_received_spans 仅排障时打开；常态关闭避免大量日志噪声
+  log_received_spans:
+    enabled: false
+
+# ingester：在内存里缓冲 trace，flush 到本地存储
+ingester:
+  trace_idle_period: 10s     # span 闲置多久判定 trace 结束
+  max_block_duration: 5m     # 单 block 累积时长上限
+
+# compactor：合并历史 block 节省存储；retention 控制总保留期
+# dev 默认 24h；prod 部署时通过环境变量或独立 tempo.prod.yaml 改为 168h（7d）
+compactor:
+  compaction:
+    block_retention: 24h
+    compacted_block_retention: 10m
+
+# storage：本地文件后端，挂载到 docker volume tempodata
+# 升级到生产时可换 S3/MinIO 后端（backend: s3 + s3 子段，复用现有 minio）
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
+    pool:
+      max_workers: 100
+      queue_depth: 10000
+
+# 限流：单租户场景下设宽松上限，防止 trace 爆量打满磁盘
+overrides:
+  defaults:
+    ingestion:
+      rate_limit_bytes: 20000000      # 20 MB/s 写入上限
+      burst_size_bytes: 30000000      # 突发 30 MB
+      max_traces_per_user: 100000     # 单租户最大 trace 数（dev 充裕）
+    global:
+      max_bytes_per_trace: 5000000    # 单 trace 最大 5 MB，超过丢弃

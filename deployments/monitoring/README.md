@@ -1,7 +1,8 @@
 # OMC Monitoring Stack
 
-Prometheus + AlertManager + Grafana + Loki + Promtail 一键起栈，覆盖
-OMC 三进程（app / acs / worker）的**指标 + 日志**双通道可观测性。
+Prometheus + AlertManager + Grafana + Loki + Promtail + **otelcol + Tempo**
+一键起栈，覆盖 OMC 三进程（app / acs / worker）的**指标 + 日志 + 链路追踪**
+三通道可观测性。
 
 ## 文件结构
 
@@ -16,11 +17,16 @@ deployments/monitoring/
 │   └── loki-config.yml           # Loki 单节点 filesystem 存储 + 7d retention
 ├── promtail/
 │   └── promtail-config.yml       # 日志采集（zap JSON 解析 + level/service label）
+├── otelcol/
+│   └── config.yaml               # OTel Collector：OTLP gRPC receiver → batch → Tempo（T-0155 Phase 1）
+├── tempo/
+│   └── tempo.yaml                # Grafana Tempo 单进程 monolithic 配置 + 本地存储
 ├── grafana/
 │   ├── provisioning/
 │   │   ├── datasources/
 │   │   │   ├── prometheus.yml    # 自动注册 Prometheus 数据源
-│   │   │   └── loki.yml          # 自动注册 Loki 数据源
+│   │   │   ├── loki.yml          # 自动注册 Loki 数据源
+│   │   │   └── tempo.yml         # 自动注册 Tempo 数据源 + trace-to-logs 跳 Loki
 │   │   └── dashboards/default.yml
 │   └── dashboards/
 │       └── omc-overview.json
@@ -36,6 +42,8 @@ deployments/monitoring/
 | Grafana | 3000 | **3030** | 宿主 3030（避开 webcode vite dev :3000） |
 | AlertManager | 9093 | 9093 | 无冲突 |
 | Loki HTTP API | 3100 | 3100 | Grafana 通过此端口查日志 |
+| Tempo HTTP API | 3200 | — | 仅容器内（Grafana 走 docker network 直连，不对外） |
+| otelcol OTLP gRPC | 4317 | — | 仅容器内（app/acs/worker SDK 在同 network 内推送，不对外） |
 | omcgo-acs metrics | 9090 | **9095** | 让出 9090 给 Prometheus 服务 |
 
 宿主访问入口：
@@ -48,15 +56,17 @@ deployments/monitoring/
 ## 用法
 
 ```bash
-# 启动监控 + 日志栈（5 个服务一起起）
+# 启动监控 + 日志 + 链路追踪栈（7 个服务一起起）
 docker-compose -f deployments/docker/docker-compose.yml up -d \
-  prometheus alertmanager grafana loki promtail
+  prometheus alertmanager grafana loki promtail tempo otelcol
 
 # 健康自检
 curl -fsSL http://localhost:9090/-/healthy        # Prometheus
 curl -fsSL http://localhost:3030/api/health       # Grafana
 curl -fsSL http://localhost:9093/-/healthy        # AlertManager
 curl -fsSL http://localhost:3100/ready            # Loki
+docker exec docker-tempo-1   wget --spider -q http://localhost:3200/ready    # Tempo（仅容器内）
+docker exec docker-otelcol-1 wget --spider -q http://localhost:13133/        # otelcol（仅容器内）
 
 # 查看 scrape target 状态（包含 omc-app / omc-acs / omc-worker 三个 job）
 curl -s http://localhost:9090/api/v1/targets | jq '.data.activeTargets[] | {job:.labels.job, health:.health}'
@@ -72,8 +82,46 @@ curl -s -G 'http://localhost:3100/loki/api/v1/query_range' \
 
 # 关闭
 docker-compose -f deployments/docker/docker-compose.yml down \
-  prometheus alertmanager grafana loki promtail
+  prometheus alertmanager grafana loki promtail tempo otelcol
 ```
+
+## 链路追踪（Trace）查询
+
+Grafana → Explore → 选 Tempo 数据源 → 三种查法：
+
+```
+# 1. 按 traceID 查（如果在日志里看到 trace_id 字段）
+<traceID 32 位 hex>
+
+# 2. TraceQL 按服务名搜
+{ resource.service.name = "omcgo-app" }
+{ resource.service.name = "omcgo-acs" && duration > 100ms }
+
+# 3. 按 HTTP 路由搜（要求 SDK 注入了 http.route 属性）
+{ name =~ "POST /api/.+" }
+```
+
+trace-to-logs 关联：span 详情页右上角 → "Logs for this span"，自动按 `service`
+label 跳 Loki 查同时段日志（详见 `grafana/provisioning/datasources/tempo.yml`
+的 `tracesToLogsV2` 配置）。
+
+> ⚠️ **当前阶段 trace_id 尚未注入 zap 日志字段**（待 T-0157 续）。
+> 暂时 trace-to-logs 会按服务名+时间窗口召回近似日志，精确匹配能力等
+> T-0157 完成后自动到位。
+
+## 应用侧 tracer 开关
+
+app/acs/worker 三进程通过 `tracer.enabled` 控制 OTel SDK 上报：
+
+```yaml
+# omcgo/cmd/{app,acs,worker}/etc/config.{dev,test,prod}.yaml
+tracer:
+  enabled: true              # local 环境保持 false（宿主直跑 go run，无 otelcol）
+  endpoint: "otelcol:4317"   # 容器内 service name + OTLP gRPC 标准端口
+  sample_rate: 1.0           # dev/test 全采；prod 0.1
+```
+
+tracer 关闭时 SDK 用 no-op Provider，零开销，与 trace 栈停机互不影响。
 
 > ⚠️ **OMC 三进程未启动时**，Prometheus targets 会显示 `down`，这是预期行为，
 > 不影响监控栈自身 healthy。启动 `app/acs/worker` 三进程后，target 会在
