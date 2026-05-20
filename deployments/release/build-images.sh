@@ -13,11 +13,12 @@
 # 基础设施包内容：Docker 引擎离线安装包（docker-cache/ 由 download-docker.sh
 # 下载）+ 基础镜像 tar（docker save）+ install-docker.sh。
 #
-# === 镜像缓存策略 ===
-# 1. 跨架构镜像通过 *-arch-saved 后缀 tag 隔离，避免覆盖 redis:7-alpine 等原 tag
-# 2. 本机架构原 tag 始终保持本机架构镜像，docker-compose 可同时使用
-# 3. 镜像不在脚本中删除，作为下次构建的本地缓存
-# 4. tar 内同时包含 *-saved 与原 tag，docker load 后部署侧可直接使用原 tag
+# === 镜像缓存策略（amd64-only） ===
+# 1. 通过 *-amd64-saved 后缀 tag 作为本地缓存，命中即跳 docker pull
+#    （保留 -amd64- 段命名作历史缓存兼容；不再有跨架构需求）
+# 2. 原 tag（如 redis:7-alpine）始终指向 amd64 镜像，docker-compose 可同时使用
+# 3. 镜像不在脚本中删除，作为下次构建的本地缓存（手工清理见末尾提示）
+# 4. tar 内同时包含 *-saved 与原 tag，运维侧 docker load 后直接用原 tag
 #
 # 默认行为（v2 起调整）：拉取并打包 INFRA + MONITORING **全套镜像**。
 # 想去掉监控栈用 --infra-only。
@@ -26,7 +27,7 @@
 #   ./build-images.sh                            # 默认：基础设施 + 监控栈全套
 #   ./build-images.sh --infra-only               # 仅基础设施（不含监控栈）
 #   ./build-images.sh --monitoring-only          # 只补监控栈（不重拉 infra）
-#   ./build-images.sh -v 0.0.2 --arch amd64      # 指定版本 / 架构
+#   ./build-images.sh -v 0.0.2                   # 手动指定基础设施版本
 #   ./build-images.sh -h | --help                # 本帮助
 #
 # 参数：
@@ -42,7 +43,7 @@
 # =============================================================================
 set -euo pipefail
 
-# 本机架构（用于跨架构 pull 后修复原 tag，保护 docker-compose）
+# 本机架构（amd64-only：必须在 amd64 host 上运行）
 HOST_ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -76,6 +77,11 @@ for _a in $ARCHES; do
         如确实需要 arm64：见 release.conf 中关于 架构支持 的注释，
         改 ARCHES + 移除本脚本的校验后自行验证。"
 done
+
+# host 架构也必须是 amd64（amd64-only refactor 后已不支持跨架构 pull）
+[ "$HOST_ARCH" = "amd64" ] || die "本工具只支持在 amd64 host 上运行（当前 host：${HOST_ARCH}）。
+        amd64-only refactor 后已移除跨架构 pull 代码路径；arm64 host 上构建
+        amd64 包请自行恢复跨架构逻辑或换 amd64 host 跑。"
 
 # ── 前置检查 ────────────────────────────────────────────────────────────
 command -v docker >/dev/null 2>&1 || die "缺少 docker"
@@ -123,9 +129,9 @@ fi
 log "本机架构：$HOST_ARCH   构建架构：$ARCHES   监控栈：$([ "$WITH_MONITORING" = 1 ] && echo 含 || echo 不含)"
 log "基础设施版本：$INFRA_VERSION"
 
-# ── 拉取并打 *-saved tag ─────────────────────────────────────────────────
-# 命名隔离：每架构镜像在本机以 <image>-<arch>-saved 留存，避免互相覆盖；命中即跳 pull。
-# 跨架构 pull 后立即用本机架构再 pull 一次，把原 tag 修复回本机架构（保护 docker-compose）。
+# ── 拉取并打 *-saved tag（amd64-only）────────────────────────────────────
+# 命名约定：<image>-amd64-saved 作为本地缓存 tag，命中即跳 docker pull。
+# （-amd64- 段保留作历史缓存兼容；不再有跨架构需求，amd64-only 已在入口断言）
 prepare_image() {
   local IMG="$1" ARCH="$2"
   local SAVED_TAG="${IMG}-${ARCH}-saved"
@@ -136,15 +142,11 @@ prepare_image() {
   docker pull --platform "linux/$ARCH" "$IMG"
   docker tag "$IMG" "$SAVED_TAG"
   log "✓ 已拉取并打标: $IMG → $SAVED_TAG"
-  if [ "$ARCH" != "$HOST_ARCH" ]; then
-    docker pull --platform "linux/$HOST_ARCH" "$IMG"
-    log "✓ 已修复本机架构原 tag: $IMG (${HOST_ARCH})"
-  fi
 }
 
-# 双 tag 导出：tar 内同时包含 *-saved 与原 tag。
-# 实现：save 前先把原 tag 临时指向当前架构 *-saved（在 docker 索引层），save 后
-# 若是跨架构循环再用本机架构 pull 修复回原 tag。HOST_ARCH 循环则原 tag 已对应。
+# 双 tag 导出：tar 内同时包含 *-saved 与原 tag（运维侧 docker load 后直接用原 tag）。
+# 实现：save 前把原 tag 指向 *-saved；amd64-only 后 host 与目标架构同源，无需再做
+# "跨架构 pull 修复原 tag" 的二次拉取。
 save_with_dual_tags() {
   local OUT_TAR="$1" ARCH="$2"; shift 2
   local IMGS=("$@") REFS=() IMG SAVED_TAG
@@ -154,12 +156,6 @@ save_with_dual_tags() {
     REFS+=( "$SAVED_TAG" "$IMG" )
   done
   docker save -o "$OUT_TAR" "${REFS[@]}"
-  if [ "$ARCH" != "$HOST_ARCH" ]; then
-    for IMG in "${IMGS[@]}"; do
-      docker pull --platform "linux/$HOST_ARCH" "$IMG"
-      log "✓ 已修复本机架构原 tag: $IMG (${HOST_ARCH})"
-    done
-  fi
 }
 
 # ── 逐架构拉取并导出 ────────────────────────────────────────────────────

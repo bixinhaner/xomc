@@ -273,20 +273,19 @@ archive/project/<项目版本>/
 > 本章是构建脚本内部流程的展开说明，便于理解与排错。
 > §6.3 属 `build-images.sh`（基础设施包，不常跑）；§6.1/6.2/6.4 属 `build-release.sh`（项目包，常跑）。
 
-### 6.1 编译 Go 二进制（amd64 + arm64 双架构）—— build-release.sh
+### 6.1 编译 Go 二进制（amd64 单架构）—— build-release.sh
 
-Go 原生支持交叉编译，**每个版本必须同时编译 amd64 与 arm64**，与构建机自身架构无关：
+每个版本编译 amd64 一份。构建机若是 amd64 host 自然原生编译；若是其它 host，
+Go 原生支持交叉编译到 amd64：
 
 ```bash
 cd omcgo
-for ARCH in amd64 arm64; do
-  for SVC in app acs worker migrate seed; do
-    CGO_ENABLED=0 GOOS=linux GOARCH=$ARCH go build -ldflags="-s -w" \
-      -o bin/$ARCH/omcgo-$SVC ./cmd/$SVC
-  done
-  CGO_ENABLED=0 GOOS=linux GOARCH=$ARCH go build -ldflags="-s -w" \
-    -o bin/$ARCH/omcctl ./cmd/omcctl
+for SVC in app acs worker migrate seed; do
+  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" \
+    -o bin/amd64/omcgo-$SVC ./cmd/$SVC
 done
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" \
+  -o bin/amd64/omcctl ./cmd/omcctl
 ```
 
 > Go 第三方组件（见 `go.mod`）在此步由 `go build` 自动拉取并**编译进二进制**，运维侧不再需要它们。
@@ -299,71 +298,59 @@ npm ci --include=dev --legacy-peer-deps   # 严格按 package-lock.json 安装
 npm run build                              # 产出 dist/（纯静态）
 ```
 
-两个架构的项目包复用同一份 `web/dist`。
+amd64 项目包包含同一份 `web/dist`。
 
-### 6.3 收集 Docker 镜像并打包基础设施包（amd64 + arm64）—— build-images.sh
+### 6.3 收集 Docker 镜像并打包基础设施包（amd64）—— build-images.sh
 
 > 本步由独立工具 `build-images.sh` 完成，不常跑；产出基础设施包到 `archive/infra/`。
 
-Docker 镜像按架构区分。镜像导出**不依赖构建机自身架构**——用 `docker pull --platform`
-显式逐架构拉取（拉取只下载分层、不执行，跨架构可行）。
+`build-images.sh` 启动时双校验：① `ARCHES`（来自 `release.conf`）必须仅 `amd64`；
+② host 架构（`uname -m`）必须是 `x86_64/amd64` —— amd64-only refactor 后已移除跨架构
+pull 代码路径，非 amd64 host 直接 die。
 
-**镜像缓存策略（与旧版本差异，重点）**：
+**镜像缓存策略（amd64-only）**：
 
-1. **命名隔离（`*-<arch>-saved` tag）**：每架构的镜像在本机以 `<image>-<arch>-saved`
-   后缀 tag 长期保留（如 `redis:7-alpine-amd64-saved`、`redis:7-alpine-arm64-saved`），
-   两个架构互不覆盖。下次构建命中 `*-saved` tag 即跳过 `docker pull`。
-2. **本机原 tag 受保护**：跨架构 pull 后，脚本立即用本机架构再 pull 一次，把
-   `redis:7-alpine` 这类原 tag 修复回本机架构镜像。
-   **同一台机器可同时跑 `build-images.sh` 与 `docker compose`，互不干扰**
-   （`docker compose` 永远拿到本机架构镜像）。
-3. **不再 `docker rmi`**（与旧版本差异点）：脚本结束后**不清理本地镜像库**，
-   `*-saved` tag 留作下次增量构建的本地缓存。如需手工清理，运行：
+1. **命名兼容（`*-amd64-saved` tag）**：镜像以 `<image>-amd64-saved` 后缀 tag 长期
+   保留（如 `redis:7-alpine-amd64-saved`）。下次构建命中即跳过 `docker pull`。
+   `-amd64-` 段命名作历史缓存兼容保留；不再有跨架构需求。
+2. **不再 `docker rmi`**：脚本结束后**不清理本地镜像库**，`*-saved` tag 留作下次
+   增量构建的本地缓存。如需手工清理：
    ```bash
    docker images | grep -- '-saved' | awk '{print $1":"$2}' | xargs docker rmi -f
    ```
-4. **tar 双 tag 设计**：`infra-images-<arch>.tar` / `monitoring-images-<arch>.tar`
-   内同时包含 `<image>-<arch>-saved` 与原 tag 两套引用。运维侧 `docker load` 后
-   两个引用都存在，**`docker-compose.yml` 直接 `image: redis:7-alpine` 即可**，
-   完全不必关心 `*-saved`。
+3. **tar 双 tag 设计**：`infra-images-amd64.tar` / `monitoring-images-amd64.tar`
+   内同时包含 `<image>-amd64-saved` 与原 tag 两套引用。运维侧 `docker load` 后两个
+   引用都存在，**`docker-compose.yml` 直接 `image: redis:7-alpine` 即可**，完全不
+   必关心 `*-saved`。
 
 伪代码（实现细节见 `build-images.sh` 中 `prepare_image` / `save_with_dual_tags`）：
 
 ```bash
-HOST_ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+ARCH=amd64
 
-for ARCH in amd64 arm64; do
-  # 1) 拉取并打 *-saved tag（命中缓存即跳过）
-  for IMG in "${INFRA_IMAGES[@]}"; do                  # 清单来自 release.conf
-    SAVED_TAG="${IMG}-${ARCH}-saved"
-    docker image inspect "$SAVED_TAG" >/dev/null 2>&1 && continue   # ✓ 复用本地缓存
-    docker pull --platform linux/$ARCH "$IMG"
-    docker tag "$IMG" "$SAVED_TAG"
-    [ "$ARCH" != "$HOST_ARCH" ] && \
-      docker pull --platform linux/$HOST_ARCH "$IMG"   # ✓ 修复本机架构原 tag
-  done
-
-  # 2) save 前临时让原 tag 指向当前架构 *-saved，使 tar 内同时含两套引用
-  for IMG in "${INFRA_IMAGES[@]}"; do
-    docker tag "${IMG}-${ARCH}-saved" "$IMG"
-  done
-  docker save -o images-cache/infra-images-$ARCH.tar \
-    $(for IMG in "${INFRA_IMAGES[@]}"; do echo "${IMG}-${ARCH}-saved"; echo "$IMG"; done)
-
-  # 3) save 完恢复本机架构原 tag（HOST_ARCH 循环则原 tag 已对应，可省略）
-  if [ "$ARCH" != "$HOST_ARCH" ]; then
-    for IMG in "${INFRA_IMAGES[@]}"; do
-      docker pull --platform linux/$HOST_ARCH "$IMG"
-    done
-  fi
-  # 组装：images/infra-images-$ARCH.tar + docker/(docker-*.tgz + install-docker.sh)
-  # → 压缩 → archive/infra/<版本>/omc-infra-<版本>-$ARCH.tar.xz
+# 1) 拉取并打 *-saved tag（命中缓存即跳过）
+for IMG in "${INFRA_IMAGES[@]}"; do                # 清单来自 release.conf
+  SAVED_TAG="${IMG}-${ARCH}-saved"
+  docker image inspect "$SAVED_TAG" >/dev/null 2>&1 && continue   # ✓ 复用本地缓存
+  docker pull --platform linux/$ARCH "$IMG"
+  docker tag "$IMG" "$SAVED_TAG"
 done
+
+# 2) save 前让原 tag 指向 *-saved，使 tar 内同时含两套引用
+for IMG in "${INFRA_IMAGES[@]}"; do
+  docker tag "${IMG}-${ARCH}-saved" "$IMG"
+done
+docker save -o images-cache/infra-images-$ARCH.tar \
+  $(for IMG in "${INFRA_IMAGES[@]}"; do echo "${IMG}-${ARCH}-saved"; echo "$IMG"; done)
+
+# 3) 组装：images/infra-images-$ARCH.tar + docker/(docker-*.tgz + install-docker.sh)
+#         + 顶层 setup-mirrors.sh
+#    → 压缩 → archive/infra/<版本>/omc-infra-<版本>-amd64.tar.xz
 ```
 
 > **不再跑完即清**：`build-images.sh` 不再 `docker rmi` 任何镜像。`*-saved` 后缀
-> tag 与本机原 tag 在命名层面完全隔离——跨架构互不覆盖、本机原 tag 始终指向本机
-> 架构镜像，因此本工具与同台机器上的 `docker compose` 等操作可并行运行，互不影响。
+> tag 与原 tag 都指向 amd64 镜像，因此本工具与同台机器上的 `docker compose` 等操作
+> 可并行运行，互不影响。
 
 ### 6.4 组装、压缩、归档项目包 —— build-release.sh
 

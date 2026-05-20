@@ -6,6 +6,31 @@
 
 ---
 
+## v5 收口（2026-05-20 当日演进 — 跨架构死代码清理 + 历史归档处理）
+
+v3 把 ARCHES 收紧到 amd64 并加入入口校验，但 `build-images.sh` 内部仍保留了
+跨架构 pull 的代码路径（HOST_ARCH != ARCH 分支、`save_with_dual_tags` 末尾的
+"修复原 tag" 循环、镜像缓存策略注释里"跨架构互不覆盖"等措辞）。这些都成为死
+代码 / 误导性文档。本轮清理：
+
+- **build-images.sh 简化**：
+  - `prepare_image` 删除 `if [ "$ARCH" != "$HOST_ARCH" ]; then docker pull --platform "linux/$HOST_ARCH" ...` 分支
+  - `save_with_dual_tags` 删除末尾跨架构 fixup 循环
+  - 头部 "镜像缓存策略" 段重写为 amd64-only 语义（保留 -amd64-saved 后缀命名作历史缓存兼容）
+  - 增入 `HOST_ARCH=amd64` 启动断言（非 amd64 host 上跑直接 die 并给指引）
+  - `-h` 用法示例去掉 `--arch amd64`（amd64 是唯一允许值，例子里写它徒增疑问）
+- **构建侧手册 §6.1 / §6.3 改写**：双架构 → amd64 单架构；伪代码同步删跨架构 fixup
+- **gen-index.sh 下载页过滤**：
+  - 扫描 glob 从 `omc-*.tar.*` 收紧到 `omc-*-amd64.tar.*` —— 历史 `*-arm64.tar.*`
+    物理文件还在磁盘但不再进下载列表，避免给运维造成"两个文件是不是同一个"的迷惑
+  - 底部加智能提示：检测到 N 个非 amd64 历史归档时显示一行 `find archive/ -name 'omc-*-arm64.tar.*' -delete` 清理命令
+
+用户场景：今日 baicells 服务器跑 build-release.sh 后，archive/project/0.0.1-XXX/
+里既有 -amd64.tar.xz（amd64-only refactor 之后产）也有 -arm64.tar.xz（refactor 之
+前产），下载页同时列出两个，被误以为"重复文件"。glob 收紧后只列 amd64，问题解决。
+
+---
+
 ## v4 收口（2026-05-20 当日演进 — install-docker.sh 数据目录智能检测）
 
 baicells 构建机 `/var` 仅 4.9G LV，跑 `build-images.sh` 拉镜像直接撑爆

@@ -45,7 +45,8 @@ scan_rows() {
     [ -f "$rel" ] || continue
     local bt links="" f bn sz
     bt="$(grep -E '^build_time=' "$rel" | cut -d= -f2- || true)"
-    for f in "$d"omc-*.tar.*; do
+    # 仅显示 amd64 包（release 工具链 amd64-only；历史 *-arm64.tar.* 物理保留但不进列表）
+    for f in "$d"omc-*-amd64.tar.*; do
       [ -f "$f" ] || continue
       case "$f" in *.sha256) continue ;; esac
       bn="$(basename "$f")"
@@ -72,6 +73,13 @@ PROJECT_ROWS="$(scan_rows "$ARCHIVE/project" project)"
 INFRA_ROWS="$(scan_rows "$ARCHIVE/infra" infra)"
 [ -n "$PROJECT_ROWS" ] || PROJECT_ROWS='<tr><td colspan="4" class="empty">暂无项目版本下载 —— 运行 ./build-release.sh 生成</td></tr>'
 [ -n "$INFRA_ROWS" ]   || INFRA_ROWS='<tr><td colspan="4" class="empty">暂无基础设施下载 —— 运行 ./build-images.sh 生成</td></tr>'
+
+# 检测非 amd64 历史归档（amd64-only refactor 之前留下的物理文件，已不进下载列表）
+LEGACY_COUNT=$(find "$ARCHIVE" -type f -name 'omc-*-arm64.tar.*' ! -name '*.sha256' 2>/dev/null | wc -l | tr -d ' ')
+LEGACY_NOTE=""
+if [ "${LEGACY_COUNT:-0}" -gt 0 ]; then
+  LEGACY_NOTE="<p class=\"note\">检测到 ${LEGACY_COUNT} 个非 amd64 历史归档（不在下载列表显示，物理文件仍在磁盘）。清理：<code>find archive/ -name 'omc-*-arm64.tar.*' -delete</code></p>"
+fi
 
 cat > "$ARCHIVE/index.html" <<HTML
 <!DOCTYPE html>
@@ -204,6 +212,7 @@ sudo bash deploy/deploy.sh -h                       # 查看所有参数</pre>
 <table><thead><tr><th>基础设施版本</th><th>Docker 版本</th><th>构建时间</th><th>下载</th></tr></thead>
 <tbody>$INFRA_ROWS</tbody></table>
 
+$LEGACY_NOTE
 <p class="note">索引刷新于 $(date -u '+%Y-%m-%dT%H:%M:%SZ')</p>
 </div></body></html>
 HTML
