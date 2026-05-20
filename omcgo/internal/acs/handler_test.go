@@ -861,6 +861,17 @@ func (m *acsHTaskService) GetTaskByCWMPID(ctx context.Context, cwmpID string) (*
 	return m.cwmpIDToTaskMap[cwmpID], nil
 }
 
+func (m *acsHTaskService) GetTask(ctx context.Context, taskID string) (*task.Task, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, t := range m.tasks {
+		if t.ID == taskID {
+			return t, nil
+		}
+	}
+	return nil, nil
+}
+
 func (m *acsHTaskService) GetQueueLength(ctx context.Context, deviceSN string) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

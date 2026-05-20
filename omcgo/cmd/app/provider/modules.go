@@ -3,11 +3,13 @@ package provider
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/backup"
 	"github.com/omcgo/omcgo/internal/config"
@@ -77,10 +79,26 @@ func initSoftwareModule(c *Container) error {
 	}
 	softwareService.RestorePendingUpgrades(context.Background())
 	softwareService.StartTaskReaper()
-	// 注入 ACS 上传基础 URL，供日志采集 Upload RPC 构造目标 URL
+	// 注入 ACS 上传基础 URL，供日志采集 Upload RPC 构造目标 URL（YAML 静态兜底）。
 	if c.Cfg.Upgrade.ACSUploadBaseURL != "" {
 		softwareService.SetUploadConfig(c.Cfg.Upgrade.ACSUploadBaseURL)
 	}
+	// 注入运行时 ACS 传输配置：从 sys_config 'acs_transfer' 类别读 BaseURL / Username /
+	// Password / Path。前端"系统管理 → ACS 传输"页面修改后 30 秒内自动生效，
+	// 优先级高于 YAML 静态兜底。worker 进程 / acs 进程也各自起一份 Policy（详见
+	// cmd/worker/main.go / cmd/acs/main.go），共享同一张 sys_configs 表。
+	softwareSysConfigRepo := admin.NewPgSysConfigRepository(c.PgPool)
+	softwareTransferPolicy := transfercfg.NewPolicy(
+		transfercfg.Snapshot{},
+		func(ctx context.Context, category, key string) (string, bool) {
+			row, err := softwareSysConfigRepo.GetByKey(ctx, category, key)
+			if err != nil || row == nil {
+				return "", false
+			}
+			return row.Value, true
+		},
+	)
+	softwareService.SetTransferProvider(softwareTransferPolicy)
 
 	// Canary monitor + metrics (T-0018 / R-101)
 	canaryMetrics := software.NewCanaryMetrics(c.MetricsReg)
@@ -124,6 +142,113 @@ func initUFTEModule(c *Container) error {
 	if err != nil {
 		return err
 	}
+
+	// 装配 LogCollect 类（备份 / 日志采集）"已完成"子任务的下载链接回调。
+	// backup.PgFileRepository 是无状态适配器（仅持有 PgPool），不依赖 initBackupModule
+	// 是否运行；MinIO 也是进程级共享。任一空则 lookup 返回 ("", nil)，DownloadURL 留空，
+	// 不阻断设备列表。详见 docs/project/backup-display-fix-20260520.md B5。
+	backupFileRepo := backup.NewPgFileRepository(c.PgPool)
+	// 用 PresignClient 而不是内部 MinIO client：内部 client 的 endpoint 是
+	// `minio:9000`（docker 服务名 / k8s ClusterIP），签出来的 presigned URL 浏览器
+	// 解析不了；NewPresignClient 在 minio.public_endpoint 非空时换成对外可达 host
+	// 重签（如 dev 配置 localhost:9000），空时退化到内部 endpoint。
+	minioClient := c.MinIO
+	if presignClient, presignErr := minioinfra.NewPresignClient(c.Cfg.MinIO); presignErr != nil {
+		logger.Warn("create MinIO presign client failed; download URLs will use internal endpoint",
+			zap.Error(presignErr))
+	} else {
+		minioClient = presignClient
+	}
+	// 复用 software 模块同款 transferPolicy：sys_configs 的 acs_transfer.uploadBaseURL
+	// 是运维在 OMC 后台维护的"对外可达 host"，复用它作为 MinIO 下载 URL 的 host 来源，
+	// 比 yaml minio.public_endpoint 更动态（改配置不用重启）。host 提取后保持 :9000
+	// 端口（MinIO 固定）。30 秒缓存内置在 transferPolicy 里，无额外查库开销。
+	ufteSysConfigRepo := admin.NewPgSysConfigRepository(c.PgPool)
+	ufteTransferPolicy := transfercfg.NewPolicy(
+		transfercfg.Snapshot{},
+		func(ctx context.Context, category, key string) (string, bool) {
+			row, err := ufteSysConfigRepo.GetByKey(ctx, category, key)
+			if err != nil || row == nil {
+				return "", false
+			}
+			return row.Value, true
+		},
+	)
+	service.SetDownloadURLLookup(func(ctx context.Context, sn, fileName string) (string, error) {
+		if minioClient == nil || sn == "" || fileName == "" {
+			return "", nil
+		}
+		files, lookupErr := backupFileRepo.ListBySerial(ctx, sn)
+		if lookupErr != nil {
+			return "", lookupErr
+		}
+		for i := range files {
+			if files[i].FileName != fileName || files[i].ObjectPath == "" {
+				continue
+			}
+			bucket, objectPath, splitErr := backup.SplitBucketAndPath(files[i].ObjectPath)
+			if splitErr != nil {
+				return "", splitErr
+			}
+			// 动态 host 重新签：presigned URL 的签名 V4 算法包含 host header，
+			// 不能签后改 host（破坏签名 → SignatureDoesNotMatch）。从 sys_configs
+			// 拿 uploadBaseURL.host，结合 MinIO 9000 端口当 PublicEndpoint，临时
+			// 创建 PresignClient 签一次。minio.New 本身不发网络请求（Region 已显式
+			// 指定，跳过 GetBucketLocation 探测），开销可忽略。
+			signer := minioClient
+			snap := ufteTransferPolicy.Snapshot(ctx)
+			if snap.Upload.BaseURL != "" {
+				if parsed, perr := url.Parse(snap.Upload.BaseURL); perr == nil && parsed.Hostname() != "" {
+					customCfg := c.Cfg.MinIO
+					customCfg.PublicEndpoint = parsed.Hostname() + ":9000"
+					if pc, nerr := minioinfra.NewPresignClient(customCfg); nerr == nil {
+						signer = pc
+					}
+				}
+			}
+			u, presignErr := signer.PresignedGetObject(ctx, bucket, objectPath, time.Hour, url.Values{})
+			if presignErr != nil {
+				return "", presignErr
+			}
+			return u.String(), nil
+		}
+		return "", nil // metadata not yet populated → caller leaves URL blank
+	})
+
+	// 注入"backup_restore_file 反查"回调——按 (sn, mainTaskID) 精确反查。
+	// 从 migrations/000133 起 backup_restore_file 加了 task_id 字段（UFTE 主任务 UUID），
+	// 唯一键 (sn, task_id, file_name) 保证不同任务隔离。这里直接按 task_id 精确反查
+	// 当前任务的落地记录，返回设备真实文件名。匹配不到（设备未上报 / 旧数据无 task_id）
+	// 时返回 ("", false)，DeviceItem.TargetFile 留空。
+	service.SetFileLandedLookup(func(ctx context.Context, sn, mainTaskID string) (string, bool, error) {
+		if sn == "" || mainTaskID == "" {
+			return "", false, nil
+		}
+		files, lookupErr := backupFileRepo.ListBySerial(ctx, sn)
+		if lookupErr != nil {
+			return "", false, lookupErr
+		}
+		for i := range files {
+			f := &files[i]
+			if f.ObjectPath == "" {
+				continue
+			}
+			if f.TaskID == nil || *f.TaskID != mainTaskID {
+				continue
+			}
+			return f.FileName, true, nil
+		}
+		return "", false, nil
+	})
+
+	// 注入"设备上线即重试"回调：让 software.HandleDeviceOnline 在 LogCollect 类
+	// 子任务被唤醒时能复用 UFTE catalog 解析 transport_path 后重启 Upload RPC。
+	// 不装配则用户挂起→开始时若设备恰好离线，子任务会永远停在 suspended。
+	// 详见 docs/project/backup-display-fix-20260520.md F6-F9。
+	if c.miscDeps.softwareService != nil {
+		c.miscDeps.softwareService.SetLogCollectResumer(service)
+	}
+
 	c.miscDeps.ufteHandler = ufte.NewHandler(service, logger)
 	logger.Info("UFTE adapter module initialized", zap.Int("built_in_task_types_inserted", inserted))
 	return nil

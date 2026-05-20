@@ -91,12 +91,25 @@ type DeviceItem struct {
 	ProductType     string `json:"productType"`
 	CurrentVersion  string `json:"currentVersion"`
 	TargetVersion   string `json:"targetVersion"`
-	Status          string `json:"status"`
-	Result          string `json:"result,omitempty"`
-	Progress        int    `json:"progress"`
-	LastReportAt    string `json:"lastReportAt"`
-	OperatorScope   string `json:"operatorScope"`
-	FailureReason   string `json:"failureReason,omitempty"`
+	// TargetFile 是"OUTPUT 文件类"（备份 / 日志采集 / 配置恢复，softwareTaskType=LogCollect）
+	// 的目标文件名（如 "backup-a1b2c3d4-SN001.nv"），由 {task_id8}/{sn} 模板按运行时渲染。
+	// 升级 / 回滚类不写本字段。
+	TargetFile string `json:"targetFile,omitempty"`
+	// DownloadURL 是 CPE 上传完成、ACS 落 MinIO 后的 1h presigned GET 链接；
+	// 仅当子任务已 ended 且 backup_restore_file 元数据存在时填充，否则留空。
+	DownloadURL   string `json:"downloadUrl,omitempty"`
+	Status        string `json:"status"`
+	Result        string `json:"result,omitempty"`
+	Progress      int    `json:"progress"`
+	LastReportAt  string `json:"lastReportAt"`
+	OperatorScope string `json:"operatorScope"`
+	FailureReason string `json:"failureReason,omitempty"`
+	// FailureDetail 是设备失败时的详细错误描述（含 FaultCode + FaultString 原文），
+	// 比如 TC 失败时填："Upgrade failed, there is FaultString in TransferComplete msg.
+	// FaultCode: 0, FaultString: httpUpload OM Http Put Upload stat file error"。
+	// 前端「设备失败信息」列展示原文，比单看 i18n 化的 FailureReason code（如 "TC_FAULT"）
+	// 更便于排查厂商侧故障。
+	FailureDetail string `json:"failureDetail,omitempty"`
 }
 
 type CreateTaskRequest struct {
@@ -317,7 +330,10 @@ func builtInTaskTypes() []TaskType {
 			FileTypeEditable:       true,
 			TargetFileNameTemplate: "runtime-{task_id8}-{sn}.tar.gz",
 			FileNameTemplate:       "runtime-{task_id8}-{sn}.tar.gz",
-			TransportPath:          "/smallcell/FileUploadService?fileType={fileType}&filename={targetFileName}",
+			// URL `filename=` 留空：厂商真实样本要求设备自己决定上传名；ACS upload
+			// handler 在 filename 空时按 (fileType, taskId, sn) 服务端兜底生成与
+			// target_file_name_template 一致的名字。详见 migrations/000132。
+			TransportPath: "/smallcell/FileUploadService?fileType={fileType}&sn={sn}&taskId={taskId}&filename=",
 			LastEditor:             "system",
 			UpdatedAt:              now,
 			softwareTaskType:       software.TaskTypeLogCollect,
@@ -339,7 +355,8 @@ func builtInTaskTypes() []TaskType {
 			FileTypeEditable:       true,
 			TargetFileNameTemplate: "fault-{task_id8}-{sn}.tar.gz",
 			FileNameTemplate:       "fault-{task_id8}-{sn}.tar.gz",
-			TransportPath:          "/smallcell/FileUploadService?fileType={fileType}&filename={targetFileName}",
+			// URL `filename=` 留空：详见 RUNTIME_LOG_COLLECT 同名说明。
+			TransportPath: "/smallcell/FileUploadService?fileType={fileType}&sn={sn}&taskId={taskId}&filename=",
 			LastEditor:             "system",
 			UpdatedAt:              now,
 			softwareTaskType:       software.TaskTypeLogCollect,
@@ -361,7 +378,8 @@ func builtInTaskTypes() []TaskType {
 			FileTypeEditable:       false,
 			TargetFileNameTemplate: "backup-{task_id8}-{sn}.xml",
 			FileNameTemplate:       "backup-{task_id8}-{sn}.xml",
-			TransportPath:          "/smallcell/FileUploadService?fileType=CONFIGBACKUP_XML&sn={sn}&taskId={taskId}&filename={targetFileName}",
+			// URL `filename=` 留空：详见 RUNTIME_LOG_COLLECT 同名说明。
+			TransportPath: "/smallcell/FileUploadService?fileType=CONFIGBACKUP_XML&sn={sn}&taskId={taskId}&filename=",
 			LastEditor:             "system",
 			UpdatedAt:              now,
 			softwareTaskType:       software.TaskTypeLogCollect,
@@ -383,7 +401,8 @@ func builtInTaskTypes() []TaskType {
 			FileTypeEditable:       false,
 			TargetFileNameTemplate: "backup-{task_id8}-{sn}.nv",
 			FileNameTemplate:       "backup-{task_id8}-{sn}.nv",
-			TransportPath:          "/smallcell/FileUploadService?fileType=CONFIGBACKUP_NV&sn={sn}&taskId={taskId}&filename={targetFileName}",
+			// URL `filename=` 留空：详见 RUNTIME_LOG_COLLECT 同名说明。
+			TransportPath: "/smallcell/FileUploadService?fileType=CONFIGBACKUP_NV&sn={sn}&taskId={taskId}&filename=",
 			LastEditor:             "system",
 			UpdatedAt:              now,
 			softwareTaskType:       software.TaskTypeLogCollect,
@@ -509,10 +528,25 @@ func normalizeTaskResult(result software.TaskResult) string {
 	}
 }
 
-func normalizeDeviceStatus(status software.UpgradeState) string {
+// normalizeDeviceStatus 把 software.UpgradeSubTask.Status 翻译成设备列表展示状态。
+//
+// 状态本身就是任务类型语义：
+//   - UpgradeDownloading（Download RPC，升级 / 回滚）→ "downloading"
+//   - UpgradeUploading（Upload RPC，备份 / 日志采集）→ "uploading"
+//     · 子分支：fileLanded=true（backup_restore_file 已落地）→ "awaiting_tc"
+//       —— TR-069 上"等 UploadResponse"和"CPE PUT 文件中"两步紧贴且无独立 ACS 信号，
+//       合并到"上传中"；CPE 完成 HTTP PUT → ACS 写 backup_restore_file 是唯一可观测分界点，
+//       之后等 CPE 主动发 TransferComplete 是独立的一段，单独展示。
+//   - 其它状态按状态机直译。
+func normalizeDeviceStatus(status software.UpgradeState, fileLanded bool) string {
 	switch status {
 	case software.UpgradeDownloading:
 		return "downloading"
+	case software.UpgradeUploading:
+		if fileLanded {
+			return "awaiting_tc"
+		}
+		return "uploading"
 	case software.UpgradeVerifying, software.UpgradeRebooting:
 		return "verifying"
 	case software.UpgradeSuspended:
@@ -544,6 +578,12 @@ func progressFromCounts(total, success, failed int, status software.TaskStatus) 
 }
 
 func stepForTask(item TaskType, status software.TaskStatus) string {
+	// 备份 / 日志采集 / 配置恢复 等"OUTPUT 文件"类型走 LogCollect 编排，跨多设备
+	// 没有"主任务当前步骤"的概念——设备级 RPC 步骤应该出现在设备子任务列表，
+	// 不该塞到主任务上（详见 docs/project/backup-display-fix-20260520.md）。
+	if item.softwareTaskType == software.TaskTypeLogCollect {
+		return ""
+	}
 	if status == software.TaskPending || status == software.TaskSuspended {
 		return "SEND_RPC"
 	}
@@ -558,8 +598,10 @@ func stepForTask(item TaskType, status software.TaskStatus) string {
 
 func progressForDeviceStatus(status string) int {
 	switch status {
-	case "downloading":
+	case "downloading", "uploading":
 		return 45
+	case "awaiting_tc":
+		return 70
 	case "verifying":
 		return 75
 	case "ended", "failed":
@@ -567,6 +609,23 @@ func progressForDeviceStatus(status string) int {
 	default:
 		return 0
 	}
+}
+
+// renderUFTEFileNameTemplate replaces {task_id8} 与 {sn} 占位符为运行时实际值。
+// 与 software/executor.go ExecuteOneUpload 渲染逻辑保持完全一致——后者把渲染结果
+// 拼到 Upload URL filename= 参数，CPE 上传时 ACS 就用这个名字落 MinIO。
+// 因此这里的渲染产物 = backup_restore_file.file_name 自然键，可用于反查元数据。
+func renderUFTEFileNameTemplate(tmpl string, taskID uuid.UUID, sn string) string {
+	if tmpl == "" {
+		return ""
+	}
+	hex := strings.ReplaceAll(taskID.String(), "-", "")
+	if len(hex) > 8 {
+		hex = hex[:8]
+	}
+	out := strings.ReplaceAll(tmpl, "{task_id8}", hex)
+	out = strings.ReplaceAll(out, "{sn}", sn)
+	return out
 }
 
 func formatTime(value time.Time) string {

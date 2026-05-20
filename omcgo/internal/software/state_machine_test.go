@@ -22,6 +22,15 @@ func TestValidateUpgradeTransition(t *testing.T) {
 		{"verifying to completed", UpgradeVerifying, UpgradeCompleted, false},
 		{"verifying to failed", UpgradeVerifying, UpgradeFailed, false},
 
+		// Upload RPC（LogCollect 类）专用转换：Pending → Uploading → Completed，
+		// 中间可被挂起 / 失败 / 终止。无 Rebooting / Verifying（备份/日志没有重启 + 校验环节）。
+		{"pending to uploading", UpgradePending, UpgradeUploading, false},
+		{"uploading to completed", UpgradeUploading, UpgradeCompleted, false},
+		{"uploading to failed", UpgradeUploading, UpgradeFailed, false},
+		{"uploading to suspended", UpgradeUploading, UpgradeSuspended, false},
+		{"uploading to terminated", UpgradeUploading, UpgradeTerminated, false},
+		{"suspended to uploading", UpgradeSuspended, UpgradeUploading, false},
+
 		// Invalid transitions
 		{"pending to completed", UpgradePending, UpgradeCompleted, true},
 		{"pending to verifying", UpgradePending, UpgradeVerifying, true},
@@ -29,6 +38,9 @@ func TestValidateUpgradeTransition(t *testing.T) {
 		{"completed to pending", UpgradeCompleted, UpgradePending, true},
 		{"failed to pending", UpgradeFailed, UpgradePending, true},
 		{"completed to downloading", UpgradeCompleted, UpgradeDownloading, true},
+		// Upload 不应该走 Rebooting / Verifying——这两个状态是 5G 升级专用的安装后阶段。
+		{"uploading to rebooting", UpgradeUploading, UpgradeRebooting, true},
+		{"uploading to verifying", UpgradeUploading, UpgradeVerifying, true},
 	}
 
 	for _, tt := range tests {
@@ -48,6 +60,7 @@ func TestIsUpgradeTerminal(t *testing.T) {
 	assert.True(t, IsUpgradeTerminal(UpgradeFailed))
 	assert.False(t, IsUpgradeTerminal(UpgradePending))
 	assert.False(t, IsUpgradeTerminal(UpgradeDownloading))
+	assert.False(t, IsUpgradeTerminal(UpgradeUploading))
 	assert.False(t, IsUpgradeTerminal(UpgradeRebooting))
 	assert.False(t, IsUpgradeTerminal(UpgradeVerifying))
 }

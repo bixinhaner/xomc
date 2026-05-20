@@ -4,11 +4,14 @@ import "fmt"
 
 // validUpgradeTransitions defines the allowed state transitions for upgrade tasks.
 var validUpgradeTransitions = map[UpgradeState][]UpgradeState{
-	UpgradePending:     {UpgradeDownloading, UpgradeFailed, UpgradeTerminated},
+	UpgradePending:     {UpgradeDownloading, UpgradeUploading, UpgradeFailed, UpgradeTerminated},
 	UpgradeDownloading: {UpgradeRebooting, UpgradeCompleted, UpgradeFailed, UpgradeSuspended, UpgradeTerminated},
-	UpgradeRebooting:   {UpgradeVerifying, UpgradeFailed, UpgradeSuspended, UpgradeTerminated},
-	UpgradeVerifying:   {UpgradeCompleted, UpgradeFailed, UpgradeTerminated},
-	UpgradeSuspended:   {UpgradeDownloading, UpgradeRebooting, UpgradeTerminated},
+	// LogCollect 类 Upload：TC 成功直接 Completed（无 Rebooting / Verifying）。
+	UpgradeUploading: {UpgradeCompleted, UpgradeFailed, UpgradeSuspended, UpgradeTerminated},
+	UpgradeRebooting: {UpgradeVerifying, UpgradeFailed, UpgradeSuspended, UpgradeTerminated},
+	UpgradeVerifying: {UpgradeCompleted, UpgradeFailed, UpgradeTerminated},
+	// Suspended 既可能是从 Downloading（设备掉线）也可能从 Uploading 进来——恢复时回到对应状态。
+	UpgradeSuspended: {UpgradeDownloading, UpgradeUploading, UpgradeRebooting, UpgradeTerminated},
 	// Terminal states — no transitions allowed.
 	UpgradeCompleted:  {},
 	UpgradeFailed:     {},

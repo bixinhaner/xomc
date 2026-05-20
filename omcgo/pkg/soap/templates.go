@@ -2,9 +2,27 @@ package soap
 
 import (
 	"bytes"
+	"encoding/xml"
 	"fmt"
 	"text/template"
 )
+
+// xmlEscape 用 encoding/xml.EscapeText 把字符串里的 & < > " ' 等转义成 XML 实体。
+// 模板里用户可控字段（URL/CommandKey/FileType/Username/Password/TargetFileName 等）
+// 必须经此函数处理，否则未转义的 & 会让 CPE 端 XML 解析失败或截断 URL。
+// 历史故障：Upload SOAP 的 URL 含 `?fileType=X&sn=Y&taskId=Z` 直接拼到模板，
+// 设备收到后解析报错，既不回 UploadResponse 也不向 FileUploadService 上传。
+func xmlEscape(s string) (string, error) {
+	var buf bytes.Buffer
+	if err := xml.EscapeText(&buf, []byte(s)); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+var soapFuncMap = template.FuncMap{
+	"xmlescape": xmlEscape,
+}
 
 // Pre-compiled SOAP response templates.
 var (
@@ -34,8 +52,8 @@ func init() {
 	GetParameterNamesTmpl = template.Must(template.New("GetParameterNames").Parse(getParameterNamesXML))
 	AddObjectTmpl = template.Must(template.New("AddObject").Parse(addObjectXML))
 	DeleteObjectTmpl = template.Must(template.New("DeleteObject").Parse(deleteObjectXML))
-	DownloadTmpl = template.Must(template.New("Download").Parse(downloadXML))
-	UploadTmpl = template.Must(template.New("Upload").Parse(uploadXML))
+	DownloadTmpl = template.Must(template.New("Download").Funcs(soapFuncMap).Parse(downloadXML))
+	UploadTmpl = template.Must(template.New("Upload").Funcs(soapFuncMap).Parse(uploadXML))
 	RebootTmpl = template.Must(template.New("Reboot").Parse(rebootXML))
 	FactoryResetTmpl = template.Must(template.New("FactoryReset").Parse(factoryResetXML))
 	ScheduleInformTmpl = template.Must(template.New("ScheduleInform").Parse(scheduleInformXML))
@@ -206,7 +224,11 @@ const soapEnvelopeOpen = `<?xml version="1.0" encoding="UTF-8"?>` +
 	` xmlns:xsd="http://www.w3.org/2001/XMLSchema">` +
 	`<SOAP-ENV:Header>` +
 	`<cwmp:ID SOAP-ENV:mustUnderstand="1">{{.ID}}</cwmp:ID>` +
-	`{{- if .NoMoreRequests}}<cwmp:NoMoreRequests>{{.NoMoreRequests}}</cwmp:NoMoreRequests>{{end}}` +
+	// TR-069 §3.7.1.5 NoMoreRequests 在 ACS→CPE 请求中必须显式出现。实测厂商 CPE
+	// （baicells/MMMM 系列）在该 header 缺失时直接静默丢弃 Upload/Download：
+	// 既不回 RPC 响应也不向 FileUploadService PUT，HTTP session 看似正常但业务卡死。
+	// 因此不要再用 `if NoMoreRequests` 条件跳过 0；直接渲染（0 = 还会有后续请求）。
+	`<cwmp:NoMoreRequests>{{.NoMoreRequests}}</cwmp:NoMoreRequests>` +
 	`</SOAP-ENV:Header>` +
 	`<SOAP-ENV:Body>`
 
@@ -254,30 +276,32 @@ const deleteObjectXML = soapEnvelopeOpen +
 	`<cwmp:ParameterKey>{{.Key}}</cwmp:ParameterKey>` +
 	`</cwmp:DeleteObject>` + soapEnvelopeClose
 
+// TR-069 §A.3.2.8 Download / §A.3.2.9 Upload: CWMP schema 使用
+// elementFormDefault="unqualified"，RPC 参数子元素必须是无前缀（unqualified），
+// 否则严格解析的 CPE 会把带 cwmp: 前缀的子元素视为未知元素而忽略，
+// 导致 CPE 收到 SOAP 后既不回 UploadResponse 也不实际下载/上传。
 const downloadXML = soapEnvelopeOpen +
 	`<cwmp:Download>` +
-	`<cwmp:CommandKey>{{.CommandKey}}</cwmp:CommandKey>` +
-	`<cwmp:FileType>{{.FileType}}</cwmp:FileType>` +
-	`<cwmp:URL>{{.URL}}</cwmp:URL>` +
-	`<cwmp:Username>{{.Username}}</cwmp:Username>` +
-	`<cwmp:Password>{{.Password}}</cwmp:Password>` +
-	`<cwmp:FileSize>{{.FileSize}}</cwmp:FileSize>` +
-	`<cwmp:TargetFileName>{{.TargetFileName}}</cwmp:TargetFileName>` +
-	`<cwmp:DelaySeconds>{{.DelaySeconds}}</cwmp:DelaySeconds>` +
-	`<cwmp:Md5>{{.Md5}}</cwmp:Md5>` +
-	`<cwmp:RawMode>{{.RawMode}}</cwmp:RawMode>` +
-	`<cwmp:SuccessURL></cwmp:SuccessURL>` +
-	`<cwmp:FailureURL></cwmp:FailureURL>` +
+	`<CommandKey>{{.CommandKey | xmlescape}}</CommandKey>` +
+	`<FileType>{{.FileType | xmlescape}}</FileType>` +
+	`<URL>{{.URL | xmlescape}}</URL>` +
+	`<Username>{{.Username | xmlescape}}</Username>` +
+	`<Password>{{.Password | xmlescape}}</Password>` +
+	`<FileSize>{{.FileSize}}</FileSize>` +
+	`<TargetFileName>{{.TargetFileName | xmlescape}}</TargetFileName>` +
+	`<DelaySeconds>{{.DelaySeconds}}</DelaySeconds>` +
+	`<SuccessURL></SuccessURL>` +
+	`<FailureURL></FailureURL>` +
 	`</cwmp:Download>` + soapEnvelopeClose
 
 const uploadXML = soapEnvelopeOpen +
 	`<cwmp:Upload>` +
-	`<cwmp:CommandKey>{{.CommandKey}}</cwmp:CommandKey>` +
-	`<cwmp:FileType>{{.FileType}}</cwmp:FileType>` +
-	`<cwmp:URL>{{.URL}}</cwmp:URL>` +
-	`<cwmp:Username>{{.Username}}</cwmp:Username>` +
-	`<cwmp:Password>{{.Password}}</cwmp:Password>` +
-	`<cwmp:DelaySeconds>{{.DelaySeconds}}</cwmp:DelaySeconds>` +
+	`<CommandKey>{{.CommandKey | xmlescape}}</CommandKey>` +
+	`<FileType>{{.FileType | xmlescape}}</FileType>` +
+	`<URL>{{.URL | xmlescape}}</URL>` +
+	`<Username>{{.Username | xmlescape}}</Username>` +
+	`<Password>{{.Password | xmlescape}}</Password>` +
+	`<DelaySeconds>{{.DelaySeconds}}</DelaySeconds>` +
 	`</cwmp:Upload>` + soapEnvelopeClose
 
 const rebootXML = soapEnvelopeOpen +

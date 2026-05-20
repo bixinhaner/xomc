@@ -4,16 +4,20 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	stderrors "errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/minio/minio-go/v7"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
+	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -21,6 +25,30 @@ import (
 	"github.com/omcgo/omcgo/internal/device"
 	devtask "github.com/omcgo/omcgo/internal/task"
 )
+
+// finalizeSubTaskFailure 是 BatchCollect / BatchUpgrade / RollbackDevices 共用的"sub_task
+// 创建失败后的兜底"。这里只清理已经 commit 的 mainTask，并把 PG unique violation
+// 翻译成业务层 ErrAlreadyExists 让 handler 自动映射到 HTTP 409。
+//
+// 为什么有这个函数：repository 没有暴露 tx 接口，无法把 mainTask + subTask 两次写库
+// 真正原子化。次优解是失败时手动回滚 mainTask，避免 UI 上出现"主任务存在但子任务缺失"
+// 的孤儿任务——这种孤儿任务列表能看到、start 会因为没 sub_task 直接 400，用户无解。
+//
+// 触发场景：同一设备已经有 active sub_task 占着 idx_upgrade_sub_tasks_device_active_uniq
+// 索引位（status NOT IN completed/failed/terminated）。前端重复点击或并发请求时会反复命中。
+func (s *SoftwareService) finalizeSubTaskFailure(ctx context.Context, mainID uuid.UUID, cause error) error {
+	if delErr := s.taskRepo.Delete(ctx, mainID); delErr != nil {
+		s.logger.Error("rollback main task after sub-task create failure",
+			zap.String("task_id", mainID.String()),
+			zap.NamedError("cause", cause),
+			zap.Error(delErr))
+	}
+	var pgErr *pgconn.PgError
+	if stderrors.As(cause, &pgErr) && pgErr.Code == "23505" {
+		return fmt.Errorf("%w: 该设备已有进行中的同类任务，请等待完成或先终止后再试", commonerrors.ErrAlreadyExists)
+	}
+	return cause
+}
 
 // SoftwareService provides firmware upload and device upgrade functionality.
 type SoftwareService struct {
@@ -146,8 +174,28 @@ func (s *SoftwareService) UploadFirmware(ctx context.Context, fw *FirmwareVersio
 
 // SetUploadConfig 配置日志采集 Upload RPC 的 ACS 上传基础 URL（CPE 可达地址）。
 // 应在 NewSoftwareService 之后、第一次 BatchCollect 之前调用（通常由 DI 容器注入）。
+// SetLogCollectResumer 装配 LogCollect 类子任务"设备上线即重试"回调（透传给 executor）。
+// ufte.Service 在 cmd/app/provider/modules.go initUFTEModule 中注入；详见
+// docs/project/backup-display-fix-20260520.md F7。
+func (s *SoftwareService) SetLogCollectResumer(r LogCollectResumer) {
+	s.executor.SetLogCollectResumer(r)
+}
+
+// ExecuteOneUploadDirect 是 executor.ExecuteOneUpload 的对外门面，供 ufte 包在
+// LogCollectResumer 回调中重启子任务的 Upload RPC 使用。与 startCollectExecution
+// 走的是同一份执行路径，区别仅在于一次只跑一个子任务、不限并发。
+func (s *SoftwareService) ExecuteOneUploadDirect(ctx context.Context, subTask *UpgradeSubTask, fileType, targetFileNameTemplate, transportPath string) {
+	s.executor.ExecuteOneUpload(ctx, subTask, fileType, targetFileNameTemplate, transportPath)
+}
+
 func (s *SoftwareService) SetUploadConfig(acsUploadBaseURL string) {
 	s.executor.SetUploadConfig(acsUploadBaseURL)
+}
+
+// SetTransferProvider 把"系统管理 → ACS 传输"系统配置接进来，Upload RPC 下发时
+// 用它的 BaseURL / Username / Password。改配置 30 秒内自动生效，无需重启。
+func (s *SoftwareService) SetTransferProvider(p transfercfg.Provider) {
+	s.executor.SetTransferProvider(p)
 }
 
 // BatchCollectRequest 日志采集任务创建请求。
@@ -196,7 +244,7 @@ func (s *SoftwareService) BatchCollect(ctx context.Context, req BatchCollectRequ
 	}
 
 	if err := s.subTaskRepo.BatchCreate(ctx, subTasks); err != nil {
-		return nil, fmt.Errorf("batch create log collect sub-tasks: %w", err)
+		return nil, s.finalizeSubTaskFailure(ctx, mainTask.ID, fmt.Errorf("batch create log collect sub-tasks: %w", err))
 	}
 
 	if req.CreateSuspended {
@@ -292,7 +340,7 @@ func (s *SoftwareService) BatchUpgrade(ctx context.Context, req BatchUpgradeRequ
 	}
 
 	if err := s.subTaskRepo.BatchCreate(ctx, subTasks); err != nil {
-		return nil, fmt.Errorf("batch create sub-tasks: %w", err)
+		return nil, s.finalizeSubTaskFailure(ctx, mainTask.ID, fmt.Errorf("batch create sub-tasks: %w", err))
 	}
 
 	if req.CreateSuspended {
@@ -559,20 +607,34 @@ func (s *SoftwareService) handleTCBody(ctx context.Context, commandKey string, f
 		return nil // Not our task
 	}
 
+	// Fault 判定不能只看 FaultCode！部分厂商 CPE（实测 baicells/MMMM 系列）
+	// 在 TC 失败场景下回传 <FaultCode></FaultCode> 空字符串（违反 TR-069 spec：
+	// spec 要求成功填 0、失败填具体 code 数字），仅在 FaultString 里塞失败描述
+	// 如 "Download fail with exit status 1"。旧实现 `fault.FaultCode != 0` 把这种
+	// 空 code 当成 0/成功，导致设备其实没传文件、sub_task 却被标 completed、
+	// managed_files 落地零文件 —— 前端"已完成"但下载列表空。
+	// 修复：FaultCode != 0 OR FaultString trim 后非空，二者满足其一即视为失败。
+	faultString := ""
+	if fault != nil {
+		faultString = strings.TrimSpace(fault.FaultString)
+	}
+	hasFault := fault != nil && (fault.FaultCode != 0 || faultString != "")
+
 	s.logger.Info("TC matched sub-task",
 		zap.String("sub_task_id", subTask.ID.String()),
 		zap.String("command_key", commandKey),
 		zap.String("status", string(subTask.Status)),
-		zap.Bool("has_fault", fault != nil && fault.FaultCode != 0))
+		zap.Bool("has_fault", hasFault))
 
-	// Only handle downloading state
-	if subTask.Status != UpgradeDownloading {
+	// 只处理在途状态：Downloading（升级 / 回滚类）或 Uploading（备份 / 日志采集类）。
+	// 其它状态意味着事件迟到或已被 reaper 兜底，忽略即可。
+	if subTask.Status != UpgradeDownloading && subTask.Status != UpgradeUploading {
 		return nil
 	}
 
 	// TC with fault → fail immediately
-	if fault != nil && fault.FaultCode != 0 {
-		reason := fmt.Sprintf("Upgrade failed, there is FaultString in TransferComplete msg. FaultCode: %d, FaultString: %s", fault.FaultCode, fault.FaultString)
+	if hasFault {
+		reason := fmt.Sprintf("Upgrade failed, there is FaultString in TransferComplete msg. FaultCode: %d, FaultString: %s", fault.FaultCode, faultString)
 		s.executor.failSubTask(ctx, subTask, reason, FailureTCFault)
 		return nil
 	}
@@ -608,7 +670,8 @@ func (s *SoftwareService) handleTCInform(ctx context.Context, deviceSN string) e
 		return nil
 	}
 
-	if subTask.Status != UpgradeDownloading {
+	// 同 handleTCBody：在途阶段（下载 / 上传）才接受 TC 事件推进。
+	if subTask.Status != UpgradeDownloading && subTask.Status != UpgradeUploading {
 		return nil
 	}
 
@@ -681,6 +744,13 @@ func (s *SoftwareService) checkAndFinalizeTask(ctx context.Context, taskID uuid.
 }
 
 // SuspendUpgrade suspends all active sub-tasks under a main task.
+// 历史 bug：旧实现只改 upgrade_tasks 主任务 status，**完全不动 upgrade_sub_tasks**——
+// 前端「设备状态」列读 sub_task.status，所以暂停后页面依然显示"上传中"/"下载中"，
+// 用户觉得"操作没生效"，再点终止时前端按状态过滤又挡住了，链路彻底卡住。
+//
+// 修复：同步把 active sub_tasks（downloading / uploading / rebooting / pending）翻成
+// Suspended。已 Terminal（completed / failed / terminated）的跳过；已 Suspended 的
+// 也跳过避免无效写库。
 func (s *SoftwareService) SuspendUpgrade(ctx context.Context, taskID uuid.UUID) error {
 	task, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
@@ -695,7 +765,33 @@ func (s *SoftwareService) SuspendUpgrade(ctx context.Context, taskID uuid.UUID) 
 		return fmt.Errorf("suspend main task: %w", err)
 	}
 
-	s.logger.Info("upgrade task suspended", zap.String("task_id", taskID.String()))
+	suspendedCount := 0
+	for page := 1; ; page++ {
+		subResult, err := s.subTaskRepo.ListByTaskID(ctx, taskID, SubTaskFilter{
+			TaskID:      taskID,
+			ListRequest: model.ListRequest{Page: page, PageSize: 100},
+		})
+		if err != nil {
+			return fmt.Errorf("list sub-tasks for suspend: %w", err)
+		}
+		for i := range subResult.Items {
+			subTask := subResult.Items[i]
+			if IsUpgradeTerminal(subTask.Status) || subTask.Status == UpgradeSuspended {
+				continue
+			}
+			if err := s.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradeSuspended, "task suspended by operator"); err != nil {
+				return fmt.Errorf("suspend sub-task %s: %w", subTask.ID.String(), err)
+			}
+			suspendedCount++
+		}
+		if len(subResult.Items) == 0 || page >= subResult.TotalPages {
+			break
+		}
+	}
+
+	s.logger.Info("upgrade task suspended",
+		zap.String("task_id", taskID.String()),
+		zap.Int("sub_tasks_suspended", suspendedCount))
 	return nil
 }
 
@@ -710,17 +806,19 @@ func (s *SoftwareService) ResumeUpgrade(ctx context.Context, taskID uuid.UUID) e
 		return commonerrors.NewBusinessError(8004, "task is not suspended or pending", commonerrors.ErrInvalidInput)
 	}
 
-	pendingStatus := UpgradeState(UpgradePending)
+	// 同时接受 Pending 和 Suspended sub-tasks——SuspendUpgrade 修复后会把 active 的
+	// downloading/rebooting 子任务翻成 Suspended，Resume 需要把它们也捞回来。
+	// 这与 ResumeCollect 行为对齐。
 	subResult, err := s.subTaskRepo.ListByTaskID(ctx, taskID, SubTaskFilter{
-		TaskID: taskID,
-		Status: &pendingStatus,
+		TaskID:   taskID,
+		Statuses: []UpgradeState{UpgradePending, UpgradeSuspended},
 	})
 	if err != nil {
-		return fmt.Errorf("list pending sub-tasks: %w", err)
+		return fmt.Errorf("list pending/suspended sub-tasks: %w", err)
 	}
 
 	if len(subResult.Items) == 0 {
-		return commonerrors.NewBusinessError(8010, "no pending sub-tasks to execute", commonerrors.ErrInvalidInput)
+		return commonerrors.NewBusinessError(8010, "no pending or suspended sub-tasks to execute", commonerrors.ErrInvalidInput)
 	}
 
 	subTasks := make([]*UpgradeSubTask, len(subResult.Items))
@@ -833,10 +931,11 @@ func (s *SoftwareService) ResumeCollect(ctx context.Context, taskID uuid.UUID, t
 		return commonerrors.NewBusinessError(8004, "task is not suspended or pending", commonerrors.ErrInvalidInput)
 	}
 
-	pendingStatus := UpgradeState(UpgradePending)
+	// Resume both pending and suspended sub-tasks (suspended = device was offline
+	// when first attempted; they should be retried on resume).
 	subResult, err := s.subTaskRepo.ListByTaskID(ctx, taskID, SubTaskFilter{
-		TaskID: taskID,
-		Status: &pendingStatus,
+		TaskID:   taskID,
+		Statuses: []UpgradeState{UpgradePending, UpgradeSuspended},
 	})
 	if err != nil {
 		return fmt.Errorf("list pending sub-tasks: %w", err)
@@ -952,7 +1051,7 @@ func (s *SoftwareService) RollbackDevices(ctx context.Context, req RollbackReque
 	}
 
 	if err := s.subTaskRepo.BatchCreate(ctx, subTasks); err != nil {
-		return nil, fmt.Errorf("batch create rollback sub-tasks: %w", err)
+		return nil, s.finalizeSubTaskFailure(ctx, mainTask.ID, fmt.Errorf("batch create rollback sub-tasks: %w", err))
 	}
 
 	// Metrics fire only once the task is fully persisted (parent + sub-tasks);
@@ -1130,6 +1229,14 @@ func (s *SoftwareService) Subscribe(eventBus event.EventBus) error {
 		s.logger.Warn("subscribe download response", zap.Error(err))
 	}
 
+	// Upload response — detect upload rejection (config backup / log collect)
+	_, err = eventBus.QueueSubscribe(event.SubjectCommandUploadResponse, "software-upgrade-upload-resp", func(ctx context.Context, evt event.Event) error {
+		return s.executor.HandleUploadResponse(ctx, evt)
+	})
+	if err != nil {
+		s.logger.Warn("subscribe upload response", zap.Error(err))
+	}
+
 	// RebootComplete — rollback completion and 4G upgrade
 	_, err = eventBus.QueueSubscribe(event.SubjectDeviceRebootComplete, "software-upgrade-reboot", func(ctx context.Context, evt event.Event) error {
 		return s.executor.HandleRebootComplete(ctx, evt)
@@ -1146,12 +1253,23 @@ func (s *SoftwareService) Subscribe(eventBus event.EventBus) error {
 		s.logger.Warn("subscribe upgrade_finish", zap.Error(err))
 	}
 
-	// Device periodic — check for pending upgrades on reconnect
+	// Device periodic — check for pending upgrades on reconnect.
+	// 每次心跳都触发；payload 含 device_id 嵌套对象（ACS publish）。
 	_, err = eventBus.QueueSubscribe(event.SubjectDevicePeriodic, "software-upgrade-periodic", func(ctx context.Context, evt event.Event) error {
 		return s.executor.HandleDeviceOnline(ctx, evt)
 	})
 	if err != nil {
 		s.logger.Warn("subscribe device periodic", zap.Error(err))
+	}
+
+	// Device online — offline→active 切换的确定性信号（device 模块 publish，T-0123），
+	// 比 periodic 更精准。两者同时订阅可形成兜底。详见
+	// docs/project/backup-display-fix-20260520.md F13。
+	_, err = eventBus.QueueSubscribe(event.SubjectDeviceOnline, "software-upgrade-online", func(ctx context.Context, evt event.Event) error {
+		return s.executor.HandleDeviceOnline(ctx, evt)
+	})
+	if err != nil {
+		s.logger.Warn("subscribe device online", zap.Error(err))
 	}
 
 	return nil
@@ -1161,13 +1279,21 @@ func (s *SoftwareService) Subscribe(eventBus event.EventBus) error {
 // stale (timed-out) upgrade sub-tasks and marks them as failed.
 func (s *SoftwareService) StartTaskReaper() {
 	interval := 2 * time.Minute
-	taskTimeout := 30 * time.Minute
+	// DeviceOnline: 设备 inform_interval 默认 300s（5 min），offline detector 还
+	// 留 2× 缓冲（10 min）才把设备标 offline。reaper 阈值原本 10 min ≈ 临界值，
+	// 一次 inform 延迟就会把"等待设备上线"的子任务错杀（2026-05-20 修复）。
+	// 改 60 min 给挂起等设备的场景留 12 个 inform 周期容错；详见
+	// docs/project/backup-display-fix-20260520.md F10。
+	timeouts := StaleTimeouts{
+		RPCResponse:      5 * time.Minute,
+		DeviceOnline:     60 * time.Minute,
+		TransferComplete: 30 * time.Minute,
+	}
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for range ticker.C {
-			cutoff := time.Now().Add(-taskTimeout)
-			taskCounts, err := s.subTaskRepo.FailStale(context.Background(), cutoff)
+			taskCounts, err := s.subTaskRepo.FailStale(context.Background(), timeouts)
 			if err != nil {
 				s.logger.Error("reap stale upgrade tasks", zap.Error(err))
 				continue
@@ -1192,7 +1318,7 @@ func (s *SoftwareService) StartTaskReaper() {
 			}
 		}
 	}()
-	s.logger.Info("upgrade task reaper started", zap.Duration("interval", interval), zap.Duration("timeout", taskTimeout))
+	s.logger.Info("upgrade task reaper started", zap.Duration("interval", interval), zap.Duration("rpc_response_timeout", timeouts.RPCResponse), zap.Duration("device_online_timeout", timeouts.DeviceOnline), zap.Duration("transfer_complete_timeout", timeouts.TransferComplete))
 }
 
 // RestorePendingUpgrades recovers upgrade tasks that were in-progress when

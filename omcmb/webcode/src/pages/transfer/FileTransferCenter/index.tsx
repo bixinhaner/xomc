@@ -15,6 +15,7 @@ import {
   Table,
   Tag,
   Tabs,
+  Tooltip,
   Typography,
   message,
 } from 'antd';
@@ -319,13 +320,22 @@ export default function FileTransferCenter() {
     dataIndex: 'failureReason',
     key: 'failureReason',
     width: 260,
-    render: (value: string) => {
+    render: (value: string, record: UnifiedFileTransferDeviceItem) => {
       if (!value) return '-';
       const i18nLabel = t(`software.failureCode.${value}` as Parameters<typeof t>[0]);
-      if (i18nLabel && i18nLabel !== `software.failureCode.${value}`) {
-        return <span style={{ color: '#ff4d4f' }}>{i18nLabel}</span>;
-      }
-      return <span style={{ color: '#ff4d4f' }}>{value}</span>;
+      const display = i18nLabel && i18nLabel !== `software.failureCode.${value}` ? i18nLabel : value;
+      // 设备厂商原始 fault（FaultCode + FaultString）放 Tooltip 里——i18n label 只看到统一
+      // 错误码描述，hover 后能拿到设备端原文（如 "Upgrade failed, there is FaultString in
+      // TransferComplete msg. FaultCode: 0, FaultString: httpUpload OM Http Put Upload stat
+      // file error"），方便厂商侧排查。
+      const detail = record.failureDetail;
+      const text = <span style={{ color: '#ff4d4f' }}>{display}</span>;
+      if (!detail || detail === display) return text;
+      return (
+        <Tooltip title={detail} placement="topLeft" overlayStyle={{ maxWidth: 480 }}>
+          {text}
+        </Tooltip>
+      );
     },
   };
 
@@ -465,11 +475,11 @@ export default function FileTransferCenter() {
   const getTypeDef = (typeCode: string) => taskTypes.find((item) => item.typeCode === typeCode);
 
   const getTaskTargetVersion = (record: UnifiedFileTransferTask) => {
-    if (record.targetVersion) {
-      return record.targetVersion;
-    }
-    const typeDef = getTypeDef(record.typeCode);
-    return typeDef?.fileNameTemplate || typeDef?.targetFileNameTemplate || typeDef?.fileTypeLabel || '-';
+    // 只有升级 / 回滚类才有"主任务目标版本"（固件版本号）；备份 / 日志采集 /
+    // 配置恢复类后端返回空串，前端不再用 typeDef.fileNameTemplate 等模板字符串兜底
+    // ——那只是占位符模板，对主任务来说没有意义。详见
+    // docs/project/backup-display-fix-20260520.md F2。
+    return record.targetVersion?.trim() ? record.targetVersion : '-';
   };
 
   const getTaskProductType = (record: UnifiedFileTransferTask) => {
@@ -581,13 +591,9 @@ export default function FileTransferCenter() {
         width: 120,
         render: (_, record) => renderTaskStatus(record.status),
       },
-      {
-        title: '当前步骤',
-        dataIndex: 'currentStep',
-        key: 'currentStep',
-        width: 170,
-        render: (value: TransferStepId) => STEP_LABELS[value],
-      },
+      // 备份 / 日志采集 / 配置恢复 等 OUTPUT 文件类（非升级类）主任务跨多设备，没有
+      // "当前步骤"概念——单设备的 RPC 步骤在设备列表展示。详见
+      // docs/project/backup-display-fix-20260520.md F1。
       {
         title: '进度',
         dataIndex: 'progress',
@@ -682,20 +688,44 @@ export default function FileTransferCenter() {
 
     return [
       {
-        title: '设备名称',
-        dataIndex: 'deviceName',
-        key: 'deviceName',
+        // 任务列表场景：每行是「某任务在某设备上的执行情况」。主显示任务名（用户操作
+        // 上下文，他刚创建的 testNV 想看这个任务的进展），副显示设备名（区分多设备）。
+        title: '任务/设备',
+        dataIndex: 'taskName',
+        key: 'taskName',
         render: (_, record) => (
           <Space direction="vertical" size={2}>
-            <Text strong>{record.deviceName}</Text>
-            <Text type="secondary">{record.taskName}</Text>
+            <Text strong>{record.taskName}</Text>
+            <Text type="secondary">{record.deviceName}</Text>
           </Space>
         ),
       },
       { title: '设备 SN', dataIndex: 'deviceSn', key: 'deviceSn', width: 120 },
       { title: '产品类型', dataIndex: 'productType', key: 'productType', width: 130 },
       { title: '当前版本', dataIndex: 'currentVersion', key: 'currentVersion', width: 130 },
-      { title: '目标版本/目标文件', dataIndex: 'targetVersion', key: 'targetVersion', width: 180 },
+      {
+        // 非升级类（备份 / 日志采集 / 配置恢复）：使用后端按 {task_id8}/{sn} 渲染过的
+        // targetFile（出现"backup-a1b2c3d4-SN001.nv"形式）。CPE 上传完成且 metadata
+        // 落地后，后端附带 downloadUrl，UI 渲染为可点击链接。详见
+        // docs/project/backup-display-fix-20260520.md F3。
+        title: '目标版本/目标文件',
+        key: 'targetVersion',
+        width: 220,
+        render: (_, record) => {
+          const file = record.targetFile?.trim();
+          if (!file) {
+            return '-';
+          }
+          if (record.downloadUrl) {
+            return (
+              <a href={record.downloadUrl} target="_blank" rel="noopener noreferrer">
+                {file}
+              </a>
+            );
+          }
+          return <Text type="secondary">{file}</Text>;
+        },
+      },
       {
         title: '状态',
         dataIndex: 'status',
@@ -922,7 +952,11 @@ export default function FileTransferCenter() {
                         onChange={(value) => setDeviceStatusFilter(value)}
                         options={[
                           { label: '待执行', value: 'pending' },
+                          // 升级 / 回滚类（Download RPC）
                           { label: '下载中', value: 'downloading' },
+                          // 备份 / 日志采集类（Upload RPC）的两个子阶段
+                          { label: '上传中', value: 'uploading' },
+                          { label: '等待 TransferComplete', value: 'awaiting_tc' },
                           { label: '校验中', value: 'verifying' },
                           { label: '已挂起', value: 'suspended' },
                           { label: '已完成', value: 'ended' },

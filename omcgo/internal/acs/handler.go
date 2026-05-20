@@ -578,6 +578,8 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 		session.State = StateRPCPending
 		session.LastRPC = taskItem.Method
 		session.LastCommandParams = taskItem.Params
+		session.LastTaskID = taskItem.ID
+		session.LastTaskCWMPID = cwmpID
 		session.RPCCount++
 		session.UpdatedAt = time.Now()
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
@@ -605,6 +607,7 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 				zap.String("soap_body", string(respData)),
 				zap.String("command_key", taskItem.CommandKey),
 			)
+			h.logOutgoingTransferRPC(log, deviceSN, taskItem.Method, cwmpID, taskItem.CommandKey, taskItem.Params, respData)
 			if entry := rpclog.EntryFromContext(r.Context()); entry != nil {
 				entry.Method = taskItem.Method
 				entry.TaskID = taskItem.ID
@@ -757,6 +760,8 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 		session.State = StateRPCPending
 		session.LastRPC = nextTask.Method
 		session.LastCommandParams = nextTask.Params
+		session.LastTaskID = nextTask.ID
+		session.LastTaskCWMPID = newCWMPID
 		session.RPCCount++
 		session.UpdatedAt = time.Now()
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
@@ -783,6 +788,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 				zap.String("trigger", "after_rpc_response"),
 				zap.String("command_key", nextTask.CommandKey),
 			)
+			h.logOutgoingTransferRPC(log, deviceSN, nextTask.Method, newCWMPID, nextTask.CommandKey, nextTask.Params, respData)
 			h.setSessionCookie(w, sessionID)
 			h.sendSOAPResponse(w, respData, log)
 			return
@@ -985,22 +991,47 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 		entry.Sequence = session.RPCCount
 	}
 
-	// 如果任务服务可用，标记任务失败
+	// 关联 Fault 到原 task：
+	//   优先用 SOAP Header cwmp:ID 反查（标准路径，spec 要求 response.cwmp:ID == request.cwmp:ID）
+	//   fallback 用 session.LastTaskID（CPE 自己生成新 cwmp:ID 主动 POST Fault 的厂商行为
+	//     —— 实测 baicells/MMMM 系列就是这种"另起一个 request 携带 Fault"的玩法，
+	//     cwmp:ID 不匹配，必须按 TR-069 session 上下文关联到刚派发出去的 RPC 才能落地失败原因）
+	var taskItem *task.Task
 	if cwmpID != "" {
-		taskItem, err := h.taskService.GetTaskByCWMPID(r.Context(), cwmpID)
+		t, err := h.taskService.GetTaskByCWMPID(r.Context(), cwmpID)
 		if err != nil {
 			log.Warn("get task by cwmp_id for fault", zap.Error(err), zap.String("cwmp_id", cwmpID))
-		} else if taskItem != nil {
-			if markErr := h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, faultCode, faultMsg); markErr != nil {
-				log.Error("mark task failed on fault", zap.Error(markErr), zap.String("task_id", taskItem.ID))
-			}
-			log.Info("task marked as failed on SOAP fault",
-				zap.String("task_id", taskItem.ID),
-				zap.String("method", taskItem.Method),
-				zap.String("fault_msg", faultMsg))
 		} else {
-			log.Warn("no task found for cwmp_id in fault", zap.String("cwmp_id", cwmpID))
+			taskItem = t
 		}
+	}
+	if taskItem == nil && session.LastTaskID != "" {
+		t, err := h.taskService.GetTask(r.Context(), session.LastTaskID)
+		if err != nil {
+			log.Warn("get task by session.last_task_id for fault",
+				zap.Error(err),
+				zap.String("last_task_id", session.LastTaskID))
+		} else if t != nil {
+			taskItem = t
+			log.Info("SOAP fault associated via session.last_task_id (cwmp_id mismatch)",
+				zap.String("cpe_cwmp_id", cwmpID),
+				zap.String("acs_cwmp_id", session.LastTaskCWMPID),
+				zap.String("task_id", t.ID))
+		}
+	}
+	if taskItem != nil {
+		if markErr := h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, faultCode, faultMsg); markErr != nil {
+			log.Error("mark task failed on fault", zap.Error(markErr), zap.String("task_id", taskItem.ID))
+		}
+		log.Info("task marked as failed on SOAP fault",
+			zap.String("task_id", taskItem.ID),
+			zap.String("method", taskItem.Method),
+			zap.Int("fault_code", faultCode),
+			zap.String("fault_msg", faultMsg))
+	} else {
+		log.Warn("SOAP fault but no task could be associated (neither cwmp_id nor session.last_task_id matched)",
+			zap.String("cwmp_id", cwmpID),
+			zap.String("device_sn", session.DeviceSN))
 	}
 
 	// 检查队列中是否有更多任务
@@ -1016,6 +1047,8 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 
 		session.State = StateRPCPending
 		session.LastRPC = nextTask.Method
+		session.LastTaskID = nextTask.ID
+		session.LastTaskCWMPID = newCWMPID
 		session.UpdatedAt = time.Now()
 		h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 
@@ -1041,6 +1074,7 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 				zap.String("trigger", "after_soap_fault"),
 				zap.String("command_key", nextTask.CommandKey),
 			)
+			h.logOutgoingTransferRPC(log, deviceSN, nextTask.Method, newCWMPID, nextTask.CommandKey, nextTask.Params, respData)
 			h.setSessionCookie(w, sessionID)
 			h.sendSOAPResponse(w, respData, log)
 			return
@@ -1699,6 +1733,57 @@ func (h *Handler) currentUploadSettings(ctx context.Context) transfercfg.UploadS
 
 // =====================================================================// 测试功能结束
 // =====================================================================
+
+// logOutgoingTransferRPC 在 ACS 把 Upload / Download SOAP 写回 CPE 之前，
+// 把渲染好的关键字段（FileType / URL / CommandKey / fileName / username / md5）+ 完整 SOAP
+// 单独打一条 INFO 日志，便于排障时直接 grep。
+//
+// 触发原因：通用日志 "ACS sending RPC request from task" 里其实 soap_body 字段已经带
+// 完整报文，但混在所有 RPC 一起。Upload / Download 是排查文件传输问题的核心，
+// 拆出来打一条带解析字段的专属日志，让 grep 一步到位。
+//
+// 仅对 method == "Upload" / "Download" 触发；其它方法 no-op。失败（params JSON 不合法）
+// 时只记录原始 soap_body，不抛错——日志是辅助手段，不能影响 RPC 下发主链路。
+func (h *Handler) logOutgoingTransferRPC(log *zap.Logger, deviceSN, method, cwmpID, commandKey string, params []byte, soapBody []byte) {
+	if method != "Upload" && method != "Download" {
+		return
+	}
+	// Upload / Download params JSON 是 SoftwareService / backup.Executor 序列化后塞进
+	// task 行的，结构和 soap.UploadData / soap.DownloadData 对齐。这里用最小子集解析，
+	// 避免对 soap 包反向依赖（acs/rpc 包已经依赖 soap，但 handler 层不直接关心字段细节）。
+	var detail struct {
+		FileType       string `json:"file_type"`
+		URL            string `json:"url"`
+		Username       string `json:"username"`
+		Password       string `json:"password"`
+		FileName       string `json:"file_name"`
+		TargetFileName string `json:"target_file_name"`
+		FileSize       int64  `json:"file_size"`
+		MD5            string `json:"md5"`
+		RawMode        string `json:"raw_mode"`
+	}
+	_ = json.Unmarshal(params, &detail) // best-effort; 失败时各字段为零值
+
+	fields := []zap.Field{
+		zap.String("device_sn", deviceSN),
+		zap.String("method", method),
+		zap.String("cwmp_id", cwmpID),
+		zap.String("command_key", commandKey),
+		zap.String("file_type", detail.FileType),
+		zap.String("url", detail.URL),
+		zap.String("username", detail.Username),
+		// password 不打——按安全合规要求避免日志泄露
+		zap.String("file_name", detail.FileName),
+		zap.String("target_file_name", detail.TargetFileName),
+		zap.Int64("file_size", detail.FileSize),
+		zap.String("md5", detail.MD5),
+		zap.String("raw_mode", detail.RawMode),
+		zap.Int("soap_size", len(soapBody)),
+		zap.String("soap_body", string(soapBody)),
+	}
+	log.Info("ACS sending TR-069 "+method+" SOAP to CPE", fields...)
+}
+
 // faultEnvRegex matches the SOAP <Fault> element regardless of namespace
 // prefix (soap-env / SOAP-ENV / soapenv / env / s / cwmp / none) and case.
 // Examples that must match: <Fault>, <soap-env:Fault>, <SOAP-ENV:Fault>.

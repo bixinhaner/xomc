@@ -196,16 +196,13 @@ func (h *DownloadHandler) BuildRequest(cmd *Command) ([]byte, error) {
 	// Plain path (no "://" scheme) is treated as MinIO bucket/object path:
 	//   firmware/v2.0.bin → {BaseURL}{Path}/firmware/v2.0.bin
 	// URLs with a scheme (http://, https://, ftp://) are passed through unchanged.
+	//
+	// Username / Password 不再自动从 transfercfg.Download 注入——产品线要求 Download
+	// 不走 HTTP Basic Auth（与 Upload 对齐），CPE 拿到的 <cwmp:Username></cwmp:Username>
+	// 应该是空标签。Params.URL 上层若已显式塞凭据走透传；空字符串则渲染成空标签。
 	current := h.currentSettings()
 	if current.BaseURL != "" && params.URL != "" && !strings.Contains(params.URL, "://") {
 		params.URL = strings.TrimRight(current.BaseURL, "/") + current.Path + "/" + params.URL
-		// Inject download credentials if not already set
-		if params.Username == "" && current.Username != "" {
-			params.Username = current.Username
-		}
-		if params.Password == "" && current.Password != "" {
-			params.Password = current.Password
-		}
 	}
 
 	return soap.RenderResponse(soap.DownloadTmpl, params)

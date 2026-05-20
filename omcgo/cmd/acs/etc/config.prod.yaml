@@ -79,15 +79,19 @@ minio:
 upload:
   base_url: "http://acs:7557"
   path: "/smallcell/FileUploadService"
-  username: "upload_user"
-  password: "secure_upload_password_123"
+  # 产品线明确要求 Upload 不走 Basic Auth（详见 config.dev.yaml 同名说明 +
+  # internal/software/executor.go）。username 非空会让 handler 401 拒绝 CPE PUT。
+  # 若 prod 环境后续要重新启用 Basic Auth，需要同步改 Upload SOAP 渲染逻辑、
+  # 让设备 PUT 带 Authorization header。
+  username: ""
+  password: ""
   max_file_size: 104857600
 
 download:
   base_url: "http://acs:7557"
   path: "/smallcell/FileDownloadService"
-  username: "download_user"
-  password: "secure_download_password_123"
+  username: ""
+  password: ""
 
 metrics:
   port: 9090

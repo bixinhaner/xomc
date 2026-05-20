@@ -23,6 +23,22 @@ type Service struct {
 	subTaskRepo     software.SubTaskRepository
 	deviceRepo      device.DeviceRepository
 	logger          *zap.Logger
+	// downloadURLLookup 注入式回调：(sn, fileName) → presigned GET URL（1h 有效）。
+	// nil 表示部署未装配 backup.FileRepository / MinIO，DeviceItem.DownloadURL 留空。
+	// 返回 ("", nil) 表示元数据缺失（CPE 还没传完）；返回 ("", err) 仅在 DB/MinIO
+	// 设施故障时出现，不阻断 mapping（外层降级为空 URL + 记日志）。
+	// 与 backup.FileRepository 解耦，避免 ufte → backup 反向依赖(backup → ufte 已存在)。
+	downloadURLLookup func(ctx context.Context, sn, fileName string) (string, error)
+
+	// fileLandedLookup 注入式回调：按 (sn, mainTaskID) 精确反查 backup_restore_file。
+	//
+	// 设备厂商（如 baicells/MMMM）实际 PUT 用自己内部 NV 文件名（"mib-home-fap.nv"），
+	// 跟 OMC 端预渲染模板无关；不同任务可能上传同一个 file_name，因此匹配键不能用
+	// fileName。从 migrations/000133 起 backup_restore_file 加了 task_id 字段，
+	// 唯一键 (sn, task_id, file_name) 保证不同任务隔离。这里用 (sn, mainTaskID)
+	// 精确反查当前任务的落地记录，返回设备真实文件名。
+	// nil → DeviceItem.TargetFile / DownloadURL 永远留空。
+	fileLandedLookup func(ctx context.Context, sn, mainTaskID string) (fileName string, landed bool, err error)
 }
 
 func NewService(
@@ -41,6 +57,19 @@ func NewService(
 		deviceRepo:      deviceRepo,
 		logger:          logger.Named("ufte-service"),
 	}
+}
+
+// SetDownloadURLLookup 注入"按 (sn, fileName) 拿 presigned URL"的回调。
+// 由 cmd/app/provider/modules.go 用 backup.FileRepository + *minio.Client 闭包装配；
+// 不调用则 LogCollect 类设备列表的 DownloadURL 始终留空（UI 灰显文件名，不可点击）。
+func (s *Service) SetDownloadURLLookup(fn func(ctx context.Context, sn, fileName string) (string, error)) {
+	s.downloadURLLookup = fn
+}
+
+// SetFileLandedLookup 注入"按 (sn, mainTaskID) 精确反查 backup_restore_file"的回调。
+// 不注入则 DeviceItem.TargetFile / DownloadURL 永远留空。
+func (s *Service) SetFileLandedLookup(fn func(ctx context.Context, sn, mainTaskID string) (fileName string, landed bool, err error)) {
+	s.fileLandedLookup = fn
 }
 
 func (s *Service) GetOverview(ctx context.Context) (*Overview, error) {
@@ -201,6 +230,34 @@ func (s *Service) StartTask(ctx context.Context, taskID uuid.UUID) error {
 		return s.softwareService.ResumeCollect(ctx, taskID, transportPath)
 	}
 	return s.softwareService.ResumeUpgrade(ctx, taskID)
+}
+
+// ResumeLogCollectSubTask 实现 software.LogCollectResumer：当被挂起的 LogCollect 类
+// （备份 / 日志采集）子任务因 device.online 事件被唤醒时，从 UFTE catalog 解析
+// transport_path 后调用 SoftwareService.ExecuteOneUploadDirect 重启 Upload RPC。
+// 详见 docs/project/backup-display-fix-20260520.md F8。
+func (s *Service) ResumeLogCollectSubTask(ctx context.Context, subTask *software.UpgradeSubTask, parent *software.UpgradeTask) error {
+	if parent == nil || subTask == nil {
+		return fmt.Errorf("nil sub-task or parent in resume log collect")
+	}
+	catalog, err := s.loadTaskTypeCatalog(ctx)
+	if err != nil {
+		return fmt.Errorf("load UFTE catalog: %w", err)
+	}
+	transportPath := ""
+	for _, tt := range catalog {
+		if tt.softwareTaskType == software.TaskTypeLogCollect && tt.FileType == parent.DownloadFileType {
+			transportPath = tt.TransportPath
+			break
+		}
+	}
+	if transportPath == "" {
+		s.logger.Warn("no transport_path matched for log collect resume; sub-task will fall back to default URL",
+			zap.String("sub_task_id", subTask.ID.String()),
+			zap.String("file_type", parent.DownloadFileType))
+	}
+	s.softwareService.ExecuteOneUploadDirect(ctx, subTask, parent.DownloadFileType, parent.FileName, transportPath)
+	return nil
 }
 
 func (s *Service) SuspendTask(ctx context.Context, taskID uuid.UUID) error {
@@ -523,6 +580,14 @@ func (s *Service) mapTask(catalog []TaskType, task *software.UpgradeTask) (*Task
 	if task.FirmwareID != nil {
 		firmwareID = task.FirmwareID.String()
 	}
+	// 备份 / 日志采集 / 配置恢复 等"OUTPUT 文件"类（softwareTaskType=LogCollect）
+	// 的 task.FileName 存的是 *未渲染的模板字符串*（如 "backup-{task_id8}-{sn}.nv"，
+	// 详见 software/service.go:BatchCollect 注释），对跨多设备的主任务来说没有意义。
+	// 真实的"目标文件"在设备子任务级（DeviceItem.TargetFile）。
+	taskTargetVersion := ""
+	if typeDef.softwareTaskType != software.TaskTypeLogCollect {
+		taskTargetVersion = strings.TrimSpace(task.FileName)
+	}
 	return &Task{
 		ID:              task.ID.String(),
 		TaskName:        task.TaskName,
@@ -531,7 +596,7 @@ func (s *Service) mapTask(catalog []TaskType, task *software.UpgradeTask) (*Task
 		TypeCode:        typeDef.TypeCode,
 		TypeDisplayName: typeDef.DisplayName,
 		FirmwareID:      firmwareID,
-		TargetVersion:   strings.TrimSpace(task.FileName),
+		TargetVersion:   taskTargetVersion,
 		ProductType:     task.ProductClass,
 		IsKeepConfig:    task.IsKeepConfig,
 		Status:          string(task.Status),
@@ -584,11 +649,37 @@ func (s *Service) mapDeviceItem(
 	if currentVersion == "" {
 		currentVersion = "-"
 	}
+	// 备份 / 日志采集 / 配置恢复（softwareTaskType=LogCollect）的 TargetFile 完全由
+	// 设备实际 PUT 上来的文件名决定（厂商如 baicells/MMMM 用自己的 NV 文件名，
+	// 如 "mib-home-fap.nv"，跟 OMC 端模板渲染的 "backup-{taskId8}-{sn}.nv" 无关）。
+	// 因此：按 (sn, sub_task.StartedAt) 反查 backup_restore_file 最新一行——同 sn
+	// 同时只能有一个 active sub_task（DB unique 索引保证），started_at 之后的第一条
+	// 必然属于当前任务。设备未上报前 TargetFile 留空。
+	//
+	// 升级 / 回滚类保持原口径：subTask.DestVersion → 退化 parent.FileName。
 	targetVersion := subTask.DestVersion
-	if targetVersion == "" {
+	targetFile := "" // 设备实际上传的文件名（反查得到），未落地时空
+	if typeDef.softwareTaskType == software.TaskTypeLogCollect {
+		targetVersion = ""
+	} else if targetVersion == "" {
 		targetVersion = parent.FileName
 	}
-	status := normalizeDeviceStatus(subTask.Status)
+	fileLanded := false
+	if typeDef.softwareTaskType == software.TaskTypeLogCollect &&
+		s.fileLandedLookup != nil && subTask.DeviceSN != "" {
+		mainTaskID := subTask.TaskID.String()
+		landedFile, landed, lookupErr := s.fileLandedLookup(ctx, subTask.DeviceSN, mainTaskID)
+		if lookupErr != nil {
+			s.logger.Debug("file landed lookup failed; treating as not-landed",
+				zap.String("device_sn", subTask.DeviceSN),
+				zap.String("main_task_id", mainTaskID),
+				zap.Error(lookupErr))
+		} else if landed {
+			fileLanded = true
+			targetFile = landedFile
+		}
+	}
+	status := normalizeDeviceStatus(subTask.Status, fileLanded)
 	result := ""
 	if status == "ended" {
 		result = "success"
@@ -601,6 +692,22 @@ func (s *Service) mapDeviceItem(
 		}
 	}
 	lastReport := time.Time(subTask.UpdatedAt)
+	// 完成态 LogCollect 类（备份等）且注入了下载回调时，拉取 1h presigned GET URL。
+	// 用 targetFile（设备实际上传文件名，从 fileLanded 反查得到）做 lookup key——
+	// 设备厂商命名不可预测，预渲染模板名匹配不上 MinIO 对象路径。
+	downloadURL := ""
+	if targetFile != "" && status == "ended" && s.downloadURLLookup != nil && subTask.DeviceSN != "" {
+		url, lookupErr := s.downloadURLLookup(ctx, subTask.DeviceSN, targetFile)
+		if lookupErr != nil {
+			s.logger.Debug("download URL lookup failed; leaving blank",
+				zap.String("device_sn", subTask.DeviceSN),
+				zap.String("target_file", targetFile),
+				zap.Error(lookupErr))
+		} else {
+			downloadURL = url
+		}
+	}
+
 	return &DeviceItem{
 		ID:              subTask.ID.String(),
 		TaskID:          subTask.TaskID.String(),
@@ -614,12 +721,15 @@ func (s *Service) mapDeviceItem(
 		ProductType:     productType,
 		CurrentVersion:  currentVersion,
 		TargetVersion:   targetVersion,
+		TargetFile:      targetFile,
+		DownloadURL:     downloadURL,
 		Status:          status,
 		Result:          result,
 		Progress:        progressForDeviceStatus(status),
 		LastReportAt:    formatTime(lastReport),
 		OperatorScope:   parent.CreateUser,
 		FailureReason:   subTask.FailureReason,
+		FailureDetail:   subTask.ErrorMessage,
 	}, nil
 }
 

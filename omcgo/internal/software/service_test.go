@@ -162,7 +162,7 @@ func (m *svcMockSubTaskRepo) BatchCreate(ctx context.Context, tasks []*UpgradeSu
 	}
 	return nil
 }
-func (m *svcMockSubTaskRepo) FailStale(_ context.Context, _ time.Time) (map[uuid.UUID]int64, error) {
+func (m *svcMockSubTaskRepo) FailStale(_ context.Context, _ StaleTimeouts) (map[uuid.UUID]int64, error) {
 	return nil, nil
 }
 func (m *svcMockSubTaskRepo) DeleteByTaskID(_ context.Context, _ uuid.UUID) error { return nil }

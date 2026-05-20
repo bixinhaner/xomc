@@ -142,6 +142,13 @@ type Session struct {
 	// LastCommandParams 保存最近发送给 CPE 的 RPC 命令参数（JSON）。
 	// 用于在收到响应时关联原始请求上下文（如 GPN 的查询路径）。
 	LastCommandParams json.RawMessage `json:"last_command_params,omitempty"`
+
+	// LastTaskID / LastTaskCWMPID 保存最近一次从队列派发出去的 RPC 对应的
+	// device_tasks.id 和 ACS 端生成的 cwmp_id。用于 handleSOAPFault 在收到
+	// CPE 主动发起的 SOAP Fault（CPE 自己生成新 cwmp_id，无法用 ACS cwmp_id 反查 task）
+	// 时按会话上下文 fallback 关联到正确的 task，避免厂商 Fault 信息无处归档。
+	LastTaskID      string `json:"last_task_id,omitempty"`
+	LastTaskCWMPID  string `json:"last_task_cwmp_id,omitempty"`
 }
 
 // validTransitions 定义允许的状态转换。

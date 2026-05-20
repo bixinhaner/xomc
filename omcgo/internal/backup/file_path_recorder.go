@@ -33,8 +33,12 @@ type BackupFileReceivedPayload struct {
 	ObjectPath         string `json:"object_path"`
 	Filename           string `json:"filename"`
 	BackupTaskIDPrefix string `json:"backup_task_id_prefix"`
-	DeviceSN           string `json:"device_sn"`
-	FileSize           int64  `json:"file_size"`
+	// TaskID 是 UFTE 主任务的完整 UUID（upgrade_tasks.id）。比 8-char Prefix
+	// 更精确，写入 backup_restore_file.task_id 后能用于精确隔离不同任务下
+	// 同 SN 同名文件的元数据。空字符串表示老链路 / 非任务路径上传。
+	TaskID   string `json:"task_id,omitempty"`
+	DeviceSN string `json:"device_sn"`
+	FileSize int64  `json:"file_size"`
 	// MD5 — M1 of backup-restore-alignment-plan: ACS 侧使用 MinIO PutObject
 	// 返回的 ETag。单块 PutObject (未启用 multipart) 下 ETag = MD5(hex)；
 	// 备份配置文件一般远小于 multipart 阈值 (5MiB)，因此在实际场景
@@ -97,6 +101,15 @@ func (r *FilePathRecorder) Subscribe(bus event.EventBus) error {
 // handleFileReceived is the EventBus callback. Best-effort by design: any
 // non-fatal classification (no match, already set, malformed payload) returns
 // nil so NATS doesn't redeliver. Real DB errors return the wrapped error.
+//
+// 双分支语义（2026-05-20 修复，backup-display-fix-20260520.md B4）：
+//   1. 旧 backup_tasks 链路（T-0079 first-write-wins）—— 仅当 prefix 命中
+//      backup_tasks 行才写 file_path，未命中跳过。
+//   2. backup_restore_file 元数据 —— 自然键 (serial_number, file_name)，
+//      *与 backup_tasks 是否命中无关*。UFTE / 自动开站等链路也会上报
+//      backup.file.received，它们的"任务"实体不在 backup_tasks 而在
+//      software.upgrade_tasks，但前端展示与下载链路需要这份元数据来定位
+//      object_path 与 MD5。因此该 upsert 提到任何 backup_tasks 判定之前。
 func (r *FilePathRecorder) handleFileReceived(ctx context.Context, evt event.Event) error {
 	var p BackupFileReceivedPayload
 	if err := evt.DecodePayload(&p); err != nil {
@@ -104,11 +117,18 @@ func (r *FilePathRecorder) handleFileReceived(ctx context.Context, evt event.Eve
 		return fmt.Errorf("decode backup.file.received: %w", err)
 	}
 
+	fullPath := p.Bucket + "/" + p.ObjectPath
+
+	// 分支 2：先 upsert metadata —— 与下面的 backup_tasks 匹配无关，
+	// nil target 表示找不到原 backup_task 行（UFTE 链路 / 旧任务被清理），
+	// 此时 OperatorCode 留空。
+	r.upsertFileMetadata(ctx, nil, p, fullPath)
+
+	// 分支 1：尝试匹配旧 backup_tasks 链路。filename 不带 backup- 前缀的
+	// 上报（操作员手工上传、外部系统）走不到这里——直接返回。
 	if p.BackupTaskIDPrefix == "" {
-		// Filename did not match `backup-{taskID8}-{sn}.xml` — likely an
-		// operator-uploaded ad-hoc config file, not from our executor. No-op.
-		r.metrics.RecordFilePathRecord("skipped_no_match")
-		r.logger.Debug("backup file received with empty task_id prefix; skipping",
+		r.metrics.RecordFilePathRecord("metadata_only_no_prefix")
+		r.logger.Debug("backup file received with empty task_id prefix; metadata-only",
 			zap.String("filename", p.Filename))
 		return nil
 	}
@@ -119,11 +139,10 @@ func (r *FilePathRecorder) handleFileReceived(ctx context.Context, evt event.Eve
 		return fmt.Errorf("find backup_task by prefix %q: %w", p.BackupTaskIDPrefix, err)
 	}
 	if len(matches) == 0 {
-		// Prefix didn't match any current row — the originating backup_task
-		// may have been cleaned up (T-0073) or this file came from a foreign
-		// system. Skip without error.
-		r.metrics.RecordFilePathRecord("skipped_no_match")
-		r.logger.Info("no backup_task matches prefix; skipping",
+		// Prefix didn't match —— UFTE 链路（task 在 software.upgrade_tasks）
+		// 或旧任务已被 T-0073 清理。metadata 已在分支 2 写入，主表跳过即可。
+		r.metrics.RecordFilePathRecord("metadata_only_no_match")
+		r.logger.Info("no backup_task matches prefix; metadata-only",
 			zap.String("prefix", p.BackupTaskIDPrefix),
 			zap.String("filename", p.Filename))
 		return nil
@@ -151,7 +170,6 @@ func (r *FilePathRecorder) handleFileReceived(ctx context.Context, evt event.Eve
 		return nil
 	}
 
-	fullPath := p.Bucket + "/" + p.ObjectPath
 	err = r.repo.UpdateFilePath(ctx, target.ID, fullPath)
 	switch {
 	case err == nil:
@@ -160,8 +178,8 @@ func (r *FilePathRecorder) handleFileReceived(ctx context.Context, evt event.Eve
 			zap.String("task_id", target.ID.String()),
 			zap.String("path", fullPath),
 			zap.String("device_sn", p.DeviceSN))
-		// M1: 同步落库 backup_restore_file 元数据。失败不阻断主路径 ——
-		// file_path 已在 backup_tasks 中记录，元数据表是补充查询面。
+		// 命中 backup_tasks 时补一次带 OperatorCode 的 upsert（覆盖 nil 路径），
+		// COALESCE 保证已有 operator_code 不会被覆盖为空。
 		r.upsertFileMetadata(ctx, target, p, fullPath)
 		return nil
 	case errors.Is(err, ErrFilePathAlreadySet):
@@ -190,6 +208,10 @@ func (r *FilePathRecorder) handleFileReceived(ctx context.Context, evt event.Eve
 // (serial_number, file_name). Best-effort: failure is logged but does not
 // propagate so the backup_tasks.file_path success path remains the source
 // of truth. No-op when fileRepo is nil (deployment did not wire it).
+//
+// target 可为 nil（B4 改造，2026-05-20）：UFTE 链路 / 操作员手工上传等场景
+// 找不到对应 backup_tasks 行，仍需要 metadata 来支撑 UI 下载链路；此时
+// OperatorCode 留空，其他字段不受影响。
 func (r *FilePathRecorder) upsertFileMetadata(
 	ctx context.Context,
 	target *BackupTask,
@@ -208,8 +230,13 @@ func (r *FilePathRecorder) upsertFileMetadata(
 		md5 = &v
 	}
 	var operatorCode *string
-	if target.OperatorCode != nil && *target.OperatorCode != "" {
+	if target != nil && target.OperatorCode != nil && *target.OperatorCode != "" {
 		operatorCode = target.OperatorCode
+	}
+	var taskID *string
+	if p.TaskID != "" {
+		tid := p.TaskID
+		taskID = &tid
 	}
 	f := &BackupRestoreFile{
 		SerialNumber: p.DeviceSN,
@@ -218,6 +245,7 @@ func (r *FilePathRecorder) upsertFileMetadata(
 		MD5:          md5,
 		FileSize:     p.FileSize,
 		OperatorCode: operatorCode,
+		TaskID:       taskID,
 	}
 	if err := r.fileRepo.Upsert(ctx, f); err != nil {
 		r.logger.Warn("upsert backup_restore_file failed (best-effort)",

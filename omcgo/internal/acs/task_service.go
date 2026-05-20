@@ -28,6 +28,10 @@ type TaskService interface {
 	// GetTaskByCWMPID retrieves a task by its CWMP ID.
 	GetTaskByCWMPID(ctx context.Context, cwmpID string) (*task.Task, error)
 
+	// GetTask retrieves a task by its primary key (task_id).
+	// 用于 handleSOAPFault 在 CPE 自生成 cwmp_id 时按 session.LastTaskID fallback 关联。
+	GetTask(ctx context.Context, taskID string) (*task.Task, error)
+
 	// GetQueueLength returns the number of pending tasks for a device.
 	GetQueueLength(ctx context.Context, deviceSN string) (int64, error)
 }

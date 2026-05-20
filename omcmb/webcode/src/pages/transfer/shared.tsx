@@ -117,11 +117,24 @@ export function renderTaskStatus(status: UnifiedFileTransferTask['status']) {
 export function renderDeviceStatus(status: UnifiedFileTransferDeviceItem['status']) {
   switch (status) {
     case 'downloading':
+      // 升级 / 回滚类 Download RPC：CPE 正在从 ACS 拉镜像 / 补丁文件
       return <Badge status="processing" text="下载中" />;
+    case 'uploading':
+      // 备份 / 日志采集 Upload RPC：Upload 命令已派发，等 UploadResponse + CPE 通过 HTTP PUT
+      // 把文件上传到 ACS（这两步在 TR-069 上紧贴，ACS 侧合并到同一段展示）
+      return <Badge status="processing" text="上传中" />;
+    case 'awaiting_tc':
+      // 备份 / 日志采集 Upload RPC：文件已落到 ACS MinIO（backup_restore_file 已 upsert），
+      // 等 CPE 主动发 TransferComplete SOAP 来结束传输事务
+      return <Badge status="processing" text="等待 TransferComplete" />;
     case 'verifying':
       return <Badge status="processing" text="校验中" />;
+    // 设备子任务的 'suspended' 既可能是"用户挂起创建"也可能是"设备离线等待"，
+    // 后者占比更高（设备 inform 间隔 5 min，挂起→开始时常碰到设备短暂掉线）。
+    // 合并文案为"已挂起 / 待上线"，避免用户以为操作未生效。详见
+    // docs/project/backup-display-fix-20260520.md F11。
     case 'suspended':
-      return <Badge status="warning" text="已挂起" />;
+      return <Badge status="warning" text="已挂起 / 待上线" />;
     case 'ended':
       return <Badge status="success" text="已完成" />;
     case 'failed':

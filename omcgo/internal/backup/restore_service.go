@@ -303,6 +303,12 @@ func (s *RestoreService) CreateByTaskID(
 	return result, nil
 }
 
+// SplitBucketAndPath 是 splitBucketAndPath 的导出别名，供 cmd/app/provider 等
+// 外部包构造 MinIO presigned URL 时复用同一份解析逻辑（B5）。
+func SplitBucketAndPath(combined string) (bucket, objectPath string, err error) {
+	return splitBucketAndPath(combined)
+}
+
 // splitBucketAndPath splits a "bucket/path/to/object" string into its parts.
 // Returns ErrInvalidInput when the format is unexpected (no '/' separator).
 func splitBucketAndPath(combined string) (bucket, objectPath string, err error) {

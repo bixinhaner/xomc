@@ -204,7 +204,7 @@ func (r *PgSubTaskRepository) UpdateStatusWithCode(ctx context.Context, id uuid.
 	if code != "" && status == UpgradeFailed {
 		builder = builder.Set("failure_reason", string(code))
 	}
-	if status == UpgradeDownloading {
+	if status == UpgradeDownloading || status == UpgradeUploading {
 		builder = builder.Set("started_at", time.Now())
 	}
 	if status == UpgradeCompleted || status == UpgradeFailed || status == UpgradeTerminated {
@@ -275,7 +275,10 @@ func (r *PgSubTaskRepository) ListByTaskID(ctx context.Context, taskID uuid.UUID
 
 	base = base.Where(sq.Eq{"ust.task_id": taskID})
 
-	if filter.Status != nil {
+	if len(filter.Statuses) > 0 {
+		base = base.Where(sq.Eq{"ust.status": filter.Statuses})
+		countBase = countBase.Where(sq.Eq{"ust.status": filter.Statuses})
+	} else if filter.Status != nil {
 		base = base.Where(sq.Eq{"ust.status": *filter.Status})
 		countBase = countBase.Where(sq.Eq{"ust.status": *filter.Status})
 	}
@@ -494,22 +497,43 @@ func (r *PgSubTaskRepository) DeleteByTaskID(ctx context.Context, taskID uuid.UU
 	return nil
 }
 
-func (r *PgSubTaskRepository) FailStale(ctx context.Context, cutoff time.Time) (map[uuid.UUID]int64, error) {
+
+func (r *PgSubTaskRepository) FailStale(ctx context.Context, cutoffs StaleTimeouts) (map[uuid.UUID]int64, error) {
+	rpcCutoff := time.Now().Add(-cutoffs.RPCResponse)
+	onlineCutoff := time.Now().Add(-cutoffs.DeviceOnline)
+	tcCutoff := time.Now().Add(-cutoffs.TransferComplete)
+
+	// 三段超时口径：
+	//   · 'downloading'（Download RPC，固件升级 / 回滚）→ RPCResponse 短超时（默认 5min）
+	//     —— 设备拿到 Download SOAP 后应该很快回 DownloadResponse；超时多半是 ACS 没派发或 CPE 没回。
+	//   · 'suspended' → DeviceOnline 长超时（默认 60min）—— 等设备 inform 上线。
+	//   · 其它（'uploading' / 'rebooting' / 'verifying'）→ TransferComplete 超时（默认 30min）
+	//     —— 文件上传 + CPE 内部安装 / 回写 TC 都属于"已派发 RPC，等事务完成"阶段，时间窗较长。
+	// 这里把 'uploading' 归入第三段而不是 'downloading' 同款 RPCResponse 短超时，是 fix 顺手修的 BUG：
+	// 旧实现把 Upload 也算成 'downloading'，5min 内卡死的大文件备份 / 日志采集会被误判超时。
 	query := `WITH failed AS (
 		UPDATE upgrade_sub_tasks ust
-		SET status = 'failed', error_message = 'Upgrade failed, can not receive TransferComplete msg from device.', completed_at = NOW(), updated_at = NOW()
+		SET status = 'failed', error_message = CASE
+		    WHEN ust.status = 'downloading' THEN 'Timed out waiting for RPC response from device.'
+		    WHEN ust.status = 'uploading'   THEN 'Timed out waiting for upload / TransferComplete from device.'
+		    WHEN ust.status = 'suspended'   THEN 'Timed out waiting for device to come online.'
+		    ELSE                                 'Timed out waiting for TransferComplete from device.'
+		END, completed_at = NOW(), updated_at = NOW()
 		FROM upgrade_tasks ut
 		WHERE ust.task_id = ut.id
-		  AND ust.status NOT IN ('completed', 'failed', 'terminated')
 		  AND ut.status NOT IN ('pending', 'suspended')
-		  AND ust.updated_at < $1
+		  AND (
+		    (ust.status = 'downloading' AND ust.updated_at < $1)
+		    OR (ust.status = 'suspended'  AND ust.updated_at < $2)
+		    OR (ust.status NOT IN ('completed', 'failed', 'terminated', 'downloading', 'suspended') AND ust.updated_at < $3)
+		  )
 		RETURNING ust.task_id
 	)
 	SELECT task_id, COUNT(*)::bigint AS cnt
 	FROM failed
 	GROUP BY task_id`
 
-	rows, err := r.pool.Query(ctx, query, cutoff)
+	rows, err := r.pool.Query(ctx, query, rpcCutoff, onlineCutoff, tcCutoff)
 	if err != nil {
 		return nil, fmt.Errorf("fail stale sub-tasks: %w", err)
 	}
@@ -529,7 +553,6 @@ func (r *PgSubTaskRepository) FailStale(ctx context.Context, cutoff time.Time) (
 	}
 	return result, nil
 }
-
 // ListAll returns sub-tasks across all main tasks, JOINing upgrade_tasks for task_name.
 func (r *PgSubTaskRepository) ListAll(ctx context.Context, filter AllSubTaskFilter) (*model.ListResponse[UpgradeSubTaskWithTaskName], error) {
 	cols := append([]string{"ust." + subTaskColumns[0]}, subTaskColumns[1:]...)

@@ -82,15 +82,22 @@ minio:
 upload:
   base_url: "http://localhost:8080"   # CPE 可访问的 ACS 地址
   path: "/smallcell/FileUploadService"
-  username: "upload_user"             # HTTP Basic Auth 用户名
-  password: "secure_upload_password_123"  # HTTP Basic Auth 密码
+  # 产品线明确要求 Upload 不走 HTTP Basic Auth：Upload SOAP 给设备的
+  # <Username></Username><Password></Password> 都是空标签，设备 PUT 时不会带
+  # Authorization header；如果这里配了非空 username，ACS upload handler 会启用
+  # Basic Auth 校验 → 直接 401 拒绝设备 PUT → 设备本地报 "httpUpload OM Http Put
+  # Upload stat file error" / "Download fail with exit status 1" 兜底错误。
+  # 详见 internal/software/executor.go ExecuteOne / ExecuteOneUpload 同名说明。
+  username: ""
+  password: ""
   max_file_size: 104857600            # 100MB
 
 download:
   base_url: "http://localhost:8080"   # CPE 可访问的 ACS 地址（网关代理到 ACS）
   path: "/smallcell/FileDownloadService"
-  username: "download_user"           # HTTP Basic Auth 用户名
-  password: "secure_download_password_123"  # HTTP Basic Auth 密码
+  # 同 upload：产品线要求 Download 也不走 Basic Auth。
+  username: ""
+  password: ""
 
 metrics:
   port: 9090

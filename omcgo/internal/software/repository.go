@@ -8,6 +8,13 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
+// StaleTimeouts configures per-phase reaper timeouts.
+type StaleTimeouts struct {
+	RPCResponse     time.Duration // waiting for Upload/Download Response
+	DeviceOnline    time.Duration // waiting for offline device to come back
+	TransferComplete time.Duration // waiting for TransferComplete after RPC accepted
+}
+
 // FirmwareRepository provides persistence for firmware versions.
 type FirmwareRepository interface {
 	Create(ctx context.Context, fw *FirmwareVersion) error
@@ -48,6 +55,6 @@ type SubTaskRepository interface {
 	GetByCommandKey(ctx context.Context, commandKey string) (*UpgradeSubTask, error)
 	BatchCreate(ctx context.Context, tasks []*UpgradeSubTask) error
 	DeleteByTaskID(ctx context.Context, taskID uuid.UUID) error
-	FailStale(ctx context.Context, cutoff time.Time) (map[uuid.UUID]int64, error)
+	FailStale(ctx context.Context, cutoffs StaleTimeouts) (map[uuid.UUID]int64, error)
 	UpdateFailureReasonByTask(ctx context.Context, taskID uuid.UUID, code FailureCode) error
 }

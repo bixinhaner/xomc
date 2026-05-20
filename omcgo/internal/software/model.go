@@ -17,14 +17,20 @@ func JSONTime(t time.Time) model.Time {
 type UpgradeState string
 
 const (
-	UpgradePending     UpgradeState = "pending"
+	UpgradePending UpgradeState = "pending"
+	// UpgradeDownloading 仅给 Download RPC（固件升级 / 回滚）使用——CPE 正在从 ACS 拉文件。
 	UpgradeDownloading UpgradeState = "downloading"
-	UpgradeRebooting   UpgradeState = "rebooting"
-	UpgradeVerifying   UpgradeState = "verifying"
-	UpgradeCompleted   UpgradeState = "completed"
-	UpgradeFailed      UpgradeState = "failed"
-	UpgradeSuspended   UpgradeState = "suspended"
-	UpgradeTerminated  UpgradeState = "terminated"
+	// UpgradeUploading 给 Upload RPC（备份 / 日志采集 / 配置恢复）使用——Upload 命令已派发，
+	// 涵盖：等 CPE 回 UploadResponse + CPE HTTP PUT 文件到 ACS + 等 CPE 主动发 TransferComplete。
+	// 这三段在 TR-069 上没有独立的 ACS 侧信号；UI 在 mapping 层结合 backup_restore_file 是否到位
+	// 再把这一段细化为"上传中 / 等待 TransferComplete"两段展示（详见 ufte/model.go normalizeDeviceStatus）。
+	UpgradeUploading  UpgradeState = "uploading"
+	UpgradeRebooting  UpgradeState = "rebooting"
+	UpgradeVerifying  UpgradeState = "verifying"
+	UpgradeCompleted  UpgradeState = "completed"
+	UpgradeFailed     UpgradeState = "failed"
+	UpgradeSuspended  UpgradeState = "suspended"
+	UpgradeTerminated UpgradeState = "terminated"
 )
 
 // FileType 升级文件类型
@@ -54,6 +60,7 @@ const (
 	FailureDownloadTimeout FailureCode = "DOWNLOAD_TIMEOUT"    // timeout — download progress timed out
 	FailureDownloadFile    FailureCode = "DOWNLOAD_FILE_ERROR" // system — firmware file not found
 	FailureDownloadFault   FailureCode = "DOWNLOAD_FAULT"      // device — CPE rejected Download RPC
+	FailureUploadFault     FailureCode = "UPLOAD_FAULT"        // device — CPE rejected Upload RPC
 
 	// Stage: transfer complete
 	FailureTCFault FailureCode = "TC_FAULT" // device — CPE returned TransferComplete with fault
@@ -200,8 +207,9 @@ type UpgradeTaskFilter struct {
 
 // SubTaskFilter specifies criteria for listing sub-tasks under a main task.
 type SubTaskFilter struct {
-	TaskID uuid.UUID
-	Status *UpgradeState `form:"status"`
+	TaskID   uuid.UUID
+	Status   *UpgradeState  `form:"status"`
+	Statuses []UpgradeState // multi-status filter (takes precedence over Status)
 	model.ListRequest
 }
 

@@ -25,8 +25,12 @@ type BackupRestoreFile struct {
 	MD5          *string   `json:"md5,omitempty"`
 	FileSize     int64     `json:"file_size"`
 	OperatorCode *string   `json:"operator_code,omitempty"`
-	UpdateTime   time.Time `json:"update_time"`
-	CreatedAt    time.Time `json:"created_at"`
+	// TaskID 是 UFTE 主任务的 UUID（upgrade_tasks.id），用于隔离同 SN 下不同
+	// 任务上传的同名文件（厂商如 baicells 每次都用 "mib-home-fap.nv" 名）。
+	// 旧数据或非任务路径上传的文件可能为空。
+	TaskID     *string   `json:"task_id,omitempty"`
+	UpdateTime time.Time `json:"update_time"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // FileRepository 是 backup_restore_file 表的最小契约。
@@ -65,12 +69,14 @@ func (r *PgFileRepository) Upsert(ctx context.Context, f *BackupRestoreFile) err
 	now := time.Now()
 	f.UpdateTime = now
 
+	// 新唯一键 (serial_number, task_id, file_name) — 见 migrations/000133。
+	// 同 sn+task_id+file_name 冲突时更新元数据。不同 task_id 视作不同备份记录。
 	query, args, err := storage.Psql.Insert("backup_restore_file").
 		Columns("serial_number", "file_name", "object_path",
-			"md5", "file_size", "operator_code", "update_time").
+			"md5", "file_size", "operator_code", "task_id", "update_time").
 		Values(f.SerialNumber, f.FileName, f.ObjectPath,
-			f.MD5, f.FileSize, f.OperatorCode, f.UpdateTime).
-		Suffix(`ON CONFLICT (serial_number, file_name) DO UPDATE SET
+			f.MD5, f.FileSize, f.OperatorCode, f.TaskID, f.UpdateTime).
+		Suffix(`ON CONFLICT (serial_number, task_id, file_name) DO UPDATE SET
 			object_path   = EXCLUDED.object_path,
 			md5           = EXCLUDED.md5,
 			file_size     = EXCLUDED.file_size,
@@ -95,7 +101,7 @@ func (r *PgFileRepository) ListBySerial(ctx context.Context, sn string) ([]Backu
 	}
 	query, args, err := storage.Psql.
 		Select("id", "serial_number", "file_name", "object_path",
-			"md5", "file_size", "operator_code", "update_time", "created_at").
+			"md5", "file_size", "operator_code", "task_id", "update_time", "created_at").
 		From("backup_restore_file").
 		Where(sq.Eq{"serial_number": sn}).
 		OrderBy("update_time DESC").
@@ -114,7 +120,7 @@ func (r *PgFileRepository) ListBySerial(ctx context.Context, sn string) ([]Backu
 		var f BackupRestoreFile
 		if scanErr := rows.Scan(
 			&f.ID, &f.SerialNumber, &f.FileName, &f.ObjectPath,
-			&f.MD5, &f.FileSize, &f.OperatorCode, &f.UpdateTime, &f.CreatedAt,
+			&f.MD5, &f.FileSize, &f.OperatorCode, &f.TaskID, &f.UpdateTime, &f.CreatedAt,
 		); scanErr != nil {
 			return nil, fmt.Errorf("scan backup_restore_file: %w", scanErr)
 		}

@@ -122,9 +122,29 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing fileType parameter", http.StatusBadRequest)
 		return
 	}
+
+	// filename 留空是合法路径：厂商真实样本里 URL 末尾 `&filename=` 都是空的——
+	// 设备自身决定上传时的文件名（裸 binary PUT，无 multipart envelope）。
+	// 服务端按业务规则生成与 UFTE target_file_name_template 一致的命名：
+	//   - 备份类（FileType "3" / CONFIGBACKUP_*）：backup-{taskId8}-{sn}.nv|xml
+	//   - 日志类（FileType "6"/"8" Vendor Log）：log-{taskId8}-{sn}.tar.gz
+	//   - 其它（默认兜底）：upload-{taskId8}-{sn}-{ts}
+	// 保证 ACS 落地名与 UFTE 端 DeviceItem.TargetFile 渲染结果一致——后续
+	// fileLandedLookup / downloadURLLookup 用 (sn, target_file) 反查能命中。
 	if filename == "" {
-		http.Error(w, "missing filename parameter", http.StatusBadRequest)
-		return
+		taskIDQ := r.URL.Query().Get("taskId")
+		snQ := r.URL.Query().Get("sn")
+		if taskIDQ == "" || snQ == "" {
+			http.Error(w, "missing filename, and cannot derive: taskId/sn query params also empty", http.StatusBadRequest)
+			return
+		}
+		filename = deriveUploadFilename(fileType, taskIDQ, snQ)
+		h.logger.Info("derived filename from sn+taskId (URL filename was empty)",
+			zap.String("file_type", fileType),
+			zap.String("sn", snQ),
+			zap.String("task_id", taskIDQ),
+			zap.String("derived_filename", filename),
+		)
 	}
 
 	// 3.1 Path traversal protection: strip directory components and reject suspicious filenames
@@ -145,11 +165,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ft := normalizeFileType(fileType)
 	bucket, category := storage.BucketAndCategory(ft, h.buckets)
 	now := time.Now()
+	// 配置备份类（FileType=3 / CONFIGBACKUP_*）加 taskId8 目录层级，避免同设备
+	// 不同任务上传同名文件（厂商如 baicells 每次都用 "mib-home-fap.nv" 名）
+	// 互相覆盖。其它类型（PM/MR/Log/Firmware）保持原路径——它们本身命名带时间戳
+	// 或唯一标识，不存在重名问题。
+	taskSubdir := ""
+	if ft == tr069.FileTypeConfig {
+		if tid := strings.ReplaceAll(r.URL.Query().Get("taskId"), "-", ""); len(tid) >= 8 {
+			taskSubdir = tid[:8] + "/"
+		}
+	}
 	var objectPath string
 	if category != "" {
-		objectPath = fmt.Sprintf("%s/%s/%s", category, now.Format("2006/01/02"), filename)
+		objectPath = fmt.Sprintf("%s/%s/%s%s", category, now.Format("2006/01/02"), taskSubdir, filename)
 	} else {
-		objectPath = fmt.Sprintf("%s/%s", now.Format("2006/01/02"), filename)
+		objectPath = fmt.Sprintf("%s/%s%s", now.Format("2006/01/02"), taskSubdir, filename)
 	}
 
 	// 6. Stream upload to MinIO. For FileTypeConfig (TR-069 "3" Vendor
@@ -267,7 +297,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// backup_tasks.file_path. Decoupled via EventBus to keep the ACS process
 	// from importing backup module directly.
 	if ft == tr069.FileTypeConfig && h.eventBus != nil {
-		h.publishBackupFileReceivedEvent(ctx, bucket, objectPath, filename, info.Size, info.ETag)
+		// 把 URL query 里的 sn / taskId 也传进去 —— 设备实际 PUT 时可能用自己内部
+		// NV 文件名（如 baicells/MMMM 系列固件回传的 "mib-home-fap.nv"），文件名
+		// 不匹配 backup-{taskId8}-{sn}.{ext} 模板时 parseBackupFilename 失效，
+		// 此时回退到 URL query 兜底是唯一可靠路径。
+		h.publishBackupFileReceivedEvent(ctx, bucket, objectPath, filename, info.Size, info.ETag,
+			r.URL.Query().Get("sn"), r.URL.Query().Get("taskId"))
 	}
 
 	// 6.3. For station log uploads (FileType "6" running log, "8" fault log),
@@ -525,8 +560,24 @@ func (c *countingReader) Read(p []byte) (int, error) {
 // 下 ETag = MD5(hex)；multipart 上传时 ETag 带 `-N` 后缀，订阅者据此过滤。
 func (h *Handler) publishBackupFileReceivedEvent(
 	ctx context.Context, bucket, objectPath, filename string, fileSize int64, etag string,
+	queryDeviceSN, queryTaskID string,
 ) {
 	taskIDPrefix, deviceSN := parseBackupFilename(filename)
+	// Fallback 1：filename 不符合 backup-{taskId8}-{sn}.{ext} 模板时（如设备用了
+	// 自己的 NV 文件名 "mib-home-fap.nv"），从 URL query 里兜底拿真实 sn 和
+	// taskId 前缀——这才是 backup_restore_file metadata upsert 的唯一可靠源。
+	if deviceSN == "" && queryDeviceSN != "" {
+		deviceSN = queryDeviceSN
+	}
+	if taskIDPrefix == "" && queryTaskID != "" {
+		hex := strings.ReplaceAll(queryTaskID, "-", "")
+		if len(hex) >= 8 {
+			taskIDPrefix = hex[:8]
+		}
+	}
+	// Payload 还透传完整 task_id（UUID 字符串）——下游 FilePathRecorder 用它
+	// 写 backup_restore_file.task_id（精确隔离不同任务的同名文件），prefix
+	// 只够给历史 backup_tasks 表前缀匹配兼容用。
 
 	// 仅当 ETag 形如 32-hex 字符串时视为可信 MD5；multipart ETag 形如
 	// "xxxxxxxxx-N" — 后缀带块数，与 MD5 不符。
@@ -540,6 +591,7 @@ func (h *Handler) publishBackupFileReceivedEvent(
 		"object_path":           objectPath,
 		"filename":              filename,
 		"backup_task_id_prefix": taskIDPrefix,
+		"task_id":               queryTaskID, // 完整 UUID，由 FilePathRecorder 写入 backup_restore_file.task_id
 		"device_sn":             deviceSN,
 		"file_size":             fileSize,
 		"md5":                   md5,
@@ -584,7 +636,11 @@ func isHexMD5(s string) bool {
 //	1: taskID8 (8 hex chars)
 //	2: deviceSN (any chars up to .xml)
 //	3: optional compression extension (.gz/.zst/.lz4/.bz2) — discarded
-var backupFilenameRe = regexp.MustCompile(`^backup-([0-9a-f]{8})-(.+)\.xml(\.[a-z0-9]+)?$`)
+// backupFilenameRe 匹配两种备份扩展名：
+//   .xml — 标准平台（BLQ/QLS）的 CONFIG_BACKUP_XML 走 FileType=10 {OUI} Configuration File
+//   .nv  — NV 平台（MLQ/MLN_SC）的 CONFIG_BACKUP_NV 走 FileType=12 {OUI} Configuration File
+// 可选 .gz/.zst/.bz2/.lz4 等压缩后缀（T-0074）。
+var backupFilenameRe = regexp.MustCompile(`^backup-([0-9a-f]{8})-(.+?)\.(xml|nv)(\.[a-z0-9]+)?$`)
 
 // parseBackupFilename returns (taskIDPrefix, deviceSN) extracted from a
 // backup filename. Returns ("", "") when the filename does not match the
@@ -675,4 +731,32 @@ func extractDeviceSNFromFilename(filename string) string {
 
 	// Fallback: return the full name without extension
 	return name
+}
+
+// deriveUploadFilename 在设备 URL `filename=` 留空时，按业务规则生成与 UFTE 端
+// target_file_name_template 一致的文件名。与 software/executor.taskIDPrefix +
+// ufte_task_types.target_file_name_template 的渲染规则保持对齐：
+//   - 备份配置（FileType 3 / CONFIGBACKUP_*）→ backup-{taskId8}-{sn}.<nv|xml>
+//   - 日志采集（FileType 6 运行日志 / 8 故障日志）→ log-{taskId8}-{sn}.tar.gz
+//   - 其它/兜底 → upload-{taskId8}-{sn}-{unix}
+// 一致性保证：ACS 落地的 filename 与 UFTE DeviceItem.TargetFile 渲染结果同名，
+// 后续 fileLandedLookup / downloadURLLookup 用 (sn, target_file) 反查能命中。
+func deriveUploadFilename(fileType, taskID, sn string) string {
+	taskID8 := taskID
+	if hex := strings.ReplaceAll(taskID, "-", ""); len(hex) >= 8 {
+		taskID8 = hex[:8]
+	}
+	ft := strings.ToUpper(strings.TrimSpace(fileType))
+	switch ft {
+	case "CONFIGBACKUP_NV":
+		return fmt.Sprintf("backup-%s-%s.nv", taskID8, sn)
+	case "CONFIGBACKUP_XML", "3":
+		return fmt.Sprintf("backup-%s-%s.xml", taskID8, sn)
+	case "6", "LOG":
+		return fmt.Sprintf("runtime-%s-%s.tar.gz", taskID8, sn)
+	case "8":
+		return fmt.Sprintf("fault-%s-%s.tar.gz", taskID8, sn)
+	default:
+		return fmt.Sprintf("upload-%s-%s-%d", taskID8, sn, time.Now().Unix())
+	}
 }
