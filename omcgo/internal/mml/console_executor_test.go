@@ -193,6 +193,141 @@ func TestBuildEntry_ADD_AppendsTrailingDot(t *testing.T) {
 	assert.Equal(t, "Device.Users.User.", params["object_name"])
 }
 
+// ============================================================
+// R-4.3 ADD 复合流程：buildStatementCommandEntries
+// ============================================================
+
+// TestBuildEntries_ADD_WithoutValues_SingleEntry — ADD 无 values 退化为单 entry
+// （与历史 1 MML = 1 RPC 行为一致）。
+func TestBuildEntries_ADD_WithoutValues_SingleEntry(t *testing.T) {
+	cmd := &MMLCommand{
+		ID:            uuid.New(),
+		CommandCode:   "ADD_USER",
+		OperationType: "ADD",
+		TargetObject:  "Device.Users.User.",
+	}
+	stmt := Statement{OperationType: "ADD"}
+	entries, err := buildStatementCommandEntries(stmt, cmd, nil)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "AddObject", entries[0]["rpc_method"])
+}
+
+// TestBuildEntries_ADD_WithValues_CompoundTwoEntries — ADD with values 触发 2 entries：
+// AddObject + SetParameterValues with .{NEW}. 占位符。
+func TestBuildEntries_ADD_WithValues_CompoundTwoEntries(t *testing.T) {
+	paramID := uuid.New()
+	cmd := &MMLCommand{
+		ID:            uuid.New(),
+		CommandCode:   "ADD_PLMNLIST",
+		OperationType: "ADD",
+		TargetObject:  "Device.Services.FAPService.{i}.PLMNList.",
+		Params: []MMLParamRef{
+			{ID: paramID, ParamCode: "PLMNID", Tr069Path: "Device.Services.FAPService.{i}.PLMNList.{i}.PLMNID"},
+		},
+	}
+	subFields := []MMLCommandSubField{
+		{ID: uuid.New(), ParamID: paramID, MMLCode: "PLMNID"},
+	}
+	stmt := Statement{
+		OperationType: "ADD",
+		InstanceSelectors: map[string]string{
+			"iα": "1",
+		},
+		Values: map[string]string{"PLMNID": "46000"},
+	}
+	entries, err := buildStatementCommandEntries(stmt, cmd, subFields)
+	require.NoError(t, err)
+	require.Len(t, entries, 2, "ADD with values → AddObject + SPV")
+
+	// 第 1 entry: AddObject，target_object 已 substitute iα=1
+	assert.Equal(t, "AddObject", entries[0]["rpc_method"])
+	params0 := entries[0]["parameters"].(map[string]interface{})
+	assert.Equal(t, "Device.Services.FAPService.1.PLMNList.", params0["object_name"])
+
+	// 第 2 entry: SetParameterValues with .{NEW}. 占位符
+	assert.Equal(t, "SetParameterValues", entries[1]["rpc_method"])
+	assert.Equal(t, "MOD", entries[1]["operation_type"], "compound SPV 标 MOD 语义")
+	assert.Equal(t, "spv_after_add", entries[1]["compound_phase"], "Sequencer / audit 用此识别")
+	refs1 := entries[1]["param_refs"].([]MMLParamRef)
+	require.Len(t, refs1, 1)
+	assert.Equal(t,
+		"Device.Services.FAPService.1.PLMNList.{NEW}.PLMNID",
+		refs1[0].Tr069Path,
+		"外层 {i} 被 selector 替换；最末尾 {i}（新实例）替换为 {NEW}",
+	)
+	params1 := entries[1]["parameters"].(map[string]interface{})
+	assert.Equal(t, "46000", params1["PLMNID"])
+}
+
+// TestBuildEntries_ADD_WithValues_NoSubFieldMatch_OnlyAddObject — stmt.Values keys
+// 都不在 subFields 中 → 第 2 行 SPV 不构造，回退单 entry。
+func TestBuildEntries_ADD_WithValues_NoSubFieldMatch_OnlyAddObject(t *testing.T) {
+	cmd := &MMLCommand{
+		ID:            uuid.New(),
+		CommandCode:   "ADD_X",
+		OperationType: "ADD",
+		TargetObject:  "Device.X.",
+	}
+	stmt := Statement{
+		OperationType: "ADD",
+		Values:        map[string]string{"NonExistent": "v"},
+	}
+	entries, err := buildStatementCommandEntries(stmt, cmd, nil)
+	require.NoError(t, err)
+	require.Len(t, entries, 1, "无 sub_field 匹配 → 仅 AddObject")
+}
+
+// TestSubstituteInstanceSelectorsForADDCompound — 三种 path/selectors 组合
+func TestSubstituteInstanceSelectorsForADDCompound(t *testing.T) {
+	cases := []struct {
+		name      string
+		path      string
+		selectors map[string]string
+		want      string
+		wantErr   bool
+	}{
+		{
+			name:      "0 selector + 1 .{i}. → {NEW}",
+			path:      "Device.Users.User.{i}.Name",
+			selectors: map[string]string{},
+			want:      "Device.Users.User.{NEW}.Name",
+		},
+		{
+			name:      "1 selector + 2 .{i}. → 外层替换为值，内层替换为 {NEW}",
+			path:      "Device.Services.FAPService.{i}.PLMNList.{i}.PLMNID",
+			selectors: map[string]string{"iα": "1"},
+			want:      "Device.Services.FAPService.1.PLMNList.{NEW}.PLMNID",
+		},
+		{
+			name: "2 selectors + 3 .{i}. → 前 2 个替换值，最后 1 个 {NEW}",
+			path: "Device.X.{i}.Y.{i}.Z.{i}.Foo",
+			selectors: map[string]string{
+				"iα": "1",
+				"iβ": "2",
+			},
+			want: "Device.X.1.Y.2.Z.{NEW}.Foo",
+		},
+		{
+			name:      "selectors+1 不等于 .{i}. 数 → error",
+			path:      "Device.X.Y", // 0 个 .{i}.
+			selectors: map[string]string{"iα": "1"},
+			wantErr:   true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := substituteInstanceSelectorsForADDCompound(tc.path, tc.selectors)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestBuildEntry_RMV(t *testing.T) {
 	idx := 5
 	cmd := &MMLCommand{

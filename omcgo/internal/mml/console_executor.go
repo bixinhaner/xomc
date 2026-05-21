@@ -42,9 +42,13 @@ var ErrInvalidRequest = errors.New("mml: invalid request")
 //          parameters = Values（map[string]string → map[string]interface{}）
 //   - ADD: rpc_method=AddObject
 //          parameters["object_name"] = command.TargetObject（必含尾点）
-//          用户决策 2026-05-20：1 MML = 1 RPC，**不做复合**。stmt.Values 透传到
-//          parameters 仅为审计；BuildTR069Params(AddObject) 只用 object_name。
-//          用户设置新实例参数需另行运行 MOD MML（手动复制 InstanceNumber）。
+//          单 entry 路径（stmt.Values 空）：原 2026-05-20 决策"1 MML=1 RPC 不做复合"
+//          仍保留；stmt.Values 透传 parameters 仅为审计。
+//          复合路径（stmt.Values 非空，spec §R-4.3，2026-05-21）：buildStatementCommandEntries
+//          追加第 2 行 SetParameterValues entry，新实例 path 含字面占位符 ".{NEW}."，
+//          Sequencer 在 AddObject task 完成后从 result.instance_number 替换为具体数字。
+//          **仍然 1 device_task = 1 RPC**（task 链复用 sequencer 现有按 cmd_idx 推进机制），
+//          因此与原 "1 MML=1 RPC" 决策的核心约束（单 task 不并发 / 不复合 RPC）不冲突。
 //   - RMV: rpc_method=DeleteObject
 //          单实例：parameters["object_name"] = command.TargetObject + "{RmvInstanceIndex}."
 //          用户决策 2026-05-20：RMV 严格单实例（R-7 多选已禁用）。
@@ -113,10 +117,11 @@ func (s *ConsoleService) ExecuteStatements(ctx context.Context, req ExecuteState
 		TotalDevices: len(req.DeviceSNs),
 	}
 
-	// 多 statement 走严格序列；单 statement 默认并发（fanouter 默认行为）。
-	// 用户决策（2026-05-20）：RMV 保持单实例，1 MML 命令 = 1 RPC 不再分批，
-	// 故按 statement 数量判定即可（无 R-7 多实例展开）。
-	sequential := len(req.Statements) > 1
+	// 多 commands 走严格序列；单 command 默认并发（fanouter 默认行为）。
+	// 按 commands 数量判定（而非 statements 数）— spec §R-4.3 单条 ADD with values
+	// statement 会展开为 2 个 commands（AddObject + SetParameterValues），同样需 sequential
+	// 让 Sequencer 在 AddObject 完成后才入队 SPV（以读取 result.instance_number 替换 .{NEW}.）。
+	sequential := len(commands) > 1
 
 	if err := taskCreator.CreateAndFanoutTask(ctx, task, sequential); err != nil {
 		return nil, fmt.Errorf("create+fanout task: %w", err)
@@ -137,8 +142,11 @@ func (s *ConsoleService) ExecuteStatements(ctx context.Context, req ExecuteState
 // 失败语义：任一 statement 编译失败 → 全体放弃；ParseError 已在 parser 阶段累加，
 // 这里遇到的错误属于 lookup 命中后 sub_field / target_object 缺失等运行期问题。
 //
-// 1 statement → 1 commands[] entry（用户决策 2026-05-20：1 MML 命令 = 1 RPC，
-// 不分批；多 RMV 实例已禁用）。
+// 1 statement → **1 或 2** commands[] entries：
+//   - LST / MOD / RMV / ADD without values → 1 entry（与历史行为一致）
+//   - ADD with values（spec §R-4.3 复合流程）→ 2 entries：AddObject + SetParameterValues with {NEW}
+//     第 2 entry 的 Tr069Path 包含字面占位符 ".{NEW}."；Sequencer 在前一条
+//     AddObject task 完成后从 result.instance_number 替换为具体数字再入队 device_task。
 func (s *ConsoleService) BuildStatementCommands(ctx context.Context, stmts []Statement) ([]map[string]interface{}, error) {
 	commands := make([]map[string]interface{}, 0, len(stmts))
 	for i, stmt := range stmts {
@@ -146,14 +154,134 @@ func (s *ConsoleService) BuildStatementCommands(ctx context.Context, stmts []Sta
 		if err != nil {
 			return nil, fmt.Errorf("statement[%d]: %w", i, err)
 		}
-		entry, err := buildStatementCommandEntry(stmt, cmd, subFields)
+		entries, err := buildStatementCommandEntries(stmt, cmd, subFields)
 		if err != nil {
 			return nil, fmt.Errorf("statement[%d] (%s %s): %w: %s",
 				i, stmt.OperationType, stmt.LogicalCode, ErrInvalidRequest, err)
 		}
-		commands = append(commands, entry)
+		commands = append(commands, entries...)
 	}
 	return commands, nil
+}
+
+// buildStatementCommandEntries 把单条 statement 编译为 1-2 个 commands[] entries。
+//
+// 历史 buildStatementCommandEntry 保留（单 entry 返回），新 wrapper 处理 spec §R-4.3
+// "ADD 复合流程"：ADD with values 时追加第 2 行 SetParameterValues entry，第 2 行
+// 的 sub_field path 中"新实例对应的 {i}"被替换为字面字符串 "{NEW}"，运行时由
+// Sequencer 在前一条 AddObject task 完成后读 result.instance_number 替换。
+func buildStatementCommandEntries(stmt Statement, cmd *MMLCommand, subFields []MMLCommandSubField) ([]map[string]interface{}, error) {
+	base, err := buildStatementCommandEntry(stmt, cmd, subFields)
+	if err != nil {
+		return nil, err
+	}
+	op := strings.ToUpper(strings.TrimSpace(stmt.OperationType))
+	if op == "" {
+		op = strings.ToUpper(cmd.OperationType)
+	}
+	// R-4.3 复合：仅 ADD with values 触发第 2 行 SPV
+	if op == "ADD" && len(stmt.Values) > 0 {
+		spv, err := buildADDCompoundSpvEntry(stmt, cmd, subFields)
+		if err != nil {
+			return nil, fmt.Errorf("ADD compound SPV: %w", err)
+		}
+		// spv 可能为 nil（防御性：所有 sub_fields 都没在 stmt.Values 里）— 此时不追加
+		if spv != nil {
+			return []map[string]interface{}{base, spv}, nil
+		}
+	}
+	return []map[string]interface{}{base}, nil
+}
+
+// buildADDCompoundSpvEntry 构造 §R-4.3 复合流程的第 2 行 SetParameterValues entry。
+//
+// 路径占位符策略：
+//   - sub_field.tr069_path 含 N+1 个 .{i}.（N 由 stmt.InstanceSelectors 提供，最后 1 个是新实例）
+//   - applyInstanceSelectorsForADDCompound 把前 N 个替换为具体值、最后 1 个替换为 ".{NEW}."
+//   - Sequencer 在前一条 AddObject task 完成后从 result.instance_number 替换 .{NEW}. → ".<n>."
+//
+// param_refs 仅纳入用户实际填了值的 sub_field（stmt.Values 的 keys），避免 SPV 携带空值。
+// 返回 nil 表示 stmt.Values 全无命中 sub_field（不构造 SPV，仅 AddObject）。
+func buildADDCompoundSpvEntry(stmt Statement, cmd *MMLCommand, subFields []MMLCommandSubField) (map[string]interface{}, error) {
+	// 仅保留 stmt.Values 命中的 sub_fields
+	filtered := make([]MMLCommandSubField, 0, len(stmt.Values))
+	for _, sf := range subFields {
+		if _, ok := stmt.Values[sf.MMLCode]; ok {
+			filtered = append(filtered, sf)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil, nil
+	}
+
+	refs := buildMODParamRefs(filtered, cmd.Params)
+	for i := range refs {
+		newPath, err := substituteInstanceSelectorsForADDCompound(refs[i].Tr069Path, stmt.InstanceSelectors)
+		if err != nil {
+			return nil, fmt.Errorf("param_ref %s: %w", refs[i].ParamCode, err)
+		}
+		refs[i].Tr069Path = newPath
+	}
+
+	// parameters 仅含命中的 keys（filtered 子集对应的 mml_code → value）
+	params := make(map[string]interface{}, len(filtered))
+	for _, sf := range filtered {
+		params[sf.MMLCode] = stmt.Values[sf.MMLCode]
+	}
+
+	return map[string]interface{}{
+		"command_code":   cmd.CommandCode,
+		"operation_type": "MOD", // SPV 语义；audit 通过 prev task (AddObject) 关联识别
+		"command_id":     cmd.ID.String(),
+		"logical_code":   stmt.LogicalCode,
+		"rpc_method":     "SetParameterValues",
+		"param_refs":     refs,
+		"parameters":     params,
+		// 标记复合阶段，便于 Sequencer 识别 + audit log 可读
+		"compound_phase": "spv_after_add",
+	}, nil
+}
+
+// substituteInstanceSelectorsForADDCompound 把路径中 N 个外层 .{i}. 替换为 selectors 值，
+// 同时把最后 1 个 .{i}. 替换为字面占位符 .{NEW}.（新实例号占位）。
+//
+// 约束：path 必须比 selectors 多正好 1 个 .{i}.（额外那 1 个 = 新实例）。
+//
+// 示例：
+//
+//	path = "Device.Services.FAPService.{i}.PLMNList.{i}.PLMNID"
+//	selectors = {iα: "1"}     →    path 有 2 个 .{i}.，selectors 1 个 → expected
+//	result = "Device.Services.FAPService.1.PLMNList.{NEW}.PLMNID"
+func substituteInstanceSelectorsForADDCompound(path string, selectors map[string]string) (string, error) {
+	placeholderCount := strings.Count(path, ".{i}.")
+	expected := len(selectors) + 1
+	if placeholderCount != expected {
+		return "", fmt.Errorf("%w: ADD compound path .{i}. count=%d, expected selectors+1=%d (path=%s)",
+			ErrInvalidRequest, placeholderCount, expected, path)
+	}
+
+	keys := make([]string, 0, len(selectors))
+	for k := range selectors {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	result := path
+	for _, key := range keys {
+		val := selectors[key]
+		idx := strings.Index(result, ".{i}.")
+		if idx < 0 {
+			break
+		}
+		result = result[:idx] + "." + val + "." + result[idx+5:]
+	}
+
+	// 此时应该正好剩 1 个 .{i}.（防御性校验）
+	if strings.Count(result, ".{i}.") != 1 {
+		return "", fmt.Errorf("ADD compound: post-substitution .{i}. count=%d (result=%s)",
+			strings.Count(result, ".{i}."), result)
+	}
+	return strings.Replace(result, ".{i}.", ".{NEW}.", 1), nil
 }
 
 // resolveStatement 加载 statement 对应的 MMLCommand + sub_fields。
@@ -424,12 +552,19 @@ func applyInstanceSelectorsToRefs(refs []MMLParamRef, selectors map[string]strin
 	return nil
 }
 
-// 用户决策 2026-05-20 二次澄清：
-//   - 1 MML 命令 = 1 RPC，严格遵守，**不做复合命令支持**
-//   - ADD + SetParameterValues 拆分为两个独立 MML 命令分别执行
-//   - 原 AddCompoundInstancePlaceholder / AddCompoundFollowUp / buildAddCompoundFollowUp
-//     全部移除；ACS 端零业务编排
+// 用户决策 2026-05-20 二次澄清（仍生效，核心约束）：
+//   - 1 device_task = 1 RPC，严格遵守，**单 task 不复合 RPC**
+//   - ACS 端零业务编排
 //
-// ADD 分支当前行为：纯 AddObject — 用户后续若需设置新实例参数，自行运行 MOD MML 命令。
-// stmt.Values 在 ADD 时透传到 entry["parameters"] 仅用于审计日志（用户意图记录），
-// 协议层 BuildTR069Params(AddObject) 只消费 object_name，其它键被忽略不下发。
+// spec §R-4.3 复合流程（2026-05-21 实施）：
+//   - 仍然 1 device_task = 1 RPC（不破核心约束）
+//   - 但 1 MML statement 可以展开为 2 个 commands[] entries（AddObject + SPV）
+//     由 Sequencer 在 OnTaskCompleted(AddObject) 后从 result.instance_number 提取
+//     新实例号，替换第 2 个 entry 中 path 的 .{NEW}. 占位符，再入队第 2 个 device_task
+//   - 实现见 buildStatementCommandEntries（本文件下方）+ Sequencer.OnTaskCompleted
+//     新增的 substituteNewInstance 钩子
+//   - 等价于用户手写多行 MML "ADD X; MOD X.{NEW}.Foo=bar"，区别仅是占位符与
+//     instance_number 之间的运行时替换由 Sequencer 自动完成
+//
+// 单 entry 路径（ADD with empty values）：保留 stmt.Values audit-transfer 到
+// entry["parameters"]，BuildTR069Params(AddObject) 仅消费 object_name，其它键忽略。
