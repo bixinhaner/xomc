@@ -288,9 +288,16 @@ export default function GroupTreePanel({
           width: 8px !important;
         }
 
-        /* 收紧 折叠箭头 ↔ 分组图标 间距：antd 默认 switcher 占 24px 太宽 */
+        /* 收紧 折叠箭头 ↔ 分组图标 间距：antd 默认 switcher 占 24px 太宽
+         * margin-right:0 防止 antd 自带的右外边距把图标推开。 */
         .group-tree .ant-tree-switcher {
           width: 16px !important;
+          margin-right: 0 !important;
+        }
+
+        /* node-content-wrapper 默认 padding 把 .groupNode 又推开一截，归零。 */
+        .group-tree .ant-tree-node-content-wrapper {
+          padding: 0 !important;
         }
 
         /* 收紧 分组图标 ↔ 分组名称 间距：treeNodeContent 默认 gap 8 → 4 */

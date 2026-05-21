@@ -5,13 +5,17 @@
 
 @import '../../../components/TreeListLayout/TreeListLayout.module.css';
 
-/* 分组节点特定样式 */
+/* 分组节点特定样式
+ * 用户反馈：折叠箭头与文件夹图标之间太空，原因是 composes:treeNode 继承了
+ * `padding: 6px 12px` 把左 padding 拉到 12px。这里覆写成 6px 4px，让折叠箭
+ * 头紧贴文件夹图标。 */
 .groupNode {
   composes: treeNode;
   align-items: center;
   display: flex;
   justify-content: space-between;
   width: 100%;
+  padding: 6px 4px;
 }
 
 .groupNodeLevel1 {
