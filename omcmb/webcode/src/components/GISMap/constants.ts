@@ -187,36 +187,6 @@ export const ANIMATION_CONFIG = {
 };
 
 /**
- * 颜色配置（用于样式工具）
- */
-export const COLORS = {
-  // 在线状态
-  onlineStart: '#73D13D',
-  onlineEnd: '#52C41A',
-  onlineBg: '#F6FFED',
-
-  // 离线状态
-  offline: '#b60808',
-  offlineBg: '#FFF1F0',
-
-  // 聚合
-  clusterStart: '#40A9FF',
-  clusterEnd: '#1890FF',
-
-  // 告警
-  alarmStart: '#FF7875',
-  alarmEnd: '#F5222D',
-
-  // 通用
-  white: '#FFFFFF',
-  border: '#E8E8E8',
-  textPrimary: '#262626',
-  textSecondary: '#8C8C8C',
-  primary: '#1890FF',
-  primaryHover: '#40A9FF',
-};
-
-/**
  * 中国边界范围（用于初始视图）
  */
 export const CHINA_BOUNDS = {
@@ -224,4 +194,40 @@ export const CHINA_BOUNDS = {
   maxLng: 135,
   minLat: 18,
   maxLat: 53,
+};
+
+/**
+ * 通用颜色配置
+ * 用于地图标记、边框、文字等样式
+ */
+export const COLORS = {
+  /** 白色 - 边框、文字 */
+  white: '#FFFFFF',
+  /** 主题色 - 高亮、连线 */
+  primary: '#1890FF',
+  /** 聚合标记结束色 */
+  clusterEnd: '#1890FF',
+  /** 告警渐变起始色 */
+  alarmStart: '#FF7875',
+  /** 告警渐变结束色 */
+  alarmEnd: '#F5222D',
+};
+
+/**
+ * Spiderfy 展开配置
+ * 用于点击聚合标记时展开重叠设备点
+ */
+export const SPIDERFY_CONFIG = {
+  /** 展开半径（像素） */
+  radius: 80,
+  /** 连线宽度 */
+  lineWidth: 2,
+  /** 连线颜色 */
+  lineColor: 'rgba(24, 144, 255, 0.5)',
+  /** 展开点半径 */
+  pointRadius: 12,
+  /** 触发 spiderfy 的最小 zoom 级别 */
+  minZoom: 4,
+  /** 展开动画时长（ms） */
+  animationDuration: 300,
 };

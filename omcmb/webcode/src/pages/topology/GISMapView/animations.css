@@ -1,0 +1,98 @@
+/**
+ * GIS 地图视图动画效果
+ */
+
+/* 徽章脉冲动画 - 用于收起状态的通知徽章 */
+@keyframes badge-pulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 2px 4px rgba(24, 144, 255, 0.3);
+  }
+  50% {
+    transform: scale(1.1);
+    box-shadow: 0 4px 8px rgba(24, 144, 255, 0.5);
+  }
+}
+
+/* 状态指示器发光动画 - 在线设备 */
+@keyframes status-glow-online {
+  0%, 100% {
+    box-shadow: 0 0 0 2px #FFF, 0 0 0 3px rgba(82, 196, 26, 0.3), 0 0 8px rgba(82, 196, 26, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 2px #FFF, 0 0 0 3px rgba(82, 196, 26, 0.5), 0 0 12px rgba(82, 196, 26, 0.6);
+  }
+}
+
+/* 状态指示器发光动画 - 离线设备 */
+@keyframes status-glow-offline {
+  0%, 100% {
+    box-shadow: 0 0 0 2px #FFF, 0 0 0 3px rgba(207, 19, 34, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 0 2px #FFF, 0 0 0 3px rgba(207, 19, 34, 0.3);
+  }
+}
+
+/* 淡入动画 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 滑入动画 - 从右侧 */
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* 滑入动画 - 从底部 */
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 应用动画的类 */
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.animate-slideInRight {
+  animation: slideInRight 0.3s ease-out;
+}
+
+.animate-slideInUp {
+  animation: slideInUp 0.3s ease-out;
+}
+
+/* 状态指示器动画类 */
+.status-indicator-online {
+  animation: status-glow-online 2s ease-in-out infinite;
+}
+
+.status-indicator-offline {
+  animation: status-glow-offline 2s ease-in-out infinite;
+}
+
+/* 徽章动画类 */
+.badge-pulse {
+  animation: badge-pulse 2s ease-in-out infinite;
+}

@@ -7,7 +7,7 @@
 import React from 'react';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import type { MapDevice } from '@core/types/map';
-import { DEVICE_STATUS_CONFIG, COLORS } from './constants';
+import { DEVICE_STATUS_CONFIG, ALARM_BADGE_CONFIG } from './constants';
 
 interface MapPopupProps {
   /** 设备数据 */
@@ -130,7 +130,7 @@ const MapPopup: React.FC<MapPopupProps> = ({
     width: 20,
     height: 20,
     borderRadius: '50%',
-    background: `linear-gradient(180deg, ${COLORS.alarmStart} 0%, ${COLORS.alarmEnd} 100%)`,
+    background: `linear-gradient(180deg, ${ALARM_BADGE_CONFIG.gradientStart} 0%, ${ALARM_BADGE_CONFIG.gradientEnd} 100%)`,
     color: '#FFF',
     fontSize: 11,
     fontWeight: 700,

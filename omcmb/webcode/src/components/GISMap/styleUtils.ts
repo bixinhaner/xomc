@@ -12,6 +12,7 @@ import {
   ALARM_BADGE_CONFIG,
   MARKER_SIZE_CONFIG,
   COLORS,
+  SPIDERFY_CONFIG,
 } from './constants';
 
 /**
@@ -336,22 +337,6 @@ export function isPointInBounds(
 ): boolean {
   return lng >= minLng && lng <= maxLng && lat >= minLat && lat <= maxLat;
 }
-
-/**
- * Spiderfy 配置
- */
-export const SPIDERFY_CONFIG = {
-  /** 展开半径（像素） */
-  radius: 60,
-  /** 连线宽度 */
-  lineWidth: 2,
-  /** 连线颜色 */
-  lineColor: 'rgba(24, 144, 255, 0.6)',
-  /** 展开点半径 */
-  pointRadius: 10,
-  /** 展开动画时长（ms） */
-  animationDuration: 300,
-};
 
 /**
  * 创建 Spiderfy 连线样式

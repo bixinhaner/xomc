@@ -2,21 +2,30 @@
  * GIS 地图视图页面
  * 完全按照 UI 原型图 GISMap_UI_Design_Main.svg 实现
  * 使用真实 API 接口获取数据
+ *
+ * UI/UX 优化：
+ * - 统一的设计 Token 和间距系统
+ * - 分层阴影系统
+ * - 流畅的动画和交互反馈
+ * - 可访问性增强
  */
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { Checkbox, Spin, Empty } from 'antd';
 import { SearchOutlined, PlusOutlined, MinusOutlined } from '@ant-design/icons';
 import GISMap, { MAP_CONFIG } from '@/components/GISMap';
 import type { GISMapRef } from '@/components/GISMap';
-import type { MapDevice, DeviceGroupNode, DeviceGeo, DeviceSearchResult } from '@core/types/map';
+import type { MapDevice, DeviceGroupNode, DeviceGeo } from '@core/types/map';
 import type { Domain } from '@core/types/topology';
 import { useThemeToken } from '@/hooks/useThemeToken';
+import MapStatsPanel from '@/components/GISMap/MapStatsPanel';
 import {
   useDomainTree,
   useMapDevicesGeo,
   useMapStats,
   useMapDeviceSearch,
 } from '@core/hooks/api/useTopology';
+import { SPACING, RADIUS, SHADOWS, COLORS, transitionString } from './styles';
+import './animations.css';
 
 /**
  * 将 DeviceGeo 转换为 MapDevice
@@ -51,6 +60,19 @@ function domainToGroupNode(domain: Domain): DeviceGroupNode {
   };
 }
 
+/**
+ * 递归获取节点及其所有子孙节点的 ID
+ */
+function getAllDescendantIds(node: DeviceGroupNode): string[] {
+  const ids: string[] = [node.id];
+  if (node.children) {
+    for (const child of node.children) {
+      ids.push(...getAllDescendantIds(child));
+    }
+  }
+  return ids;
+}
+
 export default function GISMapView() {
   const token = useThemeToken();
 
@@ -78,7 +100,6 @@ export default function GISMapView() {
 
   // 设备搜索
   const [deviceSearchValue, setDeviceSearchValue] = useState('');
-  const [deviceSearchResults, setDeviceSearchResults] = useState<DeviceSearchResult[]>([]);
   const [deviceSearchExpanded, setDeviceSearchExpanded] = useState(false);
 
   // 地图组件引用
@@ -99,21 +120,10 @@ export default function GISMapView() {
     return domainTree.map(domainToGroupNode);
   }, [domainTree]);
 
-  // 获取所有子节点 ID - 必须在 allGroupIds 之前定义
-  const getAllDescendantIds = useCallback((node: DeviceGroupNode): string[] => {
-    const ids = [node.id];
-    if (node.children) {
-      node.children.forEach((child) => {
-        ids.push(...getAllDescendantIds(child));
-      });
-    }
-    return ids;
-  }, []);
-
   // 计算所有组的 ID 集合（用于判断是否选中了"全部"）
   const allGroupIds = useMemo(() => {
     return new Set(groupTree.flatMap((node) => getAllDescendantIds(node)));
-  }, [groupTree, getAllDescendantIds]);
+  }, [groupTree]);
 
   // 获取设备地理数据
   const filterParams = useMemo(() => {
@@ -128,12 +138,6 @@ export default function GISMapView() {
     // 传 undefined 让后端返回所有设备（包括未分组的）
     const isAllSelected = selectedGroupIds.length > 0 &&
       selectedGroupIds.length === allGroupIds.size;
-
-    // Debug: 输出选中状态判断
-    console.log('[GISMapView] isAllSelected:', isAllSelected,
-      '| selectedGroupIds.length:', selectedGroupIds.length,
-      '| allGroupIds.size:', allGroupIds.size,
-      '| groupIds will be:', isAllSelected ? 'undefined (all devices)' : selectedGroupIds);
 
     return {
       // 选中所有组时传 undefined（返回所有设备，包括未分组的）
@@ -151,12 +155,6 @@ export default function GISMapView() {
 
   const { data: devicesGeoData, isLoading: isLoadingDevices } = useMapDevicesGeo(filterParams);
 
-  // Debug: 输出 filterParams 和结果
-  useEffect(() => {
-    console.log('[GISMapView] filterParams:', filterParams);
-    console.log('[GISMapView] devicesGeoData:', devicesGeoData);
-  }, [filterParams, devicesGeoData]);
-
   // 获取地图统计数据
   const { data: mapStatsData, isLoading: isLoadingStats } = useMapStats({
     groupIds: selectedGroupIds.length > 0 ? selectedGroupIds : undefined,
@@ -173,22 +171,28 @@ export default function GISMapView() {
     return devicesGeoData.items.map(deviceGeoToMapDevice);
   }, [devicesGeoData]);
 
-  // 统计数据
+  // 统计数据（匹配 MapStats 类型）
   const stats = useMemo(() => {
     if (!mapStatsData) {
       return {
         total: 0,
-        onlineActive: 0,
-        onlineInactive: 0,
-        offline: 0,
+        statusCount: {
+          onlineActive: 0,
+          onlineInactive: 0,
+          offline: 0,
+        },
+        alarmCount: 0,
         center: undefined,
       };
     }
     return {
       total: mapStatsData.total,
-      onlineActive: mapStatsData.statusCount?.onlineActive ?? 0,
-      onlineInactive: mapStatsData.statusCount?.onlineInactive ?? 0,
-      offline: mapStatsData.statusCount?.offline ?? 0,
+      statusCount: {
+        onlineActive: mapStatsData.statusCount?.onlineActive ?? 0,
+        onlineInactive: mapStatsData.statusCount?.onlineInactive ?? 0,
+        offline: mapStatsData.statusCount?.offline ?? 0,
+      },
+      alarmCount: mapStatsData.alarmCount ?? 0,
       center: mapStatsData.center,
     };
   }, [mapStatsData]);
@@ -201,23 +205,19 @@ export default function GISMapView() {
     if (value.length >= 2) {
       setDeviceSearchExpanded(true);
     } else {
-      setDeviceSearchResults([]);
       setDeviceSearchExpanded(false);
     }
   }, []);
 
-  // 搜索结果更新（根据状态过滤）
-  useEffect(() => {
-    if (searchResults) {
-      // 根据状态筛选过滤搜索结果
-      const filtered = searchResults.filter((device) => {
-        if (device.status === 'onlineActive' && !statusFilter.onlineActive) return false;
-        if (device.status === 'onlineInactive' && !statusFilter.onlineInactive) return false;
-        if (device.status === 'offline' && !statusFilter.offline) return false;
-        return true;
-      });
-      setDeviceSearchResults(filtered);
-    }
+  // 搜索结果过滤（根据状态过滤）
+  const filteredSearchResults = useMemo(() => {
+    if (!searchResults) return [];
+    return searchResults.filter((device) => {
+      if (device.status === 'onlineActive' && !statusFilter.onlineActive) return false;
+      if (device.status === 'onlineInactive' && !statusFilter.onlineInactive) return false;
+      if (device.status === 'offline' && !statusFilter.offline) return false;
+      return true;
+    });
   }, [searchResults, statusFilter]);
 
   // ========== 设备组树处理 ==========
@@ -267,6 +267,7 @@ export default function GISMapView() {
   }, [groupSearchValue, groupTree]);
 
   // 自动展开匹配的节点
+  /* eslint-disable react-hooks/set-state-in-effect -- 搜索时自动展开是预期的副作用 */
   useEffect(() => {
     if (groupSearchValue.trim() && filteredGroupTree.length > 0) {
       const collectExpandIds = (nodes: DeviceGroupNode[]): string[] => {
@@ -285,6 +286,7 @@ export default function GISMapView() {
   }, [groupSearchValue, filteredGroupTree]);
 
   // 初始化：选中并展开所有节点（包括子节点）
+  /* eslint-disable react-hooks/set-state-in-effect -- 初始化时设置状态是预期的副作用 */
   useEffect(() => {
     if (groupTree.length > 0 && selectedGroupIds.length === 0) {
       // 默认选中所有节点（包括子节点）
@@ -296,7 +298,7 @@ export default function GISMapView() {
       // 标记初始化完成，允许 API 请求
       setIsInitialized(true);
     }
-  }, [groupTree, getAllDescendantIds, selectedGroupIds.length]);
+  }, [groupTree, selectedGroupIds.length]);
 
   // 渲染设备组树节点
   const renderGroupNode = (node: DeviceGroupNode, depth: number = 0): React.ReactNode => {
@@ -401,46 +403,33 @@ export default function GISMapView() {
   };
 
   const searchBoxStyle: React.CSSProperties = {
-    margin: '16px 16px 0',
-    padding: '10px 12px',
+    margin: `${SPACING.xxl}px ${SPACING.xxl}px 0`,
+    padding: `${SPACING.md}px ${SPACING.lg}px`,
     background: '#FFF',
     border: '1px solid #D9D9D9',
-    borderRadius: 8,
+    borderRadius: RADIUS.md,
     display: 'flex',
     alignItems: 'center',
-    gap: 8,
+    gap: SPACING.md,
   };
 
   const treeContainerStyle: React.CSSProperties = {
     flex: '0 0 auto',
     maxHeight: 280,
     overflow: 'auto',
-    padding: '4px 0',
+    padding: `${SPACING.xs}px 0`,
   };
 
   const dividerStyle: React.CSSProperties = {
-    margin: '0 20px',
+    margin: `0 ${SPACING.xxl}px`,
     borderTop: '1px solid #E8E8E8',
   };
 
   const sectionTitleStyle: React.CSSProperties = {
-    padding: '12px 20px 6px',
+    padding: `${SPACING.md}px ${SPACING.xxl}px ${SPACING.sm}px`,
     fontSize: 12,
     fontWeight: 500,
     color: '#8C8C8C',
-  };
-
-  const statsPanelStyle: React.CSSProperties = {
-    position: 'absolute',
-    right: 24,
-    bottom: 24,
-    width: 260,
-    background: '#FFF',
-    borderRadius: 12,
-    boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-    border: '1px solid #E8E8E8',
-    padding: '16px 20px',
-    zIndex: 10,
   };
 
   const zoomControlsStyle: React.CSSProperties = {
@@ -449,28 +438,29 @@ export default function GISMapView() {
     top: 100,
     width: 44,
     background: '#FFF',
-    borderRadius: 12,
-    boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-    border: '1px solid #E8E8E8',
+    borderRadius: RADIUS.lg,
+    boxShadow: SHADOWS.medium,
+    border: `1px solid ${COLORS.neutral[200]}`,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    padding: '6px 0',
+    padding: `${SPACING.sm}px 0`,
     zIndex: 10,
+    transition: transitionString(['box-shadow', 'transform'], 'fast'),
   };
 
   const zoomButtonStyle: React.CSSProperties = {
     width: 32,
     height: 32,
     borderRadius: '50%',
-    background: '#F5F5F5',
+    background: COLORS.neutral[100],
     border: 'none',
     cursor: 'pointer',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    margin: '6px 0',
-    transition: 'background 0.2s',
+    margin: `${SPACING.xs}px 0`,
+    transition: transitionString(['background', 'transform'], 'fast'),
   };
 
   const deviceSearchStyle: React.CSSProperties = {
@@ -483,7 +473,7 @@ export default function GISMapView() {
 
   const searchBoxOuterStyle: React.CSSProperties = {
     background: '#FFF',
-    borderRadius: 12,
+    borderRadius: RADIUS.lg,
     boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
     border: '2px solid rgb(217, 217, 217)',
     overflow: 'hidden',
@@ -492,9 +482,9 @@ export default function GISMapView() {
   const searchInputContainerStyle: React.CSSProperties = {
     display: 'flex',
     alignItems: 'center',
-    padding: '0 16px',
+    padding: `0 ${SPACING.xl}px`,
     height: 36,
-    gap: 12,
+    gap: SPACING.md,
   };
 
   const searchResultsStyle: React.CSSProperties = {
@@ -511,7 +501,7 @@ export default function GISMapView() {
   };
 
   const searchResultsFooterStyle: React.CSSProperties = {
-    padding: '10px 16px',
+    padding: `${SPACING.md}px ${SPACING.xl}px`,
     borderTop: '1px solid #F0F0F0',
     textAlign: 'center',
     background: '#FAFAFA',
@@ -519,7 +509,7 @@ export default function GISMapView() {
   };
 
   const searchResultItemStyle = (isHighlighted: boolean): React.CSSProperties => ({
-    padding: '12px 16px',
+    padding: `${SPACING.md}px ${SPACING.xl}px`,
     cursor: 'pointer',
     background: isHighlighted ? '#E6F7FF' : 'transparent',
     transition: 'background 0.15s',
@@ -618,7 +608,7 @@ export default function GISMapView() {
             />
             <span style={{ fontSize: 14, color: 'var(--color-neutral-800)' }}>在线激活</span>
             <span style={{ marginLeft: 'auto', fontSize: 14, color: '#52C41A' }}>
-              {stats.onlineActive.toLocaleString()}
+              {stats.statusCount.onlineActive.toLocaleString()}
             </span>
           </div>
 
@@ -639,7 +629,7 @@ export default function GISMapView() {
             />
             <span style={{ fontSize: 14, color: 'var(--color-neutral-800)' }}>在线未激活</span>
             <span style={{ marginLeft: 'auto', fontSize: 14, color: '#FAAD14' }}>
-              {stats.onlineInactive.toLocaleString()}
+              {stats.statusCount.onlineInactive.toLocaleString()}
             </span>
           </div>
 
@@ -660,7 +650,7 @@ export default function GISMapView() {
             />
             <span style={{ fontSize: 14, color: 'var(--color-neutral-800)' }}>离线</span>
             <span style={{ marginLeft: 'auto', fontSize: 14, color: '#b60808' }}>
-              {stats.offline.toLocaleString()}
+              {stats.statusCount.offline.toLocaleString()}
             </span>
           </div>
         </div>
@@ -761,14 +751,12 @@ export default function GISMapView() {
             ref={mapRef}
             devices={mapDevices}
             height="100%"
-            defaultCenter={stats.center ? [stats.center.lng, stats.center.lat] : [28.221, -14.607]}
-            defaultZoom={6}
+            defaultCenter={[26, -13] as [number, number]}
+            defaultZoom={MAP_CONFIG.defaultZoom}
             showStats={false}
             showControls={false}
             tileUrl={MAP_CONFIG.tileUrl}
-            onDeviceClick={(device) => {
-              console.log('Device clicked:', device);
-            }}
+            onDeviceClick={undefined}
             onMapClick={() => {
               // 点击地图时收起搜索结果面板
               setDeviceSearchExpanded(false);
@@ -810,7 +798,7 @@ export default function GISMapView() {
                 value={deviceSearchValue}
                 onChange={(e) => handleDeviceSearch(e.target.value)}
                 onFocus={() => {
-                  if (deviceSearchValue.length >= 2 && deviceSearchResults.length > 0) {
+                  if (deviceSearchValue.length >= 2 && filteredSearchResults.length > 0) {
                     setDeviceSearchExpanded(true);
                   }
                 }}
@@ -866,7 +854,7 @@ export default function GISMapView() {
                   <div style={{ padding: 24, textAlign: 'center' }}>
                     <Spin size="small" />
                   </div>
-                ) : deviceSearchResults.length === 0 ? (
+                ) : filteredSearchResults.length === 0 ? (
                   <div style={{ padding: 24, textAlign: 'center', color: '#8C8C8C' }}>
                     🔍
                     <br />
@@ -878,7 +866,7 @@ export default function GISMapView() {
                   <>
                     {/* 可滚动的结果列表 */}
                     <div style={searchResultsListStyle}>
-                      {deviceSearchResults.map((result, index) => {
+                      {filteredSearchResults.map((result, index) => {
                         // 状态颜色：在线激活=绿色，在线未激活=黄色，离线=红色
                         const statusColor = result.status === 'onlineActive'
                           ? 'linear-gradient(180deg, #73D13D 0%, #52C41A 100%)'
@@ -909,6 +897,9 @@ export default function GISMapView() {
                                 status: result.status,
                                 sn: result.sn,
                                 groupName: result.groupName,
+                                address: '',
+                                alarmCount: 0,
+                                type: undefined,
                               };
                               mapRef.current?.highlightAndFlyTo(mapDevice);
                             }}
@@ -950,7 +941,7 @@ export default function GISMapView() {
                     {/* 固定在底部的结果统计 */}
                     <div style={searchResultsFooterStyle}>
                       <span style={{ fontSize: 11, color: '#8C8C8C' }}>
-                        共找到 {deviceSearchResults.length} 个结果
+                        共找到 {filteredSearchResults.length} 个结果
                       </span>
                     </div>
                   </>
@@ -964,112 +955,53 @@ export default function GISMapView() {
         <div style={zoomControlsStyle}>
           <button
             style={zoomButtonStyle}
-            onMouseEnter={(e) => (e.currentTarget.style.background = '#E8E8E8')}
-            onMouseLeave={(e) => (e.currentTarget.style.background = '#F5F5F5')}
-            onClick={() => console.log('Zoom in')}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = COLORS.neutral[200];
+              e.currentTarget.style.transform = 'scale(1.1)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = COLORS.neutral[100];
+              e.currentTarget.style.transform = 'scale(1)';
+            }}
+            onClick={() => {
+              const view = mapRef.current?.getViewport();
+              const currentZoom = view?.zoom ?? 6;
+              mapRef.current?.flyTo(
+                view?.centerLng ?? 28.221,
+                view?.centerLat ?? -14.607,
+                Math.min(currentZoom + 1, 18)
+              );
+            }}
           >
-            <span style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-neutral-800)' }}>+</span>
+            <span style={{ fontSize: 16, fontWeight: 600, color: COLORS.neutral[800] }}>+</span>
           </button>
-          <div style={{ width: 24, height: 1, background: '#F0F0F0' }} />
+          <div style={{ width: 24, height: 1, background: COLORS.neutral[100] }} />
           <button
             style={zoomButtonStyle}
-            onMouseEnter={(e) => (e.currentTarget.style.background = '#E8E8E8')}
-            onMouseLeave={(e) => (e.currentTarget.style.background = '#F5F5F5')}
-            onClick={() => console.log('Zoom out')}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = COLORS.neutral[200];
+              e.currentTarget.style.transform = 'scale(1.1)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = COLORS.neutral[100];
+              e.currentTarget.style.transform = 'scale(1)';
+            }}
+            onClick={() => {
+              const view = mapRef.current?.getViewport();
+              const currentZoom = view?.zoom ?? 6;
+              mapRef.current?.flyTo(
+                view?.centerLng ?? 28.221,
+                view?.centerLat ?? -14.607,
+                Math.max(currentZoom - 1, 3)
+              );
+            }}
           >
-            <span style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-neutral-800)' }}>−</span>
+            <span style={{ fontSize: 16, fontWeight: 600, color: COLORS.neutral[800] }}>−</span>
           </button>
         </div>
 
         {/* 统计面板 */}
-        <div style={statsPanelStyle}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-neutral-800)', marginBottom: 8 }}>
-            设备统计
-          </div>
-          <div style={{ borderTop: '1px solid #F0F0F0', margin: '8px 0 16px' }} />
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 12, color: '#8C8C8C' }}>总设备</span>
-            <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--color-neutral-800)' }}>
-              {stats.total.toLocaleString()}
-            </span>
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginTop: 12,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <div
-                style={{
-                  width: 12,
-                  height: 12,
-                  borderRadius: '50%',
-                  background: 'linear-gradient(180deg, #73D13D 0%, #52C41A 100%)',
-                  marginRight: 8,
-                }}
-              />
-              <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>在线激活</span>
-            </div>
-            <span style={{ fontSize: 14, fontWeight: 600, color: '#52C41A' }}>
-              {stats.onlineActive.toLocaleString()}
-            </span>
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginTop: 12,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <div
-                style={{
-                  width: 12,
-                  height: 12,
-                  borderRadius: '50%',
-                  background: 'linear-gradient(180deg, #FFC53D 0%, #FAAD14 100%)',
-                  marginRight: 8,
-                }}
-              />
-              <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>在线未激活</span>
-            </div>
-            <span style={{ fontSize: 14, fontWeight: 600, color: '#FAAD14' }}>
-              {stats.onlineInactive.toLocaleString()}
-            </span>
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginTop: 12,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <div
-                style={{
-                  width: 12,
-                  height: 12,
-                  borderRadius: '50%',
-                  background: '#b60808',
-                  marginRight: 8,
-                }}
-              />
-              <span style={{ fontSize: 12, color: 'var(--color-neutral-600)' }}>离线</span>
-            </div>
-            <span style={{ fontSize: 14, fontWeight: 600, color: '#8C8C8C' }}>
-              {stats.offline.toLocaleString()}
-            </span>
-          </div>
-        </div>
+        <MapStatsPanel stats={stats} visible={true} />
 
         {/* Footer */}
         <div

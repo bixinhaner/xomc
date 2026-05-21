@@ -26,6 +26,7 @@ import {
   CLUSTER_CONFIG,
   COLORS,
   DEVICE_STATUS_CONFIG,
+  SPIDERFY_CONFIG,
 } from './constants';
 import {
   clusterStyleFunction,
@@ -34,20 +35,6 @@ import {
   createSpiderfyCenterStyle,
   createSpiderfyPointHoverStyle,
 } from './styleUtils';
-
-/** Spiderfy 配置 */
-const SPIDERFY_CONFIG = {
-  /** 展开半径（像素） */
-  radius: 80,
-  /** 连线宽度 */
-  lineWidth: 2,
-  /** 连线颜色 */
-  lineColor: 'rgba(24, 144, 255, 0.5)',
-  /** 展开点半径 */
-  pointRadius: 12,
-  /** 触发 spiderfy 的最小 zoom 级别 */
-  minZoom: 12,
-};
 
 // 用于 spiderfy 函数内部访问
 const SPIDERFY_CONFIG_REF = SPIDERFY_CONFIG;
