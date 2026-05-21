@@ -22,7 +22,7 @@
 | R-4.1.1 | `{i}` 取值范围 onBlur 校验 | ✅ **2026-05-21 重做完成** | `group_tree_repository.go` InstanceRangeMeta + `instanceRangeValidation.ts` + InstanceArityInput Tooltip |
 | R-4.2 | MOD 仅 RW 路径 + 填新值 | ✅ | SubFieldInputList |
 | ~~R-4.2.1~~ | ~~类型约束提示 + onBlur 校验~~ | 🚫 **降级 P2 可选 / deferred**（2026-05-21 spec 已降级，见 spec §R-4.2.1）| spec doc 注解 |
-| R-4.3 | ADD 复合流程（AddObject + SPV 同会话） | ⚪ **部分**（前端 UI 完整，后端 1MML=1RPC 不复合） | `console_executor.go` 注释明确说不做 |
+| R-4.3 | ADD 复合流程（AddObject + SPV 同会话） | ✅ **2026-05-21 实施完成** | `console_executor.go buildStatementCommandEntries` 拆 2 行 + `sequencer.go substituteNewInstance` 钩子 |
 | R-4.4 | RMV 实例选择器 | ✅ | InstancePicker |
 | R-5 | Customized 公私模板权限模型 | ✅ | visibility + owner_user_id + 用户名目录层 |
 | R-6 | 命令树更新与权威源（admin overlay 保护） | ⚪ 大部分到位 | dictloader 启动期 UPSERT；admin overlay 表已建 |
@@ -365,7 +365,7 @@ device_tasks → ACS scheduler → CWMP RPC（GetParameterValues / SetParameterV
 
 | Gap | spec 条款 | 影响 | 估计 |
 |---|---|---|---|
-| ADD 复合流程（AddObject + SPV 同会话）| R-4.3 | 用户填初始值但实际只 AddObject，新实例字段全空 — 真实功能缺陷 | 中-高复杂度，需改 ACS task scheduler 支持串联 RPC |
+| ~~ADD 复合流程（AddObject + SPV 同会话）~~ | ~~R-4.3~~ | ✅ **已闭环**（2026-05-21 通过 ConsoleService 拆 2 行 commands + Sequencer .{NEW}. 替换实现，未改 ACS、未改 schema）| — |
 
 ### P2 — Nice-to-have / 工程债
 
