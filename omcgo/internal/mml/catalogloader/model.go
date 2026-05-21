@@ -169,7 +169,11 @@ type LoadInfo struct {
 	LoadedAt        time.Time `json:"loaded_at"`
 	GroupCount          int `json:"group_count"`
 	CommandCount        int `json:"command_count"`
-	SubFieldCount       int `json:"sub_field_count"`
-	DeprecatedCount     int `json:"deprecated_count"`
-	SkippedCommandCount int `json:"skipped_command_count"` // v2.4 D34 — MOD/ADD/RMV target_paths 为空被跳过的数量
+	SubFieldCount       int `json:"sub_field_count,omitempty"`
+	DeprecatedCount     int `json:"deprecated_count,omitempty"`
+	SkippedCommandCount int `json:"skipped_command_count,omitempty"` // v2.4 D34 — MOD/ADD/RMV target_paths 为空被跳过的数量
+
+	// v2 schema 字段（P2.c 引入；v1 路径下保持零值由 omitempty 隐藏）
+	LinkHealthFailures int `json:"link_health_failures,omitempty"` // §R-2.5.2 本次 Loader 检测到的标准参数树未命中数
+	LinkHealthResolved int `json:"link_health_resolved,omitempty"` // §R-2.5.2 本次 Loader 把之前失败项标为 resolved 的数量
 }
