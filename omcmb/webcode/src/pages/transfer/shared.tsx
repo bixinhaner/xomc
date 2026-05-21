@@ -3,8 +3,10 @@ import {
   Card,
   Space,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd';
+import type { CSSProperties, ReactNode } from 'react';
 
 import type {
   FirmwareLibraryFileType,
@@ -46,6 +48,78 @@ export const DEFAULT_CATEGORY_ORDER = [
   'config_backup',
   'config_restore',
 ];
+
+// typeCode 子 tab 顺序由后端 ufte_task_types.sort_order 字段控制
+// （migrations/000146 加列 + builtInTaskTypes 写默认值）。前端不再二次排序，
+// 直接采用 API 返回顺序；如需调整，在「模板配置」UI 修改 sort_order 即可。
+
+// renderEllipsisCell — 长文本列单行截断 + Tooltip 兜底。任务名称 / 设备名 /
+// 固件版本 / 文件名 等业务字段都可能超过列宽，统一封装避免每列写重复 markup。
+//
+// 实现要点：用 <div> 块级容器 + CSS（overflow:hidden, text-overflow:ellipsis,
+// white-space:nowrap）而不是 Antd Text ellipsis。原因：Text ellipsis 渲染为
+// <span>（inline），被 Tooltip wrapper（也是 inline）包后，maxWidth/width 都
+// 不生效；只能依赖 Text 内部 display:inline-block 但实测在 Table fixed layout
+// 下仍会触发换行。改用 block div 自然撑满 td 宽度，css ellipsis 100% 可靠。
+//
+// 用法：
+//   render: (_, record) => renderEllipsisCell(record.taskName)
+//   render: (_, record) => renderEllipsisCell(record.taskName, { strong: true })
+//   render: (_, record) => renderEllipsisCell(record.taskName, {
+//     subtitle: record.deviceName,  // 副行也跟着 ellipsis + tooltip
+//   })
+export function renderEllipsisCell(
+  value: string | undefined | null,
+  opts?: {
+    strong?: boolean;
+    secondary?: boolean;
+    subtitle?: string | undefined | null;
+    /** 业务渲染失败时的 fallback，比如 '-'。默认 '-'。 */
+    placeholder?: ReactNode;
+  },
+): ReactNode {
+  const display = (value ?? '').toString().trim();
+  const placeholder = opts?.placeholder ?? '-';
+  const sub = (opts?.subtitle ?? '').toString().trim();
+  if (!display && !sub) return placeholder;
+
+  const baseCellStyle: CSSProperties = {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    // block 让 maxWidth/width 100% 跟着 td 宽度走，避免 Tooltip wrapper inline 时
+    // maxWidth 失效导致换行。
+    display: 'block',
+    width: '100%',
+  };
+
+  const mainNode = display ? (
+    <Tooltip title={display} placement="topLeft" mouseEnterDelay={0.2}>
+      <div
+        style={{
+          ...baseCellStyle,
+          fontWeight: opts?.strong ? 600 : undefined,
+          color: opts?.secondary ? 'rgba(0,0,0,0.45)' : undefined,
+        }}
+      >
+        {display}
+      </div>
+    </Tooltip>
+  ) : null;
+
+  if (!sub) return mainNode ?? placeholder;
+
+  return (
+    <div style={{ minWidth: 0 }}>
+      {mainNode}
+      <Tooltip title={sub} placement="topLeft" mouseEnterDelay={0.2}>
+        <div style={{ ...baseCellStyle, color: 'rgba(0,0,0,0.45)', fontSize: 12, marginTop: 2 }}>
+          {sub}
+        </div>
+      </Tooltip>
+    </div>
+  );
+}
 
 export const TYPE_DRAWER_DEFAULT_STEPS: TransferStepId[] = [
   'CHECK_PERMISSION',

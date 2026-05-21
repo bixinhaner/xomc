@@ -21,7 +21,8 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { EyeOutlined, PlusOutlined } from '@ant-design/icons';
+import { EyeOutlined, PlusOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
+import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useT } from '@/hooks/useT';
 
@@ -53,6 +54,7 @@ import {
   EXECUTION_MODE_OPTIONS,
   getSoftwareLibraryFileTypeLabel,
   renderDeviceStatus,
+  renderEllipsisCell,
   renderTaskStatus,
   STEP_LABELS,
   UPGRADE_LIKE_CATEGORIES,
@@ -160,6 +162,7 @@ function getUpgradeTypeLabel(category: string, fallback: string) {
 export default function FileTransferCenter() {
   const navigate = useNavigate();
   const t = useT();
+  const queryClient = useQueryClient();
   // 任务名称自动填充用：取登录用户名拼前缀，displayName / username 哪个有用哪个。
   const currentUser = useUserStore((s) => s.currentUser);
   const taskNameUser = currentUser?.username || currentUser?.displayName || 'user';
@@ -221,6 +224,9 @@ export default function FileTransferCenter() {
   const recentDevices = devicesData?.items ?? [];
 
   const filteredTaskTypes = useMemo(
+    // 顺序由后端 ORDER BY sort_order ASC 控制（数据库字段 ufte_task_types.sort_order
+    // 由内置模板初始化，未来可在「模板配置」页面拖拽调整）。前端不再二次排序，避免
+    // 跟数据库源头不一致。
     () => taskTypes.filter((item) => item.category === selectedCategory),
     [selectedCategory, taskTypes],
   );
@@ -532,14 +538,15 @@ export default function FileTransferCenter() {
           dataIndex: 'taskName',
           key: 'taskName',
           width: 280,
-          ellipsis: { showTitle: false },
-          render: (_, record) => (
-            <Tooltip title={record.taskName} placement="topLeft">
-              <span>{record.taskName}</span>
-            </Tooltip>
-          ),
+          render: (_, record) => renderEllipsisCell(record.taskName, { strong: true }),
         },
-        { title: '操作人', dataIndex: 'createUser', key: 'createUser', width: 110 },
+        {
+          title: '操作人',
+          dataIndex: 'createUser',
+          key: 'createUser',
+          width: 130,
+          render: (value: string) => renderEllipsisCell(value),
+        },
         {
           title: '操作时间',
           dataIndex: 'createdAt',
@@ -557,8 +564,8 @@ export default function FileTransferCenter() {
         {
           title: '目标版本',
           key: 'targetVersion',
-          width: 150,
-          render: (_, record) => getTaskTargetVersion(record),
+          width: 180,
+          render: (_, record) => renderEllipsisCell(getTaskTargetVersion(record)),
         },
         {
           title: '升级类型',
@@ -569,8 +576,8 @@ export default function FileTransferCenter() {
         {
           title: '产品类型',
           key: 'productType',
-          width: 120,
-          render: (_, record) => getTaskProductType(record),
+          width: 130,
+          render: (_, record) => renderEllipsisCell(getTaskProductType(record)),
         },
         {
           title: '升级进度',
@@ -617,16 +624,19 @@ export default function FileTransferCenter() {
         dataIndex: 'taskName',
         key: 'taskName',
         width: 280,
-        render: (_, record) => (
-          <Space direction="vertical" size={2} style={{ maxWidth: '100%' }}>
-            <Tooltip title={record.taskName} placement="topLeft">
-              <Text strong ellipsis style={{ maxWidth: 260 }}>{record.taskName}</Text>
-            </Tooltip>
-            <Text type="secondary" ellipsis style={{ maxWidth: 260 }}>{record.typeDisplayName}</Text>
-          </Space>
-        ),
+        render: (_, record) => renderEllipsisCell(record.taskName, {
+          strong: true,
+          subtitle: record.typeDisplayName,
+          maxWidth: 260,
+        }),
       },
-      { title: '执行人', dataIndex: 'createUser', key: 'createUser', width: 110 },
+      {
+        title: '执行人',
+        dataIndex: 'createUser',
+        key: 'createUser',
+        width: 130,
+        render: (value: string) => renderEllipsisCell(value),
+      },
       {
         title: '状态',
         dataIndex: 'status',
@@ -685,17 +695,49 @@ export default function FileTransferCenter() {
   const deviceColumns: ColumnsType<UnifiedFileTransferDeviceItem> = useMemo(() => {
     if (isUpgradeLikeCategory) {
       return [
-        { title: '基站编码', dataIndex: 'deviceSn', key: 'deviceSn', width: 120 },
-        { title: '任务名称', dataIndex: 'taskName', key: 'taskName', width: 180, ellipsis: true },
-        { title: '源版本', dataIndex: 'currentVersion', key: 'currentVersion', width: 120 },
-        { title: '目标版本', dataIndex: 'targetVersion', key: 'targetVersion', width: 140 },
+        {
+          title: '基站编码',
+          dataIndex: 'deviceSn',
+          key: 'deviceSn',
+          width: 150,
+          render: (value: string) => renderEllipsisCell(value),
+        },
+        {
+          // 自动生成的 taskName 形如 "Upgrade_admin_2026-05-21 14:05:07"（约 35 字符），
+          // 180 列宽无法容纳。280 + Tooltip 兜底，跟非升级类设备列表对齐。
+          title: '任务名称',
+          dataIndex: 'taskName',
+          key: 'taskName',
+          width: 280,
+          render: (value: string) => renderEllipsisCell(value, { strong: true }),
+        },
+        {
+          title: '源版本',
+          dataIndex: 'currentVersion',
+          key: 'currentVersion',
+          width: 140,
+          render: (value: string) => renderEllipsisCell(value),
+        },
+        {
+          title: '目标版本',
+          dataIndex: 'targetVersion',
+          key: 'targetVersion',
+          width: 160,
+          render: (value: string) => renderEllipsisCell(value),
+        },
         {
           title: '升级类型',
           key: 'upgradeType',
           width: 120,
           render: (_, record) => <Tag color="blue">{getUpgradeTypeLabel(record.category, record.typeDisplayName)}</Tag>,
         },
-        { title: '产品类型', dataIndex: 'productType', key: 'productType', width: 120 },
+        {
+          title: '产品类型',
+          dataIndex: 'productType',
+          key: 'productType',
+          width: 130,
+          render: (value: string) => renderEllipsisCell(value),
+        },
         {
           title: '升级进度',
           dataIndex: 'progress',
@@ -717,7 +759,13 @@ export default function FileTransferCenter() {
           width: 110,
           render: (_, record) => renderDeviceStatus(record.status),
         },
-        { title: '操作人', dataIndex: 'operatorScope', key: 'operatorScope', width: 120, render: (value: string) => value || '-' },
+        {
+          title: '操作人',
+          dataIndex: 'operatorScope',
+          key: 'operatorScope',
+          width: 140,
+          render: (value: string) => renderEllipsisCell(value),
+        },
         failureReasonColumn,
         {
           title: '操作时间',
@@ -739,39 +787,59 @@ export default function FileTransferCenter() {
         dataIndex: 'taskName',
         key: 'taskName',
         width: 280,
-        render: (_, record) => (
-          <Space direction="vertical" size={2} style={{ maxWidth: '100%' }}>
-            <Tooltip title={record.taskName} placement="topLeft">
-              <Text strong ellipsis style={{ maxWidth: 260 }}>{record.taskName}</Text>
-            </Tooltip>
-            <Text type="secondary" ellipsis style={{ maxWidth: 260 }}>{record.deviceName}</Text>
-          </Space>
-        ),
+        render: (_, record) => renderEllipsisCell(record.taskName, {
+          strong: true,
+          subtitle: record.deviceName,
+          maxWidth: 260,
+        }),
       },
-      { title: '设备 SN', dataIndex: 'deviceSn', key: 'deviceSn', width: 120 },
-      { title: '产品类型', dataIndex: 'productType', key: 'productType', width: 130 },
-      { title: '当前版本', dataIndex: 'currentVersion', key: 'currentVersion', width: 130 },
+      {
+        title: '设备 SN',
+        dataIndex: 'deviceSn',
+        key: 'deviceSn',
+        width: 150,
+        render: (value: string) => renderEllipsisCell(value),
+      },
+      {
+        title: '产品类型',
+        dataIndex: 'productType',
+        key: 'productType',
+        width: 130,
+        render: (value: string) => renderEllipsisCell(value),
+      },
+      {
+        title: '当前版本',
+        dataIndex: 'currentVersion',
+        key: 'currentVersion',
+        width: 140,
+        render: (value: string) => renderEllipsisCell(value),
+      },
       {
         // 非升级类（备份 / 日志采集 / 配置恢复）：使用后端按 {task_id8}/{sn} 渲染过的
         // targetFile（出现"backup-a1b2c3d4-SN001.nv"形式）。CPE 上传完成且 metadata
         // 落地后，后端附带 downloadUrl，UI 渲染为可点击链接。详见
         // docs/project/backup-display-fix-20260520.md F3。
+        // 列宽 240 — 文件名常超 220，Tooltip 兜底完整看到。
         title: '目标版本/目标文件',
         key: 'targetVersion',
-        width: 220,
+        width: 240,
         render: (_, record) => {
           const file = record.targetFile?.trim();
           if (!file) {
             return '-';
           }
-          if (record.downloadUrl) {
-            return (
-              <a href={record.downloadUrl} target="_blank" rel="noopener noreferrer">
-                {file}
-              </a>
-            );
-          }
-          return <Text type="secondary">{file}</Text>;
+          const inner = record.downloadUrl ? (
+            <a href={record.downloadUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'bottom' }}>
+              {file}
+            </a>
+          ) : (
+            <Text type="secondary" ellipsis style={{ maxWidth: 220 }}>{file}</Text>
+          );
+          return (
+            <Tooltip title={file} placement="topLeft">
+              {inner}
+            </Tooltip>
+          );
         },
       },
       {
@@ -976,7 +1044,7 @@ export default function FileTransferCenter() {
                           setTaskPageSize(pageSize);
                         },
                       }}
-                      scroll={{ x: 1800 }}
+                      scroll={{ x: 2000 }}
                     />
                   </Space>
                 ),
@@ -1047,7 +1115,7 @@ export default function FileTransferCenter() {
                           setDevicePageSize(pageSize);
                         },
                       }}
-                      scroll={{ x: 1800 }}
+                      scroll={{ x: 2000 }}
                     />
                   </Space>
                 ),
@@ -1101,9 +1169,29 @@ export default function FileTransferCenter() {
                 extra={(
                   <Space direction="vertical" size={0}>
                     <Text type="secondary">当前模板查询的软件库分类：{getSoftwareLibraryFileTypeLabel(firmwareLibraryFileType)}</Text>
-                    <Button type="link" style={{ paddingInline: 0 }} onClick={() => navigate('/software/firmware')}>
-                      维护升级文件
-                    </Button>
+                    <Space size={12}>
+                      {/* 新窗口打开 — 用户在新 tab 上传完关闭即可回原弹窗，表单状态不丢；
+                          回到原 tab 时 React Query 默认 refetchOnWindowFocus 会自动刷新固件列表。 */}
+                      <Button
+                        type="link"
+                        style={{ paddingInline: 0 }}
+                        icon={<ExportOutlined />}
+                        // 不带 noopener — 让新 tab 内的"完成并关闭"按钮能调 window.close()
+                        // 自闭。本应用同源，无被钓鱼风险。
+                        onClick={() => window.open('/software/firmware?return=ufte', '_blank')}
+                      >
+                        维护升级文件（新窗口）
+                      </Button>
+                      {/* 兜底：用户在同 tab 操作完手动回来 / 窗口未失焦时，点这里强刷固件列表。 */}
+                      <Button
+                        type="link"
+                        style={{ paddingInline: 0 }}
+                        icon={<ReloadOutlined />}
+                        onClick={() => void queryClient.invalidateQueries({ queryKey: ['software', 'versions'] })}
+                      >
+                        刷新固件列表
+                      </Button>
+                    </Space>
                   </Space>
                 )}
               >

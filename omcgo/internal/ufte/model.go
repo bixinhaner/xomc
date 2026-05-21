@@ -44,6 +44,10 @@ type TaskType struct {
 	RawMode                string             `json:"rawMode,omitempty"`
 	DelaySeconds           int                `json:"delaySeconds,omitempty"`
 	TransportPath          string             `json:"transportPath,omitempty"`
+	// SortOrder 控制「任务创建」/「模板配置」子 tab 显示顺序；数字小靠前。
+	// 内置模板初始值由 migrations/000146 赋（10/20/30/...），自定义默认 100。
+	// 后续在「模板配置」UI 拖拽可改。
+	SortOrder              int                `json:"sortOrder"`
 	LastEditor             string             `json:"lastEditor"`
 	TaskCount30d           int                `json:"taskCount30d"`
 	SuccessRate30d         float64            `json:"successRate30d"`
@@ -183,6 +187,7 @@ func builtInTaskTypes() []TaskType {
 	return []TaskType{
 		{
 			TypeCode:               "ENB_IMG_UPGRADE",
+			SortOrder:              10,
 			Category:               "enb_upgrade",
 			CategoryLabel:          "4G升级",
 			DisplayName:            "4G 基站软件升级",
@@ -211,6 +216,7 @@ func builtInTaskTypes() []TaskType {
 		},
 		{
 			TypeCode:               "ENB_PATCH_UPGRADE",
+			SortOrder:              15,
 			Category:               "enb_upgrade",
 			CategoryLabel:          "4G升级",
 			DisplayName:            "4G Patch 增量升级",
@@ -239,6 +245,7 @@ func builtInTaskTypes() []TaskType {
 		},
 		{
 			TypeCode:               "ENB_FPGA_UPGRADE",
+			SortOrder:              18,
 			Category:               "enb_upgrade",
 			CategoryLabel:          "4G升级",
 			DisplayName:            "4G FPGA 升级",
@@ -267,6 +274,7 @@ func builtInTaskTypes() []TaskType {
 		},
 		{
 			TypeCode:               "GNB_IMG_UPGRADE",
+			SortOrder:              10,
 			Category:               "gnb_upgrade",
 			CategoryLabel:          "5G升级",
 			DisplayName:            "5G 基站软件升级",
@@ -296,6 +304,7 @@ func builtInTaskTypes() []TaskType {
 		},
 		{
 			TypeCode:         "VERSION_ROLLBACK",
+			SortOrder:        20,
 			Category:         "version_rollback",
 			CategoryLabel:    "基站版本回退",
 			DisplayName:      "基站版本回退",
@@ -315,6 +324,7 @@ func builtInTaskTypes() []TaskType {
 		},
 		{
 			TypeCode:               "RUNTIME_LOG_COLLECT",
+			SortOrder:              30,
 			Category:               "station_log",
 			CategoryLabel:          "日志收集",
 			DisplayName:            "运行日志采集",
@@ -342,6 +352,7 @@ func builtInTaskTypes() []TaskType {
 		},
 		{
 			TypeCode:               "FAULT_LOG_COLLECT",
+			SortOrder:              35,
 			Category:               "station_log",
 			CategoryLabel:          "日志收集",
 			DisplayName:            "故障日志采集",
@@ -366,6 +377,7 @@ func builtInTaskTypes() []TaskType {
 		},
 		{
 			TypeCode:               "CONFIG_BACKUP_XML",
+			SortOrder:              40,
 			Category:               "config_backup",
 			CategoryLabel:          "配置文件备份",
 			DisplayName:            "配置文件备份（XML）",
@@ -389,6 +401,7 @@ func builtInTaskTypes() []TaskType {
 		},
 		{
 			TypeCode:               "CONFIG_BACKUP_NV",
+			SortOrder:              45,
 			Category:               "config_backup",
 			CategoryLabel:          "配置文件备份",
 			DisplayName:            "配置文件备份（NV）",
@@ -412,6 +425,7 @@ func builtInTaskTypes() []TaskType {
 		},
 		{
 			TypeCode:               "CONFIG_RESTORE",
+			SortOrder:              50,
 			Category:               "config_restore",
 			CategoryLabel:          "配置文件恢复",
 			DisplayName:            "配置文件恢复",

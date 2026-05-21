@@ -56,15 +56,18 @@ var taskTypeColumns = []string{
 	"raw_mode",
 	"delay_seconds",
 	"transport_path",
+	"sort_order",
 	"last_editor",
 	"created_at",
 	"updated_at",
 }
 
 func (r *PgTaskTypeRepository) List(ctx context.Context) ([]TaskType, error) {
+	// sort_order 由 migrations/000146 引入；内置模板赋值 10-50 数字小靠前，
+	// 自定义模板默认 100。在「模板配置」UI 拖拽调整 sort_order 后此排序立即生效。
 	query, args, err := storage.Psql.Select(taskTypeColumns...).
 		From("ufte_task_types").
-		OrderBy("built_in DESC", "category_label ASC", "display_name ASC").
+		OrderBy("sort_order ASC", "built_in DESC", "category_label ASC", "display_name ASC").
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build list UFTE task types SQL: %w", err)
@@ -147,6 +150,7 @@ func (r *PgTaskTypeRepository) Upsert(ctx context.Context, item *TaskType) error
 			"raw_mode",
 			"delay_seconds",
 			"transport_path",
+			"sort_order",
 			"last_editor",
 			"created_at",
 			"updated_at",
@@ -176,6 +180,7 @@ func (r *PgTaskTypeRepository) Upsert(ctx context.Context, item *TaskType) error
 			item.RawMode,
 			item.DelaySeconds,
 			item.TransportPath,
+			item.SortOrder,
 			item.LastEditor,
 			now,
 			now,
@@ -270,6 +275,7 @@ func scanTaskType(scanner taskTypeScanner) (*TaskType, error) {
 		&item.RawMode,
 		&item.DelaySeconds,
 		&item.TransportPath,
+		&item.SortOrder,
 		&item.LastEditor,
 		&createdAt,
 		&updatedAt,

@@ -25,7 +25,9 @@ import {
   MoreOutlined,
   EditOutlined,
   WarningOutlined,
+  CloseCircleOutlined,
 } from '@ant-design/icons';
+import { useSearchParams } from 'react-router-dom';
 import type { UploadFile, RcFile } from 'antd/es/upload';
 import type { MenuProps } from 'antd';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
@@ -75,6 +77,11 @@ function formatFileSize(bytes: number): string {
 export default function FirmwareUpload() {
   const t = useT();
   const [form] = Form.useForm();
+  // 当 URL 带 ?return=ufte 时，认为是 UFTE 任务创建弹窗里"维护升级文件"开的新 tab。
+  // 顶部展示提示 + "完成并关闭窗口"按钮，关掉新 tab 自动回原弹窗（焦点切换触发
+  // React Query refetch，固件列表自动更新）。
+  const [searchParams] = useSearchParams();
+  const fromUFTE = searchParams.get('return') === 'ufte';
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [uploadProgress, setUploadProgress] = useState(0);
 
@@ -365,6 +372,33 @@ export default function FirmwareUpload() {
 
   return (
     <ListPageLayout title={t('software.firmware.title')}>
+      {fromUFTE ? (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="您来自「任务创建」弹窗"
+          description="完成升级文件维护后点右侧按钮关闭此窗口，回到原弹窗后固件列表会自动刷新。"
+          action={(
+            <Button
+              size="small"
+              type="primary"
+              icon={<CloseCircleOutlined />}
+              onClick={() => {
+                // self-close — 由 window.open 打开的同源窗口允许自闭
+                try {
+                  window.close();
+                } catch {
+                  void message.info('浏览器阻止了自动关闭，请手动关闭此标签页。');
+                }
+              }}
+            >
+              完成并关闭窗口
+            </Button>
+          )}
+        />
+      ) : null}
+
       {/* 文件类型选择 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <Radio.Group
