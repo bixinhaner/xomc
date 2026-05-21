@@ -60,6 +60,9 @@ export interface DataTableProps<T> {
   defaultDensity?: 'compact' | 'default' | 'comfortable';
   extraToolbarLeft?: React.ReactNode;
   extraToolbarRight?: React.ReactNode;
+  /** 整体隐藏工具栏（批量操作 + 列设置 / 密度 / 导出 / 实时刷新 / 刷新按钮 全部不渲染）。
+   *  适用于：详情页/简单展示页/页面 extra 已自带导出+刷新按钮的场景。 */
+  hideToolbar?: boolean;
   scroll?: { x?: number | string; y?: number | string };
   size?: 'small' | 'middle' | 'large';
   showPagination?: boolean;
@@ -113,6 +116,7 @@ function DataTable<T>(
     defaultDensity = 'default',
     extraToolbarLeft,
     extraToolbarRight,
+    hideToolbar = false,
     scroll,
     size,
     showPagination = true,
@@ -395,21 +399,23 @@ function DataTable<T>(
 
   return (
     <div className={styles.dataTableWrapper}>
-      <Toolbar
-        tableId={tableId}
-        columns={columnDefs}
-        selectedRowKeys={selectedRowKeys}
-        batchActions={batchActions}
-        onRefresh={onRefresh}
-        onExport={onExport}
-        onColumnVisibilityChange={setHiddenKeys}
-        onColumnOrderChange={setColumnOrder}
-        onRefreshLockChange={onRealtimeRefreshChange}
-        density={density}
-        onDensityChange={setDensity}
-        extraLeft={extraToolbarLeft}
-        extraRight={extraToolbarRight}
-      />
+      {!hideToolbar && (
+        <Toolbar
+          tableId={tableId}
+          columns={columnDefs}
+          selectedRowKeys={selectedRowKeys}
+          batchActions={batchActions}
+          onRefresh={onRefresh}
+          onExport={onExport}
+          onColumnVisibilityChange={setHiddenKeys}
+          onColumnOrderChange={setColumnOrder}
+          onRefreshLockChange={onRealtimeRefreshChange}
+          density={density}
+          onDensityChange={setDensity}
+          extraLeft={extraToolbarLeft}
+          extraRight={extraToolbarRight}
+        />
+      )}
 
       <div ref={tableContainerRef} className={`${styles.tableContainer} omc-data-table`}>
         <Table<T>

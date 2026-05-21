@@ -200,6 +200,7 @@ const messages: Record<string, string> = {
   'nav.device.rules':      'Device Rules',
   'nav.device.recycle':    'Recycle Bin',
   'nav.device.abnormalReboot': 'Reboot Records',
+  'page.abnormalReboot.title':  'Abnormal Reboot Records',
 
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Alarm

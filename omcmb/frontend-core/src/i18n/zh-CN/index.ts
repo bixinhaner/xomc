@@ -200,6 +200,7 @@ const messages: Record<string, string> = {
   'nav.device.rules':      '设备规则',
   'nav.device.recycle':    '回收站',
   'nav.device.abnormalReboot': '重启记录',
+  'page.abnormalReboot.title':  '异常重启记录',
 
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Alarm

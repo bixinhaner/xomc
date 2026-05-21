@@ -1,43 +1,28 @@
 import { useState, useMemo } from 'react';
-import {
-  Button,
-  Typography,
-  Modal,
-  message,
-  Drawer,
-  Descriptions,
-  Card,
-} from 'antd';
-import {
-  ExportOutlined,
-  DeleteOutlined,
-  ReloadOutlined,
-} from '@ant-design/icons';
+import { Button, Typography, message, Drawer, Descriptions, Card } from 'antd';
+import { ExportOutlined } from '@ant-design/icons';
 import type { Dayjs } from 'dayjs';
 import * as XLSX from 'xlsx';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
-import type { DataTableColumn, BatchAction } from '@/components/DataTable';
+import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
-import {
-  useAbnormalRebootList,
-  useBatchDeleteAbnormalReboot,
-} from '@core/hooks/api/useDeviceAbnormalReboot';
+import { useAbnormalRebootList } from '@core/hooks/api/useDeviceAbnormalReboot';
 import { deviceAbnormalRebootApi } from '@core/services/api/deviceAbnormalRebootApi';
 import type {
   AbnormalReboot,
   AbnormalRebootListParams,
 } from '@core/services/api/deviceAbnormalRebootApi';
 
-// T-0158: 异常重启记录页面（设备管理 → 异常重启记录）
+// T-0158: 异常重启记录页面（侧边菜单显示「重启记录」，页面标题显示「异常重启记录」）
 //
-// 数据来源：station_fault_logs 表，由 device.RecordBootFromInform 在 CPE 上报
+// 数据来源：station_fault_logs，由 device.RecordBootFromInform 在 CPE 上报
 // "1 BOOT" 且 Device.HaltReason.MainReason 非空时识别即落库。
-// 列设计：仅展示故障核心字段（设备身份 + HaltReason + 运行时长 + 时间），
-//        操作/记录状态/收集状态/文件名相关交互留待 T-0159~T-0163 手动收集 +
-//        文件配额 + CSV/ZIP 导出闭环后再恢复。
+// 当前列设计：仅展示故障核心字段（设备身份 + HaltReason + 运行时长 + 时间）。
+// 操作 / 记录状态 / 收集状态 / 文件名 列 + 批量删除 + 勾选 + 工具栏（实时刷新/列设置/密度）
+// 全部去掉——后续 T-0159..T-0163 闭环后再按需恢复。
 
 const formatRuntime = (seconds: number, t: (key: string) => string): string => {
   if (!seconds || seconds <= 0) return '-';
@@ -64,16 +49,13 @@ const exportTimestamp = (): string => {
 export default function AbnormalReboot() {
   const t = useT();
   const [filters, setFilters] = useState<Record<string, unknown>>({});
-  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
-  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
-  const [logsToDelete, setLogsToDelete] = useState<AbnormalReboot[]>([]);
   const [logDetailVisible, setLogDetailVisible] = useState(false);
   const [selectedLog, setSelectedLog] = useState<AbnormalReboot | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [exporting, setExporting] = useState(false);
 
-  // 构造后端查询参数（不再支持 recordStatus 过滤，因为页面已经不显示该列）
+  // 构造后端查询参数
   const queryParams = useMemo<AbnormalRebootListParams>(() => {
     const params: AbnormalRebootListParams = { page, pageSize };
     if (filters.keyword && typeof filters.keyword === 'string') {
@@ -90,8 +72,7 @@ export default function AbnormalReboot() {
     return params;
   }, [filters, page, pageSize]);
 
-  const { data, isLoading, refetch } = useAbnormalRebootList(queryParams);
-  const batchDelete = useBatchDeleteAbnormalReboot();
+  const { data, isLoading } = useAbnormalRebootList(queryParams);
 
   const dataSource = data?.items ?? [];
   const total = data?.total ?? 0;
@@ -123,9 +104,8 @@ export default function AbnormalReboot() {
     setLogDetailVisible(true);
   };
 
-  // 导出 Excel：拉取当前过滤条件下全量数据 → 写 SheetJS 工作簿 → Blob 下载
-  // 全量上限 10000 条（与后端 page_size 兼容；超出建议先收窄筛选条件）。
-  // 列定义与可见表格保持一致 + 表头走 i18n，文件名 i18n key 'log.exception.exportFileName' 提供本地化前缀。
+  // 导出 Excel：拉当前过滤条件下全量 → SheetJS json_to_sheet → 浏览器下载
+  // 全量上限 10000 条；列定义与可见表格保持一致，表头/Sheet 名/文件名全部走 i18n。
   const handleExport = async () => {
     if (exporting) return;
     setExporting(true);
@@ -153,14 +133,14 @@ export default function AbnormalReboot() {
         [t('log.exception.column.runtime')]: formatRuntime(r.runtimeBeforeReboot, t),
       }));
 
-      const ws = XLSX.utils.json_to_sheet(rows);
-      // 列宽估算：每列取表头长度和最长值长度的最大值（中文按 2 算）
+      // 列宽自适应：中文按 2 宽度算
       const widthOfStr = (s: string): number => {
         let w = 0;
         for (const ch of s) w += /[一-鿿＀-￯]/.test(ch) ? 2 : 1;
         return w;
       };
-      const cols = Object.keys(rows[0] ?? {}).map((key) => {
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws['!cols'] = Object.keys(rows[0] ?? {}).map((key) => {
         let max = widthOfStr(key);
         for (const row of rows) {
           const v = String((row as Record<string, unknown>)[key] ?? '');
@@ -168,7 +148,6 @@ export default function AbnormalReboot() {
         }
         return { wch: Math.min(Math.max(max + 2, 10), 50) };
       });
-      ws['!cols'] = cols;
 
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, t('log.exception.exportSheetName'));
@@ -186,49 +165,6 @@ export default function AbnormalReboot() {
       setExporting(false);
     }
   };
-
-  const handleBatchDelete = () => {
-    if (selectedRowKeys.length === 0) {
-      void message.warning(t('log.exception.selectDelete'));
-      return;
-    }
-    const selected = dataSource.filter((r) => selectedRowKeys.includes(r.id));
-    if (selected.length === 0) return;
-    setLogsToDelete(selected);
-    setDeleteModalVisible(true);
-  };
-
-  const handleDeleteConfirm = () => {
-    const ids = logsToDelete.map((r) => r.id);
-    batchDelete.mutate(ids, {
-      onSuccess: ({ success, failed }) => {
-        if (failed > 0) {
-          void message.warning(
-            t('log.exception.deletedCount', { count: success }) + ` (${failed} failed)`,
-          );
-        } else {
-          void message.success(t('log.exception.deletedCount', { count: success }));
-        }
-        setDeleteModalVisible(false);
-        setLogsToDelete([]);
-        setSelectedRowKeys([]);
-      },
-    });
-  };
-
-  const batchActions: BatchAction[] = useMemo(
-    () => [
-      {
-        key: 'delete',
-        label: t('log.exception.batchDelete'),
-        icon: <DeleteOutlined />,
-        danger: true,
-        onClick: handleBatchDelete,
-      },
-    ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selectedRowKeys, t, dataSource],
-  );
 
   const columns: DataTableColumn<AbnormalReboot>[] = useMemo(
     () => [
@@ -315,21 +251,16 @@ export default function AbnormalReboot() {
 
   return (
     <ListPageLayout
-      title={t('nav.device.abnormalReboot')}
+      title={t('page.abnormalReboot.title')}
       extra={
-        <>
-          <Button icon={<ReloadOutlined />} onClick={() => refetch()}>
-            {t('common.refresh')}
-          </Button>
-          <Button
-            type="primary"
-            icon={<ExportOutlined />}
-            onClick={handleExport}
-            loading={exporting}
-          >
-            {t('log.export')}
-          </Button>
-        </>
+        <Button
+          type="primary"
+          icon={<ExportOutlined />}
+          onClick={handleExport}
+          loading={exporting}
+        >
+          {t('log.export')}
+        </Button>
       }
     >
       <FilterBar
@@ -372,10 +303,7 @@ export default function AbnormalReboot() {
             setPageSize(s);
           }}
           loading={isLoading}
-          selectable
-          selectedRowKeys={selectedRowKeys}
-          onSelectionChange={setSelectedRowKeys}
-          batchActions={batchActions}
+          hideToolbar
           scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
           showRowNumber
           rowNumberTitle={t('log.exception.column.seq')}
@@ -456,19 +384,6 @@ export default function AbnormalReboot() {
           </div>
         )}
       </Drawer>
-
-      <Modal
-        title={t('log.exception.deleteConfirm.title')}
-        open={deleteModalVisible}
-        onCancel={() => setDeleteModalVisible(false)}
-        onOk={handleDeleteConfirm}
-        confirmLoading={batchDelete.isPending}
-        okText={t('log.exception.deleteConfirm.ok')}
-        cancelText={t('common.cancel')}
-        okButtonProps={{ danger: true }}
-      >
-        <p>{t('log.exception.deleteConfirm.content', { count: logsToDelete.length })}</p>
-      </Modal>
     </ListPageLayout>
   );
 }
