@@ -162,7 +162,133 @@ func (r *PgGroupTreeRepository) BuildTree(ctx context.Context, rootCode, lang st
 	// （历史/损坏数据 / 迁移未跑）时调用 InferFamily 兜底，避免 UI 缺少 family 节点。
 	// 详见 docs/design/mml-console-cmcc-tdlte-v23-adjustment-plan-20260519.md §15.6 + §15.8
 	attachFamily(nodes)
+	// CMCC TD-LTE v2.3：把同 chapter_code 的 group 折叠到合成的 SA-SR 章节父节点下。
+	// chapter_code 为空的 group（老 catalog）保持顶层，不包装。详见 spec doc
+	// "参数管理类别分组清单（派生）" 主表 + 本实施任务 §1。
+	nodes = wrapByChapter(nodes)
 	return nodes, nil
+}
+
+// chapterMetadata: 18 个 SA-SR 章节的展示元数据，与 spec doc 主表对齐。
+// 来源：omcgo/规范/移动/南向数据模型/cmcc-tdlte-southbound-data-model-v2.3.md
+// "参数管理类别分组清单（派生）" 章节主表。
+//
+// 排序：DisplayOrder 按章节字典序（SA=1, SB=2, ..., SR=18）。
+var chapterMetadata = map[string]struct {
+	ObjRoot string
+	NameZH  string
+}{
+	"SA": {"DeviceInfo", "设备信息参数管理"},
+	"SB": {"SoftwareCtrl", "软件版本参数管理"},
+	"SC": {"ManagementServer", "基站网管参数管理"},
+	"SD": {"FaultMgmt", "告警参数管理"},
+	"SE": {"DeviceLogMgmt", "日志参数管理"},
+	"SF": {"Services.FAPService", "小区服务参数管理"},
+	"SG": {"Services.FAPService.{i}.SCTP.Transport", "SCTP参数管理"},
+	"SH": {"Services.FAPService.{i}.CellConfig.LTE.RAN", "RAN协议栈参数"},
+	"SI": {"Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList", "邻区参数管理"},
+	"SJ": {"Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility", "移动性参数管理"},
+	"SK": {"Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam", "SON参数管理"},
+	"SL": {"WANDevice", "WAN口配置参数管理"},
+	"SM": {"Ipsec", "IPsec参数管理"},
+	"SN": {"Time", "时间服务器参数管理"},
+	"SO": {"FAP.GPS", "GPS信息参数管理"},
+	"SP": {"FAP.MRMgmt", "MR参数管理"},
+	"SQ": {"FAP.PerfMgmt", "性能参数管理"},
+	"SR": {"ENanocell", "扩展型一体化皮基站参数"},
+}
+
+// chapterDisplayOrder 把章节码映射为 1..18 的显示顺序（SA=1 ... SR=18）。
+// 用于合成 chapter 父节点的 DisplayOrder，让 SA→SB→...→SR 自然递增。
+func chapterDisplayOrder(code string) int {
+	if len(code) != 2 || code[0] != 'S' {
+		return 1000
+	}
+	// 'A' -> 1, 'B' -> 2, ...
+	return int(code[1]-'A') + 1
+}
+
+// wrapByChapter 把扁平的 group 列表按 chapter_code 折叠到合成的章节父节点下。
+//
+// 行为：
+//   - chapter_code 非空且在 chapterMetadata 中：所有同 chapter 的 group 归入一个
+//     合成父节点（命令仍挂在原 group 上，chapter 节点本身无 commands）
+//   - chapter_code 非空但不在 chapterMetadata（未来扩展容错）：fallback 用 code
+//     自身作为 name，仍包装
+//   - chapter_code 空字符串（老 catalog）：保持顶层，不包装
+//
+// 排序：合成 chapter 节点用 chapterDisplayOrder(code)（SA=1...SR=18）；空 chapter
+// 的 group 保持原 DisplayOrder（一般已被排到末位，详见 sortNodesByDisplayOrder）。
+// 节点内 children 保持入参原顺序（已被 assembleHierarchy + attachFamily 后处理）。
+func wrapByChapter(nodes []GroupTreeNode) []GroupTreeNode {
+	if len(nodes) == 0 {
+		return nodes
+	}
+
+	// 分两类：有 chapter 的进 chapterBuckets，空 chapter 的保持顶层
+	type bucket struct {
+		code     string
+		children []GroupTreeNode
+	}
+	buckets := map[string]*bucket{}
+	order := []string{} // 保证遍历顺序稳定（按首次出现顺序）
+	var loose []GroupTreeNode
+
+	for _, n := range nodes {
+		if n.ChapterCode == "" {
+			loose = append(loose, n)
+			continue
+		}
+		b, ok := buckets[n.ChapterCode]
+		if !ok {
+			b = &bucket{code: n.ChapterCode}
+			buckets[n.ChapterCode] = b
+			order = append(order, n.ChapterCode)
+		}
+		b.children = append(b.children, n)
+	}
+
+	if len(buckets) == 0 {
+		// 全部老 catalog，完全不包装
+		return nodes
+	}
+
+	out := make([]GroupTreeNode, 0, len(buckets)+len(loose))
+	for _, code := range order {
+		b := buckets[code]
+		meta, hasMeta := chapterMetadata[code]
+		var nameZh, nameEn string
+		if hasMeta {
+			nameZh = fmt.Sprintf("%s · %s — %s", code, meta.ObjRoot, meta.NameZH)
+			nameEn = fmt.Sprintf("%s · %s", code, meta.ObjRoot)
+		} else {
+			// 未来 spec 扩展容错：metadata 没收录就退化到 code 自身
+			nameZh = code
+			nameEn = code
+		}
+
+		out = append(out, GroupTreeNode{
+			ID:               uuid.NewSHA1(uuid.NameSpaceDNS, []byte("chapter:"+code)),
+			GroupCode:        "chapter:" + code,
+			Name:             nameZh,
+			NameI18n:         map[string]string{"zh-CN": nameZh, "en-US": nameEn},
+			Path:             "", // chapter 是合成节点，无 LTREE path
+			DisplayOrder:     chapterDisplayOrder(code),
+			ChapterCode:      code,
+			Source:           "synthetic",
+			CatalogProtected: true,
+			Commands:         nil,
+			Children:         b.children,
+		})
+	}
+
+	// chapter 父节点按 DisplayOrder（SA→SR）稳定排序
+	sortNodesByDisplayOrder(out)
+
+	// 老 catalog 顶层 group 追加到末尾（保持其在 sortNodesByDisplayOrder 中已被排到
+	// 末位的语义）
+	out = append(out, loose...)
+	return out
 }
 
 // attachFamily 递归遍历所有节点，**防御性 fallback**：仅当 DB 返回空 FamilyCode 时
