@@ -172,12 +172,20 @@ interface MmlConsoleState {
   parseErrors: ParseError[];
   syncSource: SyncSource;
 
+  // R-8.5：当前选中的 product_class（由 DeviceTree 的产品类型筛选器同步进来）。
+  // CommandTree 用此 key 调 useCommandCompatibility 查不兼容命令集合；
+  // 状态权威源仍是 useDeviceSelection 的 useState，store 是 *单向镜像*，供
+  // 兄弟组件（CommandTree）订阅 — 设备列表逻辑不读 store，避免 store 与 useState
+  // 两边互相纠缠。
+  productClassFilter: string;
+
   // 防抖控制
   parsePending: boolean;            // 当前是否有 pending parse 调用
   parseDebounceTimer: ReturnType<typeof setTimeout> | null;
 
   // 设备选择
   setSelectedDeviceSns(sns: string[]): void;
+  setProductClassFilter(productClass: string): void;
 
   // Statement 操作（UI 触发 → 'ui' source）
   appendStatement(stmt: Statement): void;
@@ -227,11 +235,16 @@ export const useMmlConsoleStore = create<MmlConsoleState>((set, get) => ({
   lang: 'zh-CN',
   parseErrors: [],
   syncSource: 'none',
+  productClassFilter: '',
   parsePending: false,
   parseDebounceTimer: null,
 
   setSelectedDeviceSns(sns) {
     set({ selectedDeviceSns: [...sns] });
+  },
+
+  setProductClassFilter(productClass) {
+    set({ productClassFilter: productClass });
   },
 
   appendStatement(stmt) {
@@ -417,6 +430,7 @@ export const useMmlConsoleStore = create<MmlConsoleState>((set, get) => ({
       activeStatementUid: null,
       parseErrors: [],
       syncSource: 'none',
+      productClassFilter: '',
       parsePending: false,
       parseDebounceTimer: null,
     });

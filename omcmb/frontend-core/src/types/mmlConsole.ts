@@ -106,6 +106,18 @@ export interface BackendParseError {
   reason: string;
 }
 
+/**
+ * R-8.5 GET /mml/console/command-compatibility 响应。
+ * 后端 Go struct: omcgo/internal/mml/command_compatibility.go CommandCompatibilityResult。
+ * Axios 拦截器自动 snake → camel，前端消费见 CommandCompatibility（下方）。
+ */
+export interface BackendCommandCompatibility {
+  product_class: string;
+  product_id: string;
+  param_model_id?: string;       // 空 UUID 时 omitempty 缺失
+  unsupported_command_ids: string[];
+}
+
 // ============================================================
 // 前端 camelCase 类型（消费侧）
 // ============================================================
@@ -186,6 +198,17 @@ export interface SubFieldDef {
   defaultSelected: boolean;
   isRequired: boolean;
   sortOrder: number;
+}
+
+/**
+ * R-8.5 命令兼容性响应（前端消费侧 camelCase）。
+ * 由 axios 拦截器从 BackendCommandCompatibility 自动转换。
+ */
+export interface CommandCompatibility {
+  productClass: string;
+  productId: string;
+  paramModelId?: string;
+  unsupportedCommandIds: string[];
 }
 
 /**

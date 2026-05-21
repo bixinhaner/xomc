@@ -10,11 +10,12 @@ import {
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import { AxiosError } from 'axios';
 import type { TreeDataNode } from 'antd';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
-import { useGroupTree } from '@core/hooks/api/useMmlConsole';
+import { useGroupTree, useCommandCompatibility } from '@core/hooks/api/useMmlConsole';
 import { useDeleteMMLTemplate } from '@core/hooks/api/useMML';
 import { mmlApi } from '@core/services/api/mmlApi';
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
@@ -41,8 +42,25 @@ const OP_TAG_COLOR: Record<string, string> = {
 // stripOpSuffix / chapterSortKey 已拆到 ./commandTreeUtils.ts；下方 import 复用。
 import { chapterSortKey, stripOpSuffix } from './commandTreeUtils';
 
-function renderOpLeafTitle(op: MMLOperationType, displayName: string): ReactNode {
+/**
+ * R-8.5：命令叶子装饰上下文。在 buildTreeData 调用时由组件构造，沿渲染链传递，
+ * 避免每个 helper 各自接 4-5 个独立参数。
+ */
+interface LeafDecor {
+  /** 不兼容命令的 ID 集合；undefined = 兼容性数据未加载，全部不显示警告 */
+  unsupportedSet?: Set<string>;
+  /** R-8.5 Tooltip 文案（zh-CN / en-US 已 i18n 解析） */
+  unsupportedTooltip: string;
+}
+
+function renderOpLeafTitle(
+  op: MMLOperationType,
+  displayName: string,
+  commandId: string,
+  decor: LeafDecor,
+): ReactNode {
   const color = OP_TAG_COLOR[op] ?? 'default';
+  const isUnsupported = decor.unsupportedSet?.has(commandId) ?? false;
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
       <Tag color={color} style={{ marginRight: 0, fontSize: 10, padding: '0 4px' }}>
@@ -50,6 +68,14 @@ function renderOpLeafTitle(op: MMLOperationType, displayName: string): ReactNode
       </Tag>
       <CodeOutlined />
       {stripOpSuffix(displayName)}
+      {isUnsupported && (
+        <Tooltip title={decor.unsupportedTooltip} placement="right">
+          <WarningOutlined
+            style={{ color: '#faad14', marginLeft: 2 }}
+            aria-label="unsupported-for-product-class"
+          />
+        </Tooltip>
+      )}
     </span>
   );
 }
@@ -82,7 +108,7 @@ function collectAllCommands(group: GroupTreeNode): GroupTreeCommand[] {
 }
 
 /** 把命令叶子列表转 antd TreeDataNode（统一 OP 排序）。 */
-function commandsToLeafNodes(cmds: GroupTreeCommand[]): TreeDataNode[] {
+function commandsToLeafNodes(cmds: GroupTreeCommand[], decor: LeafDecor): TreeDataNode[] {
   return [...cmds]
     // R-2: 命令叶子按 (op_type, displayName) 双键排序，让同一对象的不同 op
     // 相邻显示（LST 设备信息 / MOD 设备信息 / ADD 设备信息 / RMV 设备信息）。
@@ -95,7 +121,7 @@ function commandsToLeafNodes(cmds: GroupTreeCommand[]): TreeDataNode[] {
     })
     .map<TreeDataNode>((c) => ({
       key: `${CMD_KEY_PREFIX}${c.id}`,
-      title: renderOpLeafTitle(c.operationType, c.displayName),
+      title: renderOpLeafTitle(c.operationType, c.displayName, c.id, decor),
       isLeaf: true,
     }));
 }
@@ -106,7 +132,7 @@ function isChapterNode(g: GroupTreeNode): boolean {
 }
 
 /** 将单个 group 节点（含其所有平铺命令）转为 antd TreeDataNode。 */
-function groupToTreeDataNode(g: GroupTreeNode): TreeDataNode {
+function groupToTreeDataNode(g: GroupTreeNode, decor: LeafDecor): TreeDataNode {
   return {
     key: `${GROUP_KEY_PREFIX}${g.id}`,
     title: (
@@ -116,12 +142,12 @@ function groupToTreeDataNode(g: GroupTreeNode): TreeDataNode {
       </span>
     ),
     selectable: false,
-    children: commandsToLeafNodes(collectAllCommands(g)),
+    children: commandsToLeafNodes(collectAllCommands(g), decor),
   };
 }
 
 /** 将后端合成的章节节点转为 antd TreeDataNode，children 仍是 group 子节点。 */
-function chapterToTreeDataNode(g: GroupTreeNode): TreeDataNode {
+function chapterToTreeDataNode(g: GroupTreeNode, decor: LeafDecor): TreeDataNode {
   // 章节节点 key 仍走 GROUP_KEY_PREFIX + id（章节合成 id 也是 UUID，与 group 同空间
   // 不冲突；handleSelect 通过 isLeaf=false + selectable:false 防止误触发命令加载）
   return {
@@ -133,7 +159,7 @@ function chapterToTreeDataNode(g: GroupTreeNode): TreeDataNode {
       </span>
     ),
     selectable: false,
-    children: (g.children ?? []).map(groupToTreeDataNode),
+    children: (g.children ?? []).map((child) => groupToTreeDataNode(child, decor)),
   };
 }
 
@@ -143,7 +169,7 @@ function chapterToTreeDataNode(g: GroupTreeNode): TreeDataNode {
  * - 普通 group → groupToTreeDataNode（含命令叶子）
  * - 老 catalog 空 chapter 的 group 后端未包装，仍保持顶层
  */
-function buildTreeData(nodes: GroupTreeNode[]): TreeDataNode[] {
+function buildTreeData(nodes: GroupTreeNode[], decor: LeafDecor): TreeDataNode[] {
   // 后端已按 chapter 排好序，前端再做一次防御性排序（按 chapterCode + displayOrder）
   const sorted = [...nodes].sort((a, b) => {
     const ac = chapterSortKey(a.chapterCode);
@@ -152,7 +178,9 @@ function buildTreeData(nodes: GroupTreeNode[]): TreeDataNode[] {
     return a.displayOrder - b.displayOrder;
   });
 
-  return sorted.map((g) => (isChapterNode(g) ? chapterToTreeDataNode(g) : groupToTreeDataNode(g)));
+  return sorted.map((g) =>
+    isChapterNode(g) ? chapterToTreeDataNode(g, decor) : groupToTreeDataNode(g, decor),
+  );
 }
 
 function collectMatches(
@@ -403,6 +431,13 @@ export default function CommandTree({ lang }: CommandTreeProps) {
   const currentUsername = useUserStore((s) => s.currentUser?.username ?? '');
   const isSuperAdmin = useUserStore((s) => Boolean(s.currentUser?.isSuperAdmin));
 
+  // R-8.5：订阅当前选中 product_class（由 Console/index.tsx 单向镜像进 store），
+  // 调 useCommandCompatibility 取"该 product_class 下不兼容的命令 ID 集合"。
+  // productClassFilter 为空 / 加载中 → unsupportedSet 为 undefined → 不显示任何警告。
+  const productClassFilter = useMmlConsoleStore((s) => s.productClassFilter);
+  const { data: unsupportedSet } = useCommandCompatibility(productClassFilter);
+  const unsupportedTooltip = t('mml.console.commandTree.unsupportedForProductClass');
+
   // Customized PrivateTemplate / PublicTemplate (T-0123-P4 集成)
   const { data: customResp } = useQuery({
     queryKey: ['mml', 'console', 'custom-commands'],
@@ -448,7 +483,8 @@ export default function CommandTree({ lang }: CommandTreeProps) {
   );
 
   const treeData = useMemo(() => {
-    const groups = buildTreeData(tree);
+    const leafDecor: LeafDecor = { unsupportedSet, unsupportedTooltip };
+    const groups = buildTreeData(tree, leafDecor);
     const customRoot = buildCustomTreeData(
       customCommands,
       t,
@@ -459,7 +495,16 @@ export default function CommandTree({ lang }: CommandTreeProps) {
       isSuperAdmin,
     );
     return [...groups, customRoot];
-  }, [tree, customCommands, t, handleDeleteTemplate, currentUsername, isSuperAdmin]);
+  }, [
+    tree,
+    customCommands,
+    t,
+    handleDeleteTemplate,
+    currentUsername,
+    isSuperAdmin,
+    unsupportedSet,
+    unsupportedTooltip,
+  ]);
   const commandsById = useMemo(() => flattenCommandsById(tree), [tree]);
   const matched = useMemo(() => {
     if (!searchText.trim()) return { matchedKeys: new Set<string>(), expandKeys: [] };

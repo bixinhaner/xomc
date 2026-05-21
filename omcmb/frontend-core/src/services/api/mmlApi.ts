@@ -17,6 +17,7 @@ import type {
   ExecuteStatementsRequest,
   StructuredExecuteRequest,
   StructuredStatement,
+  CommandCompatibility,
 } from '../../types/mmlConsole';
 
 // ---------------------------------------------------------------------------
@@ -874,6 +875,20 @@ export const mmlApi = {
     );
     const arr = Array.isArray(data) ? data : (data?.sub_fields ?? []);
     return arr.map(mapSubField);
+  },
+
+  /**
+   * R-8.5 GET /mml/console/command-compatibility — 该 product_class 下不兼容的命令 ID 集合。
+   *
+   * 404 product_class 无匹配 / 503 service nil — axios 抛出，调用方（React Query）兜底
+   * 走 retry / fallback；hook 层把数据转 Set<string> 给 CommandTree 装饰用。
+   */
+  async getCommandCompatibility(productClass: string): Promise<CommandCompatibility> {
+    const { data } = await http.get<CommandCompatibility>(
+      '/mml/console/command-compatibility',
+      { params: { product_class: productClass } }
+    );
+    return data;
   },
 
   /** POST /mml/render — Statement → mml 字符串片段。 */

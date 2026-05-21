@@ -3964,6 +3964,8 @@ const messages: Record<string, string> = {
   'mml.console.actionBar.summaryLst':        '{selected}/{total} fields selected',
   'mml.console.actionBar.summaryMod':        '{filled} value(s) set',
   'mml.console.actionBar.summaryRmv':        'Instance #{index}',
+  // R-8.5 command compatibility warning (CommandTree leaf tail ⚠️ icon + tooltip)
+  'mml.console.commandTree.unsupportedForProductClass': 'Not supported by this product class',
   // InstanceArityInput multi-layer {i} instance index input
   'mml.console.instanceArity.label':         'Instance index',
   'mml.console.instanceArity.placeholder':   'Empty = all / single / range (e.g. 1,2,5)',

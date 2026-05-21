@@ -3989,6 +3989,8 @@ const messages: Record<string, string> = {
   'mml.console.actionBar.summaryLst':        '已选 {selected}/{total} 字段',
   'mml.console.actionBar.summaryMod':        '已填 {filled} 项',
   'mml.console.actionBar.summaryRmv':        '实例 #{index}',
+  // R-8.5 命令兼容性警告（CommandTree 命令叶子尾部 ⚠️ 图标 + Tooltip）
+  'mml.console.commandTree.unsupportedForProductClass': '该产品类型不支持本命令',
   // InstanceArityInput 多层 {i} 实例号输入
   'mml.console.instanceArity.label':         '实例索引',
   'mml.console.instanceArity.placeholder':   '留空 = 全部 / 单值 / 范围（如 1,2,5）',

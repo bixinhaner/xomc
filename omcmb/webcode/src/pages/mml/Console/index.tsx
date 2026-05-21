@@ -8,12 +8,20 @@ import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
 export default function MMLConsole() {
   const dev = useDeviceSelection();
   const setSelectedDeviceSns = useMmlConsoleStore((s) => s.setSelectedDeviceSns);
+  const setProductClassFilter = useMmlConsoleStore((s) => s.setProductClassFilter);
   const statements = useMmlConsoleStore((s) => s.statements);
   const [batchModalOpen, setBatchModalOpen] = useState(false);
 
   useEffect(() => {
     setSelectedDeviceSns(dev.selectedDevices.map((d) => d.sn));
   }, [dev.selectedDevices, setSelectedDeviceSns]);
+
+  // R-8.5：把 useDeviceSelection 的 productTypeFilter（useState）单向镜像到 store，
+  // 让兄弟组件 CommandTree 能订阅当前选中的 product_class 调 useCommandCompatibility。
+  // useState 仍是设备列表逻辑的真相源，store 只读不写回。
+  useEffect(() => {
+    setProductClassFilter(dev.productTypeFilter);
+  }, [dev.productTypeFilter, setProductClassFilter]);
 
   const current: 1 | 2 | 3 | 4 = useMemo(() => {
     if (dev.selectedDevices.length === 0) return 1;

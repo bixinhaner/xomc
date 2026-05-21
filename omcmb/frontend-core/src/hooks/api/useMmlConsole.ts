@@ -26,6 +26,7 @@ import type {
   ParseResponse,
   ExecuteStatementsRequest,
   StructuredExecuteRequest,
+  CommandCompatibility,
 } from '../../types/mmlConsole';
 import type { MMLTask } from '../../types/mml';
 
@@ -64,6 +65,26 @@ export function useCommandSubFields(
     queryFn: () => mmlApi.getCommandSubFields(commandId!, lang),
     staleTime: 30 * 60 * 1000,
     enabled: Boolean(commandId),
+  });
+}
+
+/**
+ * R-8.5 命令兼容性警告：对当前选中的 product_class 计算"不兼容命令 ID 集合"。
+ *
+ * select 把 unsupportedCommandIds 数组转 Set，调用方按 commandID O(1) 查询。
+ *
+ * enabled = !!productClass —— 首次渲染或字典空时 productClass 为空，不发起查询。
+ * staleTime 5min —— product / ParamModel 字典低频变更（admin 改后才触发）。
+ */
+export function useCommandCompatibility(
+  productClass: string | undefined
+): ReturnType<typeof useQuery<CommandCompatibility, Error, Set<string>>> {
+  return useQuery({
+    queryKey: ['mml', 'console', 'command-compatibility', productClass ?? ''],
+    queryFn: () => mmlApi.getCommandCompatibility(productClass!),
+    staleTime: 5 * 60 * 1000,
+    enabled: Boolean(productClass),
+    select: (data) => new Set(data.unsupportedCommandIds ?? []),
   });
 }
 
