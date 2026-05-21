@@ -53,14 +53,21 @@ interface LeafDecor {
   unsupportedTooltip: string;
 }
 
+/**
+ * commandId + decor 都 optional：
+ *   - 标准命令叶子（buildTreeData 链路）传完整 4 参数 → R-8.5 警告生效
+ *   - Customized 模板（buildCustomTreeData 链路）只传前 2 参数 →
+ *     不显示兼容性警告（R-5 customized 不在 R-8.5 检查范围内，且语义不适用）
+ */
 function renderOpLeafTitle(
   op: MMLOperationType,
   displayName: string,
-  commandId: string,
-  decor: LeafDecor,
+  commandId?: string,
+  decor?: LeafDecor,
 ): ReactNode {
   const color = OP_TAG_COLOR[op] ?? 'default';
-  const isUnsupported = decor.unsupportedSet?.has(commandId) ?? false;
+  const isUnsupported =
+    commandId != null && decor?.unsupportedSet?.has(commandId) === true;
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
       <Tag color={color} style={{ marginRight: 0, fontSize: 10, padding: '0 4px' }}>
@@ -68,7 +75,7 @@ function renderOpLeafTitle(
       </Tag>
       <CodeOutlined />
       {stripOpSuffix(displayName)}
-      {isUnsupported && (
+      {isUnsupported && decor && (
         <Tooltip title={decor.unsupportedTooltip} placement="right">
           <WarningOutlined
             style={{ color: '#faad14', marginLeft: 2 }}
