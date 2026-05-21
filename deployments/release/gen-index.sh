@@ -191,6 +191,65 @@ sudo bash deploy/deploy.sh -h                       # 查看所有参数</pre>
 <b>Grafana：</b><code>admin</code> / <code>admin</code>
 </div>
 
+<h2>🔑 9. 配置文件修改指南（账号 / 口令 / JWT）</h2>
+<p class="lead">默认口令在两处出现、必须<b>同步修改</b>，否则 OMC 进程连不上 PostgreSQL / MinIO：</p>
+<ul class="list">
+<li><code>/opt/omc/current/deploy/docker-compose.infra.yml</code> —— 容器起服务时的<b>初始口令</b>（仅首次 <code>volumes</code> 创建时生效）</li>
+<li><code>/opt/omc/etc/{app,acs,worker}.prod.yaml</code> —— OMC 三进程连接中间件时的<b>客户端口令</b></li>
+</ul>
+
+<h3>9.1 需同步修改的口令对应表</h3>
+<table>
+<thead><tr><th>项</th><th>docker-compose.infra.yml</th><th>etc/app.prod.yaml</th><th>说明</th></tr></thead>
+<tbody>
+<tr><td>PostgreSQL 账号</td><td><code>POSTGRES_USER: omcgo</code></td><td><code>db.dsn</code> / <code>tsdb.dsn</code> 里的 <code>omcgo</code></td><td>DSN 格式：<code>postgres://<b>账号</b>:<b>口令</b>@postgres:5432/omcgo?sslmode=disable</code></td></tr>
+<tr><td>PostgreSQL 口令</td><td><code>POSTGRES_PASSWORD: omcgo123</code></td><td><code>db.dsn</code> / <code>tsdb.dsn</code> 里的 <code>omcgo123</code></td><td>同上，出现两次（db + tsdb）</td></tr>
+<tr><td>PostgreSQL 库名</td><td><code>POSTGRES_DB: omcgo</code></td><td>DSN 路径部分 <code>/omcgo</code></td><td>一般不改</td></tr>
+<tr><td>MinIO 账号</td><td><code>MINIO_ROOT_USER: minioadmin</code></td><td><code>minio.access_key</code></td><td>三个 yaml（app/acs/worker）都要改</td></tr>
+<tr><td>MinIO 口令</td><td><code>MINIO_ROOT_PASSWORD: minioadmin</code></td><td><code>minio.secret_key</code></td><td>同上</td></tr>
+<tr><td>JWT 密钥</td><td>—</td><td><code>jwt.secret</code></td><td>仅 app.prod.yaml；必须 ≥ 32 字符；产生：<code>openssl rand -base64 48</code></td></tr>
+<tr><td>Web 管理员 admin</td><td>—</td><td>—</td><td>首次登录 <code>http://&lt;IP&gt;:8080</code> 后在「个人中心 → 修改密码」里改，<b>不需改配置文件</b></td></tr>
+<tr><td>Grafana</td><td>—</td><td>—</td><td>首次登录 <code>http://&lt;IP&gt;:3000</code> 会强制提示改口令，<b>不需改配置文件</b></td></tr>
+</tbody>
+</table>
+
+<h3>9.2 修改步骤（首次部署、<code>deploy.sh</code> 起 infra 之前）</h3>
+<pre># 1) 生成强口令（示例）
+openssl rand -base64 24    # PostgreSQL 口令
+openssl rand -base64 24    # MinIO 口令
+openssl rand -base64 48    # JWT 密钥
+
+# 2) 改 docker-compose.infra.yml （初始口令 — 仅首次 volume 创建时生效）
+sudo vi /opt/omc/current/deploy/docker-compose.infra.yml
+#     POSTGRES_PASSWORD: → 刚生成的 PG 强口令
+#     MINIO_ROOT_USER:   → 新账号（如仍用 minioadmin 则不改）
+#     MINIO_ROOT_PASSWORD: → 刚生成的 MinIO 强口令
+
+# 3) 改 etc/*.prod.yaml（OMC 进程以这里为准连接中间件）
+sudo vi /opt/omc/etc/app.prod.yaml      # db.dsn / tsdb.dsn / minio.* / jwt.secret
+sudo vi /opt/omc/etc/acs.prod.yaml      # db.dsn / minio.* （按需）
+sudo vi /opt/omc/etc/worker.prod.yaml   # db.dsn / minio.* （按需）
+
+# 4) 起 infra 并跑 deploy
+sudo bash /opt/omc/current/deploy/deploy.sh</pre>
+
+<div class="danger">⚠️ <b>volume 已创建后改口令无效</b>：PostgreSQL / MinIO 只在首次创建 <code>pgdata</code> / <code>miniodata</code> volume 时读取环境变量。若发现初始口令错了，需重应。</div>
+
+<h3>9.3 已跑起来后改口令（volume 已创建）</h3>
+<pre># PostgreSQL — 在容器内改
+sudo docker exec -it deploy-postgres-1 psql -U omcgo -d omcgo \
+    -c "ALTER USER omcgo WITH PASSWORD '新口令';"
+# 同步改 etc/*.prod.yaml 中的 dsn 口令部分
+sudo systemctl restart omcgo-app omcgo-acs omcgo-worker
+
+# MinIO — 使用 mc 客户端（或重建 volume）。参 MinIO 官方文档。</pre>
+
+<h3>9.4 调口令后验证</h3>
+<pre># PG 可连
+PGPASSWORD='新口令' psql -h 127.0.0.1 -U omcgo -d omcgo -c 'select 1'
+# OMC 服务全部 OK
+bash /opt/omc/current/deploy/healthcheck.sh</pre>
+
 <h2>🔧 故障排查</h2>
 <ul class="list">
 <li>容器状态：<code>docker compose -f /opt/omc/current/deploy/docker-compose.infra.yml ps</code></li>

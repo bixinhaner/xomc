@@ -20,6 +20,7 @@
 #   sudo bash deploy/deploy.sh --skip-web               # 不起 web 容器
 #   sudo bash deploy/deploy.sh --check-only             # 仅检查环境，不做修改
 #   sudo bash deploy/deploy.sh --infra-dir /opt/omc/infra   # 自定义 infra 目录
+#   sudo bash deploy/deploy.sh --overwrite-etc          # 用新包模板覆盖 /opt/omc/etc（旧 etc 自动备份）
 #   sudo bash deploy/deploy.sh -h | --help              # 本帮助
 #
 # 参数：
@@ -33,6 +34,10 @@
 #   --infra-dir <p>   基础设施安装目录（默认 /opt/omc/infra）。
 #                     基础设施包 omc-infra-*.tar.xz 需提前解压到此目录。
 #   --omc-root <p>    OMC 安装根（默认 /opt/omc）—— releases / etc / current 都在它下
+#   --overwrite-etc   用新包 etc/ 模板覆盖 /opt/omc/etc/。覆盖前自动备份到
+#                     /opt/omc/etc.bak.<时间戳>。默认（含 --yes）保留现有 etc
+#                     不覆盖，避免冲掉已改好的强口令。
+#                     交互模式下若检测到已有 etc，会询问是否覆盖（默认 N）。
 #   --yes             所有交互式提示直接默认（适合 CI / 批处理）
 #   -h | --help       本帮助
 #
@@ -59,19 +64,21 @@ SKIP_MIGRATE=0
 SKIP_WEB=0
 CHECK_ONLY=0
 ASSUME_YES=0
+OVERWRITE_ETC=0
 INFRA_DIR="/opt/omc/infra"
 OMC_ROOT="/opt/omc"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --skip-infra)   SKIP_INFRA=1; shift ;;
-    --skip-migrate) SKIP_MIGRATE=1; shift ;;
-    --skip-web)     SKIP_WEB=1; shift ;;
-    --check-only)   CHECK_ONLY=1; shift ;;
-    --infra-dir)    INFRA_DIR="$2"; shift 2 ;;
-    --omc-root)     OMC_ROOT="$2"; shift 2 ;;
-    --yes)          ASSUME_YES=1; shift ;;
-    -h|--help)      sed -n '3,47p' "$0"; exit 0 ;;
-    *)              die "未知参数：$1（-h 查看用法）" ;;
+    --skip-infra)    SKIP_INFRA=1; shift ;;
+    --skip-migrate)  SKIP_MIGRATE=1; shift ;;
+    --skip-web)      SKIP_WEB=1; shift ;;
+    --check-only)    CHECK_ONLY=1; shift ;;
+    --infra-dir)     INFRA_DIR="$2"; shift 2 ;;
+    --omc-root)      OMC_ROOT="$2"; shift 2 ;;
+    --overwrite-etc) OVERWRITE_ETC=1; shift ;;
+    --yes)           ASSUME_YES=1; shift ;;
+    -h|--help)       sed -n '3,49p' "$0"; exit 0 ;;
+    *)               die "未知参数：$1（-h 查看用法）" ;;
   esac
 done
 
@@ -155,12 +162,40 @@ if [ "$(readlink -f "$PKG_ROOT")" != "$(readlink -f "$RELEASE_DIR")" ]; then
   cp -a "$PKG_ROOT/." "$RELEASE_DIR/"
 fi
 
-# 实例配置：首次 = 复制模板；非首次 = 不覆盖
-if [ -z "$(ls -A "$OMC_ROOT/etc" 2>/dev/null)" ]; then
+# 实例配置：首次 = 复制模板；非首次 = 默认不覆盖以保护已改口令，需覆盖走以下三条路径：
+#   1） --overwrite-etc                              → 直接覆盖（CI 友好）
+#   2） 交互模式（未 --yes）并选 y                  → 覆盖
+#   3）其他                                          → 保留不覆盖
+# 覆盖前会先把原 etc/ 整个 mv 到 etc.bak.<时间戳>，可随时 diff/回滚。
+etc_is_empty=0
+[ -z "$(ls -A "$OMC_ROOT/etc" 2>/dev/null)" ] && etc_is_empty=1
+
+if [ "$etc_is_empty" = 1 ]; then
   log "首次部署：复制配置模板到 $OMC_ROOT/etc/（首次必修改默认口令！）"
   cp -rn "$RELEASE_DIR/etc/." "$OMC_ROOT/etc/"
 else
-  log "$OMC_ROOT/etc/ 已有实例配置，保留不覆盖"
+  do_overwrite=0
+  if [ "$OVERWRITE_ETC" = 1 ]; then
+    do_overwrite=1
+  elif [ "$ASSUME_YES" = 0 ]; then
+    warn "$OMC_ROOT/etc/ 已有实例配置（包含可能已改好的强口令 / JWT 密钥 / TLS 证书路径等）"
+    warn "  选 y 将覆盖为新包模板（原 etc 自动备份到 etc.bak.<时间戳>）"
+    warn "  选 N 保留现有配置不动（默认）"
+    read -rp "是否用新包模板覆盖 $OMC_ROOT/etc/？ [y/N] " yn
+    case "${yn:-N}" in [Yy]*) do_overwrite=1 ;; esac
+  fi
+
+  if [ "$do_overwrite" = 1 ]; then
+    BAK="$OMC_ROOT/etc.bak.$(date +%Y%m%d%H%M%S)"
+    log "备份原 etc → $BAK"
+    mv "$OMC_ROOT/etc" "$BAK"
+    mkdir -p "$OMC_ROOT/etc"
+    cp -r "$RELEASE_DIR/etc/." "$OMC_ROOT/etc/"
+    warn "etc 已重置为新包模板 —— 请从 $BAK 取回已改口令 / JWT / TLS / 自定义项"
+    warn "  参考 diff：diff -ru $BAK $OMC_ROOT/etc | less"
+  else
+    log "$OMC_ROOT/etc/ 已有实例配置，保留不覆盖（如需覆盖加 --overwrite-etc）"
+  fi
 fi
 
 # 切 current 软链（原子）

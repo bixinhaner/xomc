@@ -238,7 +238,8 @@
       "Bash(git -C /Users/cb/code/baicells/goomc stash show --stat stash@{4})",
       "Bash(git -C /Users/cb/code/baicells/goomc stash show -p stash@{2})",
       "Bash(git -C /Users/cb/code/baicells/goomc stash show -p stash@{3})",
-      "Bash(git -C /Users/cb/code/baicells/goomc stash show -p stash@{5})"
+      "Bash(git -C /Users/cb/code/baicells/goomc stash show -p stash@{5})",
+      "Bash(/tmp/omcgo-migrate up *)"
     ],
     "deny": [
       "Bash(git push -f)",
