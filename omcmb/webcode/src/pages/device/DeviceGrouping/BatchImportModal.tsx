@@ -33,25 +33,18 @@ export interface BatchImportModalProps {
 }
 
 // ── CSV header 与必填列定义 ───────────────────────────────────────────────────
-const REQUIRED_FIELDS = ['serial_number', 'oui', 'carrier', 'technology'] as const;
+//
+// 表头别名 / 必填列 / 可识别列 全部从 deviceCsvSchema 取，跟导出 / 模板共用一份
+// 元数据。同时支持「中文表头」（新模板 + 导出文件回灌）和「snake_case 表头」
+// （老模板，向后兼容）。
+import {
+  HEADER_ALIAS,
+  KNOWN_IMPORT_SNAKE,
+  REQUIRED_IMPORT_SNAKE,
+} from './deviceCsvSchema';
+
 const ALLOWED_CARRIERS: readonly CarrierCode[] = ['cmcc', 'ctcc', 'cucc'];
 const ALLOWED_TECH: readonly DeviceTechnology[] = ['lte', 'nr'];
-
-// 与 useImportExportHandlers 模板里的 header 顺序一致；用 Set 做存在性检查。
-const KNOWN_COLUMNS = new Set([
-  'serial_number',
-  'oui',
-  'carrier',
-  'technology',
-  'product_class',
-  'manufacturer',
-  'model_name',
-  'ip_address',
-  'device_name',
-  'site_id',
-  'latitude',
-  'longitude',
-]);
 
 interface LocalParseError {
   row: number; // 1-based, 不含 header
@@ -87,10 +80,14 @@ function parseCsv(
     return { ok: false, reason: t('device.batchImport.noDataRows') };
   }
 
-  const header = lines[0].split(',').map((h) => h.trim());
+  // header: 把每一列从「中文表头 / 老 snake_case 表头」归一化到 snake_case；
+  // 未识别的列（如导出附带的展示列「连接状态/MAC地址/...」）保留原样，后续 KNOWN
+  // 检查会把它们过滤掉。
+  const rawHeader = lines[0].split(',').map((h) => h.trim());
+  const header = rawHeader.map((h) => HEADER_ALIAS[h] ?? h);
 
   // 3. 校验 header 含必填列
-  for (const required of REQUIRED_FIELDS) {
+  for (const required of REQUIRED_IMPORT_SNAKE) {
     if (!header.includes(required)) {
       return {
         ok: false,
@@ -102,7 +99,7 @@ function parseCsv(
   // 4. 计算列下标
   const colIndex: Record<string, number> = {};
   header.forEach((col, idx) => {
-    if (KNOWN_COLUMNS.has(col)) {
+    if (KNOWN_IMPORT_SNAKE.has(col)) {
       colIndex[col] = idx;
     }
   });
@@ -128,16 +125,14 @@ function parseCsv(
     const technology = get('technology');
 
     // 必填校验
-    for (const field of REQUIRED_FIELDS) {
-      const val =
-        field === 'serial_number'
-          ? serialNumber
-          : field === 'oui'
-            ? oui
-            : field === 'carrier'
-              ? carrier
-              : technology;
-      if (!val) {
+    const requiredValues: Record<string, string | undefined> = {
+      serial_number: serialNumber,
+      oui,
+      carrier,
+      technology,
+    };
+    for (const field of REQUIRED_IMPORT_SNAKE) {
+      if (!requiredValues[field]) {
         localErrors.push({
           row: userRow,
           sn: serialNumber,

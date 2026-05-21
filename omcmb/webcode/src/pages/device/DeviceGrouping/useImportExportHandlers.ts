@@ -1,7 +1,8 @@
 import { useCallback } from 'react';
 import type { App as AppNS } from 'antd';
-import type { BatchImportResponse, Device, EngStatus } from '@core/types/device';
+import type { BatchImportResponse, Device } from '@core/types/device';
 import { deviceApi } from '@core/services/api/deviceApi';
+import { EXPORT_COLUMNS, IMPORT_COLUMNS } from './deviceCsvSchema';
 
 /**
  * 导出/导入/下载模板小型 handler 集合。
@@ -94,20 +95,16 @@ export function useImportExportHandlers(deps: {
   );
 
   const handleDownloadTemplate = useCallback(() => {
-    // header 字段严格对齐 BatchImportDevice（snake_case wire 名）。
-    // 必填: serial_number / oui / carrier / technology
-    // 可选: product_class / device_name / site_id / ip_address / longitude / latitude
-    const csvComment =
-      '# 必填: serial_number, oui, carrier (cmcc|ctcc|cucc), technology (lte|nr) | 可选: product_class, device_name, site_id, ip_address, longitude, latitude';
-    const csvHeader =
-      'serial_number,oui,carrier,technology,product_class,device_name,site_id,ip_address,longitude,latitude';
-    const csvExamples = [
-      'BAI-LTE-202604001,001E91,cmcc,lte,X100W,北京海淀中关村站,SITE-BJ-001,,116.310316,39.992177',
-      'BAI-LTE-202604002,001E91,cmcc,lte,X100W,北京朝阳CBD站,SITE-BJ-002,,116.460886,39.914585',
-      'BAI-LTE-202604003,001E91,cmcc,lte,X200W,上海浦东陆家嘴站,SITE-SH-001,,121.504602,31.238068',
-    ];
-    const csvContent =
-      csvComment + '\n' + csvHeader + '\n' + csvExamples.join('\n') + '\n';
+    // 模板表头与导出共享中文表头命名（IMPORT_COLUMNS / EXPORT_COLUMNS 共用
+    // deviceCsvSchema）；解析器接受中文 + snake_case 两种表头（向后兼容）。
+    const required = IMPORT_COLUMNS.filter((c) => c.required).map((c) => c.zh).join(', ');
+    const optional = IMPORT_COLUMNS.filter((c) => !c.required).map((c) => c.zh).join(', ');
+    const csvComment = `# 必填: ${required} | 可选: ${optional} | 运营商: cmcc|ctcc|cucc | 制式: lte|nr`;
+    const csvHeader = IMPORT_COLUMNS.map((c) => csvField(c.zh)).join(',');
+    const csvExamples = [0, 1, 2].map((rowIdx) =>
+      IMPORT_COLUMNS.map((c) => csvField(c.example[rowIdx] ?? '')).join(','),
+    );
+    const csvContent = csvComment + '\n' + csvHeader + '\n' + csvExamples.join('\n') + '\n';
     // UTF-8 BOM (U+FEFF) prefix 让 Excel 正确识别中文编码。
     const blob = new Blob(['﻿' + csvContent], {
       type: 'text/csv;charset=utf-8;',
@@ -128,25 +125,6 @@ export function useImportExportHandlers(deps: {
 
 // ─── CSV 导出工具 ───────────────────────────────────────────────────────────
 
-const ENG_STATUS_LABEL_KEYS: Record<EngStatus, string> = {
-  commissioned: 'device.engStatus.commissioned',
-  uncommissioned: 'device.engStatus.uncommissioned',
-  decommissioned: 'device.engStatus.decommissioned',
-};
-
-const SOURCE_TYPE_LABEL_KEYS = {
-  manual: 'device.sourceType.manual',
-  rule: 'device.sourceType.rule',
-} as const;
-
-function calcOfflineDays(lastOnlineTime: string | undefined): number {
-  if (!lastOnlineTime) return 0;
-  const lastOnline = new Date(lastOnlineTime);
-  if (Number.isNaN(lastOnline.getTime())) return 0;
-  const diff = Date.now() - lastOnline.getTime();
-  return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
-}
-
 /** 把一个 CSV 字段值转字符串并按需要加引号转义（含逗号 / 换行 / 引号）。 */
 function csvField(value: unknown): string {
   if (value === null || value === undefined) return '';
@@ -159,64 +137,27 @@ function csvField(value: unknown): string {
 }
 
 /**
- * 按 DeviceListPanel 列表展示字段（useDeviceColumns）拼一份 CSV。
+ * 按 deviceCsvSchema.EXPORT_COLUMNS 顺序拼 CSV。
  *
- * 列顺序与表格一致；状态/枚举字段用 i18n 文案，不下钻原始 enum 值。
- *   连接状态 / 安装状态 / 序列号 / 设备名称 / MAC地址 / 设备分组 /
- *   归属来源 / 经度 / 纬度 / 高度 / 离线天数 / 备注
+ * 列覆盖：
+ *   - 设备列表 useDeviceColumns 的全部展示列（连接状态 / 安装状态 / 基站编码 /
+ *     基站名称 / MAC地址 / 设备分组 / 归属来源 / 经度 / 纬度 / 高度 / 离线天数 / 备注）
+ *   - 加上 OUI / 运营商 / 制式 3 列，让用户直接拿这份 CSV 编辑后回灌也能通过
+ *     导入校验（roundtrip 友好）
  *
- * 操作列（Edit 按钮）按惯例不导出。
+ * 状态/枚举字段走 i18n 文案。共享字段（基站编码 / OUI / 运营商 / 制式 / ...）
+ * 与 IMPORT_COLUMNS 同名同序，让用户体验一致。
  */
 function buildCsvForDeviceList(
   devices: Device[],
   t: (id: string, values?: Record<string, string | number>) => string,
 ): string {
-  const headers = [
-    t('device.connStatus'),
-    t('device.installStatus'),
-    t('device.serialNumber'),
-    t('device.stationName'),
-    t('device.macAddress'),
-    t('device.groupName'),
-    t('device.sourceType'),
-    t('device.longitude'),
-    t('device.latitude'),
-    t('device.height'),
-    t('device.offlineDays'),
-    t('device.remark'),
-  ];
-
-  const rows = devices.map((d) => {
-    const connText =
-      d.connStatus === 'online' ? t('status.online') : t('status.offline');
-    const engKey = ENG_STATUS_LABEL_KEYS[d.engStatus as EngStatus];
-    const engText = engKey ? t(engKey) : String(d.engStatus ?? '');
-    const src = (d.sourceType ?? 'manual') as keyof typeof SOURCE_TYPE_LABEL_KEYS;
-    const sourceText = SOURCE_TYPE_LABEL_KEYS[src]
-      ? t(SOURCE_TYPE_LABEL_KEYS[src])
-      : String(d.sourceType ?? '');
-    const offlineDays = d.connStatus === 'online' ? '-' : calcOfflineDays(d.lastOnlineTime);
-
-    return [
-      connText,
-      engText,
-      d.sn ?? '',
-      d.name ?? '',
-      d.macAddress ?? '',
-      d.groupName ?? '',
-      sourceText,
-      d.longitude ?? '',
-      d.latitude ?? '',
-      d.gpsHeight ?? '',
-      offlineDays,
-      d.remark ?? '',
-    ]
-      .map(csvField)
-      .join(',');
-  });
-
+  const headers = EXPORT_COLUMNS.map((c) => csvField(c.zh)).join(',');
+  const rows = devices.map((d) =>
+    EXPORT_COLUMNS.map((c) => csvField(c.getValue(d, { t }))).join(','),
+  );
   // UTF-8 BOM 前缀让 Excel 正确识别中文。
-  return '﻿' + headers.map(csvField).join(',') + '\n' + rows.join('\n') + '\n';
+  return '﻿' + headers + '\n' + rows.join('\n') + '\n';
 }
 
 function buildExportFileName(selectedGroupName?: string): string {

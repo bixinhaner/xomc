@@ -166,6 +166,8 @@ function mapBackendDevice(bd: BackendDevice): Device {
     deviceModel: bd.model_name,
     region: bd.device_name,
     stationId: bd.site_id,
+    oui: bd.oui ?? '',
+    carrier: bd.carrier ?? '',
 
     // T-0162 新字段
     lifecycleState,

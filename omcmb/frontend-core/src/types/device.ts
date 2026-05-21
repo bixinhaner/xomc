@@ -95,6 +95,10 @@ export interface Device {
   deviceModel: string;
   region: string;
   stationId: string;
+  /** 厂商 OUI（与后端 devices.oui 1:1）；批量导出 CSV 需要回写以支持 roundtrip 导入。 */
+  oui: string;
+  /** 运营商代码 'cmcc' / 'ctcc' / 'cucc'。同上 roundtrip 用。 */
+  carrier: string;
 
   // T-0162: 新解耦字段
   lifecycleState: DeviceLifecycle;
