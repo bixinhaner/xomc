@@ -123,7 +123,7 @@ function buildTreeData(
           <Tooltip title={group.name} mouseEnterDelay={0.8} placement="right">
             <span className={styles.treeNodeContent}>
               {isL1 ? (
-                <FolderOutlined style={{ marginRight: 6, fontSize: 12, color: '#FA8C16' }} />
+                <FolderOutlined style={{ marginRight: 3, fontSize: 12, color: '#FA8C16' }} />
               ) : (
                 <span className="group-tree-dot" />
               )}
@@ -263,15 +263,16 @@ export default function GroupTreePanel({
 
       {/* 保留部分原有的样式，用于特定细节 */}
       <style>{`
-        /* L2 dot indicator */
+        /* L2 dot indicator —— 用户反馈：折叠箭头/分组图标/分组名称之间太散；
+         * 间隔统一压到原来一半（margin-right 8→4，margin-left 2→1）。 */
         .group-tree-dot {
           display: inline-block;
           width: 4px;
           height: 4px;
           border-radius: 50%;
           background: var(--color-text-quaternary, #d9d9d9);
-          margin-right: 8px;
-          margin-left: 2px;
+          margin-right: 4px;
+          margin-left: 1px;
           flex-shrink: 0;
         }
 
@@ -282,9 +283,20 @@ export default function GroupTreePanel({
           padding-bottom: 4px !important;
         }
 
-        /* Reduce indent */
+        /* Reduce indent —— 减少子节点缩进 */
         .group-tree .ant-tree-indent-unit {
+          width: 8px !important;
+        }
+
+        /* 收紧 折叠箭头 ↔ 分组图标 间距：antd 默认 switcher 占 24px 太宽 */
+        .group-tree .ant-tree-switcher {
           width: 16px !important;
+        }
+
+        /* 收紧 分组图标 ↔ 分组名称 间距：treeNodeContent 默认 gap 8 → 4 */
+        .group-tree .ant-tree-title > div > .ant-tooltip + * ,
+        .group-tree .ant-tree-title [class*="treeNodeContent"] {
+          gap: 4px !important;
         }
       `}</style>
     </div>
