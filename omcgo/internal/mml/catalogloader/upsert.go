@@ -149,6 +149,8 @@ func upsertGroup(ctx context.Context, tx pgx.Tx, carrier, tech string, g *Group)
 		WHERE object_path_template = $1 AND deleted_at IS NULL
 		LIMIT 1;
 	`
+	// v2.4 P3：UPDATE 同步写入 family_code / family_name_zh（来自 inferFamily 推断）。
+	// 即使值未变，每次启动 Loader 都重写一遍，保证 DB 与 catalog 规则一致。
 	const updateSQL = `
 		UPDATE mml_param_groups SET
 			group_name_zh = $2,
@@ -158,6 +160,8 @@ func upsertGroup(ctx context.Context, tx pgx.Tx, carrier, tech string, g *Group)
 			display_order = $6,
 			instance_arity = $7,
 			instance_levels = $8::text[],
+			family_code = $9,
+			family_name_zh = $10,
 			deprecated_at = NULL,
 			updated_at = NOW()
 		WHERE id = $1;
@@ -166,18 +170,21 @@ func upsertGroup(ctx context.Context, tx pgx.Tx, carrier, tech string, g *Group)
 	// `<chapter_code>.<normalized_groupCode>` 作为 ltree path（合法 ltree label：
 	// 仅字母数字下划线，由 normalizeForCommandCode 归一）。空 chapter 时退化到
 	// "Standard" 顶级，与老 catalog 风格兼容。
+	// v2.4 P3：INSERT 同步写入 family_code / family_name_zh（来自 inferFamily 推断）。
 	const insertSQL = `
 		INSERT INTO mml_param_groups (
 			id, group_code, group_name_zh, group_name_en, name_i18n,
 			param_version, display_order, source, catalog_protected,
 			object_path_template, chapter_code, instance_arity, instance_levels,
 			path,
+			family_code, family_name_zh,
 			deprecated_at, created_at, updated_at
 		) VALUES (
 			gen_random_uuid(), $1, $2, $3, $4::jsonb,
 			$5, $6, 'standard', true,
 			$7, $8, $9, $10::text[],
 			$11::ltree,
+			$12, $13,
 			NULL, NOW(), NOW()
 		) RETURNING id;
 	`
@@ -191,6 +198,10 @@ func upsertGroup(ctx context.Context, tx pgx.Tx, carrier, tech string, g *Group)
 	}
 	paramVersion := fmt.Sprintf("%s-%s-v2.3", carrier, tech)
 
+	// v2.4 P3：在 UPSERT 时同步计算 path-prefix-family，把 family 持久化到 DB。
+	// 9 条规则与 internal/mml/family.go 同步（family.go 副本见同包 family.go）。
+	familyCode, familyNameZh := inferFamily(g.GroupCode)
+
 	// 1. 尝试 UPDATE（基于 object_path_template 部分唯一索引）
 	var id uuid.UUID
 	err := tx.QueryRow(ctx, selectSQL, g.GroupCode).Scan(&id)
@@ -199,6 +210,7 @@ func upsertGroup(ctx context.Context, tx pgx.Tx, carrier, tech string, g *Group)
 		if _, err := tx.Exec(ctx, updateSQL,
 			id, nameZH, nameEN, nameI18nJSON,
 			g.ChapterCode, g.DisplayOrder, g.InstanceArity, levels,
+			familyCode, familyNameZh,
 		); err != nil {
 			return uuid.Nil, fmt.Errorf("update group %s: %w", g.GroupCode, err)
 		}
@@ -221,6 +233,7 @@ func upsertGroup(ctx context.Context, tx pgx.Tx, carrier, tech string, g *Group)
 		paramVersion, g.DisplayOrder,
 		g.GroupCode, g.ChapterCode, g.InstanceArity, levels,
 		ltreePath,
+		familyCode, familyNameZh,
 	).Scan(&id)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("insert group %s: %w", g.GroupCode, err)

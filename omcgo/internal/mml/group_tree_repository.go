@@ -119,6 +119,10 @@ func (r *PgGroupTreeRepository) BuildTree(ctx context.Context, rootCode, lang st
 				Path:             row.GroupPath,
 				DisplayOrder:     row.GroupDisplayOrder,
 				ChapterCode:      row.GroupChapterCode,
+				// v2.4 P3：family 直接从 DB 读（migration 000141 持久化）。
+				// 空字符串语义 = "self-family"，attachFamily 会作 fallback 尝试。
+				FamilyCode:       row.GroupFamilyCode,
+				FamilyNameZh:     row.GroupFamilyNameZh,
 				Source:           row.GroupSource,
 				CatalogProtected: row.GroupCatalogProtected,
 				Commands:         []GroupTreeCommand{},
@@ -153,18 +157,25 @@ func (r *PgGroupTreeRepository) BuildTree(ctx context.Context, rootCode, lang st
 
 	// 按 path 深度组装父子关系
 	nodes := assembleHierarchy(groupByID, pathToGroupID)
-	// v2.4 D32+D38：post-process 阶段按 group_code 推断 path-prefix-family，
-	// 不改 SQL / 不入库；前端按 FamilyCode 聚合 CommandTree 顶层。
-	// 详见 docs/design/mml-console-cmcc-tdlte-v23-adjustment-plan-20260519.md §15.4
+	// v2.4 P3：family 已通过 migration 000141 + catalogloader.upsertGroup 持久化到 DB，
+	// 上面 SQL 已直接读出。这里 attachFamily 退化为防御性 fallback —— 仅当 DB 返回空
+	// （历史/损坏数据 / 迁移未跑）时调用 InferFamily 兜底，避免 UI 缺少 family 节点。
+	// 详见 docs/design/mml-console-cmcc-tdlte-v23-adjustment-plan-20260519.md §15.6 + §15.8
 	attachFamily(nodes)
 	return nodes, nil
 }
 
-// attachFamily 递归遍历所有节点，按 GroupCode 推断 FamilyCode + FamilyNameZh 并填充。
-// 实现：见 family.go InferFamily（O(规则数) 线性扫描）。
+// attachFamily 递归遍历所有节点，**防御性 fallback**：仅当 DB 返回空 FamilyCode 时
+// 才调用 InferFamily 推断并填充。正常情况下 family_code / family_name_zh 已由
+// catalogloader.upsertGroup 写入 DB（migration 000141）。
+//
+// 设计：v2.4 P3 之前是无条件覆盖（不入库时的唯一推断时机），P3 之后入库为主，
+// 这里只兜底历史 / 异常数据，避免 UI 缺少 family 节点。
 func attachFamily(nodes []GroupTreeNode) {
 	for i := range nodes {
-		nodes[i].FamilyCode, nodes[i].FamilyNameZh = InferFamily(nodes[i].GroupCode)
+		if nodes[i].FamilyCode == "" {
+			nodes[i].FamilyCode, nodes[i].FamilyNameZh = InferFamily(nodes[i].GroupCode)
+		}
 		attachFamily(nodes[i].Children)
 	}
 }
@@ -182,11 +193,16 @@ func (r *PgGroupTreeRepository) queryGroupsAndCommands(ctx context.Context, root
 	// 改 Go 层 Scan 字段为 *bool 引发的连锁改造。
 	// COALESCE(g.chapter_code, '') 把 NULL 兜底为空串，方便 Scan 进 string；
 	// 老 catalog 行没有章节码，前端渲染时按 "" 视为"未分章"统一末位排序。
+	// v2.4 P3：family_code / family_name_zh 持久化在 mml_param_groups（migration 000141）。
+	// SELECT 加 COALESCE 兜底，处理迁移未跑或历史 NULL 行（理论上 NOT NULL DEFAULT ''，
+	// 但 COALESCE 双保险）。BuildTree post-process 的 attachFamily 仍对空值做 fallback。
 	const baseSQL = `
 SELECT
     g.id, g.group_code, g.group_name_zh, g.group_name_en, g.name_i18n,
     COALESCE(g.path::text, '') AS path_text, g.display_order,
     COALESCE(g.chapter_code, '') AS chapter_code,
+    COALESCE(g.family_code, '') AS family_code,
+    COALESCE(g.family_name_zh, '') AS family_name_zh,
     g.source, g.catalog_protected,
     c.id, c.command_code, c.logical_code, c.logical_name_i18n,
     c.operation_type, c.rpc_method,
@@ -222,6 +238,7 @@ ORDER BY g.path, g.display_order, c.operation_type, c.logical_code, c.command_co
 		if err := dbRows.Scan(
 			&row.GroupID, &row.GroupCode, &row.GroupNameZh, &row.GroupNameEn, &nameI18nBytes,
 			&row.GroupPath, &row.GroupDisplayOrder, &row.GroupChapterCode,
+			&row.GroupFamilyCode, &row.GroupFamilyNameZh,
 			&row.GroupSource, &row.GroupCatalogProtected,
 			&row.CommandID, &row.CommandCode, &row.LogicalCode, &cmdLogicalNameI18nBytes,
 			&row.OperationType, &row.RPCMethod, &row.RequireConfirm, &row.TargetObject,
@@ -250,7 +267,11 @@ type groupTreeRow struct {
 	GroupPath         string
 	GroupDisplayOrder int
 	// 章节码（CMCC TD-LTE v2.3 SA/SB/SC/.../SR）；老 catalog NULL → SQL COALESCE 兜底空字串
-	GroupChapterCode      string
+	GroupChapterCode string
+	// v2.4 P3：family 持久化字段（migration 000141）。COALESCE 兜底空字串 → 上层 attachFamily
+	// 对空值做 InferFamily fallback。
+	GroupFamilyCode       string
+	GroupFamilyNameZh     string
 	GroupSource           string
 	GroupCatalogProtected bool
 
