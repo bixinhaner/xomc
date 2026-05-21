@@ -105,7 +105,6 @@ function formatOfflineDuration(days?: number, hours?: number, minutes?: number):
 // axios 把 search 序列化成 search[]=a&search[]=b，后端 c.Query("search") 读
 // 不到，于是同一次"搜索"先后发两个 API、第二个还把筛选丢了。
 const URL_ARRAY_FIELDS = new Set<string>([
-  'lifecycleState',
   'productModel',
   'modelName',
   'softwareVersion',
@@ -336,7 +335,6 @@ export default function DeviceList() {
   //   - is_online（在线 2 状态：true/false）
   // 新增 3 个字典（device_model / software_version / firmware_version）由
   // seed/000137 初始化为现有 devices/device_parameters 表的 distinct 值。
-  const { data: lifecycleStateDict } = useDictionary('lifecycle_state');
   const { data: isOnlineDict } = useDictionary('is_online');
   const { data: opStateDict } = useDictionary('op_state');
   const { data: networkTypeDict } = useDictionary('network_type');
@@ -391,17 +389,9 @@ export default function DeviceList() {
     },
 
     // --- 筛选项：三制式公共（默认显示） ---
-    // T-0162: 拆出两个独立筛选项，与后端 lifecycle_state + is_online 1:1 对齐：
-    //   1) lifecycleState (多选): 6 个生命周期值
-    //   2) isOnline (单选): 在线 / 离线
-    // 老 connStatus 字典已删除，前端不再 "乐观归类"。
-    {
-      name: 'lifecycleState',
-      label: t('device.lifecycleState'),
-      type: 'multi-select',
-      width: 160,
-      options: dictToOptions(lifecycleStateDict),
-    },
+    // T-0162: 「生命周期」筛选已下线（用户反馈业务场景里实际只关心实时
+    // 在线/离线，6 状态生命周期对前端筛选过细）。字典 lifecycle_state 在
+    // 后端仍保留供详情页与统计 by_lifecycle 使用。
     {
       name: 'isOnline',
       label: t('device.isOnline'),
@@ -469,7 +459,6 @@ export default function DeviceList() {
     },
   ], [
     t,
-    lifecycleStateDict,
     isOnlineDict,
     opStateDict,
     networkTypeDict,
