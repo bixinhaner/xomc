@@ -90,7 +90,7 @@ upload:
   # 详见 internal/software/executor.go ExecuteOne / ExecuteOneUpload 同名说明。
   username: ""
   password: ""
-  max_file_size: 104857600            # 100MB
+  max_file_size: 524288000            # 500MB (设备日志包动辄 50-300MB)
 
 download:
   base_url: "http://localhost:8080"   # CPE 可访问的 ACS 地址（网关代理到 ACS）

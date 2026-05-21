@@ -44,6 +44,7 @@ import (
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/topology"
 	"github.com/omcgo/omcgo/internal/trace"
+	transferrepo "github.com/omcgo/omcgo/internal/transfer/repo"
 	"github.com/omcgo/omcgo/internal/ufte"
 )
 
@@ -68,8 +69,57 @@ func initSoftwareModule(c *Container) error {
 	logger := c.Logger.Named("software")
 
 	firmwareRepo := software.NewPgFirmwareRepository(c.PgPool)
-	taskRepo := software.NewPgTaskRepository(c.PgPool)
-	subTaskRepo := software.NewPgSubTaskRepository(c.PgPool)
+	rawTaskRepo := software.NewPgTaskRepository(c.PgPool)
+	rawSubTaskRepo := software.NewPgSubTaskRepository(c.PgPool)
+
+	// 文件传输任务按业务拆表（T-0162 后续 / docs/design/task-tables-split-by-business-20260521.md）：
+	// 4 类新业务（配置备份 / 配置下发 / 运行日志 / 异常日志）各占一对物理表；升级 / 回退
+	// 继续用旧 upgrade_tasks / upgrade_sub_tasks。RoutingTaskRepository / RoutingSubTaskRepository
+	// 实现 software.TaskRepository / SubTaskRepository 接口，对 software / executor 透明：
+	//   · Create：从 ctx WithRouteHint 取 fileType 选目标表（BatchCollect 入口注入）。
+	//   · 读 / Update / Delete：先 fallback 旧表，未命中再 fan-out 4 张新表（命中即返回）。
+	// 数据迁移待 S5 阶段补；当前线上 16 行 task_type=10 行将继续在旧表（routing 兼容）。
+	configBackupTaskRepo := transferrepo.NewPgTaskRepo(c.PgPool, transferrepo.TableConfigBackupTasks)
+	configBackupSubRepo := transferrepo.NewPgSubTaskRepo(c.PgPool, transferrepo.TableConfigBackupSubTasks, transferrepo.TableConfigBackupTasks)
+	configRestoreTaskRepo := transferrepo.NewPgTaskRepo(c.PgPool, transferrepo.TableConfigRestoreTasks)
+	configRestoreSubRepo := transferrepo.NewPgSubTaskRepo(c.PgPool, transferrepo.TableConfigRestoreSubTasks, transferrepo.TableConfigRestoreTasks)
+	runtimeLogTaskRepo := transferrepo.NewPgTaskRepo(c.PgPool, transferrepo.TableRuntimeLogCollectTasks)
+	runtimeLogSubRepo := transferrepo.NewPgSubTaskRepo(c.PgPool, transferrepo.TableRuntimeLogCollectSubTasks, transferrepo.TableRuntimeLogCollectTasks)
+	faultLogTaskRepo := transferrepo.NewPgTaskRepo(c.PgPool, transferrepo.TableFaultLogCollectTasks)
+	faultLogSubRepo := transferrepo.NewPgSubTaskRepo(c.PgPool, transferrepo.TableFaultLogCollectSubTasks, transferrepo.TableFaultLogCollectTasks)
+	deviceLockRepo := transferrepo.NewPgDeviceLockRepo(c.PgPool)
+	_ = deviceLockRepo // S4 阶段接入 reaper / executor 时启用
+
+	transferRouter := &software.TransferRepoRouter{
+		Default: software.TransferRepoSet{
+			Task: rawTaskRepo, SubTask: rawSubTaskRepo,
+			SubTaskTable: transferrepo.TableUpgradeSubTasks,
+			BusinessType: transferrepo.BusinessUpgrade,
+		},
+		ConfigBackup: software.TransferRepoSet{
+			Task: configBackupTaskRepo, SubTask: configBackupSubRepo,
+			SubTaskTable: transferrepo.TableConfigBackupSubTasks,
+			BusinessType: transferrepo.BusinessConfigBackup,
+		},
+		ConfigRestore: software.TransferRepoSet{
+			Task: configRestoreTaskRepo, SubTask: configRestoreSubRepo,
+			SubTaskTable: transferrepo.TableConfigRestoreSubTasks,
+			BusinessType: transferrepo.BusinessConfigRestore,
+		},
+		RuntimeLogCollect: software.TransferRepoSet{
+			Task: runtimeLogTaskRepo, SubTask: runtimeLogSubRepo,
+			SubTaskTable: transferrepo.TableRuntimeLogCollectSubTasks,
+			BusinessType: transferrepo.BusinessRuntimeLogCollect,
+		},
+		FaultLogCollect: software.TransferRepoSet{
+			Task: faultLogTaskRepo, SubTask: faultLogSubRepo,
+			SubTaskTable: transferrepo.TableFaultLogCollectSubTasks,
+			BusinessType: transferrepo.BusinessFaultLogCollect,
+		},
+	}
+	taskRepo := software.NewRoutingTaskRepository(transferRouter, rawTaskRepo)
+	subTaskRepo := software.NewRoutingSubTaskRepository(transferRouter, rawSubTaskRepo)
+
 	softwareService := software.NewSoftwareService(
 		firmwareRepo, taskRepo, subTaskRepo, c.DeviceRepo, c.TaskSvc, c.ConnReqClient,
 		c.MinIO, c.Cfg.MinIO.Buckets.Firmware, c.EventBus, c.Redis, logger,

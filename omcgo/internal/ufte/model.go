@@ -335,7 +335,7 @@ func builtInTaskTypes() []TaskType {
 			// · 无 sn 参数（厂商样本只有 fileType+taskId+filename）
 			// · taskId 用 32 字符纯 hex 无连字符 → 模板用 {taskId32} 占位符
 			// · filename 留空让设备自己决定上传名（同 NV/XML）
-			TransportPath: "/smallcell/FileUploadService?fileType=LOG&taskId={taskId32}&filename=",
+			TransportPath: "/smallcell/FileUploadService?fileType=LOG&sn={sn}&taskId={taskId32}&filename=",
 			LastEditor:             "system",
 			UpdatedAt:              now,
 			softwareTaskType:       software.TaskTypeLogCollect,
@@ -359,7 +359,7 @@ func builtInTaskTypes() []TaskType {
 			FileNameTemplate:       "fault-{task_id8}-{sn}.tar.gz",
 			// 厂商样本未提供故障日志格式，先复用运行日志的 fileType=LOG（设备分类
 			// 可能靠 CommandKey 前缀区分）。详见 migrations/000141 + RUNTIME_LOG_COLLECT 注释。
-			TransportPath: "/smallcell/FileUploadService?fileType=LOG&taskId={taskId32}&filename=",
+			TransportPath: "/smallcell/FileUploadService?fileType=LOG&sn={sn}&taskId={taskId32}&filename=",
 			LastEditor:             "system",
 			UpdatedAt:              now,
 			softwareTaskType:       software.TaskTypeLogCollect,

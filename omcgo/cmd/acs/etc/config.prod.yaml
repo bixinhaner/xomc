@@ -85,7 +85,7 @@ upload:
   # 让设备 PUT 带 Authorization header。
   username: ""
   password: ""
-  max_file_size: 104857600
+  max_file_size: 524288000   # 500MB (设备日志包动辄 50-300MB)
 
 download:
   base_url: "http://acs:7557"

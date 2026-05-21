@@ -211,7 +211,15 @@ type BatchCollectRequest struct {
 
 // BatchCollect 创建日志采集主任务及各设备子任务，然后启动执行。
 // 与 BatchUpgrade 类似，但不需要固件，执行时发送 Upload RPC。
+//
+// 多表分发（按业务拆表 — docs/design/task-tables-split-by-business-20260521.md）：
+// 通过 WithRouteHint 把 req.FileType 注入 ctx，下面所有 s.taskRepo / s.subTaskRepo
+// 调用都会被 RoutingTaskRepository / RoutingSubTaskRepository wrapper 据此路由到
+// 对应业务的物理表（config_backup_* / runtime_log_collect_* / fault_log_collect_*）。
+// 旧表 upgrade_tasks / upgrade_sub_tasks 仅保留给升级 / 回退（走 BatchUpgrade / RollbackDevices，
+// 那两个方法不注入 hint → wrapper fallback 到旧表）。
 func (s *SoftwareService) BatchCollect(ctx context.Context, req BatchCollectRequest) (*UpgradeTask, error) {
+	ctx = WithRouteHint(ctx, req.FileType)
 	concurrency := 5
 
 	mainTask := &UpgradeTask{

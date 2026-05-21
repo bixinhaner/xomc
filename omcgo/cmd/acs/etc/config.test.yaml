@@ -68,7 +68,7 @@ upload:
   # internal/software/executor.go）。username 非空会让 handler 401 拒绝 CPE PUT。
   username: ""
   password: ""
-  max_file_size: 104857600  # 100MB
+  max_file_size: 524288000  # 500MB (设备日志包动辄 50-300MB)
 
 download:
   base_url: "http://acs:7557"
