@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import dayjs from 'dayjs';
 import {
   Button,
   Card,
@@ -38,6 +39,7 @@ import {
 } from '@core/hooks/api/useUnifiedFileTransfer';
 import { useProductClasses } from '@core/hooks/api/useDevices';
 import { useSoftwareVersions } from '@core/hooks/api/useSoftware';
+import { useUserStore } from '@core/store/userStore';
 import type { SoftwareVersion } from '@core/mock/data/software';
 import type {
   CreateUnifiedFileTransferTaskInput,
@@ -58,6 +60,30 @@ import {
 import type { TransferStepId } from '@core/types/unifiedFileTransfer';
 
 const { Text, Title } = Typography;
+
+// TASK_NAME_PREFIX_BY_TYPE: UFTE 创建任务时默认 taskName 的业务前缀。
+// 命名规则跟升级模块惯例对齐（Upgrade_admin_2026-05-21 05:33:55）：
+//   ${prefix}_${username}_${YYYY-MM-DD HH:mm:ss}
+// 用户可在表单里编辑覆盖；切换业务类型时若用户没改过，会自动按新业务重算。
+const TASK_NAME_PREFIX_BY_TYPE: Record<string, string> = {
+  ENB_IMG_UPGRADE: 'Upgrade',
+  GNB_IMG_UPGRADE: 'Upgrade',
+  ENB_PATCH_UPGRADE: 'Upgrade',
+  ENB_FPGA_UPGRADE: 'Upgrade',
+  VERSION_ROLLBACK: 'Rollback',
+  CONFIG_BACKUP_NV: 'ConfigBackupNV',
+  CONFIG_BACKUP_XML: 'ConfigBackupXML',
+  CONFIG_RESTORE: 'ConfigRestore',
+  RUNTIME_LOG_COLLECT: 'RuntimeLog',
+  FAULT_LOG_COLLECT: 'FaultLog',
+};
+
+function buildDefaultTaskName(typeCode: string | undefined, username: string | undefined): string {
+  const prefix = (typeCode && TASK_NAME_PREFIX_BY_TYPE[typeCode]) || 'Task';
+  const user = (username && username.trim()) || 'user';
+  const ts = dayjs().format('YYYY-MM-DD HH:mm:ss');
+  return `${prefix}_${user}_${ts}`;
+}
 
 function isUpgradeTaskCategory(category?: string) {
   return category === 'gnb_upgrade' || category === 'enb_upgrade';
@@ -134,6 +160,12 @@ function getUpgradeTypeLabel(category: string, fallback: string) {
 export default function FileTransferCenter() {
   const navigate = useNavigate();
   const t = useT();
+  // 任务名称自动填充用：取登录用户名拼前缀，displayName / username 哪个有用哪个。
+  const currentUser = useUserStore((s) => s.currentUser);
+  const taskNameUser = currentUser?.username || currentUser?.displayName || 'user';
+  // lastAutoFilledTaskNameRef 记录最近一次自动填的名字。用户在表单里手动改过 → ref
+  // 跟 form 值不再一致 → typeCode 切换时不覆盖；用户没改 → 切换业务时跟着刷新。
+  const lastAutoFilledTaskNameRef = useRef<string>('');
   const { data: taskTypes = [], isLoading: taskTypesLoading } = useUnifiedFileTransferTaskTypes();
   const { data: productClasses = [] } = useProductClasses();
   const categories = useMemo(() => buildCategoryTabs(taskTypes), [taskTypes]);
@@ -495,11 +527,17 @@ export default function FileTransferCenter() {
       return [
         taskActionColumn,
         {
+          // 任务名称：默认按 业务_用户_时间 自动生成（约 30-40 字符），固定 280 + Tooltip 兜底。
           title: '任务名称',
           dataIndex: 'taskName',
           key: 'taskName',
-          width: 180,
-          render: (_, record) => record.taskName,
+          width: 280,
+          ellipsis: { showTitle: false },
+          render: (_, record) => (
+            <Tooltip title={record.taskName} placement="topLeft">
+              <span>{record.taskName}</span>
+            </Tooltip>
+          ),
         },
         { title: '操作人', dataIndex: 'createUser', key: 'createUser', width: 110 },
         {
@@ -573,13 +611,18 @@ export default function FileTransferCenter() {
     return [
       taskActionColumn,
       {
+        // 任务名称（非升级类）：默认按 业务_用户_时间 自动生成；副行展示业务类型。
+        // 固定 280 + Tooltip 兜底，避免长名挤压后续列。
         title: '任务名称',
         dataIndex: 'taskName',
         key: 'taskName',
+        width: 280,
         render: (_, record) => (
-          <Space direction="vertical" size={2}>
-            <Text strong>{record.taskName}</Text>
-            <Text type="secondary">{record.typeDisplayName}</Text>
+          <Space direction="vertical" size={2} style={{ maxWidth: '100%' }}>
+            <Tooltip title={record.taskName} placement="topLeft">
+              <Text strong ellipsis style={{ maxWidth: 260 }}>{record.taskName}</Text>
+            </Tooltip>
+            <Text type="secondary" ellipsis style={{ maxWidth: 260 }}>{record.typeDisplayName}</Text>
           </Space>
         ),
       },
@@ -690,13 +733,18 @@ export default function FileTransferCenter() {
       {
         // 任务列表场景：每行是「某任务在某设备上的执行情况」。主显示任务名（用户操作
         // 上下文，他刚创建的 testNV 想看这个任务的进展），副显示设备名（区分多设备）。
+        // 列宽 280：UFTE 自动生成的任务名形如 "ConfigBackupNV_admin_2026-05-21 13:39:55"
+        // 约 36 字符，hover Tooltip 看全名。
         title: '任务/设备',
         dataIndex: 'taskName',
         key: 'taskName',
+        width: 280,
         render: (_, record) => (
-          <Space direction="vertical" size={2}>
-            <Text strong>{record.taskName}</Text>
-            <Text type="secondary">{record.deviceName}</Text>
+          <Space direction="vertical" size={2} style={{ maxWidth: '100%' }}>
+            <Tooltip title={record.taskName} placement="topLeft">
+              <Text strong ellipsis style={{ maxWidth: 260 }}>{record.taskName}</Text>
+            </Tooltip>
+            <Text type="secondary" ellipsis style={{ maxWidth: 260 }}>{record.deviceName}</Text>
           </Space>
         ),
       },
@@ -751,7 +799,10 @@ export default function FileTransferCenter() {
       void message.warning('当前业务视图下还没有模板，请联系管理员先维护模板。');
       return;
     }
+    const defaultTaskName = buildDefaultTaskName(nextTypeCode, taskNameUser);
+    lastAutoFilledTaskNameRef.current = defaultTaskName;
     taskForm.setFieldsValue({
+      taskName: defaultTaskName,
       typeCode: nextTypeCode,
       productType: undefined,
       firmwareId: undefined,
@@ -764,6 +815,21 @@ export default function FileTransferCenter() {
     setSelectedTypeCode(nextTypeCode);
     setTaskDrawerOpen(true);
   };
+
+  // 切换"任务类型"时，如用户没动过 taskName（当前值 === 上次自动填的值）→ 重算填入；
+  // 已被用户修改过 → 保留用户输入不打扰。
+  useEffect(() => {
+    if (!taskDrawerOpen || !drawerTypeCode) {
+      return;
+    }
+    const currentTaskName = (taskForm.getFieldValue('taskName') as string | undefined) ?? '';
+    if (currentTaskName && currentTaskName !== lastAutoFilledTaskNameRef.current) {
+      return;
+    }
+    const nextName = buildDefaultTaskName(drawerTypeCode, taskNameUser);
+    lastAutoFilledTaskNameRef.current = nextName;
+    taskForm.setFieldValue('taskName', nextName);
+  }, [drawerTypeCode, taskDrawerOpen, taskForm, taskNameUser]);
 
   useEffect(() => {
     if (!taskDrawerOpen) {
@@ -910,7 +976,7 @@ export default function FileTransferCenter() {
                           setTaskPageSize(pageSize);
                         },
                       }}
-                      scroll={{ x: 1600 }}
+                      scroll={{ x: 1800 }}
                     />
                   </Space>
                 ),
@@ -981,7 +1047,7 @@ export default function FileTransferCenter() {
                           setDevicePageSize(pageSize);
                         },
                       }}
-                      scroll={{ x: 1600 }}
+                      scroll={{ x: 1800 }}
                     />
                   </Space>
                 ),
@@ -1007,8 +1073,8 @@ export default function FileTransferCenter() {
         )}
       >
         <Form form={taskForm} layout="vertical">
-          <Form.Item label="任务名称" name="taskName" rules={[{ required: true, message: '请输入任务名称' }]}> 
-            <Input placeholder="例如：华东试点-统一入口演示" />
+          <Form.Item label="任务名称" name="taskName" rules={[{ required: true, message: '请输入任务名称' }]}>
+            <Input placeholder="例如：Upgrade_admin_2026-05-21 05:33:55（默认按业务_用户_时间生成，可改）" />
           </Form.Item>
           <Form.Item label="任务类型" name="typeCode" rules={[{ required: true, message: '请选择任务类型' }]}> 
             <Select
