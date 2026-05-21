@@ -171,7 +171,13 @@ ALTER TABLE mml_commands ADD COLUMN IF NOT EXISTS confirm_msg_i18n JSONB NOT NUL
 -- 若想强约束加 CHECK：CHECK (category IN ('1','2','3','4','5','6','7')) —
 -- 但兼容老 25 条 seed/000006 数据；本次先放宽，Loader 写新数据守约。
 
--- operation_type 已在 seed/000004 加；保证存在
+-- operation_type：mml_commands 在 000007 建表时**没有**此列；之前注释"已在
+-- seed/000004 加"是错的（seed 是 DML 只 INSERT，不改 schema）。dev 环境历史
+-- 上靠 ad-hoc SQL 补齐才能过 SET NOT NULL；干净 DB（如 release 包首次部署）
+-- 会直接 SQLSTATE 42703 失败。这里显式 ADD COLUMN IF NOT EXISTS，确保两侧
+-- 都能重放。DEFAULT 'LST' 与 mml_custom_command 的 chk 约束值域对齐。
+ALTER TABLE mml_commands ADD COLUMN IF NOT EXISTS operation_type VARCHAR(20) DEFAULT 'LST';
+UPDATE mml_commands SET operation_type = 'LST' WHERE operation_type IS NULL;
 ALTER TABLE mml_commands ALTER COLUMN operation_type SET NOT NULL;
 
 -- 加 group_id FK + 索引
