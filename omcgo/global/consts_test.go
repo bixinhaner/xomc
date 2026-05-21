@@ -1,9 +1,11 @@
 package global
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_CarrierCode_IsValid(t *testing.T) {
@@ -125,4 +127,70 @@ func Test_AlarmStatus_Values(t *testing.T) {
 	assert.Equal(t, AlarmStatus("active"), AlarmActive)
 	assert.Equal(t, AlarmStatus("acknowledged"), AlarmAcknowledged)
 	assert.Equal(t, AlarmStatus("cleared"), AlarmCleared)
+}
+
+// Test_CarrierCode_UnmarshalJSON_CaseInsensitive 锁住 case-normalize 行为：
+// 任何外部 JSON 入参（北向 OSS / 手工 API / 批量导入）的 carrier 字段，
+// 不管大写小写混合，都规范成内部 canonical 小写。
+func Test_CarrierCode_UnmarshalJSON_CaseInsensitive(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  CarrierCode
+	}{
+		{"lowercase pass-through", `"cmcc"`, CarrierCMCC},
+		{"uppercase normalized", `"CMCC"`, CarrierCMCC},
+		{"mixed case normalized", `"Cmcc"`, CarrierCMCC},
+		{"trims whitespace", `"  ctcc  "`, CarrierCTCC},
+		{"uppercase ctcc", `"CTCC"`, CarrierCTCC},
+		{"mixed cucc", `"cUcC"`, CarrierCUCC},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var c CarrierCode
+			require.NoError(t, json.Unmarshal([]byte(tt.input), &c))
+			assert.Equal(t, tt.want, c)
+		})
+	}
+}
+
+// Test_Technology_UnmarshalJSON_CaseInsensitive 锁住 case-normalize：
+// 3GPP/TR-181 标准约定 LTE/NR 大写，我们内部 canonical 小写。任何外部
+// 大小写都规范掉。
+func Test_Technology_UnmarshalJSON_CaseInsensitive(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  Technology
+	}{
+		{"lowercase pass-through", `"lte"`, TechLTE},
+		{"uppercase per TR-181", `"LTE"`, TechLTE},
+		{"mixed case", `"Lte"`, TechLTE},
+		{"trims whitespace", `"  nr  "`, TechNR},
+		{"uppercase NR", `"NR"`, TechNR},
+		{"mixed NR", `"Nr"`, TechNR},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var tech Technology
+			require.NoError(t, json.Unmarshal([]byte(tt.input), &tech))
+			assert.Equal(t, tt.want, tech)
+		})
+	}
+}
+
+// Test_Technology_UnmarshalJSON_InStruct 验证嵌套字段（最接近 BatchImport /
+// CreateDeviceRequest 真实使用场景）正确触发 UnmarshalJSON。
+func Test_Technology_UnmarshalJSON_InStruct(t *testing.T) {
+	type req struct {
+		Carrier CarrierCode `json:"carrier"`
+		Tech    Technology  `json:"technology"`
+	}
+	var r req
+	require.NoError(t, json.Unmarshal([]byte(`{"carrier":"CMCC","technology":"LTE"}`), &r))
+	assert.Equal(t, CarrierCMCC, r.Carrier)
+	assert.Equal(t, TechLTE, r.Tech)
+	// 规范化后 IsValid 也能通过（之前大写会被 oneof binding 拒掉）
+	assert.True(t, r.Carrier.IsValid())
+	assert.True(t, r.Tech.IsValid())
 }

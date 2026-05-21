@@ -1,5 +1,10 @@
 package global
 
+import (
+	"encoding/json"
+	"strings"
+)
+
 // CarrierCode identifies a mobile network operator.
 type CarrierCode string
 
@@ -23,6 +28,19 @@ func (c CarrierCode) IsValid() bool {
 	return false
 }
 
+// UnmarshalJSON 让外部 JSON 入参 case-insensitive：北向 OSS / 第三方系统按
+// 习惯送 "CMCC"/"Cmcc"/"cmcc" 任一形式都解到内部 canonical 小写。后续
+// binding:"oneof=cmcc ctcc cucc" 校验、SQL 比较、字典对照都按小写走 —— 同
+// 一处地方做规范化，下游链路保持简单。
+func (c *CarrierCode) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	*c = CarrierCode(strings.ToLower(strings.TrimSpace(s)))
+	return nil
+}
+
 // Technology identifies a radio access technology.
 type Technology string
 
@@ -38,6 +56,20 @@ func (t Technology) IsValid() bool {
 		return true
 	}
 	return false
+}
+
+// UnmarshalJSON 让外部 JSON 入参 case-insensitive。
+//
+// 3GPP/TR-181 标准约定 "LTE"/"NR" 大写，本系统内部 canonical 小写。
+// 北向 OSS / 第三方系统按 TR-181 习惯送 "LTE" 不能被 oneof binding 拒掉，
+// 同时设备 Inform 推断侧 (detectTechnology) 也保持只产生小写，全链路一致。
+func (t *Technology) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	*t = Technology(strings.ToLower(strings.TrimSpace(s)))
+	return nil
 }
 
 // DeviceStatus represents the legacy device state (deprecated).

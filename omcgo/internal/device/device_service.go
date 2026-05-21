@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -1080,29 +1081,24 @@ func hasEventCode(events []string, target string) bool {
 }
 
 // detectTechnology tries to determine the radio technology from Inform parameters.
+//
+// 设备从来不直接送 Technology = "LTE"/"NR" 这种参数值（TR-069 协议层面没
+// 这种参数）；只送 Device.DeviceInfo.ModelName / Description 字符串。这里
+// 用 substring 启发式从 model 名字推断 5G/NR vs 4G/LTE。
+//
+// 大小写不敏感：Ericsson AIR6488 写 "AIR6488 5G NR"，华为 AAU5613 可能写
+// "5g nr" 小写 — 全部转 lower 后再匹配。返回的 model.Technology 是内部
+// canonical 小写常量。
 func detectTechnology(params []tr069.ParameterValueStruct) model.Technology {
 	for _, p := range params {
 		if p.Name == "Device.DeviceInfo.ModelName" || p.Name == "Device.DeviceInfo.Description" {
-			// Simple heuristic: check for NR/5G keywords
-			if containsAny(p.Value, "NR", "5G", "gNB") {
+			v := strings.ToLower(p.Value)
+			if strings.Contains(v, "nr") || strings.Contains(v, "5g") || strings.Contains(v, "gnb") {
 				return model.TechNR
 			}
 		}
 	}
 	return model.TechLTE
-}
-
-func containsAny(s string, substrs ...string) bool {
-	for _, sub := range substrs {
-		if len(s) >= len(sub) {
-			for i := 0; i <= len(s)-len(sub); i++ {
-				if s[i:i+len(sub)] == sub {
-					return true
-				}
-			}
-		}
-	}
-	return false
 }
 
 func findParamValue(params []tr069.ParameterValueStruct, name string) string {

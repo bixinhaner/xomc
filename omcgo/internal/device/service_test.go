@@ -649,64 +649,43 @@ func TestDetectTechnology(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Tests: containsAny (package-level helper)
+// Tests: detectTechnology — case-insensitive 补充用例
 // ---------------------------------------------------------------------------
 
-func TestContainsAny(t *testing.T) {
+// TestDetectTechnology_CaseInsensitive 锁住 detectTechnology 对 model name /
+// description 大小写不敏感的契约。设备厂商命名风格不统一（华为大写、Comba
+// 全小写、Ericsson 混写），不能假设固定大小写。
+func TestDetectTechnology_CaseInsensitive(t *testing.T) {
 	tests := []struct {
-		name    string
-		s       string
-		substrs []string
-		want    bool
+		name   string
+		params []tr069.ParameterValueStruct
+		want   model.Technology
 	}{
 		{
-			name:    "exact match",
-			s:       "NR",
-			substrs: []string{"NR"},
-			want:    true,
+			name: "lowercase 5g in description",
+			params: []tr069.ParameterValueStruct{
+				{Name: "Device.DeviceInfo.Description", Value: "indoor 5g pico"},
+			},
+			want: model.TechNR,
 		},
 		{
-			name:    "substring match",
-			s:       "SmallCell-NR-SA",
-			substrs: []string{"NR"},
-			want:    true,
+			name: "mixed case gNB",
+			params: []tr069.ParameterValueStruct{
+				{Name: "Device.DeviceInfo.ModelName", Value: "gNB-DU-100"},
+			},
+			want: model.TechNR,
 		},
 		{
-			name:    "no match",
-			s:       "LTE device",
-			substrs: []string{"NR", "5G", "gNB"},
-			want:    false,
-		},
-		{
-			name:    "empty string",
-			s:       "",
-			substrs: []string{"NR"},
-			want:    false,
-		},
-		{
-			name:    "empty substrs",
-			s:       "anything",
-			substrs: nil,
-			want:    false,
-		},
-		{
-			name:    "multiple substrs second matches",
-			s:       "Indoor 5G pico",
-			substrs: []string{"NR", "5G"},
-			want:    true,
-		},
-		{
-			name:    "match at end",
-			s:       "model-gNB",
-			substrs: []string{"gNB"},
-			want:    true,
+			name: "mixed-case nr in middle of string",
+			params: []tr069.ParameterValueStruct{
+				{Name: "Device.DeviceInfo.Description", Value: "5G nr base station"},
+			},
+			want: model.TechNR,
 		},
 	}
-
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := containsAny(tc.s, tc.substrs...)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, detectTechnology(tc.params))
 		})
 	}
 }
