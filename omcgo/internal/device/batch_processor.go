@@ -367,20 +367,23 @@ func (p *BatchInformProcessor) batchUpdateDevices(ctx context.Context, updates [
 			udpAddr = dev.UDPConnectionRequestAddress
 		}
 
+		// T-0162: devices.status 列已 DROP（migrations/000137），改写 lifecycle_state +
+		// is_online 双列。prepareDeviceUpdate 已显式维护这两个新字段（收到 Inform 即
+		// IsOnline=true、Discovered/Registered 升 Commissioned），这里直接持久化。
 		// AND deleted_at IS NULL：防止软删的 device 被 inform 静默复活
 		// （cache stale → 这里 UPDATE 仍命中已删行，silent data corruption）
 		query := `UPDATE devices SET
 			oui = $1, product_class = $2, manufacturer = $3,
-			status = $4, firmware_version = $5,
-			ip_address = $6, connection_request_url = $7,
-			nat_detected = $8, udp_connection_request_address = $9,
-			last_inform_at = $10, last_inform_events = $11,
+			lifecycle_state = $4, is_online = $5, firmware_version = $6,
+			ip_address = $7, connection_request_url = $8,
+			nat_detected = $9, udp_connection_request_address = $10,
+			last_inform_at = $11, last_inform_events = $12,
 			updated_at = NOW()
-		WHERE id = $12 AND deleted_at IS NULL`
+		WHERE id = $13 AND deleted_at IS NULL`
 
 		batch.Queue(query,
 			dev.OUI, dev.ProductClass, dev.Manufacturer,
-			dev.Status, dev.FirmwareVersion,
+			dev.LifecycleState, dev.IsOnline, dev.FirmwareVersion,
 			ipAddr, dev.ConnectionRequestURL,
 			dev.NatDetected, udpAddr,
 			dev.LastInformAt, eventsData,
@@ -500,7 +503,17 @@ func prepareDeviceUpdate(device *model.Device, inform *tr069.InformMessage) ([]m
 		stunChanged = true
 	}
 
-	// 自动切换到 active 状态
+	// T-0162: 收到 Inform 即视为在线 —— 必须显式写新字段 IsOnline，因为
+	// normalizeDeviceForPersist shim 只在 LifecycleState=="" 时才从 Status 派生新字段；
+	// 而 scan 出来的设备 LifecycleState 早已是 'commissioned'（非空），shim 不会重做
+	// 派生，Update SQL 会拿到 scan 时的旧 IsOnline（false） → DB 永远 is_online=false
+	// → executor 判定离线 → 任何任务派发都进 suspended。
+	device.IsOnline = true
+	// 设备初次入网（Discovered/Registered）→ 升级到 Commissioned。
+	if device.LifecycleState == model.LifecycleDiscovered || device.LifecycleState == model.LifecycleRegistered {
+		device.LifecycleState = model.LifecycleCommissioned
+	}
+	// 自动切换到 active 状态（老 Status 字段兼容路径，给读侧未迁移代码用）。
 	if device.Status == model.DeviceDiscovered || device.Status == model.DeviceOffline || device.Status == model.DeviceRegistered {
 		device.Status = model.DeviceActive
 	}
@@ -569,20 +582,23 @@ func (r *PgDeviceRepository) BatchUpdateDevices(ctx context.Context, devices []*
 			udpAddr = dev.UDPConnectionRequestAddress
 		}
 
+		// T-0162: devices.status 列已 DROP（migrations/000137），改写 lifecycle_state +
+		// is_online 双列。prepareDeviceUpdate 已显式维护这两个新字段（收到 Inform 即
+		// IsOnline=true、Discovered/Registered 升 Commissioned），这里直接持久化。
 		// AND deleted_at IS NULL：防止软删的 device 被 inform 静默复活
 		// （cache stale → 这里 UPDATE 仍命中已删行，silent data corruption）
 		query := `UPDATE devices SET
 			oui = $1, product_class = $2, manufacturer = $3,
-			status = $4, firmware_version = $5,
-			ip_address = $6, connection_request_url = $7,
-			nat_detected = $8, udp_connection_request_address = $9,
-			last_inform_at = $10, last_inform_events = $11,
+			lifecycle_state = $4, is_online = $5, firmware_version = $6,
+			ip_address = $7, connection_request_url = $8,
+			nat_detected = $9, udp_connection_request_address = $10,
+			last_inform_at = $11, last_inform_events = $12,
 			updated_at = NOW()
-		WHERE id = $12 AND deleted_at IS NULL`
+		WHERE id = $13 AND deleted_at IS NULL`
 
 		batch.Queue(query,
 			dev.OUI, dev.ProductClass, dev.Manufacturer,
-			dev.Status, dev.FirmwareVersion,
+			dev.LifecycleState, dev.IsOnline, dev.FirmwareVersion,
 			ipAddr, dev.ConnectionRequestURL,
 			dev.NatDetected, udpAddr,
 			dev.LastInformAt, eventsData,
