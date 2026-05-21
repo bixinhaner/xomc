@@ -44,7 +44,7 @@ import type { DeviceGroup } from '@core/types/device';
 import { useT } from '@/hooks/useT';
 import { apiPermissionApi } from '@core/services/api/apiPermissionApi';
 import { adminApi } from '@core/services/api/adminApi';
-import { useMenuTree } from '@core/hooks/api/useMenus';
+import { useMenuTree, useInvalidateUserMenus } from '@core/hooks/api/useMenus';
 import { fetchRoleMenuIds, setRoleMenus as apiSetRoleMenus } from '@core/services/api/menuApi';
 import type { Menu } from '@core/types/menu';
 
@@ -135,10 +135,17 @@ function isMenuVisible(m: Menu): boolean {
   return m.status === 'normal' && m.showStatus !== 'hide';
 }
 
+/** 菜单权限树只展示「目录 / 菜单」节点。按钮(type='button')由「角色 API」页签管理，
+ * 不再混在菜单权限树里。若树里含 button 节点，旧 `expandMenuAncestors` 会在后端
+ * 把 button 的祖先 menu 自动补回 role_menus，导致用户取消父菜单后回显复活。 */
+function isMenuNode(m: Menu): boolean {
+  return m.type !== 'button';
+}
+
 /** 把后端菜单树转 antd TreeDataNode 树。叶子节点显式 isLeaf=true。 */
 function buildMenuPermissionTree(menus: Menu[]): TreeDataNode[] {
   const sortAndFilter = (list: Menu[]) =>
-    [...list].filter(isMenuVisible).sort((a, b) => a.sortOrder - b.sortOrder);
+    [...list].filter(isMenuVisible).filter(isMenuNode).sort((a, b) => a.sortOrder - b.sortOrder);
   const walk = (list: Menu[]): TreeDataNode[] =>
     sortAndFilter(list).map((m) => {
       const childNodes = m.children?.length ? walk(m.children) : [];
@@ -149,11 +156,12 @@ function buildMenuPermissionTree(menus: Menu[]): TreeDataNode[] {
   return walk(menus);
 }
 
-/** 全部节点 ID（含目录/菜单/按钮），用于"全选/全不选"。 */
+/** 仅目录 + 菜单节点 ID（不含按钮），用于"全选/全不选"以及 `permissionsToMenuIds`
+ * 的白名单——按钮 ID 由 [[buttonIdsUnderMenus]] 在保存时单独合并回去。 */
 function collectAllMenuIds(menus: Menu[]): string[] {
   const ids: string[] = [];
   const walk = (list: Menu[]) => {
-    for (const m of list.filter(isMenuVisible)) {
+    for (const m of list.filter(isMenuVisible).filter(isMenuNode)) {
       ids.push(m.id);
       if (m.children?.length) walk(m.children);
     }
@@ -165,15 +173,48 @@ function collectAllMenuIds(menus: Menu[]): string[] {
 /** 一级目录 + 二级菜单 ID（用于"展开/折叠"复选框 + 回显默认展开集）。 */
 function collectExpandableMenuIds(menus: Menu[]): string[] {
   const ids: string[] = [];
-  for (const top of menus.filter(isMenuVisible)) {
+  for (const top of menus.filter(isMenuVisible).filter(isMenuNode)) {
     ids.push(top.id);
     if (top.children?.length) {
-      for (const child of top.children.filter(isMenuVisible)) {
+      for (const child of top.children.filter(isMenuVisible).filter(isMenuNode)) {
         if (child.children?.length) ids.push(child.id);
       }
     }
   }
   return ids;
+}
+
+/** 取「祖先菜单仍被勾选」的 button ID 集合：保存时把这些 button 写回 role_menus，
+ * 避免角色编辑面板把所有按钮级 RBAC 一次性清空。祖先（任意层级）的判定按 menus
+ * 树的 parentId 链向上回溯；任一祖先不在 checkedMenuIds 即丢弃。 */
+function buttonIdsUnderMenus(menus: Menu[], checkedMenuIds: Set<string>): string[] {
+  const flat: Menu[] = [];
+  const walk = (list: Menu[]) => {
+    for (const m of list) {
+      flat.push(m);
+      if (m.children?.length) walk(m.children);
+    }
+  };
+  walk(menus);
+  const byId = new Map<string, Menu>();
+  for (const m of flat) byId.set(m.id, m);
+
+  const out: string[] = [];
+  for (const m of flat) {
+    if (!isMenuVisible(m) || m.type !== 'button') continue;
+    // 按钮自身不在 menu tree 的勾选集合里；只要它「最近的菜单祖先」仍勾选即保留。
+    let cur: Menu | undefined = m.parentId ? byId.get(m.parentId) : undefined;
+    let keep = false;
+    while (cur) {
+      if (cur.type !== 'button') {
+        keep = checkedMenuIds.has(cur.id);
+        break;
+      }
+      cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+    }
+    if (keep) out.push(m.id);
+  }
+  return out;
 }
 
 export default function RoleManagement() {
@@ -211,6 +252,15 @@ export default function RoleManagement() {
   // API 树展开状态 + 父子联动（与菜单权限 UI 保持一致）
   const [expandedApiGroupKeys, setExpandedApiGroupKeys] = useState<React.Key[]>([]);
   const [apiCheckStrictly, setApiCheckStrictly] = useState(false);
+  // role_menus 中属于 button 类型的原始 ID（从后端读回的角色绑定里拆出来）。
+  // 菜单权限树只展示 directory/menu，按钮不在树里；保存时把"祖先菜单仍勾选"的
+  // 按钮 ID 回填进 PUT 请求，避免按钮级 RBAC 被本面板顺手清空。
+  const [originalButtonIds, setOriginalButtonIds] = useState<string[]>([]);
+
+  // 用于编辑/新增保存后立即让侧边栏（useUserMenus）失效重拉，
+  // 修复"改完菜单权限后侧边栏要等 5 分钟或重新登录才更新"的体验问题。
+  // （source='builtIn' 的内置超管走后端旁路返回全量菜单，不受此影响。）
+  const invalidateUserMenus = useInvalidateUserMenus();
 
 
   const { data, isLoading, refetch } = useRoles({
@@ -406,12 +456,20 @@ export default function RoleManagement() {
     setExpandedApiGroupKeys([]);
     // 清空快速回显，避免上一个角色的菜单 ID 残留
     setCheckedPermissionKeys([]);
+    setOriginalButtonIds([]);
     setSelectedDeviceGroupIds(role.deviceGroupIds || []);
     setSelectedNetworkTypes(role.networkTypes || []);
 
     // 1) 拉角色已绑定 menu_ids（GET /admin/roles/:id/menus）
+    //    把返回的 ID 拆成「菜单/目录」与「按钮」两份：
+    //      - 菜单/目录 ID → setCheckedPermissionKeys 驱动 antd Tree
+    //      - 按钮 ID    → setOriginalButtonIds 保留，保存时按祖先勾选状态合并回 PUT
     getRoleMenuIdsMut.mutate(role.id, {
-      onSuccess: (menuIds) => setCheckedPermissionKeys(menuIds),
+      onSuccess: (allIds) => {
+        const menuSet = new Set(allMenuIds);
+        setCheckedPermissionKeys(allIds.filter((id) => menuSet.has(id)));
+        setOriginalButtonIds(allIds.filter((id) => !menuSet.has(id)));
+      },
     });
     // 2) 拉设备分组 + 网络制式专项端点
     getRoleDeviceGroupsMut.mutate(role.id, {
@@ -424,7 +482,7 @@ export default function RoleManagement() {
     getRoleApiPermissions.mutate(role.id, {
       onSuccess: (ids) => setSelectedApiEndpointIds(ids),
     });
-  }, [form, expandableMenuIds, getRoleMenuIdsMut, getRoleDeviceGroupsMut, getRoleApiPermissions]);
+  }, [form, allMenuIds, getRoleMenuIdsMut, getRoleDeviceGroupsMut, getRoleApiPermissions]);
 
   // 已有的角色名称列表（用于重复检查）
   const existingRoleNames = useMemo(
@@ -436,12 +494,24 @@ export default function RoleManagement() {
 
   /**
    * 把当前 checkedPermissionKeys（菜单 ID 数组）转成提交给后端的 menu_ids 数组。
-   * 仅过滤出"实际存在于当前菜单树"的 ID（防止旧 cache 的脏 ID 漏到 PUT）。
+   *
+   * 组成两部分：
+   *   1. 树里勾选且仍存在于菜单树的 directory/menu ID（防止旧 cache 脏 ID 漏到 PUT）
+   *   2. 原 role_menus 中的 button ID 里「祖先菜单仍勾选」的子集
+   *
+   * 第 2 部分是保留按钮级 RBAC 的关键：菜单权限树不展示 button 节点，但 role_menus
+   * 表的按钮绑定要保留下去——否则用户每次保存角色都会把所有按钮 RBAC 清掉。同时
+   * 用户取消某个父菜单时，其下的按钮会被一起摘出 PUT，避免后端 expandMenuAncestors
+   * 把父菜单从按钮反向补回（这正是"取消设备规则保存后又冒出来"的成因）。
    */
   const permissionsToMenuIds = useCallback((keys: React.Key[]): string[] => {
     const valid = new Set(allMenuIds);
-    return (keys as string[]).filter((k) => valid.has(k));
-  }, [allMenuIds]);
+    const menuIds = (keys as string[]).filter((k) => valid.has(k));
+    const checkedMenuSet = new Set(menuIds);
+    const liveButtons = new Set(buttonIdsUnderMenus(menuTree, checkedMenuSet));
+    const preservedButtons = originalButtonIds.filter((id) => liveButtons.has(id));
+    return [...menuIds, ...preservedButtons];
+  }, [allMenuIds, originalButtonIds, menuTree]);
 
   // 至少选了一个菜单（无论目录/菜单/按钮）即视为有权限。
   const hasAnyPermission = useMemo(
@@ -555,58 +625,65 @@ export default function RoleManagement() {
       return;
     }
 
-    form.validateFields().then((vals) => {
+    form.validateFields().then(async (vals) => {
       const menuIds = permissionsToMenuIds(checkedPermissionKeys);
-      createRole.mutate(
-        {
-          roleName: vals.roleName as string,
-          description: (vals.description as string) ?? '',
-          // P3：permissions 字段已无意义（permissions 表 DROP），传空数组兼容 Role 类型签名。
-          // 真正的菜单权限由下方 setRoleMenusMut 写入 role_menus。
-          permissions: [],
-          deviceGroupIds: selectedDeviceGroupIds,
-          networkTypes: selectedNetworkTypes,
-          builtIn: 0,
-        } as unknown as Parameters<typeof createRole.mutate>[0],
-        {
-          onSuccess: (newRole) => {
-            if (newRole?.id) {
-              // 写菜单绑定（role_menus）
-              setRoleMenusMut.mutate({ roleId: newRole.id, menuIds });
-              // 通过专项端点保存设备分组 + 网络制式
-              setRoleDeviceGroupsMut.mutate({
-                roleId: newRole.id,
-                deviceGroupIds: selectedDeviceGroupIds,
-                networkTypes: selectedNetworkTypes,
-              });
-              // 保存 API 权限
-              if (selectedApiEndpointIds.length > 0) {
-                setRoleApiPermissions.mutate({ roleId: newRole.id, endpointIds: selectedApiEndpointIds });
-              }
-            }
-            message.success(t('common.save'));
-            setCreateVisible(false);
-            form.resetFields();
-            setCheckedPermissionKeys([]);
-            setExpandedPermissionKeys([]);
-            setSelectedDeviceGroupIds([]);
-            setSelectedNetworkTypes([]);
-            setSelectedApiEndpointIds([]);
-          },
-        },
-      );
+      try {
+        const newRole = await createRole.mutateAsync(
+          {
+            roleName: vals.roleName as string,
+            description: (vals.description as string) ?? '',
+            // P3：permissions 字段已无意义（permissions 表 DROP），传空数组兼容 Role 类型签名。
+            // 真正的菜单权限由下方 setRoleMenusMut 写入 role_menus。
+            permissions: [],
+            deviceGroupIds: selectedDeviceGroupIds,
+            networkTypes: selectedNetworkTypes,
+            builtIn: 0,
+          } as unknown as Parameters<typeof createRole.mutateAsync>[0],
+        );
+        if (newRole?.id) {
+          // 串行 await 三个专项端点：
+          //   - 任一失败立即 throw，下面 catch 弹真实 message
+          //   - 不再写"成功 toast 已弹，setRoleMenus 静默 500"这种状态错位
+          await setRoleMenusMut.mutateAsync({ roleId: newRole.id, menuIds });
+          await setRoleDeviceGroupsMut.mutateAsync({
+            roleId: newRole.id,
+            deviceGroupIds: selectedDeviceGroupIds,
+            networkTypes: selectedNetworkTypes,
+          });
+          if (selectedApiEndpointIds.length > 0) {
+            await setRoleApiPermissions.mutateAsync({
+              roleId: newRole.id,
+              endpointIds: selectedApiEndpointIds,
+            });
+          }
+        }
+        // 让当前用户的侧边栏菜单立即刷新（非 builtIn 用户）。
+        await invalidateUserMenus();
+        message.success(t('common.save'));
+        setCreateVisible(false);
+        form.resetFields();
+        setCheckedPermissionKeys([]);
+        setOriginalButtonIds([]);
+        setExpandedPermissionKeys([]);
+        setSelectedDeviceGroupIds([]);
+        setSelectedNetworkTypes([]);
+        setSelectedApiEndpointIds([]);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : t('common.saveFailed');
+        message.error(msg);
+      }
     });
-  }, [form, createRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, hasAnyPermission, allSecondLevelIds, permissionsToMenuIds, setRoleMenusMut, setRoleDeviceGroupsMut, setRoleApiPermissions, message, t]);
+  }, [form, createRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, hasAnyPermission, allSecondLevelIds, permissionsToMenuIds, setRoleMenusMut, setRoleDeviceGroupsMut, setRoleApiPermissions, invalidateUserMenus, message, t]);
 
   // doEditSubmit 拆出实际提交逻辑，配合下方"清空设备分组二次确认"复用。
   // 必须先于 handleEdit 声明，否则 React 的 useCallback 会触发 react-hooks/refs：
   // "Cannot access doEditSubmit before it is declared"。
   const doEditSubmit = useCallback(() => {
     if (!selectedRole) return;
-    form.validateFields().then((vals) => {
+    form.validateFields().then(async (vals) => {
       const menuIds = permissionsToMenuIds(checkedPermissionKeys);
-      updateRole.mutate(
-        {
+      try {
+        await updateRole.mutateAsync({
           id: selectedRole.id,
           data: {
             roleName: vals.roleName as string,
@@ -617,33 +694,38 @@ export default function RoleManagement() {
             deviceGroupIds: selectedDeviceGroupIds,
             networkTypes: selectedNetworkTypes,
           },
-        },
-        {
-          onSuccess: () => {
-            // 写菜单绑定（role_menus）
-            setRoleMenusMut.mutate({ roleId: selectedRole.id, menuIds });
-            // 通过专项端点保存设备分组 + 网络制式
-            setRoleDeviceGroupsMut.mutate({
-              roleId: selectedRole.id,
-              deviceGroupIds: selectedDeviceGroupIds,
-              networkTypes: selectedNetworkTypes,
-            });
-            // 保存 API 权限
-            setRoleApiPermissions.mutate({ roleId: selectedRole.id, endpointIds: selectedApiEndpointIds });
-            message.success(t('common.save'));
-            setEditVisible(false);
-            form.resetFields();
-            setSelectedRole(null);
-            setCheckedPermissionKeys([]);
-            setExpandedPermissionKeys([]);
-            setSelectedDeviceGroupIds([]);
-            setSelectedNetworkTypes([]);
-            setSelectedApiEndpointIds([]);
-          },
-        },
-      );
+        });
+        // 串行 await：任一专项端点失败立即 throw，下面 catch 弹真实 message。
+        // 避免「updateRole 成功 toast 已弹，setRoleMenusMut 后台 500」的状态错位
+        // ——这正是"取消设备规则保存后却没生效"的另一支可能源。
+        await setRoleMenusMut.mutateAsync({ roleId: selectedRole.id, menuIds });
+        await setRoleDeviceGroupsMut.mutateAsync({
+          roleId: selectedRole.id,
+          deviceGroupIds: selectedDeviceGroupIds,
+          networkTypes: selectedNetworkTypes,
+        });
+        await setRoleApiPermissions.mutateAsync({
+          roleId: selectedRole.id,
+          endpointIds: selectedApiEndpointIds,
+        });
+        // 让当前用户的侧边栏菜单立即刷新（非 builtIn 用户）。
+        await invalidateUserMenus();
+        message.success(t('common.save'));
+        setEditVisible(false);
+        form.resetFields();
+        setSelectedRole(null);
+        setCheckedPermissionKeys([]);
+        setOriginalButtonIds([]);
+        setExpandedPermissionKeys([]);
+        setSelectedDeviceGroupIds([]);
+        setSelectedNetworkTypes([]);
+        setSelectedApiEndpointIds([]);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : t('common.saveFailed');
+        message.error(msg);
+      }
     });
-  }, [selectedRole, form, updateRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, permissionsToMenuIds, setRoleMenusMut, setRoleDeviceGroupsMut, setRoleApiPermissions, message, t]);
+  }, [selectedRole, form, updateRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, permissionsToMenuIds, setRoleMenusMut, setRoleDeviceGroupsMut, setRoleApiPermissions, invalidateUserMenus, message, t]);
 
   // 校验并提交编辑
   const handleEdit = useCallback(() => {
@@ -1175,6 +1257,7 @@ export default function RoleManagement() {
     setCreateVisible(false);
     form.resetFields();
     setCheckedPermissionKeys([]);
+    setOriginalButtonIds([]);
     setExpandedPermissionKeys([]);
     setSelectedDeviceGroupIds([]);
     setSelectedNetworkTypes([]);
@@ -1187,6 +1270,7 @@ export default function RoleManagement() {
     form.resetFields();
     setSelectedRole(null);
     setCheckedPermissionKeys([]);
+    setOriginalButtonIds([]);
     setExpandedPermissionKeys([]);
     setSelectedDeviceGroupIds([]);
     setSelectedNetworkTypes([]);
@@ -1199,6 +1283,7 @@ export default function RoleManagement() {
     form.resetFields();
     setSelectedRole(null);
     setCheckedPermissionKeys([]);
+    setOriginalButtonIds([]);
     setExpandedPermissionKeys([]);
     setSelectedDeviceGroupIds([]);
     setSelectedNetworkTypes([]);
