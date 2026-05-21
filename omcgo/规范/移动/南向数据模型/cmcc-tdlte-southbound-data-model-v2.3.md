@@ -1702,192 +1702,545 @@ TranslateToPrivate(ctx, productId, softwareVersion, standardPath) → Translatio
 >
 > **权限图例**：📖 只读（GPV-only）/ 📝 可写（GPV + SPV）/ 📖📝 混合
 
-### 速览（18 分组 / 72 命令）
+### 速览（18 分组 / 72 spec 命令 / 228 派生 op）
 
-| 索引 | 对象路径根 | 分组中文名 | 命令数 |
-|------|-----------|-----------|--------|
-| SA | `DeviceInfo` | 设备信息参数管理 | 2 |
-| SB | `SoftwareCtrl` | 软件版本参数管理 | 1 |
-| SC | `ManagementServer` | 基站网管参数管理 | 1 |
-| SD | `FaultMgmt` | 告警参数管理 | 6 |
-| SE | `DeviceLogMgmt` | 日志参数管理 | 1 |
-| SF | `Services.FAPService` | 小区服务参数管理（总体） | 11 |
-| SG | `Services.FAPService.{i}.SCTP.Transport` | SCTP参数管理 | 2 |
-| SH | `Services.FAPService.{i}.CellConfig.LTE.RAN` | RAN协议栈参数 | 6 |
-| SI | `Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList` | 邻区参数管理 | 4 |
-| SJ | `Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility` | 移动性参数管理 | 15 |
-| SK | `Services.FAPService.{i}.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam` | SON参数管理 | 2 |
-| SL | `WANDevice` | WAN口配置参数管理 | 7 |
-| SM | `Ipsec` | IPsec参数管理 | 1 |
-| SN | `Time` | 时间服务器参数管理 | 1 |
-| SO | `FAP.GPS` | GPS信息参数管理 | 1 |
-| SP | `FAP.MRMgmt` | MR参数管理 | 1 |
-| SQ | `FAP.PerfMgmt` | 性能参数管理 | 1 |
-| SR | `ENanocell` | 扩展型一体化皮基站参数 | 9 |
+| 索引 | 对象路径根 | 分组中文名 | spec 命令数 | 派生 op 数 |
+|------|-----------|-----------|-----:|-----:|
+| SA | `DeviceInfo` | 设备信息参数管理 | 2 | 3 |
+| SB | `SoftwareCtrl` | 软件版本参数管理 | 1 | 2 |
+| SC | `ManagementServer` | 基站网管参数管理 | 1 | 2 |
+| SD | `FaultMgmt` | 告警参数管理 | 6 | 9 |
+| SE | `DeviceLogMgmt` | 日志参数管理 | 1 | 2 |
+| SF | `Services.FAPService` | 小区服务参数管理（总体） | 11 | 37 |
+| SG | `Services.FAPService.{i}.SCTP.Transport` | SCTP 参数管理 | 2 | 3 |
+| SH | `Services.FAPService.{i}.CellConfig.LTE.RAN` | RAN 协议栈参数 | 6 | 24 |
+| SI | `Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList` | 邻区参数管理 | 4 | 16 |
+| SJ | `Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility` | 移动性参数管理 | 15 | 60 |
+| SK | `Services.FAPService.{i}.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam` | SON 参数管理 | 2 | 5 |
+| SL | `WANDevice` | WAN 口配置参数管理 | 7 | 28 |
+| SM | `Ipsec` | IPsec 参数管理 | 1 | 2 |
+| SN | `Time` | 时间服务器参数管理 | 1 | 2 |
+| SO | `FAP.GPS` | GPS 信息参数管理 | 1 | 1 |
+| SP | `FAP.MRMgmt` | MR 参数管理 | 1 | 4 |
+| SQ | `FAP.PerfMgmt` | 性能参数管理 | 1 | 4 |
+| SR | `ENanocell` | 扩展型一体化皮基站参数 | 9 | 24 |
 
-### 分组明细
+### 分组明细（按 R-3 op-split 派生）
+
+> **派生规则（R-3，详见调整方案 §4）**：每个 spec `#### 命令: <path> <perm>` 按下表展开成 1-4 个子命令。
+>
+> | 条件 | 生成 |
+> |------|------|
+> | 总是 | **LST** `<对象名>` — GetParameterValues，覆盖 R + RW 全部 path |
+> | RW > 0 | **MOD** `<对象名>` — SetParameterValues，仅 RW 子集 path |
+> | arity ≥ 1 且 RW > 0 | **ADD** + **RMV** `<对象名>` — AddObject / DeleteObject |
+> | RW = 0 | ❌ 不生成 MOD（路径全只读 → 没有可改 path → 命令不应存在） |
+> | arity = 0 或 RW = 0 | ❌ 不生成 ADD/RMV |
+>
+> **⚠ 标记**：路径含 `{i}` 自动派生 ADD/RMV，但 TR-069 业务语义上不是用户可增删的容器（如固定枚举的 FAPService 载波 i=1~3、硬件描述的 MU/Slot/EU/RU 等）；后续 admin overlay 可隐藏。
+>
+> **命名约定**：派生命令的中文名 = `<OP> <对象中文名>`，例如 `LST 设备信息`、`MOD 软件控制`、`ADD MME 池配置`、`RMV LTE 邻区` 等。
 
 #### SA · DeviceInfo — 设备信息参数管理
 
-共 2 个命令：
+**G-01 · `Device.DeviceInfo.*` 📖📝**（R=15 / RW=2 / arity=0）
 
-- `Device.DeviceInfo.* 📖📝`
-- `Device.DeviceInfo.SwUpgrade.* 📖`
+- **LST 设备信息** — 17 paths（GetParameterValues 全集）
+- **MOD 设备信息** — 2 paths（SetParameterValues，RW 子集）
+- ❌ 不生成：ADD/RMV（arity=0，非多实例对象）
+
+**G-02 · `Device.DeviceInfo.SwUpgrade.*` 📖**（R=3 / RW=0 / arity=0）
+
+- **LST 设备版本升级** — 3 paths（GetParameterValues 全集）
+- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（arity=0，非多实例对象）
 
 #### SB · SoftwareCtrl — 软件版本参数管理
 
-共 1 个命令：
+**G-03 · `Device.SoftwareCtrl.*` 📖📝**（R=2 / RW=3 / arity=0）
 
-- `Device.SoftwareCtrl.* 📖📝`
+- **LST 软件控制** — 5 paths（GetParameterValues 全集）
+- **MOD 软件控制** — 3 paths（SetParameterValues，RW 子集）
+- ❌ 不生成：ADD/RMV（arity=0，非多实例对象）
 
 #### SC · ManagementServer — 基站网管参数管理
 
-共 1 个命令：
+**G-04 · `Device.ManagementServer.*` 📖📝**（R=4 / RW=15 / arity=0）
 
-- `Device.ManagementServer.* 📖📝`
+- **LST 网管参数** — 19 paths（GetParameterValues 全集）
+- **MOD 网管参数** — 15 paths（SetParameterValues，RW 子集）
+- ❌ 不生成：ADD/RMV（arity=0，非多实例对象）
 
 #### SD · FaultMgmt — 告警参数管理
 
-共 6 个命令：
+**G-05 · `Device.FaultMgmt.*` 📖**（R=6 / RW=0 / arity=0）
 
-- `Device.FaultMgmt.* 📖`
-- `Device.FaultMgmt.CurrentAlarm.{i}.* 📖`
-- `Device.FaultMgmt.ExpeditedEvent.{i}.* 📖`
-- `Device.FaultMgmt.HistoryEvent.{i}.* 📖`
-- `Device.FaultMgmt.QueuedEvent.{i}.* 📖`
-- `Device.FaultMgmt.SupportedAlarm.{i}.* 📖📝`
+- **LST 故障管理** — 6 paths（GetParameterValues 全集）
+- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（arity=0，非多实例对象）
+
+**G-06 · `Device.FaultMgmt.CurrentAlarm.{i}.*` 📖**（R=11 / RW=0 / arity=1）
+
+- **LST 当前告警实例** — 11 paths（GetParameterValues 全集）
+- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
+
+**G-07 · `Device.FaultMgmt.ExpeditedEvent.{i}.*` 📖**（R=11 / RW=0 / arity=1）
+
+- **LST 实时告警实例** — 11 paths（GetParameterValues 全集）
+- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
+
+**G-08 · `Device.FaultMgmt.HistoryEvent.{i}.*` 📖**（R=11 / RW=0 / arity=1）
+
+- **LST 历史告警实例** — 11 paths（GetParameterValues 全集）
+- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
+
+**G-09 · `Device.FaultMgmt.QueuedEvent.{i}.*` 📖**（R=11 / RW=0 / arity=1）
+
+- **LST 队列告警实例** — 11 paths（GetParameterValues 全集）
+- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
+
+**G-10 · `Device.FaultMgmt.SupportedAlarm.{i}.*` 📖📝**（R=4 / RW=1 / arity=1）
+
+- **LST 支持告警实例** — 5 paths（GetParameterValues 全集）
+- **MOD 支持告警实例** — 1 paths（SetParameterValues，RW 子集）
+- **ADD 支持告警实例** — AddObject，新增 `{i}` 实例
+- **RMV 支持告警实例** — DeleteObject，删除 `{i}` 实例
 
 #### SE · DeviceLogMgmt — 日志参数管理
 
-共 1 个命令：
+**G-11 · `Device.LogMgmt.*` 📝**（R=0 / RW=5 / arity=0）
 
-- `Device.LogMgmt.* 📝`
+- **LST 日志管理** — 5 paths（GetParameterValues 全集）
+- **MOD 日志管理** — 5 paths（SetParameterValues，RW 子集）
+- ❌ 不生成：ADD/RMV（arity=0，非多实例对象）
 
 #### SF · Services.FAPService — 小区服务参数管理（总体）
 
-共 11 个命令：
+**G-12 · `Device.Services.FAPControl.LTE.*` 📖📝**（R=2 / RW=1 / arity=0）
 
-- `Device.Services.FAPControl.LTE.* 📖📝`
-- `Device.Services.FAPControl.LTE.Gateway.* 📝`
-- `Device.Services.FAPControl.LTE.MmePoolConfigParam.{i}.* 📖📝`
-- `Device.Services.FAPControl.LTE.S1U.{i}.* 📖`
-- `Device.Services.FAPControl.X2IpAddrMapInfo.{i}.* 📝`
-- `Device.Services.FAPService.{i}.* 📖📝`
-- `Device.Services.FAPService.{i}.Capabilities.* 📝`
-- `Device.Services.FAPService.{i}.CellConfig.Capabilities.* 📖📝`
-- `Device.Services.FAPService.{i}.CellConfig.LTE.EPC.* 📝`
-- `Device.Services.FAPService.{iα}.CellConfig.LTE.EPC.PLMNList.{iβ}.* 📝`
-- `Device.Services.FAPService.{iα}.CellConfig.LTE.VoLTE.PdcpInitParam.{iβ}.* 📝`
+- **LST FAPControl LTE** — 3 paths（GetParameterValues 全集）
+- **MOD FAPControl LTE** — 1 paths（SetParameterValues，RW 子集）
+- ❌ 不生成：ADD/RMV（arity=0，非多实例对象）
 
-#### SG · Services.FAPService.{i}.SCTP.Transport — SCTP参数管理
+**G-13 · `Device.Services.FAPControl.LTE.Gateway.*` 📝**（R=0 / RW=10 / arity=0）
 
-共 2 个命令：
+- **LST 安全/接入网关** — 10 paths（GetParameterValues 全集）
+- **MOD 安全/接入网关** — 10 paths（SetParameterValues，RW 子集）
+- ❌ 不生成：ADD/RMV（arity=0，非多实例对象）
 
-- `Device.Services.FAPControl.Transport.SCTP.* 📝`
-- `Device.Services.FAPControl.Transport.SCTP.Assoc.{i}.* 📖`
+**G-14 · `Device.Services.FAPControl.LTE.MmePoolConfigParam.{i}.*` 📖📝**（R=3 / RW=2 / arity=1）
 
-#### SH · Services.FAPService.{i}.CellConfig.LTE.RAN — RAN协议栈参数
+- **LST MME 池配置** — 5 paths（GetParameterValues 全集）
+- **MOD MME 池配置** — 2 paths（SetParameterValues，RW 子集）
+- **ADD MME 池配置** — AddObject，新增 `{i}` 实例
+- **RMV MME 池配置** — DeleteObject，删除 `{i}` 实例
 
-共 6 个命令：
+**G-15 · `Device.Services.FAPControl.LTE.S1U.{i}.*` 📖**（R=2 / RW=0 / arity=1）
 
-- `Device.Services.FAPService.{i}.* 📝`
-- `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.* 📝`
-- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{iβ}.* 📝`
-- `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.* 📖📝`
-- `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.* 📝`
-- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{iβ}.* 📝`
+- **LST S1U** — 2 paths（GetParameterValues 全集）
+- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
+
+**G-16 · `Device.Services.FAPControl.X2IpAddrMapInfo.{i}.*` 📝**（R=0 / RW=5 / arity=1）
+
+- **LST X2 IP 映射** — 5 paths（GetParameterValues 全集）
+- **MOD X2 IP 映射** — 5 paths（SetParameterValues，RW 子集）
+- **ADD X2 IP 映射** — AddObject，新增 `{i}` 实例
+- **RMV X2 IP 映射** — DeleteObject，删除 `{i}` 实例
+
+**G-17 · `Device.Services.FAPService.{i}.*` 📖📝**（R=2 / RW=22 / arity=1）
+
+- **LST FAPService 载波** — 24 paths（GetParameterValues 全集）
+- **MOD FAPService 载波** — 22 paths（SetParameterValues，RW 子集）
+- **ADD FAPService 载波** — AddObject，新增 `{i}` 实例 ⚠
+- **RMV FAPService 载波** — DeleteObject，删除 `{i}` 实例 ⚠
+
+**G-18 · `Device.Services.FAPService.{i}.Capabilities.*` 📝**（R=0 / RW=1 / arity=1）
+
+- **LST FAPService Capabilities** — 1 paths（GetParameterValues 全集）
+- **MOD FAPService Capabilities** — 1 paths（SetParameterValues，RW 子集）
+- **ADD FAPService Capabilities** — AddObject，新增 `{i}` 实例 ⚠
+- **RMV FAPService Capabilities** — DeleteObject，删除 `{i}` 实例 ⚠
+
+**G-19 · `Device.Services.FAPService.{i}.CellConfig.Capabilities.*` 📖📝**（R=2 / RW=1 / arity=1）
+
+- **LST CellConfig Capabilities** — 3 paths（GetParameterValues 全集）
+- **MOD CellConfig Capabilities** — 1 paths（SetParameterValues，RW 子集）
+- **ADD CellConfig Capabilities** — AddObject，新增 `{i}` 实例 ⚠
+- **RMV CellConfig Capabilities** — DeleteObject，删除 `{i}` 实例 ⚠
+
+**G-20 · `Device.Services.FAPService.{i}.CellConfig.LTE.EPC.*` 📝**（R=0 / RW=2 / arity=1）
+
+- **LST EPC** — 2 paths（GetParameterValues 全集）
+- **MOD EPC** — 2 paths（SetParameterValues，RW 子集）
+- **ADD EPC** — AddObject，新增 `{i}` 实例 ⚠
+- **RMV EPC** — DeleteObject，删除 `{i}` 实例 ⚠
+
+**G-21 · `Device.Services.FAPService.{iα}.CellConfig.LTE.EPC.PLMNList.{iβ}.*` 📝**（R=0 / RW=2 / arity=2）
+
+- **LST PLMN 列表** — 2 paths（GetParameterValues 全集）
+- **MOD PLMN 列表** — 2 paths（SetParameterValues，RW 子集）
+- **ADD PLMN 列表** — AddObject，新增 `{i}` 实例
+- **RMV PLMN 列表** — DeleteObject，删除 `{i}` 实例
+
+**G-22 · `Device.Services.FAPService.{iα}.CellConfig.LTE.VoLTE.PdcpInitParam.{iβ}.*` 📝**（R=0 / RW=1 / arity=2）
+
+- **LST VoLTE PDCP 初始** — 1 paths（GetParameterValues 全集）
+- **MOD VoLTE PDCP 初始** — 1 paths（SetParameterValues，RW 子集）
+- **ADD VoLTE PDCP 初始** — AddObject，新增 `{i}` 实例
+- **RMV VoLTE PDCP 初始** — DeleteObject，删除 `{i}` 实例
+
+#### SG · Services.FAPService.{i}.SCTP.Transport — SCTP 参数管理
+
+**G-23 · `Device.Services.FAPControl.Transport.SCTP.*` 📝**（R=0 / RW=9 / arity=0）
+
+- **LST SCTP** — 9 paths（GetParameterValues 全集）
+- **MOD SCTP** — 9 paths（SetParameterValues，RW 子集）
+- ❌ 不生成：ADD/RMV（arity=0，非多实例对象）
+
+**G-24 · `Device.Services.FAPControl.Transport.SCTP.Assoc.{i}.*` 📖**（R=4 / RW=0 / arity=1）
+
+- **LST SCTP Assoc** — 4 paths（GetParameterValues 全集）
+- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
+
+#### SH · Services.FAPService.{i}.CellConfig.LTE.RAN — RAN 协议栈参数
+
+**G-25 · `Device.Services.FAPService.{i}.*` 📝**（R=0 / RW=10 / arity=1）
+
+- **LST RRC Timers** — 10 paths（GetParameterValues 全集）
+- **MOD RRC Timers** — 10 paths（SetParameterValues，RW 子集）
+- **ADD RRC Timers** — AddObject，新增 `{i}` 实例 ⚠
+- **RMV RRC Timers** — DeleteObject，删除 `{i}` 实例 ⚠
+
+**G-26 · `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.*` 📝**（R=0 / RW=16 / arity=1）
+
+- **LST MAC** — 16 paths（GetParameterValues 全集）
+- **MOD MAC** — 16 paths（SetParameterValues，RW 子集）
+- **ADD MAC** — AddObject，新增 `{i}` 实例 ⚠
+- **RMV MAC** — DeleteObject，删除 `{i}` 实例 ⚠
+
+**G-27 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{iβ}.*` 📝**（R=0 / RW=6 / arity=2）
+
+- **LST DRX 初始** — 6 paths（GetParameterValues 全集）
+- **MOD DRX 初始** — 6 paths（SetParameterValues，RW 子集）
+- **ADD DRX 初始** — AddObject，新增 `{i}` 实例
+- **RMV DRX 初始** — DeleteObject，删除 `{i}` 实例
+
+**G-28 · `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.*` 📖📝**（R=2 / RW=33 / arity=1）
+
+- **LST PHY** — 35 paths（GetParameterValues 全集）
+- **MOD PHY** — 33 paths（SetParameterValues，RW 子集）
+- **ADD PHY** — AddObject，新增 `{i}` 实例 ⚠
+- **RMV PHY** — DeleteObject，删除 `{i}` 实例 ⚠
+
+**G-29 · `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.*` 📝**（R=0 / RW=1 / arity=1）
+
+- **LST PHY MBSFN** — 1 paths（GetParameterValues 全集）
+- **MOD PHY MBSFN** — 1 paths（SetParameterValues，RW 子集）
+- **ADD PHY MBSFN** — AddObject，新增 `{i}` 实例 ⚠
+- **RMV PHY MBSFN** — DeleteObject，删除 `{i}` 实例 ⚠
+
+**G-30 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{iβ}.*` 📝**（R=0 / RW=5 / arity=2）
+
+- **LST MBSFN SFConfigList** — 5 paths（GetParameterValues 全集）
+- **MOD MBSFN SFConfigList** — 5 paths（SetParameterValues，RW 子集）
+- **ADD MBSFN SFConfigList** — AddObject，新增 `{i}` 实例
+- **RMV MBSFN SFConfigList** — DeleteObject，删除 `{i}` 实例
 
 #### SI · Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList — 邻区参数管理
 
-共 4 个命令：
+**G-31 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{iβ}.*` 📝**（R=0 / RW=7 / arity=2）
 
-- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{iβ}.* 📝`
-- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{iβ}.* 📝`
-- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{iβ}.* 📝`
-- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.NeighborList.LTECell.{iβ}.* 📝`
+- **LST GSM 邻区** — 7 paths（GetParameterValues 全集）
+- **MOD GSM 邻区** — 7 paths（SetParameterValues，RW 子集）
+- **ADD GSM 邻区** — AddObject，新增 `{i}` 实例
+- **RMV GSM 邻区** — DeleteObject，删除 `{i}` 实例
+
+**G-32 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{iβ}.*` 📝**（R=0 / RW=12 / arity=2）
+
+- **LST NR 邻区** — 12 paths（GetParameterValues 全集）
+- **MOD NR 邻区** — 12 paths（SetParameterValues，RW 子集）
+- **ADD NR 邻区** — AddObject，新增 `{i}` 实例
+- **RMV NR 邻区** — DeleteObject，删除 `{i}` 实例
+
+**G-33 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{iβ}.*` 📝**（R=0 / RW=10 / arity=2）
+
+- **LST UMTS 邻区** — 10 paths（GetParameterValues 全集）
+- **MOD UMTS 邻区** — 10 paths（SetParameterValues，RW 子集）
+- **ADD UMTS 邻区** — AddObject，新增 `{i}` 实例
+- **RMV UMTS 邻区** — DeleteObject，删除 `{i}` 实例
+
+**G-34 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.NeighborList.LTECell.{iβ}.*` 📝**（R=0 / RW=10 / arity=2）
+
+- **LST LTE 邻区** — 10 paths（GetParameterValues 全集）
+- **MOD LTE 邻区** — 10 paths（SetParameterValues，RW 子集）
+- **ADD LTE 邻区** — AddObject，新增 `{i}` 实例
+- **RMV LTE 邻区** — DeleteObject，删除 `{i}` 实例
 
 #### SJ · Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility — 移动性参数管理
 
-共 15 个命令：
+**G-35 · `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.*` 📝**（R=0 / RW=1 / arity=1）
 
-- `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.* 📝`
-- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{iβ}.* 📖📝`
-- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{iβ}.* 📖📝`
-- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{iβ}.* 📖📝`
-- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{iβ}.* 📖📝`
-- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{iβ}.* 📖📝`
-- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.PeriodMeasCtrl.{iβ}.* 📝`
-- `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.* 📝`
-- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{iβ}.* 📖📝`
-- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{iβ}.* 📖📝`
-- `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.* 📝`
-- `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.* 📝`
-- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{iβ}.* 📝`
-- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{iβ}.* 📝`
-- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{iβ}.* 📝`
+- **LST ConnMode EUTRA** — 1 paths（GetParameterValues 全集）
+- **MOD ConnMode EUTRA** — 1 paths（SetParameterValues，RW 子集）
+- **ADD ConnMode EUTRA** — AddObject，新增 `{i}` 实例 ⚠
+- **RMV ConnMode EUTRA** — DeleteObject，删除 `{i}` 实例 ⚠
 
-#### SK · Services.FAPService.{i}.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam — SON参数管理
+**G-36 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{iβ}.*` 📖📝**（R=1 / RW=10 / arity=2）
 
-共 2 个命令：
+- **LST A1 测量控制** — 11 paths（GetParameterValues 全集）
+- **MOD A1 测量控制** — 10 paths（SetParameterValues，RW 子集）
+- **ADD A1 测量控制** — AddObject，新增 `{i}` 实例
+- **RMV A1 测量控制** — DeleteObject，删除 `{i}` 实例
 
-- `Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.* 📖📝`
-- `Device.Services.FAPService.{i}.FAPControl.SelfConfig.* 📖`
+**G-37 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{iβ}.*` 📖📝**（R=1 / RW=10 / arity=2）
 
-#### SL · WANDevice — WAN口配置参数管理
+- **LST A2 测量控制** — 11 paths（GetParameterValues 全集）
+- **MOD A2 测量控制** — 10 paths（SetParameterValues，RW 子集）
+- **ADD A2 测量控制** — AddObject，新增 `{i}` 实例
+- **RMV A2 测量控制** — DeleteObject，删除 `{i}` 实例
 
-共 7 个命令：
+**G-38 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{iβ}.*` 📖📝**（R=1 / RW=10 / arity=2）
 
-- `Device.Ethernet.Interface.{i}.* 📖📝`
-- `Device.Ethernet.Interface.{iα}.IPv4Address.{iβ}.* 📝`
-- `Device.Ethernet.Interface.{iα}.IPv6Address.{iβ}.* 📝`
-- `Device.Ethernet.Interface.{iα}.VlanInterface.{iβ}.* 📝`
-- `Device.Ethernet.Interface.{iα}.VlanInterface.{iβ}.IPv4Address.{iγ}.* 📝`
-- `Device.Ethernet.Interface.{iα}.VlanInterface.{iβ}.IPv6Address.{iγ}.* 📝`
-- `Device.Ethernet.IpRoute.{i}.* 📝`
+- **LST A3 测量控制** — 11 paths（GetParameterValues 全集）
+- **MOD A3 测量控制** — 10 paths（SetParameterValues，RW 子集）
+- **ADD A3 测量控制** — AddObject，新增 `{i}` 实例
+- **RMV A3 测量控制** — DeleteObject，删除 `{i}` 实例
 
-#### SM · Ipsec — IPsec参数管理
+**G-39 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{iβ}.*` 📖📝**（R=1 / RW=10 / arity=2）
 
-共 1 个命令：
+- **LST A4 测量控制** — 11 paths（GetParameterValues 全集）
+- **MOD A4 测量控制** — 10 paths（SetParameterValues，RW 子集）
+- **ADD A4 测量控制** — AddObject，新增 `{i}` 实例
+- **RMV A4 测量控制** — DeleteObject，删除 `{i}` 实例
 
-- `Device.IPsec.* 📖📝`
+**G-40 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{iβ}.*` 📖📝**（R=1 / RW=12 / arity=2）
+
+- **LST A5 测量控制** — 13 paths（GetParameterValues 全集）
+- **MOD A5 测量控制** — 12 paths（SetParameterValues，RW 子集）
+- **ADD A5 测量控制** — AddObject，新增 `{i}` 实例
+- **RMV A5 测量控制** — DeleteObject，删除 `{i}` 实例
+
+**G-41 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.PeriodMeasCtrl.{iβ}.*` 📝**（R=0 / RW=4 / arity=2）
+
+- **LST 周期测量控制** — 4 paths（GetParameterValues 全集）
+- **MOD 周期测量控制** — 4 paths（SetParameterValues，RW 子集）
+- **ADD 周期测量控制** — AddObject，新增 `{i}` 实例
+- **RMV 周期测量控制** — DeleteObject，删除 `{i}` 实例
+
+**G-42 · `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.*` 📝**（R=0 / RW=4 / arity=1）
+
+- **LST ConnMode IRAT** — 4 paths（GetParameterValues 全集）
+- **MOD ConnMode IRAT** — 4 paths（SetParameterValues，RW 子集）
+- **ADD ConnMode IRAT** — AddObject，新增 `{i}` 实例 ⚠
+- **RMV ConnMode IRAT** — DeleteObject，删除 `{i}` 实例 ⚠
+
+**G-43 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{iβ}.*` 📖📝**（R=1 / RW=10 / arity=2）
+
+- **LST B1 测量控制** — 11 paths（GetParameterValues 全集）
+- **MOD B1 测量控制** — 10 paths（SetParameterValues，RW 子集）
+- **ADD B1 测量控制** — AddObject，新增 `{i}` 实例
+- **RMV B1 测量控制** — DeleteObject，删除 `{i}` 实例
+
+**G-44 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{iβ}.*` 📖📝**（R=1 / RW=12 / arity=2）
+
+- **LST B2 测量控制** — 13 paths（GetParameterValues 全集）
+- **MOD B2 测量控制** — 12 paths（SetParameterValues，RW 子集）
+- **ADD B2 测量控制** — AddObject，新增 `{i}` 实例
+- **RMV B2 测量控制** — DeleteObject，删除 `{i}` 实例
+
+**G-45 · `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.*` 📝**（R=0 / RW=28 / arity=1）
+
+- **LST IdleMode** — 28 paths（GetParameterValues 全集）
+- **MOD IdleMode** — 28 paths（SetParameterValues，RW 子集）
+- **ADD IdleMode** — AddObject，新增 `{i}` 实例 ⚠
+- **RMV IdleMode** — DeleteObject，删除 `{i}` 实例 ⚠
+
+**G-46 · `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.*` 📝**（R=0 / RW=2 / arity=1）
+
+- **LST IdleMode IRAT** — 2 paths（GetParameterValues 全集）
+- **MOD IdleMode IRAT** — 2 paths（SetParameterValues，RW 子集）
+- **ADD IdleMode IRAT** — AddObject，新增 `{i}` 实例 ⚠
+- **RMV IdleMode IRAT** — DeleteObject，删除 `{i}` 实例 ⚠
+
+**G-47 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{iβ}.*` 📝**（R=0 / RW=6 / arity=2）
+
+- **LST GERAN 频组** — 6 paths（GetParameterValues 全集）
+- **MOD GERAN 频组** — 6 paths（SetParameterValues，RW 子集）
+- **ADD GERAN 频组** — AddObject，新增 `{i}` 实例
+- **RMV GERAN 频组** — DeleteObject，删除 `{i}` 实例
+
+**G-48 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{iβ}.*` 📝**（R=0 / RW=6 / arity=2）
+
+- **LST UTRA FDD 频点** — 6 paths（GetParameterValues 全集）
+- **MOD UTRA FDD 频点** — 6 paths（SetParameterValues，RW 子集）
+- **ADD UTRA FDD 频点** — AddObject，新增 `{i}` 实例
+- **RMV UTRA FDD 频点** — DeleteObject，删除 `{i}` 实例
+
+**G-49 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{iβ}.*` 📝**（R=0 / RW=13 / arity=2）
+
+- **LST 异频载波** — 13 paths（GetParameterValues 全集）
+- **MOD 异频载波** — 13 paths（SetParameterValues，RW 子集）
+- **ADD 异频载波** — AddObject，新增 `{i}` 实例
+- **RMV 异频载波** — DeleteObject，删除 `{i}` 实例
+
+#### SK · Services.FAPService.{i}.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam — SON 参数管理
+
+**G-50 · `Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.*` 📖📝**（R=1 / RW=24 / arity=1）
+
+- **LST SON 配置** — 25 paths（GetParameterValues 全集）
+- **MOD SON 配置** — 24 paths（SetParameterValues，RW 子集）
+- **ADD SON 配置** — AddObject，新增 `{i}` 实例 ⚠
+- **RMV SON 配置** — DeleteObject，删除 `{i}` 实例 ⚠
+
+**G-51 · `Device.Services.FAPService.{i}.FAPControl.SelfConfig.*` 📖**（R=3 / RW=0 / arity=1）
+
+- **LST 自配置启动** — 3 paths（GetParameterValues 全集）
+- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
+
+#### SL · WANDevice — WAN 口配置参数管理
+
+**G-52 · `Device.Ethernet.Interface.{i}.*` 📖📝**（R=5 / RW=4 / arity=1）
+
+- **LST 以太网接口** — 9 paths（GetParameterValues 全集）
+- **MOD 以太网接口** — 4 paths（SetParameterValues，RW 子集）
+- **ADD 以太网接口** — AddObject，新增 `{i}` 实例
+- **RMV 以太网接口** — DeleteObject，删除 `{i}` 实例
+
+**G-53 · `Device.Ethernet.Interface.{iα}.IPv4Address.{iβ}.*` 📝**（R=0 / RW=5 / arity=2）
+
+- **LST IPv4 地址** — 5 paths（GetParameterValues 全集）
+- **MOD IPv4 地址** — 5 paths（SetParameterValues，RW 子集）
+- **ADD IPv4 地址** — AddObject，新增 `{i}` 实例
+- **RMV IPv4 地址** — DeleteObject，删除 `{i}` 实例
+
+**G-54 · `Device.Ethernet.Interface.{iα}.IPv6Address.{iβ}.*` 📝**（R=0 / RW=5 / arity=2）
+
+- **LST IPv6 地址** — 5 paths（GetParameterValues 全集）
+- **MOD IPv6 地址** — 5 paths（SetParameterValues，RW 子集）
+- **ADD IPv6 地址** — AddObject，新增 `{i}` 实例
+- **RMV IPv6 地址** — DeleteObject，删除 `{i}` 实例
+
+**G-55 · `Device.Ethernet.Interface.{iα}.VlanInterface.{iβ}.*` 📝**（R=0 / RW=3 / arity=2）
+
+- **LST VLAN 接口** — 3 paths（GetParameterValues 全集）
+- **MOD VLAN 接口** — 3 paths（SetParameterValues，RW 子集）
+- **ADD VLAN 接口** — AddObject，新增 `{i}` 实例
+- **RMV VLAN 接口** — DeleteObject，删除 `{i}` 实例
+
+**G-56 · `Device.Ethernet.Interface.{iα}.VlanInterface.{iβ}.IPv4Address.{iγ}.*` 📝**（R=0 / RW=5 / arity=3）
+
+- **LST VLAN IPv4** — 5 paths（GetParameterValues 全集）
+- **MOD VLAN IPv4** — 5 paths（SetParameterValues，RW 子集）
+- **ADD VLAN IPv4** — AddObject，新增 `{i}` 实例
+- **RMV VLAN IPv4** — DeleteObject，删除 `{i}` 实例
+
+**G-57 · `Device.Ethernet.Interface.{iα}.VlanInterface.{iβ}.IPv6Address.{iγ}.*` 📝**（R=0 / RW=5 / arity=3）
+
+- **LST VLAN IPv6** — 5 paths（GetParameterValues 全集）
+- **MOD VLAN IPv6** — 5 paths（SetParameterValues，RW 子集）
+- **ADD VLAN IPv6** — AddObject，新增 `{i}` 实例
+- **RMV VLAN IPv6** — DeleteObject，删除 `{i}` 实例
+
+**G-58 · `Device.Ethernet.IpRoute.{i}.*` 📝**（R=0 / RW=5 / arity=1）
+
+- **LST IP 路由** — 5 paths（GetParameterValues 全集）
+- **MOD IP 路由** — 5 paths（SetParameterValues，RW 子集）
+- **ADD IP 路由** — AddObject，新增 `{i}` 实例
+- **RMV IP 路由** — DeleteObject，删除 `{i}` 实例
+
+#### SM · Ipsec — IPsec 参数管理
+
+**G-59 · `Device.IPsec.*` 📖📝**（R=7 / RW=2 / arity=0）
+
+- **LST IPsec** — 9 paths（GetParameterValues 全集）
+- **MOD IPsec** — 2 paths（SetParameterValues，RW 子集）
+- ❌ 不生成：ADD/RMV（arity=0，非多实例对象）
 
 #### SN · Time — 时间服务器参数管理
 
-共 1 个命令：
+**G-60 · `Device.Time.*` 📖📝**（R=1 / RW=7 / arity=0）
 
-- `Device.Time.* 📖📝`
+- **LST 时间服务器** — 8 paths（GetParameterValues 全集）
+- **MOD 时间服务器** — 7 paths（SetParameterValues，RW 子集）
+- ❌ 不生成：ADD/RMV（arity=0，非多实例对象）
 
-#### SO · FAP.GPS — GPS信息参数管理
+#### SO · FAP.GPS — GPS 信息参数管理
 
-共 1 个命令：
+**G-61 · `Device.FAP.GPS.*` 📖**（R=3 / RW=0 / arity=0）
 
-- `Device.FAP.GPS.* 📖`
+- **LST GPS** — 3 paths（GetParameterValues 全集）
+- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（arity=0，非多实例对象）
 
-#### SP · FAP.MRMgmt — MR参数管理
+#### SP · FAP.MRMgmt — MR 参数管理
 
-共 1 个命令：
+**G-62 · `Device.FAP.MRMgmt.Config.{i}.*` 📝**（R=0 / RW=14 / arity=1）
 
-- `Device.FAP.MRMgmt.Config.{i}.* 📝`
+- **LST MR 配置** — 14 paths（GetParameterValues 全集）
+- **MOD MR 配置** — 14 paths（SetParameterValues，RW 子集）
+- **ADD MR 配置** — AddObject，新增 `{i}` 实例
+- **RMV MR 配置** — DeleteObject，删除 `{i}` 实例
 
 #### SQ · FAP.PerfMgmt — 性能参数管理
 
-共 1 个命令：
+**G-63 · `Device.FAP.PerfMgmt.Config.{i}.*` 📝**（R=0 / RW=10 / arity=1）
 
-- `Device.FAP.PerfMgmt.Config.{i}.* 📝`
-
-> ⚠️ 本节 spec 原文还含 1 个伪命令 / 规范引用注释段（不视为可执行命令，已在 catalog loader 中过滤）：`.*`
+- **LST PM 配置** — 10 paths（GetParameterValues 全集）
+- **MOD PM 配置** — 10 paths（SetParameterValues，RW 子集）
+- **ADD PM 配置** — AddObject，新增 `{i}` 实例
+- **RMV PM 配置** — DeleteObject，删除 `{i}` 实例
 
 #### SR · ENanocell — 扩展型一体化皮基站参数
 
-共 9 个命令：
+**G-64 · `Device.DeviceInfo.MU.{i}.*` 📖📝**（R=21 / RW=3 / arity=1）
 
-- `Device.DeviceInfo.MU.{i}.* 📖📝`
-- `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.* 📖📝`
-- `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.EU.{iγ}.* 📖📝`
-- `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.EU.{iγ}.RU.{iδ}.* 📖📝`
-- `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.EU.{iγ}.RU.{iδ}.RFChannel.{iε}.* 📖📝`
-- `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.EU.{iγ}.RU.{iδ}.SwUpgrade.* 📖`
-- `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.EU.{iγ}.SwUpgrade.* 📖`
-- `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.SwUpgrade.* 📖`
-- `Device.DeviceInfo.MU.{i}.SwUpgrade.* 📖`
+- **LST MU 主机单元** — 24 paths（GetParameterValues 全集）
+- **MOD MU 主机单元** — 3 paths（SetParameterValues，RW 子集）
+- **ADD MU 主机单元** — AddObject，新增 `{i}` 实例 ⚠
+- **RMV MU 主机单元** — DeleteObject，删除 `{i}` 实例 ⚠
+
+**G-65 · `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.*` 📖📝**（R=15 / RW=1 / arity=2）
+
+- **LST Slot 板卡** — 16 paths（GetParameterValues 全集）
+- **MOD Slot 板卡** — 1 paths（SetParameterValues，RW 子集）
+- **ADD Slot 板卡** — AddObject，新增 `{i}` 实例 ⚠
+- **RMV Slot 板卡** — DeleteObject，删除 `{i}` 实例 ⚠
+
+**G-66 · `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.EU.{iγ}.*` 📖📝**（R=11 / RW=2 / arity=3）
+
+- **LST EU 扩展单元** — 13 paths（GetParameterValues 全集）
+- **MOD EU 扩展单元** — 2 paths（SetParameterValues，RW 子集）
+- **ADD EU 扩展单元** — AddObject，新增 `{i}` 实例 ⚠
+- **RMV EU 扩展单元** — DeleteObject，删除 `{i}` 实例 ⚠
+
+**G-67 · `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.EU.{iγ}.RU.{iδ}.*` 📖📝**（R=12 / RW=4 / arity=4）
+
+- **LST RU 远端单元** — 16 paths（GetParameterValues 全集）
+- **MOD RU 远端单元** — 4 paths（SetParameterValues，RW 子集）
+- **ADD RU 远端单元** — AddObject，新增 `{i}` 实例 ⚠
+- **RMV RU 远端单元** — DeleteObject，删除 `{i}` 实例 ⚠
+
+**G-68 · `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.EU.{iγ}.RU.{iδ}.RFChannel.{iε}.*` 📖📝**（R=1 / RW=1 / arity=5）
+
+- **LST RFChannel 射频通道** — 2 paths（GetParameterValues 全集）
+- **MOD RFChannel 射频通道** — 1 paths（SetParameterValues，RW 子集）
+- **ADD RFChannel 射频通道** — AddObject，新增 `{i}` 实例 ⚠
+- **RMV RFChannel 射频通道** — DeleteObject，删除 `{i}` 实例 ⚠
+
+**G-69 · `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.EU.{iγ}.RU.{iδ}.SwUpgrade.*` 📖**（R=3 / RW=0 / arity=4）
+
+- **LST RU 升级** — 3 paths（GetParameterValues 全集）
+- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
+
+**G-70 · `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.EU.{iγ}.SwUpgrade.*` 📖**（R=3 / RW=0 / arity=3）
+
+- **LST EU 升级** — 3 paths（GetParameterValues 全集）
+- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
+
+**G-71 · `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.SwUpgrade.*` 📖**（R=3 / RW=0 / arity=2）
+
+- **LST Slot 升级** — 3 paths（GetParameterValues 全集）
+- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
+
+**G-72 · `Device.DeviceInfo.MU.{i}.SwUpgrade.*` 📖**（R=3 / RW=0 / arity=1）
+
+- **LST MU 升级** — 3 paths（GetParameterValues 全集）
+- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
 
