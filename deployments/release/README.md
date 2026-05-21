@@ -99,10 +99,121 @@ cd deployments/release
 ### ④ 起下载服务
 
 ```bash
-./serve.sh                         # 默认端口 8000
+./serve.sh                         # 默认端口 8000，前台运行（Ctrl-C 停止）
 ```
 
 使用者浏览器访问 `http://<构建机IP>:8000/` → 看到**操作步骤** + 项目包/基础设施包两张版本列表 → 点击下载。
+
+需要长期运行（关 ssh 不掉、机器重启自启）见下一节「下载服务长期运行」。
+
+## 下载服务长期运行 — `./serve.sh` 自管 vs systemd
+
+`serve.sh` 提供两种常驻方式，互不干扰，**只选其一**：
+
+| 方式 | 适用场景 | 关 ssh 后 | 机器重启后 | 谁监管崩溃 |
+|------|---------|----------|-----------|----------|
+| **A. `./serve.sh start`** | 临时常驻、机器上没 systemd / 没 root | 不掉（setsid 隔离） | **不自启** | 无 |
+| **B. systemd unit** | 长期挂着、要开机自启、要崩溃重启 | 不掉 | 自启 | systemd `Restart=on-failure` |
+
+> ⚠️ **两种方式不要并存**。systemd 接管后再用 `./serve.sh start` 会出现端口冲突 + PID 文件互不知情。要切换先把另一种停干净。
+
+### 方式 A：`./serve.sh` 自管（脚本内置 daemon）
+
+```bash
+./serve.sh start                   # 启动；默认 8000；setsid detach，关 ssh 不带走
+./serve.sh start -p 9000           # 启动并指定端口
+./serve.sh status                  # 查看运行状态（PID / 端口 / 日志路径）
+./serve.sh stop                    # 停止（SIGTERM → 10s 超时 → SIGKILL）
+./serve.sh restart                 # 重启；不传 -p 时沿用上次端口
+./serve.sh restart -p 9001         # 重启并换端口
+```
+
+相关文件（均在 `deployments/release/` 下，已加 `.gitignore`）：
+
+| 文件 | 用途 |
+|------|------|
+| `.serve.pid`  | 后台进程 PID |
+| `.serve.port` | 上次启动的端口（`restart` 沿用） |
+| `.serve.log`  | 后台模式的请求日志（`tail -f` 看实时请求） |
+
+**适合谁**：临时把构建机变成下载源，开发 / 测试场景。**不适合**机器重启后自动起来——A 方式不写 init 系统，重启就没了。
+
+### 方式 B：systemd unit（生产推荐）
+
+unit 文件随仓库交付：[`deployments/release/omc-serve.service`](omc-serve.service)。**这是构建侧文件，不打进 `omc-infra-*.tar.xz`**——客户那边不需要起这个服务。
+
+```bash
+# 1) 假设 deployments/release/ 拷贝到了 /opt/omc/release/。如果不是，
+#    先编辑 omc-serve.service 把 WorkingDirectory / ExecStart 中两处
+#    /opt/omc/release 改成你的实际路径，再继续。
+ls /opt/omc/release/serve.sh /opt/omc/release/omc-serve.service
+
+# 2) 装到 systemd
+sudo cp /opt/omc/release/omc-serve.service /etc/systemd/system/omc-serve.service
+sudo systemctl daemon-reload
+
+# 3) 启动 + 开机自启
+sudo systemctl enable --now omc-serve
+
+# 4) 验证
+sudo systemctl status omc-serve
+sudo ss -ltnp | grep :8000
+sudo journalctl -u omc-serve -f       # 实时看请求日志
+```
+
+**改端口或路径**（升级安全的做法 — 用 drop-in，不动 `/etc/systemd/system/omc-serve.service`）：
+
+```bash
+sudo systemctl edit omc-serve
+```
+
+编辑器里写覆盖段，例如换 9000 端口：
+
+```ini
+[Service]
+ExecStart=
+ExecStart=/opt/omc/release/serve.sh -p 9000
+```
+
+> 第一行 `ExecStart=` 留空很关键：systemd 不允许累加 `ExecStart`，必须先清零再设新值。
+
+存盘后：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart omc-serve
+```
+
+**常用维护命令**：
+
+```bash
+sudo systemctl start    omc-serve
+sudo systemctl stop     omc-serve
+sudo systemctl restart  omc-serve
+sudo systemctl status   omc-serve
+sudo systemctl disable  omc-serve     # 取消开机自启（不卸载 unit）
+sudo journalctl -u omc-serve --since "1 hour ago"
+```
+
+**unit 关键配置**（要查/改时找这里）：
+
+| 字段 | 当前值 | 说明 |
+|------|--------|------|
+| `Type` | `simple` | systemd 直接监管前台 python http server，**不走** serve.sh 自带的 `start/stop` 守护逻辑 |
+| `WorkingDirectory` | `/opt/omc/release` | serve.sh 所在目录 = archive/ 所在目录 |
+| `ExecStart` | `… serve.sh -p 8000` | serve.sh 以前台模式运行；端口在这里改 |
+| `Restart` | `on-failure` | 崩溃自动重启；正常退出不重启 |
+| `RestartSec` | `3s` | 重启间隔 |
+| `KillSignal` / `TimeoutStopSec` | `SIGTERM` / `10s` | 给 python 10 秒优雅退出，超时再 SIGKILL |
+| `NoNewPrivileges` / `PrivateTmp` / `ProtectSystem=full` / `ProtectHome` | 安全收紧 | 限制服务权限，`/opt` 不在 `ProtectSystem=full` 范围，`archive/` 与日志仍可读写 |
+
+**防火墙**（启动了但浏览器访问不通时）：
+
+```bash
+sudo ufw allow 8000/tcp                              # Ubuntu/Debian
+sudo firewall-cmd --add-port=8000/tcp --permanent    # CentOS/RHEL
+sudo firewall-cmd --reload
+```
 
 ## 版本号规则（基础设施 / 项目 各自独立，均纯 semver，从 0.0.1 起）
 

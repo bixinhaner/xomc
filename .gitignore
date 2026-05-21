@@ -52,3 +52,4 @@ deployments/release/images-cache/
 deployments/release/docker-cache/
 deployments/release/archive/
 deployments/release/bundle/docker/docker-*.tgz
+deployments/release/.serve.*

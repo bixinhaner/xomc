@@ -1,0 +1,47 @@
+# =============================================================================
+# OMC 离线版本下载服务 — systemd unit
+#
+# 把 deployments/release/serve.sh 注册成 systemd 托管的常驻服务。
+# 由 systemd 直接监管 python http server（前台模式），不走 serve.sh 的
+# start/stop 自管 daemon 逻辑——双重守护没意义。
+#
+# 部署见同目录 README.md「systemd 部署」一节。
+# =============================================================================
+
+[Unit]
+Description=OMC 离线版本下载 HTTP 服务
+Documentation=file:///opt/omc/release/serve.sh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+# ── 部署路径 ────────────────────────────────────────────────────────────
+# WorkingDirectory 与 ExecStart 中的 serve.sh 路径必须一致，且都指向 archive/
+# 所在目录。默认假定整包解压到 /opt/omc/release/。如解压到别处，请改这两行
+# 或用 `systemctl edit omc-serve` 覆盖。
+WorkingDirectory=/opt/omc/release
+
+# ── 端口 ────────────────────────────────────────────────────────────────
+# 默认 8000；改端口请直接改 -p 后的数字，或 `systemctl edit omc-serve` 覆盖
+# ExecStart 行。
+ExecStart=/opt/omc/release/serve.sh -p 8000
+
+# ── 生命周期 ────────────────────────────────────────────────────────────
+Restart=on-failure
+RestartSec=3s
+KillSignal=SIGTERM
+TimeoutStopSec=10s
+
+# ── 安全收紧（在不影响 archive 读写的前提下，尽量限制服务权限）─────────
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+# /opt 不在 ProtectSystem=full 范围内，archive/ 与 .serve.log 仍可读写。
+
+[Install]
+WantedBy=multi-user.target
