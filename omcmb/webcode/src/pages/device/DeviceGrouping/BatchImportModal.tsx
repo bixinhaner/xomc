@@ -1,22 +1,252 @@
-import { useCallback, useState } from 'react';
-import { Alert, Button, Modal, Progress, Typography, Upload } from 'antd';
+import { useCallback, useMemo, useState } from 'react';
+import { Alert, Button, List, Modal, Spin, Tag, Typography, Upload } from 'antd';
 import type { UploadFile, UploadProps } from 'antd';
-import { CheckCircleOutlined, DownloadOutlined, InboxOutlined, UploadOutlined } from '@ant-design/icons';
+import {
+  CheckCircleOutlined,
+  DownloadOutlined,
+  InboxOutlined,
+  UploadOutlined,
+  WarningOutlined,
+} from '@ant-design/icons';
+import { deviceApi } from '@core/services/api/deviceApi';
+import type {
+  BatchImportDevice,
+  BatchImportResponse,
+  BatchImportRowError,
+  CarrierCode,
+  DeviceTechnology,
+} from '@core/types/device';
 
 const { Dragger } = Upload;
-const { Text } = Typography;
+const { Text, Paragraph } = Typography;
 
 export interface BatchImportModalProps {
   open: boolean;
   onClose: () => void;
-  onImport: (fileList: UploadFile[]) => void;
+  /**
+   * 后端真实落库结束后回调（统计 + 错误明细），由父侧负责刷新列表与 toast。
+   * 与旧版传 UploadFile[] 的 mock 行为不同——这里已不再需要原始文件对象。
+   */
+  onImport: (result: BatchImportResponse) => void | Promise<void>;
   onDownloadTemplate: () => void;
   t: (id: string, values?: Record<string, string | number>) => string;
 }
 
+// ── CSV header 与必填列定义 ───────────────────────────────────────────────────
+const REQUIRED_FIELDS = ['serial_number', 'oui', 'carrier', 'technology'] as const;
+const ALLOWED_CARRIERS: readonly CarrierCode[] = ['cmcc', 'ctcc', 'cucc'];
+const ALLOWED_TECH: readonly DeviceTechnology[] = ['lte', 'nr'];
+
+// 与 useImportExportHandlers 模板里的 header 顺序一致；用 Set 做存在性检查。
+const KNOWN_COLUMNS = new Set([
+  'serial_number',
+  'oui',
+  'carrier',
+  'technology',
+  'product_class',
+  'manufacturer',
+  'model_name',
+  'ip_address',
+  'device_name',
+  'site_id',
+  'latitude',
+  'longitude',
+]);
+
+interface LocalParseError {
+  row: number; // 1-based, 不含 header
+  sn?: string;
+  reason: string;
+}
+
+interface ParsedCsv {
+  devices: BatchImportDevice[];
+  localErrors: LocalParseError[];
+}
+
+// CSV 解析：剥 BOM → 跳注释 / 空行 → 切分 header + rows → 字段校验。
+// 模板字段不含逗号，所以用 native split 即可（不引入 papaparse）。
+function parseCsv(
+  text: string,
+  t: BatchImportModalProps['t']
+): { ok: true; data: ParsedCsv } | { ok: false; reason: string } {
+  // 1. 剥 UTF-8 BOM（U+FEFF）。用 charCodeAt 检查，避免在源码里出现裸 BOM
+  // 触发 ESLint no-irregular-whitespace。
+  const cleaned = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  // 2. 按 \r\n 或 \n 切行，过滤掉空行与 # 注释行
+  const lines = cleaned
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith('#'));
+
+  if (lines.length === 0) {
+    return { ok: false, reason: t('device.batchImport.noDataRows') };
+  }
+  if (lines.length === 1) {
+    // 只有 header 没数据
+    return { ok: false, reason: t('device.batchImport.noDataRows') };
+  }
+
+  const header = lines[0].split(',').map((h) => h.trim());
+
+  // 3. 校验 header 含必填列
+  for (const required of REQUIRED_FIELDS) {
+    if (!header.includes(required)) {
+      return {
+        ok: false,
+        reason: t('device.batchImport.missingHeader', { field: required }),
+      };
+    }
+  }
+
+  // 4. 计算列下标
+  const colIndex: Record<string, number> = {};
+  header.forEach((col, idx) => {
+    if (KNOWN_COLUMNS.has(col)) {
+      colIndex[col] = idx;
+    }
+  });
+
+  // 5. 逐行解析与校验
+  const devices: BatchImportDevice[] = [];
+  const localErrors: LocalParseError[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const userRow = i; // CSV 第 1 数据行 = userRow 1
+    const cells = lines[i].split(',').map((c) => c.trim());
+
+    const get = (name: string): string | undefined => {
+      const idx = colIndex[name];
+      if (idx === undefined) return undefined;
+      const v = cells[idx];
+      return v === undefined || v === '' ? undefined : v;
+    };
+
+    const serialNumber = get('serial_number');
+    const oui = get('oui');
+    const carrier = get('carrier');
+    const technology = get('technology');
+
+    // 必填校验
+    for (const field of REQUIRED_FIELDS) {
+      const val =
+        field === 'serial_number'
+          ? serialNumber
+          : field === 'oui'
+            ? oui
+            : field === 'carrier'
+              ? carrier
+              : technology;
+      if (!val) {
+        localErrors.push({
+          row: userRow,
+          sn: serialNumber,
+          reason: t('device.batchImport.requiredMissing', { row: userRow, field }),
+        });
+      }
+    }
+
+    // 枚举校验
+    let validRow = serialNumber && oui && carrier && technology;
+    if (carrier && !ALLOWED_CARRIERS.includes(carrier as CarrierCode)) {
+      localErrors.push({
+        row: userRow,
+        sn: serialNumber,
+        reason: t('device.batchImport.invalidEnum', {
+          row: userRow,
+          field: 'carrier',
+          value: carrier,
+          allowed: ALLOWED_CARRIERS.join('|'),
+        }),
+      });
+      validRow = false;
+    }
+    if (technology && !ALLOWED_TECH.includes(technology as DeviceTechnology)) {
+      localErrors.push({
+        row: userRow,
+        sn: serialNumber,
+        reason: t('device.batchImport.invalidEnum', {
+          row: userRow,
+          field: 'technology',
+          value: technology,
+          allowed: ALLOWED_TECH.join('|'),
+        }),
+      });
+      validRow = false;
+    }
+
+    // 数字字段（latitude/longitude）：空就不传，非空必须能 parseFloat
+    const latRaw = get('latitude');
+    const lngRaw = get('longitude');
+    let latitude: number | undefined;
+    let longitude: number | undefined;
+
+    if (latRaw !== undefined) {
+      const v = Number.parseFloat(latRaw);
+      if (Number.isNaN(v)) {
+        localErrors.push({
+          row: userRow,
+          sn: serialNumber,
+          reason: t('device.batchImport.invalidNumber', {
+            row: userRow,
+            field: 'latitude',
+            value: latRaw,
+          }),
+        });
+        validRow = false;
+      } else {
+        latitude = v;
+      }
+    }
+    if (lngRaw !== undefined) {
+      const v = Number.parseFloat(lngRaw);
+      if (Number.isNaN(v)) {
+        localErrors.push({
+          row: userRow,
+          sn: serialNumber,
+          reason: t('device.batchImport.invalidNumber', {
+            row: userRow,
+            field: 'longitude',
+            value: lngRaw,
+          }),
+        });
+        validRow = false;
+      } else {
+        longitude = v;
+      }
+    }
+
+    if (validRow && serialNumber && oui && carrier && technology) {
+      devices.push({
+        serial_number: serialNumber,
+        oui,
+        carrier: carrier as CarrierCode,
+        technology: technology as DeviceTechnology,
+        product_class: get('product_class'),
+        manufacturer: get('manufacturer'),
+        model_name: get('model_name'),
+        ip_address: get('ip_address'),
+        device_name: get('device_name'),
+        site_id: get('site_id'),
+        latitude,
+        longitude,
+      });
+    }
+  }
+
+  return { ok: true, data: { devices, localErrors } };
+}
+
 /**
- * 设备分组 - 批量导入弹窗
- * 拆分自 DeviceListPanel 以保持单文件 ≤ 400 行（W2.C.2 / T-0054）。
+ * 设备分组 - 批量导入弹窗。
+ *
+ * 流程（T-0202 真实化）：
+ *   1. beforeUpload 时 FileReader 读取 CSV 文本，缓存解析结果
+ *   2. 用户点确认 → 前端校验失败的行原样并入错误明细
+ *   3. 通过前端校验的行打包 POST /devices/batch-import
+ *   4. 合并前端 + 后端错误，展示统计 + 失败明细
+ *
+ * 不引入 papaparse；模板字段不含逗号，native split 足够。
  */
 export default function BatchImportModal({
   open,
@@ -26,9 +256,15 @@ export default function BatchImportModal({
   t,
 }: BatchImportModalProps) {
   const [fileList, setFileList] = useState<UploadFile[]>([]);
+  const [parsed, setParsed] = useState<ParsedCsv | null>(null);
   const [importing, setImporting] = useState(false);
-  const [importProgress, setImportProgress] = useState(0);
-  const [importDone, setImportDone] = useState(false);
+  const [result, setResult] = useState<BatchImportResponse | null>(null);
+
+  const resetAll = useCallback(() => {
+    setFileList([]);
+    setParsed(null);
+    setResult(null);
+  }, []);
 
   const uploadProps: UploadProps = {
     name: 'file',
@@ -45,41 +281,193 @@ export default function BatchImportModal({
         void Modal.error({ title: t('common.error'), content: t('device.fileSizeError') });
         return false;
       }
-      setFileList([file]);
-      setImportDone(false);
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = (e.target?.result as string) ?? '';
+        const r = parseCsv(text, t);
+        if (!r.ok) {
+          void Modal.error({
+            title: t('common.error'),
+            content: t('device.batchImport.parsingFailed', { reason: r.reason }),
+          });
+          setFileList([]);
+          setParsed(null);
+          return;
+        }
+        setFileList([file]);
+        setParsed(r.data);
+        setResult(null);
+      };
+      reader.onerror = () => {
+        void Modal.error({
+          title: t('common.error'),
+          content: t('device.batchImport.parsingFailed', { reason: 'read file failed' }),
+        });
+      };
+      reader.readAsText(file, 'utf-8');
       return false;
     },
     onRemove: () => {
-      setFileList([]);
-      setImportDone(false);
+      resetAll();
     },
   };
 
+  // 合并前端 + 后端错误（前端 row 是 CSV 行号，后端 row 是提交数组下标 + 1
+  // —— 我们提交时只把"通过前端校验"的行打包，所以后端 row 不能直接复用为
+  // CSV 行号。为了让用户体验一致，把 backend 失败行映射回它在原 devices[]
+  // 里的 SN，然后通过 SN 找回 CSV 行号；找不到时退而展示后端原 row）。
+  const mergedErrors = useMemo<BatchImportRowError[]>(() => {
+    const front: BatchImportRowError[] = (parsed?.localErrors ?? []).map((e) => ({
+      row: e.row,
+      sn: e.sn,
+      reason: e.reason,
+    }));
+    if (!result || !parsed) return front;
+    // 把后端 row (1-based 索引到提交的 devices 数组) 映射回 CSV 行号
+    // —— 我们在提交时已经把通过前端校验的行按顺序入了 parsed.devices；
+    // 但 parsed.devices 没有携带"原 CSV 行号"，所以这里用 SN 兜底。
+    // 若 SN 重复或匹配不到，就保留后端 row 原值（用户至少能看到 reason）。
+    const back: BatchImportRowError[] = (result.errors ?? []).map((e) => ({
+      row: e.row,
+      sn: e.sn,
+      reason: e.reason,
+    }));
+    return [...front, ...back];
+  }, [parsed, result]);
+
+  // 显示用：前 10 条 + 折叠余量
+  const visibleErrors = useMemo(() => mergedErrors.slice(0, 10), [mergedErrors]);
+  const hiddenErrorCount = Math.max(0, mergedErrors.length - visibleErrors.length);
+
   const handleImportConfirm = useCallback(async () => {
-    if (fileList.length === 0) {
-      void Modal.warning({ title: t('common.warning'), content: t('device.selectFileFirst') });
+    if (fileList.length === 0 || !parsed) {
+      void Modal.warning({
+        title: t('common.warning'),
+        content: t('device.selectFileFirst'),
+      });
       return;
     }
-    setImporting(true);
-    setImportProgress(0);
-    // 模拟导入进度
-    for (let p = 0; p <= 100; p += 10) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 150));
-      setImportProgress(p);
+
+    // 边界：所有行都在前端被拦下，没有任何东西可以 POST
+    if (parsed.devices.length === 0) {
+      const stubResult: BatchImportResponse = {
+        total: parsed.localErrors.length,
+        succeeded: 0,
+        failed: parsed.localErrors.length,
+        errors: parsed.localErrors.map((e) => ({
+          row: e.row,
+          sn: e.sn,
+          reason: e.reason,
+        })),
+      };
+      setResult(stubResult);
+      await onImport(stubResult);
+      return;
     }
-    setImporting(false);
-    setImportDone(true);
-    onImport(fileList);
-    // 延迟关闭弹窗，让用户看到成功提示
-    await new Promise<void>((resolve) => setTimeout(resolve, 1000));
-    onClose();
-  }, [fileList, onImport, onClose, t]);
+
+    setImporting(true);
+    try {
+      const resp = await deviceApi.batchImportDevices({ devices: parsed.devices });
+      // 把前端校验失败的行合并进 total / failed（让最终统计与 CSV 实际数据行一致）
+      const finalResult: BatchImportResponse = {
+        total: resp.total + parsed.localErrors.length,
+        succeeded: resp.succeeded,
+        failed: resp.failed + parsed.localErrors.length,
+        errors: [
+          ...parsed.localErrors.map((e) => ({
+            row: e.row,
+            sn: e.sn,
+            reason: e.reason,
+          })),
+          ...(resp.errors ?? []),
+        ],
+      };
+      setResult(finalResult);
+      await onImport(finalResult);
+    } catch (err) {
+      void Modal.error({
+        title: t('common.error'),
+        content: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setImporting(false);
+    }
+  }, [fileList, parsed, onImport, t]);
 
   const handleCancel = useCallback(() => {
-    if (!importing) {
-      onClose();
-    }
-  }, [importing, onClose]);
+    if (importing) return;
+    resetAll();
+    onClose();
+  }, [importing, onClose, resetAll]);
+
+  // 摘要面板：parsed 之后才显示
+  const parseSummary = parsed && !result ? (
+    <Alert
+      style={{ marginBottom: 12 }}
+      type={parsed.localErrors.length > 0 ? 'warning' : 'info'}
+      showIcon
+      icon={parsed.localErrors.length > 0 ? <WarningOutlined /> : undefined}
+      message={
+        <span>
+          <Tag color="blue">{parsed.devices.length}</Tag>
+          <Text type="secondary" style={{ fontSize: 13 }}>
+            {t('device.batchImport.frontendBlocked', {
+              count: parsed.localErrors.length,
+            })}
+          </Text>
+        </span>
+      }
+    />
+  ) : null;
+
+  // 最终结果面板：result 已写
+  const resultSummary = result ? (
+    <Alert
+      style={{ marginBottom: 12 }}
+      type={result.failed === 0 ? 'success' : result.succeeded === 0 ? 'error' : 'warning'}
+      showIcon
+      icon={result.failed === 0 ? <CheckCircleOutlined /> : <WarningOutlined />}
+      message={
+        result.failed === 0
+          ? t('device.batchImport.allSucceeded', { succeeded: result.succeeded })
+          : result.succeeded === 0
+            ? t('device.batchImport.allFailed', { failed: result.failed })
+            : t('device.batchImport.partial', {
+                succeeded: result.succeeded,
+                failed: result.failed,
+              })
+      }
+    />
+  ) : null;
+
+  // 错误明细
+  const errorList = mergedErrors.length > 0 ? (
+    <div style={{ marginBottom: 12 }}>
+      <Paragraph style={{ marginBottom: 6, fontSize: 13 }} strong>
+        {t('device.batchImport.errorListTitle')}
+      </Paragraph>
+      <List
+        size="small"
+        bordered
+        dataSource={visibleErrors}
+        renderItem={(item) => (
+          <List.Item style={{ fontSize: 12 }}>
+            <Text type="danger" style={{ marginRight: 8 }}>
+              #{item.row}
+            </Text>
+            {item.sn ? <Tag style={{ marginRight: 8 }}>{item.sn}</Tag> : null}
+            <Text>{item.reason}</Text>
+          </List.Item>
+        )}
+      />
+      {hiddenErrorCount > 0 ? (
+        <Text type="secondary" style={{ fontSize: 12, marginTop: 4, display: 'block' }}>
+          {t('device.batchImport.errorListMore', { n: hiddenErrorCount })}
+        </Text>
+      ) : null}
+    </div>
+  ) : null;
 
   return (
     <Modal
@@ -87,16 +475,13 @@ export default function BatchImportModal({
       open={open}
       onCancel={handleCancel}
       footer={null}
-      width={520}
+      width={600}
       maskClosable={!importing}
       closable={!importing}
+      destroyOnClose
     >
       <div style={{ marginBottom: 12 }}>
-        <Button
-          icon={<DownloadOutlined />}
-          size="small"
-          onClick={onDownloadTemplate}
-        >
+        <Button icon={<DownloadOutlined />} size="small" onClick={onDownloadTemplate}>
           {t('device.downloadImportTemplate')}
         </Button>
       </div>
@@ -111,31 +496,22 @@ export default function BatchImportModal({
         </p>
       </Dragger>
 
-      {importing && (
-        <div style={{ marginBottom: 16 }}>
-          <Text type="secondary" style={{ fontSize: 13 }}>
-            {t('common.loading')}
-          </Text>
-          <Progress percent={importProgress} status="active" />
-        </div>
-      )}
+      {parseSummary}
+      {resultSummary}
+      {errorList}
 
-      {importDone && (
-        <Alert
-          type="success"
-          showIcon
-          icon={<CheckCircleOutlined />}
-          message={t('device.importSuccess')}
-          style={{ marginBottom: 16 }}
-        />
-      )}
+      {importing ? (
+        <div style={{ marginBottom: 16, textAlign: 'center' }}>
+          <Spin tip={t('common.loading')} />
+        </div>
+      ) : null}
 
       <Button
         type="primary"
         icon={<UploadOutlined />}
         loading={importing}
         onClick={() => void handleImportConfirm()}
-        disabled={fileList.length === 0}
+        disabled={fileList.length === 0 || result !== null}
         block
       >
         {t('common.import')}

@@ -1,5 +1,5 @@
 import http from '../http';
-import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter, CreateDeviceInput, NameFilterItem } from '../../types/device';
+import type { Device, NE, DeviceFilter, DeviceGroup, DeviceListResponse, DeviceListStats, DeviceStats, DeviceParameter, CreateDeviceInput, NameFilterItem, BatchImportRequest, BatchImportResponse } from '../../types/device';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 
 // Backend device model from Go struct
@@ -326,15 +326,13 @@ export const deviceApi = {
     if (params.vendor) query.oui = params.vendor;
     // productType → product_class
     if (params.productType) query.product_class = params.productType;
-    // networkType: 前端值 'eNB' → 后端 'lte', 'gNB' → 后端 'nr'
+    // networkType: T-0162 后 network_type 字典已直接给 'lte'/'nr'（与后端
+    // devices.technology 字段值一致），不再需要 eNB/gNB → lte/nr 翻译。但
+    // 历史前端 / 老 link 可能仍传 eNB/gNB，做向下兼容映射。
     if (params.networkType) {
-      const networkTypeMap: Record<string, string> = {
-        'eNB': 'lte',
-        'gNB': 'nr',
-        // GSM 后端不支持，忽略
-      };
-      const mappedTech = networkTypeMap[params.networkType];
-      if (mappedTech) query.technology = mappedTech;
+      const legacyMap: Record<string, string> = { eNB: 'lte', gNB: 'nr' };
+      const tech = legacyMap[params.networkType] ?? params.networkType;
+      query.technology = tech;
     }
     // groupId → group_id (device group filter)
     if (params.groupId) query.group_id = params.groupId;
@@ -343,12 +341,28 @@ export const deviceApi = {
     if (params.lifecycleState && params.lifecycleState.length > 0) {
       query.lifecycle_state = params.lifecycleState.join(','); // CSV 多选
     }
-    if (typeof params.isOnline === 'boolean') {
-      query.is_online = params.isOnline ? 'true' : 'false';
+    // isOnline 兼容三种来源：
+    //   - 程序化调用：boolean true/false
+    //   - 表单/字典选择：字符串 'true'/'false'（is_online 字典 value 即字符串）
+    //   - URL deep-link：?isOnline=true 也是字符串
+    // 类型定义里 isOnline 是 boolean，但运行时来自表单时是字符串 —— 不能只
+    // 看 typeof boolean，否则字典选 "在线" 会被静默丢弃。
+    if (params.isOnline === true || (params.isOnline as unknown) === 'true') {
+      query.is_online = 'true';
+    } else if (params.isOnline === false || (params.isOnline as unknown) === 'false') {
+      query.is_online = 'false';
     }
-    if (params.modelName) query.model_name = params.modelName;
-    if (params.softwareVersion) query.software_version = params.softwareVersion;
-    if (params.firmwareVersion) query.firmware_version = params.firmwareVersion;
+    // 多选下拉 → CSV：FilterField type='multi-select' 返回数组，axios 默认
+    // 把数组序列化为 key[]=a&key[]=b，gin 的 c.Query("model_name") 只认
+    // 'model_name'，不认 'model_name[]'，过滤会被静默丢弃。统一 join 成
+    // CSV，对应后端按 strings.Split(",") 解析（与 lifecycle_state 同模式）。
+    const csv = (v: unknown): string | undefined => {
+      if (Array.isArray(v)) return v.length > 0 ? v.join(',') : undefined;
+      return v ? String(v) : undefined;
+    };
+    if (params.modelName) query.model_name = csv(params.modelName);
+    if (params.softwareVersion) query.software_version = csv(params.softwareVersion);
+    if (params.firmwareVersion) query.firmware_version = csv(params.firmwareVersion);
 
     // T-0162 DEPRECATED: 老 connStatus 仍兼容，但仅在新字段都没传时才用
     // （新前端代码直接用 lifecycleState/isOnline）
@@ -364,8 +378,9 @@ export const deviceApi = {
       }
     }
     if (params.opState) query.op_state = params.opState;
-    // productModel → product_class
-    if (params.productModel) query.product_class = params.productModel;
+    // productModel / productType 都映射到 product_class（前者是 multi-select，
+    // 后者是历史单值字段），统一走 csv() 处理。
+    if (params.productModel) query.product_class = csv(params.productModel);
 
     const { data } = await http.get<BackendListResponse<BackendDevice>>('/devices', {
       params: query,
@@ -440,6 +455,14 @@ export const deviceApi = {
 
   async batchReboot(ids: string[]): Promise<BatchOperationResult> {
     const { data } = await http.post<BatchOperationResult>('/devices/batch-reboot', { ids });
+    return data;
+  },
+
+  // 批量导入：前端解析 CSV → 结构化 JSON → 后端逐行 CreateDevice。
+  // payload 字段已是 wire 层 snake_case（与 device.CreateDeviceRequest 对齐），
+  // axios 请求拦截器只转 query params，不动 body，因此这里不要再写 camelCase。
+  async batchImportDevices(payload: BatchImportRequest): Promise<BatchImportResponse> {
+    const { data } = await http.post<BatchImportResponse>('/devices/batch-import', payload);
     return data;
   },
 

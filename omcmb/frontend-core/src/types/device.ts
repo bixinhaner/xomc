@@ -47,6 +47,44 @@ export interface CreateDeviceInput {
   longitude?: number;
 }
 
+// 批量导入单行数据（wire 层使用 snake_case，与后端 device.CreateDeviceRequest 一一对应）。
+// 与 CreateDeviceInput 同语义，区别仅在序列化命名空间：
+//   - CreateDeviceInput 走单次 create，由 deviceApi.create() 内部 camelCase → snake_case 手动映射；
+//   - BatchImportDevice 走批量 POST，由 BatchImportModal 解析 CSV 后直接以 snake_case 提交，
+//     避免每行做一次 mapping helper 调用。
+export interface BatchImportDevice {
+  serial_number: string;
+  oui: string;
+  carrier: CarrierCode;
+  technology: DeviceTechnology;
+  product_class?: string;
+  manufacturer?: string;
+  model_name?: string;
+  ip_address?: string;
+  device_name?: string;
+  site_id?: string;
+  latitude?: number;
+  longitude?: number;
+}
+
+export interface BatchImportRequest {
+  devices: BatchImportDevice[];
+}
+
+// 单行错误回执（row 与 CSV 用户视角行号一致，1-based 不含 header）。
+export interface BatchImportRowError {
+  row: number;
+  sn?: string;
+  reason: string;
+}
+
+export interface BatchImportResponse {
+  total: number;
+  succeeded: number;
+  failed: number;
+  errors: BatchImportRowError[];
+}
+
 export interface Device {
   id: string;
   sn: string;

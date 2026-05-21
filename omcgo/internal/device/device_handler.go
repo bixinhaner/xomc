@@ -2,6 +2,7 @@ package device
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -51,6 +52,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		// Batch routes must be registered before /:id to avoid path conflicts
 		devices.DELETE("/batch", h.BatchDeleteDevices)
 		devices.POST("/batch-reboot", h.BatchRebootDevices)
+		devices.POST("/batch-import", h.BatchImportDevices)
 		// Recycle bin routes
 		devices.GET("/recycle", h.ListRecycleBin)
 		devices.PATCH("/recycle/restore", h.RestoreDevices)
@@ -661,6 +663,62 @@ func (h *Handler) BatchDeleteDevices(c *gin.Context) {
 	audit.LogAsync(entry)
 
 	response.OK(c, result)
+}
+
+// BatchImportRequest 来自 POST /api/v1/devices/batch-import 的请求体。
+// 前端解析 CSV 后以结构化 JSON 数组提交；服务侧逐条调 CreateDevice 落库，
+// 单行失败不影响其他行（与"成功/失败按行单独回执"的产品语义一致）。
+type BatchImportRequest struct {
+	Devices []CreateDeviceRequest `json:"devices" binding:"required,min=1,max=1000,dive"`
+}
+
+// BatchImportResponse 报告本次批次的成功/失败统计 + 失败明细。
+type BatchImportResponse struct {
+	Total     int                   `json:"total"`
+	Succeeded int                   `json:"succeeded"`
+	Failed    int                   `json:"failed"`
+	Errors    []BatchImportRowError `json:"errors"`
+}
+
+// BatchImportRowError 描述单行导入失败的原因（携带行号方便用户定位）。
+type BatchImportRowError struct {
+	Row    int    `json:"row"`          // 1-based, 与 CSV 用户视角行号一致（不含 header）
+	SN     string `json:"sn,omitempty"` // 失败行的设备 SN（即使插库失败，方便用户定位）
+	Reason string `json:"reason"`       // 友好的中文/英文错误描述
+}
+
+// BatchImportDevices handles POST /api/v1/devices/batch-import.
+//
+// 接收一组结构化 device 数据，逐条调 service.CreateDevice 落库，跳过失败行继续；
+// 返回每行成败明细。前端 CSV 解析失败的行不会到这里——前端做基础校验，
+// 后端只在 DB 唯一性 / 模型校验 / license 等运行时层面给出回执。
+func (h *Handler) BatchImportDevices(c *gin.Context) {
+	var req BatchImportRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	resp := BatchImportResponse{Total: len(req.Devices)}
+	for i, dev := range req.Devices {
+		_, err := h.service.CreateDevice(c.Request.Context(), dev)
+		if err != nil {
+			resp.Failed++
+			reason := err.Error()
+			if errors.Is(err, commonerrors.ErrAlreadyExists) {
+				reason = "SN 已存在"
+			}
+			resp.Errors = append(resp.Errors, BatchImportRowError{
+				Row:    i + 1,
+				SN:     dev.SerialNumber,
+				Reason: reason,
+			})
+			continue
+		}
+		resp.Succeeded++
+	}
+
+	response.OK(c, resp)
 }
 
 // BatchRebootDevices handles POST /api/v1/devices/batch-reboot.

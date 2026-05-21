@@ -1,10 +1,9 @@
 import React, { useCallback, useState } from 'react';
 import { Button, Card, Typography } from 'antd';
-import type { UploadFile } from 'antd';
 import { DownloadOutlined, UploadOutlined } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { BatchAction } from '@/components/DataTable';
-import type { Device } from '@core/types/device';
+import type { Device, BatchImportResponse } from '@core/types/device';
 import BatchImportModal from './BatchImportModal';
 import { useDeviceColumns } from './useDeviceColumns';
 
@@ -23,7 +22,11 @@ export interface DeviceListPanelProps {
   onPageChange: (page: number, size: number) => void;
   onRefresh: () => void;
   onExport: () => void;
-  onImport: (fileList: UploadFile[]) => void;
+  /**
+   * 批量导入完成回调（接收后端真实回执，含成功/失败统计）。
+   * T-0202 后从原 fileList 改为 BatchImportResponse —— 解析与 POST 已下沉到 Modal。
+   */
+  onImport: (result: BatchImportResponse) => void | Promise<void>;
   onDownloadTemplate: () => void;
   onEditDevice: (device: Device) => void;
   t: (id: string, values?: Record<string, string | number>) => string;
