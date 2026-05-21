@@ -39,6 +39,7 @@ import (
 	"github.com/omcgo/omcgo/internal/provision"
 	"github.com/omcgo/omcgo/internal/report"
 	"github.com/omcgo/omcgo/internal/software"
+	"github.com/omcgo/omcgo/internal/eventlog"
 	"github.com/omcgo/omcgo/internal/stationlog"
 	"github.com/omcgo/omcgo/internal/syslog"
 	"github.com/omcgo/omcgo/internal/task"
@@ -553,6 +554,24 @@ func initStationLogModule(c *Container) error {
 	}
 
 	logger.Info("stationlog module initialized")
+	return nil
+}
+
+// initEventLogModule 初始化事件日志模块（设备活动审计流水）。
+// 1 BOOT 无 HaltReason 时由 device.RecordBootFromInform 调用此 service 写入 event_logs。
+func initEventLogModule(c *Container) error {
+	logger := c.Logger.Named("eventlog")
+
+	repo := eventlog.NewPgRepository(c.PgPool)
+	svc := eventlog.NewService(repo, logger)
+
+	c.miscDeps.eventlogHandler = eventlog.NewHandler(svc, logger)
+
+	if c.DeviceService != nil {
+		c.DeviceService.SetBootEventRecorder(svc)
+	}
+
+	logger.Info("eventlog module initialized")
 	return nil
 }
 
@@ -1131,6 +1150,9 @@ type miscDeps struct {
 
 	// StationLog
 	stationlogHandler *stationlog.Handler
+
+	// EventLog（设备活动审计流水）
+	eventlogHandler *eventlog.Handler
 
 	// Dashboard
 	dashboardHandler *dashboard.Handler

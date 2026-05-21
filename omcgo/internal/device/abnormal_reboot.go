@@ -43,3 +43,30 @@ type AbnormalRebootRecorder interface {
 func (s *DeviceService) SetAbnormalRebootRecorder(r AbnormalRebootRecorder) {
 	s.abnormalRecorder = r
 }
+
+// BootEventSnapshot 是普通 1 BOOT 事件（无 HaltReason）落库到 event_logs 的快照入参。
+// 与 AbnormalRebootSnapshot 故意分开：异常重启需要 HaltReason / 关联文件等丰富信息走
+// station_fault_logs；普通 BOOT 只做轻量审计流水，字段更瘦。
+type BootEventSnapshot struct {
+	DeviceID        uuid.UUID
+	DeviceSN        string
+	DeviceName      string
+	DeviceType      string // eNB / gNB
+	IsGNB           bool
+	OperateIP       string
+	SoftwareVersion string
+	BootCount       int
+	Events          []string // 原始 Inform 事件码列表，便于排错
+	OccurredAt      time.Time
+}
+
+// BootEventRecorder 是 DeviceService 用来把普通 1 BOOT 写入 event_logs 的窄接口。
+// 由 eventlog.Service 在 modules.go wiring 时实现并注入。
+type BootEventRecorder interface {
+	RecordBootEvent(ctx context.Context, snap BootEventSnapshot) error
+}
+
+// SetBootEventRecorder 注入事件日志写入实现；nil 等价于禁用。
+func (s *DeviceService) SetBootEventRecorder(r BootEventRecorder) {
+	s.bootEventRecorder = r
+}

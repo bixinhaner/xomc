@@ -122,7 +122,8 @@ export const componentRegistry: Record<string, ComponentType> = {
   // T-0158: 旧 component_path 仍可能存在于 menus 表（seed 000139 已 UPDATE），用 alias 容错
   'log/ExceptionLog': lazy(() => import('@/pages/device/AbnormalReboot')),
   'device/AbnormalReboot': lazy(() => import('@/pages/device/AbnormalReboot')),
-  'log/EventLog': lazy(() => import('@/pages/log/EventLog')),
+  // 事件日志已合并为「设备管理 / 重启记录」EventLogTab；旧 component_path 兜底指向同入口
+  'log/EventLog': lazy(() => import('@/pages/device/AbnormalReboot')),
   'log/OperationLog': lazy(() => import('@/pages/log/OperationLog')),
   'log/SystemLog': lazy(() => import('@/pages/log/SystemLog')),
   'log/LogConfig': lazy(() => import('@/pages/log/LogConfig')),

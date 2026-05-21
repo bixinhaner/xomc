@@ -198,8 +198,10 @@ func (r *PgRepository) List(ctx context.Context, filter LogFileFilter) ([]*LogFi
 		countBase = countBase.Where(sq.Eq{"device_id": *filter.DeviceID})
 	}
 	if filter.DeviceSN != "" {
-		base = base.Where(sq.Eq{"device_sn": filter.DeviceSN})
-		countBase = countBase.Where(sq.Eq{"device_sn": filter.DeviceSN})
+		// 模糊匹配（ILIKE 大小写不敏感）：让前端输入部分 SN 如 "12028" 也能命中完整 SN
+		pattern := "%" + filter.DeviceSN + "%"
+		base = base.Where(sq.ILike{"device_sn": pattern})
+		countBase = countBase.Where(sq.ILike{"device_sn": pattern})
 	}
 	if r.withFaultFields {
 		if filter.RecordStatus != "" {

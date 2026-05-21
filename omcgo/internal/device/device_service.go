@@ -44,8 +44,9 @@ type DeviceService struct {
 	licenseEnforcer  LicenseEnforcer
 	carrierRegistry  *carrier.CarrierRegistry // T-0029: RF control path lookup by carrier+tech
 	paramSyncStarter ParamSyncStarter         // T-0126: 注入 *provision.SyncService 触发 Path B 手动同步
-	abnormalRecorder AbnormalRebootRecorder   // T-0158: 异常重启识别即落库（nil = 禁用）
-	logger           *zap.Logger
+	abnormalRecorder  AbnormalRebootRecorder // T-0158: 异常重启识别即落库（nil = 禁用）
+	bootEventRecorder BootEventRecorder      // 普通 1 BOOT 事件日志写入（nil = 禁用）
+	logger            *zap.Logger
 }
 
 // LicenseEnforcer is the narrow interface DeviceService consumes from the
@@ -1165,6 +1166,31 @@ func (s *DeviceService) RecordBootFromInform(ctx context.Context, device *model.
 					s.logger.Warn("publish device.reboot.abnormal event", zap.Error(pubErr))
 				}
 			}
+		}
+	} else if hasBoot && s.bootEventRecorder != nil {
+		// 单纯 1 BOOT（无 HaltReason）→ event_logs 普通事件日志。
+		// 与异常重启分两个表：station_fault_logs 是异常+文件管理，event_logs 是审计流水。
+		bootSnap := BootEventSnapshot{
+			DeviceID:        device.ID,
+			DeviceSN:        device.SerialNumber,
+			DeviceName:      device.DeviceName,
+			OperateIP:       device.IPAddress,
+			SoftwareVersion: device.FirmwareVersion,
+			IsGNB:           device.Technology == model.TechNR,
+			BootCount:       bootCount,
+			Events:          events,
+			OccurredAt:      now,
+		}
+		if device.Technology == model.TechNR {
+			bootSnap.DeviceType = "gNB"
+		} else {
+			bootSnap.DeviceType = "eNB"
+		}
+		if recErr := s.bootEventRecorder.RecordBootEvent(ctx, bootSnap); recErr != nil {
+			// 失败不阻塞主流程
+			s.logger.Warn("record boot event log",
+				zap.String("serial_number", device.SerialNumber),
+				zap.Error(recErr))
 		}
 	}
 

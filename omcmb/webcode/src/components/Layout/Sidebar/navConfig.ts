@@ -179,21 +179,10 @@ export const NAV_CONFIG: NavConfig = [
   //     { key: 'file-device',         label: 'nav.file.deviceFiles',        path: '/file/device-files' },
   //   ],
   // },  // 隐藏文件管理菜单
-  {
-    key: 'log',
-    label: 'nav.log',
-    iconName: 'FileTextOutlined',
-    children: [
-      { key: 'log-device',    label: 'nav.log.device',     path: '/log/device' },
-      // T-0158: "设备异常日志" 已迁移到"设备管理 / 异常重启记录" (/device/abnormal-reboot)
-      { key: 'log-event',     label: 'nav.log.event',      path: '/log/event' },
-      // T-0137 / M1: TR069 报文跟踪入口
-      { key: 'log-message-trace', label: 'nav.ops.messageTrace', path: '/ops/message-trace' },
-      // { key: 'log-operation',label: 'nav.log.operation',  path: '/log/operation' },  // 隐藏
-      // { key: 'log-system',   label: 'nav.log.system',     path: '/log/system' },       // 隐藏
-      // { key: 'log-config',   label: 'nav.log.config',     path: '/log/config' },       // 隐藏
-    ],
-  },
+  // 「日志管理」整个分组已下线：
+  //   - 设备异常日志 → 已迁移到「设备管理 / 重启记录」(/device/abnormal-reboot)
+  //   - 事件日志    → 已合并为「设备管理 / 重启记录」下的 tab
+  //   - 报文跟踪    → 路由保留（/ops/message-trace），如需访问改走顶级或 ops 菜单
   {
     key: 'product',
     label: 'nav.product',
