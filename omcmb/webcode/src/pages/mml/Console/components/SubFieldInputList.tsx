@@ -1,11 +1,22 @@
 import { useMemo } from 'react';
-import { Input, Tag, Empty } from 'antd';
+import { Input, Tag, Tooltip, Empty } from 'antd';
+import { EditOutlined, NumberOutlined } from '@ant-design/icons';
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
 import type { Statement } from '@core/types/mmlConsole';
 import { useT } from '@/hooks/useT';
 
 export interface SubFieldInputListProps {
   statement: Statement;
+}
+
+/** path 含 `.{i}.` 多实例占位符时渲染的提示图标（D35）。 */
+function multiInstanceHint(tr069Path: string, tip: string) {
+  if (!tr069Path.includes('.{i}.')) return null;
+  return (
+    <Tooltip title={tip}>
+      <NumberOutlined style={{ color: '#fa8c16' }} aria-label="multi-instance" />
+    </Tooltip>
+  );
 }
 
 export default function SubFieldInputList({ statement }: SubFieldInputListProps) {
@@ -24,6 +35,10 @@ export default function SubFieldInputList({ statement }: SubFieldInputListProps)
   if (sortedFields.length === 0) {
     return <Empty description={false} style={{ padding: 16 }} />;
   }
+
+  // D35：笔图标 ✏️ 仅在 MOD 上下文渲染（装饰性，告知"此字段可改"）；
+  // ADD 上下文虽也可输入，但语义是"创建新对象"，统一不渲染。
+  const showEditIcon = statement.operationType === 'MOD';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -47,6 +62,15 @@ export default function SubFieldInputList({ statement }: SubFieldInputListProps)
                 style={{ flex: 1 }}
                 status={sf.isRequired && !currentValue ? 'warning' : undefined}
               />
+              {multiInstanceHint(sf.tr069Path, t('mml.console.subField.multiInstanceTip'))}
+              {showEditIcon && (
+                <Tooltip title={t('mml.console.subField.readWriteTip')}>
+                  <EditOutlined
+                    style={{ color: '#1677ff' }}
+                    aria-label="editable"
+                  />
+                </Tooltip>
+              )}
               {sf.changeApplies === 'OnReboot' && (
                 <Tag color="warning">{t('mml.console.subField.onReboot')}</Tag>
               )}
