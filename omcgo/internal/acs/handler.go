@@ -706,10 +706,18 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 					zap.String("fault_msg", faultMsg))
 			} else {
 				// 任务成功完成 - 将原始响应存为结果
-				resultJSON, _ := json.Marshal(map[string]interface{}{
+				resultMap := map[string]interface{}{
 					"method":       string(method),
 					"raw_response": string(body),
-				})
+				}
+				// AddObject 提前解析 InstanceNumber 写入 result,供 notification 渲染
+				// 标题"InterFreq.Carrier.6"等场景使用,避免下游再解一次 SOAP body。
+				if method == soap.MethodAddObjectResp {
+					if instanceNumber, _, _, decErr := soap.DecodeAddObjectResponse(bytes.NewReader(body)); decErr == nil && instanceNumber > 0 {
+						resultMap["instance_number"] = instanceNumber
+					}
+				}
+				resultJSON, _ := json.Marshal(resultMap)
 				if markErr := h.taskService.MarkTaskCompleted(r.Context(), taskItem.ID, resultJSON); markErr != nil {
 					log.Error("mark task completed", zap.Error(markErr), zap.String("task_id", taskItem.ID))
 				}
@@ -722,6 +730,14 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 				// 回读由已有 RPCResponseSubscriber.handleGPVResponse 写库,本 hook 仅入队。
 				if method == soap.MethodSetParameterValuesResp {
 					h.queueAutoGPVAfterSPV(r.Context(), taskItem, log)
+				}
+				// AddObject 成功后,自动入队 GPV 回读新实例参数。
+				// 原因:AddObjectResponse 仅含 InstanceNumber(无参数值),CPE 上对象已建但
+				// device_parameters 表无新实例记录,导致"快速设置"等列表看不到新增项,
+				// 用户须手动点"同步参数"全量 Path B 才能恢复。本 hook 针对新实例 path
+				// 入队 GPV,由已有 handleGPVResponse 写库。
+				if method == soap.MethodAddObjectResp {
+					h.queueAutoGPVAfterAddObject(r.Context(), taskItem, body, log)
 				}
 			}
 		}
@@ -1457,6 +1473,76 @@ func (h *Handler) queueAutoGPVAfterSPV(ctx context.Context, spvTask *task.Task, 
 		zap.String("spv_task_id", spvTask.ID),
 		zap.String("gpv_task_id", gpvTask.ID),
 		zap.Int("param_count", len(names)))
+}
+
+// queueAutoGPVAfterAddObject 在 AddObjectResponse 成功完成后,针对新实例 path
+// 入队一个 GetParameterValues 拉取该对象下所有参数,触发 device_parameters 写入。
+//
+// 工作流:
+//  1. 解析 AddObjectResponse SOAP body 取 InstanceNumber
+//  2. 从 addObjTask.Params 解析 object_name(父对象 path,形如 "Device.X.Y.Z.")
+//  3. 拼接新实例 path: object_name + "{N}."
+//  4. 入队 GPV(names=[新实例 path]);TR-069 协议:"." 结尾的 name 拉对象下所有参数
+//  5. GPV 完成后由已有 RPCResponseSubscriber.handleGPVResponse 自动写 device_parameters
+//
+// 失败语义:解析/入队失败仅 log Warn,不阻塞主流程(AddObject 主任务已完成,实例已建)。
+func (h *Handler) queueAutoGPVAfterAddObject(ctx context.Context, addObjTask *task.Task, body []byte, log *zap.Logger) {
+	if h.taskService == nil || addObjTask == nil || len(addObjTask.Params) == 0 {
+		return
+	}
+
+	instanceNumber, _, _, err := soap.DecodeAddObjectResponse(bytes.NewReader(body))
+	if err != nil {
+		log.Warn("auto GPV after AddObject: decode response failed",
+			zap.Error(err), zap.String("add_obj_task_id", addObjTask.ID))
+		return
+	}
+	if instanceNumber <= 0 {
+		log.Warn("auto GPV after AddObject: invalid instance number",
+			zap.Int("instance_number", instanceNumber),
+			zap.String("add_obj_task_id", addObjTask.ID))
+		return
+	}
+
+	var addParams struct {
+		ObjectName string `json:"object_name"`
+	}
+	if err := json.Unmarshal(addObjTask.Params, &addParams); err != nil {
+		log.Warn("auto GPV after AddObject: parse add_object params failed",
+			zap.Error(err), zap.String("add_obj_task_id", addObjTask.ID))
+		return
+	}
+	if addParams.ObjectName == "" {
+		return
+	}
+
+	newInstancePath := addParams.ObjectName + strconv.Itoa(instanceNumber) + "."
+
+	gpvParams, err := json.Marshal(map[string]interface{}{"names": []string{newInstancePath}})
+	if err != nil {
+		log.Warn("auto GPV after AddObject: marshal gpv params failed",
+			zap.Error(err), zap.String("add_obj_task_id", addObjTask.ID))
+		return
+	}
+
+	gpvTask, err := h.taskService.CreateTask(ctx, &task.CreateTaskRequest{
+		DeviceSN:    addObjTask.DeviceSN,
+		Method:      "GetParameterValues",
+		Params:      gpvParams,
+		Priority:    5,
+		CommandKey:  fmt.Sprintf("auto-gpv-after-addobject-%s", addObjTask.ID[:8]),
+		Source:      task.TaskSourceSystem,
+		Description: "auto GPV after AddObject",
+	})
+	if err != nil {
+		log.Warn("auto GPV after AddObject: enqueue gpv failed",
+			zap.Error(err), zap.String("add_obj_task_id", addObjTask.ID))
+		return
+	}
+	log.Info("auto GPV after AddObject: enqueued",
+		zap.String("add_obj_task_id", addObjTask.ID),
+		zap.String("gpv_task_id", gpvTask.ID),
+		zap.String("new_instance_path", newInstancePath))
 }
 
 func (h *Handler) sendInformResponse(w http.ResponseWriter, cwmpID string, log *zap.Logger) {
