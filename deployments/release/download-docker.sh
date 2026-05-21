@@ -125,7 +125,40 @@ for ARCH in $ARCHES; do
   fi
   # 固定名软链（build-images.sh 以此名拷入交付包）
   ln -sfn "docker-compose-$COMPOSE_VERSION" "$COMPOSE_LINK"
+
+  # ── 同步下载 Docker Buildx v0.x 静态二进制 ──────────────
+  # buildx 资产名：buildx-${BUILDX_VERSION}.linux-{amd64|arm64}，架构名与 Docker tgz 不同
+  # 交付包内以固定名 docker-buildx 存放，install-docker.sh 同目录检测即装
+  if [ -n "${BUILDX_VERSION:-}" ] && [ -n "${BUILDX_URL_TEMPLATES+x}" ] && [ "${#BUILDX_URL_TEMPLATES[@]}" -gt 0 ]; then
+    BUILDX_OUT="$DEST/docker-buildx-$BUILDX_VERSION"
+    BUILDX_LINK="$DEST/docker-buildx"
+    if [ -f "$BUILDX_OUT" ] && [ "$FORCE" = 0 ]; then
+      log "[$ARCH] buildx 已存在，跳过：docker-cache/$ARCH/docker-buildx-$BUILDX_VERSION"
+    else
+      _OK=0
+      for _TPL in "${BUILDX_URL_TEMPLATES[@]}"; do
+        # buildx 资产名的架构字段是 amd64/arm64（不是 x86_64/aarch64），直接用 ARCH
+        BUILDX_URL="${_TPL//\{arch\}/$ARCH}"
+        log "[$ARCH] 尝试下载 buildx: $BUILDX_URL"
+        if fetch "$BUILDX_OUT.tmp" "$BUILDX_URL"; then
+          _OK=1
+          break
+        fi
+        warn "[$ARCH] 该镜像源不可用，试下一个：$BUILDX_URL"
+        rm -f "$BUILDX_OUT.tmp"
+      done
+      if [ "$_OK" = 0 ]; then
+        die "[$ARCH] buildx 下载失败：所有镜像源均不可用（检查网络 / BUILDX_VERSION / release.conf::BUILDX_URL_TEMPLATES）"
+      fi
+      chmod +x "$BUILDX_OUT.tmp"
+      mv "$BUILDX_OUT.tmp" "$BUILDX_OUT"
+      log "[$ARCH] buildx 完成 → docker-cache/$ARCH/docker-buildx-$BUILDX_VERSION"
+    fi
+    ln -sfn "docker-buildx-$BUILDX_VERSION" "$BUILDX_LINK"
+  else
+    warn "[$ARCH] release.conf 未配 BUILDX_VERSION/BUILDX_URL_TEMPLATES，跳过 buildx 下载"
+  fi
 done
 
 log "全部完成。docker-cache/ 内的包将由 build-release.sh 按架构打入交付包。"
-ls -lh "$CACHE"/*/docker-*.tgz "$CACHE"/*/docker-compose-* 2>/dev/null || true
+ls -lh "$CACHE"/*/docker-*.tgz "$CACHE"/*/docker-compose-* "$CACHE"/*/docker-buildx-* 2>/dev/null || true

@@ -167,6 +167,12 @@ if [ -f docker-compose ]; then
   install -m 0755 docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
 fi
 
+# docker buildx 插件（若交付包内提供）——Docker 23+ 在 BuildKit 开启时必需
+if [ -f docker-buildx ]; then
+  install -d /usr/local/lib/docker/cli-plugins
+  install -m 0755 docker-buildx /usr/local/lib/docker/cli-plugins/docker-buildx
+fi
+
 # ── systemd 单元：containerd ────────────────────────────────────────────
 # ExecStart 按需附加 --root <DIR>（来自上面的数据目录选择）
 CONTAINERD_EXEC="/usr/local/bin/containerd"

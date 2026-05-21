@@ -253,12 +253,24 @@ for ARCH in $ARCHES; do
     COMPOSE_IN_PKG="未含"
   fi
 
+  # Docker Buildx v0.x 二进制（仅名 docker-buildx）——Docker 23+ BuildKit 必需
+  if [ -f "$DOCKER_CACHE/$ARCH/docker-buildx" ]; then
+    cp -L "$DOCKER_CACHE/$ARCH/docker-buildx" "$STAGE/docker/docker-buildx"
+    chmod +x "$STAGE/docker/docker-buildx"
+    BUILDX_IN_PKG="${BUILDX_VERSION:-未知}"
+  else
+    warn "[$ARCH] docker-cache/$ARCH/ 无 docker-buildx 二进制 —— 交付包不含离线 buildx。"
+    warn "        请先运行： ./download-docker.sh（同时会下载 buildx）"
+    BUILDX_IN_PKG="未含"
+  fi
+
   # VERSION / README / 校验和
   cat > "$STAGE/VERSION" <<EOF
 infra_version=$INFRA_VERSION
 arch=$ARCH
 docker_version=$DOCKER_IN_PKG
 compose_version=$COMPOSE_IN_PKG
+buildx_version=$BUILDX_IN_PKG
 build_time=$BUILT_AT
 EOF
   cat > "$STAGE/README.md" <<EOF
@@ -268,6 +280,7 @@ EOF
 - 架构：$ARCH（目标机 \`uname -m\`：x86_64→amd64，aarch64→arm64）
 - Docker 版本：$DOCKER_IN_PKG
 - Compose v2 版本：$COMPOSE_IN_PKG
+- Buildx 版本：$BUILDX_IN_PKG
 - 构建时间：$BUILT_AT
 
 本包含【Docker 引擎离线安装包 + 基础镜像】（PostgreSQL / Redis / NATS /
