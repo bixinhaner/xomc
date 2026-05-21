@@ -726,7 +726,13 @@ func initMiscModules(c *Container) error {
 
 	// T-0123-P1：Console 5 端点（group-tree / sub-fields / render / parse / execute-statements）。
 	// 复用 T-0123-P0 的 SubFieldRepo + 既有 CommandRepo；新增 GroupTreeRepo（带 ltree JOIN 子树）。
-	mmlGroupTreeRepo := mml.NewPgGroupTreeRepository(c.PgPool)
+	// MML_V2_SCHEMA=true (在 dictload.go 读入 c.MMLV2Schema) 时切换 BuildTree 到 v2 视图
+	// (chapter:* 顶层 + 跳过 wrapByChapter/attachFamily)，与 catalogloader.WithV2Schema 同步。
+	mmlGroupTreeOpts := []mml.Option{}
+	if c.MMLV2Schema {
+		mmlGroupTreeOpts = append(mmlGroupTreeOpts, mml.WithV2Mode(true))
+	}
+	mmlGroupTreeRepo := mml.NewPgGroupTreeRepository(c.PgPool, mmlGroupTreeOpts...)
 	mmlConsoleSvc := mml.NewConsoleService(mmlGroupTreeRepo, mmlSubFieldRepo, mmlCmdRepo, logger)
 	c.miscDeps.mmlConsoleHandler = mml.NewConsoleHandler(mmlConsoleSvc, mmlService, logger)
 
