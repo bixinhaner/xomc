@@ -36,6 +36,8 @@ done
 
 [ -n "${DOCKER_VERSION:-}" ]      || die "release.conf 未配置 DOCKER_VERSION"
 [ -n "${DOCKER_URL_TEMPLATE:-}" ] || die "release.conf 未配置 DOCKER_URL_TEMPLATE"
+[ -n "${COMPOSE_VERSION:-}" ]      || die "release.conf 未配置 COMPOSE_VERSION"
+[ -n "${COMPOSE_URL_TEMPLATE:-}" ] || die "release.conf 未配置 COMPOSE_URL_TEMPLATE"
 
 # 仅支持 amd64（见 release.conf 注释 "架构支持"）
 for _a in $ARCHES; do
@@ -85,7 +87,29 @@ for ARCH in $ARCHES; do
   fi
   mv "$OUT.tmp" "$OUT"
   log "[$ARCH] 完成 → docker-cache/$ARCH/docker-$DOCKER_VERSION.tgz"
+
+  # ── 同步下载 Docker Compose v2 静态二进制 ──────────────
+  # compose 二进制名由 GitHub Release 资产名决定：docker-compose-linux-{x86_64|aarch64}
+  # 交付包内以固定名 docker-compose 存放，install-docker.sh 同目录检测即装
+  COMPOSE_URL="${COMPOSE_URL_TEMPLATE//\{arch\}/$DARCH}"
+  COMPOSE_OUT="$DEST/docker-compose-$COMPOSE_VERSION"
+  COMPOSE_LINK="$DEST/docker-compose"
+
+  if [ -f "$COMPOSE_OUT" ] && [ "$FORCE" = 0 ]; then
+    log "[$ARCH] compose 已存在，跳过：docker-cache/$ARCH/docker-compose-$COMPOSE_VERSION"
+  else
+    log "[$ARCH] 下载 compose v2: $COMPOSE_URL"
+    if ! fetch "$COMPOSE_OUT.tmp" "$COMPOSE_URL"; then
+      rm -f "$COMPOSE_OUT.tmp"
+      die "[$ARCH] compose 下载失败：$COMPOSE_URL（检查网络 / COMPOSE_VERSION 是否存在）"
+    fi
+    chmod +x "$COMPOSE_OUT.tmp"
+    mv "$COMPOSE_OUT.tmp" "$COMPOSE_OUT"
+    log "[$ARCH] compose 完成 → docker-cache/$ARCH/docker-compose-$COMPOSE_VERSION"
+  fi
+  # 固定名软链（build-images.sh 以此名拷入交付包）
+  ln -sfn "docker-compose-$COMPOSE_VERSION" "$COMPOSE_LINK"
 done
 
 log "全部完成。docker-cache/ 内的包将由 build-release.sh 按架构打入交付包。"
-ls -lh "$CACHE"/*/docker-*.tgz 2>/dev/null || true
+ls -lh "$CACHE"/*/docker-*.tgz "$CACHE"/*/docker-compose-* 2>/dev/null || true

@@ -54,6 +54,7 @@ nats:
   reconnect_wait: 2s
 
 db:
+  # 【全 docker compose 部署】使用 service 名 postgres（容器间 docker network 解析）
   dsn: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
   max_conns: 20
   min_conns: 5

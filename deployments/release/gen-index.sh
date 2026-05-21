@@ -166,12 +166,12 @@ sudo bash deploy/deploy.sh                          # 全套首次部署
 sudo bash deploy/deploy.sh --skip-infra             # 日常升级（基础设施已装）
 sudo bash deploy/deploy.sh --check-only             # 仅检查环境，不动手
 sudo bash deploy/deploy.sh -h                       # 查看所有参数</pre>
-<p class="tip">deploy.sh 自动：环境检查 → 建立目录布局 → load 基础镜像 → 默认口令检查 → 启动 infra 容器 → 等就绪 → migrate → seed → 装 systemd → 起 web → 健康检查。</p>
-<div class="danger">⚠️ 生产环境首次部署前请编辑 <code>/opt/omc/current/deploy/docker-compose.infra.yml</code> 与 <code>/opt/omc/etc/*.prod.yaml</code>，改 <b>PostgreSQL / MinIO / JWT</b> 默认口令为强口令。</div>
+<p class="tip">deploy.sh 自动：环境检查 → 旧 systemd 单元自动迁移 → 建立目录布局 → load 镜像（基础设施 + 监控 + 业务） → 默认口令检查 → 启动 infra 容器 → 等就绪 → migrate（容器） → seed（容器） → docker compose 一次 up 全栈（infra + app + web + monitoring） → 健康检查。<b>全 docker compose 部署，宿主机不再放业务二进制 / systemd 单元。</b></p>
+<div class="danger">⚠️ 生产环境首次部署前请编辑 <code>/opt/omc/current/deploy/.env</code> 与 <code>/opt/omc/etc/*.prod.yaml</code>，改 <b>PostgreSQL / MinIO / Grafana / JWT</b> 默认口令为强口令。</div>
 
 <h2>✅ 6. 验证部署</h2>
 <pre>bash /opt/omc/current/deploy/healthcheck.sh</pre>
-<p class="lead">应输出全部 <code>[OK]</code>：3 个 systemd 服务（app/acs/worker）+ 4 个健康端点（app /health, acs /healthz, app /metrics, 前端首页）。</p>
+<p class="lead">应输出全部 <code>[OK]</code>：业务容器（app/acs/worker）+ 基础设施容器（postgres/redis/nats/minio）+ 监控容器（prometheus/grafana/loki/...）+ 4 个健康端点（app /health, acs /healthz, app /metrics, 前端首页）。</p>
 
 <h2>🌐 7. 部署后访问地址</h2>
 <div class="kv">
@@ -183,7 +183,7 @@ sudo bash deploy/deploy.sh -h                       # 查看所有参数</pre>
 </div>
 
 <h2>👤 8. 初始账号 / 口令</h2>
-<div class="danger">⚠️ 全部默认口令<b>首次登录后必须改</b>。生产部署前需重新生成强口令并同步到 docker-compose.infra.yml 与 *.prod.yaml。</div>
+<div class="danger">⚠️ 全部默认口令<b>首次登录后必须改</b>。生产部署前需重新生成强口令并同步到 deploy/.env 与 *.prod.yaml。</div>
 <div class="kv">
 <b>Web 管理员：</b><code>admin</code> / <code>admin123</code><br>
 <b>MinIO Console：</b><code>minioadmin</code> / <code>minioadmin</code><br>
@@ -194,22 +194,22 @@ sudo bash deploy/deploy.sh -h                       # 查看所有参数</pre>
 <h2>🔑 9. 配置文件修改指南（账号 / 口令 / JWT）</h2>
 <p class="lead">默认口令在两处出现、必须<b>同步修改</b>，否则 OMC 进程连不上 PostgreSQL / MinIO：</p>
 <ul class="list">
-<li><code>/opt/omc/current/deploy/docker-compose.infra.yml</code> —— 容器起服务时的<b>初始口令</b>（仅首次 <code>volumes</code> 创建时生效）</li>
+<li><code>/opt/omc/current/deploy/.env</code> —— docker compose 起容器时的<b>初始口令 / 镜像版本</b>（仅首次 <code>volumes</code> 创建时生效）</li>
 <li><code>/opt/omc/etc/{app,acs,worker}.prod.yaml</code> —— OMC 三进程连接中间件时的<b>客户端口令</b></li>
 </ul>
 
 <h3>9.1 需同步修改的口令对应表</h3>
 <table>
-<thead><tr><th>项</th><th>docker-compose.infra.yml</th><th>etc/app.prod.yaml</th><th>说明</th></tr></thead>
+<thead><tr><th>项</th><th>deploy/.env</th><th>etc/app.prod.yaml</th><th>说明</th></tr></thead>
 <tbody>
-<tr><td>PostgreSQL 账号</td><td><code>POSTGRES_USER: omcgo</code></td><td><code>db.dsn</code> / <code>tsdb.dsn</code> 里的 <code>omcgo</code></td><td>DSN 格式：<code>postgres://<b>账号</b>:<b>口令</b>@postgres:5432/omcgo?sslmode=disable</code></td></tr>
-<tr><td>PostgreSQL 口令</td><td><code>POSTGRES_PASSWORD: omcgo123</code></td><td><code>db.dsn</code> / <code>tsdb.dsn</code> 里的 <code>omcgo123</code></td><td>同上，出现两次（db + tsdb）</td></tr>
-<tr><td>PostgreSQL 库名</td><td><code>POSTGRES_DB: omcgo</code></td><td>DSN 路径部分 <code>/omcgo</code></td><td>一般不改</td></tr>
-<tr><td>MinIO 账号</td><td><code>MINIO_ROOT_USER: minioadmin</code></td><td><code>minio.access_key</code></td><td>三个 yaml（app/acs/worker）都要改</td></tr>
-<tr><td>MinIO 口令</td><td><code>MINIO_ROOT_PASSWORD: minioadmin</code></td><td><code>minio.secret_key</code></td><td>同上</td></tr>
-<tr><td>JWT 密钥</td><td>—</td><td><code>jwt.secret</code></td><td>仅 app.prod.yaml；必须 ≥ 32 字符；产生：<code>openssl rand -base64 48</code></td></tr>
+<tr><td>PostgreSQL 账号</td><td><code>POSTGRES_USER=omcgo</code></td><td><code>db.dsn</code> / <code>tsdb.dsn</code> 里的 <code>omcgo</code></td><td>DSN 格式：<code>postgres://<b>账号</b>:<b>口令</b>@postgres:5432/omcgo?sslmode=disable</code></td></tr>
+<tr><td>PostgreSQL 口令</td><td><code>POSTGRES_PASSWORD=omcgo123</code></td><td><code>db.dsn</code> / <code>tsdb.dsn</code> 里的 <code>omcgo123</code></td><td>同上，出现两次（db + tsdb）</td></tr>
+<tr><td>PostgreSQL 库名</td><td><code>POSTGRES_DB=omcgo</code></td><td>DSN 路径部分 <code>/omcgo</code></td><td>一般不改</td></tr>
+<tr><td>MinIO 账号</td><td><code>MINIO_ROOT_USER=minioadmin</code></td><td><code>minio.access_key</code></td><td>三个 yaml（app/acs/worker）都要改</td></tr>
+<tr><td>MinIO 口令</td><td><code>MINIO_ROOT_PASSWORD=minioadmin</code></td><td><code>minio.secret_key</code></td><td>同上</td></tr>
+<tr><td>JWT 密钥</td><td><code>OMCGO_JWT_SECRET=...</code></td><td><code>jwt.secret</code>（同值）</td><td>必须 ≥ 32 字符；产生：<code>openssl rand -base64 48</code></td></tr>
+<tr><td>Grafana 管理员</td><td><code>GRAFANA_ADMIN_PASSWORD=admin</code></td><td>—</td><td>仅监控栈使用；首次登录 :3000 也会强制提示改口令</td></tr>
 <tr><td>Web 管理员 admin</td><td>—</td><td>—</td><td>首次登录 <code>http://&lt;IP&gt;:8080</code> 后在「个人中心 → 修改密码」里改，<b>不需改配置文件</b></td></tr>
-<tr><td>Grafana</td><td>—</td><td>—</td><td>首次登录 <code>http://&lt;IP&gt;:3000</code> 会强制提示改口令，<b>不需改配置文件</b></td></tr>
 </tbody>
 </table>
 
@@ -217,30 +217,34 @@ sudo bash deploy/deploy.sh -h                       # 查看所有参数</pre>
 <pre># 1) 生成强口令（示例）
 openssl rand -base64 24    # PostgreSQL 口令
 openssl rand -base64 24    # MinIO 口令
+openssl rand -base64 24    # Grafana 口令
 openssl rand -base64 48    # JWT 密钥
 
-# 2) 改 docker-compose.infra.yml （初始口令 — 仅首次 volume 创建时生效）
-sudo vi /opt/omc/current/deploy/docker-compose.infra.yml
-#     POSTGRES_PASSWORD: → 刚生成的 PG 强口令
-#     MINIO_ROOT_USER:   → 新账号（如仍用 minioadmin 则不改）
-#     MINIO_ROOT_PASSWORD: → 刚生成的 MinIO 强口令
+# 2) 改 deploy/.env（compose 初始口令 / 镜像版本变量）
+sudo vi /opt/omc/current/deploy/.env
+#     POSTGRES_PASSWORD=         → 刚生成的 PG 强口令
+#     MINIO_ROOT_USER=           → 新账号（如仍用 minioadmin 则不改）
+#     MINIO_ROOT_PASSWORD=       → 刚生成的 MinIO 强口令
+#     GRAFANA_ADMIN_PASSWORD=    → 刚生成的 Grafana 口令
+#     OMCGO_JWT_SECRET=          → 刚生成的 JWT 密钥
 
 # 3) 改 etc/*.prod.yaml（OMC 进程以这里为准连接中间件）
 sudo vi /opt/omc/etc/app.prod.yaml      # db.dsn / tsdb.dsn / minio.* / jwt.secret
 sudo vi /opt/omc/etc/acs.prod.yaml      # db.dsn / minio.* （按需）
 sudo vi /opt/omc/etc/worker.prod.yaml   # db.dsn / minio.* （按需）
 
-# 4) 起 infra 并跑 deploy
+# 4) 一键部署（自动 load 镜像 + up 全栈）
 sudo bash /opt/omc/current/deploy/deploy.sh</pre>
 
 <div class="danger">⚠️ <b>volume 已创建后改口令无效</b>：PostgreSQL / MinIO 只在首次创建 <code>pgdata</code> / <code>miniodata</code> volume 时读取环境变量。若发现初始口令错了，需重应。</div>
 
 <h3>9.3 已跑起来后改口令（volume 已创建）</h3>
 <pre># PostgreSQL — 在容器内改
-sudo docker exec -it deploy-postgres-1 psql -U omcgo -d omcgo \
+sudo docker exec -it omcgo-postgres-1 psql -U omcgo -d omcgo \
     -c "ALTER USER omcgo WITH PASSWORD '新口令';"
-# 同步改 etc/*.prod.yaml 中的 dsn 口令部分
-sudo systemctl restart omcgo-app omcgo-acs omcgo-worker
+# 同步改 etc/*.prod.yaml 中的 dsn 口令部分；重启业务容器
+cd /opt/omc/current/deploy
+sudo docker compose -p omcgo -f docker-compose.app.yml restart app acs worker
 
 # MinIO — 使用 mc 客户端（或重建 volume）。参 MinIO 官方文档。</pre>
 
@@ -252,10 +256,12 @@ bash /opt/omc/current/deploy/healthcheck.sh</pre>
 
 <h2>🔧 故障排查</h2>
 <ul class="list">
-<li>容器状态：<code>docker compose -f /opt/omc/current/deploy/docker-compose.infra.yml ps</code></li>
-<li>服务日志：<code>journalctl -u omcgo-app -n 200 --no-pager</code>（acs / worker 同样）</li>
+<li>容器状态：<code>cd /opt/omc/current/deploy && docker compose -p omcgo -f docker-compose.infra.yml -f docker-compose.app.yml -f docker-compose.web.yml -f docker-compose.monitoring.yml ps</code></li>
+<li>业务日志：<code>docker compose -p omcgo logs -f app acs worker</code>（在 deploy/ 目录）</li>
+<li>基础设施日志：<code>docker compose -p omcgo logs -f postgres redis nats minio</code></li>
 <li>容器日志：<code>docker logs &lt;容器名&gt; --tail 200</code></li>
 <li>重跑健康检查：<code>bash /opt/omc/current/deploy/healthcheck.sh</code></li>
+<li>停止全栈：<code>cd /opt/omc/current/deploy && docker compose -p omcgo -f docker-compose.infra.yml -f docker-compose.app.yml -f docker-compose.web.yml -f docker-compose.monitoring.yml down</code></li>
 <li>查看脚本帮助：<code>bash &lt;脚本&gt; -h</code>（install-docker.sh / setup-mirrors.sh / deploy.sh / healthcheck.sh 均支持）</li>
 <li>完整运维手册：见随项目包附带 <code>docs/OMC内网离线部署手册（运维侧）.md</code></li>
 </ul>

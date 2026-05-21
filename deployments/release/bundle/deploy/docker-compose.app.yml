@@ -1,0 +1,131 @@
+# OMC 业务容器 —— 内网离线部署用（migrate / seed / app / acs / worker）
+#
+# 镜像 tag 来自同目录 .env（由 build-release.sh 依 release.conf 生成）；交付包
+# 内 images/business-images-<版本>-<架构>.tar 由 deploy.sh 一次性 docker load。
+#
+# 与 docker-compose.infra.yml 共用同一个 docker compose project（deploy.sh 用
+# `-p omcgo -f docker-compose.infra.yml -f docker-compose.app.yml ...` 拉起），
+# 走 docker network 内部 service 名互联（postgres / redis / nats / minio / acs）。
+#
+# 实例配置 /opt/omc/etc/{svc}.prod.yaml 以 bind mount 方式覆盖镜像内 /etc/omcgo/
+# 的同名默认 yaml；运维改密 / TLS / SMTP 等修改 /opt/omc/etc/ 下文件即可，无需
+# 重打镜像。日志写到 /opt/omc/run/logs/<svc>/。
+
+services:
+  # ── 数据库迁移（首次部署 + 每次升级都跑；幂等）────────────────────────
+  migrate-schema:
+    image: ${IMAGE_APP}
+    restart: "no"
+    environment:
+      TZ: "Asia/Shanghai"
+      GOOSE_VERBOSITY: "1"
+    entrypoint: ["omcgo-migrate"]
+    command:
+      - "--dsn"
+      - "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
+      - "--path"
+      - "/etc/omcgo/migrations"
+      - "up"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── 种子数据导入（仅首次跑；标记由 deploy.sh 判断；幂等）──────────────
+  migrate-seed:
+    image: ${IMAGE_APP}
+    restart: "no"
+    environment:
+      TZ: "Asia/Shanghai"
+    entrypoint: ["omcgo-seed"]
+    command:
+      - "--dsn"
+      - "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
+      - "--dir"
+      - "/etc/omcgo/datamodels/seed"
+      - "--env"
+      - "prod"
+      - "apply"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      migrate-schema:
+        condition: service_completed_successfully
+
+  # ── 业务进程：app（HTTP API + gRPC）───────────────────────────────────
+  app:
+    image: ${IMAGE_APP}
+    restart: unless-stopped
+    environment:
+      TZ: "Asia/Shanghai"
+      OMCGO_ENV: ${OMCGO_ENV}
+      OMCGO_SERVICE: app
+      OMCGO_JWT_SECRET: ${OMCGO_JWT_SECRET}
+    ports:
+      - "127.0.0.1:9091:9091"        # metrics（Prometheus 经 docker network 抓取，外网不暴露）
+    volumes:
+      # 宿主实例配置覆盖镜像内默认值（/etc/omcgo/app.prod.yaml）
+      - /opt/omc/etc/app.prod.yaml:/etc/omcgo/app.prod.yaml:ro
+      # 日志卷（promtail / otelcol filelog 同样路径采集）
+      - /opt/omc/run/logs/app:/run/logs/app
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      migrate-seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  # ── 业务进程：acs（TR-069 长连接）──────────────────────────────────────
+  acs:
+    image: ${IMAGE_ACS}
+    restart: unless-stopped
+    environment:
+      TZ: "Asia/Shanghai"
+      OMCGO_ENV: ${OMCGO_ENV}
+      OMCGO_SERVICE: acs
+    ports:
+      - "7547:7547"                  # CPE → ACS（HTTP，TR-069 标准端口）
+      - "7557:7557"                  # 内部 connection-request 接口
+      - "127.0.0.1:9095:9090"        # metrics（容器内 9090，宿主侧 9095 让出 9090 给 prometheus）
+    volumes:
+      - /opt/omc/etc/acs.prod.yaml:/etc/omcgo/acs.prod.yaml:ro
+      - /opt/omc/run/logs/acs:/run/logs/acs
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      migrate-seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  # ── 业务进程：worker（异步任务消费者）──────────────────────────────────
+  worker:
+    image: ${IMAGE_WORKER}
+    restart: unless-stopped
+    environment:
+      TZ: "Asia/Shanghai"
+      OMCGO_ENV: ${OMCGO_ENV}
+      OMCGO_SERVICE: worker
+    ports:
+      - "127.0.0.1:9092:9092"        # metrics
+    volumes:
+      - /opt/omc/etc/worker.prod.yaml:/etc/omcgo/worker.prod.yaml:ro
+      - /opt/omc/run/logs/worker:/run/logs/worker
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      migrate-seed:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      minio:
+        condition: service_healthy

@@ -9,6 +9,9 @@ server:
     key_file: ""
 
 db:
+  # 【全 docker compose 部署】使用 service 名 postgres；app 容器与 postgres 容器
+  # 同 project 共享 docker network，进行内部名字解析。如仅起动 host 二进制调试，
+  # 可临时改为 127.0.0.1（infra 的 5432 publish 到 127.0.0.1）。
   dsn: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
   max_conns: 50
   min_conns: 10

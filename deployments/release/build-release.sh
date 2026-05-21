@@ -67,16 +67,19 @@ if [ -n "${SUDO_USER:-}" ]; then
   warn "检测到通过 sudo 运行——sudo 重置了 PATH，可能找不到 go/npm，且产物会归 root。"
   warn "强烈建议改用普通用户直接执行： ./build-release.sh"
 fi
-for tool in go npm tar sha256sum; do
-  if ! command -v "$tool" >/dev/null 2>&1; then
-    if [ "$tool" = go ] || [ "$tool" = npm ]; then
-      die "缺少构建工具：$tool。
-      若 \`$tool version\` 在你的 shell 里能正常运行，多半是用了 sudo——sudo 重置了
-      PATH 导致找不到。请【用普通用户直接运行】本脚本（不要 sudo）。"
-    fi
-    die "缺少构建工具：$tool"
-  fi
+# v3 起【全 docker compose 部署】：业务镜像（app/acs/worker/web）由 docker build
+# 直接产出，docker save 后随项目交付包发布。host 端不再编译 Go 二进制，也不再本
+# 地 npm build；构建机仅需 docker + 打包工具。
+for tool in docker tar sha256sum; do
+  command -v "$tool" >/dev/null 2>&1 || die "缺少构建工具：$tool"
 done
+if ! docker info >/dev/null 2>&1; then
+  die "docker 不可用：当前用户可能不在 docker 组。请执行：
+      sudo usermod -aG docker \$USER && newgrp docker   （或重新登录）
+      然后重新运行本脚本。"
+fi
+[ -n "${PROJECT_IMAGE_PREFIX:-}" ] || die "release.conf 未配置 PROJECT_IMAGE_PREFIX"
+[ "${#BUSINESS_IMAGES[@]:-0}" -gt 0 ] || die "release.conf 未配置 BUSINESS_IMAGES"
 
 # 压缩方式 → tar 选项与扩展名
 case "$PKG_COMPRESS" in
@@ -103,38 +106,42 @@ rm -rf "$WORK"
 mkdir -p "$WORK" "$OUT"
 
 log "发布渠道：$CHANNEL   压缩方式：$PKG_COMPRESS   目标架构：$ARCHES"
+log "业务镜像前缀：$PROJECT_IMAGE_PREFIX   业务镜像：${BUSINESS_IMAGES[*]}"
 
-# ── 1. 构建前端（架构无关，只做一次）──────────────────────────────────────
-log "构建前端 omcmb/webcode ..."
-(
-  cd "$REPO_ROOT/omcmb/webcode"
-  npm ci --include=dev --legacy-peer-deps
-  npm run build
-)
-[ -f "$REPO_ROOT/omcmb/webcode/dist/index.html" ] || die "前端构建产物缺失"
-
-# ── 2. 逐架构组装 + 压缩归档 ─────────────────────────────────────────────
+# ── 1. 逐架构构建业务镜像 + 组装 + 压缩归档 ───────────────────────────────
+# v3 起所有业务进程（app / acs / worker / web）都在容器内运行；前端和 Go 二进制
+# 均由对应 Dockerfile 的多阶段构建产出，host 端不再单独编译。
+# 业务镜像 tag 规则：<PROJECT_IMAGE_PREFIX>/<svc>:<project_version>，docker save
+# 后随交付包发布；目标机 docker load 即用，运维侧不再有 host 二进制依赖。
 for ARCH in $ARCHES; do
   log "=================== 架构 $ARCH ==================="
   PKG_NAME="omc-$CHANNEL-$VERSION-$ARCH"
   STAGE="$WORK/$PKG_NAME"
-  mkdir -p "$STAGE"/{bin,web,etc,docs}
+  mkdir -p "$STAGE"/{etc,docs,images}
 
-  # 2.1 交叉编译 Go 二进制（静态）
-  log "[$ARCH] 编译 Go 二进制 ..."
-  (
-    cd "$REPO_ROOT/omcgo"
-    for SVC in app acs worker migrate seed; do
-      CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" \
-        go build -ldflags="-s -w" -o "$STAGE/bin/omcgo-$SVC" "./cmd/$SVC"
-    done
-    CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" \
-      go build -ldflags="-s -w" -o "$STAGE/bin/omcctl" "./cmd/omcctl"
-  )
+  # 1.1 构建业务镜像（amd64-only：host 已在入口断言为 amd64，docker build 默认
+  # 按 host 架构产出，无需 --platform；arm64 host 上自行恢复 buildx 跨架构逻辑）
+  log "[$ARCH] docker build 业务镜像（${BUSINESS_IMAGES[*]}）..."
+  IMG_REFS=()
+  for SVC in "${BUSINESS_IMAGES[@]}"; do
+    DOCKERFILE="$REPO_ROOT/deployments/docker/Dockerfile.$SVC"
+    [ -f "$DOCKERFILE" ] || die "缺 Dockerfile：$DOCKERFILE"
+    TAG="$PROJECT_IMAGE_PREFIX/$SVC:$VERSION"
+    log "[$ARCH]   docker build -t $TAG -f $DOCKERFILE"
+    ( cd "$REPO_ROOT" && docker build \
+        -t "$TAG" \
+        -f "$DOCKERFILE" \
+        --build-arg APK_MIRROR=mirrors.aliyun.com \
+        . )
+    IMG_REFS+=( "$TAG" )
+  done
 
-  # 2.2 前端 / 字典 / Casbin / 迁移 / 配置模板
-  log "[$ARCH] 收集前端、字典、迁移、配置 ..."
-  cp -r "$REPO_ROOT/omcmb/webcode/dist" "$STAGE/web/dist"
+  # 1.2 docker save 业务镜像到 images/business-images-<version>-<arch>.tar
+  log "[$ARCH] docker save → images/business-images-$VERSION-$ARCH.tar"
+  docker save -o "$STAGE/images/business-images-$VERSION-$ARCH.tar" "${IMG_REFS[@]}"
+
+  # 1.3 配置 / 迁移 / 字典 / Casbin（可挂载到容器覆盖镜像内默认值）
+  log "[$ARCH] 收集字典、迁移、配置 ..."
   cp -r "$REPO_ROOT/omcgo/data"         "$STAGE/data"
   cp -r "$REPO_ROOT/omcgo/configs"      "$STAGE/configs"
   cp -r "$REPO_ROOT/omcgo/migrations"   "$STAGE/migrations"
@@ -142,27 +149,60 @@ for ARCH in $ARCHES; do
   cp "$REPO_ROOT/omcgo/cmd/acs/etc/config.prod.yaml"    "$STAGE/etc/acs.prod.yaml"
   cp "$REPO_ROOT/omcgo/cmd/worker/etc/config.prod.yaml" "$STAGE/etc/worker.prod.yaml"
 
-  # 2.3 部署模板 + nginx 配置（Docker 引擎与基础镜像在独立的基础设施包里）
-  log "[$ARCH] 拷入部署模板 ..."
-  cp -r "$SCRIPT_DIR/bundle/deploy" "$STAGE/deploy"
+  # 1.4 部署模板 + compose 文件 + nginx 配置 + 监控栈配置
+  log "[$ARCH] 拷入部署模板 + 监控栈配置 ..."
+  cp -r "$SCRIPT_DIR/bundle/deploy"       "$STAGE/deploy"
+  cp -r "$REPO_ROOT/deployments/monitoring" "$STAGE/deploy/monitoring"
   cp "$REPO_ROOT/deployments/docker/nginx.conf"   "$STAGE/deploy/nginx.conf"
   cp "$REPO_ROOT/deployments/docker/default.conf" "$STAGE/deploy/default.conf"
   cat > "$STAGE/deploy/.env" <<EOF
+# 项目版本（业务镜像 tag 取自此处）
+PROJECT_VERSION=$VERSION
+IMAGE_PREFIX=$PROJECT_IMAGE_PREFIX
+# 业务镜像
+IMAGE_APP=$PROJECT_IMAGE_PREFIX/app:$VERSION
+IMAGE_ACS=$PROJECT_IMAGE_PREFIX/acs:$VERSION
+IMAGE_WORKER=$PROJECT_IMAGE_PREFIX/worker:$VERSION
+IMAGE_WEB=$PROJECT_IMAGE_PREFIX/web:$VERSION
+# 基础设施镜像
 IMAGE_POSTGRES=$IMAGE_POSTGRES
 IMAGE_REDIS=$IMAGE_REDIS
 IMAGE_NATS=$IMAGE_NATS
 IMAGE_MINIO=$IMAGE_MINIO
 IMAGE_NGINX=$IMAGE_NGINX
+# 监控栈镜像
+IMAGE_PROMETHEUS=$IMAGE_PROMETHEUS
+IMAGE_ALERTMANAGER=$IMAGE_ALERTMANAGER
+IMAGE_GRAFANA=$IMAGE_GRAFANA
+IMAGE_LOKI=$IMAGE_LOKI
+IMAGE_TEMPO=$IMAGE_TEMPO
+IMAGE_OTELCOL=$IMAGE_OTELCOL
+IMAGE_NATS_EXPORTER=$IMAGE_NATS_EXPORTER
+# 数据库 / 对象存储 / Grafana 默认口令——【部署前必改为强口令】
+# 与 /opt/omc/etc/*.prod.yaml 中的 dsn / minio.access_key / minio.secret_key 保持一致
+POSTGRES_USER=omcgo
+POSTGRES_PASSWORD=omcgo123
+POSTGRES_DB=omcgo
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=minioadmin
+GRAFANA_ADMIN_USER=admin
+GRAFANA_ADMIN_PASSWORD=admin
+# OMC 运行环境（容器内 entrypoint.sh 读）
+OMCGO_ENV=prod
+# JWT 密钥（app 容器读，生产勿用默认值）
+OMCGO_JWT_SECRET=8f7a9b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6
 EOF
 
-  # 2.4 运维侧部署文档
+  # 1.5 运维侧部署文档
   cp "$REPO_ROOT/docs/operations/OMC内网离线部署手册（运维侧）.md" "$STAGE/docs/"
 
-  # 2.5 VERSION / README / 校验和
+  # 1.6 VERSION / README / 校验和
   cat > "$STAGE/VERSION" <<EOF
 project_version=$VERSION
 channel=$CHANNEL
 arch=$ARCH
+image_prefix=$PROJECT_IMAGE_PREFIX
+business_images=${BUSINESS_IMAGES[*]}
 build_time=$(date -Is)
 git_commit=$GIT_COMMIT
 EOF
@@ -172,22 +212,24 @@ EOF
 - 项目版本：$VERSION
 - 发布渠道：$CHANNEL（test=测试阶段 / release=正式发布）
 - 架构：$ARCH（目标机 \`uname -m\`：x86_64→amd64，aarch64→arm64）
+- 业务镜像：${BUSINESS_IMAGES[*]/#/$PROJECT_IMAGE_PREFIX/}（tag = $VERSION）
 - 构建时间：$(date -Is)　git commit：$GIT_COMMIT
 
-本包【只含 OMC 本体】（二进制 + 前端 + 配置 + 数据库迁移 + 部署模板）。
-Docker 引擎与基础镜像在【独立的基础设施包 omc-infra-*】里——首次部署需先用
-基础设施包装好 Docker、导入基础镜像，再部署本包。
+本包【全 docker compose 部署】，含业务镜像 tar（docker save）+ compose
+文件 + 配置模板 + 迁移 / 字典 / Casbin（可挂载覆盖）+ 监控栈配置 + 运维脚本。
+Docker 引擎、compose v2 二进制、基础镜像在【独立的基础设施包 omc-infra-*】里——
+首次部署需先用基础设施包装好 Docker / Compose、导入基础镜像，再部署本包。
 
 部署步骤见 \`docs/OMC内网离线部署手册（运维侧）.md\`。先校验完整性：
 \`\`\`bash
 sha256sum -c checksums.sha256
 \`\`\`
-PostgreSQL / MinIO / JWT / Grafana 默认口令必须在部署时修改。
+PostgreSQL / MinIO / JWT / Grafana 默认口令必须在部署时修改（deploy/.env）。
 EOF
   ( cd "$STAGE" && find . -type f ! -name checksums.sha256 -print0 \
       | sort -z | xargs -0 sha256sum > checksums.sha256 )
 
-  # 2.6 压缩打包 → archive/project/<版本>/
+  # 1.7 压缩打包 → archive/project/<版本>/
   log "[$ARCH] 压缩打包（$PKG_COMPRESS）..."
   # shellcheck disable=SC2086
   ( cd "$WORK" && tar $TAR_OPT "$OUT/$PKG_NAME.$EXT" "$PKG_NAME" )
@@ -205,20 +247,24 @@ rm -rf "$WORK"
   echo "git_commit=$GIT_COMMIT"
   echo "arches=$ARCHES"
   echo "compress=$PKG_COMPRESS"
+  echo "image_prefix=$PROJECT_IMAGE_PREFIX"
+  echo "business_images=${BUSINESS_IMAGES[*]}"
   echo ""
   echo "# ── 版本构建说明 ───────────────────────────────────────────"
   echo "项目版本：$VERSION"
   echo "发布渠道：$CHANNEL"
   echo "git commit：$GIT_COMMIT"
+  echo "业务镜像前缀：$PROJECT_IMAGE_PREFIX  （tag = $VERSION）"
+  echo "业务服务：${BUSINESS_IMAGES[*]}"
   echo ""
-  echo "说明：本包只含 OMC 本体；Docker 引擎与基础镜像在独立的基础设施包"
-  echo "      omc-infra-* 里，首次部署需配合使用。"
+  echo "说明：本包【全 docker compose 部署】，含业务镜像 tar + compose 文件 + 配置。"
+  echo "      Docker 引擎、compose v2、基础镜像在独立的基础设施包 omc-infra-* 里，首次部署需配合使用。"
   echo ""
   echo "交付文件："
   ( cd "$OUT" && ls -1 omc-*."$EXT" )
 } > "$OUT/RELEASE.txt"
 
-# ── 4. 刷新 archive/index.html（HTTP 下载索引）───────────────────────────
+# ── 3. 刷新 archive/index.html（HTTP 下载索引）───────────────────────────
 "$SCRIPT_DIR/gen-index.sh"
 log "已刷新下载索引：archive/index.html"
 

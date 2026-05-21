@@ -1,0 +1,180 @@
+# OMC 监控栈 —— 内网离线部署用（prometheus / alertmanager / grafana / loki /
+# tempo / otelcol / nats-exporter）
+#
+# 与 docker-compose.{infra,app,web}.yml 共用同一 docker compose project（deploy.sh
+# 用 `-p omcgo -f ... -f docker-compose.monitoring.yml ...` 一次性拉起），走
+# docker network 内 service 名互联（从 app/acs/worker 容器的 OTel SDK 连
+# otelcol:4317；prometheus 从各容器 :9091/:9090/:9092 抓 metrics）。
+#
+# 监控配置文件（prometheus.yml / alertmanager.yml / grafana provisioning /
+# loki / tempo / otelcol）由 build-release.sh 从 deployments/monitoring/ 拷入
+# 同目录 monitoring/，本 compose 以 bind mount 方式挂入对应容器。
+#
+# Grafana 默认账号 admin/admin —— 部署前请改 .env 的 GRAFANA_ADMIN_PASSWORD。
+
+services:
+  prometheus:
+    image: ${IMAGE_PROMETHEUS}
+    restart: unless-stopped
+    environment:
+      TZ: "Asia/Shanghai"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts:/etc/prometheus/alerts:ro
+      - prometheusdata:/prometheus
+      - /etc/localtime:/etc/localtime:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-lifecycle"
+      # T-0155 Phase 2b: 接收 otelcol prometheusremotewrite 推送的 pg/redis 指标
+      - "--web.enable-remote-write-receiver"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  alertmanager:
+    image: ${IMAGE_ALERTMANAGER}
+    restart: unless-stopped
+    environment:
+      TZ: "Asia/Shanghai"
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanagerdata:/alertmanager
+      - /etc/localtime:/etc/localtime:ro
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9093/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  grafana:
+    image: ${IMAGE_GRAFANA}
+    restart: unless-stopped
+    environment:
+      TZ: "Asia/Shanghai"
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    ports:
+      - "3030:3000"   # 宿主 3030 → 容器 3000；避开常见 :3000 占用
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── 日志栈：Loki（存储 + 查询）；采集由 otelcol filelog receiver 接管 ──
+  loki:
+    image: ${IMAGE_LOKI}
+    restart: unless-stopped
+    environment:
+      TZ: "Asia/Shanghai"
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - lokidata:/loki
+      - /etc/localtime:/etc/localtime:ro
+    command: ["-config.file=/etc/loki/loki-config.yml"]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3100/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ── Trace 栈：OpenTelemetry Collector + Grafana Tempo（T-0155）──────────
+  # 数据流：app/acs/worker (OTel SDK, OTLP gRPC) → otelcol:4317 → tempo:4317
+  #         同时 otelcol filelog 采集 /run/logs → loki，pg/redisreceiver → prometheus
+  otelcol:
+    image: ${IMAGE_OTELCOL}
+    restart: unless-stopped
+    environment:
+      TZ: "Asia/Shanghai"
+    volumes:
+      - ./monitoring/otelcol/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+      # 采集业务容器的日志：与 app/acs/worker 容器 /run/logs 挂载源同路径
+      - /opt/omc/run/logs:/run/logs:ro
+      - /etc/localtime:/etc/localtime:ro
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    # otelcol-contrib 是 distroless 镜像，无 shell/wget；不配 healthcheck。
+    # 详见 deployments/docker/docker-compose.yml 中同段注释。
+    depends_on:
+      tempo:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+
+  tempo:
+    image: ${IMAGE_TEMPO}
+    restart: unless-stopped
+    environment:
+      TZ: "Asia/Shanghai"
+    volumes:
+      - ./monitoring/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempodata:/var/tempo
+      - /etc/localtime:/etc/localtime:ro
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3200/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ── 基础服务 exporter：nats-exporter（minio 自带 /metrics；pg/redis 由 otelcol 直采）
+  nats-exporter:
+    image: ${IMAGE_NATS_EXPORTER}
+    restart: unless-stopped
+    environment:
+      TZ: "Asia/Shanghai"
+    command: ["-varz", "-jsz=all", "-connz", "http://nats:8222"]
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      nats:
+        condition: service_healthy
+
+volumes:
+  prometheusdata:
+  alertmanagerdata:
+  grafanadata:
+  lokidata:
+  tempodata:

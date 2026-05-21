@@ -3,7 +3,10 @@
 # 镜像由 `docker load` 离线导入；镜像标签来自同目录 .env（由 build-release.sh
 # 依 release.conf 生成，与 docker save 的镜像一致，勿手改成不一致的值）。
 #
-# OMC 三进程跑宿主机二进制，经回环 127.0.0.1 连接本栈（见部署方案 §5 步骤 4）。
+# 【全 docker compose 部署】：业务容器（app / acs / worker / web）与本文件中
+# 的基础服务同处一个 docker compose project（deploy.sh -p omcgo 拉起），
+# 走 docker network 内部 service 名互联（postgres / redis / nats / minio）。
+# 宿主侧 publish 到 127.0.0.1: 仅供运维调试使用。
 #
 # ⚠️ 部署前必须修改 POSTGRES_PASSWORD / MINIO_ROOT_USER / MINIO_ROOT_PASSWORD
 #    为强口令，并与 /opt/omc/etc/*.prod.yaml 保持一致。
@@ -14,17 +17,17 @@ services:
     restart: unless-stopped
     environment:
       TZ: "Asia/Shanghai"
-      POSTGRES_USER: omcgo
-      POSTGRES_PASSWORD: omcgo123          # ← 改强密码
-      POSTGRES_DB: omcgo
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "127.0.0.1:5432:5432"              # 仅本机回环可达
+      - "127.0.0.1:5432:5432"              # 仅本机回环可达（运维调试）
     command: ["postgres", "-c", "timezone=Asia/Shanghai", "-c", "log_timezone=Asia/Shanghai"]
     volumes:
       - pgdata:/var/lib/postgresql/data    # 生产建议改为数据盘 bind mount，如 /data/omc/pg
       - /etc/localtime:/etc/localtime:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U omcgo"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -69,8 +72,10 @@ services:
     restart: unless-stopped
     environment:
       TZ: "Asia/Shanghai"
-      MINIO_ROOT_USER: minioadmin          # ← 改强账号
-      MINIO_ROOT_PASSWORD: minioadmin      # ← 改强密码
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      # MinIO 自带 Prometheus 指标端点 /minio/v2/metrics/*；public 模式免 token 抓取（T-0151）。
+      MINIO_PROMETHEUS_AUTH_TYPE: "public"
     ports:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
