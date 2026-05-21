@@ -23,7 +23,7 @@ export interface DeviceListPanelProps {
   onRefresh: () => void;
   /** 实时刷新按钮翻转回调 —— 透传给 DataTable.onRealtimeRefreshChange。 */
   onRealtimeRefreshChange?: (enabled: boolean) => void;
-  onExport: () => void;
+  onExport: () => void | Promise<void>;
   /**
    * 批量导入完成回调（接收后端真实回执，含成功/失败统计）。
    * T-0202 后从原 fileList 改为 BatchImportResponse —— 解析与 POST 已下沉到 Modal。

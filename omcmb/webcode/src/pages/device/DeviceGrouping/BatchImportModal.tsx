@@ -516,6 +516,18 @@ export default function BatchImportModal({
       >
         {t('common.import')}
       </Button>
+
+      {/* result !== null 后导入按钮置灰，提供「重选文件」入口让用户继续操作，
+          避免回归 bug：导入完成后 modal 卡死，必须先关再开一遍。 */}
+      {result !== null ? (
+        <Button
+          style={{ marginTop: 8 }}
+          onClick={resetAll}
+          block
+        >
+          {t('device.batchImport.reselectFile')}
+        </Button>
+      ) : null}
     </Modal>
   );
 }

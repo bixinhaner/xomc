@@ -203,6 +203,8 @@ export default function DeviceGrouping() {
     message,
     t,
     refetch,
+    selectedGroupId,
+    selectedGroupName: selectedGroup?.name,
   });
 
   // ── Tree panel ──
