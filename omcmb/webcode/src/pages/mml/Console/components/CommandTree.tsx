@@ -576,6 +576,8 @@ export default function CommandTree({ lang }: CommandTreeProps) {
           values: {},
           unknownCodes: [],
           targetObject: cmd.targetObject,
+          // R-4.1.1：cmd.instanceRangeMeta 透传到 Statement，RightPanel 渲染时下传 InstanceArityInput 做范围校验
+          instanceRangeMeta: cmd.instanceRangeMeta,
         };
         replaceStatement(stmt);
       } catch (e) {

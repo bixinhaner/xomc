@@ -16,10 +16,16 @@
  *   - RMV 模式：父路径用本组件；最后一层"实例号"由 InstancePicker 提供
  */
 
-import { Input, Space } from 'antd';
+import { Input, Space, Tooltip } from 'antd';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import type { MMLOperationType } from '@core/types/mml';
+import type { InstanceRange } from '@core/types/mmlConsole';
+import {
+  validateInstanceLayer,
+  findRangeByLayer,
+  buildRangeHint,
+} from './instanceRangeValidation';
 
 /**
  * Greek 字母对应每层的 selector key。
@@ -65,6 +71,12 @@ export interface InstanceArityInputProps {
   onChange: (selectorKey: string, value: string) => void;
   /** 命令的 op_type，决定"是否必填"提示 */
   operationType: MMLOperationType;
+  /**
+   * R-4.1.1: 每层 {i} 占位符的取值范围 metadata（来自 cmd.instanceRangeMeta）。
+   * undefined / 空数组 → 仅做"必填+整数格式"基本校验；
+   * 单个 layer 在数组中找不到 entry → 该层跳过范围校验。
+   */
+  instanceRangeMeta?: InstanceRange[];
   /** 是否禁用（如设备未选 / 字典未加载） */
   disabled?: boolean;
 }
@@ -74,6 +86,7 @@ export function InstanceArityInput({
   values,
   onChange,
   operationType,
+  instanceRangeMeta,
   disabled,
 }: InstanceArityInputProps): JSX.Element | null {
   const t = useT();
@@ -107,28 +120,46 @@ export function InstanceArityInput({
       <Space size={[6, 6]} wrap>
         {keys.map((key, idx) => {
           const value = values[key] ?? '';
-          const isEmpty = value.trim() === '';
+          const layer = idx + 1; // 1-based，对齐后端 InstanceRange.layer
+          const range = findRangeByLayer(instanceRangeMeta, layer);
+          const validation = validateInstanceLayer(value, range, isRequired);
+          const rangeHint = buildRangeHint(range, t);
+          // Tooltip 文案：错误信息（如有）在第一行，spec 范围/描述 hint 在后面
+          // 先合成数组再 join，避免错误展示和 hint 互相覆盖
+          const tooltipLines: string[] = [];
+          if (!validation.ok && validation.errorKey) {
+            tooltipLines.push(t(validation.errorKey, validation.errorValues));
+          }
+          if (rangeHint) tooltipLines.push(rangeHint);
+          const tooltipTitle = tooltipLines.length > 0 ? tooltipLines.join('\n') : undefined;
+
           return (
-            <span
+            <Tooltip
               key={key}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12 }}
+              title={tooltipTitle}
+              placement="top"
+              styles={{ root: { whiteSpace: 'pre-line', maxWidth: 320 } }}
             >
-              <span style={{ color: token.colorTextTertiary }}>
-                {t('mml.console.instanceArity.layer', { n: idx + 1 })}
+              <span
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12 }}
+              >
+                <span style={{ color: token.colorTextTertiary }}>
+                  {t('mml.console.instanceArity.layer', { n: layer })}
+                </span>
+                <span style={{ color: token.colorTextQuaternary }}>{key} =</span>
+                <Input
+                  size="small"
+                  status={!validation.ok ? 'error' : undefined}
+                  style={{ width: 80 }}
+                  placeholder={isRequired ? '1' : t('mml.console.instanceArity.placeholder')}
+                  value={value}
+                  disabled={disabled}
+                  onChange={(e) => onChange(key, e.target.value)}
+                  data-testid={`instance-arity-input-${key}`}
+                  aria-invalid={!validation.ok || undefined}
+                />
               </span>
-              <span style={{ color: token.colorTextQuaternary }}>{key} =</span>
-              <Input
-                size="small"
-                style={{
-                  width: 80,
-                  borderColor: isEmpty && isRequired ? token.colorError : undefined,
-                }}
-                placeholder={isRequired ? '1' : t('mml.console.instanceArity.placeholder')}
-                value={value}
-                disabled={disabled}
-                onChange={(e) => onChange(key, e.target.value)}
-              />
-            </span>
+            </Tooltip>
           );
         })}
       </Space>

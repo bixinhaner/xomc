@@ -995,6 +995,8 @@ function mapGroupTreeCommand(c: BackendGroupTreeNode['commands'][number]): Group
     requireConfirm: c.require_confirm,
     source: c.source,
     catalogProtected: c.catalog_protected,
+    // R-4.1.1：原样透传 instance_range_meta；后端 omitempty + 前端 helper 已把空数组归一为 undefined
+    instanceRangeMeta: c.instance_range_meta,
   };
 }
 

@@ -202,6 +202,7 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
                         values={activeStatement.instanceSelectors ?? {}}
                         onChange={handleSelectorChange}
                         operationType={activeStatement.operationType}
+                        instanceRangeMeta={activeStatement.instanceRangeMeta}
                       />
                       <ActiveSubView statement={activeStatement} />
                     </>

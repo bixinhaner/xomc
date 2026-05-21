@@ -73,6 +73,13 @@ export interface BackendGroupTreeCommand {
   require_confirm: boolean;
   source?: string;
   catalog_protected?: boolean;
+  /**
+   * R-4.1.1: 每层 {i} 的取值范围 metadata（v2 catalog Loader 写入；v1 path 缺失）。
+   * 后端 GroupTreeCommand 用 `json.RawMessage` 透传 JSONB 列原文，wire 形态：
+   *   [{ layer, rangeExpr, rangeMin, rangeMax, dynamic, nSource?, description? }]
+   * 内层 keys 已是 camelCase（与 Python 解析器对齐），axios 拦截器对其幂等。
+   */
+  instance_range_meta?: InstanceRange[];
 }
 
 /** GET /mml/commands/:id/sub-fields 响应的单条 sub-field。 */
@@ -170,6 +177,36 @@ export interface GroupTreeCommand {
   source?: 'standard' | 'admin' | string;
   /** catalog_protected=true 时 admin 不可改/删（PRD §7.3） */
   catalogProtected?: boolean;
+  /**
+   * R-4.1.1: 每层 {i} 占位符的取值范围 metadata（v2 catalog 写入；v1 catalog 缺失）。
+   * Console Control Panel 的 InstanceArityInput 用此校验输入；
+   * 与 cmd 共生但与 Statement 解耦 — 后续 statement 构造时透传到 Statement.instanceRangeMeta。
+   */
+  instanceRangeMeta?: InstanceRange[];
+}
+
+/**
+ * R-4.1.1 单层 {i} 范围 metadata。
+ *
+ * 后端契约：omcgo/internal/mml/catalogloader/model.go InstanceRange struct（json tag 已 camelCase）。
+ * 由 Python 解析器从 cmcc-tdlte-southbound-data-model-v2.3.md 抽取，存 mml_commands.instance_range_meta JSONB。
+ *
+ * 字段语义：
+ *   - layer: 1-based 层级（对齐 InstanceArityInput 的 iα/iβ/iγ 顺序）
+ *   - rangeExpr: 规范原文（如 "1~3" / "0~N"），仅展示用
+ *   - rangeMin / rangeMax: 解析后的整数边界；null 表示该方向无界 / 动态
+ *   - dynamic: true 时上限由 nSource 命名的另一参数运行时决定，前端跳过上限校验
+ *   - nSource: 仅 dynamic=true 时出现（驱动上限的参数名，例 PLMNListNumberOfEntries）
+ *   - description: 规范原文描述（中文，spec 直接来源）
+ */
+export interface InstanceRange {
+  layer: number;
+  rangeExpr: string;
+  rangeMin: number | null;
+  rangeMax: number | null;
+  dynamic: boolean;
+  nSource?: string;
+  description?: string;
 }
 
 /**
@@ -251,6 +288,13 @@ export interface Statement {
    * POST /ops/commands/rpc (action="get_param") 探测当前设备实例集合。
    */
   targetObject?: string;
+  /**
+   * R-4.1.1: 每层 {i} 占位符的取值范围 metadata。
+   * CommandTree 构造 Statement 时从 cmd.instanceRangeMeta 透传，
+   * RightPanel 渲染时下传 InstanceArityInput → 用户输入校验。
+   * v1 catalog / 元数据缺失时为 undefined，组件兜底为"仅必填+整数格式"基本校验。
+   */
+  instanceRangeMeta?: InstanceRange[];
 }
 
 /** parse 错误（不阻塞 statement 显示，前端 toast 提示） */
