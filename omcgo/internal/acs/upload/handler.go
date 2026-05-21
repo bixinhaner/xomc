@@ -308,8 +308,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 6.3. For station log uploads (FileType "6" running log, "8" fault log),
 	// publish log.file.received so the stationlog module can record the file
 	// and enforce quotas.
+	//
+	// 同时发 backup.file.received —— stationlog 模块还没落地（station_log_files
+	// 表不存在 + NATS 流未注册），但前端 UFTE 设备列表的「文件名 / 下载」UI 已经
+	// 走通了基于 backup_restore_file 表的反查链路。让 LOG 上传也写一行通用元数据
+	// 到 backup_restore_file，前端复用现有反查 + presigned URL 下载逻辑，
+	// 不阻塞业务（用户能看到文件名 + 下载）。等 stationlog 模块上线后这里可以收口
+	// 到单一事件，但当前阶段同时双发更稳。
 	if (ft == tr069.FileTypeRunningLog || ft == tr069.FileTypeFaultLog) && h.eventBus != nil {
 		h.publishLogFileReceivedEvent(ctx, bucket, objectPath, filename, string(ft), info.Size)
+		h.publishBackupFileReceivedEvent(ctx, bucket, objectPath, filename, info.Size, info.ETag,
+			r.URL.Query().Get("sn"), r.URL.Query().Get("taskId"))
 	}
 
 	// 7. Return success

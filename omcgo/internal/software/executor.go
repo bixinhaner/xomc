@@ -114,8 +114,11 @@ func (e *UpgradeExecutor) ExecuteOne(ctx context.Context, subTask *UpgradeSubTas
 			zap.String("sub_task_id", subTask.ID.String()))
 
 		// Set Redis wait key for HandleDeviceOnline to resume
+		// Redis wait key TTL = 10min，跟 reaper.DeviceOnline 阈值保持一致：
+		// 设备 10min 内不上线 → reaper 标 sub_task failed，wait key 也同时过期
+		// 避免出现 wait key 过期不会自动唤醒、reaper 又没兜底失败的中间态。
 		waitKey := fmt.Sprintf("software:upgrade:wait:%s", dev.SerialNumber)
-		e.redis.Set(ctx, waitKey, subTask.ID.String(), time.Hour)
+		e.redis.Set(ctx, waitKey, subTask.ID.String(), 10*time.Minute)
 
 		// Record device info and mark as suspended (waiting for device)
 		subTask.DeviceSN = dev.SerialNumber
@@ -302,38 +305,47 @@ func taskIDPrefix(id uuid.UUID) string {
 
 // deriveUploadCommandKey 根据已渲染的 fileType 推断厂商私有约定的 CommandKey 格式。
 // baicells 系列 CPE firmware 内部按 CommandKey 前缀分发处理逻辑——
-// 用纯 UUID 当 CommandKey 时设备识别不出这是 NV/XML 备份请求，会直接静默丢弃
+// 用纯 UUID 当 CommandKey 时设备识别不出这是 NV/XML/LOG 备份请求，会直接静默丢弃
 // Upload RPC（既不回 UploadResponse 也不向 FileUploadService 发 PUT）。
 //
 // 真实工作样本（来自厂商抓包）：
-//   - NV 备份：CommandKey = "Collect NV|<OUI>_<SN>,<sub_task_uuid>"
-//   - XML 备份：同上 ACTION 改为 "XML"（保守按 NV 同款，等真实样本验证）
-//   - 其它 FileType（日志、数据模型 upload）：保持原 UUID，避免影响存量已工作流程
-//
-// OUI 是这里的关键——厂商样本里 `MMMM` 位置对应的是设备 OUI 而不是 manufacturer
-// 字段，CPE 内部按 OUI 校验 CommandKey 来源。
+//   - NV 备份：CommandKey = "Collect NV|<OUI>_<SN>,<sub_task_uuid>"     （FileType 第一段 "12"）
+//   - XML 备份：CommandKey = "Collect XML|<OUI>_<SN>,<sub_task_uuid>"   （FileType 第一段 "10"，保守按 NV 同款）
+//   - LOG 收集：CommandKey = "Collect LOG,<uuid_前13字符>"               （FileType 第一段 "4"，无 OUI/SN 段，UUID 截断短串）
+//   - 其它 FileType（如数据模型 upload）：保持原 UUID，避免影响存量已工作流程
 //
 // fileType 形如 "10 48BF74 Configuration File" / "12 48BF74 Configuration File" /
-// "4 Vendor Log File"——以第一个 token 的数字部分区分 NV(12)/XML(10)/其它。
+// "4 Vendor Log File 1,2,3,4"——以第一个 token 的数字部分区分。
 func deriveUploadCommandKey(resolvedFileType, oui, serialNumber, subTaskID string) string {
 	parts := strings.SplitN(strings.TrimSpace(resolvedFileType), " ", 2)
 	if len(parts) < 2 {
 		return subTaskID
 	}
-	var action string
 	switch parts[0] {
 	case "12":
-		action = "NV"
+		ouiKey := oui
+		if ouiKey == "" {
+			ouiKey = fallbackOUI
+		}
+		return fmt.Sprintf("Collect NV|%s_%s,%s", ouiKey, serialNumber, subTaskID)
 	case "10":
-		action = "XML"
+		ouiKey := oui
+		if ouiKey == "" {
+			ouiKey = fallbackOUI
+		}
+		return fmt.Sprintf("Collect XML|%s_%s,%s", ouiKey, serialNumber, subTaskID)
+	case "4":
+		// 厂商样本 CommandKey 用 UUID 前 13 字符（前 8 hex + "-" + 后 4 hex），与
+		// transport_path 里的 taskId32 (32 hex 无连字符) 是同一个 sub_task UUID
+		// 的不同截断/呈现形式。subTaskID 标准格式形如 "886de1ef-31d0-4f.." → 取前 13。
+		short := subTaskID
+		if len(short) > 13 {
+			short = short[:13]
+		}
+		return fmt.Sprintf("Collect LOG,%s", short)
 	default:
 		return subTaskID
 	}
-	ouiKey := oui
-	if ouiKey == "" {
-		ouiKey = fallbackOUI
-	}
-	return fmt.Sprintf("Collect %s|%s_%s,%s", action, ouiKey, serialNumber, subTaskID)
 }
 
 // fallbackOUI 是设备 OUI 字段为空时下发 Upload SOAP 用的兜底值。
@@ -395,8 +407,11 @@ func (e *UpgradeExecutor) ExecuteOneUpload(ctx context.Context, subTask *Upgrade
 		e.logger.Info("device offline, log collect sub-task pending",
 			zap.String("device_sn", dev.SerialNumber),
 			zap.String("sub_task_id", subTask.ID.String()))
+		// Redis wait key TTL = 10min，跟 reaper.DeviceOnline 阈值保持一致：
+		// 设备 10min 内不上线 → reaper 标 sub_task failed，wait key 也同时过期
+		// 避免出现 wait key 过期不会自动唤醒、reaper 又没兜底失败的中间态。
 		waitKey := fmt.Sprintf("software:upgrade:wait:%s", dev.SerialNumber)
-		e.redis.Set(ctx, waitKey, subTask.ID.String(), time.Hour)
+		e.redis.Set(ctx, waitKey, subTask.ID.String(), 10*time.Minute)
 		subTask.DeviceSN = dev.SerialNumber
 		e.subTaskRepo.Update(ctx, subTask)
 		e.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradeSuspended, "waiting for device online")
@@ -446,6 +461,10 @@ func (e *UpgradeExecutor) ExecuteOneUpload(ctx context.Context, subTask *Upgrade
 		"targetFileName": targetFileName,
 		"sn":             dev.SerialNumber,
 		"taskId":         subTask.TaskID.String(),
+		// {taskId32}: UUID 去连字符的 32 字符纯 hex 形式。
+		// 厂商 baicells/MMMM 真实样本的 Upload URL 用这种格式（详见 migrations/000141
+		// 运行日志收集对齐），普通 {taskId} (含连字符 36 字符) 用于 NV/XML 备份等保持兼容。
+		"taskId32": strings.ReplaceAll(subTask.TaskID.String(), "-", ""),
 	})
 	if uploadBaseURL == "" {
 		// 没配置会让 URL 变成纯路径（"/smallcell/..."），CPE 拿到后无法解析为绝对地址；

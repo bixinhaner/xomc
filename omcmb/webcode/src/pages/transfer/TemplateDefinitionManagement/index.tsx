@@ -353,8 +353,6 @@ export default function TemplateDefinitionManagement() {
               <Descriptions.Item label="权限编码">{detailType.permissionCode}</Descriptions.Item>
               <Descriptions.Item label="平台范围">{detailType.platformScope.join(' / ')}</Descriptions.Item>
               <Descriptions.Item label="最近编辑人">{detailType.lastEditor}</Descriptions.Item>
-              <Descriptions.Item label="30天任务量">{detailType.taskCount30d}</Descriptions.Item>
-              <Descriptions.Item label="30天成功率">{detailType.successRate30d}%</Descriptions.Item>
               <Descriptions.Item label="后置事件">{detailType.postTcEventCode || '-'}</Descriptions.Item>
             </Descriptions>
             <Paragraph style={{ marginBottom: 0 }}>{detailType.description}</Paragraph>

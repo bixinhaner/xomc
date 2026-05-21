@@ -325,15 +325,17 @@ func builtInTaskTypes() []TaskType {
 			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"},
 			PermissionCode:         "CODE_RUNTIME_LOG_COLLECT",
 			PlatformScope:          []string{"4G eNB", "5G gNB", "DXDF", "BBU-QSS"},
-			FileType:               "6",
-			FileTypeLabel:          "运行日志",
+			FileType:               "4 Vendor Log File 1,2,3,4",
+			FileTypeLabel:          "4 Vendor Log File 1,2,3,4",
 			FileTypeEditable:       true,
 			TargetFileNameTemplate: "runtime-{task_id8}-{sn}.tar.gz",
 			FileNameTemplate:       "runtime-{task_id8}-{sn}.tar.gz",
-			// URL `filename=` 留空：厂商真实样本要求设备自己决定上传名；ACS upload
-			// handler 在 filename 空时按 (fileType, taskId, sn) 服务端兜底生成与
-			// target_file_name_template 一致的名字。详见 migrations/000132。
-			TransportPath: "/smallcell/FileUploadService?fileType={fileType}&sn={sn}&taskId={taskId}&filename=",
+			// 厂商 baicells/MMMM 真实样本对齐（migrations/000141）：
+			// · fileType=LOG（字面值，非项目自定义编号）
+			// · 无 sn 参数（厂商样本只有 fileType+taskId+filename）
+			// · taskId 用 32 字符纯 hex 无连字符 → 模板用 {taskId32} 占位符
+			// · filename 留空让设备自己决定上传名（同 NV/XML）
+			TransportPath: "/smallcell/FileUploadService?fileType=LOG&taskId={taskId32}&filename=",
 			LastEditor:             "system",
 			UpdatedAt:              now,
 			softwareTaskType:       software.TaskTypeLogCollect,
@@ -355,8 +357,9 @@ func builtInTaskTypes() []TaskType {
 			FileTypeEditable:       true,
 			TargetFileNameTemplate: "fault-{task_id8}-{sn}.tar.gz",
 			FileNameTemplate:       "fault-{task_id8}-{sn}.tar.gz",
-			// URL `filename=` 留空：详见 RUNTIME_LOG_COLLECT 同名说明。
-			TransportPath: "/smallcell/FileUploadService?fileType={fileType}&sn={sn}&taskId={taskId}&filename=",
+			// 厂商样本未提供故障日志格式，先复用运行日志的 fileType=LOG（设备分类
+			// 可能靠 CommandKey 前缀区分）。详见 migrations/000141 + RUNTIME_LOG_COLLECT 注释。
+			TransportPath: "/smallcell/FileUploadService?fileType=LOG&taskId={taskId32}&filename=",
 			LastEditor:             "system",
 			UpdatedAt:              now,
 			softwareTaskType:       software.TaskTypeLogCollect,
