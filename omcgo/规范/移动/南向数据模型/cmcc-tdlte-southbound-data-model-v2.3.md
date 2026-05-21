@@ -1684,3 +1684,210 @@ TranslateToPrivate(ctx, productId, softwareVersion, standardPath) → Translatio
 | `InternetGatewayDevice.DeviceInfo.EU.{i}.{i}` | `Device.DeviceInfo.EU.{i}.{i}` | EU实例节点 | RW |
 | `InternetGatewayDevice.DeviceInfo.EU.{i}.RU.{i}.{i}` | `Device.DeviceInfo.EU.{i}.RU.{i}.{i}` | RU实例节点 | RW |
 | `InternetGatewayDevice.DeviceInfo.EU.{i}.RU.{i}.LTECell.{i}.{i}` | `Device.DeviceInfo.EU.{i}.RU.{i}.LTECell.{i}.{i}` | RU邻区实例节点 | RW |
+
+---
+
+## 参数管理类别分组清单（派生）
+
+> 本节由 spec doc 中所有 `## SX - ...` 大节标题及其下的 `#### 命令: ...`
+> 标题机械汇总而成；以 §（第 295 行）"参数管理类别" 主表为索引：
+> **一个 SA-SR 类别 = 一个分组**。共 **18 个分组**、**72 个命令**（已剔除 1 个伪命令 / 规范引用注释段）。
+>
+> 与 MML 控制台的对应关系：
+> - 本节的"分组"对应控制台命令树的一级 chapter 节点（SA-SR）
+> - 分组下的"命令"对应控制台二级 group 节点（每个 group 按 op_type 展开
+>   为 LST / MOD / ADD / RMV 子命令）
+> - family 维度的进一步合并（72 → ~40 顶层项）见
+>   `docs/design/mml-console-cmcc-tdlte-v23-adjustment-plan-20260519.md` §15.4
+>
+> **权限图例**：📖 只读（GPV-only）/ 📝 可写（GPV + SPV）/ 📖📝 混合
+
+### 速览（18 分组 / 72 命令）
+
+| 索引 | 对象路径根 | 分组中文名 | 命令数 |
+|------|-----------|-----------|--------|
+| SA | `DeviceInfo` | 设备信息参数管理 | 2 |
+| SB | `SoftwareCtrl` | 软件版本参数管理 | 1 |
+| SC | `ManagementServer` | 基站网管参数管理 | 1 |
+| SD | `FaultMgmt` | 告警参数管理 | 6 |
+| SE | `DeviceLogMgmt` | 日志参数管理 | 1 |
+| SF | `Services.FAPService` | 小区服务参数管理（总体） | 11 |
+| SG | `Services.FAPService.{i}.SCTP.Transport` | SCTP参数管理 | 2 |
+| SH | `Services.FAPService.{i}.CellConfig.LTE.RAN` | RAN协议栈参数 | 6 |
+| SI | `Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList` | 邻区参数管理 | 4 |
+| SJ | `Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility` | 移动性参数管理 | 15 |
+| SK | `Services.FAPService.{i}.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam` | SON参数管理 | 2 |
+| SL | `WANDevice` | WAN口配置参数管理 | 7 |
+| SM | `Ipsec` | IPsec参数管理 | 1 |
+| SN | `Time` | 时间服务器参数管理 | 1 |
+| SO | `FAP.GPS` | GPS信息参数管理 | 1 |
+| SP | `FAP.MRMgmt` | MR参数管理 | 1 |
+| SQ | `FAP.PerfMgmt` | 性能参数管理 | 1 |
+| SR | `ENanocell` | 扩展型一体化皮基站参数 | 9 |
+
+### 分组明细
+
+#### SA · DeviceInfo — 设备信息参数管理
+
+共 2 个命令：
+
+- `Device.DeviceInfo.* 📖📝`
+- `Device.DeviceInfo.SwUpgrade.* 📖`
+
+#### SB · SoftwareCtrl — 软件版本参数管理
+
+共 1 个命令：
+
+- `Device.SoftwareCtrl.* 📖📝`
+
+#### SC · ManagementServer — 基站网管参数管理
+
+共 1 个命令：
+
+- `Device.ManagementServer.* 📖📝`
+
+#### SD · FaultMgmt — 告警参数管理
+
+共 6 个命令：
+
+- `Device.FaultMgmt.* 📖`
+- `Device.FaultMgmt.CurrentAlarm.{i}.* 📖`
+- `Device.FaultMgmt.ExpeditedEvent.{i}.* 📖`
+- `Device.FaultMgmt.HistoryEvent.{i}.* 📖`
+- `Device.FaultMgmt.QueuedEvent.{i}.* 📖`
+- `Device.FaultMgmt.SupportedAlarm.{i}.* 📖📝`
+
+#### SE · DeviceLogMgmt — 日志参数管理
+
+共 1 个命令：
+
+- `Device.LogMgmt.* 📝`
+
+#### SF · Services.FAPService — 小区服务参数管理（总体）
+
+共 11 个命令：
+
+- `Device.Services.FAPControl.LTE.* 📖📝`
+- `Device.Services.FAPControl.LTE.Gateway.* 📝`
+- `Device.Services.FAPControl.LTE.MmePoolConfigParam.{i}.* 📖📝`
+- `Device.Services.FAPControl.LTE.S1U.{i}.* 📖`
+- `Device.Services.FAPControl.X2IpAddrMapInfo.{i}.* 📝`
+- `Device.Services.FAPService.{i}.* 📖📝`
+- `Device.Services.FAPService.{i}.Capabilities.* 📝`
+- `Device.Services.FAPService.{i}.CellConfig.Capabilities.* 📖📝`
+- `Device.Services.FAPService.{i}.CellConfig.LTE.EPC.* 📝`
+- `Device.Services.FAPService.{iα}.CellConfig.LTE.EPC.PLMNList.{iβ}.* 📝`
+- `Device.Services.FAPService.{iα}.CellConfig.LTE.VoLTE.PdcpInitParam.{iβ}.* 📝`
+
+#### SG · Services.FAPService.{i}.SCTP.Transport — SCTP参数管理
+
+共 2 个命令：
+
+- `Device.Services.FAPControl.Transport.SCTP.* 📝`
+- `Device.Services.FAPControl.Transport.SCTP.Assoc.{i}.* 📖`
+
+#### SH · Services.FAPService.{i}.CellConfig.LTE.RAN — RAN协议栈参数
+
+共 6 个命令：
+
+- `Device.Services.FAPService.{i}.* 📝`
+- `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.* 📝`
+- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{iβ}.* 📝`
+- `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.* 📖📝`
+- `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.* 📝`
+- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{iβ}.* 📝`
+
+#### SI · Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList — 邻区参数管理
+
+共 4 个命令：
+
+- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{iβ}.* 📝`
+- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{iβ}.* 📝`
+- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{iβ}.* 📝`
+- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.NeighborList.LTECell.{iβ}.* 📝`
+
+#### SJ · Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility — 移动性参数管理
+
+共 15 个命令：
+
+- `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.* 📝`
+- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{iβ}.* 📖📝`
+- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{iβ}.* 📖📝`
+- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{iβ}.* 📖📝`
+- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{iβ}.* 📖📝`
+- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{iβ}.* 📖📝`
+- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.PeriodMeasCtrl.{iβ}.* 📝`
+- `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.* 📝`
+- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{iβ}.* 📖📝`
+- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{iβ}.* 📖📝`
+- `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.* 📝`
+- `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.* 📝`
+- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{iβ}.* 📝`
+- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{iβ}.* 📝`
+- `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{iβ}.* 📝`
+
+#### SK · Services.FAPService.{i}.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam — SON参数管理
+
+共 2 个命令：
+
+- `Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.* 📖📝`
+- `Device.Services.FAPService.{i}.FAPControl.SelfConfig.* 📖`
+
+#### SL · WANDevice — WAN口配置参数管理
+
+共 7 个命令：
+
+- `Device.Ethernet.Interface.{i}.* 📖📝`
+- `Device.Ethernet.Interface.{iα}.IPv4Address.{iβ}.* 📝`
+- `Device.Ethernet.Interface.{iα}.IPv6Address.{iβ}.* 📝`
+- `Device.Ethernet.Interface.{iα}.VlanInterface.{iβ}.* 📝`
+- `Device.Ethernet.Interface.{iα}.VlanInterface.{iβ}.IPv4Address.{iγ}.* 📝`
+- `Device.Ethernet.Interface.{iα}.VlanInterface.{iβ}.IPv6Address.{iγ}.* 📝`
+- `Device.Ethernet.IpRoute.{i}.* 📝`
+
+#### SM · Ipsec — IPsec参数管理
+
+共 1 个命令：
+
+- `Device.IPsec.* 📖📝`
+
+#### SN · Time — 时间服务器参数管理
+
+共 1 个命令：
+
+- `Device.Time.* 📖📝`
+
+#### SO · FAP.GPS — GPS信息参数管理
+
+共 1 个命令：
+
+- `Device.FAP.GPS.* 📖`
+
+#### SP · FAP.MRMgmt — MR参数管理
+
+共 1 个命令：
+
+- `Device.FAP.MRMgmt.Config.{i}.* 📝`
+
+#### SQ · FAP.PerfMgmt — 性能参数管理
+
+共 1 个命令：
+
+- `Device.FAP.PerfMgmt.Config.{i}.* 📝`
+
+> ⚠️ 本节 spec 原文还含 1 个伪命令 / 规范引用注释段（不视为可执行命令，已在 catalog loader 中过滤）：`.*`
+
+#### SR · ENanocell — 扩展型一体化皮基站参数
+
+共 9 个命令：
+
+- `Device.DeviceInfo.MU.{i}.* 📖📝`
+- `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.* 📖📝`
+- `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.EU.{iγ}.* 📖📝`
+- `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.EU.{iγ}.RU.{iδ}.* 📖📝`
+- `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.EU.{iγ}.RU.{iδ}.RFChannel.{iε}.* 📖📝`
+- `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.EU.{iγ}.RU.{iδ}.SwUpgrade.* 📖`
+- `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.EU.{iγ}.SwUpgrade.* 📖`
+- `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.SwUpgrade.* 📖`
+- `Device.DeviceInfo.MU.{i}.SwUpgrade.* 📖`
+
