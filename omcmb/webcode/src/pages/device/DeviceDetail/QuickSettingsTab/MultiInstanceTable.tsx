@@ -251,17 +251,16 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
         action: 'save',
         submitStatus: 'queued',
         taskId: result.taskId,
+        savedInstId: instId, // task=completed 时据此清 rowEdits + draft（见下面 useEffect）
         detail: `第 ${instId} 行 ${updates.length} 项`,
         at: Date.now(),
       });
-      // 清空 edits(schema 重新拉取时会同步当前值) + 清该行 draft（避免下次重挂载又恢复旧编辑值覆盖 schema 新值）
-      setRowEdits((prev) => {
-        const next = new Map(prev);
-        next.delete(instId);
-        return next;
-      });
-      clearDraftPrefix(fbKey, `${instId}.`);
-      void refetch();
+      // 不在此立即清 rowEdits + draft / 不在此立即 refetch。
+      // 原因:SPV 才入队,CPE 没应答,device_parameters 仍是旧值,这时 refetch 拉到的
+      // currentValue 是旧的,清掉 rowEdits 后 cell 会闪回旧值——这正是用户报告的"保存后
+      // 值闪回原值"。改由下面的 useEffect 监听 lastTask.status === 'completed'(此时
+      // ACS 的 queueAutoGPVAfterSPV 已把新值回写 device_parameters)再做清理 + refetch,
+      // 整段时间 cell 保留显示用户刚保存的新值(优先级:rowEdits > schema.currentValue)。
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       notification.error({
@@ -319,10 +318,23 @@ export default function MultiInstanceTable({ deviceId, fapInstance, group, local
   // Tag 只显示"入队成功/失败"语义。
   const { data: lastTask } = useDeviceTaskStatus(lastAction?.taskId);
 
-  // CPE 真正应答完成后再次刷新 schema，让 UI 摘掉已删实例（仅入队后的乐观 refetch 拿到的还是旧 schema）
+  // CPE 真正应答完成后再次刷新 schema:
+  //  - DeleteObject:摘掉已删实例(原始用途)
+  //  - SPV save:此时 ACS 的 queueAutoGPVAfterSPV 已把新值回写 device_parameters,
+  //    schema 拉到的就是新 currentValue;同步清掉该行 rowEdits + draft,cell 显示
+  //    切回 schema(数值相同,视觉无变化),避免下次切回时 store draft 再恢复旧用户输入。
   useEffect(() => {
-    if (lastTask && lastTask.status === 'completed') {
-      void refetch();
+    if (!lastTask || lastTask.status !== 'completed') return;
+    void refetch();
+    if (lastAction?.action === 'save' && lastAction.savedInstId) {
+      const id = lastAction.savedInstId;
+      setRowEdits((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Map(prev);
+        next.delete(id);
+        return next;
+      });
+      clearDraftPrefix(fbKey, `${id}.`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastTask?.id, lastTask?.status]);

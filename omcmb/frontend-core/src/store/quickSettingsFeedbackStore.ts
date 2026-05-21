@@ -19,6 +19,9 @@ export interface MultiFeedback {
   detail: string;
   at: number;
   notifiedFailedTaskId?: string;
+  /** save 动作专用:记录被保存的实例号,task=completed 时据此清掉对应行的 rowEdits + draft,
+      避免切 tab 走回后乐观显示的旧用户输入覆盖 schema 新值。 */
+  savedInstId?: string;
 }
 
 export type Feedback = CellFeedback | MultiFeedback;
