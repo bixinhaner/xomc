@@ -2,7 +2,10 @@ package mml
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -94,8 +97,9 @@ func (s *Sequencer) OnTaskCompleted(ctx context.Context, t *task.Task) {
 		return
 	}
 
-	// 构造下一行 device_task — 复用 fanouter 的单 command 翻译能力
-	nextReq, err := s.buildNextRequest(ctx, mmlTask, t.DeviceSN, t.DeviceIndex, nextIdx)
+	// 构造下一行 device_task — 复用 fanouter 的单 command 翻译能力。
+	// R-4.3 复合：prevTask 传入，buildNextRequest 据此识别 AddObject→SPV 链路并替换 .{NEW}.
+	nextReq, err := s.buildNextRequest(ctx, mmlTask, t.DeviceSN, t.DeviceIndex, nextIdx, t)
 	if err != nil {
 		s.logger.Warn("sequencer: build next request failed",
 			zap.String("mml_task_id", mmlTaskID.String()),
@@ -144,9 +148,31 @@ func (s *Sequencer) OnTaskCompleted(ctx context.Context, t *task.Task) {
 
 // buildNextRequest 用 fanouter 的逻辑构造单条 device_task 请求。
 // 单命令单设备 → 返回单 request；不合规 / 翻译失败 → 返 nil（caller 跳过）。
-func (s *Sequencer) buildNextRequest(ctx context.Context, mmlTask *MMLTask, deviceSN string, deviceIdx, cmdIdx int) (*task.CreateTaskRequest, error) {
+//
+// prevTask 可为 nil（递归虚拟完成事件路径）；非 nil 时用于 R-4.3 ADD 复合检测：
+// prev=AddObject + next=SetParameterValues → 从 prev.Result.instance_number 提取
+// 新实例号，把 next 命令中 param_refs[].Tr069Path 的 .{NEW}. 字面替换为 ".<n>."
+// 再交给 fanouter；若 instance_number 缺失则 chain break（返回 err，caller 处理）。
+func (s *Sequencer) buildNextRequest(ctx context.Context, mmlTask *MMLTask, deviceSN string, deviceIdx, cmdIdx int, prevTask *task.Task) (*task.CreateTaskRequest, error) {
 	if cmdIdx < 0 || cmdIdx >= len(mmlTask.Commands) {
 		return nil, fmt.Errorf("cmd_idx %d out of range [0, %d)", cmdIdx, len(mmlTask.Commands))
+	}
+
+	cmdEntry := mmlTask.Commands[cmdIdx]
+
+	// R-4.3 复合流程：prev=AddObject + next=SetParameterValues → 替换 .{NEW}.
+	if prevTask != nil && isAddObjectMethod(prevTask.Method) && isSpvCmdEntry(cmdEntry) {
+		instanceNumber, ok := extractInstanceNumber(prevTask.Result)
+		if !ok {
+			return nil, fmt.Errorf("R-4.3 chain break: prev AddObject task %s missing instance_number in result", prevTask.ID)
+		}
+		cmdEntry = substituteNewInstance(cmdEntry, instanceNumber)
+		s.logger.Info("sequencer: R-4.3 substituted .{NEW}. with instance_number",
+			zap.String("mml_task_id", mmlTask.ID.String()),
+			zap.String("device_sn", deviceSN),
+			zap.Int("cmd_idx", cmdIdx),
+			zap.Int("instance_number", instanceNumber),
+		)
 	}
 
 	// 临时构造一个只含单 device + 单 command 的 MMLTask 视图，
@@ -156,7 +182,7 @@ func (s *Sequencer) buildNextRequest(ctx context.Context, mmlTask *MMLTask, devi
 		TaskName:  mmlTask.TaskName,
 		Creator:   mmlTask.Creator,
 		DeviceSNs: []string{deviceSN},
-		Commands:  []map[string]interface{}{mmlTask.Commands[cmdIdx]},
+		Commands:  []map[string]interface{}{cmdEntry},
 	}
 	reqs := s.fanouter.buildDeviceTaskRequests(ctx, view)
 	if len(reqs) == 0 {
@@ -167,4 +193,117 @@ func (s *Sequencer) buildNextRequest(ctx context.Context, mmlTask *MMLTask, devi
 	reqs[0].CommandIndex = cmdIdx
 	reqs[0].DeviceIndex = deviceIdx
 	return reqs[0], nil
+}
+
+// isAddObjectMethod 判断 task.Method 是否为 AddObject（防御性，处理 SOAP 命名差异）。
+func isAddObjectMethod(method string) bool {
+	// CWMP 标准是 "AddObject"；fanouter / SOAP 层可能写成 "addObject" 之类
+	return strings.EqualFold(strings.TrimSpace(method), "AddObject")
+}
+
+// isSpvCmdEntry 判断 cmd entry 是否为 SetParameterValues。
+func isSpvCmdEntry(entry map[string]interface{}) bool {
+	v, ok := entry["rpc_method"]
+	if !ok {
+		return false
+	}
+	s, ok := v.(string)
+	if !ok {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(s), "SetParameterValues")
+}
+
+// extractInstanceNumber 从 device_task.result JSON 解析 instance_number 整数。
+//
+// 期望形态（由 acs/handler.go MarkTaskCompleted 写入）：
+//
+//	{ "method": "AddObjectResponse", "raw_response": "...", "instance_number": 5 }
+//
+// 缺字段 / 非 JSON / 非整数 → (0, false)，调用方据此决定 chain break。
+func extractInstanceNumber(resultJSON json.RawMessage) (int, bool) {
+	if len(resultJSON) == 0 {
+		return 0, false
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(resultJSON, &m); err != nil {
+		return 0, false
+	}
+	raw, ok := m["instance_number"]
+	if !ok {
+		return 0, false
+	}
+	// JSON 数字默认解析为 float64
+	switch n := raw.(type) {
+	case float64:
+		return int(n), true
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case string:
+		// 防御性：某些路径可能存为字符串
+		if v, err := strconv.Atoi(strings.TrimSpace(n)); err == nil {
+			return v, true
+		}
+	}
+	return 0, false
+}
+
+// substituteNewInstance 深拷贝 cmd entry 并把 param_refs 中所有 Tr069Path 的
+// 字面占位符 ".{NEW}." 替换为 "."+<n>+"."。
+//
+// 处理两种 param_refs 形态（兼容 in-memory 与 JSON-roundtrip）：
+//   - []MMLParamRef                              (直接 in-memory，单测路径)
+//   - []interface{} of map[string]interface{}    (DB JSONB 反序列化，生产路径)
+//
+// 其它字段浅拷贝。parameters 字段不动（spec §R-4.3 keys 是 mml_code，不含路径）。
+func substituteNewInstance(cmd map[string]interface{}, instanceNumber int) map[string]interface{} {
+	newToken := "." + strconv.Itoa(instanceNumber) + "."
+	const placeholder = ".{NEW}."
+
+	out := make(map[string]interface{}, len(cmd))
+	for k, v := range cmd {
+		if k != "param_refs" {
+			out[k] = v
+			continue
+		}
+		// 形态 1：[]MMLParamRef（in-memory）
+		if typed, ok := v.([]MMLParamRef); ok {
+			rewritten := make([]MMLParamRef, len(typed))
+			for i, r := range typed {
+				r.Tr069Path = strings.ReplaceAll(r.Tr069Path, placeholder, newToken)
+				rewritten[i] = r
+			}
+			out[k] = rewritten
+			continue
+		}
+		// 形态 2：[]interface{} of maps（JSON 反序列化后）
+		if list, ok := v.([]interface{}); ok {
+			rewritten := make([]interface{}, len(list))
+			for i, item := range list {
+				m, ok := item.(map[string]interface{})
+				if !ok {
+					rewritten[i] = item
+					continue
+				}
+				cp := make(map[string]interface{}, len(m))
+				for mk, mv := range m {
+					if mk == "tr069_path" {
+						if s, ok := mv.(string); ok {
+							cp[mk] = strings.ReplaceAll(s, placeholder, newToken)
+							continue
+						}
+					}
+					cp[mk] = mv
+				}
+				rewritten[i] = cp
+			}
+			out[k] = rewritten
+			continue
+		}
+		// 未知形态 — 原样保留（防御性）
+		out[k] = v
+	}
+	return out
 }
