@@ -154,7 +154,16 @@ func renderNotifTitle(t *task.Task, status NotificationStatus) string {
 		}
 	case "AddObject", "DeleteObject":
 		if name := extractObjectName(t.Params); name != "" {
-			base = fmt.Sprintf("%s · %s", base, shortObjectName(name))
+			short := shortObjectName(name)
+			// AddObject 完成态追加 CPE 返回的新实例号(由 ACS handler MarkTaskCompleted 时
+			// 解 AddObjectResponse 写入 t.Result.instance_number)。进行中态 Result 为空,
+			// 自动回退到原 short name。
+			if t.Method == "AddObject" {
+				if n := extractAddObjectInstance(t.Result); n > 0 {
+					short = fmt.Sprintf("%s.%d", short, n)
+				}
+			}
+			base = fmt.Sprintf("%s · %s", base, short)
 		}
 	}
 	return base
@@ -176,7 +185,13 @@ func renderNotifContent(t *task.Task, status NotificationStatus) string {
 		}
 	case "AddObject", "DeleteObject":
 		if name := extractObjectName(t.Params); name != "" {
-			lines = append(lines, "对象路径："+name)
+			displayPath := name
+			if t.Method == "AddObject" {
+				if n := extractAddObjectInstance(t.Result); n > 0 {
+					displayPath = fmt.Sprintf("%s%d.", name, n)
+				}
+			}
+			lines = append(lines, "对象路径："+displayPath)
 		}
 	}
 
@@ -259,6 +274,21 @@ func extractObjectName(raw json.RawMessage) string {
 		return ""
 	}
 	return wrapper.ObjectName
+}
+
+// extractAddObjectInstance 解析 AddObject 已完成 task.Result 中的 instance_number。
+// 由 ACS handler MarkTaskCompleted 时解 AddObjectResponse 写入,进行中态返 0。
+func extractAddObjectInstance(raw json.RawMessage) int {
+	if len(raw) == 0 {
+		return 0
+	}
+	var wrapper struct {
+		InstanceNumber int `json:"instance_number"`
+	}
+	if err := json.Unmarshal(raw, &wrapper); err != nil {
+		return 0
+	}
+	return wrapper.InstanceNumber
 }
 
 // shortObjectName 取对象路径末尾 2 段，用于通知标题显示。
