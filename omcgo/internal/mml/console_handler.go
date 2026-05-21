@@ -39,28 +39,41 @@ import (
 // 设计：handler 持 *ConsoleService 与 MMLTaskCreator（=*Service）分离，使
 // service 与协议执行通路解耦——ConsoleService 仅做编排与编译，task 持久化 /
 // fanout 由上游 *Service 通过 MMLTaskCreator 接口承接。
+//
+// compatibility 是 R-8.5 命令兼容性警告服务（独立 CompatibilityService 以避免
+// 改动 ConsoleService 签名连累 5 个测试文件）；nil 时端点降级为 503，不影响
+// 其他路由。
 type ConsoleHandler struct {
-	svc         *ConsoleService
-	taskCreator MMLTaskCreator
-	logger      *zap.Logger
+	svc           *ConsoleService
+	taskCreator   MMLTaskCreator
+	compatibility *CompatibilityService
+	logger        *zap.Logger
 }
 
 // NewConsoleHandler 构造 ConsoleHandler。taskCreator 必须非 nil（执行端点依赖）。
-func NewConsoleHandler(svc *ConsoleService, taskCreator MMLTaskCreator, logger *zap.Logger) *ConsoleHandler {
+// compatibility 可为 nil — 端点返回 503 但其他端点不受影响。
+func NewConsoleHandler(
+	svc *ConsoleService,
+	taskCreator MMLTaskCreator,
+	compatibility *CompatibilityService,
+	logger *zap.Logger,
+) *ConsoleHandler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	return &ConsoleHandler{
-		svc:         svc,
-		taskCreator: taskCreator,
-		logger:      logger.Named("mml-console-handler"),
+		svc:           svc,
+		taskCreator:   taskCreator,
+		compatibility: compatibility,
+		logger:        logger.Named("mml-console-handler"),
 	}
 }
 
-// RegisterRoutes 注册 5+1 端点。父 router group 应为 v1 + RequireAPIPermission。
+// RegisterRoutes 注册 5+1+1 端点。父 router group 应为 v1 + RequireAPIPermission。
 //
 // R-9.2 新增 `/mml/console/execute-statements-structured` — 与旧 `/execute-statements`
 // 并存兼容期；前缀 /console/ 物理隔离便于未来下线旧端点。
+// R-8.5 新增 `/mml/console/command-compatibility` — 命令兼容性警告。
 func (h *ConsoleHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	mml := rg.Group("/mml")
 
@@ -70,6 +83,43 @@ func (h *ConsoleHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	mml.POST("/parse", h.PostParse)
 	mml.POST("/execute-statements", h.PostExecuteStatements)
 	mml.POST("/console/execute-statements-structured", h.PostExecuteStatementsStructured)
+	mml.GET("/console/command-compatibility", h.GetCommandCompatibility)
+}
+
+// ============================================================
+// GET /api/v1/mml/console/command-compatibility?product_class=<class>&lang=<lang>
+// R-8.5
+// ============================================================
+
+// GetCommandCompatibility 返回指定 product_class 下不兼容的命令 ID 列表。
+//
+// 错误码：
+//   - 400 product_class 缺失
+//   - 404 product_class 无任何 product 匹配
+//   - 503 compatibility service 未配置（启动期 nil 注入）
+//   - 500 其他内部错误
+func (h *ConsoleHandler) GetCommandCompatibility(c *gin.Context) {
+	if h.compatibility == nil {
+		response.Fail(c, http.StatusServiceUnavailable, "compatibility service not configured")
+		return
+	}
+	productClass := strings.TrimSpace(c.Query("product_class"))
+	if productClass == "" {
+		response.Fail(c, http.StatusBadRequest, "product_class is required")
+		return
+	}
+	result, err := h.compatibility.GetCommandCompatibility(c.Request.Context(), productClass)
+	if err != nil {
+		if errors.Is(err, ErrProductClassNotFound) {
+			response.Fail(c, http.StatusNotFound, err.Error())
+			return
+		}
+		h.logger.Error("get command compatibility",
+			zap.Error(err), zap.String("product_class", productClass))
+		response.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.OK(c, result)
 }
 
 // ============================================================
