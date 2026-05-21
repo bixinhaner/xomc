@@ -236,6 +236,7 @@ export default function DeviceGrouping() {
           selectedDeviceIds={selectedDeviceIds}
           currentPage={currentPage}
           pageSize={pageSize}
+          selectedGroupId={selectedGroupId}
           selectedGroupName={selectedGroup?.name}
           batchActions={batchActions}
           onSelectionChange={setSelectedDeviceIds}

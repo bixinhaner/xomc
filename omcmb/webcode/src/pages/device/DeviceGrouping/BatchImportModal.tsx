@@ -30,6 +30,9 @@ export interface BatchImportModalProps {
   onImport: (result: BatchImportResponse) => void | Promise<void>;
   onDownloadTemplate: () => void;
   t: (id: string, values?: Record<string, string | number>) => string;
+  /** 用户当前选中的设备分组 ID；POST 时随 payload 一起带上，让后端把导入的
+   * 设备一次性写入该分组。null/undefined 时设备保持"未分组"。 */
+  selectedGroupId?: string | null;
 }
 
 // ── CSV header 与必填列定义 ───────────────────────────────────────────────────
@@ -249,6 +252,7 @@ export default function BatchImportModal({
   onImport,
   onDownloadTemplate,
   t,
+  selectedGroupId,
 }: BatchImportModalProps) {
   // 注：之前直接用 `import { Modal } from 'antd'` 的 `Modal.error(...)` 静态方法
   // 弹反馈，但 antd v5 + React 19 下静态方法不会被 ConfigProvider 兼容层托管 →
@@ -361,7 +365,12 @@ export default function BatchImportModal({
 
     setImporting(true);
     try {
-      const resp = await deviceApi.batchImportDevices({ devices: parsed.devices });
+      const resp = await deviceApi.batchImportDevices({
+        devices: parsed.devices,
+        // 仅在用户实际选中了某个分组时带上 group_id；undefined / null 时后端
+        // 维持"导入即未分组"语义。
+        ...(selectedGroupId ? { group_id: selectedGroupId } : {}),
+      });
       // 把前端校验失败的行合并进 total / failed（让最终统计与 CSV 实际数据行一致）
       const finalResult: BatchImportResponse = {
         total: resp.total + parsed.localErrors.length,
@@ -383,7 +392,7 @@ export default function BatchImportModal({
     } finally {
       setImporting(false);
     }
-  }, [fileList, parsed, onImport, t, message]);
+  }, [fileList, parsed, onImport, t, message, selectedGroupId]);
 
   const handleCancel = useCallback(() => {
     if (importing) return;

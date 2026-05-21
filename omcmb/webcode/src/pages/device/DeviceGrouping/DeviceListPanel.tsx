@@ -16,6 +16,7 @@ export interface DeviceListPanelProps {
   selectedDeviceIds: React.Key[];
   currentPage: number;
   pageSize: number;
+  selectedGroupId: string | null;
   selectedGroupName: string | undefined;
   batchActions: BatchAction[];
   onSelectionChange: (keys: React.Key[]) => void;
@@ -41,6 +42,7 @@ export default function DeviceListPanel({
   selectedDeviceIds,
   currentPage,
   pageSize,
+  selectedGroupId,
   selectedGroupName,
   batchActions,
   onSelectionChange,
@@ -156,6 +158,7 @@ export default function DeviceListPanel({
         onImport={onImport}
         onDownloadTemplate={onDownloadTemplate}
         t={t}
+        selectedGroupId={selectedGroupId}
       />
     </div>
   );

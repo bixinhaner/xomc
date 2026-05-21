@@ -135,6 +135,22 @@ func (s *DeviceService) SetGroupAssigner(ga GroupAssigner) {
 	s.groupAssigner = ga
 }
 
+// BatchAssignToGroup 把一批设备成员关系一次写入指定分组（UPSERT，device_id 冲
+// 突时改写为新 groupID）。供 BatchImportDevices 在 CreateDevice 全部跑完后批
+// 量归组使用——避免 N 行 N 次单写。
+// 未注入 GroupAssigner 时返回 nil（dev/test 旁路），调用方按"分组写入失败但
+// 设备已落库"对待。
+func (s *DeviceService) BatchAssignToGroup(ctx context.Context, groupID uuid.UUID, deviceIDs []uuid.UUID) error {
+	if s.groupAssigner == nil || len(deviceIDs) == 0 {
+		return nil
+	}
+	_, err := s.groupAssigner.BatchAddDevices(ctx, groupID, deviceIDs)
+	if err != nil {
+		return fmt.Errorf("batch assign devices to group %s: %w", groupID, err)
+	}
+	return nil
+}
+
 // SetLicenseEnforcer wires the license enforcer used by CreateDevice to gate
 // against capacity/expiry. Pass nil to disable (default in tests).
 func (s *DeviceService) SetLicenseEnforcer(e LicenseEnforcer) {

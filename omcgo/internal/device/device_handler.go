@@ -668,8 +668,13 @@ func (h *Handler) BatchDeleteDevices(c *gin.Context) {
 // BatchImportRequest 来自 POST /api/v1/devices/batch-import 的请求体。
 // 前端解析 CSV 后以结构化 JSON 数组提交；服务侧逐条调 CreateDevice 落库，
 // 单行失败不影响其他行（与"成功/失败按行单独回执"的产品语义一致）。
+//
+// GroupID（可选）：用户在 /device/group 页面选中的二级分组 ID；后端在所有
+// CreateDevice 成功后一次性把这批新设备 BatchAddDevices 进该分组。未传时
+// 设备保持"未分组"，由后续 inform 心跳触发的规则或手工编辑归组。
 type BatchImportRequest struct {
 	Devices []CreateDeviceRequest `json:"devices" binding:"required,min=1,max=1000,dive"`
+	GroupID *uuid.UUID            `json:"group_id,omitempty" binding:"omitempty,uuid"`
 }
 
 // BatchImportResponse 报告本次批次的成功/失败统计 + 失败明细。
@@ -700,8 +705,9 @@ func (h *Handler) BatchImportDevices(c *gin.Context) {
 	}
 
 	resp := BatchImportResponse{Total: len(req.Devices)}
+	createdIDs := make([]uuid.UUID, 0, len(req.Devices))
 	for i, dev := range req.Devices {
-		_, err := h.service.CreateDevice(c.Request.Context(), dev)
+		created, err := h.service.CreateDevice(c.Request.Context(), dev)
 		if err != nil {
 			resp.Failed++
 			reason := err.Error()
@@ -716,6 +722,21 @@ func (h *Handler) BatchImportDevices(c *gin.Context) {
 			continue
 		}
 		resp.Succeeded++
+		if created != nil {
+			createdIDs = append(createdIDs, created.ID)
+		}
+	}
+
+	// 用户在 /device/group 页面选中分组时，把这批新设备一次性写入 device_group_members。
+	// 失败不影响导入回执的成功/失败统计——设备本身已经落库，仅归属分组失败，给一条
+	// warning row 让前端用户感知（而不是默默吞掉）。
+	if req.GroupID != nil && len(createdIDs) > 0 {
+		if err := h.service.BatchAssignToGroup(c.Request.Context(), *req.GroupID, createdIDs); err != nil {
+			resp.Errors = append(resp.Errors, BatchImportRowError{
+				Row:    0,
+				Reason: "设备已创建，但归入指定分组失败：" + err.Error(),
+			})
+		}
 	}
 
 	response.OK(c, resp)

@@ -69,6 +69,8 @@ export interface BatchImportDevice {
 
 export interface BatchImportRequest {
   devices: BatchImportDevice[];
+  /** 可选：导入后批量归入此分组（设备分组页操作上下文）。未传则保持未分组。 */
+  group_id?: string;
 }
 
 // 单行错误回执（row 与 CSV 用户视角行号一致，1-based 不含 header）。
