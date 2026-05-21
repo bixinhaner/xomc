@@ -212,8 +212,10 @@ export default function DeviceList() {
     hasDetail?: boolean; // 是否有详情可查看（只有收集操作才有）
   }
 
-  // 实时刷新状态
-  const [autoRefresh] = useState(false);
+  // 实时刷新状态：受 DataTable 工具栏「开启实时刷新」按钮控制。
+  // 历史 bug：只解构出 [autoRefresh] 没拿 setter，导致按钮翻不动这个值，
+  // refetchInterval 永远是 undefined → 实时刷新等于摆设。
+  const [autoRefresh, setAutoRefresh] = useState(false);
 
   // 收集任务抽屉状态
   const [collectDrawerOpen, setCollectDrawerOpen] = useState(false);
@@ -1520,6 +1522,7 @@ export default function DeviceList() {
               defaultDensity="default"
               scroll={{ x: 'max-content' }}
               autoFitHeight
+              onRealtimeRefreshChange={setAutoRefresh}
               showRowNumber
               rowNumberTitle={t('table.rowNumber')}
             />

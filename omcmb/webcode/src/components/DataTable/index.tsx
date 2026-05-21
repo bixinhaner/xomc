@@ -72,6 +72,13 @@ export interface DataTableProps<T> {
    * DeviceList 等需要分页紧贴底部的页面显式 autoFitHeight 即可。
    */
   autoFitHeight?: boolean;
+  /**
+   * 「实时刷新」开关切换回调。Toolbar 内的 SyncOutlined 按钮翻转时上抛布尔值；
+   * caller 收到后应把它接到 useQuery 的 `refetchInterval`（典型 5000ms）。
+   * 无此回调时按钮仍可点（仅本地视觉切换），但不会真正发起周期请求 —— 这正
+   * 是历史上 DeviceList "开启实时刷新无效"bug 的成因。
+   */
+  onRealtimeRefreshChange?: (enabled: boolean) => void;
 }
 
 type Density = 'compact' | 'default' | 'comfortable';
@@ -112,6 +119,7 @@ function DataTable<T>(
     showRowNumber = false,
     rowNumberTitle,
     autoFitHeight = false,
+    onRealtimeRefreshChange,
   } = props;
 
   const t = useT();
@@ -396,6 +404,7 @@ function DataTable<T>(
         onExport={onExport}
         onColumnVisibilityChange={setHiddenKeys}
         onColumnOrderChange={setColumnOrder}
+        onRefreshLockChange={onRealtimeRefreshChange}
         density={density}
         onDensityChange={setDensity}
         extraLeft={extraToolbarLeft}

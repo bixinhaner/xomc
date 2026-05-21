@@ -21,6 +21,8 @@ export interface DeviceListPanelProps {
   onSelectionChange: (keys: React.Key[]) => void;
   onPageChange: (page: number, size: number) => void;
   onRefresh: () => void;
+  /** 实时刷新按钮翻转回调 —— 透传给 DataTable.onRealtimeRefreshChange。 */
+  onRealtimeRefreshChange?: (enabled: boolean) => void;
   onExport: () => void;
   /**
    * 批量导入完成回调（接收后端真实回执，含成功/失败统计）。
@@ -44,6 +46,7 @@ export default function DeviceListPanel({
   onSelectionChange,
   onPageChange,
   onRefresh,
+  onRealtimeRefreshChange,
   onExport,
   onImport,
   onDownloadTemplate,
@@ -110,6 +113,7 @@ export default function DeviceListPanel({
             currentPage={currentPage}
             onPageChange={onPageChange}
             onRefresh={onRefresh}
+            onRealtimeRefreshChange={onRealtimeRefreshChange}
             defaultDensity="default"
             scroll={{ x: 'max-content', y: 100 }}
             showRowNumber
