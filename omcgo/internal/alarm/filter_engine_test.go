@@ -136,6 +136,21 @@ func TestMatch_NoMatch(t *testing.T) {
 	assert.False(t, engine.match(context.Background(), alarm, uuid.UUID{}, rule))
 }
 
+func TestMatch_MultipleDimensionsRequireAll(t *testing.T) {
+	engine := newTestFilterEngine(nil, nil)
+	matchedDeviceID := uuid.New()
+	rule := &AlarmFilterRule{
+		FilterType:       FilterTypeAlarmIdentifier,
+		AlarmIdentifiers: []string{"10001"},
+		DeviceIDs:        []uuid.UUID{matchedDeviceID},
+		Action:           FilterActionAutoAcknowledge,
+	}
+
+	assert.True(t, engine.match(context.Background(), &model.Alarm{AlarmIdentifier: "10001"}, matchedDeviceID, rule))
+	assert.False(t, engine.match(context.Background(), &model.Alarm{AlarmIdentifier: "10001"}, uuid.New(), rule))
+	assert.False(t, engine.match(context.Background(), &model.Alarm{AlarmIdentifier: "20002"}, matchedDeviceID, rule))
+}
+
 func TestMatch_DeviceGroup(t *testing.T) {
 	engine := newTestFilterEngine(nil, nil)
 	groupID := uuid.New()

@@ -15,8 +15,10 @@ import {
 } from 'antd';
 import type { TableProps } from 'antd';
 import { useT } from '@/hooks/useT';
-import { useDeviceList, useDeviceGroups } from '@core/hooks/api/useDevices';
+import { useDeviceList, useDeviceGroups, useDevicesByIds } from '@core/hooks/api/useDevices';
+import { useAlarmDefinitionList } from '@core/hooks/api/useAlarmDefinitions';
 import type { AlarmRule } from '@core/types/alarm';
+import type { AlarmDefinition } from '@core/types/alarmDefinition';
 import type { AlarmSeverity } from '@core/types/common';
 import type { Device, DeviceGroup } from '@core/types/device';
 import { Dayjs } from 'dayjs';
@@ -25,7 +27,6 @@ const { RangePicker } = DatePicker;
 
 // 执行动作配置 (匹配后端 action 值)
 const RULE_TYPE_OPTIONS = [
-  { value: 'default', label: '默认处理' },
   { value: 'ignore', label: '不入库不显示' },
   { value: 'auto_acknowledge', label: '自动确认' },
   { value: 'auto_clear', label: '自动清除' },
@@ -76,19 +77,96 @@ export interface AlarmRuleFormData {
   timeRange?: [string, string];
 }
 
-// Mock 告警库数据
-const mockAlarmLibrary = [
-  { id: 'alarm-001', alarmIdentifier: 'A0001', alarmName: '小区不可用', eventType: '30003', severity: 'critical' as const },
-  { id: 'alarm-002', alarmIdentifier: 'A0002', alarmName: 'S1链路中断', eventType: '30000', severity: 'major' as const },
-  { id: 'alarm-003', alarmIdentifier: 'A0003', alarmName: 'X2链路中断', eventType: '30000', severity: 'major' as const },
-  { id: 'alarm-004', alarmIdentifier: 'A0004', alarmName: '温度过高', eventType: '30004', severity: 'warning' as const },
-  { id: 'alarm-005', alarmIdentifier: 'A0005', alarmName: 'gNB射频异常', eventType: '30003', severity: 'critical' as const },
-  { id: 'alarm-006', alarmIdentifier: 'A0006', alarmName: 'gNB时钟失锁', eventType: '30003', severity: 'major' as const },
-  { id: 'alarm-007', alarmIdentifier: 'A0007', alarmName: 'GSM功率异常', eventType: '30003', severity: 'warning' as const },
-  { id: 'alarm-008', alarmIdentifier: 'A0008', alarmName: 'GSM链路告警', eventType: '30000', severity: 'minor' as const },
-  { id: 'alarm-009', alarmIdentifier: 'A0009', alarmName: '电源电压异常', eventType: '30004', severity: 'critical' as const },
-  { id: 'alarm-010', alarmIdentifier: 'A0010', alarmName: '风扇故障', eventType: '30003', severity: 'warning' as const },
-];
+interface AlarmLibraryItem {
+  alarmIdentifier: string;
+  alarmName: string;
+  eventType?: string;
+  severity: AlarmSeverity;
+}
+
+function getConditionValues(rule: AlarmRule | null | undefined, field: string): string[] {
+  if (!rule) {
+    return [];
+  }
+
+  return rule.conditions
+    .filter((condition) => condition.field === field)
+    .flatMap((condition) => (Array.isArray(condition.value) ? condition.value : [condition.value]))
+    .map((value) => String(value))
+    .filter((value) => value.length > 0);
+}
+
+function mapSeverityCodeToAlarmSeverity(code: number): AlarmSeverity {
+  switch (code) {
+    case 1:
+    case 31001:
+      return 'critical';
+    case 2:
+    case 31002:
+      return 'major';
+    case 3:
+    case 31003:
+      return 'minor';
+    case 4:
+    case 31004:
+    default:
+      return 'warning';
+  }
+}
+
+function mapAlarmDefinitionEventType(eventType: AlarmDefinition['eventType']): string | undefined {
+  if (eventType === undefined || eventType === null || eventType === '') {
+    return undefined;
+  }
+
+  const value = String(eventType);
+  switch (value) {
+    case 'communication':
+      return '30000';
+    case 'qualityOfService':
+      return '30001';
+    case 'processingError':
+      return '30002';
+    case 'device':
+    case 'equipment':
+      return '30003';
+    case 'environment':
+      return '30004';
+    case 'performance':
+    case 'service':
+      return '30006';
+    default:
+      return value;
+  }
+}
+
+function mapAlarmDefinitionToLibraryItem(definition: AlarmDefinition): AlarmLibraryItem {
+  return {
+    alarmIdentifier: definition.identifier,
+    alarmName:
+      definition.cnProbableCause ||
+      definition.cnName ||
+      definition.enProbableCause ||
+      definition.enName ||
+      definition.identifier,
+    eventType: mapAlarmDefinitionEventType(definition.eventType),
+    severity: mapSeverityCodeToAlarmSeverity(definition.severityCode),
+  };
+}
+
+function attachDeviceType(device: Device): DeviceWithType {
+  let deviceType: 'eNB' | 'gNB' | 'GSM' = 'eNB';
+  const name = device.name?.toLowerCase() || '';
+  const networkType = device.networkType?.toLowerCase() || '';
+
+  if (name.includes('gnb') || networkType.includes('5g') || networkType.includes('nr')) {
+    deviceType = 'gNB';
+  } else if (name.includes('gsm') || networkType.includes('gsm')) {
+    deviceType = 'GSM';
+  }
+
+  return { ...device, deviceType };
+}
 
 // 设备数据类型（包含设备类型字段）
 interface DeviceWithType extends Device {
@@ -128,31 +206,50 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
     page: 1,
     pageSize: 100,
   });
+  const selectedDeviceQueries = useDevicesByIds(selectedDevices);
 
   // 获取设备组列表
   const { data: groupsData, isLoading: groupsLoading } = useDeviceGroups();
+  const { data: alarmDefinitionData, isLoading: alarmDefinitionLoading } = useAlarmDefinitionList({
+    page: 1,
+    pageSize: 1000,
+  });
 
   const isViewMode = mode === 'view';
   const title = mode === 'add' ? t('common.add') : mode === 'edit' ? t('common.edit') : t('common.detail');
+  const ruleTypeOptions = useMemo(
+    () => (rule?.ruleType === 'default'
+      ? [
+          ...RULE_TYPE_OPTIONS,
+          { value: 'default', label: t('alarm.ruleType.defaultLegacy'), disabled: true },
+        ]
+      : RULE_TYPE_OPTIONS),
+    [rule?.ruleType, t]
+  );
 
   // 处理设备数据，添加设备类型
+  const selectedDeviceRecords = useMemo(
+    () => selectedDeviceQueries.flatMap((query) => (query.data ? [query.data] : [])),
+    [selectedDeviceQueries]
+  );
+
+  const selectedDeviceLoading = selectedDeviceQueries.some((query) => query.isLoading);
+
   const devicesWithType: DeviceWithType[] = useMemo(() => {
-    const devices = deviceData?.items || [];
-    return devices.map(device => {
-      // 根据设备名称或网络类型判断设备类型
-      let deviceType: 'eNB' | 'gNB' | 'GSM' = 'eNB';
-      const name = device.name?.toLowerCase() || '';
-      const networkType = device.networkType?.toLowerCase() || '';
+    const deviceMap = new Map<string, DeviceWithType>();
 
-      if (name.includes('gnb') || networkType.includes('5g') || networkType.includes('nr')) {
-        deviceType = 'gNB';
-      } else if (name.includes('gsm') || networkType.includes('gsm')) {
-        deviceType = 'GSM';
-      }
-
-      return { ...device, deviceType };
+    selectedDeviceRecords.forEach((device) => {
+      deviceMap.set(device.id, attachDeviceType(device));
     });
-  }, [deviceData]);
+
+    (deviceData?.items || []).forEach((device) => {
+      if (!deviceMap.has(device.id)) {
+        deviceMap.set(device.id, attachDeviceType(device));
+      }
+    });
+
+    return Array.from(deviceMap.values());
+  }, [deviceData, selectedDeviceRecords]);
 
   // 处理设备组数据，构建层级结构
   const groupsWithLevel: DeviceGroupWithLevel[] = useMemo(() => {
@@ -226,29 +323,44 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
   // 初始化表单数据
   useEffect(() => {
     if (open && rule) {
+      const nextSelectedDevices = getConditionValues(rule, 'device_id');
+      const nextSelectedGroups = getConditionValues(rule, 'device_group_id');
+      const nextSelectedAlarms = getConditionValues(rule, 'alarm_identifier');
+      const nextDeviceSelectionMode = nextSelectedGroups.length > 0 && nextSelectedDevices.length === 0
+        ? 'groups'
+        : 'devices';
+
       form.setFieldsValue({
         ruleName: rule.ruleName,
         status: rule.enabled,
         ruleType: rule.ruleType,
       });
-      setSelectedDevices([]);
-      setSelectedGroups([]);
-      setSelectedAlarms([]);
+      setDeviceSelectionMode(nextDeviceSelectionMode);
+      setSelectedDevices(nextSelectedDevices);
+      setSelectedGroups(nextSelectedGroups);
+      setSelectedAlarms(nextSelectedAlarms);
       setTimeRange(null);
     } else if (open) {
       form.resetFields();
+      setDeviceSelectionMode('devices');
       setSelectedDevices([]);
       setSelectedGroups([]);
       setSelectedAlarms([]);
       setTimeRange(null);
     }
     setAlarmError(null);
+    setAlarmFilter({ keyword: '', eventType: undefined, severity: undefined });
     setDeviceFilter({ deviceTypes: [], snKeyword: '' });
   }, [open, rule, form]);
 
+  const alarmLibrary = useMemo(
+    () => (alarmDefinitionData?.items || []).map(mapAlarmDefinitionToLibraryItem),
+    [alarmDefinitionData]
+  );
+
   // 过滤告警库
   const filteredAlarms = useMemo(() => {
-    let result = mockAlarmLibrary;
+    let result = alarmLibrary;
     if (alarmFilter.keyword) {
       const kw = alarmFilter.keyword.toLowerCase();
       result = result.filter(a =>
@@ -263,7 +375,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
       result = result.filter(a => a.severity === alarmFilter.severity);
     }
     return result;
-  }, [alarmFilter]);
+  }, [alarmFilter, alarmLibrary]);
 
   const handleSubmit = useCallback(async () => {
     // 验证告警必填
@@ -370,7 +482,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
   ];
 
   // 告警库列表列配置
-  const alarmColumns: TableProps<typeof mockAlarmLibrary[0]>['columns'] = [
+  const alarmColumns: TableProps<AlarmLibraryItem>['columns'] = [
     {
       title: t('alarm.alarmIdentifier'),
       dataIndex: 'alarmIdentifier',
@@ -441,7 +553,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
   // 告警全选/取消全选
   const handleAlarmSelectAll = useCallback((checked: boolean) => {
     if (checked) {
-      setSelectedAlarms(filteredAlarms.map(a => a.id));
+      setSelectedAlarms(filteredAlarms.map(a => a.alarmIdentifier));
       setAlarmError(null);
     } else {
       setSelectedAlarms([]);
@@ -478,7 +590,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
         form={form}
         layout="vertical"
         disabled={isViewMode}
-        initialValues={{ status: true, ruleType: 'default' }}
+        initialValues={{ status: true }}
       >
         <Form.Item
           name="ruleName"
@@ -505,7 +617,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
           label={t('alarm.ruleType')}
           rules={[{ required: true }]}
         >
-          <Select options={RULE_TYPE_OPTIONS} placeholder={t('filter.selectField').replace('{label}', t('alarm.ruleType'))} />
+          <Select options={ruleTypeOptions} placeholder={t('filter.selectField').replace('{label}', t('alarm.ruleType'))} />
         </Form.Item>
 
         {/* 设备选择方式 */}
@@ -554,7 +666,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
                   dataSource={filteredDevices}
                   rowKey="id"
                   size="small"
-                  loading={deviceLoading}
+                  loading={deviceLoading || selectedDeviceLoading}
                   pagination={{ pageSize: 5, size: 'small', showSizeChanger: false }}
                   scroll={{ y: 180 }}
                 />
@@ -644,7 +756,8 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
               rowSelection={alarmRowSelection}
               columns={alarmColumns}
               dataSource={filteredAlarms}
-              rowKey="id"
+              rowKey="alarmIdentifier"
+              loading={alarmDefinitionLoading}
               size="small"
               pagination={{ pageSize: 5, size: 'small' }}
               scroll={{ y: 180 }}

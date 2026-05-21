@@ -290,6 +290,7 @@ function ruleToBackendPayload(
   data: Partial<AlarmRule>
 ): Record<string, unknown> {
   const payload: Record<string, unknown> = {};
+  const hasConditions = data.conditions !== undefined;
 
   if (data.ruleName !== undefined) payload.name = data.ruleName;
   if (data.enabled !== undefined) payload.enabled = data.enabled;
@@ -310,10 +311,12 @@ function ruleToBackendPayload(
     .filter((c) => c.field === 'device_group_id')
     .flatMap((c) => (Array.isArray(c.value) ? c.value : [c.value]));
 
-  if (alarmIdentifiers.length > 0) payload.alarm_identifiers = alarmIdentifiers;
-  if (alarmSources.length > 0) payload.alarm_sources = alarmSources;
-  if (deviceIds.length > 0) payload.device_ids = deviceIds;
-  if (deviceGroupIds.length > 0) payload.device_group_ids = deviceGroupIds;
+  if (hasConditions) {
+    if (alarmIdentifiers.length > 0) payload.alarm_identifiers = alarmIdentifiers;
+    if (alarmSources.length > 0) payload.alarm_sources = alarmSources;
+    if (deviceIds.length > 0) payload.device_ids = deviceIds;
+    if (deviceGroupIds.length > 0) payload.device_group_ids = deviceGroupIds;
+  }
 
   // Extract acknowledge_desc from actions
   const actions = data.actions || [];
@@ -323,16 +326,18 @@ function ruleToBackendPayload(
   }
 
   // Determine filter_type from conditions
-  if (alarmIdentifiers.length > 0) {
-    payload.filter_type = 'alarm_identifier';
-  } else if (alarmSources.length > 0) {
-    payload.filter_type = 'alarm_source';
-  } else if (deviceGroupIds.length > 0) {
-    payload.filter_type = 'device_group';
-  } else if (deviceIds.length > 0) {
-    payload.filter_type = 'device';
-  } else {
-    payload.filter_type = 'alarm_identifier';
+  if (hasConditions) {
+    if (alarmIdentifiers.length > 0) {
+      payload.filter_type = 'alarm_identifier';
+    } else if (alarmSources.length > 0) {
+      payload.filter_type = 'alarm_source';
+    } else if (deviceGroupIds.length > 0) {
+      payload.filter_type = 'device_group';
+    } else if (deviceIds.length > 0) {
+      payload.filter_type = 'device';
+    } else {
+      payload.filter_type = 'alarm_identifier';
+    }
   }
 
   return payload;

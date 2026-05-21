@@ -352,6 +352,8 @@ func TestDeviceService_UpdateFromInform_Success(t *testing.T) {
 			return &model.Device{
 				ID:             deviceID,
 				SerialNumber:   sn,
+				LifecycleState: model.LifecycleCommissioned,
+				IsOnline:       false,
 				Status:         model.DeviceOffline, // should auto-transition to active
 				InformInterval: 300,
 			}, nil
@@ -384,6 +386,7 @@ func TestDeviceService_UpdateFromInform_Success(t *testing.T) {
 
 	// Auto-transition: offline -> active
 	assert.Equal(t, model.DeviceActive, updatedDevice.Status)
+	assert.True(t, updatedDevice.IsOnline)
 }
 
 func TestDeviceService_UpdateFromInform_NotFound(t *testing.T) {

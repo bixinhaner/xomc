@@ -611,6 +611,10 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	device.ConnectionRequestURL = findParamValue(inform.ParameterList, "Device.ManagementServer.ConnectionRequestURL")
 	device.LastInformAt = &now
 	device.LastInformEvents = tr069.EventCodes(inform.Event)
+	// T-0162: 收到 Inform 即视为在线。对于已 scan 出 lifecycle_state 的设备，
+	// normalizeDeviceForPersist 不会再从老 Status 反推新双字段；这里必须显式置 true，
+	// 否则设备一旦被 OfflineDetector 标记成 is_online=false，后续正常 Inform 也无法恢复在线展示。
+	device.IsOnline = true
 
 	udpAddr := findParamValue(inform.ParameterList, "Device.ManagementServer.UDPConnectionRequestAddress")
 	if udpAddr != "" {

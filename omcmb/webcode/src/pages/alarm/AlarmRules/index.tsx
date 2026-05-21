@@ -2,17 +2,19 @@ import { useCallback, useMemo, useState } from 'react';
 import { App, Button, Card, Dropdown, Space, Switch, Tag, Typography, message } from 'antd';
 import type { MenuProps } from 'antd';
 import {
+  CheckCircleOutlined,
   DeleteOutlined,
   EyeOutlined,
   MoreOutlined,
   PlusOutlined,
+  StopOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
-import type { DataTableColumn } from '@/components/DataTable';
+import type { BatchAction, DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
-import { useAlarmRules, useCreateAlarmRule, useDeleteAlarmRules, useUpdateAlarmRule, useToggleAlarmRule } from '@core/hooks/api/useAlarms';
+import { useAlarmRules, useCreateAlarmRule, useDeleteAlarmRules, useUpdateAlarmRule } from '@core/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 import type { AlarmRule, AlarmRuleCondition, AlarmRuleAction } from '@core/types/alarm';
 import AlarmRuleDrawer, { type AlarmRuleFormData } from './AlarmRuleDrawer';
@@ -27,17 +29,23 @@ const RULE_TYPE_CONFIG: Record<string, { label: string; color: string }> = {
   auto_clear: { label: 'alarm.ruleType.autoClear', color: 'orange' },
 };
 
-// 告警源配置
-const DEVICE_TYPE_CONFIG: Record<string, string> = {
-  'ENB': 'ENB',
-  'UPS': 'UPS',
-  'CPE': 'CPE',
-  'GNB': 'GNB',
-  'WCG': 'WCG',
-  'GSM': 'GSM',
-};
-
 type DrawerMode = 'add' | 'edit' | 'view';
+
+function getRuleFilterDimension(rule: AlarmRule, t: (key: string, values?: Record<string, unknown>) => string): string {
+  if (rule.conditions.some((condition) => condition.field === 'alarm_identifier')) {
+    return t('alarm.ruleFilterType.alarmIdentifier');
+  }
+  if (rule.conditions.some((condition) => condition.field === 'alarm_source')) {
+    return t('alarm.ruleFilterType.alarmSource');
+  }
+  if (rule.conditions.some((condition) => condition.field === 'device_group_id')) {
+    return t('alarm.ruleFilterType.deviceGroup');
+  }
+  if (rule.conditions.some((condition) => condition.field === 'device_id')) {
+    return t('alarm.ruleFilterType.device');
+  }
+  return rule.isDefault ? t('alarm.defaultRule') : '-';
+}
 
 export default function AlarmRules() {
   const t = useT();
@@ -46,6 +54,7 @@ export default function AlarmRules() {
   const [pageSize, setPageSize] = useState(20);
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>({});
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
 
   // 抽屉状态
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -66,23 +75,21 @@ export default function AlarmRules() {
   const { data, isLoading, refetch } = useAlarmRules(queryParams);
   const deleteRules = useDeleteAlarmRules();
   const updateRule = useUpdateAlarmRule();
-  const toggleRule = useToggleAlarmRule();
   const createRule = useCreateAlarmRule();
 
   const rules: AlarmRule[] = data?.items ?? [];
   const total = data?.total ?? 0;
+  const selectedRules = useMemo(
+    () => rules.filter((rule) => selectedRowKeys.includes(rule.id)),
+    [rules, selectedRowKeys]
+  );
 
   // 启用/禁用规则
   const handleToggle = useCallback(
     async (rule: AlarmRule, checked: boolean) => {
       setTogglingId(rule.id);
       try {
-        // Use dedicated toggle endpoint when enabling; use updateRule for disabling
-        if (checked) {
-          await toggleRule.mutateAsync(rule.id);
-        } else {
-          await updateRule.mutateAsync({ id: rule.id, data: { enabled: false } });
-        }
+        await updateRule.mutateAsync({ id: rule.id, data: { enabled: checked } });
         message.success(t(checked ? 'alarm.ruleEnabled' : 'alarm.ruleDisabled'));
         void refetch();
       } catch (error) {
@@ -92,7 +99,7 @@ export default function AlarmRules() {
         setTogglingId(null);
       }
     },
-    [toggleRule, updateRule, refetch, t]
+    [updateRule, refetch, t]
   );
 
   // 打开添加抽屉
@@ -201,22 +208,112 @@ export default function AlarmRules() {
     [deleteRules, modal, t, refetch]
   );
 
+  const handleBatchDelete = useCallback(
+    (keys: React.Key[]) => {
+      const targetRules = rules.filter((rule) => keys.includes(rule.id));
+      if (targetRules.length === 0) {
+        return;
+      }
+      if (targetRules.some((rule) => rule.isDefault)) {
+        modal.warning({
+          title: t('common.warning'),
+          content: t('alarm.cannotDeleteDefaultRule'),
+        });
+        return;
+      }
+      if (targetRules.some((rule) => rule.enabled)) {
+        modal.warning({
+          title: t('common.warning'),
+          content: t('alarm.cannotDeleteEnabledRule'),
+        });
+        return;
+      }
+
+      modal.confirm({
+        title: t('common.confirmDelete'),
+        content: t('alarm.batchDeleteRuleConfirm', { count: targetRules.length }),
+        okText: t('common.delete'),
+        okType: 'danger',
+        onOk: async () => {
+          await deleteRules.mutateAsync(targetRules.map((rule) => rule.id));
+          setSelectedRowKeys([]);
+          void refetch();
+        },
+      });
+    },
+    [deleteRules, modal, refetch, rules, t]
+  );
+
+  const handleBatchToggle = useCallback(
+    (targetEnabled: boolean) => {
+      const targetRules = rules.filter((rule) => selectedRowKeys.includes(rule.id) && rule.enabled !== targetEnabled);
+      if (targetRules.length === 0) {
+        return;
+      }
+
+      modal.confirm({
+        title: targetEnabled ? t('common.enable') : t('common.disable'),
+        content: t(targetEnabled ? 'alarm.batchEnableRuleConfirm' : 'alarm.batchDisableRuleConfirm', { count: targetRules.length }),
+        okText: targetEnabled ? t('common.enable') : t('common.disable'),
+        onOk: async () => {
+          await Promise.all(
+            targetRules.map((rule) => updateRule.mutateAsync({ id: rule.id, data: { enabled: targetEnabled } }))
+          );
+          message.success(
+            t(targetEnabled ? 'alarm.batchRuleEnabledSuccess' : 'alarm.batchRuleDisabledSuccess', { count: targetRules.length })
+          );
+          setSelectedRowKeys([]);
+          void refetch();
+        },
+      });
+    },
+    [modal, refetch, rules, selectedRowKeys, t, updateRule]
+  );
+
+  const batchActions = useMemo<BatchAction[]>(
+    () => [
+      {
+        key: 'enable',
+        label: t('common.enable'),
+        icon: <CheckCircleOutlined />,
+        disabled: selectedRules.length === 0 || selectedRules.every((rule) => rule.enabled),
+        onClick: () => handleBatchToggle(true),
+      },
+      {
+        key: 'disable',
+        label: t('common.disable'),
+        icon: <StopOutlined />,
+        disabled: selectedRules.length === 0 || selectedRules.every((rule) => !rule.enabled),
+        onClick: () => handleBatchToggle(false),
+      },
+      {
+        key: 'delete',
+        label: t('common.batchDelete'),
+        icon: <DeleteOutlined />,
+        danger: true,
+        onClick: handleBatchDelete,
+      },
+    ],
+    [handleBatchDelete, handleBatchToggle, selectedRules, t]
+  );
+
   const columns = useMemo(
     (): DataTableColumn<AlarmRule>[] => [
       {
         key: 'actions',
         title: t('table.operation'),
         dataIndex: 'id',
-        width: 100,
+        width: 140,
         fixed: 'right',
         render: (_val, record) => {
           const moreItems: MenuProps['items'] = [
-            { key: 'view', label: t('common.view'), icon: <EyeOutlined />, onClick: () => handleView(record) },
-            { type: 'divider' as const },
             { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, disabled: record.enabled || record.isDefault, onClick: () => handleDelete(record) },
           ];
           return (
             <Space size={4}>
+              <Button type="link" size="small" onClick={() => handleView(record)}>
+                {t('common.view')}
+              </Button>
               <Button type="link" size="small" disabled={record.enabled} onClick={() => handleEdit(record)}>
                 {t('common.edit')}
               </Button>
@@ -255,16 +352,12 @@ export default function AlarmRules() {
         ),
       },
       {
-        key: 'deviceType',
-        title: t('alarm.deviceType'),
-        dataIndex: 'deviceType',
+        key: 'filterType',
+        title: t('alarm.ruleFilterType'),
         width: 120,
-        render: (val: unknown, record) => {
-          if (record.isDefault) {
-            return <Text type="secondary">ALL</Text>;
-          }
-          const s = String(val ?? '');
-          return DEVICE_TYPE_CONFIG[s] || s || '-';
+        render: (_val: unknown, record) => {
+          const dimension = getRuleFilterDimension(record, t);
+          return <Text type={dimension === '-' ? 'secondary' : undefined}>{dimension}</Text>;
         },
       },
       {
@@ -303,11 +396,13 @@ export default function AlarmRules() {
   const handleSearch = useCallback((values: Record<string, unknown>) => {
     setFilterParams(values);
     setCurrentPage(1);
+    setSelectedRowKeys([]);
   }, []);
 
   const handleReset = useCallback(() => {
     setFilterParams({});
     setCurrentPage(1);
+    setSelectedRowKeys([]);
   }, []);
 
   return (
@@ -340,15 +435,21 @@ export default function AlarmRules() {
           dataSource={rules}
           loading={isLoading}
           rowKey="id"
+          selectable
+          selectedRowKeys={selectedRowKeys}
+          onSelectionChange={(keys) => setSelectedRowKeys(keys)}
           total={total}
           pageSize={pageSize}
           currentPage={currentPage}
+          batchActions={batchActions}
           onPageChange={(page, size) => {
             setCurrentPage(page);
             setPageSize(size);
+            setSelectedRowKeys([]);
           }}
           onRefresh={() => void refetch()}
           defaultDensity="default"
+          scroll={{ x: 'max-content', y: 'calc(100vh - 450px)' }}
         />
       </Card>
 

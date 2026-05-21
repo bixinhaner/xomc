@@ -18,9 +18,9 @@ interface BackendDevice {
   // 和 is_online 字段，不要再用 status。
   status: string;
   // T-0162: 业务生命周期（与后端 model.DeviceLifecycle 1:1）
-  lifecycle_state: string;
+  lifecycle_state?: string;
   // T-0162: 实时在线
-  is_online: boolean;
+  is_online?: boolean;
   firmware_version: string;
   ip_address: string;
   connection_request_url: string;
@@ -151,10 +151,25 @@ interface BackendListResponse<T> {
 // 不对称引起 Q1 bug 的根因）。新 mapBackendDevice 直接读 bd.is_online
 // 派生 connStatus，与后端语义 1:1。
 
+function deriveLegacyLifecycle(status: string | undefined): Device['lifecycleState'] {
+  switch (status) {
+    case 'discovered':
+    case 'registered':
+    case 'provisioning':
+    case 'maintenance':
+    case 'decommissioned':
+      return status;
+    case 'active':
+    case 'offline':
+    default:
+      return 'commissioned';
+  }
+}
+
 function mapBackendDevice(bd: BackendDevice): Device {
-  // T-0162: 直读新字段；connStatus 由 isOnline 派生供老 UI 代码兼容（DEPRECATED）
-  const lifecycleState = (bd.lifecycle_state || 'registered') as Device['lifecycleState'];
-  const isOnline = Boolean(bd.is_online);
+  // 兼容旧后端：若尚未升级到 T-0162 双字段，回退到 status 口径。
+  const lifecycleState = (bd.lifecycle_state || deriveLegacyLifecycle(bd.status)) as Device['lifecycleState'];
+  const isOnline = typeof bd.is_online === 'boolean' ? bd.is_online : bd.status === 'active';
 
   return {
     id: bd.id,

@@ -108,45 +108,52 @@ func (e *FilterEngine) ProcessAlarm(ctx context.Context, alarm *model.Alarm, dev
 }
 
 // match 检查告警是否匹配过滤规则。
+// 规则中凡是填了值的维度都必须同时命中；filter_type 仅保留给存量契约和列表展示。
 func (e *FilterEngine) match(ctx context.Context, alarm *model.Alarm, deviceID uuid.UUID, rule *AlarmFilterRule) bool {
-	switch rule.FilterType {
-	case FilterTypeAlarmSource:
-		if len(rule.AlarmSources) == 0 {
-			return true
+	if len(rule.AlarmSources) > 0 {
+		if alarm.AlarmSource == nil {
+			return false
 		}
+
+		matched := false
 		for _, src := range rule.AlarmSources {
-			if alarm.AlarmSource != nil && src == *alarm.AlarmSource {
-				return true
+			if src == *alarm.AlarmSource {
+				matched = true
+				break
 			}
 		}
-		return false
-
-	case FilterTypeAlarmIdentifier:
-		if len(rule.AlarmIdentifiers) == 0 {
-			return true
+		if !matched {
+			return false
 		}
+	}
+
+	if len(rule.AlarmIdentifiers) > 0 {
+		matched := false
 		for _, code := range rule.AlarmIdentifiers {
 			if code == alarm.AlarmIdentifier {
-				return true
+				matched = true
+				break
 			}
 		}
-		return false
-
-	case FilterTypeDevice:
-		if len(rule.DeviceIDs) == 0 {
-			return true
+		if !matched {
+			return false
 		}
+	}
+
+	if len(rule.DeviceIDs) > 0 {
+		matched := false
 		for _, did := range rule.DeviceIDs {
 			if did == deviceID {
-				return true
+				matched = true
+				break
 			}
 		}
-		return false
-
-	case FilterTypeDeviceGroup:
-		if len(rule.DeviceGroupIDs) == 0 {
-			return true
+		if !matched {
+			return false
 		}
+	}
+
+	if len(rule.DeviceGroupIDs) > 0 {
 		if e.deviceGroupResolver == nil {
 			e.logger.Warn("device group rule skipped: resolver not configured",
 				zap.String("rule_name", rule.Name),
@@ -165,16 +172,20 @@ func (e *FilterEngine) match(ctx context.Context, alarm *model.Alarm, deviceID u
 		if groupID == nil {
 			return false
 		}
+
+		matched := false
 		for _, gid := range rule.DeviceGroupIDs {
 			if gid == *groupID {
-				return true
+				matched = true
+				break
 			}
 		}
-		return false
-
-	default:
-		return true
+		if !matched {
+			return false
+		}
 	}
+
+	return true
 }
 
 // executeAction 执行过滤动作。

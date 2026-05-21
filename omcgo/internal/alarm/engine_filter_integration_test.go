@@ -138,6 +138,43 @@ func TestFilterEngine_ProcessAlarm_LiveInReceiver(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, int32(1), atomic.LoadInt32(&store.saveActiveCount))
 	})
+
+	t.Run("auto_ack_rule_still_persists_active_alarm", func(t *testing.T) {
+		store := newMockAlarmStore()
+
+		repo := &mockFilterRuleRepo{rules: []AlarmFilterRule{
+			{
+				FilterType:       FilterTypeAlarmIdentifier,
+				AlarmIdentifiers: []string{"10001"},
+				DeviceIDs:        []uuid.UUID{uuid.MustParse("11111111-1111-1111-1111-111111111111")},
+				Action:           FilterActionAutoAcknowledge,
+				Name:             "auto-ack-device-and-alarm",
+			},
+		}}
+		filterEngine := NewFilterEngine(repo, store, nil, nil, nil, zap.NewNop())
+
+		engine := NewAlarmEngine(store, nil, nil, nil, zap.NewNop())
+		engine.SetFilterEngine(filterEngine)
+
+		alarm := &model.Alarm{
+			ID:              uuid.New(),
+			DeviceID:        uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+			DeviceSN:        "SN-AUTO-ACK",
+			AlarmIdentifier: "10001",
+			Severity:        model.AlarmMajor,
+			RaisedAt:        time.Now(),
+			Carrier:         model.CarrierCMCC,
+		}
+
+		err := engine.Process(context.Background(), alarm)
+		assert.NoError(t, err)
+
+		stored, getErr := store.GetActiveByID(context.Background(), alarm.ID)
+		assert.NoError(t, getErr)
+		assert.Equal(t, model.AlarmAcknowledged, stored.Status)
+		assert.NotNil(t, stored.AcknowledgedAt)
+		assert.NotNil(t, stored.AcknowledgedBy)
+	})
 }
 
 // countingStore 仅记录 SaveActive 调用次数，其它方法回退到 mockStoreForEngine 行为。

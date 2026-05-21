@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { DeviceFilter, NameFilterItem } from '../../types/device';
 import type { PageRequest } from '../../types/pagination';
 import { deviceService } from '../../mock/services/deviceService';
@@ -53,6 +53,18 @@ export function useDeviceById(id: string) {
     queryKey: ['devices', 'detail', id],
     queryFn: () => api.getById(id),
     enabled: Boolean(id),
+  });
+}
+
+export function useDevicesByIds(ids: string[]) {
+  const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+
+  return useQueries({
+    queries: uniqueIds.map((id) => ({
+      queryKey: ['devices', 'detail', id],
+      queryFn: () => api.getById(id),
+      enabled: Boolean(id),
+    })),
   });
 }
 

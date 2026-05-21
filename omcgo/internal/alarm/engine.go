@@ -57,6 +57,17 @@ func severityLabel(s model.AlarmSeverity) string {
 	return strconv.Itoa(int(s))
 }
 
+func applyIncomingAlarmState(target *model.Alarm, incoming *model.Alarm) {
+	target.RaisedAt = incoming.RaisedAt
+	target.Severity = incoming.Severity
+	target.Description = incoming.Description
+	if incoming.Status != "" {
+		target.Status = incoming.Status
+		target.AcknowledgedAt = incoming.AcknowledgedAt
+		target.AcknowledgedBy = incoming.AcknowledgedBy
+	}
+}
+
 // Process handles an incoming alarm: maps severity, deduplicates, and persists.
 func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 	// 0. Apply user-defined filter rules (W2 T-0011 接生产路径)
@@ -108,9 +119,7 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 				if parseErr == nil {
 					existing, getErr := e.store.GetActiveByID(ctx, existingID)
 					if getErr == nil {
-						existing.RaisedAt = alarm.RaisedAt
-						existing.Severity = alarm.Severity
-						existing.Description = alarm.Description
+						applyIncomingAlarmState(existing, alarm)
 					if updateErr := e.store.UpdateActive(ctx, existing); updateErr != nil {
 						return fmt.Errorf("update existing alarm: %w", updateErr)
 					}
@@ -127,9 +136,7 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 	// 3. Also check DB in case Redis missed it
 	existing, err := e.store.GetActiveByDeviceAndIdentifier(ctx, alarm.DeviceSN, alarm.AlarmIdentifier)
 	if err == nil && existing != nil {
-		existing.RaisedAt = alarm.RaisedAt
-		existing.Severity = alarm.Severity
-		existing.Description = alarm.Description
+		applyIncomingAlarmState(existing, alarm)
 		if updateErr := e.store.UpdateActive(ctx, existing); updateErr != nil {
 			return fmt.Errorf("update existing alarm: %w", updateErr)
 		}
@@ -144,7 +151,9 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 	// 4. New alarm
 	now := time.Now()
 	alarm.ID = uuid.New()
-	alarm.Status = model.AlarmActive
+	if alarm.Status == "" {
+		alarm.Status = model.AlarmActive
+	}
 	alarm.CreatedAt = now
 	alarm.UpdatedAt = now
 
