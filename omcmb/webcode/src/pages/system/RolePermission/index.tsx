@@ -184,6 +184,16 @@ function collectExpandableMenuIds(menus: Menu[]): string[] {
   return ids;
 }
 
+/** 「可视树叶子」判定：节点过滤完 button + isMenuVisible 后没有任何可视子节点。
+ * 用于回显时把目录/菜单 ID 拆成「叶子（要进 checkedPermissionKeys）」与「目录
+ * （让 antd Tree 在 checkStrictly=false 模式下自动派生）」两份——否则把父目录
+ * 喂给 antd 会触发自动级联：父目录 checked → 所有子节点（含用户刚取消的）也
+ * 被展示为 checked，从而出现"取消子菜单保存重开还在勾选"的回归。 */
+function isVisibleLeaf(m: Menu): boolean {
+  const visibleChildren = (m.children ?? []).filter(isMenuVisible).filter(isMenuNode);
+  return visibleChildren.length === 0;
+}
+
 /** 取「祖先菜单仍被勾选」的 button ID 集合：保存时把这些 button 写回 role_menus，
  * 避免角色编辑面板把所有按钮级 RBAC 一次性清空。祖先（任意层级）的判定按 menus
  * 树的 parentId 链向上回溯；任一祖先不在 checkedMenuIds 即丢弃。 */
@@ -461,13 +471,36 @@ export default function RoleManagement() {
     setSelectedNetworkTypes(role.networkTypes || []);
 
     // 1) 拉角色已绑定 menu_ids（GET /admin/roles/:id/menus）
-    //    把返回的 ID 拆成「菜单/目录」与「按钮」两份：
-    //      - 菜单/目录 ID → setCheckedPermissionKeys 驱动 antd Tree
-    //      - 按钮 ID    → setOriginalButtonIds 保留，保存时按祖先勾选状态合并回 PUT
+    //    把返回的 ID 拆三份：
+    //      - 可视树叶子 ID → setCheckedPermissionKeys 驱动 antd Tree（只传叶子！）
+    //      - 目录 ID       → 让 antd Tree 在 checkStrictly=false 模式下自动派生 indeterminate
+    //      - 按钮 ID       → setOriginalButtonIds 保留，保存时按祖先勾选状态合并回 PUT
+    //
+    //    为什么不能把目录 ID 直接塞 checkedKeys：linkage 模式下 antd Tree 会自动把
+    //    目录的「所有可视子节点」也展示为 checked——包括用户明明刚刚取消的子菜单。
+    //    后端 expandMenuAncestors 把目录从其它兄弟子节点反推回 role_menus 是合规的，
+    //    但前端把目录回喂给 antd 就会触发这条级联，正是"取消设备规则保存重开仍勾
+    //    选"bug 的真正成因。
     getRoleMenuIdsMut.mutate(role.id, {
       onSuccess: (allIds) => {
         const menuSet = new Set(allMenuIds);
-        setCheckedPermissionKeys(allIds.filter((id) => menuSet.has(id)));
+        const flat: Menu[] = [];
+        const walk = (list: Menu[]) => {
+          for (const m of list) {
+            flat.push(m);
+            if (m.children?.length) walk(m.children);
+          }
+        };
+        walk(menuTree);
+        const byId = new Map<string, Menu>();
+        for (const m of flat) byId.set(m.id, m);
+        const leafIds: string[] = [];
+        for (const id of allIds) {
+          if (!menuSet.has(id)) continue;
+          const m = byId.get(id);
+          if (m && isVisibleLeaf(m)) leafIds.push(id);
+        }
+        setCheckedPermissionKeys(leafIds);
         setOriginalButtonIds(allIds.filter((id) => !menuSet.has(id)));
       },
     });
@@ -482,7 +515,7 @@ export default function RoleManagement() {
     getRoleApiPermissions.mutate(role.id, {
       onSuccess: (ids) => setSelectedApiEndpointIds(ids),
     });
-  }, [form, allMenuIds, getRoleMenuIdsMut, getRoleDeviceGroupsMut, getRoleApiPermissions]);
+  }, [form, allMenuIds, menuTree, getRoleMenuIdsMut, getRoleDeviceGroupsMut, getRoleApiPermissions]);
 
   // 已有的角色名称列表（用于重复检查）
   const existingRoleNames = useMemo(
