@@ -89,6 +89,10 @@ export function useUpdateGroup() {
       api.updateGroup(id, data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['devices', 'groups'] });
+      // 分组「设备匹配规则」改动后后端会异步重算归属，必须同时失效设备列表
+      // 缓存，否则用户在 DeviceGrouping 页面里看到的还是旧的归属结果。
+      // （仅改名也 invalidate 一次代价可忽略——分组更新本身就是低频操作。）
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'list'] });
     },
   });
 }
