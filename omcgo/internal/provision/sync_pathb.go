@@ -120,7 +120,7 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 //
 // 返回 nil 即视为成功；底层 BatchUpsert 错误向上传。
 func (s *SyncService) HandleSyncResultPathB(ctx context.Context, dev *model.Device,
-	paramValues []tr069.ParameterValueStruct) (bool, error) {
+	paramValues []tr069.ParameterValueStruct, triggerCommandKey string) (bool, error) {
 	if len(paramValues) == 0 {
 		return false, nil
 	}
@@ -204,7 +204,13 @@ func (s *SyncService) HandleSyncResultPathB(ctx context.Context, dev *model.Devi
 	//   - CPE 应答 Success 但 paramValues 空 → 函数顶部早返回，不删
 	//   - 仅对响应中"含实例号"的多实例对象 path 推导 prefix，叶子 path 不参与（reconcile 语义不适用）
 	//   - 完全没返回任何实例 → 推导不出 prefix → DB 残留（保守，避免空响应误删）
-	if len(prevPaths) > 0 {
+	//
+	// 2026-05-21 防御补丁：reconcile 仅在显式"全量同步"上下文执行 — 即入队方
+	// command_key 以 "sync-gpv-" 开头(SyncService.StartSync/enqueueGPVPrefixes 走的
+	// manual/periodic/online-trigger Path B 路径)。其他 GPV(如 auto-gpv-after-spv-*、
+	// auto-gpv-after-addobject-*) 只拉局部 path，CPE 响应集合不代表 prefix 全集合，
+	// 套用 reconcile 会把同 prefix 下的兄弟实例误判为"missing"全删。
+	if len(prevPaths) > 0 && isFullSyncTrigger(triggerCommandKey) {
 		s.reconcileDeletedPaths(ctx, dev, prevPaths, params)
 	}
 
@@ -441,6 +447,15 @@ func nearestObjectPrefix(path string) string {
 		}
 	}
 	return ""
+}
+
+// isFullSyncTrigger 判定本次 GPV 响应是否来自"全量 Path B 同步"上下文。
+// 仅 SyncService.StartSync / enqueueGPVPrefixes 入队的 task 用 "sync-gpv-" 前缀
+// (manual / periodic / online-trigger 三路统一走这两个入口);其他 follow-up GPV
+// (auto-gpv-after-spv-* / auto-gpv-after-addobject-* / 北向调试 GPV) 不入白名单,
+// 避免 reconcile 把同 prefix 下未在响应里的兄弟实例误删。
+func isFullSyncTrigger(commandKey string) bool {
+	return strings.HasPrefix(commandKey, "sync-gpv-")
 }
 
 func isPositiveInteger(s string) bool {

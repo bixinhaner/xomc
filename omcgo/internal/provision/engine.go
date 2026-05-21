@@ -864,6 +864,7 @@ func (e *ProvisioningEngine) handleDataModelFileReceived(ctx context.Context, ev
 type gpvResponsePayload struct {
 	DeviceSN        string                       `json:"device_sn"`
 	Method          string                       `json:"method"`
+	CommandKey      string                       `json:"command_key,omitempty"`
 	ParameterValues []tr069.ParameterValueStruct `json:"parameter_values"`
 }
 
@@ -901,7 +902,7 @@ func (e *ProvisioningEngine) handleGPVResponse(ctx context.Context, evt event.Ev
 		return nil
 	}
 
-	if used, err := e.syncService.HandleSyncResultPathB(ctx, dev, payload.ParameterValues); err != nil {
+	if used, err := e.syncService.HandleSyncResultPathB(ctx, dev, payload.ParameterValues, payload.CommandKey); err != nil {
 		e.logger.Error("path-b save parameter values", zap.Error(err), zap.String("device_sn", payload.DeviceSN))
 		return nil
 	} else if used {

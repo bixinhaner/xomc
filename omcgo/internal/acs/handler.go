@@ -689,8 +689,10 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 
 	// 检查是否为基于任务的 RPC（新任务队列系统）
+	var taskItem *task.Task
 	if cwmpID != "" {
-		taskItem, err := h.taskService.GetTaskByCWMPID(r.Context(), cwmpID)
+		var err error
+		taskItem, err = h.taskService.GetTaskByCWMPID(r.Context(), cwmpID)
 		if err != nil {
 			log.Warn("get task by cwmp_id", zap.Error(err), zap.String("cwmp_id", cwmpID))
 		} else if taskItem != nil {
@@ -728,7 +730,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	}
 
 	// 发布 RPC 响应事件到开通引擎（包含原始 body 用于 GPN/GPV 处理）。
-	h.publishRPCResponseEvent(r.Context(), deviceSN, method, body, session.LastCommandParams, log)
+	h.publishRPCResponseEvent(r.Context(), deviceSN, method, body, session.LastCommandParams, taskItem, log)
 
 	// 在下发下一条命令前检查单会话 RPC 上限。
 	if h.sessionRPCLimitReached(session) {
@@ -1303,7 +1305,7 @@ func (h *Handler) publishInformEvents(ctx context.Context, inform *tr069.InformM
 	}
 }
 
-func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, method soap.RPCMethod, body []byte, lastCmdParams json.RawMessage, log *zap.Logger) {
+func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, method soap.RPCMethod, body []byte, lastCmdParams json.RawMessage, taskItem *task.Task, log *zap.Logger) {
 	var subject string
 	switch method {
 	case soap.MethodGetParameterValuesResp:
@@ -1335,6 +1337,13 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 	payload := map[string]interface{}{
 		"device_sn": deviceSN,
 		"method":    string(method),
+	}
+
+	// command_key 让下游订阅者(如 Path B reconcile)按入队方约定区分触发上下文,
+	// 避免局部 follow-up GPV(如 auto-gpv-after-addobject-*)被当作"全量同步"
+	// 触发对象级 reconcile 误删兄弟实例。
+	if taskItem != nil && taskItem.CommandKey != "" {
+		payload["command_key"] = taskItem.CommandKey
 	}
 
 	// 从 lastCmdParams 提取原始命令路径（用于 GPN/GPV 关联）+ object_name（AddObject/DeleteObject）。
