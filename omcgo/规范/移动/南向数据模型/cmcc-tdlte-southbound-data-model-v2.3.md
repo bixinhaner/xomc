@@ -350,7 +350,28 @@
 - 提交时只对**勾选 + 已填值**的路径调用 `SetParameterValues`；
 - 若命令含 `{i}`，必须先指定具体实例号（不允许留空），实例号按 §R-4.1.1 校验。
 
-**R-4.2.1 类型约束提示与值校验**（v2.3 新增）：
+**R-4.2.1 类型约束提示与值校验**（**P2 可选**，2026-05-21 实施 deferred）：
+
+> **状态变更（2026-05-21）**：本条款于 v2.3 初稿提出为"强制要求"，实施工作（5 phases:
+> migration `standard_params` 加 `constraint_meta JSONB` + `constraint_hint TEXT`、Python parser
+> 升级、seed 数据回填、admin_repository SQL 透传、前端 onBlur 校验）完成 3/5 阶段后被
+> 撤销（commits `0bd63fc9` / `e633789e` / `aac62de1`，由 `git reset --hard origin/main` 整体回滚）。
+>
+> 根因复盘：(a) DB schema 改动 + 数据回填 migration 在临近发布窗口风险偏高；
+> (b) 后端 ParamModel MappingValidator 已在执行链路 400 兜底，覆盖 spec "三层校验"
+> 中的第 3 层（后端硬校验）；(c) 前端缺失 onBlur 校验时 UX 稍差但功能正确，
+> 用红框 + 后端错误文案展示也能覆盖 80% 价值。
+>
+> 决议：**降级为 P2 可选**，后续如再立项需明确：
+>   - 不在临近发布窗口启动多阶段 schema migration
+>   - 或选择"轻量替代"方案（仅前端展示后端 400 错误，不动 schema）
+>
+> 以下规范文本保留作未来实施参考；**当前 OMC 实现不需要满足本条**。
+
+<details>
+<summary>原 v2.3 规范文本（保留供未来 P2 重启时参考）</summary>
+
+**原 R-4.2.1 类型约束提示与值校验**（v2.3 新增）：
 
 - 每条 path 的类型 / 取值范围来源于 `standard_params` 的 `value_type` + `constraint` 字段（导入期由本文档"类型"列解析；语法示例：`string(64)`、`unsignedInt[0:65535]`、`int[-1:65535]`、`unsignedInt[1:5]`、`boolean`、`dateTime`）；
 - **输入框旁边显示文字提示**（v2.3 强制要求），文案规则：
@@ -375,6 +396,8 @@
   - 字段已勾选但留空 → 提交前提示"勾选了但未填值"，不允许执行；
   - 字段未勾选 → 即使填了值也忽略（明确不在 SPV 路径集内）；
 - **批量填值**：MOD 支持"全选 + 批量填同一值"（输入框上方 `[批量填入]` 按钮），便于把多个 RW 路径设为同一基线值（如所有 `Enable` 字段批量改 `true`），但批量填入后仍按 R-4.2.1 各自校验类型。
+
+</details>
 
 #### R-4.3 ADD
 
