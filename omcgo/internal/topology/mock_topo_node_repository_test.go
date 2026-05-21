@@ -101,18 +101,18 @@ func (mr *MockTopoNodeRepositoryMockRecorder) List(ctx, filter any) *gomock.Call
 }
 
 // ListAll mocks base method.
-func (m *MockTopoNodeRepository) ListAll(ctx context.Context, domainID *uuid.UUID, nodeType *string, status *string) ([]TopoNode, error) {
+func (m *MockTopoNodeRepository) ListAll(ctx context.Context, domainID *uuid.UUID, nodeType *string, status *string, limit int) ([]TopoNode, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListAll", ctx, domainID, nodeType, status)
+	ret := m.ctrl.Call(m, "ListAll", ctx, domainID, nodeType, status, limit)
 	ret0, _ := ret[0].([]TopoNode)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ListAll indicates an expected call of ListAll.
-func (mr *MockTopoNodeRepositoryMockRecorder) ListAll(ctx, domainID, nodeType, status any) *gomock.Call {
+func (mr *MockTopoNodeRepositoryMockRecorder) ListAll(ctx, domainID, nodeType, status, limit any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAll", reflect.TypeOf((*MockTopoNodeRepository)(nil).ListAll), ctx, domainID, nodeType, status)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListAll", reflect.TypeOf((*MockTopoNodeRepository)(nil).ListAll), ctx, domainID, nodeType, status, limit)
 }
 
 // Update mocks base method.

@@ -22,8 +22,9 @@ type TopoNodeRepository interface {
 	Update(ctx context.Context, node *TopoNode) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	List(ctx context.Context, filter TopoNodeFilter) (*model.ListResponse[TopoNode], error)
-	// ListAll returns all nodes with optional filters (domain, nodeType, status) for topology graph rendering.
-	ListAll(ctx context.Context, domainID *uuid.UUID, nodeType *string, status *string) ([]TopoNode, error)
+	// ListAll returns nodes with optional filters (domain, nodeType, status) and limit for topology graph rendering.
+	// limit <= 0 means no limit (return all matching nodes).
+	ListAll(ctx context.Context, domainID *uuid.UUID, nodeType *string, status *string, limit int) ([]TopoNode, error)
 }
 
 // TopoEdgeRepository provides persistence for topology edges.
@@ -34,4 +35,6 @@ type TopoEdgeRepository interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 	List(ctx context.Context, filter TopoEdgeFilter) (*model.ListResponse[TopoEdge], error)
 	ListAll(ctx context.Context) ([]TopoEdge, error)
+	// ListByNodeIDs returns edges connected to the given nodes (source or target).
+	ListByNodeIDs(ctx context.Context, nodeIDs []uuid.UUID) ([]TopoEdge, error)
 }

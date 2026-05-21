@@ -285,7 +285,7 @@ func (m *mockTopoNodeRepo) List(_ context.Context, filter TopoNodeFilter) (*mode
 	return model.NewListResponse(items, int64(len(items)), filter.Page, filter.PageSize), nil
 }
 
-func (m *mockTopoNodeRepo) ListAll(_ context.Context, _ *uuid.UUID, _ *string, _ *string) ([]TopoNode, error) {
+func (m *mockTopoNodeRepo) ListAll(_ context.Context, _ *uuid.UUID, _ *string, _ *string, _ int) ([]TopoNode, error) {
 	items := make([]TopoNode, 0, len(m.nodes))
 	for _, n := range m.nodes {
 		items = append(items, n)
@@ -350,6 +350,26 @@ func (m *mockTopoEdgeRepo) ListAll(_ context.Context) ([]TopoEdge, error) {
 	items := make([]TopoEdge, 0, len(m.edges))
 	for _, e := range m.edges {
 		items = append(items, e)
+	}
+	return items, nil
+}
+
+func (m *mockTopoEdgeRepo) ListByNodeIDs(_ context.Context, nodeIDs []uuid.UUID) ([]TopoEdge, error) {
+	if len(nodeIDs) == 0 {
+		return []TopoEdge{}, nil
+	}
+	nodeIDSet := make(map[uuid.UUID]bool)
+	for _, id := range nodeIDs {
+		nodeIDSet[id] = true
+	}
+	var items []TopoEdge
+	for _, e := range m.edges {
+		if nodeIDSet[e.SourceID] || nodeIDSet[e.TargetID] {
+			items = append(items, e)
+		}
+	}
+	if items == nil {
+		items = []TopoEdge{}
 	}
 	return items, nil
 }

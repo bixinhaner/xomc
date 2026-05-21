@@ -128,3 +128,18 @@ func (mr *MockTopoEdgeRepositoryMockRecorder) Update(ctx, edge any) *gomock.Call
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Update", reflect.TypeOf((*MockTopoEdgeRepository)(nil).Update), ctx, edge)
 }
+
+// ListByNodeIDs mocks base method.
+func (m *MockTopoEdgeRepository) ListByNodeIDs(ctx context.Context, nodeIDs []uuid.UUID) ([]TopoEdge, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListByNodeIDs", ctx, nodeIDs)
+	ret0, _ := ret[0].([]TopoEdge)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ListByNodeIDs indicates an expected call of ListByNodeIDs.
+func (mr *MockTopoEdgeRepositoryMockRecorder) ListByNodeIDs(ctx, nodeIDs any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListByNodeIDs", reflect.TypeOf((*MockTopoEdgeRepository)(nil).ListByNodeIDs), ctx, nodeIDs)
+}

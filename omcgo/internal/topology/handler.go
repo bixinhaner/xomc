@@ -2,8 +2,10 @@ package topology
 
 import (
 	"fmt"
+	"math/rand"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -544,8 +546,11 @@ func (h *Handler) ListTopoEdges(c *gin.Context) {
 // Supports ?domain_id to filter by domain.
 // Supports ?node_type to filter by node type (eNB, gNB, CPE, etc.).
 // Supports ?status to filter by node status (online, offline, alarm, maintenance).
-// Supports ?limit=N to cap node count (default: 1000, max: 5000).
+// Supports ?limit=N to cap node count (default: 200, max: 500).
+// Recommended limits: 50 (detailed), 100 (standard), 200 (default), 500 (large).
 func (h *Handler) GetTopoGraph(c *gin.Context) {
+	startTotal := time.Now()
+
 	var domainID *uuid.UUID
 	if did := c.Query("domain_id"); did != "" {
 		id, err := uuid.Parse(did)
@@ -577,49 +582,103 @@ func (h *Handler) GetTopoGraph(c *gin.Context) {
 		status = &st
 	}
 
-	limit := 1000
+	// Tiered limit options: 50, 100, 200 (default), 500 (max)
+	limit := 200
 	if limitStr := c.Query("limit"); limitStr != "" {
 		if parsed, err := strconv.Atoi(limitStr); err == nil && parsed > 0 {
 			limit = parsed
 		}
 	}
-	if limit > 5000 {
-		limit = 5000
+	// Cap at 500 for performance (force layout is O(n²))
+	if limit > 500 {
+		limit = 500
 	}
 
-	nodes, err := h.nodeRepo.ListAll(c.Request.Context(), domainID, nodeType, status)
+	// Query nodes
+	startDB := time.Now()
+	nodes, err := h.nodeRepo.ListAll(c.Request.Context(), domainID, nodeType, status, limit)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
+	dbDuration := time.Since(startDB)
 
-	// Apply limit if specified
-	if len(nodes) > limit {
-		nodes = nodes[:limit]
+	// Skip detailed log for healthy queries (reduce logging overhead)
+	if dbDuration > 500*time.Millisecond {
+		h.logger.Info("topo_graph_db_slow",
+			zap.Int("node_count", len(nodes)),
+			zap.Duration("db_query_total", dbDuration),
+		)
 	}
 
-	edges, err := h.edgeRepo.ListAll(c.Request.Context())
+	// Query edges - pre-allocate slice with capacity for better performance
+	startEdges := time.Now()
+	nodeIDs := make([]uuid.UUID, 0, len(nodes))
+	for _, n := range nodes {
+		nodeIDs = append(nodeIDs, n.ID)
+	}
+	edges, err := h.edgeRepo.ListByNodeIDs(c.Request.Context(), nodeIDs)
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
 	}
+	edgesDuration := time.Since(startEdges)
 
 	// Apply layout algorithm if requested
+	var layoutDuration time.Duration
 	layoutType := c.Query("layout_type")
 	if layoutType != "" {
-		cfg := DefaultLayoutConfig()
-		cfg.Type = layoutType
-		algorithm := NewLayoutAlgorithm(cfg, h.logger)
+		var cfg LayoutConfig
+		// For large datasets, skip layout entirely for performance
+		nodeCount := len(nodes)
+		if nodeCount > 300 {
+			// Skip layout for very large datasets - use coordinates from DB
+			h.logger.Debug("skipping layout for large dataset",
+				zap.Int("node_count", nodeCount),
+				zap.Duration("db_query", dbDuration),
+				zap.Duration("edges_query", edgesDuration))
+		} else {
+			startLayout := time.Now()
+			switch {
+			case nodeCount > 200:
+				cfg = FastLayoutConfig()
+				cfg.Type = layoutType
+			default:
+				cfg = DefaultLayoutConfig()
+				cfg.Type = layoutType
+			}
+			algorithm := NewLayoutAlgorithm(cfg, h.logger)
 
-		nodes, err = algorithm.Apply(c.Request.Context(), nodes, edges)
-		if err != nil {
-			h.logger.Warn("failed to apply layout", zap.String("type", layoutType), zap.Error(err))
-			// Continue without layout
+			nodes, err = algorithm.Apply(c.Request.Context(), nodes, edges)
+			if err != nil {
+				h.logger.Warn("failed to apply layout", zap.String("type", layoutType), zap.Error(err))
+			}
+			layoutDuration = time.Since(startLayout)
 		}
 	}
 
 	// Calculate statistics
+	startStats := time.Now()
 	statistics := CalculateStatistics(nodes, edges)
+	statsDuration := time.Since(startStats)
+
+	totalDuration := time.Since(startTotal)
+
+	// Conditional logging: log detailed metrics only for slow requests (>500ms) or 10% sampling
+	// This reduces logging overhead while maintaining visibility into performance issues
+	shouldLogDetailed := totalDuration > 500*time.Millisecond || rand.Float64() < 0.1
+	if shouldLogDetailed {
+		h.logger.Debug("topo_graph_performance",
+			zap.Int("node_count", len(nodes)),
+			zap.Int("edge_count", len(edges)),
+			zap.Duration("db_query", dbDuration),
+			zap.Duration("edges_query", edgesDuration),
+			zap.Duration("layout", layoutDuration),
+			zap.Duration("statistics", statsDuration),
+			zap.Duration("total", totalDuration),
+			zap.String("layout_type", layoutType),
+		)
+	}
 
 	response.OK(c, TopoGraph{
 		Nodes:      nodes,
@@ -636,7 +695,7 @@ func (h *Handler) GetGeoData(c *gin.Context) {
 		return
 	}
 
-	nodes, err := h.nodeRepo.ListAll(c.Request.Context(), nil, nil, nil)
+	nodes, err := h.nodeRepo.ListAll(c.Request.Context(), nil, nil, nil, 0) // 0 = no limit for geo data
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
@@ -1024,7 +1083,7 @@ func (h *Handler) GetTopologyStatistics(c *gin.Context) {
 		domainID = &id
 	}
 
-	nodes, err := h.nodeRepo.ListAll(c.Request.Context(), domainID, nil, nil)
+	nodes, err := h.nodeRepo.ListAll(c.Request.Context(), domainID, nil, nil, 0) // 0 = no limit for statistics
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return

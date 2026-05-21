@@ -206,7 +206,7 @@ func (s *DeviceSyncService) handleDeviceRegistered(ctx context.Context, evt even
 	}
 
 	// 检查节点是否已存在
-	existingNodes, err := s.nodeRepo.ListAll(ctx, nil, nil, nil)
+	existingNodes, err := s.nodeRepo.ListAll(ctx, nil, nil, nil, 0) // 0 = no limit for sync operations
 	if err != nil {
 		s.logger.Error("failed to list existing nodes", zap.Error(err))
 		return nil
@@ -319,7 +319,7 @@ func (s *DeviceSyncService) SyncFromDevices(ctx context.Context, domainID *uuid.
 	}
 
 	// Get existing nodes to avoid duplicates
-	existingNodes, err := s.nodeRepo.ListAll(ctx, domainID, nil, nil)
+	existingNodes, err := s.nodeRepo.ListAll(ctx, domainID, nil, nil, 0) // 0 = no limit for sync operations
 	if err != nil {
 		return nil, fmt.Errorf("list existing nodes: %w", err)
 	}

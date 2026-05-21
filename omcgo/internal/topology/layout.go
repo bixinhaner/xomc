@@ -28,14 +28,45 @@ type LayoutConfig struct {
 }
 
 // DefaultLayoutConfig returns default layout configuration.
+// Optimized for performance with minimal iterations while maintaining acceptable layout quality.
 func DefaultLayoutConfig() LayoutConfig {
 	return LayoutConfig{
 		Type:         "hierarchy",
 		LevelSpacing: 150,
 		NodeSpacing:  120,
-		Iterations:   300,
-		Repulsion:    5000,
+		Iterations:   50,   // Reduced from 100 for better performance
+		Repulsion:    8000, // Strong repulsion for faster convergence
 		Attraction:   0.1,
+		CenterX:      1000,
+		CenterY:      500,
+	}
+}
+
+// FastLayoutConfig returns a fast layout configuration for large datasets (>200 nodes).
+// Uses minimal iterations for sub-second response times.
+func FastLayoutConfig() LayoutConfig {
+	return LayoutConfig{
+		Type:         "force",
+		LevelSpacing: 150,
+		NodeSpacing:  120,
+		Iterations:   20,    // Minimal iterations for large datasets
+		Repulsion:    12000, // Very strong repulsion for quick spread
+		Attraction:   0.2,   // Stronger attraction to counter repulsion
+		CenterX:      1000,
+		CenterY:      500,
+	}
+}
+
+// InstantLayoutConfig returns an instant configuration for very large datasets (>400 nodes).
+// Uses hierarchy layout (O(n)) instead of force (O(n²)) for sub-200ms response.
+func InstantLayoutConfig() LayoutConfig {
+	return LayoutConfig{
+		Type:         "hierarchy", // Use O(n) hierarchy instead of O(n²) force
+		LevelSpacing: 150,
+		NodeSpacing:  120,
+		Iterations:   0, // Not used for hierarchy
+		Repulsion:    0,
+		Attraction:   0,
 		CenterX:      1000,
 		CenterY:      500,
 	}

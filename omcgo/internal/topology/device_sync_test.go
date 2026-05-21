@@ -190,7 +190,7 @@ func TestDeviceSyncService_handleDeviceRegistered(t *testing.T) {
 	require.NoError(t, err)
 
 	// 无现有节点 → syncDevice 走创建分支
-	mockNodeRepo.EXPECT().ListAll(gomock.Any(), (*uuid.UUID)(nil), (*string)(nil), (*string)(nil)).
+	mockNodeRepo.EXPECT().ListAll(gomock.Any(), (*uuid.UUID)(nil), (*string)(nil), (*string)(nil), 0).
 		Return([]TopoNode{}, nil)
 	mockNodeRepo.EXPECT().Create(gomock.Any(), gomock.Any()).Return(nil)
 
