@@ -78,6 +78,10 @@ if ! docker info >/dev/null 2>&1; then
       sudo usermod -aG docker \$USER && newgrp docker   （或重新登录）
       然后重新运行本脚本。"
 fi
+# Dockerfile.app/acs/worker 采用 RUN --mount=type=cache (BuildKit 语法)以加速 Go module / build cache。
+# 经典 builder 不识别该语法会报 "the --mount option requires BuildKit"。
+# 这里强制开 BuildKit，老 docker (>=18.09) 都支持。
+export DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}"
 [ -n "${PROJECT_IMAGE_PREFIX:-}" ] || die "release.conf 未配置 PROJECT_IMAGE_PREFIX"
 if [ -z "${BUSINESS_IMAGES+x}" ] || [ "${#BUSINESS_IMAGES[@]}" -eq 0 ]; then
   die "release.conf 未配置 BUSINESS_IMAGES"
