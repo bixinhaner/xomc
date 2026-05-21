@@ -96,7 +96,9 @@ fi
 
 # 压缩方式 → tar 选项与扩展名
 case "$PKG_COMPRESS" in
-  xz)   TAR_OPT="-cJf"; EXT="tar.xz" ;;
+  xz)   TAR_OPT="-cJf"; EXT="tar.xz"
+        # xz 默认单线程，开 -T0 跟随机器核数多线程压缩（tar 会读该环变传给 xz）
+        export XZ_OPT="${XZ_OPT:--T0}" ;;
   gzip) TAR_OPT="-czf"; EXT="tar.gz" ;;
   zstd) TAR_OPT="--zstd -cf"; EXT="tar.zst"
         command -v zstd >/dev/null 2>&1 || die "PKG_COMPRESS=zstd 但未安装 zstd" ;;

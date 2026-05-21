@@ -48,9 +48,12 @@ done
 
 # ── 下载工具：curl 优先，其次 wget ──────────────────────────────────────
 if command -v curl >/dev/null 2>&1; then
-  fetch() { curl -fL --progress-bar -o "$1" "$2"; }
+  # --connect-timeout 15：TCP 握手 15s 不通就被判死（原默认 130s+）
+  # --max-time 600：整体不超过 10 min（compose 单文件 ~50MB，够用）
+  # --retry 2：临时错重试 2 次
+  fetch() { curl -fL --connect-timeout 15 --max-time 600 --retry 2 --progress-bar -o "$1" "$2"; }
 elif command -v wget >/dev/null 2>&1; then
-  fetch() { wget -q --show-progress -O "$1" "$2"; }
+  fetch() { wget -q --show-progress --connect-timeout=15 --tries=2 -O "$1" "$2"; }
 else
   die "需要 curl 或 wget 才能下载"
 fi
@@ -75,33 +78,46 @@ for ARCH in $ARCHES; do
   mkdir -p "$DEST"
 
   if [ -f "$OUT" ] && [ "$FORCE" = 0 ]; then
-    log "[$ARCH] 已存在，跳过：docker-cache/$ARCH/docker-$DOCKER_VERSION.tgz（--force 强制重下）"
-    continue
+    log "[$ARCH] docker tgz 已存在，跳过：docker-cache/$ARCH/docker-$DOCKER_VERSION.tgz（--force 强制重下）"
+  else
+    log "[$ARCH] 下载 $URL"
+    # 先下到 .tmp，成功再就位，避免中断留下半包
+    if ! fetch "$OUT.tmp" "$URL"; then
+      rm -f "$OUT.tmp"
+      die "[$ARCH] 下载失败：$URL（检查网络 / DOCKER_VERSION 是否存在）"
+    fi
+    mv "$OUT.tmp" "$OUT"
+    log "[$ARCH] 完成 → docker-cache/$ARCH/docker-$DOCKER_VERSION.tgz"
   fi
-
-  log "[$ARCH] 下载 $URL"
-  # 先下到 .tmp，成功再就位，避免中断留下半包
-  if ! fetch "$OUT.tmp" "$URL"; then
-    rm -f "$OUT.tmp"
-    die "[$ARCH] 下载失败：$URL（检查网络 / DOCKER_VERSION 是否存在）"
-  fi
-  mv "$OUT.tmp" "$OUT"
-  log "[$ARCH] 完成 → docker-cache/$ARCH/docker-$DOCKER_VERSION.tgz"
 
   # ── 同步下载 Docker Compose v2 静态二进制 ──────────────
   # compose 二进制名由 GitHub Release 资产名决定：docker-compose-linux-{x86_64|aarch64}
   # 交付包内以固定名 docker-compose 存放，install-docker.sh 同目录检测即装
-  COMPOSE_URL="${COMPOSE_URL_TEMPLATE//\{arch\}/$DARCH}"
   COMPOSE_OUT="$DEST/docker-compose-$COMPOSE_VERSION"
   COMPOSE_LINK="$DEST/docker-compose"
 
   if [ -f "$COMPOSE_OUT" ] && [ "$FORCE" = 0 ]; then
     log "[$ARCH] compose 已存在，跳过：docker-cache/$ARCH/docker-compose-$COMPOSE_VERSION"
   else
-    log "[$ARCH] 下载 compose v2: $COMPOSE_URL"
-    if ! fetch "$COMPOSE_OUT.tmp" "$COMPOSE_URL"; then
+    # 多镜像源 fallback：依次试 COMPOSE_URL_TEMPLATES，命中即停
+    if [ -n "${COMPOSE_URL_TEMPLATES+x}" ] && [ "${#COMPOSE_URL_TEMPLATES[@]}" -gt 0 ]; then
+      _CANDIDATES=( "${COMPOSE_URL_TEMPLATES[@]}" )
+    else
+      _CANDIDATES=( "$COMPOSE_URL_TEMPLATE" )
+    fi
+    _OK=0
+    for _TPL in "${_CANDIDATES[@]}"; do
+      COMPOSE_URL="${_TPL//\{arch\}/$DARCH}"
+      log "[$ARCH] 尝试下载 compose v2: $COMPOSE_URL"
+      if fetch "$COMPOSE_OUT.tmp" "$COMPOSE_URL"; then
+        _OK=1
+        break
+      fi
+      warn "[$ARCH] 该镜像源不可用，试下一个：$COMPOSE_URL"
       rm -f "$COMPOSE_OUT.tmp"
-      die "[$ARCH] compose 下载失败：$COMPOSE_URL（检查网络 / COMPOSE_VERSION 是否存在）"
+    done
+    if [ "$_OK" = 0 ]; then
+      die "[$ARCH] compose 下载失败：所有镜像源均不可用（检查网络 / COMPOSE_VERSION / release.conf::COMPOSE_URL_TEMPLATES）"
     fi
     chmod +x "$COMPOSE_OUT.tmp"
     mv "$COMPOSE_OUT.tmp" "$COMPOSE_OUT"
