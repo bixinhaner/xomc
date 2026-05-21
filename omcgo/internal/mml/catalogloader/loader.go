@@ -119,16 +119,17 @@ func (l *Loader) run(ctx context.Context, mode string) (dictloader.Report, error
 
 		l.mu.Lock()
 		l.loadInfo[cat.SpecVersion] = LoadInfo{
-			SpecVersion:     cat.SpecVersion,
-			Carrier:         cat.Carrier,
-			Tech:            cat.Tech,
-			SourceDocSha256: cat.SourceDocSha256,
-			GeneratedAt:     cat.GeneratedAt,
-			LoadedAt:        time.Now(),
-			GroupCount:      summary.GroupCount,
-			CommandCount:    summary.CommandCount,
-			SubFieldCount:   summary.SubFieldCount,
-			DeprecatedCount: summary.DeprecatedCount,
+			SpecVersion:         cat.SpecVersion,
+			Carrier:             cat.Carrier,
+			Tech:                cat.Tech,
+			SourceDocSha256:     cat.SourceDocSha256,
+			GeneratedAt:         cat.GeneratedAt,
+			LoadedAt:            time.Now(),
+			GroupCount:          summary.GroupCount,
+			CommandCount:        summary.CommandCount,
+			SubFieldCount:       summary.SubFieldCount,
+			DeprecatedCount:     summary.DeprecatedCount,
+			SkippedCommandCount: summary.SkippedCommandCount,
 		}
 		l.mu.Unlock()
 
@@ -140,6 +141,7 @@ func (l *Loader) run(ctx context.Context, mode string) (dictloader.Report, error
 			zap.Int("commands", summary.CommandCount),
 			zap.Int("sub_fields", summary.SubFieldCount),
 			zap.Int("deprecated", summary.DeprecatedCount),
+			zap.Int("skipped_commands", summary.SkippedCommandCount),
 		)
 	}
 

@@ -64,8 +64,9 @@ type LoadInfo struct {
 	SourceDocSha256 string    `json:"source_doc_sha256"`
 	GeneratedAt     string    `json:"generated_at"`
 	LoadedAt        time.Time `json:"loaded_at"`
-	GroupCount      int       `json:"group_count"`
-	CommandCount    int       `json:"command_count"`
-	SubFieldCount   int       `json:"sub_field_count"`
-	DeprecatedCount int       `json:"deprecated_count"`
+	GroupCount          int `json:"group_count"`
+	CommandCount        int `json:"command_count"`
+	SubFieldCount       int `json:"sub_field_count"`
+	DeprecatedCount     int `json:"deprecated_count"`
+	SkippedCommandCount int `json:"skipped_command_count"` // v2.4 D34 — MOD/ADD/RMV target_paths 为空被跳过的数量
 }

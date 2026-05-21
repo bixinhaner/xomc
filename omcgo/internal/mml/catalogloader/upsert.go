@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"go.uber.org/zap"
 )
 
 // upsertSummary 是单个 catalog 文件的 UPSERT 结果统计。
@@ -16,6 +17,9 @@ type upsertSummary struct {
 	SubFieldCount   int
 	DeprecatedCount int
 	RowsAffected    int
+	// SkippedCommandCount：v2.4 D34 — MOD/ADD/RMV 命令 target_paths 为空时跳过（不入库）。
+	// LST 不受此约束（GetParameterValues 不需要 target_paths）。
+	SkippedCommandCount int
 }
 
 // upsertCatalog 在单事务内完成一份 catalog 的 UPSERT + 差集软删。
@@ -51,6 +55,16 @@ func (l *Loader) upsertCatalog(ctx context.Context, cat *Catalog) (*upsertSummar
 		// 命令：per-op_type 一行
 		incomingOps := make([]string, 0, len(g.Commands))
 		for _, cmd := range g.Commands {
+			// v2.4 D34：MOD/ADD/RMV 必须有非空 target_paths，否则跳过不入库
+			// （应对用户反馈："修改 设备信息" 出现但无 path 可勾选）
+			if isWriteOperation(cmd.OperationType) && len(cmd.TargetPaths) == 0 {
+				l.logger.Warn("catalogloader: skip empty target_paths command",
+					zap.String("group_code", g.GroupCode),
+					zap.String("op_type", cmd.OperationType),
+				)
+				s.SkippedCommandCount++
+				continue
+			}
 			if err := upsertCommand(ctx, tx, gid, &g, &cmd); err != nil {
 				return nil, fmt.Errorf("upsert command (%s, %s): %w", g.GroupCode, cmd.OperationType, err)
 			}
@@ -422,6 +436,17 @@ func softDeleteOrphanGroups(ctx context.Context, tx pgx.Tx, carrier, tech string
 		return 0, err
 	}
 	return int(ct.RowsAffected()), nil
+}
+
+// isWriteOperation 返回 true 当 op 是 MOD/ADD/RMV（需要 target_paths 非空）。
+// LST 是只读，不需要 target_paths。详见 §15.3 D34。
+func isWriteOperation(op string) bool {
+	switch op {
+	case "MOD", "ADD", "RMV":
+		return true
+	default:
+		return false
+	}
 }
 
 // rpcMethodFor 映射 operationType → RPC 方法名。
