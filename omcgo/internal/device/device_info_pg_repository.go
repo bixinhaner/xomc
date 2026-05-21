@@ -226,20 +226,27 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		builder = builder.Where(sq.Eq{"d.is_online": *filter.IsOnline})
 		countBuilder = countBuilder.Where(sq.Eq{"d.is_online": *filter.IsOnline})
 	}
+	// T-0162: 4 个 device list multi-select 筛选字段（model_name /
+	// firmware_version / software_version / product_class）支持 CSV 多值。
+	// SplitCSV 单值场景返单元素切片，sq.Eq{slice} 自动展开为 IN (...)，行为与
+	// 原 sq.Eq{string} 完全等价；多值场景才走真正的 IN 多值过滤。
 	if filter.ModelName != nil && *filter.ModelName != "" {
-		builder = builder.Where(sq.Eq{"d.model_name": *filter.ModelName})
-		countBuilder = countBuilder.Where(sq.Eq{"d.model_name": *filter.ModelName})
+		vs := SplitCSV(*filter.ModelName)
+		builder = builder.Where(sq.Eq{"d.model_name": vs})
+		countBuilder = countBuilder.Where(sq.Eq{"d.model_name": vs})
 	}
 	if filter.FirmwareVersion != nil && *filter.FirmwareVersion != "" {
-		builder = builder.Where(sq.Eq{"d.firmware_version": *filter.FirmwareVersion})
-		countBuilder = countBuilder.Where(sq.Eq{"d.firmware_version": *filter.FirmwareVersion})
+		vs := SplitCSV(*filter.FirmwareVersion)
+		builder = builder.Where(sq.Eq{"d.firmware_version": vs})
+		countBuilder = countBuilder.Where(sq.Eq{"d.firmware_version": vs})
 	}
 	// T-0162: software_version 走 device_parameters TR-069 标准路径，不在
 	// device_info 表（与 seed/000137 device_parameters 灌入 distinct 一致）
 	if filter.SoftwareVersion != nil && *filter.SoftwareVersion != "" {
+		vs := SplitCSV(*filter.SoftwareVersion)
 		sub := sq.Select("device_id").From("device_parameters").
 			Where(sq.Eq{"parameter_path": "Device.DeviceInfo.SoftwareVersion"}).
-			Where(sq.Eq{"parameter_value": *filter.SoftwareVersion})
+			Where(sq.Eq{"parameter_value": vs})
 		builder = builder.Where(sq.Expr("d.id IN (?)", sub))
 		countBuilder = countBuilder.Where(sq.Expr("d.id IN (?)", sub))
 	}
@@ -258,8 +265,9 @@ func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter
 		countBuilder = countBuilder.Where(sq.Eq{"d.manufacturer": *filter.Manufacturer})
 	}
 	if filter.ProductClass != nil && *filter.ProductClass != "" {
-		builder = builder.Where(sq.Eq{"d.product_class": *filter.ProductClass})
-		countBuilder = countBuilder.Where(sq.Eq{"d.product_class": *filter.ProductClass})
+		vs := SplitCSV(*filter.ProductClass)
+		builder = builder.Where(sq.Eq{"d.product_class": vs})
+		countBuilder = countBuilder.Where(sq.Eq{"d.product_class": vs})
 	}
 	if filter.RFStatus != nil && *filter.RFStatus != "" {
 		builder = builder.Where(sq.Eq{"di.rf_status": *filter.RFStatus})
@@ -480,15 +488,15 @@ func applyDeviceFilters(b sq.SelectBuilder, filter DeviceFilter) sq.SelectBuilde
 		b = b.Where(sq.Eq{"d.is_online": *filter.IsOnline})
 	}
 	if filter.ModelName != nil && *filter.ModelName != "" {
-		b = b.Where(sq.Eq{"d.model_name": *filter.ModelName})
+		b = b.Where(sq.Eq{"d.model_name": SplitCSV(*filter.ModelName)})
 	}
 	if filter.FirmwareVersion != nil && *filter.FirmwareVersion != "" {
-		b = b.Where(sq.Eq{"d.firmware_version": *filter.FirmwareVersion})
+		b = b.Where(sq.Eq{"d.firmware_version": SplitCSV(*filter.FirmwareVersion)})
 	}
 	if filter.SoftwareVersion != nil && *filter.SoftwareVersion != "" {
 		sub := sq.Select("device_id").From("device_parameters").
 			Where(sq.Eq{"parameter_path": "Device.DeviceInfo.SoftwareVersion"}).
-			Where(sq.Eq{"parameter_value": *filter.SoftwareVersion})
+			Where(sq.Eq{"parameter_value": SplitCSV(*filter.SoftwareVersion)})
 		b = b.Where(sq.Expr("d.id IN (?)", sub))
 	}
 	if filter.OUI != nil {
@@ -501,7 +509,7 @@ func applyDeviceFilters(b sq.SelectBuilder, filter DeviceFilter) sq.SelectBuilde
 		b = b.Where(sq.Eq{"d.manufacturer": *filter.Manufacturer})
 	}
 	if filter.ProductClass != nil && *filter.ProductClass != "" {
-		b = b.Where(sq.Eq{"d.product_class": *filter.ProductClass})
+		b = b.Where(sq.Eq{"d.product_class": SplitCSV(*filter.ProductClass)})
 	}
 	if filter.GroupID != nil {
 		b = b.Where(sq.Eq{"dgm.group_id": *filter.GroupID})

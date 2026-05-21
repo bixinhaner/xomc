@@ -66,3 +66,31 @@ func BuildSearchOR(search string, fields []string) sq.Or {
 	}
 	return cond
 }
+
+// SplitCSV 把逗号分隔的多值字符串拆成切片；TrimSpace + 去空。
+// 主要供 device list 多选筛选字段（model_name / software_version /
+// firmware_version / product_class）从 CSV 形式的 query string 还原成 []string，
+// 配合 sq.Eq{"col": vals} 自动展开为 IN (...)。
+//
+// 与 BuildSearchOR 共享 MaxSearchKeywords 上限避免恶意大数组撑爆 SQL。
+//
+// 单值场景：splitCSV("foo") → ["foo"]，sq.Eq{"col": ["foo"]} 行为与
+// sq.Eq{"col": "foo"} 完全等价（IN ("foo") == ("foo")），向后兼容。
+func SplitCSV(s string) []string {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		v := strings.TrimSpace(p)
+		if v == "" {
+			continue
+		}
+		out = append(out, v)
+		if len(out) >= MaxSearchKeywords {
+			break
+		}
+	}
+	return out
+}
