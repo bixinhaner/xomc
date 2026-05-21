@@ -68,6 +68,11 @@ type GroupTreeCommand struct {
 	TargetObject     string            `json:"target_object,omitempty"`
 	Source           string            `json:"source"`
 	CatalogProtected bool              `json:"catalog_protected"`
+	// InstanceRangeMeta 是 spec §R-4.1.1 每层 {i} 占位符的取值范围 metadata，
+	// 由 catalog Loader v2 写入 mml_commands.instance_range_meta JSONB 列；
+	// 前端 LST/MOD/ADD/RMV 操作面板用此校验 InstancePicker 输入。
+	// 透传 json.RawMessage 让前端按需反序列化（v1 路径下为 null/空 []）。
+	InstanceRangeMeta json.RawMessage `json:"instance_range_meta,omitempty"`
 }
 
 // GroupTreeRepository 提供命令树查询能力。
@@ -162,17 +167,18 @@ func (r *PgGroupTreeRepository) BuildTree(ctx context.Context, rootCode, lang st
 		if row.CommandID != nil {
 			if _, dup := commandSeen[*row.CommandID]; !dup {
 				cmd := GroupTreeCommand{
-					ID:               *row.CommandID,
-					CommandCode:      strOrEmpty(row.CommandCode),
-					LogicalCode:      strOrEmpty(row.LogicalCode),
-					LogicalNameI18n:  row.CommandLogicalNameI18n,
-					LogicalName:      pickI18n(row.CommandLogicalNameI18n, lang, "", "", strOrEmpty(row.LogicalCode)),
-					OperationType:    strOrEmpty(row.OperationType),
-					RPCMethod:        strOrEmpty(row.RPCMethod),
-					RequireConfirm:   row.RequireConfirm,
-					TargetObject:     strOrEmpty(row.TargetObject),
-					Source:           strOrEmpty(row.CommandSource),
-					CatalogProtected: row.CommandCatalogProtected,
+					ID:                *row.CommandID,
+					CommandCode:       strOrEmpty(row.CommandCode),
+					LogicalCode:       strOrEmpty(row.LogicalCode),
+					LogicalNameI18n:   row.CommandLogicalNameI18n,
+					LogicalName:       pickI18n(row.CommandLogicalNameI18n, lang, "", "", strOrEmpty(row.LogicalCode)),
+					OperationType:     strOrEmpty(row.OperationType),
+					RPCMethod:         strOrEmpty(row.RPCMethod),
+					RequireConfirm:    row.RequireConfirm,
+					TargetObject:      strOrEmpty(row.TargetObject),
+					Source:            strOrEmpty(row.CommandSource),
+					CatalogProtected:  row.CommandCatalogProtected,
+					InstanceRangeMeta: rawJSONOrNil(row.CommandInstanceRangeMeta),
 				}
 				cmd.DisplayName = buildDisplayName(cmd.LogicalName, cmd.OperationType, cmd.LogicalCode, lang)
 				node.Commands = append(node.Commands, cmd)
@@ -372,7 +378,9 @@ SELECT
     COALESCE(c.require_confirm, false) AS require_confirm,
     c.target_object,
     c.source AS cmd_source,
-    COALESCE(c.catalog_protected, false) AS cmd_catalog_protected
+    COALESCE(c.catalog_protected, false) AS cmd_catalog_protected,
+    -- v2 §R-4.1.1：每层 {i} 占位符的取值范围 metadata，v1 catalog 列为 NULL → 兜底 '[]'
+    COALESCE(c.instance_range_meta, '[]'::jsonb) AS instance_range_meta
 FROM mml_param_groups g
 LEFT JOIN mml_commands c ON c.group_id = g.id
 WHERE g.path IS NOT NULL
@@ -414,6 +422,7 @@ ORDER BY g.path, g.display_order, c.operation_type, c.logical_code, c.command_co
 			&row.CommandID, &row.CommandCode, &row.LogicalCode, &cmdLogicalNameI18nBytes,
 			&row.OperationType, &row.RPCMethod, &row.RequireConfirm, &row.TargetObject,
 			&row.CommandSource, &row.CommandCatalogProtected,
+			&row.CommandInstanceRangeMeta,
 		); err != nil {
 			return nil, fmt.Errorf("scan row: %w", err)
 		}
@@ -456,6 +465,9 @@ type groupTreeRow struct {
 	TargetObject            *string
 	CommandSource           *string
 	CommandCatalogProtected bool
+	// v2 §R-4.1.1：每层 {i} 占位符取值范围 metadata（JSONB raw bytes）。
+	// 透传到前端用 json.RawMessage，前端按需反序列化 InstanceRange[]。
+	CommandInstanceRangeMeta []byte
 }
 
 // ============================================================
@@ -636,6 +648,26 @@ func pickI18n(m map[string]string, lang, fallbackZh, fallbackEn, fallbackCode st
 		return fallbackEn
 	}
 	return fallbackCode
+}
+
+// rawJSONOrNil 把 JSONB 字节切片转成 json.RawMessage，**空数组 / null / 空切片**返回
+// nil，使外层结构 `omitempty` 标记能彻底隐藏该字段。
+//
+// 为什么把 "[]" 也视为空：SQL 侧 COALESCE(c.instance_range_meta, '[]'::jsonb) 把 v1
+// catalog 行（NULL）兜底为 '[]'，这里同样视为"无 {i} 范围 metadata"语义，不让 v1
+// 命令在 JSON 输出里多冒一个 `"instance_range_meta": []` 噪声字段。
+//
+// 注意：v2 catalog 真的需要 metadata 时，存的是非空对象数组 [{...}, ...]，本函数
+// 透传原始 bytes，前端按需反序列化为 InstanceRange[]。
+func rawJSONOrNil(b []byte) json.RawMessage {
+	if len(b) == 0 {
+		return nil
+	}
+	s := strings.TrimSpace(string(b))
+	if s == "" || s == "null" || s == "[]" {
+		return nil
+	}
+	return json.RawMessage(b)
 }
 
 func parseI18nJSON(b []byte) map[string]string {
