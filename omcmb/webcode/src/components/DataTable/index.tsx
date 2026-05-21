@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pagination, Table, Tooltip, Typography } from 'antd';
 import type { TableProps } from 'antd';
 import { CopyOutlined } from '@ant-design/icons';
@@ -170,6 +170,52 @@ function DataTable<T>(
     return filteredData.slice(start, start + pageSize);
   }, [filteredData, showPagination, currentPage, pageSize, onPageChange]);
 
+  // 自适应表格高度：caller 不显式传 scroll.y 时，按 tableContainer 的实际可用
+  // 高度减去 thead 后传给 antd Table 的 body — 避免 caller 写死 y=470 在矮容器
+  // 里留大块空白（典型表现：分页栏被推到容器底部，列表与分页之间出现"幽灵
+  // 行高"）。
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const [autoBodyY, setAutoBodyY] = useState<number | undefined>(undefined);
+
+  useEffect(() => {
+    // 只在 caller 没自带 scroll.y 时启用；caller 已写死 y 的页面（含
+    // 'calc(100vh - NNN)' 这种 string 形式）一律走 caller 的意图。
+    if (scroll?.y !== undefined) return;
+    const el = tableContainerRef.current;
+    if (!el) return;
+
+    const recalc = () => {
+      const thead = el.querySelector('.ant-table-thead') as HTMLElement | null;
+      // 默认 thead 约 40px（small 密度），首帧 thead 还没渲染时用兜底值
+      // 避免 body 撑过头反向滚出来。
+      const headerH = thead?.offsetHeight ?? 40;
+      const y = Math.max(0, el.clientHeight - headerH - 2);
+      if (y > 0) setAutoBodyY(y);
+    };
+
+    recalc();
+    const ro = new ResizeObserver(recalc);
+    ro.observe(el);
+    // antd Table thead 在首次 effect 时往往还没挂入 DOM；50ms 后再算一次。
+    const t = window.setTimeout(recalc, 50);
+    return () => {
+      ro.disconnect();
+      window.clearTimeout(t);
+    };
+  }, [scroll]);
+
+  const effectiveScroll = useMemo<TableProps<T>['scroll']>(() => {
+    // caller 显式传了 y → 完全尊重 caller 的 scroll（兼容老页面用 calc 写死的）
+    if (scroll?.y !== undefined) return scroll;
+    // 否则在 caller 的 scroll 基础上注入 autoBodyY（autoBodyY 还没算出来时
+    // 不传 y，让 Table 自然渲染——只是首帧短暂表现，ResizeObserver 立即纠正）
+    return {
+      ...(scroll ?? {}),
+      x: scroll?.x ?? 'max-content',
+      ...(autoBodyY !== undefined ? { y: autoBodyY } : {}),
+    };
+  }, [scroll, autoBodyY]);
+
   const buildColumns = useMemo((): TableProps<T>['columns'] => {
     return orderedColumns
       .filter((col) => !hiddenKeys.includes(col.key))
@@ -339,7 +385,7 @@ function DataTable<T>(
         extraRight={extraToolbarRight}
       />
 
-      <div className={`${styles.tableContainer} omc-data-table`}>
+      <div ref={tableContainerRef} className={`${styles.tableContainer} omc-data-table`}>
         <Table<T>
           columns={buildColumns}
           dataSource={pagedData}
@@ -349,7 +395,7 @@ function DataTable<T>(
           rowClassName={rowClassName}
           expandable={expandable}
           size={tableSize}
-          scroll={scroll ?? { x: 'max-content' }}
+          scroll={effectiveScroll}
           pagination={false}
           locale={{
             emptyText: <EmptyState description={t('common.noData')} />,

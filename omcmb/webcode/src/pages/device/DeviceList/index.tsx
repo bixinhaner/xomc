@@ -98,6 +98,25 @@ function formatOfflineDuration(days?: number, hours?: number, minutes?: number):
   return <Tag color="default">{'<1分钟'}</Tag>;
 }
 
+// 哪些 filter 字段在 URL 里以 CSV 形式编码、需要解析回数组（与 FILTER_FIELDS
+// 中 type='multi-select' 的项一一对应）。不在这个集合里的字段（典型如
+// searchText 自由文本，用户可能用逗号分隔多关键字）保持字符串原样 ——
+// 之前用 "value.includes(',')" 一刀切会把 searchText 也 split 成数组，导致
+// axios 把 search 序列化成 search[]=a&search[]=b，后端 c.Query("search") 读
+// 不到，于是同一次"搜索"先后发两个 API、第二个还把筛选丢了。
+const URL_ARRAY_FIELDS = new Set<string>([
+  'lifecycleState',
+  'productModel',
+  'modelName',
+  'softwareVersion',
+  'firmwareVersion',
+  'groupId',
+]);
+
+function parseUrlValue(key: string, value: string): unknown {
+  return URL_ARRAY_FIELDS.has(key) ? value.split(',').filter(Boolean) : value;
+}
+
 export default function DeviceList() {
   const t = useT();
   const navigate = useNavigate();
@@ -117,12 +136,7 @@ export default function DeviceList() {
     const params: Record<string, unknown> = {};
     searchParams.forEach((value, key) => {
       if (key !== 'page' && key !== 'pageSize') {
-        // 处理数组参数（逗号分隔）
-        if (value.includes(',')) {
-          params[key] = value.split(',');
-        } else {
-          params[key] = value;
-        }
+        params[key] = parseUrlValue(key, value);
       }
     });
     return params;
@@ -136,11 +150,7 @@ export default function DeviceList() {
     const params: Record<string, unknown> = {};
     searchParams.forEach((value, key) => {
       if (key !== 'page' && key !== 'pageSize') {
-        if (value.includes(',')) {
-          params[key] = value.split(',');
-        } else {
-          params[key] = value;
-        }
+        params[key] = parseUrlValue(key, value);
       }
     });
     // 只有当 params 与当前 filterParams 不同时才更新
@@ -150,40 +160,18 @@ export default function DeviceList() {
     }
   }, [searchParams, filterParams]);
 
-  // 组件挂载时，如果 URL 无参数但 sessionStorage 有保存的筛选条件，则恢复到 URL
-  useEffect(() => {
-    const hasUrlParams = Array.from(searchParams.keys()).some(
-      (key) => key !== 'page' && key !== 'pageSize'
-    );
-    if (!hasUrlParams) {
-      try {
-        const stored = sessionStorage.getItem('omc_filter_device-list');
-        if (stored) {
-          const parsed = JSON.parse(stored) as Record<string, unknown>;
-          if (Object.keys(parsed).length > 0) {
-            // 恢复到 URL 和 filterParams
-            const newParams = new URLSearchParams();
-            Object.entries(parsed).forEach(([key, value]) => {
-              if (value !== undefined && value !== null && value !== '') {
-                if (Array.isArray(value)) {
-                  if (value.length > 0) {
-                    newParams.set(key, value.join(','));
-                  }
-                } else {
-                  newParams.set(key, String(value));
-                }
-              }
-            });
-            if (newParams.toString()) {
-              setSearchParams(newParams);
-            }
-          }
-        }
-      } catch {
-        // ignore
-      }
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // 不再在挂载时自动把 sessionStorage 灌回 URL —— 旧实现会让"上次会话留下的过时
+  // 筛选值"（比如 T-0162 已废弃的 connStatus、或新数据里不存在的 softwareVersion）
+  // 在用户首次进入页面时就被应用，后端返回 0 条 → 表象就是"首次进入列表没数据，
+  // 点搜索才有"。
+  //
+  // 现在的恢复策略：
+  //   - 表单视觉值：由 FilterBar 自己挂载时从 sessionStorage 回填到 form fields
+  //     （只 setFieldsValue，不触发 onSearch）—— 用户能看到上次的筛选条件
+  //   - 实际查询：首次进入页面用空 filter 拿全量数据；用户主动点"搜索"才把表单
+  //     当前值变成 filterParams 并写 URL
+  //   - 返回导航：URL 里有 ?key=value 时由上面 useEffect 同步回 filterParams，
+  //     不依赖 sessionStorage
 
   useEffect(() => {
     if (!exportMenuOpen) {
@@ -1541,7 +1529,7 @@ export default function DeviceList() {
               batchActions={batchActions}
               onRefresh={() => void refetch()}
               defaultDensity="default"
-              scroll={{ x: 'max-content', y: 470 }}
+              scroll={{ x: 'max-content' }}
               showRowNumber
               rowNumberTitle={t('table.rowNumber')}
             />
