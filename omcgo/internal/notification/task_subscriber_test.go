@@ -239,6 +239,35 @@ func Test_TaskSubscriber_DeleteObject_ShowsObjectPath(t *testing.T) {
 	assert.Contains(t, got.Content, objPath, "内容应含完整对象路径")
 }
 
+// Test_TaskSubscriber_AddObject_ShowsObjectPath 验证 AddObject 通知补出对象 path（与 DeleteObject 同形态）。
+func Test_TaskSubscriber_AddObject_ShowsObjectPath(t *testing.T) {
+	repo := newMockRepository()
+	svc := NewService(repo, nil, zap.NewNop())
+	sub := NewTaskSubscriber(svc, zap.NewNop())
+
+	// AddObject 的 object_name 是 partial path（父级，以 "." 结尾），CPE 分配实例号在响应里返回
+	objPath := "Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.LTECell."
+	tk := &task.Task{
+		ID:        "task-add-001",
+		DeviceSN:  "BLQ-001",
+		Method:    "AddObject",
+		CreatorID: "alice",
+		Status:    task.TaskStatusCompleted,
+		Params:    json.RawMessage(`{"object_name":"` + objPath + `"}`),
+	}
+	evt, _ := event.NewEvent(event.SubjectTaskCompleted, tk)
+	require.NoError(t, sub.handleCompleted(context.Background(), evt))
+
+	list, _ := svc.List(context.Background(), NotificationFilter{UserID: "alice"})
+	require.Len(t, list.Items, 1)
+	got := list.Items[0]
+	assert.Contains(t, got.Title, "新增对象")
+	assert.Contains(t, got.Title, "BLQ-001")
+	assert.Contains(t, got.Title, "已完成")
+	assert.Contains(t, got.Title, "NeighborList.LTECell", "标题末尾应显示对象短名")
+	assert.Contains(t, got.Content, objPath, "内容应含完整对象路径")
+}
+
 // Test_ShortObjectName 验证 shortObjectName 各种边界。
 func Test_ShortObjectName(t *testing.T) {
 	cases := []struct {

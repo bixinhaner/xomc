@@ -152,7 +152,7 @@ func renderNotifTitle(t *task.Task, status NotificationStatus) string {
 		if n > 0 {
 			base = fmt.Sprintf("%s · %d 项", base, n)
 		}
-	case "DeleteObject":
+	case "AddObject", "DeleteObject":
 		if name := extractObjectName(t.Params); name != "" {
 			base = fmt.Sprintf("%s · %s", base, shortObjectName(name))
 		}
@@ -174,7 +174,7 @@ func renderNotifContent(t *task.Task, status NotificationStatus) string {
 			}
 			lines = append(lines, fmt.Sprintf("%s = %s", p.Name, p.Value))
 		}
-	case "DeleteObject":
+	case "AddObject", "DeleteObject":
 		if name := extractObjectName(t.Params); name != "" {
 			lines = append(lines, "对象路径："+name)
 		}
