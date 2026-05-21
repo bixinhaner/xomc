@@ -19,7 +19,7 @@
 | R-3.1 | 跨章节合并 | ✅ | parser `_merge_same_group_codes`（v2.3 触发 1 条）|
 | R-3.2 | 17 条非可创建对象清单 | ✅ | parser `NON_CREATABLE` set |
 | R-4.1 | LST 默认勾选 + 实例索引 | ✅ | SubFieldChecklist + InstanceArityInput |
-| **R-4.1.1** | `{i}` 取值范围 onBlur 校验 | ❌ **未实施**（曾实现后被 reset） | — |
+| R-4.1.1 | `{i}` 取值范围 onBlur 校验 | ✅ **2026-05-21 重做完成** | `group_tree_repository.go` InstanceRangeMeta + `instanceRangeValidation.ts` + InstanceArityInput Tooltip |
 | R-4.2 | MOD 仅 RW 路径 + 填新值 | ✅ | SubFieldInputList |
 | ~~R-4.2.1~~ | ~~类型约束提示 + onBlur 校验~~ | 🚫 **降级 P2 可选 / deferred**（2026-05-21 spec 已降级，见 spec §R-4.2.1）| spec doc 注解 |
 | R-4.3 | ADD 复合流程（AddObject + SPV 同会话） | ⚪ **部分**（前端 UI 完整，后端 1MML=1RPC 不复合） | `console_executor.go` 注释明确说不做 |
@@ -358,7 +358,7 @@ device_tasks → ACS scheduler → CWMP RPC（GetParameterValues / SetParameterV
 
 | Gap | spec 条款 | 影响 | 估计工作量 |
 |---|---|---|---|
-| `{i}` 取值范围 onBlur 校验 | R-4.1.1 | 用户填实例号无前端校验，错值由后端 400 兜底 — UX 差 | ~400 LOC（曾实施过，reflog 可参考 commit `999524d5`/`28ce0ac8`）|
+| ~~`{i}` 取值范围 onBlur 校验~~ | ~~R-4.1.1~~ | 已重做（2026-05-21 cherry-pick `999524d5`+`28ce0ac8`）| ✅ 已闭环 |
 | ~~类型约束 onBlur 校验 + 提示~~ | ~~R-4.2.1~~ | 已降级为 P2 可选（spec 同步降级），不再视为 gap | — |
 
 ### P1 — 部分实施 / 功能缺陷
