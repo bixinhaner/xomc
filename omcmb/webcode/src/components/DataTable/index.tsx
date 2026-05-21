@@ -65,6 +65,13 @@ export interface DataTableProps<T> {
   showPagination?: boolean;
   showRowNumber?: boolean;
   rowNumberTitle?: string;
+  /**
+   * 自适应表格高度：true 时按容器实测高度减 thead 注入 antd Table 的 scroll.y。
+   * 默认 false——caller 未传 scroll.y 时维持 antd 原生「自然撑高」行为，
+   * 避免 ResizeObserver 在 flex/overflow 容器里抖动导致分页栏漂移。
+   * DeviceList 等需要分页紧贴底部的页面显式 autoFitHeight 即可。
+   */
+  autoFitHeight?: boolean;
 }
 
 type Density = 'compact' | 'default' | 'comfortable';
@@ -104,6 +111,7 @@ function DataTable<T>(
     showPagination = true,
     showRowNumber = false,
     rowNumberTitle,
+    autoFitHeight = false,
   } = props;
 
   const t = useT();
@@ -170,27 +178,35 @@ function DataTable<T>(
     return filteredData.slice(start, start + pageSize);
   }, [filteredData, showPagination, currentPage, pageSize, onPageChange]);
 
-  // 自适应表格高度：caller 不显式传 scroll.y 时，按 tableContainer 的实际可用
-  // 高度减去 thead 后传给 antd Table 的 body — 避免 caller 写死 y=470 在矮容器
-  // 里留大块空白（典型表现：分页栏被推到容器底部，列表与分页之间出现"幽灵
-  // 行高"）。
+  // 自适应表格高度：仅当 autoFitHeight=true && caller 未显式传 scroll.y 时启用，
+  // 按 tableContainer 的实际可用高度减去 thead 后传给 antd Table 的 body。
+  //
+  // 默认关闭的原因：caller 把 DataTable 嵌进 flex/overflow:hidden 容器（例如系统
+  // 管理的 Card body）时，Table 切到 scroll.y 模式会改变内部 DOM 高度（sticky
+  // thead + 横向滚动条占位），反向触发 ResizeObserver → setState 反馈环，分页栏
+  // 每帧 1-2px 向上漂移直至盖住列表。
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const [autoBodyY, setAutoBodyY] = useState<number | undefined>(undefined);
 
   useEffect(() => {
-    // 只在 caller 没自带 scroll.y 时启用；caller 已写死 y 的页面（含
-    // 'calc(100vh - NNN)' 这种 string 形式）一律走 caller 的意图。
+    if (!autoFitHeight) return;
     if (scroll?.y !== undefined) return;
     const el = tableContainerRef.current;
     if (!el) return;
 
+    let lastY: number | undefined;
     const recalc = () => {
       const thead = el.querySelector('.ant-table-thead') as HTMLElement | null;
       // 默认 thead 约 40px（small 密度），首帧 thead 还没渲染时用兜底值
       // 避免 body 撑过头反向滚出来。
       const headerH = thead?.offsetHeight ?? 40;
       const y = Math.max(0, el.clientHeight - headerH - 2);
-      if (y > 0) setAutoBodyY(y);
+      // 1px 抖动死区：thead 在 scroll 切换瞬间 offsetHeight 可能 ±1 来回
+      // 抖动，没有死区会触发无限 setState → ResizeObserver → recalc 循环。
+      if (y > 0 && (lastY === undefined || Math.abs(y - lastY) > 1)) {
+        lastY = y;
+        setAutoBodyY(y);
+      }
     };
 
     recalc();
@@ -202,19 +218,20 @@ function DataTable<T>(
       ro.disconnect();
       window.clearTimeout(t);
     };
-  }, [scroll]);
+  }, [autoFitHeight, scroll]);
 
   const effectiveScroll = useMemo<TableProps<T>['scroll']>(() => {
-    // caller 显式传了 y → 完全尊重 caller 的 scroll（兼容老页面用 calc 写死的）
     if (scroll?.y !== undefined) return scroll;
-    // 否则在 caller 的 scroll 基础上注入 autoBodyY（autoBodyY 还没算出来时
-    // 不传 y，让 Table 自然渲染——只是首帧短暂表现，ResizeObserver 立即纠正）
+    if (!autoFitHeight) {
+      // 未启用自适应 → 维持 antd 原生行为：仅注入默认 x='max-content'
+      return { ...(scroll ?? {}), x: scroll?.x ?? 'max-content' };
+    }
     return {
       ...(scroll ?? {}),
       x: scroll?.x ?? 'max-content',
       ...(autoBodyY !== undefined ? { y: autoBodyY } : {}),
     };
-  }, [scroll, autoBodyY]);
+  }, [scroll, autoFitHeight, autoBodyY]);
 
   const buildColumns = useMemo((): TableProps<T>['columns'] => {
     return orderedColumns

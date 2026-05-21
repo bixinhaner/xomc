@@ -1519,6 +1519,7 @@ export default function DeviceList() {
               onRefresh={() => void refetch()}
               defaultDensity="default"
               scroll={{ x: 'max-content' }}
+              autoFitHeight
               showRowNumber
               rowNumberTitle={t('table.rowNumber')}
             />
