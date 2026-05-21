@@ -80,13 +80,39 @@ type GroupTreeRepository interface {
 }
 
 // PgGroupTreeRepository PostgreSQL 实现。
+//
+// v2 调度（2026-05-21 引入，对应 spec §R-1 一级分组 = 18 SA-SR 章节）：
+//   - v2Mode=false（默认）：兼容历史 v1 数据 —— SELECT 排除 group_code 带
+//     "chapter:" 前缀的行（防御性，避免 v2 行误入 v1 视图）；按原 wrapByChapter
+//     合成章节包装；attachFamily 给 v1 object 组挂 family。
+//   - v2Mode=true：仅查 group_code 带 "chapter:" 前缀的 18 个章节行，跳过
+//     wrapByChapter / attachFamily（DB 行本身就是顶层 chapter，命令直接挂在
+//     其下，不再需要任何包装合成）。
+//
+// 翻转时机：必须与 catalogloader.WithV2Schema(true) 同步翻；P4 frontend 上线时
+// 一起切。本字段默认 false，仅 dictload provider 显式 Option 翻 true 才生效。
 type PgGroupTreeRepository struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	v2Mode bool
+}
+
+// Option 是构造函数的函数式选项。
+type Option func(*PgGroupTreeRepository)
+
+// WithV2Mode 设置仓库是否启用 v2 (chapter 顶层) 视图。默认 false。
+func WithV2Mode(enabled bool) Option {
+	return func(r *PgGroupTreeRepository) { r.v2Mode = enabled }
 }
 
 // NewPgGroupTreeRepository 构造函数。
-func NewPgGroupTreeRepository(pool *pgxpool.Pool) *PgGroupTreeRepository {
-	return &PgGroupTreeRepository{pool: pool}
+//
+// opts 中可传 WithV2Mode(true) 切到 v2 视图；缺省 v1。
+func NewPgGroupTreeRepository(pool *pgxpool.Pool, opts ...Option) *PgGroupTreeRepository {
+	r := &PgGroupTreeRepository{pool: pool}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
 var _ GroupTreeRepository = (*PgGroupTreeRepository)(nil)
@@ -157,7 +183,18 @@ func (r *PgGroupTreeRepository) BuildTree(ctx context.Context, rootCode, lang st
 
 	// 按 path 深度组装父子关系
 	nodes := assembleHierarchy(groupByID, pathToGroupID)
-	// v2.4 P3：family 已通过 migration 000141 + catalogloader.upsertGroup 持久化到 DB，
+
+	// v2 视图（spec v2.3 §R-1 chapter 是顶层 group）：
+	// DB 行直接是 18 个章节，命令通过 group_id JOIN 已挂在 commands 上。
+	// 无需 attachFamily（v2 没有 family 概念）；无需 wrapByChapter（DB 已是 chapter）。
+	if r.v2Mode {
+		// chapter 顶层排序仍按 DisplayOrder（已在 catalog Loader 写入 1..18）
+		sortNodesByDisplayOrder(nodes)
+		return nodes, nil
+	}
+
+	// v1 视图（默认）：原 v2.4 P3 行为不变。
+	// family 已通过 migration 000141 + catalogloader.upsertGroup 持久化到 DB，
 	// 上面 SQL 已直接读出。这里 attachFamily 退化为防御性 fallback —— 仅当 DB 返回空
 	// （历史/损坏数据 / 迁移未跑）时调用 InferFamily 兜底，避免 UI 缺少 family 节点。
 	// 详见 docs/design/mml-console-cmcc-tdlte-v23-adjustment-plan-20260519.md §15.6 + §15.8
@@ -342,14 +379,22 @@ WHERE g.path IS NOT NULL
 %s
 ORDER BY g.path, g.display_order, c.operation_type, c.logical_code, c.command_code`
 
-	var whereClause string
+	var whereParts []string
 	var args []any
 	if rootCode != "" {
 		// LTREE @> $1 匹配 path 等于 rootCode 或以 rootCode 为前缀
-		whereClause = "AND (g.path <@ $1::ltree OR g.path ~ ($1::text || '.*')::lquery)"
-		args = []any{rootCode}
+		args = append(args, rootCode)
+		whereParts = append(whereParts, "AND (g.path <@ $1::ltree OR g.path ~ ($1::text || '.*')::lquery)")
+	}
+	// v2 调度：filter by group_code "chapter:" prefix presence。
+	// v2Mode=true 时只返 18 章节；false 时排除 chapter: 行（防御历史 leak）。
+	if r.v2Mode {
+		whereParts = append(whereParts, "AND g.group_code LIKE 'chapter:%'")
+	} else {
+		whereParts = append(whereParts, "AND (g.group_code IS NULL OR g.group_code NOT LIKE 'chapter:%')")
 	}
 
+	whereClause := strings.Join(whereParts, " ")
 	sqlText := fmt.Sprintf(baseSQL, whereClause)
 	dbRows, err := r.pool.Query(ctx, sqlText, args...)
 	if err != nil {
