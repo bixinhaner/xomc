@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, Button, List, Modal, Spin, Tag, Typography, Upload } from 'antd';
+import { Alert, App, Button, List, Modal, Spin, Tag, Typography, Upload } from 'antd';
 import type { UploadFile, UploadProps } from 'antd';
 import {
   CheckCircleOutlined,
@@ -255,6 +255,11 @@ export default function BatchImportModal({
   onDownloadTemplate,
   t,
 }: BatchImportModalProps) {
+  // 注：之前直接用 `import { Modal } from 'antd'` 的 `Modal.error(...)` 静态方法
+  // 弹反馈，但 antd v5 + React 19 下静态方法不会被 ConfigProvider 兼容层托管 →
+  // 弹窗根本不渲染（参 commit 7f250967 T-0161）。用户看到的现象就是"选完文件
+  // 没反应、导入按钮不亮、也没有任何报错"。统一改走 App.useApp().message。
+  const { message } = App.useApp();
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [parsed, setParsed] = useState<ParsedCsv | null>(null);
   const [importing, setImporting] = useState(false);
@@ -272,13 +277,15 @@ export default function BatchImportModal({
     accept: '.csv',
     fileList,
     beforeUpload: (file) => {
-      if (!file.name.endsWith('.csv')) {
-        void Modal.error({ title: t('common.error'), content: t('device.fileFormatError') });
+      // 后缀检查 case-insensitive：Windows Excel 导出 CSV 时常给到 `.CSV`，
+      // 之前的 .endsWith('.csv') 会把它误判为非法格式直接 return false。
+      if (!file.name.toLowerCase().endsWith('.csv')) {
+        void message.error(t('device.fileFormatError'));
         return false;
       }
       const isLt10M = file.size / 1024 / 1024 < 10;
       if (!isLt10M) {
-        void Modal.error({ title: t('common.error'), content: t('device.fileSizeError') });
+        void message.error(t('device.fileSizeError'));
         return false;
       }
 
@@ -287,10 +294,7 @@ export default function BatchImportModal({
         const text = (e.target?.result as string) ?? '';
         const r = parseCsv(text, t);
         if (!r.ok) {
-          void Modal.error({
-            title: t('common.error'),
-            content: t('device.batchImport.parsingFailed', { reason: r.reason }),
-          });
+          void message.error(t('device.batchImport.parsingFailed', { reason: r.reason }));
           setFileList([]);
           setParsed(null);
           return;
@@ -300,10 +304,7 @@ export default function BatchImportModal({
         setResult(null);
       };
       reader.onerror = () => {
-        void Modal.error({
-          title: t('common.error'),
-          content: t('device.batchImport.parsingFailed', { reason: 'read file failed' }),
-        });
+        void message.error(t('device.batchImport.parsingFailed', { reason: 'read file failed' }));
       };
       reader.readAsText(file, 'utf-8');
       return false;
@@ -342,10 +343,7 @@ export default function BatchImportModal({
 
   const handleImportConfirm = useCallback(async () => {
     if (fileList.length === 0 || !parsed) {
-      void Modal.warning({
-        title: t('common.warning'),
-        content: t('device.selectFileFirst'),
-      });
+      void message.warning(t('device.selectFileFirst'));
       return;
     }
 
@@ -386,14 +384,11 @@ export default function BatchImportModal({
       setResult(finalResult);
       await onImport(finalResult);
     } catch (err) {
-      void Modal.error({
-        title: t('common.error'),
-        content: err instanceof Error ? err.message : String(err),
-      });
+      void message.error(err instanceof Error ? err.message : String(err));
     } finally {
       setImporting(false);
     }
-  }, [fileList, parsed, onImport, t]);
+  }, [fileList, parsed, onImport, t, message]);
 
   const handleCancel = useCallback(() => {
     if (importing) return;
