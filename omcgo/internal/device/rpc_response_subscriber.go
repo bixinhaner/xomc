@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,6 +15,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/product"
+	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/pkg/tr069"
 )
 
@@ -39,9 +41,17 @@ type RPCResponseSubscriber struct {
 	translatorFactory ParamModelTranslatorFactory
 	deviceLookup      RPCDeviceLookup
 	paramRepo         DeviceParameterRepository
+	deviceWriter      DeviceSyncFailureWriter // migration 000146: 写 last_param_sync_failed_at + error
 	logger            *zap.Logger
 
 	subscriptions []event.Subscription
+}
+
+// DeviceSyncFailureWriter 窄接口:仅负责把 Path B GPV task 失败回写到 devices 表
+// (migration 000146 新增 last_param_sync_failed_at + last_param_sync_error 两列)。
+// 实现由 *PgDeviceRepository 提供;nil 时 handleSyncTaskFailed 静默跳过(测试场景)。
+type DeviceSyncFailureWriter interface {
+	UpdateLastParamSyncFailed(ctx context.Context, id uuid.UUID, failedAt time.Time, errMsg string) error
 }
 
 // ProductMatcher 通过 productClass 路由出 product (含 ParamModelID)。
@@ -71,6 +81,7 @@ func NewRPCResponseSubscriber(
 	translatorFactory ParamModelTranslatorFactory,
 	deviceLookup RPCDeviceLookup,
 	paramRepo DeviceParameterRepository,
+	deviceWriter DeviceSyncFailureWriter,
 	logger *zap.Logger,
 ) *RPCResponseSubscriber {
 	return &RPCResponseSubscriber{
@@ -79,6 +90,7 @@ func NewRPCResponseSubscriber(
 		translatorFactory: translatorFactory,
 		deviceLookup:      deviceLookup,
 		paramRepo:         paramRepo,
+		deviceWriter:      deviceWriter,
 		logger:            logger.Named("device-rpc-resp-sub"),
 	}
 }
@@ -102,12 +114,62 @@ func (s *RPCResponseSubscriber) Start() error {
 		return fmt.Errorf("subscribe %s: %w", event.SubjectCommandDeleteObjectResponse, err)
 	}
 	s.subscriptions = append(s.subscriptions, delSub)
+	// migration 000146: 订阅 task.failed,识别 Path B GPV task(command_key 前缀
+	// "sync-gpv-")失败后回写 last_param_sync_failed_at + error,供前端"上次同步失败"展示。
+	failSub, err := s.bus.Subscribe(event.SubjectTaskFailed, s.handleSyncTaskFailed)
+	if err != nil {
+		return fmt.Errorf("subscribe %s: %w", event.SubjectTaskFailed, err)
+	}
+	s.subscriptions = append(s.subscriptions, failSub)
 	s.logger.Info("RPC response subscriber started",
 		zap.Strings("subjects", []string{
 			event.SubjectCommandGetParamsResponse,
 			event.SubjectCommandDeleteObjectResponse,
+			event.SubjectTaskFailed,
 		}),
 	)
+	return nil
+}
+
+// handleSyncTaskFailed 处理 task.failed (包含 failed/expired/cancelled)。
+// 过滤条件:Path B 同步入队的 GPV task (Method=GetParameterValues + CommandKey 前缀
+// "sync-gpv-",对应 provision/sync.go StartSync / enqueueGPVPrefixes 入队点)。
+// 命中即回写 devices.last_param_sync_failed_at + error。
+func (s *RPCResponseSubscriber) handleSyncTaskFailed(ctx context.Context, evt event.Event) error {
+	if s.deviceWriter == nil {
+		return nil
+	}
+	var t task.Task
+	if err := evt.DecodePayload(&t); err != nil {
+		s.logger.Warn("task.failed: decode payload", zap.Error(err))
+		return nil
+	}
+	if t.Method != "GetParameterValues" || !strings.HasPrefix(t.CommandKey, "sync-gpv-") {
+		return nil
+	}
+	dev, err := s.deviceLookup.GetBySerialNumber(ctx, t.DeviceSN)
+	if err != nil || dev == nil {
+		s.logger.Warn("task.failed sync: device lookup failed",
+			zap.String("device_sn", t.DeviceSN), zap.Error(err))
+		return nil
+	}
+	errMsg := t.ErrorMessage
+	if errMsg == "" {
+		// expired/cancelled task 通常 ErrorMessage 为空,给一个能看的兜底文案
+		errMsg = fmt.Sprintf("task %s", t.Status)
+	}
+	if err := s.deviceWriter.UpdateLastParamSyncFailed(ctx, dev.ID, time.Now(), errMsg); err != nil {
+		s.logger.Error("task.failed sync: write last_param_sync_failed",
+			zap.String("device_sn", t.DeviceSN),
+			zap.String("task_id", t.ID),
+			zap.Error(err))
+		return err
+	}
+	s.logger.Info("param sync failure recorded",
+		zap.String("device_sn", t.DeviceSN),
+		zap.String("task_id", t.ID),
+		zap.String("command_key", t.CommandKey),
+		zap.String("error", errMsg))
 	return nil
 }
 

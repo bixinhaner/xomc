@@ -68,12 +68,16 @@ export function useDiscoverParameters() {
   });
 }
 
-export function useSyncStatus(deviceId: string, enabled: boolean) {
+// useSyncStatus mount 时永远拉一次后端 sync-status;refetchInterval 由响应中的
+// status 自适应:syncing 时每 3s 持续轮询,idle 时停止(用户切 tab 回来重新 mount
+// 时自动再拉一次最新状态)。staleTime:0 避免 React Query cache 残留旧 syncing 值。
+export function useSyncStatus(deviceId: string) {
   return useQuery({
     queryKey: ['devices', 'sync-status', deviceId],
     queryFn: () => api.getSyncStatus(deviceId),
-    enabled: Boolean(deviceId) && enabled,
-    refetchInterval: enabled ? 3000 : false,
+    enabled: Boolean(deviceId),
+    refetchInterval: (q) => (q.state.data?.status === 'syncing' ? 3000 : false),
+    staleTime: 0,
   });
 }
 

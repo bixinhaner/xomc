@@ -48,7 +48,12 @@ type Device struct {
 	// T-0124: 上一次 Path B 全量参数同步完成时刻（由 HandleSyncResultPathB 在 BatchUpsert 成功后回写，
 	// 不区分触发源 device_online / periodic / firmware_changed / manual）；PeriodicSyncer 据此找过期设备。
 	LastParamSyncAt *time.Time `json:"last_param_sync_at,omitempty" db:"last_param_sync_at"`
-	LastBootAt      *time.Time `json:"last_boot_at,omitempty" db:"last_boot_at"`
+	// 上次参数同步失败时刻 + 错误信息 (migration 000142)。与 LastParamSyncAt 互斥:
+	// 成功路径写 succeeded 并清失败列;失败路径写 failed 并清 succeeded。任一非空即"上次终态",
+	// 都为空表示从未同步过。前端 GetSyncStatus 据此渲染 idle vs failed 子态。
+	LastParamSyncFailedAt *time.Time `json:"last_param_sync_failed_at,omitempty" db:"last_param_sync_failed_at"`
+	LastParamSyncError    *string    `json:"last_param_sync_error,omitempty" db:"last_param_sync_error"`
+	LastBootAt            *time.Time `json:"last_boot_at,omitempty" db:"last_boot_at"`
 	BootCount       int        `json:"boot_count" db:"boot_count"`
 	InformInterval  int        `json:"inform_interval" db:"inform_interval"`
 	// DeviceName 设备名称。DB 物理列名仍为 site_name（历史原因，未做物理迁移），

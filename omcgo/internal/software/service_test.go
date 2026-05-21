@@ -235,6 +235,10 @@ func (m *svcMockDeviceRepo) ListStaleForParamSync(_ context.Context, _ time.Time
 func (m *svcMockDeviceRepo) UpdateLastParamSyncAt(_ context.Context, _ uuid.UUID, _ time.Time) error {
 	return nil
 }
+
+func (m *svcMockDeviceRepo) UpdateLastParamSyncFailed(_ context.Context, _ uuid.UUID, _ time.Time, _ string) error {
+	return nil
+}
 func (m *svcMockDeviceRepo) ListSerialsByIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]string, error) {
 	return map[uuid.UUID]string{}, nil
 }

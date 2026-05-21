@@ -131,6 +131,10 @@ func (m *hbMockDeviceRepo) ListStaleForParamSync(_ context.Context, _ time.Time,
 func (m *hbMockDeviceRepo) UpdateLastParamSyncAt(_ context.Context, _ uuid.UUID, _ time.Time) error {
 	return nil
 }
+
+func (m *hbMockDeviceRepo) UpdateLastParamSyncFailed(_ context.Context, _ uuid.UUID, _ time.Time, _ string) error {
+	return nil
+}
 func (m *hbMockDeviceRepo) ListSerialsByIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]string, error) {
 	return map[uuid.UUID]string{}, nil
 }

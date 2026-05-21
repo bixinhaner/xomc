@@ -174,6 +174,9 @@ type DeviceWriter interface {
 	// UpdateLastParamSyncAt 回写 last_param_sync_at（HandleSyncResultPathB BatchUpsert
 	// 成功后调；不区分触发源统一口径，回写口径详见 PRD F09 §2.6）。
 	UpdateLastParamSyncAt(ctx context.Context, id uuid.UUID, at time.Time) error
+	// UpdateLastParamSyncFailed 由 sync 失败订阅者在 Path B GPV task 失败时调用,
+	// 写 last_param_sync_failed_at + last_param_sync_error 并清空 last_param_sync_at。
+	UpdateLastParamSyncFailed(ctx context.Context, id uuid.UUID, failedAt time.Time, errMsg string) error
 	// RecordBoot atomically increments boot_count and sets last_boot_at for the device
 	// identified by serial number. Invoked when the ACS receives a "1 BOOT" or
 	// "M Reboot" Inform. Returns the updated boot_count.
@@ -773,6 +776,7 @@ func deviceColumns() []string {
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
 		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at", "d.deleted_by",
 		"d.last_param_sync_at",
+		"d.last_param_sync_failed_at", "d.last_param_sync_error", // migration 000142
 	}
 }
 
@@ -802,6 +806,7 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
 		&d.LastParamSyncAt,
+		&d.LastParamSyncFailedAt, &d.LastParamSyncError, // migration 000142
 	)
 	if err != nil {
 		return nil, err
@@ -877,6 +882,7 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
 		&d.LastParamSyncAt,
+		&d.LastParamSyncFailedAt, &d.LastParamSyncError, // migration 000142
 	)
 
 	if deletedBy != nil {
@@ -1533,11 +1539,13 @@ func (r *PgDeviceRepository) ListStaleForParamSync(ctx context.Context, threshol
 	return devices, nil
 }
 
-// UpdateLastParamSyncAt 单列更新 — 由 HandleSyncResultPathB BatchUpsert 成功后调用。
-// 不区分触发源（device_online / periodic / firmware_changed / manual）统一回写口径。
+// UpdateLastParamSyncAt 成功路径回写 — 由 HandleSyncResultPathB BatchUpsert 成功后调用。
+// 同时清空失败列(migration 000142):成功 trump 之前的失败,前端只需看哪个时间戳非空。
 func (r *PgDeviceRepository) UpdateLastParamSyncAt(ctx context.Context, id uuid.UUID, at time.Time) error {
 	query, args, err := storage.Psql.Update("devices").
 		Set("last_param_sync_at", at).
+		Set("last_param_sync_failed_at", nil).
+		Set("last_param_sync_error", nil).
 		Where(sq.Eq{"id": id}).
 		Where(sq.Eq{"deleted_at": nil}).
 		ToSql()
@@ -1546,6 +1554,28 @@ func (r *PgDeviceRepository) UpdateLastParamSyncAt(ctx context.Context, id uuid.
 	}
 	if _, err := r.pool.Exec(ctx, query, args...); err != nil {
 		return fmt.Errorf("update last_param_sync_at: %w", err)
+	}
+	return nil
+}
+
+// UpdateLastParamSyncFailed 失败路径回写 — 由 sync 失败订阅者(rpc_response_subscriber
+// handleSyncTaskFailed) 在 Path B GPV task 失败时调用。同时清空成功时刻:让前端 idle
+// 状态明确显示"上次同步失败 X 时间前 · 错误 ...",且 PeriodicSyncer 会把该设备当作
+// "需重新同步"在下个周期重排(配合 FindStaleDevices 用 last_param_sync_at IS NULL
+// 或过期判定)。
+func (r *PgDeviceRepository) UpdateLastParamSyncFailed(ctx context.Context, id uuid.UUID, failedAt time.Time, errMsg string) error {
+	query, args, err := storage.Psql.Update("devices").
+		Set("last_param_sync_failed_at", failedAt).
+		Set("last_param_sync_error", errMsg).
+		Set("last_param_sync_at", nil).
+		Where(sq.Eq{"id": id}).
+		Where(sq.Eq{"deleted_at": nil}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update last_param_sync_failed query: %w", err)
+	}
+	if _, err := r.pool.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("update last_param_sync_failed: %w", err)
 	}
 	return nil
 }

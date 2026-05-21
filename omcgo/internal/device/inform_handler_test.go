@@ -125,6 +125,10 @@ func (m *infMockDeviceRepo) UpdateLastParamSyncAt(_ context.Context, _ uuid.UUID
 	return nil
 }
 
+func (m *infMockDeviceRepo) UpdateLastParamSyncFailed(_ context.Context, _ uuid.UUID, _ time.Time, _ string) error {
+	return nil
+}
+
 func (m *infMockDeviceRepo) FindStaleDevices(_ context.Context, _ time.Time, _ int) ([]*model.Device, error) {
 	return nil, nil
 }

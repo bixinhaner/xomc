@@ -145,6 +145,20 @@ func (mr *MockDeviceRepositoryMockRecorder) UpdateLastParamSyncAt(ctx, id, at an
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateLastParamSyncAt", reflect.TypeOf((*MockDeviceRepository)(nil).UpdateLastParamSyncAt), ctx, id, at)
 }
 
+// UpdateLastParamSyncFailed mocks base method.
+func (m *MockDeviceRepository) UpdateLastParamSyncFailed(ctx context.Context, id uuid.UUID, failedAt time.Time, errMsg string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateLastParamSyncFailed", ctx, id, failedAt, errMsg)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// UpdateLastParamSyncFailed indicates an expected call of UpdateLastParamSyncFailed.
+func (mr *MockDeviceRepositoryMockRecorder) UpdateLastParamSyncFailed(ctx, id, failedAt, errMsg any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateLastParamSyncFailed", reflect.TypeOf((*MockDeviceRepository)(nil).UpdateLastParamSyncFailed), ctx, id, failedAt, errMsg)
+}
+
 // ListSerialsByIDs mocks base method.
 func (m *MockDeviceRepository) ListSerialsByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
 	m.ctrl.T.Helper()

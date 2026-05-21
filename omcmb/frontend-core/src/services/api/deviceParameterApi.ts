@@ -63,15 +63,11 @@ interface BackendParameterTreeNode {
 interface BackendSyncStatus {
   device_id?: string;
   status: string;
-  total_batches?: number;
-  completed_batches?: number;
   total_parameters?: number;
-  synced_parameters?: number;
-  percentage?: number;
   pending_commands?: number;
-  started_at?: string;
-  completed_at?: string;
-  error?: string;
+  last_param_sync_at?: string;
+  last_param_sync_failed_at?: string;
+  last_param_sync_error?: string;
 }
 
 interface BackendListResponse<T> {
@@ -237,30 +233,14 @@ function mapBackendChildParameter(bp: BackendChildParameter): ChildParameter {
 }
 
 function mapBackendSyncStatus(bs: BackendSyncStatus): ParameterSyncStatus {
-  // Backend may return simplified fields (status, total_parameters, pending_commands)
-  // instead of full batch-level tracking. Derive missing fields when possible.
-  const totalParams = bs.total_parameters ?? 0;
-  const pending = bs.pending_commands ?? 0;
-  const isComplete = bs.status === 'completed' || (bs.status === 'idle' && totalParams > 0);
-
-  let percentage = bs.percentage ?? 0;
-  if (percentage === 0 && bs.status === 'syncing' && pending > 0) {
-    // Cannot compute exact percentage without total batches; show indeterminate.
-    percentage = 0;
-  }
-  if (isComplete) percentage = 100;
-
   return {
     deviceId: bs.device_id ?? '',
-    status: (bs.status === 'idle' ? 'idle' : bs.status) as ParameterSyncStatus['status'],
-    totalBatches: bs.total_batches ?? pending,
-    completedBatches: bs.completed_batches ?? 0,
-    totalParameters: totalParams,
-    syncedParameters: bs.synced_parameters ?? (isComplete ? totalParams : 0),
-    percentage,
-    startedAt: bs.started_at,
-    completedAt: bs.completed_at,
-    error: bs.error,
+    status: bs.status === 'syncing' ? 'syncing' : 'idle',
+    totalParameters: bs.total_parameters ?? 0,
+    pendingCommands: bs.pending_commands ?? 0,
+    lastParamSyncAt: bs.last_param_sync_at,
+    lastParamSyncFailedAt: bs.last_param_sync_failed_at,
+    lastParamSyncError: bs.last_param_sync_error,
   };
 }
 

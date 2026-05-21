@@ -120,6 +120,10 @@ func (m *execDeviceRepo) ListStaleForParamSync(_ context.Context, _ time.Time, _
 func (m *execDeviceRepo) UpdateLastParamSyncAt(_ context.Context, _ uuid.UUID, _ time.Time) error {
 	return nil
 }
+
+func (m *execDeviceRepo) UpdateLastParamSyncFailed(_ context.Context, _ uuid.UUID, _ time.Time, _ string) error {
+	return nil
+}
 func (m *execDeviceRepo) ListSerialsByIDs(_ context.Context, _ []uuid.UUID) (map[uuid.UUID]string, error) {
 	return map[uuid.UUID]string{}, nil
 }

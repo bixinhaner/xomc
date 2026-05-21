@@ -748,6 +748,7 @@ func initMiscModules(c *Container) error {
 			c.ParamRegistry,
 			c.DeviceService,
 			c.ParamRepo,
+			c.DeviceRepo, // migration 000146: 写 last_param_sync_failed_at + error
 			logger,
 		)
 		if err := rpcRespSub.Start(); err != nil {

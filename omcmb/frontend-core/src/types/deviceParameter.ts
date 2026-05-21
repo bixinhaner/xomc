@@ -48,18 +48,18 @@ export interface ParameterTreeNode {
   constraints?: ParameterConstraints;
 }
 
-/** 参数同步状态 */
+/** 参数同步状态 (设备级共享状态,跨会话/跨用户一致) */
 export interface ParameterSyncStatus {
   deviceId: string;
-  status: 'idle' | 'syncing' | 'completed' | 'failed';
-  totalBatches: number;
-  completedBatches: number;
+  status: 'idle' | 'syncing';
   totalParameters: number;
-  syncedParameters: number;
-  percentage: number;
-  startedAt?: string;
-  completedAt?: string;
-  error?: string;
+  pendingCommands: number;
+  /** 上次同步成功时刻 (ISO timestamp); 与 lastParamSyncFailedAt 互斥,任一非空表示上次终态 */
+  lastParamSyncAt?: string;
+  /** 上次同步失败时刻 (ISO timestamp); 非空时前端展示红色"上次同步失败" */
+  lastParamSyncFailedAt?: string;
+  /** 上次失败原因 (CPE Fault 文案 / task 超时 / SOAP 错误) */
+  lastParamSyncError?: string;
 }
 
 /** 参数查询过滤条件 */

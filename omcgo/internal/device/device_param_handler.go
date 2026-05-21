@@ -430,24 +430,38 @@ func (h *ParameterTreeHandler) GetSyncStatus(c *gin.Context) {
 		return
 	}
 
+	dev, _ := h.deviceService.GetDevice(c.Request.Context(), id)
 	var pendingCommands int64
-	if taskSvc := h.deviceService.GetTaskService(); taskSvc != nil {
-		dev, devErr := h.deviceService.GetDevice(c.Request.Context(), id)
-		if devErr == nil && dev != nil {
-			pendingCommands, _ = taskSvc.GetQueueLength(c.Request.Context(), dev.SerialNumber)
-		}
+	if taskSvc := h.deviceService.GetTaskService(); taskSvc != nil && dev != nil {
+		pendingCommands, _ = taskSvc.GetQueueLength(c.Request.Context(), dev.SerialNumber)
 	}
 
+	// 二态: syncing(队列有 pending task) / idle(其余)。"上次同步时间"由
+	// last_param_sync_at 字段单独承载,前端据此渲染"上次同步:X 时间前"持久信息;
+	// 不再用 completed 过渡态(原因:同步状态属于设备级共享状态,跨会话/跨用户都
+	// 应该看到一致的"进行中/上次同步时间",而非"刚完成"这种会话级反馈)。
 	status := "idle"
 	if pendingCommands > 0 {
 		status = "syncing"
 	}
 
-	response.OK(c, gin.H{
+	resp := gin.H{
 		"status":           status,
 		"total_parameters": len(params),
 		"pending_commands": pendingCommands,
-	})
+	}
+	// migration 000146 互斥语义:last_param_sync_at / last_param_sync_failed_at 任一非空,
+	// 前端据此判定"上次成功"还是"上次失败"(失败时一并展示 error 文案)。
+	if dev != nil && dev.LastParamSyncAt != nil {
+		resp["last_param_sync_at"] = dev.LastParamSyncAt
+	}
+	if dev != nil && dev.LastParamSyncFailedAt != nil {
+		resp["last_param_sync_failed_at"] = dev.LastParamSyncFailedAt
+		if dev.LastParamSyncError != nil {
+			resp["last_param_sync_error"] = *dev.LastParamSyncError
+		}
+	}
+	response.OK(c, resp)
 }
 
 // SyncConfigFile handles POST /api/v1/devices/:id/config-file/sync.
