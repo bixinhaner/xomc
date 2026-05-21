@@ -21,35 +21,241 @@
 > 任何对下方 `## 目录索引` / `#### 命令:` / 路径权限的修改，都必须等价反映到 MML 控制台。
 > 本节描述实施需求，不修改下方协议解析内容。
 
-### R-1 命令树结构（**两层：object 组 → operation 叶子**）
+### R-0 术语对齐（TR-069 / TR-098 / TR-181 / standardPath / privatePath）  _(2026-05-21 v2 增补)_
 
-- 命令树**只有一级分组**（object 组），不再有 SA…SR 章节级分组。
-- 一级分组节点 = 本文档每个 `#### 命令: <路径模板>` 标题对应的"对象"；
-  - 显示名 = **对象的中文别名**（如 `设备信息` / `设备版本升级` / `当前告警实例` / ...）；
-  - 路径模板（如 `Device.DeviceInfo.*` / `Device.DeviceInfo.SwUpgrade.*`）作为副标题或 tooltip。
-- 一级分组**互为平级**，与原"目录索引"章节归属无关（例：原属 SA 的"设备信息"与"设备版本升级"现在是同级，原属 SD 的多个 FaultMgmt 子对象也是同级）。
-- 一级分组排序遵循本文档 SA → SR 出现顺序（保持运营商规范的阅读 locality，但不渲染章节名）。
-- **章节信息 (SA…SR) 仅作为元数据**保留在导入产物里（用于排序 + 管理后台 / 报表），**不进入用户可见命令树**。
-- 一级分组的**稳定标识 (group_code)** = TR-181 路径模板归一化后的字符串（例 `Device.DeviceInfo.SwUpgrade.*`），用于幂等导入。
+> 本节定义贯穿全文的 path 术语，**所有后续 R-N / 派生章节 / 实施代码都以本节为准**。早期讨论或对接文档若出现"TR-069 路径"等含糊表达，应按本节回归到精确术语。
+
+| 术语 | 实质 | 路径前缀 | 维护方 | 在本规范中的位置 |
+|------|------|----------|--------|------------------|
+| **TR-069 / CWMP** | **协议管子**：SOAP/XML 报文、Session 状态机、12 个 RPC（GetParameterValues / SetParameterValues / AddObject / Reboot / Download / ...） | **不定义路径 schema** | BBF | 南向接口的协议载体；不规定参数命名 |
+| **TR-098** | 数据模型 v1（InternetGatewayDevice:1） | `InternetGatewayDevice.*` | BBF（**2014 年停更**） | spec MD 各 `#### 命令:` 表的"TR-098 路径"栏，**仅作历史兼容索引** |
+| **TR-181** | 数据模型 v2（Device:2，3GPP SmallCell 标准引用） | `Device.*` | BBF（持续维护） | spec MD 各表的"TR-181 路径"栏，**= 本规范的 `standardPath` 权威表示** |
+| **standardPath** | OMC 内部权威 path 表示 | TR-181 形式（`Device.*`） | 本规范 | catalog JSON / DB / `mml_param_groups.code` / `mml_commands.target_paths` / §R-2.4 `group_code` / §R-3.2 清单 全部统一使用 |
+| **privatePath** | 设备实际识别的 path 线上字符串 | 因设备而异：TR-098 / TR-181 / `X_VENDOR_*` 私有 | 厂商 | 由 ParamModel Translator 按 product+software_version 翻译产出 |
+
+#### R-0.1 OMC 内部 path 统一规则
+
+- 本规范 spec MD、catalog JSON、`mml_param_groups` / `mml_commands` 表、§R-2.4 命令中文名表的 `group_code`、§R-3.2 非可创建对象清单的 path 模板，**全部使用 TR-181 形式（`Device.*`）作为 `standardPath`**；
+- **不再单独维护"TR-069 路径"这一表达** —— TR-069 是协议管子，不是路径前缀。任何文档 / 工单 / 代码注释里出现的"TR-069 路径"必须替换为以下精确术语之一：
+  - `standardPath`（OMC 内部权威表示，TR-181 `Device.*`）；
+  - `privatePath`（per-device，可能是 TR-098 `InternetGatewayDevice.*` / TR-181 `Device.*` / `X_VENDOR_*` 等下发线上字符串）；
+  - **CWMP wire-level path**（特指 SOAP 报文 `<Name>` 字段实际承载的字符串，= 当次会话 Translator 翻译输出的 `privatePath`）。
+
+#### R-0.2 三种 path 在执行链路中的关系
+
+```text
+┌──────────────────────────────────────────────────────────────────────────────────────────┐
+│  spec MD / catalog JSON / DB / 命令树 / API 入参                                          │
+│                                                                                          │
+│     standardPath  (TR-181 形式, e.g. Device.DeviceInfo.UserLabel)                         │
+│          │                                                                               │
+│          │  ParamModel Translator                                                        │
+│          │  按 (product_id, software_version) 查 discovered_param_mappings                │
+│          │  退化到 param_mappings (默认映射) → 仍未命中则 passthrough                      │
+│          ▼                                                                               │
+│     privatePath   设备识别的实际字符串                                                    │
+│        · 老 TR-098 CPE  : InternetGatewayDevice.DeviceInfo.UserLabel                     │
+│        · 新 TR-181 CPE  : Device.DeviceInfo.UserLabel        (= standardPath 直通)        │
+│        · 厂商扩展        : InternetGatewayDevice.X_BAICELLS_UserLabel (示例)              │
+│          │                                                                               │
+│          ▼                                                                               │
+│     CWMP wire-level path (TR-069 SOAP 报文 `<Name>` 字段，由 ACS 渲染并下发到 CPE)         │
+└──────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+- **反向链路**（CPE → ACS，GPV/Inform/上传 XML 解析）走相反方向：CWMP 报文里 `<Name>` 字符串当作 `privatePath`，Translator 翻成 `standardPath` 落库 / 触发业务逻辑；
+- 在 spec / catalog / OMC 内部讨论 path 时，**默认指 `standardPath`**（TR-181 形式），除非明确加 `privatePath` / `wire path` 修饰。
+
+#### R-0.3 spec MD 表中两栏的取舍
+
+- **"TR-098 路径"栏**：保留作为历史索引（早期 v1.x TD-LTE CPE 的对照），**不再作为派生材料**；catalog Loader 解析时**跳过本栏**；
+- **"TR-181 路径"栏**：派生 `standardPath` / `group_code` / `target_paths` 的**唯一权威源**；
+- 后续运营商规范（CTCC / CUCC）若引入新数据模型版本（如 USP/TR-369 Device:2 Rev x），应在本节增补对应栏目，并明确"本规范 `standardPath` 对齐到哪一版"。
+
+#### R-0.4 跨章节兼容承诺
+
+- §R-9（命令执行 API 重构）`paths` 字段、§R-2.4 命令中文名表 `group_code`、§R-3.2 非可创建对象清单、§"分组 · 命名 · path 三级结构（完整展开）" 树中 `[...]` metadata 与每行 path —— **全部统一为 TR-181 `standardPath` 形式**，与本节定义严格对齐；
+- 任何后续修订引入新的 path 形式，必须先回到本节 R-0 增补术语映射，再 propagate 到下游。
+
+---
+
+### R-1 命令树结构（**两层：chapter 分组 → operation 命令叶子**） _(2026-05-21 v2 修订)_
+
+> **本节自 2026-05-21 修订**：取代原"object 组 → operation 叶子"方案。MML 命令树严格三段、且只允许一级分组：**`分组（章节中文名） → 命令（OP + 命令中文名） → path（standardPath）`**。任何子分组、family 聚合、object-级中间节点都禁止出现在树上。
+
+- 命令树**只有一级分组**，分组节点 = 本文档 18 个 SA-SR 章节，**不再有 object 组、family 组或任何子分组**。
+- 一级分组**显示名 = 章节中文小标题**（H2 标题下的 `**...**` 加粗文本，如 `设备信息参数管理` / `软件版本参数管理` / `告警参数管理` / ...）；不附加 `<索引>` 前缀，不附加 `<对象路径根>` 前缀（旧 "SA · DeviceInfo — 设备信息参数管理" 三段式 **废弃**）。
+- 一级分组**稳定标识** `group_code = chapter:<SA-SR>`（例 `chapter:SA`, `chapter:SF`），用于幂等导入；章节代码本身只作为机器标识与排序键，**不渲染到用户视图**。
+- 一级分组**排序**严格遵循本文档 SA → SR 顺序（章节代码字典序）。
 - 一级分组**不可被用户修改/删除**（`catalog_protected = true`），仅由本规范文档的导入流程更新。
+- **多级分组禁令**：当出现"对象别名撞名"、"同 path 模板跨章节多次列出"等情况，**不得引入子分组解决**；按 §R-2.4 命令中文名表 + §R-3.1 同 group_code 合并展平到本章节的命令叶子层。例：原 G-12 / G-13（`Device.Services.FAPControl.LTE.*` / `Device.Services.FAPControl.LTE.Gateway.*`）不作为单独的二级 group，其下命令直接作为 SF "小区服务参数管理（总体）" 章节的命令叶子列出。
+- 控制台层级实现约束：`mml_param_groups` 表的 `path` 列只允许两段（`chapter` 单段）；catalog Loader 启动前自检 path depth，发现 depth>1 直接 panic 阻止入库。
 
-### R-2 命令叶子（**二级，operation 维度展开**）
+### R-2 命令叶子（**二级，operation 维度展开 + 全中文命名表**） _(2026-05-21 v2 修订)_
 
-- 每个一级分组下，按 **TR-069 标准 + 权限矩阵** 展开为 1-4 个**操作叶子**，每个叶子是一条独立的可执行命令：
-  - **LST `<Object>`**（恒有，只要路径集非空）
-  - **MOD `<Object>`**（仅当路径集中存在 ≥ 1 条 RW 路径 📝 时存在）
-  - **ADD `<Object>`**（仅当路径模板含 `{i}` 占位符 **且** 路径集中存在 ≥ 1 条 RW 路径 时存在；read-only 事件表如 CurrentAlarm/ExpeditedEvent **不展开 ADD**）
-  - **RMV `<Object>`**（与 ADD 同条件）
-- 每个叶子的**显示名**：`<OP> <对象中文别名>` 或 `<OP> <对象英文路径末段>`（如 `LST 设备信息` / `MOD ManagementServer`）。
-- 每个叶子是 DB 中一条独立的 `mml_commands` 行，**operation_type 固化**（不可在运行时切换）：
-  - `(source='standard', group_id, operation_type)` 三元组唯一；
-  - `target_paths`（该操作下要执行的 path 集合）**按操作维度独立**（详见 R-3）。
-- 命令叶子拆分原则（与生成器口径一致）：
-  - 按路径公共前缀**最小化**划分（父级 group 不含子级 group 路径，例 `Device.DeviceInfo.*` group 的叶子集合**不含** `Device.DeviceInfo.SwUpgrade.*`）；
+> **v2 修订说明**：原 v1 的"父级路径段前缀命名"规则（如 `LST MU 设备版本升级`、`LST Services FAPService 载波`）虽能消歧，但路径段（MU/Services/CellConfig 等英文）混入显示名仍降低可读性。v2 改用**全中文命名权威表**（§R-2.4）：每个 group_code 在表中有唯一中文名，catalog Loader 查表得到 `command_zh_name`，显示名 = `<OP> <command_zh_name>`。TR-181 路径只作为 DB metadata 与日志 tooltip，**不进入用户可见命令名**。
+
+- 每个一级分组（章节）下的命令叶子来源 = 该章节内所有 `#### 命令: <路径模板>` 标题；每个标题按 **TR-069 标准 + 权限矩阵** 展开为 1-4 个**操作叶子**，每个叶子是一条独立的可执行命令：
+  - **LST**（恒有，只要路径集非空）
+  - **MOD**（仅当路径集中存在 ≥ 1 条 RW 路径 📝 时存在）
+  - **ADD**（仅当路径模板含 `{i}` 占位符 **且** 路径集中存在 ≥ 1 条 RW 路径 **且** 该 group_code **未被 §R-3.2「非可创建对象清单」命中** 时存在）
+  - **RMV**（与 ADD 同条件）
+
+- **R-2.1 命名规则**（**全中文，查表 1:1 锚定**）：
+  - 叶子显示名 = `<OP> <command_zh_name>`，其中 `command_zh_name` 由 **§R-2.4「命令中文名权威表」** 按归一化 `group_code` 唯一映射；
+  - 命令中文名**必须全中文**，通信领域行业通用缩写（LTE / MME / PHY / MAC / DRX / SCTP / IPv4/IPv6 / VLAN / IPsec / EPC / PLMN / VoLTE / PDCP / MBSFN / GSM / NR / UMTS / EUTRA / IRAT / GERAN / UTRA / A1-A5 / B1/B2 / SON / GPS / MR / PM / FAP 等）允许保留；
+  - **禁止**在显示名里出现完整或片段化 TR-181 path 文本（如 `Device.DeviceInfo.MU.{i}.Slot.{i}.*` 等），路径只作为 metadata（tooltip / 调试日志）；
+  - **同名禁令**：表内任意两条 `command_zh_name` **必须互不相同**（含跨章节）；新增 group_code 时若与已有名碰撞，先在表中为旧条目细化命名，再插入新条目；
+  - **未命中规则**：catalog Loader 启动期对每个 `source='standard'` 命令查表，**未命中即 panic 阻止入库**，迫使本文档保持完整覆盖（生产期不容忍隐式 fallback）；
+  - 历史 v1 的"父级段前缀消歧"规则**作废**，DB 导入产物中的 `command_zh_name` 必须来自 §R-2.4。
+
+- **R-2.2 DB 存储与「关联标准参数树」**（**v2.3 修订：MML 命令不再自己存 path**）：每个叶子是 `mml_commands` 表中一条独立行，`operation_type` 固化（不可运行时切换）：
+  - `(source='standard', group_id, group_code_object, operation_type)` 四元组唯一；
+  - **不再写入 `target_paths` 字符串数组**；改为写**对"标准参数树"的引用** `tree_node_refs`（标准参数树 = product/param-model 页面承载的可视化视图，落地表 = `standard_params`）：
+    - 引用键 = `standard_params.standardPath`（即 TR-181 形式的 path 字符串），等价于"按 standardPath 软外键关联"；
+    - 运行时通过 `JOIN standard_params` 拿回当前命令实际要操作的 path 集合及其类型 / 范围 / 权限元数据；
+    - 详见 §R-2.5「关联标准参数树规则」；
+  - 命令叶子的稳定标识 `command_code = <OP>:<group_code_object>`（例 `LST:Device.DeviceInfo.SwUpgrade.*`，`MOD:Device.Services.FAPService.{i}.Capabilities.*`），用于幂等导入；
+  - 显示用 `logical_name_i18n.zh-CN = command_zh_name`（即查表 value），`logical_name_i18n.en-US` 由后续 i18n 流程补齐。
+
+- **R-2.3 叶子拆分原则**（与生成器口径一致）：
+  - 按路径公共前缀**最小化**划分（父级 object 不含子级 object 路径，例 `Device.DeviceInfo.*` 叶子集合**不含** `Device.DeviceInfo.SwUpgrade.*`）；
   - 数字实例编号（如 `A1MeasureCtrl.1/2/3`）归一化为 `{i}` 模板并去重；
   - 多层实例占位符 `{iα}` / `{iβ}` / `{iγ}` / `{iδ}` / `{iε}` 一律折叠回 `{i}`，实例号在运行时由用户填写区分。
 
-### R-3 各操作的 path 集与 RPC 映射
+#### R-2.4 命令中文名权威表
+
+> **维护规则**：本表是 catalog Loader 解析 `command_zh_name` 的**唯一权威源**。新增 / 修改 group_code 都必须先更新本表（再让上方 §「分组 · 命名 · path 三级结构（完整展开）」按本表重新生成）。
+>
+> 列顺序：按规范文档 SA → SR 章节出现顺序（与上方树状视图一致）；同 group_code 跨章节合并后只保留首次出现的归属章节。
+>
+> v2.3 共 **71 条 standard 命令**（72 spec 命令 - 1 条 SH→SF 合并）。
+
+| # | 章节 | group_code (TR-181 归一化 path) | 命令中文名 |
+|--:|------|--------------------------------|-----------|
+| 1 | SA | `Device.DeviceInfo.*` | 设备基本信息 |
+| 2 | SA | `Device.DeviceInfo.SwUpgrade.*` | 设备软件升级状态 |
+| 3 | SB | `Device.SoftwareCtrl.*` | 软件版本控制 |
+| 4 | SC | `Device.ManagementServer.*` | 基站网管连接 |
+| 5 | SD | `Device.FaultMgmt.*` | 故障管理总览 |
+| 6 | SD | `Device.FaultMgmt.CurrentAlarm.{i}.*` | 当前告警实例 |
+| 7 | SD | `Device.FaultMgmt.ExpeditedEvent.{i}.*` | 实时告警实例 |
+| 8 | SD | `Device.FaultMgmt.HistoryEvent.{i}.*` | 历史告警实例 |
+| 9 | SD | `Device.FaultMgmt.QueuedEvent.{i}.*` | 队列告警实例 |
+| 10 | SD | `Device.FaultMgmt.SupportedAlarm.{i}.*` | 支持告警类型 |
+| 11 | SE | `Device.LogMgmt.*` | 日志管理配置 |
+| 12 | SF | `Device.Services.FAPControl.LTE.*` | LTE 接入控制 |
+| 13 | SF | `Device.Services.FAPControl.LTE.Gateway.*` | 安全接入网关 |
+| 14 | SF | `Device.Services.FAPControl.LTE.MmePoolConfigParam.{i}.*` | MME 池配置 |
+| 15 | SF | `Device.Services.FAPControl.LTE.S1U.{i}.*` | S1U 用户面接口 |
+| 16 | SF | `Device.Services.FAPControl.X2IpAddrMapInfo.{i}.*` | X2 接口 IP 映射 |
+| 17 | SF | `Device.Services.FAPService.{i}.*` | FAP 载波基本配置 |
+| 18 | SF | `Device.Services.FAPService.{i}.Capabilities.*` | FAP 载波能力集 |
+| 19 | SF | `Device.Services.FAPService.{i}.CellConfig.Capabilities.*` | 小区配置能力集 |
+| 20 | SF | `Device.Services.FAPService.{i}.CellConfig.LTE.EPC.*` | EPC 核心网参数 |
+| 21 | SF | `Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.*` | EPC PLMN 列表 |
+| 22 | SF | `Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.{i}.*` | VoLTE PDCP 初始参数 |
+| 23 | SG | `Device.Services.FAPControl.Transport.SCTP.*` | SCTP 协议配置 |
+| 24 | SG | `Device.Services.FAPControl.Transport.SCTP.Assoc.{i}.*` | SCTP 关联状态 |
+| 25 | SH | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.*` | RAN MAC 协议层 |
+| 26 | SH | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{i}.*` | MAC DRX 初始参数 |
+| 27 | SH | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.*` | RAN PHY 物理层 |
+| 28 | SH | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.*` | PHY MBSFN 子帧 |
+| 29 | SH | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{i}.*` | MBSFN 子帧配置列表 |
+| 30 | SI | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.*` | GSM 异系统邻区 |
+| 31 | SI | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.*` | NR 异系统邻区 |
+| 32 | SI | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.*` | UMTS 异系统邻区 |
+| 33 | SI | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.*` | LTE 同系统邻区 |
+| 34 | SJ | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.*` | 连接态 EUTRA 测量 |
+| 35 | SJ | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.*` | A1 事件测量控制 |
+| 36 | SJ | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.*` | A2 事件测量控制 |
+| 37 | SJ | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.*` | A3 事件测量控制 |
+| 38 | SJ | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.*` | A4 事件测量控制 |
+| 39 | SJ | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.*` | A5 事件测量控制 |
+| 40 | SJ | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.PeriodMeasCtrl.{i}.*` | EUTRA 周期测量控制 |
+| 41 | SJ | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.*` | 连接态 IRAT 测量 |
+| 42 | SJ | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.*` | B1 事件测量控制 |
+| 43 | SJ | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.*` | B2 事件测量控制 |
+| 44 | SJ | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.*` | 空闲态移动性 |
+| 45 | SJ | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.*` | 空闲态 IRAT 移动性 |
+| 46 | SJ | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{i}.*` | 空闲态 GERAN 频组 |
+| 47 | SJ | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{i}.*` | 空闲态 UTRA FDD 频点 |
+| 48 | SJ | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.*` | 空闲态异频载波 |
+| 49 | SK | `Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.*` | SON 自配置参数 |
+| 50 | SK | `Device.Services.FAPService.{i}.FAPControl.SelfConfig.*` | 自配置启动状态 |
+| 51 | SL | `Device.Ethernet.Interface.{i}.*` | 以太网接口 |
+| 52 | SL | `Device.Ethernet.Interface.{i}.IPv4Address.{i}.*` | 接口 IPv4 地址 |
+| 53 | SL | `Device.Ethernet.Interface.{i}.IPv6Address.{i}.*` | 接口 IPv6 地址 |
+| 54 | SL | `Device.Ethernet.Interface.{i}.VlanInterface.{i}.*` | VLAN 子接口 |
+| 55 | SL | `Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.*` | VLAN 子接口 IPv4 地址 |
+| 56 | SL | `Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.*` | VLAN 子接口 IPv6 地址 |
+| 57 | SL | `Device.Ethernet.IpRoute.{i}.*` | 静态路由表项 |
+| 58 | SM | `Device.IPsec.*` | IPsec 安全配置 |
+| 59 | SN | `Device.Time.*` | 时间同步服务器 |
+| 60 | SO | `Device.FAP.GPS.*` | GPS 定位信息 |
+| 61 | SP | `Device.FAP.MRMgmt.Config.{i}.*` | MR 上报配置 |
+| 62 | SQ | `Device.FAP.PerfMgmt.Config.{i}.*` | PM 性能上报配置 |
+| 63 | SR | `Device.DeviceInfo.MU.{i}.*` | 主机单元基本信息 |
+| 64 | SR | `Device.DeviceInfo.MU.{i}.Slot.{i}.*` | 槽位板卡信息 |
+| 65 | SR | `Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.*` | 扩展单元信息 |
+| 66 | SR | `Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.*` | 射频远端单元信息 |
+| 67 | SR | `Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.RFChannel.{i}.*` | 射频通道信息 |
+| 68 | SR | `Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.SwUpgrade.*` | 射频单元软件升级 |
+| 69 | SR | `Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.SwUpgrade.*` | 扩展单元软件升级 |
+| 70 | SR | `Device.DeviceInfo.MU.{i}.Slot.{i}.SwUpgrade.*` | 板卡软件升级 |
+| 71 | SR | `Device.DeviceInfo.MU.{i}.SwUpgrade.*` | 主机单元软件升级 |
+
+> **唯一性自检**：本表 71 条 `命令中文名` 互不相同（含跨章节）；catalog Loader 启动期对本表做 unique-check，违反则 panic 阻止入库。
+>
+> **派生示例**（与 §「分组 · 命名 · path 三级结构（完整展开）」完全对齐）：
+> - `Device.DeviceInfo.MU.{i}.Slot.{i}.*` 派生为 `LST 槽位板卡信息` + `MOD 槽位板卡信息`（无 ADD/RMV，§R-3.2 命中）；
+> - `Device.FaultMgmt.SupportedAlarm.{i}.*` 派生为 `LST 支持告警类型` / `MOD 支持告警类型` / `ADD 支持告警类型` / `RMV 支持告警类型`（4 条命令叶子，全可生成）；
+> - `Device.Services.FAPControl.Transport.SCTP.Assoc.{i}.*` 派生为 `LST SCTP 关联状态`（全 RO 不产 MOD，§R-3.2 不命中但 RO→无 ADD/RMV）。
+
+#### R-2.5 关联标准参数树规则 _(2026-05-21 v2.3 新增)_
+
+> **核心思路**：spec MD 的每条 `#### 命令: <path>` 表里的 standardPath 列表，**不再被 MML catalog 拷贝一份存进 `mml_commands.target_paths`**；而是把 path 的权威定义留在 **product/param-model 页面的"标准参数树"**（落地表 `standard_params`），MML 命令只**通过 standardPath 引用对应树节点**，运行时按需 JOIN 拿回完整 path 集合 + 元属性（类型 / 范围 / 权限 / 中文描述）。
+>
+> 这样一来：(a) path 单点真相，所有改动只在标准参数树发生；(b) MML 命令大幅瘦身，仅承载语义（OP + 命令中文名 + 引用键）；(c) §R-4 操作面板的"类型提示 + 范围校验"直接消费 standard_params 元数据，无需再翻 spec MD。
+
+##### R-2.5.1 关联机制（导入与运行时）
+
+**导入期（catalog Loader 启动）**：
+1. 解析本文档每条 `#### 命令: <path>` H4 标题及其下的参数表，得到 `(group_code, [standardPath...])`；
+2. 对每条 `standardPath`，在 `standard_params` 表里按 standardPath 唯一键查询：
+   - **命中** → 把 `standard_params.id` 加入该命令的 `tree_node_refs` 数组；
+   - **未命中** → 把 standardPath 加入 §R-2.5.2 失败清单，且**命令仍可入库**（不阻塞 LST 之外的 op 派生），但该 path 在 §R-4 面板上会被打灰 + tooltip 提示"标准参数树未关联"，运行时不下发；
+3. 失败统计 → catalog Loader 完成后输出汇总日志：`mml-catalog: standard tree link check: <N> paths linked, <M> failed (see §R-2.5.2)`。
+
+**运行时（用户提交命令执行 / 控制面板渲染）**：
+- API 入参 / 控制面板字段都引用 `tree_node_refs[]`；后端 `JOIN standard_params` 即可拿到 standardPath、type、range、access 等；
+- §R-9 `POST /mml/console/execute-statements` 入参的 `paths` 字段仍是 standardPath 列表（人类可读），但其取值范围必须是 `tree_node_refs` 解析出的 standardPath 集合的**子集**，否则后端 400。
+
+##### R-2.5.2 标准参数树关联失败清单（**实施跟踪 · 占位**）
+
+> 实施后由 catalog Loader 自动维护；本表是**实施跟踪记录**，列出从本规范派生但**无法在标准参数树（product/param-model 页面 / `standard_params` 表）找到对应节点**的 path。
+>
+> **触发流程**：每次 catalog 导入完成时，Loader 用结构化日志 + Admin API `GET /api/v1/mml/catalog/link-health` 报告失败清单。开发 / 运维需要把失败项**回填到本表**，并按下表"决策"列处置后从本表移除。
+>
+> **本表空 = 关联 100% 成功**。
+
+| # | 失败 standardPath | 来源命令（group_code） | 原因 | 决策 | 责任人 | 完成日期 |
+|---|------------------|----------------------|------|------|--------|---------|
+| _(待实施期首次扫描后回填；当前未实施，留空表示该机制尚未运行)_ |  |  |  |  |  |  |
+
+> **原因分类参考**：
+> - **A. 标准参数树未覆盖**：spec 写的 path 是合法 TR-181，但 product/param-model 页面尚未导入该节点 → 决策：在标准参数树补建节点；
+> - **B. spec 写错**：spec 的 standardPath 拼写 / 大小写 / `{i}` 嵌套错误，不符合 TR-181 → 决策：修正 spec 后重导；
+> - **C. 厂商私有路径泄漏到 standardPath 列**：spec 把 `X_VENDOR_*` 写到了 TR-181 列 → 决策：移到对应 privatePath 表 + 在 standard_params 留一条 vendor extension 描述（必要时）；
+> - **D. 命令已废弃**：该 path 在新协议版本已被移除 → 决策：从 spec / 命名表 / 三级结构同步移除。
+
+##### R-2.5.3 与 §R-9 / §R-4 的衔接
+
+- §R-9.2 `POST /mml/console/execute-statements` 的 `paths` 字段在服务端必须做 **`paths ⊂ resolve(tree_node_refs)`** 子集校验（不在引用集内 → 400）；
+- §R-9.3 Translator 仍按设备 (`product_id`, `software_version`) 把 standardPath 翻译成 privatePath，**Translator 逻辑不变**；只是输入侧 standardPath 来自 standard_params 而不是 mml_commands 内部拷贝；
+- §R-4 操作面板渲染时**直接消费 `standard_params` 的 type / range / access / desc 字段**，§R-4.2 MOD 的类型提示与值校验、§R-4.1 LST 的 `{i}` 范围校验都从这里取数。
+
+### R-3 各操作的 path 集与 RPC 映射 _(2026-05-21 v2 修订：新增「非可创建对象清单」与「同 group_code 合并」)_
 
 **操作类型在 catalog 加载期就被固化**，每条命令的 `target_paths` 内容**仅与该操作类型对应的 TR-069 标准语义有关**，不依赖运行时选择：
 
@@ -57,14 +263,57 @@
 |------|-----------|---------------------------------------|---------------|
 | **LST** | `GetParameterValues` | object 路径集**全集**（含 📖 RO + 📝 RW） | 路径集非空 → 恒生成 |
 | **MOD** | `SetParameterValues` | object 路径集中**仅 📝 RW 子集** | 至少 1 条 📝 → 生成 |
-| **ADD** | `AddObject` | 仅**父级对象路径**（如 `Device.X.{i}.`）；子参数初值取 RW 字段 | 路径含 `{i}` **且** 路径集存在 RW → 生成 |
+| **ADD** | `AddObject` | 仅**父级对象路径**（如 `Device.X.{i}.`）；子参数初值取 RW 字段 | 路径含 `{i}` **且** 路径集存在 RW **且** 不在「非可创建对象清单」（R-3.2）→ 生成 |
 | **RMV** | `DeleteObject` | 仅**实例路径**（`Device.X.{i}.`）；运行时用 InstancePicker 选实例号 | 同 ADD |
 
 > 这意味着同一 object（如 `Device.DeviceInfo.*` 📖📝）在 DB 中存在**两条** `mml_commands` 行（一条 LST 全 17 path，一条 MOD 只含 2 条 📝 path）；
 > `Device.FaultMgmt.CurrentAlarm.{i}.* 📖`（全 RO 事件表）只产生**一条 LST**；
-> `Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{iβ}.* 📝`（writable 多实例）产生**四条**（LST / MOD / ADD / RMV）。
+> `Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{iβ}.* 📝`（writable 多实例）产生**四条**（LST / MOD / ADD / RMV）；
+> `Device.Services.FAPService.{i}.*`（在非可创建清单内）即使有 `{i}` + RW 也**只产生 LST + MOD 两条**，不生成 ADD/RMV。
 
 控制台只展示**已实际生成的命令行**；不存在的操作类型在树上不出现（无需置灰）。
+
+#### R-3.1 同 group_code 跨章节合并
+
+- 当多个 `#### 命令: <path>` 标题在不同章节出现相同的归一化 path 模板（例 SF 与 SH 都写了 `Device.Services.FAPService.{i}.*`），catalog Loader **必须合并**为单一 `mml_commands` 命令记录（按操作维度仍展开 LST/MOD/ADD/RMV）：
+  - `target_paths` = 各章节子参数集合的 **去重 union**（按 standardPath 唯一）；
+  - `perm` = 各章节 perm 标记的 **OR**（出现过 📝 即视为 RW）；
+  - 命令归属 **首次出现的章节**（按 SA → SR 顺序），其余章节不再独立挂载该命令；
+  - 合并记录写入 catalog Loader 的"合并日志"（结构化日志 + 派生 doc），便于审计。
+
+> v2.3 当前只触发 **1 条合并**：`Device.Services.FAPService.{i}.*`（SF + SH 合并到 SF）。详见 §「分组 · 命名 · path 三级结构（完整展开）」的"合并日志"小节。
+
+#### R-3.2 ADD/RMV 非可创建对象清单（**白名单驱动过滤**）
+
+> 业务背景：部分含 `{i}` 的对象在 TR-069 语义上**不是用户可由 ACS AddObject 增删的容器**（固定枚举的载波 i=1~3、硬件描述的 MU/Slot/EU/RU、协议层 capability/MAC/PHY/Mobility 容器等）。继续派生 ADD/RMV 会产出**最终设备不接受执行**的无效命令。
+>
+> **设计原则**：以"最终能在真实设备上执行"为前提；非可创建对象在 catalog 加载期就被剔除掉 ADD/RMV，仅保留 LST/MOD。
+
+下列归一化 path 模板（穷举）**不生成 ADD/RMV**，无论其 `{i}` + RW 条件是否成立。Loader 必须按字面字符串严格匹配（不能用前缀模糊匹配）：
+
+| # | 归一化 path 模板 | 原因 |
+|---|------------------|------|
+| 1 | `Device.Services.FAPService.{i}.*` | eNB 载波槽，i=1~3 固定 |
+| 2 | `Device.Services.FAPService.{i}.Capabilities.*` | 系统能力集，固定结构 |
+| 3 | `Device.Services.FAPService.{i}.CellConfig.Capabilities.*` | 系统能力集，固定结构 |
+| 4 | `Device.Services.FAPService.{i}.CellConfig.LTE.EPC.*` | EPC 单体配置 |
+| 5 | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.*` | MAC 单体配置 |
+| 6 | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.*` | PHY 单体配置 |
+| 7 | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.*` | MBSFN 单体配置 |
+| 8 | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.*` | Mobility 容器 |
+| 9 | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.*` | Mobility 容器 |
+| 10 | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.*` | Mobility 容器 |
+| 11 | `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.*` | Mobility 容器 |
+| 12 | `Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.*` | SON 单体配置 |
+| 13 | `Device.DeviceInfo.MU.{i}.*` | 硬件主机单元槽位 |
+| 14 | `Device.DeviceInfo.MU.{i}.Slot.{i}.*` | 硬件板卡槽位 |
+| 15 | `Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.*` | 硬件扩展单元槽位 |
+| 16 | `Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.*` | 硬件远端单元槽位 |
+| 17 | `Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.RFChannel.{i}.*` | 硬件射频通道槽位 |
+
+> v2.3 共 **17 条非可创建对象**，过滤掉 17 × 2 = **34 条 ADD/RMV 命令行**。剩余含 `{i}` + RW 的对象（如 `SupportedAlarm.{i}`、`MmePoolConfigParam.{i}`、`X2IpAddrMapInfo.{i}`、`PLMNList.{i}`、`PdcpInitParam.{i}`、`DrxInitialParam.{i}`、`SFConfigList.{i}`、`GSM/NR/UMTS/LTECell.{i}`、`AxMeasureCtrl.{i}`、`BxMeasureCtrl.{i}`、`PeriodMeasCtrl.{i}`、`GERANFreqGroup.{i}`、`UTRANFDDFreq.{i}`、`InterFreq.Carrier.{i}`、`Ethernet.Interface.{i}`、`Ethernet.IpRoute.{i}`、`MRMgmt.Config.{i}`、`PerfMgmt.Config.{i}`）正常派生 ADD/RMV。
+>
+> **维护规则**：本清单是 catalog Loader 的强约束，**修改必须通过修订本节 R-3.2 完成**，禁止在 catalog JSON / DB 中通过 overlay 单独修改。
 
 ### R-4 操作面板（Control Panel）行为（按命令的固定 operation_type 单一渲染）
 
@@ -73,7 +322,7 @@
 
 #### R-4.1 LST
 
-- 默认勾选命令路径集中的**全部 path**；
+- 默认勾选命令路径集中的**全部 path**（path 集合来自 §R-2.5 引用解析后的 `standard_params` JOIN）；
 - 用户可在 Control Panel **取消勾选**部分 path；
 - 提交时对**勾选后的路径**调用 `GetParameterValues`；
 - 若命令含 `{i}`，Control Panel 顶部提供"实例索引输入区"，支持：
@@ -82,14 +331,50 @@
   - 范围（如 `1,2,5`）—— 前端拆解为多条独立路径。
 - 多层 `{i}`：按从外到内顺序逐级填写。
 
+**R-4.1.1 `{i}` 取值范围校验**（v2.3 新增）：
+
+- 每条命令的 `{i}` 范围来源于本文档对应 `#### 命令: <path>` H4 标题下的 `**{i}** 取值范围: <expr>` 注释行（例：`**{i}** 取值范围: 0~N — 当前告警实例编号，N由MaxCurrentAlarmEntries决定`）；
+- catalog Loader 解析这一行并把 `(i_layer, range_expr, range_min, range_max, n_source)` 写入 `mml_commands.instance_range_meta`（JSONB），运行时按设备同步过来的 N 上限二次校验；
+- 前端校验规则（前端轻校验，后端硬校验）：
+  - **静态范围**（如 `1~3` / `1~24`）：输入数字必须落在 `[min, max]` 闭区间；
+  - **动态范围**（如 `0~N，N由 MaxCurrentAlarmEntries 决定`）：前端校验 `≥0` 且为整数；上限 N 由前端从设备最近一次 LST 的 `NumberOfEntries` 计数取（Redis 缓存，命中即用），缓存空则放行到后端校验；
+  - **多层 `{i}`**（如 `{iα}` / `{iβ}`）：每层各自从 spec 注释取范围独立校验；
+  - 校验失败 → 输入框红框 + 行内提示"实例号 X 超出范围 [a, b]"；用户必须修正后才可提交；
+- 后端最终校验：执行 API（§R-9.2）入参 `instance_selectors` / `instance_indices` 进 ParamModel `MappingValidator`，越界 → 400 + 错误码 `ErrInstanceOutOfRange`。
+
 #### R-4.2 MOD
 
-- Control Panel 仅列出命令路径集中**RW (📝) 路径**；只读路径不出现；
+- Control Panel 仅列出命令路径集中**RW (📝) 路径**；只读路径不出现（path 集合来自 §R-2.5 引用解析后的 `standard_params` JOIN）；
 - 默认勾选全部 RW 路径；用户可取消勾选；
 - 每条勾选路径需要在右侧填**新值**输入框；
 - 提交时只对**勾选 + 已填值**的路径调用 `SetParameterValues`；
-- 若命令含 `{i}`，必须先指定具体实例号（不允许留空）；
-- 字段值的类型 / 取值范围按本文档表格 "类型" 列约束（如 `unsignedInt[0:65535]` / `boolean` / `string(64)`），前端做软校验，后端走 ParamModel `MappingValidator` 硬校验。
+- 若命令含 `{i}`，必须先指定具体实例号（不允许留空），实例号按 §R-4.1.1 校验。
+
+**R-4.2.1 类型约束提示与值校验**（v2.3 新增）：
+
+- 每条 path 的类型 / 取值范围来源于 `standard_params` 的 `value_type` + `constraint` 字段（导入期由本文档"类型"列解析；语法示例：`string(64)`、`unsignedInt[0:65535]`、`int[-1:65535]`、`unsignedInt[1:5]`、`boolean`、`dateTime`）；
+- **输入框旁边显示文字提示**（v2.3 强制要求），文案规则：
+
+| 类型语法 | 文字提示 |
+|---------|---------|
+| `string` | 字符串 |
+| `string(N)` | 字符串，长度 ≤ N |
+| `unsignedInt` | 无符号整数（0 及以上） |
+| `unsignedInt[min:max]` | 无符号整数 [min, max] |
+| `int[min:max]` | 有符号整数 [min, max] |
+| `boolean` | `true` / `false` |
+| `dateTime` | ISO 8601 时间（例 `2026-05-21T10:00:00Z`） |
+| `hexBinary(N)` | 十六进制字符串，长度 ≤ N（字节） |
+| `enum(a/b/c)` | 枚举值之一：a / b / c |
+
+- **校验时机**：
+  1. **前端即时校验**：输入框 `onBlur` 时按上述语法判定，**不合法用红框 + 行内文字提示**（例："超过 64 字符上限"、"必须在 [0, 65535] 范围内"、"非法时间格式"）；
+  2. **提交前批量校验**：用户点"执行 MOD"前再次校验所有勾选 + 已填值字段，**有任一不合法直接阻止提交**，弹出"以下 N 条不合规"列表 + 高亮违规字段；
+  3. **后端硬校验**：API 入参进 ParamModel `MappingValidator`，违规 → 400 + 错误码 `ErrParamValueInvalid` + 字段名 + 期望约束（即使前端被绕过也兜底）；
+- **空值处理**：
+  - 字段已勾选但留空 → 提交前提示"勾选了但未填值"，不允许执行；
+  - 字段未勾选 → 即使填了值也忽略（明确不在 SPV 路径集内）；
+- **批量填值**：MOD 支持"全选 + 批量填同一值"（输入框上方 `[批量填入]` 按钮），便于把多个 RW 路径设为同一基线值（如所有 `Enable` 字段批量改 `true`），但批量填入后仍按 R-4.2.1 各自校验类型。
 
 #### R-4.3 ADD
 
@@ -312,6 +597,1485 @@ TranslateToPrivate(ctx, productId, softwareVersion, standardPath) → Translatio
 | SP | FAP.MRMgmt | MR参数管理 |
 | SQ | FAP.PerfMgmt | 性能参数管理 |
 | SR | ENanocell | 扩展型一体化皮基站参数 |
+
+---
+
+## 分组+命令的结构图（派生 · 评审视图）
+
+> 由本文档每个 `## SA-SR` 章节下的 `#### 命令: <path>` 标题派生而来，作为单页全景视图，按 §R-1 / §R-2 / §R-3 重新生成（v2: 全中文命名表 + 同 group_code 合并 + 非可创建过滤）。
+> 共 **18 个分组**、**71 条 standard 命令**（72 spec 命令 - 1 条 SH→SF 合并）。
+>
+> - **分组显示名** = 本章节 H2 标题下的中文小标题（如 `设备信息参数管理`）。
+> - **命令叶子** = 每个 group_code 按 §R-3 派生 LST / MOD / ADD / RMV，显示名 = `<OP> <命令中文名>` （命令中文名来自 §R-2.4 权威表，**全中文**）。
+> - **权限**：📖 R = 只读 · 📝 RW = 可写 · 📖📝 = 混合；命令模板中 `{i}` 表示数组实例（多层 `{iα}/{iβ}/...` 已折叠为 `{i}`）。
+
+### 全景汇总（按 SA → SR 顺序）
+
+> **维度说明**：「命令叶子数」= 该章节 LST/MOD/ADD/RMV 命令行总数（已按 §R-3 过滤非可创建 ADD/RMV）；「path 行数」= 所有命令叶子的 target_paths 累计行数（同一 path 在 LST 与 MOD 中各计一行）。同 group_code 跨章节合并后归首次出现章节统计。
+
+| 章节 | 分组中文名 | 命令叶子数 | path 行数（LST+MOD+ADD+RMV 累计） |
+|------|-----------|-----------:|-----------------------------------:|
+| SA | 设备信息参数管理 | 3 | 22 |
+| SB | 软件版本参数管理 | 2 | 8 |
+| SC | 基站网管参数管理 | 2 | 34 |
+| SD | 告警参数管理 | 9 | 58 |
+| SE | 日志参数管理 | 2 | 10 |
+| SF | 小区服务参数管理（总体） | 29 | 133 |
+| SG | SCTP参数管理 | 3 | 22 |
+| SH | RAN协议栈参数 | 14 | 128 |
+| SI | 邻区参数管理 | 16 | 86 |
+| SJ | 移动性参数管理 | 52 | 305 |
+| SK | SON参数管理 | 3 | 52 |
+| SL | WAN口配置参数管理 | 28 | 83 |
+| SM | IPsec参数管理 | 2 | 11 |
+| SN | 时间服务器参数管理 | 2 | 15 |
+| SO | GPS信息参数管理 | 1 | 3 |
+| SP | MR参数管理 | 4 | 30 |
+| SQ | 性能参数管理 | 4 | 22 |
+| SR | 扩展型一体化皮基站参数 | 14 | 94 |
+| **合计** |  | **190** | **1116** |
+
+### 分组 · 命名 · path 三级结构（完整展开）
+
+> 三级结构：**分组（章节中文名）→ 命名（OP + 命令中文名）→ path（standardPath）**。
+>
+> 实施规则（与 §R-1 / §R-2 / §R-3 完全对齐）：
+>
+> 1. **只有一级分组** —— 18 个 SA-SR 章节，分组显示名 = 章节中文小标题（如 `设备信息参数管理`），无任何子分组；
+> 2. **命名 = `<OP> <命令中文名>`**；命令中文名由 §R-2.4「命令中文名权威表」按 `group_code` 唯一映射（**全中文**，TR-181 路径不进入显示名）；catalog Loader 启动期对每个 standard 命令查表，未命中即 panic 阻止入库；
+> 3. **path 集合**：LST=GPV 全集（RO+RW）· MOD=SPV 仅 RW · ADD/RMV=AddObject/DeleteObject 父级实例路径 `Device.X.{i}.`；ADD/RMV **仅当 `{i}` 是用户可创建实例时生成**（§R-3.2「非可创建对象清单」过滤）；
+> 4. **合并规则**：跨章节出现的**相同 group_code**（归一化 path 模板相等）合并为同一条命令；path 集做去重 union；归属首次出现的章节。
+>
+> **本节生成统计**：18 分组；71 条 standard 命令（合并 1 条同 group_code）；命令中文名表 §R-2.4 共 71 条。
+>
+> **合并日志**（同 group_code 不同章节出现，归并到首次出现的章节）：
+>
+> - `Device.Services.FAPService.{i}.*` —— 归到 **SF**（合并自 SH）
+
+#### SA · 设备信息参数管理
+
+```text
+设备信息参数管理
+├── LST 设备基本信息  (17 path)   [Device.DeviceInfo.*]
+│   ├── Device.DeviceInfo.UserLabel    📝 RW
+│   ├── Device.DeviceInfo.DnPrefix    📝 RW
+│   ├── Device.DeviceInfo.ManufacturerOUI    📖 R
+│   ├── Device.DeviceInfo.Manufacturer    📖 R
+│   ├── Device.DeviceInfo.ModelName    📖 R
+│   ├── Device.DeviceInfo.SerialNumber    📖 R
+│   ├── Device.DeviceInfo.HardwareVersion    📖 R
+│   ├── Device.DeviceInfo.SoftwareVersion    📖 R
+│   ├── Device.DeviceInfo.HardwarePlatform    📖 R
+│   ├── Device.DeviceInfo.AdditionalHardwareVersion    📖 R
+│   ├── Device.DeviceInfo.AdditionalSoftwareVersion    📖 R
+│   ├── Device.DeviceInfo.ProvisioningCode    📖 R
+│   ├── Device.DeviceInfo.ProductClass    📖 R
+│   ├── Device.DeviceInfo.UpTime    📖 R
+│   ├── Device.DeviceInfo.3GPPSpecVersion    📖 R
+│   ├── Device.DeviceInfo.FirstUseDate    📖 R
+│   └── Device.DeviceInfo.DataModelSpecVersion    📖 R
+├── MOD 设备基本信息  (2 path)   [Device.DeviceInfo.*]
+│   ├── Device.DeviceInfo.UserLabel    📝 RW
+│   └── Device.DeviceInfo.DnPrefix    📝 RW
+└── LST 设备软件升级状态  (3 path)   [Device.DeviceInfo.SwUpgrade.*]
+    ├── Device.DeviceInfo.SwUpgrade.Stage    📖 R
+    ├── Device.DeviceInfo.SwUpgrade.FailureCause    📖 R
+    └── Device.DeviceInfo.SwUpgrade.Status    📖 R
+```
+
+#### SB · 软件版本参数管理
+
+```text
+软件版本参数管理
+├── LST 软件版本控制  (5 path)   [Device.SoftwareCtrl.*]
+│   ├── Device.SoftwareCtrl.AutoActivateEnable    📝 RW
+│   ├── Device.SoftwareCtrl.ActivateTime    📝 RW
+│   ├── Device.SoftwareCtrl.ActivateEnable    📝 RW
+│   ├── Device.SoftwareCtrl.SystemCurrentVersion    📖 R
+│   └── Device.SoftwareCtrl.SystemBackupVersion    📖 R
+└── MOD 软件版本控制  (3 path)   [Device.SoftwareCtrl.*]
+    ├── Device.SoftwareCtrl.AutoActivateEnable    📝 RW
+    ├── Device.SoftwareCtrl.ActivateTime    📝 RW
+    └── Device.SoftwareCtrl.ActivateEnable    📝 RW
+```
+
+#### SC · 基站网管参数管理
+
+```text
+基站网管参数管理
+├── LST 基站网管连接  (19 path)   [Device.ManagementServer.*]
+│   ├── Device.ManagementServer.URL    📝 RW
+│   ├── Device.ManagementServer.Username    📝 RW
+│   ├── Device.ManagementServer.Password    📝 RW
+│   ├── Device.ManagementServer.PeriodicInformEnable    📝 RW
+│   ├── Device.ManagementServer.PeriodicInformTime    📝 RW
+│   ├── Device.ManagementServer.PeriodicInformInterval    📝 RW
+│   ├── Device.ManagementServer.ParameterKey    📖 R
+│   ├── Device.ManagementServer.ConnectionRequestURL    📖 R
+│   ├── Device.ManagementServer.ConnectionRequestUsername    📝 RW
+│   ├── Device.ManagementServer.ConnectionRequestPassword    📝 RW
+│   ├── Device.ManagementServer.UDPConnectionRequestAddress    📖 R
+│   ├── Device.ManagementServer.STUNEnable    📝 RW
+│   ├── Device.ManagementServer.STUNServerAddress    📝 RW
+│   ├── Device.ManagementServer.STUNServerPort    📝 RW
+│   ├── Device.ManagementServer.STUNUsername    📝 RW
+│   ├── Device.ManagementServer.STUNPassword    📝 RW
+│   ├── Device.ManagementServer.STUNMaximumKeepAlivePeriod    📝 RW
+│   ├── Device.ManagementServer.STUNMinimumKeepAlivePeriod    📝 RW
+│   └── Device.ManagementServer.NATDetected    📖 R
+└── MOD 基站网管连接  (15 path)   [Device.ManagementServer.*]
+    ├── Device.ManagementServer.URL    📝 RW
+    ├── Device.ManagementServer.Username    📝 RW
+    ├── Device.ManagementServer.Password    📝 RW
+    ├── Device.ManagementServer.PeriodicInformEnable    📝 RW
+    ├── Device.ManagementServer.PeriodicInformTime    📝 RW
+    ├── Device.ManagementServer.PeriodicInformInterval    📝 RW
+    ├── Device.ManagementServer.ConnectionRequestUsername    📝 RW
+    ├── Device.ManagementServer.ConnectionRequestPassword    📝 RW
+    ├── Device.ManagementServer.STUNEnable    📝 RW
+    ├── Device.ManagementServer.STUNServerAddress    📝 RW
+    ├── Device.ManagementServer.STUNServerPort    📝 RW
+    ├── Device.ManagementServer.STUNUsername    📝 RW
+    ├── Device.ManagementServer.STUNPassword    📝 RW
+    ├── Device.ManagementServer.STUNMaximumKeepAlivePeriod    📝 RW
+    └── Device.ManagementServer.STUNMinimumKeepAlivePeriod    📝 RW
+```
+
+#### SD · 告警参数管理
+
+```text
+告警参数管理
+├── LST 故障管理总览  (6 path)   [Device.FaultMgmt.*]
+│   ├── Device.FaultMgmt.SupportedAlarmNumberOfEntries    📖 R
+│   ├── Device.FaultMgmt.MaxCurrentAlarmEntries    📖 R
+│   ├── Device.FaultMgmt.CurrentAlarmNumberOfEntries    📖 R
+│   ├── Device.FaultMgmt.HistoryEventNumberOfEntries    📖 R
+│   ├── Device.FaultMgmt.ExpeditedEventNumberOfEntries    📖 R
+│   └── Device.FaultMgmt.QueuedEventNumberOfEntries    📖 R
+├── LST 当前告警实例  (11 path)   [Device.FaultMgmt.CurrentAlarm.{i}.*]
+│   ├── Device.FaultMgmt.CurrentAlarm.{i}.AlarmIdentifier    📖 R
+│   ├── Device.FaultMgmt.CurrentAlarm.{i}.AlarmRaisedTime    📖 R
+│   ├── Device.FaultMgmt.CurrentAlarm.{i}.AlarmChangedTime    📖 R
+│   ├── Device.FaultMgmt.CurrentAlarm.{i}.FaultLocation    📖 R
+│   ├── Device.FaultMgmt.CurrentAlarm.{i}.ManagedObjectInstance    📖 R
+│   ├── Device.FaultMgmt.CurrentAlarm.{i}.EventType    📖 R
+│   ├── Device.FaultMgmt.CurrentAlarm.{i}.ProbableCause    📖 R
+│   ├── Device.FaultMgmt.CurrentAlarm.{i}.SpecificProblem    📖 R
+│   ├── Device.FaultMgmt.CurrentAlarm.{i}.PerceivedSeverity    📖 R
+│   ├── Device.FaultMgmt.CurrentAlarm.{i}.AdditionalText    📖 R
+│   └── Device.FaultMgmt.CurrentAlarm.{i}.AdditionalInformation    📖 R
+├── LST 实时告警实例  (11 path)   [Device.FaultMgmt.ExpeditedEvent.{i}.*]
+│   ├── Device.FaultMgmt.ExpeditedEvent.{i}.EventTime    📖 R
+│   ├── Device.FaultMgmt.ExpeditedEvent.{i}.AlarmIdentifier    📖 R
+│   ├── Device.FaultMgmt.ExpeditedEvent.{i}.NotificationType    📖 R
+│   ├── Device.FaultMgmt.ExpeditedEvent.{i}.FaultLocation    📖 R
+│   ├── Device.FaultMgmt.ExpeditedEvent.{i}.ManagedObjectInstance    📖 R
+│   ├── Device.FaultMgmt.ExpeditedEvent.{i}.EventType    📖 R
+│   ├── Device.FaultMgmt.ExpeditedEvent.{i}.ProbableCause    📖 R
+│   ├── Device.FaultMgmt.ExpeditedEvent.{i}.SpecificProblem    📖 R
+│   ├── Device.FaultMgmt.ExpeditedEvent.{i}.PerceivedSeverity    📖 R
+│   ├── Device.FaultMgmt.ExpeditedEvent.{i}.AdditionalText    📖 R
+│   └── Device.FaultMgmt.ExpeditedEvent.{i}.AdditionalInformation    📖 R
+├── LST 历史告警实例  (11 path)   [Device.FaultMgmt.HistoryEvent.{i}.*]
+│   ├── Device.FaultMgmt.HistoryEvent.{i}.EventTime    📖 R
+│   ├── Device.FaultMgmt.HistoryEvent.{i}.AlarmIdentifier    📖 R
+│   ├── Device.FaultMgmt.HistoryEvent.{i}.NotificationType    📖 R
+│   ├── Device.FaultMgmt.HistoryEvent.{i}.FaultLocation    📖 R
+│   ├── Device.FaultMgmt.HistoryEvent.{i}.ManagedObjectInstance    📖 R
+│   ├── Device.FaultMgmt.HistoryEvent.{i}.EventType    📖 R
+│   ├── Device.FaultMgmt.HistoryEvent.{i}.ProbableCause    📖 R
+│   ├── Device.FaultMgmt.HistoryEvent.{i}.SpecificProblem    📖 R
+│   ├── Device.FaultMgmt.HistoryEvent.{i}.PerceivedSeverity    📖 R
+│   ├── Device.FaultMgmt.HistoryEvent.{i}.AdditionalText    📖 R
+│   └── Device.FaultMgmt.HistoryEvent.{i}.AdditionalInformation    📖 R
+├── LST 队列告警实例  (11 path)   [Device.FaultMgmt.QueuedEvent.{i}.*]
+│   ├── Device.FaultMgmt.QueuedEvent.{i}.EventTime    📖 R
+│   ├── Device.FaultMgmt.QueuedEvent.{i}.AlarmIdentifier    📖 R
+│   ├── Device.FaultMgmt.QueuedEvent.{i}.NotificationType    📖 R
+│   ├── Device.FaultMgmt.QueuedEvent.{i}.FaultLocation    📖 R
+│   ├── Device.FaultMgmt.QueuedEvent.{i}.ManagedObjectInstance    📖 R
+│   ├── Device.FaultMgmt.QueuedEvent.{i}.EventType    📖 R
+│   ├── Device.FaultMgmt.QueuedEvent.{i}.ProbableCause    📖 R
+│   ├── Device.FaultMgmt.QueuedEvent.{i}.SpecificProblem    📖 R
+│   ├── Device.FaultMgmt.QueuedEvent.{i}.PerceivedSeverity    📖 R
+│   ├── Device.FaultMgmt.QueuedEvent.{i}.AdditionalText    📖 R
+│   └── Device.FaultMgmt.QueuedEvent.{i}.AdditionalInformation    📖 R
+├── LST 支持告警类型  (5 path)   [Device.FaultMgmt.SupportedAlarm.{i}.*]
+│   ├── Device.FaultMgmt.SupportedAlarm.{i}.EventType    📖 R
+│   ├── Device.FaultMgmt.SupportedAlarm.{i}.ProbableCause    📖 R
+│   ├── Device.FaultMgmt.SupportedAlarm.{i}.SpecificProblem    📖 R
+│   ├── Device.FaultMgmt.SupportedAlarm.{i}.PerceivedSeverity    📖 R
+│   └── Device.FaultMgmt.SupportedAlarm.{i}.ReportingMechanism    📝 RW
+├── MOD 支持告警类型  (1 path)   [Device.FaultMgmt.SupportedAlarm.{i}.*]
+│   └── Device.FaultMgmt.SupportedAlarm.{i}.ReportingMechanism    📝 RW
+├── ADD 支持告警类型  (1 path)   [Device.FaultMgmt.SupportedAlarm.{i}.*]
+│   └── Device.FaultMgmt.SupportedAlarm.{i}.    📝 RW
+└── RMV 支持告警类型  (1 path)   [Device.FaultMgmt.SupportedAlarm.{i}.*]
+    └── Device.FaultMgmt.SupportedAlarm.{i}.    📝 RW
+```
+
+#### SE · 日志参数管理
+
+```text
+日志参数管理
+├── LST 日志管理配置  (5 path)   [Device.LogMgmt.*]
+│   ├── Device.LogMgmt.PeriodicUploadEnable    📝 RW
+│   ├── Device.LogMgmt.URL    📝 RW
+│   ├── Device.LogMgmt.Username    📝 RW
+│   ├── Device.LogMgmt.Password    📝 RW
+│   └── Device.LogMgmt.PeriodicUploadInterval    📝 RW
+└── MOD 日志管理配置  (5 path)   [Device.LogMgmt.*]
+    ├── Device.LogMgmt.PeriodicUploadEnable    📝 RW
+    ├── Device.LogMgmt.URL    📝 RW
+    ├── Device.LogMgmt.Username    📝 RW
+    ├── Device.LogMgmt.Password    📝 RW
+    └── Device.LogMgmt.PeriodicUploadInterval    📝 RW
+```
+
+#### SF · 小区服务参数管理（总体）
+
+```text
+小区服务参数管理（总体）
+├── LST LTE 接入控制  (3 path)   [Device.Services.FAPControl.LTE.*]
+│   ├── Device.Services.FAPControl.LTE.AdminState    📝 RW
+│   ├── Device.Services.FAPControl.LTE.OpState    📖 R
+│   └── Device.Services.FAPControl.LTE.RFTxStatus    📖 R
+├── MOD LTE 接入控制  (1 path)   [Device.Services.FAPControl.LTE.*]
+│   └── Device.Services.FAPControl.LTE.AdminState    📝 RW
+├── LST 安全接入网关  (10 path)   [Device.Services.FAPControl.LTE.Gateway.*]
+│   ├── Device.Services.FAPControl.LTE.Gateway.SecGWServer1    📝 RW
+│   ├── Device.Services.FAPControl.LTE.Gateway.SecGWServer2    📝 RW
+│   ├── Device.Services.FAPControl.LTE.Gateway.SecGWServer3    📝 RW
+│   ├── Device.Services.FAPControl.LTE.Gateway.AGServerEnable    📝 RW
+│   ├── Device.Services.FAPControl.LTE.Gateway.AGServerIp1    📝 RW
+│   ├── Device.Services.FAPControl.LTE.Gateway.AGServerIp2    📝 RW
+│   ├── Device.Services.FAPControl.LTE.Gateway.AGServerIp3    📝 RW
+│   ├── Device.Services.FAPControl.LTE.Gateway.AGPort1    📝 RW
+│   ├── Device.Services.FAPControl.LTE.Gateway.AGPort2    📝 RW
+│   └── Device.Services.FAPControl.LTE.Gateway.AGPort3    📝 RW
+├── MOD 安全接入网关  (10 path)   [Device.Services.FAPControl.LTE.Gateway.*]
+│   ├── Device.Services.FAPControl.LTE.Gateway.SecGWServer1    📝 RW
+│   ├── Device.Services.FAPControl.LTE.Gateway.SecGWServer2    📝 RW
+│   ├── Device.Services.FAPControl.LTE.Gateway.SecGWServer3    📝 RW
+│   ├── Device.Services.FAPControl.LTE.Gateway.AGServerEnable    📝 RW
+│   ├── Device.Services.FAPControl.LTE.Gateway.AGServerIp1    📝 RW
+│   ├── Device.Services.FAPControl.LTE.Gateway.AGServerIp2    📝 RW
+│   ├── Device.Services.FAPControl.LTE.Gateway.AGServerIp3    📝 RW
+│   ├── Device.Services.FAPControl.LTE.Gateway.AGPort1    📝 RW
+│   ├── Device.Services.FAPControl.LTE.Gateway.AGPort2    📝 RW
+│   └── Device.Services.FAPControl.LTE.Gateway.AGPort3    📝 RW
+├── LST MME 池配置  (5 path)   [Device.Services.FAPControl.LTE.MmePoolConfigParam.{i}.*]
+│   ├── Device.Services.FAPControl.LTE.MmePoolConfigParam.{i}.PLMNID    📖 R
+│   ├── Device.Services.FAPControl.LTE.MmePoolConfigParam.{i}.MMEGroupID    📖 R
+│   ├── Device.Services.FAPControl.LTE.MmePoolConfigParam.{i}.MMECode    📖 R
+│   ├── Device.Services.FAPControl.LTE.MmePoolConfigParam.{i}.MMEIp1    📝 RW
+│   └── Device.Services.FAPControl.LTE.MmePoolConfigParam.{i}.MMEIp2    📝 RW
+├── MOD MME 池配置  (2 path)   [Device.Services.FAPControl.LTE.MmePoolConfigParam.{i}.*]
+│   ├── Device.Services.FAPControl.LTE.MmePoolConfigParam.{i}.MMEIp1    📝 RW
+│   └── Device.Services.FAPControl.LTE.MmePoolConfigParam.{i}.MMEIp2    📝 RW
+├── ADD MME 池配置  (1 path)   [Device.Services.FAPControl.LTE.MmePoolConfigParam.{i}.*]
+│   └── Device.Services.FAPControl.LTE.MmePoolConfigParam.{i}.    📝 RW
+├── RMV MME 池配置  (1 path)   [Device.Services.FAPControl.LTE.MmePoolConfigParam.{i}.*]
+│   └── Device.Services.FAPControl.LTE.MmePoolConfigParam.{i}.    📝 RW
+├── LST S1U 用户面接口  (2 path)   [Device.Services.FAPControl.LTE.S1U.{i}.*]
+│   ├── Device.Services.FAPControl.LTE.S1U.{i}.LocIpAddrList    📖 R
+│   └── Device.Services.FAPControl.LTE.S1U.{i}.FarIpSubnetworkList    📖 R
+├── LST X2 接口 IP 映射  (5 path)   [Device.Services.FAPControl.X2IpAddrMapInfo.{i}.*]
+│   ├── Device.Services.FAPControl.X2IpAddrMapInfo.{i}.PLMNID    📝 RW
+│   ├── Device.Services.FAPControl.X2IpAddrMapInfo.{i}.EnbType    📝 RW
+│   ├── Device.Services.FAPControl.X2IpAddrMapInfo.{i}.EnbId    📝 RW
+│   ├── Device.Services.FAPControl.X2IpAddrMapInfo.{i}.WanIpAddress    📝 RW
+│   └── Device.Services.FAPControl.X2IpAddrMapInfo.{i}.SubnetMask    📝 RW
+├── MOD X2 接口 IP 映射  (5 path)   [Device.Services.FAPControl.X2IpAddrMapInfo.{i}.*]
+│   ├── Device.Services.FAPControl.X2IpAddrMapInfo.{i}.PLMNID    📝 RW
+│   ├── Device.Services.FAPControl.X2IpAddrMapInfo.{i}.EnbType    📝 RW
+│   ├── Device.Services.FAPControl.X2IpAddrMapInfo.{i}.EnbId    📝 RW
+│   ├── Device.Services.FAPControl.X2IpAddrMapInfo.{i}.WanIpAddress    📝 RW
+│   └── Device.Services.FAPControl.X2IpAddrMapInfo.{i}.SubnetMask    📝 RW
+├── ADD X2 接口 IP 映射  (1 path)   [Device.Services.FAPControl.X2IpAddrMapInfo.{i}.*]
+│   └── Device.Services.FAPControl.X2IpAddrMapInfo.{i}.    📝 RW
+├── RMV X2 接口 IP 映射  (1 path)   [Device.Services.FAPControl.X2IpAddrMapInfo.{i}.*]
+│   └── Device.Services.FAPControl.X2IpAddrMapInfo.{i}.    📝 RW
+├── LST FAP 载波基本配置  (34 path)   [Device.Services.FAPService.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.CellRestriction.CellBarred    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.CellEnable.AdminState    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.OpState    📖 R
+│   ├── Device.Services.FAPService.{i}.CellConfig.AccessMgmt.LTE.MaxUEsServed    📖 R
+│   ├── Device.Services.FAPService.{i}.CellConfig.SysInfoCtrlParam.MultiBandInfoListSIB1    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.SysInfoCtrlParam.MultiBandInfoListSIB5    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RouteIndexList    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RuList    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.UserLabel    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNDL    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PSCHPowerOffset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.SSCHPowerOffset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PBCHPowerOffset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNUL    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.FreqBandIndicator    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ReferenceSignalPower    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.CellIdentity    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.EnbType    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.VoLTEParam.SPSSwitchQCI1Ul    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchUl    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchDl    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T300    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T301    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T302    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304EUTRA    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304IRAT    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T310    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T311    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T320    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N310    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N311    📝 RW
+├── MOD FAP 载波基本配置  (32 path)   [Device.Services.FAPService.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.CellRestriction.CellBarred    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.CellEnable.AdminState    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.SysInfoCtrlParam.MultiBandInfoListSIB1    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.SysInfoCtrlParam.MultiBandInfoListSIB5    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RouteIndexList    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RuList    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.UserLabel    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNDL    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PSCHPowerOffset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.SSCHPowerOffset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PBCHPowerOffset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNUL    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.FreqBandIndicator    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ReferenceSignalPower    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.CellIdentity    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.EnbType    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.VoLTEParam.SPSSwitchQCI1Ul    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchUl    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.CAParam.CASwitchDl    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T300    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T301    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T302    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304EUTRA    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T304IRAT    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T310    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T311    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.T320    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N310    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RRCTimers.N311    📝 RW
+├── LST FAP 载波能力集  (1 path)   [Device.Services.FAPService.{i}.Capabilities.*]
+│   └── Device.Services.FAPService.{i}.Capabilities.LTE.NNSFSupported    📝 RW
+├── MOD FAP 载波能力集  (1 path)   [Device.Services.FAPService.{i}.Capabilities.*]
+│   └── Device.Services.FAPService.{i}.Capabilities.LTE.NNSFSupported    📝 RW
+├── LST 小区配置能力集  (3 path)   [Device.Services.FAPService.{i}.CellConfig.Capabilities.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.Capabilities.LTE.UeInactiveTimer    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.Capabilities.LTE.SupportActiveRRCNumbers    📖 R
+│   └── Device.Services.FAPService.{i}.CellConfig.Capabilities.MaxTxPower    📖 R
+├── MOD 小区配置能力集  (1 path)   [Device.Services.FAPService.{i}.CellConfig.Capabilities.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.Capabilities.LTE.UeInactiveTimer    📝 RW
+├── LST EPC 核心网参数  (2 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.EPC.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.EPC.EAID    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.EPC.TAC    📝 RW
+├── MOD EPC 核心网参数  (2 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.EPC.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.EPC.EAID    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.EPC.TAC    📝 RW
+├── LST EPC PLMN 列表  (2 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.PLMNID    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.CellReservedForOperatorUse    📝 RW
+├── MOD EPC PLMN 列表  (2 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.PLMNID    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.CellReservedForOperatorUse    📝 RW
+├── ADD EPC PLMN 列表  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.    📝 RW
+├── RMV EPC PLMN 列表  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.    📝 RW
+├── LST VoLTE PDCP 初始参数  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.{i}.RohcEn    📝 RW
+├── MOD VoLTE PDCP 初始参数  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.{i}.RohcEn    📝 RW
+├── ADD VoLTE PDCP 初始参数  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.{i}.    📝 RW
+└── RMV VoLTE PDCP 初始参数  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.{i}.*]
+    └── Device.Services.FAPService.{i}.CellConfig.LTE.VoLTE.PdcpInitParam.{i}.    📝 RW
+```
+
+#### SG · SCTP参数管理
+
+```text
+SCTP参数管理
+├── LST SCTP 协议配置  (9 path)   [Device.Services.FAPControl.Transport.SCTP.*]
+│   ├── Device.Services.FAPControl.Transport.SCTP.Enable    📝 RW
+│   ├── Device.Services.FAPControl.Transport.SCTP.RTOInitial    📝 RW
+│   ├── Device.Services.FAPControl.Transport.SCTP.RTOMin    📝 RW
+│   ├── Device.Services.FAPControl.Transport.SCTP.RTOMax    📝 RW
+│   ├── Device.Services.FAPControl.Transport.SCTP.MaxInitRetransmits    📝 RW
+│   ├── Device.Services.FAPControl.Transport.SCTP.HBInterval    📝 RW
+│   ├── Device.Services.FAPControl.Transport.SCTP.MaxPathRetransmits    📝 RW
+│   ├── Device.Services.FAPControl.Transport.SCTP.MaxAssociationRetransmits    📝 RW
+│   └── Device.Services.FAPControl.Transport.SCTP.ValCookieLife    📝 RW
+├── MOD SCTP 协议配置  (9 path)   [Device.Services.FAPControl.Transport.SCTP.*]
+│   ├── Device.Services.FAPControl.Transport.SCTP.Enable    📝 RW
+│   ├── Device.Services.FAPControl.Transport.SCTP.RTOInitial    📝 RW
+│   ├── Device.Services.FAPControl.Transport.SCTP.RTOMin    📝 RW
+│   ├── Device.Services.FAPControl.Transport.SCTP.RTOMax    📝 RW
+│   ├── Device.Services.FAPControl.Transport.SCTP.MaxInitRetransmits    📝 RW
+│   ├── Device.Services.FAPControl.Transport.SCTP.HBInterval    📝 RW
+│   ├── Device.Services.FAPControl.Transport.SCTP.MaxPathRetransmits    📝 RW
+│   ├── Device.Services.FAPControl.Transport.SCTP.MaxAssociationRetransmits    📝 RW
+│   └── Device.Services.FAPControl.Transport.SCTP.ValCookieLife    📝 RW
+└── LST SCTP 关联状态  (4 path)   [Device.Services.FAPControl.Transport.SCTP.Assoc.{i}.*]
+    ├── Device.Services.FAPControl.Transport.SCTP.Assoc.{i}.SCTPAssocLocalAddr    📖 R
+    ├── Device.Services.FAPControl.Transport.SCTP.Assoc.{i}.LocalPort    📖 R
+    ├── Device.Services.FAPControl.Transport.SCTP.Assoc.{i}.PrimaryPeerAddress    📖 R
+    └── Device.Services.FAPControl.Transport.SCTP.Assoc.{i}.RemotePort    📖 R
+```
+
+#### SH · RAN协议栈参数
+
+```text
+RAN协议栈参数
+├── LST RAN MAC 协议层  (16 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.RACH.NumberOfRaPreambles    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.RACH.SizeOfRaGroupA    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.RACH.MessageSizeGroupA    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.RACH.MessagePowerOffsetGroupB    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.RACH.PowerRampingStep    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.RACH.PreambleInitialReceivedTargetPower    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.RACH.PreambleTransMax    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.RACH.ResponseWindowSize    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.RACH.ContentionResolutionTimer    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.RACH.MaxHARQMsg3Tx    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DRX.DRXEnabled    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.ULSCH.MaxHARQTx    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.ULSCH.PeriodicBSRTimer    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.ULSCH.RetxBSRTimer    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.ULSCH.TTIBundling    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.ULSCH.MaxUePerUlSf    📝 RW
+├── MOD RAN MAC 协议层  (16 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.RACH.NumberOfRaPreambles    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.RACH.SizeOfRaGroupA    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.RACH.MessageSizeGroupA    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.RACH.MessagePowerOffsetGroupB    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.RACH.PowerRampingStep    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.RACH.PreambleInitialReceivedTargetPower    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.RACH.PreambleTransMax    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.RACH.ResponseWindowSize    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.RACH.ContentionResolutionTimer    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.RACH.MaxHARQMsg3Tx    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DRX.DRXEnabled    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.ULSCH.MaxHARQTx    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.ULSCH.PeriodicBSRTimer    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.ULSCH.RetxBSRTimer    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.ULSCH.TTIBundling    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.ULSCH.MaxUePerUlSf    📝 RW
+├── LST MAC DRX 初始参数  (6 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{i}.DRXShortCycleTimer    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{i}.ONDurationTimer    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{i}.DRXInactivityTimer    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{i}.DRXRetransmissionTimer    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{i}.LongDRXCycle    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{i}.ShortDRXCycle    📝 RW
+├── MOD MAC DRX 初始参数  (6 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{i}.DRXShortCycleTimer    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{i}.ONDurationTimer    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{i}.DRXInactivityTimer    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{i}.DRXRetransmissionTimer    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{i}.LongDRXCycle    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{i}.ShortDRXCycle    📝 RW
+├── ADD MAC DRX 初始参数  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{i}.    📝 RW
+├── RMV MAC DRX 初始参数  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{i}.    📝 RW
+├── LST RAN PHY 物理层  (35 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.ConfigurationIndex    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.FreqOffset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.HighSpeedFlag    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.RootSequenceIndex    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.ZeroCorrelationZoneConfig    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.SRS.SRSEnabled    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.SRS.SRSBandwidthConfig    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.SRS.SRSMaxUpPTS    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.SRS.AckNackSRSSimultaneousTransmission    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PUCCH.DeltaPUCCHShift    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PUCCH.NRBCQI    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PUCCH.NCSAN    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PUCCH.N1PUCCHAN    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PUCCH.CQIPUCCHResourceIndex    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PUCCH.K    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PaParam.PUSCHPowerCtrlSwitch    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PaParam.PUCCHPowerCtrlSwitch    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PUSCH.Enable64QAM    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PUSCH.HoppingMode    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PUSCH.HoppingOffset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PUSCH.NSB    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRS.NumPRSResourceBlocks    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRS.PRSConfigurationIndex    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRS.NumConsecutivePRSSubfames    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SpecialSubframePatterns    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PDSCH.Pb    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PDSCH.Pa    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.ULPowerControl.P0NominalPUSCHPersistent    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.ULPowerControl.P0NominalPUSCH    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.ULPowerControl.Alpha    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.ULPowerControl.P0NominalPUCCH    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.ULPowerControl.DeltaMCSEnabled    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.Antenna.NumOfTxAntenna    📖 R
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.Antenna.NumOfRxAntenna    📖 R
+├── MOD RAN PHY 物理层  (33 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.ConfigurationIndex    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.FreqOffset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.HighSpeedFlag    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.RootSequenceIndex    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.ZeroCorrelationZoneConfig    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.SRS.SRSEnabled    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.SRS.SRSBandwidthConfig    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.SRS.SRSMaxUpPTS    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.SRS.AckNackSRSSimultaneousTransmission    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PUCCH.DeltaPUCCHShift    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PUCCH.NRBCQI    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PUCCH.NCSAN    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PUCCH.N1PUCCHAN    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PUCCH.CQIPUCCHResourceIndex    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PUCCH.K    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PaParam.PUSCHPowerCtrlSwitch    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PaParam.PUCCHPowerCtrlSwitch    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PUSCH.Enable64QAM    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PUSCH.HoppingMode    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PUSCH.HoppingOffset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PUSCH.NSB    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRS.NumPRSResourceBlocks    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRS.PRSConfigurationIndex    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRS.NumConsecutivePRSSubfames    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SpecialSubframePatterns    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PDSCH.Pb    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PDSCH.Pa    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.ULPowerControl.P0NominalPUSCHPersistent    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.ULPowerControl.P0NominalPUSCH    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.ULPowerControl.Alpha    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.ULPowerControl.P0NominalPUCCH    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.ULPowerControl.DeltaMCSEnabled    📝 RW
+├── LST PHY MBSFN 子帧  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.NeighCellConfig    📝 RW
+├── MOD PHY MBSFN 子帧  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.NeighCellConfig    📝 RW
+├── LST MBSFN 子帧配置列表  (5 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{i}.RadioframeAllocationOffset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{i}.RadioFrameAllocationPeriod    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{i}.RadioFrameAllocationSize    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{i}.SubFrameAllocations    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{i}.SyncStratumID    📝 RW
+├── MOD MBSFN 子帧配置列表  (5 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{i}.RadioframeAllocationOffset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{i}.RadioFrameAllocationPeriod    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{i}.RadioFrameAllocationSize    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{i}.SubFrameAllocations    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{i}.SyncStratumID    📝 RW
+├── ADD MBSFN 子帧配置列表  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{i}.    📝 RW
+└── RMV MBSFN 子帧配置列表  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{i}.*]
+    └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{i}.    📝 RW
+```
+
+#### SI · 邻区参数管理
+
+```text
+邻区参数管理
+├── LST GSM 异系统邻区  (7 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.PLMNID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.LAC    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.BSIC    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.CI    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.BandIndicator    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.BCCHARFCN    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.RAC    📝 RW
+├── MOD GSM 异系统邻区  (7 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.PLMNID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.LAC    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.BSIC    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.CI    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.BandIndicator    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.BCCHARFCN    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.RAC    📝 RW
+├── ADD GSM 异系统邻区  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.    📝 RW
+├── RMV GSM 异系统邻区  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{i}.    📝 RW
+├── LST NR 异系统邻区  (12 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.PLMNID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.CID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.GnbIdLen    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.SsbFrequency    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.SsbPeriodicity    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.SsbOffset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.Ssb_Duration    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.PhyCellID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.TAC    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.Qoffset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.NRband    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.NeighType    📝 RW
+├── MOD NR 异系统邻区  (12 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.PLMNID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.CID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.GnbIdLen    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.SsbFrequency    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.SsbPeriodicity    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.SsbOffset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.Ssb_Duration    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.PhyCellID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.TAC    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.Qoffset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.NRband    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.NeighType    📝 RW
+├── ADD NR 异系统邻区  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.    📝 RW
+├── RMV NR 异系统邻区  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{i}.    📝 RW
+├── LST UMTS 异系统邻区  (10 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.PLMNID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.RNCID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.CID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.LAC    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.RAC    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.URA    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.UARFCNUL    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.UARFCNDL    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.PCPICHScramblingCode    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.PCPICHTxPower    📝 RW
+├── MOD UMTS 异系统邻区  (10 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.PLMNID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.RNCID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.CID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.LAC    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.RAC    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.URA    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.UARFCNUL    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.UARFCNDL    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.PCPICHScramblingCode    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.PCPICHTxPower    📝 RW
+├── ADD UMTS 异系统邻区  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.    📝 RW
+├── RMV UMTS 异系统邻区  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{i}.    📝 RW
+├── LST LTE 同系统邻区  (10 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.PLMNID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.CID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.EUTRACarrierARFCN    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.PhyCellID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.QOffset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.CIO    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.RSTxPower    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.Blacklisted    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.TAC    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.EnbType    📝 RW
+├── MOD LTE 同系统邻区  (10 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.PLMNID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.CID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.EUTRACarrierARFCN    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.PhyCellID    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.QOffset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.CIO    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.RSTxPower    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.Blacklisted    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.TAC    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.EnbType    📝 RW
+├── ADD LTE 同系统邻区  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.    📝 RW
+└── RMV LTE 同系统邻区  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.*]
+    └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.    📝 RW
+```
+
+#### SJ · 移动性参数管理
+
+```text
+移动性参数管理
+├── LST 连接态 EUTRA 测量  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.MeasureCtrl.Smeasure    📝 RW
+├── MOD 连接态 EUTRA 测量  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.MeasureCtrl.Smeasure    📝 RW
+├── LST A1 事件测量控制  (11 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.Enable    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.A1ThresholdRSRP    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.A1ThresholdRSRQ    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.Hysteresis    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.MaxReportCells    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.MeasurePurpose    📖 R
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.ReportAmount    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.ReportInterval    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.ReportQuantity    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.TimeToTrigger    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.TriggerQuantity    📝 RW
+├── MOD A1 事件测量控制  (10 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.Enable    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.A1ThresholdRSRP    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.A1ThresholdRSRQ    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.Hysteresis    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.MaxReportCells    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.ReportAmount    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.ReportInterval    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.ReportQuantity    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.TimeToTrigger    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.TriggerQuantity    📝 RW
+├── ADD A1 事件测量控制  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.    📝 RW
+├── RMV A1 事件测量控制  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{i}.    📝 RW
+├── LST A2 事件测量控制  (11 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.Enable    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.A2ThresholdRSRP    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.A2ThresholdRSRQ    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.Hysteresis    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.MaxReportCells    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.MeasurePurpose    📖 R
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.ReportAmount    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.ReportInterval    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.ReportQuantity    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.TimeToTrigger    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.TriggerQuantity    📝 RW
+├── MOD A2 事件测量控制  (10 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.Enable    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.A2ThresholdRSRP    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.A2ThresholdRSRQ    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.Hysteresis    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.MaxReportCells    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.ReportAmount    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.ReportInterval    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.ReportQuantity    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.TimeToTrigger    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.TriggerQuantity    📝 RW
+├── ADD A2 事件测量控制  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.    📝 RW
+├── RMV A2 事件测量控制  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{i}.    📝 RW
+├── LST A3 事件测量控制  (11 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.Enable    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.A3Offset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.Hysteresis    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.MaxReportCells    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.MeasurePurpose    📖 R
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.ReportAmount    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.ReportOnLeave    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.ReportInterval    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.ReportQuantity    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.TimeToTrigger    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.TriggerQuantity    📝 RW
+├── MOD A3 事件测量控制  (10 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.Enable    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.A3Offset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.Hysteresis    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.MaxReportCells    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.ReportAmount    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.ReportOnLeave    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.ReportInterval    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.ReportQuantity    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.TimeToTrigger    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.TriggerQuantity    📝 RW
+├── ADD A3 事件测量控制  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.    📝 RW
+├── RMV A3 事件测量控制  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{i}.    📝 RW
+├── LST A4 事件测量控制  (11 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.Enable    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.A4ThresholdRSRP    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.A4ThresholdRSRQ    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.Hysteresis    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.MaxReportCells    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.MeasurePurpose    📖 R
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.ReportAmount    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.ReportInterval    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.ReportQuantity    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.TimeToTrigger    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.TriggerQuantity    📝 RW
+├── MOD A4 事件测量控制  (10 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.Enable    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.A4ThresholdRSRP    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.A4ThresholdRSRQ    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.Hysteresis    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.MaxReportCells    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.ReportAmount    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.ReportInterval    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.ReportQuantity    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.TimeToTrigger    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.TriggerQuantity    📝 RW
+├── ADD A4 事件测量控制  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.    📝 RW
+├── RMV A4 事件测量控制  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{i}.    📝 RW
+├── LST A5 事件测量控制  (13 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.Enable    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.A5Threshold1RSRP    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.A5Threshold1RSRQ    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.A5Threshold2RSRP    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.A5Threshold2RSRQ    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.Hysteresis    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.MaxReportCells    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.MeasurePurpose    📖 R
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.ReportAmount    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.ReportInterval    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.ReportQuantity    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.TimeToTrigger    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.TriggerQuantity    📝 RW
+├── MOD A5 事件测量控制  (12 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.Enable    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.A5Threshold1RSRP    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.A5Threshold1RSRQ    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.A5Threshold2RSRP    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.A5Threshold2RSRQ    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.Hysteresis    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.MaxReportCells    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.ReportAmount    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.ReportInterval    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.ReportQuantity    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.TimeToTrigger    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.TriggerQuantity    📝 RW
+├── ADD A5 事件测量控制  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.    📝 RW
+├── RMV A5 事件测量控制  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{i}.    📝 RW
+├── LST EUTRA 周期测量控制  (4 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.PeriodMeasCtrl.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.PeriodMeasCtrl.{i}.MeasurePurpose    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.PeriodMeasCtrl.{i}.MaxReportCells    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.PeriodMeasCtrl.{i}.ReportInterval    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.PeriodMeasCtrl.{i}.ReportAmount    📝 RW
+├── MOD EUTRA 周期测量控制  (4 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.PeriodMeasCtrl.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.PeriodMeasCtrl.{i}.MeasurePurpose    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.PeriodMeasCtrl.{i}.MaxReportCells    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.PeriodMeasCtrl.{i}.ReportInterval    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.PeriodMeasCtrl.{i}.ReportAmount    📝 RW
+├── ADD EUTRA 周期测量控制  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.PeriodMeasCtrl.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.PeriodMeasCtrl.{i}.    📝 RW
+├── RMV EUTRA 周期测量控制  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.PeriodMeasCtrl.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.PeriodMeasCtrl.{i}.    📝 RW
+├── LST 连接态 IRAT 测量  (4 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.QoffsetGERAN    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.MeasQuantityUTRAFDD    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.MeasQuantityGERAN    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.QoffsetUTRA    📝 RW
+├── MOD 连接态 IRAT 测量  (4 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.QoffsetGERAN    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.MeasQuantityUTRAFDD    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.MeasQuantityGERAN    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.QoffsetUTRA    📝 RW
+├── LST B1 事件测量控制  (11 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.Enable    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.B1ThresholdCDMA2000    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.B1ThresholdGERAN    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.B1ThresholdUTRAEcN0    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.B1ThresholdUTRARSCP    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.Hysteresis    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.MaxReportCells    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.MeasurePurpose    📖 R
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.ReportAmount    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.ReportInterval    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.TimeToTrigger    📝 RW
+├── MOD B1 事件测量控制  (10 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.Enable    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.B1ThresholdCDMA2000    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.B1ThresholdGERAN    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.B1ThresholdUTRAEcN0    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.B1ThresholdUTRARSCP    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.Hysteresis    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.MaxReportCells    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.ReportAmount    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.ReportInterval    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.TimeToTrigger    📝 RW
+├── ADD B1 事件测量控制  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.    📝 RW
+├── RMV B1 事件测量控制  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{i}.    📝 RW
+├── LST B2 事件测量控制  (13 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.Enable    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.B2Threshold1EutraRSRP    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.B2Threshold1EutraRSRQ    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.B2Threshold2CDMA2000    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.B2Threshold2GERAN    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.B2Threshold2UTRAEcN0    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.B2Threshold2UTRARSCP    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.Hysteresis    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.MaxReportCells    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.MeasurePurpose    📖 R
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.ReportAmount    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.ReportInterval    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.TimeToTrigger    📝 RW
+├── MOD B2 事件测量控制  (12 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.Enable    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.B2Threshold1EutraRSRP    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.B2Threshold1EutraRSRQ    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.B2Threshold2CDMA2000    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.B2Threshold2GERAN    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.B2Threshold2UTRAEcN0    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.B2Threshold2UTRARSCP    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.Hysteresis    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.MaxReportCells    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.ReportAmount    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.ReportInterval    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.TimeToTrigger    📝 RW
+├── ADD B2 事件测量控制  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.    📝 RW
+├── RMV B2 事件测量控制  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{i}.    📝 RW
+├── LST 空闲态移动性  (28 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.Qhyst    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.IntraFreqReselection    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.QHystSFMedium    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.QHystSFHigh    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.TEvaluation    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.THystNormal    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.NCellChangeMedium    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.NCellChangeHigh    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.QRxLevMinSIB1    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.QRxLevMinSIB3    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.QRxLevMinOffset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.SIntraSearch    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.TReselectionEUTRA    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.SNonIntraSearch    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.SNonIntraSearchPR9    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.SNonIntraSearchQR9    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.CellReselectionPriority    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.PMax    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.ThreshServingLow    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.ThreshServingLowQR9    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.TReselectionEUTRASFMedium    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.TReselectionEUTRASFHigh    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.SIntraSearchPR9    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.SIntraSearchQR9    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.QQualMinR9Reselection    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.QQualMinR9Selection    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.QQualMinOffsetR9    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.AllowedMeasBandwidth    📝 RW
+├── MOD 空闲态移动性  (28 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.Qhyst    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.IntraFreqReselection    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.QHystSFMedium    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.QHystSFHigh    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.TEvaluation    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.THystNormal    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.NCellChangeMedium    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.NCellChangeHigh    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.QRxLevMinSIB1    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.QRxLevMinSIB3    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.QRxLevMinOffset    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.SIntraSearch    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.TReselectionEUTRA    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.SNonIntraSearch    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.SNonIntraSearchPR9    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.SNonIntraSearchQR9    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.CellReselectionPriority    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.PMax    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.ThreshServingLow    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.ThreshServingLowQR9    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.TReselectionEUTRASFMedium    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.TReselectionEUTRASFHigh    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.SIntraSearchPR9    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.SIntraSearchQR9    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.QQualMinR9Reselection    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.QQualMinR9Selection    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.QQualMinOffsetR9    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IntraFreq.AllowedMeasBandwidth    📝 RW
+├── LST 空闲态 IRAT 移动性  (2 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.TReselectionUTRA    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.TReselectionGERAN    📝 RW
+├── MOD 空闲态 IRAT 移动性  (2 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.TReselectionUTRA    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.TReselectionGERAN    📝 RW
+├── LST 空闲态 GERAN 频组  (6 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{i}.BCCHARFCN    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{i}.CellReselectionPriority    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{i}.QRxLevMin    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{i}.ThreshXHigh    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{i}.ThreshXLow    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{i}.PMaxGERAN    📝 RW
+├── MOD 空闲态 GERAN 频组  (6 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{i}.BCCHARFCN    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{i}.CellReselectionPriority    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{i}.QRxLevMin    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{i}.ThreshXHigh    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{i}.ThreshXLow    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{i}.PMaxGERAN    📝 RW
+├── ADD 空闲态 GERAN 频组  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{i}.    📝 RW
+├── RMV 空闲态 GERAN 频组  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{i}.    📝 RW
+├── LST 空闲态 UTRA FDD 频点  (6 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{i}.UTRACarrierARFCN    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{i}.CellReselectionPriority    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{i}.ThreshXHigh    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{i}.ThreshXLow    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{i}.QRxLevMin    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{i}.PMaxUTRA    📝 RW
+├── MOD 空闲态 UTRA FDD 频点  (6 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{i}.UTRACarrierARFCN    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{i}.CellReselectionPriority    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{i}.ThreshXHigh    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{i}.ThreshXLow    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{i}.QRxLevMin    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{i}.PMaxUTRA    📝 RW
+├── ADD 空闲态 UTRA FDD 频点  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{i}.    📝 RW
+├── RMV 空闲态 UTRA FDD 频点  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{i}.    📝 RW
+├── LST 空闲态异频载波  (13 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.EUTRACarrierARFCN    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QRxLevMinSIB5    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QOffsetFreq    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.TReselectionEUTRA    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QQualMinR9Reselection    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.CellReselectionPriority    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXHigh    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXLow    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.PMax    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.TReselectionEUTRASFMedium    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.TReselectionEUTRASFHigh    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXHighQR9    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXLowQR9    📝 RW
+├── MOD 空闲态异频载波  (13 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.*]
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.EUTRACarrierARFCN    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QRxLevMinSIB5    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QOffsetFreq    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.TReselectionEUTRA    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.QQualMinR9Reselection    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.CellReselectionPriority    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXHigh    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXLow    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.PMax    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.TReselectionEUTRASFMedium    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.TReselectionEUTRASFHigh    📝 RW
+│   ├── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXHighQR9    📝 RW
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.ThreshXLowQR9    📝 RW
+├── ADD 空闲态异频载波  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.*]
+│   └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.    📝 RW
+└── RMV 空闲态异频载波  (1 path)   [Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.*]
+    └── Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.    📝 RW
+```
+
+#### SK · SON参数管理
+
+```text
+SON参数管理
+├── LST SON 自配置参数  (25 path)   [Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.*]
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.SONSysMode    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.SONWorkMode    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.PCIOptEnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.PCIReconfigWaitTime    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.CandidateARFCNList    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.CandidatePCIList    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.ANREnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.ANRInterFeqEnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.ANRGERANEnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.ANRUTRANEnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.ARFCNEnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.MaxLTENeighbourCellNum    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.MaxUTRANNeighbourCellNum    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.MaxGRANNeighbourCellNum    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.ReSynCellEnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.PowerEnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.LTESnifferFreqBandList    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.LTESnifferChannelList    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.GERANSnifferEnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.GERANSnifferChannelList    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.UTRANSnifferEnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.UTRANSnifferChannelList    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.MROEnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.SHEnable    📝 RW
+│   └── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.SyncMode    📖 R
+├── MOD SON 自配置参数  (24 path)   [Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.*]
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.SONSysMode    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.SONWorkMode    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.PCIOptEnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.PCIReconfigWaitTime    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.CandidateARFCNList    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.CandidatePCIList    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.ANREnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.ANRInterFeqEnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.ANRGERANEnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.ANRUTRANEnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.ARFCNEnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.MaxLTENeighbourCellNum    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.MaxUTRANNeighbourCellNum    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.MaxGRANNeighbourCellNum    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.ReSynCellEnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.PowerEnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.LTESnifferFreqBandList    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.LTESnifferChannelList    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.GERANSnifferEnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.GERANSnifferChannelList    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.UTRANSnifferEnable    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.UTRANSnifferChannelList    📝 RW
+│   ├── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.MROEnable    📝 RW
+│   └── Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.SHEnable    📝 RW
+└── LST 自配置启动状态  (3 path)   [Device.Services.FAPService.{i}.FAPControl.SelfConfig.*]
+    ├── Device.Services.FAPService.{i}.FAPControl.SelfConfig.Startup.Stage    📖 R
+    ├── Device.Services.FAPService.{i}.FAPControl.SelfConfig.Startup.Status    📖 R
+    └── Device.Services.FAPService.{i}.FAPControl.SelfConfig.Startup.FailureCause    📖 R
+```
+
+#### SL · WAN口配置参数管理
+
+```text
+WAN口配置参数管理
+├── LST 以太网接口  (9 path)   [Device.Ethernet.Interface.{i}.*]
+│   ├── Device.Ethernet.Interface.{i}.Enable    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.UserLabel    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.Name    📖 R
+│   ├── Device.Ethernet.Interface.{i}.Status    📖 R
+│   ├── Device.Ethernet.Interface.{i}.MACAddress    📖 R
+│   ├── Device.Ethernet.Interface.{i}.MaxBitRate    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.SignTransMedia    📖 R
+│   ├── Device.Ethernet.Interface.{i}.DuplexMode    📝 RW
+│   └── Device.Ethernet.Interface.{i}.PortLocation    📖 R
+├── MOD 以太网接口  (4 path)   [Device.Ethernet.Interface.{i}.*]
+│   ├── Device.Ethernet.Interface.{i}.Enable    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.UserLabel    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.MaxBitRate    📝 RW
+│   └── Device.Ethernet.Interface.{i}.DuplexMode    📝 RW
+├── ADD 以太网接口  (1 path)   [Device.Ethernet.Interface.{i}.*]
+│   └── Device.Ethernet.Interface.{i}.    📝 RW
+├── RMV 以太网接口  (1 path)   [Device.Ethernet.Interface.{i}.*]
+│   └── Device.Ethernet.Interface.{i}.    📝 RW
+├── LST 接口 IPv4 地址  (5 path)   [Device.Ethernet.Interface.{i}.IPv4Address.{i}.*]
+│   ├── Device.Ethernet.Interface.{i}.IPv4Address.{i}.IPAddress    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.IPv4Address.{i}.DefaultGateway    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.IPv4Address.{i}.SubnetMask    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.IPv4Address.{i}.AddressingType    📝 RW
+│   └── Device.Ethernet.Interface.{i}.IPv4Address.{i}.PortType    📝 RW
+├── MOD 接口 IPv4 地址  (5 path)   [Device.Ethernet.Interface.{i}.IPv4Address.{i}.*]
+│   ├── Device.Ethernet.Interface.{i}.IPv4Address.{i}.IPAddress    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.IPv4Address.{i}.DefaultGateway    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.IPv4Address.{i}.SubnetMask    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.IPv4Address.{i}.AddressingType    📝 RW
+│   └── Device.Ethernet.Interface.{i}.IPv4Address.{i}.PortType    📝 RW
+├── ADD 接口 IPv4 地址  (1 path)   [Device.Ethernet.Interface.{i}.IPv4Address.{i}.*]
+│   └── Device.Ethernet.Interface.{i}.IPv4Address.{i}.    📝 RW
+├── RMV 接口 IPv4 地址  (1 path)   [Device.Ethernet.Interface.{i}.IPv4Address.{i}.*]
+│   └── Device.Ethernet.Interface.{i}.IPv4Address.{i}.    📝 RW
+├── LST 接口 IPv6 地址  (5 path)   [Device.Ethernet.Interface.{i}.IPv6Address.{i}.*]
+│   ├── Device.Ethernet.Interface.{i}.IPv6Address.{i}.IPAddress    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.IPv6Address.{i}.PrefixLength    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.IPv6Address.{i}.Origin    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.IPv6Address.{i}.PortType    📝 RW
+│   └── Device.Ethernet.Interface.{i}.IPv6Address.{i}.DefaultGateway    📝 RW
+├── MOD 接口 IPv6 地址  (5 path)   [Device.Ethernet.Interface.{i}.IPv6Address.{i}.*]
+│   ├── Device.Ethernet.Interface.{i}.IPv6Address.{i}.IPAddress    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.IPv6Address.{i}.PrefixLength    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.IPv6Address.{i}.Origin    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.IPv6Address.{i}.PortType    📝 RW
+│   └── Device.Ethernet.Interface.{i}.IPv6Address.{i}.DefaultGateway    📝 RW
+├── ADD 接口 IPv6 地址  (1 path)   [Device.Ethernet.Interface.{i}.IPv6Address.{i}.*]
+│   └── Device.Ethernet.Interface.{i}.IPv6Address.{i}.    📝 RW
+├── RMV 接口 IPv6 地址  (1 path)   [Device.Ethernet.Interface.{i}.IPv6Address.{i}.*]
+│   └── Device.Ethernet.Interface.{i}.IPv6Address.{i}.    📝 RW
+├── LST VLAN 子接口  (3 path)   [Device.Ethernet.Interface.{i}.VlanInterface.{i}.*]
+│   ├── Device.Ethernet.Interface.{i}.VlanInterface.{i}.Name    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.VlanInterface.{i}.Id    📝 RW
+│   └── Device.Ethernet.Interface.{i}.VlanInterface.{i}.Enable    📝 RW
+├── MOD VLAN 子接口  (3 path)   [Device.Ethernet.Interface.{i}.VlanInterface.{i}.*]
+│   ├── Device.Ethernet.Interface.{i}.VlanInterface.{i}.Name    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.VlanInterface.{i}.Id    📝 RW
+│   └── Device.Ethernet.Interface.{i}.VlanInterface.{i}.Enable    📝 RW
+├── ADD VLAN 子接口  (1 path)   [Device.Ethernet.Interface.{i}.VlanInterface.{i}.*]
+│   └── Device.Ethernet.Interface.{i}.VlanInterface.{i}.    📝 RW
+├── RMV VLAN 子接口  (1 path)   [Device.Ethernet.Interface.{i}.VlanInterface.{i}.*]
+│   └── Device.Ethernet.Interface.{i}.VlanInterface.{i}.    📝 RW
+├── LST VLAN 子接口 IPv4 地址  (5 path)   [Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.*]
+│   ├── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.IPAddress    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.SubnetMask    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.AddressingType    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.DefaultGateway    📝 RW
+│   └── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.PortType    📝 RW
+├── MOD VLAN 子接口 IPv4 地址  (5 path)   [Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.*]
+│   ├── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.IPAddress    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.SubnetMask    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.AddressingType    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.DefaultGateway    📝 RW
+│   └── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.PortType    📝 RW
+├── ADD VLAN 子接口 IPv4 地址  (1 path)   [Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.*]
+│   └── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.    📝 RW
+├── RMV VLAN 子接口 IPv4 地址  (1 path)   [Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.*]
+│   └── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv4Address.{i}.    📝 RW
+├── LST VLAN 子接口 IPv6 地址  (5 path)   [Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.*]
+│   ├── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.IPAddress    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.PrefixLength    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.Origin    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.DefaultGateway    📝 RW
+│   └── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.PortType    📝 RW
+├── MOD VLAN 子接口 IPv6 地址  (5 path)   [Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.*]
+│   ├── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.IPAddress    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.PrefixLength    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.Origin    📝 RW
+│   ├── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.DefaultGateway    📝 RW
+│   └── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.PortType    📝 RW
+├── ADD VLAN 子接口 IPv6 地址  (1 path)   [Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.*]
+│   └── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.    📝 RW
+├── RMV VLAN 子接口 IPv6 地址  (1 path)   [Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.*]
+│   └── Device.Ethernet.Interface.{i}.VlanInterface.{i}.IPv6Address.{i}.    📝 RW
+├── LST 静态路由表项  (5 path)   [Device.Ethernet.IpRoute.{i}.*]
+│   ├── Device.Ethernet.IpRoute.{i}.IpVer    📝 RW
+│   ├── Device.Ethernet.IpRoute.{i}.DstIpNetwork    📝 RW
+│   ├── Device.Ethernet.IpRoute.{i}.PrefixLength    📝 RW
+│   ├── Device.Ethernet.IpRoute.{i}.GatewayIpAddress    📝 RW
+│   └── Device.Ethernet.IpRoute.{i}.InterfaceName    📝 RW
+├── MOD 静态路由表项  (5 path)   [Device.Ethernet.IpRoute.{i}.*]
+│   ├── Device.Ethernet.IpRoute.{i}.IpVer    📝 RW
+│   ├── Device.Ethernet.IpRoute.{i}.DstIpNetwork    📝 RW
+│   ├── Device.Ethernet.IpRoute.{i}.PrefixLength    📝 RW
+│   ├── Device.Ethernet.IpRoute.{i}.GatewayIpAddress    📝 RW
+│   └── Device.Ethernet.IpRoute.{i}.InterfaceName    📝 RW
+├── ADD 静态路由表项  (1 path)   [Device.Ethernet.IpRoute.{i}.*]
+│   └── Device.Ethernet.IpRoute.{i}.    📝 RW
+└── RMV 静态路由表项  (1 path)   [Device.Ethernet.IpRoute.{i}.*]
+    └── Device.Ethernet.IpRoute.{i}.    📝 RW
+```
+
+#### SM · IPsec参数管理
+
+```text
+IPsec参数管理
+├── LST IPsec 安全配置  (9 path)   [Device.IPsec.*]
+│   ├── Device.IPsec.Enable    📝 RW
+│   ├── Device.IPsec.MyKeyMode    📝 RW
+│   ├── Device.IPsec.Status    📖 R
+│   ├── Device.IPsec.AHSupported    📖 R
+│   ├── Device.IPsec.IKEv2SupportedEncryptionAlgorithms    📖 R
+│   ├── Device.IPsec.ESPSupportedEncryptionAlgorithms    📖 R
+│   ├── Device.IPsec.IKEv2SupportedPseudoRandomFunctions    📖 R
+│   ├── Device.IPsec.SupportedIntegrityAlgorithms    📖 R
+│   └── Device.IPsec.SupportedDiffieHellmanGroupTransforms    📖 R
+└── MOD IPsec 安全配置  (2 path)   [Device.IPsec.*]
+    ├── Device.IPsec.Enable    📝 RW
+    └── Device.IPsec.MyKeyMode    📝 RW
+```
+
+#### SN · 时间服务器参数管理
+
+```text
+时间服务器参数管理
+├── LST 时间同步服务器  (8 path)   [Device.Time.*]
+│   ├── Device.Time.Enable    📝 RW
+│   ├── Device.Time.NTPServer1    📝 RW
+│   ├── Device.Time.NTPServer2    📝 RW
+│   ├── Device.Time.NTPServer3    📝 RW
+│   ├── Device.Time.NTPServer4    📝 RW
+│   ├── Device.Time.NTPServer5    📝 RW
+│   ├── Device.Time.CurrentLocalTime    📖 R
+│   └── Device.Time.LocalTimeZone    📝 RW
+└── MOD 时间同步服务器  (7 path)   [Device.Time.*]
+    ├── Device.Time.Enable    📝 RW
+    ├── Device.Time.NTPServer1    📝 RW
+    ├── Device.Time.NTPServer2    📝 RW
+    ├── Device.Time.NTPServer3    📝 RW
+    ├── Device.Time.NTPServer4    📝 RW
+    ├── Device.Time.NTPServer5    📝 RW
+    └── Device.Time.LocalTimeZone    📝 RW
+```
+
+#### SO · GPS信息参数管理
+
+```text
+GPS信息参数管理
+└── LST GPS 定位信息  (3 path)   [Device.FAP.GPS.*]
+    ├── Device.FAP.GPS.LockedLatitude    📖 R
+    ├── Device.FAP.GPS.LockedLongitude    📖 R
+    └── Device.FAP.GPS.NumberOfSatellites    📖 R
+```
+
+#### SP · MR参数管理
+
+```text
+MR参数管理
+├── LST MR 上报配置  (14 path)   [Device.FAP.MRMgmt.Config.{i}.*]
+│   ├── Device.FAP.MRMgmt.Config.{i}.MrEnable    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.MrUrl    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.MrUsername    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.MrPassword    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.MeasureType    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.OmcName    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.SamplePeriod    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.UploadPeriod    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.SampleBeginTime    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.SampleEndTime    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.PrbNum    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.SubFrameNum    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.MRECGIList    📝 RW
+│   └── Device.FAP.MRMgmt.Config.{i}.MeasureItems    📝 RW
+├── MOD MR 上报配置  (14 path)   [Device.FAP.MRMgmt.Config.{i}.*]
+│   ├── Device.FAP.MRMgmt.Config.{i}.MrEnable    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.MrUrl    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.MrUsername    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.MrPassword    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.MeasureType    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.OmcName    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.SamplePeriod    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.UploadPeriod    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.SampleBeginTime    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.SampleEndTime    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.PrbNum    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.SubFrameNum    📝 RW
+│   ├── Device.FAP.MRMgmt.Config.{i}.MRECGIList    📝 RW
+│   └── Device.FAP.MRMgmt.Config.{i}.MeasureItems    📝 RW
+├── ADD MR 上报配置  (1 path)   [Device.FAP.MRMgmt.Config.{i}.*]
+│   └── Device.FAP.MRMgmt.Config.{i}.    📝 RW
+└── RMV MR 上报配置  (1 path)   [Device.FAP.MRMgmt.Config.{i}.*]
+    └── Device.FAP.MRMgmt.Config.{i}.    📝 RW
+```
+
+#### SQ · 性能参数管理
+
+```text
+性能参数管理
+├── LST PM 性能上报配置  (10 path)   [Device.FAP.PerfMgmt.Config.{i}.*]
+│   ├── Device.FAP.PerfMgmt.Config.{i}.Enable    📝 RW
+│   ├── Device.FAP.PerfMgmt.Config.{i}.Alias    📝 RW
+│   ├── Device.FAP.PerfMgmt.Config.{i}.URL    📝 RW
+│   ├── Device.FAP.PerfMgmt.Config.{i}.Username    📝 RW
+│   ├── Device.FAP.PerfMgmt.Config.{i}.Password    📝 RW
+│   ├── Device.FAP.PerfMgmt.Config.{i}.PeriodicUploadInterval    📝 RW
+│   ├── Device.FAP.PerfMgmt.Config.{i}.PeriodicUploadTime    📝 RW
+│   ├── Device.FAP.PerfMgmt.Config.{i}.ReplenishEnable    📝 RW
+│   ├── Device.FAP.PerfMgmt.Config.{i}.ReplenishStartTime    📝 RW
+│   └── Device.FAP.PerfMgmt.Config.{i}.ReplenishEndTime    📝 RW
+├── MOD PM 性能上报配置  (10 path)   [Device.FAP.PerfMgmt.Config.{i}.*]
+│   ├── Device.FAP.PerfMgmt.Config.{i}.Enable    📝 RW
+│   ├── Device.FAP.PerfMgmt.Config.{i}.Alias    📝 RW
+│   ├── Device.FAP.PerfMgmt.Config.{i}.URL    📝 RW
+│   ├── Device.FAP.PerfMgmt.Config.{i}.Username    📝 RW
+│   ├── Device.FAP.PerfMgmt.Config.{i}.Password    📝 RW
+│   ├── Device.FAP.PerfMgmt.Config.{i}.PeriodicUploadInterval    📝 RW
+│   ├── Device.FAP.PerfMgmt.Config.{i}.PeriodicUploadTime    📝 RW
+│   ├── Device.FAP.PerfMgmt.Config.{i}.ReplenishEnable    📝 RW
+│   ├── Device.FAP.PerfMgmt.Config.{i}.ReplenishStartTime    📝 RW
+│   └── Device.FAP.PerfMgmt.Config.{i}.ReplenishEndTime    📝 RW
+├── ADD PM 性能上报配置  (1 path)   [Device.FAP.PerfMgmt.Config.{i}.*]
+│   └── Device.FAP.PerfMgmt.Config.{i}.    📝 RW
+└── RMV PM 性能上报配置  (1 path)   [Device.FAP.PerfMgmt.Config.{i}.*]
+    └── Device.FAP.PerfMgmt.Config.{i}.    📝 RW
+```
+
+#### SR · 扩展型一体化皮基站参数
+
+```text
+扩展型一体化皮基站参数
+├── LST 主机单元基本信息  (24 path)   [Device.DeviceInfo.MU.{i}.*]
+│   ├── Device.DeviceInfo.MU.{i}.UserLabel    📝 RW
+│   ├── Device.DeviceInfo.MU.{i}.DnPrefix    📝 RW
+│   ├── Device.DeviceInfo.MU.{i}.ManufacturerOUI    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Manufacturer    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.ModelName    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.VendorUnitFamilyType    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.VendorUnitTypeNumber    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.SerialNumber    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.HardwareVersion    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.SoftwareVersion    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.HardwarePlatform    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.AdditionalHardwareVersion    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.AdditionalSoftwareVersion    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.ProvisioningCode    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.ProductClass    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Status    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Reboot    📝 RW
+│   ├── Device.DeviceInfo.MU.{i}.UpTime    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.FirstUseDate    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.ClockSource    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.DateOfLastService    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.DateOfManufacture    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.ManufacturerData    📖 R
+│   └── Device.DeviceInfo.MU.{i}.SlotsInformation    📖 R
+├── MOD 主机单元基本信息  (3 path)   [Device.DeviceInfo.MU.{i}.*]
+│   ├── Device.DeviceInfo.MU.{i}.UserLabel    📝 RW
+│   ├── Device.DeviceInfo.MU.{i}.DnPrefix    📝 RW
+│   └── Device.DeviceInfo.MU.{i}.Reboot    📝 RW
+├── LST 槽位板卡信息  (16 path)   [Device.DeviceInfo.MU.{i}.Slot.{i}.*]
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.PackPosition    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.SlotsOccupied    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.ManufacturerOUI    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.Manufacturer    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.ModelName    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.SerialNumber    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.HardwareVersion    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.SoftwareVersion    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.ProvisioningCode    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.VendorUnitFamilyType    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.UpTime    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.DataModelSpecVersion    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.3GPPSpecVersion    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.FirstUseDate    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.Status    📖 R
+│   └── Device.DeviceInfo.MU.{i}.Slot.{i}.Reboot    📝 RW
+├── MOD 槽位板卡信息  (1 path)   [Device.DeviceInfo.MU.{i}.Slot.{i}.*]
+│   └── Device.DeviceInfo.MU.{i}.Slot.{i}.Reboot    📝 RW
+├── LST 扩展单元信息  (13 path)   [Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.*]
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.UserLabel    📝 RW
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RouteIndex    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.ManufacturerOUI    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.Manufacturer    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.ModelName    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.SerialNumber    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.HardwareVersion    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.SoftwareVersion    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.ProvisioningCode    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.Status    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.DLCRCSum    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.ULCRCSum    📖 R
+│   └── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.Reboot    📝 RW
+├── MOD 扩展单元信息  (2 path)   [Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.*]
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.UserLabel    📝 RW
+│   └── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.Reboot    📝 RW
+├── LST 射频远端单元信息  (16 path)   [Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.*]
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.UserLabel    📝 RW
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.VendorUnitFamilyType    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.VendorUnitTypeNumber    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.RouteIndex    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.Status    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.ManufacturerOUI    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.Manufacturer    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.ModelName    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.SerialNumber    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.HardwareVersion    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.SoftwareVersion    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.ProvisioningCode    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.Reboot    📝 RW
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.FrequencyBand    📝 RW
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.RFTxStatus    📝 RW
+│   └── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.DateOfManufacture    📖 R
+├── MOD 射频远端单元信息  (4 path)   [Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.*]
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.UserLabel    📝 RW
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.Reboot    📝 RW
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.FrequencyBand    📝 RW
+│   └── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.RFTxStatus    📝 RW
+├── LST 射频通道信息  (2 path)   [Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.RFChannel.{i}.*]
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.RFChannel.{i}.TxGain    📝 RW
+│   └── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.RFChannel.{i}.NoisePwdBm    📖 R
+├── MOD 射频通道信息  (1 path)   [Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.RFChannel.{i}.*]
+│   └── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.RFChannel.{i}.TxGain    📝 RW
+├── LST 射频单元软件升级  (3 path)   [Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.SwUpgrade.*]
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.SwUpgrade.Stage    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.SwUpgrade.Status    📖 R
+│   └── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.RU.{i}.SwUpgrade.FailureCause    📖 R
+├── LST 扩展单元软件升级  (3 path)   [Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.SwUpgrade.*]
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.SwUpgrade.Stage    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.SwUpgrade.Status    📖 R
+│   └── Device.DeviceInfo.MU.{i}.Slot.{i}.EU.{i}.SwUpgrade.FailureCause    📖 R
+├── LST 板卡软件升级  (3 path)   [Device.DeviceInfo.MU.{i}.Slot.{i}.SwUpgrade.*]
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.SwUpgrade.Stage    📖 R
+│   ├── Device.DeviceInfo.MU.{i}.Slot.{i}.SwUpgrade.FailureCause    📖 R
+│   └── Device.DeviceInfo.MU.{i}.Slot.{i}.SwUpgrade.Status    📖 R
+└── LST 主机单元软件升级  (3 path)   [Device.DeviceInfo.MU.{i}.SwUpgrade.*]
+    ├── Device.DeviceInfo.MU.{i}.SwUpgrade.Stage    📖 R
+    ├── Device.DeviceInfo.MU.{i}.SwUpgrade.FailureCause    📖 R
+    └── Device.DeviceInfo.MU.{i}.SwUpgrade.Status    📖 R
+```
+
+### 结构评审要点（已落实到 §R-1/R-2/R-3 · 2026-05-21 v2）
+
+> 上一版本评审材料中识别的不规整问题，本版本已通过 §R-1/R-2/R-3 修订一并落实。本节保留作为变更追溯。
+
+1. ✅ **跨章节 group_code 撞名**（已解决）—— §R-3.1 同 group_code 跨章节合并：`Device.Services.FAPService.{i}.*` SF + SH 合并到 SF。
+2. ✅ **章节 vs 对象路径双重分类**（沿用 spec 章节划分）—— §R-1 18 章节为一级分组，SR 保留独立章节，SA / SR 同名对象（SwUpgrade）由 §R-2.4 全中文名表消歧（设备软件升级状态 vs 主机单元软件升级 等）。
+3. ✅ **G-12 / G-13 误作为子分组**（已解决）—— §R-1 多级分组禁令；现 SF 章节下直接挂 `LST LTE 接入控制` / `LST 安全接入网关` 命令叶子。
+4. ✅ **对象别名撞名 + 路径段英文混入显示名**（v2 已解决）—— §R-2.4 全中文命名权威表，每个 group_code 唯一 `command_zh_name`，全表 71 条互不相同；显示名再不出现 path 文本碎片（如 `MU 设备版本升级`、`Services FAPService 载波` 这种 v1 风格全部作废）。
+5. ✅ **不可由 ACS 创建的 {i} 槽位仍派生 ADD/RMV**（已解决）—— §R-3.2 非可创建对象清单 17 条 path 模板，命中者只产 LST + MOD；总过滤 34 条无效 ADD/RMV。
+6. ⚠ **保留观察项**（不阻塞实施）：spec 自身的 SE 章节标题 `DeviceLogMgmt` 与路径 `Device.LogMgmt.*` 不一致（本文档忠实保留）；SJ 单章 145 参数 + 15 命令 / SB-SO 多个 1 命令孤儿组（按 §R-1 不再尝试业务域伞组聚合，UI 用搜索/筛选辅助可发现性）；全 RO 章节（SO/部分 SD）只产 LST 无操作切换价值（不影响数据完整性）。
 
 ---
 
@@ -1687,560 +3451,12 @@ TranslateToPrivate(ctx, productId, softwareVersion, standardPath) → Translatio
 
 ---
 
-## 参数管理类别分组清单（派生）
+## 参数管理类别分组清单（已迁移）
 
-> 本节由 spec doc 中所有 `## SX - ...` 大节标题及其下的 `#### 命令: ...`
-> 标题机械汇总而成；以 §（第 295 行）"参数管理类别" 主表为索引：
-> **一个 SA-SR 类别 = 一个分组**。共 **18 个分组**、**72 个命令**（已剔除 1 个伪命令 / 规范引用注释段）。
+> **本节于 2026-05-21 v2 重构（与本次需求同步）**：原本机械汇总各 SA-SR `#### 命令:` 标题、按 G-01..G-72 罗列「X paths」摘要 + 派生 op 数的清单，已被前文 §「分组+命令的结构图（派生 · 评审视图）」中的三小节完全取代：
 >
-> 与 MML 控制台的对应关系：
-> - 本节的"分组"对应控制台命令树的一级 chapter 节点（SA-SR）
-> - 分组下的"命令"对应控制台二级 group 节点（每个 group 按 op_type 展开
->   为 LST / MOD / ADD / RMV 子命令）
-> - family 维度的进一步合并（72 → ~40 顶层项）见
->   `docs/design/mml-console-cmcc-tdlte-v23-adjustment-plan-20260519.md` §15.4
+> - §「全景汇总（按 SA → SR 顺序）」 —— 章节 × 命令叶子数 × path 行数 速览；
+> - §「分组 · 命名 · path 三级结构（完整展开）」 —— 按 R-1/R-2/R-3 派生的 **18 分组 → 全中文命名 → standardPath** 完整三级列表，**每条命令的 target_paths 集合都逐行列出**，供 catalog Loader 和前端开发严格按本文档实施；
+> - §「结构评审要点」 —— 上一版本指出的 6 个问题逐一标记 ✅ 已解决 / ⚠ 保留观察。
 >
-> **权限图例**：📖 只读（GPV-only）/ 📝 可写（GPV + SPV）/ 📖📝 混合
-
-### 速览（18 分组 / 72 spec 命令 / 228 派生 op）
-
-| 索引 | 对象路径根 | 分组中文名 | spec 命令数 | 派生 op 数 |
-|------|-----------|-----------|-----:|-----:|
-| SA | `DeviceInfo` | 设备信息参数管理 | 2 | 3 |
-| SB | `SoftwareCtrl` | 软件版本参数管理 | 1 | 2 |
-| SC | `ManagementServer` | 基站网管参数管理 | 1 | 2 |
-| SD | `FaultMgmt` | 告警参数管理 | 6 | 9 |
-| SE | `DeviceLogMgmt` | 日志参数管理 | 1 | 2 |
-| SF | `Services.FAPService` | 小区服务参数管理（总体） | 11 | 37 |
-| SG | `Services.FAPService.{i}.SCTP.Transport` | SCTP 参数管理 | 2 | 3 |
-| SH | `Services.FAPService.{i}.CellConfig.LTE.RAN` | RAN 协议栈参数 | 6 | 24 |
-| SI | `Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList` | 邻区参数管理 | 4 | 16 |
-| SJ | `Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility` | 移动性参数管理 | 15 | 60 |
-| SK | `Services.FAPService.{i}.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam` | SON 参数管理 | 2 | 5 |
-| SL | `WANDevice` | WAN 口配置参数管理 | 7 | 28 |
-| SM | `Ipsec` | IPsec 参数管理 | 1 | 2 |
-| SN | `Time` | 时间服务器参数管理 | 1 | 2 |
-| SO | `FAP.GPS` | GPS 信息参数管理 | 1 | 1 |
-| SP | `FAP.MRMgmt` | MR 参数管理 | 1 | 4 |
-| SQ | `FAP.PerfMgmt` | 性能参数管理 | 1 | 4 |
-| SR | `ENanocell` | 扩展型一体化皮基站参数 | 9 | 24 |
-
-### 分组明细（按 R-3 op-split 派生）
-
-> **派生规则（R-3，详见调整方案 §4）**：每个 spec `#### 命令: <path> <perm>` 按下表展开成 1-4 个子命令。
->
-> | 条件 | 生成 |
-> |------|------|
-> | 总是 | **LST** `<对象名>` — GetParameterValues，覆盖 R + RW 全部 path |
-> | RW > 0 | **MOD** `<对象名>` — SetParameterValues，仅 RW 子集 path |
-> | arity ≥ 1 且 RW > 0 | **ADD** + **RMV** `<对象名>` — AddObject / DeleteObject |
-> | RW = 0 | ❌ 不生成 MOD（路径全只读 → 没有可改 path → 命令不应存在） |
-> | arity = 0 或 RW = 0 | ❌ 不生成 ADD/RMV |
->
-> **⚠ 标记**：路径含 `{i}` 自动派生 ADD/RMV，但 TR-069 业务语义上不是用户可增删的容器（如固定枚举的 FAPService 载波 i=1~3、硬件描述的 MU/Slot/EU/RU 等）；后续 admin overlay 可隐藏。
->
-> **命名约定**：派生命令的中文名 = `<OP> <对象中文名>`，例如 `LST 设备信息`、`MOD 软件控制`、`ADD MME 池配置`、`RMV LTE 邻区` 等。
-
-#### SA · DeviceInfo — 设备信息参数管理
-
-**G-01 · `Device.DeviceInfo.*` 📖📝**（R=15 / RW=2 / arity=0）
-
-- **LST 设备信息** — 17 paths（GetParameterValues 全集）
-- **MOD 设备信息** — 2 paths（SetParameterValues，RW 子集）
-- ❌ 不生成：ADD/RMV（arity=0，非多实例对象）
-
-**G-02 · `Device.DeviceInfo.SwUpgrade.*` 📖**（R=3 / RW=0 / arity=0）
-
-- **LST 设备版本升级** — 3 paths（GetParameterValues 全集）
-- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（arity=0，非多实例对象）
-
-#### SB · SoftwareCtrl — 软件版本参数管理
-
-**G-03 · `Device.SoftwareCtrl.*` 📖📝**（R=2 / RW=3 / arity=0）
-
-- **LST 软件控制** — 5 paths（GetParameterValues 全集）
-- **MOD 软件控制** — 3 paths（SetParameterValues，RW 子集）
-- ❌ 不生成：ADD/RMV（arity=0，非多实例对象）
-
-#### SC · ManagementServer — 基站网管参数管理
-
-**G-04 · `Device.ManagementServer.*` 📖📝**（R=4 / RW=15 / arity=0）
-
-- **LST 网管参数** — 19 paths（GetParameterValues 全集）
-- **MOD 网管参数** — 15 paths（SetParameterValues，RW 子集）
-- ❌ 不生成：ADD/RMV（arity=0，非多实例对象）
-
-#### SD · FaultMgmt — 告警参数管理
-
-**G-05 · `Device.FaultMgmt.*` 📖**（R=6 / RW=0 / arity=0）
-
-- **LST 故障管理** — 6 paths（GetParameterValues 全集）
-- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（arity=0，非多实例对象）
-
-**G-06 · `Device.FaultMgmt.CurrentAlarm.{i}.*` 📖**（R=11 / RW=0 / arity=1）
-
-- **LST 当前告警实例** — 11 paths（GetParameterValues 全集）
-- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
-
-**G-07 · `Device.FaultMgmt.ExpeditedEvent.{i}.*` 📖**（R=11 / RW=0 / arity=1）
-
-- **LST 实时告警实例** — 11 paths（GetParameterValues 全集）
-- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
-
-**G-08 · `Device.FaultMgmt.HistoryEvent.{i}.*` 📖**（R=11 / RW=0 / arity=1）
-
-- **LST 历史告警实例** — 11 paths（GetParameterValues 全集）
-- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
-
-**G-09 · `Device.FaultMgmt.QueuedEvent.{i}.*` 📖**（R=11 / RW=0 / arity=1）
-
-- **LST 队列告警实例** — 11 paths（GetParameterValues 全集）
-- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
-
-**G-10 · `Device.FaultMgmt.SupportedAlarm.{i}.*` 📖📝**（R=4 / RW=1 / arity=1）
-
-- **LST 支持告警实例** — 5 paths（GetParameterValues 全集）
-- **MOD 支持告警实例** — 1 paths（SetParameterValues，RW 子集）
-- **ADD 支持告警实例** — AddObject，新增 `{i}` 实例
-- **RMV 支持告警实例** — DeleteObject，删除 `{i}` 实例
-
-#### SE · DeviceLogMgmt — 日志参数管理
-
-**G-11 · `Device.LogMgmt.*` 📝**（R=0 / RW=5 / arity=0）
-
-- **LST 日志管理** — 5 paths（GetParameterValues 全集）
-- **MOD 日志管理** — 5 paths（SetParameterValues，RW 子集）
-- ❌ 不生成：ADD/RMV（arity=0，非多实例对象）
-
-#### SF · Services.FAPService — 小区服务参数管理（总体）
-
-**G-12 · `Device.Services.FAPControl.LTE.*` 📖📝**（R=2 / RW=1 / arity=0）
-
-- **LST FAPControl LTE** — 3 paths（GetParameterValues 全集）
-- **MOD FAPControl LTE** — 1 paths（SetParameterValues，RW 子集）
-- ❌ 不生成：ADD/RMV（arity=0，非多实例对象）
-
-**G-13 · `Device.Services.FAPControl.LTE.Gateway.*` 📝**（R=0 / RW=10 / arity=0）
-
-- **LST 安全/接入网关** — 10 paths（GetParameterValues 全集）
-- **MOD 安全/接入网关** — 10 paths（SetParameterValues，RW 子集）
-- ❌ 不生成：ADD/RMV（arity=0，非多实例对象）
-
-**G-14 · `Device.Services.FAPControl.LTE.MmePoolConfigParam.{i}.*` 📖📝**（R=3 / RW=2 / arity=1）
-
-- **LST MME 池配置** — 5 paths（GetParameterValues 全集）
-- **MOD MME 池配置** — 2 paths（SetParameterValues，RW 子集）
-- **ADD MME 池配置** — AddObject，新增 `{i}` 实例
-- **RMV MME 池配置** — DeleteObject，删除 `{i}` 实例
-
-**G-15 · `Device.Services.FAPControl.LTE.S1U.{i}.*` 📖**（R=2 / RW=0 / arity=1）
-
-- **LST S1U** — 2 paths（GetParameterValues 全集）
-- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
-
-**G-16 · `Device.Services.FAPControl.X2IpAddrMapInfo.{i}.*` 📝**（R=0 / RW=5 / arity=1）
-
-- **LST X2 IP 映射** — 5 paths（GetParameterValues 全集）
-- **MOD X2 IP 映射** — 5 paths（SetParameterValues，RW 子集）
-- **ADD X2 IP 映射** — AddObject，新增 `{i}` 实例
-- **RMV X2 IP 映射** — DeleteObject，删除 `{i}` 实例
-
-**G-17 · `Device.Services.FAPService.{i}.*` 📖📝**（R=2 / RW=22 / arity=1）
-
-- **LST FAPService 载波** — 24 paths（GetParameterValues 全集）
-- **MOD FAPService 载波** — 22 paths（SetParameterValues，RW 子集）
-- **ADD FAPService 载波** — AddObject，新增 `{i}` 实例 ⚠
-- **RMV FAPService 载波** — DeleteObject，删除 `{i}` 实例 ⚠
-
-**G-18 · `Device.Services.FAPService.{i}.Capabilities.*` 📝**（R=0 / RW=1 / arity=1）
-
-- **LST FAPService Capabilities** — 1 paths（GetParameterValues 全集）
-- **MOD FAPService Capabilities** — 1 paths（SetParameterValues，RW 子集）
-- **ADD FAPService Capabilities** — AddObject，新增 `{i}` 实例 ⚠
-- **RMV FAPService Capabilities** — DeleteObject，删除 `{i}` 实例 ⚠
-
-**G-19 · `Device.Services.FAPService.{i}.CellConfig.Capabilities.*` 📖📝**（R=2 / RW=1 / arity=1）
-
-- **LST CellConfig Capabilities** — 3 paths（GetParameterValues 全集）
-- **MOD CellConfig Capabilities** — 1 paths（SetParameterValues，RW 子集）
-- **ADD CellConfig Capabilities** — AddObject，新增 `{i}` 实例 ⚠
-- **RMV CellConfig Capabilities** — DeleteObject，删除 `{i}` 实例 ⚠
-
-**G-20 · `Device.Services.FAPService.{i}.CellConfig.LTE.EPC.*` 📝**（R=0 / RW=2 / arity=1）
-
-- **LST EPC** — 2 paths（GetParameterValues 全集）
-- **MOD EPC** — 2 paths（SetParameterValues，RW 子集）
-- **ADD EPC** — AddObject，新增 `{i}` 实例 ⚠
-- **RMV EPC** — DeleteObject，删除 `{i}` 实例 ⚠
-
-**G-21 · `Device.Services.FAPService.{iα}.CellConfig.LTE.EPC.PLMNList.{iβ}.*` 📝**（R=0 / RW=2 / arity=2）
-
-- **LST PLMN 列表** — 2 paths（GetParameterValues 全集）
-- **MOD PLMN 列表** — 2 paths（SetParameterValues，RW 子集）
-- **ADD PLMN 列表** — AddObject，新增 `{i}` 实例
-- **RMV PLMN 列表** — DeleteObject，删除 `{i}` 实例
-
-**G-22 · `Device.Services.FAPService.{iα}.CellConfig.LTE.VoLTE.PdcpInitParam.{iβ}.*` 📝**（R=0 / RW=1 / arity=2）
-
-- **LST VoLTE PDCP 初始** — 1 paths（GetParameterValues 全集）
-- **MOD VoLTE PDCP 初始** — 1 paths（SetParameterValues，RW 子集）
-- **ADD VoLTE PDCP 初始** — AddObject，新增 `{i}` 实例
-- **RMV VoLTE PDCP 初始** — DeleteObject，删除 `{i}` 实例
-
-#### SG · Services.FAPService.{i}.SCTP.Transport — SCTP 参数管理
-
-**G-23 · `Device.Services.FAPControl.Transport.SCTP.*` 📝**（R=0 / RW=9 / arity=0）
-
-- **LST SCTP** — 9 paths（GetParameterValues 全集）
-- **MOD SCTP** — 9 paths（SetParameterValues，RW 子集）
-- ❌ 不生成：ADD/RMV（arity=0，非多实例对象）
-
-**G-24 · `Device.Services.FAPControl.Transport.SCTP.Assoc.{i}.*` 📖**（R=4 / RW=0 / arity=1）
-
-- **LST SCTP Assoc** — 4 paths（GetParameterValues 全集）
-- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
-
-#### SH · Services.FAPService.{i}.CellConfig.LTE.RAN — RAN 协议栈参数
-
-**G-25 · `Device.Services.FAPService.{i}.*` 📝**（R=0 / RW=10 / arity=1）
-
-- **LST RRC Timers** — 10 paths（GetParameterValues 全集）
-- **MOD RRC Timers** — 10 paths（SetParameterValues，RW 子集）
-- **ADD RRC Timers** — AddObject，新增 `{i}` 实例 ⚠
-- **RMV RRC Timers** — DeleteObject，删除 `{i}` 实例 ⚠
-
-**G-26 · `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.MAC.*` 📝**（R=0 / RW=16 / arity=1）
-
-- **LST MAC** — 16 paths（GetParameterValues 全集）
-- **MOD MAC** — 16 paths（SetParameterValues，RW 子集）
-- **ADD MAC** — AddObject，新增 `{i}` 实例 ⚠
-- **RMV MAC** — DeleteObject，删除 `{i}` 实例 ⚠
-
-**G-27 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.MAC.DrxInitialParam.{iβ}.*` 📝**（R=0 / RW=6 / arity=2）
-
-- **LST DRX 初始** — 6 paths（GetParameterValues 全集）
-- **MOD DRX 初始** — 6 paths（SetParameterValues，RW 子集）
-- **ADD DRX 初始** — AddObject，新增 `{i}` 实例
-- **RMV DRX 初始** — DeleteObject，删除 `{i}` 实例
-
-**G-28 · `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.*` 📖📝**（R=2 / RW=33 / arity=1）
-
-- **LST PHY** — 35 paths（GetParameterValues 全集）
-- **MOD PHY** — 33 paths（SetParameterValues，RW 子集）
-- **ADD PHY** — AddObject，新增 `{i}` 实例 ⚠
-- **RMV PHY** — DeleteObject，删除 `{i}` 实例 ⚠
-
-**G-29 · `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.MBSFN.*` 📝**（R=0 / RW=1 / arity=1）
-
-- **LST PHY MBSFN** — 1 paths（GetParameterValues 全集）
-- **MOD PHY MBSFN** — 1 paths（SetParameterValues，RW 子集）
-- **ADD PHY MBSFN** — AddObject，新增 `{i}` 实例 ⚠
-- **RMV PHY MBSFN** — DeleteObject，删除 `{i}` 实例 ⚠
-
-**G-30 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.PHY.MBSFN.SFConfigList.{iβ}.*` 📝**（R=0 / RW=5 / arity=2）
-
-- **LST MBSFN SFConfigList** — 5 paths（GetParameterValues 全集）
-- **MOD MBSFN SFConfigList** — 5 paths（SetParameterValues，RW 子集）
-- **ADD MBSFN SFConfigList** — AddObject，新增 `{i}` 实例
-- **RMV MBSFN SFConfigList** — DeleteObject，删除 `{i}` 实例
-
-#### SI · Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList — 邻区参数管理
-
-**G-31 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM.{iβ}.*` 📝**（R=0 / RW=7 / arity=2）
-
-- **LST GSM 邻区** — 7 paths（GetParameterValues 全集）
-- **MOD GSM 邻区** — 7 paths（SetParameterValues，RW 子集）
-- **ADD GSM 邻区** — AddObject，新增 `{i}` 实例
-- **RMV GSM 邻区** — DeleteObject，删除 `{i}` 实例
-
-**G-32 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.NeighborList.InterRATCell.NR.{iβ}.*` 📝**（R=0 / RW=12 / arity=2）
-
-- **LST NR 邻区** — 12 paths（GetParameterValues 全集）
-- **MOD NR 邻区** — 12 paths（SetParameterValues，RW 子集）
-- **ADD NR 邻区** — AddObject，新增 `{i}` 实例
-- **RMV NR 邻区** — DeleteObject，删除 `{i}` 实例
-
-**G-33 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.NeighborList.InterRATCell.UMTS.{iβ}.*` 📝**（R=0 / RW=10 / arity=2）
-
-- **LST UMTS 邻区** — 10 paths（GetParameterValues 全集）
-- **MOD UMTS 邻区** — 10 paths（SetParameterValues，RW 子集）
-- **ADD UMTS 邻区** — AddObject，新增 `{i}` 实例
-- **RMV UMTS 邻区** — DeleteObject，删除 `{i}` 实例
-
-**G-34 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.NeighborList.LTECell.{iβ}.*` 📝**（R=0 / RW=10 / arity=2）
-
-- **LST LTE 邻区** — 10 paths（GetParameterValues 全集）
-- **MOD LTE 邻区** — 10 paths（SetParameterValues，RW 子集）
-- **ADD LTE 邻区** — AddObject，新增 `{i}` 实例
-- **RMV LTE 邻区** — DeleteObject，删除 `{i}` 实例
-
-#### SJ · Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility — 移动性参数管理
-
-**G-35 · `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.*` 📝**（R=0 / RW=1 / arity=1）
-
-- **LST ConnMode EUTRA** — 1 paths（GetParameterValues 全集）
-- **MOD ConnMode EUTRA** — 1 paths（SetParameterValues，RW 子集）
-- **ADD ConnMode EUTRA** — AddObject，新增 `{i}` 实例 ⚠
-- **RMV ConnMode EUTRA** — DeleteObject，删除 `{i}` 实例 ⚠
-
-**G-36 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A1MeasureCtrl.{iβ}.*` 📖📝**（R=1 / RW=10 / arity=2）
-
-- **LST A1 测量控制** — 11 paths（GetParameterValues 全集）
-- **MOD A1 测量控制** — 10 paths（SetParameterValues，RW 子集）
-- **ADD A1 测量控制** — AddObject，新增 `{i}` 实例
-- **RMV A1 测量控制** — DeleteObject，删除 `{i}` 实例
-
-**G-37 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A2MeasureCtrl.{iβ}.*` 📖📝**（R=1 / RW=10 / arity=2）
-
-- **LST A2 测量控制** — 11 paths（GetParameterValues 全集）
-- **MOD A2 测量控制** — 10 paths（SetParameterValues，RW 子集）
-- **ADD A2 测量控制** — AddObject，新增 `{i}` 实例
-- **RMV A2 测量控制** — DeleteObject，删除 `{i}` 实例
-
-**G-38 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A3MeasureCtrl.{iβ}.*` 📖📝**（R=1 / RW=10 / arity=2）
-
-- **LST A3 测量控制** — 11 paths（GetParameterValues 全集）
-- **MOD A3 测量控制** — 10 paths（SetParameterValues，RW 子集）
-- **ADD A3 测量控制** — AddObject，新增 `{i}` 实例
-- **RMV A3 测量控制** — DeleteObject，删除 `{i}` 实例
-
-**G-39 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A4MeasureCtrl.{iβ}.*` 📖📝**（R=1 / RW=10 / arity=2）
-
-- **LST A4 测量控制** — 11 paths（GetParameterValues 全集）
-- **MOD A4 测量控制** — 10 paths（SetParameterValues，RW 子集）
-- **ADD A4 测量控制** — AddObject，新增 `{i}` 实例
-- **RMV A4 测量控制** — DeleteObject，删除 `{i}` 实例
-
-**G-40 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.A5MeasureCtrl.{iβ}.*` 📖📝**（R=1 / RW=12 / arity=2）
-
-- **LST A5 测量控制** — 13 paths（GetParameterValues 全集）
-- **MOD A5 测量控制** — 12 paths（SetParameterValues，RW 子集）
-- **ADD A5 测量控制** — AddObject，新增 `{i}` 实例
-- **RMV A5 测量控制** — DeleteObject，删除 `{i}` 实例
-
-**G-41 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.EUTRA.PeriodMeasCtrl.{iβ}.*` 📝**（R=0 / RW=4 / arity=2）
-
-- **LST 周期测量控制** — 4 paths（GetParameterValues 全集）
-- **MOD 周期测量控制** — 4 paths（SetParameterValues，RW 子集）
-- **ADD 周期测量控制** — AddObject，新增 `{i}` 实例
-- **RMV 周期测量控制** — DeleteObject，删除 `{i}` 实例
-
-**G-42 · `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.*` 📝**（R=0 / RW=4 / arity=1）
-
-- **LST ConnMode IRAT** — 4 paths（GetParameterValues 全集）
-- **MOD ConnMode IRAT** — 4 paths（SetParameterValues，RW 子集）
-- **ADD ConnMode IRAT** — AddObject，新增 `{i}` 实例 ⚠
-- **RMV ConnMode IRAT** — DeleteObject，删除 `{i}` 实例 ⚠
-
-**G-43 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B1MeasureCtrl.{iβ}.*` 📖📝**（R=1 / RW=10 / arity=2）
-
-- **LST B1 测量控制** — 11 paths（GetParameterValues 全集）
-- **MOD B1 测量控制** — 10 paths（SetParameterValues，RW 子集）
-- **ADD B1 测量控制** — AddObject，新增 `{i}` 实例
-- **RMV B1 测量控制** — DeleteObject，删除 `{i}` 实例
-
-**G-44 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.ConnMode.IRAT.B2MeasureCtrl.{iβ}.*` 📖📝**（R=1 / RW=12 / arity=2）
-
-- **LST B2 测量控制** — 13 paths（GetParameterValues 全集）
-- **MOD B2 测量控制** — 12 paths（SetParameterValues，RW 子集）
-- **ADD B2 测量控制** — AddObject，新增 `{i}` 实例
-- **RMV B2 测量控制** — DeleteObject，删除 `{i}` 实例
-
-**G-45 · `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.*` 📝**（R=0 / RW=28 / arity=1）
-
-- **LST IdleMode** — 28 paths（GetParameterValues 全集）
-- **MOD IdleMode** — 28 paths（SetParameterValues，RW 子集）
-- **ADD IdleMode** — AddObject，新增 `{i}` 实例 ⚠
-- **RMV IdleMode** — DeleteObject，删除 `{i}` 实例 ⚠
-
-**G-46 · `Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.*` 📝**（R=0 / RW=2 / arity=1）
-
-- **LST IdleMode IRAT** — 2 paths（GetParameterValues 全集）
-- **MOD IdleMode IRAT** — 2 paths（SetParameterValues，RW 子集）
-- **ADD IdleMode IRAT** — AddObject，新增 `{i}` 实例 ⚠
-- **RMV IdleMode IRAT** — DeleteObject，删除 `{i}` 实例 ⚠
-
-**G-47 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.GERAN.GERANFreqGroup.{iβ}.*` 📝**（R=0 / RW=6 / arity=2）
-
-- **LST GERAN 频组** — 6 paths（GetParameterValues 全集）
-- **MOD GERAN 频组** — 6 paths（SetParameterValues，RW 子集）
-- **ADD GERAN 频组** — AddObject，新增 `{i}` 实例
-- **RMV GERAN 频组** — DeleteObject，删除 `{i}` 实例
-
-**G-48 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.IdleMode.IRAT.UTRA.UTRANFDDFreq.{iβ}.*` 📝**（R=0 / RW=6 / arity=2）
-
-- **LST UTRA FDD 频点** — 6 paths（GetParameterValues 全集）
-- **MOD UTRA FDD 频点** — 6 paths（SetParameterValues，RW 子集）
-- **ADD UTRA FDD 频点** — AddObject，新增 `{i}` 实例
-- **RMV UTRA FDD 频点** — DeleteObject，删除 `{i}` 实例
-
-**G-49 · `Device.Services.FAPService.{iα}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{iβ}.*` 📝**（R=0 / RW=13 / arity=2）
-
-- **LST 异频载波** — 13 paths（GetParameterValues 全集）
-- **MOD 异频载波** — 13 paths（SetParameterValues，RW 子集）
-- **ADD 异频载波** — AddObject，新增 `{i}` 实例
-- **RMV 异频载波** — DeleteObject，删除 `{i}` 实例
-
-#### SK · Services.FAPService.{i}.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam — SON 参数管理
-
-**G-50 · `Device.Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam.*` 📖📝**（R=1 / RW=24 / arity=1）
-
-- **LST SON 配置** — 25 paths（GetParameterValues 全集）
-- **MOD SON 配置** — 24 paths（SetParameterValues，RW 子集）
-- **ADD SON 配置** — AddObject，新增 `{i}` 实例 ⚠
-- **RMV SON 配置** — DeleteObject，删除 `{i}` 实例 ⚠
-
-**G-51 · `Device.Services.FAPService.{i}.FAPControl.SelfConfig.*` 📖**（R=3 / RW=0 / arity=1）
-
-- **LST 自配置启动** — 3 paths（GetParameterValues 全集）
-- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
-
-#### SL · WANDevice — WAN 口配置参数管理
-
-**G-52 · `Device.Ethernet.Interface.{i}.*` 📖📝**（R=5 / RW=4 / arity=1）
-
-- **LST 以太网接口** — 9 paths（GetParameterValues 全集）
-- **MOD 以太网接口** — 4 paths（SetParameterValues，RW 子集）
-- **ADD 以太网接口** — AddObject，新增 `{i}` 实例
-- **RMV 以太网接口** — DeleteObject，删除 `{i}` 实例
-
-**G-53 · `Device.Ethernet.Interface.{iα}.IPv4Address.{iβ}.*` 📝**（R=0 / RW=5 / arity=2）
-
-- **LST IPv4 地址** — 5 paths（GetParameterValues 全集）
-- **MOD IPv4 地址** — 5 paths（SetParameterValues，RW 子集）
-- **ADD IPv4 地址** — AddObject，新增 `{i}` 实例
-- **RMV IPv4 地址** — DeleteObject，删除 `{i}` 实例
-
-**G-54 · `Device.Ethernet.Interface.{iα}.IPv6Address.{iβ}.*` 📝**（R=0 / RW=5 / arity=2）
-
-- **LST IPv6 地址** — 5 paths（GetParameterValues 全集）
-- **MOD IPv6 地址** — 5 paths（SetParameterValues，RW 子集）
-- **ADD IPv6 地址** — AddObject，新增 `{i}` 实例
-- **RMV IPv6 地址** — DeleteObject，删除 `{i}` 实例
-
-**G-55 · `Device.Ethernet.Interface.{iα}.VlanInterface.{iβ}.*` 📝**（R=0 / RW=3 / arity=2）
-
-- **LST VLAN 接口** — 3 paths（GetParameterValues 全集）
-- **MOD VLAN 接口** — 3 paths（SetParameterValues，RW 子集）
-- **ADD VLAN 接口** — AddObject，新增 `{i}` 实例
-- **RMV VLAN 接口** — DeleteObject，删除 `{i}` 实例
-
-**G-56 · `Device.Ethernet.Interface.{iα}.VlanInterface.{iβ}.IPv4Address.{iγ}.*` 📝**（R=0 / RW=5 / arity=3）
-
-- **LST VLAN IPv4** — 5 paths（GetParameterValues 全集）
-- **MOD VLAN IPv4** — 5 paths（SetParameterValues，RW 子集）
-- **ADD VLAN IPv4** — AddObject，新增 `{i}` 实例
-- **RMV VLAN IPv4** — DeleteObject，删除 `{i}` 实例
-
-**G-57 · `Device.Ethernet.Interface.{iα}.VlanInterface.{iβ}.IPv6Address.{iγ}.*` 📝**（R=0 / RW=5 / arity=3）
-
-- **LST VLAN IPv6** — 5 paths（GetParameterValues 全集）
-- **MOD VLAN IPv6** — 5 paths（SetParameterValues，RW 子集）
-- **ADD VLAN IPv6** — AddObject，新增 `{i}` 实例
-- **RMV VLAN IPv6** — DeleteObject，删除 `{i}` 实例
-
-**G-58 · `Device.Ethernet.IpRoute.{i}.*` 📝**（R=0 / RW=5 / arity=1）
-
-- **LST IP 路由** — 5 paths（GetParameterValues 全集）
-- **MOD IP 路由** — 5 paths（SetParameterValues，RW 子集）
-- **ADD IP 路由** — AddObject，新增 `{i}` 实例
-- **RMV IP 路由** — DeleteObject，删除 `{i}` 实例
-
-#### SM · Ipsec — IPsec 参数管理
-
-**G-59 · `Device.IPsec.*` 📖📝**（R=7 / RW=2 / arity=0）
-
-- **LST IPsec** — 9 paths（GetParameterValues 全集）
-- **MOD IPsec** — 2 paths（SetParameterValues，RW 子集）
-- ❌ 不生成：ADD/RMV（arity=0，非多实例对象）
-
-#### SN · Time — 时间服务器参数管理
-
-**G-60 · `Device.Time.*` 📖📝**（R=1 / RW=7 / arity=0）
-
-- **LST 时间服务器** — 8 paths（GetParameterValues 全集）
-- **MOD 时间服务器** — 7 paths（SetParameterValues，RW 子集）
-- ❌ 不生成：ADD/RMV（arity=0，非多实例对象）
-
-#### SO · FAP.GPS — GPS 信息参数管理
-
-**G-61 · `Device.FAP.GPS.*` 📖**（R=3 / RW=0 / arity=0）
-
-- **LST GPS** — 3 paths（GetParameterValues 全集）
-- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（arity=0，非多实例对象）
-
-#### SP · FAP.MRMgmt — MR 参数管理
-
-**G-62 · `Device.FAP.MRMgmt.Config.{i}.*` 📝**（R=0 / RW=14 / arity=1）
-
-- **LST MR 配置** — 14 paths（GetParameterValues 全集）
-- **MOD MR 配置** — 14 paths（SetParameterValues，RW 子集）
-- **ADD MR 配置** — AddObject，新增 `{i}` 实例
-- **RMV MR 配置** — DeleteObject，删除 `{i}` 实例
-
-#### SQ · FAP.PerfMgmt — 性能参数管理
-
-**G-63 · `Device.FAP.PerfMgmt.Config.{i}.*` 📝**（R=0 / RW=10 / arity=1）
-
-- **LST PM 配置** — 10 paths（GetParameterValues 全集）
-- **MOD PM 配置** — 10 paths（SetParameterValues，RW 子集）
-- **ADD PM 配置** — AddObject，新增 `{i}` 实例
-- **RMV PM 配置** — DeleteObject，删除 `{i}` 实例
-
-#### SR · ENanocell — 扩展型一体化皮基站参数
-
-**G-64 · `Device.DeviceInfo.MU.{i}.*` 📖📝**（R=21 / RW=3 / arity=1）
-
-- **LST MU 主机单元** — 24 paths（GetParameterValues 全集）
-- **MOD MU 主机单元** — 3 paths（SetParameterValues，RW 子集）
-- **ADD MU 主机单元** — AddObject，新增 `{i}` 实例 ⚠
-- **RMV MU 主机单元** — DeleteObject，删除 `{i}` 实例 ⚠
-
-**G-65 · `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.*` 📖📝**（R=15 / RW=1 / arity=2）
-
-- **LST Slot 板卡** — 16 paths（GetParameterValues 全集）
-- **MOD Slot 板卡** — 1 paths（SetParameterValues，RW 子集）
-- **ADD Slot 板卡** — AddObject，新增 `{i}` 实例 ⚠
-- **RMV Slot 板卡** — DeleteObject，删除 `{i}` 实例 ⚠
-
-**G-66 · `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.EU.{iγ}.*` 📖📝**（R=11 / RW=2 / arity=3）
-
-- **LST EU 扩展单元** — 13 paths（GetParameterValues 全集）
-- **MOD EU 扩展单元** — 2 paths（SetParameterValues，RW 子集）
-- **ADD EU 扩展单元** — AddObject，新增 `{i}` 实例 ⚠
-- **RMV EU 扩展单元** — DeleteObject，删除 `{i}` 实例 ⚠
-
-**G-67 · `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.EU.{iγ}.RU.{iδ}.*` 📖📝**（R=12 / RW=4 / arity=4）
-
-- **LST RU 远端单元** — 16 paths（GetParameterValues 全集）
-- **MOD RU 远端单元** — 4 paths（SetParameterValues，RW 子集）
-- **ADD RU 远端单元** — AddObject，新增 `{i}` 实例 ⚠
-- **RMV RU 远端单元** — DeleteObject，删除 `{i}` 实例 ⚠
-
-**G-68 · `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.EU.{iγ}.RU.{iδ}.RFChannel.{iε}.*` 📖📝**（R=1 / RW=1 / arity=5）
-
-- **LST RFChannel 射频通道** — 2 paths（GetParameterValues 全集）
-- **MOD RFChannel 射频通道** — 1 paths（SetParameterValues，RW 子集）
-- **ADD RFChannel 射频通道** — AddObject，新增 `{i}` 实例 ⚠
-- **RMV RFChannel 射频通道** — DeleteObject，删除 `{i}` 实例 ⚠
-
-**G-69 · `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.EU.{iγ}.RU.{iδ}.SwUpgrade.*` 📖**（R=3 / RW=0 / arity=4）
-
-- **LST RU 升级** — 3 paths（GetParameterValues 全集）
-- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
-
-**G-70 · `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.EU.{iγ}.SwUpgrade.*` 📖**（R=3 / RW=0 / arity=3）
-
-- **LST EU 升级** — 3 paths（GetParameterValues 全集）
-- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
-
-**G-71 · `Device.DeviceInfo.MU.{iα}.Slot.{iβ}.SwUpgrade.*` 📖**（R=3 / RW=0 / arity=2）
-
-- **LST Slot 升级** — 3 paths（GetParameterValues 全集）
-- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
-
-**G-72 · `Device.DeviceInfo.MU.{i}.SwUpgrade.*` 📖**（R=3 / RW=0 / arity=1）
-
-- **LST MU 升级** — 3 paths（GetParameterValues 全集）
-- ❌ 不生成：MOD（路径全只读，无可写 path） · ADD/RMV（无 RW path，新增/删除实例无意义）
-
+> 派生口径（**全中文命名表** + 非可创建对象过滤 + 同 group_code 合并）以 §R-1 / §R-2 / §R-3 为权威源，**不再单独维护 G-NN 编号**；如需对照旧 G-NN，请参考外部派生文档 `docs/design/mml-console-cmcc-tdlte-v23-catalog-listing.md`（该文档需按本 spec 重新生成）。
