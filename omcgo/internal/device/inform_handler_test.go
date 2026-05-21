@@ -439,6 +439,11 @@ func TestHandleRebootComplete_AbnormalReboot_PublishesAbnormalEvent(t *testing.T
 
 	payload := sampleInformPayload("SN-REBOOT-ABN-001")
 	payload.Events = []string{tr069.EventBoot} // only "1 BOOT", no "M Reboot"
+	// T-0158: 异常重启判断改为基于 HaltReason.MainReason 非空
+	payload.ParameterList = append(payload.ParameterList,
+		tr069.ParameterValueStruct{Name: HaltReasonMainPath, Value: "halt_reboot"},
+		tr069.ParameterValueStruct{Name: HaltReasonDetailPath, Value: "watchdog_timeout"},
+	)
 	evt, err := event.NewEvent(event.SubjectDeviceRebootComplete, payload)
 	require.NoError(t, err)
 
@@ -448,8 +453,62 @@ func TestHandleRebootComplete_AbnormalReboot_PublishesAbnormalEvent(t *testing.T
 	select {
 	case got := <-abnormalReceived:
 		assert.Equal(t, event.SubjectDeviceRebootAbnormal, got.Subject)
+		// 校验新增字段透传到 payload
+		var p map[string]interface{}
+		require.NoError(t, got.DecodePayload(&p))
+		assert.Equal(t, "halt_reboot", p["halt_main_reason"])
+		assert.Equal(t, "watchdog_timeout", p["halt_detail_reason"])
 	case <-time.After(time.Second):
 		t.Fatal("expected device.reboot.abnormal event, got none")
+	}
+}
+
+// T-0158: 1 BOOT 但 HaltReason.MainReason 为空 → 正常重启，不发异常事件。
+// 这是新判断规则相对旧规则（"1 BOOT && !M Reboot"）的关键差异：
+// 受控的重启 / 看门狗内部恢复 CPE 不带 M Reboot 也不带 HaltReason，
+// 现在不会再被误判为异常。
+func TestHandleRebootComplete_BootWithoutHaltReason_NoAbnormalEvent(t *testing.T) {
+	deviceID := uuid.New()
+	deviceRepo := &infMockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:             deviceID,
+				SerialNumber:   sn,
+				OUI:            "AABBCC",
+				Carrier:        model.CarrierCMCC,
+				Status:         model.DeviceActive,
+				InformInterval: 300,
+			}, nil
+		},
+		recordBootFn: func(_ context.Context, _ string, _ time.Time) (int, error) {
+			return 3, nil
+		},
+	}
+	bus := event.NewChannelEventBus(16, zap.NewNop())
+	abnormalReceived := make(chan event.Event, 1)
+	_, subErr := bus.Subscribe(event.SubjectDeviceRebootAbnormal, func(_ context.Context, evt event.Event) error {
+		abnormalReceived <- evt
+		return nil
+	})
+	require.NoError(t, subErr)
+
+	svc := NewDeviceService(deviceRepo, &infMockParamRepo{}, nil, bus, zap.NewNop())
+	h := NewInformHandler(svc, nil, model.CarrierCMCC, zap.NewNop())
+
+	payload := sampleInformPayload("SN-REBOOT-NORMAL-001")
+	payload.Events = []string{tr069.EventBoot}
+	// 故意不带 HaltReason 参数（sampleInformPayload 默认就没有）
+	evt, err := event.NewEvent(event.SubjectDeviceRebootComplete, payload)
+	require.NoError(t, err)
+
+	err = h.handleRebootComplete(context.Background(), evt)
+	require.NoError(t, err)
+
+	select {
+	case got := <-abnormalReceived:
+		t.Fatalf("unexpected abnormal event: %s", got.Subject)
+	case <-time.After(200 * time.Millisecond):
+		// expected: no event published
 	}
 }
 

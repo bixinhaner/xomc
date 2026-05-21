@@ -199,6 +199,7 @@ const messages: Record<string, string> = {
   'nav.device.import':     'Import & Export',
   'nav.device.rules':      'Device Rules',
   'nav.device.recycle':    'Recycle Bin',
+  'nav.device.abnormalReboot': 'Reboot Records',
 
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Alarm
@@ -3766,6 +3767,16 @@ const messages: Record<string, string> = {
   'log.exception.column.time':               'Time',
   'log.exception.column.runtime':            'Runtime',
   'log.exception.column.haltReason':         'Halt Reason',
+  'log.exception.column.haltMainReason':     'Main Halt Reason',
+  'log.exception.column.recordStatus':       'Record Status',
+  'log.exception.recordStatus.detected':         'Detected',
+  'log.exception.recordStatus.fileReceived':     'File Received',
+  'log.exception.recordStatus.collectionFailed': 'Collection Failed',
+  'log.exception.exportFileName':             'RebootRecords',
+  'log.exception.exportSheetName':            'Reboot Records',
+  'log.exception.exportSuccess':              'Exported {count} records',
+  'log.exception.exportFailed':               'Export failed',
+  'log.exception.exportEmpty':                'No data to export under current filter',
   'log.exception.detail.title':              'Log File Detail',
   'log.exception.detail.devInfo':            'Device Information',
   'log.exception.detail.devCode':            'Device Code',

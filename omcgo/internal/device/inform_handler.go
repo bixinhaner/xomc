@@ -220,7 +220,7 @@ func (h *InformHandler) handleRebootComplete(ctx context.Context, evt event.Even
 		}
 	}
 
-	if _, err := h.service.RecordBootFromInform(ctx, device, payload.Events); err != nil {
+	if _, err := h.service.RecordBootFromInform(ctx, device, payload.Events, payload.ParameterList); err != nil {
 		h.logger.Error("handleRebootComplete: RecordBootFromInform failed",
 			zap.Error(err), zap.String("serial_number", sn))
 		return err

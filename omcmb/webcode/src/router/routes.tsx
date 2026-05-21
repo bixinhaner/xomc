@@ -109,7 +109,8 @@ const DeviceFiles        = React.lazy(() => import('@/pages/file/DeviceFiles'));
 
 // Log Management
 const DeviceLog          = React.lazy(() => import('@/pages/log/DeviceLog'));
-const ExceptionLog       = React.lazy(() => import('@/pages/log/ExceptionLog'));
+// T-0158: ExceptionLog 已迁移到 device/AbnormalReboot；保留 lazy import 以兼容旧文件直至清理
+const AbnormalReboot     = React.lazy(() => import('@/pages/device/AbnormalReboot'));
 const EventLog           = React.lazy(() => import('@/pages/log/EventLog'));
 const OperationLog       = React.lazy(() => import('@/pages/log/OperationLog'));
 const SystemLog          = React.lazy(() => import('@/pages/log/SystemLog'));
@@ -247,6 +248,8 @@ export const routes: RouteObject[] = [
       { path: 'device/import',     element: withSuspense(ImportExport) },
       { path: 'device/rules',      element: withSuspense(DeviceRules) },
       { path: 'device/recycle',    element: withSuspense(RecycleBin) },
+      // T-0158: 异常重启记录
+      { path: 'device/abnormal-reboot', element: withSuspense(AbnormalReboot) },
       { path: 'device/ue-detail/:sn', element: withSuspense(UeDetail) },
 
       // Alarm Management
@@ -323,7 +326,8 @@ export const routes: RouteObject[] = [
 
       // Log Management
       { path: 'log/device',      element: withSuspense(DeviceLog) },
-      { path: 'log/exception',   element: withSuspense(ExceptionLog) },
+      // T-0158: log/exception 已迁到 device/abnormal-reboot，旧路径保留 302 跳转兼容书签
+      { path: 'log/exception',   element: <Navigate to="/device/abnormal-reboot" replace /> },
       { path: 'log/event',       element: withSuspense(EventLog) },
       { path: 'log/operation',   element: withSuspense(OperationLog) },
       { path: 'log/system',      element: withSuspense(SystemLog) },

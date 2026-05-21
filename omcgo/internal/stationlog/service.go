@@ -12,6 +12,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/device"
 )
 
 // DeviceLookup 仅需要按 SN 查设备的最小接口，避免引入整个 device.DeviceRepository。
@@ -61,7 +62,59 @@ func (s *Service) repoFor(lt LogType) Repository {
 	return s.runningRepo
 }
 
+// RecordAbnormalReboot 把"识别即落库"事件写入 station_fault_logs，状态 detected。
+//
+// 这是 device.AbnormalRebootRecorder 接口的实现，由 modules.go 在 wiring 时注入
+// 到 DeviceService。设计要点见 docs/project/abnormal-reboot-log-plan-20260521.md §3.D3。
+//
+// 同 SN 1 秒内连续 detected 记录不去重 —— collected_at 区分；上游告警链路
+// 已经有滑动窗口去抖。
+func (s *Service) RecordAbnormalReboot(ctx context.Context, snap device.AbnormalRebootSnapshot) error {
+	now := snap.DetectedAt
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	devID := snap.DeviceID
+	rec := &LogFile{
+		DeviceID:               &devID,
+		DeviceSN:               snap.DeviceSN,
+		LogType:                LogTypeFault,
+		FaultReason:            snap.HaltMainReason,
+		FaultDetail:            snap.HaltDetailReason,
+		DeviceName:             snap.DeviceName,
+		DeviceType:             snap.DeviceType,
+		IsGNB:                  snap.IsGNB,
+		OperateIP:              snap.OperateIP,
+		SoftwareVersion:        snap.SoftwareVersion,
+		RuntimeBeforeReboot:    snap.RuntimeBeforeReboot,
+		RecordStatus:           FaultRecordStatusDetected,
+		ManualCollectionStatus: ManualCollectionIdle,
+		CollectedAt:            now,
+	}
+
+	if err := s.faultRepo.Create(ctx, rec); err != nil {
+		return fmt.Errorf("create abnormal reboot record: %w", err)
+	}
+
+	s.logger.Info("abnormal reboot recorded (detected)",
+		zap.String("id", rec.ID.String()),
+		zap.String("device_sn", snap.DeviceSN),
+		zap.String("halt_main_reason", snap.HaltMainReason),
+		zap.String("halt_detail_reason", snap.HaltDetailReason),
+	)
+	return nil
+}
+
 // HandleLogFileReceived 处理 SubjectLogFileReceived 事件，按日志类型写入对应表。
+//
+// 故障日志（LogTypeFault）路径有两种补完模式：
+//  1. T-0158 识别即落库链路：device.RecordBootFromInform 已经写过一条 detected 记录，
+//     这里通过 LatestDetectedByDeviceSN 找到它并 UpdateFile 推进到 file_received；
+//  2. 兼容旧链路：若找不到 detected 占位记录（例如 ACS 直传文件没经过 1 BOOT 识别），
+//     INSERT 一行新记录（记录 status 由 Create 默认推断为 file_received）。
+//
+// 运行日志（LogTypeRunning）始终走旧 INSERT 路径。
 func (s *Service) HandleLogFileReceived(ctx context.Context, evt event.Event) error {
 	var p LogFileReceivedPayload
 	if err := evt.DecodePayload(&p); err != nil {
@@ -79,6 +132,30 @@ func (s *Service) HandleLogFileReceived(ctx context.Context, evt event.Event) er
 		}
 	}
 
+	// 故障日志优先尝试补全 detected 占位记录
+	if logType == LogTypeFault && p.DeviceSN != "" {
+		if faultRepo, ok := s.faultRepo.(FaultExtraRepository); ok {
+			detected, lookupErr := faultRepo.LatestDetectedByDeviceSN(ctx, p.DeviceSN)
+			if lookupErr != nil {
+				s.logger.Warn("lookup detected fault log", zap.String("device_sn", p.DeviceSN), zap.Error(lookupErr))
+			} else if detected != nil {
+				if err := faultRepo.UpdateFile(ctx, detected.ID, p.FileName, p.ObjectPath, p.Bucket, p.FileSize); err != nil {
+					return fmt.Errorf("update fault log file: %w", err)
+				}
+				s.logger.Info("station fault log promoted to file_received",
+					zap.String("id", detected.ID.String()),
+					zap.String("device_sn", p.DeviceSN),
+					zap.String("path", p.ObjectPath),
+				)
+				if err := s.enforceFaultLogQuota(ctx); err != nil {
+					s.logger.Warn("enforce fault log quota", zap.Error(err))
+				}
+				return nil
+			}
+		}
+	}
+
+	// 兜底：INSERT 新记录
 	f := &LogFile{
 		DeviceID:    deviceID,
 		DeviceSN:    p.DeviceSN,

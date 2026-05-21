@@ -57,13 +57,19 @@ func WithRebootThreshold(n int) RebootMonitorOption {
 }
 
 // RebootAbnormalPayload 与 device.DeviceService.RecordBootFromInform 发布的 payload 对齐。
+//
+// T-0158 起新增 HaltMainReason / HaltDetailReason / RuntimeBeforeReboot 三个字段，
+// 旧 payload（没有这三个字段）也能成功 decode（JSON 零值兜底），无破坏性。
 type RebootAbnormalPayload struct {
-	DeviceID     string    `json:"device_id"`
-	SerialNumber string    `json:"serial_number"`
-	Carrier      string    `json:"carrier"`
-	BootCount    int       `json:"boot_count"`
-	LastBootAt   time.Time `json:"last_boot_at"`
-	Events       []string  `json:"events"`
+	DeviceID            string    `json:"device_id"`
+	SerialNumber        string    `json:"serial_number"`
+	Carrier             string    `json:"carrier"`
+	BootCount           int       `json:"boot_count"`
+	LastBootAt          time.Time `json:"last_boot_at"`
+	Events              []string  `json:"events"`
+	HaltMainReason      string    `json:"halt_main_reason,omitempty"`
+	HaltDetailReason    string    `json:"halt_detail_reason,omitempty"`
+	RuntimeBeforeReboot int64     `json:"runtime_before_reboot,omitempty"`
 }
 
 // RebootMonitor 监听 SubjectDeviceRebootAbnormal 并在滑动窗口内累计到阈值后抬升告警。

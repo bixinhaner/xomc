@@ -119,7 +119,9 @@ export const componentRegistry: Record<string, ComponentType> = {
 
   // Log Management
   'log/DeviceLog': lazy(() => import('@/pages/log/DeviceLog')),
-  'log/ExceptionLog': lazy(() => import('@/pages/log/ExceptionLog')),
+  // T-0158: 旧 component_path 仍可能存在于 menus 表（seed 000139 已 UPDATE），用 alias 容错
+  'log/ExceptionLog': lazy(() => import('@/pages/device/AbnormalReboot')),
+  'device/AbnormalReboot': lazy(() => import('@/pages/device/AbnormalReboot')),
   'log/EventLog': lazy(() => import('@/pages/log/EventLog')),
   'log/OperationLog': lazy(() => import('@/pages/log/OperationLog')),
   'log/SystemLog': lazy(() => import('@/pages/log/SystemLog')),

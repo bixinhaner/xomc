@@ -6258,6 +6258,50 @@ QS_BAD_HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
 check_status_in "T-0138 quicksettings-3: GET /quicksettings/groups?tech=invalid" "400 401" "$QS_BAD_HTTP"
 
 # ------------------------------------------------------------
+# T-0158 device-abnormal-reboots: 异常重启记录端点契约
+# 设计文档: docs/project/abnormal-reboot-log-plan-20260521.md; backlog T-0158
+# ------------------------------------------------------------
+echo ""
+echo -e "${YELLOW}=== T-0158 device-abnormal-reboots: 异常重启记录 ===${NC}"
+
+T0158_BAD_UUID="00000000-0000-0000-0000-000000000000"
+
+claim "abnormal-reboot: GET list 返回 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/device-abnormal-reboots" -H "$W2D_AUTH")
+check_status_in "T-0158 abnormal-reboot-1: GET /device-abnormal-reboots" "200 401" "$HTTP_CODE"
+
+claim "abnormal-reboot: GET list 支持 record_status 过滤 (AC-1)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/device-abnormal-reboots?record_status=detected" -H "$W2D_AUTH")
+check_status_in "T-0158 abnormal-reboot-2: GET /device-abnormal-reboots?record_status=detected" "200 401" "$HTTP_CODE"
+
+claim "abnormal-reboot: GET list 支持 device_type=eNB 过滤"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/device-abnormal-reboots?device_type=eNB" -H "$W2D_AUTH")
+check_status_in "T-0158 abnormal-reboot-3: GET /device-abnormal-reboots?device_type=eNB" "200 401" "$HTTP_CODE"
+
+claim "abnormal-reboot: GET 详情 不存在返回 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/device-abnormal-reboots/$T0158_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "T-0158 abnormal-reboot-4: GET /device-abnormal-reboots/<bad>" "404 401" "$HTTP_CODE"
+
+claim "abnormal-reboot: GET 详情 bad UUID 返回 400/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/device-abnormal-reboots/not-a-uuid" -H "$W2D_AUTH")
+check_status_in "T-0158 abnormal-reboot-5: GET /device-abnormal-reboots/<malformed>" "400 401" "$HTTP_CODE"
+
+claim "abnormal-reboot: DELETE 不存在返回 200/404/401（幂等软删）"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    -X DELETE "$API/device-abnormal-reboots/$T0158_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "T-0158 abnormal-reboot-6: DELETE /device-abnormal-reboots/<bad>" "200 404 401" "$HTTP_CODE"
+
+claim "abnormal-reboot: GET download 不存在返回 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/device-abnormal-reboots/$T0158_BAD_UUID/download" -H "$W2D_AUTH")
+check_status_in "T-0158 abnormal-reboot-7: GET /device-abnormal-reboots/<bad>/download" "404 401" "$HTTP_CODE"
+
+# ------------------------------------------------------------
 # W2.D.1 段尾打印分段统计，方便 verify 报告引用
 echo ""
 echo -e "${YELLOW}=== W2.D.1 段累计 claim 总数 ${CLAIM_COUNT}（≥ 100 即合规）===${NC}"

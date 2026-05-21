@@ -47,6 +47,8 @@ export const NAV_CONFIG: NavConfig = [
       // { key: 'device-import',    label: 'nav.device.import',      path: '/device/import' },        // 隐藏
       // { key: 'device-rule',      label: 'nav.device.rules',       path: '/device/rules' },  // 已下线：device_rules 功能并入设备分组，从菜单移除（路由/页面暂保留）
       { key: 'device-recycle',   label: 'nav.device.recycle',     path: '/device/recycle' },
+      // T-0158: 异常重启记录（原"日志管理 / 设备异常日志"挪到设备管理下并改名）
+      { key: 'device-abnormal-reboot', label: 'nav.device.abnormalReboot', path: '/device/abnormal-reboot' },
     ],
   },
   {
@@ -183,7 +185,7 @@ export const NAV_CONFIG: NavConfig = [
     iconName: 'FileTextOutlined',
     children: [
       { key: 'log-device',    label: 'nav.log.device',     path: '/log/device' },
-      { key: 'log-exception', label: 'nav.log.exception',  path: '/log/exception' },
+      // T-0158: "设备异常日志" 已迁移到"设备管理 / 异常重启记录" (/device/abnormal-reboot)
       { key: 'log-event',     label: 'nav.log.event',      path: '/log/event' },
       // T-0137 / M1: TR069 报文跟踪入口
       { key: 'log-message-trace', label: 'nav.ops.messageTrace', path: '/ops/message-trace' },

@@ -44,6 +44,7 @@ type DeviceService struct {
 	licenseEnforcer  LicenseEnforcer
 	carrierRegistry  *carrier.CarrierRegistry // T-0029: RF control path lookup by carrier+tech
 	paramSyncStarter ParamSyncStarter         // T-0126: 注入 *provision.SyncService 触发 Path B 手动同步
+	abnormalRecorder AbnormalRebootRecorder   // T-0158: 异常重启识别即落库（nil = 禁用）
 	logger           *zap.Logger
 }
 
@@ -1029,6 +1030,30 @@ func (s *DeviceService) PublishDeviceRegistered(ctx context.Context, device *mod
 	}
 }
 
+// HaltReasonMainPath / HaltReasonDetailPath are the standard TR-181 paths
+// carrying the abnormal-reboot signal. Vendor-specific aliases (X_BAICELLS_*,
+// X_COM_* etc.) are normalized to these by the param-model Translator before
+// reaching this layer; private-path resolution itself is therefore left to
+// upstream code and not duplicated here.
+const (
+	HaltReasonMainPath   = "Device.HaltReason.MainReason"
+	HaltReasonDetailPath = "Device.HaltReason.DetailReason"
+	// DeviceUpTimeStandardPath is the canonical TR-181 uptime path used as a
+	// best-effort source for runtime_before_reboot. Many CPEs report it under
+	// a private alias; absence is acceptable (we store 0).
+	DeviceUpTimeStandardPath = "Device.DeviceInfo.UpTime"
+)
+
+// extractParam looks up a parameter value by exact path. Returns "" when absent.
+func extractParam(params []tr069.ParameterValueStruct, path string) string {
+	for _, p := range params {
+		if p.Name == path {
+			return p.Value
+		}
+	}
+	return ""
+}
+
 // RecordBootFromInform handles the data updates triggered by a reboot-complete
 // Inform (event codes "1 BOOT" or "M Reboot"). It:
 //   - atomically increments devices.boot_count and stamps last_boot_at;
@@ -1040,7 +1065,7 @@ func (s *DeviceService) PublishDeviceRegistered(ctx context.Context, device *mod
 // The caller is expected to have already ensured the device row exists (via
 // UpdateFromInform or RegisterFromInform). Returns the updated boot_count; 0
 // with no error means the device could not be found and the boot was ignored.
-func (s *DeviceService) RecordBootFromInform(ctx context.Context, device *model.Device, events []string) (int, error) {
+func (s *DeviceService) RecordBootFromInform(ctx context.Context, device *model.Device, events []string, params []tr069.ParameterValueStruct) (int, error) {
 	if device == nil {
 		return 0, nil
 	}
@@ -1059,36 +1084,104 @@ func (s *DeviceService) RecordBootFromInform(ctx context.Context, device *model.
 	device.BootCount = bootCount
 	s.cacheDevice(ctx, device)
 
-	// Abnormal reboot = "1 BOOT" without "M Reboot" (and without "0 BOOTSTRAP",
-	// which the caller routes through handleBootstrap instead). ACS-initiated
-	// reboots include "M Reboot"; anything else is watchdog, crash or power cycle.
-	abnormal := hasEventCode(events, tr069.EventBoot) && !hasEventCode(events, tr069.EventMReboot)
+	// Abnormal reboot 判断（T-0158）：
+	//   1 BOOT 事件 + Device.HaltReason.MainReason 非空 → 异常重启
+	//
+	// 比"1 BOOT && !M Reboot"更准确：受控的看门狗 / 软重启 CPE 不会带 M Reboot
+	// 但也不算异常；只有 CPE 明确上报故障主原因（崩溃/死机/异常断电）才算。
+	// 当 ParameterList 为空（极少数兼容场景）退回旧的事件码组合规则，保留漏判
+	// 优先于误判。
+	haltMainReason := extractParam(params, HaltReasonMainPath)
+	haltDetailReason := extractParam(params, HaltReasonDetailPath)
+	uptimeStr := extractParam(params, DeviceUpTimeStandardPath)
+	runtimeBeforeReboot := parseUptimeSeconds(uptimeStr)
+
+	hasBoot := hasEventCode(events, tr069.EventBoot)
+	var abnormal bool
+	switch {
+	case len(params) == 0:
+		// Fallback: 没有参数列表时退回旧规则（保 backward-compatible）
+		abnormal = hasBoot && !hasEventCode(events, tr069.EventMReboot)
+	default:
+		abnormal = hasBoot && haltMainReason != ""
+	}
 
 	s.logger.Info("device boot recorded",
 		zap.String("device_id", device.ID.String()),
 		zap.String("serial_number", device.SerialNumber),
 		zap.Int("boot_count", bootCount),
 		zap.Bool("abnormal", abnormal),
+		zap.String("halt_main_reason", haltMainReason),
+		zap.String("halt_detail_reason", haltDetailReason),
+		zap.Int64("runtime_before_reboot", runtimeBeforeReboot),
 		zap.Strings("events", events),
 	)
 
-	if abnormal && s.eventBus != nil {
-		payload := map[string]interface{}{
-			"device_id":     device.ID.String(),
-			"serial_number": device.SerialNumber,
-			"carrier":       string(device.Carrier),
-			"boot_count":    bootCount,
-			"last_boot_at":  now,
-			"events":        events,
+	if abnormal {
+		// 识别即落库：在事件发布前完成 detected 占位记录写入，
+		// 让"设备一上线立即可见"，且不依赖订阅者完成时机。
+		if s.abnormalRecorder != nil {
+			// snapshot 直接 freeze devices 表当时的字段值，空就是空（人工命名 /
+			// IP 长期没回填等都是上游业务流程的事，不在异常重启识别这一步做兜底）。
+			snap := AbnormalRebootSnapshot{
+				DeviceID:            device.ID,
+				DeviceSN:            device.SerialNumber,
+				DeviceName:          device.DeviceName,
+				OperateIP:           device.IPAddress,
+				SoftwareVersion:     device.FirmwareVersion,
+				HaltMainReason:      haltMainReason,
+				HaltDetailReason:    haltDetailReason,
+				RuntimeBeforeReboot: runtimeBeforeReboot,
+				IsGNB:               device.Technology == model.TechNR,
+				DetectedAt:          now,
+			}
+			if device.Technology == model.TechNR {
+				snap.DeviceType = "gNB"
+			} else {
+				snap.DeviceType = "eNB"
+			}
+			if recErr := s.abnormalRecorder.RecordAbnormalReboot(ctx, snap); recErr != nil {
+				// 落库失败不阻塞事件发布；告警链路依然能基于事件累计。
+				s.logger.Warn("record abnormal reboot",
+					zap.String("serial_number", device.SerialNumber),
+					zap.Error(recErr))
+			}
 		}
-		if evt, evtErr := event.NewEvent(event.SubjectDeviceRebootAbnormal, payload); evtErr == nil {
-			if pubErr := s.eventBus.Publish(ctx, event.SubjectDeviceRebootAbnormal, evt); pubErr != nil {
-				s.logger.Warn("publish device.reboot.abnormal event", zap.Error(pubErr))
+
+		if s.eventBus != nil {
+			payload := map[string]interface{}{
+				"device_id":             device.ID.String(),
+				"serial_number":         device.SerialNumber,
+				"carrier":               string(device.Carrier),
+				"boot_count":            bootCount,
+				"last_boot_at":          now,
+				"events":                events,
+				"halt_main_reason":      haltMainReason,
+				"halt_detail_reason":    haltDetailReason,
+				"runtime_before_reboot": runtimeBeforeReboot,
+			}
+			if evt, evtErr := event.NewEvent(event.SubjectDeviceRebootAbnormal, payload); evtErr == nil {
+				if pubErr := s.eventBus.Publish(ctx, event.SubjectDeviceRebootAbnormal, evt); pubErr != nil {
+					s.logger.Warn("publish device.reboot.abnormal event", zap.Error(pubErr))
+				}
 			}
 		}
 	}
 
 	return bootCount, nil
+}
+
+// parseUptimeSeconds turns the TR-181 UpTime string ("seconds since boot")
+// into int64 seconds. Empty / unparseable values return 0 (= unknown).
+func parseUptimeSeconds(v string) int64 {
+	if v == "" {
+		return 0
+	}
+	var n int64
+	if _, err := fmt.Sscanf(v, "%d", &n); err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 func hasEventCode(events []string, target string) bool {

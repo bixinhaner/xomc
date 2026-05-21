@@ -546,6 +546,12 @@ func initStationLogModule(c *Container) error {
 
 	c.miscDeps.stationlogHandler = stationlog.NewHandler(svc, logger)
 
+	// T-0158: 把 stationlog.Service 作为 AbnormalRebootRecorder 注入回 DeviceService，
+	// 让"1 BOOT + HaltReason 非空"识别即落库。
+	if c.DeviceService != nil {
+		c.DeviceService.SetAbnormalRebootRecorder(svc)
+	}
+
 	logger.Info("stationlog module initialized")
 	return nil
 }

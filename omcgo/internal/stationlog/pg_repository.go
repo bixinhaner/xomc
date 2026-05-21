@@ -30,6 +30,17 @@ type Repository interface {
 	LatestByDevice(ctx context.Context, deviceID uuid.UUID) (*LogFile, error)
 }
 
+// FaultExtraRepository 故障日志专用接口：提供 UpdateFile 等运行日志不需要的方法。
+//
+// detected → file_received 的转换在文件到达时通过 UpdateFile 完成；
+// LatestDetectedByDeviceSN 在文件到达时用于找到对应的占位记录。
+type FaultExtraRepository interface {
+	// UpdateFile 用文件信息更新一条 detected 记录，使其进入 file_received 状态。
+	UpdateFile(ctx context.Context, id uuid.UUID, fileName, objectPath, bucket string, fileSize int64) error
+	// LatestDetectedByDeviceSN 返回设备最近一条 detected 状态（未文件落地）的故障日志。
+	LatestDetectedByDeviceSN(ctx context.Context, sn string) (*LogFile, error)
+}
+
 // runningLogCols 运行日志表列（station_running_logs，无 fault_reason/fault_detail）
 var runningLogCols = []string{
 	"id", "device_id", "device_sn", "file_name",
@@ -37,12 +48,19 @@ var runningLogCols = []string{
 	"task_id", "is_deleted", "collected_at", "created_at", "updated_at",
 }
 
-// faultLogCols 故障日志表列（station_fault_logs，含 fault_reason/fault_detail）
+// faultLogCols 故障日志表列（station_fault_logs）。
+//
+// 顺序固定，scan / insert 双向使用。包含 000150 引入的新字段：device_name /
+// device_type / is_gnb / operate_ip / software_version / runtime_before_reboot /
+// record_status / collection_fail_reason / manual_collection_status。
 var faultLogCols = []string{
 	"id", "device_id", "device_sn", "file_name",
 	"object_path", "bucket", "file_size",
 	"fault_reason", "fault_detail",
 	"task_id", "is_deleted", "collected_at", "created_at", "updated_at",
+	"device_name", "device_type", "is_gnb", "operate_ip", "software_version",
+	"runtime_before_reboot",
+	"record_status", "collection_fail_reason", "manual_collection_status",
 }
 
 // PgRepository 参数化的 PostgreSQL 仓库实现，运行日志和故障日志各创建一个实例。
@@ -80,6 +98,23 @@ func (r *PgRepository) cols() []string {
 	return runningLogCols
 }
 
+// nilIfEmpty 把空字符串转成 nil，便于让 file_name/object_path/bucket 等
+// nullable 列在 detected 占位记录里写成 NULL 而非 ''。
+func nilIfEmpty(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// nilIfZero 把 0 转成 nil（用于 runtime_before_reboot 等 BIGINT 列）。
+func nilIfZero(v int64) interface{} {
+	if v == 0 {
+		return nil
+	}
+	return v
+}
+
 func (r *PgRepository) Create(ctx context.Context, f *LogFile) error {
 	if f.ID == uuid.Nil {
 		f.ID = uuid.New()
@@ -93,13 +128,33 @@ func (r *PgRepository) Create(ctx context.Context, f *LogFile) error {
 
 	var qb sq.InsertBuilder
 	if r.withFaultFields {
+		// 默认值兜底：未指定 record_status 视为 file_received（兼容老路径）。
+		recordStatus := f.RecordStatus
+		if recordStatus == "" {
+			if f.FileName == "" {
+				recordStatus = FaultRecordStatusDetected
+			} else {
+				recordStatus = FaultRecordStatusFileReceived
+			}
+			f.RecordStatus = recordStatus
+		}
+		manualStatus := f.ManualCollectionStatus
+		if manualStatus == "" {
+			manualStatus = ManualCollectionIdle
+			f.ManualCollectionStatus = manualStatus
+		}
+
 		qb = storage.Psql.Insert(r.tableName).
 			Columns(faultLogCols...).
 			Values(
-				f.ID, f.DeviceID, f.DeviceSN, f.FileName,
-				f.ObjectPath, f.Bucket, f.FileSize,
-				f.FaultReason, f.FaultDetail,
+				f.ID, f.DeviceID, f.DeviceSN, nilIfEmpty(f.FileName),
+				nilIfEmpty(f.ObjectPath), nilIfEmpty(f.Bucket), f.FileSize,
+				nilIfEmpty(f.FaultReason), nilIfEmpty(f.FaultDetail),
 				f.TaskID, f.IsDeleted, f.CollectedAt, f.CreatedAt, f.UpdatedAt,
+				nilIfEmpty(f.DeviceName), nilIfEmpty(f.DeviceType), f.IsGNB,
+				nilIfEmpty(f.OperateIP), nilIfEmpty(f.SoftwareVersion),
+				nilIfZero(f.RuntimeBeforeReboot),
+				recordStatus, nilIfEmpty(f.CollectionFailReason), manualStatus,
 			)
 	} else {
 		qb = storage.Psql.Insert(r.tableName).
@@ -145,6 +200,24 @@ func (r *PgRepository) List(ctx context.Context, filter LogFileFilter) ([]*LogFi
 	if filter.DeviceSN != "" {
 		base = base.Where(sq.Eq{"device_sn": filter.DeviceSN})
 		countBase = countBase.Where(sq.Eq{"device_sn": filter.DeviceSN})
+	}
+	if r.withFaultFields {
+		if filter.RecordStatus != "" {
+			base = base.Where(sq.Eq{"record_status": filter.RecordStatus})
+			countBase = countBase.Where(sq.Eq{"record_status": filter.RecordStatus})
+		}
+		if filter.DeviceType != "" {
+			base = base.Where(sq.Eq{"device_type": filter.DeviceType})
+			countBase = countBase.Where(sq.Eq{"device_type": filter.DeviceType})
+		}
+	}
+	if filter.StartTime != nil {
+		base = base.Where(sq.GtOrEq{"collected_at": *filter.StartTime})
+		countBase = countBase.Where(sq.GtOrEq{"collected_at": *filter.StartTime})
+	}
+	if filter.EndTime != nil {
+		base = base.Where(sq.LtOrEq{"collected_at": *filter.EndTime})
+		countBase = countBase.Where(sq.LtOrEq{"collected_at": *filter.EndTime})
 	}
 
 	countQuery, countArgs, err := countBase.ToSql()
@@ -208,9 +281,16 @@ func (r *PgRepository) Count(ctx context.Context) (int64, error) {
 }
 
 func (r *PgRepository) ListOldest(ctx context.Context, limit int) ([]*LogFile, error) {
-	query, args, err := storage.Psql.Select(r.cols()...).
+	// 配额清理只针对 file_received 状态：detected 占位记录没文件需要删，
+	// 也不应被算入"超额"配额。在故障日志表上额外限定 record_status；
+	// 运行日志表沿用旧逻辑（无 record_status 列）。
+	q := storage.Psql.Select(r.cols()...).
 		From(r.tableName).
-		Where(sq.Eq{"is_deleted": false}).
+		Where(sq.Eq{"is_deleted": false})
+	if r.withFaultFields {
+		q = q.Where(sq.Eq{"record_status": FaultRecordStatusFileReceived})
+	}
+	query, args, err := q.
 		OrderBy("collected_at ASC").
 		Limit(uint64(limit)).
 		ToSql()
@@ -252,18 +332,95 @@ func (r *PgRepository) LatestByDevice(ctx context.Context, deviceID uuid.UUID) (
 	return f, err
 }
 
+// UpdateFile 把 detected 状态的故障日志记录推进到 file_received。
+// 仅在 station_fault_logs 上有意义；其他表调用会返回错误。
+func (r *PgRepository) UpdateFile(ctx context.Context, id uuid.UUID, fileName, objectPath, bucket string, fileSize int64) error {
+	if !r.withFaultFields {
+		return fmt.Errorf("UpdateFile only supported on fault log table, not %s", r.tableName)
+	}
+	query, args, err := storage.Psql.Update(r.tableName).
+		Set("file_name", fileName).
+		Set("object_path", objectPath).
+		Set("bucket", bucket).
+		Set("file_size", fileSize).
+		Set("record_status", FaultRecordStatusFileReceived).
+		Set("collected_at", time.Now()).
+		Set("updated_at", time.Now()).
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update file %s: %w", r.tableName, err)
+	}
+	_, err = r.pool.Exec(ctx, query, args...)
+	return err
+}
+
+// LatestDetectedByDeviceSN 取设备最近一条 detected 状态的故障日志，用于
+// 文件到达时把占位记录推进到 file_received。
+func (r *PgRepository) LatestDetectedByDeviceSN(ctx context.Context, sn string) (*LogFile, error) {
+	if !r.withFaultFields {
+		return nil, fmt.Errorf("LatestDetectedByDeviceSN only supported on fault log table, not %s", r.tableName)
+	}
+	query, args, err := storage.Psql.Select(r.cols()...).
+		From(r.tableName).
+		Where(sq.Eq{
+			"device_sn":     sn,
+			"is_deleted":    false,
+			"record_status": FaultRecordStatusDetected,
+		}).
+		OrderBy("collected_at DESC").
+		Limit(1).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build latest detected %s: %w", r.tableName, err)
+	}
+	row := r.pool.QueryRow(ctx, query, args...)
+	f, err := r.scan(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return f, err
+}
+
 // scan 从 pgx.Row 扫描一条记录，并将 r.logType 注入 LogFile.LogType。
 func (r *PgRepository) scan(row pgx.Row) (*LogFile, error) {
 	var f LogFile
 	f.LogType = r.logType
 	var err error
 	if r.withFaultFields {
-		err = row.Scan(
-			&f.ID, &f.DeviceID, &f.DeviceSN, &f.FileName,
-			&f.ObjectPath, &f.Bucket, &f.FileSize,
-			&f.FaultReason, &f.FaultDetail,
-			&f.TaskID, &f.IsDeleted, &f.CollectedAt, &f.CreatedAt, &f.UpdatedAt,
+		// 故障日志：nullable 列用 *string 接住，避免 pgx 在 NULL 上 panic
+		var (
+			fileName, objectPath, bucket                         *string
+			faultReason, faultDetail                             *string
+			deviceName, deviceType, operateIP, softwareVersion   *string
+			runtimeBeforeReboot                                  *int64
+			collectionFailReason                                 *string
 		)
+		err = row.Scan(
+			&f.ID, &f.DeviceID, &f.DeviceSN, &fileName,
+			&objectPath, &bucket, &f.FileSize,
+			&faultReason, &faultDetail,
+			&f.TaskID, &f.IsDeleted, &f.CollectedAt, &f.CreatedAt, &f.UpdatedAt,
+			&deviceName, &deviceType, &f.IsGNB, &operateIP, &softwareVersion,
+			&runtimeBeforeReboot,
+			&f.RecordStatus, &collectionFailReason, &f.ManualCollectionStatus,
+		)
+		if err != nil {
+			return nil, err
+		}
+		f.FileName = derefStr(fileName)
+		f.ObjectPath = derefStr(objectPath)
+		f.Bucket = derefStr(bucket)
+		f.FaultReason = derefStr(faultReason)
+		f.FaultDetail = derefStr(faultDetail)
+		f.DeviceName = derefStr(deviceName)
+		f.DeviceType = derefStr(deviceType)
+		f.OperateIP = derefStr(operateIP)
+		f.SoftwareVersion = derefStr(softwareVersion)
+		f.CollectionFailReason = derefStr(collectionFailReason)
+		if runtimeBeforeReboot != nil {
+			f.RuntimeBeforeReboot = *runtimeBeforeReboot
+		}
 	} else {
 		err = row.Scan(
 			&f.ID, &f.DeviceID, &f.DeviceSN, &f.FileName,
@@ -275,4 +432,11 @@ func (r *PgRepository) scan(row pgx.Row) (*LogFile, error) {
 		return nil, err
 	}
 	return &f, nil
+}
+
+func derefStr(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }

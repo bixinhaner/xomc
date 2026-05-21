@@ -199,6 +199,7 @@ const messages: Record<string, string> = {
   'nav.device.import':     '导入导出',
   'nav.device.rules':      '设备规则',
   'nav.device.recycle':    '回收站',
+  'nav.device.abnormalReboot': '重启记录',
 
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Alarm
@@ -3792,6 +3793,16 @@ const messages: Record<string, string> = {
   'log.exception.column.time':               '时间',
   'log.exception.column.runtime':            '运行时间',
   'log.exception.column.haltReason':         '死机原因',
+  'log.exception.column.haltMainReason':     '故障主原因',
+  'log.exception.column.recordStatus':       '记录状态',
+  'log.exception.recordStatus.detected':         '已识别',
+  'log.exception.recordStatus.fileReceived':     '已采集',
+  'log.exception.recordStatus.collectionFailed': '采集失败',
+  'log.exception.exportFileName':             '重启记录',
+  'log.exception.exportSheetName':            '重启记录',
+  'log.exception.exportSuccess':              '已导出 {count} 条记录',
+  'log.exception.exportFailed':               '导出失败',
+  'log.exception.exportEmpty':                '当前筛选条件下没有可导出的数据',
   'log.exception.detail.title':              '日志文件详情',
   'log.exception.detail.devInfo':            '设备信息',
   'log.exception.detail.devCode':            '设备编码',
