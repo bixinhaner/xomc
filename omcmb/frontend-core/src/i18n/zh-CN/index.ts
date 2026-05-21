@@ -626,6 +626,7 @@ const messages: Record<string, string> = {
   'device.batchImport.missingHeader':  'CSV 文件首行 header 缺少必填列：{field}',
   'device.batchImport.frontendBlocked': '存在 {count} 条本地校验失败的行，未提交到服务端',
   'device.batchImport.reselectFile':   '重新选择文件',
+  'device.export.emptyGroup':          '当前分组下没有设备可导出',
   'device.addSuccess':          '添加成功',
   'device.deleteLevel1Desc':    '组内子级设备组及设备将会被自动移至默认设备组',
   'device.deleteLevel2Desc':    '组内设备会被自动移动到默认设备组',

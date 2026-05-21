@@ -624,6 +624,7 @@ const messages: Record<string, string> = {
   'device.batchImport.missingHeader':  'CSV header missing required column: {field}',
   'device.batchImport.frontendBlocked': '{count} rows failed local validation and were not submitted',
   'device.batchImport.reselectFile':   'Choose another file',
+  'device.export.emptyGroup':          'No devices in this group to export',
   'device.addSuccess':          'Add successful',
   'device.deleteLevel1Desc':    'Child groups and devices in this group will be automatically moved to the default group',
   'device.deleteLevel2Desc':    'Devices in this group will be automatically moved to the default group',

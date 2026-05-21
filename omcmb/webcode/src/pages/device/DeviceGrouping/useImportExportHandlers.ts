@@ -25,6 +25,10 @@ export function useImportExportHandlers(deps: {
   const handleExport = useCallback(async () => {
     // 导出当前分组的所有设备，列字段与 DeviceListPanel 表格一致（useDeviceColumns）。
     // 分页拉取避免单次 list 接口结果超大；后端默认 pageSize 上限 200，循环到 total。
+    //
+    // [device-export] 前缀的 console.info：用户在 DevTools 直接 grep 这一串就能
+    // 确认当前部署用的是带本修复的代码（旧 stub 完全没这种日志）。
+    console.info('[device-export] start', { groupId: selectedGroupId, group: selectedGroupName });
     const hide = message.loading(t('common.exportInProgress'), 0);
     try {
       const PAGE_SIZE = 500;
@@ -47,9 +51,10 @@ export function useImportExportHandlers(deps: {
         if (next.items.length === 0) break; // 后端容错：意外提前没数据
         all.push(...next.items);
       }
+      console.info('[device-export] fetched', all.length, 'devices, total=', total);
       if (all.length === 0) {
         hide();
-        void message.warning(t('common.noData'));
+        void message.warning(t('device.export.emptyGroup'));
         return;
       }
 
@@ -58,9 +63,11 @@ export function useImportExportHandlers(deps: {
       triggerCsvDownload(csv, fileName);
       hide();
       void message.success(t('common.exportSuccess', { count: all.length }));
+      console.info('[device-export] downloaded', fileName, `(${csv.length} bytes)`);
     } catch (err) {
       hide();
       const msg = err instanceof Error ? err.message : String(err);
+      console.error('[device-export] failed', err);
       void message.error(t('common.exportFailed', { reason: msg }));
     }
   }, [message, t, selectedGroupId, selectedGroupName]);
