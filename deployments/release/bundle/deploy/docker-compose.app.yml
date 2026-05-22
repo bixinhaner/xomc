@@ -18,12 +18,12 @@ networks:
 
 services:
   # ── 数据库迁移（首次部署 + 每次升级都跑；幂等）────────────────────────
-  #   使用 network_mode: host 绕过 Docker 内嵌 DNS 缺陷（短生命周期容器无法解析服务名），
-  #   直接经宿主机 127.0.0.1:5432 连接 postgres。
+  #   使用 network_mode: "service:postgres" 共享 postgres 网络命名空间，
+  #   127.0.0.1:5432 即 postgres 进程本身——不经 DNS、不经 NAT、零跳转。
   migrate-schema:
     image: ${IMAGE_APP}
     restart: "no"
-    network_mode: host
+    network_mode: "service:postgres"
     environment:
       TZ: "Asia/Shanghai"
       GOOSE_VERBOSITY: "1"
@@ -36,12 +36,15 @@ services:
       - "up"
     volumes:
       - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # ── 种子数据导入（仅首次跑；标记由 deploy.sh 判断；幂等）──────────────
   migrate-seed:
     image: ${IMAGE_APP}
     restart: "no"
-    network_mode: host
+    network_mode: "service:postgres"
     environment:
       TZ: "Asia/Shanghai"
     entrypoint: ["omcgo-seed"]
@@ -55,6 +58,9 @@ services:
       - "apply"
     volumes:
       - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # ── 业务进程：app（HTTP API + gRPC）───────────────────────────────────
   app:
