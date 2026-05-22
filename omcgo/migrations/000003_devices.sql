@@ -9,7 +9,10 @@ CREATE TABLE device_groups (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name            VARCHAR(128) NOT NULL,
     parent_id       UUID REFERENCES device_groups(id) ON DELETE CASCADE,
-    carrier         VARCHAR(4),
+    -- 修复 2026-05-22：原 VARCHAR(4) 装不下 'other' (5 字符) 的国际运营商 carrier code
+    -- (赞比亚 ZED 等)。在源头直接 VARCHAR(16) 避免后续 ALTER（且 devices.carrier 是
+    -- partition key，PG 16 完全禁止 ALTER 分区键列 type — 见 000159 注释）。
+    carrier         VARCHAR(16),
     description     TEXT,
     sort_order      INTEGER NOT NULL DEFAULT 0,
     status          VARCHAR(16) NOT NULL DEFAULT 'active',
@@ -64,7 +67,9 @@ CREATE TABLE devices (
     product_class          VARCHAR(64),
     manufacturer           VARCHAR(128),
     model_name             VARCHAR(128),
-    carrier                VARCHAR(4) NOT NULL,
+    -- 修复 2026-05-22：见同文件 device_groups.carrier 注释 — VARCHAR(16) 直供，
+    -- 避免 partition key 列 type 不可 ALTER 限制。
+    carrier                VARCHAR(16) NOT NULL,
     technology             VARCHAR(3) NOT NULL,
     data_model_id          UUID,
     status                 VARCHAR(20) NOT NULL DEFAULT 'discovered',
