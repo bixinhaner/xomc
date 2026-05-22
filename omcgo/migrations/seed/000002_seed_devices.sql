@@ -75,20 +75,29 @@ $$;
 -- ============================================================
 -- 3. 批量生成 30,000 台设备
 --    分布: cmcc 12,000 / ctcc 10,000 / cucc 8,000
---    状态: active 70%, offline 15%, registered 10%, maintenance 5%
+--    生命周期分布（migration 000137 后 status 拆为 lifecycle_state + is_online）：
+--      70% commissioned + online=true        （原 'active'）
+--      15% commissioned + online=false       （原 'offline'，曾上线过的离线）
+--      10% registered   + online=false       （原 'registered'，从未上线）
+--       5% maintenance  + online=true        （原 'maintenance'）
 -- ============================================================
 
 -- CMCC 设备 (12,000 台)
 -- +goose StatementBegin
 DO $$
 DECLARE
-    i INT; dev_id UUID; dev_sn VARCHAR; status_v VARCHAR;
+    i INT; dev_id UUID; dev_sn VARCHAR;
+    lifecycle_v VARCHAR; online_v BOOLEAN;
     oui_v VARCHAR; pc_v VARCHAR; mfr_v VARCHAR; model_v VARCHAR; tech_v VARCHAR; fw_v VARCHAR;
     site_v VARCHAR; lat_v FLOAT; lon_v FLOAT;
     ns UUID := '6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid;
 BEGIN
     FOR i IN 1..12000 LOOP
-        IF i <= 8400 THEN status_v := 'active'; ELSIF i <= 10200 THEN status_v := 'offline'; ELSIF i <= 11400 THEN status_v := 'registered'; ELSE status_v := 'maintenance'; END IF;
+        IF    i <= 8400  THEN lifecycle_v := 'commissioned'; online_v := TRUE;
+        ELSIF i <= 10200 THEN lifecycle_v := 'commissioned'; online_v := FALSE;
+        ELSIF i <= 11400 THEN lifecycle_v := 'registered';   online_v := FALSE;
+        ELSE                  lifecycle_v := 'maintenance';  online_v := TRUE;
+        END IF;
         IF i % 3 = 0 THEN tech_v := 'nr'; oui_v := '00A0C6'; pc_v := 'gNB-100'; mfr_v := 'Huawei'; model_v := 'AAU5613'; fw_v := 'V100R019C10';
         ELSIF i % 3 = 1 THEN tech_v := 'lte'; oui_v := '001A2B'; pc_v := 'SmallCell-LTE'; mfr_v := 'BaiCells'; model_v := 'BC-ENB-100'; fw_v := 'V3.2.1';
         ELSE tech_v := 'lte'; oui_v := '00E0FC'; pc_v := 'FAP-LTE-200'; mfr_v := 'ZTE'; model_v := 'ZXSDR-B8200'; fw_v := 'V4.16.30P4'; END IF;
@@ -102,9 +111,13 @@ BEGIN
         END CASE;
         dev_sn := 'CMCC-' || lpad(i::text, 6, '0');
         dev_id := uuid_generate_v5(ns, 'cmcc-dev-' || i::text);
-        INSERT INTO devices (id, serial_number, oui, product_class, manufacturer, model_name, carrier, technology, status, firmware_version, ip_address, inform_interval, site_name, latitude, longitude, last_inform_at, created_at, updated_at)
-        VALUES (dev_id, dev_sn, oui_v, pc_v, mfr_v, model_v, 'cmcc', tech_v, status_v, fw_v, ('10.1.' || ((i/256)::int % 256) || '.' || (i%256))::inet, CASE WHEN status_v='offline' THEN 600 ELSE 300 END, site_v, lat_v, lon_v,
-            CASE WHEN status_v IN ('active','maintenance') THEN NOW()-(random()*INTERVAL '30 minutes') WHEN status_v='offline' THEN NOW()-(random()*INTERVAL '7 days') ELSE NULL END,
+        INSERT INTO devices (id, serial_number, oui, product_class, manufacturer, model_name, carrier, technology, lifecycle_state, is_online, firmware_version, ip_address, inform_interval, site_name, latitude, longitude, last_inform_at, created_at, updated_at)
+        VALUES (dev_id, dev_sn, oui_v, pc_v, mfr_v, model_v, 'cmcc', tech_v, lifecycle_v, online_v, fw_v, ('10.1.' || ((i/256)::int % 256) || '.' || (i%256))::inet, CASE WHEN online_v THEN 300 ELSE 600 END, site_v, lat_v, lon_v,
+            CASE
+                WHEN online_v THEN NOW()-(random()*INTERVAL '30 minutes')
+                WHEN lifecycle_v = 'commissioned' THEN NOW()-(random()*INTERVAL '7 days')
+                ELSE NULL
+            END,
             NOW()-(random()*INTERVAL '90 days'), NOW()-(random()*INTERVAL '7 days'))
         ON CONFLICT DO NOTHING;
     END LOOP;
@@ -117,13 +130,18 @@ $$;
 -- +goose StatementBegin
 DO $$
 DECLARE
-    i INT; dev_id UUID; dev_sn VARCHAR; status_v VARCHAR;
+    i INT; dev_id UUID; dev_sn VARCHAR;
+    lifecycle_v VARCHAR; online_v BOOLEAN;
     oui_v VARCHAR; pc_v VARCHAR; mfr_v VARCHAR; model_v VARCHAR; tech_v VARCHAR; fw_v VARCHAR;
     site_v VARCHAR; lat_v FLOAT; lon_v FLOAT;
     ns UUID := '6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid;
 BEGIN
     FOR i IN 1..10000 LOOP
-        IF i <= 7000 THEN status_v := 'active'; ELSIF i <= 8500 THEN status_v := 'offline'; ELSIF i <= 9500 THEN status_v := 'registered'; ELSE status_v := 'maintenance'; END IF;
+        IF    i <= 7000 THEN lifecycle_v := 'commissioned'; online_v := TRUE;
+        ELSIF i <= 8500 THEN lifecycle_v := 'commissioned'; online_v := FALSE;
+        ELSIF i <= 9500 THEN lifecycle_v := 'registered';   online_v := FALSE;
+        ELSE                 lifecycle_v := 'maintenance';  online_v := TRUE;
+        END IF;
         IF i % 2 = 0 THEN tech_v := 'lte'; oui_v := '001E4F'; pc_v := 'FAP-LTE-200'; mfr_v := 'ZTE'; model_v := 'ZXSDR-B8200'; fw_v := 'V4.16.30P4';
         ELSE tech_v := 'lte'; oui_v := '000DB9'; pc_v := 'FAP-LTE-300'; mfr_v := 'Ericsson'; model_v := 'AIR6488'; fw_v := 'CXP9024418_R57A'; END IF;
         CASE i % 5
@@ -135,9 +153,13 @@ BEGIN
         END CASE;
         dev_sn := 'CTCC-' || lpad(i::text, 6, '0');
         dev_id := uuid_generate_v5(ns, 'ctcc-dev-' || i::text);
-        INSERT INTO devices (id, serial_number, oui, product_class, manufacturer, model_name, carrier, technology, status, firmware_version, ip_address, inform_interval, site_name, latitude, longitude, last_inform_at, created_at, updated_at)
-        VALUES (dev_id, dev_sn, oui_v, pc_v, mfr_v, model_v, 'ctcc', tech_v, status_v, fw_v, ('10.2.' || ((i/256)::int % 256) || '.' || (i%256))::inet, CASE WHEN status_v='offline' THEN 600 ELSE 300 END, site_v, lat_v, lon_v,
-            CASE WHEN status_v IN ('active','maintenance') THEN NOW()-(random()*INTERVAL '30 minutes') WHEN status_v='offline' THEN NOW()-(random()*INTERVAL '7 days') ELSE NULL END,
+        INSERT INTO devices (id, serial_number, oui, product_class, manufacturer, model_name, carrier, technology, lifecycle_state, is_online, firmware_version, ip_address, inform_interval, site_name, latitude, longitude, last_inform_at, created_at, updated_at)
+        VALUES (dev_id, dev_sn, oui_v, pc_v, mfr_v, model_v, 'ctcc', tech_v, lifecycle_v, online_v, fw_v, ('10.2.' || ((i/256)::int % 256) || '.' || (i%256))::inet, CASE WHEN online_v THEN 300 ELSE 600 END, site_v, lat_v, lon_v,
+            CASE
+                WHEN online_v THEN NOW()-(random()*INTERVAL '30 minutes')
+                WHEN lifecycle_v = 'commissioned' THEN NOW()-(random()*INTERVAL '7 days')
+                ELSE NULL
+            END,
             NOW()-(random()*INTERVAL '90 days'), NOW()-(random()*INTERVAL '7 days'))
         ON CONFLICT DO NOTHING;
     END LOOP;
@@ -150,13 +172,18 @@ $$;
 -- +goose StatementBegin
 DO $$
 DECLARE
-    i INT; dev_id UUID; dev_sn VARCHAR; status_v VARCHAR;
+    i INT; dev_id UUID; dev_sn VARCHAR;
+    lifecycle_v VARCHAR; online_v BOOLEAN;
     oui_v VARCHAR; pc_v VARCHAR; mfr_v VARCHAR; model_v VARCHAR; tech_v VARCHAR; fw_v VARCHAR;
     site_v VARCHAR; lat_v FLOAT; lon_v FLOAT;
     ns UUID := '6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid;
 BEGIN
     FOR i IN 1..8000 LOOP
-        IF i <= 5600 THEN status_v := 'active'; ELSIF i <= 6800 THEN status_v := 'offline'; ELSIF i <= 7600 THEN status_v := 'registered'; ELSE status_v := 'maintenance'; END IF;
+        IF    i <= 5600 THEN lifecycle_v := 'commissioned'; online_v := TRUE;
+        ELSIF i <= 6800 THEN lifecycle_v := 'commissioned'; online_v := FALSE;
+        ELSIF i <= 7600 THEN lifecycle_v := 'registered';   online_v := FALSE;
+        ELSE                 lifecycle_v := 'maintenance';  online_v := TRUE;
+        END IF;
         IF i % 2 = 0 THEN tech_v := 'nr'; oui_v := '64700E'; pc_v := 'gNB-200'; mfr_v := 'Ericsson'; model_v := 'AIR6488'; fw_v := 'CXP9024418_R58A';
         ELSE tech_v := 'lte'; oui_v := '58FB96'; pc_v := 'FAP-LTE-100'; mfr_v := 'Comba'; model_v := 'CB-ENB-200'; fw_v := 'V2.5.0'; END IF;
         CASE i % 4
@@ -167,9 +194,13 @@ BEGIN
         END CASE;
         dev_sn := 'CUCC-' || lpad(i::text, 6, '0');
         dev_id := uuid_generate_v5(ns, 'cucc-dev-' || i::text);
-        INSERT INTO devices (id, serial_number, oui, product_class, manufacturer, model_name, carrier, technology, status, firmware_version, ip_address, inform_interval, site_name, latitude, longitude, last_inform_at, created_at, updated_at)
-        VALUES (dev_id, dev_sn, oui_v, pc_v, mfr_v, model_v, 'cucc', tech_v, status_v, fw_v, ('10.3.' || ((i/256)::int % 256) || '.' || (i%256))::inet, CASE WHEN status_v='offline' THEN 600 ELSE 300 END, site_v, lat_v, lon_v,
-            CASE WHEN status_v IN ('active','maintenance') THEN NOW()-(random()*INTERVAL '30 minutes') WHEN status_v='offline' THEN NOW()-(random()*INTERVAL '7 days') ELSE NULL END,
+        INSERT INTO devices (id, serial_number, oui, product_class, manufacturer, model_name, carrier, technology, lifecycle_state, is_online, firmware_version, ip_address, inform_interval, site_name, latitude, longitude, last_inform_at, created_at, updated_at)
+        VALUES (dev_id, dev_sn, oui_v, pc_v, mfr_v, model_v, 'cucc', tech_v, lifecycle_v, online_v, fw_v, ('10.3.' || ((i/256)::int % 256) || '.' || (i%256))::inet, CASE WHEN online_v THEN 300 ELSE 600 END, site_v, lat_v, lon_v,
+            CASE
+                WHEN online_v THEN NOW()-(random()*INTERVAL '30 minutes')
+                WHEN lifecycle_v = 'commissioned' THEN NOW()-(random()*INTERVAL '7 days')
+                ELSE NULL
+            END,
             NOW()-(random()*INTERVAL '90 days'), NOW()-(random()*INTERVAL '7 days'))
         ON CONFLICT DO NOTHING;
     END LOOP;
@@ -232,22 +263,22 @@ BEGIN
         dev_id := uuid_generate_v5(ns, 'cmcc-del-' || i::text);
         IF i%2=0 THEN tech_v := 'nr'; oui_v := '00A0C6'; pc_v := 'gNB-100'; mfr_v := 'Huawei'; model_v := 'AAU5613';
         ELSE tech_v := 'lte'; oui_v := '001A2B'; pc_v := 'SmallCell-LTE'; mfr_v := 'BaiCells'; model_v := 'BC-ENB-100'; END IF;
-        INSERT INTO devices (id, serial_number, oui, product_class, manufacturer, model_name, carrier, technology, status, firmware_version, ip_address, inform_interval, site_name, latitude, longitude, last_inform_at, deleted_at, deleted_by, created_at, updated_at)
-        VALUES (dev_id, dev_sn, oui_v, pc_v, mfr_v, model_v, 'cmcc', tech_v, 'offline', 'V1.0.0', ('192.168.1.'||(i+100))::inet, 600, 'Retired-Site', 39.0+i*0.01, 116.0+i*0.01, NOW()-INTERVAL '30 days', NOW()-(random()*INTERVAL '30 days'), 'admin', NOW()-INTERVAL '180 days', NOW()-INTERVAL '30 days')
+        INSERT INTO devices (id, serial_number, oui, product_class, manufacturer, model_name, carrier, technology, lifecycle_state, is_online, firmware_version, ip_address, inform_interval, site_name, latitude, longitude, last_inform_at, deleted_at, deleted_by, created_at, updated_at)
+        VALUES (dev_id, dev_sn, oui_v, pc_v, mfr_v, model_v, 'cmcc', tech_v, 'decommissioned', FALSE, 'V1.0.0', ('192.168.1.'||(i+100))::inet, 600, 'Retired-Site', 39.0+i*0.01, 116.0+i*0.01, NOW()-INTERVAL '30 days', NOW()-(random()*INTERVAL '30 days'), 'admin', NOW()-INTERVAL '180 days', NOW()-INTERVAL '30 days')
         ON CONFLICT DO NOTHING;
     END LOOP;
     FOR i IN 1..10 LOOP
         dev_sn := 'CTCC-DEL-' || lpad(i::text, 4, '0');
         dev_id := uuid_generate_v5(ns, 'ctcc-del-' || i::text);
-        INSERT INTO devices (id, serial_number, oui, product_class, manufacturer, model_name, carrier, technology, status, firmware_version, ip_address, inform_interval, site_name, latitude, longitude, last_inform_at, deleted_at, deleted_by, created_at, updated_at)
-        VALUES (dev_id, dev_sn, '001E4F', 'FAP-LTE-200', 'ZTE', 'ZXSDR-B8200', 'ctcc', 'lte', 'offline', 'V2.0.0', ('192.168.2.'||(i+100))::inet, 600, 'Retired-Site', 31.0+i*0.01, 121.0+i*0.01, NOW()-INTERVAL '30 days', NOW()-(random()*INTERVAL '30 days'), 'admin', NOW()-INTERVAL '180 days', NOW()-INTERVAL '30 days')
+        INSERT INTO devices (id, serial_number, oui, product_class, manufacturer, model_name, carrier, technology, lifecycle_state, is_online, firmware_version, ip_address, inform_interval, site_name, latitude, longitude, last_inform_at, deleted_at, deleted_by, created_at, updated_at)
+        VALUES (dev_id, dev_sn, '001E4F', 'FAP-LTE-200', 'ZTE', 'ZXSDR-B8200', 'ctcc', 'lte', 'decommissioned', FALSE, 'V2.0.0', ('192.168.2.'||(i+100))::inet, 600, 'Retired-Site', 31.0+i*0.01, 121.0+i*0.01, NOW()-INTERVAL '30 days', NOW()-(random()*INTERVAL '30 days'), 'admin', NOW()-INTERVAL '180 days', NOW()-INTERVAL '30 days')
         ON CONFLICT DO NOTHING;
     END LOOP;
     FOR i IN 1..10 LOOP
         dev_sn := 'CUCC-DEL-' || lpad(i::text, 4, '0');
         dev_id := uuid_generate_v5(ns, 'cucc-del-' || i::text);
-        INSERT INTO devices (id, serial_number, oui, product_class, manufacturer, model_name, carrier, technology, status, firmware_version, ip_address, inform_interval, site_name, latitude, longitude, last_inform_at, deleted_at, deleted_by, created_at, updated_at)
-        VALUES (dev_id, dev_sn, '58FB96', 'FAP-LTE-100', 'Comba', 'CB-ENB-200', 'cucc', 'lte', 'offline', 'V1.5.0', ('192.168.3.'||(i+100))::inet, 600, 'Retired-Site', 36.0+i*0.01, 117.0+i*0.01, NOW()-INTERVAL '30 days', NOW()-(random()*INTERVAL '30 days'), 'admin', NOW()-INTERVAL '180 days', NOW()-INTERVAL '30 days')
+        INSERT INTO devices (id, serial_number, oui, product_class, manufacturer, model_name, carrier, technology, lifecycle_state, is_online, firmware_version, ip_address, inform_interval, site_name, latitude, longitude, last_inform_at, deleted_at, deleted_by, created_at, updated_at)
+        VALUES (dev_id, dev_sn, '58FB96', 'FAP-LTE-100', 'Comba', 'CB-ENB-200', 'cucc', 'lte', 'decommissioned', FALSE, 'V1.5.0', ('192.168.3.'||(i+100))::inet, 600, 'Retired-Site', 36.0+i*0.01, 117.0+i*0.01, NOW()-INTERVAL '30 days', NOW()-(random()*INTERVAL '30 days'), 'admin', NOW()-INTERVAL '180 days', NOW()-INTERVAL '30 days')
         ON CONFLICT DO NOTHING;
     END LOOP;
     RAISE NOTICE 'Recycled devices: 30 inserted';
@@ -257,8 +288,8 @@ $$;
 
 -- 验证数据量
 SELECT 'devices_total' AS entity, COUNT(*) AS count FROM devices
-UNION ALL SELECT 'devices_active', COUNT(*) FROM devices WHERE status = 'active' AND deleted_at IS NULL
-UNION ALL SELECT 'devices_offline', COUNT(*) FROM devices WHERE status = 'offline' AND deleted_at IS NULL
+UNION ALL SELECT 'devices_online',  COUNT(*) FROM devices WHERE is_online = TRUE  AND deleted_at IS NULL
+UNION ALL SELECT 'devices_offline', COUNT(*) FROM devices WHERE is_online = FALSE AND deleted_at IS NULL
 UNION ALL SELECT 'devices_recycled', COUNT(*) FROM devices WHERE deleted_at IS NOT NULL
 UNION ALL SELECT 'device_groups_seed', COUNT(*) FROM device_groups WHERE name IN ('移动设备域','电信设备域','联通设备域','测试设备域','运维设备域')
 UNION ALL SELECT 'device_rules_seed', COUNT(*) FROM device_rules WHERE name LIKE '自动归入%' OR name LIKE '%测试%' OR name LIKE '%巡检%' OR name LIKE '%TAC%'
