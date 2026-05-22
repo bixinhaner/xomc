@@ -239,7 +239,9 @@
       "Bash(git -C /Users/cb/code/baicells/goomc stash show -p stash@{2})",
       "Bash(git -C /Users/cb/code/baicells/goomc stash show -p stash@{3})",
       "Bash(git -C /Users/cb/code/baicells/goomc stash show -p stash@{5})",
-      "Bash(/tmp/omcgo-migrate up *)"
+      "Bash(/tmp/omcgo-migrate up *)",
+      "Bash(sort -k1 -n)",
+      "Bash(awk '{for\\(i=1;i<=NF;i++\\) if\\($i ~ /^\\(cat|g|cmd\\)\\\\.[A-Z]/\\) print $i}')"
     ],
     "deny": [
       "Bash(git push -f)",
