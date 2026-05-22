@@ -295,5 +295,18 @@ log "  发布渠道 ：$CHANNEL"
 log "  归档位置 ：archive/project/$VERSION/"
 ls -lh "$OUT"/omc-*."$EXT" 2>/dev/null || true
 echo
-log "起 HTTP 下载服务： ./serve.sh    然后浏览器访问 http://<构建机IP>:8000/"
+
+# ── 4. 自动重启 HTTP 下载服务，让新包立刻可被下载 ───────────────────────
+# serve.sh restart：未启动 → 启动；已在跑 → kill 旧进程后用上次端口重启。
+# 即使重启失败也不报错（build 主流程已完成，serve 只是便利）。
+if [ -x "$SCRIPT_DIR/serve.sh" ]; then
+  log "刷新 HTTP 下载服务（serve.sh restart）..."
+  if "$SCRIPT_DIR/serve.sh" restart; then
+    log "HTTP 下载服务已重启，可访问 http://<构建机IP>:$(cat "$SCRIPT_DIR/.serve.port" 2>/dev/null || echo 8000)/"
+  else
+    warn "serve.sh restart 失败（不影响发布包），可手动 ./serve.sh start 启动"
+  fi
+else
+  log "起 HTTP 下载服务： ./serve.sh    然后浏览器访问 http://<构建机IP>:8000/"
+fi
 log "基础设施包（Docker 引擎 + 基础镜像）由 ./build-images.sh 生成，与本包独立。"
