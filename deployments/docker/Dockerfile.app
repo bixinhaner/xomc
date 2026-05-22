@@ -18,8 +18,7 @@ COPY omcgo/ .
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-app ./cmd/app && \
-    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-migrate ./cmd/migrate && \
-    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-seed ./cmd/seed
+    CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-migrate ./cmd/migrate
 
 # ---
 
@@ -35,12 +34,12 @@ RUN mkdir -p /var/log/omcgo && chmod 777 /var/log/omcgo
 
 COPY --from=builder /build/bin/omcgo-app /usr/local/bin/omcgo-app
 COPY --from=builder /build/bin/omcgo-migrate /usr/local/bin/omcgo-migrate
-COPY --from=builder /build/bin/omcgo-seed /usr/local/bin/omcgo-seed
 COPY --from=builder /build/cmd/app/etc/config.dev.yaml /etc/omcgo/app.dev.yaml
 COPY --from=builder /build/cmd/app/etc/config.test.yaml /etc/omcgo/app.test.yaml
 COPY --from=builder /build/cmd/app/etc/config.prod.yaml /etc/omcgo/app.prod.yaml
 COPY --from=builder /build/migrations /etc/omcgo/migrations
-# omcgo-seed 需要的种子数据目录（与 migrations 同级，默认 datamodels/seed）
+# datamodels/：mml-catalog/ 启动期由 catalogloader 加载；templates/ 预留。
+# 原 datamodels/seed/ 是 omcgo-seed JSON 种子链路，已下线；保留目录以兼容文档。
 COPY --from=builder /build/datamodels /etc/omcgo/datamodels
 # T-0098 dictloader 启动期加载的 4 域字典 XML（param-mappings / indicator-library /
 # alarm-definitions / products）。config.dev.yaml 用相对路径 xml_base_dir: "data"，

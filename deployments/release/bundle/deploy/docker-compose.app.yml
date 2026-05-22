@@ -67,29 +67,9 @@ services:
       migrate-schema:
         condition: service_completed_successfully
 
-  # ── 业务参考数据 JSON seed（datamodels/seed/users.json / roles.json / ...）─
-  #   旧链路保留，承载 ON CONFLICT 兜底 admin/roles/device_groups。
-  #   长期方向：迁入 migrations/seed/ 后下线本容器（与 omcgo/cmd/seed/）。
-  migrate-seed:
-    image: ${IMAGE_APP}
-    restart: "no"
-    network_mode: "service:postgres"
-    environment:
-      TZ: "Asia/Shanghai"
-    entrypoint: ["omcgo-seed"]
-    command:
-      - "--dsn"
-      - "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}?sslmode=disable"
-      - "--dir"
-      - "/etc/omcgo/datamodels/seed"
-      - "--env"
-      - "prod"
-      - "apply"
-    volumes:
-      - /etc/localtime:/etc/localtime:ro
-    depends_on:
-      migrate-seed-sql:
-        condition: service_completed_successfully
+  # 注：旧 migrate-seed (omcgo-seed JSON) 容器已下线，所有种子数据收敛进
+  #     migrations/seed/，由上方 migrate-seed-sql 统一应用。详见 commit 日志
+  #     "fix(release): 接通 migrations/seed/" + "refactor(seed): 下线 JSON 双轨"。
 
   # ── 业务进程：app（HTTP API + gRPC）───────────────────────────────────
   app:
@@ -109,7 +89,7 @@ services:
       - /opt/omc/run/logs/app:/run/logs/app
       - /etc/localtime:/etc/localtime:ro
     depends_on:
-      migrate-seed:
+      migrate-seed-sql:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -137,7 +117,7 @@ services:
       - /opt/omc/run/logs/acs:/run/logs/acs
       - /etc/localtime:/etc/localtime:ro
     depends_on:
-      migrate-seed:
+      migrate-seed-sql:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -163,7 +143,7 @@ services:
       - /opt/omc/run/logs/worker:/run/logs/worker
       - /etc/localtime:/etc/localtime:ro
     depends_on:
-      migrate-seed:
+      migrate-seed-sql:
         condition: service_completed_successfully
       redis:
         condition: service_healthy

@@ -1,13 +1,12 @@
-.PHONY: build build-acs build-app build-worker build-migrate build-seed build-omcctl build-rpctool \
+.PHONY: build build-acs build-app build-worker build-migrate build-omcctl build-rpctool \
        test test-race test-coverage test-integration test-integration-up test-integration-down test-e2e \
        test-cover cover-report cover-summary cover-check \
        lint vet generate generate-mocks sqlc-generate \
        migrate-up migrate-down migrate-reset migrate-schema-up migrate-schema-down migrate-seed-up migrate-seed-down \
-       seed-apply seed-rollback seed-list \
        docker-build docker-up docker-down clean
 
 # Build
-build: build-acs build-app build-worker build-migrate build-seed build-omcctl
+build: build-acs build-app build-worker build-migrate build-omcctl
 
 build-acs:
 	go build -o bin/omcgo-acs ./cmd/acs
@@ -20,9 +19,6 @@ build-worker:
 
 build-migrate:
 	go build -o bin/omcgo-migrate ./cmd/migrate
-
-build-seed:
-	go build -o bin/omcgo-seed ./cmd/seed
 
 build-omcctl:
 	go build -o bin/omcctl ./cmd/omcctl
@@ -118,15 +114,8 @@ migrate-seed-up:  ## Run seed data migrations only
 migrate-seed-down:  ## Rollback seed data migrations only
 	go run ./cmd/migrate down --path migrations/seed
 
-# Seed data management
-seed-apply:
-	go run ./cmd/seed apply
-
-seed-rollback:
-	go run ./cmd/seed rollback
-
-seed-list:
-	go run ./cmd/seed list
+# 注：原 omcgo-seed (cmd/seed) JSON 种子工具已下线，种子数据全部走 goose
+# migrations/seed/ — 用 make migrate-seed-up / migrate-seed-down 操作。
 
 migrate-create:
 	@if [ -z "$(name)" ]; then echo "Usage: make migrate-create name=<migration_name>"; exit 1; fi

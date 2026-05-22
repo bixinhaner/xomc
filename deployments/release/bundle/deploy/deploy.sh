@@ -395,30 +395,17 @@ if [ "$SKIP_MIGRATE" = 0 ]; then
     die "migrate 失败（已重试 3 次）：${DC[*]} up --exit-code-from migrate-schema migrate-schema" 3
   fi
 
-  # 7.4 SQL seed（goose，migrations/seed/，每次部署都跑 —— goose 用 goose_db_version_seed
-  #     版本表自动追踪已应用项，新加 seed 文件自动 catch up，已应用则无 op）
-  log "执行 db SQL seed（容器：migrate-seed-sql，goose 幂等）..."
+  # 7.4 seed（goose 单链路 migrations/seed/，每次部署都跑 —— goose 用
+  #     goose_db_version_seed 版本表自动追踪已应用项，新加 seed 自动 catch up）
+  #     注：原 JSON seed 链路（omcgo-seed apply on datamodels/seed/）已下线，
+  #     所有种子收敛进 migrations/seed/。详 commit "refactor(seed): 下线 JSON 双轨"。
+  log "执行 db seed（容器：migrate-seed-sql，goose 幂等）..."
   if "${DC[@]}" up --exit-code-from migrate-seed-sql migrate-seed-sql; then
-    log "SQL seed 成功"
+    log "seed 成功"
   else
-    die "SQL seed 失败：${DC[*]} up --exit-code-from migrate-seed-sql migrate-seed-sql" 3
+    die "seed 失败：${DC[*]} up --exit-code-from migrate-seed-sql migrate-seed-sql" 3
   fi
   "${DC[@]}" rm -f migrate-seed-sql 2>/dev/null || true
-
-  # 7.5 JSON seed（datamodels/seed/，首次部署跑一次；用 .seed.done 标记防重复）
-  SEED_MARK="$OMC_ROOT/etc/.seed.done"
-  if [ -f "$SEED_MARK" ]; then
-    log "已有 $SEED_MARK，跳过 JSON seed（如需重灌请删除该文件再跑）"
-  else
-    log "执行 db JSON seed（容器：migrate-seed，首次部署）..."
-    if "${DC[@]}" up --exit-code-from migrate-seed migrate-seed; then
-      touch "$SEED_MARK"
-      log "JSON seed 成功"
-    else
-      warn "JSON seed 失败（部分种子可能已存在，不影响主流程；如确需排查请看日志）"
-    fi
-    "${DC[@]}" rm -f migrate-seed 2>/dev/null || true
-  fi
 else
   log "--skip-migrate：跳过 migrate / seed"
 fi
