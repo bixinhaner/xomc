@@ -42,6 +42,13 @@ const OP_TAG_COLOR: Record<string, string> = {
 // stripOpSuffix / chapterSortKey 已拆到 ./commandTreeUtils.ts；下方 import 复用。
 import { chapterSortKey, stripOpSuffix } from './commandTreeUtils';
 
+// 模块级稳定空 match，避免 `matched` useMemo 短路分支每次都 new Set + new Array
+// 导致下游 useEffect 依赖引用变动 → 无限 setState 循环。
+const EMPTY_MATCH: { matchedKeys: Set<string>; expandKeys: string[] } = {
+  matchedKeys: new Set<string>(),
+  expandKeys: [],
+};
+
 /**
  * R-8.5：命令叶子装饰上下文。在 buildTreeData 调用时由组件构造，沿渲染链传递，
  * 避免每个 helper 各自接 4-5 个独立参数。
@@ -441,7 +448,10 @@ export default function CommandTree({ lang }: CommandTreeProps) {
   const replaceStatement = useMmlConsoleStore((s) => s.replaceStatement);
   const effectiveLang = lang ?? storeLang;
 
-  const { data: tree = [], isLoading } = useGroupTree(undefined, effectiveLang);
+  // 稳定 tree 引用：destructuring `= []` default 在 data=undefined 期间每 render 新建数组，
+  // 会让下游 useMemo / useEffect deps 引用变动，引发不必要重算甚至循环。useMemo 锚住引用。
+  const { data: treeData, isLoading } = useGroupTree(undefined, effectiveLang);
+  const tree = useMemo<GroupTreeNode[]>(() => treeData ?? [], [treeData]);
   const queryClient = useQueryClient();
   const deleteMutation = useDeleteMMLTemplate();
 
@@ -472,7 +482,9 @@ export default function CommandTree({ lang }: CommandTreeProps) {
     return () => clearTimeout(t);
   }, [searchText]);
   // 后端搜索（command_code / logical_name / path / description 联合 ILIKE）
-  const { data: searchResults = [] } = useSearchCommands(debouncedSearch, effectiveLang);
+  // 同 tree：useMemo 锚住引用，避免 destructuring default 引入引用抖动。
+  const { data: searchData } = useSearchCommands(debouncedSearch, effectiveLang);
+  const searchResults = useMemo(() => searchData ?? [], [searchData]);
 
   const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
   const [autoExpand, setAutoExpand] = useState(true);
@@ -533,17 +545,19 @@ export default function CommandTree({ lang }: CommandTreeProps) {
     unsupportedTooltip,
   ]);
   const commandsById = useMemo(() => flattenCommandsById(tree), [tree]);
-  // Bundle C: matched 由后端搜索结果（commandId 集合）反推 expandKeys / matchedKeys
+  // Bundle C: matched 由后端搜索结果（commandId 集合）反推 expandKeys / matchedKeys。
+  // 短路分支返回模块级 EMPTY_MATCH 常量，确保引用稳定（防御 useMemo 内重计算造成的引用抖动）。
   const matched = useMemo(() => {
-    if (!debouncedSearch) return { matchedKeys: new Set<string>(), expandKeys: [] as string[] };
+    if (!debouncedSearch || searchResults.length === 0) return EMPTY_MATCH;
     const ids = new Set(searchResults.map((r) => r.commandId));
     return buildMatchExpansion(tree, ids);
   }, [debouncedSearch, searchResults, tree]);
 
-  // 自动展开命中的祖先链；空查询时收起到根
+  // 自动展开命中的祖先链；空查询时收起到根。
+  // 空 → 空使用 functional updater 返回原引用，防御 setState 引用抖动触发冗余 re-render。
   useEffect(() => {
     if (!debouncedSearch) {
-      setExpandedKeys([]);
+      setExpandedKeys((prev) => (prev.length === 0 ? prev : []));
       setAutoExpand(true);
       return;
     }
