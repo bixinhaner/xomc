@@ -20,6 +20,13 @@ export function useAlarmDefinitionList(filter?: AlarmDefinitionFilter) {
   });
 }
 
+export function useAllAlarmDefinitions(filter?: Omit<AlarmDefinitionFilter, 'page'>) {
+  return useQuery({
+    queryKey: [...AD_KEY, 'list-all', filter ?? {}],
+    queryFn: () => api.listAll(filter),
+  });
+}
+
 export function useAlarmDefinitionDetail(identifier: string | undefined) {
   return useQuery({
     queryKey: [...AD_KEY, 'detail', identifier],

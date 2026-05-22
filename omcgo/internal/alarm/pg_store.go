@@ -31,12 +31,12 @@ func NewPgAlarmStore(pool *pgxpool.Pool, tsPool *pgxpool.Pool) *PgAlarmStore {
 func (s *PgAlarmStore) SaveActive(ctx context.Context, alarm *model.Alarm) error {
 	additionalJSON, _ := json.Marshal(alarm.AdditionalInfo)
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO alarms_active (id, device_id, device_sn, carrier, severity, alarm_type, alarm_identifier, description, status, raised_at, additional_info, created_at, updated_at,
+		`INSERT INTO alarms_active (id, device_id, device_sn, carrier, severity, alarm_type, alarm_identifier, description, status, raised_at, acknowledged_at, acknowledged_by, ack_note, additional_info, created_at, updated_at,
 			 device_name, technology, alarm_source, event_type, network_location, explicit_cause, is_read, ack_count, first_raised_at, last_updated_at, probable_cause, is_unknown)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`,
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)`,
 		alarm.ID, alarm.DeviceID, alarm.DeviceSN, alarm.Carrier, alarm.Severity,
 		alarm.AlarmType, alarm.AlarmIdentifier, alarm.Description, alarm.Status,
-		alarm.RaisedAt, additionalJSON, alarm.CreatedAt, alarm.UpdatedAt,
+		alarm.RaisedAt, alarm.AcknowledgedAt, alarm.AcknowledgedBy, alarm.AckNote, additionalJSON, alarm.CreatedAt, alarm.UpdatedAt,
 		alarm.DeviceName, alarm.Technology, alarm.AlarmSource, alarm.EventType,
 		alarm.NetworkLocation, alarm.ExplicitCause, alarm.IsRead, alarm.AckCount,
 		alarm.FirstRaisedAt, alarm.LastUpdatedAt, alarm.ProbableCause, alarm.IsUnknown,
@@ -151,7 +151,7 @@ func (s *PgAlarmStore) ListActive(ctx context.Context, filter AlarmFilter) (*mod
 }
 
 func (s *PgAlarmStore) Archive(ctx context.Context, alarm *model.Alarm) error {
-	_, err := s.tsPool.Exec(ctx,
+	_, err := s.pool.Exec(ctx,
 		`INSERT INTO alarms_history (time, alarm_id, device_id, device_sn, carrier, severity, alarm_type, alarm_identifier, description, status, raised_at, acknowledged_at, cleared_at, device_name, technology, alarm_source, event_type, network_location, explicit_cause, ack_count, acknowledged_by, ack_note, updated_at, cleared_by, clear_note, probable_cause)
 			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)`,
 		time.Now(), alarm.ID, alarm.DeviceID, alarm.DeviceSN, alarm.Carrier,
@@ -186,13 +186,13 @@ func (s *PgAlarmStore) ListHistory(ctx context.Context, filter AlarmFilter) (*mo
 
 	countSQL, countArgs, _ := countQb.ToSql()
 	var total int64
-	if err := s.tsPool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
+	if err := s.pool.QueryRow(ctx, countSQL, countArgs...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("count alarms_history: %w", err)
 	}
 
 	qb = qb.OrderBy("time DESC").Limit(uint64(filter.Limit())).Offset(uint64(filter.Offset()))
 	sql, args, _ := qb.ToSql()
-	rows, err := s.tsPool.Query(ctx, sql, args...)
+	rows, err := s.pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query alarms_history: %w", err)
 	}
@@ -290,12 +290,12 @@ func (s *PgAlarmStore) HistoryStatistics(ctx context.Context, filter AlarmFilter
 	stats := &AlarmStatistics{BySeverity: make(map[model.AlarmSeverity]int64), ByType: make(map[string]int64)}
 
 	var total int64
-	if err := s.tsPool.QueryRow(ctx, "SELECT COUNT(*) FROM alarms_history").Scan(&total); err != nil {
+	if err := s.pool.QueryRow(ctx, "SELECT COUNT(*) FROM alarms_history").Scan(&total); err != nil {
 		return nil, fmt.Errorf("count history: %w", err)
 	}
 	stats.TotalActive = total
 
-	rows, err := s.tsPool.Query(ctx, "SELECT severity, COUNT(*) FROM alarms_history GROUP BY severity")
+	rows, err := s.pool.Query(ctx, "SELECT severity, COUNT(*) FROM alarms_history GROUP BY severity")
 	if err != nil {
 		return nil, fmt.Errorf("stats history by severity: %w", err)
 	}
@@ -308,7 +308,7 @@ func (s *PgAlarmStore) HistoryStatistics(ctx context.Context, filter AlarmFilter
 		}
 	}
 
-	rows2, err := s.tsPool.Query(ctx, "SELECT alarm_type, COUNT(*) FROM alarms_history WHERE alarm_type != '' GROUP BY alarm_type")
+	rows2, err := s.pool.Query(ctx, "SELECT alarm_type, COUNT(*) FROM alarms_history WHERE alarm_type != '' GROUP BY alarm_type")
 	if err != nil {
 		return nil, fmt.Errorf("stats history by type: %w", err)
 	}
@@ -598,7 +598,7 @@ func (s *PgAlarmStore) BatchHistoryUnacknowledge(ctx context.Context, ids []uuid
 }
 
 func (s *PgAlarmStore) BatchHistoryDelete(ctx context.Context, ids []uuid.UUID) error {
-	_, err := s.tsPool.Exec(ctx,
+	_, err := s.pool.Exec(ctx,
 		`DELETE FROM alarms_history WHERE alarm_id = ANY($1)`,
 		ids)
 	return err

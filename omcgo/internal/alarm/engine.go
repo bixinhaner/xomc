@@ -2,12 +2,14 @@ package alarm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/carrier"
+	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"go.uber.org/zap"
@@ -82,7 +84,15 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 				zap.String("alarm_identifier", alarm.AlarmIdentifier))
 		} else if result != nil && result.Handled {
 			switch result.Action {
-			case FilterActionIgnore, FilterActionAutoClear:
+			case FilterActionIgnore:
+				e.logger.Debug("alarm short-circuited by filter",
+					zap.String("action", result.Action),
+					zap.String("alarm_identifier", alarm.AlarmIdentifier))
+				return nil
+			case FilterActionAutoClear:
+				if err := e.archiveAutoClearedAlarm(ctx, alarm); err != nil {
+					return err
+				}
 				e.logger.Debug("alarm short-circuited by filter",
 					zap.String("action", result.Action),
 					zap.String("alarm_identifier", alarm.AlarmIdentifier))
@@ -294,6 +304,69 @@ func (e *AlarmEngine) AutoClear(ctx context.Context, deviceSN, alarmIdentifier s
 		return nil // No active alarm to clear
 	}
 	return e.Clear(ctx, alarm.ID)
+}
+
+func (e *AlarmEngine) archiveAutoClearedAlarm(ctx context.Context, alarm *model.Alarm) error {
+	now := time.Now()
+	clearNote := "auto-cleared by filter"
+	clearedBy := "system:auto_filter"
+
+	existing, err := e.store.GetActiveByDeviceAndIdentifier(ctx, alarm.DeviceSN, alarm.AlarmIdentifier)
+	if err != nil {
+		if !errors.Is(err, commonerrors.ErrNotFound) {
+			return fmt.Errorf("lookup auto-cleared alarm: %w", err)
+		}
+	}
+
+	if existing != nil {
+		existing.Status = model.AlarmCleared
+		existing.ClearedAt = &now
+		existing.ClearedBy = &clearedBy
+		existing.ClearNote = &clearNote
+		if err := e.store.Archive(ctx, existing); err != nil {
+			return fmt.Errorf("archive existing auto-cleared alarm: %w", err)
+		}
+		if err := e.store.RemoveActive(ctx, existing.ID); err != nil {
+			return fmt.Errorf("remove existing auto-cleared alarm: %w", err)
+		}
+		if e.redisStore != nil {
+			if err := e.redisStore.Delete(ctx, existing.DeviceSN, existing.AlarmIdentifier); err != nil {
+				e.logger.Warn("redis delete auto-cleared alarm", zap.Error(err))
+			}
+		}
+		if e.metrics != nil {
+			e.metrics.ActiveTotal.WithLabelValues(severityLabel(existing.Severity), string(existing.Carrier)).Dec()
+		}
+		return nil
+	}
+
+	archived := *alarm
+	if archived.ID == uuid.Nil {
+		archived.ID = uuid.New()
+	}
+	if archived.RaisedAt.IsZero() {
+		archived.RaisedAt = now
+	}
+	if archived.FirstRaisedAt.IsZero() {
+		archived.FirstRaisedAt = archived.RaisedAt
+	}
+	archived.Status = model.AlarmCleared
+	archived.ClearedAt = &now
+	archived.ClearedBy = &clearedBy
+	archived.ClearNote = &clearNote
+	if archived.CreatedAt.IsZero() {
+		archived.CreatedAt = now
+	}
+	archived.UpdatedAt = now
+	if archived.LastUpdatedAt.IsZero() {
+		archived.LastUpdatedAt = now
+	}
+
+	if err := e.store.Archive(ctx, &archived); err != nil {
+		return fmt.Errorf("archive new auto-cleared alarm: %w", err)
+	}
+
+	return nil
 }
 
 // UpdateFromSync updates an existing alarm's attributes during sync without publishing events.

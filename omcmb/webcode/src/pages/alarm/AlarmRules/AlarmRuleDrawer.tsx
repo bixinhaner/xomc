@@ -16,7 +16,7 @@ import {
 import type { TableProps } from 'antd';
 import { useT } from '@/hooks/useT';
 import { useDeviceList, useDeviceGroups, useDevicesByIds } from '@core/hooks/api/useDevices';
-import { useAlarmDefinitionList } from '@core/hooks/api/useAlarmDefinitions';
+import { useAllAlarmDefinitions } from '@core/hooks/api/useAlarmDefinitions';
 import type { AlarmRule } from '@core/types/alarm';
 import type { AlarmDefinition } from '@core/types/alarmDefinition';
 import type { AlarmSeverity } from '@core/types/common';
@@ -82,6 +82,42 @@ interface AlarmLibraryItem {
   alarmName: string;
   eventType?: string;
   severity: AlarmSeverity;
+}
+
+function isAlarmLibraryItem(item: AlarmLibraryItem | undefined): item is AlarmLibraryItem {
+  return item !== undefined;
+}
+
+function mergeVisibleSelection(
+  previousKeys: string[],
+  visibleKeys: string[],
+  nextVisibleKeys: string[],
+): string[] {
+  const visibleKeySet = new Set(visibleKeys);
+  const mergedKeySet = new Set(previousKeys.filter((key) => !visibleKeySet.has(key)));
+
+  nextVisibleKeys.forEach((key) => {
+    mergedKeySet.add(key);
+  });
+
+  return Array.from(mergedKeySet);
+}
+
+function toggleVisibleSelection(
+  previousKeys: string[],
+  visibleKeys: string[],
+  checked: boolean,
+): string[] {
+  if (checked) {
+    return mergeVisibleSelection(previousKeys, visibleKeys, visibleKeys);
+  }
+
+  const visibleKeySet = new Set(visibleKeys);
+  return previousKeys.filter((key) => !visibleKeySet.has(key));
+}
+
+function sortSelectedFirst<T>(items: T[], isSelected: (item: T) => boolean): T[] {
+  return [...items].sort((left, right) => Number(isSelected(right)) - Number(isSelected(left)));
 }
 
 function getConditionValues(rule: AlarmRule | null | undefined, field: string): string[] {
@@ -210,10 +246,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
 
   // 获取设备组列表
   const { data: groupsData, isLoading: groupsLoading } = useDeviceGroups();
-  const { data: alarmDefinitionData, isLoading: alarmDefinitionLoading } = useAlarmDefinitionList({
-    page: 1,
-    pageSize: 1000,
-  });
+  const { data: alarmDefinitionData, isLoading: alarmDefinitionLoading } = useAllAlarmDefinitions();
 
   const isViewMode = mode === 'view';
   const title = mode === 'add' ? t('common.add') : mode === 'edit' ? t('common.edit') : t('common.detail');
@@ -317,8 +350,9 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
       );
     }
 
-    return result;
-  }, [devicesWithType, deviceFilter]);
+    const selectedDeviceSet = new Set(selectedDevices);
+    return sortSelectedFirst(result, (device) => selectedDeviceSet.has(device.id));
+  }, [devicesWithType, deviceFilter, selectedDevices]);
 
   // 初始化表单数据
   useEffect(() => {
@@ -353,29 +387,38 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
     setDeviceFilter({ deviceTypes: [], snKeyword: '' });
   }, [open, rule, form]);
 
-  const alarmLibrary = useMemo(
+  const alarmLibrary = useMemo<AlarmLibraryItem[]>(
     () => (alarmDefinitionData?.items || []).map(mapAlarmDefinitionToLibraryItem),
     [alarmDefinitionData]
   );
 
   // 过滤告警库
-  const filteredAlarms = useMemo(() => {
-    let result = alarmLibrary;
+  const filteredAlarms = useMemo<AlarmLibraryItem[]>(() => {
+    let result: AlarmLibraryItem[] = alarmLibrary;
     if (alarmFilter.keyword) {
       const kw = alarmFilter.keyword.toLowerCase();
-      result = result.filter(a =>
-        a.alarmIdentifier.toLowerCase().includes(kw) ||
-        a.alarmName.toLowerCase().includes(kw)
+      result = result.filter((alarm) =>
+        alarm.alarmIdentifier.toLowerCase().includes(kw) ||
+        alarm.alarmName.toLowerCase().includes(kw)
       );
     }
     if (alarmFilter.eventType) {
-      result = result.filter(a => a.eventType === alarmFilter.eventType);
+      result = result.filter((alarm) => alarm.eventType === alarmFilter.eventType);
     }
     if (alarmFilter.severity) {
-      result = result.filter(a => a.severity === alarmFilter.severity);
+      result = result.filter((alarm) => alarm.severity === alarmFilter.severity);
     }
-    return result;
-  }, [alarmFilter, alarmLibrary]);
+
+    const selectedAlarmSet = new Set(selectedAlarms);
+    return sortSelectedFirst(result, (alarm) => selectedAlarmSet.has(alarm.alarmIdentifier));
+  }, [alarmFilter, alarmLibrary, selectedAlarms]);
+
+  const selectedAlarmItems = useMemo<AlarmLibraryItem[]>(() => {
+    const alarmMap = new Map(alarmLibrary.map((alarm) => [alarm.alarmIdentifier, alarm]));
+    return selectedAlarms
+      .map((alarmIdentifier) => alarmMap.get(alarmIdentifier))
+      .filter(isAlarmLibraryItem);
+  }, [alarmLibrary, selectedAlarms]);
 
   const handleSubmit = useCallback(async () => {
     // 验证告警必填
@@ -510,10 +553,29 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
     },
   ];
 
+  const filteredDeviceKeys = useMemo(() => filteredDevices.map((device) => device.id), [filteredDevices]);
+  const filteredAlarmKeys = useMemo(
+    () => filteredAlarms.map((alarm) => alarm.alarmIdentifier),
+    [filteredAlarms],
+  );
+
+  const filteredSelectedDeviceCount = useMemo(() => {
+    const selectedDeviceSet = new Set(selectedDevices);
+    return filteredDeviceKeys.filter((key) => selectedDeviceSet.has(key)).length;
+  }, [filteredDeviceKeys, selectedDevices]);
+
+  const filteredSelectedAlarmCount = useMemo(() => {
+    const selectedAlarmSet = new Set(selectedAlarms);
+    return filteredAlarmKeys.filter((key) => selectedAlarmSet.has(key)).length;
+  }, [filteredAlarmKeys, selectedAlarms]);
+
   // 表格行选择配置
   const deviceRowSelection = {
     selectedRowKeys: selectedDevices,
-    onChange: (keys: React.Key[]) => setSelectedDevices(keys as string[]),
+    preserveSelectedRowKeys: true,
+    onChange: (keys: React.Key[]) => {
+      setSelectedDevices((previousKeys) => mergeVisibleSelection(previousKeys, filteredDeviceKeys, keys as string[]));
+    },
     columnWidth: 40,
   };
 
@@ -523,10 +585,11 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
     columnWidth: 40,
   };
 
-  const alarmRowSelection = {
+  const alarmRowSelection: TableProps<AlarmLibraryItem>['rowSelection'] = {
     selectedRowKeys: selectedAlarms,
+    preserveSelectedRowKeys: true,
     onChange: (keys: React.Key[]) => {
-      setSelectedAlarms(keys as string[]);
+      setSelectedAlarms((previousKeys) => mergeVisibleSelection(previousKeys, filteredAlarmKeys, keys as string[]));
       setAlarmError(null);
     },
     columnWidth: 40,
@@ -534,12 +597,8 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
 
   // 设备全选/取消全选
   const handleDeviceSelectAll = useCallback((checked: boolean) => {
-    if (checked) {
-      setSelectedDevices(filteredDevices.map(d => d.id));
-    } else {
-      setSelectedDevices([]);
-    }
-  }, [filteredDevices]);
+    setSelectedDevices((previousKeys) => toggleVisibleSelection(previousKeys, filteredDeviceKeys, checked));
+  }, [filteredDeviceKeys]);
 
   // 设备组全选/取消全选
   const handleGroupSelectAll = useCallback((checked: boolean) => {
@@ -552,21 +611,17 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
 
   // 告警全选/取消全选
   const handleAlarmSelectAll = useCallback((checked: boolean) => {
-    if (checked) {
-      setSelectedAlarms(filteredAlarms.map(a => a.alarmIdentifier));
-      setAlarmError(null);
-    } else {
-      setSelectedAlarms([]);
-    }
-  }, [filteredAlarms]);
+    setSelectedAlarms((previousKeys) => toggleVisibleSelection(previousKeys, filteredAlarmKeys, checked));
+    setAlarmError(null);
+  }, [filteredAlarmKeys]);
 
   // 计算全选状态
-  const isAllDevicesSelected = filteredDevices.length > 0 && selectedDevices.length === filteredDevices.length;
+  const isAllDevicesSelected = filteredDevices.length > 0 && filteredSelectedDeviceCount === filteredDevices.length;
   const isAllGroupsSelected = groupsWithLevel.length > 0 && selectedGroups.length === groupsWithLevel.length;
-  const isAllAlarmsSelected = filteredAlarms.length > 0 && selectedAlarms.length === filteredAlarms.length;
-  const isIndeterminateDevices = selectedDevices.length > 0 && selectedDevices.length < filteredDevices.length;
+  const isAllAlarmsSelected = filteredAlarms.length > 0 && filteredSelectedAlarmCount === filteredAlarms.length;
+  const isIndeterminateDevices = filteredSelectedDeviceCount > 0 && filteredSelectedDeviceCount < filteredDevices.length;
   const isIndeterminateGroups = selectedGroups.length > 0 && selectedGroups.length < groupsWithLevel.length;
-  const isIndeterminateAlarms = selectedAlarms.length > 0 && selectedAlarms.length < filteredAlarms.length;
+  const isIndeterminateAlarms = filteredSelectedAlarmCount > 0 && filteredSelectedAlarmCount < filteredAlarms.length;
 
   return (
     <Drawer
@@ -752,7 +807,33 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
                 {t('common.selectAll')}
               </Checkbox>
             </Space>
-            <Table
+            {selectedAlarmItems.length > 0 && (
+              <div style={{
+                padding: 8,
+                border: '1px solid #f0f0f0',
+                borderRadius: 6,
+                background: '#fafafa',
+              }}>
+                <div style={{ marginBottom: 8, fontSize: 12, color: 'rgba(0,0,0,0.65)' }}>
+                  已选告警标识
+                </div>
+                <Space wrap size={[4, 8]}>
+                  {selectedAlarmItems.map((alarm) => (
+                    <Tag
+                      key={alarm.alarmIdentifier}
+                      closable={!isViewMode}
+                      onClose={() => {
+                        setSelectedAlarms((previousKeys) => previousKeys.filter((key) => key !== alarm.alarmIdentifier));
+                      }}
+                      style={{ marginInlineEnd: 0 }}
+                    >
+                      {alarm.alarmIdentifier}
+                    </Tag>
+                  ))}
+                </Space>
+              </div>
+            )}
+            <Table<AlarmLibraryItem>
               rowSelection={alarmRowSelection}
               columns={alarmColumns}
               dataSource={filteredAlarms}

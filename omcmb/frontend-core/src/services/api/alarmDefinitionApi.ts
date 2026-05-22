@@ -118,7 +118,7 @@ export const alarmDefinitionApi = {
     if (filter?.keyword) params.keyword = filter.keyword;
     if (filter?.isUnknown !== undefined) params.is_unknown = filter.isUnknown;
     if (filter?.page) params.page = filter.page;
-    if (filter?.pageSize) params.pageSize = filter.pageSize;
+    if (filter?.pageSize) params.page_size = filter.pageSize;
 
     const { data } = await http.get<{
       items: BackendDefinition[];
@@ -131,6 +131,42 @@ export const alarmDefinitionApi = {
       total: data.total || 0,
       page: data.page || 1,
       pageSize: data.page_size || 20,
+    };
+  },
+
+  async listAll(filter?: Omit<AlarmDefinitionFilter, 'page'>): Promise<{
+    items: AlarmDefinition[];
+    total: number;
+    page: number;
+    pageSize: number;
+  }> {
+    const pageSize = filter?.pageSize && filter.pageSize > 0
+      ? Math.min(filter.pageSize, 500)
+      : 500;
+    const items: AlarmDefinition[] = [];
+    let page = 1;
+    let total = 0;
+
+    while (true) {
+      const result = await alarmDefinitionApi.list({
+        ...filter,
+        page,
+        pageSize,
+      });
+      total = result.total;
+      items.push(...result.items);
+
+      if (result.items.length === 0 || items.length >= total) {
+        break;
+      }
+      page += 1;
+    }
+
+    return {
+      items,
+      total,
+      page: 1,
+      pageSize: items.length,
     };
   },
 

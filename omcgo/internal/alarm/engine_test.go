@@ -20,6 +20,7 @@ type mockAlarmStore struct {
 	history          []*model.Alarm
 	lastActiveFilter AlarmFilter
 	lastHistoryFilter AlarmFilter
+	returnNotFoundOnLookup bool
 }
 
 func newMockAlarmStore() *mockAlarmStore {
@@ -44,6 +45,9 @@ func (m *mockAlarmStore) GetActiveByDeviceAndIdentifier(_ context.Context, devic
 		if a.DeviceSN == deviceSN && a.AlarmIdentifier == alarmIdentifier && a.Status != model.AlarmCleared {
 			return a, nil
 		}
+	}
+	if m.returnNotFoundOnLookup {
+		return nil, fmt.Errorf("alarm not found: %w", commonerrors.ErrNotFound)
 	}
 	return nil, nil // not found — return nil, nil (like a real store)
 }
@@ -248,6 +252,92 @@ func TestClearAlarm(t *testing.T) {
 
 	assert.Len(t, store.active, 0)
 	assert.Len(t, store.history, 1)
+	assert.Equal(t, model.AlarmCleared, store.history[0].Status)
+	assert.NotNil(t, store.history[0].ClearedAt)
+}
+
+func TestProcessAutoClearArchivesHistoryWhenNoActiveExists(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	engine.SetFilterEngine(newTestFilterEngine([]AlarmFilterRule{
+		{FilterType: FilterTypeAlarmIdentifier, AlarmIdentifiers: []string{"ALM001"}, Action: FilterActionAutoClear, Name: "auto-clear-alm001"},
+	}, nil))
+
+	alarm := &model.Alarm{
+		DeviceSN:        "TEST001",
+		DeviceID:        uuid.New(),
+		Carrier:         model.CarrierCMCC,
+		AlarmIdentifier: "ALM001",
+		Severity:        model.AlarmMajor,
+		RaisedAt:        time.Now(),
+	}
+
+	require.NoError(t, engine.Process(context.Background(), alarm))
+	assert.Len(t, store.active, 0)
+	assert.Len(t, store.history, 1)
+	assert.Equal(t, model.AlarmCleared, store.history[0].Status)
+	assert.NotNil(t, store.history[0].ClearedAt)
+	require.NotNil(t, store.history[0].ClearedBy)
+	assert.Equal(t, "system:auto_filter", *store.history[0].ClearedBy)
+}
+
+func TestProcessAutoClearArchivesHistoryWhenStoreReturnsNotFound(t *testing.T) {
+	store := newMockAlarmStore()
+	store.returnNotFoundOnLookup = true
+	engine := newTestEngine(store)
+	engine.SetFilterEngine(newTestFilterEngine([]AlarmFilterRule{
+		{FilterType: FilterTypeAlarmIdentifier, AlarmIdentifiers: []string{"ALM001"}, Action: FilterActionAutoClear, Name: "auto-clear-alm001"},
+	}, nil))
+
+	alarm := &model.Alarm{
+		DeviceSN:        "TEST001",
+		DeviceID:        uuid.New(),
+		Carrier:         model.CarrierCMCC,
+		AlarmIdentifier: "ALM001",
+		Severity:        model.AlarmMajor,
+		RaisedAt:        time.Now(),
+	}
+
+	require.NoError(t, engine.Process(context.Background(), alarm))
+	assert.Len(t, store.active, 0)
+	assert.Len(t, store.history, 1)
+	assert.Equal(t, model.AlarmCleared, store.history[0].Status)
+}
+
+func TestProcessAutoClearArchivesAndRemovesExistingActive(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	ctx := context.Background()
+
+	existing := &model.Alarm{
+		ID:              uuid.New(),
+		DeviceSN:        "TEST001",
+		DeviceID:        uuid.New(),
+		Carrier:         model.CarrierCMCC,
+		AlarmIdentifier: "ALM001",
+		Severity:        model.AlarmMajor,
+		RaisedAt:        time.Now().Add(-time.Minute),
+		Status:          model.AlarmActive,
+	}
+	require.NoError(t, store.SaveActive(ctx, existing))
+
+	engine.SetFilterEngine(newTestFilterEngine([]AlarmFilterRule{
+		{FilterType: FilterTypeAlarmIdentifier, AlarmIdentifiers: []string{"ALM001"}, Action: FilterActionAutoClear, Name: "auto-clear-alm001"},
+	}, nil))
+
+	incoming := &model.Alarm{
+		DeviceSN:        existing.DeviceSN,
+		DeviceID:        existing.DeviceID,
+		Carrier:         existing.Carrier,
+		AlarmIdentifier: existing.AlarmIdentifier,
+		Severity:        existing.Severity,
+		RaisedAt:        time.Now(),
+	}
+
+	require.NoError(t, engine.Process(ctx, incoming))
+	assert.Len(t, store.active, 0)
+	assert.Len(t, store.history, 1)
+	assert.Equal(t, existing.ID, store.history[0].ID)
 	assert.Equal(t, model.AlarmCleared, store.history[0].Status)
 	assert.NotNil(t, store.history[0].ClearedAt)
 }

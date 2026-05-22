@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"strconv"
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
@@ -124,6 +125,17 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	alarmEngine := alarm.NewAlarmEngine(alarmPgStore, alarmRedisStore, w.Carriers, w.EventBus, logger)
 	alarmMetrics := alarm.NewAlarmMetrics(w.MetricsReg)
 	alarmEngine.SetMetrics(alarmMetrics)
+	alarmFilterRuleRepo := alarm.NewPgAlarmFilterRuleRepository(w.PgPool)
+	webhookMetrics := alarm.NewWebhookMetrics(w.MetricsReg)
+	webhookDispatcher := alarm.NewHTTPWebhookDispatcher(logger.Named("webhook"), webhookMetrics)
+	deadLetterRepo := alarm.NewPgDeadLetterRepository(w.PgPool)
+	filterEngine := alarm.NewFilterEngine(alarmFilterRuleRepo, alarmPgStore, webhookDispatcher, deadLetterRepo, webhookMetrics, logger)
+	filterEngine.SetDeviceGroupResolver(alarm.NewPgDeviceGroupResolver(w.PgPool))
+	emailMetrics := alarm.NewEmailMetrics(w.MetricsReg)
+	emailCfg := loadEmailConfigFromEnv()
+	emailDispatcher := alarm.NewSMTPEmailDispatcher(emailCfg, logger.Named("email"), emailMetrics)
+	filterEngine.SetEmailDispatcher(emailDispatcher)
+	alarmEngine.SetFilterEngine(filterEngine)
 
 	// Alarm Sync Service (creates GPV tasks to query device alarms)
 	alarmSyncService := alarm.NewAlarmSyncService(w.TaskService, w.Redis, w.EventBus, logger)
@@ -393,4 +405,17 @@ func parseStringSlice(s string) []string {
 		}
 	}
 	return result
+}
+
+func loadEmailConfigFromEnv() alarm.EmailConfig {
+	port, _ := strconv.Atoi(os.Getenv("OMC_SMTP_PORT"))
+	return alarm.EmailConfig{
+		Host:        os.Getenv("OMC_SMTP_HOST"),
+		Port:        port,
+		Username:    os.Getenv("OMC_SMTP_USERNAME"),
+		Password:    os.Getenv("OMC_SMTP_PASSWORD"),
+		From:        os.Getenv("OMC_SMTP_FROM"),
+		UseTLS:      os.Getenv("OMC_SMTP_USE_TLS") == "true",
+		UseSTARTTLS: os.Getenv("OMC_SMTP_USE_STARTTLS") == "true",
+	}
 }

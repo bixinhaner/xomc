@@ -10,11 +10,23 @@ const api: typeof alarmApi = useMock
   ? (alarmService as unknown as typeof alarmApi)
   : alarmApi;
 
+function scheduleAlarmRefresh(queryClient: ReturnType<typeof useQueryClient>) {
+  const retryDelays = [3_000, 8_000, 15_000, 30_000];
+
+  retryDelays.forEach((delayMs) => {
+    window.setTimeout(() => {
+      void queryClient.invalidateQueries({ queryKey: ['alarms'] });
+    }, delayMs);
+  });
+}
+
 export function useCurrentAlarms(params: AlarmFilter & PageRequest) {
   return useQuery({
     queryKey: ['alarms', 'current', params],
     queryFn: () => api.getCurrentAlarms(params),
     refetchInterval: 30000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -22,6 +34,7 @@ export function useHistoricalAlarms(params: AlarmFilter & PageRequest) {
   return useQuery({
     queryKey: ['alarms', 'historical', params],
     queryFn: () => api.getHistoricalAlarms(params),
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -30,6 +43,8 @@ export function useAlarmList(params: AlarmFilter & PageRequest & { isActive?: bo
     queryKey: ['alarms', 'list', params],
     queryFn: () => api.getList(params),
     refetchInterval: params.isActive !== false ? 30000 : undefined,
+    refetchIntervalInBackground: params.isActive !== false,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -46,6 +61,8 @@ export function useAlarmCount() {
     queryKey: ['alarms', 'count'],
     queryFn: () => api.getAlarmCount(),
     refetchInterval: 15000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -186,6 +203,7 @@ export function useTriggerAlarmSync() {
     mutationFn: (deviceSN: string) => api.triggerAlarmSync(deviceSN),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['alarms'] });
+      scheduleAlarmRefresh(queryClient);
     },
   });
 }
