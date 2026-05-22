@@ -9,7 +9,7 @@ import (
 // 通常 5-50 个 param/group；超 50 的 flat 大子树视为接受边界情况。
 const MaxParamsPerGroup = 50
 
-// GroupSpec 一个逻辑命令分组 — 最终成为 mml_param_groups 一行。
+// GroupSpec 一个逻辑命令分组 — 最终成为 mml_command_groups 一行。
 //
 // Path 形如 "Device.DeviceInfo.AntennaInfo" 或
 // "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell"。

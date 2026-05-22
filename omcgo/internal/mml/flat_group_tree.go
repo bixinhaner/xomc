@@ -60,7 +60,7 @@ type FlatGroup struct {
 // ObjectPath 字段三态：
 //   - LST: []string         所有 sub_field 关联的 standard_path
 //   - MOD: []ModParamPath    带 type / 约束的对象数组
-//   - ADD/RMV: string        目标对象路径（mml_param_groups.object_path_template）
+//   - ADD/RMV: string        目标对象路径（mml_command_groups.object_path_template）
 type FlatCommand struct {
 	ID         uuid.UUID   `json:"id"`
 	Name       string      `json:"name"`
@@ -92,7 +92,7 @@ type FlatGroupTreeRepository interface {
 
 // PgFlatGroupTreeRepository 是 PostgreSQL 实现。
 //
-// 单 SQL JOIN：mml_param_groups + mml_commands + mml_command_sub_fields +
+// 单 SQL JOIN：mml_command_groups + mml_commands + mml_command_sub_fields +
 // standard_params；Go 侧按 (chapter_code, command_id) 聚合。
 type PgFlatGroupTreeRepository struct {
 	pool *pgxpool.Pool
@@ -109,7 +109,7 @@ var _ FlatGroupTreeRepository = (*PgFlatGroupTreeRepository)(nil)
 type flatRow struct {
 	ChapterCode        string
 	GroupDisplayOrder  int
-	GroupObjectPath    *string // mml_param_groups.object_path_template
+	GroupObjectPath    *string // mml_command_groups.object_path_template
 	CommandID          uuid.UUID
 	OperationType      string
 	CommandCode        string
@@ -141,7 +141,7 @@ SELECT
     sp.data_type,
     sp.min_value,
     sp.max_value
-FROM mml_param_groups g
+FROM mml_command_groups g
 JOIN mml_commands c        ON c.group_id = g.id
 LEFT JOIN mml_command_sub_fields csf
        ON csf.command_id = c.id

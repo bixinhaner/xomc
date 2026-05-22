@@ -65,7 +65,7 @@ export interface MMLCommand {
   // 新增字段（standard-model 重建后由 mmlstandardloader 写入）
   /** ADD/RMV 操作的目标对象路径，nullable */
   targetObject?: string;
-  /** 所属 mml_param_groups.id，nullable */
+  /** 所属 mml_command_groups.id，nullable */
   groupId?: string;
   /** i18n 命令名 {"zh-CN":"...", "en-US":"..."} */
   commandNameI18n?: Record<string, string>;

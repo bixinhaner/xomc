@@ -119,10 +119,10 @@ func (l *Loader) upsertCatalog(ctx context.Context, cat *Catalog) (*upsertSummar
 	return s, nil
 }
 
-// upsertGroup UPSERT mml_param_groups 一行，返回 group.id。
+// upsertGroup UPSERT mml_command_groups 一行，返回 group.id。
 //
 // 唯一键：object_path_template（部分唯一索引，仅 deleted_at IS NULL 时生效）。
-// 注意 mml_param_groups 表存在 (param_version, group_code) UNIQUE 约束，但
+// 注意 mml_command_groups 表存在 (param_version, group_code) UNIQUE 约束，但
 // 本 Loader 写入的是 v2.3 catalog 维度，不绑定 param_version；通过新加的
 // object_path_template 列作为本 catalog 范围唯一标识。
 func upsertGroup(ctx context.Context, tx pgx.Tx, carrier, tech string, g *Group) (uuid.UUID, error) {
@@ -134,7 +134,7 @@ func upsertGroup(ctx context.Context, tx pgx.Tx, carrier, tech string, g *Group)
 	nameZH := g.NameI18n["zh-CN"]
 	nameEN := g.NameI18n["en-US"]
 
-	// mml_param_groups schema after 000090 + 000129:
+		// mml_command_groups schema after 000090 + 000129:
 	//   id, group_code, group_name_zh, group_name_en, path, param_version,
 	//   display_order, is_active, name_i18n, source, catalog_protected,
 	//   object_path_template, chapter_code, instance_arity, instance_levels,
@@ -145,14 +145,14 @@ func upsertGroup(ctx context.Context, tx pgx.Tx, carrier, tech string, g *Group)
 	//
 	// 简化方案：先 SELECT 看是否存在 → UPDATE 或 INSERT。
 	const selectSQL = `
-		SELECT id FROM mml_param_groups
+		SELECT id FROM mml_command_groups
 		WHERE object_path_template = $1 AND deleted_at IS NULL
 		LIMIT 1;
 	`
 	// v2.4 P3：UPDATE 同步写入 family_code / family_name_zh（来自 inferFamily 推断）。
 	// 即使值未变，每次启动 Loader 都重写一遍，保证 DB 与 catalog 规则一致。
 	const updateSQL = `
-		UPDATE mml_param_groups SET
+		UPDATE mml_command_groups SET
 			group_name_zh = $2,
 			group_name_en = $3,
 			name_i18n = $4::jsonb,
@@ -172,7 +172,7 @@ func upsertGroup(ctx context.Context, tx pgx.Tx, carrier, tech string, g *Group)
 	// "Standard" 顶级，与老 catalog 风格兼容。
 	// v2.4 P3：INSERT 同步写入 family_code / family_name_zh（来自 inferFamily 推断）。
 	const insertSQL = `
-		INSERT INTO mml_param_groups (
+		INSERT INTO mml_command_groups (
 			id, group_code, group_name_zh, group_name_en, name_i18n,
 			param_version, display_order, source, catalog_protected,
 			object_path_template, chapter_code, instance_arity, instance_levels,
@@ -436,7 +436,7 @@ func softDeleteOrphanSubFields(ctx context.Context, tx pgx.Tx, ownerCmdID uuid.U
 func softDeleteOrphanGroups(ctx context.Context, tx pgx.Tx, carrier, tech string, incomingGroupCodes []string) (int, error) {
 	paramVersion := fmt.Sprintf("%s-%s-v2.3", carrier, tech)
 	const sql = `
-		UPDATE mml_param_groups
+		UPDATE mml_command_groups
 		SET deprecated_at = NOW()
 		WHERE param_version = $1
 		  AND object_path_template IS NOT NULL
@@ -511,7 +511,7 @@ func normalizeForCommandCode(s string) string {
 }
 
 // ensureParamVersion 确保 catalog 对应的 mml_param_versions 行存在。
-// FK：mml_param_groups.param_version → mml_param_versions.version_code。
+// FK：mml_command_groups.param_version → mml_param_versions.version_code。
 // 派生规则与 upsertGroup 保持一致：version_code = "{carrier}-{tech}-v2.3"。
 // 注：specVersion 在文件中是 "cmcc-tdlte-v2.3" 类自描述串，不直接做 version_code。
 func ensureParamVersion(ctx context.Context, tx pgx.Tx, carrier, tech, specVersion string) error {

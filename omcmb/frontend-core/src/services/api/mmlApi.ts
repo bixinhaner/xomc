@@ -488,7 +488,7 @@ export const mmlApi = {
   },
 
   /**
-   * Sprint B-5：按组批量执行 mml_param_groups 下的全部命令。
+   * Sprint B-5：按组批量执行 mml_command_groups 下的全部命令。
    * 后端会展开 group 下 N 条 mml_commands 为单 mml_task.commands[]，
    * Fanouter 串行下发；operation_filter 可挑 ["LST"] / ["MOD"] 等。
    */

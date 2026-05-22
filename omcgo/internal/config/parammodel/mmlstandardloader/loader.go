@@ -38,7 +38,7 @@ const (
 //	parse standard-model.xml
 //	  → trie 切分 group（≤50 阈值）
 //	  → 生成 LST/MOD/ADD/RMV 命令
-//	  → 单事务 UPSERT mml_param_versions / mml_param_groups / mml_params / mml_commands /
+//	  → 单事务 UPSERT mml_param_versions / mml_command_groups / mml_params / mml_commands /
 //	    mml_group_param_rel
 //
 // 二次跑：UPSERT 幂等，无副作用。
@@ -331,13 +331,13 @@ func upsertParams(ctx context.Context, tx pgx.Tx, params []ParamSpec) error {
 	return nil
 }
 
-// upsertGroups 批量 UPSERT mml_param_groups，返回 path→id 映射用于后续 commands.group_id 解析。
+// upsertGroups 批量 UPSERT mml_command_groups，返回 path→id 映射用于后续 commands.group_id 解析。
 func upsertGroups(ctx context.Context, tx pgx.Tx, groups []GroupSpec) (map[string]string, error) {
 	ids := make(map[string]string, len(groups))
 	for _, g := range groups {
 		nameZh, nameEn := groupDisplayName(g)
 		row := tx.QueryRow(ctx, `
-			INSERT INTO mml_param_groups (
+			INSERT INTO mml_command_groups (
 				id, group_code, group_name_zh, group_name_en,
 				path, name_i18n,
 				param_version, display_order, is_active
@@ -421,7 +421,7 @@ func upsertCommands(ctx context.Context, tx pgx.Tx, cmds []CommandSpec, groupIDs
 // upsertBusinessPackages 批量 UPSERT 业务套餐 LST 命令（F-B / T-0119）。
 //
 // 与 upsertCommands 区别：
-//   - group_id = NULL（套餐不归属 mml_param_groups 派生树）
+//   - group_id = NULL（套餐不归属 mml_command_groups 派生树）
 //   - operation_type 固定 LST；rpc_method 固定 GetParameterValues
 //   - target_paths 通常是 partial path（以 "." 结尾）一次抓整棵子树
 //   - description 字段直填 PackageSpec.Description（FE 详情页用）

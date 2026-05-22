@@ -14,7 +14,7 @@ export type I18nMap = Record<string, string>;
 export type Source = 'standard' | 'admin';
 
 // ============================================================
-// Group (mml_param_groups)
+// Group (mml_command_groups)
 // ============================================================
 
 export interface BackendGroupAdmin {

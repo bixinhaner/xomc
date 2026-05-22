@@ -3,7 +3,7 @@ package mmlstandardloader
 // seed_importer.go — 把 cmcc_tdlte_v23.json seed 一次性 UPSERT 到 4 张表：
 //
 //	mml_param_versions        — 版本锚点（version_code = "cmcc-tdlte-v2.3"）
-//	mml_param_groups          — 18 个 chapter 一级分组（SA…SR）
+//	mml_command_groups          — 18 个 chapter 一级分组（SA…SR）
 //	mml_commands              — 派生后的 LST/MOD/ADD/RMV 命令
 //	mml_command_sub_fields    — 命令 ↔ standard_params M:N 关联
 //
@@ -23,7 +23,7 @@ package mmlstandardloader
 //	mml_commands(id, command_code, group_id, ...)
 //	  ▲
 //	  │  group_id FK
-//	mml_param_groups(id, group_code, chapter_code, param_version, ...)
+//	mml_command_groups(id, group_code, chapter_code, param_version, ...)
 //	  ▲
 //	  │  param_version FK (VARCHAR)
 //	mml_param_versions(version_code, ...)
@@ -44,7 +44,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// SeedImportSource 标识 mml_commands.source / mml_param_groups.source
+// SeedImportSource 标识 mml_commands.source / mml_command_groups.source
 // 是 standard 来源（vs admin 手动新增）。
 const SeedImportSource = "standard"
 
@@ -113,9 +113,9 @@ func ImportSeedFile(ctx context.Context, pool *pgxpool.Pool, seedPath string, lo
 
 	chapterIDs, err := upsertChapterGroups(ctx, tx, seed)
 	if err != nil {
-		return fmt.Errorf("upsert mml_param_groups: %w", err)
+		return fmt.Errorf("upsert mml_command_groups: %w", err)
 	}
-	logger.Info("mml_param_groups upserted", zap.Int("rows", len(chapterIDs)))
+	logger.Info("mml_command_groups upserted", zap.Int("rows", len(chapterIDs)))
 
 	cmdIDs, err := upsertDerivedCommands(ctx, tx, derived, chapterIDs)
 	if err != nil {
@@ -248,7 +248,7 @@ func lookupStandardParamIDs(
 	return ids, missing, nil
 }
 
-// upsertChapterGroups 写 18 个一级分组（SA…SR）到 mml_param_groups。
+// upsertChapterGroups 写 18 个一级分组（SA…SR）到 mml_command_groups。
 //
 // 字段决策：
 //   - group_code = chapter code（SA / SB / …）
@@ -265,7 +265,7 @@ func upsertChapterGroups(ctx context.Context, tx pgx.Tx, seed *SeedRoot) (map[st
 		nameJSON := jsonI18n(g.Name, g.Name)
 		var id string
 		row := tx.QueryRow(ctx, `
-			INSERT INTO mml_param_groups (
+			INSERT INTO mml_command_groups (
 				id, group_code, group_name_zh, group_name_en,
 				path, name_i18n, param_version,
 				display_order, is_active,

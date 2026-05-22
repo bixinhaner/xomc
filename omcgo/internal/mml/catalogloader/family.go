@@ -15,7 +15,7 @@ import "strings"
 //     000141 历史回填 CASE WHEN 一致），任何调整需三处同步：
 //       1. internal/mml/family.go familyRules
 //       2. internal/mml/catalogloader/family.go familyRules（本文件）
-//       3. migrations/0001NN_mml_param_groups_family*.sql CASE WHEN
+//       3. migrations/0001NN_mml_command_groups_family*.sql CASE WHEN
 //
 // 规则顺序敏感：更具体的规则在前（hardware_upgrade 在 hardware_units / device_info
 // 之前；G-02 Device.DeviceInfo.SwUpgrade.* 不属于 MU 升级所以走 device_info）。

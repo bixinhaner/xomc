@@ -23,8 +23,8 @@ type ParamVersion struct {
 	UpdatedAt       time.Time `json:"updated_at" db:"updated_at"`
 }
 
-// ParamGroup represents a hierarchical group of parameters.
-type ParamGroup struct {
+// CommandGroup represents a hierarchical group of parameters.
+type CommandGroup struct {
 	ID                    uuid.UUID  `json:"id" db:"id"`
 	GroupCode             string     `json:"group_code" db:"group_code"`
 	GroupNameZh           string     `json:"group_name_zh" db:"group_name_zh"`
@@ -52,7 +52,7 @@ type ParamGroup struct {
 	Source            string `json:"source" db:"source"`                         // standard / admin
 	CatalogProtected  bool   `json:"catalog_protected" db:"catalog_protected"`   // standard 行不可删除
 
-	Children              []ParamGroup `json:"children,omitempty"`
+	Children              []CommandGroup `json:"children,omitempty"`
 }
 
 // Param represents a single TR-069 parameter definition.

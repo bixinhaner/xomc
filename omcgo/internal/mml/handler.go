@@ -72,7 +72,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	templates.DELETE("/:id", h.DeleteTemplate)
 	templates.POST("/:id/clone", h.CloneTemplate)
 
-	// Sprint B Q-V3-1：mml_param_groups 批量执行。group 下的全部命令
+	// Sprint B Q-V3-1：mml_command_groups 批量执行。group 下的全部命令
 	// 一键展开为一个 mml_task，fanout + sequencer 自动串行下发。
 	groups := mml.Group("/groups")
 	groups.POST("/:id/execute", h.ExecuteGroup)
@@ -355,11 +355,11 @@ type ExecuteGroupHTTPRequest struct {
 // 把指定 mml_param_group 下的全部命令一次性下发（操作类型过滤可选）。
 // device_sns 必填；其他字段缺省走 ExecuteImmediate。
 //
-// @Summary      按组批量执行 mml_param_groups 下的全部命令
+// @Summary      按组批量执行 mml_command_groups 下的全部命令
 // @Description  Fanouter + Sequencer 串行下发；operation_filter 可挑 LST/MOD/ADD/RMV 子集
 // @Tags         MML
 // @Security     BearerAuth
-// @Param        id    path  string                        true   "mml_param_groups.id (uuid)"
+// @Param        id    path  string                        true   "mml_command_groups.id (uuid)"
 // @Param        body  body  ExecuteGroupHTTPRequest       true   "执行参数"
 // @Success      201  {object}  MMLTask
 // @Failure      400  {string}  string  "device_sns 缺失 / group_id 无效"

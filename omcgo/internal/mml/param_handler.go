@@ -63,7 +63,7 @@ func (h *ParamHandler) GetGroupTree(c *gin.Context) {
 		return
 	}
 	if groups == nil {
-		groups = []ParamGroup{}
+		groups = []CommandGroup{}
 	}
 	response.OK(c, gin.H{"items": groups})
 }

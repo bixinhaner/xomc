@@ -51,7 +51,7 @@ func (c *Catalog) IsV2() bool {
 	return c.SchemaVersion == "v2"
 }
 
-// Group 是命令树的一级分组，对应 mml_param_groups 一行。
+// Group 是命令树的一级分组，对应 mml_command_groups 一行。
 //
 // v1 语义：object 维度（GroupCode = TR-181 路径模板，如 "Device.DeviceInfo.*"）；
 // v2 语义：chapter 维度（GroupCode = "chapter:SA" / "chapter:SF" ...）。

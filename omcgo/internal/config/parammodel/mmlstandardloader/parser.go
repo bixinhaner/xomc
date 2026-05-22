@@ -14,7 +14,7 @@
 //	[]CommandSpec
 //	    │
 //	    ▼ loader.go : 事务 UPSERT
-//	mml_param_versions / mml_param_groups / mml_params / mml_commands / mml_group_param_rel
+//	mml_param_versions / mml_command_groups / mml_params / mml_commands / mml_group_param_rel
 //
 // 决策依据：docs/design/mml-rebuild-plan-20260513.md v3.1
 package mmlstandardloader

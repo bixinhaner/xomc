@@ -28,7 +28,7 @@ type CommandSpec struct {
 	Category      string   // '1'..'7'
 	OperationType string   // LST / MOD / ADD / RMV
 	RPCMethod     string   // GetParameterValues 等
-	GroupPath     string   // 关联 group path（运行时 lookup mml_param_groups.path → id）
+	GroupPath     string   // 关联 group path（运行时 lookup mml_command_groups.path → id）
 	TargetPaths   []string // LST/MOD 时填；ADD/RMV 时空
 	TargetObject  string   // ADD/RMV 时填；LST/MOD 时空
 }

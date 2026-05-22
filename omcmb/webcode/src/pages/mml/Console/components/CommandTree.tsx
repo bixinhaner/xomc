@@ -101,7 +101,7 @@ const CHAPTER_GROUP_PREFIX = 'chapter:';
  * 把后端返回的 N 层 LTREE 拍平为「一级大类 → 命令」两层。
  *
  * 用户决策（2026-05-18）："命令分组只保留一层，完全参考老 OMC 命令树"。
- * 后端 `mml_param_groups` 字典仍允许多层（admin 维护用），但 console 前端
+ * 后端 `mml_command_groups` 字典仍允许多层（admin 维护用），但 console 前端
  * 只展示**根节点 = 一级大类**，把所有后代命令收集挂到同一个根下。
  *
  * 例：原结构「设备信息 → 设备基础信息 → 基础查询」此处压平为「设备信息 → 基础查询」。

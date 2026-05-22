@@ -94,8 +94,8 @@ type UpdateGroupReq struct {
 }
 
 // CreateGroup 新建一个 admin 来源的 group。
-func (s *AdminService) CreateGroup(ctx context.Context, req CreateGroupReq) (*ParamGroup, error) {
-	g := &ParamGroup{
+func (s *AdminService) CreateGroup(ctx context.Context, req CreateGroupReq) (*CommandGroup, error) {
+	g := &CommandGroup{
 		GroupCode:        req.GroupCode,
 		GroupNameZh:      req.GroupNameZh,
 		GroupNameEn:      req.GroupNameEn,
@@ -115,7 +115,7 @@ func (s *AdminService) CreateGroup(ctx context.Context, req CreateGroupReq) (*Pa
 }
 
 // UpdateGroup 更新一个 group 的可编辑字段。catalog_protected=true 时仅允许 i18n + display_order。
-func (s *AdminService) UpdateGroup(ctx context.Context, id uuid.UUID, req UpdateGroupReq) (*ParamGroup, error) {
+func (s *AdminService) UpdateGroup(ctx context.Context, id uuid.UUID, req UpdateGroupReq) (*CommandGroup, error) {
 	existing, err := s.groupRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("get group: %w", err)

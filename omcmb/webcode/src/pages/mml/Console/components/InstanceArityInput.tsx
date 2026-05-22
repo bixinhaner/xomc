@@ -40,7 +40,7 @@ export function selectorKeysForArity(arity: number): string[] {
 
 /**
  * deriveArityFromSubFields — 由 sub_field.tr069Path 推断 instance arity。
- * 后端 BuildTree 尚未暴露 mml_param_groups.instance_arity，前端 derive。
+ * 后端 BuildTree 尚未暴露 mml_command_groups.instance_arity，前端 derive。
  *
  * 同 command 内所有 sub_field 应同 arity（catalog 由组级 instance_arity 决定）；
  * 异常时取最大值，由后端校验数量 mismatch 兜底。

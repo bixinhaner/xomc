@@ -45,7 +45,7 @@ const (
 // were dropped in 000090. New layout pivots on:
 //   - target_paths  : TR-069 paths the command operates on (JSONB array of strings)
 //   - target_object : add/delete object path (for ADD/RMV) — nullable
-//   - group_id      : FK → mml_param_groups.id (NULL for ungrouped legacy)
+//   - group_id      : FK → mml_command_groups.id (NULL for ungrouped legacy)
 //   - command_name_i18n / confirm_msg_i18n : {"zh-CN": "...", "en-US": "..."}
 //   - require_confirm : 危险命令二次确认标志
 //

@@ -25,7 +25,7 @@ import (
 // ---- mocks ----
 
 type mockGroupRepo struct {
-	groups            map[uuid.UUID]*ParamGroup
+	groups            map[uuid.UUID]*CommandGroup
 	createErr         error
 	updateErr         error
 	deleteErr         error
@@ -34,12 +34,12 @@ type mockGroupRepo struct {
 
 func newMockGroupRepo() *mockGroupRepo {
 	return &mockGroupRepo{
-		groups:            map[uuid.UUID]*ParamGroup{},
+		groups:            map[uuid.UUID]*CommandGroup{},
 		commandCountByGrp: map[uuid.UUID]int64{},
 	}
 }
 
-func (m *mockGroupRepo) Create(ctx context.Context, g *ParamGroup) error {
+func (m *mockGroupRepo) Create(ctx context.Context, g *CommandGroup) error {
 	if m.createErr != nil {
 		return m.createErr
 	}
@@ -50,7 +50,7 @@ func (m *mockGroupRepo) Create(ctx context.Context, g *ParamGroup) error {
 	m.groups[g.ID] = &cp
 	return nil
 }
-func (m *mockGroupRepo) Update(ctx context.Context, g *ParamGroup) error {
+func (m *mockGroupRepo) Update(ctx context.Context, g *CommandGroup) error {
 	if m.updateErr != nil {
 		return m.updateErr
 	}
@@ -71,7 +71,7 @@ func (m *mockGroupRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	delete(m.groups, id)
 	return nil
 }
-func (m *mockGroupRepo) GetByID(ctx context.Context, id uuid.UUID) (*ParamGroup, error) {
+func (m *mockGroupRepo) GetByID(ctx context.Context, id uuid.UUID) (*CommandGroup, error) {
 	g, ok := m.groups[id]
 	if !ok {
 		return nil, ErrGroupNotFound
@@ -267,7 +267,7 @@ func newAdminTestService() (*AdminService, *mockGroupRepo, *mockAdminCmdRepo, *m
 func TestAdminService_DeleteGroup_CatalogProtected(t *testing.T) {
 	svc, gRepo, _, _, _, _ := newAdminTestService()
 	id := uuid.New()
-	gRepo.groups[id] = &ParamGroup{ID: id, GroupCode: "BSC_CONFIG", CatalogProtected: true}
+	gRepo.groups[id] = &CommandGroup{ID: id, GroupCode: "BSC_CONFIG", CatalogProtected: true}
 
 	err := svc.DeleteGroup(context.Background(), id)
 	require.Error(t, err)
@@ -277,7 +277,7 @@ func TestAdminService_DeleteGroup_CatalogProtected(t *testing.T) {
 func TestAdminService_DeleteGroup_NotEmpty(t *testing.T) {
 	svc, gRepo, _, _, _, _ := newAdminTestService()
 	id := uuid.New()
-	gRepo.groups[id] = &ParamGroup{ID: id, GroupCode: "ADMIN_GRP", CatalogProtected: false}
+	gRepo.groups[id] = &CommandGroup{ID: id, GroupCode: "ADMIN_GRP", CatalogProtected: false}
 	gRepo.commandCountByGrp[id] = 3
 
 	err := svc.DeleteGroup(context.Background(), id)
@@ -288,7 +288,7 @@ func TestAdminService_DeleteGroup_NotEmpty(t *testing.T) {
 func TestAdminService_DeleteGroup_Happy(t *testing.T) {
 	svc, gRepo, _, _, _, audit := newAdminTestService()
 	id := uuid.New()
-	gRepo.groups[id] = &ParamGroup{ID: id, GroupCode: "ADMIN_GRP", CatalogProtected: false}
+	gRepo.groups[id] = &CommandGroup{ID: id, GroupCode: "ADMIN_GRP", CatalogProtected: false}
 
 	err := svc.DeleteGroup(context.Background(), id)
 	require.NoError(t, err)

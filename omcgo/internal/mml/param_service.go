@@ -22,7 +22,7 @@ func (s *ParamService) ListVersions(ctx context.Context) ([]ParamVersion, error)
 }
 
 // GetGroupTree returns a hierarchical group tree for a given version.
-func (s *ParamService) GetGroupTree(ctx context.Context, versionCode string) ([]ParamGroup, error) {
+func (s *ParamService) GetGroupTree(ctx context.Context, versionCode string) ([]CommandGroup, error) {
 	groups, err := s.repo.ListGroupsByVersion(ctx, versionCode)
 	if err != nil {
 		return nil, err
@@ -41,13 +41,13 @@ func (s *ParamService) SearchParams(ctx context.Context, filter ParamFilter) ([]
 }
 
 // buildGroupTree converts a flat list of groups into a tree structure.
-func buildGroupTree(groups []ParamGroup) []ParamGroup {
-	index := make(map[uuid.UUID]*ParamGroup, len(groups))
+func buildGroupTree(groups []CommandGroup) []CommandGroup {
+	index := make(map[uuid.UUID]*CommandGroup, len(groups))
 	for i := range groups {
 		index[groups[i].ID] = &groups[i]
 	}
 
-	var roots []ParamGroup
+	var roots []CommandGroup
 	for i := range groups {
 		g := &groups[i]
 		if g.ParentID == nil {

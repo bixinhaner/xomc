@@ -65,7 +65,7 @@ func (m *Metrics) recordSuccess(elapsed time.Duration, params, groups, commands 
 	m.Duration.Observe(elapsed.Seconds())
 	m.Total.WithLabelValues("success", "all").Inc()
 	m.Rows.WithLabelValues("mml_params").Set(float64(params))
-	m.Rows.WithLabelValues("mml_param_groups").Set(float64(groups))
+	m.Rows.WithLabelValues("mml_command_groups").Set(float64(groups))
 	m.Rows.WithLabelValues("mml_commands").Set(float64(commands))
 }
 

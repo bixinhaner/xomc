@@ -30,7 +30,7 @@ package mmlstandardloader
 //
 // 关键字段含义：
 //   - version/carrier/network_type — 拼成 mml_param_versions.version_code（"cmcc-tdlte-v2.3"）
-//   - groups[].code — 18 个一级分组 code（SA…SR），落 mml_param_groups.chapter_code/group_code
+//   - groups[].code — 18 个一级分组 code（SA…SR），落 mml_command_groups.chapter_code/group_code
 //   - groups[].commands[].object_path — TR-181 容器路径，包含 .{i}. 占位符；派生命令的锚点
 //   - groups[].commands[].non_creatable — 命令级 ADD/RMV 抑制位
 //   - groups[].commands[].params[].access — "R" / "RW"（=> standard_params.access "READ_ONLY"/"READ_WRITE"

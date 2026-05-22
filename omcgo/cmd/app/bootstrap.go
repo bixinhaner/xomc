@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 
-	"github.com/omcgo/omcgo/internal/config/parammodel/mmlstandardloader"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/carrier"
 	"github.com/omcgo/omcgo/internal/core/carrier/cmcc"
@@ -51,12 +50,10 @@ func initApp(ctx context.Context, cfg *appconfig.AppConfig) (*appInfra, error) {
 	}
 	inf.CreateEventBus()
 
-	// MML seed 数据自动导入：将嵌入的命令树 seed（18分组、190命令）UPSERT 到数据库。
-	// soft failure：导入失败仅记录 warn，不阻止服务启动。
-	if err := mmlstandardloader.ImportEmbeddedSeed(ctx, inf.PgPool, inf.Logger); err != nil {
-		inf.Logger.Warn("MML seed import failed (non-fatal, service continues)",
-			zap.Error(err))
-	}
+	// MML 命令树 seed 数据不再在应用启动时注入：
+	// 改由 Goose seed 迁移文件 migrations/seed/000152_cmcc_tdlte_v23_mml_commands.sql
+	// 在 docker compose 启动时由 migrate-seed 服务统一执行，与项目迁移路径对齐。
+	// SQL 文件则由 ./cmd/tools/gen_seed_sql/ 从同一份 JSON seed 生成。
 
 	app := &appInfra{Infra: inf}
 	app.registerCarriers()

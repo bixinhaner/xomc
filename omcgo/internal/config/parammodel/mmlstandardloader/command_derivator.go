@@ -53,7 +53,7 @@ type DerivedCommand struct {
 	NameEn        string      // "List Device Basic Info"（拷贝中文 — 暂无英文 seed）
 	LogicalNameZh string      // "设备基本信息" — 命令树叶子标签来源
 	LogicalNameEn string      // 同上 en（暂用 ASCII 化的 logical_code）
-	GroupCode     string      // SeedGroup.Code（SA…SR）— 用于 mml_param_groups 关联
+	GroupCode     string      // SeedGroup.Code（SA…SR）— 用于 mml_command_groups 关联
 	ObjectPath    string      // 原 seed object_path（含 .{i}.），用于 standard_params object 行 + sub_field 关联
 	RPCMethod     string      // GetParameterValues / SetParameterValues / AddObject / DeleteObject
 	TargetObject  string      // ADD/RMV 时 = strip{i}(ObjectPath)；LST/MOD 时空

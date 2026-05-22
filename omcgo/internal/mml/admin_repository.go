@@ -20,7 +20,7 @@ import (
 //
 // 5 interfaces (按资源类型分组):
 //   - SubFieldRepository       — mml_command_sub_fields CRUD
-//   - AdminGroupRepository     — mml_param_groups admin CRUD
+//   - AdminGroupRepository     — mml_command_groups admin CRUD
 //   - AdminCommandRepository   — mml_commands admin CRUD（GetByID 复用 PgCommandRepository）
 //   - AdminParamRepository     — mml_params admin CRUD + List
 //
@@ -313,16 +313,16 @@ func (r *PgSubFieldRepository) CountByParam(ctx context.Context, paramID uuid.UU
 }
 
 // ============================================================
-// AdminGroupRepository (mml_param_groups)
+// AdminGroupRepository (mml_command_groups)
 // ============================================================
 
-// AdminGroupRepository 提供 mml_param_groups 的 admin CRUD。
+// AdminGroupRepository 提供 mml_command_groups 的 admin CRUD。
 // Console 端读复用 ParamRepository.ListGroups；本接口承担写路径。
 type AdminGroupRepository interface {
-	Create(ctx context.Context, g *ParamGroup) error
-	Update(ctx context.Context, g *ParamGroup) error
+	Create(ctx context.Context, g *CommandGroup) error
+	Update(ctx context.Context, g *CommandGroup) error
 	Delete(ctx context.Context, id uuid.UUID) error
-	GetByID(ctx context.Context, id uuid.UUID) (*ParamGroup, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*CommandGroup, error)
 	CountCommandsByGroup(ctx context.Context, groupID uuid.UUID) (int64, error)
 }
 
@@ -338,7 +338,7 @@ func NewPgAdminGroupRepository(pool *pgxpool.Pool) *PgAdminGroupRepository {
 
 var _ AdminGroupRepository = (*PgAdminGroupRepository)(nil)
 
-func (r *PgAdminGroupRepository) Create(ctx context.Context, g *ParamGroup) error {
+func (r *PgAdminGroupRepository) Create(ctx context.Context, g *CommandGroup) error {
 	if g.ID == uuid.Nil {
 		g.ID = uuid.New()
 	}
@@ -346,7 +346,7 @@ func (r *PgAdminGroupRepository) Create(ctx context.Context, g *ParamGroup) erro
 		g.Source = SourceAdmin
 	}
 	const sqlText = `
-INSERT INTO mml_param_groups (
+INSERT INTO mml_command_groups (
     id, group_code, group_name_zh, group_name_en, param_version,
     display_order, name_i18n, source, catalog_protected
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
@@ -360,9 +360,9 @@ INSERT INTO mml_param_groups (
 	return nil
 }
 
-func (r *PgAdminGroupRepository) Update(ctx context.Context, g *ParamGroup) error {
+func (r *PgAdminGroupRepository) Update(ctx context.Context, g *CommandGroup) error {
 	const sqlText = `
-UPDATE mml_param_groups SET
+UPDATE mml_command_groups SET
     group_name_zh = $2,
     group_name_en = $3,
     display_order = $4,
@@ -383,7 +383,7 @@ WHERE id = $1`
 }
 
 func (r *PgAdminGroupRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	const sqlText = `DELETE FROM mml_param_groups WHERE id = $1`
+	const sqlText = `DELETE FROM mml_command_groups WHERE id = $1`
 	tag, err := r.pool.Exec(ctx, sqlText, id)
 	if err != nil {
 		return fmt.Errorf("delete group: %w", err)
@@ -394,12 +394,12 @@ func (r *PgAdminGroupRepository) Delete(ctx context.Context, id uuid.UUID) error
 	return nil
 }
 
-func (r *PgAdminGroupRepository) GetByID(ctx context.Context, id uuid.UUID) (*ParamGroup, error) {
+func (r *PgAdminGroupRepository) GetByID(ctx context.Context, id uuid.UUID) (*CommandGroup, error) {
 	const sqlText = `
 SELECT id, group_code, group_name_zh, group_name_en, param_version,
        display_order, source, catalog_protected
-FROM mml_param_groups WHERE id = $1`
-	g := &ParamGroup{}
+FROM mml_command_groups WHERE id = $1`
+	g := &CommandGroup{}
 	if err := r.pool.QueryRow(ctx, sqlText, id).Scan(
 		&g.ID, &g.GroupCode, &g.GroupNameZh, &g.GroupNameEn, &g.ParamVersion,
 		&g.DisplayOrder, &g.Source, &g.CatalogProtected,
@@ -810,7 +810,7 @@ func (r *PgAdminParamRepository) List(ctx context.Context, f AdminParamFilter) (
 
 // ListReferences 反向查询：返回引用该 standard_path 的命令列表（T-0131 admin Tab 3 反向查抽屉用）。
 // 入参 paramID 在 migration 000113 后语义切换为 standard_params.id。
-// JOIN 链：mml_command_sub_fields → mml_commands → mml_param_groups。
+// JOIN 链：mml_command_sub_fields → mml_commands → mml_command_groups。
 // ORDER BY command_code 保持稳定顺序便于 UI 渲染。
 func (r *PgAdminParamRepository) ListReferences(ctx context.Context, paramID uuid.UUID) ([]ParamReference, error) {
 	const sqlText = `
@@ -818,7 +818,7 @@ SELECT c.id, c.command_code, c.logical_code, c.operation_type,
        c.command_name_i18n, g.id, g.path
 FROM mml_command_sub_fields sf
 JOIN mml_commands c       ON c.id = sf.command_id
-JOIN mml_param_groups g   ON g.id = c.group_id
+JOIN mml_command_groups g   ON g.id = c.group_id
 WHERE sf.standard_path_id = $1
 ORDER BY c.command_code`
 	rows, err := r.pool.Query(ctx, sqlText, paramID)

@@ -16,7 +16,7 @@ import (
 // ParamRepository provides read access to the parameter library.
 type ParamRepository interface {
 	ListVersions(ctx context.Context) ([]ParamVersion, error)
-	ListGroupsByVersion(ctx context.Context, versionCode string) ([]ParamGroup, error)
+	ListGroupsByVersion(ctx context.Context, versionCode string) ([]CommandGroup, error)
 	ListParamsByGroup(ctx context.Context, groupID uuid.UUID) ([]Param, error)
 	SearchParams(ctx context.Context, filter ParamFilter) ([]Param, error)
 }
@@ -96,9 +96,9 @@ func (r *PgParamRepository) ListVersions(ctx context.Context) ([]ParamVersion, e
 	return result, rows.Err()
 }
 
-func (r *PgParamRepository) ListGroupsByVersion(ctx context.Context, versionCode string) ([]ParamGroup, error) {
+func (r *PgParamRepository) ListGroupsByVersion(ctx context.Context, versionCode string) ([]CommandGroup, error) {
 	query, args, err := storage.Psql.Select(paramGroupColumns...).
-		From("mml_param_groups").
+		From("mml_command_groups").
 		Where(sq.Eq{"param_version": versionCode, "is_active": true}).
 		OrderBy("display_order", "group_code").
 		ToSql()
@@ -112,10 +112,10 @@ func (r *PgParamRepository) ListGroupsByVersion(ctx context.Context, versionCode
 	}
 	defer rows.Close()
 
-	var result []ParamGroup
+	var result []CommandGroup
 	for rows.Next() {
-		var g ParamGroup
-		if err := scanParamGroup(rows, &g); err != nil {
+		var g CommandGroup
+		if err := scanCommandGroup(rows, &g); err != nil {
 			return nil, fmt.Errorf("scan param group: %w", err)
 		}
 		result = append(result, g)
@@ -178,7 +178,7 @@ func (r *PgParamRepository) SearchParams(ctx context.Context, filter ParamFilter
 
 // ---- scan helpers ----
 
-func scanParamGroup(rows pgx.Rows, g *ParamGroup) error {
+func scanCommandGroup(rows pgx.Rows, g *CommandGroup) error {
 	return rows.Scan(
 		&g.ID, &g.GroupCode, &g.GroupNameZh, &g.GroupNameEn,
 		&g.ParentID, &g.Level,

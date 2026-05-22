@@ -15,7 +15,7 @@ import (
 //
 // 设计依据：docs/design/mml-restore-old-interaction-plan-20260514.md §N.2.1
 //
-// 单 SQL JOIN 抓 mml_param_groups + mml_commands；Go 侧按 LTREE path 长度分层组装树。
+// 单 SQL JOIN 抓 mml_command_groups + mml_commands；Go 侧按 LTREE path 长度分层组装树。
 //
 // 老 OMC 实测命令树（playwright BSC Configuration）：
 //   MML List
@@ -362,7 +362,7 @@ func (r *PgGroupTreeRepository) queryGroupsAndCommands(ctx context.Context, root
 	// 改 Go 层 Scan 字段为 *bool 引发的连锁改造。
 	// COALESCE(g.chapter_code, '') 把 NULL 兜底为空串，方便 Scan 进 string；
 	// 老 catalog 行没有章节码，前端渲染时按 "" 视为"未分章"统一末位排序。
-	// v2.4 P3：family_code / family_name_zh 持久化在 mml_param_groups（migration 000141）。
+	// v2.4 P3：family_code / family_name_zh 持久化在 mml_command_groups（migration 000141）。
 	// SELECT 加 COALESCE 兜底，处理迁移未跑或历史 NULL 行（理论上 NOT NULL DEFAULT ''，
 	// 但 COALESCE 双保险）。BuildTree post-process 的 attachFamily 仍对空值做 fallback。
 	const baseSQL = `
@@ -381,7 +381,7 @@ SELECT
     COALESCE(c.catalog_protected, false) AS cmd_catalog_protected,
     -- v2 §R-4.1.1：每层 {i} 占位符的取值范围 metadata，v1 catalog 列为 NULL → 兜底 '[]'
     COALESCE(c.instance_range_meta, '[]'::jsonb) AS instance_range_meta
-FROM mml_param_groups g
+FROM mml_command_groups g
 LEFT JOIN mml_commands c ON c.group_id = g.id
 WHERE g.path IS NOT NULL
 %s

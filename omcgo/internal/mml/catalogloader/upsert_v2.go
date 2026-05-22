@@ -118,7 +118,7 @@ func (l *Loader) upsertCatalogV2(ctx context.Context, cat *Catalog) (*upsertSumm
 	return s, nil
 }
 
-// upsertChapterGroupV2 UPSERT 一个 chapter 分组到 mml_param_groups。
+// upsertChapterGroupV2 UPSERT 一个 chapter 分组到 mml_command_groups。
 //
 // group_code / object_path_template 都用 "chapter:SA" 形式（§R-1 namespace），
 // 与 v1 的 "Device.X.*" 共存于同一列但无 key 冲撞。
@@ -129,12 +129,12 @@ func upsertChapterGroupV2(ctx context.Context, tx pgx.Tx, carrier, tech string, 
 	nameEN := g.NameI18n["en-US"]
 
 	const selectSQL = `
-		SELECT id FROM mml_param_groups
+		SELECT id FROM mml_command_groups
 		WHERE object_path_template = $1 AND deleted_at IS NULL
 		LIMIT 1;
 	`
 	const updateSQL = `
-		UPDATE mml_param_groups SET
+		UPDATE mml_command_groups SET
 			group_name_zh = $2,
 			group_name_en = $3,
 			name_i18n = $4::jsonb,
@@ -148,7 +148,7 @@ func upsertChapterGroupV2(ctx context.Context, tx pgx.Tx, carrier, tech string, 
 	`
 	// path LTREE：v2 chapter 单段，例 "chapter_SA"。归一化 ":" → "_"。
 	const insertSQL = `
-		INSERT INTO mml_param_groups (
+		INSERT INTO mml_command_groups (
 			id, group_code, group_name_zh, group_name_en, name_i18n,
 			param_version, display_order, source, catalog_protected,
 			object_path_template, chapter_code,
