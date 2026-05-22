@@ -296,6 +296,11 @@ func (s *ConsoleService) resolveStatement(ctx context.Context, stmt Statement) (
 		if cmd == nil {
 			return nil, nil, ErrCommandNotFound
 		}
+		// 见 attachParams 文档：buildLSTParamRefs/buildMODParamRefs 依赖 cmd.Params
+		// 提供 Tr069Path；缺失会让 BuildTR069Params 拿到空 path 失败。
+		if err := s.attachParams(ctx, cmd); err != nil {
+			return nil, nil, err
+		}
 		subFields, err := s.subFieldRepo.ListByCommand(ctx, cmd.ID)
 		if err != nil {
 			return nil, nil, fmt.Errorf("list sub_fields: %w", err)

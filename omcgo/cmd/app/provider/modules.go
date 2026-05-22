@@ -772,6 +772,9 @@ func initMiscModules(c *Container) error {
 	mmlConsoleSvc.SetFlatTreeRepo(mml.NewPgFlatGroupTreeRepository(c.PgPool))
 	// Bundle C: 装配命令搜索仓储（GET /mml/commands/search）。
 	mmlConsoleSvc.SetSearchRepo(mml.NewPgSearchRepository(c.PgPool))
+	// 修复 2026-05-22：装配 cmdParamRepo 让 cmd.Params 在 GetByID 后被 enrichment
+	// 填上（旧版漏装 → execute-statements-structured 全部 path 误报 R-9.2 unknown）。
+	mmlConsoleSvc.SetCmdParamRepo(mmlCmdParamRepo)
 	// R-8.5: 独立 CompatibilityService（不耦合 ConsoleService 签名 / 测试）。
 	// 直接走 devices LEFT JOIN products 反查 param_model_id，
 	// 绕过 ProductRegistry.MatchProductClass 全局正则（字典 product_class

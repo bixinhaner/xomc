@@ -242,6 +242,70 @@ func TestExecuteStructured_DelegatesToExecuteStatements(t *testing.T) {
 	assert.Equal(t, "10.0.0.1", params["ADDR"])
 }
 
+// 2026-05-22 防回归：模拟 PgCommandRepository.GetByID 返回 cmd.Params=nil 的
+// 生产场景，验证 attachParams (via SetCmdParamRepo) 能填上 Params 让 path 匹配成功。
+//
+// 历史 bug：ConsoleService 漏装 cmdParamRepo → cmd.Params 永远 nil →
+// buildPathToSubFieldIndex 返空 → 全部 path 误报 R-9.2 unknown_paths。
+func TestStructuredToStatement_CmdParamRepoEnrichesNilParams(t *testing.T) {
+	fx := newStructuredFixture()
+	// 模拟生产：commandRepo 返回的 cmd.Params 为 nil（PgCommandRepository.GetByID
+	// 不查 params 列）。clone cmd 以避免修改 fixture 状态影响其他 case。
+	cmdNoParams := *fx.cmd
+	cmdNoParams.Params = nil
+
+	cmdRepo := newFakeCommandRepo()
+	cmdRepo.byID[fx.cmd.ID] = &cmdNoParams
+	sfRepo := newFakeSubFieldRepo()
+	sfRepo.byCommandList[fx.cmd.ID] = fx.subFields
+	svc := NewConsoleService(&fakeGroupTreeRepo{}, sfRepo, cmdRepo, nil)
+	// 装上 cmdParamRepo enrichment（这是 modules.go 在生产应做的，旧版漏装）
+	svc.SetCmdParamRepo(&stubCmdParamRepo{refs: map[uuid.UUID][]MMLParamRef{
+		fx.cmd.ID: {
+			{ID: fx.pIDs[0], ParamCode: "ADDR", Tr069Path: "Device.IP.Address", ValueType: "string"},
+			{ID: fx.pIDs[1], ParamCode: "MASK", Tr069Path: "Device.IP.Netmask", ValueType: "string"},
+			{ID: fx.pIDs[2], ParamCode: "ENBL", Tr069Path: "Device.IP.Enable", ValueType: "boolean"},
+		},
+	}})
+
+	stmt, err := svc.StructuredToStatement(context.Background(), StructuredStatement{
+		CommandID:     fx.cmd.ID,
+		OperationType: "LST",
+		Paths: []string{
+			"Device.IP.Address",
+			"Device.IP.Enable",
+		},
+	})
+	require.NoError(t, err, "attachParams 应该让 path 命中而非误报 unknown_paths")
+	require.Len(t, stmt.SelectedSubFieldIDs, 2)
+}
+
+// 2026-05-22 防回归：cmdParamRepo 未装配且 cmd.Params 为空时，attachParams 短路
+// 不阻塞调用 — 但 buildPathToSubFieldIndex 拿不到映射会照旧返 unknown_paths。
+// 此用例确认短路语义（保留旧部署退化兜底），不掩盖错误（仍报 R-9.2）。
+func TestStructuredToStatement_NoCmdParamRepoFallsBackToUnknown(t *testing.T) {
+	fx := newStructuredFixture()
+	cmdNoParams := *fx.cmd
+	cmdNoParams.Params = nil
+
+	cmdRepo := newFakeCommandRepo()
+	cmdRepo.byID[fx.cmd.ID] = &cmdNoParams
+	sfRepo := newFakeSubFieldRepo()
+	sfRepo.byCommandList[fx.cmd.ID] = fx.subFields
+	svc := NewConsoleService(&fakeGroupTreeRepo{}, sfRepo, cmdRepo, nil)
+	// 不调 SetCmdParamRepo — 模拟旧部署 / 测试环境
+
+	_, err := svc.StructuredToStatement(context.Background(), StructuredStatement{
+		CommandID:     fx.cmd.ID,
+		OperationType: "LST",
+		Paths:         []string{"Device.IP.Address"},
+	})
+	require.Error(t, err)
+	var unk *ErrUnknownPaths
+	require.True(t, errors.As(err, &unk),
+		"未装 cmdParamRepo 时仍走旧逻辑报 unknown_paths（不掩盖错误）")
+}
+
 func TestExecuteStructured_StatementErrorWrappedWithIndex(t *testing.T) {
 	fx := newStructuredFixture()
 	svc := fx.install()

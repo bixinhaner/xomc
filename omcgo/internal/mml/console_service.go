@@ -27,6 +27,9 @@ type ConsoleService struct {
 	treeRepo     GroupTreeRepository
 	subFieldRepo SubFieldRepository
 	commandRepo  CommandRepository
+	// cmdParamRepo 用于 cmd.Params enrichment（commandRepo.GetByID 不查 params 列）。
+	// 未装配时 attachParams 短路（保留旧行为 / 兼容测试 fixture 直接预填 cmd.Params）。
+	cmdParamRepo CommandParamRepository
 	// flatTreeRepo 是 Task #4 新增的扁平命令树仓储，nil 表示未装配
 	// （老测试以及 v1 部署路径保持原戉行为）。BuildFlatGroupTree 未装配时
 	// 返回明确错误，handler 映射为 503。
@@ -68,6 +71,37 @@ func (s *ConsoleService) SetFlatTreeRepo(repo FlatGroupTreeRepository) {
 // SetSearchRepo 装配 Bundle C 命令搜索仓储；理由同 SetFlatTreeRepo。
 func (s *ConsoleService) SetSearchRepo(repo SearchRepository) {
 	s.searchRepo = repo
+}
+
+// SetCmdParamRepo 装配命令参数 enrichment 仓储；理由同 SetFlatTreeRepo。
+//
+// 修复 2026-05-22：旧版 ConsoleService 直接调 commandRepo.GetByID 拿 cmd，
+// 但 PgCommandRepository.GetByID 不查 params 列，cmd.Params 永远是 nil；
+// 下游 StructuredToStatement / buildLSTParamRefs / buildMODParamRefs 全部依赖
+// cmd.Params → standardPath 反查全失败 → 误报 R-9.2 unknown_paths。
+// 装配本 repo 后，attachParams 在 GetByID 之后填上 cmd.Params。
+func (s *ConsoleService) SetCmdParamRepo(repo CommandParamRepository) {
+	s.cmdParamRepo = repo
+}
+
+// attachParams 把 cmd.Params 从 cmdParamRepo 填上（enrichment）。
+//
+// 短路条件（任一满足即 no-op）：
+//   - cmd 为 nil
+//   - cmd.Params 已挂载（测试 fixture 直接预填的兼容路径）
+//   - cmdParamRepo 未装配（保留 ConsoleService 老部署的退化兜底行为）
+func (s *ConsoleService) attachParams(ctx context.Context, cmd *MMLCommand) error {
+	if cmd == nil || len(cmd.Params) > 0 || s.cmdParamRepo == nil {
+		return nil
+	}
+	paramMap, err := s.cmdParamRepo.ListByCommandIDs(ctx, []uuid.UUID{cmd.ID})
+	if err != nil {
+		return fmt.Errorf("attach command %s params: %w", cmd.ID, err)
+	}
+	if params, ok := paramMap[cmd.ID]; ok {
+		cmd.Params = params
+	}
+	return nil
 }
 
 // SearchCommandDTO 是 GET /mml/commands/search 响应单元（lang 派生 + 中文 i18n 解析）。
@@ -289,6 +323,11 @@ func (s *ConsoleService) LookupByLogicalCode(ctx context.Context, op, logicalCod
 	}
 	if cmd.OperationType != op {
 		return nil, nil, ErrCommandNotFound
+	}
+	// 见 attachParams 文档：parser → resolveStatement → buildLSTParamRefs 整条链
+	// 都依赖 cmd.Params，缺失会让 BuildTR069Params 拿到空 Tr069Path 失败。
+	if err := s.attachParams(ctx, cmd); err != nil {
+		return nil, nil, fmt.Errorf("attach params: %w", err)
 	}
 
 	subFields, err := s.subFieldRepo.ListByCommand(ctx, cmd.ID)

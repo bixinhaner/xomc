@@ -99,6 +99,11 @@ func (s *ConsoleService) StructuredToStatement(ctx context.Context, ss Structure
 	if cmd == nil {
 		return Statement{}, ErrCommandNotFound
 	}
+	// commandRepo.GetByID 不查 params 列，必须显式 enrichment 才能拿到
+	// (ParamID → Tr069Path) 反查表，否则下方 buildPathToSubFieldIndex 全返空 → R-9.2 误报。
+	if err := s.attachParams(ctx, cmd); err != nil {
+		return Statement{}, err
+	}
 
 	subFields, err := s.subFieldRepo.ListByCommand(ctx, ss.CommandID)
 	if err != nil {
