@@ -36,14 +36,8 @@ type upsertSummaryV2 struct {
 //     mml_catalog_link_health（§R-2.5.2 失败清单）；ADD/RMV 父级实例路径
 //     `Device.X.{i}.` 不算 standard_params 行，跳过检查。
 //
-// 兼容期策略：v1 standard 行不被本函数触动。P2.c cutover 时由 Loader 主入口
-// 决定是调用 v1 还是 v2 upsert，并在 v2 启用后单独清理 v1 standard 行。
-//
 // 事务语义：任何错误回滚整个事务，DB 保持原状（无半成品）。
 func (l *Loader) upsertCatalogV2(ctx context.Context, cat *Catalog) (*upsertSummaryV2, error) {
-	if !cat.IsV2() {
-		return nil, fmt.Errorf("upsertCatalogV2: catalog schemaVersion=%q, expected 'v2'", cat.SchemaVersion)
-	}
 	s := &upsertSummaryV2{}
 
 	tx, err := l.db.Begin(ctx)

@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"go.uber.org/zap"
@@ -60,22 +59,12 @@ func initDictLoadModule(c *Container) error {
 
 	// MML 控制台 v2.3 catalog Loader（dictloader 模式第 5 个 Loader）
 	// 方案：docs/design/mml-console-cmcc-tdlte-v23-adjustment-plan-20260519.md §6.7
+	// 仅 v2（spec §R-1：18 章节顶层 + chapter:* group_code + tree_node_refs + link_health）。
 	mmlCatalogDir := c.Cfg.DictLoader.MMLCatalog.Directory
 	if mmlCatalogDir == "" {
 		mmlCatalogDir = catalogloader.DefaultDirectory
 	}
-	// MML_V2_SCHEMA=true 切到 v2 路径（spec v2.3 §R-1：18 章节顶层 + chapter:* group_code +
-	// tree_node_refs + link_health）。默认不设，保持 v1 行为。注意：此 env 同时驱动
-	// modules.go 的 mml.WithV2Mode（BuildTree 过滤），两处必须共用同一 toggle，
-	// 否则 Loader 写 v2 行而 BuildTree 仍按 v1 视图过滤，UI 会看到混乱。
-	mmlUseV2Schema := os.Getenv("MML_V2_SCHEMA") == "true"
-	c.MMLV2Schema = mmlUseV2Schema
-	mmlLoaderOpts := []catalogloader.Option{}
-	if mmlUseV2Schema {
-		mmlLoaderOpts = append(mmlLoaderOpts, catalogloader.WithV2Schema(true))
-		logger.Info("mml-catalog: v2 schema ENABLED (MML_V2_SCHEMA=true)")
-	}
-	mmlCatalogLoader := catalogloader.NewLoader(c.PgPool, filepath.Join(baseDir, mmlCatalogDir), logger, mmlLoaderOpts...)
+	mmlCatalogLoader := catalogloader.NewLoader(c.PgPool, filepath.Join(baseDir, mmlCatalogDir), logger)
 	c.MMLCatalogLoader = mmlCatalogLoader
 	// T-0123-P0：mmlstandardloader 启动期注册下线。
 	// 改为一次性 SQL seed 导入（migrations/seed/000096_mml_standard_params_import.sql，

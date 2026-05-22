@@ -275,6 +275,33 @@ ORDER BY g.chapter_code,
 	return out, nil
 }
 
+// chapterMetadata: 18 个 SA-SR 章节的中文展示名，与 spec doc 主表对齐。
+// 来源：omcgo/规范/移动/南向数据模型/cmcc-tdlte-southbound-data-model-v2.3.md
+// "参数管理类别分组清单（派生）" 章节主表。
+var chapterMetadata = map[string]struct {
+	ObjRoot string
+	NameZH  string
+}{
+	"SA": {"DeviceInfo", "设备信息参数管理"},
+	"SB": {"SoftwareCtrl", "软件版本参数管理"},
+	"SC": {"ManagementServer", "基站网管参数管理"},
+	"SD": {"FaultMgmt", "告警参数管理"},
+	"SE": {"DeviceLogMgmt", "日志参数管理"},
+	"SF": {"Services.FAPService", "小区服务参数管理"},
+	"SG": {"Services.FAPService.{i}.SCTP.Transport", "SCTP参数管理"},
+	"SH": {"Services.FAPService.{i}.CellConfig.LTE.RAN", "RAN协议栈参数"},
+	"SI": {"Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList", "邻区参数管理"},
+	"SJ": {"Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility", "移动性参数管理"},
+	"SK": {"Services.FAPService.{i}.FAPControl.LTE.SelfConfig.SONConfigParam", "SON参数管理"},
+	"SL": {"WANDevice", "WAN口配置参数管理"},
+	"SM": {"Ipsec", "IPsec参数管理"},
+	"SN": {"Time", "时间服务器参数管理"},
+	"SO": {"FAP.GPS", "GPS信息参数管理"},
+	"SP": {"FAP.MRMgmt", "MR参数管理"},
+	"SQ": {"FAP.PerfMgmt", "性能参数管理"},
+	"SR": {"ENanocell", "扩展型一体化皮基站参数"},
+}
+
 // resolveChapterName 把章节码翻译为纯中文名。优先取 chapterMetadata（与 v2.3
 // spec 主表一致）；表外 code 退化返回 code 自身。
 func resolveChapterName(code string) string {

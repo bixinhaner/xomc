@@ -63,12 +63,6 @@ type Container struct {
 	// 用于 admin REST API /api/v1/mml/catalog/{info,reload} 的引用
 	MMLCatalogLoader *catalogloader.Loader
 
-	// MMLV2Schema 当 true 时启用 spec v2.3 (chapter 顶层) 全链路。
-	// 由 env MML_V2_SCHEMA=true 驱动，在 dictload provider 初始化时读取。
-	// 同一 toggle 同时驱动 catalogloader.WithV2Schema (写链) 与 mml.WithV2Mode
-	// (读链)，确保 Loader 与 BuildTree 路径一致。
-	MMLV2Schema bool
-
 	// ProductRegistry 模块设置（T-0098 P2-01）
 	ProductRegistry *product.Registry
 

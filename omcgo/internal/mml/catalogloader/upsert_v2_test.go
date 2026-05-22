@@ -26,12 +26,3 @@ func TestNormalizeChapterLTreePath(t *testing.T) {
 	}
 }
 
-// TestUpsertCatalogV2_RequiresV2Schema 校验 v1 catalog 调用 v2 upsert 时 fail-fast。
-func TestUpsertCatalogV2_RequiresV2Schema(t *testing.T) {
-	l := &Loader{}
-	v1 := &Catalog{SpecVersion: "x", Carrier: "cmcc", Tech: "lte"} // 没有 schemaVersion
-	_, err := l.upsertCatalogV2(nil, v1)
-	if assert.Error(t, err) {
-		assert.Contains(t, err.Error(), "schemaVersion")
-	}
-}

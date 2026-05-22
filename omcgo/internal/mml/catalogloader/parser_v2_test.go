@@ -7,12 +7,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestParseV2_ProductionFile 用真实 P0 产物 cmcc-tdlte-v2.3.v2.json 跑端到端，
+// TestParseV2_ProductionFile 用真实 catalog 文件跑端到端，
 // 校验所有 v2 schema 校验通过、统计字段与 §R-2.4 命令中文名表一致。
 func TestParseV2_ProductionFile(t *testing.T) {
-	cat, err := ParseFile("../../../datamodels/mml-catalog/cmcc-tdlte-v2.3.v2.json")
+	cat, err := ParseFile("../../../datamodels/mml-catalog/cmcc-tdlte-v2.3.json")
 	require.NoError(t, err, "real v2 catalog should parse cleanly")
-	require.True(t, cat.IsV2(), "schemaVersion should mark v2")
 
 	assert.Equal(t, "cmcc-tdlte-v2.3", cat.SpecVersion)
 	assert.Equal(t, "v2", cat.SchemaVersion)
@@ -250,10 +249,3 @@ func TestParseV2_RejectDuplicateZhAcrossGroups(t *testing.T) {
 	assert.Contains(t, err.Error(), "撞名命令")
 }
 
-// TestParseV1Still 校验 v1 schema 文件继续工作（无 schemaVersion 字段）。
-func TestParseV1Still(t *testing.T) {
-	cat, err := ParseFile("../../../datamodels/mml-catalog/cmcc-tdlte-v2.3.json")
-	require.NoError(t, err, "legacy v1 catalog should still parse")
-	assert.False(t, cat.IsV2(), "v1 file must not be detected as v2")
-	assert.NotEmpty(t, cat.Groups)
-}
