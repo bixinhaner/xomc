@@ -66,6 +66,12 @@ func initDictLoadModule(c *Container) error {
 	}
 	mmlCatalogLoader := catalogloader.NewLoader(c.PgPool, filepath.Join(baseDir, mmlCatalogDir), logger)
 	c.MMLCatalogLoader = mmlCatalogLoader
+	// v2.3 catalog 单源化：seed/000152 + seed/000155 已是唯一来源（version_code=
+	// cmcc-td-lte-v2.3, group_code=chapter:SA-SR）。Loader 旧逻辑会平行注入
+	// cmcc-lte-v2.3 → 与 seed 撕裂（旧 catalog 无 sub_fields → 前端命令面板空）。
+	// 启动期自动注入与 dictloader Registry 注册都跳过，admin API 也不再触发自动加载；
+	// 实例构造保留以兜底未来需要时手动调 LoadOnce。
+	_ = mmlCatalogLoader
 	// T-0123-P0：mmlstandardloader 启动期注册下线。
 	// 改为一次性 SQL seed 导入（migrations/seed/000096_mml_standard_params_import.sql，
 	// 由 `omcctl mml import-standard-xml` 离线生成）。
@@ -74,7 +80,8 @@ func initDictLoadModule(c *Container) error {
 	// 关联：docs/design/mml-restore-old-interaction-plan-20260514.md §M.6 / R-206 mitigation
 	_ = mmlstandardloader.LoaderName // 显式引用防止 import 被 goimports 移除
 
-	for _, ld := range []dictloader.Loader{paramLoader, indicatorLoader, alarmLoader, productLoader, quickSettingsLoader, mmlCatalogLoader} {
+	// mmlCatalogLoader 从 Registry 移除（v2.3 catalog 单源化 — 见上方注释 + seed/000155）。
+	for _, ld := range []dictloader.Loader{paramLoader, indicatorLoader, alarmLoader, productLoader, quickSettingsLoader} {
 		if err := registry.Register(ld); err != nil {
 			return fmt.Errorf("register %s loader: %w", ld.Name(), err)
 		}
@@ -137,17 +144,8 @@ func initDictLoadModule(c *Container) error {
 			zap.Error(err))
 		return err
 	})
-	g.Go(func() error {
-		t0 := time.Now()
-		rep, err := mmlCatalogLoader.LoadOnce(gctx)
-		logger.Info("mml-catalog load done",
-			zap.Int("rows", rep.RowsAffected),
-			zap.Int("files_loaded", rep.FilesLoaded),
-			zap.Int("non_fatal_errors", len(rep.Errors)),
-			zap.Duration("duration", time.Since(t0)),
-			zap.Error(err))
-		return err
-	})
+	// v2.3 catalog 单源化：mml-catalog Loader 启动注入已下线，
+	// 数据由 seed/000152 + seed/000155 唯一注入，避免与 Loader 并行撕裂。
 	// T-0123-P0：mml-standard 启动期 LoadOnce 下线。
 	// MML 命令字典通过 migrations/seed/000096_mml_standard_params_import.sql 一次性 DB 导入；
 	// 后续 admin UI 维护。详 docs/design/mml-restore-old-interaction-plan-20260514.md §M.6。

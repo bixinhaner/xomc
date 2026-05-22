@@ -111,14 +111,19 @@ SET version_name  = EXCLUDED.version_name,
 ) VALUES`)
 	for i, g := range seed.Groups {
 		nameJSON := jsonI18n(g.Name, g.Name)
+		// spec §R-1：一级分组稳定标识 group_code=chapter:<SA-SR>；
+		// ltree path 不允许冒号，path 形式 chapter_<X>。chapter_code 列仍保留
+		// 裸 SA/SB/.../SR（机器排序键 + admin 视图）。
+		groupCode := "chapter:" + g.Code
+		pathLtree := "chapter_" + g.Code
 		comma := ","
 		if i == len(seed.Groups)-1 {
 			comma = ""
 		}
 		fmt.Fprintf(w,
 			"    (gen_random_uuid(), %s, %s, %s, %s::ltree, %s::jsonb, %s, %d, true, %s, true, %s)%s\n",
-			sqlStr(g.Code), sqlStr(g.Name), sqlStr(g.Name),
-			sqlStr(g.Code), sqlStr(string(nameJSON)), sqlStr(versionCode),
+			sqlStr(groupCode), sqlStr(g.Name), sqlStr(g.Name),
+			sqlStr(pathLtree), sqlStr(string(nameJSON)), sqlStr(versionCode),
 			i,
 			sqlStr(sourceTag), sqlStr(g.Code), comma,
 		)
@@ -165,9 +170,10 @@ SET group_name_zh     = EXCLUDED.group_name_zh,
 		category := mmlstandardloader.CategorizePath(c.ObjectPath)
 		nameJSON := jsonI18n(c.NameZh, c.NameEn)
 		logicalNameJSON := jsonI18n(c.LogicalNameZh, c.LogicalNameEn)
+		// commands.group_id FK 走 chapter: 前缀的 group_code（spec §R-1）。
 		groupIDExpr := fmt.Sprintf(
 			"(SELECT id FROM mml_command_groups WHERE param_version=%s AND group_code=%s)",
-			sqlStr(versionCode), sqlStr(c.GroupCode),
+			sqlStr(versionCode), sqlStr("chapter:"+c.GroupCode),
 		)
 
 		comma := ","
