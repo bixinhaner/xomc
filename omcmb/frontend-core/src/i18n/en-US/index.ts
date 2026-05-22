@@ -4614,6 +4614,21 @@ const messages: Record<string, string> = {
   'systemLicense.history.replacedAt':               'Replaced At',
   'systemLicense.history.signature':                'Signature',
   'systemLicense.history.empty':                    'No historical licenses',
+
+  // T-0164-P2 / G2 PM Retention Policy (System Config Page)
+  'pmRetention.title':                              'PM Data Retention Policy',
+  'pmRetention.description':                        'Configure retention days for 5-level PM time series granularities. Changes take effect immediately.',
+  'pmRetention.raw_15min_days':                     '15min Raw Retention (days)',
+  'pmRetention.hourly_days':                        'Hourly Aggregate Retention (days)',
+  'pmRetention.daily_days':                         'Daily Aggregate Retention (days)',
+  'pmRetention.weekly_days':                        'Weekly Aggregate Retention (days)',
+  'pmRetention.monthly_days':                       'Monthly Aggregate Retention (days)',
+  'pmRetention.unit.days':                          'days',
+  'pmRetention.save':                               'Save',
+  'pmRetention.reset':                              'Reset to default',
+  'pmRetention.validate.tooShort':                  'Retention days must be at least 1 day',
+  'pmRetention.validate.tooLong':                   'Retention days must be at most 3650 days (10 years)',
+  'pmRetention.save.success':                       'Saved successfully; new retention policy is effective',
 };
 
 export default messages;

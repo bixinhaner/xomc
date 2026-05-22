@@ -4637,6 +4637,21 @@ const messages: Record<string, string> = {
   'systemLicense.history.replacedAt':               '被替换时间',
   'systemLicense.history.signature':                '签名',
   'systemLicense.history.empty':                    '暂无历史 license',
+
+  // T-0164-P2 / G2 PM 保留策略管理（系统配置页）
+  'pmRetention.title':                              'PM 数据保留策略',
+  'pmRetention.description':                        '按 5 级粒度配置 PM 时序数据的保留天数。修改后立即生效。',
+  'pmRetention.raw_15min_days':                     '15min 原始数据保留天数',
+  'pmRetention.hourly_days':                        '小时聚合表保留天数',
+  'pmRetention.daily_days':                         '日聚合表保留天数',
+  'pmRetention.weekly_days':                        '周聚合表保留天数',
+  'pmRetention.monthly_days':                       '月聚合表保留天数',
+  'pmRetention.unit.days':                          '天',
+  'pmRetention.save':                               '保存',
+  'pmRetention.reset':                              '恢复默认',
+  'pmRetention.validate.tooShort':                  '保留天数最少 1 天',
+  'pmRetention.validate.tooLong':                   '保留天数最长 3650 天（10 年）',
+  'pmRetention.save.success':                       '保存成功，新的保留策略已生效',
 };
 
 export default messages;
