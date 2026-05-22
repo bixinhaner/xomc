@@ -7,11 +7,11 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/config/parammodel"
-	"github.com/omcgo/omcgo/internal/product"
 )
 
 // ============================================================
@@ -23,25 +23,36 @@ import (
 //   command 的 tree_node_refs（v2 catalog） 或 target_paths（v1 catalog）
 //   是否全部位于该 product 对应 ParamModel 的 default param_mappings 集合。
 //
+// 解析路径（绕过 ProductRegistry.MatchProductClass 正则）：
+//   SELECT d.product_id, COALESCE(d.param_model_id, p.param_model_id)
+//     FROM devices d LEFT JOIN products p ON p.id = d.product_id
+//    WHERE d.product_class = $1
+//    ORDER BY (effective_param_model_id IS NULL) LIMIT 1
+//
+//   字典 type='product_class' 已对齐 devices.product_class DISTINCT 真实值
+//   （seed/000154），因此前端传来的 product_class 一定能命中至少一台设备。
+//   product_class_patterns 全局正则只在设备 Bootstrap 路径用，命令兼容性
+//   计算不再依赖它，避免「字典里有但 patterns 没有」导致的 404。
+//
 // 三处独立单元：
 //   1. CommandPathRepository — 从 mml_commands 取每条命令的 path 集合
 //      （tree_node_refs 优先，回退 target_paths）
 //   2. ComputeCommandCompatibility — 纯函数，无外部依赖，可单测
-//   3. CompatibilityService — 编排：ProductRegistry → ParamRegistry → 计算
+//   3. CompatibilityService — 编排：devices 反查 → ParamRegistry → 计算
 //
 // 与现有 ConsoleService 解耦（独立 struct + 独立 deps），避免破坏
 // NewConsoleService 签名影响 5 个测试文件。
 // ============================================================
 
-// ErrProductClassNotFound 是 product_class 无任何 product 匹配时的 sentinel error，
-// 用于 handler 区分 404 vs 500。
-var ErrProductClassNotFound = errors.New("product_class not matched to any product")
+// ErrProductClassNotFound 是 product_class 在 devices 表里完全无匹配时的 sentinel error，
+// 用于 handler 区分 404 vs 500。字典与 devices 对齐后，正常路径不会触发。
+var ErrProductClassNotFound = errors.New("product_class not matched to any device")
 
 // CommandCompatibilityResult 是 GetCommandCompatibility 的返回 / API 响应载荷。
 type CommandCompatibilityResult struct {
 	ProductClass          string      `json:"product_class"`
 	ProductID             uuid.UUID   `json:"product_id"`
-	ParamModelID          uuid.UUID   `json:"param_model_id,omitempty"` // 空 UUID 表示 product 未配 ParamModel
+	ParamModelID          uuid.UUID   `json:"param_model_id,omitempty"` // 空 UUID 表示设备/产品未配 ParamModel
 	UnsupportedCommandIDs []uuid.UUID `json:"unsupported_command_ids"`
 }
 
@@ -133,20 +144,24 @@ func ComputeCommandCompatibility(
 	return unsupported
 }
 
-// CompatibilityService 编排 ProductRegistry → ParamRegistry → CommandPathRepository →
+// CompatibilityService 编排 devices 反查 → ParamRegistry → CommandPathRepository →
 // ComputeCommandCompatibility。
 //
 // 独立于 ConsoleService 以最小化对现有签名 / 测试的影响（spec §R-8.5 可选 P2）。
+//
+// 不再依赖 ProductRegistry：product_class 的来源（字典 type='product_class'）已
+// 与 devices.product_class DISTINCT 对齐（seed/000154），直接走 devices LEFT JOIN
+// products 拿 param_model_id，跳过 product_class_patterns 全局正则。
 type CompatibilityService struct {
-	productRegistry *product.Registry
-	paramRegistry   *parammodel.Registry
-	cmdPathRepo     CommandPathRepository
-	logger          *zap.Logger
+	pool          *pgxpool.Pool
+	paramRegistry *parammodel.Registry
+	cmdPathRepo   CommandPathRepository
+	logger        *zap.Logger
 }
 
 // NewCompatibilityService 构造。所有 deps 非 nil 必需。
 func NewCompatibilityService(
-	productRegistry *product.Registry,
+	pool *pgxpool.Pool,
 	paramRegistry *parammodel.Registry,
 	cmdPathRepo CommandPathRepository,
 	logger *zap.Logger,
@@ -155,55 +170,74 @@ func NewCompatibilityService(
 		logger = zap.NewNop()
 	}
 	return &CompatibilityService{
-		productRegistry: productRegistry,
-		paramRegistry:   paramRegistry,
-		cmdPathRepo:     cmdPathRepo,
-		logger:          logger.Named("mml-compatibility"),
+		pool:          pool,
+		paramRegistry: paramRegistry,
+		cmdPathRepo:   cmdPathRepo,
+		logger:        logger.Named("mml-compatibility"),
 	}
 }
+
+// resolveProductClassSQL 直接从 devices 反查 product_id + 有效 param_model_id。
+//
+// 选择策略：优先返回"有 param_model 链路"的行（device.param_model_id 或
+// product.param_model_id 非空），否则任选一台同 product_class 设备 — 这样
+// 即使大多数设备未发现私网映射，只要有一台跑过 FileType=11 就能命中。
+const resolveProductClassSQL = `
+SELECT d.product_id,
+       COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
+  FROM devices d
+  LEFT JOIN products p ON p.id = d.product_id
+ WHERE d.product_class = $1
+ ORDER BY (COALESCE(d.param_model_id, p.param_model_id) IS NULL)
+ LIMIT 1`
 
 // GetCommandCompatibility 计算指定 product_class 下的命令兼容性。
 //
 // 错误约定：
-//   - productClass 无匹配 product → 返回 ErrProductClassNotFound（handler 404）
-//   - ParamModel ID 为 nil 或映射加载失败 → supportedPaths=空集 → 所有有 path 的命令 unsupported
+//   - productClass 在 devices 表完全无匹配 → 返回 ErrProductClassNotFound（handler 404）
+//   - 设备/产品未关联 ParamModel → supportedPaths=空集 → 所有有 path 的命令 unsupported
+//     （UI 应以"未配置参数模型"提示用户而非"全部不兼容"，由前端区分 paramModelID 是否为零 UUID）
 //   - 其他底层错误 → wrap 后返回
 func (s *CompatibilityService) GetCommandCompatibility(
 	ctx context.Context,
 	productClass string,
 ) (*CommandCompatibilityResult, error) {
-	if s.productRegistry == nil || s.paramRegistry == nil || s.cmdPathRepo == nil {
+	if s.pool == nil || s.paramRegistry == nil || s.cmdPathRepo == nil {
 		return nil, fmt.Errorf("compatibility service not properly initialized")
 	}
 
-	// 1. resolve product_class → product
-	match, err := s.productRegistry.MatchProductClass(ctx, productClass)
-	if err != nil {
-		// ProductRegistry.MatchProductClass 用 ErrOrphan 表示未命中，外部 wrap 一致
-		s.logger.Debug("product_class no match",
-			zap.String("product_class", productClass), zap.Error(err))
-		return nil, ErrProductClassNotFound
+	// 1. 直接走 devices 反查（绕过 ProductRegistry.MatchProductClass 正则）
+	var (
+		productID    *uuid.UUID
+		paramModelID *uuid.UUID
+	)
+	if err := s.pool.QueryRow(ctx, resolveProductClassSQL, productClass).
+		Scan(&productID, &paramModelID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			s.logger.Debug("product_class has no device row",
+				zap.String("product_class", productClass))
+			return nil, ErrProductClassNotFound
+		}
+		return nil, fmt.Errorf("resolve product_class via devices: %w", err)
 	}
-	if match == nil || match.Product == nil {
-		return nil, ErrProductClassNotFound
-	}
-	prod := match.Product
 
-	// 2. get default param_mappings (per design §3.3 — 不查 discovered)
+	// 2. 取 default param_mappings（按 spec §3.3 — 不查 discovered）
 	supportedPaths := make(map[string]struct{})
-	if prod.ParamModelID != nil {
-		ms, err := s.paramRegistry.GetByParamModel(ctx, *prod.ParamModelID)
+	if paramModelID != nil {
+		ms, err := s.paramRegistry.GetByParamModel(ctx, *paramModelID)
 		if err != nil {
 			// 不视为致命 — 缺映射相当于"全部 unsupported"，由 spec §R-8.5 不阻塞语义兜底
 			s.logger.Warn("load param_model mappings",
-				zap.String("product_id", prod.ID.String()),
-				zap.String("param_model_id", prod.ParamModelID.String()),
+				zap.String("param_model_id", paramModelID.String()),
 				zap.Error(err))
 		} else if ms != nil {
 			for _, m := range ms.Mappings {
 				supportedPaths[m.StandardPath] = struct{}{}
 			}
 		}
+	} else {
+		s.logger.Debug("product_class resolved but no param_model linkage",
+			zap.String("product_class", productClass))
 	}
 
 	// 3. list all commands + their paths
@@ -220,11 +254,13 @@ func (s *CompatibilityService) GetCommandCompatibility(
 
 	result := &CommandCompatibilityResult{
 		ProductClass:          productClass,
-		ProductID:             prod.ID,
 		UnsupportedCommandIDs: unsupported,
 	}
-	if prod.ParamModelID != nil {
-		result.ParamModelID = *prod.ParamModelID
+	if productID != nil {
+		result.ProductID = *productID
+	}
+	if paramModelID != nil {
+		result.ParamModelID = *paramModelID
 	}
 	return result, nil
 }

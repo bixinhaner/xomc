@@ -763,10 +763,11 @@ func initMiscModules(c *Container) error {
 	// 依赖同一个 PgPool，与现有 GroupTreeRepository 只读同表不冲突。
 	mmlConsoleSvc.SetFlatTreeRepo(mml.NewPgFlatGroupTreeRepository(c.PgPool))
 	// R-8.5: 独立 CompatibilityService（不耦合 ConsoleService 签名 / 测试）。
-	// ProductRegistry / ParamRegistry 由 dictload → productregistry → paramregistry
-	// 初始化链保证此时非 nil。
+	// 直接走 devices LEFT JOIN products 反查 param_model_id，
+	// 绕过 ProductRegistry.MatchProductClass 全局正则（字典 product_class
+	// 已对齐 devices.product_class DISTINCT，正常路径无需 patterns 命中）。
 	mmlCmdPathRepo := mml.NewPgCommandPathRepository(c.PgPool)
-	mmlCompatibility := mml.NewCompatibilityService(c.ProductRegistry, c.ParamRegistry, mmlCmdPathRepo, logger)
+	mmlCompatibility := mml.NewCompatibilityService(c.PgPool, c.ParamRegistry, mmlCmdPathRepo, logger)
 	c.miscDeps.mmlConsoleHandler = mml.NewConsoleHandler(mmlConsoleSvc, mmlService, mmlCompatibility, logger)
 
 	// Stage 3（T-0123 v5）：装配 mml.Service 的 device_tasks 路径翻译 miss 聚合
