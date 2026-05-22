@@ -241,7 +241,9 @@
       "Bash(git -C /Users/cb/code/baicells/goomc stash show -p stash@{5})",
       "Bash(/tmp/omcgo-migrate up *)",
       "Bash(sort -k1 -n)",
-      "Bash(awk '{for\\(i=1;i<=NF;i++\\) if\\($i ~ /^\\(cat|g|cmd\\)\\\\.[A-Z]/\\) print $i}')"
+      "Bash(awk '{for\\(i=1;i<=NF;i++\\) if\\($i ~ /^\\(cat|g|cmd\\)\\\\.[A-Z]/\\) print $i}')",
+      "Bash(sed -n '1,40p' /Users/cb/code/baicells/goomc/omcgo/migrations/000063_drop_datamodel.sql)",
+      "Bash(sed -n '60,90p' /Users/cb/code/baicells/goomc/omcgo/migrations/000063_drop_datamodel.sql)"
     ],
     "deny": [
       "Bash(git push -f)",
