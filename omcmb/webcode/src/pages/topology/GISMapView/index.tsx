@@ -1001,7 +1001,7 @@ export default function GISMapView() {
         </div>
 
         {/* 统计面板 */}
-        <MapStatsPanel stats={stats} visible={true} />
+        <MapStatsPanel stats={stats} visible={false} />
 
         {/* Footer */}
         <div
