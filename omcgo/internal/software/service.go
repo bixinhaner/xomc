@@ -181,11 +181,52 @@ func (s *SoftwareService) SetLogCollectResumer(r LogCollectResumer) {
 	s.executor.SetLogCollectResumer(r)
 }
 
+// SetParamPathTranslator 装配 standardPath → privatePath 翻译器（透传给 executor），
+// 供 SPV 触发的日志采集（FAULT_LOG_COLLECT 等）在下发前翻译参数名。
+func (s *SoftwareService) SetParamPathTranslator(t ParamPathTranslator) {
+	s.executor.SetParamPathTranslator(t)
+}
+
+// OnLogFileLanded 实现 backup.FileLandedNotifier 接口。
+// 由 backup.FilePathRecorder 在 backup_restore_file 元数据 upsert 完成后同进程
+// 直接回调，按 (deviceSN, taskID) 推进 LogCollect 类（FAULT_LOG_COLLECT /
+// RUNTIME_LOG_COLLECT / CONFIG_BACKUP_*）sub_task 到 Completed。
+//
+// SPV 触发的 FAULT_LOG_COLLECT 链路不走 TR-069 TransferComplete，"文件落地即成功"
+// 是业务定义的结束条件——见 ufte/model.go FAULT_LOG_COLLECT 的 StepChain
+// WAIT_FILE_UPLOAD（区别于 RUNTIME_LOG_COLLECT 的 WAIT_TRANSFER_COMPLETE）。
+//
+// 复用 executor.HandleFileLandedForCollect：同款 (parent_task_id + device_sn)
+// 反查逻辑 + parent.TaskType==LogCollect 过滤 + status==Uploading 防误推。
+func (s *SoftwareService) OnLogFileLanded(ctx context.Context, deviceSN, taskID string) {
+	// 把 hook 参数转回 event payload 形式，复用既有 handler，避免逻辑双份维护。
+	evt, err := event.NewEvent(event.SubjectBackupFileReceived, map[string]interface{}{
+		"device_sn": deviceSN,
+		"task_id":   taskID,
+	})
+	if err != nil {
+		s.logger.Warn("OnLogFileLanded: build event", zap.Error(err))
+		return
+	}
+	if err := s.executor.HandleFileLandedForCollect(ctx, evt); err != nil {
+		s.logger.Warn("OnLogFileLanded: handle file landed",
+			zap.String("device_sn", deviceSN),
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
+}
+
 // ExecuteOneUploadDirect 是 executor.ExecuteOneUpload 的对外门面，供 ufte 包在
 // LogCollectResumer 回调中重启子任务的 Upload RPC 使用。与 startCollectExecution
 // 走的是同一份执行路径，区别仅在于一次只跑一个子任务、不限并发。
 func (s *SoftwareService) ExecuteOneUploadDirect(ctx context.Context, subTask *UpgradeSubTask, fileType, targetFileNameTemplate, transportPath string) {
 	s.executor.ExecuteOneUpload(ctx, subTask, fileType, targetFileNameTemplate, transportPath)
+}
+
+// ExecuteOneSetParamCollectDirect 是 executor.ExecuteOneSetParamCollect 的对外门面，
+// 供 ufte 包在 LogCollectResumer 回调中重启子任务的 SPV 触发上传使用。
+func (s *SoftwareService) ExecuteOneSetParamCollectDirect(ctx context.Context, subTask *UpgradeSubTask, paramPath, transportPath string) {
+	s.executor.ExecuteOneSetParamCollect(ctx, subTask, paramPath, transportPath)
 }
 
 func (s *SoftwareService) SetUploadConfig(acsUploadBaseURL string) {
@@ -204,9 +245,17 @@ type BatchCollectRequest struct {
 	TaskName               string
 	FileType               string // Upload RPC FileType，如 "6"（运行日志）、"8"（故障日志）
 	TargetFileNameTemplate string // 目标文件名模板，如 "runtime-{task_id8}-{sn}.tar.gz"
-	TransportPath          string // 上传路径模板，如 "/smallcell/FileUploadService?fileType={fileType}&filename={targetFileName}"
-	CreateUser             string
-	CreateSuspended        bool
+	TransportPath          string // 上传路径模板（Upload 或 SPV 模式各自的 URL 模板，渲染规则不同）
+	// RPCType 决定使用 TR-069 Upload RPC（"UPLOAD"，默认）还是 SetParameterValues
+	// 直接给设备私有参数写 URL（"SET_PARAM_VALUES"，如 FAULT_LOG_COLLECT 用 FaultLogURL）。
+	// 留空 → "UPLOAD"，兼容现有 RUNTIME_LOG_COLLECT / CONFIG_BACKUP 链路。
+	RPCType string
+	// ParamPath 仅在 RPCType="SET_PARAM_VALUES" 时使用，是 SPV 下发的参数名，例如
+	// "Device.DeviceInfo.X_COM_Log.FaultLogURL"。其值由 executor 用 transport_path
+	// 渲染后写入。
+	ParamPath       string
+	CreateUser      string
+	CreateSuspended bool
 }
 
 // BatchCollect 创建日志采集主任务及各设备子任务，然后启动执行。
@@ -267,16 +316,19 @@ func (s *SoftwareService) BatchCollect(ctx context.Context, req BatchCollectRequ
 	}
 	mainTask.Status = TaskInProgress
 
-	s.startCollectExecution(mainTask, subTasks, req.TransportPath, concurrency)
+	s.startCollectExecution(mainTask, subTasks, req.TransportPath, req.RPCType, req.ParamPath, concurrency)
 
 	return mainTask, nil
 }
 
-// startCollectExecution 启动日志采集子任务的并发执行 goroutine。
-func (s *SoftwareService) startCollectExecution(mainTask *UpgradeTask, subTasks []*UpgradeSubTask, transportPath string, concurrency int) {
+// startCollectExecution 启动日志采集子任务的并发执行 goroutine。按 RPCType 分流：
+// "SET_PARAM_VALUES" 走 ExecuteOneSetParamCollect（如 FAULT_LOG_COLLECT），其余走
+// ExecuteOneUpload（默认 Upload RPC 链路，包含 RUNTIME_LOG_COLLECT / CONFIG_BACKUP_*）。
+func (s *SoftwareService) startCollectExecution(mainTask *UpgradeTask, subTasks []*UpgradeSubTask, transportPath, rpcType, paramPath string, concurrency int) {
 	if concurrency < 1 {
 		concurrency = 5
 	}
+	useSPV := strings.EqualFold(strings.TrimSpace(rpcType), "SET_PARAM_VALUES")
 	sem := make(chan struct{}, concurrency)
 	for i := range subTasks {
 		sem <- struct{}{}
@@ -289,6 +341,10 @@ func (s *SoftwareService) startCollectExecution(mainTask *UpgradeTask, subTasks 
 						zap.Any("recover", r))
 				}
 			}()
+			if useSPV {
+				s.executor.ExecuteOneSetParamCollect(context.Background(), st, paramPath, transportPath)
+				return
+			}
 			s.executor.ExecuteOneUpload(context.Background(), st, mainTask.DownloadFileType, mainTask.FileName, transportPath)
 		}(subTasks[i])
 	}
@@ -888,6 +944,19 @@ func (s *SoftwareService) TerminateUpgrade(ctx context.Context, taskID uuid.UUID
 			if err := s.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradeTerminated, "task terminated by operator"); err != nil {
 				return fmt.Errorf("terminate sub-task %s: %w", subTask.ID.String(), err)
 			}
+			// 释放设备级 Redis 锁，否则用户终止后 1 小时（lock TTL）内重试都会撞
+			// "升级无法启动，设备不能运行多个升级任务"。failSubTask 路径会顺带 Del 是巧合，
+			// 不能依赖。注意 sub_task 行刚拿出来时 DeviceSN 可能为空（还没进 ExecuteOne）→
+			// 此时也没拿过锁，跳过即可。
+			if subTask.DeviceSN != "" {
+				key := fmt.Sprintf("software:upgrade:active:%s", subTask.DeviceSN)
+				if err := s.redis.Del(ctx, key).Err(); err != nil {
+					s.logger.Warn("release device lock on terminate",
+						zap.String("sub_task_id", subTask.ID.String()),
+						zap.String("device_sn", subTask.DeviceSN),
+						zap.Error(err))
+				}
+			}
 		}
 		if len(subResult.Items) == 0 || page >= subResult.TotalPages {
 			break
@@ -927,9 +996,10 @@ func (s *SoftwareService) DeleteUpgrade(ctx context.Context, taskID uuid.UUID) e
 }
 
 // ResumeCollect resumes a suspended or pending log-collect / config-backup task.
+// rpcType + paramPath 仅 SPV 模式（FAULT_LOG_COLLECT）使用；Upload 模式留空即可。
 // transportPath is the Upload RPC path template stored in the UFTE task-type catalog;
 // callers (ufte.Service.StartTask) must look it up before calling this method.
-func (s *SoftwareService) ResumeCollect(ctx context.Context, taskID uuid.UUID, transportPath string) error {
+func (s *SoftwareService) ResumeCollect(ctx context.Context, taskID uuid.UUID, transportPath, rpcType, paramPath string) error {
 	task, err := s.taskRepo.GetByID(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("get upgrade task: %w", err)
@@ -961,7 +1031,7 @@ func (s *SoftwareService) ResumeCollect(ctx context.Context, taskID uuid.UUID, t
 		return fmt.Errorf("resume collect task: %w", err)
 	}
 
-	s.startCollectExecution(task, subTasks, transportPath, task.MaxConcurrent)
+	s.startCollectExecution(task, subTasks, transportPath, rpcType, paramPath, task.MaxConcurrent)
 	s.logger.Info("collect task resumed", zap.String("task_id", taskID.String()))
 	return nil
 }
@@ -1280,6 +1350,22 @@ func (s *SoftwareService) Subscribe(eventBus event.EventBus) error {
 		s.logger.Warn("subscribe device online", zap.Error(err))
 	}
 
+	// SetParameterValues response — SPV 触发的 LogCollect 类（如 FAULT_LOG_COLLECT）
+	// 失败拦截。成功路径保持 Uploading 等文件落地；fault → 立即标 fail。
+	_, err = eventBus.QueueSubscribe(event.SubjectCommandSetParamsResponse, "software-collect-setparams-resp", func(ctx context.Context, evt event.Event) error {
+		return s.executor.HandleSetParamsResponseForCollect(ctx, evt)
+	})
+	if err != nil {
+		s.logger.Warn("subscribe set_parameters response", zap.Error(err))
+	}
+
+	// 文件落地通知不走 NATS 订阅：BACKUP stream 是 WorkQueuePolicy retention，
+	// 同 subject 只能 1 个 filter consumer——backup.FilePathRecorder 已独占。
+	// 改走 hook：FilePathRecorder.SetFileLandedNotifier(softwareService) 在
+	// cmd/app/provider/modules.go 装配，FilePathRecorder 处理完 metadata 后
+	// 直接同进程回调 SoftwareService.OnLogFileLanded，按 (deviceSN, taskID) 推进
+	// LogCollect sub_task 到 Completed。
+
 	return nil
 }
 
@@ -1299,6 +1385,9 @@ func (s *SoftwareService) StartTaskReaper() {
 		RPCResponse:      5 * time.Minute,
 		DeviceOnline:     10 * time.Minute,
 		TransferComplete: 30 * time.Minute,
+		// FAULT_LOG_COLLECT 走 SPV → CPE 主动 PUT 故障日志，秒～分钟级即可。15min 充裕，
+		// 比 30min TC 通用值短一半，配合"文件落地即成功"语义快速失败更直观。
+		FaultLogUpload: 15 * time.Minute,
 	}
 	go func() {
 		ticker := time.NewTicker(interval)
@@ -1329,7 +1418,12 @@ func (s *SoftwareService) StartTaskReaper() {
 			}
 		}
 	}()
-	s.logger.Info("upgrade task reaper started", zap.Duration("interval", interval), zap.Duration("rpc_response_timeout", timeouts.RPCResponse), zap.Duration("device_online_timeout", timeouts.DeviceOnline), zap.Duration("transfer_complete_timeout", timeouts.TransferComplete))
+	s.logger.Info("upgrade task reaper started",
+		zap.Duration("interval", interval),
+		zap.Duration("rpc_response_timeout", timeouts.RPCResponse),
+		zap.Duration("device_online_timeout", timeouts.DeviceOnline),
+		zap.Duration("transfer_complete_timeout", timeouts.TransferComplete),
+		zap.Duration("fault_log_upload_timeout", timeouts.FaultLogUpload))
 }
 
 // RestorePendingUpgrades recovers upgrade tasks that were in-progress when

@@ -146,7 +146,9 @@ func TestRebootHandler(t *testing.T) {
 	require.NoError(t, err)
 	body := string(result)
 	assert.Contains(t, body, "cwmp:Reboot")
-	assert.Contains(t, body, "<cwmp:CommandKey>reboot-key-1</cwmp:CommandKey>")
+	// TR-069 §A.3.2.10: 子元素 unqualified（参考 templates.go rebootXML 注释）
+	assert.Contains(t, body, "<CommandKey>reboot-key-1</CommandKey>")
+	assert.NotContains(t, body, "<cwmp:CommandKey>")
 }
 
 func TestFactoryResetHandler(t *testing.T) {

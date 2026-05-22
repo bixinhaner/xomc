@@ -503,6 +503,12 @@ func initBackupModule(c *Container) error {
 	// M1 of backup-restore-alignment-plan: 同步落库 backup_restore_file 元数据
 	// （SN/file_name/md5/size/operator_code/update_time），支撑后续查询与导出。
 	filePathRecorder.SetFileRepository(backup.NewPgFileRepository(c.PgPool))
+	// FAULT_LOG_COLLECT / RUNTIME_LOG_COLLECT 的"文件落地即任务成功"hook：
+	// BACKUP stream 是 WorkQueuePolicy，软件包不能再订一份 backup.file.received，
+	// 走同进程 hook 让 FilePathRecorder 处理完元数据后回调 software 推进 sub_task。
+	if c.miscDeps.softwareService != nil {
+		filePathRecorder.SetFileLandedNotifier(c.miscDeps.softwareService)
+	}
 	if err := filePathRecorder.Subscribe(c.EventBus); err != nil {
 		logger.Warn("subscribe backup file path recorder", zap.Error(err))
 	}
@@ -730,6 +736,15 @@ func initMiscModules(c *Container) error {
 	}
 	if c.ProductRegistry != nil && c.ParamRegistry != nil {
 		mmlService.SetPathTranslator(NewMMLPathTranslator(c.ProductRegistry, c.ParamRegistry, logger))
+		// 同源装配 software 端：SPV 触发的日志采集（如 FAULT_LOG_COLLECT）下发前
+		// 用同款 productClass → Registry → Translator 链路把 standardPath 翻译成
+		// privatePath。CLAUDE.md §5.3 要求；未注入时 ExecuteOneSetParamCollect
+		// 退化为 passthrough。
+		if c.miscDeps.softwareService != nil {
+			c.miscDeps.softwareService.SetParamPathTranslator(
+				NewSoftwareParamPathTranslator(c.ProductRegistry, c.ParamRegistry, logger),
+			)
+		}
 	}
 	c.miscDeps.mmlHandler = mml.NewHandler(mmlService, logger)
 	c.miscDeps.mmlService = mmlService

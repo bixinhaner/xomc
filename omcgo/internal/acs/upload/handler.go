@@ -114,9 +114,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 3. Extract fileType and filename from query params
+	// 3. Extract fileType and filename from query params.
+	// FAULT_LOG_COLLECT (SPV 触发) 走厂商私有 URL 模板：
+	//   /FileUploadService?fileType=RL&id={id}&sn={sn}&fileName=
+	// 与现网 Upload RPC 链路的 `taskId` / `filename` 大小写不同，下面统一兜底。
 	fileType := r.URL.Query().Get("fileType")
 	filename := r.URL.Query().Get("filename")
+	if filename == "" {
+		filename = r.URL.Query().Get("fileName")
+	}
 
 	if fileType == "" {
 		http.Error(w, "missing fileType parameter", http.StatusBadRequest)
@@ -131,18 +137,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	//   - 其它（默认兜底）：upload-{taskId8}-{sn}-{ts}
 	// 保证 ACS 落地名与 UFTE 端 DeviceItem.TargetFile 渲染结果一致——后续
 	// fileLandedLookup / downloadURLLookup 用 (sn, target_file) 反查能命中。
+	// FAULT_LOG_COLLECT 用 ?id=<task_uuid>，其他链路用 ?taskId=<task_uuid>；取 id 兜底 taskId。
+	queryTaskID := r.URL.Query().Get("taskId")
+	if queryTaskID == "" {
+		queryTaskID = r.URL.Query().Get("id")
+	}
 	if filename == "" {
-		taskIDQ := r.URL.Query().Get("taskId")
 		snQ := r.URL.Query().Get("sn")
-		if taskIDQ == "" || snQ == "" {
+		if queryTaskID == "" || snQ == "" {
 			http.Error(w, "missing filename, and cannot derive: taskId/sn query params also empty", http.StatusBadRequest)
 			return
 		}
-		filename = deriveUploadFilename(fileType, taskIDQ, snQ)
+		filename = deriveUploadFilename(fileType, queryTaskID, snQ)
 		h.logger.Info("derived filename from sn+taskId (URL filename was empty)",
 			zap.String("file_type", fileType),
 			zap.String("sn", snQ),
-			zap.String("task_id", taskIDQ),
+			zap.String("task_id", queryTaskID),
 			zap.String("derived_filename", filename),
 		)
 	}
@@ -165,13 +175,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ft := normalizeFileType(fileType)
 	bucket, category := storage.BucketAndCategory(ft, h.buckets)
 	now := time.Now()
-	// 配置备份类（FileType=3 / CONFIGBACKUP_*）加 taskId8 目录层级，避免同设备
-	// 不同任务上传同名文件（厂商如 baicells 每次都用 "mib-home-fap.nv" 名）
-	// 互相覆盖。其它类型（PM/MR/Log/Firmware）保持原路径——它们本身命名带时间戳
+	// 配置备份类（FileType=3 / CONFIGBACKUP_*）和故障日志类（FileType=8 / RL）加 taskId8
+	// 目录层级，避免同设备不同任务上传同名文件互相覆盖：
+	//   - 配置备份：厂商如 baicells 每次都用 "mib-home-fap.nv" 名
+	//   - 故障日志：FAULT_LOG_COLLECT 同一设备可能在多个采集任务中各采集一次，
+	//     CPE 自己生成的文件名相同时会被后写者覆盖
+	// 其它类型（PM/MR/RunningLog/Firmware）保持原路径——它们本身命名带时间戳
 	// 或唯一标识，不存在重名问题。
 	taskSubdir := ""
-	if ft == tr069.FileTypeConfig {
-		if tid := strings.ReplaceAll(r.URL.Query().Get("taskId"), "-", ""); len(tid) >= 8 {
+	if ft == tr069.FileTypeConfig || ft == tr069.FileTypeFaultLog {
+		if tid := strings.ReplaceAll(queryTaskID, "-", ""); len(tid) >= 8 {
 			taskSubdir = tid[:8] + "/"
 		}
 	}
@@ -302,7 +315,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// 不匹配 backup-{taskId8}-{sn}.{ext} 模板时 parseBackupFilename 失效，
 		// 此时回退到 URL query 兜底是唯一可靠路径。
 		h.publishBackupFileReceivedEvent(ctx, bucket, objectPath, filename, info.Size, info.ETag,
-			r.URL.Query().Get("sn"), r.URL.Query().Get("taskId"))
+			r.URL.Query().Get("sn"), queryTaskID)
 	}
 
 	// 6.3. For station log uploads (FileType "6" running log, "8" fault log),
@@ -318,7 +331,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if (ft == tr069.FileTypeRunningLog || ft == tr069.FileTypeFaultLog) && h.eventBus != nil {
 		h.publishLogFileReceivedEvent(ctx, bucket, objectPath, filename, string(ft), info.Size)
 		h.publishBackupFileReceivedEvent(ctx, bucket, objectPath, filename, info.Size, info.ETag,
-			r.URL.Query().Get("sn"), r.URL.Query().Get("taskId"))
+			r.URL.Query().Get("sn"), queryTaskID)
 	}
 
 	// 7. Return success
@@ -358,7 +371,9 @@ func normalizeFileType(raw string) tr069.FileType {
 		return tr069.FileTypeRunningLog
 	case "7":
 		return tr069.FileTypeSecurityLog
-	case "8":
+	case "8", "RL":
+		// "RL" 是 FAULT_LOG_COLLECT 链路（SPV 触发，FaultLogURL 参数）使用的厂商私有标识，
+		// 等价于 TR-069 标准 FileType "8"（异常 / 故障日志）。
 		return tr069.FileTypeFaultLog
 	case "9":
 		return tr069.FileTypePCAP
@@ -763,7 +778,7 @@ func deriveUploadFilename(fileType, taskID, sn string) string {
 		return fmt.Sprintf("backup-%s-%s.xml", taskID8, sn)
 	case "6", "LOG":
 		return fmt.Sprintf("runtime-%s-%s.tar.gz", taskID8, sn)
-	case "8":
+	case "8", "RL":
 		return fmt.Sprintf("fault-%s-%s.tar.gz", taskID8, sn)
 	default:
 		return fmt.Sprintf("upload-%s-%s-%d", taskID8, sn, time.Now().Unix())

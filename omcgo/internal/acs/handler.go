@@ -278,8 +278,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Info("ACS detected RPC method", zap.String("method", string(method)))
 
 	// 优先检查 SOAP Fault（可能出现在任何 RPC 的响应中）
-	if isFault, faultCode, faultMsg := detectSOAPFault(body); isFault {
-		h.handleSOAPFault(w, r, body, faultCode, faultMsg, log)
+	if isFault, faultCode, soapFaultCode, faultMsg := detectSOAPFault(body); isFault {
+		h.handleSOAPFault(w, r, body, faultCode, soapFaultCode, faultMsg, log)
 		return
 	}
 
@@ -697,14 +697,20 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 			log.Warn("get task by cwmp_id", zap.Error(err), zap.String("cwmp_id", cwmpID))
 		} else if taskItem != nil {
 			// 检查响应中是否有 SOAP Fault
-			if isFault, faultCode, faultMsg := detectSOAPFault(body); isFault {
-				// 任务因 SOAP Fault 失败
-				if markErr := h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, faultCode, faultMsg); markErr != nil {
+			if isFault, faultCode, soapFaultCode, faultMsg := detectSOAPFault(body); isFault {
+				// 把 SOAP 1.1 outer faultcode（如 "Server.Internal"）合进 error message，
+				// 否则丢失诊断信息；DB 落盘的 error_message 也能完整呈现。
+				combinedMsg := faultMsg
+				if soapFaultCode != "" && !strings.Contains(faultMsg, soapFaultCode) {
+					combinedMsg = fmt.Sprintf("[%s] %s", soapFaultCode, faultMsg)
+				}
+				if markErr := h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, faultCode, combinedMsg); markErr != nil {
 					log.Error("mark task failed", zap.Error(markErr), zap.String("task_id", taskItem.ID))
 				}
 				log.Warn("task failed with SOAP fault",
 					zap.String("task_id", taskItem.ID),
 					zap.Int("fault_code", faultCode),
+					zap.String("soap_fault_code", soapFaultCode),
 					zap.String("fault_msg", faultMsg))
 			} else {
 				// 任务成功完成 - 将原始响应存为结果
@@ -982,15 +988,28 @@ func (h *Handler) resetContinuousWake(ctx context.Context, deviceSN string) {
 
 // handleSOAPFault 处理 CPE 返回的 SOAP Fault 响应。
 // 通过 CWMP ID 查找关联任务并标记为失败。
-func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body []byte, faultCode int, faultMsg string, log *zap.Logger) {
+//
+// 参数：
+//   - faultCode     — 内层 cwmp:FaultCode 数值（标准 CWMP fault，如 9005=Invalid parameter name）
+//   - soapFaultCode — 外层 soap:faultcode 文本（如 "Server.Internal"），部分厂商只回这个不带 cwmp:Fault
+//   - faultMsg      — 人类可读 faultstring
+func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body []byte, faultCode int, soapFaultCode, faultMsg string, log *zap.Logger) {
 	// 从 SOAP Header 中提取 CWMP ID
 	_, cwmpID, _, _ := soap.DetectMethod(bytes.NewReader(body))
 
 	log.Warn("ACS received SOAP Fault",
 		zap.String("cwmp_id", cwmpID),
 		zap.Int("fault_code", faultCode),
+		zap.String("soap_fault_code", soapFaultCode),
 		zap.String("fault_msg", faultMsg),
+		zap.ByteString("raw_body", body),
 	)
+
+	// 合并消息：把 SOAP 1.1 outer faultcode 前缀到 faultMsg，让下游业务层看到完整信息。
+	combinedFaultMsg := faultMsg
+	if soapFaultCode != "" && !strings.Contains(faultMsg, soapFaultCode) {
+		combinedFaultMsg = fmt.Sprintf("[%s] %s", soapFaultCode, faultMsg)
+	}
 
 	// 从 Cookie 查找会话以获取设备上下文
 	session, sessionID := h.getSessionFromCookie(r, log)
@@ -1038,14 +1057,22 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 		}
 	}
 	if taskItem != nil {
-		if markErr := h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, faultCode, faultMsg); markErr != nil {
+		if markErr := h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, faultCode, combinedFaultMsg); markErr != nil {
 			log.Error("mark task failed on fault", zap.Error(markErr), zap.String("task_id", taskItem.ID))
 		}
 		log.Info("task marked as failed on SOAP fault",
 			zap.String("task_id", taskItem.ID),
 			zap.String("method", taskItem.Method),
 			zap.Int("fault_code", faultCode),
+			zap.String("soap_fault_code", soapFaultCode),
 			zap.String("fault_msg", faultMsg))
+
+		// 同步发出对应方法的 command.*.response 事件，把 fault_code / fault_string 透传给业务订阅者。
+		// 否则像 software.HandleUploadResponse / HandleSetParamsResponseForCollect 这种按
+		// "RPC 失败 → 立即 fail 子任务"的 handler 永远收不到 SOAP Fault，sub_task 卡 Uploading
+		// 直到 reaper 兜底（半小时级延迟）。fault_msg 用 combinedFaultMsg —— 即包含外层
+		// soap:faultcode 前缀的版本，让业务层能完整呈现「[Server.Internal] RPC handler failed: ...」。
+		h.publishRPCFaultEvent(r.Context(), session.DeviceSN, taskItem, faultCode, soapFaultCode, combinedFaultMsg, log)
 	} else {
 		log.Warn("SOAP fault but no task could be associated (neither cwmp_id nor session.last_task_id matched)",
 			zap.String("cwmp_id", cwmpID),
@@ -1414,6 +1441,69 @@ func (h *Handler) publishRPCResponseEvent(ctx context.Context, deviceSN string, 
 	if err := h.eventBus.Publish(ctx, subject, evt); err != nil {
 		log.Error("publish RPC response event", zap.Error(err), zap.String("subject", subject))
 	}
+}
+
+// publishRPCFaultEvent 在 CPE 回 SOAP Fault 时，按"原 RPC 方法"派发到对应的
+// command.*.response 事件 subject 上，payload 带 fault_code / fault_string，
+// 让业务订阅器（software.HandleUploadResponse / HandleSetParamsResponseForCollect 等）
+// 跟收到正常响应一样走 fault 分支处理。
+//
+// 与 publishRPCResponseEvent 的区别：那个是收到合法 *Response SOAP body 时调用，
+// 这里是只有 SOAP Fault（不含 Response body）时的兜底。
+func (h *Handler) publishRPCFaultEvent(ctx context.Context, deviceSN string, taskItem *task.Task, faultCode int, soapFaultCode, faultMsg string, log *zap.Logger) {
+	if taskItem == nil || h.eventBus == nil {
+		return
+	}
+	var subject string
+	switch taskItem.Method {
+	case "GetParameterValues":
+		subject = event.SubjectCommandGetParamsResponse
+	case "SetParameterValues":
+		subject = event.SubjectCommandSetParamsResponse
+	case "Download":
+		subject = event.SubjectCommandDownloadResponse
+	case "Upload":
+		subject = event.SubjectCommandUploadResponse
+	case "GetParameterNames":
+		subject = event.SubjectCommandGetNamesResponse
+	case "AddObject":
+		subject = event.SubjectCommandAddObjectResponse
+	case "DeleteObject":
+		subject = event.SubjectCommandDeleteObjectResponse
+	case "Reboot":
+		subject = event.SubjectCommandRebootResponse
+	case "FactoryReset":
+		subject = event.SubjectCommandFactoryResetResponse
+	case "GetParameterAttributes":
+		subject = event.SubjectCommandGetAttrsResponse
+	case "SetParameterAttributes":
+		subject = event.SubjectCommandSetAttrsResponse
+	default:
+		return
+	}
+
+	payload := map[string]interface{}{
+		"device_sn":       deviceSN,
+		"method":          taskItem.Method,
+		"command_key":     taskItem.CommandKey,
+		"fault_code":      faultCode,        // 数值：cwmp:FaultCode（标准 CWMP），无则 0
+		"fault_code_text": soapFaultCode,    // 字符串：soap:faultcode（SOAP 1.1 outer，如 "Server.Internal"）
+		"fault_string":    faultMsg,         // 已含 [soapFaultCode] 前缀的人类可读消息
+	}
+	evt, err := event.NewEvent(subject, payload)
+	if err != nil {
+		log.Warn("build RPC fault event", zap.Error(err), zap.String("subject", subject))
+		return
+	}
+	if err := h.eventBus.Publish(ctx, subject, evt); err != nil {
+		log.Error("publish RPC fault event", zap.Error(err), zap.String("subject", subject))
+		return
+	}
+	log.Info("RPC fault event published",
+		zap.String("subject", subject),
+		zap.String("device_sn", deviceSN),
+		zap.String("command_key", taskItem.CommandKey),
+		zap.Int("fault_code", faultCode))
 }
 
 // queueAutoGPVAfterSPV 在 SetParameterValuesResponse 成功完成后,自动入队一个
@@ -1895,31 +1985,48 @@ var (
 	soapFaultCodeRegex   = regexp.MustCompile(`(?s)<faultcode>([^<]*)</faultcode>`)
 )
 
-// detectSOAPFault checks whether a SOAP envelope carries a CPE-side Fault and,
-// if so, returns the CWMP-level numeric FaultCode plus a descriptive string.
-// Falls back to the outer SOAP <faultstring> when CWMP-level fields are absent.
-func detectSOAPFault(body []byte) (bool, int, string) {
+// detectSOAPFault 解析 CPE 返回的 SOAP Fault，分别返回三层信息：
+//
+//   - cwmpCode：内层 <detail><cwmp:Fault><FaultCode>9xxx</...> 数值（CWMP 标准）
+//   - soapCode：外层 <faultcode>...</faultcode> 文本（SOAP 1.1 标准，如 "Server.Internal" /
+//     "Client" / "Client.InvalidParameter"，部分厂商如 baicells 只返回这个不带 cwmp:FaultCode）
+//   - faultString：人类可读描述（优先 cwmp:FaultString，退化到 soap:faultstring，再退化到 soapCode）
+//
+// 历史教训：原版只返回 (bool, int, string)，丢弃外层 soapCode。当 CPE 返回
+//
+//	<soap:Fault>
+//	  <faultcode>Server.Internal</faultcode>
+//	  <faultstring>RPC handler failed: Empty parameter list</faultstring>
+//	</soap:Fault>
+//
+// 这种 SOAP 1.1 fault（无 cwmp:Fault 块），cwmpCode 解出 0，调用方误判成功，sub_task
+// 卡 in_progress；现在把 soapCode 单独返回，调用方可以放进 error_message / event payload，
+// 业务层看到 "Server.Internal" 立即知道 CPE 内部错而非协议错。
+func detectSOAPFault(body []byte) (found bool, cwmpCode int, soapCode string, faultString string) {
 	if !faultEnvRegex.Match(body) {
-		return false, 0, ""
+		return false, 0, "", ""
 	}
 
-	faultCode := 0
-	faultString := "SOAP fault"
+	faultString = "SOAP fault"
 
 	if m := cwmpFaultCodeRegex.FindSubmatch(body); m != nil {
 		if n, err := strconv.Atoi(strings.TrimSpace(string(m[1]))); err == nil {
-			faultCode = n
+			cwmpCode = n
 		}
+	}
+	if m := soapFaultCodeRegex.FindSubmatch(body); m != nil {
+		soapCode = strings.TrimSpace(string(m[1]))
 	}
 	if m := cwmpFaultStringRegex.FindSubmatch(body); m != nil {
 		faultString = strings.TrimSpace(string(m[1]))
 	} else if m := soapFaultStringRegex.FindSubmatch(body); m != nil {
 		faultString = strings.TrimSpace(string(m[1]))
-	} else if m := soapFaultCodeRegex.FindSubmatch(body); m != nil {
-		faultString = strings.TrimSpace(string(m[1]))
+	} else if soapCode != "" {
+		// 没有任何 faultstring 时，至少把 soap 外层 code 文本作为 message 返回
+		faultString = soapCode
 	}
 
-	return true, faultCode, faultString
+	return true, cwmpCode, soapCode, faultString
 }
 
 // isLocalhost 检查 URL 是否包含 localhost 或 127.0.0.1

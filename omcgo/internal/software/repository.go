@@ -13,6 +13,12 @@ type StaleTimeouts struct {
 	RPCResponse     time.Duration // waiting for Upload/Download Response
 	DeviceOnline    time.Duration // waiting for offline device to come back
 	TransferComplete time.Duration // waiting for TransferComplete after RPC accepted
+	// FaultLogUpload 是 FAULT_LOG_COLLECT 专用的 uploading 状态超时（SPV 触发后等
+	// 设备主动 PUT 故障日志到 ACS）。语义和 TransferComplete 不同：CPE 收到 SPV 后
+	// 应立刻 PUT 一个故障日志文件（一般几 MB～几十 MB，过程秒～分钟级），不像
+	// RUNTIME_LOG_COLLECT 走 Upload RPC 可能上传大日志包要更久。该值仅作用于
+	// fault_log_collect_sub_tasks 表；为 0 时退化到 TransferComplete。
+	FaultLogUpload time.Duration
 }
 
 // FirmwareRepository provides persistence for firmware versions.

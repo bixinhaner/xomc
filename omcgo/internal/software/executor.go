@@ -41,6 +41,10 @@ type UpgradeExecutor struct {
 	// ufte 包，避免 software 反向依赖 ufte 的 catalog——通过接口注入解耦。
 	// nil-safe：未注入时 LogCollect 子任务上线唤醒退化为 no-op + 警告日志。
 	logCollectResumer LogCollectResumer
+	// pathTranslator 把 standardPath → privatePath（per-device），SPV 触发的
+	// 日志采集（如 FAULT_LOG_COLLECT）下发 paramName 前必须翻译，否则不同
+	// param_model 的设备会拒收。nil 退化为 passthrough。
+	pathTranslator ParamPathTranslator
 }
 
 // LogCollectResumer 接口承载 LogCollect 类子任务"设备上线即重试"的能力。
@@ -51,6 +55,27 @@ type LogCollectResumer interface {
 	// 被唤醒时回调；实现方需要根据 parent.DownloadFileType 解析 UFTE catalog 的
 	// transport_path，再调 SoftwareService.ExecuteOneUploadDirect 重启 Upload RPC。
 	ResumeLogCollectSubTask(ctx context.Context, subTask *UpgradeSubTask, parent *UpgradeTask) error
+}
+
+// ParamPathTranslator 把 standardPath 翻译为目标设备的 privatePath（per-device，按
+// productClass + swVersion 路由 ProductRegistry → ParamRegistry → Translator）。
+// 与 mml.PathTranslator 同款消费者驱动接口；CLAUDE.md §5.3 明确「模板 / SPV / GPV
+// 输入侧用 standardPath，下发 / 持久化用 privatePath」，所有走 SPV 下发的链路都
+// 必须先经此翻译，否则不同 param_model 的设备会拒收。
+//
+// 注入：cmd/app/provider/modules.go 用 mml_adapters.go 同款 adapter 装配；nil 表示
+// 翻译禁用（向后兼容 / 单测），ExecuteOneSetParamCollect 退化为 passthrough。
+type ParamPathTranslator interface {
+	// TranslateForDevice 翻译一组 standardPaths。未命中 → Private=Standard，Source="passthrough"。
+	// productClass 解析失败 → 返回 error；调用方退化到 passthrough 并 warn。
+	TranslateForDevice(ctx context.Context, productClass, softwareVersion string, standardPaths []string) ([]TranslatedParamPath, error)
+}
+
+// TranslatedParamPath 是 ParamPathTranslator 的单条结果。
+type TranslatedParamPath struct {
+	Standard string
+	Private  string
+	Source   string // discovered / default / passthrough
 }
 
 // SetUploadConfig 注入日志采集所需的 ACS 上传基础 URL（CPE 可达地址）。
@@ -70,6 +95,12 @@ func (e *UpgradeExecutor) SetTransferProvider(p transfercfg.Provider) {
 // 未注入时 HandleDeviceOnline 对 LogCollect 子任务退化为 no-op（保持原有 升级类 行为）。
 func (e *UpgradeExecutor) SetLogCollectResumer(r LogCollectResumer) {
 	e.logCollectResumer = r
+}
+
+// SetParamPathTranslator 注入 standardPath → privatePath 翻译器，供 SPV 触发的日志
+// 采集（如 FAULT_LOG_COLLECT）下发前翻译参数名。nil 则保持 passthrough。
+func (e *UpgradeExecutor) SetParamPathTranslator(t ParamPathTranslator) {
+	e.pathTranslator = t
 }
 
 // NewUpgradeExecutor creates a new UpgradeExecutor.
@@ -548,6 +579,265 @@ func (e *UpgradeExecutor) ExecuteOneUpload(ctx context.Context, subTask *Upgrade
 		zap.String("target_file_name", targetFileName))
 }
 
+// ExecuteOneSetParamCollect 通过 SetParameterValues 触发设备主动上传日志文件。
+//
+// 与 ExecuteOneUpload 的区别：不走 TR-069 Upload RPC（厂商私有 ACS 协议未实现 Upload），
+// 而是把 ACS 端 FileUploadService 的完整 URL 写入设备私有参数（如
+// Device.DeviceInfo.X_COM_Log.FaultLogURL）。设备收到 SPV 后会异步把日志 HTTP PUT 到该 URL，
+// 整体效果等价于厂商触发的"反向上传"。
+//
+// paramPath  → SetParameterValues 的参数名，如 "Device.DeviceInfo.X_COM_Log.FaultLogURL"
+// transportPath → 含 {id}/{sn} 占位符的 URL 路径模板，渲染后拼到 uploadBaseURL 前面
+//
+// 完成路径：CPE 上传文件 → ACS 端 upload handler 落 MinIO → 发布 backup.file.received →
+// SoftwareService.HandleFileLandedForCollect 把 sub_task 标 Completed。
+func (e *UpgradeExecutor) ExecuteOneSetParamCollect(ctx context.Context, subTask *UpgradeSubTask, paramPath, transportPath string) {
+	dev, err := e.deviceRepo.GetByID(ctx, subTask.DeviceID)
+	if err != nil {
+		e.failSubTask(ctx, subTask, "Log collect can not be started, device not found.", FailureDeviceNotFound)
+		return
+	}
+
+	// 设备在线检查（与 ExecuteOneUpload 同款）：离线 → 挂 wait key 等 device.online 唤醒。
+	if dev.Status != model.DeviceActive {
+		waitKey := fmt.Sprintf("software:upgrade:wait:%s", dev.SerialNumber)
+		e.redis.Set(ctx, waitKey, subTask.ID.String(), 10*time.Minute)
+		subTask.DeviceSN = dev.SerialNumber
+		e.subTaskRepo.Update(ctx, subTask)
+		e.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradeSuspended, "waiting for device online")
+		return
+	}
+
+	acquired, err := e.acquireDeviceLock(ctx, dev.SerialNumber, subTask.ID)
+	if err != nil {
+		e.logger.Warn("acquire device lock failed for set-param collect, proceeding without lock",
+			zap.String("device_sn", dev.SerialNumber), zap.Error(err))
+	} else if !acquired {
+		e.failLockedSubTask(ctx, subTask, dev.SerialNumber)
+		return
+	}
+
+	subTask.DeviceSN = dev.SerialNumber
+	if err := e.subTaskRepo.Update(ctx, subTask); err != nil {
+		e.logger.Error("update set-param collect sub-task device info", zap.Error(err))
+	}
+
+	// 渲染上传 URL。{id} 用主任务 UUID（与文件名 fault-{task_id8}-{sn}.tar.gz 里的
+	// task_id 对齐，便于 ACS upload handler 据此分目录 + 按 (sn, parent_task_id) 反查），
+	// {sn} 用设备序列号。{fileName} 留空让设备自己决定上传名（与现网 Upload 链路一致）。
+	uploadBaseURL := e.resolveUploadBaseURL(ctx)
+	resolvedPath := resolveTemplate(transportPath, map[string]string{
+		"id":  subTask.TaskID.String(),
+		"sn":  dev.SerialNumber,
+	})
+	if uploadBaseURL == "" {
+		e.logger.Warn("upload base URL is empty for set-param collect; CPE will receive path-only URL and likely reject",
+			zap.String("device_sn", dev.SerialNumber),
+			zap.String("sub_task_id", subTask.ID.String()))
+	}
+	uploadURL := uploadBaseURL + resolvedPath
+
+	// standardPath → privatePath 翻译（per-device，按 productClass + swVersion 路由
+	// ProductRegistry → ParamRegistry → Translator）。UFTE 模板里 url_template 字段
+	// 存的是 standardPath（如 Device.DeviceInfo.FaultLogURL），实际下发给 CPE 的
+	// 必须是该 param_model 对应的 privatePath（不同型号映射可能不一样，详见
+	// CLAUDE.md §5.3 与 mml/service.go 同款翻译链路）。翻译器未注入或翻译失败 →
+	// passthrough 用原 standardPath，跟旧行为兼容。
+	dispatchPath := paramPath
+	if e.pathTranslator != nil && paramPath != "" {
+		translated, terr := e.pathTranslator.TranslateForDevice(ctx, dev.ProductClass, dev.FirmwareVersion, []string{paramPath})
+		switch {
+		case terr != nil:
+			e.logger.Warn("path translator failed; using standardPath as-is (passthrough)",
+				zap.String("device_sn", dev.SerialNumber),
+				zap.String("product_class", dev.ProductClass),
+				zap.String("standard_path", paramPath),
+				zap.Error(terr))
+		case len(translated) > 0:
+			dispatchPath = translated[0].Private
+			e.logger.Info("path translated for SPV collect",
+				zap.String("device_sn", dev.SerialNumber),
+				zap.String("product_class", dev.ProductClass),
+				zap.String("standard_path", translated[0].Standard),
+				zap.String("private_path", translated[0].Private),
+				zap.String("source", translated[0].Source))
+		}
+	}
+
+	// 构造 SetParameterValues 命令：参数 = dispatchPath（翻译后的 privatePath），值 = uploadURL。
+	// CommandKey 用 sub_task ID，后续 set_parameters.response 事件按 command_key 反查 sub_task。
+	paramsJSON, err := json.Marshal(map[string]interface{}{
+		"values": []map[string]string{
+			{
+				"name":  dispatchPath,
+				"value": uploadURL,
+				"type":  "xsd:string",
+			},
+		},
+		"command_key": subTask.ID.String(),
+	})
+	if err != nil {
+		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.failSubTask(ctx, subTask, fmt.Sprintf("Log collect can not be started, internal error: %v", err), FailureInternalError)
+		return
+	}
+
+	if _, err := e.cmdQueue.CreateTask(ctx, &devtask.CreateTaskRequest{
+		DeviceSN:   dev.SerialNumber,
+		Method:     "SetParameterValues",
+		Params:     paramsJSON,
+		Source:     devtask.TaskSourceSystem,
+		CommandKey: subTask.ID.String(),
+	}); err != nil {
+		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		e.failSubTask(ctx, subTask, "Log collect can not be started, failed to push SetParameterValues command.", FailureCommandPush)
+		return
+	}
+
+	subTask.CommandKey = subTask.ID.String()
+	if err := e.subTaskRepo.Update(ctx, subTask); err != nil {
+		e.logger.Error("update set-param collect sub-task command_key", zap.Error(err))
+	}
+
+	// 状态翻到 Uploading —— 必须在 connReq 之前，详见 ExecuteOneUpload 同名注释。
+	// SPV 走和 Upload 同款的 Uploading 状态：UI 通过 fileLanded 判定是 uploading / awaiting_tc，
+	// 文件落地后 HandleFileLandedForCollect 推进到 Completed。
+	if err := e.subTaskRepo.UpdateStatus(ctx, subTask.ID, UpgradeUploading, ""); err != nil {
+		e.logger.Error("update set-param collect sub-task to uploading", zap.Error(err))
+	}
+
+	if dev.ConnectionRequestURL != "" {
+		deviceSN := dev.SerialNumber
+		connURL := dev.ConnectionRequestURL
+		go func() {
+			if err := e.connReq.Send(context.Background(), deviceSN, connURL); err != nil {
+				e.logger.Warn("send connection request for set-param collect",
+					zap.String("device_sn", deviceSN), zap.Error(err))
+			}
+		}()
+	}
+
+	e.logger.Info("set-param collect SPV pushed",
+		zap.String("sub_task_id", subTask.ID.String()),
+		zap.String("device_sn", dev.SerialNumber),
+		zap.String("standard_path", paramPath),
+		zap.String("dispatch_path", dispatchPath),
+		zap.String("upload_url", uploadURL),
+		zap.String("upload_base_url", uploadBaseURL))
+}
+
+// HandleSetParamsResponseForCollect 处理 SetParameterValues 响应事件，专供 LogCollect
+// 类（FAULT_LOG_COLLECT 等通过 SPV 触发的日志采集）使用。
+//
+//   - fault_code != 0 → 设备拒绝 SPV，立即 fail 子任务
+//   - fault_code == 0 → 设备接受了 SPV，保持 Uploading 状态等待文件实际落地
+//
+// 注意：rollback 也走 SPV，但其 command_key 是 sub_task UUID 且 parent.TaskType=Rollback，
+// 这里通过 parent.TaskType==LogCollect 过滤，避免误吞 rollback 路径的响应。
+func (e *UpgradeExecutor) HandleSetParamsResponseForCollect(ctx context.Context, evt event.Event) error {
+	var payload struct {
+		DeviceSN   string `json:"device_sn"`
+		CommandKey string `json:"command_key"`
+		FaultCode  int    `json:"fault_code"`
+		FaultStr   string `json:"fault_string"`
+	}
+	if err := evt.DecodePayload(&payload); err != nil || payload.CommandKey == "" {
+		return nil
+	}
+
+	subTask, err := e.subTaskRepo.GetByCommandKey(ctx, payload.CommandKey)
+	if err != nil {
+		return nil
+	}
+	if subTask.Status != UpgradeUploading {
+		return nil
+	}
+	parent, err := e.taskRepo.GetByID(ctx, subTask.TaskID)
+	if err != nil || parent.TaskType != TaskTypeLogCollect {
+		return nil
+	}
+
+	// 判失败：fault_code 非 0 → 标准 CWMP fault；fault_code 为 0 但 fault_string 非空 →
+	// 兼容用 SOAP 1.1 <faultcode>Server.Internal</faultcode> 替代 <cwmp:FaultCode> 的厂商
+	// （如 baicells/FAP，回 "RPC handler failed: Empty parameter list"），ACS 解出 code=0
+	// 但 string 携带真实原因。任一非空都视为失败，把原因落到 sub_task.error_message。
+	if isCPEFault(payload.FaultCode, payload.FaultStr) {
+		e.failSubTask(ctx, subTask,
+			fmt.Sprintf("SetParameterValues rejected by device. FaultCode: %d, FaultString: %s",
+				payload.FaultCode, payload.FaultStr),
+			FailureUploadFault)
+		return nil
+	}
+
+	e.logger.Info("SPV accepted, waiting for log file upload",
+		zap.String("sub_task_id", subTask.ID.String()),
+		zap.String("device_sn", payload.DeviceSN))
+	return nil
+}
+
+// isCPEFault 综合判定 CPE 是否真的失败。
+// 单看 fault_code != 0 不够：部分厂商 CPE（如 baicells）SOAP Fault 用 SOAP 1.1 的
+// <faultcode>Server.Internal</faultcode>（字符串）而不是 CWMP 标准的
+// <cwmp:FaultCode>9xxx</cwmp:FaultCode>（数值），ACS 解出来 fault_code=0，但 fault_string
+// 仍然带真实错误描述（"RPC handler failed: ..."）。此时若只看 code 会把失败当成功，
+// sub_task 永远卡在 in_flight 状态。
+func isCPEFault(faultCode int, faultStr string) bool {
+	return faultCode != 0 || strings.TrimSpace(faultStr) != ""
+}
+
+// HandleFileLandedForCollect 处理 backup.file.received 事件，按 (device_sn, parent_task_id)
+// 反查在途 LogCollect 子任务，把状态推进到 Completed。
+//
+// 触发场景：FAULT_LOG_COLLECT 通过 SPV 让设备把日志 PUT 到 ACS 端 FileUploadService。
+// 设备 PUT 完成 → upload handler 写 MinIO → 发 backup.file.received（含 task_id 与 device_sn）。
+//
+// 与 TC 路径并存：传统 Upload RPC 链路（RUNTIME_LOG_COLLECT）走 TransferComplete →
+// handleTCBody 推进。该路径下也会进到这里，但因 sub_task 已被 TC 标 Completed，
+// GetActiveByDeviceID 拿不到在途任务 → 自然 no-op。
+func (e *UpgradeExecutor) HandleFileLandedForCollect(ctx context.Context, evt event.Event) error {
+	var payload struct {
+		DeviceSN string `json:"device_sn"`
+		TaskID   string `json:"task_id"`
+	}
+	if err := evt.DecodePayload(&payload); err != nil {
+		return nil
+	}
+	if payload.DeviceSN == "" || payload.TaskID == "" {
+		return nil
+	}
+	parentID, err := uuid.Parse(payload.TaskID)
+	if err != nil {
+		return nil
+	}
+	parent, err := e.taskRepo.GetByID(ctx, parentID)
+	if err != nil || parent == nil || parent.TaskType != TaskTypeLogCollect {
+		return nil
+	}
+
+	dev, err := e.deviceRepo.GetBySerialNumber(ctx, payload.DeviceSN)
+	if err != nil || dev == nil {
+		return nil
+	}
+	subTask, err := e.subTaskRepo.GetActiveByDeviceID(ctx, dev.ID)
+	if err != nil || subTask == nil {
+		return nil
+	}
+	if subTask.TaskID != parentID {
+		// 在途任务不是当前事件所属的主任务（设备同时在跑别的 LogCollect 任务）→ 不动。
+		return nil
+	}
+	if subTask.Status != UpgradeUploading {
+		return nil
+	}
+
+	e.completeSubTask(ctx, subTask, payload.DeviceSN)
+	e.logger.Info("log file landed, sub_task completed",
+		zap.String("sub_task_id", subTask.ID.String()),
+		zap.String("device_sn", payload.DeviceSN),
+		zap.String("parent_task_id", parentID.String()))
+	return nil
+}
+
 // HandleDownloadResponse handles command.download.response events.
 // On fault → fail the sub-task. On success → wait for TransferComplete.
 func (e *UpgradeExecutor) HandleDownloadResponse(ctx context.Context, evt event.Event) error {
@@ -570,7 +860,8 @@ func (e *UpgradeExecutor) HandleDownloadResponse(ctx context.Context, evt event.
 		return nil
 	}
 
-	if payload.FaultCode != 0 {
+	// 判失败兼容 SOAP 1.1 fault（fault_code=0 但 fault_string 非空），详见 isCPEFault 注释。
+	if isCPEFault(payload.FaultCode, payload.FaultStr) {
 		e.failSubTask(ctx, subTask, fmt.Sprintf("Download failed, device rejected download. FaultCode: %d, FaultString: %s", payload.FaultCode, payload.FaultStr), FailureDownloadFault)
 		return nil
 	}
@@ -605,7 +896,8 @@ func (e *UpgradeExecutor) HandleUploadResponse(ctx context.Context, evt event.Ev
 		return nil
 	}
 
-	if payload.FaultCode != 0 {
+	// 判失败兼容 SOAP 1.1 fault（fault_code=0 但 fault_string 非空），详见 isCPEFault 注释。
+	if isCPEFault(payload.FaultCode, payload.FaultStr) {
 		e.failSubTask(ctx, subTask, fmt.Sprintf("Upload rejected by device. FaultCode: %d, FaultString: %s", payload.FaultCode, payload.FaultStr), FailureUploadFault)
 		return nil
 	}

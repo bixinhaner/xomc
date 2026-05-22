@@ -220,14 +220,18 @@ func (s *Service) StartTask(ctx context.Context, taskID uuid.UUID) error {
 		if err != nil {
 			return err
 		}
-		transportPath := ""
+		transportPath, rpcType, paramPath := "", "", ""
 		for _, tt := range catalog {
 			if tt.softwareTaskType == software.TaskTypeLogCollect && tt.FileType == task.DownloadFileType {
 				transportPath = tt.TransportPath
+				rpcType = tt.RPCType
+				// FAULT_LOG_COLLECT 用 URLTemplate 存 SPV 参数路径（如
+				// Device.DeviceInfo.X_COM_Log.FaultLogURL）。详见 model.go 注释。
+				paramPath = tt.URLTemplate
 				break
 			}
 		}
-		return s.softwareService.ResumeCollect(ctx, taskID, transportPath)
+		return s.softwareService.ResumeCollect(ctx, taskID, transportPath, rpcType, paramPath)
 	}
 	return s.softwareService.ResumeUpgrade(ctx, taskID)
 }
@@ -244,10 +248,12 @@ func (s *Service) ResumeLogCollectSubTask(ctx context.Context, subTask *software
 	if err != nil {
 		return fmt.Errorf("load UFTE catalog: %w", err)
 	}
-	transportPath := ""
+	transportPath, rpcType, paramPath := "", "", ""
 	for _, tt := range catalog {
 		if tt.softwareTaskType == software.TaskTypeLogCollect && tt.FileType == parent.DownloadFileType {
 			transportPath = tt.TransportPath
+			rpcType = tt.RPCType
+			paramPath = tt.URLTemplate
 			break
 		}
 	}
@@ -255,6 +261,10 @@ func (s *Service) ResumeLogCollectSubTask(ctx context.Context, subTask *software
 		s.logger.Warn("no transport_path matched for log collect resume; sub-task will fall back to default URL",
 			zap.String("sub_task_id", subTask.ID.String()),
 			zap.String("file_type", parent.DownloadFileType))
+	}
+	if strings.EqualFold(strings.TrimSpace(rpcType), "SET_PARAM_VALUES") {
+		s.softwareService.ExecuteOneSetParamCollectDirect(ctx, subTask, paramPath, transportPath)
+		return nil
 	}
 	s.softwareService.ExecuteOneUploadDirect(ctx, subTask, parent.DownloadFileType, parent.FileName, transportPath)
 	return nil
@@ -315,13 +325,17 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 
 	switch {
 	case typeDef.softwareTaskType == software.TaskTypeLogCollect:
-		// 日志采集（Upload RPC）：不需要固件，直接通过 BatchCollect 下发 Upload 命令
+		// 日志采集（Upload 或 SetParameterValues RPC）：不需要固件，直接通过 BatchCollect 下发。
+		// FAULT_LOG_COLLECT 用 SPV 模式 — URLTemplate 字段复用为 SPV 参数路径
+		// （Device.DeviceInfo.X_COM_Log.FaultLogURL）；其余走传统 Upload RPC。
 		createdTask, err = s.softwareService.BatchCollect(ctx, software.BatchCollectRequest{
 			DeviceIDs:              req.DeviceIDs,
 			TaskName:               req.TaskName,
 			FileType:               typeDef.FileType,
 			TargetFileNameTemplate: typeDef.TargetFileNameTemplate,
 			TransportPath:          typeDef.TransportPath,
+			RPCType:                typeDef.RPCType,
+			ParamPath:              typeDef.URLTemplate,
 			CreateUser:             createUser,
 			CreateSuspended:        createSuspended,
 		})

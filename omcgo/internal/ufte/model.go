@@ -351,29 +351,42 @@ func builtInTaskTypes() []TaskType {
 			softwareTaskType:       software.TaskTypeLogCollect,
 		},
 		{
-			TypeCode:               "FAULT_LOG_COLLECT",
-			SortOrder:              35,
-			Category:               "station_log",
-			CategoryLabel:          "日志收集",
-			DisplayName:            "故障日志采集",
-			Description:            "复用现网日志采集 Upload 链路，提供 UFTE 内置的故障日志收集模板。",
-			RPCType:                "UPLOAD",
-			BuiltIn:                true,
-			Enabled:                true,
-			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"},
-			PermissionCode:         "CODE_FAULT_LOG_COLLECT",
-			PlatformScope:          []string{"4G eNB", "5G gNB", "DXDF", "BBU-QSS"},
-			FileType:               "8",
-			FileTypeLabel:          "故障日志",
-			FileTypeEditable:       true,
+			TypeCode:      "FAULT_LOG_COLLECT",
+			SortOrder:     35,
+			Category:      "station_log",
+			CategoryLabel: "日志收集",
+			DisplayName:   "故障日志采集",
+			Description:   "通过 SetParameterValues 写设备私有参数 Device.DeviceInfo.FaultLogURL 触发 CPE 主动上传故障日志，落 MinIO 后由 backup.file.received 推进任务完成。",
+			// SPV 触发的"反向上传"：厂商私有 ACS 协议不实现 Upload RPC，而是把 ACS 端
+			// FileUploadService 的完整 URL 写到设备私有参数 FaultLogURL，CPE 拿到 URL
+			// 后异步 HTTP PUT 日志到该 URL。
+			RPCType:        "SET_PARAM_VALUES",
+			BuiltIn:        true,
+			Enabled:        true,
+			StepChain:      []string{"CHECK_PERMISSION", "CHECK_ONLINE", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_FILE_UPLOAD"},
+			PermissionCode: "CODE_FAULT_LOG_COLLECT",
+			PlatformScope:  []string{"4G eNB", "5G gNB", "DXDF", "BBU-QSS"},
+			// FileType 仍保留 "8"，用于 transfer_router.ForUploadFileType 路由到
+			// fault_log_collect_tasks / fault_log_collect_sub_tasks 物理表。
+			FileType:         "8",
+			FileTypeLabel:    "故障日志",
+			FileTypeEditable: true,
+			// URLTemplate 复用为 SPV 参数路径。BatchCollect 把它透传给 executor.ExecuteOneSetParamCollect
+			// 作为 SetParameterValues 的 paramName。路径来源：migrations/seed/000126
+			// standard_params 字典（STANDARD 类型 READ_WRITE string）。最初按用户口述写成
+			// "X_COM_Log.FaultLogURL"，CPE 回 "Empty parameter list" 因为该路径在 CPE 数据
+			// 模型里不存在，已对齐字典。
+			URLTemplate:            "Device.DeviceInfo.FaultLogURL",
 			TargetFileNameTemplate: "fault-{task_id8}-{sn}.tar.gz",
 			FileNameTemplate:       "fault-{task_id8}-{sn}.tar.gz",
-			// 厂商样本未提供故障日志格式，先复用运行日志的 fileType=LOG（设备分类
-			// 可能靠 CommandKey 前缀区分）。详见 migrations/000141 + RUNTIME_LOG_COLLECT 注释。
-			TransportPath: "/smallcell/FileUploadService?fileType=LOG&sn={sn}&taskId={taskId32}&filename=",
-			LastEditor:             "system",
-			UpdatedAt:              now,
-			softwareTaskType:       software.TaskTypeLogCollect,
+			// TransportPath 是 SPV 下发给 CPE 的 URL 路径模板。{id} = 主任务 UUID（与
+			// 文件名 fault-{task_id8}-{sn}.tar.gz 的 task_id8 同源；ACS upload handler
+			// 用它做 task 子目录隔离同设备多次任务）；{sn} = 设备 SN；{fileName} 留空
+			// 让 CPE 自行决定上传名。
+			TransportPath:    "/smallcell/FileUploadService?fileType=RL&id={id}&sn={sn}&fileName=",
+			LastEditor:       "system",
+			UpdatedAt:        now,
+			softwareTaskType: software.TaskTypeLogCollect,
 		},
 		{
 			TypeCode:               "CONFIG_BACKUP_XML",

@@ -272,8 +272,13 @@ func (r *RoutingSubTaskRepository) candidatesByCommandKey(commandKey string) []B
 			return cands
 		}
 	}
-	// 其他（升级 Download 等）→ fallback 旧表
-	return []BasicSubTaskRepo{r.fallback}
+	// 其他（升级 Download / SPV 触发的 FAULT_LOG_COLLECT 用纯 UUID 当 CommandKey / 任何
+	// 未识别前缀）→ fan-out 全部表，跟 GetByID / pickByID 同行为。否则像
+	// ExecuteOneSetParamCollect 用 sub_task UUID 当 CommandKey 的链路会拿不到行，导致
+	// HandleSetParamsResponseForCollect 静默 return，sub_task 永远卡 uploading（5 分钟前
+	// 实测踩坑：fault_log_collect_sub_tasks 行查不到，handler 走 errors.Is(ErrNotFound)
+	// → return nil → SOAP Fault 信息扔了）。
+	return r.allSubTaskRepos()
 }
 
 // pickByID fan-out 查所有 sub_task 表找到 id。
@@ -476,8 +481,18 @@ func (r *RoutingSubTaskRepository) DeleteByTaskID(ctx context.Context, taskID uu
 
 func (r *RoutingSubTaskRepository) FailStale(ctx context.Context, cutoffs StaleTimeouts) (map[uuid.UUID]int64, error) {
 	merged := make(map[uuid.UUID]int64)
+	// per-business override：fault_log_collect 的 uploading 走 FaultLogUpload（默认 15min），
+	// 跟其它表（30min TransferComplete）拉开。其它业务暂时无差异化需求，沿用 cutoffs 原值。
+	faultLogCuts := cutoffs
+	if cutoffs.FaultLogUpload > 0 {
+		faultLogCuts.TransferComplete = cutoffs.FaultLogUpload
+	}
 	for _, repo := range r.allSubTaskRepos() {
-		m, err := repo.FailStale(ctx, cutoffs)
+		c := cutoffs
+		if r.router.FaultLogCollect.SubTask != nil && repo == r.router.FaultLogCollect.SubTask {
+			c = faultLogCuts
+		}
+		m, err := repo.FailStale(ctx, c)
 		if err != nil {
 			return nil, err
 		}

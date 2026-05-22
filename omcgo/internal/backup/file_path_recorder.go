@@ -59,6 +59,32 @@ type FilePathRecorder struct {
 	fileRepo FileRepository // optional (M1)
 	metrics  *RestoreMetrics
 	logger   *zap.Logger
+	// notifier 可选 hook：在文件落盘 + metadata 写入完成后被调一次，让上层（如
+	// software/UFTE 的 FAULT_LOG_COLLECT 链路）按 (task_id, device_sn) 推进自己的
+	// sub_task 状态。
+	//
+	// 为什么走 hook 而不是订阅 backup.file.received：NATS BACKUP stream 是
+	// WorkQueuePolicy retention，同 subject 只能挂 1 个 filter consumer——
+	// FilePathRecorder 已经独占，再加 software 端 subscribe 会被 NATS 拒
+	// ("filtered consumer not unique on workqueue stream")。所以让已经收到
+	// 事件的 FilePathRecorder 转手通知上层。
+	notifier FileLandedNotifier
+}
+
+// FileLandedNotifier 是 FilePathRecorder 处理完一条 backup.file.received 后回调
+// 给上层的 hook（消费者驱动接口，定义在 backup 包）。software 模块实现并注入；
+// 详见 file_path_recorder.go 注释里"为什么走 hook"。
+type FileLandedNotifier interface {
+	// OnLogFileLanded 在 backup_restore_file metadata upsert 完成后调用，best-effort
+	// 语义（实现内部处理错误并日志，不影响 FilePathRecorder 主链路 / NATS ack）。
+	// deviceSN + taskID 来自 ACS upload handler URL query；taskID 为完整 UUID 字符串，
+	// 实现方按 (deviceSN, taskID) 反查自己的 active 子任务并推进。
+	OnLogFileLanded(ctx context.Context, deviceSN, taskID string)
+}
+
+// SetFileLandedNotifier 注入 hook。nil 表示禁用（向后兼容）。
+func (r *FilePathRecorder) SetFileLandedNotifier(n FileLandedNotifier) {
+	r.notifier = n
 }
 
 // NewFilePathRecorder constructs a FilePathRecorder. metrics may be nil
@@ -123,6 +149,18 @@ func (r *FilePathRecorder) handleFileReceived(ctx context.Context, evt event.Eve
 	// nil target 表示找不到原 backup_task 行（UFTE 链路 / 旧任务被清理），
 	// 此时 OperatorCode 留空。
 	r.upsertFileMetadata(ctx, nil, p, fullPath)
+
+	// 通知上层（如 software UFTE 的 FAULT_LOG_COLLECT）按 (deviceSN, taskID) 推进
+	// 自己的 sub_task。一定要放在 backup_tasks 匹配前——UFTE 链路 task 在
+	// upgrade_tasks 表，prefix 永远不会命中下面的 backup_tasks 分支。
+	r.logger.Info("file_landed hook check",
+		zap.Bool("notifier_wired", r.notifier != nil),
+		zap.String("device_sn", p.DeviceSN),
+		zap.String("task_id", p.TaskID),
+		zap.String("filename", p.Filename))
+	if r.notifier != nil && p.DeviceSN != "" && p.TaskID != "" {
+		r.notifier.OnLogFileLanded(ctx, p.DeviceSN, p.TaskID)
+	}
 
 	// 分支 1：尝试匹配旧 backup_tasks 链路。filename 不带 backup- 前缀的
 	// 上报（操作员手工上传、外部系统）走不到这里——直接返回。

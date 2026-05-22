@@ -48,7 +48,7 @@ var (
 func init() {
 	InformResponseTmpl = template.Must(template.New("InformResponse").Parse(informResponseXML))
 	GetParameterValuesTmpl = template.Must(template.New("GetParameterValues").Parse(getParameterValuesXML))
-	SetParameterValuesTmpl = template.Must(template.New("SetParameterValues").Parse(setParameterValuesXML))
+	SetParameterValuesTmpl = template.Must(template.New("SetParameterValues").Funcs(soapFuncMap).Parse(setParameterValuesXML))
 	GetParameterNamesTmpl = template.Must(template.New("GetParameterNames").Parse(getParameterNamesXML))
 	AddObjectTmpl = template.Must(template.New("AddObject").Parse(addObjectXML))
 	DeleteObjectTmpl = template.Must(template.New("DeleteObject").Parse(deleteObjectXML))
@@ -247,15 +247,27 @@ const getParameterValuesXML = soapEnvelopeOpen +
 	`</ParameterNames>` +
 	`</cwmp:GetParameterValues>` + soapEnvelopeClose
 
+// setParameterValuesXML
+//
+// TR-069 §A.3.2.1 SetParameterValues: CWMP schema 使用 elementFormDefault="unqualified"，
+// RPC 参数子元素（ParameterList / ParameterValueStruct / Name / Value / ParameterKey）
+// 必须是无前缀（unqualified）；只有 RPC 顶层元素 cwmp:SetParameterValues 与 arrayType 里
+// 指向类型定义的 cwmp:ParameterValueStruct[N] 带 cwmp: 前缀。
+//
+// 历史教训（双重）：
+//  1. URL 含 `&` 未 xmlescape，CPE XML parser 报错（与下方 Download/Upload 模板同根因）
+//  2. 内层元素带 cwmp: 前缀，严格按 spec 校验的 CPE（baicells/FAP/BU1810 实测）
+//     直接把 ParameterList 当未知元素忽略，回 "Empty parameter list" SOAP Fault，
+//     RPC handler 整个失败。所有用户可控字段同时过 xmlescape。
 const setParameterValuesXML = soapEnvelopeOpen +
 	`<cwmp:SetParameterValues>` +
-	`<cwmp:ParameterList SOAP-ENC:arrayType="cwmp:ParameterValueStruct[{{len .Params}}]">` +
-	`{{- range .Params}}<cwmp:ParameterValueStruct>` +
-	`<cwmp:Name>{{.Name}}</cwmp:Name>` +
-	`<cwmp:Value xsi:type="{{.Type}}">{{.Value}}</cwmp:Value>` +
-	`</cwmp:ParameterValueStruct>{{end}}` +
-	`</cwmp:ParameterList>` +
-	`<cwmp:ParameterKey>{{.Key}}</cwmp:ParameterKey>` +
+	`<ParameterList SOAP-ENC:arrayType="cwmp:ParameterValueStruct[{{len .Params}}]">` +
+	`{{- range .Params}}<ParameterValueStruct>` +
+	`<Name>{{.Name | xmlescape}}</Name>` +
+	`<Value xsi:type="{{.Type}}">{{.Value | xmlescape}}</Value>` +
+	`</ParameterValueStruct>{{end}}` +
+	`</ParameterList>` +
+	`<ParameterKey>{{.Key | xmlescape}}</ParameterKey>` +
 	`</cwmp:SetParameterValues>` + soapEnvelopeClose
 
 const getParameterNamesXML = soapEnvelopeOpen +
@@ -264,16 +276,17 @@ const getParameterNamesXML = soapEnvelopeOpen +
 	`<NextLevel>{{if .NextLevel}}true{{else}}false{{end}}</NextLevel>` +
 	`</cwmp:GetParameterNames>` + soapEnvelopeClose
 
+// AddObject / DeleteObject — RPC 参数子元素同样 unqualified（参考 SetParameterValues 注释）。
 const addObjectXML = soapEnvelopeOpen +
 	`<cwmp:AddObject>` +
-	`<cwmp:ObjectName>{{.ObjectName}}</cwmp:ObjectName>` +
-	`<cwmp:ParameterKey>{{.Key}}</cwmp:ParameterKey>` +
+	`<ObjectName>{{.ObjectName}}</ObjectName>` +
+	`<ParameterKey>{{.Key}}</ParameterKey>` +
 	`</cwmp:AddObject>` + soapEnvelopeClose
 
 const deleteObjectXML = soapEnvelopeOpen +
 	`<cwmp:DeleteObject>` +
-	`<cwmp:ObjectName>{{.ObjectName}}</cwmp:ObjectName>` +
-	`<cwmp:ParameterKey>{{.Key}}</cwmp:ParameterKey>` +
+	`<ObjectName>{{.ObjectName}}</ObjectName>` +
+	`<ParameterKey>{{.Key}}</ParameterKey>` +
 	`</cwmp:DeleteObject>` + soapEnvelopeClose
 
 // TR-069 §A.3.2.8 Download / §A.3.2.9 Upload: CWMP schema 使用
@@ -304,9 +317,10 @@ const uploadXML = soapEnvelopeOpen +
 	`<DelaySeconds>{{.DelaySeconds}}</DelaySeconds>` +
 	`</cwmp:Upload>` + soapEnvelopeClose
 
+// Reboot — CommandKey 子元素 unqualified（参考 SetParameterValues 注释）。
 const rebootXML = soapEnvelopeOpen +
 	`<cwmp:Reboot>` +
-	`<cwmp:CommandKey>{{.CommandKey}}</cwmp:CommandKey>` +
+	`<CommandKey>{{.CommandKey}}</CommandKey>` +
 	`</cwmp:Reboot>` + soapEnvelopeClose
 
 const factoryResetXML = soapEnvelopeOpen +
@@ -317,10 +331,11 @@ const factoryResetXML = soapEnvelopeOpen +
 const getRPCMethodsXML = soapEnvelopeOpen +
 	`<cwmp:GetRPCMethods/>` + soapEnvelopeClose
 
+// ScheduleInform — DelaySeconds / CommandKey 子元素 unqualified（参考 SetParameterValues 注释）。
 const scheduleInformXML = soapEnvelopeOpen +
 	`<cwmp:ScheduleInform>` +
-	`<cwmp:DelaySeconds>{{.DelaySeconds}}</cwmp:DelaySeconds>` +
-	`<cwmp:CommandKey>{{.CommandKey}}</cwmp:CommandKey>` +
+	`<DelaySeconds>{{.DelaySeconds}}</DelaySeconds>` +
+	`<CommandKey>{{.CommandKey}}</CommandKey>` +
 	`</cwmp:ScheduleInform>` + soapEnvelopeClose
 
 const faultResponseXML = soapEnvelopeOpen +
@@ -339,23 +354,26 @@ const transferCompleteResponseXML = soapEnvelopeOpen +
 const autonomousTransferCompleteResponseXML = soapEnvelopeOpen +
 	`<cwmp:AutonomousTransferCompleteResponse/>` + soapEnvelopeClose
 
+// GetParameterAttributes / SetParameterAttributes — RPC 参数子元素同样 unqualified
+// （参考 SetParameterValues 注释）。arrayType 里的类型名（cwmp:SetParameterAttributesStruct）
+// 保留 cwmp: 前缀（指向类型定义）。
 const getParameterAttributesXML = soapEnvelopeOpen +
 	`<cwmp:GetParameterAttributes>` +
-	`<cwmp:ParameterNames SOAP-ENC:arrayType="xsd:string[{{len .Params}}]">` +
+	`<ParameterNames SOAP-ENC:arrayType="xsd:string[{{len .Params}}]">` +
 	`{{- range .Params}}<string>{{.Name}}</string>{{end}}` +
-	`</cwmp:ParameterNames>` +
+	`</ParameterNames>` +
 	`</cwmp:GetParameterAttributes>` + soapEnvelopeClose
 
 const setParameterAttributesXML = soapEnvelopeOpen +
 	`<cwmp:SetParameterAttributes>` +
-	`<cwmp:ParameterList SOAP-ENC:arrayType="cwmp:SetParameterAttributesStruct[{{len .Params}}]">` +
-	`{{- range .Params}}<cwmp:SetParameterAttributesStruct>` +
-	`<cwmp:Name>{{.Name}}</cwmp:Name>` +
-	`<cwmp:NotificationChange>{{if .NotificationChange}}true{{else}}false{{end}}</cwmp:NotificationChange>` +
-	`<cwmp:Notification>{{.Notification}}</cwmp:Notification>` +
-	`<cwmp:AccessListChange>{{if .AccessListChange}}true{{else}}false{{end}}</cwmp:AccessListChange>` +
-	`<cwmp:AccessList>{{range .AccessList}}<string>{{.}}</string>{{end}}</cwmp:AccessList>` +
-	`</cwmp:SetParameterAttributesStruct>{{end}}` +
-	`</cwmp:ParameterList>` +
+	`<ParameterList SOAP-ENC:arrayType="cwmp:SetParameterAttributesStruct[{{len .Params}}]">` +
+	`{{- range .Params}}<SetParameterAttributesStruct>` +
+	`<Name>{{.Name}}</Name>` +
+	`<NotificationChange>{{if .NotificationChange}}true{{else}}false{{end}}</NotificationChange>` +
+	`<Notification>{{.Notification}}</Notification>` +
+	`<AccessListChange>{{if .AccessListChange}}true{{else}}false{{end}}</AccessListChange>` +
+	`<AccessList>{{range .AccessList}}<string>{{.}}</string>{{end}}</AccessList>` +
+	`</SetParameterAttributesStruct>{{end}}` +
+	`</ParameterList>` +
 	`</cwmp:SetParameterAttributes>` + soapEnvelopeClose
 

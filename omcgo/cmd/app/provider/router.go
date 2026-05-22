@@ -87,7 +87,11 @@ func Setup(r *gin.Engine, c *Container) error {
 	})
 	graph.Add(components.ModuleInitializer{
 		Name: "backup",
-		Init: func() error { return initBackupModule(c) },
+		// 依赖 software：FilePathRecorder 装配时要拿 c.miscDeps.softwareService 作为
+		// FileLandedNotifier（FAULT_LOG_COLLECT 文件落地即完成的 hook 回调）；不声明依赖
+		// 时 backup 跑得比 software 早，softwareService 还是 nil，hook 永远拿不到通知。
+		Depends: []string{"software"},
+		Init:    func() error { return initBackupModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
 		Name:    "stationlog",
