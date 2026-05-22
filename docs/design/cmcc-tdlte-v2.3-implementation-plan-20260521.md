@@ -4,6 +4,8 @@
 > 生成日期：2026-05-21
 > 适用范围：MML Console（F06）+ 参数模型字典（F02）+ ACS RPC（F01）三域协同
 
+> **2026-05-22 更新**：v1/v2 双轨已收敛为单轨 v2。`MML_V2_SCHEMA` env、`WithV2Mode` / `WithV2Schema` Options、`v1` catalog parser/upsert、`wrapByChapter` / `attachFamily` / `InferFamily`、v1 catalog 文件 `cmcc-tdlte-v2.3.json`（旧 object 维度）已全部删除。下文 v1/v2 双轨小节仅保留为历史记录。
+
 ---
 
 ## 0. 执行摘要（TL;DR）

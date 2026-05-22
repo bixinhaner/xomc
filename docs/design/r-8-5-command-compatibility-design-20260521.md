@@ -30,7 +30,7 @@
 | `mml_commands.target_paths` 非空 | 563 / 1183 | v1 catalog Loader 出来 |
 | `product_class_patterns` | 8+ 正则 pattern | `^FAP/MLN/SC$` 等 |
 
-**关键决策**：路径来源用 fallback — 优先 `tree_node_refs`（v2，更精确），回退 `target_paths`（v1，覆盖更广）。这样 v1/v2 双模式都能工作，无需依赖 `MML_V2_SCHEMA` flag。
+**关键决策**：路径来源直接读 `tree_node_refs`（v2 唯一路径来源）。v1 `target_paths` 路径已随 v1 catalog 下线一起删除（2026-05-22）。
 
 ---
 

@@ -4,6 +4,8 @@
 > 范围：前端组件 + Zustand 状态 + 7 个后端 API + service/repo SQL + 14 张 DB 表 + ER 关系
 > 目的：为后续维护 / 新人 onboarding / 设计变更 提供完整的全栈索引
 
+> **2026-05-22 更新**：v1 命令树视图（object 维度 group + `wrapByChapter` 合成章节层 + `InferFamily` family 推断）已全部下线，`MML_V2_SCHEMA` env / `WithV2Mode` / `WithV2Schema` Options 已删除。`BuildTree` 永远走 chapter 顶层 + DB 真实嵌套；catalog Loader 永远走 v2 路径。下文 v1/v2 双轨章节仅保留为历史记录。
+
 ---
 
 ## 0. 导论
