@@ -4,6 +4,7 @@
  */
 
 import type { DeviceStatus } from '@core/types/map';
+import type { MapMetadata } from './useMapConfig';
 
 /**
  * 设备状态配置
@@ -143,6 +144,10 @@ export const MAP_CONFIG = {
   clusterZoomThreshold: 12,
   /** OpenStreetMap 在线瓦片地址 */
   osmTileUrl: 'https://{a-c}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  /** 默认版权信息 */
+  attribution: '© OpenStreetMap contributors',
+  /** 默认地理边界（赞比亚区域） */
+  bounds: { minLon: 22.0, maxLon: 34.0, minLat: -18.0, maxLat: -8.0 },
   /**
    * 瓦片服务地址（智能选择）
    * 优先级：环境变量 VITE_MAP_TILE_URL > 在线 OSM
@@ -231,3 +236,41 @@ export const SPIDERFY_CONFIG = {
   /** 展开动画时长（ms） */
   animationDuration: 300,
 };
+
+/**
+ * 从元数据构建地图配置
+ *
+ * @param metadata - 地图元数据（来自 TileJSON 或默认配置）
+ * @returns 地图配置对象，包含中心点、缩放级别、瓦片 URL 等
+ *
+ * 使用示例：
+ * ```ts
+ * const { metadata } = useMapConfig();
+ * if (metadata) {
+ *   const config = buildMapConfigFromMetadata(metadata);
+ *   // 使用 config defaultCenter, defaultZoom 等
+ * }
+ * ```
+ */
+export function buildMapConfigFromMetadata(metadata: MapMetadata) {
+  return {
+    /** 默认中心点 [经度, 纬度] */
+    defaultCenter: [metadata.center.lon, metadata.center.lat] as [
+      number,
+      number,
+    ],
+    /** 默认缩放级别 */
+    defaultZoom: metadata.center.zoom,
+    /** 最小缩放级别 */
+    minZoom: metadata.zoom.min,
+    /** 最大缩放级别 */
+    maxZoom: metadata.zoom.max,
+    /** 瓦片服务地址（优先使用环境变量，否则使用 OSM） */
+    tileUrl:
+      import.meta.env.VITE_MAP_TILE_URL || MAP_CONFIG.osmTileUrl,
+    /** 版权信息 */
+    attribution: metadata.attribution,
+    /** 地理边界（用于设备数据校验） */
+    bounds: metadata.bounds,
+  };
+}

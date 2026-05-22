@@ -3,7 +3,7 @@
  * @module components/GISMap/useOLMap
  */
 
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import Map from 'ol/Map';
 import View from 'ol/View';
 import BaseLayer from 'ol/layer/Base';
@@ -27,6 +27,7 @@ import {
   COLORS,
   DEVICE_STATUS_CONFIG,
   SPIDERFY_CONFIG,
+  buildMapConfigFromMetadata,
 } from './constants';
 import {
   clusterStyleFunction,
@@ -35,6 +36,7 @@ import {
   createSpiderfyCenterStyle,
   createSpiderfyPointHoverStyle,
 } from './styleUtils';
+import { useMapConfig, type MapMetadata } from './useMapConfig';
 
 // 用于 spiderfy 函数内部访问
 const SPIDERFY_CONFIG_REF = SPIDERFY_CONFIG;
@@ -91,18 +93,43 @@ interface UseOLMapReturn {
   fitBounds: (bounds: MapBounds) => void;
   /** 高亮设备并在需要时展开聚合 */
   highlightAndSpiderfyIfNeeded: (device: MapDevice) => void;
+  /** 地图元数据 */
+  metadata: MapMetadata | null;
+  /** 元数据加载状态 */
+  metadataLoading: boolean;
 }
 
 /**
  * OpenLayers 地图 Hook
+ * 支持从服务端加载元数据（TileJSON），实现零配置切换
  */
 export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
+  // 加载地图元数据
+  const { metadata, loading: metadataLoading } = useMapConfig();
+
+  // 根据元数据或传入的 options 获取配置
+  const config = useMemo(() => {
+    if (metadata) {
+      return buildMapConfigFromMetadata(metadata);
+    }
+    // 降级到硬编码配置
+    return {
+      defaultCenter: MAP_CONFIG.defaultCenter,
+      defaultZoom: MAP_CONFIG.defaultZoom,
+      minZoom: MAP_CONFIG.minZoom,
+      maxZoom: MAP_CONFIG.maxZoom,
+      tileUrl: MAP_CONFIG.osmTileUrl,
+      attribution: MAP_CONFIG.attribution || '© OpenStreetMap contributors',
+      bounds: MAP_CONFIG.bounds,
+    };
+  }, [metadata]);
+
   const {
     tileUrl,
-    center = MAP_CONFIG.defaultCenter,
-    zoom = MAP_CONFIG.defaultZoom,
-    minZoom = MAP_CONFIG.minZoom,
-    maxZoom = MAP_CONFIG.maxZoom,
+    center = config.defaultCenter,
+    zoom = config.defaultZoom,
+    minZoom = config.minZoom,
+    maxZoom = config.maxZoom,
     clusterDistance = CLUSTER_CONFIG.distance,
     onDeviceClick,
     onDeviceHover,
@@ -251,23 +278,42 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     }
   }, [clusterDistance]);
 
-  // 初始化地图
-  useEffect(() => {
-    if (!mapRef.current || mapInstanceRef.current) return;
+  // 使用 ref 跟踪地图是否已初始化（避免依赖项导致的重复初始化）
+  const isMapInitializedRef = useRef(false);
 
-    // 创建瓦片图层（可选：如果提供了 tileUrl 则使用，否则不显示底图）
-    // 地图背景使用 CSS 格条纹理，不再使用 OSM 瓦片
+  // 初始化地图（等待元数据加载完成后执行一次）
+  useEffect(() => {
+    // 已经初始化过，不再重复
+    if (isMapInitializedRef.current) return;
+    // 容器不存在或地图已存在，跳过
+    if (!mapRef.current || mapInstanceRef.current) return;
+    // 等待元数据加载完成
+    if (metadataLoading) return;
+
+    // 标记初始化开始
+    isMapInitializedRef.current = true;
+
+    // 创建瓦片图层
+    // 优先级：传入的 tileUrl > 环境变量 > 元数据配置 > 默认 OSM
+    const finalTileUrl = tileUrl || import.meta.env.VITE_MAP_TILE_URL || config.tileUrl;
     const layers: BaseLayer[] = [];
 
-    // 只有提供了 tileUrl 才添加瓦片图层
-    if (tileUrl) {
-      const tileSource = new XYZ({ url: tileUrl });
-      const tileLayer = new TileLayer({
-        source: tileSource,
-        opacity: 1.0, // 完全不透明，覆盖 CSS 网格背景
-      });
-      layers.push(tileLayer);
-    }
+    // 瓦片数据源
+    const tileSource = new XYZ({
+      url: finalTileUrl,
+      crossOrigin: 'anonymous',
+      projection: 'EPSG:3857',
+      tileSize: 256,
+      minZoom: config.minZoom || 6,
+      maxZoom: config.maxZoom || 15,
+    });
+
+    const tileLayer = new TileLayer({
+      source: tileSource,
+      opacity: 1.0,
+      zIndex: 0, // 确保瓦片层在最底层
+    });
+    layers.push(tileLayer);
 
     // 创建设备数据源
     deviceSourceRef.current = new VectorSource();
@@ -350,9 +396,10 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
       deviceLayerRef.current = null;
       spiderfySourceRef.current = null;
       spiderfyLayerRef.current = null;
+      // 重置初始化标记，允许重新初始化
+      isMapInitializedRef.current = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // 仅在挂载时执行
+  }, [metadataLoading]);
 
   // 更新设备数据
   const updateDevices = useCallback((devices: MapDevice[]) => {
@@ -778,11 +825,13 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     flyTo,
     highlightDevice,
     clearHighlight,
-    isReady,
+    isReady: isReady && !metadataLoading,
     updateSize,
     getZoom,
     fitBounds,
     highlightAndSpiderfyIfNeeded,
+    metadata,
+    metadataLoading,
   };
 }
 

@@ -1,8 +1,11 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
+
+  return {
   plugins: [react()],
   resolve: {
     alias: {
@@ -22,6 +25,20 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8081',
         changeOrigin: true,
+      },
+      // 离线地图元数据代理（必须在 /tiles 前面）
+      '/tiles-metadata': {
+        target: 'http://localhost:8081',
+        changeOrigin: true,
+        rewrite: (path) => path,
+      },
+      // 离线地图瓦片代理（通过环境变量配置目标服务器）
+      '/tiles': {
+        target: env.VITE_TILES_PROXY_TARGET || 'http://localhost:8081',
+        changeOrigin: true,
+        timeout: 30000,
+        // 不重写路径，保持 /tiles/... 原样转发
+        rewrite: (path) => path,
       },
     },
   },
@@ -59,4 +76,5 @@ export default defineConfig({
       },
     },
   },
+}
 })

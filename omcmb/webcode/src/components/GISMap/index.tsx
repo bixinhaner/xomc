@@ -62,6 +62,8 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     isReady,
     updateSize,
     highlightAndSpiderfyIfNeeded,
+    metadata,
+    metadataLoading,
   } = useOLMap({
     center: defaultCenter,
     zoom: defaultZoom,
@@ -92,6 +94,13 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
       updateDevices(devices);
     }
   }, [isReady, devices, updateDevices]);
+
+  // 元数据加载完成日志（用于调试）
+  useEffect(() => {
+    if (metadata) {
+      console.log('[GISMap] Metadata loaded:', metadata.region, metadata.bounds);
+    }
+  }, [metadata]);
 
   // 窗口大小变化时更新地图
   useEffect(() => {
