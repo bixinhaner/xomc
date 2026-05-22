@@ -61,6 +61,13 @@ func Setup(r *gin.Engine, c *Container) error {
 		Name: "pm",
 		Init: func() error { return initPMModule(c) },
 	})
+	// T-0164-P2 / G2 PM 保留策略层（sys_configs 5 键 + SavedHook reload）
+	// 依赖 admin（拿 SysConfigSvc 挂 hook），pm 仅占位保证 PM 主模块先初始化。
+	graph.Add(components.ModuleInitializer{
+		Name:    "pm-retention",
+		Depends: []string{"admin", "pm"},
+		Init:    func() error { return initPMRetentionModule(c) },
+	})
 	graph.Add(components.ModuleInitializer{
 		Name: "mr",
 		Init: func() error { return initMRModule(c) },

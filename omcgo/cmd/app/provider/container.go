@@ -24,6 +24,7 @@ import (
 	"github.com/omcgo/omcgo/internal/mml/catalogloader"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
+	"github.com/omcgo/omcgo/internal/pm/retention"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/quicksettings"
 	"github.com/omcgo/omcgo/internal/task"
@@ -123,6 +124,11 @@ type Container struct {
 	// PMModule 设置
 	PMCounterRepo *counter.PgCounterRepository
 	PMKPIRepo     *kpi.PgKPIRepository
+
+	// PM retention 策略层（T-0164-P2 / G2）
+	// sys_configs (category='pm.retention') 5 键的运行时缓存 + RegisterSavedHook 监听 reload
+	// G3/G5 实施时通过 retention.Service.RegisterListener 挂 alter_compression_policy / alter_retention_policy 触发器
+	PMRetentionSvc *retention.Service
 
 	// BaselineModule 设置
 	BaselineSvc *baseline.Service
