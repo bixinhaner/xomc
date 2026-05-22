@@ -4011,7 +4011,7 @@ const messages: Record<string, string> = {
   'mml.console.commandTree.unsupportedForProductClass': '该产品类型不支持本命令',
   // InstanceArityInput 多层 {i} 实例号输入
   'mml.console.instanceArity.label':         '实例索引',
-  'mml.console.instanceArity.placeholder':   '留空 = 全部 / 单值 / 范围（如 1,2,5）',
+  'mml.console.instanceArity.placeholder':   '请输入实例号',
   'mml.console.instanceArity.requiredHint':  '必填',
   'mml.console.instanceArity.layer':         '第 {n} 层',
   // R-4.1.1：每层 {i} 取值范围 metadata 校验 + Tooltip 提示
@@ -4472,6 +4472,8 @@ const messages: Record<string, string> = {
   'mml.console.subField.readOnly':             '只读',
   'mml.console.subField.readOnlyTip':          '只读字段（GetParameterValues 可查，SetParameterValues 不可改）',
   'mml.console.subField.readWriteTip':         '可读可写字段（GetParameterValues 可查 + SetParameterValues 可改）',
+  'mml.console.subField.accessTag.readOnly':   '只读',
+  'mml.console.subField.accessTag.readWrite':  '读写',
   'mml.console.subField.multiInstanceTip':     '多实例占位符，需在"实例索引"输入框中填入具体编号',
   'mml.console.subField.required':             '必填',
   'mml.console.editor.execute':                'DO',

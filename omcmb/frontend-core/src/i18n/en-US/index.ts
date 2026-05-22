@@ -3987,7 +3987,7 @@ const messages: Record<string, string> = {
   'mml.console.commandTree.unsupportedForProductClass': 'Not supported by this product class',
   // InstanceArityInput multi-layer {i} instance index input
   'mml.console.instanceArity.label':         'Instance index',
-  'mml.console.instanceArity.placeholder':   'Empty = all / single / range (e.g. 1,2,5)',
+  'mml.console.instanceArity.placeholder':   'Enter instance index',
   'mml.console.instanceArity.requiredHint':  'Required',
   'mml.console.instanceArity.layer':         'Layer {n}',
   // R-4.1.1: per-{i}-layer range metadata validation + tooltip hints
@@ -4449,6 +4449,8 @@ const messages: Record<string, string> = {
   'mml.console.subField.readOnly':             'Read-only',
   'mml.console.subField.readOnlyTip':          'Read-only field (queryable via GetParameterValues, not writable via SetParameterValues)',
   'mml.console.subField.readWriteTip':         'Read-write field (queryable via GetParameterValues and writable via SetParameterValues)',
+  'mml.console.subField.accessTag.readOnly':   'Read-only',
+  'mml.console.subField.accessTag.readWrite':  'Read-write',
   'mml.console.subField.multiInstanceTip':     'Multi-instance placeholder; fill the index in the "Instance Index" input',
   'mml.console.subField.required':             'Required',
   'mml.console.editor.execute':                'DO',

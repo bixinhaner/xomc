@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { Input, Tag, Tooltip, Empty } from 'antd';
-import { EditOutlined, NumberOutlined } from '@ant-design/icons';
+import { NumberOutlined } from '@ant-design/icons';
+import AccessTypeTag from './AccessTypeTag';
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
 import type { Statement } from '@core/types/mmlConsole';
 import { useT } from '@/hooks/useT';
@@ -53,10 +54,6 @@ export default function SubFieldInputList({ statement }: SubFieldInputListProps)
     );
   }
 
-  // D35：笔图标 ✏️ 仅在 MOD 上下文渲染（装饰性，告知"此字段可改"）；
-  // ADD 上下文虽也可输入，但语义是"创建新对象"，统一不渲染。
-  const showEditIcon = statement.operationType === 'MOD';
-
   return (
     <div style={{ ...VIEWPORT_STYLE, display: 'flex', flexDirection: 'column', gap: 10 }}>
       {sortedFields.map((sf) => {
@@ -80,29 +77,17 @@ export default function SubFieldInputList({ statement }: SubFieldInputListProps)
                 status={sf.isRequired && !currentValue ? 'warning' : undefined}
               />
               {multiInstanceHint(sf.tr069Path, t('mml.console.subField.multiInstanceTip'))}
-              {showEditIcon && (
-                <Tooltip title={t('mml.console.subField.readWriteTip')}>
-                  <EditOutlined
-                    style={{ color: '#1677ff' }}
-                    aria-label="editable"
-                  />
-                </Tooltip>
-              )}
+              <AccessTypeTag
+                accessType={sf.accessType}
+                valueType={sf.valueType}
+                constraintText={sf.constraintText}
+              />
               {sf.changeApplies === 'OnReboot' && (
                 <Tag color="warning">{t('mml.console.subField.onReboot')}</Tag>
               )}
             </div>
-            {sf.constraintText && (
-              <span
-                style={{
-                  fontSize: 12,
-                  color: '#999',
-                  paddingLeft: 208,
-                }}
-              >
-                {t('mml.console.input.constraint')}: {sf.constraintText}
-              </span>
-            )}
+            {/* 约束 / 取值范围已合并到 AccessTypeTag（用户决策 2026-05-22），
+                输入框下方不再重复渲染 hint 行，避免视觉冗余。 */}
           </div>
         );
       })}

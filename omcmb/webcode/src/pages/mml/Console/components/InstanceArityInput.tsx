@@ -10,10 +10,10 @@
  *   - 字典序与 path 中 `.{i}.` 左到右出现顺序对齐
  *   - 后端按 key 字典序左到右 replace path 中 `.{i}.`
  *
- * 模式约束：
- *   - LST 模式：允许任意层留空 = partial path（CWMP 标准行为）— 注：当前实现要求填齐
- *   - MOD/ADD 模式：必须填齐所有层
- *   - RMV 模式：父路径用本组件；最后一层"实例号"由 InstancePicker 提供
+ * 模式约束（用户决策 2026-05-22）：
+ *   - 全部 op_type（LST / MOD / ADD / RMV）一律**必填**，不再保留 LST partial path 例外；
+ *     占位符给出 spec 范围说明（如 `1~24` / `≥ 0` / `N 由 NumberOfEntries 决定` 等），
+ *     由 `instance_range_meta` 派生。
  */
 
 import { Input, Space, Tooltip } from 'antd';
@@ -26,6 +26,25 @@ import {
   findRangeByLayer,
   buildRangeHint,
 } from './instanceRangeValidation';
+
+/**
+ * 由 InstanceRange 派生输入框 placeholder 文案。
+ *   · 静态范围 → "1~24"
+ *   · 动态上限 → "≥ 1（上限：NumberOfEntries）"
+ *   · 无 metadata → "请输入实例号"
+ */
+function buildPlaceholder(range: InstanceRange | undefined, fallback: string): string {
+  if (!range) return fallback;
+  const min = range.rangeMin;
+  const max = range.rangeMax;
+  if (typeof min === 'number' && typeof max === 'number') return `${min}~${max}`;
+  if (typeof min === 'number' && range.dynamic && range.nSource) {
+    return `≥ ${min}（上限：${range.nSource}）`;
+  }
+  if (typeof min === 'number') return `≥ ${min}`;
+  if (typeof max === 'number') return `≤ ${max}`;
+  return fallback;
+}
 
 /**
  * Greek 字母对应每层的 selector key。
@@ -96,8 +115,10 @@ export function InstanceArityInput({
     return null;
   }
   const keys = selectorKeysForArity(arity);
-  // LST 允许任意层留空（partial path）；MOD/ADD/RMV 强制必填，否则后端 400 mismatch
-  const isRequired = operationType !== 'LST';
+  // 用户决策 2026-05-22：全部 op_type 一律必填（含 LST），不再保留 partial path 例外。
+  // 仍保留参数 operationType 以兼容调用方 / 日志，仅作 reference。
+  void operationType;
+  const isRequired = true;
 
   return (
     <div
@@ -150,8 +171,8 @@ export function InstanceArityInput({
                 <Input
                   size="small"
                   status={!validation.ok ? 'error' : undefined}
-                  style={{ width: 80 }}
-                  placeholder={isRequired ? '1' : t('mml.console.instanceArity.placeholder')}
+                  style={{ width: 120 }}
+                  placeholder={buildPlaceholder(range, t('mml.console.instanceArity.placeholder'))}
                   value={value}
                   disabled={disabled}
                   onChange={(e) => onChange(key, e.target.value)}

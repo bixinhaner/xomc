@@ -102,11 +102,13 @@ describe('SubFieldInputList', () => {
     expect(setValue).toHaveBeenCalledWith('uid-mod', 'MAND', 'abc');
   });
 
-  it('constraintText renders as hint below input', () => {
+  it('constraintText renders inside AccessTypeTag', () => {
     const fields = [
       sf({ id: 'c', label: 'Constrained', constraintText: '1..100' }),
     ];
     render(<SubFieldInputList statement={modStmt(fields)} />);
+    // 用户决策 2026-05-22：取值范围合并到访问类型 Tag（读写 <type> <range>），
+    // 不再渲染输入框下方独立的 hint 行。
     expect(screen.getByText(/1\.\.100/)).toBeInTheDocument();
   });
 });

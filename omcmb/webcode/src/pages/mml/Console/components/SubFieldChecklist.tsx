@@ -1,7 +1,8 @@
 import { useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { Checkbox, Tag, Tooltip, Empty } from 'antd';
-import { EyeOutlined, FileTextOutlined, NumberOutlined } from '@ant-design/icons';
+import { NumberOutlined } from '@ant-design/icons';
+import AccessTypeTag from './AccessTypeTag';
 type CheckboxValueType = string | number | boolean;
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
 import type { Statement, SubFieldDef } from '@core/types/mmlConsole';
@@ -9,28 +10,6 @@ import { useT } from '@/hooks/useT';
 
 export interface SubFieldChecklistProps {
   statement: Statement;
-}
-
-/**
- * path 行的访问性图标（D35）：
- *   - READ_ONLY  → 📖 EyeOutlined（灰）
- *   - READ_WRITE → 📝 FileTextOutlined（蓝）
- * LST 上下文下两者都不可编辑，仅为元数据展示，故 RW 使用 FileTextOutlined
- * 而非 EditOutlined（笔），避免暗示"可点击编辑"。
- */
-function accessIcon(sf: SubFieldDef, readOnlyTip: string, readWriteTip: string) {
-  if (sf.accessType === 'READ_ONLY') {
-    return (
-      <Tooltip title={readOnlyTip}>
-        <EyeOutlined style={{ color: '#999' }} aria-label="read-only" />
-      </Tooltip>
-    );
-  }
-  return (
-    <Tooltip title={readWriteTip}>
-      <FileTextOutlined style={{ color: '#1677ff' }} aria-label="read-write" />
-    </Tooltip>
-  );
 }
 
 /** path 含 `.{i}.` 多实例占位符时渲染的提示图标（D35）。 */
@@ -116,11 +95,11 @@ export default function SubFieldChecklist({ statement }: SubFieldChecklistProps)
                 {sf.tr069Path}
               </span>
               {multiInstanceHint(sf.tr069Path, t('mml.console.subField.multiInstanceTip'))}
-              {accessIcon(
-                sf,
-                t('mml.console.subField.readOnlyTip'),
-                t('mml.console.subField.readWriteTip'),
-              )}
+              <AccessTypeTag
+                accessType={sf.accessType}
+                valueType={sf.valueType}
+                constraintText={sf.constraintText}
+              />
               {sf.changeApplies === 'OnReboot' && (
                 <Tag color="warning">{t('mml.console.subField.onReboot')}</Tag>
               )}
