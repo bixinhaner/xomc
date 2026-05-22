@@ -11,6 +11,11 @@
 # ⚠️ 部署前必须修改 POSTGRES_PASSWORD / MINIO_ROOT_USER / MINIO_ROOT_PASSWORD
 #    为强口令，并与 /opt/omc/etc/*.prod.yaml 保持一致。
 
+networks:
+  omcgo-net:
+    name: omcgo-net
+    driver: bridge
+
 services:
   postgres:
     image: ${IMAGE_POSTGRES}
@@ -26,6 +31,8 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data    # 生产建议改为数据盘 bind mount，如 /data/omc/pg
       - /etc/localtime:/etc/localtime:ro
+    networks:
+      - omcgo-net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 5s
@@ -43,6 +50,8 @@ services:
     volumes:
       - redisdata:/data
       - /etc/localtime:/etc/localtime:ro
+    networks:
+      - omcgo-net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -61,6 +70,8 @@ services:
     volumes:
       - natsdata:/data
       - /etc/localtime:/etc/localtime:ro
+    networks:
+      - omcgo-net
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
       interval: 5s
@@ -83,6 +94,8 @@ services:
     volumes:
       - miniodata:/data
       - /etc/localtime:/etc/localtime:ro
+    networks:
+      - omcgo-net
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s

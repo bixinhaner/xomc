@@ -11,11 +11,18 @@
 # 的同名默认 yaml；运维改密 / TLS / SMTP 等修改 /opt/omc/etc/ 下文件即可，无需
 # 重打镜像。日志写到 /opt/omc/run/logs/<svc>/。
 
+networks:
+  omcgo-net:
+    name: omcgo-net
+    driver: bridge
+
 services:
   # ── 数据库迁移（首次部署 + 每次升级都跑；幂等）────────────────────────
   migrate-schema:
     image: ${IMAGE_APP}
     restart: "no"
+    dns:
+      - 127.0.0.11
     environment:
       TZ: "Asia/Shanghai"
       GOOSE_VERBOSITY: "1"
@@ -31,11 +38,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - omcgo-net
 
   # ── 种子数据导入（仅首次跑；标记由 deploy.sh 判断；幂等）──────────────
   migrate-seed:
     image: ${IMAGE_APP}
     restart: "no"
+    dns:
+      - 127.0.0.11
     environment:
       TZ: "Asia/Shanghai"
     entrypoint: ["omcgo-seed"]
@@ -52,6 +63,8 @@ services:
     depends_on:
       migrate-schema:
         condition: service_completed_successfully
+    networks:
+      - omcgo-net
 
   # ── 业务进程：app（HTTP API + gRPC）───────────────────────────────────
   app:
@@ -79,6 +92,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    networks:
+      - omcgo-net
 
   # ── 业务进程：acs（TR-069 长连接）──────────────────────────────────────
   acs:
@@ -105,6 +120,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    networks:
+      - omcgo-net
 
   # ── 业务进程：worker（异步任务消费者）──────────────────────────────────
   worker:
@@ -129,3 +146,5 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    networks:
+      - omcgo-net

@@ -9,6 +9,11 @@
 # 而不重打镜像。upstream 名（app / acs）依赖与 docker-compose.app.yml 同 project
 # 共享 docker network 内 service 名。
 
+networks:
+  omcgo-net:
+    name: omcgo-net
+    driver: bridge
+
 services:
   web:
     image: ${IMAGE_WEB}
@@ -29,3 +34,5 @@ services:
     depends_on:
       - app
       - acs
+    networks:
+      - omcgo-net

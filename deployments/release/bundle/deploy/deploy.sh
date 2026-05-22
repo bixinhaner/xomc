@@ -322,7 +322,13 @@ if [ "$PG_OK" != 1 ] || [ "$RD_OK" != 1 ]; then
 fi
 log "基础设施已就绪 (PG / Redis)"
 
-# 7.2 migrate-schema（一次性容器，跑完即退；用 .env 中的 dsn）
+# 7.2 验证 omcgo-net 网络已创建
+log "验证 omcgo-net 网络 ..."
+if ! docker network inspect omcgo-net >/dev/null 2>&1; then
+  die "omcgo-net 网络未创建，请检查 docker-compose.infra.yml" 2
+fi
+
+# 7.3 migrate-schema（一次性容器，跑完即退；用 .env 中的 dsn）
 if [ "$SKIP_MIGRATE" = 0 ]; then
   log "执行 db migrate（容器：migrate-schema）..."
   if "${DC[@]}" run --rm migrate-schema; then
@@ -331,7 +337,7 @@ if [ "$SKIP_MIGRATE" = 0 ]; then
     die "migrate 失败：${DC[*]} run --rm migrate-schema" 3
   fi
 
-  # 7.3 seed（首次部署跑一次；用 .seed.done 标记防重复）
+  # 7.4 seed（首次部署跑一次；用 .seed.done 标记防重复）
   SEED_MARK="$OMC_ROOT/etc/.seed.done"
   if [ -f "$SEED_MARK" ]; then
     log "已有 $SEED_MARK，跳过 seed（如需重灌请删除该文件再跑）"

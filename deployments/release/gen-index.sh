@@ -113,11 +113,25 @@ pre{background:#1f2937;color:#e5e7eb;padding:.7rem .9rem;border-radius:5px;overf
 .tab{flex:1;background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:.7rem .9rem;font-size:.88rem}
 .tab b{display:block;color:#1668dc;margin-bottom:.3rem;font-size:.95rem}
 ul.list{font-size:.88rem;line-height:1.8;margin:.3rem 0;padding-left:1.5rem}
+.tab-nav{display:flex;gap:0;border-bottom:2px solid #e5e7eb;margin:1rem 0 1.5rem}
+.tab-btn{padding:.6rem 1.2rem;cursor:pointer;border:none;background:none;font-size:.92rem;color:#6b7280;border-bottom:2px solid transparent;margin-bottom:-2px}
+.tab-btn:hover{color:#1668dc}
+.tab-btn.active{color:#1668dc;border-bottom-color:#1668dc;font-weight:600}
+.tab-content{display:none}
+.tab-content.active{display:block}
 </style></head><body><div class="wrap">
 <h1>OMC 离线版本下载</h1>
 <p class="lead">内网离线部署交付包。<b>项目包</b>与<b>基础设施下载</b>相互独立、各自版本号：
 首次部署两个都要下载；之后日常升级通常只需更新项目包。</p>
 
+<nav class="tab-nav">
+<button class="tab-btn active" data-tab="download">📦 下载</button>
+<button class="tab-btn" data-tab="deploy">🚀 部署</button>
+<button class="tab-btn" data-tab="config">⚙️ 配置</button>
+<button class="tab-btn" data-tab="ops">🛠️ 运维</button>
+</nav>
+
+<div class="tab-content active" id="tab-download">
 <h2>📋 你应该下载哪些文件？</h2>
 <div class="tabs">
 <div class="tab"><b>🆕 首次部署</b>
@@ -128,6 +142,21 @@ ul.list{font-size:.88rem;line-height:1.8;margin:.3rem 0;padding-left:1.5rem}
 <span class="sz">基础设施已部署、Docker 已装时，只更新项目包</span></div>
 </div>
 
+<h2>📦 项目版本下载</h2>
+<p class="lead">OMC 二进制 + 前端 + 配置 + 数据库迁移 + 部署模板。发版频繁。
+渠道：<span class="ch ch-test">test</span> 测试阶段　<span class="ch ch-release">release</span> 正式发布。</p>
+<table><thead><tr><th>项目版本</th><th>渠道</th><th>构建时间</th><th>下载</th></tr></thead>
+<tbody>$PROJECT_ROWS</tbody></table>
+
+<h2>🛠️ 基础设施下载</h2>
+<p class="lead">Docker 引擎离线安装包 + 基础镜像。不常变更，仅基础设施升级时更新。</p>
+<table><thead><tr><th>基础设施版本</th><th>Docker 版本</th><th>构建时间</th><th>下载</th></tr></thead>
+<tbody>$INFRA_ROWS</tbody></table>
+
+$LEGACY_NOTE
+</div>
+
+<div class="tab-content" id="tab-deploy">
 <h2>🔐 1. 校验完整性</h2>
 <pre>sha256sum -c omc-infra-&lt;版本&gt;-&lt;架构&gt;.tar.xz.sha256
 sha256sum -c omc-&lt;test|release&gt;-&lt;版本&gt;-&lt;架构&gt;.tar.xz.sha256</pre>
@@ -172,7 +201,9 @@ sudo bash deploy/deploy.sh -h                       # 查看所有参数</pre>
 <h2>✅ 6. 验证部署</h2>
 <pre>bash /opt/omc/current/deploy/healthcheck.sh</pre>
 <p class="lead">应输出全部 <code>[OK]</code>：业务容器（app/acs/worker）+ 基础设施容器（postgres/redis/nats/minio）+ 监控容器（prometheus/grafana/loki/...）+ 4 个健康端点（app /health, acs /healthz, app /metrics, 前端首页）。</p>
+</div>
 
+<div class="tab-content" id="tab-config">
 <h2>🌐 7. 部署后访问地址</h2>
 <div class="kv">
 <b>Web 管理页：</b>http://&lt;服务器IP&gt;:8080<br>
@@ -253,6 +284,50 @@ sudo docker compose -p omcgo -f docker-compose.app.yml restart app acs worker
 PGPASSWORD='新口令' psql -h 127.0.0.1 -U omcgo -d omcgo -c 'select 1'
 # OMC 服务全部 OK
 bash /opt/omc/current/deploy/healthcheck.sh</pre>
+</div>
+
+<div class="tab-content" id="tab-ops">
+<h2>🛠️ 10. 日常运维</h2>
+<p class="lead">所有命令在 <code>/opt/omc/current/deploy/</code> 目录下执行，项目名 <code>omcgo</code>。</p>
+
+<h3>10.1 服务状态与启停</h3>
+<pre># 查看状态
+docker compose -p omcgo ps
+
+# 启动全部服务
+docker compose -p omcgo start
+
+# 停止全部服务
+docker compose -p omcgo stop
+
+# 重启全部服务
+docker compose -p omcgo restart
+
+# 重启单个服务（如 app）
+docker compose -p omcgo restart app
+
+# 停止并移除容器（数据保留）
+docker compose -p omcgo down
+
+# 重新创建并启动（如镜像更新后）
+docker compose -p omcgo up -d</pre>
+
+<h3>10.2 日志与健康检查</h3>
+<pre># 查看日志
+docker compose -p omcgo logs -f app
+
+# 查看最近 100 行日志
+docker compose -p omcgo logs --tail 100 app
+
+# 健康检查
+bash /opt/omc/current/deploy/healthcheck.sh</pre>
+
+<h3>10.3 进入容器 / 连接数据库</h3>
+<pre># 进入容器
+docker compose -p omcgo exec app /bin/sh
+
+# 连接数据库
+docker compose -p omcgo exec postgres psql -U omcgo -d omcgo</pre>
 
 <h2>🔧 故障排查</h2>
 <ul class="list">
@@ -265,19 +340,19 @@ bash /opt/omc/current/deploy/healthcheck.sh</pre>
 <li>查看脚本帮助：<code>bash &lt;脚本&gt; -h</code>（install-docker.sh / setup-mirrors.sh / deploy.sh / healthcheck.sh 均支持）</li>
 <li>完整运维手册：见随项目包附带 <code>docs/OMC内网离线部署手册（运维侧）.md</code></li>
 </ul>
+</div>
 
-<h2>📦 项目版本下载</h2>
-<p class="lead">OMC 二进制 + 前端 + 配置 + 数据库迁移 + 部署模板。发版频繁。
-渠道：<span class="ch ch-test">test</span> 测试阶段　<span class="ch ch-release">release</span> 正式发布。</p>
-<table><thead><tr><th>项目版本</th><th>渠道</th><th>构建时间</th><th>下载</th></tr></thead>
-<tbody>$PROJECT_ROWS</tbody></table>
-
-<h2>🛠️ 基础设施下载</h2>
-<p class="lead">Docker 引擎离线安装包 + 基础镜像。不常变更，仅基础设施升级时更新。</p>
-<table><thead><tr><th>基础设施版本</th><th>Docker 版本</th><th>构建时间</th><th>下载</th></tr></thead>
-<tbody>$INFRA_ROWS</tbody></table>
-
-$LEGACY_NOTE
 <p class="note">索引刷新于 $(date -u '+%Y-%m-%dT%H:%M:%SZ')</p>
-</div></body></html>
+</div>
+<script>
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+</script>
+</body></html>
 HTML

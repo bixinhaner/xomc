@@ -12,6 +12,11 @@
 #
 # Grafana 默认账号 admin/admin —— 部署前请改 .env 的 GRAFANA_ADMIN_PASSWORD。
 
+networks:
+  omcgo-net:
+    name: omcgo-net
+    driver: bridge
+
 services:
   prometheus:
     image: ${IMAGE_PROMETHEUS}
@@ -40,6 +45,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - omcgo-net
 
   alertmanager:
     image: ${IMAGE_ALERTMANAGER}
@@ -61,6 +68,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - omcgo-net
 
   grafana:
     image: ${IMAGE_GRAFANA}
@@ -93,6 +102,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    networks:
+      - omcgo-net
 
   # ── 日志栈：Loki（存储 + 查询）；采集由 otelcol filelog receiver 接管 ──
   loki:
@@ -113,6 +124,8 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
+    networks:
+      - omcgo-net
 
   # ── Trace 栈：OpenTelemetry Collector + Grafana Tempo（T-0155）──────────
   # 数据流：app/acs/worker (OTel SDK, OTLP gRPC) → otelcol:4317 → tempo:4317
@@ -141,6 +154,8 @@ services:
         condition: service_healthy
       loki:
         condition: service_healthy
+    networks:
+      - omcgo-net
 
   tempo:
     image: ${IMAGE_TEMPO}
@@ -158,6 +173,8 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
+    networks:
+      - omcgo-net
 
   # ── 基础服务 exporter：nats-exporter（minio 自带 /metrics；pg/redis 由 otelcol 直采）
   nats-exporter:
@@ -171,6 +188,8 @@ services:
     depends_on:
       nats:
         condition: service_healthy
+    networks:
+      - omcgo-net
 
 volumes:
   prometheusdata:
