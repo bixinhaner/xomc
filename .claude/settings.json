@@ -245,7 +245,20 @@
       "Bash(sed -n '1,40p' /Users/cb/code/baicells/goomc/omcgo/migrations/000063_drop_datamodel.sql)",
       "Bash(sed -n '60,90p' /Users/cb/code/baicells/goomc/omcgo/migrations/000063_drop_datamodel.sql)",
       "Bash(grep -n \"license\\\\|oem\" /opt/omc/etc/*.yaml 2>/dev/null || echo \"\\(can't access /opt/omc on Mac - need to check on server\\)\"; echo \"---\" && grep -n \"license\\\\|oem_public\" /Users/cb/code/baicells/goomc/omcgo/cmd/app/etc/config.prod.yaml | head -10)",
-      "Read(//opt/omc/**)"
+      "Read(//opt/omc/**)",
+      "Bash(chmod +x /Users/cb/code/baicells/goomc/deployments/release/bundle/deploy/svc.sh)",
+      "Bash(bash -n /Users/cb/code/baicells/goomc/deployments/release/bundle/deploy/svc.sh)",
+      "Bash(bash /Users/cb/code/baicells/goomc/deployments/release/bundle/deploy/svc.sh -h)",
+      "Bash(bash -n /Users/cb/code/baicells/goomc/deployments/release/bundle/deploy/healthcheck.sh)",
+      "mcp__playwright__browser_network_request",
+      "Bash(bash -n /Users/cb/code/baicells/goomc/deployments/release/bundle/deploy/deploy.sh)",
+      "Bash(bash -n /Users/cb/code/baicells/goomc/deployments/release/bundle/deploy/docker-compose.app.yml)",
+      "Bash(chmod +x /tmp/audit_seeds.sh)",
+      "Bash(/tmp/audit_seeds.sh)",
+      "Bash(chmod +x /tmp/final_audit.sh)",
+      "Bash(/tmp/final_audit.sh)",
+      "Bash(xargs -I {} sh -c 'echo \"=== {} ===\" && grep -A 5 \"-- +goose Up\" {} | grep -E \"DROP|ALTER.*DROP\"')",
+      "Bash(awk '/CREATE TABLE devices \\\\\\(/,/^\\\\\\) PARTITION/' /Users/cb/code/baicells/goomc/omcgo/migrations/000003_devices.sql)"
     ],
     "deny": [
       "Bash(git push -f)",
