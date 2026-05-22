@@ -365,13 +365,14 @@ if ! docker network inspect omcgo-net >/dev/null 2>&1; then
 fi
 
 # 7.3 migrate-schema（一次性容器，跑完即退；用 .env 中的 dsn）
-#     docker compose run 存在 DNS 竞态（新容器加入网络后 DNS 注册可能有短暂延迟），
-#     因此加重试逻辑：最多 3 次，间隔 5s。
+#     使用 `up --exit-code-from` 而非 `run`，因为 `run` 创建的一次性容器
+#     存在 DNS 解析缺陷（无法解析服务名），而 `up` 作为正式服务启动时
+#     网络集成完整，DNS 解析正常。保留重试逻辑作为兆底。
 if [ "$SKIP_MIGRATE" = 0 ]; then
   log "执行 db migrate（容器：migrate-schema）..."
   MIGRATE_OK=0
   for attempt in 1 2 3; do
-    if "${DC[@]}" run --rm migrate-schema; then
+    if "${DC[@]}" up --exit-code-from migrate-schema migrate-schema; then
       MIGRATE_OK=1
       break
     fi
@@ -380,10 +381,11 @@ if [ "$SKIP_MIGRATE" = 0 ]; then
       sleep 5
     fi
   done
+  "${DC[@]}" rm -f migrate-schema 2>/dev/null || true
   if [ "$MIGRATE_OK" = 1 ]; then
     log "migrate 成功"
   else
-    die "migrate 失败（已重试 3 次）：${DC[*]} run --rm migrate-schema" 3
+    die "migrate 失败（已重试 3 次）：${DC[*]} up --exit-code-from migrate-schema migrate-schema" 3
   fi
 
   # 7.4 seed（首次部署跑一次；用 .seed.done 标记防重复）
@@ -392,12 +394,13 @@ if [ "$SKIP_MIGRATE" = 0 ]; then
     log "已有 $SEED_MARK，跳过 seed（如需重灌请删除该文件再跑）"
   else
     log "执行 db seed（容器：migrate-seed，首次部署）..."
-    if "${DC[@]}" run --rm migrate-seed; then
+    if "${DC[@]}" up --exit-code-from migrate-seed migrate-seed; then
       touch "$SEED_MARK"
       log "seed 成功"
     else
       warn "seed 失败（部分种子可能已存在，不影响主流程；如确需排查请看日志）"
     fi
+    "${DC[@]}" rm -f migrate-seed 2>/dev/null || true
   fi
 else
   log "--skip-migrate：跳过 migrate / seed"
