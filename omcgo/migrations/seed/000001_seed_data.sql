@@ -15,11 +15,16 @@ INSERT INTO roles (id, name, description, is_system) VALUES
 ON CONFLICT (name) DO NOTHING;
 
 -- 2. 管理员用户
-INSERT INTO users (id, username, password_hash, display_name, status) VALUES
+--   source='builtIn' 关键：IsSuperAdmin() 由 source 字段判定（model.go:65），
+--   super admin 旁路（middleware.go:216）依赖此值。
+--   migration 000053 的 UPDATE 仅修复"先于 000053 存在"的 admin 用户；fresh
+--   deploy 中 seed 在所有 migration 之后跑，UPDATE 早已无目标，必须 seed 自带。
+INSERT INTO users (id, username, password_hash, display_name, status, source) VALUES
     ('20000000-0000-0000-0000-000000000001', 'admin',
      '$2a$10$5feKmwxvoxEyqIo5DaYQNuNcPFWZnRdNytomGLrXDnv0e5MgnEJT6',
-     'System Admin', 'active')
-ON CONFLICT (username) DO NOTHING;
+     'System Admin', 'active', 'builtIn')
+ON CONFLICT (username) DO UPDATE SET source = 'builtIn'
+WHERE users.source IS DISTINCT FROM 'builtIn';
 
 -- 3. 用户角色绑定 + 默认角色
 INSERT INTO user_roles (user_id, role_id) VALUES

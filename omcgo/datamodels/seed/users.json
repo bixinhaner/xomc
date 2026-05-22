@@ -1,13 +1,14 @@
 {
   "table": "users",
-  "columns": ["id", "username", "password_hash", "display_name", "status"],
+  "columns": ["id", "username", "password_hash", "display_name", "status", "source"],
   "records": [
     {
       "id": "20000000-0000-0000-0000-000000000001",
       "username": "admin",
       "password_hash": "$2a$10$5feKmwxvoxEyqIo5DaYQNuNcPFWZnRdNytomGLrXDnv0e5MgnEJT6",
       "display_name": "System Admin",
-      "status": "active"
+      "status": "active",
+      "source": "builtIn"
     }
   ]
 }
