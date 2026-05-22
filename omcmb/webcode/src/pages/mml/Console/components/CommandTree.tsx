@@ -153,10 +153,17 @@ function groupToTreeDataNode(g: GroupTreeNode, decor: LeafDecor): TreeDataNode {
   };
 }
 
-/** 将后端合成的章节节点转为 antd TreeDataNode，children 仍是 group 子节点。 */
+/** 将后端合成的章节节点转为 antd TreeDataNode。
+ *
+ * spec §R-1 v2：两层树 = 章节 → 命令叶子。命令直接挂在 `g.commands`，
+ * 不再有任何子分组（`g.children` 在 v2 永远为空）。早期 v1 视图遗留的 `g.children`
+ * 仍兼容渲染（如老 catalog 没下线干净），让命令叶子和 sub-group 共存于章节下。
+ */
 function chapterToTreeDataNode(g: GroupTreeNode, decor: LeafDecor): TreeDataNode {
   // 章节节点 key 仍走 GROUP_KEY_PREFIX + id（章节合成 id 也是 UUID，与 group 同空间
   // 不冲突；handleSelect 通过 isLeaf=false + selectable:false 防止误触发命令加载）
+  const directCmdLeaves = commandsToLeafNodes(g.commands ?? [], decor);
+  const subGroupNodes = (g.children ?? []).map((child) => groupToTreeDataNode(child, decor));
   return {
     key: `${GROUP_KEY_PREFIX}${g.id}`,
     title: (
@@ -166,7 +173,7 @@ function chapterToTreeDataNode(g: GroupTreeNode, decor: LeafDecor): TreeDataNode
       </span>
     ),
     selectable: false,
-    children: (g.children ?? []).map((child) => groupToTreeDataNode(child, decor)),
+    children: [...directCmdLeaves, ...subGroupNodes],
   };
 }
 
