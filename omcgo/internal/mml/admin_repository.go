@@ -222,7 +222,8 @@ SELECT
     jsonb_build_object(
         'zh-CN', sp.standard_path,
         'en-US', sp.standard_path
-    )                                     AS name_i18n
+    )                                     AS name_i18n,
+    COALESCE(sp.description, '')          AS description
 FROM mml_command_sub_fields csf
 JOIN standard_params sp ON sp.id = csf.standard_path_id
 WHERE csf.command_id = $1
@@ -245,6 +246,7 @@ ORDER BY csf.sort_order ASC, csf.mml_code ASC`
 			&e.AccessType, &e.IsObject, &e.SupportsAdd, &e.SupportsDelete,
 			&e.ChangeApplies, &constraintI18n,
 			&e.DefaultValue, &e.JsRegex, &paramNameI18n,
+			&e.Description,
 		); err != nil {
 			return nil, fmt.Errorf("scan enriched sub_field row: %w", err)
 		}

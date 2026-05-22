@@ -95,6 +95,9 @@ type SubFieldDTO struct {
 	DefaultSelected    bool              `json:"default_selected"`
 	IsRequired         bool              `json:"is_required"`
 	SortOrder          int               `json:"sort_order"`
+	// Description 是 TR-181 path 的中文含义说明（来自 standard_params.description）。
+	// 前端 MML 控制台 path 行 tooltip / 行内提示用；可为空。
+	Description string `json:"description,omitempty"`
 }
 
 // GetCommandSubFields 加载命令的 sub_fields（含 JOIN standard_params 元数据），按 lang 派生
@@ -130,6 +133,7 @@ func (s *ConsoleService) GetCommandSubFields(ctx context.Context, commandID uuid
 			DefaultSelected:    e.DefaultSelected,
 			IsRequired:         e.IsRequired,
 			SortOrder:          e.SortOrder,
+			Description:        e.Description,
 		})
 	}
 	return out, nil

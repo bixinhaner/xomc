@@ -61,13 +61,20 @@ export default function SubFieldInputList({ statement }: SubFieldInputListProps)
         return (
           <div key={sf.id} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ flex: '0 0 200px', fontWeight: 500 }}>
-                {sf.isRequired && (
-                  <span style={{ color: '#ff4d4f', marginRight: 4 }} aria-label="required">
-                    *
+              <span style={{ flex: '0 0 200px', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                <span style={{ fontWeight: 500 }}>
+                  {sf.isRequired && (
+                    <span style={{ color: '#ff4d4f', marginRight: 4 }} aria-label="required">
+                      *
+                    </span>
+                  )}
+                  {sf.label}
+                </span>
+                {sf.description && (
+                  <span style={{ color: '#bfbfbf', fontSize: 11, marginTop: 1 }}>
+                    {sf.description}
                   </span>
                 )}
-                {sf.label}
               </span>
               <Input
                 value={currentValue}

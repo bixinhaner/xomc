@@ -91,8 +91,15 @@ export default function SubFieldChecklist({ statement }: SubFieldChecklistProps)
               >
                 {sf.label}
               </span>
-              <span style={{ flex: 1, color: '#888', fontFamily: 'monospace', fontSize: 12 }}>
-                {sf.tr069Path}
+              <span style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                <span style={{ color: '#888', fontFamily: 'monospace', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {sf.tr069Path}
+                </span>
+                {sf.description && (
+                  <span style={{ color: '#bfbfbf', fontSize: 11, marginTop: 1 }}>
+                    {sf.description}
+                  </span>
+                )}
               </span>
               {multiInstanceHint(sf.tr069Path, t('mml.console.subField.multiInstanceTip'))}
               <AccessTypeTag

@@ -218,6 +218,13 @@ export interface SubFieldDef {
   defaultSelected: boolean;
   isRequired: boolean;
   sortOrder: number;
+  /**
+   * TR-181 path 的中文含义说明（来自 standard_params.description，
+   * 由 cmcc_tdlte_v23.json 等 spec seed 回填，详 migration 000155 + seed/000156）。
+   * 可为空（非 cmcc-td-lte 来源的 standard_params 行 description 未维护）。
+   * 前端 SubFieldChecklist / SubFieldInputList 行内 / Tooltip 渲染用。
+   */
+  description?: string;
 }
 
 /**

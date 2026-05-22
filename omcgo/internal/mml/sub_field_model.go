@@ -80,4 +80,8 @@ type MMLCommandSubFieldEnriched struct {
 	JsRegex            *string           `json:"js_regex,omitempty"`
 	// ParamNameI18n 是 mml_params.name_i18n（全局默认 label，LabelI18n 为空时兜底）
 	ParamNameI18n map[string]string `json:"param_name_i18n,omitempty"`
+	// Description 是 standard_params.description（TR-181 path 中文含义说明，
+	// 由 cmcc_tdlte_v23.json 等 spec seed 回填；MML 控制台 path 行 tooltip / 行内提示用）。
+	// 可为空（非 cmcc-td-lte 来源的 standard_params 行 description 未维护）。
+	Description string `json:"description,omitempty"`
 }
