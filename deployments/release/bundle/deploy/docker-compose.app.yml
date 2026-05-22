@@ -40,7 +40,36 @@ services:
       postgres:
         condition: service_healthy
 
-  # ── 种子数据导入（仅首次跑；标记由 deploy.sh 判断；幂等）──────────────
+  # ── 种子数据迁移（goose SQL seed，migrations/seed/，70 个 .sql）─────────
+  #   独立 GOOSE_TABLE=goose_db_version_seed 避免与主 DDL 撞号
+  #   （两个目录都有 000001/000002...，但版本表分开追踪不冲突）。
+  #   覆盖：内置角色/admin 用户/role_menus/role_api_permissions/菜单 seed/
+  #         KPI 字典/告警库/MML 命令树/standard_params 等 70 条种子。
+  #   必须在 migrate-schema 之后跑（依赖 DDL 已建表）。
+  migrate-seed-sql:
+    image: ${IMAGE_APP}
+    restart: "no"
+    network_mode: "service:postgres"
+    environment:
+      TZ: "Asia/Shanghai"
+      GOOSE_VERBOSITY: "1"
+      GOOSE_TABLE: "goose_db_version_seed"
+    entrypoint: ["omcgo-migrate"]
+    command:
+      - "--dsn"
+      - "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}?sslmode=disable"
+      - "--path"
+      - "/etc/omcgo/migrations/seed"
+      - "up"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      migrate-schema:
+        condition: service_completed_successfully
+
+  # ── 业务参考数据 JSON seed（datamodels/seed/users.json / roles.json / ...）─
+  #   旧链路保留，承载 ON CONFLICT 兜底 admin/roles/device_groups。
+  #   长期方向：迁入 migrations/seed/ 后下线本容器（与 omcgo/cmd/seed/）。
   migrate-seed:
     image: ${IMAGE_APP}
     restart: "no"
@@ -59,8 +88,8 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate-seed-sql:
+        condition: service_completed_successfully
 
   # ── 业务进程：app（HTTP API + gRPC）───────────────────────────────────
   app:

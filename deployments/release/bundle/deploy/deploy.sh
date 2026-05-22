@@ -395,17 +395,27 @@ if [ "$SKIP_MIGRATE" = 0 ]; then
     die "migrate 失败（已重试 3 次）：${DC[*]} up --exit-code-from migrate-schema migrate-schema" 3
   fi
 
-  # 7.4 seed（首次部署跑一次；用 .seed.done 标记防重复）
+  # 7.4 SQL seed（goose，migrations/seed/，每次部署都跑 —— goose 用 goose_db_version_seed
+  #     版本表自动追踪已应用项，新加 seed 文件自动 catch up，已应用则无 op）
+  log "执行 db SQL seed（容器：migrate-seed-sql，goose 幂等）..."
+  if "${DC[@]}" up --exit-code-from migrate-seed-sql migrate-seed-sql; then
+    log "SQL seed 成功"
+  else
+    die "SQL seed 失败：${DC[*]} up --exit-code-from migrate-seed-sql migrate-seed-sql" 3
+  fi
+  "${DC[@]}" rm -f migrate-seed-sql 2>/dev/null || true
+
+  # 7.5 JSON seed（datamodels/seed/，首次部署跑一次；用 .seed.done 标记防重复）
   SEED_MARK="$OMC_ROOT/etc/.seed.done"
   if [ -f "$SEED_MARK" ]; then
-    log "已有 $SEED_MARK，跳过 seed（如需重灌请删除该文件再跑）"
+    log "已有 $SEED_MARK，跳过 JSON seed（如需重灌请删除该文件再跑）"
   else
-    log "执行 db seed（容器：migrate-seed，首次部署）..."
+    log "执行 db JSON seed（容器：migrate-seed，首次部署）..."
     if "${DC[@]}" up --exit-code-from migrate-seed migrate-seed; then
       touch "$SEED_MARK"
-      log "seed 成功"
+      log "JSON seed 成功"
     else
-      warn "seed 失败（部分种子可能已存在，不影响主流程；如确需排查请看日志）"
+      warn "JSON seed 失败（部分种子可能已存在，不影响主流程；如确需排查请看日志）"
     fi
     "${DC[@]}" rm -f migrate-seed 2>/dev/null || true
   fi
