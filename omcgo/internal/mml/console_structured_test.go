@@ -53,10 +53,16 @@ func newStructuredFixture() structuredFixture {
 		LogicalCode:   "IP",
 		OperationType: "MOD",
 		TargetObject:  "",
+		// 生产 ID 语义（migration 000113）：
+		//   MMLParamRef.ID == mml_command_sub_fields.id（来自 paramRefSelectExpr.csf.id）
+		// 所以 cmd.Params[i].ID == sf[i].ID（同一个 csf.id），而 p[i]（standard_params.id）
+		// 仅出现在 sub_field.ParamID 字段（soft alias of standard_path_id），不与
+		// MMLParamRef.ID 共用空间。旧 fixture 用同一 p[i] 同时填两边，遮蔽了
+		// buildPathToSubFieldIndex / buildLSTParamRefs 的 ID-mismatch 真 bug。
 		Params: []MMLParamRef{
-			{ID: p[0], ParamCode: codes[0], Tr069Path: paths[0], ValueType: "string"},
-			{ID: p[1], ParamCode: codes[1], Tr069Path: paths[1], ValueType: "string"},
-			{ID: p[2], ParamCode: codes[2], Tr069Path: paths[2], ValueType: "boolean"},
+			{ID: sf[0], ParamCode: codes[0], Tr069Path: paths[0], ValueType: "string"},
+			{ID: sf[1], ParamCode: codes[1], Tr069Path: paths[1], ValueType: "string"},
+			{ID: sf[2], ParamCode: codes[2], Tr069Path: paths[2], ValueType: "boolean"},
 		},
 	}
 	subFields := []MMLCommandSubField{
@@ -259,12 +265,13 @@ func TestStructuredToStatement_CmdParamRepoEnrichesNilParams(t *testing.T) {
 	sfRepo := newFakeSubFieldRepo()
 	sfRepo.byCommandList[fx.cmd.ID] = fx.subFields
 	svc := NewConsoleService(&fakeGroupTreeRepo{}, sfRepo, cmdRepo, nil)
-	// 装上 cmdParamRepo enrichment（这是 modules.go 在生产应做的，旧版漏装）
+	// 装上 cmdParamRepo enrichment（这是 modules.go 在生产应做的，旧版漏装）。
+	// 注意：MMLParamRef.ID == sub_field.id（paramRefSelectExpr.csf.id），故用 sfIDs 而非 pIDs。
 	svc.SetCmdParamRepo(&stubCmdParamRepo{refs: map[uuid.UUID][]MMLParamRef{
 		fx.cmd.ID: {
-			{ID: fx.pIDs[0], ParamCode: "ADDR", Tr069Path: "Device.IP.Address", ValueType: "string"},
-			{ID: fx.pIDs[1], ParamCode: "MASK", Tr069Path: "Device.IP.Netmask", ValueType: "string"},
-			{ID: fx.pIDs[2], ParamCode: "ENBL", Tr069Path: "Device.IP.Enable", ValueType: "boolean"},
+			{ID: fx.sfIDs[0], ParamCode: "ADDR", Tr069Path: "Device.IP.Address", ValueType: "string"},
+			{ID: fx.sfIDs[1], ParamCode: "MASK", Tr069Path: "Device.IP.Netmask", ValueType: "string"},
+			{ID: fx.sfIDs[2], ParamCode: "ENBL", Tr069Path: "Device.IP.Enable", ValueType: "boolean"},
 		},
 	}})
 

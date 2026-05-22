@@ -155,17 +155,25 @@ func (s *ConsoleService) StructuredToStatement(ctx context.Context, ss Structure
 
 // buildPathToSubFieldIndex 构造 standardPath → sub_field 反向索引。
 //
-// 关系链：sub_field.ParamID --(cmd.Params)--> MMLParamRef.Tr069Path
-// 同一 path 在 command 内应唯一；理论上不会有冲突（catalog loader 已保证）。
-// 若 path 出现多次（异常数据），后者覆盖前者并保留 deterministic（仍可工作）。
+// 关系链（migration 000113 后语义澄清）：
+//   - MMLParamRef.ID       == mml_command_sub_fields.id（来自 paramRefSelectExpr.csf.id）
+//   - MMLCommandSubField.ID == mml_command_sub_fields.id
+//   - MMLCommandSubField.ParamID == standard_params.id（字段名 soft alias，
+//     migration 000113 列重命名为 standard_path_id 但结构体保留 ParamID）
+//
+// 历史 bug（commit pre-2026-05-22）：曾用 paramByID[sf.ParamID] 查 → 把
+// standard_params.id 当 sub_field.id 查，索引 100% miss，全部 path 误报 R-9.2。
+// 现在用 sub_field.id（sf.ID == MMLParamRef.ID）做 key — 两边都是 csf.id，对齐。
+//
+// 同一 path 在 command 内由 UNIQUE(command_id, standard_path_id) 保证唯一。
 func buildPathToSubFieldIndex(subFields []MMLCommandSubField, params []MMLParamRef) map[string]MMLCommandSubField {
-	paramByID := make(map[uuid.UUID]MMLParamRef, len(params))
+	paramBySubFieldID := make(map[uuid.UUID]MMLParamRef, len(params))
 	for _, p := range params {
-		paramByID[p.ID] = p
+		paramBySubFieldID[p.ID] = p
 	}
 	idx := make(map[string]MMLCommandSubField, len(subFields))
 	for _, sf := range subFields {
-		ref, ok := paramByID[sf.ParamID]
+		ref, ok := paramBySubFieldID[sf.ID]
 		if !ok || ref.Tr069Path == "" {
 			continue
 		}

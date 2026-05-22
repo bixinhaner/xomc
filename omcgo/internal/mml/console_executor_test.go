@@ -54,9 +54,10 @@ func TestBuildEntry_LST_SelectedSubset(t *testing.T) {
 		CommandCode:   "LST_DEVICE_INFO",
 		LogicalCode:   "DEVICE_INFO",
 		OperationType: "LST",
+		// MMLParamRef.ID == csf.id（sub_field.id）— 与 paramRefSelectExpr 对齐。
 		Params: []MMLParamRef{
-			{ID: p1ID, ParamCode: "PATH1", Tr069Path: "Device.X.Y", ValueType: "string"},
-			{ID: p2ID, ParamCode: "PATH2", Tr069Path: "Device.X.Z", ValueType: "int"},
+			{ID: sf1ID, ParamCode: "PATH1", Tr069Path: "Device.X.Y", ValueType: "string"},
+			{ID: sf2ID, ParamCode: "PATH2", Tr069Path: "Device.X.Z", ValueType: "int"},
 		},
 	}
 	subFields := []MMLCommandSubField{
@@ -87,7 +88,7 @@ func TestBuildEntry_LST_EmptySelectionDefaultsToAll(t *testing.T) {
 		CommandCode:   "LST_DEVICE_INFO",
 		OperationType: "LST",
 		Params: []MMLParamRef{
-			{ID: p1ID, ParamCode: "PATH1", Tr069Path: "Device.X", ValueType: "string"},
+			{ID: sf1ID, ParamCode: "PATH1", Tr069Path: "Device.X", ValueType: "string"},
 		},
 	}
 	subFields := []MMLCommandSubField{
@@ -122,7 +123,7 @@ func TestBuildEntry_MOD(t *testing.T) {
 		CommandCode:   "MOD_DEVICE_INFO",
 		OperationType: "MOD",
 		Params: []MMLParamRef{
-			{ID: p1ID, ParamCode: "ignored", Tr069Path: "Device.X", ValueType: "string"},
+			{ID: sf1ID, ParamCode: "ignored", Tr069Path: "Device.X", ValueType: "string"},
 		},
 	}
 	subFields := []MMLCommandSubField{
@@ -216,6 +217,7 @@ func TestBuildEntries_ADD_WithoutValues_SingleEntry(t *testing.T) {
 // TestBuildEntries_ADD_WithValues_CompoundTwoEntries — ADD with values 触发 2 entries：
 // AddObject + SetParameterValues with .{NEW}. 占位符。
 func TestBuildEntries_ADD_WithValues_CompoundTwoEntries(t *testing.T) {
+	sfID := uuid.New()
 	paramID := uuid.New()
 	cmd := &MMLCommand{
 		ID:            uuid.New(),
@@ -223,11 +225,11 @@ func TestBuildEntries_ADD_WithValues_CompoundTwoEntries(t *testing.T) {
 		OperationType: "ADD",
 		TargetObject:  "Device.Services.FAPService.{i}.PLMNList.",
 		Params: []MMLParamRef{
-			{ID: paramID, ParamCode: "PLMNID", Tr069Path: "Device.Services.FAPService.{i}.PLMNList.{i}.PLMNID"},
+			{ID: sfID, ParamCode: "PLMNID", Tr069Path: "Device.Services.FAPService.{i}.PLMNList.{i}.PLMNID"},
 		},
 	}
 	subFields := []MMLCommandSubField{
-		{ID: uuid.New(), ParamID: paramID, MMLCode: "PLMNID"},
+		{ID: sfID, ParamID: paramID, MMLCode: "PLMNID"},
 	}
 	stmt := Statement{
 		OperationType: "ADD",
@@ -388,7 +390,7 @@ func TestExecuteStatements_SingleStatement_NotSequential(t *testing.T) {
 		CommandCode:   "LST_X",
 		OperationType: "LST",
 		Params: []MMLParamRef{
-			{ID: pID, ParamCode: "P", Tr069Path: "Device.X", ValueType: "string"},
+			{ID: sfID, ParamCode: "P", Tr069Path: "Device.X", ValueType: "string"},
 		},
 	})
 	sfRepo := newFakeSubFieldRepo()
@@ -424,7 +426,7 @@ func TestExecuteStatements_MultipleStatements_Sequential(t *testing.T) {
 		CommandCode:   "LST_X",
 		OperationType: "LST",
 		Params: []MMLParamRef{
-			{ID: pID, ParamCode: "P", Tr069Path: "Device.X", ValueType: "string"},
+			{ID: sfID, ParamCode: "P", Tr069Path: "Device.X", ValueType: "string"},
 		},
 	})
 	sfRepo := newFakeSubFieldRepo()
@@ -514,7 +516,7 @@ func TestEntry_GetParameterValues_WireFormat(t *testing.T) {
 		CommandCode:   "LST_X",
 		OperationType: "LST",
 		Params: []MMLParamRef{
-			{ID: pID, ParamCode: "P", Tr069Path: "Device.X.Y", ValueType: "string"},
+			{ID: sfID, ParamCode: "P", Tr069Path: "Device.X.Y", ValueType: "string"},
 		},
 	}
 	subFields := []MMLCommandSubField{
@@ -548,7 +550,7 @@ func TestEntry_SetParameterValues_WireFormat(t *testing.T) {
 		CommandCode:   "MOD_X",
 		OperationType: "MOD",
 		Params: []MMLParamRef{
-			{ID: pID, ParamCode: "P", Tr069Path: "Device.X.Y", ValueType: "string"},
+			{ID: sfID, ParamCode: "P", Tr069Path: "Device.X.Y", ValueType: "string"},
 		},
 	}
 	subFields := []MMLCommandSubField{

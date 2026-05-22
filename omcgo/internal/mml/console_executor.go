@@ -488,13 +488,16 @@ func buildLSTParamRefs(selected []uuid.UUID, subFields []MMLCommandSubField, cmd
 
 	refs := make([]MMLParamRef, 0, len(pick))
 	for _, sf := range pick {
-		if ref, ok := paramByID[sf.ParamID]; ok {
+		// 修复 2026-05-22：用 sf.ID 而非 sf.ParamID 查 paramByID。
+		// MMLParamRef.ID 来自 csf.id（sub_field.id），sf.ID 同源；旧版误用
+		// sf.ParamID（migration 000113 起语义 = standard_params.id）查 → 100% miss。
+		if ref, ok := paramByID[sf.ID]; ok {
 			refs = append(refs, ref)
 			continue
 		}
-		// 退化兜底：cmd.Params 未挂载或对应 ParamID 缺失，合成最小 ref
+		// 退化兜底：cmd.Params 未挂载或对应 ID 缺失，合成最小 ref
 		refs = append(refs, MMLParamRef{
-			ID:        sf.ParamID,
+			ID:        sf.ID,
 			ParamCode: sf.MMLCode,
 		})
 	}
@@ -509,9 +512,10 @@ func buildMODParamRefs(subFields []MMLCommandSubField, cmdParams []MMLParamRef) 
 	paramByID := indexParamsByID(cmdParams)
 	refs := make([]MMLParamRef, 0, len(subFields))
 	for _, sf := range subFields {
-		ref, ok := paramByID[sf.ParamID]
+		// 修复 2026-05-22：见 buildLSTParamRefs 同名注释，用 sf.ID 而非 sf.ParamID。
+		ref, ok := paramByID[sf.ID]
 		if !ok {
-			ref = MMLParamRef{ID: sf.ParamID}
+			ref = MMLParamRef{ID: sf.ID}
 		}
 		// 用 MMLCode 覆盖 ParamCode，使 buildParameterValues 能按 Values key 找到 ref
 		ref.ParamCode = sf.MMLCode

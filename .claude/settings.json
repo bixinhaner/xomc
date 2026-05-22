@@ -243,7 +243,9 @@
       "Bash(sort -k1 -n)",
       "Bash(awk '{for\\(i=1;i<=NF;i++\\) if\\($i ~ /^\\(cat|g|cmd\\)\\\\.[A-Z]/\\) print $i}')",
       "Bash(sed -n '1,40p' /Users/cb/code/baicells/goomc/omcgo/migrations/000063_drop_datamodel.sql)",
-      "Bash(sed -n '60,90p' /Users/cb/code/baicells/goomc/omcgo/migrations/000063_drop_datamodel.sql)"
+      "Bash(sed -n '60,90p' /Users/cb/code/baicells/goomc/omcgo/migrations/000063_drop_datamodel.sql)",
+      "Bash(grep -n \"license\\\\|oem\" /opt/omc/etc/*.yaml 2>/dev/null || echo \"\\(can't access /opt/omc on Mac - need to check on server\\)\"; echo \"---\" && grep -n \"license\\\\|oem_public\" /Users/cb/code/baicells/goomc/omcgo/cmd/app/etc/config.prod.yaml | head -10)",
+      "Read(//opt/omc/**)"
     ],
     "deny": [
       "Bash(git push -f)",

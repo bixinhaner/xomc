@@ -126,7 +126,7 @@ func TestBuildEntry_LST_InstanceSelectors(t *testing.T) {
 		CommandCode:   "LST_IFACE",
 		OperationType: "LST",
 		Params: []MMLParamRef{
-			{ID: pID, ParamCode: "ADDR", Tr069Path: "Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress"},
+			{ID: sfID, ParamCode: "ADDR", Tr069Path: "Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress"},
 		},
 	}
 	subFields := []MMLCommandSubField{
@@ -155,7 +155,7 @@ func TestBuildEntry_MOD_InstanceSelectors(t *testing.T) {
 		CommandCode:   "MOD_IFACE",
 		OperationType: "MOD",
 		Params: []MMLParamRef{
-			{ID: pID, ParamCode: "ADDR", Tr069Path: "Device.IP.Interface.{i}.IPAddress"},
+			{ID: sfID, ParamCode: "ADDR", Tr069Path: "Device.IP.Interface.{i}.IPAddress"},
 		},
 	}
 	subFields := []MMLCommandSubField{
@@ -225,7 +225,7 @@ func TestExecuteStructured_InstanceSelectorsEndToEnd(t *testing.T) {
 		LogicalCode:   "MU_SLOT",
 		OperationType: "LST",
 		Params: []MMLParamRef{
-			{ID: pID, ParamCode: "VER", Tr069Path: "Device.DeviceInfo.MU.{i}.Slot.{i}.3GPPSpecVersion"},
+			{ID: sfID, ParamCode: "VER", Tr069Path: "Device.DeviceInfo.MU.{i}.Slot.{i}.3GPPSpecVersion"},
 		},
 	}
 	subFields := []MMLCommandSubField{
