@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 
+	"github.com/omcgo/omcgo/internal/config/parammodel/mmlstandardloader"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/carrier"
 	"github.com/omcgo/omcgo/internal/core/carrier/cmcc"
@@ -49,6 +50,13 @@ func initApp(ctx context.Context, cfg *appconfig.AppConfig) (*appInfra, error) {
 		return nil, err
 	}
 	inf.CreateEventBus()
+
+	// MML seed 数据自动导入：将嵌入的命令树 seed（18分组、190命令）UPSERT 到数据库。
+	// soft failure：导入失败仅记录 warn，不阻止服务启动。
+	if err := mmlstandardloader.ImportEmbeddedSeed(ctx, inf.PgPool, inf.Logger); err != nil {
+		inf.Logger.Warn("MML seed import failed (non-fatal, service continues)",
+			zap.Error(err))
+	}
 
 	app := &appInfra{Infra: inf}
 	app.registerCarriers()

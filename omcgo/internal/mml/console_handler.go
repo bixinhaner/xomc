@@ -129,16 +129,34 @@ func (h *ConsoleHandler) GetCommandCompatibility(c *gin.Context) {
 // GroupTreeQuery 是 GET /mml/group-tree 的查询参数。
 //
 // root 缺省时返回全树根节点（按 path 顶级 ltree 自动判定）。
+// format 缺省为 tree（向后兼容递归树）；format=flat 返 Task #4 扁平响应。
 type GroupTreeQuery struct {
-	Root string `form:"root"`
-	Lang string `form:"lang"`
+	Root   string `form:"root"`
+	Lang   string `form:"lang"`
+	Format string `form:"format"`
 }
 
-// GetGroupTree 返回 3 列布局左侧命令分组树（含每节点 commands[]）。
+// GetGroupTree 返回命令树。
+//   - format=flat：Task #4 扁平格式（章节 + 命令 + 内联 object_path / 约束）
+//   - 其他·缺省：3 列布局左侧递归树（含每节点 commands[]，原有合同）
 func (h *ConsoleHandler) GetGroupTree(c *gin.Context) {
 	var q GroupTreeQuery
 	if err := c.ShouldBindQuery(&q); err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid query: "+err.Error())
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(q.Format), "flat") {
+		groups, err := h.svc.BuildFlatGroupTree(c.Request.Context())
+		if err != nil {
+			if errors.Is(err, ErrFlatTreeNotConfigured) {
+				response.Fail(c, http.StatusServiceUnavailable, err.Error())
+				return
+			}
+			h.logger.Error("build flat group tree", zap.Error(err))
+			response.Fail(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		response.OK(c, FlatGroupTreeResponse{Groups: groups})
 		return
 	}
 	lang := normalizeLang(q.Lang)

@@ -925,6 +925,11 @@ var (
 	ErrParamInUse = errors.New("mml: param is referenced by sub_fields")
 	// ErrGroupNotEmpty 当尝试删除还含 commands 的 group 时返回；handler 翻 HTTP 409。
 	ErrGroupNotEmpty = errors.New("mml: group has commands; cannot delete")
+
+	// ErrFlatTreeNotConfigured 当 ConsoleService.flatTreeRepo 未装配但调用
+	// BuildFlatGroupTree 时返回；handler 翻 HTTP 503。Task #4 扁平命令树
+	// 依赖 PgFlatGroupTreeRepository，provider 未调 SetFlatTreeRepo 时触发。
+	ErrFlatTreeNotConfigured = errors.New("mml: flat group tree repository not configured")
 )
 
 // ============================================================

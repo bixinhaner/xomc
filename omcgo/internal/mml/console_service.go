@@ -27,6 +27,10 @@ type ConsoleService struct {
 	treeRepo     GroupTreeRepository
 	subFieldRepo SubFieldRepository
 	commandRepo  CommandRepository
+	// flatTreeRepo 是 Task #4 新增的扁平命令树仓储，nil 表示未装配
+	// （老测试以及 v1 部署路径保持原戉行为）。BuildFlatGroupTree 未装配时
+	// 返回明确错误，handler 映射为 503。
+	flatTreeRepo FlatGroupTreeRepository
 	logger       *zap.Logger
 }
 
@@ -51,6 +55,21 @@ func NewConsoleService(
 // BuildGroupTree 透传 repo BuildTree。
 func (s *ConsoleService) BuildGroupTree(ctx context.Context, rootCode, lang string) ([]GroupTreeNode, error) {
 	return s.treeRepo.BuildTree(ctx, rootCode, lang)
+}
+
+// SetFlatTreeRepo 装配 Task #4 扁平命令树仓储。不走构造函数以避免贩及
+// 现有 ~18 个测试点 NewConsoleService 的签名。provider 装配时调用一次。
+func (s *ConsoleService) SetFlatTreeRepo(repo FlatGroupTreeRepository) {
+	s.flatTreeRepo = repo
+}
+
+// BuildFlatGroupTree 透传 FlatGroupTreeRepository.BuildFlatTree。未装配时返
+// ErrFlatTreeNotConfigured，handler 映射为 503。
+func (s *ConsoleService) BuildFlatGroupTree(ctx context.Context) ([]FlatGroup, error) {
+	if s.flatTreeRepo == nil {
+		return nil, ErrFlatTreeNotConfigured
+	}
+	return s.flatTreeRepo.BuildFlatTree(ctx)
 }
 
 // SubFieldDTO 是 GET /mml/commands/:id/sub-fields 端点的响应单元。

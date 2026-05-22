@@ -1,5 +1,9 @@
 export { default as DeviceTree } from './DeviceTree';
 export { default as CommandTree } from './CommandTree';
+export { default as CommandTreeFlat } from './CommandTreeFlat';
+export type { CommandTreeFlatProps } from './CommandTreeFlat';
+export { default as CommandPanelFlat } from './CommandPanelFlat';
+export type { CommandPanelFlatProps } from './CommandPanelFlat';
 export { default as TerminalPanel } from './TerminalPanel';
 export type { TerminalPanelHandle } from './TerminalPanel';
 export { default as RightPanel } from './RightPanel';

@@ -759,6 +759,9 @@ func initMiscModules(c *Container) error {
 	}
 	mmlGroupTreeRepo := mml.NewPgGroupTreeRepository(c.PgPool, mmlGroupTreeOpts...)
 	mmlConsoleSvc := mml.NewConsoleService(mmlGroupTreeRepo, mmlSubFieldRepo, mmlCmdRepo, logger)
+	// Task #4: 装配扁平命令树仓储（GET /mml/group-tree?format=flat）
+	// 依赖同一个 PgPool，与现有 GroupTreeRepository 只读同表不冲突。
+	mmlConsoleSvc.SetFlatTreeRepo(mml.NewPgFlatGroupTreeRepository(c.PgPool))
 	// R-8.5: 独立 CompatibilityService（不耦合 ConsoleService 签名 / 测试）。
 	// ProductRegistry / ParamRegistry 由 dictload → productregistry → paramregistry
 	// 初始化链保证此时非 nil。

@@ -27,6 +27,7 @@ import type {
   ExecuteStatementsRequest,
   StructuredExecuteRequest,
   CommandCompatibility,
+  FlatGroupTreeResponse,
 } from '../../types/mmlConsole';
 import type { MMLTask } from '../../types/mml';
 
@@ -46,6 +47,23 @@ export function useGroupTree(
   return useQuery({
     queryKey: ['mml', 'console', 'group-tree', root ?? '', lang],
     queryFn: () => mmlApi.buildGroupTree(root, lang),
+    staleTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * Task #9: format=flat 命令树。2 层结构（分组 → 命令叶子），
+ * 命令叶子直接携带 object_path。
+ *
+ * 与 useGroupTree 并存：新控制台页面走 flat，旧 admin/Catalog 页面仍走 hierarchical。
+ * staleTime 同为 30min。
+ */
+export function useGroupTreeFlat(
+  lang: string = 'zh-CN'
+): ReturnType<typeof useQuery<FlatGroupTreeResponse>> {
+  return useQuery({
+    queryKey: ['mml', 'console', 'group-tree', 'flat', lang],
+    queryFn: () => mmlApi.buildGroupTreeFlat(lang),
     staleTime: 30 * 60 * 1000,
   });
 }
