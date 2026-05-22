@@ -1,0 +1,272 @@
+package asyncjob
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	sq "github.com/Masterminds/squirrel"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/omcgo/omcgo/internal/core/storage"
+)
+
+// Repository 是 async_jobs 表的持久化接口（便于单测用 stub 实现）。
+type Repository interface {
+	// Insert 写一行 status='pending' 的新任务，返回 job_id。
+	Insert(ctx context.Context, req InsertRequest) (uuid.UUID, error)
+
+	// GetByID 按 id 取一行（status 不限）。
+	GetByID(ctx context.Context, id uuid.UUID) (*Job, error)
+
+	// LockNextPending 用 SELECT ... FOR UPDATE SKIP LOCKED 抢一个可用任务，
+	// 同时把 status pending→running、heartbeat_at=NOW()、lock_owner 标本进程。
+	// 返回 ErrNoPendingJob 表示当前无可用任务。
+	LockNextPending(ctx context.Context, jobType, lockOwner string) (*Job, error)
+
+	// UpdateHeartbeat 在 running 期间每 30s 调用，刷新 heartbeat_at 到 NOW()。
+	// 任务已不在 running 状态时返回 ErrJobNotRunning。
+	UpdateHeartbeat(ctx context.Context, id uuid.UUID) error
+
+	// MarkSucceeded 任务成功收尾：status=succeeded, finished_at=NOW(), result=...
+	MarkSucceeded(ctx context.Context, id uuid.UUID, result json.RawMessage) error
+
+	// MarkFailed 任务失败收尾：status=failed, finished_at=NOW(), error_message=...
+	MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error
+
+	// ListZombies 找 status=running 且 heartbeat_at 过 threshold 的任务。
+	ListZombies(ctx context.Context, threshold time.Duration) ([]Job, error)
+
+	// ResetZombie 把僵尸任务重置回 pending（attempt+1），便于其他 worker 抢；
+	// 若 attempt >= max_attempts 则直接置 failed 返回 ErrAttemptsExhausted。
+	ResetZombie(ctx context.Context, id uuid.UUID) error
+}
+
+// PgRepository 是 Repository 的 pgxpool 实现。
+type PgRepository struct {
+	pool *pgxpool.Pool
+}
+
+// NewPgRepository 创建 Repository 的 PG 实现。
+func NewPgRepository(pool *pgxpool.Pool) *PgRepository {
+	return &PgRepository{pool: pool}
+}
+
+var _ Repository = (*PgRepository)(nil)
+
+func (r *PgRepository) Insert(ctx context.Context, req InsertRequest) (uuid.UUID, error) {
+	maxAttempts := req.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = DefaultMaxAttempts
+	}
+	q, args, err := storage.Psql.Insert("async_jobs").
+		Columns("job_type", "status", "schedule_expr", "scheduled_at", "payload", "max_attempts").
+		Values(req.JobType, string(StatusPending), nullableString(req.ScheduleExpr), req.ScheduledAt, req.Payload, maxAttempts).
+		Suffix("RETURNING id").
+		ToSql()
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("build insert async_jobs: %w", err)
+	}
+	var id uuid.UUID
+	if err := r.pool.QueryRow(ctx, q, args...).Scan(&id); err != nil {
+		return uuid.Nil, fmt.Errorf("insert async_jobs: %w", err)
+	}
+	return id, nil
+}
+
+func (r *PgRepository) GetByID(ctx context.Context, id uuid.UUID) (*Job, error) {
+	q, args, err := storage.Psql.Select(jobCols...).
+		From("async_jobs").
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build get async_jobs: %w", err)
+	}
+	row := r.pool.QueryRow(ctx, q, args...)
+	return scanJob(row)
+}
+
+// LockNextPending 用 CTE + FOR UPDATE SKIP LOCKED 在单条 SQL 内原子完成
+// "找 pending → 改 running"。比"先 SELECT，再 UPDATE"少一次 round-trip 且避免竞态。
+func (r *PgRepository) LockNextPending(ctx context.Context, jobType, lockOwner string) (*Job, error) {
+	const q = `
+WITH next AS (
+    SELECT id
+    FROM async_jobs
+    WHERE job_type = $1 AND status = 'pending' AND scheduled_at <= NOW()
+    ORDER BY scheduled_at
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+UPDATE async_jobs aj
+SET status = 'running',
+    started_at = NOW(),
+    heartbeat_at = NOW(),
+    lock_owner = $2
+FROM next
+WHERE aj.id = next.id
+RETURNING aj.id, aj.job_type, aj.status, aj.schedule_expr, aj.scheduled_at, aj.started_at, aj.finished_at,
+          aj.heartbeat_at, aj.lock_owner, aj.attempt, aj.max_attempts, aj.payload, aj.result, aj.error_message,
+          aj.created_at, aj.updated_at
+`
+	row := r.pool.QueryRow(ctx, q, jobType, lockOwner)
+	job, err := scanJob(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNoPendingJob
+		}
+		return nil, err
+	}
+	return job, nil
+}
+
+func (r *PgRepository) UpdateHeartbeat(ctx context.Context, id uuid.UUID) error {
+	const q = `UPDATE async_jobs SET heartbeat_at = NOW() WHERE id = $1 AND status = 'running'`
+	tag, err := r.pool.Exec(ctx, q, id)
+	if err != nil {
+		return fmt.Errorf("update heartbeat: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrJobNotRunning
+	}
+	return nil
+}
+
+func (r *PgRepository) MarkSucceeded(ctx context.Context, id uuid.UUID, result json.RawMessage) error {
+	const q = `UPDATE async_jobs SET status = 'succeeded', finished_at = NOW(), result = $2 WHERE id = $1 AND status = 'running'`
+	tag, err := r.pool.Exec(ctx, q, id, result)
+	if err != nil {
+		return fmt.Errorf("mark succeeded: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrJobNotRunning
+	}
+	return nil
+}
+
+func (r *PgRepository) MarkFailed(ctx context.Context, id uuid.UUID, errMsg string) error {
+	const q = `UPDATE async_jobs SET status = 'failed', finished_at = NOW(), error_message = $2 WHERE id = $1 AND status = 'running'`
+	tag, err := r.pool.Exec(ctx, q, id, errMsg)
+	if err != nil {
+		return fmt.Errorf("mark failed: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrJobNotRunning
+	}
+	return nil
+}
+
+func (r *PgRepository) ListZombies(ctx context.Context, threshold time.Duration) ([]Job, error) {
+	q := fmt.Sprintf(`
+SELECT %s FROM async_jobs
+WHERE status = 'running' AND heartbeat_at < NOW() - $1::interval
+ORDER BY heartbeat_at
+LIMIT 100`, joinJobCols())
+	rows, err := r.pool.Query(ctx, q, threshold.String())
+	if err != nil {
+		return nil, fmt.Errorf("list zombies: %w", err)
+	}
+	defer rows.Close()
+	var jobs []Job
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, *j)
+	}
+	return jobs, rows.Err()
+}
+
+// ResetZombie 单 SQL 原子做"attempt 检查 + 重置"，避免读改写竞态。
+// 若 attempt < max_attempts → status pending, attempt+1, heartbeat_at=NULL；
+// 若 attempt >= max_attempts → status failed, finished_at=NOW(), error_message='attempts exhausted (zombie)'；
+// 用 RETURNING 区分两种结局。
+func (r *PgRepository) ResetZombie(ctx context.Context, id uuid.UUID) error {
+	const q = `
+UPDATE async_jobs SET
+    status = CASE WHEN attempt + 1 > max_attempts THEN 'failed' ELSE 'pending' END,
+    attempt = attempt + 1,
+    heartbeat_at = NULL,
+    lock_owner = NULL,
+    finished_at = CASE WHEN attempt + 1 > max_attempts THEN NOW() ELSE NULL END,
+    error_message = CASE WHEN attempt + 1 > max_attempts THEN 'attempts exhausted (zombie)' ELSE NULL END
+WHERE id = $1 AND status = 'running'
+RETURNING status
+`
+	var newStatus string
+	err := r.pool.QueryRow(ctx, q, id).Scan(&newStatus)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrJobNotRunning
+		}
+		return fmt.Errorf("reset zombie: %w", err)
+	}
+	if newStatus == string(StatusFailed) {
+		return ErrAttemptsExhausted
+	}
+	return nil
+}
+
+// jobCols / joinJobCols / scanJob — 内部 helper
+
+var jobCols = []string{
+	"id", "job_type", "status", "schedule_expr", "scheduled_at", "started_at", "finished_at",
+	"heartbeat_at", "lock_owner", "attempt", "max_attempts", "payload", "result", "error_message",
+	"created_at", "updated_at",
+}
+
+func joinJobCols() string {
+	out := ""
+	for i, c := range jobCols {
+		if i > 0 {
+			out += ", "
+		}
+		out += c
+	}
+	return out
+}
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanJob(row rowScanner) (*Job, error) {
+	var j Job
+	var scheduleExpr, lockOwner, errMsg *string
+	var payload, result []byte
+	if err := row.Scan(
+		&j.ID, &j.JobType, &j.Status, &scheduleExpr, &j.ScheduledAt, &j.StartedAt, &j.FinishedAt,
+		&j.HeartbeatAt, &lockOwner, &j.Attempt, &j.MaxAttempts, &payload, &result, &errMsg,
+		&j.CreatedAt, &j.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	if scheduleExpr != nil {
+		j.ScheduleExpr = *scheduleExpr
+	}
+	if lockOwner != nil {
+		j.LockOwner = *lockOwner
+	}
+	if errMsg != nil {
+		j.ErrorMessage = *errMsg
+	}
+	if len(payload) > 0 {
+		j.Payload = json.RawMessage(payload)
+	}
+	if len(result) > 0 {
+		j.Result = json.RawMessage(result)
+	}
+	return &j, nil
+}
+
+func nullableString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
