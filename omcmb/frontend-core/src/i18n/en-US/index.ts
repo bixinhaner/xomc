@@ -4139,6 +4139,16 @@ const messages: Record<string, string> = {
   'mml.console.saveAndExecute':              'Save & Execute',
   'mml.console.saveOnly':                    'Save Only',
 
+  // PathPicker (multi-select for paramPaths in template form, Bundle D)
+  'mml.console.pathPicker.label':            'Parameter Paths (optional)',
+  'mml.console.pathPicker.help':             'Pick via Group → Command → Path, or search by path / command name; multi-select supported',
+  'mml.console.pathPicker.searchPlaceholder':   'Search path or command name (≥1 char)',
+  'mml.console.pathPicker.groupPlaceholder':    'Select group',
+  'mml.console.pathPicker.commandPlaceholder':  'Select command',
+  'mml.console.pathPicker.pathPlaceholder':     'Tick paths to add',
+  'mml.console.pathPicker.empty':            'No path selected yet',
+  'mml.console.pathPicker.clearAll':         'Clear all',
+
   // MML Console - Command tree
   'mml.console.customTemplates':             'Custom Commands',
   'mml.console.publicCommands':              'Public Commands',

@@ -6,6 +6,7 @@ import type { MMLCustomCommand } from '@core/types/mml';
 import { useT } from '@/hooks/useT';
 import CommandCodeTextarea from '../../components/CommandCodeTextarea';
 import OperationTypeWithModify from '../../components/OperationTypeWithModify';
+import PathPicker from './PathPicker';
 
 interface AddTemplateModalProps {
   open: boolean;
@@ -91,9 +92,11 @@ export default function AddTemplateModal({
         operationType: editingTemplate.operationType,
         modifyValues: serializeModifyValues(editingTemplate.parameters as Record<string, unknown>),
         description: editingTemplate.description ?? '',
+        paramPaths: editingTemplate.paramPaths ?? [],
       });
     } else {
       form.resetFields();
+      form.setFieldsValue({ paramPaths: [] });
     }
   }, [open, editingTemplate, form]);
 
@@ -127,8 +130,8 @@ export default function AddTemplateModal({
           : {};
 
       // T-0090 子项 ②：UI 删 categoryGroup / productClasses / 参数配置 section；
-      // productClasses column 已由 T-0090-b 真删；categoryGroup / paramPaths schema
-      // 仍 required，提交时传 empty default 保持后端兼容。
+      // productClasses column 已由 T-0090-b 真删；categoryGroup schema 仍 required，
+      // 提交时传 empty default。paramPaths 由 Bundle D 通过 PathPicker 收集。
       const template: Omit<MMLCustomCommand, 'id' | 'creator' | 'createdAt' | 'updatedAt'> = {
         commandName: values.templateName,
         commandCode: values.commandCode,
@@ -136,7 +139,7 @@ export default function AddTemplateModal({
         commandScope: effectiveScope,
         categoryGroup: '',
         parameters,
-        paramPaths: [],
+        paramPaths: Array.isArray(values.paramPaths) ? values.paramPaths : [],
         description: values.description ?? '',
       };
 
@@ -181,7 +184,7 @@ export default function AddTemplateModal({
       title={t(titleKey)}
       open={open}
       onCancel={onClose}
-      width={600}
+      width={720}
       destroyOnClose
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
@@ -216,6 +219,16 @@ export default function AddTemplateModal({
         </Form.Item>
 
         <OperationTypeWithModify form={form} />
+
+        <Form.Item
+          name="paramPaths"
+          label={t('mml.console.pathPicker.label')}
+          extra={t('mml.console.pathPicker.help')}
+          valuePropName="value"
+          trigger="onChange"
+        >
+          <PathPicker value={[]} onChange={() => undefined} />
+        </Form.Item>
 
         <Form.Item name="description" label={t('common.description')}>
           <Input.TextArea rows={2} placeholder={t('mml.console.commandDescriptionOptional')} maxLength={500} />

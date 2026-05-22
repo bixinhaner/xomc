@@ -4162,6 +4162,16 @@ const messages: Record<string, string> = {
   'mml.console.saveAndExecute':              '保存并执行',
   'mml.console.saveOnly':                    '仅保存',
 
+  // PathPicker（自定义模板的参数路径多选选择器，Bundle D）
+  'mml.console.pathPicker.label':            '参数路径（可选）',
+  'mml.console.pathPicker.help':             '按 分组 → 命令 → 路径 三级选择，或直接搜索 path / 命令名；可勾选多条 path',
+  'mml.console.pathPicker.searchPlaceholder':   '搜索 path 或命令名（≥1 字符）',
+  'mml.console.pathPicker.groupPlaceholder':    '选择分组',
+  'mml.console.pathPicker.commandPlaceholder':  '选择命令',
+  'mml.console.pathPicker.pathPlaceholder':     '勾选要添加的 path',
+  'mml.console.pathPicker.empty':            '尚未选择任何 path',
+  'mml.console.pathPicker.clearAll':         '全部清空',
+
   // MML Console - Command tree
   'mml.console.customTemplates':             '自定义命令',
   'mml.console.publicCommands':              '公有命令',
