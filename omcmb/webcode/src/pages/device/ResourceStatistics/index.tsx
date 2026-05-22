@@ -152,7 +152,7 @@ export default function ResourceStatistics() {
       {/* Charts Row 1 */}
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={12}>
-          <Card title={t('device.productType')} size="small" styles={{ body: { padding: '8px 0 0' } }}>
+          <Card title={t('device.productClass')} size="small" styles={{ body: { padding: '8px 0 0' } }}>
             <PieChart title="" data={typeData} height={280} donut />
           </Card>
         </Col>

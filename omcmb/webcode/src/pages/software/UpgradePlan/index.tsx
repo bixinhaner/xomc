@@ -108,7 +108,7 @@ export default function UpgradePlan() {
 
   // ---- Dynamic product type options from API ----
   const { data: productClassesData } = useProductClasses();
-  const productTypeOptions = useMemo(() => {
+  const productClassOptions = useMemo(() => {
     if (productClassesData && productClassesData.length > 0) {
       return productClassesData.map((c) => ({ label: c, value: c }));
     }
@@ -215,8 +215,8 @@ export default function UpgradePlan() {
   const [drawerKeepConfig, setDrawerKeepConfig] = useState(true);
   const [retryOffline, setRetryOffline] = useState(true);
   const [batchSize, setBatchSize] = useState(20);
-  const [drawerDevices, setDrawerDevices] = useState<{ id: string; deviceSn: string; deviceName: string; sourceVersion: string; productType: string }[]>([]);
-  const [drawerProductType, setDrawerProductType] = useState<string>('');
+  const [drawerDevices, setDrawerDevices] = useState<{ id: string; deviceSn: string; deviceName: string; sourceVersion: string; productClass: string }[]>([]);
+  const [drawerProductClass, setDrawerProductClass] = useState<string>('');
   const [selectAllOfType, setSelectAllOfType] = useState(false);
 
   // Add device modal state
@@ -228,7 +228,7 @@ export default function UpgradePlan() {
   const [batchInputVisible, setBatchInputVisible] = useState(false);
   const [batchInputValue, setBatchInputValue] = useState('');
   const [batchInputPreview, setBatchInputPreview] = useState<{
-    matched: { id: string; deviceSn: string; deviceName: string; sourceVersion: string; productType: string }[];
+    matched: { id: string; deviceSn: string; deviceName: string; sourceVersion: string; productClass: string }[];
     notFound: string[];
     mixedTypes: string[];
   }>({ matched: [], notFound: [], mixedTypes: [] });
@@ -260,16 +260,16 @@ export default function UpgradePlan() {
     const allFiles = firmwareData?.items ?? [];
     return allFiles.filter((f) => {
       // Support comma-separated multi-product-type: match if selected type is in the list
-      if (drawerProductType && f.deviceType) {
+      if (drawerProductClass && f.deviceType) {
         const supportedTypes = f.deviceType.split(',').map((s) => s.trim()).filter(Boolean);
-        if (!supportedTypes.includes(drawerProductType)) return false;
+        if (!supportedTypes.includes(drawerProductClass)) return false;
       }
       if (upgradeCategory === 'software') return f.fileType === 0 || f.fileType === undefined;
       if (upgradeCategory === 'patch') return f.fileType === 1;
       if (upgradeCategory === 'fpga') return f.fileType === 6;
       return true;
     });
-  }, [firmwareData, drawerProductType, upgradeCategory]);
+  }, [firmwareData, drawerProductClass, upgradeCategory]);
 
   // Filtered firmware options for select
   const filteredFiles = useMemo(() =>
@@ -293,7 +293,7 @@ export default function UpgradePlan() {
       return;
     }
 
-    const headers = [t('software.taskName'), t('table.operator'), t('software.taskStatus'), t('software.upgrade.productType'), t('software.upgrade.targetVersion'), t('software.upgrade.upgradeProgress'), t('table.result'), t('software.startTime'), t('software.endTime')];
+    const headers = [t('software.taskName'), t('table.operator'), t('software.taskStatus'), t('software.upgrade.productClass'), t('software.upgrade.targetVersion'), t('software.upgrade.upgradeProgress'), t('table.result'), t('software.startTime'), t('software.endTime')];
     const rows = taskList.map((task) => [
       task.taskName,
       task.createUser,
@@ -358,7 +358,7 @@ export default function UpgradePlan() {
   const handleOpenUpgradeDrawer = () => {
     setTaskName('');
     setDrawerDevices([]);
-    setDrawerProductType('');
+    setDrawerProductClass('');
     setUpgradeCategory('software');
     setExecutionMethod('immediate');
     setScheduledTime(null);
@@ -385,7 +385,7 @@ export default function UpgradePlan() {
   // Fetch real devices from API by product_class
   const { data: deviceListData } = useDeviceList(
     {
-      productType: drawerProductType,
+      productClass: drawerProductClass,
       page: 1,
       pageSize: 500,
     },
@@ -394,7 +394,7 @@ export default function UpgradePlan() {
 
   // Available devices: real data from API, excluding already added ones
   const availableDevices = useMemo(() => {
-    if (!drawerProductType || !deviceListData?.items) return [];
+    if (!drawerProductClass || !deviceListData?.items) return [];
     return deviceListData.items
       .filter((d) => !drawerDevices.some((existing) => existing.id === d.id))
       .map((d) => ({
@@ -402,10 +402,10 @@ export default function UpgradePlan() {
         deviceSn: d.sn,
         deviceName: d.name,
         sourceVersion: d.firmwareVersion || d.softwareVersion || '',
-        productType: d.productType,
+        productClass: d.productClass,
         deviceGroup: d.groupName || '',
       }));
-  }, [drawerProductType, deviceListData, drawerDevices]);
+  }, [drawerProductClass, deviceListData, drawerDevices]);
 
   const filteredAvailableDevices = useMemo(() => {
     if (!addDeviceKeyword) return availableDevices;
@@ -436,7 +436,7 @@ export default function UpgradePlan() {
 
     const newDevices = availableDevices
       .filter((d) => selectedNewDevices.includes(d.id))
-      .map((d) => ({ id: d.id, deviceSn: d.deviceSn, deviceName: d.deviceName, sourceVersion: d.sourceVersion, productType: d.productType }));
+      .map((d) => ({ id: d.id, deviceSn: d.deviceSn, deviceName: d.deviceName, sourceVersion: d.sourceVersion, productClass: d.productClass }));
 
     setDrawerDevices((prev) => [...prev, ...newDevices]);
     setAddDeviceModalVisible(false);
@@ -453,7 +453,7 @@ export default function UpgradePlan() {
   };
 
   const handleBatchInputPreview = () => {
-    if (!batchInputValue.trim() || !drawerProductType) {
+    if (!batchInputValue.trim() || !drawerProductClass) {
       setBatchInputPreview({ matched: [], notFound: [], mixedTypes: [] });
       return;
     }
@@ -465,7 +465,7 @@ export default function UpgradePlan() {
     const matched = availableDevices.filter((d) => sns.includes(d.deviceSn));
     const matchedSns = new Set(matched.map((d) => d.deviceSn));
     const notFound = sns.filter((sn) => !matchedSns.has(sn));
-    const mixedTypes = [...new Set(matched.map((d) => d.productType))];
+    const mixedTypes = [...new Set(matched.map((d) => d.productClass))];
 
     setBatchInputPreview({ matched, notFound, mixedTypes });
   };
@@ -478,8 +478,8 @@ export default function UpgradePlan() {
     }
     // Only add devices matching the selected product type
     const toAdd = matched
-      .filter((d) => d.productType === drawerProductType && !drawerDevices.some((existing) => existing.id === d.id))
-      .map((d) => ({ id: d.id, deviceSn: d.deviceSn, deviceName: d.deviceName, sourceVersion: d.sourceVersion, productType: d.productType }));
+      .filter((d) => d.productClass === drawerProductClass && !drawerDevices.some((existing) => existing.id === d.id))
+      .map((d) => ({ id: d.id, deviceSn: d.deviceSn, deviceName: d.deviceName, sourceVersion: d.sourceVersion, productClass: d.productClass }));
 
     setDrawerDevices((prev) => [...prev, ...toAdd]);
     setBatchInputVisible(false);
@@ -533,7 +533,7 @@ export default function UpgradePlan() {
                                 executionMethod === 'suspend' ? t('software.upgrade.suspendExecText') : t('software.upgrade.scheduledExecText', { time: scheduledTime?.format('YYYY-MM-DD HH:mm') ?? '' });
           const deviceCount = selectAllOfType ? allDevicesCountOfType : drawerDevices.length;
           const deviceInfo = selectAllOfType
-            ? t('software.upgrade.productTypeAll', { type: drawerProductType, count: deviceCount })
+            ? t('software.upgrade.productClassAll', { type: drawerProductClass, count: deviceCount })
             : t('software.upgrade.deviceCountInfo', { count: deviceCount });
 
           void message.success(t('software.upgrade.createTaskSuccess', { name: taskName, deviceInfo, execMethod: execMethodText }));
@@ -769,7 +769,7 @@ export default function UpgradePlan() {
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
     },
-    { key: 'productType', title: t('software.upgrade.productType'), dataIndex: 'productClass', width: 100 },
+    { key: 'productClass', title: t('software.upgrade.productClass'), dataIndex: 'productClass', width: 100 },
     {
       key: 'progress',
       title: t('software.upgrade.upgradeProgress'),
@@ -842,7 +842,7 @@ export default function UpgradePlan() {
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
     },
-    { key: 'productType', title: t('software.upgrade.productType'), width: 100, render: () => '-' },
+    { key: 'productClass', title: t('software.upgrade.productClass'), width: 100, render: () => '-' },
     {
       key: 'keepConfig',
       title: t('software.upgrade.keepConfig'),
@@ -1030,7 +1030,7 @@ export default function UpgradePlan() {
 
       {/* Batch input modal */}
       <Modal
-        title={t('software.upgrade.batchInputTitle', { type: drawerProductType || t('software.upgrade.selectProductTypeFirst') })}
+        title={t('software.upgrade.batchInputTitle', { type: drawerProductClass || t('software.upgrade.selectProductClassFirst') })}
         open={batchInputVisible}
         onCancel={() => setBatchInputVisible(false)}
         onOk={handleBatchInputConfirm}
@@ -1038,14 +1038,14 @@ export default function UpgradePlan() {
         cancelText={t('common.cancel')}
         width={600}
         okButtonProps={{
-          disabled: batchInputPreview.matched.length === 0 || !drawerProductType,
+          disabled: batchInputPreview.matched.length === 0 || !drawerProductClass,
         }}
       >
-        {!drawerProductType && (
+        {!drawerProductClass && (
           <Alert
             type="warning"
             showIcon
-            message={t('software.upgrade.selectProductTypeFirst')}
+            message={t('software.upgrade.selectProductClassFirst')}
             style={{ marginBottom: 16 }}
           />
         )}
@@ -1064,21 +1064,21 @@ export default function UpgradePlan() {
         {batchInputPreview.matched.length > 0 && (
           <div style={{ marginBottom: 16 }}>
             <Alert
-              type={batchInputPreview.mixedTypes.includes(drawerProductType) ? 'success' : 'warning'}
+              type={batchInputPreview.mixedTypes.includes(drawerProductClass) ? 'success' : 'warning'}
               showIcon
-              icon={!batchInputPreview.mixedTypes.includes(drawerProductType) ? <WarningOutlined /> : undefined}
+              icon={!batchInputPreview.mixedTypes.includes(drawerProductClass) ? <WarningOutlined /> : undefined}
               message={
                 <Space direction="vertical" size="small">
                   <span>
                     {t('software.upgrade.matchedDevices', { count: batchInputPreview.matched.length })}
-                    {batchInputPreview.mixedTypes.includes(drawerProductType) && (
-                      <Tag color="blue" style={{ marginLeft: 8 }}>{t('software.upgrade.addableCount', { count: batchInputPreview.matched.filter(d => d.productType === drawerProductType).length })}</Tag>
+                    {batchInputPreview.mixedTypes.includes(drawerProductClass) && (
+                      <Tag color="blue" style={{ marginLeft: 8 }}>{t('software.upgrade.addableCount', { count: batchInputPreview.matched.filter(d => d.productClass === drawerProductClass).length })}</Tag>
                     )}
                   </span>
-                  {!batchInputPreview.mixedTypes.includes(drawerProductType) && drawerProductType && (
+                  {!batchInputPreview.mixedTypes.includes(drawerProductClass) && drawerProductClass && (
                     <span style={{ color: '#faad14' }}>
                       <WarningOutlined style={{ marginRight: 4 }} />
-                      {t('software.upgrade.noMatchedType', { type: drawerProductType })}
+                      {t('software.upgrade.noMatchedType', { type: drawerProductClass })}
                     </span>
                   )}
                 </Space>
@@ -1199,16 +1199,16 @@ export default function UpgradePlan() {
           </Form.Item>
 
           {/* Product type */}
-          <Form.Item label={t('software.upgrade.productType')} required>
+          <Form.Item label={t('software.upgrade.productClass')} required>
             <Select
-              value={drawerProductType}
+              value={drawerProductClass}
               onChange={(val) => {
-                setDrawerProductType(val);
+                setDrawerProductClass(val);
                 setUpgradeFile(undefined);
                 setSelectAllOfType(false);
-                setDrawerDevices((prev) => prev.filter((d) => d.productType === val));
+                setDrawerDevices((prev) => prev.filter((d) => d.productClass === val));
               }}
-              options={productTypeOptions}
+              options={productClassOptions}
               style={{ width: '100%' }}
             />
           </Form.Item>
@@ -1218,10 +1218,10 @@ export default function UpgradePlan() {
             <Checkbox
               checked={selectAllOfType}
               onChange={(e) => setSelectAllOfType(e.target.checked)}
-              disabled={!drawerProductType}
+              disabled={!drawerProductClass}
             >
               {t('software.upgrade.upgradeAllOfType')}
-              {drawerProductType && (
+              {drawerProductClass && (
                 <Tag color="blue" style={{ marginLeft: 8 }}>{t('software.upgrade.totalDevices', { count: allDevicesCountOfType })}</Tag>
               )}
             </Checkbox>
@@ -1255,7 +1255,7 @@ export default function UpgradePlan() {
                   size="small"
                   icon={<PlusOutlined />}
                   onClick={handleOpenBatchInput}
-                  disabled={!drawerProductType}
+                  disabled={!drawerProductClass}
                 >
                   {t('software.upgrade.batchInput') ?? '批量输入'}
                 </Button>
@@ -1266,7 +1266,7 @@ export default function UpgradePlan() {
               <Alert
                 type="info"
                 showIcon
-                message={`${t('software.upgrade.selectedAllOfType') ?? '已选择产品类型'}「${drawerProductType}」${t('software.upgrade.allDevices') ?? '的全部设备'}，${t('software.upgrade.total') ?? '共'} ${allDevicesCountOfType} ${t('software.upgrade.units') ?? '台'}`}
+                message={`${t('software.upgrade.selectedAllOfType') ?? '已选择产品类型'}「${drawerProductClass}」${t('software.upgrade.allDevices') ?? '的全部设备'}，${t('software.upgrade.total') ?? '共'} ${allDevicesCountOfType} ${t('software.upgrade.units') ?? '台'}`}
                 description={t('software.upgrade.autoQueryDesc') ?? '执行时将自动查询该产品类型的所有设备进行升级'}
               />
             ) : (
@@ -1303,7 +1303,7 @@ export default function UpgradePlan() {
                     icon={<PlusOutlined />}
                     onClick={handleOpenAddDeviceModal}
                     style={{ width: '100%' }}
-                    disabled={!drawerProductType}
+                    disabled={!drawerProductClass}
                   >
                     {t('software.upgrade.addDevice') ?? '添加设备'}
                   </Button>
@@ -1417,7 +1417,7 @@ export default function UpgradePlan() {
               {/* Task basic info */}
               <Descriptions column={2} bordered size="small" style={{ marginBottom: 16 }}>
                 <Descriptions.Item label={t('software.taskName')} span={2}>{taskDetailRecord.taskName}</Descriptions.Item>
-                <Descriptions.Item label={t('software.upgrade.productType')}>{taskDetailRecord.productClass}</Descriptions.Item>
+                <Descriptions.Item label={t('software.upgrade.productClass')}>{taskDetailRecord.productClass}</Descriptions.Item>
                 <Descriptions.Item label={t('software.upgrade.upgradeType')}>
                   <Tag color={TASK_TYPE_MAP[taskDetailRecord.taskType as keyof typeof TASK_TYPE_MAP]?.color}>
                     {TASK_TYPE_MAP[taskDetailRecord.taskType as keyof typeof TASK_TYPE_MAP]?.text || taskDetailRecord.taskType}
@@ -1551,7 +1551,7 @@ export default function UpgradePlan() {
 
       {/* Add device modal */}
       <Modal
-        title={`${t('software.upgrade.addDevice') ?? '添加设备'} - ${drawerProductType}`}
+        title={`${t('software.upgrade.addDevice') ?? '添加设备'} - ${drawerProductClass}`}
         open={addDeviceModalVisible}
         onCancel={() => setAddDeviceModalVisible(false)}
         onOk={handleConfirmAddDevices}
@@ -1565,7 +1565,7 @@ export default function UpgradePlan() {
             type="info"
             showIcon
             message={t('software.upgrade.noDevicesToAdd') ?? '没有可添加的设备'}
-            description={`${t('software.upgrade.productType') ?? '产品类型'} ${drawerProductType} ${t('software.upgrade.allDevicesAdded') ?? '的设备已全部在列表中'}`}
+            description={`${t('software.upgrade.productClass') ?? '产品类型'} ${drawerProductClass} ${t('software.upgrade.allDevicesAdded') ?? '的设备已全部在列表中'}`}
           />
         ) : (
           <>

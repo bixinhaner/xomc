@@ -15,7 +15,7 @@ export interface IndicatorInfo {
   unit?: string;
   description?: string;
   isCounter?: boolean;
-  productType?: string;
+  productClass?: string;
   operatorCode?: string;
   isEnabled?: boolean;
   deviceType: DeviceType;
@@ -25,7 +25,7 @@ export interface IndicatorListFilter {
   groupId?: string;
   keyword?: string;
   operatorCode?: string;
-  productType?: string;
+  productClass?: string;
   indicatorLevel?: string;
   isEnabled?: boolean;
   isCounter?: boolean;
@@ -67,7 +67,7 @@ export interface CreateIndicatorInput {
   indicatorLevel?: string;
   unit?: string;
   description?: string;
-  productType?: string;
+  productClass?: string;
   operatorCode?: string;
 }
 

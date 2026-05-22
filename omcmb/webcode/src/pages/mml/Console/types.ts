@@ -5,7 +5,7 @@ export interface ConsoleDevice {
   sn: string;
   name: string;
   type: string;
-  productType: string;
+  productClass: string;
   status: 'online' | 'offline' | 'alarm';
 }
 

@@ -69,8 +69,8 @@ export default function ImportExport() {
       ],
     },
     {
-      name: 'productType',
-      label: t('device.productType'),
+      name: 'productClass',
+      label: t('device.productClass'),
       type: 'select',
       options: [
         { label: t('common.all'), value: '' },

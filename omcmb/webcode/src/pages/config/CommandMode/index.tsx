@@ -28,7 +28,7 @@ const mockCommands: MMLCommand[] = [
     params: [
       { name: 'CELLID', type: 'number', required: false, description: '小区ID，不填则查询全部', minValue: 0, maxValue: 65535 },
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   {
     id: '2',
@@ -40,7 +40,7 @@ const mockCommands: MMLCommand[] = [
       { name: 'CELLID', type: 'number', required: true, description: '小区ID', minValue: 0, maxValue: 65535 },
       { name: 'ACTTYPE', type: 'enum', required: true, description: '操作类型', options: [{ label: '激活', value: 0 }, { label: '去激活', value: 1 }] },
     ],
-    productTypes: ['eNB'],
+    productClasses: ['eNB'],
   },
   {
     id: '3',
@@ -51,7 +51,7 @@ const mockCommands: MMLCommand[] = [
     params: [
       { name: 'LOCALCELLID', type: 'number', required: false, description: '本地小区ID' },
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   {
     id: '4',
@@ -60,7 +60,7 @@ const mockCommands: MMLCommand[] = [
     category: 'BSC配置',
     description: '查询基站运行状态信息',
     params: [],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
 ];
 

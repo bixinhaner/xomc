@@ -41,11 +41,11 @@ const classificationTree: DataNode[] = [
 ];
 
 const mockDevices: Partial<Device>[] = [
-  { id: 'd-001', sn: 'ENB00001', name: '北京-eNB-0001', vendor: '华为', productType: 'eNB', networkType: 'LTE', connStatus: 'online', alarmLevel: 'none', region: '北京', softwareVersion: 'V100R011C10SPC200' },
-  { id: 'd-002', sn: 'ENB00002', name: '北京-eNB-0002', vendor: '华为', productType: 'eNB', networkType: 'LTE', connStatus: 'online', alarmLevel: 'minor', region: '北京', softwareVersion: 'V100R011C10SPC200' },
-  { id: 'd-003', sn: 'ENB00003', name: '上海-eNB-0001', vendor: '中兴', productType: 'eNB', networkType: 'LTE', connStatus: 'offline', alarmLevel: 'major', region: '上海', softwareVersion: 'V100R011C10SPC100' },
-  { id: 'd-004', sn: 'ENB00004', name: '广州-eNB-0001', vendor: '爱立信', productType: 'eNB', networkType: 'LTE', connStatus: 'online', alarmLevel: 'none', region: '广州', softwareVersion: 'V100R011C10SPC200' },
-  { id: 'd-005', sn: 'GNB00001', name: '北京-gNB-0001', vendor: '华为', productType: 'gNB', networkType: 'NR', connStatus: 'online', alarmLevel: 'none', region: '北京', softwareVersion: 'V200R001C10SPC100' },
+  { id: 'd-001', sn: 'ENB00001', name: '北京-eNB-0001', vendor: '华为', productClass: 'eNB', networkType: 'LTE', connStatus: 'online', alarmLevel: 'none', region: '北京', softwareVersion: 'V100R011C10SPC200' },
+  { id: 'd-002', sn: 'ENB00002', name: '北京-eNB-0002', vendor: '华为', productClass: 'eNB', networkType: 'LTE', connStatus: 'online', alarmLevel: 'minor', region: '北京', softwareVersion: 'V100R011C10SPC200' },
+  { id: 'd-003', sn: 'ENB00003', name: '上海-eNB-0001', vendor: '中兴', productClass: 'eNB', networkType: 'LTE', connStatus: 'offline', alarmLevel: 'major', region: '上海', softwareVersion: 'V100R011C10SPC100' },
+  { id: 'd-004', sn: 'ENB00004', name: '广州-eNB-0001', vendor: '爱立信', productClass: 'eNB', networkType: 'LTE', connStatus: 'online', alarmLevel: 'none', region: '广州', softwareVersion: 'V100R011C10SPC200' },
+  { id: 'd-005', sn: 'GNB00001', name: '北京-gNB-0001', vendor: '华为', productClass: 'gNB', networkType: 'NR', connStatus: 'online', alarmLevel: 'none', region: '北京', softwareVersion: 'V200R001C10SPC100' },
 ];
 
 const connStatusColorMap: Record<string, string> = { online: 'green', offline: 'red' };
@@ -63,10 +63,10 @@ export default function DeviceClassification() {
     if (selectedCategory === 'all') return true;
     if (selectedCategory === '4g') return d.networkType === 'LTE';
     if (selectedCategory === '5g') return d.networkType === 'NR';
-    if (selectedCategory === 'enb') return d.productType === 'eNB';
-    if (selectedCategory === 'gnb') return d.productType === 'gNB';
-    if (selectedCategory === 'rru') return d.productType === 'RRU';
-    if (selectedCategory === 'aau') return d.productType === 'AAU';
+    if (selectedCategory === 'enb') return d.productClass === 'eNB';
+    if (selectedCategory === 'gnb') return d.productClass === 'gNB';
+    if (selectedCategory === 'rru') return d.productClass === 'RRU';
+    if (selectedCategory === 'aau') return d.productClass === 'AAU';
     return true;
   });
 
@@ -74,7 +74,7 @@ export default function DeviceClassification() {
     { key: 'sn', title: t('device.sn'), dataIndex: 'sn', width: 130, mono: true },
     { key: 'name', title: t('device.name'), dataIndex: 'name', ellipsis: true },
     { key: 'vendor', title: t('table.vendor'), dataIndex: 'vendor', width: 90 },
-    { key: 'productType', title: t('device.productType'), dataIndex: 'productType', width: 90 },
+    { key: 'productClass', title: t('device.productClass'), dataIndex: 'productClass', width: 90 },
     { key: 'networkType', title: t('table.type'), dataIndex: 'networkType', width: 90 },
     { key: 'region', title: t('table.region'), dataIndex: 'region', width: 80 },
     {

@@ -184,12 +184,12 @@ export default function FileTransferCenter() {
   const [deviceKeyword, setDeviceKeyword] = useState('');
   const [deviceKeywordInput, setDeviceKeywordInput] = useState('');
   const [deviceStatusFilter, setDeviceStatusFilter] = useState<string>();
-  const [deviceProductTypeFilter, setDeviceProductTypeFilter] = useState<string>();
+  const [deviceProductClassFilter, setDeviceProductClassFilter] = useState<string>();
   const [viewMode, setViewMode] = useState<'tasks' | 'devices'>('tasks');
   const [taskDrawerOpen, setTaskDrawerOpen] = useState(false);
   const [taskForm] = Form.useForm<CreateUnifiedFileTransferTaskInput>();
   const drawerTypeCode = Form.useWatch('typeCode', taskForm);
-  const drawerProductType = Form.useWatch('productType', taskForm);
+  const drawerProductClass = Form.useWatch('productClass', taskForm);
   const [selectedDrawerDeviceIds, setSelectedDrawerDeviceIds] = useState<string[]>([]);
   const [drawerDeviceKeyword, setDrawerDeviceKeyword] = useState('');
   const [drawerDeviceKeywordInput, setDrawerDeviceKeywordInput] = useState('');
@@ -212,7 +212,7 @@ export default function FileTransferCenter() {
     keyword: deviceKeyword || undefined,
     status: deviceStatusFilter,
     typeCode: selectedTypeCode || undefined,
-    productType: deviceProductTypeFilter,
+    productClass: deviceProductClassFilter,
   });
 
   const createTaskMutation = useCreateUnifiedFileTransferTask();
@@ -262,7 +262,7 @@ export default function FileTransferCenter() {
     pageSize: 200,
     category: selectedCategory || undefined,
     typeCode: drawerTaskType?.typeCode || selectedTypeCode || undefined,
-    productType: needsFirmwareSelection(drawerTaskType) ? drawerProductType : undefined,
+    productClass: needsFirmwareSelection(drawerTaskType) ? drawerProductClass : undefined,
     keyword: drawerDeviceKeyword || undefined,
   });
 
@@ -273,7 +273,7 @@ export default function FileTransferCenter() {
     [firmwareData?.items],
   );
 
-  const drawerProductTypeOptions = useMemo(() => {
+  const drawerProductClassOptions = useMemo(() => {
     const scope = drawerTaskType?.platformScope ?? [];
     const category = drawerTaskType?.category ?? '';
     const realClasses = new Set<string>();
@@ -293,13 +293,13 @@ export default function FileTransferCenter() {
   }, [drawerTaskType, firmwareCandidates, productClasses]);
 
   const filteredFirmwareCandidates = useMemo(
-    () => (drawerProductType
+    () => (drawerProductClass
       ? firmwareCandidates.filter((item) => {
           const deviceTypes = splitDeviceTypes(item.deviceType);
-          return deviceTypes.length === 0 || deviceTypes.includes(drawerProductType);
+          return deviceTypes.length === 0 || deviceTypes.includes(drawerProductClass);
         })
       : []),
-    [drawerProductType, firmwareCandidates],
+    [drawerProductClass, firmwareCandidates],
   );
 
   const firmwareOptions = useMemo(
@@ -310,11 +310,11 @@ export default function FileTransferCenter() {
     [filteredFirmwareCandidates],
   );
 
-  const deviceProductTypeOptions = useMemo(() => {
+  const deviceProductClassOptions = useMemo(() => {
     const values = new Set<string>(productClasses);
     recentDevices.forEach((item) => {
-      if (item.productType) {
-        values.add(item.productType);
+      if (item.productClass) {
+        values.add(item.productClass);
       }
     });
     (activeTaskType?.platformScope ?? []).forEach((entry) => values.add(entry));
@@ -343,7 +343,7 @@ export default function FileTransferCenter() {
     () => [
       { title: '设备 SN', dataIndex: 'deviceSn', key: 'deviceSn', width: 160 },
       { title: '站点名称', dataIndex: 'deviceName', key: 'deviceName', ellipsis: true },
-      { title: '产品类型', dataIndex: 'productType', key: 'productType', width: 120 },
+      { title: '产品类型', dataIndex: 'productClass', key: 'productClass', width: 120 },
       { title: '当前版本', dataIndex: 'currentVersion', key: 'currentVersion', width: 120 },
     ],
     [],
@@ -502,10 +502,10 @@ export default function FileTransferCenter() {
   useEffect(() => {
     setTaskPage(1);
     setDevicePage(1);
-  }, [selectedCategory, selectedTypeCode, taskKeyword, taskStatusFilter, deviceKeyword, deviceStatusFilter, deviceProductTypeFilter]);
+  }, [selectedCategory, selectedTypeCode, taskKeyword, taskStatusFilter, deviceKeyword, deviceStatusFilter, deviceProductClassFilter]);
 
   useEffect(() => {
-    setDeviceProductTypeFilter(undefined);
+    setDeviceProductClassFilter(undefined);
   }, [selectedTypeCode]);
 
   const isUpgradeLikeCategory = UPGRADE_LIKE_CATEGORIES.has(selectedCategory);
@@ -520,9 +520,9 @@ export default function FileTransferCenter() {
     return record.targetVersion?.trim() ? record.targetVersion : '-';
   };
 
-  const getTaskProductType = (record: UnifiedFileTransferTask) => {
-    if (record.productType) {
-      return record.productType;
+  const getTaskProductClass = (record: UnifiedFileTransferTask) => {
+    if (record.productClass) {
+      return record.productClass;
     }
     const typeDef = getTypeDef(record.typeCode);
     return typeDef?.platformScope?.[0] || '-';
@@ -575,9 +575,9 @@ export default function FileTransferCenter() {
         },
         {
           title: '产品类型',
-          key: 'productType',
+          key: 'productClass',
           width: 130,
-          render: (_, record) => renderEllipsisCell(getTaskProductType(record)),
+          render: (_, record) => renderEllipsisCell(getTaskProductClass(record)),
         },
         {
           title: '升级进度',
@@ -733,8 +733,8 @@ export default function FileTransferCenter() {
         },
         {
           title: '产品类型',
-          dataIndex: 'productType',
-          key: 'productType',
+          dataIndex: 'productClass',
+          key: 'productClass',
           width: 130,
           render: (value: string) => renderEllipsisCell(value),
         },
@@ -802,8 +802,8 @@ export default function FileTransferCenter() {
       },
       {
         title: '产品类型',
-        dataIndex: 'productType',
-        key: 'productType',
+        dataIndex: 'productClass',
+        key: 'productClass',
         width: 130,
         render: (value: string) => renderEllipsisCell(value),
       },
@@ -872,7 +872,7 @@ export default function FileTransferCenter() {
     taskForm.setFieldsValue({
       taskName: defaultTaskName,
       typeCode: nextTypeCode,
-      productType: undefined,
+      productClass: undefined,
       firmwareId: undefined,
       isKeepConfig: true,
       executionMode: 'immediate',
@@ -904,15 +904,15 @@ export default function FileTransferCenter() {
       return;
     }
     if (!needsFirmwareSelection(drawerTaskType)) {
-      taskForm.setFieldValue('productType', undefined);
+      taskForm.setFieldValue('productClass', undefined);
       taskForm.setFieldValue('firmwareId', undefined);
       taskForm.setFieldValue('isKeepConfig', undefined);
     } else {
       if (taskForm.getFieldValue('isKeepConfig') === undefined) {
         taskForm.setFieldValue('isKeepConfig', true);
       }
-      if (!drawerProductType && drawerProductTypeOptions.length === 1) {
-        taskForm.setFieldValue('productType', drawerProductTypeOptions[0].value);
+      if (!drawerProductClass && drawerProductClassOptions.length === 1) {
+        taskForm.setFieldValue('productClass', drawerProductClassOptions[0].value);
         return;
       }
       const selectedFirmwareId = taskForm.getFieldValue('firmwareId') as string | undefined;
@@ -925,7 +925,7 @@ export default function FileTransferCenter() {
     if (validIds.length !== selectedDrawerDeviceIds.length) {
       setSelectedDrawerDeviceIds(validIds);
     }
-  }, [drawerDeviceCandidates, drawerProductType, drawerProductTypeOptions, drawerTaskType, firmwareOptions, selectedDrawerDeviceIds, taskDrawerOpen, taskForm]);
+  }, [drawerDeviceCandidates, drawerProductClass, drawerProductClassOptions, drawerTaskType, firmwareOptions, selectedDrawerDeviceIds, taskDrawerOpen, taskForm]);
 
   const handleCreateTask = async () => {
     // 防止用户连续点击「创建」按钮重复提交：mutation 进行中直接忽略后续点击。
@@ -1073,9 +1073,9 @@ export default function FileTransferCenter() {
                         allowClear
                         showSearch
                         placeholder="按产品类型过滤"
-                        value={deviceProductTypeFilter}
-                        onChange={(value) => setDeviceProductTypeFilter(value)}
-                        options={deviceProductTypeOptions}
+                        value={deviceProductClassFilter}
+                        onChange={(value) => setDeviceProductClassFilter(value)}
+                        options={deviceProductClassOptions}
                         optionFilterProp="label"
                         style={{ width: 220 }}
                       />
@@ -1153,12 +1153,12 @@ export default function FileTransferCenter() {
           </Form.Item>
           {needsFirmwareSelection(drawerTaskType) ? (
             <>
-              <Form.Item label="产品类型" name="productType" rules={[{ required: true, message: '请选择产品类型' }]}> 
+              <Form.Item label="产品类型" name="productClass" rules={[{ required: true, message: '请选择产品类型' }]}> 
                 <Select
                   allowClear
                   showSearch
                   placeholder="请选择产品类型"
-                  options={drawerProductTypeOptions}
+                  options={drawerProductClassOptions}
                   optionFilterProp="label"
                 />
               </Form.Item>
@@ -1198,9 +1198,9 @@ export default function FileTransferCenter() {
                 <Select
                   showSearch
                   allowClear
-                  disabled={!drawerProductType}
+                  disabled={!drawerProductClass}
                   placeholder={
-                    !drawerProductType
+                    !drawerProductClass
                       ? '请先选择产品类型'
                       : firmwareOptions.length > 0
                         ? '请选择升级文件'
@@ -1273,7 +1273,7 @@ export default function FileTransferCenter() {
                   : '-'}
               </Descriptions.Item>
               <Descriptions.Item label="目标版本">{getTaskTargetVersion(detailTask)}</Descriptions.Item>
-              <Descriptions.Item label="产品类型">{getTaskProductType(detailTask)}</Descriptions.Item>
+              <Descriptions.Item label="产品类型">{getTaskProductClass(detailTask)}</Descriptions.Item>
               <Descriptions.Item label="执行方式">
                 <Tag>{EXECUTION_MODE_OPTIONS.find((o) => o.value === detailTask.executionMode)?.label ?? detailTask.executionMode}</Tag>
               </Descriptions.Item>

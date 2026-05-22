@@ -126,8 +126,8 @@ export default function AddTemplateModal({
           ? parseModifyValues(values.modifyValues)
           : {};
 
-      // T-0090 子项 ②：UI 删 categoryGroup / productTypes / 参数配置 section；
-      // productTypes column 已由 T-0090-b 真删；categoryGroup / paramPaths schema
+      // T-0090 子项 ②：UI 删 categoryGroup / productClasses / 参数配置 section；
+      // productClasses column 已由 T-0090-b 真删；categoryGroup / paramPaths schema
       // 仍 required，提交时传 empty default 保持后端兼容。
       const template: Omit<MMLCustomCommand, 'id' | 'creator' | 'createdAt' | 'updatedAt'> = {
         commandName: values.templateName,

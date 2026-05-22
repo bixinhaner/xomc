@@ -24,7 +24,7 @@ interface Device {
 interface Policy {
   policyId: string;
   policyName: string;
-  productType: string;
+  productClass: string;
 }
 
 interface Props {
@@ -207,7 +207,7 @@ export default function DetectDialog({ open, onClose, onSuccess }: Props) {
       width: 80,
     },
     {
-      title: t('provision.productType'),
+      title: t('provision.productClass'),
       dataIndex: 'product',
       width: 60,
     },

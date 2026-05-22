@@ -97,7 +97,7 @@ function mapBackendIndicator(ind: BackendPerfIndicator): PerfIndicator {
     kpiNameZh: ind.cn_name,
     catagoryId: ind.group_id,
     catagoryName: '',
-    productType: ind.product_types,
+    productClass: ind.product_types,
     custName: ind.cust_name,
     indicatorLevel: ind.indicator_level,
     unit: ind.unit_id,
@@ -206,7 +206,7 @@ export const indicatorApi = {
     };
     if (params.catagoryId) payload.group_id = params.catagoryId;
     if (params.searchText) payload.keyword = params.searchText;
-    if (params.productType) payload.product_type = params.productType;
+    if (params.productClass) payload.product_type = params.productClass;
     if (params.isEnable !== undefined && params.isEnable !== '') payload.is_enabled = params.isEnable;
     if (params.indicatorType !== undefined && params.indicatorType !== '') payload.is_counter = params.indicatorType;
     if (params.indicatorLevel) payload.indicator_level = params.indicatorLevel;
@@ -267,7 +267,7 @@ export const indicatorApi = {
     if (params.indicatorType) {
       payload.is_counter = params.indicatorType === 'counter' ? '1' : '0';
     }
-    if (params.productType) payload.product_types = params.productType;
+    if (params.productClass) payload.product_types = params.productClass;
     if (params.indicatorLevel) payload.indicator_level = params.indicatorLevel;
     if (params.custName) payload.cust_name = params.custName;
     if (params.definition) payload.cn_description = params.definition;

@@ -272,7 +272,7 @@ function mapBackendCommand(bc: BackendMMLCommand): MMLCommand {
     commandNameI18n: bc.command_name_i18n || undefined,
     requireConfirm: bc.require_confirm,
     confirmMsgI18n: bc.confirm_msg_i18n || undefined,
-    productTypes: bc.product_types || [],
+    productClasses: bc.product_types || [],
   };
 }
 

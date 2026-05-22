@@ -51,7 +51,7 @@ type EnableType = '0' | '1';
 export interface _PolicyForm {
   selfStartEnable: EnableType;
   policyName: string;
-  productType: string;
+  productClass: string;
   executeType: ExecuteType;
   functionModule: '0' | '1' | '2'; // 0-software upgrade, 1-license, 2-self config
   // Software Upgrade
@@ -688,7 +688,7 @@ export default function AddPolicyPage() {
 
   // Current function module
   const [functionModule, setFunctionModule] = useState<'0' | '1' | '2'>('0');
-  const [productType, setProductType] = useState<string>('');
+  const [productClass, setProductClass] = useState<string>('');
 
   // Page title
   const pageTitle = useMemo(() => {
@@ -698,8 +698,8 @@ export default function AddPolicyPage() {
   }, [isView, isEdit, t]);
 
   // Handle product type change
-  const handleProductTypeChange = useCallback((value: string) => {
-    setProductType(value);
+  const handleProductClassChange = useCallback((value: string) => {
+    setProductClass(value);
   }, []);
 
   // Handle add version from list
@@ -885,13 +885,13 @@ export default function AddPolicyPage() {
     },
   ];
 
-  // Filtered param config list - filter by productType and search text
+  // Filtered param config list - filter by productClass and search text
   const filteredParamConfigList = useMemo(() => {
     let list = paramConfigList;
 
     // Filter by product type (device type)
-    if (productType) {
-      list = list.filter(item => item.deviceType === productType);
+    if (productClass) {
+      list = list.filter(item => item.deviceType === productClass);
     }
 
     // Filter by search text
@@ -902,7 +902,7 @@ export default function AddPolicyPage() {
     }
 
     return list;
-  }, [paramConfigList, productType, configSearchText]);
+  }, [paramConfigList, productClass, configSearchText]);
 
   // Handle export
   const handleExportConfig = useCallback(() => {
@@ -1292,9 +1292,9 @@ export default function AddPolicyPage() {
                   <Input placeholder={t('provision.policyNamePlaceholder')} maxLength={50} />
                 </Form.Item>
               </Descriptions.Item>
-              <Descriptions.Item label={t('provision.productType')}>
-                <Form.Item name="productType" noStyle rules={[{ required: true, message: t('common.pleaseSelect') }]}>
-                  <Select placeholder={t('common.pleaseSelect')} options={PRODUCT_TYPES} onChange={handleProductTypeChange} />
+              <Descriptions.Item label={t('provision.productClass')}>
+                <Form.Item name="productClass" noStyle rules={[{ required: true, message: t('common.pleaseSelect') }]}>
+                  <Select placeholder={t('common.pleaseSelect')} options={PRODUCT_TYPES} onChange={handleProductClassChange} />
                 </Form.Item>
               </Descriptions.Item>
               <Descriptions.Item label={t('provision.executeType')}>

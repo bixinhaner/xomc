@@ -94,7 +94,7 @@ export default function VersionRollback() {
 
   // ---- Dynamic product type options from API ----
   const { data: productClassesData } = useProductClasses();
-  const productTypeOptions = useMemo(() => {
+  const productClassOptions = useMemo(() => {
     if (productClassesData && productClassesData.length > 0) {
       return productClassesData.map((c) => ({ label: c, value: c }));
     }
@@ -192,8 +192,8 @@ export default function VersionRollback() {
   const [taskName, setTaskName] = useState('');
   const [executionMethod, setExecutionMethod] = useState<ExecutionMethod>('immediate');
   const [scheduledTime, setScheduledTime] = useState<Dayjs | null>(null);
-  const [drawerDevices, setDrawerDevices] = useState<{ id: string; deviceSn: string; deviceName: string; sourceVersion: string; productType: string }[]>([]);
-  const [drawerProductType, setDrawerProductType] = useState<string>('');
+  const [drawerDevices, setDrawerDevices] = useState<{ id: string; deviceSn: string; deviceName: string; sourceVersion: string; productClass: string }[]>([]);
+  const [drawerProductClass, setDrawerProductClass] = useState<string>('');
   const [selectAllOfType, setSelectAllOfType] = useState(false);
 
   // Add device modal state
@@ -205,7 +205,7 @@ export default function VersionRollback() {
   const [batchInputVisible, setBatchInputVisible] = useState(false);
   const [batchInputValue, setBatchInputValue] = useState('');
   const [batchInputPreview, setBatchInputPreview] = useState<{
-    matched: { id: string; deviceSn: string; deviceName: string; sourceVersion: string; productType: string }[];
+    matched: { id: string; deviceSn: string; deviceName: string; sourceVersion: string; productClass: string }[];
     notFound: string[];
     mixedTypes: string[];
   }>({ matched: [], notFound: [], mixedTypes: [] });
@@ -219,10 +219,10 @@ export default function VersionRollback() {
   // Task detail drawer state
   const [taskDetailRecord, setTaskDetailRecord] = useState<UpgradeTaskInfo | null>(null);
 
-  // ---- Fetch real devices from API by productType ----
+  // ---- Fetch real devices from API by productClass ----
   const { data: deviceListData } = useDeviceList(
     {
-      productType: drawerProductType,
+      productClass: drawerProductClass,
       page: 1,
       pageSize: 500,
     },
@@ -231,7 +231,7 @@ export default function VersionRollback() {
 
   // ---- Available devices for add-device modal ----
   const availableDevices = useMemo(() => {
-    if (!drawerProductType || !deviceListData?.items) return [];
+    if (!drawerProductClass || !deviceListData?.items) return [];
     return deviceListData.items
       .filter((d) => !drawerDevices.some((existing) => existing.id === d.id))
       .map((d) => ({
@@ -239,10 +239,10 @@ export default function VersionRollback() {
         deviceSn: d.sn,
         deviceName: d.name,
         sourceVersion: d.firmwareVersion || d.softwareVersion || '',
-        productType: d.productType,
+        productClass: d.productClass,
         deviceGroup: d.groupName || '',
       }));
-  }, [drawerProductType, deviceListData, drawerDevices]);
+  }, [drawerProductClass, deviceListData, drawerDevices]);
 
   const filteredAvailableDevices = useMemo(() => {
     if (!addDeviceKeyword) return availableDevices;
@@ -261,7 +261,7 @@ export default function VersionRollback() {
       return;
     }
 
-    const headers = [t('software.taskName'), t('table.operator'), t('software.taskStatus'), t('software.upgrade.productType'), t('software.rollback.rollbackProgress'), t('table.result'), t('software.startTime'), t('software.endTime')];
+    const headers = [t('software.taskName'), t('table.operator'), t('software.taskStatus'), t('software.upgrade.productClass'), t('software.rollback.rollbackProgress'), t('table.result'), t('software.startTime'), t('software.endTime')];
     const rows = taskList.map((task) => [
       task.taskName,
       task.createUser,
@@ -323,7 +323,7 @@ export default function VersionRollback() {
   const handleOpenUpgradeDrawer = () => {
     setTaskName('');
     setDrawerDevices([]);
-    setDrawerProductType('');
+    setDrawerProductClass('');
     setExecutionMethod('immediate');
     setScheduledTime(null);
     setSelectAllOfType(false);
@@ -360,7 +360,7 @@ export default function VersionRollback() {
 
     const newDevices = availableDevices
       .filter((d) => selectedNewDevices.includes(d.id))
-      .map((d) => ({ id: d.id, deviceSn: d.deviceSn, deviceName: d.deviceName, sourceVersion: d.sourceVersion, productType: d.productType }));
+      .map((d) => ({ id: d.id, deviceSn: d.deviceSn, deviceName: d.deviceName, sourceVersion: d.sourceVersion, productClass: d.productClass }));
 
     setDrawerDevices((prev) => [...prev, ...newDevices]);
     setAddDeviceModalVisible(false);
@@ -377,7 +377,7 @@ export default function VersionRollback() {
   };
 
   const handleBatchInputPreview = () => {
-    if (!batchInputValue.trim() || !drawerProductType) {
+    if (!batchInputValue.trim() || !drawerProductClass) {
       setBatchInputPreview({ matched: [], notFound: [], mixedTypes: [] });
       return;
     }
@@ -389,7 +389,7 @@ export default function VersionRollback() {
     const matched = availableDevices.filter((d) => sns.includes(d.deviceSn));
     const matchedSns = new Set(matched.map((d) => d.deviceSn));
     const notFound = sns.filter((sn) => !matchedSns.has(sn));
-    const mixedTypes = [...new Set(matched.map((d) => d.productType))];
+    const mixedTypes = [...new Set(matched.map((d) => d.productClass))];
 
     setBatchInputPreview({ matched, notFound, mixedTypes });
   };
@@ -401,8 +401,8 @@ export default function VersionRollback() {
       return;
     }
     const toAdd = matched
-      .filter((d) => d.productType === drawerProductType && !drawerDevices.some((existing) => existing.id === d.id))
-      .map((d) => ({ id: d.id, deviceSn: d.deviceSn, deviceName: d.deviceName, sourceVersion: d.sourceVersion, productType: d.productType }));
+      .filter((d) => d.productClass === drawerProductClass && !drawerDevices.some((existing) => existing.id === d.id))
+      .map((d) => ({ id: d.id, deviceSn: d.deviceSn, deviceName: d.deviceName, sourceVersion: d.sourceVersion, productClass: d.productClass }));
 
     setDrawerDevices((prev) => [...prev, ...toAdd]);
     setBatchInputVisible(false);
@@ -447,7 +447,7 @@ export default function VersionRollback() {
                                 executionMethod === 'suspend' ? t('software.upgrade.suspendExecText') : t('software.upgrade.scheduledExecText', { time: scheduledTime?.format('YYYY-MM-DD HH:mm') ?? '' });
           const deviceCount = selectAllOfType ? allDevicesCountOfType : drawerDevices.length;
           const deviceInfo = selectAllOfType
-            ? t('software.upgrade.productTypeAll', { type: drawerProductType, count: deviceCount })
+            ? t('software.upgrade.productClassAll', { type: drawerProductClass, count: deviceCount })
             : t('software.upgrade.deviceCountInfo', { count: deviceCount });
 
           void message.success(t('software.rollback.createRollbackSuccess', { name: taskName, deviceInfo, execMethod: execMethodText }));
@@ -628,7 +628,7 @@ export default function VersionRollback() {
         return <Tag color={cfg.color}>{cfg.text}</Tag>;
       },
     },
-    { key: 'productType', title: t('software.upgrade.productType'), dataIndex: 'productClass', width: 100 },
+    { key: 'productClass', title: t('software.upgrade.productClass'), dataIndex: 'productClass', width: 100 },
     {
       key: 'progress',
       title: t('software.rollback.rollbackProgress'),
@@ -819,7 +819,7 @@ export default function VersionRollback() {
 
       {/* Batch input modal */}
       <Modal
-        title={t('software.upgrade.batchInputTitle', { type: drawerProductType || t('software.upgrade.selectProductTypeFirst') })}
+        title={t('software.upgrade.batchInputTitle', { type: drawerProductClass || t('software.upgrade.selectProductClassFirst') })}
         open={batchInputVisible}
         onCancel={() => setBatchInputVisible(false)}
         onOk={handleBatchInputConfirm}
@@ -827,14 +827,14 @@ export default function VersionRollback() {
         cancelText={t('common.cancel')}
         width={600}
         okButtonProps={{
-          disabled: batchInputPreview.matched.length === 0 || !drawerProductType,
+          disabled: batchInputPreview.matched.length === 0 || !drawerProductClass,
         }}
       >
-        {!drawerProductType && (
+        {!drawerProductClass && (
           <Alert
             type="warning"
             showIcon
-            message={t('software.upgrade.selectProductTypeFirst')}
+            message={t('software.upgrade.selectProductClassFirst')}
             style={{ marginBottom: 16 }}
           />
         )}
@@ -853,21 +853,21 @@ export default function VersionRollback() {
         {batchInputPreview.matched.length > 0 && (
           <div style={{ marginBottom: 16 }}>
             <Alert
-              type={batchInputPreview.mixedTypes.includes(drawerProductType) ? 'success' : 'warning'}
+              type={batchInputPreview.mixedTypes.includes(drawerProductClass) ? 'success' : 'warning'}
               showIcon
-              icon={!batchInputPreview.mixedTypes.includes(drawerProductType) ? <WarningOutlined /> : undefined}
+              icon={!batchInputPreview.mixedTypes.includes(drawerProductClass) ? <WarningOutlined /> : undefined}
               message={
                 <Space direction="vertical" size="small">
                   <span>
                     {t('software.upgrade.matchedDevices', { count: batchInputPreview.matched.length })}
-                    {batchInputPreview.mixedTypes.includes(drawerProductType) && (
-                      <Tag color="blue" style={{ marginLeft: 8 }}>{t('software.upgrade.addableCount', { count: batchInputPreview.matched.filter(d => d.productType === drawerProductType).length })}</Tag>
+                    {batchInputPreview.mixedTypes.includes(drawerProductClass) && (
+                      <Tag color="blue" style={{ marginLeft: 8 }}>{t('software.upgrade.addableCount', { count: batchInputPreview.matched.filter(d => d.productClass === drawerProductClass).length })}</Tag>
                     )}
                   </span>
-                  {!batchInputPreview.mixedTypes.includes(drawerProductType) && drawerProductType && (
+                  {!batchInputPreview.mixedTypes.includes(drawerProductClass) && drawerProductClass && (
                     <span style={{ color: '#faad14' }}>
                       <WarningOutlined style={{ marginRight: 4 }} />
-                      {t('software.upgrade.noMatchedType', { type: drawerProductType })}
+                      {t('software.upgrade.noMatchedType', { type: drawerProductClass })}
                     </span>
                   )}
                 </Space>
@@ -988,15 +988,15 @@ export default function VersionRollback() {
           </Form.Item>
 
           {/* Product type */}
-          <Form.Item label={t('software.upgrade.productType')} required>
+          <Form.Item label={t('software.upgrade.productClass')} required>
             <Select
-              value={drawerProductType}
+              value={drawerProductClass}
               onChange={(val) => {
-                setDrawerProductType(val);
+                setDrawerProductClass(val);
                 setSelectAllOfType(false);
-                setDrawerDevices((prev) => prev.filter((d) => d.productType === val));
+                setDrawerDevices((prev) => prev.filter((d) => d.productClass === val));
               }}
-              options={productTypeOptions}
+              options={productClassOptions}
               style={{ width: '100%' }}
             />
           </Form.Item>
@@ -1006,10 +1006,10 @@ export default function VersionRollback() {
             <Checkbox
               checked={selectAllOfType}
               onChange={(e) => setSelectAllOfType(e.target.checked)}
-              disabled={!drawerProductType}
+              disabled={!drawerProductClass}
             >
               {t('software.rollback.rollbackAllOfType')}
-              {drawerProductType && (
+              {drawerProductClass && (
                 <Tag color="blue" style={{ marginLeft: 8 }}>{t('software.upgrade.totalDevices', { count: allDevicesCountOfType })}</Tag>
               )}
             </Checkbox>
@@ -1028,7 +1028,7 @@ export default function VersionRollback() {
                   size="small"
                   icon={<PlusOutlined />}
                   onClick={handleOpenBatchInput}
-                  disabled={!drawerProductType}
+                  disabled={!drawerProductClass}
                 >
                   {t('software.upgrade.batchInput')}
                 </Button>
@@ -1039,7 +1039,7 @@ export default function VersionRollback() {
               <Alert
                 type="info"
                 showIcon
-                message={t('software.rollback.selectedAllRollbackInfo', { type: drawerProductType, count: allDevicesCountOfType })}
+                message={t('software.rollback.selectedAllRollbackInfo', { type: drawerProductClass, count: allDevicesCountOfType })}
                 description={t('software.rollback.selectedAllRollbackDesc')}
               />
             ) : (
@@ -1076,7 +1076,7 @@ export default function VersionRollback() {
                     icon={<PlusOutlined />}
                     onClick={handleOpenAddDeviceModal}
                     style={{ width: '100%' }}
-                    disabled={!drawerProductType}
+                    disabled={!drawerProductClass}
                   >
                     {t('software.upgrade.addDevice')}
                   </Button>
@@ -1142,7 +1142,7 @@ export default function VersionRollback() {
               {/* Task basic info */}
               <Descriptions column={2} bordered size="small" style={{ marginBottom: 16 }}>
                 <Descriptions.Item label={t('software.taskName')} span={2}>{taskDetailRecord.taskName}</Descriptions.Item>
-                <Descriptions.Item label={t('software.upgrade.productType')}>{taskDetailRecord.productClass}</Descriptions.Item>
+                <Descriptions.Item label={t('software.upgrade.productClass')}>{taskDetailRecord.productClass}</Descriptions.Item>
                 <Descriptions.Item label={t('software.rollback.rollbackType')}>
                   <Tag color="orange">{t('software.rollback.rollback')}</Tag>
                 </Descriptions.Item>
@@ -1273,7 +1273,7 @@ export default function VersionRollback() {
 
       {/* Add device modal */}
       <Modal
-        title={`${t('software.upgrade.addDevice')} - ${drawerProductType}`}
+        title={`${t('software.upgrade.addDevice')} - ${drawerProductClass}`}
         open={addDeviceModalVisible}
         onCancel={() => setAddDeviceModalVisible(false)}
         onOk={handleConfirmAddDevices}
@@ -1287,7 +1287,7 @@ export default function VersionRollback() {
             type="info"
             showIcon
             message={t('software.upgrade.noAvailableDevices')}
-            description={t('software.upgrade.allDevicesInList', { type: drawerProductType })}
+            description={t('software.upgrade.allDevicesInList', { type: drawerProductClass })}
           />
         ) : (
           <>

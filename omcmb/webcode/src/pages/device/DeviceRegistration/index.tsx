@@ -176,7 +176,7 @@ export default function DeviceRegistration() {
         <Col span={12}>
           <Form.Item
             name="productClass"
-            label={t('device.productType')}
+            label={t('device.productClass')}
             tooltip={t('device.productClassHint')}
           >
             <Select
@@ -273,7 +273,7 @@ export default function DeviceRegistration() {
                   { label: t('device.carrier'), value: basicData?.carrier },
                   { label: t('device.networkType'), value: basicData?.technology },
                   { label: t('device.vendor'), value: basicData?.manufacturer || '-' },
-                  { label: t('device.productType'), value: basicData?.productClass || '-' },
+                  { label: t('device.productClass'), value: basicData?.productClass || '-' },
                   { label: t('device.model'), value: basicData?.modelName || '-' },
                 ].map(({ label, value }) => (
                   <tr key={label} style={{ borderBottom: '1px solid #f0f0f0' }}>

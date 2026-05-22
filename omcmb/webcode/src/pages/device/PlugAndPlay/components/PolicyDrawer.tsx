@@ -5,7 +5,7 @@ import { useT } from '@/hooks/useT';
 interface Policy {
   policyId: string;
   policyName: string;
-  productType: string;
+  productClass: string;
   executeType: '0' | '1';
   selfStartEnable: '0' | '1';
   upgradeEnable: '0' | '1';
@@ -60,7 +60,7 @@ export default function PolicyDrawer({ open, mode, policy, onClose, onSubmit }: 
     if (policy) {
       return {
         policyName: policy.policyName,
-        productType: policy.productType,
+        productClass: policy.productClass,
         executeType: policy.executeType,
         upgradeEnable: policy.upgradeEnable === '1',
         targetVersion: policy.targetVersion?.[0],
@@ -70,7 +70,7 @@ export default function PolicyDrawer({ open, mode, policy, onClose, onSubmit }: 
     }
     return {
       policyName: '',
-      productType: undefined,
+      productClass: undefined,
       executeType: '0',
       upgradeEnable: false,
       targetVersion: undefined,
@@ -96,8 +96,8 @@ export default function PolicyDrawer({ open, mode, policy, onClose, onSubmit }: 
   };
 
   // Check if License is supported based on product type
-  const isLicenseSupported = (productType: string) => {
-    return LICENSE_SUPPORTED_TYPES.includes(productType);
+  const isLicenseSupported = (productClass: string) => {
+    return LICENSE_SUPPORTED_TYPES.includes(productClass);
   };
 
   return (
@@ -134,8 +134,8 @@ export default function PolicyDrawer({ open, mode, policy, onClose, onSubmit }: 
         </Form.Item>
 
         <Form.Item
-          name="productType"
-          label={t('provision.productType')}
+          name="productClass"
+          label={t('provision.productClass')}
           rules={[{ required: true, message: t('common.pleaseSelect') }]}
         >
           <Select placeholder={t('common.pleaseSelect')} options={PRODUCT_TYPES} />
@@ -181,11 +181,11 @@ export default function PolicyDrawer({ open, mode, policy, onClose, onSubmit }: 
 
         <Form.Item
           noStyle
-          shouldUpdate={(prev, curr) => prev.productType !== curr.productType}
+          shouldUpdate={(prev, curr) => prev.productClass !== curr.productClass}
         >
           {({ getFieldValue }) => {
-            const productType = getFieldValue('productType');
-            if (isLicenseSupported(productType)) {
+            const productClass = getFieldValue('productClass');
+            if (isLicenseSupported(productClass)) {
               return (
                 <Form.Item
                   name="licenseEnable"

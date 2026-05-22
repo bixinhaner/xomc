@@ -12,7 +12,7 @@ interface DeviceTreeProps {
   filteredDevices: ConsoleDevice[];
   paginatedDevices: ConsoleDevice[];
   searchText: string;
-  productTypeFilter: string;
+  productClassFilter: string;
   currentPage: number;
   isAllSelected: boolean;
   isIndeterminate: boolean;
@@ -32,7 +32,7 @@ export default function DeviceTree({
   selectedDevices,
   paginatedDevices,
   searchText,
-  productTypeFilter,
+  productClassFilter,
   currentPage,
   isAllSelected,
   isIndeterminate,
@@ -49,23 +49,23 @@ export default function DeviceTree({
 }: DeviceTreeProps) {
   const t = useT();
   const token = useThemeToken();
-  const { data: productTypeDict, isLoading: isDictLoading } = useDictionary('product_type');
+  const { data: productClassDict, isLoading: isDictLoading } = useDictionary('product_class');
 
   // 产品类型选项（字典驱动）
-  const productTypeOptions = useMemo(
-    () => (productTypeDict?.sysDictionaryDetails ?? []).map((d) => ({ label: d.label, value: d.value })),
-    [productTypeDict]
+  const productClassOptions = useMemo(
+    () => (productClassDict?.sysDictionaryDetails ?? []).map((d) => ({ label: d.label, value: d.value })),
+    [productClassDict]
   );
 
-  // R-8.1: 字典加载完成后若 productTypeFilter 未设置，自动选中第一项
+  // R-8.1: 字典加载完成后若 productClassFilter 未设置，自动选中第一项
   // R-8.2: 字典为空时禁用整个 DeviceTree 操作
   useEffect(() => {
-    if (!isDictLoading && productTypeFilter === '' && productTypeOptions.length > 0) {
-      onFilterChange(productTypeOptions[0]?.label ?? '');
+    if (!isDictLoading && productClassFilter === '' && productClassOptions.length > 0) {
+      onFilterChange(productClassOptions[0]?.label ?? '');
     }
-  }, [isDictLoading, productTypeFilter, productTypeOptions, onFilterChange]);
+  }, [isDictLoading, productClassFilter, productClassOptions, onFilterChange]);
 
-  const isDictEmpty = !isDictLoading && productTypeOptions.length === 0;
+  const isDictEmpty = !isDictLoading && productClassOptions.length === 0;
   const isDisabled = isDictEmpty;
 
   // 按类型分组设备
@@ -138,10 +138,10 @@ export default function DeviceTree({
           style={{ width: '100%', borderRadius: 4 }}
           placeholder={isDictEmpty ? t('mml.deviceTree.productClassDictEmpty') : t('mml.deviceTree.productClassRequired')}
           disabled={isDisabled}
-          options={productTypeOptions}
-          value={productTypeOptions.find((o) => o.label === productTypeFilter)?.value || undefined}
+          options={productClassOptions}
+          value={productClassOptions.find((o) => o.label === productClassFilter)?.value || undefined}
           onChange={(val) => {
-            const selected = productTypeOptions.find((o) => o.value === val);
+            const selected = productClassOptions.find((o) => o.value === val);
             onFilterChange(selected?.label ?? '');
           }}
         />

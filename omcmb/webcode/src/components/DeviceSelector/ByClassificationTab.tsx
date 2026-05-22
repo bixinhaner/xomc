@@ -68,16 +68,16 @@ const DIMENSIONS: Dimension[] = [
     },
   },
   {
-    key: 'productType',
+    key: 'productClass',
     label: '产品类型',
     getTree: (devices) =>
       buildTree(
-        devices.map((d) => d.productType),
-        'productType'
+        devices.map((d) => d.productClass),
+        'productClass'
       ),
     filterDevices: (devices, keys) => {
-      const types = keys.map((k) => k.replace('productType__', ''));
-      return devices.filter((d) => types.includes(d.productType));
+      const types = keys.map((k) => k.replace('productClass__', ''));
+      return devices.filter((d) => types.includes(d.productClass));
     },
   },
   {

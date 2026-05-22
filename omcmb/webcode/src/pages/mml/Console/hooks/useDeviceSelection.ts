@@ -6,7 +6,7 @@ import { deviceApi } from '@core/services/api/deviceApi';
 export function useDeviceSelection() {
   const [selectedDevices, setSelectedDevices] = useState<ConsoleDevice[]>([]);
   const [searchText, setSearchText] = useState('');
-  const [productTypeFilter, setProductTypeFilter] = useState<string>('');
+  const [productClassFilter, setProductClassFilter] = useState<string>('');
   const [currentPage, setCurrentPage] = useState(1);
   const [devices, setDevices] = useState<ConsoleDevice[]>([]);
   const [total, setTotal] = useState(0);
@@ -15,20 +15,20 @@ export function useDeviceSelection() {
   void _abortRef;
 
   // Fetch devices from API — server-side pagination + filter
-  const fetchDevices = useCallback(async (page: number, search?: string, productType?: string) => {
+  const fetchDevices = useCallback(async (page: number, search?: string, productClass?: string) => {
     setIsLoadingDevices(true);
     try {
       const result = await deviceApi.getList({
         page,
         pageSize: DEVICE_PAGE_SIZE,
         ...(search ? { searchText: search } : {}),
-        ...(productType ? { productType } : {}),
+        ...(productClass ? { productClass } : {}),
       });
       const mapped: ConsoleDevice[] = result.items.map((d) => ({
         sn: d.sn,
         name: d.deviceName || d.sn,
         type: d.networkType === 'nr' ? 'gNB' : 'eNB',
-        productType: d.productType || '',
+        productClass: d.productClass || '',
         status: (d.connStatus === 'online' ? 'online' : 'offline') as ConsoleDevice['status'],
       }));
       // 后端分页边界或缓存异常偶发会带回同 SN 重复项；此处按 SN 排重，
@@ -49,18 +49,18 @@ export function useDeviceSelection() {
     }
   }, []);
 
-  // R-8.1: 首次加载延后到产品类型默认值就绪（由组件传入 setProductTypeFilter 触发）。
-  // R-8.2: 不再用空 productTypeFilter 首拉，避免回到"未筛选 = 跨类型"语义。
+  // R-8.1: 首次加载延后到产品类型默认值就绪（由组件传入 setProductClassFilter 触发）。
+  // R-8.2: 不再用空 productClassFilter 首拉，避免回到"未筛选 = 跨类型"语义。
   useEffect(() => {
-    if (productTypeFilter) {
-      void fetchDevices(1, undefined, productTypeFilter);
+    if (productClassFilter) {
+      void fetchDevices(1, undefined, productClassFilter);
     }
-    // 依赖 productTypeFilter：首次默认值就绪即触发一次加载
-  }, [productTypeFilter, fetchDevices]);
+    // 依赖 productClassFilter：首次默认值就绪即触发一次加载
+  }, [productClassFilter, fetchDevices]);
 
   // R-8.3: 产品类型切换时除重置分页外，**清空已选设备**（不允许跨类型累积）。
   const handleFilterChange = useCallback((filter: string) => {
-    setProductTypeFilter(filter);
+    setProductClassFilter(filter);
     setCurrentPage(1);
     setSelectedDevices([]); // R-8.3 清空已选
     if (filter) {
@@ -72,14 +72,14 @@ export function useDeviceSelection() {
   const handleSearchChange = useCallback((text: string) => {
     setSearchText(text);
     setCurrentPage(1);
-    void fetchDevices(1, text || undefined, productTypeFilter || undefined);
-  }, [fetchDevices, productTypeFilter]);
+    void fetchDevices(1, text || undefined, productClassFilter || undefined);
+  }, [fetchDevices, productClassFilter]);
 
   // 翻页时请求真实数据
   const handlePageChange = useCallback((page: number) => {
     setCurrentPage(page);
-    void fetchDevices(page, searchText || undefined, productTypeFilter || undefined);
-  }, [fetchDevices, searchText, productTypeFilter]);
+    void fetchDevices(page, searchText || undefined, productClassFilter || undefined);
+  }, [fetchDevices, searchText, productClassFilter]);
 
   // 全选状态计算（基于当前页）
   const deviceSns = useMemo(() => new Set(devices.map((d) => d.sn)), [devices]);
@@ -146,7 +146,7 @@ export function useDeviceSelection() {
     // 状态
     selectedDevices,
     searchText,
-    productTypeFilter,
+    productClassFilter,
     currentPage,
     filteredDevices: devices,
     paginatedDevices: devices,
@@ -160,7 +160,7 @@ export function useDeviceSelection() {
 
     // 操作
     setSearchText: handleSearchChange,
-    setProductTypeFilter: handleFilterChange,
+    setProductClassFilter: handleFilterChange,
     setCurrentPage: handlePageChange,
     toggleDevice,
     toggleSelectAll,

@@ -131,8 +131,8 @@ export const indicatorService = {
     }
 
     // Filter by product type
-    if (params.productType) {
-      filtered = filtered.filter((ind) => ind.productType === params.productType);
+    if (params.productClass) {
+      filtered = filtered.filter((ind) => ind.productClass === params.productClass);
     }
 
     // Filter by enable status
@@ -205,7 +205,7 @@ export const indicatorService = {
       kpiName: params.kpiName,
       catagoryId: params.catagoryId,
       catagoryName: '',
-      productType: params.productType || 'BBU',
+      productClass: params.productClass || 'BBU',
       custName: params.custName || '',
       indicatorLevel: params.indicatorLevel || 'device',
       unit: params.unit,

@@ -133,7 +133,7 @@ export default function RecycleBin() {
     if (!data?.items) return [];
     return data.items.map((device: Device) => ({
       ...device,
-      deviceType: inferDeviceType(device.productType),
+      deviceType: inferDeviceType(device.productClass),
       offlineDays: calcOfflineDays(device.lastOnlineTime, device.deletedAt || ''),
       moveTime: device.deletedAt || '',
       move_author: device.deletedBy || 'system',

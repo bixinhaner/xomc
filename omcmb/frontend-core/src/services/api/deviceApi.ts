@@ -176,7 +176,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     sn: bd.serial_number,
     name: bd.device_name || bd.serial_number,
     vendor: bd.manufacturer,
-    productType: bd.product_class,
+    productClass: bd.product_class,
     networkType: bd.technology,
     deviceModel: bd.model_name,
     region: bd.device_name,
@@ -341,8 +341,8 @@ export const deviceApi = {
     if (params.searchText) query.search = params.searchText;
     if (params.sn) query.sn = params.sn;
     if (params.vendor) query.oui = params.vendor;
-    // productType → product_class
-    if (params.productType) query.product_class = params.productType;
+    // productClass → product_class
+    if (params.productClass) query.product_class = params.productClass;
     // networkType: T-0162 后 network_type 字典已直接给 'lte'/'nr'（与后端
     // devices.technology 字段值一致），不再需要 eNB/gNB → lte/nr 翻译。但
     // 历史前端 / 老 link 可能仍传 eNB/gNB，做向下兼容映射。
@@ -395,7 +395,7 @@ export const deviceApi = {
       }
     }
     if (params.opState) query.op_state = params.opState;
-    // productModel / productType 都映射到 product_class（前者是 multi-select，
+    // productModel / productClass 都映射到 product_class（前者是 multi-select，
     // 后者是历史单值字段），统一走 csv() 处理。
     if (params.productModel) query.product_class = csv(params.productModel);
 
@@ -449,7 +449,7 @@ export const deviceApi = {
     const payload: Record<string, unknown> = {};
     if (data.sn !== undefined) payload.serial_number = data.sn;
     if (data.vendor !== undefined) payload.manufacturer = data.vendor;
-    if (data.productType !== undefined) payload.product_class = data.productType;
+    if (data.productClass !== undefined) payload.product_class = data.productClass;
     if (data.networkType !== undefined) payload.technology = data.networkType;
     if (data.deviceModel !== undefined) payload.model_name = data.deviceModel;
     if (data.connStatus !== undefined) payload.status = data.connStatus === 'online' ? 'active' : 'offline';

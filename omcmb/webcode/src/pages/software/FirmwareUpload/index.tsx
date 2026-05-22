@@ -51,7 +51,7 @@ const { Dragger } = Upload;
 const { TextArea } = Input;
 
 // 产品类型列表 — 从后端动态获取，此常量仅作为 fallback
-const fallbackProductTypeOptions = [
+const fallbackProductClassOptions = [
   { label: 'PM-B4860', value: 'PM-B4860' },
   { label: 'QAFA', value: 'QAFA' },
   { label: 'QAFB', value: 'QAFB' },
@@ -87,11 +87,11 @@ export default function FirmwareUpload() {
 
   // Dynamic product type options from API
   const { data: productClassesData } = useProductClasses();
-  const productTypeOptions = useMemo(() => {
+  const productClassOptions = useMemo(() => {
     if (productClassesData && productClassesData.length > 0) {
       return productClassesData.map((c) => ({ label: c, value: c }));
     }
-    return fallbackProductTypeOptions;
+    return fallbackProductClassOptions;
   }, [productClassesData]);
 
   // 文件类型状态
@@ -332,7 +332,7 @@ export default function FirmwareUpload() {
     },
     {
       key: 'product',
-      title: t('software.firmware.productType'),
+      title: t('software.firmware.productClass'),
       dataIndex: 'deviceType',
       width: 250,
       ellipsis: true,
@@ -482,20 +482,20 @@ export default function FirmwareUpload() {
           {/* 产品类型标识 */}
           <Form.Item
               name="product"
-              label={t('software.firmware.productType')}
-              rules={[{ required: true, message: t('software.firmware.selectProductType') }]}
+              label={t('software.firmware.productClass')}
+              rules={[{ required: true, message: t('software.firmware.selectProductClass') }]}
             >
               {fileType === 'upgrade' ? (
                 <Select
                   mode="multiple"
                   maxTagCount="responsive"
-                  placeholder={t('software.firmware.selectProductType')}
-                  options={productTypeOptions}
+                  placeholder={t('software.firmware.selectProductClass')}
+                  options={productClassOptions}
                 />
               ) : (
                 <Select
-                  placeholder={t('software.firmware.selectProductType')}
-                  options={productTypeOptions}
+                  placeholder={t('software.firmware.selectProductClass')}
+                  options={productClassOptions}
                 />
               )}
             </Form.Item>

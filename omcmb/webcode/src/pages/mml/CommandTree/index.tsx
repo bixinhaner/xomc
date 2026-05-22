@@ -16,7 +16,7 @@ interface CommandRow extends Record<string, unknown> {
   category: string;
   description: string;
   paramCount: number;
-  productTypes?: string[];
+  productClasses?: string[];
 }
 
 const CATEGORY_KEYS = [
@@ -30,14 +30,14 @@ const CATEGORY_KEYS = [
 ];
 
 const mockCommands: MMLCommand[] = [
-  { id: '1', commandName: '查询小区信息', commandCode: 'LST CELL', category: '1', description: '查询小区配置信息，支持按小区ID过滤查询', params: [{ name: 'CELLID', type: 'number', required: false, description: '小区ID' }], productTypes: ['eNB', 'gNB'] },
-  { id: '2', commandName: '激活小区', commandCode: 'ACT CELL', category: '1', description: '激活指定小区，使其进入服务状态', params: [{ name: 'CELLID', type: 'number', required: true, description: '小区ID' }], productTypes: ['eNB'] },
-  { id: '3', commandName: '去激活小区', commandCode: 'DEA CELL', category: '1', description: '去激活指定小区，退出服务状态', params: [{ name: 'CELLID', type: 'number', required: true, description: '小区ID' }], productTypes: ['eNB'] },
-  { id: '4', commandName: '查询邻区', commandCode: 'LST NCELL', category: '2', description: '查询邻区配置关系列表', params: [{ name: 'LOCALCELLID', type: 'number', required: false, description: '本地小区ID' }], productTypes: ['eNB', 'gNB'] },
-  { id: '5', commandName: '添加邻区', commandCode: 'ADD NCELL', category: '2', description: '添加邻区关系', params: [{ name: 'LOCALCELLID', type: 'number', required: true, description: '本地小区ID' }, { name: 'CELLID', type: 'number', required: true, description: '邻小区ID' }], productTypes: ['eNB'] },
-  { id: '6', commandName: '查询基站状态', commandCode: 'LST BTSSTATE', category: '3', description: '查询基站运行状态信息', params: [], productTypes: ['eNB', 'gNB'] },
-  { id: '7', commandName: '查询活动告警', commandCode: 'LST ALMAF', category: '4', description: '查询当前活动告警列表', params: [{ name: 'ALMFAULTID', type: 'number', required: false, description: '告警ID' }, { name: 'SEVERITY', type: 'enum', required: false, description: '告警级别', options: [{ label: '严重', value: 1 }, { label: '主要', value: 2 }] }], productTypes: ['eNB', 'gNB'] },
-  { id: '8', commandName: '复位基站', commandCode: 'RST BTS', category: '3', description: '对基站进行软复位操作', params: [{ name: 'RSTTYPE', type: 'enum', required: true, description: '复位类型', options: [{ label: '软复位', value: 0 }, { label: '硬复位', value: 1 }] }], productTypes: ['eNB', 'gNB'] },
+  { id: '1', commandName: '查询小区信息', commandCode: 'LST CELL', category: '1', description: '查询小区配置信息，支持按小区ID过滤查询', params: [{ name: 'CELLID', type: 'number', required: false, description: '小区ID' }], productClasses: ['eNB', 'gNB'] },
+  { id: '2', commandName: '激活小区', commandCode: 'ACT CELL', category: '1', description: '激活指定小区，使其进入服务状态', params: [{ name: 'CELLID', type: 'number', required: true, description: '小区ID' }], productClasses: ['eNB'] },
+  { id: '3', commandName: '去激活小区', commandCode: 'DEA CELL', category: '1', description: '去激活指定小区，退出服务状态', params: [{ name: 'CELLID', type: 'number', required: true, description: '小区ID' }], productClasses: ['eNB'] },
+  { id: '4', commandName: '查询邻区', commandCode: 'LST NCELL', category: '2', description: '查询邻区配置关系列表', params: [{ name: 'LOCALCELLID', type: 'number', required: false, description: '本地小区ID' }], productClasses: ['eNB', 'gNB'] },
+  { id: '5', commandName: '添加邻区', commandCode: 'ADD NCELL', category: '2', description: '添加邻区关系', params: [{ name: 'LOCALCELLID', type: 'number', required: true, description: '本地小区ID' }, { name: 'CELLID', type: 'number', required: true, description: '邻小区ID' }], productClasses: ['eNB'] },
+  { id: '6', commandName: '查询基站状态', commandCode: 'LST BTSSTATE', category: '3', description: '查询基站运行状态信息', params: [], productClasses: ['eNB', 'gNB'] },
+  { id: '7', commandName: '查询活动告警', commandCode: 'LST ALMAF', category: '4', description: '查询当前活动告警列表', params: [{ name: 'ALMFAULTID', type: 'number', required: false, description: '告警ID' }, { name: 'SEVERITY', type: 'enum', required: false, description: '告警级别', options: [{ label: '严重', value: 1 }, { label: '主要', value: 2 }] }], productClasses: ['eNB', 'gNB'] },
+  { id: '8', commandName: '复位基站', commandCode: 'RST BTS', category: '3', description: '对基站进行软复位操作', params: [{ name: 'RSTTYPE', type: 'enum', required: true, description: '复位类型', options: [{ label: '软复位', value: 0 }, { label: '硬复位', value: 1 }] }], productClasses: ['eNB', 'gNB'] },
 ];
 
 export default function CommandTree() {
@@ -87,7 +87,7 @@ export default function CommandTree() {
     category: c.category,
     description: c.description,
     paramCount: c.params.length,
-    productTypes: c.productTypes,
+    productClasses: c.productClasses,
   }));
 
   const columns: DataTableColumn<CommandRow>[] = useMemo(() => [
@@ -97,9 +97,9 @@ export default function CommandTree() {
     { key: 'description', title: t('table.description'), dataIndex: 'description', width: 280, ellipsis: true },
     { key: 'paramCount', title: t('table.total'), dataIndex: 'paramCount', width: 90 },
     {
-      key: 'productTypes',
-      title: t('device.productType'),
-      dataIndex: 'productTypes',
+      key: 'productClasses',
+      title: t('device.productClass'),
+      dataIndex: 'productClasses',
       width: 130,
       render: (val) =>
         (val as string[]).map((tp) => (
@@ -207,8 +207,8 @@ export default function CommandTree() {
                 <Typography.Text code>{selectedCommand.commandCode}</Typography.Text>
               </Descriptions.Item>
               <Descriptions.Item label={t('perf.category')}>{getCatLabel(selectedCommand.category)}</Descriptions.Item>
-              <Descriptions.Item label={t('device.productType')}>
-                {selectedCommand.productTypes?.map((tp) => <Tag key={tp} color="blue">{tp}</Tag>)}
+              <Descriptions.Item label={t('device.productClass')}>
+                {selectedCommand.productClasses?.map((tp) => <Tag key={tp} color="blue">{tp}</Tag>)}
               </Descriptions.Item>
               <Descriptions.Item label={t('table.description')}>{selectedCommand.description}</Descriptions.Item>
             </Descriptions>

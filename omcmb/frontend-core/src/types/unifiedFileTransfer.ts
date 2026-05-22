@@ -69,7 +69,7 @@ export interface UnifiedFileTransferTask {
   typeDisplayName: string;
   firmwareId?: string;
   targetVersion?: string;
-  productType?: string;
+  productClass?: string;
   isKeepConfig?: boolean;
   status: TransferTaskStatus;
   result?: TransferTaskResult;
@@ -107,7 +107,7 @@ export interface UnifiedFileTransferDeviceItem {
   typeDisplayName: string;
   deviceName: string;
   deviceSn: string;
-  productType: string;
+  productClass: string;
   currentVersion: string;
   targetVersion: string;
   /** OUTPUT 文件类（备份 / 日志采集 / 配置恢复）的目标文件名，{task_id8}/{sn} 已渲染。
@@ -129,7 +129,7 @@ export interface UnifiedFileTransferDeviceItem {
 export interface CreateUnifiedFileTransferTaskInput {
   taskName: string;
   typeCode: string;
-  productType?: string;
+  productClass?: string;
   firmwareId?: string;
   isKeepConfig?: boolean;
   deviceIds?: string[];

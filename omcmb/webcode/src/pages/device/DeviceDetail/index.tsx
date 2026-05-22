@@ -194,7 +194,7 @@ const getStationFields = (t: ReturnType<typeof useT>, networkType: string): Fiel
     { key: 'sn', label: t('device.sn'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.sn}</Text> },
     { key: 'name', label: t('device.hostName'), render: (d) => d.name || '-' },
     { key: 'networkType', label: t('device.radioMode'), render: (d) => <Tag color={{ eNB: 'blue', gNB: 'green', GSM: 'orange' }[d.networkType ?? '']}>{d.networkType || '-'}</Tag> },
-    { key: 'productType', label: t('device.productType'), render: (d) => d.productType || '-' },
+    { key: 'productClass', label: t('device.productClass'), render: (d) => d.productClass || '-' },
     { key: 'deviceModel', label: t('device.model'), render: (d) => d.deviceModel || '-' },
     { key: 'softwareVersion', label: t('device.softwareVersion'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.softwareVersion || '-'}</Text> },
     { key: 'firmwareVersion', label: t('device.firmwareVersion'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.firmwareVersion || '-'}</Text> },

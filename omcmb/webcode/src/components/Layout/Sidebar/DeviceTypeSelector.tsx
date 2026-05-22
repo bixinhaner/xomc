@@ -39,7 +39,7 @@ export default function DeviceTypeSelector({ collapsed }: Props) {
           letterSpacing: '0.5px',
         }}
       >
-        {t('device.productType')}
+        {t('device.productClass')}
       </div>
       <Select<DeviceType>
         value={deviceType}

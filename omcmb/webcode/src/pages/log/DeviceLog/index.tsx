@@ -67,7 +67,7 @@ interface DeviceItem {
   id: string;
   deviceCode: string;
   deviceName: string;
-  productType: string;
+  productClass: string;
 }
 
 // 状态配置 - use i18n keys
@@ -100,17 +100,17 @@ const mockLogResults: LogResultItem[] = [
 
 // Mock 可选设备列表
 const mockAvailableDevices: DeviceItem[] = [
-  { id: '1', deviceCode: 'ENB00001', deviceName: '北京朝阳1号站', productType: '4G LTE' },
-  { id: '2', deviceCode: 'GNB00002', deviceName: '上海浦东2号站', productType: '5G NR' },
-  { id: '3', deviceCode: 'ENB00003', deviceName: '广州天河3号站', productType: '4G LTE' },
-  { id: '4', deviceCode: 'ENB00004', deviceName: '深圳南山4号站', productType: '4G LTE' },
-  { id: '5', deviceCode: 'GNB00005', deviceName: '杭州西湖5号站', productType: '5G NR' },
-  { id: '6', deviceCode: 'ENB00006', deviceName: '成都高新6号站', productType: '4G LTE' },
-  { id: '7', deviceCode: 'GNB00007', deviceName: '武汉光谷7号站', productType: '5G NR' },
+  { id: '1', deviceCode: 'ENB00001', deviceName: '北京朝阳1号站', productClass: '4G LTE' },
+  { id: '2', deviceCode: 'GNB00002', deviceName: '上海浦东2号站', productClass: '5G NR' },
+  { id: '3', deviceCode: 'ENB00003', deviceName: '广州天河3号站', productClass: '4G LTE' },
+  { id: '4', deviceCode: 'ENB00004', deviceName: '深圳南山4号站', productClass: '4G LTE' },
+  { id: '5', deviceCode: 'GNB00005', deviceName: '杭州西湖5号站', productClass: '5G NR' },
+  { id: '6', deviceCode: 'ENB00006', deviceName: '成都高新6号站', productClass: '4G LTE' },
+  { id: '7', deviceCode: 'GNB00007', deviceName: '武汉光谷7号站', productClass: '5G NR' },
 ];
 
 // 产品类型选项
-const productTypeOptions = [
+const productClassOptions = [
   { label: '4G LTE', value: '4G LTE' },
   { label: '5G NR', value: '5G NR' },
 ];
@@ -130,7 +130,7 @@ export default function DeviceLog() {
 
   // 新建任务相关状态
   const [selectedDevices, setSelectedDevices] = useState<DeviceItem[]>([]);
-  const [productTypeFilter, setProductTypeFilter] = useState<string>('');
+  const [productClassFilter, setProductClassFilter] = useState<string>('');
   const [addDeviceModalVisible, setAddDeviceModalVisible] = useState(false);
   const [selectedNewDevices, setSelectedNewDevices] = useState<React.Key[]>([]);
   const [addDeviceKeyword, setAddDeviceKeyword] = useState('');
@@ -174,8 +174,8 @@ export default function DeviceLog() {
   // 搜索过滤后的可选设备
   const filteredAvailableDevices = useMemo(() => {
     let devices = availableDevices;
-    if (productTypeFilter) {
-      devices = devices.filter((d) => d.productType === productTypeFilter);
+    if (productClassFilter) {
+      devices = devices.filter((d) => d.productClass === productClassFilter);
     }
     if (addDeviceKeyword) {
       const keyword = addDeviceKeyword.toLowerCase();
@@ -186,7 +186,7 @@ export default function DeviceLog() {
       );
     }
     return devices;
-  }, [availableDevices, productTypeFilter, addDeviceKeyword]);
+  }, [availableDevices, productClassFilter, addDeviceKeyword]);
 
   // 筛选字段
   const filterFields: FilterField[] = useMemo(() => [
@@ -422,7 +422,7 @@ export default function DeviceLog() {
           id: `manual-${Date.now()}-${code}`,
           deviceCode: code,
           deviceName: t('log.manualDevice'),
-          productType: t('log.unknownProductType'),
+          productClass: t('log.unknownProductClass'),
         });
       }
     }
@@ -446,14 +446,14 @@ export default function DeviceLog() {
       setCreateDrawerVisible(false);
       form.resetFields();
       setSelectedDevices([]);
-      setProductTypeFilter('');
+      setProductClassFilter('');
     });
   };
 
   // 打开新建抽屉时重置状态
   const handleOpenCreateDrawer = () => {
     setSelectedDevices([]);
-    setProductTypeFilter('');
+    setProductClassFilter('');
     setCreateDrawerVisible(true);
   };
 
@@ -696,14 +696,14 @@ export default function DeviceLog() {
           </Form.Item>
 
           {/* 产品类型筛选 */}
-          <Form.Item label={t('log.productType')}>
+          <Form.Item label={t('log.productClass')}>
             <Select
-              placeholder={t('log.filterByProductType')}
+              placeholder={t('log.filterByProductClass')}
               allowClear
               style={{ width: '100%' }}
-              options={productTypeOptions}
-              value={productTypeFilter || undefined}
-              onChange={(val) => setProductTypeFilter(val ?? '')}
+              options={productClassOptions}
+              value={productClassFilter || undefined}
+              onChange={(val) => setProductClassFilter(val ?? '')}
             />
           </Form.Item>
 
@@ -736,7 +736,7 @@ export default function DeviceLog() {
                   columns={[
                     { title: t('log.deviceCode'), dataIndex: 'deviceCode', width: 100 },
                     { title: t('log.logDeviceName'), dataIndex: 'deviceName', ellipsis: true },
-                    { title: t('log.productType'), dataIndex: 'productType', width: 80 },
+                    { title: t('log.productClass'), dataIndex: 'productClass', width: 80 },
                     {
                       title: '',
                       width: 40,
@@ -827,7 +827,7 @@ export default function DeviceLog() {
               columns={[
                 { title: t('log.deviceCode'), dataIndex: 'deviceCode', width: 120 },
                 { title: t('log.logDeviceName'), dataIndex: 'deviceName', ellipsis: true },
-                { title: t('log.productType'), dataIndex: 'productType', width: 100 },
+                { title: t('log.productClass'), dataIndex: 'productClass', width: 100 },
               ]}
             />
           </>

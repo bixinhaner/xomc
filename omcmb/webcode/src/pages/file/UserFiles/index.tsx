@@ -104,7 +104,7 @@ export default function UserFiles() {
     { name: 'keyword', label: t('table.name'), type: 'input', placeholder: t('common.placeholder') },
     {
       name: 'deviceType',
-      label: t('device.productType'),
+      label: t('device.productClass'),
       type: 'select',
       options: [
         { label: 'eNB', value: 'eNB' },
@@ -150,7 +150,7 @@ export default function UserFiles() {
   const firmwareColumns: DataTableColumn<FirmwareItem & Record<string, unknown>>[] = useMemo(() => [
     { key: 'fileName', title: t('table.name'), dataIndex: 'fileName', ellipsis: true },
     { key: 'fileSize', title: t('table.description'), dataIndex: 'fileSize', width: 110, render: (val) => formatFileSize(Number(val)) },
-    { key: 'deviceType', title: t('device.productType'), dataIndex: 'deviceType', width: 100 },
+    { key: 'deviceType', title: t('device.productClass'), dataIndex: 'deviceType', width: 100 },
     { key: 'version', title: t('table.version'), dataIndex: 'version', width: 200, render: (val) => <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(val)}</span> },
     { key: 'uploadTime', title: t('table.createTime'), dataIndex: 'uploadTime', width: 160, render: (val) => new Date(String(val)).toLocaleString('zh-CN') },
     { key: 'uploader', title: t('table.operator'), dataIndex: 'uploader', width: 100 },

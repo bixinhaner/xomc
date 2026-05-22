@@ -44,7 +44,7 @@ export const deviceService = {
     if (params.name) filtered = filterByText(filtered, 'name', params.name);
     if (params.sn) filtered = filterByText(filtered, 'sn', params.sn);
     if (params.vendor) filtered = filtered.filter((d) => d.vendor === params.vendor);
-    if (params.productType) filtered = filtered.filter((d) => d.productType === params.productType);
+    if (params.productClass) filtered = filtered.filter((d) => d.productClass === params.productClass);
     if (params.networkType) filtered = filtered.filter((d) => d.networkType === params.networkType);
     if (params.connStatus) {
       // 前端传数字值 '1'(在线)/'0'(离线)/'2'(同步失败)/'3'(同步中)，mock 数据用 'online'/'offline'
@@ -75,7 +75,7 @@ export const deviceService = {
         return true;
       });
     }
-    if (params.productModel) filtered = filtered.filter((d) => d.productType === params.productModel);
+    if (params.productModel) filtered = filtered.filter((d) => d.productClass === params.productModel);
     if (params.alarmLevel) filtered = filtered.filter((d) => d.alarmLevel === params.alarmLevel);
     if (params.region) filtered = filtered.filter((d) => d.region === params.region);
     if (params.subnet) filtered = filtered.filter((d) => d.subnet === params.subnet);

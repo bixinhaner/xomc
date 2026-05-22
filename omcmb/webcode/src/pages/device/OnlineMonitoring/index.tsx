@@ -129,7 +129,7 @@ function DeviceCard({
 
       {/* Tags */}
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
-        <Tag style={{ margin: 0, fontSize: 11 }}>{device.productType}</Tag>
+        <Tag style={{ margin: 0, fontSize: 11 }}>{device.productClass}</Tag>
         <Tag style={{ margin: 0, fontSize: 11 }}>{device.networkType}</Tag>
         {device.alarmLevel !== 'none' && (
           <Tag
@@ -183,7 +183,7 @@ export default function OnlineMonitoring() {
         d.name.toLowerCase().includes(searchText.toLowerCase()) ||
         d.sn.toLowerCase().includes(searchText.toLowerCase());
       const matchStatus = statusFilter === 'all' || d.connStatus === statusFilter;
-      const matchType = typeFilter === 'all' || d.productType === typeFilter;
+      const matchType = typeFilter === 'all' || d.productClass === typeFilter;
       return matchText && matchStatus && matchType;
     });
   }, [allDevices, searchText, statusFilter, typeFilter]);

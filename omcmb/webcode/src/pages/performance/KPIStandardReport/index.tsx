@@ -30,7 +30,7 @@ const { Link } = Typography;
 interface KPIIndicatorRow extends Record<string, unknown> {
   kpiId: string;
   kpiName: string;
-  productType: string;
+  productClass: string;
   custName: string;
   indicatorLevel: string;
   unit: string;
@@ -67,7 +67,7 @@ function toRow(ind: PerfIndicator, locale: string): KPIIndicatorRow {
   return {
     kpiId: ind.kpiId,
     kpiName: getLocalizedIndicatorName(ind, locale),
-    productType: ind.productType,
+    productClass: ind.productClass,
     custName: ind.custName,
     indicatorLevel: ind.indicatorLevel,
     unit: ind.unit,
@@ -238,7 +238,7 @@ export default function KPIStandardReport() {
   const [pageSize, setPageSize] = useState(20);
 
   // 筛选状态
-  const [productType, setProductType] = useState<string>('');
+  const [productClass, setProductClass] = useState<string>('');
   const [indicatorLevel, setIndicatorLevel] = useState<string>('');
   const [indicatorTypeFilter, setIndicatorTypeFilter] = useState<string>('');
   const [isEnableFilter, setIsEnableFilter] = useState<string>('');
@@ -286,13 +286,13 @@ export default function KPIStandardReport() {
     deviceType,
     catagoryId: selectedGroupId,
     searchText: tableSearchValue || undefined,
-    productType: productType || undefined,
+    productClass: productClass || undefined,
     indicatorType: indicatorTypeFilter || undefined,
     isEnable: isEnableFilter || undefined,
     indicatorLevel: indicatorLevel || undefined,
     page,
     rows: pageSize,
-  }), [deviceType, selectedGroupId, tableSearchValue, productType, indicatorTypeFilter, isEnableFilter, indicatorLevel, page, pageSize]);
+  }), [deviceType, selectedGroupId, tableSearchValue, productClass, indicatorTypeFilter, isEnableFilter, indicatorLevel, page, pageSize]);
 
   const { data: indicatorPage, isLoading: indicatorLoading, refetch: refetchIndicatorList } = useIndicatorList(indicatorListParams);
 
@@ -311,7 +311,7 @@ export default function KPIStandardReport() {
     indicatorType: 'kpi' | 'counter';
     indicatorLevel: string;
     kpiName: string;
-    productType: string;
+    productClass: string;
     custName: string;
     catagoryId: string;
     unit: string;
@@ -323,7 +323,7 @@ export default function KPIStandardReport() {
   const [calcFormula, setCalcFormula] = useState<string>('');
   const [formulaSearchValue, setFormulaSearchValue] = useState<string>('');
   const [formulaSelectedCategory, setFormulaSelectedCategory] = useState<string>('');
-  const [formulaProductType, setFormulaProductType] = useState<string>('');
+  const [formulaProductClass, setFormulaProductClass] = useState<string>('');
 
   // Edit indicator drawer state
   const [editDrawerOpen, setEditDrawerOpen] = useState(false);
@@ -331,7 +331,7 @@ export default function KPIStandardReport() {
     indicatorType: 'kpi' | 'counter';
     indicatorLevel: string;
     kpiName: string;
-    productType: string;
+    productClass: string;
     custName: string;
     catagoryId: string;
     unit: string;
@@ -526,7 +526,7 @@ export default function KPIStandardReport() {
     editIndicatorForm.setFieldsValue({
       indicatorLevel: row.indicatorLevel,
       kpiName: row.kpiName,
-      productType: row.productType || '',
+      productClass: row.productClass || '',
       custName: row.custName || '',
       unit: row.unit,
       statisType: row.statisType,
@@ -593,7 +593,7 @@ export default function KPIStandardReport() {
           indicatorType: editIndicatorType,
           kpiName: values.kpiName,
           catagoryId: editingIndicator?.catagoryId || '',
-          productType: values.productType,
+          productClass: values.productClass,
           unit: values.unit,
           statisType: values.statisType,
           isEnable: values.isEnable,
@@ -612,7 +612,7 @@ export default function KPIStandardReport() {
       setEditingIndicator(null);
       setFormulaSearchValue('');
       setFormulaSelectedCategory('');
-      setFormulaProductType('');
+      setFormulaProductClass('');
     } catch (err) {
       const axiosErr = err as AxiosError & { userMessage?: string };
       const errMsg = axiosErr?.userMessage || axiosErr?.message || String(err);
@@ -693,9 +693,9 @@ export default function KPIStandardReport() {
       render: (val: unknown) => val || '-',
     },
     {
-      key: 'productType',
-      title: t('kpi.productType'),
-      dataIndex: 'productType',
+      key: 'productClass',
+      title: t('kpi.productClass'),
+      dataIndex: 'productClass',
       width: 70,
     },
     {
@@ -740,7 +740,7 @@ export default function KPIStandardReport() {
       render: (val: unknown) => formatDateTime(val as string | undefined),
     },
   ].filter((col) => {
-    if (isGNB && (col.key === 'productType' || col.key === 'indicatorLevel')) return false;
+    if (isGNB && (col.key === 'productClass' || col.key === 'indicatorLevel')) return false;
     return true;
   }) as DataTableColumn<KPIIndicatorRow>[], [t, handleDeleteIndicator, handleEditIndicator, navigate, deviceType, isGNB]);
 
@@ -824,7 +824,7 @@ export default function KPIStandardReport() {
         indicatorType: values.indicatorType,
         kpiName: values.kpiName,
         catagoryId: currentParentKey || selectedGroupId || '',
-        productType: values.productType,
+        productClass: values.productClass,
         unit: values.unit,
         statisType: values.statisType,
         isEnable: values.isEnable,
@@ -842,7 +842,7 @@ export default function KPIStandardReport() {
       setCalcFormula('');
       setFormulaSearchValue('');
       setFormulaSelectedCategory('');
-      setFormulaProductType('');
+      setFormulaProductClass('');
     } catch (err) {
       const axiosErr = err as AxiosError & { userMessage?: string };
       const errMsg = axiosErr?.userMessage || axiosErr?.message || String(err);
@@ -901,12 +901,12 @@ export default function KPIStandardReport() {
     let data = tableData;
 
     // 按产品类型过滤
-    if (formulaProductType) {
-      data = data.filter((row) => row.productType === formulaProductType);
+    if (formulaProductClass) {
+      data = data.filter((row) => row.productClass === formulaProductClass);
     }
 
     return data;
-  }, [tableData, formulaProductType]);
+  }, [tableData, formulaProductClass]);
 
   // 根据搜索词过滤指标
   const searchedIndicators = useMemo(() => {
@@ -1128,9 +1128,9 @@ export default function KPIStandardReport() {
                 />
                 <Input
                   size="small"
-                  placeholder={t('kpi.productType')}
-                  value={productType}
-                  onChange={(e) => { setProductType(e.target.value); setPage(1); }}
+                  placeholder={t('kpi.productClass')}
+                  value={productClass}
+                  onChange={(e) => { setProductClass(e.target.value); setPage(1); }}
                   style={{ width: 120 }}
                   allowClear
                 />
@@ -1310,7 +1310,7 @@ export default function KPIStandardReport() {
           setCalcFormula('');
           setFormulaSearchValue('');
           setFormulaSelectedCategory('');
-          setFormulaProductType('');
+          setFormulaProductClass('');
         }}
         width={720}
         destroyOnClose
@@ -1323,7 +1323,7 @@ export default function KPIStandardReport() {
               setCalcFormula('');
               setFormulaSearchValue('');
               setFormulaSelectedCategory('');
-              setFormulaProductType('');
+              setFormulaProductClass('');
             }}>
               {t('common.cancel')}
             </Button>
@@ -1385,12 +1385,12 @@ export default function KPIStandardReport() {
 
             {!isGNB && (
             <Form.Item
-              name="productType"
-              label={t('kpi.productType')}
+              name="productClass"
+              label={t('kpi.productClass')}
               rules={[{ max: 50, message: t('kpi.nameMax50') }]}
               style={{ marginBottom: 12 }}
             >
-              <Input placeholder={t('kpi.productType')} maxLength={50} showCount />
+              <Input placeholder={t('kpi.productClass')} maxLength={50} showCount />
             </Form.Item>
             )}
 
@@ -1566,9 +1566,9 @@ export default function KPIStandardReport() {
                   />
                   <Input
                     size="small"
-                    placeholder={t('kpi.productType')}
-                    value={formulaProductType}
-                    onChange={(e) => setFormulaProductType(e.target.value)}
+                    placeholder={t('kpi.productClass')}
+                    value={formulaProductClass}
+                    onChange={(e) => setFormulaProductClass(e.target.value)}
                     style={{ width: 100, flexShrink: 0 }}
                     allowClear
                   />
@@ -1726,7 +1726,7 @@ export default function KPIStandardReport() {
           setEditingIndicator(null);
           setFormulaSearchValue('');
           setFormulaSelectedCategory('');
-          setFormulaProductType('');
+          setFormulaProductClass('');
         }}
         width={720}
         destroyOnClose
@@ -1738,7 +1738,7 @@ export default function KPIStandardReport() {
               setEditingIndicator(null);
               setFormulaSearchValue('');
               setFormulaSelectedCategory('');
-              setFormulaProductType('');
+              setFormulaProductClass('');
             }}>
               {t('common.cancel')}
             </Button>
@@ -1804,13 +1804,13 @@ export default function KPIStandardReport() {
 
             {!isGNB && (
             <Form.Item
-              name="productType"
-              label={t('kpi.productType')}
+              name="productClass"
+              label={t('kpi.productClass')}
               rules={[{ max: 50, message: t('kpi.nameMax50') }]}
               style={{ marginBottom: 12 }}
             >
               <Input
-                placeholder={t('kpi.productType')}
+                placeholder={t('kpi.productClass')}
                 maxLength={50}
                 showCount
                 disabled={!editingIndicator?.isCustomize}
@@ -1992,9 +1992,9 @@ export default function KPIStandardReport() {
                   />
                   <Input
                     size="small"
-                    placeholder={t('kpi.productType')}
-                    value={formulaProductType}
-                    onChange={(e) => setFormulaProductType(e.target.value)}
+                    placeholder={t('kpi.productClass')}
+                    value={formulaProductClass}
+                    onChange={(e) => setFormulaProductClass(e.target.value)}
                     style={{ width: 100, flexShrink: 0 }}
                     allowClear
                   />

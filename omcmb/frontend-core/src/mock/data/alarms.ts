@@ -52,7 +52,7 @@ const severityDistribution: AlarmSeverity[] = [
   ...Array(42).fill('warning'),
 ];
 
-const deviceSnList = mockDevices.map((d) => ({ sn: d.sn, name: d.name, type: d.productType }));
+const deviceSnList = mockDevices.map((d) => ({ sn: d.sn, name: d.name, type: d.productClass }));
 
 function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];

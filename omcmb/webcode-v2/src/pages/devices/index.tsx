@@ -116,7 +116,7 @@ export function DevicesPage() {
       },
       { accessorKey: 'name', header: '名称' },
       { accessorKey: 'vendor', header: '厂商' },
-      { accessorKey: 'productType', header: '产品型号' },
+      { accessorKey: 'productClass', header: '产品型号' },
       { accessorKey: 'networkType', header: '制式' },
       {
         accessorKey: 'connStatus',

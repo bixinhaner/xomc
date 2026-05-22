@@ -340,7 +340,7 @@ export default function DeviceList() {
   const { data: isOnlineDict } = useDictionary('is_online');
   const { data: opStateDict } = useDictionary('op_state');
   const { data: networkTypeDict } = useDictionary('network_type');
-  const { data: productTypeDict } = useDictionary('product_type');
+  const { data: productClassDict } = useDictionary('product_class');
   const { data: deviceModelDict } = useDictionary('device_model');
   const { data: softwareVersionDict } = useDictionary('software_version');
   const { data: firmwareVersionDict } = useDictionary('firmware_version');
@@ -417,10 +417,10 @@ export default function DeviceList() {
     },
     {
       name: 'productModel',
-      label: t('device.productType'),
+      label: t('device.productClass'),
       type: 'multi-select',
       width: 160,
-      options: dictToOptions(productTypeDict),
+      options: dictToOptions(productClassDict),
     },
 
     // --- 筛选项：三制式公共（默认折叠） ---
@@ -464,7 +464,7 @@ export default function DeviceList() {
     isOnlineDict,
     opStateDict,
     networkTypeDict,
-    productTypeDict,
+    productClassDict,
     deviceModelDict,
     softwareVersionDict,
     firmwareVersionDict,
@@ -910,13 +910,13 @@ export default function DeviceList() {
         },
       },
       {
-        key: 'productType',
-        title: t('device.productType'),
-        dataIndex: 'productType',
+        key: 'productClass',
+        title: t('device.productClass'),
+        dataIndex: 'productClass',
         width: 120,
         group: 'common',
         // 原始 JSP: product 字段 — PM-B4860/QAFA/BaiBNX/BSC/BTS 等
-        render: (_val, record) => record.productType || '-',
+        render: (_val, record) => record.productClass || '-',
       },
       {
         key: 'platformType',

@@ -43,7 +43,7 @@ export default function VersionQuery() {
     { name: 'versionCode', label: t('table.version'), type: 'input', placeholder: t('common.placeholder') },
     {
       name: 'deviceType',
-      label: t('device.productType'),
+      label: t('device.productClass'),
       type: 'select',
       options: [
         { label: 'eNB', value: 'eNB' },
@@ -91,7 +91,7 @@ export default function VersionQuery() {
       mono: true,
       render: (val) => <span style={{ fontFamily: 'monospace', fontSize: 13 }}>{String(val)}</span>,
     },
-    { key: 'deviceType', title: t('device.productType'), dataIndex: 'deviceType', width: 100 },
+    { key: 'deviceType', title: t('device.productClass'), dataIndex: 'deviceType', width: 100 },
     { key: 'vendor', title: t('device.vendor'), dataIndex: 'vendor', width: 100 },
     {
       key: 'releaseNotes',
@@ -197,7 +197,7 @@ export default function VersionQuery() {
               <span style={{ fontFamily: 'monospace' }}>{selectedVersion.versionCode}</span>
             </Descriptions.Item>
             <Descriptions.Item label={t('table.name')}>{selectedVersion.versionName}</Descriptions.Item>
-            <Descriptions.Item label={t('device.productType')}>{selectedVersion.deviceType}</Descriptions.Item>
+            <Descriptions.Item label={t('device.productClass')}>{selectedVersion.deviceType}</Descriptions.Item>
             <Descriptions.Item label={t('device.vendor')}>{selectedVersion.vendor}</Descriptions.Item>
             <Descriptions.Item label={t('table.status')}>
               <Tag color={statusColorMap[selectedVersion.status]}>{t(statusLabelKeyMap[selectedVersion.status])}</Tag>

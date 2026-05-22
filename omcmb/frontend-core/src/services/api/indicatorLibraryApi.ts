@@ -68,7 +68,7 @@ function mapIndicator(b: BackendIndicator, deviceType: DeviceType): IndicatorInf
     unit: b.unit,
     description: b.description,
     isCounter: b.is_counter,
-    productType: b.product_type,
+    productClass: b.product_type,
     operatorCode: b.operator_code,
     isEnabled: b.is_enabled,
     deviceType: b.device_type ?? deviceType,
@@ -113,7 +113,7 @@ function indicatorPayload(
   if (input.indicatorLevel !== undefined) p.indicator_level = input.indicatorLevel;
   if (input.unit !== undefined) p.unit = input.unit;
   if (input.description !== undefined) p.description = input.description;
-  if (input.productType !== undefined) p.product_type = input.productType;
+  if (input.productClass !== undefined) p.product_type = input.productClass;
   if (input.operatorCode !== undefined) p.operator_code = input.operatorCode;
   return p;
 }
@@ -137,7 +137,7 @@ export const indicatorLibraryApi = {
     if (filter?.groupId) params.groupId = filter.groupId;
     if (filter?.keyword) params.keyword = filter.keyword;
     if (filter?.operatorCode) params.operatorCode = filter.operatorCode;
-    if (filter?.productType) params.productType = filter.productType;
+    if (filter?.productClass) params.productClass = filter.productClass;
     if (filter?.indicatorLevel) params.indicatorLevel = filter.indicatorLevel;
     if (filter?.isEnabled !== undefined) params.isEnabled = filter.isEnabled;
     if (filter?.isCounter !== undefined) params.isCounter = filter.isCounter;

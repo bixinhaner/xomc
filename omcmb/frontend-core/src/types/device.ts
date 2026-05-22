@@ -92,7 +92,7 @@ export interface Device {
   sn: string;
   name: string;
   vendor: string;
-  productType: string;
+  productClass: string;
   networkType: string;
   deviceModel: string;
   region: string;
@@ -260,7 +260,7 @@ export interface DeviceGroup {
   /** 基站制式：LTE, 5G, GSM 等 */
   networkType?: string;
   /** 产品类型 */
-  productType?: string;
+  productClass?: string;
   /**
    * 设备分组匹配规则字段（来自后端 device_groups 表）。L2 子分组编辑入口
    * （DeviceGrouping/useGroupActions.tsx openEditLevel2）需要这些字段才能
@@ -278,7 +278,7 @@ export interface DeviceFilter {
   searchText?: string;
   sn?: string;
   vendor?: string;
-  productType?: string;
+  productClass?: string;
   networkType?: string;
   /**
    * T-0162 DEPRECATED: 用 `lifecycleState` + `isOnline` 替代。

@@ -157,7 +157,7 @@ export default function BatchParamTemplate() {
     { key: 'paramCount', title: t('table.total'), dataIndex: 'paramCount', width: 100 },
     {
       key: 'deviceType',
-      title: t('device.productType'),
+      title: t('device.productClass'),
       dataIndex: 'deviceType',
       width: 130,
       render: (val) => <Tag color={DEVICE_TYPE_COLORS[val as string] ?? 'default'}>{val as string}</Tag>,
@@ -240,7 +240,7 @@ export default function BatchParamTemplate() {
           <Form.Item label={t('config.template')} name="templateName" rules={[{ required: true, message: t('common.placeholder') }]}>
             <Input placeholder={t('common.placeholder')} />
           </Form.Item>
-          <Form.Item label={t('device.productType')} name="deviceType" rules={[{ required: true, message: t('common.pleaseSelect') }]}>
+          <Form.Item label={t('device.productClass')} name="deviceType" rules={[{ required: true, message: t('common.pleaseSelect') }]}>
             <Select options={DEVICE_TYPE_OPTIONS} placeholder={t('common.pleaseSelect')} />
           </Form.Item>
           <Form.Item label={t('table.description')} name="description">

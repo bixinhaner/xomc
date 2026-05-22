@@ -84,7 +84,7 @@ const PRODUCT_TYPE_OPTIONS = [
 const buildDeviceGroupTreeData = (
   groups: DeviceGroup[],
   networkTypeFilter?: string,
-  productTypeFilter?: string
+  productClassFilter?: string
 ): TreeDataNode[] => {
   // 筛选二级节点
   let filteredChildGroups = groups.filter((g) => g.parentId);
@@ -95,9 +95,9 @@ const buildDeviceGroupTreeData = (
       (g) => g.networkType === networkTypeFilter || !g.networkType
     );
   }
-  if (productTypeFilter) {
+  if (productClassFilter) {
     filteredChildGroups = filteredChildGroups.filter(
-      (g) => g.productType === productTypeFilter || !g.productType
+      (g) => g.productClass === productClassFilter || !g.productClass
     );
   }
 
@@ -256,7 +256,7 @@ export default function RoleManagement() {
   const [selectedNetworkTypes, setSelectedNetworkTypes] = useState<string[]>([]);
   // 设备组筛选条件
   const [deviceGroupNetworkType, setDeviceGroupNetworkType] = useState<string>('');
-  const [deviceGroupProductType, setDeviceGroupProductType] = useState<string>('');
+  const [deviceGroupProductClass, setDeviceGroupProductClass] = useState<string>('');
   // API权限选择
   const [selectedApiEndpointIds, setSelectedApiEndpointIds] = useState<string[]>([]);
   // API 树展开状态 + 父子联动（与菜单权限 UI 保持一致）
@@ -283,8 +283,8 @@ export default function RoleManagement() {
 
   // 设备组树形数据（一级+二级节点，支持筛选）
   const deviceGroupTreeData = useMemo(
-    () => buildDeviceGroupTreeData(allDeviceGroups ?? [], deviceGroupNetworkType, deviceGroupProductType),
-    [allDeviceGroups, deviceGroupNetworkType, deviceGroupProductType]
+    () => buildDeviceGroupTreeData(allDeviceGroups ?? [], deviceGroupNetworkType, deviceGroupProductClass),
+    [allDeviceGroups, deviceGroupNetworkType, deviceGroupProductClass]
   );
 
   // 筛选后的二级节点ID列表
@@ -293,11 +293,11 @@ export default function RoleManagement() {
     if (deviceGroupNetworkType) {
       filtered = filtered.filter((g) => g.networkType === deviceGroupNetworkType || !g.networkType);
     }
-    if (deviceGroupProductType) {
-      filtered = filtered.filter((g) => g.productType === deviceGroupProductType || !g.productType);
+    if (deviceGroupProductClass) {
+      filtered = filtered.filter((g) => g.productClass === deviceGroupProductClass || !g.productClass);
     }
     return filtered.map((g) => g.id);
-  }, [allDeviceGroups, deviceGroupNetworkType, deviceGroupProductType]);
+  }, [allDeviceGroups, deviceGroupNetworkType, deviceGroupProductClass]);
 
   // 筛选后的一级节点ID列表（用于全选时同时选中父节点）
   const filteredFirstLevelIds = useMemo(() => {
@@ -1138,10 +1138,10 @@ export default function RoleManagement() {
                 <Select
                   size="small"
                   style={{ width: 120 }}
-                  value={deviceGroupProductType}
-                  onChange={(val) => setDeviceGroupProductType(val)}
+                  value={deviceGroupProductClass}
+                  onChange={(val) => setDeviceGroupProductClass(val)}
                   options={PRODUCT_TYPE_OPTIONS}
-                  placeholder={t('role.productType')}
+                  placeholder={t('role.productClass')}
                 />
                 <Divider type="vertical" style={{ height: 20, margin: 0 }} />
                 <Checkbox

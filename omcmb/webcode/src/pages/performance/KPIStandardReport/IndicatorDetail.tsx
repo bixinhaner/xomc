@@ -117,7 +117,7 @@ export default function IndicatorDetail() {
           <Descriptions.Item label={t('kpi.indicatorName')}>{indicatorName}</Descriptions.Item>
           <Descriptions.Item label={t('kpi.customName')}>{indicator.custName || '-'}</Descriptions.Item>
           <Descriptions.Item label={t('perf.functionSet')}>{groupName}</Descriptions.Item>
-          {!isGNB && <Descriptions.Item label={t('kpi.productType')}>{indicator.productType || '-'}</Descriptions.Item>}
+          {!isGNB && <Descriptions.Item label={t('kpi.productClass')}>{indicator.productClass || '-'}</Descriptions.Item>}
           {!isGNB && (
             <Descriptions.Item label={t('kpi.level')}>
               {indicator.indicatorLevel === 'device' ? 'Device' : indicator.indicatorLevel === 'plmn' ? 'PLMN' : '-'}

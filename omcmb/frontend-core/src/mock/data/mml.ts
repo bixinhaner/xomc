@@ -11,7 +11,7 @@ export const mockMMLCommands: MMLCommand[] = [
     params: [
       { name: 'CELLID', type: 'number', required: false, description: '小区ID（不填则查询所有）', minValue: 0, maxValue: 255 },
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   {
     id: 'cmd-002',
@@ -22,7 +22,7 @@ export const mockMMLCommands: MMLCommand[] = [
     params: [
       { name: 'CELLID', type: 'number', required: true, description: '小区ID', minValue: 0, maxValue: 255 },
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   {
     id: 'cmd-003',
@@ -33,7 +33,7 @@ export const mockMMLCommands: MMLCommand[] = [
     params: [
       { name: 'CELLID', type: 'number', required: true, description: '小区ID', minValue: 0, maxValue: 255 },
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   {
     id: 'cmd-004',
@@ -46,7 +46,7 @@ export const mockMMLCommands: MMLCommand[] = [
       { name: 'PCI', type: 'number', required: false, description: '物理小区标识', minValue: 0, maxValue: 503 },
       { name: 'TXPOWER', type: 'number', required: false, description: '发射功率(dBm)', minValue: 0, maxValue: 50, defaultValue: 43 },
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   {
     id: 'cmd-005',
@@ -57,7 +57,7 @@ export const mockMMLCommands: MMLCommand[] = [
     params: [
       { name: 'CELLID', type: 'number', required: true, description: '小区ID', minValue: 0, maxValue: 255 },
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   // ---- 邻区管理 ----
   {
@@ -69,7 +69,7 @@ export const mockMMLCommands: MMLCommand[] = [
     params: [
       { name: 'LOCALCELLID', type: 'number', required: false, description: '本地小区ID', minValue: 0, maxValue: 255 },
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   {
     id: 'cmd-007',
@@ -81,7 +81,7 @@ export const mockMMLCommands: MMLCommand[] = [
       { name: 'LOCALCELLID', type: 'number', required: true, description: '本地小区ID', minValue: 0, maxValue: 255 },
       { name: 'NCELLID', type: 'number', required: true, description: '邻小区ID', minValue: 0, maxValue: 255 },
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   {
     id: 'cmd-008',
@@ -93,7 +93,7 @@ export const mockMMLCommands: MMLCommand[] = [
       { name: 'LOCALCELLID', type: 'number', required: true, description: '本地小区ID', minValue: 0, maxValue: 255 },
       { name: 'NCELLID', type: 'number', required: true, description: '邻小区ID', minValue: 0, maxValue: 255 },
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   // ---- 基站管理 ----
   {
@@ -103,7 +103,7 @@ export const mockMMLCommands: MMLCommand[] = [
     category: '基站管理',
     description: '查询基站运行状态信息',
     params: [],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   {
     id: 'cmd-010',
@@ -115,7 +115,7 @@ export const mockMMLCommands: MMLCommand[] = [
       { name: 'SRN', type: 'number', required: false, description: '子框号', minValue: 0, maxValue: 15 },
       { name: 'SN', type: 'number', required: false, description: '槽位号', minValue: 0, maxValue: 31 },
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   {
     id: 'cmd-011',
@@ -129,7 +129,7 @@ export const mockMMLCommands: MMLCommand[] = [
         { label: '硬复位', value: 1 },
       ]},
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   {
     id: 'cmd-012',
@@ -138,7 +138,7 @@ export const mockMMLCommands: MMLCommand[] = [
     category: '基站管理',
     description: '显示系统CPU、内存等资源占用情况',
     params: [],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   {
     id: 'cmd-013',
@@ -147,7 +147,7 @@ export const mockMMLCommands: MMLCommand[] = [
     category: '基站管理',
     description: '显示系统时钟同步状态',
     params: [],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   // ---- 告警查询 ----
   {
@@ -165,7 +165,7 @@ export const mockMMLCommands: MMLCommand[] = [
         { label: '提示', value: 4 },
       ]},
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   {
     id: 'cmd-015',
@@ -177,7 +177,7 @@ export const mockMMLCommands: MMLCommand[] = [
       { name: 'START_TIME', type: 'string', required: false, description: '开始时间' },
       { name: 'END_TIME', type: 'string', required: false, description: '结束时间' },
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   {
     id: 'cmd-016',
@@ -188,7 +188,7 @@ export const mockMMLCommands: MMLCommand[] = [
     params: [
       { name: 'ALMID', type: 'number', required: true, description: '告警ID' },
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   // ---- 性能采集 ----
   {
@@ -201,7 +201,7 @@ export const mockMMLCommands: MMLCommand[] = [
       { name: 'COUNTER', type: 'string', required: true, description: '计数器名称' },
       { name: 'CELLID', type: 'number', required: false, description: '小区ID', minValue: 0, maxValue: 255 },
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   {
     id: 'cmd-018',
@@ -213,7 +213,7 @@ export const mockMMLCommands: MMLCommand[] = [
       { name: 'START_TIME', type: 'string', required: true, description: '开始时间' },
       { name: 'END_TIME', type: 'string', required: true, description: '结束时间' },
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   {
     id: 'cmd-019',
@@ -224,7 +224,7 @@ export const mockMMLCommands: MMLCommand[] = [
     params: [
       { name: 'RRUID', type: 'number', required: false, description: 'RRU编号', minValue: 0, maxValue: 63 },
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   // ---- 传输管理 ----
   {
@@ -240,7 +240,7 @@ export const mockMMLCommands: MMLCommand[] = [
         { label: 'NG', value: 'NG' },
       ]},
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   {
     id: 'cmd-021',
@@ -251,7 +251,7 @@ export const mockMMLCommands: MMLCommand[] = [
     params: [
       { name: 'LNKID', type: 'number', required: false, description: '链路ID', minValue: 0, maxValue: 255 },
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   {
     id: 'cmd-022',
@@ -260,7 +260,7 @@ export const mockMMLCommands: MMLCommand[] = [
     category: '传输管理',
     description: '列出设备所有接口IP地址配置',
     params: [],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   // ---- 版本管理 ----
   {
@@ -270,7 +270,7 @@ export const mockMMLCommands: MMLCommand[] = [
     category: '版本管理',
     description: '显示设备软件版本信息',
     params: [],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   {
     id: 'cmd-024',
@@ -279,7 +279,7 @@ export const mockMMLCommands: MMLCommand[] = [
     category: '版本管理',
     description: '查询可用软件包列表',
     params: [],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
   {
     id: 'cmd-025',
@@ -294,7 +294,7 @@ export const mockMMLCommands: MMLCommand[] = [
         { label: '延迟', value: 'DELAYED' },
       ]},
     ],
-    productTypes: ['eNB', 'gNB'],
+    productClasses: ['eNB', 'gNB'],
   },
 ];
 

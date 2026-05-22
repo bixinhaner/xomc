@@ -16,12 +16,12 @@ export default function MMLConsole() {
     setSelectedDeviceSns(dev.selectedDevices.map((d) => d.sn));
   }, [dev.selectedDevices, setSelectedDeviceSns]);
 
-  // R-8.5：把 useDeviceSelection 的 productTypeFilter（useState）单向镜像到 store，
+  // R-8.5：把 useDeviceSelection 的 productClassFilter（useState）单向镜像到 store，
   // 让兄弟组件 CommandTree 能订阅当前选中的 product_class 调 useCommandCompatibility。
   // useState 仍是设备列表逻辑的真相源，store 只读不写回。
   useEffect(() => {
-    setProductClassFilter(dev.productTypeFilter);
-  }, [dev.productTypeFilter, setProductClassFilter]);
+    setProductClassFilter(dev.productClassFilter);
+  }, [dev.productClassFilter, setProductClassFilter]);
 
   const current: 1 | 2 | 3 | 4 = useMemo(() => {
     if (dev.selectedDevices.length === 0) return 1;
@@ -44,14 +44,14 @@ export default function MMLConsole() {
             filteredDevices={dev.filteredDevices}
             paginatedDevices={dev.paginatedDevices}
             searchText={dev.searchText}
-            productTypeFilter={dev.productTypeFilter}
+            productClassFilter={dev.productClassFilter}
             currentPage={dev.currentPage}
             isAllSelected={dev.isAllSelected}
             isIndeterminate={dev.isIndeterminate}
             totalFiltered={dev.totalFiltered}
             totalPages={dev.totalPages}
             onSearchChange={dev.setSearchText}
-            onFilterChange={dev.setProductTypeFilter}
+            onFilterChange={dev.setProductClassFilter}
             onPageChange={dev.setCurrentPage}
             onToggleDevice={dev.toggleDevice}
             onToggleSelectAll={dev.toggleSelectAll}

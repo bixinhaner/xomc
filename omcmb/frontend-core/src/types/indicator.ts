@@ -31,7 +31,7 @@ export interface PerfIndicator {
   kpiNameZh?: string;
   catagoryId: string;
   catagoryName: string;
-  productType: string;
+  productClass: string;
   custName: string;
   indicatorLevel: string;
   unit: string;
@@ -60,7 +60,7 @@ export interface PerfIndicator {
 export interface IndicatorListParams {
   catagoryId?: string;
   searchText?: string;
-  productType?: string;
+  productClass?: string;
   isEnable?: string;
   indicatorType?: string;
   indicatorLevel?: string;
@@ -85,7 +85,7 @@ export interface IndicatorCreateParams {
   unit: string;
   statisType: string;
   arithmetic: string;
-  productType?: string;
+  productClass?: string;
   isEnable?: string;
   definition?: string;
   custName?: string;

@@ -115,21 +115,21 @@ const MOCK_DEVICE_GROUPS = [
 
 // Mock 设备数据 (示例数据)
 const MOCK_DEVICES = [
-  { id: 'ENB00001', name: '北京朝阳基站01', neType: 'eNB', productType: 'LTE', groupId: 'group-1-1' },
-  { id: 'ENB00002', name: '北京海淀基站01', neType: 'eNB', productType: 'LTE', groupId: 'group-1-2' },
-  { id: 'ENB00003', name: '北京东城基站01', neType: 'eNB', productType: 'LTE', groupId: 'group-1' },
-  { id: 'ENB00004', name: '北京西城基站01', neType: 'eNB', productType: 'LTE', groupId: 'group-1' },
-  { id: 'ENB00005', name: '上海浦东基站01', neType: 'eNB', productType: 'LTE', groupId: 'group-2-1' },
-  { id: 'ENB00006', name: '上海徐汇基站01', neType: 'eNB', productType: 'LTE', groupId: 'group-2-2' },
-  { id: 'GNB00001', name: '北京5G基站01', neType: 'gNB', productType: 'NR', groupId: 'group-1' },
-  { id: 'GNB00002', name: '上海5G基站01', neType: 'gNB', productType: 'NR', groupId: 'group-2' },
-  { id: 'GNB00003', name: '广州5G基站01', neType: 'gNB', productType: 'NR', groupId: 'group-3' },
-  { id: 'ENB00007', name: '深圳南山基站01', neType: 'eNB', productType: 'LTE', groupId: 'group-4' },
-  { id: 'ENB00008', name: '深圳福田基站01', neType: 'eNB', productType: 'LTE', groupId: 'group-4' },
-  { id: 'ENB00009', name: '广州天河基站01', neType: 'eNB', productType: 'LTE', groupId: 'group-3' },
-  { id: 'ENB00010', name: '广州越秀基站01', neType: 'eNB', productType: 'LTE', groupId: 'group-3' },
-  { id: 'GNB00004', name: '深圳5G基站01', neType: 'gNB', productType: 'NR', groupId: 'group-4' },
-  { id: 'ENB00011', name: '北京朝阳基站02', neType: 'eNB', productType: 'LTE', groupId: 'group-1-1' },
+  { id: 'ENB00001', name: '北京朝阳基站01', neType: 'eNB', productClass: 'LTE', groupId: 'group-1-1' },
+  { id: 'ENB00002', name: '北京海淀基站01', neType: 'eNB', productClass: 'LTE', groupId: 'group-1-2' },
+  { id: 'ENB00003', name: '北京东城基站01', neType: 'eNB', productClass: 'LTE', groupId: 'group-1' },
+  { id: 'ENB00004', name: '北京西城基站01', neType: 'eNB', productClass: 'LTE', groupId: 'group-1' },
+  { id: 'ENB00005', name: '上海浦东基站01', neType: 'eNB', productClass: 'LTE', groupId: 'group-2-1' },
+  { id: 'ENB00006', name: '上海徐汇基站01', neType: 'eNB', productClass: 'LTE', groupId: 'group-2-2' },
+  { id: 'GNB00001', name: '北京5G基站01', neType: 'gNB', productClass: 'NR', groupId: 'group-1' },
+  { id: 'GNB00002', name: '上海5G基站01', neType: 'gNB', productClass: 'NR', groupId: 'group-2' },
+  { id: 'GNB00003', name: '广州5G基站01', neType: 'gNB', productClass: 'NR', groupId: 'group-3' },
+  { id: 'ENB00007', name: '深圳南山基站01', neType: 'eNB', productClass: 'LTE', groupId: 'group-4' },
+  { id: 'ENB00008', name: '深圳福田基站01', neType: 'eNB', productClass: 'LTE', groupId: 'group-4' },
+  { id: 'ENB00009', name: '广州天河基站01', neType: 'eNB', productClass: 'LTE', groupId: 'group-3' },
+  { id: 'ENB00010', name: '广州越秀基站01', neType: 'eNB', productClass: 'LTE', groupId: 'group-3' },
+  { id: 'GNB00004', name: '深圳5G基站01', neType: 'gNB', productClass: 'NR', groupId: 'group-4' },
+  { id: 'ENB00011', name: '北京朝阳基站02', neType: 'eNB', productClass: 'LTE', groupId: 'group-1-1' },
 ];
 
 // Mock KPI 数据 (示例数据)
@@ -265,13 +265,13 @@ export default function TemplateDrawer({
   const [selectedDevices, setSelectedDevices] = useState<string[]>([]);
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
   const [deviceSearchText, _setDeviceSearchText] = useState('');
-  const [deviceProductType, _setDeviceProductType] = useState<string>('all');
+  const [deviceProductClass, _setDeviceProductClass] = useState<string>('all');
   const [groupDeviceType, _setGroupDeviceType] = useState<string>('all');
   const [deviceCurrentPage, _setDeviceCurrentPage] = useState(1);
   const [devicePageSize, _setDevicePageSize] = useState(10);
   const [addDeviceModalVisible, setAddDeviceModalVisible] = useState(false);
   const [modalSearchText, setModalSearchText] = useState('');
-  const [modalProductType, setModalProductType] = useState<string>('all');
+  const [modalProductClass, setModalProductClass] = useState<string>('all');
   const [modalDeviceType, setModalDeviceType] = useState<string>('all');
   const [modalCurrentPage, setModalCurrentPage] = useState(1);
   const [modalPageSize, setModalPageSize] = useState(10);
@@ -540,8 +540,8 @@ export default function TemplateDrawer({
     let result = MOCK_DEVICES;
 
     // 按产品类型筛选
-    if (deviceProductType !== 'all') {
-      result = result.filter(device => device.productType === deviceProductType);
+    if (deviceProductClass !== 'all') {
+      result = result.filter(device => device.productClass === deviceProductClass);
     }
 
     // 按搜索文本筛选
@@ -556,7 +556,7 @@ export default function TemplateDrawer({
     }
 
     return result;
-  }, [deviceSearchText, deviceProductType]);
+  }, [deviceSearchText, deviceProductClass]);
 
   // 过滤后的设备组列表
   const filteredGroups = useMemo(() => {
@@ -613,8 +613,8 @@ export default function TemplateDrawer({
     let result = MOCK_DEVICES.filter(d => !selectedDevices.includes(d.id));
 
     // 按产品类型筛选
-    if (modalProductType !== 'all') {
-      result = result.filter(device => device.productType === modalProductType);
+    if (modalProductClass !== 'all') {
+      result = result.filter(device => device.productClass === modalProductClass);
     }
 
     // 按搜索文本筛选
@@ -628,7 +628,7 @@ export default function TemplateDrawer({
     }
 
     return result;
-  }, [selectedDevices, modalProductType, modalSearchText]);
+  }, [selectedDevices, modalProductClass, modalSearchText]);
 
   // Modal 中过滤后的设备组列表（排除已选组）
   const filteredModalGroups = useMemo(() => {
@@ -997,8 +997,8 @@ export default function TemplateDrawer({
                       { title: t('perf.query.baseStationCode'), dataIndex: 'id', ellipsis: true },
                       { title: t('perf.query.baseStationName'), dataIndex: 'name', ellipsis: true },
                       {
-                        title: t('perf.query.productType'),
-                        dataIndex: 'productType',
+                        title: t('perf.query.productClass'),
+                        dataIndex: 'productClass',
                         width: 80,
                         render: (val) => <Tag>{val}</Tag>
                       },
@@ -1192,13 +1192,13 @@ export default function TemplateDrawer({
           <div style={{ marginBottom: 12 }}>
             <Select
               style={{ width: 150, marginRight: 12 }}
-              value={modalProductType}
+              value={modalProductClass}
               onChange={(value) => {
-                setModalProductType(value);
+                setModalProductClass(value);
                 setModalCurrentPage(1);
               }}
               options={[
-                { label: t('perf.query.allProductTypes'), value: 'all' },
+                { label: t('perf.query.allProductClasses'), value: 'all' },
                 { label: 'LTE', value: 'LTE' },
                 { label: 'NR', value: 'NR' },
               ]}
@@ -1296,8 +1296,8 @@ export default function TemplateDrawer({
                 { title: t('perf.query.baseStationCode'), dataIndex: 'id', width: 120 },
                 { title: t('perf.query.baseStationName'), dataIndex: 'name', ellipsis: true },
                 {
-                  title: t('perf.query.productType'),
-                  dataIndex: 'productType',
+                  title: t('perf.query.productClass'),
+                  dataIndex: 'productClass',
                   width: 80,
                   render: (val) => <Tag>{val}</Tag>,
                 },

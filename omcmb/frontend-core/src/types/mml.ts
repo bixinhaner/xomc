@@ -77,7 +77,7 @@ export interface MMLCommand {
    * @deprecated migration 000090 后 mml_commands.product_types 列已下线；
    * 字段保留为可选仅供页面兜底渲染（永远为 undefined / []）。
    */
-  productTypes?: string[];
+  productClasses?: string[];
 }
 
 export interface MMLResult {

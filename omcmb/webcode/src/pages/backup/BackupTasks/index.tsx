@@ -111,7 +111,7 @@ interface BackupDeviceRow extends Record<string, unknown> {
   deviceSn: string;
   deviceName: string;
   deviceGroup: string;
-  productType: string;
+  productClass: string;
   backupType: BackupType;
   status: BackupStatus;
   progress: number;
@@ -144,18 +144,18 @@ interface BackupTaskRow extends Record<string, unknown> {
 
 // Mock 设备级别数据
 const mockDeviceData: BackupDeviceRow[] = [
-  { id: 'd1', taskId: 'bkp-001', taskName: '全量备份-北京站点', deviceSn: 'ENB00001', deviceName: '北京朝阳基站01', deviceGroup: '北京移动', productType: 'BBU', backupType: 'full', status: 'success', progress: 100, startTime: '2026-03-01 02:00:00', endTime: '2026-03-01 02:15:10', fileSize: 1024 * 1024 * 64, failureReason: '' },
-  { id: 'd2', taskId: 'bkp-001', taskName: '全量备份-北京站点', deviceSn: 'ENB00002', deviceName: '北京海淀基站01', deviceGroup: '北京移动', productType: 'BBU', backupType: 'full', status: 'success', progress: 100, startTime: '2026-03-01 02:00:00', endTime: '2026-03-01 02:18:30', fileSize: 1024 * 1024 * 58, failureReason: '' },
-  { id: 'd3', taskId: 'bkp-001', taskName: '全量备份-北京站点', deviceSn: 'ENB00003', deviceName: '上海浦东基站01', deviceGroup: '上海移动', productType: 'BBU', backupType: 'full', status: 'success', progress: 100, startTime: '2026-03-01 02:00:00', endTime: '2026-03-01 02:25:20', fileSize: 1024 * 1024 * 72, failureReason: '' },
-  { id: 'd4', taskId: 'bkp-001', taskName: '全量备份-北京站点', deviceSn: 'GNB00001', deviceName: '北京5G基站01', deviceGroup: '北京移动', productType: 'AAU', backupType: 'full', status: 'success', progress: 100, startTime: '2026-03-01 02:00:00', endTime: '2026-03-01 02:45:32', fileSize: 1024 * 1024 * 62, failureReason: '' },
-  { id: 'd5', taskId: 'bkp-002', taskName: '计划备份-全网每日', deviceSn: 'ENB00001', deviceName: '北京朝阳基站01', deviceGroup: '北京移动', productType: 'BBU', backupType: 'full', status: 'success', progress: 100, startTime: '2026-03-02 02:00:00', endTime: '2026-03-02 02:12:05', fileSize: 1024 * 1024 * 48, failureReason: '' },
-  { id: 'd6', taskId: 'bkp-002', taskName: '计划备份-全网每日', deviceSn: 'ENB00002', deviceName: '北京海淀基站01', deviceGroup: '北京移动', productType: 'BBU', backupType: 'full', status: 'running', progress: 80, startTime: '2026-03-02 02:00:00', endTime: '', fileSize: 0, failureReason: '' },
-  { id: 'd7', taskId: 'bkp-002', taskName: '计划备份-全网每日', deviceSn: 'ENB00003', deviceName: '上海浦东基站01', deviceGroup: '上海移动', productType: 'BBU', backupType: 'full', status: 'running', progress: 55, startTime: '2026-03-02 02:00:00', endTime: '', fileSize: 0, failureReason: '' },
-  { id: 'd8', taskId: 'bkp-002', taskName: '计划备份-全网每日', deviceSn: 'GNB00001', deviceName: '北京5G基站01', deviceGroup: '北京移动', productType: 'AAU', backupType: 'full', status: 'pending', progress: 0, startTime: '', endTime: '', fileSize: 0, failureReason: '' },
-  { id: 'd9', taskId: 'bkp-003', taskName: '配置备份-5G基站', deviceSn: 'GNB00001', deviceName: '北京5G基站01', deviceGroup: '北京移动', productType: 'AAU', backupType: 'config-only', status: 'failed', progress: 40, startTime: '2026-03-01 15:30:00', endTime: '2026-03-01 15:35:12', fileSize: 0, failureReason: '设备连接超时' },
-  { id: 'd10', taskId: 'bkp-003', taskName: '配置备份-5G基站', deviceSn: 'GNB00002', deviceName: '上海5G基站01', deviceGroup: '上海移动', productType: 'AAU', backupType: 'config-only', status: 'failed', progress: 60, startTime: '2026-03-01 15:30:00', endTime: '2026-03-01 15:38:12', fileSize: 0, failureReason: '认证失败' },
-  { id: 'd11', taskId: 'bkp-004', taskName: '增量备份-上海站点', deviceSn: 'ENB00003', deviceName: '上海浦东基站01', deviceGroup: '上海移动', productType: 'BBU', backupType: 'incremental', status: 'success', progress: 100, startTime: '2026-03-01 04:00:00', endTime: '2026-03-01 04:12:05', fileSize: 1024 * 1024 * 32, failureReason: '' },
-  { id: 'd12', taskId: 'bkp-005', taskName: '手动备份-单台设备', deviceSn: 'ENB00001', deviceName: '北京朝阳基站01', deviceGroup: '北京移动', productType: 'BBU', backupType: 'config-only', status: 'cancelled', progress: 20, startTime: '2026-02-28 09:00:00', endTime: '2026-02-28 09:05:00', fileSize: 0, failureReason: '' },
+  { id: 'd1', taskId: 'bkp-001', taskName: '全量备份-北京站点', deviceSn: 'ENB00001', deviceName: '北京朝阳基站01', deviceGroup: '北京移动', productClass: 'BBU', backupType: 'full', status: 'success', progress: 100, startTime: '2026-03-01 02:00:00', endTime: '2026-03-01 02:15:10', fileSize: 1024 * 1024 * 64, failureReason: '' },
+  { id: 'd2', taskId: 'bkp-001', taskName: '全量备份-北京站点', deviceSn: 'ENB00002', deviceName: '北京海淀基站01', deviceGroup: '北京移动', productClass: 'BBU', backupType: 'full', status: 'success', progress: 100, startTime: '2026-03-01 02:00:00', endTime: '2026-03-01 02:18:30', fileSize: 1024 * 1024 * 58, failureReason: '' },
+  { id: 'd3', taskId: 'bkp-001', taskName: '全量备份-北京站点', deviceSn: 'ENB00003', deviceName: '上海浦东基站01', deviceGroup: '上海移动', productClass: 'BBU', backupType: 'full', status: 'success', progress: 100, startTime: '2026-03-01 02:00:00', endTime: '2026-03-01 02:25:20', fileSize: 1024 * 1024 * 72, failureReason: '' },
+  { id: 'd4', taskId: 'bkp-001', taskName: '全量备份-北京站点', deviceSn: 'GNB00001', deviceName: '北京5G基站01', deviceGroup: '北京移动', productClass: 'AAU', backupType: 'full', status: 'success', progress: 100, startTime: '2026-03-01 02:00:00', endTime: '2026-03-01 02:45:32', fileSize: 1024 * 1024 * 62, failureReason: '' },
+  { id: 'd5', taskId: 'bkp-002', taskName: '计划备份-全网每日', deviceSn: 'ENB00001', deviceName: '北京朝阳基站01', deviceGroup: '北京移动', productClass: 'BBU', backupType: 'full', status: 'success', progress: 100, startTime: '2026-03-02 02:00:00', endTime: '2026-03-02 02:12:05', fileSize: 1024 * 1024 * 48, failureReason: '' },
+  { id: 'd6', taskId: 'bkp-002', taskName: '计划备份-全网每日', deviceSn: 'ENB00002', deviceName: '北京海淀基站01', deviceGroup: '北京移动', productClass: 'BBU', backupType: 'full', status: 'running', progress: 80, startTime: '2026-03-02 02:00:00', endTime: '', fileSize: 0, failureReason: '' },
+  { id: 'd7', taskId: 'bkp-002', taskName: '计划备份-全网每日', deviceSn: 'ENB00003', deviceName: '上海浦东基站01', deviceGroup: '上海移动', productClass: 'BBU', backupType: 'full', status: 'running', progress: 55, startTime: '2026-03-02 02:00:00', endTime: '', fileSize: 0, failureReason: '' },
+  { id: 'd8', taskId: 'bkp-002', taskName: '计划备份-全网每日', deviceSn: 'GNB00001', deviceName: '北京5G基站01', deviceGroup: '北京移动', productClass: 'AAU', backupType: 'full', status: 'pending', progress: 0, startTime: '', endTime: '', fileSize: 0, failureReason: '' },
+  { id: 'd9', taskId: 'bkp-003', taskName: '配置备份-5G基站', deviceSn: 'GNB00001', deviceName: '北京5G基站01', deviceGroup: '北京移动', productClass: 'AAU', backupType: 'config-only', status: 'failed', progress: 40, startTime: '2026-03-01 15:30:00', endTime: '2026-03-01 15:35:12', fileSize: 0, failureReason: '设备连接超时' },
+  { id: 'd10', taskId: 'bkp-003', taskName: '配置备份-5G基站', deviceSn: 'GNB00002', deviceName: '上海5G基站01', deviceGroup: '上海移动', productClass: 'AAU', backupType: 'config-only', status: 'failed', progress: 60, startTime: '2026-03-01 15:30:00', endTime: '2026-03-01 15:38:12', fileSize: 0, failureReason: '认证失败' },
+  { id: 'd11', taskId: 'bkp-004', taskName: '增量备份-上海站点', deviceSn: 'ENB00003', deviceName: '上海浦东基站01', deviceGroup: '上海移动', productClass: 'BBU', backupType: 'incremental', status: 'success', progress: 100, startTime: '2026-03-01 04:00:00', endTime: '2026-03-01 04:12:05', fileSize: 1024 * 1024 * 32, failureReason: '' },
+  { id: 'd12', taskId: 'bkp-005', taskName: '手动备份-单台设备', deviceSn: 'ENB00001', deviceName: '北京朝阳基站01', deviceGroup: '北京移动', productClass: 'BBU', backupType: 'config-only', status: 'cancelled', progress: 20, startTime: '2026-02-28 09:00:00', endTime: '2026-02-28 09:05:00', fileSize: 0, failureReason: '' },
 ];
 
 // Map frontend-core BackupTask (camelCase, backend-derived) → UI BackupTaskRow.
@@ -255,7 +255,7 @@ export default function BackupTasks() {
   // 添加设备弹窗
   const [addDeviceVisible, setAddDeviceVisible] = useState(false);
   const [addDeviceSearch, setAddDeviceSearch] = useState('');
-  const [addDeviceProductTypes, setAddDeviceProductTypes] = useState<string[]>([]);
+  const [addDeviceProductClasses, setAddDeviceProductClasses] = useState<string[]>([]);
   const [selectedNewDevices, setSelectedNewDevices] = useState<React.Key[]>([]);
   // 批量输入弹窗
   const [batchInputVisible, setBatchInputVisible] = useState(false);
@@ -408,8 +408,8 @@ export default function BackupTasks() {
 
   const filteredAvailableDevices = useMemo(() => {
     let result = availableDevices;
-    if (addDeviceProductTypes.length > 0) {
-      result = result.filter((d) => addDeviceProductTypes.includes(d.productType));
+    if (addDeviceProductClasses.length > 0) {
+      result = result.filter((d) => addDeviceProductClasses.includes(d.productClass));
     }
     if (addDeviceSearch.trim()) {
       const keyword = addDeviceSearch.toLowerCase();
@@ -418,7 +418,7 @@ export default function BackupTasks() {
       );
     }
     return result;
-  }, [availableDevices, addDeviceSearch, addDeviceProductTypes]);
+  }, [availableDevices, addDeviceSearch, addDeviceProductClasses]);
 
   // ========== 批量输入处理 ==========
   const parseBatchInput = (input: string): string[] => {
@@ -775,7 +775,7 @@ export default function BackupTasks() {
   const deviceColumns: DataTableColumn<BackupDeviceRow>[] = useMemo(() => [
     { key: 'deviceSn', title: t('device.stationCode'), dataIndex: 'deviceSn', width: 120 },
     { key: 'deviceName', title: t('device.stationName'), dataIndex: 'deviceName', width: 150, ellipsis: true },
-    { key: 'productType', title: t('backup.productType'), dataIndex: 'productType', width: 100 },
+    { key: 'productClass', title: t('backup.productClass'), dataIndex: 'productClass', width: 100 },
     {
       key: 'backupType',
       title: t('table.type'),
@@ -1126,7 +1126,7 @@ export default function BackupTasks() {
                     columns={[
                       { title: t('device.stationCode'), dataIndex: 'deviceSn', width: 100 },
                       { title: t('device.stationName'), dataIndex: 'deviceName', ellipsis: true },
-                      { title: t('backup.productType'), dataIndex: 'productType', width: 80 },
+                      { title: t('backup.productClass'), dataIndex: 'productClass', width: 80 },
                       {
                         title: '',
                         width: 40,
@@ -1141,7 +1141,7 @@ export default function BackupTasks() {
                   <Button
                     type="dashed"
                     icon={<PlusOutlined />}
-                    onClick={() => { setAddDeviceSearch(''); setAddDeviceProductTypes([]); setSelectedNewDevices([]); setAddDeviceVisible(true); }}
+                    onClick={() => { setAddDeviceSearch(''); setAddDeviceProductClasses([]); setSelectedNewDevices([]); setAddDeviceVisible(true); }}
                     style={{ width: '100%' }}
                   >
                     {t('common.addDevice')}
@@ -1367,9 +1367,9 @@ export default function BackupTasks() {
                 />
                 <Select
                   mode="multiple"
-                  placeholder={t('backup.productType')}
-                  value={addDeviceProductTypes}
-                  onChange={setAddDeviceProductTypes}
+                  placeholder={t('backup.productClass')}
+                  value={addDeviceProductClasses}
+                  onChange={setAddDeviceProductClasses}
                   options={[
                     { label: 'BBU', value: 'BBU' },
                     { label: 'RRU', value: 'RRU' },
@@ -1401,7 +1401,7 @@ export default function BackupTasks() {
               columns={[
                 { title: t('device.stationCode'), dataIndex: 'deviceSn', width: 120 },
                 { title: t('device.stationName'), dataIndex: 'deviceName', ellipsis: true },
-                { title: t('backup.productType'), dataIndex: 'productType', width: 100 },
+                { title: t('backup.productClass'), dataIndex: 'productClass', width: 100 },
               ]}
             />
           </>

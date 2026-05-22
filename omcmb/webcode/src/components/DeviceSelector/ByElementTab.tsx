@@ -57,8 +57,8 @@ const ByElementTab: React.FC<ByElementTabProps> = ({
     },
     {
       title: '类型',
-      dataIndex: 'productType',
-      key: 'productType',
+      dataIndex: 'productClass',
+      key: 'productClass',
       width: 100,
     },
     {

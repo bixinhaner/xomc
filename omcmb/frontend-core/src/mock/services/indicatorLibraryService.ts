@@ -90,7 +90,7 @@ export const indicatorLibraryService = {
       indicatorLevel: input.indicatorLevel,
       unit: input.unit,
       description: input.description,
-      productType: input.productType,
+      productClass: input.productClass,
       operatorCode: input.operatorCode || 'default',
       isEnabled: false,
       deviceType,
@@ -113,7 +113,7 @@ export const indicatorLibraryService = {
       ...(input.indicatorLevel !== undefined && { indicatorLevel: input.indicatorLevel }),
       ...(input.unit !== undefined && { unit: input.unit }),
       ...(input.description !== undefined && { description: input.description }),
-      ...(input.productType !== undefined && { productType: input.productType }),
+      ...(input.productClass !== undefined && { productClass: input.productClass }),
       ...(input.operatorCode !== undefined && { operatorCode: input.operatorCode }),
     };
     return clone(arr[idx]);
