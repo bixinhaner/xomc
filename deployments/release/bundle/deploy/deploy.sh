@@ -123,6 +123,13 @@ docker info >/dev/null 2>&1 || die "docker 服务不可用，请先 systemctl st
 [ "$SKIP_WEB" = 1 ]        || [ -f "$PKG_ROOT/deploy/docker-compose.web.yml" ]        || die "缺 deploy/docker-compose.web.yml（或加 --skip-web）" 1
 [ "$SKIP_MONITORING" = 1 ] || [ -f "$PKG_ROOT/deploy/docker-compose.monitoring.yml" ] || die "缺 deploy/docker-compose.monitoring.yml（或加 --skip-monitoring）" 1
 
+# 兜底：旧版 build-release.sh 在 umask=027 机器上构建时 monitoring/ 配置会落 0640，
+# prometheus/loki/tempo/alertmanager 等非 root 容器读不动直接 fail。
+# 新版 build-release.sh 已 baked chmod a+rX 到 tar；这里再 defensive 兜一遍。
+if [ "$SKIP_MONITORING" = 0 ] && [ -d "$PKG_ROOT/deploy/monitoring" ]; then
+  chmod -R a+rX "$PKG_ROOT/deploy/monitoring"
+fi
+
 # 项目版本号
 VERSION="$(awk -F= '/^project_version=/{print $2}' "$PKG_ROOT/VERSION" 2>/dev/null || echo unknown)"
 log "项目版本：$VERSION"

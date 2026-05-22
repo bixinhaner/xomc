@@ -168,6 +168,12 @@ for ARCH in $ARCHES; do
   cp -r "$REPO_ROOT/deployments/monitoring" "$STAGE/deploy/monitoring"
   cp "$REPO_ROOT/deployments/docker/nginx.conf"   "$STAGE/deploy/nginx.conf"
   cp "$REPO_ROOT/deployments/docker/default.conf" "$STAGE/deploy/default.conf"
+
+  # 关键：强制 world-read。cp 不带 -p 时会按构建机 umask 写入 mode，
+  # 若 umask=027 则配置文件落 0640，prometheus/loki/tempo/alertmanager 等
+  # 非 root 容器（UID 65534/10001 等）读不动，启动直接 fail "permission denied"。
+  # 大写 X 只补目录的 x，不会给普通文件加可执行位。
+  chmod -R a+rX "$STAGE/deploy/monitoring"
   cat > "$STAGE/deploy/.env" <<EOF
 # 项目版本（业务镜像 tag 取自此处）
 PROJECT_VERSION=$VERSION
