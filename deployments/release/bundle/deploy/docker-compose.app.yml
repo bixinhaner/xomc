@@ -18,41 +18,36 @@ networks:
 
 services:
   # ── 数据库迁移（首次部署 + 每次升级都跑；幂等）────────────────────────
+  #   使用 network_mode: host 绕过 Docker 内嵌 DNS 缺陷（短生命周期容器无法解析服务名），
+  #   直接经宿主机 127.0.0.1:5432 连接 postgres。
   migrate-schema:
     image: ${IMAGE_APP}
     restart: "no"
-    dns:
-      - 127.0.0.11
+    network_mode: host
     environment:
       TZ: "Asia/Shanghai"
       GOOSE_VERBOSITY: "1"
     entrypoint: ["omcgo-migrate"]
     command:
       - "--dsn"
-      - "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
+      - "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}?sslmode=disable"
       - "--path"
       - "/etc/omcgo/migrations"
       - "up"
     volumes:
       - /etc/localtime:/etc/localtime:ro
-    depends_on:
-      postgres:
-        condition: service_healthy
-    networks:
-      - omcgo-net
 
   # ── 种子数据导入（仅首次跑；标记由 deploy.sh 判断；幂等）──────────────
   migrate-seed:
     image: ${IMAGE_APP}
     restart: "no"
-    dns:
-      - 127.0.0.11
+    network_mode: host
     environment:
       TZ: "Asia/Shanghai"
     entrypoint: ["omcgo-seed"]
     command:
       - "--dsn"
-      - "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
+      - "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}?sslmode=disable"
       - "--dir"
       - "/etc/omcgo/datamodels/seed"
       - "--env"
@@ -60,11 +55,6 @@ services:
       - "apply"
     volumes:
       - /etc/localtime:/etc/localtime:ro
-    depends_on:
-      migrate-schema:
-        condition: service_completed_successfully
-    networks:
-      - omcgo-net
 
   # ── 业务进程：app（HTTP API + gRPC）───────────────────────────────────
   app:
