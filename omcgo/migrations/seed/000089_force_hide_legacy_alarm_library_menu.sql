@@ -44,6 +44,7 @@ WHERE b.migration_key = '000089_force_hide_legacy_alarm_library_menu'
 DELETE FROM seed_menu_show_status_backups
 WHERE migration_key = '000089_force_hide_legacy_alarm_library_menu';
 
+-- +goose StatementBegin
 DO $$
 BEGIN
     IF EXISTS (
@@ -55,3 +56,4 @@ BEGIN
         DROP TABLE seed_menu_show_status_backups;
     END IF;
 END $$;
+-- +goose StatementEnd

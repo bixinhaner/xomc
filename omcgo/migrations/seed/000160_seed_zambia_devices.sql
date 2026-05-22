@@ -55919,8 +55919,10 @@ INSERT INTO devices (
      -14.22406,
      28.573324,
      NOW(),
-     NOW()) 
-ON CONFLICT (serial_number, carrier) DO NOTHING;
+     NOW())
+-- devices 的 (serial_number, carrier) 唯一索引在 migration 000089 改为 partial
+-- (WHERE deleted_at IS NULL)，PG ON CONFLICT 必须用同样的 WHERE 子句才能匹配。
+ON CONFLICT (serial_number, carrier) WHERE deleted_at IS NULL DO NOTHING;
 
 -- ============================================================
 -- 3. 关联设备到分组（所有设备关联到 LTE700 组）
