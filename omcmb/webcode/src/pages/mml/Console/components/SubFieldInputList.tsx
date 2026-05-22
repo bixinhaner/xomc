@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import type { CSSProperties } from 'react';
 import { Input, Tag, Tooltip, Empty } from 'antd';
 import { EditOutlined, NumberOutlined } from '@ant-design/icons';
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
@@ -32,8 +33,24 @@ export default function SubFieldInputList({ statement }: SubFieldInputListProps)
     return list;
   }, [statement.subFields, statement.operationType]);
 
+  // 固定高度容器（spec：操作面板限制 path 区域 10 行可视高度，<10 行也保留空间，
+  // >10 行出现滚动条；MOD/ADD 行更高 — input 32px + flex gap 10 + 可选 constraint 行 ≈ 42-62px，
+  // 取 420px = 10 行不带 constraint 的基准，constraint 多时自然出现滚动）。
+  const VIEWPORT_HEIGHT = 420;
+  const VIEWPORT_STYLE: CSSProperties = {
+    height: VIEWPORT_HEIGHT,
+    overflowY: 'auto',
+    border: '1px solid #f0f0f0',
+    borderRadius: 4,
+    padding: 8,
+  };
+
   if (sortedFields.length === 0) {
-    return <Empty description={false} style={{ padding: 16 }} />;
+    return (
+      <div style={{ ...VIEWPORT_STYLE, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Empty description={false} />
+      </div>
+    );
   }
 
   // D35：笔图标 ✏️ 仅在 MOD 上下文渲染（装饰性，告知"此字段可改"）；
@@ -41,7 +58,7 @@ export default function SubFieldInputList({ statement }: SubFieldInputListProps)
   const showEditIcon = statement.operationType === 'MOD';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div style={{ ...VIEWPORT_STYLE, display: 'flex', flexDirection: 'column', gap: 10 }}>
       {sortedFields.map((sf) => {
         const currentValue = statement.values[sf.mmlCode] ?? '';
         return (

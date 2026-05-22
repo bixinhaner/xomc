@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import type { CSSProperties } from 'react';
 import { Checkbox, Tag, Tooltip, Empty } from 'antd';
 import { EyeOutlined, FileTextOutlined, NumberOutlined } from '@ant-design/icons';
 type CheckboxValueType = string | number | boolean;
@@ -51,8 +52,22 @@ export default function SubFieldChecklist({ statement }: SubFieldChecklistProps)
     [statement.subFields],
   );
 
+  // 固定高度容器（spec：操作面板限制 path 区域 10 行可视高度，<10 行也保留空间，
+  // >10 行出现滚动条；每行约 38px = 行内 padding 4+4 + content ~24 + flex gap 6）。
+  const VIEWPORT_HEIGHT = 380;
+  const VIEWPORT_STYLE: CSSProperties = {
+    height: VIEWPORT_HEIGHT,
+    overflowY: 'auto',
+    border: '1px solid #f0f0f0',
+    borderRadius: 4,
+  };
+
   if (sortedFields.length === 0) {
-    return <Empty description={false} style={{ padding: 16 }} />;
+    return (
+      <div style={{ ...VIEWPORT_STYLE, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Empty description={false} />
+      </div>
+    );
   }
 
   const value: CheckboxValueType[] = statement.selectedSubFieldIds;
@@ -72,7 +87,7 @@ export default function SubFieldChecklist({ statement }: SubFieldChecklistProps)
 
   return (
     <Checkbox.Group value={value} onChange={handleChange} style={{ width: '100%' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ ...VIEWPORT_STYLE, display: 'flex', flexDirection: 'column', gap: 6, padding: 4 }}>
         {sortedFields.map((sf) => {
           const isReadOnly = sf.accessType === 'READ_ONLY';
           return (
