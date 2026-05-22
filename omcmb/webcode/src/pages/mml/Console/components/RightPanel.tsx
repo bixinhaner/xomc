@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { Tabs, Empty, Modal, message } from 'antd';
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
 import { useExecuteStatementsStructured } from '@core/hooks/api/useMmlConsole';
+import { useMmlTaskStream } from '@core/hooks/api/useMmlTaskStream';
 import { statementToStructured } from '@core/types/mmlConsole';
 import type { Statement } from '@core/types/mmlConsole';
 import type { MMLTask } from '@core/types/mml';
@@ -61,6 +62,16 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
   // 切换边界：activeStatement 由 CommandTree 加载并附带 subFields → 可做 structured 转换。
   const executeMutation = useExecuteStatementsStructured();
 
+  // T-0123-P4 收尾 (2026-05-22)：execute 后用 task.id 订阅 /events/stream 的
+  // mml_device_frame / mml_task_status / mml_task_completed 事件，把终端输出
+  // 接回来；da6c1c68 重构时这条路径被推到 P4 但从未落地。
+  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
+  const {
+    lines: terminalLines,
+    appendLine,
+    clear: clearTerminal,
+  } = useMmlTaskStream(currentTaskId);
+
   const activeStatement = useMemo(
     () => statements.find((s) => s.uid === activeStatementUid) ?? null,
     [statements, activeStatementUid],
@@ -99,13 +110,24 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
         deviceSns: selectedDeviceSns,
         executeType: 'immediate',
       });
+      // 接入 SSE：先切 currentTaskId（hook 会复位 lines）再种一条"已派发"行，
+      // 避免 task 创建瞬间到第一台设备完成之间终端是空白的体感。
+      setCurrentTaskId(task.id);
+      appendLine({
+        type: 'info',
+        text: t('mml.console.terminal.dispatched', {
+          taskId: task.id,
+          devices: String(selectedDeviceSns.length),
+        }),
+        timestamp: new Date().toLocaleTimeString(),
+      });
       message.success(t('mml.console.execute.success', { taskId: task.id }));
       onExecuted?.(task);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       message.error(t('mml.console.execute.failed', { message: msg }));
     }
-  }, [executeMutation, onExecuted, selectedDeviceSns, statements, t]);
+  }, [appendLine, executeMutation, onExecuted, selectedDeviceSns, statements, t]);
 
   const handleExecute = useCallback(() => {
     if (selectedDeviceSns.length === 0) {
@@ -169,7 +191,13 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
           Tabs 外。在 Tabs 内部时看起来"插在 tab 栏和 Control Panel 中间"；外置后
           它跨 Control / ParamPath 两个 tab 永远可见，更接近真终端的固定区域感。 */}
       <div style={{ height: 240, flexShrink: 0 }}>
-        <TerminalPanel lines={[]} />
+        <TerminalPanel
+          lines={terminalLines}
+          onClear={() => {
+            clearTerminal();
+            setCurrentTaskId(null);
+          }}
+        />
       </div>
       <Tabs
         activeKey={tab}

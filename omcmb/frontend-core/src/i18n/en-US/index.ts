@@ -4455,6 +4455,8 @@ const messages: Record<string, string> = {
   'mml.console.parseError.syntax':             'MML syntax error (statement #{index}): {reason}',
   'mml.console.parseError.unknownSubField':    'Unknown sub-field: {mmlCode}',
   'mml.console.execute.success':               'Execution task created (task_id: {taskId})',
+  // Terminal "dispatched" seed line: appended right after execute() resolves; further lines come from SSE mml_device_frame
+  'mml.console.terminal.dispatched':           'Task {taskId} dispatched to {devices} device(s), waiting for results...',
   'mml.console.execute.partial':               'Partial failure: {failed}/{total} devices failed',
   'mml.console.execute.failed':                'Execution failed: {message}',
   'mml.console.execute.noDevices':             'Please select at least one device',

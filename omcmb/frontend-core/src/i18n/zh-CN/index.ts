@@ -4482,6 +4482,8 @@ const messages: Record<string, string> = {
   'mml.console.execute.failed':                '执行失败：{message}',
   'mml.console.execute.noDevices':             '请选择至少一台设备',
   'mml.console.execute.noStatements':          '请至少添加一条命令',
+  // 终端"已派发"种子行：execute 成功后立即写入，下一条由 SSE mml_device_frame 推送
+  'mml.console.terminal.dispatched':           'Task {taskId} 已派发到 {devices} 台设备，等待执行结果...',
   'mml.console.subField.onReboot':             '需重启生效',
   'mml.console.subField.readOnly':             '只读',
   'mml.console.subField.readOnlyTip':          '只读字段（GetParameterValues 可查，SetParameterValues 不可改）',
