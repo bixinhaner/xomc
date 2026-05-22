@@ -1350,10 +1350,12 @@ func (s *SoftwareService) Subscribe(eventBus event.EventBus) error {
 		s.logger.Warn("subscribe device online", zap.Error(err))
 	}
 
-	// SetParameterValues response — SPV 触发的 LogCollect 类（如 FAULT_LOG_COLLECT）
-	// 失败拦截。成功路径保持 Uploading 等文件落地；fault → 立即标 fail。
-	_, err = eventBus.QueueSubscribe(event.SubjectCommandSetParamsResponse, "software-collect-setparams-resp", func(ctx context.Context, evt event.Event) error {
-		return s.executor.HandleSetParamsResponseForCollect(ctx, evt)
+	// SetParameterValues response — 覆盖两条 SPV 业务路径：
+	//   · LogCollect（FAULT_LOG_COLLECT）：fault → 立即 fail，success → 等文件落地
+	//   · Rollback（VERSION_ROLLBACK）：fault → 立即 fail，success → 等 reboot_complete
+	// 详见 executor.HandleSetParamsResponse 注释。
+	_, err = eventBus.QueueSubscribe(event.SubjectCommandSetParamsResponse, "software-setparams-resp", func(ctx context.Context, evt event.Event) error {
+		return s.executor.HandleSetParamsResponse(ctx, evt)
 	})
 	if err != nil {
 		s.logger.Warn("subscribe set_parameters response", zap.Error(err))

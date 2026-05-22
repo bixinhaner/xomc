@@ -726,15 +726,21 @@ func (e *UpgradeExecutor) ExecuteOneSetParamCollect(ctx context.Context, subTask
 		zap.String("upload_base_url", uploadBaseURL))
 }
 
-// HandleSetParamsResponseForCollect 处理 SetParameterValues 响应事件，专供 LogCollect
-// 类（FAULT_LOG_COLLECT 等通过 SPV 触发的日志采集）使用。
+// HandleSetParamsResponse 处理 SetParameterValues 响应事件。SPV 在 OMC 内有两条
+// 业务使用路径，按 parent.TaskType + sub_task.Status 分发：
 //
-//   - fault_code != 0 → 设备拒绝 SPV，立即 fail 子任务
-//   - fault_code == 0 → 设备接受了 SPV，保持 Uploading 状态等待文件实际落地
+//   - LogCollect / Uploading：FAULT_LOG_COLLECT 等 SPV 触发的日志采集
+//     · fault → fail，记 UPLOAD_FAULT
+//     · success → 保持 Uploading 等文件落地（OnLogFileLanded hook 推进）
 //
-// 注意：rollback 也走 SPV，但其 command_key 是 sub_task UUID 且 parent.TaskType=Rollback，
-// 这里通过 parent.TaskType==LogCollect 过滤，避免误吞 rollback 路径的响应。
-func (e *UpgradeExecutor) HandleSetParamsResponseForCollect(ctx context.Context, evt event.Event) error {
+//   - Rollback / Rebooting：基站版本回退（adapter 决定 4G/5G 路径与值）
+//     · fault → fail，记 UPLOAD_FAULT（避免 30 min 后才被 reaper 兜底）
+//     · success → 保持 Rebooting 等 reboot_complete 事件
+//
+// 历史教训：原版只服务 LogCollect 一条路径（带 parent.TaskType==LogCollect 过滤），
+// rollback 路径的 SPV Fault 拿不到回调，sub_task 在 Rebooting 状态卡 30 min 直到
+// reaper 兜底，UI 上"失败原因"也只显示模糊的"等 TC 超时"，丢失真实 CPE 错误。
+func (e *UpgradeExecutor) HandleSetParamsResponse(ctx context.Context, evt event.Event) error {
 	var payload struct {
 		DeviceSN   string `json:"device_sn"`
 		CommandKey string `json:"command_key"`
@@ -749,11 +755,8 @@ func (e *UpgradeExecutor) HandleSetParamsResponseForCollect(ctx context.Context,
 	if err != nil {
 		return nil
 	}
-	if subTask.Status != UpgradeUploading {
-		return nil
-	}
 	parent, err := e.taskRepo.GetByID(ctx, subTask.TaskID)
-	if err != nil || parent.TaskType != TaskTypeLogCollect {
+	if err != nil {
 		return nil
 	}
 
@@ -761,17 +764,45 @@ func (e *UpgradeExecutor) HandleSetParamsResponseForCollect(ctx context.Context,
 	// 兼容用 SOAP 1.1 <faultcode>Server.Internal</faultcode> 替代 <cwmp:FaultCode> 的厂商
 	// （如 baicells/FAP，回 "RPC handler failed: Empty parameter list"），ACS 解出 code=0
 	// 但 string 携带真实原因。任一非空都视为失败，把原因落到 sub_task.error_message。
-	if isCPEFault(payload.FaultCode, payload.FaultStr) {
-		e.failSubTask(ctx, subTask,
-			fmt.Sprintf("SetParameterValues rejected by device. FaultCode: %d, FaultString: %s",
-				payload.FaultCode, payload.FaultStr),
-			FailureUploadFault)
+	isFault := isCPEFault(payload.FaultCode, payload.FaultStr)
+
+	switch parent.TaskType {
+	case TaskTypeLogCollect:
+		if subTask.Status != UpgradeUploading {
+			return nil
+		}
+		if isFault {
+			e.failSubTask(ctx, subTask,
+				fmt.Sprintf("SetParameterValues rejected by device. FaultCode: %d, FaultString: %s",
+					payload.FaultCode, payload.FaultStr),
+				FailureUploadFault)
+			return nil
+		}
+		e.logger.Info("SPV accepted, waiting for log file upload",
+			zap.String("sub_task_id", subTask.ID.String()),
+			zap.String("device_sn", payload.DeviceSN))
+
+	case TaskTypeRollback:
+		// rollback 路径 RollbackOne 推送 SPV 后立刻把 sub_task 翻到 Rebooting；
+		// 这里只在该状态接受 fault 推进，避免重复处理或脏推送（reaper / 多副本场景）。
+		if subTask.Status != UpgradeRebooting {
+			return nil
+		}
+		if isFault {
+			e.failSubTask(ctx, subTask,
+				fmt.Sprintf("Rollback failed, device rejected SetParameterValues. FaultCode: %d, FaultString: %s",
+					payload.FaultCode, payload.FaultStr),
+				FailureUploadFault)
+			return nil
+		}
+		e.logger.Info("SPV accepted, waiting for device reboot",
+			zap.String("sub_task_id", subTask.ID.String()),
+			zap.String("device_sn", payload.DeviceSN))
+
+	default:
+		// 其它 TaskType（升级 / 配置备份等）不通过 SPV 单独触发，无需处理。
 		return nil
 	}
-
-	e.logger.Info("SPV accepted, waiting for log file upload",
-		zap.String("sub_task_id", subTask.ID.String()),
-		zap.String("device_sn", payload.DeviceSN))
 	return nil
 }
 
