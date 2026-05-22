@@ -1,0 +1,11 @@
+{
+  "tilejson": "2.0.0",
+  "name": "Zambia Offline Map",
+  "description": "赞比亚区域离线地图，包含 6-15 级瓦片",
+  "attribution": "© OpenStreetMap contributors",
+  "tiles": ["tiles/{z}/{x}/{y}.png"],
+  "minzoom": 6,
+  "maxzoom": 15,
+  "bounds": [22.0, -18.0, 34.0, -8.0],
+  "center": [28.221, -14.607, 6]
+}
