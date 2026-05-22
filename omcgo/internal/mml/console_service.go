@@ -31,7 +31,9 @@ type ConsoleService struct {
 	// （老测试以及 v1 部署路径保持原戉行为）。BuildFlatGroupTree 未装配时
 	// 返回明确错误，handler 映射为 503。
 	flatTreeRepo FlatGroupTreeRepository
-	logger       *zap.Logger
+	// searchRepo 是 Bundle C 新增的命令搜索仓储；nil 表示未装配（503）。
+	searchRepo SearchRepository
+	logger     *zap.Logger
 }
 
 // NewConsoleService 构造 ConsoleService。
@@ -61,6 +63,63 @@ func (s *ConsoleService) BuildGroupTree(ctx context.Context, rootCode, lang stri
 // 现有 ~18 个测试点 NewConsoleService 的签名。provider 装配时调用一次。
 func (s *ConsoleService) SetFlatTreeRepo(repo FlatGroupTreeRepository) {
 	s.flatTreeRepo = repo
+}
+
+// SetSearchRepo 装配 Bundle C 命令搜索仓储；理由同 SetFlatTreeRepo。
+func (s *ConsoleService) SetSearchRepo(repo SearchRepository) {
+	s.searchRepo = repo
+}
+
+// SearchCommandDTO 是 GET /mml/commands/search 响应单元（lang 派生 + 中文 i18n 解析）。
+type SearchCommandDTO struct {
+	CommandID     uuid.UUID `json:"command_id"`
+	CommandCode   string    `json:"command_code"`
+	LogicalCode   string    `json:"logical_code"`
+	OperationType string    `json:"operation_type"`
+	DisplayName   string    `json:"display_name"`
+	LogicalName   string    `json:"logical_name"`
+	GroupID       uuid.UUID `json:"group_id"`
+	GroupCode     string    `json:"group_code"`
+	GroupName     string    `json:"group_name"`
+	ChapterCode   string    `json:"chapter_code"`
+	MatchedPaths  []string  `json:"matched_paths"`
+	MatchReasons  []string  `json:"match_reasons"`
+}
+
+// ErrSearchNotConfigured handler 据此返 503（searchRepo 未装配时）。
+var ErrSearchNotConfigured = fmt.Errorf("search repo not configured")
+
+// SearchCommands 透传 SearchRepository.SearchCommands + lang 派生 display_name / group_name。
+func (s *ConsoleService) SearchCommands(ctx context.Context, query, lang string, limit int) ([]SearchCommandDTO, error) {
+	if s.searchRepo == nil {
+		return nil, ErrSearchNotConfigured
+	}
+	if lang == "" {
+		lang = "zh-CN"
+	}
+	rows, err := s.searchRepo.SearchCommands(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SearchCommandDTO, 0, len(rows))
+	for _, r := range rows {
+		logicalName := pickI18n(r.LogicalI18n, lang, "", "", r.LogicalCode)
+		out = append(out, SearchCommandDTO{
+			CommandID:     r.CommandID,
+			CommandCode:   r.CommandCode,
+			LogicalCode:   r.LogicalCode,
+			OperationType: r.OperationType,
+			DisplayName:   buildDisplayName(logicalName, r.OperationType, r.LogicalCode, lang),
+			LogicalName:   logicalName,
+			GroupID:       r.GroupID,
+			GroupCode:     r.GroupCode,
+			GroupName:     pickI18n(r.GroupNameI18n, lang, "", "", r.GroupCode),
+			ChapterCode:   r.ChapterCode,
+			MatchedPaths:  r.MatchedPaths,
+			MatchReasons:  r.MatchReasons,
+		})
+	}
+	return out, nil
 }
 
 // BuildFlatGroupTree 透传 FlatGroupTreeRepository.BuildFlatTree。未装配时返

@@ -770,6 +770,8 @@ func initMiscModules(c *Container) error {
 	// Task #4: 装配扁平命令树仓储（GET /mml/group-tree?format=flat）
 	// 依赖同一个 PgPool，与现有 GroupTreeRepository 只读同表不冲突。
 	mmlConsoleSvc.SetFlatTreeRepo(mml.NewPgFlatGroupTreeRepository(c.PgPool))
+	// Bundle C: 装配命令搜索仓储（GET /mml/commands/search）。
+	mmlConsoleSvc.SetSearchRepo(mml.NewPgSearchRepository(c.PgPool))
 	// R-8.5: 独立 CompatibilityService（不耦合 ConsoleService 签名 / 测试）。
 	// 直接走 devices LEFT JOIN products 反查 param_model_id，
 	// 绕过 ProductRegistry.MatchProductClass 全局正则（字典 product_class

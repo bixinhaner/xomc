@@ -28,6 +28,7 @@ import type {
   StructuredExecuteRequest,
   CommandCompatibility,
   FlatGroupTreeResponse,
+  SearchCommand,
 } from '../../types/mmlConsole';
 import type { MMLTask } from '../../types/mml';
 
@@ -103,6 +104,30 @@ export function useCommandCompatibility(
     staleTime: 5 * 60 * 1000,
     enabled: Boolean(productClass),
     select: (data) => new Set(data.unsupportedCommandIds ?? []),
+  });
+}
+
+/**
+ * Bundle C — 命令搜索（按 command_code / logical_name / path / description 联合 ILIKE）。
+ *
+ * 调用方应**先做 debounce 300ms** 再把 q 传进来（在 CommandTree 用 useDebounce
+ * 或类似 hook），避免每键击触发 RTT。
+ *
+ * enabled = q.trim() !== ''：空查询不触发请求；React Query 会保留上次结果，
+ * CommandTree 据此切换"搜索结果列表"和"完整树视图"。
+ * staleTime 30s — 命令字典低频变更，但用户连续搜索时应允许短时间复用结果。
+ */
+export function useSearchCommands(
+  q: string,
+  lang: string = 'zh-CN',
+  limit: number = 50,
+): ReturnType<typeof useQuery<SearchCommand[]>> {
+  const trimmed = q.trim();
+  return useQuery({
+    queryKey: ['mml', 'console', 'search-commands', trimmed, lang, limit],
+    queryFn: () => mmlApi.searchCommands(trimmed, lang, limit),
+    staleTime: 30 * 1000,
+    enabled: trimmed !== '',
   });
 }
 

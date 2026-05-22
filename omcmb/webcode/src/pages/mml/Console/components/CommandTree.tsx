@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import type { Key, ReactNode } from 'react';
 import { Input, Tree, Empty, Spin, message, Popconfirm, Tooltip, Tag } from 'antd';
 import {
@@ -15,7 +15,7 @@ import {
 import { AxiosError } from 'axios';
 import type { TreeDataNode } from 'antd';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
-import { useGroupTree, useCommandCompatibility } from '@core/hooks/api/useMmlConsole';
+import { useGroupTree, useCommandCompatibility, useSearchCommands } from '@core/hooks/api/useMmlConsole';
 import { useDeleteMMLTemplate } from '@core/hooks/api/useMML';
 import { mmlApi } from '@core/services/api/mmlApi';
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
@@ -197,22 +197,26 @@ function buildTreeData(nodes: GroupTreeNode[], decor: LeafDecor): TreeDataNode[]
   );
 }
 
-function collectMatches(
+/**
+ * 由后端搜索返回的命令 ID 集合反推树形 expandKeys（祖先链）+ matchedKeys。
+ *
+ * Bundle C — 取代原 collectMatches 客户端 displayName 过滤：现在搜索维度由
+ * 后端 ILIKE 联合 command_code / logical_name / standardPath / description 决定，
+ * 前端只需把后端返回的 commandId 集合映射到 antd Tree 的 keys。
+ */
+function buildMatchExpansion(
   nodes: GroupTreeNode[],
-  needle: string,
+  matchedCommandIds: Set<string>,
 ): { matchedKeys: Set<string>; expandKeys: string[] } {
   const matchedKeys = new Set<string>();
   const expandKeys: string[] = [];
-  const lower = needle.toLowerCase();
-  // 后端 wrapByChapter 后树形为：chapter → group → command（或老 catalog 的 group → command）。
-  // walk 沿 children 递归把 ancestor 路径（含 chapter 父节点）加进 expandKeys，
-  // 保证 antd Tree 展开命中命令的整条祖先链。
+  if (matchedCommandIds.size === 0) return { matchedKeys, expandKeys };
   const walk = (arr: GroupTreeNode[], ancestors: string[]) => {
     arr.forEach((g) => {
       const groupKey = `${GROUP_KEY_PREFIX}${g.id}`;
       const path = [...ancestors, groupKey];
       (g.commands ?? []).forEach((c) => {
-        if (c.displayName.toLowerCase().includes(lower)) {
+        if (matchedCommandIds.has(c.id)) {
           matchedKeys.add(`${CMD_KEY_PREFIX}${c.id}`);
           path.forEach((k) => {
             if (!expandKeys.includes(k)) expandKeys.push(k);
@@ -461,6 +465,15 @@ export default function CommandTree({ lang }: CommandTreeProps) {
   const customCommands = useMemo(() => customResp?.items ?? [], [customResp]);
 
   const [searchText, setSearchText] = useState('');
+  // Bundle C: debounce 300ms 后再发后端搜索，避免每键击一个 RTT
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchText.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchText]);
+  // 后端搜索（command_code / logical_name / path / description 联合 ILIKE）
+  const { data: searchResults = [] } = useSearchCommands(debouncedSearch, effectiveLang);
+
   const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
   const [autoExpand, setAutoExpand] = useState(true);
   // Customized 子树「+」点击后打开 AddTemplateModal；null = 关闭。
@@ -520,25 +533,30 @@ export default function CommandTree({ lang }: CommandTreeProps) {
     unsupportedTooltip,
   ]);
   const commandsById = useMemo(() => flattenCommandsById(tree), [tree]);
+  // Bundle C: matched 由后端搜索结果（commandId 集合）反推 expandKeys / matchedKeys
   const matched = useMemo(() => {
-    if (!searchText.trim()) return { matchedKeys: new Set<string>(), expandKeys: [] };
-    return collectMatches(tree, searchText.trim());
-  }, [searchText, tree]);
+    if (!debouncedSearch) return { matchedKeys: new Set<string>(), expandKeys: [] as string[] };
+    const ids = new Set(searchResults.map((r) => r.commandId));
+    return buildMatchExpansion(tree, ids);
+  }, [debouncedSearch, searchResults, tree]);
 
-  const onSearchChange = useCallback(
-    (value: string) => {
-      setSearchText(value);
-      if (!value.trim()) {
-        setExpandedKeys([]);
-        setAutoExpand(true);
-        return;
-      }
-      const { expandKeys } = collectMatches(tree, value.trim());
-      setExpandedKeys(expandKeys);
+  // 自动展开命中的祖先链；空查询时收起到根
+  useEffect(() => {
+    if (!debouncedSearch) {
+      setExpandedKeys([]);
+      setAutoExpand(true);
+      return;
+    }
+    if (matched.expandKeys.length > 0) {
+      setExpandedKeys(matched.expandKeys);
       setAutoExpand(false);
-    },
-    [tree],
-  );
+    }
+  }, [debouncedSearch, matched.expandKeys]);
+
+  const onSearchChange = useCallback((value: string) => {
+    setSearchText(value);
+    // debounced effect 触发后端搜索 + expand
+  }, []);
 
   const handleSelect = useCallback(
     async (selectedKeys: Key[]) => {

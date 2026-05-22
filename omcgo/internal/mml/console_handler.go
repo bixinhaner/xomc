@@ -3,6 +3,7 @@ package mml
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -78,6 +79,10 @@ func (h *ConsoleHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	mml := rg.Group("/mml")
 
 	mml.GET("/group-tree", h.GetGroupTree)
+	// Bundle C: 命令搜索（按 command_code / logical_name / standardPath / description 联合 ILIKE）。
+	// 静态段 "/commands/search" 必须在通配段 "/commands/:id/sub-fields" 之前注册 — 否则
+	// gin tree 会把 "search" 当作 :id 路径变量匹配后者，返回 400/404。
+	mml.GET("/commands/search", h.SearchCommands)
 	mml.GET("/commands/:id/sub-fields", h.GetCommandSubFields)
 	mml.POST("/render", h.PostRender)
 	mml.POST("/parse", h.PostParse)
@@ -167,6 +172,46 @@ func (h *ConsoleHandler) GetGroupTree(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"tree": tree})
+}
+
+// ============================================================
+// GET /api/v1/mml/commands/search?q=<keyword>&lang=<lang>&limit=<n>
+// Bundle C — 命令搜索（按 command_code / logical_name / standardPath / description）
+// ============================================================
+
+// SearchCommands 按关键字模糊匹配命令，复用 CommandTree 搜索 + AddTemplateModal 选 path 场景。
+//
+// 行为：
+//   - q 空 / 仅空白 → 返 200 空数组（不消耗服务端 CPU 做"全表 LIMIT 50"）
+//   - q 非空 → ILIKE %q% 联合 SELECT，按 (chapter, display_order, op_type, code) 排序
+//   - limit 缺省 50，硬上限 200（由 repo 兜底）
+//
+// 错误码：
+//   - 503 — search service 未配置（启动期 SearchRepo 为 nil；理论上不应发生）
+//   - 500 — DB 查询错
+func (h *ConsoleHandler) SearchCommands(c *gin.Context) {
+	q := strings.TrimSpace(c.Query("q"))
+	lang := normalizeLang(c.Query("lang"))
+	limit := 50
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+	items, err := h.svc.SearchCommands(c.Request.Context(), q, lang, limit)
+	if err != nil {
+		if errors.Is(err, ErrSearchNotConfigured) {
+			response.Fail(c, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		h.logger.Error("search commands", zap.Error(err), zap.String("q", q))
+		response.Fail(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if items == nil {
+		items = []SearchCommandDTO{}
+	}
+	response.OK(c, gin.H{"items": items})
 }
 
 // ============================================================

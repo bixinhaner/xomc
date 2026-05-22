@@ -6,9 +6,11 @@ import type {
   BackendGroupTreeNode,
   BackendSubField,
   BackendParseError,
+  BackendSearchCommand,
   GroupTreeNode,
   GroupTreeCommand,
   SubFieldDef,
+  SearchCommand,
   Statement,
   ParseError,
   RenderRequest,
@@ -900,6 +902,49 @@ export const mmlApi = {
     );
     const arr = Array.isArray(data) ? data : (data?.sub_fields ?? []);
     return arr.map(mapSubField);
+  },
+
+  /**
+   * Bundle C: GET /mml/commands/search?q=&lang=&limit= — 命令搜索。
+   *
+   * 后端 ILIKE 联合搜索 command_code / logical_name / standardPath / description。
+   * q 空 → 返空数组（后端不消耗 CPU 做"全表 LIMIT 50"）。
+   * 调用方应做 300ms debounce 避免每键击都触发请求。
+   */
+  async searchCommands(
+    q: string,
+    lang: string = 'zh-CN',
+    limit: number = 50,
+  ): Promise<SearchCommand[]> {
+    const trimmed = q.trim();
+    if (!trimmed) return [];
+    const { data } = await http.get<{ items: BackendSearchCommand[] } | BackendSearchCommand[]>(
+      '/mml/commands/search',
+      { params: { q: trimmed, lang, limit } },
+    );
+    const arr = Array.isArray(data) ? data : (data?.items ?? []);
+    // axios 拦截器已 snake → camel；matched_paths / match_reasons 是 string[]，
+    // null 兜底成空数组让调用端不必再判空。
+    return arr.map((r) => {
+      const item = r as unknown as Partial<SearchCommand> & {
+        matched_paths?: string[] | null;
+        match_reasons?: string[] | null;
+      };
+      return {
+        commandId: item.commandId ?? '',
+        commandCode: item.commandCode ?? '',
+        logicalCode: item.logicalCode ?? '',
+        operationType: item.operationType ?? '',
+        displayName: item.displayName ?? '',
+        logicalName: item.logicalName ?? '',
+        groupId: item.groupId ?? '',
+        groupCode: item.groupCode ?? '',
+        groupName: item.groupName ?? '',
+        chapterCode: item.chapterCode ?? '',
+        matchedPaths: item.matchedPaths ?? item.matched_paths ?? [],
+        matchReasons: item.matchReasons ?? item.match_reasons ?? [],
+      };
+    });
   },
 
   /**

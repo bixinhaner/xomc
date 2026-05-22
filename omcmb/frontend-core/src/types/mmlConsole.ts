@@ -239,6 +239,41 @@ export interface CommandCompatibility {
 }
 
 /**
+ * Bundle C — 命令搜索后端响应单元。
+ * 对应 GET /api/v1/mml/commands/search?q=...
+ */
+export interface BackendSearchCommand {
+  command_id: string;
+  command_code: string;
+  logical_code: string;
+  operation_type: string;
+  display_name: string;
+  logical_name: string;
+  group_id: string;
+  group_code: string;
+  group_name: string;
+  chapter_code: string;
+  matched_paths: string[] | null;
+  match_reasons: string[] | null;
+}
+
+/** 前端 camelCase 视图。axios 拦截器自动转换；本接口与 BackendSearchCommand 1:1。 */
+export interface SearchCommand {
+  commandId: string;
+  commandCode: string;
+  logicalCode: string;
+  operationType: string;
+  displayName: string;
+  logicalName: string;
+  groupId: string;
+  groupCode: string;
+  groupName: string;
+  chapterCode: string;
+  matchedPaths: string[];
+  matchReasons: string[];
+}
+
+/**
  * Console 中单条 statement 的客户端状态。
  *
  * 注：uid 是客户端生成（crypto.randomUUID），用于 React key 与 store 内部
