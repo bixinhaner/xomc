@@ -13,11 +13,29 @@ import (
 )
 
 // PMFileContent holds the parsed content of a PM XML file.
+//
+// T-0164-P4 / G4 加 FileBeginTime / FileEndTime / IngestTime 三时间字段：
+//   - FileBeginTime — 基站采集窗口起点（fileHeader/measCollec/@beginTime，基站时钟）
+//   - FileEndTime   — 基站采集窗口止点（fileFooter/measCollec/@endTime，基站时钟）
+//   - IngestTime    — OMC 入库时刻（Parse 完成时 time.Now()，OMC 时钟）
+//
+// 用途：上报延迟监控、时钟漂移排查、补传识别、唯一性维度扩展。
+// 旧字段 CollectTime 沿用 granPeriod.endTime 作为兼容（指向 measInfo 的窗口止点）。
+//
+// 缺失场景（fallback）：
+//   - 无 fileHeader/measCollec/@beginTime → FileBeginTime = FileEndTime - granPeriod.duration（间接推算）
+//   - 无 fileFooter/measCollec/@endTime   → FileEndTime = granPeriod.endTime（measInfo 级窗口止点）
+//   - 两段都无                            → FileBeginTime / FileEndTime 均为 zero time.Time{}（消费方按 zero 判定）
+//
+// G3 合表为 pm_metrics 后，三字段将写入新表 start_time / end_time / ingest_time 列（NOT NULL）。
 type PMFileContent struct {
-	DeviceSN    string
-	CollectTime time.Time
-	Granularity int // minutes
-	Counters    []model.PMCounter
+	DeviceSN      string
+	CollectTime   time.Time         // 兼容：沿用 granPeriod.endTime
+	FileBeginTime time.Time         // G4: fileHeader/measCollec/@beginTime
+	FileEndTime   time.Time         // G4: fileFooter/measCollec/@endTime
+	IngestTime    time.Time         // G4: Parse 完成时刻（OMC 时钟）
+	Granularity   int               // minutes
+	Counters      []model.PMCounter
 }
 
 // PMXMLParser parses 3GPP 32.435 format PM XML files using streaming XML decoder.
@@ -61,6 +79,24 @@ type xmlManagedElement struct {
 	SwVersion string `xml:"swVersion,attr"`
 }
 
+// xmlFileHeaderSection 解析 <fileHeader><measCollec beginTime="..."/></fileHeader> 段。
+// 老格式 PM 文件可能 fileHeader 仅含 dnPrefix/vendorName 等属性，无 measCollec 子元素 —
+// 此时 BeginTime 为空字符串，调用方按 zero time 处理。
+type xmlFileHeaderSection struct {
+	MeasCollec xmlCollecAttrs `xml:"measCollec"`
+}
+
+// xmlFileFooterSection 解析 <fileFooter><measCollec endTime="..."/></fileFooter> 段。
+type xmlFileFooterSection struct {
+	MeasCollec xmlCollecAttrs `xml:"measCollec"`
+}
+
+// xmlCollecAttrs 是 fileHeader/measCollec 与 fileFooter/measCollec 共用的属性结构。
+type xmlCollecAttrs struct {
+	BeginTime string `xml:"beginTime,attr"`
+	EndTime   string `xml:"endTime,attr"`
+}
+
 // Parse parses a PM XML file from the given reader.
 func (p *PMXMLParser) Parse(r io.Reader, deviceID uuid.UUID) (*PMFileContent, error) {
 	decoder := xml.NewDecoder(r)
@@ -83,6 +119,30 @@ func (p *PMXMLParser) Parse(r io.Reader, deviceID uuid.UUID) (*PMFileContent, er
 		}
 
 		switch se.Name.Local {
+		case "fileHeader":
+			// G4: 读 fileHeader/measCollec/@beginTime。老格式无 measCollec 子元素时 BeginTime 为空，FileBeginTime 保持 zero。
+			var fh xmlFileHeaderSection
+			if err := decoder.DecodeElement(&fh, &se); err != nil {
+				return nil, fmt.Errorf("decode fileHeader: %w", err)
+			}
+			if fh.MeasCollec.BeginTime != "" {
+				if t, perr := time.Parse(time.RFC3339, fh.MeasCollec.BeginTime); perr == nil {
+					content.FileBeginTime = t
+				}
+			}
+
+		case "fileFooter":
+			// G4: 读 fileFooter/measCollec/@endTime。老格式无此段时 FileEndTime 保持 zero。
+			var ff xmlFileFooterSection
+			if err := decoder.DecodeElement(&ff, &se); err != nil {
+				return nil, fmt.Errorf("decode fileFooter: %w", err)
+			}
+			if ff.MeasCollec.EndTime != "" {
+				if t, perr := time.Parse(time.RFC3339, ff.MeasCollec.EndTime); perr == nil {
+					content.FileEndTime = t
+				}
+			}
+
 		case "managedElement":
 			var me xmlManagedElement
 			if err := decoder.DecodeElement(&me, &se); err != nil {
@@ -150,6 +210,19 @@ func (p *PMXMLParser) Parse(r io.Reader, deviceID uuid.UUID) (*PMFileContent, er
 	if len(content.Counters) == 0 {
 		return nil, fmt.Errorf("no counters found in pm xml")
 	}
+
+	// G4: fallback 推断 + 设 IngestTime。
+	// 如果 fileFooter/measCollec/@endTime 缺失，FileEndTime 走 collectTime（measInfo 级窗口止点）兜底。
+	// 如果 fileHeader/measCollec/@beginTime 缺失，FileBeginTime 走 collectTime - granularity 兜底。
+	// 单 measInfo 文件这两个兜底足够；多 measInfo 文件可能丢失精度（首个 measInfo 的 collectTime），
+	// 调用方需自行评估是否接受。
+	if content.FileEndTime.IsZero() && !content.CollectTime.IsZero() {
+		content.FileEndTime = content.CollectTime
+	}
+	if content.FileBeginTime.IsZero() && !content.FileEndTime.IsZero() && content.Granularity > 0 {
+		content.FileBeginTime = content.FileEndTime.Add(-time.Duration(content.Granularity) * time.Minute)
+	}
+	content.IngestTime = time.Now()
 
 	return content, nil
 }
