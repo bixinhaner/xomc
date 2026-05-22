@@ -235,38 +235,74 @@ fi
 ln -sfn "$RELEASE_DIR" "$OMC_ROOT/current"
 log "current → $RELEASE_DIR"
 
+# 检查一组镜像是否全部已在本地
+# 用法：images_exist IMAGE1 IMAGE2 ...
+# 返回：0=全部存在  1=有缺失
+images_exist() {
+  local img
+  for img in "$@"; do
+    [ -z "$img" ] && continue
+    if ! docker image inspect "$img" >/dev/null 2>&1; then
+      return 1
+    fi
+  done
+  return 0
+}
+
 # =============================================================================
 # Step 4. load 镜像（基础设施 + 监控 + 业务）
 # =============================================================================
 sep "4/9 load 镜像"
 
+# 提前加载 .env 获取镜像名（IMAGE_* 变量），供 images_exist 判定使用
+ENV_FILE="$OMC_ROOT/current/deploy/.env"
+if [ -f "$ENV_FILE" ]; then
+  set -a; source "$ENV_FILE"; set +a
+fi
+
 if [ "$SKIP_INFRA" = 0 ]; then
-  log "load 基础设施 + 监控镜像（$INFRA_DIR/images/）"
-  for tar in "$INFRA_DIR/images"/*.tar; do
-    [ -f "$tar" ] || continue
-    log "  · docker load < $(basename "$tar")"
-    docker load -i "$tar"
-  done
+  INFRA_IMAGES=("$IMAGE_POSTGRES" "$IMAGE_REDIS" "$IMAGE_NATS" "$IMAGE_MINIO" "${IMAGE_NGINX:-}")
+  MON_IMAGES=("${IMAGE_PROMETHEUS:-}" "${IMAGE_ALERTMANAGER:-}" "${IMAGE_GRAFANA:-}" "${IMAGE_LOKI:-}" "${IMAGE_TEMPO:-}" "${IMAGE_OTELCOL:-}" "${IMAGE_NATS_EXPORTER:-}")
+
+  if images_exist "${INFRA_IMAGES[@]}" "${MON_IMAGES[@]}"; then
+    log "基础设施 + 监控镜像已存在，跳过 load，重启容器"
+    $COMPOSE -p "$COMPOSE_PROJECT" restart postgres redis nats minio 2>/dev/null || true
+  else
+    log "load 基础设施 + 监控镜像（$INFRA_DIR/images/）"
+    for tar in "$INFRA_DIR/images"/*.tar; do
+      [ -f "$tar" ] || continue
+      log "  · docker load < $(basename "$tar")"
+      docker load -i "$tar"
+    done
+  fi
 else
   log "--skip-infra：跳过基础设施 / 监控镜像 load"
 fi
 
-log "load 业务镜像（$RELEASE_DIR/images/）"
-biz_loaded=0
-for tar in "$RELEASE_DIR/images"/*.tar; do
-  [ -f "$tar" ] || continue
-  log "  · docker load < $(basename "$tar")"
-  docker load -i "$tar"
+BIZ_IMAGES=("$IMAGE_APP" "$IMAGE_ACS" "$IMAGE_WORKER" "$IMAGE_WEB")
+
+if images_exist "${BIZ_IMAGES[@]}"; then
+  log "业务镜像已存在，跳过 load，重启业务容器"
+  $COMPOSE -p "$COMPOSE_PROJECT" restart app acs worker web 2>/dev/null || true
   biz_loaded=1
-done
-[ "$biz_loaded" = 1 ] || die "$RELEASE_DIR/images/ 下无业务镜像 tar，无法继续" 1
+else
+  log "load 业务镜像（$RELEASE_DIR/images/）"
+  biz_loaded=0
+  for tar in "$RELEASE_DIR/images"/*.tar; do
+    [ -f "$tar" ] || continue
+    log "  · docker load < $(basename "$tar")"
+    docker load -i "$tar"
+    biz_loaded=1
+  done
+  [ "$biz_loaded" = 1 ] || die "$RELEASE_DIR/images/ 下无业务镜像 tar，无法继续" 1
+fi
 
 # =============================================================================
 # Step 5. 默认口令检查（PostgreSQL / MinIO / Grafana）
 # =============================================================================
 sep "5/9 默认口令安全检查"
 
-ENV_FILE="$OMC_ROOT/current/deploy/.env"
+# ENV_FILE 已在 Step 4 定义并 source，这里仅做存在性兜底
 [ -f "$ENV_FILE" ] || die "缺 $ENV_FILE（由 build-release.sh 生成）" 1
 
 if grep -qE '^(POSTGRES_PASSWORD=omcgo123|MINIO_ROOT_PASSWORD=minioadmin|GRAFANA_ADMIN_PASSWORD=admin)$' "$ENV_FILE"; then

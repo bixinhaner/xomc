@@ -46,14 +46,19 @@ scan_rows() {
     local bt links="" f bn sz
     bt="$(grep -E '^build_time=' "$rel" | cut -d= -f2- || true)"
     # 仅显示 amd64 包（release 工具链 amd64-only；历史 *-arm64.tar.* 物理保留但不进列表）
+    # RELEASE.txt 仅作为构建系统内部元数据，不进下载列表
     for f in "$d"omc-*-amd64.tar.*; do
       [ -f "$f" ] || continue
       case "$f" in *.sha256) continue ;; esac
       bn="$(basename "$f")"
       sz="$(du -h "$f" | cut -f1)"
-      links="${links}<a href=\"${kind}/${v}/${bn}\">${bn}</a> <span class=\"sz\">(${sz})</span><br>"
+      links="${links}<a href=\"${kind}/${v}/${bn}\">${bn}</a> <span class=\"sz\">(${sz})</span>"
+      if [ -f "${f}.sha256" ]; then
+        links="${links} <a class=\"sha\" href=\"${kind}/${v}/${bn}.sha256\">[SHA256]</a>"
+      fi
+      links="${links}<br>"
     done
-    links="${links}<a href=\"${kind}/${v}/RELEASE.txt\">RELEASE.txt</a>"
+    links="${links%<br>}"
     if [ "$kind" = project ]; then
       local pv ch
       pv="$(grep -E '^project_version=' "$rel" | cut -d= -f2- || true)"
@@ -98,6 +103,8 @@ th,td{border:1px solid #e5e7eb;padding:.55rem .75rem;text-align:left;font-size:.
 th{background:#f0f2f5;font-weight:600}
 a{color:#1668dc;text-decoration:none}a:hover{text-decoration:underline}
 .sz{color:#9ca3af;font-size:.8rem}
+a.sha{color:#6b7280;font-size:.75rem;font-family:ui-monospace,Menlo,monospace;margin-left:.25rem}
+a.sha:hover{color:#1668dc}
 .ch{display:inline-block;padding:.05rem .45rem;border-radius:3px;font-size:.78rem;font-weight:600}
 .ch-test{background:#fff7e6;color:#d46b08}
 .ch-release{background:#f6ffed;color:#389e0d}
@@ -189,13 +196,31 @@ sudo bash setup-mirrors.sh --remove                 # 全部取消，回归官�
 每项 <code>official</code> = 不设置（走该工具官方源）。
 </p>
 
-<h2>🚚 5. 一键部署 OMC（推荐）</h2>
+<h2>🚚 5. 一键部署 OMC</h2>
+<p class="lead">所有场景都使用 <code>deploy.sh</code>，脚本会自动检测已有镜像并智能跳过重复加载。</p>
+
+<h3>场景 A：首次部署（全新服务器）</h3>
 <pre>cd /opt/omc/releases/omc-&lt;test|release&gt;-&lt;版本&gt;-&lt;架构&gt;
-sudo bash deploy/deploy.sh                          # 全套首次部署
-sudo bash deploy/deploy.sh --skip-infra             # 日常升级（基础设施已装）
-sudo bash deploy/deploy.sh --check-only             # 仅检查环境，不动手
-sudo bash deploy/deploy.sh -h                       # 查看所有参数</pre>
-<p class="tip">deploy.sh 自动：环境检查 → 旧 systemd 单元自动迁移 → 建立目录布局 → load 镜像（基础设施 + 监控 + 业务） → 默认口令检查 → 启动 infra 容器 → 等就绪 → migrate（容器） → seed（容器） → docker compose 一次 up 全栈（infra + app + web + monitoring） → 健康检查。<b>全 docker compose 部署，宿主机不再放业务二进制 / systemd 单元。</b></p>
+sudo bash deploy/deploy.sh</pre>
+<p class="lead">全量执行：load 所有镜像 → 建目录 → 启动基础设施 → migrate/seed → 启动全栈。</p>
+
+<h3>场景 B：升级业务版本（最常用）</h3>
+<pre>cd /opt/omc/releases/omc-&lt;test|release&gt;-&lt;新版本&gt;-&lt;架构&gt;
+sudo bash deploy/deploy.sh --skip-infra</pre>
+<p class="lead">跳过基础设施镜像加载，仅加载新业务镜像 → 执行新迁移 → 重建业务容器（app/acs/worker/web），基础设施容器保持运行不受影响。</p>
+
+<h3>场景 C：重复部署同版本（修复/重启）</h3>
+<pre>cd /opt/omc/releases/omc-&lt;test|release&gt;-&lt;当前版本&gt;-&lt;架构&gt;
+sudo bash deploy/deploy.sh</pre>
+<p class="lead">脚本检测到所有镜像已存在 → 自动跳过 load → 重启容器 → 重跑 migrate（幂等）→ 健康检查。适用于服务异常需要完整重启的场景。</p>
+
+<h3>其他参数</h3>
+<pre>sudo bash deploy/deploy.sh --check-only             # 仅检查环境，不动手
+sudo bash deploy/deploy.sh --skip-migrate            # 不跑 migrate / seed
+sudo bash deploy/deploy.sh --skip-monitoring         # 不起监控栈
+sudo bash deploy/deploy.sh -h                        # 查看所有参数</pre>
+
+<p class="tip">deploy.sh 自动：环境检查 → 目录布局 → 智能 load 镜像（已有则跳过并重启）→ 默认口令检查 → 启动 infra → 等就绪 → migrate → seed → <code>docker compose up -d</code> 全栈 → 健康检查。<b>全 docker compose 部署，宿主机不再放业务二进制。</b></p>
 <div class="danger">⚠️ 生产环境首次部署前请编辑 <code>/opt/omc/current/deploy/.env</code> 与 <code>/opt/omc/etc/*.prod.yaml</code>，改 <b>PostgreSQL / MinIO / Grafana / JWT</b> 默认口令为强口令。</div>
 
 <h2>✅ 6. 验证部署</h2>
