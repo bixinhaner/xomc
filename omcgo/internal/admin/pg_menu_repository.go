@@ -306,13 +306,16 @@ func (r *PgMenuRepository) GetTree(ctx context.Context, status *MenuStatus) ([]M
 	return r.buildTree(menus), nil
 }
 
-// GetAllActive 返回全部 status=MenuStatusNormal 的菜单（含 directory/menu/button），
+// GetAllActive 返回全部 status=MenuStatusNormal 且 show_status='show' 的菜单（含 directory/menu/button），
 // 仅供超管旁路使用（user.source='builtIn'）。
 // 参 docs/prd/system/menu-dynamic-loading.md §4.2.2 / §设计原则 #4。
 func (r *PgMenuRepository) GetAllActive(ctx context.Context) ([]Menu, error) {
 	sql, args, err := storage.Psql.Select(menuColumns...).
 		From("menus").
-		Where(sq.Eq{"status": MenuStatusNormal}).
+		Where(sq.And{
+			sq.Eq{"status": MenuStatusNormal},
+			sq.Eq{"show_status": MenuShow},
+		}).
 		OrderBy("parent_id NULLS FIRST, sort_order ASC").
 		ToSql()
 	if err != nil {
@@ -342,7 +345,11 @@ func (r *PgMenuRepository) GetByRole(ctx context.Context, roleID uuid.UUID) ([]M
 		"m.created_by", "m.created_at", "m.updated_by", "m.updated_at").
 		From("menus m").
 		Join("role_menus rm ON m.id = rm.menu_id").
-		Where(sq.Eq{"rm.role_id": roleID}).
+		Where(sq.And{
+			sq.Eq{"rm.role_id": roleID},
+			sq.Eq{"m.status": MenuStatusNormal},
+			sq.Eq{"m.show_status": MenuShow},
+		}).
 		OrderBy("m.sort_order ASC").
 		ToSql()
 	if err != nil {
@@ -381,6 +388,7 @@ func (r *PgMenuRepository) GetByUser(ctx context.Context, userID uuid.UUID) ([]M
 		Where(sq.And{
 			sq.Eq{"ur.user_id": userID},
 			sq.Eq{"m.status": MenuStatusNormal},
+			sq.Eq{"m.show_status": MenuShow},
 		}).
 		OrderBy("m.sort_order ASC").
 		ToSql()

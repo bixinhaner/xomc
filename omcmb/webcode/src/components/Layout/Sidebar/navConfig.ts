@@ -123,12 +123,12 @@ export const NAV_CONFIG: NavConfig = [
     label: 'nav.topology',
     iconName: 'GlobalOutlined',
     children: [
-      // { key: 'topo-gis',      label: 'nav.topology.gisMap',    path: '/topology/gis-map' },      // 隐藏拓扑图
-      { key: 'topo-canvas',   label: 'nav.topology.canvas',    path: '/topology/canvas' },
+      { key: 'topo-gis',      label: 'nav.topology.gisMap',    path: '/topology/gis-map' },      // GIS地图
+      // { key: 'topo-canvas',   label: 'nav.topology.canvas',    path: '/topology/canvas' },      // 隐藏拓扑图
       // { key: 'topo-domain',   label: 'nav.topology.domain',    path: '/topology/domain' },      // 隐藏域管理
       // { key: 'topo-site',     label: 'nav.topology.site',      path: '/topology/site' },        // 隐藏站点管理
-      // { key: 'topo-settings', label: 'nav.topology.settings',  path: '/topology/settings' },    // 隐藏拓扑设置
-      // { key: 'topo-legend',   label: 'nav.topology.legend',    path: '/topology/legend' },      // 隐藏图例管理
+      { key: 'topo-settings', label: 'nav.topology.settings',  path: '/topology/settings' },    // 拓扑设置
+      { key: 'topo-legend',   label: 'nav.topology.legend',    path: '/topology/legend' },      // 图例管理
     ],
   },
   {
