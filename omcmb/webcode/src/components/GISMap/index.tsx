@@ -5,7 +5,9 @@
  */
 
 import React, { useState, useEffect, useMemo, useCallback, forwardRef, useImperativeHandle } from 'react';
-import { Spin } from 'antd';
+import { Spin, Alert } from 'antd';
+import { LoadingOutlined, InfoCircleOutlined } from '@ant-design/icons';
+import { useIntl } from 'react-intl';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import type { GISMapProps, MapDevice, MapViewport, MapStats } from '@core/types/map';
 import { MAP_CONFIG } from './constants';
@@ -45,11 +47,13 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   className,
   style,
 }, ref) => {
+  const intl = useIntl();
   const token = useThemeToken();
   const [hoveredDevice, setHoveredDevice] = useState<MapDevice | null>(null);
   const [popupPosition, setPopupPosition] = useState<{ x: number; y: number } | null>(null);
   const [, setHighlightedId] = useState<string | null>(null);
   const [viewport, setViewport] = useState<MapViewport | null>(null);
+  const [showMetadataTip, setShowMetadataTip] = useState(false);
 
   // 使用 OpenLayers Hook
   const {
@@ -99,6 +103,10 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   useEffect(() => {
     if (metadata) {
       console.log('[GISMap] Metadata loaded:', metadata.region, metadata.bounds);
+      // 显示短暂的元数据加载提示
+      setShowMetadataTip(true);
+      const timer = setTimeout(() => setShowMetadataTip(false), 3000);
+      return () => clearTimeout(timer);
     }
   }, [metadata]);
 
@@ -201,6 +209,34 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     zIndex: 1000,
   };
 
+  // 加载提示文本
+  const getLoadingText = () => {
+    if (metadataLoading) {
+      return intl.formatMessage({ id: 'map.loadingConfig' });
+    }
+    return intl.formatMessage({ id: 'map.initializing' });
+  };
+
+  // 元数据信息提示
+  const metadataAlert = useMemo(() => {
+    if (!metadata || !showMetadataTip) return null;
+    return {
+      message: intl.formatMessage(
+        { id: 'map.loaded' },
+        { name: metadata.name, region: metadata.region }
+      ),
+      description: intl.formatMessage(
+        { id: 'map.metadata' },
+        {
+          min: metadata.zoom.min,
+          max: metadata.zoom.max,
+          lon: metadata.center.lon,
+          lat: metadata.center.lat
+        }
+      ),
+    };
+  }, [metadata, showMetadataTip, intl]);
+
   return (
     <div
       style={containerStyle}
@@ -212,7 +248,33 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
       {/* 加载状态 */}
       {!isReady && (
         <div style={loadingStyle}>
-          <Spin size="large" />
+          <Spin size="large" indicator={<LoadingOutlined spin />} />
+          <div style={{ marginTop: 16, color: token.colorTextSecondary }}>
+            {getLoadingText()}
+          </div>
+        </div>
+      )}
+
+      {/* 元数据加载提示 */}
+      {isReady && metadataAlert && (
+        <div style={{
+          position: 'absolute',
+          top: 16,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 1000,
+          maxWidth: '80%',
+        }}>
+          <Alert
+            message={metadataAlert.message}
+            description={metadataAlert.description}
+            type="info"
+            icon={<InfoCircleOutlined />}
+            showIcon
+            closable
+            onClose={() => setShowMetadataTip(false)}
+            style={{ fontSize: 12 }}
+          />
         </div>
       )}
 

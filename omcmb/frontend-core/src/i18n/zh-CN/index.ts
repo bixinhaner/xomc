@@ -254,6 +254,10 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   'nav.topology.gisMap':   'GIS地图',
   'nav.topology.canvas':   '拓扑图',
+  'map.loadingConfig':     '正在加载地图配置...',
+  'map.initializing':      '正在初始化地图...',
+  'map.loaded':            '{name} ({region})',
+  'map.metadata':          '缩放级别: {min}-{max} | 中心点: [{lon}, {lat}]',
   'nav.topology.domain':   '域管理',
   'nav.topology.site':     '站点管理',
   'nav.topology.settings': '拓扑设置',

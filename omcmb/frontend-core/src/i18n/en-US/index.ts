@@ -253,6 +253,10 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   'nav.topology.gisMap':   'GIS Map',
   'nav.topology.canvas':   'Topology Canvas',
+  'map.loadingConfig':     'Loading map configuration...',
+  'map.initializing':      'Initializing map...',
+  'map.loaded':            '{name} ({region})',
+  'map.metadata':          'Zoom: {min}-{max} | Center: [{lon}, {lat}]',
   'nav.topology.domain':   'Domain Management',
   'nav.topology.site':     'Site Management',
   'nav.topology.settings': 'Topology Settings',
