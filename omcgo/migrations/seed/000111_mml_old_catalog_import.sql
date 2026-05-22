@@ -23,9 +23,9 @@ INSERT INTO mml_param_versions (version_code, version_name, description, is_acti
 ON CONFLICT (version_code) DO NOTHING;
 
 -- ============================================================
--- 1. mml_param_groups 业务大类（一级，90 行）
+-- 1. mml_command_groups 业务大类（一级，90 行）
 -- ============================================================
-INSERT INTO mml_param_groups (id, group_code, group_name_zh, group_name_en, name_i18n, path, param_version, display_order, is_active, source, catalog_protected) VALUES
+INSERT INTO mml_command_groups (id, group_code, group_name_zh, group_name_en, name_i18n, path, param_version, display_order, is_active, source, catalog_protected) VALUES
     ('ae9ff25a-fe8a-eb1c-baf0-8adc4c7c39a2'::uuid, 'cat_b6f86d3938d2', '设备信息', '设备信息', '{"zh-CN": "设备信息", "en-US": "设备信息"}'::jsonb, 'cat_b6f86d3938d2'::ltree, 'STANDARD', 0, true, 'standard', true),
     ('af903b08-0bfc-65f0-2c83-112e97684c83'::uuid, 'cat_0cbda6b52442', '网络', '网络', '{"zh-CN": "网络", "en-US": "网络"}'::jsonb, 'cat_0cbda6b52442'::ltree, 'STANDARD', 1, true, 'standard', true),
     ('a519305c-c568-dfaf-746b-3090d588eb5e'::uuid, 'cat_e88ab5ba616a', '同步', '同步', '{"zh-CN": "同步", "en-US": "同步"}'::jsonb, 'cat_e88ab5ba616a'::ltree, 'STANDARD', 2, true, 'standard', true),
@@ -119,9 +119,9 @@ INSERT INTO mml_param_groups (id, group_code, group_name_zh, group_name_en, name
 ON CONFLICT (param_version, group_code) DO NOTHING;
 
 -- ============================================================
--- 2. mml_param_groups 命令分组（二级，383 行）
+-- 2. mml_command_groups 命令分组（二级，383 行）
 -- ============================================================
-INSERT INTO mml_param_groups (id, group_code, group_name_zh, group_name_en, name_i18n, path, param_version, display_order, is_active, source, catalog_protected) VALUES
+INSERT INTO mml_command_groups (id, group_code, group_name_zh, group_name_en, name_i18n, path, param_version, display_order, is_active, source, catalog_protected) VALUES
     ('a7ef3c67-0052-d124-eb80-ac1139ec0bb4'::uuid, 'kw_memory_usage', '内存使用', 'Memory usage', '{"zh-CN": "内存使用", "en-US": "Memory usage"}'::jsonb, 'cat_b6f86d3938d2.kw_memory_usage'::ltree, 'STANDARD', 1, true, 'standard', true),
     ('a24d2989-7873-1872-2b27-e8d8e4b49fef'::uuid, 'kw_cpu_usage', 'CPU使用', 'CPU Usage', '{"zh-CN": "CPU使用", "en-US": "CPU Usage"}'::jsonb, 'cat_b6f86d3938d2.kw_cpu_usage'::ltree, 'STANDARD', 1, true, 'standard', true),
     ('a41c895d-c935-bd36-2e01-72c8f480a5bb'::uuid, 'kw_wan_check', 'WAN口检测参数', 'WAN Check Parameter', '{"zh-CN": "WAN口检测参数", "en-US": "WAN Check Parameter"}'::jsonb, 'cat_0cbda6b52442.kw_wan_check'::ltree, 'STANDARD', 1, true, 'standard', true),
@@ -26566,4 +26566,4 @@ DELETE FROM mml_command_sub_fields
         SELECT id FROM mml_commands WHERE source = 'standard'
     );
 DELETE FROM mml_commands WHERE source = 'standard';
-DELETE FROM mml_param_groups WHERE source = 'standard';
+DELETE FROM mml_command_groups WHERE source = 'standard';

@@ -2145,7 +2145,7 @@ ON CONFLICT (standard_path) DO UPDATE SET
 --    或 add_path 严格前缀；depth ≤ 6 段防爆。
 -- ============================================================
 -- T-0157 C10 兜底（pre-existing FK fix，与 chenbo01 原修复正交）：
--- 部分 commands 因 000111 的 mml_param_groups FK 失败被跳过（如 b3bfacff
+-- 部分 commands 因 000111 的 mml_command_groups FK 失败被跳过（如 b3bfacff
 -- KPI_MAC_PMS），导致下文 789 个 INSERT 命中 FK violation 整体 rollback。
 -- 解法：暂卸 mml_command_sub_fields.command_id FK → 跑 INSERTs → 清孤儿行 →
 -- 恢复 FK。对 fresh DB 和已应用 000111 的库都安全（FK 恢复前已清完无效行）。

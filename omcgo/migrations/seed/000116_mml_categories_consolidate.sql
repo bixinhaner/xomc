@@ -1,7 +1,7 @@
 -- +goose Up
 -- ============================================================
 -- 000116_mml_categories_consolidate.sql
--- 把 mml_param_groups 从 90 一级 + 383 keyword 折叠为 10 老 OMC 一级大类
+-- 把 mml_command_groups 从 90 一级 + 383 keyword 折叠为 10 老 OMC 一级大类
 -- （用户决策 2026-05-18 — Phase C：参考老 OMC 系统命令树结构）
 --
 -- 影响：
@@ -19,7 +19,7 @@
 --   Step 1: INSERT 10 个新顶（固定 UUID，ON CONFLICT 幂等）
 --   Step 2: DELETE 3 个 DROP 大类下的所有命令（sub_fields 随 CASCADE）
 --   Step 3: UPDATE 剩余 mml_commands.group_id 老 keyword → 新顶
---   Step 4: DELETE 所有 source='standard' 但非 10 新顶的 mml_param_groups
+--   Step 4: DELETE 所有 source='standard' 但非 10 新顶的 mml_command_groups
 --           （parent_id ON DELETE CASCADE 自动清掉 keyword 子组）
 --
 -- 幂等：所有步骤可重复执行（ON CONFLICT / JOIN 不命中 = no-op）
@@ -31,7 +31,7 @@
 -- 列集对齐 seed/000111_mml_old_catalog_import.sql 已用的 11 列；migration
 -- 000090 把 level / parent_id / 一堆 BOOLEAN 元属性 DROP 掉了，本表当前
 -- schema 不含 level（fix 自 SQLSTATE 42703 失败回滚）。
-INSERT INTO mml_param_groups
+INSERT INTO mml_command_groups
     (id, group_code, group_name_zh, group_name_en, name_i18n, path,
      param_version, display_order, is_active, source, catalog_protected)
 VALUES
@@ -83,8 +83,8 @@ ON CONFLICT (param_version, group_code) DO NOTHING;
 DELETE FROM mml_commands
 WHERE group_id IN (
     SELECT kw.id
-    FROM mml_param_groups kw
-    JOIN mml_param_groups p
+    FROM mml_command_groups kw
+    JOIN mml_command_groups p
          ON p.path = subltree(kw.path, 0, 1)
          AND p.source = 'standard'
     WHERE kw.source = 'standard'
@@ -197,8 +197,8 @@ WITH name_to_top (old_name, new_top_id) AS (
 )
 UPDATE mml_commands c
 SET group_id = mapping.new_top_id
-FROM mml_param_groups kw
-JOIN mml_param_groups p
+FROM mml_command_groups kw
+JOIN mml_command_groups p
      ON p.path = subltree(kw.path, 0, 1)
      AND p.source = 'standard'
 JOIN name_to_top mapping ON mapping.old_name = p.group_name_zh
@@ -208,15 +208,20 @@ WHERE c.group_id = kw.id
 
 -- ---------- Step 4: 删除老 90 + 383 组（保留 10 新顶 + admin 自建） ----------
 -- parent_id ON DELETE CASCADE：删 depth-1 时 depth-2 keyword 子组自动消失
--- 用 group_code NOT LIKE 'top_%' 区分新旧；source='standard' 保护 admin 自建组
-DELETE FROM mml_param_groups
+-- 用 group_code NOT LIKE 'top_%' 区分新旧；source='standard' 保护 admin 自建组。
+-- param_version='STANDARD' 守卫：只清理本迁移目标的 87-class 老结构，不波及
+-- 其它 param_version（例如 seed/000152 注入的 'cmcc-td-lte-v2.3' 18 个
+-- SA…SR 分组）。缺这守卫会在多次 migrate up 时把后续 catalog 一并删空
+-- （fix 自 2026-05-22 dev DB 实测 18 SA-SR 全部被删事件）。
+DELETE FROM mml_command_groups
 WHERE source = 'standard'
+  AND param_version = 'STANDARD'
   AND group_code NOT LIKE 'top\_%' ESCAPE '\';
 
 -- +goose Down
 -- 警告：down 不能精确恢复 90+383 老结构（映射有损）。
 -- 仅删 10 新顶；若需还原完整旧 catalog，请重跑 seed/000111_mml_old_catalog_import.sql。
-DELETE FROM mml_param_groups
+DELETE FROM mml_command_groups
 WHERE group_code IN (
     'top_btsinfo', 'top_btssetting', 'top_network', 'top_system', 'top_lte',
     'top_special', 'top_maintenance', 'top_elecadj', 'top_euru', 'top_vswr'

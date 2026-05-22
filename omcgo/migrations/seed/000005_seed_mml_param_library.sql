@@ -43,7 +43,7 @@ ON CONFLICT (version_code) DO NOTHING;
 -- ============================================================
 -- 分组数据 (从 small_cell_param_group 转换)
 -- ============================================================
-INSERT INTO mml_param_groups (
+INSERT INTO mml_command_groups (
     id, group_code, group_name_zh, group_name_en,
     parent_id, level,
     is_listable, is_modifiable, is_addable, is_removable,
@@ -103830,4 +103830,4 @@ ON CONFLICT (param_version, tr069_path) DO NOTHING;
 -- 删除种子数据
 DELETE FROM mml_group_param_rel WHERE matched_by = 'seed';
 DELETE FROM mml_params WHERE id::TEXT LIKE 'b%';
-DELETE FROM mml_param_groups WHERE id::TEXT LIKE 'a%';
+DELETE FROM mml_command_groups WHERE id::TEXT LIKE 'a%';
