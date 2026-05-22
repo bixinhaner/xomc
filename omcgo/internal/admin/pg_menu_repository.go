@@ -368,6 +368,9 @@ func (r *PgMenuRepository) GetByRole(ctx context.Context, roleID uuid.UUID) ([]M
 }
 
 func (r *PgMenuRepository) GetByUser(ctx context.Context, userID uuid.UUID) ([]Menu, error) {
+	// 注：曾有 r.status='active' 过滤，但 roles 表从来没有 status 列（migrations
+	// 000002 + 000056 都没加），是 dead-code filter；已删除并连带去掉只为它服务
+	// 的 roles JOIN。如未来需要"禁用角色"概念，请先加 ALTER TABLE roles ADD COLUMN status。
 	query, args, err := storage.Psql.Select("DISTINCT m.id", "m.name", "m.name_i18n",
 		"m.type", "m.permission_key", "m.parent_id",
 		"m.sort_order", "m.route_path", "m.component_path", "m.icon", "m.show_status", "m.status",
@@ -375,11 +378,8 @@ func (r *PgMenuRepository) GetByUser(ctx context.Context, userID uuid.UUID) ([]M
 		From("menus m").
 		Join("role_menus rm ON m.id = rm.menu_id").
 		Join("user_roles ur ON ur.role_id = rm.role_id").
-		Join("roles r ON r.id = ur.role_id").
 		Where(sq.And{
 			sq.Eq{"ur.user_id": userID},
-			// r.status: roles 表 status 值域 'active'/'disabled'（与 menus 不同表不同口径）
-			sq.Eq{"r.status": "active"},
 			sq.Eq{"m.status": MenuStatusNormal},
 		}).
 		OrderBy("m.sort_order ASC").
