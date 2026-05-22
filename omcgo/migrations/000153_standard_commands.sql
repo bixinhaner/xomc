@@ -1,4 +1,8 @@
--- 000151_standard_commands.sql
+-- 000153_standard_commands.sql
+--
+-- 改号说明（2026-05-22）：原 000151 与 eventlog 分支（commit 8c148c81）的
+--   000151_event_logs.sql 撞号 → 按 CLAUDE.md §5.5「后合入者重命名为更大版本号」
+--   规则改为 000153（000152 已被 mml_param_groups → mml_command_groups rename 占用）。
 --
 -- 任务 #5 修复说明（与 000058 冲突解决）：
 --   原始 000151 试图重建 standard_params 表，与 000058 创建的同名表（UUID PK，
