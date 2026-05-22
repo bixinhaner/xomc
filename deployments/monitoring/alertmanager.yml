@@ -61,9 +61,11 @@ receivers:
   # 一旦在约定窗口（建议 ≤ repeat_interval 的 2 倍 = 2min）内收不到，
   # 说明 Prometheus/AlertManager 本身已死，由外部系统反向告警「监控失联」。
   # 看门狗可用：第三方 Dead Man's Snitch / 内网另一台机器上的 cron 检查脚本。
+  # ⚠️ 部署期必改：替换为真实看门狗 URL；下方默认是 placeholder（URL 解析得通但 POST 必失败）。
+  # 不放占位会让 AlertManager 启动期解析 URL scheme 报错，整个监控栈起不来。
   - name: 'deadmansswitch'
     webhook_configs:
-      - url: '<deadmansswitch-watchdog-url>'
+      - url: 'http://localhost:9999/deadmansswitch-placeholder'
         send_resolved: false
 
   # 应用通知中心 webhook —— T-0152（notification SMTP 发送器）落地后启用：
