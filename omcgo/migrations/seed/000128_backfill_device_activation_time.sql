@@ -8,12 +8,16 @@
 --
 -- 取值：优先 last_online_time（设备最近一次离线→在线时刻），无则退回设备
 -- created_at（建档时刻）。两者都是对真实激活时刻的合理近似。
+-- 注：migration 000137 (D1 硬切) 把 devices.status 拆为 lifecycle_state +
+-- is_online；原 status IN ('active', 'offline', 'maintenance') 对应新 schema
+-- 的 lifecycle_state IN ('commissioned', 'maintenance')—— 都是"曾经/正在激活"
+-- 的语义集合（与 000137:34-44 的 status → lifecycle 映射表对齐）。
 UPDATE device_info di
 SET first_online_time = COALESCE(di.last_online_time, d.created_at)
 FROM devices d
 WHERE di.device_id = d.id
   AND di.first_online_time IS NULL
-  AND d.status IN ('active', 'offline', 'maintenance');
+  AND d.lifecycle_state IN ('commissioned', 'maintenance');
 
 -- +goose Down
 -- 无回滚：first_online_time 是一次性事实，回填值与正常写入值无法区分，
