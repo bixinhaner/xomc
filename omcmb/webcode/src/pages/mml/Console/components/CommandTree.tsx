@@ -450,8 +450,9 @@ export default function CommandTree({ lang }: CommandTreeProps) {
 
   // 稳定 tree 引用：destructuring `= []` default 在 data=undefined 期间每 render 新建数组，
   // 会让下游 useMemo / useEffect deps 引用变动，引发不必要重算甚至循环。useMemo 锚住引用。
-  const { data: treeData, isLoading } = useGroupTree(undefined, effectiveLang);
-  const tree = useMemo<GroupTreeNode[]>(() => treeData ?? [], [treeData]);
+  // 注：本作用域内 `treeData` 已被下方 buildTreeData 结果占用，这里用 rawTree 避免撞名。
+  const { data: rawTree, isLoading } = useGroupTree(undefined, effectiveLang);
+  const tree = useMemo<GroupTreeNode[]>(() => rawTree ?? [], [rawTree]);
   const queryClient = useQueryClient();
   const deleteMutation = useDeleteMMLTemplate();
 
