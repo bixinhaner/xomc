@@ -103,6 +103,34 @@ func (e *UpgradeExecutor) SetParamPathTranslator(t ParamPathTranslator) {
 	e.pathTranslator = t
 }
 
+// HandleGetParamsResponseForRollback 桥接 command.get_parameters.response 事件到
+// RollbackExecutor.HandleEnableCheckResponse —— 仅当 command_key 带 rollback enable
+// 检查前缀时才推进，其它 GPV 响应（device_parameters 自动同步等）由其它订阅者处理。
+//
+// 注入：service.Subscribe 时把 rollbackExec 绑定到该 handler；payload 形态：
+//
+//	{
+//	  "device_sn": "...",
+//	  "command_key": "rollback-enable-check-<uuid>",
+//	  "fault_code": 0 | 9xxx,
+//	  "fault_string": "...",
+//	  "parameter_values": [{"name": "...", "value": "1|true|0|false", "type": "..."}]
+//	}
+func (e *UpgradeExecutor) HandleGetParamsResponseForRollback(ctx context.Context, evt event.Event, rb *RollbackExecutor) error {
+	var payload struct {
+		DeviceSN        string                   `json:"device_sn"`
+		CommandKey      string                   `json:"command_key"`
+		FaultCode       int                      `json:"fault_code"`
+		FaultStr        string                   `json:"fault_string"`
+		ParameterValues []ParameterValueResponse `json:"parameter_values"`
+	}
+	if err := evt.DecodePayload(&payload); err != nil || payload.CommandKey == "" {
+		return nil
+	}
+	rb.HandleEnableCheckResponse(ctx, payload.DeviceSN, payload.CommandKey, payload.FaultCode, payload.FaultStr, payload.ParameterValues)
+	return nil
+}
+
 // NewUpgradeExecutor creates a new UpgradeExecutor.
 func NewUpgradeExecutor(
 	taskRepo TaskRepository,

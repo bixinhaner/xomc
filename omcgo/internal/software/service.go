@@ -181,10 +181,18 @@ func (s *SoftwareService) SetLogCollectResumer(r LogCollectResumer) {
 	s.executor.SetLogCollectResumer(r)
 }
 
-// SetParamPathTranslator 装配 standardPath → privatePath 翻译器（透传给 executor），
-// 供 SPV 触发的日志采集（FAULT_LOG_COLLECT 等）在下发前翻译参数名。
+// SetParamPathTranslator 装配 standardPath → privatePath 翻译器（透传给 executor
+// 和 rollback executor），供 SPV / GPV 下发前翻译参数名。
+//
+// 业务场景：
+//   - FAULT_LOG_COLLECT（executor）：SPV 写 FaultLogURL 时翻译
+//   - VERSION_ROLLBACK（rollbackExec）：4G 阶段一 GPV ROLLBACK_ENABLE +
+//     阶段二 SPV ROLLBACK_CONTROL 都翻译；5G SPV ActivateEnable 翻译
 func (s *SoftwareService) SetParamPathTranslator(t ParamPathTranslator) {
 	s.executor.SetParamPathTranslator(t)
+	if s.rollbackExec != nil {
+		s.rollbackExec.SetParamPathTranslator(t)
+	}
 }
 
 // OnLogFileLanded 实现 backup.FileLandedNotifier 接口。
@@ -609,11 +617,9 @@ func (s *SoftwareService) startRollbackExecution(subTasks []*UpgradeSubTask) {
 				tech = model.TechNR
 			}
 
-			rollbackPath := s.adapter.RollbackParameterPath(tech)
-			rollbackValue := s.adapter.RollbackParameterValue(tech)
-			needEnableCheck := s.adapter.RollbackNeedsEnableCheck(tech)
-
-			s.rollbackExec.RollbackOne(context.Background(), st, dev, rollbackPath, rollbackValue, needEnableCheck)
+			// 4G 走两阶段（GPV ROLLBACK_ENABLE → SPV ROLLBACK_CONTROL）；5G 直接 SPV。
+			// 路径与值统一在 RollbackExecutor 内部经 adapter + Translator 决定。
+			s.rollbackExec.RollbackOne(context.Background(), st, dev, tech)
 		}(subTasks[i])
 	}
 }
@@ -1359,6 +1365,16 @@ func (s *SoftwareService) Subscribe(eventBus event.EventBus) error {
 	})
 	if err != nil {
 		s.logger.Warn("subscribe set_parameters response", zap.Error(err))
+	}
+
+	// GetParameterValues response — 仅服务 VERSION_ROLLBACK 4G 阶段一 ROLLBACK_ENABLE 校验：
+	// 按 command_key 前缀 "rollback-enable-check-" 过滤，其它 GPV 响应（device_parameters
+	// 自动同步等）由 device-rpc-resp-sub 等其它订阅者各自处理，互不打扰。
+	_, err = eventBus.QueueSubscribe(event.SubjectCommandGetParamsResponse, "software-rollback-gpv-resp", func(ctx context.Context, evt event.Event) error {
+		return s.executor.HandleGetParamsResponseForRollback(ctx, evt, s.rollbackExec)
+	})
+	if err != nil {
+		s.logger.Warn("subscribe get_parameters response for rollback", zap.Error(err))
 	}
 
 	// 文件落地通知不走 NATS 订阅：BACKUP stream 是 WorkQueuePolicy retention，
