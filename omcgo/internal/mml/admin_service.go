@@ -41,7 +41,6 @@ type AdminService struct {
 	groupRepo    AdminGroupRepository
 	commandRepo  AdminCommandRepository
 	subFieldRepo SubFieldRepository
-	paramRepo    AdminParamRepository
 	audit        AdminAuditWriter
 	logger       *zap.Logger
 }
@@ -52,7 +51,6 @@ func NewAdminService(
 	groupRepo AdminGroupRepository,
 	commandRepo AdminCommandRepository,
 	subFieldRepo SubFieldRepository,
-	paramRepo AdminParamRepository,
 	audit AdminAuditWriter,
 	logger *zap.Logger,
 ) *AdminService {
@@ -66,7 +64,6 @@ func NewAdminService(
 		groupRepo:    groupRepo,
 		commandRepo:  commandRepo,
 		subFieldRepo: subFieldRepo,
-		paramRepo:    paramRepo,
 		audit:        audit,
 		logger:       logger.Named("mml-admin-service"),
 	}
@@ -78,11 +75,11 @@ func NewAdminService(
 
 // CreateGroupReq 是 POST /admin/groups 的请求体。
 type CreateGroupReq struct {
-	GroupCode     string `json:"group_code" binding:"required,max=255"`
-	GroupNameZh   string `json:"group_name_zh" binding:"max=500"`
-	GroupNameEn   string `json:"group_name_en" binding:"max=500"`
-	ParamVersion  string `json:"param_version" binding:"required,max=50"`
-	DisplayOrder  int    `json:"display_order"`
+	GroupCode    string `json:"group_code" binding:"required,max=255"`
+	GroupNameZh  string `json:"group_name_zh" binding:"max=500"`
+	GroupNameEn  string `json:"group_name_en" binding:"max=500"`
+	ParamVersion string `json:"param_version" binding:"required,max=50"`
+	DisplayOrder int    `json:"display_order"`
 }
 
 // UpdateGroupReq 是 PATCH /admin/groups/:id 的请求体。
@@ -422,176 +419,6 @@ func (s *AdminService) DeleteSubField(ctx context.Context, id uuid.UUID) error {
 }
 
 // ============================================================
-// Param
-// ============================================================
-
-// CreateParamReq 是 POST /admin/params 的请求体。
-type CreateParamReq struct {
-	ParamCode          string            `json:"param_code" binding:"required,max=255"`
-	Tr069Path          string            `json:"tr069_path" binding:"required,max=500"`
-	ValueType          string            `json:"value_type" binding:"required,max=30"`
-	DefaultValue       *string           `json:"default_value,omitempty"`
-	JsRegex            *string           `json:"js_regex,omitempty"`
-	ParamVersion       string            `json:"param_version" binding:"required,max=50"`
-	NameI18n           map[string]string `json:"name_i18n"`
-	ExplanationI18n    map[string]string `json:"explanation_i18n"`
-	ConstraintTextI18n map[string]string `json:"constraint_text_i18n"`
-	AccessType         string            `json:"access_type" binding:"omitempty,oneof=READ_ONLY READ_WRITE WRITE_ONLY"`
-	IsObject           bool              `json:"is_object"`
-	SupportsAdd        bool              `json:"supports_add"`
-	SupportsDelete     bool              `json:"supports_delete"`
-	ChangeApplies      string            `json:"change_applies" binding:"omitempty,oneof=Immediate OnReboot"`
-}
-
-// UpdateParamReq 是 PATCH /admin/params/:id 的请求体。
-// 不可改字段（Q2=C 决议）：tr069_path / param_code / catalog_protected / source / is_writable
-// 对 catalog_protected=true 行额外锁定：access_type / is_object / supports_add / supports_delete / change_applies
-type UpdateParamReq struct {
-	DefaultValue       *string            `json:"default_value,omitempty"`
-	JsRegex            *string            `json:"js_regex,omitempty"`
-	NameI18n           *map[string]string `json:"name_i18n,omitempty"`
-	ExplanationI18n    *map[string]string `json:"explanation_i18n,omitempty"`
-	ConstraintTextI18n *map[string]string `json:"constraint_text_i18n,omitempty"`
-	AccessType         *string            `json:"access_type,omitempty" binding:"omitempty,oneof=READ_ONLY READ_WRITE WRITE_ONLY"`
-	IsObject           *bool              `json:"is_object,omitempty"`
-	SupportsAdd        *bool              `json:"supports_add,omitempty"`
-	SupportsDelete     *bool              `json:"supports_delete,omitempty"`
-	ChangeApplies      *string            `json:"change_applies,omitempty" binding:"omitempty,oneof=Immediate OnReboot"`
-}
-
-// CreateParam 新建 admin 来源的 param。
-func (s *AdminService) CreateParam(ctx context.Context, req CreateParamReq) (*Param, error) {
-	if req.AccessType == "" {
-		req.AccessType = AccessTypeReadOnly
-	}
-	if req.ChangeApplies == "" {
-		req.ChangeApplies = ChangeAppliesImmediate
-	}
-	p := &Param{
-		ParamCode:          req.ParamCode,
-		Tr069Path:          req.Tr069Path,
-		ValueType:          req.ValueType,
-		DefaultValue:       req.DefaultValue,
-		JsRegex:            req.JsRegex,
-		ParamVersion:       req.ParamVersion,
-		AccessType:         req.AccessType,
-		IsObject:           req.IsObject,
-		SupportsAdd:        req.SupportsAdd,
-		SupportsDelete:     req.SupportsDelete,
-		ChangeApplies:      req.ChangeApplies,
-		ConstraintTextI18n: req.ConstraintTextI18n,
-		CatalogProtected:   false,
-		Source:             SourceAdmin,
-	}
-	if err := s.paramRepo.Create(ctx, p); err != nil {
-		return nil, fmt.Errorf("create param: %w", err)
-	}
-	s.audit.Write(ctx, "mml.catalog.param.created", "param:"+p.ID.String(), map[string]any{
-		"param_code":  p.ParamCode,
-		"tr069_path":  p.Tr069Path,
-		"access_type": p.AccessType,
-	})
-	return p, nil
-}
-
-// UpdateParam 更新 param。
-// 对 catalog_protected=true 行额外锁定 access_type / is_object / supports_add / supports_delete / change_applies；
-// i18n + default_value + js_regex + constraint_text_i18n 仍可改。
-func (s *AdminService) UpdateParam(ctx context.Context, id uuid.UUID, req UpdateParamReq) (*Param, error) {
-	existing, err := s.paramRepo.GetByID(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("get param: %w", err)
-	}
-	if existing.CatalogProtected {
-		if req.AccessType != nil && *req.AccessType != existing.AccessType {
-			return nil, fmt.Errorf("access_type is locked: %w", ErrCatalogProtected)
-		}
-		if req.IsObject != nil && *req.IsObject != existing.IsObject {
-			return nil, fmt.Errorf("is_object is locked: %w", ErrCatalogProtected)
-		}
-		if req.SupportsAdd != nil && *req.SupportsAdd != existing.SupportsAdd {
-			return nil, fmt.Errorf("supports_add is locked: %w", ErrCatalogProtected)
-		}
-		if req.SupportsDelete != nil && *req.SupportsDelete != existing.SupportsDelete {
-			return nil, fmt.Errorf("supports_delete is locked: %w", ErrCatalogProtected)
-		}
-		if req.ChangeApplies != nil && *req.ChangeApplies != existing.ChangeApplies {
-			return nil, fmt.Errorf("change_applies is locked: %w", ErrCatalogProtected)
-		}
-	}
-	if req.DefaultValue != nil {
-		existing.DefaultValue = req.DefaultValue
-	}
-	if req.JsRegex != nil {
-		existing.JsRegex = req.JsRegex
-	}
-	if req.ConstraintTextI18n != nil {
-		existing.ConstraintTextI18n = *req.ConstraintTextI18n
-	}
-	if req.AccessType != nil {
-		existing.AccessType = *req.AccessType
-	}
-	if req.IsObject != nil {
-		existing.IsObject = *req.IsObject
-	}
-	if req.SupportsAdd != nil {
-		existing.SupportsAdd = *req.SupportsAdd
-	}
-	if req.SupportsDelete != nil {
-		existing.SupportsDelete = *req.SupportsDelete
-	}
-	if req.ChangeApplies != nil {
-		existing.ChangeApplies = *req.ChangeApplies
-	}
-	if err := s.paramRepo.Update(ctx, existing); err != nil {
-		return nil, fmt.Errorf("update param: %w", err)
-	}
-	s.audit.Write(ctx, "mml.catalog.param.updated", "param:"+id.String(), map[string]any{
-		"param_code":        existing.ParamCode,
-		"catalog_protected": existing.CatalogProtected,
-	})
-	return existing, nil
-}
-
-// DeleteParam 删除 param。
-//   - catalog_protected=true → 拒绝
-//   - 被 sub_fields 引用 → 拒绝
-func (s *AdminService) DeleteParam(ctx context.Context, id uuid.UUID) error {
-	existing, err := s.paramRepo.GetByID(ctx, id)
-	if err != nil {
-		return fmt.Errorf("get param: %w", err)
-	}
-	if existing.CatalogProtected {
-		return ErrCatalogProtected
-	}
-	refs, err := s.subFieldRepo.CountByParam(ctx, id)
-	if err != nil {
-		return fmt.Errorf("count sub_fields by param: %w", err)
-	}
-	if refs > 0 {
-		return fmt.Errorf("param referenced by %d sub_fields: %w", refs, ErrParamInUse)
-	}
-	if err := s.paramRepo.Delete(ctx, id); err != nil {
-		return fmt.Errorf("delete param: %w", err)
-	}
-	s.audit.Write(ctx, "mml.catalog.param.deleted", "param:"+id.String(), map[string]any{
-		"param_code": existing.ParamCode,
-		"tr069_path": existing.Tr069Path,
-	})
-	return nil
-}
-
-// ListParams 透传到 repo（不需守护逻辑，仅读取）。
-func (s *AdminService) ListParams(ctx context.Context, f AdminParamFilter) ([]Param, int64, error) {
-	return s.paramRepo.List(ctx, f)
-}
-
-// ListParamReferences 反向查：返回引用该 param 的命令列表（T-0131 admin Tab 3 抽屉用）。
-func (s *AdminService) ListParamReferences(ctx context.Context, paramID uuid.UUID) ([]ParamReference, error) {
-	return s.paramRepo.ListReferences(ctx, paramID)
-}
-
-// ============================================================
 // Helpers
 // ============================================================
 
@@ -600,6 +427,5 @@ func (s *AdminService) ListParamReferences(ctx context.Context, paramID uuid.UUI
 func IsErrNotFound(err error) bool {
 	return errors.Is(err, ErrSubFieldNotFound) ||
 		errors.Is(err, ErrGroupNotFound) ||
-		errors.Is(err, ErrCommandNotFound) ||
-		errors.Is(err, ErrParamNotFound)
+		errors.Is(err, ErrCommandNotFound)
 }

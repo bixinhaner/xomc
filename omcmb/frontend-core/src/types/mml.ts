@@ -30,7 +30,8 @@ export type MMLOperationType = 'LST' | 'MOD' | 'ADD' | 'RMV' | 'DSP' | 'ACT' | '
 
 /**
  * MMLParamRef represents a parameter reference bound to a command.
- * Maps to backend MMLParamRef (mml_params table).
+ * Maps to backend MMLParamRef sourced from standard_params (the legacy
+ * mml_params table has been retired).
  */
 export interface MMLParamRef {
   id: string;

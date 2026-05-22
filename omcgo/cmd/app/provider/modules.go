@@ -22,6 +22,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/reliability/runner"
 	"github.com/omcgo/omcgo/internal/dashboard"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/eventlog"
 	"github.com/omcgo/omcgo/internal/events"
 	"github.com/omcgo/omcgo/internal/filemanager"
 	"github.com/omcgo/omcgo/internal/interop"
@@ -39,7 +40,6 @@ import (
 	"github.com/omcgo/omcgo/internal/provision"
 	"github.com/omcgo/omcgo/internal/report"
 	"github.com/omcgo/omcgo/internal/software"
-	"github.com/omcgo/omcgo/internal/eventlog"
 	"github.com/omcgo/omcgo/internal/stationlog"
 	"github.com/omcgo/omcgo/internal/syslog"
 	"github.com/omcgo/omcgo/internal/task"
@@ -749,20 +749,18 @@ func initMiscModules(c *Container) error {
 	c.miscDeps.mmlHandler = mml.NewHandler(mmlService, logger)
 	c.miscDeps.mmlService = mmlService
 
-	// T-0123-P0：catalog 管理 admin 13 端点（mml_admin api_group）。
+	// T-0123-P0：catalog 管理 admin 端点（mml_admin api_group）。
 	// catalog_protected 守护 / sentinel error → HTTP 403/404/409 翻译。
+	// mml_params 表已下线，AdminParamRepository / XMLImportService 已随之移除。
 	mmlSubFieldRepo := mml.NewPgSubFieldRepository(c.PgPool)
 	mmlAdminGroupRepo := mml.NewPgAdminGroupRepository(c.PgPool)
 	mmlAdminCmdRepo := mml.NewPgAdminCommandRepository(c.PgPool)
-	mmlAdminParamRepo := mml.NewPgAdminParamRepository(c.PgPool)
 	mmlAdminService := mml.NewAdminService(
-		mmlAdminGroupRepo, mmlAdminCmdRepo, mmlSubFieldRepo, mmlAdminParamRepo,
+		mmlAdminGroupRepo, mmlAdminCmdRepo, mmlSubFieldRepo,
 		nil, // AuditWriter — TODO: wire internal/admin/auditlog when admin module exposes interface
 		logger,
 	)
-	// T-0132 admin Tab 4 XML 导入 — Preview/Apply service。
-	mmlXMLImportSvc := mml.NewXMLImportService(mmlAdminParamRepo, nil, logger)
-	c.miscDeps.mmlAdminHandler = mml.NewAdminHandler(mmlAdminService, mmlCmdRepo, mmlXMLImportSvc, logger)
+	c.miscDeps.mmlAdminHandler = mml.NewAdminHandler(mmlAdminService, mmlCmdRepo, logger)
 
 	// T-0123-P1：Console 5 端点（group-tree / sub-fields / render / parse / execute-statements）。
 	// 复用 T-0123-P0 的 SubFieldRepo + 既有 CommandRepo；新增 GroupTreeRepo（带 ltree JOIN 子树）。
@@ -865,10 +863,8 @@ func initMiscModules(c *Container) error {
 		logger.Info("MML fan-out bridge enabled")
 	}
 
-	// Parameter Library module
-	paramRepo := mml.NewPgParamRepository(c.PgPool)
-	paramService := mml.NewParamService(paramRepo)
-	c.miscDeps.paramHandler = mml.NewParamHandler(paramService, logger)
+	// Parameter Library module 已下线（mml_params 表 + 4 个 /mml/param-versions/* 端点删除）。
+	// v2.3 sub_field 元数据现由 standard_params 直供，无需独立参数库 API。
 	logger.Info("MML console module initialized")
 
 	// Config Baseline module
@@ -1191,9 +1187,6 @@ type miscDeps struct {
 	mmlService        *mml.Service
 	mmlAdminHandler   *mml.AdminHandler   // T-0123-P0 catalog 管理 13 端点
 	mmlConsoleHandler *mml.ConsoleHandler // T-0123-P1 Console 5 端点（group-tree / sub-fields / render / parse / execute-statements）
-
-	// Param Library
-	paramHandler *mml.ParamHandler
 
 	// Baseline
 	baselineHandler *baseline.Handler

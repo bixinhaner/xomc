@@ -459,7 +459,7 @@ func substituteInstanceSelectors(path string, selectors map[string]string) (stri
 //   - SelectedSubFieldIDs 非空 → 仅选中那部分
 //   - SelectedSubFieldIDs 为空 → 默认全 sub_fields（与老 OMC 默认勾选状态一致）
 //
-// 每个 sub_field 通过 cmd.Params（mml_command_param_refs JOIN mml_params）的 ParamID
+// 每个 sub_field 通过 cmd.Params（mml_command_sub_fields JOIN standard_params）的 ParamID
 // 对应一条 MMLParamRef；若 cmd.Params 未挂载（lookup 路径未触发 attachParamRefs），
 // 退化为合成最小集（tr069_path 从 enriched 列单独查更彻底，但 P1 范围内 cmd.Params
 // 在 ListByCommand 已能拿到 enriched 数据，这里走基本 sub_field.MMLCode → 空 Tr069Path

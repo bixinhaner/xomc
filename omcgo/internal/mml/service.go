@@ -1012,7 +1012,7 @@ func (s *Service) resolveRPCMethods(ctx context.Context, commands []map[string]i
 	return commands
 }
 
-// attachParamRefs 把 mml_command_param_refs JOIN mml_params 的结果挂到 entry 上。
+// attachParamRefs 把 mml_command_sub_fields JOIN standard_params 的结果挂到 entry 上。
 // Fanouter 后续会调用 BuildTR069Params(rpcMethod, paramRefs, ...) 翻译为 TR-069
 // wire 格式。失败仅记 warn，让 Fanouter 走兜底路径（透传 formValues）。
 func (s *Service) attachParamRefs(ctx context.Context, entry map[string]interface{}, cmdID uuid.UUID) {

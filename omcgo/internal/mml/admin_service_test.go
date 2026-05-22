@@ -174,68 +174,6 @@ func (m *mockAdminCmdRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-type mockAdminParamRepo struct {
-	params map[uuid.UUID]*Param
-}
-
-func newMockAdminParamRepo() *mockAdminParamRepo {
-	return &mockAdminParamRepo{params: map[uuid.UUID]*Param{}}
-}
-
-func (m *mockAdminParamRepo) Create(ctx context.Context, p *Param) error {
-	if p.ID == uuid.Nil {
-		p.ID = uuid.New()
-	}
-	cp := *p
-	m.params[p.ID] = &cp
-	return nil
-}
-func (m *mockAdminParamRepo) Update(ctx context.Context, p *Param) error {
-	if _, ok := m.params[p.ID]; !ok {
-		return ErrParamNotFound
-	}
-	cp := *p
-	m.params[p.ID] = &cp
-	return nil
-}
-func (m *mockAdminParamRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	if _, ok := m.params[id]; !ok {
-		return ErrParamNotFound
-	}
-	delete(m.params, id)
-	return nil
-}
-func (m *mockAdminParamRepo) GetByID(ctx context.Context, id uuid.UUID) (*Param, error) {
-	p, ok := m.params[id]
-	if !ok {
-		return nil, ErrParamNotFound
-	}
-	cp := *p
-	return &cp, nil
-}
-func (m *mockAdminParamRepo) List(ctx context.Context, f AdminParamFilter) ([]Param, int64, error) {
-	var out []Param
-	for _, p := range m.params {
-		out = append(out, *p)
-	}
-	return out, int64(len(out)), nil
-}
-
-// ListReferences 空 stub（T-0131 interface 引入；admin_service_test.go 不覆盖此场景）。
-func (m *mockAdminParamRepo) ListReferences(ctx context.Context, paramID uuid.UUID) ([]ParamReference, error) {
-	return nil, nil
-}
-
-// ListPathStateByVersion 空 stub（T-0132 interface 引入；admin_service_test.go 不覆盖 XML import 场景，由 xml_import_service_test.go 单独 stubParamRepo 覆盖）。
-func (m *mockAdminParamRepo) ListPathStateByVersion(ctx context.Context, paramVersion string) (map[string]bool, error) {
-	return map[string]bool{}, nil
-}
-
-// BatchUpsertStandardParams 空 stub（T-0132 interface 引入；同上）。
-func (m *mockAdminParamRepo) BatchUpsertStandardParams(ctx context.Context, rows []ImportRow, paramVersion string) (int64, error) {
-	return 0, nil
-}
-
 type mockAuditWriter struct {
 	calls []auditCall
 }
@@ -250,14 +188,13 @@ func (m *mockAuditWriter) Write(ctx context.Context, op, resource string, detail
 
 // ---- helpers ----
 
-func newAdminTestService() (*AdminService, *mockGroupRepo, *mockAdminCmdRepo, *mockSubFieldRepo, *mockAdminParamRepo, *mockAuditWriter) {
+func newAdminTestService() (*AdminService, *mockGroupRepo, *mockAdminCmdRepo, *mockSubFieldRepo, *mockAuditWriter) {
 	g := newMockGroupRepo()
 	c := newMockAdminCmdRepo()
 	sf := newMockSubFieldRepo()
-	p := newMockAdminParamRepo()
 	audit := &mockAuditWriter{}
-	svc := NewAdminService(g, c, sf, p, audit, nil)
-	return svc, g, c, sf, p, audit
+	svc := NewAdminService(g, c, sf, audit, nil)
+	return svc, g, c, sf, audit
 }
 
 // ============================================================
@@ -265,7 +202,7 @@ func newAdminTestService() (*AdminService, *mockGroupRepo, *mockAdminCmdRepo, *m
 // ============================================================
 
 func TestAdminService_DeleteGroup_CatalogProtected(t *testing.T) {
-	svc, gRepo, _, _, _, _ := newAdminTestService()
+	svc, gRepo, _, _, _ := newAdminTestService()
 	id := uuid.New()
 	gRepo.groups[id] = &CommandGroup{ID: id, GroupCode: "BSC_CONFIG", CatalogProtected: true}
 
@@ -275,7 +212,7 @@ func TestAdminService_DeleteGroup_CatalogProtected(t *testing.T) {
 }
 
 func TestAdminService_DeleteGroup_NotEmpty(t *testing.T) {
-	svc, gRepo, _, _, _, _ := newAdminTestService()
+	svc, gRepo, _, _, _ := newAdminTestService()
 	id := uuid.New()
 	gRepo.groups[id] = &CommandGroup{ID: id, GroupCode: "ADMIN_GRP", CatalogProtected: false}
 	gRepo.commandCountByGrp[id] = 3
@@ -286,7 +223,7 @@ func TestAdminService_DeleteGroup_NotEmpty(t *testing.T) {
 }
 
 func TestAdminService_DeleteGroup_Happy(t *testing.T) {
-	svc, gRepo, _, _, _, audit := newAdminTestService()
+	svc, gRepo, _, _, audit := newAdminTestService()
 	id := uuid.New()
 	gRepo.groups[id] = &CommandGroup{ID: id, GroupCode: "ADMIN_GRP", CatalogProtected: false}
 
@@ -298,7 +235,7 @@ func TestAdminService_DeleteGroup_Happy(t *testing.T) {
 }
 
 func TestAdminService_CreateGroup_AuditEmitted(t *testing.T) {
-	svc, _, _, _, _, audit := newAdminTestService()
+	svc, _, _, _, audit := newAdminTestService()
 	_, err := svc.CreateGroup(context.Background(), CreateGroupReq{
 		GroupCode: "FOO", ParamVersion: "STANDARD",
 	})
@@ -308,80 +245,11 @@ func TestAdminService_CreateGroup_AuditEmitted(t *testing.T) {
 }
 
 // ============================================================
-// Param tests
-// ============================================================
-
-func TestAdminService_UpdateParam_ProtectedLocksAccessType(t *testing.T) {
-	svc, _, _, _, pRepo, _ := newAdminTestService()
-	id := uuid.New()
-	pRepo.params[id] = &Param{
-		ID: id, Tr069Path: "Device.X", AccessType: AccessTypeReadOnly,
-		CatalogProtected: true, Source: SourceStandard,
-	}
-
-	newAccess := AccessTypeReadWrite
-	_, err := svc.UpdateParam(context.Background(), id, UpdateParamReq{
-		AccessType: &newAccess,
-	})
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrCatalogProtected))
-}
-
-func TestAdminService_UpdateParam_ProtectedAllowsLabelChange(t *testing.T) {
-	svc, _, _, _, pRepo, _ := newAdminTestService()
-	id := uuid.New()
-	pRepo.params[id] = &Param{
-		ID: id, Tr069Path: "Device.X", AccessType: AccessTypeReadOnly,
-		CatalogProtected: true, Source: SourceStandard,
-	}
-
-	newCT := map[string]string{"en-US": "test", "zh-CN": "测试"}
-	_, err := svc.UpdateParam(context.Background(), id, UpdateParamReq{
-		ConstraintTextI18n: &newCT,
-	})
-	require.NoError(t, err)
-	assert.Equal(t, newCT, pRepo.params[id].ConstraintTextI18n)
-}
-
-func TestAdminService_DeleteParam_CatalogProtected(t *testing.T) {
-	svc, _, _, _, pRepo, _ := newAdminTestService()
-	id := uuid.New()
-	pRepo.params[id] = &Param{ID: id, CatalogProtected: true, Source: SourceStandard}
-
-	err := svc.DeleteParam(context.Background(), id)
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrCatalogProtected))
-}
-
-func TestAdminService_DeleteParam_InUse(t *testing.T) {
-	svc, _, _, sfRepo, pRepo, _ := newAdminTestService()
-	id := uuid.New()
-	pRepo.params[id] = &Param{ID: id, CatalogProtected: false}
-	sfRepo.countByParam[id] = 2
-
-	err := svc.DeleteParam(context.Background(), id)
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrParamInUse))
-}
-
-func TestAdminService_DeleteParam_Happy(t *testing.T) {
-	svc, _, _, _, pRepo, audit := newAdminTestService()
-	id := uuid.New()
-	pRepo.params[id] = &Param{ID: id, CatalogProtected: false, ParamCode: "TEST", Tr069Path: "Device.Test"}
-
-	err := svc.DeleteParam(context.Background(), id)
-	require.NoError(t, err)
-	assert.NotContains(t, pRepo.params, id)
-	require.Len(t, audit.calls, 1)
-	assert.Equal(t, "mml.catalog.param.deleted", audit.calls[0].Op)
-}
-
-// ============================================================
 // Command tests
 // ============================================================
 
 func TestAdminService_DeleteCommand_CatalogProtected(t *testing.T) {
-	svc, _, cRepo, _, _, _ := newAdminTestService()
+	svc, _, cRepo, _, _ := newAdminTestService()
 	id := uuid.New()
 	cRepo.commands[id] = &MMLCommand{ID: id, CommandCode: "LST_FOO", CatalogProtected: true}
 
@@ -400,7 +268,7 @@ func TestAdminService_DeleteCommand_CatalogProtected(t *testing.T) {
 }
 
 func TestAdminService_UpdateCommand_ProtectedLocksLogicalCode(t *testing.T) {
-	svc, _, cRepo, _, _, _ := newAdminTestService()
+	svc, _, cRepo, _, _ := newAdminTestService()
 	id := uuid.New()
 	cRepo.commands[id] = &MMLCommand{
 		ID: id, CommandCode: "LST_FOO", LogicalCode: "FOO",
@@ -424,7 +292,7 @@ func TestAdminService_UpdateCommand_ProtectedLocksLogicalCode(t *testing.T) {
 }
 
 func TestAdminService_CreateCommand_DefaultsSource(t *testing.T) {
-	svc, _, cRepo, _, _, _ := newAdminTestService()
+	svc, _, cRepo, _, _ := newAdminTestService()
 	c, err := svc.CreateCommand(context.Background(), CreateCommandReq{
 		CommandName: "test", CommandCode: "T_FOO", OperationType: "LST",
 	})
@@ -439,12 +307,12 @@ func TestAdminService_CreateCommand_DefaultsSource(t *testing.T) {
 // ============================================================
 
 func TestAdminService_CreateSubField_DefaultsSelected(t *testing.T) {
-	svc, _, _, sfRepo, _, _ := newAdminTestService()
+	svc, _, _, sfRepo, _ := newAdminTestService()
 	cmdID := uuid.New()
 	paramID := uuid.New()
 	sf, err := svc.CreateSubField(context.Background(), cmdID, CreateSubFieldReq{
-		ParamID:  paramID,
-		MMLCode:  "TEST_FIELD",
+		ParamID:   paramID,
+		MMLCode:   "TEST_FIELD",
 		LabelI18n: map[string]string{"en-US": "Test"},
 	})
 	require.NoError(t, err)
@@ -454,7 +322,7 @@ func TestAdminService_CreateSubField_DefaultsSelected(t *testing.T) {
 }
 
 func TestAdminService_CreateSubField_ExplicitFalse(t *testing.T) {
-	svc, _, _, _, _, _ := newAdminTestService()
+	svc, _, _, _, _ := newAdminTestService()
 	cmdID := uuid.New()
 	paramID := uuid.New()
 	false_ := false
@@ -480,9 +348,7 @@ func TestIsErrNotFound(t *testing.T) {
 		{"sub_field", ErrSubFieldNotFound, true},
 		{"group", ErrGroupNotFound, true},
 		{"command", ErrCommandNotFound, true},
-		{"param", ErrParamNotFound, true},
 		{"protected", ErrCatalogProtected, false},
-		{"in_use", ErrParamInUse, false},
 		{"not_empty", ErrGroupNotEmpty, false},
 		{"nil", nil, false},
 	}

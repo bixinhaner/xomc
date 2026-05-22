@@ -14,7 +14,7 @@ import (
 //
 // 输入：
 //   - rpcMethod    canonical RPC 名（GetParameterValues / SetParameterValues / ...）
-//   - paramRefs    命令绑定的参数定义（mml_command_param_refs JOIN mml_params），
+//   - paramRefs    命令绑定的参数定义（mml_command_sub_fields JOIN standard_params），
 //                  已按 (command_id, tr069_path) 去重排序
 //   - formValues   前端表单 / 脚本入参的 map[param_code]value（可能含空字符串）
 //   - operationType MML 操作语义（LST/MOD/ADD/RMV/DSP/...），目前用于日志/诊断
@@ -175,7 +175,7 @@ func BuildTR069Params(
 	}
 }
 
-// xsdType 把 mml_params.value_type（业务定义）映射为 TR-069 SOAP 报文的 xsd 类型字符串。
+// xsdType 把 standard_params.data_type 映射为 TR-069 SOAP 报文的 xsd 类型字符串。
 // 列表型（stringList / unsignedIntList）按 TR-069 规范以 CSV string 传输。
 func xsdType(valueType string) string {
 	switch valueType {

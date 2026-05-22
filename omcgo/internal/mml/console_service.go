@@ -97,7 +97,7 @@ type SubFieldDTO struct {
 	SortOrder          int               `json:"sort_order"`
 }
 
-// GetCommandSubFields 加载命令的 sub_fields（含 join mml_params 元数据），按 lang 派生
+// GetCommandSubFields 加载命令的 sub_fields（含 JOIN standard_params 元数据），按 lang 派生
 // 顶级 label / constraint_text。
 func (s *ConsoleService) GetCommandSubFields(ctx context.Context, commandID uuid.UUID, lang string) ([]SubFieldDTO, error) {
 	if lang == "" {

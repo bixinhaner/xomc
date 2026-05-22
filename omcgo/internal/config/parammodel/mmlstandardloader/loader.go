@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -278,56 +277,13 @@ func upsertVersion(ctx context.Context, tx pgx.Tx, contentHash string) error {
 	return err
 }
 
-// upsertParams 批量 UPSERT 1988 行 mml_params。
-//
-// 注意：当前 mml_params 的 UNIQUE 约束是 (param_version, tr069_path)；
-// 单 STANDARD version 下这等价于 tr069_path 唯一。
+// upsertParams 历史上批量 UPSERT mml_params 行；mml_params 表已下线（v2.3 catalog
+// 单源化），改由 standard_params 字典承担 path 元数据。本函数保留为 no-op
+// stub 以保持 caller 序列不变，待 Loader 调用链彻底清理后可一并移除。
 func upsertParams(ctx context.Context, tx pgx.Tx, params []ParamSpec) error {
-	if len(params) == 0 {
-		return nil
-	}
-	// 一条一条 UPSERT — 1988 行可接受（~3-5s）；可改为 batch 后续优化。
-	//
-	// T-0123-P0 migration 000095：is_writable 是 GENERATED ALWAYS AS STORED 派生列，
-	// 不能直接 INSERT/UPDATE；改写 access_type，由 PG 自动派生 is_writable。
-	for _, p := range params {
-		valueType, constraint := mapValueType(p)
-		accessType := AccessReadOnly
-		if p.IsWritable() {
-			accessType = AccessReadWrite
-		}
-
-		// param_code = 末段（去 {i}）
-		segs := strings.Split(StripInstanceIndex(p.StandardPath), ".")
-		paramCode := segs[len(segs)-1]
-
-		_, err := tx.Exec(ctx, `
-			INSERT INTO mml_params (
-				id, param_code, param_name_zh, param_name_en, tr069_path,
-				value_type, value_constraint, access_type, is_leaf,
-				param_version, name_i18n, explanation_i18n,
-				display_order, is_active
-			) VALUES (
-				gen_random_uuid(), $1, $2, $2, $3,
-				$4, $5, $6, true,
-				$7, $8, '{}'::jsonb,
-				0, true
-			)
-			ON CONFLICT (param_version, tr069_path) DO UPDATE
-			SET param_code    = EXCLUDED.param_code,
-			    value_type    = EXCLUDED.value_type,
-			    value_constraint = EXCLUDED.value_constraint,
-			    access_type   = EXCLUDED.access_type,
-			    name_i18n     = EXCLUDED.name_i18n,
-			    is_active     = true,
-			    updated_at    = NOW()
-		`, paramCode, paramCode, p.StandardPath,
-			valueType, constraint, accessType,
-			VersionCode, nameI18nJSON(paramCode, paramCode))
-		if err != nil {
-			return fmt.Errorf("upsert param %s: %w", p.StandardPath, err)
-		}
-	}
+	_ = ctx
+	_ = tx
+	_ = params
 	return nil
 }
 

@@ -173,7 +173,7 @@ func (h *ConsoleHandler) GetGroupTree(c *gin.Context) {
 // GET /api/v1/mml/commands/:id/sub-fields?lang=<lang>
 // ============================================================
 
-// GetCommandSubFields 返回命令的 sub-fields（含 join mml_params 通用元数据），
+// GetCommandSubFields 返回命令的 sub-fields（含 JOIN standard_params 元数据），
 // 按 sort_order 排序。lang 派生顶级 label / constraint_text。
 func (h *ConsoleHandler) GetCommandSubFields(c *gin.Context) {
 	id, ok := parseUUIDPathParam(c, "id")

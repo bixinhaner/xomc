@@ -3,10 +3,8 @@ import { Card, Tabs } from 'antd';
 import { useT } from '@/hooks/useT';
 import GroupsTab from './GroupsTab';
 import CommandsTab from './CommandsTab';
-import ParamsTab from './ParamsTab';
-import XmlImportTab from './XmlImportTab';
 
-type CatalogTab = 'groups' | 'commands' | 'params' | 'xmlImport';
+type CatalogTab = 'groups' | 'commands';
 
 export default function MMLAdminCatalog() {
   const t = useT();
@@ -27,16 +25,6 @@ export default function MMLAdminCatalog() {
             key: 'commands',
             label: t('mml.admin.catalog.tab.commands'),
             children: <CommandsTab />,
-          },
-          {
-            key: 'params',
-            label: t('mml.admin.catalog.tab.params'),
-            children: <ParamsTab />,
-          },
-          {
-            key: 'xmlImport',
-            label: t('mml.admin.catalog.tab.xmlImport'),
-            children: <XmlImportTab />,
           },
         ]}
       />

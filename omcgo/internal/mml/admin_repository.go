@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
@@ -18,11 +17,10 @@ import (
 // ============================================================
 // admin_repository.go — T-0123-P0 catalog 管理 repo 层
 //
-// 5 interfaces (按资源类型分组):
+// 3 interfaces (按资源类型分组):
 //   - SubFieldRepository       — mml_command_sub_fields CRUD
 //   - AdminGroupRepository     — mml_command_groups admin CRUD
 //   - AdminCommandRepository   — mml_commands admin CRUD（GetByID 复用 PgCommandRepository）
-//   - AdminParamRepository     — mml_params admin CRUD + List
 //
 // 设计依据：
 //   - PRD `docs/design/mml-restore-old-interaction-plan-20260514.md` §M.5.2
@@ -33,40 +31,6 @@ import (
 // catalog_protected 守护逻辑在 service 层（admin_service.go）实施；
 // 本层仅 raw CRUD，无业务校验。
 // ============================================================
-
-// ---- 共享列表 ----
-
-var paramAdminColumns = []string{
-	"id", "param_code", "param_name_zh", "param_name_en",
-	"tr069_path", "value_type", "value_constraint",
-	"default_value", "js_regex", "is_writable", "is_leaf",
-	"display_order", "param_version", "explanation_zh", "explanation_en",
-	"title_zh", "title_en",
-	// T-0123-P0 catalog 元数据
-	"access_type", "is_object", "supports_add", "supports_delete",
-	"change_applies", "constraint_text_i18n", "catalog_protected", "source",
-	"name_i18n", "explanation_i18n",
-}
-
-var groupAdminColumns = []string{
-	"id", "group_code", "group_name_zh", "group_name_en", "param_version",
-	"path", "display_order",
-	"name_i18n",
-	// T-0123-P0 catalog 元数据
-	"source", "catalog_protected",
-	"created_at", "updated_at",
-}
-
-// AdminParamFilter 列查询参数字典时的过滤器。
-type AdminParamFilter struct {
-	Search       *string
-	AccessType   *string
-	IsObject     *bool
-	Source       *string
-	ParamVersion *string
-	PageNum      int
-	PageSize     int
-}
 
 // ============================================================
 // SubFieldRepository (mml_command_sub_fields)
@@ -544,316 +508,11 @@ func (r *PgAdminCommandRepository) Delete(ctx context.Context, id uuid.UUID) err
 }
 
 // ============================================================
-// AdminParamRepository (mml_params)
-// ============================================================
-
-// AdminParamRepository 提供 mml_params 的 admin CRUD + List + sub_field 引用计数。
+// AdminParamRepository (mml_params) — DELETED
 //
-// is_writable 是 GENERATED STORED 派生列（migration 000095），INSERT/UPDATE 时
-// **不能** 在列列表中包含 is_writable —— 由 access_type 派生。
-type AdminParamRepository interface {
-	Create(ctx context.Context, p *Param) error
-	Update(ctx context.Context, p *Param) error
-	Delete(ctx context.Context, id uuid.UUID) error
-	GetByID(ctx context.Context, id uuid.UUID) (*Param, error)
-	List(ctx context.Context, f AdminParamFilter) ([]Param, int64, error)
-	// ListReferences 反向查：返回引用该 param_id 的命令列表（admin Tab 3 Params 行点击抽屉用，T-0131）
-	ListReferences(ctx context.Context, paramID uuid.UUID) ([]ParamReference, error)
-	// ListPathStateByVersion 返回指定 param_version 下所有 path → catalog_protected 映射（T-0132 XML 导入 diff 用）。
-	// 仅返必要字段（tr069_path / catalog_protected）以最小化网络/内存开销，10K 行 ~200KB。
-	ListPathStateByVersion(ctx context.Context, paramVersion string) (map[string]bool, error)
-	// BatchUpsertStandardParams 批量 UPSERT standard 来源 params（T-0132 XML 导入 apply 用）。
-	// 对 catalog_protected=true 行执行 UPDATE；对 catalog_protected=false 行被守护跳过。
-	// 返回 rowsAffected（INSERT + UPDATE 总数，跳过的不计）。
-	BatchUpsertStandardParams(ctx context.Context, rows []ImportRow, paramVersion string) (int64, error)
-}
-
-// ImportRow 是 T-0132 XML 导入向 mml_params 的批量 UPSERT 行（与 xml_import_helpers.go::importRow 同步）。
-// 导出版本供 repo interface 跨包消费。
-type ImportRow struct {
-	ParamCode          string
-	Tr069Path          string
-	ValueType          string
-	AccessType         string
-	IsObject           bool
-	SupportsAdd        bool
-	SupportsDelete     bool
-	ChangeApplies      string
-	NameI18n           map[string]string
-	ConstraintTextI18n map[string]string
-}
-
-// ParamReference 是 admin Tab 3 反向查的一条记录：某个 param 被哪些命令引用。
-type ParamReference struct {
-	CommandID       uuid.UUID         `json:"command_id"`
-	CommandCode     string            `json:"command_code"`
-	LogicalCode     string            `json:"logical_code"`
-	OperationType   string            `json:"operation_type"`
-	CommandNameI18n map[string]string `json:"command_name_i18n"`
-	GroupID         uuid.UUID         `json:"group_id"`
-	GroupPath       string            `json:"group_path"`
-}
-
-// PgAdminParamRepository PostgreSQL 实现。
-type PgAdminParamRepository struct {
-	pool *pgxpool.Pool
-}
-
-// NewPgAdminParamRepository 构造 PgAdminParamRepository。
-func NewPgAdminParamRepository(pool *pgxpool.Pool) *PgAdminParamRepository {
-	return &PgAdminParamRepository{pool: pool}
-}
-
-var _ AdminParamRepository = (*PgAdminParamRepository)(nil)
-
-func (r *PgAdminParamRepository) Create(ctx context.Context, p *Param) error {
-	if p.ID == uuid.Nil {
-		p.ID = uuid.New()
-	}
-	if p.Source == "" {
-		p.Source = SourceAdmin
-	}
-	if p.AccessType == "" {
-		p.AccessType = AccessTypeReadOnly
-	}
-	if p.ChangeApplies == "" {
-		p.ChangeApplies = ChangeAppliesImmediate
-	}
-	constraint, err := marshalI18n(p.ConstraintTextI18n)
-	if err != nil {
-		return fmt.Errorf("marshal constraint_text_i18n: %w", err)
-	}
-	// NOTE: 不包含 is_writable（GENERATED 派生列，自动从 access_type 派生）。
-	const sqlText = `
-INSERT INTO mml_params (
-    id, param_code, tr069_path, value_type, value_constraint,
-    default_value, js_regex, param_version,
-    access_type, is_object, supports_add, supports_delete,
-    change_applies, constraint_text_i18n, catalog_protected, source
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`
-	if _, err := r.pool.Exec(ctx, sqlText,
-		p.ID, p.ParamCode, p.Tr069Path, p.ValueType, jsonOrEmpty(p.ValueConstraint),
-		p.DefaultValue, p.JsRegex, p.ParamVersion,
-		p.AccessType, p.IsObject, p.SupportsAdd, p.SupportsDelete,
-		p.ChangeApplies, constraint, p.CatalogProtected, p.Source,
-	); err != nil {
-		return fmt.Errorf("insert param: %w", err)
-	}
-	return nil
-}
-
-func (r *PgAdminParamRepository) Update(ctx context.Context, p *Param) error {
-	constraint, err := marshalI18n(p.ConstraintTextI18n)
-	if err != nil {
-		return fmt.Errorf("marshal constraint_text_i18n: %w", err)
-	}
-	// NOTE: 不包含 is_writable（GENERATED 派生列）。
-	const sqlText = `
-UPDATE mml_params SET
-    value_constraint     = $2,
-    default_value        = $3,
-    js_regex             = $4,
-    access_type          = $5,
-    is_object            = $6,
-    supports_add         = $7,
-    supports_delete      = $8,
-    change_applies       = $9,
-    constraint_text_i18n = $10
-WHERE id = $1`
-	tag, err := r.pool.Exec(ctx, sqlText,
-		p.ID, jsonOrEmpty(p.ValueConstraint),
-		p.DefaultValue, p.JsRegex,
-		p.AccessType, p.IsObject, p.SupportsAdd, p.SupportsDelete,
-		p.ChangeApplies, constraint,
-	)
-	if err != nil {
-		return fmt.Errorf("update param: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrParamNotFound
-	}
-	return nil
-}
-
-func (r *PgAdminParamRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	const sqlText = `DELETE FROM mml_params WHERE id = $1`
-	tag, err := r.pool.Exec(ctx, sqlText, id)
-	if err != nil {
-		return fmt.Errorf("delete param: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrParamNotFound
-	}
-	return nil
-}
-
-func (r *PgAdminParamRepository) GetByID(ctx context.Context, id uuid.UUID) (*Param, error) {
-	const sqlText = `
-SELECT id, param_code, tr069_path, value_type, value_constraint,
-       default_value, js_regex, is_writable, param_version,
-       access_type, is_object, supports_add, supports_delete,
-       change_applies, constraint_text_i18n, catalog_protected, source
-FROM mml_params WHERE id = $1`
-	p := &Param{}
-	var constraint []byte
-	if err := r.pool.QueryRow(ctx, sqlText, id).Scan(
-		&p.ID, &p.ParamCode, &p.Tr069Path, &p.ValueType, &p.ValueConstraint,
-		&p.DefaultValue, &p.JsRegex, &p.IsWritable, &p.ParamVersion,
-		&p.AccessType, &p.IsObject, &p.SupportsAdd, &p.SupportsDelete,
-		&p.ChangeApplies, &constraint, &p.CatalogProtected, &p.Source,
-	); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrParamNotFound
-		}
-		return nil, fmt.Errorf("scan param: %w", err)
-	}
-	if err := unmarshalI18n(constraint, &p.ConstraintTextI18n); err != nil {
-		return nil, fmt.Errorf("unmarshal constraint_text_i18n: %w", err)
-	}
-	return p, nil
-}
-
-func (r *PgAdminParamRepository) List(ctx context.Context, f AdminParamFilter) ([]Param, int64, error) {
-	base := storage.Psql.Select(
-		"id", "param_code", "tr069_path", "value_type", "value_constraint",
-		"default_value", "js_regex", "is_writable", "param_version",
-		"access_type", "is_object", "supports_add", "supports_delete",
-		"change_applies", "constraint_text_i18n", "catalog_protected", "source",
-	).From("mml_params")
-
-	countBase := storage.Psql.Select("COUNT(*)").From("mml_params")
-
-	conds := sq.And{}
-	if f.Search != nil && *f.Search != "" {
-		pattern := "%" + *f.Search + "%"
-		conds = append(conds, sq.Or{
-			sq.ILike{"tr069_path": pattern},
-			sq.ILike{"param_code": pattern},
-		})
-	}
-	if f.AccessType != nil {
-		conds = append(conds, sq.Eq{"access_type": *f.AccessType})
-	}
-	if f.IsObject != nil {
-		conds = append(conds, sq.Eq{"is_object": *f.IsObject})
-	}
-	if f.Source != nil {
-		conds = append(conds, sq.Eq{"source": *f.Source})
-	}
-	if f.ParamVersion != nil {
-		conds = append(conds, sq.Eq{"param_version": *f.ParamVersion})
-	}
-	if len(conds) > 0 {
-		base = base.Where(conds)
-		countBase = countBase.Where(conds)
-	}
-
-	pageSize := f.PageSize
-	if pageSize <= 0 {
-		pageSize = 50
-	}
-	if pageSize > 500 {
-		pageSize = 500
-	}
-	pageNum := f.PageNum
-	if pageNum <= 0 {
-		pageNum = 1
-	}
-	offset := uint64((pageNum - 1) * pageSize)
-
-	listQuery, listArgs, err := base.
-		OrderBy("tr069_path ASC").
-		Offset(offset).
-		Limit(uint64(pageSize)).
-		ToSql()
-	if err != nil {
-		return nil, 0, fmt.Errorf("build list params SQL: %w", err)
-	}
-	countQuery, countArgs, err := countBase.ToSql()
-	if err != nil {
-		return nil, 0, fmt.Errorf("build count params SQL: %w", err)
-	}
-
-	var total int64
-	if err := r.pool.QueryRow(ctx, countQuery, countArgs...).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count params: %w", err)
-	}
-
-	rows, err := r.pool.Query(ctx, listQuery, listArgs...)
-	if err != nil {
-		return nil, 0, fmt.Errorf("query params: %w", err)
-	}
-	defer rows.Close()
-
-	var out []Param
-	for rows.Next() {
-		p := Param{}
-		var constraint []byte
-		if err := rows.Scan(
-			&p.ID, &p.ParamCode, &p.Tr069Path, &p.ValueType, &p.ValueConstraint,
-			&p.DefaultValue, &p.JsRegex, &p.IsWritable, &p.ParamVersion,
-			&p.AccessType, &p.IsObject, &p.SupportsAdd, &p.SupportsDelete,
-			&p.ChangeApplies, &constraint, &p.CatalogProtected, &p.Source,
-		); err != nil {
-			return nil, 0, fmt.Errorf("scan param row: %w", err)
-		}
-		if err := unmarshalI18n(constraint, &p.ConstraintTextI18n); err != nil {
-			return nil, 0, fmt.Errorf("unmarshal constraint_text_i18n: %w", err)
-		}
-		out = append(out, p)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("iterate params rows: %w", err)
-	}
-	return out, total, nil
-}
-
-// ListReferences 反向查询：返回引用该 standard_path 的命令列表（T-0131 admin Tab 3 反向查抽屉用）。
-// 入参 paramID 在 migration 000113 后语义切换为 standard_params.id。
-// JOIN 链：mml_command_sub_fields → mml_commands → mml_command_groups。
-// ORDER BY command_code 保持稳定顺序便于 UI 渲染。
-func (r *PgAdminParamRepository) ListReferences(ctx context.Context, paramID uuid.UUID) ([]ParamReference, error) {
-	const sqlText = `
-SELECT c.id, c.command_code, c.logical_code, c.operation_type,
-       c.command_name_i18n, g.id, g.path
-FROM mml_command_sub_fields sf
-JOIN mml_commands c       ON c.id = sf.command_id
-JOIN mml_command_groups g   ON g.id = c.group_id
-WHERE sf.standard_path_id = $1
-ORDER BY c.command_code`
-	rows, err := r.pool.Query(ctx, sqlText, paramID)
-	if err != nil {
-		return nil, fmt.Errorf("query param references: %w", err)
-	}
-	defer rows.Close()
-
-	out := make([]ParamReference, 0, 8)
-	for rows.Next() {
-		var ref ParamReference
-		var nameI18nBytes []byte
-		if err := rows.Scan(
-			&ref.CommandID,
-			&ref.CommandCode,
-			&ref.LogicalCode,
-			&ref.OperationType,
-			&nameI18nBytes,
-			&ref.GroupID,
-			&ref.GroupPath,
-		); err != nil {
-			return nil, fmt.Errorf("scan param reference: %w", err)
-		}
-		if len(nameI18nBytes) > 0 {
-			if err := json.Unmarshal(nameI18nBytes, &ref.CommandNameI18n); err != nil {
-				return nil, fmt.Errorf("unmarshal command_name_i18n: %w", err)
-			}
-		}
-		out = append(out, ref)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate param references rows: %w", err)
-	}
-	return out, nil
-}
+// mml_params 表已下线（v2.3 catalog 单源化），所有 admin Param CRUD / XML 导入
+// 路径已移除。sub_fields 通过 standard_path_id 引用 standard_params。
+// ============================================================
 
 // ============================================================
 // 共享 helper（i18n / null / sentinel）
@@ -915,14 +574,10 @@ var (
 	ErrGroupNotFound = errors.New("mml: group not found")
 	// ErrCommandNotFound 当 command 不存在或被并发删除时返回。
 	ErrCommandNotFound = errors.New("mml: command not found")
-	// ErrParamNotFound 当 param 不存在或被并发删除时返回。
-	ErrParamNotFound = errors.New("mml: param not found")
 
 	// ErrCatalogProtected 当尝试修改/删除 catalog_protected=true 的 row 关键字段时返回。
 	// service 层 catalog_protected 守护逻辑使用；handler 翻 HTTP 403。
 	ErrCatalogProtected = errors.New("mml: entry is catalog_protected; modification denied")
-	// ErrParamInUse 当尝试删除被 sub_fields 引用的 param 时返回；handler 翻 HTTP 409。
-	ErrParamInUse = errors.New("mml: param is referenced by sub_fields")
 	// ErrGroupNotEmpty 当尝试删除还含 commands 的 group 时返回；handler 翻 HTTP 409。
 	ErrGroupNotEmpty = errors.New("mml: group has commands; cannot delete")
 
@@ -950,120 +605,3 @@ const (
 	SourceStandard = "standard"
 	SourceAdmin    = "admin"
 )
-
-// ============================================================
-// T-0132 XML 导入 — PG 实现（ListPathStateByVersion + BatchUpsertStandardParams）
-// ============================================================
-
-// ListPathStateByVersion 见 AdminParamRepository.ListPathStateByVersion。
-func (r *PgAdminParamRepository) ListPathStateByVersion(ctx context.Context, paramVersion string) (map[string]bool, error) {
-	const sqlText = `SELECT tr069_path, catalog_protected FROM mml_params WHERE param_version = $1`
-	rows, err := r.pool.Query(ctx, sqlText, paramVersion)
-	if err != nil {
-		return nil, fmt.Errorf("list path state: %w", err)
-	}
-	defer rows.Close()
-	out := make(map[string]bool, 2000)
-	for rows.Next() {
-		var path string
-		var protected bool
-		if err := rows.Scan(&path, &protected); err != nil {
-			return nil, fmt.Errorf("scan path state: %w", err)
-		}
-		out[path] = protected
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate path state: %w", err)
-	}
-	return out, nil
-}
-
-// BatchUpsertStandardParams 见 AdminParamRepository.BatchUpsertStandardParams。
-//
-// SQL 行为（与 omcctl/mml.go::renderImportSQL 保持一致 Q2=C 决议）：
-//   - INSERT 新行：tr069_path 未存在 → 直接插入 catalog_protected=true source='standard'
-//   - UPDATE 旧 standard 行：(param_version, tr069_path) 命中 + catalog_protected=true → 更新 8 个元数据列
-//   - 跳过 admin 改过的行：(param_version, tr069_path) 命中 + catalog_protected=false → ON CONFLICT 触发但 WHERE 不满足 → 行不变（不计入 rowsAffected）
-//
-// 批量大小：单批 ~500 行（standard-model.xml ~2000 行需 4 批）。
-func (r *PgAdminParamRepository) BatchUpsertStandardParams(ctx context.Context, rows []ImportRow, paramVersion string) (int64, error) {
-	if len(rows) == 0 {
-		return 0, nil
-	}
-	const batchSize = 500
-	var totalAffected int64
-	for start := 0; start < len(rows); start += batchSize {
-		end := start + batchSize
-		if end > len(rows) {
-			end = len(rows)
-		}
-		affected, err := r.upsertBatch(ctx, rows[start:end], paramVersion)
-		if err != nil {
-			return totalAffected, fmt.Errorf("batch [%d:%d]: %w", start, end, err)
-		}
-		totalAffected += affected
-	}
-	return totalAffected, nil
-}
-
-func (r *PgAdminParamRepository) upsertBatch(ctx context.Context, batch []ImportRow, paramVersion string) (int64, error) {
-	var b strings.Builder
-	b.WriteString(`INSERT INTO mml_params (
-    id, param_version, param_code, param_name_zh, param_name_en, tr069_path, value_type,
-    access_type, is_object, supports_add, supports_delete, change_applies,
-    name_i18n, explanation_i18n, constraint_text_i18n,
-    catalog_protected, source, display_order
-) VALUES `)
-
-	args := make([]any, 0, len(batch)*15)
-	for i, row := range batch {
-		nameZh := row.NameI18n["zh-CN"]
-		nameEn := row.NameI18n["en-US"]
-		if nameZh == "" {
-			nameZh = nameEn
-		}
-		if nameZh == "" {
-			nameZh = row.ParamCode
-		}
-		nameI18nJSON, err := marshalI18n(row.NameI18n)
-		if err != nil {
-			return 0, fmt.Errorf("marshal name_i18n for %s: %w", row.Tr069Path, err)
-		}
-		constraintI18nJSON, err := marshalI18n(row.ConstraintTextI18n)
-		if err != nil {
-			return 0, fmt.Errorf("marshal constraint_text_i18n for %s: %w", row.Tr069Path, err)
-		}
-
-		base := i * 15
-		if i > 0 {
-			b.WriteString(",\n")
-		}
-		fmt.Fprintf(&b,
-			"(gen_random_uuid(), $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d::jsonb, $%d::jsonb, $%d::jsonb, true, 'standard', $%d)",
-			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9, base+10, base+11, base+12, base+13, base+14, base+15,
-		)
-		args = append(args,
-			paramVersion, row.ParamCode, nameZh, nameEn, row.Tr069Path,
-			row.ValueType, row.AccessType, row.IsObject, row.SupportsAdd, row.SupportsDelete,
-			row.ChangeApplies, nameI18nJSON, []byte("{}"), constraintI18nJSON, i,
-		)
-	}
-
-	b.WriteString(`
-ON CONFLICT (param_version, tr069_path) DO UPDATE SET
-    access_type          = EXCLUDED.access_type,
-    is_object            = EXCLUDED.is_object,
-    supports_add         = EXCLUDED.supports_add,
-    supports_delete      = EXCLUDED.supports_delete,
-    change_applies       = EXCLUDED.change_applies,
-    constraint_text_i18n = EXCLUDED.constraint_text_i18n,
-    name_i18n            = EXCLUDED.name_i18n,
-    value_type           = EXCLUDED.value_type
-WHERE mml_params.catalog_protected = true`)
-
-	tag, err := r.pool.Exec(ctx, b.String(), args...)
-	if err != nil {
-		return 0, fmt.Errorf("exec batch upsert: %w", err)
-	}
-	return tag.RowsAffected(), nil
-}

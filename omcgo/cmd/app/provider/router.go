@@ -462,7 +462,6 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- MML Console routes → resource "devices" -----
 	md.mmlHandler.RegisterRoutes(permGroup("devices"))
-	md.paramHandler.RegisterRoutes(permGroup("devices"))
 	// T-0123-P0：MML Catalog Admin (13 endpoints) → resource "devices"（端点级 Casbin 鉴权进一步细分）
 	if md.mmlAdminHandler != nil {
 		md.mmlAdminHandler.RegisterRoutes(permGroup("devices"))

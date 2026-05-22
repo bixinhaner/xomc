@@ -69,7 +69,7 @@ export function useGroupTreeFlat(
 }
 
 /**
- * 命令的 sub-fields（join mml_params 元数据）。
+ * 命令的 sub-fields（join standard_params 元数据；mml_params 表已下线）。
  *
  * enabled = Boolean(commandId) 防止首次渲染没选命令时空查。
  * staleTime 与 GroupTree 一致。
