@@ -4,8 +4,10 @@
 #
 # 检查内容：
 #   · docker compose 容器状态（business + infra + monitoring）
-#   · 4 个核心健康端点：app /health（:8081）/ acs /healthz（:9090）/
-#     app /metrics（:9091）/ 前端（:8080）
+#   · 5 个核心健康端点（端口与 docker-compose port mapping 对齐）：
+#     app /healthz（:9091）/ acs /healthz（:9095，容器 9090→宿主 9095）/
+#     worker /healthz（:9092）/ app /metrics（:9091）/ 前端 SPA（:8081，
+#     web 容器 nginx；:8080 是 ACS CWMP 反代不检）
 #
 # 用法：
 #   bash healthcheck.sh                # 默认完整检查
@@ -84,10 +86,15 @@ if [ -f "$DEPLOY_DIR/docker-compose.monitoring.yml" ]; then
 fi
 
 echo "== 服务健康端点 =="
-check "app  /health  (:8081)"   curl -fsS http://127.0.0.1:8081/health
-check "acs  /healthz (:9090)"   curl -fsS http://127.0.0.1:9090/healthz
-check "app  metrics  (:9091)"   curl -fsS http://127.0.0.1:9091/metrics
-check "前端 (:8080)"             curl -fsS http://127.0.0.1:8080/
+# /healthz + /metrics 都在 metrics 端口上注册（internal/core/components/monitor/metrics.go）。
+# 业务进程主 HTTP（app:8081 / acs SOAP:7547）不直接暴露 /healthz —— 用 metrics 端口检健康。
+# 端口与 compose port mapping 对齐：app/worker 容器 == 宿主；acs 容器 9090 → 宿主 9095。
+check "app    /healthz (:9091)"  curl -fsS http://127.0.0.1:9091/healthz
+check "acs    /healthz (:9095)"  curl -fsS http://127.0.0.1:9095/healthz
+check "worker /healthz (:9092)"  curl -fsS http://127.0.0.1:9092/healthz
+check "app    /metrics (:9091)"  curl -fsS http://127.0.0.1:9091/metrics
+# 前端 SPA：web 容器 nginx :8081 served（:8080 是 ACS CWMP 反代，GET / 不响应，不检）。
+check "前端 SPA (:8081)"          curl -fsS http://127.0.0.1:8081/ -o /dev/null
 
 echo
 echo "compose ps 详情："
