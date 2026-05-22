@@ -27,11 +27,13 @@
 #   ./build-images.sh                            # 默认：基础设施 + 监控栈全套
 #   ./build-images.sh --infra-only               # 仅基础设施（不含监控栈）
 #   ./build-images.sh --monitoring-only          # 只补监控栈（不重拉 infra）
-#   ./build-images.sh -v 0.0.2                   # 手动指定基础设施版本
+#   ./build-images.sh -v 0.0.2                   # 手动指定基础设施版本（仍会自动追加时间戳）
 #   ./build-images.sh -h | --help                # 本帮助
 #
 # 参数：
-#   -v, --version <ver>     基础设施版本号（默认取 release.conf 的 INFRA_VERSION）
+#   -v, --version <ver>     基础设施版本号的基础部分（默认取 release.conf 的 INFRA_VERSION）。
+#                           无论是否手动指定，最终版本都会自动追加 -YYYYMMDD-HHMM
+#                           时间戳（例：-v 0.0.2 → 0.0.2-20260522-1530），保证镜像 tag 唯一。
 #   --arch <amd64>          目标架构。【当前只支持 amd64】，非法值会被拒绝；
 #                           原因见 release.conf 中"架构支持"注释
 #   --infra-only            仅拉 + 打包基础设施镜像，不要监控栈（v2 新增）
@@ -109,6 +111,9 @@ CACHE="$SCRIPT_DIR/images-cache"
 mkdir -p "$CACHE"
 
 # --monitoring-only：基础设施必须已构建过；版本与构建时间沿用既有 manifest
+# 无论 INFRA_VERSION 来自 release.conf 默认值还是 -v 参数，最终版本号统一追加
+# -YYYYMMDD-HHMM 时间戳，保证镜像 tag 与归档目录永远唯一。--monitoring-only 下
+# 从既有 manifest 沉底读回全版本（已含时间戳），避免补包冲出另一个版本目录。
 if [ "$MONITORING_ONLY" = 1 ]; then
   for ARCH in $ARCHES; do
     [ -f "$CACHE/infra-images-$ARCH.tar" ] || \
@@ -119,9 +124,11 @@ if [ "$MONITORING_ONLY" = 1 ]; then
     INFRA_VERSION="$(grep -E '^infra_version=' "$CACHE/images.manifest" | cut -d= -f2 || echo "$INFRA_VERSION")"
     BUILT_AT="$(grep -E '^built_at=' "$CACHE/images.manifest" | cut -d= -f2 || date -Is)"
   else
+    INFRA_VERSION="${INFRA_VERSION}-$(date +%Y%m%d-%H%M)"
     BUILT_AT="$(date -Is)"
   fi
 else
+  INFRA_VERSION="${INFRA_VERSION}-$(date +%Y%m%d-%H%M)"
   BUILT_AT="$(date -Is)"
 fi
 

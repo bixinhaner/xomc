@@ -365,12 +365,25 @@ if ! docker network inspect omcgo-net >/dev/null 2>&1; then
 fi
 
 # 7.3 migrate-schema（一次性容器，跑完即退；用 .env 中的 dsn）
+#     docker compose run 存在 DNS 竞态（新容器加入网络后 DNS 注册可能有短暂延迟），
+#     因此加重试逻辑：最多 3 次，间隔 5s。
 if [ "$SKIP_MIGRATE" = 0 ]; then
   log "执行 db migrate（容器：migrate-schema）..."
-  if "${DC[@]}" run --rm migrate-schema; then
+  MIGRATE_OK=0
+  for attempt in 1 2 3; do
+    if "${DC[@]}" run --rm migrate-schema; then
+      MIGRATE_OK=1
+      break
+    fi
+    if [ $attempt -lt 3 ]; then
+      warn "migrate 第 ${attempt} 次失败，等待 5s 重试..."
+      sleep 5
+    fi
+  done
+  if [ "$MIGRATE_OK" = 1 ]; then
     log "migrate 成功"
   else
-    die "migrate 失败：${DC[*]} run --rm migrate-schema" 3
+    die "migrate 失败（已重试 3 次）：${DC[*]} run --rm migrate-schema" 3
   fi
 
   # 7.4 seed（首次部署跑一次；用 .seed.done 标记防重复）

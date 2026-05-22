@@ -14,9 +14,11 @@
 #   release → omc-release-<版本>-<架构>.tar.xz  （正式发布）
 #   默认取 release.conf 的 RELEASE_CHANNEL，--channel 可临时覆盖。
 #
-# 项目版本号（纯 semver，与基础设施版本独立）：
-#   不带 -v  → 自动生成（小版本）：<RELEASE_BASE_VERSION>-<构建时间戳>
-#   带  -v   → 手动指定（大版本）：例如  ./build-release.sh -v 1.0.0
+# 项目版本号（与基础设施版本独立，最终格式统一为 X.Y.Z-YYYYMMDD-HHMM）：
+#   不带 -v  → 自动生成：<RELEASE_BASE_VERSION>-<构建时间戳>
+#   带  -v   → 指定基础版本：<X.Y.Z>-<构建时间戳>（指定的版本号会自动追加时间戳，
+#              保证镜像 tag 永远唯一，使 deploy.sh 的 images_exist 智能跳过逻辑安全）
+#   例： ./build-release.sh -v 1.0.0   →  1.0.0-20260522-1530
 #
 # 产物：archive/project/<版本>/omc-<渠道>-<版本>-<架构>.tar.<压缩>（+ .sha256）
 #       并自动刷新 archive/index.html，供 serve.sh 起 HTTP 服务下载。
@@ -99,11 +101,14 @@ case "$PKG_COMPRESS" in
 esac
 
 # ── 项目版本号解析 ──────────────────────────────────────────────────────
+# 无论是否传 -v，最终版本号统一追加 -YYYYMMDD-HHMM 时间戳，保证镜像 tag 永远唯一。
+TIMESTAMP="$(date +%Y%m%d-%H%M)"
 if [ -n "$VERSION" ]; then
-  log "项目版本【手动指定 / 大版本】：$VERSION"
+  VERSION="${VERSION}-${TIMESTAMP}"
+  log "项目版本【手动指定基础版本 + 时间戳】：$VERSION"
 else
-  VERSION="${RELEASE_BASE_VERSION}-$(date +%Y%m%d-%H%M)"
-  log "项目版本【自动生成 / 小版本】：$VERSION"
+  VERSION="${RELEASE_BASE_VERSION}-${TIMESTAMP}"
+  log "项目版本【自动生成】：$VERSION"
 fi
 GIT_COMMIT="$(cd "$REPO_ROOT" && git rev-parse --short HEAD 2>/dev/null || echo n/a)"
 
