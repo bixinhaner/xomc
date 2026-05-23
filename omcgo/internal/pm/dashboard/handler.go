@@ -96,6 +96,8 @@ func mapErr(c *gin.Context, err error) {
 		response.Fail(c, http.StatusNotFound, "not found")
 	case errors.Is(err, ErrPermissionDenied):
 		response.Fail(c, http.StatusForbidden, "permission denied")
+	case errors.Is(err, ErrBuiltinReadonly):
+		response.Fail(c, http.StatusForbidden, "builtin dashboard is read-only; fork it first")
 	default:
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 	}
@@ -112,6 +114,7 @@ type dashboardDTO struct {
 	ParentDashboardID *string        `json:"parent_dashboard_id,omitempty"`
 	Technology        string         `json:"technology"`
 	Layout            json.RawMessage `json:"layout"`
+	IsBuiltin         bool           `json:"is_builtin"`
 	CreatedAt         string         `json:"created_at"`
 	UpdatedAt         string         `json:"updated_at"`
 }
@@ -130,6 +133,7 @@ func dashboardToDTO(d *Dashboard) dashboardDTO {
 		ID: d.ID.String(), Name: d.Name, Description: d.Description,
 		OwnerID: d.OwnerID.String(), SharedWith: shared, ParentDashboardID: parent,
 		Technology: string(d.Technology), Layout: d.Layout,
+		IsBuiltin: d.IsBuiltin,
 		CreatedAt: d.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		UpdatedAt: d.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}

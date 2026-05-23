@@ -29,7 +29,7 @@ const (
 	TechGSM Technology = "gsm"
 )
 
-// PanelType 5 种受支持图表类型。
+// PanelType 7 种受支持图表类型（T-0164 收尾 G6-Gap-5 加 topn + big_number）。
 type PanelType string
 
 const (
@@ -38,6 +38,8 @@ const (
 	PanelBarChart  PanelType = "bar_chart"
 	PanelTable     PanelType = "table"
 	PanelGauge     PanelType = "gauge"
+	PanelTopN      PanelType = "topn"        // 排行榜 — config.n + config.sort_desc
+	PanelBigNumber PanelType = "big_number"  // 数值大屏 — config.font_size + config.warning_threshold
 )
 
 // Dimension 数据维度。
@@ -66,6 +68,7 @@ type Dashboard struct {
 	ParentDashboardID *uuid.UUID
 	Technology        Technology
 	Layout            json.RawMessage // react-grid-layout 配置（前端透传）
+	IsBuiltin         bool            // G6-Gap-4: 系统内置 readonly 标记（前端 hide 编辑 / 删除）
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }

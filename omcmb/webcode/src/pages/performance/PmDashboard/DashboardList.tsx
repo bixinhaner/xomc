@@ -96,13 +96,12 @@ export default function PmDashboardList() {
           },
           {
             title: '类型',
-            width: 100,
-            render: (_, r) =>
-              currentUserId && r.ownerId === currentUserId ? (
-                <Tag>自有</Tag>
-              ) : (
-                <Tag color="orange">来自分享</Tag>
-              ),
+            width: 110,
+            render: (_, r) => {
+              if (r.isBuiltin) return <Tag color="blue">系统内置</Tag>;
+              if (currentUserId && r.ownerId === currentUserId) return <Tag>自有</Tag>;
+              return <Tag color="orange">来自分享</Tag>;
+            },
           },
           {
             title: '分享给',
@@ -115,6 +114,7 @@ export default function PmDashboardList() {
             width: 280,
             render: (_, r) => {
               const isOwner = currentUserId === r.ownerId;
+              const canModify = isOwner && !r.isBuiltin; // G6-Gap-4: 内置 dashboard readonly
               return (
                 <Space>
                   <Button size="small" icon={<EditOutlined />} onClick={() => navigate(`/performance/pm-dashboard/${r.id}`)}>
@@ -123,12 +123,12 @@ export default function PmDashboardList() {
                   <Button size="small" icon={<ForkOutlined />} onClick={() => setForkOpen(r)}>
                     派生
                   </Button>
-                  {isOwner && (
+                  {canModify && (
                     <Button size="small" icon={<ShareAltOutlined />} onClick={() => message.info('分享对话框 G6 task 10')}>
                       分享
                     </Button>
                   )}
-                  {isOwner && (
+                  {canModify && (
                     <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete(r.id)}>
                       删除
                     </Button>

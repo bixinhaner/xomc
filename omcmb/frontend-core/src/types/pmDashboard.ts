@@ -12,8 +12,8 @@
 // 顶层制式切换
 export type Technology = 'lte' | 'nr' | 'gsm';
 
-// 5 种 Panel 类型
-export type PanelType = 'kpi_card' | 'line_chart' | 'bar_chart' | 'table' | 'gauge';
+// 7 种 Panel 类型（T-0164 收尾 G6-Gap-5 加 topn + big_number）
+export type PanelType = 'kpi_card' | 'line_chart' | 'bar_chart' | 'table' | 'gauge' | 'topn' | 'big_number';
 
 // 数据维度
 export type Dimension = 'device' | 'device_group';
@@ -56,6 +56,7 @@ export interface Dashboard {
   parentDashboardId?: string;
   technology: Technology;
   layout: DashboardLayout;
+  isBuiltin: boolean; // G6-Gap-4: 系统内置 readonly 标记
   createdAt: string;
   updatedAt: string;
 }
@@ -144,6 +145,7 @@ export interface BackendDashboard {
   parent_dashboard_id?: string;
   technology: string;
   layout: DashboardLayout;
+  is_builtin?: boolean; // G6-Gap-4
   created_at: string;
   updated_at: string;
 }
@@ -184,6 +186,7 @@ export function mapBackendDashboard(b: BackendDashboard): Dashboard {
     parentDashboardId: b.parent_dashboard_id,
     technology: b.technology as Technology,
     layout: b.layout ?? { panels: [] },
+    isBuiltin: b.is_builtin ?? false,
     createdAt: b.created_at,
     updatedAt: b.updated_at,
   };

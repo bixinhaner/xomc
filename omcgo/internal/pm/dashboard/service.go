@@ -33,6 +33,7 @@ func NewService(repo Repository, logger *zap.Logger) *Service {
 
 var (
 	ErrPermissionDenied = errors.New("dashboard: permission denied")
+	ErrBuiltinReadonly  = errors.New("dashboard: builtin dashboard is read-only; use Fork to create a customizable copy")
 )
 
 // ── Dashboard ────────────────────────────────────────────────────────────
@@ -58,11 +59,14 @@ func (s *Service) List(ctx context.Context, requesterID uuid.UUID) ([]Dashboard,
 	return s.repo.ListByOwnerOrShared(ctx, requesterID)
 }
 
-// Update 仅 owner。
+// Update 仅 owner；is_builtin=TRUE 的系统内置 dashboard 即使 owner=admin 也拒（G6-Gap-4 readonly）。
 func (s *Service) Update(ctx context.Context, requesterID, id uuid.UUID, req UpdateDashboardRequest) error {
 	d, err := s.repo.GetDashboard(ctx, id)
 	if err != nil {
 		return err
+	}
+	if d.IsBuiltin {
+		return ErrBuiltinReadonly
 	}
 	if !CanWrite(d, requesterID) {
 		return ErrPermissionDenied
@@ -70,11 +74,14 @@ func (s *Service) Update(ctx context.Context, requesterID, id uuid.UUID, req Upd
 	return s.repo.UpdateDashboard(ctx, id, req)
 }
 
-// Delete 仅 owner。
+// Delete 仅 owner；is_builtin=TRUE 拒（G6-Gap-4 readonly）。
 func (s *Service) Delete(ctx context.Context, requesterID, id uuid.UUID) error {
 	d, err := s.repo.GetDashboard(ctx, id)
 	if err != nil {
 		return err
+	}
+	if d.IsBuiltin {
+		return ErrBuiltinReadonly
 	}
 	if !CanWrite(d, requesterID) {
 		return ErrPermissionDenied

@@ -64,7 +64,7 @@ var _ Repository = (*PgRepository)(nil)
 
 var dashboardCols = []string{
 	"id", "name", "description", "owner_id", "shared_with", "parent_dashboard_id",
-	"technology", "layout", "created_at", "updated_at",
+	"technology", "layout", "is_builtin", "created_at", "updated_at",
 }
 
 func (r *PgRepository) CreateDashboard(ctx context.Context, ownerID uuid.UUID, req CreateDashboardRequest) (*Dashboard, error) {
@@ -102,14 +102,17 @@ func (r *PgRepository) GetDashboard(ctx context.Context, id uuid.UUID) (*Dashboa
 	return d, nil
 }
 
-// ListByOwnerOrShared 返当前用户拥有 + 被分享的 dashboard。shared_with 用 GIN 索引快速查。
+// ListByOwnerOrShared 返当前用户拥有 + 被分享 + 系统内置（is_builtin=TRUE）的 dashboard。
+// shared_with 用 GIN 索引快速查；is_builtin 用部分索引 idx_pm_dashboards_is_builtin。
+//
+// G6-Gap-4：所有用户都能看到内置 dashboard，但前端 hide 编辑 / 删除 按钮（只允许"另存为派生"）。
 func (r *PgRepository) ListByOwnerOrShared(ctx context.Context, userID uuid.UUID) ([]Dashboard, error) {
 	const q = `
 SELECT id, name, description, owner_id, shared_with, parent_dashboard_id,
-       technology, layout, created_at, updated_at
+       technology, layout, is_builtin, created_at, updated_at
 FROM pm_dashboards
-WHERE owner_id = $1 OR $1 = ANY(shared_with)
-ORDER BY updated_at DESC`
+WHERE owner_id = $1 OR $1 = ANY(shared_with) OR is_builtin = TRUE
+ORDER BY is_builtin DESC, updated_at DESC`
 	rows, err := r.pool.Query(ctx, q, userID)
 	if err != nil {
 		return nil, fmt.Errorf("ListByOwnerOrShared: %w", err)
@@ -179,16 +182,16 @@ func (r *PgRepository) Fork(ctx context.Context, srcID uuid.UUID, ownerID uuid.U
 		return nil, err
 	}
 
-	// 2) INSERT new dashboard
+	// 2) INSERT new dashboard（forked dashboard 永远 is_builtin=FALSE）
 	var newDash Dashboard
 	err = tx.QueryRow(ctx, `
-INSERT INTO pm_dashboards (name, description, owner_id, parent_dashboard_id, technology, layout)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, name, description, owner_id, shared_with, parent_dashboard_id, technology, layout, created_at, updated_at`,
+INSERT INTO pm_dashboards (name, description, owner_id, parent_dashboard_id, technology, layout, is_builtin)
+VALUES ($1, $2, $3, $4, $5, $6, FALSE)
+RETURNING id, name, description, owner_id, shared_with, parent_dashboard_id, technology, layout, is_builtin, created_at, updated_at`,
 		newName, src.Description, ownerID, srcID, string(src.Technology), src.Layout).
 		Scan(&newDash.ID, &newDash.Name, &newDash.Description, &newDash.OwnerID,
 			&newDash.SharedWith, &newDash.ParentDashboardID, &newDash.Technology,
-			&newDash.Layout, &newDash.CreatedAt, &newDash.UpdatedAt)
+			&newDash.Layout, &newDash.IsBuiltin, &newDash.CreatedAt, &newDash.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("Fork insert: %w", err)
 	}
@@ -464,7 +467,7 @@ func scanDashboard(row rowScanner) (*Dashboard, error) {
 	var layout []byte
 	if err := row.Scan(
 		&d.ID, &d.Name, &description, &d.OwnerID, &d.SharedWith, &d.ParentDashboardID,
-		&d.Technology, &layout, &d.CreatedAt, &d.UpdatedAt,
+		&d.Technology, &layout, &d.IsBuiltin, &d.CreatedAt, &d.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}

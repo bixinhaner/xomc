@@ -44,6 +44,14 @@ interface FormValues {
   adhocTaskId?: string;
   unit?: string;
   threshold?: number;
+  // G6-Gap-5 TopN
+  topnN?: number;
+  topnSortDesc?: boolean;
+  // G6-Gap-5 BigNumber
+  bigNumberFontSize?: number;
+  warningThreshold?: number;
+  // G6-Gap-9: 时间轴切换（end_time = 采集时间；ingest_time = 入库时间）
+  timeAxis?: 'end_time' | 'ingest_time';
 }
 
 const PANEL_TYPE_OPTIONS: { label: string; value: PanelType }[] = [
@@ -52,6 +60,9 @@ const PANEL_TYPE_OPTIONS: { label: string; value: PanelType }[] = [
   { label: '柱状图', value: 'bar_chart' },
   { label: '表格', value: 'table' },
   { label: '仪表盘', value: 'gauge' },
+  // G6-Gap-5
+  { label: '排行榜 (TopN)', value: 'topn' },
+  { label: '数值大屏 (BigNumber)', value: 'big_number' },
 ];
 
 const GRANULARITY_OPTIONS: { label: string; value: Granularity }[] = [
@@ -104,6 +115,11 @@ export function PanelConfigDrawer({ open, mode, panel, dashboardId, technology, 
         adhocTaskId: panel.adhocTaskId,
         unit: panel.config?.unit as string | undefined,
         threshold: panel.config?.threshold as number | undefined,
+        topnN: panel.config?.n as number | undefined,
+        topnSortDesc: panel.config?.sort_desc as boolean | undefined,
+        bigNumberFontSize: panel.config?.font_size as number | undefined,
+        warningThreshold: panel.config?.warning_threshold as number | undefined,
+        timeAxis: (panel.config?.time_axis as 'end_time' | 'ingest_time' | undefined) ?? 'end_time',
       });
     } else {
       form.setFieldsValue({
@@ -132,7 +148,19 @@ export function PanelConfigDrawer({ open, mode, panel, dashboardId, technology, 
       timeRange: { start_offset: values.windowOffset },
       compareMode,
       adhocTaskId: values.adhocTaskId,
-      config: { unit: values.unit, threshold: values.threshold },
+      config: {
+        unit: values.unit,
+        threshold: values.threshold,
+        // G6-Gap-9 时间轴
+        time_axis: values.timeAxis ?? 'end_time',
+        // G6-Gap-5 类型化 config
+        ...(values.panelType === 'topn'
+          ? { n: values.topnN ?? 10, sort_desc: values.topnSortDesc ?? true }
+          : {}),
+        ...(values.panelType === 'big_number'
+          ? { font_size: values.bigNumberFontSize ?? 56, warning_threshold: values.warningThreshold }
+          : {}),
+      },
     };
 
     if (mode === 'create' || !panel) {
@@ -208,8 +236,63 @@ export function PanelConfigDrawer({ open, mode, panel, dashboardId, technology, 
         <Form.Item label="单位" name="unit">
           <Input placeholder="%, Mbps..." />
         </Form.Item>
-        <Form.Item label="阈值（仅 KPI 卡片用）" name="threshold">
+        <Form.Item
+          label="阈值（KPI 卡片低于此值红色 / 曲线 + 柱状图画阈值线）"
+          name="threshold"
+        >
           <InputNumber style={{ width: '100%' }} />
+        </Form.Item>
+
+        {/* G6-Gap-9: 时间轴切换 */}
+        <Form.Item
+          label="时间轴"
+          name="timeAxis"
+          tooltip="end_time 是基站采集窗口的止点；ingest_time 是 OMC 入库时刻。两者差即上报延迟。"
+          initialValue="end_time"
+        >
+          <Select
+            options={[
+              { label: '采集时间 (end_time)', value: 'end_time' },
+              { label: '入库时间 (ingest_time)', value: 'ingest_time' },
+            ]}
+          />
+        </Form.Item>
+
+        {/* G6-Gap-5: TopN 类型专用 */}
+        <Form.Item shouldUpdate={(p, c) => p.panelType !== c.panelType} noStyle>
+          {() =>
+            form.getFieldValue('panelType') === 'topn' ? (
+              <>
+                <Form.Item label="TopN — N（取前 N 名）" name="topnN" initialValue={10}>
+                  <InputNumber style={{ width: '100%' }} min={1} max={100} />
+                </Form.Item>
+                <Form.Item label="TopN — 排序" name="topnSortDesc" initialValue={true}>
+                  <Select
+                    options={[
+                      { label: '降序（默认）', value: true },
+                      { label: '升序', value: false },
+                    ]}
+                  />
+                </Form.Item>
+              </>
+            ) : null
+          }
+        </Form.Item>
+
+        {/* G6-Gap-5: BigNumber 类型专用 */}
+        <Form.Item shouldUpdate={(p, c) => p.panelType !== c.panelType} noStyle>
+          {() =>
+            form.getFieldValue('panelType') === 'big_number' ? (
+              <>
+                <Form.Item label="字号 (px)" name="bigNumberFontSize" initialValue={56}>
+                  <InputNumber style={{ width: '100%' }} min={24} max={160} />
+                </Form.Item>
+                <Form.Item label="警戒阈值（低于此值红色）" name="warningThreshold">
+                  <InputNumber style={{ width: '100%' }} />
+                </Form.Item>
+              </>
+            ) : null
+          }
         </Form.Item>
       </Form>
     </Drawer>
