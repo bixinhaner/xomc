@@ -170,14 +170,34 @@ export function useMmlTaskStream(
   }, [messages]);
   // 用 ref 保留最新 taskId，让 listener 闭包始终读到当前值（避免每次 taskId
   // 变化重建 EventSource — 频繁重连会丢事件 + 增加后端连接开销）。
+  //
+  // 关键：ref 写在 render body，而不是 useEffect。因为 EventSource 是浏览器侧
+  // 持久连接，事件可能在 setCurrentTaskId 之后、useEffect 触发之前就到达（后端
+  // CreateAndFanoutTask publishTaskStatus 在 HTTP 响应之前 publish 到 hub，
+  // 而 SSE 和 HTTP 走不同 TCP，事件抢跑常见）；放 effect 里会造成首条
+  // mml_task_status 事件被 taskIdRef.current === null 过滤丢弃。
+  // ref 在 render 期赋值合规：不触发 re-render，对其它 hook 无副作用。
   const taskIdRef = useRef<string | null>(taskId);
-  useEffect(() => {
-    taskIdRef.current = taskId;
-  }, [taskId]);
+  taskIdRef.current = taskId;
 
-  // taskId 切换时复位 lines / status（每条 task 独立终端会话）
+  // taskId 切换时复位 lines / status，但只在 "real → 不同 real" 时清空 lines。
+  // 关键修正（2026-05-23）：原实现每次 taskId 变化都 setLines([])，因 React 18 把
+  //   setCurrentTaskId(newId)
+  //   appendLine(dispatchedSeedLine)
+  // 自动 batch，commit 后这条 effect 会把刚被 appendLine 写进去的"已派发"行
+  // 一起清掉，导致用户点完"执行"终端立刻空白、没有派发反馈。
+  // 现在的行为：
+  //   - null → real（首次接到 task）：保留 lines（消费方种的 dispatched 行存活）
+  //   - real → 不同 real（切到新 task 会话）：清空 lines
+  //   - real → null（用户点了 Clear）：消费方自身已 clear()，effect 这里不再
+  //     重复 setLines([])，避免与正在到达的事件 race
+  const prevTaskIdRef = useRef<string | null>(null);
   useEffect(() => {
-    setLines([]);
+    const prev = prevTaskIdRef.current;
+    prevTaskIdRef.current = taskId;
+    if (prev !== null && taskId !== null && prev !== taskId) {
+      setLines([]);
+    }
     setStatus(taskId ? 'dispatched' : 'idle');
   }, [taskId]);
 
