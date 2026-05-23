@@ -166,10 +166,17 @@ func (r *PgRepository) List(ctx context.Context, filter ListFilter) ([]Task, err
 }
 
 func (r *PgRepository) Cancel(ctx context.Context, id uuid.UUID) error {
-	// 终态行不可 cancel；用 RETURNING 区分行不存在 vs 状态不对。
+	// T-0164 收尾 G7-Gap-6：continuous 任务停止时把 window_end 设为 NOW()
+	// （之后清理按 oneshot 走自动 drop_chunks；运行中 continuous endTime 空不被清）。
+	//
+	// SQL 用 CASE 同时处理 oneshot / continuous 两种 mode：
+	//   - oneshot:   window_end 不动
+	//   - continuous: window_end = NOW()（覆盖原 endTime 表"停止后这是终止时刻"）
 	const q = `
 UPDATE pm_tasks
-SET status = 'canceled', updated_at = NOW()
+SET status = 'canceled',
+    window_end = CASE WHEN mode = 'continuous' THEN NOW() ELSE window_end END,
+    updated_at = NOW()
 WHERE id = $1
   AND task_subtype = $2
   AND status IN ('pending','running','scheduled')

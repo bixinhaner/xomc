@@ -18,6 +18,7 @@ import StorageSettings from './StorageSettings';
 import OmcSettings from './OmcSettings';
 import NorthboundSettings from './NorthboundSettings';
 import TransferSettings from './TransferSettings';
+import PmRetentionSection from './PmRetentionSection';
 import {
   useSysConfigsByCategory,
   useBatchUpdateSysConfigs,
@@ -29,7 +30,7 @@ import type {
 } from '@core/types/system';
 
 // 设置子页签类型（v1.0：移除 sas / ldap，参 omgo/docs/prd/system/config.md）
-type SettingsTab = 'basic' | 'security' | 'device' | 'notify' | 'storage' | 'omc' | 'acs_transfer' | 'northbound';
+type SettingsTab = 'basic' | 'security' | 'device' | 'notify' | 'storage' | 'omc' | 'acs_transfer' | 'northbound' | 'pm_retention';
 
 // 设置子页签配置
 const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
@@ -41,6 +42,8 @@ const settingsTabs: { key: SettingsTab; labelKey: string }[] = [
   { key: 'omc', labelKey: 'system.config.omc' },
   { key: 'acs_transfer', labelKey: 'system.config.acsTransfer' },
   { key: 'northbound', labelKey: 'system.config.northbound' },
+  // T-0164 收尾 G2-Gap-1：PM 数据保留策略页签
+  { key: 'pm_retention', labelKey: 'system.config.pmRetention' },
 ];
 
 // ----- value <-> form value 编解码 -----
@@ -200,6 +203,9 @@ export default function SystemConfig() {
 		return <TransferSettings form={transferForm} />;
       case 'northbound':
         return <NorthboundSettings form={northboundForm} />;
+      case 'pm_retention':
+        // T-0164 收尾 G2-Gap-1：PM 数据保留独立组件，内部自管 form + state（不需要 form props）
+        return <PmRetentionSection />;
       default:
         return null;
     }

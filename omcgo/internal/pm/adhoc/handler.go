@@ -134,7 +134,10 @@ func (h *Handler) Create(c *gin.Context) {
 	response.OKWithStatus(c, http.StatusCreated, gin.H{"id": id.String()})
 }
 
-// List GET /pm/adhoc/tasks?mode=&status=&limit=&offset=
+// List GET /pm/adhoc/tasks?mode=&status=&limit=&offset=&all=true
+//
+// T-0164 收尾 G7-Gap-7：默认按 creator=current_user 过滤（"我的任务"），
+// admin 角色传 ?all=true 可看全部任务（运维 / 审计场景）。
 func (h *Handler) List(c *gin.Context) {
 	filter := ListFilter{Limit: 50}
 	if v := c.Query("mode"); v != "" {
@@ -145,8 +148,22 @@ func (h *Handler) List(c *gin.Context) {
 		s := Status(v)
 		filter.Status = &s
 	}
-	if v := c.Query("creator"); v != "" {
-		filter.Creator = v
+
+	// T-0164 收尾 G7-Gap-7：creator 过滤
+	// - 默认按当前用户过滤（"我的任务"）
+	// - admin 角色传 ?all=true 可看全部
+	// - 显式传 ?creator=xxx 时尊重（向后兼容老 client + 运维筛查特定用户场景）
+	currentUser := extractCreator(c)
+	all := c.Query("all") == "true"
+	switch {
+	case c.Query("creator") != "":
+		filter.Creator = c.Query("creator")
+	case all && isAdmin(c):
+		// admin + 显式 ?all=true → 不过滤
+		filter.Creator = ""
+	default:
+		// 默认按当前用户过滤
+		filter.Creator = currentUser
 	}
 	if v := c.Query("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
@@ -399,4 +416,26 @@ func extractCreator(c *gin.Context) string {
 		}
 	}
 	return "anonymous"
+}
+
+// isAdmin 判断当前用户是否 admin / super_admin（T-0164 收尾 G7-Gap-7 用，决定 ?all=true 是否生效）。
+//
+// admin.AuthMiddleware 注入的 context key（roles / is_super_admin / user role）；
+// 任一为真即视为有权限看全部任务。
+func isAdmin(c *gin.Context) bool {
+	if v, ok := c.Get("is_super_admin"); ok {
+		if b, ok := v.(bool); ok && b {
+			return true
+		}
+	}
+	if v, ok := c.Get("roles"); ok {
+		if roles, ok := v.([]string); ok {
+			for _, r := range roles {
+				if r == "admin" || r == "super_admin" {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

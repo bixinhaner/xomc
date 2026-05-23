@@ -9,6 +9,9 @@ import (
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
@@ -75,11 +78,16 @@ func startPMAggregatorPipeline(
 	}
 
 	// 3) 启动 Sweeper（zombie reset + 心跳监控）
-	sweeper := asyncjob.NewSweeper(jobRepo, 0, 0, logger)
+	// T-0164 收尾 G8-Gap-3：从 sys_configs 读 sweeper_interval / zombie_threshold；
+	// 缺失 / 解析失败 fallback 走 asyncjob 包默认常量（与原行为一致）
+	sweeperInterval, zombieThreshold := loadAsyncJobThresholds(ctx, w.PgPool, logger)
+	sweeper := asyncjob.NewSweeper(jobRepo, sweeperInterval, zombieThreshold, logger)
+	asyncMetrics := asyncjob.NewMetrics(w.MetricsReg)
+	_ = asyncMetrics // Metrics 已注册 Prometheus；instrumentation 钩子留 v2（详 plan-T-0164-followup-gaps.md G8-Gap-4）
 	go sweeper.Run(ctx)
 	logger.Info("asyncjob sweeper started",
-		zap.Duration("interval", asyncjob.SweeperInterval),
-		zap.Duration("zombie_threshold", asyncjob.ZombieThreshold))
+		zap.Duration("interval", sweeperInterval),
+		zap.Duration("zombie_threshold", zombieThreshold))
 
 	// 4) 每个 JobType 开一个 worker goroutine（设备级 4 + 设备组级 4 = 8 个）
 	for _, r := range runners {
@@ -363,6 +371,49 @@ func truncateWeekISO(t time.Time) time.Time {
 	daysSinceMonday := (wd + 6) % 7 // Sun=6, Mon=0, Tue=1, ...
 	monday := time.Date(t.Year(), t.Month(), t.Day()-daysSinceMonday, 0, 0, 0, 0, t.Location())
 	return monday
+}
+
+// loadAsyncJobThresholds 启动期从 sys_configs 读 sweeper_interval / zombie_threshold。
+//
+// T-0164 收尾 G8-Gap-3：之前 asyncjob.SweeperInterval / ZombieThreshold 是包级常量；
+// 现在让运维可改（启动生效，重启 worker 拾取新值；运行期热重载留 v2）。
+func loadAsyncJobThresholds(ctx context.Context, pool *pgxpool.Pool, logger *zap.Logger) (time.Duration, time.Duration) {
+	sweeperInterval := asyncjob.SweeperInterval
+	zombieThreshold := asyncjob.ZombieThreshold
+
+	if pool == nil {
+		return sweeperInterval, zombieThreshold
+	}
+	repo := admin.NewPgSysConfigRepository(pool)
+	if v := readSysConfigInt(ctx, repo, "asyncjob", "sweeper_interval_seconds"); v > 0 {
+		sweeperInterval = time.Duration(v) * time.Second
+	}
+	if v := readSysConfigInt(ctx, repo, "asyncjob", "zombie_threshold_seconds"); v > 0 {
+		zombieThreshold = time.Duration(v) * time.Second
+	}
+	logger.Info("asyncjob thresholds loaded from sys_configs",
+		zap.Duration("sweeper_interval", sweeperInterval),
+		zap.Duration("zombie_threshold", zombieThreshold))
+	return sweeperInterval, zombieThreshold
+}
+
+// readSysConfigInt 读单个 sys_configs (category, key) int 值；失败返 0。
+func readSysConfigInt(ctx context.Context, repo *admin.PgSysConfigRepository, category, key string) int {
+	if repo == nil {
+		return 0
+	}
+	row, err := repo.GetByKey(ctx, category, key)
+	if err != nil || row == nil || row.ValueType != "int" {
+		return 0
+	}
+	v := 0
+	for _, c := range row.Value {
+		if c < '0' || c > '9' {
+			return 0
+		}
+		v = v*10 + int(c-'0')
+	}
+	return v
 }
 
 // buildLockOwner 生成 hostname-pid 形式的锁所有者标识，便于运维排查"哪个 worker 抢到任务"。

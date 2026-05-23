@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	"github.com/omcgo/omcgo/internal/core/dictloader"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/adhoc"
@@ -70,6 +71,9 @@ func initPMModule(c *Container) error {
 	// app 端只走查询不跑 cron（cron runner 在 worker 端注册）。
 	pmAggregator := aggregator.NewWithPool(c.TsPool, kpiRouter, logger.Named("aggregator"))
 
+	// T-0164 收尾 G5-Gap-2：手动重算入口需 asyncjob.Repository
+	pmAsyncJobRepo := asyncjob.NewPgRepository(c.PgPool)
+
 	// T-0164-P7 / G7：adhoc 任务 REST 入口（worker 端跑实际执行）。
 	pmAdhocRepo := adhoc.NewPgRepository(c.PgPool)
 	pmAdhocHandler := adhoc.NewHandler(pmAdhocRepo, c.TsPool, c.EventBus, logger.Named("adhoc"))
@@ -117,6 +121,7 @@ func initPMModule(c *Container) error {
 		pmFileStore:          pmFileStore,
 		pmIndicatorRepo:      indicatorRepo,
 		pmAggregator:         pmAggregator,
+		pmAsyncJobRepo:       pmAsyncJobRepo,
 		pmAdhocHandler:       pmAdhocHandler,
 		pmDashboardHandler:   pmDashboardHandler,
 		indicatorHandler:     indicatorHandler,
@@ -149,6 +154,7 @@ type pmHandlerDeps struct {
 	pmFileStore     *pm.PgPMFileStore
 	pmIndicatorRepo indicator.IndicatorRepository // T-0164-P1 ListKPIDefinitions 数据源
 	pmAggregator    *aggregator.Aggregator        // T-0164-P5 ListAggregatedMetrics 数据源
+	pmAsyncJobRepo  asyncjob.Repository           // T-0164 收尾 G5-Gap-2 手动重算端点
 	pmAdhocHandler     *adhoc.Handler        // T-0164-P7 自定义聚合任务 REST 入口
 	pmDashboardHandler *pmdashboard.Handler  // T-0164-P6 PM 仪表盘 REST 入口
 

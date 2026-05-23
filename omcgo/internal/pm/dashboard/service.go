@@ -6,6 +6,8 @@ import (
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+
+	"github.com/omcgo/omcgo/internal/admin/audit"
 )
 
 // Service 是 dashboard 业务层，把 Repository 包装为带 ACL 的对外接口。
@@ -92,7 +94,7 @@ func (s *Service) Fork(ctx context.Context, requesterID, srcID uuid.UUID, newNam
 	return s.repo.Fork(ctx, srcID, requesterID, newName)
 }
 
-// Share 仅 owner。
+// Share 仅 owner。T-0164 收尾 G6-Gap-8：写审计日志（合规追溯）。
 func (s *Service) Share(ctx context.Context, requesterID uuid.UUID, req ShareRequest) error {
 	d, err := s.repo.GetDashboard(ctx, req.DashboardID)
 	if err != nil {
@@ -108,10 +110,12 @@ func (s *Service) Share(ctx context.Context, requesterID uuid.UUID, req ShareReq
 			filtered = append(filtered, uid)
 		}
 	}
-	return s.repo.AddShare(ctx, req.DashboardID, filtered)
+	shareErr := s.repo.AddShare(ctx, req.DashboardID, filtered)
+	s.logShareAudit(ctx, requesterID, d, "dashboard_share_add", filtered, nil, shareErr)
+	return shareErr
 }
 
-// Unshare 仅 owner。
+// Unshare 仅 owner。T-0164 收尾 G6-Gap-8：写审计日志。
 func (s *Service) Unshare(ctx context.Context, requesterID uuid.UUID, req UnshareRequest) error {
 	d, err := s.repo.GetDashboard(ctx, req.DashboardID)
 	if err != nil {
@@ -120,7 +124,54 @@ func (s *Service) Unshare(ctx context.Context, requesterID uuid.UUID, req Unshar
 	if !CanWrite(d, requesterID) {
 		return ErrPermissionDenied
 	}
-	return s.repo.RemoveShare(ctx, req.DashboardID, req.UserID)
+	removeErr := s.repo.RemoveShare(ctx, req.DashboardID, req.UserID)
+	s.logShareAudit(ctx, requesterID, d, "dashboard_share_remove", nil, &req.UserID, removeErr)
+	return removeErr
+}
+
+// logShareAudit 是 Share / Unshare 共用审计日志写入助手（G6-Gap-8）。
+//
+// action 用 ActionConfig 分类（owner 变更分享列表 = config 操作），子动作 dashboard_share_add /
+// dashboard_share_remove。失败也记审计（Success=false + ErrorMessage），便于审计排查"为什么没分享成功"。
+func (s *Service) logShareAudit(
+	ctx context.Context,
+	requesterID uuid.UUID,
+	d *Dashboard,
+	subAction string,
+	addedUsers []uuid.UUID,
+	removedUser *uuid.UUID,
+	opErr error,
+) {
+	details := map[string]any{
+		"dashboard_id":   d.ID.String(),
+		"dashboard_name": d.Name,
+		"owner_id":       d.OwnerID.String(),
+		"technology":     string(d.Technology),
+	}
+	if len(addedUsers) > 0 {
+		ids := make([]string, 0, len(addedUsers))
+		for _, u := range addedUsers {
+			ids = append(ids, u.String())
+		}
+		details["added_user_ids"] = ids
+	}
+	if removedUser != nil {
+		details["removed_user_id"] = removedUser.String()
+	}
+	errMsg := ""
+	if opErr != nil {
+		errMsg = opErr.Error()
+	}
+	requester := requesterID
+	audit.Log(ctx, audit.Entry{
+		UserID:       &requester,
+		Action:       audit.ActionConfig + "_" + subAction,
+		ResourceType: "pm_dashboard",
+		ResourceID:   d.ID.String(),
+		Details:      details,
+		Success:      opErr == nil,
+		ErrorMessage: errMsg,
+	})
 }
 
 // ── Panel ────────────────────────────────────────────────────────────────

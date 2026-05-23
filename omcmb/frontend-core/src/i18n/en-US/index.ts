@@ -2960,6 +2960,7 @@ const messages: Record<string, string> = {
   'system.config.omc':           'OMC Settings',
   'system.config.acsTransfer':   'ACS Transfer',
   'system.config.northbound':    'Northbound Settings',
+  'system.config.pmRetention':   'PM Data Retention',
   'system.transfer.inheritHint': 'These fields are stored under sys_configs category acs_transfer. Leave a field blank to keep using the startup config file or environment default.',
   'system.transfer.uploadSection': 'Upload Service Settings',
   'system.transfer.downloadSection': 'Download Service Settings',

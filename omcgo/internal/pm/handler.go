@@ -14,6 +14,7 @@ import (
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
+	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
@@ -34,6 +35,7 @@ type Handler struct {
 	pool          *pgxpool.Pool // T-0164-P3 fix: 反查 devices 拿 (oui, sn) 给 KPIEngine
 	indicatorRepo indicator.IndicatorRepository // T-0164-P1：/pm/kpi/definitions 数据源（替代旧 carrier KPIDefinitions 列表）
 	aggr          *aggregator.Aggregator        // T-0164-P5 / G5：按粒度路由聚合表查询（hourly/daily/weekly/monthly + device_group）
+	asyncJobRepo  asyncjob.Repository           // T-0164 收尾 G5-Gap-2：手动重算入口入队 async_jobs
 	metrics       *PMMetrics
 	logger        *zap.Logger
 }
@@ -43,6 +45,12 @@ type Handler struct {
 // 调用方：cmd/app/provider/router.go 在初始化 pm.Handler 后调用。
 func (h *Handler) WithAggregator(aggr *aggregator.Aggregator) *Handler {
 	h.aggr = aggr
+	return h
+}
+
+// WithAsyncJobRepo 注入 asyncjob 仓库（G5-Gap-2 手动重算端点用）。
+func (h *Handler) WithAsyncJobRepo(repo asyncjob.Repository) *Handler {
+	h.asyncJobRepo = repo
 	return h
 }
 
@@ -88,6 +96,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		// T-0164-P5 / G5：按粒度路由的聚合查询接口（pm_metrics_hourly / daily / weekly / monthly
 		// + pm_group_metrics_*）。15min 粒度直查 pm_metrics；其余粒度走聚合表。
 		pm.GET("/metrics/aggregated", h.ListAggregatedMetrics)
+		// T-0164 收尾 G5-Gap-2：手动重算入口（晚到数据 / 补传场景运维触发）。
+		pm.POST("/aggregation/recompute", h.RecomputeAggregation)
 		pm.GET("/kpi", h.ListKPIValues)
 		pm.GET("/kpi/definitions", h.ListKPIDefinitions)
 		pm.POST("/kpi/calculate", h.CalculateKPI)
@@ -270,6 +280,91 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"items": rows, "total": len(rows)})
+}
+
+// RecomputeAggregation POST /pm/aggregation/recompute（T-0164 收尾 G5-Gap-2）
+//
+// 入参：{granularity, dimension, start, end}
+//   - granularity: 'hourly' / 'daily' / 'weekly' / 'monthly'
+//   - dimension:   'device'（默认）/ 'device_group'
+//   - start/end:   桶起止（RFC3339）
+//
+// 行为：直接 INSERT async_jobs 入队对应 job_type，worker 抢到后跑一次。
+// 用于"晚到数据 / 补传场景"运维补算或自动化脚本调度，不走 cron。
+type recomputeRequest struct {
+	Granularity string    `json:"granularity" binding:"required,oneof=hourly daily weekly monthly"`
+	Dimension   string    `json:"dimension"`
+	Start       time.Time `json:"start" binding:"required"`
+	End         time.Time `json:"end" binding:"required"`
+}
+
+func (h *Handler) RecomputeAggregation(c *gin.Context) {
+	if h.asyncJobRepo == nil {
+		response.Fail(c, http.StatusServiceUnavailable, "async job repo not wired; see G5-Gap-2")
+		return
+	}
+	var req recomputeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	if !req.End.After(req.Start) {
+		response.Fail(c, http.StatusBadRequest, "end must be after start")
+		return
+	}
+
+	dim := req.Dimension
+	if dim == "" {
+		dim = "device"
+	}
+	// 路由 granularity + dimension → job_type
+	jobType := ""
+	switch req.Granularity {
+	case "hourly":
+		jobType = aggregator.JobTypeHourly
+		if dim == "device_group" {
+			jobType = aggregator.JobTypeHourlyGroup
+		}
+	case "daily":
+		jobType = aggregator.JobTypeDaily
+		if dim == "device_group" {
+			jobType = aggregator.JobTypeDailyGroup
+		}
+	case "weekly":
+		jobType = aggregator.JobTypeWeekly
+		if dim == "device_group" {
+			jobType = aggregator.JobTypeWeeklyGroup
+		}
+	case "monthly":
+		jobType = aggregator.JobTypeMonthly
+		if dim == "device_group" {
+			jobType = aggregator.JobTypeMonthlyGroup
+		}
+	default:
+		response.Fail(c, http.StatusBadRequest, "unsupported granularity")
+		return
+	}
+
+	payload, err := aggregator.BuildPayload(req.Start, req.End)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	jobID, err := h.asyncJobRepo.Insert(c.Request.Context(), asyncjob.InsertRequest{
+		JobType:     jobType,
+		ScheduledAt: time.Now(),
+		Payload:     payload,
+	})
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OKWithStatus(c, http.StatusAccepted, gin.H{
+		"job_id":   jobID.String(),
+		"job_type": jobType,
+		"start":    req.Start,
+		"end":      req.End,
+	})
 }
 
 type kpiQuery struct {

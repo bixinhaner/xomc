@@ -272,11 +272,38 @@ P3（进阶导出 + G6-G7 集成）
 
 进度更新本文档底部 + backlog.md 子表 + commit message。
 
-- [ ] P0（7 项）— 启动 2026-05-23
-- [ ] P1（7 项）
-- [ ] P2（13 项）
-- [ ] P3（7 项）
-- [ ] 跨域（2 项）
+- [x] **P0（7 项）— 已 commit `46b50678` (+`922d6c56` 文档)**
+  - ✅ G8-Gap-1 cron_state 表 + 启动补跑
+  - ✅ G5-Gap-1 设备组独立 4 cron runner
+  - ✅ G2-Gap-2 普通表 cron 清理
+  - ✅ G6-Gap-3 + G6-Gap-13 制式切换持久化 + KPI 卡片按制式分键
+  - 兼带 PM Auto-Setup（G1 收尾）
+
+- [⚙️] **P1（部分完成；2026-05-23 dev_done_pending_commit）**
+  - ✅ G7-Gap-7 creator 过滤 + admin 看全
+  - ✅ G7-Gap-6 stop continuous 时写 endTime
+  - ✅ G6-Gap-8 分享/撤销审计日志（audit.Log 接入）
+  - ✅ G5-Gap-2 手动重算 endpoint POST /pm/aggregation/recompute
+  - ✅ G2-Gap-1 PmRetentionSection 挂载 SystemConfig + 2 lang i18n
+  - ✅ G7-Gap-5 partial（sys_configs seed migration 000166 加 4 key；admin UI 已可改；改小 confirm 留 P2）
+  - ✅ G5-Gap-3 aggregator Prometheus 指标 4 个（Runs / Duration / RowsWritten / BucketLag）注册
+  - ✅ G8-Gap-4 asyncjob Prometheus 指标 5 个（QueueDepth / Duration / Failed / Zombie / Catchup）注册
+  - ⚠️ G8-Gap-3 partial（Sweeper interval / zombie_threshold 从 sys_configs 读 OK；HeartbeatInterval 仍是包常量，热重载留 v2）
+  - 🚧 G4-Gap-1 PM 上报延迟 histogram（未做 — 需碰 PM collector parse 层）
+  - 🚧 G7-Gap-9 cron 完美补跑漏桶（现状每 sweep tick 1 cycle，非 lossless；做 lossless 需加 last_runs_at 列大改）
+  - 🚧 Cross-Gap-1 e2e_verify.sh 加 G5/G6/G7/G8 断言
+  - 🚧 Cross-Gap-2 release-gate.md 更新
+  - **Prometheus instrumentation hooks**: 指标已注册，但 Runner.Run / Registry.RunNext / Sweeper.sweepOnce 内部还没调 Inc / Observe — 数据 0；hook 注入留 v2
+
+- [ ] **P2（13 项）— 未启动**
+- [ ] **P3（7 项）— 未启动**
+- [ ] **跨域（2 项）— 未启动**
+
+### 上下文窗口预警
+
+主 session 已实施 9 项 P1 主体，剩余 4 项（G4-Gap-1 / G7-Gap-9 lossless / Cross-Gap-1 / Cross-Gap-2）已展开主分支无完整时间，建议：
+- 4 剩余项 + P2 + P3 + Prometheus instrumentation hook 注入：**下一会话**继续
+- 主分支 commit 当前 P1 主体（约 12 项 done）+ 落档
 
 ---
 

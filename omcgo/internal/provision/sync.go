@@ -191,13 +191,28 @@ func (s *SyncService) HandleSyncResult(ctx context.Context, dev *model.Device,
 //
 // 路径形态由 basePrefix 决定（含 "{i}" 截到对象前缀，其余原样）。CPE 收到对象前缀
 // 时自动展开子树，收到叶子时返回该叶子的值。
+//
+// Batch 划分（object_param_classifier 引入）：
+//   - scalar 参数（无尾点）：按 s.batchSize 批量打包，效率优先
+//   - object 前缀（尾点 "."，CPE 枚举实例）：一个 path 一个 GPV 独立成 batch
+//     原因：object 0 实例时 CPE 回 SOAP Fault 9005，会拒绝整个 GPV。批量发会让
+//     无关联的兄弟 path 一并失败。单独发只让自己挂掉，其它 batch 不受影响。
+//
+// 不并发收紧：所有 batch 走同一 taskSvc 入队，taskSvc 下游 dispatch 已按 device-level
+// 串行调度 RPC（每设备同时只跑一个会话），不需要在这里再做"object batch 并发限流 5"
+// 之类的事 —— 设备端速率天然受限。
+//
+// 失败语义：object 单 path GPV 收到 9005 时，ACS 端会把对应 task 标记为 Fault；
+// 这是预期行为（"该对象当前无实例"，不是错误），不会触发 reconcileDeletedPaths
+// 误删（reconcile 只在响应成功且含数据的入口跑）。
 func (s *SyncService) enqueueGPVPrefixes(ctx context.Context, dev *model.Device, prefixes []string, sourceID string) error {
 	log, _ := s.discoveryRepo.GetByDeviceID(ctx, dev.ID)
 	if log != nil {
 		_ = s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoverySyncing, "")
 	}
 
-	batches := batchPaths(prefixes, s.batchSize)
+	batches := buildGPVBatches(prefixes, s.batchSize)
+	scalarPaths, objectPaths := classifyPrefixes(prefixes)
 	for i, batch := range batches {
 		gpvParams, err := json.Marshal(map[string]interface{}{
 			"names": batch,
@@ -222,10 +237,31 @@ func (s *SyncService) enqueueGPVPrefixes(ctx context.Context, dev *model.Device,
 	s.logger.Info("GPV prefix sync enqueued",
 		zap.String("device_sn", dev.SerialNumber),
 		zap.Int("prefixes", len(prefixes)),
+		zap.Int("scalar_paths", len(scalarPaths)),
+		zap.Int("object_paths", len(objectPaths)),
 		zap.Int("batches", len(batches)),
 	)
 
 	return nil
+}
+
+// buildGPVBatches 把 prefixes 划分为 GPV 批次：
+//   - scalar 参数合并到 s.batchSize 大小的批
+//   - object 前缀（尾点 "."）每条独立成批（size=1），避免 SOAP Fault 9005 误伤
+//
+// 输入顺序：scalars 与 objects 在输入中可交错；本函数稳定保留各类内部相对顺序，
+// 输出 [scalar 批... , object 单 path 批...]。空切片返回 nil（与 batchPaths 一致）。
+func buildGPVBatches(prefixes []string, batchSize int) [][]string {
+	scalars, objects := classifyPrefixes(prefixes)
+	if batchSize <= 0 {
+		batchSize = 50
+	}
+	var batches [][]string
+	batches = append(batches, batchPaths(scalars, batchSize)...)
+	for _, p := range objects {
+		batches = append(batches, []string{p})
+	}
+	return batches
 }
 
 // CompleteSyncLog marks the discovery log as completed after all sync batches finish.

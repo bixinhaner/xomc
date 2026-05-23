@@ -2984,6 +2984,7 @@ const messages: Record<string, string> = {
   'system.config.omc':           '网管设置',
   'system.config.acsTransfer':   'ACS传输',
   'system.config.northbound':    '北向设置',
+  'system.config.pmRetention':   'PM 数据保留',
   'system.transfer.inheritHint': '此页配置写入 sys_configs.category=acs_transfer。字段留空时，ACS 继续使用启动配置文件或环境变量中的默认值。',
   'system.transfer.uploadSection': '上传服务配置',
   'system.transfer.downloadSection': '下载服务配置',
