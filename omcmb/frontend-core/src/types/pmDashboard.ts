@@ -1,0 +1,201 @@
+/**
+ * T-0164-P6 / G6 PM 性能查看仪表盘类型定义。
+ *
+ * 设计文档：docs/design/pm-kpi-pipeline-improvements.md §4.6
+ * 实施 plan：docs/project/plan-T-0164-P6-frontend-dashboard.md
+ *
+ * 与现有 src/types/performance.ts 关系：
+ *   - performance.ts 承载老三 tab（概览/趋势探查/报表）的类型；G6 上线后这些类型逐步归档
+ *   - pmDashboard.ts 是新单 tab "性能查看"的 Dashboard / Panel / 用户偏好模型
+ */
+
+// 顶层制式切换
+export type Technology = 'lte' | 'nr' | 'gsm';
+
+// 5 种 Panel 类型
+export type PanelType = 'kpi_card' | 'line_chart' | 'bar_chart' | 'table' | 'gauge';
+
+// 数据维度
+export type Dimension = 'device' | 'device_group';
+
+// 对比双模式
+export type CompareMode = 'same_window_other_devices' | 'previous_window';
+
+// 粒度（与后端 metrics.Granularity 一致）
+export type Granularity = '15min' | 'hourly' | 'daily' | 'weekly' | 'monthly';
+
+// 时间范围：相对（offset）或绝对（absolute）。前端编辑器二选一。
+export type PanelTimeRange =
+  | { start_offset: string; end_offset?: string } // 相对：'-1h' / '-7d' / '-30d'
+  | { absolute_start: string; absolute_end: string }; // ISO RFC3339
+
+// react-grid-layout item（layout JSON 透传，不在 TS 里强类型化）
+export type PanelGridItem = {
+  i: string; // panel id
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  minW?: number;
+  minH?: number;
+  static?: boolean;
+};
+
+export interface DashboardLayout {
+  panels: PanelGridItem[];
+}
+
+// ── 前端域模型 ────────────────────────────────────────────────────────
+
+export interface Dashboard {
+  id: string;
+  name: string;
+  description?: string;
+  ownerId: string;
+  sharedWith: string[];
+  parentDashboardId?: string;
+  technology: Technology;
+  layout: DashboardLayout;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Panel {
+  id: string;
+  dashboardId: string;
+  panelType: PanelType;
+  title: string;
+  metricPaths: string[];
+  granularity: Granularity;
+  dimension: Dimension;
+  deviceSns?: string[];
+  deviceGroupIds?: string[];
+  timeRange: PanelTimeRange;
+  compareMode?: CompareMode;
+  adhocTaskId?: string;
+  config: Record<string, unknown>;
+}
+
+export interface UserDashboardPreferences {
+  userId: string;
+  kpiCardLayout: Record<string, unknown>;
+}
+
+// ── Input types（hooks / handler 入参）────────────────────────────────
+
+export interface CreateDashboardInput {
+  name: string;
+  description?: string;
+  technology: Technology;
+  layout?: DashboardLayout;
+}
+
+export interface UpdateDashboardInput {
+  name?: string;
+  description?: string;
+  technology?: Technology;
+  layout?: DashboardLayout;
+}
+
+export interface CreatePanelInput {
+  dashboardId: string;
+  panelType: PanelType;
+  title: string;
+  metricPaths: string[];
+  granularity: Granularity;
+  dimension: Dimension;
+  deviceSns?: string[];
+  deviceGroupIds?: string[];
+  timeRange: PanelTimeRange;
+  compareMode?: CompareMode;
+  adhocTaskId?: string;
+  config?: Record<string, unknown>;
+}
+
+export interface ForkInput {
+  sourceId: string;
+  newName: string;
+}
+
+export interface ShareInput {
+  dashboardId: string;
+  userIds: string[];
+}
+
+// ── Backend wire types（snake_case，与后端 handler.go DTO 对齐）────────
+
+export interface BackendDashboard {
+  id: string;
+  name: string;
+  description?: string;
+  owner_id: string;
+  shared_with: string[];
+  parent_dashboard_id?: string;
+  technology: string;
+  layout: DashboardLayout;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BackendPanel {
+  id: string;
+  dashboard_id: string;
+  panel_type: string;
+  title: string;
+  metric_paths: string[];
+  granularity: string;
+  dimension: string;
+  device_sns?: string[];
+  device_group_ids?: string[];
+  time_range: PanelTimeRange;
+  compare_mode?: string;
+  adhoc_task_id?: string;
+  config: Record<string, unknown>;
+}
+
+export interface BackendUserPreferences {
+  user_id: string;
+  kpi_card_layout: Record<string, unknown>;
+}
+
+// ── Mappers（snake_case → camelCase）────────────────────────────────
+
+export function mapBackendDashboard(b: BackendDashboard): Dashboard {
+  return {
+    id: b.id,
+    name: b.name,
+    description: b.description,
+    ownerId: b.owner_id,
+    sharedWith: b.shared_with ?? [],
+    parentDashboardId: b.parent_dashboard_id,
+    technology: b.technology as Technology,
+    layout: b.layout ?? { panels: [] },
+    createdAt: b.created_at,
+    updatedAt: b.updated_at,
+  };
+}
+
+export function mapBackendPanel(b: BackendPanel): Panel {
+  return {
+    id: b.id,
+    dashboardId: b.dashboard_id,
+    panelType: b.panel_type as PanelType,
+    title: b.title,
+    metricPaths: b.metric_paths,
+    granularity: b.granularity as Granularity,
+    dimension: b.dimension as Dimension,
+    deviceSns: b.device_sns,
+    deviceGroupIds: b.device_group_ids,
+    timeRange: b.time_range,
+    compareMode: b.compare_mode as CompareMode | undefined,
+    adhocTaskId: b.adhoc_task_id,
+    config: b.config ?? {},
+  };
+}
+
+export function mapBackendPreferences(b: BackendUserPreferences): UserDashboardPreferences {
+  return {
+    userId: b.user_id,
+    kpiCardLayout: b.kpi_card_layout ?? {},
+  };
+}

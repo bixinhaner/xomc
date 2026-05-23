@@ -63,6 +63,11 @@ const PerformanceCharts  = React.lazy(() => import('@/pages/performance/Performa
 const ThresholdConfig    = React.lazy(() => import('@/pages/performance/ThresholdConfig'));
 const PerformanceFiles   = React.lazy(() => import('@/pages/performance/PerformanceFiles'));
 const PerfTaskConfig     = React.lazy(() => import('@/pages/performance/PerformanceTaskConfig'));
+// T-0164-P6 G6 PM 仪表盘（新单 tab "性能查看"）
+const PmDashboardList    = React.lazy(() => import('@/pages/performance/PmDashboard/DashboardList'));
+const PmDashboardEditor  = React.lazy(() => import('@/pages/performance/PmDashboard/DashboardEditor'));
+// T-0164-P7 G7 自定义聚合任务
+const PmAdhocPage        = React.lazy(() => import('@/pages/performance/PmAdhoc'));
 
 // MML Management
 const MMLConsole         = React.lazy(() => import('@/pages/mml/Console'));
@@ -284,6 +289,11 @@ export const routes: RouteObject[] = [
       { path: 'performance/threshold',     element: withSuspense(ThresholdConfig) },
       { path: 'performance/files',         element: withSuspense(PerformanceFiles) },
       { path: 'performance/task-config',   element: withSuspense(PerfTaskConfig) },
+      // T-0164-P6 G6 PM 仪表盘（单 tab "性能查看"）
+      { path: 'performance/pm-dashboard',      element: withSuspense(PmDashboardList) },
+      { path: 'performance/pm-dashboard/:id',  element: withSuspense(PmDashboardEditor) },
+      // T-0164-P7 G7 自定义聚合任务
+      { path: 'performance/pm-adhoc',          element: withSuspense(PmAdhocPage) },
 
       // MML Management
       { path: 'mml/console',         element: withSuspense(MMLConsole) },
