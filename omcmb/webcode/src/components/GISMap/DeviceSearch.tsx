@@ -130,10 +130,10 @@ const DeviceSearch: React.FC<DeviceSearchProps> = ({
 
   const containerStyle: React.CSSProperties = {
     position: 'absolute',
-    left: 300,
+    left: 20,
     top: 20,
     zIndex: 500,
-    width: 320,
+    width: 400,
   };
 
   const searchBoxStyle: React.CSSProperties = {
@@ -161,15 +161,18 @@ const DeviceSearch: React.FC<DeviceSearchProps> = ({
 
   const resultItemStyle = (isHighlighted: boolean): React.CSSProperties => ({
     padding: '12px 16px',
+    paddingLeft: isHighlighted ? '13px' : '16px', // 补偿左边框宽度，保持内容对齐
     cursor: 'pointer',
-    background: isHighlighted ? token.colorPrimaryBg : 'transparent',
-    transition: 'background 0.15s',
+    background: 'transparent',
+    borderLeft: isHighlighted ? `3px solid ${token.colorPrimary}` : '3px solid transparent',
+    transition: 'all 0.15s',
   });
 
   const footerStyle: React.CSSProperties = {
-    padding: '10px 16px',
+    padding: '8px 16px',
     borderTop: `1px solid ${token.colorBorderSecondary}`,
     textAlign: 'center',
+    background: 'transparent',
   };
 
   return (
@@ -212,7 +215,7 @@ const DeviceSearch: React.FC<DeviceSearchProps> = ({
               }
             }}
             onKeyDown={handleKeyDown}
-            placeholder={t('device.searchPlaceholder')}
+            placeholder={t('filter.searchText.multiHint')}
             style={{
               flex: 1,
               border: 'none',
@@ -326,7 +329,7 @@ const DeviceSearch: React.FC<DeviceSearchProps> = ({
                         <Text style={{ fontSize: 11, color: token.colorTextSecondary }}>
                           SN: {result.sn}
                         </Text>
-                        <Text style={{ fontSize: 11, color: config.color }}>
+                        <Text style={{ fontSize: 11, color: config.textColor, fontWeight: 500 }}>
                           {config.text}
                         </Text>
                       </div>
@@ -336,7 +339,7 @@ const DeviceSearch: React.FC<DeviceSearchProps> = ({
 
                 {/* 结果计数 */}
                 <div style={footerStyle}>
-                  <Text style={{ fontSize: 11, color: token.colorTextSecondary }}>
+                  <Text style={{ fontSize: 12, color: 'rgba(0, 0, 0, 0.45)' }}>
                     {t('device.searchResultsCount', { count: results.length })}
                   </Text>
                 </div>
