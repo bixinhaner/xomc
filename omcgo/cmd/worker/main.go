@@ -188,20 +188,11 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	if err := alarmDefRegistry.Refresh(context.Background()); err != nil {
 		logger.Warn("alarm-definition registry refresh failed; fallback disabled", zap.Error(err))
 	} else {
-		productRepo := product.NewPgRepository(w.PgPool)
-		productMetrics := product.NewRegistryMetrics(w.MetricsReg)
-		productCache := product.Cache(product.NopCache{})
-		if w.Redis != nil {
-			productCache = product.NewRedisCache(w.Redis)
-		}
-		productRegistry := product.NewRegistry(productRepo, productCache, productMetrics, logger)
-		if err := productRegistry.Refresh(context.Background()); err != nil {
-			logger.Warn("product registry refresh failed in worker; alarm fallback disabled", zap.Error(err))
-		} else {
-			alarmReceiver, expeditedReceiver, _ = wireUnknownAlarmFallback(alarmReceiver, expeditedReceiver, alarmDefRegistry, productRegistry)
-			logger.Info("alarm-definition fallback enabled",
-				zap.Int("definitions_loaded", alarmDefRegistry.Count()))
-		}
+		// T-0164-P1：复用 KPI Router 已构造的 pmProductRegistry，避免
+		// 重复 RegistryMetrics MustRegister 触发 Prometheus duplicate collector panic。
+		alarmReceiver, expeditedReceiver, _ = wireUnknownAlarmFallback(alarmReceiver, expeditedReceiver, alarmDefRegistry, pmProductRegistry)
+		logger.Info("alarm-definition fallback enabled",
+			zap.Int("definitions_loaded", alarmDefRegistry.Count()))
 	}
 	if err := alarmReceiver.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe alarm receiver", zap.Error(err))
