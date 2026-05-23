@@ -62,10 +62,13 @@ describe('statementToStructured (R-9.2 前端切结构化通道)', () => {
     expect(out.instanceIndices).toBeUndefined();
   });
 
-  it('MOD: values key 由 mml_code 翻译为 standardPath', () => {
+  it('MOD: values key 由 mml_code 翻译为 standardPath（仅勾选 path）', () => {
+    // 2026-05-23：MOD path 改为选填（参考 LST）；values 现在按 selectedSubFieldIds
+    // 过滤，仅勾选的 sub_field 对应的 value 才下发。
     const stmt = baseStmt({
       operationType: 'MOD',
       subFields,
+      selectedSubFieldIds: ['sf-addr', 'sf-mask'],
       values: { ADDR: '192.168.1.1', MASK: '255.255.255.0' },
     });
     const out = statementToStructured(stmt);
@@ -73,6 +76,18 @@ describe('statementToStructured (R-9.2 前端切结构化通道)', () => {
       'Device.IP.Address': '192.168.1.1',
       'Device.IP.Netmask': '255.255.255.0',
     });
+  });
+
+  it('MOD: 未勾选的 path values 被过滤掉（用户已取消该 path 的修改）', () => {
+    const stmt = baseStmt({
+      operationType: 'MOD',
+      subFields,
+      // ADDR 勾选，MASK 未勾选；尽管 store 还留着 MASK 的值
+      selectedSubFieldIds: ['sf-addr'],
+      values: { ADDR: '192.168.1.1', MASK: '255.255.255.0' },
+    });
+    const out = statementToStructured(stmt);
+    expect(out.values).toEqual({ 'Device.IP.Address': '192.168.1.1' });
   });
 
   it('RMV: rmvInstanceIndices 直通 instanceIndices', () => {
@@ -120,6 +135,7 @@ describe('statementToStructured (R-9.2 前端切结构化通道)', () => {
     const stmt = baseStmt({
       operationType: 'MOD',
       subFields,
+      selectedSubFieldIds: ['sf-addr'],
       values: { ADDR: '10.0.0.1', BOGUS: 'x' },
     });
     const out = statementToStructured(stmt);

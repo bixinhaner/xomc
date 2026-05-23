@@ -3978,7 +3978,7 @@ const messages: Record<string, string> = {
   'mml.console.actionBar.execute':           '执行 {op} ▸',
   'mml.console.actionBar.devices':           '设备',
   'mml.console.actionBar.summaryLst':        '已选 {selected}/{total} 字段',
-  'mml.console.actionBar.summaryMod':        '已填 {filled} 项',
+  'mml.console.actionBar.summaryMod':        '已选 {selected}/{total} 字段 · 已填 {filled} 项',
   'mml.console.actionBar.summaryRmv':        '实例 #{index}',
   // R-8.5 命令兼容性警告（CommandTree 命令叶子尾部 ⚠️ 图标 + Tooltip）
   'mml.console.commandTree.unsupportedForProductClass': '该产品类型不支持本命令',

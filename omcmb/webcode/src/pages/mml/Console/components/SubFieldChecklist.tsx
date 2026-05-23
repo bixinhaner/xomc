@@ -2,7 +2,6 @@ import { useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { Checkbox, Tag, Tooltip, Empty } from 'antd';
 import { NumberOutlined } from '@ant-design/icons';
-import AccessTypeTag from './AccessTypeTag';
 type CheckboxValueType = string | number | boolean;
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
 import type { Statement, SubFieldDef } from '@core/types/mmlConsole';
@@ -102,11 +101,9 @@ export default function SubFieldChecklist({ statement }: SubFieldChecklistProps)
                 )}
               </span>
               {multiInstanceHint(sf.tr069Path, t('mml.console.subField.multiInstanceTip'))}
-              <AccessTypeTag
-                accessType={sf.accessType}
-                valueType={sf.valueType}
-                constraintText={sf.constraintText}
-              />
+              {/* 用户决策 2026-05-23：LST 只读查询，访问类型 Tag（"读写 / 只读 + TYPE"）
+                  对用户无操作意义（用户只是查值，不存在编辑动作），移除以减少视觉噪音。
+                  MOD / ADD 行的 Tag 仍保留（用户决定要不要改的 path，access 类型有意义）。 */}
               {sf.changeApplies === 'OnReboot' && (
                 <Tag color="warning">{t('mml.console.subField.onReboot')}</Tag>
               )}

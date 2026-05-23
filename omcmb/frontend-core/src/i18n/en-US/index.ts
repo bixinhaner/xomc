@@ -3953,7 +3953,7 @@ const messages: Record<string, string> = {
   'mml.console.actionBar.execute':           'Execute {op} ▸',
   'mml.console.actionBar.devices':           'device(s)',
   'mml.console.actionBar.summaryLst':        '{selected}/{total} fields selected',
-  'mml.console.actionBar.summaryMod':        '{filled} value(s) set',
+  'mml.console.actionBar.summaryMod':        '{selected}/{total} fields selected · {filled} value(s) set',
   'mml.console.actionBar.summaryRmv':        'Instance #{index}',
   // R-8.5 command compatibility warning (CommandTree leaf tail ⚠️ icon + tooltip)
   'mml.console.commandTree.unsupportedForProductClass': 'Not supported by this product class',

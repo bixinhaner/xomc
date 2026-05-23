@@ -153,9 +153,29 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
           selected: activeStatement.selectedSubFieldIds.length,
           total: activeStatement.subFields.length,
         });
-      case 'MOD':
+      case 'MOD': {
+        // MOD 现在与 LST 一样支持 path 选填（2026-05-23）；摘要同时展示已勾选数
+        // 与实际填值数，让用户知道有多少行被勾上 + 多少行有 value 会下发。
+        // 注意：subFields 含 READ_ONLY，selectedSubFieldIds 也只来自可见的
+        // READ_WRITE 行（CommandTree 初始化按 defaultSelected & isWritable），
+        // total 用 READ_WRITE 行数才贴合视觉。
+        const writableTotal = activeStatement.subFields.filter(
+          (sf) => sf.accessType !== 'READ_ONLY',
+        ).length;
+        const writableSelected = activeStatement.selectedSubFieldIds.filter((id) => {
+          const sf = activeStatement.subFields.find((x) => x.id === id);
+          return sf && sf.accessType !== 'READ_ONLY';
+        }).length;
+        return t('mml.console.actionBar.summaryMod', {
+          selected: writableSelected,
+          total: writableTotal,
+          filled: Object.keys(activeStatement.values).length,
+        });
+      }
       case 'ADD':
         return t('mml.console.actionBar.summaryMod', {
+          selected: activeStatement.selectedSubFieldIds.length,
+          total: activeStatement.subFields.length,
           filled: Object.keys(activeStatement.values).length,
         });
       case 'RMV':
@@ -236,22 +256,51 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
   );
 
   // v2.4 D36：LST 全选/全部取消 合一为 toggleAll 单按钮，按当前选中比例切换文案。
-  const allSelected = useMemo(() => {
-    if (!activeStatement || activeStatement.operationType !== 'LST') return false;
-    return (
-      activeStatement.subFields.length > 0 &&
-      activeStatement.selectedSubFieldIds.length === activeStatement.subFields.length
-    );
+  // 2026-05-23：MOD path 改为选填后，ToggleAll 同样适用（与 LST 同款语义）；
+  // 但 MOD 的可勾选行只含 READ_WRITE（SubFieldInputList 已过滤），allSelected /
+  // toggle 也只按 READ_WRITE 集合计数，免得 READ_ONLY 字段被误"全选"。
+  const toggleableFieldIds = useMemo<string[]>(() => {
+    if (!activeStatement) return [];
+    if (activeStatement.operationType === 'LST') {
+      return activeStatement.subFields.map((sf) => sf.id);
+    }
+    if (activeStatement.operationType === 'MOD') {
+      return activeStatement.subFields
+        .filter((sf) => sf.accessType !== 'READ_ONLY')
+        .map((sf) => sf.id);
+    }
+    return [];
   }, [activeStatement]);
+  const supportsToggleAll =
+    activeStatement?.operationType === 'LST' ||
+    activeStatement?.operationType === 'MOD';
+
+  const allSelected = useMemo(() => {
+    if (!activeStatement || !supportsToggleAll) return false;
+    if (toggleableFieldIds.length === 0) return false;
+    const selectedSet = new Set(activeStatement.selectedSubFieldIds);
+    return toggleableFieldIds.every((id) => selectedSet.has(id));
+  }, [activeStatement, supportsToggleAll, toggleableFieldIds]);
 
   const handleToggleAll = useCallback(() => {
-    if (!activeStatement || activeStatement.operationType !== 'LST') return;
+    if (!activeStatement || !supportsToggleAll) return;
+    // 切换只影响 toggleable 集合；其它行（如 MOD 的 READ_ONLY）的勾选状态保留
+    const toggleableSet = new Set(toggleableFieldIds);
+    const others = activeStatement.selectedSubFieldIds.filter(
+      (id) => !toggleableSet.has(id),
+    );
     updateStatement(activeStatement.uid, {
       selectedSubFieldIds: allSelected
-        ? []
-        : activeStatement.subFields.map((sf) => sf.id),
+        ? others
+        : [...others, ...toggleableFieldIds],
     });
-  }, [activeStatement, allSelected, updateStatement]);
+  }, [
+    activeStatement,
+    allSelected,
+    supportsToggleAll,
+    toggleableFieldIds,
+    updateStatement,
+  ]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -321,9 +370,7 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
                     deviceCount={selectedDeviceSns.length}
                     disabled={selectedDeviceSns.length === 0 || statements.length === 0}
                     loading={executeMutation.isPending}
-                    onToggleAll={
-                      activeStatement.operationType === 'LST' ? handleToggleAll : undefined
-                    }
+                    onToggleAll={supportsToggleAll ? handleToggleAll : undefined}
                     allSelected={allSelected}
                     onExecute={handleExecute}
                   />

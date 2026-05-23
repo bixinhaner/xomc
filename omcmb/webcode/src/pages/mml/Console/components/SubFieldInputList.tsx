@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { CSSProperties } from 'react';
-import { Input, Tag, Tooltip, Empty } from 'antd';
+import { Checkbox, Input, Tag, Tooltip, Empty } from 'antd';
 import { NumberOutlined } from '@ant-design/icons';
 import AccessTypeTag from './AccessTypeTag';
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
@@ -24,6 +24,17 @@ function multiInstanceHint(tr069Path: string, tip: string) {
 export default function SubFieldInputList({ statement }: SubFieldInputListProps) {
   const t = useT();
   const setValue = useMmlConsoleStore((s) => s.setValue);
+  const toggleSubField = useMmlConsoleStore((s) => s.toggleSubField);
+
+  // MOD：path 改为选填（用户决策 2026-05-23）—— 每行加 Checkbox 与 LST 一致，
+  // 用户勾选的 path 才纳入下发；未勾选行的 Input 灰显但保留用户已输入值（再次
+  // 勾选时无需重新填）。ADD 暂保留 "全字段编辑" 语义（创建新对象需要所有
+  // is_required 字段，未来再分流）。
+  const isMod = statement.operationType === 'MOD';
+  const selectedSet = useMemo(
+    () => new Set(statement.selectedSubFieldIds),
+    [statement.selectedSubFieldIds],
+  );
 
   const sortedFields = useMemo(() => {
     const list = [...statement.subFields].sort((a, b) => a.sortOrder - b.sortOrder);
@@ -58,12 +69,28 @@ export default function SubFieldInputList({ statement }: SubFieldInputListProps)
     <div style={{ ...VIEWPORT_STYLE, display: 'flex', flexDirection: 'column', gap: 10 }}>
       {sortedFields.map((sf) => {
         const currentValue = statement.values[sf.mmlCode] ?? '';
+        const isSelected = !isMod || selectedSet.has(sf.id);
         return (
           <div key={sf.id} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                opacity: isSelected ? 1 : 0.55,
+              }}
+            >
+              {isMod && (
+                <Checkbox
+                  checked={selectedSet.has(sf.id)}
+                  onChange={() => toggleSubField(statement.uid, sf.id)}
+                  aria-label={`select-${sf.mmlCode}`}
+                />
+              )}
               <span style={{ flex: '0 0 200px', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                 <span style={{ fontWeight: 500 }}>
-                  {sf.isRequired && (
+                  {/* MOD 模式 path 改为选填，不再用 is_required 标红 *；ADD 保留 */}
+                  {sf.isRequired && !isMod && (
                     <span style={{ color: '#ff4d4f', marginRight: 4 }} aria-label="required">
                       *
                     </span>
@@ -80,14 +107,21 @@ export default function SubFieldInputList({ statement }: SubFieldInputListProps)
                 value={currentValue}
                 onChange={(e) => setValue(statement.uid, sf.mmlCode, e.target.value)}
                 placeholder={sf.defaultValue ?? ''}
-                style={{ flex: 1 }}
-                status={sf.isRequired && !currentValue ? 'warning' : undefined}
+                // 用户决策 2026-05-23：value 输入框宽度减半（原 flex:1 占满剩余空间，
+                // 现取固定 240px 上限 + 0 1 缩放，留出右侧空间给 path Tag / OnReboot 等）
+                style={{ flex: '0 1 240px', maxWidth: 240 }}
+                status={!isMod && sf.isRequired && !currentValue ? 'warning' : undefined}
+                // MOD 未勾选行禁用输入（仍保留已有 value，避免误清）
+                disabled={isMod && !isSelected}
               />
+              {/* 填充剩余空间，把 path Tag 等推到右侧对齐 */}
+              <div style={{ flex: 1 }} />
               {multiInstanceHint(sf.tr069Path, t('mml.console.subField.multiInstanceTip'))}
               <AccessTypeTag
                 accessType={sf.accessType}
                 valueType={sf.valueType}
                 constraintText={sf.constraintText}
+                tr069Path={sf.tr069Path}
               />
               {sf.changeApplies === 'OnReboot' && (
                 <Tag color="warning">{t('mml.console.subField.onReboot')}</Tag>

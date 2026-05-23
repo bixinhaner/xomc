@@ -558,10 +558,21 @@ export function statementToStructured(stmt: Statement): StructuredStatement {
 
   // values：key 从 mml_code 反查 sub_field → 取 tr069Path 作为新 key。
   // 同样静默 skip 缺 tr069Path 的字段（与后端 422 unknown_paths 行为对齐）。
+  //
+  // 用户决策 2026-05-23：MOD path 改为选填（参考 LST），未勾选行的 value 不应
+  // 被下发（用户已显式 "取消修改"）。这里按 selectedSubFieldIds 过滤即可
+  // —— store 仍保留所有 values（再次勾选可恢复），但 wire 上只送选中部分。
+  // 对 LST / ADD / RMV 无影响：LST 不消费 values；ADD 当前不渲染 Checkbox，
+  // selectedSubFieldIds = 所有字段（CommandTree.replaceStatement default 选中
+  // defaultSelected），过滤为 no-op。
+  const selectedIDSet = new Set(stmt.selectedSubFieldIds);
+  const filterValuesBySelection = stmt.operationType === 'MOD';
   const values: Record<string, string> = {};
   for (const [mmlCode, v] of Object.entries(stmt.values)) {
     const sf = sfByMmlCode.get(mmlCode);
-    if (sf?.tr069Path) values[sf.tr069Path] = v;
+    if (!sf?.tr069Path) continue;
+    if (filterValuesBySelection && !selectedIDSet.has(sf.id)) continue;
+    values[sf.tr069Path] = v;
   }
 
   // instance indices：rmvInstanceIndices 优先；旧单 Index 兼容回退为 [Index]

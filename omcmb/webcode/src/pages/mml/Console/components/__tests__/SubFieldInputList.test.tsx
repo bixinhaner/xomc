@@ -3,10 +3,12 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import type { Statement, SubFieldDef } from '@core/types/mmlConsole';
 
 const setValue = vi.fn();
+const toggleSubField = vi.fn();
 
 vi.mock('@core/store/mmlConsoleStore', () => ({
-  useMmlConsoleStore: <T,>(selector: (s: { setValue: typeof setValue }) => T) =>
-    selector({ setValue }),
+  useMmlConsoleStore: <T,>(
+    selector: (s: { setValue: typeof setValue; toggleSubField: typeof toggleSubField }) => T,
+  ) => selector({ setValue, toggleSubField }),
 }));
 
 vi.mock('@/hooks/useT', () => ({
@@ -68,6 +70,7 @@ function addStmt(subFields: SubFieldDef[]): Statement {
 describe('SubFieldInputList', () => {
   beforeEach(() => {
     setValue.mockReset();
+    toggleSubField.mockReset();
   });
 
   it('MOD mode filters out READ_ONLY sub-fields (PRD §7.3)', () => {
@@ -90,16 +93,32 @@ describe('SubFieldInputList', () => {
     expect(screen.getByText('Locked')).toBeInTheDocument();
   });
 
-  it('required field shows red asterisk + typing fires store.setValue', () => {
+  it('ADD required field shows red asterisk + typing fires store.setValue', () => {
+    // 2026-05-23：MOD path 改为选填，required * 仅在 ADD 模式保留
+    // （创建新对象仍需所有 is_required 字段；MOD 用户已显式 "取消" 该 path 的修改）。
     const fields = [
       sf({ id: 'r', label: 'Mandatory', mmlCode: 'MAND', isRequired: true }),
     ];
-    render(<SubFieldInputList statement={modStmt(fields)} />);
+    render(<SubFieldInputList statement={addStmt(fields)} />);
     expect(screen.getByLabelText('required')).toBeInTheDocument();
 
     const input = screen.getByRole('textbox');
     fireEvent.change(input, { target: { value: 'abc' } });
-    expect(setValue).toHaveBeenCalledWith('uid-mod', 'MAND', 'abc');
+    expect(setValue).toHaveBeenCalledWith('uid-add', 'MAND', 'abc');
+  });
+
+  it('MOD shows Checkbox per row + toggle fires store.toggleSubField', () => {
+    // 2026-05-23：MOD path 选填，每行 Checkbox 与 LST 一致
+    const fields = [
+      sf({ id: 'r', label: 'OptionalPath', mmlCode: 'OPT', isRequired: true }),
+    ];
+    render(<SubFieldInputList statement={modStmt(fields)} />);
+    // MOD 模式不显示 required *（path 选填，user 决定要不要改）
+    expect(screen.queryByLabelText('required')).not.toBeInTheDocument();
+    // Checkbox aria-label="select-<mmlCode>"
+    const cb = screen.getByLabelText('select-OPT');
+    fireEvent.click(cb);
+    expect(toggleSubField).toHaveBeenCalledWith('uid-mod', 'r');
   });
 
   it('constraintText renders inside AccessTypeTag', () => {
