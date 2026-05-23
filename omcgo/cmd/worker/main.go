@@ -375,6 +375,11 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	}
 	logger.Info("backup transfer-complete router started")
 
+	// T-0164-P5 / G5 + T-0164-P8 / G8：PM 自然桶聚合 cron + asyncjob 框架接入。
+	// 复用上文已构造的 pmKPIRouter（KPI 反算依赖路由）；新开 4 个 cron runner +
+	// sweeper + 触发器（hourly @:05 / daily 00:05 / weekly 周一 00:10 / monthly 1日 00:15）。
+	startPMAggregatorPipeline(context.Background(), w, pmKPIRouter)
+
 	// M3: 周期备份调度器 + 任务 reaper（event-loss 兜底恢复）
 	backupScheduleRepo := backup.NewPgScheduleRepository(w.PgPool)
 	backupService := backup.NewService(backupTaskRepo, backupScheduleRepo, w.EventBus, logger)
