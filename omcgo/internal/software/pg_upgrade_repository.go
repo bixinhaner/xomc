@@ -446,12 +446,12 @@ func (r *PgSubTaskRepository) BatchCreate(ctx context.Context, tasks []*UpgradeS
 
 	builder := storage.Psql.Insert("upgrade_sub_tasks").
 		Columns("task_id", "device_id", "firmware_id", "status", "max_retries",
-			"device_sn", "ori_version", "dest_version")
+			"device_sn", "ori_version", "dest_version", "command_key")
 
 	for _, t := range tasks {
 		builder = builder.Values(
 			t.TaskID, t.DeviceID, t.FirmwareID, t.Status, t.MaxRetries,
-			t.DeviceSN, t.OriVersion, t.DestVersion,
+			t.DeviceSN, t.OriVersion, t.DestVersion, t.CommandKey,
 		)
 	}
 
