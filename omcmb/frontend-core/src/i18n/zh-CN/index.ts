@@ -294,8 +294,9 @@ const messages: Record<string, string> = {
   'nav.file.mrRetrieval':        'MR文件采集',
   'nav.file.userFiles':          '用户文件',
   'nav.file.deviceFiles':        '设备文件',
-  'nav.transfer.taskCreate':     '任务创建',
+  'nav.transfer.taskCreate':     '任务管理',
   'nav.transfer.templateConfig': '模板配置',
+  'nav.transfer.fileManagement': '文件管理',
 
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Log

@@ -16,11 +16,12 @@ import (
 
 // Handler provides HTTP handlers for backup management REST API.
 type Handler struct {
-	service        *Service
-	ftpRepo        FTPConfigRepository
-	policyService  *PolicyService       // T-0071; nil-safe (UpdatePolicy/GetPolicy return 503 if unset)
-	restoreService *RestoreService      // T-0072; nil-safe (restore endpoints return 503 if unset)
-	ftpTester      *FTPConnectionTester // T-0032; nil-safe (TestFTPConnection returns stub when unset)
+	service         *Service
+	ftpRepo         FTPConfigRepository
+	policyService   *PolicyService       // T-0071; nil-safe (UpdatePolicy/GetPolicy return 503 if unset)
+	restoreService  *RestoreService      // T-0072; nil-safe (restore endpoints return 503 if unset)
+	snapshotService *SnapshotService     // T-0164; nil-safe (config-snapshot endpoints return 503 if unset)
+	ftpTester       *FTPConnectionTester // T-0032; nil-safe (TestFTPConnection returns stub when unset)
 	// M4: ExportFile presigned URL support
 	fileRepo    FileRepository // nil-safe (ExportFile returns 503 if unset)
 	minioClient *minio.Client  // nil-safe (ExportFile returns 503 if unset)
@@ -110,8 +111,24 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	// T-0079: restore_by_task_id mode — same fan-out, but resolves bucket +
 	// object_path automatically from backup_tasks.file_path linkage.
 	restore.POST("/restore/by-task-id", h.CreateRestoreByTaskID)
+	// T-0164 B5: restore_by_snapshot mode — per-device picks latest snapshot.
+	restore.POST("/restore/by-snapshot", h.CreateRestoreBySnapshot)
 	restore.GET("/restore-tasks", h.ListRestoreTasks)
 	restore.GET("/restore-tasks/:id", h.GetRestoreTask)
+
+	// T-0164 B4: config snapshots endpoints (single source of latest config per
+	// device). Routes are always registered; handlers 503 if snapshotService nil.
+	snap := rg.Group("/backup/config-snapshots")
+	snap.GET("", h.ListSnapshots)
+	snap.POST("/batch-get", h.BatchGetSnapshots)
+	snap.POST("/validate-sns", h.ValidateImportSNs)
+	snap.POST("/import", h.ImportSnapshots)
+	// 批量删除走 POST /batch-delete 而不是 DELETE with body —— DELETE 携带 body
+	// 在某些代理 / WAF 下会被吞，且 axios 在某些 adapter 下也不一定可靠。
+	snap.POST("/batch-delete", h.BatchDeleteSnapshots)
+	snap.GET("/:sn", h.GetSnapshot)
+	snap.GET("/:sn/download", h.DownloadSnapshot)
+	snap.DELETE("/:sn", h.DeleteSnapshot)
 
 	// M4: 运营商规范 API 别名 — /task/enb/config/backupRestore/*
 	// 保留 /api/v1/backup/* 原路由，此处仅增加别名前缀，不修改处理逻辑。

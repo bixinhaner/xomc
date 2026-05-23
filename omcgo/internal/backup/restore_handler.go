@@ -119,6 +119,48 @@ func (h *Handler) CreateRestoreByTaskID(c *gin.Context) {
 	response.OK(c, result)
 }
 
+// CreateRestoreBySnapshot handles POST /api/v1/backup/restore/by-snapshot (T-0164 B5).
+//
+// Body: {"target_device_sns": ["SN001", "SN002", ...]}
+//
+// Each target device picks its own latest config_snapshots row as source.
+// Integral rejection: if any SN has no snapshot, returns 404 with the list of
+// missing SNs in the body so the operator can fix and retry.
+func (h *Handler) CreateRestoreBySnapshot(c *gin.Context) {
+	if h.restoreService == nil {
+		commonerrors.AbortWithError(c, http.StatusServiceUnavailable,
+			errors.New("restore service not configured"))
+		return
+	}
+	var req CreateBySnapshotRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	createdByStr := admin.UserIDStringFromCtx(c)
+	result, err := h.restoreService.CreateBySnapshot(c.Request.Context(), &req, createdByStr)
+	if err != nil {
+		switch {
+		case errors.Is(err, commonerrors.ErrInvalidInput):
+			// Service returns InvalidInput when by-snapshot mode isn't wired
+			// OR when the request body has zero targets. result may carry
+			// missing SNs if integral rejection happened.
+			if result != nil && len(result.Missing) > 0 {
+				response.FailWithData(c, http.StatusBadRequest, err.Error(), result)
+				return
+			}
+			commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		case errors.Is(err, commonerrors.ErrNotFound):
+			// Missing snapshot rows → 404 with body listing missing SNs.
+			response.FailWithData(c, http.StatusNotFound, err.Error(), result)
+		default:
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	response.OK(c, result)
+}
+
 // GetRestoreTask handles GET /api/v1/backup/restore-tasks/:id.
 func (h *Handler) GetRestoreTask(c *gin.Context) {
 	if h.restoreService == nil {

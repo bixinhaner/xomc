@@ -43,6 +43,14 @@ type FileRepository interface {
 	// ListBySerial 返回某 SN 下的全部备份文件元数据，按 update_time DESC 排序。
 	// 用于 queryCellInfos / single/exportFile（M4 里程碑使用）。
 	ListBySerial(ctx context.Context, sn string) ([]BackupRestoreFile, error)
+
+	// ListByTaskID 返回 UFTE 主任务 UUID 关联的所有备份/日志文件元数据。
+	// 用于任务删除时回收 MinIO 对象。空 taskID 返回空切片。
+	ListByTaskID(ctx context.Context, taskID string) ([]BackupRestoreFile, error)
+
+	// DeleteByTaskID 删除属于该 taskID 的所有元数据行。MinIO 对象清理由调用方
+	// 在删除元数据**之前**完成（先 List → 删 MinIO → 删元数据）。
+	DeleteByTaskID(ctx context.Context, taskID string) error
 }
 
 // PgFileRepository 是 PostgreSQL 实现。
@@ -90,6 +98,60 @@ func (r *PgFileRepository) Upsert(ctx context.Context, f *BackupRestoreFile) err
 
 	if scanErr := r.pool.QueryRow(ctx, query, args...).Scan(&f.ID, &f.CreatedAt); scanErr != nil {
 		return fmt.Errorf("upsert backup_restore_file: %w", scanErr)
+	}
+	return nil
+}
+
+// ListByTaskID 按 task_id 列出该任务关联的所有备份/日志文件元数据。
+func (r *PgFileRepository) ListByTaskID(ctx context.Context, taskID string) ([]BackupRestoreFile, error) {
+	if taskID == "" {
+		return nil, nil
+	}
+	query, args, err := storage.Psql.
+		Select("id", "serial_number", "file_name", "object_path",
+			"md5", "file_size", "operator_code", "task_id", "update_time", "created_at").
+		From("backup_restore_file").
+		Where(sq.Eq{"task_id": taskID}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build backup_restore_file list-by-task SQL: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query backup_restore_file by task_id: %w", err)
+	}
+	defer rows.Close()
+	out := make([]BackupRestoreFile, 0)
+	for rows.Next() {
+		var f BackupRestoreFile
+		if scanErr := rows.Scan(
+			&f.ID, &f.SerialNumber, &f.FileName, &f.ObjectPath,
+			&f.MD5, &f.FileSize, &f.OperatorCode, &f.TaskID, &f.UpdateTime, &f.CreatedAt,
+		); scanErr != nil {
+			return nil, fmt.Errorf("scan backup_restore_file: %w", scanErr)
+		}
+		out = append(out, f)
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		return nil, fmt.Errorf("iterate backup_restore_file: %w", rowsErr)
+	}
+	return out, nil
+}
+
+// DeleteByTaskID 删除 task_id 关联的所有元数据行。幂等：taskID 为空或无匹配行时返回 nil。
+func (r *PgFileRepository) DeleteByTaskID(ctx context.Context, taskID string) error {
+	if taskID == "" {
+		return nil
+	}
+	query, args, err := storage.Psql.
+		Delete("backup_restore_file").
+		Where(sq.Eq{"task_id": taskID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build backup_restore_file delete-by-task SQL: %w", err)
+	}
+	if _, execErr := r.pool.Exec(ctx, query, args...); execErr != nil {
+		return fmt.Errorf("delete backup_restore_file by task_id: %w", execErr)
 	}
 	return nil
 }

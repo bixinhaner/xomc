@@ -39,6 +39,32 @@ type Service struct {
 	// 精确反查当前任务的落地记录，返回设备真实文件名。
 	// nil → DeviceItem.TargetFile / DownloadURL 永远留空。
 	fileLandedLookup func(ctx context.Context, sn, mainTaskID string) (fileName string, landed bool, err error)
+
+	// snapshotConfigRestoreDispatcher (T-0164)：CONFIG_RESTORE 任务的实际派发器。
+	// 接收设备 SN 列表，从 config_snapshots 表取每设备最新一份配置 → 缺失整批拒绝
+	// → 全部存在则创建 restore_tasks 主行 + 逐设备 Download device_tasks。
+	// nil → CONFIG_RESTORE 任务创建直接返回 not configured。
+	// 由 backup.RestoreService 满足该接口；wiring 在 cmd/app/provider/modules.go。
+	snapshotConfigRestoreDispatcher SnapshotConfigRestoreDispatcher
+}
+
+// SnapshotConfigRestoreDispatcher 是 UFTE 对 backup.RestoreService.CreateBySnapshot
+// 的最小依赖。命名带 Snapshot 表明文件源恒来自 config_snapshots 表（每设备最新一份）。
+//
+// 返回：
+//   - dispatchedID：成功时返回 restore_tasks 主行 UUID（外层包装为 ufte.Task.ID）
+//   - missing：缺失快照的 SN 列表；非空时调用方应返 ErrNotFound 给上层
+//   - err：基础设施错误（DB/MinIO 不可用等）
+type SnapshotConfigRestoreDispatcher interface {
+	DispatchConfigRestoreBySnapshot(
+		ctx context.Context, targetDeviceSNs []string, createUser string,
+	) (dispatchedID uuid.UUID, missing []string, err error)
+}
+
+// SetSnapshotConfigRestoreDispatcher 注入 CONFIG_RESTORE 派发器（T-0164）。
+// 不调用则 CONFIG_RESTORE 任务创建始终返回 ErrInvalidInput。
+func (s *Service) SetSnapshotConfigRestoreDispatcher(d SnapshotConfigRestoreDispatcher) {
+	s.snapshotConfigRestoreDispatcher = d
 }
 
 func NewService(
@@ -323,6 +349,13 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 	var createdTask *software.UpgradeTask
 	createSuspended := req.ExecutionMode == "suspended"
 
+	// T-0164：CONFIG_RESTORE 走独立链路（backup.RestoreService.CreateBySnapshot），
+	// 不进 software.upgrade_tasks 表，因此 createdTask 留 nil，由 dispatcher 返回
+	// dispatchedID 后构造 placeholder。提前 return，避免落到下面的 firmware case。
+	if typeDef.TypeCode == "CONFIG_RESTORE" {
+		return s.createConfigRestoreTask(ctx, &typeDef, req, createUser, createSuspended)
+	}
+
 	switch {
 	case typeDef.softwareTaskType == software.TaskTypeLogCollect:
 		// 日志采集（Upload 或 SetParameterValues RPC）：不需要固件，直接通过 BatchCollect 下发。
@@ -369,6 +402,70 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 		return nil, err
 	}
 	return s.mapTask(catalog, createdTask)
+}
+
+// createConfigRestoreTask (T-0164) 处理 CONFIG_RESTORE 任务创建。
+//
+// 与升级/采集/回滚不同，本类型**不**写入 software.upgrade_tasks 表，而是走
+// backup.RestoreService.CreateBySnapshot：每台设备从 config_snapshots 取自己
+// 最新一份配置 → 缺失整批拒绝 → 全部存在则创建 restore_tasks 主行 +
+// 逐设备 Download device_tasks。
+//
+// 返回的 ufte.Task 是 placeholder（ID = restore_task UUID，Status/Progress 暂置
+// 初值），UFTE "任务列表"不会展示它（列表查 upgrade_tasks）；CONFIG_RESTORE 历史
+// 任务的展示由备份恢复模块的 RestoreTask 列表负责。
+func (s *Service) createConfigRestoreTask(
+	ctx context.Context,
+	typeDef *TaskType,
+	req CreateTaskRequest,
+	createUser string,
+	createSuspended bool,
+) (*Task, error) {
+	if s.snapshotConfigRestoreDispatcher == nil {
+		return nil, fmt.Errorf("%w: CONFIG_RESTORE dispatcher not wired", commonerrors.ErrInvalidInput)
+	}
+	if createSuspended {
+		return nil, fmt.Errorf("%w: CONFIG_RESTORE does not support suspended creation yet", commonerrors.ErrInvalidInput)
+	}
+
+	// device_ids (UUID) → device_sns
+	sns := make([]string, 0, len(req.DeviceIDs))
+	for _, did := range req.DeviceIDs {
+		dev, err := s.deviceRepo.GetByID(ctx, did)
+		if err != nil || dev == nil {
+			return nil, fmt.Errorf("%w: device %s not found", commonerrors.ErrInvalidInput, did)
+		}
+		sns = append(sns, dev.SerialNumber)
+	}
+
+	dispatchedID, missing, err := s.snapshotConfigRestoreDispatcher.
+		DispatchConfigRestoreBySnapshot(ctx, sns, createUser)
+	if err != nil {
+		if len(missing) > 0 {
+			// 缺失整批拒绝：把 missing 列表带回，handler 据此返结构化错误。
+			return nil, fmt.Errorf("%w: %d device(s) missing config snapshot: %v",
+				commonerrors.ErrNotFound, len(missing), missing)
+		}
+		return nil, fmt.Errorf("dispatch CONFIG_RESTORE by snapshot: %w", err)
+	}
+
+	// 构造 placeholder Task，前端可立即看到任务名称 + ID + 类型，
+	// 详细进度走备份恢复模块的 restore_tasks 列表。
+	now := time.Now().Format(time.RFC3339)
+	return &Task{
+		ID:              dispatchedID.String(),
+		TaskName:        req.TaskName,
+		Category:        typeDef.Category,
+		CategoryLabel:   typeDef.CategoryLabel,
+		TypeCode:        typeDef.TypeCode,
+		TypeDisplayName: typeDef.DisplayName,
+		Status:          "pending",
+		Progress:        0,
+		TotalCount:      len(req.DeviceIDs),
+		ExecutionMode:   req.ExecutionMode,
+		CreateUser:      createUser,
+		CreatedAt:       now,
+	}, nil
 }
 
 func (s *Service) ListTasks(ctx context.Context, filter TaskListFilter) (*coremodel.ListResponse[Task], error) {
@@ -719,6 +816,18 @@ func (s *Service) mapDeviceItem(
 				zap.Error(lookupErr))
 		} else {
 			downloadURL = url
+		}
+	}
+	// 配置备份类（CONFIG_BACKUP_XML / NV）展示用规范化名 <SN>_CFG.<ext>，与
+	// 配置快照库口径一致。downloadURL 已用真实 CPE 文件名换好 presigned URL，
+	// 这里改名只影响 UI 展示，不影响下载。日志类（RUNTIME_LOG / FAULT_LOG）
+	// 保留设备原始上传名。
+	if targetFile != "" && (typeDef.TypeCode == "CONFIG_BACKUP_XML" || typeDef.TypeCode == "CONFIG_BACKUP_NV") {
+		if dot := strings.LastIndex(targetFile, "."); dot >= 0 {
+			ext := strings.ToLower(targetFile[dot+1:])
+			if ext == "xml" || ext == "nv" {
+				targetFile = fmt.Sprintf("%s_CFG.%s", subTask.DeviceSN, ext)
+			}
 		}
 	}
 

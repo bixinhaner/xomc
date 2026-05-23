@@ -90,7 +90,9 @@ func Setup(r *gin.Engine, c *Container) error {
 		// 依赖 software：FilePathRecorder 装配时要拿 c.miscDeps.softwareService 作为
 		// FileLandedNotifier（FAULT_LOG_COLLECT 文件落地即完成的 hook 回调）；不声明依赖
 		// 时 backup 跑得比 software 早，softwareService 还是 nil，hook 永远拿不到通知。
-		Depends: []string{"software"},
+		// 依赖 ufte (T-0164)：backup.RestoreService 反向注入到 ufte.Service 作为
+		// CONFIG_RESTORE 派发器；ufte 必须先就绪。
+		Depends: []string{"software", "ufte"},
 		Init:    func() error { return initBackupModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{

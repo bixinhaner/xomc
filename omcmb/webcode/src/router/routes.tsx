@@ -86,6 +86,7 @@ const BackupSchedule     = React.lazy(() => import('@/pages/backup/BackupSchedul
 const FTPConfig          = React.lazy(() => import('@/pages/backup/FTPConfig'));
 const RestoreData        = React.lazy(() => import('@/pages/backup/RestoreData'));
 const BackupPolicy       = React.lazy(() => import('@/pages/backup/BackupPolicy'));
+const ConfigSnapshotLibrary = React.lazy(() => import('@/pages/backup/ConfigSnapshotLibrary'));
 
 // Software Management — 菜单已移除，保留 lazy import 以便路由可达
 const VersionQuery       = React.lazy(() => import('@/pages/software/VersionQuery'));
@@ -97,6 +98,7 @@ const VersionRollback    = React.lazy(() => import('@/pages/software/VersionRoll
 // Unified File Transfer Preview
 const FileTransferCenter = React.lazy(() => import('@/pages/transfer/FileTransferCenter'));
 const TransferTemplateManagement = React.lazy(() => import('@/pages/transfer/TemplateDefinitionManagement'));
+const TransferFileManagement = React.lazy(() => import('@/pages/transfer/FileManagement'));
 
 // File Management
 const ConfigRetrieval    = React.lazy(() => import('@/pages/file/ConfigRetrieval'));
@@ -307,6 +309,7 @@ export const routes: RouteObject[] = [
       { path: 'backup/ftp',      element: withSuspense(FTPConfig) },
       { path: 'backup/restore',  element: withSuspense(RestoreData) },
       { path: 'backup/policy',   element: withSuspense(BackupPolicy) },
+      { path: 'backup/config-snapshots', element: withSuspense(ConfigSnapshotLibrary) },
 
       // Software Management — 菜单已移除，路由保留以便直接 URL 访问
       { path: 'software/version',       element: withSuspense(VersionQuery) },
@@ -378,6 +381,7 @@ export const routes: RouteObject[] = [
 
       // Transfer Management
       { path: 'transfer/center',             element: withSuspense(FileTransferCenter) },
+      { path: 'transfer/file-management',    element: withSuspense(TransferFileManagement) },
       { path: 'transfer/template-management', element: withAdminRole(TransferTemplateManagement) },
 
       // Ops Management

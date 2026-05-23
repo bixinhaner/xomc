@@ -16,6 +16,8 @@ type RestoreMetrics struct {
 	devicesEnqueued     prometheus.Counter
 	filePathRecorded    *prometheus.CounterVec // T-0079
 	restoreByTaskTotal  *prometheus.CounterVec // T-0079
+	snapshotPromoted    *prometheus.CounterVec // T-0164 B3
+	restoreBySnapshot   *prometheus.CounterVec // T-0164 B5
 }
 
 // NewRestoreMetrics registers collectors on the given registry.
@@ -38,11 +40,20 @@ func NewRestoreMetrics(reg prometheus.Registerer) *RestoreMetrics {
 			Name: "omc_backup_restore_by_task_total",
 			Help: "Outcomes of POST /backup/restore/by-task-id (T-0079). result ∈ {accepted, rejected_not_uploaded, rejected_invalid_input}.",
 		}, []string{"result"}),
+		snapshotPromoted: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_config_snapshot_promote_total",
+			Help: "config_snapshots promote-from-backup outcomes (T-0164 B3). result ∈ {success, failed}.",
+		}, []string{"result"}),
+		restoreBySnapshot: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "omc_backup_restore_by_snapshot_total",
+			Help: "Outcomes of POST /backup/restore/by-snapshot (T-0164 B5). result ∈ {accepted, rejected_missing_snapshot, rejected_invalid_input}.",
+		}, []string{"result"}),
 	}
 	if reg != nil {
 		reg.MustRegister(
 			m.requestsTotal, m.devicesEnqueued,
 			m.filePathRecorded, m.restoreByTaskTotal,
+			m.snapshotPromoted, m.restoreBySnapshot,
 		)
 	}
 	return m
@@ -82,4 +93,22 @@ func (m *RestoreMetrics) RecordRestoreByTask(result string) {
 		return
 	}
 	m.restoreByTaskTotal.WithLabelValues(result).Inc()
+}
+
+// RecordSnapshotPromote increments the config_snapshot promote counter (T-0164 B3).
+// result ∈ {"success", "failed"}.
+func (m *RestoreMetrics) RecordSnapshotPromote(result string) {
+	if m == nil {
+		return
+	}
+	m.snapshotPromoted.WithLabelValues(result).Inc()
+}
+
+// RecordRestoreBySnapshot increments the by-snapshot restore mode counter (T-0164 B5).
+// result ∈ {"accepted", "rejected_missing_snapshot", "rejected_invalid_input"}.
+func (m *RestoreMetrics) RecordRestoreBySnapshot(result string) {
+	if m == nil {
+		return
+	}
+	m.restoreBySnapshot.WithLabelValues(result).Inc()
 }

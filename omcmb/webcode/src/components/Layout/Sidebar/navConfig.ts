@@ -137,21 +137,11 @@ export const NAV_CONFIG: NavConfig = [
     iconName: 'CloudServerOutlined',
     children: [
       { key: 'transfer-task-create', label: 'nav.transfer.taskCreate', path: '/transfer/center' },
+      { key: 'transfer-file-management', label: 'nav.transfer.fileManagement', path: '/transfer/file-management' },
       { key: 'transfer-template-config', label: 'nav.transfer.templateConfig', path: '/transfer/template-management', requireAdmin: true },
     ],
   },
-  {
-    key: 'backup',
-    label: 'nav.backup',
-    iconName: 'SaveOutlined',
-    children: [
-      { key: 'backup-task',     label: 'nav.backup.tasks',     path: '/backup/tasks' },
-      { key: 'backup-plan',     label: 'nav.backup.schedule',  path: '/backup/schedule' },
-      // { key: 'backup-ftp',      label: 'nav.backup.ftp',       path: '/backup/ftp' },
-      { key: 'backup-restore', label: 'nav.backup.restore',   path: '/backup/restore' },
-      // { key: 'backup-strategy', label: 'nav.backup.policy',    path: '/backup/policy' },
-    ],
-  },
+  // 备份恢复菜单已下线：配置快照已整合进"文件传输 → 文件管理"
   // 软件管理菜单已移除，升级功能已整合到文件传输模块
   // {
   //   key: 'software',

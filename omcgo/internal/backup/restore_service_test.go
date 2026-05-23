@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -17,6 +18,9 @@ import (
 	devicemodel "github.com/omcgo/omcgo/internal/core/model"
 	devtask "github.com/omcgo/omcgo/internal/task"
 )
+
+// jsonUnmarshal 是 encoding/json.Unmarshal 的别名，让本测试文件读起来更短。
+func jsonUnmarshal(data []byte, v interface{}) error { return json.Unmarshal(data, v) }
 
 // --- mocks ---
 
@@ -264,6 +268,110 @@ func TestCreateByTaskID_finderNotConfigured(t *testing.T) {
 		BackupTaskID:    uuid.New(),
 		TargetDeviceSNs: []string{"SN999"},
 	}, "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrInvalidInput))
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// B5: CreateBySnapshot
+// ─────────────────────────────────────────────────────────────────────────
+
+// fakeSnapshotLookup satisfies SnapshotLookup with an in-memory map.
+type fakeSnapshotLookup struct {
+	rows map[string]*ConfigSnapshot
+	err  error
+}
+
+func (f *fakeSnapshotLookup) BatchGetBySerialNumbers(_ context.Context, sns []string) (map[string]*ConfigSnapshot, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := map[string]*ConfigSnapshot{}
+	for _, sn := range sns {
+		if v, ok := f.rows[sn]; ok {
+			out[sn] = v
+		}
+	}
+	return out, nil
+}
+
+func makeSnap(sn string) *ConfigSnapshot {
+	return &ConfigSnapshot{
+		SerialNumber: sn,
+		FileName:     sn + "_CFG.xml",
+		FileExt:      "xml",
+		ObjectBucket: "config-snapshots",
+		ObjectPath:   sn + "_CFG.xml",
+		Source:       SnapshotSourceManualUpload,
+	}
+}
+
+func TestCreateBySnapshot_AllPresent_FansOutPerDevice(t *testing.T) {
+	svc, repo, enq := newSvc(t, []string{"SN001", "SN002"}, true)
+	svc.SetSnapshotLookup(&fakeSnapshotLookup{rows: map[string]*ConfigSnapshot{
+		"SN001": makeSnap("SN001"),
+		"SN002": makeSnap("SN002"),
+	}})
+
+	res, err := svc.CreateBySnapshot(context.Background(),
+		&CreateBySnapshotRequest{TargetDeviceSNs: []string{"SN001", "SN002"}}, "alice")
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.NotNil(t, res.Task)
+	assert.Empty(t, res.Missing)
+
+	// One restore_tasks row, placeholder source_object_path.
+	require.Len(t, repo.created, 1)
+	assert.Equal(t, "config-snapshots", repo.created[0].SourceBucket)
+	assert.Equal(t, SnapshotRestoreSourcePlaceholder, repo.created[0].SourceObjectPath)
+	assert.ElementsMatch(t, []string{"SN001", "SN002"}, repo.created[0].TargetDeviceSNs)
+
+	// Two device_tasks, each with its own URL pointing at the device's snapshot.
+	require.Len(t, enq.requests, 2)
+	urls := []string{}
+	for _, r := range enq.requests {
+		var params map[string]interface{}
+		require.NoError(t, jsonUnmarshal(r.Params, &params))
+		urls = append(urls, params["url"].(string))
+	}
+	assert.ElementsMatch(t,
+		[]string{"config-snapshots/SN001_CFG.xml", "config-snapshots/SN002_CFG.xml"},
+		urls)
+}
+
+func TestCreateBySnapshot_PartialMissing_IntegrallyRejects(t *testing.T) {
+	svc, repo, enq := newSvc(t, []string{"SN001", "SN002", "SN003"}, true)
+	svc.SetSnapshotLookup(&fakeSnapshotLookup{rows: map[string]*ConfigSnapshot{
+		"SN001": makeSnap("SN001"),
+		// SN002, SN003 missing
+	}})
+
+	res, err := svc.CreateBySnapshot(context.Background(),
+		&CreateBySnapshotRequest{TargetDeviceSNs: []string{"SN001", "SN002", "SN003"}}, "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrNotFound))
+	require.NotNil(t, res)
+	assert.ElementsMatch(t, []string{"SN002", "SN003"}, res.Missing)
+
+	// No persistence side-effects (no restore_task row, no device_tasks).
+	assert.Empty(t, repo.created, "integral rejection must not create restore_tasks")
+	assert.Empty(t, enq.requests, "integral rejection must not enqueue device_tasks")
+}
+
+func TestCreateBySnapshot_NotConfigured(t *testing.T) {
+	svc, _, _ := newSvc(t, []string{"SN001"}, true)
+	// SetSnapshotLookup NOT called.
+	_, err := svc.CreateBySnapshot(context.Background(),
+		&CreateBySnapshotRequest{TargetDeviceSNs: []string{"SN001"}}, "")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, commonerrors.ErrInvalidInput))
+}
+
+func TestCreateBySnapshot_EmptyTargets(t *testing.T) {
+	svc, _, _ := newSvc(t, nil, true)
+	svc.SetSnapshotLookup(&fakeSnapshotLookup{rows: map[string]*ConfigSnapshot{}})
+	_, err := svc.CreateBySnapshot(context.Background(),
+		&CreateBySnapshotRequest{TargetDeviceSNs: []string{}}, "")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, commonerrors.ErrInvalidInput))
 }

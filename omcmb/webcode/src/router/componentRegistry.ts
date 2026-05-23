@@ -96,6 +96,7 @@ export const componentRegistry: Record<string, ComponentType> = {
   'backup/FTPConfig': lazy(() => import('@/pages/backup/FTPConfig')),
   'backup/RestoreData': lazy(() => import('@/pages/backup/RestoreData')),
   'backup/BackupPolicy': lazy(() => import('@/pages/backup/BackupPolicy')),
+  'backup/ConfigSnapshotLibrary': lazy(() => import('@/pages/backup/ConfigSnapshotLibrary')),
 
   // Software Management
   'software/VersionQuery': lazy(() => import('@/pages/software/VersionQuery')),

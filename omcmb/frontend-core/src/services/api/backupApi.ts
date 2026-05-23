@@ -442,6 +442,26 @@ export const backupApi = {
     return mapBackendRestoreTask(data);
   },
 
+  /**
+   * T-0164 B5: 按设备快照恢复。每台设备从 config_snapshots 取自己最新一份。
+   * 缺失快照的设备会触发后端整批拒绝（HTTP 4xx + missing 列表），
+   * 调用方应捕获 axios 错误并读取 response.data.missing。
+   */
+  async createRestoreBySnapshot(req: {
+    targetDeviceSns: string[];
+  }): Promise<{ task: RestoreTask | null; missing: string[] }> {
+    const { data } = await http.post<{
+      task?: BackendRestoreTask;
+      missing?: string[];
+    }>('/backup/restore/by-snapshot', {
+      target_device_sns: req.targetDeviceSns,
+    });
+    return {
+      task: data.task ? mapBackendRestoreTask(data.task) : null,
+      missing: data.missing ?? [],
+    };
+  },
+
   async listRestoreTasks(
     params: PageRequest & { status?: RestoreStatus }
   ): Promise<PageResponse<RestoreTask>> {

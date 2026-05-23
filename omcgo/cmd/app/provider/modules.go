@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/minio/minio-go/v7"
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
@@ -300,7 +302,75 @@ func initUFTEModule(c *Container) error {
 		c.miscDeps.softwareService.SetLogCollectResumer(service)
 	}
 
+	// 注入"任务删除时清理 MinIO + backup_restore_file"的回调：UFTE 文件传输
+	// 任务（CONFIG_BACKUP_*/RUNTIME_LOG_COLLECT/FAULT_LOG_COLLECT）的产物
+	// 落在 config_backup / logs 等 bucket，DeleteUpgrade 默认只删 DB 任务行，
+	// MinIO 上的备份/日志文件会成为孤儿。这里按 task_id 回收：
+	//   1) 反查 backup_restore_file 拿到 (bucket, objectPath) 列表（同步）
+	//   2) 删 backup_restore_file 元数据（同步，让接口尽快返回）
+	//   3) **后台 goroutine** 逐个 RemoveObject（异步，best-effort）
+	// 元数据先删 → UI 立即看到任务消失；MinIO 慢请求不阻塞响应。MinIO 失败
+	// 也不影响 DB 一致性（最坏只是孤儿对象，由运维定期 bucket lifecycle 兜底）。
+	// config_snapshots 不在此清理——它是"每设备最新一份"的辅助索引，独立 bucket，
+	// 由 promote 链路覆盖式维护。
+	// 注意：清理用 c.MinIO（内部客户端，连 docker 服务名 minio:9000），不能用
+	// 上面那个 minioClient（被覆盖成 PresignClient，public_endpoint=localhost:9000，
+	// 容器内连不通）。PresignClient 只该用来签 presigned URL，不该跑真实 API。
+	internalMinIO := c.MinIO
+	if c.miscDeps.softwareService != nil && internalMinIO != nil {
+		c.miscDeps.softwareService.SetTaskFileCleaner(func(ctx context.Context, taskID uuid.UUID) error {
+			taskIDStr := taskID.String()
+			files, listErr := backupFileRepo.ListByTaskID(ctx, taskIDStr)
+			if listErr != nil {
+				return fmt.Errorf("list backup_restore_file by task %s: %w", taskIDStr, listErr)
+			}
+			if delErr := backupFileRepo.DeleteByTaskID(ctx, taskIDStr); delErr != nil {
+				return fmt.Errorf("delete backup_restore_file by task %s: %w", taskIDStr, delErr)
+			}
+			if len(files) == 0 {
+				return nil
+			}
+			// 异步清理 MinIO 对象 — 不阻塞 HTTP 响应。用独立 ctx（不继承请求 ctx）
+			// 避免响应返回后 ctx 被 cancel 导致 RemoveObject 中断。2 分钟超时兜底
+			// 防止 MinIO 卡死时 goroutine 永远跑。
+			go func(toRemove []backup.BackupRestoreFile) {
+				asyncCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+				defer cancel()
+				removed, failed := 0, 0
+				for i := range toRemove {
+					if toRemove[i].ObjectPath == "" {
+						continue
+					}
+					bucket, objectPath, splitErr := backup.SplitBucketAndPath(toRemove[i].ObjectPath)
+					if splitErr != nil || bucket == "" || objectPath == "" {
+						logger.Warn("skip MinIO removal: bad object_path",
+							zap.String("task_id", taskIDStr),
+							zap.String("object_path", toRemove[i].ObjectPath))
+						failed++
+						continue
+					}
+					if rmErr := internalMinIO.RemoveObject(asyncCtx, bucket, objectPath, minio.RemoveObjectOptions{}); rmErr != nil {
+						logger.Warn("async remove MinIO object failed",
+							zap.String("task_id", taskIDStr),
+							zap.String("bucket", bucket),
+							zap.String("path", objectPath),
+							zap.Error(rmErr))
+						failed++
+						continue
+					}
+					removed++
+				}
+				logger.Info("async MinIO cleanup done",
+					zap.String("task_id", taskIDStr),
+					zap.Int("removed", removed),
+					zap.Int("failed", failed))
+			}(files)
+			return nil
+		})
+	}
+
 	c.miscDeps.ufteHandler = ufte.NewHandler(service, logger)
+	c.miscDeps.ufteService = service
 	logger.Info("UFTE adapter module initialized", zap.Int("built_in_task_types_inserted", inserted))
 	return nil
 }
@@ -509,6 +579,34 @@ func initBackupModule(c *Container) error {
 	if c.miscDeps.softwareService != nil {
 		filePathRecorder.SetFileLandedNotifier(c.miscDeps.softwareService)
 	}
+	// T-0164 B6: ConfigSnapshot 子系统装配（独立 bucket / 表 / Service / Handler）。
+	// 历史数据不回填（用户确认 2026-05-22），表上线后从首次新备份或导入开始累积。
+	snapshotRepo := backup.NewPgSnapshotRepository(c.PgPool)
+	snapshotFileLookup := backup.NewPgFileRepository(c.PgPool) // 复用 backup_restore_file repo
+	snapshotService := backup.NewSnapshotService(
+		snapshotRepo, c.MinIO, snapshotFileLookup, c.DeviceRepo,
+		backup.SnapshotBucketDefault, logger,
+	)
+	// promote hook：备份成功后自动 promote 到 config_snapshots。
+	filePathRecorder.SetSnapshotPromoter(snapshotService)
+	// by-snapshot 恢复模式：每设备取自己最新快照。
+	restoreService.SetSnapshotLookup(snapshotService)
+	backupHandler.SetSnapshotService(snapshotService)
+	// T-0164: 让 UFTE CONFIG_RESTORE 走 backup.RestoreService.CreateBySnapshot 链路。
+	// 反向注入：ufte init 早于 backup，必须等 restoreService 装配完成才能 wire。
+	if c.miscDeps.ufteService != nil {
+		c.miscDeps.ufteService.SetSnapshotConfigRestoreDispatcher(restoreService)
+	}
+	// 启动期幂等创建 bucket（MinIOClient 注入存在才执行）。
+	if c.MinIO != nil {
+		if err := ensureSnapshotBucket(context.Background(), c.MinIO, backup.SnapshotBucketDefault); err != nil {
+			// 失败不阻塞模块启动 —— Service 调用时 MinIO 会返回更明确的错误，
+			// 比此处启动期 panic 更便于排查。
+			logger.Warn("ensure config-snapshots bucket failed; service may 5xx until fixed",
+				zap.String("bucket", backup.SnapshotBucketDefault), zap.Error(err))
+		}
+	}
+
 	if err := filePathRecorder.Subscribe(c.EventBus); err != nil {
 		logger.Warn("subscribe backup file path recorder", zap.Error(err))
 	}
@@ -523,7 +621,19 @@ func initBackupModule(c *Container) error {
 	// M4: ExportFile 依赖（按 SN 列文件 + 生成 MinIO presigned URL）
 	backupHandler.SetFileRepository(backup.NewPgFileRepository(c.PgPool))
 	if c.MinIO != nil {
-		backupHandler.SetMinioClient(c.MinIO)
+		// 注入 PresignClient 而不是内部 client —— 内部 client 的 endpoint 是
+		// `minio:9000`（docker 服务名），签出来的 presigned URL 浏览器解析不了
+		// 会报 ERR_NAME_NOT_RESOLVED。PresignClient 用 minio.public_endpoint
+		// 重签为对外可达 host（如 localhost:9000）。
+		// 与 UFTE 模块 SetDownloadURLLookup 同一套逻辑（见上方 line 207-213）。
+		presignSigner := c.MinIO
+		if pc, perr := minioinfra.NewPresignClient(c.Cfg.MinIO); perr != nil {
+			logger.Warn("create MinIO presign client failed for backupHandler; download URLs may be unreachable",
+				zap.Error(perr))
+		} else {
+			presignSigner = pc
+		}
+		backupHandler.SetMinioClient(presignSigner)
 	}
 	// M4: device 相关端点（QueryCellInfos / QueryTaskDeviceList / GetProductType）
 	backupHandler.SetDeviceReader(c.DeviceRepo)
@@ -531,6 +641,25 @@ func initBackupModule(c *Container) error {
 	c.miscDeps.backupHandler = backupHandler
 
 	logger.Info("backup module initialized")
+	return nil
+}
+
+// ensureSnapshotBucket 启动期幂等创建 config-snapshots bucket（T-0164 B6）。
+// 与 core/components/minio.EnsureBuckets 的差异：那是配置驱动的统一批量创建，
+// 此处是 backup 模块私有的额外 bucket，不进 BucketConfig（避免污染配置 schema）。
+func ensureSnapshotBucket(ctx context.Context, client *minio.Client, bucket string) error {
+	if bucket == "" {
+		return nil
+	}
+	exists, err := client.BucketExists(ctx, bucket)
+	if err != nil {
+		return fmt.Errorf("check bucket %s: %w", bucket, err)
+	}
+	if !exists {
+		if err := client.MakeBucket(ctx, bucket, minio.MakeBucketOptions{}); err != nil {
+			return fmt.Errorf("create bucket %s: %w", bucket, err)
+		}
+	}
 	return nil
 }
 
@@ -1149,6 +1278,7 @@ type miscDeps struct {
 	softwareSubTaskRepo software.SubTaskRepository
 	canaryMonitor       *software.CanaryMonitor
 	ufteHandler         *ufte.Handler
+	ufteService         *ufte.Service
 
 	// Provision
 	provisionRepo   *provision.PgProvisioningTaskRepository

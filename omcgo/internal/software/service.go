@@ -68,6 +68,17 @@ type SoftwareService struct {
 	canaryMetrics   *CanaryMetrics   // optional; nil-safe via metrics methods
 	rollbackMetrics *RollbackMetrics // optional; nil-safe via metrics methods (T-0021)
 	logger          *zap.Logger
+	// taskFileCleaner 可选 hook：DeleteUpgrade 时回收任务关联的 MinIO 对象 +
+	// backup_restore_file 元数据。由 cmd/app/provider/modules.go 用 backup.FileRepository
+	// + MinIO 客户端装配。未注入时仅删 upgrade_tasks/upgrade_sub_tasks（向后兼容）。
+	taskFileCleaner func(ctx context.Context, taskID uuid.UUID) error
+}
+
+// SetTaskFileCleaner 注入"任务删除时清理 MinIO 对象 + backup_restore_file 元数据"的回调。
+// 由 wiring 层（cmd/app/provider/modules.go）装配；不调用则 DeleteUpgrade 仅删 DB 任务行，
+// MinIO 上的备份/日志文件会成为孤儿。Best-effort 语义：清理失败仅 warn，不阻断主删除。
+func (s *SoftwareService) SetTaskFileCleaner(fn func(ctx context.Context, taskID uuid.UUID) error) {
+	s.taskFileCleaner = fn
 }
 
 // SetCanaryMetrics wires Prometheus metrics for canary stage transitions.
@@ -988,6 +999,16 @@ func (s *SoftwareService) DeleteUpgrade(ctx context.Context, taskID uuid.UUID) e
 
 	if task.Status == TaskInProgress {
 		return commonerrors.NewBusinessError(8011, "cannot delete a running task; terminate it first", commonerrors.ErrInvalidInput)
+	}
+
+	// 先回收任务关联的 MinIO 对象 + backup_restore_file 元数据（LogCollect 类
+	// 任务：配置备份 / 运行日志 / 故障日志）。best-effort：失败仅 warn，不阻断
+	// 主任务删除——孤儿文件比卡住删除按钮更可接受。
+	if s.taskFileCleaner != nil {
+		if err := s.taskFileCleaner(ctx, taskID); err != nil {
+			s.logger.Warn("task file cleanup failed (best-effort)",
+				zap.String("task_id", taskID.String()), zap.Error(err))
+		}
 	}
 
 	if err := s.subTaskRepo.DeleteByTaskID(ctx, taskID); err != nil {

@@ -293,8 +293,9 @@ const messages: Record<string, string> = {
   'nav.file.mrRetrieval':        'MR Retrieval',
   'nav.file.userFiles':          'User Files',
   'nav.file.deviceFiles':        'Device Files',
-  'nav.transfer.taskCreate':     'Task Creation',
+  'nav.transfer.taskCreate':     'Task Management',
   'nav.transfer.templateConfig': 'Template Configuration',
+  'nav.transfer.fileManagement': 'File Management',
 
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Log

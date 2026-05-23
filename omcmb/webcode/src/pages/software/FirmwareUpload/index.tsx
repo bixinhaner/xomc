@@ -74,7 +74,12 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / 1024).toFixed(2)} KB`;
 }
 
-export default function FirmwareUpload() {
+interface FirmwareUploadProps {
+  /** 嵌入 Tab/弹窗使用时隐藏页面级标题，避免与父级标题重复 */
+  embedded?: boolean;
+}
+
+export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps = {}) {
   const t = useT();
   const [form] = Form.useForm();
   // 当 URL 带 ?return=ufte 时，认为是 UFTE 任务创建弹窗里"维护升级文件"开的新 tab。
@@ -371,7 +376,7 @@ export default function FirmwareUpload() {
   }, []);
 
   return (
-    <ListPageLayout title={t('software.firmware.title')}>
+    <ListPageLayout title={embedded ? undefined : t('software.firmware.title')}>
       {fromUFTE ? (
         <Alert
           type="info"

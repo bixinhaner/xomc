@@ -5536,6 +5536,32 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
     -d '{"backup_task_id":"'"$W2D_BAD_UUID"'","target_device_sns":["SN001"]}')
 check_status_in "W2D bk-11: POST /backup/restore/by-task-id (T-0079)" "404 401 400" "$HTTP_CODE"
 
+# T-0164 B4: config_snapshots list endpoint reachable (空列表 200).
+claim "backup: GET /backup/config-snapshots 列表可达 (T-0164)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/backup/config-snapshots" -H "$W2D_AUTH")
+check_status_in "W2D bk-snap-1: GET /backup/config-snapshots (T-0164)" "200 401" "$HTTP_CODE"
+
+# T-0164 B4: 不存在 SN 返回 404
+claim "backup: GET /backup/config-snapshots/:sn 不存在返回 404 (T-0164)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/backup/config-snapshots/SN_NEVER_BACKED_UP" -H "$W2D_AUTH")
+check_status_in "W2D bk-snap-2: GET single snapshot 404 (T-0164)" "404 401" "$HTTP_CODE"
+
+# T-0164 B4: batch-get 缺失 SN 通过 missing 字段返回（HTTP 200）
+claim "backup: POST /backup/config-snapshots/batch-get missing 返回 200 (T-0164)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/backup/config-snapshots/batch-get" -H "$W2D_AUTH" -H "Content-Type: application/json" \
+    -d '{"serial_numbers":["SN_NEVER_BACKED_UP_1","SN_NEVER_BACKED_UP_2"]}')
+check_status_in "W2D bk-snap-3: batch-get missing → 200 with body (T-0164)" "200 401" "$HTTP_CODE"
+
+# T-0164 B5: 按设备快照恢复，目标 SN 全部缺失快照应整批拒绝（404 / 400）
+claim "backup: POST /backup/restore/by-snapshot missing 整批拒绝 (T-0164)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/backup/restore/by-snapshot" -H "$W2D_AUTH" -H "Content-Type: application/json" \
+    -d '{"target_device_sns":["SN_NEVER_BACKED_UP_1"]}')
+check_status_in "W2D bk-snap-4: restore by-snapshot missing → 404/400 (T-0164)" "404 400 401" "$HTTP_CODE"
+
 # T-0085: PUT policy AES-256-CBC + EnableEncryption=true now accepted at
 # schema level (CBC algorithm matrix closed). 200 when KEK is wired, 400
 # ErrInvalidInput when KEK is unset (KP-availability gate). Either is

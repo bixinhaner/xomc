@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
@@ -69,6 +70,25 @@ type FilePathRecorder struct {
 	// ("filtered consumer not unique on workqueue stream")。所以让已经收到
 	// 事件的 FilePathRecorder 转手通知上层。
 	notifier FileLandedNotifier
+
+	// snapshotPromoter 可选 hook（T-0164 / B3）：每次本 SN 的备份文件成功落
+	// MinIO + backup_tasks/backup_restore_file 完成写入后，把该文件 server-side
+	// copy 到 config-snapshots bucket 并 upsert config_snapshots 表。
+	//
+	// 失败仅 warn + metric，不影响主链路成功 —— 配置快照表是辅助索引，
+	// 任何故障都不应让备份任务被标记为失败。
+	snapshotPromoter SnapshotPromoter
+}
+
+// SnapshotPromoter 是 FilePathRecorder 对 SnapshotService 的最小依赖。
+// *SnapshotService 通过同名方法满足；在 backup 模块内同包定义所以无需 import 反向。
+type SnapshotPromoter interface {
+	PromoteFromBackup(ctx context.Context, backupTaskID uuid.UUID, deviceSN string) error
+}
+
+// SetSnapshotPromoter 注入快照 promote hook（B3）。nil 表示禁用。
+func (r *FilePathRecorder) SetSnapshotPromoter(p SnapshotPromoter) {
+	r.snapshotPromoter = p
 }
 
 // FileLandedNotifier 是 FilePathRecorder 处理完一条 backup.file.received 后回调
@@ -150,6 +170,23 @@ func (r *FilePathRecorder) handleFileReceived(ctx context.Context, evt event.Eve
 	// 此时 OperatorCode 留空。
 	r.upsertFileMetadata(ctx, nil, p, fullPath)
 
+	// T-0164 关键：promote 必须在 backup_tasks 匹配**之前**触发，因为现网真实链路
+	// 大多走 UFTE 的 CONFIG_BACKUP_XML / CONFIG_BACKUP_NV —— 主任务在
+	// software.upgrade_tasks 表，prefix 永远不会命中下面的 backup_tasks 分支。
+	// 只要 sn 非空、metadata 已 upsert（pickBackupFileForTask 能拿到这一行），
+	// promote 就该执行。UFTE 路径下 backupTaskID 用 event payload.TaskID（如有），
+	// 没有则用 zero UUID — PromoteFromBackup 内部会 fallback 到 ListBySerial 的
+	// 最新一行（按 update_time DESC），与刚 upsert 的 metadata 一致。
+	if p.DeviceSN != "" && p.Filename != "" {
+		var promoteTaskID uuid.UUID
+		if p.TaskID != "" {
+			if parsed, perr := uuid.Parse(p.TaskID); perr == nil {
+				promoteTaskID = parsed
+			}
+		}
+		r.promoteSnapshot(ctx, promoteTaskID, p.DeviceSN)
+	}
+
 	// 通知上层（如 software UFTE 的 FAULT_LOG_COLLECT）按 (deviceSN, taskID) 推进
 	// 自己的 sub_task。一定要放在 backup_tasks 匹配前——UFTE 链路 task 在
 	// upgrade_tasks 表，prefix 永远不会命中下面的 backup_tasks 分支。
@@ -219,6 +256,8 @@ func (r *FilePathRecorder) handleFileReceived(ctx context.Context, evt event.Eve
 		// 命中 backup_tasks 时补一次带 OperatorCode 的 upsert（覆盖 nil 路径），
 		// COALESCE 保证已有 operator_code 不会被覆盖为空。
 		r.upsertFileMetadata(ctx, target, p, fullPath)
+		// 注：promote 已在事件处理早期统一执行（详见上面分支 2 后注释），此处
+		// 无需重复调用。
 		return nil
 	case errors.Is(err, ErrFilePathAlreadySet):
 		// CAS lost: another concurrent recorder won. This is the TOCTOU-safe
@@ -296,4 +335,25 @@ func (r *FilePathRecorder) upsertFileMetadata(
 		zap.String("device_sn", p.DeviceSN),
 		zap.String("filename", p.Filename),
 		zap.Int64("file_size", p.FileSize))
+}
+
+// promoteSnapshot 把刚落地的备份文件 promote 到 config_snapshots（B3）。
+// 失败仅 warn + metric，不返回 error —— 快照表是辅助索引，故障不应阻塞
+// 主备份链路。promoter 未注入时静默跳过（向后兼容）。
+func (r *FilePathRecorder) promoteSnapshot(ctx context.Context, taskID uuid.UUID, deviceSN string) {
+	if r.snapshotPromoter == nil {
+		return
+	}
+	if deviceSN == "" {
+		return
+	}
+	if err := r.snapshotPromoter.PromoteFromBackup(ctx, taskID, deviceSN); err != nil {
+		r.metrics.RecordSnapshotPromote("failed")
+		r.logger.Warn("promote config_snapshot failed (best-effort)",
+			zap.String("task_id", taskID.String()),
+			zap.String("device_sn", deviceSN),
+			zap.Error(err))
+		return
+	}
+	r.metrics.RecordSnapshotPromote("success")
 }

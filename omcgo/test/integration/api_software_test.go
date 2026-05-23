@@ -369,7 +369,7 @@ func (s *swHSubTaskRepoStub) BatchCreate(_ context.Context, tasks []*software.Up
 	}
 	return nil
 }
-func (s *swHSubTaskRepoStub) FailStale(_ context.Context, _ time.Time) (map[uuid.UUID]int64, error) {
+func (s *swHSubTaskRepoStub) FailStale(_ context.Context, _ software.StaleTimeouts) (map[uuid.UUID]int64, error) {
 	return nil, nil
 }
 func (s *swHSubTaskRepoStub) DeleteByTaskID(_ context.Context, _ uuid.UUID) error { return nil }

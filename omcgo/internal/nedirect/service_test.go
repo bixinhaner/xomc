@@ -261,6 +261,10 @@ func (m *mockParamRepo) GetByFAPInstanceAndGroup(_ context.Context, _ uuid.UUID,
 	return []model.DeviceParameter{}, nil
 }
 
+func (m *mockParamRepo) DeleteByPathPrefix(_ context.Context, _ uuid.UUID, _ string) (int64, error) {
+	return 0, nil
+}
+
 type mockAlarmStore struct{}
 
 func (m *mockAlarmStore) SaveActive(ctx context.Context, a *model.Alarm) error { return nil }

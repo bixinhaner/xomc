@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dayjs from 'dayjs';
 import {
+  Alert,
   Button,
   Card,
   Checkbox,
@@ -40,6 +41,8 @@ import {
 } from '@core/hooks/api/useUnifiedFileTransfer';
 import { useProductClasses } from '@core/hooks/api/useDevices';
 import { useSoftwareVersions } from '@core/hooks/api/useSoftware';
+import { configSnapshotApi } from '@core/services/api/configSnapshotApi';
+import type { BatchGetSnapshotsResult } from '@core/services/api/configSnapshotApi';
 import { useUserStore } from '@core/store/userStore';
 import type { SoftwareVersion } from '@core/mock/data/software';
 import type {
@@ -191,6 +194,10 @@ export default function FileTransferCenter() {
   const drawerTypeCode = Form.useWatch('typeCode', taskForm);
   const drawerProductClass = Form.useWatch('productClass', taskForm);
   const [selectedDrawerDeviceIds, setSelectedDrawerDeviceIds] = useState<string[]>([]);
+  // T-0164: CONFIG_RESTORE 模式下"按设备 SN 检查 config_snapshots 表"的结果。
+  // selectedDrawerDeviceIds + drawerTypeCode 变化时自动 refetch；缺失则禁用提交。
+  const [snapshotProbe, setSnapshotProbe] = useState<BatchGetSnapshotsResult | null>(null);
+  const [snapshotProbing, setSnapshotProbing] = useState(false);
   const [drawerDeviceKeyword, setDrawerDeviceKeyword] = useState('');
   const [drawerDeviceKeywordInput, setDrawerDeviceKeywordInput] = useState('');
   const [detailTask, setDetailTask] = useState<UnifiedFileTransferTask | null>(null);
@@ -212,7 +219,7 @@ export default function FileTransferCenter() {
     keyword: deviceKeyword || undefined,
     status: deviceStatusFilter,
     typeCode: selectedTypeCode || undefined,
-    productClass: deviceProductClassFilter,
+    productType: deviceProductClassFilter,
   });
 
   const createTaskMutation = useCreateUnifiedFileTransferTask();
@@ -262,7 +269,9 @@ export default function FileTransferCenter() {
     pageSize: 200,
     category: selectedCategory || undefined,
     typeCode: drawerTaskType?.typeCode || selectedTypeCode || undefined,
-    productClass: needsFirmwareSelection(drawerTaskType) ? drawerProductClass : undefined,
+    // 升级类任务（needsFirmwareSelection）用 drawerProductClass 表单字段
+    // 缩窄候选设备 — UFTE 后端字段名是 productType。
+    productType: needsFirmwareSelection(drawerTaskType) ? drawerProductClass : undefined,
     keyword: drawerDeviceKeyword || undefined,
   });
 
@@ -313,8 +322,8 @@ export default function FileTransferCenter() {
   const deviceProductClassOptions = useMemo(() => {
     const values = new Set<string>(productClasses);
     recentDevices.forEach((item) => {
-      if (item.productClass) {
-        values.add(item.productClass);
+      if (item.productType) {
+        values.add(item.productType);
       }
     });
     (activeTaskType?.platformScope ?? []).forEach((entry) => values.add(entry));
@@ -339,11 +348,51 @@ export default function FileTransferCenter() {
     [drawerDeviceCandidates, selectedDrawerDeviceIds],
   );
 
+  // T-0164: CONFIG_RESTORE 模式自动检测每台设备是否已有最新配置快照。
+  // 用 dependency 的 join 字符串避免数组引用变化导致的无限刷新。
+  const drawerSelectedSnsKey = useMemo(
+    () => drawerSelectedDevices.map((d) => d.deviceSn).filter(Boolean).sort().join(','),
+    [drawerSelectedDevices],
+  );
+  useEffect(() => {
+    if (drawerTypeCode !== 'CONFIG_RESTORE') {
+      setSnapshotProbe(null);
+      return;
+    }
+    if (!drawerSelectedSnsKey) {
+      setSnapshotProbe(null);
+      return;
+    }
+    let cancelled = false;
+    const sns = drawerSelectedSnsKey.split(',');
+    setSnapshotProbing(true);
+    configSnapshotApi
+      .batchGet(sns)
+      .then((res) => {
+        if (!cancelled) setSnapshotProbe(res);
+      })
+      .catch(() => {
+        if (!cancelled) setSnapshotProbe({ found: {}, missing: sns });
+      })
+      .finally(() => {
+        if (!cancelled) setSnapshotProbing(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [drawerTypeCode, drawerSelectedSnsKey]);
+
+  const snapshotMissingCount = snapshotProbe?.missing.length ?? 0;
+  const isConfigRestoreBlockedByMissing =
+    drawerTypeCode === 'CONFIG_RESTORE' && snapshotMissingCount > 0;
+
   const drawerDeviceColumns: ColumnsType<UnifiedFileTransferDeviceItem> = useMemo(
     () => [
       { title: '设备 SN', dataIndex: 'deviceSn', key: 'deviceSn', width: 160 },
       { title: '站点名称', dataIndex: 'deviceName', key: 'deviceName', ellipsis: true },
-      { title: '产品类型', dataIndex: 'productClass', key: 'productClass', width: 120 },
+      // 后端 UFTE DeviceItem 字段名是 productType（见 internal/ufte/model.go），
+      // 不是 productClass —— 前端原 dataIndex 写错，真实数据下永远空。
+      { title: '产品类型', dataIndex: 'productType', key: 'productType', width: 140 },
       { title: '当前版本', dataIndex: 'currentVersion', key: 'currentVersion', width: 120 },
     ],
     [],
@@ -521,8 +570,8 @@ export default function FileTransferCenter() {
   };
 
   const getTaskProductClass = (record: UnifiedFileTransferTask) => {
-    if (record.productClass) {
-      return record.productClass;
+    if (record.productType) {
+      return record.productType;
     }
     const typeDef = getTypeDef(record.typeCode);
     return typeDef?.platformScope?.[0] || '-';
@@ -575,7 +624,7 @@ export default function FileTransferCenter() {
         },
         {
           title: '产品类型',
-          key: 'productClass',
+          key: 'productType',
           width: 130,
           render: (_, record) => renderEllipsisCell(getTaskProductClass(record)),
         },
@@ -733,8 +782,8 @@ export default function FileTransferCenter() {
         },
         {
           title: '产品类型',
-          dataIndex: 'productClass',
-          key: 'productClass',
+          dataIndex: 'productType',
+          key: 'productType',
           width: 130,
           render: (value: string) => renderEllipsisCell(value),
         },
@@ -802,8 +851,8 @@ export default function FileTransferCenter() {
       },
       {
         title: '产品类型',
-        dataIndex: 'productClass',
-        key: 'productClass',
+        dataIndex: 'productType',
+        key: 'productType',
         width: 130,
         render: (value: string) => renderEllipsisCell(value),
       },
@@ -936,6 +985,13 @@ export default function FileTransferCenter() {
     const values = await taskForm.validateFields();
     if (selectedDrawerDeviceIds.length === 0) {
       void message.warning('请选择设备。');
+      return;
+    }
+    // T-0164: CONFIG_RESTORE 整批拒绝 — 任一设备缺快照即阻止提交。
+    if (isConfigRestoreBlockedByMissing) {
+      void message.error(
+        `以下设备无可用配置快照，请先备份或在"配置快照库"导入：${snapshotProbe?.missing.join(', ') ?? ''}`,
+      );
       return;
     }
     if (createTaskMutation.isPending) {
@@ -1134,7 +1190,12 @@ export default function FileTransferCenter() {
         extra={(
           <Space>
             <Button onClick={() => setTaskDrawerOpen(false)}>取消</Button>
-            <Button type="primary" loading={createTaskMutation.isPending} onClick={() => void handleCreateTask()}>
+            <Button
+              type="primary"
+              loading={createTaskMutation.isPending}
+              disabled={isConfigRestoreBlockedByMissing}
+              onClick={() => void handleCreateTask()}
+            >
               创建
             </Button>
           </Space>
@@ -1245,7 +1306,111 @@ export default function FileTransferCenter() {
               />
             </Space>
           </Form.Item>
-          <Form.Item label="执行方式" name="executionMode" rules={[{ required: true, message: '请选择执行方式' }]}> 
+
+          {drawerTypeCode === 'CONFIG_RESTORE' ? (
+            <Form.Item
+              label={(
+                <Space size={8}>
+                  <span>配置文件来源（按设备最新快照）</span>
+                  <Button
+                    type="primary"
+                    size="small"
+                    icon={<ExportOutlined />}
+                    onClick={() => window.open('/backup/config-snapshots', '_blank')}
+                  >
+                    打开配置快照库
+                  </Button>
+                </Space>
+              )}
+            >
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Text type="secondary">
+                  每台设备恢复时使用各自最新一份配置快照；缺失则整批拒绝。
+                  点击右上方「打开配置快照库」可查看所有快照、导入新文件、删除旧文件。
+                </Text>
+
+                {drawerSelectedDevices.length === 0 ? (
+                  <Text type="secondary">请先在上方选择设备，下表自动展示快照详情。</Text>
+                ) : snapshotProbing ? (
+                  <Tag color="processing">检查快照中…</Tag>
+                ) : !snapshotProbe ? null : (
+                  <>
+                    <Space size={12}>
+                      {snapshotMissingCount === 0 ? (
+                        <Tag color="success">
+                          全部设备已就绪（{Object.keys(snapshotProbe.found).length} 台）
+                        </Tag>
+                      ) : (
+                        <Tag color="error">
+                          {snapshotMissingCount} 台设备无可用快照，整批不能提交
+                        </Tag>
+                      )}
+                    </Space>
+                    <Table<UnifiedFileTransferDeviceItem>
+                      size="small"
+                      rowKey="id"
+                      dataSource={drawerSelectedDevices}
+                      pagination={false}
+                      scroll={{ y: 200 }}
+                      columns={[
+                        { title: '设备 SN', dataIndex: 'deviceSn', key: 'sn', width: 160 },
+                        {
+                          title: '快照文件',
+                          key: 'file',
+                          ellipsis: true,
+                          render: (_, rec) => {
+                            const snap = snapshotProbe.found[rec.deviceSn];
+                            return snap ? (
+                              <Text code style={{ fontSize: 12 }}>{snap.fileName}</Text>
+                            ) : (
+                              <Tag color="error">缺失</Tag>
+                            );
+                          },
+                        },
+                        {
+                          title: '大小',
+                          key: 'size',
+                          width: 90,
+                          render: (_, rec) => {
+                            const snap = snapshotProbe.found[rec.deviceSn];
+                            if (!snap) return '—';
+                            if (snap.fileSize < 1024) return `${snap.fileSize} B`;
+                            if (snap.fileSize < 1024 * 1024) return `${(snap.fileSize / 1024).toFixed(1)} KB`;
+                            return `${(snap.fileSize / 1024 / 1024).toFixed(2)} MB`;
+                          },
+                        },
+                        {
+                          title: '更新时间',
+                          key: 'updateTime',
+                          width: 150,
+                          render: (_, rec) => {
+                            const snap = snapshotProbe.found[rec.deviceSn];
+                            return snap ? dayjs(snap.updateTime).format('YYYY-MM-DD HH:mm') : '—';
+                          },
+                        },
+                        {
+                          title: '来源',
+                          key: 'source',
+                          width: 90,
+                          render: (_, rec) => {
+                            const snap = snapshotProbe.found[rec.deviceSn];
+                            if (!snap) return null;
+                            return snap.source === 'backup' ? (
+                              <Tag color="blue">备份</Tag>
+                            ) : (
+                              <Tag color="green">手动导入</Tag>
+                            );
+                          },
+                        },
+                      ]}
+                    />
+                  </>
+                )}
+              </Space>
+            </Form.Item>
+          ) : null}
+
+          <Form.Item label="执行方式" name="executionMode" rules={[{ required: true, message: '请选择执行方式' }]}>
             <Radio.Group options={createExecutionModeOptions} optionType="button" buttonStyle="solid" />
           </Form.Item>
           <Form.Item label="备注" name="note">

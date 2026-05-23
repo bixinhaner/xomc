@@ -62,6 +62,19 @@ type BackupTaskFinder interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*BackupTask, error)
 }
 
+// SnapshotLookup is the narrow contract RestoreService needs for
+// `restore_by_snapshot` mode (T-0164 / B5): batch lookup latest snapshot rows
+// by SN. *SnapshotService satisfies this via BatchGetBySerialNumbers.
+type SnapshotLookup interface {
+	BatchGetBySerialNumbers(ctx context.Context, sns []string) (map[string]*ConfigSnapshot, error)
+}
+
+// SnapshotRestoreSourcePlaceholder 标记 restore_tasks.source_object_path
+// 在按快照恢复模式下的占位串。每个 device_task 的 Download URL 各自指向
+// 对应 SN 的真实 snapshot 文件，但 restore_tasks 是单行聚合 —— 列表展示
+// 时前端见到该串就可识别"按设备快照"模式。
+const SnapshotRestoreSourcePlaceholder = "(per-device-latest)"
+
 // RestoreService orchestrates restore_task creation + device task fan-out.
 type RestoreService struct {
 	repo       RestoreTaskRepository
@@ -73,6 +86,8 @@ type RestoreService struct {
 	// T-0079: optional — when wired enables POST /backup/restore/by-task-id.
 	// nil-safe: nil disables the endpoint (handler returns 503).
 	backupTaskFinder BackupTaskFinder
+	// T-0164 B5: optional — when wired enables POST /backup/restore/by-snapshot.
+	snapshotLookup SnapshotLookup
 }
 
 // NewRestoreService wires the dependencies. metrics may be nil (Record* nil-safe).
@@ -98,6 +113,11 @@ func NewRestoreService(
 // changing NewRestoreService's signature. Pass nil to disable.
 func (s *RestoreService) SetBackupTaskFinder(finder BackupTaskFinder) {
 	s.backupTaskFinder = finder
+}
+
+// SetSnapshotLookup enables the by-snapshot restore mode (T-0164 B5).
+func (s *RestoreService) SetSnapshotLookup(lookup SnapshotLookup) {
+	s.snapshotLookup = lookup
 }
 
 // CreateRestoreRequest is the API request body validated and persisted.
@@ -303,10 +323,170 @@ func (s *RestoreService) CreateByTaskID(
 	return result, nil
 }
 
+// CreateBySnapshotRequest is the body of POST /backup/restore/by-snapshot.
+type CreateBySnapshotRequest struct {
+	TargetDeviceSNs []string `json:"target_device_sns" binding:"required,min=1"`
+}
+
+// CreateBySnapshotResult bundles the created RestoreTask with the missing-SN
+// list (when integral rejection happens) so the handler can return a single
+// shape regardless of acceptance outcome.
+type CreateBySnapshotResult struct {
+	Task    *RestoreTask `json:"task,omitempty"`
+	Missing []string     `json:"missing,omitempty"`
+}
+
+// CreateBySnapshot orchestrates a restore where each target device picks its
+// **own** latest config_snapshots row as the source. Integral rejection
+// semantics: if any target SN has no snapshot row, the entire batch is
+// rejected and the missing SNs are returned to the caller — avoids partial
+// success ambiguity ("which devices actually restored").
+//
+// One restore_tasks row is persisted (source_bucket=config-snapshots,
+// source_object_path=SnapshotRestoreSourcePlaceholder). Per-device Download
+// commands point at the device's own snapshot key.
+func (s *RestoreService) CreateBySnapshot(
+	ctx context.Context,
+	req *CreateBySnapshotRequest,
+	createdBy string,
+) (*CreateBySnapshotResult, error) {
+	if s.snapshotLookup == nil {
+		return nil, fmt.Errorf("by-snapshot mode not configured: %w", commonerrors.ErrInvalidInput)
+	}
+	if req == nil || len(req.TargetDeviceSNs) == 0 {
+		s.metrics.RecordRestoreBySnapshot("rejected_invalid_input")
+		return nil, fmt.Errorf("at least one target device required: %w", commonerrors.ErrInvalidInput)
+	}
+
+	snaps, err := s.snapshotLookup.BatchGetBySerialNumbers(ctx, req.TargetDeviceSNs)
+	if err != nil {
+		return nil, fmt.Errorf("lookup config_snapshots: %w", err)
+	}
+	missing := make([]string, 0)
+	for _, sn := range req.TargetDeviceSNs {
+		if _, ok := snaps[sn]; !ok {
+			missing = append(missing, sn)
+		}
+	}
+	if len(missing) > 0 {
+		s.metrics.RecordRestoreBySnapshot("rejected_missing_snapshot")
+		// Note: we return missing in the result *and* propagate ErrNotFound so
+		// the handler can choose 400/404 mapping; the body carries the list.
+		return &CreateBySnapshotResult{Missing: missing},
+			fmt.Errorf("the following devices have no config snapshot: %v: %w",
+				missing, commonerrors.ErrNotFound)
+	}
+
+	// All targets have snapshots — persist one restore_tasks row, then fan out.
+	now := time.Now()
+	bucket := SnapshotBucketDefault
+	if first, ok := snaps[req.TargetDeviceSNs[0]]; ok && first.ObjectBucket != "" {
+		bucket = first.ObjectBucket
+	}
+	created := &RestoreTask{
+		SourceBucket:     bucket,
+		SourceObjectPath: SnapshotRestoreSourcePlaceholder,
+		TargetDeviceSNs:  req.TargetDeviceSNs,
+		Status:           RestorePending,
+		Progress:         0,
+		StartedAt:        &now,
+	}
+	if createdBy != "" {
+		cb := createdBy
+		created.CreatedBy = &cb
+	}
+	if err := s.repo.Create(ctx, created); err != nil {
+		return nil, fmt.Errorf("create restore_task: %w", err)
+	}
+
+	enqueued := 0
+	skipped := make([]string, 0)
+	for _, sn := range req.TargetDeviceSNs {
+		snap := snaps[sn]
+		dev, dErr := s.deviceRepo.GetBySerialNumber(ctx, sn)
+		if dErr != nil || dev == nil {
+			skipped = append(skipped, sn)
+			s.logger.Warn("device not found for restore_by_snapshot; skipping",
+				zap.String("device_sn", sn), zap.Error(dErr))
+			continue
+		}
+		restoreURL := snap.ObjectBucket + "/" + snap.ObjectPath
+		params, mErr := json.Marshal(map[string]interface{}{
+			"file_type":        "3",
+			"url":              restoreURL,
+			"target_file_name": pathpkg.Base(snap.ObjectPath),
+		})
+		if mErr != nil {
+			return nil, fmt.Errorf("marshal Download params for %s: %w", sn, mErr)
+		}
+		if _, qErr := s.taskSvc.CreateTask(ctx, &devtask.CreateTaskRequest{
+			DeviceSN:   dev.SerialNumber,
+			Method:     "Download",
+			Params:     params,
+			Source:     devtask.TaskSourceSystem,
+			SourceID:   created.ID.String(),
+			CreatorID:  createdBy,
+			CommandKey: BuildRestoreCommandKey(dev.SiteID, dev.SerialNumber, created.ID.String()),
+		}); qErr != nil {
+			skipped = append(skipped, sn)
+			s.logger.Warn("enqueue Download device task failed (by-snapshot)",
+				zap.String("device_sn", sn), zap.Error(qErr))
+			continue
+		}
+		enqueued++
+	}
+	s.metrics.RecordRestoreBySnapshot("accepted")
+	s.metrics.RecordDevicesEnqueued(int64(enqueued))
+
+	if len(skipped) > 0 {
+		msg := "skipped: " + strings.Join(skipped, ",")
+		created.ErrorMessage = &msg
+		if updErr := s.updateSkipped(ctx, created); updErr != nil {
+			s.logger.Warn("update restore_task skipped notes failed (by-snapshot)",
+				zap.String("restore_id", created.ID.String()),
+				zap.Error(updErr))
+		}
+	}
+
+	s.logger.Info("restore created (by-snapshot)",
+		zap.String("restore_id", created.ID.String()),
+		zap.Int("target_count", len(req.TargetDeviceSNs)),
+		zap.Int("enqueued", enqueued),
+		zap.Int("skipped", len(skipped)))
+	return &CreateBySnapshotResult{Task: created}, nil
+}
+
 // SplitBucketAndPath 是 splitBucketAndPath 的导出别名，供 cmd/app/provider 等
 // 外部包构造 MinIO presigned URL 时复用同一份解析逻辑（B5）。
 func SplitBucketAndPath(combined string) (bucket, objectPath string, err error) {
 	return splitBucketAndPath(combined)
+}
+
+// DispatchConfigRestoreBySnapshot 实现 ufte.SnapshotConfigRestoreDispatcher（T-0164）。
+//
+// 让 UFTE 的 CONFIG_RESTORE 任务复用 CreateBySnapshot 的整批拒绝 + 逐设备 URL 派发
+// 语义，无需在 ufte 包反向 import backup。
+//
+// 返回：
+//   - dispatchedID：restore_tasks 主行 UUID
+//   - missing：缺失快照的 SN 列表（非空时同时返回 ErrNotFound 包装错误）
+//   - err：基础设施错误
+func (s *RestoreService) DispatchConfigRestoreBySnapshot(
+	ctx context.Context, sns []string, createUser string,
+) (dispatchedID uuid.UUID, missing []string, err error) {
+	result, err := s.CreateBySnapshot(ctx,
+		&CreateBySnapshotRequest{TargetDeviceSNs: sns}, createUser)
+	if err != nil {
+		// CreateBySnapshot 在整批拒绝时同时返回 result + ErrNotFound 包装错误。
+		if result != nil && len(result.Missing) > 0 {
+			return uuid.Nil, result.Missing, err
+		}
+		return uuid.Nil, nil, err
+	}
+	if result == nil || result.Task == nil {
+		return uuid.Nil, nil, fmt.Errorf("CreateBySnapshot returned nil result")
+	}
+	return result.Task.ID, nil, nil
 }
 
 // splitBucketAndPath splits a "bucket/path/to/object" string into its parts.

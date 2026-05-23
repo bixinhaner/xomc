@@ -201,3 +201,141 @@ func TestHandleFileReceived_updateNotFoundIsSkip(t *testing.T) {
 	}))
 	require.NoError(t, err, "race with cleanup is benign; treat as skip")
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// B3: SnapshotPromoter hook tests
+// ─────────────────────────────────────────────────────────────────────────
+
+// fakeSnapshotPromoter 记录 PromoteFromBackup 调用，可注入失败错误。
+type fakeSnapshotPromoter struct {
+	calls   []promoteCall
+	failErr error
+}
+
+type promoteCall struct {
+	taskID uuid.UUID
+	sn     string
+}
+
+func (p *fakeSnapshotPromoter) PromoteFromBackup(_ context.Context, taskID uuid.UUID, sn string) error {
+	p.calls = append(p.calls, promoteCall{taskID, sn})
+	return p.failErr
+}
+
+func TestHandleFileReceived_PromoterCalledOnRecorded(t *testing.T) {
+	id := uuid.New()
+	task := &BackupTask{ID: id, TargetIDs: []string{"SN001"}}
+	repo := &fakePrefixRepo{byPrefix: map[string][]*BackupTask{"abcdef12": {task}}}
+	rec := newRecorder(t, repo)
+	promoter := &fakeSnapshotPromoter{}
+	rec.SetSnapshotPromoter(promoter)
+
+	err := rec.handleFileReceived(context.Background(), makeEvent(t, map[string]interface{}{
+		"bucket":                "config_backup",
+		"object_path":           "backup/2026/05/22/backup-abcdef12-SN001.xml",
+		"filename":              "backup-abcdef12-SN001.xml",
+		"backup_task_id_prefix": "abcdef12",
+		"task_id":               id.String(),
+		"device_sn":             "SN001",
+		"file_size":             int64(2048),
+	}))
+	require.NoError(t, err)
+	require.Len(t, promoter.calls, 1, "promote must be called on the recorded path")
+	assert.Equal(t, id, promoter.calls[0].taskID,
+		"promote 应使用 event payload.task_id 作为 backupTaskID")
+	assert.Equal(t, "SN001", promoter.calls[0].sn)
+}
+
+func TestHandleFileReceived_PromoterCalledOnCASLost(t *testing.T) {
+	id := uuid.New()
+	task := &BackupTask{ID: id, TargetIDs: []string{"SN001", "SN002"}}
+	repo := &fakePrefixRepo{
+		byPrefix:  map[string][]*BackupTask{"abcdef12": {task}},
+		updateErr: ErrFilePathAlreadySet,
+	}
+	rec := newRecorder(t, repo)
+	promoter := &fakeSnapshotPromoter{}
+	rec.SetSnapshotPromoter(promoter)
+
+	err := rec.handleFileReceived(context.Background(), makeEvent(t, map[string]interface{}{
+		"bucket":                "config_backup",
+		"object_path":           "backup/x-SN002.xml",
+		"filename":              "backup-abcdef12-SN002.xml",
+		"backup_task_id_prefix": "abcdef12",
+		"device_sn":             "SN002",
+		"file_size":             int64(2048),
+	}))
+	require.NoError(t, err)
+	require.Len(t, promoter.calls, 1,
+		"promote must run for the losing sibling too — its SN has its own snapshot row")
+	assert.Equal(t, "SN002", promoter.calls[0].sn)
+}
+
+func TestHandleFileReceived_PromoterFailureDoesNotBreakMainFlow(t *testing.T) {
+	id := uuid.New()
+	task := &BackupTask{ID: id, TargetIDs: []string{"SN001"}}
+	repo := &fakePrefixRepo{byPrefix: map[string][]*BackupTask{"abcdef12": {task}}}
+	rec := newRecorder(t, repo)
+	promoter := &fakeSnapshotPromoter{failErr: errors.New("simulated minio outage")}
+	rec.SetSnapshotPromoter(promoter)
+
+	err := rec.handleFileReceived(context.Background(), makeEvent(t, map[string]interface{}{
+		"bucket":                "config_backup",
+		"object_path":           "backup/x-SN001.xml",
+		"filename":              "backup-abcdef12-SN001.xml",
+		"backup_task_id_prefix": "abcdef12",
+		"device_sn":             "SN001",
+		"file_size":             int64(1024),
+	}))
+	require.NoError(t, err,
+		"promote failure must not fail the EventBus handler — main backup chain stays green")
+	require.Len(t, promoter.calls, 1)
+	require.Len(t, repo.updateCalls, 1,
+		"main UpdateFilePath path still ran before the promote hook")
+}
+
+func TestHandleFileReceived_PromoterNotCalledWhenUnwired(t *testing.T) {
+	id := uuid.New()
+	task := &BackupTask{ID: id, TargetIDs: []string{"SN001"}}
+	repo := &fakePrefixRepo{byPrefix: map[string][]*BackupTask{"abcdef12": {task}}}
+	rec := newRecorder(t, repo)
+	// SetSnapshotPromoter not invoked — backward-compat path.
+
+	err := rec.handleFileReceived(context.Background(), makeEvent(t, map[string]interface{}{
+		"bucket":                "config_backup",
+		"object_path":           "backup/x-SN001.xml",
+		"filename":              "backup-abcdef12-SN001.xml",
+		"backup_task_id_prefix": "abcdef12",
+		"device_sn":             "SN001",
+		"file_size":             int64(1024),
+	}))
+	require.NoError(t, err)
+}
+
+// TestHandleFileReceived_PromoterCalledForUFTEPath 验证 T-0164 核心修复：
+// UFTE 链路（主任务在 software.upgrade_tasks，prefix 永远不命中 backup_tasks）
+// 也必须 promote 到 config_snapshots，否则 config-snapshots bucket 永远是空的。
+// 这是部署后真实观察到的 bug（"no backup_task matches prefix; metadata-only"
+// 路径未触发 promote）。
+func TestHandleFileReceived_PromoterCalledForUFTEPath(t *testing.T) {
+	repo := &fakePrefixRepo{byPrefix: map[string][]*BackupTask{}} // backup_tasks 空
+	rec := newRecorder(t, repo)
+	promoter := &fakeSnapshotPromoter{}
+	rec.SetSnapshotPromoter(promoter)
+	ufteTaskID := uuid.New()
+
+	err := rec.handleFileReceived(context.Background(), makeEvent(t, map[string]interface{}{
+		"bucket":                "config_backup",
+		"object_path":           "backup/2026/05/22/Config_xx_SN777.xml",
+		"filename":              "Config_20260522.0611-0500_MMMM.SN777.xml",
+		"backup_task_id_prefix": "cafefe12",
+		"task_id":               ufteTaskID.String(), // UFTE main task UUID
+		"device_sn":             "SN777",
+		"file_size":             int64(512),
+	}))
+	require.NoError(t, err)
+	require.Len(t, promoter.calls, 1,
+		"UFTE 链路（backup_tasks 不命中）也必须触发 promote")
+	assert.Equal(t, ufteTaskID, promoter.calls[0].taskID)
+	assert.Equal(t, "SN777", promoter.calls[0].sn)
+}

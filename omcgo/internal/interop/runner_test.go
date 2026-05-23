@@ -161,6 +161,10 @@ func (m *mockParamRepo) GetByGroup(_ context.Context, _ uuid.UUID, _ string) ([]
 	return []model.DeviceParameter{}, nil
 }
 
+func (m *mockParamRepo) DeleteByPathPrefix(_ context.Context, _ uuid.UUID, _ string) (int64, error) {
+	return 0, nil
+}
+
 func (m *mockParamRepo) GetByFAPInstance(_ context.Context, _ uuid.UUID, _ int) ([]model.DeviceParameter, error) {
 	return []model.DeviceParameter{}, nil
 }

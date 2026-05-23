@@ -218,6 +218,13 @@ func TestDownloadHandler(t *testing.T) {
 	assert.Contains(t, body, "<TargetFileName>firmware.bin</TargetFileName>")
 }
 
+// TestDownloadHandler_RuntimeTransferConfigOverride 验证 runtime transfer config
+// 只用于 BaseURL/Path 拼接，**不**把 Username/Password 注入 SOAP Download —— 这是
+// 产品决策（与 Upload 对齐，CPE 不通过 HTTP Basic Auth 取文件，详见 dispatcher.go
+// DownloadHandler.BuildRequest 注释）。本测试是反向断言，防止该决策被无意回退。
+//
+// 凭据来源仅认 Params.Username/Password（上层任务派发时显式塞入）；transfercfg
+// 提供的 Username/Password 即便配置了也应被忽略。
 func TestDownloadHandler_RuntimeTransferConfigOverride(t *testing.T) {
 	d := NewDispatcher(DispatcherConfig{
 		TransferConfigProvider: staticTransferProvider{snapshot: transfercfg.Snapshot{
@@ -244,7 +251,14 @@ func TestDownloadHandler_RuntimeTransferConfigOverride(t *testing.T) {
 	result, err := d.BuildRequest(cmd, "cwmp-id-runtime")
 	require.NoError(t, err)
 	body := string(result)
+	// BaseURL/Path 拼接生效
 	assert.Contains(t, body, "http://gateway.example.com/smallcell/FileDownloadService/firmware/QAFA/V1/pkg.bin")
-	assert.Contains(t, body, "<Username>runtime-user</Username>")
-	assert.Contains(t, body, "<Password>runtime-pass</Password>")
+	// 凭据**不**应被注入（runtime config 里的 Username/Password 不进 SOAP）
+	assert.NotContains(t, body, "runtime-user",
+		"runtime transfer config 的 Username 不应注入 SOAP（产品决策）")
+	assert.NotContains(t, body, "runtime-pass",
+		"runtime transfer config 的 Password 不应注入 SOAP（产品决策）")
+	// 模板渲染时应为空标签
+	assert.Contains(t, body, "<Username></Username>")
+	assert.Contains(t, body, "<Password></Password>")
 }
