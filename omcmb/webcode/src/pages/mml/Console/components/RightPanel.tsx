@@ -190,9 +190,9 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
       {/* 终端输出：用户决策 2026-05-18 + 二次确认 — 必须放在整个 RightPanel 顶端，
           Tabs 外。在 Tabs 内部时看起来"插在 tab 栏和 Control Panel 中间"；外置后
           它跨 Control / ParamPath 两个 tab 永远可见，更接近真终端的固定区域感。
-          高度 280px：12px 字号 × 1.7 行高 ≈ 20.4px/行，280-标题-内边距 容纳 ~10 行
-          可见输出（旧 240 容纳 ~8 行），覆盖更长 SetParameterValuesResponse 块。 */}
-      <div style={{ height: 280, flexShrink: 0 }}>
+          高度 320px：12px 字号 × 1.7 行高 ≈ 20.4px/行，320-标题-内边距 容纳 ~12 行
+          可见输出，覆盖更长 SetParameterValuesResponse 块。 */}
+      <div style={{ height: 320, flexShrink: 0 }}>
         <TerminalPanel
           lines={terminalLines}
           onClear={() => {

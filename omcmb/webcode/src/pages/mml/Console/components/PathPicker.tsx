@@ -149,25 +149,11 @@ export default function PathPicker({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {/* Row 1：搜索 + 分组 + 命令 一行三列 */}
+      {/* Row 1：分组 + 命令 两个独立选择器并排（确定三级筛选起点） */}
       <div style={{ display: 'flex', gap: 8, width: '100%' }}>
-        <AutoComplete
-          size="small"
-          style={{ flex: 1, minWidth: 0 }}
-          placeholder={t('mml.console.pathPicker.searchPlaceholder')}
-          value={searchText}
-          options={searchPathOptions}
-          onSearch={setSearchText}
-          onSelect={handleAddOne}
-          onChange={setSearchText}
-          disabled={disabled}
-          notFoundContent={
-            debouncedQuery ? <Empty description={false} image={Empty.PRESENTED_IMAGE_SIMPLE} /> : null
-          }
-        />
         <Select
           size="small"
-          style={{ width: 200, flexShrink: 0 }}
+          style={{ flex: 1, minWidth: 0 }}
           placeholder={t('mml.console.pathPicker.groupPlaceholder')}
           options={groupOptions}
           value={groupCode}
@@ -182,7 +168,7 @@ export default function PathPicker({
         />
         <Select
           size="small"
-          style={{ width: 240, flexShrink: 0 }}
+          style={{ flex: 1, minWidth: 0 }}
           placeholder={t('mml.console.pathPicker.commandPlaceholder')}
           options={commandOptions}
           value={commandId}
@@ -194,7 +180,23 @@ export default function PathPicker({
         />
       </div>
 
-      {/* Row 2：路径多选（全宽，showCheck 显示已勾选效果） */}
+      {/* Row 2：搜索 path（独立一行，跨命令的 type-ahead 直加） */}
+      <AutoComplete
+        size="small"
+        style={{ width: '100%' }}
+        placeholder={t('mml.console.pathPicker.searchPlaceholder')}
+        value={searchText}
+        options={searchPathOptions}
+        onSearch={setSearchText}
+        onSelect={handleAddOne}
+        onChange={setSearchText}
+        disabled={disabled}
+        notFoundContent={
+          debouncedQuery ? <Empty description={false} image={Empty.PRESENTED_IMAGE_SIMPLE} /> : null
+        }
+      />
+
+      {/* Row 3：当前命令下的路径多选（已选 path 默认带 ✓） */}
       {commandId && (
         <Select
           size="small"

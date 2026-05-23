@@ -4,7 +4,6 @@ import { AxiosError } from 'axios';
 import { useCreateMMLTemplate, useUpdateMMLTemplate } from '@core/hooks/api/useMML';
 import type { MMLCustomCommand } from '@core/types/mml';
 import { useT } from '@/hooks/useT';
-import CommandCodeTextarea from '../../components/CommandCodeTextarea';
 import OperationTypeWithModify from '../../components/OperationTypeWithModify';
 import PathPicker from './PathPicker';
 
@@ -214,7 +213,11 @@ export default function AddTemplateModal({
           label={t('mml.console.commandCode')}
           rules={[{ required: true, message: t('mml.console.commandCodeRequired') }]}
         >
-          <CommandCodeTextarea />
+          <Input
+            placeholder={t('mml.console.commandCodeTextareaPlaceholder')}
+            maxLength={200}
+            style={{ fontFamily: "'SFMono-Regular', Consolas, monospace" }}
+          />
         </Form.Item>
 
         <OperationTypeWithModify form={form} />
