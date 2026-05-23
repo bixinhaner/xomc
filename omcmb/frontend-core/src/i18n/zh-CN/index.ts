@@ -4446,9 +4446,9 @@ const messages: Record<string, string> = {
   'mml.console.parseError.unknownCommand':     '未识别命令：{logicalCode}',
   'mml.console.parseError.syntax':             'MML 语法错（第 {index} 段）：{reason}',
   'mml.console.parseError.unknownSubField':    '未识别的 sub-field：{mmlCode}',
-  'mml.console.execute.success':               '执行任务已创建（task_id: {taskId}）',
+  'mml.console.execute.success':               '命令已提交成功（task_id: {taskId}）',
   'mml.console.execute.partial':               '部分设备执行失败：{failed}/{total}',
-  'mml.console.execute.failed':                '执行失败：{message}',
+  'mml.console.execute.failed':                '命令已提交失败：{message}',
   'mml.console.execute.noDevices':             '请选择至少一台设备',
   'mml.console.execute.noStatements':          '请至少添加一条命令',
   // 终端"已派发"种子行：execute 成功后立即写入，下一条由 SSE mml_device_frame 推送

@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Tabs, Empty, Modal, message } from 'antd';
+import { Tabs, Empty, Modal, App } from 'antd';
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
 import { useExecuteStatementsStructured } from '@core/hooks/api/useMmlConsole';
 import { useMmlTaskStream } from '@core/hooks/api/useMmlTaskStream';
@@ -82,6 +82,9 @@ function buildTaskName(
 
 export default function RightPanel({ onExecuted }: RightPanelProps) {
   const t = useT();
+  // antd v5 静态 message 在嵌套 portal / Tabs 内会脱 ConfigProvider 上下文导致
+  // 不出 toast；项目内 14+ 处统一改走 App.useApp() scoped 实例（参 LoginPage / PrivateCommand）。
+  const { message } = App.useApp();
   const [tab, setTab] = useState<RightTab>('control');
   const activeStatementUid = useMmlConsoleStore((s) => s.activeStatementUid);
   const statements = useMmlConsoleStore((s) => s.statements);
