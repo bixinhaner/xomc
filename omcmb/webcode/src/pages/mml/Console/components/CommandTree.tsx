@@ -286,9 +286,11 @@ function buildCustomTreeData(
   // R-2: Customized 叶子同样加 OP 前缀，与 standard 命令保持视觉一致。
   // 颜色边按 scope 微调（public/private 通过 OP Tag 颜色已能区分，无需额外标记）。
   const renderLeaf = (cc: MMLCustomCommand): TreeDataNode => {
-    // 编辑/删除入口仅在私有 + 自己的（或 super_admin）时暴露
-    const canModify =
-      cc.commandScope === 'private' && (isSuperAdmin || cc.creator === currentUsername);
+    // 编辑/删除入口：private + public 一致 —— 创建者本人 OR super_admin 可改。
+    // 后端 pg_repository.UpdateAdmin/DeleteAdmin 同步校验同样规则，前端隐藏只是
+    // UX 体现，越权请求最终被后端 403 拒绝（详 docs/design/mml-user-public-
+    // template-permission-20260523.md §3）。
+    const canModify = isSuperAdmin || cc.creator === currentUsername;
     const titleEl = (
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
         {renderOpLeafTitle(cc.operationType, cc.commandName)}

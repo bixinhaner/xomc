@@ -4129,9 +4129,9 @@ const messages: Record<string, string> = {
 
   'mml.console.commandName':                 'Command Name',
   'mml.console.inputCommandName':            'Enter command name',
-  'mml.console.commandCode':                 'Command Code (must be custom; selecting existing commands is not allowed)',
+  'mml.console.commandCode':                 'Command Code (must be custom and globally unique; a custom prefix is recommended)',
   'mml.console.commandCodeRequired':         'Please enter command code',
-  'mml.console.commandCodeTextareaPlaceholder': 'Enter custom command code (existing commands cannot be selected)',
+  'mml.console.commandCodeTextareaPlaceholder': 'Enter custom command code',
   'mml.console.commandCodeTextareaTip':      '',
   'mml.console.operationType':               'Operation Type',
   'mml.console.selectOperationType':         'Select operation type',

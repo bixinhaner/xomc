@@ -20,7 +20,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { AutoComplete, Empty, Select, Tag, Tooltip, Typography } from 'antd';
+import { Empty, Select, Tag, Tooltip, Typography } from 'antd';
 import { useGroupTree, useCommandSubFields, useSearchCommands } from '@core/hooks/api/useMmlConsole';
 import type { GroupTreeNode } from '@core/types/mmlConsole';
 import { useT } from '@/hooks/useT';
@@ -122,10 +122,6 @@ export default function PathPicker({
     const merged = Array.from(new Set([...value, ...newPaths]));
     if (merged.length !== value.length) onChange(merged);
   };
-  const handleAddOne = (p: string) => {
-    handleAddPaths([p]);
-    setSearchText(''); // 清空搜索 input 以便连续添加
-  };
   const handleRemove = (p: string) => {
     onChange(value.filter((x) => x !== p));
   };
@@ -147,9 +143,52 @@ export default function PathPicker({
     onChange(merged);
   };
 
+  // 搜索框是「跨命令」的全局多选：value 反映外层 value 中命中过搜索结果的子集，
+  // 让用户能再次 reopen 时看到已勾选状态；options 始终是后端搜索响应聚合后的 path。
+  const searchSelectValue = useMemo(
+    () => value.filter((p) => searchPathOptions.some((o) => o.value === p)),
+    [value, searchPathOptions],
+  );
+  const handleSearchSelectChange = (picked: string[]) => {
+    // picked = 当前搜索结果集合内最新勾选的全集；其它不在搜索候选里的 path 保留。
+    const searchPathValues = new Set(searchPathOptions.map((o) => o.value));
+    const otherPaths = value.filter((p) => !searchPathValues.has(p));
+    onChange(Array.from(new Set([...otherPaths, ...picked])));
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {/* Row 1：分组 + 命令 两个独立选择器并排（确定三级筛选起点） */}
+      {/* Row 1：搜索 path（多选，跨命令） — 置顶，用户优先输入关键词找 path */}
+      <Select
+        size="small"
+        style={{ width: '100%' }}
+        mode="multiple"
+        placeholder={t('mml.console.pathPicker.searchPlaceholder')}
+        options={searchPathOptions}
+        // 受控搜索词，结合 debounce 把网络请求降到 300ms 后才发
+        searchValue={searchText}
+        onSearch={setSearchText}
+        // 多选 value = 已选 path ∩ 搜索结果候选；保证下拉里命中项带 ✓
+        value={searchSelectValue}
+        onChange={(picked) => handleSearchSelectChange(picked as string[])}
+        // 关闭客户端二次过滤：所有匹配由后端 ILIKE 完成
+        filterOption={false}
+        disabled={disabled}
+        notFoundContent={
+          debouncedQuery && searchPathOptions.length === 0 ? (
+            <Empty description={false} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          ) : null
+        }
+        maxTagCount={0}
+        maxTagPlaceholder={(omitted) =>
+          omitted.length > 0
+            ? `${t('mml.console.pathPicker.searchPlaceholder')} · ${omitted.length}`
+            : null
+        }
+        allowClear
+      />
+
+      {/* Row 2：分组 + 命令 两个独立选择器并排（三级筛选起点） */}
       <div style={{ display: 'flex', gap: 8, width: '100%' }}>
         <Select
           size="small"
@@ -179,22 +218,6 @@ export default function PathPicker({
           allowClear
         />
       </div>
-
-      {/* Row 2：搜索 path（独立一行，跨命令的 type-ahead 直加） */}
-      <AutoComplete
-        size="small"
-        style={{ width: '100%' }}
-        placeholder={t('mml.console.pathPicker.searchPlaceholder')}
-        value={searchText}
-        options={searchPathOptions}
-        onSearch={setSearchText}
-        onSelect={handleAddOne}
-        onChange={setSearchText}
-        disabled={disabled}
-        notFoundContent={
-          debouncedQuery ? <Empty description={false} image={Empty.PRESENTED_IMAGE_SIMPLE} /> : null
-        }
-      />
 
       {/* Row 3：当前命令下的路径多选（已选 path 默认带 ✓） */}
       {commandId && (
