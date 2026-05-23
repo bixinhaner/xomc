@@ -1,4 +1,7 @@
--- 000161_drop_device_rules.sql
+-- 000162_drop_device_rules.sql
+-- 历史：原 000161，与并行合入的 000161_config_snapshots.sql 撞号
+-- （commits c0123994 ↔ 3af260e3），按 CLAUDE.md §5.5 "后合并的重命名为
+-- 更大版本号" 顺延为 162。
 --
 -- 彻底下线设备规则模块（device_rules）。
 --
