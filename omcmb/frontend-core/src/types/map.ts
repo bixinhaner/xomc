@@ -69,6 +69,14 @@ export interface MapDevice {
   address?: string;
   /** 设备类型 */
   type?: DeviceType;
+  /** IP 地址 */
+  ip_address?: string;
+  /** MAC 地址 */
+  mac?: string;
+  /** PCI（物理小区标识） */
+  pci?: string;
+  /** 运维自定义设备名称 */
+  device_name?: string;
 }
 
 /**
@@ -97,6 +105,14 @@ export interface DeviceGeo {
   address?: string;
   /** 告警数量 */
   alarmCount?: number;
+  /** IP 地址 */
+  ip_address?: string;
+  /** MAC 地址 */
+  mac?: string;
+  /** PCI（物理小区标识） */
+  pci?: string;
+  /** 运维自定义设备名称 */
+  device_name?: string;
 }
 
 /**
@@ -215,6 +231,14 @@ export interface DeviceSearchResult {
   latitude: number;
   /** 设备组名称 */
   groupName?: string;
+  /** IP 地址 */
+  ip_address?: string;
+  /** MAC 地址 */
+  mac?: string;
+  /** PCI（物理小区标识） */
+  pci?: string;
+  /** 运维自定义设备名称 */
+  device_name?: string;
 }
 
 /**
@@ -370,6 +394,14 @@ export interface BackendDeviceGeo {
   group_name?: string;
   address?: string;
   alarm_count?: number;
+  /** IP 地址 */
+  ip_address?: string;
+  /** MAC 地址 */
+  mac?: string;
+  /** PCI（物理小区标识） */
+  pci?: string;
+  /** 运维自定义设备名称 */
+  device_name?: string;
 }
 
 /**
@@ -421,4 +453,12 @@ export interface BackendSearchResult {
   longitude: number;
   latitude: number;
   group_name?: string;
+  /** IP 地址 */
+  ip_address?: string;
+  /** MAC 地址 */
+  mac?: string;
+  /** PCI（物理小区标识） */
+  pci?: string;
+  /** 运维自定义设备名称 */
+  device_name?: string;
 }

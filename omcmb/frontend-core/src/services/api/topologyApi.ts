@@ -559,6 +559,10 @@ function mapBackendDeviceGeo(bd: BackendDeviceGeo): DeviceGeo {
     groupName: bd.group_name,
     address: bd.address,
     alarmCount: bd.alarm_count,
+    ip_address: bd.ip_address,
+    mac: bd.mac,
+    pci: bd.pci,
+    device_name: bd.device_name,
   };
 }
 
@@ -659,5 +663,9 @@ function mapBackendSearchResult(bs: BackendSearchResult): DeviceSearchResult {
     longitude: bs.longitude,
     latitude: bs.latitude,
     groupName: bs.group_name,
+    ip_address: bs.ip_address,
+    mac: bs.mac,
+    pci: bs.pci,
+    device_name: bs.device_name,
   };
 }
