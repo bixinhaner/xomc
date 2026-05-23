@@ -212,15 +212,47 @@ func Test_Repository_UserPreferencesUpsert(t *testing.T) {
 
 	user := ensureUser(t, pool, "test-dash-prefs-"+uuid.New().String()[:8])
 	layout1 := []byte(`{"order":["k1","k2"]}`)
-	require.NoError(t, r.UpsertUserPreferences(ctx, user, layout1))
+	require.NoError(t, r.UpsertUserPreferences(ctx, &UserPreferences{
+		UserID: user, Technology: TechLTE, KPICardLayout: layout1,
+	}))
 
-	got, err := r.GetUserPreferences(ctx, user)
+	got, err := r.GetUserPreferences(ctx, user, TechLTE)
 	require.NoError(t, err)
 	assert.JSONEq(t, string(layout1), string(got.KPICardLayout))
+	assert.Equal(t, TechLTE, got.Technology)
 
 	// upsert 覆盖
 	layout2 := []byte(`{"order":["k3"]}`)
-	require.NoError(t, r.UpsertUserPreferences(ctx, user, layout2))
-	got2, _ := r.GetUserPreferences(ctx, user)
+	require.NoError(t, r.UpsertUserPreferences(ctx, &UserPreferences{
+		UserID: user, Technology: TechLTE, KPICardLayout: layout2,
+	}))
+	got2, _ := r.GetUserPreferences(ctx, user, TechLTE)
 	assert.JSONEq(t, string(layout2), string(got2.KPICardLayout))
+}
+
+// T-0164 收尾 G6-Gap-3：制式分键独立持久化（集成测试）
+func Test_Repository_UserPreferences_TechnologyIsolated(t *testing.T) {
+	pool := openPoolOrSkip(t)
+	defer pool.Close()
+	r := NewPgRepository(pool)
+	ctx := context.Background()
+
+	user := ensureUser(t, pool, "test-prefs-tech-"+uuid.New().String()[:8])
+	lteLayout := []byte(`{"order":["rrc"]}`)
+	nrLayout := []byte(`{"order":["nr_sa"]}`)
+	require.NoError(t, r.UpsertUserPreferences(ctx, &UserPreferences{
+		UserID: user, Technology: TechLTE, KPICardLayout: lteLayout,
+	}))
+	require.NoError(t, r.UpsertUserPreferences(ctx, &UserPreferences{
+		UserID: user, Technology: TechNR, KPICardLayout: nrLayout,
+	}))
+
+	lte, _ := r.GetUserPreferences(ctx, user, TechLTE)
+	nr, _ := r.GetUserPreferences(ctx, user, TechNR)
+	assert.JSONEq(t, string(lteLayout), string(lte.KPICardLayout))
+	assert.JSONEq(t, string(nrLayout), string(nr.KPICardLayout))
+
+	// GSM 没设过 → ErrNotFound
+	_, err := r.GetUserPreferences(ctx, user, TechGSM)
+	assert.ErrorIs(t, err, ErrNotFound)
 }

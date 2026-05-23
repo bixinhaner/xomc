@@ -78,7 +78,18 @@ export interface Panel {
 
 export interface UserDashboardPreferences {
   userId: string;
+  technology: Technology;
   kpiCardLayout: Record<string, unknown>;
+  currentDashboardId?: string;
+  sharedFilters: Record<string, unknown>;
+}
+
+// T-0164 收尾 G6-Gap-3：upsert user preferences 时必须显式指定 technology。
+export interface UpsertUserPreferencesInput {
+  technology: Technology;
+  kpiCardLayout?: Record<string, unknown>;
+  currentDashboardId?: string;
+  sharedFilters?: Record<string, unknown>;
 }
 
 // ── Input types（hooks / handler 入参）────────────────────────────────
@@ -155,7 +166,10 @@ export interface BackendPanel {
 
 export interface BackendUserPreferences {
   user_id: string;
+  technology: string;
   kpi_card_layout: Record<string, unknown>;
+  current_dashboard_id?: string;
+  shared_filters: Record<string, unknown>;
 }
 
 // ── Mappers（snake_case → camelCase）────────────────────────────────
@@ -196,6 +210,9 @@ export function mapBackendPanel(b: BackendPanel): Panel {
 export function mapBackendPreferences(b: BackendUserPreferences): UserDashboardPreferences {
   return {
     userId: b.user_id,
+    technology: (b.technology as Technology) ?? 'lte',
     kpiCardLayout: b.kpi_card_layout ?? {},
+    currentDashboardId: b.current_dashboard_id,
+    sharedFilters: b.shared_filters ?? {},
   };
 }

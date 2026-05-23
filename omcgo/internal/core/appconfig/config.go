@@ -481,10 +481,37 @@ type WorkerConfig struct {
 	NATS            NATSConfig     `mapstructure:"nats"`
 	MinIO           MinIOConfig    `mapstructure:"minio"`
 	Task            TaskConfig     `mapstructure:"task"` // T-0157 C2: 任务过期扫描器配置
+	PM              PMConfig       `mapstructure:"pm"`   // 设备上线时自动下发 PM 上传配置
 	Metrics         MetricsConfig  `mapstructure:"metrics"`
 	Tracer          TracerConfig   `mapstructure:"tracer"`
 	Log             LogConfig      `mapstructure:"log"`
 	RequestIDPrefix string         `mapstructure:"request_id_prefix"` // 请求 ID 前缀，如 "worker"
+}
+
+// PMConfig 配置 PM 文件上传自动下发流程。
+//
+// 设备 offline→online 时（即 device.online 事件），worker 自动构造
+// 3 个 SetParameterValues task 入队 ACS Redis 任务队列：
+//
+//	Device.FAP.PerfMgmt.Config.1.Enable                  = EnableValue (默认 "1")
+//	Device.FAP.PerfMgmt.Config.1.URL                     = 渲染后的 UploadURLTemplate
+//	Device.FAP.PerfMgmt.Config.1.PeriodicUploadInterval  = PeriodicUploadInterval (默认 900)
+//
+// UploadURLTemplate 支持 ${VAR} / ${VAR:-default} 环境变量插值（OnlineSubscriber 内 expandEnv 处理），
+// 例如 "http://${OMC_PUBLIC_HOST:-localhost}:7557/smallcell/FileUploadService?fileType=PM&filename="，
+// 由 docker-compose 注入 OMC_PUBLIC_HOST=172.19.1.132 等。
+type PMConfig struct {
+	// UploadURLTemplate 是下发给 CPE 的 URL 模板，含 ${ENV} 插值；
+	// 末尾必须是 "filename=" 让 CPE 自己拼具体文件名。
+	UploadURLTemplate string `mapstructure:"upload_url_template"`
+	// EnableValue 是 Enable 参数的字符串值。文档（KPI上报参数整理.md §1）规定 "1"；
+	// 但真机历史可能落 "true"。两种 TR-069 boolean 都接受。
+	EnableValue string `mapstructure:"enable_value"`
+	// PeriodicUploadInterval 文件上传周期（秒）。文档 §3 默认 900（15 分钟）。
+	PeriodicUploadInterval int `mapstructure:"periodic_upload_interval"`
+	// AutoSetupOnOnline 是否启用 device.online → 自动下发流程。
+	// 关闭时 OnlineSubscriber 不订阅事件（兜底开关，回归 / 排查时可关）。
+	AutoSetupOnOnline bool `mapstructure:"auto_setup_on_online"`
 }
 
 // ACSServerConfig 配置 ACS HTTP/HTTPS 服务器监听参数。

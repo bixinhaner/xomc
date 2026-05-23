@@ -90,11 +90,17 @@ type Panel struct {
 }
 
 // UserPreferences 是 pm_user_dashboard_preferences 行。
+//
+// T-0164 收尾 G6-Gap-3 + G6-Gap-13：制式按主键拆分（每个用户在每种制式下持有独立偏好），
+// 包含当前选中仪表盘 + 全局筛选条 + KPI 卡片 layout。
 type UserPreferences struct {
-	UserID         uuid.UUID
-	KPICardLayout  json.RawMessage
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	UserID              uuid.UUID
+	Technology          Technology      // 制式主键的第二维（lte/nr/gsm）
+	KPICardLayout       json.RawMessage // KPI 卡片 layout（按制式独立）
+	CurrentDashboardID  *uuid.UUID      // 切回该制式时自动打开的仪表盘
+	SharedFilters       json.RawMessage // 全局筛选条快照（时间窗 / 设备组 / 设备多选）
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // ── Request DTOs ─────────────────────────────────────────────────────────

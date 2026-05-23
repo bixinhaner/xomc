@@ -375,6 +375,25 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	}
 	logger.Info("backup transfer-complete router started")
 
+	// PM 设备上线自动下发 PM 上传配置（KPI 上报参数整理.md 三参数）
+	// 仅在 cfg.PM.AutoSetupOnOnline=true 时启用；test 环境默认关闭防止干扰压测
+	if cfg.PM.AutoSetupOnOnline {
+		pmOnlineSub := pm.NewOnlineSubscriber(
+			w.TaskService,
+			cfg.PM.UploadURLTemplate,
+			cfg.PM.EnableValue,
+			cfg.PM.PeriodicUploadInterval,
+			logger,
+		)
+		if err := pmOnlineSub.Subscribe(w.EventBus); err != nil {
+			logger.Warn("subscribe pm online subscriber failed", zap.Error(err))
+		} else {
+			logger.Info("pm online subscriber started (auto SPV on device.online)")
+		}
+	} else {
+		logger.Info("pm online subscriber disabled (cfg.pm.auto_setup_on_online=false)")
+	}
+
 	// T-0164-P5 / G5 + T-0164-P8 / G8：PM 自然桶聚合 cron + asyncjob 框架接入。
 	// 复用上文已构造的 pmKPIRouter（KPI 反算依赖路由）；新开 4 个 cron runner +
 	// sweeper + 触发器（hourly @:05 / daily 00:05 / weekly 周一 00:10 / monthly 1日 00:15）。

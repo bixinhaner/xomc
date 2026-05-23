@@ -22,6 +22,7 @@ import type {
   Dashboard,
   Panel,
   UserDashboardPreferences,
+  UpsertUserPreferencesInput,
   CreateDashboardInput,
   UpdateDashboardInput,
   CreatePanelInput,
@@ -34,6 +35,7 @@ import type {
   Granularity,
   Dimension,
   CompareMode,
+  Technology,
 } from '../../types/pmDashboard';
 import {
   mapBackendDashboard,
@@ -156,14 +158,21 @@ export const pmDashboardApi = {
     await http.delete(`/pm/dashboards/${dashboardId}/panels/${panelId}`);
   },
 
-  // UserPreferences
-  async getUserPrefs(): Promise<UserDashboardPreferences> {
-    const resp = await http.get<BackendUserPreferences>('/pm/user-preferences/dashboard');
+  // UserPreferences（T-0164 收尾 G6-Gap-3：按制式分键持久化）
+  async getUserPrefs(technology: Technology = 'lte'): Promise<UserDashboardPreferences> {
+    const resp = await http.get<BackendUserPreferences>('/pm/user-preferences/dashboard', {
+      params: { technology },
+    });
     return mapBackendPreferences(resp);
   },
 
-  async setUserPrefs(layout: Record<string, unknown>): Promise<void> {
-    await http.put('/pm/user-preferences/dashboard', { kpi_card_layout: layout });
+  async setUserPrefs(input: UpsertUserPreferencesInput): Promise<void> {
+    await http.put('/pm/user-preferences/dashboard', {
+      technology: input.technology,
+      kpi_card_layout: input.kpiCardLayout ?? {},
+      current_dashboard_id: input.currentDashboardId,
+      shared_filters: input.sharedFilters ?? {},
+    });
   },
 };
 
@@ -289,11 +298,18 @@ export const pmDashboardMock: typeof pmDashboardApi = {
     mockPanelsState = mockPanelsState.filter((p) => p.id !== panelId);
   },
 
-  async getUserPrefs() {
-    return { ...mockUserPrefsState };
+  async getUserPrefs(technology: Technology = 'lte') {
+    // mock 一份按 technology 切的实现：同一 user 不同 technology 返不同 prefs
+    return { ...mockUserPrefsState, technology };
   },
 
-  async setUserPrefs(layout) {
-    mockUserPrefsState = { ...mockUserPrefsState, kpiCardLayout: layout };
+  async setUserPrefs(input) {
+    mockUserPrefsState = {
+      ...mockUserPrefsState,
+      technology: input.technology,
+      kpiCardLayout: input.kpiCardLayout ?? {},
+      currentDashboardId: input.currentDashboardId,
+      sharedFilters: input.sharedFilters ?? {},
+    };
   },
 };

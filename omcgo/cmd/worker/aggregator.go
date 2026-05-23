@@ -24,6 +24,10 @@ import (
 // 每个 JobType 单独开一个 worker goroutine，每 5 秒尝试抢一个待执行任务。
 // 单进程内串行（避免同 JobType 重复跑同一 bucket）；多 worker 跨进程靠
 // LockNextPending 的 SKIP LOCKED 自然分配。
+//
+// G8-Gap-1（启动补跑）：cronScheduler 启动前先扫 async_jobs_cron_state 表，对每个 job_type
+// 算"上次成功触发到现在之间所有应触发但漏掉的 bucket"逐个 enqueue，保证 worker 停机期间
+// 的 cron 触发不丢失。补跑后才启动 cron 走正常调度。
 func startPMAggregatorPipeline(
 	ctx context.Context,
 	w *workerInfra,
@@ -34,10 +38,11 @@ func startPMAggregatorPipeline(
 	// 1) 构造 aggregator + asyncjob 基础设施
 	aggr := aggregator.NewWithPool(w.TsPool, kpiRouter, logger)
 	jobRepo := asyncjob.NewPgRepository(w.PgPool)
+	cronStateRepo := asyncjob.NewPgCronStateRepository(w.PgPool)
 	lockOwner := buildLockOwner()
 	registry := asyncjob.NewRegistry(jobRepo, lockOwner, logger)
 
-	// 2) 注册 4 个 G5 cron runner
+	// 2) 注册 4 个 G5 设备级 cron runner
 	runners := []*aggregator.Runner{
 		aggregator.NewHourlyRunner(aggr),
 		aggregator.NewDailyRunner(aggr),
@@ -46,10 +51,26 @@ func startPMAggregatorPipeline(
 	}
 	for _, r := range runners {
 		registry.Register(r)
-		logger.Info("registered pm aggregator runner",
+		logger.Info("registered pm aggregator runner (device)",
 			zap.String("job_type", r.JobType()),
 			zap.String("source", r.Source()),
 			zap.String("target", r.Target()),
+			zap.String("granularity", string(r.Granularity())))
+	}
+
+	// 2b) 注册 4 个 G5 设备组级 cron runner（T-0164 收尾 G5-Gap-1）
+	groupRunners := []*aggregator.GroupRunner{
+		aggregator.NewHourlyGroupRunner(aggr),
+		aggregator.NewDailyGroupRunner(aggr),
+		aggregator.NewWeeklyGroupRunner(aggr),
+		aggregator.NewMonthlyGroupRunner(aggr),
+	}
+	for _, r := range groupRunners {
+		registry.Register(r)
+		logger.Info("registered pm aggregator runner (group)",
+			zap.String("job_type", r.JobType()),
+			zap.String("device_target", r.DeviceTarget()),
+			zap.String("group_target", r.GroupTarget()),
 			zap.String("granularity", string(r.Granularity())))
 	}
 
@@ -60,16 +81,23 @@ func startPMAggregatorPipeline(
 		zap.Duration("interval", asyncjob.SweeperInterval),
 		zap.Duration("zombie_threshold", asyncjob.ZombieThreshold))
 
-	// 4) 每个 JobType 开一个 worker goroutine
+	// 4) 每个 JobType 开一个 worker goroutine（设备级 4 + 设备组级 4 = 8 个）
 	for _, r := range runners {
 		jt := r.JobType()
 		go runJobTypeWorker(ctx, registry, jt, logger)
 	}
+	for _, r := range groupRunners {
+		jt := r.JobType()
+		go runJobTypeWorker(ctx, registry, jt, logger)
+	}
 
-	// 5) 启动 cron 调度器，按 wall-clock 整点触发 enqueue
-	startCronScheduler(ctx, jobRepo, logger)
+	// 5) 启动 cron 调度器（含启动补跑）
+	startCronScheduler(ctx, jobRepo, cronStateRepo, logger)
 
-	logger.Info("PM aggregator pipeline ready (4 runners + sweeper + cron triggers)")
+	// 6) PM retention cleanup（T-0164 收尾 G2-Gap-2）— 共享 jobRepo / cronStateRepo / registry
+	startPMRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry)
+
+	logger.Info("PM aggregator pipeline ready (8 aggregator runners + 1 retention runner + sweeper + cron triggers + catchup)")
 }
 
 // runJobTypeWorker 单 JobType 内串行循环 RunNext。
@@ -100,58 +128,102 @@ func runJobTypeWorker(ctx context.Context, registry *asyncjob.Registry, jobType 
 	}
 }
 
+// cronEntry 是单条 cron 调度配置（含启动补跑用的 advance）。
+type cronEntry struct {
+	spec     string
+	jobType  string
+	window   func(now time.Time) (start, end time.Time)
+	advance  asyncjob.BucketAdvance
+}
+
+// pmAggregatorCronEntries 8 个 G5 cron 配置（4 设备级 + 4 设备组级）。
+//
+// 设备组级 cron 时刻晚于对应设备级 10 分钟，避免读到未完成的 device-level 聚合表：
+//   设备级 hourly :05 → 设备组级 hourly :15
+//   设备级 daily 00:05 → 设备组级 daily 00:15
+//   设备级 weekly Mon 00:10 → 设备组级 weekly Mon 00:20
+//   设备级 monthly 1日 00:15 → 设备组级 monthly 1日 00:25
+func pmAggregatorCronEntries() []cronEntry {
+	hourlyAdvance := func(prev time.Time) time.Time { return prev.Add(time.Hour) }
+	dailyAdvance := func(prev time.Time) time.Time { return prev.AddDate(0, 0, 1) }
+	weeklyAdvance := func(prev time.Time) time.Time { return prev.AddDate(0, 0, 7) }
+	monthlyAdvance := func(prev time.Time) time.Time { return prev.AddDate(0, 1, 0) }
+
+	hourlyWindow := func(now time.Time) (time.Time, time.Time) {
+		end := now.Truncate(time.Hour)
+		return end.Add(-time.Hour), end
+	}
+	dailyWindow := func(now time.Time) (time.Time, time.Time) {
+		today := truncateDay(now)
+		return today.AddDate(0, 0, -1), today
+	}
+	weeklyWindow := func(now time.Time) (time.Time, time.Time) {
+		thisMon := truncateWeekISO(now)
+		return thisMon.AddDate(0, 0, -7), thisMon
+	}
+	monthlyWindow := func(now time.Time) (time.Time, time.Time) {
+		thisMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+		return thisMonth.AddDate(0, -1, 0), thisMonth
+	}
+
+	return []cronEntry{
+		// 设备级
+		{spec: "5 * * * *", jobType: aggregator.JobTypeHourly, window: hourlyWindow, advance: hourlyAdvance},
+		{spec: "5 0 * * *", jobType: aggregator.JobTypeDaily, window: dailyWindow, advance: dailyAdvance},
+		{spec: "10 0 * * 1", jobType: aggregator.JobTypeWeekly, window: weeklyWindow, advance: weeklyAdvance},
+		{spec: "15 0 1 * *", jobType: aggregator.JobTypeMonthly, window: monthlyWindow, advance: monthlyAdvance},
+		// 设备组级（错峰 10 分钟）
+		{spec: "15 * * * *", jobType: aggregator.JobTypeHourlyGroup, window: hourlyWindow, advance: hourlyAdvance},
+		{spec: "15 0 * * *", jobType: aggregator.JobTypeDailyGroup, window: dailyWindow, advance: dailyAdvance},
+		{spec: "20 0 * * 1", jobType: aggregator.JobTypeWeeklyGroup, window: weeklyWindow, advance: weeklyAdvance},
+		{spec: "25 0 1 * *", jobType: aggregator.JobTypeMonthlyGroup, window: monthlyWindow, advance: monthlyAdvance},
+	}
+}
+
 // startCronScheduler 启动 robfig/cron/v3，按 wall-clock 时刻触发 enqueue。
 //
-// schedule（5 字段 cron 表达式：m h dom mon dow）：
-//   - hourly  '5 * * * *'  每小时第 5 分
-//   - daily   '5 0 * * *'  每日 00:05
-//   - weekly  '10 0 * * 1' 每周一 00:10（dow=1 ISO Monday）
-//   - monthly '15 0 1 * *' 每月 1 日 00:15
+// G8-Gap-1 实施：
+//   1. 先做启动补跑（catchup）— 按 cron_state.last_bucket_end 算漏桶逐个 enqueue
+//   2. 再启动正常 cron 调度
 //
-// 触发器只入队 async_jobs，不直接调 runner（解耦：worker 重启 / 多 worker 时同样安全）。
-func startCronScheduler(ctx context.Context, repo asyncjob.Repository, logger *zap.Logger) {
+// 触发器只入队 async_jobs + Upsert cron_state，不直接调 runner
+// （解耦：worker 重启 / 多 worker 时同样安全）。
+func startCronScheduler(
+	ctx context.Context,
+	jobRepo asyncjob.Repository,
+	stateRepo asyncjob.CronStateRepository,
+	logger *zap.Logger,
+) {
+	entries := pmAggregatorCronEntries()
+
+	// === 1. 启动补跑 ===
+	now := time.Now().UTC()
+	for _, e := range entries {
+		catchupCronEntry(ctx, jobRepo, stateRepo, e, now, logger)
+	}
+
+	// === 2. 启动正常 cron 调度 ===
 	c := cron.New()
-	mustAdd := func(spec, jobType string, window func(now time.Time) (time.Time, time.Time)) {
-		_, err := c.AddFunc(spec, func() {
-			now := time.Now().UTC()
-			start, end := window(now)
-			enqueueAggregationJob(context.Background(), repo, jobType, start, end, logger)
+	for _, e := range entries {
+		entry := e // 闭包变量捕获
+		_, err := c.AddFunc(entry.spec, func() {
+			triggerCron(ctx, jobRepo, stateRepo, entry, logger)
 		})
 		if err != nil {
 			logger.Error("cron AddFunc failed",
-				zap.String("spec", spec), zap.String("job_type", jobType), zap.Error(err))
+				zap.String("spec", entry.spec),
+				zap.String("job_type", entry.jobType),
+				zap.Error(err))
 		}
 	}
 
-	mustAdd("5 * * * *", aggregator.JobTypeHourly, func(now time.Time) (time.Time, time.Time) {
-		// 触发时 now ≈ HH:05 — 处理 [HH-1:00, HH:00) 桶
-		end := now.Truncate(time.Hour)
-		start := end.Add(-time.Hour)
-		return start, end
-	})
-	mustAdd("5 0 * * *", aggregator.JobTypeDaily, func(now time.Time) (time.Time, time.Time) {
-		// 触发时 now ≈ 今日 00:05 — 处理 [昨日 00:00, 今日 00:00) 桶
-		today := truncateDay(now)
-		yesterday := today.AddDate(0, 0, -1)
-		return yesterday, today
-	})
-	mustAdd("10 0 * * 1", aggregator.JobTypeWeekly, func(now time.Time) (time.Time, time.Time) {
-		// 触发时 now ≈ 周一 00:10 — 处理 [上周一 00:00, 本周一 00:00) 桶
-		thisMon := truncateWeekISO(now)
-		lastMon := thisMon.AddDate(0, 0, -7)
-		return lastMon, thisMon
-	})
-	mustAdd("15 0 1 * *", aggregator.JobTypeMonthly, func(now time.Time) (time.Time, time.Time) {
-		// 触发时 now ≈ 本月 1 日 00:15 — 处理 [上月 1 日 00:00, 本月 1 日 00:00) 桶
-		thisMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
-		lastMonth := thisMonth.AddDate(0, -1, 0)
-		return lastMonth, thisMonth
-	})
-
 	c.Start()
 	logger.Info("pm aggregator cron scheduler started",
-		zap.Strings("schedules", []string{
+		zap.Strings("schedules_device", []string{
 			"hourly @:05", "daily 00:05", "weekly Mon 00:10", "monthly 1日 00:15",
+		}),
+		zap.Strings("schedules_group", []string{
+			"hourly @:15", "daily 00:15", "weekly Mon 00:20", "monthly 1日 00:25",
 		}))
 
 	// ctx 取消时优雅停 cron（不阻塞 worker shutdown）
@@ -161,6 +233,87 @@ func startCronScheduler(ctx context.Context, repo asyncjob.Repository, logger *z
 		<-stopCtx.Done()
 		logger.Info("pm aggregator cron scheduler stopped")
 	}()
+}
+
+// catchupCronEntry 启动时补跑单个 cron job_type 的所有漏桶。
+//
+// 流程：
+//   1. 查 cron_state — 没有则跳过（首次启动，等下次正常 cron 触发即可）
+//   2. CatchupMissedBuckets 算 (last_bucket_end, now] 区间所有应触发但漏掉的 bucket
+//   3. 逐个 enqueue（最多 10000 个上限保护）
+//   4. 更新 cron_state.last_bucket_end 到最后一个补跑的 bucket 的 end
+func catchupCronEntry(
+	ctx context.Context,
+	jobRepo asyncjob.Repository,
+	stateRepo asyncjob.CronStateRepository,
+	entry cronEntry,
+	now time.Time,
+	logger *zap.Logger,
+) {
+	state, err := stateRepo.Get(ctx, entry.jobType)
+	if err != nil {
+		if err == asyncjob.ErrNoCronState {
+			logger.Info("no cron state; skip catchup (first run)",
+				zap.String("job_type", entry.jobType))
+			return
+		}
+		logger.Warn("load cron state failed; skip catchup",
+			zap.String("job_type", entry.jobType), zap.Error(err))
+		return
+	}
+	if state.LastBucketEnd == nil {
+		logger.Info("cron state has nil last_bucket_end; skip catchup",
+			zap.String("job_type", entry.jobType))
+		return
+	}
+
+	missed := asyncjob.CatchupMissedBuckets(*state.LastBucketEnd, now, entry.advance)
+	if len(missed) == 0 {
+		logger.Debug("no missed buckets",
+			zap.String("job_type", entry.jobType),
+			zap.Timep("last_bucket_end", state.LastBucketEnd))
+		return
+	}
+
+	logger.Info("catching up missed cron buckets",
+		zap.String("job_type", entry.jobType),
+		zap.Int("count", len(missed)),
+		zap.Time("first_start", missed[0].Start),
+		zap.Time("last_end", missed[len(missed)-1].End))
+
+	var lastEnd time.Time
+	for _, b := range missed {
+		enqueueAggregationJob(ctx, jobRepo, entry.jobType, b.Start, b.End, logger)
+		lastEnd = b.End
+	}
+
+	if !lastEnd.IsZero() {
+		if err := stateRepo.Upsert(ctx, entry.jobType, entry.spec, now, lastEnd); err != nil {
+			logger.Warn("upsert cron state after catchup failed",
+				zap.String("job_type", entry.jobType), zap.Error(err))
+		}
+	}
+}
+
+// triggerCron 正常 cron 触发：入队 1 个 bucket + 更新 cron_state。
+func triggerCron(
+	ctx context.Context,
+	jobRepo asyncjob.Repository,
+	stateRepo asyncjob.CronStateRepository,
+	entry cronEntry,
+	logger *zap.Logger,
+) {
+	now := time.Now().UTC()
+	start, end := entry.window(now)
+	enqueueAggregationJob(context.Background(), jobRepo, entry.jobType, start, end, logger)
+
+	// 用 background ctx 防 ctx 取消时丢状态更新（与 enqueue 一致）
+	bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := stateRepo.Upsert(bg, entry.jobType, entry.spec, now, end); err != nil {
+		logger.Warn("upsert cron state after trigger failed",
+			zap.String("job_type", entry.jobType), zap.Error(err))
+	}
 }
 
 // enqueueAggregationJob 把 (jobType, start, end) 序列化成 async_jobs.payload 入队。

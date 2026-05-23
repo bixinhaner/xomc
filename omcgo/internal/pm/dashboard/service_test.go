@@ -17,14 +17,14 @@ type stubRepo struct {
 	mu         sync.Mutex
 	dashboards map[uuid.UUID]*Dashboard
 	panels     map[uuid.UUID]*Panel
-	prefs      map[uuid.UUID]*UserPreferences
+	prefsByKey map[string]*UserPreferences // key = userID + "/" + technology
 }
 
 func newStubRepo() *stubRepo {
 	return &stubRepo{
 		dashboards: map[uuid.UUID]*Dashboard{},
 		panels:     map[uuid.UUID]*Panel{},
-		prefs:      map[uuid.UUID]*UserPreferences{},
+		prefsByKey: map[string]*UserPreferences{},
 	}
 }
 
@@ -175,18 +175,22 @@ func (s *stubRepo) DeletePanel(_ context.Context, id uuid.UUID) error {
 	delete(s.panels, id)
 	return nil
 }
-func (s *stubRepo) GetUserPreferences(_ context.Context, userID uuid.UUID) (*UserPreferences, error) {
+func (s *stubRepo) GetUserPreferences(_ context.Context, userID uuid.UUID, tech Technology) (*UserPreferences, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if p, ok := s.prefs[userID]; ok {
+	key := userID.String() + "/" + string(tech)
+	if p, ok := s.prefsByKey[key]; ok {
 		return p, nil
 	}
 	return nil, ErrNotFound
 }
-func (s *stubRepo) UpsertUserPreferences(_ context.Context, userID uuid.UUID, layout []byte) error {
+func (s *stubRepo) UpsertUserPreferences(_ context.Context, p *UserPreferences) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.prefs[userID] = &UserPreferences{UserID: userID, KPICardLayout: layout}
+	if s.prefsByKey == nil {
+		s.prefsByKey = map[string]*UserPreferences{}
+	}
+	s.prefsByKey[p.UserID.String()+"/"+string(p.Technology)] = p
 	return nil
 }
 
@@ -295,10 +299,36 @@ func Test_Service_GetUserPreferences_ReturnsEmptyOnMiss(t *testing.T) {
 	svc := NewService(repo, nil)
 	user := uuid.New()
 
-	p, err := svc.GetUserPreferences(context.Background(), user)
+	p, err := svc.GetUserPreferences(context.Background(), user, TechLTE)
 	require.NoError(t, err)
 	require.NotNil(t, p)
 	assert.Equal(t, user, p.UserID)
+	assert.Equal(t, TechLTE, p.Technology)
+}
+
+// T-0164 收尾 G6-Gap-3：制式分键独立持久化
+func Test_Service_UserPreferences_TechnologyIsolated(t *testing.T) {
+	repo := newStubRepo()
+	svc := NewService(repo, nil)
+	user := uuid.New()
+
+	lteLayout := []byte(`{"order":["rrc","erab"]}`)
+	nrLayout := []byte(`{"order":["nr_sa","accessibility"]}`)
+	require.NoError(t, svc.UpsertUserPreferences(context.Background(), &UserPreferences{
+		UserID: user, Technology: TechLTE, KPICardLayout: lteLayout,
+	}))
+	require.NoError(t, svc.UpsertUserPreferences(context.Background(), &UserPreferences{
+		UserID: user, Technology: TechNR, KPICardLayout: nrLayout,
+	}))
+
+	lte, _ := svc.GetUserPreferences(context.Background(), user, TechLTE)
+	nr, _ := svc.GetUserPreferences(context.Background(), user, TechNR)
+	assert.JSONEq(t, string(lteLayout), string(lte.KPICardLayout))
+	assert.JSONEq(t, string(nrLayout), string(nr.KPICardLayout))
+
+	// GSM 未设过 — 返默认空
+	gsm, _ := svc.GetUserPreferences(context.Background(), user, TechGSM)
+	assert.JSONEq(t, "{}", string(gsm.KPICardLayout))
 }
 
 func Test_Service_CreatePanel_NonOwnerDenied(t *testing.T) {

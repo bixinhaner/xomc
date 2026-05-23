@@ -180,19 +180,26 @@ func (s *Service) ListPanels(ctx context.Context, requesterID, dashboardID uuid.
 
 // ── UserPreferences ──────────────────────────────────────────────────────
 
-// GetUserPreferences 仅自己的偏好可读。
-func (s *Service) GetUserPreferences(ctx context.Context, userID uuid.UUID) (*UserPreferences, error) {
-	p, err := s.repo.GetUserPreferences(ctx, userID)
+// GetUserPreferences 取用户在指定制式下的偏好；不存在返默认空偏好（按制式）。
+//
+// T-0164 收尾 G6-Gap-3：技术维度独立持久化，每个用户在每种制式下偏好分离。
+func (s *Service) GetUserPreferences(ctx context.Context, userID uuid.UUID, tech Technology) (*UserPreferences, error) {
+	p, err := s.repo.GetUserPreferences(ctx, userID, tech)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-			// 返默认空偏好
-			return &UserPreferences{UserID: userID, KPICardLayout: []byte(`{}`)}, nil
+			return &UserPreferences{
+				UserID:        userID,
+				Technology:    tech,
+				KPICardLayout: []byte(`{}`),
+				SharedFilters: []byte(`{}`),
+			}, nil
 		}
 		return nil, err
 	}
 	return p, nil
 }
 
-func (s *Service) UpsertUserPreferences(ctx context.Context, userID uuid.UUID, layout []byte) error {
-	return s.repo.UpsertUserPreferences(ctx, userID, layout)
+// UpsertUserPreferences 写整行偏好。caller 须构造完整 UserPreferences（含 Technology）。
+func (s *Service) UpsertUserPreferences(ctx context.Context, p *UserPreferences) error {
+	return s.repo.UpsertUserPreferences(ctx, p)
 }

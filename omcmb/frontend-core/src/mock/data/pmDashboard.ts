@@ -87,8 +87,10 @@ export const mockPanels: Panel[] = [
 
 export const mockUserPreferences: UserDashboardPreferences = {
   userId: mockOwnerId,
+  technology: 'lte',
   kpiCardLayout: {
     order: ['rrcSuccRate', 'erabSuccRate', 'hoSuccRate', 'dlThroughput'],
     hidden: ['voLteSuccRate'],
   },
+  sharedFilters: {},
 };

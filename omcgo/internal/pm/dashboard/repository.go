@@ -37,8 +37,10 @@ type Repository interface {
 	DeletePanel(ctx context.Context, id uuid.UUID) error
 
 	// UserPreferences
-	GetUserPreferences(ctx context.Context, userID uuid.UUID) (*UserPreferences, error)
-	UpsertUserPreferences(ctx context.Context, userID uuid.UUID, kpiCardLayout []byte) error
+	// T-0164 收尾 G6-Gap-3：按 (user_id, technology) 主键取偏好；技术维度独立持久化。
+	GetUserPreferences(ctx context.Context, userID uuid.UUID, tech Technology) (*UserPreferences, error)
+	// UpsertUserPreferences 写整行偏好（按制式分键）；nil 字段不更新，需要 caller 显式构造。
+	UpsertUserPreferences(ctx context.Context, p *UserPreferences) error
 }
 
 // Errors
@@ -400,32 +402,50 @@ func (r *PgRepository) DeletePanel(ctx context.Context, id uuid.UUID) error {
 
 // ── UserPreferences ──────────────────────────────────────────────────────
 
-func (r *PgRepository) GetUserPreferences(ctx context.Context, userID uuid.UUID) (*UserPreferences, error) {
+func (r *PgRepository) GetUserPreferences(ctx context.Context, userID uuid.UUID, tech Technology) (*UserPreferences, error) {
 	var p UserPreferences
-	var layout []byte
+	var layout, sharedFilters []byte
+	var techStr string
 	err := r.pool.QueryRow(ctx, `
-SELECT user_id, kpi_card_layout, created_at, updated_at
-FROM pm_user_dashboard_preferences WHERE user_id = $1`, userID).
-		Scan(&p.UserID, &layout, &p.CreatedAt, &p.UpdatedAt)
+SELECT user_id, technology, kpi_card_layout, current_dashboard_id, shared_filters, created_at, updated_at
+FROM pm_user_dashboard_preferences WHERE user_id = $1 AND technology = $2`, userID, string(tech)).
+		Scan(&p.UserID, &techStr, &layout, &p.CurrentDashboardID, &sharedFilters, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("GetUserPreferences: %w", err)
 	}
+	p.Technology = Technology(techStr)
 	p.KPICardLayout = layout
+	p.SharedFilters = sharedFilters
 	return &p, nil
 }
 
-func (r *PgRepository) UpsertUserPreferences(ctx context.Context, userID uuid.UUID, kpiCardLayout []byte) error {
-	if len(kpiCardLayout) == 0 {
-		kpiCardLayout = []byte(`{}`)
+func (r *PgRepository) UpsertUserPreferences(ctx context.Context, p *UserPreferences) error {
+	if p == nil {
+		return fmt.Errorf("UpsertUserPreferences: nil preferences")
+	}
+	if p.Technology == "" {
+		return fmt.Errorf("UpsertUserPreferences: technology required")
+	}
+	layout := p.KPICardLayout
+	if len(layout) == 0 {
+		layout = []byte(`{}`)
+	}
+	sharedFilters := p.SharedFilters
+	if len(sharedFilters) == 0 {
+		sharedFilters = []byte(`{}`)
 	}
 	_, err := r.pool.Exec(ctx, `
-INSERT INTO pm_user_dashboard_preferences (user_id, kpi_card_layout)
-VALUES ($1, $2)
-ON CONFLICT (user_id) DO UPDATE SET kpi_card_layout = EXCLUDED.kpi_card_layout, updated_at = NOW()`,
-		userID, kpiCardLayout)
+INSERT INTO pm_user_dashboard_preferences (user_id, technology, kpi_card_layout, current_dashboard_id, shared_filters)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (user_id, technology) DO UPDATE SET
+    kpi_card_layout      = EXCLUDED.kpi_card_layout,
+    current_dashboard_id = EXCLUDED.current_dashboard_id,
+    shared_filters       = EXCLUDED.shared_filters,
+    updated_at           = NOW()`,
+		p.UserID, string(p.Technology), layout, p.CurrentDashboardID, sharedFilters)
 	if err != nil {
 		return fmt.Errorf("UpsertUserPreferences: %w", err)
 	}

@@ -524,25 +524,56 @@ func (h *Handler) DeletePanel(c *gin.Context) {
 
 // ── UserPreferences handlers ────────────────────────────────────────────
 
+// parseTechnologyParam 从 query string 取 technology；缺省返 lte（默认制式）。
+func parseTechnologyParam(c *gin.Context) (Technology, bool) {
+	v := c.Query("technology")
+	if v == "" {
+		return TechLTE, true // 默认 lte（向前兼容老 client 不传 technology 的请求）
+	}
+	switch v {
+	case "lte", "nr", "gsm":
+		return Technology(v), true
+	}
+	response.Fail(c, http.StatusBadRequest, "invalid technology (lte/nr/gsm)")
+	return "", false
+}
+
+// GetPreferences GET /pm/user-preferences/dashboard?technology=lte|nr|gsm
+//
+// 不传 technology 时默认 lte。返回当前用户在该制式下的 KPI 卡片 layout +
+// current_dashboard_id + shared_filters。
 func (h *Handler) GetPreferences(c *gin.Context) {
 	uid, ok := userID(c)
 	if !ok {
 		response.Fail(c, http.StatusUnauthorized, "missing user_id")
 		return
 	}
-	p, err := h.svc.GetUserPreferences(c.Request.Context(), uid)
+	tech, ok := parseTechnologyParam(c)
+	if !ok {
+		return
+	}
+	p, err := h.svc.GetUserPreferences(c.Request.Context(), uid, tech)
 	if err != nil {
 		mapErr(c, err)
 		return
 	}
-	response.OK(c, gin.H{
-		"user_id":         p.UserID.String(),
-		"kpi_card_layout": p.KPICardLayout,
-	})
+	resp := gin.H{
+		"user_id":              p.UserID.String(),
+		"technology":           string(p.Technology),
+		"kpi_card_layout":      p.KPICardLayout,
+		"shared_filters":       p.SharedFilters,
+	}
+	if p.CurrentDashboardID != nil {
+		resp["current_dashboard_id"] = p.CurrentDashboardID.String()
+	}
+	response.OK(c, resp)
 }
 
 type prefsDTO struct {
-	KPICardLayout json.RawMessage `json:"kpi_card_layout"`
+	Technology         string          `json:"technology" binding:"required,oneof=lte nr gsm"`
+	KPICardLayout      json.RawMessage `json:"kpi_card_layout"`
+	CurrentDashboardID *string         `json:"current_dashboard_id"`
+	SharedFilters      json.RawMessage `json:"shared_filters"`
 }
 
 func (h *Handler) PutPreferences(c *gin.Context) {
@@ -556,9 +587,23 @@ func (h *Handler) PutPreferences(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	if err := h.svc.UpsertUserPreferences(c.Request.Context(), uid, req.KPICardLayout); err != nil {
+	prefs := &UserPreferences{
+		UserID:        uid,
+		Technology:    Technology(req.Technology),
+		KPICardLayout: req.KPICardLayout,
+		SharedFilters: req.SharedFilters,
+	}
+	if req.CurrentDashboardID != nil {
+		id, err := uuid.Parse(*req.CurrentDashboardID)
+		if err != nil {
+			response.Fail(c, http.StatusBadRequest, "invalid current_dashboard_id")
+			return
+		}
+		prefs.CurrentDashboardID = &id
+	}
+	if err := h.svc.UpsertUserPreferences(c.Request.Context(), prefs); err != nil {
 		mapErr(c, err)
 		return
 	}
-	response.OK(c, gin.H{"user_id": uid.String()})
+	response.OK(c, gin.H{"user_id": uid.String(), "technology": req.Technology})
 }

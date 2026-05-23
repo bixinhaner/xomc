@@ -13,6 +13,8 @@ import type {
   CreatePanelInput,
   ForkInput,
   ShareInput,
+  Technology,
+  UpsertUserPreferencesInput,
 } from '../../types/pmDashboard';
 
 const api = createApiSwitch(pmDashboardMock, pmDashboardApi);
@@ -135,19 +137,21 @@ export function useDeletePmPanel() {
 
 // ── UserPreferences hooks ──────────────────────────────────────────────
 
-export function usePmUserPreferences() {
+// T-0164 收尾 G6-Gap-3：按制式分键查偏好；query key 含 technology 避免不同制式互相覆盖缓存。
+export function usePmUserPreferences(technology: Technology = 'lte') {
   return useQuery({
-    queryKey: PM_PREFS_KEY,
-    queryFn: () => api.getUserPrefs(),
+    queryKey: [...PM_PREFS_KEY, technology],
+    queryFn: () => api.getUserPrefs(technology),
   });
 }
 
 export function useUpdatePmUserPreferences() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (layout: Record<string, unknown>) => api.setUserPrefs(layout),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: PM_PREFS_KEY });
+    mutationFn: (input: UpsertUserPreferencesInput) => api.setUserPrefs(input),
+    onSuccess: (_, vars) => {
+      // 只 invalidate 对应 technology 的 query key，避免跨制式抖动
+      void qc.invalidateQueries({ queryKey: [...PM_PREFS_KEY, vars.technology] });
     },
   });
 }

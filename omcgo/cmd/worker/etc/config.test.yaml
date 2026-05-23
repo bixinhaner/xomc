@@ -52,6 +52,13 @@ task:
   default_expires_in_seconds: 120
   sweep_interval_seconds: 10
 
+# PM 文件上传自动下发配置（test 环境默认关闭，避免影响压测和 E2E 设备）
+pm:
+  upload_url_template: "http://${OMC_PUBLIC_HOST:-localhost}:7557/smallcell/FileUploadService?fileType=PM&filename="
+  enable_value: "1"
+  periodic_upload_interval: 900
+  auto_setup_on_online: false
+
 metrics:
   port: 9092
 
