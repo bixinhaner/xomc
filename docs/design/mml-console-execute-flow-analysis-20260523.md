@@ -1,15 +1,28 @@
 # `POST /api/v1/mml/console/execute-statements-structured` 全链路分析
 
-> **日期**：2026-05-23
-> **范围**：单一 API 端到端 — Browser SPA → App → Redis 队列 → ACS → CPE → CompletionRouter → SSE Hub → Browser 终端
+> **版本**：v1.1（2026-05-23）
+> **范围**：单一 API 端到端 — Browser SPA → App → NATS / Redis → ACS → CPE → NATS task.* → CompletionRouter → SSE Hub → Browser 终端
 > **目的**：为排错 / 新人 onboarding / 后续优化提供 file:line 级别的执行链路索引
 > **关联文档**：
+> - [../消息队列全流程流转说明书.md](../消息队列全流程流转说明书.md) — **队列权威说明书**（本文档与之对齐）
 > - [mml-console-architecture-overview-20260521.md](mml-console-architecture-overview-20260521.md) — 三栏 UI + 7 个 API + 14 张表的横向概览
-> - [mml-task-flow-design-20260424.md](mml-task-flow-design-20260424.md) — MML 任务模型的纵向设计（添加 → 执行 → 回流）
+> - [mml-task-flow-design-20260424.md](mml-task-flow-design-20260424.md) — MML 任务模型的纵向设计
 > - [mml-tasks-vs-device-tasks-analysis.md](mml-tasks-vs-device-tasks-analysis.md) — mml_tasks vs device_tasks 边界
 > - [mml-console-cmcc-tdlte-v23-adjustment-plan-20260519.md](mml-console-cmcc-tdlte-v23-adjustment-plan-20260519.md) — R-9.2 结构化通道的需求来源
 
 本文档与上述文档**不重复**：架构 overview 关注横向，task-flow 关注模型，本文档关注**这一个 API 请求被点击后发生的所有事情**。
+
+### v1.1 变更说明（相对 v1.0 的修订）
+
+v1.0 在 ACS 侧出现 2 处关键错误和 3 处重要缺失，经对照 `消息队列全流程流转说明书.md` 与 `internal/acs/handler.go` 实际代码修订：
+
+| # | 类型 | v1.0 | v1.1 |
+|---|---|---|---|
+| 1 | ❌ 错误 | 称 ACS 有"后台 Poller 周期 ZRANGE 取 task" | 实际是 **CPE-Inform 驱动**：`PopTask` 仅在 `HandleInform` / `HandleEmpty` / `HandleSOAPFault` 三个 SOAP handler 内同步调用（handler.go:565/772/1084） |
+| 2 | ❌ 错误 | ACS 直接 → CompletionRouter → ResultAggregator | 实际经 **NATS TASK stream**：`notifyCompletion` 跨进程 Publish → APP `task-completion-bridge` QueueGroup 订阅 → deduper 防重 → CompletionRouter.Dispatch |
+| 3 | ➕ 补充 | 未提 NATS 重投 / 死信 | §3.7 增加：5 次重投 + 退避（1/2/4/8/16s）+ `msg.Term()` 死信 |
+| 4 | ➕ 补充 | 未提兜底机制 | §3.7 增加：RestorePendingQueues / RecoverPendingTasks / task-reboot-closer 三道兜底 |
+| 5 | ➕ 补充 | 未提发布过滤 | §3.5 增加：`SourceID && CreatorID 均空时跳过` 的关键过滤 |
 
 ---
 
@@ -19,17 +32,27 @@
 - [1. 高层数据流图](#1-高层数据流图)
 - [2. 前端流程](#2-前端流程)
 - [3. 后端流程](#3-后端流程)
+  - [3.1 路由 + 鉴权](#31-路由--鉴权)
+  - [3.2 Handler](#32-handler)
+  - [3.3 Service 核心](#33-service-核心)
+  - [3.4 Task 创建 + 派发（App）](#34-task-创建--派发app)
+  - [3.5 ACS 南向下发（CPE-Inform 驱动）](#35-acs-南向下发cpe-inform-驱动)
+  - [3.6 结果回流（NATS TASK stream）](#36-结果回流nats-task-stream)
+  - [3.7 可靠性兜底机制](#37-可靠性兜底机制)
 - [4. 完整时序图（前+后端合并）](#4-完整时序图前后端合并)
 - [5. 关键设计决策与亮点](#5-关键设计决策与亮点)
 - [6. 易踩坑 / 已知短板](#6-易踩坑--已知短板)
 - [附录 A：文件:行号引用表](#附录-a文件行号引用表)
 - [附录 B：类型契约](#附录-b类型契约)
+- [附录 C：消息分层对照](#附录-c消息分层对照)
 
 ---
 
 ## 0. 一句话总结
 
-**HTTP 201 ≠ 执行完成**。前端把结构化语句 POST 给 App，App 同步把它编译成 RPC commands、做 `standardPath → privatePath` 翻译、fanout 到 Redis 队列，立刻返 201 给前端；前端拿到 task_id 后切去订阅 `/events/stream` SSE。ACS 异步消费队列，渲染 SOAP，与 CPE 完成交互后写回 `device_tasks` 并通过事件总线触发 `ResultAggregator`，后者通过 `MessageHub` 把 `mml_device_frame` / `mml_task_completed` 帧推回浏览器的 `TerminalPanel`。**整链路通过 `trace_id` 串联可观测，通过 `task_id` / `device_sn` / `cmd_idx` 三元组寻址任意环节状态。**
+**HTTP 201 ≠ 执行完成，而且 ACS 完全被动**。前端把结构化语句 POST 给 App，App 同步把它编译成 RPC commands、做 `standardPath → privatePath` 翻译、写入 Redis ZSET 任务队列（`acs:taskq:{sn}`）并立刻返 201；前端拿到 task_id 后切去订阅 `/events/stream` SSE。**ACS 没有后台 Poller —— TR-069 是 CPE-initiated 协议，ACS 只能在 CPE 发 SOAP 进来（Inform / 空 POST / Fault response）时同步 PopTask 把下一条 RPC 塞进响应体回发**。CPE 返 SOAP 响应后 ACS 写回 device_tasks 并通过 `notifyCompletion → NATS TASK stream` 跨进程广播 `task.completed/failed`，App 侧 `task-completion-bridge` QueueGroup 订阅、经 deduper 防重后由 `CompletionRouter` 按 `task.Source` 路由到 `mml.ResultAggregator`，后者通过 `MessageHub` 把 `mml_device_frame` / `mml_task_completed` 帧推回浏览器的 `TerminalPanel`。
+
+> **三个核心机制**：① Redis ZSET TaskQ（下行队列，CPE-Inform 触发 Pop）；② NATS JetStream TASK stream（回流广播，QueueGroup 多副本负载均衡 + 重投/死信）；③ `cwmp2task` 映射（CPE 响应回来时按 CWMP ID 反查原 task）。
 
 ---
 
@@ -47,17 +70,42 @@
   │                                         ├─ CreateAndFanoutTask
   │                                         │   ├─ INSERT mml_tasks + device_tasks
   │                                         │   ├─ Fanouter 展 M cmd × N device
-  │                                         │   └─ Redis ZADD acs:taskq:{sn}
+  │                                         │   └─ Redis ZADD acs:taskq:{sn}  (TaskQ)
   ◀──201 MMLTask────────────────────         └─ audit log
   ├─ setCurrentTaskId  →  EventSource /events/stream
-  ├─ appendLine "已派发"                                          ZRANGE ◀──────  ACS Poller
-  └─ message.success                                              ↓
-                                                                Dispatcher → SOAP ─────▶ CPE
-                                                                                          ↓
-                                                                                 ◀──SOAP response
-                                                                ResultAggregator ◀── 写回 device_tasks
-                                                                ├─ Sequencer 推下一步
-  ◀──SSE mml_device_frame─────────────── hub.PublishSimple ←────┘
+  ├─ appendLine "已派发"
+  └─ message.success
+                                                                  ▲ CPE 主动 Inform / 空 POST / Fault 响应
+                                                                  │ (ACS 完全被动，无后台 Poller)
+                                                                  │
+                                                                  ACS HandleInform / HandleEmpty / HandleSOAPFault
+                                                                    ├─ PopTask (ZRANGEBYSCORE + ZREM atomic)
+                                                                    ├─ MarkTaskSent + acs:cwmp2task:{hash}=taskID
+                                                                    └─ rpcDispatcher.BuildRequest → SOAP ───▶ CPE
+                                                                                                              ↓
+                                                                                                    ◀──SOAP response
+                                                                  ACS 解析 response, 按 CWMP ID 反查 task,
+                                                                  MarkTaskCompleted / MarkTaskFailed
+                                                                    ↓
+                                                                  notifyCompletion (service.go:687)
+                                                                  if SourceID || CreatorID 非空:
+                                                                    EventBus.Publish(task.completed/failed)
+                                                                    ↓
+                                                       ┌──── NATS JetStream "TASK" stream ────┐
+                                                       │  (持久化 72h, At-Least-Once,         │
+                                                       │   重投 5 次 + 退避 1/2/4/8/16s)       │
+                                                       └──────────────────────────────────────┘
+                                                                    ↓
+                                       APP: QueueSubscribe(SubjectTaskCompleted/Failed,
+                                            queue="task-completion-bridge-{completed|failed}")
+                                            → deduper.Wrap("task-completion-bridge") 防 NATS 重投双发
+                                            → CompletionRouter.Dispatch(task)  按 task.Source 路由：
+                                                  ├─ source=mml → ResultAggregator.OnTaskCompleted
+                                                  │              ├─ Sequencer 推下一步 (cmd_idx+1)
+                                                  │              ├─ IncrementStats (mml_tasks)
+                                                  │              └─ hub.PublishSimple("mml_device_frame")
+                                                  │                  ↓
+  ◀──SSE mml_device_frame──────────────────  events/handler.go for-select 推流
   ◀──SSE mml_task_completed (最终)
 ```
 
@@ -209,7 +257,11 @@ catch (e) {
 | ADD | AddObject (+ optional SPV) | **复合 ADD**：单 statement = 2 commands。entry[0] AddObject；entry[1] SPV 含 `.{NEW}.` 占位待 Sequencer 替换 |
 | RMV | DeleteObject | parameters["object_name"] = TargetObject + Index（单实例，2026-05-20 用户决策） |
 
-- 多 statement → `sequential=true`；单 statement → 并发（行 124）
+- **`sequential` 标志**（行 124）：`sequential := len(commands) > 1`
+  - **不是 sequential vs parallel 的整体选择**，而是 Fanouter 的入队策略：
+    - `sequential=true`：Fanouter 只入队每个设备的 cmd_idx=0，剩下的等 Sequencer 在终态回调里入下一条
+    - `sequential=false`：所有 cmd 一次性入队
+  - **跨设备永远并行**：设备 A 和 B 的命令链在 Redis 是各自独立的 `acs:taskq:{sn_A}` / `acs:taskq:{sn_B}`，ACS 也是每个 CPE Inform 独立处理
 
 #### 3.3.3 路径翻译（R-9.3）
 `PathTranslator` 接口（service.go:57-62）按 `(productClass, softwareVersion)` 把 `standardPath` → `privatePath`：
@@ -218,70 +270,185 @@ catch (e) {
 - 未命中时 passthrough（**已知短板**：无告警，见 §6）
 - 详细策略：参 [omcgo/CLAUDE.md §5.3](../../omcgo/CLAUDE.md)
 
-#### 3.3.4 持久化 + 派发
+### 3.4 Task 创建 + 派发（App）
+
 `service.go:858-936` `CreateAndFanoutTask`：
 
 | 步骤 | 操作 |
 |---|---|
-| 1 | INSERT `mml_tasks` 主表（id, device_sns[], commands JSON, status='pending', executor, ...） |
+| 1 | INSERT `mml_tasks` 主表（id, device_sns[], commands JSON, status='pending', executor, source=mml, source_id=…, ...） |
 | 2 | `Fanouter.Fanout` 展开 M command × N device = M·N `device_tasks` 行 |
-| 3 | sequential=true：只入队 cmd_idx=0；其余等 Sequencer 推 |
-| 4 | sequential=false：全部入队，跨设备并发 |
-| 5 | 写 `mml_audit_logs` 每 statement 一行 |
-| 6 | Redis：`acs:taskq:{sn}` ZADD（score=priority）<br>`acs:task:{taskID}` HSET 详情<br>`acs:cwmp2task:{hash}` 映射 CWMP ID → task |
+| 3 | sequential=true：每设备只入队 cmd_idx=0；其余等 Sequencer 推 |
+| 4 | sequential=false：所有 cmd 一次性入队 |
+| 5 | 写 `mml_audit_logs` 每 statement 一行（合规） |
+| 6 | Redis 双写：<br>· `acs:taskq:{sn}` ZADD（score = `priority × 1e13 + created_at_ns`，小者先出）<br>· `acs:task:{taskID}` HSET 详情（TTL 24h）<br>· Redis 失败时**回滚 PG**保证最终一致 |
 
-#### 3.3.5 Sequencer
-`sequencer.go:1-99` 实现多 cmd 严格序列：
-- 监听 `CompletionRouter` 派发的 `OnTaskCompleted` 回调
+#### Sequencer（多 cmd 串联）
+`sequencer.go:1-99` 实现同设备多 cmd 严格序列：
+- 订阅 `CompletionRouter` 派发的 `OnTaskCompleted`
 - device_task 终态时查 `mml_task.Commands[cmd_idx+1]`，构造下一条 device_task 并 enqueue
 - 跨设备并行：设备 A 与 B 的命令链各自独立推进；同设备内部严格序列
 - **AddObject response 的 `instance_number`** 被 Sequencer 提取，替换下一条命令的 `.{NEW}.` 占位（行 100+）
 
-### 3.4 ACS 南向下发
+### 3.5 ACS 南向下发（CPE-Inform 驱动）
 
-ACS 进程（`omcgo/cmd/acs/main.go`）后台 Poller 周期 ZRANGE 取 task：
+> **关键认知**：TR-069 是 CPE-initiated 协议。ACS 没有后台 Poller / Ticker / cron 去拉队列。**`PopTask` 完全是被动调用** —— 必须等 CPE 主动 SOAP HTTP POST 进来时（开了 session）才能在响应体里塞下一条 RPC。
 
-| 阶段 | 文件:行 | 说明 |
+#### 3.5.1 三个 PopTask 调用点（handler.go）
+
+| 行 | 入口 | 触发条件 |
 |---|---|---|
-| 取队列 | `cmdqueue/...` | `acs:taskq:{sn}` ZRANGE 取最老 task ID |
-| 会话 | `session.go:58-92` | 状态机 IDLE → INFORM_RECEIVED → PROCESSING → RPC_PENDING → RPC_RESPONSE → COMPLETE |
-| 模板 | `rpc/dispatcher.go:33-80` | 按 device_task.Method 路由到 GetParameterValues / SetParameterValues / AddObject / DeleteObject |
-| 下发 | `pkg/soap` | text/template 预渲染（避免反射开销）→ net/http POST SOAP |
-| CWMP ID 关联 | `dispatcher.go:78` | `cmd.CWMPID = cwmpID` 用于 response 回填查找 task |
+| **565** | `HandleEmpty` | CPE 在已有会话中发空 POST（想结束会话），ACS 看队列还有任务就再发一条 |
+| **772** | `HandleInform` | CPE 上报 Inform 进入会话，ACS 拉队列下发首条 RPC |
+| **1084** | `HandleSOAPFault` response 处理 | CPE 上一条 RPC 响应 fault 后，ACS 尝试 pop 下一条继续 |
 
-**Connection Request**（可选）：`task/service.go:92` `SetConnectionRequester`
-- CreateTask 后异步 wake：DNS lookup device IP + HTTP GET CR
-- 让 CPE 主动 Inform 缩短首包延迟
-- 不支持 CR 的设备会等下一次 PERIODIC Inform 才被拉走（默认数十秒~数分钟）
+三处 PopTask 代码骨架一致：
+```go
+taskItem, err := h.taskService.PopTask(r.Context(), deviceSN)  // ZRANGEBYSCORE + ZREM atomic
+if taskItem != nil {
+    cwmpID := task.GenerateCWMPID(taskItem.Method)
+    h.taskService.MarkTaskSent(r.Context(), taskItem.ID, cwmpID)  // 写 acs:cwmp2task:{cwmpID} = taskID (TTL 24h)
+    session.State = StateRPCPending
+    session.LastTaskID = taskItem.ID
+    session.LastTaskCWMPID = cwmpID
+    cmd := &rpc.Command{ID: taskItem.ID, Method: taskItem.Method, Params: taskItem.Params, ...}
+    respData, _ := h.rpcDispatcher.BuildRequest(cmd, cwmpID)  // 渲染 SOAP 模板
+    h.sendSOAPResponse(w, respData, log)  // 直接写回当前 HTTP response
+}
+```
 
-**device_task 状态演进**：pending → dispatched → completed / failed / expired
+#### 3.5.2 会话状态机
+`session.go:58-92`：IDLE → INFORM_RECEIVED → PROCESSING → RPC_PENDING → RPC_RESPONSE → COMPLETE → IDLE
 
-### 3.5 结果回流 + 事件
+每次 PopTask 成功后 → `session.State = StateRPCPending`，等 CPE 下一次 POST（带 RPC response）。
 
-| 阶段 | 进程 | 操作 |
-|---|---|---|
-| 1. SOAP response 解析 | ACS | 把 result/fault 写回 `device_tasks.result/error_message/completed_at` |
-| 2. 事件发布 | ACS | `eventBus.Publish("task.completed"/"task.failed"/"task.expired")`（NATS subject） |
-| 3. 路由分发 | App | `CompletionRouter` 订阅，dispatch 给两路： |
-| 3a. Sequencer | App | `sequencer.go:100` 推进同设备下一个 cmd_idx |
-| 3b. ResultAggregator | App | `result_aggregator.go:40-114` 聚合统计 |
-| 4a. SSE per-frame | App | 每 device_task 终态 → `hub.PublishSimple(executor, "mml_device_frame", {task_id, device_sn, status, result})` |
-| 4b. SSE 终态 | App | 全部 device 完成 → `finalizeIfComplete()` (`result_aggregator.go:172`) → `"mml_task_completed"` |
-| 5. SSE 推流 | App | `events/handler.go:40-114` `GET /events/stream` for-select 写 SSE + 30s keepalive + Last-Event-ID replay |
-| 6. 浏览器接收 | Browser | `EventSource` 事件 listener → `appendLine` → `TerminalPanel` 增量渲染 |
+#### 3.5.3 SOAP 模板渲染
+`rpc/dispatcher.go:33-80`：按 `device_task.Method`（GetParameterValues / SetParameterValues / AddObject / DeleteObject）路由到对应 handler，用 `text/template` 预编译模板渲染（避免反射开销）。
 
-**MessageHub 设计**（events/hub.go）：
-- 维护 per-user channel map（key = username）
-- 同用户多 tab 共享 channel
-- 切角色后 `hub.Unsubscribe` 立刻清流
+#### 3.5.4 Connection Request（加速主动推送）
+TR-069 协议规定 ACS 可向 CPE 发 HTTP GET 触发 CPE 立刻 Inform，避免等 PERIODIC（默认数十秒到数分钟）：
+- `task.TaskService.SetConnectionRequester` 注入 CR sender
+- CreateTask 后异步 `wakeDevice(sn)`：从 `acs:connreq:pending:{sn}` 30s 去重 → DNS lookup device IP → HTTP GET CR
+- **CR 不是另一条派发路径**，只是把"等 CPE 自然 Inform"加速；不支持 CR 的设备仍要等 PERIODIC
 
-### 3.6 横切关注
+#### 3.5.5 device_task 状态演进
+`pending → sent → completed / failed / expired`
+- sent：ACS Pop 后 MarkTaskSent
+- completed/failed：CPE 返响应后 ACS MarkTaskCompleted/Failed
+- expired：Pop 时发现 `ExpiresAt < now` → 跳过并 MarkTaskFailed(errorCode=expired)
 
-| 维度 | 实现 | 说明 |
-|---|---|---|
-| 链路追踪 | `Tracing` middleware → `logger.L(ctx)` 注 trace_id 进 zap（T-0157） | Grafana Tempo → Loki 一键跳 |
-| 审计 | `service.go:1039-1070` `writeAuditLogs` | 每 statement 一行，符合电信合规精度要求 |
-| 限流 | 全局 per-IP 100/s + 200 burst | MML 路径无额外限流，依赖 ACS 设备级 Inform 洪泛防护 |
+### 3.6 结果回流（NATS TASK stream）
+
+> v1.0 这一段画错了：以为 ACS 直接调用 APP 进程的 CompletionRouter。实际是**跨进程经 NATS JetStream TASK stream**。
+
+#### 3.6.1 ACS 侧：MarkTask*** → notifyCompletion → Publish
+
+```
+ACS handler 收到 CPE 响应:
+  解析 SOAP response → 按 cwmp2task:{cwmpID} 反查 taskID
+  ↓
+TaskService.MarkTaskCompleted(taskID, result)  service.go:307
+  或 MarkTaskFailed(taskID, code, msg)         service.go:340
+  ↓
+内部均调 s.notifyCompletion(ctx, task)  service.go:687
+  ↓
+过滤：if task.SourceID == "" && task.CreatorID == "" → return  (service.go:692)
+  ↓ 关键过滤：匿名/临时任务不广播，避免占用 NATS 带宽
+  ↓ MML 任务的 source_id = mml_tasks.id ⇒ 必然广播
+  ↓
+subject := SubjectForStatus(task.Status)  // task.completed / task.failed
+EventBus.Publish(ctx, subject, evt)
+```
+
+> v1.0 错误：没说这条 Publish 是跨进程的。`EventBus` 在生产是 NATSEventBus → 写入 NATS JetStream `TASK` stream 持久化 72h。
+
+#### 3.6.2 APP 侧：task-completion-bridge QueueGroup 订阅
+
+`event_bridge.go:38-62` `CompletionEventBridge.Subscribe`：
+```go
+subjects := map[string]string{
+    event.SubjectTaskCompleted: "task-completion-bridge-completed",
+    event.SubjectTaskFailed:    "task-completion-bridge-failed",
+}
+for subject, queue := range subjects {
+    handler := b.handle  // 内部调 router.Dispatch(ctx, task)
+    if b.deduper != nil {
+        handler = b.deduper.Wrap("task-completion-bridge", handler)  // 防 NATS 重投双发
+    }
+    bus.QueueSubscribe(subject, queue, handler)
+}
+```
+
+**关键细节**：
+- `QueueSubscribe` 保证多 APP 副本部署时每条事件只被一个副本消费（NATS QueueGroup 语义）
+- `deduper.Wrap` 在 NATS InterestPolicy 下重投时去重，避免 ResultAggregator 双重计数（mml_tasks.success_count++ 两次）
+- `task.completed` 和 `task.failed` 用**不同的 QueueGroup name**，独立游标互不干扰
+
+#### 3.6.3 CompletionRouter 按 source 路由
+`completion_router.go:70` `Dispatch(ctx, t)`：
+- 按 `t.Source`（"mml" / "provision" / "backup" / ...）查注册表
+- 当前只注册了 `mml.ResultAggregator`（其他 source 走 UnknownHandler.warn）
+- 未来扩展只需 `router.Register(source, handler)`
+
+#### 3.6.4 ResultAggregator 聚合 + SSE
+`result_aggregator.go:40-114` `OnTaskCompleted`：
+1. UPDATE `mml_tasks.success_count++` 或 `failed_count++`（IncrementStats）
+2. `hub.PublishSimple(executor, "mml_device_frame", payload)` — 每 device_task 终态一帧
+3. `finalizeIfComplete()` 行 116-172：done==total 时把 `mml_tasks.status` 置 completed/failed/partial → `hub.PublishSimple("mml_task_completed", payload)`
+
+#### 3.6.5 SSE 推流
+`events/handler.go:40-114` `GET /events/stream`：
+- 认证后 `hub.Subscribe(username)` 得到 per-user channel
+- for-select 写 SSE：`event: <name>\ndata: <json>\n\n` + 30s keepalive
+- Last-Event-ID replay：客户端断线重连指定 ID，hub 从缓冲区回放
+- 浏览器 `EventSource` 监听器 → `appendLine` → `TerminalPanel` 增量渲染
+
+### 3.7 可靠性兜底机制
+
+> v1.0 漏写了整段。这套机制覆盖了"ACS 崩溃 / NATS 短连断 / Worker 重启 / CPE 异常重启"等 4 类异常恢复。
+
+#### 3.7.1 NATS 重投 + 死信
+所有 `QueueSubscribe` 共享 wrapHandler（`nats_bus.go:105`）：
+
+| 阶段 | 处理 |
+|---|---|
+| Unmarshal 失败 | `msg.Term()` — 视为永久错误，不重试 |
+| Handler 返回 error & 投递次数 < 5 | `msg.NakWithDelay(2^(n-1) s)` — 1s / 2s / 4s / 8s / 16s 递增退避 |
+| 投递次数 >= 5 | `msg.Term()` — 视为死信终止，记 metrics |
+| Handler 成功 | `msg.Ack()` |
+
+业务关键链路（如告警抬升）通过**多订阅者冗余**缓解死信导致的丢失。`task-completion-bridge` 上游有 `deduper.Wrap` 防重投双发。
+
+#### 3.7.2 Worker 启动幂等补灌
+`task/service.go:526` `RestorePendingQueues(ctx, limit)`：
+- 调用方：`cmd/worker/main.go:79` 在 Worker 启动后立刻调用，limit=0 表示无限制
+- 扫 PG `device_tasks WHERE status='pending'`
+- 对每条做 `ZSCORE acs:taskq:{sn} task.id` 判存 — **不在才 Push**
+- 多 Worker / 多次重启幂等，不会重复入队
+- 用于：Redis 重启丢数据后从 PG 重新灌回；新 Worker 副本启动接手老积压
+
+#### 3.7.3 RecoverPendingTasks（设计文档建议；当前未挂线）
+`task/service.go:458` `RecoverPendingTasks(ctx, deviceSN)`：
+- 设计意图：CPE 每次 Inform 时由 ACS 调用，扫该设备所有 `status=sent` 且 `sent_at > 5min` 的僵死任务，按 `CanRetry()` 重置 pending / failed
+- **当前实际状态**：函数与单测（`service_pg_test.go:341`）已实现，但 `internal/acs/handler.go` 中**没有调用点**（grep 验证）
+- 队列文档 §4.3.2 描述的是设计目标；实际是 P1 缺口，建议补回 ACS Inform handler 调用
+
+#### 3.7.4 task-reboot-closer（Worker 兜底闭环）
+`task/reboot_closer.go`（队列文档 §6.4）：
+- Worker 订阅 `device.inform.reboot_complete`，QueueGroup=`task-reboot-closer`
+- Inform 含 `M Reboot` 时扫 PG `method IN (Reboot, FactoryReset) AND status IN (pending, sent)` → 主动 `MarkTaskCompleted`
+- 解决"CPE 重启后老 Reboot 任务永不应答"的悬挂问题
+- 与 `device-mgr-reboot` QueueGroup 共享同一 Subject 但独立消费
+
+#### 3.7.5 双写一致性
+`CreateTask` 流程：PG INSERT 成功 → Redis ZADD/HSET 成功 → return；Redis 失败时**显式回滚 PG**（DELETE 刚 INSERT 的行）保证 PG = Redis 最终一致。Redis pipeline 内 ZADD + HSET 也是 atomic。
+
+#### 3.7.6 优雅降级
+| 条件 | 表现 |
+|---|---|
+| `cfg.NATS.URL == ""` | `NewEventBus` 返回 `ChannelEventBus` 进程内通配实现，订阅/发布 API 不变，牺牲跨进程能力 |
+| `EventBus == nil`（单测） | `notifyCompletion` 退回同进程 callback；Casbin Watcher 退化 no-op |
+| Redis 短暂失败 | `redisx.Retry` 对非关键读操作自动重试 3 次后放弃；写操作回滚 PG |
 
 ---
 
@@ -304,33 +471,56 @@ T7    BuildStatementCommands (RPC 展开)                 App             consol
 T8    PathTranslator standardPath→privatePath           App             parammodel translator
 T9    INSERT mml_tasks + device_tasks                   App             service.go:890
 T10   Fanouter 扇出（sequential? cmd_idx=0 only）       App             fanout.go
-T11   Redis ZADD acs:taskq:{sn}                         App             task/queue
-T12   响应 201 + MMLTask                                App→Browser     console_handler.go:390
-T13   信封剥壳 ret=1 → data                             Browser         http.ts:108
-T14   setCurrentTaskId + appendLine "已派发"            Browser         RightPanel.tsx:183-191
+T11   Redis ZADD acs:taskq:{sn} + HSET acs:task:{id}    App             task/queue
+      (双写：失败回滚 PG)
+T12   (可选) wakeDevice → HTTP GET Connection Request   App→CPE         task/service.go:92
+       让 CPE 立刻 Inform（30s 去重 acs:connreq:pending）
+T13   响应 201 + MMLTask                                App→Browser     console_handler.go:390
+T14   信封剥壳 ret=1 → data                             Browser         http.ts:108
+T15   setCurrentTaskId + appendLine "已派发"            Browser         RightPanel.tsx:183-191
        message.success                                  Browser         RightPanel.tsx:192
-T15   EventSource(/events/stream?token=)                Browser→App     useMmlTaskStream.ts:193
+T16   EventSource(/events/stream?token=)                Browser→App     useMmlTaskStream.ts:193
        hub.Subscribe(username)                          App             events/handler.go:46
-══════════════════════════════════════════════════════════════════════ 异步分界
-T16   Poller ZRANGE / 取 device_task                    ACS             cmdqueue (background)
-T17   Session IDLE→PROCESSING→RPC_PENDING               ACS             session.go:64
-T18   Dispatcher → SOAP 模板渲染                        ACS             rpc/dispatcher.go:33
-T19   net/http POST SOAP                                ACS→CPE
-T20   CPE response                                      CPE→ACS
-T21   解析 + 写回 device_tasks.result                   ACS             pg writer
-T22   eventBus.Publish(task.completed)                  ACS             NATS subject
-T23   CompletionRouter dispatch                         App             completion_router.go
-       ├ Sequencer.OnTaskCompleted                      App             sequencer.go:100
-       │  └ enqueue cmd_idx+1 / sub .{NEW}.             App
-       └ ResultAggregator.OnTaskCompleted               App             result_aggregator.go:40
-          └ hub.PublishSimple("mml_device_frame", …)    App             result_aggregator.go:82
-T24   SSE 帧 → 浏览器                                   App→Browser     events/handler.go:90
-T25   useMmlTaskStream 监听器 appendLine                Browser         useMmlTaskStream.ts:206
-       TerminalPanel 增量渲染                           Browser
-T26   重复 T16~T25 直到所有 device 完成
-T27   finalizeIfComplete → mml_task_completed           App             result_aggregator.go:172
-T28   SSE 终态帧 → 浏览器写汇总行                       App→Browser     useMmlTaskStream.ts:235
+══════════════════════════════════════════════════════════════════════ 异步分界（等 CPE）
+T17   CPE 发 SOAP Inform (PERIODIC / CR 触发)           CPE→ACS         net/http POST
+T18   ACS HandleInform 进入 SOAP handler                ACS             handler.go:772
+T19   PopTask: ZRANGEBYSCORE + ZREM atomic              ACS             task/queue
+T20   MarkTaskSent + 写 acs:cwmp2task:{cwmpID}=taskID   ACS             handler.go:573
+       Session.State = RPC_PENDING                                      session.go
+T21   rpcDispatcher.BuildRequest → SOAP 模板渲染        ACS             rpc/dispatcher.go:33
+T22   sendSOAPResponse 把 SOAP 写入当前 HTTP response   ACS→CPE         handler.go:618
+T23   CPE 解析 SOAP → 处理 RPC → 返响应 (新 POST)       CPE→ACS
+T24   ACS HandleResponse 解 SOAP → 按 cwmp_id 反查 task ACS             handler.go
+T25   MarkTaskCompleted(taskID, result)                 ACS             service.go:307
+       UPDATE device_tasks SET status='completed', ...                  pg writer
+T26   notifyCompletion: if SourceID||CreatorID 非空 →   ACS             service.go:687
+       EventBus.Publish(SubjectTaskCompleted, evt)
+─────────────────────────────────────── 跨进程 NATS JetStream "TASK" stream（持久化 72h）─────
+T27   APP QueueSubscribe("task-completion-bridge-       App             event_bridge.go:49
+       completed").handler.invoke
+T28   deduper.Wrap 防 NATS 重投双发                     App             event_bridge.go:54
+T29   CompletionRouter.Dispatch(task)                   App             completion_router.go:70
+       按 task.Source==mml 路由
+T30   ResultAggregator.OnTaskCompleted                  App             result_aggregator.go:40
+       ├ Sequencer 推 cmd_idx+1（若 sequential 且未完）App             sequencer.go:100
+       │  └ AddObject result.instance_number → 替换下一条 .{NEW}.
+       ├ UPDATE mml_tasks.success_count++              App
+       └ hub.PublishSimple(executor, "mml_device_frame", data)
+T31   events/handler.go for-select 写 SSE 帧            App→Browser     events/handler.go:90
+T32   useMmlTaskStream listener → appendLine            Browser         useMmlTaskStream.ts:206
+       TerminalPanel 增量渲染
+T33   重复 T17~T32 直到所有 device 完成
+T34   finalizeIfComplete → mml_task_completed           App             result_aggregator.go:172
+       UPDATE mml_tasks.status = 'completed'/'partial'/'failed'
+T35   SSE 终态帧 → 浏览器写汇总行                       App→Browser     useMmlTaskStream.ts:235
 ```
+
+**异常恢复点**：
+- T19 PopTask 时若发现 task.ExpiresAt < now → 跳过并 MarkTaskFailed(expired)
+- T26 NATS Publish 失败 → 5 次重投退避 → 死信 + metrics
+- T27 多 APP 副本：QueueGroup 保证一条事件只被一个副本消费
+- Worker 启动：`RestorePendingQueues` 从 PG 把 pending 行补灌回 Redis（幂等）
+- CPE 重启：`task-reboot-closer` 闭环关掉 Reboot/FactoryReset 老任务
 
 ---
 
@@ -339,15 +529,22 @@ T28   SSE 终态帧 → 浏览器写汇总行                       App→Browse
 | # | 决策 | 代码位置 | 设计理由 |
 |---|---|---|---|
 | 1 | **HTTP 201 ≠ 执行完成**，只表示已派发 | `console_handler.go:390` | 异步任务模型；前端拿到 task_id 后再订阅 SSE 拿实时结果 |
-| 2 | **standardPath / privatePath 双向翻译** | `parammodel.Translator` | 解耦上层（IETF/TR-181 标准路径）与下层（厂商专有路径），新厂商接入只配映射不改业务 |
-| 3 | **Sequential vs Parallel 按 statement 数自动判定** | `console_executor.go:124` | 单 statement 跨设备并发；多 statement 严格序列保证依赖（如 ADD→SPV 必须等 NEW instance number） |
-| 4 | **Fanouter + Sequencer 解耦** | `fanout.go` + `sequencer.go:100` | Fanouter 一次性扇出 M×N device_tasks 简化模型；sequencer 仅在 sequential 时按完成回调推进，避免硬编码协程依赖 |
-| 5 | **SSE 而非 WebSocket** | `events/handler.go` | 单向推送 + 浏览器原生 EventSource + 30s keepalive + Last-Event-ID 回放足够，避免 WS 心跳/重连复杂度 |
-| 6 | **MessageHub per-user channel** | `events/hub.go` | executor=username 作为路由 key；同用户多 tab 共享 channel；切角色后 `hub.Unsubscribe` 立刻清流 |
-| 7 | **审计每 statement 一行** | `service.go:1039` | 符合电信合规：精细到操作命令而非任务级粒度 |
-| 8 | **Tracing 跨进程**：trace_id 注入 zap + Tempo → Loki 跳转 | `logger.L(ctx)` + T-0157 | 排错时一条 trace 串起 Browser→App→ACS→CPE→ResultAggregator→SSE |
-| 9 | **structuredStmtToBackend 显式 snake_case** | `mmlApi.ts:1142-1157` | 避开 axios 拦截器对 `instanceIndices` 等驼峰字段的误伤 |
-| 10 | **"已派发" seed 行** | `RightPanel.tsx:184-191` | execute API 返回即刻 appendLine，不等 SSE 首帧，消除"派发后死寂"体感 |
+| 2 | **ACS 完全被动**，没有后台 Poller | `handler.go:565/772/1084` | TR-069 是 CPE-initiated 协议；ACS 只能在 SOAP handler 内同步 Pop |
+| 3 | **Redis ZSET TaskQ + PG 双写** | `task/service.go CreateTask` | Redis 低延迟出队，PG 持久化供启动恢复；Redis 失败回滚 PG 保证一致 |
+| 4 | **NATS JetStream + QueueGroup** 回流 | `event_bridge.go:49` | 跨进程 At-Least-Once + 多 APP 副本负载均衡；持久化 72h 可回放 |
+| 5 | **deduper 包 QueueSubscribe** | `event_bridge.go:54` | 防 NATS 重投导致 ResultAggregator 双重计数 |
+| 6 | **notifyCompletion source 过滤** | `service.go:692` | 匿名 / 临时任务（SourceID 与 CreatorID 都空）跳过广播，节省 NATS 带宽 |
+| 7 | **standardPath / privatePath 双向翻译** | `parammodel.Translator` | 上层 IETF/TR-181 标准路径，下层厂商专有路径解耦；新厂商接入只配映射 |
+| 8 | **`sequential` 仅控同设备序列，跨设备永远并发** | `console_executor.go:124` + `sequencer.go:100` | 同设备多 cmd 严格序列（AddObject→SPV 等依赖）；跨设备独立 Redis 队列 |
+| 9 | **Fanouter + Sequencer 解耦** | `fanout.go` + `sequencer.go` | Fanouter 仅入队 cmd_idx=0；sequencer 在终态回调里推下一步，避免硬编码协程依赖 |
+| 10 | **SSE 而非 WebSocket** | `events/handler.go` | 单向推送 + 浏览器原生 EventSource + 30s keepalive + Last-Event-ID 回放 |
+| 11 | **MessageHub per-user channel** | `events/hub.go` | executor=username 路由 key；多 tab 共享；切角色 Unsubscribe 立刻清流 |
+| 12 | **审计每 statement 一行** | `service.go:1039` | 符合电信合规：精细到操作命令而非任务级粒度 |
+| 13 | **NATS 重投 + 死信** | `nats_bus.go:105` | 5 次重投退避 + `msg.Term()` 死信；关键链路靠多订阅者冗余 |
+| 14 | **三道兜底机制** | RestorePendingQueues / RecoverPendingTasks / task-reboot-closer | 覆盖 Worker 重启 / CPE 异常 / 任务僵死三类场景 |
+| 15 | **Tracing 跨进程** | `logger.L(ctx)` + T-0157 | trace_id 注 zap + Tempo → Loki 一键跳，排错串起 Browser→App→NATS→ACS→CPE |
+| 16 | **structuredStmtToBackend 显式 snake_case** | `mmlApi.ts:1142-1157` | 避开 axios 拦截器对 `instanceIndices` 等驼峰字段的误伤 |
+| 17 | **"已派发" seed 行** | `RightPanel.tsx:184-191` | execute API 返回即刻 appendLine，不等 SSE 首帧，消除"派发后死寂"体感 |
 
 ---
 
@@ -355,15 +552,16 @@ T28   SSE 终态帧 → 浏览器写汇总行                       App→Browse
 
 | 项 | 位置 | 风险 / 建议 |
 |---|---|---|
+| **RecoverPendingTasks 未挂线** | `task/service.go:458` + `acs/handler.go`（无调用点） | 队列文档 §4.3.2 描述了 CPE Inform 触发僵死任务恢复，但实际 ACS handler 没调；当前依赖 Worker 重启时的 RestorePendingQueues 兜底。建议在 `HandleInform` 行 772 PopTask 前补一次 RecoverPendingTasks 调用 |
 | **422 unknown_paths 没专门 UI 处理** | `RightPanel.tsx:194` | 用户只看到通用 toast；建议加 modal 列出失败 path + 引导排查 |
 | **utils/toast.ts 仍用静态 message** | `utils/toast.ts:1` | 调用方在嵌套 portal/Tabs 内可能仍丢 toast（30+ 文件未迁），已知技术债 |
-| **buildTaskName 默认 zh-CN，未根据用户 i18n 偏好** | `RightPanel.tsx:173` | 英文用户也得"查询 …"中文任务名；改 i18n locale 注入即可 |
-| **任务名为空时后端兜底用 `MML console (X stmts × Y devices)`** | `console_executor.go:103` | 排查时不直观；前端 buildTaskName 永远非空所以理论不触发 |
-| **路径翻译失败时 passthrough** | `parammodel translator` | 没有显式告警；用户排查会 confused "为啥下发的 path 跟我选的不一样" |
-| **Connection Request 是可选的** | `task/service.go:92` | 若设备不支持或 IP 探测失败，task 要等下一个 PERIODIC Inform 才被拉走（默认 inform_interval 可能数十秒到数分钟） |
-| **Sequencer 单点 risk** | `sequencer.go` | 若 sequencer 重启时正好有同设备的 cmd_idx=0 完成，cmd_idx=1 入队可能丢；需 reconcile 机制（未深入验证，建议补 reconciler） |
-| **SSE 重连机制** | `useMmlTaskStream.ts` | EventSource 自带自动重连，但 Last-Event-ID 回放依赖 hub 的 buffer 大小，长时间断网 + 大流量任务可能漏帧 |
-| **历史"查询 查询..."task_name 数据未清** | DB | commit `21c4d027` 修了源代码但 DB 历史 task_records 仍保留旧名；属历史档案，可不清 |
+| **buildTaskName 默认 zh-CN** | `RightPanel.tsx:173` | 英文用户也得"查询 …"中文任务名；改 i18n locale 注入即可 |
+| **路径翻译失败时 passthrough** | `parammodel translator` | 没有显式告警；用户排查会 confused"为啥下发的 path 跟我选的不一样"；建议加 trace span event + metrics counter |
+| **Connection Request 是可选的** | `task/service.go:92` | 若设备不支持 CR 或 IP 探测失败，task 要等下一个 PERIODIC Inform 才被拉走（默认 inform_interval 数十秒~数分钟） |
+| **SSE 重连机制依赖 hub buffer** | `useMmlTaskStream.ts` + `events/store.go` | EventSource 自带自动重连，但 Last-Event-ID 回放依赖 hub 的 buffer 大小，长时间断网 + 大流量任务可能漏帧 |
+| **Sequencer 单点 risk** | `sequencer.go` | 若 sequencer 进程重启时正好有同设备 cmd_idx=0 完成，cmd_idx=1 入队可能丢；需要 reconciler 扫 PG `device_tasks WHERE status=completed AND mml_task 还有下一步` 兜底，建议补 |
+| **历史 task_records "查询 查询..." 旧数据** | DB | commit `21c4d027` 修源代码，DB 历史不动；属历史档案，可不清 |
+| **task-completion-bridge deduper 缓存窗口** | `event_bridge.go:54` | deduper 窗口期内（默认 5 min？需查实现）能防重；超出窗口的 NATS 重投会双发，依赖 ResultAggregator 业务层自身幂等 |
 
 ---
 
@@ -390,7 +588,7 @@ T28   SSE 终态帧 → 浏览器写汇总行                       App→Browse
 | mml_task_completed listener | `omcmb/frontend-core/src/hooks/api/useMmlTaskStream.ts` | 235-257 |
 | CommandTree.loadCommand | `omcmb/webcode/src/pages/mml/Console/components/CommandTree.tsx` | 588-630 |
 
-### 后端
+### 后端 — 请求入站 + 编译
 
 | 功能 | 文件 | 行号 |
 |---|---|---|
@@ -406,24 +604,64 @@ T28   SSE 终态帧 → 浏览器写汇总行                       App→Browse
 | ExecuteStatements | `omcgo/internal/mml/console_executor.go` | 81-137 |
 | BuildStatementCommands | `omcgo/internal/mml/console_executor.go` | 150+ |
 | sequential 判定 | `omcgo/internal/mml/console_executor.go` | 124 |
+
+### 后端 — 持久化 + Redis 派发
+
+| 功能 | 文件 | 行号 |
+|---|---|---|
 | CreateAndFanoutTask | `omcgo/internal/mml/service.go` | 858-936 |
 | writeAuditLogs | `omcgo/internal/mml/service.go` | 1039-1070 |
 | Fanouter | `omcgo/internal/mml/fanout.go` | — |
 | Sequencer | `omcgo/internal/mml/sequencer.go` | 1-99 + 100+ |
-| TaskService.CreateTask + CR | `omcgo/internal/task/service.go` | 92-176 |
+| TaskService.CreateTask | `omcgo/internal/task/service.go` | 127-176 |
+| TaskService.notifyCompletion | `omcgo/internal/task/service.go` | 687-720 |
+| 发布过滤 (SourceID && CreatorID) | `omcgo/internal/task/service.go` | 692 |
+
+### 后端 — ACS（CPE-Inform 驱动）
+
+| 功能 | 文件 | 行号 |
+|---|---|---|
+| PopTask in HandleEmpty | `omcgo/internal/acs/handler.go` | 565 |
+| PopTask in HandleInform | `omcgo/internal/acs/handler.go` | 772 |
+| PopTask in HandleSOAPFault | `omcgo/internal/acs/handler.go` | 1084 |
+| ConnectionRequester 接口 | `omcgo/internal/acs/handler.go` | 39-45 |
+| ConnectionRequestURL 缓存 | `omcgo/internal/acs/handler.go` | 89, 421-425 |
 | ACS RPC dispatcher | `omcgo/internal/acs/rpc/dispatcher.go` | 33-80 |
 | ACS session 状态机 | `omcgo/internal/acs/session.go` | 58-92 |
-| ResultAggregator | `omcgo/internal/mml/result_aggregator.go` | 40-114 |
+| MarkTaskCompleted | `omcgo/internal/task/service.go` | 305-310 |
+| MarkTaskFailed | `omcgo/internal/task/service.go` | 338-342 |
+
+### 后端 — 回流 NATS / Bridge / Aggregator
+
+| 功能 | 文件 | 行号 |
+|---|---|---|
+| CompletionEventBridge | `omcgo/internal/task/event_bridge.go` | 22-65 |
+| QueueGroup 配置 | `omcgo/internal/task/event_bridge.go` | 49-50 |
+| deduper.Wrap | `omcgo/internal/task/event_bridge.go` | 53-54 |
+| CompletionRouter.Dispatch | `omcgo/internal/task/completion_router.go` | 70-99 |
+| CompletionRouter.Register | `omcgo/internal/task/completion_router.go` | 50-60 |
+| ResultAggregator.OnTaskCompleted | `omcgo/internal/mml/result_aggregator.go` | 40-114 |
 | finalizeIfComplete | `omcgo/internal/mml/result_aggregator.go` | 116-172 |
+| MessageHub.PublishSimple | `omcgo/internal/events/hub.go` | — |
 | SSE handler | `omcgo/internal/events/handler.go` | 40-114 |
-| MessageHub | `omcgo/internal/events/hub.go` | — |
+
+### 后端 — 兜底机制
+
+| 功能 | 文件 | 行号 |
+|---|---|---|
+| RestorePendingQueues（Worker 启动） | `omcgo/internal/task/service.go` | 526+ |
+| RestorePendingQueues 调用方 | `omcgo/cmd/worker/main.go` | 79 |
+| RecoverPendingTasks（未挂线） | `omcgo/internal/task/service.go` | 458-470 |
+| GetStaleSentTasks (5min 阈值) | `omcgo/internal/task/service.go` | 460 |
+| task-reboot-closer | `omcgo/internal/task/reboot_closer.go` | — |
+| NATS 重投 wrapHandler | `omcgo/internal/core/event/nats_bus.go` | 105+ |
 
 ### 数据库表
 
 | 表 | 用途 |
 |---|---|
-| `mml_tasks` | 任务主表（id, device_sns[], commands JSON, status, executor, ...） |
-| `device_tasks` | 每设备每命令一行（source_id→mml_task.id, device_sn, command_index, method, result, ...） |
+| `mml_tasks` | 任务主表（id, device_sns[], commands JSON, status, executor, source, source_id, ...） |
+| `device_tasks` | 每设备每命令一行（source_id→mml_task.id, device_sn, command_index, method, result, status, sent_at, ...） |
 | `mml_audit_logs` | 每 statement 一行（user_id, statement, op, values, status） |
 | `mml_commands` | 命令字典（含 logical_name_i18n） |
 | `mml_sub_fields` | 子字段字典（含 tr069_path, value_type, access_type, change_applies） |
@@ -432,10 +670,21 @@ T28   SSE 终态帧 → 浏览器写汇总行                       App→Browse
 
 | Key 模板 | 类型 | TTL | 用途 |
 |---|---|---|---|
-| `acs:taskq:{sn}` | Sorted Set | — | per-device 任务队列，member=taskID，score=priority |
+| `acs:taskq:{sn}` | Sorted Set | 无 | per-device 任务队列，member=taskID，score = `priority × 1e13 + created_at_ns` |
 | `acs:task:{taskID}` | Hash | 24h | device_task 完整内容 |
-| `acs:cwmp2task:{cwmpHash}` | String | 24h | CWMP ID → Task ID 映射 |
+| `acs:cwmp2task:{cwmpID_hash}` | String | 24h | CWMP ID → Task ID 反查（CPE 响应回来时定位 task） |
 | `acs:session:{sn}` | Hash | 5min | TR069 会话状态 |
+| `acs:connreq:pending:{sn}` | String | 30s | Connection Request 去重 |
+| `acs:heartbeat:{sn}` | String（时间戳） | 2×inform | 心跳追踪 |
+
+### NATS Subjects
+
+| Subject | Stream | QueueGroup | 用途 |
+|---|---|---|---|
+| `task.completed` | TASK | `task-completion-bridge-completed` | 任务成功终态（App 订阅） |
+| `task.failed` | TASK | `task-completion-bridge-failed` | 任务失败终态（App 订阅） |
+
+> 完整 Subject 清单见 [消息队列全流程流转说明书 §10.A.2](../消息队列全流程流转说明书.md)
 
 ---
 
@@ -482,6 +731,8 @@ export interface MMLTask {
   creator: string;
   executor: string;
   executeType: string;
+  source: string;       // = "mml"
+  sourceId: string;     // = mml_tasks.id (用于 notifyCompletion 过滤)
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
@@ -512,10 +763,51 @@ export interface MMLTask {
 }
 ```
 
+### NATS TASK stream payload (Go `task.Task`)
+
+```go
+type Task struct {
+    ID           string
+    DeviceSN     string
+    Method       string         // "GetParameterValues" / "SetParameterValues" / ...
+    Params       map[string]any
+    CommandKey   string
+    Status       TaskStatus     // pending / sent / completed / failed / expired
+    Result       json.RawMessage
+    ErrorCode    int
+    ErrorMessage string
+    Source       string         // "mml" / "provision" / "backup" / ...
+    SourceID     string         // = mml_tasks.id（按业务关联到上游任务）
+    CreatorID    string         // user_id（用户操作触发的任务）
+    CommandIndex int            // 多 cmd 任务的第几条
+    Priority     int            // ZSET score 的高位
+    CreatedAt    time.Time
+    SentAt       *time.Time     // RecoverPendingTasks 5min 阈值判定依据
+    ExpiresAt    *time.Time     // Pop 时检查；过期直接 fail(expired)
+}
+```
+
+---
+
+## 附录 C：消息分层对照
+
+参考 `消息队列全流程流转说明书.md` §2.3：
+
+| 层 | 机制 | 库 | 跨进程 | 持久化 | 用在本流程的哪步 |
+|---|---|---|:---:|:---:|---|
+| L1 | NATS JetStream | `nats-io/nats.go` | ✅ | ✅ 文件 | T26-T29：ACS publish task.completed → App task-completion-bridge 订阅 |
+| L1 降级 | Channel EventBus | 纯 Go channel | ❌ | ❌ | 单进程 / 无 NATS 部署兜底（dev/test） |
+| L2 | Redis TaskQ | `redis/go-redis` | ✅ | ✅ Redis + PG 双写 | T11：CreateTask 入队；T19：ACS PopTask 出队 |
+| L3 | Redis 普通 Hash | `redis/go-redis` | ✅ | ✅ | `acs:task:{id}` task 详情 / `acs:cwmp2task:{hash}` 响应反查 |
+| L4 | SSE Hub | Go channel | ❌（单进程）| 可选 | T31-T35：mml_device_frame / mml_task_completed → 浏览器 |
+
+> ❌ 已下线：原 `acs:cmdq:*` 命令队列（2026-04-23 合入 TaskQ）；原 Redis Pub/Sub `casbin:policy:reload`（2026-04-22 迁 NATS）。当前 Redis **不再承载任何广播语义**。
+
 ---
 
 ## 变更历史
 
-| 日期 | 作者 | 变更 |
+| 日期 | 版本 | 变更 |
 |---|---|---|
-| 2026-05-23 | 分析整理 | 初稿；记录至 commit `21c4d027`（任务名 dedup）+ `b00f4928`（toast App.useApp）后的代码状态 |
+| 2026-05-23 | v1.0 | 初稿；记录至 commit `21c4d027` + `b00f4928` 后的代码状态 |
+| 2026-05-23 | v1.1 | 修订：① ACS 改为 CPE-Inform 驱动（删除 Poller 误述）；② 回流路径补全 NATS TASK stream + task-completion-bridge QueueGroup + deduper + CompletionRouter 四层；③ 新增 §3.7 可靠性兜底机制；④ 新增 SourceID 过滤说明；⑤ 时序图 T17-T35 重画；⑥ 附录 A 补 12+ 处新引用 |
