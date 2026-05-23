@@ -340,6 +340,139 @@ func (s *SoftwareService) BatchCollect(ctx context.Context, req BatchCollectRequ
 	return mainTask, nil
 }
 
+// PlaceholderTrackingRequest 是 CreatePlaceholderTrackingTask 的入参。
+type PlaceholderTrackingRequest struct {
+	DeviceIDs []uuid.UUID
+	TaskName  string
+	// TypeCode 是 UFTE 任务类型编码（如 "LICENSE_UPGRADE" / "CONFIG_RESTORE"）。
+	// 仅用于派生 sub_task.CommandKey 前缀，让派发 device_task 时能用同一份 key
+	// 让 TC 回流能命中 sub_task → 自动推进。
+	TypeCode string
+	// FileType 存进 upgrade_tasks.download_file_type 列，给 UFTE 列表的
+	// resolveTaskType(catalog, taskType, productClass, fileType) 精确回找
+	// catalog 条目。对 CONFIG_RESTORE 是 "10 <OUI> Configuration File" 这种
+	// 字面值（含 <OUI> 占位），与 dispatcher 真实下发 FileType（含真实 OUI）解耦。
+	FileType   string
+	CreateUser string
+	Suspended  bool
+}
+
+// CreatePlaceholderTrackingTask 创建一个"已派发完毕"的占位 upgrade_tasks / sub_tasks，
+// 给 LICENSE_UPGRADE / CONFIG_RESTORE 等"绕过 software executor 直接派发 device_tasks"
+// 的任务类型在 UFTE 列表里可见。
+//
+// 行为：
+//   - 主任务 TaskType=LogCollect（让 ufte loadAllTasks 的 typeSet 过滤包含它）
+//   - 主任务 Status=ended / Result=success（因为派发是同步、瞬时的）
+//   - 子任务 Status=completed（一并算 ended）
+//   - 实际设备下发结果在 device_tasks 里独立跟踪，本占位行不会自动更新
+//
+// 这是为可见性服务的 MVP；真正的端到端进度跟踪需要扩展 TransferCompleteRouter
+// 识别 LICENSE_UPGRADE / CONFIG_RESTORE 的 CommandKey 并回写 sub_task 状态。
+func (s *SoftwareService) CreatePlaceholderTrackingTask(
+	ctx context.Context, req PlaceholderTrackingRequest,
+) (*UpgradeTask, error) {
+	now := model.Time(time.Now())
+	// 三态：
+	//   - Suspended=true  → 任务"已挂起" / sub_tasks "待派发"；不增计数
+	//   - Suspended=false → 任务"进行中" / sub_tasks "下载中"；不增计数
+	//     （派发成功 ≠ 设备已应用，真正完成态要靠 TransferComplete 路由推进，
+	//     这条线尚未接，先用 in_progress 表示"已派发等设备落地"，进度 0%）
+	initialStatus := TaskInProgress
+	subStatus := UpgradeDownloading
+	if req.Suspended {
+		initialStatus = TaskSuspended
+		subStatus = UpgradePending
+	}
+	main := &UpgradeTask{
+		TaskName:         req.TaskName,
+		TaskType:         TaskTypeLogCollect, // 复用使 typeSet 过滤覆盖到本任务
+		DownloadFileType: req.FileType,       // 用 catalog FileType 字面值（含 <OUI> 占位）
+		Status:           initialStatus,
+		CreateStatus:     "active",
+		CreateUser:       req.CreateUser,
+		TotalCount:       len(req.DeviceIDs),
+		MaxConcurrent:    1,
+		StartedAt:        &now,
+	}
+	// route hint 用 FileType（catalog 字面）：当前 router 没匹配的话 fallback 到默认 upgrade_tasks 表
+	ctx = WithRouteHint(ctx, req.FileType)
+	if err := s.taskRepo.Create(ctx, main); err != nil {
+		return nil, fmt.Errorf("create placeholder tracking task: %w", err)
+	}
+	// pg_task_repository.go::Create 只插了部分列（status / total_count），
+	// 这里再用 UpdateStatus 把 status 真正落库（Create 已写但保险起见）。
+	if err := s.taskRepo.UpdateStatus(ctx, main.ID, initialStatus, ""); err != nil {
+		s.logger.Warn("update placeholder task status failed",
+			zap.String("task_id", main.ID.String()), zap.Error(err))
+	}
+
+	subs := make([]*UpgradeSubTask, 0, len(req.DeviceIDs))
+	for _, did := range req.DeviceIDs {
+		sub := &UpgradeSubTask{
+			TaskID:   main.ID,
+			DeviceID: did,
+			Status:   subStatus,
+		}
+		if dev, derr := s.deviceRepo.GetByID(ctx, did); derr == nil && dev != nil {
+			sub.DeviceSN = dev.SerialNumber
+			// 关键：CommandKey 用统一格式，让派发 device_tasks 时使用同一 key →
+			// TC 到达后 handleTCBody → GetByCommandKey 命中 sub_task → 自动推进。
+			sub.CommandKey = BuildDirectDispatchCommandKey(req.TypeCode, main.ID, dev.SerialNumber)
+		}
+		subs = append(subs, sub)
+	}
+	if err := s.subTaskRepo.BatchCreate(ctx, subs); err != nil {
+		return nil, s.finalizeSubTaskFailure(ctx, main.ID,
+			fmt.Errorf("create placeholder sub_tasks: %w", err))
+	}
+	return main, nil
+}
+
+// BuildDirectDispatchCommandKey 给 CONFIG_RESTORE / LICENSE_UPGRADE 等"直接派发
+// device_tasks 的 LogCollect 类任务"生成统一 CommandKey。sub_task 和 device_task
+// 都用同一份 key，TC 到达时 handleTCBody → GetByCommandKey 才能命中 sub_task 推进。
+//
+// 格式：<typeCode>_<upgradeTaskID 前 8 hex>_<deviceSN>
+func BuildDirectDispatchCommandKey(typeCode string, upgradeTaskID uuid.UUID, deviceSN string) string {
+	tid := strings.ReplaceAll(upgradeTaskID.String(), "-", "")
+	if len(tid) >= 8 {
+		tid = tid[:8]
+	}
+	return fmt.Sprintf("%s_%s_%s", typeCode, tid, deviceSN)
+}
+
+// FinalizePlaceholderTrackingTask 把一个 suspended 状态的占位任务推进到"已派发"
+// 状态（task=in_progress，sub_tasks=downloading）—— 与 immediate 模式创建后的状态
+// 完全一致。在 UFTE StartTask 内 direct-dispatch 路径派发完后调用。
+//
+// 故意不推到 TaskEnded：派发成功 ≠ 设备已下载完成并应用 license/config，
+// 真正完成态要靠后续接入 TransferCompleteRouter 据 device_tasks TC 推进。
+func (s *SoftwareService) FinalizePlaceholderTrackingTask(
+	ctx context.Context, taskID uuid.UUID, totalCount int,
+) error {
+	_ = totalCount // 保留入参以保后向兼容；状态推进仅依赖 ID
+	if err := s.taskRepo.UpdateStatus(ctx, taskID, TaskInProgress, ""); err != nil {
+		return fmt.Errorf("update status to in_progress: %w", err)
+	}
+	// 子任务从 pending → downloading
+	page, err := s.subTaskRepo.ListByTaskID(ctx, taskID, SubTaskFilter{})
+	if err != nil {
+		s.logger.Warn("list sub_tasks for finalize failed", zap.Error(err))
+		return nil
+	}
+	for _, sub := range page.Items {
+		if sub.Status != UpgradePending {
+			continue // 已不是 pending（可能已 completed/failed 由其他链路推进过）
+		}
+		if upErr := s.subTaskRepo.UpdateStatus(ctx, sub.ID, UpgradeDownloading, ""); upErr != nil {
+			s.logger.Warn("update sub_task to downloading failed",
+				zap.String("sub_task_id", sub.ID.String()), zap.Error(upErr))
+		}
+	}
+	return nil
+}
+
 // startCollectExecution 启动日志采集子任务的并发执行 goroutine。按 RPCType 分流：
 // "SET_PARAM_VALUES" 走 ExecuteOneSetParamCollect（如 FAULT_LOG_COLLECT），其余走
 // ExecuteOneUpload（默认 Upload RPC 链路，包含 RUNTIME_LOG_COLLECT / CONFIG_BACKUP_*）。

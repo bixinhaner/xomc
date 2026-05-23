@@ -607,6 +607,24 @@ func initBackupModule(c *Container) error {
 		}
 	}
 
+	// T-0165: DeviceLicense 子系统装配 — 与 SnapshotService 同款，但只支持手动导入，
+	// 派发 LICENSE_UPGRADE 任务时直接构造 device_tasks（FileType="License File"）。
+	licenseRepo := backup.NewPgLicenseRepository(c.PgPool)
+	licenseService := backup.NewLicenseService(
+		licenseRepo, c.MinIO, c.DeviceRepo,
+		c.miscDeps.taskSvc, backup.LicenseBucketDefault, logger,
+	)
+	backupHandler.SetLicenseService(licenseService)
+	if c.miscDeps.ufteService != nil {
+		c.miscDeps.ufteService.SetLicenseUpgradeDispatcher(licenseService)
+	}
+	if c.MinIO != nil {
+		if err := ensureSnapshotBucket(context.Background(), c.MinIO, backup.LicenseBucketDefault); err != nil {
+			logger.Warn("ensure device-licenses bucket failed; service may 5xx until fixed",
+				zap.String("bucket", backup.LicenseBucketDefault), zap.Error(err))
+		}
+	}
+
 	if err := filePathRecorder.Subscribe(c.EventBus); err != nil {
 		logger.Warn("subscribe backup file path recorder", zap.Error(err))
 	}

@@ -449,8 +449,8 @@ func builtInTaskTypes() []TaskType {
 			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"},
 			PermissionCode:         "CODE_CONFIG_RESTORE",
 			PlatformScope:          []string{"4G eNB", "5G gNB", "QAFA", "QAFB", "BBU-XSS", "BBU-QSS"},
-			FileType:               "3 Vendor Configuration File",
-			FileTypeLabel:          "3 Vendor Configuration File",
+			FileType:               "10 <OUI> Configuration File",
+			FileTypeLabel:          "10 <OUI> Configuration File",
 			FileTypeEditable:       false,
 			URLTemplate:            "config_backup/{object_path}",
 			TargetFileNameTemplate: "{file_name}",
@@ -458,6 +458,34 @@ func builtInTaskTypes() []TaskType {
 			TransportPath:          "/smallcell/FileDownloadService/config_backup/{object_path}",
 			LastEditor:             "system",
 			UpdatedAt:              now,
+			// 走 LogCollect 桶以便复用 ufte.loadAllTasks 的 typeSet 过滤，
+			// 让 CONFIG_RESTORE 占位 upgrade_tasks 行在任务列表里可见。
+			// 早 return 路径（createConfigRestoreTask）保证不会被 BatchCollect 误派发。
+			softwareTaskType: software.TaskTypeLogCollect,
+		},
+		{
+			TypeCode:               "LICENSE_UPGRADE",
+			SortOrder:              55,
+			Category:               "license_upgrade",
+			CategoryLabel:          "设备License升级",
+			DisplayName:            "设备License升级",
+			Description:            "从 license 库取目标设备最新 license，通过 TR-069 Download RPC 下发。",
+			RPCType:                "DOWNLOAD",
+			BuiltIn:                true,
+			Enabled:                true,
+			StepChain:              []string{"CHECK_PERMISSION", "CHECK_ONLINE", "CHECK_CONFLICT", "PRE_VALIDATE", "SEND_RPC", "WAIT_RPC_RESPONSE", "WAIT_TRANSFER_COMPLETE"},
+			PermissionCode:         "CODE_LICENSE_UPGRADE",
+			PlatformScope:          []string{"4G eNB", "5G gNB", "QAFA", "QAFB", "BBU-XSS", "BBU-QSS"},
+			FileType:               "License File",
+			FileTypeLabel:          "License File",
+			FileTypeEditable:       false,
+			URLTemplate:            "device-licenses/{object_path}",
+			TargetFileNameTemplate: "{file_name}",
+			FileNameTemplate:       "{file_name}",
+			TransportPath:          "/smallcell/FileDownloadService/device-licenses/{object_path}",
+			LastEditor:             "system",
+			UpdatedAt:              now,
+			softwareTaskType:       software.TaskTypeLogCollect, // 同上
 		},
 	}
 }

@@ -46,6 +46,13 @@ type Service struct {
 	// nil → CONFIG_RESTORE 任务创建直接返回 not configured。
 	// 由 backup.RestoreService 满足该接口；wiring 在 cmd/app/provider/modules.go。
 	snapshotConfigRestoreDispatcher SnapshotConfigRestoreDispatcher
+
+	// licenseUpgradeDispatcher (T-0165)：LICENSE_UPGRADE 任务派发器（与上方
+	// CONFIG_RESTORE 对称）。接 SN 列表 → device_licenses 表取每设备 license →
+	// 缺失整批拒绝 → 逐设备 Download device_tasks（FileType="License File"）。
+	// nil → LICENSE_UPGRADE 任务创建返回 not configured。
+	// 由 backup.LicenseService 满足；wiring 在 cmd/app/provider/modules.go。
+	licenseUpgradeDispatcher LicenseUpgradeDispatcher
 }
 
 // SnapshotConfigRestoreDispatcher 是 UFTE 对 backup.RestoreService.CreateBySnapshot
@@ -56,8 +63,12 @@ type Service struct {
 //   - missing：缺失快照的 SN 列表；非空时调用方应返 ErrNotFound 给上层
 //   - err：基础设施错误（DB/MinIO 不可用等）
 type SnapshotConfigRestoreDispatcher interface {
+	// upgradeTaskID 是 ufte 提前创建的占位 upgrade_tasks ID，dispatcher 用它
+	// 派生统一 CommandKey（与 sub_task 一致），让 TC 回流可自动推进。
+	// 传 uuid.Nil 时退化用 restore_tasks.id-derived CommandKey（兼容旧调用，
+	// 没有 TC 自动跟踪）。
 	DispatchConfigRestoreBySnapshot(
-		ctx context.Context, targetDeviceSNs []string, createUser string,
+		ctx context.Context, targetDeviceSNs []string, createUser string, upgradeTaskID uuid.UUID,
 	) (dispatchedID uuid.UUID, missing []string, err error)
 }
 
@@ -65,6 +76,26 @@ type SnapshotConfigRestoreDispatcher interface {
 // 不调用则 CONFIG_RESTORE 任务创建始终返回 ErrInvalidInput。
 func (s *Service) SetSnapshotConfigRestoreDispatcher(d SnapshotConfigRestoreDispatcher) {
 	s.snapshotConfigRestoreDispatcher = d
+}
+
+// LicenseUpgradeDispatcher 是 UFTE 对 backup.LicenseService.DispatchLicenseUpgradeBySN
+// 的最小依赖。命名体现"从 device_licenses 取每设备最新一份 license 派发 Download"。
+//
+// 返回：
+//   - dispatchedID：成功时返回派发主 ID（UFTE 用作 placeholder Task.ID）
+//   - missing：缺失 license 的 SN 列表；非空时调用方应返 ErrNotFound
+//   - err：基础设施错误
+type LicenseUpgradeDispatcher interface {
+	// upgradeTaskID 是 ufte 提前创建的占位 upgrade_tasks 主行 ID。dispatcher
+	// 用它派生统一 CommandKey（与 sub_task.CommandKey 一致），TC 到达可自动推进。
+	DispatchLicenseUpgradeBySN(
+		ctx context.Context, targetDeviceSNs []string, createUser string, upgradeTaskID uuid.UUID,
+	) (dispatchedID uuid.UUID, missing []string, err error)
+}
+
+// SetLicenseUpgradeDispatcher 注入 LICENSE_UPGRADE 派发器（T-0165）。
+func (s *Service) SetLicenseUpgradeDispatcher(d LicenseUpgradeDispatcher) {
+	s.licenseUpgradeDispatcher = d
 }
 
 func NewService(
@@ -246,20 +277,93 @@ func (s *Service) StartTask(ctx context.Context, taskID uuid.UUID) error {
 		if err != nil {
 			return err
 		}
-		transportPath, rpcType, paramPath := "", "", ""
-		for _, tt := range catalog {
+		var matched *TaskType
+		for i := range catalog {
+			tt := catalog[i]
 			if tt.softwareTaskType == software.TaskTypeLogCollect && tt.FileType == task.DownloadFileType {
-				transportPath = tt.TransportPath
-				rpcType = tt.RPCType
-				// FAULT_LOG_COLLECT 用 URLTemplate 存 SPV 参数路径（如
-				// Device.DeviceInfo.X_COM_Log.FaultLogURL）。详见 model.go 注释。
-				paramPath = tt.URLTemplate
+				matched = &tt
 				break
 			}
+		}
+		// CONFIG_RESTORE / LICENSE_UPGRADE 是"直接派发 device_tasks"链路，不能走
+		// ResumeCollect（那是 Upload RPC 调度）。改走对应 dispatcher 再派发一遍，
+		// 然后把占位 upgrade_tasks 推到 ended。
+		if matched != nil && (matched.TypeCode == "CONFIG_RESTORE" || matched.TypeCode == "LICENSE_UPGRADE") {
+			return s.startDirectDispatchTask(ctx, task, matched)
+		}
+		transportPath, rpcType, paramPath := "", "", ""
+		if matched != nil {
+			transportPath = matched.TransportPath
+			rpcType = matched.RPCType
+			// FAULT_LOG_COLLECT 用 URLTemplate 存 SPV 参数路径（如
+			// Device.DeviceInfo.X_COM_Log.FaultLogURL）。详见 model.go 注释。
+			paramPath = matched.URLTemplate
 		}
 		return s.softwareService.ResumeCollect(ctx, taskID, transportPath, rpcType, paramPath)
 	}
 	return s.softwareService.ResumeUpgrade(ctx, taskID)
+}
+
+// startDirectDispatchTask 处理 CONFIG_RESTORE / LICENSE_UPGRADE 类型挂起任务的"开始"：
+// 从 sub_tasks 读出设备 SN 列表 → 调对应 dispatcher 真实派发 → 把占位 upgrade_tasks
+// 推到 ended/success + sub_tasks 推到 completed。
+func (s *Service) startDirectDispatchTask(
+	ctx context.Context, task *software.UpgradeTask, typeDef *TaskType,
+) error {
+	// 取 sub_tasks 的设备 SN
+	subPage, err := s.subTaskRepo.ListByTaskID(ctx, task.ID, software.SubTaskFilter{})
+	if err != nil {
+		return fmt.Errorf("list sub_tasks for direct dispatch start: %w", err)
+	}
+	sns := make([]string, 0, len(subPage.Items))
+	for _, sub := range subPage.Items {
+		if sub.DeviceSN == "" {
+			continue
+		}
+		sns = append(sns, sub.DeviceSN)
+	}
+	if len(sns) == 0 {
+		return fmt.Errorf("%w: suspended task has no device sub-tasks to dispatch", commonerrors.ErrInvalidInput)
+	}
+
+	switch typeDef.TypeCode {
+	case "CONFIG_RESTORE":
+		if s.snapshotConfigRestoreDispatcher == nil {
+			return fmt.Errorf("%w: CONFIG_RESTORE dispatcher not wired", commonerrors.ErrInvalidInput)
+		}
+		_, missing, dErr := s.snapshotConfigRestoreDispatcher.
+			DispatchConfigRestoreBySnapshot(ctx, sns, task.CreateUser, task.ID)
+		if dErr != nil {
+			if len(missing) > 0 {
+				return fmt.Errorf("%w: %d device(s) missing config snapshot: %v",
+					commonerrors.ErrNotFound, len(missing), missing)
+			}
+			return fmt.Errorf("dispatch CONFIG_RESTORE on resume: %w", dErr)
+		}
+	case "LICENSE_UPGRADE":
+		if s.licenseUpgradeDispatcher == nil {
+			return fmt.Errorf("%w: LICENSE_UPGRADE dispatcher not wired", commonerrors.ErrInvalidInput)
+		}
+		_, missing, dErr := s.licenseUpgradeDispatcher.
+			DispatchLicenseUpgradeBySN(ctx, sns, task.CreateUser, task.ID)
+		if dErr != nil {
+			if len(missing) > 0 {
+				return fmt.Errorf("%w: %d device(s) missing license file: %v",
+					commonerrors.ErrNotFound, len(missing), missing)
+			}
+			return fmt.Errorf("dispatch LICENSE_UPGRADE on resume: %w", dErr)
+		}
+	default:
+		return fmt.Errorf("%w: unsupported direct-dispatch type %s",
+			commonerrors.ErrInvalidInput, typeDef.TypeCode)
+	}
+
+	// 派发成功后把占位行推到 ended/success（progress 100%）
+	if err := s.softwareService.FinalizePlaceholderTrackingTask(ctx, task.ID, len(sns)); err != nil {
+		s.logger.Warn("finalize placeholder after direct-dispatch start failed",
+			zap.String("task_id", task.ID.String()), zap.Error(err))
+	}
+	return nil
 }
 
 // ResumeLogCollectSubTask 实现 software.LogCollectResumer：当被挂起的 LogCollect 类
@@ -356,6 +460,11 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 		return s.createConfigRestoreTask(ctx, &typeDef, req, createUser, createSuspended)
 	}
 
+	// T-0165：LICENSE_UPGRADE 与 CONFIG_RESTORE 同款，走 backup.LicenseService 派发。
+	if typeDef.TypeCode == "LICENSE_UPGRADE" {
+		return s.createLicenseUpgradeTask(ctx, &typeDef, req, createUser, createSuspended)
+	}
+
 	switch {
 	case typeDef.softwareTaskType == software.TaskTypeLogCollect:
 		// 日志采集（Upload 或 SetParameterValues RPC）：不需要固件，直接通过 BatchCollect 下发。
@@ -424,11 +533,7 @@ func (s *Service) createConfigRestoreTask(
 	if s.snapshotConfigRestoreDispatcher == nil {
 		return nil, fmt.Errorf("%w: CONFIG_RESTORE dispatcher not wired", commonerrors.ErrInvalidInput)
 	}
-	if createSuspended {
-		return nil, fmt.Errorf("%w: CONFIG_RESTORE does not support suspended creation yet", commonerrors.ErrInvalidInput)
-	}
 
-	// device_ids (UUID) → device_sns
 	sns := make([]string, 0, len(req.DeviceIDs))
 	for _, did := range req.DeviceIDs {
 		dev, err := s.deviceRepo.GetByID(ctx, did)
@@ -438,34 +543,98 @@ func (s *Service) createConfigRestoreTask(
 		sns = append(sns, dev.SerialNumber)
 	}
 
-	dispatchedID, missing, err := s.snapshotConfigRestoreDispatcher.
-		DispatchConfigRestoreBySnapshot(ctx, sns, createUser)
+	// 1) 先建占位 upgrade_tasks + sub_tasks（拿 task.ID 用于派生 CommandKey）。
+	placeholder, phErr := s.softwareService.CreatePlaceholderTrackingTask(ctx,
+		software.PlaceholderTrackingRequest{
+			DeviceIDs:  req.DeviceIDs,
+			TaskName:   req.TaskName,
+			TypeCode:   typeDef.TypeCode, // CommandKey 前缀 = "CONFIG_RESTORE"
+			FileType:   typeDef.FileType, // download_file_type 列（catalog 字面，含 <OUI>）
+			CreateUser: createUser,
+			Suspended:  createSuspended,
+		})
+	if phErr != nil {
+		return nil, fmt.Errorf("create CONFIG_RESTORE placeholder: %w", phErr)
+	}
+
+	// 2) Suspended：到此结束；等用户点"开始"由 StartTask 触发派发。
+	if createSuspended {
+		catalog, _ := s.loadTaskTypeCatalog(ctx)
+		return s.mapTask(catalog, placeholder)
+	}
+
+	// 3) 派发 device_tasks（CommandKey 与 sub_task 一致 → TC 自动推进）。
+	_, missing, err := s.snapshotConfigRestoreDispatcher.
+		DispatchConfigRestoreBySnapshot(ctx, sns, createUser, placeholder.ID)
 	if err != nil {
 		if len(missing) > 0 {
-			// 缺失整批拒绝：把 missing 列表带回，handler 据此返结构化错误。
 			return nil, fmt.Errorf("%w: %d device(s) missing config snapshot: %v",
 				commonerrors.ErrNotFound, len(missing), missing)
 		}
 		return nil, fmt.Errorf("dispatch CONFIG_RESTORE by snapshot: %w", err)
 	}
 
-	// 构造 placeholder Task，前端可立即看到任务名称 + ID + 类型，
-	// 详细进度走备份恢复模块的 restore_tasks 列表。
-	now := time.Now().Format(time.RFC3339)
-	return &Task{
-		ID:              dispatchedID.String(),
-		TaskName:        req.TaskName,
-		Category:        typeDef.Category,
-		CategoryLabel:   typeDef.CategoryLabel,
-		TypeCode:        typeDef.TypeCode,
-		TypeDisplayName: typeDef.DisplayName,
-		Status:          "pending",
-		Progress:        0,
-		TotalCount:      len(req.DeviceIDs),
-		ExecutionMode:   req.ExecutionMode,
-		CreateUser:      createUser,
-		CreatedAt:       now,
-	}, nil
+	catalog, _ := s.loadTaskTypeCatalog(ctx)
+	return s.mapTask(catalog, placeholder)
+}
+
+// createLicenseUpgradeTask (T-0165) 处理 LICENSE_UPGRADE 任务创建。
+// 与 createConfigRestoreTask 同款：不写 software.upgrade_tasks，直接派发
+// device_tasks。返回 placeholder Task 给前端展示。
+func (s *Service) createLicenseUpgradeTask(
+	ctx context.Context,
+	typeDef *TaskType,
+	req CreateTaskRequest,
+	createUser string,
+	createSuspended bool,
+) (*Task, error) {
+	if s.licenseUpgradeDispatcher == nil {
+		return nil, fmt.Errorf("%w: LICENSE_UPGRADE dispatcher not wired", commonerrors.ErrInvalidInput)
+	}
+
+	sns := make([]string, 0, len(req.DeviceIDs))
+	for _, did := range req.DeviceIDs {
+		dev, err := s.deviceRepo.GetByID(ctx, did)
+		if err != nil || dev == nil {
+			return nil, fmt.Errorf("%w: device %s not found", commonerrors.ErrInvalidInput, did)
+		}
+		sns = append(sns, dev.SerialNumber)
+	}
+
+	// 1) 先建占位 upgrade_tasks + sub_tasks（拿到 task.ID 用于派生 CommandKey）。
+	//    Suspended 模式 sub_tasks=pending；非 suspended sub_tasks=downloading。
+	placeholder, phErr := s.softwareService.CreatePlaceholderTrackingTask(ctx,
+		software.PlaceholderTrackingRequest{
+			DeviceIDs:  req.DeviceIDs,
+			TaskName:   req.TaskName,
+			TypeCode:   typeDef.TypeCode, // CommandKey 前缀（如 "LICENSE_UPGRADE"），与 dispatcher 一致
+			FileType:   typeDef.FileType, // download_file_type 列（catalog 字面，含 <OUI> 占位）
+			CreateUser: createUser,
+			Suspended:  createSuspended,
+		})
+	if phErr != nil {
+		return nil, fmt.Errorf("create LICENSE_UPGRADE placeholder: %w", phErr)
+	}
+
+	// 2) Suspended：到此结束；等用户点"开始"由 StartTask 派发。
+	if createSuspended {
+		catalog, _ := s.loadTaskTypeCatalog(ctx)
+		return s.mapTask(catalog, placeholder)
+	}
+
+	// 3) 派发 device_tasks（CommandKey 与 sub_task 一致 → TC 自动推进）。
+	_, missing, err := s.licenseUpgradeDispatcher.
+		DispatchLicenseUpgradeBySN(ctx, sns, createUser, placeholder.ID)
+	if err != nil {
+		if len(missing) > 0 {
+			return nil, fmt.Errorf("%w: %d device(s) missing license file: %v",
+				commonerrors.ErrNotFound, len(missing), missing)
+		}
+		return nil, fmt.Errorf("dispatch LICENSE_UPGRADE: %w", err)
+	}
+
+	catalog, _ := s.loadTaskTypeCatalog(ctx)
+	return s.mapTask(catalog, placeholder)
 }
 
 func (s *Service) ListTasks(ctx context.Context, filter TaskListFilter) (*coremodel.ListResponse[Task], error) {

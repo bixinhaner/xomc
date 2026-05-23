@@ -377,7 +377,10 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
 
   return (
     <ListPageLayout title={embedded ? undefined : t('software.firmware.title')}>
-      {fromUFTE ? (
+      {/* embedded 模式（嵌入到「文件管理」tab）下，FileManagement 父组件已经
+          在页面顶部统一显示「您来自任务创建 / 完成并关闭」Alert，这里就不重复显示。
+          只在直链 /software/firmware?return=ufte 的旧入口才走这条 Alert。 */}
+      {fromUFTE && !embedded ? (
         <Alert
           type="info"
           showIcon

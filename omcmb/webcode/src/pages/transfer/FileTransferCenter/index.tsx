@@ -43,6 +43,8 @@ import { useProductClasses } from '@core/hooks/api/useDevices';
 import { useSoftwareVersions } from '@core/hooks/api/useSoftware';
 import { configSnapshotApi } from '@core/services/api/configSnapshotApi';
 import type { BatchGetSnapshotsResult } from '@core/services/api/configSnapshotApi';
+import { deviceLicenseApi } from '@core/services/api/deviceLicenseApi';
+import type { BatchGetLicensesResult } from '@core/services/api/deviceLicenseApi';
 import { useUserStore } from '@core/store/userStore';
 import type { SoftwareVersion } from '@core/mock/data/software';
 import type {
@@ -198,6 +200,21 @@ export default function FileTransferCenter() {
   // selectedDrawerDeviceIds + drawerTypeCode 变化时自动 refetch；缺失则禁用提交。
   const [snapshotProbe, setSnapshotProbe] = useState<BatchGetSnapshotsResult | null>(null);
   const [snapshotProbing, setSnapshotProbing] = useState(false);
+  // T-0165: LICENSE_UPGRADE 模式下"按设备 SN 检查 device_licenses 表"的结果（同款）。
+  const [licenseProbe, setLicenseProbe] = useState<BatchGetLicensesResult | null>(null);
+  const [licenseProbing, setLicenseProbing] = useState(false);
+  // probeTick：tab 重新聚焦时 +1，触发 probe useEffect 重新跑——用户在新 tab
+  // 上传文件后切回，自动看到最新匹配状态，与 React Query refetchOnWindowFocus 同款体验。
+  const [probeTick, setProbeTick] = useState(0);
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        setProbeTick((t) => t + 1);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, []);
   const [drawerDeviceKeyword, setDrawerDeviceKeyword] = useState('');
   const [drawerDeviceKeywordInput, setDrawerDeviceKeywordInput] = useState('');
   const [detailTask, setDetailTask] = useState<UnifiedFileTransferTask | null>(null);
@@ -380,11 +397,44 @@ export default function FileTransferCenter() {
     return () => {
       cancelled = true;
     };
-  }, [drawerTypeCode, drawerSelectedSnsKey]);
+  }, [drawerTypeCode, drawerSelectedSnsKey, probeTick]);
 
   const snapshotMissingCount = snapshotProbe?.missing.length ?? 0;
   const isConfigRestoreBlockedByMissing =
     drawerTypeCode === 'CONFIG_RESTORE' && snapshotMissingCount > 0;
+
+  // T-0165: LICENSE_UPGRADE 同款 — 选完设备后批量查 device_licenses。
+  useEffect(() => {
+    if (drawerTypeCode !== 'LICENSE_UPGRADE') {
+      setLicenseProbe(null);
+      return;
+    }
+    if (!drawerSelectedSnsKey) {
+      setLicenseProbe(null);
+      return;
+    }
+    let cancelled = false;
+    const sns = drawerSelectedSnsKey.split(',');
+    setLicenseProbing(true);
+    deviceLicenseApi
+      .batchGet(sns)
+      .then((res) => {
+        if (!cancelled) setLicenseProbe(res);
+      })
+      .catch(() => {
+        if (!cancelled) setLicenseProbe({ found: {}, missing: sns });
+      })
+      .finally(() => {
+        if (!cancelled) setLicenseProbing(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [drawerTypeCode, drawerSelectedSnsKey, probeTick]);
+
+  const licenseMissingCount = licenseProbe?.missing.length ?? 0;
+  const isLicenseUpgradeBlockedByMissing =
+    drawerTypeCode === 'LICENSE_UPGRADE' && licenseMissingCount > 0;
 
   const drawerDeviceColumns: ColumnsType<UnifiedFileTransferDeviceItem> = useMemo(
     () => [
@@ -994,6 +1044,13 @@ export default function FileTransferCenter() {
       );
       return;
     }
+    // T-0165: LICENSE_UPGRADE 同款整批拒绝 — 任一设备缺 license 即阻止提交。
+    if (isLicenseUpgradeBlockedByMissing) {
+      void message.error(
+        `以下设备未上传 license，请先在"文件管理 → License 文件"导入：${licenseProbe?.missing.join(', ') ?? ''}`,
+      );
+      return;
+    }
     if (createTaskMutation.isPending) {
       return;
     }
@@ -1193,7 +1250,7 @@ export default function FileTransferCenter() {
             <Button
               type="primary"
               loading={createTaskMutation.isPending}
-              disabled={isConfigRestoreBlockedByMissing}
+              disabled={isConfigRestoreBlockedByMissing || isLicenseUpgradeBlockedByMissing}
               onClick={() => void handleCreateTask()}
             >
               创建
@@ -1239,7 +1296,12 @@ export default function FileTransferCenter() {
                         icon={<ExportOutlined />}
                         // 不带 noopener — 让新 tab 内的"完成并关闭"按钮能调 window.close()
                         // 自闭。本应用同源，无被钓鱼风险。
-                        onClick={() => window.open('/software/firmware?return=ufte', '_blank')}
+                        // 跳到新的"文件管理 → 版本文件" tab —— 老 /software/firmware
+                        // 路由在菜单下线后被 PrivateRoute 路径守卫拦成 403，新入口在
+                        // "文件传输 / 文件管理"菜单内，所有角色可达。
+                        onClick={() =>
+                          window.open('/transfer/file-management?tab=version&return=ufte', '_blank')
+                        }
                       >
                         维护升级文件（新窗口）
                       </Button>
@@ -1307,6 +1369,86 @@ export default function FileTransferCenter() {
             </Space>
           </Form.Item>
 
+          {drawerTypeCode === 'LICENSE_UPGRADE' ? (
+            <Form.Item
+              label={(
+                <Space size={8}>
+                  <span>License 文件来源（按设备最新 license）</span>
+                  <Button
+                    type="primary"
+                    size="small"
+                    icon={<ExportOutlined />}
+                    onClick={() =>
+                      window.open('/transfer/file-management?tab=license&return=ufte', '_blank')
+                    }
+                  >
+                    打开 License 文件管理
+                  </Button>
+                </Space>
+              )}
+            >
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Text type="secondary">
+                  每台设备升级时使用各自最新一份 license；缺失则整批拒绝。
+                  点击右上方「打开 License 文件管理」可上传新文件、删除旧文件。
+                </Text>
+
+                {drawerSelectedDevices.length === 0 ? (
+                  <Text type="secondary">请先在上方选择设备，下表自动展示 license 详情。</Text>
+                ) : licenseProbing ? (
+                  <Tag color="processing">检查 license 中…</Tag>
+                ) : !licenseProbe ? null : (
+                  <>
+                    <Space size={12}>
+                      {licenseMissingCount === 0 ? (
+                        <Tag color="success">
+                          全部设备已就绪（{Object.keys(licenseProbe.found).length} 台）
+                        </Tag>
+                      ) : (
+                        <Tag color="error">
+                          {licenseMissingCount} 台设备无可用 license，整批不能提交
+                        </Tag>
+                      )}
+                    </Space>
+                    <Table<UnifiedFileTransferDeviceItem>
+                      size="small"
+                      rowKey="id"
+                      dataSource={drawerSelectedDevices}
+                      pagination={false}
+                      scroll={{ y: 200 }}
+                      columns={[
+                        { title: '设备 SN', dataIndex: 'deviceSn', key: 'sn', width: 180 },
+                        {
+                          title: '文件名称',
+                          key: 'file',
+                          width: 240,
+                          ellipsis: true,
+                          render: (_, rec) => {
+                            const lic = licenseProbe.found[rec.deviceSn];
+                            return lic ? (
+                              <Text code style={{ fontSize: 12 }}>{lic.fileName}</Text>
+                            ) : (
+                              <Tag color="error">缺失</Tag>
+                            );
+                          },
+                        },
+                        {
+                          title: '更新时间',
+                          key: 'updateTime',
+                          width: 160,
+                          render: (_, rec) => {
+                            const lic = licenseProbe.found[rec.deviceSn];
+                            return lic ? dayjs(lic.updateTime).format('YYYY-MM-DD HH:mm') : '—';
+                          },
+                        },
+                      ]}
+                    />
+                  </>
+                )}
+              </Space>
+            </Form.Item>
+          ) : null}
+
           {drawerTypeCode === 'CONFIG_RESTORE' ? (
             <Form.Item
               label={(
@@ -1316,9 +1458,13 @@ export default function FileTransferCenter() {
                     type="primary"
                     size="small"
                     icon={<ExportOutlined />}
-                    onClick={() => window.open('/backup/config-snapshots', '_blank')}
+                    // 走新 tab，让原"任务创建"抽屉状态（已选设备、表单值）不丢。
+                    // 用户在新 tab 维护完文件后点页面顶部"完成并关闭"自闭，回到本 tab。
+                    onClick={() =>
+                      window.open('/transfer/file-management?tab=config&return=ufte', '_blank')
+                    }
                   >
-                    打开配置快照库
+                    打开配置文件管理
                   </Button>
                 </Space>
               )}
@@ -1326,7 +1472,7 @@ export default function FileTransferCenter() {
               <Space direction="vertical" size={8} style={{ width: '100%' }}>
                 <Text type="secondary">
                   每台设备恢复时使用各自最新一份配置快照；缺失则整批拒绝。
-                  点击右上方「打开配置快照库」可查看所有快照、导入新文件、删除旧文件。
+                  点击右上方「打开配置文件管理」可查看所有快照、导入新文件、删除旧文件。
                 </Text>
 
                 {drawerSelectedDevices.length === 0 ? (
@@ -1353,10 +1499,11 @@ export default function FileTransferCenter() {
                       pagination={false}
                       scroll={{ y: 200 }}
                       columns={[
-                        { title: '设备 SN', dataIndex: 'deviceSn', key: 'sn', width: 160 },
+                        { title: '设备 SN', dataIndex: 'deviceSn', key: 'sn', width: 180 },
                         {
-                          title: '快照文件',
+                          title: '文件名称',
                           key: 'file',
+                          width: 240,
                           ellipsis: true,
                           render: (_, rec) => {
                             const snap = snapshotProbe.found[rec.deviceSn];
@@ -1368,21 +1515,9 @@ export default function FileTransferCenter() {
                           },
                         },
                         {
-                          title: '大小',
-                          key: 'size',
-                          width: 90,
-                          render: (_, rec) => {
-                            const snap = snapshotProbe.found[rec.deviceSn];
-                            if (!snap) return '—';
-                            if (snap.fileSize < 1024) return `${snap.fileSize} B`;
-                            if (snap.fileSize < 1024 * 1024) return `${(snap.fileSize / 1024).toFixed(1)} KB`;
-                            return `${(snap.fileSize / 1024 / 1024).toFixed(2)} MB`;
-                          },
-                        },
-                        {
                           title: '更新时间',
                           key: 'updateTime',
-                          width: 150,
+                          width: 160,
                           render: (_, rec) => {
                             const snap = snapshotProbe.found[rec.deviceSn];
                             return snap ? dayjs(snap.updateTime).format('YYYY-MM-DD HH:mm') : '—';
@@ -1391,7 +1526,7 @@ export default function FileTransferCenter() {
                         {
                           title: '来源',
                           key: 'source',
-                          width: 90,
+                          width: 100,
                           render: (_, rec) => {
                             const snap = snapshotProbe.found[rec.deviceSn];
                             if (!snap) return null;

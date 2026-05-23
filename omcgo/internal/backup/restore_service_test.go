@@ -138,7 +138,9 @@ func TestCreate_validRequest_fanOut(t *testing.T) {
 	require.Len(t, enq.requests, 2, "two device tasks should be enqueued")
 	for _, req := range enq.requests {
 		assert.Equal(t, "Download", req.Method)
-		assert.Contains(t, string(req.Params), `"file_type":"3"`)
+		// FileType = "10 <OUI> Configuration File"；fake device 没填 OUI →
+		// 退化到 fallback OUI 48BF74（Baicells）。
+		assert.Contains(t, string(req.Params), `"file_type":"10 48BF74 Configuration File"`)
 		assert.Contains(t, string(req.Params), `"url":"config_backup/backup/2026/04/29/cfg.xml.gz"`)
 	}
 }

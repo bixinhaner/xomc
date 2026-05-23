@@ -188,7 +188,9 @@ func (s *RestoreService) Create(ctx context.Context, req *CreateRestoreRequest, 
 			continue
 		}
 		params, err := json.Marshal(map[string]interface{}{
-			"file_type":        "3", // Vendor Configuration File
+			// FileType = "10 <OUI> Configuration File"：厂商私有配置文件下行格式，
+			// OUI 必须替换为设备真实 OUI（如 48BF74 Baicells），否则 CPE 不识别。
+			"file_type":        s.buildRestoreFileType(dev.SerialNumber, dev.OUI),
 			"url":              restoreURL,
 			"target_file_name": pathpkg.Base(req.ObjectPath),
 		})
@@ -326,6 +328,11 @@ func (s *RestoreService) CreateByTaskID(
 // CreateBySnapshotRequest is the body of POST /backup/restore/by-snapshot.
 type CreateBySnapshotRequest struct {
 	TargetDeviceSNs []string `json:"target_device_sns" binding:"required,min=1"`
+	// UpgradeTaskID（可选）：UFTE 侧提前建好的 upgrade_tasks 占位行 ID。
+	// 非 Nil 时 device_tasks 的 CommandKey 用 "CONFIG_RESTORE_<id8>_<sn>" 格式
+	// （与 software.BuildDirectDispatchCommandKey 对齐），保证 TC 回流可命中 sub_task。
+	// Nil 时退化用 restore_tasks.id-derived CommandKey（兼容 /backup/restore/by-snapshot 旧入口）。
+	UpgradeTaskID uuid.UUID `json:"-"`
 }
 
 // CreateBySnapshotResult bundles the created RestoreTask with the missing-SN
@@ -399,6 +406,18 @@ func (s *RestoreService) CreateBySnapshot(
 		return nil, fmt.Errorf("create restore_task: %w", err)
 	}
 
+	// UpgradeTaskID 非 Nil 时派生 "CONFIG_RESTORE_<id8>_<sn>" CommandKey
+	// （与 software.BuildDirectDispatchCommandKey 对齐，让 TC 回流能命中 UFTE sub_task）。
+	// 这条 short id 提前算一次复用。
+	upgradeTidShort := ""
+	if req.UpgradeTaskID != uuid.Nil {
+		s := strings.ReplaceAll(req.UpgradeTaskID.String(), "-", "")
+		if len(s) >= 8 {
+			s = s[:8]
+		}
+		upgradeTidShort = s
+	}
+
 	enqueued := 0
 	skipped := make([]string, 0)
 	for _, sn := range req.TargetDeviceSNs {
@@ -412,12 +431,16 @@ func (s *RestoreService) CreateBySnapshot(
 		}
 		restoreURL := snap.ObjectBucket + "/" + snap.ObjectPath
 		params, mErr := json.Marshal(map[string]interface{}{
-			"file_type":        "3",
+			"file_type":        s.buildRestoreFileType(dev.SerialNumber, dev.OUI),
 			"url":              restoreURL,
 			"target_file_name": pathpkg.Base(snap.ObjectPath),
 		})
 		if mErr != nil {
 			return nil, fmt.Errorf("marshal Download params for %s: %w", sn, mErr)
+		}
+		commandKey := BuildRestoreCommandKey(dev.SiteID, dev.SerialNumber, created.ID.String())
+		if upgradeTidShort != "" {
+			commandKey = fmt.Sprintf("CONFIG_RESTORE_%s_%s", upgradeTidShort, dev.SerialNumber)
 		}
 		if _, qErr := s.taskSvc.CreateTask(ctx, &devtask.CreateTaskRequest{
 			DeviceSN:   dev.SerialNumber,
@@ -426,7 +449,7 @@ func (s *RestoreService) CreateBySnapshot(
 			Source:     devtask.TaskSourceSystem,
 			SourceID:   created.ID.String(),
 			CreatorID:  createdBy,
-			CommandKey: BuildRestoreCommandKey(dev.SiteID, dev.SerialNumber, created.ID.String()),
+			CommandKey: commandKey,
 		}); qErr != nil {
 			skipped = append(skipped, sn)
 			s.logger.Warn("enqueue Download device task failed (by-snapshot)",
@@ -462,6 +485,28 @@ func SplitBucketAndPath(combined string) (bucket, objectPath string, err error) 
 	return splitBucketAndPath(combined)
 }
 
+// restoreFileTypeFallbackOUI：设备未上报 OUI 时下发 Download 用的兜底 OUI。
+// 与 software/executor.go 的 fallbackOUI 同值（Baicells 48BF74）——OMC 当前主流
+// 设备来自 Baicells，CPE 拿到形如 "10 48BF74 Configuration File" 的 FileType
+// 才能正确识别。接其它厂商时务必保证设备注册时填了真实 OUI。
+const restoreFileTypeFallbackOUI = "48BF74"
+
+// buildRestoreFileType 渲染配置恢复 Download RPC 的 FileType 字符串，格式：
+//
+//	10 <OUI> Configuration File
+//
+// 其中 OUI 取设备真实 OUI；为空时退化到 restoreFileTypeFallbackOUI 并 warn 一次。
+func (s *RestoreService) buildRestoreFileType(deviceSN, deviceOUI string) string {
+	oui := deviceOUI
+	if oui == "" {
+		s.logger.Warn("device OUI not populated; falling back for Download FileType",
+			zap.String("device_sn", deviceSN),
+			zap.String("fallback_oui", restoreFileTypeFallbackOUI))
+		oui = restoreFileTypeFallbackOUI
+	}
+	return fmt.Sprintf("10 %s Configuration File", oui)
+}
+
 // DispatchConfigRestoreBySnapshot 实现 ufte.SnapshotConfigRestoreDispatcher（T-0164）。
 //
 // 让 UFTE 的 CONFIG_RESTORE 任务复用 CreateBySnapshot 的整批拒绝 + 逐设备 URL 派发
@@ -472,10 +517,10 @@ func SplitBucketAndPath(combined string) (bucket, objectPath string, err error) 
 //   - missing：缺失快照的 SN 列表（非空时同时返回 ErrNotFound 包装错误）
 //   - err：基础设施错误
 func (s *RestoreService) DispatchConfigRestoreBySnapshot(
-	ctx context.Context, sns []string, createUser string,
+	ctx context.Context, sns []string, createUser string, upgradeTaskID uuid.UUID,
 ) (dispatchedID uuid.UUID, missing []string, err error) {
 	result, err := s.CreateBySnapshot(ctx,
-		&CreateBySnapshotRequest{TargetDeviceSNs: sns}, createUser)
+		&CreateBySnapshotRequest{TargetDeviceSNs: sns, UpgradeTaskID: upgradeTaskID}, createUser)
 	if err != nil {
 		// CreateBySnapshot 在整批拒绝时同时返回 result + ErrNotFound 包装错误。
 		if result != nil && len(result.Missing) > 0 {

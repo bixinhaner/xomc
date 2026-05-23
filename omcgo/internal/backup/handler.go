@@ -21,6 +21,7 @@ type Handler struct {
 	policyService   *PolicyService       // T-0071; nil-safe (UpdatePolicy/GetPolicy return 503 if unset)
 	restoreService  *RestoreService      // T-0072; nil-safe (restore endpoints return 503 if unset)
 	snapshotService *SnapshotService     // T-0164; nil-safe (config-snapshot endpoints return 503 if unset)
+	licenseService  *LicenseService      // T-0165; nil-safe (device-license endpoints return 503 if unset)
 	ftpTester       *FTPConnectionTester // T-0032; nil-safe (TestFTPConnection returns stub when unset)
 	// M4: ExportFile presigned URL support
 	fileRepo    FileRepository // nil-safe (ExportFile returns 503 if unset)
@@ -129,6 +130,18 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	snap.GET("/:sn", h.GetSnapshot)
 	snap.GET("/:sn/download", h.DownloadSnapshot)
 	snap.DELETE("/:sn", h.DeleteSnapshot)
+
+	// T-0165: device license endpoints (与 config-snapshots 同款 CRUD)。
+	// 与 LICENSE_UPGRADE UFTE 任务配套：库里管理 license 文件，任务下发时按 SN 取最新。
+	lic := rg.Group("/backup/device-licenses")
+	lic.GET("", h.ListLicenses)
+	lic.POST("/batch-get", h.BatchGetLicenses)
+	lic.POST("/validate-sns", h.ValidateLicenseSNs)
+	lic.POST("/import", h.ImportLicenses)
+	lic.POST("/batch-delete", h.BatchDeleteLicenses)
+	lic.GET("/:sn", h.GetLicense)
+	lic.GET("/:sn/download", h.DownloadLicense)
+	lic.DELETE("/:sn", h.DeleteLicense)
 
 	// M4: 运营商规范 API 别名 — /task/enb/config/backupRestore/*
 	// 保留 /api/v1/backup/* 原路由，此处仅增加别名前缀，不修改处理逻辑。
