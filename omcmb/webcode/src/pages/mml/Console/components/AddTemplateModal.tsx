@@ -213,7 +213,6 @@ export default function AddTemplateModal({
           name="commandCode"
           label={t('mml.console.commandCode')}
           rules={[{ required: true, message: t('mml.console.commandCodeRequired') }]}
-          extra={t('mml.console.commandCodeTextareaTip')}
         >
           <CommandCodeTextarea />
         </Form.Item>
@@ -223,7 +222,6 @@ export default function AddTemplateModal({
         <Form.Item
           name="paramPaths"
           label={t('mml.console.pathPicker.label')}
-          extra={t('mml.console.pathPicker.help')}
           valuePropName="value"
           trigger="onChange"
         >

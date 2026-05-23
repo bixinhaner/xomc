@@ -3,6 +3,7 @@ import { Button, Checkbox, Input, List, Pagination, Select, Space, Tag, Typograp
 import { SearchOutlined, UserAddOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ConsoleDevice } from '../types';
 import { STATUS_COLORS } from '../types';
+import { DEVICE_PAGE_SIZE } from '../constants';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { useT } from '@/hooks/useT';
 import { useDictionary } from '@core/hooks/api/useSystem';
@@ -262,7 +263,7 @@ export default function DeviceTree({
           <Pagination
             size="small"
             current={currentPage}
-            pageSize={50}
+            pageSize={DEVICE_PAGE_SIZE}
             total={totalFiltered}
             onChange={onPageChange}
             showSizeChanger={false}

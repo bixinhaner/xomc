@@ -410,10 +410,18 @@ func pickI18n(m map[string]string, lang, fallbackZh, fallbackEn, fallbackCode st
 	if v, ok := m[lang]; ok && v != "" {
 		return v
 	}
+	// seed/000152 注入的 i18n key 是 'zh' / 'en'（短码），而 API/前端约定用 'zh-CN' / 'en-US'。
+	// 两套兼容：lang 命中失败时短码 + 长码各回落一次，避免按命令中文名搜索/展示全空白。
 	if v, ok := m["zh-CN"]; ok && v != "" {
 		return v
 	}
+	if v, ok := m["zh"]; ok && v != "" {
+		return v
+	}
 	if v, ok := m["en-US"]; ok && v != "" {
+		return v
+	}
+	if v, ok := m["en"]; ok && v != "" {
 		return v
 	}
 	if fallbackZh != "" {

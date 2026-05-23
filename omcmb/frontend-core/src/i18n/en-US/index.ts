@@ -4129,10 +4129,10 @@ const messages: Record<string, string> = {
 
   'mml.console.commandName':                 'Command Name',
   'mml.console.inputCommandName':            'Enter command name',
-  'mml.console.commandCode':                 'Command Code',
+  'mml.console.commandCode':                 'Command Code (must be custom; selecting existing commands is not allowed)',
   'mml.console.commandCodeRequired':         'Please enter command code',
   'mml.console.commandCodeTextareaPlaceholder': 'Enter custom command code (existing commands cannot be selected)',
-  'mml.console.commandCodeTextareaTip':      'Command code must be custom; selecting existing commands is not allowed',
+  'mml.console.commandCodeTextareaTip':      '',
   'mml.console.operationType':               'Operation Type',
   'mml.console.selectOperationType':         'Select operation type',
   'mml.console.modifyValuesLabel':           'Modify Values',
@@ -4144,8 +4144,8 @@ const messages: Record<string, string> = {
   'mml.console.saveOnly':                    'Save Only',
 
   // PathPicker (multi-select for paramPaths in template form, Bundle D)
-  'mml.console.pathPicker.label':            'Parameter Paths (optional)',
-  'mml.console.pathPicker.help':             'Pick via Group → Command → Path, or search by path / command name; multi-select supported',
+  'mml.console.pathPicker.label':            'Parameter Paths (pick via Group → Command → Path, or search by path / command name; multi-select supported)',
+  'mml.console.pathPicker.help':             '',
   'mml.console.pathPicker.searchPlaceholder':   'Search path or command name (≥1 char)',
   'mml.console.pathPicker.groupPlaceholder':    'Select group',
   'mml.console.pathPicker.commandPlaceholder':  'Select command',

@@ -81,6 +81,8 @@ func (r *PgSearchRepository) SearchCommands(ctx context.Context, query string, l
 	}
 	pattern := "%" + q + "%"
 
+	// i18n key 兼容：seed/000152 注入用 'zh' / 'en'，新约定用 'zh-CN' / 'en-US'。
+	// COALESCE 链同时查两套 key，任一命中即算匹配，避免出现"按命令中文名永远搜不到"。
 	const sqlText = `
 WITH name_hits AS (
     SELECT c.id
@@ -90,10 +92,10 @@ WITH name_hits AS (
       AND (
             c.command_code ILIKE $1
          OR COALESCE(c.logical_code, '') ILIKE $1
-         OR COALESCE(c.command_name_i18n->>'zh-CN', '') ILIKE $1
-         OR COALESCE(c.command_name_i18n->>'en-US', '') ILIKE $1
-         OR COALESCE(c.logical_name_i18n->>'zh-CN', '') ILIKE $1
-         OR COALESCE(c.logical_name_i18n->>'en-US', '') ILIKE $1
+         OR COALESCE(c.command_name_i18n->>'zh-CN', c.command_name_i18n->>'zh', '') ILIKE $1
+         OR COALESCE(c.command_name_i18n->>'en-US', c.command_name_i18n->>'en', '') ILIKE $1
+         OR COALESCE(c.logical_name_i18n->>'zh-CN', c.logical_name_i18n->>'zh', '') ILIKE $1
+         OR COALESCE(c.logical_name_i18n->>'en-US', c.logical_name_i18n->>'en', '') ILIKE $1
       )
 ),
 path_hits AS (

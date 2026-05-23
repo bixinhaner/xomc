@@ -20,7 +20,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { AutoComplete, Empty, Select, Space, Tag, Tooltip, Typography } from 'antd';
+import { AutoComplete, Empty, Select, Tag, Tooltip, Typography } from 'antd';
 import { useGroupTree, useCommandSubFields, useSearchCommands } from '@core/hooks/api/useMmlConsole';
 import type { GroupTreeNode } from '@core/types/mmlConsole';
 import { useT } from '@/hooks/useT';
@@ -131,29 +131,43 @@ export default function PathPicker({
   };
   const handleClear = () => onChange([]);
 
+  // 路径多选框的当前 value：当前命令下已被外层 value 选中的 path 子集
+  // —— 用来在下拉里把已勾选项打 ✓，同时关闭下拉时 onChange 会拿到新增/减少的全量
+  const pathOptionValues = useMemo(() => pathOptions.map((o) => o.value), [pathOptions]);
+  const selectedInCurrentCommand = useMemo(
+    () => pathOptionValues.filter((p) => value.includes(p)),
+    [pathOptionValues, value],
+  );
+  const handlePathSelectChange = (picked: string[]) => {
+    // picked = 当前命令下用户最新勾选的全集。
+    // 把"其它命令的已选 path"（外层 value 减去当前命令所有 path 候选）保留，
+    // 再追加当前 picked，构成新的总 value。
+    const otherCommandPaths = value.filter((p) => !pathOptionValues.includes(p));
+    const merged = Array.from(new Set([...otherCommandPaths, ...picked]));
+    onChange(merged);
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {/* A. 搜索模式 */}
-      <AutoComplete
-        size="small"
-        style={{ width: '100%' }}
-        placeholder={t('mml.console.pathPicker.searchPlaceholder')}
-        value={searchText}
-        options={searchPathOptions}
-        onSearch={setSearchText}
-        onSelect={handleAddOne}
-        onChange={setSearchText}
-        disabled={disabled}
-        notFoundContent={
-          debouncedQuery ? <Empty description={false} image={Empty.PRESENTED_IMAGE_SIMPLE} /> : null
-        }
-      />
-
-      {/* B. 三级下拉模式（分组 → 命令 → 路径多选） */}
-      <Space size="small" wrap style={{ width: '100%' }}>
+      {/* Row 1：搜索 + 分组 + 命令 一行三列 */}
+      <div style={{ display: 'flex', gap: 8, width: '100%' }}>
+        <AutoComplete
+          size="small"
+          style={{ flex: 1, minWidth: 0 }}
+          placeholder={t('mml.console.pathPicker.searchPlaceholder')}
+          value={searchText}
+          options={searchPathOptions}
+          onSearch={setSearchText}
+          onSelect={handleAddOne}
+          onChange={setSearchText}
+          disabled={disabled}
+          notFoundContent={
+            debouncedQuery ? <Empty description={false} image={Empty.PRESENTED_IMAGE_SIMPLE} /> : null
+          }
+        />
         <Select
           size="small"
-          style={{ width: 200 }}
+          style={{ width: 200, flexShrink: 0 }}
           placeholder={t('mml.console.pathPicker.groupPlaceholder')}
           options={groupOptions}
           value={groupCode}
@@ -168,7 +182,7 @@ export default function PathPicker({
         />
         <Select
           size="small"
-          style={{ width: 240 }}
+          style={{ width: 240, flexShrink: 0 }}
           placeholder={t('mml.console.pathPicker.commandPlaceholder')}
           options={commandOptions}
           value={commandId}
@@ -178,23 +192,31 @@ export default function PathPicker({
           optionFilterProp="label"
           allowClear
         />
+      </div>
+
+      {/* Row 2：路径多选（全宽，showCheck 显示已勾选效果） */}
+      {commandId && (
         <Select
           size="small"
-          style={{ width: 320 }}
+          style={{ width: '100%' }}
           mode="multiple"
           placeholder={t('mml.console.pathPicker.pathPlaceholder')}
           options={pathOptions}
-          // multi-select Select 的 value 应表示"当前下拉框内已勾选"，本组件把
-          // value 提到外部 Tag 列表，所以这里始终 [] —— 用户点哪条直接 add
-          value={[]}
-          onChange={(picked) => handleAddPaths(picked as string[])}
-          disabled={disabled || !commandId}
-          maxTagCount={0}
-          maxTagPlaceholder={() => null}
+          // value 反映当前命令下已选 path 子集 → 下拉列表里这些项默认带 ✓
+          value={selectedInCurrentCommand}
+          onChange={(picked) => handlePathSelectChange(picked as string[])}
+          disabled={disabled}
           optionFilterProp="label"
+          // 不在 selector 里塞重复 Tag —— 已选展示统一交给下方 Tag 区域
+          maxTagCount={0}
+          maxTagPlaceholder={(omitted) =>
+            omitted.length > 0
+              ? `${t('mml.console.pathPicker.pathPlaceholder')} · ${omitted.length}`
+              : null
+          }
           allowClear
         />
-      </Space>
+      )}
 
       {/* 已选 path 列表 */}
       <div

@@ -4152,10 +4152,10 @@ const messages: Record<string, string> = {
   'mml.template.updated':                    '模板已更新',
   'mml.console.commandName':                 '命令名称',
   'mml.console.inputCommandName':            '请输入命令名称',
-  'mml.console.commandCode':                 '命令编码',
+  'mml.console.commandCode':                 '命令编码（命令编码必须自定义，不允许从下拉选择既有命令）',
   'mml.console.commandCodeRequired':         '请输入命令编码',
   'mml.console.commandCodeTextareaPlaceholder': '请输入自定义命令编码（不可选既有命令）',
-  'mml.console.commandCodeTextareaTip':      '命令编码必须自定义，不允许从下拉选择既有命令',
+  'mml.console.commandCodeTextareaTip':      '',
   'mml.console.operationType':               '操作类型',
   'mml.console.selectOperationType':         '请选择操作类型',
   'mml.console.modifyValuesLabel':           '修改值入口',
@@ -4167,8 +4167,8 @@ const messages: Record<string, string> = {
   'mml.console.saveOnly':                    '仅保存',
 
   // PathPicker（自定义模板的参数路径多选选择器，Bundle D）
-  'mml.console.pathPicker.label':            '参数路径（可选）',
-  'mml.console.pathPicker.help':             '按 分组 → 命令 → 路径 三级选择，或直接搜索 path / 命令名；可勾选多条 path',
+  'mml.console.pathPicker.label':            '参数路径（按 分组 → 命令 → 路径 三级选择，或直接搜索 path / 命令名；可勾选多条 path）',
+  'mml.console.pathPicker.help':             '',
   'mml.console.pathPicker.searchPlaceholder':   '搜索 path 或命令名（≥1 字符）',
   'mml.console.pathPicker.groupPlaceholder':    '选择分组',
   'mml.console.pathPicker.commandPlaceholder':  '选择命令',
