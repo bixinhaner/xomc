@@ -4483,7 +4483,10 @@ const messages: Record<string, string> = {
   'mml.console.execute.noDevices':             '请选择至少一台设备',
   'mml.console.execute.noStatements':          '请至少添加一条命令',
   // 终端"已派发"种子行：execute 成功后立即写入，下一条由 SSE mml_device_frame 推送
-  'mml.console.terminal.dispatched':           'Task {taskId} 已派发到 {devices} 台设备，等待执行结果...',
+  'mml.console.terminal.dispatched':           '命令已提交（任务 ID {taskId}），等待 {devices} 台设备执行，请稍等...',
+  'mml.console.terminal.running':              '任务开始执行，正在下发到设备…',
+  'mml.console.terminal.cancelled':            '任务已取消',
+  'mml.console.terminal.completedSummary':     '任务{status}（{result}）：成功 {success} / 失败 {failed}',
   'mml.console.subField.onReboot':             '需重启生效',
   'mml.console.subField.readOnly':             '只读',
   'mml.console.subField.readOnlyTip':          '只读字段（GetParameterValues 可查，SetParameterValues 不可改）',

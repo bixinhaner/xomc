@@ -38,6 +38,24 @@ export type MmlTaskStreamStatus =
   | 'failed'
   | 'cancelled';
 
+/**
+ * 可注入的本地化文案，供 hook 在状态切换时写入对应 line 文案。
+ * 调用方（RightPanel）传 t() 渲染后的中文/英文字串，hook 内部不依赖 i18n。
+ */
+export interface MmlTaskStreamMessages {
+  /** mml_task_status running → 写一行（"任务开始执行..."）*/
+  running?: string;
+  /** mml_task_status cancelled → 写一行（"任务已取消"）*/
+  cancelled?: string;
+  /** mml_task_completed → 写一行最终统计，调用方按需用模板拼成最终字串 */
+  completedSummary?: (args: {
+    status: string;
+    result: string;
+    successCount: number;
+    failedCount: number;
+  }) => string;
+}
+
 export interface UseMmlTaskStreamReturn {
   /** 累积的终端行；taskId 切换后会复位为空 */
   lines: MmlTerminalLine[];
@@ -126,10 +144,18 @@ function parseEventData<T>(raw: string): T | null {
   }
 }
 
-export function useMmlTaskStream(taskId: string | null): UseMmlTaskStreamReturn {
+export function useMmlTaskStream(
+  taskId: string | null,
+  messages?: MmlTaskStreamMessages,
+): UseMmlTaskStreamReturn {
   const [lines, setLines] = useState<MmlTerminalLine[]>([]);
   const [status, setStatus] = useState<MmlTaskStreamStatus>('idle');
   const accessToken = useUserStore((s) => s.accessToken);
+  // 用 ref 保存最新 messages，避免每次 messages 引用变化重建 EventSource
+  const messagesRef = useRef<MmlTaskStreamMessages | undefined>(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
   // 用 ref 保留最新 taskId，让 listener 闭包始终读到当前值（避免每次 taskId
   // 变化重建 EventSource — 频繁重连会丢事件 + 增加后端连接开销）。
   const taskIdRef = useRef<string | null>(taskId);
@@ -173,14 +199,24 @@ export function useMmlTaskStream(taskId: string | null): UseMmlTaskStreamReturn 
     const onTaskStatus = (ev: MessageEvent<string>): void => {
       const frame = parseEventData<MmlTaskStatusPayload>(ev.data);
       if (!frame || frame.task_id !== taskIdRef.current) return;
-      // running 状态切换只更新 status 不写行，避免噪声；只在终态时写
+      const msgs = messagesRef.current;
       if (frame.new_status === 'running') {
-        setStatus('running');
+        // running 状态首次到达 → 写一条"开始执行"提示行，让用户感知任务真的进入下发阶段
+        // （之前 silent → 用户体感是"派发后死寂"）。重复 running 事件不再写新行。
+        setStatus((prev) => {
+          if (prev !== 'running' && msgs?.running) {
+            setLines((cur) => [
+              ...cur,
+              { type: 'info', text: msgs.running as string, timestamp: formatTimestamp() },
+            ]);
+          }
+          return 'running';
+        });
       } else if (frame.new_status === 'cancelled') {
         setStatus('cancelled');
         setLines((prev) => [
           ...prev,
-          { type: 'info', text: `Task cancelled`, timestamp: formatTimestamp() },
+          { type: 'info', text: msgs?.cancelled ?? 'Task cancelled', timestamp: formatTimestamp() },
         ]);
       }
     };
@@ -189,11 +225,20 @@ export function useMmlTaskStream(taskId: string | null): UseMmlTaskStreamReturn 
       if (!frame || frame.task_id !== taskIdRef.current) return;
       const newStatus = statusFromCompleted(frame);
       setStatus(newStatus);
+      const msgs = messagesRef.current;
+      const text =
+        msgs?.completedSummary?.({
+          status: frame.status,
+          result: frame.result,
+          successCount: frame.success_count,
+          failedCount: frame.failed_count,
+        }) ??
+        `Task ${frame.status} (${frame.result}): success=${frame.success_count}, failed=${frame.failed_count}`;
       setLines((prev) => [
         ...prev,
         {
           type: newStatus === 'completed' ? 'success' : 'stderr',
-          text: `Task ${frame.status} (${frame.result}): success=${frame.success_count}, failed=${frame.failed_count}`,
+          text,
           timestamp: formatTimestamp(),
         },
       ]);

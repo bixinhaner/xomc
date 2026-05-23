@@ -50,6 +50,34 @@ function hasOnRebootHits(statements: Statement[]): boolean {
   );
 }
 
+// 任务名命名规则（用户决策）：命令名 + 设备 SN。
+// - 1 命令 1 设备："{op} {logicalName} {sn}"
+// - 1 命令 N 设备："{op} {logicalName} {sn1} 等 N 台"
+// - M 命令 N 设备："{op} {logicalName} 等 M 条 {sn1} 等 N 台"
+// 后端兜底逻辑：taskName 为空时回落到 "MML console (X statements × Y devices)"。
+function buildTaskName(
+  stmts: Statement[],
+  sns: string[],
+  lang: 'zh-CN' | 'en-US' = 'zh-CN',
+): string {
+  if (stmts.length === 0 || sns.length === 0) return '';
+  const first = stmts[0];
+  const cmdName =
+    first.logicalNameI18n?.[lang] ?? first.logicalNameI18n?.['zh'] ?? first.logicalCode;
+  const opVerbZh: Record<string, string> = {
+    LST: '查询',
+    MOD: '修改',
+    ADD: '添加',
+    RMV: '删除',
+  };
+  const opVerb = lang === 'zh-CN' ? (opVerbZh[first.operationType] ?? first.operationType) : first.operationType;
+  let cmdPart = `${opVerb} ${cmdName}`.trim();
+  if (stmts.length > 1) cmdPart += ` 等${stmts.length}条`;
+  const sn = sns[0];
+  const snPart = sns.length === 1 ? sn : `${sn} 等${sns.length}台`;
+  return `${cmdPart} ${snPart}`;
+}
+
 export default function RightPanel({ onExecuted }: RightPanelProps) {
   const t = useT();
   const [tab, setTab] = useState<RightTab>('control');
@@ -66,11 +94,36 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
   // mml_device_frame / mml_task_status / mml_task_completed 事件，把终端输出
   // 接回来；da6c1c68 重构时这条路径被推到 P4 但从未落地。
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
+  // 把 i18n 翻译后的文案传给 frontend-core hook —— hook 自身不依赖 i18n 系统。
+  const streamMessages = useMemo(
+    () => ({
+      running: t('mml.console.terminal.running'),
+      cancelled: t('mml.console.terminal.cancelled'),
+      completedSummary: ({
+        status,
+        result,
+        successCount,
+        failedCount,
+      }: {
+        status: string;
+        result: string;
+        successCount: number;
+        failedCount: number;
+      }) =>
+        t('mml.console.terminal.completedSummary', {
+          status,
+          result,
+          success: String(successCount),
+          failed: String(failedCount),
+        }),
+    }),
+    [t],
+  );
   const {
     lines: terminalLines,
     appendLine,
     clear: clearTerminal,
-  } = useMmlTaskStream(currentTaskId);
+  } = useMmlTaskStream(currentTaskId, streamMessages);
 
   const activeStatement = useMemo(
     () => statements.find((s) => s.uid === activeStatementUid) ?? null,
@@ -109,6 +162,7 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
         statements: structured,
         deviceSns: selectedDeviceSns,
         executeType: 'immediate',
+        taskName: buildTaskName(statements, selectedDeviceSns),
       });
       // 接入 SSE：先切 currentTaskId（hook 会复位 lines）再种一条"已派发"行，
       // 避免 task 创建瞬间到第一台设备完成之间终端是空白的体感。
