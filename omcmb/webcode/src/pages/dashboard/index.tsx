@@ -413,6 +413,7 @@ export default function DashboardPage() {
             <GISMap
               devices={MOCK_MAP_DEVICES}
               height={280}
+              showStats={false}
               onDeviceClick={handleDeviceClick}
             />
           </Card>
