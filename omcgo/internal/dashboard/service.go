@@ -581,12 +581,15 @@ func (s *Service) GetKPITimeSeries(ctx context.Context, kpiNames []string, start
 		result[name] = []KPITimeSeriesEntry{}
 	}
 
-	query, args, err := storage.Psql.Select("kpi_name", "time", "kpi_value").
-		From("kpi_values").
-		Where("kpi_name = ANY(?)", kpiNames).
+	// T-0164-P3 / G3：kpi_values 表合入 pm_metrics（metric_type='kpi'），列改名
+	// kpi_name → metric_path，kpi_value → metric_value。
+	query, args, err := storage.Psql.Select("metric_path", "time", "metric_value").
+		From("pm_metrics").
+		Where(sq.Eq{"metric_type": "kpi"}).
+		Where("metric_path = ANY(?)", kpiNames).
 		Where(sq.GtOrEq{"time": startTime}).
 		Where(sq.LtOrEq{"time": endTime}).
-		OrderBy("kpi_name", "time ASC").
+		OrderBy("metric_path", "time ASC").
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build kpi time series query: %w", err)

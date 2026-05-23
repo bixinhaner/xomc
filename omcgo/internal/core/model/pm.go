@@ -7,7 +7,9 @@ import (
 )
 
 // PMCounter 表示一条性能管理计数器采样。
-// 对应 TimescaleDB 的 pm_counters 超表，由 pm.Collector 解析 PM XML 后入库。
+// T-0164-P3 / G3 后 pm_counters 表已合入统一表 pm_metrics（metric_type='counter'），
+// 本 struct 作为 pm.Collector / handler / KPIEngine 内部的传输类型保留；
+// pm/counter.PgCounterRepository 作为 pm/metrics.Repository 的薄包装做字段双向转换。
 // 时间列 (Time) 是 TimescaleDB 分区键，Granularity 单位为分钟。
 type PMCounter struct {
 	Time         time.Time `json:"time" db:"time"`
@@ -20,7 +22,9 @@ type PMCounter struct {
 }
 
 // KPIValue 表示一个计算后的 KPI 指标值。
-// 对应 TimescaleDB 的 kpi_values 超表，由 pm.KPICalculator 在 PMCounter 入库后异步计算。
+// T-0164-P3 / G3 后 kpi_values 表已合入统一表 pm_metrics（metric_type='kpi'），
+// 本 struct 作为 pm.KPICalculator / pm.Handler 内部的传输类型保留；
+// pm/kpi.PgKPIRepository 作为 pm/metrics.Repository 的薄包装做字段双向转换。
 type KPIValue struct {
 	Time       time.Time   `json:"time" db:"time"`
 	DeviceID   uuid.UUID   `json:"device_id" db:"device_id"`
