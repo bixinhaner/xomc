@@ -9,9 +9,9 @@
  * - 流畅的动画和交互反馈
  * - 可访问性增强
  */
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { Checkbox, Spin, Empty } from 'antd';
-import { SearchOutlined, PlusOutlined, MinusOutlined } from '@ant-design/icons';
+import { useState, useMemo, useRef, useEffect } from 'react';
+import { Checkbox, Spin, Empty, Collapse } from 'antd';
+import { SearchOutlined, PlusOutlined, MinusOutlined, CaretDownOutlined } from '@ant-design/icons';
 import GISMap, { MAP_CONFIG } from '@/components/GISMap';
 import type { GISMapRef } from '@/components/GISMap';
 import type { MapDevice, DeviceGroupNode, DeviceGeo } from '@core/types/map';
@@ -25,7 +25,7 @@ import {
 } from '@core/hooks/api/useTopology';
 import { useDeviceSearch } from '@core/hooks/useDeviceSearch';
 import { topologyApi } from '@core/services/api/topologyApi';
-import { SPACING, RADIUS, SHADOWS, COLORS, transitionString } from './styles';
+import { SPACING, RADIUS, SHADOWS, COLORS, transitionString, DURATION, EASING } from './styles';
 import './animations.css';
 
 /**
@@ -43,6 +43,12 @@ function deviceGeoToMapDevice(device: DeviceGeo): MapDevice {
     address: device.address,
     alarmCount: device.alarmCount,
     type: device.type,
+    groupId: device.groupId,
+    // 新增字段：IP/MAC/PCI/设备名称
+    ip_address: device.ip_address,
+    mac: device.mac,
+    pci: device.pci,
+    device_name: device.device_name,
   };
 }
 
@@ -98,6 +104,13 @@ export default function GISMapView() {
     onlineInactive: true,
     offline: true,
   });
+
+  // 左侧筛选面板折叠状态（默认全部展开）
+  const [filterPanelActiveKeys, setFilterPanelActiveKeys] = useState<string[]>([
+    'deviceGroup',    // 设备组
+    'deviceStatus',   // 设备状态
+    'legend',         // 图例
+  ]);
 
   // 地图组件引用
   const mapRef = useRef<GISMapRef>(null);
@@ -403,10 +416,10 @@ export default function GISMapView() {
   };
 
   const searchBoxStyle: React.CSSProperties = {
-    margin: `${SPACING.xxl}px ${SPACING.xxl}px 0`,
+    margin: `${SPACING.md}px ${SPACING.md}px 0`,
     padding: `${SPACING.md}px ${SPACING.lg}px`,
     background: '#FFF',
-    border: '1px solid #D9D9D9',
+    border: '1px solid #E8E8E8',
     borderRadius: RADIUS.md,
     display: 'flex',
     alignItems: 'center',
@@ -420,17 +433,45 @@ export default function GISMapView() {
     padding: `${SPACING.xs}px 0`,
   };
 
-  const dividerStyle: React.CSSProperties = {
-    margin: `0 ${SPACING.xxl}px`,
-    borderTop: '1px solid #E8E8E8',
+  // ========== Collapse 组件样式 ==========
+
+  // Collapse 容器样式
+  const collapseContainerStyle: React.CSSProperties = {
+    background: 'transparent',
+    border: 'none',
+    flex: 1,
+    overflow: 'auto',
+    padding: `0 ${SPACING.md}px`,
   };
 
-  const sectionTitleStyle: React.CSSProperties = {
-    padding: `${SPACING.md}px ${SPACING.xxl}px ${SPACING.sm}px`,
-    fontSize: 12,
-    fontWeight: 500,
-    color: '#8C8C8C',
+  // Collapse.Panel 头部样式
+  const collapseHeaderStyle: React.CSSProperties = {
+    fontSize: 13,
+    fontWeight: 600,
+    color: '#595959',
+    padding: `${SPACING.md}px 0`,
+    transition: transitionString(['color'], 'fast'),
   };
+
+  // 折叠面板之间的间距
+  const collapseItemStyle: React.CSSProperties = {
+    marginBottom: SPACING.md,
+    borderRadius: RADIUS.md,
+    overflow: 'hidden',
+    transition: transitionString(['background', 'box-shadow'], 'fast'),
+  };
+
+  // 自定义折叠图标（红色向下箭头，与图片中的设计一致）
+  const customExpandIcon = (panelProps: { isActive?: boolean }) => (
+    <CaretDownOutlined
+      rotate={panelProps.isActive ? 0 : 180}
+      style={{
+        color: '#FF4D4F',      // 红色箭头
+        fontSize: 12,
+        transition: `transform ${DURATION.normal}ms ${EASING.out}`,
+      }}
+    />
+  );
 
   const zoomControlsStyle: React.CSSProperties = {
     position: 'absolute',
@@ -555,112 +596,133 @@ export default function GISMapView() {
           />
         </div>
 
-        {/* 设备组树 */}
-        <div style={sectionTitleStyle}>设备组</div>
-        <div style={treeContainerStyle}>
-          {isLoadingTree ? (
-            <div style={{ padding: 20, textAlign: 'center' }}>
-              <Spin size="small" />
-            </div>
-          ) : filteredGroupTree.length === 0 ? (
-            <Empty description="暂无设备组" style={{ padding: 20 }} />
-          ) : (
-            filteredGroupTree.map((node) => renderGroupNode(node))
-          )}
-        </div>
-
-        {/* 已选择汇总 */}
-        {selectedGroupIds.length > 0 && (
-          <div
-            style={{
-              margin: '8px 16px',
-              padding: '10px 12px',
-              background: '#E6F7FF',
-              borderRadius: 8,
-            }}
+        {/* 折叠面板：设备组、设备状态、图例 */}
+        <Collapse
+          activeKey={filterPanelActiveKeys}
+          onChange={(keys) => setFilterPanelActiveKeys(keys as string[])}
+          expandIcon={customExpandIcon}
+          bordered={false}
+          style={collapseContainerStyle}
+          className="gismap-filter-collapse"
+        >
+          {/* Panel 1: 设备组 */}
+          <Collapse.Panel
+            key="deviceGroup"
+            header={<span style={collapseHeaderStyle}>设备组</span>}
+            style={collapseItemStyle}
           >
-            <span style={{ fontSize: 13, color: token.colorPrimary }}>
-              已选择 {selectedGroupIds.length} 个设备组
-            </span>
-          </div>
-        )}
+            {/* 设备组树 */}
+            <div style={treeContainerStyle}>
+              {isLoadingTree ? (
+                <div style={{ padding: 20, textAlign: 'center' }}>
+                  <Spin size="small" />
+                </div>
+              ) : filteredGroupTree.length === 0 ? (
+                <Empty description="暂无设备组" style={{ padding: 20 }} />
+              ) : (
+                filteredGroupTree.map((node) => renderGroupNode(node))
+              )}
+            </div>
 
-        {/* 分隔线 */}
-        <div style={dividerStyle} />
+            {/* 已选择汇总 */}
+            {selectedGroupIds.length > 0 && (
+              <div
+                style={{
+                  margin: '12px 8px 8px', // 与树节点保持一致的左右边距
+                  padding: '10px 12px',
+                  background: '#E6F7FF', // 蓝色背景
+                  borderRadius: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <span style={{ fontSize: 13, color: '#595959' }}>
+                  已选择 <span style={{ color: '#1677FF', fontWeight: 500 }}>{selectedGroupIds.length}</span> 个设备组
+                </span>
+              </div>
+            )}
+          </Collapse.Panel>
 
-        {/* 设备状态筛选 */}
-        <div style={sectionTitleStyle}>设备状态</div>
-        <div style={{ padding: '0 20px' }}>
-          {/* 在线激活 */}
-          <div style={{ display: 'flex', alignItems: 'center', padding: '10px 0' }}>
-            <Checkbox
-              checked={statusFilter.onlineActive}
-              onChange={(e) => setStatusFilter((prev) => ({ ...prev, onlineActive: e.target.checked }))}
-            />
-            <div
-              style={{
-                width: 14,
-                height: 14,
-                borderRadius: '50%',
-                background: 'linear-gradient(180deg, #73D13D 0%, #52C41A 100%)',
-                margin: '0 8px 0 12px',
-              }}
-            />
-            <span style={{ fontSize: 14, color: 'var(--color-neutral-800)' }}>在线激活</span>
-            <span style={{ marginLeft: 'auto', fontSize: 14, color: '#52C41A' }}>
-              {stats.statusCount.onlineActive.toLocaleString()}
-            </span>
-          </div>
+          {/* Panel 2: 设备状态 */}
+          <Collapse.Panel
+            key="deviceStatus"
+            header={<span style={collapseHeaderStyle}>设备状态</span>}
+            style={collapseItemStyle}
+          >
+            <div style={{ padding: '0 4px' }}>
+              {/* 在线激活 */}
+              <div style={{ display: 'flex', alignItems: 'center', padding: '10px 0' }}>
+                <Checkbox
+                  checked={statusFilter.onlineActive}
+                  onChange={(e) => setStatusFilter((prev) => ({ ...prev, onlineActive: e.target.checked }))}
+                />
+                <div
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: '50%',
+                    background: 'linear-gradient(180deg, #73D13D 0%, #52C41A 100%)',
+                    margin: '0 8px 0 12px',
+                  }}
+                />
+                <span style={{ fontSize: 14, color: 'var(--color-neutral-800)' }}>在线激活</span>
+                <span style={{ marginLeft: 'auto', fontSize: 14, color: '#52C41A' }}>
+                  {stats.statusCount.onlineActive.toLocaleString()}
+                </span>
+              </div>
 
-          {/* 在线未激活 */}
-          <div style={{ display: 'flex', alignItems: 'center', padding: '10px 0' }}>
-            <Checkbox
-              checked={statusFilter.onlineInactive}
-              onChange={(e) => setStatusFilter((prev) => ({ ...prev, onlineInactive: e.target.checked }))}
-            />
-            <div
-              style={{
-                width: 14,
-                height: 14,
-                borderRadius: '50%',
-                background: 'linear-gradient(180deg, #FFC53D 0%, #FAAD14 100%)',
-                margin: '0 8px 0 12px',
-              }}
-            />
-            <span style={{ fontSize: 14, color: 'var(--color-neutral-800)' }}>在线未激活</span>
-            <span style={{ marginLeft: 'auto', fontSize: 14, color: '#FAAD14' }}>
-              {stats.statusCount.onlineInactive.toLocaleString()}
-            </span>
-          </div>
+              {/* 在线未激活 */}
+              <div style={{ display: 'flex', alignItems: 'center', padding: '10px 0' }}>
+                <Checkbox
+                  checked={statusFilter.onlineInactive}
+                  onChange={(e) => setStatusFilter((prev) => ({ ...prev, onlineInactive: e.target.checked }))}
+                />
+                <div
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: '50%',
+                    background: 'linear-gradient(180deg, #FFC53D 0%, #FAAD14 100%)',
+                    margin: '0 8px 0 12px',
+                  }}
+                />
+                <span style={{ fontSize: 14, color: 'var(--color-neutral-800)' }}>在线未激活</span>
+                <span style={{ marginLeft: 'auto', fontSize: 14, color: '#FAAD14' }}>
+                  {stats.statusCount.onlineInactive.toLocaleString()}
+                </span>
+              </div>
 
-          {/* 离线 */}
-          <div style={{ display: 'flex', alignItems: 'center', padding: '10px 0' }}>
-            <Checkbox
-              checked={statusFilter.offline}
-              onChange={(e) => setStatusFilter((prev) => ({ ...prev, offline: e.target.checked }))}
-            />
-            <div
-              style={{
-                width: 14,
-                height: 14,
-                borderRadius: '50%',
-                background: '#b60808',
-                margin: '0 8px 0 12px',
-              }}
-            />
-            <span style={{ fontSize: 14, color: 'var(--color-neutral-800)' }}>离线</span>
-            <span style={{ marginLeft: 'auto', fontSize: 14, color: '#b60808' }}>
-              {stats.statusCount.offline.toLocaleString()}
-            </span>
-          </div>
-        </div>
+              {/* 离线 */}
+              <div style={{ display: 'flex', alignItems: 'center', padding: '10px 0' }}>
+                <Checkbox
+                  checked={statusFilter.offline}
+                  onChange={(e) => setStatusFilter((prev) => ({ ...prev, offline: e.target.checked }))}
+                />
+                <div
+                  style={{
+                    width: 14,
+                    height: 14,
+                    borderRadius: '50%',
+                    background: '#b60808',
+                    margin: '0 8px 0 12px',
+                  }}
+                />
+                <span style={{ fontSize: 14, color: 'var(--color-neutral-800)' }}>离线</span>
+                <span style={{ marginLeft: 'auto', fontSize: 14, color: '#b60808' }}>
+                  {stats.statusCount.offline.toLocaleString()}
+                </span>
+              </div>
+            </div>
+          </Collapse.Panel>
 
-        {/* 分隔线 */}
-        <div style={dividerStyle} />
-
-        {/* 图例 */}
-        <div style={sectionTitleStyle}>图例</div>
-        <div style={{ padding: '0 20px' }}>
+          {/* Panel 3: 图例 */}
+          <Collapse.Panel
+            key="legend"
+            header={<span style={collapseHeaderStyle}>图例</span>}
+            style={collapseItemStyle}
+          >
+            <div style={{ padding: '0 4px' }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 24px' }}>
             <div style={{ display: 'flex', alignItems: 'center' }}>
               <div
@@ -737,6 +799,8 @@ export default function GISMapView() {
             </div>
           </div>
         </div>
+          </Collapse.Panel>
+        </Collapse>
       </div>
 
       {/* 地图区域 */}
