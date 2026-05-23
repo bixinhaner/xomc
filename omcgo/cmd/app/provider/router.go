@@ -363,9 +363,6 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	topologyHandler := topology.NewHandler(th.groupRepo, th.groupService, th.siteRepo, th.topoNodeRepo, th.topoEdgeRepo, th.syncSvc, th.logger)
 	topologyHandler.RegisterRoutes(permGroup("devices"))
 
-	// ----- Device Rules routes → resource "devices" -----
-	md.ruleHandler.RegisterRoutes(permGroup("devices"))
-
 	// ----- PM routes → resource "pm" -----
 	ph := c.pmHandlerDeps
 	pmHandler := pm.NewHandler(ph.pmCounterRepo, ph.pmKPIRepo, ph.pmKPIEngine, ph.pmTaskRepo, ph.pmFileStore, c.MinIO, c.Cfg.MinIO.Buckets.PMFiles, c.Logger)

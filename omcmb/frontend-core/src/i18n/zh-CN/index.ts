@@ -197,7 +197,6 @@ const messages: Record<string, string> = {
   'nav.device.handover':   '交接管理',
   'nav.device.stats':      '资源统计',
   'nav.device.import':     '导入导出',
-  'nav.device.rules':      '设备规则',
   'nav.device.recycle':    '回收站',
   'nav.device.abnormalReboot': '重启记录',
   'page.rebootRecords.title':   '重启记录',
@@ -2617,41 +2616,10 @@ const messages: Record<string, string> = {
   'ops.allOmcServer':               '全部 (OMC Server)',
 
   // -------------------------------------------------------------------------
-  // Device Rules (设备归属规则)
+  // Device Rules 模块已下线；以下仅保留 DeviceGrouping 共用的匹配条件文案。
+  // 模块专属文案（priority/title/applyRule/...）随页面删除一并清理。
   // -------------------------------------------------------------------------
-  'device.rules.title':             '设备规则',
-  'device.rules.priority':          '优先级',
-  'device.rules.rule':              '规则',
-  'device.rules.targetGroup':       '设备分组',
-  'device.rules.basicSettings':     '基本设置',
-  'device.rules.matchingRule':      '匹配规则',
   'device.rules.maxConditions':     '最多添加{max}个条件',
-  'device.rules.atLeastOneFilter':  '请至少输入一个过滤条件',
-  'device.rules.selectTargetGroup': '请选择设备分组',
-  'device.rules.apply':             '应用',
-  'device.rules.applyRule':         '应用规则',
-  'device.rules.selectGroupToApply':'选择要应用规则的设备组',
-  'device.rules.selectAtLeastOne':  '请选择至少一个设备组',
-  'device.rules.appliedTo':         '已对 {count} 个设备组应用规则',
-  'device.rules.moveUp':            '上移',
-  'device.rules.moveDown':          '下移',
-  'device.rules.deleteConfirm':     '确定要删除这条规则吗？',
-  'device.rules.inputRange':        '请输入{type}范围',
-  'device.rules.operators':         '操作描述',
-  'device.rules.operation':         '操作',
-  'device.rules.migrationResult':   '迁移结果',
-  'device.rules.sourceGroup':       '源设备分组',
-  'device.rules.migrationSuccess':  '迁移成功',
-  'device.rules.connectionTimeout': '连接超时',
-  'device.rules.enableStatus':      '启用状态',
-  'device.rules.searchPlaceholder': '请输入规则内容搜索',
-  'device.rules.ruleName':          '规则名称',
-  'device.rules.inputRuleName':     '请输入规则名称',
-  'device.rules.nameMatch':         '设备名称',
-  'device.rules.mustEnableFirst':   '请先启用规则',
-  'device.rules.taskInProgress':    '任务进行中',
-  'device.rules.taskCompleted':     '任务完成，匹配 {matched} 个设备，失败 {failed} 个',
-  'device.rules.applyConfirm':      '确认将规则 "{name}" 应用到所有匹配设备？',
 
   // Filter conditions
   'filter.contain':                 '包含',

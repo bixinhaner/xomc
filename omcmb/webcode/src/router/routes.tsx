@@ -27,7 +27,6 @@ const Commissioning      = React.lazy(() => import('@/pages/device/Commissioning
 const HandoverMgmt       = React.lazy(() => import('@/pages/device/HandoverManagement'));
 const ResourceStats      = React.lazy(() => import('@/pages/device/ResourceStatistics'));
 const ImportExport       = React.lazy(() => import('@/pages/device/ImportExport'));
-const DeviceRules        = React.lazy(() => import('@/pages/device/DeviceRules'));
 const RecycleBin         = React.lazy(() => import('@/pages/device/RecycleBin'));
 const UeDetail           = React.lazy(() => import('@/pages/device/UeDetail'));
 
@@ -248,7 +247,6 @@ export const routes: RouteObject[] = [
       { path: 'device/handover',   element: withSuspense(HandoverMgmt) },
       { path: 'device/stats',      element: withSuspense(ResourceStats) },
       { path: 'device/import',     element: withSuspense(ImportExport) },
-      { path: 'device/rules',      element: withSuspense(DeviceRules) },
       { path: 'device/recycle',    element: withSuspense(RecycleBin) },
       // T-0158: 异常重启记录
       { path: 'device/abnormal-reboot', element: withSuspense(AbnormalReboot) },

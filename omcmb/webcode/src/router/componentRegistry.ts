@@ -31,7 +31,6 @@ export const componentRegistry: Record<string, ComponentType> = {
   'device/HandoverManagement': lazy(() => import('@/pages/device/HandoverManagement')),
   'device/ResourceStatistics': lazy(() => import('@/pages/device/ResourceStatistics')),
   'device/ImportExport': lazy(() => import('@/pages/device/ImportExport')),
-  'device/DeviceRules': lazy(() => import('@/pages/device/DeviceRules')),
   'device/RecycleBin': lazy(() => import('@/pages/device/RecycleBin')),
   'device/UeDetail': lazy(() => import('@/pages/device/UeDetail')),
   'device/PlugAndPlay': lazy(() => import('@/pages/device/PlugAndPlay')),

@@ -1149,9 +1149,10 @@ func initMiscModules(c *Container) error {
 		}
 	}
 
-	// Device Rules (topology rules)
-	ruleRepo := topology.NewPgDeviceRuleRepository(c.PgPool)
-	ruleTaskRepo := topology.NewPgRuleTaskRepository(c.PgPool)
+	// 设备自动归组的两条路径都用同一个 DeviceMatcher：
+	//   - 心跳异步路径：device.InformHandler 收到 Inform 后调 matcher
+	//   - 分组规则路径：GroupMatchEngine 周期/事件触发时调 matcher
+	// （历史的 device_rules 独立引擎已彻底下线，相关表/handler/seed 一并删除）
 	matcher := topology.NewDeviceMatcher(c.GroupRepo, c.PgPool, logger)
 
 	// migration 000124 / SN 规则：把 matcher 注入到 device.InformHandler，
@@ -1163,21 +1164,6 @@ func initMiscModules(c *Container) error {
 		c.InformHandler.SetGroupAssigner(groupAssignerAdapter{a: hbAssigner})
 		logger.Info("device inform handler wired with topology heartbeat group assigner")
 	}
-	ruleService := topology.NewDeviceRuleService(ruleRepo, ruleTaskRepo, c.GroupRepo, matcher, c.PgPool, 4, logger)
-	// T-0027 S3 Day 4：注入 PgDeviceLister 替换 getAllDevices stub
-	// 见 prd/F06-topology-auto-grouping.md §12.1，让 ApplyRule 能扫描真实设备
-	ruleService.SetDeviceLister(topology.NewPgDeviceLister(c.PgPool, logger))
-	// T-0027 S3 Day 7：注入 EventBus 让 Start 装配 device.registered 订阅
-	// PRD §12.7 corrected：项目模式订 device.registered 而非早稿 device.inform.bootstrap
-	// 避免 InformHandler race（与 ProvisioningEngine 同模式，commit 2026-03-18）
-	ruleService.SetEventBus(c.EventBus)
-	// T-0027 S3 Day 8：注入 RuleMetrics（PRD §12.5 — 6 metric / 7 log key）
-	ruleService.SetMetrics(topology.NewRuleMetrics(c.MetricsReg))
-	// device_rules 引擎已下线：自动归组功能并入设备分组（GroupMatchEngine 接管）。
-	// ruleService 的 REST 接口仍保留（device_rules 表/CRUD 暂存、前端页面尚在），
-	// 故 ruleHandler 照常装配 —— 仅不再调 Start()：不挂 cron、不订阅 device.registered，
-	// 避免与 GroupMatchEngine 形成双引擎并跑。彻底退役 device_rules 留作后续单独立项。
-	c.miscDeps.ruleHandler = topology.NewRuleHandler(ruleService)
 
 	// 设备分组自动匹配引擎（GroupMatchEngine）：消费 L2 分组自带的匹配规则，
 	// 触发时机 = 分组新增/编辑 + 新设备注册 + 心跳 inform + cron @hourly。
@@ -1344,9 +1330,6 @@ type miscDeps struct {
 
 	// Report
 	reportHandler *report.Handler
-
-	// Device Rules
-	ruleHandler *topology.RuleHandler
 
 	// System Info
 	sysInfoHandler *components.SystemInfoHandler
