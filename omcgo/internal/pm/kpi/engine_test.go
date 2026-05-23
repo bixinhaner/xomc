@@ -2,36 +2,32 @@ package kpi
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/core/carrier"
-	"github.com/omcgo/omcgo/internal/core/carrier/cmcc"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/pm/counter"
+	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
-// mockCounterRepo is a test mock for counter.CounterRepository.
+// ── 测试夹具：mock 依赖 ──────────────────────────────────────────────
+
 type mockCounterRepo struct {
 	queryForKPIFunc func(ctx context.Context, deviceID uuid.UUID, cellID string, counterNames []string, startTime, endTime time.Time) (map[string]float64, error)
 }
 
-func (m *mockCounterRepo) BatchInsert(_ context.Context, _ []model.PMCounter) error {
-	return nil
-}
-
+func (m *mockCounterRepo) BatchInsert(_ context.Context, _ []model.PMCounter) error { return nil }
 func (m *mockCounterRepo) Query(_ context.Context, _ counter.CounterFilter) (*model.ListResponse[model.PMCounter], error) {
 	return model.NewListResponse([]model.PMCounter{}, 0, 1, 20), nil
 }
-
 func (m *mockCounterRepo) QueryAggregated(_ context.Context, _ counter.CounterFilter) ([]counter.AggregatedCounter, error) {
 	return nil, nil
 }
-
 func (m *mockCounterRepo) QueryForKPI(ctx context.Context, deviceID uuid.UUID, cellID string, counterNames []string, startTime, endTime time.Time) (map[string]float64, error) {
 	if m.queryForKPIFunc != nil {
 		return m.queryForKPIFunc(ctx, deviceID, cellID, counterNames, startTime, endTime)
@@ -39,206 +35,182 @@ func (m *mockCounterRepo) QueryForKPI(ctx context.Context, deviceID uuid.UUID, c
 	return nil, nil
 }
 
-// mockKPIRepo is a test mock for KPIRepository.
-type mockKPIRepo struct {
-	insertedValues []model.KPIValue
-}
+type mockKPIRepo struct{ insertedValues []model.KPIValue }
 
 func (m *mockKPIRepo) BatchInsert(_ context.Context, values []model.KPIValue) error {
 	m.insertedValues = append(m.insertedValues, values...)
 	return nil
 }
-
 func (m *mockKPIRepo) Query(_ context.Context, _ KPIFilter) (*model.ListResponse[model.KPIValue], error) {
 	return model.NewListResponse([]model.KPIValue{}, 0, 1, 20), nil
 }
-
 func (m *mockKPIRepo) ListDefinitions(_ context.Context, _ *model.CarrierCode, _ *model.Technology) ([]model.KPIDefinition, error) {
 	return nil, nil
 }
+func (m *mockKPIRepo) SyncDefinitions(_ context.Context, _ []model.KPIDefinition) error { return nil }
 
-func (m *mockKPIRepo) SyncDefinitions(_ context.Context, _ []model.KPIDefinition) error {
-	return nil
+// stubRouter 实现 KPIRouter，按 deviceSN 返指定路由 / 错误。
+type stubRouter struct {
+	route *router.KPIRoute
+	err   error
 }
 
-func newTestEngine(counterRepo *mockCounterRepo, kpiRepo *mockKPIRepo) *KPIEngine {
-	registry := carrier.NewRegistry()
-	registry.Register(cmcc.New())
-
-	logger := zap.NewNop()
-	return NewKPIEngine(counterRepo, kpiRepo, registry, logger)
+func (s *stubRouter) LookupByDevice(_ context.Context, _ string) (*router.KPIRoute, error) {
+	return s.route, s.err
 }
 
-func TestKPIEngine_LoadFormulas(t *testing.T) {
-	counterRepo := &mockCounterRepo{}
-	kpiRepo := &mockKPIRepo{}
-	engine := newTestEngine(counterRepo, kpiRepo)
-
-	formulas := engine.Formulas()
-
-	// CMCC has 10 LTE KPIs + 6 NR KPIs = 16 total
-	assert.Equal(t, 16, len(formulas), "expected 16 KPI formulas from CMCC carrier")
-
-	// Check that LTE and NR formulas are present
-	lteCount := 0
-	nrCount := 0
-	for _, f := range formulas {
-		if f.Technology == model.TechLTE {
-			lteCount++
-		}
-		if f.Technology == model.TechNR {
-			nrCount++
-		}
-		assert.Equal(t, model.CarrierCMCC, f.Carrier)
+// 构造一个典型的 BLQ-LTE-V1 KPI 子集：1 个 KPI（RRC_Succ_Rate = succ/att），2 个 counter。
+func sampleRoute() *router.KPIRoute {
+	return &router.KPIRoute{
+		ProductID:         uuid.New(),
+		IndicatorPlatform: "BLQ-LTE-V1",
+		KPIs: []router.KPIDef{
+			{
+				IndicatorID:  "K-001",
+				Name:         "RRC_Succ_Rate",
+				StatisType:   "pct",
+				Formula:      "RRC_Conn_Succ / RRC_Conn_Att",
+				Dependencies: []string{"RRC_Conn_Succ", "RRC_Conn_Att"},
+			},
+		},
 	}
-	assert.Equal(t, 10, lteCount, "expected 10 LTE KPIs")
-	assert.Equal(t, 6, nrCount, "expected 6 NR KPIs")
 }
 
-func TestKPIEngine_Calculate_ValidCounters(t *testing.T) {
+// ── Cases ────────────────────────────────────────────────────────────
+
+// 主路径：router 返路由 + counterRepo 有齐全 counter → KPIEngine 计算成功
+// 并按 route.KPIs[*] 落 KPIValue。
+func TestKPIEngine_Calculate_ComputesRoutedKPIs(t *testing.T) {
 	counterRepo := &mockCounterRepo{
-		queryForKPIFunc: func(_ context.Context, _ uuid.UUID, _ string, _ []string, _, _ time.Time) (map[string]float64, error) {
-			return map[string]float64{
-				"rrc_conn_setup_succ":     950,
-				"rrc_conn_setup_att":      1000,
-				"erab_setup_succ":         780,
-				"erab_setup_att":          800,
-				"s1_sig_conn_setup_succ":  490,
-				"s1_sig_conn_setup_att":   500,
-				"erab_abnormal_release":   5,
-				"erab_normal_release":     95,
-				"intra_freq_ho_succ":      180,
-				"intra_freq_ho_att":       200,
-				"inter_freq_ho_succ":      90,
-				"inter_freq_ho_att":       100,
-				"dl_prb_used_avg":         75,
-				"dl_prb_total":            100,
-				"ul_prb_used_avg":         40,
-				"ul_prb_total":            100,
-				"pdcp_sdu_dl_volume":      125000000,
-				"pdcp_sdu_ul_volume":      25000000,
-				"period_seconds":          900,
-			}, nil
+		queryForKPIFunc: func(_ context.Context, _ uuid.UUID, _ string, names []string, _, _ time.Time) (map[string]float64, error) {
+			// 验证 engine 把 route.KPIs[*].Dependencies 透传给 counterRepo
+			assert.ElementsMatch(t, []string{"RRC_Conn_Succ", "RRC_Conn_Att"}, names)
+			return map[string]float64{"RRC_Conn_Succ": 950, "RRC_Conn_Att": 1000}, nil
 		},
 	}
 	kpiRepo := &mockKPIRepo{}
-	engine := newTestEngine(counterRepo, kpiRepo)
-
-	deviceID := uuid.New()
-	startTime := time.Now().Add(-15 * time.Minute)
-	endTime := time.Now()
+	engine := NewKPIEngine(counterRepo, kpiRepo, &stubRouter{route: sampleRoute()}, zap.NewNop())
 
 	values, err := engine.Calculate(
 		context.Background(),
-		deviceID, "00A0C6", "TEST-SN-001", "Cell1",
-		startTime, endTime,
+		uuid.New(), "00A0C6", "TEST-SN-001", "cell-1",
+		time.Now().Add(-15*time.Minute), time.Now(),
 		model.CarrierCMCC, model.TechLTE,
 	)
 	require.NoError(t, err)
-
-	// Should produce values for all 10 LTE KPIs since all counters are available
-	assert.Equal(t, 10, len(values))
-
-	// Verify specific KPI values
-	kpiMap := make(map[string]float64)
-	for _, v := range values {
-		kpiMap[v.KPIName] = v.KPIValue
-	}
-
-	assert.InDelta(t, 95.0, kpiMap["lte_rrc_setup_success_rate"], 0.01)
-	assert.InDelta(t, 97.5, kpiMap["lte_erab_setup_success_rate"], 0.01)
-	assert.InDelta(t, 5.0, kpiMap["lte_erab_drop_rate"], 0.01)
-	assert.InDelta(t, 75.0, kpiMap["lte_dl_prb_utilization"], 0.01)
+	require.Len(t, values, 1)
+	assert.Equal(t, "RRC_Succ_Rate", values[0].KPIName)
+	assert.InDelta(t, 0.95, values[0].KPIValue, 0.001)
+	assert.Equal(t, model.CarrierCMCC, values[0].Carrier, "carrier 作为 passthrough 标签写入 KPIValue")
 }
 
-func TestKPIEngine_Calculate_MissingCounters(t *testing.T) {
+// 产品未匹配 → router 返 ErrProductNotMatched → KPIEngine 跳过设备，返空切片不抛错。
+func TestKPIEngine_Calculate_SkipsWhenProductNotMatched(t *testing.T) {
 	counterRepo := &mockCounterRepo{
-		queryForKPIFunc: func(_ context.Context, _ uuid.UUID, _ string, _ []string, _, _ time.Time) (map[string]float64, error) {
-			// Only return RRC counters, missing others
-			return map[string]float64{
-				"rrc_conn_setup_succ": 950,
-				"rrc_conn_setup_att":  1000,
-				"period_seconds":      900,
-			}, nil
+		queryForKPIFunc: func(context.Context, uuid.UUID, string, []string, time.Time, time.Time) (map[string]float64, error) {
+			t.Fatal("counterRepo 不应被调用：路由失败应短路")
+			return nil, nil
 		},
 	}
-	kpiRepo := &mockKPIRepo{}
-	engine := newTestEngine(counterRepo, kpiRepo)
-
-	deviceID := uuid.New()
-	startTime := time.Now().Add(-15 * time.Minute)
-	endTime := time.Now()
+	engine := NewKPIEngine(counterRepo, &mockKPIRepo{}, &stubRouter{err: router.ErrProductNotMatched}, zap.NewNop())
 
 	values, err := engine.Calculate(
 		context.Background(),
-		deviceID, "00A0C6", "TEST-SN-001", "Cell1",
-		startTime, endTime,
+		uuid.New(), "00A0C6", "ORPHAN-SN", "cell-1",
+		time.Now().Add(-15*time.Minute), time.Now(),
 		model.CarrierCMCC, model.TechLTE,
 	)
 	require.NoError(t, err)
-
-	// Only the KPIs whose counters are available should be computed
-	// rrc_conn_setup_succ/att -> lte_rrc_setup_success_rate should be there
-	found := false
-	for _, v := range values {
-		if v.KPIName == "lte_rrc_setup_success_rate" {
-			found = true
-			assert.InDelta(t, 95.0, v.KPIValue, 0.01)
-		}
-	}
-	assert.True(t, found, "expected lte_rrc_setup_success_rate to be calculated")
-
-	// KPIs requiring missing counters should be skipped
-	for _, v := range values {
-		assert.NotEqual(t, "lte_erab_setup_success_rate", v.KPIName,
-			"should not compute erab KPI with missing counters")
-	}
+	assert.Nil(t, values)
 }
 
-func TestKPIEngine_CalculateAndStore(t *testing.T) {
+// counter 缺失 → 该 KPI 跳过（Evaluate 报 counter not found），其它 KPI 仍能跑。
+func TestKPIEngine_Calculate_SkipKPIsWithMissingCounters(t *testing.T) {
+	route := &router.KPIRoute{
+		ProductID:         uuid.New(),
+		IndicatorPlatform: "BLQ-LTE-V1",
+		KPIs: []router.KPIDef{
+			{
+				Name:         "RRC_Succ_Rate",
+				Formula:      "RRC_Conn_Succ / RRC_Conn_Att",
+				Dependencies: []string{"RRC_Conn_Succ", "RRC_Conn_Att"},
+			},
+			{
+				Name:         "ERAB_Succ_Rate",
+				Formula:      "ERAB_Succ / ERAB_Att",
+				Dependencies: []string{"ERAB_Succ", "ERAB_Att"},
+			},
+		},
+	}
 	counterRepo := &mockCounterRepo{
 		queryForKPIFunc: func(_ context.Context, _ uuid.UUID, _ string, _ []string, _, _ time.Time) (map[string]float64, error) {
-			return map[string]float64{
-				"rrc_conn_setup_succ": 950,
-				"rrc_conn_setup_att":  1000,
-				"period_seconds":      900,
-			}, nil
+			// 只回 RRC counter，ERAB 全缺
+			return map[string]float64{"RRC_Conn_Succ": 950, "RRC_Conn_Att": 1000}, nil
+		},
+	}
+	engine := NewKPIEngine(counterRepo, &mockKPIRepo{}, &stubRouter{route: route}, zap.NewNop())
+
+	values, err := engine.Calculate(
+		context.Background(),
+		uuid.New(), "00A0C6", "SN-001", "cell-1",
+		time.Now().Add(-15*time.Minute), time.Now(),
+		model.CarrierCMCC, model.TechLTE,
+	)
+	require.NoError(t, err)
+	require.Len(t, values, 1, "ERAB 应被 skip")
+	assert.Equal(t, "RRC_Succ_Rate", values[0].KPIName)
+}
+
+// CalculateAndStore：落库走 kpiRepo.BatchInsert，且返回的值与持久化值一致。
+func TestKPIEngine_CalculateAndStore_PersistsResults(t *testing.T) {
+	counterRepo := &mockCounterRepo{
+		queryForKPIFunc: func(_ context.Context, _ uuid.UUID, _ string, _ []string, _, _ time.Time) (map[string]float64, error) {
+			return map[string]float64{"RRC_Conn_Succ": 950, "RRC_Conn_Att": 1000}, nil
 		},
 	}
 	kpiRepo := &mockKPIRepo{}
-	engine := newTestEngine(counterRepo, kpiRepo)
-
-	deviceID := uuid.New()
-	collectTime := time.Now()
+	engine := NewKPIEngine(counterRepo, kpiRepo, &stubRouter{route: sampleRoute()}, zap.NewNop())
 
 	values, err := engine.CalculateAndStore(
 		context.Background(),
-		deviceID, "00A0C6", "TEST-SN-001", "Cell1",
-		collectTime,
+		uuid.New(), "00A0C6", "SN-001", "cell-1",
+		time.Now(),
 		model.CarrierCMCC, model.TechLTE,
 	)
 	require.NoError(t, err)
-	assert.NotEmpty(t, values)
-
-	// Verify values were persisted
+	require.NotEmpty(t, values)
 	assert.Equal(t, len(values), len(kpiRepo.insertedValues))
 }
 
-func TestKPIEngine_Calculate_NoApplicableFormulas(t *testing.T) {
-	counterRepo := &mockCounterRepo{}
-	kpiRepo := &mockKPIRepo{}
-	engine := newTestEngine(counterRepo, kpiRepo)
+// router 透传非 sentinel 错误 → engine 透传给调用方（让上游决定重试 / 记账）。
+func TestKPIEngine_Calculate_PropagatesRouterError(t *testing.T) {
+	wantErr := errors.New("redis down")
+	engine := NewKPIEngine(&mockCounterRepo{}, &mockKPIRepo{}, &stubRouter{err: wantErr}, zap.NewNop())
 
-	deviceID := uuid.New()
-	startTime := time.Now().Add(-15 * time.Minute)
-	endTime := time.Now()
+	_, err := engine.Calculate(
+		context.Background(),
+		uuid.New(), "00A0C6", "SN-001", "cell-1",
+		time.Now().Add(-15*time.Minute), time.Now(),
+		model.CarrierCMCC, model.TechLTE,
+	)
+	require.ErrorIs(t, err, wantErr)
+}
 
-	// Use a carrier code that has no registered formulas
+// 空路由（router 返空 KPIs）→ 直接返 nil + nil，不调 counterRepo。
+func TestKPIEngine_Calculate_EmptyRouteShortCircuit(t *testing.T) {
+	counterRepo := &mockCounterRepo{
+		queryForKPIFunc: func(context.Context, uuid.UUID, string, []string, time.Time, time.Time) (map[string]float64, error) {
+			t.Fatal("counterRepo 不应被调用：空 KPI 子集应短路")
+			return nil, nil
+		},
+	}
+	engine := NewKPIEngine(counterRepo, &mockKPIRepo{}, &stubRouter{route: &router.KPIRoute{}}, zap.NewNop())
+
 	values, err := engine.Calculate(
 		context.Background(),
-		deviceID, "00A0C6", "TEST-SN-001", "Cell1",
-		startTime, endTime,
-		model.CarrierCTCC, model.TechLTE, // CTCC not registered
+		uuid.New(), "00A0C6", "SN-001", "cell-1",
+		time.Now().Add(-15*time.Minute), time.Now(),
+		model.CarrierCMCC, model.TechLTE,
 	)
 	require.NoError(t, err)
 	assert.Nil(t, values)

@@ -26,7 +26,9 @@ import (
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/collector"
 	"github.com/omcgo/omcgo/internal/pm/counter"
+	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
+	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/report"
 	"github.com/omcgo/omcgo/internal/task"
@@ -98,7 +100,44 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// PM Collector — wraps handler with retry+DLQ runner (T-0012 / R-106).
 	counterRepo := counter.NewPgCounterRepository(w.TsPool)
 	kpiRepo := kpi.NewPgKPIRepository(w.TsPool)
-	kpiEngine := kpi.NewKPIEngine(counterRepo, kpiRepo, w.Carriers, logger)
+
+	// T-0164-P1：worker 端的 KPIEngine 同样走 KPI Router（按 device → product → 平台公式路由），
+	// 不再依赖 carrier-based 硬编码 KPIDefinitions。这里独立构造 ProductRegistry，
+	// 与后面 alarm-definition fallback 复用同一份 PgRepository / Redis cache。
+	pmProductRepo := product.NewPgRepository(w.PgPool)
+	pmProductMetrics := product.NewRegistryMetrics(w.MetricsReg)
+	pmProductCache := product.Cache(product.NopCache{})
+	if w.Redis != nil {
+		pmProductCache = product.NewRedisCache(w.Redis)
+	}
+	pmProductRegistry := product.NewRegistry(pmProductRepo, pmProductCache, pmProductMetrics, logger)
+	if err := pmProductRegistry.Refresh(context.Background()); err != nil {
+		// 与 alarm-definition fallback 相同的容错策略：refresh 失败仅 WARN，让 KPI Router 跑
+		// 在零 patterns 状态（所有设备都会被判 orphan，KPI 跳过 + log warn）。比 worker 整体启动失败更稳。
+		logger.Warn("product registry refresh failed in worker; kpi route will be orphan-only",
+			zap.Error(err))
+	}
+	pmDeviceRepo := device.NewPgDeviceRepository(w.PgPool)
+	pmIndicatorRepo := indicator.NewPgIndicatorRepository(w.PgPool)
+	pmFormulaRepo := indicator.NewPgPlatformFormulaRepository(w.PgPool)
+	var pmL2Cache router.L2Cache
+	if w.Redis != nil {
+		pmL2Cache = router.NewRedisCache(w.Redis)
+	}
+	pmKPIRouter, err := router.New(
+		pmDeviceRepo, pmProductRegistry, pmIndicatorRepo, pmFormulaRepo,
+		router.Options{
+			L2Cache: pmL2Cache,
+			Metrics: router.NewMetrics(w.MetricsReg),
+			Logger:  logger,
+		},
+	)
+	if err != nil {
+		// 仅在依赖为 nil 时返错（编程错误）— worker 启动期阻塞性失败，及时暴露。
+		logger.Fatal("build kpi router failed", zap.Error(err))
+	}
+
+	kpiEngine := kpi.NewKPIEngine(counterRepo, kpiRepo, pmKPIRouter, logger)
 	pmParser := collector.NewPMXMLParser()
 	pmFileStore := pm.NewPgPMFileStore(w.PgPool)
 	pmCollector := collector.NewPMCollector(w.MinIO, cfg.MinIO.Buckets.PMFiles, pmParser, counterRepo, kpiEngine, pmFileStore, w.EventBus, logger)

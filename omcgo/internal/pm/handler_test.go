@@ -11,11 +11,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/core/carrier"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
+	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -85,14 +85,23 @@ func (m *pmHTaskRepo) Create(ctx context.Context, task *PerformanceTask) error {
 // Helpers
 // ---------------------------------------------------------------------------
 
+// pmHStubRouter 是测试夹具用的 KPIRouter 实现：永远返"产品未匹配"，让 Engine 跳过 KPI 计算。
+// 测试 handler 路由层不关心 KPI 值，需要 router 不抛硬错。
+type pmHStubRouter struct{}
+
+func (pmHStubRouter) LookupByDevice(_ context.Context, _ string) (*router.KPIRoute, error) {
+	return nil, router.ErrProductNotMatched
+}
+
 func pmHNewEngine() *kpi.KPIEngine {
-	return kpi.NewKPIEngine(&pmHCounterRepo{}, &pmHKPIRepo{}, carrier.NewRegistry(), zap.NewNop())
+	return kpi.NewKPIEngine(&pmHCounterRepo{}, &pmHKPIRepo{}, pmHStubRouter{}, zap.NewNop())
 }
 
 func pmHSetupRouter(cr counter.CounterRepository, kr kpi.KPIRepository, engine *kpi.KPIEngine, tr TaskRepository) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := NewHandler(cr, kr, engine, tr, nil, nil, "pm-files", nil, zap.NewNop())
+	// indicatorRepo 传 nil → ListKPIDefinitions 走退化路径返空集合。
+	h := NewHandler(cr, kr, engine, tr, nil, nil, "pm-files", nil, nil, zap.NewNop())
 	h.RegisterRoutes(r.Group(""))
 	return r
 }

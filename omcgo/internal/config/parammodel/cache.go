@@ -135,6 +135,20 @@ func (c *RedisCache) BumpVersion(ctx context.Context) (int64, error) {
 	return val, nil
 }
 
+// cacheEntry 是 parammodel L2 缓存的 wire 结构（T-0106 修复）。
+//
+// 修复前：直接存裸 []ParamMapping JSON，cache_version 字段虽然存在但读侧不校验，
+// 导致 schema 演进后旧条目无法被自动失效（必须等 TTL 24h 自然过期）。
+//
+// 修复后：写入时把 SchemaVersion = 当前 cache_version 一起序列化；
+// 读取时如果 entry.SchemaVersion ≠ 当前 cache_version，视为 stale → miss 击穿到 DB。
+// 这样 BumpVersion 一次能让全部进程的全部 parammodel 缓存条目立即失效，与
+// ProductRegistry / KPIRouter 的 cache_version 协议一致。
+type cacheEntry struct {
+	SchemaVersion int64           `json:"v"`
+	Payload       []ParamMapping  `json:"p"`
+}
+
 func (c *RedisCache) getMappings(ctx context.Context, key string) ([]ParamMapping, error) {
 	data, err := c.client.Get(ctx, key).Bytes()
 	if err != nil {
@@ -147,10 +161,20 @@ func (c *RedisCache) getMappings(ctx context.Context, key string) ([]ParamMappin
 	if len(data) == 0 {
 		return []ParamMapping{}, nil
 	}
-	var out []ParamMapping
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("unmarshal parammodel cache %s: %w", key, err)
+	var entry cacheEntry
+	if err := json.Unmarshal(data, &entry); err != nil {
+		// 旧格式 / 损坏值：视为 miss，不返回错误（让 DB 重建覆盖即可）。
+		return nil, nil
 	}
+	current, err := c.GetVersion(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get cache_version for %s: %w", key, err)
+	}
+	if entry.SchemaVersion != current {
+		// schema_version 漂移（BumpVersion 已被调用） → 强制重建。
+		return nil, nil
+	}
+	out := entry.Payload
 	if out == nil {
 		out = []ParamMapping{}
 	}
@@ -161,7 +185,11 @@ func (c *RedisCache) setMappings(ctx context.Context, key string, mappings []Par
 	if mappings == nil {
 		mappings = []ParamMapping{}
 	}
-	data, err := json.Marshal(mappings)
+	version, err := c.GetVersion(ctx)
+	if err != nil {
+		return fmt.Errorf("get cache_version for %s: %w", key, err)
+	}
+	data, err := json.Marshal(cacheEntry{SchemaVersion: version, Payload: mappings})
 	if err != nil {
 		return fmt.Errorf("marshal parammodel cache %s: %w", key, err)
 	}

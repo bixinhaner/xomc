@@ -59,7 +59,10 @@ func Setup(r *gin.Engine, c *Container) error {
 	})
 	graph.Add(components.ModuleInitializer{
 		Name: "pm",
-		Init: func() error { return initPMModule(c) },
+		// T-0164-P1：KPIEngine 现在依赖 ProductRegistry / DeviceRepo / IndicatorRepo
+		// 三者构造 KPI Router。productregistry / device 必须先就绪。
+		Depends: []string{"productregistry", "device"},
+		Init:    func() error { return initPMModule(c) },
 	})
 	// T-0164-P2 / G2 PM 保留策略层（sys_configs 5 键 + SavedHook reload）
 	// 依赖 admin（拿 SysConfigSvc 挂 hook），pm 仅占位保证 PM 主模块先初始化。
@@ -373,7 +376,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- PM routes → resource "pm" -----
 	ph := c.pmHandlerDeps
-	pmHandler := pm.NewHandler(ph.pmCounterRepo, ph.pmKPIRepo, ph.pmKPIEngine, ph.pmTaskRepo, ph.pmFileStore, c.MinIO, c.Cfg.MinIO.Buckets.PMFiles, c.TsPool, c.Logger)
+	pmHandler := pm.NewHandler(ph.pmCounterRepo, ph.pmKPIRepo, ph.pmKPIEngine, ph.pmTaskRepo, ph.pmFileStore, c.MinIO, c.Cfg.MinIO.Buckets.PMFiles, c.TsPool, ph.pmIndicatorRepo, c.Logger)
 	pmHandler.SetMetrics(pm.NewPMMetrics(c.MetricsReg))
 	pmHandler.RegisterRoutes(permGroup("pm"))
 

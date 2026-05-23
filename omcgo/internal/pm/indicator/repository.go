@@ -62,6 +62,10 @@ type PlatformFormulaRepository interface {
 	DeleteByIndicatorIDs(ctx context.Context, dt DeviceType, indicatorIDs []string, tx pgx.Tx) error
 	// ListPlatformNames returns distinct platform names for a device type.
 	ListPlatformNames(ctx context.Context, dt DeviceType) ([]string, error)
+	// ListByPlatform returns all formula rows for a platform.
+	// T-0164-P1: 给 pm/kpi/router 走"产品平台 → KPI 子集"路由用，按 platform_name 一次性
+	// 拉全部 (indicator_id, formula)，调用方再用 indicatorRepo.ListByIDs 拼指标元数据。
+	ListByPlatform(ctx context.Context, dt DeviceType, platformName string) ([]*PlatformFormula, error)
 }
 
 // EnabledIndicatorRepository manages enabled indicator status.

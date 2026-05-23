@@ -14,27 +14,40 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
 	"github.com/omcgo/omcgo/internal/pm/counter"
+	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"go.uber.org/zap"
 )
 
 // Handler provides REST API endpoints for PM data.
 type Handler struct {
-	counterRepo counter.CounterRepository
-	kpiRepo     kpi.KPIRepository
-	kpiEngine   *kpi.KPIEngine
-	taskRepo    TaskRepository
-	fileStore   PMFileStore
-	minioClient *minio.Client
-	pmBucket    string
-	pool        *pgxpool.Pool // T-0164-P3 fix: 反查 devices 拿 (oui, sn) 给 KPIEngine
-	metrics     *PMMetrics
-	logger      *zap.Logger
+	counterRepo   counter.CounterRepository
+	kpiRepo       kpi.KPIRepository
+	kpiEngine     *kpi.KPIEngine
+	taskRepo      TaskRepository
+	fileStore     PMFileStore
+	minioClient   *minio.Client
+	pmBucket      string
+	pool          *pgxpool.Pool // T-0164-P3 fix: 反查 devices 拿 (oui, sn) 给 KPIEngine
+	indicatorRepo indicator.IndicatorRepository // T-0164-P1：/pm/kpi/definitions 数据源（替代旧 carrier KPIDefinitions 列表）
+	metrics       *PMMetrics
+	logger        *zap.Logger
 }
 
 // NewHandler creates a new PM handler.
-func NewHandler(counterRepo counter.CounterRepository, kpiRepo kpi.KPIRepository, kpiEngine *kpi.KPIEngine, taskRepo TaskRepository, fileStore PMFileStore, minioClient *minio.Client, pmBucket string, pool *pgxpool.Pool, logger *zap.Logger) *Handler {
-	return &Handler{counterRepo: counterRepo, kpiRepo: kpiRepo, kpiEngine: kpiEngine, taskRepo: taskRepo, fileStore: fileStore, minioClient: minioClient, pmBucket: pmBucket, pool: pool, logger: logger}
+func NewHandler(counterRepo counter.CounterRepository, kpiRepo kpi.KPIRepository, kpiEngine *kpi.KPIEngine, taskRepo TaskRepository, fileStore PMFileStore, minioClient *minio.Client, pmBucket string, pool *pgxpool.Pool, indicatorRepo indicator.IndicatorRepository, logger *zap.Logger) *Handler {
+	return &Handler{
+		counterRepo:   counterRepo,
+		kpiRepo:       kpiRepo,
+		kpiEngine:     kpiEngine,
+		taskRepo:      taskRepo,
+		fileStore:     fileStore,
+		minioClient:   minioClient,
+		pmBucket:      pmBucket,
+		pool:          pool,
+		indicatorRepo: indicatorRepo,
+		logger:        logger,
+	}
 }
 
 // lookupDeviceOUISN 反查 devices 表的 (oui, serial_number) 双键（T-0164-P3 fix）。
@@ -233,30 +246,76 @@ func (h *Handler) ListKPIValues(c *gin.Context) {
 	response.OK(c, result)
 }
 
+// ListKPIDefinitions 返回 KPI 元数据目录，供前端"性能管理→指标列表"等界面消费。
+//
+// T-0164-P1 改造前：数据源是 carrier 适配器代码里硬编码的 KPIDefinitions 列表。
+// 现在改为枚举 perf_indicators_{enb,gsm,gnb}（is_counter='0' 的行），
+// platform_name 维度的具体公式在 KPIEngine 计算路径上由 router 路由解析，
+// 这里只暴露"系统支持哪些 KPI 指标"。
+//
+// 查询参数（向后兼容老前端的 carrier 模糊搜索）：
+//   - keyword：name/cn_name/id 模糊匹配
+//   - device_type：ENB / GSM / GNB（不传 → 三表合并枚举）
 func (h *Handler) ListKPIDefinitions(c *gin.Context) {
-	carrier := c.Query("carrier")
-	tech := c.Query("technology")
+	keyword := c.Query("keyword")
+	if keyword == "" {
+		// 老前端把 keyword 塞在 carrier 参数里（见 omcmb/.../usePerformance）— 兼容一下。
+		keyword = c.Query("carrier")
+	}
+	dtParam := c.Query("device_type")
 
-	// Return from engine's in-memory formulas
+	dts := []indicator.DeviceType{indicator.DeviceTypeENB, indicator.DeviceTypeGSM, indicator.DeviceTypeGNB}
+	if dtParam != "" {
+		dt, err := indicator.ParseDeviceType(dtParam)
+		if err != nil {
+			response.Fail(c, http.StatusBadRequest, "invalid device_type")
+			return
+		}
+		dts = []indicator.DeviceType{dt}
+	}
+
+	if h.indicatorRepo == nil {
+		// 测试 / 退化场景：返空集合，调用方按 total=0 处理。
+		response.OK(c, gin.H{"items": []model.KPIDefinition{}, "total": 0})
+		return
+	}
+
+	isCounter := "0" // KPI 而非 counter
 	var items []model.KPIDefinition
-	for _, f := range h.kpiEngine.Formulas() {
-		if carrier != "" && string(f.Carrier) != carrier {
-			continue
+	for _, dt := range dts {
+		filter := indicator.IndicatorListFilter{
+			DeviceType: string(dt),
+			IsCounter:  &isCounter,
 		}
-		if tech != "" && string(f.Technology) != tech {
-			continue
+		if keyword != "" {
+			kw := keyword
+			filter.Keyword = &kw
 		}
-		items = append(items, model.KPIDefinition{
-			Name:        f.Name,
-			DisplayName: f.DisplayName,
-			Formula:     f.Parsed.Expression,
-			Unit:        f.Unit,
-			Carrier:     f.Carrier,
-			Technology:  f.Technology,
-			Counters:    f.Counters,
-		})
+		rows, err := h.indicatorRepo.ListAll(c.Request.Context(), filter)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+			return
+		}
+		for _, r := range rows {
+			items = append(items, model.KPIDefinition{
+				Name:        r.EnName,
+				DisplayName: derefOr(r.CnName, r.EnName),
+				Formula:     derefOr(r.Arithmetic, ""),
+				Unit:        derefOr(r.UnitID, ""),
+				// Carrier / Technology 在新模型下不再是 KPI 维度（按平台 + 设备类型路由），
+				// 留空以保持 wire 兼容。
+				Counters: nil,
+			})
+		}
 	}
 	response.OK(c, gin.H{"items": items, "total": len(items)})
+}
+
+func derefOr(p *string, fallback string) string {
+	if p == nil {
+		return fallback
+	}
+	return *p
 }
 
 type calculateRequest struct {

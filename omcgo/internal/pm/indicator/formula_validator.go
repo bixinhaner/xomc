@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/omcgo/omcgo/internal/pm/kpi"
+	"github.com/omcgo/omcgo/internal/pm/kpi/expr"
 )
 
 // FormulaValidator validates indicator formulas against a known ID→formula mapping.
@@ -98,8 +98,8 @@ func (v *FormulaValidator) Validate(arithmetic string) ValidationResult {
 	}
 
 	// Parse and evaluate the numeric expression
-	expr := rebuilt.String()
-	formula, err := kpi.ParseFormula(expr)
+	rebuiltExpr := rebuilt.String()
+	formula, err := expr.Parse(rebuiltExpr)
 	if err != nil {
 		return ValidationResult{IsValid: false, ErrorMsg: "Expression is invalid"}
 	}

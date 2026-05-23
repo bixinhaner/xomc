@@ -120,6 +120,36 @@ func (r *PgPlatformFormulaRepository) DeleteByIndicatorIDs(ctx context.Context, 
 	return nil
 }
 
+func (r *PgPlatformFormulaRepository) ListByPlatform(ctx context.Context, dt DeviceType, platformName string) ([]*PlatformFormula, error) {
+	table := dt.FormulaTable()
+	query, args, err := storage.Psql.Select(formulaColumns...).
+		From(table).
+		Where(sq.Eq{"platform_name": platformName}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list %s by platform SQL: %w", table, err)
+	}
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list %s by platform: %w", table, err)
+	}
+	defer rows.Close()
+
+	var formulas []*PlatformFormula
+	for rows.Next() {
+		f, err := scanFormula(rows)
+		if err != nil {
+			return nil, err
+		}
+		formulas = append(formulas, f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating formula rows: %w", err)
+	}
+	return formulas, nil
+}
+
 func (r *PgPlatformFormulaRepository) ListPlatformNames(ctx context.Context, dt DeviceType) ([]string, error) {
 	table := dt.FormulaTable()
 	query, args, err := storage.Psql.Select("DISTINCT platform_name").

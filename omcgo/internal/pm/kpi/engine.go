@@ -2,92 +2,62 @@ package kpi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/core/carrier"
+	"go.uber.org/zap"
+
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/pm/counter"
-	"go.uber.org/zap"
+	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 )
 
-// RegisteredFormula holds a parsed formula alongside its definition metadata.
-type RegisteredFormula struct {
-	Name        string
-	DisplayName string
-	Parsed      *Formula
-	Counters    []string
-	Unit        string
-	Category    string
-	Carrier     model.CarrierCode
-	Technology  model.Technology
+// KPIRouter 抽象 router.Router，方便单元测试 mock。
+type KPIRouter interface {
+	LookupByDevice(ctx context.Context, deviceSN string) (*router.KPIRoute, error)
 }
 
-// KPIEngine calculates KPI values from PM counters using registered formulas.
+// KPIEngine 按设备 → 产品 → 平台公式路由计算 KPI（T-0164-P1 / G1）。
+//
+// 旧实现（按 carrier+technology 过滤代码硬编码 KPIDefinitions）已下线，
+// 现在所有 KPI 公式由 DB 元数据声明：
+//   - 来源：indicator.PlatformFormulaRepository / IndicatorRepository
+//   - 路由：router.Router.LookupByDevice — 决定"哪台设备算哪些 KPI"
+//   - 调用方语义：carrier/tech 只作为 KPIValue 行的"分类标签"，不再用于过滤
+//     公式集合；保留参数是为了多运营商环境下的存储分桶 + 历史兼容。
 type KPIEngine struct {
-	formulas        []*RegisteredFormula
-	counterRepo     counter.CounterRepository
-	kpiRepo         KPIRepository
-	carrierRegistry *carrier.CarrierRegistry
-	logger          *zap.Logger
+	counterRepo counter.CounterRepository
+	kpiRepo     KPIRepository
+	router      KPIRouter
+	logger      *zap.Logger
 }
 
-// NewKPIEngine creates a new KPI engine and loads formulas from all registered carriers.
+// NewKPIEngine 构造 Engine。router 必须非 nil（旧实现允许 carrier registry 为空，
+// 现在路由是核心依赖）。logger nil → NewNop。
 func NewKPIEngine(
 	counterRepo counter.CounterRepository,
 	kpiRepo KPIRepository,
-	carrierRegistry *carrier.CarrierRegistry,
+	kpiRouter KPIRouter,
 	logger *zap.Logger,
 ) *KPIEngine {
-	e := &KPIEngine{
-		counterRepo:     counterRepo,
-		kpiRepo:         kpiRepo,
-		carrierRegistry: carrierRegistry,
-		logger:          logger,
+	if logger == nil {
+		logger = zap.NewNop()
 	}
-	e.loadFormulas()
-	return e
-}
-
-func (e *KPIEngine) loadFormulas() {
-	for _, c := range e.carrierRegistry.All() {
-		for _, tech := range c.SupportedTechnologies() {
-			defs := c.KPIDefinitions(tech)
-			for _, d := range defs {
-				parsed, err := ParseFormula(d.Formula)
-				if err != nil {
-					e.logger.Warn("skip invalid kpi formula",
-						zap.String("name", d.Name),
-						zap.String("formula", d.Formula),
-						zap.Error(err),
-					)
-					continue
-				}
-				e.formulas = append(e.formulas, &RegisteredFormula{
-					Name:        d.Name,
-					DisplayName: d.DisplayName,
-					Parsed:      parsed,
-					Counters:    d.Counters,
-					Unit:        d.Unit,
-					Category:    d.Category,
-					Carrier:     c.Code(),
-					Technology:  tech,
-				})
-			}
-		}
+	return &KPIEngine{
+		counterRepo: counterRepo,
+		kpiRepo:     kpiRepo,
+		router:      kpiRouter,
+		logger:      logger.Named("kpi.engine"),
 	}
-	e.logger.Info("KPI formulas loaded", zap.Int("count", len(e.formulas)))
-}
-
-// Formulas returns all registered formulas.
-func (e *KPIEngine) Formulas() []*RegisteredFormula {
-	return e.formulas
 }
 
 // Calculate computes KPI values for a device/cell in a time range.
-// T-0164-P3: 签名加 oui+deviceSN 用于按 TR-069 标准双键写入 pm_metrics。
-// deviceID 保留作 internal ID（counterRepo.QueryForKPI 反查 counter 用）。
+//
+// 与旧签名相比 carrier+tech 仍保留 — 不用作公式集合的过滤键，而是作为
+// 落库标签（KPIValue.Carrier / Technology）传入。Router 路由失败的设备
+// 静默 skip（log warn）— 不应让一台 orphan 设备阻塞整批文件的 KPI 计算。
 func (e *KPIEngine) Calculate(
 	ctx context.Context,
 	deviceID uuid.UUID,
@@ -97,25 +67,47 @@ func (e *KPIEngine) Calculate(
 	carrierCode model.CarrierCode,
 	tech model.Technology,
 ) ([]model.KPIValue, error) {
-	// Collect all needed counter names
-	var allCounters []string
-	applicable := e.applicableFormulas(carrierCode, tech)
-	for _, f := range applicable {
-		allCounters = append(allCounters, f.Counters...)
+	if e.router == nil {
+		return nil, errors.New("kpi.Engine.Calculate: router not configured")
 	}
 
-	// Query counter values
-	counterValues, err := e.counterRepo.QueryForKPI(ctx, deviceID, cellID, allCounters, startTime, endTime)
+	route, err := e.router.LookupByDevice(ctx, deviceSN)
+	if err != nil {
+		if errors.Is(err, router.ErrProductNotMatched) || errors.Is(err, router.ErrInvalidProductMetadata) {
+			e.logger.Warn("kpi route unavailable; skip device",
+				zap.String("device_sn", deviceSN),
+				zap.Error(err))
+			return nil, nil
+		}
+		return nil, fmt.Errorf("kpi route lookup for %q: %w", deviceSN, err)
+	}
+	if route == nil || len(route.KPIs) == 0 {
+		return nil, nil
+	}
+
+	counterNames := uniqueCounterDeps(route.KPIs)
+	if len(counterNames) == 0 {
+		return nil, nil
+	}
+
+	counterValues, err := e.counterRepo.QueryForKPI(ctx, deviceID, cellID, counterNames, startTime, endTime)
 	if err != nil {
 		return nil, fmt.Errorf("query counters for kpi: %w", err)
 	}
 
-	// Evaluate each formula
-	var results []model.KPIValue
-	for _, f := range applicable {
-		value, err := f.Parsed.Evaluate(counterValues)
+	results := make([]model.KPIValue, 0, len(route.KPIs))
+	for _, k := range route.KPIs {
+		parsed, err := ParseFormula(k.Formula)
 		if err != nil {
-			// Skip formulas with missing counters or division by zero
+			e.logger.Warn("skip kpi with invalid formula",
+				zap.String("kpi", k.Name),
+				zap.String("formula", k.Formula),
+				zap.Error(err))
+			continue
+		}
+		value, err := parsed.Evaluate(counterValues)
+		if err != nil {
+			// counter 缺失 / 除零 → 跳过这条 KPI；不向上抛错。
 			continue
 		}
 		results = append(results, model.KPIValue{
@@ -124,18 +116,16 @@ func (e *KPIEngine) Calculate(
 			OUI:        oui,
 			DeviceSN:   deviceSN,
 			CellID:     cellID,
-			KPIName:    f.Name,
+			KPIName:    k.Name,
 			KPIValue:   value,
 			Carrier:    carrierCode,
 			Technology: tech,
 		})
 	}
-
 	return results, nil
 }
 
 // CalculateAndStore calculates KPIs and persists them.
-// T-0164-P3: 签名加 oui+deviceSN，与 Calculate 一致。
 func (e *KPIEngine) CalculateAndStore(
 	ctx context.Context,
 	deviceID uuid.UUID,
@@ -145,30 +135,31 @@ func (e *KPIEngine) CalculateAndStore(
 	carrierCode model.CarrierCode,
 	tech model.Technology,
 ) ([]model.KPIValue, error) {
-	// Use a time window around the collection time
-	startTime := collectTime.Add(-time.Duration(15) * time.Minute)
-	endTime := collectTime
-
-	results, err := e.Calculate(ctx, deviceID, oui, deviceSN, cellID, startTime, endTime, carrierCode, tech)
+	startTime := collectTime.Add(-15 * time.Minute)
+	results, err := e.Calculate(ctx, deviceID, oui, deviceSN, cellID, startTime, collectTime, carrierCode, tech)
 	if err != nil {
 		return nil, err
 	}
-
 	if len(results) > 0 {
 		if err := e.kpiRepo.BatchInsert(ctx, results); err != nil {
 			return nil, fmt.Errorf("store kpi values: %w", err)
 		}
 	}
-
 	return results, nil
 }
 
-func (e *KPIEngine) applicableFormulas(carrierCode model.CarrierCode, tech model.Technology) []*RegisteredFormula {
-	var result []*RegisteredFormula
-	for _, f := range e.formulas {
-		if f.Carrier == carrierCode && f.Technology == tech {
-			result = append(result, f)
+// uniqueCounterDeps 去重收集 route.KPIs 中所有公式依赖的 counter 名。
+func uniqueCounterDeps(kpis []router.KPIDef) []string {
+	seen := make(map[string]struct{})
+	out := make([]string, 0)
+	for _, k := range kpis {
+		for _, name := range k.Dependencies {
+			if _, dup := seen[name]; dup {
+				continue
+			}
+			seen[name] = struct{}{}
+			out = append(out, name)
 		}
 	}
-	return result
+	return out
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
+	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 )
 
 // initPMModule 初始化 F03 性能管理模块。
@@ -19,7 +20,6 @@ func initPMModule(c *Container) error {
 
 	pmCounterRepo := counter.NewPgCounterRepository(c.TsPool)
 	pmKPIRepo := kpi.NewPgKPIRepository(c.TsPool)
-	pmKPIEngine := kpi.NewKPIEngine(pmCounterRepo, pmKPIRepo, c.Carriers, logger)
 	pmTaskRepo := pm.NewPgTaskRepository(c.PgPool)
 	pmFileStore := pm.NewPgPMFileStore(c.PgPool)
 
@@ -39,6 +39,30 @@ func initPMModule(c *Container) error {
 	indicatorGroupRepo := indicator.NewPgGroupRepository(c.PgPool)
 	indicatorRepo := indicator.NewPgIndicatorRepository(c.PgPool)
 	platformFormulaRepo := indicator.NewPgPlatformFormulaRepository(c.PgPool)
+
+	// T-0164-P1：构造 KPI Router 替代旧 carrier-based 公式路由。
+	// 依赖：ProductRegistry / DeviceRepo / IndicatorRepository / PlatformFormulaRepository。
+	var l2Cache router.L2Cache
+	if c.Redis != nil {
+		l2Cache = router.NewRedisCache(c.Redis)
+	}
+	kpiRouter, err := router.New(
+		c.DeviceRepo,
+		c.ProductRegistry,
+		indicatorRepo,
+		platformFormulaRepo,
+		router.Options{
+			L2Cache: l2Cache,
+			Metrics: router.NewMetrics(c.MetricsReg),
+			Logger:  logger,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("build kpi router: %w", err)
+	}
+
+	pmKPIEngine := kpi.NewKPIEngine(pmCounterRepo, pmKPIRepo, kpiRouter, logger)
+
 	enabledRepo := indicator.NewPgEnabledRepository(c.PgPool)
 	templateRelRepo := indicator.NewPgTemplateRelRepository(c.PgPool)
 	custNameRepo := indicator.NewPgCustNameRepository(c.PgPool)
@@ -75,6 +99,7 @@ func initPMModule(c *Container) error {
 		pmKPIEngine:          pmKPIEngine,
 		pmTaskRepo:           pmTaskRepo,
 		pmFileStore:          pmFileStore,
+		pmIndicatorRepo:      indicatorRepo,
 		indicatorHandler:     indicatorHandler,
 		indicatorRESTHandler: indicatorRESTHandler,
 	}
@@ -98,11 +123,12 @@ func (r *indicatorReloader) ReloadOne(ctx context.Context, name string) error {
 }
 
 type pmHandlerDeps struct {
-	pmCounterRepo *counter.PgCounterRepository
-	pmKPIRepo     *kpi.PgKPIRepository
-	pmKPIEngine   *kpi.KPIEngine
-	pmTaskRepo    *pm.PgTaskRepository
-	pmFileStore   *pm.PgPMFileStore
+	pmCounterRepo   *counter.PgCounterRepository
+	pmKPIRepo       *kpi.PgKPIRepository
+	pmKPIEngine     *kpi.KPIEngine
+	pmTaskRepo      *pm.PgTaskRepository
+	pmFileStore     *pm.PgPMFileStore
+	pmIndicatorRepo indicator.IndicatorRepository // T-0164-P1 ListKPIDefinitions 数据源
 
 	// Indicator management handler
 	indicatorHandler     *indicator.IndicatorHandler

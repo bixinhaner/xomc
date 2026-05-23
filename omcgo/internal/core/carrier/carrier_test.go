@@ -106,23 +106,8 @@ func TestCMCCCarrier(t *testing.T) {
 		}
 	})
 
-	t.Run("kpi_definitions", func(t *testing.T) {
-		lteKPIs := c.KPIDefinitions(model.TechLTE)
-		assert.NotEmpty(t, lteKPIs)
-		// Check RRC success rate is defined
-		found := false
-		for _, kpi := range lteKPIs {
-			if kpi.Name == "lte_rrc_setup_success_rate" {
-				found = true
-				assert.Equal(t, "%", kpi.Unit)
-				assert.NotEmpty(t, kpi.Counters)
-			}
-		}
-		assert.True(t, found, "RRC setup success rate KPI should be defined")
-
-		nrKPIs := c.KPIDefinitions(model.TechNR)
-		assert.NotEmpty(t, nrKPIs)
-	})
+	// T-0164-P1: KPIDefinitions 已从 carrier 接口下线（KPI 元数据走 DB / pm/kpi/router），
+	// 原 kpi_definitions 子测试已删除。
 
 	t.Run("provisioning_templates", func(t *testing.T) {
 		lteTemplates := c.ProvisioningTemplates(model.TechLTE)
@@ -195,23 +180,7 @@ func TestCTCCCarrier(t *testing.T) {
 		}
 	})
 
-	t.Run("kpi_definitions", func(t *testing.T) {
-		lteKPIs := c.KPIDefinitions(model.TechLTE)
-		assert.NotEmpty(t, lteKPIs)
-		// Check RRC success rate is defined
-		found := false
-		for _, kpi := range lteKPIs {
-			if kpi.Name == "lte_rrc_setup_success_rate" {
-				found = true
-				assert.Equal(t, "%", kpi.Unit)
-				assert.NotEmpty(t, kpi.Counters)
-			}
-		}
-		assert.True(t, found, "RRC setup success rate KPI should be defined")
-
-		nrKPIs := c.KPIDefinitions(model.TechNR)
-		assert.NotEmpty(t, nrKPIs)
-	})
+	// T-0164-P1: kpi_definitions 子测试已删除（同上）。
 
 	t.Run("provisioning_templates", func(t *testing.T) {
 		lteTemplates := c.ProvisioningTemplates(model.TechLTE)
