@@ -5,7 +5,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TILES_DIR="${SCRIPT_DIR}/tiles"
+TILES_DIR="${SCRIPT_DIR}/../../../tiles"
 TILES_JSON="${TILES_DIR}/tiles.json"
 NGINX_CONF="${SCRIPT_DIR}/default.conf"
 

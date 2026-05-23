@@ -214,7 +214,7 @@ services:
         hard: 40960
     volumes:
       - ../../run/logs/nginx:/var/log/nginx
-      - ./tiles:/usr/share/nginx/tiles:ro
+      - ../../../tiles:/usr/share/nginx/tiles:ro
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       - app
