@@ -607,9 +607,13 @@ export default function CommandTree({ lang }: CommandTreeProps) {
           commandCode: cmd.commandCode,
           logicalCode: cmd.logicalCode,
           operationType: cmd.operationType,
+          // 必须用 backend 的 logicalNameI18n（干净的本地化名）；cmd.displayName 是
+          // 后端已经拼了 op 动词的展示串（如「查询 设备基本信息」），用在这里会让
+          // buildTaskName 再拼一次 op 动词 → 「查询 查询 设备基本信息」。
+          // backend i18n 键是 'en'/'zh'，UI 键是 'en-US'/'zh-CN'，所以做一次映射。
           logicalNameI18n: {
-            'zh-CN': cmd.displayName,
-            'en-US': cmd.displayName,
+            'zh-CN': cmd.logicalNameI18n?.['zh'] ?? cmd.logicalName ?? cmd.displayName,
+            'en-US': cmd.logicalNameI18n?.['en'] ?? cmd.logicalName ?? cmd.displayName,
           },
           subFields,
           selectedSubFieldIds: subFields

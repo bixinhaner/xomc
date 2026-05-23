@@ -74,7 +74,10 @@ function buildTaskName(
   };
   const opVerb =
     lang === 'zh-CN' ? (opVerbZh[first.operationType] ?? first.operationType) : first.operationType;
-  const cmdPart = `${opVerb} ${cmdName}`.trim();
+  // 防御性 dedup：CommandTree 历史上曾把后端 displayName（已带 op 动词，如「查询 设备
+  // 基本信息」）塞进 logicalNameI18n。若 cmdName 已以 opVerb 开头，跳过 prepend，
+  // 避免「查询 查询 设备基本信息」体感 bug 复发。
+  const cmdPart = cmdName.startsWith(opVerb) ? cmdName : `${opVerb} ${cmdName}`.trim();
   const sn = sns[0];
   const snPart = sns.length === 1 ? sn : `${sn} 等${sns.length}台`;
   return `${cmdPart} ${snPart}`;
