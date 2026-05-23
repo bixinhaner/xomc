@@ -22,8 +22,9 @@ import {
   useDomainTree,
   useMapDevicesGeo,
   useMapStats,
-  useMapDeviceSearch,
 } from '@core/hooks/api/useTopology';
+import { useDeviceSearch } from '@core/hooks/useDeviceSearch';
+import { topologyApi } from '@core/services/api/topologyApi';
 import { SPACING, RADIUS, SHADOWS, COLORS, transitionString } from './styles';
 import './animations.css';
 
@@ -98,10 +99,6 @@ export default function GISMapView() {
     offline: true,
   });
 
-  // 设备搜索
-  const [deviceSearchValue, setDeviceSearchValue] = useState('');
-  const [deviceSearchExpanded, setDeviceSearchExpanded] = useState(false);
-
   // 地图组件引用
   const mapRef = useRef<GISMapRef>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -160,8 +157,21 @@ export default function GISMapView() {
     groupIds: selectedGroupIds.length > 0 ? selectedGroupIds : undefined,
   });
 
-  // 设备搜索 hook
-  const { data: searchResults, isLoading: isSearching } = useMapDeviceSearch(deviceSearchValue);
+  // 设备搜索 hook（支持防抖、50 值限制和自动展开）
+  const {
+    keyword: searchKeyword,
+    handleChange: handleSearchInputChange,
+    handleClear: handleSearchClear,
+    results: searchResults,
+    isLoading: isSearching,
+    expanded: deviceSearchExpanded,
+    setExpanded: setDeviceSearchExpanded,
+  } = useDeviceSearch((kw) => topologyApi.searchDevices(kw), {
+    minLength: 2,
+    maxValues: 50,
+    debounce: 300,
+    autoExpand: true,
+  });
 
   // ========== 数据转换 ==========
 
@@ -198,16 +208,6 @@ export default function GISMapView() {
   }, [mapStatsData]);
 
   // ========== 搜索处理 ==========
-
-  // 处理设备搜索
-  const handleDeviceSearch = useCallback((value: string) => {
-    setDeviceSearchValue(value);
-    if (value.length >= 2) {
-      setDeviceSearchExpanded(true);
-    } else {
-      setDeviceSearchExpanded(false);
-    }
-  }, []);
 
   // 搜索结果过滤（根据状态过滤）
   const filteredSearchResults = useMemo(() => {
@@ -795,14 +795,9 @@ export default function GISMapView() {
               <input
                 ref={searchInputRef}
                 type="text"
-                value={deviceSearchValue}
-                onChange={(e) => handleDeviceSearch(e.target.value)}
-                onFocus={() => {
-                  if (deviceSearchValue.length >= 2 && filteredSearchResults.length > 0) {
-                    setDeviceSearchExpanded(true);
-                  }
-                }}
-                placeholder="搜索设备名称或序列号..."
+                value={searchKeyword}
+                onChange={(e) => handleSearchInputChange(e.target.value)}
+                placeholder="SN / 名称 / IP / MAC / PCI（多个值用英文逗号分隔，最多 50 个）"
                 style={{
                   flex: 1,
                   border: 'none',
@@ -814,11 +809,9 @@ export default function GISMapView() {
               />
 
               {/* 清除按钮 */}
-              {deviceSearchValue && (
+              {searchKeyword && (
                 <div
-                  onClick={() => {
-                    handleDeviceSearch('');
-                  }}
+                  onClick={handleSearchClear}
                   style={{
                     width: 24,
                     height: 20,
