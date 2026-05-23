@@ -187,11 +187,42 @@ const MapPopup: React.FC<MapPopupProps> = ({
 
         {/* 详情 */}
         <div style={detailsStyle}>
+          {/* 核心标识 */}
           <div style={detailRowStyle}>
             <span style={labelStyle}>序列号:</span>
             <span style={{ ...valueStyle, fontFamily: 'monospace' }}>{device.sn}</span>
           </div>
 
+          {/* 网络信息（常用） */}
+          <div style={detailRowStyle}>
+            <span style={labelStyle}>IP:</span>
+            <span style={{ ...valueStyle, fontFamily: 'monospace' }}>
+              {device.ip_address || <span style={{ color: '#BFBFBF' }}>--</span>}
+            </span>
+          </div>
+
+          <div style={detailRowStyle}>
+            <span style={labelStyle}>MAC:</span>
+            <span style={{ ...valueStyle, fontFamily: 'monospace' }}>
+              {device.mac || <span style={{ color: '#BFBFBF' }}>--</span>}
+            </span>
+          </div>
+
+          {/* 可读名称 */}
+          <div style={detailRowStyle}>
+            <span style={labelStyle}>设备名称:</span>
+            <span style={valueStyle}>{device.device_name || <span style={{ color: '#BFBFBF' }}>--</span>}</span>
+          </div>
+
+          {/* 无线参数 */}
+          <div style={detailRowStyle}>
+            <span style={labelStyle}>PCI:</span>
+            <span style={{ ...valueStyle, fontFamily: 'monospace' }}>
+              {device.pci || <span style={{ color: '#BFBFBF' }}>--</span>}
+            </span>
+          </div>
+
+          {/* 位置信息 */}
           {device.groupName && (
             <div style={detailRowStyle}>
               <span style={labelStyle}>设备组:</span>
