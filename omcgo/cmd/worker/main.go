@@ -380,6 +380,11 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// sweeper + 触发器（hourly @:05 / daily 00:05 / weekly 周一 00:10 / monthly 1日 00:15）。
 	startPMAggregatorPipeline(context.Background(), w, pmKPIRouter)
 
+	// T-0164-P7 / G7：自定义聚合任务（oneshot + continuous）。
+	// 复用同一 kpiRouter；4 个 worker 抢 pm_tasks 中 task_subtype='adhoc_aggregation' 的 pending 行；
+	// continuous scheduler 单 goroutine 每分钟扫 scheduled 任务切回 pending。
+	startPMAdhocPipeline(context.Background(), w, pmKPIRouter)
+
 	// M3: 周期备份调度器 + 任务 reaper（event-loss 兜底恢复）
 	backupScheduleRepo := backup.NewPgScheduleRepository(w.PgPool)
 	backupService := backup.NewService(backupTaskRepo, backupScheduleRepo, w.EventBus, logger)

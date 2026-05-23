@@ -7,6 +7,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/core/dictloader"
 	"github.com/omcgo/omcgo/internal/pm"
+	"github.com/omcgo/omcgo/internal/pm/adhoc"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
@@ -68,6 +69,10 @@ func initPMModule(c *Container) error {
 	// app 端只走查询不跑 cron（cron runner 在 worker 端注册）。
 	pmAggregator := aggregator.NewWithPool(c.TsPool, kpiRouter, logger.Named("aggregator"))
 
+	// T-0164-P7 / G7：adhoc 任务 REST 入口（worker 端跑实际执行）。
+	pmAdhocRepo := adhoc.NewPgRepository(c.PgPool)
+	pmAdhocHandler := adhoc.NewHandler(pmAdhocRepo, c.TsPool, c.EventBus, logger.Named("adhoc"))
+
 	enabledRepo := indicator.NewPgEnabledRepository(c.PgPool)
 	templateRelRepo := indicator.NewPgTemplateRelRepository(c.PgPool)
 	custNameRepo := indicator.NewPgCustNameRepository(c.PgPool)
@@ -106,6 +111,7 @@ func initPMModule(c *Container) error {
 		pmFileStore:          pmFileStore,
 		pmIndicatorRepo:      indicatorRepo,
 		pmAggregator:         pmAggregator,
+		pmAdhocHandler:       pmAdhocHandler,
 		indicatorHandler:     indicatorHandler,
 		indicatorRESTHandler: indicatorRESTHandler,
 	}
@@ -136,6 +142,7 @@ type pmHandlerDeps struct {
 	pmFileStore     *pm.PgPMFileStore
 	pmIndicatorRepo indicator.IndicatorRepository // T-0164-P1 ListKPIDefinitions 数据源
 	pmAggregator    *aggregator.Aggregator        // T-0164-P5 ListAggregatedMetrics 数据源
+	pmAdhocHandler  *adhoc.Handler                // T-0164-P7 自定义聚合任务 REST 入口
 
 	// Indicator management handler
 	indicatorHandler     *indicator.IndicatorHandler
