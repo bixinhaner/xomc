@@ -308,6 +308,12 @@ func (f *Fanouter) translateParamRefs(
 
 	out := make([]MMLParamRef, 0, len(refs))
 	missCount := 0
+	// v1.1 §6 P2：单条 path 在 translator 内未命中只累 metrics 不输出日志，
+	// 排查"为何下发的 SOAP 用 standardPath"无可追溯线索。这里聚合到 task 级，
+	// missCount>0 时输出一条 WARN 含 device + product_class + sw_version +
+	// 前 10 条 sample path（限量防日志洪泛）。
+	const maxSampleMissedPaths = 10
+	var sampleMissedPaths []string
 	for _, r := range refs {
 		if r.Tr069Path == "" {
 			out = append(out, r)
@@ -318,11 +324,25 @@ func (f *Fanouter) translateParamRefs(
 		copy.Tr069Path = res.Translated
 		if !res.Found {
 			missCount++
+			if len(sampleMissedPaths) < maxSampleMissedPaths {
+				sampleMissedPaths = append(sampleMissedPaths, r.Tr069Path)
+			}
 		}
 		out = append(out, copy)
 	}
 	if f.metrics != nil {
 		f.metrics.missPathUnmapped(missCount)
+	}
+	if missCount > 0 && f.logger != nil {
+		f.logger.Warn("path translation: some standardPaths unmapped, falling back as-is",
+			zap.String("device_sn", sn),
+			zap.String("product_class", device.ProductClass),
+			zap.String("sw_version", device.FirmwareVersion),
+			zap.String("product_id", matchRes.Product.ID.String()),
+			zap.Int("miss_count", missCount),
+			zap.Int("total_count", len(refs)),
+			zap.Strings("sample_missed_paths", sampleMissedPaths),
+		)
 	}
 	return out, missCount, translator
 }

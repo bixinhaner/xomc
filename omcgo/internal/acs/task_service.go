@@ -34,4 +34,11 @@ type TaskService interface {
 
 	// GetQueueLength returns the number of pending tasks for a device.
 	GetQueueLength(ctx context.Context, deviceSN string) (int64, error)
+
+	// RecoverPendingTasks 把该设备上 status=sent 且 sent_at>5min 的僵死任务
+	// 按 CanRetry() 重置 pending 重入队 / 或标记 failed。
+	// 调用方：handler.handleInform —— CPE 每次重连即触发兜底（参 docs/消息队列
+	// 全流程流转说明书.md §4.3.2）。RestorePendingQueues 只覆盖 pending 状态，
+	// sent 状态必须靠本方法在设备重连时恢复。
+	RecoverPendingTasks(ctx context.Context, deviceSN string) error
 }

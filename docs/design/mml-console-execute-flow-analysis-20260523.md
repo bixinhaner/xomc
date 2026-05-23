@@ -1,6 +1,6 @@
 # `POST /api/v1/mml/console/execute-statements-structured` 全链路分析
 
-> **版本**：v1.1（2026-05-23）
+> **版本**：v1.2（2026-05-23）
 > **范围**：单一 API 端到端 — Browser SPA → App → NATS / Redis → ACS → CPE → NATS task.* → CompletionRouter → SSE Hub → Browser 终端
 > **目的**：为排错 / 新人 onboarding / 后续优化提供 file:line 级别的执行链路索引
 > **关联文档**：
@@ -12,7 +12,25 @@
 
 本文档与上述文档**不重复**：架构 overview 关注横向，task-flow 关注模型，本文档关注**这一个 API 请求被点击后发生的所有事情**。
 
-### v1.1 变更说明（相对 v1.0 的修订）
+### v1.2 变更说明（基于 v1.1 短板表的实际代码修复）
+
+v1.1 完成文档对齐后，对照 §6 短板逐条 grep 验证真实性，本轮（v1.2）落地了 2 处代码修复 + 2 项移到 backlog：
+
+| 短板 | v1.1 状态 | v1.2 处理 | 验证 |
+|---|---|---|---|
+| **P0 #1** RecoverPendingTasks 未挂线 | 仅文档列出 | ✅ **已修**：`acs/handler.go::handleInform` 在 InformResponse 前同步调用，按 5min 阈值恢复 sent 僵死任务 | `go build ./...` + `go test ./internal/acs/...` 通过 |
+| **P2 #4** PathTranslator passthrough 无日志 | 仅文档列出 | ✅ **已修**：`mml/fanout.go::translateParamRefs` 聚合到 task 级 WARN 含 device_sn / product_class / sw_version / 前 10 条 sample_missed_paths | `go test ./internal/mml/...` 通过 |
+| **P1 #3** Sequencer 缺启动期 reconciler | 仅文档列出 | 🟡 **进 backlog**：复发概率年 1-2 次；实现需新 SQL + 新 repo 接口 + mock + 测试 ~140 行；deduper.Wrap 已覆盖大部分 NATS 重投。详见 §6 backlog |
+| **P3 #5** deduper 24h TTL 外的重投 | 仅文档列出 | 🟡 **进 backlog**：极低概率；ResultAggregator IncrementStats 业务幂等为主防线 |
+
+#### v1.2 真实修订点
+
+- §3.5 — 新增 §3.5.6 "僵死任务恢复"小节，记录 RecoverPendingTasks 已挂线
+- §3.7.3 — 状态从"设计文档建议；当前 ACS handler 未挂线"改为"**已挂线 commit XXX**"
+- §6 — 短板表新增"状态"列，标记 P0/P2 已修复；P1/P3 拆到独立 backlog 子表
+- 附录 A — 新增 ACS handleInform RecoverPendingTasks 调用行 + fanout WARN 日志行
+
+#### 历史变更（v1.0 → v1.1）
 
 v1.0 在 ACS 侧出现 2 处关键错误和 3 处重要缺失，经对照 `消息队列全流程流转说明书.md` 与 `internal/acs/handler.go` 实际代码修订：
 
@@ -267,7 +285,7 @@ catch (e) {
 `PathTranslator` 接口（service.go:57-62）按 `(productClass, softwareVersion)` 把 `standardPath` → `privatePath`：
 - 优先 discovered_param_mappings（精确匹配 swVersion）
 - 退化 param_mappings（默认）
-- 未命中时 passthrough（**已知短板**：无告警，见 §6）
+- 未命中时 passthrough（**v1.2 修复**：`fanout.go::translateParamRefs` 现在聚合 missCount，>0 时输出 WARN 含 sample_missed_paths，可在日志中追溯"为何下发 standardPath"）
 - 详细策略：参 [omcgo/CLAUDE.md §5.3](../../omcgo/CLAUDE.md)
 
 ### 3.4 Task 创建 + 派发（App）
@@ -336,6 +354,23 @@ TR-069 协议规定 ACS 可向 CPE 发 HTTP GET 触发 CPE 立刻 Inform，避�
 - sent：ACS Pop 后 MarkTaskSent
 - completed/failed：CPE 返响应后 ACS MarkTaskCompleted/Failed
 - expired：Pop 时发现 `ExpiresAt < now` → 跳过并 MarkTaskFailed(errorCode=expired)
+
+#### 3.5.6 僵死任务恢复（v1.2 新增 / 已挂线）
+
+`handler.go::handleInform` 在 InformResponse 之前同步调用：
+```go
+if err := h.taskService.RecoverPendingTasks(r.Context(), deviceSN); err != nil {
+    log.Warn("recover pending tasks failed (non-blocking)", ..., zap.Error(err))
+}
+```
+- 调用方：每次 CPE Inform（PERIODIC / BOOTSTRAP / CR-触发）
+- 实现：`task/service.go:458` 扫 `device_tasks WHERE device_sn=$1 AND status='sent' AND sent_at < now()-5min`，按 `CanRetry()` 重置 `pending`（重入队）或标记 `failed`
+- 性能：单设备 indexed query (device_sn + status + sent_at)，亚毫秒级
+- 失败兜底：only warn log，不阻塞 InformResponse（业务可继续）
+- **覆盖语义**：所有 sent 状态僵死任务（CPE 网络波动 / RPC 丢包 / 设备重启）在 CPE 重连即被恢复
+- 与 `RestorePendingQueues`（Worker 启动幂等补灌 pending 状态）形成完整 sent + pending 双覆盖
+
+> **v1.1 → v1.2 修订**：此前 §3.7.3 标注"设计文档建议；当前未挂线"是 v1.1 验证发现的 P0 短板。本轮已实际接入，详见 commit 列表。
 
 ### 3.6 结果回流（NATS TASK stream）
 
@@ -427,11 +462,12 @@ for subject, queue := range subjects {
 - 多 Worker / 多次重启幂等，不会重复入队
 - 用于：Redis 重启丢数据后从 PG 重新灌回；新 Worker 副本启动接手老积压
 
-#### 3.7.3 RecoverPendingTasks（设计文档建议；当前未挂线）
+#### 3.7.3 RecoverPendingTasks（v1.2 已挂线）
 `task/service.go:458` `RecoverPendingTasks(ctx, deviceSN)`：
 - 设计意图：CPE 每次 Inform 时由 ACS 调用，扫该设备所有 `status=sent` 且 `sent_at > 5min` 的僵死任务，按 `CanRetry()` 重置 pending / failed
-- **当前实际状态**：函数与单测（`service_pg_test.go:341`）已实现，但 `internal/acs/handler.go` 中**没有调用点**（grep 验证）
-- 队列文档 §4.3.2 描述的是设计目标；实际是 P1 缺口，建议补回 ACS Inform handler 调用
+- **v1.2 状态**：✅ 已在 `internal/acs/handler.go::handleInform` 同步调用（InformResponse 之前），详见 §3.5.6
+- 接口暴露：`internal/acs/task_service.go` 的 `TaskService` 接口已添加 `RecoverPendingTasks` 方法（含 doc 注释引用队列说明书 §4.3.2）
+- 历史：v1.0 / v1.1 漏检（设计文档建议但代码未挂线），v1.2 经 grep 验证修复
 
 #### 3.7.4 task-reboot-closer（Worker 兜底闭环）
 `task/reboot_closer.go`（队列文档 §6.4）：
@@ -548,20 +584,32 @@ T35   SSE 终态帧 → 浏览器写汇总行                       App→Browse
 
 ---
 
-## 6. 易踩坑 / 已知短板
+## 6. 已知短板（v1.2 状态跟踪）
+
+### 6.1 已修复
+
+| 项 | 位置 | 风险 | v1.2 处理 |
+|---|---|---|---|
+| **P0：RecoverPendingTasks 未挂线** | `task/service.go:458` + 原 `acs/handler.go` 无调用点 | 队列文档 §4.3.2 明确要求 CPE Inform 触发僵死任务恢复，但实际 ACS handler 没调 → 所有 `status=sent` 且 sent_at>5min 的任务永久悬挂，只有 Worker 重启才被兜底 | ✅ **已修**：`acs/handler.go::handleInform` 在 InformResponse 之前同步调用 RecoverPendingTasks；`acs/task_service.go::TaskService` 接口增加该方法；handler_test.go mock 加 no-op 实现 |
+| **P2：路径翻译失败时 passthrough 无日志** | `mml/fanout.go::translateParamRefs` 原仅累 metrics.missPathUnmapped | 排查"为何下发的 SOAP 用了 standardPath"无可追溯线索 | ✅ **已修**：聚合到 task 级 WARN 含 device_sn / product_class / sw_version / product_id / miss_count / total_count / sample_missed_paths（前 10 条限量防日志洪泛） |
+
+### 6.2 进 backlog（本轮未动）
+
+| 项 | 位置 | 风险 | 不实施原因 |
+|---|---|---|---|
+| **P1：Sequencer 缺启动期 reconciler** | `sequencer.go` | APP 进程在 cmd_idx=0 完成、cmd_idx=1 入队之间崩溃时，同设备 cmd_idx≥1 链丢失（user 视角：脚本跑一半永远卡住） | 复发概率年 1-2 次（agent 估算）；实现需新 SQL + 新 repo 接口 + mock + 测试 ~140 行；deduper.Wrap 已覆盖大部分 NATS 重投。建议作为独立 backlog ticket 立项实施 |
+| **P3：task-completion-bridge deduper 24h 窗口外** | `event_bridge.go:54` + `event/dedup.go` | NATS 死信队列内的消息 24h 后 dedup key 过期，重新投递可能双发 ResultAggregator | 极低概率（需要消息在死信反复投递 24h+）；ResultAggregator IncrementStats 业务幂等设计是主防线；建议增强 dedup TTL 或加 PG 唯一约束作为后续优化 |
+
+### 6.3 其他已知短板（UX / 边界）
 
 | 项 | 位置 | 风险 / 建议 |
 |---|---|---|
-| **RecoverPendingTasks 未挂线** | `task/service.go:458` + `acs/handler.go`（无调用点） | 队列文档 §4.3.2 描述了 CPE Inform 触发僵死任务恢复，但实际 ACS handler 没调；当前依赖 Worker 重启时的 RestorePendingQueues 兜底。建议在 `HandleInform` 行 772 PopTask 前补一次 RecoverPendingTasks 调用 |
 | **422 unknown_paths 没专门 UI 处理** | `RightPanel.tsx:194` | 用户只看到通用 toast；建议加 modal 列出失败 path + 引导排查 |
 | **utils/toast.ts 仍用静态 message** | `utils/toast.ts:1` | 调用方在嵌套 portal/Tabs 内可能仍丢 toast（30+ 文件未迁），已知技术债 |
 | **buildTaskName 默认 zh-CN** | `RightPanel.tsx:173` | 英文用户也得"查询 …"中文任务名；改 i18n locale 注入即可 |
-| **路径翻译失败时 passthrough** | `parammodel translator` | 没有显式告警；用户排查会 confused"为啥下发的 path 跟我选的不一样"；建议加 trace span event + metrics counter |
 | **Connection Request 是可选的** | `task/service.go:92` | 若设备不支持 CR 或 IP 探测失败，task 要等下一个 PERIODIC Inform 才被拉走（默认 inform_interval 数十秒~数分钟） |
 | **SSE 重连机制依赖 hub buffer** | `useMmlTaskStream.ts` + `events/store.go` | EventSource 自带自动重连，但 Last-Event-ID 回放依赖 hub 的 buffer 大小，长时间断网 + 大流量任务可能漏帧 |
-| **Sequencer 单点 risk** | `sequencer.go` | 若 sequencer 进程重启时正好有同设备 cmd_idx=0 完成，cmd_idx=1 入队可能丢；需要 reconciler 扫 PG `device_tasks WHERE status=completed AND mml_task 还有下一步` 兜底，建议补 |
 | **历史 task_records "查询 查询..." 旧数据** | DB | commit `21c4d027` 修源代码，DB 历史不动；属历史档案，可不清 |
-| **task-completion-bridge deduper 缓存窗口** | `event_bridge.go:54` | deduper 窗口期内（默认 5 min？需查实现）能防重；超出窗口的 NATS 重投会双发，依赖 ResultAggregator 业务层自身幂等 |
 
 ---
 
@@ -811,3 +859,4 @@ type Task struct {
 |---|---|---|
 | 2026-05-23 | v1.0 | 初稿；记录至 commit `21c4d027` + `b00f4928` 后的代码状态 |
 | 2026-05-23 | v1.1 | 修订：① ACS 改为 CPE-Inform 驱动（删除 Poller 误述）；② 回流路径补全 NATS TASK stream + task-completion-bridge QueueGroup + deduper + CompletionRouter 四层；③ 新增 §3.7 可靠性兜底机制；④ 新增 SourceID 过滤说明；⑤ 时序图 T17-T35 重画；⑥ 附录 A 补 12+ 处新引用 |
+| 2026-05-23 | v1.2 | 落地 v1.1 列出的 2 处短板代码修复：① P0 — `acs/handler.go::handleInform` 接入 RecoverPendingTasks 同步调用（5min 阈值恢复 sent 僵死任务）；② P2 — `mml/fanout.go::translateParamRefs` 加 WARN 日志含 sample_missed_paths（路径翻译可观测性）。P1 Sequencer reconciler + P3 deduper 24h 窗口 进 backlog（§6.2）。§6 重排为「已修复 / backlog / 其他短板」三表 |

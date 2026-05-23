@@ -378,6 +378,18 @@ func (h *Handler) handleInform(w http.ResponseWriter, r *http.Request, body []by
 		h.reapOrphanedSession(oldEntry, "new_inform")
 	}
 
+	// 僵死任务恢复（docs/消息队列全流程流转说明书.md §4.3.2）。
+	// CPE 重连即视为"在线信号"——把该设备上 status=sent 且 sent_at>5min 的任务
+	// 按 CanRetry() 重置 pending 重入队 / 或标记 failed；否则这些任务会因
+	// CPE 网络波动 / RPC 丢包 / 设备重启而永久悬挂在 sent 状态（v1.1 §6 P0 短板）。
+	// 同步执行：单设备 indexed query (device_sn + status + sent_at)，亚毫秒级；
+	// 失败不阻塞 InformResponse，仅 warn 留痕。
+	if err := h.taskService.RecoverPendingTasks(r.Context(), deviceSN); err != nil {
+		log.Warn("recover pending tasks failed (non-blocking)",
+			zap.String("device_sn", deviceSN),
+			zap.Error(err))
+	}
+
 	// 准入控制 —— 槽位持有直到会话完成（通过 completeSession）或后台清理器回收。
 	if !h.admission.Acquire() {
 		log.Warn("admission denied", zap.String("device_sn", deviceSN))

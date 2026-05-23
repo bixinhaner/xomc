@@ -884,6 +884,11 @@ func (m *acsHTaskService) GetQueueLength(ctx context.Context, deviceSN string) (
 	return count, nil
 }
 
+// RecoverPendingTasks 在 handler 单测中无僵死任务模拟需求，no-op 满足接口即可。
+func (m *acsHTaskService) RecoverPendingTasks(ctx context.Context, deviceSN string) error {
+	return nil
+}
+
 func (m *acsHTaskService) CreateTask(ctx context.Context, req *task.CreateTaskRequest) (*task.Task, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
