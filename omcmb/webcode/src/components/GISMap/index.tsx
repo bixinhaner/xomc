@@ -54,6 +54,9 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   const [, setHighlightedId] = useState<string | null>(null);
   const [viewport, setViewport] = useState<MapViewport | null>(null);
   const [showMetadataTip, setShowMetadataTip] = useState(false);
+  // 点击锁定的设备（优先显示，支持复制）
+  const [clickedDevice, setClickedDevice] = useState<MapDevice | null>(null);
+  const [clickedPosition, setClickedPosition] = useState<{ x: number; y: number } | null>(null);
 
   // 使用 OpenLayers Hook
   const {
@@ -72,15 +75,23 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     center: defaultCenter,
     zoom: defaultZoom,
     tileUrl,
-    onDeviceClick: (device) => {
+    onDeviceClick: (device, pixel) => {
+      // 点击设备时锁定弹窗
+      setClickedDevice(device);
+      if (pixel) {
+        setClickedPosition({ x: pixel.x, y: pixel.y });
+      }
       onDeviceClick?.(device);
     },
     onDeviceHover: (device, pixel) => {
-      setHoveredDevice(device);
-      if (device && pixel) {
-        setPopupPosition({ x: pixel.x, y: pixel.y });
-      } else {
-        setPopupPosition(null);
+      // hover 只在未锁定时更新
+      if (!clickedDevice) {
+        setHoveredDevice(device);
+        if (device && pixel) {
+          setPopupPosition({ x: pixel.x, y: pixel.y });
+        } else {
+          setPopupPosition(null);
+        }
       }
     },
     onViewportChange: (vp) => {
@@ -88,6 +99,9 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
       onViewportChange?.(vp);
     },
     onMapClick: () => {
+      // 点击地图空白时清除锁定
+      setClickedDevice(null);
+      setClickedPosition(null);
       onMapClick?.();
     },
   });
@@ -291,13 +305,15 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
       {/* 统计面板 */}
       {showStats && isReady && <MapStatsPanel stats={stats} visible />}
 
-      {/* 悬浮提示 */}
-      {hoveredDevice && popupPosition && (
+      {/* 悬浮提示：优先显示点击锁定的设备，否则显示 hover 的设备 */}
+      {(clickedDevice || hoveredDevice) && (clickedPosition || popupPosition) && (
         <MapPopup
-          device={hoveredDevice}
+          device={clickedDevice ?? hoveredDevice!}
           visible
-          position={popupPosition}
+          position={clickedPosition ?? popupPosition!}
           onClose={() => {
+            setClickedDevice(null);
+            setClickedPosition(null);
             setHoveredDevice(null);
             setPopupPosition(null);
           }}

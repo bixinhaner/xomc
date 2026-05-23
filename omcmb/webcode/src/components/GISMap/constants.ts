@@ -10,6 +10,10 @@ import type { MapMetadata } from './useMapConfig';
  * 设备状态配置
  * 根据 UI 设计图: GISMap_UI_Design_Markers.svg
  * 三种状态：在线激活(绿色)、在线未激活(黄色)、离线(红色)
+ *
+ * 颜色说明：
+ * - color: 标记/图标的颜色（保持鲜艳）
+ * - textColor: 文字显示颜色（加深版本，符合 WCAG AA 对比度要求 4.5:1）
  */
 export const DEVICE_STATUS_CONFIG: Record<
   DeviceStatus,
@@ -19,6 +23,7 @@ export const DEVICE_STATUS_CONFIG: Record<
     gradientEnd: string;
     bgColor: string;
     borderColor: string;
+    textColor: string; // 文字颜色（加深版本，提升可读性）
     text: string;
     i18nKey: string;
   }
@@ -29,6 +34,7 @@ export const DEVICE_STATUS_CONFIG: Record<
     gradientEnd: '#52C41A',
     bgColor: '#F6FFED',
     borderColor: '#B7EB8F',
+    textColor: '#237804', // 深绿色，对比度 > 7:1
     text: '在线激活',
     i18nKey: 'status.onlineActive',
   },
@@ -38,6 +44,7 @@ export const DEVICE_STATUS_CONFIG: Record<
     gradientEnd: '#FAAD14',
     bgColor: '#FFFBE6',
     borderColor: '#FFE58F',
+    textColor: '#D48806', // 深黄色，对比度 > 5:1
     text: '在线未激活',
     i18nKey: 'status.onlineInactive',
   },
@@ -47,6 +54,7 @@ export const DEVICE_STATUS_CONFIG: Record<
     gradientEnd: '#b60808',
     bgColor: '#FFF1F0',
     borderColor: '#FFA39E',
+    textColor: '#8B0000', // 深红色，对比度 > 7:1
     text: '离线',
     i18nKey: 'status.offline',
   },

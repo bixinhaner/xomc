@@ -96,7 +96,7 @@ export function createClusterStyle(count: number): Style {
 
 /**
  * 创建高亮设备样式（搜索定位）
- * 节点大小不变 + 水波纹扩散效果
+ * 简约清爽风格：适中数量的波纹、优雅的扩散、中心点发光
  */
 export function createHighlightStyle(
   device: MapDevice,
@@ -108,7 +108,15 @@ export function createHighlightStyle(
 
   const styles: Style[] = [];
 
-  // 水波纹样式：从中心向外扩散的圆环
+  // 中心点外发光效果（增强选中感）
+  styles.push(new Style({
+    image: new Circle({
+      radius: baseRadius + 4,
+      fill: new Fill({ color: 'rgba(24, 144, 255, 0.15)' }), // 淡淡的外发光
+    }),
+  }));
+
+  // 水波纹样式：简约清爽的圆环
   rippleWaves.forEach(wave => {
     const rippleRadius = baseRadius + wave.radius;
     if (rippleRadius > baseRadius) {
@@ -117,8 +125,8 @@ export function createHighlightStyle(
           radius: rippleRadius,
           fill: new Fill({ color: 'transparent' }),
           stroke: new Stroke({
-            color: `rgba(24, 144, 255, ${wave.opacity})`, // 蓝色波纹，透明度随扩散降低
-            width: 1, // 细线条
+            color: `rgba(24, 144, 255, ${wave.opacity})`, // 清爽的蓝色
+            width: 2, // 适中线条宽度
           }),
         }),
       }));
@@ -132,7 +140,7 @@ export function createHighlightStyle(
       fill: new Fill({ color: config.color }),
       stroke: new Stroke({
         color: COLORS.primary,
-        width: 3,
+        width: 3, // 加粗边框增强选中感
       }),
     }),
   }));

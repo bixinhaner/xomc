@@ -54,8 +54,8 @@ interface UseOLMapOptions {
   maxZoom?: number;
   /** 聚合距离 */
   clusterDistance?: number;
-  /** 设备点击回调 */
-  onDeviceClick?: (device: MapDevice) => void;
+  /** 设备点击回调（包含鼠标位置） */
+  onDeviceClick?: (device: MapDevice, pixel?: { x: number; y: number }) => void;
   /** 设备悬停回调（包含鼠标位置） */
   onDeviceHover?: (device: MapDevice | null, pixel?: { x: number; y: number }) => void;
   /** 视图变化回调 */
@@ -282,6 +282,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   const isMapInitializedRef = useRef(false);
 
   // 初始化地图（等待元数据加载完成后执行一次）
+  /* eslint-disable react-hooks/exhaustive-deps -- 地图初始化应只执行一次，使用 ref 防止重复初始化 */
   useEffect(() => {
     // 已经初始化过，不再重复
     if (isMapInitializedRef.current) return;
@@ -383,7 +384,9 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
       spiderfyLayerRef.current
     );
 
-    setIsReady(true);
+    // 延迟设置 isReady，避免在 effect 中同步调用 setState 导致级联渲染
+    // 使用 setTimeout 将状态更新推迟到下一个事件循环
+    setTimeout(() => setIsReady(true), 0);
 
     // 清理函数
     return () => {
@@ -508,7 +511,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
         flyTo(lonLat[0], lonLat[1]);
       }
 
-      // 初始化波纹状态
+      // 初始化波纹状态 - 简约风格：最多2个波纹
       rippleWavesRef.current = [];
 
       // 创建新波纹的函数
@@ -516,23 +519,23 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
         if (!highlightFeatureRef.current) return;
         rippleWavesRef.current.push({
           radius: 0,      // 从中心开始
-          opacity: 0.5,   // 初始透明度（更浅）
+          opacity: 0.6,   // 初始透明度（适中）
         });
       };
 
       // 立即创建第一个波纹
       createRipple();
 
-      // 定时创建新波纹（每 600ms）
+      // 定时创建新波纹（每 800ms - 更舒缓的节奏）
       rippleCreateRef.current = setInterval(() => {
         createRipple();
-        // 最多同时存在 3 个波纹
-        if (rippleWavesRef.current.length > 3) {
+        // 最多同时存在 2 个波纹 - 简约风格
+        if (rippleWavesRef.current.length > 2) {
           rippleWavesRef.current.shift();
         }
-      }, 600);
+      }, 800);
 
-      // 波纹扩散动画（每 30ms 更新）
+      // 波纹扩散动画（每 40ms 更新 - 更流畅）
       pulseAnimationRef.current = setInterval(() => {
         if (!highlightFeatureRef.current) {
           if (pulseAnimationRef.current) {
@@ -545,8 +548,8 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
         // 更新所有波纹的状态
         rippleWavesRef.current = rippleWavesRef.current
           .map(wave => ({
-            radius: wave.radius + 0.5,     // 半径增长（扩散更慢）
-            opacity: wave.opacity - 0.01,  // 透明度降低
+            radius: wave.radius + 0.4,     // 半径增长（更缓慢优雅）
+            opacity: wave.opacity - 0.008,  // 透明度降低（更持久）
           }))
           .filter(wave => wave.opacity > 0); // 移除已消失的波纹
 
@@ -557,7 +560,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
         if (mapInstanceRef.current) {
           mapInstanceRef.current.render();
         }
-      }, 30); // 30ms 更新一次，实现平滑动画
+      }, 40); // 40ms 更新一次，更流畅的动画
     }
   }, [flyTo, clearHighlight]);
 
@@ -680,7 +683,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
                     // 在 spiderfy 点上应用高亮
                     highlightFeatureRef.current = sf as Feature;
 
-                    // 初始化波纹状态
+                    // 初始化波纹状态 - 简约风格：最多2个波纹
                     rippleWavesRef.current = [];
 
                     // 创建新波纹的函数
@@ -688,22 +691,22 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
                       if (!highlightFeatureRef.current) return;
                       rippleWavesRef.current.push({
                         radius: 0,
-                        opacity: 0.5,
+                        opacity: 0.6,
                       });
                     };
 
                     // 立即创建第一个波纹
                     createRipple();
 
-                    // 定时创建新波纹
+                    // 定时创建新波纹（每 800ms）
                     rippleCreateRef.current = setInterval(() => {
                       createRipple();
-                      if (rippleWavesRef.current.length > 3) {
+                      if (rippleWavesRef.current.length > 2) {
                         rippleWavesRef.current.shift();
                       }
-                    }, 600);
+                    }, 800);
 
-                    // 波纹扩散动画
+                    // 波纹扩散动画（每 40ms）
                     pulseAnimationRef.current = setInterval(() => {
                       if (!highlightFeatureRef.current) {
                         if (pulseAnimationRef.current) {
@@ -715,8 +718,8 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
 
                       rippleWavesRef.current = rippleWavesRef.current
                         .map(wave => ({
-                          radius: wave.radius + 0.5,
-                          opacity: wave.opacity - 0.01,
+                          radius: wave.radius + 0.4,
+                          opacity: wave.opacity - 0.008,
                         }))
                         .filter(wave => wave.opacity > 0);
 
@@ -725,7 +728,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
                       if (mapInstanceRef.current) {
                         mapInstanceRef.current.render();
                       }
-                    }, 30);
+                    }, 40);
 
                     break;
                   }
@@ -738,7 +741,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
           targetDeviceFeature.set('highlighted', true);
           highlightFeatureRef.current = targetDeviceFeature as Feature;
 
-          // 初始化波纹状态
+          // 初始化波纹状态 - 简约风格：最多2个波纹
           rippleWavesRef.current = [];
 
           // 创建新波纹的函数
@@ -746,22 +749,22 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
             if (!highlightFeatureRef.current) return;
             rippleWavesRef.current.push({
               radius: 0,
-              opacity: 0.5,
+              opacity: 0.6,
             });
           };
 
           // 立即创建第一个波纹
           createRipple();
 
-          // 定时创建新波纹
+          // 定时创建新波纹（每 800ms）
           rippleCreateRef.current = setInterval(() => {
             createRipple();
-            if (rippleWavesRef.current.length > 3) {
+            if (rippleWavesRef.current.length > 2) {
               rippleWavesRef.current.shift();
             }
-          }, 600);
+          }, 800);
 
-          // 波纹扩散动画
+          // 波纹扩散动画（每 40ms）
           pulseAnimationRef.current = setInterval(() => {
             if (!highlightFeatureRef.current) {
               if (pulseAnimationRef.current) {
@@ -773,8 +776,8 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
 
             rippleWavesRef.current = rippleWavesRef.current
               .map(wave => ({
-                radius: wave.radius + 0.5,
-                opacity: wave.opacity - 0.01,
+                radius: wave.radius + 0.4,
+                opacity: wave.opacity - 0.008,
               }))
               .filter(wave => wave.opacity > 0);
 
@@ -783,7 +786,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
             if (mapInstanceRef.current) {
               mapInstanceRef.current.render();
             }
-          }, 30);
+          }, 40);
         }
       });
     };
@@ -858,13 +861,21 @@ function spiderfyStyleFunction(feature: Feature): Style | Style[] {
     const isHovered = feature.get('hovered');
     const rippleWaves = feature.get('rippleWaves') as { radius: number; opacity: number }[] | undefined;
 
-    // 如果有波纹效果（高亮状态）
+    // 如果有波纹效果（高亮状态）- 简约清爽风格
     if (rippleWaves && rippleWaves.length > 0) {
       const styles: Style[] = [];
       const config = DEVICE_STATUS_CONFIG[device.status] || DEVICE_STATUS_CONFIG.offline;
       const baseRadius = SPIDERFY_CONFIG_REF.pointRadius;
 
-      // 波纹样式：从中心向外扩散的圆环
+      // 中心点外发光效果
+      styles.push(new Style({
+        image: new Circle({
+          radius: baseRadius + 4,
+          fill: new Fill({ color: 'rgba(24, 144, 255, 0.15)' }),
+        }),
+      }));
+
+      // 波纹样式：简约清爽的圆环
       rippleWaves.forEach(wave => {
         const rippleRadius = baseRadius + wave.radius;
         if (rippleRadius > baseRadius) {
@@ -923,7 +934,7 @@ function bindMapEvents(
   _deviceSource: VectorSource,
   _clusterSource: Cluster,
   callbacks: {
-    onDeviceClick?: (device: MapDevice) => void;
+    onDeviceClick?: (device: MapDevice, pixel?: { x: number; y: number }) => void;
     onDeviceHover?: (device: MapDevice | null, pixel?: { x: number; y: number }) => void;
     onViewportChange?: (viewport: MapViewport) => void;
     onClusterClick?: (devices: MapDevice[]) => void;
@@ -956,7 +967,8 @@ function bindMapEvents(
       // 点击了展开的设备点
       if (feature.get('spiderfyPoint')) {
         const device = feature.get('device') as MapDevice;
-        onDeviceClick?.(device);
+        const [x, y] = evt.pixel;
+        onDeviceClick?.(device, { x, y });
         return;
       }
 
@@ -982,7 +994,8 @@ function bindMapEvents(
         if (featuresProp.length === 1) {
           // 单个设备
           const device = featuresProp[0].getProperties() as MapDevice;
-          onDeviceClick?.(device);
+          const [x, y] = evt.pixel;
+          onDeviceClick?.(device, { x, y });
         } else {
           // 多个设备
           const devices = featuresProp.map((f: Feature) => f.getProperties() as MapDevice);
@@ -1016,7 +1029,8 @@ function bindMapEvents(
       } else {
         // 单独设备
         const device = feature.getProperties() as MapDevice;
-        onDeviceClick?.(device);
+        const [x, y] = evt.pixel;
+        onDeviceClick?.(device, { x, y });
       }
     } else if (isSpiderfied) {
       // 点击空白区域，收起展开
