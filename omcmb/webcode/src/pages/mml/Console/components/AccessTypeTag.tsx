@@ -1,14 +1,17 @@
 /**
  * AccessTypeTag — sub_field 行的访问/类型/范围标签
  *
- * 显示规则（spec / 用户决策 2026-05-22）：
+ * 显示规则（spec / 用户决策 2026-05-22 + 2026-05-23）：
  *   - READ_ONLY  (GetParameterValues 可查，SetParameterValues 不可改) → 默认 Tag "只读 <TYPE>"
  *   - READ_WRITE (GetParameterValues 可查 + SetParameterValues 可改)   → 蓝 Tag "读写 <TYPE> <constraint>"
+ *   - Tooltip → 显示该 path 的实际取值范围（standard_params.min_value / max_value 派生）；
+ *               若 standard_params 未维护范围，回落 "无明确取值范围" 提示文案。
  *
  * 数据来源：
  *   · accessType / valueType — sub_field 自带（来自 standard_params.access / data_type）
- *   · constraintText         — sub_field i18n 解析后的取值范围文案
- *                              （如 "STRING(64)" / "[0, 65535]" / "true / false"）
+ *   · constraintText         — 后端从 standard_params.min_value / max_value 派生
+ *                              （如 "[0, 65535]" / "≥ 0" / "≤ 100"）；为空表示
+ *                              standard_params 该行 min/max 都未配置
  *
  * 使用方：SubFieldChecklist（LST）/ SubFieldInputList（MOD / ADD）。
  */
@@ -41,12 +44,13 @@ export default function AccessTypeTag({
   const showRange = !isReadOnly && range !== '';
   const tagText = `${accessLabel} ${typeText}${showRange ? ` ${range}` : ''}`;
 
-  const tooltipKey = isReadOnly
-    ? 'mml.console.subField.readOnlyTip'
-    : 'mml.console.subField.readWriteTip';
+  // Tooltip 显示该 path 的取值范围（用户决策 2026-05-23）：
+  //   - 有范围 → 直接展示（如 "[0, 65535]"）
+  //   - 无范围 → "无明确取值范围"，告知用户 standard_params 未维护
+  const tooltipText = range !== '' ? range : t('mml.console.subField.noRange');
 
   return (
-    <Tooltip title={t(tooltipKey)}>
+    <Tooltip title={tooltipText}>
       <Tag
         color={isReadOnly ? 'default' : 'blue'}
         style={{ fontSize: 11, marginRight: 0 }}

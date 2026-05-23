@@ -4465,6 +4465,8 @@ const messages: Record<string, string> = {
   'mml.console.subField.readOnly':             '只读',
   'mml.console.subField.readOnlyTip':          '只读字段（GetParameterValues 可查，SetParameterValues 不可改）',
   'mml.console.subField.readWriteTip':         '可读可写字段（GetParameterValues 可查 + SetParameterValues 可改）',
+  // AccessTypeTag Tooltip 在 standard_params 未配置 min_value / max_value 时的兜底文案
+  'mml.console.subField.noRange':              '无明确取值范围',
   'mml.console.subField.accessTag.readOnly':   '只读',
   'mml.console.subField.accessTag.readWrite':  '读写',
   'mml.console.subField.multiInstanceTip':     '多实例占位符，需在"实例索引"输入框中填入具体编号',

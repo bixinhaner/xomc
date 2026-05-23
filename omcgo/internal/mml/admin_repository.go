@@ -204,6 +204,13 @@ func (r *PgSubFieldRepository) ListByCommand(ctx context.Context, commandID uuid
 // （系统级标准 path 字典）；MML 模块不再持有独立 path 字典。standard_params
 // 字段更少（无 is_writable / supports_add / js_regex / constraint_text_i18n），
 // 这里补默认值兜底，前端 SubFieldChecklist / SubFieldInputList 接口不变。
+//
+// constraint_text_i18n 由 standard_params.min_value / max_value 派生（2026-05-23 改）：
+//   - 双侧有范围 → "[min, max]"
+//   - 仅有 min   → "≥ min"
+//   - 仅有 max   → "≤ max"
+//   - 都为 NULL → 空（前端 AccessTypeTag Tooltip 走"无明确取值范围"兜底文案）
+// 数字内容 zh-CN / en-US 同形，i18n 两 key 同值即可。
 func (r *PgSubFieldRepository) ListEnrichedByCommand(ctx context.Context, commandID uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
 	const sqlText = `
 SELECT
@@ -216,7 +223,24 @@ SELECT
     false                                 AS supports_add,
     false                                 AS supports_delete,
     COALESCE(sp.change_applies, 'Immediate') AS change_applies,
-    '{}'::jsonb                           AS constraint_text_i18n,
+    CASE
+        WHEN sp.min_value IS NOT NULL AND sp.max_value IS NOT NULL THEN
+            jsonb_build_object(
+                'zh-CN', '[' || sp.min_value::text || ', ' || sp.max_value::text || ']',
+                'en-US', '[' || sp.min_value::text || ', ' || sp.max_value::text || ']'
+            )
+        WHEN sp.min_value IS NOT NULL THEN
+            jsonb_build_object(
+                'zh-CN', '≥ ' || sp.min_value::text,
+                'en-US', '≥ ' || sp.min_value::text
+            )
+        WHEN sp.max_value IS NOT NULL THEN
+            jsonb_build_object(
+                'zh-CN', '≤ ' || sp.max_value::text,
+                'en-US', '≤ ' || sp.max_value::text
+            )
+        ELSE '{}'::jsonb
+    END                                   AS constraint_text_i18n,
     NULL::text                            AS default_value,
     NULL::text                            AS js_regex,
     jsonb_build_object(

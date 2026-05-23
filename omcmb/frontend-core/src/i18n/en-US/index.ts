@@ -4441,6 +4441,8 @@ const messages: Record<string, string> = {
   'mml.console.subField.readOnly':             'Read-only',
   'mml.console.subField.readOnlyTip':          'Read-only field (queryable via GetParameterValues, not writable via SetParameterValues)',
   'mml.console.subField.readWriteTip':         'Read-write field (queryable via GetParameterValues and writable via SetParameterValues)',
+  // AccessTypeTag Tooltip fallback when standard_params has no min_value / max_value configured
+  'mml.console.subField.noRange':              'No value range defined',
   'mml.console.subField.accessTag.readOnly':   'Read-only',
   'mml.console.subField.accessTag.readWrite':  'Read-write',
   'mml.console.subField.multiInstanceTip':     'Multi-instance placeholder; fill the index in the "Instance Index" input',
