@@ -22,9 +22,11 @@ import (
 //     的 pm_metrics 并在内存按 cell+counter_name+bucket(端点对齐 hour) 聚合。G5 上线后会
 //     直接路由到 hourly 聚合表替代本实现。
 //
-// DeviceSN 过渡：旧 PMCounter.DeviceID 是 UUID，新 PMMetric.DeviceSN 是 text。本 wrapper
-// 内 DeviceSN = DeviceID.String()（即 UUID 的字符串形式），保留链路兼容性；后续 collector
-// 改为传真实 device serial number 后，本 wrapper 也会一并清理。
+// 设备唯一标识（T-0164-P3 fix）：按 TR-069 标准用 (OUI, DeviceSN) 双键。
+//   - BatchInsert：上游 PMCounter.OUI / DeviceSN 已由 collector 填充，wrapper 直接用
+//   - Query / QueryForKPI：handler 仍按 device_id(uuid) 接收，wrapper 反查 devices 表
+//     拿 (oui, serial_number) 后再查 pm_metrics；开销一次/请求可接受
+// 全系统级切换见 docs/project/plan-T-0165-system-wide-oui-sn-migration.md。
 type PgCounterRepository struct {
 	pool        *pgxpool.Pool
 	metricsRepo metrics.Repository
@@ -50,7 +52,10 @@ func (r *PgCounterRepository) BatchInsert(ctx context.Context, counters []model.
 }
 
 func (r *PgCounterRepository) Query(ctx context.Context, filter CounterFilter) (*model.ListResponse[model.PMCounter], error) {
-	q := counterFilterToMetricsQuery(filter)
+	q, err := r.counterFilterToMetricsQuery(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
 	total, err := r.metricsRepo.Count(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("count counters: %w", err)
@@ -72,7 +77,10 @@ func (r *PgCounterRepository) Query(ctx context.Context, filter CounterFilter) (
 // 查 15min 粒度 pm_metrics 后内存按 hour bucket 聚合。G5 上线 hourly 聚合表后由路由层替换。
 // G5 之前调用方应理解：数据量大时不要随便查（小时跨度 × cells × counters）。
 func (r *PgCounterRepository) QueryAggregated(ctx context.Context, filter CounterFilter) ([]AggregatedCounter, error) {
-	q := counterFilterToMetricsQuery(filter)
+	q, err := r.counterFilterToMetricsQuery(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
 	q.Limit = 100000 // 安全上限
 	ms, err := r.metricsRepo.Query(ctx, q)
 	if err != nil {
@@ -84,13 +92,19 @@ func (r *PgCounterRepository) QueryAggregated(ctx context.Context, filter Counte
 // QueryForKPI 查指定 device + cell 在时间窗口内的 counter 求和，返回 counter_name → SUM(value)。
 // G3 阶段改为查 pm_metrics WHERE metric_type='counter' + 内存聚合（替代旧 SQL GROUP BY SUM）。
 // 单文件 KPI 计算的 counter 集合通常 ≤ 几十，内存聚合开销可接受。
+// T-0164-P3 fix: 按 (oui, sn) 双键过滤，wrapper 反查 devices 表拿到。
 func (r *PgCounterRepository) QueryForKPI(ctx context.Context, deviceID uuid.UUID, cellID string, counterNames []string, startTime, endTime time.Time) (map[string]float64, error) {
 	if len(counterNames) == 0 {
 		return nil, nil
 	}
+	oui, sn, err := r.lookupDeviceOUISN(ctx, deviceID)
+	if err != nil {
+		return nil, err
+	}
 	mt := metrics.MetricTypeCounter
 	q := metrics.QueryRequest{
-		DeviceSNs:   []string{deviceID.String()},
+		DeviceOUIs:  []string{oui},
+		DeviceSNs:   []string{sn},
 		MetricPaths: counterNames,
 		MetricType:  &mt,
 		Granularity: metrics.Granularity15Min,
@@ -119,6 +133,8 @@ func (r *PgCounterRepository) QueryForKPI(ctx context.Context, deviceID uuid.UUI
 
 // --- 字段转换辅助 ---
 
+// counterToMetric 把 model.PMCounter（业务键 OUI+SN）转 metrics.PMMetric。
+// 上游 collector 已填 c.OUI 和 c.DeviceSN，这里直接拿。
 func counterToMetric(c model.PMCounter) metrics.PMMetric {
 	extra := map[string]any{}
 	if c.CounterGroup != "" {
@@ -126,6 +142,9 @@ func counterToMetric(c model.PMCounter) metrics.PMMetric {
 	}
 	if c.Granularity > 0 {
 		extra["granularity_minutes"] = c.Granularity
+	}
+	if c.DeviceID != uuid.Nil {
+		extra["device_id"] = c.DeviceID.String()
 	}
 	var ldn *string
 	if c.CellID != "" {
@@ -138,7 +157,8 @@ func counterToMetric(c model.PMCounter) metrics.PMMetric {
 		startTime = endTime.Add(-time.Duration(c.Granularity) * time.Minute)
 	}
 	return metrics.PMMetric{
-		DeviceSN:    c.DeviceID.String(),
+		DeviceOUI:   c.OUI,
+		DeviceSN:    c.DeviceSN,
 		MetricPath:  c.CounterName,
 		MetricType:  metrics.MetricTypeCounter,
 		MetricValue: c.CounterValue,
@@ -151,9 +171,13 @@ func counterToMetric(c model.PMCounter) metrics.PMMetric {
 	}
 }
 
+// metricToCounter 反向：PMMetric → PMCounter。
+// device_id 从 extra 取（写入时存的），失败时留 uuid.Nil。
 func metricToCounter(m metrics.PMMetric) model.PMCounter {
 	c := model.PMCounter{
 		Time:         m.Time,
+		OUI:          m.DeviceOUI,
+		DeviceSN:     m.DeviceSN,
 		CounterName:  m.MetricPath,
 		CounterValue: m.MetricValue,
 		Granularity:  15, // G3 阶段固定 15min 粒度
@@ -161,10 +185,12 @@ func metricToCounter(m metrics.PMMetric) model.PMCounter {
 	if m.ObjectLDN != nil {
 		c.CellID = *m.ObjectLDN
 	}
-	if did, err := uuid.Parse(m.DeviceSN); err == nil {
-		c.DeviceID = did
-	}
 	if m.Extra != nil {
+		if did, ok := m.Extra["device_id"].(string); ok {
+			if parsed, err := uuid.Parse(did); err == nil {
+				c.DeviceID = parsed
+			}
+		}
 		if grp, ok := m.Extra["counter_group"].(string); ok {
 			c.CounterGroup = grp
 		}
@@ -175,7 +201,9 @@ func metricToCounter(m metrics.PMMetric) model.PMCounter {
 	return c
 }
 
-func counterFilterToMetricsQuery(filter CounterFilter) metrics.QueryRequest {
+// counterFilterToMetricsQuery 把 CounterFilter（按 device_id uuid 过滤）转换为 metrics.QueryRequest
+// （按 oui+sn 双键过滤）。需要反查 devices 表拿 oui+sn。
+func (r *PgCounterRepository) counterFilterToMetricsQuery(ctx context.Context, filter CounterFilter) (metrics.QueryRequest, error) {
 	mt := metrics.MetricTypeCounter
 	q := metrics.QueryRequest{
 		MetricType:  &mt,
@@ -184,31 +212,48 @@ func counterFilterToMetricsQuery(filter CounterFilter) metrics.QueryRequest {
 		EndTime:     filter.EndTime,
 	}
 	if filter.DeviceID != nil {
-		q.DeviceSNs = []string{filter.DeviceID.String()}
+		oui, sn, err := r.lookupDeviceOUISN(ctx, *filter.DeviceID)
+		if err != nil {
+			return q, err
+		}
+		q.DeviceOUIs = []string{oui}
+		q.DeviceSNs = []string{sn}
 	}
 	if filter.CounterName != nil {
 		q.MetricPaths = []string{*filter.CounterName}
 	}
-	return q
+	return q, nil
 }
 
-// aggregateInMemory 在内存里按 (cell, counter_name) 做 sum/avg/min/max/count 聚合，
+// lookupDeviceOUISN 反查 devices 表的 (oui, serial_number) 双键。
+// 一次/请求开销，pgxpool 自带连接复用。
+func (r *PgCounterRepository) lookupDeviceOUISN(ctx context.Context, deviceID uuid.UUID) (string, string, error) {
+	var oui, sn string
+	err := r.pool.QueryRow(ctx,
+		`SELECT oui, serial_number FROM devices WHERE id = $1`, deviceID,
+	).Scan(&oui, &sn)
+	if err != nil {
+		return "", "", fmt.Errorf("lookup device oui+sn by id %s: %w", deviceID, err)
+	}
+	return oui, sn, nil
+}
+
+// aggregateInMemory 在内存里按 (oui+sn, cell, counter_name) 做 sum/avg/min/max/count 聚合，
 // bucket 对齐到小时端点（与旧 pm_counters_hourly 1h 窗口一致）。
+// T-0164-P3 fix: 设备维度按 (oui, sn) 双键聚合；DeviceID(uuid) 从 extra 反查（写入时 collector 存的）。
 func aggregateInMemory(ms []metrics.PMMetric, groupFilter *string) []AggregatedCounter {
 	type key struct {
-		bucket   time.Time
-		deviceID uuid.UUID
-		cellID   string
-		group    string
-		name     string
+		bucket time.Time
+		oui    string
+		sn     string
+		cellID string
+		group  string
+		name   string
 	}
 	agg := make(map[key]*AggregatedCounter)
 	for _, m := range ms {
 		bucket := m.Time.Truncate(time.Hour)
 		var did uuid.UUID
-		if parsed, err := uuid.Parse(m.DeviceSN); err == nil {
-			did = parsed
-		}
 		var cellID, group string
 		if m.ObjectLDN != nil {
 			cellID = *m.ObjectLDN
@@ -217,11 +262,16 @@ func aggregateInMemory(ms []metrics.PMMetric, groupFilter *string) []AggregatedC
 			if g, ok := m.Extra["counter_group"].(string); ok {
 				group = g
 			}
+			if didStr, ok := m.Extra["device_id"].(string); ok {
+				if parsed, err := uuid.Parse(didStr); err == nil {
+					did = parsed
+				}
+			}
 		}
 		if groupFilter != nil && *groupFilter != group {
 			continue
 		}
-		k := key{bucket: bucket, deviceID: did, cellID: cellID, group: group, name: m.MetricPath}
+		k := key{bucket: bucket, oui: m.DeviceOUI, sn: m.DeviceSN, cellID: cellID, group: group, name: m.MetricPath}
 		a, ok := agg[k]
 		if !ok {
 			a = &AggregatedCounter{

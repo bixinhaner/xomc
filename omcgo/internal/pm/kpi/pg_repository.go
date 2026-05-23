@@ -19,8 +19,9 @@ import (
 // BatchInsert / Query 改走 pm/metrics.Repository（KPIValue ↔ PMMetric 字段转换）。
 // ListDefinitions / SyncDefinitions 仍走 kpi_definitions 表（独立元数据表，与 G3 无关）。
 //
-// DeviceSN 过渡：旧 KPIValue.DeviceID 是 UUID，新 PMMetric.DeviceSN 是 text。本 wrapper
-// 内 DeviceSN = DeviceID.String()（即 UUID 的字符串形式），与 counter 包做法一致。
+// 设备唯一标识（T-0164-P3 fix）：按 TR-069 标准用 (OUI, DeviceSN) 双键。
+//   - BatchInsert：上游 KPIEngine 已填 v.OUI / v.DeviceSN
+//   - Query：handler 仍按 device_id(uuid) 接收，wrapper 反查 devices 表拿 (oui, sn)
 type PgKPIRepository struct {
 	pool        *pgxpool.Pool
 	metricsRepo metrics.Repository
@@ -46,7 +47,10 @@ func (r *PgKPIRepository) BatchInsert(ctx context.Context, values []model.KPIVal
 }
 
 func (r *PgKPIRepository) Query(ctx context.Context, filter KPIFilter) (*model.ListResponse[model.KPIValue], error) {
-	q := kpiFilterToMetricsQuery(filter)
+	q, err := r.kpiFilterToMetricsQuery(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
 	total, err := r.metricsRepo.Count(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("count kpi: %w", err)
@@ -148,6 +152,8 @@ func nilIfEmpty(s string) *string {
 
 // --- 字段转换辅助 ---
 
+// kpiValueToMetric: KPIValue → PMMetric。
+// 上游 KPIEngine 已填 v.OUI / v.DeviceSN（TR-069 标准双键）。
 func kpiValueToMetric(v model.KPIValue) metrics.PMMetric {
 	extra := map[string]any{}
 	if v.Carrier != "" {
@@ -156,13 +162,17 @@ func kpiValueToMetric(v model.KPIValue) metrics.PMMetric {
 	if v.Technology != "" {
 		extra["technology"] = string(v.Technology)
 	}
+	if v.DeviceID != uuid.Nil {
+		extra["device_id"] = v.DeviceID.String()
+	}
 	var ldn *string
 	if v.CellID != "" {
 		s := v.CellID
 		ldn = &s
 	}
 	return metrics.PMMetric{
-		DeviceSN:    v.DeviceID.String(),
+		DeviceOUI:   v.OUI,
+		DeviceSN:    v.DeviceSN,
 		MetricPath:  v.KPIName,
 		MetricType:  metrics.MetricTypeKPI,
 		MetricValue: v.KPIValue,
@@ -178,16 +188,20 @@ func kpiValueToMetric(v model.KPIValue) metrics.PMMetric {
 func metricToKPIValue(m metrics.PMMetric) model.KPIValue {
 	v := model.KPIValue{
 		Time:     m.Time,
+		OUI:      m.DeviceOUI,
+		DeviceSN: m.DeviceSN,
 		KPIName:  m.MetricPath,
 		KPIValue: m.MetricValue,
 	}
 	if m.ObjectLDN != nil {
 		v.CellID = *m.ObjectLDN
 	}
-	if did, err := uuid.Parse(m.DeviceSN); err == nil {
-		v.DeviceID = did
-	}
 	if m.Extra != nil {
+		if didStr, ok := m.Extra["device_id"].(string); ok {
+			if parsed, err := uuid.Parse(didStr); err == nil {
+				v.DeviceID = parsed
+			}
+		}
 		if c, ok := m.Extra["carrier"].(string); ok {
 			v.Carrier = model.CarrierCode(c)
 		}
@@ -198,7 +212,8 @@ func metricToKPIValue(m metrics.PMMetric) model.KPIValue {
 	return v
 }
 
-func kpiFilterToMetricsQuery(filter KPIFilter) metrics.QueryRequest {
+// kpiFilterToMetricsQuery: 反查 devices 表拿 oui+sn。
+func (r *PgKPIRepository) kpiFilterToMetricsQuery(ctx context.Context, filter KPIFilter) (metrics.QueryRequest, error) {
 	mt := metrics.MetricTypeKPI
 	q := metrics.QueryRequest{
 		MetricType:  &mt,
@@ -207,12 +222,29 @@ func kpiFilterToMetricsQuery(filter KPIFilter) metrics.QueryRequest {
 		EndTime:     filter.EndTime,
 	}
 	if filter.DeviceID != nil {
-		q.DeviceSNs = []string{filter.DeviceID.String()}
+		oui, sn, err := r.lookupDeviceOUISN(ctx, *filter.DeviceID)
+		if err != nil {
+			return q, err
+		}
+		q.DeviceOUIs = []string{oui}
+		q.DeviceSNs = []string{sn}
 	}
 	if filter.KPIName != nil {
 		q.MetricPaths = []string{*filter.KPIName}
 	}
-	return q
+	return q, nil
+}
+
+// lookupDeviceOUISN 反查 devices 表的 (oui, serial_number) 双键。
+func (r *PgKPIRepository) lookupDeviceOUISN(ctx context.Context, deviceID uuid.UUID) (string, string, error) {
+	var oui, sn string
+	err := r.pool.QueryRow(ctx,
+		`SELECT oui, serial_number FROM devices WHERE id = $1`, deviceID,
+	).Scan(&oui, &sn)
+	if err != nil {
+		return "", "", fmt.Errorf("lookup device oui+sn by id %s: %w", deviceID, err)
+	}
+	return oui, sn, nil
 }
 
 var _ KPIRepository = (*PgKPIRepository)(nil)

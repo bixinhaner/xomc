@@ -130,7 +130,7 @@ func TestKPIEngine_Calculate_ValidCounters(t *testing.T) {
 
 	values, err := engine.Calculate(
 		context.Background(),
-		deviceID, "Cell1",
+		deviceID, "00A0C6", "TEST-SN-001", "Cell1",
 		startTime, endTime,
 		model.CarrierCMCC, model.TechLTE,
 	)
@@ -171,7 +171,7 @@ func TestKPIEngine_Calculate_MissingCounters(t *testing.T) {
 
 	values, err := engine.Calculate(
 		context.Background(),
-		deviceID, "Cell1",
+		deviceID, "00A0C6", "TEST-SN-001", "Cell1",
 		startTime, endTime,
 		model.CarrierCMCC, model.TechLTE,
 	)
@@ -213,7 +213,7 @@ func TestKPIEngine_CalculateAndStore(t *testing.T) {
 
 	values, err := engine.CalculateAndStore(
 		context.Background(),
-		deviceID, "Cell1",
+		deviceID, "00A0C6", "TEST-SN-001", "Cell1",
 		collectTime,
 		model.CarrierCMCC, model.TechLTE,
 	)
@@ -236,7 +236,7 @@ func TestKPIEngine_Calculate_NoApplicableFormulas(t *testing.T) {
 	// Use a carrier code that has no registered formulas
 	values, err := engine.Calculate(
 		context.Background(),
-		deviceID, "Cell1",
+		deviceID, "00A0C6", "TEST-SN-001", "Cell1",
 		startTime, endTime,
 		model.CarrierCTCC, model.TechLTE, // CTCC not registered
 	)

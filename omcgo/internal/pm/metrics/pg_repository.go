@@ -25,7 +25,9 @@ type Repository interface {
 }
 
 // QueryRequest 是 Query / Count 的查询条件。空切片 / nil 字段忽略。
+// 设备过滤用 (DeviceOUI, DeviceSN) 双键（TR-069 标准）。
 type QueryRequest struct {
+	DeviceOUIs  []string // 与 DeviceSNs 配对（按位置 i 对应同一设备 (ouis[i], sns[i])）
 	DeviceSNs   []string
 	MetricPaths []string
 	MetricType  *MetricType
@@ -63,7 +65,7 @@ func (r *PgRepository) BatchInsert(ctx context.Context, ms []PMMetric) error {
 		return nil
 	}
 	ib := storage.Psql.Insert("pm_metrics").Columns(
-		"id", "device_sn", "metric_path", "metric_type", "metric_value",
+		"id", "device_oui", "device_sn", "metric_path", "metric_type", "metric_value",
 		"statis_type", "granularity", "time", "start_time", "end_time",
 		"ingest_time", "object_ldn", "extra",
 	)
@@ -97,13 +99,13 @@ func (r *PgRepository) BatchInsert(ctx context.Context, ms []PMMetric) error {
 			extra = b
 		}
 		ib = ib.Values(
-			id, m.DeviceSN, m.MetricPath, string(m.MetricType), m.MetricValue,
+			id, m.DeviceOUI, m.DeviceSN, m.MetricPath, string(m.MetricType), m.MetricValue,
 			statis, string(m.Granularity), t, m.StartTime, m.EndTime,
 			ingest, ldn, extra,
 		)
 	}
 	ib = ib.Suffix(
-		"ON CONFLICT (device_sn, metric_path, granularity, end_time, time) " +
+		"ON CONFLICT (device_oui, device_sn, metric_path, granularity, end_time, time) " +
 			"DO UPDATE SET metric_value = EXCLUDED.metric_value, ingest_time = NOW()",
 	)
 	sql, args, err := ib.ToSql()
@@ -119,7 +121,7 @@ func (r *PgRepository) BatchInsert(ctx context.Context, ms []PMMetric) error {
 // Query 按条件查询。
 func (r *PgRepository) Query(ctx context.Context, q QueryRequest) ([]PMMetric, error) {
 	qb := storage.Psql.Select(
-		"id", "device_sn", "metric_path", "metric_type", "metric_value",
+		"id", "device_oui", "device_sn", "metric_path", "metric_type", "metric_value",
 		"statis_type", "granularity", "time", "start_time", "end_time",
 		"ingest_time", "object_ldn", "extra",
 	).From("pm_metrics")
@@ -149,7 +151,7 @@ func (r *PgRepository) Query(ctx context.Context, q QueryRequest) ([]PMMetric, e
 		var extraBytes []byte
 		var metricType, granularity string
 		if err := rows.Scan(
-			&m.ID, &m.DeviceSN, &m.MetricPath, &metricType, &m.MetricValue,
+			&m.ID, &m.DeviceOUI, &m.DeviceSN, &m.MetricPath, &metricType, &m.MetricValue,
 			&statis, &granularity, &m.Time, &m.StartTime, &m.EndTime,
 			&m.IngestTime, &ldn, &extraBytes,
 		); err != nil {
@@ -189,7 +191,25 @@ func (r *PgRepository) Count(ctx context.Context, q QueryRequest) (int64, error)
 }
 
 func applyFilters(qb squirrel.SelectBuilder, q QueryRequest) squirrel.SelectBuilder {
-	if len(q.DeviceSNs) > 0 {
+	// 设备双键过滤：(oui[i], sn[i]) 配对成 OR 条件
+	// 如 ([A,B], [X,Y]) → WHERE (oui='A' AND sn='X') OR (oui='B' AND sn='Y')
+	// 单 OUIs / 单 SNs 仅一边过滤；位长度不等时按 min(len) 截断配对
+	if len(q.DeviceOUIs) > 0 && len(q.DeviceSNs) > 0 {
+		n := len(q.DeviceOUIs)
+		if len(q.DeviceSNs) < n {
+			n = len(q.DeviceSNs)
+		}
+		or := squirrel.Or{}
+		for i := 0; i < n; i++ {
+			or = append(or, squirrel.And{
+				squirrel.Eq{"device_oui": q.DeviceOUIs[i]},
+				squirrel.Eq{"device_sn": q.DeviceSNs[i]},
+			})
+		}
+		qb = qb.Where(or)
+	} else if len(q.DeviceOUIs) > 0 {
+		qb = qb.Where(squirrel.Eq{"device_oui": q.DeviceOUIs})
+	} else if len(q.DeviceSNs) > 0 {
 		qb = qb.Where(squirrel.Eq{"device_sn": q.DeviceSNs})
 	}
 	if len(q.MetricPaths) > 0 {

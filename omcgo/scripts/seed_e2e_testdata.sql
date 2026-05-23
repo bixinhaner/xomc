@@ -48,8 +48,9 @@ DELETE FROM alarm_rules WHERE id::text LIKE 'a0000000%';
 -- Sprint 3 data
 DELETE FROM mr_records WHERE device_id::text LIKE 'e2e00001%';
 DELETE FROM mr_files WHERE id::text LIKE 'e2e00008%';
--- T-0164-P3 / G3：pm_counters + kpi_values 合入 pm_metrics（metric_type 区分），device_id (uuid) → device_sn (text)
-DELETE FROM pm_metrics WHERE device_sn LIKE 'e2e00001%';
+-- T-0164-P3 / G3：pm_counters + kpi_values 合入 pm_metrics（metric_type 区分）
+-- 设备唯一标识：(device_oui, device_sn) 双键（TR-069 标准），与上方 e2e devices 表对齐
+DELETE FROM pm_metrics WHERE device_sn LIKE 'TEST-SN-%';
 DELETE FROM kpi_definitions WHERE name LIKE 'E2E_%';
 DELETE FROM audit_logs WHERE id::text LIKE 'e2e00009%';
 
@@ -348,21 +349,21 @@ INSERT INTO device_group_members (group_id, device_id, added_at) VALUES
 -- ============================================================
 
 -- T-0164-P3 / G3：pm_counters 合入 pm_metrics（metric_type='counter'）
--- 字段映射：device_id(uuid) → device_sn(text 存 UUID 字符串)、counter_name → metric_path、
--- counter_value → metric_value、cell_id → object_ldn、counter_group → extra JSONB、granularity 15 → '15min'。
-INSERT INTO pm_metrics (device_sn, metric_path, metric_type, metric_value, granularity, time, start_time, end_time, object_ldn, extra) VALUES
--- Device 1, RRC counters, 2 hours ago
-('e2e00001-0000-0000-0000-000000000001', 'RRC_CONN_ATTEMPT', 'counter', 1500, '15min', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '2 hours 15 minutes', NOW() - INTERVAL '2 hours', 'CELL-001-1', '{"counter_group":"RRC"}'::jsonb),
-('e2e00001-0000-0000-0000-000000000001', 'RRC_CONN_SUCCESS', 'counter', 1485, '15min', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '2 hours 15 minutes', NOW() - INTERVAL '2 hours', 'CELL-001-1', '{"counter_group":"RRC"}'::jsonb),
+-- T-0164-P3 fix: 设备唯一标识用 TR-069 标准 (device_oui, device_sn) 双键
+-- Device 1 (TEST-SN-001) OUI=00A0C6 / Device 2 (TEST-SN-002) OUI=00A0C6（与上方 devices 表对齐）
+INSERT INTO pm_metrics (device_oui, device_sn, metric_path, metric_type, metric_value, granularity, time, start_time, end_time, object_ldn, extra) VALUES
+-- Device 1 (00A0C6 / TEST-SN-001), RRC counters, 2 hours ago
+('00A0C6', 'TEST-SN-001', 'RRC_CONN_ATTEMPT', 'counter', 1500, '15min', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '2 hours 15 minutes', NOW() - INTERVAL '2 hours', 'CELL-001-1', '{"counter_group":"RRC"}'::jsonb),
+('00A0C6', 'TEST-SN-001', 'RRC_CONN_SUCCESS', 'counter', 1485, '15min', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '2 hours 15 minutes', NOW() - INTERVAL '2 hours', 'CELL-001-1', '{"counter_group":"RRC"}'::jsonb),
 -- Device 1, RRC counters, 1 hour ago
-('e2e00001-0000-0000-0000-000000000001', 'RRC_CONN_ATTEMPT', 'counter', 1600, '15min', NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour 15 minutes', NOW() - INTERVAL '1 hour', 'CELL-001-1', '{"counter_group":"RRC"}'::jsonb),
-('e2e00001-0000-0000-0000-000000000001', 'RRC_CONN_SUCCESS', 'counter', 1592, '15min', NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour 15 minutes', NOW() - INTERVAL '1 hour', 'CELL-001-1', '{"counter_group":"RRC"}'::jsonb),
+('00A0C6', 'TEST-SN-001', 'RRC_CONN_ATTEMPT', 'counter', 1600, '15min', NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour 15 minutes', NOW() - INTERVAL '1 hour', 'CELL-001-1', '{"counter_group":"RRC"}'::jsonb),
+('00A0C6', 'TEST-SN-001', 'RRC_CONN_SUCCESS', 'counter', 1592, '15min', NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour 15 minutes', NOW() - INTERVAL '1 hour', 'CELL-001-1', '{"counter_group":"RRC"}'::jsonb),
 -- Device 1, ERAB counters
-('e2e00001-0000-0000-0000-000000000001', 'ERAB_SETUP_ATTEMPT', 'counter', 1200, '15min', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '2 hours 15 minutes', NOW() - INTERVAL '2 hours', 'CELL-001-1', '{"counter_group":"ERAB"}'::jsonb),
-('e2e00001-0000-0000-0000-000000000001', 'ERAB_SETUP_SUCCESS', 'counter', 1188, '15min', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '2 hours 15 minutes', NOW() - INTERVAL '2 hours', 'CELL-001-1', '{"counter_group":"ERAB"}'::jsonb),
--- Device 2, RRC counters
-('e2e00001-0000-0000-0000-000000000002', 'RRC_CONN_ATTEMPT', 'counter', 800, '15min', NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour 15 minutes', NOW() - INTERVAL '1 hour', 'CELL-002-1', '{"counter_group":"RRC"}'::jsonb),
-('e2e00001-0000-0000-0000-000000000002', 'RRC_CONN_SUCCESS', 'counter', 796, '15min', NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour 15 minutes', NOW() - INTERVAL '1 hour', 'CELL-002-1', '{"counter_group":"RRC"}'::jsonb);
+('00A0C6', 'TEST-SN-001', 'ERAB_SETUP_ATTEMPT', 'counter', 1200, '15min', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '2 hours 15 minutes', NOW() - INTERVAL '2 hours', 'CELL-001-1', '{"counter_group":"ERAB"}'::jsonb),
+('00A0C6', 'TEST-SN-001', 'ERAB_SETUP_SUCCESS', 'counter', 1188, '15min', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '2 hours 15 minutes', NOW() - INTERVAL '2 hours', 'CELL-001-1', '{"counter_group":"ERAB"}'::jsonb),
+-- Device 2 (00A0C6 / TEST-SN-002), RRC counters
+('00A0C6', 'TEST-SN-002', 'RRC_CONN_ATTEMPT', 'counter', 800, '15min', NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour 15 minutes', NOW() - INTERVAL '1 hour', 'CELL-002-1', '{"counter_group":"RRC"}'::jsonb),
+('00A0C6', 'TEST-SN-002', 'RRC_CONN_SUCCESS', 'counter', 796, '15min', NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour 15 minutes', NOW() - INTERVAL '1 hour', 'CELL-002-1', '{"counter_group":"RRC"}'::jsonb);
 
 -- ============================================================
 -- 8. KPI 定义 (Sprint 3 — 2 条)
@@ -379,11 +380,11 @@ INSERT INTO kpi_definitions (name, display_name, formula, unit, category, carrie
 -- ============================================================
 
 -- T-0164-P3 / G3：kpi_values 合入 pm_metrics（metric_type='kpi'），carrier/technology 进 extra JSONB
-INSERT INTO pm_metrics (device_sn, metric_path, metric_type, metric_value, granularity, time, start_time, end_time, object_ldn, extra) VALUES
-('e2e00001-0000-0000-0000-000000000001', 'E2E_RRC_SR',  'kpi', 99.0, '15min', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '2 hours', 'CELL-001-1', '{"carrier":"cmcc","technology":"lte"}'::jsonb),
-('e2e00001-0000-0000-0000-000000000001', 'E2E_RRC_SR',  'kpi', 99.5, '15min', NOW() - INTERVAL '1 hour',  NOW() - INTERVAL '1 hour',  NOW() - INTERVAL '1 hour',  'CELL-001-1', '{"carrier":"cmcc","technology":"lte"}'::jsonb),
-('e2e00001-0000-0000-0000-000000000001', 'E2E_ERAB_SR', 'kpi', 99.0, '15min', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '2 hours', 'CELL-001-1', '{"carrier":"cmcc","technology":"lte"}'::jsonb),
-('e2e00001-0000-0000-0000-000000000002', 'E2E_RRC_SR',  'kpi', 99.5, '15min', NOW() - INTERVAL '1 hour',  NOW() - INTERVAL '1 hour',  NOW() - INTERVAL '1 hour',  'CELL-002-1', '{"carrier":"cmcc","technology":"nr"}'::jsonb);
+INSERT INTO pm_metrics (device_oui, device_sn, metric_path, metric_type, metric_value, granularity, time, start_time, end_time, object_ldn, extra) VALUES
+('00A0C6', 'TEST-SN-001', 'E2E_RRC_SR',  'kpi', 99.0, '15min', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '2 hours', 'CELL-001-1', '{"carrier":"cmcc","technology":"lte"}'::jsonb),
+('00A0C6', 'TEST-SN-001', 'E2E_RRC_SR',  'kpi', 99.5, '15min', NOW() - INTERVAL '1 hour',  NOW() - INTERVAL '1 hour',  NOW() - INTERVAL '1 hour',  'CELL-001-1', '{"carrier":"cmcc","technology":"lte"}'::jsonb),
+('00A0C6', 'TEST-SN-001', 'E2E_ERAB_SR', 'kpi', 99.0, '15min', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '2 hours', NOW() - INTERVAL '2 hours', 'CELL-001-1', '{"carrier":"cmcc","technology":"lte"}'::jsonb),
+('00A0C6', 'TEST-SN-002', 'E2E_RRC_SR',  'kpi', 99.5, '15min', NOW() - INTERVAL '1 hour',  NOW() - INTERVAL '1 hour',  NOW() - INTERVAL '1 hour',  'CELL-002-1', '{"carrier":"cmcc","technology":"nr"}'::jsonb);
 
 -- ============================================================
 -- 10. MR 文件元数据 (Sprint 3 — 2 条)
@@ -664,11 +665,11 @@ SELECT 'upgrade_tasks', COUNT(*) FROM upgrade_tasks WHERE id::text LIKE 'e2e0000
 UNION ALL
 SELECT 'device_groups', COUNT(*) FROM device_groups WHERE id::text LIKE 'e2e00007%'
 UNION ALL
-SELECT 'pm_metrics_counter', COUNT(*) FROM pm_metrics WHERE device_sn LIKE 'e2e00001%' AND metric_type = 'counter'
+SELECT 'pm_metrics_counter', COUNT(*) FROM pm_metrics WHERE device_sn LIKE 'TEST-SN-%' AND metric_type = 'counter'
 UNION ALL
 SELECT 'kpi_definitions', COUNT(*) FROM kpi_definitions WHERE name LIKE 'E2E_%'
 UNION ALL
-SELECT 'pm_metrics_kpi', COUNT(*) FROM pm_metrics WHERE device_sn LIKE 'e2e00001%' AND metric_type = 'kpi'
+SELECT 'pm_metrics_kpi', COUNT(*) FROM pm_metrics WHERE device_sn LIKE 'TEST-SN-%' AND metric_type = 'kpi'
 UNION ALL
 SELECT 'mr_files', COUNT(*) FROM mr_files WHERE id::text LIKE 'e2e00008%'
 UNION ALL

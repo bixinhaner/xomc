@@ -196,6 +196,8 @@ func (p *PMXMLParser) Parse(r io.Reader, deviceID uuid.UUID) (*PMFileContent, er
 					content.Counters = append(content.Counters, model.PMCounter{
 						Time:         collectTime,
 						DeviceID:     deviceID,
+						DeviceSN:     content.DeviceSN, // T-0164-P3: TR-069 SN（parser 从 managedElement.LocalDn 解析）
+						// OUI 由 collector 在 BatchInsert 前从 payload 统一填充（parser 不解析 OUI）
 						CellID:       cellID,
 						CounterGroup: counterGroup,
 						CounterName:  counterName,

@@ -38,8 +38,13 @@ const (
 
 // PMMetric 是 pm_metrics 表行。
 //
-// 唯一性维度（自然键）：(DeviceSN, MetricPath, Granularity, EndTime)
+// 设备唯一标识：按 TR-069 标准用 (DeviceOUI, DeviceSN) 双键（T-0164-P3 fix 引入）。
+// DeviceOUI = TR-069 DeviceId.OUI（6 位 hex 大写），DeviceSN = DeviceId.SerialNumber。
+// 全系统级切换见 docs/project/plan-T-0165-system-wide-oui-sn-migration.md。
+//
+// 唯一性维度（自然键）：(DeviceOUI, DeviceSN, MetricPath, Granularity, EndTime, Time)
 // 唯一索引 uq_pm_metrics_natural 上挂 ON CONFLICT DO UPDATE 保证补传幂等。
+// （TimescaleDB 要求 UNIQUE 索引必须含分区列 Time；业务上 Time = EndTime，约束意义不变）
 //
 // 时间三字段（G4 在 parser 层已落）：
 //   - StartTime  基站采集窗口起（基站时钟）
@@ -47,7 +52,7 @@ const (
 //   - IngestTime OMC 入库时刻（OMC 时钟，默认 NOW()）
 //
 // 字段映射（旧 → 新）：
-//   - PMCounter.DeviceID(uuid)  → DeviceSN(text)（过渡期存 UUID 字符串，后续 collector 改传真实 SN）
+//   - PMCounter.OUI + PMCounter.DeviceSN → DeviceOUI + DeviceSN（TR-069 双键）
 //   - PMCounter.CellID(string)  → ObjectLDN(*string)
 //   - PMCounter.CounterGroup    → 进 Extra JSONB
 //   - PMCounter.CounterName     → MetricPath + MetricType='counter'
@@ -57,7 +62,8 @@ const (
 //   - KPIValue.Carrier/Tech     → 进 Extra JSONB
 type PMMetric struct {
 	ID          uuid.UUID
-	DeviceSN    string
+	DeviceOUI   string // TR-069 DeviceId.OUI（6 位 hex 大写）
+	DeviceSN    string // TR-069 DeviceId.SerialNumber
 	MetricPath  string
 	MetricType  MetricType
 	MetricValue float64

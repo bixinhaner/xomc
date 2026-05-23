@@ -62,12 +62,15 @@ func Test_AggregatedCounter_Struct(t *testing.T) {
 }
 
 // G3 字段双向转换：PMCounter ↔ PMMetric 保证无字段丢失
+// T-0164-P3 fix: 业务键改用 TR-069 标准 (OUI, DeviceSN) 双键
 func Test_counterToMetric_BasicFields(t *testing.T) {
 	deviceID := uuid.New()
 	now := time.Now()
 	c := model.PMCounter{
 		Time:         now,
 		DeviceID:     deviceID,
+		OUI:          "48BF74",
+		DeviceSN:     "1202000240194DP0026",
 		CellID:       "cell-1",
 		CounterGroup: "LTE.CellMeasReport",
 		CounterName:  "PRB.UlAvailProcMeas",
@@ -76,7 +79,8 @@ func Test_counterToMetric_BasicFields(t *testing.T) {
 	}
 	m := counterToMetric(c)
 
-	assert.Equal(t, deviceID.String(), m.DeviceSN)
+	assert.Equal(t, "48BF74", m.DeviceOUI)
+	assert.Equal(t, "1202000240194DP0026", m.DeviceSN)
 	assert.Equal(t, "PRB.UlAvailProcMeas", m.MetricPath)
 	assert.Equal(t, "counter", string(m.MetricType))
 	assert.Equal(t, 42.5, m.MetricValue)
@@ -87,6 +91,7 @@ func Test_counterToMetric_BasicFields(t *testing.T) {
 		assert.Equal(t, "cell-1", *m.ObjectLDN)
 	}
 	assert.Equal(t, "LTE.CellMeasReport", m.Extra["counter_group"])
+	assert.Equal(t, deviceID.String(), m.Extra["device_id"])
 }
 
 func Test_counterRoundTrip_PreservesCoreFields(t *testing.T) {
@@ -95,6 +100,8 @@ func Test_counterRoundTrip_PreservesCoreFields(t *testing.T) {
 	original := model.PMCounter{
 		Time:         now,
 		DeviceID:     deviceID,
+		OUI:          "48BF74",
+		DeviceSN:     "1202000240194DP0026",
 		CellID:       "cell-7",
 		CounterGroup: "LTE.CellMeasReport",
 		CounterName:  "PRB.UlAvailProcMeas",
@@ -104,7 +111,9 @@ func Test_counterRoundTrip_PreservesCoreFields(t *testing.T) {
 	m := counterToMetric(original)
 	got := metricToCounter(m)
 
-	assert.Equal(t, deviceID, got.DeviceID)
+	assert.Equal(t, deviceID, got.DeviceID, "DeviceID 应从 extra 反查")
+	assert.Equal(t, "48BF74", got.OUI)
+	assert.Equal(t, "1202000240194DP0026", got.DeviceSN)
 	assert.Equal(t, "cell-7", got.CellID)
 	assert.Equal(t, "LTE.CellMeasReport", got.CounterGroup)
 	assert.Equal(t, "PRB.UlAvailProcMeas", got.CounterName)

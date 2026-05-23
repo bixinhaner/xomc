@@ -18,7 +18,8 @@ BEGIN;
 -- ============================================================
 DELETE FROM mr_records              WHERE device_id::text LIKE 'a0000000%';
 DELETE FROM mr_files                WHERE device_id::text LIKE 'a0000000%';
--- T-0164-P3 / G3：pm_counters + kpi_values 合入 pm_metrics（device_id → device_sn TEXT 存 'TD-xxx-NNNN'）
+-- T-0164-P3 / G3：pm_counters + kpi_values 合入 pm_metrics
+-- T-0164-P3 fix: 设备唯一标识 (device_oui, device_sn) 双键
 DELETE FROM pm_metrics              WHERE device_sn LIKE 'TD-%';
 DELETE FROM pm_files                WHERE device_id::text LIKE 'a0000000%';
 DELETE FROM alarms_history          WHERE device_id::text LIKE 'a0000000%';
@@ -407,8 +408,11 @@ CROSS JOIN LATERAL (
 -- 13. PM 计数器 → pm_metrics（metric_type='counter'，20000 条，TimescaleDB hypertable）
 -- T-0164-P3 / G3：旧 pm_counters 表已合入 pm_metrics（详见 docs/design/pm-kpi-pipeline-improvements.md §4.3）
 -- ============================================================
-INSERT INTO pm_metrics (device_sn, metric_path, metric_type, metric_value, granularity, time, start_time, end_time, extra)
+-- T-0164-P3 fix: 设备唯一标识 (device_oui, device_sn) 双键。
+-- OUI 从 3 个常见厂商池循环选（48BF74 / 00A0C6 / 00E0FC），与 devices 表真实数据风格一致。
+INSERT INTO pm_metrics (device_oui, device_sn, metric_path, metric_type, metric_value, granularity, time, start_time, end_time, extra)
 SELECT
+    (ARRAY['48BF74', '00A0C6', '00E0FC'])[1 + ((i-1) % 500) % 3],
     'TD-' || c.carrier || '-' || lpad(((i-1) % 500 + 1)::text, 4, '0'),
     cn.name,
     'counter',
@@ -460,8 +464,9 @@ ON CONFLICT (device_sn, metric_path, granularity, end_time, time) DO NOTHING;
 -- 14. KPI 值 → pm_metrics（metric_type='kpi'，20000 条，TimescaleDB hypertable）
 -- T-0164-P3 / G3：旧 kpi_values 表已合入 pm_metrics
 -- ============================================================
-INSERT INTO pm_metrics (device_sn, metric_path, metric_type, metric_value, granularity, time, start_time, end_time)
+INSERT INTO pm_metrics (device_oui, device_sn, metric_path, metric_type, metric_value, granularity, time, start_time, end_time)
 SELECT
+    (ARRAY['48BF74', '00A0C6', '00E0FC'])[1 + ((i-1) % 500) % 3],
     'TD-LOAD-' || lpad(((i-1) % 500 + 1)::text, 4, '0'),
     (ARRAY[
         'RRC_CONN_SETUP_SR', 'ERAB_SETUP_SR', 'INTRA_FREQ_HO_SR',

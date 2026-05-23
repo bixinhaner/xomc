@@ -16,7 +16,11 @@
 --   - statis_type CHECK ('sum','avg','max','pct') 或 NULL：counter 必填（驱动 G5 自然桶聚合），kpi 为 NULL
 --   - granularity CHECK ('15min','hourly','daily','weekly','monthly')：G3 仅 '15min'，G5 加 'hourly'+ 等
 --   - 三时间字段 NOT NULL（T-0164-P4 / G4 已在 parser 层填充 FileBeginTime/FileEndTime/IngestTime）
---   - 自然键唯一索引 (device_sn, metric_path, granularity, end_time, time)：补传去重 + ON CONFLICT 幂等
+--   - **设备唯一标识 (device_oui, device_sn)**：TR-069 标准双键
+--       device_oui — TR-069 DeviceId.OUI（6 位十六进制大写厂商标识），如 '48BF74'
+--       device_sn  — TR-069 DeviceId.SerialNumber（厂商内序列号），如 '1202000240194DP0026'
+--       全系统设备唯一标识由这两列组合决定（详见 docs/project/plan-T-0165-system-wide-oui-sn-migration.md）
+--   - 自然键唯一索引 (device_oui, device_sn, metric_path, granularity, end_time, time)：补传去重 + ON CONFLICT 幂等
 --     （TimescaleDB 要求 UNIQUE 索引必须包含分区列 `time`；业务上 time = end_time，约束意义不变）
 --   - PRIMARY KEY (id, time)：TS hypertable 要求 PK 含分区列
 --   - object_ldn 替代旧 cell_id：更通用的 LDN 对象标识（cell / sector / 等）
@@ -30,6 +34,7 @@ DROP TABLE IF EXISTS kpi_values CASCADE;
 
 CREATE TABLE pm_metrics (
     id            UUID NOT NULL DEFAULT gen_random_uuid(),
+    device_oui    TEXT NOT NULL,
     device_sn     TEXT NOT NULL,
     metric_path   TEXT NOT NULL,
     metric_type   TEXT NOT NULL CHECK (metric_type IN ('counter', 'kpi')),
@@ -46,12 +51,13 @@ CREATE TABLE pm_metrics (
 );
 
 -- TimescaleDB 要求 UNIQUE 索引必须包含分区列 `time`；业务上 time = end_time，
--- 增加 time 列不改变自然键去重语义（同 (device_sn, metric_path, granularity, end_time) 必然 time 也相等）
+-- 增加 time 列不改变自然键去重语义。
+-- 设备唯一标识用 (device_oui, device_sn) 双键（TR-069 标准）
 CREATE UNIQUE INDEX uq_pm_metrics_natural
-    ON pm_metrics (device_sn, metric_path, granularity, end_time, time);
+    ON pm_metrics (device_oui, device_sn, metric_path, granularity, end_time, time);
 
 CREATE INDEX idx_pm_metrics_path_time   ON pm_metrics (metric_path, time DESC);
-CREATE INDEX idx_pm_metrics_device_time ON pm_metrics (device_sn, time DESC);
+CREATE INDEX idx_pm_metrics_device_time ON pm_metrics (device_oui, device_sn, time DESC);
 CREATE INDEX idx_pm_metrics_ingest_time ON pm_metrics (ingest_time DESC);
 CREATE INDEX idx_pm_metrics_object_ldn  ON pm_metrics (object_ldn) WHERE object_ldn IS NOT NULL;
 
@@ -59,7 +65,7 @@ SELECT create_hypertable('pm_metrics', 'time', chunk_time_interval => INTERVAL '
 
 ALTER TABLE pm_metrics SET (
     timescaledb.compress,
-    timescaledb.compress_segmentby = 'device_sn,metric_type,granularity'
+    timescaledb.compress_segmentby = 'device_oui,device_sn,metric_type,granularity'
 );
 
 SELECT add_compression_policy('pm_metrics', INTERVAL '7 days');

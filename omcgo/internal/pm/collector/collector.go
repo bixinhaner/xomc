@@ -21,6 +21,7 @@ import (
 type FileReceivedPayload struct {
 	MinIOPath  string `json:"minio_path"`
 	DeviceID   string `json:"device_id"`
+	DeviceOUI  string `json:"device_oui"` // T-0164-P3: TR-069 标准设备唯一标识 (oui, sn) 双键
 	DeviceSN   string `json:"device_sn"`
 	Carrier    string `json:"carrier"`
 	Technology string `json:"technology"`
@@ -150,6 +151,15 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 
 	c.logger.Info("parsed PM file", zap.Int("counters", len(content.Counters)))
 
+	// T-0164-P3: parser 不知道 OUI（XML 内不含），由 collector 从 payload 统一填充。
+	// OUI 同一文件内必然一致（一个文件对应一个设备）。
+	for i := range content.Counters {
+		content.Counters[i].OUI = payload.DeviceOUI
+		if content.Counters[i].DeviceSN == "" {
+			content.Counters[i].DeviceSN = payload.DeviceSN
+		}
+	}
+
 	if err := c.counterRepo.BatchInsert(ctx, content.Counters); err != nil {
 		if c.metrics != nil {
 			c.metrics.FilesProcessedTotal.WithLabelValues("failed").Inc()
@@ -177,7 +187,7 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 		carrier := model.CarrierCode(payload.Carrier)
 		tech := model.Technology(payload.Technology)
 		for _, cellID := range cellIDs {
-			if _, err := c.kpiEngine.CalculateAndStore(ctx, deviceID, cellID, content.CollectTime, carrier, tech); err != nil {
+			if _, err := c.kpiEngine.CalculateAndStore(ctx, deviceID, payload.DeviceOUI, payload.DeviceSN, cellID, content.CollectTime, carrier, tech); err != nil {
 				c.logger.Warn("calculate kpi", zap.String("cell_id", cellID), zap.Error(err))
 			}
 		}

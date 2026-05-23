@@ -1,12 +1,14 @@
 package pm
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/minio/minio-go/v7"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
@@ -25,13 +27,26 @@ type Handler struct {
 	fileStore   PMFileStore
 	minioClient *minio.Client
 	pmBucket    string
+	pool        *pgxpool.Pool // T-0164-P3 fix: 反查 devices 拿 (oui, sn) 给 KPIEngine
 	metrics     *PMMetrics
 	logger      *zap.Logger
 }
 
 // NewHandler creates a new PM handler.
-func NewHandler(counterRepo counter.CounterRepository, kpiRepo kpi.KPIRepository, kpiEngine *kpi.KPIEngine, taskRepo TaskRepository, fileStore PMFileStore, minioClient *minio.Client, pmBucket string, logger *zap.Logger) *Handler {
-	return &Handler{counterRepo: counterRepo, kpiRepo: kpiRepo, kpiEngine: kpiEngine, taskRepo: taskRepo, fileStore: fileStore, minioClient: minioClient, pmBucket: pmBucket, logger: logger}
+func NewHandler(counterRepo counter.CounterRepository, kpiRepo kpi.KPIRepository, kpiEngine *kpi.KPIEngine, taskRepo TaskRepository, fileStore PMFileStore, minioClient *minio.Client, pmBucket string, pool *pgxpool.Pool, logger *zap.Logger) *Handler {
+	return &Handler{counterRepo: counterRepo, kpiRepo: kpiRepo, kpiEngine: kpiEngine, taskRepo: taskRepo, fileStore: fileStore, minioClient: minioClient, pmBucket: pmBucket, pool: pool, logger: logger}
+}
+
+// lookupDeviceOUISN 反查 devices 表的 (oui, serial_number) 双键（T-0164-P3 fix）。
+func (h *Handler) lookupDeviceOUISN(ctx context.Context, deviceID uuid.UUID) (string, string, error) {
+	var oui, sn string
+	err := h.pool.QueryRow(ctx,
+		`SELECT oui, serial_number FROM devices WHERE id = $1`, deviceID,
+	).Scan(&oui, &sn)
+	if err != nil {
+		return "", "", fmt.Errorf("lookup device oui+sn: %w", err)
+	}
+	return oui, sn, nil
 }
 
 // SetMetrics attaches Prometheus metrics to the handler.
@@ -275,8 +290,13 @@ func (h *Handler) CalculateKPI(c *gin.Context) {
 		return
 	}
 
+	oui, sn, err := h.lookupDeviceOUISN(c.Request.Context(), deviceID)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
 	results, err := h.kpiEngine.CalculateAndStore(
-		c.Request.Context(), deviceID, req.CellID, endTime,
+		c.Request.Context(), deviceID, oui, sn, req.CellID, endTime,
 		model.CarrierCode(req.Carrier), model.Technology(req.Technology),
 	)
 	_ = startTime // endTime is used as collectTime

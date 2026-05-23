@@ -86,9 +86,12 @@ func (e *KPIEngine) Formulas() []*RegisteredFormula {
 }
 
 // Calculate computes KPI values for a device/cell in a time range.
+// T-0164-P3: 签名加 oui+deviceSN 用于按 TR-069 标准双键写入 pm_metrics。
+// deviceID 保留作 internal ID（counterRepo.QueryForKPI 反查 counter 用）。
 func (e *KPIEngine) Calculate(
 	ctx context.Context,
 	deviceID uuid.UUID,
+	oui, deviceSN string,
 	cellID string,
 	startTime, endTime time.Time,
 	carrierCode model.CarrierCode,
@@ -118,6 +121,8 @@ func (e *KPIEngine) Calculate(
 		results = append(results, model.KPIValue{
 			Time:       endTime,
 			DeviceID:   deviceID,
+			OUI:        oui,
+			DeviceSN:   deviceSN,
 			CellID:     cellID,
 			KPIName:    f.Name,
 			KPIValue:   value,
@@ -130,9 +135,11 @@ func (e *KPIEngine) Calculate(
 }
 
 // CalculateAndStore calculates KPIs and persists them.
+// T-0164-P3: 签名加 oui+deviceSN，与 Calculate 一致。
 func (e *KPIEngine) CalculateAndStore(
 	ctx context.Context,
 	deviceID uuid.UUID,
+	oui, deviceSN string,
 	cellID string,
 	collectTime time.Time,
 	carrierCode model.CarrierCode,
@@ -142,7 +149,7 @@ func (e *KPIEngine) CalculateAndStore(
 	startTime := collectTime.Add(-time.Duration(15) * time.Minute)
 	endTime := collectTime
 
-	results, err := e.Calculate(ctx, deviceID, cellID, startTime, endTime, carrierCode, tech)
+	results, err := e.Calculate(ctx, deviceID, oui, deviceSN, cellID, startTime, endTime, carrierCode, tech)
 	if err != nil {
 		return nil, err
 	}

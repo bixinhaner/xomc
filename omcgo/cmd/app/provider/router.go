@@ -373,7 +373,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- PM routes → resource "pm" -----
 	ph := c.pmHandlerDeps
-	pmHandler := pm.NewHandler(ph.pmCounterRepo, ph.pmKPIRepo, ph.pmKPIEngine, ph.pmTaskRepo, ph.pmFileStore, c.MinIO, c.Cfg.MinIO.Buckets.PMFiles, c.Logger)
+	pmHandler := pm.NewHandler(ph.pmCounterRepo, ph.pmKPIRepo, ph.pmKPIEngine, ph.pmTaskRepo, ph.pmFileStore, c.MinIO, c.Cfg.MinIO.Buckets.PMFiles, c.TsPool, c.Logger)
 	pmHandler.SetMetrics(pm.NewPMMetrics(c.MetricsReg))
 	pmHandler.RegisterRoutes(permGroup("pm"))
 
