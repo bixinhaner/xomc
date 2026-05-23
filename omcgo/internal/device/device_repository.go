@@ -104,6 +104,11 @@ type GeoDevice struct {
 	Address      string             `json:"address,omitempty"`
 	AlarmCount   int                `json:"alarm_count"`
 	Type         string             `json:"type,omitempty"`
+	// 搜索相关字段
+	IPAddress  *string `json:"ip_address,omitempty"`  // devices.ip_address
+	MAC        *string `json:"mac,omitempty"`         // device_info.mac
+	PCI        *string `json:"pci,omitempty"`         // device_info.pci
+	DeviceName *string `json:"device_name,omitempty"` // device_info.device_name
 }
 
 // GeoStats represents device statistics for map display.
@@ -943,9 +948,11 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 		"d.lifecycle_state", "d.is_online",
 		"d.latitude", "d.longitude", "dg.id as group_id", "dg.name as group_name",
 		"d.site_name as address", "0 as alarm_count", "d.model_name as type",
+		"COALESCE(host(d.ip_address), '')", "COALESCE(di.mac, '')", "COALESCE(di.pci, '')", "COALESCE(di.device_name, '')",
 	).From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
+		LeftJoin("device_info di ON d.id = di.device_id").
 		Where(sq.NotEq{"d.latitude": nil}).
 		Where(sq.NotEq{"d.longitude": nil})
 
@@ -969,17 +976,27 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 		builder = builder.Where(orClauses)
 	}
 	if filter.Keyword != "" {
-		builder = builder.Where(sq.Or{
-			sq.ILike{"d.serial_number": "%" + filter.Keyword + "%"},
-			sq.ILike{"d.site_name": "%" + filter.Keyword + "%"},
-		})
+		// GIS 地图搜索字段（6 个）：SN / 名称 / IP / MAC / PCI / 设备名称
+		searchFields := []string{
+			"d.serial_number",
+			"d.site_name",
+			"d.ip_address",
+			"di.mac",
+			"di.pci",
+			"di.device_name",
+		}
+		if cond := BuildSearchOR(filter.Keyword, searchFields); cond != nil {
+			builder = builder.Where(cond)
+		}
 	}
 
 	// Get total count with a separate query
-	countBuilder := storage.Psql.Select("COUNT(DISTINCT d.id)").
+	// 注意：去掉 DISTINCT，因为 device 与 device_info 是 1:1 关系
+	countBuilder := storage.Psql.Select("COUNT(d.id)").
 		From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
+		LeftJoin("device_info di ON d.id = di.device_id").
 		Where(sq.NotEq{"d.latitude": nil}).
 		Where(sq.NotEq{"d.longitude": nil})
 
@@ -1001,10 +1018,18 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 		countBuilder = countBuilder.Where(orClauses)
 	}
 	if filter.Keyword != "" {
-		countBuilder = countBuilder.Where(sq.Or{
-			sq.ILike{"d.serial_number": "%" + filter.Keyword + "%"},
-			sq.ILike{"d.site_name": "%" + filter.Keyword + "%"},
-		})
+		// GIS 地图搜索字段（6 个）：SN / 名称 / IP / MAC / PCI / 设备名称
+		searchFields := []string{
+			"d.serial_number",
+			"d.site_name",
+			"d.ip_address",
+			"di.mac",
+			"di.pci",
+			"di.device_name",
+		}
+		if cond := BuildSearchOR(filter.Keyword, searchFields); cond != nil {
+			countBuilder = countBuilder.Where(cond)
+		}
 	}
 
 	countQuery, countArgs, _ := countBuilder.ToSql()
@@ -1042,12 +1067,14 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 		var groupID *uuid.UUID
 		var groupName, address, deviceType *string
 		var alarmCount int
+		var ipAddress, mac, pci, deviceName string // COALESCE 保证非 NULL
 
 		err := rows.Scan(
 			&d.ID, &d.SerialNumber, &d.Name,
 			&lifecycle, &isOnline, // T-0162: 替代 &d.Status
 			&d.Latitude, &d.Longitude, &groupID, &groupName,
 			&address, &alarmCount, &deviceType,
+			&ipAddress, &mac, &pci, &deviceName, // 新增 4 个字段
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("scan geo device: %w", err)
@@ -1066,6 +1093,20 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 			d.Type = *deviceType
 		}
 		d.AlarmCount = alarmCount
+
+		// 新增 4 个字段：空字符串转为 nil
+		if ipAddress != "" {
+			d.IPAddress = &ipAddress
+		}
+		if mac != "" {
+			d.MAC = &mac
+		}
+		if pci != "" {
+			d.PCI = &pci
+		}
+		if deviceName != "" {
+			d.DeviceName = &deviceName
+		}
 
 		devices = append(devices, d)
 	}
@@ -1164,20 +1205,36 @@ func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, 
 		limit = 20
 	}
 
+	// GIS 地图搜索字段（6 个）：SN / 名称 / IP / MAC / PCI / 设备名称
+	searchFields := []string{
+		"d.serial_number",
+		"d.site_name",
+		"d.ip_address",
+		"di.mac",
+		"di.pci",
+		"di.device_name",
+	}
+
 	// T-0162: 同 ListGeo，用 lifecycle_state + is_online
 	builder := storage.Psql.Select(
 		"d.id", "d.serial_number", "d.serial_number as name",
 		"d.lifecycle_state", "d.is_online",
 		"d.latitude", "d.longitude", "dg.id as group_id", "dg.name as group_name",
 		"d.site_name as address", "0 as alarm_count", "d.model_name as type",
+		"COALESCE(host(d.ip_address), '')", "COALESCE(di.mac, '')", "COALESCE(di.pci, '')", "COALESCE(di.device_name, '')",
 	).From("devices d").
 		LeftJoin("device_group_members dgm ON d.id = dgm.device_id").
 		LeftJoin("device_groups dg ON dgm.group_id = dg.id").
-		Where(sq.Or{
-			sq.ILike{"d.serial_number": "%" + keyword + "%"},
-			sq.ILike{"d.site_name": "%" + keyword + "%"},
-		}).
-		Limit(uint64(limit))
+		LeftJoin("device_info di ON d.id = di.device_id")
+
+	// 复用 BuildSearchOR：支持逗号分隔多值搜索 + 50 个值限制
+	if cond := BuildSearchOR(keyword, searchFields); cond != nil {
+		builder = builder.Where(cond)
+	} else {
+		return []GeoDevice{}, nil
+	}
+
+	builder = builder.Limit(uint64(limit))
 
 	query, args, err := builder.ToSql()
 	if err != nil {
@@ -1196,6 +1253,7 @@ func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, 
 		var groupID *uuid.UUID
 		var groupName, address, deviceType *string
 		var alarmCount int
+		var ipAddress, mac, pci, deviceName string // COALESCE 保证非 NULL
 
 		var lifecycle model.DeviceLifecycle
 		var isOnline bool
@@ -1204,6 +1262,7 @@ func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, 
 			&lifecycle, &isOnline, // T-0162: 替代 &d.Status
 			&d.Latitude, &d.Longitude, &groupID, &groupName,
 			&address, &alarmCount, &deviceType,
+			&ipAddress, &mac, &pci, &deviceName, // 新增 4 个字段
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan search result: %w", err)
@@ -1222,6 +1281,20 @@ func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, 
 			d.Type = *deviceType
 		}
 		d.AlarmCount = alarmCount
+
+		// 新增 4 个字段：空字符串转为 nil
+		if ipAddress != "" {
+			d.IPAddress = &ipAddress
+		}
+		if mac != "" {
+			d.MAC = &mac
+		}
+		if pci != "" {
+			d.PCI = &pci
+		}
+		if deviceName != "" {
+			d.DeviceName = &deviceName
+		}
 
 		devices = append(devices, d)
 	}
