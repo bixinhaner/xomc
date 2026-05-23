@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,9 +14,11 @@ import (
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
+	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
+	"github.com/omcgo/omcgo/internal/pm/metrics"
 	"go.uber.org/zap"
 )
 
@@ -30,8 +33,17 @@ type Handler struct {
 	pmBucket      string
 	pool          *pgxpool.Pool // T-0164-P3 fix: 反查 devices 拿 (oui, sn) 给 KPIEngine
 	indicatorRepo indicator.IndicatorRepository // T-0164-P1：/pm/kpi/definitions 数据源（替代旧 carrier KPIDefinitions 列表）
+	aggr          *aggregator.Aggregator        // T-0164-P5 / G5：按粒度路由聚合表查询（hourly/daily/weekly/monthly + device_group）
 	metrics       *PMMetrics
 	logger        *zap.Logger
+}
+
+// WithAggregator 注入 G5 聚合查询入口（可选；nil 时退回老路径）。
+//
+// 调用方：cmd/app/provider/router.go 在初始化 pm.Handler 后调用。
+func (h *Handler) WithAggregator(aggr *aggregator.Aggregator) *Handler {
+	h.aggr = aggr
+	return h
 }
 
 // NewHandler creates a new PM handler.
@@ -73,6 +85,9 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	{
 		pm.GET("/counters", h.ListCounters)
 		pm.GET("/counters/aggregated", h.ListAggregatedCounters)
+		// T-0164-P5 / G5：按粒度路由的聚合查询接口（pm_metrics_hourly / daily / weekly / monthly
+		// + pm_group_metrics_*）。15min 粒度直查 pm_metrics；其余粒度走聚合表。
+		pm.GET("/metrics/aggregated", h.ListAggregatedMetrics)
 		pm.GET("/kpi", h.ListKPIValues)
 		pm.GET("/kpi/definitions", h.ListKPIDefinitions)
 		pm.POST("/kpi/calculate", h.CalculateKPI)
@@ -180,6 +195,81 @@ func (h *Handler) ListAggregatedCounters(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"items": result})
+}
+
+// ListAggregatedMetrics 走 G5 aggregator.Query 按粒度路由聚合表（hourly+ 直查物化表，
+// 15min 退回 pm_metrics 原表）。device_group 维度可选。
+//
+// Query params：
+//   - granularity（必填）: 15min / hourly / daily / weekly / monthly
+//   - dimension（可选）: device（默认）/ device_group
+//   - device_oui+device_sn / device_group_id：维度过滤（与 dimension 配套）
+//   - metric_path：单 metric 过滤；metric_type：counter / kpi
+//   - start_time / end_time：RFC3339
+//   - limit / offset
+//
+// 没注入 aggregator（兼容老部署）时返 503。
+func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
+	if h.aggr == nil {
+		response.Fail(c, http.StatusServiceUnavailable, "aggregator not wired; see plan T-0164-P5")
+		return
+	}
+	gran := metrics.Granularity(c.Query("granularity"))
+	if gran == "" {
+		response.Fail(c, http.StatusBadRequest, "granularity is required")
+		return
+	}
+	dim := aggregator.Dimension(c.Query("dimension"))
+	req := aggregator.QueryRequest{Granularity: gran, Dimension: dim}
+
+	if v := c.Query("device_oui"); v != "" {
+		req.DeviceOUIs = []string{v}
+	}
+	if v := c.Query("device_sn"); v != "" {
+		req.DeviceSNs = []string{v}
+	}
+	if v := c.Query("device_group_id"); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			response.Fail(c, http.StatusBadRequest, "invalid device_group_id")
+			return
+		}
+		req.DeviceGroupIDs = []uuid.UUID{id}
+	}
+	if v := c.Query("metric_path"); v != "" {
+		req.MetricPaths = []string{v}
+	}
+	if v := c.Query("metric_type"); v != "" {
+		mt := metrics.MetricType(v)
+		req.MetricType = &mt
+	}
+	if v := c.Query("start_time"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			req.StartTime = t
+		}
+	}
+	if v := c.Query("end_time"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			req.EndTime = t
+		}
+	}
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			req.Limit = n
+		}
+	}
+	if v := c.Query("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			req.Offset = n
+		}
+	}
+
+	rows, err := h.aggr.Query(c.Request.Context(), req)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OK(c, gin.H{"items": rows, "total": len(rows)})
 }
 
 type kpiQuery struct {

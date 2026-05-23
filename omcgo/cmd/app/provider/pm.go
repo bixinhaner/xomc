@@ -7,6 +7,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/core/dictloader"
 	"github.com/omcgo/omcgo/internal/pm"
+	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
@@ -63,6 +64,10 @@ func initPMModule(c *Container) error {
 
 	pmKPIEngine := kpi.NewKPIEngine(pmCounterRepo, pmKPIRepo, kpiRouter, logger)
 
+	// T-0164-P5 / G5：聚合查询入口。复用同一 kpiRouter（KPI 反算所需），
+	// app 端只走查询不跑 cron（cron runner 在 worker 端注册）。
+	pmAggregator := aggregator.NewWithPool(c.TsPool, kpiRouter, logger.Named("aggregator"))
+
 	enabledRepo := indicator.NewPgEnabledRepository(c.PgPool)
 	templateRelRepo := indicator.NewPgTemplateRelRepository(c.PgPool)
 	custNameRepo := indicator.NewPgCustNameRepository(c.PgPool)
@@ -100,6 +105,7 @@ func initPMModule(c *Container) error {
 		pmTaskRepo:           pmTaskRepo,
 		pmFileStore:          pmFileStore,
 		pmIndicatorRepo:      indicatorRepo,
+		pmAggregator:         pmAggregator,
 		indicatorHandler:     indicatorHandler,
 		indicatorRESTHandler: indicatorRESTHandler,
 	}
@@ -129,6 +135,7 @@ type pmHandlerDeps struct {
 	pmTaskRepo      *pm.PgTaskRepository
 	pmFileStore     *pm.PgPMFileStore
 	pmIndicatorRepo indicator.IndicatorRepository // T-0164-P1 ListKPIDefinitions 数据源
+	pmAggregator    *aggregator.Aggregator        // T-0164-P5 ListAggregatedMetrics 数据源
 
 	// Indicator management handler
 	indicatorHandler     *indicator.IndicatorHandler
