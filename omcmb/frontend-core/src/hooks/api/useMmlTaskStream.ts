@@ -54,6 +54,12 @@ export interface MmlTaskStreamMessages {
     successCount: number;
     failedCount: number;
   }) => string;
+  /**
+   * 设备 device_task 终态 status 标签翻译：
+   * { completed: '任务完成', failed: '任务失败', expired: '任务超时', cancelled: '任务已取消' }
+   * 取代过去 header 里直显英文 raw status；未传 / 无对应 key 时回落 raw 值。
+   */
+  deviceStatusLabels?: Record<string, string>;
 }
 
 export interface UseMmlTaskStreamReturn {
@@ -99,12 +105,18 @@ function formatTimestamp(): string {
   return new Date().toLocaleTimeString();
 }
 
-function deviceFrameToLines(frame: MmlDeviceFramePayload): MmlTerminalLine[] {
+function deviceFrameToLines(
+  frame: MmlDeviceFramePayload,
+  statusLabels?: Record<string, string>,
+): MmlTerminalLine[] {
   const ts = frame.completed_at
     ? new Date(frame.completed_at).toLocaleTimeString()
     : formatTimestamp();
   const out: MmlTerminalLine[] = [];
-  const header = `[${frame.device_sn}] ${frame.method ?? ''} → ${frame.status}`.trimEnd();
+  // status 翻译：completed → 任务完成，failed → 任务失败 等；未提供 / 未命中
+  // 时落回 raw 字串（兼容老调用方 / 后端新增状态码）。
+  const statusLabel = statusLabels?.[frame.status] ?? frame.status;
+  const header = `[${frame.device_sn}] ${frame.method ?? ''} → ${statusLabel}`.trimEnd();
   out.push({ type: 'info', text: header, timestamp: ts });
   if (frame.error_message) {
     out.push({ type: 'stderr', text: frame.error_message, timestamp: ts });
@@ -194,7 +206,7 @@ export function useMmlTaskStream(
     const onDeviceFrame = (ev: MessageEvent<string>): void => {
       const frame = parseEventData<MmlDeviceFramePayload>(ev.data);
       if (!frame || frame.task_id !== taskIdRef.current) return;
-      setLines((prev) => [...prev, ...deviceFrameToLines(frame)]);
+      setLines((prev) => [...prev, ...deviceFrameToLines(frame, messagesRef.current?.deviceStatusLabels)]);
     };
     const onTaskStatus = (ev: MessageEvent<string>): void => {
       const frame = parseEventData<MmlTaskStatusPayload>(ev.data);

@@ -51,9 +51,11 @@ function hasOnRebootHits(statements: Statement[]): boolean {
 }
 
 // 任务名命名规则（用户决策）：命令名 + 设备 SN。
-// - 1 命令 1 设备："{op} {logicalName} {sn}"
-// - 1 命令 N 设备："{op} {logicalName} {sn1} 等 N 台"
-// - M 命令 N 设备："{op} {logicalName} 等 M 条 {sn1} 等 N 台"
+// 业务约束：一次执行只允许 1 个命令（多命令不在 /mml/console 范畴；
+// 多语句场景走 ScriptTask 单独入口）。多设备允许。
+// 输出格式：
+//   - 1 设备："{op} {logicalName} {sn}"
+//   - N 设备："{op} {logicalName} {sn1} 等N台"
 // 后端兜底逻辑：taskName 为空时回落到 "MML console (X statements × Y devices)"。
 function buildTaskName(
   stmts: Statement[],
@@ -70,9 +72,9 @@ function buildTaskName(
     ADD: '添加',
     RMV: '删除',
   };
-  const opVerb = lang === 'zh-CN' ? (opVerbZh[first.operationType] ?? first.operationType) : first.operationType;
-  let cmdPart = `${opVerb} ${cmdName}`.trim();
-  if (stmts.length > 1) cmdPart += ` 等${stmts.length}条`;
+  const opVerb =
+    lang === 'zh-CN' ? (opVerbZh[first.operationType] ?? first.operationType) : first.operationType;
+  const cmdPart = `${opVerb} ${cmdName}`.trim();
   const sn = sns[0];
   const snPart = sns.length === 1 ? sn : `${sn} 等${sns.length}台`;
   return `${cmdPart} ${snPart}`;
@@ -116,6 +118,12 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
           success: String(successCount),
           failed: String(failedCount),
         }),
+      deviceStatusLabels: {
+        completed: t('mml.console.terminal.deviceStatus.completed'),
+        failed: t('mml.console.terminal.deviceStatus.failed'),
+        expired: t('mml.console.terminal.deviceStatus.expired'),
+        cancelled: t('mml.console.terminal.deviceStatus.cancelled'),
+      },
     }),
     [t],
   );

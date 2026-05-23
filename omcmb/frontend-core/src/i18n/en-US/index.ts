@@ -4460,6 +4460,11 @@ const messages: Record<string, string> = {
   'mml.console.terminal.running':              'Task started, dispatching to devices…',
   'mml.console.terminal.cancelled':            'Task cancelled',
   'mml.console.terminal.completedSummary':     'Task {status} ({result}): success {success} / failed {failed}',
+  // device_task terminal status labels (per-device frame header)
+  'mml.console.terminal.deviceStatus.completed': 'task completed',
+  'mml.console.terminal.deviceStatus.failed':    'task failed',
+  'mml.console.terminal.deviceStatus.expired':   'task timed out',
+  'mml.console.terminal.deviceStatus.cancelled': 'task cancelled',
   'mml.console.execute.partial':               'Partial failure: {failed}/{total} devices failed',
   'mml.console.execute.failed':                'Execution failed: {message}',
   'mml.console.execute.noDevices':             'Please select at least one device',

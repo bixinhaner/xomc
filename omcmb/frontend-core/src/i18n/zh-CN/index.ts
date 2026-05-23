@@ -4487,6 +4487,11 @@ const messages: Record<string, string> = {
   'mml.console.terminal.running':              '任务开始执行，正在下发到设备…',
   'mml.console.terminal.cancelled':            '任务已取消',
   'mml.console.terminal.completedSummary':     '任务{status}（{result}）：成功 {success} / 失败 {failed}',
+  // device_task 终态 status 标签（per-device frame header 文案）
+  'mml.console.terminal.deviceStatus.completed': '任务完成',
+  'mml.console.terminal.deviceStatus.failed':    '任务失败',
+  'mml.console.terminal.deviceStatus.expired':   '任务超时',
+  'mml.console.terminal.deviceStatus.cancelled': '任务已取消',
   'mml.console.subField.onReboot':             '需重启生效',
   'mml.console.subField.readOnly':             '只读',
   'mml.console.subField.readOnlyTip':          '只读字段（GetParameterValues 可查，SetParameterValues 不可改）',
