@@ -10,6 +10,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/adhoc"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/counter"
+	pmdashboard "github.com/omcgo/omcgo/internal/pm/dashboard"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
@@ -73,6 +74,11 @@ func initPMModule(c *Container) error {
 	pmAdhocRepo := adhoc.NewPgRepository(c.PgPool)
 	pmAdhocHandler := adhoc.NewHandler(pmAdhocRepo, c.TsPool, c.EventBus, logger.Named("adhoc"))
 
+	// T-0164-P6 / G6：PM 仪表盘 REST 入口（dashboard + panel + 用户偏好）。
+	pmDashboardRepo := pmdashboard.NewPgRepository(c.PgPool)
+	pmDashboardSvc := pmdashboard.NewService(pmDashboardRepo, logger.Named("dashboard"))
+	pmDashboardHandler := pmdashboard.NewHandler(pmDashboardSvc, logger.Named("dashboard"))
+
 	enabledRepo := indicator.NewPgEnabledRepository(c.PgPool)
 	templateRelRepo := indicator.NewPgTemplateRelRepository(c.PgPool)
 	custNameRepo := indicator.NewPgCustNameRepository(c.PgPool)
@@ -112,6 +118,7 @@ func initPMModule(c *Container) error {
 		pmIndicatorRepo:      indicatorRepo,
 		pmAggregator:         pmAggregator,
 		pmAdhocHandler:       pmAdhocHandler,
+		pmDashboardHandler:   pmDashboardHandler,
 		indicatorHandler:     indicatorHandler,
 		indicatorRESTHandler: indicatorRESTHandler,
 	}
@@ -142,7 +149,8 @@ type pmHandlerDeps struct {
 	pmFileStore     *pm.PgPMFileStore
 	pmIndicatorRepo indicator.IndicatorRepository // T-0164-P1 ListKPIDefinitions 数据源
 	pmAggregator    *aggregator.Aggregator        // T-0164-P5 ListAggregatedMetrics 数据源
-	pmAdhocHandler  *adhoc.Handler                // T-0164-P7 自定义聚合任务 REST 入口
+	pmAdhocHandler     *adhoc.Handler        // T-0164-P7 自定义聚合任务 REST 入口
+	pmDashboardHandler *pmdashboard.Handler  // T-0164-P6 PM 仪表盘 REST 入口
 
 	// Indicator management handler
 	indicatorHandler     *indicator.IndicatorHandler
