@@ -6,6 +6,11 @@ import "github.com/prometheus/client_golang/prometheus"
 type PMMetrics struct {
 	FilesProcessedTotal    *prometheus.CounterVec
 	ProcessingDurationSecs prometheus.Histogram
+
+	// G4-Gap-1: 上报延迟 ingest_time - end_time（秒）。
+	// 标签 carrier × technology 低基数（3 × 2 = 6 组合）；不加 device 避免基数爆炸。
+	// 桶覆盖 1 分钟到 24 小时（PM 文件 15 分钟周期，超 1 小时即明显异常）。
+	ReportDelaySeconds *prometheus.HistogramVec
 }
 
 // NewPMMetrics creates and registers PM metrics.
@@ -20,8 +25,13 @@ func NewPMMetrics(reg prometheus.Registerer) *PMMetrics {
 			Help:    "Duration of PM file processing in seconds",
 			Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60, 120},
 		}),
+		ReportDelaySeconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "omc_pm_report_delay_seconds",
+			Help:    "PM file report delay = ingest_time - end_time (seconds). Negative values indicate device clock ahead of OMC.",
+			Buckets: []float64{30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 14400, 28800, 86400},
+		}, []string{"carrier", "technology"}),
 	}
 
-	reg.MustRegister(m.FilesProcessedTotal, m.ProcessingDurationSecs)
+	reg.MustRegister(m.FilesProcessedTotal, m.ProcessingDurationSecs, m.ReportDelaySeconds)
 	return m
 }

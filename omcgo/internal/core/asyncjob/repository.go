@@ -182,6 +182,35 @@ LIMIT 100`, joinJobCols())
 	return jobs, rows.Err()
 }
 
+// CountByJobTypeAndStatus 扫 async_jobs 表统计 (job_type, status) 维度的行数；
+// 仅返活动状态（pending / running），其余状态视为完结不再产生队列压力。
+// G8-Gap-4：QueueDepthSampler 周期调用，更新 QueueDepth gauge。
+func (r *PgRepository) CountByJobTypeAndStatus(ctx context.Context) (map[string]map[string]int, error) {
+	const q = `
+SELECT job_type, status, COUNT(*)
+FROM async_jobs
+WHERE status IN ('pending', 'running')
+GROUP BY job_type, status`
+	rows, err := r.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("count by job_type and status: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]map[string]int)
+	for rows.Next() {
+		var jobType, status string
+		var n int
+		if err := rows.Scan(&jobType, &status, &n); err != nil {
+			return nil, err
+		}
+		if out[jobType] == nil {
+			out[jobType] = make(map[string]int)
+		}
+		out[jobType][status] = n
+	}
+	return out, rows.Err()
+}
+
 // ResetZombie 单 SQL 原子做"attempt 检查 + 重置"，避免读改写竞态。
 // 若 attempt < max_attempts → status pending, attempt+1, heartbeat_at=NULL；
 // 若 attempt >= max_attempts → status failed, finished_at=NOW(), error_message='attempts exhausted (zombie)'；

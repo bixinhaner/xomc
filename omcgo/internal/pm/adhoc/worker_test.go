@@ -122,24 +122,26 @@ func Test_Worker_NoPendingReturnsFalse(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type schedRepoStub struct {
-	tasks     []ContinuousTask
-	markedIDs []ContinuousTaskID
-	listErr   error
+	tasks      []ContinuousTask
+	markedIDs  []ContinuousTaskID
+	markedFire []time.Time
+	listErr    error
 }
 
 func (s *schedRepoStub) ListReschedulable(context.Context) ([]ContinuousTask, error) {
 	return s.tasks, s.listErr
 }
-func (s *schedRepoStub) MarkPending(_ context.Context, id ContinuousTaskID) error {
+func (s *schedRepoStub) MarkPending(_ context.Context, id ContinuousTaskID, fireAt time.Time) error {
 	s.markedIDs = append(s.markedIDs, id)
+	s.markedFire = append(s.markedFire, fireAt)
 	return nil
 }
 
 func Test_ContinuousScheduler_MarksDueTasksPending(t *testing.T) {
-	// 一个 cron '* * * * *' 每分钟跑；updated_at 设 1 小时前 → 早该跑了
+	// 一个 cron '* * * * *' 每分钟跑；last_fire_at 设 1 小时前 → 早该跑了
 	repo := &schedRepoStub{
 		tasks: []ContinuousTask{
-			{ID: "task-1", CronExpr: "* * * * *", UpdatedAt: time.Now().Add(-time.Hour)},
+			{ID: "task-1", CronExpr: "* * * * *", LastFireAt: time.Now().Add(-time.Hour)},
 		},
 	}
 	s := NewContinuousScheduler(repo, time.Hour, nil)
@@ -150,10 +152,10 @@ func Test_ContinuousScheduler_MarksDueTasksPending(t *testing.T) {
 }
 
 func Test_ContinuousScheduler_DoesNotMarkBeforeDue(t *testing.T) {
-	// updated_at 刚刚，每小时 cron → 还没到下一次
+	// last_fire_at 刚刚，每小时 cron → 还没到下一次
 	repo := &schedRepoStub{
 		tasks: []ContinuousTask{
-			{ID: "task-1", CronExpr: "0 * * * *", UpdatedAt: time.Now()},
+			{ID: "task-1", CronExpr: "0 * * * *", LastFireAt: time.Now()},
 		},
 	}
 	s := NewContinuousScheduler(repo, time.Hour, nil)
@@ -165,7 +167,7 @@ func Test_ContinuousScheduler_DoesNotMarkBeforeDue(t *testing.T) {
 func Test_ContinuousScheduler_InvalidCronSkipped(t *testing.T) {
 	repo := &schedRepoStub{
 		tasks: []ContinuousTask{
-			{ID: "task-1", CronExpr: "garbage", UpdatedAt: time.Now().Add(-time.Hour)},
+			{ID: "task-1", CronExpr: "garbage", LastFireAt: time.Now().Add(-time.Hour)},
 		},
 	}
 	s := NewContinuousScheduler(repo, time.Hour, nil)
@@ -178,4 +180,27 @@ func Test_ContinuousScheduler_ListErrorTolerated(t *testing.T) {
 	s := NewContinuousScheduler(repo, time.Hour, nil)
 	// 不 panic
 	s.sweepOnce(context.Background(), time.Now())
+}
+
+// G7-Gap-9: lossless catchup
+// 每小时 cron '0 * * * *'，last_fire_at 设 4 小时前 → 应识别漏 4 个窗口，
+// 且 MarkPending 只推进 1 格（fireAt = LastFireAt 之后第一个 cron 触发时刻）。
+func Test_ContinuousScheduler_LosslessCatchup_AdvancesOneWindowPerSweep(t *testing.T) {
+	now := time.Date(2026, 5, 23, 4, 30, 0, 0, time.UTC)
+	// 头一晚 23:30，cron "0 * * * *" 漏了 00:00 / 01:00 / 02:00 / 03:00 / 04:00 共 5 个窗口
+	lastFire := time.Date(2026, 5, 22, 23, 30, 0, 0, time.UTC)
+	repo := &schedRepoStub{
+		tasks: []ContinuousTask{
+			{ID: "task-1", CronExpr: "0 * * * *", LastFireAt: lastFire},
+		},
+	}
+	s := NewContinuousScheduler(repo, time.Hour, nil)
+	s.sweepOnce(context.Background(), now)
+
+	require.Len(t, repo.markedIDs, 1)
+	require.Len(t, repo.markedFire, 1)
+	// 推进到 LastFireAt 后第一个 cron 触发：00:00 May 23（不是跳到 04:00 当前小时）
+	expected := time.Date(2026, 5, 23, 0, 0, 0, 0, time.UTC)
+	assert.Equal(t, expected, repo.markedFire[0],
+		"fire_at 必须推进 1 格（不是直接跳到 now），让后续 sweep 继续追平漏桶")
 }

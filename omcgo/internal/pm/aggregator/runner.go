@@ -24,6 +24,7 @@ type Runner struct {
 	source      string
 	target      string
 	granularity metrics.Granularity
+	metrics     *Metrics // G5-Gap-3 Prometheus hook；nil 则不记
 }
 
 // JobType 返回 asyncjob 注册主键。
@@ -33,6 +34,9 @@ func (r *Runner) JobType() string { return r.jobType }
 func (r *Runner) Source() string                   { return r.source }
 func (r *Runner) Target() string                   { return r.target }
 func (r *Runner) Granularity() metrics.Granularity { return r.granularity }
+
+// SetMetrics 注入 Prometheus 指标采集器；nil 关闭采集（G5-Gap-3）。
+func (r *Runner) SetMetrics(m *Metrics) { r.metrics = m }
 
 // runPayload 是 cron 注入到 async_jobs.payload 的字段集。Start/End 半开区间 [Start, End)。
 type runPayload struct {
@@ -48,16 +52,27 @@ type runPayload struct {
 //  3. AggregateKPIs（target 内 device → KPI route → arithmetic 求值）
 //  4. 返回 {"counter_rows": N, "kpi_rows": M, "start": ..., "end": ...}
 func (r *Runner) Run(ctx context.Context, job *asyncjob.Job) (json.RawMessage, error) {
+	startedAt := time.Now()
+	// G5-Gap-3: nil metrics 安全；defer 写 Duration / 终态 status
+	var runStatus = "succeeded"
+	defer func() {
+		r.metrics.ObserveDuration(r.jobType, time.Since(startedAt).Seconds())
+		r.metrics.IncRun(r.jobType, runStatus)
+	}()
+
 	var p runPayload
 	if len(job.Payload) > 0 {
 		if err := json.Unmarshal(job.Payload, &p); err != nil {
+			runStatus = "failed"
 			return nil, fmt.Errorf("runner %s: unmarshal payload: %w", r.jobType, err)
 		}
 	}
 	if p.Start.IsZero() || p.End.IsZero() {
+		runStatus = "failed"
 		return nil, fmt.Errorf("runner %s: payload missing start/end", r.jobType)
 	}
 	if !p.End.After(p.Start) {
+		runStatus = "failed"
 		return nil, fmt.Errorf("runner %s: end (%s) must be after start (%s)",
 			r.jobType, p.End.Format(time.RFC3339), p.Start.Format(time.RFC3339))
 	}
@@ -66,12 +81,20 @@ func (r *Runner) Run(ctx context.Context, job *asyncjob.Job) (json.RawMessage, e
 
 	counterRows, err := r.aggregator.AggregateCounters(ctx, r.source, r.target, w)
 	if err != nil {
+		runStatus = "failed"
 		return nil, fmt.Errorf("runner %s: aggregate counters: %w", r.jobType, err)
 	}
+	r.metrics.AddRows(r.jobType, "counter", counterRows)
+
 	kpiRows, err := r.aggregator.AggregateKPIs(ctx, r.target, w)
 	if err != nil {
+		runStatus = "failed"
 		return nil, fmt.Errorf("runner %s: aggregate kpis: %w", r.jobType, err)
 	}
+	r.metrics.AddRows(r.jobType, "kpi", kpiRows)
+
+	// 更新桶滞后秒数（end 到现在的秒差），Grafana 用它判断是否堵塞
+	r.metrics.SetBucketLag(r.jobType, time.Since(p.End).Seconds())
 
 	out := map[string]any{
 		"counter_rows": counterRows,

@@ -25,6 +25,7 @@ type GroupRunner struct {
 	deviceTarget string // 上一级聚合表（如 pm_metrics_hourly）
 	groupTarget  string // 本级 group 聚合表（如 pm_group_metrics_hourly）
 	granularity  metrics.Granularity
+	metrics      *Metrics // G5-Gap-3 Prometheus hook；nil 则不记
 }
 
 // JobType / DeviceTarget / GroupTarget / Granularity — 暴露给外部（路由 + 日志）。
@@ -33,20 +34,33 @@ func (r *GroupRunner) DeviceTarget() string             { return r.deviceTarget 
 func (r *GroupRunner) GroupTarget() string              { return r.groupTarget }
 func (r *GroupRunner) Granularity() metrics.Granularity { return r.granularity }
 
+// SetMetrics 注入 Prometheus 指标采集器；nil 关闭采集（G5-Gap-3）。
+func (r *GroupRunner) SetMetrics(m *Metrics) { r.metrics = m }
+
 // Run 解析 payload 拿 [Start, End) → AggregateDeviceGroup 写 groupTarget。
 //
 // 不计算 KPI（设备组级 KPI 因依赖具体设备 productClass 路由，跨设备时语义复杂，留 v2）。
 func (r *GroupRunner) Run(ctx context.Context, job *asyncjob.Job) (json.RawMessage, error) {
+	startedAt := time.Now()
+	var runStatus = "succeeded"
+	defer func() {
+		r.metrics.ObserveDuration(r.jobType, time.Since(startedAt).Seconds())
+		r.metrics.IncRun(r.jobType, runStatus)
+	}()
+
 	var p runPayload
 	if len(job.Payload) > 0 {
 		if err := json.Unmarshal(job.Payload, &p); err != nil {
+			runStatus = "failed"
 			return nil, fmt.Errorf("group runner %s: unmarshal payload: %w", r.jobType, err)
 		}
 	}
 	if p.Start.IsZero() || p.End.IsZero() {
+		runStatus = "failed"
 		return nil, fmt.Errorf("group runner %s: payload missing start/end", r.jobType)
 	}
 	if !p.End.After(p.Start) {
+		runStatus = "failed"
 		return nil, fmt.Errorf("group runner %s: end (%s) must be after start (%s)",
 			r.jobType, p.End.Format(time.RFC3339), p.Start.Format(time.RFC3339))
 	}
@@ -55,8 +69,11 @@ func (r *GroupRunner) Run(ctx context.Context, job *asyncjob.Job) (json.RawMessa
 
 	rows, err := r.aggregator.AggregateDeviceGroup(ctx, r.deviceTarget, r.groupTarget, w)
 	if err != nil {
+		runStatus = "failed"
 		return nil, fmt.Errorf("group runner %s: aggregate device group: %w", r.jobType, err)
 	}
+	r.metrics.AddRows(r.jobType, "group", rows)
+	r.metrics.SetBucketLag(r.jobType, time.Since(p.End).Seconds())
 
 	out := map[string]any{
 		"rows":          rows,

@@ -151,6 +151,16 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 
 	c.logger.Info("parsed PM file", zap.Int("counters", len(content.Counters)))
 
+	// G4-Gap-1: 上报延迟 = ingest_time - end_time。仅在两值齐全且 end_time 非 zero 时记录；
+	// 时钟漂移可能产生负值，Prometheus histogram 不接受负 Observe，需 clamp 到 0。
+	if c.metrics != nil && !content.FileEndTime.IsZero() && !content.IngestTime.IsZero() {
+		delay := content.IngestTime.Sub(content.FileEndTime).Seconds()
+		if delay < 0 {
+			delay = 0
+		}
+		c.metrics.ReportDelaySeconds.WithLabelValues(payload.Carrier, payload.Technology).Observe(delay)
+	}
+
 	// T-0164-P3: parser 不知道 OUI（XML 内不含），由 collector 从 payload 统一填充。
 	// OUI 同一文件内必然一致（一个文件对应一个设备）。
 	for i := range content.Counters {

@@ -30,6 +30,7 @@ func startPMRetentionCleanup(
 	jobRepo asyncjob.Repository,
 	cronStateRepo asyncjob.CronStateRepository,
 	registry *asyncjob.Registry,
+	asyncMetrics *asyncjob.Metrics,
 ) {
 	logger := w.Logger.Named("pm-retention")
 
@@ -48,7 +49,7 @@ func startPMRetentionCleanup(
 	go runJobTypeWorker(ctx, registry, retention.JobTypeCleanup, w.Logger.Named("pm-retention"))
 
 	// cron 触发器（每日 03:00）+ 启动补跑
-	startRetentionCleanupCron(ctx, jobRepo, cronStateRepo, logger)
+	startRetentionCleanupCron(ctx, jobRepo, cronStateRepo, logger, asyncMetrics)
 
 	logger.Info("PM retention cleanup pipeline ready (1 runner + 1 cron + catchup)")
 }
@@ -79,6 +80,7 @@ func startRetentionCleanupCron(
 	jobRepo asyncjob.Repository,
 	stateRepo asyncjob.CronStateRepository,
 	logger *zap.Logger,
+	asyncMetrics *asyncjob.Metrics,
 ) {
 	const spec = "0 3 * * *" // 每日 03:00
 	jobType := retention.JobTypeCleanup
@@ -96,7 +98,7 @@ func startRetentionCleanupCron(
 
 	// 启动补跑（complementary 防丢）
 	now := time.Now().UTC()
-	catchupCronEntry(ctx, jobRepo, stateRepo, entry, now, logger)
+	catchupCronEntry(ctx, jobRepo, stateRepo, entry, now, logger, asyncMetrics)
 
 	// 正常 cron
 	c := cron.New()

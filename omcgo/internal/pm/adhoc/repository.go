@@ -379,14 +379,16 @@ func NewPgContinuousRepository(pool *pgxpool.Pool) *PgContinuousRepository {
 var _ ContinuousRepository = (*PgContinuousRepository)(nil)
 
 func (r *PgContinuousRepository) ListReschedulable(ctx context.Context) ([]ContinuousTask, error) {
+	// G7-Gap-9: 用 COALESCE(last_fire_at, created_at) 作"上次触发时刻"，
+	// 老行 last_fire_at IS NULL 时退化到 created_at（首次启动会立即追到当前 cron 窗口）。
 	const q = `
-SELECT id::text, cron_expr, updated_at
+SELECT id::text, cron_expr, COALESCE(last_fire_at, created_at)
 FROM pm_tasks
 WHERE task_subtype = $1
   AND mode = 'continuous'
   AND status = 'scheduled'
   AND cron_expr IS NOT NULL
-ORDER BY updated_at ASC
+ORDER BY COALESCE(last_fire_at, created_at) ASC
 LIMIT 1000`
 	rows, err := r.pool.Query(ctx, q, TaskSubtype)
 	if err != nil {
@@ -396,7 +398,7 @@ LIMIT 1000`
 	var out []ContinuousTask
 	for rows.Next() {
 		var ct ContinuousTask
-		if err := rows.Scan(&ct.ID, &ct.CronExpr, &ct.UpdatedAt); err != nil {
+		if err := rows.Scan(&ct.ID, &ct.CronExpr, &ct.LastFireAt); err != nil {
 			return nil, err
 		}
 		out = append(out, ct)
@@ -404,11 +406,16 @@ LIMIT 1000`
 	return out, rows.Err()
 }
 
-func (r *PgContinuousRepository) MarkPending(ctx context.Context, id ContinuousTaskID) error {
+func (r *PgContinuousRepository) MarkPending(ctx context.Context, id ContinuousTaskID, fireAt time.Time) error {
+	// G7-Gap-9: last_fire_at 推进到本次 cron 触发时间（不是 NOW）。Worker 跑完后回 scheduled，
+	// 下一 sweep 会从该 fireAt 算 Next，若仍 < NOW 则继续追下一格，直至追平。
 	const q = `
-UPDATE pm_tasks SET status = 'pending', updated_at = NOW()
+UPDATE pm_tasks
+SET status = 'pending',
+    updated_at = NOW(),
+    last_fire_at = $3
 WHERE id = $1::uuid AND task_subtype = $2 AND status = 'scheduled'`
-	tag, err := r.pool.Exec(ctx, q, id, TaskSubtype)
+	tag, err := r.pool.Exec(ctx, q, id, TaskSubtype, fireAt)
 	if err != nil {
 		return fmt.Errorf("PgContinuousRepository.MarkPending: %w", err)
 	}

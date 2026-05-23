@@ -2,6 +2,7 @@ package asyncjob
 
 import (
 	"context"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -109,3 +110,58 @@ func (m *Metrics) SetQueueDepth(jobType, status string, n int) {
 type QueueDepthSampler interface {
 	CountByJobTypeAndStatus(ctx context.Context) (map[string]map[string]int, error)
 }
+
+// RunQueueDepthSampler 启动 goroutine 定期采集 async_jobs 队列深度并更新 gauge。
+//
+// 调用方在 worker 启动期 `go asyncjob.RunQueueDepthSampler(ctx, repo, metrics, 30*time.Second, logger)`。
+// interval 推荐 30s（pending/running 不会秒级变化，太频会增加 DB 负载）。
+// 单进程跑足够；多进程都跑只是 gauge 值重复 set 同样值，无冲突。
+//
+// 异常处理：ctx 取消优雅退出；CountByJobTypeAndStatus 失败 log warn 不停采样。
+func RunQueueDepthSampler(ctx context.Context, repo QueueDepthSampler, m *Metrics, interval time.Duration, logger Logger) {
+	if repo == nil || m == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	if logger == nil {
+		logger = nopLogger{}
+	}
+
+	sample := func() {
+		counts, err := repo.CountByJobTypeAndStatus(ctx)
+		if err != nil {
+			logger.Warn("queue depth sample failed", err)
+			return
+		}
+		for jobType, byStatus := range counts {
+			for status, n := range byStatus {
+				m.SetQueueDepth(jobType, status, n)
+			}
+		}
+	}
+
+	// 启动期立即采一次
+	sample()
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sample()
+		}
+	}
+}
+
+// Logger 最小日志接口，避开包级 zap 依赖（asyncjob 不应强依赖 zap）。
+type Logger interface {
+	Warn(msg string, err error)
+}
+
+type nopLogger struct{}
+
+func (nopLogger) Warn(string, error) {}

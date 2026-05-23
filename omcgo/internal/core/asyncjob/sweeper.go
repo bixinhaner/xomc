@@ -16,6 +16,7 @@ type Sweeper struct {
 	interval  time.Duration
 	threshold time.Duration
 	logger    *zap.Logger
+	metrics   *Metrics // G8-Gap-4 Prometheus hook；nil 则不记
 }
 
 // NewSweeper 创建 Sweeper。interval/threshold 缺省走 SweeperInterval/ZombieThreshold。
@@ -36,6 +37,9 @@ func NewSweeper(repo Repository, interval, threshold time.Duration, logger *zap.
 		logger:    logger,
 	}
 }
+
+// SetMetrics 注入 Prometheus 指标采集器；nil 关闭采集（G8-Gap-4）。
+func (s *Sweeper) SetMetrics(m *Metrics) { s.metrics = m }
 
 // Run 阻塞循环，每 interval 扫一次。ctx 取消后返回。
 // 推荐在 worker goroutine 内调：go sweeper.Run(ctx)
@@ -71,12 +75,14 @@ func (s *Sweeper) sweepOnce(ctx context.Context) {
 		err := s.repo.ResetZombie(ctx, z.ID)
 		switch {
 		case err == nil:
+			s.metrics.IncZombie(z.JobType) // G8-Gap-4
 			s.logger.Info("zombie reset to pending",
 				zap.String("job_id", z.ID.String()),
 				zap.String("job_type", z.JobType),
 				zap.Int("attempt", z.Attempt+1),
 			)
 		case errors.Is(err, ErrAttemptsExhausted):
+			s.metrics.IncZombie(z.JobType) // G8-Gap-4 — attempts 耗尽也算一次 zombie 处理
 			s.logger.Warn("zombie attempts exhausted, marked failed",
 				zap.String("job_id", z.ID.String()),
 				zap.String("job_type", z.JobType),

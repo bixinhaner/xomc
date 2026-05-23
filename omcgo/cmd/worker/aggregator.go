@@ -45,6 +45,11 @@ func startPMAggregatorPipeline(
 	lockOwner := buildLockOwner()
 	registry := asyncjob.NewRegistry(jobRepo, lockOwner, logger)
 
+	// 1b) Prometheus 指标注册 + 注入（T-0164 P1 收尾：aggregator + asyncjob hooks 全注入）
+	aggregatorMetrics := aggregator.NewMetrics(w.MetricsReg)
+	asyncMetrics := asyncjob.NewMetrics(w.MetricsReg)
+	registry.SetMetrics(asyncMetrics)
+
 	// 2) 注册 4 个 G5 设备级 cron runner
 	runners := []*aggregator.Runner{
 		aggregator.NewHourlyRunner(aggr),
@@ -53,6 +58,7 @@ func startPMAggregatorPipeline(
 		aggregator.NewMonthlyRunner(aggr),
 	}
 	for _, r := range runners {
+		r.SetMetrics(aggregatorMetrics)
 		registry.Register(r)
 		logger.Info("registered pm aggregator runner (device)",
 			zap.String("job_type", r.JobType()),
@@ -69,6 +75,7 @@ func startPMAggregatorPipeline(
 		aggregator.NewMonthlyGroupRunner(aggr),
 	}
 	for _, r := range groupRunners {
+		r.SetMetrics(aggregatorMetrics)
 		registry.Register(r)
 		logger.Info("registered pm aggregator runner (group)",
 			zap.String("job_type", r.JobType()),
@@ -82,12 +89,15 @@ func startPMAggregatorPipeline(
 	// 缺失 / 解析失败 fallback 走 asyncjob 包默认常量（与原行为一致）
 	sweeperInterval, zombieThreshold := loadAsyncJobThresholds(ctx, w.PgPool, logger)
 	sweeper := asyncjob.NewSweeper(jobRepo, sweeperInterval, zombieThreshold, logger)
-	asyncMetrics := asyncjob.NewMetrics(w.MetricsReg)
-	_ = asyncMetrics // Metrics 已注册 Prometheus；instrumentation 钩子留 v2（详 plan-T-0164-followup-gaps.md G8-Gap-4）
+	sweeper.SetMetrics(asyncMetrics)
 	go sweeper.Run(ctx)
 	logger.Info("asyncjob sweeper started",
 		zap.Duration("interval", sweeperInterval),
 		zap.Duration("zombie_threshold", zombieThreshold))
+
+	// 3b) 启动 QueueDepthSampler — 每 30s 扫 async_jobs 表更新 omc_async_jobs_queue_depth gauge
+	go asyncjob.RunQueueDepthSampler(ctx, jobRepo, asyncMetrics, 30*time.Second, &queueDepthSamplerLogger{logger: logger})
+	logger.Info("asyncjob queue depth sampler started", zap.Duration("interval", 30*time.Second))
 
 	// 4) 每个 JobType 开一个 worker goroutine（设备级 4 + 设备组级 4 = 8 个）
 	for _, r := range runners {
@@ -100,10 +110,10 @@ func startPMAggregatorPipeline(
 	}
 
 	// 5) 启动 cron 调度器（含启动补跑）
-	startCronScheduler(ctx, jobRepo, cronStateRepo, logger)
+	startCronScheduler(ctx, jobRepo, cronStateRepo, logger, asyncMetrics)
 
-	// 6) PM retention cleanup（T-0164 收尾 G2-Gap-2）— 共享 jobRepo / cronStateRepo / registry
-	startPMRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry)
+	// 6) PM retention cleanup（T-0164 收尾 G2-Gap-2）— 共享 jobRepo / cronStateRepo / registry / asyncMetrics
+	startPMRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry, asyncMetrics)
 
 	logger.Info("PM aggregator pipeline ready (8 aggregator runners + 1 retention runner + sweeper + cron triggers + catchup)")
 }
@@ -201,13 +211,14 @@ func startCronScheduler(
 	jobRepo asyncjob.Repository,
 	stateRepo asyncjob.CronStateRepository,
 	logger *zap.Logger,
+	asyncMetrics *asyncjob.Metrics,
 ) {
 	entries := pmAggregatorCronEntries()
 
 	// === 1. 启动补跑 ===
 	now := time.Now().UTC()
 	for _, e := range entries {
-		catchupCronEntry(ctx, jobRepo, stateRepo, e, now, logger)
+		catchupCronEntry(ctx, jobRepo, stateRepo, e, now, logger, asyncMetrics)
 	}
 
 	// === 2. 启动正常 cron 调度 ===
@@ -257,6 +268,7 @@ func catchupCronEntry(
 	entry cronEntry,
 	now time.Time,
 	logger *zap.Logger,
+	asyncMetrics *asyncjob.Metrics,
 ) {
 	state, err := stateRepo.Get(ctx, entry.jobType)
 	if err != nil {
@@ -292,6 +304,7 @@ func catchupCronEntry(
 	var lastEnd time.Time
 	for _, b := range missed {
 		enqueueAggregationJob(ctx, jobRepo, entry.jobType, b.Start, b.End, logger)
+		asyncMetrics.IncCatchup(entry.jobType) // G8-Gap-4
 		lastEnd = b.End
 	}
 
@@ -301,6 +314,15 @@ func catchupCronEntry(
 				zap.String("job_type", entry.jobType), zap.Error(err))
 		}
 	}
+}
+
+// queueDepthSamplerLogger 把 asyncjob.Logger 适配到 zap.Logger（避免 asyncjob 包反向依赖 zap）。
+type queueDepthSamplerLogger struct {
+	logger *zap.Logger
+}
+
+func (q *queueDepthSamplerLogger) Warn(msg string, err error) {
+	q.logger.Warn(msg, zap.Error(err))
 }
 
 // triggerCron 正常 cron 触发：入队 1 个 bucket + 更新 cron_state。

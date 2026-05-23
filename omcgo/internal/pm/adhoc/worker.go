@@ -146,10 +146,15 @@ type ContinuousScheduler struct {
 //
 // 真实实现由本包外的 SQL 提供（worker main 装配时用 pgxpool 直接实现）。
 type ContinuousRepository interface {
-	// ListReschedulable 返 status=scheduled 且 mode=continuous 的 task（含 updated_at + cron_expr）。
+	// ListReschedulable 返 status=scheduled 且 mode=continuous 的 task。
+	// 每行的 LastFireAt 为"上次 cron 触发时刻"——优先 last_fire_at 列，
+	// 为 NULL 时 fallback 到 created_at。Worker 跑完任务后不更新 last_fire_at，
+	// 由本 Scheduler 在 MarkPending 时显式推进。
 	ListReschedulable(ctx context.Context) ([]ContinuousTask, error)
-	// MarkPending 单条原子切 scheduled→pending（CAS）。
-	MarkPending(ctx context.Context, id ContinuousTaskID) error
+	// MarkPending 单条原子切 scheduled→pending（CAS），同时把 last_fire_at 推到 fireAt。
+	// fireAt 表示本次 cron 触发对应的窗口时间（cron.Next(prevLastFireAt) 算出）。
+	// 推一格而非直接到 NOW，让长时间停机后启动能逐格补齐漏桶（"lossless catchup"，G7-Gap-9）。
+	MarkPending(ctx context.Context, id ContinuousTaskID, fireAt time.Time) error
 }
 
 // ContinuousTaskID 是 marker；具体类型由实现决定（避免 uuid 包污染 contract）。
@@ -157,9 +162,9 @@ type ContinuousTaskID = string
 
 // ContinuousTask 是 ContinuousScheduler 看到的最小任务投影。
 type ContinuousTask struct {
-	ID        ContinuousTaskID // string 版本的 task UUID
-	CronExpr  string
-	UpdatedAt time.Time
+	ID         ContinuousTaskID // string 版本的 task UUID
+	CronExpr   string
+	LastFireAt time.Time // 上次 cron 触发时刻（last_fire_at 优先；NULL fallback 到 created_at）
 }
 
 // NewContinuousScheduler 构造调度器。tickEvery <= 0 走默认 60s。
@@ -195,6 +200,12 @@ func (s *ContinuousScheduler) Run(ctx context.Context) {
 }
 
 // sweepOnce 单轮扫描。暴露便于单测。
+//
+// G7-Gap-9 lossless catchup：last_fire_at 与 status 解耦，调度器每次只推进一个 cron 窗口。
+// 长时间停机场景下，每个 sweep cycle + 一次 worker 跑完，会前进一个漏桶；
+// 直至 last_fire_at 追平 NOW()，恢复正常 cadence。
+// 单轮内 status=scheduled→pending 只能切一次（CAS），所以本函数不在循环内对同一 task 反复 MarkPending —
+// 推进 1 格即可，下一 tick 会再来。
 func (s *ContinuousScheduler) sweepOnce(ctx context.Context, now time.Time) {
 	tasks, err := s.repo.ListReschedulable(ctx)
 	if err != nil {
@@ -208,19 +219,36 @@ func (s *ContinuousScheduler) sweepOnce(ctx context.Context, now time.Time) {
 				zap.String("task_id", t.ID), zap.String("cron", t.CronExpr), zap.Error(err))
 			continue
 		}
-		// 算自 updated_at 之后下次 cron 触发时刻；如已 <= now → 该跑了
-		next := sched.Next(t.UpdatedAt)
+		// 从 LastFireAt 之后下一个 cron 触发时刻
+		next := sched.Next(t.LastFireAt)
 		if next.IsZero() || next.After(now) {
 			continue
 		}
-		if err := s.repo.MarkPending(ctx, t.ID); err != nil {
+		// 统计本次需要追多少格（仅 log 用，实际 MarkPending 只推 1 格）
+		missed := 0
+		for cur := next; !cur.IsZero() && !cur.After(now); cur = sched.Next(cur) {
+			missed++
+			if missed > 10000 {
+				// 极端防御：cron 表达式异常导致无限循环
+				break
+			}
+		}
+		if err := s.repo.MarkPending(ctx, t.ID, next); err != nil {
 			s.logger.Warn("mark pending failed",
 				zap.String("task_id", t.ID), zap.Error(err))
 			continue
 		}
-		s.logger.Info("continuous task rescheduled",
-			zap.String("task_id", t.ID),
-			zap.String("cron", t.CronExpr),
-			zap.Time("next", next))
+		if missed > 1 {
+			s.logger.Warn("continuous task catching up missed windows",
+				zap.String("task_id", t.ID),
+				zap.String("cron", t.CronExpr),
+				zap.Int("missed", missed),
+				zap.Time("fire_at", next))
+		} else {
+			s.logger.Info("continuous task rescheduled",
+				zap.String("task_id", t.ID),
+				zap.String("cron", t.CronExpr),
+				zap.Time("fire_at", next))
+		}
 	}
 }

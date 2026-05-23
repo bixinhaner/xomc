@@ -26,6 +26,7 @@ type Registry struct {
 	lockOwner string
 	logger    *zap.Logger
 	runners   map[string]JobRunner
+	metrics   *Metrics // G8-Gap-4 Prometheus hook；nil 则不记
 }
 
 // NewRegistry 创建 Registry。
@@ -41,6 +42,9 @@ func NewRegistry(repo Repository, lockOwner string, logger *zap.Logger) *Registr
 		runners:   make(map[string]JobRunner),
 	}
 }
+
+// SetMetrics 注入 Prometheus 指标采集器；nil 关闭采集（G8-Gap-4）。
+func (r *Registry) SetMetrics(m *Metrics) { r.metrics = m }
 
 // Register 注册一个 JobRunner，相同 JobType 重复注册以最后一次为准（覆盖）。
 func (r *Registry) Register(runner JobRunner) {
@@ -75,6 +79,8 @@ func (r *Registry) RunNext(ctx context.Context, jobType string) (didRun bool, er
 		zap.Int("attempt", job.Attempt),
 	)
 
+	startedAt := time.Now()
+
 	// 心跳 ticker：另起 goroutine 每 30s 上报，job 结束后由本函数主控停 ticker。
 	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
 	defer cancelHeartbeat()
@@ -87,12 +93,16 @@ func (r *Registry) RunNext(ctx context.Context, jobType string) (didRun bool, er
 	cancelHeartbeat()
 	<-heartbeatDone
 
+	// G8-Gap-4: 单任务耗时记录（成功 / 失败都记，便于查 latency）
+	r.metrics.ObserveDuration(jobType, time.Since(startedAt).Seconds())
+
 	// 收尾：用 background context + 10s timeout（避免外层 ctx cancel 时收尾 SQL 写不进去；
 	// 任务已结束，只为持久化状态留窗口，超时不致命）。
 	finalizeCtx, finalizeCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer finalizeCancel()
 
 	if runErr != nil {
+		r.metrics.IncFailed(jobType) // G8-Gap-4
 		if mErr := r.repo.MarkFailed(finalizeCtx, job.ID, runErr.Error()); mErr != nil {
 			r.logger.Error("mark failed write error", zap.String("job_id", job.ID.String()), zap.Error(mErr))
 		}
