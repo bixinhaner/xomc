@@ -19,6 +19,11 @@ interface LoginFormValues {
 
 const REMEMBER_KEY = 'omc-remember-credentials';
 
+// 不能作为登录后"返回目的地"的路径：错误页 / 登录页本身。
+// 例：PrivateRoute 在 /403 上发现未登录 → 跳 /login 并把 from=/403 塞进 state；
+// 若不过滤，登录成功后会回到 /403，用户体感"admin 登录后被踢到 403"。
+const FROM_PATH_BLOCKLIST = new Set<string>(['/403', '/404', '/login']);
+
 function getRemembered(): { username: string; password: string } | null {
   try {
     const raw = localStorage.getItem(REMEMBER_KEY);
@@ -47,7 +52,11 @@ export default function LoginPage() {
   const location = useLocation();
   const { login, setTokenPair } = useUserStore();
 
-  const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/dashboard';
+  // PrivateRoute 把未登录用户从任意路径（含 /403 错误页）弹到 /login 时会把
+  // 原 location 塞进 state.from。错误页不是合法的登录返回目的地，直接降级到
+  // /dashboard，避免"admin 登录后又被踢回 /403"的体感 bug。
+  const fromPath = (location.state as { from?: { pathname: string } })?.from?.pathname;
+  const from = fromPath && !FROM_PATH_BLOCKLIST.has(fromPath) ? fromPath : '/dashboard';
 
   // P2-⑧ 浏览器记密：拉公开 security 配置，按 isBrowserAutoRecordPass=true 切
   // autocomplete 属性。注意：现代浏览器（Chrome）会忽略 autocomplete=off，

@@ -17,6 +17,16 @@ interface PrivateRouteProps {
 //   - /login：在 routes 上层，本守卫不会经过；列出仅作文档
 const ALWAYS_ALLOWED_PATHS = new Set<string>(['/dashboard', '/403', '/login']);
 
+// 错误页：未登录用户访问这些路径被弹到 /login 时，**不要**把它们当成
+// "登录后想去的地方"塞进 state.from —— 否则登录成功会回弹到错误页。
+// 双层防御：LoginPage 那边也有 FROM_PATH_BLOCKLIST 做兜底。
+const ERROR_PATH_SET = new Set<string>(['/403', '/404']);
+
+function buildLoginRedirectState(pathname: string) {
+  if (ERROR_PATH_SET.has(pathname)) return undefined;
+  return { from: { pathname } };
+}
+
 /**
  * 路径前缀允许：用户菜单含父级 path 时，子路径 / detail 子路由也允许。
  * 例：menus 含 '/device/list'，则 '/device/list/xxx' 也允许（参 React Router relative routing）。
@@ -56,17 +66,17 @@ export default function PrivateRoute({
 
   // Not authenticated at all → redirect to login
   if (!isAuthenticated) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    return <Navigate to="/login" state={buildLoginRedirectState(location.pathname)} replace />;
   }
 
   // Token is expired and no refresh token → force re-login
   if (isTokenExpired() && !refreshToken) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    return <Navigate to="/login" state={buildLoginRedirectState(location.pathname)} replace />;
   }
 
   // No access token and no refresh token → force re-login
   if (!accessToken && !refreshToken) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    return <Navigate to="/login" state={buildLoginRedirectState(location.pathname)} replace />;
   }
 
   // T-0098-P4-02：super_admin 治理路由组守卫
