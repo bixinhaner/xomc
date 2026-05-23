@@ -188,7 +188,13 @@ func (f *Fanouter) buildDeviceTaskRequests(ctx context.Context, mmlTask *MMLTask
 		for devIdx, sn := range mmlTask.DeviceSNs {
 			translated, missCount, translator := f.translateParamRefs(ctx, sn, paramRefs)
 
-			params, err := BuildTR069Params(rpcMethod, translated, formValues, operationType)
+			// v1.2 测试报告 §3 P0：ADD/RMV 的 object_name 走独立翻译。
+			// translateParamRefs 仅处理 param_refs[].Tr069Path；ADD/RMV 命令的
+			// parameters.object_name 是父对象路径（如 .../Carrier.），同样需要
+			// standardPath → privatePath；否则 BaiBLQ 等私有 path 设备必返 9005。
+			perDeviceFormValues := f.translateObjectName(ctx, sn, formValues)
+
+			params, err := BuildTR069Params(rpcMethod, translated, perDeviceFormValues, operationType)
 			if err != nil {
 				f.logger.Warn("build tr069 params failed, skip device",
 					zap.String("mml_task_id", parentID),
@@ -354,6 +360,92 @@ func translatorSourceLabel(t *parammodel.Translator) string {
 		return "fallback"
 	}
 	return "param_model"
+}
+
+// translateObjectName 翻译 ADD/RMV/DeleteObject 命令的 parameters.object_name 字段。
+//
+// 历史问题（v1.2 测试报告 §3 P0）：translateParamRefs 仅作用于 param_refs[].Tr069Path，
+// 而 ADD/RMV 不带 param_refs —— object_name 直接进 SOAP wire。对于 standardPath !=
+// privatePath 的设备（如 BaiBLQ 的 X_COM_* 前缀），CPE 收到的是 standardPath，必返
+// 9005 Invalid Object Name。
+//
+// 行为：
+//   - formValues 不含 "object_name" 或为空 → 原 map 返回（无副作用）
+//   - 任一前置依赖（deviceLookup / productMatcher / translatorFactory）未注入 → 原样返回
+//   - translator 取不到（NoMapping） → 原样返回 + WARN 留痕
+//   - translator 命中但 object_name 未在映射表内 → 原样返回 + WARN 留痕
+//   - 命中 → 浅拷贝 formValues，仅替换 object_name 为 privatePath
+//
+// 注：本函数对 formValues map 不做就地修改，永远返回新 map（即使内容不变，调用方
+// 拿到的 map 可安全持有，不会被 Sequencer 后续 substitution 改坏）。
+func (f *Fanouter) translateObjectName(
+	ctx context.Context, sn string, formValues map[string]interface{},
+) map[string]interface{} {
+	if formValues == nil {
+		return formValues
+	}
+	objNameRaw, ok := formValues["object_name"]
+	if !ok {
+		return formValues
+	}
+	objName, ok := objNameRaw.(string)
+	if !ok || objName == "" {
+		return formValues
+	}
+	if f.productMatcher == nil || f.translatorFactory == nil || f.deviceLookup == nil {
+		return formValues
+	}
+	device, err := f.deviceLookup.GetBySerialNumber(ctx, sn)
+	if err != nil || device == nil {
+		// 与 translateParamRefs 行为一致：device 查不到 warn 但不阻塞
+		f.logger.Warn("object_name translation skip: device lookup failed",
+			zap.String("device_sn", sn),
+			zap.String("object_name", objName),
+			zap.Error(err),
+		)
+		return formValues
+	}
+	matchRes, err := f.productMatcher.MatchProductClass(ctx, device.ProductClass)
+	if err != nil || matchRes == nil || matchRes.Product == nil || matchRes.Product.ParamModelID == nil {
+		f.logger.Error("object_name translation skip: product/param_model unresolved",
+			zap.String("device_sn", sn),
+			zap.String("product_class", device.ProductClass),
+			zap.String("object_name", objName),
+			zap.Error(err),
+		)
+		return formValues
+	}
+	translator, err := f.translatorFactory.Translator(ctx, *matchRes.Product.ParamModelID, device.FirmwareVersion)
+	if err != nil || translator == nil {
+		if !errors.Is(err, parammodel.ErrNoMapping) && err != nil {
+			f.logger.Warn("object_name translation skip: translator build failed",
+				zap.String("device_sn", sn),
+				zap.String("object_name", objName),
+				zap.Error(err),
+			)
+		}
+		return formValues
+	}
+	res := translator.ToPrivate(objName)
+	if !res.Found {
+		// object_name 未命中 mapping 表 —— 大概率是命令字典 target_object 缺
+		// `.{i}.` 占位（未经 substituteInstanceSelectors 替换）或 mapping 表本身
+		// 缺该 path。WARN 输出 5 元组方便排查（device_class / sw_version / paramModel）。
+		f.logger.Warn("object_name translation: standardPath unmapped, falling back as-is",
+			zap.String("device_sn", sn),
+			zap.String("product_class", device.ProductClass),
+			zap.String("sw_version", device.FirmwareVersion),
+			zap.String("param_model_id", matchRes.Product.ParamModelID.String()),
+			zap.String("object_name", objName),
+		)
+		return formValues
+	}
+	out := make(map[string]interface{}, len(formValues))
+	for k, v := range formValues {
+		out[k] = v
+	}
+	out["object_name"] = res.Translated
+	return out
 }
 
 // paramRefsFromEntry pulls param_refs out of a commands[] entry, tolerating
