@@ -78,6 +78,20 @@ func (h *SSEHandler) Stream(c *gin.Context) {
 		return
 	}
 
+	// 解除 http.Server.WriteTimeout（在 infra.go::ListenAndServe 设为 30s）对本
+	// SSE 长连接的限制。WriteTimeout 是整个 ResponseWriter 写操作的硬截止时间，
+	// 任何 streaming 响应超过 30s 就被强制关连接（curl 实测：返 Content-Length:0
+	// + Connection:close）。其它 REST API 仍保留 30s 防慢客户端攻击；这里仅
+	// 针对 SSE endpoint 通过 ResponseController（Go 1.20+）清掉 deadline。
+	if rc := http.NewResponseController(c.Writer); rc != nil {
+		if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+			h.logger.Warn("clear SSE write deadline failed",
+				zap.String("user_id", username),
+				zap.Error(err),
+			)
+		}
+	}
+
 	// Step 4: Replay missed messages if Last-Event-ID present
 	if lastEventID := c.GetHeader("Last-Event-ID"); lastEventID != "" {
 		h.replayMessages(c, username, lastEventID, flusher)
