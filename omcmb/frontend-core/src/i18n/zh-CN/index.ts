@@ -3910,6 +3910,8 @@ const messages: Record<string, string> = {
   'mml.taskName':                            '任务名称',
   'mml.executedCommand':                     '执行的命令',
   'mml.selectedPathsCount':                  '已选 {count} 条路径',
+  'mml.formattedXml':                        '格式化 XML',
+  'mml.rawOutput':                           '原始输出',
   'mml.creator':                             '创建者',
   'mml.createTime':                          '创建时间',
   'mml.type':                                '类型',

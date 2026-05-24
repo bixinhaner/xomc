@@ -383,18 +383,37 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
   }
 
   // commandsDetail：保留 operation_type + param_paths + param_values，供"任务记录-查看"
-  // 页展示用户当时勾选了哪些 path。空数组也归一为 undefined 以便 UI 判定。
-  const commandsDetail: MMLTaskCommandDetail[] = (bt.commands || []).map((c) => ({
-    commandCode: typeof c.command_code === 'string' ? c.command_code : JSON.stringify(c),
-    operationType:
-      typeof c.operation_type === 'string'
-        ? (c.operation_type as MMLTaskCommandDetail['operationType'])
-        : undefined,
-    paramPaths: Array.isArray(c.param_paths)
+  // 页展示用户当时勾选了哪些 path。
+  //
+  // 路径来源两种形态（按时间顺序）：
+  //   1) c.param_refs[].tr069_path —— 当前主流形态：后端把 mml_command_sub_fields 直接
+  //      关联进来，每条 ref 含 param_code / param_name_zh / is_writable 元信息
+  //   2) c.param_paths[] —— 老形态（raw param_paths 模式 / 部分历史任务），纯字符串数组
+  // 同时支持两种，优先取 param_refs，没有再退回 param_paths；都空则 undefined。
+  const commandsDetail: MMLTaskCommandDetail[] = (bt.commands || []).map((c) => {
+    const refsRaw = Array.isArray(c.param_refs) ? (c.param_refs as unknown[]) : [];
+    const pathsFromRefs = refsRaw
+      .map((r) => {
+        if (r && typeof r === 'object' && typeof (r as { tr069_path?: unknown }).tr069_path === 'string') {
+          return (r as { tr069_path: string }).tr069_path;
+        }
+        return null;
+      })
+      .filter((p): p is string => Boolean(p));
+    const pathsFromLegacy = Array.isArray(c.param_paths)
       ? (c.param_paths as unknown[]).filter((p): p is string => typeof p === 'string')
-      : undefined,
-    paramValues: Array.isArray(c.param_values) ? (c.param_values as unknown[]) : undefined,
-  }));
+      : [];
+    const paramPaths = pathsFromRefs.length > 0 ? pathsFromRefs : pathsFromLegacy;
+    return {
+      commandCode: typeof c.command_code === 'string' ? c.command_code : JSON.stringify(c),
+      operationType:
+        typeof c.operation_type === 'string'
+          ? (c.operation_type as MMLTaskCommandDetail['operationType'])
+          : undefined,
+      paramPaths: paramPaths.length > 0 ? paramPaths : undefined,
+      paramValues: Array.isArray(c.param_values) ? (c.param_values as unknown[]) : undefined,
+    };
+  });
 
   return {
     id: bt.id,

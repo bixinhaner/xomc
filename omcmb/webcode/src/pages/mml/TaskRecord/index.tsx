@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Alert, Button, Descriptions, Modal, Space, Table, Tag, Typography, message } from 'antd';
-import { DownloadOutlined } from '@ant-design/icons';
+import { Alert, Button, Descriptions, Input, Modal, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
+import { CopyOutlined, DownloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 
 import ListPageLayout from '@/components/Layout/ListPageLayout';
@@ -446,38 +446,14 @@ export default function TaskRecord() {
                 pagination={false}
                 scroll={{ y: 360 }}
                 expandable={{
-                  // 展开行：上方失败原因 Alert（红），下方 XmlViewer 渲染 rawOutput。
-                  // failReason 也允许触发展开 —— Server fault 场景下后端可能不返回 raw，
-                  // 但报错信息已写入 device_task.error_message，必须可见。
+                  // 展开行：失败原因 Alert + 格式化 XML（XmlViewer，带颜色）+ 原始输出
+                  // textarea（全文可滚动 / Ctrl+F 搜索 / 复制）。failReason 也允许触发展开
+                  // —— Server fault 场景下后端可能不返回 raw，但报错信息已写入
+                  // device_task.error_message，必须可见。
                   rowExpandable: (row) =>
                     Boolean(row.result?.rawOutput) || Boolean(row.failReason),
                   expandedRowRender: (row) => (
-                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                      {row.failReason && (
-                        <Alert
-                          type="error"
-                          showIcon
-                          message={t('mml.failReason')}
-                          description={
-                            <Typography.Paragraph
-                              copyable={{ text: row.failReason }}
-                              style={{
-                                margin: 0,
-                                whiteSpace: 'pre-wrap',
-                                wordBreak: 'break-word',
-                                fontFamily: 'monospace',
-                                fontSize: 12,
-                              }}
-                            >
-                              {row.failReason}
-                            </Typography.Paragraph>
-                          }
-                        />
-                      )}
-                      {row.result?.rawOutput && (
-                        <XmlViewer xml={row.result.rawOutput} maxHeight={360} />
-                      )}
-                    </Space>
+                    <DeviceResultExpanded row={row} t={t} />
                   ),
                 }}
               />
@@ -613,6 +589,100 @@ function CommandBlock({ item, t }: { item: MMLTaskCommandDetail; t: CommandSumma
         </ul>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DeviceResultExpanded — 设备执行结果表"展开行"内容：失败原因 + 格式化 XML +
+// 原始输出 textarea（用户可 Ctrl+F 搜索 / 整段复制）。
+// ---------------------------------------------------------------------------
+
+interface DeviceResultExpandedProps {
+  row: DeviceTaskResultItem;
+  t: CommandSummaryProps['t'];
+}
+
+function DeviceResultExpanded({ row, t }: DeviceResultExpandedProps) {
+  const raw = row.result?.rawOutput;
+  const handleCopyRaw = useCallback(async () => {
+    if (!raw) return;
+    try {
+      await navigator.clipboard.writeText(raw);
+      void message.success(t('common.copiedToClipboard'));
+    } catch {
+      void message.error(t('common.copyFailed'));
+    }
+  }, [raw, t]);
+
+  return (
+    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      {row.failReason && (
+        <Alert
+          type="error"
+          showIcon
+          message={t('mml.failReason')}
+          description={
+            <Typography.Paragraph
+              copyable={{ text: row.failReason }}
+              style={{
+                margin: 0,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                fontFamily: 'monospace',
+                fontSize: 12,
+              }}
+            >
+              {row.failReason}
+            </Typography.Paragraph>
+          }
+        />
+      )}
+      {raw && (
+        <>
+          <div>
+            <Typography.Text strong style={{ fontSize: 12, color: '#595959' }}>
+              {t('mml.formattedXml')}
+            </Typography.Text>
+            <div style={{ marginTop: 4 }}>
+              <XmlViewer xml={raw} maxHeight={320} />
+            </div>
+          </div>
+          <div>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 4,
+              }}
+            >
+              <Typography.Text strong style={{ fontSize: 12, color: '#595959' }}>
+                {t('mml.rawOutput')}
+              </Typography.Text>
+              <Tooltip title={t('common.copy')}>
+                <Button size="small" icon={<CopyOutlined />} onClick={handleCopyRaw}>
+                  {t('common.copy')}
+                </Button>
+              </Tooltip>
+            </div>
+            {/* textarea 而非 pre：浏览器原生 select-all / Ctrl+F 搜索 / 鼠标拖选都好用，
+                配合 readOnly + 等宽字体满足"查询全部信息"诉求 */}
+            <Input.TextArea
+              value={raw}
+              readOnly
+              autoSize={{ minRows: 6, maxRows: 18 }}
+              style={{
+                fontFamily:
+                  "'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace",
+                fontSize: 12,
+                lineHeight: 1.6,
+                background: '#fafafa',
+              }}
+            />
+          </div>
+        </>
+      )}
+    </Space>
   );
 }
 
