@@ -936,6 +936,9 @@ func initMiscModules(c *Container) error {
 	// 返回 path_translation_warning 字段供前端任务详情警告标签使用。
 	if c.miscDeps.taskSvc != nil {
 		mmlService.SetDeviceTaskPathMissAggregator(&mmlPathMissAdapter{svc: c.miscDeps.taskSvc})
+		// 2026-05-23 修：装配 device_tasks → mml task results 适配器，让任务记录
+		// 页"查看"modal 拿到真实设备级执行结果（原 mml_tasks.results JSONB 永远空）。
+		mmlService.SetDeviceTaskResultLister(&mmlDeviceTaskResultAdapter{svc: c.miscDeps.taskSvc})
 	}
 
 	// Stage 2（T-0123 v5）：上行 RPC 响应订阅者 — ACS 进程发 EventBus 后，
@@ -1421,6 +1424,38 @@ func (a *mmlPathMissAdapter) AggregatePathTranslationMissBySourceID(
 		PathCount:   stats.PathCount,
 		AnyMiss:     stats.AnyMiss,
 	}, nil
+}
+
+// mmlDeviceTaskResultAdapter 把 task.TaskService.ListResultsBySourceID 适配为
+// mml.DeviceTaskResultLister。同消费者驱动模式：task 包返回 task.DeviceTaskResultRow，
+// 这里逐字段拷贝到 mml.DeviceTaskResultRowView，让 mml 包不反向 import task 包。
+type mmlDeviceTaskResultAdapter struct {
+	svc *task.TaskService
+}
+
+func (a *mmlDeviceTaskResultAdapter) ListResultsBySourceID(
+	ctx context.Context, sourceID string, page, pageSize int,
+) ([]mml.DeviceTaskResultRowView, int64, error) {
+	rows, total, err := a.svc.ListResultsBySourceID(ctx, sourceID, page, pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]mml.DeviceTaskResultRowView, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, mml.DeviceTaskResultRowView{
+			DeviceSN:     r.DeviceSN,
+			Status:       r.Status,
+			ErrorCode:    r.ErrorCode,
+			ErrorMessage: r.ErrorMessage,
+			Result:       r.Result,
+			SentAt:       r.SentAt,
+			CompletedAt:  r.CompletedAt,
+			CreatedAt:    r.CreatedAt,
+			CommandIndex: r.CommandIndex,
+			DeviceIndex:  r.DeviceIndex,
+		})
+	}
+	return out, total, nil
 }
 
 // groupAssignerAdapter — 实现 device.GroupAssigner 接口的 1 行适配器。

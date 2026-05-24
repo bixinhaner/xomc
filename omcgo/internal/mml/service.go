@@ -38,6 +38,7 @@ type Service struct {
 	hub              SSEPublisher
 	roleQuerier      RoleQuerier // optional; nil 时 ListCustomCommands fallback creator-only 过滤
 	deviceTaskPathMissAggregator DeviceTaskPathMissAggregator // Stage 3 路径翻译警告字段聚合
+	deviceTaskResultLister       DeviceTaskResultLister       // 任务记录"查看"modal 的设备级结果（2026-05-23 修）
 	deviceLookup     DeviceLookup // R-8.4 product_class 一致性校验；nil 时跳过（向后兼容）
 	pathTranslator   PathTranslator // R-9.3 per-device standardPath → privatePath 翻译；nil 时跳过
 	logger           *zap.Logger
@@ -1141,6 +1142,37 @@ func (s *Service) SetDeviceTaskPathMissAggregator(agg DeviceTaskPathMissAggregat
 	s.deviceTaskPathMissAggregator = agg
 }
 
+// DeviceTaskResultLister 按 mml_task.id 拉 device_tasks 执行结果列表，供任务记录
+// 页"查看"modal 渲染设备级输出（device_sn / status / 错误码 / SOAP raw_response）。
+//
+// 消费者驱动小接口；实现端在 cmd/app/provider/modules.go 用 task.TaskService 包装。
+// nil 时 GetTaskResults 回退读 mml_tasks.results JSONB（兼容老数据）。
+type DeviceTaskResultLister interface {
+	ListResultsBySourceID(
+		ctx context.Context, sourceID string, page, pageSize int,
+	) ([]DeviceTaskResultRowView, int64, error)
+}
+
+// DeviceTaskResultRowView 屏蔽 task 包内部 struct，让 mml 包不反向 import task 包。
+// 字段语义对齐 task.DeviceTaskResultRow；Result 是 device_tasks.result JSONB 原始字节。
+type DeviceTaskResultRowView struct {
+	DeviceSN     string
+	Status       string
+	ErrorCode    int
+	ErrorMessage string
+	Result       json.RawMessage
+	SentAt       *time.Time
+	CompletedAt  *time.Time
+	CreatedAt    time.Time
+	CommandIndex int
+	DeviceIndex  int
+}
+
+// SetDeviceTaskResultLister 装配 device_tasks → mml task results 适配器（DI Setter）。
+func (s *Service) SetDeviceTaskResultLister(l DeviceTaskResultLister) {
+	s.deviceTaskResultLister = l
+}
+
 // ListRunsByScript 返回脚本关联的全部执行实例（模板 + 子实例），分页倒序。
 // P4 C11：脚本详情页"历史执行"tab 的后端入口。
 func (s *Service) ListRunsByScript(ctx context.Context, scriptID uuid.UUID, req model.ListRequest) (*model.ListResponse[MMLTask], error) {
@@ -1698,17 +1730,6 @@ func (s *Service) IsDangerousCommand(ctx context.Context, commandCode string) (*
 
 // GetTaskResults returns paginated per-device execution results for a task.
 func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSize int) (*model.ListResponse[map[string]interface{}], error) {
-	task, err := s.taskRepo.GetByID(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("get mml task: %w", err)
-	}
-
-	results := task.Results
-	if results == nil {
-		results = []map[string]interface{}{}
-	}
-
-	total := int64(len(results))
 	if page < 1 {
 		page = 1
 	}
@@ -1716,6 +1737,30 @@ func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSi
 		pageSize = 20
 	}
 
+	// 优先路径：从 device_tasks 拉真实执行结果（2026-05-23 修；执行结果实际写在
+	// device_tasks 表，mml_tasks.results 从未由 ACS 回写，老路径永远空）。
+	if s.deviceTaskResultLister != nil {
+		rows, total, err := s.deviceTaskResultLister.ListResultsBySourceID(ctx, id.String(), page, pageSize)
+		if err != nil {
+			return nil, fmt.Errorf("list device task results: %w", err)
+		}
+		items := make([]map[string]interface{}, 0, len(rows))
+		for _, row := range rows {
+			items = append(items, deviceTaskRowToResultMap(row))
+		}
+		return model.NewListResponse(items, total, page, pageSize), nil
+	}
+
+	// 兼容回退：装配器未注入时读老 JSONB（dev / 单测）。
+	t, err := s.taskRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get mml task: %w", err)
+	}
+	results := t.Results
+	if results == nil {
+		results = []map[string]interface{}{}
+	}
+	total := int64(len(results))
 	start := (page - 1) * pageSize
 	end := start + pageSize
 	if start > int(total) {
@@ -1724,11 +1769,55 @@ func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSi
 	if end > int(total) {
 		end = int(total)
 	}
-
 	items := results[start:end]
 	if items == nil {
 		items = []map[string]interface{}{}
 	}
-
 	return model.NewListResponse(items, total, page, pageSize), nil
+}
+
+// deviceTaskRowToResultMap 把 device_tasks 行映射为前端 DeviceTaskResultItem 期望
+// 的 snake_case map（mapBackendResult in mmlApi.ts）：
+//   - device_sn / status / error_message / started_at / finished_at 直通
+//   - success = (status=completed && error_code=0)
+//   - raw_output = result->>'raw_response'
+//   - mml_script = result->>'method' （SOAP method name；便于前端展示）
+//   - execution_time = completed_at - sent_at（毫秒）
+//
+// 解析 result JSONB 失败时静默跳过该字段（不影响主流程），device_sn / status 等
+// 主字段保持可用。
+func deviceTaskRowToResultMap(row DeviceTaskResultRowView) map[string]interface{} {
+	m := map[string]interface{}{
+		"device_sn":     row.DeviceSN,
+		"status":        row.Status,
+		"error_code":    row.ErrorCode,
+		"error_message": row.ErrorMessage,
+		"command_index": row.CommandIndex,
+		"device_index":  row.DeviceIndex,
+		"success":       row.Status == "completed" && row.ErrorCode == 0,
+	}
+	if row.SentAt != nil {
+		m["started_at"] = row.SentAt.Format(time.RFC3339)
+	}
+	if row.CompletedAt != nil {
+		m["finished_at"] = row.CompletedAt.Format(time.RFC3339)
+		m["timestamp"] = row.CompletedAt.Format(time.RFC3339)
+	}
+	if row.SentAt != nil && row.CompletedAt != nil {
+		m["execution_time"] = row.CompletedAt.Sub(*row.SentAt).Milliseconds()
+	}
+	if len(row.Result) > 0 {
+		var resObj map[string]interface{}
+		if err := json.Unmarshal(row.Result, &resObj); err == nil {
+			if rr, ok := resObj["raw_response"].(string); ok && rr != "" {
+				m["raw_output"] = rr
+			}
+			if method, ok := resObj["method"].(string); ok && method != "" {
+				m["mml_script"] = method
+			}
+			// parsed_data：把整个 result JSON 透传给前端做兜底渲染（不阻塞主字段）
+			m["parsed_data"] = resObj
+		}
+	}
+	return m
 }

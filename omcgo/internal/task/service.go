@@ -76,6 +76,17 @@ func (s *TaskService) AggregatePathTranslationMissBySourceID(
 	return s.repo.AggregatePathTranslationMissBySourceID(ctx, sourceID)
 }
 
+// ListResultsBySourceID 透传到底层 PgTaskRepository，供 mml.Service 在
+// GET /api/v1/mml/tasks/:id/results 展示设备级执行结果（任务记录页查看 modal）。
+//
+// 历史问题（2026-05-23 修复）：原 mml.GetTaskResults 读 mml_tasks.results JSONB，
+// 但执行结果实际全在 device_tasks，导致 UI 永远"暂无执行结果"。
+func (s *TaskService) ListResultsBySourceID(
+	ctx context.Context, sourceID string, page, pageSize int,
+) ([]DeviceTaskResultRow, int64, error) {
+	return s.repo.ListResultsBySourceID(ctx, sourceID, page, pageSize)
+}
+
 // SetMetrics attaches Prometheus metrics to the service.
 func (s *TaskService) SetMetrics(m *TaskMetrics) {
 	s.metrics = m

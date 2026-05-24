@@ -423,6 +423,89 @@ WHERE source = 'mml' AND source_id = $1`
 	return stats, nil
 }
 
+// DeviceTaskResultRow 表示按 source_id（mml_task.id）聚出来的单条 device_task
+// 执行结果行，用于 GET /api/v1/mml/tasks/:id/results 在前端展示设备级输出。
+//
+// 历史问题（2026-05-23 修复）：原来 mml.GetTaskResults 读 mml_tasks.results
+// JSONB 列，但执行结果从未由 ACS 回写到 mml_tasks，真实数据全在 device_tasks。
+// 改为直接按 source_id 查 device_tasks，可一步把"列表里看见成功/失败但点查
+// 看永远空"修好。
+type DeviceTaskResultRow struct {
+	DeviceSN     string
+	Status       string
+	ErrorCode    int
+	ErrorMessage string
+	Result       json.RawMessage // JSONB（device_tasks.result），含 method / raw_response
+	SentAt       *time.Time
+	CompletedAt  *time.Time
+	CreatedAt    time.Time
+	CommandIndex int
+	DeviceIndex  int
+}
+
+// ListResultsBySourceID 返回某个 source_id（典型为 mml_task.id）下所有 device_tasks
+// 的执行结果，按 (command_index, device_index, created_at) 升序稳定排序。
+//
+// total 取自全量 COUNT；items 分页。pageSize <= 0 时退化为 20，page <= 0 退化为 1。
+func (r *PgTaskRepository) ListResultsBySourceID(
+	ctx context.Context, sourceID string, page, pageSize int,
+) ([]DeviceTaskResultRow, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+
+	const countQ = `
+SELECT COUNT(*) FROM device_tasks
+WHERE source = 'mml' AND source_id = $1`
+	var total int64
+	if err := r.pool.QueryRow(ctx, countQ, sourceID).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count device tasks by source: %w", err)
+	}
+	if total == 0 {
+		return []DeviceTaskResultRow{}, 0, nil
+	}
+
+	const listQ = `
+SELECT device_sn, status,
+       COALESCE(error_code, 0), COALESCE(error_message, ''),
+       result, sent_at, completed_at, created_at,
+       COALESCE(command_index, 0), COALESCE(device_index, 0)
+FROM device_tasks
+WHERE source = 'mml' AND source_id = $1
+ORDER BY command_index ASC, device_index ASC, created_at ASC
+LIMIT $2 OFFSET $3`
+	rows, err := r.pool.Query(ctx, listQ, sourceID, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query device tasks by source: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]DeviceTaskResultRow, 0, pageSize)
+	for rows.Next() {
+		var row DeviceTaskResultRow
+		var raw []byte
+		if err := rows.Scan(
+			&row.DeviceSN, &row.Status,
+			&row.ErrorCode, &row.ErrorMessage,
+			&raw, &row.SentAt, &row.CompletedAt, &row.CreatedAt,
+			&row.CommandIndex, &row.DeviceIndex,
+		); err != nil {
+			return nil, 0, fmt.Errorf("scan device task row: %w", err)
+		}
+		if len(raw) > 0 {
+			row.Result = json.RawMessage(raw)
+		}
+		items = append(items, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate device task rows: %w", err)
+	}
+	return items, total, nil
+}
+
 // CountByStatus 统计各状态任务数量
 func (r *PgTaskRepository) CountByStatus(ctx context.Context, deviceSN string) (map[TaskStatus]int64, error) {
 	query, args, err := storage.Psql.Select("status", "COUNT(*) as count").
