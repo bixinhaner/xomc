@@ -350,6 +350,18 @@ export default function TaskRecord() {
       ellipsis: true,
       render: (_: unknown, row: DeviceTaskResultItem) => {
         const raw = row.result?.rawOutput;
+        // 失败优先：terminal 已经把 [Server] xxx 当 stderr 行打出来，modal 不能漏
+        // 显示。failReason 由后端 device_task.error_message / fail_reason 映射，rawOutput
+        // 可能为空或只含 SOAP fault 报文，单看 raw 用户读不懂。
+        if (row.failReason) {
+          const oneLine = row.failReason.replace(/\s+/g, ' ').trim();
+          const preview = oneLine.length > 80 ? `${oneLine.slice(0, 80)}…` : oneLine;
+          return (
+            <Typography.Text type="danger" style={{ fontSize: 12 }}>
+              {preview}
+            </Typography.Text>
+          );
+        }
         if (!raw) return '-';
         // 单行简介：把 XML 折成一行，展示前 80 字符；完整内容在展开行里看
         const oneLine = raw.replace(/\s+/g, ' ').trim();
@@ -425,11 +437,38 @@ export default function TaskRecord() {
                 pagination={false}
                 scroll={{ y: 360 }}
                 expandable={{
-                  // 展开行内嵌 XmlViewer：原始 rawOutput 缩进 + 着色 + 复制按钮；
-                  // 没有 rawOutput 的行不显示展开符号（避免空展开）。
-                  rowExpandable: (row) => Boolean(row.result?.rawOutput),
+                  // 展开行：上方失败原因 Alert（红），下方 XmlViewer 渲染 rawOutput。
+                  // failReason 也允许触发展开 —— Server fault 场景下后端可能不返回 raw，
+                  // 但报错信息已写入 device_task.error_message，必须可见。
+                  rowExpandable: (row) =>
+                    Boolean(row.result?.rawOutput) || Boolean(row.failReason),
                   expandedRowRender: (row) => (
-                    <XmlViewer xml={row.result?.rawOutput ?? ''} maxHeight={360} />
+                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                      {row.failReason && (
+                        <Alert
+                          type="error"
+                          showIcon
+                          message={t('mml.failReason')}
+                          description={
+                            <Typography.Paragraph
+                              copyable={{ text: row.failReason }}
+                              style={{
+                                margin: 0,
+                                whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-word',
+                                fontFamily: 'monospace',
+                                fontSize: 12,
+                              }}
+                            >
+                              {row.failReason}
+                            </Typography.Paragraph>
+                          }
+                        />
+                      )}
+                      {row.result?.rawOutput && (
+                        <XmlViewer xml={row.result.rawOutput} maxHeight={360} />
+                      )}
+                    </Space>
                   ),
                 }}
               />
