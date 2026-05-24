@@ -353,7 +353,10 @@ func buildStatementCommandEntry(stmt Statement, cmd *MMLCommand, subFields []MML
 
 	case "MOD":
 		if len(stmt.Values) == 0 {
-			return nil, fmt.Errorf("MOD: empty values")
+			// 历史触发场景：① 前端未勾选任何 sub_field 直接提交；② 调用方按
+			// access_type 过滤可写字段时漏写枚举值（如只匹配 'RW' 漏了
+			// 'READ_WRITE'）。Hint 提示常见排查点。
+			return nil, fmt.Errorf("MOD: empty values — 请确认至少勾选一个 READ_WRITE 字段并填入值；若调用 API 时按 access_type 过滤可写字段，注意使用完整字面值 'READ_WRITE'/'READ_ONLY'，而非缩写 'RW'/'RO'")
 		}
 		refs := buildMODParamRefs(subFields, cmd.Params)
 		if err := applyInstanceSelectorsToRefs(refs, stmt.InstanceSelectors); err != nil {
