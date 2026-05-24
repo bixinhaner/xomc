@@ -36,7 +36,10 @@ type ConsoleService struct {
 	flatTreeRepo FlatGroupTreeRepository
 	// searchRepo 是 Bundle C 新增的命令搜索仓储；nil 表示未装配（503）。
 	searchRepo SearchRepository
-	logger     *zap.Logger
+	// T-0170: 注入"device key (SN 或 UUID) → paramModelID"反查闭包；nil 时退化为全集（admin 视图）。
+	// 设计哲学：param_mappings 是 product 实际支持 path 的真值源；缺映射 = 不支持。
+	resolveParamModelByDevice func(ctx context.Context, deviceKey string) (*uuid.UUID, error)
+	logger                    *zap.Logger
 }
 
 // NewConsoleService 构造 ConsoleService。
@@ -71,6 +74,13 @@ func (s *ConsoleService) SetFlatTreeRepo(repo FlatGroupTreeRepository) {
 // SetSearchRepo 装配 Bundle C 命令搜索仓储；理由同 SetFlatTreeRepo。
 func (s *ConsoleService) SetSearchRepo(repo SearchRepository) {
 	s.searchRepo = repo
+}
+
+// SetParamModelByDeviceResolver 注入 deviceKey → paramModelID 反查（T-0170）。
+// deviceKey 可以是 serial_number 或 UUID（resolver 自行判定）。
+// 不注入时 sub_field 端点不按设备过滤（admin 视图等价）。
+func (s *ConsoleService) SetParamModelByDeviceResolver(fn func(ctx context.Context, deviceKey string) (*uuid.UUID, error)) {
+	s.resolveParamModelByDevice = fn
 }
 
 // SetCmdParamRepo 装配命令参数 enrichment 仓储；理由同 SetFlatTreeRepo。
@@ -195,11 +205,22 @@ type SubFieldDTO struct {
 
 // GetCommandSubFields 加载命令的 sub_fields（含 JOIN standard_params 元数据），按 lang 派生
 // 顶级 label / constraint_text。
-func (s *ConsoleService) GetCommandSubFields(ctx context.Context, commandID uuid.UUID, lang string) ([]SubFieldDTO, error) {
+func (s *ConsoleService) GetCommandSubFields(ctx context.Context, commandID uuid.UUID, deviceKey string, lang string) ([]SubFieldDTO, error) {
 	if lang == "" {
 		lang = "zh-CN"
 	}
-	enriched, err := s.subFieldRepo.ListEnrichedByCommand(ctx, commandID)
+	// T-0170: deviceKey 非空时反查 paramModelID → repo SQL 叠加 param_mappings 过滤。
+	// deviceKey 可以是 SN 或 UUID。反查闭包未注入 / 反查失败 → 退化为全集（不阻塞 admin 视图）。
+	var paramModelID *uuid.UUID
+	if deviceKey != "" && s.resolveParamModelByDevice != nil {
+		pmID, err := s.resolveParamModelByDevice(ctx, deviceKey)
+		if err != nil {
+			s.logger.Warn("resolve param_model by device failed, fallback to unfiltered",
+				zap.String("device_key", deviceKey), zap.Error(err))
+		}
+		paramModelID = pmID
+	}
+	enriched, err := s.subFieldRepo.ListEnrichedByCommand(ctx, commandID, paramModelID)
 	if err != nil {
 		return nil, fmt.Errorf("list enriched sub_fields: %w", err)
 	}

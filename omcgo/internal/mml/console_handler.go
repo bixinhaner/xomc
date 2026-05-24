@@ -226,7 +226,14 @@ func (h *ConsoleHandler) GetCommandSubFields(c *gin.Context) {
 		return
 	}
 	lang := normalizeLang(c.Query("lang"))
-	subFields, err := h.svc.GetCommandSubFields(c.Request.Context(), id, lang)
+	// T-0170: 可选 ?device_sn=<sn> 或 ?device_id=<uuid> — 传了就按该设备的 paramModel
+	// 过滤 sub_field（缺映射的不返）；都不传走老行为返全集（admin 视图等价，向后兼容）。
+	// 前端 console 用 SN（ConsoleDevice 类型只有 sn）；admin 工具可用 UUID。
+	deviceKey := strings.TrimSpace(c.Query("device_sn"))
+	if deviceKey == "" {
+		deviceKey = strings.TrimSpace(c.Query("device_id"))
+	}
+	subFields, err := h.svc.GetCommandSubFields(c.Request.Context(), id, deviceKey, lang)
 	if err != nil {
 		h.logger.Error("get command sub_fields", zap.Error(err), zap.String("command_id", id.String()))
 		response.Fail(c, http.StatusInternalServerError, err.Error())

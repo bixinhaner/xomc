@@ -131,33 +131,39 @@ func (a *mmlPathTranslatorAdapter) TranslateForDevice(
 		}, nil
 	}
 
+	// T-0170: product 已识别 + Translator 成功，单 path miss 直接拒绝整 task
+	// （CPE 必返 9005 — 让 OMC 在 fanout 前 422 拒绝比让用户等 30 秒 CPE 拒强）。
+	// 收集 miss path 清单后统一返 ErrPathUnsupported。
 	src := string(translator.Source())
 	paths := make([]mml.TranslatedPath, 0, len(standardPaths))
-	var hasHit, hasMiss bool
+	missPaths := make([]string, 0)
 	for _, p := range standardPaths {
 		r := translator.ToPrivate(p)
 		if r.Found {
 			paths = append(paths, mml.TranslatedPath{Standard: p, Private: r.Translated, Source: src})
-			hasHit = true
 		} else {
+			missPaths = append(missPaths, p)
 			paths = append(paths, mml.TranslatedPath{Standard: p, Private: p, Source: "passthrough"})
-			hasMiss = true
 		}
 	}
-	aggregate := src
-	switch {
-	case hasHit && hasMiss:
-		aggregate = "mixed"
-	case !hasHit && hasMiss:
-		aggregate = "passthrough"
+	if len(missPaths) > 0 {
+		a.logger.Warn("path(s) not in param_mappings, rejecting task (T-0170)",
+			zap.String("product_class", productClass),
+			zap.String("param_model_id", matchRes.Product.ParamModelID.String()),
+			zap.Strings("unsupported_paths", missPaths))
+		return nil, &mml.ErrPathUnsupported{
+			ProductClass: productClass,
+			ParamModelID: matchRes.Product.ParamModelID.String(),
+			Paths:        missPaths,
+		}
 	}
-
+	// 全部命中 → 正常返回（T-0170 后 missPaths 非空已在上面提前返错，到这只剩纯命中）
 	return &mml.TranslationOutcome{
 		Paths:           paths,
 		ProductResolved: true,
 		ProductID:       matchRes.Product.ID,
 		ProductClass:    productClass,
-		AggregateSource: aggregate,
+		AggregateSource: src, // 全命中 → 必为单一来源（discovered / default）
 	}, nil
 }
 

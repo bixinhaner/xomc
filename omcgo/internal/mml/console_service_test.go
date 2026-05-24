@@ -63,7 +63,7 @@ func (f *fakeSubFieldRepo) ListByCommand(_ context.Context, c uuid.UUID) ([]MMLC
 	}
 	return f.byCommandList[c], nil
 }
-func (f *fakeSubFieldRepo) ListEnrichedByCommand(_ context.Context, c uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
+func (f *fakeSubFieldRepo) ListEnrichedByCommand(_ context.Context, c uuid.UUID, _ *uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
@@ -383,7 +383,7 @@ func TestGetCommandSubFields_LangPicksZhCN(t *testing.T) {
 	}
 
 	svc := NewConsoleService(&fakeGroupTreeRepo{}, sfRepo, newFakeCommandRepo(), nil)
-	got, err := svc.GetCommandSubFields(context.Background(), cmdID, "zh-CN")
+	got, err := svc.GetCommandSubFields(context.Background(), cmdID, "", "zh-CN")
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, "型号", got[0].Label)
@@ -406,7 +406,7 @@ func TestGetCommandSubFields_LangFallbackToEn(t *testing.T) {
 	}
 
 	svc := NewConsoleService(&fakeGroupTreeRepo{}, sfRepo, newFakeCommandRepo(), nil)
-	got, err := svc.GetCommandSubFields(context.Background(), cmdID, "zh-CN")
+	got, err := svc.GetCommandSubFields(context.Background(), cmdID, "", "zh-CN")
 	require.NoError(t, err)
 	require.Len(t, got, 1)
 	assert.Equal(t, "Only EN", got[0].Label) // fallback

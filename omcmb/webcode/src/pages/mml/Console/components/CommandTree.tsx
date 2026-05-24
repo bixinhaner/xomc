@@ -448,6 +448,8 @@ export default function CommandTree({ lang }: CommandTreeProps) {
   // 用户决策（2026-05-18）：连续点击命令是**覆盖**而非追加。
   // 老 OMC 行为：用户点一个命令 → 控制面板只显示这一条；要多语句脚本走 textbox。
   const replaceStatement = useMmlConsoleStore((s) => s.replaceStatement);
+  // T-0170: 取选中设备 SN（首条）传给 sub-fields 端点做 paramModel 过滤
+  const selectedDeviceSns = useMmlConsoleStore((s) => s.selectedDeviceSns);
   const effectiveLang = lang ?? storeLang;
 
   // 稳定 tree 引用：destructuring `= []` default 在 data=undefined 期间每 render 新建数组，
@@ -595,9 +597,12 @@ export default function CommandTree({ lang }: CommandTreeProps) {
       if (!cmd) return;
 
       try {
+        // T-0170: 取首个选中设备的 SN 作为 deviceKey，让后端按设备 paramModel 过滤 sub_field
+        // （缺 param_mappings 映射的不返）。0 设备时不传 deviceKey 走全集兼容。
+        const deviceKey = selectedDeviceSns[0];
         const subFields = await queryClient.fetchQuery<SubFieldDef[]>({
-          queryKey: ['mml', 'console', 'sub-fields', commandId, effectiveLang],
-          queryFn: () => mmlApi.getCommandSubFields(commandId, effectiveLang),
+          queryKey: ['mml', 'console', 'sub-fields', commandId, effectiveLang, deviceKey ?? ''],
+          queryFn: () => mmlApi.getCommandSubFields(commandId, effectiveLang, deviceKey),
           staleTime: 30 * 60 * 1000,
         });
 

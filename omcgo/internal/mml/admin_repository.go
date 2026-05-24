@@ -45,7 +45,11 @@ type SubFieldRepository interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 	GetByID(ctx context.Context, id uuid.UUID) (*MMLCommandSubField, error)
 	ListByCommand(ctx context.Context, commandID uuid.UUID) ([]MMLCommandSubField, error)
-	ListEnrichedByCommand(ctx context.Context, commandID uuid.UUID) ([]MMLCommandSubFieldEnriched, error)
+	// ListEnrichedByCommand 返回命令的 sub_fields（JOIN standard_params 元数据）。
+	//
+	// T-0170: paramModelID 非 nil 时叠加 param_mappings 过滤 — 只返该 paramModel
+	// 真实支持的 standardPath（缺映射的 sub_field 被排除）。admin 视图传 nil 返全集。
+	ListEnrichedByCommand(ctx context.Context, commandID uuid.UUID, paramModelID *uuid.UUID) ([]MMLCommandSubFieldEnriched, error)
 	CountByParam(ctx context.Context, paramID uuid.UUID) (int64, error)
 }
 
@@ -211,8 +215,24 @@ func (r *PgSubFieldRepository) ListByCommand(ctx context.Context, commandID uuid
 //   - 仅有 max   → "≤ max"
 //   - 都为 NULL → 空（前端 AccessTypeTag Tooltip 走"无明确取值范围"兜底文案）
 // 数字内容 zh-CN / en-US 同形，i18n 两 key 同值即可。
-func (r *PgSubFieldRepository) ListEnrichedByCommand(ctx context.Context, commandID uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
-	const sqlText = `
+func (r *PgSubFieldRepository) ListEnrichedByCommand(ctx context.Context, commandID uuid.UUID, paramModelID *uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
+	// T-0170: paramModelID 非 nil 时叠加 param_mappings 过滤，
+	// 让前端只看到"该 paramModel 真实支持的 sub_field"。设计哲学：
+	// param_mappings 是 product 实际支持 path 的真值源；缺映射 = 不支持。
+	paramModelFilter := ""
+	args := []any{commandID}
+	if paramModelID != nil {
+		paramModelFilter = `
+  AND EXISTS (
+      SELECT 1 FROM param_mappings pm
+       WHERE pm.standard_path  = sp.standard_path
+         AND pm.param_model_id = $2
+         AND pm.is_active      = true
+  )`
+		args = append(args, *paramModelID)
+	}
+
+	sqlText := `
 SELECT
     csf.id, csf.command_id, csf.standard_path_id AS param_id, csf.mml_code, csf.label_i18n,
     csf.default_selected, csf.is_required, csf.sort_order, csf.created_at, csf.updated_at,
@@ -250,10 +270,10 @@ SELECT
     COALESCE(sp.description, '')          AS description
 FROM mml_command_sub_fields csf
 JOIN standard_params sp ON sp.id = csf.standard_path_id
-WHERE csf.command_id = $1
+WHERE csf.command_id = $1` + paramModelFilter + `
 ORDER BY csf.sort_order ASC, csf.mml_code ASC`
 
-	rows, err := r.pool.Query(ctx, sqlText, commandID)
+	rows, err := r.pool.Query(ctx, sqlText, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query enriched sub_fields: %w", err)
 	}

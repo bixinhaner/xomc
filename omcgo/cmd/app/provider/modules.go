@@ -926,6 +926,24 @@ func initMiscModules(c *Container) error {
 	// 修复 2026-05-22：装配 cmdParamRepo 让 cmd.Params 在 GetByID 后被 enrichment
 	// 填上（旧版漏装 → execute-statements-structured 全部 path 误报 R-9.2 unknown）。
 	mmlConsoleSvc.SetCmdParamRepo(mmlCmdParamRepo)
+	// T-0170: 注入 device → paramModel 反查闭包，让 GET /mml/commands/:id/sub-fields?device_id=
+	// 端点能按 paramModel 过滤 sub_field — 缺映射的 sub_field 不返给前端。
+	// SQL 直接查 devices LEFT JOIN products，与 CompatibilityService.resolveProductClassSQL 同源。
+	mmlConsoleSvc.SetParamModelByDeviceResolver(func(ctx context.Context, deviceKey string) (*uuid.UUID, error) {
+		// deviceKey 可以是 SN 或 UUID。SQL 用 OR 兼容；前端 ConsoleDevice 只有 sn，
+		// admin 工具可用 UUID — 同端点同 SQL 通用。
+		const q = `
+SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
+  FROM devices d
+  LEFT JOIN products p ON p.id = d.product_id
+ WHERE d.serial_number = $1 OR d.id::text = $1
+ LIMIT 1`
+		var pmID *uuid.UUID
+		if err := c.PgPool.QueryRow(ctx, q, deviceKey).Scan(&pmID); err != nil {
+			return nil, fmt.Errorf("resolve param_model by device %q: %w", deviceKey, err)
+		}
+		return pmID, nil
+	})
 	// R-8.5: 独立 CompatibilityService（不耦合 ConsoleService 签名 / 测试）。
 	// 直接走 devices LEFT JOIN products 反查 param_model_id，
 	// 绕过 ProductRegistry.MatchProductClass 全局正则（字典 product_class

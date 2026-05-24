@@ -77,11 +77,13 @@ export function useGroupTreeFlat(
  */
 export function useCommandSubFields(
   commandId: string | undefined,
-  lang: string = 'zh-CN'
+  lang: string = 'zh-CN',
+  deviceKey?: string
 ): ReturnType<typeof useQuery<SubFieldDef[]>> {
   return useQuery({
-    queryKey: ['mml', 'console', 'sub-fields', commandId ?? '', lang],
-    queryFn: () => mmlApi.getCommandSubFields(commandId!, lang),
+    // T-0170: queryKey 含 deviceKey 让缓存按设备隔离 — 切设备会重新拉对应 paramModel 的 sub_field
+    queryKey: ['mml', 'console', 'sub-fields', commandId ?? '', lang, deviceKey ?? ''],
+    queryFn: () => mmlApi.getCommandSubFields(commandId!, lang, deviceKey),
     staleTime: 30 * 60 * 1000,
     enabled: Boolean(commandId),
   });

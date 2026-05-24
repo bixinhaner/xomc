@@ -135,7 +135,7 @@ func (m *mockSubFieldRepo) ListByCommand(ctx context.Context, commandID uuid.UUI
 	}
 	return out, nil
 }
-func (m *mockSubFieldRepo) ListEnrichedByCommand(ctx context.Context, commandID uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
+func (m *mockSubFieldRepo) ListEnrichedByCommand(ctx context.Context, commandID uuid.UUID, paramModelID *uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
 	return nil, nil
 }
 func (m *mockSubFieldRepo) CountByParam(ctx context.Context, paramID uuid.UUID) (int64, error) {

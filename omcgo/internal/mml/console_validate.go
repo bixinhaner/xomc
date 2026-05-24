@@ -53,6 +53,25 @@ func (e *ErrProductClassUnresolved) Error() string {
 
 func (e *ErrProductClassUnresolved) Code() int { return global.ErrCodeProductClassUnresolved }
 
+// ErrPathUnsupported (T-0170) — product 已识别但单条 standardPath 在该 paramModel
+// 的 param_mappings 中无映射 → 不应静默 passthrough（CPE 必拒 9005），整 task 拒绝。
+//
+// 设计哲学：param_mappings 是 product 实际支持 path 的真值源；缺映射 = 不支持。
+// 与 ErrProductClassUnresolved（整 product 未识别 → T-0168 orphan_passthrough）的区别：
+// 本错误仅在 product 命中、Translator 加载成功后、单 path miss 时触发。
+type ErrPathUnsupported struct {
+	ProductClass string
+	ParamModelID string
+	Paths        []string // 不支持的 standardPath 清单
+}
+
+func (e *ErrPathUnsupported) Error() string {
+	return fmt.Sprintf("mml: %d path(s) not in param_mappings for paramModel %s (product_class=%s): %v (T-0170)",
+		len(e.Paths), e.ParamModelID, e.ProductClass, e.Paths)
+}
+
+func (e *ErrPathUnsupported) Code() int { return global.ErrCodeProductClassUnresolved } // 复用最贴近的错误码
+
 // ErrNoValidDevices 由 R-8.4 / R-9.3 共用，目标设备列表为空或全部失效。
 var ErrNoValidDevices = errors.New("mml: no valid devices to execute against (R-8.4)")
 
@@ -148,6 +167,12 @@ func (s *Service) translateTaskPaths(ctx context.Context, task *MMLTask) error {
 		// 保留 sentinel 检查作为旧适配器实现的向后兼容兜底。
 		var orphanErr *ErrProductClassUnresolved
 		if errors.As(err, &orphanErr) {
+			return err
+		}
+		// T-0170: ErrPathUnsupported — product 已识别但单 path 在 paramModel 无映射，
+		// 整 task 拒绝（让 handler 转 422 + 错误信息含具体 path 清单，不让用户等 CPE 9005）。
+		var unsupportedErr *ErrPathUnsupported
+		if errors.As(err, &unsupportedErr) {
 			return err
 		}
 		// Translator 内部错误（Registry IO / DI 失败）→ wrap

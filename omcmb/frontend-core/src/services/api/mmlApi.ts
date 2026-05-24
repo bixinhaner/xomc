@@ -970,14 +970,24 @@ export const mmlApi = {
     };
   },
 
-  /** GET /mml/commands/:id/sub-fields?lang= — 命令的 sub-fields。 */
+  /**
+   * GET /mml/commands/:id/sub-fields?lang=&device_id= — 命令的 sub-fields。
+   *
+   * T-0170: 可选 deviceId 让后端按设备 paramModel 过滤 — 只返该 product 实际支持的
+   * sub_field（缺 param_mappings 映射的不返），避免用户勾选必失败的 path。
+   * 不传 deviceId → 返全集（admin 视图兼容）。
+   */
   async getCommandSubFields(
     commandId: string,
-    lang: string = 'zh-CN'
+    lang: string = 'zh-CN',
+    deviceKey?: string
   ): Promise<SubFieldDef[]> {
+    // T-0170: deviceKey 可以是 SN 或 UUID；后端 SQL 自动判定（serial_number 或 id::text）
+    const params: Record<string, string> = { lang };
+    if (deviceKey) params.device_sn = deviceKey;
     const { data } = await http.get<{ sub_fields: BackendSubField[] } | BackendSubField[]>(
       `/mml/commands/${commandId}/sub-fields`,
-      { params: { lang } }
+      { params }
     );
     const arr = Array.isArray(data) ? data : (data?.sub_fields ?? []);
     return arr.map(mapSubField);
