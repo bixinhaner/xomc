@@ -3895,6 +3895,8 @@ const messages: Record<string, string> = {
   'mml.terminateTask':                       '终止任务',
   'mml.info':                                '信息',
   'mml.taskName':                            '任务名称',
+  'mml.executedCommand':                     '执行的命令',
+  'mml.selectedPathsCount':                  '已选 {count} 条路径',
   'mml.creator':                             '创建者',
   'mml.createTime':                          '创建时间',
   'mml.type':                                '类型',

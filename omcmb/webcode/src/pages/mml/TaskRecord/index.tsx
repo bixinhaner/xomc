@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { Alert, Button, Modal, Space, Table, Tag, message } from 'antd';
+import { Alert, Button, Descriptions, Modal, Space, Table, Tag, Typography, message } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 
@@ -8,6 +8,7 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
+import XmlViewer from '@/components/XmlViewer';
 import { useT } from '@/hooks/useT';
 
 import type {
@@ -16,6 +17,7 @@ import type {
   MMLExecuteType,
   MMLTaskResult,
   DeviceTaskResultItem,
+  MMLTaskCommandDetail,
 } from '@core/types/mml';
 import {
   useMMLTasks,
@@ -346,7 +348,18 @@ export default function TaskRecord() {
       key: 'output',
       title: t('mml.output'),
       ellipsis: true,
-      render: (_: unknown, row: DeviceTaskResultItem) => row.result?.rawOutput || '-',
+      render: (_: unknown, row: DeviceTaskResultItem) => {
+        const raw = row.result?.rawOutput;
+        if (!raw) return '-';
+        // 单行简介：把 XML 折成一行，展示前 80 字符；完整内容在展开行里看
+        const oneLine = raw.replace(/\s+/g, ' ').trim();
+        const preview = oneLine.length > 80 ? `${oneLine.slice(0, 80)}…` : oneLine;
+        return (
+          <Typography.Text type="secondary" style={{ fontFamily: 'monospace', fontSize: 12 }}>
+            {preview}
+          </Typography.Text>
+        );
+      },
     },
   ], [t]);
 
@@ -389,6 +402,7 @@ export default function TaskRecord() {
       >
         {viewing && (
           <>
+            <CommandSummary task={viewing} t={t} />
             {viewing.pathTranslationWarning?.anyMiss && (
               <Alert
                 type="warning"
@@ -410,6 +424,14 @@ export default function TaskRecord() {
                 loading={resultsLoading}
                 pagination={false}
                 scroll={{ y: 360 }}
+                expandable={{
+                  // 展开行内嵌 XmlViewer：原始 rawOutput 缩进 + 着色 + 复制按钮；
+                  // 没有 rawOutput 的行不显示展开符号（避免空展开）。
+                  rowExpandable: (row) => Boolean(row.result?.rawOutput),
+                  expandedRowRender: (row) => (
+                    <XmlViewer xml={row.result?.rawOutput ?? ''} maxHeight={360} />
+                  ),
+                }}
               />
             ) : (
               <div style={{ padding: 24, textAlign: 'center', color: '#999' }}>
@@ -420,5 +442,128 @@ export default function TaskRecord() {
         )}
       </Modal>
     </ListPageLayout>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CommandSummary — Modal 顶部"任务信息"面板：展示执行的命令 + 用户当时勾选的 path。
+// ---------------------------------------------------------------------------
+
+const OP_COLORS: Record<string, string> = {
+  LST: 'blue',
+  DSP: 'blue',
+  MOD: 'orange',
+  ADD: 'green',
+  RMV: 'red',
+};
+
+interface CommandSummaryProps {
+  task: MMLTask;
+  t: (key: string, values?: Record<string, string | number>) => string;
+}
+
+function CommandSummary({ task, t }: CommandSummaryProps) {
+  // 优先用 commandsDetail（含 op_type / param_paths）；回退到旧的 commands string[]。
+  // 多命令场景（脚本任务）：每条命令一个 sub-block，避免挤在一行不可读。
+  const items: MMLTaskCommandDetail[] = useMemo(() => {
+    if (task.commandsDetail && task.commandsDetail.length > 0) return task.commandsDetail;
+    return (task.commands ?? []).map((code) => ({ commandCode: code }));
+  }, [task.commandsDetail, task.commands]);
+
+  return (
+    <div
+      style={{
+        marginBottom: 12,
+        padding: 12,
+        background: '#fafafa',
+        border: '1px solid #f0f0f0',
+        borderRadius: 6,
+      }}
+    >
+      <Descriptions
+        size="small"
+        column={1}
+        labelStyle={{ width: 90, color: '#595959' }}
+        contentStyle={{ color: '#1f2937' }}
+        items={[
+          {
+            key: 'taskName',
+            label: t('mml.taskName'),
+            children: <Typography.Text strong>{task.taskName}</Typography.Text>,
+          },
+          {
+            key: 'devices',
+            label: t('mml.deviceSn'),
+            children: (
+              <Typography.Text type="secondary">
+                {t('mml.console.actionBar.devices')}: {task.deviceSns.length}
+              </Typography.Text>
+            ),
+          },
+          {
+            key: 'commands',
+            label: t('mml.executedCommand'),
+            children: <CommandList items={items} t={t} />,
+          },
+        ]}
+      />
+    </div>
+  );
+}
+
+interface CommandListProps {
+  items: MMLTaskCommandDetail[];
+  t: CommandSummaryProps['t'];
+}
+
+function CommandList({ items, t }: CommandListProps) {
+  if (items.length === 0) {
+    return <Typography.Text type="secondary">-</Typography.Text>;
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {items.map((it, idx) => (
+        <CommandBlock key={`${it.commandCode}-${idx}`} item={it} t={t} />
+      ))}
+    </div>
+  );
+}
+
+function CommandBlock({ item, t }: { item: MMLTaskCommandDetail; t: CommandSummaryProps['t'] }) {
+  const op = (item.operationType ?? '').toUpperCase();
+  const opColor = OP_COLORS[op] ?? 'default';
+  const paths = item.paramPaths ?? [];
+  return (
+    <div>
+      <Space size={6} wrap>
+        {op && <Tag color={opColor} style={{ marginRight: 0 }}>{op}</Tag>}
+        <Typography.Text code style={{ fontSize: 13 }}>
+          {item.commandCode}
+        </Typography.Text>
+        {paths.length > 0 && (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            · {t('mml.selectedPathsCount', { count: paths.length })}
+          </Typography.Text>
+        )}
+      </Space>
+      {paths.length > 0 && (
+        <ul
+          style={{
+            margin: '6px 0 0 24px',
+            padding: 0,
+            color: '#4b5563',
+            fontFamily: 'monospace',
+            fontSize: 12,
+            lineHeight: 1.7,
+          }}
+        >
+          {paths.map((p, i) => (
+            <li key={`${p}-${i}`} style={{ wordBreak: 'break-all' }}>
+              {p}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

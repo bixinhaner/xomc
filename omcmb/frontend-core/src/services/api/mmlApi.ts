@@ -1,5 +1,5 @@
 import http from '../http';
-import type { MMLCommand, MMLScript, MMLTask, MMLParam, MMLCustomCommand, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef } from '../../types/mml';
+import type { MMLCommand, MMLScript, MMLTask, MMLTaskCommandDetail, MMLParam, MMLCustomCommand, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef } from '../../types/mml';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import type {
   BackendStatement,
@@ -343,6 +343,20 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
     }
   }
 
+  // commandsDetail：保留 operation_type + param_paths + param_values，供"任务记录-查看"
+  // 页展示用户当时勾选了哪些 path。空数组也归一为 undefined 以便 UI 判定。
+  const commandsDetail: MMLTaskCommandDetail[] = (bt.commands || []).map((c) => ({
+    commandCode: typeof c.command_code === 'string' ? c.command_code : JSON.stringify(c),
+    operationType:
+      typeof c.operation_type === 'string'
+        ? (c.operation_type as MMLTaskCommandDetail['operationType'])
+        : undefined,
+    paramPaths: Array.isArray(c.param_paths)
+      ? (c.param_paths as unknown[]).filter((p): p is string => typeof p === 'string')
+      : undefined,
+    paramValues: Array.isArray(c.param_values) ? (c.param_values as unknown[]) : undefined,
+  }));
+
   return {
     id: bt.id,
     taskName: bt.task_name,
@@ -354,6 +368,7 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
       if (typeof c.command_code === 'string') return c.command_code as string;
       return JSON.stringify(c);
     }),
+    commandsDetail: commandsDetail.length > 0 ? commandsDetail : undefined,
     orphanCommandCodes: orphanCommandCodes.length > 0 ? orphanCommandCodes : undefined,
     status: bt.status as MMLTask['status'],
     results: (bt.results || []).map(mapBackendResult),

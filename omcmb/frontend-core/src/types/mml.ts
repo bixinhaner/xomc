@@ -147,12 +147,30 @@ export type MMLExecuteType = 'immediate' | 'scheduled' | 'periodic' | 'suspended
 
 export type MMLTaskResult = 'success' | 'partial' | 'failed';
 
+/**
+ * 任务 commands JSONB 数组中每条命令的"明细"形态（含 op_type 与勾选 path）。
+ *
+ * 后端 mml_tasks.commands 是 `Array<{command_code, operation_type, param_paths,
+ * param_values, ...}>` 的 JSONB；旧字段 MMLTask.commands 把每条压成 command_code 单
+ * 字符串够任务列表用，但任务记录"查看"页需要展示用户当时勾选了哪些 path —— 新增
+ * 这个并行字段保留完整明细，老消费者继续读 commands: string[] 不受影响。
+ */
+export interface MMLTaskCommandDetail {
+  commandCode: string;
+  operationType?: MMLOperationType | string;
+  paramPaths?: string[];
+  /** MOD 操作的下发值；与 paramPaths 同序对应 */
+  paramValues?: unknown[];
+}
+
 export interface MMLTask {
   id: string;
   taskName: string;
   scriptId?: string;
   deviceSns: string[];
   commands: string[];
+  /** 命令明细（含 op_type / param_paths）；老接口可能不返回，UI 需做 fallback */
+  commandsDetail?: MMLTaskCommandDetail[];
   status: MMLTaskStatus;
   results: Array<{ deviceSn: string; result: MMLResult }>;
   createdAt: string;

@@ -3871,6 +3871,8 @@ const messages: Record<string, string> = {
   'mml.terminateTask':                       'Terminate Task',
   'mml.info':                                'Info',
   'mml.taskName':                            'Task Name',
+  'mml.executedCommand':                     'Executed Command',
+  'mml.selectedPathsCount':                  '{count} path(s) selected',
   'mml.creator':                             'Creator',
   'mml.createTime':                          'Created At',
   'mml.type':                                'Type',

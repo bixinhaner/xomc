@@ -14,13 +14,15 @@
  *
  * 行为：
  *   - mount 立刻建立 SSE（不等 execute），避免 task 创建瞬间事件丢失
- *   - taskId 切换时 setLines([]) 复位，旧任务历史不残留
+ *   - lines 由 useMmlConsoleTerminalStore（localStorage 持久化）托管：刷新 / 切路由 /
+ *     执行新命令都不会清空历史；用户主动点"清空"按钮才 reset（用户决策 2026-05-24）
  *   - taskId 为 null 时仍保持连接，但不写 lines（防御调用方早 mount）
  *   - SSE 全用户 channel 共享，事件按 frame.task_id === taskId 二次过滤
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useUserStore } from '@core/store/userStore';
+import { useMmlConsoleTerminalStore } from '@core/store/mmlConsoleTerminalStore';
 
 export type MmlTerminalLineType = 'stdout' | 'stderr' | 'info' | 'success';
 
@@ -63,7 +65,7 @@ export interface MmlTaskStreamMessages {
 }
 
 export interface UseMmlTaskStreamReturn {
-  /** 累积的终端行；taskId 切换后会复位为空 */
+  /** 累积的终端行；由持久化 store 托管，跨刷新 / 跨命令保留 */
   lines: MmlTerminalLine[];
   /** 任务整体状态推断 */
   status: MmlTaskStreamStatus;
@@ -160,7 +162,12 @@ export function useMmlTaskStream(
   taskId: string | null,
   messages?: MmlTaskStreamMessages,
 ): UseMmlTaskStreamReturn {
-  const [lines, setLines] = useState<MmlTerminalLine[]>([]);
+  // lines 走持久化 store —— 跨刷新 / 路由 / 新 execute 保留历史；只在用户点"清空"
+  // 按钮时 reset。原 taskId-切换-自动-清空 行为已下线（用户决策 2026-05-24）。
+  const lines = useMmlConsoleTerminalStore((s) => s.lines);
+  const appendLineStore = useMmlConsoleTerminalStore((s) => s.appendLine);
+  const appendLinesStore = useMmlConsoleTerminalStore((s) => s.appendLines);
+  const clearStore = useMmlConsoleTerminalStore((s) => s.clear);
   const [status, setStatus] = useState<MmlTaskStreamStatus>('idle');
   const accessToken = useUserStore((s) => s.accessToken);
   // 用 ref 保存最新 messages，避免每次 messages 引用变化重建 EventSource
@@ -180,34 +187,21 @@ export function useMmlTaskStream(
   const taskIdRef = useRef<string | null>(taskId);
   taskIdRef.current = taskId;
 
-  // taskId 切换时复位 lines / status，但只在 "real → 不同 real" 时清空 lines。
-  // 关键修正（2026-05-23）：原实现每次 taskId 变化都 setLines([])，因 React 18 把
-  //   setCurrentTaskId(newId)
-  //   appendLine(dispatchedSeedLine)
-  // 自动 batch，commit 后这条 effect 会把刚被 appendLine 写进去的"已派发"行
-  // 一起清掉，导致用户点完"执行"终端立刻空白、没有派发反馈。
-  // 现在的行为：
-  //   - null → real（首次接到 task）：保留 lines（消费方种的 dispatched 行存活）
-  //   - real → 不同 real（切到新 task 会话）：清空 lines
-  //   - real → null（用户点了 Clear）：消费方自身已 clear()，effect 这里不再
-  //     重复 setLines([])，避免与正在到达的事件 race
-  const prevTaskIdRef = useRef<string | null>(null);
+  // taskId 变化只重置会话级 status；lines 由持久化 store 托管，跨 task 累积。
   useEffect(() => {
-    const prev = prevTaskIdRef.current;
-    prevTaskIdRef.current = taskId;
-    if (prev !== null && taskId !== null && prev !== taskId) {
-      setLines([]);
-    }
     setStatus(taskId ? 'dispatched' : 'idle');
   }, [taskId]);
 
-  const appendLine = useCallback((line: MmlTerminalLine) => {
-    setLines((prev) => [...prev, line]);
-  }, []);
+  const appendLine = useCallback(
+    (line: MmlTerminalLine) => {
+      appendLineStore(line);
+    },
+    [appendLineStore],
+  );
   const clear = useCallback(() => {
-    setLines([]);
+    clearStore();
     setStatus('idle');
-  }, []);
+  }, [clearStore]);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -226,7 +220,7 @@ export function useMmlTaskStream(
     const onDeviceFrame = (ev: MessageEvent<string>): void => {
       const frame = parseEventData<MmlDeviceFramePayload>(ev.data);
       if (!frame || frame.task_id !== taskIdRef.current) return;
-      setLines((prev) => [...prev, ...deviceFrameToLines(frame, messagesRef.current?.deviceStatusLabels)]);
+      appendLinesStore(deviceFrameToLines(frame, messagesRef.current?.deviceStatusLabels));
     };
     const onTaskStatus = (ev: MessageEvent<string>): void => {
       const frame = parseEventData<MmlTaskStatusPayload>(ev.data);
@@ -237,19 +231,21 @@ export function useMmlTaskStream(
         // （之前 silent → 用户体感是"派发后死寂"）。重复 running 事件不再写新行。
         setStatus((prev) => {
           if (prev !== 'running' && msgs?.running) {
-            setLines((cur) => [
-              ...cur,
-              { type: 'info', text: msgs.running as string, timestamp: formatTimestamp() },
-            ]);
+            appendLineStore({
+              type: 'info',
+              text: msgs.running as string,
+              timestamp: formatTimestamp(),
+            });
           }
           return 'running';
         });
       } else if (frame.new_status === 'cancelled') {
         setStatus('cancelled');
-        setLines((prev) => [
-          ...prev,
-          { type: 'info', text: msgs?.cancelled ?? 'Task cancelled', timestamp: formatTimestamp() },
-        ]);
+        appendLineStore({
+          type: 'info',
+          text: msgs?.cancelled ?? 'Task cancelled',
+          timestamp: formatTimestamp(),
+        });
       }
     };
     const onTaskCompleted = (ev: MessageEvent<string>): void => {
@@ -266,14 +262,11 @@ export function useMmlTaskStream(
           failedCount: frame.failed_count,
         }) ??
         `Task ${frame.status} (${frame.result}): success=${frame.success_count}, failed=${frame.failed_count}`;
-      setLines((prev) => [
-        ...prev,
-        {
-          type: newStatus === 'completed' ? 'success' : 'stderr',
-          text,
-          timestamp: formatTimestamp(),
-        },
-      ]);
+      appendLineStore({
+        type: newStatus === 'completed' ? 'success' : 'stderr',
+        text,
+        timestamp: formatTimestamp(),
+      });
     };
 
     source.addEventListener('mml_device_frame', onDeviceFrame as EventListener);
@@ -286,7 +279,7 @@ export function useMmlTaskStream(
       source?.removeEventListener('mml_task_completed', onTaskCompleted as EventListener);
       source?.close();
     };
-  }, [accessToken]);
+  }, [accessToken, appendLineStore, appendLinesStore]);
 
   return { lines, status, appendLine, clear };
 }
