@@ -22,6 +22,21 @@ const ALWAYS_ALLOWED_PATHS = new Set<string>(['/dashboard', '/403', '/login']);
 // 双层防御：LoginPage 那边也有 FROM_PATH_BLOCKLIST 做兜底。
 const ERROR_PATH_SET = new Set<string>(['/403', '/404']);
 
+/**
+ * Drilldown 路由父级映射：key=drilldown 路径前缀，value=必须可见的菜单 path。
+ *
+ * 背景：详情 / 编辑 / 查看 等 drilldown 页面通常不挂菜单，URL 也不嵌套在菜单父
+ * 路径下，导致 `isPathAllowedByMenu` 前缀匹配失败 → 直接 /403（即使设备列表
+ * 在菜单里）。这里显式声明 "看到 list 就能进 detail" 的语义，避免改 URL。
+ *
+ * 添加新 drilldown 路由时，**必须**把它登记到这里，否则 admin 也会被 403。
+ */
+const DRILLDOWN_PARENT_MAP: Record<string, string> = {
+  '/device/detail': '/device/list',
+  '/device/ue-detail': '/device/list',
+  '/performance/kpi-standard/detail': '/performance/kpi-standard',
+};
+
 function buildLoginRedirectState(pathname: string) {
   if (ERROR_PATH_SET.has(pathname)) return undefined;
   return { from: { pathname } };
@@ -30,11 +45,19 @@ function buildLoginRedirectState(pathname: string) {
 /**
  * 路径前缀允许：用户菜单含父级 path 时，子路径 / detail 子路由也允许。
  * 例：menus 含 '/device/list'，则 '/device/list/xxx' 也允许（参 React Router relative routing）。
+ *
+ * 此外查 DRILLDOWN_PARENT_MAP：详情 / 编辑等 drilldown 页面的 URL 不嵌套在菜单
+ * 父路径下时，仍然按 "菜单父项可见即放行" 处理。
  */
 function isPathAllowedByMenu(routePaths: Set<string>, pathname: string): boolean {
   if (routePaths.has(pathname)) return true;
   for (const p of routePaths) {
     if (pathname.startsWith(`${p}/`)) return true;
+  }
+  for (const [drilldown, parent] of Object.entries(DRILLDOWN_PARENT_MAP)) {
+    if ((pathname === drilldown || pathname.startsWith(`${drilldown}/`)) && routePaths.has(parent)) {
+      return true;
+    }
   }
   return false;
 }
