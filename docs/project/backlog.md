@@ -278,6 +278,7 @@ T-0013（SNMP 骨架）→ T-0017（联调）→ T-0020（推送可靠性）
 | T-0155 | 设备详情 tab 共享槽位 + URL 内部 tab 状态（同一 key 复用 tab、internal tab 走 `?tab=`、`labelRaw` 跳过 i18n 支持动态 SN 标题）| feat | frontend | P2 | in_dev | Claude | S | — | N/A (UX) | sprint-13 | 2026-05-19 |
 | T-0156 | 快速设置切走切回 Tag 反馈消失 — Tag 状态提升至 zustand store 持久化 + Card loading 拆出避免骨架屏遮蔽 extra 区 | fix | frontend | P1 | in_dev | Claude | S | — | N/A (bugfix) | sprint-13 | 2026-05-19 |
 | T-0157 | 消息中心 V1（铃铛 Popover + 后端 task 事件桥 + 快速设置接入；§10 拆 C1-C10 共 10 commit 实施计划）— umbrella | feat | F04/notification + frontend | P1 | planned | Claude | L (~7.7d) | T-0156 ✅ | `docs/design/notification-center-design-20260519.md` | sprint-13 | 2026-05-19 |
+| T-0171 | MML catalog 孤儿 path 审计 + 扩展补偿（1544 path 100% 覆盖 / 0 父子重叠 / source=extension 隔离）| feat+refactor | F06/mml+F02/parammodel | P2 | planned | Claude | M (~1d) | T-0098 ✅ + T-0123 ✅ + T-0169 ✅ + T-0170 ✅ | `docs/project/prd/F06-mml-catalog-orphan-compensation.md` | sprint-12 | 2026-05-24 |
 
 **说明**：
 - T-0009 是外部凭据申请，不编码但走流水线（作为前置项，保证 T-0014 不被卡）。
