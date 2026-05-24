@@ -18,6 +18,9 @@ import type {
   MMLTaskResult,
   DeviceTaskResultItem,
   MMLTaskCommandDetail,
+  MMLPathTranslationView,
+  MMLTaskResultsStats,
+  PathTranslationSource,
 } from '@core/types/mml';
 import {
   useMMLTasks,
@@ -395,6 +398,12 @@ export default function TaskRecord() {
         onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
         onRefresh={() => void refetch()}
         scroll={{ x: 1400 }}
+        expandable={{
+          // T-0168: 列表行直接展开（替代旧 Modal 单一入口）。
+          // 老 Modal "查看" 按钮保留作为单设备深入兜底，后期评估是否删。
+          expandedRowRender: (task) => <TaskRowExpandedDetail task={task} t={t} />,
+          rowExpandable: () => true,
+        }}
       />
 
       <Modal
@@ -603,6 +612,145 @@ function CommandBlock({ item, t }: { item: MMLTaskCommandDetail; t: CommandSumma
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// T-0168: 列表行展开 — 命令信息 + 路径转换详情 + 设备执行结果三段式
+// ---------------------------------------------------------------------------
+
+interface TaskRowExpandedDetailProps {
+  task: MMLTask;
+  t: (key: string, values?: Record<string, string | number>) => string;
+}
+
+/**
+ * T-0168 列表行展开组件 — 替代 Modal 入口（老 Modal "查看" 按钮仍保留兜底）。
+ *
+ * 数据加载策略：useMMLTaskResults 仅在该行展开时调用（hook 内部 enabled = id 非空），
+ * 列表渲染时不预拉，避免列表页性能受影响。
+ *
+ * 三段结构：
+ *   1. product_resolved=false 时顶部橙色 Banner（PRD §GWT-3）
+ *   2. CommandSummary 复用现有组件
+ *   3. PathTranslationTable 新组件（T-0168 核心）
+ *   4. DeviceResultsTable 简化版（仅必要列）
+ */
+function TaskRowExpandedDetail({ task, t }: TaskRowExpandedDetailProps) {
+  const { data: resultsData, isLoading } = useMMLTaskResults(task.id, 1, 200);
+  // T-0168: stats 字段包含 path_translations + 任务级翻译审计
+  const stats = (resultsData as { stats?: MMLTaskResultsStats } | undefined)?.stats;
+  const pathTranslations: MMLPathTranslationView[] = stats?.pathTranslations ?? [];
+  const productResolved = stats?.productResolved ?? task.productResolved ?? true;
+  const matchedProductClass = stats?.matchedProductClass ?? task.matchedProductClass;
+
+  return (
+    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      {!productResolved && (
+        <Alert
+          type="warning"
+          showIcon
+          message={t('mml.productUnresolvedBanner')}
+          description={t('mml.productUnresolvedBannerDetail', {
+            productClass: matchedProductClass || '-',
+          })}
+        />
+      )}
+
+      <CommandSummary task={task} t={t} />
+
+      <PathTranslationTable rows={pathTranslations} loading={isLoading} t={t} />
+
+      {task.pathTranslationWarning?.anyMiss && (
+        <Alert
+          type="warning"
+          showIcon
+          message={t('mml.pathTranslationWarning')}
+          description={t('mml.pathTranslationWarningDetail', {
+            deviceCount: task.pathTranslationWarning.deviceCount,
+            pathCount: task.pathTranslationWarning.pathCount,
+          })}
+        />
+      )}
+    </Space>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// T-0168: PathTranslationTable — 路径转换详情表
+// ---------------------------------------------------------------------------
+
+const SOURCE_TAG_CONFIG: Record<PathTranslationSource, { color: string; key: string }> = {
+  discovered:         { color: 'green',  key: 'mml.translation.sourceDiscovered' },
+  default:            { color: 'green',  key: 'mml.translation.sourceDefault' },
+  passthrough:        { color: 'gold',   key: 'mml.translation.sourcePassthrough' },
+  orphan_passthrough: { color: 'orange', key: 'mml.translation.sourceOrphan' },
+  mixed:              { color: 'blue',   key: 'mml.translation.sourceMixed' },
+};
+
+interface PathTranslationTableProps {
+  rows: MMLPathTranslationView[];
+  loading: boolean;
+  t: TaskRowExpandedDetailProps['t'];
+}
+
+function PathTranslationTable({ rows, loading, t }: PathTranslationTableProps) {
+  const columns: Array<{
+    key: string;
+    title: string;
+    dataIndex?: keyof MMLPathTranslationView;
+    width?: number;
+    render?: (val: unknown, row: MMLPathTranslationView) => React.ReactNode;
+  }> = [
+    {
+      key: 'standardPath',
+      title: t('mml.translation.standardPath'),
+      dataIndex: 'standardPath',
+      render: (v) => <Typography.Text code style={{ fontSize: 12 }}>{String(v)}</Typography.Text>,
+    },
+    {
+      key: 'privatePath',
+      title: t('mml.translation.privatePath'),
+      dataIndex: 'privatePath',
+      render: (v, row) => (
+        <Typography.Text
+          code
+          style={{
+            fontSize: 12,
+            color: row.translated ? '#1f2937' : '#9ca3af',
+          }}
+        >
+          {String(v)}
+        </Typography.Text>
+      ),
+    },
+    {
+      key: 'source',
+      title: t('mml.translation.source'),
+      dataIndex: 'translationSource',
+      width: 220,
+      render: (val) => {
+        const v = val as PathTranslationSource;
+        const cfg = SOURCE_TAG_CONFIG[v];
+        return cfg ? <Tag color={cfg.color}>{t(cfg.key)}</Tag> : <Tag>{String(val ?? '-')}</Tag>;
+      },
+    },
+  ];
+  return (
+    <div>
+      <Typography.Text strong style={{ display: 'block', marginBottom: 6 }}>
+        {t('mml.translation.tableTitle')}
+      </Typography.Text>
+      <Table
+        size="small"
+        rowKey="standardPath"
+        dataSource={rows}
+        columns={columns}
+        loading={loading}
+        pagination={false}
+        locale={{ emptyText: t('mml.translation.noData') }}
+      />
     </div>
   );
 }

@@ -192,6 +192,17 @@ type MMLTask struct {
 	// 计数后填充；nil = 任务非 MML 来源或者聚合未启用；AnyMiss=true 时前端
 	// 任务详情页显示"路径翻译警告"标签。
 	PathTranslationWarning *PathTranslationWarning `json:"path_translation_warning,omitempty"`
+
+	// T-0168: 路径翻译审计元数据，持久化到 mml_tasks 表 4 列（migration 000171）。
+	// 由 Service.translateTaskPaths 在 fanout 前根据 TranslationOutcome 写入。
+	//
+	// ProductResolved=false 表示设备 productClass 未匹配任何 product（激进路线下
+	// 任务仍正常 fanout，所有 path 走 orphan_passthrough 原路径下发），并触发
+	// Prometheus 告警 mml_path_translation_orphan_total。
+	ProductResolved       bool       `json:"product_resolved"`
+	MatchedProductID      *uuid.UUID `json:"matched_product_id,omitempty"`
+	MatchedProductClass   string     `json:"matched_product_class,omitempty"`
+	PathTranslationSource string     `json:"path_translation_source,omitempty"` // discovered/default/passthrough/orphan_passthrough/mixed
 }
 
 // PathTranslationWarning 是 MML 任务详情中关于 standardPath ↔ privatePath 翻译

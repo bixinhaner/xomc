@@ -59,6 +59,33 @@
 | `OMCTaskQueueBacklog` | warning | 待执行任务 > 2000 持续 10 分钟 | 查 worker 健康、设备是否大面积离线导致任务送不达；查批量操作是否引发任务风暴 |
 | `OMCPMProcessingSlow` | warning | PM 文件处理 p95 > 60s | 查 worker CPU、TimescaleDB 写入压力；评估 PM 文件体积与并发 |
 | `MMLPathTranslationMissSustained` | warning | 标准 path→私有 path 翻译持续 fallback —— 字典与设备不同步，下发易被 CPE 拒（Fault 9005） | `omcctl mml migrate-device-params --dry-run`；查 `parammodel_intersect_*` 指标；用 admin Tab 3 补映射 |
+| `MMLPathTranslationOrphan` | warning | productClass 未匹配任何 product —— 野设备走 orphan_passthrough 原路径下发，CPE 可能返 Fault 9005 | 见下方 §MMLPathTranslationOrphan 处置流程 |
+
+### MMLPathTranslationOrphan（T-0168）
+
+**触发**：`increase(mml_path_translation_orphan_total[5m]) > 0`，label `product_class` 是触发 orphan 的设备 product_class。
+
+**为什么会触发**：
+- MML 控制台执行命令时，OMC 用 `ProductRegistry.MatchProductClass(productClass)` 查 `product_class_patterns` 表（正则匹配），未命中即 ErrOrphan。
+- T-0168 激进路线：不阻塞任务，让所有 path 走 `orphan_passthrough`（原路径下发），但累加本告警让运维兜底。
+
+**影响**：
+- 任务能创建和执行，**但命令体里是 standardPath**（IETF 风格，如 `Device.X.A`），厂商私有 CPE 大概率返 Fault 9005。
+- 任务记录页详情展开 → 路径转换详情会显示橙色"未转换 - 产品未识别"标签。
+
+**24h 内必做**：
+1. 登 OMC Web 管理台 → 产品管理 → 确认是否缺该 `product_class` 的 patterns 行
+2. 与设备厂商确认 product / param_model 归属（如 BLQ / BNQ / MLN 之一）
+3. 用 admin 在 `product_class_patterns` 表插入新行（正则可以宽泛，如 `BaiBLQ_.*`），或修改 products.xml + reload 字典
+4. 复跑该任务验证（任务记录详情展开 → 应显示绿色"已转换"或黄色"mapping 缺失"）
+
+**临时缓解**：
+- 如果业务方明确该野设备**就该用 standardPath**（如 TR-181 标准 CPE），可保留 orphan_passthrough，本告警视为预期。
+- 设置 `inhibit_rules` 抑制特定 product_class 的告警（运维侧配置 alertmanager.yml）。
+
+**不要做**：
+- 不要禁用 metric / 删 metric — 这是商用环境野设备检测的唯一信号。
+- 不要把 ProductRegistry 行为改回硬阻塞 — 这会导致联调期间命令完全无法执行。
 
 ---
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/config/parammodel"
@@ -33,91 +34,131 @@ import (
 // mmlPathTranslatorAdapter 把 ProductRegistry + ParamRegistry 适配为 mml.PathTranslator。
 //
 // 翻译链路：product_class → ProductRegistry.MatchProductClass → product.id
-//   → ParamRegistry.Translator(productID, swVersion) → Translator.ToPrivate(path)
+//
+//	→ ParamRegistry.Translator(productID, swVersion) → Translator.ToPrivate(path)
+//
+// T-0168 激进路线：MatchProductClass 返 ErrOrphan 时**不**返 error，构造
+// TranslationOutcome{ProductResolved=false, AggregateSource="orphan_passthrough"}
+// 让上层不阻塞 fanout；并触发 Prometheus 告警 mml_path_translation_orphan_total。
 type mmlPathTranslatorAdapter struct {
 	products *product.Registry
 	params   *parammodel.Registry
+	metrics  *mml.FanoutMetrics
 	logger   *zap.Logger
 }
 
 // NewMMLPathTranslator 构造适配器。若 products 或 params 为 nil，TranslateForDevice
-// 返回错误（防止运行期空指针）。
-func NewMMLPathTranslator(products *product.Registry, params *parammodel.Registry, logger *zap.Logger) mml.PathTranslator {
+// 返回错误（防止运行期空指针）。metrics 为 nil 时退化为匿名 Registry（单测可用）。
+func NewMMLPathTranslator(products *product.Registry, params *parammodel.Registry, metrics *mml.FanoutMetrics, logger *zap.Logger) mml.PathTranslator {
 	if logger == nil {
 		logger = zap.NewNop()
+	}
+	if metrics == nil {
+		metrics = mml.NewFanoutMetrics(nil)
 	}
 	return &mmlPathTranslatorAdapter{
 		products: products,
 		params:   params,
+		metrics:  metrics,
 		logger:   logger.Named("mml-translator-adapter"),
 	}
 }
 
-// TranslateForDevice 实现 mml.PathTranslator 接口。
+// TranslateForDevice 实现 mml.PathTranslator 接口（T-0168 升级版）。
 //
 //	productClass → ProductRegistry.MatchProductClass → product.id
 //	→ ParamRegistry.Translator(productID, swVersion) → ToPrivate
 //
-// 未命中（Found=false）→ passthrough（Private = Standard）。
-// product_class 无匹配 product → mml.ErrProductClassUnresolved。
-// ParamRegistry 失败（ErrNoMapping / ErrNoParamModel）→ 全 passthrough。
+// 行为：
+//   - product 命中 + 单条 path 未命中 mapping → Source="passthrough"（Private=Standard）
+//   - product 命中 + path 命中 → Source=translator.Source()（discovered / default）
+//   - **product 未命中（ErrOrphan）→ 全部 path Source="orphan_passthrough"**（激进路线）
+//     + 触发 metrics.OrphanInc(productClass) + WARN log
+//   - ParamRegistry 失败（ErrNoMapping / ErrNoParamModel）→ 全 passthrough（product 已识别）
+//
+// 仅在以下场景返 error：未注入（products/params==nil）、Registry IO 错误（非 ErrOrphan）。
 func (a *mmlPathTranslatorAdapter) TranslateForDevice(
 	ctx context.Context,
 	productClass, softwareVersion string,
 	standardPaths []string,
-) ([]mml.TranslatedPath, error) {
+) (*mml.TranslationOutcome, error) {
 	if a.products == nil || a.params == nil {
 		return nil, fmt.Errorf("mml-translator-adapter: ProductRegistry or ParamRegistry not wired")
 	}
 
-	out := make([]mml.TranslatedPath, 0, len(standardPaths))
-
 	matchRes, err := a.products.MatchProductClass(ctx, productClass)
-	if err != nil {
-		if errors.Is(err, product.ErrOrphan) {
-			return nil, &mml.ErrProductClassUnresolved{
-				ProductClass: productClass,
-			}
-		}
+	orphan := errors.Is(err, product.ErrOrphan) || (err == nil && (matchRes == nil || matchRes.Product == nil))
+	if err != nil && !errors.Is(err, product.ErrOrphan) {
 		return nil, fmt.Errorf("mml-translator-adapter: match product_class %s: %w", productClass, err)
 	}
-	if matchRes == nil || matchRes.Product == nil {
-		return nil, &mml.ErrProductClassUnresolved{
-			ProductClass: productClass,
+
+	if orphan {
+		// T-0168 激进路线：productClass 未识别 → 整任务走 orphan_passthrough，不阻塞 fanout
+		a.metrics.OrphanInc(productClass)
+		a.logger.Warn("product_class unresolved, all paths orphan_passthrough",
+			zap.String("product_class", productClass),
+			zap.Int("path_count", len(standardPaths)))
+		paths := make([]mml.TranslatedPath, 0, len(standardPaths))
+		for _, p := range standardPaths {
+			paths = append(paths, mml.TranslatedPath{Standard: p, Private: p, Source: "orphan_passthrough"})
 		}
+		return &mml.TranslationOutcome{
+			Paths:           paths,
+			ProductResolved: false,
+			ProductID:       uuid.Nil,
+			ProductClass:    productClass,
+			AggregateSource: "orphan_passthrough",
+		}, nil
 	}
 
 	translator, err := a.params.Translator(ctx, matchRes.Product.ID, softwareVersion)
 	if err != nil {
-		// ParamRegistry 失败：所有路径走 passthrough；记 WARN 不阻塞执行
+		// ParamRegistry 失败：product 已识别，但 mapping 拿不到 → 全 passthrough
 		a.logger.Warn("translator unavailable, all paths passthrough",
 			zap.String("product_class", productClass),
 			zap.String("software_version", softwareVersion),
 			zap.Error(err))
+		paths := make([]mml.TranslatedPath, 0, len(standardPaths))
 		for _, p := range standardPaths {
-			out = append(out, mml.TranslatedPath{Standard: p, Private: p, Source: "passthrough"})
+			paths = append(paths, mml.TranslatedPath{Standard: p, Private: p, Source: "passthrough"})
 		}
-		return out, nil
+		return &mml.TranslationOutcome{
+			Paths:           paths,
+			ProductResolved: true,
+			ProductID:       matchRes.Product.ID,
+			ProductClass:    productClass,
+			AggregateSource: "passthrough",
+		}, nil
 	}
 
 	src := string(translator.Source())
+	paths := make([]mml.TranslatedPath, 0, len(standardPaths))
+	var hasHit, hasMiss bool
 	for _, p := range standardPaths {
 		r := translator.ToPrivate(p)
 		if r.Found {
-			out = append(out, mml.TranslatedPath{
-				Standard: p,
-				Private:  r.Translated,
-				Source:   src,
-			})
+			paths = append(paths, mml.TranslatedPath{Standard: p, Private: r.Translated, Source: src})
+			hasHit = true
 		} else {
-			out = append(out, mml.TranslatedPath{
-				Standard: p,
-				Private:  p,
-				Source:   "passthrough",
-			})
+			paths = append(paths, mml.TranslatedPath{Standard: p, Private: p, Source: "passthrough"})
+			hasMiss = true
 		}
 	}
-	return out, nil
+	aggregate := src
+	switch {
+	case hasHit && hasMiss:
+		aggregate = "mixed"
+	case !hasHit && hasMiss:
+		aggregate = "passthrough"
+	}
+
+	return &mml.TranslationOutcome{
+		Paths:           paths,
+		ProductResolved: true,
+		ProductID:       matchRes.Product.ID,
+		ProductClass:    productClass,
+		AggregateSource: aggregate,
+	}, nil
 }
 
 // mmlDeviceLookupAdapter 把 device.Service 适配为 mml.DeviceLookup 接口。

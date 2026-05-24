@@ -228,6 +228,56 @@ export interface MMLTask {
     deviceCount: number;
     pathCount: number;
   };
+
+  /**
+   * T-0168: 路径翻译审计元数据（持久化到 mml_tasks 4 列）。
+   *
+   * productResolved=false 表示设备 productClass 未匹配任何 product（激进路线下
+   * 任务仍正常 fanout，所有 path 走 orphan_passthrough 原路径下发，触发
+   * Prometheus 告警 mml_path_translation_orphan_total）。前端展开行顶部应显示
+   * 橙色 Banner 提示运维补登记 product_class_patterns。
+   */
+  productResolved?: boolean;
+  matchedProductId?: string;
+  matchedProductClass?: string;
+  /** 任务级翻译来源汇总：discovered/default/passthrough/orphan_passthrough/mixed */
+  pathTranslationSource?: PathTranslationSource;
+}
+
+/** T-0168: 路径翻译来源枚举（per-path 与 task 级共用）。 */
+export type PathTranslationSource =
+  | 'discovered'
+  | 'default'
+  | 'passthrough'
+  | 'orphan_passthrough'
+  | 'mixed';
+
+/**
+ * T-0168: GET /mml/tasks/{id}/results 响应 stats 字段的单条路径翻译视图。
+ *
+ * 前端"任务记录列表行展开"读 ListResponse.stats.path_translations[] 渲染表格：
+ *   standardPath | privatePath | 来源 Tag | 状态 Tag
+ *
+ * translated=false 时（passthrough / orphan_passthrough）privatePath === standardPath。
+ */
+export interface MMLPathTranslationView {
+  standardPath: string;
+  privatePath: string;
+  translationSource: PathTranslationSource;
+  translated: boolean;
+}
+
+/**
+ * T-0168: GET /mml/tasks/{id}/results 响应 stats 字段结构。
+ *
+ * 复用 ListResponse<T>.stats interface{} 字段携带任务级翻译元数据 +
+ * per-path 翻译详情，避免前端发两次请求。
+ */
+export interface MMLTaskResultsStats {
+  pathTranslations?: MMLPathTranslationView[];
+  productResolved: boolean;
+  matchedProductClass?: string;
+  pathTranslationSource?: PathTranslationSource;
 }
 
 /**

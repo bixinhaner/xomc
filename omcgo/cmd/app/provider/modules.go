@@ -881,8 +881,12 @@ func initMiscModules(c *Container) error {
 	if c.DeviceService != nil {
 		mmlService.SetDeviceLookup(NewMMLDeviceLookup(c.DeviceService))
 	}
+	// T-0168: 提取 FanoutMetrics 同实例，供 PathTranslator 适配器 + Fanouter 共享，
+	// 让 mml_path_translation_orphan_total 与 _miss_total 注册到同一 Registry，
+	// 避免后续 fanouter.SetMetrics 重复 NewFanoutMetrics 导致 Prometheus 重复注册 panic。
+	mmlFanoutMetrics := mml.NewFanoutMetrics(c.MetricsReg)
 	if c.ProductRegistry != nil && c.ParamRegistry != nil {
-		mmlService.SetPathTranslator(NewMMLPathTranslator(c.ProductRegistry, c.ParamRegistry, logger))
+		mmlService.SetPathTranslator(NewMMLPathTranslator(c.ProductRegistry, c.ParamRegistry, mmlFanoutMetrics, logger))
 		// 同源装配 software 端：SPV 触发的日志采集（如 FAULT_LOG_COLLECT）下发前
 		// 用同款 productClass → Registry → Translator 链路把 standardPath 翻译成
 		// privatePath。CLAUDE.md §5.3 要求；未注入时 ExecuteOneSetParamCollect
@@ -979,7 +983,8 @@ func initMiscModules(c *Container) error {
 		fanouter.SetSequentialMode(true)
 		// Stage 1 整改方案 §3：累加 mml_path_translation_miss_total 供
 		// `deployments/monitoring/alerts/omc-rules.yml MMLPathTranslationMissSustained` 告警。
-		fanouter.SetMetrics(mml.NewFanoutMetrics(c.MetricsReg))
+		// T-0168: 复用上面已构造的 mmlFanoutMetrics 实例，避免重复注册。
+		fanouter.SetMetrics(mmlFanoutMetrics)
 		mmlService.SetFanouter(fanouter)
 
 		// Sequencer：与 ResultAggregator 并行挂到 MML completion 通路，

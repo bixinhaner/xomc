@@ -1,5 +1,5 @@
 import http from '../http';
-import type { MMLCommand, MMLScript, MMLTask, MMLTaskCommandDetail, MMLParam, MMLCustomCommand, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef } from '../../types/mml';
+import type { MMLCommand, MMLScript, MMLTask, MMLTaskCommandDetail, MMLParam, MMLCustomCommand, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef, MMLTaskResultsStats, MMLPathTranslationView, PathTranslationSource } from '../../types/mml';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import type {
   BackendStatement,
@@ -126,6 +126,27 @@ interface BackendMMLTask {
     device_count: number;
     path_count: number;
   } | null;
+
+  // T-0168: 翻译审计 4 列（migration 000171 持久化到 mml_tasks 表）
+  product_resolved?: boolean;
+  matched_product_id?: string | null;
+  matched_product_class?: string | null;
+  path_translation_source?: string | null;
+}
+
+// T-0168: GET /mml/tasks/{id}/results 响应 stats 字段（后端 TaskResultsStats）
+interface BackendMMLPathTranslation {
+  standard_path: string;
+  private_path: string;
+  translation_source: string;
+  translated: boolean;
+}
+
+interface BackendMMLTaskResultsStats {
+  path_translations?: BackendMMLPathTranslation[];
+  product_resolved: boolean;
+  matched_product_class?: string;
+  path_translation_source?: string;
 }
 
 interface BackendListResponse<T> {
@@ -314,6 +335,24 @@ function mapBackendScript(bs: BackendMMLScript): MMLScript {
   };
 }
 
+function mapTaskResultsStats(
+  bs: BackendMMLTaskResultsStats | undefined
+): MMLTaskResultsStats | undefined {
+  if (!bs) return undefined;
+  const pathTranslations: MMLPathTranslationView[] = (bs.path_translations || []).map((p) => ({
+    standardPath: p.standard_path,
+    privatePath: p.private_path,
+    translationSource: p.translation_source as PathTranslationSource,
+    translated: p.translated,
+  }));
+  return {
+    pathTranslations: pathTranslations.length > 0 ? pathTranslations : undefined,
+    productResolved: bs.product_resolved,
+    matchedProductClass: bs.matched_product_class || undefined,
+    pathTranslationSource: (bs.path_translation_source || undefined) as PathTranslationSource | undefined,
+  };
+}
+
 function mapBackendResult(br: Record<string, unknown>): DeviceTaskResultItem {
   return {
     deviceSn: (br.device_sn as string) || '',
@@ -398,6 +437,11 @@ function mapBackendTask(bt: BackendMMLTask): MMLTask {
     // Scheduler fields (P2/P3)
     nextTriggerAt: bt.next_trigger_at || undefined,
     parentTaskId: bt.parent_task_id || undefined,
+    // T-0168: 翻译审计列映射；后端默认值 product_resolved=true（migration 000171）
+    productResolved: bt.product_resolved ?? true,
+    matchedProductId: bt.matched_product_id || undefined,
+    matchedProductClass: bt.matched_product_class || undefined,
+    pathTranslationSource: (bt.path_translation_source || undefined) as MMLTask['pathTranslationSource'],
     pathTranslationWarning: bt.path_translation_warning
       ? {
           anyMiss: bt.path_translation_warning.any_miss,
@@ -757,16 +801,17 @@ export const mmlApi = {
     id: string,
     page = 1,
     pageSize = 20
-  ): Promise<PageResponse<DeviceTaskResultItem>> {
-    const { data } = await http.get<BackendListResponse<Record<string, unknown>>>(
-      `/mml/tasks/${id}/results`,
-      { params: { page, page_size: pageSize } }
-    );
+  ): Promise<PageResponse<DeviceTaskResultItem, MMLTaskResultsStats>> {
+    // T-0168: 响应 stats 字段携带任务级翻译审计 + per-path 翻译详情
+    const { data } = await http.get<
+      BackendListResponse<Record<string, unknown>> & { stats?: BackendMMLTaskResultsStats }
+    >(`/mml/tasks/${id}/results`, { params: { page, page_size: pageSize } });
     return {
       items: (data.items || []).map(mapBackendResult),
       total: data.total,
       page: data.page,
       pageSize: data.page_size,
+      stats: mapTaskResultsStats(data.stats),
     };
   },
 

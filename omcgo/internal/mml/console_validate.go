@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/omcgo/omcgo/global"
 )
 
@@ -140,19 +142,35 @@ func (s *Service) translateTaskPaths(ctx context.Context, task *MMLTask) error {
 		return nil
 	}
 
-	results, err := s.pathTranslator.TranslateForDevice(ctx, productClass, softwareVersion, standardPaths)
+	outcome, err := s.pathTranslator.TranslateForDevice(ctx, productClass, softwareVersion, standardPaths)
 	if err != nil {
+		// T-0168: ErrProductClassUnresolved 已被适配器内部消化为 orphan_passthrough；
+		// 保留 sentinel 检查作为旧适配器实现的向后兼容兜底。
 		var orphanErr *ErrProductClassUnresolved
 		if errors.As(err, &orphanErr) {
 			return err
 		}
-		// Translator 内部错误 → wrap
+		// Translator 内部错误（Registry IO / DI 失败）→ wrap
 		return fmt.Errorf("translate paths for product_class %s: %w", productClass, err)
 	}
+	if outcome == nil {
+		return fmt.Errorf("translate paths for product_class %s: nil outcome", productClass)
+	}
+
+	// T-0168: 写回任务级翻译元数据，由 PgTaskRepository.Create 持久化到 mml_tasks 4 列。
+	task.ProductResolved = outcome.ProductResolved
+	task.MatchedProductClass = outcome.ProductClass
+	if outcome.ProductResolved && outcome.ProductID != uuid.Nil {
+		id := outcome.ProductID
+		task.MatchedProductID = &id
+	} else {
+		task.MatchedProductID = nil
+	}
+	task.PathTranslationSource = outcome.AggregateSource
 
 	// 构造 standard → privatePath 映射
-	trans := make(map[string]TranslatedPath, len(results))
-	for _, r := range results {
+	trans := make(map[string]TranslatedPath, len(outcome.Paths))
+	for _, r := range outcome.Paths {
 		trans[r.Standard] = r
 	}
 

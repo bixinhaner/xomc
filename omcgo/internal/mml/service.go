@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -49,25 +50,59 @@ type Service struct {
 
 // PathTranslator 让 mml.Service 在 fanout 前把 standardPath → privatePath。
 //
-// 消费者驱动小接口；实现在 internal/config/parammodel 包内提供薄包装：
+// 消费者驱动小接口；实现在 cmd/app/provider/mml_adapters.go 提供薄包装：
 //
-//	type translatorAdapter struct { reg *parammodel.Registry; prodReg *product.Registry }
-//	func (a *translatorAdapter) TranslateForDevice(ctx, productClass, swVer, paths) ([]TranslatedPath, error) {...}
+//	type mmlPathTranslatorAdapter struct { products *product.Registry; params *parammodel.Registry }
+//	func (a *mmlPathTranslatorAdapter) TranslateForDevice(ctx, productClass, swVer, paths) (*TranslationOutcome, error) {...}
 //
 // nil 时跳过翻译（向后兼容 / dev / 单测）。
+//
+// T-0168: 接口签名升级为返 *TranslationOutcome，把"产品解析"+"路径翻译"两步结果合一，
+// 让 caller（translateTaskPaths）一次拿全任务级审计元数据（product_resolved /
+// matched_product_id / aggregate_source）。
 type PathTranslator interface {
 	// TranslateForDevice 把 standardPaths 按 (productClass, swVersion) 翻译为 privatePath。
 	//   - 内部链路：productClass → ProductRegistry → product.id → Translator.ToPrivate
-	//   - 未命中（passthrough）时 Private = Standard
-	//   - product_class 解析失败 → 返回 ErrProductClassUnresolved
-	TranslateForDevice(ctx context.Context, productClass, softwareVersion string, standardPaths []string) ([]TranslatedPath, error)
+	//   - 单条未命中（passthrough）时 Private = Standard，Source="passthrough"
+	//   - **激进路线**（T-0168）：productClass 整批未识别时 **不**返 ErrProductClassUnresolved，
+	//     而是构造 TranslationOutcome{ProductResolved=false, AggregateSource="orphan_passthrough"}，
+	//     所有 Paths.Source="orphan_passthrough"，让上层不阻塞 fanout
+	//   - 仅在 Registry IO / DI 错误时返 error
+	TranslateForDevice(ctx context.Context, productClass, softwareVersion string, standardPaths []string) (*TranslationOutcome, error)
 }
 
 // TranslatedPath 是 Translator 的单条结果。
 type TranslatedPath struct {
 	Standard string `json:"standard"`
 	Private  string `json:"private"`
-	Source   string `json:"source"` // discovered / default / passthrough
+	Source   string `json:"source"` // discovered / default / passthrough / orphan_passthrough
+}
+
+// TranslationOutcome 是 PathTranslator.TranslateForDevice 的完整返回结果（T-0168）。
+//
+// 它把"产品解析"与"路径翻译"两步合一返回，避免上层 caller 二次调用 ResolveProduct +
+// TranslateForDevice 的冗余。translateTaskPaths 从这里抽出任务级审计元数据写到
+// mml_tasks 表的 4 列（product_resolved / matched_product_id /
+// matched_product_class / path_translation_source），见 migration 000171。
+type TranslationOutcome struct {
+	// Paths 是逐条 standardPath → privatePath 的翻译结果（与输入 standardPaths 顺序对齐）。
+	Paths []TranslatedPath
+
+	// ProductResolved 表示 productClass 是否成功匹配到 product。
+	//   true  → MatchProductClass 命中，所有 Paths.Source ∈ {"discovered","default","passthrough"}
+	//   false → MatchProductClass 返 ErrOrphan，所有 Paths.Source == "orphan_passthrough"
+	ProductResolved bool
+
+	// ProductID 是命中的 product.id；ProductResolved=false 时为 uuid.Nil。
+	ProductID uuid.UUID
+
+	// ProductClass 透传调用方传入的 productClass，便于上层写审计列（mml_tasks.matched_product_class）。
+	ProductClass string
+
+	// AggregateSource 是任务级翻译来源汇总（基于 Paths[].Source 推导）：
+	//   - 全 discovered / 全 default / 全 passthrough / 全 orphan_passthrough → 取该单一值
+	//   - 否则（任意混合）→ "mixed"
+	AggregateSource string
 }
 
 // SSEPublisher defines the interface for publishing SSE events.
@@ -1728,7 +1763,100 @@ func (s *Service) IsDangerousCommand(ctx context.Context, commandCode string) (*
 	return CheckDangerousCommand(commandCode), nil
 }
 
+// PathTranslationView 是任务路径翻译详情的单条视图（T-0168 PRD §S2.2.7）。
+// 前端"任务记录列表行展开"读 GET /mml/tasks/{id}/results 响应的 stats.path_translations[]。
+type PathTranslationView struct {
+	StandardPath      string `json:"standard_path"`
+	PrivatePath       string `json:"private_path"`
+	TranslationSource string `json:"translation_source"` // discovered / default / passthrough / orphan_passthrough
+	Translated        bool   `json:"translated"`         // source != "passthrough" && source != "orphan_passthrough"
+}
+
+// TaskResultsStats 是 GET /mml/tasks/{id}/results 响应的 stats 字段（T-0168）。
+//
+// 透出任务级翻译审计（mml_tasks 4 列）+ per-path 翻译详情（task.Commands JSONB）。
+// 前端列表行展开 + product_resolved=false Banner 都从这里读。
+type TaskResultsStats struct {
+	PathTranslations      []PathTranslationView `json:"path_translations,omitempty"`
+	ProductResolved       bool                  `json:"product_resolved"`
+	MatchedProductClass   string                `json:"matched_product_class,omitempty"`
+	PathTranslationSource string                `json:"path_translation_source,omitempty"`
+}
+
+// extractPathTranslations 从 task.Commands JSONB 抽出去重的 PathTranslationView 列表。
+// 数据源：task.Commands[i].param_refs[] 与 task.Commands[i].translation_results。
+// translateTaskPaths 已经把 standardPath / privatePath / translation_source 写入两者。
+func extractPathTranslations(commands []map[string]interface{}) []PathTranslationView {
+	seen := make(map[string]PathTranslationView)
+	for _, entry := range commands {
+		// 优先读 param_refs[]（LST/MOD/ADD 选中路径）
+		if refs, ok := entry["param_refs"].([]interface{}); ok {
+			for _, r := range refs {
+				m, ok := r.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				std, _ := m["param_path"].(string)
+				if std == "" {
+					continue
+				}
+				priv, _ := m["private_path"].(string)
+				src, _ := m["translation_source"].(string)
+				if priv == "" {
+					priv = std
+				}
+				if src == "" {
+					src = "passthrough"
+				}
+				seen[std] = PathTranslationView{
+					StandardPath:      std,
+					PrivatePath:       priv,
+					TranslationSource: src,
+					Translated:        src != "passthrough" && src != "orphan_passthrough",
+				}
+			}
+		}
+		// 兜底读 translation_results（部分 cmd 没 param_refs 但 translateTaskPaths 仍写了 results）
+		if tr, ok := entry["translation_results"].([]interface{}); ok {
+			for _, r := range tr {
+				m, ok := r.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				std, _ := m["standard"].(string)
+				if std == "" || seen[std].StandardPath != "" {
+					continue // 已被 param_refs 优先填充
+				}
+				priv, _ := m["private"].(string)
+				src, _ := m["source"].(string)
+				if priv == "" {
+					priv = std
+				}
+				if src == "" {
+					src = "passthrough"
+				}
+				seen[std] = PathTranslationView{
+					StandardPath:      std,
+					PrivatePath:       priv,
+					TranslationSource: src,
+					Translated:        src != "passthrough" && src != "orphan_passthrough",
+				}
+			}
+		}
+	}
+	out := make([]PathTranslationView, 0, len(seen))
+	for _, v := range seen {
+		out = append(out, v)
+	}
+	// 稳定排序：按 standardPath 字母序，便于前端展示一致
+	sort.Slice(out, func(i, j int) bool { return out[i].StandardPath < out[j].StandardPath })
+	return out
+}
+
 // GetTaskResults returns paginated per-device execution results for a task.
+//
+// T-0168: 响应 stats 字段携带 TaskResultsStats（path_translations + product_resolved
+// + matched_product_class + path_translation_source），供前端列表行展开使用。
 func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSize int) (*model.ListResponse[map[string]interface{}], error) {
 	if page < 1 {
 		page = 1
@@ -1736,6 +1864,11 @@ func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSi
 	if pageSize < 1 {
 		pageSize = 20
 	}
+
+	// T-0168: 先拿 task 元数据用于装配 stats（即使 deviceTaskResultLister 注入也要这步）
+	taskMeta, taskErr := s.taskRepo.GetByID(ctx, id)
+	// taskErr 不阻塞主流程；找不到 task 让后续 device_tasks 查询自己处理
+	stats := buildTaskResultsStats(taskMeta, taskErr)
 
 	// 优先路径：从 device_tasks 拉真实执行结果（2026-05-23 修；执行结果实际写在
 	// device_tasks 表，mml_tasks.results 从未由 ACS 回写，老路径永远空）。
@@ -1748,7 +1881,9 @@ func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSi
 		for _, row := range rows {
 			items = append(items, deviceTaskRowToResultMap(row))
 		}
-		return model.NewListResponse(items, total, page, pageSize), nil
+		resp := model.NewListResponse(items, total, page, pageSize)
+		resp.Stats = stats
+		return resp, nil
 	}
 
 	// 兼容回退：装配器未注入时读老 JSONB（dev / 单测）。
@@ -1773,7 +1908,23 @@ func (s *Service) GetTaskResults(ctx context.Context, id uuid.UUID, page, pageSi
 	if items == nil {
 		items = []map[string]interface{}{}
 	}
-	return model.NewListResponse(items, total, page, pageSize), nil
+	resp := model.NewListResponse(items, total, page, pageSize)
+	resp.Stats = stats
+	return resp, nil
+}
+
+// buildTaskResultsStats 装配 TaskResultsStats（T-0168）。taskErr 非 nil 时返回空 stats，
+// 避免 GetByID 失败阻断主流程（让前端拿到 200 + 空翻译详情）。
+func buildTaskResultsStats(task *MMLTask, taskErr error) *TaskResultsStats {
+	if taskErr != nil || task == nil {
+		return &TaskResultsStats{ProductResolved: true}
+	}
+	return &TaskResultsStats{
+		PathTranslations:      extractPathTranslations(task.Commands),
+		ProductResolved:       task.ProductResolved,
+		MatchedProductClass:   task.MatchedProductClass,
+		PathTranslationSource: task.PathTranslationSource,
+	}
 }
 
 // deviceTaskRowToResultMap 把 device_tasks 行映射为前端 DeviceTaskResultItem 期望

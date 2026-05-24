@@ -109,6 +109,32 @@ groups:
               2. 看 `parammodel_intersect_*` 指标确认 discovered_param_mappings 是否被填充
               3. 必要时用 admin Tab 3 补充缺失映射并重试任务
 
+      - alert: MMLPathTranslationOrphan
+        # T-0168 激进路线告警。mml_path_translation_orphan_total 由 mml_adapters.go
+        # 在 ProductRegistry.MatchProductClass 返 ErrOrphan 时累加，label
+        # `product_class` 是触发 orphan 的设备 product_class 字符串。
+        # 任务仍正常 fanout（原路径下发），但意味着：① 厂商把新 productClass
+        # 接入了网络但没在 product_class_patterns 表登记；② 命令很可能因路径
+        # 不匹配被 CPE 拒（Fault 9005）。运维应在 24h 内补 patterns。
+        expr: increase(mml_path_translation_orphan_total[5m]) > 0
+        for: 0s
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: mml
+        annotations:
+          summary: "MML 野设备 productClass 未识别：{{ $labels.product_class }}"
+          description: |
+            过去 5 分钟内 product_class="{{ $labels.product_class }}" 的设备
+            通过 MML 控制台执行命令，但该 productClass 未匹配 product_class_patterns
+            表任何正则。激进路线（T-0168）让任务用 standardPath 原路径下发，
+            CPE 可能因路径不匹配返 Fault 9005。
+            Action:
+              1. 用 omcctl 或 admin UI 查表确认 product_class_patterns 是否缺该 patterns
+              2. 业务方提供该设备所属 product / param_model 后补 patterns + reload
+              3. 历史 orphan 任务的执行结果可在任务记录页查看（详情展开 → 路径转换详情）
+            Runbook: docs/operations/告警处置Runbook.md#MMLPathTranslationOrphan
+
   - name: omc.meta
     interval: 30s
     rules:

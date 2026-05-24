@@ -32,6 +32,14 @@ func nilUUID(s string) any {
 	return s
 }
 
+// nilString converts an empty string to nil for nullable VARCHAR/TEXT columns（T-0168）。
+func nilString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 // Create 创建任务记录
 func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 	query, args, err := storage.Psql.Insert("device_tasks").
@@ -43,6 +51,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 			"source", "creator_id", "description",
 			"source_id", "command_index", "device_index",
 			"has_path_translation_miss", "path_translation_miss_count",
+			"path_translation_source", // T-0168
 		).
 		Values(
 			task.ID, task.DeviceSN, task.Method, task.Params, task.Priority,
@@ -52,6 +61,7 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *Task) error {
 			task.Source, task.CreatorID, task.Description,
 			nilUUID(task.SourceID), task.CommandIndex, task.DeviceIndex,
 			task.HasPathTranslationMiss, task.PathTranslationMissCount,
+			nilString(task.PathTranslationSource), // T-0168: 空字符串 → NULL
 		).
 		ToSql()
 	if err != nil {
@@ -364,6 +374,7 @@ func (r *PgTaskRepository) BatchCreate(ctx context.Context, tasks []*Task) error
 		"source", "creator_id", "description",
 		"source_id", "command_index", "device_index",
 		"has_path_translation_miss", "path_translation_miss_count",
+		"path_translation_source", // T-0168
 	}
 
 	insertBuilder := storage.Psql.Insert("device_tasks").Columns(columns...)
@@ -377,6 +388,7 @@ func (r *PgTaskRepository) BatchCreate(ctx context.Context, tasks []*Task) error
 			task.Source, task.CreatorID, task.Description,
 			task.SourceID, task.CommandIndex, task.DeviceIndex,
 			task.HasPathTranslationMiss, task.PathTranslationMissCount,
+			nilString(task.PathTranslationSource), // T-0168
 		)
 	}
 
@@ -569,6 +581,7 @@ func taskColumns() []string {
 		"source", "creator_id", "description",
 		"source_id", "command_index", "device_index",
 		"has_path_translation_miss", "path_translation_miss_count",
+		"path_translation_source", // T-0168
 	}
 }
 
@@ -585,6 +598,8 @@ func (r *PgTaskRepository) scanTaskRow(row pgx.Row) (*Task, error) {
 	// source_id 列允许 NULL（pre-existing 任务可能没 source_id）；
 	// pgx 直接 Scan NULL 到 *string 会失败，用 NullString 中介。
 	var sourceID sql.NullString
+	// T-0168: path_translation_source 列允许 NULL（非 MML 来源任务）。
+	var pathTranslationSource sql.NullString
 
 	err := row.Scan(
 		&task.ID, &task.DeviceSN, &task.Method, &params, &task.Priority,
@@ -594,6 +609,7 @@ func (r *PgTaskRepository) scanTaskRow(row pgx.Row) (*Task, error) {
 		&task.Source, &task.CreatorID, &task.Description,
 		&sourceID, &task.CommandIndex, &task.DeviceIndex,
 		&task.HasPathTranslationMiss, &task.PathTranslationMissCount,
+		&pathTranslationSource,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -610,6 +626,9 @@ func (r *PgTaskRepository) scanTaskRow(row pgx.Row) (*Task, error) {
 	}
 	if sourceID.Valid {
 		task.SourceID = sourceID.String
+	}
+	if pathTranslationSource.Valid {
+		task.PathTranslationSource = pathTranslationSource.String
 	}
 
 	return &task, nil

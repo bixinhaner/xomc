@@ -32,27 +32,63 @@ func (f *fakeDeviceLookup) GetBySerialNumber(_ context.Context, sn string) (*mod
 	return dev, nil
 }
 
-// fakePathTranslator 实现 PathTranslator 接口，返回预置 standard → private 映射。
+// fakePathTranslator 实现 PathTranslator 接口（T-0168 升级版返 *TranslationOutcome），
+// 返回预置 standard → private 映射。
 type fakePathTranslator struct {
 	mapping map[string]string // standardPath → privatePath（缺失视为 passthrough）
 	err     error
-	calls   int
+	// T-0168: 模拟 orphan_passthrough 场景（productClass 未识别）
+	orphan       bool
+	productClass string // 透传给 outcome.ProductClass
+	calls        int
 }
 
-func (f *fakePathTranslator) TranslateForDevice(_ context.Context, _, _ string, paths []string) ([]TranslatedPath, error) {
+func (f *fakePathTranslator) TranslateForDevice(_ context.Context, productClass, _ string, paths []string) (*TranslationOutcome, error) {
 	f.calls++
 	if f.err != nil {
 		return nil, f.err
 	}
+	if f.orphan {
+		// T-0168 激进路线：productClass 未识别，全 orphan_passthrough，不返 error
+		out := make([]TranslatedPath, 0, len(paths))
+		for _, p := range paths {
+			out = append(out, TranslatedPath{Standard: p, Private: p, Source: "orphan_passthrough"})
+		}
+		return &TranslationOutcome{
+			Paths:           out,
+			ProductResolved: false,
+			ProductID:       uuid.Nil,
+			ProductClass:    productClass,
+			AggregateSource: "orphan_passthrough",
+		}, nil
+	}
 	out := make([]TranslatedPath, 0, len(paths))
+	hasHit, hasMiss := false, false
 	for _, p := range paths {
 		if priv, ok := f.mapping[p]; ok {
 			out = append(out, TranslatedPath{Standard: p, Private: priv, Source: "discovered"})
+			hasHit = true
 		} else {
 			out = append(out, TranslatedPath{Standard: p, Private: p, Source: "passthrough"})
+			hasMiss = true
 		}
 	}
-	return out, nil
+	aggregate := "discovered"
+	switch {
+	case hasHit && hasMiss:
+		aggregate = "mixed"
+	case !hasHit && hasMiss:
+		aggregate = "passthrough"
+	case !hasHit && !hasMiss: // 空 paths
+		aggregate = ""
+	}
+	return &TranslationOutcome{
+		Paths:           out,
+		ProductResolved: true,
+		ProductID:       uuid.New(), // 测试用 product.id；真实场景由 ProductRegistry 返
+		ProductClass:    productClass,
+		AggregateSource: aggregate,
+	}, nil
 }
 
 func newServiceForTest() *Service {
@@ -257,6 +293,9 @@ func TestTranslateTaskPaths_NoTranslatorInjected_Skips(t *testing.T) {
 }
 
 func TestTranslateTaskPaths_OrphanError(t *testing.T) {
+	// 向后兼容：旧版适配器仍返 ErrProductClassUnresolved 时上层正确传播。
+	// T-0168 新适配器已改为内部消化为 orphan_passthrough（见
+	// TestTranslateTaskPaths_OrphanPassthrough），保留此测试防退化。
 	s := newServiceForTest()
 	s.SetDeviceLookup(&fakeDeviceLookup{devs: map[string]*model.Device{
 		"SN1": {SerialNumber: "SN1", ProductClass: "Unknown"},
@@ -273,6 +312,116 @@ func TestTranslateTaskPaths_OrphanError(t *testing.T) {
 	err := s.translateTaskPaths(context.Background(), task)
 	var ue *ErrProductClassUnresolved
 	require.ErrorAs(t, err, &ue)
+}
+
+// TestTranslateTaskPaths_OrphanPassthrough 验证 T-0168 激进路线：productClass 未识别
+// 时整任务全部走 orphan_passthrough，task 上的 4 个翻译审计字段被正确写入，且不返 error。
+func TestTranslateTaskPaths_OrphanPassthrough(t *testing.T) {
+	s := newServiceForTest()
+	s.SetDeviceLookup(&fakeDeviceLookup{devs: map[string]*model.Device{
+		"SN1": {SerialNumber: "SN1", ProductClass: "UNKNOWN-2025"},
+	}})
+	s.SetPathTranslator(&fakePathTranslator{orphan: true})
+
+	task := &MMLTask{
+		DeviceSNs: []string{"SN1"},
+		Commands: []map[string]interface{}{
+			{
+				"param_refs": []interface{}{
+					map[string]interface{}{"param_path": "Device.X.Foo"},
+					map[string]interface{}{"param_path": "Device.X.Bar"},
+				},
+			},
+		},
+	}
+	err := s.translateTaskPaths(context.Background(), task)
+	require.NoError(t, err, "orphan 路径应不阻塞 fanout")
+
+	// 任务级翻译审计字段
+	assert.False(t, task.ProductResolved, "ProductResolved 应为 false")
+	assert.Nil(t, task.MatchedProductID, "MatchedProductID 应为 nil")
+	assert.Equal(t, "UNKNOWN-2025", task.MatchedProductClass, "MatchedProductClass 应透传 productClass")
+	assert.Equal(t, "orphan_passthrough", task.PathTranslationSource, "PathTranslationSource 应为 orphan_passthrough")
+
+	// param_refs 上的 per-path 翻译标记
+	refs := task.Commands[0]["param_refs"].([]interface{})
+	for _, r := range refs {
+		m := r.(map[string]interface{})
+		assert.Equal(t, m["param_path"], m["private_path"], "orphan 时 private_path 应等于 standardPath")
+		assert.Equal(t, "orphan_passthrough", m["translation_source"], "Source 应为 orphan_passthrough")
+	}
+}
+
+// TestTranslateTaskPaths_MixedSource 验证 task.PathTranslationSource 在
+// discovered + passthrough 混合时正确判定为 "mixed"。
+func TestTranslateTaskPaths_MixedSource(t *testing.T) {
+	s := newServiceForTest()
+	s.SetDeviceLookup(&fakeDeviceLookup{devs: map[string]*model.Device{
+		"SN1": {SerialNumber: "SN1", ProductClass: "BaiBLQ_5.0.16"},
+	}})
+	// 第一条命中 mapping → discovered；第二条未命中 → passthrough
+	s.SetPathTranslator(&fakePathTranslator{mapping: map[string]string{
+		"Device.Standard.Path1": "InternetGw.X_VENDOR.Path1",
+	}})
+
+	task := &MMLTask{
+		DeviceSNs: []string{"SN1"},
+		Commands: []map[string]interface{}{
+			{
+				"param_refs": []interface{}{
+					map[string]interface{}{"param_path": "Device.Standard.Path1"},
+					map[string]interface{}{"param_path": "Device.Standard.Path2"},
+				},
+			},
+		},
+	}
+	err := s.translateTaskPaths(context.Background(), task)
+	require.NoError(t, err)
+
+	assert.True(t, task.ProductResolved)
+	assert.NotNil(t, task.MatchedProductID, "命中 product 时 MatchedProductID 应非 nil")
+	assert.Equal(t, "mixed", task.PathTranslationSource, "discovered+passthrough 混合应为 mixed")
+}
+
+// TestExtractPathTranslations 验证 service.GetTaskResults 调用的 extractPathTranslations
+// 从 task.Commands JSONB 中正确抽出去重的 PathTranslationView 列表（T-0168）。
+func TestExtractPathTranslations(t *testing.T) {
+	commands := []map[string]interface{}{
+		{
+			"param_refs": []interface{}{
+				map[string]interface{}{
+					"param_path":         "Device.A",
+					"private_path":       "InternetGw.X_VENDOR.A",
+					"translation_source": "discovered",
+				},
+				map[string]interface{}{
+					"param_path":         "Device.B",
+					"private_path":       "Device.B",
+					"translation_source": "passthrough",
+				},
+			},
+		},
+		{
+			"param_refs": []interface{}{
+				// 同 standardPath 去重保留一份
+				map[string]interface{}{
+					"param_path":         "Device.A",
+					"private_path":       "InternetGw.X_VENDOR.A",
+					"translation_source": "discovered",
+				},
+			},
+		},
+	}
+	got := extractPathTranslations(commands)
+	require.Len(t, got, 2, "Device.A / Device.B 去重应为 2 条")
+	// 按 standardPath 字母序排序
+	assert.Equal(t, "Device.A", got[0].StandardPath)
+	assert.Equal(t, "InternetGw.X_VENDOR.A", got[0].PrivatePath)
+	assert.Equal(t, "discovered", got[0].TranslationSource)
+	assert.True(t, got[0].Translated)
+	assert.Equal(t, "Device.B", got[1].StandardPath)
+	assert.Equal(t, "passthrough", got[1].TranslationSource)
+	assert.False(t, got[1].Translated, "passthrough 算未翻译")
 }
 
 // ────────────────────────────────────────────────────────────────────────────

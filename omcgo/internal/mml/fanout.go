@@ -243,6 +243,8 @@ func (f *Fanouter) buildDeviceTaskRequests(ctx context.Context, mmlTask *MMLTask
 
 				HasPathTranslationMiss:   missCount > 0,
 				PathTranslationMissCount: missCount,
+				// T-0168: per-device 翻译来源继承 task 维度（D2 决策：R-8.4 保证一致）。
+				PathTranslationSource: mmlTask.PathTranslationSource,
 			})
 		}
 	}

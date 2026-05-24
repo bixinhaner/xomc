@@ -78,6 +78,8 @@ var taskColumns = []string{
 	"started_at", "finished_at",
 	"total_devices", "success_count", "failed_count", "result",
 	"next_trigger_at", "parent_task_id",
+	// T-0168: 路径翻译审计 4 列（migration 000171）
+	"product_resolved", "matched_product_id", "matched_product_class", "path_translation_source",
 }
 
 // ======================================================================
@@ -653,6 +655,18 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
 		return fmt.Errorf("marshal results: %w", err)
 	}
 
+	// T-0168: 翻译审计列 — product_resolved 默认 true（与 migration 000171 列默认值一致）。
+	// matched_product_class / path_translation_source 空串 → 入 NULL（DB CHECK 兼容）。
+	var matchedProductClassPtr, pathTranslationSourcePtr *string
+	if task.MatchedProductClass != "" {
+		mpc := task.MatchedProductClass
+		matchedProductClassPtr = &mpc
+	}
+	if task.PathTranslationSource != "" {
+		pts := task.PathTranslationSource
+		pathTranslationSourcePtr = &pts
+	}
+
 	query, args, err := storage.Psql.Insert("mml_tasks").
 		Columns("task_name", "script_id", "device_sns",
 			"commands", "status", "results", "creator", "executor",
@@ -661,7 +675,8 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
 			"offline_retry", "offline_retry_wait",
 			"failed_retry", "failed_retry_count", "failed_retry_interval",
 			"total_devices",
-			"next_trigger_at", "parent_task_id").
+			"next_trigger_at", "parent_task_id",
+			"product_resolved", "matched_product_id", "matched_product_class", "path_translation_source").
 		Values(task.TaskName, task.ScriptID, deviceSNsJSON,
 			commandsJSON, task.Status, resultsJSON, task.Creator, task.Executor,
 			task.ExecuteType, task.ScheduledAt,
@@ -669,7 +684,8 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
 			task.OfflineRetry, task.OfflineRetryWait,
 			task.FailedRetry, task.FailedRetryCount, task.FailedRetryInterval,
 			task.TotalDevices,
-			task.NextTriggerAt, task.PeriodicParentID).
+			task.NextTriggerAt, task.PeriodicParentID,
+			task.ProductResolved, task.MatchedProductID, matchedProductClassPtr, pathTranslationSourcePtr).
 		Suffix("RETURNING " + joinColumns(taskColumns)).
 		ToSql()
 	if err != nil {
@@ -836,6 +852,9 @@ func (r *PgTaskRepository) List(ctx context.Context, filter TaskFilter) (*model.
 func scanTask(row pgx.Row) (*MMLTask, error) {
 	var t MMLTask
 	var deviceSNsJSON, commandsJSON, resultsJSON []byte
+	// T-0168: 翻译审计 4 列；matched_product_class / path_translation_source 用 *string
+	// 接 NULL（migration 000171 列允许 NULL）；product_resolved 默认 true，*bool 处理 NULL 兜底。
+	var matchedProductClass, pathTranslationSource *string
 
 	err := row.Scan(
 		&t.ID, &t.TaskName, &t.ScriptID, &deviceSNsJSON,
@@ -848,9 +867,16 @@ func scanTask(row pgx.Row) (*MMLTask, error) {
 		&t.StartedAt, &t.FinishedAt,
 		&t.TotalDevices, &t.SuccessCount, &t.FailedCount, &t.Result,
 		&t.NextTriggerAt, &t.PeriodicParentID,
+		&t.ProductResolved, &t.MatchedProductID, &matchedProductClass, &pathTranslationSource,
 	)
 	if err != nil {
 		return nil, err
+	}
+	if matchedProductClass != nil {
+		t.MatchedProductClass = *matchedProductClass
+	}
+	if pathTranslationSource != nil {
+		t.PathTranslationSource = *pathTranslationSource
 	}
 	if deviceSNsJSON != nil {
 		if err := json.Unmarshal(deviceSNsJSON, &t.DeviceSNs); err != nil {
@@ -882,6 +908,8 @@ func scanTask(row pgx.Row) (*MMLTask, error) {
 func scanTaskRow(rows pgx.Rows) (*MMLTask, error) {
 	var t MMLTask
 	var deviceSNsJSON, commandsJSON, resultsJSON []byte
+	// T-0168: 翻译审计列 NULL 接收同 scanTask。
+	var matchedProductClass, pathTranslationSource *string
 
 	err := rows.Scan(
 		&t.ID, &t.TaskName, &t.ScriptID, &deviceSNsJSON,
@@ -894,9 +922,16 @@ func scanTaskRow(rows pgx.Rows) (*MMLTask, error) {
 		&t.StartedAt, &t.FinishedAt,
 		&t.TotalDevices, &t.SuccessCount, &t.FailedCount, &t.Result,
 		&t.NextTriggerAt, &t.PeriodicParentID,
+		&t.ProductResolved, &t.MatchedProductID, &matchedProductClass, &pathTranslationSource,
 	)
 	if err != nil {
 		return nil, err
+	}
+	if matchedProductClass != nil {
+		t.MatchedProductClass = *matchedProductClass
+	}
+	if pathTranslationSource != nil {
+		t.PathTranslationSource = *pathTranslationSource
 	}
 	if deviceSNsJSON != nil {
 		if err := json.Unmarshal(deviceSNsJSON, &t.DeviceSNs); err != nil {
