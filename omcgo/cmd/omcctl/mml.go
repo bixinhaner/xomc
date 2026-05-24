@@ -54,6 +54,7 @@ func newMMLCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newMMLMigrateDeviceParamsCmd())
 	cmd.AddCommand(newMMLImportStandardParamsCmd())
+	cmd.AddCommand(newMMLImportSpecMDCmd()) // T-0169: spec md → seed SQL + JSON catalog
 	return cmd
 }
 
