@@ -26,9 +26,9 @@ export default defineConfig(({ mode }) => {
         target: 'http://localhost:8081',
         changeOrigin: true,
       },
-      // 离线地图元数据代理（必须在 /tiles 前面）
+      // 离线地图元数据代理（必须在 /tiles 前面，与 /tiles 同源）
       '/tiles-metadata': {
-        target: 'http://localhost:8081',
+        target: env.VITE_TILES_PROXY_TARGET || 'http://localhost:8081',
         changeOrigin: true,
         rewrite: (path) => path,
       },
