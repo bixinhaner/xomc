@@ -566,10 +566,12 @@ const messages: Record<string, string> = {
   'device.latitude':        'Latitude',
   'device.height':          'Height',
   'device.offlineDays':     'Offline Days',
-  'device.stationName':     'Station Name',
+  // Synonym of device.hostName / device.rules.deviceName; all point to devices.site_name (=> JSON device_name).
+  // Historical labels "Station Name"/"Name" unified as "Device Name" (2026-05-25); 3 keys kept for backward compat.
+  'device.stationName':     'Device Name',
 
   // Monitor page extended fields (Device)
-  'device.hostName':            'Name',
+  'device.hostName':            'Device Name',
   'device.productName':         'Product Name',
   'device.firmwareVersion':     'Firmware Version',
   'device.macAddress':          'MAC Address',

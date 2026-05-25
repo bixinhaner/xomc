@@ -203,10 +203,15 @@ function mapBackendDevice(bd: BackendDevice): Device {
   const lifecycleState = (bd.lifecycle_state || deriveLegacyLifecycle(bd.status)) as Device['lifecycleState'];
   const isOnline = typeof bd.is_online === 'boolean' ? bd.is_online : bd.status === 'active';
 
+  // 设备名称统一回退：device_name 空时回落到 SN，避免设备列表 / 分组页 / 详情页
+  // 在 site_name 未填的设备上显示空白（用户看到"未命名设备"会失去识别能力）。
+  // 历史 mapper 中 name 字段已是这个回退，deviceName 字段当时填的空串 —— 现统一。
+  const friendlyName = bd.device_name || bd.serial_number;
+
   return {
     id: bd.id,
     sn: bd.serial_number,
-    name: bd.device_name || bd.serial_number,
+    name: friendlyName,
     vendor: bd.manufacturer,
     productClass: bd.product_class,
     networkType: toRadioMode(bd.technology),
@@ -251,7 +256,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     upTime: bd.run_time ?? null,
     firstOnlineTime: bd.first_online_time || '',
     lastInformTime: bd.last_inform_at || '',
-    deviceName: bd.device_name || '',
+    deviceName: friendlyName,
     gpsVersion: bd.gps_version || '',
     rom: bd.rom || '',
     remark: bd.remark || '',

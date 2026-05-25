@@ -568,10 +568,12 @@ const messages: Record<string, string> = {
   'device.latitude':        '纬度',
   'device.height':          '高度',
   'device.offlineDays':     '离线天数',
-  'device.stationName':     '基站名称',
+  // 与 device.hostName / device.rules.deviceName 同义，均指 devices.site_name (=> JSON device_name)；
+  // 历史 i18n 文案"基站名称"/"名称"已统一为"设备名称"（2026-05-25），保留 3 个 key 兼容现有引用。
+  'device.stationName':     '设备名称',
 
   // 监控页面扩展字段 (Device)
-  'device.hostName':            '名称',
+  'device.hostName':            '设备名称',
   'device.productName':         '产品名称',
   'device.firmwareVersion':     '固件版本',
   'device.macAddress':          'MAC地址',
