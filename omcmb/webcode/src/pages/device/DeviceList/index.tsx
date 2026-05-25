@@ -28,6 +28,10 @@ import { useCreateUnifiedFileTransferTask } from '@core/hooks/api/useUnifiedFile
 import { useDownloadStationLog } from '@core/hooks/api/useStationLog';
 import { stationLogApi } from '@core/services/api/stationLogApi';
 import { useT } from '@/hooks/useT';
+import { useUserStore } from '@core/store/userStore';
+import { useAppStore } from '@core/store/appStore';
+import { buildDefaultUfteTaskName } from '@/pages/transfer/shared';
+import dayjs from 'dayjs';
 import type { Device } from '@core/types/device';
 
 const { Link } = Typography;
@@ -326,6 +330,9 @@ export default function DeviceList() {
   const triggerAlarmSync = useTriggerAlarmSync();
   const createUfteTask = useCreateUnifiedFileTransferTask();
   const downloadStationLog = useDownloadStationLog();
+  const currentUser = useUserStore((s) => s.currentUser);
+  const appLocale = useAppStore((s) => s.locale);
+  const taskNameUser = currentUser?.username || currentUser?.displayName || 'user';
   // 性能优化：使用 useMemo 避免每次渲染创建新引用，防止下游 callback/useMemo 依赖变化
   const devices = useMemo(() => data?.items ?? [], [data?.items]);
   const total = data?.total ?? 0;
@@ -578,19 +585,31 @@ export default function DeviceList() {
             hasDetail: actionKey === 'batch-tr069-collect' || actionKey === 'batch-log-collect', // 只有收集操作才有详情
           }));
 
-          // 日志采集：调用 UFTE 真实接口创建采集任务
+          // 日志采集：UFTE 创建 RUNTIME_LOG_COLLECT 任务后自动跳转到「文件传输 →
+          // 任务管理」的「运行日志采集」tab，让用户立刻看到刚创建的任务进度。
           if (actionKey === 'batch-log-collect') {
             try {
-              const now = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+              // 任务名遵循 UFTE 全局统一规则：<i18n prefix>_<user>_<YYYY-MM-DD HH:mm:ss>
+              // 中文环境 "运行日志_admin_..."；英文 "RuntimeLog_admin_..."
+              const taskName = buildDefaultUfteTaskName(
+                'RUNTIME_LOG_COLLECT',
+                taskNameUser,
+                appLocale,
+                dayjs().format('YYYY-MM-DD HH:mm:ss'),
+              );
               await createUfteTask.mutateAsync({
-                taskName: `${t('device.action.logCollect')}-${now}`,
+                taskName,
                 typeCode: 'RUNTIME_LOG_COLLECT',
                 deviceIds: selectedDevices.map((d) => d.id),
                 deviceCount: selectedDevices.length,
                 executionMode: 'immediate',
               });
-              void message.success(t('ufte.taskCreatedAndNavigate', { defaultMessage: '日志采集任务已创建，正在跳转到任务详情页...' }));
-              navigate('/transfer/center?category=station_log');
+              void message.success(t('ufte.taskCreatedAndNavigate', {
+                defaultMessage: '日志采集任务已创建，正在跳转到运行日志采集 tab...',
+              }));
+              // category=station_log + typeCode=RUNTIME_LOG_COLLECT —— FileTransferCenter
+              // 初始化时按 URL 还原 selectedCategory + selectedTypeCode，定位到具体 tab。
+              navigate('/transfer/center?category=station_log&typeCode=RUNTIME_LOG_COLLECT');
             } catch {
               void message.error(t('common.operationFailed'));
             }

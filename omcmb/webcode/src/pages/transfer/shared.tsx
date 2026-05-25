@@ -131,6 +131,43 @@ export const TYPE_DRAWER_DEFAULT_STEPS: TransferStepId[] = [
 
 export const UPGRADE_LIKE_CATEGORIES = new Set(['gnb_upgrade', 'enb_upgrade', 'version_rollback']);
 
+// TASK_NAME_PREFIX_BY_TYPE_I18N：UFTE 新建任务默认名前缀，按 typeCode 区分业务，
+// 同时提供 zh-CN / en-US 两套字面值。命名规则与升级模块沿袭：
+//   <prefix>_<username>_<YYYY-MM-DD HH:mm:ss>
+// 例：中文环境 → "运行日志_admin_2026-05-25 13:40:36"
+//     英文环境 → "RuntimeLog_admin_2026-05-25 13:40:36"
+export const TASK_NAME_PREFIX_BY_TYPE_I18N: Record<string, { zh: string; en: string }> = {
+  ENB_IMG_UPGRADE:     { zh: '4G升级',         en: 'Upgrade' },
+  GNB_IMG_UPGRADE:     { zh: '5G升级',         en: 'Upgrade' },
+  ENB_PATCH_UPGRADE:   { zh: '基站补丁升级',   en: 'Upgrade' },
+  ENB_FPGA_UPGRADE:    { zh: 'FPGA升级',       en: 'Upgrade' },
+  VERSION_ROLLBACK:    { zh: '版本回退',       en: 'Rollback' },
+  CONFIG_BACKUP_NV:    { zh: '配置备份NV',     en: 'ConfigBackupNV' },
+  CONFIG_BACKUP_XML:   { zh: '配置备份XML',    en: 'ConfigBackupXML' },
+  CONFIG_RESTORE:      { zh: '配置文件恢复',   en: 'ConfigRestore' },
+  RUNTIME_LOG_COLLECT: { zh: '运行日志',       en: 'RuntimeLog' },
+  FAULT_LOG_COLLECT:   { zh: '故障日志',       en: 'FaultLog' },
+  LICENSE_UPGRADE:     { zh: '设备License升级', en: 'LicenseUpgrade' },
+};
+
+/**
+ * 跨页面统一的 UFTE 默认任务名生成。locale 取自 appStore.locale —
+ * 'zh-' 前缀走 zh 表，其它走 en。FileTransferCenter 抽屉、设备列表批量操作等
+ * 所有触发 UFTE 创建任务的地方都应走这一份，避免风格不一致。
+ */
+export function buildDefaultUfteTaskName(
+  typeCode: string | undefined,
+  username: string | undefined,
+  locale: string,
+  nowText: string,
+): string {
+  const useZh = locale.startsWith('zh');
+  const entry = typeCode ? TASK_NAME_PREFIX_BY_TYPE_I18N[typeCode] : undefined;
+  const prefix = entry ? (useZh ? entry.zh : entry.en) : (useZh ? '任务' : 'Task');
+  const user = (username && username.trim()) || (useZh ? '用户' : 'user');
+  return `${prefix}_${user}_${nowText}`;
+}
+
 export interface CategoryTabItem {
   category: UnifiedFileTransferCategory;
   categoryLabel: string;

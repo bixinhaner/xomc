@@ -25,7 +25,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import { DeleteOutlined, DownloadOutlined, EyeOutlined, PlusOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useT } from '@/hooks/useT';
 
 import ListPageLayout from '@/components/Layout/ListPageLayout';
@@ -49,6 +49,7 @@ import type { BatchGetSnapshotsResult } from '@core/services/api/configSnapshotA
 import { deviceLicenseApi } from '@core/services/api/deviceLicenseApi';
 import type { BatchGetLicensesResult } from '@core/services/api/deviceLicenseApi';
 import { useUserStore } from '@core/store/userStore';
+import { useAppStore } from '@core/store/appStore';
 import type { SoftwareVersion } from '@core/mock/data/software';
 import type {
   CreateUnifiedFileTransferTaskInput,
@@ -60,6 +61,7 @@ import type {
 import {
   buildCategoryTabs,
   EXECUTION_MODE_OPTIONS,
+  buildDefaultUfteTaskName,
   getSoftwareLibraryFileTypeLabel,
   renderDeviceStatus,
   renderEllipsisCell,
@@ -71,28 +73,10 @@ import type { TransferStepId } from '@core/types/unifiedFileTransfer';
 
 const { Text, Title } = Typography;
 
-// TASK_NAME_PREFIX_BY_TYPE: UFTE 创建任务时默认 taskName 的业务前缀。
-// 命名规则跟升级模块惯例对齐（Upgrade_admin_2026-05-21 05:33:55）：
-//   ${prefix}_${username}_${YYYY-MM-DD HH:mm:ss}
-// 用户可在表单里编辑覆盖；切换业务类型时若用户没改过，会自动按新业务重算。
-const TASK_NAME_PREFIX_BY_TYPE: Record<string, string> = {
-  ENB_IMG_UPGRADE: 'Upgrade',
-  GNB_IMG_UPGRADE: 'Upgrade',
-  ENB_PATCH_UPGRADE: 'Upgrade',
-  ENB_FPGA_UPGRADE: 'Upgrade',
-  VERSION_ROLLBACK: 'Rollback',
-  CONFIG_BACKUP_NV: 'ConfigBackupNV',
-  CONFIG_BACKUP_XML: 'ConfigBackupXML',
-  CONFIG_RESTORE: 'ConfigRestore',
-  RUNTIME_LOG_COLLECT: 'RuntimeLog',
-  FAULT_LOG_COLLECT: 'FaultLog',
-};
-
-function buildDefaultTaskName(typeCode: string | undefined, username: string | undefined): string {
-  const prefix = (typeCode && TASK_NAME_PREFIX_BY_TYPE[typeCode]) || 'Task';
-  const user = (username && username.trim()) || 'user';
-  const ts = dayjs().format('YYYY-MM-DD HH:mm:ss');
-  return `${prefix}_${user}_${ts}`;
+// buildDefaultTaskName 适配器：保持原签名（typeCode + username），内部委托给
+// shared.buildDefaultUfteTaskName + appStore.locale，全局保持 i18n 一致。
+function buildDefaultTaskName(typeCode: string | undefined, username: string | undefined, locale: string): string {
+  return buildDefaultUfteTaskName(typeCode, username, locale, dayjs().format('YYYY-MM-DD HH:mm:ss'));
 }
 
 function isUpgradeTaskCategory(category?: string) {
@@ -174,14 +158,18 @@ export default function FileTransferCenter() {
   // 任务名称自动填充用：取登录用户名拼前缀，displayName / username 哪个有用哪个。
   const currentUser = useUserStore((s) => s.currentUser);
   const taskNameUser = currentUser?.username || currentUser?.displayName || 'user';
+  const appLocale = useAppStore((s) => s.locale);
   // lastAutoFilledTaskNameRef 记录最近一次自动填的名字。用户在表单里手动改过 → ref
   // 跟 form 值不再一致 → typeCode 切换时不覆盖；用户没改 → 切换业务时跟着刷新。
   const lastAutoFilledTaskNameRef = useRef<string>('');
   const { data: taskTypes = [], isLoading: taskTypesLoading } = useUnifiedFileTransferTaskTypes();
   const { data: productClasses = [] } = useProductClasses();
   const categories = useMemo(() => buildCategoryTabs(taskTypes), [taskTypes]);
-  const [selectedCategory, setSelectedCategory] = useState('');
-  const [selectedTypeCode, setSelectedTypeCode] = useState('');
+  // URL 参数初始化：?category=...&typeCode=... 用于外部 deep link（如
+  // 设备列表批量"日志收集"自动跳到 station_log + RUNTIME_LOG_COLLECT tab）。
+  const [urlSearchParams] = useSearchParams();
+  const [selectedCategory, setSelectedCategory] = useState(() => urlSearchParams.get('category') ?? '');
+  const [selectedTypeCode, setSelectedTypeCode] = useState(() => urlSearchParams.get('typeCode') ?? '');
   const [taskPage, setTaskPage] = useState(1);
   const [taskPageSize, setTaskPageSize] = useState(10);
   const [taskKeyword, setTaskKeyword] = useState('');
@@ -891,7 +879,6 @@ export default function FileTransferCenter() {
           return <Tag color={color}>{label}</Tag>;
         },
       },
-      { title: '归属范围', dataIndex: 'operatorScope', key: 'operatorScope', width: 160 },
       {
         title: '创建时间',
         dataIndex: 'createdAt',
@@ -1077,7 +1064,7 @@ export default function FileTransferCenter() {
       void message.warning('当前业务视图下还没有模板，请联系管理员先维护模板。');
       return;
     }
-    const defaultTaskName = buildDefaultTaskName(nextTypeCode, taskNameUser);
+    const defaultTaskName = buildDefaultTaskName(nextTypeCode, taskNameUser, appLocale);
     lastAutoFilledTaskNameRef.current = defaultTaskName;
     taskForm.setFieldsValue({
       taskName: defaultTaskName,
@@ -1104,7 +1091,7 @@ export default function FileTransferCenter() {
     if (currentTaskName && currentTaskName !== lastAutoFilledTaskNameRef.current) {
       return;
     }
-    const nextName = buildDefaultTaskName(drawerTypeCode, taskNameUser);
+    const nextName = buildDefaultTaskName(drawerTypeCode, taskNameUser, appLocale);
     lastAutoFilledTaskNameRef.current = nextName;
     taskForm.setFieldValue('taskName', nextName);
   }, [drawerTypeCode, taskDrawerOpen, taskForm, taskNameUser]);
@@ -1226,7 +1213,7 @@ export default function FileTransferCenter() {
                     <Space wrap>
                       <Input.Search
                         allowClear
-                        placeholder="按任务名称、类型、归属范围搜索"
+                        placeholder="按任务名称、类型搜索"
                         value={taskKeywordInput}
                         onChange={(event) => setTaskKeywordInput(event.target.value)}
                         onSearch={(value) => setTaskKeyword(value.trim())}
