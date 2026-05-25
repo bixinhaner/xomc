@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |------|----|
-| Commit | `PENDING`（commit 后回填） |
+| Commit | `dfb1bc3d` |
 | Author | shangyingbin |
 | Scope | pm + migration |
 | Backlog | T-0164（G1 真机闭环延续，BUG-6） |
