@@ -126,6 +126,43 @@ type DeviceInfo struct {
 	// RunTime 累计运行时间（秒）
 	RunTime int64 `json:"run_time"`
 
+	// ===== Phase 2/3 (设计文档 §4.2)：扩展基础信息字段（指针 nullable）=====
+	// 这些列在 migration 000181 加入；InfoSyncer 按 universalInformMapping
+	// 和派生计算回填。前端 BasicTab「小区信息 / 状态信息 / 其他信息」分组消费。
+
+	// TAC Tracking Area Code（TR-181 EPC.TAC）
+	TAC *string `json:"tac,omitempty"`
+
+	// Band LTE 频段编号（TR-181 RAN.RF.FreqBandIndicator）
+	Band *string `json:"band,omitempty"`
+
+	// ULEarfcn 上行频点号（TR-181 RAN.RF.EARFCNUL；与 FreqPoint 对称）
+	ULEarfcn *string `json:"ul_earfcn,omitempty"`
+
+	// SubframeAssignment TDD 帧配比（RAN.PHY.TDDFrame.SubFrameAssignment）
+	SubframeAssignment *string `json:"subframe_assignment,omitempty"`
+
+	// SpecialSubframe TDD 特殊子帧（RAN.PHY.TDDFrame.SpecialSubframePatterns）
+	SpecialSubframe *string `json:"special_subframe,omitempty"`
+
+	// RootIndex PRACH 根索引（RAN.PHY.PRACH.ZeroCorrelationZoneConfig）
+	RootIndex *string `json:"root_index,omitempty"`
+
+	// GPSSatellites GPS 卫星数（FAP.GPS.NumberOfSatellites）
+	GPSSatellites *int `json:"gps_satellites,omitempty"`
+
+	// GPSHeight GPS 高度（米；CPE 上报 path 优先 altidute → Altitude → Height）
+	GPSHeight *float64 `json:"gps_height,omitempty"`
+
+	// LockStatus 小区锁状态（FAPControl.LTE.AdminState："true"=unlocked/"false"=locked）
+	LockStatus *string `json:"lock_status,omitempty"`
+
+	// EnbID eNodeB ID（派生：ECI >> 8）
+	EnbID *string `json:"enb_id,omitempty"`
+
+	// NetworkModel "TDD" / "FDD"（派生：根据 PHY 子帧 path 是否存在）
+	NetworkModel *string `json:"network_model,omitempty"`
+
 	// ===== 审计字段 =====
 
 	// Creator 创建人用户名

@@ -56,8 +56,84 @@ func parseRunTimeToSeconds(val string) int64 {
 // universalInformMapping maps TR069 parameter paths to device_info columns
 // for parameters that are identical across all carriers (not carrier-specific).
 // Note: run_time is handled separately with priority logic (UpTime > X_COM_STATION_RUN_Time)
+//
+// Phase 3 (设计文档 §4.2 Layer B)：扩充 TR-181 标准 path 映射，覆盖
+// device_info 表新增的 9 个字段。这些 path 与运营商无关（CMCC/CTCC/CUCC
+// CPE 上报的字段名相同），统一在此 mapping 表，避免三个 adapter 冗余。
+// carrier-specific 路径仍保留在各自 adapter.GetInfoParamMapping 中（如
+// X_CMCC_MACAddress 兜底）— InfoSyncer 用 universal 后写覆盖 carrier
+// 的语义：标准 path 优先（若 CPE 同时上报两种，标准胜出）。
 var universalInformMapping = map[string]string{
-	"Device.Services.FAPService.1.FAPControl.X_RADISYS_COM_AlarmStatus": "alarm_severity",
+	"Device.Services.FAPService.1.FAPControl.X_RADISYS_COM_AlarmStatus":                      "alarm_severity",
+	// TR-181 Ethernet 标准 path（取代 CMCC X_CMCC_MACAddress，多数 CPE 上报此 path）
+	"Device.Ethernet.Interface.MACAddress": "mac",
+	// 发射功率：CPE 实际上报 MaxTxPower（Capabilities 子树）而非 ReferenceSignalPower
+	"Device.Services.FAPService.1.Capabilities.MaxTxPower": "transmit_power",
+	// LTE 小区配置（device_info 表 Phase 2 新增列）
+	"Device.Services.FAPService.1.CellConfig.LTE.EPC.TAC":                  "tac",
+	"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.FreqBandIndicator": "band",
+	"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.EARFCNUL":          "ul_earfcn",
+	"Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment":    "subframe_assignment",
+	"Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.TDDFrame.SpecialSubframePatterns": "special_subframe",
+	"Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.PRACH.ZeroCorrelationZoneConfig":  "root_index",
+	// GPS（卫星数 + 高度）
+	"Device.FAP.GPS.NumberOfSatellites": "gps_satellites",
+	// 锁状态 = FAP AdminState（"true"=已激活/unlocked, "false"=锁定）
+	"Device.Services.FAPService.1.FAPControl.LTE.AdminState": "lock_status",
+}
+
+// gpsHeightCandidatePaths lists possible TR069 paths for GPS height.
+// CPE 上报的字段名有拼写差异（`altidute` 是 Baicells 固件字面值），按顺序
+// 优先匹配第一个有值的 path。Phase 3 fallback 链；后续固件统一后可裁剪。
+var gpsHeightCandidatePaths = []string{
+	"Device.FAP.GPS.altidute", // Baicells BaiBLQ 实测拼写
+	"Device.FAP.GPS.Altitude", // TR-181 spec 标准拼写
+	"Device.FAP.GPS.Height",
+}
+
+// deriveEnbID 从 LTE ECI 派生 eNodeB ID。
+//
+// TR-36.413 / 3GPP 标准：28-bit ECI = 20-bit eNB-ID + 8-bit Cell-ID。
+// 即 enb_id = eci >> 8。
+//
+// 返回 (派生值字符串, ok)。ok=false 表示输入无效（空 / 非数字 / 0）。
+func deriveEnbID(eci string) (string, bool) {
+	if eci == "" {
+		return "", false
+	}
+	eciInt, err := strconv.ParseInt(eci, 10, 64)
+	if err != nil || eciInt <= 0 {
+		return "", false
+	}
+	return strconv.FormatInt(eciInt>>8, 10), true
+}
+
+// deriveNetworkModel 根据 PHY 子帧 path 是否存在判定 TDD / FDD。
+//
+// LTE 帧结构由 SubFrameAssignment / SpecialSubframePatterns 标识 TDD；
+// FDDFrame 子树标识 FDD。两者互斥。
+//
+// 返回 (模式字符串, ok)。ok=false 表示无法判定（参数缺失）。
+func deriveNetworkModel(paramValues map[string]string) (string, bool) {
+	if _, ok := paramValues["Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment"]; ok {
+		return "TDD", true
+	}
+	if _, ok := paramValues["Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.FDDFrame.SubFrameAssignment"]; ok {
+		return "FDD", true
+	}
+	return "", false
+}
+
+// lookupGPSHeight 按候选 path 优先级查找 GPS 高度值。
+//
+// 命中第一个非空值即返回；全部未命中返回 ("", false)。
+func lookupGPSHeight(paramValues map[string]string) (string, bool) {
+	for _, p := range gpsHeightCandidatePaths {
+		if v, ok := paramValues[p]; ok && v != "" {
+			return v, true
+		}
+	}
+	return "", false
 }
 
 // TR069 parameter paths for run_time with priority
@@ -157,6 +233,19 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 	fields["gps_status"] = CalcGPSStatus(paramValues)
 	fields["num_of_cells"] = CalcNumOfCells(paramValues)
 	fields["license_status"] = CalcLicenseStatus(paramValues)
+
+	// Phase 3 派生字段（设计文档 §4.2 Layer C）：
+	if v, ok := lookupGPSHeight(paramValues); ok {
+		fields["gps_height"] = v
+	}
+	if eci, ok := fields["eci"].(string); ok {
+		if enb, ok := deriveEnbID(eci); ok {
+			fields["enb_id"] = enb
+		}
+	}
+	if model, ok := deriveNetworkModel(paramValues); ok {
+		fields["network_model"] = model
+	}
 
 	if len(fields) == 0 {
 		return nil
