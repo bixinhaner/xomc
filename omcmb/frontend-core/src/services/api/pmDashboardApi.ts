@@ -36,11 +36,15 @@ import type {
   Dimension,
   CompareMode,
   Technology,
+  AggregatedQueryParams,
+  AggregatedRow,
+  BackendAggregatedRow,
 } from '../../types/pmDashboard';
 import {
   mapBackendDashboard,
   mapBackendPanel,
   mapBackendPreferences,
+  mapBackendAggregatedRow,
 } from '../../types/pmDashboard';
 
 interface ListResponse {
@@ -98,21 +102,21 @@ function panelBody(input: CreatePanelInput) {
 export const pmDashboardApi = {
   // Dashboard CRUD
   async list(): Promise<Dashboard[]> {
-    const resp = await http.get<ListResponse>('/pm/dashboards');
-    return (resp.items ?? []).map(mapBackendDashboard);
+    const { data } = await http.get<ListResponse>('/pm/dashboards');
+    return (data.items ?? []).map(mapBackendDashboard);
   },
 
   async get(id: string): Promise<DashboardDetail> {
-    const resp = await http.get<DetailResponse>(`/pm/dashboards/${id}`);
+    const { data } = await http.get<DetailResponse>(`/pm/dashboards/${id}`);
     return {
-      dashboard: mapBackendDashboard(resp.dashboard),
-      panels: (resp.panels ?? []).map(mapBackendPanel),
+      dashboard: mapBackendDashboard(data.dashboard),
+      panels: (data.panels ?? []).map(mapBackendPanel),
     };
   },
 
   async create(input: CreateDashboardInput): Promise<Dashboard> {
-    const resp = await http.post<BackendDashboard>('/pm/dashboards', dashboardCreateBody(input));
-    return mapBackendDashboard(resp);
+    const { data } = await http.post<BackendDashboard>('/pm/dashboards', dashboardCreateBody(input));
+    return mapBackendDashboard(data);
   },
 
   async update(id: string, input: UpdateDashboardInput): Promise<void> {
@@ -124,10 +128,10 @@ export const pmDashboardApi = {
   },
 
   async fork(input: ForkInput): Promise<Dashboard> {
-    const resp = await http.post<BackendDashboard>(`/pm/dashboards/${input.sourceId}/fork`, {
+    const { data } = await http.post<BackendDashboard>(`/pm/dashboards/${input.sourceId}/fork`, {
       new_name: input.newName,
     });
-    return mapBackendDashboard(resp);
+    return mapBackendDashboard(data);
   },
 
   async share(input: ShareInput): Promise<void> {
@@ -140,11 +144,11 @@ export const pmDashboardApi = {
 
   // Panel CRUD
   async createPanel(input: CreatePanelInput): Promise<Panel> {
-    const resp = await http.post<BackendPanel>(
+    const { data } = await http.post<BackendPanel>(
       `/pm/dashboards/${input.dashboardId}/panels`,
       panelBody(input),
     );
-    return mapBackendPanel(resp);
+    return mapBackendPanel(data);
   },
 
   async updatePanel(input: CreatePanelInput & { panelId: string }): Promise<void> {
@@ -160,10 +164,10 @@ export const pmDashboardApi = {
 
   // UserPreferences（T-0164 收尾 G6-Gap-3：按制式分键持久化）
   async getUserPrefs(technology: Technology = 'lte'): Promise<UserDashboardPreferences> {
-    const resp = await http.get<BackendUserPreferences>('/pm/user-preferences/dashboard', {
+    const { data } = await http.get<BackendUserPreferences>('/pm/user-preferences/dashboard', {
       params: { technology },
     });
-    return mapBackendPreferences(resp);
+    return mapBackendPreferences(data);
   },
 
   async setUserPrefs(input: UpsertUserPreferencesInput): Promise<void> {
@@ -173,6 +177,31 @@ export const pmDashboardApi = {
       current_dashboard_id: input.currentDashboardId,
       shared_filters: input.sharedFilters ?? {},
     });
+  },
+
+  // G6 Phase 4: 走 G5 aggregator → 按粒度路由聚合表（hourly+ 直查物化表，15min 退回 pm_metrics 原表）。
+  async queryAggregated(params: AggregatedQueryParams): Promise<AggregatedRow[]> {
+    // metricPaths 后端期望 comma-separated；其它 snake_case 参数手工拼，避免被 http 拦截器误转。
+    const qp: Record<string, string | number | undefined> = {
+      granularity: params.granularity,
+      dimension: params.dimension,
+      device_oui: params.deviceOui,
+      device_sn: params.deviceSn,
+      device_group_id: params.deviceGroupId,
+      metric_paths: params.metricPaths && params.metricPaths.length > 0
+        ? params.metricPaths.join(',')
+        : undefined,
+      metric_type: params.metricType,
+      start_time: params.startTime,
+      end_time: params.endTime,
+      limit: params.limit,
+      offset: params.offset,
+    };
+    const { data } = await http.get<{ items: BackendAggregatedRow[] | null; total: number }>(
+      '/pm/metrics/aggregated',
+      { params: qp },
+    );
+    return (data.items ?? []).map(mapBackendAggregatedRow);
   },
 };
 
@@ -312,4 +341,50 @@ export const pmDashboardMock: typeof pmDashboardApi = {
       sharedFilters: input.sharedFilters ?? {},
     };
   },
+
+  // Mock：每个 metric 拉出 deterministic 序列。粒度按入参 8 桶。
+  async queryAggregated(params): Promise<AggregatedRow[]> {
+    const buckets = mockBuckets(params.granularity);
+    const paths = params.metricPaths && params.metricPaths.length > 0
+      ? params.metricPaths
+      : ['MOCK.Counter'];
+    const out: AggregatedRow[] = [];
+    paths.forEach((path) => {
+      buckets.forEach((iso, i) => {
+        out.push({
+          deviceOui: params.deviceOui ?? 'MOCK',
+          deviceSn: params.deviceSn ?? 'MOCK-0001',
+          deviceGroupId: undefined,
+          metricPath: path,
+          metricType: (params.metricType ?? 'counter') as 'counter' | 'kpi',
+          metricValue: Math.round((90 + ((i * 3) % 11) + Math.sin(i) * 2) * 100) / 100,
+          statisType: 'sum',
+          granularity: params.granularity,
+          time: iso,
+          startTime: iso,
+          endTime: iso,
+          ingestTime: iso,
+          objectLdn: null,
+          extra: {},
+        });
+      });
+    });
+    return out;
+  },
 };
+
+// ── Helpers ────────────────────────────────────────────────────────────
+
+function mockBuckets(g: Granularity): string[] {
+  const now = Date.now();
+  const stepMs = g === '15min'
+    ? 15 * 60_000
+    : g === 'hourly'
+    ? 3_600_000
+    : g === 'daily'
+    ? 86_400_000
+    : g === 'weekly'
+    ? 7 * 86_400_000
+    : 30 * 86_400_000; // monthly approx
+  return Array.from({ length: 8 }, (_, i) => new Date(now - (7 - i) * stepMs).toISOString());
+}

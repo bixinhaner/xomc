@@ -220,3 +220,78 @@ export function mapBackendPreferences(b: BackendUserPreferences): UserDashboardP
     sharedFilters: b.shared_filters ?? {},
   };
 }
+
+// ── G6 Phase 4: /pm/metrics/aggregated 真 API 数据形态 ─────────────────
+
+export interface AggregatedQueryParams {
+  granularity: Granularity;
+  dimension?: Dimension;
+  // 后端 v1 handler 只支持单 OUI+SN 过滤；多设备走多次查询或 group dimension。
+  deviceOui?: string;
+  deviceSn?: string;
+  deviceGroupId?: string;
+  metricPaths?: string[];
+  metricType?: 'counter' | 'kpi';
+  // ISO RFC3339 字符串。
+  startTime?: string;
+  endTime?: string;
+  limit?: number;
+  offset?: number;
+}
+
+// 后端 aggregator.Row JSON（已加 snake_case json tag）。
+export interface BackendAggregatedRow {
+  device_oui?: string;
+  device_sn?: string;
+  // device 维度查询时是全零 UUID；分组维度才有实际值。前端在 mapper 里把全零规整成 undefined。
+  device_group_id?: string;
+  metric_path: string;
+  metric_type: string;
+  metric_value: number;
+  statis_type?: string;
+  granularity: string;
+  time: string;
+  start_time: string;
+  end_time: string;
+  ingest_time: string;
+  object_ldn?: string | null;
+  extra?: Record<string, unknown>;
+}
+
+export interface AggregatedRow {
+  deviceOui?: string;
+  deviceSn?: string;
+  deviceGroupId?: string;
+  metricPath: string;
+  metricType: 'counter' | 'kpi';
+  metricValue: number;
+  statisType?: string;
+  granularity: Granularity;
+  time: string;
+  startTime: string;
+  endTime: string;
+  ingestTime: string;
+  objectLdn?: string | null;
+  extra?: Record<string, unknown>;
+}
+
+const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
+
+export function mapBackendAggregatedRow(b: BackendAggregatedRow): AggregatedRow {
+  return {
+    deviceOui: b.device_oui || undefined,
+    deviceSn: b.device_sn || undefined,
+    deviceGroupId: !b.device_group_id || b.device_group_id === ZERO_UUID ? undefined : b.device_group_id,
+    metricPath: b.metric_path,
+    metricType: (b.metric_type as 'counter' | 'kpi') ?? 'counter',
+    metricValue: b.metric_value,
+    statisType: b.statis_type,
+    granularity: b.granularity as Granularity,
+    time: b.time,
+    startTime: b.start_time,
+    endTime: b.end_time,
+    ingestTime: b.ingest_time,
+    objectLdn: b.object_ldn ?? null,
+    extra: b.extra ?? {},
+  };
+}

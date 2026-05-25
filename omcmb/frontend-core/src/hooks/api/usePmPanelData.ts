@@ -1,15 +1,32 @@
 /**
- * G6-Gap-7：Panel 数据加载 hook（含对比双模式语义）。
+ * G6-Gap-7 / G6 Phase 4：Panel 数据加载 hook（真 API）。
  *
- * v1 实现：返回 deterministic mock series（按 panelId + granularity 哈希），
- * 当 panel.compareMode 非空时返回 compareSeries（双 series 或多 series）。
+ * 调用 /pm/metrics/aggregated（后端走 G5 aggregator → 按粒度路由聚合表，
+ * 15min 退回 pm_metrics 原表；hourly+ 直查物化表）。
  *
- * v2 计划：替换 mockSeries() 内部为调 /pm/aggregation/query 或 KPI 查询接口；
- * Hook 对外 API（PanelSeriesData / usePmPanelData 签名）保持不变。
+ * compareMode 处理（v2 待补，G6 Phase 4 简化先只渲染 primary series）：
+ *   - 'previous_window' / 'same_window_other_devices' 在 v2 触发第二次 API 调用，
+ *     生成 'compare' kind series。当前版本透传 panel.compareMode 但不渲染对比线。
+ *
+ * 限制（v1）：
+ *   - 后端 handler 只支持单 OUI+SN / 单 device_group_id；panel.deviceSns 取第 0 项。
+ *   - 多设备并列对比走 dimension='device_group' + deviceGroupIds。
  */
 
 import { useMemo } from 'react';
-import type { CompareMode, Granularity, Panel } from '../../types/pmDashboard';
+import { useQuery } from '@tanstack/react-query';
+import { createApiSwitch } from '../../services/apiSwitch';
+import { pmDashboardApi, pmDashboardMock } from '../../services/api/pmDashboardApi';
+import type {
+  AggregatedQueryParams,
+  AggregatedRow,
+  CompareMode,
+  Granularity,
+  Panel,
+  PanelTimeRange,
+} from '../../types/pmDashboard';
+
+const api = createApiSwitch(pmDashboardMock, pmDashboardApi);
 
 export interface PanelSeriesPoint {
   // X 轴标签（时间桶或设备名）。
@@ -33,79 +50,160 @@ export interface PanelSeriesData {
   // 当前 panel 是否处于对比模式（非空 = 渲染时多 series 处理）。
   compareMode: CompareMode | undefined;
   isLoading: boolean;
+  isError: boolean;
+  error?: unknown;
 }
 
-// 基于 (panelId, granularity, metric) 生成 deterministic 数字 0..N-1
-function hash(seed: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < seed.length; i++) {
-    h ^= seed.charCodeAt(i);
-    h = Math.imul(h, 16777619);
+// 把 panel.timeRange + 兜底窗口换算成 RFC3339 startTime/endTime。
+function resolveTimeWindow(
+  timeRange: PanelTimeRange | undefined,
+  granularity: Granularity,
+): { startTime?: string; endTime?: string } {
+  const now = Date.now();
+  if (timeRange && 'absolute_start' in timeRange && 'absolute_end' in timeRange) {
+    return { startTime: timeRange.absolute_start, endTime: timeRange.absolute_end };
   }
-  return Math.abs(h >>> 0);
+  let startOffsetMs = defaultWindowMs(granularity);
+  let endOffsetMs = 0;
+  if (timeRange && 'start_offset' in timeRange) {
+    const so = parseOffset(timeRange.start_offset);
+    if (so > 0) startOffsetMs = so;
+    if (timeRange.end_offset) {
+      const eo = parseOffset(timeRange.end_offset);
+      if (eo >= 0) endOffsetMs = eo;
+    }
+  }
+  return {
+    startTime: new Date(now - startOffsetMs).toISOString(),
+    endTime: new Date(now - endOffsetMs).toISOString(),
+  };
 }
 
-function granularityBuckets(g: Granularity): string[] {
+// '-1h' / '-7d' / '-2w' / '-3M' → ms（正数）。无法解析返 0。
+function parseOffset(s: string): number {
+  const m = s.match(/^-?(\d+)([hdwM])$/);
+  if (!m) return 0;
+  const n = parseInt(m[1], 10);
+  switch (m[2]) {
+    case 'h':
+      return n * 3_600_000;
+    case 'd':
+      return n * 86_400_000;
+    case 'w':
+      return n * 7 * 86_400_000;
+    case 'M':
+      return n * 30 * 86_400_000;
+  }
+  return 0;
+}
+
+function defaultWindowMs(g: Granularity): number {
   switch (g) {
     case '15min':
-      return ['00:00', '00:15', '00:30', '00:45', '01:00', '01:15', '01:30', '01:45'];
+      return 2 * 3_600_000;
     case 'hourly':
-      return ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00'];
+      return 24 * 3_600_000;
     case 'daily':
-      return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      return 30 * 86_400_000;
     case 'weekly':
-      return ['W1', 'W2', 'W3', 'W4'];
+      return 12 * 7 * 86_400_000;
     case 'monthly':
-      return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+      return 12 * 30 * 86_400_000;
   }
 }
 
-// 给一组 bucket 生成 deterministic 数列；可叠加偏移做对比 series。
-function mockSeries(seed: string, buckets: string[], offset: number): PanelSeriesPoint[] {
-  const base = hash(seed) % 20;
-  return buckets.map((label, i) => {
-    // 在固定模式下塞一个 null 模拟缺采（G6-Gap-9 (c)）
-    const value =
-      i === Math.floor(buckets.length / 2) && seed.endsWith(':primary:0')
-        ? null
-        : Math.round((90 + ((base + i * 3 + offset) % 11) + Math.sin(i + offset) * 1.5) * 100) / 100;
-    return { label, value };
+function formatBucketLabel(iso: string, g: Granularity): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const MM = pad(d.getMonth() + 1);
+  const DD = pad(d.getDate());
+  const HH = pad(d.getHours());
+  const mm = pad(d.getMinutes());
+  switch (g) {
+    case '15min':
+      return `${HH}:${mm}`;
+    case 'hourly':
+      return `${MM}-${DD} ${HH}:00`;
+    case 'daily':
+    case 'weekly':
+      return `${MM}-${DD}`;
+    case 'monthly':
+      return `${d.getFullYear()}-${MM}`;
+  }
+}
+
+function buildQueryParams(panel: Panel, granularity: Granularity): AggregatedQueryParams | null {
+  if (!panel.metricPaths || panel.metricPaths.length === 0) return null;
+  const { startTime, endTime } = resolveTimeWindow(panel.timeRange, granularity);
+  const params: AggregatedQueryParams = {
+    granularity,
+    dimension: panel.dimension,
+    metricPaths: panel.metricPaths,
+    startTime,
+    endTime,
+    limit: 5000,
+  };
+  if (panel.dimension === 'device_group' && panel.deviceGroupIds && panel.deviceGroupIds.length > 0) {
+    params.deviceGroupId = panel.deviceGroupIds[0];
+  } else if (panel.deviceSns && panel.deviceSns.length > 0) {
+    params.deviceSn = panel.deviceSns[0];
+  }
+  return params;
+}
+
+// AggregatedRow[] → PanelSeries[]：按 metricPath 分组，按 time 升序，去重同桶取最后一条。
+function rowsToSeries(rows: AggregatedRow[], panel: Panel, granularity: Granularity): PanelSeries[] {
+  const byMetric = new Map<string, AggregatedRow[]>();
+  for (const r of rows) {
+    if (!byMetric.has(r.metricPath)) byMetric.set(r.metricPath, []);
+    byMetric.get(r.metricPath)!.push(r);
+  }
+  return panel.metricPaths.map((metric) => {
+    const list = (byMetric.get(metric) ?? [])
+      .slice()
+      .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+    const points: PanelSeriesPoint[] = list.map((r) => {
+      const lagSec = Math.max(0, Math.floor((new Date(r.ingestTime).getTime() - new Date(r.time).getTime()) / 1000));
+      return {
+        label: formatBucketLabel(r.time, granularity),
+        value: r.metricValue,
+        ingestLagSeconds: lagSec > 0 ? lagSec : undefined,
+      };
+    });
+    return { name: metric, kind: 'primary', points };
   });
 }
 
-/**
- * v1：纯 mock；后续 v2 替换为真实 API 调用。
- *
- * 行为：
- *   - 主 series：panel.metricPaths 每个 metric 生成一条 primary series。
- *   - compareMode='previous_window'：每个 metric 多一条 "前一周期" compare series（偏移 5）。
- *   - compareMode='same_window_other_devices'：每个 metric 多一条 "对比设备" compare series（偏移 -3）。
- *   - compareMode=undefined：只返主 series。
- */
 export function usePmPanelData(panel: Panel, activeGranularity: Granularity): PanelSeriesData {
+  const params = useMemo(() => buildQueryParams(panel, activeGranularity), [panel, activeGranularity]);
+
+  const query = useQuery({
+    queryKey: [
+      'pm',
+      'panel-aggregated',
+      panel.id,
+      activeGranularity,
+      params?.dimension,
+      params?.deviceSn,
+      params?.deviceGroupId,
+      params?.metricPaths?.join(','),
+      params?.startTime,
+      params?.endTime,
+    ],
+    queryFn: () => api.queryAggregated(params!),
+    enabled: params != null,
+    staleTime: 30_000,
+  });
+
   return useMemo(() => {
-    const buckets = granularityBuckets(activeGranularity);
-    const series: PanelSeries[] = [];
-    panel.metricPaths.forEach((metric, idx) => {
-      series.push({
-        name: metric,
-        kind: 'primary',
-        points: mockSeries(`${panel.id}:${activeGranularity}:${metric}:primary:${idx}`, buckets, 0),
-      });
-      if (panel.compareMode === 'previous_window') {
-        series.push({
-          name: `${metric} (上一周期)`,
-          kind: 'compare',
-          points: mockSeries(`${panel.id}:${activeGranularity}:${metric}:prev:${idx}`, buckets, 5),
-        });
-      } else if (panel.compareMode === 'same_window_other_devices') {
-        series.push({
-          name: `${metric} (对比设备)`,
-          kind: 'compare',
-          points: mockSeries(`${panel.id}:${activeGranularity}:${metric}:other:${idx}`, buckets, -3),
-        });
-      }
-    });
-    return { series, compareMode: panel.compareMode, isLoading: false };
-  }, [panel, activeGranularity]);
+    const rows = query.data ?? [];
+    const series = rowsToSeries(rows, panel, activeGranularity);
+    return {
+      series,
+      compareMode: panel.compareMode,
+      isLoading: query.isLoading,
+      isError: query.isError,
+      error: query.error,
+    };
+  }, [query.data, query.isLoading, query.isError, query.error, panel, activeGranularity]);
 }

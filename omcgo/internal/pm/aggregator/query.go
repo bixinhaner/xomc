@@ -42,21 +42,22 @@ type QueryRequest struct {
 
 // Row 是 Aggregator.Query 的输出行。device 维度填 DeviceOUI/DeviceSN/ObjectLDN；
 // device_group 维度填 DeviceGroupID。其余字段两维度共用。
+// JSON tag 统一 snake_case 对齐其它 REST 响应；前端 mapper 走 snake → camel。
 type Row struct {
-	DeviceOUI     string
-	DeviceSN      string
-	DeviceGroupID uuid.UUID
-	MetricPath    string
-	MetricType    metrics.MetricType
-	MetricValue   float64
-	StatisType    *metrics.StatisType
-	Granularity   metrics.Granularity
-	Time          time.Time
-	StartTime     time.Time
-	EndTime       time.Time
-	IngestTime    time.Time
-	ObjectLDN     *string
-	Extra         map[string]any
+	DeviceOUI     string              `json:"device_oui,omitempty"`
+	DeviceSN      string              `json:"device_sn,omitempty"`
+	DeviceGroupID uuid.UUID           `json:"device_group_id,omitempty"`
+	MetricPath    string              `json:"metric_path"`
+	MetricType    metrics.MetricType  `json:"metric_type"`
+	MetricValue   float64             `json:"metric_value"`
+	StatisType    *metrics.StatisType `json:"statis_type,omitempty"`
+	Granularity   metrics.Granularity `json:"granularity"`
+	Time          time.Time           `json:"time"`
+	StartTime     time.Time           `json:"start_time"`
+	EndTime       time.Time           `json:"end_time"`
+	IngestTime    time.Time           `json:"ingest_time"`
+	ObjectLDN     *string             `json:"object_ldn,omitempty"`
+	Extra         map[string]any      `json:"extra,omitempty"`
 }
 
 // Query 根据 (Granularity, Dimension) 路由到对应聚合表查询。
