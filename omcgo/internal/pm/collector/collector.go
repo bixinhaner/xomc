@@ -51,6 +51,21 @@ type DeviceLookup interface {
 	GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error)
 }
 
+// CounterWhitelist 按设备 SN 返回指标库定义的 counter name 集合，用于过滤
+// PM 文件里的孤儿 counter（厂家上报但 perf_indicators_{enb,gnb,gsm} 未注册）。
+//
+// 真实实现用 router.Router（设备 → product → indicator_platform → counter 子集）。
+// worker main 写 adapter 把 *router.Router 包装成此接口，避免 collector 直接耦合 router 包。
+//
+// 错误处理约定（fail-open，参见 BUG-6 真根因复盘）：
+//   - 返回 (nil, err)：collector 跳过过滤，log warn 后照常 BatchInsert 全量 counter；
+//     不阻塞 PM 处理。失败保留量比误删数据风险小。
+//   - 返回 (empty set, nil)：collector 同样跳过过滤（防误删全部 — 如启动期缓存未就绪）。
+//   - 返回 (set, nil)：set 内的 counter 保留，其他作为孤儿丢弃。
+type CounterWhitelist interface {
+	LookupCounters(ctx context.Context, deviceSN string) (map[string]struct{}, error)
+}
+
 // PMCollector handles PM file processing: download from MinIO, parse XML, store counters.
 //
 // The optional runner.Wrapper field enables retry + DLQ instrumentation: when
@@ -60,17 +75,18 @@ type DeviceLookup interface {
 // is registered directly, preserving legacy behaviour for tests / single-process
 // deployments without DLQ infra.
 type PMCollector struct {
-	minioClient  *minio.Client
-	bucket       string
-	parser       *PMXMLParser
-	counterRepo  counter.CounterRepository
-	kpiEngine    *kpi.KPIEngine
-	fileStore    pm.PMFileStore
-	eventBus     event.EventBus
-	metrics      *pm.PMMetrics
-	runner       runner.Wrapper
-	deviceLookup DeviceLookup
-	logger       *zap.Logger
+	minioClient      *minio.Client
+	bucket           string
+	parser           *PMXMLParser
+	counterRepo      counter.CounterRepository
+	kpiEngine        *kpi.KPIEngine
+	fileStore        pm.PMFileStore
+	eventBus         event.EventBus
+	metrics          *pm.PMMetrics
+	runner           runner.Wrapper
+	deviceLookup     DeviceLookup
+	counterWhitelist CounterWhitelist
+	logger           *zap.Logger
 }
 
 // NewPMCollector creates a new PM collector.
@@ -108,6 +124,13 @@ func (c *PMCollector) SetRunner(w runner.Wrapper) {
 // thin-payload events fail the existing uuid.Parse(DeviceID) check.
 func (c *PMCollector) SetDeviceLookup(lookup DeviceLookup) {
 	c.deviceLookup = lookup
+}
+
+// SetCounterWhitelist wires the indicator-library-driven counter whitelist
+// (T-0164 G1 BUG-6 真根因复盘 / 方案 D)：解析后用于丢弃指标库未注册的孤儿
+// counter。Nil-safe — 未设置时 collector 不过滤，行为退化到注入前。
+func (c *PMCollector) SetCounterWhitelist(w CounterWhitelist) {
+	c.counterWhitelist = w
 }
 
 // Subscribe registers the collector to listen for PM file received events.
@@ -199,14 +222,13 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 		c.metrics.ReportDelaySeconds.WithLabelValues(payload.Carrier, payload.Technology).Observe(delay)
 	}
 
-	// T-0164-P3: parser 不知道 OUI（XML 内不含），由 collector 从 payload 统一填充。
-	// OUI 同一文件内必然一致（一个文件对应一个设备）。
-	for i := range content.Counters {
-		content.Counters[i].OUI = payload.DeviceOUI
-		if content.Counters[i].DeviceSN == "" {
-			content.Counters[i].DeviceSN = payload.DeviceSN
-		}
-	}
+	applyPayloadIdentity(content.Counters, payload.DeviceOUI, payload.DeviceSN)
+
+	// T-0164 G1 BUG-6 方案 D：用产品指标库白名单过滤孤儿 counter。
+	// 厂家 PM 文件可能含未注册 counter（如 Baicells `MR.RIPPRB` × 53 PRB 索引把序号
+	// 编码在 measType.p 而不是 Name 里），落库会撞 pm_metrics 自然键。
+	// 过滤逻辑 fail-open：lookup 失败 / 空白名单时跳过过滤，保留原行为。
+	content.Counters = c.filterByWhitelist(ctx, payload.DeviceSN, content.Counters)
 
 	if err := c.counterRepo.BatchInsert(ctx, content.Counters); err != nil {
 		if c.metrics != nil {
@@ -278,6 +300,60 @@ func (c *PMCollector) resolveDevice(ctx context.Context, payload *FileReceivedPa
 	payload.Carrier = string(dev.Carrier)
 	payload.Technology = string(dev.Technology)
 	return nil
+}
+
+// applyPayloadIdentity 把 ACS upload handler 解析的 (OUI, SN) 覆盖到 parser 输出的
+// Counter 切片，统一全系统设备身份（T-0164-P3 双键 + BUG-6 续修 device_sn 一致性）。
+//
+// 为什么不用 parser 输出的 DeviceSN：parser 从 XML `<managedElement localDn=...>`
+// 提取的 SN 依赖厂家 XML 规范，如 Baicells 真机用 `Station=eNb-{SN}` 格式，parser
+// fallback 取最后一段拿到带 `eNb-` 前缀的脏值。payload.DeviceSN 是 ACS upload
+// handler 从 URL `?sn=` / 文件名规范化解析的 TR-069 标准 SN，是全系统权威源
+// （与 devices / topology / alarm / KPI 等模块一致）。
+//
+// OUI 同样由 payload 统一填充（parser 看不到 OUI — XML 内不含）。
+func applyPayloadIdentity(counters []model.PMCounter, oui, sn string) {
+	for i := range counters {
+		counters[i].OUI = oui
+		counters[i].DeviceSN = sn
+	}
+}
+
+// filterByWhitelist 用产品指标库白名单过滤 counter（T-0164 G1 BUG-6 方案 D）。
+// fail-open：whitelist 未注入 / 查询失败 / 空集合 → 返回原 counters 不过滤。
+func (c *PMCollector) filterByWhitelist(ctx context.Context, deviceSN string, counters []model.PMCounter) []model.PMCounter {
+	if c.counterWhitelist == nil || len(counters) == 0 {
+		return counters
+	}
+	allow, err := c.counterWhitelist.LookupCounters(ctx, deviceSN)
+	if err != nil {
+		c.logger.Warn("counter whitelist lookup failed, skip filter",
+			zap.String("device_sn", deviceSN), zap.Error(err))
+		return counters
+	}
+	if len(allow) == 0 {
+		c.logger.Warn("counter whitelist empty, skip filter (likely cache warming / product not matched)",
+			zap.String("device_sn", deviceSN))
+		return counters
+	}
+
+	kept := counters[:0] // 原地 reslice 复用 slice
+	dropped := 0
+	for _, ctr := range counters {
+		if _, ok := allow[ctr.CounterName]; ok {
+			kept = append(kept, ctr)
+		} else {
+			dropped++
+		}
+	}
+	if dropped > 0 {
+		c.logger.Info("filtered orphan counters not in indicator library",
+			zap.String("device_sn", deviceSN),
+			zap.Int("kept", len(kept)),
+			zap.Int("dropped_orphans", dropped),
+			zap.Int("whitelist_size", len(allow)))
+	}
+	return kept
 }
 
 func extractUniqueCellIDs(counters []model.PMCounter) []string {
