@@ -11,10 +11,11 @@
  *   G6-Gap-9  pct 单位 / 阈值线 / 缺采断线 / 时间轴切换
  */
 
-import { Statistic, Table, Empty } from 'antd';
+import { Alert, Empty, Spin, Statistic, Table } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import type { Granularity, Panel } from '@core/types/pmDashboard';
 import { usePmPanelData, type PanelSeries } from '@core/hooks/api/usePmPanelData';
+import { usePmAdhocDetail } from '@core/hooks/api/usePmAdhoc';
 
 interface Props {
   panel: Panel;
@@ -25,6 +26,25 @@ interface Props {
 
 export function PanelRenderer({ panel, activeGranularity }: Props) {
   const gran: Granularity = activeGranularity ?? panel.granularities?.[0] ?? 'hourly';
+
+  // G7-Gap-8：panel 软引用了 adhoc 任务但任务已删除 / 数据已清理时显示占位
+  const adhocQuery = usePmAdhocDetail(panel.adhocTaskId);
+  if (panel.adhocTaskId) {
+    if (adhocQuery.isLoading) {
+      return <Spin tip="加载 adhoc 任务..." />;
+    }
+    if (adhocQuery.isError || !adhocQuery.data) {
+      return (
+        <Alert
+          type="warning"
+          showIcon
+          message="数据源不可用"
+          description={`关联的自定义聚合任务（${panel.adhocTaskId}）已被删除或结果已超出保留期。请编辑 panel 解除关联或重新创建任务。`}
+        />
+      );
+    }
+  }
+
   switch (panel.panelType) {
     case 'kpi_card':
       return <KpiCardRenderer panel={panel} gran={gran} />;

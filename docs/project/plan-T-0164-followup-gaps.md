@@ -307,8 +307,24 @@ P3（进阶导出 + G6-G7 集成）
   - ✅ G6-Gap-2 共享筛选条 GlobalFilterBar（store.globalFilter + ConfigDrawer.inheritGlobal Switch）
   - ✅ G6-Gap-13 KPI 卡片配置（KpiCardManager Drawer 11 候选 + 上下移 + 持久化 user_preferences.kpi_card_layout）
 
-- [ ] **P3（7 项）— 未启动**
-- [ ] **跨域（2 项）— 未启动**
+- [x] **P3（7 项）— 2026-05-25 dev_done_pending_commit**
+  - ✅ G6-Gap-10 / G7-Gap-4 Excel/PDF 导出（excelExport.ts 工具 + PanelCard / DashboardEditorPane / AdhocResultPanel 集成）
+  - ✅ G6-Gap-11 URL 复现（PerformanceLayout 双向同步 globalFilter ↔ URL query）
+  - ✅ G6-Gap-12 deviceSns > 10 时建议 adhoc（PanelConfigDrawer Alert + 一键跳 + URL preset 预填）
+  - ✅ G7-Gap-1 dashboard 工具栏 "+ 自定义聚合"（CreateAdhocTaskDrawer 抽公共）
+  - ✅ G7-Gap-2 adhoc 结果走 G6 panel 风格（AdhocResultPanel ECharts 多 series + 表格）
+  - ✅ G7-Gap-3 adhoc 粒度 Tab（AdhocResultPanel 内置）
+  - ✅ G7-Gap-8 panel adhoc fallback（PanelRenderer Alert 占位）
+
+- [x] **跨域（2 项）— P1 剩余批已交付（commit `3d0cacfa`）**
+  - ✅ Cross-Gap-1 e2e_verify.sh 加 G5/G6/G7/G8 断言（~15 个 check_status_in）
+  - ✅ Cross-Gap-2 release-gate.md §8.5 G1-G8 完整 DoD + Prometheus 自检命令
+
+---
+
+## ★ T-0164 收尾全部完成（36 项 + 跨域 2 项）
+
+满足真机验证启动条件（用户"全部功能实现后才真机测试"约定）。docker 全栈待重新部署。
 
 ### 上下文窗口预警
 

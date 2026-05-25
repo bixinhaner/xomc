@@ -2,29 +2,25 @@
  * T-0164-P7 / G7 自定义聚合任务管理页面。
  *
  * 左侧 TaskList 列表 + 右侧 ResultsViewer + 顶部 CreateTaskDrawer。
+ *
+ * T-0164 收尾：
+ *   G7-Gap-1  创建抽屉抽到 CreateAdhocTaskDrawer 公共组件（DashboardEditorPane 复用）
+ *   G7-Gap-2  结果查看用 AdhocResultPanel（G6 panel 风格，多指标多 series ECharts）
+ *   G7-Gap-3  AdhocResultPanel 内置粒度 Tab（与 G6-Gap-6 一致）
+ *   G6-Gap-12 联动：PanelConfigDrawer 跳转时携带 ?preset=panel&device_sns=...&metric_paths=...&granularities=...
  */
 
-import { useState } from 'react';
-import { Button, Card, Drawer, Form, Input, Modal, Select, Space, Table, Tag, message, Progress, DatePicker } from 'antd';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { Button, Card, Drawer, Modal, Space, Table, Tag, Progress, message } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
-import dayjs from 'dayjs';
 import {
   usePmAdhocList,
-  useCreatePmAdhoc,
   useCancelPmAdhoc,
-  usePmAdhocResults,
 } from '@core/hooks/api/usePmAdhoc';
 import type { AdhocMode, AdhocStatus, AdhocTask } from '@core/types/pmAdhoc';
-
-const MODE_OPTIONS: { label: string; value: AdhocMode }[] = [
-  { label: '单次执行', value: 'oneshot' },
-  { label: '持续执行', value: 'continuous' },
-];
-
-const GRANULARITY_OPTIONS = ['hourly', 'daily', 'weekly', 'monthly'].map((g) => ({
-  label: g,
-  value: g,
-}));
+import { CreateAdhocTaskDrawer, type CreateAdhocPreset } from './CreateAdhocTaskDrawer';
+import { AdhocResultPanel } from './AdhocResultPanel';
 
 const statusColor: Record<AdhocStatus, string> = {
   pending: 'default',
@@ -35,49 +31,47 @@ const statusColor: Record<AdhocStatus, string> = {
   canceled: 'warning',
 };
 
-interface CreateForm {
-  name: string;
-  mode: AdhocMode;
-  cronExpr?: string;
-  deviceSns: string; // csv
-  metricPaths: string; // csv
-  granularities: string[];
-  window: [dayjs.Dayjs, dayjs.Dayjs];
-}
-
 export default function PmAdhocPage() {
   const { data: tasks = [], isLoading } = usePmAdhocList({ refetchInterval: 5000 });
-  const createMut = useCreatePmAdhoc();
   const cancelMut = useCancelPmAdhoc();
 
+  const [searchParams, setSearchParams] = useSearchParams();
   const [createOpen, setCreateOpen] = useState(false);
+  const [createPreset, setCreatePreset] = useState<CreateAdhocPreset | undefined>(undefined);
   const [selectedTask, setSelectedTask] = useState<AdhocTask | null>(null);
-  const [form] = Form.useForm<CreateForm>();
 
-  const { data: results = [] } = usePmAdhocResults(selectedTask?.id);
-
-  const handleCreate = async () => {
-    const v = await form.validateFields();
-    await createMut.mutateAsync({
-      name: v.name,
-      mode: v.mode,
-      cronExpr: v.cronExpr,
-      deviceSns: v.deviceSns
+  // G6-Gap-12 联动：URL preset 触发自动打开 Drawer
+  useEffect(() => {
+    if (searchParams.get('preset') === 'panel') {
+      const deviceSns = (searchParams.get('device_sns') ?? '')
         .split(',')
         .map((s) => s.trim())
-        .filter(Boolean),
-      metricPaths: v.metricPaths
+        .filter(Boolean);
+      const metricPaths = (searchParams.get('metric_paths') ?? '')
         .split(',')
         .map((s) => s.trim())
-        .filter(Boolean),
-      granularities: v.granularities,
-      windowStart: v.window[0].toISOString(),
-      windowEnd: v.window[1].toISOString(),
-    });
-    message.success('任务已创建，worker 将开始执行');
-    setCreateOpen(false);
-    form.resetFields();
-  };
+        .filter(Boolean);
+      const granularities = (searchParams.get('granularities') ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      setCreatePreset({
+        name: `从 panel 派生 (${deviceSns.length} 设备)`,
+        deviceSns,
+        metricPaths,
+        granularities,
+      });
+      setCreateOpen(true);
+      // 清除 query 避免刷新页面重复打开
+      const next = new URLSearchParams(searchParams);
+      next.delete('preset');
+      next.delete('device_sns');
+      next.delete('metric_paths');
+      next.delete('granularities');
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleCancel = (id: string) => {
     Modal.confirm({
@@ -94,7 +88,14 @@ export default function PmAdhocPage() {
     <Card
       title="自定义聚合任务"
       extra={
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={() => {
+            setCreatePreset(undefined);
+            setCreateOpen(true);
+          }}
+        >
           新建任务
         </Button>
       }
@@ -155,81 +156,22 @@ export default function PmAdhocPage() {
         ]}
       />
 
-      {/* 创建抽屉 */}
-      <Drawer
-        title="新建自定义聚合任务"
-        width={600}
+      <CreateAdhocTaskDrawer
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        extra={
-          <Button type="primary" loading={createMut.isPending} onClick={handleCreate}>
-            创建
-          </Button>
-        }
-      >
-        <Form
-          form={form}
-          layout="vertical"
-          initialValues={{
-            mode: 'oneshot' as AdhocMode,
-            granularities: ['hourly'],
-            window: [dayjs().subtract(1, 'day'), dayjs()],
-          }}
-        >
-          <Form.Item label="任务名称" name="name" rules={[{ required: true }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item label="模式" name="mode" rules={[{ required: true }]}>
-            <Select options={MODE_OPTIONS} />
-          </Form.Item>
-          <Form.Item shouldUpdate={(p, c) => p.mode !== c.mode}>
-            {() =>
-              form.getFieldValue('mode') === 'continuous' ? (
-                <Form.Item
-                  label="Cron 表达式（5 字段：m h dom mon dow）"
-                  name="cronExpr"
-                  rules={[{ required: true, message: 'continuous 必须填 cron_expr' }]}
-                >
-                  <Input placeholder="0 * * * *（每小时整点）" />
-                </Form.Item>
-              ) : null
-            }
-          </Form.Item>
-          <Form.Item label="设备 SN（逗号分隔）" name="deviceSns" rules={[{ required: true }]}>
-            <Input placeholder="BLQ-001, BLQ-002" />
-          </Form.Item>
-          <Form.Item label="指标路径（逗号分隔）" name="metricPaths" rules={[{ required: true }]}>
-            <Input placeholder="L.RRC.SuccRate, L.ERAB.SuccRate" />
-          </Form.Item>
-          <Form.Item label="粒度（多选）" name="granularities" rules={[{ required: true }]}>
-            <Select mode="multiple" options={GRANULARITY_OPTIONS} />
-          </Form.Item>
-          <Form.Item label="时间窗" name="window" rules={[{ required: true }]}>
-            <DatePicker.RangePicker showTime style={{ width: '100%' }} />
-          </Form.Item>
-        </Form>
-      </Drawer>
+        preset={createPreset}
+        onClose={() => {
+          setCreateOpen(false);
+          setCreatePreset(undefined);
+        }}
+      />
 
-      {/* 结果查看 */}
       <Drawer
         title={selectedTask ? `结果：${selectedTask.name}` : '结果'}
-        width={720}
+        width={820}
         open={Boolean(selectedTask)}
         onClose={() => setSelectedTask(null)}
       >
-        <Table
-          rowKey="id"
-          size="small"
-          pagination={{ pageSize: 20 }}
-          dataSource={results}
-          columns={[
-            { title: '设备', render: (_, r) => `${r.deviceOui}/${r.deviceSn}` },
-            { title: '指标', dataIndex: 'metricPath' },
-            { title: '粒度', dataIndex: 'granularity', width: 80 },
-            { title: '值', dataIndex: 'metricValue', width: 100 },
-            { title: '时间', dataIndex: 'time', width: 180 },
-          ]}
-        />
+        {selectedTask && <AdhocResultPanel taskId={selectedTask.id} />}
       </Drawer>
     </Card>
   );

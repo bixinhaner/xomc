@@ -12,10 +12,12 @@
  */
 
 import { useState } from 'react';
-import { Empty, Row, Col, Card, Button, Space, Tabs } from 'antd';
-import { DeleteOutlined, SettingOutlined } from '@ant-design/icons';
+import { Empty, Row, Col, Card, Button, Space, Tabs, Tooltip } from 'antd';
+import { DeleteOutlined, SettingOutlined, DownloadOutlined } from '@ant-design/icons';
 import type { Granularity, Panel } from '@core/types/pmDashboard';
 import { usePmDashboardStore } from '@core/store/pmDashboardStore';
+import { usePmPanelData } from '@core/hooks/api/usePmPanelData';
+import { exportWorkbook } from '@core/utils/excelExport';
 import { PanelRenderer } from './PanelRenderer';
 import { ComparePanel } from './ComparePanel';
 
@@ -51,6 +53,28 @@ function PanelCard({
   const [active, setActive] = useState<Granularity>(grans[0] ?? 'hourly');
   const showTabs = grans.length > 1;
 
+  // G6-Gap-10：导出 panel 数据 Excel（按粒度多 sheet，每行 = bucket × metric）
+  const panelData = usePmPanelData(panel, active);
+  const handleExportExcel = () => {
+    const sheets = (panel.granularities ?? [active]).map((g) => {
+      // 重算一次该粒度的 series（usePmPanelData 当前粒度已有；其它粒度按 hook 形态独立调；
+      // 简化：导出仅当前 active 粒度的数据；其它粒度的导出由用户切 Tab 后再点）
+      if (g !== active) {
+        return { name: g, rows: [{ note: '切到该粒度 Tab 后再次点击导出可获取本粒度数据' }] };
+      }
+      const buckets = panelData.series[0]?.points.map((p) => p.label) ?? [];
+      const rows = buckets.map((label, i) => {
+        const row: Record<string, string | number | null> = { time: label };
+        panelData.series.forEach((s) => {
+          row[s.name] = s.points[i]?.value ?? null;
+        });
+        return row;
+      });
+      return { name: g, rows };
+    });
+    exportWorkbook(`panel_${panel.title}_${panel.id.slice(0, 8)}`, sheets);
+  };
+
   return (
     <Col span={span}>
       <Card
@@ -62,23 +86,33 @@ function PanelCard({
         }
         size="small"
         extra={
-          editMode ? (
-            <Space>
+          <Space>
+            <Tooltip title={`导出当前粒度 (${active}) 数据 Excel`}>
               <Button
                 size="small"
                 type="text"
-                icon={<SettingOutlined />}
-                onClick={() => onConfigPanel?.(panel)}
+                icon={<DownloadOutlined />}
+                onClick={handleExportExcel}
               />
-              <Button
-                size="small"
-                type="text"
-                danger
-                icon={<DeleteOutlined />}
-                onClick={() => onDeletePanel?.(panel)}
-              />
-            </Space>
-          ) : null
+            </Tooltip>
+            {editMode && (
+              <>
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<SettingOutlined />}
+                  onClick={() => onConfigPanel?.(panel)}
+                />
+                <Button
+                  size="small"
+                  type="text"
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={() => onDeletePanel?.(panel)}
+                />
+              </>
+            )}
+          </Space>
         }
         styles={{ body: { minHeight: 200 } }}
       >

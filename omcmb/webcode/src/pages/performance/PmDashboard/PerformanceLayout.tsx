@@ -12,7 +12,7 @@
  *   - 来自分享（其他）
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button, Card, Empty, List, Modal, Form, Input, Select, Space, Tag, Tooltip, message } from 'antd';
 import { PlusOutlined, AppstoreAddOutlined } from '@ant-design/icons';
@@ -21,6 +21,7 @@ import {
   useCreatePmDashboard,
 } from '@core/hooks/api/usePmDashboard';
 import { useUserStore } from '@core/store/userStore';
+import { usePmDashboardStore } from '@core/store/pmDashboardStore';
 import type { Dashboard, Technology } from '@core/types/pmDashboard';
 import DashboardEditorPane from './DashboardEditorPane';
 import { KpiCardManager } from './KpiCardManager';
@@ -50,6 +51,59 @@ export default function PerformanceLayout() {
   const [form] = Form.useForm<{ name: string; technology: Technology; description?: string }>();
   const [createOpen, setCreateOpen] = useState(false);
   const [kpiMgrOpen, setKpiMgrOpen] = useState(false);
+
+  // G6-Gap-11 URL 复现：把 globalFilter 同步进 URL，反之亦然
+  const globalFilter = usePmDashboardStore((s) => s.globalFilter);
+  const setGlobalFilter = usePmDashboardStore((s) => s.setGlobalFilter);
+
+  // URL → store（首次 + 用户 paste 链接时）
+  useEffect(() => {
+    const start = searchParams.get('start');
+    const absStart = searchParams.get('abs_start');
+    const absEnd = searchParams.get('abs_end');
+    const devs = searchParams.get('devices');
+    const groups = searchParams.get('groups');
+    const next: Parameters<typeof setGlobalFilter>[0] = {};
+    if (start) next.startOffset = start;
+    if (absStart) next.absoluteStart = absStart;
+    if (absEnd) next.absoluteEnd = absEnd;
+    if (devs !== null) next.deviceSns = devs ? devs.split(',') : [];
+    if (groups !== null) next.deviceGroupIds = groups ? groups.split(',') : [];
+    if (Object.keys(next).length > 0) setGlobalFilter(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboardId]); // 仅在切 dashboard 时从 URL 重读，避免循环
+
+  // store → URL（用户在 GlobalFilterBar 上交互时）
+  useEffect(() => {
+    const next = new URLSearchParams(searchParams);
+    if (dashboardId) next.set('dashboard', dashboardId);
+    // 时间窗：absoluteStart 优先
+    if (globalFilter.absoluteStart && globalFilter.absoluteEnd) {
+      next.set('abs_start', globalFilter.absoluteStart);
+      next.set('abs_end', globalFilter.absoluteEnd);
+      next.delete('start');
+    } else if (globalFilter.startOffset) {
+      next.set('start', globalFilter.startOffset);
+      next.delete('abs_start');
+      next.delete('abs_end');
+    }
+    // 设备 / 设备组：空数组不写
+    if (globalFilter.deviceSns && globalFilter.deviceSns.length > 0) {
+      next.set('devices', globalFilter.deviceSns.join(','));
+    } else {
+      next.delete('devices');
+    }
+    if (globalFilter.deviceGroupIds && globalFilter.deviceGroupIds.length > 0) {
+      next.set('groups', globalFilter.deviceGroupIds.join(','));
+    } else {
+      next.delete('groups');
+    }
+    // 仅在 URL 真正变化时 setSearchParams，避免重渲染循环
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [globalFilter, dashboardId]);
   // KPI 卡片管理弹窗用的当前制式：取选中 dashboard 的 technology；否则默认 lte
   const selectedDashboard = useMemo(
     () => dashboards.find((d) => d.id === dashboardId),

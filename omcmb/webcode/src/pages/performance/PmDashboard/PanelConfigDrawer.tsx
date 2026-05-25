@@ -7,7 +7,9 @@
  */
 
 import { useEffect } from 'react';
-import { Button, Drawer, Form, Input, InputNumber, Select, Space, Switch, Tag, message } from 'antd';
+import { Alert, Button, Drawer, Form, Input, InputNumber, Select, Space, Switch, Tag, message } from 'antd';
+import { ThunderboltOutlined } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
 import {
   useCreatePmPanel,
   useUpdatePmPanel,
@@ -95,11 +97,15 @@ function splitCsv(s?: string): string[] {
     .filter(Boolean);
 }
 
+// G6-Gap-12：deviceSns 超过此阈值时弹"建议改用自定义聚合任务"提示
+const ADHOC_SUGGESTION_THRESHOLD = 10;
+
 export function PanelConfigDrawer({ open, mode, panel, dashboardId, technology, onClose }: Props) {
   const [form] = Form.useForm<FormValues>();
   const createMut = useCreatePmPanel();
   const updateMut = useUpdatePmPanel();
   const addPanel = usePmDashboardStore((s) => s.addPanel);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!open) return;
@@ -223,18 +229,58 @@ export function PanelConfigDrawer({ open, mode, panel, dashboardId, technology, 
         <Form.Item label="维度" name="dimension" rules={[{ required: true }]}>
           <Select options={DIMENSION_OPTIONS} />
         </Form.Item>
-        <Form.Item shouldUpdate={(p, c) => p.dimension !== c.dimension}>
-          {() =>
-            form.getFieldValue('dimension') === 'device' ? (
-              <Form.Item label="设备 SN（逗号分隔）" name="deviceSns">
-                <Input placeholder="SN-001, SN-002" />
-              </Form.Item>
-            ) : (
+        <Form.Item shouldUpdate={(p, c) => p.dimension !== c.dimension || p.deviceSns !== c.deviceSns}>
+          {() => {
+            const dim = form.getFieldValue('dimension');
+            if (dim === 'device') {
+              const sns = splitCsv(form.getFieldValue('deviceSns'));
+              const overflow = sns.length > ADHOC_SUGGESTION_THRESHOLD;
+              return (
+                <>
+                  <Form.Item label="设备 SN（逗号分隔）" name="deviceSns">
+                    <Input placeholder="SN-001, SN-002" />
+                  </Form.Item>
+                  {/* G6-Gap-12: deviceSns 超阈值时建议改用 adhoc */}
+                  {overflow && (
+                    <Alert
+                      style={{ marginBottom: 16 }}
+                      type="warning"
+                      showIcon
+                      message={`已输入 ${sns.length} 个设备 SN（超过 ${ADHOC_SUGGESTION_THRESHOLD} 个）`}
+                      description="该数量级建议改用「自定义聚合任务」(G7) — 后端会异步并发执行 + 进度反馈 + 可持续化定时任务，避免 panel 实时拉数据时压力。"
+                      action={
+                        <Space direction="vertical">
+                          <Button
+                            size="small"
+                            type="primary"
+                            icon={<ThunderboltOutlined />}
+                            onClick={() => {
+                              // 关闭抽屉 → 跳转 adhoc 页（带预填的 SN/指标/粒度）
+                              const params = new URLSearchParams({
+                                preset: 'panel',
+                                device_sns: sns.join(','),
+                                metric_paths: form.getFieldValue('metricPaths') ?? '',
+                                granularities: (form.getFieldValue('granularities') ?? []).join(','),
+                              });
+                              onClose();
+                              navigate(`/performance/pm-adhoc?${params.toString()}`);
+                            }}
+                          >
+                            去创建自定义聚合任务
+                          </Button>
+                        </Space>
+                      }
+                    />
+                  )}
+                </>
+              );
+            }
+            return (
               <Form.Item label="设备组 ID（逗号分隔）" name="deviceGroupIds">
                 <Input placeholder="uuid-1, uuid-2" />
               </Form.Item>
-            )
-          }
+            );
+          }}
         </Form.Item>
         <Form.Item
           label="继承全局筛选"
