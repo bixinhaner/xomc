@@ -449,14 +449,18 @@ func wireUnknownAlarmFallback(
 
 // parseStringSlice parses a comma-separated string into a slice.
 // routerCounterWhitelist 把 *router.Router 包装成 collector.CounterWhitelist 接口。
-// 通过 LookupByDevice 拿设备所属产品的 KPIRoute.Counters，转 name 集合作为白名单。
-// Lookup 失败时把错误透传给 collector，由 collector 决定 fail-open（log warn + 不过滤）。
+// 通过 LookupByDevice 拿设备所属产品的 KPIRoute.Counters，转 name→statis_type 映射
+// 作为白名单。Lookup 失败时把错误透传给 collector，由 collector 决定 fail-open
+// （log warn + 不过滤）。
+//
+// T-0164-G6 收尾 BUG-A：map value 从 struct{}{} 改为 statis_type 字符串，
+// collector.filterByWhitelist 用以填充 PMCounter.StatisType，驱动 G5 自然桶聚合。
 type routerCounterWhitelist struct {
 	r   *router.Router
 	log *zap.Logger
 }
 
-func (a *routerCounterWhitelist) LookupCounters(ctx context.Context, deviceSN string) (map[string]struct{}, error) {
+func (a *routerCounterWhitelist) LookupCounters(ctx context.Context, deviceSN string) (map[string]string, error) {
 	route, err := a.r.LookupByDevice(ctx, deviceSN)
 	if err != nil {
 		// 注意：ErrProductNotMatched / ErrInvalidProductMetadata 是业务上的"空白名单"信号，
@@ -467,11 +471,11 @@ func (a *routerCounterWhitelist) LookupCounters(ctx context.Context, deviceSN st
 	if route == nil || len(route.Counters) == 0 {
 		return nil, nil
 	}
-	set := make(map[string]struct{}, len(route.Counters))
+	out := make(map[string]string, len(route.Counters))
 	for _, c := range route.Counters {
-		set[c.Name] = struct{}{}
+		out[c.Name] = c.StatisType
 	}
-	return set, nil
+	return out, nil
 }
 
 func parseStringSlice(s string) []string {

@@ -15,12 +15,13 @@ import (
 // T-0164 G1 BUG-6 真根因复盘 / 方案 D：filterByWhitelist 行为单测。
 
 // fakeWhitelist 让单测脚本化 LookupCounters 返回值。
+// T-0164-G6 BUG-A：map value 由 struct{}{} 升级为 statis_type 字符串（驱动 G5 聚合）。
 type fakeWhitelist struct {
-	set map[string]struct{}
+	set map[string]string
 	err error
 }
 
-func (f *fakeWhitelist) LookupCounters(_ context.Context, _ string) (map[string]struct{}, error) {
+func (f *fakeWhitelist) LookupCounters(_ context.Context, _ string) (map[string]string, error) {
 	return f.set, f.err
 }
 
@@ -47,15 +48,21 @@ func names(cs []model.PMCounter) []string {
 	return out
 }
 
-// 核心场景：白名单含 A/B，丢 C/D（孤儿）。
+// 核心场景：白名单含 A/B，丢 C/D（孤儿）；保留的 counter 应带 StatisType（BUG-A）。
 func TestFilterByWhitelist_DropsOrphans(t *testing.T) {
-	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]struct{}{
-		"L.Cell.Avail": {},
-		"RRC.AttConn":  {},
+	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]string{
+		"L.Cell.Avail": "avg",
+		"RRC.AttConn":  "sum",
 	}})
 	in := sample("L.Cell.Avail", "MR.RIPPRB", "RRC.AttConn", "MR.RECEIVEDIPOWER")
 	out := c.filterByWhitelist(context.Background(), "SN-1", in)
 	assert.ElementsMatch(t, []string{"L.Cell.Avail", "RRC.AttConn"}, names(out))
+	statisByName := map[string]string{}
+	for _, c := range out {
+		statisByName[c.CounterName] = c.StatisType
+	}
+	assert.Equal(t, "avg", statisByName["L.Cell.Avail"])
+	assert.Equal(t, "sum", statisByName["RRC.AttConn"])
 }
 
 // fail-open：whitelist 未注入（nil）→ 不过滤。
@@ -76,7 +83,7 @@ func TestFilterByWhitelist_LookupError_NoFilter(t *testing.T) {
 
 // fail-open：lookup 返回空集合（缓存未热 / 产品无 KPI 配置）→ 不过滤。
 func TestFilterByWhitelist_EmptyWhitelist_NoFilter(t *testing.T) {
-	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]struct{}{}})
+	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]string{}})
 	in := sample("any", "thing")
 	out := c.filterByWhitelist(context.Background(), "SN-1", in)
 	require.Len(t, out, 2, "空白名单 fail-open，防止误删全部")
@@ -94,8 +101,8 @@ func TestFilterByWhitelist_EmptyCounters_Noop(t *testing.T) {
 // BUG-6 回归（最直接的场景）：模拟 Baicells 真机 PM 文件 — `MR.RIPPRB`
 // × 53 + `MR.RECEIVEDIPOWER` × 53 + 一个已注册 counter。过滤后只剩注册的那个。
 func TestFilterByWhitelist_BUG6_BaicellsOrphans(t *testing.T) {
-	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]struct{}{
-		"RRC.AttConnEstab": {},
+	c := collectorWithWhitelist(&fakeWhitelist{set: map[string]string{
+		"RRC.AttConnEstab": "sum",
 	}})
 	in := []model.PMCounter{}
 	for i := 1; i <= 53; i++ {
@@ -115,7 +122,7 @@ type trackingWhitelist struct {
 	onCall func()
 }
 
-func (t *trackingWhitelist) LookupCounters(_ context.Context, _ string) (map[string]struct{}, error) {
+func (t *trackingWhitelist) LookupCounters(_ context.Context, _ string) (map[string]string, error) {
 	t.onCall()
 	return nil, nil
 }

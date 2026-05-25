@@ -26,6 +26,11 @@ type PMCounter struct {
 	CounterName  string    `json:"counter_name" db:"counter_name"`
 	CounterValue float64   `json:"counter_value" db:"counter_value"`
 	Granularity  int       `json:"granularity" db:"granularity"` // minutes
+	// StatisType 标记该 counter 的聚合方式（sum/avg/max/pct），由 collector 在
+	// filterByWhitelist 阶段从 indicator 元数据填入，counterToMetric 透传到
+	// pm_metrics.statis_type 列，驱动 G5 自然桶聚合 (CASE WHEN m.statis_type)。
+	// 空串表示未知（白名单未注入或 lookup fail-open 场景），下游聚合会跳过该行。
+	StatisType   string    `json:"statis_type,omitempty" db:"-"`
 }
 
 // KPIValue 表示一个计算后的 KPI 指标值。

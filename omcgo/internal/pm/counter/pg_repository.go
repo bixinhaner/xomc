@@ -156,7 +156,7 @@ func counterToMetric(c model.PMCounter) metrics.PMMetric {
 	if c.Granularity > 0 {
 		startTime = endTime.Add(-time.Duration(c.Granularity) * time.Minute)
 	}
-	return metrics.PMMetric{
+	m := metrics.PMMetric{
 		DeviceOUI:   c.OUI,
 		DeviceSN:    c.DeviceSN,
 		MetricPath:  c.CounterName,
@@ -169,6 +169,14 @@ func counterToMetric(c model.PMCounter) metrics.PMMetric {
 		ObjectLDN:   ldn,
 		Extra:       extra,
 	}
+	// T-0164-G6 收尾 BUG-A：counter 的 statis_type 由 collector.filterByWhitelist
+	// 从 indicator 元数据填到 PMCounter.StatisType，这里透传给 pm_metrics.statis_type
+	// 列，驱动 G5 aggregator CASE WHEN m.statis_type 路由 SUM/AVG/MAX。
+	if c.StatisType != "" {
+		st := metrics.StatisType(c.StatisType)
+		m.StatisType = &st
+	}
+	return m
 }
 
 // metricToCounter 反向：PMMetric → PMCounter。
@@ -181,6 +189,9 @@ func metricToCounter(m metrics.PMMetric) model.PMCounter {
 		CounterName:  m.MetricPath,
 		CounterValue: m.MetricValue,
 		Granularity:  15, // G3 阶段固定 15min 粒度
+	}
+	if m.StatisType != nil {
+		c.StatisType = string(*m.StatisType)
 	}
 	if m.ObjectLDN != nil {
 		c.CellID = *m.ObjectLDN

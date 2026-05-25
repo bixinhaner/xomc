@@ -51,8 +51,10 @@ type DeviceLookup interface {
 	GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error)
 }
 
-// CounterWhitelist 按设备 SN 返回指标库定义的 counter name 集合，用于过滤
-// PM 文件里的孤儿 counter（厂家上报但 perf_indicators_{enb,gnb,gsm} 未注册）。
+// CounterWhitelist 按设备 SN 返回指标库定义的 counter name → statis_type 映射，
+// 用于：(a) 过滤 PM 文件里的孤儿 counter（厂家上报但 perf_indicators_{enb,gnb,gsm}
+// 未注册）；(b) 填充 PMCounter.StatisType，下游 counterToMetric 透传到
+// pm_metrics.statis_type 驱动 G5 自然桶聚合。
 //
 // 真实实现用 router.Router（设备 → product → indicator_platform → counter 子集）。
 // worker main 写 adapter 把 *router.Router 包装成此接口，避免 collector 直接耦合 router 包。
@@ -60,10 +62,12 @@ type DeviceLookup interface {
 // 错误处理约定（fail-open，参见 BUG-6 真根因复盘）：
 //   - 返回 (nil, err)：collector 跳过过滤，log warn 后照常 BatchInsert 全量 counter；
 //     不阻塞 PM 处理。失败保留量比误删数据风险小。
-//   - 返回 (empty set, nil)：collector 同样跳过过滤（防误删全部 — 如启动期缓存未就绪）。
-//   - 返回 (set, nil)：set 内的 counter 保留，其他作为孤儿丢弃。
+//   - 返回 (empty map, nil)：collector 同样跳过过滤（防误删全部 — 如启动期缓存未就绪）。
+//   - 返回 (map, nil)：map 内的 counter 保留并填充 StatisType，其他作为孤儿丢弃。
+//
+// statis_type 取值：'sum' / 'avg' / 'max' / 'pct'，或空串（indicator 元数据未填）。
 type CounterWhitelist interface {
-	LookupCounters(ctx context.Context, deviceSN string) (map[string]struct{}, error)
+	LookupCounters(ctx context.Context, deviceSN string) (map[string]string, error)
 }
 
 // PMCollector handles PM file processing: download from MinIO, parse XML, store counters.
@@ -340,7 +344,8 @@ func (c *PMCollector) filterByWhitelist(ctx context.Context, deviceSN string, co
 	kept := counters[:0] // 原地 reslice 复用 slice
 	dropped := 0
 	for _, ctr := range counters {
-		if _, ok := allow[ctr.CounterName]; ok {
+		if st, ok := allow[ctr.CounterName]; ok {
+			ctr.StatisType = st // T-0164-G6 收尾：填充 statis_type 驱动 G5 聚合 (BUG-A)
 			kept = append(kept, ctr)
 		} else {
 			dropped++
