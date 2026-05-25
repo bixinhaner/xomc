@@ -146,6 +146,69 @@ func TestRedisCache_TTLOverride(t *testing.T) {
 	assert.Equal(t, discoveredMappingTTL, c.discoveredTTL)
 }
 
+// TestRedisCache_SchemaVersionMismatch 覆盖 T-0106 修复：
+// 写入后 BumpVersion 一次（模拟字典变更），下一次 Get 应视为 stale → miss。
+//
+// 与"显式 Invalidate"的区别：BumpVersion 不需要遍历单条 key 即可让所有进程的
+// 全部缓存条目立即失效，是跨实例字典变更的标准失效协议。
+func TestRedisCache_SchemaVersionMismatch_TreatsAsMiss(t *testing.T) {
+	client := newMiniRedis(t)
+	c := NewRedisCache(client)
+	ctx := context.Background()
+
+	id := uuid.New()
+	mappings := sampleMappings(id)
+
+	require.NoError(t, c.SetDefault(ctx, id, mappings))
+	got, err := c.GetDefault(ctx, id)
+	require.NoError(t, err)
+	require.Len(t, got, 2, "same cache_version → hit")
+
+	// 字典变更 / 全量重建场景：BumpVersion 让所有 entry 立即 stale。
+	_, err = c.BumpVersion(ctx)
+	require.NoError(t, err)
+
+	got, err = c.GetDefault(ctx, id)
+	require.NoError(t, err)
+	assert.Nil(t, got, "after BumpVersion, version mismatch should be miss")
+
+	// 同一道理对 discovered 也生效。
+	productID := uuid.New()
+	require.NoError(t, c.SetDiscovered(ctx, productID, "1.0.0", mappings))
+	_, err = c.BumpVersion(ctx)
+	require.NoError(t, err)
+
+	got, err = c.GetDiscovered(ctx, productID, "1.0.0")
+	require.NoError(t, err)
+	assert.Nil(t, got)
+}
+
+// TestRedisCache_SchemaVersionAlignedAfterRewrite 模拟"BumpVersion 后重建":
+// 用新的 SetDefault 覆盖应当让条目恢复命中。
+func TestRedisCache_SchemaVersionAlignedAfterRewrite(t *testing.T) {
+	client := newMiniRedis(t)
+	c := NewRedisCache(client)
+	ctx := context.Background()
+
+	id := uuid.New()
+	mappings := sampleMappings(id)
+
+	require.NoError(t, c.SetDefault(ctx, id, mappings))
+	_, err := c.BumpVersion(ctx) // 字典刷新
+	require.NoError(t, err)
+
+	got, err := c.GetDefault(ctx, id)
+	require.NoError(t, err)
+	require.Nil(t, got, "stale after bump")
+
+	// Registry 触发 DB 兜底后 SetDefault 重新写入：新 entry 的 SchemaVersion = 新 cache_version。
+	require.NoError(t, c.SetDefault(ctx, id, mappings))
+
+	got, err = c.GetDefault(ctx, id)
+	require.NoError(t, err)
+	require.Len(t, got, 2, "rewrite after bump should align version → hit")
+}
+
 func TestNopCache(t *testing.T) {
 	ctx := context.Background()
 	var c Cache = NopCache{}

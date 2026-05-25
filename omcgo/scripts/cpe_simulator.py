@@ -1417,7 +1417,9 @@ class CPESimulator:
             ("xsd:string", "")
         )[1]
         if not pm_url:
-            pm_url = f"{self.parsed_url.scheme}://{self.parsed_url.hostname}:{self.parsed_url.port or 80}/FileUploadService?type=pm&sn={self.serial_number}"
+            # ACS 真实 endpoint 是 /smallcell/FileUploadService（见 internal/acs/server.go:105）。
+            # 模拟器历史拼成 /FileUploadService 命中 404；T-0164-P1 G1 E2E 验证时发现并修复。
+            pm_url = f"{self.parsed_url.scheme}://{self.parsed_url.hostname}:{self.parsed_url.port or 80}/smallcell/FileUploadService?fileType=PM&fileName=pm-{self.serial_number}.xml.gz&sn={self.serial_number}"
         self._log("模拟 PM 文件上传", "blue")
         file_size = self._do_file_upload(pm_url, "104 PM File")
         if file_size > 0:
@@ -1435,7 +1437,7 @@ class CPESimulator:
             ("xsd:string", "")
         )[1]
         if not mr_url:
-            mr_url = f"{self.parsed_url.scheme}://{self.parsed_url.hostname}:{self.parsed_url.port or 80}/FileUploadService?type=mr&sn={self.serial_number}"
+            mr_url = f"{self.parsed_url.scheme}://{self.parsed_url.hostname}:{self.parsed_url.port or 80}/smallcell/FileUploadService?fileType=MR&fileName=mr-{self.serial_number}.xml.gz&sn={self.serial_number}"
         self._log("模拟 MR 文件上传", "blue")
         file_size = self._do_file_upload(mr_url, "105 MR File")
         if file_size > 0:

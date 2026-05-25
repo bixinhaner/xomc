@@ -57,10 +57,6 @@ func (c *CUCCCarrier) ProvisioningTemplates(tech model.Technology) []*carrier.Pr
 	return provisioningTemplates(tech)
 }
 
-func (c *CUCCCarrier) KPIDefinitions(tech model.Technology) []*carrier.KPIDefinition {
-	return kpiDefinitions(tech)
-}
-
 func (c *CUCCCarrier) AlarmSeverityMapping(carrierAlarmCode string) model.AlarmSeverity {
 	if sev, ok := alarmSeverityMap[carrierAlarmCode]; ok {
 		return sev

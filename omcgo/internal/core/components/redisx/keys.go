@@ -147,6 +147,22 @@ func (KeyBuilder) ParamModelPattern() string { return paramModelPattern }
 // ParamModelCacheVersion 跨实例 ParamRegistry 缓存版本号。
 func (KeyBuilder) ParamModelCacheVersion() string { return paramModelCacheVersionKey }
 
+// ===== KPI Route（T-0164-P1 KPI 路由）=====
+
+// KPIRouteByProduct KPIRoute 缓存（24h TTL，按 product_id 索引）。值为 JSON 序列化的 router.KPIRoute。
+func (KeyBuilder) KPIRouteByProduct(productID string) string {
+	return kpiRouteByProductPrefix + productID
+}
+
+// KPIRouteByProductPrefix KPIRoute 键前缀（供扫描/清理）。
+func (KeyBuilder) KPIRouteByProductPrefix() string { return kpiRouteByProductPrefix }
+
+// KPIRoutePattern 扫描所有 kpi-route:* 键。
+func (KeyBuilder) KPIRoutePattern() string { return kpiRoutePattern }
+
+// KPIRouteCacheVersion 跨实例 KPI Router 缓存版本号。
+func (KeyBuilder) KPIRouteCacheVersion() string { return kpiRouteCacheVersionKey }
+
 // ===== 告警 / 异常重启 =====
 
 // AlarmActive 活跃告警 Hash（每设备一个）。
@@ -235,6 +251,11 @@ const (
 	paramModelDiscoveredPrefix = "parammodel:discovered:"
 	paramModelPattern          = "parammodel:*"
 	paramModelCacheVersionKey  = "parammodel:cache_version"
+
+	// kpi-route (T-0164-P1 KPI 路由)
+	kpiRouteByProductPrefix  = "kpi-route:product:"
+	kpiRoutePattern          = "kpi-route:*"
+	kpiRouteCacheVersionKey  = "kpi-route:cache_version"
 
 	// device / provision / upload
 	deviceSNPrefix          = "device:sn:"

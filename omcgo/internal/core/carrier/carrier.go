@@ -35,9 +35,6 @@ type Carrier interface {
 	// ProvisioningTemplates returns default provisioning template definitions for a technology.
 	ProvisioningTemplates(tech model.Technology) []*ProvisionTemplate
 
-	// KPIDefinitions returns KPI formula definitions for a technology.
-	KPIDefinitions(tech model.Technology) []*KPIDefinition
-
 	// AlarmSeverityMapping maps a carrier-specific alarm code to a standard severity level.
 	// Returns 0 when no explicit mapping exists so callers can preserve source severity.
 	AlarmSeverityMapping(carrierAlarmCode string) model.AlarmSeverity

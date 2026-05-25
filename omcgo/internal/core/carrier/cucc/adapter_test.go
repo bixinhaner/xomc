@@ -60,11 +60,6 @@ func Test_ProvisioningTemplates(t *testing.T) {
 	_ = c.ProvisioningTemplates(model.TechNR)
 }
 
-func Test_KPIDefinitions(t *testing.T) {
-	c := New()
-	_ = c.KPIDefinitions(model.TechNR)
-}
-
 func Test_AlarmSeverityMapping(t *testing.T) {
 	c := New()
 	tests := []struct {

@@ -5,11 +5,16 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/omcgo/omcgo/internal/core/asyncjob"
 	"github.com/omcgo/omcgo/internal/core/dictloader"
 	"github.com/omcgo/omcgo/internal/pm"
+	"github.com/omcgo/omcgo/internal/pm/adhoc"
+	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/counter"
+	pmdashboard "github.com/omcgo/omcgo/internal/pm/dashboard"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
+	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 )
 
 // initPMModule 初始化 F03 性能管理模块。
@@ -19,7 +24,6 @@ func initPMModule(c *Container) error {
 
 	pmCounterRepo := counter.NewPgCounterRepository(c.TsPool)
 	pmKPIRepo := kpi.NewPgKPIRepository(c.TsPool)
-	pmKPIEngine := kpi.NewKPIEngine(pmCounterRepo, pmKPIRepo, c.Carriers, logger)
 	pmTaskRepo := pm.NewPgTaskRepository(c.PgPool)
 	pmFileStore := pm.NewPgPMFileStore(c.PgPool)
 
@@ -39,6 +43,46 @@ func initPMModule(c *Container) error {
 	indicatorGroupRepo := indicator.NewPgGroupRepository(c.PgPool)
 	indicatorRepo := indicator.NewPgIndicatorRepository(c.PgPool)
 	platformFormulaRepo := indicator.NewPgPlatformFormulaRepository(c.PgPool)
+
+	// T-0164-P1：构造 KPI Router 替代旧 carrier-based 公式路由。
+	// 依赖：ProductRegistry / DeviceRepo / IndicatorRepository / PlatformFormulaRepository。
+	var l2Cache router.L2Cache
+	if c.Redis != nil {
+		l2Cache = router.NewRedisCache(c.Redis)
+	}
+	kpiRouter, err := router.New(
+		c.DeviceRepo,
+		c.ProductRegistry,
+		indicatorRepo,
+		platformFormulaRepo,
+		router.Options{
+			L2Cache: l2Cache,
+			Metrics: router.NewMetrics(c.MetricsReg),
+			Logger:  logger,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("build kpi router: %w", err)
+	}
+
+	pmKPIEngine := kpi.NewKPIEngine(pmCounterRepo, pmKPIRepo, kpiRouter, logger)
+
+	// T-0164-P5 / G5：聚合查询入口。复用同一 kpiRouter（KPI 反算所需），
+	// app 端只走查询不跑 cron（cron runner 在 worker 端注册）。
+	pmAggregator := aggregator.NewWithPool(c.TsPool, kpiRouter, logger.Named("aggregator"))
+
+	// T-0164 收尾 G5-Gap-2：手动重算入口需 asyncjob.Repository
+	pmAsyncJobRepo := asyncjob.NewPgRepository(c.PgPool)
+
+	// T-0164-P7 / G7：adhoc 任务 REST 入口（worker 端跑实际执行）。
+	pmAdhocRepo := adhoc.NewPgRepository(c.PgPool)
+	pmAdhocHandler := adhoc.NewHandler(pmAdhocRepo, c.TsPool, c.EventBus, logger.Named("adhoc"))
+
+	// T-0164-P6 / G6：PM 仪表盘 REST 入口（dashboard + panel + 用户偏好）。
+	pmDashboardRepo := pmdashboard.NewPgRepository(c.PgPool)
+	pmDashboardSvc := pmdashboard.NewService(pmDashboardRepo, logger.Named("dashboard"))
+	pmDashboardHandler := pmdashboard.NewHandler(pmDashboardSvc, logger.Named("dashboard"))
+
 	enabledRepo := indicator.NewPgEnabledRepository(c.PgPool)
 	templateRelRepo := indicator.NewPgTemplateRelRepository(c.PgPool)
 	custNameRepo := indicator.NewPgCustNameRepository(c.PgPool)
@@ -75,6 +119,11 @@ func initPMModule(c *Container) error {
 		pmKPIEngine:          pmKPIEngine,
 		pmTaskRepo:           pmTaskRepo,
 		pmFileStore:          pmFileStore,
+		pmIndicatorRepo:      indicatorRepo,
+		pmAggregator:         pmAggregator,
+		pmAsyncJobRepo:       pmAsyncJobRepo,
+		pmAdhocHandler:       pmAdhocHandler,
+		pmDashboardHandler:   pmDashboardHandler,
 		indicatorHandler:     indicatorHandler,
 		indicatorRESTHandler: indicatorRESTHandler,
 	}
@@ -98,11 +147,16 @@ func (r *indicatorReloader) ReloadOne(ctx context.Context, name string) error {
 }
 
 type pmHandlerDeps struct {
-	pmCounterRepo *counter.PgCounterRepository
-	pmKPIRepo     *kpi.PgKPIRepository
-	pmKPIEngine   *kpi.KPIEngine
-	pmTaskRepo    *pm.PgTaskRepository
-	pmFileStore   *pm.PgPMFileStore
+	pmCounterRepo   *counter.PgCounterRepository
+	pmKPIRepo       *kpi.PgKPIRepository
+	pmKPIEngine     *kpi.KPIEngine
+	pmTaskRepo      *pm.PgTaskRepository
+	pmFileStore     *pm.PgPMFileStore
+	pmIndicatorRepo indicator.IndicatorRepository // T-0164-P1 ListKPIDefinitions 数据源
+	pmAggregator    *aggregator.Aggregator        // T-0164-P5 ListAggregatedMetrics 数据源
+	pmAsyncJobRepo  asyncjob.Repository           // T-0164 收尾 G5-Gap-2 手动重算端点
+	pmAdhocHandler     *adhoc.Handler        // T-0164-P7 自定义聚合任务 REST 入口
+	pmDashboardHandler *pmdashboard.Handler  // T-0164-P6 PM 仪表盘 REST 入口
 
 	// Indicator management handler
 	indicatorHandler     *indicator.IndicatorHandler

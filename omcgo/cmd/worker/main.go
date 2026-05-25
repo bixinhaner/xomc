@@ -27,7 +27,9 @@ import (
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/pm/collector"
 	"github.com/omcgo/omcgo/internal/pm/counter"
+	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
+	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/report"
 	"github.com/omcgo/omcgo/internal/task"
@@ -99,12 +101,58 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// PM Collector — wraps handler with retry+DLQ runner (T-0012 / R-106).
 	counterRepo := counter.NewPgCounterRepository(w.TsPool)
 	kpiRepo := kpi.NewPgKPIRepository(w.TsPool)
-	kpiEngine := kpi.NewKPIEngine(counterRepo, kpiRepo, w.Carriers, logger)
+
+	// T-0164-P1：worker 端的 KPIEngine 同样走 KPI Router（按 device → product → 平台公式路由），
+	// 不再依赖 carrier-based 硬编码 KPIDefinitions。这里独立构造 ProductRegistry，
+	// 与后面 alarm-definition fallback 复用同一份 PgRepository / Redis cache。
+	pmProductRepo := product.NewPgRepository(w.PgPool)
+	pmProductMetrics := product.NewRegistryMetrics(w.MetricsReg)
+	pmProductCache := product.Cache(product.NopCache{})
+	if w.Redis != nil {
+		pmProductCache = product.NewRedisCache(w.Redis)
+	}
+	pmProductRegistry := product.NewRegistry(pmProductRepo, pmProductCache, pmProductMetrics, logger)
+	if err := pmProductRegistry.Refresh(context.Background()); err != nil {
+		// 与 alarm-definition fallback 相同的容错策略：refresh 失败仅 WARN，让 KPI Router 跑
+		// 在零 patterns 状态（所有设备都会被判 orphan，KPI 跳过 + log warn）。比 worker 整体启动失败更稳。
+		logger.Warn("product registry refresh failed in worker; kpi route will be orphan-only",
+			zap.Error(err))
+	}
+	pmDeviceRepo := device.NewPgDeviceRepository(w.PgPool)
+	pmIndicatorRepo := indicator.NewPgIndicatorRepository(w.PgPool)
+	pmFormulaRepo := indicator.NewPgPlatformFormulaRepository(w.PgPool)
+	var pmL2Cache router.L2Cache
+	if w.Redis != nil {
+		pmL2Cache = router.NewRedisCache(w.Redis)
+	}
+	pmKPIRouter, err := router.New(
+		pmDeviceRepo, pmProductRegistry, pmIndicatorRepo, pmFormulaRepo,
+		router.Options{
+			L2Cache: pmL2Cache,
+			Metrics: router.NewMetrics(w.MetricsReg),
+			Logger:  logger,
+		},
+	)
+	if err != nil {
+		// 仅在依赖为 nil 时返错（编程错误）— worker 启动期阻塞性失败，及时暴露。
+		logger.Fatal("build kpi router failed", zap.Error(err))
+	}
+
+	kpiEngine := kpi.NewKPIEngine(counterRepo, kpiRepo, pmKPIRouter, logger)
 	pmParser := collector.NewPMXMLParser()
 	pmFileStore := pm.NewPgPMFileStore(w.PgPool)
 	pmCollector := collector.NewPMCollector(w.MinIO, cfg.MinIO.Buckets.PMFiles, pmParser, counterRepo, kpiEngine, pmFileStore, w.EventBus, logger)
 	pmMetrics := pm.NewPMMetrics(w.MetricsReg)
 	pmCollector.SetMetrics(pmMetrics)
+	// T-0164 G1 真机闭环：acs.upload.Handler 发的瘦 payload 只带 device_sn，
+	// 由 collector 用同一个 deviceRepo 反查补齐 UUID / OUI / carrier / technology。
+	pmCollector.SetDeviceLookup(pmDeviceRepo)
+
+	// T-0164 G1 BUG-6 真根因复盘 / 方案 D：collector 用指标库白名单过滤孤儿 counter。
+	// 复用 pmKPIRouter 的 LookupByDevice：route.Counters[].Name 即设备所属产品在
+	// perf_indicators_{enb,gnb,gsm} 中注册的 counter 全集。fail-open（lookup 失败 / 空集合
+	// 时跳过过滤，保留全量入库），细节见 collector.filterByWhitelist。
+	pmCollector.SetCounterWhitelist(&routerCounterWhitelist{r: pmKPIRouter, log: logger})
 
 	// Runner wires retry + DLQ instrumentation around the PM handler.
 	// dlqRepo + runnerMetrics are scoped to the worker process; admin handler
@@ -161,20 +209,11 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	if err := alarmDefRegistry.Refresh(context.Background()); err != nil {
 		logger.Warn("alarm-definition registry refresh failed; fallback disabled", zap.Error(err))
 	} else {
-		productRepo := product.NewPgRepository(w.PgPool)
-		productMetrics := product.NewRegistryMetrics(w.MetricsReg)
-		productCache := product.Cache(product.NopCache{})
-		if w.Redis != nil {
-			productCache = product.NewRedisCache(w.Redis)
-		}
-		productRegistry := product.NewRegistry(productRepo, productCache, productMetrics, logger)
-		if err := productRegistry.Refresh(context.Background()); err != nil {
-			logger.Warn("product registry refresh failed in worker; alarm fallback disabled", zap.Error(err))
-		} else {
-			alarmReceiver, expeditedReceiver, _ = wireUnknownAlarmFallback(alarmReceiver, expeditedReceiver, alarmDefRegistry, productRegistry)
-			logger.Info("alarm-definition fallback enabled",
-				zap.Int("definitions_loaded", alarmDefRegistry.Count()))
-		}
+		// T-0164-P1：复用 KPI Router 已构造的 pmProductRegistry，避免
+		// 重复 RegistryMetrics MustRegister 触发 Prometheus duplicate collector panic。
+		alarmReceiver, expeditedReceiver, _ = wireUnknownAlarmFallback(alarmReceiver, expeditedReceiver, alarmDefRegistry, pmProductRegistry)
+		logger.Info("alarm-definition fallback enabled",
+			zap.Int("definitions_loaded", alarmDefRegistry.Count()))
 	}
 	if err := alarmReceiver.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe alarm receiver", zap.Error(err))
@@ -357,6 +396,35 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	}
 	logger.Info("backup transfer-complete router started")
 
+	// PM 设备上线自动下发 PM 上传配置（KPI 上报参数整理.md 三参数）
+	// 仅在 cfg.PM.AutoSetupOnOnline=true 时启用；test 环境默认关闭防止干扰压测
+	if cfg.PM.AutoSetupOnOnline {
+		pmOnlineSub := pm.NewOnlineSubscriber(
+			w.TaskService,
+			cfg.PM.UploadURLTemplate,
+			cfg.PM.EnableValue,
+			cfg.PM.PeriodicUploadInterval,
+			logger,
+		)
+		if err := pmOnlineSub.Subscribe(w.EventBus); err != nil {
+			logger.Warn("subscribe pm online subscriber failed", zap.Error(err))
+		} else {
+			logger.Info("pm online subscriber started (auto SPV on device.online)")
+		}
+	} else {
+		logger.Info("pm online subscriber disabled (cfg.pm.auto_setup_on_online=false)")
+	}
+
+	// T-0164-P5 / G5 + T-0164-P8 / G8：PM 自然桶聚合 cron + asyncjob 框架接入。
+	// 复用上文已构造的 pmKPIRouter（KPI 反算依赖路由）；新开 4 个 cron runner +
+	// sweeper + 触发器（hourly @:05 / daily 00:05 / weekly 周一 00:10 / monthly 1日 00:15）。
+	startPMAggregatorPipeline(context.Background(), w, pmKPIRouter)
+
+	// T-0164-P7 / G7：自定义聚合任务（oneshot + continuous）。
+	// 复用同一 kpiRouter；4 个 worker 抢 pm_tasks 中 task_subtype='adhoc_aggregation' 的 pending 行；
+	// continuous scheduler 单 goroutine 每分钟扫 scheduled 任务切回 pending。
+	startPMAdhocPipeline(context.Background(), w, pmKPIRouter)
+
 	// M3: 周期备份调度器 + 任务 reaper（event-loss 兜底恢复）
 	backupScheduleRepo := backup.NewPgScheduleRepository(w.PgPool)
 	backupService := backup.NewService(backupTaskRepo, backupScheduleRepo, w.EventBus, logger)
@@ -392,6 +460,36 @@ func wireUnknownAlarmFallback(
 }
 
 // parseStringSlice parses a comma-separated string into a slice.
+// routerCounterWhitelist 把 *router.Router 包装成 collector.CounterWhitelist 接口。
+// 通过 LookupByDevice 拿设备所属产品的 KPIRoute.Counters，转 name→statis_type 映射
+// 作为白名单。Lookup 失败时把错误透传给 collector，由 collector 决定 fail-open
+// （log warn + 不过滤）。
+//
+// T-0164-G6 收尾 BUG-A：map value 从 struct{}{} 改为 statis_type 字符串，
+// collector.filterByWhitelist 用以填充 PMCounter.StatisType，驱动 G5 自然桶聚合。
+type routerCounterWhitelist struct {
+	r   *router.Router
+	log *zap.Logger
+}
+
+func (a *routerCounterWhitelist) LookupCounters(ctx context.Context, deviceSN string) (map[string]string, error) {
+	route, err := a.r.LookupByDevice(ctx, deviceSN)
+	if err != nil {
+		// 注意：ErrProductNotMatched / ErrInvalidProductMetadata 是业务上的"空白名单"信号，
+		// 不是技术错误。返回 (nil, err) 让 collector log warn 后 fail-open（不过滤 = 入全量）。
+		// 与其他真技术错误（DB 故障）的处理一致。
+		return nil, err
+	}
+	if route == nil || len(route.Counters) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(route.Counters))
+	for _, c := range route.Counters {
+		out[c.Name] = c.StatisType
+	}
+	return out, nil
+}
+
 func parseStringSlice(s string) []string {
 	if s == "" {
 		return nil

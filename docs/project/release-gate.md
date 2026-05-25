@@ -178,6 +178,84 @@
 
 ---
 
+## 8.5 T-0164 PM/KPI 流水线收尾专项（G1-G8 DoD）
+
+> **范围**：T-0164 PM/KPI 流水线 8 个工作包（G1 上传 / G2 保留策略 / G3 表合并 / G4 时间窗 / G5 自然桶聚合 / G6 仪表盘 / G7 自定义聚合 / G8 通用任务框架）全部 DoD 项。
+> **依据**：`docs/design/pm-kpi-pipeline-improvements.md §7 验收（DoD 草案）`
+> **进度跟踪**：`docs/project/plan-T-0164-followup-gaps.md §5`
+
+### G1 — PM 上传自动配置
+- [x] 真机 PM 上传自动 SPV 触发 G1 一键开 PM（commit `46b50678`）
+- [x] PM Auto-Setup runner 注册 + 启动 worker 抢锁运行
+
+### G2 — PM 保留策略
+- [x] hypertable retention policy（pm_metrics + pm_metrics_hourly + pm_group_metrics_hourly）
+- [x] 普通表 daily/weekly/monthly cron 清理 runner（commit `46b50678`，03:00 每日跑）
+- [x] PmRetentionSection 前端挂载 SystemConfig（commit `ac77b74b`）
+- [x] sys_configs 13 个保留参数 seed（migration 000158）
+
+### G3 — pm_metrics 表合并
+- [x] 旧表 drop → 新 pm_metrics（含 metric_type/statis_type/granularity）+ TimescaleDB hypertable
+- [x] 收集器双向兼容（counter / kpi 都写新表）
+
+### G4 — 时间窗三时间字段
+- [x] FileBeginTime / FileEndTime / IngestTime 持久化
+- [x] 上报延迟 Prometheus histogram `omc_pm_report_delay_seconds`（本次 commit）
+  - 标签：carrier × technology（低基数）
+  - 桶覆盖 30s 到 24h（PM 周期 15min，超 1h 即明显异常）
+
+### G5 — 自然桶聚合
+- [x] 4 设备级 cron runner（hourly :05 / daily 00:05 / weekly Mon 00:10 / monthly 00:15）
+- [x] 4 设备组级 cron runner（错峰 10 分钟，commit `46b50678`）
+- [x] 手动重算 POST /pm/aggregation/recompute（commit `ac77b74b`）
+- [x] Prometheus 指标 4 个：`omc_pm_aggregator_runs_total` / `_duration_seconds` / `_rows_written_total` / `_bucket_lag_seconds`
+- [x] 指标 hook 全注入 Runner.Run + GroupRunner.Run（本次 commit）
+
+### G6 — 仪表盘
+- [x] 制式切换持久化（pm_user_dashboard_preferences PK 改 (user_id, technology)，migration 000165）
+- [x] KPI 卡片按制式分键
+- [x] share/unshare 审计日志（commit `ac77b74b`）
+- [ ] 左右栏布局 / 共享筛选条 / 12 内置仪表盘 / TopN + 数值大屏 / 粒度多选 / 对比真数据 / 显示增强（P2 在进行）
+- [ ] Excel / PDF 导出 / URL 复现（P3 待启动）
+
+### G7 — 自定义聚合任务
+- [x] adhoc tasks CRUD（migration 000162 + handler）
+- [x] List 默认 creator 过滤 + admin ?all=true（commit `ac77b74b`）
+- [x] continuous stop 写 window_end（commit `ac77b74b`）
+- [x] sys_configs 4 retention key seed（migration 000166）
+- [x] cron lossless 补跑漏桶 — last_fire_at 列追踪 + sweepOnce 推 1 格 / sweep（migration 000167 + commit P1 本次）
+- [ ] 仪表盘工具栏 adhoc 入口 / panel 渲染集成 / panel fallback 提示 / 粒度 tab（P3 待启动）
+
+### G8 — 通用任务框架
+- [x] async_jobs 表 + Repository + Registry + Sweeper（migration 000159 + internal/core/asyncjob/）
+- [x] async_jobs_cron_state 表 + 启动补跑 catchupCronEntry（migration 000164 + commit `46b50678`）
+- [x] sys_configs 可调 sweeper_interval / zombie_threshold / heartbeat_interval（commit `ac77b74b` + `300ae4a1`）
+- [x] **改后重启 worker 生效**（详见设计文档 §7.1 Decision Note 2026-05-25；asyncjob 阈值变更频次极低，不做 EventBus 热重载）
+- [x] Prometheus 指标 5 个：`omc_async_jobs_queue_depth` / `_duration_seconds` / `_failed_total` / `_zombie_total` / `_catchup_total`
+- [x] 指标 hook 全注入 Registry.RunNext + Sweeper.sweepOnce + catchupCronEntry（本次 commit）
+- [x] QueueDepthSampler 启动 30s 周期采样（本次 commit）
+
+### 跨域 DoD
+- [x] e2e_verify.sh 新增 G5/G6/G7/G8 ~15 个 check_status_in（本次 commit）
+- [x] release-gate.md 本节（本次 commit）
+- [ ] 全部 P2 + P3 完成后真机端到端验证
+
+### Prometheus 指标可见性自检
+```bash
+# 验证 PM collector 指标
+curl -s http://localhost:9092/metrics | grep -E "omc_pm_(files_processed|report_delay)_"
+
+# 验证 aggregator 指标
+curl -s http://localhost:9092/metrics | grep -E "omc_pm_aggregator_"
+
+# 验证 asyncjob 框架指标
+curl -s http://localhost:9092/metrics | grep -E "omc_async_jobs_"
+
+# 期望：上述三组指标都至少出现一次（>0 表示已采样到数据）
+```
+
+---
+
 ## 9. 本文件演进
 
 - [x] 每次发布回顾时补充遗漏的 Gate 项

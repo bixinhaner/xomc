@@ -5,7 +5,7 @@
 -- 数据量级:
 --   小 (10-50):  sites, firmware, templates, rules, ops, reports
 --   中 (200-500): devices, device_info, alarms_active, mr_files, audit_logs
---   大 (5K-50K):  device_parameters, pm_counters, kpi_values, alarms_history, mr_records
+--   大 (5K-50K):  device_parameters, pm_metrics (counter+kpi), alarms_history, mr_records
 --
 -- 前置条件: migrations 000001-000011 已全部执行（含种子数据）
 -- 使用方法:  psql "$DSN" -f scripts/seed_test_data.sql
@@ -18,8 +18,9 @@ BEGIN;
 -- ============================================================
 DELETE FROM mr_records              WHERE device_id::text LIKE 'a0000000%';
 DELETE FROM mr_files                WHERE device_id::text LIKE 'a0000000%';
-DELETE FROM kpi_values              WHERE device_id::text LIKE 'a0000000%';
-DELETE FROM pm_counters             WHERE device_id::text LIKE 'a0000000%';
+-- T-0164-P3 / G3：pm_counters + kpi_values 合入 pm_metrics
+-- T-0164-P3 fix: 设备唯一标识 (device_oui, device_sn) 双键
+DELETE FROM pm_metrics              WHERE device_sn LIKE 'TD-%';
 DELETE FROM pm_files                WHERE device_id::text LIKE 'a0000000%';
 DELETE FROM alarms_history          WHERE device_id::text LIKE 'a0000000%';
 DELETE FROM alarms_active           WHERE device_id::text LIKE 'a0000000%';
@@ -404,20 +405,23 @@ CROSS JOIN LATERAL (
 ) c;
 
 -- ============================================================
--- 13. PM 计数器 (20000条，TimescaleDB 超表)
+-- 13. PM 计数器 → pm_metrics（metric_type='counter'，20000 条，TimescaleDB hypertable）
+-- T-0164-P3 / G3：旧 pm_counters 表已合入 pm_metrics（详见 docs/design/pm-kpi-pipeline-improvements.md §4.3）
 -- ============================================================
-INSERT INTO pm_counters (time, device_id, device_sn, carrier, technology, counter_name, counter_value, granularity, period_start, period_end)
+-- T-0164-P3 fix: 设备唯一标识 (device_oui, device_sn) 双键。
+-- OUI 从 3 个常见厂商池循环选（48BF74 / 00A0C6 / 00E0FC），与 devices 表真实数据风格一致。
+INSERT INTO pm_metrics (device_oui, device_sn, metric_path, metric_type, metric_value, granularity, time, start_time, end_time, extra)
 SELECT
-    ts,
-    format('a0000000-%s-4000-8000-000000000001', lpad((i-1) % 500 + 1, 4, '0'))::uuid,
-    'TD-' || c.carrier || '-' || lpad((i-1) % 500 + 1, 4, '0'),
-    c.carrier,
-    c.tech,
+    (ARRAY['48BF74', '00A0C6', '00E0FC'])[1 + ((i-1) % 500) % 3],
+    'TD-' || c.carrier || '-' || lpad(((i-1) % 500 + 1)::text, 4, '0'),
     cn.name,
-    floor(random() * cn.max_val)::bigint,
+    'counter',
+    floor(random() * cn.max_val)::double precision,
     '15min',
     ts,
-    ts + INTERVAL '15 minutes'
+    ts - INTERVAL '15 minutes',
+    ts,
+    jsonb_build_object('carrier', c.carrier, 'technology', c.tech)
 FROM generate_series(1, 20000) AS i
 CROSS JOIN LATERAL (
     SELECT NOW() - (random() * INTERVAL '7 days')::interval AS ts
@@ -453,30 +457,37 @@ CROSS JOIN LATERAL (
     ) AS n(name, max_val)
     OFFSET floor(random()*11)::int
     LIMIT 1
-) cn;
+) cn
+ON CONFLICT (device_sn, metric_path, granularity, end_time, time) DO NOTHING;
 
 -- ============================================================
--- 14. KPI 值 (20000条，TimescaleDB 超表)
+-- 14. KPI 值 → pm_metrics（metric_type='kpi'，20000 条，TimescaleDB hypertable）
+-- T-0164-P3 / G3：旧 kpi_values 表已合入 pm_metrics
 -- ============================================================
-INSERT INTO kpi_values (time, device_id, kpi_name, value, period)
+INSERT INTO pm_metrics (device_oui, device_sn, metric_path, metric_type, metric_value, granularity, time, start_time, end_time)
 SELECT
-    ts,
-    format('a0000000-%s-4000-8000-000000000001', lpad((i-1) % 500 + 1, 4, '0'))::uuid,
+    (ARRAY['48BF74', '00A0C6', '00E0FC'])[1 + ((i-1) % 500) % 3],
+    'TD-LOAD-' || lpad(((i-1) % 500 + 1)::text, 4, '0'),
     (ARRAY[
         'RRC_CONN_SETUP_SR', 'ERAB_SETUP_SR', 'INTRA_FREQ_HO_SR',
         'CALL_DROP_RATE', 'DL_PRB_UTIL',
         'NR_RRC_SETUP_SR', 'NR_PDCP_RATE_DL', 'NR_SA_HO_SR'
     ])[1 + floor(random()*8)::int],
+    'kpi',
     CASE
         WHEN random() < 0.3 THEN 85 + random()*15      -- 85~100 好的性能
         WHEN random() < 0.7 THEN 70 + random()*15       -- 70~85 一般
         ELSE 40 + random()*30                            -- 40~70 差
     END,
-    '15min'
+    '15min',
+    ts,
+    ts,
+    ts
 FROM generate_series(1, 20000) AS i
 CROSS JOIN LATERAL (
     SELECT NOW() - (random() * INTERVAL '7 days')::interval AS ts
-) t;
+) t
+ON CONFLICT (device_sn, metric_path, granularity, end_time, time) DO NOTHING;
 
 -- ============================================================
 -- 15. MR 文件 (100条)
@@ -726,8 +737,8 @@ UNION ALL SELECT 'sites', count(*) FROM sites WHERE id::text LIKE 'a0000000%'
 UNION ALL SELECT 'topo_nodes', count(*) FROM topo_nodes WHERE id::text LIKE 'a0000000%'
 UNION ALL SELECT 'alarms_active', count(*) FROM alarms_active WHERE device_id::text LIKE 'a0000000%'
 UNION ALL SELECT 'alarms_history', count(*) FROM alarms_history WHERE device_id::text LIKE 'a0000000%'
-UNION ALL SELECT 'pm_counters', count(*) FROM pm_counters WHERE device_id::text LIKE 'a0000000%'
-UNION ALL SELECT 'kpi_values', count(*) FROM kpi_values WHERE device_id::text LIKE 'a0000000%'
+UNION ALL SELECT 'pm_metrics_counter', count(*) FROM pm_metrics WHERE device_sn LIKE 'TD-%' AND metric_type = 'counter'
+UNION ALL SELECT 'pm_metrics_kpi',     count(*) FROM pm_metrics WHERE device_sn LIKE 'TD-LOAD-%' AND metric_type = 'kpi'
 UNION ALL SELECT 'mr_files', count(*) FROM mr_files WHERE device_id::text LIKE 'a0000000%'
 UNION ALL SELECT 'mr_records', count(*) FROM mr_records WHERE device_id::text LIKE 'a0000000%'
 UNION ALL SELECT 'audit_logs', count(*) FROM audit_logs WHERE id::text LIKE 'a0000000%'

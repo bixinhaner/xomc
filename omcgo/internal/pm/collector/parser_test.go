@@ -3,6 +3,7 @@ package collector
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -269,4 +270,137 @@ func TestParseDuration(t *testing.T) {
 			assert.Equal(t, tt.wantSecs, got)
 		})
 	}
+}
+
+// ==================== T-0164-P4 / G4 新增：三时间字段测试 ====================
+
+// TestPMXMLParser_FileHeaderFooterTime_FullExtraction 验证完整含 fileHeader/measCollec
+// 与 fileFooter/measCollec 的 XML 文件解析后三字段命中。
+func TestPMXMLParser_FileHeaderFooterTime_FullExtraction(t *testing.T) {
+	const xmlWithFullTime = `<?xml version="1.0" encoding="UTF-8"?>
+<measCollecFile>
+  <fileHeader dnPrefix="DC=cmcc" vendorName="TestVendor">
+    <measCollec beginTime="2026-05-22T10:00:00+08:00"/>
+  </fileHeader>
+  <measData>
+    <managedElement localDn="SubNetwork=1,MeContext=eNB001" swVersion="V1.0"/>
+    <measInfo measInfoId="PM_Counters">
+      <granPeriod duration="PT900S" endTime="2026-05-22T10:15:00+08:00"/>
+      <measType p="1">rrc_conn_setup_att</measType>
+      <measValue measObjLdn="CellId=Cell1">
+        <r p="1">100</r>
+      </measValue>
+    </measInfo>
+  </measData>
+  <fileFooter>
+    <measCollec endTime="2026-05-22T10:15:00+08:00"/>
+  </fileFooter>
+</measCollecFile>`
+
+	parser := NewPMXMLParser()
+	content, err := parser.Parse(strings.NewReader(xmlWithFullTime), uuid.New())
+	require.NoError(t, err)
+	require.NotNil(t, content)
+
+	wantBegin, _ := time.Parse(time.RFC3339, "2026-05-22T10:00:00+08:00")
+	wantEnd, _ := time.Parse(time.RFC3339, "2026-05-22T10:15:00+08:00")
+	require.True(t, content.FileBeginTime.Equal(wantBegin), "FileBeginTime got %v want %v", content.FileBeginTime, wantBegin)
+	require.True(t, content.FileEndTime.Equal(wantEnd), "FileEndTime got %v want %v", content.FileEndTime, wantEnd)
+	require.False(t, content.IngestTime.IsZero(), "IngestTime should always be set")
+}
+
+// TestPMXMLParser_FileHeaderFooterTime_FallbackInference 验证缺 fileHeader/measCollec
+// 与 fileFooter/measCollec 的老格式 XML，fallback 推断三字段。
+func TestPMXMLParser_FileHeaderFooterTime_FallbackInference(t *testing.T) {
+	const xmlOldFormat = `<?xml version="1.0" encoding="UTF-8"?>
+<measCollecFile>
+  <fileHeader dnPrefix="DC=cmcc" vendorName="TestVendor"/>
+  <measData>
+    <managedElement localDn="SubNetwork=1,MeContext=eNB001"/>
+    <measInfo measInfoId="PM_Counters">
+      <granPeriod duration="PT900S" endTime="2026-05-22T10:15:00+08:00"/>
+      <measType p="1">x</measType>
+      <measValue measObjLdn="CellId=A">
+        <r p="1">1</r>
+      </measValue>
+    </measInfo>
+  </measData>
+</measCollecFile>`
+
+	parser := NewPMXMLParser()
+	content, err := parser.Parse(strings.NewReader(xmlOldFormat), uuid.New())
+	require.NoError(t, err)
+	require.NotNil(t, content)
+
+	// fileFooter 缺 → FileEndTime fallback = collectTime
+	wantEnd, _ := time.Parse(time.RFC3339, "2026-05-22T10:15:00+08:00")
+	require.True(t, content.FileEndTime.Equal(wantEnd), "FileEndTime fallback should equal collectTime")
+
+	// fileHeader/measCollec 缺 → FileBeginTime fallback = FileEndTime - granularity (15min)
+	wantBegin := wantEnd.Add(-15 * time.Minute)
+	require.True(t, content.FileBeginTime.Equal(wantBegin), "FileBeginTime fallback should equal FileEndTime - 15min")
+
+	require.False(t, content.IngestTime.IsZero())
+}
+
+// TestPMXMLParser_FileHeaderFooterTime_PartialPresent 验证只有 fileFooter/measCollec
+// 而无 fileHeader/measCollec 的混合场景。
+func TestPMXMLParser_FileHeaderFooterTime_PartialPresent(t *testing.T) {
+	const xmlPartial = `<?xml version="1.0" encoding="UTF-8"?>
+<measCollecFile>
+  <fileHeader dnPrefix="DC=cmcc"/>
+  <measData>
+    <managedElement localDn="SubNetwork=1,MeContext=eNB001"/>
+    <measInfo measInfoId="PM_Counters">
+      <granPeriod duration="PT900S" endTime="2026-05-22T10:15:00+08:00"/>
+      <measType p="1">x</measType>
+      <measValue measObjLdn="CellId=A">
+        <r p="1">1</r>
+      </measValue>
+    </measInfo>
+  </measData>
+  <fileFooter>
+    <measCollec endTime="2026-05-22T10:30:00+08:00"/>
+  </fileFooter>
+</measCollecFile>`
+
+	parser := NewPMXMLParser()
+	content, err := parser.Parse(strings.NewReader(xmlPartial), uuid.New())
+	require.NoError(t, err)
+
+	// fileFooter/measCollec 命中 → FileEndTime = 2026-05-22T10:30:00（不走 collectTime fallback）
+	wantEnd, _ := time.Parse(time.RFC3339, "2026-05-22T10:30:00+08:00")
+	require.True(t, content.FileEndTime.Equal(wantEnd))
+
+	// fileHeader/measCollec 缺 → FileBeginTime = FileEndTime - 15min（基于 footer，非 collectTime）
+	wantBegin := wantEnd.Add(-15 * time.Minute)
+	require.True(t, content.FileBeginTime.Equal(wantBegin))
+}
+
+// TestPMXMLParser_IngestTime_AlwaysSet 验证 IngestTime 总是非 zero（即使其他时间都缺）。
+func TestPMXMLParser_IngestTime_AlwaysSet(t *testing.T) {
+	const xmlNoTime = `<?xml version="1.0" encoding="UTF-8"?>
+<measCollecFile>
+  <fileHeader/>
+  <measData>
+    <managedElement localDn="SubNetwork=1,MeContext=eNB001"/>
+    <measInfo measInfoId="PM_Counters">
+      <granPeriod duration="PT900S" endTime="2026-05-22T10:15:00+08:00"/>
+      <measType p="1">x</measType>
+      <measValue measObjLdn="CellId=A">
+        <r p="1">1</r>
+      </measValue>
+    </measInfo>
+  </measData>
+</measCollecFile>`
+
+	parser := NewPMXMLParser()
+	before := time.Now()
+	content, err := parser.Parse(strings.NewReader(xmlNoTime), uuid.New())
+	after := time.Now()
+	require.NoError(t, err)
+
+	require.False(t, content.IngestTime.IsZero(), "IngestTime must always be set")
+	require.True(t, !content.IngestTime.Before(before) && !content.IngestTime.After(after),
+		"IngestTime should be within Parse call window")
 }

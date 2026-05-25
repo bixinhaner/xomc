@@ -7,7 +7,9 @@ import (
 	"errors"
 	"io"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/assert"
@@ -15,6 +17,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/backup"
+	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/pkg/tr069"
 )
 
@@ -163,6 +166,142 @@ func TestCountingReader(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, " world", string(rest))
 	assert.Equal(t, int64(11), c.n.Load())
+}
+
+// captureBus records every published event for assertions.
+type captureBus struct {
+	mu        sync.Mutex
+	published []struct {
+		subject string
+		evt     event.Event
+	}
+	publishErr error
+}
+
+func (c *captureBus) Publish(_ context.Context, subject string, evt event.Event) error {
+	if c.publishErr != nil {
+		return c.publishErr
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.published = append(c.published, struct {
+		subject string
+		evt     event.Event
+	}{subject, evt})
+	return nil
+}
+
+func (c *captureBus) Subscribe(string, event.EventHandler) (event.Subscription, error) {
+	return nil, nil
+}
+
+func (c *captureBus) QueueSubscribe(string, string, event.EventHandler) (event.Subscription, error) {
+	return nil, nil
+}
+
+func (c *captureBus) Close() error { return nil }
+
+func TestPublishPMFileReceivedEvent_emptySNSkipsPublish(t *testing.T) {
+	bus := &captureBus{}
+	h := &Handler{logger: zap.NewNop(), eventBus: bus}
+
+	h.publishPMFileReceivedEvent(context.Background(),
+		"pm-files", "pm-files/2026/05/25/pm-X.xml.gz", "pm-X.xml.gz", 1234, "")
+
+	assert.Empty(t, bus.published, "empty device_sn must skip pm.file.received publish")
+}
+
+func TestPublishPMFileReceivedEvent_publishesThinPayload(t *testing.T) {
+	bus := &captureBus{}
+	h := &Handler{logger: zap.NewNop(), eventBus: bus}
+
+	h.publishPMFileReceivedEvent(context.Background(),
+		"pm-files", "pm-files/2026/05/25/pm-1202000240194DP0015.xml.gz",
+		"pm-1202000240194DP0015.xml.gz", 4096, "1202000240194DP0015")
+
+	require.Len(t, bus.published, 1)
+	got := bus.published[0]
+	assert.Equal(t, event.SubjectPMFileReceived, got.subject)
+
+	// Decode payload via the wire-format the collector uses.
+	var decoded struct {
+		MinIOPath string `json:"minio_path"`
+		Bucket    string `json:"bucket"`
+		DeviceSN  string `json:"device_sn"`
+		FileSize  int64  `json:"file_size"`
+		FileName  string `json:"file_name"`
+		DeviceID  string `json:"device_id"`
+		DeviceOUI string `json:"device_oui"`
+	}
+	require.NoError(t, got.evt.DecodePayload(&decoded))
+
+	assert.Equal(t, "pm-files/2026/05/25/pm-1202000240194DP0015.xml.gz", decoded.MinIOPath)
+	assert.Equal(t, "pm-files", decoded.Bucket)
+	assert.Equal(t, "1202000240194DP0015", decoded.DeviceSN)
+	assert.Equal(t, int64(4096), decoded.FileSize)
+	assert.Equal(t, "pm-1202000240194DP0015.xml.gz", decoded.FileName)
+	// Thin payload: device_id/oui intentionally empty — collector fills via DeviceLookup.
+	assert.Empty(t, decoded.DeviceID, "thin payload must leave device_id empty")
+	assert.Empty(t, decoded.DeviceOUI, "thin payload must leave device_oui empty")
+}
+
+func TestExtractDeviceSNFromPMFilename(t *testing.T) {
+	cases := []struct {
+		name     string
+		filename string
+		want     string
+	}{
+		{
+			name:     "Baicells real CPE format (Beijing time window, .xml)",
+			filename: "A20260525.1630+0800-1645+0800_48BF74.1202000240194DP0015.xml",
+			want:     "1202000240194DP0015",
+		},
+		{
+			name:     "Baicells real CPE format with .xml.gz",
+			filename: "A20260525.1630+0800-1645+0800_48BF74.1202000240194DP0015.xml.gz",
+			want:     "1202000240194DP0015",
+		},
+		{
+			name:     "cpe_simulator pm-{SN}.xml.gz pattern",
+			filename: "pm-1202000240194DP0015.xml.gz",
+			want:     "1202000240194DP0015",
+		},
+		{
+			name:     "cpe_simulator pm-{SN}.xml pattern (no compression)",
+			filename: "pm-G1-VALIDATE-001.xml",
+			want:     "G1-VALIDATE-001",
+		},
+		{
+			name:     "unknown pattern returns empty (caller will WARN-skip)",
+			filename: "random-filename.xml",
+			want:     "",
+		},
+		{
+			name:     "empty filename",
+			filename: "",
+			want:     "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, extractDeviceSNFromPMFilename(tc.filename))
+		})
+	}
+}
+
+func TestPublishPMFileReceivedEvent_publishErrorDoesNotPanic(t *testing.T) {
+	// Defensive: even if NATS is down, publish failure must not bring down
+	// the upload request (5xx on a successful MinIO write is worse than a
+	// silently-skipped event — the CPE will re-upload on next cycle).
+	bus := &captureBus{publishErr: errors.New("NATS down")}
+	h := &Handler{logger: zap.NewNop(), eventBus: bus}
+
+	// Should log error but not panic.
+	assert.NotPanics(t, func() {
+		h.publishPMFileReceivedEvent(context.Background(),
+			"pm-files", "obj/path.xml.gz", "f.xml.gz", 1, "SN1")
+	})
+	_ = time.Millisecond // keep import alive
 }
 
 func enabledGzipPolicy() *backup.BackupPolicy {

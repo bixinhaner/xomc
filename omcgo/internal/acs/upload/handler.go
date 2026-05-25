@@ -334,6 +334,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			r.URL.Query().Get("sn"), queryTaskID)
 	}
 
+	// 6.4. T-0164 G1 真机闭环修复点：FileType=PM (4) 文件入库后发 pm.file.received，
+	// pm.Collector 订阅后解析 XML 写 pm_metrics / 触发 KPI 反算。
+	// 此前只有 transfer-bridge 路径（订阅 AutonomousTransferComplete + 下载文件）
+	// 会发这个事件，CPE 直接 HTTP POST 路径不经过 bridge，导致 pm_metrics 永远空。
+	//
+	// SN 提取优先级：
+	//   1. URL query `sn=`（cpe_simulator.py 模板带；部分厂商私有实现也带）
+	//   2. 文件名兜底（真机 Baicells 实测：`A{ts}_{OUI}.{SN}.xml(.gz)?`，URL 不带 sn）
+	//
+	// payload 走精简版（minio_path / bucket / device_sn / file_size / file_name），
+	// 设备 UUID / OUI / carrier / technology 由 collector 用 SN 查 device 表回填。
+	if ft == tr069.FileTypePM && h.eventBus != nil {
+		deviceSN := r.URL.Query().Get("sn")
+		if deviceSN == "" {
+			deviceSN = extractDeviceSNFromPMFilename(filename)
+		}
+		h.publishPMFileReceivedEvent(ctx, bucket, objectPath, filename, info.Size, deviceSN)
+	}
+
 	// 7. Return success
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -676,6 +695,78 @@ func parseBackupFilename(filename string) (taskIDPrefix, deviceSN string) {
 		return m[1], m[2]
 	}
 	return "", ""
+}
+
+// publishPMFileReceivedEvent emits SubjectPMFileReceived after a FileType=PM
+// upload lands in MinIO. The PM collector (in the worker process) subscribes
+// to this and parses the XML / writes pm_metrics / triggers KPI rollups.
+//
+// Payload is the "thin" variant: device_id / device_oui / carrier / technology
+// are intentionally omitted — the collector resolves them from device_sn via
+// its DeviceLookup fallback (see internal/pm/collector/collector.go). The
+// transfer-bridge path publishes the "fat" variant with all fields pre-filled
+// because it already has a DeviceRepository on hand; ACS does not, and we
+// don't want to add a synchronous DB lookup on the upload hot path.
+//
+// If device_sn is empty the publish is skipped with a WARN — the collector
+// can't resolve the device without it, and an event with no SN would fail
+// downstream anyway.
+func (h *Handler) publishPMFileReceivedEvent(
+	ctx context.Context, bucket, objectPath, filename string, fileSize int64, deviceSN string,
+) {
+	if deviceSN == "" {
+		h.logger.Warn("PM upload missing device_sn query param; skipping pm.file.received publish",
+			zap.String("path", objectPath),
+			zap.String("filename", filename))
+		return
+	}
+
+	payload := map[string]interface{}{
+		"minio_path": objectPath,
+		"bucket":     bucket,
+		"device_sn":  deviceSN,
+		"file_size":  fileSize,
+		"file_name":  filename,
+	}
+
+	evt, err := event.NewEvent(event.SubjectPMFileReceived, payload)
+	if err != nil {
+		h.logger.Error("create pm.file.received event", zap.Error(err))
+		return
+	}
+	if err := h.eventBus.Publish(ctx, event.SubjectPMFileReceived, evt); err != nil {
+		h.logger.Error("publish pm.file.received", zap.Error(err))
+		return
+	}
+	h.logger.Info("published pm.file.received",
+		zap.String("device_sn", deviceSN),
+		zap.String("path", objectPath),
+		zap.Int64("size", fileSize))
+}
+
+// pmFilenameSNRe matches the two PM filename layouts we've seen in the wild:
+//
+//	A{date}.{startTime}-{endTime}_{OUI}.{SN}.xml(.gz)?   — Baicells real CPE
+//	pm-{SN}.xml(.gz)?                                    — cpe_simulator.py
+//
+// Capture group 1 is the deviceSN. Anchored to the end (after stripping the
+// optional .gz) so it can't confuse intermediate dot-segments with the SN.
+//
+// 3GPP 32.435 names PM files this way (`A{date}.{period}_{vendorTag}.{neId}`
+// or similar); the regex below captures the Baicells dialect that uses
+// `{OUI}.{SN}` as the vendor/NE tag. New vendor dialects should add an
+// alternative branch here rather than scattering parsing logic at the call site.
+var pmFilenameSNRe = regexp.MustCompile(`(?:^A.+?_[0-9a-fA-F]{6,}\.|^pm-)([^.]+)\.xml(\.gz)?$`)
+
+// extractDeviceSNFromPMFilename returns the device SN parsed from a PM upload
+// filename, or "" when none of the recognised vendor patterns match. The
+// caller already strips the directory portion, so `filename` is the basename.
+func extractDeviceSNFromPMFilename(filename string) string {
+	m := pmFilenameSNRe.FindStringSubmatch(filename)
+	if len(m) >= 2 {
+		return m[1]
+	}
+	return ""
 }
 
 // publishLogFileReceivedEvent emits SubjectLogFileReceived after a

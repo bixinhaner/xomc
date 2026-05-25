@@ -1,0 +1,54 @@
+package aggregator
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/omcgo/omcgo/internal/pm/metrics"
+)
+
+// SelectTable 10 case：5 粒度 × 2 维度。15min × device_group 必须返 ErrUnsupportedQuery。
+
+func Test_SelectTable_5Granularities_x_2Dimensions(t *testing.T) {
+	cases := []struct {
+		gran    metrics.Granularity
+		dim     Dimension
+		want    string
+		wantErr bool
+	}{
+		{metrics.Granularity15Min, DimensionDevice, "pm_metrics", false},
+		{metrics.Granularity15Min, DimensionDeviceGroup, "", true}, // 不支持
+		{metrics.GranularityHourly, DimensionDevice, "pm_metrics_hourly", false},
+		{metrics.GranularityHourly, DimensionDeviceGroup, "pm_group_metrics_hourly", false},
+		{metrics.GranularityDaily, DimensionDevice, "pm_metrics_daily", false},
+		{metrics.GranularityDaily, DimensionDeviceGroup, "pm_group_metrics_daily", false},
+		{metrics.GranularityWeekly, DimensionDevice, "pm_metrics_weekly", false},
+		{metrics.GranularityWeekly, DimensionDeviceGroup, "pm_group_metrics_weekly", false},
+		{metrics.GranularityMonthly, DimensionDevice, "pm_metrics_monthly", false},
+		{metrics.GranularityMonthly, DimensionDeviceGroup, "pm_group_metrics_monthly", false},
+	}
+	for _, c := range cases {
+		t.Run(string(c.gran)+"_"+string(c.dim), func(t *testing.T) {
+			got, err := SelectTable(c.gran, c.dim)
+			if c.wantErr {
+				assert.ErrorIs(t, err, ErrUnsupportedQuery)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, c.want, got)
+		})
+	}
+}
+
+func Test_SelectTable_EmptyDimDefaultsDevice(t *testing.T) {
+	got, err := SelectTable(metrics.GranularityHourly, "")
+	require.NoError(t, err)
+	assert.Equal(t, "pm_metrics_hourly", got)
+}
+
+func Test_SelectTable_UnknownGranularity(t *testing.T) {
+	_, err := SelectTable(metrics.Granularity("xyz"), DimensionDevice)
+	assert.Error(t, err)
+}

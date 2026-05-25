@@ -77,13 +77,6 @@ func Test_ProvisioningTemplates(t *testing.T) {
 	}
 }
 
-func Test_KPIDefinitions(t *testing.T) {
-	c := New()
-	for _, tech := range []model.Technology{model.TechLTE, model.TechNR} {
-		_ = c.KPIDefinitions(tech)
-	}
-}
-
 func Test_AlarmSeverityMapping(t *testing.T) {
 	c := New()
 	tests := []struct {

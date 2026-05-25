@@ -2944,6 +2944,7 @@ const messages: Record<string, string> = {
   'system.config.omc':           'OMC Settings',
   'system.config.acsTransfer':   'ACS Transfer',
   'system.config.northbound':    'Northbound Settings',
+  'system.config.pmRetention':   'PM Data Retention',
   'system.transfer.inheritHint': 'These fields are stored under sys_configs category acs_transfer. Leave a field blank to keep using the startup config file or environment default.',
   'system.transfer.uploadSection': 'Upload Service Settings',
   'system.transfer.downloadSection': 'Download Service Settings',
@@ -5016,6 +5017,21 @@ const messages: Record<string, string> = {
   'systemLicense.history.replacedAt':               'Replaced At',
   'systemLicense.history.signature':                'Signature',
   'systemLicense.history.empty':                    'No historical licenses',
+
+  // T-0164-P2 / G2 PM Retention Policy (System Config Page)
+  'pmRetention.title':                              'PM Data Retention Policy',
+  'pmRetention.description':                        'Configure retention days for 5-level PM time series granularities. Changes take effect immediately.',
+  'pmRetention.raw_15min_days':                     '15min Raw Retention (days)',
+  'pmRetention.hourly_days':                        'Hourly Aggregate Retention (days)',
+  'pmRetention.daily_days':                         'Daily Aggregate Retention (days)',
+  'pmRetention.weekly_days':                        'Weekly Aggregate Retention (days)',
+  'pmRetention.monthly_days':                       'Monthly Aggregate Retention (days)',
+  'pmRetention.unit.days':                          'days',
+  'pmRetention.save':                               'Save',
+  'pmRetention.reset':                              'Reset to default',
+  'pmRetention.validate.tooShort':                  'Retention days must be at least 1 day',
+  'pmRetention.validate.tooLong':                   'Retention days must be at most 3650 days (10 years)',
+  'pmRetention.save.success':                       'Saved successfully; new retention policy is effective',
 };
 
 export default messages;

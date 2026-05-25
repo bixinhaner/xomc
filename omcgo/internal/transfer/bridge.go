@@ -157,6 +157,7 @@ func (b *TransferBridge) handleAutonomousTransferComplete(ctx context.Context, e
 		pmPayload := map[string]interface{}{
 			"minio_path": objectPath,
 			"device_id":  dev.ID.String(),
+			"device_oui": dev.OUI, // T-0164-P3: TR-069 标准设备唯一标识 (oui, sn) 双键
 			"device_sn":  dev.SerialNumber,
 			"carrier":    string(dev.Carrier),
 			"technology": string(dev.Technology),
@@ -177,6 +178,7 @@ func (b *TransferBridge) handleAutonomousTransferComplete(ctx context.Context, e
 			"minio_path": objectPath,
 			"bucket":     bucket,
 			"device_id":  dev.ID.String(),
+			"device_oui": dev.OUI, // T-0164-P3: TR-069 标准设备唯一标识 (oui, sn) 双键
 			"device_sn":  dev.SerialNumber,
 			"carrier":    string(dev.Carrier),
 			"file_name":  fileName,

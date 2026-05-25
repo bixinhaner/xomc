@@ -4,181 +4,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/model"
-	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-// ---------------------------------------------------------------------------
-// Test applyCounterFilters — builds correct SQL WHERE clauses
-// ---------------------------------------------------------------------------
-
-func Test_applyCounterFilters_NoFilters(t *testing.T) {
-	qb := storage.Psql.Select("*").From("pm_counters")
-	filter := CounterFilter{}
-
-	result := applyCounterFilters(qb, filter)
-
-	sql, args, err := result.ToSql()
-	require.NoError(t, err)
-	assert.Equal(t, "SELECT * FROM pm_counters", sql)
-	assert.Empty(t, args)
-}
-
-func Test_applyCounterFilters_DeviceID(t *testing.T) {
-	qb := storage.Psql.Select("*").From("pm_counters")
-	deviceID := uuid.New()
-	filter := CounterFilter{DeviceID: &deviceID}
-
-	result := applyCounterFilters(qb, filter)
-
-	sql, args, err := result.ToSql()
-	require.NoError(t, err)
-	assert.Contains(t, sql, "device_id = $1")
-	assert.Len(t, args, 1)
-}
-
-func Test_applyCounterFilters_CellID(t *testing.T) {
-	qb := storage.Psql.Select("*").From("pm_counters")
-	cellID := "cell-1"
-	filter := CounterFilter{CellID: &cellID}
-
-	result := applyCounterFilters(qb, filter)
-
-	sql, args, err := result.ToSql()
-	require.NoError(t, err)
-	assert.Contains(t, sql, "cell_id = $1")
-	assert.Equal(t, "cell-1", args[0])
-}
-
-func Test_applyCounterFilters_CounterGroup(t *testing.T) {
-	qb := storage.Psql.Select("*").From("pm_counters")
-	group := "LTE.CellMeasReport"
-	filter := CounterFilter{CounterGroup: &group}
-
-	result := applyCounterFilters(qb, filter)
-
-	sql, args, err := result.ToSql()
-	require.NoError(t, err)
-	assert.Contains(t, sql, "counter_group = $1")
-	assert.Equal(t, "LTE.CellMeasReport", args[0])
-}
-
-func Test_applyCounterFilters_CounterName(t *testing.T) {
-	qb := storage.Psql.Select("*").From("pm_counters")
-	name := "PRB.UlAvailProcMeas"
-	filter := CounterFilter{CounterName: &name}
-
-	result := applyCounterFilters(qb, filter)
-
-	sql, args, err := result.ToSql()
-	require.NoError(t, err)
-	assert.Contains(t, sql, "counter_name = $1")
-	assert.Equal(t, "PRB.UlAvailProcMeas", args[0])
-}
-
-func Test_applyCounterFilters_TimeRange(t *testing.T) {
-	qb := storage.Psql.Select("*").From("pm_counters")
-	start := time.Date(2026, 3, 22, 0, 0, 0, 0, time.UTC)
-	end := time.Date(2026, 3, 22, 23, 59, 59, 0, time.UTC)
-	filter := CounterFilter{
-		StartTime: start,
-		EndTime:   end,
-	}
-
-	result := applyCounterFilters(qb, filter)
-
-	sql, args, err := result.ToSql()
-	require.NoError(t, err)
-	assert.Contains(t, sql, "time >= $1")
-	assert.Contains(t, sql, "time <= $2")
-	assert.Equal(t, start, args[0])
-	assert.Equal(t, end, args[1])
-}
-
-func Test_applyCounterFilters_AllFilters(t *testing.T) {
-	qb := storage.Psql.Select("*").From("pm_counters")
-	deviceID := uuid.New()
-	cellID := "cell-1"
-	group := "LTE.CellMeasReport"
-	name := "PRB.UlAvailProcMeas"
-	start := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	end := time.Date(2026, 3, 31, 23, 59, 59, 0, time.UTC)
-
-	filter := CounterFilter{
-		DeviceID:     &deviceID,
-		CellID:       &cellID,
-		CounterGroup: &group,
-		CounterName:  &name,
-		StartTime:    start,
-		EndTime:      end,
-	}
-
-	result := applyCounterFilters(qb, filter)
-
-	sql, args, err := result.ToSql()
-	require.NoError(t, err)
-	assert.Contains(t, sql, "device_id = $1")
-	assert.Contains(t, sql, "cell_id = $2")
-	assert.Contains(t, sql, "counter_group = $3")
-	assert.Contains(t, sql, "counter_name = $4")
-	assert.Contains(t, sql, "time >= $5")
-	assert.Contains(t, sql, "time <= $6")
-	assert.Len(t, args, 6)
-}
-
-func Test_applyCounterFilters_ZeroTimeIgnored(t *testing.T) {
-	qb := storage.Psql.Select("*").From("pm_counters")
-	filter := CounterFilter{
-		StartTime: time.Time{}, // zero value
-		EndTime:   time.Time{}, // zero value
-	}
-
-	result := applyCounterFilters(qb, filter)
-
-	sql, args, err := result.ToSql()
-	require.NoError(t, err)
-	assert.NotContains(t, sql, "time")
-	assert.Empty(t, args)
-}
-
-// ---------------------------------------------------------------------------
-// Test allowedSortColumns — SQL injection prevention
-// ---------------------------------------------------------------------------
-
-func Test_allowedSortColumns_ValidColumns(t *testing.T) {
-	validColumns := []string{"time", "counter_name", "counter_value", "device_id", "created_at"}
-
-	for _, col := range validColumns {
-		t.Run(col, func(t *testing.T) {
-			assert.True(t, allowedSortColumns[col], "column %s should be allowed", col)
-		})
-	}
-}
-
-func Test_allowedSortColumns_InvalidColumns(t *testing.T) {
-	invalidColumns := []string{
-		"DROP TABLE",
-		"counter_group",
-		"cell_id",
-		"1; DROP TABLE pm_counters",
-		"",
-	}
-
-	for _, col := range invalidColumns {
-		t.Run(col, func(t *testing.T) {
-			assert.False(t, allowedSortColumns[col], "column %s should not be allowed", col)
-		})
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Test CounterFilter struct — embedded ListRequest
-// ---------------------------------------------------------------------------
-
+// CounterFilter 与 ListRequest 集成
 func Test_CounterFilter_WithListRequest(t *testing.T) {
 	filter := CounterFilter{
 		ListRequest: model.ListRequest{
@@ -202,10 +33,7 @@ func Test_CounterFilter_DefaultListRequest(t *testing.T) {
 	assert.Equal(t, 20, filter.Limit())
 }
 
-// ---------------------------------------------------------------------------
-// Test AggregatedCounter struct — verify fields
-// ---------------------------------------------------------------------------
-
+// AggregatedCounter struct 字段稳定性
 func Test_AggregatedCounter_Struct(t *testing.T) {
 	now := time.Now()
 	deviceID := uuid.New()
@@ -233,18 +61,62 @@ func Test_AggregatedCounter_Struct(t *testing.T) {
 	assert.Equal(t, int64(4), ac.SampleCount)
 }
 
-// ---------------------------------------------------------------------------
-// Test psql statement builder — uses Dollar placeholder format
-// ---------------------------------------------------------------------------
+// G3 字段双向转换：PMCounter ↔ PMMetric 保证无字段丢失
+// T-0164-P3 fix: 业务键改用 TR-069 标准 (OUI, DeviceSN) 双键
+func Test_counterToMetric_BasicFields(t *testing.T) {
+	deviceID := uuid.New()
+	now := time.Now()
+	c := model.PMCounter{
+		Time:         now,
+		DeviceID:     deviceID,
+		OUI:          "48BF74",
+		DeviceSN:     "1202000240194DP0026",
+		CellID:       "cell-1",
+		CounterGroup: "LTE.CellMeasReport",
+		CounterName:  "PRB.UlAvailProcMeas",
+		CounterValue: 42.5,
+		Granularity:  15,
+	}
+	m := counterToMetric(c)
 
-func Test_psql_DollarPlaceholder(t *testing.T) {
-	sql, args, err := storage.Psql.Select("counter_name").
-		From("pm_counters").
-		Where(squirrel.Eq{"device_id": "test-id"}).
-		ToSql()
+	assert.Equal(t, "48BF74", m.DeviceOUI)
+	assert.Equal(t, "1202000240194DP0026", m.DeviceSN)
+	assert.Equal(t, "PRB.UlAvailProcMeas", m.MetricPath)
+	assert.Equal(t, "counter", string(m.MetricType))
+	assert.Equal(t, 42.5, m.MetricValue)
+	assert.Equal(t, "15min", string(m.Granularity))
+	assert.Equal(t, now, m.EndTime)
+	assert.Equal(t, now.Add(-15*time.Minute), m.StartTime)
+	if assert.NotNil(t, m.ObjectLDN) {
+		assert.Equal(t, "cell-1", *m.ObjectLDN)
+	}
+	assert.Equal(t, "LTE.CellMeasReport", m.Extra["counter_group"])
+	assert.Equal(t, deviceID.String(), m.Extra["device_id"])
+}
 
-	require.NoError(t, err)
-	assert.Contains(t, sql, "$1", "should use dollar placeholders")
-	assert.NotContains(t, sql, "?", "should not use question mark placeholders")
-	assert.Equal(t, "test-id", args[0])
+func Test_counterRoundTrip_PreservesCoreFields(t *testing.T) {
+	deviceID := uuid.New()
+	now := time.Now().UTC().Truncate(time.Second)
+	original := model.PMCounter{
+		Time:         now,
+		DeviceID:     deviceID,
+		OUI:          "48BF74",
+		DeviceSN:     "1202000240194DP0026",
+		CellID:       "cell-7",
+		CounterGroup: "LTE.CellMeasReport",
+		CounterName:  "PRB.UlAvailProcMeas",
+		CounterValue: 7.5,
+		Granularity:  15,
+	}
+	m := counterToMetric(original)
+	got := metricToCounter(m)
+
+	assert.Equal(t, deviceID, got.DeviceID, "DeviceID 应从 extra 反查")
+	assert.Equal(t, "48BF74", got.OUI)
+	assert.Equal(t, "1202000240194DP0026", got.DeviceSN)
+	assert.Equal(t, "cell-7", got.CellID)
+	assert.Equal(t, "LTE.CellMeasReport", got.CounterGroup)
+	assert.Equal(t, "PRB.UlAvailProcMeas", got.CounterName)
+	assert.Equal(t, 7.5, got.CounterValue)
+	assert.Equal(t, 15, got.Granularity)
 }

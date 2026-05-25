@@ -1301,10 +1301,26 @@ pm_adhoc_aggregation_results = (job_id, granularity, device_sn, time_bucket, met
 - [ ] **G8**：重启续跑可用——kill -9 worker 进程后，僵尸任务在阈值（默认 5min）后被重置为 pending，由其他 worker 接管完成
 - [ ] **G8**：多 worker 部署下同一任务不会被两个 worker 同时执行（`FOR UPDATE SKIP LOCKED` 验证）
 - [ ] **G8**：cron 错过触发时点（worker 停机覆盖触发时间）后，启动时自动补跑漏掉的桶；`async_jobs_cron_state` 表正确记录最后成功触发时间
-- [ ] **G8**：心跳间隔与僵尸阈值通过 sys_configs 可调；改后立即生效
+- [ ] **G8**：心跳间隔 / 僵尸阈值 / Sweeper 间隔通过 sys_configs 可调；**改后重启 worker 生效**（异步任务阈值变更频次极低，不做 EventBus 热重载；详见 §7 末 Decision Note 2026-05-25）
 - [ ] **G8**：Prometheus 任务总览指标齐全（队列深度按 type 分桶 / 平均耗时 / 失败率 / 僵尸计数 / 补跑次数）
 - [ ] 八项均覆盖到 `scripts/e2e_verify.sh` + Playwright（G6 / G7 含 UI 交互断言；G8 含进程重启续跑断言）
 - [ ] 文档更新：本设计 → 实施计划 → backlog 登记 → release-gate.md 检查项
+
+---
+
+## 7.1 Decision Notes
+
+### 2026-05-25 — G8 阈值 sys_configs 取"启动期生效"而非"热重载"
+
+| 维度 | 内容 |
+|------|------|
+| 原 DoD | G8 心跳间隔 / 僵尸阈值 sys_configs 可调，**改后立即生效** |
+| 新 DoD | G8 心跳间隔 / 僵尸阈值 / Sweeper 间隔 sys_configs 可调，**改后重启 worker 生效** |
+| 决策人 | 用户（kevin） |
+| 理由 | 1) asyncjob 阈值（心跳 30s / 僵尸 5min / Sweeper 60s）属于内部容错调参，**变更频次极低**（运维一年改 0-1 次）；2) 与 G2 retention（高频改、影响数据保留窗口）有本质不同——retention 已实现 EventBus 立即生效；3) 引入 atomic 包装 + Runner/Sweeper 内 getter + EventBus 监听属于"为完备而完备"的复杂度，违背"做减法"原则；4) 运维重启 worker 成本可接受（Sweeper 续跑 + cron_state 补跑机制已保证零数据丢失） |
+| 实现 | `asyncjob.HeartbeatInterval` / `SweeperInterval` / `ZombieThreshold` 由 `cmd/worker/aggregator.go:loadAsyncJobThresholds` 启动期从 sys_configs 读取，写回包级 var；改值需 `systemctl restart omcgo-worker` 拾取新值 |
+| 影响 | 不影响 G8 其它 5 项 DoD（async_jobs 表 / 续跑 / SKIP LOCKED / cron_state / Prometheus）；不影响 release-gate.md §8.5 G8 段的其它检查项 |
+| 回归路径 | 若运维场景出现频繁调参需求，可参照 `pm/retention/service.go:OnSysConfigSaved` 模式补 EventBus hook，向后兼容（数据格式 / sys_configs key 不变） |
 
 ---
 

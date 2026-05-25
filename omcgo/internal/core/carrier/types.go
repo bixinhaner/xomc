@@ -21,13 +21,10 @@ type ProvisionTemplate struct {
 	Required   []string               // required parameter paths
 }
 
-// KPIDefinition 描述一个 KPI 计算公式。
-// 由运营商适配器按技术返回，由 PM 模块在 PM 文件入库后计算 KPI 指标时引用。
-type KPIDefinition struct {
-	Name        string   // unique KPI identifier
-	DisplayName string   // human-readable name
-	Formula     string   // calculation formula expression
-	Unit        string   // "%", "ms", "Mbps", etc.
-	Counters    []string // dependent counter names
-	Category    string   // "accessibility", "retainability", "mobility", "throughput", "utilization"
-}
+// KPIDefinition 类型已废弃（T-0164-P1）。
+//
+// 旧实现下，每个 carrier 适配器返回一份硬编码的 KPI 列表，KPIEngine 按 carrier+tech 过滤
+// 决定算哪些公式。新模型下 KPI 来源全部走 DB（perf_indicators_* + rela_platform_indicator_formula_*），
+// 由 pm/kpi/router 按 device → product → 平台路由解析。
+//
+// 文件保留 ProvisioningTemplates / OUIProductClassInfo 用于其它运营商差异化能力。

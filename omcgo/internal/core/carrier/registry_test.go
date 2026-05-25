@@ -31,7 +31,6 @@ func (m *registryMockCarrier) MapUnifiedToParameter(_ string) string { return ""
 func (m *registryMockCarrier) ProvisioningTemplates(_ model.Technology) []*ProvisionTemplate {
 	return nil
 }
-func (m *registryMockCarrier) KPIDefinitions(_ model.Technology) []*KPIDefinition       { return nil }
 func (m *registryMockCarrier) AlarmSeverityMapping(_ string) model.AlarmSeverity        { return 0 }
 func (m *registryMockCarrier) ValidateParameter(_ string, _ string) error               { return nil }
 func (m *registryMockCarrier) GetInfoParamMapping(_ model.Technology) map[string]string { return nil }

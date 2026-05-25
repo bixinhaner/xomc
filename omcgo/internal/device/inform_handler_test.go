@@ -231,7 +231,6 @@ func (c *infMockCarrier) MapUnifiedToParameter(_ string) string { return "" }
 func (c *infMockCarrier) ProvisioningTemplates(_ model.Technology) []*carrier.ProvisionTemplate {
 	return nil
 }
-func (c *infMockCarrier) KPIDefinitions(_ model.Technology) []*carrier.KPIDefinition { return nil }
 func (c *infMockCarrier) AlarmSeverityMapping(_ string) model.AlarmSeverity          { return 0 }
 func (c *infMockCarrier) ValidateParameter(_ string, _ string) error                 { return nil }
 func (c *infMockCarrier) GetInfoParamMapping(_ model.Technology) map[string]string   { return nil }

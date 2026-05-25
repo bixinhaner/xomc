@@ -191,7 +191,7 @@ dict_loader:
     directory: "quicksettings"
 
 batch_processor:
-  enabled: true           # 启用 Periodic Inform 批量处理
+  enabled: true           # 启用 Periodic Inform 批量处理；由 sequencer 保护跨路径竞态（真机验证 2026-05-25）
   workers: 2              # 工作协程数
   flush_interval: 10s     # 批量刷新间隔
   max_batch_size: 200     # 单次批量上限
