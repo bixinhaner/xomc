@@ -138,8 +138,12 @@ export interface Device {
   sourceType?: 'manual' | 'rule';
   onlineTime: string;
   offlineTime: string;
-  onlineDuration: number;
-  upTime: string;
+  // T-XXX (Phase 0)：后端 SQL 派生秒数（NULL 表示设备从未上线/无法计算）。
+  // 之前 `number` + mapper `?? 0` 会让"从未上线"显示为"0m"误导，改 null。
+  onlineDuration: number | null;
+  // T-XXX (Phase 0)：后端 device_info.run_time int64 秒（来自 Device.DeviceInfo.UpTime）。
+  // 之前类型是 string + mapper 读不存在字段 → 显示空。
+  upTime: number | null;
   firstOnlineTime: string;
   lastInformTime: string;
   deviceName: string;

@@ -41,11 +41,16 @@ interface BackendDevice {
   product_name?: string;
   mac_address?: string;
   group_name?: string;
-  online_at?: string;
-  offline_at?: string;
+  // T-XXX (Phase 0)：字段名对齐后端 DeviceWithInfo DTO（json tag），
+  // 修复"其他信息组"接入/断开/首次接入/运行时长 5 字段全空白 bug。
+  // 原 mapper 用的 `online_at / offline_at / first_online_at / up_time` 在后端从不存在。
+  last_online_time?: string;
+  last_offline_time?: string;
+  first_online_time?: string;
+  // run_time: 设备本次开机后运行秒数（来自 Device.DeviceInfo.UpTime），int64 not string
+  run_time?: number;
+  // online_duration: SQL 派生 — 当前在线/上次在线区间秒数
   online_duration?: number;
-  up_time?: string;
-  first_online_at?: string;
   gps_version?: string;
   rom?: string;
   remark?: string;
@@ -166,6 +171,23 @@ function deriveLegacyLifecycle(status: string | undefined): Device['lifecycleSta
   }
 }
 
+// toRadioMode 把后端 technology 枚举（'lte' / 'nr' / 'gsm'）转换为
+// BasicTab 期望的基站类型（'eNB' / 'gNB' / 'GSM'）。前端 BasicTab 内部
+// 的"小区信息 / 状态信息（专属字段）"分组渲染条件依赖此枚举，否则整组
+// 不显示。设计文档 §12。
+function toRadioMode(technology: string): string {
+  switch (technology) {
+    case 'lte':
+      return 'eNB';
+    case 'nr':
+      return 'gNB';
+    case 'gsm':
+      return 'GSM';
+    default:
+      return technology;
+  }
+}
+
 function mapBackendDevice(bd: BackendDevice): Device {
   // 兼容旧后端：若尚未升级到 T-0162 双字段，回退到 status 口径。
   const lifecycleState = (bd.lifecycle_state || deriveLegacyLifecycle(bd.status)) as Device['lifecycleState'];
@@ -177,7 +199,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     name: bd.device_name || bd.serial_number,
     vendor: bd.manufacturer,
     productClass: bd.product_class,
-    networkType: bd.technology,
+    networkType: toRadioMode(bd.technology),
     deviceModel: bd.model_name,
     region: bd.device_name,
     stationId: bd.site_id,
@@ -211,11 +233,12 @@ function mapBackendDevice(bd: BackendDevice): Device {
     firmwareVersion: bd.firmware_version || '',
     macAddress: bd.mac_address || '',
     groupName: bd.group_name || '',
-    onlineTime: bd.online_at || '',
-    offlineTime: bd.offline_at || '',
-    onlineDuration: bd.online_duration ?? 0,
-    upTime: bd.up_time || '',
-    firstOnlineTime: bd.first_online_at || '',
+    // T-XXX (Phase 0)：字段名对齐后端 DTO。设计文档 §13。
+    onlineTime: bd.last_online_time || '',
+    offlineTime: bd.last_offline_time || '',
+    onlineDuration: bd.online_duration ?? null,
+    upTime: bd.run_time ?? null,
+    firstOnlineTime: bd.first_online_time || '',
     lastInformTime: bd.last_inform_at || '',
     deviceName: bd.device_name || '',
     gpsVersion: bd.gps_version || '',

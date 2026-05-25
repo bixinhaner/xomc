@@ -113,6 +113,15 @@ type DeviceWithInfo struct {
 	// RunTime 累计运行时长（秒）
 	RunTime *int64 `json:"run_time"`
 
+	// ===== 在线时长（动态计算，不存储）=====
+	//
+	// OnlineDuration 当前在线/最近在线区间秒数（SQL 派生列）：
+	//   - is_online=TRUE 时：NOW() - last_online_time
+	//   - is_online=FALSE 且 last_offline_time > last_online_time 时：last_offline_time - last_online_time
+	//   - last_online_time IS NULL 时：null
+	// 用于前端「累计时长」UI 字段（与 RunTime「设备本次开机时长」语义区分）。
+	OnlineDuration *int64 `json:"online_duration,omitempty"`
+
 	// ===== 离线时长（动态计算，不存储）=====
 
 	// OfflineSeconds 离线总秒数（仅离线设备有值）

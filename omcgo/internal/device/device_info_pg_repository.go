@@ -578,6 +578,17 @@ func deviceWithInfoSelectColumns() []string {
 		"di.num_of_cells", "di.gps_status", "di.alarm_severity", "di.license_status",
 		"di.mac", "di.hardware_version",
 		"di.first_online_time", "di.last_online_time", "di.last_offline_time", "di.run_time",
+		// 在线时长派生（设计文档 §13）：
+		//   - is_online → 当前已在线多久（NOW - last_online_time）
+		//   - 离线后 → 上次在线区间长度（last_offline_time - last_online_time）
+		//   - last_online_time IS NULL → NULL（设备从未上线）
+		`CASE
+			WHEN di.last_online_time IS NULL THEN NULL
+			WHEN d.is_online THEN EXTRACT(EPOCH FROM (NOW() - di.last_online_time))::bigint
+			WHEN di.last_offline_time IS NOT NULL AND di.last_offline_time > di.last_online_time
+				THEN EXTRACT(EPOCH FROM (di.last_offline_time - di.last_online_time))::bigint
+			ELSE NULL
+		END AS online_duration`,
 		// 离线时长计算（SQL层面）：T-0162 用 lifecycle+is_online 判定
 		`CASE
 			WHEN ` + offlineCond + ` AND di.last_offline_time IS NOT NULL
@@ -657,6 +668,8 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		diLastOnline    *time.Time
 		diLastOffline   *time.Time
 		diRunTime       *int64
+		// 在线时长派生（SQL计算，设计文档 §13）
+		onlineDuration *int64
 		// 离线时长（SQL计算）
 		offlineSeconds *int64
 		offlineDays    *int64
@@ -685,6 +698,8 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&diNumOfCells, &diGPSStatus, &diAlarmSeverity, &diLicenseStatus,
 		&diMAC, &diHWVersion,
 		&diFirstOnline, &diLastOnline, &diLastOffline, &diRunTime,
+		// 在线时长派生
+		&onlineDuration,
 		// 离线时长（SQL计算）
 		&offlineSeconds, &offlineDays, &offlineHours, &offlineMinutes,
 	)
@@ -756,6 +771,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	d.LastOnlineTime = diLastOnline
 	d.LastOfflineTime = diLastOffline
 	d.RunTime = diRunTime
+	d.OnlineDuration = onlineDuration
 	// 离线时长
 	d.OfflineSeconds = offlineSeconds
 	d.OfflineDays = offlineDays
