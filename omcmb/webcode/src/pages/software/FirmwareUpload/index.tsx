@@ -345,14 +345,14 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
     },
     {
       key: 'size',
-      title: t('table.fileSize') ?? '文件大小',
+      title: t('table.fileSize') ?? t('transfer.fileLib.firmware.col.fileSize'),
       dataIndex: 'fileSize',
       width: 120,
       render: (val: unknown) => formatFileSize(Number(val)),
     },
     {
       key: 'uploadTime',
-      title: t('table.uploadTime') ?? '上传时间',
+      title: t('table.uploadTime') ?? t('transfer.fileLib.firmware.col.uploadTime'),
       dataIndex: 'releaseDate',
       width: 180,
       render: (val: unknown) => val ? String(val) : '-',
@@ -385,8 +385,8 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
           type="info"
           showIcon
           style={{ marginBottom: 12 }}
-          message="您来自「任务创建」弹窗"
-          description="完成升级文件维护后点右侧按钮关闭此窗口，回到原弹窗后固件列表会自动刷新。"
+          message={t('transfer.fileLib.firmware.fromUfteTitle')}
+          description={t('transfer.fileLib.firmware.fromUfteDesc')}
           action={(
             <Button
               size="small"
@@ -397,11 +397,11 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
                 try {
                   window.close();
                 } catch {
-                  void message.info('浏览器阻止了自动关闭，请手动关闭此标签页。');
+                  void message.info(t('transfer.fileLib.firmware.closeBlocked'));
                 }
               }}
             >
-              完成并关闭窗口
+              {t('transfer.fileLib.firmware.close')}
             </Button>
           )}
         />

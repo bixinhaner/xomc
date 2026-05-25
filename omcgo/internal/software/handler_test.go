@@ -127,6 +127,9 @@ func (m *swHSubTaskRepo) UpdateStatusWithCode(_ context.Context, _ uuid.UUID, _ 
 func (m *swHSubTaskRepo) UpdateFailureReasonByTask(_ context.Context, _ uuid.UUID, _ FailureCode) error {
 	return nil
 }
+func (m *swHSubTaskRepo) UpdateDestVersionByCommandKey(_ context.Context, _, _ string) error {
+	return nil
+}
 func (m *swHSubTaskRepo) GetActiveByDeviceID(_ context.Context, _ uuid.UUID) (*UpgradeSubTask, error) {
 	return nil, commonerrors.ErrNotFound
 }

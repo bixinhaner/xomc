@@ -96,6 +96,29 @@ const (
 	TaskEnded      TaskStatus = "ended"
 )
 
+// CreateStatus 标记任务的"创建意图"，与 TaskStatus 正交：
+//   · CreateStatusActive  — 立即执行 / 挂起待手动 Resume（旧默认）
+//   · CreateStatusSuspend — 保留位，未使用
+//   · CreateStatusTiming  — 定时执行；调度器到点把 status pending → in_progress
+//
+// 三态决策表（status × create_status × scheduled_at）：
+//
+//	┌──────────┬──────────────┬──────────────┬─────────────┐
+//	│   status │ create_status│ scheduled_at │  含义       │
+//	├──────────┼──────────────┼──────────────┼─────────────┤
+//	│ in_progress │ active     │ NULL         │ 立即执行    │
+//	│ pending     │ active     │ NULL         │ 挂起        │
+//	│ pending     │ timing     │ 非 NULL       │ 定时（待触发）│
+//	│ in_progress │ timing     │ 非 NULL       │ 定时已触发  │
+//	└──────────┴──────────────┴──────────────┴─────────────┘
+//
+// 字段值与 migrations/000033 加的 CHECK 约束 ('active','suspend','timing') 一致。
+const (
+	CreateStatusActive  = "active"
+	CreateStatusSuspend = "suspend"
+	CreateStatusTiming  = "timing"
+)
+
 // TaskResult 主任务结果（ended 时才有值）
 type TaskResult string
 
@@ -149,8 +172,13 @@ type UpgradeTask struct {
 	MaxConcurrent    int         `json:"max_concurrent"`
 	StartedAt        *model.Time `json:"started_at,omitempty"`
 	EndedAt          *model.Time `json:"ended_at,omitempty"`
-	CreatedAt        model.Time  `json:"created_at"`
-	UpdatedAt        model.Time  `json:"updated_at"`
+	// ScheduledAt 是"定时执行"任务的计划启动时刻。
+	//   · 非 nil ＋ CreateStatus=timing ＋ Status=pending → 等待 TaskScheduler 触发
+	//   · 触发后由 scheduler 调 ResumeUpgrade / ResumeCollect 推进，本字段保留作审计
+	//   · 立即 / 挂起模式恒为 nil
+	ScheduledAt *model.Time `json:"scheduled_at,omitempty"`
+	CreatedAt   model.Time  `json:"created_at"`
+	UpdatedAt   model.Time  `json:"updated_at"`
 
 	// Rollback metadata (T-0021 / R-101). Populated for TaskTypeRollback rows;
 	// for upgrade rows the columns carry their DB defaults (rollback_source='manual',
@@ -232,6 +260,9 @@ type BatchUpgradeRequest struct {
 	DownloadFileType string      `json:"download_file_type,omitempty"`
 	IsKeepConfig     bool        `json:"is_keep_config"`
 	CreateSuspended  bool        `json:"create_suspended"`
+	// ScheduledAt 指定执行时间。非 nil 且晚于当前时间 → 定时模式（CreateSuspended 被忽略）。
+	// 时间已过 / 为 nil → 按 CreateSuspended 走老语义。
+	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
 
 	// Canary strategy (T-0018 / R-101). Strategy defaults to "full" (legacy
 	// path); when "canary", CanaryStages drives stage progression. Empty
@@ -271,6 +302,8 @@ type RollbackRequest struct {
 	TaskName        string      `json:"task_name" binding:"required"`
 	CreateUser      string      `json:"create_user" binding:"required"`
 	CreateSuspended bool        `json:"create_suspended"`
+	// ScheduledAt 指定回退任务的计划执行时间，语义与 BatchUpgradeRequest 一致。
+	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
 
 	// Audit fields (T-0021). All optional for backwards compatibility.
 	// Source defaults to RollbackSourceManual when empty.

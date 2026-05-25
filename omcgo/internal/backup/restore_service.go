@@ -341,6 +341,9 @@ type CreateBySnapshotRequest struct {
 type CreateBySnapshotResult struct {
 	Task    *RestoreTask `json:"task,omitempty"`
 	Missing []string     `json:"missing,omitempty"`
+	// DispatchedFiles 是每台设备实际下发的快照文件 basename。UFTE 用作"目标文件"列
+	// 展示数据来源。仅成功 enqueue 的设备进 map；整批拒绝时为 nil。
+	DispatchedFiles map[string]string `json:"dispatched_files,omitempty"`
 }
 
 // CreateBySnapshot orchestrates a restore where each target device picks its
@@ -420,6 +423,8 @@ func (s *RestoreService) CreateBySnapshot(
 
 	enqueued := 0
 	skipped := make([]string, 0)
+	// dispatchedFiles 用作"目标文件"列展示数据来源；仅 enqueue 成功的设备进 map。
+	dispatchedFiles := make(map[string]string, len(req.TargetDeviceSNs))
 	for _, sn := range req.TargetDeviceSNs {
 		snap := snaps[sn]
 		dev, dErr := s.deviceRepo.GetBySerialNumber(ctx, sn)
@@ -430,10 +435,11 @@ func (s *RestoreService) CreateBySnapshot(
 			continue
 		}
 		restoreURL := snap.ObjectBucket + "/" + snap.ObjectPath
+		targetFileName := pathpkg.Base(snap.ObjectPath)
 		params, mErr := json.Marshal(map[string]interface{}{
 			"file_type":        s.buildRestoreFileType(dev.SerialNumber, dev.OUI),
 			"url":              restoreURL,
-			"target_file_name": pathpkg.Base(snap.ObjectPath),
+			"target_file_name": targetFileName,
 		})
 		if mErr != nil {
 			return nil, fmt.Errorf("marshal Download params for %s: %w", sn, mErr)
@@ -456,6 +462,7 @@ func (s *RestoreService) CreateBySnapshot(
 				zap.String("device_sn", sn), zap.Error(qErr))
 			continue
 		}
+		dispatchedFiles[dev.SerialNumber] = targetFileName
 		enqueued++
 	}
 	s.metrics.RecordRestoreBySnapshot("accepted")
@@ -476,7 +483,7 @@ func (s *RestoreService) CreateBySnapshot(
 		zap.Int("target_count", len(req.TargetDeviceSNs)),
 		zap.Int("enqueued", enqueued),
 		zap.Int("skipped", len(skipped)))
-	return &CreateBySnapshotResult{Task: created}, nil
+	return &CreateBySnapshotResult{Task: created, DispatchedFiles: dispatchedFiles}, nil
 }
 
 // SplitBucketAndPath 是 splitBucketAndPath 的导出别名，供 cmd/app/provider 等
@@ -518,20 +525,53 @@ func (s *RestoreService) buildRestoreFileType(deviceSN, deviceOUI string) string
 //   - err：基础设施错误
 func (s *RestoreService) DispatchConfigRestoreBySnapshot(
 	ctx context.Context, sns []string, createUser string, upgradeTaskID uuid.UUID,
-) (dispatchedID uuid.UUID, missing []string, err error) {
+) (dispatchedID uuid.UUID, dispatchedFiles map[string]string, missing []string, err error) {
 	result, err := s.CreateBySnapshot(ctx,
 		&CreateBySnapshotRequest{TargetDeviceSNs: sns, UpgradeTaskID: upgradeTaskID}, createUser)
 	if err != nil {
 		// CreateBySnapshot 在整批拒绝时同时返回 result + ErrNotFound 包装错误。
 		if result != nil && len(result.Missing) > 0 {
-			return uuid.Nil, result.Missing, err
+			return uuid.Nil, nil, result.Missing, err
 		}
-		return uuid.Nil, nil, err
+		return uuid.Nil, nil, nil, err
 	}
 	if result == nil || result.Task == nil {
-		return uuid.Nil, nil, fmt.Errorf("CreateBySnapshot returned nil result")
+		return uuid.Nil, nil, nil, fmt.Errorf("CreateBySnapshot returned nil result")
 	}
-	return result.Task.ID, nil, nil
+	return result.Task.ID, result.DispatchedFiles, nil, nil
+}
+
+// PreviewConfigRestoreFiles 不创建 restore_task / device_task，只返回 sn → 预期下发的
+// snapshot 文件名（basename），给 UFTE 挂起 / 定时占位任务在创建时写 sub_task.dest_version 用。
+// 整批拒绝语义同 CreateBySnapshot。
+func (s *RestoreService) PreviewConfigRestoreFiles(
+	ctx context.Context, sns []string,
+) (map[string]string, error) {
+	if s.snapshotLookup == nil {
+		return nil, fmt.Errorf("by-snapshot mode not configured: %w", commonerrors.ErrInvalidInput)
+	}
+	if len(sns) == 0 {
+		return nil, fmt.Errorf("at least one target device required: %w", commonerrors.ErrInvalidInput)
+	}
+	snaps, err := s.snapshotLookup.BatchGetBySerialNumbers(ctx, sns)
+	if err != nil {
+		return nil, fmt.Errorf("lookup config_snapshots (preview): %w", err)
+	}
+	missing := make([]string, 0)
+	for _, sn := range sns {
+		if _, ok := snaps[sn]; !ok {
+			missing = append(missing, sn)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("the following devices have no config snapshot: %v: %w",
+			missing, commonerrors.ErrNotFound)
+	}
+	out := make(map[string]string, len(sns))
+	for _, sn := range sns {
+		out[sn] = pathpkg.Base(snaps[sn].ObjectPath)
+	}
+	return out, nil
 }
 
 // splitBucketAndPath splits a "bucket/path/to/object" string into its parts.

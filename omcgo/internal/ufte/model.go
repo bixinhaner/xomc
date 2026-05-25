@@ -125,7 +125,10 @@ type CreateTaskRequest struct {
 	DeviceIDs     []uuid.UUID `json:"deviceIds" binding:"required,min=1"`
 	DeviceCount   int         `json:"deviceCount"`
 	ExecutionMode string      `json:"executionMode" binding:"required"`
-	Note          string      `json:"note"`
+	// ScheduledAt 仅在 ExecutionMode="scheduled" 时使用，ISO 8601 字符串（前端 dayjs.toISOString()）。
+	// 解析失败 / 时间已过 → 退化为 immediate（不阻断主流程，由 service 层兜底）。
+	ScheduledAt string `json:"scheduledAt,omitempty"`
+	Note        string `json:"note"`
 }
 
 type TaskTypeWriteRequest struct {

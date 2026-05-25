@@ -24,6 +24,8 @@ var taskColumns = []string{
 	"max_concurrent", "started_at", "ended_at", "created_at", "updated_at",
 	// Rollback metadata (T-0021 / R-101).
 	"rollback_reason", "rollback_source", "rollback_target_firmware_id",
+	// Scheduled execution (000184): pending+timing+scheduled_at = 定时待触发。
+	"scheduled_at",
 }
 
 var _ TaskRepository = (*PgTaskRepository)(nil)
@@ -43,7 +45,7 @@ func scanUpgradeTask(row pgx.Row) (*UpgradeTask, error) {
 	var firmwareID sql.NullString
 	var downloadFileType sql.NullString
 	var fileName, fileMD5, result sql.NullString
-	var startedAt, endedAt sql.NullTime
+	var startedAt, endedAt, scheduledAt sql.NullTime
 	var createdAt, updatedAt time.Time
 	var rollbackReason sql.NullString
 	var rollbackSource sql.NullString
@@ -55,9 +57,14 @@ func scanUpgradeTask(row pgx.Row) (*UpgradeTask, error) {
 		&task.CreateStatus, &task.CreateUser, &task.TotalCount, &task.SuccessCount, &task.FailCount,
 		&task.MaxConcurrent, &startedAt, &endedAt, &createdAt, &updatedAt,
 		&rollbackReason, &rollbackSource, &rollbackTargetFW,
+		&scheduledAt,
 	)
 	if err != nil {
 		return nil, err
+	}
+	if scheduledAt.Valid {
+		t := JSONTime(scheduledAt.Time)
+		task.ScheduledAt = &t
 	}
 
 	if firmwareID.Valid {
@@ -116,15 +123,21 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *UpgradeTask) error 
 		rollbackTargetFW = *task.RollbackTargetFirmwareID
 	}
 
+	var scheduledAt any
+	if task.ScheduledAt != nil {
+		scheduledAt = time.Time(*task.ScheduledAt)
+	}
 	builder := storage.Psql.Insert("upgrade_tasks").
 		Columns("task_name", "task_type", "firmware_id", "download_file_type", "file_name", "file_md5",
 			"status", "product_class", "is_keep_config",
 			"create_status", "create_user", "total_count", "max_concurrent",
-			"rollback_reason", "rollback_source", "rollback_target_firmware_id").
+			"rollback_reason", "rollback_source", "rollback_target_firmware_id",
+			"scheduled_at").
 		Values(task.TaskName, task.TaskType, task.FirmwareID, task.DownloadFileType, task.FileName, task.FileMD5,
 			task.Status, task.ProductClass, task.IsKeepConfig,
 			task.CreateStatus, task.CreateUser, task.TotalCount, task.MaxConcurrent,
-			rollbackReason, rollbackSource, rollbackTargetFW).
+			rollbackReason, rollbackSource, rollbackTargetFW,
+			scheduledAt).
 		Suffix("RETURNING " + joinColumns(taskColumns))
 
 	query, args, err := builder.ToSql()
@@ -320,6 +333,19 @@ func (r *PgTaskRepository) IncrementCounts(ctx context.Context, taskID uuid.UUID
 	return nil
 }
 
+// ListDueScheduled 返回所有"定时模式 + 已到期 + 仍待触发"的任务，按 scheduled_at 升序。
+// limit ≤ 0 时不限制（仅给单测用）。索引：idx_upgrade_tasks_due_scheduled（partial）。
+func (r *PgTaskRepository) ListDueScheduled(ctx context.Context, before time.Time, limit int) ([]*UpgradeTask, error) {
+	return listDueScheduledFromTable(ctx, r.pool, "upgrade_tasks", before, limit)
+}
+
+// UpdateCreateStatusGuarded 仅当 create_status=from AND status=pending 时把 create_status
+// 翻成 to。RowsAffected=1 → 命中并成功（返回 true）；其它情形返回 false。
+// 调度器用作"抢占式锁"，避免多实例 / 多 tick 重复触发同一任务。
+func (r *PgTaskRepository) UpdateCreateStatusGuarded(ctx context.Context, id uuid.UUID, from, to string) (bool, error) {
+	return updateCreateStatusGuardedOn(ctx, r.pool, "upgrade_tasks", id, from, to)
+}
+
 func (r *PgTaskRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	query, args, err := storage.Psql.Delete("upgrade_tasks").Where(sq.Eq{"id": id}).ToSql()
 	if err != nil {
@@ -337,7 +363,7 @@ func scanUpgradeTaskRow(rows pgx.Rows) (*UpgradeTask, error) {
 	var firmwareID sql.NullString
 	var downloadFileType sql.NullString
 	var fileName, fileMD5, result sql.NullString
-	var startedAt, endedAt sql.NullTime
+	var startedAt, endedAt, scheduledAt sql.NullTime
 	var createdAt, updatedAt time.Time
 	var rollbackReason sql.NullString
 	var rollbackSource sql.NullString
@@ -349,9 +375,14 @@ func scanUpgradeTaskRow(rows pgx.Rows) (*UpgradeTask, error) {
 		&task.CreateStatus, &task.CreateUser, &task.TotalCount, &task.SuccessCount, &task.FailCount,
 		&task.MaxConcurrent, &startedAt, &endedAt, &createdAt, &updatedAt,
 		&rollbackReason, &rollbackSource, &rollbackTargetFW,
+		&scheduledAt,
 	)
 	if err != nil {
 		return nil, err
+	}
+	if scheduledAt.Valid {
+		t := JSONTime(scheduledAt.Time)
+		task.ScheduledAt = &t
 	}
 	if firmwareID.Valid {
 		fid, _ := uuid.Parse(firmwareID.String)

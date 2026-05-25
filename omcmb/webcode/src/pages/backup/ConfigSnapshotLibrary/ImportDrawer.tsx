@@ -16,6 +16,7 @@ import { Alert, Button, Drawer, Empty, List, Space, Tag, Typography, Upload, mes
 import {
   InboxOutlined, FileDoneOutlined, ExclamationCircleOutlined, DeleteOutlined, LoadingOutlined,
 } from '@ant-design/icons';
+import { useT } from '@/hooks/useT';
 import {
   useImportConfigSnapshots,
 } from '@core/hooks/api/useConfigSnapshot';
@@ -44,6 +45,7 @@ interface ParsedFile {
 }
 
 export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
+  const t = useT();
   const [files, setFiles] = useState<ParsedFile[]>([]);
   const [submitResult, setSubmitResult] = useState<SnapshotImportResult | null>(null);
   const importMutation = useImportConfigSnapshots();
@@ -61,7 +63,7 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
     setFiles((prev) => {
       // 同名去重：再次拖入相同 fileName 时不重复加（防止用户多次点击造成混乱）
       if (prev.some((f) => f.fileName === file.name)) {
-        void message.warning(`已存在同名文件 ${file.name}，已跳过`);
+        void message.warning(t('transfer.fileLib.import.duplicate', { name: file.name }));
         return prev;
       }
       const v = validateSnapshotFileName(file.name);
@@ -133,16 +135,16 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
       const result = await importMutation.mutateAsync(files.map((f) => f.rawFile));
       setSubmitResult(result);
       if (result.succeeded.length > 0) {
-        void message.success(`导入成功 ${result.succeeded.length} 台设备`);
+        void message.success(t('transfer.fileLib.import.successMsg', { count: result.succeeded.length }));
         // 成功提交后清空待提交清单，避免重复提交
         setFiles([]);
       }
       if (result.failed.length > 0) {
-        void message.warning(`${result.failed.length} 个文件失败，详见下方列表`);
+        void message.warning(t('transfer.fileLib.import.partialFailMsg', { count: result.failed.length }));
       }
       onSuccess?.();
-    } catch (e) {
-      void message.error('导入请求失败，请稍后重试');
+    } catch {
+      void message.error(t('transfer.fileLib.import.requestFailed'));
     }
   }
 
@@ -155,19 +157,19 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
   return (
     <Drawer
       open={open}
-      title="导入配置文件"
+      title={t('transfer.fileLib.import.snapshotTitle')}
       width={620}
       onClose={handleClose}
       footer={
         <Space style={{ float: 'right' }}>
-          <Button onClick={handleClose}>关闭</Button>
+          <Button onClick={handleClose}>{t('transfer.fileLib.import.close')}</Button>
           <Button
             type="primary"
             disabled={!canSubmit}
             loading={importMutation.isPending}
             onClick={() => void handleSubmit()}
           >
-            提交导入（{validCount}）
+            {t('transfer.fileLib.import.submit', { count: validCount })}
           </Button>
         </Space>
       }
@@ -175,16 +177,16 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
       <Alert
         type="info"
         showIcon
-        message="导入规则"
+        message={t('transfer.fileLib.import.rulesTitle')}
         description={(
           <>
-            ① 文件名必须为 <code>&lt;serialNumber&gt;_CFG.xml</code> 或 <code>&lt;serialNumber&gt;_CFG.nv</code>。
+            ① {t('transfer.fileLib.import.snapshotRule1')}
             <br />
-            ② <strong>SN 必须在设备列表中存在</strong>（不存在的设备无法导入）。
+            ② <strong>{t('transfer.fileLib.import.ruleSnExist')}</strong>
             <br />
-            ③ 单文件 ≤ 10 MB，单次最多 200 个文件。
+            ③ {t('transfer.fileLib.import.ruleSize')}
             <br />
-            <strong>有任一项不符将无法提交，请先移除问题文件。</strong>
+            <strong>{t('transfer.fileLib.import.ruleSummary')}</strong>
           </>
         )}
         style={{ marginBottom: 12 }}
@@ -211,10 +213,10 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
             <InboxOutlined style={{ fontSize: 22, color: '#1677ff' }} />
             <div style={{ textAlign: 'left' }}>
               <div style={{ fontSize: 13, color: 'rgba(0,0,0,0.88)' }}>
-                点击或拖拽配置文件到此处，支持一次选择多个
+                {t('transfer.fileLib.import.snapshotDropTitle')}
               </div>
               <div style={{ fontSize: 12, color: 'rgba(0,0,0,0.45)' }}>
-                支持 xml / nv 后缀，文件名前缀需为设备 serial number
+                {t('transfer.fileLib.import.snapshotDropHint')}
               </div>
             </div>
           </Space>
@@ -225,20 +227,20 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
       <div style={{ marginTop: 16 }}>
         <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }}>
           <Typography.Title level={5} style={{ margin: 0 }}>
-            待提交清单（{files.length}）
+            {t('transfer.fileLib.import.pendingList', { count: files.length })}
             {invalidCount > 0 && (
-              <Tag color="red" style={{ marginLeft: 8 }}>{invalidCount} 个有问题</Tag>
+              <Tag color="red" style={{ marginLeft: 8 }}>{t('transfer.fileLib.import.tagInvalid', { count: invalidCount })}</Tag>
             )}
             {pendingCount > 0 && (
-              <Tag color="processing" style={{ marginLeft: 4 }}>{pendingCount} 个校验中</Tag>
+              <Tag color="processing" style={{ marginLeft: 4 }}>{t('transfer.fileLib.import.tagChecking', { count: pendingCount })}</Tag>
             )}
             {validCount > 0 && (
-              <Tag color="green" style={{ marginLeft: 4 }}>{validCount} 个可提交</Tag>
+              <Tag color="green" style={{ marginLeft: 4 }}>{t('transfer.fileLib.import.tagValid', { count: validCount })}</Tag>
             )}
           </Typography.Title>
           {files.length > 0 && (
             <Button type="link" danger size="small" onClick={handleClearAll}>
-              全部清空
+              {t('transfer.fileLib.import.clearAll')}
             </Button>
           )}
         </Space>
@@ -246,7 +248,7 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
         {files.length === 0 ? (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="还没有文件 — 请拖拽或点击上方区域上传"
+            description={t('transfer.fileLib.import.empty')}
           />
         ) : (
           <div
@@ -277,7 +279,7 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
                       icon={<DeleteOutlined />}
                       onClick={() => handleRemove(f.fileName)}
                     >
-                      移除
+                      {t('transfer.fileLib.import.remove')}
                     </Button>,
                   ]}
                 >
@@ -298,9 +300,9 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
                           </Tag>
                         )}
                         {f.valid && f.ext && <Tag color="geekblue">{f.ext.toUpperCase()}</Tag>}
-                        {f.snKnown === 'existing' && <Tag color="green">设备已注册</Tag>}
-                        {f.snKnown === 'missing' && <Tag color="red">设备不存在</Tag>}
-                        {pending && <Tag color="processing">校验设备中…</Tag>}
+                        {f.snKnown === 'existing' && <Tag color="green">{t('transfer.fileLib.import.deviceRegistered')}</Tag>}
+                        {f.snKnown === 'missing' && <Tag color="red">{t('transfer.fileLib.import.deviceMissing')}</Tag>}
+                        {pending && <Tag color="processing">{t('transfer.fileLib.import.deviceChecking')}</Tag>}
                       </Space>
                     )}
                     description={(
@@ -308,7 +310,7 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
                         <Typography.Text type="danger">{f.reason}</Typography.Text>
                       ) : f.snKnown === 'missing' ? (
                         <Typography.Text type="danger">
-                          SN {f.serialNumber} 不在设备列表中。请检查文件名前缀是否正确，或先在「设备管理」录入该设备。
+                          {t('transfer.fileLib.import.snNotFound', { sn: f.serialNumber ?? '' })}
                         </Typography.Text>
                       ) : (
                         <Typography.Text type="secondary">
@@ -331,7 +333,7 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
           <Alert
             type={submitResult.failed.length === 0 ? 'success' : 'warning'}
             showIcon
-            message={`本次提交：成功 ${submitResult.succeeded.length} 台，失败 ${submitResult.failed.length} 个`}
+            message={t('transfer.fileLib.import.resultSummary', { succeeded: submitResult.succeeded.length, failed: submitResult.failed.length })}
           />
           {submitResult.failed.length > 0 && (
             <List
@@ -342,7 +344,7 @@ export default function ImportDrawer({ open, onClose, onSuccess }: Props) {
               }}
               size="small"
               bordered
-              header={<Typography.Text strong>失败明细</Typography.Text>}
+              header={<Typography.Text strong>{t('transfer.fileLib.import.failureDetails')}</Typography.Text>}
               dataSource={submitResult.failed}
               renderItem={(f) => (
                 <List.Item>

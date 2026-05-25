@@ -275,6 +275,9 @@ type BatchCollectRequest struct {
 	ParamPath       string
 	CreateUser      string
 	CreateSuspended bool
+	// ScheduledAt 定时执行模式：非 nil 且晚于当前时间 → 任务挂在 pending+timing，
+	// 等 TaskScheduler 到点 ResumeCollect 推进；时间已过 / 为 nil → 旧语义。
+	ScheduledAt *time.Time
 }
 
 // BatchCollect 创建日志采集主任务及各设备子任务，然后启动执行。
@@ -290,17 +293,20 @@ func (s *SoftwareService) BatchCollect(ctx context.Context, req BatchCollectRequ
 	ctx = WithRouteHint(ctx, req.FileType)
 	concurrency := 5
 
+	mode, schedAt := resolveScheduleMode(req.ScheduledAt, req.CreateSuspended)
+
 	mainTask := &UpgradeTask{
 		TaskName:         req.TaskName,
 		TaskType:         TaskTypeLogCollect,
 		DownloadFileType: req.FileType,               // 复用字段存放 Upload FileType（如 "6"）
 		FileName:         req.TargetFileNameTemplate, // 复用字段存放目标文件名模板
 		Status:           TaskPending,
-		CreateStatus:     "active",
+		CreateStatus:     CreateStatusActive,
 		CreateUser:       req.CreateUser,
 		TotalCount:       len(req.DeviceIDs),
 		MaxConcurrent:    concurrency,
 	}
+	applyScheduleMode(mainTask, mode, schedAt)
 	if err := s.taskRepo.Create(ctx, mainTask); err != nil {
 		return nil, fmt.Errorf("create log collect main task: %w", err)
 	}
@@ -323,7 +329,14 @@ func (s *SoftwareService) BatchCollect(ctx context.Context, req BatchCollectRequ
 		return nil, s.finalizeSubTaskFailure(ctx, mainTask.ID, fmt.Errorf("batch create log collect sub-tasks: %w", err))
 	}
 
-	if req.CreateSuspended {
+	switch mode {
+	case scheduleModeScheduled:
+		s.logger.Info("log collect task created in scheduled mode",
+			zap.String("task_id", mainTask.ID.String()),
+			zap.Int("device_count", len(req.DeviceIDs)),
+			zap.Time("scheduled_at", *schedAt))
+		return mainTask, nil
+	case scheduleModeSuspended:
 		s.logger.Info("log collect task created in pending (suspended) mode",
 			zap.String("task_id", mainTask.ID.String()),
 			zap.Int("device_count", len(req.DeviceIDs)))
@@ -355,6 +368,9 @@ type PlaceholderTrackingRequest struct {
 	FileType   string
 	CreateUser string
 	Suspended  bool
+	// ScheduledAt 非 nil 且未过时 → 占位任务建成 pending + create_status=timing，
+	// 由 TaskScheduler 到点触发 StartTask 真正调 dispatcher 派发 device_tasks。
+	ScheduledAt *time.Time
 }
 
 // CreatePlaceholderTrackingTask 创建一个"已派发完毕"的占位 upgrade_tasks / sub_tasks，
@@ -373,15 +389,23 @@ func (s *SoftwareService) CreatePlaceholderTrackingTask(
 	ctx context.Context, req PlaceholderTrackingRequest,
 ) (*UpgradeTask, error) {
 	now := model.Time(time.Now())
-	// 三态：
-	//   - Suspended=true  → 任务"已挂起" / sub_tasks "待派发"；不增计数
-	//   - Suspended=false → 任务"进行中" / sub_tasks "下载中"；不增计数
-	//     （派发成功 ≠ 设备已应用，真正完成态要靠 TransferComplete 路由推进，
-	//     这条线尚未接，先用 in_progress 表示"已派发等设备落地"，进度 0%）
+	// 四态：
+	//   - immediate (Suspended=false, ScheduledAt 空): 任务"进行中" / sub_tasks "下载中"
+	//   - suspended (Suspended=true):                任务"已挂起" / sub_tasks "待派发"
+	//   - scheduled (ScheduledAt 非空且未过):         任务"待定时触发" / sub_tasks "待派发"
+	//                                                由 TaskScheduler 到点 StartTask 派发
+	mode, schedAt := resolveScheduleMode(req.ScheduledAt, req.Suspended)
+	// CreatePlaceholderTrackingTask 历史上用 TaskSuspended 区分手动挂起的 placeholder
+	// 与立即派发的 in_progress。新增 scheduled 模式遵循"pending + create_status=timing"
+	// 与其他业务（BatchUpgrade/BatchCollect/RollbackDevices）一致，给 scheduler 抢占 hook。
 	initialStatus := TaskInProgress
 	subStatus := UpgradeDownloading
-	if req.Suspended {
+	switch mode {
+	case scheduleModeSuspended:
 		initialStatus = TaskSuspended
+		subStatus = UpgradePending
+	case scheduleModeScheduled:
+		initialStatus = TaskPending
 		subStatus = UpgradePending
 	}
 	main := &UpgradeTask{
@@ -389,11 +413,19 @@ func (s *SoftwareService) CreatePlaceholderTrackingTask(
 		TaskType:         TaskTypeLogCollect, // 复用使 typeSet 过滤覆盖到本任务
 		DownloadFileType: req.FileType,       // 用 catalog FileType 字面值（含 <OUI> 占位）
 		Status:           initialStatus,
-		CreateStatus:     "active",
+		CreateStatus:     CreateStatusActive,
 		CreateUser:       req.CreateUser,
 		TotalCount:       len(req.DeviceIDs),
 		MaxConcurrent:    1,
 		StartedAt:        &now,
+	}
+	// 仅 scheduled 模式覆写 create_status=timing + scheduled_at。suspended 保留原行为。
+	if mode == scheduleModeScheduled {
+		main.CreateStatus = CreateStatusTiming
+		if schedAt != nil {
+			mt := model.Time(*schedAt)
+			main.ScheduledAt = &mt
+		}
 	}
 	// route hint 用 FileType（catalog 字面）：当前 router 没匹配的话 fallback 到默认 upgrade_tasks 表
 	ctx = WithRouteHint(ctx, req.FileType)
@@ -519,6 +551,8 @@ func (s *SoftwareService) BatchUpgrade(ctx context.Context, req BatchUpgradeRequ
 		taskType = TaskTypeUpgrade
 	}
 
+	mode, schedAt := resolveScheduleMode(req.ScheduledAt, req.CreateSuspended)
+
 	mainTask := &UpgradeTask{
 		TaskName:         req.TaskName,
 		TaskType:         taskType,
@@ -529,11 +563,12 @@ func (s *SoftwareService) BatchUpgrade(ctx context.Context, req BatchUpgradeRequ
 		Status:           TaskPending,
 		ProductClass:     fw.ProductClass,
 		IsKeepConfig:     req.IsKeepConfig,
-		CreateStatus:     "active",
+		CreateStatus:     CreateStatusActive,
 		CreateUser:       "system",
 		TotalCount:       len(req.DeviceIDs),
 		MaxConcurrent:    concurrency,
 	}
+	applyScheduleMode(mainTask, mode, schedAt)
 	if err := s.taskRepo.Create(ctx, mainTask); err != nil {
 		return nil, fmt.Errorf("create main task: %w", err)
 	}
@@ -559,7 +594,14 @@ func (s *SoftwareService) BatchUpgrade(ctx context.Context, req BatchUpgradeRequ
 		return nil, s.finalizeSubTaskFailure(ctx, mainTask.ID, fmt.Errorf("batch create sub-tasks: %w", err))
 	}
 
-	if req.CreateSuspended {
+	switch mode {
+	case scheduleModeScheduled:
+		s.logger.Info("upgrade task created in scheduled mode",
+			zap.String("task_id", mainTask.ID.String()),
+			zap.Int("device_count", len(req.DeviceIDs)),
+			zap.Time("scheduled_at", *schedAt))
+		return mainTask, nil
+	case scheduleModeSuspended:
 		s.logger.Info("upgrade task created in pending (suspended) mode",
 			zap.String("task_id", mainTask.ID.String()),
 			zap.Int("device_count", len(req.DeviceIDs)))
@@ -710,6 +752,55 @@ func (s *SoftwareService) transitionCanaryStatus(ctx context.Context, taskID uui
 
 // nowFunc is overridable for tests; production reads time.Now.
 var nowFunc = func() time.Time { return time.Now() }
+
+// scheduleMode 是 Batch* 入参在"是否定时 / 是否挂起 / 是否立即"三态间的决策结果。
+type scheduleMode int
+
+const (
+	scheduleModeImmediate scheduleMode = iota // 立即派发
+	scheduleModeSuspended                     // 挂起 pending，等手动 Resume
+	scheduleModeScheduled                     // 定时 pending+timing，等 scheduler 触发
+)
+
+// resolveScheduleMode 决定三态：
+//   - ScheduledAt 非空 ＋ 晚于 now → 定时
+//   - 否则 CreateSuspended=true   → 挂起
+//   - 否则                       → 立即
+//
+// 把判定收敛到一个函数，BatchCollect / BatchUpgrade / RollbackDevices 三处共用，
+// 避免各自手写一遍漏掉边界（如时间已过的定时任务）。返回的 *time.Time 即为持久化用的
+// scheduled_at；非定时模式恒为 nil。
+func resolveScheduleMode(scheduledAt *time.Time, createSuspended bool) (scheduleMode, *time.Time) {
+	if scheduledAt != nil && scheduledAt.After(nowFunc()) {
+		t := *scheduledAt
+		return scheduleModeScheduled, &t
+	}
+	if createSuspended {
+		return scheduleModeSuspended, nil
+	}
+	return scheduleModeImmediate, nil
+}
+
+// applyScheduleMode 把 mode 投射到 UpgradeTask 的 Status / CreateStatus / ScheduledAt。
+// 调用方负责后续是否 Update 入库或保持 Create 默认值。
+func applyScheduleMode(task *UpgradeTask, mode scheduleMode, scheduledAt *time.Time) {
+	switch mode {
+	case scheduleModeScheduled:
+		task.Status = TaskPending
+		task.CreateStatus = CreateStatusTiming
+		if scheduledAt != nil {
+			t := model.Time(*scheduledAt)
+			task.ScheduledAt = &t
+		}
+	case scheduleModeSuspended:
+		task.Status = TaskPending
+		task.CreateStatus = CreateStatusActive
+		task.ScheduledAt = nil
+	default: // immediate — Create 之后由调用方推到 in_progress
+		task.CreateStatus = CreateStatusActive
+		task.ScheduledAt = nil
+	}
+}
 
 // startExecution launches goroutines to execute upgrade sub-tasks with bounded concurrency.
 func (s *SoftwareService) startExecution(mainTask *UpgradeTask, subTasks []*UpgradeSubTask, fw *FirmwareVersion, concurrency int) {
@@ -1249,12 +1340,14 @@ func (s *SoftwareService) RollbackDevices(ctx context.Context, req RollbackReque
 		}
 	}
 
+	mode, schedAt := resolveScheduleMode(req.ScheduledAt, req.CreateSuspended)
+
 	mainTask := &UpgradeTask{
 		TaskName:                 req.TaskName,
 		TaskType:                 TaskTypeRollback,
 		Status:                   TaskPending,
 		ProductClass:             productClass,
-		CreateStatus:             "active",
+		CreateStatus:             CreateStatusActive,
 		CreateUser:               req.CreateUser,
 		TotalCount:               len(req.DeviceIDs),
 		MaxConcurrent:            5,
@@ -1262,6 +1355,7 @@ func (s *SoftwareService) RollbackDevices(ctx context.Context, req RollbackReque
 		RollbackSource:           source,
 		RollbackTargetFirmwareID: req.TargetFirmwareID,
 	}
+	applyScheduleMode(mainTask, mode, schedAt)
 	if err := s.taskRepo.Create(ctx, mainTask); err != nil {
 		return nil, fmt.Errorf("create rollback task: %w", err)
 	}
@@ -1301,7 +1395,18 @@ func (s *SoftwareService) RollbackDevices(ctx context.Context, req RollbackReque
 		}
 	}
 
-	if req.CreateSuspended {
+	switch mode {
+	case scheduleModeScheduled:
+		recordMetrics()
+		s.logger.Info("rollback task created in scheduled mode",
+			zap.String("task_id", mainTask.ID.String()),
+			zap.Int("device_count", len(req.DeviceIDs)),
+			zap.Time("scheduled_at", *schedAt),
+			zap.String("source", source),
+			zap.String("reason", req.Reason),
+			zap.Bool("with_target", req.TargetFirmwareID != nil))
+		return mainTask, nil
+	case scheduleModeSuspended:
 		recordMetrics()
 		s.logger.Info("rollback task created in pending (suspended) mode",
 			zap.String("task_id", mainTask.ID.String()),

@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   Checkbox,
+  DatePicker,
   Descriptions,
   Drawer,
   Form,
@@ -289,10 +290,9 @@ export default function FileTransferCenter() {
     fileType: firmwareLibraryFileType,
   });
 
-  const createExecutionModeOptions = useMemo(
-    () => executionModeOptions.filter((item) => item.value !== 'scheduled'),
-    [executionModeOptions],
-  );
+  // 创建任务时全部三种执行方式可选（立即 / 挂起 / 定时）。
+  // 定时模式下表单会条件渲染 DatePicker，handleCreateTask 把时间塞进 payload.scheduledAt。
+  const createExecutionModeOptions = executionModeOptions;
 
   const { data: drawerDevicesData, isLoading: drawerDevicesLoading } = useUnifiedFileTransferDeviceCandidates({
     page: 1,
@@ -1163,9 +1163,16 @@ export default function FileTransferCenter() {
     if (createTaskMutation.isPending) {
       return;
     }
+    // scheduledAt 在表单里是 dayjs 实例，发请求前转 ISO 字符串（后端 RFC3339 解析）。
+    // 非 scheduled 模式 form 不会渲染这个字段 → values.scheduledAt 为 undefined，直接传不影响。
+    const rawScheduledAt = (values as { scheduledAt?: unknown }).scheduledAt;
+    const scheduledAtIso = values.executionMode === 'scheduled' && rawScheduledAt
+      ? (dayjs.isDayjs(rawScheduledAt) ? rawScheduledAt : dayjs(rawScheduledAt as string)).toISOString()
+      : undefined;
     void createTaskMutation
       .mutateAsync({
         ...values,
+        scheduledAt: scheduledAtIso,
         deviceIds: selectedDrawerDeviceIds,
         deviceCount: selectedDrawerDeviceIds.length,
       })
@@ -1467,7 +1474,7 @@ export default function FileTransferCenter() {
                           window.open('/transfer/file-management?tab=version&return=ufte', '_blank')
                         }
                       >
-                        维护升级文件（新窗口）
+                        {t('ufte.form.openFirmwareManager')}
                       </Button>
                       {/* 兜底：用户在同 tab 操作完手动回来 / 窗口未失焦时，点这里强刷固件列表。 */}
                       <Button
@@ -1476,7 +1483,7 @@ export default function FileTransferCenter() {
                         icon={<ReloadOutlined />}
                         onClick={() => void queryClient.invalidateQueries({ queryKey: ['software', 'versions'] })}
                       >
-                        刷新固件列表
+                        {t('ufte.form.refreshFirmwares')}
                       </Button>
                     </Space>
                   </Space>
@@ -1519,7 +1526,7 @@ export default function FileTransferCenter() {
                 >
                   {t('ufte.action.batchSnInput')}
                 </Button>
-                <Text type="secondary">已选 {drawerSelectedDevices.length} 台</Text>
+                <Text type="secondary">{t('ufte.form.selectedCount', { count: drawerSelectedDevices.length })}</Text>
               </Space>
               <Table<UnifiedFileTransferDeviceItem>
                 size="small"
@@ -1543,7 +1550,7 @@ export default function FileTransferCenter() {
             <Form.Item
               label={(
                 <Space size={8}>
-                  <span>License 文件来源（按设备最新 license）</span>
+                  <span>{t('ufte.form.licenseSource')}</span>
                   <Button
                     type="primary"
                     size="small"
@@ -1552,19 +1559,16 @@ export default function FileTransferCenter() {
                       window.open('/transfer/file-management?tab=license&return=ufte', '_blank')
                     }
                   >
-                    打开 License 文件管理
+                    {t('ufte.form.openLicenseManager')}
                   </Button>
                 </Space>
               )}
             >
               <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                <Text type="secondary">
-                  每台设备升级时使用各自最新一份 license；缺失则整批拒绝。
-                  点击右上方「打开 License 文件管理」可上传新文件、删除旧文件。
-                </Text>
+                <Text type="secondary">{t('ufte.form.licenseSourceHint')}</Text>
 
                 {drawerSelectedDevices.length === 0 ? (
-                  <Text type="secondary">请先在上方选择设备，下表自动展示 license 详情。</Text>
+                  <Text type="secondary">{t('ufte.form.pickDevicesFirstLicense')}</Text>
                 ) : licenseProbing ? (
                   <Tag color="processing">{t('ufte.tag.licenseChecking')}</Tag>
                 ) : !licenseProbe ? null : (
@@ -1572,11 +1576,11 @@ export default function FileTransferCenter() {
                     <Space size={12}>
                       {licenseMissingCount === 0 ? (
                         <Tag color="success">
-                          全部设备已就绪（{Object.keys(licenseProbe.found).length} 台）
+                          {t('ufte.form.allDevicesReady', { count: Object.keys(licenseProbe.found).length })}
                         </Tag>
                       ) : (
                         <Tag color="error">
-                          {licenseMissingCount} 台设备无可用 license，整批不能提交
+                          {t('ufte.form.devicesMissingLicense', { count: licenseMissingCount })}
                         </Tag>
                       )}
                     </Space>
@@ -1623,7 +1627,7 @@ export default function FileTransferCenter() {
             <Form.Item
               label={(
                 <Space size={8}>
-                  <span>配置文件来源（按设备最新快照）</span>
+                  <span>{t('ufte.form.configSource')}</span>
                   <Button
                     type="primary"
                     size="small"
@@ -1634,19 +1638,16 @@ export default function FileTransferCenter() {
                       window.open('/transfer/file-management?tab=config&return=ufte', '_blank')
                     }
                   >
-                    打开配置文件管理
+                    {t('ufte.form.openConfigManager')}
                   </Button>
                 </Space>
               )}
             >
               <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                <Text type="secondary">
-                  每台设备恢复时使用各自最新一份配置快照；缺失则整批拒绝。
-                  点击右上方「打开配置文件管理」可查看所有快照、导入新文件、删除旧文件。
-                </Text>
+                <Text type="secondary">{t('ufte.form.configSourceHint')}</Text>
 
                 {drawerSelectedDevices.length === 0 ? (
-                  <Text type="secondary">请先在上方选择设备，下表自动展示快照详情。</Text>
+                  <Text type="secondary">{t('ufte.form.pickDevicesFirstSnapshot')}</Text>
                 ) : snapshotProbing ? (
                   <Tag color="processing">{t('ufte.tag.snapshotChecking')}</Tag>
                 ) : !snapshotProbe ? null : (
@@ -1654,11 +1655,11 @@ export default function FileTransferCenter() {
                     <Space size={12}>
                       {snapshotMissingCount === 0 ? (
                         <Tag color="success">
-                          全部设备已就绪（{Object.keys(snapshotProbe.found).length} 台）
+                          {t('ufte.form.allDevicesReady', { count: Object.keys(snapshotProbe.found).length })}
                         </Tag>
                       ) : (
                         <Tag color="error">
-                          {snapshotMissingCount} 台设备无可用快照，整批不能提交
+                          {t('ufte.form.devicesMissingSnapshot', { count: snapshotMissingCount })}
                         </Tag>
                       )}
                     </Space>
@@ -1718,6 +1719,41 @@ export default function FileTransferCenter() {
           <Form.Item label={t('ufte.form.executionMode')} name="executionMode" rules={[{ required: true, message: t('ufte.form.executionMode.required') }]}>
             <Radio.Group options={createExecutionModeOptions} optionType="button" buttonStyle="solid" />
           </Form.Item>
+          {/*
+            定时执行：仅 executionMode='scheduled' 时显示日期选择器；其它模式 form value 留空。
+            shouldUpdate 监听 executionMode 字段变化决定是否渲染。校验：必填 + 大于当前时间。
+            提交时 handleCreateTask 走 form.getFieldValue('scheduledAt')（dayjs 对象）→ .toISOString()。
+          */}
+          <Form.Item noStyle shouldUpdate={(prev, curr) => prev.executionMode !== curr.executionMode}>
+            {({ getFieldValue }) =>
+              getFieldValue('executionMode') === 'scheduled' ? (
+                <Form.Item
+                  label={t('ufte.form.scheduledAt')}
+                  name="scheduledAt"
+                  rules={[
+                    { required: true, message: t('ufte.form.scheduledAt.required') },
+                    {
+                      validator: (_, value) => {
+                        if (!value) return Promise.resolve();
+                        const target = dayjs.isDayjs(value) ? value : dayjs(value);
+                        return target.isAfter(dayjs())
+                          ? Promise.resolve()
+                          : Promise.reject(new Error(t('ufte.form.scheduledAt.future')));
+                      },
+                    },
+                  ]}
+                >
+                  <DatePicker
+                    showTime
+                    format="YYYY-MM-DD HH:mm:ss"
+                    style={{ width: 240 }}
+                    placeholder={t('ufte.form.scheduledAt.placeholder')}
+                    disabledDate={(current) => current && current.isBefore(dayjs().startOf('day'))}
+                  />
+                </Form.Item>
+              ) : null
+            }
+          </Form.Item>
           <Form.Item label={t('ufte.form.note')} name="note">
             <Input.TextArea rows={4} placeholder={t('ufte.form.note.placeholder')} />
           </Form.Item>
@@ -1745,10 +1781,7 @@ export default function FileTransferCenter() {
                 allowClear
               />
             </Form.Item>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              多个设备 SN 可用分号 (;)、逗号 (,)、空格 或换行分隔；自动去重、忽略空白。
-              未在当前任务候选列表中的 SN 会在提交后给出提示。
-            </Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>{t('ufte.batchSnModal.hint')}</Text>
           </Form>
         </Modal>
       </Drawer>
@@ -1776,6 +1809,11 @@ export default function FileTransferCenter() {
               <Descriptions.Item label={t('ufte.col.executionMode')}>
                 <Tag>{executionModeOptions.find((o) => o.value === detailTask.executionMode)?.label ?? detailTask.executionMode}</Tag>
               </Descriptions.Item>
+              {detailTask.executionMode === 'scheduled' && detailTask.scheduledAt ? (
+                <Descriptions.Item label={t('ufte.form.scheduledAt')}>
+                  {new Date(detailTask.scheduledAt).toLocaleString('zh-CN')}
+                </Descriptions.Item>
+              ) : null}
               <Descriptions.Item label={t('ufte.col.currentStep')}>{stepLabels[detailTask.currentStep as TransferStepId] ?? '-'}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.col.operator')}>{detailTask.createUser}</Descriptions.Item>
               <Descriptions.Item label={t('ufte.col.createdAt')}>{new Date(detailTask.createdAt).toLocaleString('zh-CN')}</Descriptions.Item>

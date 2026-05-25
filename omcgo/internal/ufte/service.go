@@ -67,9 +67,19 @@ type SnapshotConfigRestoreDispatcher interface {
 	// 派生统一 CommandKey（与 sub_task 一致），让 TC 回流可自动推进。
 	// 传 uuid.Nil 时退化用 restore_tasks.id-derived CommandKey（兼容旧调用，
 	// 没有 TC 自动跟踪）。
+	//
+	// dispatchedFiles[sn] 是每台设备实际下发的快照文件名（basename）。UFTE 收到后
+	// 写回 sub_task.dest_version，作为"目标文件"列展示数据来源。
 	DispatchConfigRestoreBySnapshot(
 		ctx context.Context, targetDeviceSNs []string, createUser string, upgradeTaskID uuid.UUID,
-	) (dispatchedID uuid.UUID, missing []string, err error)
+	) (dispatchedID uuid.UUID, dispatchedFiles map[string]string, missing []string, err error)
+
+	// PreviewConfigRestoreFiles 只查不派发：返回每台设备如果派发会下发的快照文件名。
+	// 给"挂起 / 定时"模式占位任务用：创建时设备已选定、snapshot 已确定，
+	// 即使派发推迟也应立即把目标文件名写到 sub_task.dest_version 让前端"目标文件"列可见。
+	PreviewConfigRestoreFiles(
+		ctx context.Context, targetDeviceSNs []string,
+	) (map[string]string, error)
 }
 
 // SetSnapshotConfigRestoreDispatcher 注入 CONFIG_RESTORE 派发器（T-0164）。
@@ -88,9 +98,17 @@ func (s *Service) SetSnapshotConfigRestoreDispatcher(d SnapshotConfigRestoreDisp
 type LicenseUpgradeDispatcher interface {
 	// upgradeTaskID 是 ufte 提前创建的占位 upgrade_tasks 主行 ID。dispatcher
 	// 用它派生统一 CommandKey（与 sub_task.CommandKey 一致），TC 到达可自动推进。
+	//
+	// dispatchedFiles[sn] 是每台设备实际下发的 license 文件名（basename）。UFTE 收到后
+	// 写回 sub_task.dest_version，作为"目标文件"列展示数据来源。
 	DispatchLicenseUpgradeBySN(
 		ctx context.Context, targetDeviceSNs []string, createUser string, upgradeTaskID uuid.UUID,
-	) (dispatchedID uuid.UUID, missing []string, err error)
+	) (dispatchedID uuid.UUID, dispatchedFiles map[string]string, missing []string, err error)
+
+	// PreviewLicenseFiles 只查不派发：见 SnapshotConfigRestoreDispatcher.PreviewConfigRestoreFiles 注释。
+	PreviewLicenseFiles(
+		ctx context.Context, targetDeviceSNs []string,
+	) (map[string]string, error)
 }
 
 // SetLicenseUpgradeDispatcher 注入 LICENSE_UPGRADE 派发器（T-0165）。
@@ -331,7 +349,7 @@ func (s *Service) startDirectDispatchTask(
 		if s.snapshotConfigRestoreDispatcher == nil {
 			return fmt.Errorf("%w: CONFIG_RESTORE dispatcher not wired", commonerrors.ErrInvalidInput)
 		}
-		_, missing, dErr := s.snapshotConfigRestoreDispatcher.
+		_, dispatchedFiles, missing, dErr := s.snapshotConfigRestoreDispatcher.
 			DispatchConfigRestoreBySnapshot(ctx, sns, task.CreateUser, task.ID)
 		if dErr != nil {
 			if len(missing) > 0 {
@@ -340,11 +358,12 @@ func (s *Service) startDirectDispatchTask(
 			}
 			return fmt.Errorf("dispatch CONFIG_RESTORE on resume: %w", dErr)
 		}
+		s.persistDispatchedFiles(ctx, "CONFIG_RESTORE", task.ID, dispatchedFiles)
 	case "LICENSE_UPGRADE":
 		if s.licenseUpgradeDispatcher == nil {
 			return fmt.Errorf("%w: LICENSE_UPGRADE dispatcher not wired", commonerrors.ErrInvalidInput)
 		}
-		_, missing, dErr := s.licenseUpgradeDispatcher.
+		_, dispatchedFiles, missing, dErr := s.licenseUpgradeDispatcher.
 			DispatchLicenseUpgradeBySN(ctx, sns, task.CreateUser, task.ID)
 		if dErr != nil {
 			if len(missing) > 0 {
@@ -353,6 +372,7 @@ func (s *Service) startDirectDispatchTask(
 			}
 			return fmt.Errorf("dispatch LICENSE_UPGRADE on resume: %w", dErr)
 		}
+		s.persistDispatchedFiles(ctx, "LICENSE_UPGRADE", task.ID, dispatchedFiles)
 	default:
 		return fmt.Errorf("%w: unsupported direct-dispatch type %s",
 			commonerrors.ErrInvalidInput, typeDef.TypeCode)
@@ -465,11 +485,20 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 	if !ok {
 		return nil, fmt.Errorf("%w: unsupported UFTE type %s", commonerrors.ErrInvalidInput, req.TypeCode)
 	}
-	if req.ExecutionMode == "scheduled" {
-		return nil, fmt.Errorf("%w: scheduled execution is not supported by the current UFTE upgrade/rollback adapter", commonerrors.ErrInvalidInput)
-	}
 	if len(req.DeviceIDs) == 0 {
 		return nil, fmt.Errorf("%w: device_ids is required", commonerrors.ErrInvalidInput)
+	}
+
+	// 解析 scheduled 模式的目标时间：仅在 ExecutionMode="scheduled" 且字符串非空时解析；
+	// 解析失败 → 视作 immediate（前端发请求前会校验时间，后端这里是兜底）。
+	var scheduledAt *time.Time
+	if req.ExecutionMode == "scheduled" && req.ScheduledAt != "" {
+		if t, parseErr := time.Parse(time.RFC3339, req.ScheduledAt); parseErr == nil {
+			scheduledAt = &t
+		} else {
+			s.logger.Warn("invalid scheduledAt, falling back to immediate",
+				zap.String("scheduled_at_raw", req.ScheduledAt), zap.Error(parseErr))
+		}
 	}
 
 	var createdTask *software.UpgradeTask
@@ -479,12 +508,12 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 	// 不进 software.upgrade_tasks 表，因此 createdTask 留 nil，由 dispatcher 返回
 	// dispatchedID 后构造 placeholder。提前 return，避免落到下面的 firmware case。
 	if typeDef.TypeCode == "CONFIG_RESTORE" {
-		return s.createConfigRestoreTask(ctx, &typeDef, req, createUser, createSuspended)
+		return s.createConfigRestoreTask(ctx, &typeDef, req, createUser, createSuspended, scheduledAt)
 	}
 
 	// T-0165：LICENSE_UPGRADE 与 CONFIG_RESTORE 同款，走 backup.LicenseService 派发。
 	if typeDef.TypeCode == "LICENSE_UPGRADE" {
-		return s.createLicenseUpgradeTask(ctx, &typeDef, req, createUser, createSuspended)
+		return s.createLicenseUpgradeTask(ctx, &typeDef, req, createUser, createSuspended, scheduledAt)
 	}
 
 	switch {
@@ -502,6 +531,7 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 			ParamPath:              typeDef.URLTemplate,
 			CreateUser:             createUser,
 			CreateSuspended:        createSuspended,
+			ScheduledAt:            scheduledAt,
 		})
 	case typeDef.TypeCode == "VERSION_ROLLBACK":
 		createdTask, err = s.softwareService.RollbackDevices(ctx, software.RollbackRequest{
@@ -509,6 +539,7 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 			TaskName:        req.TaskName,
 			CreateUser:      createUser,
 			CreateSuspended: createSuspended,
+			ScheduledAt:     scheduledAt,
 			Source:          software.RollbackSourceManual,
 			Reason:          req.Note,
 		})
@@ -525,6 +556,7 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 			DownloadFileType: typeDef.FileType,
 			IsKeepConfig:     req.IsKeepConfig,
 			CreateSuspended:  createSuspended,
+			ScheduledAt:      scheduledAt,
 		})
 	default:
 		return nil, fmt.Errorf("%w: UFTE type %s is not executable by the current backend adapter", commonerrors.ErrInvalidInput, req.TypeCode)
@@ -551,6 +583,7 @@ func (s *Service) createConfigRestoreTask(
 	req CreateTaskRequest,
 	createUser string,
 	createSuspended bool,
+	scheduledAt *time.Time,
 ) (*Task, error) {
 	if s.snapshotConfigRestoreDispatcher == nil {
 		return nil, fmt.Errorf("%w: CONFIG_RESTORE dispatcher not wired", commonerrors.ErrInvalidInput)
@@ -566,27 +599,39 @@ func (s *Service) createConfigRestoreTask(
 	}
 
 	// 1) 先建占位 upgrade_tasks + sub_tasks（拿 task.ID 用于派生 CommandKey）。
+	//    scheduledAt 非空 → 占位 status=pending + create_status=timing，等 scheduler 触发。
 	placeholder, phErr := s.softwareService.CreatePlaceholderTrackingTask(ctx,
 		software.PlaceholderTrackingRequest{
-			DeviceIDs:  req.DeviceIDs,
-			TaskName:   req.TaskName,
-			TypeCode:   typeDef.TypeCode, // CommandKey 前缀 = "CONFIG_RESTORE"
-			FileType:   typeDef.FileType, // download_file_type 列（catalog 字面，含 <OUI>）
-			CreateUser: createUser,
-			Suspended:  createSuspended,
+			DeviceIDs:   req.DeviceIDs,
+			TaskName:    req.TaskName,
+			TypeCode:    typeDef.TypeCode, // CommandKey 前缀 = "CONFIG_RESTORE"
+			FileType:    typeDef.FileType, // download_file_type 列（catalog 字面，含 <OUI>）
+			CreateUser:  createUser,
+			Suspended:   createSuspended,
+			ScheduledAt: scheduledAt,
 		})
 	if phErr != nil {
 		return nil, fmt.Errorf("create CONFIG_RESTORE placeholder: %w", phErr)
 	}
 
-	// 2) Suspended：到此结束；等用户点"开始"由 StartTask 触发派发。
-	if createSuspended {
+	// 1.5) 不管哪种执行模式都先 Preview 一遍每台设备的快照文件名，写到 sub_task.dest_version，
+	// 让前端"目标文件"列在派发前（suspended / scheduled）也立即可见。
+	// Preview 失败不阻断主流程（dest_version 留空，列表显示 "-"，用户至少能看到任务本身）。
+	if previewFiles, prevErr := s.snapshotConfigRestoreDispatcher.PreviewConfigRestoreFiles(ctx, sns); prevErr == nil {
+		s.persistDispatchedFiles(ctx, "CONFIG_RESTORE", placeholder.ID, previewFiles)
+	} else {
+		s.logger.Warn("preview CONFIG_RESTORE files failed; dest_version stays empty",
+			zap.String("task_id", placeholder.ID.String()), zap.Error(prevErr))
+	}
+
+	// 2) Suspended / scheduled：到此结束；等用户点"开始"或 scheduler 到点触发 dispatcher。
+	if createSuspended || (scheduledAt != nil && scheduledAt.After(time.Now())) {
 		catalog, _ := s.loadTaskTypeCatalog(ctx)
 		return s.mapTask(catalog, placeholder)
 	}
 
 	// 3) 派发 device_tasks（CommandKey 与 sub_task 一致 → TC 自动推进）。
-	_, missing, err := s.snapshotConfigRestoreDispatcher.
+	_, dispatchedFiles, missing, err := s.snapshotConfigRestoreDispatcher.
 		DispatchConfigRestoreBySnapshot(ctx, sns, createUser, placeholder.ID)
 	if err != nil {
 		if len(missing) > 0 {
@@ -595,6 +640,7 @@ func (s *Service) createConfigRestoreTask(
 		}
 		return nil, fmt.Errorf("dispatch CONFIG_RESTORE by snapshot: %w", err)
 	}
+	s.persistDispatchedFiles(ctx, "CONFIG_RESTORE", placeholder.ID, dispatchedFiles)
 
 	catalog, _ := s.loadTaskTypeCatalog(ctx)
 	return s.mapTask(catalog, placeholder)
@@ -609,6 +655,7 @@ func (s *Service) createLicenseUpgradeTask(
 	req CreateTaskRequest,
 	createUser string,
 	createSuspended bool,
+	scheduledAt *time.Time,
 ) (*Task, error) {
 	if s.licenseUpgradeDispatcher == nil {
 		return nil, fmt.Errorf("%w: LICENSE_UPGRADE dispatcher not wired", commonerrors.ErrInvalidInput)
@@ -624,28 +671,37 @@ func (s *Service) createLicenseUpgradeTask(
 	}
 
 	// 1) 先建占位 upgrade_tasks + sub_tasks（拿到 task.ID 用于派生 CommandKey）。
-	//    Suspended 模式 sub_tasks=pending；非 suspended sub_tasks=downloading。
+	//    Suspended / scheduled 模式 sub_tasks=pending；immediate 模式 sub_tasks=downloading。
 	placeholder, phErr := s.softwareService.CreatePlaceholderTrackingTask(ctx,
 		software.PlaceholderTrackingRequest{
-			DeviceIDs:  req.DeviceIDs,
-			TaskName:   req.TaskName,
-			TypeCode:   typeDef.TypeCode, // CommandKey 前缀（如 "LICENSE_UPGRADE"），与 dispatcher 一致
-			FileType:   typeDef.FileType, // download_file_type 列（catalog 字面，含 <OUI> 占位）
-			CreateUser: createUser,
-			Suspended:  createSuspended,
+			DeviceIDs:   req.DeviceIDs,
+			TaskName:    req.TaskName,
+			TypeCode:    typeDef.TypeCode, // CommandKey 前缀（如 "LICENSE_UPGRADE"），与 dispatcher 一致
+			FileType:    typeDef.FileType, // download_file_type 列（catalog 字面，含 <OUI> 占位）
+			CreateUser:  createUser,
+			Suspended:   createSuspended,
+			ScheduledAt: scheduledAt,
 		})
 	if phErr != nil {
 		return nil, fmt.Errorf("create LICENSE_UPGRADE placeholder: %w", phErr)
 	}
 
-	// 2) Suspended：到此结束；等用户点"开始"由 StartTask 派发。
-	if createSuspended {
+	// 1.5) 同 CONFIG_RESTORE：先 Preview 每台设备的 license 文件名写到 sub_task.dest_version。
+	if previewFiles, prevErr := s.licenseUpgradeDispatcher.PreviewLicenseFiles(ctx, sns); prevErr == nil {
+		s.persistDispatchedFiles(ctx, "LICENSE_UPGRADE", placeholder.ID, previewFiles)
+	} else {
+		s.logger.Warn("preview LICENSE_UPGRADE files failed; dest_version stays empty",
+			zap.String("task_id", placeholder.ID.String()), zap.Error(prevErr))
+	}
+
+	// 2) Suspended / scheduled：到此结束；等用户点"开始"或 scheduler 到点触发 dispatcher。
+	if createSuspended || (scheduledAt != nil && scheduledAt.After(time.Now())) {
 		catalog, _ := s.loadTaskTypeCatalog(ctx)
 		return s.mapTask(catalog, placeholder)
 	}
 
 	// 3) 派发 device_tasks（CommandKey 与 sub_task 一致 → TC 自动推进）。
-	_, missing, err := s.licenseUpgradeDispatcher.
+	_, dispatchedFiles, missing, err := s.licenseUpgradeDispatcher.
 		DispatchLicenseUpgradeBySN(ctx, sns, createUser, placeholder.ID)
 	if err != nil {
 		if len(missing) > 0 {
@@ -654,9 +710,36 @@ func (s *Service) createLicenseUpgradeTask(
 		}
 		return nil, fmt.Errorf("dispatch LICENSE_UPGRADE: %w", err)
 	}
+	s.persistDispatchedFiles(ctx, "LICENSE_UPGRADE", placeholder.ID, dispatchedFiles)
 
 	catalog, _ := s.loadTaskTypeCatalog(ctx)
 	return s.mapTask(catalog, placeholder)
+}
+
+// persistDispatchedFiles 把 dispatcher 返回的 sn → 文件名映射写回 upgrade_sub_tasks.dest_version。
+// CommandKey 用 software.BuildDirectDispatchCommandKey 重建，与 placeholder 创建时
+// sub_task.CommandKey、dispatcher enqueue device_task.CommandKey 一致。
+//
+// best-effort：任一 sn 写失败仅 warn，不阻断整体派发——派发已成功提交，dest_version
+// 仅影响"目标文件"列展示。下次 list 时这一行 dest_version 留空 = "-"，可手动重派后修复。
+func (s *Service) persistDispatchedFiles(ctx context.Context, typeCode string, upgradeTaskID uuid.UUID, files map[string]string) {
+	if len(files) == 0 || s.subTaskRepo == nil {
+		return
+	}
+	for sn, fileName := range files {
+		if sn == "" || fileName == "" {
+			continue
+		}
+		commandKey := software.BuildDirectDispatchCommandKey(typeCode, upgradeTaskID, sn)
+		if err := s.subTaskRepo.UpdateDestVersionByCommandKey(ctx, commandKey, fileName); err != nil {
+			s.logger.Warn("persist dispatched file name failed (sub_task.dest_version)",
+				zap.String("type_code", typeCode),
+				zap.String("upgrade_task_id", upgradeTaskID.String()),
+				zap.String("device_sn", sn),
+				zap.String("file_name", fileName),
+				zap.Error(err))
+		}
+	}
 }
 
 func (s *Service) ListTasks(ctx context.Context, filter TaskListFilter) (*coremodel.ListResponse[Task], error) {
@@ -990,11 +1073,21 @@ func (s *Service) mapTask(catalog []TaskType, task *software.UpgradeTask) (*Task
 		SuccessCount:    task.SuccessCount,
 		FailCount:       task.FailCount,
 		CurrentStep:     stepForTask(typeDef, task.Status),
-		ExecutionMode:   executionModeForTask(task.Status),
+		ExecutionMode:   executionModeForTask(task.Status, task.CreateStatus),
 		CreateUser:      task.CreateUser,
 		CreatedAt:       formatTime(time.Time(task.CreatedAt)),
+		ScheduledAt:     scheduledAtToString(task.ScheduledAt),
 		OperatorScope:   task.CreateUser,
 	}, nil
+}
+
+// scheduledAtToString 把 *model.Time 格式化成前端期望的 ISO 字符串（formatTime 与
+// CreatedAt 一致），nil 时返回空串 → JSON omitempty 不输出。
+func scheduledAtToString(t *coremodel.Time) string {
+	if t == nil {
+		return ""
+	}
+	return formatTime(time.Time(*t))
 }
 
 func (s *Service) mapDeviceItem(
@@ -1048,8 +1141,16 @@ func (s *Service) mapDeviceItem(
 	} else if targetVersion == "" {
 		targetVersion = parent.FileName
 	}
+	// CONFIG_RESTORE / LICENSE_UPGRADE 是 ACS → 设备 的下发方向：UFTE 派发后把实际
+	// 下发文件名（snapshot / license 文件 basename）写到 sub_task.dest_version，
+	// 这里直接拎出来填到 TargetFile 让前端"目标文件"列正常展示。
+	// 这两类不走 fileLandedLookup（没有上行文件落地），下面 if 分支也跳过。
+	isDirectDispatchFile := typeDef.TypeCode == "CONFIG_RESTORE" || typeDef.TypeCode == "LICENSE_UPGRADE"
+	if isDirectDispatchFile && subTask.DestVersion != "" {
+		targetFile = subTask.DestVersion
+	}
 	fileLanded := false
-	if typeDef.softwareTaskType == software.TaskTypeLogCollect &&
+	if typeDef.softwareTaskType == software.TaskTypeLogCollect && !isDirectDispatchFile &&
 		s.fileLandedLookup != nil && subTask.DeviceSN != "" {
 		mainTaskID := subTask.TaskID.String()
 		landedFile, landed, lookupErr := s.fileLandedLookup(ctx, subTask.DeviceSN, mainTaskID)
@@ -1079,8 +1180,11 @@ func (s *Service) mapDeviceItem(
 	// 完成态 LogCollect 类（备份等）且注入了下载回调时，拉取 1h presigned GET URL。
 	// 用 targetFile（设备实际上传文件名，从 fileLanded 反查得到）做 lookup key——
 	// 设备厂商命名不可预测，预渲染模板名匹配不上 MinIO 对象路径。
+	//
+	// CONFIG_RESTORE / LICENSE_UPGRADE 是 ACS → 设备 的下行方向，downloadURLLookup
+	// 查的是设备上行的"已落地文件"，对它们语义不对——跳过，文件名以纯文本展示。
 	downloadURL := ""
-	if targetFile != "" && status == "ended" && s.downloadURLLookup != nil && subTask.DeviceSN != "" {
+	if !isDirectDispatchFile && targetFile != "" && status == "ended" && s.downloadURLLookup != nil && subTask.DeviceSN != "" {
 		url, lookupErr := s.downloadURLLookup(ctx, subTask.DeviceSN, targetFile)
 		if lookupErr != nil {
 			s.logger.Debug("download URL lookup failed; leaving blank",
@@ -1210,7 +1314,18 @@ func matchesDeviceFilter(item DeviceItem, filter DeviceListFilter) bool {
 	return true
 }
 
-func executionModeForTask(status software.TaskStatus) string {
+// executionModeForTask 把后端 task.Status × task.CreateStatus 映射到前端 executionMode 枚举。
+//
+//	create_status='timing' 且 status in (pending, in_progress) → "scheduled"
+//	status='suspended'                                          → "suspended"
+//	其它（status=in_progress / pending(active) / ended）         → "immediate"
+//
+// 定时任务被 scheduler 触发后 status 翻成 in_progress 但 create_status 仍是 timing；
+// 前端列"执行方式"应继续显示"定时执行"，所以 timing 的优先级最高。
+func executionModeForTask(status software.TaskStatus, createStatus string) string {
+	if createStatus == software.CreateStatusTiming {
+		return "scheduled"
+	}
 	if status == software.TaskSuspended {
 		return "suspended"
 	}

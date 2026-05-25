@@ -704,6 +704,23 @@ func (r *PgSubTaskRepository) ListAll(ctx context.Context, filter AllSubTaskFilt
 	}, nil
 }
 
+// UpdateDestVersionByCommandKey 按 command_key 把 dest_version 写成 destVersion。
+// CONFIG_RESTORE / LICENSE_UPGRADE 派发后回填实际下发文件名。RowsAffected=0 不报错——
+// command_key 跨表只在某一张表落库，本表未命中是预期。
+func (r *PgSubTaskRepository) UpdateDestVersionByCommandKey(ctx context.Context, commandKey, destVersion string) error {
+	query, args, err := storage.Psql.Update("upgrade_sub_tasks").
+		Set("dest_version", destVersion).
+		Where(sq.Eq{"command_key": commandKey}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update dest_version SQL: %w", err)
+	}
+	if _, err := r.pool.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("update dest_version by command_key: %w", err)
+	}
+	return nil
+}
+
 // UpdateFailureReasonByTask sets failure_reason for all failed sub-tasks under a main task.
 func (r *PgSubTaskRepository) UpdateFailureReasonByTask(ctx context.Context, taskID uuid.UUID, code FailureCode) error {
 	query, args, err := storage.Psql.Update("upgrade_sub_tasks").

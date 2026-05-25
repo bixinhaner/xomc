@@ -45,8 +45,8 @@ export default function FileManagementPage() {
         <Alert
           type="info"
           showIcon
-          message="您来自「任务创建」"
-          description="完成文件维护后点右侧按钮关闭此窗口，回到原任务创建抽屉（已选设备和表单值保持不变，重新勾选设备即可刷新文件匹配状态）。"
+          message={t('ufte.fileManagement.fromUfte.title')}
+          description={t('ufte.fileManagement.fromUfte.desc')}
           action={(
             <Space>
               <Button
@@ -55,7 +55,7 @@ export default function FileManagementPage() {
                 icon={<CloseCircleOutlined />}
                 onClick={handleCloseTab}
               >
-                完成并关闭
+                {t('ufte.fileManagement.close')}
               </Button>
             </Space>
           )}
@@ -73,17 +73,17 @@ export default function FileManagementPage() {
         items={[
           {
             key: 'version',
-            label: '版本文件',
+            label: t('ufte.fileManagement.tab.version'),
             children: <div style={PANE_STYLE}><FirmwareUpload embedded /></div>,
           },
           {
             key: 'config',
-            label: '配置文件',
+            label: t('ufte.fileManagement.tab.config'),
             children: <div style={PANE_STYLE}><ConfigSnapshotLibrary /></div>,
           },
           {
             key: 'license',
-            label: 'License 文件',
+            label: t('ufte.fileManagement.tab.license'),
             children: <div style={PANE_STYLE}><DeviceLicenseLibrary /></div>,
           },
         ].filter((item) => !fromUFTE || item.key === activeKey)}

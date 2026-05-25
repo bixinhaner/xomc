@@ -141,6 +141,9 @@ func (m *svcMockSubTaskRepo) UpdateStatusWithCode(_ context.Context, id uuid.UUI
 func (m *svcMockSubTaskRepo) UpdateFailureReasonByTask(_ context.Context, _ uuid.UUID, _ FailureCode) error {
 	return nil
 }
+func (m *svcMockSubTaskRepo) UpdateDestVersionByCommandKey(_ context.Context, _, _ string) error {
+	return nil
+}
 func (m *svcMockSubTaskRepo) GetActiveByDeviceID(ctx context.Context, deviceID uuid.UUID) (*UpgradeSubTask, error) {
 	if m.getActiveByDeviceFn != nil {
 		return m.getActiveByDeviceFn(ctx, deviceID)

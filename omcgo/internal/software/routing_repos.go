@@ -511,3 +511,17 @@ func (r *RoutingSubTaskRepository) UpdateFailureReasonByTask(ctx context.Context
 	}
 	return nil
 }
+
+// UpdateDestVersionByCommandKey 走 commandKey 前缀候选：CONFIG_RESTORE / LICENSE_UPGRADE
+// 等"直接派发"任务的 sub_task 落在 fallback 旧表（CreatePlaceholderTrackingTask 路径
+// 当前不注 route hint）。candidatesByCommandKey 不识别 CONFIG_RESTORE_/LICENSE_UPGRADE_
+// 前缀 → 全表 fan-out，结果一致。每张表 UPDATE WHERE command_key= 仅命中含此 key 的行，
+// 不影响其它表。
+func (r *RoutingSubTaskRepository) UpdateDestVersionByCommandKey(ctx context.Context, commandKey, destVersion string) error {
+	for _, repo := range r.candidatesByCommandKey(commandKey) {
+		if err := repo.UpdateDestVersionByCommandKey(ctx, commandKey, destVersion); err != nil {
+			return err
+		}
+	}
+	return nil
+}

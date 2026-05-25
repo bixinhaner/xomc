@@ -18,6 +18,7 @@ import {
 import dayjs from 'dayjs';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
+import { useT } from '@/hooks/useT';
 import {
   useConfigSnapshots,
   useBatchDeleteConfigSnapshots,
@@ -29,12 +30,14 @@ import type {
 import { configSnapshotApi } from '@core/services/api/configSnapshotApi';
 import ImportDrawer from './ImportDrawer';
 
-const SOURCE_TAG: Record<SnapshotSource, { color: string; label: string }> = {
-  backup: { color: 'blue', label: '备份任务' },
-  manual_upload: { color: 'green', label: '手动导入' },
+// 来源 Tag 颜色映射；label 走 i18n key 在渲染时按当前 locale 取。
+const SOURCE_TAG: Record<SnapshotSource, { color: string; labelKey: string }> = {
+  backup: { color: 'blue', labelKey: 'transfer.fileLib.source.backup' },
+  manual_upload: { color: 'green', labelKey: 'transfer.fileLib.source.manualUpload' },
 };
 
 export default function ConfigSnapshotLibraryPage() {
+  const t = useT();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [serialFilter, setSerialFilter] = useState('');
@@ -60,42 +63,42 @@ export default function ConfigSnapshotLibraryPage() {
   const batchDelete = useBatchDeleteConfigSnapshots();
 
   const columns: DataTableColumn<ConfigSnapshot>[] = [
-    { key: 'serialNumber', title: '设备序列号', dataIndex: 'serialNumber', width: 200, copyable: true, mono: true },
+    { key: 'serialNumber', title: t('transfer.fileLib.col.serialNumber'), dataIndex: 'serialNumber', width: 200, copyable: true, mono: true },
     {
       key: 'enbName',
-      title: '基站名称',
+      title: t('transfer.fileLib.col.enbName'),
       dataIndex: 'enbName',
       width: 180,
       render: (v) => (v ? String(v) : <span style={{ color: '#999' }}>—</span>),
     },
     {
       key: 'productType',
-      title: 'Product Type',
+      title: t('transfer.fileLib.col.productType'),
       dataIndex: 'productType',
       width: 160,
       render: (v) => (v ? String(v) : <span style={{ color: '#999' }}>—</span>),
     },
-    { key: 'fileName', title: '最新配置文件', dataIndex: 'fileName', width: 260, mono: true },
+    { key: 'fileName', title: t('transfer.fileLib.col.snapshotFile'), dataIndex: 'fileName', width: 260, mono: true },
     {
       key: 'fileSize',
-      title: '大小',
+      title: t('transfer.fileLib.col.size'),
       dataIndex: 'fileSize',
       width: 100,
       render: (v) => formatBytes(v as number),
     },
     {
       key: 'source',
-      title: '来源',
+      title: t('transfer.fileLib.col.source'),
       dataIndex: 'source',
       width: 110,
       render: (v) => {
         const cfg = SOURCE_TAG[v as SnapshotSource];
-        return <Tag color={cfg.color}>{cfg.label}</Tag>;
+        return <Tag color={cfg.color}>{t(cfg.labelKey)}</Tag>;
       },
     },
     {
       key: 'updateTime',
-      title: '最新更新时间',
+      title: t('transfer.fileLib.col.updateTime'),
       dataIndex: 'updateTime',
       width: 180,
       sorter: true,
@@ -103,7 +106,7 @@ export default function ConfigSnapshotLibraryPage() {
     },
     {
       key: 'actions',
-      title: '操作',
+      title: t('transfer.fileLib.col.actions'),
       width: 160,
       fixed: 'right',
       render: (_, record) => (
@@ -114,7 +117,7 @@ export default function ConfigSnapshotLibraryPage() {
             icon={<DownloadOutlined />}
             onClick={() => { void downloadSnapshot(record.serialNumber); }}
           >
-            下载
+            {t('transfer.fileLib.action.download')}
           </Button>
           <Button
             type="link"
@@ -123,7 +126,7 @@ export default function ConfigSnapshotLibraryPage() {
             icon={<DeleteOutlined />}
             onClick={() => confirmDelete([record.serialNumber])}
           >
-            删除
+            {t('transfer.fileLib.action.delete')}
           </Button>
         </Space>
       ),
@@ -134,22 +137,24 @@ export default function ConfigSnapshotLibraryPage() {
     try {
       await configSnapshotApi.download(sn);
     } catch (e) {
-      message.error(`下载失败：${(e as Error).message ?? '请稍后重试'}`);
+      message.error(t('transfer.fileLib.msg.downloadFailed', { reason: (e as Error).message ?? t('transfer.fileLib.msg.tryAgainLater') }));
     }
   }
 
   function confirmDelete(sns: string[]) {
     Modal.confirm({
-      title: '确认删除？',
-      content: `将删除 ${sns.length} 台设备的配置快照（DB 行 + MinIO 对象），不可恢复。`,
+      title: t('transfer.fileLib.msg.deleteConfirmTitle'),
+      content: t('transfer.fileLib.msg.deleteSnapshotConfirm', { count: sns.length }),
       okType: 'danger',
       onOk: async () => {
         try {
           const res = await batchDelete.mutateAsync(sns);
-          message.success(`已删除 ${res.succeeded.length} 条${res.failed.length ? `；${res.failed.length} 条失败` : ''}`);
+          message.success(res.failed.length
+            ? t('transfer.fileLib.msg.deletePartial', { count: res.succeeded.length, failedCount: res.failed.length })
+            : t('transfer.fileLib.msg.deleteSuccess', { count: res.succeeded.length }));
           setSelectedKeys((prev) => prev.filter((k) => !sns.includes(String(k))));
-        } catch (e) {
-          message.error('删除失败');
+        } catch {
+          message.error(t('transfer.fileLib.msg.deleteFailed'));
         }
       },
     });
@@ -160,38 +165,38 @@ export default function ConfigSnapshotLibraryPage() {
       <Card size="small">
         <Space wrap>
           <Input
-            placeholder="设备 SN"
+            placeholder={t('transfer.fileLib.filter.sn')}
             allowClear
             value={serialFilter}
             onChange={(e) => setSerialFilter(e.target.value)}
             style={{ width: 180 }}
           />
           <Input
-            placeholder="基站名称"
+            placeholder={t('transfer.fileLib.filter.enbName')}
             allowClear
             value={enbFilter}
             onChange={(e) => setEnbFilter(e.target.value)}
             style={{ width: 180 }}
           />
           <Input
-            placeholder="Product Type"
+            placeholder={t('transfer.fileLib.filter.productType')}
             allowClear
             value={productFilter}
             onChange={(e) => setProductFilter(e.target.value)}
             style={{ width: 180 }}
           />
           <Select<SnapshotSource | ''>
-            placeholder="来源"
+            placeholder={t('transfer.fileLib.filter.source')}
             allowClear
             value={sourceFilter || undefined}
             onChange={(v) => setSourceFilter(v ?? '')}
             style={{ width: 140 }}
             options={[
-              { value: 'backup', label: '备份任务' },
-              { value: 'manual_upload', label: '手动导入' },
+              { value: 'backup', label: t('transfer.fileLib.source.backup') },
+              { value: 'manual_upload', label: t('transfer.fileLib.source.manualUpload') },
             ]}
           />
-          <Button icon={<ReloadOutlined />} onClick={() => refetch()}>刷新</Button>
+          <Button icon={<ReloadOutlined />} onClick={() => refetch()}>{t('transfer.fileLib.action.refresh')}</Button>
         </Space>
       </Card>
       <DataTable<ConfigSnapshot>
@@ -213,7 +218,7 @@ export default function ConfigSnapshotLibraryPage() {
         extraToolbarLeft={
           <Space>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setImportOpen(true)}>
-              导入配置
+              {t('transfer.fileLib.action.importConfig')}
             </Button>
             <Button
               danger
@@ -221,7 +226,7 @@ export default function ConfigSnapshotLibraryPage() {
               disabled={selectedKeys.length === 0}
               onClick={() => confirmDelete(selectedKeys.map(String))}
             >
-              批量删除（{selectedKeys.length}）
+              {t('transfer.fileLib.action.batchDelete', { count: selectedKeys.length })}
             </Button>
           </Space>
         }

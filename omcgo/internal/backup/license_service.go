@@ -308,17 +308,17 @@ type LicenseUpgradeDispatchResult struct {
 //   - err：基础设施错误
 func (s *LicenseService) DispatchLicenseUpgradeBySN(
 	ctx context.Context, targetDeviceSNs []string, createUser string, upgradeTaskID uuid.UUID,
-) (uuid.UUID, []string, error) {
+) (uuid.UUID, map[string]string, []string, error) {
 	if s.taskSvc == nil {
-		return uuid.Nil, nil, fmt.Errorf("license upgrade dispatcher not configured: %w", commonerrors.ErrInvalidInput)
+		return uuid.Nil, nil, nil, fmt.Errorf("license upgrade dispatcher not configured: %w", commonerrors.ErrInvalidInput)
 	}
 	if len(targetDeviceSNs) == 0 {
-		return uuid.Nil, nil, fmt.Errorf("at least one target device required: %w", commonerrors.ErrInvalidInput)
+		return uuid.Nil, nil, nil, fmt.Errorf("at least one target device required: %w", commonerrors.ErrInvalidInput)
 	}
 
 	licMap, err := s.repo.BatchGetBySerialNumbers(ctx, targetDeviceSNs)
 	if err != nil {
-		return uuid.Nil, nil, fmt.Errorf("lookup device_licenses: %w", err)
+		return uuid.Nil, nil, nil, fmt.Errorf("lookup device_licenses: %w", err)
 	}
 	missing := make([]string, 0)
 	for _, sn := range targetDeviceSNs {
@@ -327,7 +327,7 @@ func (s *LicenseService) DispatchLicenseUpgradeBySN(
 		}
 	}
 	if len(missing) > 0 {
-		return uuid.Nil, missing,
+		return uuid.Nil, nil, missing,
 			fmt.Errorf("the following devices have no license: %v: %w",
 				missing, commonerrors.ErrNotFound)
 	}
@@ -344,6 +344,9 @@ func (s *LicenseService) DispatchLicenseUpgradeBySN(
 
 	enqueued := 0
 	skipped := make([]string, 0)
+	// dispatchedFiles：返回给 UFTE 写回 sub_task.dest_version，作为"目标文件"列展示。
+	// 只收成功 enqueue 的设备；skipped 不进 map 以免覆盖。
+	dispatchedFiles := make(map[string]string, len(targetDeviceSNs))
 	for _, sn := range targetDeviceSNs {
 		lic := licMap[sn]
 		dev, dErr := s.deviceLookup.GetBySerialNumber(ctx, sn)
@@ -354,6 +357,7 @@ func (s *LicenseService) DispatchLicenseUpgradeBySN(
 			continue
 		}
 		downloadURL := lic.ObjectBucket + "/" + lic.ObjectPath
+		targetFileName := pathpkg.Base(lic.ObjectPath)
 		params, mErr := json.Marshal(map[string]interface{}{
 			// FileType = "License File"——TR-069 私有 license 文件下行格式。
 			// 不同于配置恢复的 "10 <OUI> Configuration File"，license 这边
@@ -361,10 +365,10 @@ func (s *LicenseService) DispatchLicenseUpgradeBySN(
 			// 若以后接其它厂商要求带 OUI，调整这里集中改动。
 			"file_type":        "License File",
 			"url":              downloadURL,
-			"target_file_name": pathpkg.Base(lic.ObjectPath),
+			"target_file_name": targetFileName,
 		})
 		if mErr != nil {
-			return uuid.Nil, nil, fmt.Errorf("marshal Download params for %s: %w", sn, mErr)
+			return uuid.Nil, nil, nil, fmt.Errorf("marshal Download params for %s: %w", sn, mErr)
 		}
 		// CommandKey 与 software.BuildDirectDispatchCommandKey 严格对齐：
 		// "<typeCode>_<upgradeTaskID8>_<sn>"。这样 handleTCBody.GetByCommandKey
@@ -384,6 +388,7 @@ func (s *LicenseService) DispatchLicenseUpgradeBySN(
 				zap.String("device_sn", sn), zap.Error(qErr))
 			continue
 		}
+		dispatchedFiles[dev.SerialNumber] = targetFileName
 		enqueued++
 	}
 
@@ -393,7 +398,38 @@ func (s *LicenseService) DispatchLicenseUpgradeBySN(
 		zap.Int("enqueued", enqueued),
 		zap.Int("skipped", len(skipped)),
 	)
-	return dispatchID, nil, nil
+	return dispatchID, dispatchedFiles, nil, nil
+}
+
+// PreviewLicenseFiles 不入队任何 device_task，只返回 sn → 预期下发的 license 文件名。
+// 给 UFTE 挂起 / 定时模式的占位任务用：创建时就把目标文件名写到 sub_task.dest_version，
+// 让前端列表"目标文件"列即时可见，无需等 dispatcher 真正派发。
+// 缺失 license 的设备整批拒绝（同 DispatchLicenseUpgradeBySN 语义）。
+func (s *LicenseService) PreviewLicenseFiles(
+	ctx context.Context, targetDeviceSNs []string,
+) (map[string]string, error) {
+	if len(targetDeviceSNs) == 0 {
+		return nil, fmt.Errorf("at least one target device required: %w", commonerrors.ErrInvalidInput)
+	}
+	licMap, err := s.repo.BatchGetBySerialNumbers(ctx, targetDeviceSNs)
+	if err != nil {
+		return nil, fmt.Errorf("lookup device_licenses (preview): %w", err)
+	}
+	missing := make([]string, 0)
+	for _, sn := range targetDeviceSNs {
+		if _, ok := licMap[sn]; !ok {
+			missing = append(missing, sn)
+		}
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("the following devices have no license: %v: %w",
+			missing, commonerrors.ErrNotFound)
+	}
+	out := make(map[string]string, len(targetDeviceSNs))
+	for _, sn := range targetDeviceSNs {
+		out[sn] = pathpkg.Base(licMap[sn].ObjectPath)
+	}
+	return out, nil
 }
 
 // ─────────────────────────────────────────────────────────────────────────

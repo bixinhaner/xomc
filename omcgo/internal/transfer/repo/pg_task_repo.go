@@ -27,6 +27,8 @@ var taskColumns = []string{
 	"create_status", "create_user", "total_count", "success_count", "fail_count",
 	"max_concurrent", "started_at", "ended_at", "created_at", "updated_at",
 	"rollback_reason", "rollback_source", "rollback_target_firmware_id",
+	// Scheduled execution (000184)。
+	"scheduled_at",
 }
 
 var _ TaskRepo = (*PgTaskRepo)(nil)
@@ -51,7 +53,7 @@ func scanTask(row pgx.Row) (*software.UpgradeTask, error) {
 	var firmwareID sql.NullString
 	var downloadFileType sql.NullString
 	var fileName, fileMD5, result sql.NullString
-	var startedAt, endedAt sql.NullTime
+	var startedAt, endedAt, scheduledAt sql.NullTime
 	var createdAt, updatedAt time.Time
 	var rollbackReason, rollbackSource, rollbackTargetFW sql.NullString
 
@@ -61,9 +63,14 @@ func scanTask(row pgx.Row) (*software.UpgradeTask, error) {
 		&task.CreateStatus, &task.CreateUser, &task.TotalCount, &task.SuccessCount, &task.FailCount,
 		&task.MaxConcurrent, &startedAt, &endedAt, &createdAt, &updatedAt,
 		&rollbackReason, &rollbackSource, &rollbackTargetFW,
+		&scheduledAt,
 	)
 	if err != nil {
 		return nil, err
+	}
+	if scheduledAt.Valid {
+		t := software.JSONTime(scheduledAt.Time)
+		task.ScheduledAt = &t
 	}
 	if firmwareID.Valid {
 		fid, _ := uuid.Parse(firmwareID.String)
@@ -121,15 +128,21 @@ func (r *PgTaskRepo) Create(ctx context.Context, task *software.UpgradeTask) err
 		rollbackTargetFW = *task.RollbackTargetFirmwareID
 	}
 
+	var scheduledAt any
+	if task.ScheduledAt != nil {
+		scheduledAt = time.Time(*task.ScheduledAt)
+	}
 	builder := storage.Psql.Insert(r.tableName).
 		Columns("task_name", "task_type", "firmware_id", "download_file_type", "file_name", "file_md5",
 			"status", "product_class", "is_keep_config",
 			"create_status", "create_user", "total_count", "max_concurrent",
-			"rollback_reason", "rollback_source", "rollback_target_firmware_id").
+			"rollback_reason", "rollback_source", "rollback_target_firmware_id",
+			"scheduled_at").
 		Values(task.TaskName, task.TaskType, task.FirmwareID, task.DownloadFileType, task.FileName, task.FileMD5,
 			task.Status, task.ProductClass, task.IsKeepConfig,
 			task.CreateStatus, task.CreateUser, task.TotalCount, task.MaxConcurrent,
-			rollbackReason, rollbackSource, rollbackTargetFW).
+			rollbackReason, rollbackSource, rollbackTargetFW,
+			scheduledAt).
 		Suffix("RETURNING " + joinColumns(taskColumns))
 
 	query, args, err := builder.ToSql()
@@ -318,6 +331,57 @@ func (r *PgTaskRepo) IncrementCounts(ctx context.Context, taskID uuid.UUID, succ
 		return fmt.Errorf("increment %s counts: %w", r.tableName, err)
 	}
 	return nil
+}
+
+// UpdateCreateStatusGuarded 同 software.PgTaskRepository.UpdateCreateStatusGuarded，作用于本 repo 绑定的物理表。
+func (r *PgTaskRepo) UpdateCreateStatusGuarded(ctx context.Context, id uuid.UUID, from, to string) (bool, error) {
+	q, args, err := storage.Psql.Update(r.tableName).
+		Set("create_status", to).
+		Set("updated_at", time.Now()).
+		Where(sq.Eq{"id": id}).
+		Where(sq.Eq{"create_status": from}).
+		Where(sq.Eq{"status": string(software.TaskPending)}).
+		ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build update create_status SQL (%s): %w", r.tableName, err)
+	}
+	tag, err := r.pool.Exec(ctx, q, args...)
+	if err != nil {
+		return false, fmt.Errorf("exec update create_status (%s): %w", r.tableName, err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// ListDueScheduled 同 software.PgTaskRepository.ListDueScheduled，作用于本 repo 绑定的物理表。
+func (r *PgTaskRepo) ListDueScheduled(ctx context.Context, before time.Time, limit int) ([]*software.UpgradeTask, error) {
+	builder := storage.Psql.Select(taskColumns...).
+		From(r.tableName).
+		Where(sq.Eq{"create_status": software.CreateStatusTiming}).
+		Where(sq.Eq{"status": software.TaskPending}).
+		Where(sq.LtOrEq{"scheduled_at": before}).
+		Where("scheduled_at IS NOT NULL").
+		OrderBy("scheduled_at ASC")
+	if limit > 0 {
+		builder = builder.Limit(uint64(limit))
+	}
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list due scheduled SQL (%s): %w", r.tableName, err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query due scheduled (%s): %w", r.tableName, err)
+	}
+	defer rows.Close()
+	var out []*software.UpgradeTask
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan due scheduled (%s): %w", r.tableName, err)
+		}
+		out = append(out, t)
+	}
+	return out, nil
 }
 
 func (r *PgTaskRepo) Delete(ctx context.Context, id uuid.UUID) error {

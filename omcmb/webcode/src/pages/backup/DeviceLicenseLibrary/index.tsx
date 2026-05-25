@@ -16,6 +16,7 @@ import {
 import dayjs from 'dayjs';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
+import { useT } from '@/hooks/useT';
 import {
   useDeviceLicenses,
   useBatchDeleteDeviceLicenses,
@@ -25,6 +26,7 @@ import { deviceLicenseApi } from '@core/services/api/deviceLicenseApi';
 import ImportDrawer from './ImportDrawer';
 
 export default function DeviceLicenseLibraryPage() {
+  const t = useT();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [serialFilter, setSerialFilter] = useState('');
@@ -48,39 +50,39 @@ export default function DeviceLicenseLibraryPage() {
   const batchDelete = useBatchDeleteDeviceLicenses();
 
   const columns: DataTableColumn<DeviceLicense>[] = [
-    { key: 'serialNumber', title: '设备序列号', dataIndex: 'serialNumber', width: 200, copyable: true, mono: true },
+    { key: 'serialNumber', title: t('transfer.fileLib.col.serialNumber'), dataIndex: 'serialNumber', width: 200, copyable: true, mono: true },
     {
       key: 'enbName',
-      title: '基站名称',
+      title: t('transfer.fileLib.col.enbName'),
       dataIndex: 'enbName',
       width: 180,
       render: (v) => (v ? String(v) : <span style={{ color: '#999' }}>—</span>),
     },
     {
       key: 'productType',
-      title: 'Product Type',
+      title: t('transfer.fileLib.col.productType'),
       dataIndex: 'productType',
       width: 160,
       render: (v) => (v ? String(v) : <span style={{ color: '#999' }}>—</span>),
     },
-    { key: 'fileName', title: 'License 文件', dataIndex: 'fileName', width: 260, mono: true },
+    { key: 'fileName', title: t('transfer.fileLib.col.licenseFile'), dataIndex: 'fileName', width: 260, mono: true },
     {
       key: 'fileSize',
-      title: '大小',
+      title: t('transfer.fileLib.col.size'),
       dataIndex: 'fileSize',
       width: 100,
       render: (v) => formatBytes(v as number),
     },
     {
       key: 'description',
-      title: '说明',
+      title: t('transfer.fileLib.col.description'),
       dataIndex: 'description',
       width: 200,
       render: (v) => (v ? String(v) : <span style={{ color: '#999' }}>—</span>),
     },
     {
       key: 'updateTime',
-      title: '最新更新时间',
+      title: t('transfer.fileLib.col.updateTime'),
       dataIndex: 'updateTime',
       width: 180,
       sorter: true,
@@ -88,7 +90,7 @@ export default function DeviceLicenseLibraryPage() {
     },
     {
       key: 'actions',
-      title: '操作',
+      title: t('transfer.fileLib.col.actions'),
       width: 160,
       fixed: 'right',
       render: (_, record) => (
@@ -99,7 +101,7 @@ export default function DeviceLicenseLibraryPage() {
             icon={<DownloadOutlined />}
             onClick={() => { void downloadLicense(record.serialNumber); }}
           >
-            下载
+            {t('transfer.fileLib.action.download')}
           </Button>
           <Button
             type="link"
@@ -108,7 +110,7 @@ export default function DeviceLicenseLibraryPage() {
             icon={<DeleteOutlined />}
             onClick={() => confirmDelete([record.serialNumber])}
           >
-            删除
+            {t('transfer.fileLib.action.delete')}
           </Button>
         </Space>
       ),
@@ -119,22 +121,24 @@ export default function DeviceLicenseLibraryPage() {
     try {
       await deviceLicenseApi.download(sn);
     } catch (e) {
-      message.error(`下载失败：${(e as Error).message ?? '请稍后重试'}`);
+      message.error(t('transfer.fileLib.msg.downloadFailed', { reason: (e as Error).message ?? t('transfer.fileLib.msg.tryAgainLater') }));
     }
   }
 
   function confirmDelete(sns: string[]) {
     Modal.confirm({
-      title: '确认删除？',
-      content: `将删除 ${sns.length} 台设备的 license 文件（DB 行 + MinIO 对象），不可恢复。`,
+      title: t('transfer.fileLib.msg.deleteConfirmTitle'),
+      content: t('transfer.fileLib.msg.deleteLicenseConfirm', { count: sns.length }),
       okType: 'danger',
       onOk: async () => {
         try {
           const res = await batchDelete.mutateAsync(sns);
-          message.success(`已删除 ${res.succeeded.length} 条${res.failed.length ? `；${res.failed.length} 条失败` : ''}`);
+          message.success(res.failed.length
+            ? t('transfer.fileLib.msg.deletePartial', { count: res.succeeded.length, failedCount: res.failed.length })
+            : t('transfer.fileLib.msg.deleteSuccess', { count: res.succeeded.length }));
           setSelectedKeys((prev) => prev.filter((k) => !sns.includes(String(k))));
         } catch {
-          message.error('删除失败');
+          message.error(t('transfer.fileLib.msg.deleteFailed'));
         }
       },
     });
@@ -145,27 +149,27 @@ export default function DeviceLicenseLibraryPage() {
       <Card size="small">
         <Space wrap>
           <Input
-            placeholder="设备 SN"
+            placeholder={t('transfer.fileLib.filter.sn')}
             allowClear
             value={serialFilter}
             onChange={(e) => setSerialFilter(e.target.value)}
             style={{ width: 180 }}
           />
           <Input
-            placeholder="基站名称"
+            placeholder={t('transfer.fileLib.filter.enbName')}
             allowClear
             value={enbFilter}
             onChange={(e) => setEnbFilter(e.target.value)}
             style={{ width: 180 }}
           />
           <Input
-            placeholder="Product Type"
+            placeholder={t('transfer.fileLib.filter.productType')}
             allowClear
             value={productFilter}
             onChange={(e) => setProductFilter(e.target.value)}
             style={{ width: 180 }}
           />
-          <Button icon={<ReloadOutlined />} onClick={() => refetch()}>刷新</Button>
+          <Button icon={<ReloadOutlined />} onClick={() => refetch()}>{t('transfer.fileLib.action.refresh')}</Button>
         </Space>
       </Card>
       <DataTable<DeviceLicense>
@@ -187,7 +191,7 @@ export default function DeviceLicenseLibraryPage() {
         extraToolbarLeft={
           <Space>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setImportOpen(true)}>
-              导入 License
+              {t('transfer.fileLib.action.importLicense')}
             </Button>
             <Button
               danger
@@ -195,7 +199,7 @@ export default function DeviceLicenseLibraryPage() {
               disabled={selectedKeys.length === 0}
               onClick={() => confirmDelete(selectedKeys.map(String))}
             >
-              批量删除（{selectedKeys.length}）
+              {t('transfer.fileLib.action.batchDelete', { count: selectedKeys.length })}
             </Button>
           </Space>
         }

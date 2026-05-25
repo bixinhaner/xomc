@@ -134,6 +134,24 @@ func initSoftwareModule(c *Container) error {
 	}
 	softwareService.RestorePendingUpgrades(context.Background())
 	softwareService.StartTaskReaper()
+
+	// 定时任务调度器：周期扫所有 5 张 task 表的"pending+timing"行，到期触发。
+	// LogCollect 类任务的触发回调由 UFTE 模块在 initUFTEModule 中通过
+	// taskScheduler.SetCollectTrigger 注入。
+	taskScheduler := software.NewTaskScheduler(
+		softwareService,
+		[]software.ScheduledTaskSource{
+			rawTaskRepo,
+			configBackupTaskRepo,
+			configRestoreTaskRepo,
+			runtimeLogTaskRepo,
+			faultLogTaskRepo,
+		},
+		0, // 默认 30s
+		logger,
+	)
+	taskScheduler.Start(context.Background())
+	c.miscDeps.taskScheduler = taskScheduler
 	// 注入 ACS 上传基础 URL，供日志采集 Upload RPC 构造目标 URL（YAML 静态兜底）。
 	if c.Cfg.Upgrade.ACSUploadBaseURL != "" {
 		softwareService.SetUploadConfig(c.Cfg.Upgrade.ACSUploadBaseURL)
@@ -373,6 +391,18 @@ func initUFTEModule(c *Container) error {
 
 	c.miscDeps.ufteHandler = ufte.NewHandler(service, logger)
 	c.miscDeps.ufteService = service
+
+	// 把"定时任务调度器触发 LogCollect 类任务"的回调指向 ufte.Service.StartTask。
+	// StartTask 内部已经按 TaskType / TypeCode 分流到 ResumeCollect 或 startDirectDispatchTask，
+	// scheduler 不用关心子类型。LogCollect 之外的（升级 / 回退）走 SoftwareService.ResumeUpgrade，
+	// 不经过本回调。
+	if c.miscDeps.taskScheduler != nil {
+		c.miscDeps.taskScheduler.SetCollectTrigger(func(ctx context.Context, taskID uuid.UUID) error {
+			return service.StartTask(ctx, taskID)
+		})
+		logger.Info("task scheduler collect trigger wired to ufte.Service.StartTask")
+	}
+
 	logger.Info("UFTE adapter module initialized", zap.Int("built_in_task_types_inserted", inserted))
 	return nil
 }
@@ -1356,6 +1386,7 @@ type miscDeps struct {
 	softwareTaskRepo    software.TaskRepository
 	softwareSubTaskRepo software.SubTaskRepository
 	canaryMonitor       *software.CanaryMonitor
+	taskScheduler       *software.TaskScheduler // 定时任务调度器（000181）
 	ufteHandler         *ufte.Handler
 	ufteService         *ufte.Service
 

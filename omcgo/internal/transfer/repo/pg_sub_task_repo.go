@@ -440,6 +440,21 @@ func (r *PgSubTaskRepo) FailStale(ctx context.Context, cutoffs software.StaleTim
 	return result, nil
 }
 
+// UpdateDestVersionByCommandKey 同 software.PgSubTaskRepository 同名方法，作用于本 repo 绑定的物理表。
+func (r *PgSubTaskRepo) UpdateDestVersionByCommandKey(ctx context.Context, commandKey, destVersion string) error {
+	query, args, err := storage.Psql.Update(r.subTaskTable).
+		Set("dest_version", destVersion).
+		Where(sq.Eq{"command_key": commandKey}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update %s dest_version SQL: %w", r.subTaskTable, err)
+	}
+	if _, err := r.pool.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("update %s dest_version: %w", r.subTaskTable, err)
+	}
+	return nil
+}
+
 func (r *PgSubTaskRepo) UpdateFailureReasonByTask(ctx context.Context, taskID uuid.UUID, code software.FailureCode) error {
 	query, args, err := storage.Psql.Update(r.subTaskTable).
 		Set("failure_reason", string(code)).

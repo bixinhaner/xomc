@@ -63,4 +63,9 @@ type SubTaskRepository interface {
 	DeleteByTaskID(ctx context.Context, taskID uuid.UUID) error
 	FailStale(ctx context.Context, cutoffs StaleTimeouts) (map[uuid.UUID]int64, error)
 	UpdateFailureReasonByTask(ctx context.Context, taskID uuid.UUID, code FailureCode) error
+	// UpdateDestVersionByCommandKey 按 command_key 单字段更新 dest_version。
+	// CONFIG_RESTORE / LICENSE_UPGRADE 等"占位任务"在 dispatcher 派发完成后写回
+	// 实际下发文件名，UFTE 设备列表"目标文件"列读这一列展示。
+	// RowsAffected=0 不视为错误（command_key 可能尚未生成 / 跨表分流未命中）。
+	UpdateDestVersionByCommandKey(ctx context.Context, commandKey, destVersion string) error
 }

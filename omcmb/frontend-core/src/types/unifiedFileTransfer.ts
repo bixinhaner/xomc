@@ -135,6 +135,11 @@ export interface CreateUnifiedFileTransferTaskInput {
   deviceIds?: string[];
   deviceCount: number;
   executionMode: TransferExecutionMode;
+  /**
+   * ISO 8601 字符串。仅 executionMode='scheduled' 时由前端 DatePicker 提交；其它模式忽略。
+   * 后端 ufte CreateTaskRequest.ScheduledAt 同名字段；time.Parse(RFC3339) 解析。
+   */
+  scheduledAt?: string;
   note?: string;
 }
 
