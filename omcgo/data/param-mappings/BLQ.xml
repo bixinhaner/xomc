@@ -1,5 +1,5 @@
 <?xml version="1.0" ?>
-<parameterModel paramModel="BLQ" totalEntries="755">
+<parameterModel paramModel="BLQ" totalEntries="765">
     <objects>
         <object name="Device.FaultMgmt.CurrentAlarm." standardPath="Device.FaultMgmt.CurrentAlarm." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FaultMgmt.ExpeditedEvent." standardPath="Device.FaultMgmt.ExpeditedEvent." access="READ_ONLY" changeApplies="Immediate"/>
@@ -12,6 +12,20 @@
     </objects>
     <parameters>
         <param name="Device.DeviceInfo.3GPPSpecVersion" standardPath="Device.DeviceInfo.3GPPSpecVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate" max="64"/>
+        <!-- TR-181 Device.DeviceInfo.* 标准 passthrough（私有路径 == 标准路径）。
+             MML LST/MOD DEVICE_INFO 依赖这些路径在字典里登记，否则 T-0170 ErrPathUnsupported 整条拒绝、
+             T-0172 把 supportedCount=0 的 MOD DEVICE_INFO 隐藏。
+             access / type 取自 standard_params 表的权威定义。 -->
+        <param name="Device.DeviceInfo.AdditionalHardwareVersion" standardPath="Device.DeviceInfo.AdditionalHardwareVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.AdditionalSoftwareVersion" standardPath="Device.DeviceInfo.AdditionalSoftwareVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.DataModelSpecVersion" standardPath="Device.DeviceInfo.DataModelSpecVersion" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.DnPrefix" standardPath="Device.DeviceInfo.DnPrefix" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.FirstUseDate" standardPath="Device.DeviceInfo.FirstUseDate" access="READ_ONLY" type="DATE_TIME" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.HardwarePlatform" standardPath="Device.DeviceInfo.HardwarePlatform" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.Manufacturer" standardPath="Device.DeviceInfo.Manufacturer" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.ModelName" standardPath="Device.DeviceInfo.ModelName" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.ProvisioningCode" standardPath="Device.DeviceInfo.ProvisioningCode" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param name="Device.DeviceInfo.UserLabel" standardPath="Device.DeviceInfo.UserLabel" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.DeviceInfo.AmbrLimitSwitch" standardPath="Device.DeviceInfo.AmbrLimitSwitch" access="READ_WRITE" type="STRING" changeApplies="Immediate" enumValues="0,1" enumLabels="OFF,ON" supported="false"/>
         <param name="Device.DeviceInfo.AntennaInfo.Azimuth" standardPath="Device.DeviceInfo.AntennaInfo.Azimuth" access="READ_WRITE" type="INT" changeApplies="Immediate" max="359"/>
         <param name="Device.DeviceInfo.AntennaInfo.Azimuth2" standardPath="Device.DeviceInfo.AntennaInfo.Azimuth2" access="READ_WRITE" type="INT" changeApplies="Immediate" max="359"/>
