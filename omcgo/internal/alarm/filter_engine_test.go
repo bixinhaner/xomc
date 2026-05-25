@@ -33,6 +33,7 @@ type mockStoreForEngine struct{}
 
 func (m *mockStoreForEngine) SaveActive(ctx context.Context, alarm *model.Alarm) error       { return nil }
 func (m *mockStoreForEngine) GetActiveByID(ctx context.Context, id uuid.UUID) (*model.Alarm, error) { return nil, nil }
+func (m *mockStoreForEngine) GetHistoryByID(ctx context.Context, id uuid.UUID) (*model.Alarm, error) { return nil, nil }
 func (m *mockStoreForEngine) GetActiveByDeviceAndIdentifier(ctx context.Context, deviceSN string, alarmIdentifier string) (*model.Alarm, error) {
 	return nil, nil
 }

@@ -45,6 +45,7 @@ type AlarmStatistics struct {
 type AlarmStore interface {
 	SaveActive(ctx context.Context, alarm *model.Alarm) error
 	GetActiveByID(ctx context.Context, id uuid.UUID) (*model.Alarm, error)
+	GetHistoryByID(ctx context.Context, id uuid.UUID) (*model.Alarm, error)
 	GetActiveByDeviceAndIdentifier(ctx context.Context, deviceSN string, alarmIdentifier string) (*model.Alarm, error)
 	GetActiveByDeviceSN(ctx context.Context, deviceSN string) ([]*model.Alarm, error)
 	UpdateActive(ctx context.Context, alarm *model.Alarm) error

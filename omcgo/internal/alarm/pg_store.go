@@ -51,6 +51,24 @@ func (s *PgAlarmStore) GetActiveByID(ctx context.Context, id uuid.UUID) (*model.
 	return s.scanActiveAlarm(ctx, activeAlarmSelect().Where(squirrel.Eq{"alarms_active.id": id}))
 }
 
+func (s *PgAlarmStore) GetHistoryByID(ctx context.Context, id uuid.UUID) (*model.Alarm, error) {
+	qb := storage.Psql.Select(
+		"alarms_history.time", "alarms_history.alarm_id", "alarms_history.device_id", "alarms_history.device_sn", "alarms_history.carrier", "alarms_history.severity",
+		"alarms_history.alarm_type", "alarms_history.alarm_identifier", "alarms_history.description", "alarms_history.status", "alarms_history.raised_at",
+		"alarms_history.acknowledged_at", "alarms_history.cleared_at", "alarms_history.acknowledged_by", "alarms_history.ack_note",
+		"alarms_history.additional_info",
+		"alarms_history.device_name", "COALESCE(alarms_history.technology, d.technology) AS technology", "alarms_history.alarm_source", "alarms_history.event_type",
+		"alarms_history.ack_count", "alarms_history.updated_at",
+		"alarms_history.cleared_by", "alarms_history.clear_note",
+		"alarms_history.probable_cause",
+	).From("alarms_history").
+		LeftJoin("devices d ON d.id = alarms_history.device_id").
+		Where(squirrel.Eq{"alarms_history.alarm_id": id}).
+		OrderBy("alarms_history.time DESC").
+		Limit(1)
+	return s.scanHistoryAlarm(ctx, qb)
+}
+
 func (s *PgAlarmStore) GetActiveByDeviceAndIdentifier(ctx context.Context, deviceSN string, alarmIdentifier string) (*model.Alarm, error) {
 	return s.scanActiveAlarm(ctx, activeAlarmSelect().
 		Where(squirrel.Eq{"alarms_active.device_sn": deviceSN, "alarms_active.alarm_identifier": alarmIdentifier}).
@@ -151,15 +169,16 @@ func (s *PgAlarmStore) ListActive(ctx context.Context, filter AlarmFilter) (*mod
 }
 
 func (s *PgAlarmStore) Archive(ctx context.Context, alarm *model.Alarm) error {
+	additionalJSON, _ := json.Marshal(alarm.AdditionalInfo)
 	_, err := s.pool.Exec(ctx,
-		`INSERT INTO alarms_history (time, alarm_id, device_id, device_sn, carrier, severity, alarm_type, alarm_identifier, description, status, raised_at, acknowledged_at, cleared_at, device_name, technology, alarm_source, event_type, network_location, explicit_cause, ack_count, acknowledged_by, ack_note, updated_at, cleared_by, clear_note, probable_cause)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)`,
+		`INSERT INTO alarms_history (time, alarm_id, device_id, device_sn, carrier, severity, alarm_type, alarm_identifier, description, status, raised_at, acknowledged_at, cleared_at, device_name, technology, alarm_source, event_type, network_location, explicit_cause, ack_count, acknowledged_by, ack_note, additional_info, updated_at, cleared_by, clear_note, probable_cause)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)`,
 		time.Now(), alarm.ID, alarm.DeviceID, alarm.DeviceSN, alarm.Carrier,
 		alarm.Severity, alarm.AlarmType, alarm.AlarmIdentifier, alarm.Description,
 		alarm.Status, alarm.RaisedAt, alarm.AcknowledgedAt, alarm.ClearedAt,
 		alarm.DeviceName, alarm.Technology, alarm.AlarmSource, alarm.EventType,
 		alarm.NetworkLocation, alarm.ExplicitCause, alarm.AckCount,
-		alarm.AcknowledgedBy, alarm.AckNote, time.Now(),
+		alarm.AcknowledgedBy, alarm.AckNote, additionalJSON, time.Now(),
 		alarm.ClearedBy, alarm.ClearNote,
 		alarm.ProbableCause,
 	)
@@ -174,6 +193,7 @@ func (s *PgAlarmStore) ListHistory(ctx context.Context, filter AlarmFilter) (*mo
 		"alarms_history.time", "alarms_history.alarm_id", "alarms_history.device_id", "alarms_history.device_sn", "alarms_history.carrier", "alarms_history.severity",
 		"alarms_history.alarm_type", "alarms_history.alarm_identifier", "alarms_history.description", "alarms_history.status", "alarms_history.raised_at",
 		"alarms_history.acknowledged_at", "alarms_history.cleared_at", "alarms_history.acknowledged_by", "alarms_history.ack_note",
+		"alarms_history.additional_info",
 		"alarms_history.device_name", "COALESCE(alarms_history.technology, d.technology) AS technology", "alarms_history.alarm_source", "alarms_history.event_type",
 		"alarms_history.ack_count", "alarms_history.updated_at",
 		"alarms_history.cleared_by", "alarms_history.clear_note",
@@ -202,17 +222,22 @@ func (s *PgAlarmStore) ListHistory(ctx context.Context, filter AlarmFilter) (*mo
 	for rows.Next() {
 		var a model.Alarm
 		var timeVal time.Time
+		var additionalJSON []byte
 		if err := rows.Scan(
 			&timeVal,
 			&a.ID, &a.DeviceID, &a.DeviceSN, &a.Carrier, &a.Severity,
 			&a.AlarmType, &a.AlarmIdentifier, &a.Description, &a.Status, &a.RaisedAt,
 			&a.AcknowledgedAt, &a.ClearedAt, &a.AcknowledgedBy, &a.AckNote,
+			&additionalJSON,
 			&a.DeviceName, &a.Technology, &a.AlarmSource, &a.EventType,
 			&a.AckCount, &a.UpdatedAt,
 			&a.ClearedBy, &a.ClearNote,
 			&a.ProbableCause,
 		); err != nil {
 			return nil, fmt.Errorf("scan alarms_history: %w", err)
+		}
+		if len(additionalJSON) > 0 {
+			_ = json.Unmarshal(additionalJSON, &a.AdditionalInfo)
 		}
 		items = append(items, a)
 	}
@@ -567,6 +592,37 @@ func (s *PgAlarmStore) scanActiveAlarm(ctx context.Context, qb squirrel.SelectBu
 	}
 	row := s.pool.QueryRow(ctx, sql, args...)
 	return scanAlarmRow(row)
+}
+
+func (s *PgAlarmStore) scanHistoryAlarm(ctx context.Context, qb squirrel.SelectBuilder) (*model.Alarm, error) {
+	sql, args, err := qb.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build history query: %w", err)
+	}
+	row := s.pool.QueryRow(ctx, sql, args...)
+	var a model.Alarm
+	var timeVal time.Time
+	var additionalJSON []byte
+	if err := row.Scan(
+		&timeVal,
+		&a.ID, &a.DeviceID, &a.DeviceSN, &a.Carrier, &a.Severity,
+		&a.AlarmType, &a.AlarmIdentifier, &a.Description, &a.Status, &a.RaisedAt,
+		&a.AcknowledgedAt, &a.ClearedAt, &a.AcknowledgedBy, &a.AckNote,
+		&additionalJSON,
+		&a.DeviceName, &a.Technology, &a.AlarmSource, &a.EventType,
+		&a.AckCount, &a.UpdatedAt,
+		&a.ClearedBy, &a.ClearNote,
+		&a.ProbableCause,
+	); err != nil {
+		if gerr.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("history alarm not found: %w", commonerrors.ErrNotFound)
+		}
+		return nil, fmt.Errorf("scan history alarm: %w", err)
+	}
+	if len(additionalJSON) > 0 {
+		_ = json.Unmarshal(additionalJSON, &a.AdditionalInfo)
+	}
+	return &a, nil
 }
 
 func (s *PgAlarmStore) BatchAcknowledge(ctx context.Context, ids []uuid.UUID, by string, note string) error {

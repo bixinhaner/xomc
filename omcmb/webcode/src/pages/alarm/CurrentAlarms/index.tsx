@@ -4,6 +4,7 @@ import {
   CheckOutlined,
   ClearOutlined,
   ExportOutlined,
+  MoreOutlined,
   EyeOutlined,
   MinusCircleOutlined,
   SyncOutlined,
@@ -562,6 +563,41 @@ export default function CurrentAlarms() {
   const columns = useMemo(
     (): DataTableColumn<Alarm>[] => [
       {
+        key: 'actions',
+        title: t('common.operation'),
+        width: 72,
+        fixed: 'left',
+        render: (_val: unknown, record) => {
+          const isConfirmed = record.dealState === '1' || record.dealState === '3';
+          return (
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [
+                  { key: 'detail', label: t('common.detail') },
+                  { key: 'ack', label: t(isConfirmed ? 'alarm.unacknowledge' : 'alarm.acknowledge') },
+                  { key: 'clear', label: t('alarm.clear'), danger: true },
+                ],
+                onClick: ({ key, domEvent }) => {
+                  domEvent.stopPropagation();
+                  if (key === 'detail') handleShowDetail(record);
+                  if (key === 'ack') {
+                    if (isConfirmed) {
+                      handleUnacknowledge([record.id]);
+                    } else {
+                      handleAcknowledge([record.id]);
+                    }
+                  }
+                  if (key === 'clear') handleClear([record.id]);
+                },
+              }}
+            >
+              <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+            </Dropdown>
+          );
+        },
+      },
+      {
         key: 'deviceSn',
         title: t('alarm.deviceSn'),
         dataIndex: 'deviceSn',
@@ -569,14 +605,7 @@ export default function CurrentAlarms() {
         render: (val: unknown, record) => (
           <Space size={4}>
             {record.unread === '1' && <Badge status="error" style={{ marginLeft: -4 }} />}
-            <Button
-              type="link"
-              size="small"
-              style={{ padding: 0, height: 'auto' }}
-              onClick={() => handleShowDetail(record)}
-            >
-              {String(val ?? '')}
-            </Button>
+            <span>{String(val ?? '')}</span>
           </Space>
         ),
       },
@@ -686,7 +715,7 @@ export default function CurrentAlarms() {
         ellipsis: true,
       },
     ],
-    [t, SEVERITY_LABEL, handleShowDetail]
+    [t, SEVERITY_LABEL, handleAcknowledge, handleClear, handleShowDetail, handleUnacknowledge]
   );
 
   const batchActions = useMemo(

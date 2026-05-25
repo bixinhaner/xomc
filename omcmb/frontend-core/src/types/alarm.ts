@@ -43,6 +43,7 @@ export interface Alarm {
   // 后端直传字段
   probableCause?: string;
   additionalInfo?: Record<string, string>;
+  additionalText?: string;
   acknowledgedAt?: string;
   acknowledgedBy?: string;
   clearedAt?: string;

@@ -873,14 +873,17 @@ const messages: Record<string, string> = {
   // Alarm actions
   'alarm.filterAlarm':      'Filter Alarm',
   'alarm.filterAlarmConfirm': 'Confirm to filter selected alarms?',
+  'alarm.deleteAlarm':      'Delete Alarm',
+  'alarm.deleteConfirmMsg': 'Are you sure you want to delete the selected {count} alarms? This action cannot be undone.',
+  'alarm.historyClearConfirmMsg': 'Are you sure you want to clear the selected {count} historical alarms? This action cannot be undone.',
 
   // Alarm detail
   'alarm.basicInfo':        'Basic Info',
   'alarm.deviceInfo':       'Device Info',
   'alarm.statusAndTime':    'Status & Time',
   'alarm.handleInfo':       'Handle Info',
-  'alarm.additionalInfo':   'Additional Info',
-  'alarm.additionalText':   'Additional Text',
+  'alarm.additionalInfo':   'Extra Info',
+  'alarm.additionalText':   'Extra Text',
   'alarm.suggestion':       'Suggestion',
   'alarm.dealUser':         'Confirmed By',
   'alarm.dealTime':         'Confirmed At',

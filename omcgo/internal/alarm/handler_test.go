@@ -246,6 +246,38 @@ func TestHandler_GetByID_Found(t *testing.T) {
 	assert.Equal(t, alarm.AlarmIdentifier, got.AlarmIdentifier)
 }
 
+func TestHandler_GetByID_FallsBackToHistory(t *testing.T) {
+	_, store, _, router := setupHandlerTest()
+	now := time.Now()
+	historyAlarm := &model.Alarm{
+		ID:              uuid.New(),
+		DeviceID:        uuid.New(),
+		DeviceSN:        "SN-HISTORY-001",
+		Carrier:         model.CarrierCMCC,
+		Severity:        model.AlarmMajor,
+		AlarmType:       "equipment",
+		AlarmIdentifier: "ALM-HISTORY-001",
+		Status:          model.AlarmCleared,
+		RaisedAt:        now.Add(-time.Hour),
+		ClearedAt:       &now,
+		UpdatedAt:       now,
+		AdditionalInfo:  map[string]string{"additional_information": "slot=1", "additional_text": "LTE0"},
+	}
+	store.history = append(store.history, historyAlarm)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet,
+		fmt.Sprintf("/alarms/%s", historyAlarm.ID.String()), nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var got model.Alarm
+	response.DecodeData(t, w.Body, &got)
+	assert.Equal(t, historyAlarm.ID, got.ID)
+	assert.Equal(t, "slot=1", got.AdditionalInfo["additional_information"])
+}
+
 func TestHandler_GetByID_NotFound(t *testing.T) {
 	_, _, _, router := setupHandlerTest()
 

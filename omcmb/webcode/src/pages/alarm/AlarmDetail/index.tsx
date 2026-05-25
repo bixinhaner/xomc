@@ -9,6 +9,7 @@ import {
 import {
   UserOutlined,
 } from '@ant-design/icons';
+import { useAlarmById } from '@core/hooks/api/useAlarms';
 import type { Alarm, DealState, EventType } from '@core/types/alarm';
 import { useT } from '@/hooks/useT';
 import { formatBaseStationTypeLabel } from '../utils/baseStationType';
@@ -49,6 +50,8 @@ const EVENT_TYPE_CONFIG: Record<EventType, string> = {
 
 const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
   const t = useT();
+  const { data: fetchedAlarm } = useAlarmById(alarm?.id ?? '');
+  const resolvedAlarm = fetchedAlarm ?? alarm;
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
@@ -57,10 +60,17 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
     warning: t('alarm.severity.warning'),
   }), [t]);
 
+  const additionalInfoEntries = useMemo(
+    () => Object.entries(resolvedAlarm?.additionalInfo ?? {}).filter(
+      ([key]) => key !== 'additional_text' && key !== 'managed_object_instance' && key !== 'additional_information'
+    ),
+    [resolvedAlarm]
+  );
+
   // 判断是否已确认 (dealState 为 1 或 3)
-  const isConfirmed = alarm?.dealState === '1' || alarm?.dealState === '3';
+  const isConfirmed = resolvedAlarm?.dealState === '1' || resolvedAlarm?.dealState === '3';
   // 判断是否已清除 (dealState 为 2 或 3)
-  const isCleared = alarm?.dealState === '2' || alarm?.dealState === '3';
+  const isCleared = resolvedAlarm?.dealState === '2' || resolvedAlarm?.dealState === '3';
 
   // 格式化时间
   const formatTime = (time?: string) => {
@@ -68,7 +78,7 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
     return new Date(String(time)).toLocaleString('zh-CN');
   };
 
-  if (!alarm) {
+  if (!resolvedAlarm) {
     return (
       <Drawer title={t('alarm.detail')} open={open} onClose={onClose} width={600}>
         <div style={{ padding: '40px 0', textAlign: 'center', color: '#8c8c8c' }}>
@@ -78,7 +88,9 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
     );
   }
 
-  const severityConfig = SEVERITY_CONFIG[alarm.severity] || SEVERITY_CONFIG.warning;
+  const severityConfig = SEVERITY_CONFIG[resolvedAlarm.severity] || SEVERITY_CONFIG.warning;
+  const additionalText = resolvedAlarm.additionalText || resolvedAlarm.additionalInfo?.additional_text;
+  const additionalInformation = resolvedAlarm.additionalInfo?.additional_information;
 
   return (
     <Drawer
@@ -91,9 +103,9 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
               border: 'none',
             }}
           >
-            {SEVERITY_LABEL[alarm.severity] ?? alarm.severity}
+            {SEVERITY_LABEL[resolvedAlarm.severity] ?? resolvedAlarm.severity}
           </Tag>
-          <span>{alarm.alarmIdentifier || t('alarm.detail')}</span>
+          <span>{resolvedAlarm.alarmIdentifier || t('alarm.detail')}</span>
         </Space>
       }
       open={open}
@@ -113,19 +125,19 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
           <Descriptions column={1} size="small" bordered>
             {/* 1. 序号 */}
             <Descriptions.Item label={t('alarm.alarmId')}>
-              <Text style={{ fontFamily: 'monospace', fontWeight: 600 }}>{alarm.id}</Text>
+              <Text style={{ fontFamily: 'monospace', fontWeight: 600 }}>{resolvedAlarm.id}</Text>
             </Descriptions.Item>
             {/* 2. 告警编码 */}
             <Descriptions.Item label={t('alarm.alarmIdentifier')}>
-              <Text style={{ fontFamily: 'monospace' }}>{alarm.alarmIdentifier}</Text>
+              <Text style={{ fontFamily: 'monospace' }}>{resolvedAlarm.alarmIdentifier}</Text>
             </Descriptions.Item>
             {/* 3. 可能原因 */}
             <Descriptions.Item label={t('alarm.possibleCause')}>
-              {alarm.probableCause || '-'}
+              {resolvedAlarm.probableCause || '-'}
             </Descriptions.Item>
             {/* 4. 具体故障 */}
             <Descriptions.Item label={t('alarm.specificProblem')}>
-              {alarm.description || '-'}
+              {resolvedAlarm.description || '-'}
             </Descriptions.Item>
             {/* 5. 严重程度 */}
             <Descriptions.Item label={t('alarm.severity')}>
@@ -136,12 +148,12 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
                   border: 'none',
                 }}
               >
-                {SEVERITY_LABEL[alarm.severity] ?? alarm.severity}
+                {SEVERITY_LABEL[resolvedAlarm.severity] ?? resolvedAlarm.severity}
               </Tag>
             </Descriptions.Item>
             {/* 6. 事件类型 */}
             <Descriptions.Item label={t('alarm.eventType')}>
-              {t(EVENT_TYPE_CONFIG[alarm.eventType] || 'common.unknown')}
+              {t(EVENT_TYPE_CONFIG[resolvedAlarm.eventType] || 'common.unknown')}
             </Descriptions.Item>
           </Descriptions>
         </section>
@@ -156,13 +168,18 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
             {t('alarm.deviceInfo')}
           </Text>
           <Descriptions column={1} size="small" bordered>
+            <Descriptions.Item label={t('alarm.deviceSn')}>
+              <Text style={{ fontFamily: 'monospace' }}>{resolvedAlarm.deviceSn || '-'}</Text>
+            </Descriptions.Item>
+            <Descriptions.Item label={t('alarm.deviceName')}>
+              {resolvedAlarm.deviceName || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label={t('alarm.equipInfo')}>
+              {resolvedAlarm.equipInfo || '-'}
+            </Descriptions.Item>
             {/* 9. 告警源 */}
             <Descriptions.Item label={t('alarm.neTypeCol')}>
-              {formatBaseStationTypeLabel(alarm.neType)}
-            </Descriptions.Item>
-            {/* 10. SN */}
-            <Descriptions.Item label={t('alarm.deviceSn')}>
-              {alarm.equipInfo}
+              {formatBaseStationTypeLabel(resolvedAlarm.neType)}
             </Descriptions.Item>
           </Descriptions>
         </section>
@@ -179,31 +196,31 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
           <Descriptions column={1} size="small" bordered>
             {/* 11. 告警状态 */}
             <Descriptions.Item label={t('alarm.dealState')}>
-              <span style={{ color: DEAL_STATE_CONFIG[alarm.dealState]?.color || '#666' }}>
-                {t(DEAL_STATE_CONFIG[alarm.dealState]?.label || 'common.unknown')}
+              <span style={{ color: DEAL_STATE_CONFIG[resolvedAlarm.dealState]?.color || '#666' }}>
+                {t(DEAL_STATE_CONFIG[resolvedAlarm.dealState]?.label || 'common.unknown')}
               </span>
             </Descriptions.Item>
             {/* 12. 故障时间 */}
             <Descriptions.Item label={t('alarm.eventTime')}>
-              {formatTime(alarm.eventTime)}
+              {formatTime(resolvedAlarm.eventTime)}
             </Descriptions.Item>
             {/* 13. 更新时间 */}
             <Descriptions.Item label={t('alarm.updTime')}>
-              {formatTime(alarm.updTime)}
+              {formatTime(resolvedAlarm.updTime)}
             </Descriptions.Item>
             {/* 14. 确认人 - 已确认时显示 */}
             {isConfirmed && (
               <Descriptions.Item label={t('alarm.dealUser')}>
                 <Space>
                   <UserOutlined />
-                  {alarm.dealUser || '-'}
+                  {resolvedAlarm.dealUser || '-'}
                 </Space>
               </Descriptions.Item>
             )}
             {/* 15. 确认时间 - 已确认时显示 */}
             {isConfirmed && (
               <Descriptions.Item label={t('alarm.dealTime')}>
-                {formatTime(alarm.dealTime)}
+                {formatTime(resolvedAlarm.dealTime)}
               </Descriptions.Item>
             )}
             {/* 16. 告警清除人 - 已清除时显示 */}
@@ -211,14 +228,14 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
               <Descriptions.Item label={t('alarm.clearUser')}>
                 <Space>
                   <UserOutlined />
-                  {alarm.clearUser || '-'}
+                  {resolvedAlarm.clearUser || '-'}
                 </Space>
               </Descriptions.Item>
             )}
             {/* 17. 告警清除时间 - 已清除时显示 */}
             {isCleared && (
               <Descriptions.Item label={t('alarm.clearTime')}>
-                {formatTime(alarm.clearTime)}
+                {formatTime(resolvedAlarm.clearTime)}
               </Descriptions.Item>
             )}
           </Descriptions>
@@ -236,14 +253,44 @@ const AlarmDetail: React.FC<AlarmDetailProps> = ({ alarm, open, onClose }) => {
           <Descriptions column={1} size="small" bordered>
             {/* 确认描述 */}
             <Descriptions.Item label={t('alarm.dealMemo')}>
-              <Paragraph style={{ margin: 0 }}>{alarm.dealMemo || '-'}</Paragraph>
+              <Paragraph style={{ margin: 0 }}>{resolvedAlarm.dealMemo || '-'}</Paragraph>
             </Descriptions.Item>
             {/* 清除描述 */}
             {isCleared && (
               <Descriptions.Item label={t('alarm.clearMemo')}>
-                <Paragraph style={{ margin: 0 }}>{alarm.clearMemo || '-'}</Paragraph>
+                <Paragraph style={{ margin: 0 }}>{resolvedAlarm.clearMemo || '-'}</Paragraph>
               </Descriptions.Item>
             )}
+          </Descriptions>
+        </section>
+
+        <section>
+          <Text
+            type="secondary"
+            strong
+            style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 10 }}
+          >
+            {t('common.details')}
+          </Text>
+          <Descriptions column={1} size="small" bordered>
+            <Descriptions.Item label={t('alarm.additionalText')}>
+              <Paragraph style={{ margin: 0 }}>{additionalText || '-'}</Paragraph>
+            </Descriptions.Item>
+            <Descriptions.Item label={t('alarm.additionalInfo')}>
+              {additionalInformation || additionalInfoEntries.length > 0 ? (
+                <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                  {additionalInformation ? <Paragraph style={{ margin: 0 }}>{additionalInformation}</Paragraph> : null}
+                  {additionalInfoEntries.map(([key, value]) => (
+                    <div key={key} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                      <Text type="secondary" style={{ minWidth: 140, fontFamily: 'monospace' }}>{key}</Text>
+                      <Paragraph style={{ margin: 0, flex: 1 }}>{value || '-'}</Paragraph>
+                    </div>
+                  ))}
+                </Space>
+              ) : (
+                '-'
+              )}
+            </Descriptions.Item>
           </Descriptions>
         </section>
       </div>

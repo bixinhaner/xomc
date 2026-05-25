@@ -41,6 +41,9 @@ func (s *capturingStore) saved() []*model.Alarm {
 func (s *capturingStore) GetActiveByID(_ context.Context, _ uuid.UUID) (*model.Alarm, error) {
 	return nil, nil
 }
+func (s *capturingStore) GetHistoryByID(_ context.Context, _ uuid.UUID) (*model.Alarm, error) {
+	return nil, nil
+}
 func (s *capturingStore) GetActiveByDeviceAndCode(_ context.Context, _, _ string) (*model.Alarm, error) {
 	return nil, nil
 }

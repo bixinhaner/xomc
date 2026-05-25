@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTabStore } from '@core/store/tabStore';
@@ -9,6 +9,7 @@ import {
   Card,
   Col,
   Descriptions,
+  Dropdown,
   Radio,
   Row,
   Skeleton,
@@ -18,9 +19,11 @@ import {
   Tag,
   Typography,
   Alert,
+  App,
 } from 'antd';
 import {
   ArrowLeftOutlined,
+  MoreOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
@@ -29,13 +32,15 @@ import LineChart from '@/components/Charts/LineChart';
 import StatusIndicator from '@/components/StatusIndicator';
 import { useDeviceBySn } from '@core/hooks/api/useDevices';
 import { useQuickSettingsGroups } from '@core/hooks/api/useQuickSettings';
-import { useCurrentAlarms } from '@core/hooks/api/useAlarms';
+import { useAcknowledgeAlarms, useClearAlarms, useCurrentAlarms, useUnacknowledgeAlarms } from '@core/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 import type { Alarm } from '@core/types/alarm';
 import type { Device } from '@core/types/device';
 import ParameterTreeTab from './ParameterTreeTab';
 import QuickSettingsTab from './QuickSettingsTab';
 import LicenseParamsTab from './LicenseParamsTab';
+import AlarmDetail from '@/pages/alarm/AlarmDetail';
+import ConfirmWithNoteModal from '@/pages/alarm/components/ConfirmWithNoteModal';
 
 const { Title, Text } = Typography;
 
@@ -493,6 +498,7 @@ function KPITabContent({ device, t }: KPITabContentProps) {
 
 export default function DeviceDetail() {
   const t = useT();
+  const { modal, message } = App.useApp();
   const { sn = '' } = useParams<{ sn: string }>();
   const location = useLocation();
   const navigate = useNavigate();
@@ -589,15 +595,128 @@ export default function DeviceDetail() {
     none: t('alarm.severity.none'),
   }), [t]);
 
+  const [detailAlarm, setDetailAlarm] = useState<Alarm | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [ackTargetIds, setAckTargetIds] = useState<string[]>([]);
+  const [ackModalOpen, setAckModalOpen] = useState(false);
+  const [ackLoading, setAckLoading] = useState(false);
+  const [clearTargetIds, setClearTargetIds] = useState<string[]>([]);
+  const [clearModalOpen, setClearModalOpen] = useState(false);
+  const [clearLoading, setClearLoading] = useState(false);
+
+  const acknowledgeAlarms = useAcknowledgeAlarms();
+  const unacknowledgeAlarms = useUnacknowledgeAlarms();
+  const clearAlarms = useClearAlarms();
+
   const alarmParams = useMemo(
     () => ({ deviceSn: sn, page: 1, pageSize: 20 } as Parameters<typeof useCurrentAlarms>[0]),
     [sn]
   );
-  const { data: alarmData, isLoading: alarmsLoading } = useCurrentAlarms(alarmParams);
+  const { data: alarmData, isLoading: alarmsLoading, refetch: refetchAlarms } = useCurrentAlarms(alarmParams);
   const alarms: Alarm[] = alarmData?.items ?? [];
+
+  const handleShowAlarmDetail = useCallback((alarm: Alarm) => {
+    setDetailAlarm(alarm);
+    setDetailOpen(true);
+  }, []);
+
+  const handleCloseAlarmDetail = useCallback(() => {
+    setDetailOpen(false);
+    setDetailAlarm(null);
+  }, []);
+
+  const handleAcknowledgeAlarm = useCallback((ids: string[]) => {
+    setAckTargetIds(ids);
+    setAckModalOpen(true);
+  }, []);
+
+  const handleAcknowledgeConfirm = useCallback(async (note: string) => {
+    setAckLoading(true);
+    try {
+      await acknowledgeAlarms.mutateAsync({ ids: ackTargetIds, note });
+      setAckModalOpen(false);
+      await refetchAlarms();
+      void message.success(t('common.ackSuccess'));
+    } catch {
+      void message.error(t('common.ackFailed'));
+    } finally {
+      setAckLoading(false);
+    }
+  }, [ackTargetIds, acknowledgeAlarms, message, refetchAlarms, t]);
+
+  const handleUnacknowledgeAlarm = useCallback((ids: string[]) => {
+    modal.confirm({
+      title: t('alarm.unacknowledge'),
+      content: t('common.unackConfirmMsg', { count: ids.length }),
+      okText: t('common.confirm'),
+      onOk: async () => {
+        try {
+          await unacknowledgeAlarms.mutateAsync(ids);
+          await refetchAlarms();
+          void message.success(t('common.unackSuccess'));
+        } catch {
+          void message.error(t('common.unackFailed'));
+        }
+      },
+    });
+  }, [message, modal, refetchAlarms, t, unacknowledgeAlarms]);
+
+  const handleClearAlarm = useCallback((ids: string[]) => {
+    setClearTargetIds(ids);
+    setClearModalOpen(true);
+  }, []);
+
+  const handleClearConfirm = useCallback(async (note: string) => {
+    setClearLoading(true);
+    try {
+      await clearAlarms.mutateAsync({ ids: clearTargetIds, note });
+      setClearModalOpen(false);
+      await refetchAlarms();
+      void message.success(t('common.clearSuccess'));
+    } catch {
+      void message.error(t('common.clearFailed'));
+    } finally {
+      setClearLoading(false);
+    }
+  }, [clearAlarms, clearTargetIds, message, refetchAlarms, t]);
 
   const alarmColumns = useMemo(
     (): DataTableColumn<Alarm>[] => [
+      {
+        key: 'actions',
+        title: t('common.operation'),
+        width: 72,
+        fixed: 'left',
+        render: (_val, record) => {
+          const isConfirmed = record.dealState === '1' || record.dealState === '3';
+          return (
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [
+                  { key: 'detail', label: t('common.detail') },
+                  { key: 'ack', label: t(isConfirmed ? 'alarm.unacknowledge' : 'alarm.acknowledge') },
+                  { key: 'clear', label: t('alarm.clear'), danger: true },
+                ],
+                onClick: ({ key, domEvent }) => {
+                  domEvent.stopPropagation();
+                  if (key === 'detail') handleShowAlarmDetail(record);
+                  if (key === 'ack') {
+                    if (isConfirmed) {
+                      handleUnacknowledgeAlarm([record.id]);
+                    } else {
+                      handleAcknowledgeAlarm([record.id]);
+                    }
+                  }
+                  if (key === 'clear') handleClearAlarm([record.id]);
+                },
+              }}
+            >
+              <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+            </Dropdown>
+          );
+        },
+      },
       {
         key: 'severity',
         title: t('alarm.severity'),
@@ -631,7 +750,7 @@ export default function DeviceDetail() {
         ),
       },
     ],
-    [t, SEVERITY_LABEL]
+    [SEVERITY_LABEL, handleAcknowledgeAlarm, handleClearAlarm, handleShowAlarmDetail, handleUnacknowledgeAlarm, t]
   );
 
   // 根据设备制式获取字段组
@@ -788,6 +907,27 @@ export default function DeviceDetail() {
           ]}
         />
       </Card>
+
+      <AlarmDetail alarm={detailAlarm} open={detailOpen} onClose={handleCloseAlarmDetail} />
+      <ConfirmWithNoteModal
+        open={ackModalOpen}
+        title={t('alarm.acknowledge')}
+        message={t('common.ackConfirmMsg', { count: ackTargetIds.length })}
+        confirmText={t('alarm.acknowledge')}
+        loading={ackLoading}
+        onConfirm={handleAcknowledgeConfirm}
+        onCancel={() => setAckModalOpen(false)}
+      />
+      <ConfirmWithNoteModal
+        open={clearModalOpen}
+        title={t('alarm.clear')}
+        message={t('common.clearConfirmMsg', { count: clearTargetIds.length })}
+        confirmText={t('alarm.clear')}
+        confirmType="danger"
+        loading={clearLoading}
+        onConfirm={handleClearConfirm}
+        onCancel={() => setClearModalOpen(false)}
+      />
     </div>
   );
 }

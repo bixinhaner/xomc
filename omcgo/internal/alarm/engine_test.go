@@ -40,6 +40,15 @@ func (m *mockAlarmStore) GetActiveByID(_ context.Context, id uuid.UUID) (*model.
 	return a, nil
 }
 
+func (m *mockAlarmStore) GetHistoryByID(_ context.Context, id uuid.UUID) (*model.Alarm, error) {
+	for _, a := range m.history {
+		if a.ID == id {
+			return a, nil
+		}
+	}
+	return nil, fmt.Errorf("history alarm not found: %w", commonerrors.ErrNotFound)
+}
+
 func (m *mockAlarmStore) GetActiveByDeviceAndIdentifier(_ context.Context, deviceSN, alarmIdentifier string) (*model.Alarm, error) {
 	for _, a := range m.active {
 		if a.DeviceSN == deviceSN && a.AlarmIdentifier == alarmIdentifier && a.Status != model.AlarmCleared {

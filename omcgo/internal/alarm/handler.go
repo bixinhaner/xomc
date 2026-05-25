@@ -213,8 +213,11 @@ func (h *Handler) GetByID(c *gin.Context) {
 	}
 	alarm, err := h.store.GetActiveByID(c.Request.Context(), id)
 	if err != nil {
-		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
-		return
+		alarm, err = h.store.GetHistoryByID(c.Request.Context(), id)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+			return
+		}
 	}
 	response.OK(c, alarm)
 }

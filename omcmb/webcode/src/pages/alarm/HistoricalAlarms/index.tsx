@@ -1,9 +1,10 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Badge, Button, Card, Space, Tag, Typography, App } from 'antd';
+import { Badge, Button, Card, Dropdown, Space, Tag, Typography, App } from 'antd';
 import {
   CheckOutlined,
   DeleteOutlined,
   ExportOutlined,
+  MoreOutlined,
   MinusCircleOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
@@ -285,13 +286,13 @@ export default function HistoricalAlarms() {
     [unacknowledgeHistoryAlarms, t, message, modal]
   );
 
-  // 删除告警
+  // 删除历史告警
   const handleDelete = useCallback(
     (ids: string[]) => {
       modal.confirm({
         title: t('alarm.deleteAlarm'),
         content: t('alarm.deleteConfirmMsg', { count: ids.length }),
-        okText: t('common.delete'),
+        okText: t('alarm.deleteAlarm'),
         okType: 'danger',
         icon: <DeleteOutlined />,
         onOk: async () => {
@@ -482,6 +483,41 @@ export default function HistoricalAlarms() {
   const columns = useMemo(
     (): DataTableColumn<Alarm>[] => [
       {
+        key: 'actions',
+        title: t('common.operation'),
+        width: 72,
+        fixed: 'left',
+        render: (_val: unknown, record) => {
+          const isConfirmed = record.dealState === '1' || record.dealState === '3';
+          return (
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [
+                  { key: 'detail', label: t('common.detail') },
+                  { key: 'ack', label: t(isConfirmed ? 'alarm.unacknowledge' : 'alarm.acknowledge') },
+                  { key: 'delete', label: t('alarm.deleteAlarm'), danger: true },
+                ],
+                onClick: ({ key, domEvent }) => {
+                  domEvent.stopPropagation();
+                  if (key === 'detail') handleShowDetail(record);
+                  if (key === 'ack') {
+                    if (isConfirmed) {
+                      handleUnacknowledge([record.id]);
+                    } else {
+                      handleAcknowledge([record.id]);
+                    }
+                  }
+                  if (key === 'delete') handleDelete([record.id]);
+                },
+              }}
+            >
+              <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
+            </Dropdown>
+          );
+        },
+      },
+      {
         key: 'deviceSn',
         title: t('alarm.deviceSn'),
         dataIndex: 'deviceSn',
@@ -489,14 +525,7 @@ export default function HistoricalAlarms() {
         render: (val: unknown, record) => (
           <Space size={4}>
             {record.unread === '1' && <Badge status="error" style={{ marginLeft: -4 }} />}
-            <Button
-              type="link"
-              size="small"
-              style={{ padding: 0, height: 'auto' }}
-              onClick={() => handleShowDetail(record)}
-            >
-              {String(val ?? '')}
-            </Button>
+            <span>{String(val ?? '')}</span>
           </Space>
         ),
       },
@@ -613,7 +642,7 @@ export default function HistoricalAlarms() {
         ellipsis: true,
       },
     ],
-    [t, SEVERITY_LABEL, handleShowDetail]
+    [t, SEVERITY_LABEL, handleAcknowledge, handleDelete, handleShowDetail, handleUnacknowledge]
   );
 
   const batchActions = useMemo(

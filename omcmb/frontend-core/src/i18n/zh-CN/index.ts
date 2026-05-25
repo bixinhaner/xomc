@@ -876,14 +876,15 @@ const messages: Record<string, string> = {
   'alarm.filterAlarmConfirm': '确认过滤选中的告警？',
   'alarm.deleteAlarm':      '删除告警',
   'alarm.deleteConfirmMsg': '确定要删除选中的 {count} 条告警吗？此操作不可恢复。',
+  'alarm.historyClearConfirmMsg': '确定要删除选中的 {count} 条历史告警吗？此操作不可恢复。',
 
   // 告警详情页
   'alarm.basicInfo':        '基本信息',
   'alarm.deviceInfo':       '设备信息',
   'alarm.statusAndTime':    '状态与时间',
   'alarm.handleInfo':       '处理信息',
-  'alarm.additionalInfo':   '附件信息',
-  'alarm.additionalText':   '附件文本',
+  'alarm.additionalInfo':   '附加信息',
+  'alarm.additionalText':   '附加文本',
   'alarm.suggestion':       '处理建议',
   'alarm.dealUser':         '确认人',
   'alarm.dealTime':         '确认时间',

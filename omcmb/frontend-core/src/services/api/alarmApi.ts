@@ -189,6 +189,7 @@ function mapBackendAlarm(ba: BackendAlarm): Alarm {
     // 后端直传字段
     probableCause: ba.probable_cause,
     additionalInfo: ba.additional_info,
+    additionalText: ba.additional_info?.additional_text,
     acknowledgedAt: ba.acknowledged_at,
     acknowledgedBy: ba.acknowledged_by,
     clearedAt: ba.cleared_at,
