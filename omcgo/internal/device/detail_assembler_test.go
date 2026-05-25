@@ -42,6 +42,22 @@ func TestAssembleMMEPool_Empty(t *testing.T) {
 	assert.Empty(t, entries)
 }
 
+// TestAssembleMMEPool_MMEIp1Path verifies Phase 4 mapper fix —
+// Baicells BaiBLQ 等实际上报路径 `MmePoolConfigParam.{N}.MMEIp1` 被正确识别。
+// 设计文档 §3.3。
+func TestAssembleMMEPool_MMEIp1Path(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.1.MME1Status", ParameterValue: "1"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.1.MMEIp1", ParameterValue: "172.23.224.88"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.1.PLMNID", ParameterValue: "46068"},
+	}
+	entries := AssembleMMEPool(params)
+	assert.Len(t, entries, 1)
+	assert.Equal(t, "active", entries[0].Status)
+	assert.Equal(t, "172.23.224.88", entries[0].IP)
+	assert.Equal(t, "46068", entries[0].PLMNID)
+}
+
 func TestAssembleLicenseDetail(t *testing.T) {
 	params := []model.DeviceParameter{
 		{ParameterPath: "Device.DeviceInfo.X_COM_LICENSE.LicenseCode", ParameterValue: "ABC-123"},
@@ -64,6 +80,26 @@ func TestAssembleLicenseDetail(t *testing.T) {
 func TestAssembleLicenseDetail_Empty(t *testing.T) {
 	detail := AssembleLicenseDetail(nil)
 	assert.Nil(t, detail)
+}
+
+// TestAssembleLicenseDetail_ValueField verifies Phase 4 mapper fix —
+// Baicells 实际上报 Capacity.{N}.Value 字段（容量数值），不上报 State；
+// 此前 mapper 只取 State 导致 capacity 数据全空。设计文档 §3.3。
+func TestAssembleLicenseDetail_ValueField(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.X_COM_LICENSE.Capacity.1.Description", ParameterValue: "Max served UE num"},
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.X_COM_LICENSE.Capacity.1.Value", ParameterValue: "100"},
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.X_COM_LICENSE.Capacity.1.ValidPeriod", ParameterValue: "180"},
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.X_COM_LICENSE.Capacity.1.RemainingPeriod", ParameterValue: "0"},
+	}
+	detail := AssembleLicenseDetail(params)
+	assert.NotNil(t, detail)
+	assert.Len(t, detail.Capacities, 1)
+	assert.Equal(t, "Max served UE num", detail.Capacities[0].Description)
+	assert.Equal(t, "100", detail.Capacities[0].Value)
+	assert.Equal(t, "", detail.Capacities[0].State) // CPE 不上报 → 仍空
+	assert.Equal(t, 180, detail.Capacities[0].ValidPeriod)
+	assert.Equal(t, 0, detail.Capacities[0].RemainingPeriod)
 }
 
 func TestAssembleAntennaInfo(t *testing.T) {
@@ -118,6 +154,39 @@ func TestAssembleCells_SingleCell(t *testing.T) {
 	cells := AssembleCells(nil, 1)
 	assert.Len(t, cells, 1)
 	assert.Equal(t, 1, cells[0].Index)
+}
+
+// TestAssembleCells_FAPControlPaths verifies Phase 4 mapper fix —
+// 实际上报路径：
+//   - OpState 来自 `FAPControl.LTE.CellOpState`
+//   - RFTxStatus 来自 `FAPControl.LTE.RFTxStatus`（非 RAN.RF 子树）
+// 设计文档 §3.3。
+func TestAssembleCells_FAPControlPaths(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity", ParameterValue: "654321"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID", ParameterValue: "2"},
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.CellOpState", ParameterValue: "0"},
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", ParameterValue: "false"},
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.AdminState", ParameterValue: "false"},
+	}
+	cells := AssembleCells(params, 1)
+	assert.Len(t, cells, 1)
+	assert.Equal(t, "654321", cells[0].ECI)
+	assert.Equal(t, "2", cells[0].PCI)
+	assert.Equal(t, "0", cells[0].OpState)
+	assert.Equal(t, "false", cells[0].RFTxStatus)
+	assert.Equal(t, "false", cells[0].AdminState)
+}
+
+// TestAssembleCells_LegacyOpStatePath verifies backward compatibility —
+// 老路径 `FAPControl.LTE.OpState` 仍能命中（CellOpState 缺失时兜底）。
+func TestAssembleCells_LegacyOpStatePath(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.OpState", ParameterValue: "true"},
+	}
+	cells := AssembleCells(params, 1)
+	assert.Len(t, cells, 1)
+	assert.Equal(t, "true", cells[0].OpState)
 }
 
 func TestExtractIndexAndField(t *testing.T) {

@@ -30,10 +30,16 @@ type LicenseDetail struct {
 }
 
 // LicenseCapacity represents a single license capacity entry.
+//
+// 设计文档 §3.3 / §4.3：
+//   - State 字段在大多数 CPE（如 Baicells BaiBLQ）上**不上报**，恒为空
+//   - Value 字段是 CPE 实际上报的容量计数（例如 Max UE = 100）
+//   - 前端可优先展示 Value（容量值）；如需"状态文案"由后端按 RemainingPeriod 派生（>0 active / =0 expired）
 type LicenseCapacity struct {
 	Index           int    `json:"index"`
 	Description     string `json:"description"`
 	State           string `json:"state"`
+	Value           string `json:"value,omitempty"`
 	ValidPeriod     int    `json:"valid_period"`
 	RemainingPeriod int    `json:"remaining_period"`
 }

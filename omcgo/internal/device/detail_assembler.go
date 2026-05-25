@@ -30,7 +30,12 @@ func AssembleMMEPool(params []model.DeviceParameter) []MMEEntry {
 		switch {
 		case strings.HasSuffix(field, "MME1Status"):
 			grouped[idx].status = p.ParameterValue
-		case strings.HasSuffix(field, "MME1Address") || strings.HasSuffix(field, "MME1IP"):
+		// MMEIp1 / MMEIp2: Baicells BaiBLQ 等设备实际上报路径
+		//   Device.Services.FAPService.1.CellConfig.LTE.MmePoolConfigParam.{N}.MMEIp1
+		// MME1Address / MME1IP: 部分设备/早期固件使用的路径（保留向后兼容）
+		case strings.HasSuffix(field, "MMEIp1") ||
+			strings.HasSuffix(field, "MME1Address") ||
+			strings.HasSuffix(field, "MME1IP"):
 			grouped[idx].ip = p.ParameterValue
 		case strings.HasSuffix(field, "PLMNID"):
 			grouped[idx].plmnID = p.ParameterValue
@@ -90,6 +95,11 @@ func AssembleLicenseDetail(params []model.DeviceParameter) *LicenseDetail {
 			cap.Description = p.ParameterValue
 		case strings.HasSuffix(field, "State"):
 			cap.State = p.ParameterValue
+		// Baicells BaiBLQ 等设备实际上报 Capacity.{N}.Value 字段（容量数值），
+		// 不上报 State；前端凭 RemainingPeriod>0 派生 active/expired 文案。
+		// 设计文档 §3.3。
+		case strings.HasSuffix(field, "Value"):
+			cap.Value = p.ParameterValue
 		case strings.HasSuffix(field, "ValidPeriod"):
 			cap.ValidPeriod, _ = strconv.Atoi(p.ParameterValue)
 		case strings.HasSuffix(field, "RemainingPeriod"):
@@ -186,14 +196,30 @@ func AssembleCells(params []model.DeviceParameter, numOfCells int) []CellInfo {
 			cell.Bandwidth = paramMap[nrPrefix+"RAN.RF.ChannelBandwidth"]
 		}
 
-		// OpState
-		cell.OpState = paramMap[ctrlPrefix+"LTE.OpState"]
+		// OpState — Baicells 等 BaiBLQ 设备实际上报 CellOpState（FAPControl 子树）
+		// 老 OpState 后缀保留作为向后兼容（部分设备/早期固件可能仅有 OpState）
+		// 设计文档 §3.3。
+		cell.OpState = paramMap[ctrlPrefix+"LTE.CellOpState"]
+		if cell.OpState == "" {
+			cell.OpState = paramMap[ctrlPrefix+"LTE.OpState"]
+		}
+		if cell.OpState == "" {
+			cell.OpState = paramMap[ctrlPrefix+"NR.CellOpState"]
+		}
 		if cell.OpState == "" {
 			cell.OpState = paramMap[ctrlPrefix+"NR.OpState"]
 		}
 
-		// RFTxStatus
-		cell.RFTxStatus = paramMap[ltePrefix+"RAN.RF.RFTxStatus"]
+		// RFTxStatus — 实际位于 FAPControl 子树（非 RAN.RF）
+		// 设计文档 §3.3。
+		cell.RFTxStatus = paramMap[ctrlPrefix+"LTE.RFTxStatus"]
+		if cell.RFTxStatus == "" {
+			cell.RFTxStatus = paramMap[ctrlPrefix+"NR.RFTxStatus"]
+		}
+		if cell.RFTxStatus == "" {
+			// 老路径兜底（保留兼容）
+			cell.RFTxStatus = paramMap[ltePrefix+"RAN.RF.RFTxStatus"]
+		}
 		if cell.RFTxStatus == "" {
 			cell.RFTxStatus = paramMap[nrPrefix+"RAN.RF.RFTxStatus"]
 		}
