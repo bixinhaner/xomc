@@ -3,6 +3,7 @@ package device
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -160,6 +161,29 @@ func (r *PgDeviceInfoRepository) UpdateSyncFields(ctx context.Context, deviceID 
 		return fmt.Errorf("update device_info sync fields: %w", err)
 	}
 	return nil
+}
+
+// GetTopologyAttributes returns lac / tac for a device. NULL or empty cells
+// are omitted from the map so callers can use `_, ok := m[col]` to detect
+// "this column had no value before".
+func (r *PgDeviceInfoRepository) GetTopologyAttributes(ctx context.Context, deviceID uuid.UUID) (map[string]string, error) {
+	const sqlText = `SELECT lac, tac FROM device_info WHERE device_id = $1`
+	var lac, tac *string
+	if err := r.pool.QueryRow(ctx, sqlText, deviceID).Scan(&lac, &tac); err != nil {
+		// 设备无 device_info 行（新设备首次 sync 之前）—— 不算错误，返回空 map
+		if errors.Is(err, pgx.ErrNoRows) {
+			return map[string]string{}, nil
+		}
+		return nil, fmt.Errorf("query topology attributes: %w", err)
+	}
+	out := make(map[string]string, 2)
+	if lac != nil && *lac != "" {
+		out["lac"] = *lac
+	}
+	if tac != nil && *tac != "" {
+		out["tac"] = *tac
+	}
+	return out, nil
 }
 
 func (r *PgDeviceInfoRepository) ListDevicesWithInfo(ctx context.Context, filter DeviceFilter) (*model.ListResponse[DeviceWithInfo], error) {

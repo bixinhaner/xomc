@@ -26,6 +26,20 @@ func (f *fakeLister) ListAllForRuleEval(_ context.Context) ([]DeviceForMatch, er
 	return f.devices, f.err
 }
 
+// GetByID 在 devices 切片里线性扫，无命中返 (nil, nil)。供 device.attributes.changed
+// 单设备订阅路径的单测覆盖。
+func (f *fakeLister) GetByID(_ context.Context, deviceID uuid.UUID) (*DeviceForMatch, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	for i := range f.devices {
+		if f.devices[i].ID == deviceID {
+			return &f.devices[i], nil
+		}
+	}
+	return nil, nil
+}
+
 func newEngineWithMocks(t *testing.T) (*GroupMatchEngine, *MockDeviceGroupRepository, *fakeLister, *gomock.Controller) {
 	ctrl := gomock.NewController(t)
 	repo := NewMockDeviceGroupRepository(ctrl)

@@ -31,8 +31,9 @@ type GroupMatchEngine struct {
 	eventBus  event.EventBus
 	logger    *zap.Logger
 
-	cron *cron.Cron
-	sub  event.Subscription
+	cron     *cron.Cron
+	sub      event.Subscription // device.registered
+	subAttrs event.Subscription // device.attributes.changed
 }
 
 // NewGroupMatchEngine 构造分组匹配引擎。
@@ -129,6 +130,51 @@ func (e *GroupMatchEngine) handleDeviceRegistered(ctx context.Context, evt event
 	return err
 }
 
+// handleAttributesChanged 处理 device.attributes.changed 事件 —— LAC/TAC 实时归组。
+//
+// device.registered 仅在首次注册触发且不带 LAC/TAC；后续 Inform 写入 device_info
+// 后由 device.DeviceService.PublishDeviceAttributesChangedEvent 发本事件。Payload 只
+// 带 device_id + serial_number + changed_fields，订阅方自己从 lister 读最新 LAC/TAC
+// 当前值（让数据源始终是 DB，避免事件传递中状态不一致）。
+//
+// 设备已被 ACS 删除（事件到达时 lister 找不到）时安全 no-op。
+func (e *GroupMatchEngine) handleAttributesChanged(ctx context.Context, evt event.Event) error {
+	var payload struct {
+		DeviceID      uuid.UUID `json:"device_id"`
+		SerialNumber  string    `json:"serial_number"`
+		ChangedFields []string  `json:"changed_fields"`
+	}
+	if err := evt.DecodePayload(&payload); err != nil {
+		return fmt.Errorf("decode device.attributes.changed payload: %w", err)
+	}
+	if payload.DeviceID == uuid.Nil {
+		return fmt.Errorf("device.attributes.changed payload missing device_id")
+	}
+	d, err := e.lister.GetByID(ctx, payload.DeviceID)
+	if err != nil {
+		return fmt.Errorf("get device for match: %w", err)
+	}
+	if d == nil {
+		e.logger.Debug("device.attributes.changed: device gone before re-match",
+			zap.String("device_id", payload.DeviceID.String()))
+		return nil
+	}
+	_, err = e.matcher.AssignDeviceToGroup(ctx, MatchRequest{
+		DeviceID:     d.ID,
+		DeviceName:   d.Name,
+		SerialNumber: d.SerialNumber,
+		LAC:          d.LAC,
+		TAC:          d.TAC,
+	})
+	if err != nil {
+		return fmt.Errorf("assign device to group after attrs changed: %w", err)
+	}
+	e.logger.Info("device.attributes.changed re-matched",
+		zap.String("device_id", payload.DeviceID.String()),
+		zap.Strings("changed_fields", payload.ChangedFields))
+	return nil
+}
+
 // Start 装配 cron @hourly 全量重评估 + device.registered 订阅。幂等。
 func (e *GroupMatchEngine) Start(ctx context.Context) error {
 	if e.cron == nil {
@@ -159,6 +205,21 @@ func (e *GroupMatchEngine) Start(ctx context.Context) error {
 		e.logger.Info("group match subscribed device.registered",
 			zap.String("queue", "topology-group-match"))
 	}
+	if e.eventBus != nil && e.subAttrs == nil {
+		sub, err := e.eventBus.QueueSubscribe(
+			event.SubjectDeviceAttributesChanged,
+			"topology-group-match-attrs", // 独立 queue group，与 registered 分流
+			func(ctx context.Context, evt event.Event) error {
+				return e.handleAttributesChanged(ctx, evt)
+			},
+		)
+		if err != nil {
+			return fmt.Errorf("subscribe device.attributes.changed: %w", err)
+		}
+		e.subAttrs = sub
+		e.logger.Info("group match subscribed device.attributes.changed",
+			zap.String("queue", "topology-group-match-attrs"))
+	}
 	return nil
 }
 
@@ -167,6 +228,10 @@ func (e *GroupMatchEngine) Stop() {
 	if e.sub != nil {
 		_ = e.sub.Unsubscribe()
 		e.sub = nil
+	}
+	if e.subAttrs != nil {
+		_ = e.subAttrs.Unsubscribe()
+		e.subAttrs = nil
 	}
 	if e.cron != nil {
 		c := e.cron.Stop()

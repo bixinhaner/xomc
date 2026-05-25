@@ -587,6 +587,21 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		zap.Int("param_count", len(inform.ParameterList)))
 	s.storeInformParameters(ctx, device.ID, inform.ParameterList)
 
+	// 新设备 device_info 行已在 CreateDeviceInfo 创建（空字段）。这里立刻 sync 一遍把
+	// 首次 Inform 携带的 LAC/TAC 等关键字段写入，让按 LAC/TAC 匹配的分组规则在首次
+	// 注册就能命中，而不必等下一次周期 Inform。NULL→有值 也算变化，会触发
+	// device.attributes.changed 事件 → GroupMatchEngine 异步归组。
+	if s.infoSyncer != nil {
+		changedAttrs, err := s.infoSyncer.SyncFromParameters(ctx, device.ID, device.Carrier, device.Technology)
+		if err != nil {
+			s.logger.Warn("RegisterFromInform: sync device info from parameters",
+				zap.String("device_id", device.ID.String()),
+				zap.Error(err))
+		} else if len(changedAttrs) > 0 {
+			s.PublishDeviceAttributesChangedEvent(ctx, device, changedAttrs)
+		}
+	}
+
 	// Refresh heartbeat
 	if s.heartbeat != nil {
 		s.heartbeat.RefreshHeartbeat(ctx, device.SerialNumber, device.InformInterval)
@@ -732,12 +747,17 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	// Store parameters
 	s.storeInformParameters(ctx, device.ID, inform.ParameterList)
 
-	// Sync key parameters to device_info for fast query access
+	// Sync key parameters to device_info for fast query access.
+	// 同时拿到 topology 关键列（LAC/TAC）的变化集，若非空发 device.attributes.changed
+	// 让 GroupMatchEngine 异步重匹配该设备，避免等 @hourly cron 兜底。
 	if s.infoSyncer != nil {
-		if err := s.infoSyncer.SyncFromParameters(ctx, device.ID, device.Carrier, device.Technology); err != nil {
+		changedAttrs, err := s.infoSyncer.SyncFromParameters(ctx, device.ID, device.Carrier, device.Technology)
+		if err != nil {
 			s.logger.Warn("sync device info from parameters",
 				zap.String("device_id", device.ID.String()),
 				zap.Error(err))
+		} else if len(changedAttrs) > 0 {
+			s.PublishDeviceAttributesChangedEvent(ctx, device, changedAttrs)
 		}
 	}
 
@@ -1076,6 +1096,48 @@ func (s *DeviceService) PublishDeviceOnlineEvent(ctx context.Context, device *mo
 	s.logger.Info("device.online published",
 		zap.String("device_id", device.ID.String()),
 		zap.String("serial_number", device.SerialNumber),
+	)
+}
+
+// DeviceAttributesChangedEvent — 设备分组关键属性 (LAC/TAC) 实际变化时载荷。
+// 详见 event.SubjectDeviceAttributesChanged 的发布/订阅说明。
+//
+// 订阅者（topology.GroupMatchEngine）拿到事件后会自己从 device_info 表
+// 重新读 LAC/TAC 当前值再做匹配 —— 载荷里只带 device_id + serial_number
+// 即可，避免把 *string 字段反复序列化又得在 receiver 重新解析。
+type DeviceAttributesChangedEvent struct {
+	DeviceID      uuid.UUID `json:"device_id"`
+	SerialNumber  string    `json:"serial_number"`
+	ChangedFields []string  `json:"changed_fields"`
+}
+
+// PublishDeviceAttributesChangedEvent 在 SyncFromParameters 检测到 device_info
+// 拓扑关键列（LAC/TAC 等）实际变化后被调用，触发 GroupMatchEngine 异步重匹配。
+// EventBus nil / Publish 失败均仅 log Warn，不阻塞 Inform 主流程。
+func (s *DeviceService) PublishDeviceAttributesChangedEvent(ctx context.Context, device *model.Device, changedFields []string) {
+	if s.eventBus == nil || len(changedFields) == 0 {
+		return
+	}
+	payload := DeviceAttributesChangedEvent{
+		DeviceID:      device.ID,
+		SerialNumber:  device.SerialNumber,
+		ChangedFields: changedFields,
+	}
+	evt, err := event.NewEvent(event.SubjectDeviceAttributesChanged, payload)
+	if err != nil {
+		s.logger.Error("create device.attributes.changed event", zap.Error(err),
+			zap.String("device_id", device.ID.String()))
+		return
+	}
+	if err := s.eventBus.Publish(ctx, event.SubjectDeviceAttributesChanged, evt); err != nil {
+		s.logger.Warn("publish device.attributes.changed event", zap.Error(err),
+			zap.String("device_id", device.ID.String()))
+		return
+	}
+	s.logger.Info("device.attributes.changed published",
+		zap.String("device_id", device.ID.String()),
+		zap.String("serial_number", device.SerialNumber),
+		zap.Strings("changed_fields", changedFields),
 	)
 }
 

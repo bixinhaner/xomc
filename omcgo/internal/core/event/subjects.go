@@ -65,6 +65,25 @@ const (
 	// 发布者：device.Service.RegisterDevice，订阅者：provision.Engine（触发自动开站流程）
 	SubjectDeviceRegistered = "device.registered"
 
+	// SubjectDeviceAttributesChanged 是设备分组关键属性（LAC/TAC 等）在 Inform
+	// 回写时实际变化后发布。
+	//
+	// 背景：device_groups 支持按 LAC/TAC/SerialNumber/DeviceName 匹配，但
+	// device.registered 只携带 device_id + serial_number，且仅在首次注册触发；
+	// 周期 Inform 写入 device_info.lac/tac 之后若不另发事件，分组匹配必须等
+	// @hourly cron 兜底，最坏 60 分钟漂移。
+	//
+	// 发布者：device.DeviceService.UpdateFromInform / RegisterFromInform —— 解析
+	// Inform ParameterList 拿到 LAC/TAC，与旧值 diff 后**只在实际变化时 publish**
+	// （首次从 NULL 变成有值也算变化）。空值不覆盖已有，无变化不 publish 避免
+	// 在 10w 设备 / 5min Inform 周期下产生 333 events/秒 风暴。
+	//
+	// 订阅者：topology.GroupMatchEngine.handleAttributesChanged —— 调
+	// AssignDeviceToGroup(MatchRequest{device_id, sn, lac, tac}) 单设备瞬时归组。
+	//
+	// Payload：{ device_id, serial_number, lac, tac, changed_fields }
+	SubjectDeviceAttributesChanged = "device.attributes.changed"
+
 	// SubjectDeviceOffline 是已存在设备状态由 active 跌为 offline 时发布。
 	// 发布者：device.OfflineDetector（last_inform_at 超阈值时扫描标记）；
 	// 订阅者：暂无（保留为通用基础设施事件）。

@@ -71,6 +71,9 @@ var universalInformMapping = map[string]string{
 	"Device.Services.FAPService.1.Capabilities.MaxTxPower": "transmit_power",
 	// LTE 小区配置（device_info 表 Phase 2 新增列）
 	"Device.Services.FAPService.1.CellConfig.LTE.EPC.TAC":                  "tac",
+	// GSM 位置区码：补全 device_groups LAC 匹配模式所需的设备侧数据源（T-2026-05-25）。
+	// 与 TAC 平行，CPE 同时上报时 LAC 多见于双模 / GSM 设备。
+	"Device.DeviceInfo.BTS.CurrentLac":                                     "lac",
 	"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.FreqBandIndicator": "band",
 	"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.EARFCNUL":          "ul_earfcn",
 	"Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment":    "subframe_assignment",
@@ -168,23 +171,36 @@ func NewInfoSyncer(
 	}
 }
 
+// topologyAttributeColumns 列出会触发 device_groups 重匹配的 device_info 列。
+// 当 SyncFromParameters 检测到这些列的实际值变化时，会把列名追加到返回的
+// changedAttrs 切片中，由调用方决定是否 publish device.attributes.changed。
+//
+// 当前只覆盖 LAC / TAC（GroupMatchEngine 已支持的两种位置区匹配模式）。
+// 后续若 device_groups 新增按其它属性匹配（如 PLMN / Band），把列名加进来即可。
+var topologyAttributeColumns = []string{"lac", "tac"}
+
 // SyncFromParameters reads the device's stored TR069 parameters and updates
 // the corresponding device_info columns based on the carrier's mapping.
-func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID, carrierCode model.CarrierCode, tech model.Technology) error {
+//
+// 返回 changedAttrs：本次 sync 中 topologyAttributeColumns 列出的列**实际从旧值
+// 变成了不同的新值**（NULL→有值 / 有值→不同新值 / 有值→NULL 全算变化）的列名
+// 列表。调用方据此决定是否发 device.attributes.changed 事件触发分组重匹配。
+// 当 sync 不涉及这些列、或值未变时，返回 nil（避免事件风暴）。
+func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID, carrierCode model.CarrierCode, tech model.Technology) ([]string, error) {
 	c, err := s.carrierRegistry.Get(carrierCode)
 	if err != nil {
-		return fmt.Errorf("get carrier adapter: %w", err)
+		return nil, fmt.Errorf("get carrier adapter: %w", err)
 	}
 
 	mapping := c.GetInfoParamMapping(tech)
 	if len(mapping) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Get all parameters for this device
 	params, err := s.paramRepo.GetByDevice(ctx, deviceID)
 	if err != nil {
-		return fmt.Errorf("get device parameters: %w", err)
+		return nil, fmt.Errorf("get device parameters: %w", err)
 	}
 
 	// Build a lookup map: path → value
@@ -248,19 +264,54 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 	}
 
 	if len(fields) == 0 {
-		return nil
+		return nil, nil
+	}
+
+	// Topology diff：在 UPDATE 之前 SELECT 一次当前 LAC/TAC 旧值，与新 fields 对比，
+	// 决定调用方是否要 publish device.attributes.changed。读 SELECT 只在 fields 真
+	// 含 LAC/TAC 时跑，避免给纯指标列同步路径增加无用 IO。
+	var changedAttrs []string
+	if anyKey(fields, topologyAttributeColumns) {
+		oldAttrs, err := s.infoRepo.GetTopologyAttributes(ctx, deviceID)
+		if err != nil {
+			s.logger.Warn("read old topology attributes failed; will skip change-event publish",
+				zap.String("device_id", deviceID.String()),
+				zap.Error(err))
+		} else {
+			for _, col := range topologyAttributeColumns {
+				newVal, hasNew := fields[col].(string)
+				oldVal, hasOld := oldAttrs[col]
+				switch {
+				case hasNew && hasOld && newVal != oldVal:
+					changedAttrs = append(changedAttrs, col)
+				case hasNew && !hasOld:
+					changedAttrs = append(changedAttrs, col)
+				}
+			}
+		}
 	}
 
 	if err := s.infoRepo.UpdateSyncFields(ctx, deviceID, fields); err != nil {
-		return fmt.Errorf("update device info sync fields: %w", err)
+		return nil, fmt.Errorf("update device info sync fields: %w", err)
 	}
 
 	s.logger.Debug("synced device info from parameters",
 		zap.String("device_id", deviceID.String()),
 		zap.Int("fields_synced", len(fields)),
+		zap.Strings("topology_changed", changedAttrs),
 	)
 
-	return nil
+	return changedAttrs, nil
+}
+
+// anyKey reports whether m contains any of the given keys.
+func anyKey(m map[string]interface{}, keys []string) bool {
+	for _, k := range keys {
+		if _, ok := m[k]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // RecordOffline updates the last_offline_time when a device goes offline.
