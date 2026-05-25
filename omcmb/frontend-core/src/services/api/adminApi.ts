@@ -110,6 +110,13 @@ export interface DictDetailListResponse {
   total: number;
 }
 
+// 批量字典查询响应类型
+export interface DictBatchResponse {
+  [code: string]: {
+    sysDictionaryDetails?: DictionaryDetail[];
+  } | undefined;
+}
+
 interface BackendDictionary {
   id: number;
   name: string;
@@ -958,6 +965,18 @@ export const adminApi = {
     const dict = mapBackendDictionary(data);
     dict.sysDictionaryDetails = (data.sysDictionaryDetails || []).map(mapBackendDictionaryDetail);
     return dict;
+  },
+
+  // ---- Batch dictionary queries ----
+  // 批量获取字典数据，减少 HTTP 请求次数（性能优化）
+  async batchGetDicts(codes: string[]): Promise<DictBatchResponse> {
+    if (codes.length === 0) {
+      return {};
+    }
+    const { data } = await http.get<{ dicts: DictBatchResponse }>('/admin/sysDictionary/batch', {
+      params: { codes: codes.join(',') }
+    });
+    return data.dicts;
   },
 
   // API 权限

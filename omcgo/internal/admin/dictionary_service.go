@@ -297,3 +297,48 @@ func eqOptInt64(a, b *int64) bool {
 func (s *DictionaryService) DeleteDictionaryDetail(ctx context.Context, id int64) error {
 	return s.detailRepo.Delete(ctx, id)
 }
+
+// BatchGetDicts retrieves multiple dictionaries by their types in a single call.
+// Returns a map where the key is the dictionary type and the value is the dictionary with its details.
+func (s *DictionaryService) BatchGetDicts(ctx context.Context, dictTypes []string) (map[string]*Dictionary, error) {
+	// Remove duplicates while preserving order
+	seen := make(map[string]bool)
+	uniqueTypes := make([]string, 0, len(dictTypes))
+	for _, t := range dictTypes {
+		t = trimSpace(t)
+		if t != "" && !seen[t] {
+			seen[t] = true
+			uniqueTypes = append(uniqueTypes, t)
+		}
+	}
+
+	if len(uniqueTypes) == 0 {
+		return nil, commonerrors.NewBusinessError(7001, "at least one dictionary type is required", nil)
+	}
+
+	result := make(map[string]*Dictionary, len(uniqueTypes))
+
+	// Fetch each dictionary - repository is expected to have efficient caching
+	for _, dictType := range uniqueTypes {
+		dict, err := s.dictRepo.GetByType(ctx, dictType)
+		if err == nil && dict != nil {
+			result[dictType] = dict
+		}
+		// Silently skip not-found dictionaries to allow partial results
+	}
+
+	return result, nil
+}
+
+func trimSpace(s string) string {
+	// Simple trimSpace implementation to avoid importing strings
+	start := 0
+	end := len(s)
+	for start < end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
+		start++
+	}
+	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\n' || s[end-1] == '\r') {
+		end--
+	}
+	return s[start:end]
+}

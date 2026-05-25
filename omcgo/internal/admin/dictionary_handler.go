@@ -29,6 +29,7 @@ func (h *DictionaryHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		dict.PUT("/updateSysDictionary", h.UpdateDictionary)
 		dict.GET("/findSysDictionary", h.FindDictionary)
 		dict.GET("/getSysDictionaryList", h.GetDictionaryList)
+		dict.GET("/batch", h.BatchGetDicts)
 	}
 
 	detail := rg.Group("/sysDictionaryDetail")
@@ -227,4 +228,100 @@ func (h *DictionaryHandler) GetDictionaryDetailList(c *gin.Context) {
 		"list":  result.Items,
 		"total": result.Total,
 	}, "查询成功")
+}
+
+// BatchGetDicts handles GET /sysDictionary/batch?codes=is_online,op_state,...
+// Returns multiple dictionaries in a single request to reduce HTTP round-trips.
+func (h *DictionaryHandler) BatchGetDicts(c *gin.Context) {
+	codesStr := c.Query("codes")
+	if codesStr == "" {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.NewBusinessError(7, "codes parameter is required", nil))
+		return
+	}
+
+	codes := splitAndTrim(codesStr, ",")
+	if len(codes) == 0 {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.NewBusinessError(7, "at least one valid code is required", nil))
+		return
+	}
+
+	dicts, err := h.service.BatchGetDicts(c.Request.Context(), codes)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+
+	response.OKWithMsg(c, gin.H{"dicts": dicts}, "查询成功")
+}
+
+// splitAndTrim splits a string by sep and trims each part.
+func splitAndTrim(s, sep string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := make([]string, 0)
+	for _, p := range splitString(s, sep) {
+	 trimmed := trimString(p)
+		if trimmed != "" {
+			parts = append(parts, trimmed)
+		}
+	}
+	return parts
+}
+
+// splitString splits a string by sep without importing strings.
+func splitString(s, sep string) []string {
+	if sep == "" {
+		return nil
+	}
+	result := make([]string, 0)
+	start := 0
+	for {
+		idx := indexOf(s, sep, start)
+		if idx == -1 {
+			result = append(result, s[start:])
+			break
+		}
+		result = append(result, s[start:idx])
+		start = idx + len(sep)
+	}
+	return result
+}
+
+// indexOf returns the index of sep in s starting from start, or -1 if not found.
+func indexOf(s, sep string, start int) int {
+	if len(sep) == 0 || start > len(s) {
+		return -1
+	}
+	for i := start; i <= len(s)-len(sep); i++ {
+		match := true
+		for j := 0; j < len(sep); j++ {
+			if i+j >= len(s) || s[i+j] != sep[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return i
+		}
+	}
+	return -1
+}
+
+// trimString removes leading and trailing whitespace.
+func trimString(s string) string {
+	start := 0
+	end := len(s)
+	for start < end && isSpace(rune(s[start])) {
+		start++
+	}
+	for end > start && isSpace(rune(s[end-1])) {
+		end--
+	}
+	return s[start:end]
+}
+
+// isSpace checks if a rune is a whitespace character.
+func isSpace(r rune) bool {
+	return r == ' ' || r == '\t' || r == '\n' || r == '\r'
 }

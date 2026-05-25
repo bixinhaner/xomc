@@ -22,7 +22,7 @@ import StatisticsPanel from '@/components/StatisticsPanel';
 import StatusIndicator from '@/components/StatusIndicator';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useDeviceList, useBatchRebootDevices, useDeviceGroups } from '@core/hooks/api/useDevices';
-import { useDictionary } from '@core/hooks/api/useSystem';
+import { useDictionary, useDictionaryBatch } from '@core/hooks/api/useSystem';
 import { useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
 import { useCreateUnifiedFileTransferTask } from '@core/hooks/api/useUnifiedFileTransfer';
 import { useDownloadStationLog } from '@core/hooks/api/useStationLog';
@@ -363,13 +363,24 @@ export default function DeviceList() {
   //   - is_online（在线 2 状态：true/false）
   // 新增 3 个字典（device_model / software_version / firmware_version）由
   // seed/000137 初始化为现有 devices/device_parameters 表的 distinct 值。
-  const { data: isOnlineDict } = useDictionary('is_online');
-  const { data: opStateDict } = useDictionary('op_state');
-  const { data: networkTypeDict } = useDictionary('network_type');
-  const { data: productClassDict } = useDictionary('product_class');
-  const { data: deviceModelDict } = useDictionary('device_model');
-  const { data: softwareVersionDict } = useDictionary('software_version');
-  const { data: firmwareVersionDict } = useDictionary('firmware_version');
+  // 性能优化：使用批量查询一次获取所有字典，减少 HTTP 请求
+  const { data: batchDicts } = useDictionaryBatch([
+    'is_online',
+    'op_state',
+    'network_type',
+    'product_class',
+    'device_model',
+    'software_version',
+    'firmware_version',
+  ]);
+
+  const isOnlineDict = batchDicts?.['is_online'];
+  const opStateDict = batchDicts?.['op_state'];
+  const networkTypeDict = batchDicts?.['network_type'];
+  const productClassDict = batchDicts?.['product_class'];
+  const deviceModelDict = batchDicts?.['device_model'];
+  const softwareVersionDict = batchDicts?.['software_version'];
+  const firmwareVersionDict = batchDicts?.['firmware_version'];
 
   const dictToOptions = useCallback(
     (dict: { sysDictionaryDetails?: { label: string; value: string }[] } | undefined) =>
