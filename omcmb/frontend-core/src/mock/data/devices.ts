@@ -96,6 +96,8 @@ function generateDevice(index: number): Device {
     region: city.region,
     stationId: `ST${String(index + 1).padStart(6, '0')}`,
     connStatus: isOnline ? 'online' : 'offline',
+    isOnline,
+    lifecycleState: isOnline ? 'commissioned' : 'decommissioned',
     alarmLevel,
     engStatus: pickRandom(engStatuses),
     mgmtStatus: pickRandom(mgmtStatuses),
@@ -107,6 +109,8 @@ function generateDevice(index: number): Device {
     latitude: randomOffset(city.lat, 0.5),
     softwareVersion: pickRandom(softwareVersions),
     createTime: randomDate(365),
+    oui: `${vendors[0]}-OUI`,
+    carrier: pickRandom(['cmcc', 'ctcc', 'cucc']),
 
     // 监控扩展字段
     platformType: platformType,
@@ -278,6 +282,8 @@ const beijingDevices: Device[] = Array.from({ length: 50 }, (_, i) => {
     region: beijingCity.region,
     stationId: `ST${String(index + 1).padStart(6, '0')}`,
     connStatus: isOnline ? 'online' : 'offline',
+    isOnline,
+    lifecycleState: isOnline ? 'commissioned' : 'decommissioned',
     alarmLevel,
     engStatus: pickRandom(engStatuses),
     mgmtStatus: pickRandom(mgmtStatuses),
@@ -289,6 +295,8 @@ const beijingDevices: Device[] = Array.from({ length: 50 }, (_, i) => {
     latitude: randomOffset(beijingCity.lat, 0.5),
     softwareVersion: pickRandom(softwareVersions),
     createTime: randomDate(365),
+    oui: `${vendors[0]}-OUI`,
+    carrier: pickRandom(['cmcc', 'ctcc', 'cucc']),
 
     // 监控扩展字段
     platformType: platformType,
