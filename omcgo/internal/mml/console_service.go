@@ -39,7 +39,11 @@ type ConsoleService struct {
 	// T-0170: 注入"device key (SN 或 UUID) → paramModelID"反查闭包；nil 时退化为全集（admin 视图）。
 	// 设计哲学：param_mappings 是 product 实际支持 path 的真值源；缺映射 = 不支持。
 	resolveParamModelByDevice func(ctx context.Context, deviceKey string) (*uuid.UUID, error)
-	logger                    *zap.Logger
+	// T-0172: 注入 productClass → SupportedSet 反查。nil 时 BuildGroupTreeFiltered
+	// 退化为原 BuildGroupTree（不过滤）。设计同 resolveParamModelByDevice 通过闭包
+	// 解耦 product / parammodel 包依赖。
+	supportedPathsRepo SupportedPathsRepository
+	logger             *zap.Logger
 }
 
 // NewConsoleService 构造 ConsoleService。
@@ -60,9 +64,79 @@ func NewConsoleService(
 	}
 }
 
-// BuildGroupTree 透传 repo BuildTree。
+// BuildGroupTree 透传 repo BuildTree（不做产品过滤；向后兼容旧调用方）。
 func (s *ConsoleService) BuildGroupTree(ctx context.Context, rootCode, lang string) ([]GroupTreeNode, error) {
 	return s.treeRepo.BuildTree(ctx, rootCode, lang)
+}
+
+// BuildGroupTreeFiltered 在 BuildGroupTree 之上按 productClass 过滤命令：
+//   - LST/MOD：target_paths 中至少 1 条在 supported set → 显示
+//   - ADD/RMV：supported set 中存在以 target_object 为前缀的 path → 显示
+//   - 孤儿设备（productClass 未匹配产品）：全部命令显示，每条标 unsupported
+//   - 空 group（过滤后 0 命令且无 children）：从结果中剔除
+//
+// 在每条留下的命令上挂 TotalPathCount / UnsupportedPaths / ProductResolved 标注。
+//
+// productClass 为空 / supportedPathsRepo 未装配时退化为 BuildGroupTree。
+func (s *ConsoleService) BuildGroupTreeFiltered(ctx context.Context, rootCode, lang, productClass string) ([]GroupTreeNode, error) {
+	tree, err := s.treeRepo.BuildTree(ctx, rootCode, lang)
+	if err != nil {
+		return nil, err
+	}
+	if productClass == "" || s.supportedPathsRepo == nil {
+		return tree, nil
+	}
+	supported, err := s.supportedPathsRepo.ResolveByProductClass(ctx, productClass)
+	if err != nil {
+		return nil, fmt.Errorf("resolve supported paths for product_class %q: %w", productClass, err)
+	}
+	filterTreeInPlace(tree, supported)
+	tree = pruneEmptyGroups(tree)
+	return tree, nil
+}
+
+// filterTreeInPlace 递归遍历 tree，按 supported 给每个 command 加标注，
+// 隐藏 visible=false 的命令。原 slice 被改动（in-place）。
+func filterTreeInPlace(nodes []GroupTreeNode, supported *SupportedSet) {
+	for i := range nodes {
+		kept := nodes[i].Commands[:0]
+		for _, cmd := range nodes[i].Commands {
+			ann := AnnotateCommand(cmd.OperationType, cmd.TargetPathsRaw(), cmd.TargetObject, supported)
+			if !ann.Visible {
+				continue
+			}
+			// 复制标注到响应字段（指针字段允许 omitempty 不出现在未过滤路径上）
+			total := ann.TotalPathCount
+			cmd.TotalPathCount = &total
+			resolved := ann.ProductResolved
+			cmd.ProductResolved = &resolved
+			cmd.UnsupportedPaths = ann.UnsupportedPaths
+			kept = append(kept, cmd)
+		}
+		nodes[i].Commands = kept
+		filterTreeInPlace(nodes[i].Children, supported)
+	}
+}
+
+// pruneEmptyGroups 递归剔除"自身无命令且子树也全空"的 group（含 chapter 顶层）。
+// 后序遍历：先剪 children，再判 self。
+// user 反馈 Point 3：空 group 直接隐藏（不保留空章节骨架）。
+func pruneEmptyGroups(nodes []GroupTreeNode) []GroupTreeNode {
+	kept := nodes[:0]
+	for i := range nodes {
+		nodes[i].Children = pruneEmptyGroups(nodes[i].Children)
+		if len(nodes[i].Commands) == 0 && len(nodes[i].Children) == 0 {
+			continue
+		}
+		kept = append(kept, nodes[i])
+	}
+	return kept
+}
+
+// SetSupportedPathsRepository 注入 productClass → SupportedSet 反查仓储（T-0172）。
+// 不注入时 BuildGroupTreeFiltered 退化为 BuildGroupTree。
+func (s *ConsoleService) SetSupportedPathsRepository(repo SupportedPathsRepository) {
+	s.supportedPathsRepo = repo
 }
 
 // SetFlatTreeRepo 装配 Task #4 扁平命令树仓储。不走构造函数以避免贩及

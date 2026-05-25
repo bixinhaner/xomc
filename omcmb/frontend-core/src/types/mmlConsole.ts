@@ -72,6 +72,18 @@ export interface BackendGroupTreeCommand {
    * 内层 keys 已是 camelCase（与 Python 解析器对齐），axios 拦截器对其幂等。
    */
   instance_range_meta?: InstanceRange[];
+
+  /**
+   * T-0172 catalog 按 product_class 过滤的标注（仅在 group-tree 请求带
+   * product_class 入参时填充；缺省请求不返回）。
+   * - total_path_count: 命令操作的总 path 数（LST/MOD = len(target_paths);
+   *                     ADD/RMV = 1）
+   * - unsupported_paths: 当前产品不支持的具体 path 列表（完整返回，前端 tooltip 用）
+   * - product_resolved: false = 孤儿设备（productClass 未匹配产品）
+   */
+  total_path_count?: number;
+  unsupported_paths?: string[];
+  product_resolved?: boolean;
 }
 
 /** GET /mml/commands/:id/sub-fields 响应的单条 sub-field。 */
@@ -166,6 +178,17 @@ export interface GroupTreeCommand {
    * 与 cmd 共生但与 Statement 解耦 — 后续 statement 构造时透传到 Statement.instanceRangeMeta。
    */
   instanceRangeMeta?: InstanceRange[];
+
+  /**
+   * T-0172 catalog 按 product_class 过滤的标注。仅在 useGroupTree 传入
+   * productClass 时填充；缺省请求不返回。
+   * - totalPathCount: 命令操作的总 path 数（LST/MOD = target_paths 长度；ADD/RMV = 1）
+   * - unsupportedPaths: 当前产品不支持的具体 path 列表（完整返回，UI tooltip / banner 用）
+   * - productResolved: false = 孤儿设备（productClass 未匹配任何产品）；UI 据此降级显示
+   */
+  totalPathCount?: number;
+  unsupportedPaths?: string[];
+  productResolved?: boolean;
 }
 
 /**

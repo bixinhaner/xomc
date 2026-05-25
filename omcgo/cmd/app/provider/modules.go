@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"time"
@@ -39,6 +40,7 @@ import (
 	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/ops"
 	"github.com/omcgo/omcgo/internal/pm"
+	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/provision"
 	"github.com/omcgo/omcgo/internal/report"
 	"github.com/omcgo/omcgo/internal/software"
@@ -944,6 +946,53 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 		}
 		return pmID, nil
 	})
+
+	// T-0172: 注入 productClass → SupportedSet 反查（catalog 按产品过滤命令树）。
+	// 方案 X：supported set 仅取 default param_mappings（不掺杂 discovered）；
+	// 与 per-device A1 (T-0170) 区分开。详见 mml/device_supported_paths.go 注释。
+	mmlConsoleSvc.SetSupportedPathsRepository(mml.SupportedPathsResolverFunc(
+		func(ctx context.Context, productClass string) (*mml.SupportedSet, error) {
+			mr, err := c.ProductRegistry.MatchProductClass(ctx, productClass)
+			if errors.Is(err, product.ErrOrphan) {
+				// 孤儿设备：保留 productResolved=false，前端按 user Q4 决定的策略
+				// 显示全部命令但每条标 0 supported。
+				return &mml.SupportedSet{
+					ProductClass:    productClass,
+					ProductResolved: false,
+					Paths:           map[string]struct{}{},
+				}, nil
+			}
+			if err != nil {
+				return nil, fmt.Errorf("match product_class %q: %w", productClass, err)
+			}
+			if mr == nil || mr.Product == nil || mr.Product.ParamModelID == nil {
+				// 匹配到 product 但无 paramModel — 类同孤儿处理（无法构造 supported set）
+				return &mml.SupportedSet{
+					ProductClass:    productClass,
+					ProductResolved: false,
+					Paths:           map[string]struct{}{},
+				}, nil
+			}
+			set, err := c.ParamRegistry.GetByParamModel(ctx, *mr.Product.ParamModelID)
+			if err != nil {
+				return nil, fmt.Errorf("get param_model %s mappings: %w", mr.Product.ParamModelID, err)
+			}
+			paths := make(map[string]struct{}, len(set.Mappings))
+			for _, m := range set.Mappings {
+				if m.StandardPath != "" && m.IsActive && m.IsSupported {
+					paths[m.StandardPath] = struct{}{}
+				}
+			}
+			productID := mr.Product.ID
+			paramModelID := *mr.Product.ParamModelID
+			return &mml.SupportedSet{
+				ProductClass:    productClass,
+				ProductID:       &productID,
+				ParamModelID:    &paramModelID,
+				ProductResolved: true,
+				Paths:           paths,
+			}, nil
+		}))
 	// R-8.5: 独立 CompatibilityService（不耦合 ConsoleService 签名 / 测试）。
 	// 直接走 devices LEFT JOIN products 反查 param_model_id，
 	// 绕过 ProductRegistry.MatchProductClass 全局正则（字典 product_class

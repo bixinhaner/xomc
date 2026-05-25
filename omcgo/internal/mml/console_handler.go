@@ -135,10 +135,13 @@ func (h *ConsoleHandler) GetCommandCompatibility(c *gin.Context) {
 //
 // root 缺省时返回全树根节点（按 path 顶级 ltree 自动判定）。
 // format 缺省为 tree（向后兼容递归树）；format=flat 返 Task #4 扁平响应。
+// product_class 缺省时不做产品级过滤（向后兼容）；非空时按 T-0172 方案 X
+// 过滤命令并给每条命令挂 total_path_count / unsupported_paths / product_resolved。
 type GroupTreeQuery struct {
-	Root   string `form:"root"`
-	Lang   string `form:"lang"`
-	Format string `form:"format"`
+	Root         string `form:"root"`
+	Lang         string `form:"lang"`
+	Format       string `form:"format"`
+	ProductClass string `form:"product_class"`
 }
 
 // GetGroupTree 返回命令树。
@@ -165,9 +168,12 @@ func (h *ConsoleHandler) GetGroupTree(c *gin.Context) {
 		return
 	}
 	lang := normalizeLang(q.Lang)
-	tree, err := h.svc.BuildGroupTree(c.Request.Context(), q.Root, lang)
+	productClass := strings.TrimSpace(q.ProductClass)
+	tree, err := h.svc.BuildGroupTreeFiltered(c.Request.Context(), q.Root, lang, productClass)
 	if err != nil {
-		h.logger.Error("build group tree", zap.Error(err), zap.String("root", q.Root))
+		h.logger.Error("build group tree", zap.Error(err),
+			zap.String("root", q.Root),
+			zap.String("product_class", productClass))
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}

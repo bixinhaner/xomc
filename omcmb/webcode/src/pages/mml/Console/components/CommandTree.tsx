@@ -65,16 +65,38 @@ interface LeafDecor {
  *   - 标准命令叶子（buildTreeData 链路）传完整 4 参数 → R-8.5 警告生效
  *   - Customized 模板（buildCustomTreeData 链路）只传前 2 参数 →
  *     不显示兼容性警告（R-5 customized 不在 R-8.5 检查范围内，且语义不适用）
+ *
+ * T-0172：命令对象额外携带后端注解（totalPathCount / unsupportedPaths /
+ * productResolved），在 displayName 后附加：
+ *   - "(N)" 总 path 数（仅 LST/MOD；ADD/RMV 不显示）
+ *   - ⚠ 部分不支持 tooltip（unsupportedPaths.length > 0 时）
  */
 function renderOpLeafTitle(
   op: MMLOperationType,
   displayName: string,
   commandId?: string,
   decor?: LeafDecor,
+  cmd?: GroupTreeCommand,
 ): ReactNode {
   const color = OP_TAG_COLOR[op] ?? 'default';
   const isUnsupported =
     commandId != null && decor?.unsupportedSet?.has(commandId) === true;
+
+  // T-0172 标注：仅 LST/MOD 显示总 path 数（ADD/RMV 操作的是父对象，无意义）
+  const showPathCount =
+    cmd?.totalPathCount != null && (op === 'LST' || op === 'MOD');
+  const partialUnsupported =
+    cmd != null &&
+    cmd.unsupportedPaths != null &&
+    cmd.unsupportedPaths.length > 0 &&
+    cmd.productResolved !== false; // 孤儿单独展示，不当 partial
+  const orphanFlag = cmd?.productResolved === false;
+
+  // unsupportedPaths 列表过长时 tooltip 截断显示
+  const unsupportedTooltipContent = partialUnsupported
+    ? `${cmd!.unsupportedPaths!.length} 条 path 不支持，执行时将自动忽略`
+    : '';
+
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
       <Tag color={color} style={{ marginRight: 0, fontSize: 10, padding: '0 4px' }}>
@@ -82,6 +104,27 @@ function renderOpLeafTitle(
       </Tag>
       <CodeOutlined />
       {stripOpSuffix(displayName)}
+      {showPathCount && (
+        <span style={{ color: '#8c8c8c', fontSize: 11, marginLeft: 2 }}>
+          ({cmd!.totalPathCount})
+        </span>
+      )}
+      {orphanFlag && (
+        <Tooltip title="该设备未匹配到已知产品，无可执行 path" placement="right">
+          <WarningOutlined
+            style={{ color: '#ff4d4f', marginLeft: 2 }}
+            aria-label="orphan-product-class"
+          />
+        </Tooltip>
+      )}
+      {partialUnsupported && (
+        <Tooltip title={unsupportedTooltipContent} placement="right">
+          <WarningOutlined
+            style={{ color: '#faad14', marginLeft: 2 }}
+            aria-label="partial-unsupported-paths"
+          />
+        </Tooltip>
+      )}
       {isUnsupported && decor && (
         <Tooltip title={decor.unsupportedTooltip} placement="right">
           <WarningOutlined
@@ -135,7 +178,7 @@ function commandsToLeafNodes(cmds: GroupTreeCommand[], decor: LeafDecor): TreeDa
     })
     .map<TreeDataNode>((c) => ({
       key: `${CMD_KEY_PREFIX}${c.id}`,
-      title: renderOpLeafTitle(c.operationType, c.displayName, c.id, decor),
+      title: renderOpLeafTitle(c.operationType, c.displayName, c.id, decor, c),
       isLeaf: true,
     }));
 }
@@ -455,7 +498,15 @@ export default function CommandTree({ lang }: CommandTreeProps) {
   // 稳定 tree 引用：destructuring `= []` default 在 data=undefined 期间每 render 新建数组，
   // 会让下游 useMemo / useEffect deps 引用变动，引发不必要重算甚至循环。useMemo 锚住引用。
   // 注：本作用域内 `treeData` 已被下方 buildTreeData 结果占用，这里用 rawTree 避免撞名。
-  const { data: rawTree, isLoading } = useGroupTree(undefined, effectiveLang);
+  // T-0172: 传入 productClassFilter 让后端按"该产品族 default param_mappings"过滤
+  // 命令 + 给每条挂注解（totalPathCount / unsupportedPaths / productResolved）。
+  // productClassFilter 为空时不过滤（向后兼容）。
+  const productClassForTree = useMmlConsoleStore((s) => s.productClassFilter);
+  const { data: rawTree, isLoading } = useGroupTree(
+    undefined,
+    effectiveLang,
+    productClassForTree || undefined
+  );
   const tree = useMemo<GroupTreeNode[]>(() => rawTree ?? [], [rawTree]);
   const queryClient = useQueryClient();
   const deleteMutation = useDeleteMMLTemplate();
@@ -467,6 +518,11 @@ export default function CommandTree({ lang }: CommandTreeProps) {
   // R-8.5：订阅当前选中 product_class（由 Console/index.tsx 单向镜像进 store），
   // 调 useCommandCompatibility 取"该 product_class 下不兼容的命令 ID 集合"。
   // productClassFilter 为空 / 加载中 → unsupportedSet 为 undefined → 不显示任何警告。
+  //
+  // T-0172：上面这套 useCommandCompatibility 仍保留作 sub_field 级提示；本次扩展
+  // 在 useGroupTree 直接传 productClassFilter，让后端按方案 X (default
+  // param_mappings) 过滤命令并给每条挂 totalPathCount/unsupportedPaths/productResolved
+  // 标注 — 命令树渲染据此显示总 path 数 + ⚠ 部分不支持图标。
   const productClassFilter = useMmlConsoleStore((s) => s.productClassFilter);
   const { data: unsupportedSet } = useCommandCompatibility(productClassFilter);
   const unsupportedTooltip = t('mml.console.commandTree.unsupportedForProductClass');

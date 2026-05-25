@@ -59,7 +59,27 @@ type GroupTreeCommand struct {
 	// 由 catalog Loader 写入 mml_commands.instance_range_meta JSONB 列；
 	// 前端 LST/MOD/ADD/RMV 操作面板用此校验 InstancePicker 输入。
 	InstanceRangeMeta json.RawMessage `json:"instance_range_meta,omitempty"`
+
+	// T-0172 catalog 按产品过滤的标注字段（仅 BuildGroupTree 调用方传入
+	// product_class 时填充；否则全部 omit，老调用者无感）。
+	// TotalPathCount: 该命令操作的总 path 数（LST/MOD = len(target_paths);
+	//                 ADD/RMV = 1）。
+	// UnsupportedPaths: 当前产品不支持的具体 path 列表；前端用作 tooltip / banner。
+	// ProductResolved: 入参 product_class 是否成功路由到 product；false=孤儿。
+	TotalPathCount   *int     `json:"total_path_count,omitempty"`
+	UnsupportedPaths []string `json:"unsupported_paths,omitempty"`
+	ProductResolved  *bool    `json:"product_resolved,omitempty"`
+	// rawTargetPaths 是 mml_commands.target_paths JSONB raw bytes，仅在
+	// repository → service 内部流转用于过滤；JSON 序列化时排除（- tag）。
+	rawTargetPaths []byte `json:"-"`
 }
+
+// TargetPathsRaw 返回未导出的 JSONB raw bytes（供 service 层 AnnotateCommand 用）。
+func (c *GroupTreeCommand) TargetPathsRaw() []byte { return c.rawTargetPaths }
+
+// SetTargetPathsRaw 由 repository 调用时填入。导出 setter 让 repository（同 pkg）
+// 在 BuildTree 时塞值；外部 pkg 不需要。
+func (c *GroupTreeCommand) SetTargetPathsRaw(raw []byte) { c.rawTargetPaths = raw }
 
 // GroupTreeRepository 提供命令树查询能力。
 type GroupTreeRepository interface {
@@ -137,6 +157,11 @@ func (r *PgGroupTreeRepository) BuildTree(ctx context.Context, rootCode, lang st
 					InstanceRangeMeta: rawJSONOrNil(row.CommandInstanceRangeMeta),
 				}
 				cmd.DisplayName = buildDisplayName(cmd.LogicalName, cmd.OperationType, cmd.LogicalCode, lang)
+				// T-0172：把 target_paths raw bytes 塞入未导出字段，供 service 层
+				// AnnotateCommand 在 product_class 过滤路径上读取。
+				if len(row.CommandTargetPaths) > 0 {
+					cmd.SetTargetPathsRaw(row.CommandTargetPaths)
+				}
 				node.Commands = append(node.Commands, cmd)
 				commandSeen[*row.CommandID] = struct{}{}
 			}
@@ -174,7 +199,9 @@ SELECT
     c.source AS cmd_source,
     COALESCE(c.catalog_protected, false) AS cmd_catalog_protected,
     -- §R-4.1.1：每层 {i} 占位符的取值范围 metadata，无 metadata → 兜底 '[]'
-    COALESCE(c.instance_range_meta, '[]'::jsonb) AS instance_range_meta
+    COALESCE(c.instance_range_meta, '[]'::jsonb) AS instance_range_meta,
+    -- T-0172：操作的标准路径列表，无值兜底 '[]'
+    COALESCE(c.target_paths, '[]'::jsonb) AS target_paths
 FROM mml_command_groups g
 LEFT JOIN mml_commands c ON c.group_id = g.id
 WHERE g.path IS NOT NULL
@@ -210,6 +237,7 @@ ORDER BY g.path, g.display_order, c.operation_type, c.logical_code, c.command_co
 			&row.OperationType, &row.RPCMethod, &row.RequireConfirm, &row.TargetObject,
 			&row.CommandSource, &row.CommandCatalogProtected,
 			&row.CommandInstanceRangeMeta,
+			&row.CommandTargetPaths,
 		); err != nil {
 			return nil, fmt.Errorf("scan row: %w", err)
 		}
@@ -250,6 +278,9 @@ type groupTreeRow struct {
 	CommandCatalogProtected bool
 	// §R-4.1.1：每层 {i} 占位符取值范围 metadata（JSONB raw bytes）。
 	CommandInstanceRangeMeta []byte
+	// T-0172：命令操作的标准路径列表（LST/MOD），用于 product_class 过滤。
+	// ADD/RMV 始终为空数组（这两种用 TargetObject）。JSONB raw bytes。
+	CommandTargetPaths []byte
 }
 
 // ============================================================

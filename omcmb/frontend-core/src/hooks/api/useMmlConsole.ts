@@ -43,11 +43,13 @@ import type { MMLTask } from '../../types/mml';
  */
 export function useGroupTree(
   root?: string,
-  lang: string = 'zh-CN'
+  lang: string = 'zh-CN',
+  productClass?: string
 ): ReturnType<typeof useQuery<GroupTreeNode[]>> {
+  // T-0172: productClass 加入 queryKey 让设备/产品切换时自动重取
   return useQuery({
-    queryKey: ['mml', 'console', 'group-tree', root ?? '', lang],
-    queryFn: () => mmlApi.buildGroupTree(root, lang),
+    queryKey: ['mml', 'console', 'group-tree', root ?? '', lang, productClass ?? ''],
+    queryFn: () => mmlApi.buildGroupTree(root, lang, productClass),
     staleTime: 30 * 60 * 1000,
   });
 }
