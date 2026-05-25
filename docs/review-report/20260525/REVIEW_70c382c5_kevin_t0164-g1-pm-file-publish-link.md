@@ -4,7 +4,7 @@
 |------|----|
 | 审查时间 | 2026-05-25 |
 | 审查人 | kevin (AI 辅助) |
-| Commit Hash | _PENDING_ |
+| Commit Hash | `70c382c5` |
 | Backlog | T-0164 (G1 真机闭环 publish 链路) |
 | Scope | pm, acs, deploy |
 | Type | fix |
