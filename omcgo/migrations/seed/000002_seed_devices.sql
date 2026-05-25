@@ -51,23 +51,11 @@ BEGIN
     ON CONFLICT (id) DO NOTHING;
 
     -- ============================================================
-    -- 2. 设备规则 (10 条)
+    -- 2. 设备规则 — migration 000162_drop_device_rules 已删表，本段下线
+    --   原 10 条 device_rules INSERT 删除（device_rules 表不再存在）
     -- ============================================================
-    INSERT INTO device_rules (id, name, priority, target_group_id, enabled, matching_mode, name_rule_list, description, created_by)
-    VALUES
-        (uuid_generate_v5('6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid, 'seed-rule-1'), '自动归入北京移动', 1, uuid_generate_v5('6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid, 'seed-group-cmcc-bj'), true, 'deviceName', '[{"condition":"startWith","value":"BJ-"}]'::jsonb, '按设备名前缀 BJ- 自动归入北京移动', 'system'),
-        (uuid_generate_v5('6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid, 'seed-rule-2'), '自动归入上海移动', 2, uuid_generate_v5('6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid, 'seed-group-cmcc-sh'), true, 'deviceName', '[{"condition":"startWith","value":"SH-"}]'::jsonb, '按设备名前缀 SH- 自动归入上海移动', 'system'),
-        (uuid_generate_v5('6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid, 'seed-rule-3'), '自动归入广东移动', 3, uuid_generate_v5('6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid, 'seed-group-cmcc-gd'), true, 'deviceName', '[{"condition":"startWith","value":"GD-"}]'::jsonb, '按设备名前缀 GD- 自动归入广东移动', 'system'),
-        (uuid_generate_v5('6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid, 'seed-rule-4'), '自动归入江苏电信', 4, uuid_generate_v5('6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid, 'seed-group-ctcc-js'), true, 'deviceName', '[{"condition":"startWith","value":"JS-"}]'::jsonb, '按设备名前缀 JS- 自动归入江苏电信', 'system'),
-        (uuid_generate_v5('6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid, 'seed-rule-5'), '自动归入浙江电信', 5, uuid_generate_v5('6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid, 'seed-group-ctcc-zj'), true, 'deviceName', '[{"condition":"startWith","value":"ZJ-"}]'::jsonb, '按设备名前缀 ZJ- 自动归入浙江电信', 'system'),
-        (uuid_generate_v5('6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid, 'seed-rule-6'), '自动归入山东联通', 6, uuid_generate_v5('6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid, 'seed-group-cucc-sd'), true, 'deviceName', '[{"condition":"startWith","value":"SD-"}]'::jsonb, '按设备名前缀 SD- 自动归入山东联通', 'system'),
-        (uuid_generate_v5('6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid, 'seed-rule-7'), '自动归入河南联通', 7, uuid_generate_v5('6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid, 'seed-group-cucc-hn'), true, 'deviceName', '[{"condition":"startWith","value":"HN-"}]'::jsonb, '按设备名前缀 HN- 自动归入河南联通', 'system'),
-        (uuid_generate_v5('6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid, 'seed-rule-8'), '联调测试规则', 8, uuid_generate_v5('6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid, 'seed-group-test-compat'), true, 'deviceName', '[{"condition":"startWith","value":"TEST-"}]'::jsonb, '按设备名前缀 TEST- 自动归入联调测试组', 'system'),
-        (uuid_generate_v5('6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid, 'seed-rule-9'), '巡检设备规则（禁用）', 9, uuid_generate_v5('6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid, 'seed-group-ops-patrol'), false, 'deviceName', '[{"condition":"startWith","value":"PATROL-"}]'::jsonb, '巡检设备自动归组（已禁用）', 'system'),
-        (uuid_generate_v5('6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid, 'seed-rule-10'), 'TAC 匹配规则（禁用）', 10, uuid_generate_v5('6ba7b812-9dad-11d1-80b4-00c04fd430c8'::uuid, 'seed-group-test-conform'), false, 'tac', NULL, '按 TAC 匹配归入一致性测试组（已禁用）', 'system')
-    ON CONFLICT (id) DO NOTHING;
 
-    RAISE NOTICE 'Seed groups and rules created';
+    RAISE NOTICE 'Seed groups created (device_rules removed in 000162)';
 END;
 $$;
 -- +goose StatementEnd
@@ -292,7 +280,6 @@ UNION ALL SELECT 'devices_online',  COUNT(*) FROM devices WHERE is_online = TRUE
 UNION ALL SELECT 'devices_offline', COUNT(*) FROM devices WHERE is_online = FALSE AND deleted_at IS NULL
 UNION ALL SELECT 'devices_recycled', COUNT(*) FROM devices WHERE deleted_at IS NOT NULL
 UNION ALL SELECT 'device_groups_seed', COUNT(*) FROM device_groups WHERE name IN ('移动设备域','电信设备域','联通设备域','测试设备域','运维设备域')
-UNION ALL SELECT 'device_rules_seed', COUNT(*) FROM device_rules WHERE name LIKE '自动归入%' OR name LIKE '%测试%' OR name LIKE '%巡检%' OR name LIKE '%TAC%'
 UNION ALL SELECT 'group_members', COUNT(*) FROM device_group_members;
 
 -- +goose Down
@@ -305,7 +292,6 @@ BEGIN
     DELETE FROM device_group_members WHERE group_id IN (
         SELECT id FROM device_groups WHERE name IN ('北京移动','上海移动','广东移动','江苏电信','浙江电信','山东联通','河南联通','联调测试组','一致性测试组','巡检设备组')
     );
-    DELETE FROM device_rules WHERE name LIKE '自动归入%' OR name LIKE '%测试%' OR name LIKE '%巡检%' OR name LIKE '%TAC%';
     DELETE FROM device_groups WHERE name IN ('北京移动','上海移动','广东移动','江苏电信','浙江电信','山东联通','河南联通','联调测试组','一致性测试组','巡检设备组');
     DELETE FROM device_groups WHERE name IN ('移动设备域','电信设备域','联通设备域','测试设备域','运维设备域');
     DELETE FROM devices WHERE serial_number LIKE 'CMCC-%' OR serial_number LIKE 'CTCC-%' OR serial_number LIKE 'CUCC-%';
