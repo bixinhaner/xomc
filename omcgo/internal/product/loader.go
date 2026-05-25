@@ -15,6 +15,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/dictloader"
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // LoaderName 是 dictloader.Registry 中的注册名。
@@ -172,9 +173,13 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 		    device_attrs_override = EXCLUDED.device_attrs_override,
 		    enable_unknown_alarm  = EXCLUDED.enable_unknown_alarm
 		RETURNING id`
+		// XML 习惯写 "4G"/"5G"/"2G"，DB 列存 canonical 小写代码 lte/nr/gsm
+		// （与 devices.technology / API 入参 ?tech=lte 完全对齐）。Loader 是 DB
+		// 的唯一持久化入口，归一在写库前完成 → 下游一律看到 canonical 值。
+		normalizedTech := string(model.NormalizeTechnology(p.Tech))
 		var productID string
 		if err := tx.QueryRow(ctx, upsertProduct,
-			p.Name, p.Vendor, p.Tech, p.RadioModes, p.Description, paramModelID,
+			p.Name, p.Vendor, normalizedTech, p.RadioModes, p.Description, paramModelID,
 			p.Indicator.DeviceType, p.Indicator.Platform, neType,
 			enableFT11, overrideJSON, enableUnknown,
 		).Scan(&productID); err != nil {

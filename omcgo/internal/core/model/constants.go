@@ -31,7 +31,12 @@ type Technology = global.Technology
 const (
 	TechLTE = global.TechLTE
 	TechNR  = global.TechNR
+	TechGSM = global.TechGSM
 )
+
+// NormalizeTechnology re-exports global.NormalizeTechnology 供业务层做 XML/外部
+// 输入归一（"4G" → "lte"，"5G" → "nr"，"2G" → "gsm"）。
+var NormalizeTechnology = global.NormalizeTechnology
 
 // DeviceStatus 和 DeviceXxx 常量 — DEPRECATED (T-0162)，P3 整体删除
 type DeviceStatus = global.DeviceStatus

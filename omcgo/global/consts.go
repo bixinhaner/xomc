@@ -47,28 +47,51 @@ type Technology string
 const (
 	TechLTE Technology = "lte" // 4G LTE
 	TechNR  Technology = "nr"  // 5G NR SA
+	TechGSM Technology = "gsm" // 2G GSM（小基站 BSC/BTS 等）
 )
 
 // IsValid checks if the technology is recognized.
 func (t Technology) IsValid() bool {
 	switch t {
-	case TechLTE, TechNR:
+	case TechLTE, TechNR, TechGSM:
 		return true
 	}
 	return false
 }
 
-// UnmarshalJSON 让外部 JSON 入参 case-insensitive。
+// NormalizeTechnology 把人类可读 / 厂商习惯字符串（"4G" / "LTE" / "5G NR" / "2G" 等）
+// 归一为本系统内部 canonical 小写代码（lte/nr/gsm）。
+//
+// 用途：
+//   - products.xml Loader 写 DB 前归一（XML 习惯写 "4G"，DB 列存 "lte"）
+//   - 北向 / OSS 接口入参兼容
+//
+// 不认识的输入：返回 trim+lower 后的原值，让上层用 IsValid 判定是否拒绝。
+func NormalizeTechnology(in string) Technology {
+	s := strings.ToLower(strings.TrimSpace(in))
+	switch s {
+	case "lte", "4g", "4g lte", "lte fdd", "lte tdd", "fdd-lte", "tdd-lte":
+		return TechLTE
+	case "nr", "5g", "5g nr", "5g nr sa", "5g sa":
+		return TechNR
+	case "gsm", "2g", "2g gsm":
+		return TechGSM
+	}
+	return Technology(s)
+}
+
+// UnmarshalJSON 让外部 JSON 入参 case-insensitive 且统一别名。
 //
 // 3GPP/TR-181 标准约定 "LTE"/"NR" 大写，本系统内部 canonical 小写。
 // 北向 OSS / 第三方系统按 TR-181 习惯送 "LTE" 不能被 oneof binding 拒掉，
 // 同时设备 Inform 推断侧 (detectTechnology) 也保持只产生小写，全链路一致。
+// 别名（"4G"/"5G"/"2G"）走 NormalizeTechnology 折算为 canonical 代码。
 func (t *Technology) UnmarshalJSON(data []byte) error {
 	var s string
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
 	}
-	*t = Technology(strings.ToLower(strings.TrimSpace(s)))
+	*t = NormalizeTechnology(s)
 	return nil
 }
 
