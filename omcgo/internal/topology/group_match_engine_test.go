@@ -175,11 +175,14 @@ func TestMatchDevice_PrefersMostRecentlyUpdatedL2(t *testing.T) {
 		NameRuleList: []NameRule{{Condition: "contain", Value: "BJ"}},
 		UpdatedAt:    time.Date(2026, 5, 19, 0, 0, 0, 0, time.UTC),
 	}
-	// 故意把更早编辑的放前面，验证排序生效（不是按插入顺序）
-	tree := []DeviceGroup{{
-		ID: uuid.New(), Level: 1, Name: "root-L1",
-		Children: []DeviceGroup{older, newer},
-	}}
+	// 故意把更早编辑的放前面，验证排序生效（不是按插入顺序）。
+	// PgDeviceGroupRepository.GetTreeWithCounts 实际返回扁平 list（Level 字段区分
+	// L1/L2），MatchDevice 按 Level==2 过滤，所以 mock 要镜像真实行为：返 flat。
+	tree := []DeviceGroup{
+		{ID: uuid.New(), Level: 1, Name: "root-L1"},
+		older,
+		newer,
+	}
 	repo.EXPECT().GetTreeWithCounts(gomock.Any()).Return(tree, nil)
 
 	result, err := matcher.MatchDevice(context.Background(), MatchRequest{

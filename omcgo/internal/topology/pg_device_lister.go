@@ -59,8 +59,10 @@ func NewPgDeviceLister(pool *pgxpool.Pool, logger *zap.Logger) *PgDeviceLister {
 // ListAllForRuleEval 返回所有可被规则匹配的设备的最小信息集。
 //
 // SQL 字段来源：
-//   - Name 取 devices.site_name（"设备名称"匹配模式字段，与设备列表 / 分组页一致）。
-//     site_name 为空时 Name 为空串 —— matchByDeviceName 对空串安全降级不命中。
+//   - Name = COALESCE(NULLIF(site_name,''), serial_number)：
+//     site_name 非空 → 用 site_name；site_name 空/NULL → 回落 SN。与前端 mapper
+//     friendlyName=device_name||serial_number 完全对齐，保证"UI 上看到什么、
+//     '设备名称' 匹配模式就拿什么比对"——避免 site_name 空的设备被悄悄排除。
 //   - SerialNumber 取 devices.serial_number（SN 匹配模式，migration 000124 补齐）。
 //   - LAC / TAC 取 device_info.lac / device_info.tac，VARCHAR(16) 用 NULLIF +
 //     CAST 转 INTEGER；解析失败的脏数据回落为 NULL → DeviceForMatch.LAC/TAC = nil
@@ -74,7 +76,7 @@ func (l *PgDeviceLister) ListAllForRuleEval(ctx context.Context) ([]DeviceForMat
 	const sqlText = `
 		SELECT
 			d.id,
-			COALESCE(d.site_name, '') AS name,
+			COALESCE(NULLIF(d.site_name, ''), d.serial_number) AS name,
 			d.serial_number,
 			CASE WHEN di.lac ~ '^-?[0-9]+$' THEN di.lac::int ELSE NULL END AS lac,
 			CASE WHEN di.tac ~ '^-?[0-9]+$' THEN di.tac::int ELSE NULL END AS tac
@@ -110,7 +112,7 @@ func (l *PgDeviceLister) GetByID(ctx context.Context, deviceID uuid.UUID) (*Devi
 	const sqlText = `
 		SELECT
 			d.id,
-			COALESCE(d.site_name, '') AS name,
+			COALESCE(NULLIF(d.site_name, ''), d.serial_number) AS name,
 			d.serial_number,
 			CASE WHEN di.lac ~ '^-?[0-9]+$' THEN di.lac::int ELSE NULL END AS lac,
 			CASE WHEN di.tac ~ '^-?[0-9]+$' THEN di.tac::int ELSE NULL END AS tac

@@ -46,7 +46,12 @@ type MatchResult struct {
 // MatchDevice 为设备查找匹配的 L2 分组
 // 返回第一个匹配的分组，如果没有匹配则返回 nil
 func (m *DeviceMatcher) MatchDevice(ctx context.Context, req MatchRequest) (*MatchResult, error) {
-	// 获取所有有匹配规则的 L2 分组
+	// 获取所有分组。注意：PgDeviceGroupRepository.GetTreeWithCounts 实际返回的
+	// 是按 sort_order 排序的扁平 list（DeviceGroup.Children 字段不会被填充），
+	// 必须按 Level==2 过滤拿到 L2。历史代码用 `for l1Group; for l1Group.Children`
+	// 嵌套遍历是 bug：Children 永远空 → 整条 device-side 匹配路径（cron 重评估 /
+	// device.registered / device.attributes.changed）全部失效，唯一能跑通的是
+	// group-side 的 MatchGroup（直接 ListAllForRuleEval + 单组 matchGroup）。
 	groups, err := m.repo.GetTreeWithCounts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("get groups: %w", err)
@@ -55,11 +60,9 @@ func (m *DeviceMatcher) MatchDevice(ctx context.Context, req MatchRequest) (*Mat
 	// 收集所有配了匹配规则的 L2 分组，按 updated_at 降序排列 —— 最近新增/编辑的
 	// 分组优先匹配，首个命中即胜，实现"分组最后新增或编辑为优先"。
 	var l2Groups []DeviceGroup
-	for _, l1Group := range groups {
-		for _, g := range l1Group.Children {
-			if g.MatchingMode != "" {
-				l2Groups = append(l2Groups, g)
-			}
+	for _, g := range groups {
+		if g.Level == 2 && g.MatchingMode != "" {
+			l2Groups = append(l2Groups, g)
 		}
 	}
 	sort.SliceStable(l2Groups, func(i, j int) bool {
