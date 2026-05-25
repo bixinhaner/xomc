@@ -1,6 +1,6 @@
 -- +goose Up
 -- ============================================================
--- 000182_device_info_add_lac.sql
+-- 000183_device_info_add_lac.sql
 -- 给 device_info 表补 LAC 列（GSM 位置区码），与已存在的 tac 列对齐。
 --
 -- 背景：device_groups 已有 LAC / TAC 匹配模式定义（migrations/000023 + matcher.go），
