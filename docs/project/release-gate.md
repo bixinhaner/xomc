@@ -229,7 +229,8 @@
 ### G8 — 通用任务框架
 - [x] async_jobs 表 + Repository + Registry + Sweeper（migration 000159 + internal/core/asyncjob/）
 - [x] async_jobs_cron_state 表 + 启动补跑 catchupCronEntry（migration 000164 + commit `46b50678`）
-- [x] sys_configs 可调 sweeper_interval / zombie_threshold（commit `ac77b74b`）
+- [x] sys_configs 可调 sweeper_interval / zombie_threshold / heartbeat_interval（commit `ac77b74b` + `300ae4a1`）
+- [x] **改后重启 worker 生效**（详见设计文档 §7.1 Decision Note 2026-05-25；asyncjob 阈值变更频次极低，不做 EventBus 热重载）
 - [x] Prometheus 指标 5 个：`omc_async_jobs_queue_depth` / `_duration_seconds` / `_failed_total` / `_zombie_total` / `_catchup_total`
 - [x] 指标 hook 全注入 Registry.RunNext + Sweeper.sweepOnce + catchupCronEntry（本次 commit）
 - [x] QueueDepthSampler 启动 30s 周期采样（本次 commit）
