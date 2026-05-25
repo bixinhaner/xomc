@@ -5,12 +5,14 @@ import { useSearchParams } from 'react-router-dom';
 import ConfigSnapshotLibrary from '@/pages/backup/ConfigSnapshotLibrary';
 import DeviceLicenseLibrary from '@/pages/backup/DeviceLicenseLibrary';
 import FirmwareUpload from '@/pages/software/FirmwareUpload';
+import { useT } from '@/hooks/useT';
 
 const VALID_TABS = new Set(['version', 'config', 'license']);
 
 const PANE_STYLE: React.CSSProperties = { paddingTop: 8 };
 
 export default function FileManagementPage() {
+  const t = useT();
   const [searchParams, setSearchParams] = useSearchParams();
   // 支持 deep link：?tab=license 直接定位到 License 文件 tab
   const queryTab = searchParams.get('tab') ?? '';
@@ -33,7 +35,7 @@ export default function FileManagementPage() {
     window.close();
     // 兜底：浏览器拒绝关闭时（极少见，比如脚本之外打开的 tab）给个提示
     setTimeout(() => {
-      void message.info('浏览器未允许自动关闭此页，请手动关闭返回任务创建页面。');
+      void message.info(t('ufte.fileManagement.autoCloseBlocked'));
     }, 300);
   };
 

@@ -60,13 +60,15 @@ import type {
 } from '@core/types/unifiedFileTransfer';
 import {
   buildCategoryTabs,
-  EXECUTION_MODE_OPTIONS,
+  getExecutionModeOptions,
   buildDefaultUfteTaskName,
   getSoftwareLibraryFileTypeLabel,
+  getStepLabels,
+  localizeBuiltinCategoryLabel,
+  localizeBuiltinTypeName,
   renderDeviceStatus,
   renderEllipsisCell,
   renderTaskStatus,
-  STEP_LABELS,
   UPGRADE_LIKE_CATEGORIES,
 } from '../shared';
 import type { TransferStepId } from '@core/types/unifiedFileTransfer';
@@ -141,12 +143,12 @@ function resolveFirmwareLibraryFileType(taskType?: UnifiedFileTransferTaskType):
   return undefined;
 }
 
-function getUpgradeTypeLabel(category: string, fallback: string) {
+function getUpgradeTypeLabel(category: string, fallback: string, t: (id: string) => string) {
   if (category === 'gnb_upgrade' || category === 'enb_upgrade') {
-    return '软件升级';
+    return t('ufte.softLib.upgrade');
   }
   if (category === 'version_rollback') {
-    return '版本回退';
+    return t('ufte.softLib.rollback');
   }
   return fallback;
 }
@@ -258,9 +260,18 @@ export default function FileTransferCenter() {
   );
 
   const taskTypeOptions = useMemo(
-    () => filteredTaskTypes.map((item) => ({ label: item.displayName, value: item.typeCode })),
-    [filteredTaskTypes],
+    () => filteredTaskTypes.map((item) => ({
+      label: localizeBuiltinTypeName(item.typeCode, item.displayName, t),
+      value: item.typeCode,
+    })),
+    [filteredTaskTypes, t],
   );
+
+  // EXECUTION_MODE_OPTIONS 常量已下线 —— 改用 getExecutionModeOptions(t) 适配 i18n
+  const executionModeOptions = useMemo(() => getExecutionModeOptions(t), [t]);
+
+  // STEP_LABELS 常量已下线 —— 改用 getStepLabels(t) 适配 i18n（用于详情步骤名展示）
+  const stepLabels = useMemo(() => getStepLabels(t), [t]);
 
   const activeTaskType = useMemo(
     () => filteredTaskTypes.find((item) => item.typeCode === selectedTypeCode) ?? filteredTaskTypes[0],
@@ -279,8 +290,8 @@ export default function FileTransferCenter() {
   });
 
   const createExecutionModeOptions = useMemo(
-    () => EXECUTION_MODE_OPTIONS.filter((item) => item.value !== 'scheduled'),
-    [],
+    () => executionModeOptions.filter((item) => item.value !== 'scheduled'),
+    [executionModeOptions],
   );
 
   const { data: drawerDevicesData, isLoading: drawerDevicesLoading } = useUnifiedFileTransferDeviceCandidates({
@@ -354,12 +365,12 @@ export default function FileTransferCenter() {
       key: item.typeCode,
       label: (
         <Space size={6}>
-          <span>{item.displayName}</span>
-          <Tag color={item.builtIn ? 'blue' : 'gold'}>{item.builtIn ? '内置' : '自定义'}</Tag>
+          <span>{localizeBuiltinTypeName(item.typeCode, item.displayName, t)}</span>
+          <Tag color={item.builtIn ? 'blue' : 'gold'}>{item.builtIn ? t('ufte.tag.builtIn') : t('ufte.tag.custom')}</Tag>
         </Space>
       ),
     })),
-    [filteredTaskTypes],
+    [filteredTaskTypes, t],
   );
 
   const drawerSelectedDevices = useMemo(
@@ -440,14 +451,14 @@ export default function FileTransferCenter() {
 
   const drawerDeviceColumns: ColumnsType<UnifiedFileTransferDeviceItem> = useMemo(
     () => [
-      { title: '设备 SN', dataIndex: 'deviceSn', key: 'deviceSn', width: 160 },
-      { title: '站点名称', dataIndex: 'deviceName', key: 'deviceName', ellipsis: true },
+      { title: t('ufte.col.deviceSn'), dataIndex: 'deviceSn', key: 'deviceSn', width: 160 },
+      { title: t('ufte.col.stationName'), dataIndex: 'deviceName', key: 'deviceName', ellipsis: true },
       // 后端 UFTE DeviceItem 字段名是 productType（见 internal/ufte/model.go），
       // 不是 productClass —— 前端原 dataIndex 写错，真实数据下永远空。
-      { title: '产品类型', dataIndex: 'productType', key: 'productType', width: 140 },
-      { title: '当前版本', dataIndex: 'currentVersion', key: 'currentVersion', width: 120 },
+      { title: t('ufte.col.productType'), dataIndex: 'productType', key: 'productType', width: 140 },
+      { title: t('ufte.col.currentVersion'), dataIndex: 'currentVersion', key: 'currentVersion', width: 120 },
     ],
-    [],
+    [t],
   );
 
   // Failure reason i18n — mirrors UpgradePlan renderFailureReason
@@ -490,26 +501,26 @@ export default function FileTransferCenter() {
 
   const handleStartTask = (record: UnifiedFileTransferTask) => {
     void startTaskMutation.mutateAsync(record.id)
-      .then(() => void message.success('任务已启动'))
-      .catch((error: unknown) => void message.error(getTaskActionErrorMessage(error, '任务启动失败')));
+      .then(() => void message.success(t('ufte.msg.taskStarted')))
+      .catch((error: unknown) => void message.error(getTaskActionErrorMessage(error, t('ufte.msg.taskStartFailed'))));
   };
 
   const handleSuspendTask = (record: UnifiedFileTransferTask) => {
     void suspendTaskMutation.mutateAsync(record.id)
-      .then(() => void message.success('任务已暂停'))
-      .catch((error: unknown) => void message.error(getTaskActionErrorMessage(error, '任务暂停失败')));
+      .then(() => void message.success(t('ufte.msg.taskPaused')))
+      .catch((error: unknown) => void message.error(getTaskActionErrorMessage(error, t('ufte.msg.taskPauseFailed'))));
   };
 
   const handleTerminateTask = (record: UnifiedFileTransferTask) => {
     void terminateTaskMutation.mutateAsync(record.id)
-      .then(() => void message.success('任务已终止'))
-      .catch((error: unknown) => void message.error(getTaskActionErrorMessage(error, '任务终止失败')));
+      .then(() => void message.success(t('ufte.msg.taskTerminated')))
+      .catch((error: unknown) => void message.error(getTaskActionErrorMessage(error, t('ufte.msg.taskTerminateFailed'))));
   };
 
   const handleDeleteTask = (record: UnifiedFileTransferTask) => {
     void deleteTaskMutation.mutateAsync(record.id)
-      .then(() => void message.success('任务已删除'))
-      .catch((error: unknown) => void message.error(getTaskActionErrorMessage(error, '任务删除失败')));
+      .then(() => void message.success(t('ufte.msg.taskDeleted')))
+      .catch((error: unknown) => void message.error(getTaskActionErrorMessage(error, t('ufte.msg.taskDeleteFailed'))));
   };
 
   // 批量输入 SN → 解析 → 全量候选匹配 → 并入选中。
@@ -520,7 +531,7 @@ export default function FileTransferCenter() {
       raw.split(/[;,\s]+/).map((s) => s.trim()).filter(Boolean),
     ));
     if (tokens.length === 0) {
-      void message.warning('请输入至少一个 SN');
+      void message.warning(t('ufte.msg.snAtLeastOne'));
       return;
     }
     setBatchSNApplying(true);
@@ -546,17 +557,20 @@ export default function FileTransferCenter() {
       // 与已选合并去重
       setSelectedDrawerDeviceIds((prev) => Array.from(new Set([...prev, ...matchedIds])));
       if (unmatched.length === 0) {
-        void message.success(`已批量选中 ${matchedIds.length} 台`);
+        void message.success(t('ufte.msg.batchSelectedCount', { count: matchedIds.length }));
       } else {
-        void message.warning(
-          `成功 ${matchedIds.length} 台；未匹配 ${unmatched.length} 个 SN：${unmatched.slice(0, 5).join('、')}${unmatched.length > 5 ? '…' : ''}`,
-        );
+        void message.warning(t('ufte.msg.batchPartialMatch', {
+          matched: matchedIds.length,
+          unmatched: unmatched.length,
+          sns: unmatched.slice(0, 5).join('、'),
+          ellipsis: unmatched.length > 5 ? '…' : '',
+        }));
       }
       setBatchSNInputOpen(false);
       setBatchSNInputText('');
     } catch (e) {
-      const msg = e instanceof Error ? e.message : '请稍后重试';
-      void message.error(`批量输入失败：${msg}`);
+      const msg = e instanceof Error ? e.message : t('ufte.msg.retryLater');
+      void message.error(t('ufte.msg.batchInputFailed', { msg }));
     } finally {
       setBatchSNApplying(false);
     }
@@ -579,7 +593,7 @@ export default function FileTransferCenter() {
         view: isUpgradeLikeCategory ? 'upgrade' : 'default',
       });
       if (blob.size === 0) {
-        void message.warning('当前过滤条件下没有设备数据可导出');
+        void message.warning(t('ufte.msg.exportEmpty'));
         return;
       }
       const url = URL.createObjectURL(blob);
@@ -590,10 +604,10 @@ export default function FileTransferCenter() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      void message.success('已开始下载');
+      void message.success(t('ufte.msg.exportStarted'));
     } catch (e) {
-      const msg = e instanceof Error ? e.message : '请稍后重试';
-      void message.error(`导出失败：${msg}`);
+      const msg = e instanceof Error ? e.message : t('ufte.msg.retryLater');
+      void message.error(t('ufte.msg.exportFailed', { msg }));
     } finally {
       setDevicesExporting(false);
     }
@@ -619,7 +633,7 @@ export default function FileTransferCenter() {
           onClick={() => openDetailDrawer(record)}
           style={{ paddingInline: 0 }}
         >
-          详情
+          {t('common.detail')}
         </Button>
         {showStart ? (
           <Button
@@ -629,7 +643,7 @@ export default function FileTransferCenter() {
             onClick={() => handleStartTask(record)}
             style={{ paddingInline: 0 }}
           >
-            开始
+            {t('common.start')}
           </Button>
         ) : null}
         {showSuspend ? (
@@ -640,20 +654,20 @@ export default function FileTransferCenter() {
             onClick={() => handleSuspendTask(record)}
             style={{ paddingInline: 0 }}
           >
-            暂停
+            {t('ufte.action.pause')}
           </Button>
         ) : null}
         {showTerminate ? (
-          <Popconfirm title="确认终止该任务？" onConfirm={() => handleTerminateTask(record)}>
+          <Popconfirm title={t('ufte.confirm.terminateTask')} onConfirm={() => handleTerminateTask(record)}>
             <Button type="link" size="small" danger loading={terminateTaskMutation.isPending} style={{ paddingInline: 0 }}>
-              终止
+              {t('common.terminate')}
             </Button>
           </Popconfirm>
         ) : null}
         {showDelete ? (
-          <Popconfirm title="确认删除该任务？" onConfirm={() => handleDeleteTask(record)}>
+          <Popconfirm title={t('ufte.confirm.deleteTask')} onConfirm={() => handleDeleteTask(record)}>
             <Button type="link" size="small" danger loading={deleteTaskMutation.isPending} style={{ paddingInline: 0 }}>
-              删除
+              {t('common.delete')}
             </Button>
           </Popconfirm>
         ) : null}
@@ -662,7 +676,7 @@ export default function FileTransferCenter() {
   };
 
   const taskActionColumn = {
-    title: '操作',
+    title: t('common.operation'),
     key: 'action',
     width: 190,
     align: 'center' as const,
@@ -732,53 +746,53 @@ export default function FileTransferCenter() {
         taskActionColumn,
         {
           // 任务名称：默认按 业务_用户_时间 自动生成（约 30-40 字符），固定 280 + Tooltip 兜底。
-          title: '任务名称',
+          title: t('ufte.col.taskName'),
           dataIndex: 'taskName',
           key: 'taskName',
           width: 280,
           render: (_, record) => renderEllipsisCell(record.taskName, { strong: true }),
         },
         {
-          title: '操作人',
+          title: t('ufte.col.operator'),
           dataIndex: 'createUser',
           key: 'createUser',
           width: 130,
           render: (value: string) => renderEllipsisCell(value),
         },
         {
-          title: '操作时间',
+          title: t('ufte.col.operationTime'),
           dataIndex: 'createdAt',
           key: 'createdAt',
           width: 180,
           render: (value: string) => new Date(value).toLocaleString('zh-CN'),
         },
         {
-          title: '状态',
+          title: t('common.status'),
           dataIndex: 'status',
           key: 'status',
           width: 110,
-          render: (_, record) => renderTaskStatus(record.status),
+          render: (_, record) => renderTaskStatus(record.status, t),
         },
         {
-          title: '目标版本',
+          title: t('ufte.col.destVersion'),
           key: 'targetVersion',
           width: 180,
           render: (_, record) => renderEllipsisCell(getTaskTargetVersion(record)),
         },
         {
-          title: '升级类型',
+          title: t('ufte.col.upgradeType'),
           key: 'upgradeType',
           width: 120,
-          render: (_, record) => <Tag color="blue">{getUpgradeTypeLabel(record.category, record.typeDisplayName)}</Tag>,
+          render: (_, record) => <Tag color="blue">{getUpgradeTypeLabel(record.category, record.typeDisplayName, t)}</Tag>,
         },
         {
-          title: '产品类型',
+          title: t('ufte.col.productType'),
           key: 'productType',
           width: 130,
           render: (_, record) => renderEllipsisCell(getTaskProductClass(record)),
         },
         {
-          title: '升级进度',
+          title: t('ufte.col.upgradeProgress'),
           dataIndex: 'progress',
           key: 'progress',
           width: 150,
@@ -787,25 +801,25 @@ export default function FileTransferCenter() {
           ),
         },
         {
-          title: '结果',
+          title: t('ufte.col.result'),
           dataIndex: 'result',
           key: 'result',
           width: 100,
           render: (value) => {
             if (!value) return '-';
             const color = value === 'success' ? 'success' : value === 'partial' ? 'warning' : 'error';
-            const label = value === 'success' ? '成功' : value === 'partial' ? '部分成功' : value === 'terminated' ? '已终止' : '失败';
+            const label = value === 'success' ? t('ufte.result.success') : value === 'partial' ? t('ufte.result.partial') : value === 'terminated' ? t('ufte.result.terminated') : t('ufte.result.failed');
             return <Tag color={color}>{label}</Tag>;
           },
         },
         {
-          title: '开始时间',
+          title: t('ufte.col.startTime'),
           key: 'startTime',
           width: 180,
           render: (_, record) => record.executionMode === 'scheduled' && record.scheduledAt ? new Date(record.scheduledAt).toLocaleString('zh-CN') : '-',
         },
         {
-          title: '结束时间',
+          title: t('ufte.col.endTime'),
           key: 'endTime',
           width: 180,
           render: (_, record) => record.status === 'ended' ? new Date(record.createdAt).toLocaleString('zh-CN') : '-',
@@ -816,84 +830,81 @@ export default function FileTransferCenter() {
     return [
       taskActionColumn,
       {
-        // 任务名称（非升级类）：默认按 业务_用户_时间 自动生成；副行展示业务类型。
-        // 固定 280 + Tooltip 兜底，避免长名挤压后续列。
-        title: '任务名称',
+        // 任务名称（非升级类）：默认按 业务_用户_时间 自动生成；任务名前缀已带业务类型
+        // （运行日志_admin_... / 配置文件备份_... 等），不再加 typeDisplayName 副行
+        // 重复显示。固定 280 + Tooltip 兜底，避免长名挤压后续列。
+        title: t('ufte.col.taskName'),
         dataIndex: 'taskName',
         key: 'taskName',
         width: 280,
-        render: (_, record) => renderEllipsisCell(record.taskName, {
-          strong: true,
-          subtitle: record.typeDisplayName,
-          maxWidth: 260,
-        }),
+        render: (_, record) => renderEllipsisCell(record.taskName, { strong: true }),
       },
       {
-        title: '执行人',
+        title: t('ufte.col.executor'),
         dataIndex: 'createUser',
         key: 'createUser',
         width: 130,
         render: (value: string) => renderEllipsisCell(value),
       },
       {
-        title: '状态',
+        title: t('common.status'),
         dataIndex: 'status',
         key: 'status',
         width: 120,
-        render: (_, record) => renderTaskStatus(record.status),
+        render: (_, record) => renderTaskStatus(record.status, t),
       },
       // 备份 / 日志采集 / 配置恢复 等 OUTPUT 文件类（非升级类）主任务跨多设备，没有
       // "当前步骤"概念——单设备的 RPC 步骤在设备列表展示。详见
       // docs/project/backup-display-fix-20260520.md F1。
       {
-        title: '进度',
+        title: t('ufte.col.progress'),
         dataIndex: 'progress',
         key: 'progress',
         width: 180,
         render: (value: number, record) => (
           <Space direction="vertical" size={4} style={{ width: '100%' }}>
             <Progress percent={value} size="small" status={record.status === 'ended' ? 'success' : 'active'} />
-            <Text type="secondary">成功 {record.successCount} / 失败 {record.failCount} / 总数 {record.totalCount}</Text>
+            <Text type="secondary">{t('ufte.col.statsBrief', { ok: record.successCount, fail: record.failCount, total: record.totalCount })}</Text>
           </Space>
         ),
       },
       {
-        title: '执行方式',
+        title: t('ufte.col.executionMode'),
         dataIndex: 'executionMode',
         key: 'executionMode',
         width: 120,
         render: (value) => {
-          const label = EXECUTION_MODE_OPTIONS.find((item) => item.value === value)?.label ?? value;
+          const label = executionModeOptions.find((item) => item.value === value)?.label ?? value;
           return <Tag>{label}</Tag>;
         },
       },
       {
-        title: '结果',
+        title: t('ufte.col.result'),
         dataIndex: 'result',
         key: 'result',
         width: 100,
         render: (value) => {
           if (!value) return '—';
           const color = value === 'success' ? 'success' : value === 'partial' ? 'warning' : 'error';
-          const label = value === 'success' ? '成功' : value === 'partial' ? '部分成功' : value === 'terminated' ? '已终止' : '失败';
+          const label = value === 'success' ? t('ufte.result.success') : value === 'partial' ? t('ufte.result.partial') : value === 'terminated' ? t('ufte.result.terminated') : t('ufte.result.failed');
           return <Tag color={color}>{label}</Tag>;
         },
       },
       {
-        title: '创建时间',
+        title: t('ufte.col.createdAt'),
         dataIndex: 'createdAt',
         key: 'createdAt',
         width: 180,
         render: (value: string) => new Date(value).toLocaleString('zh-CN'),
       },
     ];
-  }, [isUpgradeLikeCategory, taskTypes]);
+  }, [isUpgradeLikeCategory, taskTypes, t]);
 
   const deviceColumns: ColumnsType<UnifiedFileTransferDeviceItem> = useMemo(() => {
     if (isUpgradeLikeCategory) {
       return [
         {
-          title: '基站编码',
+          title: t('ufte.col.stationCode'),
           dataIndex: 'deviceSn',
           key: 'deviceSn',
           width: 150,
@@ -902,41 +913,41 @@ export default function FileTransferCenter() {
         {
           // 自动生成的 taskName 形如 "Upgrade_admin_2026-05-21 14:05:07"（约 35 字符），
           // 180 列宽无法容纳。280 + Tooltip 兜底，跟非升级类设备列表对齐。
-          title: '任务名称',
+          title: t('ufte.col.taskName'),
           dataIndex: 'taskName',
           key: 'taskName',
           width: 280,
           render: (value: string) => renderEllipsisCell(value, { strong: true }),
         },
         {
-          title: '源版本',
+          title: t('ufte.col.sourceVersion'),
           dataIndex: 'currentVersion',
           key: 'currentVersion',
           width: 140,
           render: (value: string) => renderEllipsisCell(value),
         },
         {
-          title: '目标版本',
+          title: t('ufte.col.destVersion'),
           dataIndex: 'targetVersion',
           key: 'targetVersion',
           width: 160,
           render: (value: string) => renderEllipsisCell(value),
         },
         {
-          title: '升级类型',
+          title: t('ufte.col.upgradeType'),
           key: 'upgradeType',
           width: 120,
-          render: (_, record) => <Tag color="blue">{getUpgradeTypeLabel(record.category, record.typeDisplayName)}</Tag>,
+          render: (_, record) => <Tag color="blue">{getUpgradeTypeLabel(record.category, record.typeDisplayName, t)}</Tag>,
         },
         {
-          title: '产品类型',
+          title: t('ufte.col.productType'),
           dataIndex: 'productType',
           key: 'productType',
           width: 130,
           render: (value: string) => renderEllipsisCell(value),
         },
         {
-          title: '升级进度',
+          title: t('ufte.col.upgradeProgress'),
           dataIndex: 'progress',
           key: 'progress',
           width: 130,
@@ -950,14 +961,14 @@ export default function FileTransferCenter() {
           },
         },
         {
-          title: '结果',
+          title: t('ufte.col.result'),
           dataIndex: 'status',
           key: 'status',
           width: 110,
-          render: (_, record) => renderDeviceStatus(record.status),
+          render: (_, record) => renderDeviceStatus(record.status, t),
         },
         {
-          title: '操作人',
+          title: t('ufte.col.operator'),
           dataIndex: 'operatorScope',
           key: 'operatorScope',
           width: 140,
@@ -965,7 +976,7 @@ export default function FileTransferCenter() {
         },
         failureReasonColumn,
         {
-          title: '操作时间',
+          title: t('ufte.col.operationTime'),
           dataIndex: 'lastReportAt',
           key: 'lastReportAt',
           width: 180,
@@ -980,7 +991,7 @@ export default function FileTransferCenter() {
         // 上下文，他刚创建的 testNV 想看这个任务的进展），副显示设备名（区分多设备）。
         // 列宽 280：UFTE 自动生成的任务名形如 "ConfigBackupNV_admin_2026-05-21 13:39:55"
         // 约 36 字符，hover Tooltip 看全名。
-        title: '任务/设备',
+        title: t('ufte.col.taskOrDevice'),
         dataIndex: 'taskName',
         key: 'taskName',
         width: 280,
@@ -991,21 +1002,21 @@ export default function FileTransferCenter() {
         }),
       },
       {
-        title: '设备 SN',
+        title: t('ufte.col.deviceSn'),
         dataIndex: 'deviceSn',
         key: 'deviceSn',
         width: 150,
         render: (value: string) => renderEllipsisCell(value),
       },
       {
-        title: '产品类型',
+        title: t('ufte.col.productType'),
         dataIndex: 'productType',
         key: 'productType',
         width: 130,
         render: (value: string) => renderEllipsisCell(value),
       },
       {
-        title: '当前版本',
+        title: t('ufte.col.currentVersion'),
         dataIndex: 'currentVersion',
         key: 'currentVersion',
         width: 140,
@@ -1017,7 +1028,7 @@ export default function FileTransferCenter() {
         // 落地后，后端附带 downloadUrl，UI 渲染为可点击链接。详见
         // docs/project/backup-display-fix-20260520.md F3。
         // 列宽 240 — 文件名常超 220，Tooltip 兜底完整看到。
-        title: '目标版本/目标文件',
+        title: t('ufte.col.destVersionOrFile'),
         key: 'targetVersion',
         width: 240,
         render: (_, record) => {
@@ -1040,28 +1051,28 @@ export default function FileTransferCenter() {
         },
       },
       {
-        title: '状态',
+        title: t('common.status'),
         dataIndex: 'status',
         key: 'status',
         width: 110,
-        render: (_, record) => renderDeviceStatus(record.status),
+        render: (_, record) => renderDeviceStatus(record.status, t),
       },
-      { title: '进度', dataIndex: 'progress', key: 'progress', width: 180, render: (value: number) => <Progress percent={value} size="small" status={value === 100 ? 'success' : 'active'} /> },
+      { title: t('ufte.col.progress'), dataIndex: 'progress', key: 'progress', width: 180, render: (value: number) => <Progress percent={value} size="small" status={value === 100 ? 'success' : 'active'} /> },
       failureReasonColumn,
       {
-        title: '上报时间',
+        title: t('ufte.col.reportTime'),
         dataIndex: 'lastReportAt',
         key: 'lastReportAt',
         width: 180,
         render: (value: string) => new Date(value).toLocaleString('zh-CN'),
       },
     ];
-  }, [isUpgradeLikeCategory]);
+  }, [isUpgradeLikeCategory, t]);
 
   const openTaskDrawer = (typeCode?: string) => {
     const nextTypeCode = typeCode || selectedTypeCode || activeTaskType?.typeCode;
     if (!nextTypeCode) {
-      void message.warning('当前业务视图下还没有模板，请联系管理员先维护模板。');
+      void message.warning(t('ufte.msg.noTemplate'));
       return;
     }
     const defaultTaskName = buildDefaultTaskName(nextTypeCode, taskNameUser, appLocale);
@@ -1132,21 +1143,21 @@ export default function FileTransferCenter() {
     }
     const values = await taskForm.validateFields();
     if (selectedDrawerDeviceIds.length === 0) {
-      void message.warning('请选择设备。');
+      void message.warning(t('ufte.msg.pickDevice'));
       return;
     }
     // T-0164: CONFIG_RESTORE 整批拒绝 — 任一设备缺快照即阻止提交。
     if (isConfigRestoreBlockedByMissing) {
-      void message.error(
-        `以下设备无可用配置快照，请先备份或在"配置快照库"导入：${snapshotProbe?.missing.join(', ') ?? ''}`,
-      );
+      void message.error(t('ufte.msg.snapshotMissing', {
+        sns: snapshotProbe?.missing.join(', ') ?? '',
+      }));
       return;
     }
     // T-0165: LICENSE_UPGRADE 同款整批拒绝 — 任一设备缺 license 即阻止提交。
     if (isLicenseUpgradeBlockedByMissing) {
-      void message.error(
-        `以下设备未上传 license，请先在"文件管理 → License 文件"导入：${licenseProbe?.missing.join(', ') ?? ''}`,
-      );
+      void message.error(t('ufte.msg.licenseMissing', {
+        sns: licenseProbe?.missing.join(', ') ?? '',
+      }));
       return;
     }
     if (createTaskMutation.isPending) {
@@ -1159,19 +1170,19 @@ export default function FileTransferCenter() {
         deviceCount: selectedDrawerDeviceIds.length,
       })
       .then(() => {
-        void message.success('任务已创建。');
+        void message.success(t('ufte.msg.taskCreated'));
         setTaskDrawerOpen(false);
         setSelectedDrawerDeviceIds([]);
         taskForm.resetFields();
       })
       .catch((error: unknown) => {
-        void message.error(getTaskActionErrorMessage(error, '创建任务失败，请稍后重试'));
+        void message.error(getTaskActionErrorMessage(error, t('ufte.msg.taskCreateFailed')));
       });
   };
 
   return (
     <ListPageLayout
-      title="任务创建"
+      title={t('ufte.page.taskCreate')}
       extra={(
         <Button
           type="primary"
@@ -1179,17 +1190,20 @@ export default function FileTransferCenter() {
           onClick={() => openTaskDrawer()}
           disabled={taskTypesLoading || !activeTaskType}
         >
-          新建任务
+          {t('ufte.action.newTask')}
         </Button>
       )}
     >
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
         <Card>
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Title level={4} style={{ margin: 0 }}>任务创建</Title>
+            <Title level={4} style={{ margin: 0 }}>{t('ufte.page.taskCreate')}</Title>
             <Tabs
               activeKey={selectedCategory}
-              items={categories.map((item) => ({ key: item.category, label: item.categoryLabel }))}
+              items={categories.map((item) => ({
+                key: item.category,
+                label: localizeBuiltinCategoryLabel(item.category, item.categoryLabel, t),
+              }))}
               onChange={(key) => setSelectedCategory(key)}
             />
             <Tabs
@@ -1200,20 +1214,20 @@ export default function FileTransferCenter() {
           </Space>
         </Card>
 
-        <Card title="执行视图">
+        <Card title={t('ufte.card.executionView')}>
           <Tabs
             activeKey={viewMode}
             onChange={(key) => setViewMode(key as 'tasks' | 'devices')}
             items={[
               {
                 key: 'tasks',
-                label: '任务列表',
+                label: t('ufte.tab.taskList'),
                 children: (
                   <Space direction="vertical" size={12} style={{ width: '100%' }}>
                     <Space wrap>
                       <Input.Search
                         allowClear
-                        placeholder="按任务名称、类型搜索"
+                        placeholder={t('ufte.search.tasks')}
                         value={taskKeywordInput}
                         onChange={(event) => setTaskKeywordInput(event.target.value)}
                         onSearch={(value) => setTaskKeyword(value.trim())}
@@ -1227,14 +1241,14 @@ export default function FileTransferCenter() {
                       />
                       <Select
                         allowClear
-                        placeholder="按状态过滤"
+                        placeholder={t('ufte.filter.status')}
                         value={taskStatusFilter}
                         onChange={(value) => setTaskStatusFilter(value)}
                         options={[
-                          { label: '待执行', value: 'pending' },
-                          { label: '执行中', value: 'in_progress' },
-                          { label: '已挂起', value: 'suspended' },
-                          { label: '已结束', value: 'ended' },
+                          { label: t('ufte.status.pending'), value: 'pending' },
+                          { label: t('ufte.status.inProgress'), value: 'in_progress' },
+                          { label: t('ufte.status.suspended'), value: 'suspended' },
+                          { label: t('ufte.status.ended'), value: 'ended' },
                         ]}
                         style={{ width: 160 }}
                       />
@@ -1248,33 +1262,35 @@ export default function FileTransferCenter() {
                           onClick={() => {
                             const ids = selectedTaskIds.map(String);
                             Modal.confirm({
-                              title: '确认批量删除？',
-                              content: `将删除 ${ids.length} 个任务（含其设备子任务 + MinIO 备份/日志文件），不可恢复。运行中的任务请先终止。`,
+                              title: t('ufte.msg.batchDeleteConfirmTitle'),
+                              content: t('ufte.msg.batchDeleteConfirmContent', { count: ids.length }),
                               okType: 'danger',
                               onOk: async () => {
                                 try {
                                   const res = await batchDeleteTasksMutation.mutateAsync(ids);
                                   if (res.failed.length === 0) {
-                                    void message.success(`已删除 ${res.succeeded.length} 个任务`);
+                                    void message.success(t('ufte.msg.batchDeleteSuccess', { count: res.succeeded.length }));
                                   } else {
-                                    void message.warning(
-                                      `成功 ${res.succeeded.length}，失败 ${res.failed.length}：${res.failed.map((f) => f.error).join('；')}`,
-                                    );
+                                    void message.warning(t('ufte.msg.batchDeletePartial', {
+                                      succeeded: res.succeeded.length,
+                                      failed: res.failed.length,
+                                      errors: res.failed.map((f) => f.error).join('；'),
+                                    }));
                                   }
                                   setSelectedTaskIds((prev) =>
                                     prev.filter((k) => !res.succeeded.includes(String(k))),
                                   );
                                 } catch {
-                                  void message.error('批量删除请求失败，请稍后重试');
+                                  void message.error(t('ufte.msg.batchDeleteFailed'));
                                 }
                               },
                             });
                           }}
                         >
-                          批量删除（{selectedTaskIds.length}）
+                          {t('ufte.action.batchDeleteWithCount', { count: selectedTaskIds.length })}
                         </Button>
                         <Button type="link" onClick={() => setSelectedTaskIds([])}>
-                          取消选择
+                          {t('ufte.action.cancelSelection')}
                         </Button>
                       </Space>
                     )}
@@ -1292,7 +1308,7 @@ export default function FileTransferCenter() {
                         pageSize: taskPageSize,
                         total: tasksData?.total ?? 0,
                         showSizeChanger: true,
-                        showTotal: (total) => `共 ${total} 条`,
+                        showTotal: (total) => t('ufte.common.totalCount', { count: total }),
                         onChange: (page, pageSize) => {
                           setTaskPage(page);
                           setTaskPageSize(pageSize);
@@ -1305,13 +1321,13 @@ export default function FileTransferCenter() {
               },
               {
                 key: 'devices',
-                label: '设备列表',
+                label: t('ufte.tab.deviceList'),
                 children: (
                   <Space direction="vertical" size={12} style={{ width: '100%' }}>
                     <Space wrap>
                       <Input.Search
                         allowClear
-                        placeholder="按设备名称、SN、任务名称搜索"
+                        placeholder={t('ufte.search.devices')}
                         value={deviceKeywordInput}
                         onChange={(event) => setDeviceKeywordInput(event.target.value)}
                         onSearch={(value) => setDeviceKeyword(value.trim())}
@@ -1326,7 +1342,7 @@ export default function FileTransferCenter() {
                       <Select
                         allowClear
                         showSearch
-                        placeholder="按产品类型过滤"
+                        placeholder={t('ufte.filter.productType')}
                         value={deviceProductClassFilter}
                         onChange={(value) => setDeviceProductClassFilter(value)}
                         options={deviceProductClassOptions}
@@ -1335,20 +1351,20 @@ export default function FileTransferCenter() {
                       />
                       <Select
                         allowClear
-                        placeholder="按状态过滤"
+                        placeholder={t('ufte.filter.status')}
                         value={deviceStatusFilter}
                         onChange={(value) => setDeviceStatusFilter(value)}
                         options={[
-                          { label: '待执行', value: 'pending' },
+                          { label: t('ufte.status.pending'), value: 'pending' },
                           // 升级 / 回滚类（Download RPC）
-                          { label: '下载中', value: 'downloading' },
+                          { label: t('ufte.status.downloading'), value: 'downloading' },
                           // 备份 / 日志采集类（Upload RPC）的两个子阶段
-                          { label: '上传中', value: 'uploading' },
-                          { label: '等待 TransferComplete', value: 'awaiting_tc' },
-                          { label: '校验中', value: 'verifying' },
-                          { label: '已挂起', value: 'suspended' },
-                          { label: '已完成', value: 'ended' },
-                          { label: '失败', value: 'failed' },
+                          { label: t('ufte.status.uploading'), value: 'uploading' },
+                          { label: t('ufte.status.awaitingTc'), value: 'awaiting_tc' },
+                          { label: t('ufte.status.verifying'), value: 'verifying' },
+                          { label: t('ufte.status.suspended'), value: 'suspended' },
+                          { label: t('ufte.status.completed'), value: 'ended' },
+                          { label: t('ufte.status.failed'), value: 'failed' },
                         ]}
                         style={{ width: 160 }}
                       />
@@ -1357,7 +1373,7 @@ export default function FileTransferCenter() {
                         loading={devicesExporting}
                         onClick={() => { void handleExportDevices(); }}
                       >
-                        导出 CSV
+                        {t('ufte.action.exportCsv')}
                       </Button>
                     </Space>
                     <Table<UnifiedFileTransferDeviceItem>
@@ -1370,7 +1386,7 @@ export default function FileTransferCenter() {
                         pageSize: devicePageSize,
                         total: devicesData?.total ?? 0,
                         showSizeChanger: true,
-                        showTotal: (total) => `共 ${total} 条`,
+                        showTotal: (total) => t('ufte.common.totalCount', { count: total }),
                         onChange: (page, pageSize) => {
                           setDevicePage(page);
                           setDevicePageSize(pageSize);
@@ -1387,54 +1403,54 @@ export default function FileTransferCenter() {
       </Space>
 
       <Drawer
-        title="新建任务"
+        title={t('ufte.drawer.newTask')}
         width={520}
         open={taskDrawerOpen}
         onClose={() => setTaskDrawerOpen(false)}
         destroyOnClose
         extra={(
           <Space>
-            <Button onClick={() => setTaskDrawerOpen(false)}>取消</Button>
+            <Button onClick={() => setTaskDrawerOpen(false)}>{t('common.cancel')}</Button>
             <Button
               type="primary"
               loading={createTaskMutation.isPending}
               disabled={isConfigRestoreBlockedByMissing || isLicenseUpgradeBlockedByMissing}
               onClick={() => void handleCreateTask()}
             >
-              创建
+              {t('ufte.action.create')}
             </Button>
           </Space>
         )}
       >
         <Form form={taskForm} layout="vertical">
-          <Form.Item label="任务名称" name="taskName" rules={[{ required: true, message: '请输入任务名称' }]}>
-            <Input placeholder="例如：Upgrade_admin_2026-05-21 05:33:55（默认按业务_用户_时间生成，可改）" />
+          <Form.Item label={t('ufte.form.taskName')} name="taskName" rules={[{ required: true, message: t('ufte.form.taskName.required') }]}>
+            <Input placeholder={t('ufte.form.taskName.placeholder')} />
           </Form.Item>
-          <Form.Item label="任务类型" name="typeCode" rules={[{ required: true, message: '请选择任务类型' }]}> 
+          <Form.Item label={t('ufte.form.taskType')} name="typeCode" rules={[{ required: true, message: t('ufte.form.taskType.required') }]}>
             <Select
               options={taskTypeOptions}
-              placeholder="请选择任务类型"
+              placeholder={t('ufte.form.taskType.required')}
               disabled={taskTypeOptions.length <= 1}
             />
           </Form.Item>
           {needsFirmwareSelection(drawerTaskType) ? (
             <>
-              <Form.Item label="产品类型" name="productClass" rules={[{ required: true, message: '请选择产品类型' }]}> 
+              <Form.Item label={t('ufte.form.productClass')} name="productClass" rules={[{ required: true, message: t('ufte.form.productClass.required') }]}>
                 <Select
                   allowClear
                   showSearch
-                  placeholder="请选择产品类型"
+                  placeholder={t('ufte.form.productClass.required')}
                   options={drawerProductClassOptions}
                   optionFilterProp="label"
                 />
               </Form.Item>
               <Form.Item
-                label="升级文件"
+                label={t('ufte.form.firmware')}
                 name="firmwareId"
-                rules={[{ required: true, message: '请选择升级文件' }]}
+                rules={[{ required: true, message: t('ufte.form.firmware.required') }]}
                 extra={(
                   <Space direction="vertical" size={0}>
-                    <Text type="secondary">当前模板查询的软件库分类：{getSoftwareLibraryFileTypeLabel(firmwareLibraryFileType)}</Text>
+                    <Text type="secondary">{t('ufte.form.firmwareLibraryHint', { kind: getSoftwareLibraryFileTypeLabel(firmwareLibraryFileType, t) })}</Text>
                     <Space size={12}>
                       {/* 新窗口打开 — 用户在新 tab 上传完关闭即可回原弹窗，表单状态不丢；
                           回到原 tab 时 React Query 默认 refetchOnWindowFocus 会自动刷新固件列表。 */}
@@ -1472,25 +1488,25 @@ export default function FileTransferCenter() {
                   disabled={!drawerProductClass}
                   placeholder={
                     !drawerProductClass
-                      ? '请先选择产品类型'
+                      ? t('ufte.form.firmware.needProductFirst')
                       : firmwareOptions.length > 0
-                        ? '请选择升级文件'
-                        : `暂无可用${getSoftwareLibraryFileTypeLabel(firmwareLibraryFileType)}，请先到软件管理对应分类上传`
+                        ? t('ufte.form.firmware.required')
+                        : t('ufte.form.firmware.empty', { kind: getSoftwareLibraryFileTypeLabel(firmwareLibraryFileType, t) })
                   }
                   options={firmwareOptions}
                   optionFilterProp="label"
                 />
               </Form.Item>
               <Form.Item name="isKeepConfig" valuePropName="checked">
-                <Checkbox>保留配置</Checkbox>
+                <Checkbox>{t('ufte.form.keepConfig')}</Checkbox>
               </Form.Item>
             </>
           ) : null}
-          <Form.Item label="选择设备" required>
+          <Form.Item label={t('ufte.form.deviceSelection')} required>
             <Space direction="vertical" size={12} style={{ width: '100%' }}>
               <Space>
                 <Input.Search
-                  placeholder="按 SN 搜索设备"
+                  placeholder={t('ufte.form.deviceSearchPlaceholder')}
                   allowClear
                   style={{ width: 240 }}
                   value={drawerDeviceKeywordInput}
@@ -1501,7 +1517,7 @@ export default function FileTransferCenter() {
                   icon={<PlusOutlined />}
                   onClick={() => { setBatchSNInputOpen(true); setBatchSNInputText(''); }}
                 >
-                  批量输入 SN
+                  {t('ufte.action.batchSnInput')}
                 </Button>
                 <Text type="secondary">已选 {drawerSelectedDevices.length} 台</Text>
               </Space>
@@ -1550,7 +1566,7 @@ export default function FileTransferCenter() {
                 {drawerSelectedDevices.length === 0 ? (
                   <Text type="secondary">请先在上方选择设备，下表自动展示 license 详情。</Text>
                 ) : licenseProbing ? (
-                  <Tag color="processing">检查 license 中…</Tag>
+                  <Tag color="processing">{t('ufte.tag.licenseChecking')}</Tag>
                 ) : !licenseProbe ? null : (
                   <>
                     <Space size={12}>
@@ -1571,9 +1587,9 @@ export default function FileTransferCenter() {
                       pagination={false}
                       scroll={{ y: 200 }}
                       columns={[
-                        { title: '设备 SN', dataIndex: 'deviceSn', key: 'sn', width: 180 },
+                        { title: t('ufte.col.deviceSn'), dataIndex: 'deviceSn', key: 'sn', width: 180 },
                         {
-                          title: '文件名称',
+                          title: t('ufte.col.fileName'),
                           key: 'file',
                           width: 240,
                           ellipsis: true,
@@ -1582,12 +1598,12 @@ export default function FileTransferCenter() {
                             return lic ? (
                               <Text code style={{ fontSize: 12 }}>{lic.fileName}</Text>
                             ) : (
-                              <Tag color="error">缺失</Tag>
+                              <Tag color="error">{t('ufte.tag.missing')}</Tag>
                             );
                           },
                         },
                         {
-                          title: '更新时间',
+                          title: t('common.updateTime'),
                           key: 'updateTime',
                           width: 160,
                           render: (_, rec) => {
@@ -1632,7 +1648,7 @@ export default function FileTransferCenter() {
                 {drawerSelectedDevices.length === 0 ? (
                   <Text type="secondary">请先在上方选择设备，下表自动展示快照详情。</Text>
                 ) : snapshotProbing ? (
-                  <Tag color="processing">检查快照中…</Tag>
+                  <Tag color="processing">{t('ufte.tag.snapshotChecking')}</Tag>
                 ) : !snapshotProbe ? null : (
                   <>
                     <Space size={12}>
@@ -1653,9 +1669,9 @@ export default function FileTransferCenter() {
                       pagination={false}
                       scroll={{ y: 200 }}
                       columns={[
-                        { title: '设备 SN', dataIndex: 'deviceSn', key: 'sn', width: 180 },
+                        { title: t('ufte.col.deviceSn'), dataIndex: 'deviceSn', key: 'sn', width: 180 },
                         {
-                          title: '文件名称',
+                          title: t('ufte.col.fileName'),
                           key: 'file',
                           width: 240,
                           ellipsis: true,
@@ -1664,12 +1680,12 @@ export default function FileTransferCenter() {
                             return snap ? (
                               <Text code style={{ fontSize: 12 }}>{snap.fileName}</Text>
                             ) : (
-                              <Tag color="error">缺失</Tag>
+                              <Tag color="error">{t('ufte.tag.missing')}</Tag>
                             );
                           },
                         },
                         {
-                          title: '更新时间',
+                          title: t('common.updateTime'),
                           key: 'updateTime',
                           width: 160,
                           render: (_, rec) => {
@@ -1678,16 +1694,16 @@ export default function FileTransferCenter() {
                           },
                         },
                         {
-                          title: '来源',
+                          title: t('ufte.col.source'),
                           key: 'source',
                           width: 100,
                           render: (_, rec) => {
                             const snap = snapshotProbe.found[rec.deviceSn];
                             if (!snap) return null;
                             return snap.source === 'backup' ? (
-                              <Tag color="blue">备份</Tag>
+                              <Tag color="blue">{t('ufte.tag.backup')}</Tag>
                             ) : (
-                              <Tag color="green">手动导入</Tag>
+                              <Tag color="green">{t('ufte.tag.manualImport')}</Tag>
                             );
                           },
                         },
@@ -1699,31 +1715,31 @@ export default function FileTransferCenter() {
             </Form.Item>
           ) : null}
 
-          <Form.Item label="执行方式" name="executionMode" rules={[{ required: true, message: '请选择执行方式' }]}>
+          <Form.Item label={t('ufte.form.executionMode')} name="executionMode" rules={[{ required: true, message: t('ufte.form.executionMode.required') }]}>
             <Radio.Group options={createExecutionModeOptions} optionType="button" buttonStyle="solid" />
           </Form.Item>
-          <Form.Item label="备注" name="note">
-            <Input.TextArea rows={4} placeholder="可填写灰度范围、验证目标或领导评审备注" />
+          <Form.Item label={t('ufte.form.note')} name="note">
+            <Input.TextArea rows={4} placeholder={t('ufte.form.note.placeholder')} />
           </Form.Item>
         </Form>
 
         {/* 批量输入 SN 弹窗 — 给当前任务的设备表加批量勾选入口 */}
         <Modal
-          title="批量输入 SN"
+          title={t('ufte.batchSnModal.title')}
           open={batchSNInputOpen}
           onCancel={() => setBatchSNInputOpen(false)}
           onOk={() => { void handleApplyBatchSNs(); }}
-          okText="确定"
-          cancelText="取消"
+          okText={t('common.confirm')}
+          cancelText={t('common.cancel')}
           confirmLoading={batchSNApplying}
           width={520}
           destroyOnClose
         >
           <Form layout="vertical">
-            <Form.Item label="Serial Number">
+            <Form.Item label={t('ufte.batchSnModal.label')}>
               <Input.TextArea
                 rows={6}
-                placeholder="粘贴或输入多个 SN，按分号 ; 逗号 , 空格、Tab 或换行分隔"
+                placeholder={t('ufte.batchSnModal.placeholder')}
                 value={batchSNInputText}
                 onChange={(e) => setBatchSNInputText(e.target.value)}
                 allowClear
@@ -1738,7 +1754,7 @@ export default function FileTransferCenter() {
       </Drawer>
 
       <Drawer
-        title={detailTask ? `任务详情 · ${detailTask.taskName}` : '任务详情'}
+        title={detailTask ? t('ufte.drawer.taskDetailWithName', { name: detailTask.taskName }) : t('ufte.drawer.taskDetail')}
         width={640}
         open={detailDrawerOpen}
         onClose={() => { setDetailDrawerOpen(false); setDetailTask(null); }}
@@ -1747,24 +1763,24 @@ export default function FileTransferCenter() {
         {detailTask ? (
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <Descriptions column={2} size="small" bordered>
-              <Descriptions.Item label="任务名称">{detailTask.taskName}</Descriptions.Item>
-              <Descriptions.Item label="任务类型">{detailTask.typeDisplayName}</Descriptions.Item>
-              <Descriptions.Item label="状态">{renderTaskStatus(detailTask.status)}</Descriptions.Item>
-              <Descriptions.Item label="结果">
+              <Descriptions.Item label={t('ufte.col.taskName')}>{detailTask.taskName}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.col.taskType')}>{localizeBuiltinTypeName(detailTask.typeCode, detailTask.typeDisplayName, t)}</Descriptions.Item>
+              <Descriptions.Item label={t('common.status')}>{renderTaskStatus(detailTask.status, t)}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.col.result')}>
                 {detailTask.result
-                  ? <Tag color={detailTask.result === 'success' ? 'success' : detailTask.result === 'partial' ? 'warning' : 'error'}>{detailTask.result === 'success' ? '成功' : detailTask.result === 'partial' ? '部分成功' : detailTask.result === 'terminated' ? '已终止' : '失败'}</Tag>
+                  ? <Tag color={detailTask.result === 'success' ? 'success' : detailTask.result === 'partial' ? 'warning' : 'error'}>{detailTask.result === 'success' ? t('ufte.result.success') : detailTask.result === 'partial' ? t('ufte.result.partial') : detailTask.result === 'terminated' ? t('ufte.result.terminated') : t('ufte.result.failed')}</Tag>
                   : '-'}
               </Descriptions.Item>
-              <Descriptions.Item label="目标版本">{getTaskTargetVersion(detailTask)}</Descriptions.Item>
-              <Descriptions.Item label="产品类型">{getTaskProductClass(detailTask)}</Descriptions.Item>
-              <Descriptions.Item label="执行方式">
-                <Tag>{EXECUTION_MODE_OPTIONS.find((o) => o.value === detailTask.executionMode)?.label ?? detailTask.executionMode}</Tag>
+              <Descriptions.Item label={t('ufte.col.destVersion')}>{getTaskTargetVersion(detailTask)}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.col.productType')}>{getTaskProductClass(detailTask)}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.col.executionMode')}>
+                <Tag>{executionModeOptions.find((o) => o.value === detailTask.executionMode)?.label ?? detailTask.executionMode}</Tag>
               </Descriptions.Item>
-              <Descriptions.Item label="当前步骤">{STEP_LABELS[detailTask.currentStep as TransferStepId] ?? '-'}</Descriptions.Item>
-              <Descriptions.Item label="操作人">{detailTask.createUser}</Descriptions.Item>
-              <Descriptions.Item label="创建时间">{new Date(detailTask.createdAt).toLocaleString('zh-CN')}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.col.currentStep')}>{stepLabels[detailTask.currentStep as TransferStepId] ?? '-'}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.col.operator')}>{detailTask.createUser}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.col.createdAt')}>{new Date(detailTask.createdAt).toLocaleString('zh-CN')}</Descriptions.Item>
             </Descriptions>
-            <Card title="执行进度" size="small">
+            <Card title={t('ufte.card.executionProgress')} size="small">
               <Space direction="vertical" size={12} style={{ width: '100%' }}>
                 <Progress
                   type="circle"
@@ -1772,9 +1788,9 @@ export default function FileTransferCenter() {
                   format={() => `${detailTask.progress}%`}
                 />
                 <Space wrap>
-                  <Tag color="success">成功 {detailTask.successCount}</Tag>
-                  <Tag color="error">失败 {detailTask.failCount}</Tag>
-                  <Tag>总数 {detailTask.totalCount}</Tag>
+                  <Tag color="success">{t('ufte.tag.successCount', { count: detailTask.successCount })}</Tag>
+                  <Tag color="error">{t('ufte.tag.failedCount', { count: detailTask.failCount })}</Tag>
+                  <Tag>{t('ufte.tag.totalCount', { count: detailTask.totalCount })}</Tag>
                 </Space>
               </Space>
             </Card>

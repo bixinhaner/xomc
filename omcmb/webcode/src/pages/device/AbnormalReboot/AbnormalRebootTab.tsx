@@ -19,6 +19,21 @@ import type {
 // 数据触发：device.RecordBootFromInform 在 CPE 上报 "1 BOOT" 且
 // Device.HaltReason.MainReason 非空时识别即落库。
 
+// CPE 上报的 HaltReason 是 snake_case enum（如 halt_reboot / lte_worker_unhealthy）。
+// 走 i18n key `reboot.haltMain.<value>` 和 `reboot.haltDetail.<value>` 翻译；
+// 没维护过的值原样回退展示，避免对未来新增厂商上报值"硬挡"。
+const localizeHaltReason = (
+  value: string | undefined | null,
+  kind: 'haltMain' | 'haltDetail',
+  t: (key: string) => string,
+): string => {
+  const raw = (value ?? '').trim();
+  if (!raw) return '-';
+  const key = `reboot.${kind}.${raw}`;
+  const translated = t(key);
+  return translated && translated !== key ? translated : raw;
+};
+
 const formatRuntime = (seconds: number, t: (key: string) => string): string => {
   if (!seconds || seconds <= 0) return '-';
   const days = Math.floor(seconds / 86400);
@@ -122,8 +137,8 @@ export default function AbnormalRebootTab() {
         [t('log.exception.column.deviceType')]: r.deviceType || '-',
         [t('log.exception.column.baseIp')]: r.operateIp || '-',
         [t('log.exception.column.softwareVersion')]: r.softwareVersion || '-',
-        [t('log.exception.column.haltMainReason')]: r.haltMainReason || '-',
-        [t('log.exception.column.haltReason')]: r.haltDetailReason || '-',
+        [t('log.exception.column.haltMainReason')]: localizeHaltReason(r.haltMainReason, 'haltMain', t),
+        [t('log.exception.column.haltReason')]: localizeHaltReason(r.haltDetailReason, 'haltDetail', t),
         [t('log.exception.column.time')]:
           r.collectedAt?.replace('T', ' ').slice(0, 19) ?? '',
         [t('log.exception.column.runtime')]: formatRuntime(r.runtimeBeforeReboot, t),
@@ -209,7 +224,7 @@ export default function AbnormalRebootTab() {
         dataIndex: 'haltMainReason',
         width: 140,
         ellipsis: true,
-        render: (val: unknown) => (val as string) || '-',
+        render: (val: unknown) => localizeHaltReason(val as string | undefined, 'haltMain', t),
       },
       {
         key: 'haltDetailReason',
@@ -217,7 +232,7 @@ export default function AbnormalRebootTab() {
         dataIndex: 'haltDetailReason',
         width: 180,
         ellipsis: true,
-        render: (val: unknown) => (val as string) || '-',
+        render: (val: unknown) => localizeHaltReason(val as string | undefined, 'haltDetail', t),
       },
       {
         key: 'collectedAt',
@@ -347,10 +362,10 @@ export default function AbnormalRebootTab() {
                   {formatRuntime(selectedLog.runtimeBeforeReboot, t)}
                 </Descriptions.Item>
                 <Descriptions.Item label={t('log.exception.column.haltMainReason')} span={2}>
-                  {selectedLog.haltMainReason || '-'}
+                  {localizeHaltReason(selectedLog.haltMainReason, 'haltMain', t)}
                 </Descriptions.Item>
                 <Descriptions.Item label={t('log.exception.detail.haltReason')} span={2}>
-                  {selectedLog.haltDetailReason || '-'}
+                  {localizeHaltReason(selectedLog.haltDetailReason, 'haltDetail', t)}
                 </Descriptions.Item>
               </Descriptions>
             </Card>

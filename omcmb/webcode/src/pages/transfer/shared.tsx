@@ -8,6 +8,7 @@ import {
 } from 'antd';
 import type { CSSProperties, ReactNode } from 'react';
 
+import { useT } from '@/hooks/useT';
 import type {
   FirmwareLibraryFileType,
   TransferExecutionMode,
@@ -21,24 +22,86 @@ import type {
 
 const { Text } = Typography;
 
-export const STEP_LABELS: Record<TransferStepId, string> = {
-  CHECK_PERMISSION: '权限检查',
-  CHECK_ONLINE: '在线检查',
-  CHECK_CONFLICT: '并发冲突检查',
-  PRE_VALIDATE: '前置校验',
-  SEND_RPC: '发送 RPC',
-  WAIT_RPC_RESPONSE: '等待 RPC 响应',
-  WAIT_FILE_TRANSFER: '等待文件传输',
-  WAIT_TRANSFER_COMPLETE: '等待 TransferComplete',
-  WAIT_INFORM_EVENT: '等待 Inform 事件',
-  WAIT_REBOOT_COMPLETE: '等待重启完成',
-};
+// 翻译函数签名 —— useT 返回的 (id, values?) => string，简化为窄类型供工具函数使用。
+type Translate = (id: string, values?: Record<string, string | number>) => string;
 
-export const EXECUTION_MODE_OPTIONS: Array<{ label: string; value: TransferExecutionMode }> = [
-  { label: '立即执行', value: 'immediate' },
-  { label: '计划执行', value: 'scheduled' },
-  { label: '挂起创建', value: 'suspended' },
-];
+/** 步骤链翻译。原 STEP_LABELS 常量已下线 —— 需要 t 才能本地化。 */
+export function getStepLabels(t: Translate): Record<TransferStepId, string> {
+  return {
+    CHECK_PERMISSION: t('ufte.step.CHECK_PERMISSION'),
+    CHECK_ONLINE: t('ufte.step.CHECK_ONLINE'),
+    CHECK_CONFLICT: t('ufte.step.CHECK_CONFLICT'),
+    PRE_VALIDATE: t('ufte.step.PRE_VALIDATE'),
+    SEND_RPC: t('ufte.step.SEND_RPC'),
+    WAIT_RPC_RESPONSE: t('ufte.step.WAIT_RPC_RESPONSE'),
+    WAIT_FILE_TRANSFER: t('ufte.step.WAIT_FILE_TRANSFER'),
+    WAIT_TRANSFER_COMPLETE: t('ufte.step.WAIT_TRANSFER_COMPLETE'),
+    WAIT_INFORM_EVENT: t('ufte.step.WAIT_INFORM_EVENT'),
+    WAIT_REBOOT_COMPLETE: t('ufte.step.WAIT_REBOOT_COMPLETE'),
+  };
+}
+
+/** 执行方式选项 —— 同 STEP_LABELS 的转换，i18n 改造后需要 t。 */
+export function getExecutionModeOptions(t: Translate): Array<{ label: string; value: TransferExecutionMode }> {
+  return [
+    { label: t('ufte.execMode.immediate'), value: 'immediate' },
+    { label: t('ufte.execMode.scheduled'), value: 'scheduled' },
+    { label: t('ufte.execMode.suspended'), value: 'suspended' },
+  ];
+}
+
+// 内置 taskType / category 的翻译映射 —— seed 数据写死中文，按 typeCode/category 查表覆盖。
+// 自定义模板（builtIn=false）的 displayName 是用户输入，**不翻译**，原样使用 fallback。
+const BUILTIN_TYPE_CODES = new Set([
+  'ENB_IMG_UPGRADE', 'ENB_PATCH_UPGRADE', 'ENB_FPGA_UPGRADE',
+  'GNB_IMG_UPGRADE', 'GNB_FPGA_UPGRADE',
+  'VERSION_ROLLBACK',
+  'RUNTIME_LOG_COLLECT', 'FAULT_LOG_COLLECT',
+  'CONFIG_BACKUP', 'CONFIG_BACKUP_NV', 'CONFIG_BACKUP_XML',
+  'CONFIG_RESTORE',
+  'LICENSE_UPGRADE',
+]);
+
+const BUILTIN_CATEGORY_CODES = new Set([
+  'enb_upgrade', 'gnb_upgrade', 'version_rollback',
+  'station_log', 'config_backup', 'config_restore', 'license_upgrade',
+]);
+
+/** 内置 taskType displayName 翻译。非内置 typeCode（用户自定义）原样返回 fallback。 */
+export function localizeBuiltinTypeName(
+  typeCode: string | undefined,
+  fallback: string,
+  t: Translate,
+): string {
+  if (!typeCode || !BUILTIN_TYPE_CODES.has(typeCode)) return fallback;
+  const key = `ufte.builtin.type.${typeCode}`;
+  const translated = t(key);
+  return translated && translated !== key ? translated : fallback;
+}
+
+/** 内置 category label 翻译。自定义分类（运行时生成的 custom_xxx）原样返回 fallback。 */
+export function localizeBuiltinCategoryLabel(
+  category: string | undefined,
+  fallback: string,
+  t: Translate,
+): string {
+  if (!category || !BUILTIN_CATEGORY_CODES.has(category)) return fallback;
+  const key = `ufte.builtin.category.${category}`;
+  const translated = t(key);
+  return translated && translated !== key ? translated : fallback;
+}
+
+/** 内置 taskType description 翻译。非内置原样返回 fallback。 */
+export function localizeBuiltinDescription(
+  typeCode: string | undefined,
+  fallback: string,
+  t: Translate,
+): string {
+  if (!typeCode || !BUILTIN_TYPE_CODES.has(typeCode)) return fallback;
+  const key = `ufte.builtin.desc.${typeCode}`;
+  const translated = t(key);
+  return translated && translated !== key ? translated : fallback;
+}
 
 export const DEFAULT_CATEGORY_ORDER = [
   'gnb_upgrade',
@@ -198,60 +261,65 @@ export interface TaskTypeFormValues {
   transportPath?: string;
 }
 
-export const SOFTWARE_LIBRARY_FILE_TYPE_OPTIONS: Array<{ label: string; value: FirmwareLibraryFileType }> = [
-  { label: '软件主镜像', value: 0 },
-  { label: 'PATCH 补丁包', value: 1 },
-  { label: 'AP 固件', value: 5 },
-  { label: 'FPGA 文件', value: 6 },
-];
+export function getSoftwareLibraryFileTypeOptions(
+  t: Translate,
+): Array<{ label: string; value: FirmwareLibraryFileType }> {
+  return [
+    { label: t('ufte.softLib.image'),      value: 0 },
+    { label: t('ufte.softLib.patch'),      value: 1 },
+    { label: t('ufte.softLib.apFirmware'), value: 5 },
+    { label: t('ufte.softLib.fpga'),       value: 6 },
+  ];
+}
 
-export function getSoftwareLibraryFileTypeLabel(value?: FirmwareLibraryFileType) {
+export function getSoftwareLibraryFileTypeLabel(value: FirmwareLibraryFileType | undefined, t: Translate): string {
   if (value === undefined) {
     return '-';
   }
-  return SOFTWARE_LIBRARY_FILE_TYPE_OPTIONS.find((item) => item.value === value)?.label ?? `类型 ${value}`;
+  const opt = getSoftwareLibraryFileTypeOptions(t).find((item) => item.value === value);
+  return opt ? opt.label : t('ufte.softLib.unknown', { value });
 }
 
-export function renderTaskStatus(status: UnifiedFileTransferTask['status']) {
+export function renderTaskStatus(status: UnifiedFileTransferTask['status'], t: Translate) {
   switch (status) {
     case 'in_progress':
-      return <Badge status="processing" text="执行中" />;
+      return <Badge status="processing" text={t('ufte.status.inProgress')} />;
     case 'suspended':
-      return <Badge status="warning" text="已挂起" />;
+      return <Badge status="warning" text={t('ufte.status.suspended')} />;
     case 'ended':
-      return <Badge status="success" text="已结束" />;
+      return <Badge status="success" text={t('ufte.status.ended')} />;
     default:
-      return <Badge status="default" text="待执行" />;
+      return <Badge status="default" text={t('ufte.status.pending')} />;
   }
 }
 
-export function renderDeviceStatus(status: UnifiedFileTransferDeviceItem['status']) {
+export function renderDeviceStatus(status: UnifiedFileTransferDeviceItem['status'], t: Translate) {
   switch (status) {
     case 'downloading':
       // 升级 / 回滚类 Download RPC：CPE 正在从 ACS 拉镜像 / 补丁文件
-      return <Badge status="processing" text="下载中" />;
+      return <Badge status="processing" text={t('ufte.status.downloading')} />;
     case 'uploading':
       // 备份 / 日志采集 Upload RPC：Upload 命令已派发，等 UploadResponse + CPE 通过 HTTP PUT
       // 把文件上传到 ACS（这两步在 TR-069 上紧贴，ACS 侧合并到同一段展示）
-      return <Badge status="processing" text="上传中" />;
+      return <Badge status="processing" text={t('ufte.status.uploading')} />;
     case 'awaiting_tc':
       // 备份 / 日志采集 Upload RPC：文件已落到 ACS MinIO（backup_restore_file 已 upsert），
       // 等 CPE 主动发 TransferComplete SOAP 来结束传输事务
-      return <Badge status="processing" text="等待 TransferComplete" />;
+      return <Badge status="processing" text={t('ufte.status.awaitingTc')} />;
     case 'verifying':
-      return <Badge status="processing" text="校验中" />;
+      return <Badge status="processing" text={t('ufte.status.verifying')} />;
     // 设备子任务的 'suspended' 既可能是"用户挂起创建"也可能是"设备离线等待"，
     // 后者占比更高（设备 inform 间隔 5 min，挂起→开始时常碰到设备短暂掉线）。
     // 合并文案为"已挂起 / 待上线"，避免用户以为操作未生效。详见
     // docs/project/backup-display-fix-20260520.md F11。
     case 'suspended':
-      return <Badge status="warning" text="已挂起 / 待上线" />;
+      return <Badge status="warning" text={t('ufte.status.suspendedOrOffline')} />;
     case 'ended':
-      return <Badge status="success" text="已完成" />;
+      return <Badge status="success" text={t('ufte.status.completed')} />;
     case 'failed':
-      return <Badge status="error" text="失败" />;
+      return <Badge status="error" text={t('ufte.status.failed')} />;
     default:
-      return <Badge status="default" text="待执行" />;
+      return <Badge status="default" text={t('ufte.status.pending')} />;
   }
 }
 
@@ -307,7 +375,9 @@ export function buildCategoryPayload(
   }
 
   if (!values.categorySelection) {
-    throw new Error('请选择现有业务 Tab，或者输入新的 Tab 名称');
+    // 不能本地化抛错 —— 该函数纯逻辑无 t 参数；调用方在 catch 里翻 i18n key
+    // ufte.template.pickCategory 显示。这里抛 key 而非中文，保持与 i18n 体系一致。
+    throw new Error('ufte.template.pickCategory');
   }
 
   const existingByKey = categories.find((item) => item.category === values.categorySelection);
@@ -328,6 +398,9 @@ export function TransferTemplateCard({
   taskType: UnifiedFileTransferTaskType;
   active?: boolean;
 }) {
+  const t = useT();
+  const displayName = localizeBuiltinTypeName(taskType.typeCode, taskType.displayName, t);
+  const description = localizeBuiltinDescription(taskType.typeCode, taskType.description, t);
   return (
     <Card
       size="small"
@@ -339,16 +412,16 @@ export function TransferTemplateCard({
     >
       <Space direction="vertical" size={8} style={{ width: '100%' }}>
         <Space wrap>
-          <Text strong>{taskType.displayName}</Text>
-          <Tag color={taskType.builtIn ? 'blue' : 'gold'}>{taskType.builtIn ? '内置' : '自定义'}</Tag>
+          <Text strong>{displayName}</Text>
+          <Tag color={taskType.builtIn ? 'blue' : 'gold'}>{taskType.builtIn ? t('ufte.tag.builtIn') : t('ufte.tag.custom')}</Tag>
           <Tag>{taskType.rpcType}</Tag>
           <Tag color="cyan">FileType {taskType.fileType}</Tag>
           {taskType.firmwareFileType !== undefined ? (
-            <Tag color="geekblue">文件库 {getSoftwareLibraryFileTypeLabel(taskType.firmwareFileType)}</Tag>
+            <Tag color="geekblue">{t('ufte.template.softLibTag', { label: getSoftwareLibraryFileTypeLabel(taskType.firmwareFileType, t) })}</Tag>
           ) : null}
-          <Tag color={taskType.enabled ? 'green' : 'default'}>{taskType.enabled ? '已启用' : '已停用'}</Tag>
+          <Tag color={taskType.enabled ? 'green' : 'default'}>{taskType.enabled ? t('ufte.template.enabled') : t('ufte.template.disabled')}</Tag>
         </Space>
-        <Text type="secondary">{taskType.description}</Text>
+        <Text type="secondary">{description}</Text>
       </Space>
     </Card>
   );

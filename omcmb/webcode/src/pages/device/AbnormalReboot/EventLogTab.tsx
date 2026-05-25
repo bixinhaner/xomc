@@ -34,6 +34,24 @@ const EVENT_TYPE_I18N: Record<string, string> = {
   // 后续接入更多 event_type 时在此追加
 };
 
+// event_reason 是后端硬编码的中文字符串（见 omcgo/internal/eventlog/service.go）。
+// 通过原文 → i18n key 的映射做本地化；映射不到原样回退，避免阻挡未来后端新增的 reason 文案。
+const EVENT_REASON_I18N: Record<string, string> = {
+  '设备重启完成': 'log.event.reason.deviceRebootComplete',
+};
+
+const localizeEventReason = (
+  value: string | undefined | null,
+  t: (key: string) => string,
+): string => {
+  const raw = (value ?? '').trim();
+  if (!raw) return '-';
+  const key = EVENT_REASON_I18N[raw];
+  if (!key) return raw;
+  const translated = t(key);
+  return translated && translated !== key ? translated : raw;
+};
+
 export default function EventLogTab() {
   const t = useT();
   const [filters, setFilters] = useState<Record<string, unknown>>({});
@@ -128,7 +146,7 @@ export default function EventLogTab() {
         [t('log.deviceCode')]: r.deviceSn,
         [t('log.exception.column.baseIp')]: r.operateIp || '-',
         [t('log.event.eventType')]: labelOfEventType(r.eventType),
-        [t('log.event.column.reason')]: r.eventReason || '-',
+        [t('log.event.column.reason')]: localizeEventReason(r.eventReason, t),
         [t('log.event.column.time')]: r.occurredAt?.replace('T', ' ').slice(0, 19) ?? '',
       }));
       const ws = XLSX.utils.json_to_sheet(rows);
@@ -193,7 +211,7 @@ export default function EventLogTab() {
         title: t('log.event.column.reason'),
         dataIndex: 'eventReason',
         ellipsis: true,
-        render: (val: unknown) => (val as string) || '-',
+        render: (val: unknown) => localizeEventReason(val as string | undefined, t),
       },
       {
         key: 'occurredAt',

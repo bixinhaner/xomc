@@ -27,6 +27,7 @@ import {
 } from '@ant-design/icons';
 
 import ListPageLayout from '@/components/Layout/ListPageLayout';
+import { useT } from '@/hooks/useT';
 import {
   useCreateUnifiedFileTransferTaskType,
   useDeleteUnifiedFileTransferTaskType,
@@ -43,8 +44,11 @@ import {
   buildCategoryPayload,
   buildCategoryTabs,
   getSoftwareLibraryFileTypeLabel,
-  SOFTWARE_LIBRARY_FILE_TYPE_OPTIONS,
-  STEP_LABELS,
+  getSoftwareLibraryFileTypeOptions,
+  getStepLabels,
+  localizeBuiltinCategoryLabel,
+  localizeBuiltinDescription,
+  localizeBuiltinTypeName,
   TransferTemplateCard,
   TYPE_DRAWER_DEFAULT_STEPS,
 } from '../shared';
@@ -53,6 +57,7 @@ import type { TaskTypeFormValues } from '../shared';
 const { Paragraph, Text, Title } = Typography;
 
 export default function TemplateDefinitionManagement() {
+  const t = useT();
   const { data: taskTypes = [], isLoading: taskTypesLoading } = useUnifiedFileTransferTaskTypes({
     refetchOnMount: 'always',
   });
@@ -85,9 +90,16 @@ export default function TemplateDefinitionManagement() {
   );
 
   const categoryOptions = useMemo(
-    () => categories.map((item) => ({ label: item.categoryLabel, value: item.category })),
-    [categories],
+    () => categories.map((item) => ({
+      label: localizeBuiltinCategoryLabel(item.category, item.categoryLabel, t),
+      value: item.category,
+    })),
+    [categories, t],
   );
+
+  // STEP_LABELS / SOFTWARE_LIBRARY_FILE_TYPE_OPTIONS 常量已下线 —— 改用 hook 形式
+  const stepLabels = useMemo(() => getStepLabels(t), [t]);
+  const softwareLibraryFileTypeOptions = useMemo(() => getSoftwareLibraryFileTypeOptions(t), [t]);
 
   const platformScopeOptions = useMemo(() => {
     const values = new Set<string>(productClasses);
@@ -171,7 +183,15 @@ export default function TemplateDefinitionManagement() {
       return;
     }
     const values = await typeForm.validateFields();
-    const categoryPayload = buildCategoryPayload(values, categories, editingType);
+    let categoryPayload;
+    try {
+      categoryPayload = buildCategoryPayload(values, categories, editingType);
+    } catch (e) {
+      // buildCategoryPayload 通过 throw i18n key 表达 "缺业务 Tab" 校验失败；前端在此 catch 翻译展示。
+      const key = e instanceof Error ? e.message : 'ufte.template.pickCategory';
+      void message.warning(t(key));
+      return;
+    }
     const payload: CreateUnifiedFileTransferTypeInput = {
       category: categoryPayload.category,
       categoryLabel: categoryPayload.categoryLabel,
@@ -202,10 +222,10 @@ export default function TemplateDefinitionManagement() {
         typeCode: editingType.typeCode,
         ...payload,
       } as UpdateUnifiedFileTransferTaskTypeInput);
-      void message.success('模板已更新。');
+      void message.success(t('ufte.template.msg.updated'));
     } else {
       savedType = await createTaskTypeMutation.mutateAsync(payload);
-      void message.success('自定义模板已创建。');
+      void message.success(t('ufte.template.msg.created'));
     }
 
     setSelectedCategory(savedType.category);
@@ -226,7 +246,7 @@ export default function TemplateDefinitionManagement() {
       setEditingType(null);
       typeForm.resetFields();
     }
-    void message.success('自定义模板已删除。');
+    void message.success(t('ufte.template.msg.deleted'));
   };
 
   const renderTemplateSection = (
@@ -249,19 +269,19 @@ export default function TemplateDefinitionManagement() {
                   </div>
                   <Space wrap>
                     <Button type="link" icon={<EyeOutlined />} onClick={() => openTypeDetailDrawer(taskType)}>
-                      查看详情
+                      {t('ufte.action.viewDetail')}
                     </Button>
                     <Button type="link" icon={<EditOutlined />} onClick={() => openTypeDrawer(taskType)}>
-                      {taskType.builtIn ? '调整模板' : '编辑模板'}
+                      {taskType.builtIn ? t('ufte.action.adjustTemplate') : t('ufte.action.editTemplate')}
                     </Button>
                     {!taskType.builtIn ? (
                       <Popconfirm
-                        title="确认删除这个自定义模板吗？"
-                        description="删除后将无法恢复。"
+                        title={t('ufte.confirm.deleteTemplate')}
+                        description={t('ufte.confirm.deleteTemplateDesc')}
                         onConfirm={() => void handleDeleteType(taskType)}
                       >
                         <Button type="link" icon={<DeleteOutlined />} danger loading={deleteTaskTypeMutation.isPending}>
-                          删除模板
+                          {t('ufte.action.deleteTemplate')}
                         </Button>
                       </Popconfirm>
                     ) : null}
@@ -277,20 +297,23 @@ export default function TemplateDefinitionManagement() {
 
   return (
     <ListPageLayout
-      title="传输模板管理"
+      title={t('ufte.page.templateManagement')}
       extra={(
         <Button type="primary" icon={<PlusOutlined />} onClick={() => openTypeDrawer()}>
-          新增自定义模板
+          {t('ufte.action.newCustomTemplate')}
         </Button>
       )}
     >
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
         <Card>
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            <Title level={4} style={{ margin: 0 }}>模板配置</Title>
+            <Title level={4} style={{ margin: 0 }}>{t('ufte.page.templateConfig')}</Title>
             <Tabs
               activeKey={selectedCategory}
-              items={categories.map((item) => ({ key: item.category, label: item.categoryLabel }))}
+              items={categories.map((item) => ({
+                key: item.category,
+                label: localizeBuiltinCategoryLabel(item.category, item.categoryLabel, t),
+              }))}
               onChange={(key) => setSelectedCategory(key)}
             />
           </Space>
@@ -299,23 +322,23 @@ export default function TemplateDefinitionManagement() {
         <Row gutter={[16, 16]}>
           <Col xs={24} xl={14}>
             {renderTemplateSection(
-              '内置模板',
+              t('ufte.template.builtInGroup'),
               builtInTypes,
-              '当前业务暂无内置模板',
+              t('ufte.template.emptyBuiltIn'),
             )}
           </Col>
           <Col xs={24} xl={10}>
             {renderTemplateSection(
-              '自定义模板',
+              t('ufte.template.customGroup'),
               customTypes,
-              '当前业务暂无自定义模板',
+              t('ufte.template.emptyCustom'),
             )}
           </Col>
         </Row>
       </Space>
 
       <Drawer
-        title={detailType ? `模板详情 · ${detailType.displayName}` : '模板详情'}
+        title={detailType ? t('ufte.drawer.templateDetailWithName', { name: localizeBuiltinTypeName(detailType.typeCode, detailType.displayName, t) }) : t('ufte.drawer.templateDetail')}
         width={560}
         open={detailDrawerOpen}
         onClose={() => setDetailDrawerOpen(false)}
@@ -324,12 +347,12 @@ export default function TemplateDefinitionManagement() {
           <Space>
             {!detailType.builtIn ? (
               <Popconfirm
-                title="确认删除这个自定义模板吗？"
-                description="删除后将无法恢复。"
+                title={t('ufte.confirm.deleteTemplate')}
+                description={t('ufte.confirm.deleteTemplateDesc')}
                 onConfirm={() => void handleDeleteType(detailType)}
               >
                 <Button icon={<DeleteOutlined />} danger loading={deleteTaskTypeMutation.isPending}>
-                  删除模板
+                  {t('ufte.action.deleteTemplate')}
                 </Button>
               </Popconfirm>
             ) : null}
@@ -337,7 +360,7 @@ export default function TemplateDefinitionManagement() {
               setDetailDrawerOpen(false);
               openTypeDrawer(detailType);
             }}>
-              {detailType.builtIn ? '调整模板' : '编辑模板'}
+              {detailType.builtIn ? t('ufte.action.adjustTemplate') : t('ufte.action.editTemplate')}
             </Button>
           </Space>
         ) : null}
@@ -345,32 +368,32 @@ export default function TemplateDefinitionManagement() {
         {detailType ? (
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <Descriptions column={2} size="small" bordered>
-              <Descriptions.Item label="业务视图">{detailType.categoryLabel}</Descriptions.Item>
-              <Descriptions.Item label="类型编码">{detailType.typeCode}</Descriptions.Item>
-              <Descriptions.Item label="RPC 类型">{detailType.rpcType}</Descriptions.Item>
-              <Descriptions.Item label="FileType">{detailType.fileType}</Descriptions.Item>
-              <Descriptions.Item label="软件库分类">{getSoftwareLibraryFileTypeLabel(detailType.firmwareFileType)}</Descriptions.Item>
-              <Descriptions.Item label="权限编码">{detailType.permissionCode}</Descriptions.Item>
-              <Descriptions.Item label="平台范围">{detailType.platformScope.join(' / ')}</Descriptions.Item>
-              <Descriptions.Item label="最近编辑人">{detailType.lastEditor}</Descriptions.Item>
-              <Descriptions.Item label="后置事件">{detailType.postTcEventCode || '-'}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.template.businessView')}>{localizeBuiltinCategoryLabel(detailType.category, detailType.categoryLabel, t)}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.template.typeCode')}>{detailType.typeCode}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.template.rpcType')}>{detailType.rpcType}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.template.fileType')}>{detailType.fileType}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.template.softLib')}>{getSoftwareLibraryFileTypeLabel(detailType.firmwareFileType, t)}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.template.permCode')}>{detailType.permissionCode}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.template.platformScope')}>{detailType.platformScope.join(' / ')}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.template.lastEditor')}>{detailType.lastEditor}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.template.postEvent')}>{detailType.postTcEventCode || '-'}</Descriptions.Item>
             </Descriptions>
-            <Paragraph style={{ marginBottom: 0 }}>{detailType.description}</Paragraph>
+            <Paragraph style={{ marginBottom: 0 }}>{localizeBuiltinDescription(detailType.typeCode, detailType.description, t)}</Paragraph>
             <Descriptions column={2} size="small" bordered>
-              <Descriptions.Item label="FileType 可编辑">
+              <Descriptions.Item label={t('ufte.template.fileTypeEditable')}>
                 <Tag color={detailType.fileTypeEditable ? 'green' : 'default'}>
-                  {detailType.fileTypeEditable ? '支持' : '固定'}
+                  {detailType.fileTypeEditable ? t('ufte.template.fileTypeEditable.yes') : t('ufte.template.fileTypeEditable.no')}
                 </Tag>
               </Descriptions.Item>
-              <Descriptions.Item label="DelaySeconds">{detailType.delaySeconds ?? 0}</Descriptions.Item>
+              <Descriptions.Item label={t('ufte.template.delaySeconds')}>{detailType.delaySeconds ?? 0}</Descriptions.Item>
             </Descriptions>
             <div>
-              <Text strong>步骤链</Text>
+              <Text strong>{t('ufte.template.stepChain')}</Text>
               <div style={{ marginTop: 8 }}>
                 <Space wrap size={[6, 8]}>
                   {detailType.stepChain.map((stepId, index) => (
                     <Tag key={stepId} color={index < 2 ? 'blue' : index === detailType.stepChain.length - 1 ? 'purple' : 'default'}>
-                      {index + 1}. {STEP_LABELS[stepId]}
+                      {index + 1}. {stepLabels[stepId]}
                     </Tag>
                   ))}
                 </Space>
@@ -381,7 +404,7 @@ export default function TemplateDefinitionManagement() {
       </Drawer>
 
       <Drawer
-        title={editingType ? `编辑模板 · ${editingType.displayName}` : '新增自定义模板'}
+        title={editingType ? t('ufte.drawer.editTemplateWithName', { name: localizeBuiltinTypeName(editingType.typeCode, editingType.displayName, t) }) : t('ufte.drawer.newCustomTemplate')}
         width={520}
         open={typeDrawerOpen}
         onClose={() => {
@@ -395,32 +418,32 @@ export default function TemplateDefinitionManagement() {
               setTypeDrawerOpen(false);
               setEditingType(null);
             }}>
-              取消
+              {t('common.cancel')}
             </Button>
             <Button
               type="primary"
               loading={createTaskTypeMutation.isPending || updateTaskTypeMutation.isPending || deleteTaskTypeMutation.isPending}
               onClick={() => void handleSaveType()}
             >
-              {editingType ? '保存' : '创建'}
+              {editingType ? t('common.save') : t('ufte.action.create')}
             </Button>
           </Space>
         )}
       >
         <Form form={typeForm} layout="vertical">
-          <Form.Item label="已有业务 Tab" name="categorySelection">
-            <Select allowClear options={categoryOptions} placeholder="已有的业务 Tab 可直接复用" />
+          <Form.Item label={t('ufte.template.existingCategoryTab')} name="categorySelection">
+            <Select allowClear options={categoryOptions} placeholder={t('ufte.template.existingCategoryTab.placeholder')} />
           </Form.Item>
-          <Form.Item label="新增 Tab 名称" name="categoryCustomLabel">
-            <Input placeholder="如果没有合适的业务 Tab，可直接输入新名称，例如：诊断包分发" />
+          <Form.Item label={t('ufte.template.newCategoryLabel')} name="categoryCustomLabel">
+            <Input placeholder={t('ufte.template.newCategoryLabel.placeholder')} />
           </Form.Item>
-          <Form.Item label="显示名称" name="displayName" rules={[{ required: true, message: '请输入类型名称' }]}> 
-            <Input placeholder="例如：诊断包采集" />
+          <Form.Item label={t('ufte.template.displayName')} name="displayName" rules={[{ required: true, message: t('ufte.template.displayName.required') }]}>
+            <Input placeholder={t('ufte.template.displayName.placeholder')} />
           </Form.Item>
-          <Form.Item label="功能描述" name="description" rules={[{ required: true, message: '请输入功能描述' }]}> 
-            <Input.TextArea rows={3} placeholder="说明这个类型想统一哪类文件交互，以及为什么需要独立类型。" />
+          <Form.Item label={t('ufte.template.description')} name="description" rules={[{ required: true, message: t('ufte.template.description.required') }]}>
+            <Input.TextArea rows={3} placeholder={t('ufte.template.description.placeholder')} />
           </Form.Item>
-          <Form.Item label="RPC 类型" name="rpcType" rules={[{ required: true, message: '请选择 RPC 类型' }]}> 
+          <Form.Item label={t('ufte.template.rpcType')} name="rpcType" rules={[{ required: true, message: t('ufte.template.rpcType.required') }]}>
             <Select
               options={[
                 { label: 'DOWNLOAD', value: 'DOWNLOAD' },
@@ -429,44 +452,44 @@ export default function TemplateDefinitionManagement() {
               ]}
             />
           </Form.Item>
-          <Form.Item label="步骤链" name="stepChain" rules={[{ required: true, message: '请选择至少一个步骤' }]}> 
+          <Form.Item label={t('ufte.template.stepChain')} name="stepChain" rules={[{ required: true, message: t('ufte.template.stepChain.required') }]}>
             <Select
               mode="multiple"
-              options={Object.entries(STEP_LABELS).map(([value, label]) => ({ value, label }))}
-              placeholder="按顺序选择步骤"
+              options={Object.entries(stepLabels).map(([value, label]) => ({ value, label }))}
+              placeholder={t('ufte.template.stepChain.placeholder')}
             />
           </Form.Item>
-          <Form.Item label="平台范围" name="platformScope" rules={[{ required: true, message: '请至少输入一个平台范围' }]}> 
+          <Form.Item label={t('ufte.template.platformScope')} name="platformScope" rules={[{ required: true, message: t('ufte.template.platformScope.required') }]}>
             <Select
               mode="tags"
               showSearch
               optionFilterProp="label"
               options={platformScopeOptions}
-              placeholder="输入产品类型关键字，可从设备库联想选择，例如：FAP/BU1810、QAFA、BBU-XSS"
+              placeholder={t('ufte.template.platformScope.placeholder')}
             />
           </Form.Item>
-          <Form.Item label="FileType" name="fileType" rules={[{ required: true, message: '请输入 FileType' }]}> 
-                <Input placeholder="例如：1 Firmware Upgrade Image / 3 Vendor Configuration File / Firmware Upgrade Fpga" />
+          <Form.Item label={t('ufte.template.fileType')} name="fileType" rules={[{ required: true, message: t('ufte.template.fileType.required') }]}>
+                <Input placeholder={t('ufte.template.fileType.placeholder')} />
           </Form.Item>
-          <Form.Item label="软件库分类" name="firmwareFileType" extra={formRpcType === 'DOWNLOAD' ? '用于关联软件管理中的镜像/PATCH/FPGA 文件分类，避免按文件名猜测。' : '仅 DOWNLOAD 模板需要配置；其他 RPC 类型会忽略该值。'}>
+          <Form.Item label={t('ufte.template.softLib')} name="firmwareFileType" extra={formRpcType === 'DOWNLOAD' ? t('ufte.template.softLib.extraDownload') : t('ufte.template.softLib.extraOther')}>
             <Select
               allowClear
-              placeholder={formRpcType === 'DOWNLOAD' ? '请选择软件库分类' : '当前 RPC 类型无需配置'}
-              options={SOFTWARE_LIBRARY_FILE_TYPE_OPTIONS}
+              placeholder={formRpcType === 'DOWNLOAD' ? t('ufte.template.softLib.placeholder') : t('ufte.template.softLib.placeholderDisabled')}
+              options={softwareLibraryFileTypeOptions}
               disabled={formRpcType !== 'DOWNLOAD'}
             />
           </Form.Item>
-          <Form.Item label="DelaySeconds" name="delaySeconds">
+          <Form.Item label={t('ufte.template.delaySeconds')} name="delaySeconds">
             <InputNumber min={0} max={86400} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item label="允许页面直接调整 FileType" name="fileTypeEditable" valuePropName="checked">
-            <Switch checkedChildren="可调" unCheckedChildren="固定" />
+          <Form.Item label={t('ufte.template.fileTypeEditableLabel')} name="fileTypeEditable" valuePropName="checked">
+            <Switch checkedChildren={t('ufte.template.switchEditable')} unCheckedChildren={t('ufte.template.switchFixed')} />
           </Form.Item>
-          <Form.Item label="启用状态" name="enabled" valuePropName="checked">
-            <Switch checkedChildren="启用" unCheckedChildren="停用" />
+          <Form.Item label={t('ufte.template.enabledStatus')} name="enabled" valuePropName="checked">
+            <Switch checkedChildren={t('ufte.template.switchEnabled')} unCheckedChildren={t('ufte.template.switchDisabled')} />
           </Form.Item>
-          <Form.Item label="TransferComplete 后事件码" name="postTcEventCode">
-            <Input placeholder="例如：102 UPGRADE FINISH；无则留空" />
+          <Form.Item label={t('ufte.template.postTcEventCode')} name="postTcEventCode">
+            <Input placeholder={t('ufte.template.postTcEventCode.placeholder')} />
           </Form.Item>
         </Form>
       </Drawer>
