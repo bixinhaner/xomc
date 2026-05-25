@@ -147,7 +147,10 @@ type DeviceReader interface {
 	// merged with a set of mandatory types that must always appear.
 	ListProductClasses(ctx context.Context) ([]string, error)
 	// FindStaleDevices finds active devices that haven't sent Inform within the threshold.
-	// Used by OfflineDetector to mark devices as offline.
+	//
+	// DEPRECATED (T-0173): 原 OfflineDetector 唯一调用方已废弃。新代码请用
+	// *PgDeviceRepository.FindStaleDevicesAdaptive（自适应阈值 = max(2×inform_interval, minStaleSec))。
+	// 保留接口仅为兼容全仓 11 个手写 mockDeviceRepo —— 等后续统一清理。
 	FindStaleDevices(ctx context.Context, threshold time.Time, limit int) ([]*model.Device, error)
 	// ListStaleForParamSync 找 last_param_sync_at IS NULL 或 < threshold 的 active 设备，
 	// 供 PeriodicSyncer 按 interval 入队 Path B 同步（NULLS FIRST：从未同步过的设备优先）。
@@ -782,6 +785,7 @@ func deviceColumns() []string {
 		"d.extension_data", "d.created_at", "d.updated_at", "d.deleted_at", "d.deleted_by",
 		"d.last_param_sync_at",
 		"d.last_param_sync_failed_at", "d.last_param_sync_error", // migration 000142
+		"d.last_offline_reason", // T-0173: 离线原因诊断列（migration 000184）
 	}
 }
 
@@ -812,6 +816,7 @@ func scanDeviceFromRow(row pgx.Row) (*model.Device, error) {
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
 		&d.LastParamSyncAt,
 		&d.LastParamSyncFailedAt, &d.LastParamSyncError, // migration 000142
+		&d.LastOfflineReason, // T-0173: 离线原因（migration 000184)
 	)
 	if err != nil {
 		return nil, err
@@ -888,6 +893,7 @@ func scanDeviceRow(rows pgx.Rows) (*model.Device, error) {
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
 		&d.LastParamSyncAt,
 		&d.LastParamSyncFailedAt, &d.LastParamSyncError, // migration 000142
+		&d.LastOfflineReason, // T-0173: 离线原因（migration 000184)
 	)
 
 	if deletedBy != nil {
@@ -1657,10 +1663,12 @@ func (r *PgDeviceRepository) UpdateLastParamSyncFailed(ctx context.Context, id u
 }
 
 // FindStaleDevices finds active devices that haven't sent Inform within the threshold.
-// Used by OfflineDetector to mark devices as offline.
+//
+// DEPRECATED (T-0173): 原 OfflineDetector 唯一调用方已废弃。新代码请用
+// FindStaleDevicesAdaptive(minStaleSec) —— 自适应阈值,按设备 inform_interval
+// 动态计算 max(2×inform_interval, minStaleSec) 秒。
 //
 // T-0162: "active" 语义 = lifecycle_state='commissioned' AND is_online=TRUE。
-// OfflineDetector 找到 stale 设备后只更 is_online=false（不动 lifecycle）。
 func (r *PgDeviceRepository) FindStaleDevices(ctx context.Context, threshold time.Time, limit int) ([]*model.Device, error) {
 	builder := storage.Psql.Select(deviceColumns()...).
 		From("devices d").
@@ -1746,4 +1754,124 @@ func (r *PgDeviceRepository) ListProductClasses(ctx context.Context) ([]string, 
 		classes = []string{}
 	}
 	return classes, nil
+}
+
+// ===== T-0173: 异步在线状态治理（DeviceStatusReconciler）专用方法 =====
+//
+// 这两个方法故意只挂在 *PgDeviceRepository 上,不进 DeviceRepository 接口 ——
+// 全仓 11 个手写 mock 不需要为只被 Reconciler 单点消费的方法增加桩。Reconciler
+// 自己在 status_reconciler.go 定义 2 方法的窄接口 statusReconcilerRepo,
+// *PgDeviceRepository 自然满足。
+
+// FindStaleDevicesAdaptive 找出"超过自适应阈值未上报心跳"的在线设备。
+//
+// 自适应阈值 = max(2 × inform_interval, minStaleSec)。inform_interval 是每设备
+// 心跳间隔（来自 Device.ManagementServer.PeriodicInformInterval,默认 300s）。
+// 短心跳设备（如 60s）2 倍只有 120s,不足以判定真正离线;minStaleSec 给一个全局
+// 下限（推荐 600s),避免在心跳轻微抖动时误标离线。
+//
+// 用于 DeviceStatusReconciler.detect。返回按 last_inform_at ASC 排序,
+// 优先处理最久未心跳的设备。
+func (r *PgDeviceRepository) FindStaleDevicesAdaptive(ctx context.Context, minStaleSec int, limit int) ([]*model.Device, error) {
+	if minStaleSec <= 0 {
+		minStaleSec = 600
+	}
+	if limit <= 0 {
+		limit = 1000
+	}
+	builder := storage.Psql.Select(deviceColumns()...).
+		From("devices d").
+		Where(sq.Eq{"d.lifecycle_state": model.LifecycleCommissioned}).
+		Where(sq.Eq{"d.is_online": true}).
+		Where(notDeleted).
+		Where("d.last_inform_at IS NOT NULL").
+		Where(
+			"d.last_inform_at < NOW() - (GREATEST(COALESCE(d.inform_interval, 300) * 2, ?) * INTERVAL '1 second')",
+			minStaleSec,
+		).
+		OrderBy("d.last_inform_at ASC").
+		Limit(uint64(limit))
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build find stale devices adaptive query: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("find stale devices adaptive: %w", err)
+	}
+	defer rows.Close()
+
+	var devices []*model.Device
+	for rows.Next() {
+		d, err := scanDeviceRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan stale device adaptive: %w", err)
+		}
+		devices = append(devices, d)
+	}
+	return devices, nil
+}
+
+// MarkOfflineWithAccounting 事务性把单台设备从"在线"翻转到"离线":
+//  1. devices.is_online → false（仅当当前为 true,否则整个事务空转）
+//  2. devices.last_offline_reason → reason
+//  3. device_info.last_offline_time → now
+//  4. device_info.cumulative_online_duration += GREATEST(0, now - last_online_time)
+//
+// 全部在同一 TX 内完成,失败回滚不留半成品。
+//
+// 返回 (transitioned, error):
+//   - transitioned=true 表示这次调用真的把设备从 online→offline 翻转了；
+//   - transitioned=false 表示调用前设备已 offline / 已删除,事务无副作用,调用方
+//     不应再发 device.offline 事件（幂等保护)。
+//
+// 入参 now 由调用方传入而非 NOW(),便于测试与事件载荷时间戳对齐。
+func (r *PgDeviceRepository) MarkOfflineWithAccounting(ctx context.Context, deviceID uuid.UUID, reason string, now time.Time) (bool, error) {
+	if reason == "" {
+		reason = "unknown"
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("begin mark offline tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Step 1: 翻 is_online + 记原因,只在当前在线时才动手。
+	res, err := tx.Exec(ctx, `
+		UPDATE devices
+		   SET is_online = false,
+		       last_offline_reason = $2,
+		       updated_at = NOW()
+		 WHERE id = $1
+		   AND is_online = true
+		   AND deleted_at IS NULL`,
+		deviceID, reason)
+	if err != nil {
+		return false, fmt.Errorf("update devices offline: %w", err)
+	}
+	if res.RowsAffected() == 0 {
+		// 已是 offline 或不存在 / 已软删 —— 幂等返回。
+		if err := tx.Commit(ctx); err != nil {
+			return false, fmt.Errorf("commit no-op tx: %w", err)
+		}
+		return false, nil
+	}
+
+	// Step 2: 离线时间戳 + 累计在线时长。
+	// last_online_time 为 NULL 时（如设备从未触发 RecordOnline）累加 0,保守。
+	if _, err := tx.Exec(ctx, `
+		UPDATE device_info
+		   SET last_offline_time = $2,
+		       cumulative_online_duration = COALESCE(cumulative_online_duration, 0)
+		                                  + GREATEST(0, EXTRACT(EPOCH FROM ($2 - COALESCE(last_online_time, $2)))::bigint)
+		 WHERE device_id = $1`,
+		deviceID, now); err != nil {
+		return false, fmt.Errorf("update device_info offline accounting: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("commit mark offline tx: %w", err)
+	}
+	return true, nil
 }

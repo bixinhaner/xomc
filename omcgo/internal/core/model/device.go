@@ -53,6 +53,9 @@ type Device struct {
 	// 都为空表示从未同步过。前端 GetSyncStatus 据此渲染 idle vs failed 子态。
 	LastParamSyncFailedAt *time.Time `json:"last_param_sync_failed_at,omitempty" db:"last_param_sync_failed_at"`
 	LastParamSyncError    *string    `json:"last_param_sync_error,omitempty" db:"last_param_sync_error"`
+	// T-0173: 最近一次离线原因（heartbeat_timeout / manual / reboot / NULL）。
+	// 由 DeviceStatusReconciler 或管理面操作写入；从未离线为 nil。诊断字段。
+	LastOfflineReason *string `json:"last_offline_reason,omitempty" db:"last_offline_reason"`
 	LastBootAt            *time.Time `json:"last_boot_at,omitempty" db:"last_boot_at"`
 	BootCount       int        `json:"boot_count" db:"boot_count"`
 	InformInterval  int        `json:"inform_interval" db:"inform_interval"`

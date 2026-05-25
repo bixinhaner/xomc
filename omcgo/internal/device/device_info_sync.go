@@ -314,13 +314,6 @@ func anyKey(m map[string]interface{}, keys []string) bool {
 	return false
 }
 
-// RecordOffline updates the last_offline_time when a device goes offline.
-func (s *InfoSyncer) RecordOffline(ctx context.Context, deviceID uuid.UUID) error {
-	return s.infoRepo.UpdateSyncFields(ctx, deviceID, map[string]interface{}{
-		"last_offline_time": time.Now(),
-	})
-}
-
 // RecordOnline updates the last_online_time when a device comes online (from offline to active).
 // It also sets first_online_time if this is the device's first online event.
 func (s *InfoSyncer) RecordOnline(ctx context.Context, deviceID uuid.UUID) error {

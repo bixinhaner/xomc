@@ -40,7 +40,7 @@ type BatchInformProcessor struct {
 
 	pool        *pgxpool.Pool
 	redisClient redis.UniversalClient
-	heartbeat   *HeartbeatMonitor
+	reconciler  *DeviceStatusReconciler
 	cache       *DeviceCache
 	stunUpdater StunAddressUpdater
 	metrics     *DeviceMetrics
@@ -89,11 +89,13 @@ type TransitionEventPublisher interface {
 }
 
 // NewBatchInformProcessor creates a new BatchInformProcessor.
+//
+// reconciler 可为 nil（dev/test),flush 时跳过 RefreshHeartbeat,不影响 PG 写入。
 func NewBatchInformProcessor(
 	cfg appconfig.BatchProcessorConfig,
 	pool *pgxpool.Pool,
 	redisClient redis.UniversalClient,
-	heartbeat *HeartbeatMonitor,
+	reconciler *DeviceStatusReconciler,
 	cache *DeviceCache,
 	stunUpdater StunAddressUpdater,
 	metrics *DeviceMetrics,
@@ -132,7 +134,7 @@ func NewBatchInformProcessor(
 		shutdownTimeout: shutdownTimeout,
 		pool:            pool,
 		redisClient:     redisClient,
-		heartbeat:       heartbeat,
+		reconciler:      reconciler,
 		cache:           cache,
 		stunUpdater:     stunUpdater,
 		metrics:         metrics,
@@ -185,8 +187,8 @@ func (p *BatchInformProcessor) SetTransitionPublisher(pub TransitionEventPublish
 func (p *BatchInformProcessor) Submit(device *model.Device, inform *tr069.InformMessage,
 	params []model.DeviceParameter, oldStatus model.DeviceStatus, oldVersion string) {
 	// 心跳立即刷新，不等 flush
-	if p.heartbeat != nil {
-		p.heartbeat.RefreshHeartbeat(context.Background(), device.SerialNumber, device.InformInterval)
+	if p.reconciler != nil {
+		p.reconciler.RefreshHeartbeat(context.Background(), device.SerialNumber, device.InformInterval)
 	}
 
 	// Phase 6 (设计文档 §4.3 方案 X): ProductRegistry 回填 device.ModelName。

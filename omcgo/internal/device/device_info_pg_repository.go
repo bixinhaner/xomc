@@ -82,7 +82,9 @@ func (r *PgDeviceInfoRepository) Create(ctx context.Context, info *DeviceInfo) e
 			"rf_status", "cell_status", "mme_status", "sync_status", "kpi_status",
 			"num_of_cells", "gps_status", "alarm_severity", "license_status",
 			"mac", "hardware_version",
-			"first_online_time", "last_offline_time", "run_time",
+			// T-0173: 显式带上 last_online_time + cumulative_online_duration,与读路径对齐。
+			"first_online_time", "last_online_time", "last_offline_time",
+			"run_time", "cumulative_online_duration",
 			"creator", "updater", "created_at", "updated_at",
 		).
 		Values(
@@ -91,7 +93,8 @@ func (r *PgDeviceInfoRepository) Create(ctx context.Context, info *DeviceInfo) e
 			info.RFStatus, info.CellStatus, info.MMEStatus, info.SyncStatus, info.KPIStatus,
 			info.NumOfCells, info.GPSStatus, info.AlarmSeverity, info.LicenseStatus,
 			info.MAC, info.HardwareVersion,
-			info.FirstOnlineTime, info.LastOfflineTime, info.RunTime,
+			info.FirstOnlineTime, info.LastOnlineTime, info.LastOfflineTime,
+			info.RunTime, info.CumulativeOnlineDuration,
 			info.Creator, info.Updater, info.CreatedAt, info.UpdatedAt,
 		).
 		ToSql()
@@ -570,7 +573,9 @@ func deviceInfoColumns() []string {
 		"rf_status", "cell_status", "mme_status", "sync_status", "kpi_status",
 		"num_of_cells", "gps_status", "alarm_severity", "license_status",
 		"mac", "hardware_version",
-		"first_online_time", "last_offline_time", "run_time",
+		// T-0173: 补齐 last_online_time（pre-existing 漏读) + 新增 cumulative_online_duration
+		"first_online_time", "last_online_time", "last_offline_time",
+		"run_time", "cumulative_online_duration",
 		// Phase 2/3 (设计文档 §4.2)：扩展列
 		"tac", "band", "ul_earfcn",
 		"subframe_assignment", "special_subframe", "root_index",
@@ -598,6 +603,7 @@ func deviceWithInfoSelectColumns() []string {
 		"d.last_boot_at", "d.boot_count",
 		"d.inform_interval", "d.site_name", "d.site_id", "d.latitude", "d.longitude",
 		"d.extension_data", "d.created_at", "d.updated_at",
+		"d.last_offline_reason", // T-0173: 离线原因诊断（migration 000184)
 		// device_groups columns
 		"dg.name as group_name",
 		// device_info columns
@@ -607,6 +613,7 @@ func deviceWithInfoSelectColumns() []string {
 		"di.num_of_cells", "di.gps_status", "di.alarm_severity", "di.license_status",
 		"di.mac", "di.hardware_version",
 		"di.first_online_time", "di.last_online_time", "di.last_offline_time", "di.run_time",
+		"di.cumulative_online_duration", // T-0173: OMC 视角累计在线时长
 		// Phase 2/3 (设计文档 §4.2 Layer E)：device_info 扩展列
 		"di.tac", "di.band", "di.ul_earfcn",
 		"di.subframe_assignment", "di.special_subframe", "di.root_index",
@@ -656,7 +663,9 @@ func scanDeviceInfoFromRow(row pgx.Row) (*DeviceInfo, error) {
 		&info.RFStatus, &info.CellStatus, &info.MMEStatus, &info.SyncStatus, &info.KPIStatus,
 		&info.NumOfCells, &info.GPSStatus, &info.AlarmSeverity, &info.LicenseStatus,
 		&info.MAC, &info.HardwareVersion,
-		&info.FirstOnlineTime, &info.LastOfflineTime, &info.RunTime,
+		// T-0173: 顺序与 deviceInfoColumns() 对齐;补齐 last_online_time + cumulative_online_duration
+		&info.FirstOnlineTime, &info.LastOnlineTime, &info.LastOfflineTime,
+		&info.RunTime, &info.CumulativeOnlineDuration,
 		// Phase 2/3 (设计文档 §4.2)：扩展列与 deviceInfoColumns 顺序一致
 		&info.TAC, &info.Band, &info.ULEarfcn,
 		&info.SubframeAssignment, &info.SpecialSubframe, &info.RootIndex,
@@ -707,6 +716,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		diLastOnline    *time.Time
 		diLastOffline   *time.Time
 		diRunTime       *int64
+		diCumOnline     *int64 // T-0173: cumulative_online_duration
 		// Phase 2/3 (设计文档 §4.2)：扩展列接收变量
 		diTAC                *string
 		diBand               *string
@@ -740,6 +750,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&d.LastBootAt, &d.BootCount,
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
 		&extData, &d.CreatedAt, &d.UpdatedAt,
+		&d.LastOfflineReason, // T-0173: 离线原因（migration 000184)
 		// device_groups field (nullable from LEFT JOIN)
 		&d.GroupName,
 		// device_info fields (all nullable from LEFT JOIN)
@@ -749,6 +760,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&diNumOfCells, &diGPSStatus, &diAlarmSeverity, &diLicenseStatus,
 		&diMAC, &diHWVersion,
 		&diFirstOnline, &diLastOnline, &diLastOffline, &diRunTime,
+		&diCumOnline, // T-0173: cumulative_online_duration（与 select 列顺序一致)
 		// Phase 2/3 扩展列
 		&diTAC, &diBand, &diULEarfcn,
 		&diSubframeAssignment, &diSpecialSubframe, &diRootIndex,
@@ -827,6 +839,7 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	d.LastOnlineTime = diLastOnline
 	d.LastOfflineTime = diLastOffline
 	d.RunTime = diRunTime
+	d.CumulativeOnlineDuration = diCumOnline // T-0173
 	// Phase 2/3 扩展列
 	d.TAC = diTAC
 	d.Band = diBand

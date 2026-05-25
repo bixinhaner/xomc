@@ -22,10 +22,15 @@ func initDeviceModule(c *Container) error {
 	paramRepo := device.NewPgDeviceParameterRepository(c.PgPool)
 	deviceInfoRepo := device.NewPgDeviceInfoRepository(c.PgPool)
 
-	// HeartbeatMonitor
-	heartbeatMonitor := device.NewHeartbeatMonitor(c.Redis, deviceRepo, logger)
-	heartbeatMonitor.Start()
-	c.GS.Register("heartbeat", 1, func(ctx context.Context) error { heartbeatMonitor.Stop(); return nil })
+	// T-0173: DeviceStatusReconciler 替代原来的 HeartbeatMonitor + OfflineDetector。
+	// 同时承担:
+	//   1) RefreshHeartbeat（ACS Inform 路径同步调用,刷 Redis 心跳 key）
+	//   2) 后台扫描:每 60s 找 last_inform_at < NOW - max(2×inform_interval, 600s) 的
+	//      在线设备,事务性翻 is_online=false + 累加 cumulative_online_duration +
+	//      publish device.offline。
+	reconciler := device.NewDeviceStatusReconciler(c.Redis, deviceRepo, c.EventBus, logger)
+	reconciler.Start()
+	c.GS.Register("device-status-reconciler", 1, func(ctx context.Context) error { reconciler.Stop(); return nil })
 
 	// Shared infrastructure
 	connReqClient := connreq.NewClient(c.Redis, logger)
@@ -33,7 +38,7 @@ func initDeviceModule(c *Container) error {
 
 	// DeviceService
 	deviceCache := device.NewDeviceCache(c.Redis, logger)
-	deviceService := device.NewDeviceService(deviceRepo, paramRepo, heartbeatMonitor, c.EventBus, logger)
+	deviceService := device.NewDeviceService(deviceRepo, paramRepo, reconciler, c.EventBus, logger)
 	deviceService.SetDeviceCache(deviceCache)
 	deviceService.SetDeviceInfoRepo(deviceInfoRepo)
 	deviceService.SetTaskService(c.TaskSvc)
@@ -52,14 +57,7 @@ func initDeviceModule(c *Container) error {
 	infoSyncer := device.NewInfoSyncer(deviceInfoRepo, paramRepo, c.Carriers, logger)
 	deviceService.SetInfoSyncer(infoSyncer)
 
-	// OfflineDetector
-	offlineDetector := device.NewOfflineDetector(deviceRepo, infoSyncer, c.EventBus, logger)
-	go func() {
-		if err := offlineDetector.Start(context.Background()); err != nil {
-			logger.Error("offline detector stopped with error", zap.Error(err))
-		}
-	}()
-	c.GS.Register("offline-detector", 2, func(ctx context.Context) error { return nil })
+	// T-0173: OfflineDetector 已合并入 DeviceStatusReconciler（见上方 reconciler 初始化）。
 
 	// Registration module
 	regRepo := device.NewPgRegistrationRepository(c.PgPool)
@@ -74,7 +72,7 @@ func initDeviceModule(c *Container) error {
 	if c.Cfg.BatchProcessor.Enabled {
 		batchProcessor = device.NewBatchInformProcessor(
 			c.Cfg.BatchProcessor,
-			c.PgPool, c.Redis, heartbeatMonitor, deviceCache,
+			c.PgPool, c.Redis, reconciler, deviceCache,
 			stunStore, deviceMetrics, logger,
 		)
 		batchProcessor.Start()

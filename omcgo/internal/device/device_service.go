@@ -35,7 +35,7 @@ type DeviceService struct {
 	regRepo          RegistrationRepository
 	groupAssigner    GroupAssigner
 	infoSyncer       *InfoSyncer
-	heartbeat        *HeartbeatMonitor
+	reconciler       *DeviceStatusReconciler
 	eventBus         event.EventBus
 	taskSvc          task.Enqueuer
 	connReq          ConnectionRequester
@@ -73,17 +73,20 @@ type StunAddressUpdater interface {
 }
 
 // NewDeviceService creates a new DeviceService.
+//
+// reconciler 可为 nil（dev/test 模式下不启用心跳刷新),此时所有 RefreshHeartbeat
+// 调用静默跳过,不影响 Inform 接收与 PG 写入。
 func NewDeviceService(
 	deviceRepo DeviceRepository,
 	paramRepo DeviceParameterRepository,
-	heartbeat *HeartbeatMonitor,
+	reconciler *DeviceStatusReconciler,
 	eventBus event.EventBus,
 	logger *zap.Logger,
 ) *DeviceService {
 	return &DeviceService{
 		deviceRepo: deviceRepo,
 		paramRepo:  paramRepo,
-		heartbeat:  heartbeat,
+		reconciler: reconciler,
 		eventBus:   eventBus,
 		logger:     logger,
 	}
@@ -603,8 +606,8 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 	}
 
 	// Refresh heartbeat
-	if s.heartbeat != nil {
-		s.heartbeat.RefreshHeartbeat(ctx, device.SerialNumber, device.InformInterval)
+	if s.reconciler != nil {
+		s.reconciler.RefreshHeartbeat(ctx, device.SerialNumber, device.InformInterval)
 	}
 
 	s.logger.Info("device registered from bootstrap",
@@ -762,8 +765,8 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	}
 
 	// Refresh heartbeat
-	if s.heartbeat != nil {
-		s.heartbeat.RefreshHeartbeat(ctx, device.SerialNumber, device.InformInterval)
+	if s.reconciler != nil {
+		s.reconciler.RefreshHeartbeat(ctx, device.SerialNumber, device.InformInterval)
 	}
 
 	// T-0123/T-0125: 检测 firmware 变化与 offline→active 二选一发布事件。

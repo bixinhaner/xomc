@@ -126,8 +126,14 @@ type DeviceWithInfo struct {
 	// LastOfflineTime 最后离线时间（设备从在线变为离线的时间，对应前端"断开时间"）
 	LastOfflineTime *time.Time `json:"last_offline_time"`
 
-	// RunTime 累计运行时长（秒）
+	// RunTime 设备自报运行时长（秒，来自 TR-181 Device.DeviceInfo.UpTime）。
+	// 与"OMC 视角累计在线时长"（CumulativeOnlineDuration）含义不同。
 	RunTime *int64 `json:"run_time"`
+
+	// CumulativeOnlineDuration 累计在线总时长（秒）。
+	// 由 DeviceStatusReconciler 在 online→offline 边沿事务性累加。
+	// 前端"总在线时长"应用 = cumulative_online_duration + (is_online ? NOW - last_online_time : 0)。
+	CumulativeOnlineDuration *int64 `json:"cumulative_online_duration,omitempty"`
 
 	// ===== 在线时长（动态计算，不存储）=====
 	//
