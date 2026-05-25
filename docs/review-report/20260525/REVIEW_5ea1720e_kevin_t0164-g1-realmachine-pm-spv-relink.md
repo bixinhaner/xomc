@@ -3,7 +3,7 @@
 | 项 | 值 |
 |---|---|
 | Branch | `draft/pm-kpi-impl` |
-| Commit Hash | PENDING（回填于 dev-pipeline §D4） |
+| Commit Hash | `5ea1720e` |
 | Author | kevin |
 | Scope | device |
 | Backlog | T-0164 |
