@@ -6,10 +6,9 @@ export type { TabItem };
 
 const MAX_TABS = 10;
 
-// 仪表板 tab 的稳定标识。与动态菜单 buildDynamicKeyToLeaf 产出的 key
-// （= 菜单 routePath）保持一致，否则点击菜单"仪表板"会因 key 不匹配
-// 创建出第二个同名 tab（NavMenu.tsx 走 leaf.routePath='/dashboard'）。
-const DASHBOARD_TAB_KEY = '/dashboard';
+// 仪表板 tab 的稳定标识。使用 'dashboard'（与 navConfig 中其他菜单项的 key 命名风格一致）。
+// 动态菜单使用 routePath（'/dashboard'）作为 key，但通过 path 匹配兼容静态菜单的 'dashboard' key。
+const DASHBOARD_TAB_KEY = 'dashboard';
 
 interface TabState {
   tabs: TabItem[];
@@ -42,8 +41,8 @@ export const useTabStore = create<TabState>()(
 
       openTab: (tab) => {
         const { tabs } = get();
-        // 兼容旧 sessionStorage：历史版本用 'dashboard' 作为 key，
-        // 新版用 '/dashboard'。同 path 视为同 tab，merge 时把 key 收敛到新值。
+        // 兼容动态菜单：动态菜单使用 routePath（'/dashboard'）作为 key，
+        // 静态菜单使用 'dashboard' 作为 key。通过 path 匹配确保两者指向同一个 tab。
         const existsIdx = tabs.findIndex(
           (t) => t.key === tab.key || (tab.path === '/dashboard' && t.path === '/dashboard'),
         );
@@ -128,27 +127,44 @@ export const useTabStore = create<TabState>()(
     {
       name: 'omc-tab-store',
       storage: createJSONStorage(() => sessionStorage),
-      version: 2,
+      version: 3,
       migrate: (persisted: unknown, version: number) => {
-        // v1 → v2：DASHBOARD_TAB_KEY 从 'dashboard' 改 '/dashboard'。
-        // 把残留的旧 dashboard tab key 改写，activeTabKey 同步迁移。
-        if (version < 2 && persisted && typeof persisted === 'object') {
-          const p = persisted as { tabs?: TabItem[]; activeTabKey?: string };
-          const tabs = (p.tabs ?? []).map((t) =>
+        if (!persisted || typeof persisted !== 'object') return persisted as TabState;
+        const p = persisted as { tabs?: TabItem[]; activeTabKey?: string };
+        // 确保 tabs 始终有值，避免后续代码中的类型错误
+        p.tabs = p.tabs ?? [];
+
+        // v2 → v3：DASHBOARD_TAB_KEY 从 '/dashboard' 改回 'dashboard'（与 navConfig 命名风格一致）。
+        if (version < 3) {
+          const migratedTabs = p.tabs.map((t) =>
+            t.key === '/dashboard' && t.path === '/dashboard'
+              ? { ...t, key: DASHBOARD_TAB_KEY, closable: false }
+              : t,
+          );
+          const migratedActiveKey = p.activeTabKey === '/dashboard' ? DASHBOARD_TAB_KEY : p.activeTabKey;
+          p.tabs = migratedTabs;
+          p.activeTabKey = migratedActiveKey ?? DASHBOARD_TAB_KEY;
+        }
+
+        // v1 → v2：DASHBOARD_TAB_KEY 从 'dashboard' 改 '/dashboard'（已废弃，保留以防旧数据）。
+        if (version < 2) {
+          const v2Tabs = p.tabs.map((t) =>
             t.key === 'dashboard' && t.path === '/dashboard'
               ? { ...t, key: DASHBOARD_TAB_KEY, closable: false }
               : t,
           );
-          // 兜底：迁移完若没有 dashboard tab（理论不会发生），补回。
-          const hasDashboard = tabs.some((t) => t.key === DASHBOARD_TAB_KEY);
-          return {
-            ...p,
-            tabs: hasDashboard ? tabs : [DASHBOARD_TAB, ...tabs],
-            activeTabKey:
-              p.activeTabKey === 'dashboard' ? DASHBOARD_TAB_KEY : (p.activeTabKey ?? DASHBOARD_TAB_KEY),
-          };
+          p.tabs = v2Tabs;
+          if (p.activeTabKey === 'dashboard') p.activeTabKey = DASHBOARD_TAB_KEY;
         }
-        return persisted as TabState;
+
+        // 兜底：确保始终有 dashboard tab
+        const hasDashboard = p.tabs.some((t) => t.key === DASHBOARD_TAB_KEY);
+        if (!hasDashboard) {
+          p.tabs = [DASHBOARD_TAB, ...p.tabs];
+          p.activeTabKey = p.activeTabKey ?? DASHBOARD_TAB_KEY;
+        }
+
+        return p as TabState;
       },
     }
   )
