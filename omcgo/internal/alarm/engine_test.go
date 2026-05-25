@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	carrierpkg "github.com/omcgo/omcgo/internal/core/carrier"
+	"github.com/omcgo/omcgo/internal/core/carrier/cmcc"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/stretchr/testify/assert"
@@ -155,6 +157,34 @@ func TestProcessNewAlarm(t *testing.T) {
 	assert.Len(t, store.active, 1)
 	assert.Equal(t, model.AlarmActive, alarm.Status)
 	assert.NotEqual(t, uuid.Nil, alarm.ID)
+}
+
+func TestProcessPreservesSourceSeverityWhenCarrierMappingMissing(t *testing.T) {
+	store := newMockAlarmStore()
+	registry := carrierpkg.NewRegistry()
+	registry.Register(cmcc.New())
+	engine := &AlarmEngine{
+		store:           store,
+		carrierRegistry: registry,
+		logger:          zap.NewNop(),
+	}
+
+	alarm := &model.Alarm{
+		DeviceSN:        "TEST001",
+		DeviceID:        uuid.New(),
+		Carrier:         model.CarrierCMCC,
+		AlarmIdentifier: "70011",
+		AlarmType:       "equipment",
+		Severity:        model.AlarmMajor,
+		RaisedAt:        time.Now(),
+	}
+
+	require.NoError(t, engine.Process(context.Background(), alarm))
+
+	stored, err := store.GetActiveByDeviceAndIdentifier(context.Background(), "TEST001", "70011")
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, model.AlarmMajor, stored.Severity)
 }
 
 func TestProcessDuplicateAlarm(t *testing.T) {

@@ -112,6 +112,8 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 			mapped := c.AlarmSeverityMapping(alarm.AlarmIdentifier)
 			if mapped != 0 {
 				alarm.Severity = mapped
+			} else if alarm.Severity == 0 {
+				alarm.Severity = model.AlarmWarning
 			}
 		}
 	}

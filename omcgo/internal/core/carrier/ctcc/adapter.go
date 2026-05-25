@@ -68,7 +68,7 @@ func (c *CTCCCarrier) AlarmSeverityMapping(carrierAlarmCode string) model.AlarmS
 	if sev, ok := alarmSeverityMap[carrierAlarmCode]; ok {
 		return sev
 	}
-	return model.AlarmWarning
+	return 0
 }
 
 func (c *CTCCCarrier) ValidateParameter(path string, value string) error {

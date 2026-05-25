@@ -39,6 +39,7 @@ type Carrier interface {
 	KPIDefinitions(tech model.Technology) []*KPIDefinition
 
 	// AlarmSeverityMapping maps a carrier-specific alarm code to a standard severity level.
+	// Returns 0 when no explicit mapping exists so callers can preserve source severity.
 	AlarmSeverityMapping(carrierAlarmCode string) model.AlarmSeverity
 
 	// ValidateParameter validates a parameter value against carrier-specific rules.

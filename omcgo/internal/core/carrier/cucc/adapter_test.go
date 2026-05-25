@@ -81,7 +81,7 @@ func Test_AlarmSeverityMapping(t *testing.T) {
 		{"POWER_DEGRADED", model.AlarmMinor},
 		{"SW_VERSION_MISMATCH", model.AlarmWarning},
 		{"LICENSE_EXPIRING", model.AlarmWarning},
-		{"UNKNOWN_ALARM", model.AlarmWarning},
+		{"UNKNOWN_ALARM", model.AlarmSeverity(0)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.code, func(t *testing.T) {

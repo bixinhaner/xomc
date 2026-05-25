@@ -99,7 +99,7 @@ func Test_AlarmSeverityMapping(t *testing.T) {
 		{"VSWR_HIGH", model.AlarmMinor},
 		{"MEM_OVERLOAD", model.AlarmWarning},
 		{"CONFIG_MISMATCH", model.AlarmWarning},
-		{"UNKNOWN_ALARM", model.AlarmWarning}, // unknown defaults to warning
+		{"UNKNOWN_ALARM", model.AlarmSeverity(0)}, // unknown has no explicit override
 	}
 	for _, tt := range tests {
 		t.Run(tt.code, func(t *testing.T) {

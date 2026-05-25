@@ -46,6 +46,7 @@ func TestProcessSync_BackfillsDeviceFieldsForAddedAlarm(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, alarm)
 	assert.Equal(t, deviceID, alarm.DeviceID)
+	assert.Equal(t, model.AlarmMajor, alarm.Severity)
 	require.NotNil(t, alarm.Technology)
 	assert.Equal(t, string(model.TechLTE), *alarm.Technology)
 	assert.Equal(t, model.CarrierCode("cmcc"), alarm.Carrier)

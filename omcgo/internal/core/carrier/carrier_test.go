@@ -139,7 +139,7 @@ func TestCMCCCarrier(t *testing.T) {
 	t.Run("alarm_severity", func(t *testing.T) {
 		assert.Equal(t, model.AlarmCritical, c.AlarmSeverityMapping("CELL_UNAVAILABLE"))
 		assert.Equal(t, model.AlarmMajor, c.AlarmSeverityMapping("RADIO_FAILURE"))
-		assert.Equal(t, model.AlarmWarning, c.AlarmSeverityMapping("UNKNOWN_CODE"))
+		assert.Equal(t, model.AlarmSeverity(0), c.AlarmSeverityMapping("UNKNOWN_CODE"))
 	})
 
 	t.Run("known_oui_products", func(t *testing.T) {
@@ -231,7 +231,7 @@ func TestCTCCCarrier(t *testing.T) {
 		assert.Equal(t, model.AlarmMajor, c.AlarmSeverityMapping("RADIO_FAILURE"))
 		assert.Equal(t, model.AlarmMajor, c.AlarmSeverityMapping("BACKHAUL_FAILURE"))
 		assert.Equal(t, model.AlarmMinor, c.AlarmSeverityMapping("POWER_DEGRADED"))
-		assert.Equal(t, model.AlarmWarning, c.AlarmSeverityMapping("UNKNOWN_CODE"))
+		assert.Equal(t, model.AlarmSeverity(0), c.AlarmSeverityMapping("UNKNOWN_CODE"))
 	})
 
 	t.Run("known_oui_products", func(t *testing.T) {
