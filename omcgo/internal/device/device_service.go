@@ -15,6 +15,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/tracing"
+	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"go.opentelemetry.io/otel/attribute"
@@ -46,6 +47,7 @@ type DeviceService struct {
 	paramSyncStarter ParamSyncStarter         // T-0126: 注入 *provision.SyncService 触发 Path B 手动同步
 	abnormalRecorder  AbnormalRebootRecorder // T-0158: 异常重启识别即落库（nil = 禁用）
 	bootEventRecorder BootEventRecorder      // 普通 1 BOOT 事件日志写入（nil = 禁用）
+	productMatcher    ProductClassMatcher    // Phase 6 ModelName 回填（nil = 禁用）
 	logger            *zap.Logger
 }
 
@@ -157,6 +159,23 @@ func (s *DeviceService) BatchAssignToGroup(ctx context.Context, groupID uuid.UUI
 // against capacity/expiry. Pass nil to disable (default in tests).
 func (s *DeviceService) SetLicenseEnforcer(e LicenseEnforcer) {
 	s.licenseEnforcer = e
+}
+
+// ProductClassMatcher 是 DeviceService 反查 productClass → product 装配件的最小依赖。
+//
+// 生产环境由 *product.Registry 满足；测试可注入 stub。
+// 通过接口而非直接依赖具体类型，避免在 device 包引入 product 包循环依赖风险。
+//
+// MatchProductClass 返回的 product 对象上的 `Name` 字段即装配件名（如 "mBS31001"），
+// 用作 devices.model_name 的回填来源（设计文档 §4.3 方案 X）。
+type ProductClassMatcher interface {
+	MatchProductClass(ctx context.Context, productClass string) (*product.MatchResult, error)
+}
+
+// SetProductMatcher 注入 product 装配件路由器（Phase 6 ModelName 回填）。
+// 传 nil 等价于禁用回填——Inform 路径不影响。
+func (s *DeviceService) SetProductMatcher(m ProductClassMatcher) {
+	s.productMatcher = m
 }
 
 // RebootDevice queues a Reboot command for the given device via the ACS command queue.
@@ -479,6 +498,9 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		UpdatedAt:                   now,
 	}
 
+	// Phase 6: ProductRegistry 回填 model_name（TR-069 DeviceId 不含 ModelName）
+	s.applyProductMetadata(ctx, device)
+
 	s.logger.Info("RegisterFromInform: creating device in DB",
 		zap.String("device_id", device.ID.String()),
 		zap.String("serial_number", device.SerialNumber),
@@ -609,6 +631,8 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	device.OUI = inform.DeviceId.OUI
 	device.ProductClass = inform.DeviceId.ProductClass
 	device.Manufacturer = inform.DeviceId.Manufacturer
+	// Phase 6: ProductRegistry 回填 model_name（仅在 ModelName 为空时尝试）
+	s.applyProductMetadata(ctx, device)
 	device.FirmwareVersion = findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion")
 	device.ConnectionRequestURL = findParamValue(inform.ParameterList, "Device.ManagementServer.ConnectionRequestURL")
 	device.LastInformAt = &now
@@ -854,6 +878,54 @@ func (s *DeviceService) GetDeviceWithInfo(ctx context.Context, id uuid.UUID) (*D
 		return &DeviceWithInfo{Device: *d}, nil
 	}
 	return s.deviceInfoRepo.GetByIDWithInfo(ctx, id)
+}
+
+// applyProductMetadata 在 Inform 路径上把 ProductRegistry 装配件元数据
+// 回填到 device 结构体（Phase 6 — 设计文档 §4.3 方案 X）。
+//
+// 当前仅回填 ModelName：TR-069 DeviceId 块不含 ModelName，CPE 参数树通常也
+// 不上报 Device.DeviceInfo.ModelName，因此 devices.model_name 列长期为空。
+// 通过 ProductRegistry.MatchProductClass 路由 productClass → product 装配件，
+// 把 product.Name（装配件友好名称，如 "mBS31001"）回填进 device.ModelName。
+//
+// 行为：
+//   - productMatcher 未注入 / device == nil → noop
+//   - device.ModelName 已有值 → noop（不覆盖手填或前次回填）
+//   - device.ProductClass 为空 → noop（无法路由）
+//   - MatchProductClass 返 ErrOrphan / 任何错误 → fail-soft 仅 WARN，不阻断 Inform
+//   - 命中且 product.Name != "" → 写入 device.ModelName（in-memory，caller 负责持久化）
+//
+// 由 RegisterFromInform 与 UpdateFromInform 在 Create/Update 持久化前各调用一次。
+func (s *DeviceService) applyProductMetadata(ctx context.Context, device *model.Device) {
+	if s == nil || s.productMatcher == nil || device == nil {
+		return
+	}
+	if device.ModelName != "" {
+		return
+	}
+	if device.ProductClass == "" {
+		return
+	}
+	matchRes, err := s.productMatcher.MatchProductClass(ctx, device.ProductClass)
+	if err != nil {
+		// ErrOrphan 是合法业务态（productClass 未登记）；其他错误也都视为 soft fail：
+		// Inform 主流程不依赖回填成功，下次 Inform 仍会重试。
+		if !errors.Is(err, product.ErrOrphan) {
+			s.logger.Warn("applyProductMetadata: MatchProductClass failed (non-fatal)",
+				zap.String("serial_number", device.SerialNumber),
+				zap.String("product_class", device.ProductClass),
+				zap.Error(err))
+		}
+		return
+	}
+	if matchRes == nil || matchRes.Product == nil || matchRes.Product.Name == "" {
+		return
+	}
+	device.ModelName = matchRes.Product.Name
+	s.logger.Debug("applyProductMetadata: model_name backfilled from ProductRegistry",
+		zap.String("serial_number", device.SerialNumber),
+		zap.String("product_class", device.ProductClass),
+		zap.String("model_name", device.ModelName))
 }
 
 // GetDeviceInfo retrieves extended info for a device.

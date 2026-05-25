@@ -38,6 +38,11 @@ func initDeviceModule(c *Container) error {
 	deviceService.SetDeviceInfoRepo(deviceInfoRepo)
 	deviceService.SetTaskService(c.TaskSvc)
 	deviceService.SetCarrierRegistry(c.Carriers) // T-0029: RF control path lookup
+	// Phase 6 (设计文档 §4.3): productClass → product 装配件回填 device.model_name。
+	// ProductRegistry 在 ModuleGraph 中先于 device 模块初始化（productregistry → device）。
+	if c.ProductRegistry != nil {
+		deviceService.SetProductMatcher(c.ProductRegistry)
+	}
 	deviceService.SetConnectionRequester(connReqClient)
 	deviceService.SetStunAddressUpdater(stunStore)
 	deviceMetrics := device.NewDeviceMetrics(c.MetricsReg)
