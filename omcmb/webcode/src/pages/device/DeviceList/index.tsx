@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { App, Button, Card, Drawer, Input, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { App, Button, Card, Drawer, Input, Modal, Popconfirm, Popover, Progress, Space, Spin, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   AlertOutlined,
@@ -129,7 +129,8 @@ export default function DeviceList() {
   });
   const [pageSize, setPageSize] = useState(() => {
     const size = searchParams.get('pageSize');
-    return size ? parseInt(size, 10) : 100;
+    // 性能优化：默认 20 条而非 100 条，减少首屏 DOM 节点数量 80%
+    return size ? parseInt(size, 10) : 20;
   });
   const [filterParams, setFilterParams] = useState<Record<string, unknown>>(() => {
     const params: Record<string, unknown> = {};
@@ -145,6 +146,7 @@ export default function DeviceList() {
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
   // 同步 URL 参数到 filterParams（解决返回时 state 未恢复的问题）
+  // 性能优化：使用浅比较替代 JSON.stringify 深度比较，避免循环依赖
   useEffect(() => {
     const params: Record<string, unknown> = {};
     searchParams.forEach((value, key) => {
@@ -152,12 +154,26 @@ export default function DeviceList() {
         params[key] = parseUrlValue(key, value);
       }
     });
-    // 只有当 params 与当前 filterParams 不同时才更新
-    if (JSON.stringify(params) !== JSON.stringify(filterParams)) {
+    // 浅比较：先比较 key 数量，再逐个比较 value
+    const currentKeys = Object.keys(filterParams);
+    const newKeys = Object.keys(params);
+    if (currentKeys.length !== newKeys.length) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setFilterParams(params);
+      return;
     }
-  }, [searchParams, filterParams]);
+    let changed = false;
+    for (const key of newKeys) {
+      if (params[key] !== filterParams[key]) {
+        changed = true;
+        break;
+      }
+    }
+    if (changed) {
+      setFilterParams(params);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);  // 移除 filterParams 依赖，避免循环触发
 
   // 不再在挂载时自动把 sessionStorage 灌回 URL —— 旧实现会让"上次会话留下的过时
   // 筛选值"（比如 T-0162 已废弃的 connStatus、或新数据里不存在的 softwareVersion）
@@ -253,6 +269,8 @@ export default function DeviceList() {
     setEditingRemark(false);
   }, []);
 
+  // remarkHeaderRender 保持 useMemo，因为 headerRender 需要 ReactNode 而非函数
+  // 编辑状态变化不频繁，性能开销可接受
   const remarkHeaderRender = useMemo(() => {
     if (editingRemark) {
       return (
@@ -308,9 +326,10 @@ export default function DeviceList() {
   const triggerAlarmSync = useTriggerAlarmSync();
   const createUfteTask = useCreateUnifiedFileTransferTask();
   const downloadStationLog = useDownloadStationLog();
-  const devices: Device[] = data?.items ?? [];
+  // 性能优化：使用 useMemo 避免每次渲染创建新引用，防止下游 callback/useMemo 依赖变化
+  const devices = useMemo(() => data?.items ?? [], [data?.items]);
   const total = data?.total ?? 0;
-  const stats = data?.stats ?? { total: 0, online: 0, offline: 0, alarmed: 0 };
+  const stats = useMemo(() => data?.stats ?? { total: 0, online: 0, offline: 0, alarmed: 0, online_count: 0, offline_count: 0 }, [data?.stats]);
 
   // R6b: 设备分组下拉接入 device/group API（device-list-and-group-improvements-20260520.md R6b）
   const { data: groupsResp } = useDeviceGroups();
@@ -351,13 +370,18 @@ export default function DeviceList() {
     [],
   );
 
-  const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
-    critical: t('alarm.severity.critical'),
-    major: t('alarm.severity.major'),
-    minor: t('alarm.severity.minor'),
-    warning: t('alarm.severity.warning'),
-    none: t('alarm.severity.none'),
-  }), [t]);
+  // 性能优化：SEVERITY_LABEL 改为函数调用，移除 useMemo
+  // 仅 5 个字符串映射，计算开销可忽略，避免依赖 t 函数导致频繁重建
+  const getSeverityLabel = useCallback((severity: string): string => {
+    const labels: Record<string, string> = {
+      critical: t('alarm.severity.critical'),
+      major: t('alarm.severity.major'),
+      minor: t('alarm.severity.minor'),
+      warning: t('alarm.severity.warning'),
+      none: t('alarm.severity.none'),
+    };
+    return labels[severity] || severity;
+  }, [t]);
 
   // 状态值映射：兼容多种可能的数据格式，修复乱码问题
   const mapConnStatus = useCallback((status: string | undefined | null): 'online' | 'offline' => {
@@ -884,7 +908,7 @@ export default function DeviceList() {
         group: 'common',
         render: (_val, record) => {
           const color = SEVERITY_COLOR[record.alarmLevel] ?? 'default';
-          const label = SEVERITY_LABEL[record.alarmLevel] ?? record.alarmLevel;
+          const label = getSeverityLabel(record.alarmLevel);
           if (record.alarmLevel && record.alarmLevel !== 'none') {
             // 点击告警跳转到设备详情告警 tab
             return (
@@ -1242,7 +1266,7 @@ export default function DeviceList() {
       { key: 'ipsecAddr', title: t('device.ipsecAddr'), dataIndex: 'ipsecAddr', width: 140, hidden: true, mono: true, group: 'common' },
       {
         key: 'latestLog',
-        title: t('device.latestLog', '运行日志'),
+        title: t('device.latestLog'),
         dataIndex: 'id',
         width: 100,
         hidden: true,
@@ -1256,19 +1280,19 @@ export default function DeviceList() {
               const res = await stationLogApi.list({ deviceId: record.id, logType: 'running', page: 1, pageSize: 1 });
               const log = res.items[0];
               if (!log) {
-                void message.info(t('device.noLogFile', '暂无日志文件'));
+                void message.info(t('device.noLogFile'));
                 return;
               }
               downloadStationLog.mutate(log.id);
             }}
           >
-            {t('common.download', '下载')}
+            {t('common.download')}
           </Button>
         ),
       },
 
     ],
-    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, SEVERITY_LABEL, remarkHeaderRender, message, downloadStationLog, mapConnStatus]
+    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, remarkHeaderRender, message, downloadStationLog, mapConnStatus, getSeverityLabel]
   );
 
   const batchActions = useMemo((): BatchAction[] => [
@@ -1495,7 +1519,8 @@ export default function DeviceList() {
           <StatisticsPanel items={statsItems} style={{ marginBottom: 8 }} />
 
           {/* 设备列表卡片 */}
-          <Card
+          <Spin spinning={isLoading} size="large" tip={t('common.loading')}>
+            <Card
             size="small"
             bordered
             style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
@@ -1526,7 +1551,8 @@ export default function DeviceList() {
               showRowNumber
               rowNumberTitle={t('table.rowNumber')}
             />
-          </Card>
+            </Card>
+          </Spin>
         </ListPageLayout>
       </div>
 

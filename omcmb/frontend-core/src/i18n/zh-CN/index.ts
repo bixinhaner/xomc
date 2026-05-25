@@ -709,6 +709,8 @@ const messages: Record<string, string> = {
   'device.verticalBeamWidth':   '垂直波束宽度',
   'device.horizontalAzimuth':   '水平方位角',
   'device.installAddress':      '安装详细地址',
+  'device.latestLog':           '运行日志',
+  'device.noLogFile':           '暂无日志文件',
 
   // 监控页面扩展字段 (5G NR Others)
   'device.rollbackVersion':     '回滚版本',

@@ -707,6 +707,8 @@ const messages: Record<string, string> = {
   'device.verticalBeamWidth':   'Vertical Beam Width',
   'device.horizontalAzimuth':   'Horizontal Azimuth',
   'device.installAddress':      'Install Address',
+  'device.latestLog':           'Runtime Log',
+  'device.noLogFile':           'No log file available',
 
   // Monitor page extended fields (5G NR Others)
   'device.rollbackVersion':     'Rollback Version',
