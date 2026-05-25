@@ -1,7 +1,14 @@
 -- +goose Up
 -- ============================================================
--- 000184_devices_status_tracking_comments.sql
+-- 000187_devices_status_tracking_comments.sql
 -- T-0173 Phase 1：设备在线状态异步治理 + devices 表字段 COMMENT 补全。
+--
+-- 让位说明（CLAUDE.md §5.5 多人协作"后合并方让位"）：
+-- 本文件原编号 000184，与远端 b08720c8 引入的 000184_task_scheduled_execution.sql
+-- 同号导致 goose duplicate version 184 panic（docker-migrate-schema-1 5/25 起不来）。
+-- rebase 时仅检查文件内容冲突而漏检版本号冲突——git 视新增不同文件名为独立改动,
+-- goose 视同版本号为重复。修复：本文件让位到 000187（远端最大 = 186 + 1）；
+-- 同 commit 的兄弟迁移 000185_device_info_status_tracking_comments 未与远端冲突,保留原号。
 --
 -- 背景：HeartbeatMonitor 与 OfflineDetector 双扫描器并存，HeartbeatMonitor
 -- 命中路径只写 is_online=false 不写 last_offline_time，与 OfflineDetector
