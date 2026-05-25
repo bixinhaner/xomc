@@ -1548,7 +1548,13 @@ export default function DeviceList() {
 
           <StatisticsPanel items={statsItems} style={{ marginBottom: 8 }} />
 
-          {/* 设备列表卡片 */}
+          {/* 设备列表卡片。
+              注意:不要在外层套 <Spin>。Antd Spin 内部的
+              .ant-spin-nested-loading + .ant-spin-container 是 display:block
+              不是 flex,会断 ListPageLayout → Card 的 flex 高度链,导致 Card
+              收缩到内容自然高度(~161px),DataTable.autoFitHeight 算出 y=1px,
+              所有列表行被压到 1px 高度内不可见(分页栏看似贴上来盖住列表)。
+              DataTable 自己已接 loading={isLoading},无需外层 Spin。 */}
           <Card
             size="small"
             bordered
