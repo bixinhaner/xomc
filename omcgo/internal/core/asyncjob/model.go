@@ -73,7 +73,9 @@ type InsertRequest struct {
 const DefaultMaxAttempts = 3
 
 // HeartbeatInterval 心跳上报间隔。
-const HeartbeatInterval = 30 * time.Second
+// 启动期可通过 sys_configs.asyncjob.heartbeat_interval_seconds 覆盖；
+// 改值需重启 worker 生效（NewTicker 在 Runner.runOnce 创建时锁定当前值）。
+var HeartbeatInterval = 30 * time.Second
 
 // ZombieThreshold heartbeat_at 距 now() 超过此值则视为僵尸（被 sweeper 重置）。
 const ZombieThreshold = 5 * time.Minute

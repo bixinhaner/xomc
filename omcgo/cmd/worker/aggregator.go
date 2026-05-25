@@ -85,15 +85,17 @@ func startPMAggregatorPipeline(
 	}
 
 	// 3) 启动 Sweeper（zombie reset + 心跳监控）
-	// T-0164 收尾 G8-Gap-3：从 sys_configs 读 sweeper_interval / zombie_threshold；
-	// 缺失 / 解析失败 fallback 走 asyncjob 包默认常量（与原行为一致）
+	// T-0164 收尾 G8-Gap-3：从 sys_configs 读 sweeper_interval / zombie_threshold / heartbeat_interval；
+	// 缺失 / 解析失败 fallback 走 asyncjob 包默认值（与原行为一致）。
+	// heartbeat_interval 写回 asyncjob.HeartbeatInterval（var），后续 Runner.runOnce 启 ticker 时读取。
 	sweeperInterval, zombieThreshold := loadAsyncJobThresholds(ctx, w.PgPool, logger)
 	sweeper := asyncjob.NewSweeper(jobRepo, sweeperInterval, zombieThreshold, logger)
 	sweeper.SetMetrics(asyncMetrics)
 	go sweeper.Run(ctx)
 	logger.Info("asyncjob sweeper started",
 		zap.Duration("interval", sweeperInterval),
-		zap.Duration("zombie_threshold", zombieThreshold))
+		zap.Duration("zombie_threshold", zombieThreshold),
+		zap.Duration("heartbeat_interval", asyncjob.HeartbeatInterval))
 
 	// 3b) 启动 QueueDepthSampler — 每 30s 扫 async_jobs 表更新 omc_async_jobs_queue_depth gauge
 	go asyncjob.RunQueueDepthSampler(ctx, jobRepo, asyncMetrics, 30*time.Second, &queueDepthSamplerLogger{logger: logger})
@@ -395,10 +397,11 @@ func truncateWeekISO(t time.Time) time.Time {
 	return monday
 }
 
-// loadAsyncJobThresholds 启动期从 sys_configs 读 sweeper_interval / zombie_threshold。
+// loadAsyncJobThresholds 启动期从 sys_configs 读 sweeper_interval / zombie_threshold / heartbeat_interval。
 //
-// T-0164 收尾 G8-Gap-3：之前 asyncjob.SweeperInterval / ZombieThreshold 是包级常量；
-// 现在让运维可改（启动生效，重启 worker 拾取新值；运行期热重载留 v2）。
+// T-0164 收尾 G8-Gap-3：之前 asyncjob.SweeperInterval / ZombieThreshold / HeartbeatInterval 是包级常量；
+// 现在让运维可改（启动生效，重启 worker 拾取新值；运行期热重载未做，按设计简化要求保留启动期注入）。
+// heartbeat_interval 直接写回 asyncjob.HeartbeatInterval（var），其它两项作为返回值供 Sweeper 构造。
 func loadAsyncJobThresholds(ctx context.Context, pool *pgxpool.Pool, logger *zap.Logger) (time.Duration, time.Duration) {
 	sweeperInterval := asyncjob.SweeperInterval
 	zombieThreshold := asyncjob.ZombieThreshold
@@ -413,9 +416,13 @@ func loadAsyncJobThresholds(ctx context.Context, pool *pgxpool.Pool, logger *zap
 	if v := readSysConfigInt(ctx, repo, "asyncjob", "zombie_threshold_seconds"); v > 0 {
 		zombieThreshold = time.Duration(v) * time.Second
 	}
+	if v := readSysConfigInt(ctx, repo, "asyncjob", "heartbeat_interval_seconds"); v > 0 {
+		asyncjob.HeartbeatInterval = time.Duration(v) * time.Second
+	}
 	logger.Info("asyncjob thresholds loaded from sys_configs",
 		zap.Duration("sweeper_interval", sweeperInterval),
-		zap.Duration("zombie_threshold", zombieThreshold))
+		zap.Duration("zombie_threshold", zombieThreshold),
+		zap.Duration("heartbeat_interval", asyncjob.HeartbeatInterval))
 	return sweeperInterval, zombieThreshold
 }
 
