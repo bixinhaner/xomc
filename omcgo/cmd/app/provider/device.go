@@ -93,6 +93,15 @@ func initDeviceModule(c *Container) error {
 		// 触发 device.online / device.firmware.changed 事件（与 UpdateFromInform 非 batch
 		// 路径对齐）。08754f89 收官 PR 漏挂导致这两个触发源在 batch 模式下全失效。
 		batchProcessor.SetTransitionPublisher(deviceService)
+		// Phase 6 follow-up: ProductRegistry 注入到 batch path,让 batch flush 也能回填 model_name
+		// 与非 batch 路径 device_service.applyProductMetadata 对齐。c.ProductRegistry 已由
+		// ModuleGraph 保证早于 device 模块初始化（device Depends "productregistry"）。
+		if c.ProductRegistry != nil {
+			batchProcessor.SetProductMatcher(c.ProductRegistry)
+		}
+		// Phase 3 follow-up: InfoSyncer 注入到 batch path,让 batch flush 后异步把
+		// device_parameters 投影到 device_info 新列（tac/band/ul_earfcn/mac/transmit_power 等）。
+		batchProcessor.SetInfoSyncer(infoSyncer)
 		informHandler.SetBatchProcessor(batchProcessor)
 	}
 	if err := informHandler.Subscribe(c.EventBus); err != nil {

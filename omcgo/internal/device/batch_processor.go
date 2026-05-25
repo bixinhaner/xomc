@@ -3,6 +3,7 @@ package device
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
+	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/pkg/tr069"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
@@ -51,6 +53,31 @@ type BatchInformProcessor struct {
 	// transitionPublisher: T-0123 / T-0125 batch path 补完 — flush 成功后发布
 	// device.online / device.firmware.changed 事件。允许 nil（test 场景）。
 	transitionPublisher TransitionEventPublisher
+
+	// Phase 6/3 (设计文档 §4.3 §4.2 Layer C)：batch path 补完。原 batch flush
+	// 旁路了 InfoSyncer + applyProductMetadata,导致 device_info 11 个 Phase 2
+	// 新列 + devices.model_name 在 batch=true 下永远不被回填。
+	//
+	// productMatcher: applyProductMetadata 用,回填 device.ModelName。Submit 时
+	//   调一次（batchUpdateDevices SQL 含 model_name 列,会持久化）。
+	// infoSyncer: SyncFromParameters 用,把 device_parameters 投影到 device_info
+	//   的 11 个新列 + mac / transmit_power 等。flush 成功后异步调用。
+	//
+	// 两者为 nil 时退化为原 batch path 行为（无回填），与改造前等价。
+	productMatcher ProductClassMatcher
+	infoSyncer     *InfoSyncer
+}
+
+// SetProductMatcher 注入 ProductRegistry 用于 batch path 回填 device.ModelName。
+// Phase 6 follow-up — nil 时跳过回填。
+func (p *BatchInformProcessor) SetProductMatcher(m ProductClassMatcher) {
+	p.productMatcher = m
+}
+
+// SetInfoSyncer 注入 InfoSyncer 用于 batch flush 后投影 device_info 扩展列。
+// Phase 3 follow-up — nil 时跳过投影。
+func (p *BatchInformProcessor) SetInfoSyncer(s *InfoSyncer) {
+	p.infoSyncer = s
 }
 
 // TransitionEventPublisher 是 BatchInformProcessor 调 DeviceService 发布
@@ -160,6 +187,13 @@ func (p *BatchInformProcessor) Submit(device *model.Device, inform *tr069.Inform
 	// 心跳立即刷新，不等 flush
 	if p.heartbeat != nil {
 		p.heartbeat.RefreshHeartbeat(context.Background(), device.SerialNumber, device.InformInterval)
+	}
+
+	// Phase 6 (设计文档 §4.3 方案 X): ProductRegistry 回填 device.ModelName。
+	// 与 UpdateFromInform 非 batch 路径 device_service.go:635 行为对齐。
+	// helper 内部已 nil-safe + 空字段检查，调用代价小（多数情况 cache 命中即 return）。
+	if p.productMatcher != nil && device.ModelName == "" && device.ProductClass != "" {
+		applyProductMetadataInline(context.Background(), p.productMatcher, device, p.logger)
 	}
 
 	update := &informUpdate{
@@ -303,6 +337,14 @@ func (p *BatchInformProcessor) doFlush(ctx context.Context, buffer map[string]*i
 	// 3. 批量 Redis 操作（仅 hit，避免把 stale device 写回 cache）
 	p.batchRedisOps(ctx, hit)
 
+	// Phase 3 (设计文档 §4.2 Layer C): batch path 补完 — 异步触发 InfoSyncer
+	// 把 device_parameters 投影到 device_info 的 tac/band/mac/transmit_power 等
+	// 11 个 Phase 2 新列。异步执行（不阻塞 flush 主路径），失败仅 WARN，下次
+	// Inform 周期会重试。
+	if p.infoSyncer != nil && len(hit) > 0 {
+		go p.asyncSyncDeviceInfo(hit)
+	}
+
 	// 4. T-0123/T-0125: PG + cache 写入成功后发 transition 事件。
 	// 与 UpdateFromInform 非 batch 路径行为对齐（device_service.go §UpdateFromInform 末尾）。
 	// 同一 Inform 满足两者时优先发 firmware.changed（不发 device.online），由
@@ -372,14 +414,17 @@ func (p *BatchInformProcessor) batchUpdateDevices(ctx context.Context, updates [
 		// IsOnline=true、Discovered/Registered 升 Commissioned），这里直接持久化。
 		// AND deleted_at IS NULL：防止软删的 device 被 inform 静默复活
 		// （cache stale → 这里 UPDATE 仍命中已删行，silent data corruption）
+		// Phase 6 follow-up：加 model_name 列让 Submit 中 applyProductMetadataInline 写入
+		// 的 device.ModelName 真正持久化。SET model_name 不写空字符串覆盖既有非空值。
 		query := `UPDATE devices SET
 			oui = $1, product_class = $2, manufacturer = $3,
 			lifecycle_state = $4, is_online = $5, firmware_version = $6,
 			ip_address = $7, connection_request_url = $8,
 			nat_detected = $9, udp_connection_request_address = $10,
 			last_inform_at = $11, last_inform_events = $12,
+			model_name = CASE WHEN $13::text <> '' THEN $13 ELSE model_name END,
 			updated_at = NOW()
-		WHERE id = $13 AND deleted_at IS NULL`
+		WHERE id = $14 AND deleted_at IS NULL`
 
 		batch.Queue(query,
 			dev.OUI, dev.ProductClass, dev.Manufacturer,
@@ -387,6 +432,7 @@ func (p *BatchInformProcessor) batchUpdateDevices(ctx context.Context, updates [
 			ipAddr, dev.ConnectionRequestURL,
 			dev.NatDetected, udpAddr,
 			dev.LastInformAt, eventsData,
+			dev.ModelName,
 			dev.ID,
 		)
 	}
@@ -587,14 +633,16 @@ func (r *PgDeviceRepository) BatchUpdateDevices(ctx context.Context, devices []*
 		// IsOnline=true、Discovered/Registered 升 Commissioned），这里直接持久化。
 		// AND deleted_at IS NULL：防止软删的 device 被 inform 静默复活
 		// （cache stale → 这里 UPDATE 仍命中已删行，silent data corruption）
+		// Phase 6 follow-up：与 batchUpdateDevices 对齐,加 model_name。
 		query := `UPDATE devices SET
 			oui = $1, product_class = $2, manufacturer = $3,
 			lifecycle_state = $4, is_online = $5, firmware_version = $6,
 			ip_address = $7, connection_request_url = $8,
 			nat_detected = $9, udp_connection_request_address = $10,
 			last_inform_at = $11, last_inform_events = $12,
+			model_name = CASE WHEN $13::text <> '' THEN $13 ELSE model_name END,
 			updated_at = NOW()
-		WHERE id = $13 AND deleted_at IS NULL`
+		WHERE id = $14 AND deleted_at IS NULL`
 
 		batch.Queue(query,
 			dev.OUI, dev.ProductClass, dev.Manufacturer,
@@ -602,6 +650,7 @@ func (r *PgDeviceRepository) BatchUpdateDevices(ctx context.Context, devices []*
 			ipAddr, dev.ConnectionRequestURL,
 			dev.NatDetected, udpAddr,
 			dev.LastInformAt, eventsData,
+			dev.ModelName,
 			dev.ID,
 		)
 	}
@@ -619,3 +668,54 @@ func (r *PgDeviceRepository) BatchUpdateDevices(ctx context.Context, devices []*
 
 // dummy use to avoid uuid import error
 var _ = uuid.New
+
+// applyProductMetadataInline 是 batch path Submit 时调的 ModelName 回填 helper。
+//
+// 复制 DeviceService.applyProductMetadata 的核心算法（避免循环依赖 — batchProcessor
+// 已经在 device 包内,直接调 DeviceService 方法会让 batchProcessor 持有 DeviceService
+// 指针,在 ModuleGraph 接线层制造循环）。helper 的语义与 device_service.go 中的
+// applyProductMetadata 严格对齐（设计文档 §4.3 方案 X）。
+//
+// 调用方在外侧已经判断了 device.ModelName == "" && device.ProductClass != ""。
+// 这里仅做 MatchProductClass + 写入 + 错误降级。
+func applyProductMetadataInline(ctx context.Context, matcher ProductClassMatcher, device *model.Device, logger *zap.Logger) {
+	matchRes, err := matcher.MatchProductClass(ctx, device.ProductClass)
+	if err != nil {
+		// ErrOrphan 是合法业务态（productClass 未登记）；其他错误视为 soft fail。
+		if !errors.Is(err, product.ErrOrphan) {
+			logger.Warn("batch path applyProductMetadata: MatchProductClass failed (non-fatal)",
+				zap.String("serial_number", device.SerialNumber),
+				zap.String("product_class", device.ProductClass),
+				zap.Error(err))
+		}
+		return
+	}
+	if matchRes == nil || matchRes.Product == nil || matchRes.Product.Name == "" {
+		return
+	}
+	device.ModelName = matchRes.Product.Name
+}
+
+// asyncSyncDeviceInfo 在 batch flush 成功后异步把 device_parameters 投影到
+// device_info 表（Phase 3 设计文档 §4.2 Layer C）。
+//
+// 异步执行避免阻塞 flush 主路径;失败仅 WARN,下次 Inform 周期会自动重试
+// (InfoSyncer 内部从 paramRepo.GetByDevice 全量读取,幂等)。
+//
+// 设计权衡:每个 hit device 单独起一次 SyncFromParameters,N=200 时 200 个 goroutine
+// 短时并发。infoRepo.UpdateSyncFields 用 squirrel 动态构建+pgxpool,内部连接池处理
+// 并发。如未来观测到 P99 抖动,可改为 worker pool 或事件驱动。
+func (p *BatchInformProcessor) asyncSyncDeviceInfo(hit []*informUpdate) {
+	for _, u := range hit {
+		dev := u.device
+		go func(d *model.Device) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := p.infoSyncer.SyncFromParameters(ctx, d.ID, d.Carrier, d.Technology); err != nil {
+				p.logger.Warn("batch path InfoSyncer.SyncFromParameters failed (non-fatal)",
+					zap.String("serial_number", d.SerialNumber),
+					zap.Error(err))
+			}
+		}(dev)
+	}
+}
