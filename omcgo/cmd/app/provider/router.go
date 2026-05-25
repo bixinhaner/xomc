@@ -49,8 +49,12 @@ func Setup(r *gin.Engine, c *Container) error {
 		Init:    func() error { return initAdminModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
-		Name:    "device",
-		Depends: []string{"topology"},
+		Name: "device",
+		// Phase 6 (设计文档 §4.3)：device.applyProductMetadata 需注入 ProductRegistry
+		// 才能回填 devices.model_name；ModuleGraph 必须保证 productregistry 先于
+		// device 初始化。漏掉此依赖会让 SetProductMatcher 跳过 → productMatcher=nil
+		// → applyProductMetadata 第一行 return → 永远不调 MatchProductClass。
+		Depends: []string{"topology", "productregistry"},
 		Init:    func() error { return initDeviceModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
