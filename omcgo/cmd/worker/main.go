@@ -143,6 +143,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	pmCollector := collector.NewPMCollector(w.MinIO, cfg.MinIO.Buckets.PMFiles, pmParser, counterRepo, kpiEngine, pmFileStore, w.EventBus, logger)
 	pmMetrics := pm.NewPMMetrics(w.MetricsReg)
 	pmCollector.SetMetrics(pmMetrics)
+	// T-0164 G1 真机闭环：acs.upload.Handler 发的瘦 payload 只带 device_sn，
+	// 由 collector 用同一个 deviceRepo 反查补齐 UUID / OUI / carrier / technology。
+	pmCollector.SetDeviceLookup(pmDeviceRepo)
 
 	// Runner wires retry + DLQ instrumentation around the PM handler.
 	// dlqRepo + runnerMetrics are scoped to the worker process; admin handler

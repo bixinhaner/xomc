@@ -18,13 +18,37 @@ import (
 )
 
 // FileReceivedPayload is the event payload for pm.file.received.
+//
+// Two publish paths exist with different completeness levels:
+//
+//   - transfer.Bridge (worker process, T-0164-P3): "fat" payload, all fields
+//     pre-filled from device repository lookup before publish.
+//   - acs.upload.Handler (ACS process, T-0164 G1 真机闭环): "thin" payload —
+//     only MinIOPath / Bucket / DeviceSN / FileSize / FileName. The ACS hot
+//     path can't afford a synchronous DB lookup, so DeviceID / DeviceOUI /
+//     Carrier / Technology are left empty and the collector resolves them
+//     via DeviceLookup (set by worker main).
 type FileReceivedPayload struct {
 	MinIOPath  string `json:"minio_path"`
+	Bucket     string `json:"bucket,omitempty"`
+	FileName   string `json:"file_name,omitempty"`
+	FileSize   int64  `json:"file_size,omitempty"`
 	DeviceID   string `json:"device_id"`
 	DeviceOUI  string `json:"device_oui"` // T-0164-P3: TR-069 标准设备唯一标识 (oui, sn) 双键
 	DeviceSN   string `json:"device_sn"`
 	Carrier    string `json:"carrier"`
 	Technology string `json:"technology"`
+}
+
+// DeviceLookup resolves a device by serial number. Used by PMCollector to
+// fill in DeviceID / DeviceOUI / Carrier / Technology when the upstream
+// publisher (acs.upload.Handler) only had the SN at publish time.
+//
+// Implemented by device.DeviceRepository — but we declare a minimal interface
+// here to avoid the worker module taking a hard dep on the entire device
+// package internals just for this one method.
+type DeviceLookup interface {
+	GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error)
 }
 
 // PMCollector handles PM file processing: download from MinIO, parse XML, store counters.
@@ -36,16 +60,17 @@ type FileReceivedPayload struct {
 // is registered directly, preserving legacy behaviour for tests / single-process
 // deployments without DLQ infra.
 type PMCollector struct {
-	minioClient *minio.Client
-	bucket      string
-	parser      *PMXMLParser
-	counterRepo counter.CounterRepository
-	kpiEngine   *kpi.KPIEngine
-	fileStore   pm.PMFileStore
-	eventBus    event.EventBus
-	metrics     *pm.PMMetrics
-	runner      runner.Wrapper
-	logger      *zap.Logger
+	minioClient  *minio.Client
+	bucket       string
+	parser       *PMXMLParser
+	counterRepo  counter.CounterRepository
+	kpiEngine    *kpi.KPIEngine
+	fileStore    pm.PMFileStore
+	eventBus     event.EventBus
+	metrics      *pm.PMMetrics
+	runner       runner.Wrapper
+	deviceLookup DeviceLookup
+	logger       *zap.Logger
 }
 
 // NewPMCollector creates a new PM collector.
@@ -76,6 +101,15 @@ func (c *PMCollector) SetRunner(w runner.Wrapper) {
 	c.runner = w
 }
 
+// SetDeviceLookup wires a device-resolution dependency for the "thin"
+// pm.file.received payload (T-0164 G1 真机闭环): when acs.upload.Handler
+// publishes the event with only device_sn, the collector uses this to fill
+// in DeviceID / DeviceOUI / Carrier / Technology. Nil-safe — when unset,
+// thin-payload events fail the existing uuid.Parse(DeviceID) check.
+func (c *PMCollector) SetDeviceLookup(lookup DeviceLookup) {
+	c.deviceLookup = lookup
+}
+
 // Subscribe registers the collector to listen for PM file received events.
 func (c *PMCollector) Subscribe(bus event.EventBus) error {
 	handler := c.handleFileReceived
@@ -103,6 +137,10 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 		zap.String("path", payload.MinIOPath),
 		zap.String("device_sn", payload.DeviceSN),
 	)
+
+	if err := c.resolveDevice(ctx, &payload); err != nil {
+		return err
+	}
 
 	deviceID, err := uuid.Parse(payload.DeviceID)
 	if err != nil {
@@ -209,6 +247,36 @@ func (c *PMCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 	if err == nil {
 		_ = c.eventBus.Publish(ctx, event.SubjectPMFileParsed, parsedEvt)
 	}
+	return nil
+}
+
+// resolveDevice fills in DeviceID / DeviceOUI / Carrier / Technology on the
+// payload when the publisher only provided device_sn (T-0164 G1 真机闭环 —
+// acs.upload.Handler 发的瘦 payload）。transfer.Bridge 发的胖 payload device_id
+// 已填，函数直接 no-op 返回。Returning an error here triggers retry+DLQ in
+// the wrapping runner — transient cases (device row not yet inserted because
+// the inform/registration race) get retried and usually succeed.
+func (c *PMCollector) resolveDevice(ctx context.Context, payload *FileReceivedPayload) error {
+	if payload.DeviceID != "" {
+		return nil
+	}
+	if c.deviceLookup == nil {
+		return fmt.Errorf("pm.file.received: device_id empty and no DeviceLookup wired (sn=%s)", payload.DeviceSN)
+	}
+	if payload.DeviceSN == "" {
+		return fmt.Errorf("pm.file.received: both device_id and device_sn empty")
+	}
+	dev, err := c.deviceLookup.GetBySerialNumber(ctx, payload.DeviceSN)
+	if err != nil {
+		return fmt.Errorf("lookup device by sn %s: %w", payload.DeviceSN, err)
+	}
+	if dev == nil {
+		return fmt.Errorf("pm.file.received: device not found for sn=%s", payload.DeviceSN)
+	}
+	payload.DeviceID = dev.ID.String()
+	payload.DeviceOUI = dev.OUI
+	payload.Carrier = string(dev.Carrier)
+	payload.Technology = string(dev.Technology)
 	return nil
 }
 
