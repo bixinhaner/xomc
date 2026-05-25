@@ -27,12 +27,13 @@ func Test_buildCountersSQL_HourlyFromPmMetrics(t *testing.T) {
 	}
 	sql, args := buildCountersSQL("pm_metrics", "pm_metrics_hourly", w)
 
-	// CASE WHEN 三路聚合
+	// CASE WHEN 四路聚合（BUG-D 补 min）
 	assert.Contains(t, sql, "WHEN 'sum' THEN SUM(m.metric_value)")
 	assert.Contains(t, sql, "WHEN 'avg' THEN AVG(m.metric_value)")
 	assert.Contains(t, sql, "WHEN 'max' THEN MAX(m.metric_value)")
+	assert.Contains(t, sql, "WHEN 'min' THEN MIN(m.metric_value)")
 	// pct/NULL counter 不进聚合
-	assert.Contains(t, sql, "AND m.statis_type IN ('sum','avg','max')")
+	assert.Contains(t, sql, "AND m.statis_type IN ('sum','avg','max','min')")
 	// hourly 目标含 id 列（hypertable）
 	assert.Contains(t, sql, "INSERT INTO pm_metrics_hourly (id, device_oui")
 	assert.Contains(t, sql, "gen_random_uuid()")

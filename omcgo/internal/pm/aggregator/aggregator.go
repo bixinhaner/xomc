@@ -287,6 +287,7 @@ SELECT
         WHEN 'sum' THEN SUM(m.metric_value)
         WHEN 'avg' THEN AVG(m.metric_value)
         WHEN 'max' THEN MAX(m.metric_value)
+        WHEN 'min' THEN MIN(m.metric_value)
     END,
     m.statis_type,
     $1,
@@ -300,7 +301,7 @@ FROM %s m
 WHERE m.metric_type = 'counter'
   AND m.end_time >= $4
   AND m.end_time <  $5
-  AND m.statis_type IN ('sum','avg','max')
+  AND m.statis_type IN ('sum','avg','max','min')
 GROUP BY m.device_oui, m.device_sn, m.metric_path, m.statis_type
 ON CONFLICT %s DO UPDATE SET
     metric_value = EXCLUDED.metric_value,
