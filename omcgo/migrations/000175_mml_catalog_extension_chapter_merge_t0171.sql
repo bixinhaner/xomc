@@ -28,6 +28,30 @@
 -- ============================================================
 
 -- ----------------------------------------------------------------------------
+-- Step 0: 确保 param_version 'cmcc-td-lte-v2.3' 父行存在（幂等兜底）
+--
+-- 原因：本迁移 Step 1 用 INSERT...VALUES 硬编码写入 mml_command_groups，依赖
+-- mml_param_versions(version_code='cmcc-td-lte-v2.3') 父行存在（FK 约束
+-- mml_param_groups_param_version_fkey）。
+--
+-- 该 param_version 行原本只在 seed/000152 创建 —— 全新环境部署时
+-- migrate-schema 先于 migrate-seed 运行，跑到这里 FK 违反 → 整条流水线挂死。
+-- 现有环境（本地 + 已运行过 seed 的环境）此行已存在，ON CONFLICT DO NOTHING
+-- 不副作用。
+--
+-- 不下放 Step 1 到 seed 是因为 chapter 合并需要在 schema 级别确定性发生，且
+-- 后续 DDL 迁移可能依赖这些 chapter 存在。
+-- ----------------------------------------------------------------------------
+INSERT INTO mml_param_versions (version_code, version_name, description, source)
+VALUES (
+    'cmcc-td-lte-v2.3',
+    'CMCC TD-LTE v2.3',
+    '由 cmcc_tdlte_v2.3.json 派生（goose 000175 bootstrap）',
+    'standard'
+)
+ON CONFLICT (version_code) DO NOTHING;
+
+-- ----------------------------------------------------------------------------
 -- Step 1: 创建 4 个汇总 chapter（按顶层第 1 段聚合）
 -- ----------------------------------------------------------------------------
 INSERT INTO mml_command_groups (
