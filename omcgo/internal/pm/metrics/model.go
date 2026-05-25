@@ -42,9 +42,12 @@ const (
 // DeviceOUI = TR-069 DeviceId.OUI（6 位 hex 大写），DeviceSN = DeviceId.SerialNumber。
 // 全系统级切换见 docs/project/plan-T-0165-system-wide-oui-sn-migration.md。
 //
-// 唯一性维度（自然键）：(DeviceOUI, DeviceSN, MetricPath, Granularity, EndTime, Time)
+// 唯一性维度（自然键）：(DeviceOUI, DeviceSN, MetricPath, Granularity, EndTime, Time, ObjectLDN)
 // 唯一索引 uq_pm_metrics_natural 上挂 ON CONFLICT DO UPDATE 保证补传幂等。
 // （TimescaleDB 要求 UNIQUE 索引必须含分区列 Time；业务上 Time = EndTime，约束意义不变）
+// ObjectLDN 在 DB 层 NOT NULL DEFAULT ''（migration 000171），Go 端 *string nil → ''
+// 落盘。原因：UNIQUE 中 NULL ≠ NULL，必须强制非空才能严格唯一；BUG-6 即由此触发：
+// 同 PM 文件中同 MetricPath 跨多个 cell（不同 ObjectLDN）撞自然键二次命中同行。
 //
 // 时间三字段（G4 在 parser 层已落）：
 //   - StartTime  基站采集窗口起（基站时钟）

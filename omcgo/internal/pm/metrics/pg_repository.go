@@ -55,8 +55,12 @@ func (r *PgRepository) Insert(ctx context.Context, m PMMetric) error {
 
 // BatchInsert 批量插入。使用自然键 ON CONFLICT DO UPDATE 实现补传幂等：
 //
-//	相同 (device_sn, metric_path, granularity, end_time) 再次写入时
-//	更新 metric_value（取新值）+ ingest_time（取 NOW()）。
+//	相同 (device_oui, device_sn, metric_path, granularity, end_time, time, object_ldn)
+//	再次写入时更新 metric_value（取新值）+ ingest_time（取 NOW()）。
+//
+// object_ldn 列 NOT NULL DEFAULT ''（migration 000171），nil 在此统一落 ''
+// 避免 UNIQUE 索引 NULL ≠ NULL 破坏幂等语义；同时让同文件多 cell 同 counter_name
+// 不再因为缺 ldn 维度而撞 ON CONFLICT 二次命中（BUG-6）。
 //
 // 注意 TimescaleDB 压缩 chunk 不允许 UPSERT；本逻辑假设新写入只命中 7d 内的未压缩 chunk。
 // 补传 > 7d 旧数据将报错（业务约束：补传窗口受限于 retention/compression policy）。
@@ -64,6 +68,24 @@ func (r *PgRepository) BatchInsert(ctx context.Context, ms []PMMetric) error {
 	if len(ms) == 0 {
 		return nil
 	}
+	sql, args, err := buildBatchInsertSQL(ms)
+	if err != nil {
+		return err
+	}
+	if _, err := r.pool.Exec(ctx, sql, args...); err != nil {
+		return fmt.Errorf("insert pm_metrics: %w", err)
+	}
+	return nil
+}
+
+// pmMetricsUpsertSuffix 自然键 ON CONFLICT 子句。
+// 列顺序与 migration 000171 中 uq_pm_metrics_natural 一致（不一致 PG 会按列集合匹配，但保持顺序便于人读）。
+const pmMetricsUpsertSuffix = "ON CONFLICT (device_oui, device_sn, metric_path, granularity, end_time, time, object_ldn) " +
+	"DO UPDATE SET metric_value = EXCLUDED.metric_value, ingest_time = NOW()"
+
+// buildBatchInsertSQL 构造 pm_metrics 批量 INSERT SQL（含 ON CONFLICT 子句）。
+// 抽出供单测使用，运行期由 BatchInsert 调用。
+func buildBatchInsertSQL(ms []PMMetric) (string, []any, error) {
 	ib := storage.Psql.Insert("pm_metrics").Columns(
 		"id", "device_oui", "device_sn", "metric_path", "metric_type", "metric_value",
 		"statis_type", "granularity", "time", "start_time", "end_time",
@@ -86,7 +108,9 @@ func (r *PgRepository) BatchInsert(ctx context.Context, ms []PMMetric) error {
 		if m.StatisType != nil {
 			statis = string(*m.StatisType)
 		}
-		var ldn interface{}
+		// object_ldn 列 NOT NULL DEFAULT ''（migration 000171）：
+		// nil/空指针统一落 ''，与 UNIQUE 索引语义一致。
+		ldn := ""
 		if m.ObjectLDN != nil {
 			ldn = *m.ObjectLDN
 		}
@@ -94,7 +118,7 @@ func (r *PgRepository) BatchInsert(ctx context.Context, ms []PMMetric) error {
 		if len(m.Extra) > 0 {
 			b, err := json.Marshal(m.Extra)
 			if err != nil {
-				return fmt.Errorf("marshal pm_metrics extra: %w", err)
+				return "", nil, fmt.Errorf("marshal pm_metrics extra: %w", err)
 			}
 			extra = b
 		}
@@ -104,18 +128,12 @@ func (r *PgRepository) BatchInsert(ctx context.Context, ms []PMMetric) error {
 			ingest, ldn, extra,
 		)
 	}
-	ib = ib.Suffix(
-		"ON CONFLICT (device_oui, device_sn, metric_path, granularity, end_time, time) " +
-			"DO UPDATE SET metric_value = EXCLUDED.metric_value, ingest_time = NOW()",
-	)
+	ib = ib.Suffix(pmMetricsUpsertSuffix)
 	sql, args, err := ib.ToSql()
 	if err != nil {
-		return fmt.Errorf("build pm_metrics insert: %w", err)
+		return "", nil, fmt.Errorf("build pm_metrics insert: %w", err)
 	}
-	if _, err := r.pool.Exec(ctx, sql, args...); err != nil {
-		return fmt.Errorf("insert pm_metrics: %w", err)
-	}
-	return nil
+	return sql, args, nil
 }
 
 // Query 按条件查询。
