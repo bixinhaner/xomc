@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type {
   User,
@@ -402,6 +403,22 @@ export function useDictionary(dictType: string) {
     queryFn: () => adminApi.findDictionaryByType(dictType),
     enabled: !!dictType,
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+// 批量获取字典 Hook（性能优化：一次请求获取多个字典）
+export function useDictionaryBatch(codes: string[]) {
+  // 排序 codes 以确保 queryKey 稳定性
+  const sortedCodes = useMemo(() => {
+    const sorted = [...codes].sort();
+    return sorted;
+  }, [codes]);
+
+  return useQuery({
+    queryKey: ['dictionary', 'batch', sortedCodes],
+    queryFn: () => adminApi.batchGetDicts(sortedCodes),
+    staleTime: 10 * 60 * 1000, // 10 分钟缓存
+    enabled: codes.length > 0,
   });
 }
 

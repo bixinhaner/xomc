@@ -10,7 +10,7 @@
  * - 可访问性增强
  */
 import { useState, useMemo, useRef, useEffect } from 'react';
-import { Checkbox, Spin, Empty, Collapse } from 'antd';
+import { Checkbox, Spin, Empty, Collapse, Input } from 'antd';
 import { SearchOutlined, PlusOutlined, MinusOutlined, CaretDownOutlined } from '@ant-design/icons';
 import GISMap, { MAP_CONFIG } from '@/components/GISMap';
 import type { GISMapRef } from '@/components/GISMap';
@@ -295,8 +295,12 @@ export default function GISMapView() {
       };
       const expandIds = collectExpandIds(filteredGroupTree);
       setExpandedGroupIds((prev) => [...new Set([...prev, ...expandIds])]);
+    } else if (!groupSearchValue.trim() && groupTree.length > 0) {
+      // 搜索清空时，重置展开状态为根节点
+      const rootIds = groupTree.map((node) => node.id);
+      setExpandedGroupIds(rootIds);
     }
-  }, [groupSearchValue, filteredGroupTree]);
+  }, [groupSearchValue, filteredGroupTree, groupTree]);
 
   // 初始化：选中并展开所有节点（包括子节点）
   /* eslint-disable react-hooks/set-state-in-effect -- 初始化时设置状态是预期的副作用 */
@@ -580,19 +584,20 @@ export default function GISMapView() {
 
         {/* 搜索设备组 */}
         <div style={searchBoxStyle}>
-          <SearchOutlined style={{ color: '#BFBFBF' }} />
-          <input
-            type="text"
+          <Input
             placeholder="搜索设备组"
             value={groupSearchValue}
             onChange={(e) => setGroupSearchValue(e.target.value)}
+            prefix={<SearchOutlined style={{ color: '#8C8C8C' }} />}
+            allowClear
             style={{
-              flex: 1,
               border: 'none',
-              outline: 'none',
-              fontSize: 13,
+              padding: 0,
               background: 'transparent',
+              color: '#262626',
             }}
+            variant="borderless"
+            className="device-group-search-input"
           />
         </div>
 

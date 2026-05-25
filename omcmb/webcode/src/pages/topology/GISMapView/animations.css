@@ -147,3 +147,25 @@
   color: #FF4D4F !important;
 }
 
+/* ============================================
+   设备组搜索框样式
+   增强文字和清除按钮的视觉对比度
+   ============================================ */
+
+.device-group-search-input input {
+  color: #262626 !important;
+}
+
+.device-group-search-input input::placeholder {
+  color: #8C8C8C !important;
+}
+
+.device-group-search-input .ant-input-clear-icon {
+  color: #8C8C8C !important;
+  font-size: 14px !important;
+}
+
+.device-group-search-input .ant-input-clear-icon:hover {
+  color: #262626 !important;
+}
+
