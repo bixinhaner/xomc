@@ -46,6 +46,7 @@ type DeviceService struct {
 	paramSyncStarter ParamSyncStarter         // T-0126: 注入 *provision.SyncService 触发 Path B 手动同步
 	abnormalRecorder  AbnormalRebootRecorder // T-0158: 异常重启识别即落库（nil = 禁用）
 	bootEventRecorder BootEventRecorder      // 普通 1 BOOT 事件日志写入（nil = 禁用）
+	seq               *Sequencer             // per-device 串行化：消除 PERIODIC/RebootResponse 竞态（真机验证 2026-05-25）
 	logger            *zap.Logger
 }
 
@@ -110,6 +111,14 @@ func (s *DeviceService) SetConnectionRequester(cr ConnectionRequester) {
 // UDPConnectionRequestAddress from Inform to the STUN address cache.
 func (s *DeviceService) SetStunAddressUpdater(u StunAddressUpdater) {
 	s.stunUpdater = u
+}
+
+// SetSequencer 注入 per-device 串行化锁。与 RebootResponseOfflineMarker /
+// OfflineDetector / HeartbeatMonitor 共享同一实例，确保同一 device 的写状态
+// 操作（is_online / lifecycle_state）按 EventBus publish 顺序 FIFO 处理。
+// nil = 退化为无锁（test / batch-only 路径）。
+func (s *DeviceService) SetSequencer(seq *Sequencer) {
+	s.seq = seq
 }
 
 // SetDeviceCache sets the Redis device cache for fast serial number lookups.
@@ -581,6 +590,14 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 
 // UpdateFromInform updates an existing device from a periodic Inform message.
 func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.InformMessage) (*model.Device, error) {
+	// per-device 串行化：与 RebootResponseOfflineMarker / OfflineDetector / HeartbeatMonitor
+	// 共享同一把 SN 锁，确保事件按 EventBus publish 顺序处理，防止 PERIODIC 异步覆盖
+	// RebootResponse 写的 is_online=false（真机验证 2026-05-25 暴露的竞态）。
+	if s.seq != nil {
+		unlock := s.seq.Lock(inform.DeviceId.SerialNumber)
+		defer unlock()
+	}
+
 	s.logger.Debug("UpdateFromInform: looking up device",
 		zap.String("serial_number", inform.DeviceId.SerialNumber))
 
@@ -613,10 +630,16 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	device.ConnectionRequestURL = findParamValue(inform.ParameterList, "Device.ManagementServer.ConnectionRequestURL")
 	device.LastInformAt = &now
 	device.LastInformEvents = tr069.EventCodes(inform.Event)
-	// T-0162: 收到 Inform 即视为在线。对于已 scan 出 lifecycle_state 的设备，
-	// normalizeDeviceForPersist 不会再从老 Status 反推新双字段；这里必须显式置 true，
-	// 否则设备一旦被 OfflineDetector 标记成 is_online=false，后续正常 Inform 也无法恢复在线展示。
-	device.IsOnline = true
+	// D 方案（真机验证 2026-05-25）：is_online 只在"明确表示设备重新上线的事件"
+	// 时由本路径显式置 true：
+	//   - 0 BOOTSTRAP：首次接入 / 恢复出厂
+	//   - 1 BOOT：设备启动（含自主重启 / 异常重启）
+	//   - M Reboot：响应 ACS 主动 Reboot 后回连
+	// PERIODIC / VALUE_CHANGE 走 PeriodicOnlineMarker 独立快路径写 true（不在 batch buffer），
+	// 避免本路径 line 619 无脑写 true → batch flush 覆盖 RebootResponseOfflineMarker 写的 false。
+	if isReconnectEvent(device.LastInformEvents) {
+		device.IsOnline = true
+	}
 
 	udpAddr := findParamValue(inform.ParameterList, "Device.ManagementServer.UDPConnectionRequestAddress")
 	if udpAddr != "" {
@@ -1247,6 +1270,25 @@ func findParamValue(params []tr069.ParameterValueStruct, name string) string {
 		}
 	}
 	return ""
+}
+
+// isReconnectEvent 判定 Inform 事件码集合是否表示"设备重新上线"信号。
+// 当前匹配 TR-069 Amendment 6 中的 3 个事件码：
+//   - "0 BOOTSTRAP" — 首次接入 / 恢复出厂 / 厂家初始化
+//   - "1 BOOT"      — 设备启动（自主或异常重启完成）
+//   - "M Reboot"    — 响应 ACS 主动下发 Reboot RPC 后回连
+//
+// 用于 D 方案：UpdateFromInform 路径下，只在含上述事件时才显式置 is_online=true。
+// PERIODIC / VALUE_CHANGE / CONNECTION REQUEST 等不在此列，由 PeriodicOnlineMarker
+// 独立路径处理（不进 batch buffer，写 DB 即时生效）。
+func isReconnectEvent(events []string) bool {
+	for _, e := range events {
+		switch e {
+		case "0 BOOTSTRAP", "1 BOOT", "M Reboot":
+			return true
+		}
+	}
+	return false
 }
 
 // getDeviceBySerialNumber looks up a device with Redis cache → PostgreSQL fallback.

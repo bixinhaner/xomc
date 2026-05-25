@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"sort"
 	"sync"
 	"time"
 
@@ -51,6 +52,12 @@ type BatchInformProcessor struct {
 	// transitionPublisher: T-0123 / T-0125 batch path 补完 — flush 成功后发布
 	// device.online / device.firmware.changed 事件。允许 nil（test 场景）。
 	transitionPublisher TransitionEventPublisher
+
+	// seq: per-device 串行化锁（与 DeviceService / RebootResponseOfflineMarker /
+	// OfflineDetector / HeartbeatMonitor 共享）。doFlush 入口按字典序 acquire batch
+	// 内所有 SN 锁，确保 marker 写的 is_online=false 不会被随后的 batch UPDATE 覆盖。
+	// nil = 退化为无锁（test 场景），生产部署必须注入。
+	seq *Sequencer
 }
 
 // TransitionEventPublisher 是 BatchInformProcessor 调 DeviceService 发布
@@ -149,6 +156,15 @@ func (p *BatchInformProcessor) Stop() {
 // nil 表示不发事件（test 场景或灰度关闭）。
 func (p *BatchInformProcessor) SetTransitionPublisher(pub TransitionEventPublisher) {
 	p.transitionPublisher = pub
+}
+
+// SetSequencer 注入 per-device 串行化锁（与 DeviceService / marker /
+// OfflineDetector / HeartbeatMonitor 共享同一实例）。doFlush 入口按字典序
+// acquire batch 内所有 SN 锁，确保 marker 写的 is_online=false 不会被随后
+// 的 batch UPDATE 覆盖（真机验证 2026-05-25 暴露的 batch 路径缺口）。
+// nil-safe：未注入则退化为无锁，仅 test 场景可用。
+func (p *BatchInformProcessor) SetSequencer(seq *Sequencer) {
+	p.seq = seq
 }
 
 // Submit dispatches an inform update to the appropriate worker.
@@ -273,6 +289,28 @@ func (p *BatchInformProcessor) doFlush(ctx context.Context, buffer map[string]*i
 		updates = append(updates, u)
 	}
 
+	// per-device 串行化：按字典序 acquire batch 内所有 SN 锁，与 marker /
+	// UpdateFromInform / OfflineDetector / HeartbeatMonitor 互斥。整个 doFlush
+	// 期间持锁，UPDATE + cache writeback + transition publish 全部在临界区内完成。
+	// 字典序保证多 batch 并发时不会循环等待（all callers 同序 acquire = 无死锁）。
+	if p.seq != nil {
+		sns := make([]string, 0, len(updates))
+		for _, u := range updates {
+			sns = append(sns, u.device.SerialNumber)
+		}
+		sort.Strings(sns)
+		unlocks := make([]func(), 0, len(sns))
+		for _, sn := range sns {
+			unlocks = append(unlocks, p.seq.Lock(sn))
+		}
+		defer func() {
+			// 释放顺序与 acquire 顺序无关（sync.Mutex.Unlock 独立），逆序仅为可读性。
+			for i := len(unlocks) - 1; i >= 0; i-- {
+				unlocks[i]()
+			}
+		}()
+	}
+
 	// 1. 批量更新设备表（返回每条 update 的 RowsAffected）
 	affected, err := p.batchUpdateDevices(ctx, updates)
 	if err != nil {
@@ -368,22 +406,27 @@ func (p *BatchInformProcessor) batchUpdateDevices(ctx context.Context, updates [
 		}
 
 		// T-0162: devices.status 列已 DROP（migrations/000137），改写 lifecycle_state +
-		// is_online 双列。prepareDeviceUpdate 已显式维护这两个新字段（收到 Inform 即
-		// IsOnline=true、Discovered/Registered 升 Commissioned），这里直接持久化。
+		// is_online 双列。prepareDeviceUpdate 已显式维护这两个新字段。
 		// AND deleted_at IS NULL：防止软删的 device 被 inform 静默复活
-		// （cache stale → 这里 UPDATE 仍命中已删行，silent data corruption）
+		// （cache stale → 这里 UPDATE 仍命中已删行，silent data corruption）。
+		//
+		// D 方案（真机验证 2026-05-25 暴露的 batch 路径覆盖）：本 SQL **不再写 is_online 列**。
+		// is_online 改由 PeriodicOnlineMarker / RebootResponseOfflineMarker / OfflineDetector /
+		// HeartbeatMonitor 四条独立快路径维护（每条都在 sequencer 锁内 + cache.Delete），
+		// 从根因消除"batch buffer 累积 10s → flush 写 true 覆盖 marker 写的 false"的
+		// lost update 问题。
 		query := `UPDATE devices SET
 			oui = $1, product_class = $2, manufacturer = $3,
-			lifecycle_state = $4, is_online = $5, firmware_version = $6,
-			ip_address = $7, connection_request_url = $8,
-			nat_detected = $9, udp_connection_request_address = $10,
-			last_inform_at = $11, last_inform_events = $12,
+			lifecycle_state = $4, firmware_version = $5,
+			ip_address = $6, connection_request_url = $7,
+			nat_detected = $8, udp_connection_request_address = $9,
+			last_inform_at = $10, last_inform_events = $11,
 			updated_at = NOW()
-		WHERE id = $13 AND deleted_at IS NULL`
+		WHERE id = $12 AND deleted_at IS NULL`
 
 		batch.Queue(query,
 			dev.OUI, dev.ProductClass, dev.Manufacturer,
-			dev.LifecycleState, dev.IsOnline, dev.FirmwareVersion,
+			dev.LifecycleState, dev.FirmwareVersion,
 			ipAddr, dev.ConnectionRequestURL,
 			dev.NatDetected, udpAddr,
 			dev.LastInformAt, eventsData,
@@ -446,17 +489,20 @@ func (p *BatchInformProcessor) batchUpsertParams(ctx context.Context, updates []
 }
 
 // batchRedisOps 批量刷新设备缓存和 STUN 地址。
+//
+// D 方案（真机验证 2026-05-25）：cache 改为 Delete 而非 Set。
+// 原因：u.device 是 PERIODIC inform 处理时构造的快照，含 IsOnline=true。若 Set 进 cache
+// 会覆盖 RebootResponseOfflineMarker 在 10s buffer 期间刚写的 is_online=false。
+// 改 Delete 让下次 cache.GetOrLoad miss → DB 重读最新 is_online。代价：每 batch flush
+// 后该 SN cache 失效一次（PERIODIC 60s 一次，cache 重建成本可忽略）。
 func (p *BatchInformProcessor) batchRedisOps(ctx context.Context, updates []*informUpdate) {
 	pipe := p.redisClient.Pipeline()
 
 	for _, u := range updates {
 		dev := u.device
-		// 刷新设备缓存
+		// invalidate 设备缓存（让 is_online 等字段下次读取时走 DB 重建，避免 stale 覆盖）
 		if p.cache != nil {
-			data, err := json.Marshal(dev)
-			if err == nil {
-				pipe.Set(ctx, deviceCacheKey(dev.SerialNumber), data, deviceCacheTTL)
-			}
+			pipe.Del(ctx, deviceCacheKey(dev.SerialNumber))
 		}
 
 		// STUN 地址同步
@@ -583,22 +629,27 @@ func (r *PgDeviceRepository) BatchUpdateDevices(ctx context.Context, devices []*
 		}
 
 		// T-0162: devices.status 列已 DROP（migrations/000137），改写 lifecycle_state +
-		// is_online 双列。prepareDeviceUpdate 已显式维护这两个新字段（收到 Inform 即
-		// IsOnline=true、Discovered/Registered 升 Commissioned），这里直接持久化。
+		// is_online 双列。prepareDeviceUpdate 已显式维护这两个新字段。
 		// AND deleted_at IS NULL：防止软删的 device 被 inform 静默复活
-		// （cache stale → 这里 UPDATE 仍命中已删行，silent data corruption）
+		// （cache stale → 这里 UPDATE 仍命中已删行，silent data corruption）。
+		//
+		// D 方案（真机验证 2026-05-25 暴露的 batch 路径覆盖）：本 SQL **不再写 is_online 列**。
+		// is_online 改由 PeriodicOnlineMarker / RebootResponseOfflineMarker / OfflineDetector /
+		// HeartbeatMonitor 四条独立快路径维护（每条都在 sequencer 锁内 + cache.Delete），
+		// 从根因消除"batch buffer 累积 10s → flush 写 true 覆盖 marker 写的 false"的
+		// lost update 问题。
 		query := `UPDATE devices SET
 			oui = $1, product_class = $2, manufacturer = $3,
-			lifecycle_state = $4, is_online = $5, firmware_version = $6,
-			ip_address = $7, connection_request_url = $8,
-			nat_detected = $9, udp_connection_request_address = $10,
-			last_inform_at = $11, last_inform_events = $12,
+			lifecycle_state = $4, firmware_version = $5,
+			ip_address = $6, connection_request_url = $7,
+			nat_detected = $8, udp_connection_request_address = $9,
+			last_inform_at = $10, last_inform_events = $11,
 			updated_at = NOW()
-		WHERE id = $13 AND deleted_at IS NULL`
+		WHERE id = $12 AND deleted_at IS NULL`
 
 		batch.Queue(query,
 			dev.OUI, dev.ProductClass, dev.Manufacturer,
-			dev.LifecycleState, dev.IsOnline, dev.FirmwareVersion,
+			dev.LifecycleState, dev.FirmwareVersion,
 			ipAddr, dev.ConnectionRequestURL,
 			dev.NatDetected, udpAddr,
 			dev.LastInformAt, eventsData,

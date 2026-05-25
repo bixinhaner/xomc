@@ -17,6 +17,8 @@ type OfflineDetector struct {
 	deviceRepo DeviceRepository
 	infoSyncer *InfoSyncer
 	eventBus   event.EventBus
+	seq        *Sequencer // per-device 串行化，与 DeviceService / marker 共享同一锁
+	cache      *DeviceCache // 写 DB 后 invalidate，与 UpdateFromInform 的 cache.GetOrLoad 协调
 	logger     *zap.Logger
 
 	// 配置参数
@@ -50,6 +52,18 @@ func NewOfflineDetector(
 		offlineThreshold: 10 * time.Minute,
 		batchSize:        1000,
 	}
+}
+
+// SetSequencer 注入 per-device 串行化锁（与 DeviceService 共享同一实例）。
+// nil-safe：未注入则退化为无锁。
+func (d *OfflineDetector) SetSequencer(seq *Sequencer) {
+	d.seq = seq
+}
+
+// SetCache 注入 DeviceCache，UpdateOnlineStatus 后 invalidate（保持与
+// DeviceService.UpdateFromInform 的 cache.GetOrLoad 一致）。nil-safe。
+func (d *OfflineDetector) SetCache(cache *DeviceCache) {
+	d.cache = cache
 }
 
 // Start 启动离线检测（阻塞运行）
@@ -118,10 +132,20 @@ func (d *OfflineDetector) detect(ctx context.Context) {
 func (d *OfflineDetector) markOffline(ctx context.Context, device *model.Device) error {
 	now := time.Now()
 
+	// per-device 串行化：与 UpdateFromInform / marker 共享锁，确保不与同 device 的
+	// 在飞事件并发写库（避免覆盖刚到的 Inform 写的 is_online=true）。
+	if d.seq != nil {
+		unlock := d.seq.Lock(device.SerialNumber)
+		defer unlock()
+	}
+
 	// 1. T-0162: 只更 is_online=false，**不动 lifecycle_state**。
 	// commissioned + is_online=false 是合法状态（已入网 + 当前掉线）。
 	if err := d.deviceRepo.UpdateOnlineStatus(ctx, device.ID, false); err != nil {
 		return fmt.Errorf("update online status: %w", err)
+	}
+	if d.cache != nil {
+		d.cache.Delete(ctx, device.SerialNumber)
 	}
 
 	// 2. 记录离线时间

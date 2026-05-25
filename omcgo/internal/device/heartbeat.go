@@ -17,6 +17,8 @@ type HeartbeatMonitor struct {
 	redis      redis.UniversalClient
 	deviceRepo DeviceRepository
 	cron       *cron.Cron
+	seq        *Sequencer   // per-device 串行化（与 DeviceService / marker / OfflineDetector 共享）
+	cache      *DeviceCache // 写 DB 后 invalidate
 	logger     *zap.Logger
 	cancel     context.CancelFunc
 }
@@ -28,6 +30,17 @@ func NewHeartbeatMonitor(redis redis.UniversalClient, deviceRepo DeviceRepositor
 		deviceRepo: deviceRepo,
 		logger:     logger,
 	}
+}
+
+// SetSequencer 注入 per-device 串行化锁（与 DeviceService 共享同一实例）。
+// nil-safe：未注入则退化为无锁。
+func (m *HeartbeatMonitor) SetSequencer(seq *Sequencer) {
+	m.seq = seq
+}
+
+// SetCache 注入 DeviceCache，UpdateOnlineStatus 后 invalidate。nil-safe。
+func (m *HeartbeatMonitor) SetCache(cache *DeviceCache) {
+	m.cache = cache
 }
 
 // Start begins the periodic heartbeat check using a cron scheduler.
@@ -99,19 +112,29 @@ func (m *HeartbeatMonitor) CheckHeartbeats(ctx context.Context) {
 			}
 
 			if exists == 0 {
-				// T-0162: 只更 is_online=false，**不动 lifecycle_state**。
-				// commissioned + is_online=false 是合法状态（已入网 + 当前掉线）。
-				// 老代码这里写 status='offline' 实际等价于"丢失 lifecycle 信息"，是
-				// status 字段双重语义的典型 bug 现场。
-				if err := m.deviceRepo.UpdateOnlineStatus(ctx, device.ID, false); err != nil {
-					m.logger.Error("mark device offline",
-						zap.Error(err),
-						zap.String("device_sn", device.SerialNumber))
-				} else {
-					m.logger.Info("device marked offline (heartbeat expired)",
-						zap.String("device_sn", device.SerialNumber),
-						zap.String("device_id", device.ID.String()))
-				}
+				// per-device 串行化：与同 device 的 UpdateFromInform / marker 互斥。
+				func() {
+					if m.seq != nil {
+						unlock := m.seq.Lock(device.SerialNumber)
+						defer unlock()
+					}
+					// T-0162: 只更 is_online=false，**不动 lifecycle_state**。
+					// commissioned + is_online=false 是合法状态（已入网 + 当前掉线）。
+					// 老代码这里写 status='offline' 实际等价于"丢失 lifecycle 信息"，是
+					// status 字段双重语义的典型 bug 现场。
+					if err := m.deviceRepo.UpdateOnlineStatus(ctx, device.ID, false); err != nil {
+						m.logger.Error("mark device offline",
+							zap.Error(err),
+							zap.String("device_sn", device.SerialNumber))
+					} else {
+						if m.cache != nil {
+							m.cache.Delete(ctx, device.SerialNumber)
+						}
+						m.logger.Info("device marked offline (heartbeat expired)",
+							zap.String("device_sn", device.SerialNumber),
+							zap.String("device_id", device.ID.String()))
+					}
+				}()
 			}
 		}
 
