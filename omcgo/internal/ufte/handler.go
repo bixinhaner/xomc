@@ -38,6 +38,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	ufte.PUT("/tasks/:id/suspend", h.SuspendTask)
 	ufte.PUT("/tasks/:id/terminate", h.TerminateTask)
 	ufte.DELETE("/tasks/:id", h.DeleteTask)
+	// 批量删除：body 走 POST 避免 DELETE+body 在某些代理 / WAF 下被吞
+	ufte.POST("/tasks/batch-delete", h.BatchDeleteTasks)
 	ufte.POST("/tasks/:id/retry", h.RetryTask)
 	ufte.GET("/devices", h.ListDevices)
 	ufte.GET("/device-candidates", h.ListDeviceCandidates)
@@ -209,6 +211,59 @@ func (h *Handler) DeleteTask(c *gin.Context) {
 		return
 	}
 	response.OK(c, gin.H{"id": id.String()})
+}
+
+// BatchDeleteTasksRequest 批量删除 body。
+type BatchDeleteTasksRequest struct {
+	TaskIDs []string `json:"task_ids" binding:"required,min=1"`
+}
+
+// BatchDeleteTasksResponse 批量删除响应。
+type BatchDeleteTasksResponse struct {
+	Succeeded []string                     `json:"succeeded"`
+	Failed    []BatchDeleteTaskFailureItem `json:"failed"`
+}
+
+// BatchDeleteTaskFailureItem 失败明细。
+type BatchDeleteTaskFailureItem struct {
+	TaskID string `json:"task_id"`
+	Error  string `json:"error"`
+}
+
+// BatchDeleteTasks 批量删除任务；单条失败不影响其他。
+func (h *Handler) BatchDeleteTasks(c *gin.Context) {
+	var req BatchDeleteTasksRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	ids := make([]uuid.UUID, 0, len(req.TaskIDs))
+	invalidIDs := make([]BatchDeleteTaskFailureItem, 0)
+	for _, raw := range req.TaskIDs {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			invalidIDs = append(invalidIDs, BatchDeleteTaskFailureItem{
+				TaskID: raw, Error: "invalid uuid: " + err.Error(),
+			})
+			continue
+		}
+		ids = append(ids, id)
+	}
+	results := h.service.BatchDeleteTasks(c.Request.Context(), ids)
+	resp := BatchDeleteTasksResponse{
+		Succeeded: make([]string, 0, len(results)),
+		Failed:    invalidIDs, // 先把 uuid 解析失败的塞进去
+	}
+	for _, r := range results {
+		if r.Success {
+			resp.Succeeded = append(resp.Succeeded, r.TaskID.String())
+		} else {
+			resp.Failed = append(resp.Failed, BatchDeleteTaskFailureItem{
+				TaskID: r.TaskID.String(), Error: r.Error,
+			})
+		}
+	}
+	response.OK(c, resp)
 }
 
 func (h *Handler) RetryTask(c *gin.Context) {

@@ -130,6 +130,25 @@ export const unifiedFileTransferApi = {
     await http.delete(`/ufte/tasks/${id}`);
   },
 
+  /**
+   * 批量删除任务。单条失败不影响其他；返回 succeeded + failed 列表。
+   * 走 POST /tasks/batch-delete 而不是 DELETE+body（DELETE 携带 body 在某些
+   * 代理 / WAF 下会被吞，与 backup snapshot/license 批删同款约定）。
+   */
+  async batchDeleteTasks(taskIds: string[]): Promise<{
+    succeeded: string[];
+    failed: Array<{ taskId: string; error: string }>;
+  }> {
+    const { data } = await http.post<{
+      succeeded: string[];
+      failed: Array<{ task_id: string; error: string }>;
+    }>('/ufte/tasks/batch-delete', { task_ids: taskIds });
+    return {
+      succeeded: data.succeeded ?? [],
+      failed: (data.failed ?? []).map((f) => ({ taskId: f.task_id, error: f.error })),
+    };
+  },
+
   async retryTask(id: string): Promise<void> {
     await http.post(`/ufte/tasks/${id}/retry`);
   },

@@ -412,6 +412,28 @@ func (s *Service) DeleteTask(ctx context.Context, taskID uuid.UUID) error {
 	return s.softwareService.DeleteUpgrade(ctx, taskID)
 }
 
+// BatchDeleteTaskResult 单条任务删除结果。
+type BatchDeleteTaskResult struct {
+	TaskID  uuid.UUID `json:"task_id"`
+	Success bool      `json:"success"`
+	Error   string    `json:"error,omitempty"`
+}
+
+// BatchDeleteTasks 逐条调 DeleteTask；单条失败不影响其它（如运行中任务、已不存在等）。
+// 返回每条详细结果，前端据此提示"成功 X 个，失败 Y 个：xxx"。
+func (s *Service) BatchDeleteTasks(ctx context.Context, taskIDs []uuid.UUID) []BatchDeleteTaskResult {
+	results := make([]BatchDeleteTaskResult, 0, len(taskIDs))
+	for _, id := range taskIDs {
+		r := BatchDeleteTaskResult{TaskID: id, Success: true}
+		if err := s.softwareService.DeleteUpgrade(ctx, id); err != nil {
+			r.Success = false
+			r.Error = err.Error()
+		}
+		results = append(results, r)
+	}
+	return results
+}
+
 func (s *Service) RetryTask(ctx context.Context, taskID uuid.UUID) error {
 	return s.softwareService.RetryUpgrade(ctx, taskID)
 }

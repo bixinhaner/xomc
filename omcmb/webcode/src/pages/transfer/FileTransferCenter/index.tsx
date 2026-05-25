@@ -9,6 +9,7 @@ import {
   Drawer,
   Form,
   Input,
+  Modal,
   Popconfirm,
   Progress,
   Radio,
@@ -22,13 +23,14 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { EyeOutlined, PlusOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EyeOutlined, PlusOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useT } from '@/hooks/useT';
 
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import {
+  useBatchDeleteUfteTasks,
   useCreateUnifiedFileTransferTask,
   useDeleteUfteTask,
   useStartUfteTask,
@@ -244,6 +246,12 @@ export default function FileTransferCenter() {
   const suspendTaskMutation = useSuspendUfteTask();
   const terminateTaskMutation = useTerminateUfteTask();
   const deleteTaskMutation = useDeleteUfteTask();
+  const batchDeleteTasksMutation = useBatchDeleteUfteTasks();
+  const [selectedTaskIds, setSelectedTaskIds] = useState<React.Key[]>([]);
+  // 切 tab/分类/类型 + 改过滤器 + 翻页 → 选中集自动清空，避免"显示 3 个已选但其实
+  // 是上一个 tab 的任务 ID"的违和感。
+  // 注：表格 dataSource 切换后，AntD 表格会自动收起"勾选行"显示，但 selectedTaskIds
+  // 状态还在 → 顶部"批量删除（N）"按钮的计数错位；这条 useEffect 同步清掉。
   const recentTasks = tasksData?.items ?? [];
   const recentDevices = devicesData?.items ?? [];
 
@@ -601,7 +609,14 @@ export default function FileTransferCenter() {
   useEffect(() => {
     setTaskPage(1);
     setDevicePage(1);
+    // 同步清空批量选中——切 tab / 改过滤 / 翻页时旧的选中 ID 已不在当前可见行
+    setSelectedTaskIds([]);
   }, [selectedCategory, selectedTypeCode, taskKeyword, taskStatusFilter, deviceKeyword, deviceStatusFilter, deviceProductClassFilter]);
+
+  // 翻页（taskPage / taskPageSize 变化）同样清空选中，避免跨页 ID 残留计数
+  useEffect(() => {
+    setSelectedTaskIds([]);
+  }, [taskPage, taskPageSize]);
 
   useEffect(() => {
     setDeviceProductClassFilter(undefined);
@@ -1141,11 +1156,54 @@ export default function FileTransferCenter() {
                         style={{ width: 160 }}
                       />
                     </Space>
+                    {selectedTaskIds.length > 0 && (
+                      <Space>
+                        <Button
+                          danger
+                          icon={<DeleteOutlined />}
+                          loading={batchDeleteTasksMutation.isPending}
+                          onClick={() => {
+                            const ids = selectedTaskIds.map(String);
+                            Modal.confirm({
+                              title: '确认批量删除？',
+                              content: `将删除 ${ids.length} 个任务（含其设备子任务 + MinIO 备份/日志文件），不可恢复。运行中的任务请先终止。`,
+                              okType: 'danger',
+                              onOk: async () => {
+                                try {
+                                  const res = await batchDeleteTasksMutation.mutateAsync(ids);
+                                  if (res.failed.length === 0) {
+                                    void message.success(`已删除 ${res.succeeded.length} 个任务`);
+                                  } else {
+                                    void message.warning(
+                                      `成功 ${res.succeeded.length}，失败 ${res.failed.length}：${res.failed.map((f) => f.error).join('；')}`,
+                                    );
+                                  }
+                                  setSelectedTaskIds((prev) =>
+                                    prev.filter((k) => !res.succeeded.includes(String(k))),
+                                  );
+                                } catch {
+                                  void message.error('批量删除请求失败，请稍后重试');
+                                }
+                              },
+                            });
+                          }}
+                        >
+                          批量删除（{selectedTaskIds.length}）
+                        </Button>
+                        <Button type="link" onClick={() => setSelectedTaskIds([])}>
+                          取消选择
+                        </Button>
+                      </Space>
+                    )}
                     <Table<UnifiedFileTransferTask>
                       rowKey="id"
                       columns={taskColumns}
                       dataSource={recentTasks}
                       loading={tasksLoading}
+                      rowSelection={{
+                        selectedRowKeys: selectedTaskIds,
+                        onChange: (keys) => setSelectedTaskIds(keys),
+                      }}
                       pagination={{
                         current: taskPage,
                         pageSize: taskPageSize,

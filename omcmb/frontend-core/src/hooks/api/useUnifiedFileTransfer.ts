@@ -143,6 +143,20 @@ export function useDeleteUfteTask() {
   });
 }
 
+export function useBatchDeleteUfteTasks() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    { succeeded: string[]; failed: Array<{ taskId: string; error: string }> },
+    Error,
+    string[]
+  >({
+    mutationFn: (ids: string[]) => api.batchDeleteTasks(ids),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['ufte'] });
+    },
+  });
+}
+
 export function useRetryUfteTask() {
   const queryClient = useQueryClient();
   return useMutation({
