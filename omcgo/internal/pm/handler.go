@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -214,7 +215,8 @@ func (h *Handler) ListAggregatedCounters(c *gin.Context) {
 //   - granularity（必填）: 15min / hourly / daily / weekly / monthly
 //   - dimension（可选）: device（默认）/ device_group
 //   - device_oui+device_sn / device_group_id：维度过滤（与 dimension 配套）
-//   - metric_path：单 metric 过滤；metric_type：counter / kpi
+//   - metric_path：单 metric 过滤（兼容 v1）；metric_paths：逗号分隔的多 metric 过滤（v2，PmDashboard panel 用）
+//   - metric_type：counter / kpi
 //   - start_time / end_time：RFC3339
 //   - limit / offset
 //
@@ -246,7 +248,18 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		}
 		req.DeviceGroupIDs = []uuid.UUID{id}
 	}
-	if v := c.Query("metric_path"); v != "" {
+	if v := c.Query("metric_paths"); v != "" {
+		parts := strings.Split(v, ",")
+		paths := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if p = strings.TrimSpace(p); p != "" {
+				paths = append(paths, p)
+			}
+		}
+		if len(paths) > 0 {
+			req.MetricPaths = paths
+		}
+	} else if v := c.Query("metric_path"); v != "" {
 		req.MetricPaths = []string{v}
 	}
 	if v := c.Query("metric_type"); v != "" {
