@@ -199,6 +199,11 @@ export default function FileTransferCenter() {
   const drawerTypeCode = Form.useWatch('typeCode', taskForm);
   const drawerProductClass = Form.useWatch('productClass', taskForm);
   const [selectedDrawerDeviceIds, setSelectedDrawerDeviceIds] = useState<string[]>([]);
+  // 批量输入 SN 弹窗：用户粘贴多个 SN（;/,/ 空格/换行/Tab 任意分隔），匹配
+  // 当前可选设备 → 并入 selectedDrawerDeviceIds。不在候选名单的 SN 走 warning。
+  const [batchSNInputOpen, setBatchSNInputOpen] = useState(false);
+  const [batchSNInputText, setBatchSNInputText] = useState('');
+  const [batchSNApplying, setBatchSNApplying] = useState(false);
   // T-0164: CONFIG_RESTORE 模式下"按设备 SN 检查 config_snapshots 表"的结果。
   // selectedDrawerDeviceIds + drawerTypeCode 变化时自动 refetch；缺失则禁用提交。
   const [snapshotProbe, setSnapshotProbe] = useState<BatchGetSnapshotsResult | null>(null);
@@ -517,6 +522,56 @@ export default function FileTransferCenter() {
     void deleteTaskMutation.mutateAsync(record.id)
       .then(() => void message.success('任务已删除'))
       .catch((error: unknown) => void message.error(getTaskActionErrorMessage(error, '任务删除失败')));
+  };
+
+  // 批量输入 SN → 解析 → 全量候选匹配 → 并入选中。
+  // 分隔符：; , 空格 Tab 换行（任一）；自动 trim、去重、忽略空串。
+  const handleApplyBatchSNs = async () => {
+    const raw = batchSNInputText || '';
+    const tokens = Array.from(new Set(
+      raw.split(/[;,\s]+/).map((s) => s.trim()).filter(Boolean),
+    ));
+    if (tokens.length === 0) {
+      void message.warning('请输入至少一个 SN');
+      return;
+    }
+    setBatchSNApplying(true);
+    try {
+      // 当前可见 200 条候选不够，按同款过滤条件拉一次 pageSize=10000
+      // 全量匹配。命中即累加，未命中给出明细。
+      const resp = await unifiedFileTransferApi.getDeviceCandidates({
+        page: 1,
+        pageSize: 10000,
+        category: selectedCategory || undefined,
+        typeCode: drawerTaskType?.typeCode || selectedTypeCode || undefined,
+        productType: needsFirmwareSelection(drawerTaskType) ? drawerProductClass : undefined,
+      });
+      const allCandidates = resp.items ?? [];
+      const snToId = new Map(allCandidates.map((d) => [d.deviceSn, d.id]));
+      const matchedIds: string[] = [];
+      const unmatched: string[] = [];
+      for (const sn of tokens) {
+        const id = snToId.get(sn);
+        if (id) matchedIds.push(id);
+        else unmatched.push(sn);
+      }
+      // 与已选合并去重
+      setSelectedDrawerDeviceIds((prev) => Array.from(new Set([...prev, ...matchedIds])));
+      if (unmatched.length === 0) {
+        void message.success(`已批量选中 ${matchedIds.length} 台`);
+      } else {
+        void message.warning(
+          `成功 ${matchedIds.length} 台；未匹配 ${unmatched.length} 个 SN：${unmatched.slice(0, 5).join('、')}${unmatched.length > 5 ? '…' : ''}`,
+        );
+      }
+      setBatchSNInputOpen(false);
+      setBatchSNInputText('');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '请稍后重试';
+      void message.error(`批量输入失败：${msg}`);
+    } finally {
+      setBatchSNApplying(false);
+    }
   };
 
   // 设备列表导出 CSV — 调后端 /ufte/devices/export 端点：复用 ListDevices
@@ -1455,6 +1510,12 @@ export default function FileTransferCenter() {
                   onChange={(e) => setDrawerDeviceKeywordInput(e.target.value)}
                   onSearch={(value) => setDrawerDeviceKeyword(value.trim())}
                 />
+                <Button
+                  icon={<PlusOutlined />}
+                  onClick={() => { setBatchSNInputOpen(true); setBatchSNInputText(''); }}
+                >
+                  批量输入 SN
+                </Button>
                 <Text type="secondary">已选 {drawerSelectedDevices.length} 台</Text>
               </Space>
               <Table<UnifiedFileTransferDeviceItem>
@@ -1658,6 +1719,35 @@ export default function FileTransferCenter() {
             <Input.TextArea rows={4} placeholder="可填写灰度范围、验证目标或领导评审备注" />
           </Form.Item>
         </Form>
+
+        {/* 批量输入 SN 弹窗 — 给当前任务的设备表加批量勾选入口 */}
+        <Modal
+          title="批量输入 SN"
+          open={batchSNInputOpen}
+          onCancel={() => setBatchSNInputOpen(false)}
+          onOk={() => { void handleApplyBatchSNs(); }}
+          okText="确定"
+          cancelText="取消"
+          confirmLoading={batchSNApplying}
+          width={520}
+          destroyOnClose
+        >
+          <Form layout="vertical">
+            <Form.Item label="Serial Number">
+              <Input.TextArea
+                rows={6}
+                placeholder="粘贴或输入多个 SN，按分号 ; 逗号 , 空格、Tab 或换行分隔"
+                value={batchSNInputText}
+                onChange={(e) => setBatchSNInputText(e.target.value)}
+                allowClear
+              />
+            </Form.Item>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              多个设备 SN 可用分号 (;)、逗号 (,)、空格 或换行分隔；自动去重、忽略空白。
+              未在当前任务候选列表中的 SN 会在提交后给出提示。
+            </Text>
+          </Form>
+        </Modal>
       </Drawer>
 
       <Drawer
