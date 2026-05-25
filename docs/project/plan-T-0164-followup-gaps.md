@@ -334,7 +334,7 @@ P3（进阶导出 + G6-G7 集成）
 - ✅ **G7-Gap-9**（曾标 🚧 "lossless 需大改"）— `pm/adhoc/worker.go:202 sweepOnce` 用"每 sweep 推进 1 格 + 多 sweep 追平"模式实现 lossless；`asyncjob/cron_state.go:104 CatchupMissedBuckets` 同模式；单测覆盖
 - ✅ **Cross-Gap-1 / Cross-Gap-2**（曾标 🚧）— commit `3d0cacfa` 已交付（e2e_verify.sh 加 ~15 断言 / release-gate.md §8.5 加 G1-G8 DoD）
 - ✅ **Prometheus instrumentation hooks**（曾标"hook 留 v2"）— Runner.runOnce / Aggregator / QueueDepthSampler / IncCatchup 全部接入，数据非 0
-- ✅ **G8-Gap-3**（曾标 ⚠️ partial）— 2026-05-25 终结：HeartbeatInterval 从 `const` 改 `var` + `loadAsyncJobThresholds` 启动期注入；按用户简化偏好放弃 EventBus 热重载
+- ✅ **G8-Gap-3**（曾标 ⚠️ partial）— 2026-05-25 终结 commit `300ae4a1`：HeartbeatInterval 从 `const` 改 `var` + `loadAsyncJobThresholds` 启动期注入；按用户简化偏好放弃 EventBus 热重载
 
 ---
 

@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |------|----|
-| Commit | `PENDING`（hash 回填后更新） |
+| Commit | `300ae4a1` |
 | Author | kevin |
 | Branch | draft/pm-kpi-impl |
 | Backlog | T-0164 |
