@@ -515,7 +515,11 @@ export default function CurrentAlarms() {
         }
 
         downloadAlarmCsv(exportItems);
-        message.open({ key: 'current-alarm-export', type: 'success', content: t('common.exportSuccess') });
+        message.open({
+          key: 'current-alarm-export',
+          type: 'success',
+          content: t('common.exportSuccess', { count: exportItems.length }),
+        });
         setExportOpen(false);
       } catch {
         message.open({ key: 'current-alarm-export', type: 'error', content: t('common.exportFailed') });
