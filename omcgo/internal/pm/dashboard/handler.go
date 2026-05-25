@@ -145,7 +145,7 @@ type panelDTO struct {
 	PanelType      string          `json:"panel_type"`
 	Title          string          `json:"title"`
 	MetricPaths    []string        `json:"metric_paths"`
-	Granularity    string          `json:"granularity"`
+	Granularities  []string        `json:"granularities"`
 	Dimension      string          `json:"dimension"`
 	DeviceSNs      []string        `json:"device_sns,omitempty"`
 	DeviceGroupIDs []string        `json:"device_group_ids,omitempty"`
@@ -159,7 +159,7 @@ func panelToDTO(p *Panel) panelDTO {
 	dto := panelDTO{
 		ID: p.ID.String(), DashboardID: p.DashboardID.String(),
 		PanelType: string(p.PanelType), Title: p.Title,
-		MetricPaths: p.MetricPaths, Granularity: p.Granularity,
+		MetricPaths: p.MetricPaths, Granularities: p.Granularities,
 		Dimension: string(p.Dimension), DeviceSNs: p.DeviceSNs,
 		TimeRange: p.TimeRange, Config: p.Config,
 	}
@@ -405,7 +405,7 @@ type panelInputDTO struct {
 	PanelType      string          `json:"panel_type" binding:"required"`
 	Title          string          `json:"title" binding:"required"`
 	MetricPaths    []string        `json:"metric_paths" binding:"required,min=1"`
-	Granularity    string          `json:"granularity" binding:"required"`
+	Granularities  []string        `json:"granularities" binding:"required,min=1,dive,oneof=15min hourly daily weekly monthly"`
 	Dimension      string          `json:"dimension" binding:"required,oneof=device device_group"`
 	DeviceSNs      []string        `json:"device_sns"`
 	DeviceGroupIDs []string        `json:"device_group_ids"`
@@ -417,15 +417,15 @@ type panelInputDTO struct {
 
 func (d panelInputDTO) toReq(dashID uuid.UUID) (CreatePanelRequest, error) {
 	req := CreatePanelRequest{
-		DashboardID: dashID,
-		PanelType:   PanelType(d.PanelType),
-		Title:       d.Title,
-		MetricPaths: d.MetricPaths,
-		Granularity: d.Granularity,
-		Dimension:   Dimension(d.Dimension),
-		DeviceSNs:   d.DeviceSNs,
-		TimeRange:   d.TimeRange,
-		Config:      d.Config,
+		DashboardID:   dashID,
+		PanelType:     PanelType(d.PanelType),
+		Title:         d.Title,
+		MetricPaths:   d.MetricPaths,
+		Granularities: d.Granularities,
+		Dimension:     Dimension(d.Dimension),
+		DeviceSNs:     d.DeviceSNs,
+		TimeRange:     d.TimeRange,
+		Config:        d.Config,
 	}
 	if len(d.DeviceGroupIDs) > 0 {
 		ids := make([]uuid.UUID, 0, len(d.DeviceGroupIDs))

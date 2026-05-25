@@ -74,13 +74,16 @@ type Dashboard struct {
 }
 
 // Panel 是 pm_panels 表的 Go 域模型。
+//
+// G6-Gap-6：Granularities 多粒度（前端 Tab 切换浏览，不重新请求 CRUD），
+// 元素白名单 = 15min / hourly / daily / weekly / monthly。
 type Panel struct {
 	ID             uuid.UUID
 	DashboardID    uuid.UUID
 	PanelType      PanelType
 	Title          string
 	MetricPaths    []string
-	Granularity    string
+	Granularities  []string
 	Dimension      Dimension
 	DeviceSNs      []string
 	DeviceGroupIDs []uuid.UUID
@@ -130,7 +133,7 @@ type CreatePanelRequest struct {
 	PanelType      PanelType
 	Title          string
 	MetricPaths    []string
-	Granularity    string
+	Granularities  []string
 	Dimension      Dimension
 	DeviceSNs      []string
 	DeviceGroupIDs []uuid.UUID

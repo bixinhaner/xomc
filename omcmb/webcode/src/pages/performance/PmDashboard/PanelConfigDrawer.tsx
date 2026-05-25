@@ -7,7 +7,7 @@
  */
 
 import { useEffect } from 'react';
-import { Button, Drawer, Form, Input, InputNumber, Select, Space, Tag, message } from 'antd';
+import { Button, Drawer, Form, Input, InputNumber, Select, Space, Switch, Tag, message } from 'antd';
 import {
   useCreatePmPanel,
   useUpdatePmPanel,
@@ -35,7 +35,8 @@ interface FormValues {
   panelType: PanelType;
   title: string;
   metricPaths: string;          // 逗号分隔 → 入参时拆数组
-  granularity: Granularity;
+  // G6-Gap-6：粒度多选，前端 PanelHeader 用 Tab 切换浏览
+  granularities: Granularity[];
   dimension: Dimension;
   deviceSns?: string;           // 逗号分隔
   deviceGroupIds?: string;      // 逗号分隔
@@ -52,6 +53,8 @@ interface FormValues {
   warningThreshold?: number;
   // G6-Gap-9: 时间轴切换（end_time = 采集时间；ingest_time = 入库时间）
   timeAxis?: 'end_time' | 'ingest_time';
+  // G6-Gap-2: 是否继承全局筛选（默认 true）。false 时 panel 用自己的 timeRange / deviceSns / deviceGroupIds。
+  inheritGlobal?: boolean;
 }
 
 const PANEL_TYPE_OPTIONS: { label: string; value: PanelType }[] = [
@@ -106,7 +109,7 @@ export function PanelConfigDrawer({ open, mode, panel, dashboardId, technology, 
         panelType: panel.panelType,
         title: panel.title,
         metricPaths: panel.metricPaths.join(', '),
-        granularity: panel.granularity,
+        granularities: panel.granularities,
         dimension: panel.dimension,
         deviceSns: (panel.deviceSns ?? []).join(', '),
         deviceGroupIds: (panel.deviceGroupIds ?? []).join(', '),
@@ -120,15 +123,17 @@ export function PanelConfigDrawer({ open, mode, panel, dashboardId, technology, 
         bigNumberFontSize: panel.config?.font_size as number | undefined,
         warningThreshold: panel.config?.warning_threshold as number | undefined,
         timeAxis: (panel.config?.time_axis as 'end_time' | 'ingest_time' | undefined) ?? 'end_time',
+        inheritGlobal: (panel.config?.inherit_global as boolean | undefined) ?? true,
       });
     } else {
       form.setFieldsValue({
         panelType: 'kpi_card',
         title: '',
         metricPaths: '',
-        granularity: 'hourly',
+        granularities: ['hourly'],
         dimension: 'device',
         windowOffset: '-24h',
+        inheritGlobal: true,
       });
     }
   }, [open, panel, form]);
@@ -141,7 +146,7 @@ export function PanelConfigDrawer({ open, mode, panel, dashboardId, technology, 
       panelType: values.panelType,
       title: values.title,
       metricPaths: splitCsv(values.metricPaths),
-      granularity: values.granularity,
+      granularities: values.granularities,
       dimension: values.dimension,
       deviceSns: values.dimension === 'device' ? splitCsv(values.deviceSns) : undefined,
       deviceGroupIds: values.dimension === 'device_group' ? splitCsv(values.deviceGroupIds) : undefined,
@@ -153,6 +158,8 @@ export function PanelConfigDrawer({ open, mode, panel, dashboardId, technology, 
         threshold: values.threshold,
         // G6-Gap-9 时间轴
         time_axis: values.timeAxis ?? 'end_time',
+        // G6-Gap-2 是否继承全局筛选
+        inherit_global: values.inheritGlobal ?? true,
         // G6-Gap-5 类型化 config
         ...(values.panelType === 'topn'
           ? { n: values.topnN ?? 10, sort_desc: values.topnSortDesc ?? true }
@@ -205,8 +212,13 @@ export function PanelConfigDrawer({ open, mode, panel, dashboardId, technology, 
         >
           <Input placeholder="L.RRC.SuccRate" />
         </Form.Item>
-        <Form.Item label="粒度" name="granularity" rules={[{ required: true }]}>
-          <Select options={GRANULARITY_OPTIONS} />
+        <Form.Item
+          label="粒度（多选 — 前端 Tab 切换浏览）"
+          name="granularities"
+          rules={[{ required: true, message: '至少一个粒度' }]}
+          tooltip="可同时绑定多个粒度，PanelHeader 会显示 Tab，切换 Tab 时不重新请求 panel CRUD，只切换数据源"
+        >
+          <Select mode="multiple" options={GRANULARITY_OPTIONS} placeholder="hourly / daily / weekly / monthly" />
         </Form.Item>
         <Form.Item label="维度" name="dimension" rules={[{ required: true }]}>
           <Select options={DIMENSION_OPTIONS} />
@@ -223,6 +235,15 @@ export function PanelConfigDrawer({ open, mode, panel, dashboardId, technology, 
               </Form.Item>
             )
           }
+        </Form.Item>
+        <Form.Item
+          label="继承全局筛选"
+          name="inheritGlobal"
+          valuePropName="checked"
+          tooltip="开启时本 panel 使用 Dashboard 顶部的 GlobalFilterBar 时间窗 / 设备组 / 设备多选；关闭时用下面 panel 自己的设置"
+          initialValue={true}
+        >
+          <Switch />
         </Form.Item>
         <Form.Item label="时间窗（offset）" name="windowOffset" rules={[{ required: true }]}>
           <Input placeholder="-24h" />

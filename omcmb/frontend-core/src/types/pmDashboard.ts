@@ -67,7 +67,8 @@ export interface Panel {
   panelType: PanelType;
   title: string;
   metricPaths: string[];
-  granularity: Granularity;
+  // G6-Gap-6：多粒度数组，前端 PanelHeader 用 Tab 切换浏览，不重新请求 CRUD。
+  granularities: Granularity[];
   dimension: Dimension;
   deviceSns?: string[];
   deviceGroupIds?: string[];
@@ -114,7 +115,7 @@ export interface CreatePanelInput {
   panelType: PanelType;
   title: string;
   metricPaths: string[];
-  granularity: Granularity;
+  granularities: Granularity[];
   dimension: Dimension;
   deviceSns?: string[];
   deviceGroupIds?: string[];
@@ -156,7 +157,7 @@ export interface BackendPanel {
   panel_type: string;
   title: string;
   metric_paths: string[];
-  granularity: string;
+  granularities: string[];
   dimension: string;
   device_sns?: string[];
   device_group_ids?: string[];
@@ -199,7 +200,7 @@ export function mapBackendPanel(b: BackendPanel): Panel {
     panelType: b.panel_type as PanelType,
     title: b.title,
     metricPaths: b.metric_paths,
-    granularity: b.granularity as Granularity,
+    granularities: (b.granularities ?? []) as Granularity[],
     dimension: b.dimension as Dimension,
     deviceSns: b.device_sns,
     deviceGroupIds: b.device_group_ids,

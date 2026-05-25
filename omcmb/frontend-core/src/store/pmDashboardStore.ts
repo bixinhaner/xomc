@@ -8,6 +8,25 @@
 import { create } from 'zustand';
 import type { Dashboard, Panel, PanelGridItem } from '../types/pmDashboard';
 
+// G6-Gap-2：共享筛选条 — 编辑器顶部全局筛选，panel.config.inherit_global=true 时消费。
+export interface GlobalFilter {
+  // 相对时间偏移（如 -1h / -24h / -7d）；优先级低于 absolute
+  startOffset?: string;
+  // 绝对时间窗（ISO RFC3339）；置后优先于 offset
+  absoluteStart?: string;
+  absoluteEnd?: string;
+  // 选中的设备组 ID 列表（多选）
+  deviceGroupIds: string[];
+  // 选中的设备 SN 列表（多选）
+  deviceSns: string[];
+}
+
+const DEFAULT_FILTER: GlobalFilter = {
+  startOffset: '-24h',
+  deviceGroupIds: [],
+  deviceSns: [],
+};
+
 interface PmDashboardState {
   // 当前打开的 dashboard + panels（fetched 后由 hook 初始化）
   currentDashboard: Dashboard | null;
@@ -16,6 +35,10 @@ interface PmDashboardState {
   // 编辑模式开关 + dirty 跟踪
   editMode: boolean;
   unsavedChanges: boolean;
+
+  // G6-Gap-2 共享筛选条（dashboard 级，不持久化到 pm_panels；保存到 user_preferences.shared_filters）
+  globalFilter: GlobalFilter;
+  setGlobalFilter: (f: Partial<GlobalFilter>) => void;
 
   // ── Actions ──────────────────────────────────────────────────────
 
@@ -46,10 +69,13 @@ const initialState = {
   currentPanels: [] as Panel[],
   editMode: false,
   unsavedChanges: false,
+  globalFilter: DEFAULT_FILTER,
 };
 
 export const usePmDashboardStore = create<PmDashboardState>((set, get) => ({
   ...initialState,
+
+  setGlobalFilter: (f) => set((s) => ({ globalFilter: { ...s.globalFilter, ...f } })),
 
   loadDashboard: (dashboard, panels) =>
     set({
@@ -57,6 +83,8 @@ export const usePmDashboardStore = create<PmDashboardState>((set, get) => ({
       currentPanels: panels,
       editMode: false,
       unsavedChanges: false,
+      // 切 dashboard 重置筛选（每个 dashboard 独立筛选语义；持久化到 user_preferences.shared_filters 由调用方负责）
+      globalFilter: DEFAULT_FILTER,
     }),
 
   toggleEditMode: () => set((s) => ({ editMode: !s.editMode })),

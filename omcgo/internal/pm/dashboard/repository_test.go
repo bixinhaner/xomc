@@ -153,7 +153,7 @@ func Test_Repository_ForkCopiesPanels(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		_, err := r.CreatePanel(ctx, CreatePanelRequest{
 			DashboardID: src.ID, PanelType: PanelLineChart, Title: "p" + string(rune('A'+i)),
-			MetricPaths: []string{"L.Cell.Avail"}, Granularity: "hourly",
+			MetricPaths: []string{"L.Cell.Avail"}, Granularities: []string{"hourly"},
 			Dimension: DimensionDevice, DeviceSNs: []string{"S1"},
 			TimeRange: json.RawMessage(`{"start_offset":"-1h"}`),
 		})
@@ -185,14 +185,14 @@ func Test_Repository_PanelCRUDAndCascade(t *testing.T) {
 
 	p, err := r.CreatePanel(ctx, CreatePanelRequest{
 		DashboardID: d.ID, PanelType: PanelKPICard, Title: "card",
-		MetricPaths: []string{"M1"}, Granularity: "hourly", Dimension: DimensionDevice,
+		MetricPaths: []string{"M1"}, Granularities: []string{"hourly"}, Dimension: DimensionDevice,
 	})
 	require.NoError(t, err)
 
 	// Update
 	require.NoError(t, r.UpdatePanel(ctx, p.ID, CreatePanelRequest{
 		DashboardID: d.ID, PanelType: PanelLineChart, Title: "updated",
-		MetricPaths: []string{"M1", "M2"}, Granularity: "daily", Dimension: DimensionDevice,
+		MetricPaths: []string{"M1", "M2"}, Granularities: []string{"daily", "weekly"}, Dimension: DimensionDevice,
 	}))
 	got, _ := r.GetPanel(ctx, p.ID)
 	assert.Equal(t, "updated", got.Title)

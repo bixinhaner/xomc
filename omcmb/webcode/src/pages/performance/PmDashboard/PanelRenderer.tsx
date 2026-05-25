@@ -1,39 +1,53 @@
 /**
  * 按 panel.panelType 路由到具体图表组件。
  *
- * v1：7 种 PanelType 全部走 ECharts 或 antd Statistic 占位实现；接 G5/G7 实际数据走
- * usePanelData hook（见底部）— 拉对应粒度 + 维度的聚合数据。
+ * v1：7 种 PanelType 全部走 ECharts 或 antd Statistic；数据由 usePmPanelData hook 提供
+ * （hook 内部是 deterministic mock，后续 v2 替换为真 API 调用，组件无需改）。
  *
- * T-0164 收尾 G6-Gap-5 加 topn + big_number 两类型；mock 数据 + 简化展示。
+ * T-0164 收尾：
+ *   G6-Gap-5  加 topn + big_number 两类型
+ *   G6-Gap-6  接 activeGranularity prop（PanelGrid Tab 切换驱动）
+ *   G6-Gap-7  compareMode 非空时拉双 series（mock 内置 previous_window / same_window_other_devices）
+ *   G6-Gap-9  pct 单位 / 阈值线 / 缺采断线 / 时间轴切换
  */
 
 import { Statistic, Table, Empty } from 'antd';
 import ReactECharts from 'echarts-for-react';
-import type { Panel } from '@core/types/pmDashboard';
+import type { Granularity, Panel } from '@core/types/pmDashboard';
+import { usePmPanelData, type PanelSeries } from '@core/hooks/api/usePmPanelData';
 
 interface Props {
   panel: Panel;
+  // G6-Gap-6: 当 panel.granularities.length > 1 时，由 PanelGrid 的 Tab 切换决定当前粒度。
+  // 不传则用 panel.granularities[0]，再不行兜底 'hourly'。
+  activeGranularity?: Granularity;
 }
 
-export function PanelRenderer({ panel }: Props) {
+export function PanelRenderer({ panel, activeGranularity }: Props) {
+  const gran: Granularity = activeGranularity ?? panel.granularities?.[0] ?? 'hourly';
   switch (panel.panelType) {
     case 'kpi_card':
-      return <KpiCardRenderer panel={panel} />;
+      return <KpiCardRenderer panel={panel} gran={gran} />;
     case 'line_chart':
-      return <LineChartRenderer panel={panel} />;
+      return <LineChartRenderer panel={panel} gran={gran} />;
     case 'bar_chart':
-      return <BarChartRenderer panel={panel} />;
+      return <BarChartRenderer panel={panel} gran={gran} />;
     case 'table':
-      return <TableRenderer panel={panel} />;
+      return <TableRenderer panel={panel} gran={gran} />;
     case 'gauge':
-      return <GaugeRenderer panel={panel} />;
+      return <GaugeRenderer panel={panel} gran={gran} />;
     case 'topn':
-      return <TopNRenderer panel={panel} />;
+      return <TopNRenderer panel={panel} gran={gran} />;
     case 'big_number':
-      return <BigNumberRenderer panel={panel} />;
+      return <BigNumberRenderer panel={panel} gran={gran} />;
     default:
       return <Empty description={`未支持的 panel type: ${panel.panelType}`} />;
   }
+}
+
+interface RenderProps {
+  panel: Panel;
+  gran: Granularity;
 }
 
 // G6-Gap-9: 自动判断指标是否为百分比类（path 含 .Rate / .SuccRate / Pct / .Ratio 等关键词）。
@@ -56,14 +70,32 @@ function buildThresholdMarkLine(threshold: number | undefined) {
   };
 }
 
-function KpiCardRenderer({ panel }: Props) {
-  // v1: 占位数据；G6 task 13 集成时改为 usePanelData
-  // G6-Gap-9 (a): unit 自动判断 + (d) 延迟角标占位
+// G6-Gap-9 (c) 缺采：把 null 转换为 echarts 的 '-' 占位符（断线）。
+function toEchartsData(series: PanelSeries): Array<number | '-'> {
+  return series.points.map((p) => (p.value === null ? '-' : p.value));
+}
+
+function bucketLabels(series: PanelSeries[]): string[] {
+  return series[0]?.points.map((p) => p.label) ?? [];
+}
+
+function KpiCardRenderer({ panel, gran }: RenderProps) {
+  const { series } = usePmPanelData(panel, gran);
   const path0 = panel.metricPaths[0] ?? '';
   const unit = inferPctUnit(path0, panel.config?.unit as string | undefined);
   const threshold = panel.config?.threshold as number | undefined;
-  const value = 94.5;
+  // 取主 series 最后一个非缺采点
+  const primary = series.find((s) => s.kind === 'primary');
+  const last = primary?.points.slice().reverse().find((p) => p.value !== null);
+  const value = (last?.value as number | undefined) ?? 0;
   const overThreshold = threshold !== undefined && value < threshold;
+
+  // G6-Gap-7：对比 series 末值，作为副指标显示在卡片下方
+  const compare = series.find((s) => s.kind === 'compare');
+  const compareLast = compare?.points.slice().reverse().find((p) => p.value !== null);
+  const compareValue = compareLast?.value as number | undefined;
+  const delta = compareValue !== undefined ? Math.round((value - compareValue) * 100) / 100 : undefined;
+
   return (
     <div style={{ position: 'relative' }}>
       <Statistic
@@ -73,35 +105,40 @@ function KpiCardRenderer({ panel }: Props) {
         precision={2}
         valueStyle={overThreshold ? { color: '#ff4d4f' } : undefined}
       />
-      {/* G6-Gap-9 (d) 延迟角标：mock 数据无延迟信息时占位；接真数据后由后端 ingest_lag_s 决定显示 */}
-      {/* eslint-disable-next-line @typescript-eslint/no-unused-expressions */}
+      {delta !== undefined && compare && (
+        <div style={{ marginTop: 4, fontSize: 12, color: delta >= 0 ? '#3f8600' : '#cf1322' }}>
+          {compare.name}: {compareValue}
+          {unit} （Δ {delta >= 0 ? '+' : ''}
+          {delta}）
+        </div>
+      )}
     </div>
   );
 }
 
-function LineChartRenderer({ panel }: Props) {
-  // G6-Gap-9 (b) 阈值线 + (e) end_time vs ingest_time 取决于 panel.config.time_axis
+function LineChartRenderer({ panel, gran }: RenderProps) {
+  const { series } = usePmPanelData(panel, gran);
   const threshold = panel.config?.threshold as number | undefined;
-  const timeAxis = (panel.config?.time_axis as string) ?? 'end_time'; // end_time | ingest_time
+  const timeAxis = (panel.config?.time_axis as string) ?? 'end_time';
   const markLine = buildThresholdMarkLine(threshold);
+  const buckets = bucketLabels(series);
   const option = {
     grid: { left: 40, right: 16, top: 24, bottom: 40 },
     xAxis: {
       type: 'category',
-      data: ['10:00', '11:00', '12:00', '13:00', '14:00', '15:00'],
+      data: buckets,
       name: timeAxis === 'ingest_time' ? '入库时间' : '采集时间',
       nameLocation: 'middle',
       nameGap: 24,
     },
     yAxis: { type: 'value' },
-    series: panel.metricPaths.map((path, i) => ({
-      name: path,
+    series: series.map((s, i) => ({
+      name: s.name,
       type: 'line',
       smooth: true,
-      // G6-Gap-9 (c) 缺采：用 '-' 标记，echarts 自动断线（不画 0）
-      data: [95, 96, '-', 97, 96, 98].map((v, j) => (typeof v === 'number' ? v + i : v)) as Array<
-        number | '-'
-      >,
+      // G6-Gap-7 对比 series 用虚线区分
+      lineStyle: s.kind === 'compare' ? { type: 'dashed' } : undefined,
+      data: toEchartsData(s),
       connectNulls: false,
       markLine: i === 0 ? markLine : undefined,
     })),
@@ -111,17 +148,21 @@ function LineChartRenderer({ panel }: Props) {
   return <ReactECharts option={option} style={{ height: 200 }} />;
 }
 
-function BarChartRenderer({ panel }: Props) {
+function BarChartRenderer({ panel, gran }: RenderProps) {
+  const { series } = usePmPanelData(panel, gran);
   const threshold = panel.config?.threshold as number | undefined;
   const markLine = buildThresholdMarkLine(threshold);
+  const buckets = bucketLabels(series);
   const option = {
     grid: { left: 40, right: 16, top: 24, bottom: 32 },
-    xAxis: { type: 'category', data: ['SN-001', 'SN-002', 'SN-003', 'SN-004'] },
+    xAxis: { type: 'category', data: buckets },
     yAxis: { type: 'value' },
-    series: panel.metricPaths.map((path, i) => ({
-      name: path,
+    series: series.map((s, i) => ({
+      name: s.name,
       type: 'bar',
-      data: [120, 200, 150, 80],
+      // G6-Gap-7 对比 series 浅色 + 半透明 stack 偏移视觉
+      itemStyle: s.kind === 'compare' ? { opacity: 0.55 } : undefined,
+      data: toEchartsData(s),
       markLine: i === 0 ? markLine : undefined,
     })),
     tooltip: { trigger: 'axis' },
@@ -130,25 +171,39 @@ function BarChartRenderer({ panel }: Props) {
   return <ReactECharts option={option} style={{ height: 200 }} />;
 }
 
-function TableRenderer({ panel }: Props) {
+function TableRenderer({ panel, gran }: RenderProps) {
+  const { series } = usePmPanelData(panel, gran);
+  const buckets = bucketLabels(series);
+  // 每行 = 一个 bucket；列 = metric × {primary | compare}
+  const rows = buckets.map((label, i) => {
+    const row: Record<string, string | number | null> = { key: String(i), name: label };
+    series.forEach((s) => {
+      row[s.name] = s.points[i]?.value ?? null;
+    });
+    return row;
+  });
   return (
     <Table
       size="small"
       pagination={false}
       columns={[
-        { title: '设备/组', dataIndex: 'name' },
-        ...panel.metricPaths.map((p) => ({ title: p, dataIndex: p })),
+        { title: '时间', dataIndex: 'name', width: 100 },
+        ...series.map((s) => ({
+          title: s.name,
+          dataIndex: s.name,
+          render: (v: number | null) => (v === null ? <span style={{ color: '#bfbfbf' }}>缺采</span> : v),
+        })),
       ]}
-      dataSource={[
-        { key: '1', name: '组A', ...Object.fromEntries(panel.metricPaths.map((p) => [p, 95.2])) },
-        { key: '2', name: '组B', ...Object.fromEntries(panel.metricPaths.map((p) => [p, 92.7])) },
-      ]}
+      dataSource={rows}
     />
   );
 }
 
-function GaugeRenderer({ panel }: Props) {
-  const value = 92;
+function GaugeRenderer({ panel, gran }: RenderProps) {
+  const { series } = usePmPanelData(panel, gran);
+  const primary = series.find((s) => s.kind === 'primary');
+  const last = primary?.points.slice().reverse().find((p) => p.value !== null);
+  const value = (last?.value as number | undefined) ?? 0;
   const option = {
     series: [
       {
@@ -167,7 +222,8 @@ function GaugeRenderer({ panel }: Props) {
 
 // G6-Gap-5: TopN 排行榜
 // config.n (number, 默认 10)；config.sort_desc (bool, 默认 true 表示降序)
-function TopNRenderer({ panel }: Props) {
+function TopNRenderer({ panel, gran }: RenderProps) {
+  void gran;
   const n = (panel.config?.n as number) ?? 10;
   const sortDesc = (panel.config?.sort_desc as boolean) ?? true;
   // mock 数据：N 条 (device, value) 行
@@ -194,13 +250,19 @@ function TopNRenderer({ panel }: Props) {
 
 // G6-Gap-5: BigNumber 数值大屏
 // config.font_size (number, 默认 56)；config.warning_threshold (number, 低于此值红色)
-function BigNumberRenderer({ panel }: Props) {
+function BigNumberRenderer({ panel, gran }: RenderProps) {
+  const { series } = usePmPanelData(panel, gran);
   const fontSize = (panel.config?.font_size as number) ?? 56;
   const warningThreshold = panel.config?.warning_threshold as number | undefined;
   const unit = (panel.config?.unit as string) ?? '';
-  const value = 92.4;
+  const primary = series.find((s) => s.kind === 'primary');
+  const last = primary?.points.slice().reverse().find((p) => p.value !== null);
+  const value = (last?.value as number | undefined) ?? 0;
   const color =
     warningThreshold !== undefined && value < warningThreshold ? '#ff4d4f' : '#1677ff';
+  // G6-Gap-7：对比 series 末值显示在大数字下方
+  const compare = series.find((s) => s.kind === 'compare');
+  const compareLast = compare?.points.slice().reverse().find((p) => p.value !== null);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 16 }}>
       <div style={{ fontSize, lineHeight: 1.2, color, fontWeight: 600 }}>
@@ -210,6 +272,12 @@ function BigNumberRenderer({ panel }: Props) {
       <div style={{ marginTop: 8, color: '#888', fontSize: 12 }}>
         {panel.metricPaths.join(' / ')}
       </div>
+      {compare && compareLast && (
+        <div style={{ marginTop: 4, color: '#888', fontSize: 12 }}>
+          {compare.name}: {compareLast.value}
+          {unit}
+        </div>
+      )}
     </div>
   );
 }

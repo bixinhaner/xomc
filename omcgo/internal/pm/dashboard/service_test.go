@@ -344,14 +344,14 @@ func Test_Service_CreatePanel_NonOwnerDenied(t *testing.T) {
 	// owner 可创建
 	_, err := svc.CreatePanel(context.Background(), owner, CreatePanelRequest{
 		DashboardID: d.ID, PanelType: PanelLineChart, Title: "p1",
-		MetricPaths: []string{"M1"}, Granularity: "hourly", Dimension: DimensionDevice,
+		MetricPaths: []string{"M1"}, Granularities: []string{"hourly"}, Dimension: DimensionDevice,
 	})
 	require.NoError(t, err)
 
 	// shared 用户不可创建（read-only）
 	_, err = svc.CreatePanel(context.Background(), other, CreatePanelRequest{
 		DashboardID: d.ID, PanelType: PanelLineChart, Title: "p2",
-		MetricPaths: []string{"M1"}, Granularity: "hourly", Dimension: DimensionDevice,
+		MetricPaths: []string{"M1"}, Granularities: []string{"hourly"}, Dimension: DimensionDevice,
 	})
 	assert.True(t, errors.Is(err, ErrPermissionDenied))
 }

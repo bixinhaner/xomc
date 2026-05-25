@@ -6,19 +6,95 @@
  *
  * 设计 trade-off：v1 不带依赖少 + 快速可用；v2 升级时只改本文件 + store 的
  * updatePanelLayout/replaceLayout 直接对接 react-grid-layout 的 onLayoutChange。
+ *
+ * G6-Gap-6：当 panel.granularities.length > 1 时，Card title 下方显示 Tab；
+ * 切 Tab 只切换 PanelRenderer 的 activeGranularity prop（不重发 panel CRUD）。
  */
 
-import { Empty, Row, Col, Card, Button, Space } from 'antd';
+import { useState } from 'react';
+import { Empty, Row, Col, Card, Button, Space, Tabs } from 'antd';
 import { DeleteOutlined, SettingOutlined } from '@ant-design/icons';
-import type { Panel } from '@core/types/pmDashboard';
+import type { Granularity, Panel } from '@core/types/pmDashboard';
 import { usePmDashboardStore } from '@core/store/pmDashboardStore';
 import { PanelRenderer } from './PanelRenderer';
+import { ComparePanel } from './ComparePanel';
 
 interface Props {
   panels: Panel[];
   editMode: boolean;
   onConfigPanel?: (panel: Panel) => void;
   onDeletePanel?: (panel: Panel) => void;
+}
+
+const GRAN_LABEL: Record<Granularity, string> = {
+  '15min': '15 分钟',
+  hourly: '小时',
+  daily: '日',
+  weekly: '周',
+  monthly: '月',
+};
+
+function PanelCard({
+  panel,
+  editMode,
+  onConfigPanel,
+  onDeletePanel,
+  span,
+}: {
+  panel: Panel;
+  editMode: boolean;
+  onConfigPanel?: (panel: Panel) => void;
+  onDeletePanel?: (panel: Panel) => void;
+  span: number;
+}) {
+  const grans = panel.granularities ?? [];
+  const [active, setActive] = useState<Granularity>(grans[0] ?? 'hourly');
+  const showTabs = grans.length > 1;
+
+  return (
+    <Col span={span}>
+      <Card
+        title={
+          <Space size={6}>
+            <span>{panel.title}</span>
+            <ComparePanel mode={panel.compareMode} />
+          </Space>
+        }
+        size="small"
+        extra={
+          editMode ? (
+            <Space>
+              <Button
+                size="small"
+                type="text"
+                icon={<SettingOutlined />}
+                onClick={() => onConfigPanel?.(panel)}
+              />
+              <Button
+                size="small"
+                type="text"
+                danger
+                icon={<DeleteOutlined />}
+                onClick={() => onDeletePanel?.(panel)}
+              />
+            </Space>
+          ) : null
+        }
+        styles={{ body: { minHeight: 200 } }}
+      >
+        {showTabs && (
+          <Tabs
+            size="small"
+            activeKey={active}
+            onChange={(k) => setActive(k as Granularity)}
+            items={grans.map((g) => ({ key: g, label: GRAN_LABEL[g] }))}
+            style={{ marginTop: -8, marginBottom: 8 }}
+          />
+        )}
+        <PanelRenderer panel={panel} activeGranularity={active} />
+      </Card>
+    </Col>
+  );
 }
 
 export function PanelGrid({ panels, editMode, onConfigPanel, onDeletePanel }: Props) {
@@ -46,34 +122,14 @@ export function PanelGrid({ panels, editMode, onConfigPanel, onDeletePanel }: Pr
         // v1：col span 由 layout.w 映射（4 = 1/3 屏；6 = 1/2；12 = 全宽）
         const span = item?.w ? Math.max(4, Math.min(24, item.w * 2)) : 12;
         return (
-          <Col key={p.id} span={span}>
-            <Card
-              title={p.title}
-              size="small"
-              extra={
-                editMode ? (
-                  <Space>
-                    <Button
-                      size="small"
-                      type="text"
-                      icon={<SettingOutlined />}
-                      onClick={() => onConfigPanel?.(p)}
-                    />
-                    <Button
-                      size="small"
-                      type="text"
-                      danger
-                      icon={<DeleteOutlined />}
-                      onClick={() => onDeletePanel?.(p)}
-                    />
-                  </Space>
-                ) : null
-              }
-              styles={{ body: { minHeight: 200 } }}
-            >
-              <PanelRenderer panel={p} />
-            </Card>
-          </Col>
+          <PanelCard
+            key={p.id}
+            panel={p}
+            editMode={editMode}
+            onConfigPanel={onConfigPanel}
+            onDeletePanel={onDeletePanel}
+            span={span}
+          />
         );
       })}
     </Row>

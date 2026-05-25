@@ -295,7 +295,18 @@ P3（进阶导出 + G6-G7 集成）
   - 🚧 Cross-Gap-2 release-gate.md 更新
   - **Prometheus instrumentation hooks**: 指标已注册，但 Runner.Run / Registry.RunNext / Sweeper.sweepOnce 内部还没调 Inc / Observe — 数据 0；hook 注入留 v2
 
-- [ ] **P2（13 项）— 未启动**
+- [x] **P2 第 1 批（3 项）— 已 commit `7c2e9576` (+`52016f04` 文档)**
+  - ✅ G6-Gap-5 TopN + BigNumber panel 类型（migration 000168 + 2 渲染器 + ConfigDrawer）
+  - ✅ G6-Gap-4 12 内置 readonly dashboards（is_builtin + seed 000169 + Service guard + UI Tag）
+  - ✅ G6-Gap-9 显示增强（pct 单位 / threshold markLine / 缺采断线 / KPI 红色阈值 / time_axis 切换）
+
+- [x] **P2 第 2 批（5 项）— 2026-05-25 dev_done_pending_commit**
+  - ✅ G6-Gap-6 panel granularities TEXT[]（migration 000170 + 后端 SQL/handler + 前端 PanelHeader Tabs + ConfigDrawer 多选）
+  - ✅ G6-Gap-7 对比双模式实数据（usePmPanelData hook + PanelRenderer 双 series + ComparePanel tag 嵌 Card 标题）
+  - ✅ G6-Gap-1 左右栏布局（PerformanceLayout + DashboardEditorPane + 旧路由 Redirect）
+  - ✅ G6-Gap-2 共享筛选条 GlobalFilterBar（store.globalFilter + ConfigDrawer.inheritGlobal Switch）
+  - ✅ G6-Gap-13 KPI 卡片配置（KpiCardManager Drawer 11 候选 + 上下移 + 持久化 user_preferences.kpi_card_layout）
+
 - [ ] **P3（7 项）— 未启动**
 - [ ] **跨域（2 项）— 未启动**
 

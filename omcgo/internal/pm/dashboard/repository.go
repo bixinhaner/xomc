@@ -199,11 +199,11 @@ RETURNING id, name, description, owner_id, shared_with, parent_dashboard_id, tec
 	// 3) 复制 panels（INSERT ... SELECT 替换 dashboard_id）
 	_, err = tx.Exec(ctx, `
 INSERT INTO pm_panels (
-    dashboard_id, panel_type, title, metric_paths, granularity, dimension,
+    dashboard_id, panel_type, title, metric_paths, granularities, dimension,
     device_sns, device_group_ids, time_range, compare_mode, adhoc_task_id, config
 )
 SELECT
-    $1, panel_type, title, metric_paths, granularity, dimension,
+    $1, panel_type, title, metric_paths, granularities, dimension,
     device_sns, device_group_ids, time_range, compare_mode, adhoc_task_id, config
 FROM pm_panels WHERE dashboard_id = $2`, newDash.ID, srcID)
 	if err != nil {
@@ -275,7 +275,7 @@ WHERE id = $1`
 // ── Panel ────────────────────────────────────────────────────────────────
 
 var panelCols = []string{
-	"id", "dashboard_id", "panel_type", "title", "metric_paths", "granularity",
+	"id", "dashboard_id", "panel_type", "title", "metric_paths", "granularities",
 	"dimension", "device_sns", "device_group_ids", "time_range", "compare_mode",
 	"adhoc_task_id", "config", "created_at", "updated_at",
 }
@@ -298,11 +298,15 @@ func (r *PgRepository) CreatePanel(ctx context.Context, req CreatePanelRequest) 
 		adhocTaskID = *req.AdhocTaskID
 	}
 
+	grans := req.Granularities
+	if len(grans) == 0 {
+		grans = []string{"hourly"}
+	}
 	q, args, err := storage.Psql.Insert("pm_panels").
-		Columns("dashboard_id", "panel_type", "title", "metric_paths", "granularity",
+		Columns("dashboard_id", "panel_type", "title", "metric_paths", "granularities",
 			"dimension", "device_sns", "device_group_ids", "time_range",
 			"compare_mode", "adhoc_task_id", "config").
-		Values(req.DashboardID, string(req.PanelType), req.Title, req.MetricPaths, req.Granularity,
+		Values(req.DashboardID, string(req.PanelType), req.Title, req.MetricPaths, grans,
 			string(req.Dimension), req.DeviceSNs, req.DeviceGroupIDs, timeRange,
 			compareMode, adhocTaskID, config).
 		Suffix(fmt.Sprintf("RETURNING %s", joinCols(panelCols, ""))).
@@ -373,13 +377,17 @@ func (r *PgRepository) UpdatePanel(ctx context.Context, id uuid.UUID, req Create
 	if req.AdhocTaskID != nil {
 		adhocTaskID = *req.AdhocTaskID
 	}
+	grans := req.Granularities
+	if len(grans) == 0 {
+		grans = []string{"hourly"}
+	}
 	tag, err := r.pool.Exec(ctx, `
 UPDATE pm_panels SET
-    panel_type=$2, title=$3, metric_paths=$4, granularity=$5, dimension=$6,
+    panel_type=$2, title=$3, metric_paths=$4, granularities=$5, dimension=$6,
     device_sns=$7, device_group_ids=$8, time_range=$9,
     compare_mode=$10, adhoc_task_id=$11, config=$12
 WHERE id=$1`,
-		id, string(req.PanelType), req.Title, req.MetricPaths, req.Granularity,
+		id, string(req.PanelType), req.Title, req.MetricPaths, grans,
 		string(req.Dimension), req.DeviceSNs, req.DeviceGroupIDs, timeRange,
 		compareMode, adhocTaskID, config,
 	)
@@ -484,7 +492,7 @@ func scanPanel(row rowScanner) (*Panel, error) {
 	var compareMode *string
 	var timeRange, config []byte
 	if err := row.Scan(
-		&p.ID, &p.DashboardID, &panelType, &p.Title, &p.MetricPaths, &p.Granularity,
+		&p.ID, &p.DashboardID, &panelType, &p.Title, &p.MetricPaths, &p.Granularities,
 		&dimension, &p.DeviceSNs, &p.DeviceGroupIDs, &timeRange,
 		&compareMode, &p.AdhocTaskID, &config, &p.CreatedAt, &p.UpdatedAt,
 	); err != nil {
