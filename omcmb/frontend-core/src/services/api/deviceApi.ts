@@ -39,6 +39,10 @@ interface BackendDevice {
   // --- 监控扩展字段 ---
   host_name?: string;
   product_name?: string;
+  // T-XXX (Phase 5): 字段名对齐后端 DTO。mac_address / tx_power / gps_satellite_count
+  // 是早期前端假定的字段名，后端实际返回的 json tag 为 mac / transmit_power / gps_satellites。
+  // 旧 *? 字段保留作为兼容（Mock / 自填值场景），mapper 优先读正确字段。
+  mac?: string;
   mac_address?: string;
   group_name?: string;
   // T-XXX (Phase 0)：字段名对齐后端 DeviceWithInfo DTO（json tag），
@@ -71,6 +75,9 @@ interface BackendDevice {
   dl_earfcn?: string;
   ul_earfcn?: string;
   network_model?: string;
+  // T-XXX (Phase 5): transmit_power 后端 numeric (NUMERIC(8,2))；
+  // tx_power 是旧字段名,保留兼容,mapper 优先读 transmit_power。
+  transmit_power?: number;
   tx_power?: string;
   band?: string;
   lac?: string;
@@ -115,6 +122,9 @@ interface BackendDevice {
   vertical_beam_width?: string;
   horizontal_azimuth?: string;
   install_address?: string;
+  // T-XXX (Phase 5): gps_satellites 是后端实际字段（migration 000181 列名）；
+  // gps_satellite_count 是旧前端假定名，保留兼容，mapper 优先 gps_satellites。
+  gps_satellites?: number;
   gps_satellite_count?: number;
 
   // 5G NR Others
@@ -231,7 +241,8 @@ function mapBackendDevice(bd: BackendDevice): Device {
     hostName: bd.host_name || '',
     productName: bd.product_name || '',
     firmwareVersion: bd.firmware_version || '',
-    macAddress: bd.mac_address || '',
+    // T-XXX (Phase 5)：优先后端实际字段 mac，兜底旧 mac_address
+    macAddress: bd.mac || bd.mac_address || '',
     groupName: bd.group_name || '',
     // T-XXX (Phase 0)：字段名对齐后端 DTO。设计文档 §13。
     onlineTime: bd.last_online_time || '',
@@ -261,7 +272,9 @@ function mapBackendDevice(bd: BackendDevice): Device {
     dlEarfcn: bd.dl_earfcn || '',
     ulEarfcn: bd.ul_earfcn || '',
     networkModel: bd.network_model || '',
-    txPower: bd.tx_power || '',
+    // T-XXX (Phase 5)：transmit_power 是后端实际字段 (NUMERIC 转 number)
+    // tx_power 兼容旧字段名；fmtDuration 等渲染器接受 string，转字符串展示。
+    txPower: bd.transmit_power != null ? String(bd.transmit_power) : (bd.tx_power || ''),
     band: bd.band || '',
     lac: bd.lac || '',
     arfcn: bd.arfcn || '',
@@ -302,7 +315,8 @@ function mapBackendDevice(bd: BackendDevice): Device {
     verticalBeamWidth: bd.vertical_beam_width || '',
     horizontalAzimuth: bd.horizontal_azimuth || '',
     installAddress: bd.install_address || '',
-    gpsSatelliteCount: bd.gps_satellite_count ?? 0,
+    // T-XXX (Phase 5)：gps_satellites 是后端实际字段；gps_satellite_count 兜底
+    gpsSatelliteCount: bd.gps_satellites ?? bd.gps_satellite_count ?? 0,
 
     rollbackVersion: bd.rollback_version || '',
     sasParam: bd.sas_param || '',

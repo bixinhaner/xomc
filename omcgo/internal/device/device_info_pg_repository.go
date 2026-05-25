@@ -547,6 +547,11 @@ func deviceInfoColumns() []string {
 		"num_of_cells", "gps_status", "alarm_severity", "license_status",
 		"mac", "hardware_version",
 		"first_online_time", "last_offline_time", "run_time",
+		// Phase 2/3 (设计文档 §4.2)：扩展列
+		"tac", "band", "ul_earfcn",
+		"subframe_assignment", "special_subframe", "root_index",
+		"gps_satellites", "gps_height", "lock_status",
+		"enb_id", "network_model",
 		"creator", "updater", "created_at", "updated_at",
 	}
 }
@@ -578,6 +583,11 @@ func deviceWithInfoSelectColumns() []string {
 		"di.num_of_cells", "di.gps_status", "di.alarm_severity", "di.license_status",
 		"di.mac", "di.hardware_version",
 		"di.first_online_time", "di.last_online_time", "di.last_offline_time", "di.run_time",
+		// Phase 2/3 (设计文档 §4.2 Layer E)：device_info 扩展列
+		"di.tac", "di.band", "di.ul_earfcn",
+		"di.subframe_assignment", "di.special_subframe", "di.root_index",
+		"di.gps_satellites", "di.gps_height", "di.lock_status",
+		"di.enb_id", "di.network_model",
 		// 在线时长派生（设计文档 §13）：
 		//   - is_online → 当前已在线多久（NOW - last_online_time）
 		//   - 离线后 → 上次在线区间长度（last_offline_time - last_online_time）
@@ -623,6 +633,11 @@ func scanDeviceInfoFromRow(row pgx.Row) (*DeviceInfo, error) {
 		&info.NumOfCells, &info.GPSStatus, &info.AlarmSeverity, &info.LicenseStatus,
 		&info.MAC, &info.HardwareVersion,
 		&info.FirstOnlineTime, &info.LastOfflineTime, &info.RunTime,
+		// Phase 2/3 (设计文档 §4.2)：扩展列与 deviceInfoColumns 顺序一致
+		&info.TAC, &info.Band, &info.ULEarfcn,
+		&info.SubframeAssignment, &info.SpecialSubframe, &info.RootIndex,
+		&info.GPSSatellites, &info.GPSHeight, &info.LockStatus,
+		&info.EnbID, &info.NetworkModel,
 		&info.Creator, &info.Updater, &info.CreatedAt, &info.UpdatedAt,
 	)
 	if err != nil {
@@ -668,6 +683,18 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		diLastOnline    *time.Time
 		diLastOffline   *time.Time
 		diRunTime       *int64
+		// Phase 2/3 (设计文档 §4.2)：扩展列接收变量
+		diTAC                *string
+		diBand               *string
+		diULEarfcn           *string
+		diSubframeAssignment *string
+		diSpecialSubframe    *string
+		diRootIndex          *string
+		diGPSSatellites      *int
+		diGPSHeight          *float64
+		diLockStatus         *string
+		diEnbID              *string
+		diNetworkModel       *string
 		// 在线时长派生（SQL计算，设计文档 §13）
 		onlineDuration *int64
 		// 离线时长（SQL计算）
@@ -698,6 +725,11 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 		&diNumOfCells, &diGPSStatus, &diAlarmSeverity, &diLicenseStatus,
 		&diMAC, &diHWVersion,
 		&diFirstOnline, &diLastOnline, &diLastOffline, &diRunTime,
+		// Phase 2/3 扩展列
+		&diTAC, &diBand, &diULEarfcn,
+		&diSubframeAssignment, &diSpecialSubframe, &diRootIndex,
+		&diGPSSatellites, &diGPSHeight, &diLockStatus,
+		&diEnbID, &diNetworkModel,
 		// 在线时长派生
 		&onlineDuration,
 		// 离线时长（SQL计算）
@@ -771,6 +803,18 @@ func scanDeviceWithInfoRow(rows pgx.Rows) (*DeviceWithInfo, error) {
 	d.LastOnlineTime = diLastOnline
 	d.LastOfflineTime = diLastOffline
 	d.RunTime = diRunTime
+	// Phase 2/3 扩展列
+	d.TAC = diTAC
+	d.Band = diBand
+	d.ULEarfcn = diULEarfcn
+	d.SubframeAssignment = diSubframeAssignment
+	d.SpecialSubframe = diSpecialSubframe
+	d.RootIndex = diRootIndex
+	d.GPSSatellites = diGPSSatellites
+	d.GPSHeight = diGPSHeight
+	d.LockStatus = diLockStatus
+	d.EnbID = diEnbID
+	d.NetworkModel = diNetworkModel
 	d.OnlineDuration = onlineDuration
 	// 离线时长
 	d.OfflineSeconds = offlineSeconds

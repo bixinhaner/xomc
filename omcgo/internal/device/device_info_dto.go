@@ -99,6 +99,22 @@ type DeviceWithInfo struct {
 	// HardwareVersion 硬件版本
 	HardwareVersion *string `json:"hardware_version"`
 
+	// ===== Phase 2/3 (设计文档 §4.2 Layer E)：扩展基础信息列 =====
+	// 与 model.DeviceInfo 同名字段保持一致;list 接口 SELECT 这些列后扁平
+	// 化暴露给前端,无需走 /devices/:id/detail composite 接口。
+
+	TAC                *string  `json:"tac"`
+	Band               *string  `json:"band"`
+	ULEarfcn           *string  `json:"ul_earfcn"`
+	SubframeAssignment *string  `json:"subframe_assignment"`
+	SpecialSubframe    *string  `json:"special_subframe"`
+	RootIndex          *string  `json:"root_index"`
+	GPSSatellites      *int     `json:"gps_satellites"`
+	GPSHeight          *float64 `json:"gps_height"`
+	LockStatus         *string  `json:"lock_status"`
+	EnbID              *string  `json:"enb_id"`
+	NetworkModel       *string  `json:"network_model"`
+
 	// ===== device_info 时间信息（可能为空）=====
 
 	// FirstOnlineTime 首次上线时间（设备生命周期内只记录一次）
