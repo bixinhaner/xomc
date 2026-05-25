@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |------|----|
-| Commit | `PENDING`（commit 后回填） |
+| Commit | `783bb5de` |
 | Author | shangyingbin |
 | Scope | pm/collector + worker wiring |
 | Backlog | T-0164（G1 真机闭环延续，BUG-6 真根因 + 续修 SN 一致性） |
