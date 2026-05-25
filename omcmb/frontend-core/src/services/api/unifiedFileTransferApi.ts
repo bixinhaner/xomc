@@ -62,6 +62,40 @@ export const unifiedFileTransferApi = {
     return data;
   },
 
+  /**
+   * 导出设备列表 CSV（流式，复用 ListDevices 的过滤逻辑，不分页拿全量）。
+   * 后端直接写 text/csv 流；axios 用 responseType=blob 接收。
+   */
+  async exportDevices(params: {
+    status?: string;
+    typeCode?: string;
+    keyword?: string;
+    category?: string;
+    productType?: string;
+    /** "upgrade" = 4G/5G 升级页签列名；其它（默认） = 通用页签列名 */
+    view?: 'upgrade' | 'default';
+  }): Promise<{ blob: Blob; filename: string }> {
+    const resp = await http.get<Blob>('/ufte/devices/export', {
+      params: {
+        status: params.status,
+        typeCode: params.typeCode,
+        category: params.category,
+        productType: params.productType,
+        keyword: params.keyword,
+        view: params.view,
+      },
+      responseType: 'blob',
+    });
+    // 优先用 Content-Disposition 里的服务端命名
+    const cd = (resp.headers['content-disposition'] || resp.headers['Content-Disposition']) as string | undefined;
+    let filename = 'ufte-devices.csv';
+    if (cd) {
+      const m = /filename=([^;]+)/i.exec(cd);
+      if (m) filename = m[1].trim().replace(/^"|"$/g, '');
+    }
+    return { blob: resp.data, filename };
+  },
+
   async getDevices(
     params: { status?: string; typeCode?: string; keyword?: string; category?: string; productType?: string } & PageRequest,
   ): Promise<PageResponse<UnifiedFileTransferDeviceItem>> {

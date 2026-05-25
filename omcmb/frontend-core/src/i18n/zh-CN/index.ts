@@ -3498,6 +3498,7 @@ const messages: Record<string, string> = {
   'software.failureCode.TASK_TIMEOUT':        '任务超时，未收到设备 TransferComplete',
   'software.failureCode.FIRMWARE_NOT_FOUND':  '任务无法启动，固件文件不存在',
   'software.failureCode.INTERNAL_ERROR':      '系统内部错误',
+  'software.failureCode.OPERATOR_TERMINATED': '被操作者终止',
   'software.failureSource.device':            '设备',
   'software.failureSource.system':            '系统',
   'software.failureSource.timeout':           '超时',

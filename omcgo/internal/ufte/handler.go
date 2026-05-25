@@ -1,7 +1,10 @@
 package ufte
 
 import (
+	"encoding/csv"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -42,6 +45,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	ufte.POST("/tasks/batch-delete", h.BatchDeleteTasks)
 	ufte.POST("/tasks/:id/retry", h.RetryTask)
 	ufte.GET("/devices", h.ListDevices)
+	ufte.GET("/devices/export", h.ExportDevices)
 	ufte.GET("/device-candidates", h.ListDeviceCandidates)
 }
 
@@ -154,6 +158,168 @@ func (h *Handler) ListDevices(c *gin.Context) {
 		return
 	}
 	response.OK(c, result)
+}
+
+// failureReasonZH 把 sub_task.failure_reason 翻成 UI 同款中文（与前端 i18n
+// software.failureCode.* + 'task terminated by operator' 特例对齐）。
+// 后端不维护多语言资源；只针对当前已知 code 给出 zh-CN 显示。前端 i18n bundle
+// 仍是真值源，本表只在 CSV 导出场景"近似还原"显示文本。
+var failureReasonZH = map[string]string{
+	"DEVICE_NOT_FOUND":              "任务无法启动，设备不存在",
+	"DEVICE_LOCKED":                 "任务无法启动，设备已在其他任务中运行",
+	"DEVICE_OFFLINE":                "任务无法启动，设备离线",
+	"COMMAND_PUSH_FAILED":           "任务无法启动，下发命令失败",
+	"DOWNLOAD_TIMEOUT":              "下载未启动，未收到设备 DownloadResponse",
+	"DOWNLOAD_FILE_ERROR":           "下载失败，找不到目标文件",
+	"DOWNLOAD_FAULT":                "下载失败，设备拒绝 Download 请求",
+	"UPLOAD_FAULT":                  "上传失败，设备拒绝 Upload / SetParameterValues 请求",
+	"TC_FAULT":                      "文件传输失败，设备 TransferComplete 异常",
+	"UPGRADE_5G_FAILED":             "升级失败，5G 升级状态异常",
+	"TASK_TIMEOUT":                  "任务超时，未收到设备 TransferComplete",
+	"FIRMWARE_NOT_FOUND":            "任务无法启动，固件文件不存在",
+	"INTERNAL_ERROR":                "系统内部错误",
+	// SoftwareService.TerminateUpgrade 给被终止 sub_task 写的固定字符串
+	"task terminated by operator": "被操作者终止",
+}
+
+func translateFailureReason(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	if v, ok := failureReasonZH[raw]; ok {
+		return v
+	}
+	return raw
+}
+
+// translateDeviceStatus 把 sub_task status 翻成 UI 同款中文标签（与
+// omcmb/.../shared.tsx::renderDeviceStatus 对齐），CSV 显示和页面一致。
+func translateDeviceStatus(s string) string {
+	switch s {
+	case "downloading":
+		return "下载中"
+	case "uploading":
+		return "上传中"
+	case "awaiting_tc":
+		return "等待 TransferComplete"
+	case "verifying":
+		return "校验中"
+	case "suspended":
+		return "已挂起 / 待上线"
+	case "ended":
+		return "已完成"
+	case "failed":
+		return "失败"
+	default:
+		return "待执行"
+	}
+}
+
+// ExportDevices 真流式导出设备子任务列表为 CSV。
+//
+// 复用 ListDevices 过滤条件；走 Service.StreamDeviceItems 不在内存累积全量行，
+// 每命中一条立刻写 csv.Writer，每 500 行 Flush 一次把字节推到客户端 HTTP 流，
+// 大数据集下浏览器能边下边显进度，服务端内存占用稳定（≈ 1 批 + caches）。
+//
+// 为什么不让前端 pageSize=10000：① backend 可能限上限 ② JSON 序列化大量行内存
+// 膨胀 ③ 客户端拼 CSV 字段含 , " 换行 时转义易错。后端 csv.Writer 标准库自动转义。
+func (h *Handler) ExportDevices(c *gin.Context) {
+	var filter DeviceListFilter
+	if err := c.ShouldBindQuery(&filter); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	stamp := time.Now().Format("20060102-150405")
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition",
+		fmt.Sprintf("attachment; filename=ufte-devices-%s.csv", stamp))
+	// 不设 Content-Length → Go net/http 自动用 Transfer-Encoding: chunked
+	// （Flush 才真正生效，否则 ResponseWriter 内部缓冲后才一次性发）
+	c.Status(http.StatusOK)
+
+	w := c.Writer
+	flusher, _ := w.(http.Flusher) // gin 的 ResponseWriter 实现了 http.Flusher
+
+	// UTF-8 BOM：Excel 直接打开中文不乱码
+	_, _ = w.Write([]byte{0xEF, 0xBB, 0xBF})
+
+	csvW := csv.NewWriter(w)
+
+	// view=upgrade 时按"4G/5G 升级"页签列名输出；其它（备份/恢复/license/log）
+	// 按通用页签列名输出。与 FileTransferCenter 表头严格对齐。
+	view := c.Query("view")
+	upgrade := view == "upgrade"
+	var headers []string
+	if upgrade {
+		headers = []string{
+			"基站编码", "任务名称", "源版本", "目标版本", "升级类型",
+			"产品类型", "升级进度(%)", "结果", "操作人", "失败原因", "操作时间",
+		}
+	} else {
+		headers = []string{
+			"任务名称", "设备名称", "设备 SN", "产品类型", "当前版本",
+			"目标版本/目标文件", "状态", "进度(%)", "失败原因", "上报时间",
+		}
+	}
+	_ = csvW.Write(headers)
+
+	rowCount := 0
+	const flushEvery = 500
+	streamErr := h.service.StreamDeviceItems(c.Request.Context(), filter,
+		func(it DeviceItem) error {
+			var row []string
+			if upgrade {
+				// 升级类型显示规则与前端 getUpgradeTypeLabel 一致
+				upType := it.TypeDisplayName
+				switch it.Category {
+				case "gnb_upgrade", "enb_upgrade":
+					upType = "软件升级"
+				case "version_rollback":
+					upType = "版本回退"
+				}
+				row = []string{
+					it.DeviceSN, it.TaskName, it.CurrentVersion, it.TargetVersion, upType,
+					it.ProductType, fmt.Sprintf("%d", it.Progress),
+					translateDeviceStatus(it.Status), it.OperatorScope,
+					translateFailureReason(it.FailureReason), it.LastReportAt,
+				}
+			} else {
+				// "目标版本/目标文件" 在 UI 优先显示 targetFile，回退 targetVersion
+				tgt := it.TargetFile
+				if tgt == "" {
+					tgt = it.TargetVersion
+				}
+				row = []string{
+					it.TaskName, it.DeviceName, it.DeviceSN, it.ProductType, it.CurrentVersion,
+					tgt, translateDeviceStatus(it.Status),
+					fmt.Sprintf("%d", it.Progress),
+					translateFailureReason(it.FailureReason), it.LastReportAt,
+				}
+			}
+			if err := csvW.Write(row); err != nil {
+				return err
+			}
+			rowCount++
+			if rowCount%flushEvery == 0 {
+				csvW.Flush()
+				if flusher != nil {
+					flusher.Flush()
+				}
+			}
+			return nil
+		},
+	)
+	// 收尾：把 csv 内部 buffer + HTTP buffer 全部冲出去
+	csvW.Flush()
+	if flusher != nil {
+		flusher.Flush()
+	}
+	if streamErr != nil {
+		// HTTP status 已经发出去了改不了。只能记日志，下载文件末尾可能截断。
+		h.logger.Warn("export devices stream error (response may be truncated)",
+			zap.Error(streamErr), zap.Int("written_rows", rowCount))
+	}
 }
 
 func (h *Handler) parseTaskID(c *gin.Context) (uuid.UUID, bool) {

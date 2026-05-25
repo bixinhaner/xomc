@@ -688,6 +688,88 @@ func (s *Service) ListTasks(ctx context.Context, filter TaskListFilter) (*coremo
 }
 
 func (s *Service) ListDevices(ctx context.Context, filter DeviceListFilter) (*coremodel.ListResponse[DeviceItem], error) {
+	items, err := s.collectFilteredDeviceItems(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	return paginate(items, filter.Page, filter.PageSize), nil
+}
+
+// StreamDeviceItems 流式过滤 + 逐条输出设备子任务，每条调一次 write 回调。
+// 给导出 CSV 用 —— 全程不把全量结果累积在内存：
+//   1. 按 taskType / page 分批拉 sub_tasks（每批 200 条）
+//   2. 当批 mapDeviceItem + matchesDeviceFilter → 命中即立刻 write 回调出去
+//   3. 调用方在 write 里写 CSV + 周期性 Flush，bytes 直推 HTTP 流
+// 内存峰值约 = 1 批 sub_tasks + deviceCache + parentCache + catalog（cache 体量
+// 随设备 / 任务总数线性增长但单项 ~百字节，相对全量 DeviceItem 累积小得多）。
+//
+// 与 ListDevices 区别：**不做全局排序**——排序需要全量在内存。导出可在 Excel
+// 里自行排序，不影响数据完整性。
+func (s *Service) StreamDeviceItems(
+	ctx context.Context, filter DeviceListFilter, write func(DeviceItem) error,
+) error {
+	catalog, err := s.loadTaskTypeCatalog(ctx)
+	if err != nil {
+		return err
+	}
+	typeSet, err := deviceTypeFilterKeys(catalog, filter.Category, filter.TypeCode)
+	if err != nil {
+		return fmt.Errorf("%w: %v", commonerrors.ErrInvalidInput, err)
+	}
+	if len(typeSet) == 0 {
+		return nil
+	}
+	deviceCache := make(map[uuid.UUID]*coremodel.Device)
+	parentCache := make(map[uuid.UUID]*software.UpgradeTask)
+	const batchSize = 200
+
+	for taskType := range typeSet {
+		page := 1
+		for {
+			pageResult, err := s.subTaskRepo.ListAll(ctx, software.AllSubTaskFilter{
+				TaskType: taskTypePtr(taskType),
+				ListRequest: coremodel.ListRequest{
+					Page: page, PageSize: batchSize,
+				},
+			})
+			if err != nil {
+				return err
+			}
+			for _, subTask := range pageResult.Items {
+				parent, ok := parentCache[subTask.TaskID]
+				if !ok {
+					parent, err = s.taskRepo.GetByID(ctx, subTask.TaskID)
+					if err != nil {
+						s.logger.Debug("skip UFTE sub-task parent lookup (stream)",
+							zap.String("task_id", subTask.TaskID.String()), zap.Error(err))
+						continue
+					}
+					parentCache[subTask.TaskID] = parent
+				}
+				mapped, mErr := s.mapDeviceItem(ctx, catalog, subTask, parent, deviceCache)
+				if mErr != nil {
+					s.logger.Debug("skip UFTE sub-task mapping (stream)",
+						zap.String("sub_task_id", subTask.ID.String()), zap.Error(mErr))
+					continue
+				}
+				if !matchesDeviceFilter(*mapped, filter) {
+					continue
+				}
+				if wErr := write(*mapped); wErr != nil {
+					return wErr
+				}
+			}
+			if page >= pageResult.TotalPages || len(pageResult.Items) == 0 {
+				break
+			}
+			page++
+		}
+	}
+	return nil
+}
+
+// collectFilteredDeviceItems 把 ListDevices 的核心抓取/映射/过滤/排序逻辑提出来复用。
+func (s *Service) collectFilteredDeviceItems(ctx context.Context, filter DeviceListFilter) ([]DeviceItem, error) {
 	catalog, err := s.loadTaskTypeCatalog(ctx)
 	if err != nil {
 		return nil, err
@@ -722,7 +804,7 @@ func (s *Service) ListDevices(ctx context.Context, filter DeviceListFilter) (*co
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].LastReportAt > items[j].LastReportAt
 	})
-	return paginate(items, filter.Page, filter.PageSize), nil
+	return items, nil
 }
 
 func (s *Service) ListDeviceCandidates(ctx context.Context, filter DeviceCandidateFilter) (*coremodel.ListResponse[DeviceItem], error) {

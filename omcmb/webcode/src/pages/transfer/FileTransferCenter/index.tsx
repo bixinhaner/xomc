@@ -23,7 +23,7 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { DeleteOutlined, EyeOutlined, PlusOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
+import { DeleteOutlined, DownloadOutlined, EyeOutlined, PlusOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useT } from '@/hooks/useT';
@@ -43,6 +43,7 @@ import {
 } from '@core/hooks/api/useUnifiedFileTransfer';
 import { useProductClasses } from '@core/hooks/api/useDevices';
 import { useSoftwareVersions } from '@core/hooks/api/useSoftware';
+import { unifiedFileTransferApi } from '@core/services/api/unifiedFileTransferApi';
 import { configSnapshotApi } from '@core/services/api/configSnapshotApi';
 import type { BatchGetSnapshotsResult } from '@core/services/api/configSnapshotApi';
 import { deviceLicenseApi } from '@core/services/api/deviceLicenseApi';
@@ -467,8 +468,11 @@ export default function FileTransferCenter() {
     width: 260,
     render: (value: string, record: UnifiedFileTransferDeviceItem) => {
       if (!value) return '-';
-      const i18nLabel = t(`software.failureCode.${value}` as Parameters<typeof t>[0]);
-      const display = i18nLabel && i18nLabel !== `software.failureCode.${value}` ? i18nLabel : value;
+      // 终止时 SoftwareService.TerminateUpgrade 给 sub_task 写的固定串
+      // "task terminated by operator"——历史代码没用 code，这里做一层兜底翻译。
+      const codeOrRaw = value === 'task terminated by operator' ? 'OPERATOR_TERMINATED' : value;
+      const i18nLabel = t(`software.failureCode.${codeOrRaw}` as Parameters<typeof t>[0]);
+      const display = i18nLabel && i18nLabel !== `software.failureCode.${codeOrRaw}` ? i18nLabel : value;
       // 设备厂商原始 fault（FaultCode + FaultString）放 Tooltip 里——i18n label 只看到统一
       // 错误码描述，hover 后能拿到设备端原文（如 "Upgrade failed, there is FaultString in
       // TransferComplete msg. FaultCode: 0, FaultString: httpUpload OM Http Put Upload stat
@@ -513,6 +517,43 @@ export default function FileTransferCenter() {
     void deleteTaskMutation.mutateAsync(record.id)
       .then(() => void message.success('任务已删除'))
       .catch((error: unknown) => void message.error(getTaskActionErrorMessage(error, '任务删除失败')));
+  };
+
+  // 设备列表导出 CSV — 调后端 /ufte/devices/export 端点：复用 ListDevices
+  // 过滤逻辑、不分页拿全量、服务端拼 CSV 流式返回。比客户端拼更可靠（避免
+  // pageSize 上限、内存膨胀、SN 含逗号转义错位等问题）。
+  const [devicesExporting, setDevicesExporting] = useState(false);
+  const handleExportDevices = async () => {
+    setDevicesExporting(true);
+    try {
+      const { blob, filename } = await unifiedFileTransferApi.exportDevices({
+        category: selectedCategory || undefined,
+        typeCode: selectedTypeCode || undefined,
+        keyword: deviceKeyword || undefined,
+        status: deviceStatusFilter,
+        productType: deviceProductClassFilter,
+        // 与当前 tab 的 deviceColumns 分支保持一致
+        view: isUpgradeLikeCategory ? 'upgrade' : 'default',
+      });
+      if (blob.size === 0) {
+        void message.warning('当前过滤条件下没有设备数据可导出');
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      void message.success('已开始下载');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '请稍后重试';
+      void message.error(`导出失败：${msg}`);
+    } finally {
+      setDevicesExporting(false);
+    }
   };
 
   const openDetailDrawer = (record: UnifiedFileTransferTask) => {
@@ -1269,6 +1310,13 @@ export default function FileTransferCenter() {
                         ]}
                         style={{ width: 160 }}
                       />
+                      <Button
+                        icon={<DownloadOutlined />}
+                        loading={devicesExporting}
+                        onClick={() => { void handleExportDevices(); }}
+                      >
+                        导出 CSV
+                      </Button>
                     </Space>
                     <Table<UnifiedFileTransferDeviceItem>
                       rowKey="id"

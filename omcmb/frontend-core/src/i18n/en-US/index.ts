@@ -3472,6 +3472,7 @@ const messages: Record<string, string> = {
   'software.failureCode.TASK_TIMEOUT':        'Task timeout: no TransferComplete from device',
   'software.failureCode.FIRMWARE_NOT_FOUND':  'Task cannot start: firmware file not found',
   'software.failureCode.INTERNAL_ERROR':      'Internal error',
+  'software.failureCode.OPERATOR_TERMINATED': 'Terminated by operator',
   'software.failureSource.device':            'Device',
   'software.failureSource.system':            'System',
   'software.failureSource.timeout':           'Timeout',
