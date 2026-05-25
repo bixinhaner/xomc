@@ -977,10 +977,11 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 	}
 	if filter.Keyword != "" {
 		// GIS 地图搜索字段（6 个）：SN / 名称 / IP / MAC / PCI / 设备名称
+		// 注意：d.ip_address 是 INET 类型，需要用 host() 转为 TEXT 后才能 ILIKE
 		searchFields := []string{
 			"d.serial_number",
 			"d.site_name",
-			"d.ip_address",
+			"host(d.ip_address)",
 			"di.mac",
 			"di.pci",
 			"di.device_name",
@@ -1019,10 +1020,11 @@ func (r *PgDeviceRepository) ListGeo(ctx context.Context, filter GeoDeviceFilter
 	}
 	if filter.Keyword != "" {
 		// GIS 地图搜索字段（6 个）：SN / 名称 / IP / MAC / PCI / 设备名称
+		// 注意：d.ip_address 是 INET 类型，需要用 host() 转为 TEXT 后才能 ILIKE
 		searchFields := []string{
 			"d.serial_number",
 			"d.site_name",
-			"d.ip_address",
+			"host(d.ip_address)",
 			"di.mac",
 			"di.pci",
 			"di.device_name",
@@ -1206,10 +1208,11 @@ func (r *PgDeviceRepository) SearchDevices(ctx context.Context, keyword string, 
 	}
 
 	// GIS 地图搜索字段（6 个）：SN / 名称 / IP / MAC / PCI / 设备名称
+	// 注意：d.ip_address 是 INET 类型，需要用 host() 转为 TEXT 后才能 ILIKE
 	searchFields := []string{
 		"d.serial_number",
 		"d.site_name",
-		"d.ip_address",
+		"host(d.ip_address)",
 		"di.mac",
 		"di.pci",
 		"di.device_name",
