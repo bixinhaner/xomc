@@ -185,8 +185,10 @@ func TestValidatePath_AllReasons(t *testing.T) {
 	}{
 		{"empty", "", PathSkipBadPrefix},
 		{"whitespace", "   ", PathSkipBadPrefix},
-		{"missing_root", "DeviceGSM.Mcc", PathSkipBadPrefix},
+		{"missing_root", "BogusRoot.Mcc", PathSkipBadPrefix},
 		{"internal_namespace", "Internal.X.Y", PathSkipBadPrefix},
+		{"legal_devicegsm", "DeviceGSM.Bts.1.X", ""}, // 百怡 GSM 私有根已加入白名单
+		{"legal_boardconf", "boardconf.HALOD.HALOD_PORT", ""},
 		{"placeholder_i", "Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress", PathSkipPlaceholder},
 		{"placeholder_n", "Device.WiFi.SSID.{n}.SSID", PathSkipPlaceholder},
 		{"placeholder_idx", "Device.X.Y.{idx}.Z", PathSkipPlaceholder},
@@ -205,16 +207,19 @@ func TestValidatePath_AllReasons(t *testing.T) {
 }
 
 func TestBuildTR069Params_GetParameterValues_FiltersIllegalPaths(t *testing.T) {
-	// 直接复刻 baicell 现场报文的 14 条 path：7 条 DeviceGSM.* 非法、
-	// 1 条带 {i} 占位符、其余合法。校验后应只剩 6 条合法路径。
+	// 复刻 baicell 现场报文形态：7 条完全未知前缀（非法）、1 条带 {i} 占位符（自动展开）、
+	// 其余合法。校验后应只剩 6 条合法路径 + 1 条 {i} 展开 = 7。
+	//
+	// 注：DeviceGSM 已被加入合法根白名单（百怡 GSM 设备子树），
+	// 故本测试用 BogusRoot.* 表示真实非法前缀场景。
 	refs := []MMLParamRef{
-		{ParamCode: "GSM_ENC", Tr069Path: "DeviceGSM.Encryption", ValueType: "int"},
-		{ParamCode: "GSM_MCC", Tr069Path: "DeviceGSM.Mcc", ValueType: "string"},
-		{ParamCode: "GSM_MNC", Tr069Path: "DeviceGSM.Mnc", ValueType: "string"},
-		{ParamCode: "GSM_NRI", Tr069Path: "DeviceGSM.NriBitLen", ValueType: "int"},
-		{ParamCode: "GSM_NRINULL", Tr069Path: "DeviceGSM.NriNullAdd", ValueType: "string"},
-		{ParamCode: "GSM_T3212", Tr069Path: "DeviceGSM.TimerNetT3212", ValueType: "int"},
-		{ParamCode: "GSM_BTS", Tr069Path: "DeviceGSM.BtsNum", ValueType: "int"},
+		{ParamCode: "BAD1", Tr069Path: "BogusRoot.Encryption", ValueType: "int"},
+		{ParamCode: "BAD2", Tr069Path: "BogusRoot.Mcc", ValueType: "string"},
+		{ParamCode: "BAD3", Tr069Path: "BogusRoot.Mnc", ValueType: "string"},
+		{ParamCode: "BAD4", Tr069Path: "BogusRoot.NriBitLen", ValueType: "int"},
+		{ParamCode: "BAD5", Tr069Path: "BogusRoot.NriNullAdd", ValueType: "string"},
+		{ParamCode: "BAD6", Tr069Path: "BogusRoot.TimerNetT3212", ValueType: "int"},
+		{ParamCode: "BAD7", Tr069Path: "BogusRoot.BtsNum", ValueType: "int"},
 		{ParamCode: "DEV_HW", Tr069Path: "Device.DeviceInfo.HardwareVersion", ValueType: "string"},
 		{ParamCode: "IP_ADDR", Tr069Path: "Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress", ValueType: "string"},
 		{ParamCode: "DEV_MAC", Tr069Path: "Device.DeviceInfo.X_COM_MACAddress", ValueType: "string"},
@@ -232,9 +237,9 @@ func TestBuildTR069Params_GetParameterValues_FiltersIllegalPaths(t *testing.T) {
 	// Sprint B Q-V3-2：含 {i} 的 Device.IP.Interface.{i}.IPv4Address.{i}.IPAddress
 	// 自动展开为 partial path Device.IP.Interface.（不再被过滤）— 总数变 7。
 	assert.Len(t, got.Names, 7, "6 条合法 + 1 条 {i} 展开为 partial path")
-	// 仍不应包含 DeviceGSM.* 等非法前缀
+	// 仍不应包含完全未知前缀
 	for _, n := range got.Names {
-		assert.False(t, strings.HasPrefix(n, "DeviceGSM."), "DeviceGSM. 前缀必须被过滤")
+		assert.False(t, strings.HasPrefix(n, "MadeUpRoot."), "未知私有前缀必须被过滤")
 		assert.NotContains(t, n, "{i}", "占位符必须被展开（不残留）")
 	}
 	// 必须保留合法的具体路径
@@ -248,8 +253,8 @@ func TestBuildTR069Params_GetParameterValues_AllIllegalReturnsError(t *testing.T
 	// Sprint B Q-V3-2 后：Device.X.{i}.Y 路径自动展开为 partial path Device.X.，
 	// 不再视为非法 — 所以本 case 只保留**真正非法**前缀路径来验证 ErrNoUsableParams。
 	refs := []MMLParamRef{
-		{ParamCode: "A", Tr069Path: "DeviceGSM.Mcc"},  // 非 Device./IGD. 前缀
-		{ParamCode: "B", Tr069Path: "Internal.X"},     // 非法前缀
+		{ParamCode: "A", Tr069Path: "Internal.Mcc"},   // 非法前缀
+		{ParamCode: "B", Tr069Path: "BogusRoot.X"},    // 非法前缀
 		{ParamCode: "C", Tr069Path: "Bad@chars#here"}, // 非法字符
 	}
 	_, err := BuildTR069Params("GetParameterValues", refs, nil, "LST")
@@ -260,7 +265,7 @@ func TestBuildTR069Params_GetParameterValues_AllIllegalReturnsError(t *testing.T
 
 func TestBuildTR069Params_SetParameterValues_FiltersIllegalPaths(t *testing.T) {
 	refs := []MMLParamRef{
-		{ParamCode: "BAD", Tr069Path: "DeviceGSM.Mcc", ValueType: "string"},
+		{ParamCode: "BAD", Tr069Path: "Internal.Mcc", ValueType: "string"},
 		{ParamCode: "PLACEHOLDER", Tr069Path: "Device.IP.Interface.{i}.X", ValueType: "string"},
 		{ParamCode: "OK", Tr069Path: "Device.DeviceInfo.X_BAICELLS_GsmMcc", ValueType: "string"},
 	}
@@ -284,7 +289,7 @@ func TestBuildTR069Params_GetParameterNames_RejectsIllegalPath(t *testing.T) {
 		name string
 		path string
 	}{
-		{"bad_prefix", "DeviceGSM."},
+		{"bad_prefix", "Internal."},
 		{"placeholder", "Device.WiFi.{i}."},
 	}
 	for _, c := range cases {
@@ -298,7 +303,7 @@ func TestBuildTR069Params_GetParameterNames_RejectsIllegalPath(t *testing.T) {
 }
 
 func TestBuildTR069Params_AddObject_RejectsIllegalPath(t *testing.T) {
-	cases := []string{"DeviceGSM", "Device.IP.{i}"}
+	cases := []string{"Internal.Foo", "Device.IP.{i}"}
 	for _, p := range cases {
 		t.Run(p, func(t *testing.T) {
 			_, err := BuildTR069Params("AddObject", nil,

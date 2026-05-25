@@ -27,19 +27,31 @@ import (
 // a strong signal that the command/parameter configuration upstream is broken.
 var ErrNoUsableParams = errors.New("no usable params for tr069 payload")
 
-// 路径合规校验（TR-069 §3.3 / §A.2.2.x）。前置在 BuildTR069Params 之前过滤掉
-// CPE 必拒的路径，避免下发到 ACS 后被静默丢弃。被过滤的路径会通过 Skip 列表
-// 由 fanout 层日志输出，运维侧能立刻看到具体哪条 path 出问题、为什么。
+// 路径合规校验（TR-069 §3.3 / §A.2.2.x，含厂商私有根扩展）。
+// 前置在 BuildTR069Params 之前过滤掉 CPE 必拒的路径，避免下发到 ACS 后被静默丢弃。
+// 被过滤的路径会通过 Skip 列表由 fanout 层日志输出，运维侧能立刻看到具体哪条 path 出问题、为什么。
 //
 // 三类不合规：
-//   1. 顶层不是 Device. 或 InternetGatewayDevice.
-//      （TR-069 数据模型唯二合法根；DeviceGSM. / Internal. / 自造前缀都拒）
+//   1. 顶层既不是 TR-069 标准根（Device. / InternetGatewayDevice.）也不是已知
+//      厂商私有根。厂商根从 param_mappings.private_path 已有 root 集合扩展（白名单），
+//      详见 paramPathLegalRoot 注释。
 //   2. 含 {i} / {n} / {idx} 占位符未替换
 //      （TR-181 写法约定，发 SOAP 必须替换为实际索引）
 //   3. 含非 ASCII 或非 TR-069 合法字符
 //      （只允许字母数字、_ . - [] {} ）
 
-var paramPathLegalRoot = regexp.MustCompile(`^(Device|InternetGatewayDevice)\.`)
+// paramPathLegalRoot 接受 TR-069 标准根 + 厂商私有根。
+//
+//   - Device. / InternetGatewayDevice. — TR-069/TR-181 标准
+//   - boardconf. — BLQ/MLN 等百怡私有板卡配置根（present in 7+ param_mappings）
+//   - DeviceGSM. — GSM 设备子树（T-0171 扩展 catalog 派生）
+//   - aldconfig. — BLQ ALD 配置（present in 1 param_mapping）
+//   - FAPService. — TR-196 FAPService 根（无 Device. 前缀的私有变体）
+//
+// 历史教训：仅放 Device. / InternetGatewayDevice. → boardconf.HALOD.* path 在
+// MML MOD 时被 validator 拒绝（bad_prefix），即便 param_mappings 已声明该路径合法、
+// CPE 实际能识别。修复方式：扩展白名单覆盖 param_mappings.private_path 的实际根集合。
+var paramPathLegalRoot = regexp.MustCompile(`^(Device|InternetGatewayDevice|boardconf|DeviceGSM|aldconfig|FAPService)\.`)
 
 // 占位符匹配所有 {<letter>+} 形式：TR-069 spec 标准是 {i}，
 // 但实际项目种子里也出现 {j}（多层实例索引）等同类问题，CPE 同样无法识别。
@@ -337,7 +349,7 @@ func buildGetParameterNames(paramRefs []MMLParamRef, formValues map[string]inter
 	// GetParameterNames 的 path 允许 partial（以 "." 结尾），所以校验只查前缀和字符集，
 	// 占位符 {i} 同样不允许（CPE 解析失败）。
 	if !paramPathLegalRoot.MatchString(path) {
-		return nil, fmt.Errorf("%w: GetParameterNames path %q does not start with Device. or InternetGatewayDevice.", ErrNoUsableParams, path)
+		return nil, fmt.Errorf("%w: GetParameterNames path %q does not start with an accepted root (Device./InternetGatewayDevice./boardconf./DeviceGSM./aldconfig./FAPService.)", ErrNoUsableParams, path)
 	}
 	if paramPathPlaceholder.MatchString(path) {
 		return nil, fmt.Errorf("%w: GetParameterNames path %q contains unresolved placeholder {i}/{n}", ErrNoUsableParams, path)

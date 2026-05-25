@@ -317,9 +317,11 @@ func (h *ConsoleHandler) PostExecuteStatements(c *gin.Context) {
 		//   ErrMixedProductClass      → 400 (R-8.4)
 		//   ErrNoValidDevices         → 400 (R-8.4)
 		//   ErrProductClassUnresolved → 422 (R-9.3 孤儿设备)
+		//   ErrPathUnsupported        → 422 (T-0170 path 在 paramModel 无映射)
 		//   其余                        → 500
 		var mixedErr *ErrMixedProductClass
 		var orphanErr *ErrProductClassUnresolved
+		var unsupportedErr *ErrPathUnsupported
 		switch {
 		case errors.Is(err, ErrCommandNotFound):
 			response.Fail(c, http.StatusNotFound, err.Error())
@@ -331,6 +333,9 @@ func (h *ConsoleHandler) PostExecuteStatements(c *gin.Context) {
 			response.Fail(c, http.StatusBadRequest, mixedErr.Error())
 		case errors.As(err, &orphanErr):
 			response.Fail(c, http.StatusUnprocessableEntity, orphanErr.Error())
+		case errors.As(err, &unsupportedErr):
+			response.FailWithData(c, http.StatusUnprocessableEntity, unsupportedErr.Error(),
+				gin.H{"unsupported_paths": unsupportedErr.Paths, "param_model_id": unsupportedErr.ParamModelID})
 		default:
 			h.logger.Error("execute statements", zap.Error(err))
 			response.Fail(c, http.StatusInternalServerError, err.Error())
@@ -374,6 +379,7 @@ func (h *ConsoleHandler) PostExecuteStatementsStructured(c *gin.Context) {
 		var unknownErr *ErrUnknownPaths
 		var mixedErr *ErrMixedProductClass
 		var orphanErr *ErrProductClassUnresolved
+		var unsupportedErr *ErrPathUnsupported
 		switch {
 		case errors.As(err, &unknownErr):
 			response.FailWithData(c, http.StatusUnprocessableEntity, unknownErr.Error(),
@@ -388,6 +394,9 @@ func (h *ConsoleHandler) PostExecuteStatementsStructured(c *gin.Context) {
 			response.Fail(c, http.StatusBadRequest, mixedErr.Error())
 		case errors.As(err, &orphanErr):
 			response.Fail(c, http.StatusUnprocessableEntity, orphanErr.Error())
+		case errors.As(err, &unsupportedErr):
+			response.FailWithData(c, http.StatusUnprocessableEntity, unsupportedErr.Error(),
+				gin.H{"unsupported_paths": unsupportedErr.Paths, "param_model_id": unsupportedErr.ParamModelID})
 		default:
 			h.logger.Error("execute structured statements", zap.Error(err))
 			response.Fail(c, http.StatusInternalServerError, err.Error())

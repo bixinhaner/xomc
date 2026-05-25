@@ -285,15 +285,17 @@ type CustomCommandFilter struct {
 //
 // DefaultValue / JsRegex 暴露给前端做 placeholder 与初始值提示（to-do-list MOD 类需求）。
 type MMLParamRef struct {
-	ID              uuid.UUID              `json:"id"`
-	ParamCode       string                 `json:"param_code"`
-	ParamNameZh     string                 `json:"param_name_zh"`
-	Tr069Path       string                 `json:"tr069_path"`
-	ValueType       string                 `json:"value_type"`
-	IsWritable      bool                   `json:"is_writable"`
-	DefaultValue    string                 `json:"default_value,omitempty"`
-	JsRegex         string                 `json:"js_regex,omitempty"`
-	ValueConstraint map[string]interface{} `json:"value_constraint,omitempty"`
+	ID                uuid.UUID              `json:"id"`
+	ParamCode         string                 `json:"param_code"`
+	ParamNameZh       string                 `json:"param_name_zh"`
+	Tr069Path         string                 `json:"tr069_path"`
+	ValueType         string                 `json:"value_type"`
+	IsWritable        bool                   `json:"is_writable"`
+	DefaultValue      string                 `json:"default_value,omitempty"`
+	JsRegex           string                 `json:"js_regex,omitempty"`
+	ValueConstraint   map[string]interface{} `json:"value_constraint,omitempty"`
+	PrivatePath       string                 `json:"private_path,omitempty"`
+	TranslationSource string                 `json:"translation_source,omitempty"`
 }
 
 // MMLAuditLog records a single command execution for compliance auditing.

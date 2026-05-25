@@ -214,9 +214,9 @@ func TestTranslateTaskPaths_PassthroughAndDiscovered(t *testing.T) {
 			{
 				"command_code":   "LST_DEVICE",
 				"operation_type": "LST",
-				"param_refs": []interface{}{
-					map[string]interface{}{"param_path": "Device.X.SoftwareVersion"},
-					map[string]interface{}{"param_path": "Device.X.UserLabel"},
+				"param_refs": []MMLParamRef{
+					{Tr069Path: "Device.X.SoftwareVersion"},
+					{Tr069Path: "Device.X.UserLabel"},
 				},
 			},
 		},
@@ -226,21 +226,21 @@ func TestTranslateTaskPaths_PassthroughAndDiscovered(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, tr.calls, "translator should be called once per task")
 
-	refs := task.Commands[0]["param_refs"].([]interface{})
-	r0 := refs[0].(map[string]interface{})
-	assert.Equal(t, "Device.X_VENDOR.SwVer", r0["private_path"])
-	assert.Equal(t, "discovered", r0["translation_source"])
-	r1 := refs[1].(map[string]interface{})
-	// passthrough：未命中 mapping，private_path 与 standardPath 相同
-	assert.Equal(t, "Device.X.UserLabel", r1["private_path"])
-	assert.Equal(t, "passthrough", r1["translation_source"])
+	refs := task.Commands[0]["param_refs"].([]MMLParamRef)
+	assert.Equal(t, "Device.X_VENDOR.SwVer", refs[0].PrivatePath)
+	assert.Equal(t, "discovered", refs[0].TranslationSource)
+	// passthrough：fakeTranslator 仍返 outcome.Paths 含 entry，private = standardPath
+	assert.Equal(t, "Device.X.UserLabel", refs[1].PrivatePath)
+	assert.Equal(t, "passthrough", refs[1].TranslationSource)
 
 	// translation_results 元数据已记录
 	results := task.Commands[0]["translation_results"].([]TranslatedPath)
 	assert.Len(t, results, 2)
 }
 
-func TestTranslateTaskPaths_ParametersKeyReplacement(t *testing.T) {
+// TestTranslateTaskPaths_MODUsesParamRefs 验证 MOD 命令的 path 翻译走 param_refs.Tr069Path，
+// 不依赖 parameters keys（parameters 的 key 是 MMLCode leaf 段，非 standardPath，禁止当 path 用）。
+func TestTranslateTaskPaths_MODUsesParamRefs(t *testing.T) {
 	s := newServiceForTest()
 	s.SetDeviceLookup(&fakeDeviceLookup{devs: map[string]*model.Device{
 		"SN1": {SerialNumber: "SN1", ProductClass: "Nova430E"},
@@ -255,8 +255,12 @@ func TestTranslateTaskPaths_ParametersKeyReplacement(t *testing.T) {
 			{
 				"command_code":   "MOD_DEVICE",
 				"operation_type": "MOD",
+				"param_refs": []MMLParamRef{
+					{ParamCode: "UserLabel", Tr069Path: "Device.X.UserLabel"},
+				},
+				// parameters key 是 MMLCode（leaf 段），不是 standardPath；不参与翻译
 				"parameters": map[string]interface{}{
-					"Device.X.UserLabel": "myDevice",
+					"UserLabel": "myDevice",
 				},
 			},
 		},
@@ -265,11 +269,14 @@ func TestTranslateTaskPaths_ParametersKeyReplacement(t *testing.T) {
 	err := s.translateTaskPaths(context.Background(), task)
 	require.NoError(t, err)
 
+	// param_refs 上正确写回 PrivatePath
+	refs := task.Commands[0]["param_refs"].([]MMLParamRef)
+	assert.Equal(t, "Device.X_VENDOR.Label", refs[0].PrivatePath)
+	assert.Equal(t, "discovered", refs[0].TranslationSource)
+
+	// parameters 不动（SOAP 层用 param_refs 查 MMLCode → PrivatePath）
 	params := task.Commands[0]["parameters"].(map[string]interface{})
-	// key 已替换为 privatePath
-	assert.Equal(t, "myDevice", params["Device.X_VENDOR.Label"])
-	_, hasOld := params["Device.X.UserLabel"]
-	assert.False(t, hasOld, "old standardPath key should be removed")
+	assert.Equal(t, "myDevice", params["UserLabel"], "parameters keys are MMLCode and stay untouched")
 }
 
 func TestTranslateTaskPaths_NoTranslatorInjected_Skips(t *testing.T) {
@@ -280,16 +287,14 @@ func TestTranslateTaskPaths_NoTranslatorInjected_Skips(t *testing.T) {
 	task := &MMLTask{
 		DeviceSNs: []string{"SN1"},
 		Commands: []map[string]interface{}{
-			{"param_refs": []interface{}{map[string]interface{}{"param_path": "Device.X.A"}}},
+			{"param_refs": []MMLParamRef{{Tr069Path: "Device.X.A"}}},
 		},
 	}
 	err := s.translateTaskPaths(context.Background(), task)
 	assert.NoError(t, err)
 	// command entry 未被修改
-	refs := task.Commands[0]["param_refs"].([]interface{})
-	r0 := refs[0].(map[string]interface{})
-	_, hasPriv := r0["private_path"]
-	assert.False(t, hasPriv)
+	refs := task.Commands[0]["param_refs"].([]MMLParamRef)
+	assert.Equal(t, "", refs[0].PrivatePath, "translator 未注入时不应写 PrivatePath")
 }
 
 func TestTranslateTaskPaths_OrphanError(t *testing.T) {
@@ -306,7 +311,7 @@ func TestTranslateTaskPaths_OrphanError(t *testing.T) {
 	task := &MMLTask{
 		DeviceSNs: []string{"SN1"},
 		Commands: []map[string]interface{}{
-			{"param_refs": []interface{}{map[string]interface{}{"param_path": "Device.X.A"}}},
+			{"param_refs": []MMLParamRef{{Tr069Path: "Device.X.A"}}},
 		},
 	}
 	err := s.translateTaskPaths(context.Background(), task)
@@ -327,9 +332,9 @@ func TestTranslateTaskPaths_OrphanPassthrough(t *testing.T) {
 		DeviceSNs: []string{"SN1"},
 		Commands: []map[string]interface{}{
 			{
-				"param_refs": []interface{}{
-					map[string]interface{}{"param_path": "Device.X.Foo"},
-					map[string]interface{}{"param_path": "Device.X.Bar"},
+				"param_refs": []MMLParamRef{
+					{Tr069Path: "Device.X.Foo"},
+					{Tr069Path: "Device.X.Bar"},
 				},
 			},
 		},
@@ -344,11 +349,10 @@ func TestTranslateTaskPaths_OrphanPassthrough(t *testing.T) {
 	assert.Equal(t, "orphan_passthrough", task.PathTranslationSource, "PathTranslationSource 应为 orphan_passthrough")
 
 	// param_refs 上的 per-path 翻译标记
-	refs := task.Commands[0]["param_refs"].([]interface{})
-	for _, r := range refs {
-		m := r.(map[string]interface{})
-		assert.Equal(t, m["param_path"], m["private_path"], "orphan 时 private_path 应等于 standardPath")
-		assert.Equal(t, "orphan_passthrough", m["translation_source"], "Source 应为 orphan_passthrough")
+	refs := task.Commands[0]["param_refs"].([]MMLParamRef)
+	for _, ref := range refs {
+		assert.Equal(t, ref.Tr069Path, ref.PrivatePath, "orphan 时 PrivatePath 应等于 standardPath")
+		assert.Equal(t, "orphan_passthrough", ref.TranslationSource, "Source 应为 orphan_passthrough")
 	}
 }
 
@@ -368,9 +372,9 @@ func TestTranslateTaskPaths_MixedSource(t *testing.T) {
 		DeviceSNs: []string{"SN1"},
 		Commands: []map[string]interface{}{
 			{
-				"param_refs": []interface{}{
-					map[string]interface{}{"param_path": "Device.Standard.Path1"},
-					map[string]interface{}{"param_path": "Device.Standard.Path2"},
+				"param_refs": []MMLParamRef{
+					{Tr069Path: "Device.Standard.Path1"},
+					{Tr069Path: "Device.Standard.Path2"},
 				},
 			},
 		},
@@ -390,12 +394,12 @@ func TestExtractPathTranslations(t *testing.T) {
 		{
 			"param_refs": []interface{}{
 				map[string]interface{}{
-					"param_path":         "Device.A",
+					"tr069_path":         "Device.A",
 					"private_path":       "InternetGw.X_VENDOR.A",
 					"translation_source": "discovered",
 				},
 				map[string]interface{}{
-					"param_path":         "Device.B",
+					"tr069_path":         "Device.B",
 					"private_path":       "Device.B",
 					"translation_source": "passthrough",
 				},
@@ -405,7 +409,7 @@ func TestExtractPathTranslations(t *testing.T) {
 			"param_refs": []interface{}{
 				// 同 standardPath 去重保留一份
 				map[string]interface{}{
-					"param_path":         "Device.A",
+					"tr069_path":         "Device.A",
 					"private_path":       "InternetGw.X_VENDOR.A",
 					"translation_source": "discovered",
 				},
@@ -431,16 +435,20 @@ func TestExtractPathTranslations(t *testing.T) {
 func TestCollectStandardPaths(t *testing.T) {
 	commands := []map[string]interface{}{
 		{
-			"param_refs": []interface{}{
-				map[string]interface{}{"param_path": "Device.B"},
-				map[string]interface{}{"param_path": "Device.A"},
+			"param_refs": []MMLParamRef{
+				{Tr069Path: "Device.B"},
+				{Tr069Path: "Device.A"},
 			},
 		},
 		{
+			// 模拟 JSONB 反序列化路径：[]interface{} + 字段 tr069_path
+			"param_refs": []interface{}{
+				map[string]interface{}{"tr069_path": "Device.C"},
+			},
+			// parameters key 不再视作 standardPath（MOD 的 key 是 MMLCode leaf）
 			"parameters": map[string]interface{}{
-				"Device.A":    "v1",
-				"Device.C":    "v2",
-				"object_name": "Device.X.{i=1}.", // 不参与翻译
+				"UserLabel":   "v1",
+				"object_name": "Device.X.{i=1}.",
 			},
 		},
 	}

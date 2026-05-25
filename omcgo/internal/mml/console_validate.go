@@ -207,25 +207,33 @@ func (s *Service) translateTaskPaths(ctx context.Context, task *MMLTask) error {
 }
 
 // collectStandardPaths 从 task.Commands 中收集所有需要翻译的 standardPath。
-// param_refs[].Path 或 parameters 的 key 都是 standardPath 来源（互斥）。
+//
+// 真值源：param_refs[].Tr069Path（standardPath，由 buildLST/MODParamRefs 从 cmd.Params 拷贝）。
+// parameters 的 key 是 MMLCode（leaf 段，per buildStatementCommandEntry MOD 分支 stmt.Values
+// 在 StructuredToStatement 已 sf.MMLCode keyed），不是 standardPath，禁用为翻译来源。
+//
+// 类型容忍：buildStatementCommandEntries 内存中 param_refs 是 []MMLParamRef；JSON 反序列化
+// 路径（极少触发）为 []interface{}。两种 shape 都遍历，字段名读 Tr069Path / "tr069_path"
+// (MMLParamRef json tag)。
 func collectStandardPaths(commands []map[string]interface{}) []string {
 	seen := make(map[string]struct{})
+	addPath := func(p string) {
+		if p != "" {
+			seen[p] = struct{}{}
+		}
+	}
 	for _, entry := range commands {
-		// param_refs: []MMLParamRef 或 []map
-		if refs, ok := entry["param_refs"].([]interface{}); ok {
+		switch refs := entry["param_refs"].(type) {
+		case []MMLParamRef:
+			for _, ref := range refs {
+				addPath(ref.Tr069Path)
+			}
+		case []interface{}:
 			for _, r := range refs {
 				if m, ok := r.(map[string]interface{}); ok {
-					if p, ok := m["param_path"].(string); ok && p != "" {
-						seen[p] = struct{}{}
+					if p, ok := m["tr069_path"].(string); ok {
+						addPath(p)
 					}
-				}
-			}
-		}
-		// parameters: map[string]any
-		if params, ok := entry["parameters"].(map[string]interface{}); ok {
-			for k := range params {
-				if k != "" && k != "object_name" { // object_name 不参与翻译（ADD/RMV 父级路径）
-					seen[k] = struct{}{}
 				}
 			}
 		}
@@ -239,40 +247,41 @@ func collectStandardPaths(commands []map[string]interface{}) []string {
 }
 
 // applyTranslationToCommandEntry 把翻译结果写回单条 command entry。
-//   - param_refs[].private_path / param_refs[].translation_source 追加
-//   - parameters key 同步替换为 privatePath（仅当翻译命中且与 standard 不同）
+//   - param_refs[].PrivatePath / TranslationSource 字段（in-memory）追加
+//   - parameters key 不替换（key 是 MMLCode，非 standardPath；SOAP 层用 param_refs 查
+//     MMLCode→Tr069/PrivatePath，无需修改 parameters）
 //   - 整体 entry 追加 translation_results 数组，供 TerminalPanel 回显
+//
+// 类型容忍：与 collectStandardPaths 对称，支持 []MMLParamRef 和 []interface{} 两种形态。
 func applyTranslationToCommandEntry(entry map[string]interface{}, trans map[string]TranslatedPath) {
 	usedTranslations := make([]TranslatedPath, 0)
 
-	// param_refs
-	if refs, ok := entry["param_refs"].([]interface{}); ok {
+	switch refs := entry["param_refs"].(type) {
+	case []MMLParamRef:
+		// 写回到具体 struct slice — 用索引写避免 range 拷贝
+		updated := make([]MMLParamRef, len(refs))
+		copy(updated, refs)
+		for i := range updated {
+			if t, hit := trans[updated[i].Tr069Path]; hit {
+				updated[i].PrivatePath = t.Private
+				updated[i].TranslationSource = t.Source
+				usedTranslations = append(usedTranslations, t)
+			}
+		}
+		entry["param_refs"] = updated
+	case []interface{}:
 		for _, r := range refs {
 			m, ok := r.(map[string]interface{})
 			if !ok {
 				continue
 			}
-			p, _ := m["param_path"].(string)
+			p, _ := m["tr069_path"].(string)
 			if t, hit := trans[p]; hit {
 				m["private_path"] = t.Private
 				m["translation_source"] = t.Source
 				usedTranslations = append(usedTranslations, t)
 			}
 		}
-	}
-
-	// parameters：替换 key 为 privatePath
-	if params, ok := entry["parameters"].(map[string]interface{}); ok {
-		newParams := make(map[string]interface{}, len(params))
-		for k, v := range params {
-			if t, hit := trans[k]; hit && t.Private != k {
-				newParams[t.Private] = v
-				usedTranslations = append(usedTranslations, t)
-			} else {
-				newParams[k] = v
-			}
-		}
-		entry["parameters"] = newParams
 	}
 
 	if len(usedTranslations) > 0 {

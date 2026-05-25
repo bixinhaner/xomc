@@ -1786,34 +1786,45 @@ type TaskResultsStats struct {
 // extractPathTranslations 从 task.Commands JSONB 抽出去重的 PathTranslationView 列表。
 // 数据源：task.Commands[i].param_refs[] 与 task.Commands[i].translation_results。
 // translateTaskPaths 已经把 standardPath / privatePath / translation_source 写入两者。
+//
+// MMLParamRef 的 json tag 是 "tr069_path"（不是 "param_path"）；in-memory 走 []MMLParamRef
+// 直接读字段；DB JSONB 反序列化后走 []interface{} 读 "tr069_path"。
 func extractPathTranslations(commands []map[string]interface{}) []PathTranslationView {
 	seen := make(map[string]PathTranslationView)
+	upsert := func(std, priv, src string) {
+		if std == "" {
+			return
+		}
+		if priv == "" {
+			priv = std
+		}
+		if src == "" {
+			src = "passthrough"
+		}
+		seen[std] = PathTranslationView{
+			StandardPath:      std,
+			PrivatePath:       priv,
+			TranslationSource: src,
+			Translated:        src != "passthrough" && src != "orphan_passthrough",
+		}
+	}
 	for _, entry := range commands {
 		// 优先读 param_refs[]（LST/MOD/ADD 选中路径）
-		if refs, ok := entry["param_refs"].([]interface{}); ok {
+		switch refs := entry["param_refs"].(type) {
+		case []MMLParamRef:
+			for _, ref := range refs {
+				upsert(ref.Tr069Path, ref.PrivatePath, ref.TranslationSource)
+			}
+		case []interface{}:
 			for _, r := range refs {
 				m, ok := r.(map[string]interface{})
 				if !ok {
 					continue
 				}
-				std, _ := m["param_path"].(string)
-				if std == "" {
-					continue
-				}
+				std, _ := m["tr069_path"].(string)
 				priv, _ := m["private_path"].(string)
 				src, _ := m["translation_source"].(string)
-				if priv == "" {
-					priv = std
-				}
-				if src == "" {
-					src = "passthrough"
-				}
-				seen[std] = PathTranslationView{
-					StandardPath:      std,
-					PrivatePath:       priv,
-					TranslationSource: src,
-					Translated:        src != "passthrough" && src != "orphan_passthrough",
-				}
+				upsert(std, priv, src)
 			}
 		}
 		// 兜底读 translation_results（部分 cmd 没 param_refs 但 translateTaskPaths 仍写了 results）
