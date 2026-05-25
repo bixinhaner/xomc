@@ -1,0 +1,255 @@
+// Package acs path_translator.go — T-XXX ACS 端 standardPath → privatePath 翻译。
+//
+// 设计背景：早期实现把翻译放在 App 进程的 mml fanout 阶段，导致 device_tasks.tr069_params
+// 存的是 privatePath。问题：
+//   - 队列里 pending 任务无法跟进字典更新（admin 修映射后旧 task 仍用旧 privatePath）
+//   - 任务表存私有 path,不利于审计/重试/排查
+//
+// 改造后：MML 入队存 standardPath；ACS 出队时调用 PathTranslationService.Translate
+// 翻为 privatePath 再 SOAP 下发。任一步失败 fallback 原样直发（与原 fanout fallback 一致）。
+//
+// 翻译涉及的 RPC 与字段：
+//
+//	GPV / GPA          → params.names[]
+//	SPV / SPA          → params.values[].name
+//	GPN                → params.path
+//	AddObject / Delete → params.object_name
+//	Reboot / Download / Upload / FactoryReset / GetRPCMethods → 无 path 字段，透传
+package acs
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+
+	"github.com/google/uuid"
+	"go.uber.org/zap"
+
+	"github.com/omcgo/omcgo/internal/config/parammodel"
+	coremodel "github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/internal/product"
+	"github.com/omcgo/omcgo/internal/task"
+)
+
+// pathTranslatorDeviceLookup 按 SN 反查 *coremodel.Device，仅取 ProductClass +
+// FirmwareVersion。生产由 device.PgDeviceRepository 满足；测试可 stub。
+type pathTranslatorDeviceLookup interface {
+	GetBySerialNumber(ctx context.Context, sn string) (*coremodel.Device, error)
+}
+
+// pathTranslatorProductMatcher 把 productClass 路由到 product。由 *product.Registry 满足。
+type pathTranslatorProductMatcher interface {
+	MatchProductClass(ctx context.Context, productClass string) (*product.MatchResult, error)
+}
+
+// pathTranslatorFactory 取 (productID, swVersion) 的 Translator。由 *parammodel.Registry 满足。
+type pathTranslatorFactory interface {
+	Translator(ctx context.Context, productID uuid.UUID, swVersion string) (*parammodel.Translator, error)
+}
+
+// PathTranslationService 把 task.Params 内的 standardPath 翻译为 privatePath。
+//
+// 缺省语义（任一依赖未注入或任一步失败）：原样返回 task.Params，调用方继续按原流程
+// BuildRequest —— 这是退化兼容（与旧的 App fanout fallback 行为一致）。
+type PathTranslationService struct {
+	devices    pathTranslatorDeviceLookup
+	products   pathTranslatorProductMatcher
+	translator pathTranslatorFactory
+	logger     *zap.Logger
+}
+
+// NewPathTranslationService 构造服务。任一依赖为 nil → 后续翻译退化为透传。
+func NewPathTranslationService(
+	devices pathTranslatorDeviceLookup,
+	products pathTranslatorProductMatcher,
+	translator pathTranslatorFactory,
+	logger *zap.Logger,
+) *PathTranslationService {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	return &PathTranslationService{
+		devices:    devices,
+		products:   products,
+		translator: translator,
+		logger:     logger.Named("acs-path-translator"),
+	}
+}
+
+// Enabled 报告服务是否具备翻译能力(依赖均已注入)。供 handler 跳过 noop 路径。
+func (s *PathTranslationService) Enabled() bool {
+	return s != nil && s.devices != nil && s.products != nil && s.translator != nil
+}
+
+// TranslateTaskParams 翻译 task.Params 内的 path 字段并返回新的 json.RawMessage。
+//
+// 返回 (新 params, true) 表示发生过翻译(可能仍有 miss,但至少一条命中);
+// 返回 (原 params, false) 表示完全没翻译(透传)。
+// 永不返回 error —— 任一步失败 fallback 原 params + WARN 日志,与旧 fanout 一致。
+//
+// 注:即使所有 path 在 Translator 内都 Found=false(完全 miss),也返回 (新 params, true)
+// 但新 params 与原 params 等价(原样写回)。这种语义让上层无需感知是否真的 transform 过,
+// 仅需判断"是否走过翻译路径"。
+func (s *PathTranslationService) TranslateTaskParams(ctx context.Context, t *task.Task) (json.RawMessage, bool) {
+	if !s.Enabled() || t == nil || len(t.Params) == 0 || !methodNeedsTranslation(t.Method) {
+		return t.Params, false
+	}
+
+	device, err := s.devices.GetBySerialNumber(ctx, t.DeviceSN)
+	if err != nil || device == nil {
+		s.logger.Warn("path translation skipped: device lookup failed",
+			zap.String("device_sn", t.DeviceSN),
+			zap.String("task_id", t.ID),
+			zap.Error(err))
+		return t.Params, false
+	}
+
+	matchRes, err := s.products.MatchProductClass(ctx, device.ProductClass)
+	if err != nil || matchRes == nil || matchRes.Product == nil || matchRes.Product.ParamModelID == nil {
+		// orphan device 不算严重错误:App 端 fanout 也会走 orphan_passthrough。
+		// 这里 WARN 但不阻断 — 原 params 直发(很可能 9005,但语义与改造前一致)。
+		if !errors.Is(err, product.ErrOrphan) && err != nil {
+			s.logger.Warn("path translation skipped: product match failed",
+				zap.String("device_sn", t.DeviceSN),
+				zap.String("product_class", device.ProductClass),
+				zap.String("task_id", t.ID),
+				zap.Error(err))
+		}
+		return t.Params, false
+	}
+
+	tr, err := s.translator.Translator(ctx, matchRes.Product.ID, device.FirmwareVersion)
+	if err != nil || tr == nil {
+		if err != nil && !errors.Is(err, parammodel.ErrNoMapping) {
+			s.logger.Warn("path translation skipped: translator unavailable",
+				zap.String("device_sn", t.DeviceSN),
+				zap.String("product_class", device.ProductClass),
+				zap.String("software_version", device.FirmwareVersion),
+				zap.String("task_id", t.ID),
+				zap.Error(err))
+		}
+		return t.Params, false
+	}
+
+	translated, err := translateParamsByMethod(t.Method, t.Params, tr)
+	if err != nil {
+		s.logger.Warn("path translation skipped: params shape mismatch",
+			zap.String("device_sn", t.DeviceSN),
+			zap.String("method", t.Method),
+			zap.String("task_id", t.ID),
+			zap.Error(err))
+		return t.Params, false
+	}
+	return translated, true
+}
+
+// methodNeedsTranslation 报告哪些 RPC 方法的 params 含 path 字段。
+func methodNeedsTranslation(method string) bool {
+	switch method {
+	case "GetParameterValues", "GetParameterAttributes",
+		"SetParameterValues", "SetParameterAttributes",
+		"GetParameterNames",
+		"AddObject", "DeleteObject":
+		return true
+	default:
+		return false
+	}
+}
+
+// translateParamsByMethod 按 RPC 类型选择性翻译 params 内的 path 字段。
+func translateParamsByMethod(method string, raw json.RawMessage, tr *parammodel.Translator) (json.RawMessage, error) {
+	switch method {
+	case "GetParameterValues", "GetParameterAttributes":
+		return translateNamesArray(raw, tr)
+	case "SetParameterValues", "SetParameterAttributes":
+		return translateValuesArray(raw, tr)
+	case "GetParameterNames":
+		return translateSinglePath(raw, tr)
+	case "AddObject", "DeleteObject":
+		return translateObjectName(raw, tr)
+	default:
+		return raw, nil
+	}
+}
+
+// translateNamesArray 翻译 {names: [string]} 形态(GPV / GPA)。
+func translateNamesArray(raw json.RawMessage, tr *parammodel.Translator) (json.RawMessage, error) {
+	var p struct {
+		Names []string `json:"names"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, fmt.Errorf("unmarshal names: %w", err)
+	}
+	for i, n := range p.Names {
+		if n == "" {
+			continue
+		}
+		if res := tr.ToPrivate(n); res.Found {
+			p.Names[i] = res.Translated
+		}
+	}
+	return json.Marshal(p)
+}
+
+// translateValuesArray 翻译 {values: [{name, value, type}]} 形态(SPV / SPA)。
+// 用 map[string]interface{} 解析以容纳厂商扩展字段(如 access)。
+func translateValuesArray(raw json.RawMessage, tr *parammodel.Translator) (json.RawMessage, error) {
+	var p struct {
+		Values []map[string]interface{} `json:"values"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, fmt.Errorf("unmarshal values: %w", err)
+	}
+	for _, v := range p.Values {
+		nameRaw, ok := v["name"]
+		if !ok {
+			continue
+		}
+		name, ok := nameRaw.(string)
+		if !ok || name == "" {
+			continue
+		}
+		if res := tr.ToPrivate(name); res.Found {
+			v["name"] = res.Translated
+		}
+	}
+	return json.Marshal(p)
+}
+
+// translateSinglePath 翻译 {path, next_level} 形态(GPN)。
+func translateSinglePath(raw json.RawMessage, tr *parammodel.Translator) (json.RawMessage, error) {
+	var p struct {
+		Path      string `json:"path"`
+		NextLevel bool   `json:"next_level"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, fmt.Errorf("unmarshal path: %w", err)
+	}
+	if p.Path != "" {
+		if res := tr.ToPrivate(p.Path); res.Found {
+			p.Path = res.Translated
+		}
+	}
+	return json.Marshal(p)
+}
+
+// translateObjectName 翻译 {object_name} 形态(AddObject / DeleteObject)。
+func translateObjectName(raw json.RawMessage, tr *parammodel.Translator) (json.RawMessage, error) {
+	var p map[string]interface{}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, fmt.Errorf("unmarshal object_name: %w", err)
+	}
+	nameRaw, ok := p["object_name"]
+	if !ok {
+		return raw, nil
+	}
+	name, ok := nameRaw.(string)
+	if !ok || name == "" {
+		return raw, nil
+	}
+	if res := tr.ToPrivate(name); res.Found {
+		p["object_name"] = res.Translated
+	}
+	return json.Marshal(p)
+}

@@ -95,6 +95,9 @@ type Handler struct {
 	// 两个字段都为 nil 表示跟踪关闭（默认）。
 	traceWhitelist *trace.WhitelistCache
 	traceService   traceCaptureSink
+	// pathTranslator: ACS 端 standardPath → privatePath 翻译服务。
+	// nil 或 !Enabled() 时 → task.Params 原样下发（与改造前行为一致）。
+	pathTranslator *PathTranslationService
 	// connSessions 映射 HTTP RemoteAddr → connSessionEntry，用于连接级会话追踪。
 	// 条目在会话完成时或由后台清理器清除。
 	connSessions sync.Map
@@ -578,6 +581,8 @@ func (h *Handler) handleEmpty(w http.ResponseWriter, r *http.Request, log *zap.L
 	if err != nil {
 		log.Error("pop task from queue", zap.Error(err))
 	} else if taskItem != nil {
+		// standardPath → privatePath 翻译（T-XXX：翻译职责从 App fanout 迁移到 ACS）
+		h.translateTaskParamsInPlace(r.Context(), taskItem, log)
 		// 为此任务生成 CWMP ID
 		cwmpID := task.GenerateCWMPID(taskItem.Method)
 
@@ -785,6 +790,7 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	if err != nil {
 		log.Error("pop task from queue", zap.Error(err))
 	} else if nextTask != nil {
+		h.translateTaskParamsInPlace(r.Context(), nextTask, log)
 		// 为此任务生成 CWMP ID
 		newCWMPID := task.GenerateCWMPID(nextTask.Method)
 
@@ -1097,6 +1103,7 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 	if err != nil {
 		log.Error("pop next task after fault", zap.Error(err))
 	} else if nextTask != nil {
+		h.translateTaskParamsInPlace(r.Context(), nextTask, log)
 		newCWMPID := task.GenerateCWMPID(nextTask.Method)
 		if err := h.taskService.MarkTaskSent(r.Context(), nextTask.ID, newCWMPID); err != nil {
 			log.Error("mark next task sent", zap.Error(err), zap.String("task_id", nextTask.ID))
@@ -2070,4 +2077,26 @@ func filterExpeditedEventParams(params []tr069.ParameterValueStruct) []tr069.Par
 		}
 	}
 	return filtered
+}
+
+// translateTaskParamsInPlace 在 ACS 出队时把 task.Params 内的 standardPath 翻译为 privatePath。
+//
+// T-XXX 改造：翻译职责从 App 端 mml fanout 迁移到 ACS。device_tasks.tr069_params 现在
+// 入队时存的是 standardPath；ACS 出队时按 device.product_class → product_class_patterns →
+// (discovered|default)_param_mappings 链路翻译为 privatePath 后下发。
+//
+// 失败语义（任一前置依赖未注入或任一步失败）→ task.Params 原样保留，与改造前行为一致。
+// helper 设计为 nil-safe + 副作用本地化：直接覆写 t.Params。
+func (h *Handler) translateTaskParamsInPlace(ctx context.Context, t *task.Task, log *zap.Logger) {
+	if h.pathTranslator == nil || !h.pathTranslator.Enabled() || t == nil {
+		return
+	}
+	translated, changed := h.pathTranslator.TranslateTaskParams(ctx, t)
+	if changed {
+		t.Params = translated
+		log.Debug("ACS path translation applied",
+			zap.String("task_id", t.ID),
+			zap.String("device_sn", t.DeviceSN),
+			zap.String("method", t.Method))
+	}
 }

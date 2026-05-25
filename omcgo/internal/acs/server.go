@@ -52,8 +52,12 @@ type ServerDeps struct {
 	ProtocolLogger          *zap.Logger                 // dedicated logger for protocol XML (nil = disabled)
 	MaxBodySize             int                         // XML truncation threshold for protocol log (0 = no truncation)
 	// T-0137 / M1: TR069 报文跟踪。两个都为 nil 表示跟踪关闭。
-	TraceWhitelist          *trace.WhitelistCache
-	TraceService            *trace.Service
+	TraceWhitelist *trace.WhitelistCache
+	TraceService   *trace.Service
+	// PathTranslator: ACS 端 standardPath → privatePath 翻译服务。
+	// 任一底层依赖（ProductRegistry / ParamRegistry / DeviceRepo）未配置时 → nil-safe
+	// 退化为透传（task.Params 原样下发，等价于改造前行为）。
+	PathTranslator          *PathTranslationService
 	Logger                  *zap.Logger
 	RequestIDPrefix         string // prefix for request IDs, e.g., "acs"
 	EnableTestTaskInjection bool   // enable random test task injection (for testing only)
@@ -88,6 +92,7 @@ func NewACSServer(cfg appconfig.ACSConfig, deps ServerDeps) *ACSServer {
 		maxBodySize:             deps.MaxBodySize,
 		traceWhitelist:          deps.TraceWhitelist,
 		traceService:            deps.TraceService,
+		pathTranslator:          deps.PathTranslator,
 	}
 
 	mux := http.NewServeMux()

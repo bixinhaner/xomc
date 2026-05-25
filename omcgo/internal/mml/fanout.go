@@ -3,7 +3,6 @@ package mml
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -252,107 +251,22 @@ func (f *Fanouter) buildDeviceTaskRequests(ctx context.Context, mmlTask *MMLTask
 	return reqs
 }
 
-// translateParamRefs 把 standardPath 形态的 paramRefs 翻译为 device 对应的
-// privatePath 形态。返回 (翻译后副本, missCount, 使用的 translator)。
+// translateParamRefs 已退化为 noop（T-XXX 改造）。
 //
-// 任一步骤失败（设备查询、product 匹配、mapping 构造）都退化为：直接返回
-// 原 paramRefs + missCount=len(paramRefs)（全部用 standardPath 兜底）。
-// Translator 命中失败的单条 path 同样累入 missCount。
+// 历史：本方法曾在 fanout 阶段把 standardPath 翻译为 privatePath 写入 device_task.params。
+// 改造后：翻译职责完全迁移到 ACS 端（PopTask 后、BuildRequest 前），队列里存的是
+// standardPath（用户的核心诉求 — 字典更新后 pending 任务自动使用新映射，任务审计稳定）。
 //
-// 当 fanouter 的依赖未注入（早期集成 / 测试场景）时，跳过翻译，原样返回
-// 且 missCount=0（视为"无需翻译"，与生产 fallback 区分由日志注解）。
+// 保留方法签名是为了让 buildDeviceTaskRequests 现有调用站点继续编译；ProductMatcher /
+// TranslatorFactory / DeviceLookup 依赖保留在 Fanouter struct 中但不再被消费，
+// 是为了让 provider DI 接线层保持不变（向后兼容）。
+//
+// T-0170 即时 422 校验仍由 service.translateTaskPaths 在 fanout 前执行；本方法之后
+// 即可移除——但本期保持最小改动面。
 func (f *Fanouter) translateParamRefs(
-	ctx context.Context, sn string, refs []MMLParamRef,
+	_ context.Context, _ string, refs []MMLParamRef,
 ) ([]MMLParamRef, int, *parammodel.Translator) {
-	if len(refs) == 0 || f.productMatcher == nil || f.translatorFactory == nil || f.deviceLookup == nil {
-		return refs, 0, nil
-	}
-
-	device, err := f.deviceLookup.GetBySerialNumber(ctx, sn)
-	if err != nil || device == nil {
-		f.logger.Warn("path translation fallback: device lookup failed",
-			zap.String("device_sn", sn),
-			zap.Error(err),
-		)
-		if f.metrics != nil {
-			f.metrics.missDeviceLookup()
-		}
-		return refs, len(refs), nil
-	}
-
-	matchRes, err := f.productMatcher.MatchProductClass(ctx, device.ProductClass)
-	if err != nil || matchRes == nil || matchRes.Product == nil || matchRes.Product.ParamModelID == nil {
-		// 用户决策 2026-05-18：找不到设备对应的 product/param_model 是异常态
-		// （命令树不做兼容性过滤，用户可以对任何设备下发任何命令；落到这里
-		// 说明 product_class_patterns 缺规则或新设备型号未登记）。升级到
-		// Error 级 + 累加 metric，运维 / Prometheus alert 能立刻发现。
-		f.logger.Error("path translation fallback: product/param_model unresolved",
-			zap.String("device_sn", sn),
-			zap.String("product_class", device.ProductClass),
-			zap.Error(err),
-		)
-		if f.metrics != nil {
-			f.metrics.missProductUnresolved()
-		}
-		return refs, len(refs), nil
-	}
-
-	translator, err := f.translatorFactory.Translator(ctx, *matchRes.Product.ParamModelID, device.FirmwareVersion)
-	if err != nil || translator == nil {
-		// ErrNoMapping 是合法业务态（无 discovered 也无 default），不算错误。
-		if !errors.Is(err, parammodel.ErrNoMapping) && err != nil {
-			f.logger.Warn("path translation fallback: translator build failed",
-				zap.String("device_sn", sn),
-				zap.String("product_id", matchRes.Product.ID.String()),
-				zap.String("sw_version", device.FirmwareVersion),
-				zap.Error(err),
-			)
-		}
-		if f.metrics != nil {
-			f.metrics.missTranslatorUnavail()
-		}
-		return refs, len(refs), nil
-	}
-
-	out := make([]MMLParamRef, 0, len(refs))
-	missCount := 0
-	// v1.1 §6 P2：单条 path 在 translator 内未命中只累 metrics 不输出日志，
-	// 排查"为何下发的 SOAP 用 standardPath"无可追溯线索。这里聚合到 task 级，
-	// missCount>0 时输出一条 WARN 含 device + product_class + sw_version +
-	// 前 10 条 sample path（限量防日志洪泛）。
-	const maxSampleMissedPaths = 10
-	var sampleMissedPaths []string
-	for _, r := range refs {
-		if r.Tr069Path == "" {
-			out = append(out, r)
-			continue
-		}
-		res := translator.ToPrivate(r.Tr069Path)
-		copy := r
-		copy.Tr069Path = res.Translated
-		if !res.Found {
-			missCount++
-			if len(sampleMissedPaths) < maxSampleMissedPaths {
-				sampleMissedPaths = append(sampleMissedPaths, r.Tr069Path)
-			}
-		}
-		out = append(out, copy)
-	}
-	if f.metrics != nil {
-		f.metrics.missPathUnmapped(missCount)
-	}
-	if missCount > 0 && f.logger != nil {
-		f.logger.Warn("path translation: some standardPaths unmapped, falling back as-is",
-			zap.String("device_sn", sn),
-			zap.String("product_class", device.ProductClass),
-			zap.String("sw_version", device.FirmwareVersion),
-			zap.String("product_id", matchRes.Product.ID.String()),
-			zap.Int("miss_count", missCount),
-			zap.Int("total_count", len(refs)),
-			zap.Strings("sample_missed_paths", sampleMissedPaths),
-		)
-	}
-	return out, missCount, translator
+	return refs, 0, nil
 }
 
 // translatorSourceLabel 给日志生成一个简短的 Translator 状态字串。
@@ -364,90 +278,17 @@ func translatorSourceLabel(t *parammodel.Translator) string {
 	return "param_model"
 }
 
-// translateObjectName 翻译 ADD/RMV/DeleteObject 命令的 parameters.object_name 字段。
+// translateObjectName 已退化为 noop（T-XXX 改造）。
 //
-// 历史问题（v1.2 测试报告 §3 P0）：translateParamRefs 仅作用于 param_refs[].Tr069Path，
-// 而 ADD/RMV 不带 param_refs —— object_name 直接进 SOAP wire。对于 standardPath !=
-// privatePath 的设备（如 BaiBLQ 的 X_COM_* 前缀），CPE 收到的是 standardPath，必返
-// 9005 Invalid Object Name。
+// 历史：曾在 fanout 阶段翻译 ADD/RMV 的 object_name 字段（避免 BaiBLQ 等私有 path 设备
+// 收到 standardPath 后返 9005）。改造后：ACS 端的 PathTranslationService.TranslateTaskParams
+// 在 BuildRequest 前统一翻译 object_name（含 AddObject / DeleteObject 路径）。
 //
-// 行为：
-//   - formValues 不含 "object_name" 或为空 → 原 map 返回（无副作用）
-//   - 任一前置依赖（deviceLookup / productMatcher / translatorFactory）未注入 → 原样返回
-//   - translator 取不到（NoMapping） → 原样返回 + WARN 留痕
-//   - translator 命中但 object_name 未在映射表内 → 原样返回 + WARN 留痕
-//   - 命中 → 浅拷贝 formValues，仅替换 object_name 为 privatePath
-//
-// 注：本函数对 formValues map 不做就地修改，永远返回新 map（即使内容不变，调用方
-// 拿到的 map 可安全持有，不会被 Sequencer 后续 substitution 改坏）。
+// 保留方法签名仅为兼容现有调用站点；formValues 原样返回（standardPath 落入 device_task.params）。
 func (f *Fanouter) translateObjectName(
-	ctx context.Context, sn string, formValues map[string]interface{},
+	_ context.Context, _ string, formValues map[string]interface{},
 ) map[string]interface{} {
-	if formValues == nil {
-		return formValues
-	}
-	objNameRaw, ok := formValues["object_name"]
-	if !ok {
-		return formValues
-	}
-	objName, ok := objNameRaw.(string)
-	if !ok || objName == "" {
-		return formValues
-	}
-	if f.productMatcher == nil || f.translatorFactory == nil || f.deviceLookup == nil {
-		return formValues
-	}
-	device, err := f.deviceLookup.GetBySerialNumber(ctx, sn)
-	if err != nil || device == nil {
-		// 与 translateParamRefs 行为一致：device 查不到 warn 但不阻塞
-		f.logger.Warn("object_name translation skip: device lookup failed",
-			zap.String("device_sn", sn),
-			zap.String("object_name", objName),
-			zap.Error(err),
-		)
-		return formValues
-	}
-	matchRes, err := f.productMatcher.MatchProductClass(ctx, device.ProductClass)
-	if err != nil || matchRes == nil || matchRes.Product == nil || matchRes.Product.ParamModelID == nil {
-		f.logger.Error("object_name translation skip: product/param_model unresolved",
-			zap.String("device_sn", sn),
-			zap.String("product_class", device.ProductClass),
-			zap.String("object_name", objName),
-			zap.Error(err),
-		)
-		return formValues
-	}
-	translator, err := f.translatorFactory.Translator(ctx, *matchRes.Product.ParamModelID, device.FirmwareVersion)
-	if err != nil || translator == nil {
-		if !errors.Is(err, parammodel.ErrNoMapping) && err != nil {
-			f.logger.Warn("object_name translation skip: translator build failed",
-				zap.String("device_sn", sn),
-				zap.String("object_name", objName),
-				zap.Error(err),
-			)
-		}
-		return formValues
-	}
-	res := translator.ToPrivate(objName)
-	if !res.Found {
-		// object_name 未命中 mapping 表 —— 大概率是命令字典 target_object 缺
-		// `.{i}.` 占位（未经 substituteInstanceSelectors 替换）或 mapping 表本身
-		// 缺该 path。WARN 输出 5 元组方便排查（device_class / sw_version / paramModel）。
-		f.logger.Warn("object_name translation: standardPath unmapped, falling back as-is",
-			zap.String("device_sn", sn),
-			zap.String("product_class", device.ProductClass),
-			zap.String("sw_version", device.FirmwareVersion),
-			zap.String("param_model_id", matchRes.Product.ParamModelID.String()),
-			zap.String("object_name", objName),
-		)
-		return formValues
-	}
-	out := make(map[string]interface{}, len(formValues))
-	for k, v := range formValues {
-		out[k] = v
-	}
-	out["object_name"] = res.Translated
-	return out
+	return formValues
 }
 
 // paramRefsFromEntry pulls param_refs out of a commands[] entry, tolerating

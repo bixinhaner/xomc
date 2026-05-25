@@ -21,12 +21,15 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/upload"
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/backup"
+	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/components"
 	"github.com/omcgo/omcgo/internal/core/components/logger"
 	miniocomp "github.com/omcgo/omcgo/internal/core/components/minio"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/health"
+	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/product"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/trace"
 	"github.com/spf13/cobra"
@@ -92,6 +95,14 @@ func runACS(cmd *cobra.Command, args []string) error {
 		requestIDPrefix = "acs"
 	}
 
+	// T-XXX: ACS 端 standardPath → privatePath 翻译服务（取代 App fanout 翻译）。
+	//   - ProductRegistry: productClass → product 路由（regex patterns）
+	//   - ParamRegistry: discovered → default 双源映射
+	//   - DeviceRepo: 按 SN 查 product_class / firmware_version
+	// 任一依赖初始化失败 → PathTranslator 为 nil-safe 透传（设备直收 standardPath，CPE 必返 9005;
+	// 与改造前 fanout fallback 行为一致，所以仅 WARN 不阻塞 ACS 启动）。
+	pathTranslator := buildACSPathTranslator(context.Background(), inf)
+
 	deps := acs.NewDefaultDeps(
 		sessionStore,
 		taskService,
@@ -109,6 +120,7 @@ func runACS(cmd *cobra.Command, args []string) error {
 	// （未配 PG/MinIO）下误报。检查列表与 components.HealthChecker.Register 同源，
 	// 但这里独立组装是为了让 ACS HTTP server（非 metrics 端口）也能直接探测。
 	deps.ReadinessCheckers = buildACSReadinessCheckers(inf)
+	deps.PathTranslator = pathTranslator
 	transferPolicy := transfercfg.NewPolicy(
 		transfercfg.DefaultsFromACSConfig(cfg),
 		newTransferSysConfigLookup(admin.NewPgSysConfigRepository(inf.PgPool)),
@@ -347,6 +359,54 @@ func runACS(cmd *cobra.Command, args []string) error {
 	}
 
 	return inf.WaitAndShutdown(errCh)
+}
+
+// buildACSPathTranslator 构造 ACS 端的 standardPath → privatePath 翻译服务。
+//
+// 启动期一次性 Refresh ProductRegistry 与 ParamRegistry —— 把 product_class_patterns
+// 与字典版本号同步到本进程。运行期通过 ensureFresh 协议感知其他实例的 BumpVersion。
+//
+// 任一依赖（PG / Redis 缺失）→ 返回 nil，Handler.translateTaskParamsInPlace 退化为透传。
+// 仅 WARN 不阻塞启动 —— 与改造前 App fanout 失败 fallback 的行为一致。
+func buildACSPathTranslator(ctx context.Context, inf *components.Infra) *acs.PathTranslationService {
+	if inf == nil || inf.PgPool == nil {
+		inf.Logger.Warn("ACS path translator disabled: PgPool not available")
+		return nil
+	}
+	logger := inf.Logger.Named("acs-path-translator")
+
+	// ProductRegistry — productClass → product 路由（regex patterns）
+	productRepo := product.NewPgRepository(inf.PgPool)
+	productMetrics := product.NewRegistryMetrics(inf.MetricsReg)
+	productCache := product.Cache(product.NopCache{})
+	if inf.Redis != nil {
+		productCache = product.NewRedisCache(inf.Redis)
+	}
+	productReg := product.NewRegistry(productRepo, productCache, productMetrics, logger)
+
+	refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := productReg.Refresh(refreshCtx); err != nil {
+		logger.Warn("product registry refresh failed; path translation disabled", zap.Error(err))
+		return nil
+	}
+
+	// ParamRegistry — discovered → default 双源映射（依赖 productReg 反查 ParamModelID）
+	paramRepo := parammodel.NewPgRepository(inf.PgPool)
+	paramMetrics := parammodel.NewRegistryMetrics(inf.MetricsReg)
+	paramCache := parammodel.Cache(parammodel.NopCache{})
+	if inf.Redis != nil {
+		paramCache = parammodel.NewRedisCache(inf.Redis)
+	}
+	paramReg := parammodel.NewRegistry(paramRepo, paramCache, productReg, paramMetrics, logger)
+	if err := paramReg.Refresh(refreshCtx); err != nil {
+		// ParamRegistry Refresh 仅清 L1 + BumpVersion，PG 错误较罕见 — WARN 后继续，
+		// 后续 GetByProduct 仍会按需 read-through。
+		logger.Warn("param registry refresh failed (non-fatal); continuing", zap.Error(err))
+	}
+
+	deviceRepo := device.NewPgDeviceRepository(inf.PgPool)
+	return acs.NewPathTranslationService(deviceRepo, productReg, paramReg, inf.Logger)
 }
 
 // buildACSReadinessCheckers 收集 ACS 进程实际依赖的基础设施，构造 /readyz 检查列表。
