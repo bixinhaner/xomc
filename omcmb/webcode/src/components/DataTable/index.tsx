@@ -207,18 +207,28 @@ function DataTable<T>(
     if (!el) return;
 
     let lastY: number | undefined;
+    let rafId: number | null = null;
+
     const recalc = () => {
-      const thead = el.querySelector('.ant-table-thead') as HTMLElement | null;
-      // 默认 thead 约 40px（small 密度），首帧 thead 还没渲染时用兜底值
-      // 避免 body 撑过头反向滚出来。
-      const headerH = thead?.offsetHeight ?? 40;
-      const y = Math.max(0, el.clientHeight - headerH - 2);
-      // 1px 抖动死区：thead 在 scroll 切换瞬间 offsetHeight 可能 ±1 来回
-      // 抖动，没有死区会触发无限 setState → ResizeObserver → recalc 循环。
-      if (y > 0 && (lastY === undefined || Math.abs(y - lastY) > 1)) {
-        lastY = y;
-        setAutoBodyY(y);
+      // 如果已有待执行的 raf，取消它，避免积压
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
       }
+
+      rafId = requestAnimationFrame(() => {
+        const thead = el.querySelector('.ant-table-thead') as HTMLElement | null;
+        // 默认 thead 约 40px（small 密度），首帧 thead 还没渲染时用兜底值
+        // 避免 body 撑过头反向滚出来。
+        const headerH = thead?.offsetHeight ?? 40;
+        const y = Math.max(0, el.clientHeight - headerH - 2);
+        // 增大死区到 5px，避免 ResizeObserver 反馈环导致的持续漂移
+        // 反馈环表现为：分页栏每帧向上移动 1-2px，最终盖住列表
+        if (y > 0 && (lastY === undefined || Math.abs(y - lastY) > 5)) {
+          lastY = y;
+          setAutoBodyY(y);
+        }
+        rafId = null;
+      });
     };
 
     recalc();
@@ -229,6 +239,9 @@ function DataTable<T>(
     return () => {
       ro.disconnect();
       window.clearTimeout(t);
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
     };
   }, [autoFitHeight, scroll]);
 

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { App, Button, Card, Drawer, Input, Modal, Popconfirm, Popover, Progress, Space, Spin, Table, Tag, Tooltip, Typography } from 'antd';
+import { App, Button, Card, Drawer, Input, Modal, Popconfirm, Popover, Progress, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   AlertOutlined,
@@ -1538,8 +1538,7 @@ export default function DeviceList() {
           <StatisticsPanel items={statsItems} style={{ marginBottom: 8 }} />
 
           {/* 设备列表卡片 */}
-          <Spin spinning={isLoading} size="large" tip={t('common.loading')}>
-            <Card
+          <Card
             size="small"
             bordered
             style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
@@ -1570,8 +1569,7 @@ export default function DeviceList() {
               showRowNumber
               rowNumberTitle={t('table.rowNumber')}
             />
-            </Card>
-          </Spin>
+          </Card>
         </ListPageLayout>
       </div>
 
