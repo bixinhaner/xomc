@@ -122,7 +122,11 @@ function generateDevice(index: number): Device {
     onlineTime: isOnline ? randomDate(7) : '',
     offlineTime: isOnline ? '' : randomDate(3),
     onlineDuration: isOnline ? Math.floor(Math.random() * 864000) : 0,
-    upTime: isOnline ? `${Math.floor(Math.random() * 720)}h${Math.floor(Math.random() * 60)}m` : '',
+    upTime: isOnline ? Math.floor(Math.random() * 720 * 3600) : 0,
+    // T-0173: 累计在线时长（OMC 视角）mock 取 1~30 天范围,验证 Detail 展示。
+    cumulativeOnlineDuration: Math.floor(Math.random() * 30 * 86400),
+    // T-0173: 离线原因 mock,在线设备 null,离线随机选三种之一。
+    lastOfflineReason: isOnline ? null : pickRandom(['heartbeat_timeout', 'manual', 'reboot']),
     firstOnlineTime: randomDate(365),
     lastInformTime: isOnline ? randomDate(1) : randomDate(30),
     deviceName: `${city.name}站点${String((index % 20) + 1).padStart(2, '0')}`,
@@ -308,7 +312,11 @@ const beijingDevices: Device[] = Array.from({ length: 50 }, (_, i) => {
     onlineTime: isOnline ? randomDate(7) : '',
     offlineTime: isOnline ? '' : randomDate(3),
     onlineDuration: isOnline ? Math.floor(Math.random() * 864000) : 0,
-    upTime: isOnline ? `${Math.floor(Math.random() * 720)}h${Math.floor(Math.random() * 60)}m` : '',
+    upTime: isOnline ? Math.floor(Math.random() * 720 * 3600) : 0,
+    // T-0173: 累计在线时长（OMC 视角）mock 取 1~30 天范围。
+    cumulativeOnlineDuration: Math.floor(Math.random() * 30 * 86400),
+    // T-0173: 离线原因 mock。
+    lastOfflineReason: isOnline ? null : pickRandom(['heartbeat_timeout', 'manual', 'reboot']),
     firstOnlineTime: randomDate(365),
     lastInformTime: isOnline ? randomDate(1) : randomDate(30),
     deviceName: `${beijingCity.name}站点${String((i % 20) + 1).padStart(2, '0')}`,

@@ -144,6 +144,14 @@ export interface Device {
   // T-XXX (Phase 0)：后端 device_info.run_time int64 秒（来自 Device.DeviceInfo.UpTime）。
   // 之前类型是 string + mapper 读不存在字段 → 显示空。
   upTime: number | null;
+  // T-0173: OMC 视角累计在线时长（秒）。
+  // 由 DeviceStatusReconciler 在 online→offline 边沿事务性累加 (NOW - last_online_time)。
+  // 总在线时长 = cumulativeOnlineDuration + (is_online ? NOW - last_online_time : 0)。
+  // null 表示设备从未上线 / 后端旧版无该字段。
+  cumulativeOnlineDuration: number | null;
+  // T-0173: 最近一次离线原因（诊断字段，仅 isOnline=false 时有意义)。
+  // 取值：'heartbeat_timeout' | 'manual' | 'reboot' | null
+  lastOfflineReason: string | null;
   firstOnlineTime: string;
   lastInformTime: string;
   deviceName: string;

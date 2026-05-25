@@ -55,6 +55,13 @@ interface BackendDevice {
   run_time?: number;
   // online_duration: SQL 派生 — 当前在线/上次在线区间秒数
   online_duration?: number;
+  // T-0173: OMC 视角累计在线时长（秒）。
+  // 后端 device_info.cumulative_online_duration，由 DeviceStatusReconciler
+  // 在 online→offline 边沿事务性累加 (NOW - last_online_time)。
+  cumulative_online_duration?: number;
+  // T-0173: 最近一次离线原因（诊断字段，可空）。
+  // 取值：heartbeat_timeout / manual / reboot / null（从未离线或当前在线）
+  last_offline_reason?: string | null;
   gps_version?: string;
   rom?: string;
   remark?: string;
@@ -254,6 +261,10 @@ function mapBackendDevice(bd: BackendDevice): Device {
     offlineTime: bd.last_offline_time || '',
     onlineDuration: bd.online_duration ?? null,
     upTime: bd.run_time ?? null,
+    // T-0173: OMC 视角累计在线时长（秒）。后端 device_info.cumulative_online_duration。
+    cumulativeOnlineDuration: bd.cumulative_online_duration ?? null,
+    // T-0173: 最近一次离线原因（诊断字段)。空串 → null,与 onlineDuration 一致。
+    lastOfflineReason: bd.last_offline_reason ?? null,
     firstOnlineTime: bd.first_online_time || '',
     lastInformTime: bd.last_inform_at || '',
     deviceName: friendlyName,
