@@ -92,19 +92,38 @@ export default function PivotTable({ rows, loading }: PivotTableProps) {
     );
   }
 
-  // antd 默认 scroll.x 行为：当 container 宽度 > totalWidth 时，按列 width 比例拉伸填满容器；
-  // 当 container 宽度 < totalWidth 时（指标列多），保留 width 严格值并出现横向滚动。
+  // antd 默认 scroll.x 行为：container > totalWidth 时按列 width 比例拉伸；container < totalWidth 时严格 width + 横滚。
+  // macOS 默认 overlay scrollbar 太淡用户看不见，强制 webkit scrollbar 加深可见。
   return (
-    <Table<PivotRow>
-      rowKey="key"
-      size="small"
-      loading={loading}
-      columns={columns}
-      dataSource={pivoted.rows}
-      pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `共 ${t} 行` }}
-      tableLayout="fixed"
-      scroll={{ x: totalWidth, y: 480 }}
-      bordered
-    />
+    <>
+      <style>{`
+        .kpi-pivot-table .ant-table-body::-webkit-scrollbar,
+        .kpi-pivot-table .ant-table-content::-webkit-scrollbar {
+          height: 12px;
+          background: rgba(0, 0, 0, 0.04);
+        }
+        .kpi-pivot-table .ant-table-body::-webkit-scrollbar-thumb,
+        .kpi-pivot-table .ant-table-content::-webkit-scrollbar-thumb {
+          background: rgba(0, 0, 0, 0.35);
+          border-radius: 6px;
+        }
+        .kpi-pivot-table .ant-table-body::-webkit-scrollbar-thumb:hover,
+        .kpi-pivot-table .ant-table-content::-webkit-scrollbar-thumb:hover {
+          background: rgba(0, 0, 0, 0.55);
+        }
+      `}</style>
+      <Table<PivotRow>
+        className="kpi-pivot-table"
+        rowKey="key"
+        size="small"
+        loading={loading}
+        columns={columns}
+        dataSource={pivoted.rows}
+        pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `共 ${t} 行` }}
+        tableLayout="fixed"
+        scroll={{ x: totalWidth }}
+        bordered
+      />
+    </>
   );
 }
