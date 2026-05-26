@@ -94,10 +94,15 @@ export const NAV_CONFIG: NavConfig = [
     label: 'nav.performance',
     iconName: 'LineChartOutlined',
     children: [
+      // T-0173 阶段 1：消费类在前（仪表盘 / 指标查询 / 自定义聚合）→ 配置类在后（指标库 / 测量任务管理）
+      // 与 seed/000189 同步：5 项 name + sort_order 走 menus 表 name_i18n。
+      // 性能仪表盘对齐 seed/000188 的 route_path=/performance（T-0164 G6 主入口）。
+      { key: 'perf-dashboard',  label: 'nav.performance.dashboard',    path: '/performance' },
       { key: 'perf-query',      label: 'nav.performance.query',        path: '/performance/query' },
-      // { key: 'perf-chart',      label: 'nav.performance.charts',       path: '/performance/charts' },  // 隐藏性能图表
-      { key: 'perf-kpi-bs',     label: 'nav.performance.kpiStation',   path: '/performance/kpi-station' },
+      { key: 'perf-adhoc',      label: 'nav.performance.adhoc',        path: '/performance/pm-adhoc' },
       { key: 'perf-kpi-std',    label: 'nav.performance.kpiStandard',  path: '/performance/kpi-standard' },
+      { key: 'perf-kpi-bs',     label: 'nav.performance.kpiStation',   path: '/performance/kpi-station' },
+      // { key: 'perf-chart',      label: 'nav.performance.charts',       path: '/performance/charts' },  // 隐藏性能图表
       // { key: 'perf-threshold',  label: 'nav.performance.threshold',    path: '/performance/threshold' },  // 隐藏
       // { key: 'perf-file',       label: 'nav.performance.files',        path: '/performance/files' },  // 隐藏
       // { key: 'perf-task',       label: 'nav.performance.taskConfig',   path: '/performance/task-config' },  // 隐藏

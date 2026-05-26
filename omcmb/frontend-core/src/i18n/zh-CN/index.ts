@@ -231,10 +231,13 @@ const messages: Record<string, string> = {
   // -------------------------------------------------------------------------
   // Navigation — sub-pages: Performance
   // -------------------------------------------------------------------------
-  'nav.performance.kpiStandard':  '指标管理',
-  'nav.performance.kpiStation':   '测量维护',
+  // T-0173 阶段 1：消费类菜单（dashboard / query / adhoc）+ 配置类菜单（kpiStandard / kpiStation）命名重构
+  'nav.performance.dashboard':    '性能仪表盘',
+  'nav.performance.adhoc':        '自定义聚合',
+  'nav.performance.kpiStandard':  '指标库',
+  'nav.performance.kpiStation':   '测量任务管理',
   'nav.performance.extraction':   '数据提取',
-  'nav.performance.query':        '性能查询',
+  'nav.performance.query':        '指标查询',
   'nav.performance.charts':       '性能图表',
   'nav.performance.threshold':    '门限配置',
   'nav.performance.files':        '性能文件',
