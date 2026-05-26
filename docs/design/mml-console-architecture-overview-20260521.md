@@ -173,7 +173,7 @@ MMLConsole (index.tsx)
 |---|---|
 | 注册 | `console_handler.go:73` GetCommandCompatibility |
 | Query | `product_class` 必填 |
-| 返回 | `200 { product_class, product_id, param_model_id, unsupported_command_ids: UUID[] }` / `404 ErrProductClassNotFound` / `503 service nil` |
+| 返回 | `200 { product_class, product_id, param_model_id, unsupported_command_ids: UUID[] }` / `503 service nil`（T-0177 起孤儿 productClass 返 200 + paramModelID=零值，不再 404；旧 `ErrProductClassNotFound` sentinel 已删） |
 | Service | `command_compatibility.go:165` CompatibilityService.GetCommandCompatibility |
 | 链路 | ProductRegistry.MatchProductClass → ParamRegistry.GetByParamModel → ListAllCommandPaths → ComputeCommandCompatibility |
 | 关键 SQL | `SELECT id, COALESCE(NULLIF(tree_node_refs,'[]'::jsonb), to_jsonb(target_paths), '[]'::jsonb) AS paths FROM mml_commands` |
