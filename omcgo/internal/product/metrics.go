@@ -7,10 +7,11 @@ import "github.com/prometheus/client_golang/prometheus"
 // 命名遵循已有 P1-06 模块约定（device / alarm / task），全部以 product_registry_ 前缀。
 // nil 实例由 newRegistryMetrics(nil) 返回安全空实现，避免单元测试强依赖 prometheus.Registerer。
 type registryMetrics struct {
-	matchTotal      *prometheus.CounterVec   // labels: result=hit|orphan
-	matchDuration   prometheus.Histogram
-	cacheHitTotal   *prometheus.CounterVec   // labels: layer=L1|L2|miss
-	refreshTotal    *prometheus.CounterVec   // labels: result=ok|err
+	matchTotal         *prometheus.CounterVec // labels: result=hit|orphan
+	matchDuration      prometheus.Histogram
+	cacheHitTotal      *prometheus.CounterVec // labels: layer=L1|L2|miss（GetProductByID 三级缓存）
+	classCacheHitTotal *prometheus.CounterVec // labels: layer=L1|L2|miss（MatchProductClass 二级缓存，T-0173）
+	refreshTotal       *prometheus.CounterVec // labels: result=ok|err
 }
 
 // NewRegistryMetrics 注册并返回 Registry 用的指标集合。
@@ -40,6 +41,13 @@ func NewRegistryMetrics(reg prometheus.Registerer) *registryMetrics {
 			},
 			[]string{"layer"},
 		),
+		classCacheHitTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "product_registry_class_cache_hit_total",
+				Help: "ProductRegistry MatchProductClass cache hit by layer (T-0173).",
+			},
+			[]string{"layer"},
+		),
 		refreshTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "product_registry_refresh_total",
@@ -52,7 +60,7 @@ func NewRegistryMetrics(reg prometheus.Registerer) *registryMetrics {
 	if reg == nil {
 		reg = prometheus.NewRegistry()
 	}
-	reg.MustRegister(m.matchTotal, m.matchDuration, m.cacheHitTotal, m.refreshTotal)
+	reg.MustRegister(m.matchTotal, m.matchDuration, m.cacheHitTotal, m.classCacheHitTotal, m.refreshTotal)
 	return m
 }
 
@@ -63,6 +71,9 @@ func (m *registryMetrics) matchHit()    { m.matchTotal.WithLabelValues("hit").In
 func (m *registryMetrics) matchOrphan() { m.matchTotal.WithLabelValues("orphan").Inc() }
 func (m *registryMetrics) cacheHit(layer string) {
 	m.cacheHitTotal.WithLabelValues(layer).Inc()
+}
+func (m *registryMetrics) classCacheHit(layer string) {
+	m.classCacheHitTotal.WithLabelValues(layer).Inc()
 }
 func (m *registryMetrics) refreshOK()  { m.refreshTotal.WithLabelValues("ok").Inc() }
 func (m *registryMetrics) refreshErr() { m.refreshTotal.WithLabelValues("err").Inc() }
