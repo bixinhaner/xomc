@@ -401,6 +401,10 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	if ph.pmDashboardHandler != nil {
 		ph.pmDashboardHandler.RegisterRoutes(permGroup("pm"))
 	}
+	// T-0174 阶段 1：指标查询模板 REST 路由（5 CRUD，同 pm 权限组）
+	if ph.pmQueryTemplateHandler != nil {
+		ph.pmQueryTemplateHandler.RegisterRoutes(permGroup("pm"))
+	}
 
 	// ----- Alarm routes → resource "alarms" -----
 	ah := c.alarmHandlerDeps

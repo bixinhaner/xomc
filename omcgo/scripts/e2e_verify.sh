@@ -6459,6 +6459,41 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/admin/sysConfig?categor
 check_status_in "T-0164 G8-2: GET /admin/sysConfig?category=asyncjob" "200 401 403" "$HTTP_CODE"
 
 # ------------------------------------------------------------
+# T-0174 阶段 1：指标查询页 查询模板 CRUD — 5 endpoints
+#
+# pm_query_templates 表存储指标查询页的可复用查询配置。5 端点：
+#   GET    /pm/query-templates          列表（visibility/search/page/page_size）
+#   GET    /pm/query-templates/:id      详情
+#   POST   /pm/query-templates          创建（public 限 super_admin）
+#   PATCH  /pm/query-templates/:id      更新
+#   DELETE /pm/query-templates/:id      删除
+# 用 BAD_UUID 验证契约存在 + 鉴权链路通；真创建/编辑由前端 e2e 覆盖。
+
+claim "T-0174: GET /pm/query-templates 列表 200 / 401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/pm/query-templates" -H "$W2D_AUTH")
+check_status_in "T-0174-1: GET /pm/query-templates" "200 401" "$HTTP_CODE"
+
+claim "T-0174: GET /pm/query-templates/:id 不存在 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/pm/query-templates/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "T-0174-2: GET /pm/query-templates/<bad>" "404 401" "$HTTP_CODE"
+
+claim "T-0174: POST /pm/query-templates create minimal private 200/201/401/422"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/pm/query-templates" \
+    -H "Content-Type: application/json" -H "$W2D_AUTH" \
+    -d '{"name":"e2e-t0174-private-1","visibility":"private","payload":{"device_sns":["TEST-SN-001"],"metric_paths":["PHY.NbrCqi6"],"granularity":"15min"}}')
+check_status_in "T-0174-3: POST /pm/query-templates (private)" "200 201 401 422" "$HTTP_CODE"
+
+claim "T-0174: PATCH /pm/query-templates/:id 不存在 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH "$API/pm/query-templates/$W2D_BAD_UUID" \
+    -H "Content-Type: application/json" -H "$W2D_AUTH" \
+    -d '{"description":"updated"}')
+check_status_in "T-0174-4: PATCH /pm/query-templates/<bad>" "404 401" "$HTTP_CODE"
+
+claim "T-0174: DELETE /pm/query-templates/:id 不存在 404/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API/pm/query-templates/$W2D_BAD_UUID" -H "$W2D_AUTH")
+check_status_in "T-0174-5: DELETE /pm/query-templates/<bad>" "404 401" "$HTTP_CODE"
+
+# ------------------------------------------------------------
 # T-0168 MML Path 翻译方案完善 — E2E 入口断言
 #
 # 验证两件事：

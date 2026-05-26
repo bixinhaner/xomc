@@ -15,6 +15,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/indicator"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
+	"github.com/omcgo/omcgo/internal/pm/querytemplate"
 )
 
 // initPMModule 初始化 F03 性能管理模块。
@@ -83,6 +84,10 @@ func initPMModule(c *Container) error {
 	pmDashboardSvc := pmdashboard.NewService(pmDashboardRepo, logger.Named("dashboard"))
 	pmDashboardHandler := pmdashboard.NewHandler(pmDashboardSvc, logger.Named("dashboard"))
 
+	// T-0174 阶段 1：指标查询页"查询模板"REST 入口（5 CRUD：list/get/create/update/delete）。
+	pmQueryTemplateRepo := querytemplate.NewPgRepository(c.PgPool)
+	pmQueryTemplateHandler := querytemplate.NewHandler(pmQueryTemplateRepo, logger.Named("querytemplate"))
+
 	enabledRepo := indicator.NewPgEnabledRepository(c.PgPool)
 	templateRelRepo := indicator.NewPgTemplateRelRepository(c.PgPool)
 	custNameRepo := indicator.NewPgCustNameRepository(c.PgPool)
@@ -114,18 +119,19 @@ func initPMModule(c *Container) error {
 
 	// Store deps for route registration
 	c.pmHandlerDeps = &pmHandlerDeps{
-		pmCounterRepo:        pmCounterRepo,
-		pmKPIRepo:            pmKPIRepo,
-		pmKPIEngine:          pmKPIEngine,
-		pmTaskRepo:           pmTaskRepo,
-		pmFileStore:          pmFileStore,
-		pmIndicatorRepo:      indicatorRepo,
-		pmAggregator:         pmAggregator,
-		pmAsyncJobRepo:       pmAsyncJobRepo,
-		pmAdhocHandler:       pmAdhocHandler,
-		pmDashboardHandler:   pmDashboardHandler,
-		indicatorHandler:     indicatorHandler,
-		indicatorRESTHandler: indicatorRESTHandler,
+		pmCounterRepo:          pmCounterRepo,
+		pmKPIRepo:              pmKPIRepo,
+		pmKPIEngine:            pmKPIEngine,
+		pmTaskRepo:             pmTaskRepo,
+		pmFileStore:            pmFileStore,
+		pmIndicatorRepo:        indicatorRepo,
+		pmAggregator:           pmAggregator,
+		pmAsyncJobRepo:         pmAsyncJobRepo,
+		pmAdhocHandler:         pmAdhocHandler,
+		pmDashboardHandler:     pmDashboardHandler,
+		pmQueryTemplateHandler: pmQueryTemplateHandler,
+		indicatorHandler:       indicatorHandler,
+		indicatorRESTHandler:   indicatorRESTHandler,
 	}
 
 	logger.Info("PM module initialized")
@@ -155,8 +161,9 @@ type pmHandlerDeps struct {
 	pmIndicatorRepo indicator.IndicatorRepository // T-0164-P1 ListKPIDefinitions 数据源
 	pmAggregator    *aggregator.Aggregator        // T-0164-P5 ListAggregatedMetrics 数据源
 	pmAsyncJobRepo  asyncjob.Repository           // T-0164 收尾 G5-Gap-2 手动重算端点
-	pmAdhocHandler     *adhoc.Handler        // T-0164-P7 自定义聚合任务 REST 入口
-	pmDashboardHandler *pmdashboard.Handler  // T-0164-P6 PM 仪表盘 REST 入口
+	pmAdhocHandler         *adhoc.Handler         // T-0164-P7 自定义聚合任务 REST 入口
+	pmDashboardHandler     *pmdashboard.Handler   // T-0164-P6 PM 仪表盘 REST 入口
+	pmQueryTemplateHandler *querytemplate.Handler // T-0174 指标查询模板 REST 入口
 
 	// Indicator management handler
 	indicatorHandler     *indicator.IndicatorHandler
