@@ -100,9 +100,12 @@ func (h *ConsoleHandler) RegisterRoutes(rg *gin.RouterGroup) {
 //
 // 错误码：
 //   - 400 product_class 缺失
-//   - 404 product_class 无任何 product 匹配
 //   - 503 compatibility service 未配置（启动期 nil 注入）
 //   - 500 其他内部错误
+//
+// T-0177：孤儿 productClass（ProductRegistry 未匹配）不再返 404，而是返 200 +
+// paramModelID=零值 + 全部 unsupported；前端据 paramModelID 是否零值提示
+// "未配置参数模型" vs "全部不兼容"。
 func (h *ConsoleHandler) GetCommandCompatibility(c *gin.Context) {
 	if h.compatibility == nil {
 		response.Fail(c, http.StatusServiceUnavailable, "compatibility service not configured")
@@ -115,10 +118,6 @@ func (h *ConsoleHandler) GetCommandCompatibility(c *gin.Context) {
 	}
 	result, err := h.compatibility.GetCommandCompatibility(c.Request.Context(), productClass)
 	if err != nil {
-		if errors.Is(err, ErrProductClassNotFound) {
-			response.Fail(c, http.StatusNotFound, err.Error())
-			return
-		}
 		h.logger.Error("get command compatibility",
 			zap.Error(err), zap.String("product_class", productClass))
 		response.Fail(c, http.StatusInternalServerError, err.Error())
