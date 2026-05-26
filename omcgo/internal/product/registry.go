@@ -34,15 +34,18 @@ type compiledPattern struct {
 // 缓存层级：
 //   - patterns slice：atomic.Pointer 持有不可变快照，Refresh 整体替换；零锁热路径
 //   - product 详情：sync.Map L1（按 ID）+ Cache L2（Redis）+ DB read-through
+//   - productClass 路由：sync.Map L1（按 class 字面量）+ Cache L2（Redis byProductClass）+
+//     全表 regex 扫描兜底（T-0173）
 type Registry struct {
 	repo    Repository
 	cache   Cache
 	logger  *zap.Logger
 	metrics *registryMetrics
 
-	patterns     atomic.Pointer[[]compiledPattern] // 全局 sort_order 升序
-	productByID  sync.Map                          // map[uuid.UUID]*Product
-	cacheVersion atomic.Int64
+	patterns       atomic.Pointer[[]compiledPattern] // 全局 sort_order 升序
+	productByID    sync.Map                          // map[uuid.UUID]*Product
+	productClassL1 sync.Map                          // map[string]*ProductClassCacheEntry — T-0173
+	cacheVersion   atomic.Int64
 }
 
 // NewRegistry 构造一个未加载状态的 Registry。
@@ -134,6 +137,9 @@ func (r *Registry) refresh(ctx context.Context, bumpVersion bool) error {
 
 	// drop L1 product details — 后续读会按需 read-through 重建
 	r.productByID.Range(func(k, _ any) bool { r.productByID.Delete(k); return true })
+	// drop L1 productClass entries — 即便不主动删，旧 entry 的 CacheVersion 也会与新版本
+	// 不匹配而被识别为 stale；这里同步清空降低后续 stale 探测的开销（T-0173）。
+	r.productClassL1.Range(func(k, _ any) bool { r.productClassL1.Delete(k); return true })
 
 	if bumpVersion {
 		if _, err := r.cache.BumpVersion(ctx); err != nil {
@@ -157,6 +163,13 @@ func (r *Registry) refresh(ctx context.Context, bumpVersion bool) error {
 
 // MatchProductClass 按全局 sort_order 升序遍历 patterns，首次命中返回 product。
 // 全部未命中 → 返回 ErrOrphan。
+//
+// 命中路径（T-0173 二级缓存）：
+//  1. productClassL1：按 class 字面量查 sync.Map；CacheVersion 匹配 → materialize 返回
+//  2. cache.GetProductClass：Redis L2；CacheVersion 匹配 → 填回 L1 后 materialize 返回
+//  3. matchPatternsSlow：全表 regex 扫描；写回 L1 + L2（hit TTL 1h / orphan TTL 5min）
+//
+// stale 探测：L1/L2 entry.CacheVersion ≠ r.cacheVersion 即旁路；不主动 DEL。
 func (r *Registry) MatchProductClass(ctx context.Context, productClass string) (*MatchResult, error) {
 	t0 := time.Now()
 	defer func() { r.metrics.matchDuration.Observe(time.Since(t0).Seconds()) }()
@@ -164,35 +177,128 @@ func (r *Registry) MatchProductClass(ctx context.Context, productClass string) (
 		return nil, err
 	}
 
-	patternsPtr := r.patterns.Load()
-	if patternsPtr == nil || len(*patternsPtr) == 0 {
+	currentVer := r.cacheVersion.Load()
+
+	// L1
+	if v, ok := r.productClassL1.Load(productClass); ok {
+		entry := v.(*ProductClassCacheEntry)
+		if entry.CacheVersion == currentVer {
+			r.metrics.classCacheHit("L1")
+			return r.materializeFromEntry(ctx, entry)
+		}
+	}
+
+	// L2
+	if r.cache != nil {
+		entry, err := r.cache.GetProductClass(ctx, productClass)
+		if err != nil {
+			r.logger.Warn("L2 productClass cache get failed; falling back to slow path",
+				zap.String("product_class", productClass),
+				zap.Error(err))
+		} else if entry != nil && entry.CacheVersion == currentVer {
+			r.productClassL1.Store(productClass, entry)
+			r.metrics.classCacheHit("L2")
+			return r.materializeFromEntry(ctx, entry)
+		}
+	}
+
+	// Slow path：全表 regex 扫描
+	r.metrics.classCacheHit("miss")
+	entry, result, err := r.matchPatternsSlow(ctx, productClass, currentVer)
+	if err != nil {
+		return nil, err
+	}
+
+	// 回填 L1 + L2
+	r.productClassL1.Store(productClass, entry)
+	if r.cache != nil {
+		ttl := ProductClassHitTTL
+		if entry.Orphan {
+			ttl = ProductClassOrphanTTL
+		}
+		if err := r.cache.SetProductClass(ctx, productClass, entry, ttl); err != nil {
+			// 与 SetProduct 一致：L2 写失败不影响 L1，仅 WARN
+			r.logger.Warn("L2 productClass cache set failed (non-fatal)",
+				zap.String("product_class", productClass),
+				zap.Error(err))
+		}
+	}
+
+	if entry.Orphan {
 		r.metrics.matchOrphan()
 		return nil, ErrOrphan
 	}
-	for _, p := range *patternsPtr {
-		if p.regex.MatchString(productClass) {
-			prod, err := r.GetProductByID(ctx, p.productID)
-			if err != nil {
-				return nil, fmt.Errorf("load product %s for matched pattern %q: %w", p.productID, p.raw, err)
-			}
-			if prod == nil {
-				// 数据不一致：pattern 引用了不存在的 product。容忍但 WARN —
-				// 继续遍历，让兜底正则有机会接住（设计 §4.3.1 一次匹配，但此场景属异常恢复）。
-				r.logger.Warn("matched pattern points to missing product; continuing",
-					zap.String("pattern", p.raw),
-					zap.String("product_id", p.productID.String()))
-				continue
-			}
-			r.metrics.matchHit()
-			return &MatchResult{
-				Product:        prod,
-				MatchedPattern: p.raw,
-				GlobalOrder:    p.sortOrder,
-			}, nil
-		}
+	r.metrics.matchHit()
+	return result, nil
+}
+
+// materializeFromEntry 把 cache entry 还原为 MatchResult（hit）或 ErrOrphan。
+// hit 路径会调 GetProductByID 复用 product 详情的三级缓存。
+//
+// 若 entry 标记 hit 但 productByID 查不到（dangling cache entry），降级为 slow path
+// 重算 —— 这与 dangling pattern 的容忍策略一致：宁可慢一次也不阻塞业务。
+func (r *Registry) materializeFromEntry(ctx context.Context, entry *ProductClassCacheEntry) (*MatchResult, error) {
+	if entry.Orphan {
+		r.metrics.matchOrphan()
+		return nil, ErrOrphan
 	}
-	r.metrics.matchOrphan()
-	return nil, ErrOrphan
+	prod, err := r.GetProductByID(ctx, entry.MatchedProductID)
+	if err != nil {
+		return nil, fmt.Errorf("load product %s from cached match: %w", entry.MatchedProductID, err)
+	}
+	if prod == nil {
+		// dangling cache：product 被删/未同步。Drop L1 entry 让下次走 slow path 重算。
+		r.productClassL1.Delete(entry.MatchedPattern)
+		r.logger.Warn("cached match references missing product; will recompute on next call",
+			zap.String("product_id", entry.MatchedProductID.String()),
+			zap.String("matched_pattern", entry.MatchedPattern))
+		return nil, fmt.Errorf("cached match references missing product %s", entry.MatchedProductID)
+	}
+	r.metrics.matchHit()
+	return &MatchResult{
+		Product:        prod,
+		MatchedPattern: entry.MatchedPattern,
+		GlobalOrder:    entry.GlobalSortOrder,
+	}, nil
+}
+
+// matchPatternsSlow 走全表 regex 扫描的兜底路径，返回缓存条目 + MatchResult（仅 hit）。
+// orphan / dangling-pattern fall-through 与原 MatchProductClass 行为完全一致。
+func (r *Registry) matchPatternsSlow(ctx context.Context, productClass string, currentVer int64) (*ProductClassCacheEntry, *MatchResult, error) {
+	patternsPtr := r.patterns.Load()
+	if patternsPtr == nil || len(*patternsPtr) == 0 {
+		return &ProductClassCacheEntry{Orphan: true, CacheVersion: currentVer}, nil, nil
+	}
+	for _, p := range *patternsPtr {
+		if !p.regex.MatchString(productClass) {
+			continue
+		}
+		prod, err := r.GetProductByID(ctx, p.productID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("load product %s for matched pattern %q: %w", p.productID, p.raw, err)
+		}
+		if prod == nil {
+			// 数据不一致：pattern 引用了不存在的 product。容忍但 WARN —
+			// 继续遍历，让兜底正则有机会接住（设计 §4.3.1）。
+			r.logger.Warn("matched pattern points to missing product; continuing",
+				zap.String("pattern", p.raw),
+				zap.String("product_id", p.productID.String()))
+			continue
+		}
+		entry := &ProductClassCacheEntry{
+			MatchedProductID: prod.ID,
+			Orphan:           false,
+			MatchedPattern:   p.raw,
+			GlobalSortOrder:  p.sortOrder,
+			CacheVersion:     currentVer,
+		}
+		return entry, &MatchResult{
+			Product:        prod,
+			MatchedPattern: p.raw,
+			GlobalOrder:    p.sortOrder,
+		}, nil
+	}
+	return &ProductClassCacheEntry{Orphan: true, CacheVersion: currentVer}, nil, nil
 }
 
 // GetProductByID 按 L1 → L2 → DB 顺序加载 Product 详情。命中后回填上层缓存。

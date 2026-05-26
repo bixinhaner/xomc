@@ -6,6 +6,7 @@ import (
 	"sort"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -235,10 +236,22 @@ type spyCache struct {
 	bumpCount int32
 	failGet   bool
 	version   int64
+
+	// productClass cache state（T-0173）
+	classStore    map[string]*ProductClassCacheEntry
+	classTTL      map[string]time.Duration
+	classGetCount int32
+	classSetCount int32
+	classFailGet  bool
 }
 
 func newSpyCache() *spyCache {
-	return &spyCache{store: make(map[uuid.UUID]*Product), storeVer: make(map[uuid.UUID]int64)}
+	return &spyCache{
+		store:      make(map[uuid.UUID]*Product),
+		storeVer:   make(map[uuid.UUID]int64),
+		classStore: make(map[string]*ProductClassCacheEntry),
+		classTTL:   make(map[string]time.Duration),
+	}
 }
 
 func (s *spyCache) GetProduct(_ context.Context, id uuid.UUID) (*Product, error) {
@@ -272,6 +285,26 @@ func (s *spyCache) BumpVersion(_ context.Context) (int64, error) {
 	atomic.AddInt32(&s.bumpCount, 1)
 	s.version++
 	return s.version, nil
+}
+
+func (s *spyCache) GetProductClass(_ context.Context, productClass string) (*ProductClassCacheEntry, error) {
+	atomic.AddInt32(&s.classGetCount, 1)
+	if s.classFailGet {
+		return nil, errors.New("redis down")
+	}
+	if e, ok := s.classStore[productClass]; ok {
+		cp := *e
+		return &cp, nil
+	}
+	return nil, nil
+}
+
+func (s *spyCache) SetProductClass(_ context.Context, productClass string, entry *ProductClassCacheEntry, ttl time.Duration) error {
+	atomic.AddInt32(&s.classSetCount, 1)
+	cp := *entry
+	s.classStore[productClass] = &cp
+	s.classTTL[productClass] = ttl
+	return nil
 }
 
 func TestRegistry_GetProductByID_L1HitAfterFirstLoad(t *testing.T) {
@@ -471,4 +504,148 @@ type countingRepo struct {
 func (c *countingRepo) FetchIndicatorPlatformsByDeviceType(ctx context.Context, dt string) (map[string]struct{}, error) {
 	c.calls[dt]++
 	return c.Repository.FetchIndicatorPlatformsByDeviceType(ctx, dt)
+}
+
+// ─── T-0173 MatchProductClass 二级缓存测试 ────────────────────────────
+
+// patternsScanCountRepo 在 fakeRepo 之上追踪 GetProductByID 调用次数变化，
+// 间接判断 slow path 是否真的被走（命中 L1/L2 时不应再触碰 productByID）。
+// 因为 slow path 内部命中后会调 GetProductByID，所以 slow-path / cache-hit 的区分
+// 用 productByID L1 是否预热判断；本文件直接比对 atomic 计数器。
+
+func Test_MatchProductClass_L1Hit(t *testing.T) {
+	repo := newFakeRepo()
+	pid := repo.addProduct("Specific", "v1", "enb", "BLQ", "ENB")
+	repo.addPattern(pid, "^QRTB", 1)
+	cache := newSpyCache()
+
+	r := NewRegistry(repo, cache, NewRegistryMetrics(nil), zap.NewNop())
+	require.NoError(t, r.Refresh(context.Background()))
+
+	// 1st call — miss → slow path → 写 L1 + L2
+	got, err := r.MatchProductClass(context.Background(), "QRTB123")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&cache.classSetCount), "first call must populate L2")
+
+	getsBefore := atomic.LoadInt32(&cache.classGetCount)
+
+	// 2nd call — L1 hit，不再访问 L2
+	got2, err := r.MatchProductClass(context.Background(), "QRTB123")
+	require.NoError(t, err)
+	require.NotNil(t, got2)
+	assert.Equal(t, pid, got2.Product.ID)
+	assert.Equal(t, getsBefore, atomic.LoadInt32(&cache.classGetCount),
+		"L1 hit must not call cache.GetProductClass")
+	assert.Equal(t, int32(1), atomic.LoadInt32(&cache.classSetCount),
+		"L1 hit must not re-populate L2")
+}
+
+func Test_MatchProductClass_L2HitAfterRestart(t *testing.T) {
+	repo := newFakeRepo()
+	pid := repo.addProduct("Specific", "v1", "enb", "BLQ", "ENB")
+	repo.addPattern(pid, "^QRTB", 1)
+	cache := newSpyCache()
+
+	// 实例 A：预热 L2
+	rA := NewRegistry(repo, cache, NewRegistryMetrics(nil), zap.NewNop())
+	require.NoError(t, rA.Refresh(context.Background()))
+	_, err := rA.MatchProductClass(context.Background(), "QRTB123")
+	require.NoError(t, err)
+	require.Equal(t, int32(1), atomic.LoadInt32(&cache.classSetCount))
+
+	// 实例 B：新建（L1 为空，但 L2 有），模拟跨进程重启
+	cache.version = 0 // 与 rA 保持一致；spyCache 与 RedisCache 不同，BumpVersion 才递增
+	rB := NewRegistry(repo, cache, NewRegistryMetrics(nil), zap.NewNop())
+	require.NoError(t, rB.Refresh(context.Background()))
+
+	setsBefore := atomic.LoadInt32(&cache.classSetCount)
+	getsBefore := atomic.LoadInt32(&cache.classGetCount)
+
+	got, err := rB.MatchProductClass(context.Background(), "QRTB123")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, pid, got.Product.ID)
+	assert.Equal(t, getsBefore+1, atomic.LoadInt32(&cache.classGetCount),
+		"L2 must be consulted when L1 is empty")
+	assert.Equal(t, setsBefore, atomic.LoadInt32(&cache.classSetCount),
+		"L2 hit must not re-populate L2 (no Set call)")
+}
+
+func Test_MatchProductClass_OrphanNegativeCache(t *testing.T) {
+	repo := newFakeRepo()
+	pid := repo.addProduct("Specific", "v1", "enb", "BLQ", "ENB")
+	repo.addPattern(pid, "^QRTB", 1)
+	cache := newSpyCache()
+
+	r := NewRegistry(repo, cache, NewRegistryMetrics(nil), zap.NewNop())
+	require.NoError(t, r.Refresh(context.Background()))
+
+	// 不匹配任何 pattern → orphan
+	got, err := r.MatchProductClass(context.Background(), "Unrelated123")
+	assert.Nil(t, got)
+	assert.ErrorIs(t, err, ErrOrphan)
+	assert.Equal(t, int32(1), atomic.LoadInt32(&cache.classSetCount),
+		"orphan must also populate L2 (negative cache)")
+
+	// orphan 用较短 TTL（5min），与 hit（1h）区分
+	assert.Equal(t, ProductClassOrphanTTL, cache.classTTL["Unrelated123"],
+		"orphan TTL must be 5 minutes")
+
+	// 第二次同样 orphan，但走 L1，不再触发 slow path / L2 写
+	setsBefore := atomic.LoadInt32(&cache.classSetCount)
+	got, err = r.MatchProductClass(context.Background(), "Unrelated123")
+	assert.Nil(t, got)
+	assert.ErrorIs(t, err, ErrOrphan)
+	assert.Equal(t, setsBefore, atomic.LoadInt32(&cache.classSetCount),
+		"second orphan call must hit L1, not re-populate L2")
+
+	// hit 路径 TTL 验证
+	_, err = r.MatchProductClass(context.Background(), "QRTB123")
+	require.NoError(t, err)
+	assert.Equal(t, ProductClassHitTTL, cache.classTTL["QRTB123"],
+		"hit TTL must be 1 hour")
+}
+
+func Test_MatchProductClass_VersionBumpInvalidatesL1(t *testing.T) {
+	repo := newFakeRepo()
+	pid := repo.addProduct("Specific", "v1", "enb", "BLQ", "ENB")
+	repo.addPattern(pid, "^QRTB", 1)
+	cache := newSpyCache()
+
+	r := NewRegistry(repo, cache, NewRegistryMetrics(nil), zap.NewNop())
+	require.NoError(t, r.Refresh(context.Background()))
+
+	// 首次：写入 L1 / L2，CacheVersion=0
+	_, err := r.MatchProductClass(context.Background(), "QRTB123")
+	require.NoError(t, err)
+	require.Equal(t, int32(1), atomic.LoadInt32(&cache.classSetCount))
+
+	// 模拟另一实例改了 pattern + BumpVersion；当前实例的 r.cacheVersion 在 ensureFresh
+	// 中被同步上去。spyCache.GetVersion 返新版 → ensureFresh 调 refresh(false) → 清 L1。
+	cache.version = 5
+
+	setsBefore := atomic.LoadInt32(&cache.classSetCount)
+	_, err = r.MatchProductClass(context.Background(), "QRTB123")
+	require.NoError(t, err)
+	// 新 version 下 L1 entry stale → slow path → 重写 L2
+	assert.Greater(t, atomic.LoadInt32(&cache.classSetCount), setsBefore,
+		"version bump must invalidate L1 and rewrite L2")
+}
+
+func Test_MatchProductClass_RedisFailureFallback(t *testing.T) {
+	repo := newFakeRepo()
+	pid := repo.addProduct("Specific", "v1", "enb", "BLQ", "ENB")
+	repo.addPattern(pid, "^QRTB", 1)
+	cache := newSpyCache()
+	cache.classFailGet = true
+
+	r := NewRegistry(repo, cache, NewRegistryMetrics(nil), zap.NewNop())
+	require.NoError(t, r.Refresh(context.Background()))
+
+	// L2 GetProductClass 返 error → silent fallback to slow path，调用方拿到正确结果
+	got, err := r.MatchProductClass(context.Background(), "QRTB123")
+	require.NoError(t, err, "Redis failure must not surface to caller")
+	require.NotNil(t, got)
+	assert.Equal(t, pid, got.Product.ID)
 }

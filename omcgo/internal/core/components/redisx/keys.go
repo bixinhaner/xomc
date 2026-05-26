@@ -123,6 +123,16 @@ func (KeyBuilder) ProductPattern() string { return productPattern }
 // ProductCacheVersion 跨实例 ProductRegistry 缓存版本号。
 func (KeyBuilder) ProductCacheVersion() string { return productCacheVersionKey }
 
+// ProductByProductClass ProductRegistry productClass→product 路由结果缓存
+// （hit TTL 1h / orphan TTL 5min，按 productClass 字面量索引）。productClass
+// 含 "/" 在 Redis 中合法，不做转义。
+func (KeyBuilder) ProductByProductClass(productClass string) string {
+	return productByProductClassPrefix + productClass
+}
+
+// ProductByProductClassPrefix productClass 路由结果键前缀，供扫描使用。
+func (KeyBuilder) ProductByProductClassPrefix() string { return productByProductClassPrefix }
+
 // ===== ParamModel / ParamRegistry（T-0098 P2-02）=====
 
 // ParamModelDefault 默认映射缓存（24h TTL，按 paramModelId 索引）。值为 JSON 序列化的 []ParamMapping。
@@ -242,9 +252,10 @@ const (
 	datamodelPattern         = "datamodel:*"
 
 	// product (T-0098 P2-01 ProductRegistry)
-	productByIDPrefix       = "product:byID:"
-	productPattern          = "product:*"
-	productCacheVersionKey  = "product:cache_version"
+	productByIDPrefix           = "product:byID:"
+	productByProductClassPrefix = "product:byProductClass:"
+	productPattern              = "product:*"
+	productCacheVersionKey      = "product:cache_version"
 
 	// parammodel (T-0098 P2-02 ParamRegistry)
 	paramModelDefaultPrefix    = "parammodel:default:"

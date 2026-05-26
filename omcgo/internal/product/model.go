@@ -67,6 +67,23 @@ type ValidationIssue struct {
 	Reason      string
 }
 
+// ProductClassCacheEntry 是 productClass → match result 的最小序列化形态（T-0173）。
+//
+// 故意只持久化"路由结果指纹"（matched_product_id / matched_pattern / sort_order）
+// 而非完整 *Product —— Product 详情走 GetProductByID 三级缓存复用。
+// Orphan 单独标记，避免每次走全表 regex 扫描；orphan 取较短 TTL（5min）作为 negative
+// cache，避免 pattern 新增后长时间漏接新设备。
+//
+// CacheVersion 与 Cache.GetVersion() 比对识别 stale：BumpVersion 后旧条目读出立即被
+// 视为失效，旁路到 slow path 重算，避免主动 SCAN+DEL。
+type ProductClassCacheEntry struct {
+	MatchedProductID uuid.UUID `json:"matched_product_id,omitempty"` // orphan 时 zero
+	Orphan           bool      `json:"orphan"`
+	MatchedPattern   string    `json:"matched_pattern,omitempty"`
+	GlobalSortOrder  int       `json:"sort_order,omitempty"`
+	CacheVersion     int64     `json:"cache_version"`
+}
+
 // ── XML 解析结构（设计 §4.5）────────────────────────────────────────
 
 type xmlProducts struct {
