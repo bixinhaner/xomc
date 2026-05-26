@@ -173,14 +173,14 @@ func (r *PgSubFieldRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLC
 }
 
 func (r *PgSubFieldRepository) ListByCommand(ctx context.Context, commandID uuid.UUID) ([]MMLCommandSubField, error) {
-	// T-0174: 过滤 is_supported=false 的 sub_field（CPE 测试证实不支持）。
-	// catalog/字典仍保留这些行,只是不再被 MML executor / SubFieldChecklist 暴露。
+	// T-0176-PR-C: 不再读 mml_command_sub_fields.is_supported 决定可见性。
+	// "该 path 是否被 paramModel 支持"的真值源已收敛到 param_mappings.is_supported；
+	// sub_field 行始终返完整 catalog（PR-F 之后 DROP 该列）。
 	query, args, err := storage.Psql.Select(
 		"id", "command_id", "standard_path_id AS param_id", "mml_code", "label_i18n",
 		"default_selected", "is_required", "sort_order", "created_at", "updated_at",
 	).From("mml_command_sub_fields").
 		Where(sq.Eq{"command_id": commandID}).
-		Where(sq.Eq{"is_supported": true}).
 		OrderBy("sort_order ASC", "mml_code ASC").
 		ToSql()
 	if err != nil {
@@ -229,9 +229,12 @@ func (r *PgSubFieldRepository) ListByCommand(ctx context.Context, commandID uuid
 //   - 都为 NULL → 空（前端 AccessTypeTag Tooltip 走"无明确取值范围"兜底文案）
 // 数字内容 zh-CN / en-US 同形，i18n 两 key 同值即可。
 func (r *PgSubFieldRepository) ListEnrichedByCommand(ctx context.Context, commandID uuid.UUID, paramModelID *uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
-	// T-0170: paramModelID 非 nil 时叠加 param_mappings 过滤，
+	// T-0170 / T-0176-PR-C: paramModelID 非 nil 时叠加 param_mappings 过滤，
 	// 让前端只看到"该 paramModel 真实支持的 sub_field"。设计哲学：
-	// param_mappings 是 product 实际支持 path 的真值源；缺映射 = 不支持。
+	// param_mappings 是 product 实际支持 path 的单一真值源；
+	//   - is_active = true：映射处于激活态
+	//   - is_supported = true：CPE 实测支持（auto-learn 收敛后的能力位）
+	// 缺映射或被自动学习标 unsupported 都视为不可见。
 	paramModelFilter := ""
 	args := []any{commandID}
 	if paramModelID != nil {
@@ -241,6 +244,7 @@ func (r *PgSubFieldRepository) ListEnrichedByCommand(ctx context.Context, comman
        WHERE pm.standard_path  = sp.standard_path
          AND pm.param_model_id = $2
          AND pm.is_active      = true
+         AND pm.is_supported   = true
   )`
 		args = append(args, *paramModelID)
 	}
@@ -283,8 +287,7 @@ SELECT
     COALESCE(sp.description, '')          AS description
 FROM mml_command_sub_fields csf
 JOIN standard_params sp ON sp.id = csf.standard_path_id
-WHERE csf.command_id = $1
-  AND csf.is_supported = true` + paramModelFilter + `
+WHERE csf.command_id = $1` + paramModelFilter + `
 ORDER BY csf.sort_order ASC, csf.mml_code ASC`
 
 	rows, err := r.pool.Query(ctx, sqlText, args...)

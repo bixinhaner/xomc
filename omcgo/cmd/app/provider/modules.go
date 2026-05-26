@@ -963,23 +963,47 @@ func initMiscModules(c *Container) error {
 	// 修复 2026-05-22：装配 cmdParamRepo 让 cmd.Params 在 GetByID 后被 enrichment
 	// 填上（旧版漏装 → execute-statements-structured 全部 path 误报 R-9.2 unknown）。
 	mmlConsoleSvc.SetCmdParamRepo(mmlCmdParamRepo)
-	// T-0170: 注入 device → paramModel 反查闭包，让 GET /mml/commands/:id/sub-fields?device_id=
-	// 端点能按 paramModel 过滤 sub_field — 缺映射的 sub_field 不返给前端。
-	// SQL 直接查 devices LEFT JOIN products，与 CompatibilityService.resolveProductClassSQL 同源。
+	// T-0170 / T-0176-PR-C: 注入 device → paramModel 反查闭包，让 GET
+	// /mml/commands/:id/sub-fields?device_id= 端点能按 paramModel 过滤 sub_field。
+	//
+	// 重构（PR-C）：抛弃原"devices LEFT JOIN products"单条 SQL，改走 cache-aware
+	// 分层链路：
+	//   1) deviceKey 解析为 SN (UUID 首先尝试 GetByID 不命中再退 SN)
+	//   2) DeviceService.GetBySerialNumber → 享受 DeviceCache L1 命中
+	//   3) device.ProductClass → ProductRegistry.MatchProductClass → product
+	//      (享受 T-0173 的 productClass L1/L2 缓存)
+	//   4) product.ParamModelID
+	//
+	// 旧 SQL 的 device.param_model_id 字段已不在 Go model 上（T-0098 后字段下线，
+	// 仅 DB 列残留）；本路径不再读该列，与 lazy bind PR-D 收敛到 product 路由
+	// 单一真值源。
+	//
+	// silent skip 语义（返回 (nil, nil)）：
+	//   - 设备不存在
+	//   - 设备 productClass 空（未上报 inform）
+	//   - 孤儿 productClass（无 product 路由命中）
+	//   - product 装配件未挂 paramModel
+	// 上层（ConsoleService）见 nil 即降级到"全集 sub_field"行为，与原 SQL NULL
+	// 返回路径等价。
 	mmlConsoleSvc.SetParamModelByDeviceResolver(func(ctx context.Context, deviceKey string) (*uuid.UUID, error) {
-		// deviceKey 可以是 SN 或 UUID。SQL 用 OR 兼容；前端 ConsoleDevice 只有 sn，
-		// admin 工具可用 UUID — 同端点同 SQL 通用。
-		const q = `
-SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
-  FROM devices d
-  LEFT JOIN products p ON p.id = d.product_id
- WHERE d.serial_number = $1 OR d.id::text = $1
- LIMIT 1`
-		var pmID *uuid.UUID
-		if err := c.PgPool.QueryRow(ctx, q, deviceKey).Scan(&pmID); err != nil {
-			return nil, fmt.Errorf("resolve param_model by device %q: %w", deviceKey, err)
+		dev, err := resolveDeviceByKey(ctx, c, deviceKey)
+		if err != nil {
+			return nil, fmt.Errorf("resolve device %q: %w", deviceKey, err)
 		}
-		return pmID, nil
+		if dev == nil || dev.ProductClass == "" {
+			return nil, nil
+		}
+		mr, err := c.ProductRegistry.MatchProductClass(ctx, dev.ProductClass)
+		if errors.Is(err, product.ErrOrphan) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("match product_class %q for device %q: %w", dev.ProductClass, deviceKey, err)
+		}
+		if mr == nil || mr.Product == nil {
+			return nil, nil
+		}
+		return mr.Product.ParamModelID, nil
 	})
 
 	// T-0172: 注入 productClass → SupportedSet 反查（catalog 按产品过滤命令树）。

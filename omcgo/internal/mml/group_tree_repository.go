@@ -201,20 +201,13 @@ SELECT
     -- §R-4.1.1：每层 {i} 占位符的取值范围 metadata，无 metadata → 兜底 '[]'
     COALESCE(c.instance_range_meta, '[]'::jsonb) AS instance_range_meta,
     -- T-0172：操作的标准路径列表，无值兜底 '[]'
-    -- T-0174：把 target_paths 收敛到"sub_field 表实际能 show 的 path 列表"——
-    --   过滤掉 is_supported=false 的 sub_field 对应路径（CPE 实测不支持）。
-    --   命令树 (N) 计数与操作面板 path 列表完全对齐，避免 (17) 但实际只显示 12 行
-    --   的视觉差。无 sub_field 关联的命令兜底 c.target_paths（行为不变）。
-    COALESCE(
-        (
-            SELECT jsonb_agg(sp.standard_path ORDER BY csf.sort_order)
-            FROM mml_command_sub_fields csf
-            JOIN standard_params sp ON sp.id = csf.standard_path_id
-            WHERE csf.command_id = c.id
-              AND csf.is_supported = true
-        ),
-        COALESCE(c.target_paths, '[]'::jsonb)
-    ) AS target_paths
+    -- T-0176-PR-C：直接读 c.target_paths 列，不再二次过滤 sub_field.is_supported。
+    --   理由：trigger refresh_mml_command_target_paths (migrations/000113) 已经
+    --   把 c.target_paths 维护为 sub_fields -> standard_params 的完整聚合；同时
+    --   "该 path 是否被 paramModel 支持"的真值源已收敛到 param_mappings.is_supported
+    --   （PR-A 数据迁移 + paramRegistry intersect 路径），sub_field.is_supported 字段
+    --   冻结待 PR-F DROP，读路径不再依赖。
+    COALESCE(c.target_paths, '[]'::jsonb) AS target_paths
 FROM mml_command_groups g
 LEFT JOIN mml_commands c ON c.group_id = g.id
 WHERE g.path IS NOT NULL
