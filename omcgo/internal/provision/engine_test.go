@@ -4,18 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
-	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/carrier"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/product"
+	"github.com/omcgo/omcgo/internal/task"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1251,4 +1253,242 @@ func TestHandleFirmwareChanged_RedisDown_StillProceeds(t *testing.T) {
 	err := engine.HandleFirmwareChanged(context.Background(), evt)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, lookupCount, "Redis 失败仍应推进到 device lookup")
+}
+
+// ---------------------------------------------------------------------------
+// Tests: T-0176-PR-D bindDeviceProduct / bindDeviceProductIfNeeded
+//
+// 路由 + 写回 + cache.Delete 三段链路。stub productClassMatcher / productBinder /
+// deviceCacheInvalidator 注入 ProvisioningEngine 用 narrow interface（不依赖
+// 真 product.Registry / PgRepository / device.DeviceCache）。
+// ---------------------------------------------------------------------------
+
+// stubProductMatcher 实现 productClassMatcher（test only）。
+type stubProductMatcher struct {
+	matchFn func(ctx context.Context, productClass string) (*product.MatchResult, error)
+}
+
+func (s *stubProductMatcher) MatchProductClass(ctx context.Context, productClass string) (*product.MatchResult, error) {
+	if s.matchFn != nil {
+		return s.matchFn(ctx, productClass)
+	}
+	return nil, product.ErrOrphan
+}
+
+// stubProductBinder 实现 productBinder（test only）。
+type stubProductBinder struct {
+	bindCalls    atomic.Int32
+	lookupCalls  atomic.Int32
+	lastDeviceID uuid.UUID
+	lastProduct  uuid.UUID
+	lastParamMod *uuid.UUID
+	bindFn       func(ctx context.Context, deviceID, productID uuid.UUID, paramModelID *uuid.UUID) error
+	lookupFn     func(ctx context.Context, deviceID uuid.UUID) (*uuid.UUID, error)
+}
+
+func (s *stubProductBinder) BindDevice(ctx context.Context, deviceID, productID uuid.UUID, paramModelID *uuid.UUID) error {
+	s.bindCalls.Add(1)
+	s.lastDeviceID = deviceID
+	s.lastProduct = productID
+	s.lastParamMod = paramModelID
+	if s.bindFn != nil {
+		return s.bindFn(ctx, deviceID, productID, paramModelID)
+	}
+	return nil
+}
+
+func (s *stubProductBinder) GetProductIDByDeviceID(ctx context.Context, deviceID uuid.UUID) (*uuid.UUID, error) {
+	s.lookupCalls.Add(1)
+	if s.lookupFn != nil {
+		return s.lookupFn(ctx, deviceID)
+	}
+	return nil, nil // default: unbound
+}
+
+// stubCacheInvalidator 实现 deviceCacheInvalidator（test only）。
+type stubCacheInvalidator struct {
+	deleteCalls atomic.Int32
+	lastSN      string
+}
+
+func (s *stubCacheInvalidator) Delete(_ context.Context, sn string) {
+	s.deleteCalls.Add(1)
+	s.lastSN = sn
+}
+
+// newBindHarness 构造一个仅用于绑定相关测试的 ProvisioningEngine。
+func newBindHarness(matcher productClassMatcher, binder productBinder, cache deviceCacheInvalidator) *ProvisioningEngine {
+	logger := zap.NewNop()
+	devService := device.NewDeviceService(&mockDeviceRepo{}, nil, nil, nil, logger)
+	tmplService := template.NewConfigTemplateService(nil, logger)
+	carrierReg := carrier.NewRegistry()
+	engine := NewProvisioningEngine(
+		&mockTaskRepo{}, devService, tmplService, carrierReg, &mockCommandQueue{},
+		&mockEventBus{}, appconfig.ProvisionConfig{}, logger,
+	)
+	if matcher != nil || binder != nil {
+		engine.SetProductBinder(matcher, binder)
+	}
+	if cache != nil {
+		engine.SetDeviceCache(cache)
+	}
+	return engine
+}
+
+func Test_BindDeviceProduct_ReturnsTrueWhenWrote(t *testing.T) {
+	productID := uuid.New()
+	paramModelID := uuid.New()
+	matchedProduct := &product.Product{
+		ID:           productID,
+		Name:         "TestProduct",
+		ParamModelID: &paramModelID,
+	}
+	matcher := &stubProductMatcher{
+		matchFn: func(_ context.Context, pc string) (*product.MatchResult, error) {
+			assert.Equal(t, "PCLASS-A", pc)
+			return &product.MatchResult{Product: matchedProduct, MatchedPattern: "PCLASS-.*"}, nil
+		},
+	}
+	binder := &stubProductBinder{}
+	engine := newBindHarness(matcher, binder, nil)
+
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-BIND-OK", ProductClass: "PCLASS-A"}
+	bound := engine.bindDeviceProduct(context.Background(), dev)
+
+	assert.True(t, bound, "命中后应返 true")
+	assert.Equal(t, int32(1), binder.bindCalls.Load(), "BindDevice 应被调一次")
+	assert.Equal(t, dev.ID, binder.lastDeviceID)
+	assert.Equal(t, productID, binder.lastProduct)
+	require.NotNil(t, binder.lastParamMod)
+	assert.Equal(t, paramModelID, *binder.lastParamMod)
+}
+
+func Test_BindDeviceProduct_ReturnsFalseOnOrphan(t *testing.T) {
+	matcher := &stubProductMatcher{
+		matchFn: func(_ context.Context, _ string) (*product.MatchResult, error) {
+			return nil, product.ErrOrphan
+		},
+	}
+	binder := &stubProductBinder{}
+	engine := newBindHarness(matcher, binder, nil)
+
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-ORPHAN", ProductClass: "UNKNOWN"}
+	bound := engine.bindDeviceProduct(context.Background(), dev)
+
+	assert.False(t, bound, "orphan 应返 false")
+	assert.Equal(t, int32(0), binder.bindCalls.Load(), "orphan 时 BindDevice 不应被调")
+}
+
+func Test_BindDeviceProduct_ReturnsFalseOnBindErr(t *testing.T) {
+	matcher := &stubProductMatcher{
+		matchFn: func(_ context.Context, _ string) (*product.MatchResult, error) {
+			return &product.MatchResult{Product: &product.Product{ID: uuid.New(), Name: "P"}}, nil
+		},
+	}
+	binder := &stubProductBinder{
+		bindFn: func(_ context.Context, _, _ uuid.UUID, _ *uuid.UUID) error {
+			return errors.New("simulated DB failure")
+		},
+	}
+	engine := newBindHarness(matcher, binder, nil)
+
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-BIND-ERR", ProductClass: "PCLASS-X"}
+	bound := engine.bindDeviceProduct(context.Background(), dev)
+
+	assert.False(t, bound, "BindDevice 失败应返 false，由调用方据此跳过 cache 清理")
+}
+
+func Test_BindDeviceProduct_NilDepsReturnsFalse(t *testing.T) {
+	engine := newBindHarness(nil, nil, nil)
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-NIL", ProductClass: "PCLASS-A"}
+	bound := engine.bindDeviceProduct(context.Background(), dev)
+	assert.False(t, bound)
+}
+
+func Test_BindDeviceProductIfNeeded_SkipsAlreadyBound(t *testing.T) {
+	existingProductID := uuid.New()
+	matcher := &stubProductMatcher{
+		matchFn: func(_ context.Context, _ string) (*product.MatchResult, error) {
+			t.Fatal("MatchProductClass 不应被调 — 已绑定路径")
+			return nil, nil
+		},
+	}
+	binder := &stubProductBinder{
+		lookupFn: func(_ context.Context, _ uuid.UUID) (*uuid.UUID, error) {
+			return &existingProductID, nil
+		},
+	}
+	cache := &stubCacheInvalidator{}
+	engine := newBindHarness(matcher, binder, cache)
+
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-ALREADY", ProductClass: "PCLASS-A"}
+	engine.bindDeviceProductIfNeeded(context.Background(), dev)
+
+	assert.Equal(t, int32(1), binder.lookupCalls.Load(), "Lookup 调一次确认已绑定")
+	assert.Equal(t, int32(0), binder.bindCalls.Load(), "已绑定不应再调 BindDevice")
+	assert.Equal(t, int32(0), cache.deleteCalls.Load(), "已绑定不应清 cache")
+}
+
+func Test_BindDeviceProductIfNeeded_DeletesCacheOnBindSuccess(t *testing.T) {
+	productID := uuid.New()
+	matcher := &stubProductMatcher{
+		matchFn: func(_ context.Context, _ string) (*product.MatchResult, error) {
+			return &product.MatchResult{Product: &product.Product{ID: productID, Name: "P"}}, nil
+		},
+	}
+	binder := &stubProductBinder{
+		// lookupFn nil → 返 (nil, nil) → 未绑定 → 走 bindDeviceProduct
+	}
+	cache := &stubCacheInvalidator{}
+	engine := newBindHarness(matcher, binder, cache)
+
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-CACHE-DEL", ProductClass: "PCLASS-A"}
+	engine.bindDeviceProductIfNeeded(context.Background(), dev)
+
+	assert.Equal(t, int32(1), binder.bindCalls.Load(), "未绑定时 BindDevice 调一次")
+	assert.Equal(t, int32(1), cache.deleteCalls.Load(), "Bind 成功后 cache.Delete 调一次")
+	assert.Equal(t, "SN-CACHE-DEL", cache.lastSN)
+}
+
+func Test_BindDeviceProductIfNeeded_NoCacheDeleteOnBindFailure(t *testing.T) {
+	matcher := &stubProductMatcher{
+		matchFn: func(_ context.Context, _ string) (*product.MatchResult, error) {
+			return &product.MatchResult{Product: &product.Product{ID: uuid.New(), Name: "P"}}, nil
+		},
+	}
+	binder := &stubProductBinder{
+		bindFn: func(_ context.Context, _, _ uuid.UUID, _ *uuid.UUID) error {
+			return errors.New("DB down")
+		},
+	}
+	cache := &stubCacheInvalidator{}
+	engine := newBindHarness(matcher, binder, cache)
+
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-FAIL", ProductClass: "PCLASS-A"}
+	engine.bindDeviceProductIfNeeded(context.Background(), dev)
+
+	assert.Equal(t, int32(0), cache.deleteCalls.Load(), "Bind 失败时不应清 cache（避免假象'已生效'）")
+}
+
+func Test_BindDeviceProductIfNeeded_NilDevSafelyNoop(t *testing.T) {
+	engine := newBindHarness(&stubProductMatcher{}, &stubProductBinder{}, &stubCacheInvalidator{})
+	// 不应 panic
+	engine.bindDeviceProductIfNeeded(context.Background(), nil)
+}
+
+func Test_BindDeviceProductIfNeeded_EmptyProductClassSkips(t *testing.T) {
+	matcher := &stubProductMatcher{
+		matchFn: func(_ context.Context, _ string) (*product.MatchResult, error) {
+			t.Fatal("空 productClass 时 Match 不应被调")
+			return nil, nil
+		},
+	}
+	binder := &stubProductBinder{}
+	engine := newBindHarness(matcher, binder, nil)
+
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-EMPTY-PC", ProductClass: ""}
+	engine.bindDeviceProductIfNeeded(context.Background(), dev)
+
+	assert.Equal(t, int32(0), binder.lookupCalls.Load())
+	assert.Equal(t, int32(0), binder.bindCalls.Load())
 }

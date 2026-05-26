@@ -48,6 +48,11 @@ func initDeviceModule(c *Container) error {
 	if c.ProductRegistry != nil {
 		deviceService.SetProductMatcher(c.ProductRegistry)
 	}
+	// T-0176-PR-D：CreateDevice INSERT 后写回 devices.product_id / param_model_id。
+	// ProductRepo 与 ProductRegistry 同在 productregistry 模块创建，依赖关系一致。
+	if c.ProductRepo != nil {
+		deviceService.SetProductBinder(c.ProductRepo)
+	}
 	deviceService.SetConnectionRequester(connReqClient)
 	deviceService.SetStunAddressUpdater(stunStore)
 	deviceMetrics := device.NewDeviceMetrics(c.MetricsReg)
@@ -114,6 +119,14 @@ func initDeviceModule(c *Container) error {
 	c.DeviceInfoRepo = deviceInfoRepo
 	c.ConnReqClient = connReqClient
 	c.StunStore = stunStore
+	c.DeviceCache = deviceCache // T-0176-PR-D：供 provision / product 模块写库后失效 SN 缓存
+
+	// T-0176-PR-D：把 DeviceCache 反向注入到 ProductHandler，让 BindOrphan / RematchOrphan
+	// 写完 product_id 后立即失效 SN cache（ProductHandler 在 productregistry 模块创建，
+	// 早于 device 模块；此处通过 setter 完成迟绑定，避免循环依赖）。
+	if c.ProductHandler != nil {
+		c.ProductHandler.SetDeviceCacheInvalidator(deviceCache)
+	}
 
 	// Register module-level health check
 	c.Health.Register("device", func(ctx context.Context) error {

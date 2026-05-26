@@ -27,6 +27,26 @@ import (
 // 已删除。Path B 同步走 syncService.StartPathBSync（基于 paramRegistry.GetByProduct
 // 的 MappingSet）；Path C 模型上传由 modelUploadService.HandleModelFileReceived
 // 解析 XML → IntersectService 写 discovered_param_mappings。
+// productClassMatcher 是 ProvisioningEngine 路由 productClass → product 装配件
+// 的最小依赖（T-0176-PR-D）。生产由 *product.Registry 满足；测试可注入 stub。
+// 消费者侧定义避免对 product 内部类型的强耦合。
+type productClassMatcher interface {
+	MatchProductClass(ctx context.Context, productClass string) (*product.MatchResult, error)
+}
+
+// productBinder 是 ProvisioningEngine 把命中的 product 装配件写回 device 行
+// 的最小依赖（T-0176-PR-D）。生产由 *product.PgRepository 满足；测试可注入 stub。
+type productBinder interface {
+	BindDevice(ctx context.Context, deviceID, productID uuid.UUID, paramModelID *uuid.UUID) error
+	GetProductIDByDeviceID(ctx context.Context, deviceID uuid.UUID) (*uuid.UUID, error)
+}
+
+// deviceCacheInvalidator 是 ProvisioningEngine 写库后失效 SN 缓存的最小依赖
+// （T-0176-PR-D）。生产由 *device.DeviceCache 满足；测试可注入 stub。
+type deviceCacheInvalidator interface {
+	Delete(ctx context.Context, sn string)
+}
+
 type ProvisioningEngine struct {
 	taskRepo           ProvisioningTaskRepository
 	deviceService      *device.DeviceService
@@ -37,11 +57,15 @@ type ProvisioningEngine struct {
 	deduper            *event.Deduper
 	modelUploadService *ModelUploadService
 	syncService        *SyncService
-	productRegistry    *product.Registry
-	productRepo        *product.PgRepository
-	redisClient        redis.UniversalClient
-	config             appconfig.ProvisionConfig
-	logger             *zap.Logger
+	productRegistry    productClassMatcher
+	productRepo        productBinder
+	// deviceCache 在 lazy bind 写库成功后失效 SN 缓存。
+	// nil 表示禁用（不影响主流程，仅留下 stale 缓存的可能 — admin 改 productClass 时
+	// 见 §C C2 修复路径）。T-0176-PR-D 注入。
+	deviceCache deviceCacheInvalidator
+	redisClient redis.UniversalClient
+	config      appconfig.ProvisionConfig
+	logger      *zap.Logger
 }
 
 // NewProvisioningEngine creates a new ProvisioningEngine with all dependencies.
@@ -94,40 +118,93 @@ func (e *ProvisioningEngine) SetDeduper(d *event.Deduper) {
 // HandleBootstrap identify 阶段调 productRegistry 命中产品后,用 productRepo
 // 把 product_id / param_model_id 写回 device 行,避免前端"产品中心"设备数永 0
 // 和孤儿设备页误判。两个参数任一为 nil 都关闭此功能。
-func (e *ProvisioningEngine) SetProductBinder(reg *product.Registry, repo *product.PgRepository) {
+//
+// 接收消费者侧 narrow interface（productClassMatcher / productBinder），生产由
+// *product.Registry / *product.PgRepository 满足，测试可注入 stub
+// （T-0176-PR-D 重构）。
+func (e *ProvisioningEngine) SetProductBinder(reg productClassMatcher, repo productBinder) {
 	e.productRegistry = reg
 	e.productRepo = repo
 }
 
-// bindDeviceProduct 在 HandleBootstrap identify 阶段调 productRegistry 路由
-// productClass 命中产品后，把 product_id / param_model_id 写回 device 行。
+// SetDeviceCache 注入 DeviceCache，让 bindDeviceProductIfNeeded 在写库后失效
+// SN 缓存（T-0176-PR-D）。nil 表示禁用 — bind 仍写库，仅跳过 cache.Delete。
+func (e *ProvisioningEngine) SetDeviceCache(c deviceCacheInvalidator) {
+	e.deviceCache = c
+}
+
+// bindDeviceProduct 调 productRegistry 路由 productClass 命中产品后，
+// 把 product_id / param_model_id 写回 device 行。返 bound=true 当且仅当
+// 实际 BindDevice 写库成功；orphan / 任何 err / 前置校验失败均返 false。
 // 任何错误都仅记 warn 不阻断后续 provisioning（孤儿设备由前端孤儿设备页处理）。
-func (e *ProvisioningEngine) bindDeviceProduct(ctx context.Context, dev *model.Device) {
+//
+// T-0176-PR-D：返 bool 让 bindDeviceProductIfNeeded 据此决定是否清 cache。
+func (e *ProvisioningEngine) bindDeviceProduct(ctx context.Context, dev *model.Device) (bound bool) {
 	if e.productRegistry == nil || e.productRepo == nil || dev == nil || dev.ProductClass == "" {
-		return
+		return false
 	}
 	match, err := e.productRegistry.MatchProductClass(ctx, dev.ProductClass)
 	if err != nil {
+		// ErrOrphan 不算异常 — 这里 warn 即可，调用方据 false 跳过 cache 清理
 		e.logger.Warn("bindDeviceProduct: match productClass failed",
 			zap.String("device_sn", dev.SerialNumber),
 			zap.String("product_class", dev.ProductClass),
 			zap.Error(err))
-		return
+		return false
 	}
 	if match == nil || match.Product == nil {
-		return
+		return false
 	}
 	if err := e.productRepo.BindDevice(ctx, dev.ID, match.Product.ID, match.Product.ParamModelID); err != nil {
 		e.logger.Warn("bindDeviceProduct: write product_id failed",
 			zap.String("device_sn", dev.SerialNumber),
 			zap.String("product_id", match.Product.ID.String()),
 			zap.Error(err))
-		return
+		return false
 	}
 	e.logger.Info("device bound to product",
 		zap.String("device_sn", dev.SerialNumber),
 		zap.String("product_id", match.Product.ID.String()),
 		zap.String("product_name", match.Product.Name))
+	return true
+}
+
+// bindDeviceProductIfNeeded 在非 Bootstrap 入口（DeviceOnline / FirmwareChanged /
+// FileType11 上传）头部懒补 product 绑定。已绑定时 skip；写库成功后失效 SN cache。
+//
+// "已绑定"的检测：通过 productRepo.GetProductIDByDeviceID 查 devices.product_id。
+// productRepo / productRegistry 任一 nil 时静默跳过（与 bindDeviceProduct 行为一致）。
+//
+// 任何 err 都不抛出 — 主流程（Path B 同步 / Upload / RPC 派发）不应被审计写库
+// 路径阻塞（PR-D 事实修正：product_id 列写入只服务 admin/审计/未来 denorm 消费）。
+func (e *ProvisioningEngine) bindDeviceProductIfNeeded(ctx context.Context, dev *model.Device) {
+	if dev == nil || e.productRepo == nil || e.productRegistry == nil {
+		return
+	}
+	if dev.ProductClass == "" {
+		return
+	}
+	// 已绑定检测：查 devices.product_id；err / not-null 都 skip
+	existing, err := e.productRepo.GetProductIDByDeviceID(ctx, dev.ID)
+	if err != nil {
+		// 查询失败不阻塞主流程，silent skip（BindDevice 即使重复写也幂等，
+		// 但避免主流程额外 DB round trip — 这里宁可让缓存暂时落后一拍）
+		e.logger.Debug("bindDeviceProductIfNeeded: lookup product_id failed, skipping",
+			zap.String("device_sn", dev.SerialNumber),
+			zap.Error(err))
+		return
+	}
+	if existing != nil {
+		// 已绑定 → skip
+		return
+	}
+	if !e.bindDeviceProduct(ctx, dev) {
+		return
+	}
+	if e.deviceCache != nil {
+		// cache.Delete 内部已有 warn log + silent fail，不再重复包装
+		e.deviceCache.Delete(ctx, dev.SerialNumber)
+	}
 }
 
 // bootstrapEvent represents the data published on device.registered.
@@ -275,6 +352,10 @@ func (e *ProvisioningEngine) HandleDeviceOnline(ctx context.Context, evt device.
 		return nil
 	}
 
+	// T-0176-PR-D 懒补 product 绑定（首次 Bootstrap 错过 / 历史孤儿设备恢复在线场景）。
+	// silent skip 任何 err，不阻塞 Path B 同步主流程。
+	e.bindDeviceProductIfNeeded(ctx, dev)
+
 	// SourceID 是裸 UUID（写入 device_tasks.source_id UUID 列做溯源）；reason="device_online"
 	// 通过 WithReason 走 Redis 通道传给 HandleSyncResultPathB 打差异日志（T-0127）。
 	sourceID := evt.DeviceID.String()
@@ -360,6 +441,9 @@ func (e *ProvisioningEngine) HandleFirmwareChanged(ctx context.Context, evt devi
 			zap.String("device_id", evt.DeviceID.String()))
 		return nil
 	}
+
+	// T-0176-PR-D 懒补 product 绑定（设备升级后 productClass 不变但历史 orphan 此刻有机会路由）。
+	e.bindDeviceProductIfNeeded(ctx, dev)
 
 	// 4. 调 RequestModelUpload：log.Status=Discovering → Upload 真入队（handleDataModelFileReceived 会自动触发 Path B）；
 	//    log.Status=Completed (enable_filetype11=false) 或 err → 走 step 5 兜底
@@ -474,7 +558,9 @@ func (e *ProvisioningEngine) HandleBootstrap(ctx context.Context, evt bootstrapE
 
 	// 2.5 路由产品装配件并回写 device.product_id / param_model_id（B1 修复）。
 	// 路由失败/未命中（孤儿设备）不阻断后续 provisioning，仅记 warn。
-	e.bindDeviceProduct(ctx, dev)
+	// T-0176-PR-D：HandleBootstrap 进的是首次发现链路，无需 cache.Delete（设备行刚 INSERT，
+	// cache 还没写入；后续读再触发 GetOrLoad 即可）。返回值丢弃。
+	_ = e.bindDeviceProduct(ctx, dev)
 
 	// 3. Try matching template first (Path A).
 	if err := e.transitionTask(ctx, task, StateMatching); err != nil {
@@ -819,6 +905,9 @@ func (e *ProvisioningEngine) handleDataModelFileReceived(ctx context.Context, ev
 		e.logger.Warn("device not found for datamodel file, skipping", zap.String("device_sn", payload.DeviceSN))
 		return nil
 	}
+
+	// T-0176-PR-D 懒补 product 绑定（FileType11 上传链路也可能命中历史 orphan）。
+	e.bindDeviceProductIfNeeded(ctx, dev)
 
 	if e.modelUploadService == nil {
 		e.logger.Warn("model upload service not configured, skipping datamodel file")

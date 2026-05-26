@@ -48,6 +48,7 @@ type DeviceService struct {
 	abnormalRecorder  AbnormalRebootRecorder // T-0158: 异常重启识别即落库（nil = 禁用）
 	bootEventRecorder BootEventRecorder      // 普通 1 BOOT 事件日志写入（nil = 禁用）
 	productMatcher    ProductClassMatcher    // Phase 6 ModelName 回填（nil = 禁用）
+	productBinder     ProductBinder          // T-0176-PR-D：CreateDevice inline match 后写回 product_id（nil = 禁用）
 	logger            *zap.Logger
 }
 
@@ -179,6 +180,26 @@ type ProductClassMatcher interface {
 // 传 nil 等价于禁用回填——Inform 路径不影响。
 func (s *DeviceService) SetProductMatcher(m ProductClassMatcher) {
 	s.productMatcher = m
+}
+
+// ProductBinder 是 CreateDevice 把命中的 product 装配件写回 devices.product_id
+// 的最小依赖（T-0176-PR-D §B）。
+//
+// 生产环境由 *product.PgRepository 满足；测试可注入 stub。
+// 通过接口而非直接依赖避免 device 包对 product 仓储的强耦合。
+//
+// 注：BindDevice 与 *product.PgRepository.BindDevice 的签名保持一致 —— 当 INSERT
+// 已完成（device.ID 已分配）后才被调用，写库失败仅 warn 不回滚 device 行
+// （PR-D 事实修正：product_id 列只服务 admin/审计/未来 denorm 消费，
+//  不再是 Go 运行路径关键 — PR-C 切完 resolver 后 Go 路径不读它）。
+type ProductBinder interface {
+	BindDevice(ctx context.Context, deviceID, productID uuid.UUID, paramModelID *uuid.UUID) error
+}
+
+// SetProductBinder 注入 ProductBinder（T-0176-PR-D）。
+// 传 nil 等价于禁用回写——CreateDevice 进 inline match 时退化为"仅 metric + log"。
+func (s *DeviceService) SetProductBinder(b ProductBinder) {
+	s.productBinder = b
 }
 
 // RebootDevice queues a Reboot command for the given device via the ACS command queue.
@@ -1474,6 +1495,12 @@ func (s *DeviceService) GetDeviceDetailComposite(ctx context.Context, deviceID u
 }
 
 // CreateDevice creates a new device from an API request.
+//
+// T-0176-PR-D：INSERT 之前 inline 路由 productClass → product 装配件 →
+// INSERT 后通过 ProductBinder 写回 product_id / param_model_id；productClass
+// 为空 / productMatcher 未注入 / Registry 返 ErrOrphan 时跳过绑定（孤儿设备走
+// 既有 orphan 列表 / RematchOrphan 流程）。绑定写库失败仅 warn，不回滚 device
+// 行（PR-D 事实修正：product_id 列只服务 admin/审计/未来 denorm 消费）。
 func (s *DeviceService) CreateDevice(ctx context.Context, req CreateDeviceRequest) (*model.Device, error) {
 	existing, err := s.deviceRepo.GetBySerialNumber(ctx, req.SerialNumber)
 	if err != nil {
@@ -1490,6 +1517,33 @@ func (s *DeviceService) CreateDevice(ctx context.Context, req CreateDeviceReques
 		}
 		if err := s.licenseEnforcer.EnforceCapacity(ctx, 1); err != nil {
 			return nil, err
+		}
+	}
+
+	// T-0176-PR-D：INSERT 之前先尝试路由 productClass，命中 / orphan / 真错三态分流。
+	// 真错（DB 故障等）直接 return；不写脏数据。orphan 与命中都继续 INSERT，
+	// 仅在 INSERT 完成后用拿到的 device.ID 调 BindDevice。
+	var matchedProduct *product.Product
+	if req.ProductClass != "" && s.productMatcher != nil {
+		mr, mErr := s.productMatcher.MatchProductClass(ctx, req.ProductClass)
+		switch {
+		case mErr == nil && mr != nil && mr.Product != nil:
+			matchedProduct = mr.Product
+		case errors.Is(mErr, product.ErrOrphan):
+			if s.metrics != nil {
+				s.metrics.DeviceCreateOrphan.Inc()
+			}
+			s.logger.Info("device created as orphan; product_id left NULL",
+				zap.String("serial_number", req.SerialNumber),
+				zap.String("product_class", req.ProductClass))
+		case mErr != nil:
+			return nil, fmt.Errorf("resolve product for new device %s: %w", req.SerialNumber, mErr)
+			// mErr == nil && mr == nil 的极端场景按 orphan 对待但不计 metric（Registry 契约保证
+			// orphan 总返 ErrOrphan，到此说明运行期不一致 — 仅日志，不创造假数据）
+		default:
+			s.logger.Warn("device productClass match returned nil without ErrOrphan; treating as orphan",
+				zap.String("serial_number", req.SerialNumber),
+				zap.String("product_class", req.ProductClass))
 		}
 	}
 
@@ -1515,6 +1569,22 @@ func (s *DeviceService) CreateDevice(ctx context.Context, req CreateDeviceReques
 
 	if err := s.deviceRepo.Create(ctx, device); err != nil {
 		return nil, fmt.Errorf("create device: %w", err)
+	}
+
+	// T-0176-PR-D：INSERT 已成功，device.ID 已确定 — 写回 product_id（命中时）。
+	// 写库失败仅 warn，不回滚 device 行（让 orphan 列表+RematchOrphan 兜底）。
+	if matchedProduct != nil && s.productBinder != nil {
+		if bindErr := s.productBinder.BindDevice(ctx, device.ID, matchedProduct.ID, matchedProduct.ParamModelID); bindErr != nil {
+			s.logger.Warn("device created but product binding failed; leaving product_id NULL",
+				zap.String("serial_number", device.SerialNumber),
+				zap.String("product_id", matchedProduct.ID.String()),
+				zap.Error(bindErr))
+		} else {
+			s.logger.Debug("device bound to product on create",
+				zap.String("serial_number", device.SerialNumber),
+				zap.String("product_id", matchedProduct.ID.String()),
+				zap.String("product_name", matchedProduct.Name))
+		}
 	}
 
 	s.logger.Info("device created via API",
@@ -1555,6 +1625,12 @@ func (s *DeviceService) UpdateDevice(ctx context.Context, id uuid.UUID, req Upda
 
 	if err := s.deviceRepo.Update(ctx, device); err != nil {
 		return nil, fmt.Errorf("update device: %w", err)
+	}
+	// T-0176-PR-D：UpdateDevice 写库后清 cache，让下次读经 GetOrLoad 重新加载。
+	// 改 productClass 时尤其关键 — PR-C 切完 resolver 后，DeviceCache 缓存的 product_class
+	// 直接喂给 ProductRegistry，stale 会让运行路径选错 product。
+	if s.cache != nil {
+		s.cache.Delete(ctx, device.SerialNumber)
 	}
 	return device, nil
 }

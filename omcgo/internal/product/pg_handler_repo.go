@@ -577,6 +577,27 @@ func (r *PgRepository) ListOrphanDevices(ctx context.Context, limit int) ([]Orph
 	return out, rows.Err()
 }
 
+// GetDeviceSerialByID 取设备 SN（T-0176-PR-D：BindOrphan / RematchOrphan 写库后
+// 需要 SN 来清 DeviceCache）。
+//
+// 返回值约定：
+//   - device 不存在 / deleted_at 非空 → ("", nil)
+//   - DB 异常 → ("", wrapped err)
+func (r *PgRepository) GetDeviceSerialByID(ctx context.Context, deviceID uuid.UUID) (string, error) {
+	var sn string
+	err := r.pool.QueryRow(ctx,
+		`SELECT serial_number FROM devices WHERE id = $1 AND deleted_at IS NULL`,
+		deviceID,
+	).Scan(&sn)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("get serial_number by device %s: %w", deviceID, err)
+	}
+	return sn, nil
+}
+
 // BindOrphanDevice 手动把孤儿设备绑定到指定 product。
 func (r *PgRepository) BindOrphanDevice(ctx context.Context, deviceID, productID uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx,
@@ -590,6 +611,30 @@ func (r *PgRepository) BindOrphanDevice(ctx context.Context, deviceID, productID
 		return fmt.Errorf("device %s not found or already deleted", deviceID)
 	}
 	return nil
+}
+
+// GetProductIDByDeviceID 反查设备当前绑定的 product_id（T-0176-PR-D 已绑定检测）。
+//
+// 返回值约定：
+//   - device 不存在 / deleted_at 非空 → (nil, sql ErrNoRows wrapped 不抛，返 nil,nil)
+//   - product_id IS NULL（孤儿/未绑定）→ (nil, nil)
+//   - 已绑定 → (&productID, nil)
+//
+// bindDeviceProductIfNeeded 用本方法判断"是否已绑定"以决定是否走 BindDevice。
+// 单列 lookup，热路径友好（PR-D 的非 Bootstrap 入口被频繁调用）。
+func (r *PgRepository) GetProductIDByDeviceID(ctx context.Context, deviceID uuid.UUID) (*uuid.UUID, error) {
+	var productID *uuid.UUID
+	err := r.pool.QueryRow(ctx,
+		`SELECT product_id FROM devices WHERE id = $1 AND deleted_at IS NULL`,
+		deviceID,
+	).Scan(&productID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get product_id by device %s: %w", deviceID, err)
+	}
+	return productID, nil
 }
 
 // BindDevice 把 ProvisioningEngine 路由命中后的产品装配件回写到 device 行，

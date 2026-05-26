@@ -13,6 +13,11 @@ type DeviceMetrics struct {
 	BatchFlushDuration prometheus.Histogram
 	BatchFlushFailed   prometheus.Counter
 	BatchDropped       prometheus.Counter
+
+	// CreateDevice inline ProductRegistry 路由（T-0176-PR-D）：
+	// productClass 命中没有任何 active pattern 时 +1，devices.product_id 留 NULL。
+	// 运维据此盯异常 SN（说明 product 字典缺该型号），不阻塞设备创建本身。
+	DeviceCreateOrphan prometheus.Counter
 }
 
 // NewDeviceMetrics creates and registers device metrics.
@@ -49,12 +54,17 @@ func NewDeviceMetrics(reg prometheus.Registerer) *DeviceMetrics {
 			Name: "omc_device_batch_dropped_total",
 			Help: "Total number of inform events dropped due to full worker channel",
 		}),
+		DeviceCreateOrphan: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "omc_device_create_orphan_total",
+			Help: "Total number of CreateDevice calls whose productClass matched no product pattern (product_id left NULL)",
+		}),
 	}
 
 	reg.MustRegister(
 		m.DevicesTotal, m.RegistrationsTotal,
 		m.BatchFlushTotal, m.BatchFlushSize, m.BatchFlushDuration,
 		m.BatchFlushFailed, m.BatchDropped,
+		m.DeviceCreateOrphan,
 	)
 	return m
 }
