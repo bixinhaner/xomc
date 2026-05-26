@@ -88,15 +88,24 @@ export default function SubFieldInputList({ statement }: SubFieldInputListProps)
                 />
               )}
               <span style={{ flex: '0 0 200px', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                <span style={{ fontWeight: 500 }}>
-                  {/* MOD 模式 path 改为选填，不再用 is_required 标红 *；ADD 保留 */}
-                  {sf.isRequired && !isMod && (
-                    <span style={{ color: '#ff4d4f', marginRight: 4 }} aria-label="required">
-                      *
-                    </span>
-                  )}
-                  {sf.label}
-                </span>
+                <Tooltip title={sf.label} placement="top" mouseEnterDelay={0.3}>
+                  <span
+                    style={{
+                      fontWeight: 500,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {/* MOD 模式 path 改为选填，不再用 is_required 标红 *；ADD 保留 */}
+                    {sf.isRequired && !isMod && (
+                      <span style={{ color: '#ff4d4f', marginRight: 4 }} aria-label="required">
+                        *
+                      </span>
+                    )}
+                    {sf.label}
+                  </span>
+                </Tooltip>
                 {sf.description && (
                   <span style={{ color: '#bfbfbf', fontSize: 11, marginTop: 1 }}>
                     {sf.description}

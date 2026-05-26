@@ -1,4 +1,5 @@
 import http from '../http';
+import { generateUid } from '../../utils/uid';
 import type { MMLCommand, MMLScript, MMLTask, MMLTaskCommandDetail, MMLParam, MMLCustomCommand, ParamPath, MMLOperationType, DeviceTaskResultItem, MMLParamRef, MMLTaskResultsStats, MMLPathTranslationView, PathTranslationSource } from '../../types/mml';
 import type { PageRequest, PageResponse } from '../../types/pagination';
 import type {
@@ -1204,9 +1205,7 @@ function mapBackendStatement(b: BackendStatement): Statement {
   // 这些是 P2-a 组件层在 appendStatement 时通过 GET /commands/:id 与
   // GET /commands/:id/sub-fields 补齐。此处保守填空，让 store 决定何时 enrich。
   return {
-    uid: typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : `stmt-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    uid: generateUid('stmt'),
     commandId: b.command_id,
     commandCode: '', // 待 store 层 enrich
     logicalCode: b.logical_code,

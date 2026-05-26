@@ -187,8 +187,16 @@ export function useMmlTaskStream(
   const taskIdRef = useRef<string | null>(taskId);
   taskIdRef.current = taskId;
 
-  // taskId 变化只重置会话级 status；lines 由持久化 store 托管，跨 task 累积。
+  // mml_task_status running 事件去重 ref。
+  // 之前在 setStatus((prev) => { ... appendLineStore(...) ... }) 里做 dedup，
+  // 但 React 18+ 并发渲染下 setState updater 可能被调用多次（docs 明确要求
+  // updater 必须纯函数），导致 appendLineStore 被调多次 → 终端出现两条
+  // "任务开始执行" 重复行。改用 ref 在 effect 外部做 dedup，与 React 状态机解耦。
+  const runningEmittedRef = useRef(false);
+
+  // taskId 变化只重置会话级 status + dedup 标记；lines 由持久化 store 托管，跨 task 累积。
   useEffect(() => {
+    runningEmittedRef.current = false;
     setStatus(taskId ? 'dispatched' : 'idle');
   }, [taskId]);
 
@@ -229,16 +237,19 @@ export function useMmlTaskStream(
       if (frame.new_status === 'running') {
         // running 状态首次到达 → 写一条"开始执行"提示行，让用户感知任务真的进入下发阶段
         // （之前 silent → 用户体感是"派发后死寂"）。重复 running 事件不再写新行。
-        setStatus((prev) => {
-          if (prev !== 'running' && msgs?.running) {
+        // dedup 用 ref 而非 setState updater：state updater 必须纯函数，
+        // appendLineStore 是副作用，并发渲染下可能被调多次（实测内网 HTTP 部署复现）。
+        if (!runningEmittedRef.current) {
+          runningEmittedRef.current = true;
+          if (msgs?.running) {
             appendLineStore({
               type: 'info',
               text: msgs.running as string,
               timestamp: formatTimestamp(),
             });
           }
-          return 'running';
-        });
+        }
+        setStatus('running');
       } else if (frame.new_status === 'cancelled') {
         setStatus('cancelled');
         appendLineStore({

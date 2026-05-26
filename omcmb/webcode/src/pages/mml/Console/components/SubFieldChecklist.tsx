@@ -81,15 +81,20 @@ export default function SubFieldChecklist({ statement }: SubFieldChecklistProps)
               }}
             >
               <Checkbox value={sf.id} />
-              <span
-                style={{
-                  flex: '0 0 200px',
-                  fontWeight: 500,
-                  color: isReadOnly ? '#999' : undefined,
-                }}
-              >
-                {sf.label}
-              </span>
+              <Tooltip title={sf.label} placement="top" mouseEnterDelay={0.3}>
+                <span
+                  style={{
+                    flex: '0 0 200px',
+                    fontWeight: 500,
+                    color: isReadOnly ? '#999' : undefined,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {sf.label}
+                </span>
+              </Tooltip>
               <span style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                 <span style={{ color: '#888', fontFamily: 'monospace', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {sf.tr069Path}

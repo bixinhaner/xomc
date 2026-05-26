@@ -27,6 +27,7 @@ import type {
   SubFieldDef,
 } from '@core/types/mmlConsole';
 import type { MMLCustomCommand, MMLOperationType } from '@core/types/mml';
+import { generateUid } from '@core/utils/uid';
 import { useT } from '@/hooks/useT';
 import AddTemplateModal from './AddTemplateModal';
 
@@ -465,7 +466,7 @@ function customCommandToStatement(cc: MMLCustomCommand): Statement {
     values[k] = typeof v === 'string' ? v : String(v);
   });
   return {
-    uid: crypto.randomUUID(),
+    uid: generateUid('stmt'),
     commandId: undefined,
     commandCode: cc.commandCode,
     logicalCode: cc.commandCode,
@@ -663,7 +664,7 @@ export default function CommandTree({ lang }: CommandTreeProps) {
         });
 
         const stmt: Statement = {
-          uid: crypto.randomUUID(),
+          uid: generateUid('stmt'),
           commandId: cmd.id,
           commandCode: cmd.commandCode,
           logicalCode: cmd.logicalCode,
