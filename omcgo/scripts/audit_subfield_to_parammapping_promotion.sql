@@ -3,7 +3,7 @@
 --
 -- Pre/post 审计脚本：MML is_supported 单一真值源重构 PR-A。
 --
--- 用途：迁移 000195 前/后跑此脚本，得到以下统计（PR 描述贴上来）：
+-- 用途：迁移 000196 前/后跑此脚本，得到以下统计（PR 描述贴上来）：
 --   A. mml_command_sub_fields.is_supported=false 涉及的 unique standard_path 数
 --   B. 这些 path 中已在 BLQ param_mappings（迁移将 UPDATE）的数量
 --   C. 不在 BLQ param_mappings（迁移将 INSERT 占位行）的数量
