@@ -6,9 +6,9 @@
  *   - 'edit'   panel=existing → 更新（PUT）
  */
 
-import { useEffect } from 'react';
-import { Alert, Button, Drawer, Form, Input, InputNumber, Select, Space, Switch, Tag, message } from 'antd';
-import { ThunderboltOutlined } from '@ant-design/icons';
+import { useEffect, useState } from 'react';
+import { Alert, Button, Drawer, Form, Input, InputNumber, Select, Space, Switch, Tag, Tooltip, message } from 'antd';
+import { ThunderboltOutlined, AppstoreOutlined, MobileOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import {
   useCreatePmPanel,
@@ -22,7 +22,11 @@ import type {
   PanelType,
   Technology,
 } from '@core/types/pmDashboard';
+import type { DeviceType } from '@core/types/indicatorLibrary';
 import { usePmDashboardStore } from '@core/store/pmDashboardStore';
+import MetricPickerModal from '../KPIQuery/components/MetricPickerModal';
+import DevicePickerModal from '../KPIQuery/components/DevicePickerModal';
+import { csvToArray, arrayToCsv, techToDeviceType } from './dashboardUtils';
 
 interface Props {
   open: boolean;
@@ -90,11 +94,91 @@ const COMPARE_OPTIONS: { label: string; value: CompareMode | '' }[] = [
 ];
 
 function splitCsv(s?: string): string[] {
-  if (!s) return [];
-  return s
-    .split(',')
-    .map((x) => x.trim())
-    .filter(Boolean);
+  return csvToArray(s);
+}
+
+/**
+ * 指标路径选择字段 — antd Form 子组件契约：自动接收 value/onChange。
+ * value 为逗号分隔字符串（与表单 schema 兼容），picker 内部用 string[]，提交时回写 csv。
+ */
+function MetricPickerField({
+  value,
+  onChange,
+  deviceType,
+}: {
+  value?: string;
+  onChange?: (v: string) => void;
+  deviceType: DeviceType;
+}) {
+  const [open, setOpen] = useState(false);
+  const arr = csvToArray(value);
+  return (
+    <>
+      <Space wrap>
+        <Button icon={<AppstoreOutlined />} onClick={() => setOpen(true)}>
+          选择指标（已选 {arr.length}）
+        </Button>
+        {arr.length > 0 && (
+          <Tooltip title={<div style={{ whiteSpace: 'pre-wrap' }}>{arr.join('\n')}</div>}>
+            <Tag>
+              {arr.slice(0, 3).join(', ')}
+              {arr.length > 3 ? ` 等 ${arr.length} 个` : ''}
+            </Tag>
+          </Tooltip>
+        )}
+      </Space>
+      <MetricPickerModal
+        open={open}
+        onClose={() => setOpen(false)}
+        onConfirm={(paths) => {
+          onChange?.(arrayToCsv(paths));
+          setOpen(false);
+        }}
+        initialSelected={arr}
+        initialDeviceType={deviceType}
+      />
+    </>
+  );
+}
+
+/**
+ * 设备 SN 选择字段 — DevicePickerModal 已含搜索/分页/批量粘贴。
+ */
+function DeviceSnPickerField({
+  value,
+  onChange,
+}: {
+  value?: string;
+  onChange?: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const arr = csvToArray(value);
+  return (
+    <>
+      <Space wrap>
+        <Button icon={<MobileOutlined />} onClick={() => setOpen(true)}>
+          选择设备（已选 {arr.length}）
+        </Button>
+        {arr.length > 0 && (
+          <Tooltip title={<div style={{ whiteSpace: 'pre-wrap' }}>{arr.join('\n')}</div>}>
+            <Tag>
+              {arr.slice(0, 3).join(', ')}
+              {arr.length > 3 ? ` 等 ${arr.length} 个` : ''}
+            </Tag>
+          </Tooltip>
+        )}
+      </Space>
+      <DevicePickerModal
+        open={open}
+        onClose={() => setOpen(false)}
+        onConfirm={(sns) => {
+          onChange?.(arrayToCsv(sns));
+          setOpen(false);
+        }}
+        initialSelected={arr}
+      />
+    </>
+  );
 }
 
 // G6-Gap-12：deviceSns 超过此阈值时弹"建议改用自定义聚合任务"提示
@@ -211,12 +295,16 @@ export function PanelConfigDrawer({ open, mode, panel, dashboardId, technology, 
           <Input />
         </Form.Item>
         <Form.Item
-          label="指标路径（逗号分隔）"
+          label="指标路径"
           name="metricPaths"
-          rules={[{ required: true, message: '至少一个 metric_path' }]}
-          tooltip="如 L.RRC.SuccRate, L.ERAB.SuccRate；与后端 perf_indicators_*.en_name 对齐"
+          rules={[
+            {
+              validator: (_r, v) => (csvToArray(v).length > 0 ? Promise.resolve() : Promise.reject(new Error('至少选择一个指标'))),
+            },
+          ]}
+          tooltip="点按钮弹出指标选择器（支持搜索 / 多选 / 分页）"
         >
-          <Input placeholder="L.RRC.SuccRate" />
+          <MetricPickerField deviceType={techToDeviceType(technology)} />
         </Form.Item>
         <Form.Item
           label="粒度（多选 — 前端 Tab 切换浏览）"
@@ -237,8 +325,8 @@ export function PanelConfigDrawer({ open, mode, panel, dashboardId, technology, 
               const overflow = sns.length > ADHOC_SUGGESTION_THRESHOLD;
               return (
                 <>
-                  <Form.Item label="设备 SN（逗号分隔）" name="deviceSns">
-                    <Input placeholder="SN-001, SN-002" />
+                  <Form.Item label="设备 SN" name="deviceSns" tooltip="点按钮弹出设备选择器（支持 SN/OUI/站点名搜索 / 批量粘贴）">
+                    <DeviceSnPickerField />
                   </Form.Item>
                   {/* G6-Gap-12: deviceSns 超阈值时建议改用 adhoc */}
                   {overflow && (
