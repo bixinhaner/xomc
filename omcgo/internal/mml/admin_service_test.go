@@ -141,7 +141,7 @@ func (m *mockSubFieldRepo) ListEnrichedByCommand(ctx context.Context, commandID 
 func (m *mockSubFieldRepo) CountByParam(ctx context.Context, paramID uuid.UUID) (int64, error) {
 	return m.countByParam[paramID], nil
 }
-func (m *mockSubFieldRepo) MarkUnsupportedByStandardPath(_ context.Context, _ string) (int64, error) {
+func (m *mockSubFieldRepo) MarkUnsupportedByStandardPath(_ context.Context, _ uuid.UUID, _ string) (int64, error) {
 	return 0, nil
 }
 

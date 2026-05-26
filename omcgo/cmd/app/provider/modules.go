@@ -1097,8 +1097,29 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 		// ACS 在 MarkTaskCompleted/Failed 后发布 task.completed/task.failed，
 		// 本进程的 bridge 订阅后驱动 ResultAggregator 更新 mml_tasks 统计并推送 SSE。
 		// T-0174: 注入 mmlSubFieldRepo 让 aggregator 能在收到 SetParameterValues 9005
-		// 时自动 mark sub_field is_supported=false（auto-learn 不支持 path）。
+		// 时自动 mark is_supported=false（auto-learn 不支持 path）。
+		// T-0176-PR-E: auto-learn 真值源迁到 param_mappings 后必须先解析 paramModelID；
+		// 这里复用与 ConsoleService.SetParamModelByDeviceResolver 相同的 devices LEFT
+		// JOIN products SQL —— 两闭包是 cosmetic duplication，PR-C / PR-E 合主分支
+		// 后可抽出 helper（独立清理任务，留 TODO 在此）。
 		aggregator := mml.NewResultAggregator(mmlTaskRepo, mmlScriptRepo, mmlSubFieldRepo, messageHub, logger)
+		aggregator.SetParamModelResolver(func(ctx context.Context, deviceKey string) (*uuid.UUID, error) {
+			// deviceKey 可以是 SN 或 UUID。SQL 用 OR 兼容；ACS 上报的 dt.DeviceSN 是 SN，
+			// admin 工具可能传 UUID — 同 SQL 通用。
+			// TODO(T-0176 cleanup): 与 mmlConsoleSvc.SetParamModelByDeviceResolver 闭包
+			// 抽出共享 helper（如 provider.resolveParamModelByDeviceKey）。
+			const q = `
+SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
+  FROM devices d
+  LEFT JOIN products p ON p.id = d.product_id
+ WHERE d.serial_number = $1 OR d.id::text = $1
+ LIMIT 1`
+			var pmID *uuid.UUID
+			if err := c.PgPool.QueryRow(ctx, q, deviceKey).Scan(&pmID); err != nil {
+				return nil, fmt.Errorf("resolve param_model by device %q: %w", deviceKey, err)
+			}
+			return pmID, nil
+		})
 		if c.EventBus != nil {
 			// 注：completionRouter 通过 miscDeps 持有，方便 ops 模块（在本块之后初始化）
 			// 也注册自己的 TaskSourceOps 聚合器。CompletionRouter.Register 是 mutex-safe，

@@ -16,16 +16,27 @@ import (
 // last_run_status / last_run_at 字段，供脚本列表/详情页展示"最近一次执行态"。
 //
 // T-0174 扩展：subFieldRepo 注入后，OnTaskCompleted 在收到 SetParameterValues
-// 失败且 dt.Result.param_faults[].fault_code == 9005 (AttributeIdNotFound) 时，
-// 自动把对应 standardPath 的 sub_field 标 is_supported=false —— UI 后续永久
-// 隐藏该 path，避免下一个用户继续触发同样的 9003 失败。subFieldRepo 为 nil 时
-// 跳过 auto-learn，保持向后兼容（单测 / 无 mml 依赖的场景）。
+// 失败且 dt.Result.param_faults[].fault_code == 9005 (Invalid parameter name) 时，
+// 自动把对应 standardPath 标 is_supported=false —— UI 后续永久隐藏该 path，避免
+// 下一个用户继续触发同样的 9003 失败。subFieldRepo 为 nil 时跳过 auto-learn，
+// 保持向后兼容（单测 / 无 mml 依赖的场景）。
+//
+// T-0176-PR-E：auto-learn 的写真值源从 mml_command_sub_fields 迁到 param_mappings，
+// 因此需要先把 dt.DeviceSN → paramModelID 解析出来再调 MarkUnsupportedByStandardPath。
+// paramModelResolver 闭包由 provider 装配（与 ConsoleService.SetParamModelByDeviceResolver
+// 同源逻辑：devices LEFT JOIN products → effective param_model_id）；resolver 未注入
+// 或返 nil/err 时整个 auto-learn 跳过，孤儿设备 / 无 paramModel 不污染数据。
 type ResultAggregator struct {
 	taskRepo     TaskRepository
 	scriptRepo   ScriptRepository
 	subFieldRepo SubFieldRepository
 	hub          SSEPublisher
 	logger       *zap.Logger
+
+	// T-0176-PR-E: deviceSN/UUID → paramModelID 反查闭包。注入后
+	// autoLearnUnsupportedPaths 在写 param_mappings 之前解析 paramModelID。
+	// nil → silent skip 整个 auto-learn。
+	paramModelResolver func(ctx context.Context, deviceKey string) (*uuid.UUID, error)
 }
 
 // NewResultAggregator creates a new ResultAggregator. scriptRepo / subFieldRepo 可为 nil——
@@ -44,6 +55,16 @@ func NewResultAggregator(
 		hub:          hub,
 		logger:       logger.Named("mml-result-aggregator"),
 	}
+}
+
+// SetParamModelResolver 注入 deviceSN/UUID → paramModelID 反查闭包（T-0176-PR-E）。
+// 不注入时 autoLearnUnsupportedPaths silent skip。注入风格与 PR-C
+// ConsoleService.SetParamModelByDeviceResolver 对齐——不改 NewResultAggregator
+// 构造签名避免现有测试大面积调整。
+func (a *ResultAggregator) SetParamModelResolver(
+	fn func(ctx context.Context, deviceKey string) (*uuid.UUID, error),
+) {
+	a.paramModelResolver = fn
 }
 
 // OnTaskCompleted is called when a device_task reaches a terminal state.
@@ -108,15 +129,33 @@ type spvFaultPayload struct {
 const cwmpFaultInvalidParameterName = 9005
 
 // autoLearnUnsupportedPaths 解析 dt.Result.param_faults，对 code=9005 的 path
-// 调 subFieldRepo.MarkUnsupportedByStandardPath。subFieldRepo 为 nil（未注入）
-// 或 dt.Result 不是 SPV fault 形态时 silent skip。
+// 调 subFieldRepo.MarkUnsupportedByStandardPath 把 param_mappings 行标
+// is_supported=false。subFieldRepo 为 nil（未注入）、paramModelResolver 未注入、
+// dt.Result 不是 SPV fault 形态、resolver 返 nil/err 时均 silent skip。
+//
+// T-0176-PR-E：写入真值源已从 mml_command_sub_fields 迁到 param_mappings，因此
+// 在调 MarkUnsupportedByStandardPath 之前先用 dt.DeviceSN 解析 paramModelID。
 func (a *ResultAggregator) autoLearnUnsupportedPaths(ctx context.Context, dt *task.Task) {
-	if a.subFieldRepo == nil {
+	if a.subFieldRepo == nil || a.paramModelResolver == nil {
 		return
 	}
 	if dt.Method != "SetParameterValues" || len(dt.Result) == 0 {
 		return
 	}
+
+	// T-0176-PR-E: 先解析 paramModelID；孤儿设备 / 无 paramModel / err → silent skip。
+	pmID, err := a.paramModelResolver(ctx, dt.DeviceSN)
+	if err != nil {
+		a.logger.Debug("skip auto-learn: cannot resolve paramModel",
+			zap.String("device_sn", dt.DeviceSN), zap.Error(err))
+		return
+	}
+	if pmID == nil {
+		a.logger.Debug("skip auto-learn: device has no paramModel",
+			zap.String("device_sn", dt.DeviceSN))
+		return
+	}
+
 	var payload spvFaultPayload
 	if err := json.Unmarshal(dt.Result, &payload); err != nil {
 		// dt.Result 是 ACS 写入的 {"param_faults":[...]}；解析失败说明 ACS 没写
@@ -131,10 +170,11 @@ func (a *ResultAggregator) autoLearnUnsupportedPaths(ctx context.Context, dt *ta
 		if f.FaultCode != cwmpFaultInvalidParameterName || f.ParameterName == "" {
 			continue
 		}
-		affected, err := a.subFieldRepo.MarkUnsupportedByStandardPath(ctx, f.ParameterName)
+		affected, err := a.subFieldRepo.MarkUnsupportedByStandardPath(ctx, *pmID, f.ParameterName)
 		if err != nil {
-			a.logger.Warn("auto-learn mark sub_field unsupported failed",
+			a.logger.Warn("auto-learn mark param_mapping unsupported failed",
 				zap.String("device_sn", dt.DeviceSN),
+				zap.String("param_model_id", pmID.String()),
 				zap.String("path", f.ParameterName),
 				zap.Error(err))
 			continue
@@ -143,16 +183,18 @@ func (a *ResultAggregator) autoLearnUnsupportedPaths(ctx context.Context, dt *ta
 			learned++
 			a.logger.Info("auto-learned unsupported path",
 				zap.String("device_sn", dt.DeviceSN),
+				zap.String("param_model_id", pmID.String()),
 				zap.String("device_task_id", dt.ID),
 				zap.String("path", f.ParameterName),
 				zap.Int("fault_code", f.FaultCode),
-				zap.Int64("sub_fields_updated", affected),
+				zap.Int64("mappings_updated", affected),
 			)
 		}
 	}
 	if learned > 0 {
 		a.logger.Info("auto-learn pass done",
 			zap.String("device_task_id", dt.ID),
+			zap.String("param_model_id", pmID.String()),
 			zap.Int("paths_learned", learned),
 		)
 	}

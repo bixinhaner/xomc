@@ -52,15 +52,19 @@ type SubFieldRepository interface {
 	ListEnrichedByCommand(ctx context.Context, commandID uuid.UUID, paramModelID *uuid.UUID) ([]MMLCommandSubFieldEnriched, error)
 	CountByParam(ctx context.Context, paramID uuid.UUID) (int64, error)
 
-	// MarkUnsupportedByStandardPath 把所有引用 standardPath 的 sub_field 标为
-	// is_supported=false，返回受影响行数。T-0174 auto-learn 入口：ACS 收到
-	// SetParameterValues 9005 (AttributeIdNotFound) 时调用，让 UI 永久隐藏该 path。
+	// MarkUnsupportedByStandardPath 把 (paramModelID, standardPath) 在 param_mappings
+	// 中标 is_supported=false (auto-learn 入口)。T-0176-PR-E 起从写
+	// mml_command_sub_fields 迁到写 param_mappings，paramModelID 必填——这是 MML
+	// 控制台 "is_supported 单一真值源 = param_mappings" 重构的最后一块写路径。
 	//
-	// 当前粒度：全局（同 standardPath 在所有 command 下统一隐藏）。理由：
-	//   - mml_command_sub_fields.is_supported 列就是全局粒度
-	//   - 同 path 不被 CPE A 支持，CPE B/C 多半也不支持
-	//   - 若需 per-device-family 粒度，未来迁移到 discovered_param_mappings 设备级表(T-0175)
-	MarkUnsupportedByStandardPath(ctx context.Context, standardPath string) (int64, error)
+	// 调用方：ACS 收到 SetParameterValues 9005 (Invalid parameter name) 时
+	// ResultAggregator 转发到此方法，让 UI 后续 enriched 视图按 paramModel 过滤掉
+	// 该 path。0 行受影响是合法情况（path 不在 param_mappings 中，或已经标过 false）。
+	//
+	// 注意：方法名 / 接口归属保留——MarkUnsupportedByStandardPath 仍挂在
+	// SubFieldRepository 接口上虽然语义已飘到 param_mappings，T-0176 计划"第一版就
+	// 地修改，类型迁回 parammodel.Registry 是后续清理项"。
+	MarkUnsupportedByStandardPath(ctx context.Context, paramModelID uuid.UUID, standardPath string) (int64, error)
 }
 
 // PgSubFieldRepository PostgreSQL 实现。
@@ -336,27 +340,33 @@ func (r *PgSubFieldRepository) CountByParam(ctx context.Context, paramID uuid.UU
 	return n, nil
 }
 
-// MarkUnsupportedByStandardPath 把所有引用 standardPath 的 sub_field 行标为
-// is_supported=false，仅更新当前 is_supported=true 的行（已 false 的不重复
-// 触动 updated_at）。返回受影响行数。
+// MarkUnsupportedByStandardPath 把 (paramModelID, standardPath) 在 param_mappings
+// 表中标 is_supported=false，仅更新当前 is_supported=true 的行（已 false 的不重复
+// 触动 updated_at，避免抖动）。返回受影响行数。
 //
-// T-0174 auto-learn 调用：ACS 收到 SetParameterValues 9005 时 MML
-// ResultAggregator 转发到此方法。standardPath 为空 → 直接返 0 不报错（防御）。
-func (r *PgSubFieldRepository) MarkUnsupportedByStandardPath(ctx context.Context, standardPath string) (int64, error) {
+// T-0176-PR-E 起从写 mml_command_sub_fields 迁到写 param_mappings 单一真值源；
+// paramModelID 必填以隔离同 standardPath 在不同 paramModel 间的真值差异。
+//
+// 调用方：ACS 收到 SetParameterValues 9005 (Invalid parameter name) 时
+// ResultAggregator 转发到此方法。standardPath 为空 → 短路返 0 不报错（防御）。
+// 0 行受影响是合法情况：path 不在该 paramModel 的 mappings 里，或已经标过 false。
+func (r *PgSubFieldRepository) MarkUnsupportedByStandardPath(
+	ctx context.Context, paramModelID uuid.UUID, standardPath string,
+) (int64, error) {
 	if standardPath == "" {
 		return 0, nil
 	}
 	const sqlText = `
-UPDATE mml_command_sub_fields csf
+UPDATE param_mappings
    SET is_supported = false,
        updated_at   = NOW()
-  FROM standard_params sp
- WHERE csf.standard_path_id = sp.id
-   AND sp.standard_path = $1
-   AND csf.is_supported = true`
-	tag, err := r.pool.Exec(ctx, sqlText, standardPath)
+ WHERE param_model_id = $1
+   AND standard_path  = $2
+   AND is_supported   = true`
+	tag, err := r.pool.Exec(ctx, sqlText, paramModelID, standardPath)
 	if err != nil {
-		return 0, fmt.Errorf("mark sub_field unsupported by standard_path %q: %w", standardPath, err)
+		return 0, fmt.Errorf("mark param_mapping unsupported (pm=%s, path=%q): %w",
+			paramModelID, standardPath, err)
 	}
 	return tag.RowsAffected(), nil
 }
