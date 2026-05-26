@@ -117,36 +117,56 @@ func (s *SyncService) StartSync(ctx context.Context, dev *model.Device, paramPat
 	if log != nil {
 		_ = s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoverySyncing, "")
 	}
+	_, err := s.EnqueueGPVBatches(ctx, dev.SerialNumber, paramPaths, sourceID)
+	return err
+}
 
+// EnqueueGPVBatches 按统一 batchSize 把 paths 拆批，每批入队一个 GetParameterValues task。
+//
+// 这是参数同步流程的"批次拆分 + 入队"原子能力，对所有同步入口统一：
+//   - StartSync（手动 / 北向显式 path 列表）
+//   - enqueueGPVPrefixes（Path B / Inform 触发，从 paramRegistry 抽 storable 前缀）
+//   - PullConfig（HTTP /config/sync/pull/{deviceId} 北向同步）
+//
+// commandKey 一律用 "sync-gpv-{sn}-{i}" 前缀。该前缀同时是 ACS handler 判定
+// "本任务允许 Fault 自愈"和 Path B "允许 reconcile" 的关键标识。
+//
+// 返回入队成功的 task ID 列表，调用方可用于追溯/北向返回。
+func (s *SyncService) EnqueueGPVBatches(ctx context.Context, deviceSN string, paramPaths []string, sourceID string) ([]string, error) {
+	if deviceSN == "" {
+		return nil, fmt.Errorf("EnqueueGPVBatches: empty deviceSN")
+	}
 	batches := batchPaths(paramPaths, s.batchSize)
+	taskIDs := make([]string, 0, len(batches))
 	for i, batch := range batches {
 		gpvParams, err := json.Marshal(map[string]interface{}{
 			"names": batch,
 		})
 		if err != nil {
-			return fmt.Errorf("marshal GPV batch %d: %w", i, err)
+			return taskIDs, fmt.Errorf("marshal GPV batch %d: %w", i, err)
 		}
-
-		if _, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
-			DeviceSN:   dev.SerialNumber,
+		t, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
+			DeviceSN:   deviceSN,
 			Method:     MethodGetParameterValues,
 			Params:     gpvParams,
 			Priority:   10 + i,
-			CommandKey: fmt.Sprintf("sync-gpv-%s-%d", dev.SerialNumber, i),
+			CommandKey: fmt.Sprintf("sync-gpv-%s-%d", deviceSN, i),
 			Source:     task.TaskSourceSystem,
 			SourceID:   sourceID,
-		}); err != nil {
-			return fmt.Errorf("enqueue GPV batch %d: %w", i, err)
+		})
+		if err != nil {
+			return taskIDs, fmt.Errorf("enqueue GPV batch %d: %w", i, err)
+		}
+		if t != nil {
+			taskIDs = append(taskIDs, t.ID)
 		}
 	}
-
-	s.logger.Info("parameter sync started",
-		zap.String("device_sn", dev.SerialNumber),
+	s.logger.Info("GPV batches enqueued",
+		zap.String("device_sn", deviceSN),
 		zap.Int("total_params", len(paramPaths)),
 		zap.Int("batches", len(batches)),
 	)
-
-	return nil
+	return taskIDs, nil
 }
 
 // HandleSyncResult processes a GPV response and upserts parameter values into the database.
@@ -185,83 +205,21 @@ func (s *SyncService) HandleSyncResult(ctx context.Context, dev *model.Device,
 	return nil
 }
 
-// enqueueGPVPrefixes enqueues GPV commands using paths from the param mapping
-// dictionary as-is. 供 sync_pathb.go 的 Path B 流程复用：把 ParamMapping 抽出的
-// 去重 path 列表分批做 GPV。
+// enqueueGPVPrefixes 把 paramRegistry 抽出的去重前缀分批入队 GPV。供 Path B 同步使用。
 //
 // 路径形态由 basePrefix 决定（含 "{i}" 截到对象前缀，其余原样）。CPE 收到对象前缀
 // 时自动展开子树，收到叶子时返回该叶子的值。
 //
-// Batch 划分（object_param_classifier 引入）：
-//   - scalar 参数（无尾点）：按 s.batchSize 批量打包，效率优先
-//   - object 前缀（尾点 "."，CPE 枚举实例）：一个 path 一个 GPV 独立成 batch
-//     原因：object 0 实例时 CPE 回 SOAP Fault 9005，会拒绝整个 GPV。批量发会让
-//     无关联的兄弟 path 一并失败。单独发只让自己挂掉，其它 batch 不受影响。
-//
-// 不并发收紧：所有 batch 走同一 taskSvc 入队，taskSvc 下游 dispatch 已按 device-level
-// 串行调度 RPC（每设备同时只跑一个会话），不需要在这里再做"object batch 并发限流 5"
-// 之类的事 —— 设备端速率天然受限。
-//
-// 失败语义：object 单 path GPV 收到 9005 时，ACS 端会把对应 task 标记为 Fault；
-// 这是预期行为（"该对象当前无实例"，不是错误），不会触发 reconcileDeletedPaths
-// 误删（reconcile 只在响应成功且含数据的入口跑）。
+// 批次拆分：一刀切按 s.batchSize 打包，标量 / 对象前缀混编。
+// 历史上对"对象前缀（尾点 "."）"单独成批 size=1 以预防 9005 拖垮整批；引入
+// ACS handler.tryRecoverGPVFault 后改为事后自愈（剔除坏 path 续查），不再需要事前过度防护。
 func (s *SyncService) enqueueGPVPrefixes(ctx context.Context, dev *model.Device, prefixes []string, sourceID string) error {
 	log, _ := s.discoveryRepo.GetByDeviceID(ctx, dev.ID)
 	if log != nil {
 		_ = s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoverySyncing, "")
 	}
-
-	batches := buildGPVBatches(prefixes, s.batchSize)
-	scalarPaths, objectPaths := classifyPrefixes(prefixes)
-	for i, batch := range batches {
-		gpvParams, err := json.Marshal(map[string]interface{}{
-			"names": batch,
-		})
-		if err != nil {
-			return fmt.Errorf("marshal GPV prefix batch %d: %w", i, err)
-		}
-
-		if _, err := s.taskSvc.CreateTask(ctx, &task.CreateTaskRequest{
-			DeviceSN:   dev.SerialNumber,
-			Method:     MethodGetParameterValues,
-			Params:     gpvParams,
-			Priority:   10 + i,
-			CommandKey: fmt.Sprintf("sync-gpv-%s-%d", dev.SerialNumber, i),
-			Source:     task.TaskSourceSystem,
-			SourceID:   sourceID,
-		}); err != nil {
-			return fmt.Errorf("enqueue GPV batch %d: %w", i, err)
-		}
-	}
-
-	s.logger.Info("GPV prefix sync enqueued",
-		zap.String("device_sn", dev.SerialNumber),
-		zap.Int("prefixes", len(prefixes)),
-		zap.Int("scalar_paths", len(scalarPaths)),
-		zap.Int("object_paths", len(objectPaths)),
-		zap.Int("batches", len(batches)),
-	)
-
-	return nil
-}
-
-// buildGPVBatches 把 prefixes 划分为 GPV 批次：
-//   - scalar 参数合并到 s.batchSize 大小的批
-//   - object 前缀（尾点 "."）每条独立成批（size=1），避免 SOAP Fault 9005 误伤
-//
-// 输入顺序：scalars 与 objects 在输入中可交错；本函数稳定保留各类内部相对顺序，
-// 输出 [scalar 批... , object 单 path 批...]。空切片返回 nil（与 batchPaths 一致）。
-func buildGPVBatches(prefixes []string, batchSize int) [][]string {
-	scalars, objects := classifyPrefixes(prefixes)
-	if batchSize <= 0 {
-		batchSize = 50
-	}
-	var batches [][]string
-	batches = append(batches, batchPaths(scalars, batchSize)...)
-	for _, p := range objects {
-		batches = append(batches, []string{p})
-	}
-	return batches
+	_, err := s.EnqueueGPVBatches(ctx, dev.SerialNumber, prefixes, sourceID)
+	return err
 }
 
 // CompleteSyncLog marks the discovery log as completed after all sync batches finish.

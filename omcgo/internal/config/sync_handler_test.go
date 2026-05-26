@@ -42,7 +42,8 @@ func (f *fakeEnqueuer) GetQueueLength(ctx context.Context, deviceSN string) (int
 func setupRouter(enq task.Enqueuer) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	handler := NewSyncHandler(enq, zap.NewNop())
+	// 测试场景模拟 AutoSync 未启用，gpvBatcher=nil → PullConfig 走兜底单 task 路径。
+	handler := NewSyncHandler(enq, nil, zap.NewNop())
 	handler.RegisterRoutes(&r.RouterGroup)
 	return r
 }

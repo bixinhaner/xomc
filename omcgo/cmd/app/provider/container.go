@@ -26,6 +26,7 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/kpi"
 	"github.com/omcgo/omcgo/internal/pm/retention"
 	"github.com/omcgo/omcgo/internal/product"
+	"github.com/omcgo/omcgo/internal/provision"
 	"github.com/omcgo/omcgo/internal/quicksettings"
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/topology"
@@ -90,6 +91,11 @@ type Container struct {
 
 	// ConfigModule 设置（T-0098 P5-01：旧 DMRegistry / DMImporter 已删除）
 	TemplateService *template.ConfigTemplateService
+
+	// 参数同步服务（AutoSync.Enabled 时由 provisionModule.Init 创建，否则为 nil）。
+	// 用途：让 config.SyncHandler.PullConfig 也能拿到统一的批次拆分能力，从而触发
+	// ACS handler.tryRecoverGPVFault 的 Fault 自愈循环。
+	SyncSvc *provision.SyncService
 
 	// TopologyModule 设置
 	GroupRepo    *topology.PgDeviceGroupRepository

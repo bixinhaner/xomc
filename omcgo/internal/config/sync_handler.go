@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -15,17 +16,28 @@ import (
 	"github.com/omcgo/omcgo/internal/task"
 )
 
+// GPVBatcher 是 PullConfig 拿到批次拆分能力的窄接口（避免 config → provision 循环 import）。
+// 由 provision.SyncService 实现，DI 时按接口注入。
+type GPVBatcher interface {
+	// EnqueueGPVBatches 按统一 batchSize 拆分 paths 并入队 GetParameterValues 任务。
+	// 返回入队的 task ID 列表。
+	EnqueueGPVBatches(ctx context.Context, deviceSN string, paramPaths []string, sourceID string) ([]string, error)
+}
+
 // SyncHandler provides HTTP endpoints for configuration parameter sync operations.
 type SyncHandler struct {
-	taskSvc task.Enqueuer
-	logger  *zap.Logger
+	taskSvc    task.Enqueuer
+	gpvBatcher GPVBatcher
+	logger     *zap.Logger
 }
 
 // NewSyncHandler creates a new SyncHandler.
-func NewSyncHandler(taskSvc task.Enqueuer, logger *zap.Logger) *SyncHandler {
+// gpvBatcher 可为 nil（AutoSync 未启用时）；nil 时 PullConfig 降级为单 task 不拆批。
+func NewSyncHandler(taskSvc task.Enqueuer, gpvBatcher GPVBatcher, logger *zap.Logger) *SyncHandler {
 	return &SyncHandler{
-		taskSvc: taskSvc,
-		logger:  logger.Named("config-sync"),
+		taskSvc:    taskSvc,
+		gpvBatcher: gpvBatcher,
+		logger:     logger.Named("config-sync"),
 	}
 }
 
@@ -117,6 +129,9 @@ func (h *SyncHandler) PushConfig(c *gin.Context) {
 }
 
 // PullConfig queues GetParameterValues commands for a device.
+//
+// 走 GPVBatcher：按统一 batchSize 拆批，commandKey 用 "sync-gpv-{sn}-{i}" 前缀，
+// 即可享受 ACS handler.tryRecoverGPVFault 的 Fault 自愈循环（剔除坏 path 续查）。
 func (h *SyncHandler) PullConfig(c *gin.Context) {
 	deviceID := c.Param("deviceId")
 	if deviceID == "" {
@@ -130,12 +145,33 @@ func (h *SyncHandler) PullConfig(c *gin.Context) {
 		return
 	}
 
+	if h.gpvBatcher != nil {
+		taskIDs, err := h.gpvBatcher.EnqueueGPVBatches(c.Request.Context(), deviceID, req.ParameterNames, "")
+		if err != nil {
+			logger.L(c.Request.Context()).Error("pull config enqueue batches",
+				zap.String("device_id", deviceID), zap.Error(err))
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+			return
+		}
+		firstID := ""
+		if len(taskIDs) > 0 {
+			firstID = taskIDs[0]
+		}
+		response.OKWithMsg(c, gin.H{
+			"device_id":   deviceID,
+			"command_id":  firstID,
+			"task_ids":    taskIDs,
+			"batch_count": len(taskIDs),
+		}, "configuration pull queued")
+		return
+	}
+
+	// 兜底：AutoSync 未启用 → 批次拆分能力不可用，退回旧的单 task 路径。
 	params, err := json.Marshal(req.ParameterNames)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-
 	created, err := h.taskSvc.CreateTask(c.Request.Context(), &task.CreateTaskRequest{
 		DeviceSN: deviceID,
 		Method:   "GetParameterValues",
@@ -147,7 +183,6 @@ func (h *SyncHandler) PullConfig(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-
 	response.OKWithMsg(c, gin.H{
 		"device_id":  deviceID,
 		"command_id": created.ID,

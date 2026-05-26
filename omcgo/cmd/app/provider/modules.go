@@ -445,6 +445,7 @@ func initProvisionModule(c *Container) error {
 		).WithParamRegistry(c.ParamRegistry, c.ProductRegistry, true).
 			SetRedisClient(c.Redis).
 			SetParamSyncWriter(c.DeviceRepo) // T-0124: 注入 last_param_sync_at 回写器
+		c.SyncSvc = syncSvc
 		provisionEngine.SetSyncService(syncSvc)
 		// T-0126: 注入 ParamSyncStarter 让 device.handler.SyncDeviceParams 调 Path B 手动同步（reason="manual"）
 		if c.DeviceService != nil {
@@ -837,8 +838,12 @@ func initMiscModules(c *Container) error {
 	syslogRepo := syslog.NewPgSyslogRepository(c.PgPool)
 	c.miscDeps.syslogHandler = syslog.NewHandler(syslogRepo, logger)
 
-	// Config sync
-	c.miscDeps.syncHandler = config.NewSyncHandler(c.TaskSvc, logger)
+	// Config sync —— PullConfig 优先走 SyncSvc 拿批次拆分 + Fault 自愈；AutoSync 未启用时 SyncSvc=nil，handler 自动降级到单 task 路径。
+	var gpvBatcher config.GPVBatcher
+	if c.SyncSvc != nil {
+		gpvBatcher = c.SyncSvc
+	}
+	c.miscDeps.syncHandler = config.NewSyncHandler(c.TaskSvc, gpvBatcher, logger)
 
 	// File Manager module
 	fileRepo := filemanager.NewPgFileRepository(c.PgPool)

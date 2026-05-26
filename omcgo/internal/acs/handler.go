@@ -281,8 +281,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Info("ACS detected RPC method", zap.String("method", string(method)))
 
 	// 优先检查 SOAP Fault（可能出现在任何 RPC 的响应中）
-	if isFault, faultCode, soapFaultCode, faultMsg := detectSOAPFault(body); isFault {
-		h.handleSOAPFault(w, r, body, faultCode, soapFaultCode, faultMsg, log)
+	if isFault, faultCode, soapFaultCode, faultMsg, badPath := detectSOAPFault(body); isFault {
+		h.handleSOAPFault(w, r, body, faultCode, soapFaultCode, faultMsg, badPath, log)
 		return
 	}
 
@@ -714,21 +714,24 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 			log.Warn("get task by cwmp_id", zap.Error(err), zap.String("cwmp_id", cwmpID))
 		} else if taskItem != nil {
 			// 检查响应中是否有 SOAP Fault
-			if isFault, faultCode, soapFaultCode, faultMsg := detectSOAPFault(body); isFault {
+			if isFault, faultCode, soapFaultCode, faultMsg, badPath := detectSOAPFault(body); isFault {
 				// 把 SOAP 1.1 outer faultcode（如 "Server.Internal"）合进 error message，
 				// 否则丢失诊断信息；DB 落盘的 error_message 也能完整呈现。
 				combinedMsg := faultMsg
 				if soapFaultCode != "" && !strings.Contains(faultMsg, soapFaultCode) {
 					combinedMsg = fmt.Sprintf("[%s] %s", soapFaultCode, faultMsg)
 				}
-				if markErr := h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, faultCode, combinedMsg); markErr != nil {
-					log.Error("mark task failed", zap.Error(markErr), zap.String("task_id", taskItem.ID))
+				// 参数同步 GPV 自愈：剔除坏 path 后续查，命中即跳过 MarkTaskFailed
+				if !h.tryRecoverGPVFault(r.Context(), taskItem, badPath, log) {
+					if markErr := h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, faultCode, combinedMsg); markErr != nil {
+						log.Error("mark task failed", zap.Error(markErr), zap.String("task_id", taskItem.ID))
+					}
+					log.Warn("task failed with SOAP fault",
+						zap.String("task_id", taskItem.ID),
+						zap.Int("fault_code", faultCode),
+						zap.String("soap_fault_code", soapFaultCode),
+						zap.String("fault_msg", faultMsg))
 				}
-				log.Warn("task failed with SOAP fault",
-					zap.String("task_id", taskItem.ID),
-					zap.Int("fault_code", faultCode),
-					zap.String("soap_fault_code", soapFaultCode),
-					zap.String("fault_msg", faultMsg))
 			} else {
 				// 任务成功完成 - 将原始响应存为结果
 				resultMap := map[string]interface{}{
@@ -1005,13 +1008,14 @@ func (h *Handler) resetContinuousWake(ctx context.Context, deviceSN string) {
 }
 
 // handleSOAPFault 处理 CPE 返回的 SOAP Fault 响应。
-// 通过 CWMP ID 查找关联任务并标记为失败。
+// 通过 CWMP ID 查找关联任务，先尝试参数同步 GPV 自愈（剔除坏 path 续查），未命中再标失败。
 //
 // 参数：
 //   - faultCode     — 内层 cwmp:FaultCode 数值（标准 CWMP fault，如 9005=Invalid parameter name）
 //   - soapFaultCode — 外层 soap:faultcode 文本（如 "Server.Internal"），部分厂商只回这个不带 cwmp:Fault
 //   - faultMsg      — 人类可读 faultstring
-func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body []byte, faultCode int, soapFaultCode, faultMsg string, log *zap.Logger) {
+//   - badPath       — 从 faultMsg 抽出的坏 path（CWMP 协议未规范，厂商私有约定），空表示未识别
+func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body []byte, faultCode int, soapFaultCode, faultMsg, badPath string, log *zap.Logger) {
 	// 从 SOAP Header 中提取 CWMP ID
 	_, cwmpID, _, _ := soap.DetectMethod(bytes.NewReader(body))
 
@@ -1075,22 +1079,27 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 		}
 	}
 	if taskItem != nil {
-		if markErr := h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, faultCode, combinedFaultMsg); markErr != nil {
-			log.Error("mark task failed on fault", zap.Error(markErr), zap.String("task_id", taskItem.ID))
-		}
-		log.Info("task marked as failed on SOAP fault",
-			zap.String("task_id", taskItem.ID),
-			zap.String("method", taskItem.Method),
-			zap.Int("fault_code", faultCode),
-			zap.String("soap_fault_code", soapFaultCode),
-			zap.String("fault_msg", faultMsg))
+		// 参数同步 GPV 自愈：剔除坏 path 后续查；命中即跳过 MarkTaskFailed + Fault 事件。
+		if h.tryRecoverGPVFault(r.Context(), taskItem, badPath, log) {
+			// 自愈分支已标 task completed 并入队 retry batch，继续走 PopTask 推进队列。
+		} else {
+			if markErr := h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, faultCode, combinedFaultMsg); markErr != nil {
+				log.Error("mark task failed on fault", zap.Error(markErr), zap.String("task_id", taskItem.ID))
+			}
+			log.Info("task marked as failed on SOAP fault",
+				zap.String("task_id", taskItem.ID),
+				zap.String("method", taskItem.Method),
+				zap.Int("fault_code", faultCode),
+				zap.String("soap_fault_code", soapFaultCode),
+				zap.String("fault_msg", faultMsg))
 
-		// 同步发出对应方法的 command.*.response 事件，把 fault_code / fault_string 透传给业务订阅者。
-		// 否则像 software.HandleUploadResponse / HandleSetParamsResponseForCollect 这种按
-		// "RPC 失败 → 立即 fail 子任务"的 handler 永远收不到 SOAP Fault，sub_task 卡 Uploading
-		// 直到 reaper 兜底（半小时级延迟）。fault_msg 用 combinedFaultMsg —— 即包含外层
-		// soap:faultcode 前缀的版本，让业务层能完整呈现「[Server.Internal] RPC handler failed: ...」。
-		h.publishRPCFaultEvent(r.Context(), session.DeviceSN, taskItem, faultCode, soapFaultCode, combinedFaultMsg, log)
+			// 同步发出对应方法的 command.*.response 事件，把 fault_code / fault_string 透传给业务订阅者。
+			// 否则像 software.HandleUploadResponse / HandleSetParamsResponseForCollect 这种按
+			// "RPC 失败 → 立即 fail 子任务"的 handler 永远收不到 SOAP Fault，sub_task 卡 Uploading
+			// 直到 reaper 兜底（半小时级延迟）。fault_msg 用 combinedFaultMsg —— 即包含外层
+			// soap:faultcode 前缀的版本，让业务层能完整呈现「[Server.Internal] RPC handler failed: ...」。
+			h.publishRPCFaultEvent(r.Context(), session.DeviceSN, taskItem, faultCode, soapFaultCode, combinedFaultMsg, log)
+		}
 	} else {
 		log.Warn("SOAP fault but no task could be associated (neither cwmp_id nor session.last_task_id matched)",
 			zap.String("cwmp_id", cwmpID),
@@ -1149,6 +1158,95 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 	h.completeSession(r.Context(), session)
 	w.Header().Set("Connection", "close")
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// tryRecoverGPVFault 在参数同步 GPV 收到 SOAP Fault 时执行自愈：从原批次剔除坏 path，
+// 用剩余 path 重新入队 GPV 续查；批次空则视为该批完成（无任何参数可查）。
+//
+// 适用范围：commandKey 以 "sync-gpv-" 开头的 GetParameterValues 任务——
+// 即 SyncService.StartSync / enqueueGPVPrefixes / EnqueueGPVBatches 三个入口
+// （手动同步 / 周期同步 / Inform 触发 Path B / PullConfig 北向同步）。
+// 其它 GPV（auto-gpv-after-spv-* / auto-gpv-after-addobject-* / 北向调试）不参与自愈。
+//
+// 返回 true 表示已进入自愈分支（原 task 已标 completed，新批已入队）——调用方应跳过
+// MarkTaskFailed 与 publishRPCFaultEvent。返回 false 表示不适用，走原 fault 流程。
+//
+// 设计取舍：不设硬上限。最坏情况一批 batchSize 个 path 全坏，会触发 batchSize-1 次重查，
+// 每次至少剔除 1 个 path → 天然收敛。坏参数不持久化标记，下次同步重新探测。
+func (h *Handler) tryRecoverGPVFault(ctx context.Context, taskItem *task.Task, badPath string, log *zap.Logger) bool {
+	if taskItem == nil || badPath == "" {
+		return false
+	}
+	if taskItem.Method != "GetParameterValues" {
+		return false
+	}
+	if !strings.HasPrefix(taskItem.CommandKey, "sync-gpv-") {
+		return false
+	}
+	var paramsObj struct {
+		Names []string `json:"names"`
+	}
+	if err := json.Unmarshal(taskItem.Params, &paramsObj); err != nil {
+		log.Warn("gpv fault recovery: unmarshal task params failed",
+			zap.String("task_id", taskItem.ID), zap.Error(err))
+		return false
+	}
+	remaining := make([]string, 0, len(paramsObj.Names))
+	removed := false
+	for _, p := range paramsObj.Names {
+		if p == badPath {
+			removed = true
+			continue
+		}
+		remaining = append(remaining, p)
+	}
+	if !removed {
+		log.Warn("gpv fault recovery: bad path not in original batch (regex extraction may be off)",
+			zap.String("task_id", taskItem.ID),
+			zap.String("bad_path", badPath),
+			zap.Strings("batch", paramsObj.Names))
+		return false
+	}
+	resultJSON, _ := json.Marshal(map[string]interface{}{
+		"recovered":     true,
+		"bad_path":      badPath,
+		"remaining_cnt": len(remaining),
+	})
+	if err := h.taskService.MarkTaskCompleted(ctx, taskItem.ID, resultJSON); err != nil {
+		log.Error("gpv fault recovery: mark original task completed failed",
+			zap.String("task_id", taskItem.ID), zap.Error(err))
+		return false
+	}
+	if len(remaining) == 0 {
+		log.Info("gpv fault recovery: batch exhausted, no params left to query",
+			zap.String("task_id", taskItem.ID), zap.String("bad_path", badPath))
+		return true
+	}
+	newParams, err := json.Marshal(map[string]interface{}{"names": remaining})
+	if err != nil {
+		log.Warn("gpv fault recovery: marshal remaining batch failed",
+			zap.String("task_id", taskItem.ID), zap.Error(err))
+		return true // 原 task 已 completed，不再降级到失败路径
+	}
+	if _, err := h.taskService.CreateTask(ctx, &task.CreateTaskRequest{
+		DeviceSN:   taskItem.DeviceSN,
+		Method:     "GetParameterValues",
+		Params:     newParams,
+		Priority:   taskItem.Priority,
+		CommandKey: taskItem.CommandKey + "-r",
+		Source:     taskItem.Source,
+		SourceID:   taskItem.SourceID,
+	}); err != nil {
+		log.Error("gpv fault recovery: enqueue retry batch failed",
+			zap.String("task_id", taskItem.ID), zap.Error(err))
+		return true // 原 task 已 completed
+	}
+	log.Info("gpv fault recovery: bad path removed, retry batch enqueued",
+		zap.String("task_id", taskItem.ID),
+		zap.String("device_sn", taskItem.DeviceSN),
+		zap.String("bad_path", badPath),
+		zap.Int("remaining", len(remaining)))
+	return true
 }
 
 func (h *Handler) handleTransferComplete(w http.ResponseWriter, r *http.Request, body []byte, log *zap.Logger) {
@@ -2002,14 +2100,25 @@ var (
 	cwmpFaultStringRegex = regexp.MustCompile(`(?s)<(?:[a-zA-Z][\w-]*:)?FaultString>([^<]*)</(?:[a-zA-Z][\w-]*:)?FaultString>`)
 	soapFaultStringRegex = regexp.MustCompile(`(?s)<faultstring>([^<]*)</faultstring>`)
 	soapFaultCodeRegex   = regexp.MustCompile(`(?s)<faultcode>([^<]*)</faultcode>`)
+
+	// faultPathKeywordRegex 匹配带关键字标记的坏 path（厂商实测格式）：
+	//   "Invalid Parameter Names [1], including: Device.X.Y.Z."
+	//   "Invalid parameter name: Device.X"
+	//   "Parameter 'Device.X' is invalid"
+	// 抓关键字后的第一个 dot-separated 标识符（末尾可有 "."，对象前缀语义需保留）。
+	faultPathKeywordRegex = regexp.MustCompile(`(?i)(?:including|parameter|name)[\s:'"\x60]+([A-Za-z_]\w*(?:\.[A-Za-z0-9_]+)+\.?)`)
+	// faultPathGenericRegex 兜底：找任何 dot-separated 标识符（>=3 段）。最长匹配作为 path。
+	faultPathGenericRegex = regexp.MustCompile(`[A-Za-z_]\w*(?:\.[A-Za-z0-9_]+){2,}\.?`)
 )
 
-// detectSOAPFault 解析 CPE 返回的 SOAP Fault，分别返回三层信息：
+// detectSOAPFault 解析 CPE 返回的 SOAP Fault，分别返回四层信息：
 //
 //   - cwmpCode：内层 <detail><cwmp:Fault><FaultCode>9xxx</...> 数值（CWMP 标准）
 //   - soapCode：外层 <faultcode>...</faultcode> 文本（SOAP 1.1 标准，如 "Server.Internal" /
 //     "Client" / "Client.InvalidParameter"，部分厂商如 baicells 只返回这个不带 cwmp:FaultCode）
 //   - faultString：人类可读描述（优先 cwmp:FaultString，退化到 soap:faultstring，再退化到 soapCode）
+//   - badPath：从 FaultString 文本里抽出的"坏 path"（CWMP 协议未规范该字段，厂商私有
+//     约定，如 BLQ 把 path 拼在 "Invalid Parameter Names [1], including: ..."）。空表示未识别。
 //
 // 历史教训：原版只返回 (bool, int, string)，丢弃外层 soapCode。当 CPE 返回
 //
@@ -2021,9 +2130,9 @@ var (
 // 这种 SOAP 1.1 fault（无 cwmp:Fault 块），cwmpCode 解出 0，调用方误判成功，sub_task
 // 卡 in_progress；现在把 soapCode 单独返回，调用方可以放进 error_message / event payload，
 // 业务层看到 "Server.Internal" 立即知道 CPE 内部错而非协议错。
-func detectSOAPFault(body []byte) (found bool, cwmpCode int, soapCode string, faultString string) {
+func detectSOAPFault(body []byte) (found bool, cwmpCode int, soapCode string, faultString string, badPath string) {
 	if !faultEnvRegex.Match(body) {
-		return false, 0, "", ""
+		return false, 0, "", "", ""
 	}
 
 	faultString = "SOAP fault"
@@ -2045,7 +2154,39 @@ func detectSOAPFault(body []byte) (found bool, cwmpCode int, soapCode string, fa
 		faultString = soapCode
 	}
 
-	return true, cwmpCode, soapCode, faultString
+	badPath = extractBadPathFromFaultString(faultString)
+	return true, cwmpCode, soapCode, faultString, badPath
+}
+
+// extractBadPathFromFaultString 从 CWMP FaultString 文本里抽取 CPE 不支持的参数 path。
+//
+// 厂商实测格式（CWMP 协议未规范该字段，是私有约定）：
+//
+//	"Invalid Parameter Names [1], including: Device.Services.FAPService.2....LTECell."
+//	"Invalid parameter name: Device.X.Y"
+//	"Parameter 'Device.X.Y' is not supported"
+//
+// 抽取策略：
+//  1. 优先抓 "including:" / "parameter:" / "name:" 关键字后第一个 path-like token
+//  2. 兜底找最长 dot-separated 标识符（>=3 段，可能尾点）
+//
+// 末尾 "." 表示对象前缀（CPE 让该对象枚举实例），与 SyncService 入队的格式一致，
+// 必须保留以便后续从 batch 准确剔除。
+func extractBadPathFromFaultString(faultString string) string {
+	if faultString == "" {
+		return ""
+	}
+	if m := faultPathKeywordRegex.FindStringSubmatch(faultString); m != nil {
+		return strings.TrimRight(strings.TrimSpace(m[1]), ",;")
+	}
+	matches := faultPathGenericRegex.FindAllString(faultString, -1)
+	var longest string
+	for _, c := range matches {
+		if len(c) > len(longest) {
+			longest = c
+		}
+	}
+	return strings.TrimRight(longest, ",;")
 }
 
 // isLocalhost 检查 URL 是否包含 localhost 或 127.0.0.1
