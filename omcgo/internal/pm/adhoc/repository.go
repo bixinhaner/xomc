@@ -70,7 +70,7 @@ var _ Repository = (*PgRepository)(nil)
 var taskCols = []string{
 	"id", "task_name", "task_subtype", "mode", "cron_expr",
 	"device_sns", "metric_paths", "granularities",
-	"window_start", "window_end", "status", "progress",
+	"window_start", "window_end", "dimension", "status", "progress",
 	"creator", "created_at", "updated_at",
 }
 
@@ -83,16 +83,20 @@ func (r *PgRepository) Create(ctx context.Context, req CreateRequest) (uuid.UUID
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("adhoc.Create: marshal device_sns: %w", err)
 	}
+	dim := req.Dimension
+	if dim == "" {
+		dim = DimensionDevice
+	}
 	q, args, err := storage.Psql.Insert("pm_tasks").
 		Columns(
 			"task_name", "task_type", "task_subtype", "mode", "cron_expr",
 			"device_sns", "metric_paths", "granularities",
-			"window_start", "window_end", "status", "progress", "creator",
+			"window_start", "window_end", "dimension", "status", "progress", "creator",
 		).
 		Values(
 			req.Name, "extraction", TaskSubtype, string(req.Mode), nullableString(req.CronExpr),
 			deviceSNsJSON, req.MetricPaths, req.Granularities,
-			req.WindowStart, req.WindowEnd, string(StatusPending), 0, req.Creator,
+			req.WindowStart, req.WindowEnd, string(dim), string(StatusPending), 0, req.Creator,
 		).
 		Suffix("RETURNING id").
 		ToSql()
@@ -310,13 +314,14 @@ func scanTask(row rowScanner) (*Task, error) {
 	var deviceSNsJSON []byte
 	var metricPaths, granularities []string
 	var windowStart, windowEnd *time.Time
+	var dimension string
 	var status string
 	var creator *string
 
 	err := row.Scan(
 		&t.ID, &t.Name, &subtype, &mode, &cronExpr,
 		&deviceSNsJSON, &metricPaths, &granularities,
-		&windowStart, &windowEnd, &status, &t.Progress,
+		&windowStart, &windowEnd, &dimension, &status, &t.Progress,
 		&creator, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if err != nil {
@@ -338,6 +343,11 @@ func scanTask(row rowScanner) (*Task, error) {
 	}
 	if windowEnd != nil {
 		t.WindowEnd = *windowEnd
+	}
+	if dimension != "" {
+		t.Dimension = Dimension(dimension)
+	} else {
+		t.Dimension = DimensionDevice
 	}
 	t.Status = Status(status)
 	if creator != nil {

@@ -43,6 +43,17 @@ const (
 // TaskSubtype 标记 pm_tasks 行属于 G7 adhoc 任务（区别于老 extraction/report 等）。
 const TaskSubtype = "adhoc_aggregation"
 
+// Dimension 标识 adhoc 任务聚合维度（device / aggregate_group）。
+//
+//   - 'device'：每设备一条结果（既有行为，默认值）
+//   - 'aggregate_group'：N 个 SN 临时组聚合成一条（按时间桶 + LDN GROUP BY，不 GROUP BY device_sn）
+type Dimension string
+
+const (
+	DimensionDevice         Dimension = "device"
+	DimensionAggregateGroup Dimension = "aggregate_group"
+)
+
 // Task 是 pm_tasks 表中 task_subtype='adhoc_aggregation' 行的 Go 域模型。
 //
 // 与现有 pm.PerformanceTask 共享表但走独立 Repository（避免破坏 pm.TaskRepository 既有 8 个调用方）。
@@ -56,6 +67,7 @@ type Task struct {
 	Granularities []string  // 多粒度多选（如 ['hourly','daily']）
 	WindowStart   time.Time // 单次执行的源数据时窗起
 	WindowEnd     time.Time // 源数据时窗止
+	Dimension     Dimension // 'device' 或 'aggregate_group'，默认 'device'
 	Status        Status
 	Progress      int    // 0-100
 	Creator       string // user_id 字符串或用户名（与 pm_tasks 既有 creator 列对齐）
@@ -79,6 +91,7 @@ type CreateRequest struct {
 	Granularities []string
 	WindowStart   time.Time
 	WindowEnd     time.Time
+	Dimension     Dimension // 默认 device
 	Creator       string
 }
 

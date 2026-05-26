@@ -60,6 +60,8 @@ type createRequestDTO struct {
 	Granularities []string  `json:"granularities" binding:"required,min=1"`
 	WindowStart   time.Time `json:"window_start" binding:"required"`
 	WindowEnd     time.Time `json:"window_end" binding:"required"`
+	// 维度：'device' (默认，每设备一条) / 'aggregate_group' (N 个 SN 临时组聚合成一条)
+	Dimension string `json:"dimension" binding:"omitempty,oneof=device aggregate_group"`
 }
 
 type taskResponseDTO struct {
@@ -72,6 +74,7 @@ type taskResponseDTO struct {
 	Granularities []string  `json:"granularities"`
 	WindowStart   time.Time `json:"window_start"`
 	WindowEnd     time.Time `json:"window_end"`
+	Dimension     string    `json:"dimension"`
 	Status        string    `json:"status"`
 	Progress      int       `json:"progress"`
 	Creator       string    `json:"creator"`
@@ -80,6 +83,10 @@ type taskResponseDTO struct {
 }
 
 func taskToDTO(t *Task) taskResponseDTO {
+	dim := string(t.Dimension)
+	if dim == "" {
+		dim = string(DimensionDevice)
+	}
 	return taskResponseDTO{
 		ID:            t.ID.String(),
 		Name:          t.Name,
@@ -90,6 +97,7 @@ func taskToDTO(t *Task) taskResponseDTO {
 		Granularities: t.Granularities,
 		WindowStart:   t.WindowStart,
 		WindowEnd:     t.WindowEnd,
+		Dimension:     dim,
 		Status:        string(t.Status),
 		Progress:      t.Progress,
 		Creator:       t.Creator,
@@ -116,6 +124,10 @@ func (h *Handler) Create(c *gin.Context) {
 		cronPtr = &req.CronExpr
 	}
 	creator := extractCreator(c)
+	dim := Dimension(req.Dimension)
+	if dim == "" {
+		dim = DimensionDevice
+	}
 	id, err := h.repo.Create(c.Request.Context(), CreateRequest{
 		Name:          req.Name,
 		Mode:          Mode(req.Mode),
@@ -125,6 +137,7 @@ func (h *Handler) Create(c *gin.Context) {
 		Granularities: req.Granularities,
 		WindowStart:   req.WindowStart,
 		WindowEnd:     req.WindowEnd,
+		Dimension:     dim,
 		Creator:       creator,
 	})
 	if err != nil {

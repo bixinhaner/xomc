@@ -97,9 +97,14 @@ func (e *Executor) ExecuteOneshot(ctx context.Context, task *Task) (int, error) 
 // device 维度过滤：DeviceSNs。OUI 未在 task 中存储，aggregator 接受空 OUI + 非空 SN
 // 走 `device_sn IN (...)` 路径（参见 aggregator/query.go applyDeviceFilters）。
 func (e *Executor) queryAndConvert(ctx context.Context, task *Task, g metrics.Granularity) ([]ResultRow, error) {
+	// 默认 device 维度（兼容老任务）；aggregate_group 走聚合到组路径。
+	dim := aggregator.DimensionDevice
+	if task.Dimension == DimensionAggregateGroup {
+		dim = aggregator.DimensionAggregateGroup
+	}
 	req := aggregator.QueryRequest{
 		Granularity: g,
-		Dimension:   aggregator.DimensionDevice,
+		Dimension:   dim,
 		DeviceSNs:   task.DeviceSNs,
 		MetricPaths: task.MetricPaths,
 		StartTime:   task.WindowStart,

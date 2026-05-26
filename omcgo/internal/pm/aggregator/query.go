@@ -17,8 +17,9 @@ import (
 type Dimension string
 
 const (
-	DimensionDevice      Dimension = "device"
-	DimensionDeviceGroup Dimension = "device_group"
+	DimensionDevice         Dimension = "device"
+	DimensionDeviceGroup    Dimension = "device_group"
+	DimensionAggregateGroup Dimension = "aggregate_group" // adhoc 临时组：N 个 SN 现场聚合成一条
 )
 
 // QueryRequest 是 Aggregator.Query 的输入。
@@ -83,7 +84,131 @@ func (a *Aggregator) Query(ctx context.Context, q QueryRequest) ([]Row, error) {
 	if q.Dimension == DimensionDeviceGroup {
 		return a.queryGroupTable(ctx, table, q)
 	}
+	if q.Dimension == DimensionAggregateGroup {
+		return a.queryAggregateGroupTable(ctx, table, q)
+	}
 	return a.queryDeviceTable(ctx, table, q)
+}
+
+// ErrPctNotSupportedInAggregateGroup 表示 aggregate_group 维度不支持 KPI 类指标
+// （statis_type=pct 需公式重算，本阶段未实现）。
+var ErrPctNotSupportedInAggregateGroup = fmt.Errorf(
+	"aggregate_group 维度暂不支持 KPI 类 (statis_type=pct)，请改用 counter 类指标 (sum/avg/max/min)",
+)
+
+// queryAggregateGroupTable 现场聚合：从 device 维度表 (pm_metrics / pm_metrics_hourly / 等)
+// 按 metric_path + granularity + time + object_ldn GROUP BY，不 GROUP BY device_sn。
+// 算子按 statis_type 路由（sum/avg/max/min；pct 报错）。
+//
+// 输出 Row.DeviceSN = "AGGREGATED"，DeviceOUI = ""；MetricValue = 跨设备算子结果。
+//
+// 与 G5 cron 路径无关：直接查 device 表的已聚合（hourly/daily/...）数据再做 GROUP BY 折叠。
+// 15min 也支持（pm_metrics raw 表本身就是 15min 粒度，GROUP BY 同样规则）。
+func (a *Aggregator) queryAggregateGroupTable(ctx context.Context, table string, q QueryRequest) ([]Row, error) {
+	// 预检查：扫描目标 metric 的 statis_type，若有 pct 立即报错。
+	if err := a.precheckStatisType(ctx, table, q); err != nil {
+		return nil, err
+	}
+
+	// 算子按 statis_type 选择。CASE 在 SQL 内做路由，避免多次查询。
+	// 各 statis_type 同一 metric_path 应该一致（来自指标定义），MIN(statis_type) 取代表值。
+	const aggValueExpr = `
+		CASE MIN(statis_type)
+			WHEN 'sum' THEN SUM(metric_value)
+			WHEN 'avg' THEN AVG(metric_value)
+			WHEN 'max' THEN MAX(metric_value)
+			WHEN 'min' THEN MIN(metric_value)
+			ELSE SUM(metric_value)
+		END`
+
+	qb := storage.Psql.Select(
+		"metric_path",
+		"MIN(metric_type) AS metric_type",
+		aggValueExpr+" AS metric_value",
+		"MIN(statis_type) AS statis_type",
+		"granularity",
+		"time",
+		"MIN(start_time) AS start_time",
+		"MIN(end_time) AS end_time",
+		"MAX(ingest_time) AS ingest_time",
+		"object_ldn",
+	).From(table)
+	qb = applyDeviceFilters(qb, q)
+	qb = qb.GroupBy("metric_path", "granularity", "time", "object_ldn")
+	qb = qb.OrderBy("time DESC")
+	if q.Limit > 0 {
+		qb = qb.Limit(uint64(q.Limit))
+	}
+	if q.Offset > 0 {
+		qb = qb.Offset(uint64(q.Offset))
+	}
+	sqlStr, args, err := qb.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("aggregator.Query build %s (aggregate_group): %w", table, err)
+	}
+	rows, err := a.db.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("aggregator.Query exec %s (aggregate_group): %w", table, err)
+	}
+	defer rows.Close()
+
+	var out []Row
+	for rows.Next() {
+		var r Row
+		var statis, ldn *string
+		var metricType, granularity string
+		if err := rows.Scan(
+			&r.MetricPath, &metricType, &r.MetricValue,
+			&statis, &granularity, &r.Time, &r.StartTime, &r.EndTime, &r.IngestTime, &ldn,
+		); err != nil {
+			return nil, fmt.Errorf("aggregator.Query scan %s (aggregate_group): %w", table, err)
+		}
+		r.DeviceSN = "AGGREGATED" // 聚合后无单设备身份
+		r.DeviceOUI = ""
+		r.MetricType = metrics.MetricType(metricType)
+		r.Granularity = metrics.Granularity(granularity)
+		if statis != nil {
+			st := metrics.StatisType(*statis)
+			r.StatisType = &st
+		}
+		r.ObjectLDN = ldn
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// precheckStatisType 扫描 target metric_path 的 statis_type，若有 pct 立即报错。
+func (a *Aggregator) precheckStatisType(ctx context.Context, table string, q QueryRequest) error {
+	if len(q.MetricPaths) == 0 {
+		return nil
+	}
+	qb := storage.Psql.Select("DISTINCT statis_type").From(table).
+		Where(sq.Eq{"metric_path": q.MetricPaths})
+	if !q.StartTime.IsZero() {
+		qb = qb.Where(sq.GtOrEq{"time": q.StartTime})
+	}
+	if !q.EndTime.IsZero() {
+		qb = qb.Where(sq.LtOrEq{"time": q.EndTime})
+	}
+	sqlStr, args, err := qb.ToSql()
+	if err != nil {
+		return fmt.Errorf("aggregator.precheckStatisType build: %w", err)
+	}
+	rows, err := a.db.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return fmt.Errorf("aggregator.precheckStatisType exec: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var s *string
+		if err := rows.Scan(&s); err != nil {
+			return fmt.Errorf("aggregator.precheckStatisType scan: %w", err)
+		}
+		if s != nil && *s == "pct" {
+			return ErrPctNotSupportedInAggregateGroup
+		}
+	}
+	return rows.Err()
 }
 
 func (a *Aggregator) queryDeviceTable(ctx context.Context, table string, q QueryRequest) ([]Row, error) {
@@ -249,6 +374,9 @@ func applyCommonFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 var ErrUnsupportedQuery = fmt.Errorf("aggregator: unsupported (granularity, dimension) combination")
 
 // SelectTable 把 (granularity, dim) 路由到具体表名。
+//
+// aggregate_group 维度走 device 维度的表 (pm_metrics / pm_metrics_hourly / 等)，
+// 然后在查询层做 GROUP BY metric_path+granularity+time+object_ldn 折叠（不依赖 G5 group 表）。
 func SelectTable(g metrics.Granularity, dim Dimension) (string, error) {
 	if dim == "" {
 		dim = DimensionDevice
@@ -258,6 +386,7 @@ func SelectTable(g metrics.Granularity, dim Dimension) (string, error) {
 		if dim == DimensionDeviceGroup {
 			return "", fmt.Errorf("%w: 15min × device_group", ErrUnsupportedQuery)
 		}
+		// device 与 aggregate_group 都走 pm_metrics raw 表
 		return "pm_metrics", nil
 	case metrics.GranularityHourly:
 		if dim == DimensionDeviceGroup {
