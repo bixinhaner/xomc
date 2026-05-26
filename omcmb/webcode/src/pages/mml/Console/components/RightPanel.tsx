@@ -330,16 +330,13 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
                 {/* v2.4 D37：MmlEditor (拼接命令 textarea + DO 执行按钮) 已下线，
                     结构化通道由下方 ConsoleActionBar 承担；用户在 SubField 区勾选 path
                     → 后端 API 通过结构化 standardPath[] 传，不再生成 MML 文本 */}
-                {/* 参数列表（LST/MOD/ADD/RMV 因 op 不同换皮）：选中长命令
-                    如 LST DEVICE_INFO 可能有 200+ sub_fields，包一层
-                    max-height + overflow:auto 防撑长页面。 */}
-                <div
-                  style={{
-                    maxHeight: 'calc(100vh - 600px)',
-                    overflowY: 'auto',
-                    paddingRight: 4,
-                  }}
-                >
+                {/* 参数列表（LST/MOD/ADD/RMV 因 op 不同换皮）：
+                    SubFieldChecklist / SubFieldInputList / InstancePicker
+                    都已自带 height + overflowY:auto 的 viewport（380/420px），
+                    这里不再额外包 max-height + overflow:auto —— 否则形成
+                    双层 scrollable，选中 LST DEVICE_INFO 等 12+ row 命令时
+                    操作面板会出现两根滚动条（外层冗余的 + 内层真实的）。 */}
+                <div>
                   {activeStatement ? (
                     <>
                       {/* R-4：命令含多层 {i} 占位符时显示 instance 索引输入；
