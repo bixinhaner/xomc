@@ -28,6 +28,7 @@ import {
   Popconfirm,
   Spin,
   DatePicker,
+  Divider,
 } from 'antd';
 import {
   ReloadOutlined,
@@ -103,6 +104,8 @@ interface SaveTemplateFormState {
   name: string;
   description: string;
   visibility: TemplateVisibility;
+  payload: QueryTemplatePayload;
+  customRange: [dayjs.Dayjs, dayjs.Dayjs] | null;
 }
 
 function presetToRange(preset: TimeRangePreset): { start: string; end: string } | null {
@@ -132,6 +135,8 @@ export default function KPIQuery() {
   const [customRange, setCustomRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
   const [devicePickerOpen, setDevicePickerOpen] = useState(false);
   const [metricPickerOpen, setMetricPickerOpen] = useState(false);
+  // 设备/指标选择器的目标：'main' = 主查询表单；'modal' = 模板编辑 Modal
+  const [pickerTarget, setPickerTarget] = useState<'main' | 'modal'>('main');
 
   // ── 模板侧栏状态 ─────────────────────────────────────────────────
   const [templateTab, setTemplateTab] = useState<'public' | 'private'>('public');
@@ -159,6 +164,8 @@ export default function KPIQuery() {
     name: '',
     description: '',
     visibility: 'private',
+    payload: DEFAULT_PAYLOAD,
+    customRange: null,
   });
 
   // ── 查询执行状态 ─────────────────────────────────────────────────
@@ -243,16 +250,15 @@ export default function KPIQuery() {
   };
 
   const handleOpenSaveModal = () => {
-    if (payload.deviceSns.length === 0 || payload.metricPaths.length === 0) {
-      message.warning('请先填好查询条件再存为模板');
-      return;
-    }
+    // 从主表单复制当前条件作为初值（即"存为模板"工作流）；从侧栏 + 新建也走这里，复用主表单 default
     setSaveForm({
       open: true,
       mode: 'create',
       name: '',
       description: '',
       visibility: 'private',
+      payload: { ...payload },
+      customRange,
     });
   };
 
@@ -264,6 +270,11 @@ export default function KPIQuery() {
       name: tpl.name,
       description: tpl.description ?? '',
       visibility: tpl.visibility,
+      payload: tpl.payload,
+      customRange:
+        tpl.payload.timeRangePreset === 'custom' && tpl.payload.absoluteStart && tpl.payload.absoluteEnd
+          ? [dayjs(tpl.payload.absoluteStart), dayjs(tpl.payload.absoluteEnd)]
+          : null,
     });
   };
 
@@ -272,13 +283,17 @@ export default function KPIQuery() {
       message.warning('请输入模板名称');
       return;
     }
-    // 保存时回填 custom 模式的绝对时间
+    // 保存时回填 custom 模式的绝对时间（使用 Modal 内部的 payload + customRange，不是主表单）
     const payloadToSave: QueryTemplatePayload = {
-      ...payload,
+      ...saveForm.payload,
       absoluteStart:
-        payload.timeRangePreset === 'custom' && customRange ? customRange[0].toISOString() : undefined,
+        saveForm.payload.timeRangePreset === 'custom' && saveForm.customRange
+          ? saveForm.customRange[0].toISOString()
+          : undefined,
       absoluteEnd:
-        payload.timeRangePreset === 'custom' && customRange ? customRange[1].toISOString() : undefined,
+        saveForm.payload.timeRangePreset === 'custom' && saveForm.customRange
+          ? saveForm.customRange[1].toISOString()
+          : undefined,
     };
     try {
       if (saveForm.mode === 'create') {
@@ -405,12 +420,24 @@ export default function KPIQuery() {
           <Title level={5} style={{ margin: 0 }}>
             查询模板
           </Title>
-          <Button
-            type="text"
-            size="small"
-            icon={<ReloadOutlined />}
-            onClick={() => void refetchTemplates()}
-          />
+          <Space size={2}>
+            <Tooltip title="新建模板（用当前查询条件，未填则后续可补）">
+              <Button
+                type="text"
+                size="small"
+                icon={<PlusOutlined />}
+                onClick={handleOpenSaveModal}
+              />
+            </Tooltip>
+            <Tooltip title="刷新列表">
+              <Button
+                type="text"
+                size="small"
+                icon={<ReloadOutlined />}
+                onClick={() => void refetchTemplates()}
+              />
+            </Tooltip>
+          </Space>
         </Space>
       </div>
       <Tabs
@@ -492,7 +519,7 @@ export default function KPIQuery() {
                     }
                     placeholder="点击右侧按钮选择设备"
                   />
-                  <Button onClick={() => setDevicePickerOpen(true)}>列表选</Button>
+                  <Button onClick={() => { setPickerTarget('main'); setDevicePickerOpen(true); }}>列表选</Button>
                 </Space.Compact>
               </Form.Item>
 
@@ -507,7 +534,7 @@ export default function KPIQuery() {
                     }
                     placeholder="点击右侧按钮选择指标"
                   />
-                  <Button onClick={() => setMetricPickerOpen(true)}>列表选</Button>
+                  <Button onClick={() => { setPickerTarget('main'); setMetricPickerOpen(true); }}>列表选</Button>
                 </Space.Compact>
               </Form.Item>
 
@@ -580,26 +607,41 @@ export default function KPIQuery() {
         <DevicePickerModal
           open={devicePickerOpen}
           onClose={() => setDevicePickerOpen(false)}
-          onConfirm={(sns) => setPayload({ ...payload, deviceSns: sns })}
-          initialSelected={payload.deviceSns}
+          onConfirm={(sns) => {
+            if (pickerTarget === 'modal') {
+              setSaveForm((s) => ({ ...s, payload: { ...s.payload, deviceSns: sns } }));
+            } else {
+              setPayload({ ...payload, deviceSns: sns });
+            }
+          }}
+          initialSelected={pickerTarget === 'modal' ? saveForm.payload.deviceSns : payload.deviceSns}
         />
 
         <MetricPickerModal
           open={metricPickerOpen}
           onClose={() => setMetricPickerOpen(false)}
-          onConfirm={(paths) => setPayload({ ...payload, metricPaths: paths })}
-          initialSelected={payload.metricPaths}
-          initialDeviceType={payload.deviceType ?? 'ENB'}
+          onConfirm={(paths) => {
+            if (pickerTarget === 'modal') {
+              setSaveForm((s) => ({ ...s, payload: { ...s.payload, metricPaths: paths } }));
+            } else {
+              setPayload({ ...payload, metricPaths: paths });
+            }
+          }}
+          initialSelected={pickerTarget === 'modal' ? saveForm.payload.metricPaths : payload.metricPaths}
+          initialDeviceType={
+            (pickerTarget === 'modal' ? saveForm.payload.deviceType : payload.deviceType) ?? 'ENB'
+          }
         />
 
         <Modal
-          title={saveForm.mode === 'create' ? '存为查询模板' : '更新查询模板'}
+          title={saveForm.mode === 'create' ? '新建查询模板' : '编辑查询模板'}
           open={saveForm.open}
           onCancel={() => setSaveForm((s) => ({ ...s, open: false }))}
           onOk={handleSaveTemplate}
           confirmLoading={createMut.isPending || updateMut.isPending}
           okText="保存"
           cancelText="取消"
+          width={720}
           destroyOnHidden
         >
           <Form layout="vertical">
@@ -626,11 +668,108 @@ export default function KPIQuery() {
             </Form.Item>
             <Form.Item label="描述">
               <Input.TextArea
-                rows={3}
+                rows={2}
                 value={saveForm.description}
                 onChange={(e) => setSaveForm({ ...saveForm, description: e.target.value })}
                 maxLength={500}
               />
+            </Form.Item>
+
+            <Divider orientation="left" style={{ margin: '8px 0 16px' }}>
+              查询配置
+            </Divider>
+
+            <Space wrap size="middle" align="start" style={{ width: '100%' }}>
+              <Form.Item label="设备类型" style={{ marginBottom: 8 }}>
+                <Select
+                  style={{ width: 120 }}
+                  value={saveForm.payload.deviceType}
+                  onChange={(v) =>
+                    setSaveForm((s) => ({ ...s, payload: { ...s.payload, deviceType: v } }))
+                  }
+                  options={DEVICE_TYPE_OPTIONS}
+                />
+              </Form.Item>
+
+              <Form.Item label="粒度" style={{ marginBottom: 8 }}>
+                <Select
+                  style={{ width: 110 }}
+                  value={saveForm.payload.granularity}
+                  onChange={(v) =>
+                    setSaveForm((s) => ({ ...s, payload: { ...s.payload, granularity: v } }))
+                  }
+                  options={GRANULARITY_OPTIONS}
+                />
+              </Form.Item>
+
+              <Form.Item label="时间范围" style={{ marginBottom: 8 }}>
+                <Space>
+                  <Select
+                    style={{ width: 140 }}
+                    value={saveForm.payload.timeRangePreset}
+                    onChange={(v) =>
+                      setSaveForm((s) => ({ ...s, payload: { ...s.payload, timeRangePreset: v } }))
+                    }
+                    options={TIME_RANGE_OPTIONS}
+                  />
+                  {saveForm.payload.timeRangePreset === 'custom' && (
+                    <RangePicker
+                      showTime
+                      value={saveForm.customRange}
+                      onChange={(v) =>
+                        setSaveForm((s) => ({
+                          ...s,
+                          customRange: v as [dayjs.Dayjs, dayjs.Dayjs] | null,
+                        }))
+                      }
+                    />
+                  )}
+                </Space>
+              </Form.Item>
+            </Space>
+
+            <Form.Item label="设备" style={{ marginBottom: 8 }}>
+              <Space.Compact style={{ width: '100%' }}>
+                <Input
+                  readOnly
+                  value={
+                    saveForm.payload.deviceSns.length === 0
+                      ? ''
+                      : `已选 ${saveForm.payload.deviceSns.length} 个：${saveForm.payload.deviceSns.slice(0, 3).join(', ')}${saveForm.payload.deviceSns.length > 3 ? ' ...' : ''}`
+                  }
+                  placeholder="点击右侧按钮选择设备"
+                />
+                <Button
+                  onClick={() => {
+                    setPickerTarget('modal');
+                    setDevicePickerOpen(true);
+                  }}
+                >
+                  列表选
+                </Button>
+              </Space.Compact>
+            </Form.Item>
+
+            <Form.Item label="指标" style={{ marginBottom: 0 }}>
+              <Space.Compact style={{ width: '100%' }}>
+                <Input
+                  readOnly
+                  value={
+                    saveForm.payload.metricPaths.length === 0
+                      ? ''
+                      : `已选 ${saveForm.payload.metricPaths.length} 个：${saveForm.payload.metricPaths.slice(0, 3).join(', ')}${saveForm.payload.metricPaths.length > 3 ? ' ...' : ''}`
+                  }
+                  placeholder="点击右侧按钮选择指标"
+                />
+                <Button
+                  onClick={() => {
+                    setPickerTarget('modal');
+                    setMetricPickerOpen(true);
+                  }}
+                >
+                  列表选
+                </Button>
+              </Space.Compact>
             </Form.Item>
           </Form>
         </Modal>
