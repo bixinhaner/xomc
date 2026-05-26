@@ -209,32 +209,49 @@ func TestAggregator_OnTaskCompleted_NilHub_NoPanic(t *testing.T) {
 }
 
 // =============================================================================
-// T-0174 — auto-learn is_unsupported from SetParameterValues fault 9005
+// T-0174 / T-0176-PR-E — auto-learn is_unsupported from SetParameterValues 9005
 // =============================================================================
+//
+// T-0176-PR-E：写入真值源从 mml_command_sub_fields 迁到 param_mappings，
+// MarkUnsupportedByStandardPath 签名加 paramModelID 入参。ResultAggregator 在调用
+// repo 之前先用注入的 paramModelResolver 把 dt.DeviceSN 解析成 paramModelID；
+// resolver 未注入 / 返 nil / 返 err 时整个 auto-learn skip 不污染数据。
 
-// fakeSubFieldRepoAutoLearn 只用来捕获 MarkUnsupportedByStandardPath 调用，
-// 不实现其它方法 —— 用 SubFieldRepository 接口的 promotion 让它 satisfy 接口的
-// 编译期约束。
+// fakeSubFieldRepoAutoLearn 捕获 MarkUnsupportedByStandardPath 调用，
+// 同时记录 paramModelID 入参以便测试断言 PR-E 解析链路被正确穿透。
 type fakeSubFieldRepoAutoLearn struct {
 	SubFieldRepository // 嵌入接口让未实现的方法 panic 时立刻暴露（仅 Mark 路径被测）
-	mu              sync.Mutex
-	markedPaths     []string
-	rowsPerPath     int64
+	mu          sync.Mutex
+	markedPaths []string
+	markedPMIDs []uuid.UUID
+	rowsPerPath int64
 }
 
-func (f *fakeSubFieldRepoAutoLearn) MarkUnsupportedByStandardPath(_ context.Context, path string) (int64, error) {
+func (f *fakeSubFieldRepoAutoLearn) MarkUnsupportedByStandardPath(
+	_ context.Context, paramModelID uuid.UUID, path string,
+) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.markedPaths = append(f.markedPaths, path)
+	f.markedPMIDs = append(f.markedPMIDs, paramModelID)
 	return f.rowsPerPath, nil
 }
 
-// V5 — SPV fault 9005 触发 auto-learn
+// resolverConst 返回固定 paramModelID 的 resolver（happy path 用）。
+func resolverConst(pmID uuid.UUID) func(context.Context, string) (*uuid.UUID, error) {
+	return func(_ context.Context, _ string) (*uuid.UUID, error) {
+		return &pmID, nil
+	}
+}
+
+// V5 — SPV fault 9005 触发 auto-learn，paramModelID 透传正确
 func TestAggregator_AutoLearn_MarksUnsupportedOn9005(t *testing.T) {
 	mmlID := uuid.New()
 	repo := newAggregatorTestRepo(&MMLTask{ID: mmlID, Executor: "u", TotalDevices: 1, Commands: []map[string]interface{}{{}}})
 	sf := &fakeSubFieldRepoAutoLearn{rowsPerPath: 1}
+	pmID := uuid.New()
 	agg := NewResultAggregator(repo, nil, sf, &fakeSSEHub{}, zap.NewNop())
+	agg.SetParamModelResolver(resolverConst(pmID))
 
 	result, _ := json.Marshal(map[string]interface{}{
 		"param_faults": []map[string]interface{}{
@@ -250,6 +267,8 @@ func TestAggregator_AutoLearn_MarksUnsupportedOn9005(t *testing.T) {
 	}
 	agg.OnTaskCompleted(context.Background(), dt)
 	assert.Equal(t, []string{"Device.DeviceInfo.UserLabel"}, sf.markedPaths)
+	require.Len(t, sf.markedPMIDs, 1)
+	assert.Equal(t, pmID, sf.markedPMIDs[0], "paramModelID 必须从 resolver 透传到 repo")
 }
 
 // V5b — 非 9005 fault code（如 9008 read-only）不触发 auto-learn
@@ -258,6 +277,7 @@ func TestAggregator_AutoLearn_SkipsNon9005Codes(t *testing.T) {
 	repo := newAggregatorTestRepo(&MMLTask{ID: mmlID, Executor: "u", TotalDevices: 1, Commands: []map[string]interface{}{{}}})
 	sf := &fakeSubFieldRepoAutoLearn{}
 	agg := NewResultAggregator(repo, nil, sf, &fakeSSEHub{}, zap.NewNop())
+	agg.SetParamModelResolver(resolverConst(uuid.New()))
 
 	result, _ := json.Marshal(map[string]interface{}{
 		"param_faults": []map[string]interface{}{
@@ -279,6 +299,7 @@ func TestAggregator_AutoLearn_SkipsNonSPVMethods(t *testing.T) {
 	repo := newAggregatorTestRepo(&MMLTask{ID: mmlID, Executor: "u", TotalDevices: 1, Commands: []map[string]interface{}{{}}})
 	sf := &fakeSubFieldRepoAutoLearn{}
 	agg := NewResultAggregator(repo, nil, sf, &fakeSSEHub{}, zap.NewNop())
+	agg.SetParamModelResolver(resolverConst(uuid.New()))
 
 	result, _ := json.Marshal(map[string]interface{}{
 		"param_faults": []map[string]interface{}{
@@ -299,6 +320,7 @@ func TestAggregator_AutoLearn_NilRepo_NoPanic(t *testing.T) {
 	mmlID := uuid.New()
 	repo := newAggregatorTestRepo(&MMLTask{ID: mmlID, Executor: "u", TotalDevices: 1, Commands: []map[string]interface{}{{}}})
 	agg := NewResultAggregator(repo, nil, nil, &fakeSSEHub{}, zap.NewNop())
+	agg.SetParamModelResolver(resolverConst(uuid.New()))
 
 	result, _ := json.Marshal(map[string]interface{}{
 		"param_faults": []map[string]interface{}{
@@ -310,6 +332,105 @@ func TestAggregator_AutoLearn_NilRepo_NoPanic(t *testing.T) {
 		Method: "SetParameterValues", Result: result,
 	}
 	assert.NotPanics(t, func() { agg.OnTaskCompleted(context.Background(), dt) })
+}
+
+// V5e — paramModelResolver 未注入（nil） → 整个 auto-learn skip，不调 repo
+func TestAggregator_AutoLearn_ResolverNil_Skip(t *testing.T) {
+	mmlID := uuid.New()
+	repo := newAggregatorTestRepo(&MMLTask{ID: mmlID, Executor: "u", TotalDevices: 1, Commands: []map[string]interface{}{{}}})
+	sf := &fakeSubFieldRepoAutoLearn{rowsPerPath: 1}
+	// 不调 SetParamModelResolver — resolver 保持 nil
+	agg := NewResultAggregator(repo, nil, sf, &fakeSSEHub{}, zap.NewNop())
+
+	result, _ := json.Marshal(map[string]interface{}{
+		"param_faults": []map[string]interface{}{
+			{"parameter_name": "Device.A", "fault_code": 9005},
+		},
+	})
+	dt := &task.Task{
+		SourceID: mmlID.String(), DeviceSN: "SN-W",
+		Status: task.TaskStatusFailed, Method: "SetParameterValues",
+		Result: result,
+	}
+	agg.OnTaskCompleted(context.Background(), dt)
+	assert.Empty(t, sf.markedPaths, "resolver nil → 不调 MarkUnsupportedByStandardPath")
+}
+
+// V5f — paramModelResolver 返 nil（孤儿设备 / 无 paramModel） → skip
+func TestAggregator_AutoLearn_ResolverReturnsNil_Skip(t *testing.T) {
+	mmlID := uuid.New()
+	repo := newAggregatorTestRepo(&MMLTask{ID: mmlID, Executor: "u", TotalDevices: 1, Commands: []map[string]interface{}{{}}})
+	sf := &fakeSubFieldRepoAutoLearn{rowsPerPath: 1}
+	agg := NewResultAggregator(repo, nil, sf, &fakeSSEHub{}, zap.NewNop())
+	agg.SetParamModelResolver(func(_ context.Context, _ string) (*uuid.UUID, error) {
+		return nil, nil // 孤儿设备 / 无 paramModel
+	})
+
+	result, _ := json.Marshal(map[string]interface{}{
+		"param_faults": []map[string]interface{}{
+			{"parameter_name": "Device.B", "fault_code": 9005},
+		},
+	})
+	dt := &task.Task{
+		SourceID: mmlID.String(), DeviceSN: "SN-ORPHAN",
+		Status: task.TaskStatusFailed, Method: "SetParameterValues",
+		Result: result,
+	}
+	agg.OnTaskCompleted(context.Background(), dt)
+	assert.Empty(t, sf.markedPaths, "resolver 返 nil → 孤儿设备不污染数据")
+}
+
+// V5g — paramModelResolver 返 error → silent skip + 不调 repo
+func TestAggregator_AutoLearn_ResolverReturnsErr_Skip(t *testing.T) {
+	mmlID := uuid.New()
+	repo := newAggregatorTestRepo(&MMLTask{ID: mmlID, Executor: "u", TotalDevices: 1, Commands: []map[string]interface{}{{}}})
+	sf := &fakeSubFieldRepoAutoLearn{rowsPerPath: 1}
+	agg := NewResultAggregator(repo, nil, sf, &fakeSSEHub{}, zap.NewNop())
+	agg.SetParamModelResolver(func(_ context.Context, _ string) (*uuid.UUID, error) {
+		return nil, errors.New("db blip resolving param_model")
+	})
+
+	result, _ := json.Marshal(map[string]interface{}{
+		"param_faults": []map[string]interface{}{
+			{"parameter_name": "Device.C", "fault_code": 9005},
+		},
+	})
+	dt := &task.Task{
+		SourceID: mmlID.String(), DeviceSN: "SN-ERR",
+		Status: task.TaskStatusFailed, Method: "SetParameterValues",
+		Result: result,
+	}
+	agg.OnTaskCompleted(context.Background(), dt)
+	assert.Empty(t, sf.markedPaths, "resolver 返 err → silent skip 不调 repo")
+}
+
+// V5h — 同一 task 多个 9005 path 全部 mark 到同一 paramModelID 下
+func TestAggregator_AutoLearn_MultiplePaths_AllMarkedUnderSamePmID(t *testing.T) {
+	mmlID := uuid.New()
+	repo := newAggregatorTestRepo(&MMLTask{ID: mmlID, Executor: "u", TotalDevices: 1, Commands: []map[string]interface{}{{}}})
+	sf := &fakeSubFieldRepoAutoLearn{rowsPerPath: 1}
+	pmID := uuid.New()
+	agg := NewResultAggregator(repo, nil, sf, &fakeSSEHub{}, zap.NewNop())
+	agg.SetParamModelResolver(resolverConst(pmID))
+
+	result, _ := json.Marshal(map[string]interface{}{
+		"param_faults": []map[string]interface{}{
+			{"parameter_name": "Device.A.Foo", "fault_code": 9005},
+			{"parameter_name": "Device.A.Bar", "fault_code": 9005},
+			{"parameter_name": "Device.A.Baz", "fault_code": 9008}, // 不该被 mark
+		},
+	})
+	dt := &task.Task{
+		SourceID: mmlID.String(), DeviceSN: "SN-MULTI",
+		Status: task.TaskStatusFailed, Method: "SetParameterValues",
+		Result: result,
+	}
+	agg.OnTaskCompleted(context.Background(), dt)
+	assert.Equal(t, []string{"Device.A.Foo", "Device.A.Bar"}, sf.markedPaths)
+	require.Len(t, sf.markedPMIDs, 2)
+	for _, got := range sf.markedPMIDs {
+		assert.Equal(t, pmID, got, "所有调用必须用同一 paramModelID")
+	}
 }
 
 func TestAggregator_OnTaskCompleted_EmptyExecutor_SkipsFrame(t *testing.T) {
