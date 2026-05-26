@@ -1062,11 +1062,12 @@ func initMiscModules(c *Container) error {
 			}, nil
 		}))
 	// R-8.5: 独立 CompatibilityService（不耦合 ConsoleService 签名 / 测试）。
-	// 直接走 devices LEFT JOIN products 反查 param_model_id，
-	// 绕过 ProductRegistry.MatchProductClass 全局正则（字典 product_class
-	// 已对齐 devices.product_class DISTINCT，正常路径无需 patterns 命中）。
+	// T-0177：走 ProductRegistry.MatchProductClass（全局正则路由）取代旧
+	// 直查 devices LEFT JOIN products 的 raw SQL — 不再依赖 devices.product_id /
+	// param_model_id denorm 列填充状态，享受 PR-B (T-0173) productClass L1+L2
+	// 缓存；与 group_tree (PR-C) / supported_paths (T-0172) resolver 模式统一。
 	mmlCmdPathRepo := mml.NewPgCommandPathRepository(c.PgPool)
-	mmlCompatibility := mml.NewCompatibilityService(c.PgPool, c.ParamRegistry, mmlCmdPathRepo, logger)
+	mmlCompatibility := mml.NewCompatibilityService(c.ProductRegistry, c.ParamRegistry, mmlCmdPathRepo, logger)
 	c.miscDeps.mmlConsoleHandler = mml.NewConsoleHandler(mmlConsoleSvc, mmlService, mmlCompatibility, logger)
 
 	// Stage 3（T-0123 v5）：装配 mml.Service 的 device_tasks 路径翻译 miss 聚合
