@@ -16,6 +16,7 @@ export interface KPICardProps {
   unit?: string;
   onClick?: () => void;
   loading?: boolean;
+  minHeight?: number;
 }
 
 const KPICard: React.FC<KPICardProps> = ({
@@ -29,6 +30,7 @@ const KPICard: React.FC<KPICardProps> = ({
   deltaLabel,
   unit,
   onClick,
+  minHeight,
 }) => {
   const token = useThemeToken();
   const trendColor =
@@ -116,6 +118,7 @@ const KPICard: React.FC<KPICardProps> = ({
                 alignItems: 'center',
                 gap: 4,
                 marginTop: 4,
+                minHeight: minHeight,
               }}
             >
               {TrendIcon && (

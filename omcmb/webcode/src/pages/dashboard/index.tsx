@@ -250,6 +250,8 @@ export default function DashboardPage() {
             iconBgColor="#f9f0ff"
             iconColor="#722ED1"
             loading={isLoading}
+            trend="neutral"
+            minHeight={20}
             onClick={() => void navigate('/ops/tasks')}
           />
         </Col>
