@@ -24,14 +24,6 @@ export function useQueryTemplates(params?: ListTemplateParams) {
   });
 }
 
-export function useQueryTemplate(id: string | undefined) {
-  return useQuery({
-    queryKey: [...KEY, 'detail', id],
-    queryFn: () => pmQueryApi.get(id as string),
-    enabled: Boolean(id),
-  });
-}
-
 export function useCreateQueryTemplate() {
   const qc = useQueryClient();
   return useMutation({

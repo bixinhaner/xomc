@@ -110,6 +110,7 @@ export default function DevicePickerModal({
 
   const rowSelection = {
     selectedRowKeys: selected,
+    preserveSelectedRowKeys: true,
     onChange: (keys: React.Key[]) => setSelected(keys as string[]),
   };
 
@@ -136,7 +137,6 @@ export default function DevicePickerModal({
               style={{ width: 320 }}
               allowClear
               onClear={() => {
-                setSearchDraft('');
                 setSearch('');
                 setPage(1);
               }}
@@ -155,7 +155,7 @@ export default function DevicePickerModal({
             loading={isLoading}
             columns={columns}
             dataSource={items}
-            rowSelection={{ ...rowSelection, preserveSelectedRowKeys: true }}
+            rowSelection={rowSelection}
             pagination={false}
             scroll={{ y: 320 }}
           />

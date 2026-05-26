@@ -104,6 +104,7 @@ export default function MetricPickerModal({
 
   const rowSelection = {
     selectedRowKeys: selected,
+    preserveSelectedRowKeys: true,
     onChange: (keys: React.Key[]) => setSelected(keys as string[]),
   };
 
@@ -155,7 +156,7 @@ export default function MetricPickerModal({
           loading={isLoading}
           columns={columns}
           dataSource={items}
-          rowSelection={{ ...rowSelection, preserveSelectedRowKeys: true }}
+          rowSelection={rowSelection}
           pagination={false}
           scroll={{ y: 320 }}
         />
