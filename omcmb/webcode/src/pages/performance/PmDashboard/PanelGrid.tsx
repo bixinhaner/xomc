@@ -87,7 +87,10 @@ function PanelCard({
         title={
           <Space size={6}>
             <span>{panel.title}</span>
-            <ComparePanel mode={panel.compareMode} />
+            <ComparePanel
+              mode={panel.compareMode}
+              windowOffset={'start_offset' in panel.timeRange ? panel.timeRange.start_offset : undefined}
+            />
           </Space>
         }
         size="small"

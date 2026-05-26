@@ -89,7 +89,6 @@ const DIMENSION_OPTIONS: { label: string; value: Dimension }[] = [
 
 const COMPARE_OPTIONS: { label: string; value: CompareMode | '' }[] = [
   { label: '不对比', value: '' },
-  { label: '同时段对比其它设备', value: 'same_window_other_devices' },
   { label: '与上一周期对比', value: 'previous_window' },
 ];
 
