@@ -24,6 +24,8 @@ export interface PivotColumn {
 export interface PivotRow {
   key: string;             // (time + sn + ldn) 唯一行标识
   time: string;
+  startTime?: string;      // 桶开始时间（RFC3339）
+  endTime?: string;        // 桶结束时间（RFC3339）
   deviceSn?: string;
   cellId?: string;         // 从 object_ldn 解析
   plmn?: string;           // 从 object_ldn 解析
@@ -112,6 +114,8 @@ export function pivotLongToWide(rows: AggregatedRow[]): PivotResult {
       row = {
         key,
         time: r.time,
+        startTime: r.startTime,
+        endTime: r.endTime,
         deviceSn: r.deviceSn,
         cellId: parsed.cellId,
         plmn: parsed.plmn,
@@ -131,9 +135,9 @@ export function pivotLongToWide(rows: AggregatedRow[]): PivotResult {
     return row;
   });
 
-  // 排序：时间升序 → SN → LDN
+  // 排序：时间倒序（最新在前） → SN 升序 → LDN 升序
   outRows.sort((a, b) => {
-    if (a.time !== b.time) return a.time.localeCompare(b.time);
+    if (a.time !== b.time) return b.time.localeCompare(a.time);
     const sa = a.deviceSn ?? '';
     const sb = b.deviceSn ?? '';
     if (sa !== sb) return sa.localeCompare(sb);

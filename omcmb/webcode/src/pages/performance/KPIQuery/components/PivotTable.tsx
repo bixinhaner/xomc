@@ -30,14 +30,21 @@ export default function PivotTable({ rows, loading }: PivotTableProps) {
   const pivoted = useMemo(() => pivotLongToWide(rows), [rows]);
 
   const columns: ColumnsType<PivotRow> = useMemo(() => {
-    // 紧凑宽度 — 列宽 = max(标题, 数据) 实际 px。时间列保险加宽到 160 避免在用户系统字体下换行。
+    // 固定列：开始时间 / 结束时间 / 设备 SN / Cell ID / PLMN
     const fixed: ColumnsType<PivotRow> = [
       {
-        title: '时间',
-        dataIndex: 'time',
-        key: 'time',
+        title: '开始时间',
+        dataIndex: 'startTime',
+        key: 'startTime',
         width: 160,
-        render: (t: string) => dayjs(t).format('YYYY-MM-DD HH:mm'),
+        render: (t?: string, r?: PivotRow) => dayjs(t ?? r?.time).format('YYYY-MM-DD HH:mm'),
+      },
+      {
+        title: '结束时间',
+        dataIndex: 'endTime',
+        key: 'endTime',
+        width: 160,
+        render: (t?: string) => (t ? dayjs(t).format('YYYY-MM-DD HH:mm') : '-'),
       },
       {
         title: '设备 SN',
@@ -67,24 +74,19 @@ export default function PivotTable({ rows, loading }: PivotTableProps) {
       },
     ];
 
-    // 指标列：标题单行，超出 ellipsis；hover 显示完整 metric_path。数据单元格右对齐数字。
+    // 指标列：标题单行不换行不截断，列宽按列名字符宽度估算自适应。
+    // 字体 14px：英文/数字/标点 ≈ 8px，中文 ≈ 14px；左右 padding 共 32px。
+    const estimateWidth = (title: string): number => {
+      let textWidth = 0;
+      for (const ch of title) {
+        textWidth += /[一-鿿]/.test(ch) ? 14 : 8;
+      }
+      return Math.max(120, textWidth + 32);
+    };
     const metricCols: ColumnsType<PivotRow> = pivoted.columns.map((c: PivotColumn) => ({
-      title: (
-        <Tooltip title={c.title} placement="top">
-          <span
-            style={{
-              display: 'block',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-          >
-            {c.title}
-          </span>
-        </Tooltip>
-      ),
+      title: <span style={{ whiteSpace: 'nowrap' }}>{c.title}</span>,
       key: c.key,
-      width: 160,
+      width: estimateWidth(c.title),
       align: 'right',
       render: (_: unknown, row: PivotRow) => formatNumber(row.cells[c.key]),
     }));
@@ -92,8 +94,18 @@ export default function PivotTable({ rows, loading }: PivotTableProps) {
     return [...fixed, ...metricCols];
   }, [pivoted.columns]);
 
-  // 总宽 = 固定 520 + 每指标列 160
-  const totalWidth = 160 + 180 + 100 + 80 + pivoted.columns.length * 160;
+  // 总宽 = 固定 5 列 + 所有指标列累加
+  const totalWidth = useMemo(() => {
+    const fixedWidth = 160 + 160 + 180 + 100 + 80; // 开始 / 结束 / SN / Cell / PLMN
+    const metricWidth = pivoted.columns.reduce((sum, c) => {
+      let textWidth = 0;
+      for (const ch of c.title) {
+        textWidth += /[一-鿿]/.test(ch) ? 14 : 8;
+      }
+      return sum + Math.max(120, textWidth + 32);
+    }, 0);
+    return fixedWidth + metricWidth;
+  }, [pivoted.columns]);
 
   if (!loading && pivoted.rows.length === 0) {
     return (

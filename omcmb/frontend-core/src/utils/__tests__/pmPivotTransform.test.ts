@@ -82,7 +82,7 @@ describe('pivotLongToWide', () => {
     expect(result.rows[0].cells['PHY.NbrCqi6']).toBe(5);
   });
 
-  it('单设备 + 2 指标 + 4 时间桶 → 4 行 × 2 列', () => {
+  it('单设备 + 2 指标 + 4 时间桶 → 4 行 × 2 列（倒序：最新在前）', () => {
     const inputs: AggregatedRow[] = [];
     ['10:00', '10:15', '10:30', '10:45'].forEach((m, i) => {
       ['M1', 'M2'].forEach((path) => {
@@ -93,9 +93,10 @@ describe('pivotLongToWide', () => {
     expect(r.columns).toHaveLength(2);
     expect(r.rows).toHaveLength(4);
     expect(r.hasMultiDevice).toBe(false);
-    expect(r.rows[0].cells['M1']).toBe(1);
-    expect(r.rows[0].cells['M2']).toBe(1);
-    expect(r.rows[3].cells['M1']).toBe(4);
+    // 倒序：最新时间 10:45 (i=3, value=4) 在第一行
+    expect(r.rows[0].cells['M1']).toBe(4);
+    expect(r.rows[0].cells['M2']).toBe(4);
+    expect(r.rows[3].cells['M1']).toBe(1);
   });
 
   it('多设备 → 行按 (time, sn) 拆开', () => {
@@ -142,7 +143,7 @@ describe('pivotLongToWide', () => {
     expect(t2.cells['M2']).toBe(2);
   });
 
-  it('行按时间 → SN → LDN 升序', () => {
+  it('行按时间倒序 → SN 升序 → LDN 升序（最新数据在前）', () => {
     const r = pivotLongToWide([
       row({ deviceSn: 'B', time: '2026-05-26T10:30:00Z' }),
       row({ deviceSn: 'A', time: '2026-05-26T10:00:00Z' }),
@@ -150,10 +151,22 @@ describe('pivotLongToWide', () => {
       row({ deviceSn: 'B', time: '2026-05-26T10:00:00Z' }),
     ]);
     expect(r.rows.map((x) => `${x.time}|${x.deviceSn}`)).toEqual([
-      '2026-05-26T10:00:00Z|A',
-      '2026-05-26T10:00:00Z|B',
       '2026-05-26T10:30:00Z|A',
       '2026-05-26T10:30:00Z|B',
+      '2026-05-26T10:00:00Z|A',
+      '2026-05-26T10:00:00Z|B',
     ]);
+  });
+
+  it('PivotRow 携带 startTime / endTime', () => {
+    const r = pivotLongToWide([
+      row({
+        time: '2026-05-26T10:00:00Z',
+        startTime: '2026-05-26T10:00:00Z',
+        endTime: '2026-05-26T10:15:00Z',
+      }),
+    ]);
+    expect(r.rows[0].startTime).toBe('2026-05-26T10:00:00Z');
+    expect(r.rows[0].endTime).toBe('2026-05-26T10:15:00Z');
   });
 });
