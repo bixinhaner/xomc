@@ -30,28 +30,27 @@ export default function PivotTable({ rows, loading }: PivotTableProps) {
   const pivoted = useMemo(() => pivotLongToWide(rows), [rows]);
 
   const columns: ColumnsType<PivotRow> = useMemo(() => {
-    // 紧凑宽度 — 匹配 (标题, 内容) 中较长者的实际 px 占用
+    // 紧凑宽度 — 列宽 = max(标题, 数据) 实际 px。时间列保险加宽到 160 避免在用户系统字体下换行。
     const fixed: ColumnsType<PivotRow> = [
       {
         title: '时间',
         dataIndex: 'time',
         key: 'time',
-        width: 140, // "2026-05-26 19:00" ≈ 130px
+        width: 160,
         render: (t: string) => dayjs(t).format('YYYY-MM-DD HH:mm'),
       },
       {
         title: '设备 SN',
         dataIndex: 'deviceSn',
         key: 'deviceSn',
-        width: 180, // 19-char SN ≈ 165px
-        ellipsis: true,
+        width: 180,
         render: (v?: string) => v ?? '-',
       },
       {
         title: 'Cell ID',
         dataIndex: 'cellId',
         key: 'cellId',
-        width: 100, // 9-digit ID ≈ 80px
+        width: 100,
         render: (v?: string, r?: PivotRow) =>
           v ?? (
             <Tooltip title={r?.objectLdn ? `原始 LDN: ${r.objectLdn}` : '无 LDN'}>
@@ -63,25 +62,38 @@ export default function PivotTable({ rows, loading }: PivotTableProps) {
         title: 'PLMN',
         dataIndex: 'plmn',
         key: 'plmn',
-        width: 80, // 5-digit PLMN
+        width: 80,
         render: (v?: string) => v ?? '-',
       },
     ];
 
+    // 指标列：长名允许标题多行 wrap（不截断），数据单行。160 宽度可容纳 2 行最多 ~20 字符的标题。
+    // 通过在 . _ 前插入零宽空格，让浏览器优先在这些符号处断行（CSS overflow-wrap 不识别标点为单词边界）。
+    const insertBreakHints = (s: string) =>
+      s.replace(/([._-])/g, '​$1');
     const metricCols: ColumnsType<PivotRow> = pivoted.columns.map((c: PivotColumn) => ({
-      title: <Tooltip title={c.title}><span style={{ display: 'inline-block', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.title}</span></Tooltip>,
+      title: (
+        <span
+          style={{
+            whiteSpace: 'normal',
+            overflowWrap: 'break-word',
+            lineHeight: 1.3,
+          }}
+        >
+          {insertBreakHints(c.title)}
+        </span>
+      ),
       key: c.key,
-      width: 160, // 平均指标路径宽度 ≈ 130-150px，留少量余量
+      width: 160,
       align: 'right',
-      ellipsis: true,
       render: (_: unknown, row: PivotRow) => formatNumber(row.cells[c.key]),
     }));
 
     return [...fixed, ...metricCols];
   }, [pivoted.columns]);
 
-  // 计算总宽度用于 scroll.x，超出 viewport 时横向滚动
-  const totalWidth = 140 + 180 + 100 + 80 + pivoted.columns.length * 160;
+  // 总宽 = 固定 520 + 每指标列 160
+  const totalWidth = 160 + 180 + 100 + 80 + pivoted.columns.length * 160;
 
   if (!loading && pivoted.rows.length === 0) {
     return (
