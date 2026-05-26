@@ -67,21 +67,21 @@ export default function PivotTable({ rows, loading }: PivotTableProps) {
       },
     ];
 
-    // 指标列：长名允许标题多行 wrap（不截断），数据单行。160 宽度可容纳 2 行最多 ~20 字符的标题。
-    // 通过在 . _ 前插入零宽空格，让浏览器优先在这些符号处断行（CSS overflow-wrap 不识别标点为单词边界）。
-    const insertBreakHints = (s: string) =>
-      s.replace(/([._-])/g, '​$1');
+    // 指标列：标题单行，超出 ellipsis；hover 显示完整 metric_path。数据单元格右对齐数字。
     const metricCols: ColumnsType<PivotRow> = pivoted.columns.map((c: PivotColumn) => ({
       title: (
-        <span
-          style={{
-            whiteSpace: 'normal',
-            overflowWrap: 'break-word',
-            lineHeight: 1.3,
-          }}
-        >
-          {insertBreakHints(c.title)}
-        </span>
+        <Tooltip title={c.title} placement="top">
+          <span
+            style={{
+              display: 'block',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {c.title}
+          </span>
+        </Tooltip>
       ),
       key: c.key,
       width: 160,
