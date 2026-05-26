@@ -31,10 +31,14 @@ func (s *PgPMFileStore) SaveFile(ctx context.Context, info *PMFileInfo) error {
 		info.CreatedAt = time.Now()
 	}
 
+	// ON CONFLICT (device_sn, file_name) DO NOTHING：CPE 重传同名文件静默忽略。
+	// 重复上传无业务危害（minio 文件覆盖语义；parser 已 first-arrived 语义），
+	// 不返回错误也不打 warn 日志（每个采样窗口的常规重传，避免刷屏）。
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO pm_files (id, device_id, device_sn, carrier, technology, file_name, file_size,
 		                       collect_time, minio_path, parsed, counter_count, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		 ON CONFLICT (device_sn, file_name) DO NOTHING`,
 		info.ID, info.DeviceID, info.DeviceSN, info.Carrier, info.Technology,
 		info.FileName, info.FileSize, info.CollectTime, info.MinioPath,
 		info.Parsed, info.CounterCount, info.CreatedAt,
