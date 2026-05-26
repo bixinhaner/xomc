@@ -426,6 +426,11 @@ func initProvisionModule(c *Container) error {
 	if c.ProductRegistry != nil && c.ProductRepo != nil {
 		provisionEngine.SetProductBinder(c.ProductRegistry, c.ProductRepo)
 	}
+	// T-0176-PR-D：bindDeviceProductIfNeeded 在 DeviceOnline / FirmwareChanged /
+	// FileType11 三个非 Bootstrap 入口懒补绑定，写库成功后失效 SN cache。
+	if c.DeviceCache != nil {
+		provisionEngine.SetDeviceCache(c.DeviceCache)
+	}
 
 	if c.Cfg.Provision.ModelUpload.Enabled {
 		modelUploadSvc := provision.NewModelUploadService(

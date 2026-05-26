@@ -118,6 +118,9 @@ type Container struct {
 	DeviceInfoRepo device.DeviceInfoRepository
 	ConnReqClient  *connreq.Client
 	StunStore      *stun.Store
+	// DeviceCache 用于其他模块（如 provision lazy bind / product orphan bind）
+	// 在写库后失效 SN 缓存（T-0176-PR-D）。可为 nil（仅 dev/test 路径），消费方需 nil-safe。
+	DeviceCache *device.DeviceCache
 	// InformHandler 暴露给后续模块（如 topology matcher）注入"心跳自动分组"钩子。
 	// 在 initDeviceModule 创建时尚无 matcher，由 initMiscModules 创建 matcher 后
 	// 反向注入 SetGroupAssigner — 避免循环依赖（device → topology）。

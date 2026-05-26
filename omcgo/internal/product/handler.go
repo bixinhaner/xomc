@@ -25,12 +25,23 @@ import (
 // DiscoveredCleaner 由 provider 注入 parammodel.PgRepository.DeleteDiscoveredAll 来
 // 实现 reset 端点（避免 product 反向 import parammodel 包）。
 type Handler struct {
-	repo      *PgRepository
-	registry  *Registry
-	cleaner   DiscoveredCleaner
-	rematcher Rematcher
-	reloader  Reloader
-	logger    *zap.Logger
+	repo         *PgRepository
+	registry     *Registry
+	cleaner      DiscoveredCleaner
+	rematcher    Rematcher
+	reloader     Reloader
+	deviceCache  DeviceCacheInvalidator // T-0176-PR-D：BindOrphan 后失效 SN cache（nil = 禁用）
+	logger       *zap.Logger
+}
+
+// DeviceCacheInvalidator 是 product handler 写设备绑定字段后清 SN 缓存的最小依赖
+// （T-0176-PR-D）。生产由 *device.DeviceCache 满足；写在消费者侧避免 product → device
+// 反向依赖。
+//
+// Delete 失败仅记录（实现内部 warn log），不影响 BindOrphan 主返回值 —— stale
+// cache 的代价是下次读到旧值，远比 BindOrphan 失败更可接受。
+type DeviceCacheInvalidator interface {
+	Delete(ctx context.Context, sn string)
 }
 
 // DiscoveredCleaner 抽象"清空某 product 所有 swVersion 的 discovered 映射"。
@@ -63,6 +74,22 @@ func NewHandler(repo *PgRepository, registry *Registry, cleaner DiscoveredCleane
 		reloader:  reloader,
 		logger:    logger.Named("product.handler"),
 	}
+}
+
+// SetDeviceCacheInvalidator 注入 device cache 清理器（T-0176-PR-D）。
+// nil 表示禁用 — BindOrphan / RematchOrphan 写完 DB 后不清 cache。
+func (h *Handler) SetDeviceCacheInvalidator(c DeviceCacheInvalidator) {
+	h.deviceCache = c
+}
+
+// invalidateDeviceCacheBySN 是 BindOrphan / RematchOrphan 写完 product_id 后清
+// SN cache 的统一入口（T-0176-PR-D）。deviceCache 未注入时 noop；sn 为空也 noop。
+// 任何错误均 silent — admin 不应因 cache 维护操作失败收到 5xx。
+func (h *Handler) invalidateDeviceCacheBySN(ctx context.Context, sn string) {
+	if h.deviceCache == nil || sn == "" {
+		return
+	}
+	h.deviceCache.Delete(ctx, sn)
 }
 
 // RegisterRoutes 挂载 /api/v1/products/* 到给定 RouterGroup。
@@ -614,6 +641,8 @@ func (h *Handler) RematchOrphan(c *gin.Context) {
 		}
 		if err := h.repo.BindOrphanDevice(c.Request.Context(), d.ID, mr.Product.ID); err == nil {
 			rebound++
+			// T-0176-PR-D：批量重绑后逐个失效 SN cache（d.SerialNumber 已在 OrphanDevice 中）。
+			h.invalidateDeviceCacheBySN(c.Request.Context(), d.SerialNumber)
 		}
 	}
 	response.OK(c, gin.H{"rebound": rebound, "scanned": len(orphans)})
@@ -650,6 +679,17 @@ func (h *Handler) BindOrphan(c *gin.Context) {
 	if err := h.repo.BindOrphanDevice(c.Request.Context(), deviceID, productID); err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
+	}
+	// T-0176-PR-D：写完 product_id 后清 SN cache，避免 DeviceCache 缓存的 product_class
+	// 喂给 ProductRegistry 时仍指向旧路由（PR-C 切完 resolver 后这一步关键）。
+	// SN 查不到 / Delete 失败均 silent — admin 仍能看到 bind 成功响应。
+	if h.deviceCache != nil {
+		if sn, snErr := h.repo.GetDeviceSerialByID(c.Request.Context(), deviceID); snErr == nil {
+			h.invalidateDeviceCacheBySN(c.Request.Context(), sn)
+		} else {
+			h.logger.Warn("BindOrphan: lookup SN for cache invalidation failed",
+				zap.String("device_id", deviceID.String()), zap.Error(snErr))
+		}
 	}
 	response.OK(c, gin.H{"device_id": deviceID, "product_id": productID})
 }
