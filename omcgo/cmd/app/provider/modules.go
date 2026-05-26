@@ -1096,7 +1096,9 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 		// device_tasks 终态通过 NATS 跨进程事件投递到聚合器：
 		// ACS 在 MarkTaskCompleted/Failed 后发布 task.completed/task.failed，
 		// 本进程的 bridge 订阅后驱动 ResultAggregator 更新 mml_tasks 统计并推送 SSE。
-		aggregator := mml.NewResultAggregator(mmlTaskRepo, mmlScriptRepo, messageHub, logger)
+		// T-0174: 注入 mmlSubFieldRepo 让 aggregator 能在收到 SetParameterValues 9005
+		// 时自动 mark sub_field is_supported=false（auto-learn 不支持 path）。
+		aggregator := mml.NewResultAggregator(mmlTaskRepo, mmlScriptRepo, mmlSubFieldRepo, messageHub, logger)
 		if c.EventBus != nil {
 			// 注：completionRouter 通过 miscDeps 持有，方便 ops 模块（在本块之后初始化）
 			// 也注册自己的 TaskSourceOps 聚合器。CompletionRouter.Register 是 mutex-safe，

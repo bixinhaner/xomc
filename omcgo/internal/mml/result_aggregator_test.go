@@ -89,7 +89,7 @@ func newAggregatorTestRepo(mmlTask *MMLTask) *aggregatorTestRepo {
 }
 
 func newAggregatorWithHub(repo TaskRepository, hub SSEPublisher) *ResultAggregator {
-	return NewResultAggregator(repo, nil, hub, zap.NewNop())
+	return NewResultAggregator(repo, nil, nil, hub, zap.NewNop())
 }
 
 // V1 — completed device_task emits mml_device_frame with device_sn + result
@@ -198,7 +198,7 @@ func TestAggregator_OnTaskCompleted_NonTerminal_NoFrame(t *testing.T) {
 func TestAggregator_OnTaskCompleted_NilHub_NoPanic(t *testing.T) {
 	mmlID := uuid.New()
 	repo := newAggregatorTestRepo(&MMLTask{ID: mmlID, Executor: "dave"})
-	agg := NewResultAggregator(repo, nil, nil, zap.NewNop())
+	agg := NewResultAggregator(repo, nil, nil, nil, zap.NewNop())
 
 	dt := &task.Task{
 		SourceID: mmlID.String(), DeviceSN: "SN-3", Status: task.TaskStatusCompleted,
@@ -206,6 +206,110 @@ func TestAggregator_OnTaskCompleted_NilHub_NoPanic(t *testing.T) {
 	assert.NotPanics(t, func() {
 		agg.OnTaskCompleted(context.Background(), dt)
 	})
+}
+
+// =============================================================================
+// T-0174 — auto-learn is_unsupported from SetParameterValues fault 9005
+// =============================================================================
+
+// fakeSubFieldRepoAutoLearn 只用来捕获 MarkUnsupportedByStandardPath 调用，
+// 不实现其它方法 —— 用 SubFieldRepository 接口的 promotion 让它 satisfy 接口的
+// 编译期约束。
+type fakeSubFieldRepoAutoLearn struct {
+	SubFieldRepository // 嵌入接口让未实现的方法 panic 时立刻暴露（仅 Mark 路径被测）
+	mu              sync.Mutex
+	markedPaths     []string
+	rowsPerPath     int64
+}
+
+func (f *fakeSubFieldRepoAutoLearn) MarkUnsupportedByStandardPath(_ context.Context, path string) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.markedPaths = append(f.markedPaths, path)
+	return f.rowsPerPath, nil
+}
+
+// V5 — SPV fault 9005 触发 auto-learn
+func TestAggregator_AutoLearn_MarksUnsupportedOn9005(t *testing.T) {
+	mmlID := uuid.New()
+	repo := newAggregatorTestRepo(&MMLTask{ID: mmlID, Executor: "u", TotalDevices: 1, Commands: []map[string]interface{}{{}}})
+	sf := &fakeSubFieldRepoAutoLearn{rowsPerPath: 1}
+	agg := NewResultAggregator(repo, nil, sf, &fakeSSEHub{}, zap.NewNop())
+
+	result, _ := json.Marshal(map[string]interface{}{
+		"param_faults": []map[string]interface{}{
+			{"parameter_name": "Device.DeviceInfo.UserLabel", "fault_code": 9005, "fault_string": "AttributeIdNotFound"},
+		},
+	})
+	dt := &task.Task{
+		SourceID: mmlID.String(),
+		DeviceSN: "SN-X",
+		Status:   task.TaskStatusFailed,
+		Method:   "SetParameterValues",
+		Result:   result,
+	}
+	agg.OnTaskCompleted(context.Background(), dt)
+	assert.Equal(t, []string{"Device.DeviceInfo.UserLabel"}, sf.markedPaths)
+}
+
+// V5b — 非 9005 fault code（如 9008 read-only）不触发 auto-learn
+func TestAggregator_AutoLearn_SkipsNon9005Codes(t *testing.T) {
+	mmlID := uuid.New()
+	repo := newAggregatorTestRepo(&MMLTask{ID: mmlID, Executor: "u", TotalDevices: 1, Commands: []map[string]interface{}{{}}})
+	sf := &fakeSubFieldRepoAutoLearn{}
+	agg := NewResultAggregator(repo, nil, sf, &fakeSSEHub{}, zap.NewNop())
+
+	result, _ := json.Marshal(map[string]interface{}{
+		"param_faults": []map[string]interface{}{
+			{"parameter_name": "Device.DeviceInfo.Foo", "fault_code": 9008, "fault_string": "read-only"},
+		},
+	})
+	dt := &task.Task{
+		SourceID: mmlID.String(), DeviceSN: "SN-Y",
+		Status: task.TaskStatusFailed, Method: "SetParameterValues",
+		Result: result,
+	}
+	agg.OnTaskCompleted(context.Background(), dt)
+	assert.Empty(t, sf.markedPaths)
+}
+
+// V5c — 非 SPV 方法即使失败也不触发（GPV 等没有 SetParameterValuesFault 语义）
+func TestAggregator_AutoLearn_SkipsNonSPVMethods(t *testing.T) {
+	mmlID := uuid.New()
+	repo := newAggregatorTestRepo(&MMLTask{ID: mmlID, Executor: "u", TotalDevices: 1, Commands: []map[string]interface{}{{}}})
+	sf := &fakeSubFieldRepoAutoLearn{}
+	agg := NewResultAggregator(repo, nil, sf, &fakeSSEHub{}, zap.NewNop())
+
+	result, _ := json.Marshal(map[string]interface{}{
+		"param_faults": []map[string]interface{}{
+			{"parameter_name": "Device.X.Y", "fault_code": 9005, "fault_string": "nope"},
+		},
+	})
+	dt := &task.Task{
+		SourceID: mmlID.String(), DeviceSN: "SN-Z",
+		Status: task.TaskStatusFailed, Method: "GetParameterValues",
+		Result: result,
+	}
+	agg.OnTaskCompleted(context.Background(), dt)
+	assert.Empty(t, sf.markedPaths)
+}
+
+// V5d — subFieldRepo 为 nil（未注入 auto-learn）时 silent skip，不 panic
+func TestAggregator_AutoLearn_NilRepo_NoPanic(t *testing.T) {
+	mmlID := uuid.New()
+	repo := newAggregatorTestRepo(&MMLTask{ID: mmlID, Executor: "u", TotalDevices: 1, Commands: []map[string]interface{}{{}}})
+	agg := NewResultAggregator(repo, nil, nil, &fakeSSEHub{}, zap.NewNop())
+
+	result, _ := json.Marshal(map[string]interface{}{
+		"param_faults": []map[string]interface{}{
+			{"parameter_name": "Device.A", "fault_code": 9005},
+		},
+	})
+	dt := &task.Task{
+		SourceID: mmlID.String(), Status: task.TaskStatusFailed,
+		Method: "SetParameterValues", Result: result,
+	}
+	assert.NotPanics(t, func() { agg.OnTaskCompleted(context.Background(), dt) })
 }
 
 func TestAggregator_OnTaskCompleted_EmptyExecutor_SkipsFrame(t *testing.T) {

@@ -201,7 +201,20 @@ SELECT
     -- §R-4.1.1：每层 {i} 占位符的取值范围 metadata，无 metadata → 兜底 '[]'
     COALESCE(c.instance_range_meta, '[]'::jsonb) AS instance_range_meta,
     -- T-0172：操作的标准路径列表，无值兜底 '[]'
-    COALESCE(c.target_paths, '[]'::jsonb) AS target_paths
+    -- T-0174：把 target_paths 收敛到"sub_field 表实际能 show 的 path 列表"——
+    --   过滤掉 is_supported=false 的 sub_field 对应路径（CPE 实测不支持）。
+    --   命令树 (N) 计数与操作面板 path 列表完全对齐，避免 (17) 但实际只显示 12 行
+    --   的视觉差。无 sub_field 关联的命令兜底 c.target_paths（行为不变）。
+    COALESCE(
+        (
+            SELECT jsonb_agg(sp.standard_path ORDER BY csf.sort_order)
+            FROM mml_command_sub_fields csf
+            JOIN standard_params sp ON sp.id = csf.standard_path_id
+            WHERE csf.command_id = c.id
+              AND csf.is_supported = true
+        ),
+        COALESCE(c.target_paths, '[]'::jsonb)
+    ) AS target_paths
 FROM mml_command_groups g
 LEFT JOIN mml_commands c ON c.group_id = g.id
 WHERE g.path IS NOT NULL

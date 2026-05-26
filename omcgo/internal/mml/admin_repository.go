@@ -51,6 +51,16 @@ type SubFieldRepository interface {
 	// 真实支持的 standardPath（缺映射的 sub_field 被排除）。admin 视图传 nil 返全集。
 	ListEnrichedByCommand(ctx context.Context, commandID uuid.UUID, paramModelID *uuid.UUID) ([]MMLCommandSubFieldEnriched, error)
 	CountByParam(ctx context.Context, paramID uuid.UUID) (int64, error)
+
+	// MarkUnsupportedByStandardPath 把所有引用 standardPath 的 sub_field 标为
+	// is_supported=false，返回受影响行数。T-0174 auto-learn 入口：ACS 收到
+	// SetParameterValues 9005 (AttributeIdNotFound) 时调用，让 UI 永久隐藏该 path。
+	//
+	// 当前粒度：全局（同 standardPath 在所有 command 下统一隐藏）。理由：
+	//   - mml_command_sub_fields.is_supported 列就是全局粒度
+	//   - 同 path 不被 CPE A 支持，CPE B/C 多半也不支持
+	//   - 若需 per-device-family 粒度，未来迁移到 discovered_param_mappings 设备级表(T-0175)
+	MarkUnsupportedByStandardPath(ctx context.Context, standardPath string) (int64, error)
 }
 
 // PgSubFieldRepository PostgreSQL 实现。
@@ -163,11 +173,14 @@ func (r *PgSubFieldRepository) GetByID(ctx context.Context, id uuid.UUID) (*MMLC
 }
 
 func (r *PgSubFieldRepository) ListByCommand(ctx context.Context, commandID uuid.UUID) ([]MMLCommandSubField, error) {
+	// T-0174: 过滤 is_supported=false 的 sub_field（CPE 测试证实不支持）。
+	// catalog/字典仍保留这些行,只是不再被 MML executor / SubFieldChecklist 暴露。
 	query, args, err := storage.Psql.Select(
 		"id", "command_id", "standard_path_id AS param_id", "mml_code", "label_i18n",
 		"default_selected", "is_required", "sort_order", "created_at", "updated_at",
 	).From("mml_command_sub_fields").
 		Where(sq.Eq{"command_id": commandID}).
+		Where(sq.Eq{"is_supported": true}).
 		OrderBy("sort_order ASC", "mml_code ASC").
 		ToSql()
 	if err != nil {
@@ -270,7 +283,8 @@ SELECT
     COALESCE(sp.description, '')          AS description
 FROM mml_command_sub_fields csf
 JOIN standard_params sp ON sp.id = csf.standard_path_id
-WHERE csf.command_id = $1` + paramModelFilter + `
+WHERE csf.command_id = $1
+  AND csf.is_supported = true` + paramModelFilter + `
 ORDER BY csf.sort_order ASC, csf.mml_code ASC`
 
 	rows, err := r.pool.Query(ctx, sqlText, args...)
@@ -320,6 +334,31 @@ func (r *PgSubFieldRepository) CountByParam(ctx context.Context, paramID uuid.UU
 		return 0, fmt.Errorf("count sub_fields by standard_path: %w", err)
 	}
 	return n, nil
+}
+
+// MarkUnsupportedByStandardPath 把所有引用 standardPath 的 sub_field 行标为
+// is_supported=false，仅更新当前 is_supported=true 的行（已 false 的不重复
+// 触动 updated_at）。返回受影响行数。
+//
+// T-0174 auto-learn 调用：ACS 收到 SetParameterValues 9005 时 MML
+// ResultAggregator 转发到此方法。standardPath 为空 → 直接返 0 不报错（防御）。
+func (r *PgSubFieldRepository) MarkUnsupportedByStandardPath(ctx context.Context, standardPath string) (int64, error) {
+	if standardPath == "" {
+		return 0, nil
+	}
+	const sqlText = `
+UPDATE mml_command_sub_fields csf
+   SET is_supported = false,
+       updated_at   = NOW()
+  FROM standard_params sp
+ WHERE csf.standard_path_id = sp.id
+   AND sp.standard_path = $1
+   AND csf.is_supported = true`
+	tag, err := r.pool.Exec(ctx, sqlText, standardPath)
+	if err != nil {
+		return 0, fmt.Errorf("mark sub_field unsupported by standard_path %q: %w", standardPath, err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // ============================================================

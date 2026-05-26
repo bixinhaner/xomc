@@ -7,6 +7,14 @@ import (
 
 // CatalogJSONFile 是 data/mml-catalog/cmcc-tdlte-v2.3.json 的顶层结构。
 //
+// ⚠️ 该文件**仅用于提取分组结构**(chapter / group_code / command_zh_name /
+// has_instance / command_code / operation_type),**不是 path 的真值源**。
+// 命令真正引用哪些 path 由 `mml_command_sub_fields` 表 → `standard_params`
+// 决定。详见 catalogloader/loader.go Loader 注释中的"角色与边界"说明。
+//
+// JSON 中 Groups[].Paths[] 与 Commands[].TargetPaths[] 字段是 catalog 生成
+// 阶段写出的冗余元数据(便于审阅),运行时 GPV 不读这两个字段。
+//
 // 用途：同步给前端 admin / catalog 展示，保留 generated_from + spec_md_hash 元数据
 // 让 catalog 来源可追溯。
 type CatalogJSONFile struct {
@@ -19,6 +27,10 @@ type CatalogJSONFile struct {
 }
 
 // CatalogJSONGroup 一个 group 的完整描述（含派生命令）。
+//
+// Paths 字段:catalog 生成阶段从规范 MD 抽取的 path 元数据,运行时 **不**
+// 当作 path 真值源消费 —— 真值源是 `standard_params` 表。该字段仅供 catalog
+// 文件审阅与离线工具(specparser)使用。
 type CatalogJSONGroup struct {
 	Chapter       string            `json:"chapter"`
 	GroupCode     string            `json:"group_code"`
@@ -39,6 +51,13 @@ type CatalogJSONPath struct {
 	MaxLength    *int   `json:"max_length,omitempty"`
 }
 
+// CatalogJSONCmd 一条派生命令的元数据。
+//
+// TargetPaths 字段:**只是 catalog 生成时的冗余 path 列表**(从同 group 的
+// Paths 抽取),catalogloader 会把它写入 `mml_commands.target_paths` jsonb 列,
+// 但 MML executor 拼 GPV 时不读这两份冗余,而是直接走 `mml_command_sub_fields`
+// JOIN `standard_params`。因此修改 catalog 的 target_paths 不会影响实际 GPV 行为;
+// 增删命令的字段集请改 sub_field 表(或写 seed migration)。
 type CatalogJSONCmd struct {
 	CommandCode   string   `json:"command_code"`
 	LogicalCode   string   `json:"logical_code"`

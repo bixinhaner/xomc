@@ -23,6 +23,26 @@ const DefaultDirectory = "mml-catalog"
 
 // Loader 实现 dictloader.Loader 接口；在启动期由 Registry 编排调用。
 //
+// ============================================================
+// data/mml-catalog/cmcc-tdlte-v2.3.json 的角色与边界（CRITICAL）
+// ============================================================
+// 该 JSON **只用于提取"命令分组结构"**：chapter / group_code /
+// command_zh_name / has_instance / command_code / operation_type 等元数据。
+//
+// 它 **不是 path 的真值源**。
+//   · 命令真正引用哪些 path：来自 `mml_command_sub_fields` 表，由该表的
+//     `standard_path_id` FK → `standard_params`（系统级 standardPath 字典）。
+//   · catalog JSON 里的 `paths[]` 与 `target_paths[]` 只是 catalog 生成时
+//     冗余写出的"该 group 应包含哪些标准 path"建议；运行时不依据它做 GPV。
+//   · 因此 **改 catalog.target_paths 不会改 sub_field 表**（catalogloader
+//     UPSERT 写 mml_commands.target_paths jsonb 列，但 executor 拼 GPV 时
+//     是从 sub_field 表 JOIN standard_params 拿 path，与 target_paths 列无关）。
+//
+// 历史教训：曾多次因把 catalog target_paths 当成 sub_field 源导致误判。
+// 任何"删除 / 增加命令字段集"的操作，都应改 `mml_command_sub_fields` 行
+// （或新增 seed migration），不应改 catalog JSON。
+// ============================================================
+//
 // 行为契约（见方案 §6.7.6）：
 //   - 启动期 LoadOnce 失败 → app 启动失败（fail-fast）
 //   - 热重载 Reload 失败 → 事务回滚，DB 保持原状

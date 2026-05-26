@@ -840,6 +840,10 @@ func (m *acsHTaskService) MarkTaskCompleted(ctx context.Context, taskID string, 
 }
 
 func (m *acsHTaskService) MarkTaskFailed(ctx context.Context, taskID string, errorCode int, errorMsg string) error {
+	return m.MarkTaskFailedWithResult(ctx, taskID, errorCode, errorMsg, nil)
+}
+
+func (m *acsHTaskService) MarkTaskFailedWithResult(ctx context.Context, taskID string, errorCode int, errorMsg string, result json.RawMessage) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, t := range m.tasks {
@@ -847,6 +851,9 @@ func (m *acsHTaskService) MarkTaskFailed(ctx context.Context, taskID string, err
 			t.Status = task.TaskStatusFailed
 			t.ErrorCode = errorCode
 			t.ErrorMessage = errorMsg
+			if len(result) > 0 {
+				t.Result = result
+			}
 			now := time.Now()
 			t.CompletedAt = &now
 			return nil

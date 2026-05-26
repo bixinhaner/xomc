@@ -201,6 +201,19 @@ func (t *Task) MarkFailed(errorCode int, errorMessage string) {
 	t.CompletedAt = &now
 }
 
+// MarkFailedWithResult 标记任务失败并附带结构化结果（如 per-param SetParameterValuesFault 详情）。
+// result 为空则等价 MarkFailed。
+//
+// T-0174 引入：ACS 收到 SetParameterValues SOAP Fault 时把每个失败 path 的
+// (parameter_name / fault_code / fault_string) 序列化到 t.Result，下游 MML
+// ResultAggregator 据此触发 is_supported=false auto-learn。
+func (t *Task) MarkFailedWithResult(errorCode int, errorMessage string, result json.RawMessage) {
+	t.MarkFailed(errorCode, errorMessage)
+	if len(result) > 0 {
+		t.Result = result
+	}
+}
+
 // MarkExpired 标记任务过期
 func (t *Task) MarkExpired() {
 	now := time.Now()

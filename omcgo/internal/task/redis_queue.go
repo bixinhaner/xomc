@@ -346,6 +346,12 @@ func (q *RedisTaskQueue) MarkTaskCompleted(ctx context.Context, taskID string, r
 
 // MarkTaskFailed 标记任务失败
 func (q *RedisTaskQueue) MarkTaskFailed(ctx context.Context, taskID string, errorCode int, errorMsg string) error {
+	return q.MarkTaskFailedWithResult(ctx, taskID, errorCode, errorMsg, nil)
+}
+
+// MarkTaskFailedWithResult 标记任务失败并附带结构化 result（如 SetParameterValuesFault 详情）。
+// result 为空时等价于 MarkTaskFailed。
+func (q *RedisTaskQueue) MarkTaskFailedWithResult(ctx context.Context, taskID string, errorCode int, errorMsg string, result json.RawMessage) error {
 	task, err := q.GetByID(ctx, taskID)
 	if err != nil {
 		return err
@@ -354,7 +360,7 @@ func (q *RedisTaskQueue) MarkTaskFailed(ctx context.Context, taskID string, erro
 		return fmt.Errorf("task not found: %s", taskID)
 	}
 
-	task.MarkFailed(errorCode, errorMsg)
+	task.MarkFailedWithResult(errorCode, errorMsg, result)
 
 	// 更新任务详情
 	taskData, _ := json.Marshal(task)

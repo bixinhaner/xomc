@@ -322,8 +322,18 @@ func (s *TaskService) MarkTaskCompleted(ctx context.Context, taskID string, resu
 
 // MarkTaskFailed 标记任务失败
 func (s *TaskService) MarkTaskFailed(ctx context.Context, taskID string, errorCode int, errorMsg string) error {
+	return s.MarkTaskFailedWithResult(ctx, taskID, errorCode, errorMsg, nil)
+}
+
+// MarkTaskFailedWithResult 标记任务失败并附带结构化 result（如 per-param SetParameterValuesFault 详情）。
+// result 为空时等价于 MarkTaskFailed —— 不会清空已有 task.Result。
+//
+// T-0174 引入：ACS handleSOAPFault 在 SetParameterValues 失败时把每个失败 path 的
+// (parameter_name / fault_code / fault_string) 序列化到 result，下游 MML
+// ResultAggregator 据此触发 is_supported=false auto-learn。
+func (s *TaskService) MarkTaskFailedWithResult(ctx context.Context, taskID string, errorCode int, errorMsg string, result json.RawMessage) error {
 	// 更新 Redis
-	if err := s.queue.MarkTaskFailed(ctx, taskID, errorCode, errorMsg); err != nil {
+	if err := s.queue.MarkTaskFailedWithResult(ctx, taskID, errorCode, errorMsg, result); err != nil {
 		return fmt.Errorf("mark task failed in queue: %w", err)
 	}
 
@@ -346,7 +356,8 @@ func (s *TaskService) MarkTaskFailed(ctx context.Context, taskID string, errorCo
 	logger.L(ctx).Info("task failed",
 		zap.String("task_id", taskID),
 		zap.Int("error_code", errorCode),
-		zap.String("error_message", errorMsg))
+		zap.String("error_message", errorMsg),
+		zap.Int("result_bytes", len(result)))
 
 	s.notifyCompletion(ctx, task)
 

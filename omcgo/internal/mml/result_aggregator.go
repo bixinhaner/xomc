@@ -14,26 +14,35 @@ import (
 // ResultAggregator updates MML task statistics when device_tasks complete.
 // P1 扩展：当 mml_task.script_id != nil 时，把最终 status 回写到 mml_scripts 的
 // last_run_status / last_run_at 字段，供脚本列表/详情页展示"最近一次执行态"。
+//
+// T-0174 扩展：subFieldRepo 注入后，OnTaskCompleted 在收到 SetParameterValues
+// 失败且 dt.Result.param_faults[].fault_code == 9005 (AttributeIdNotFound) 时，
+// 自动把对应 standardPath 的 sub_field 标 is_supported=false —— UI 后续永久
+// 隐藏该 path，避免下一个用户继续触发同样的 9003 失败。subFieldRepo 为 nil 时
+// 跳过 auto-learn，保持向后兼容（单测 / 无 mml 依赖的场景）。
 type ResultAggregator struct {
-	taskRepo   TaskRepository
-	scriptRepo ScriptRepository
-	hub        SSEPublisher
-	logger     *zap.Logger
+	taskRepo     TaskRepository
+	scriptRepo   ScriptRepository
+	subFieldRepo SubFieldRepository
+	hub          SSEPublisher
+	logger       *zap.Logger
 }
 
-// NewResultAggregator creates a new ResultAggregator. scriptRepo 可为 nil——
-// 单测或不需要回写 mml_scripts 的场景下传 nil，跳过脚本态更新逻辑。
+// NewResultAggregator creates a new ResultAggregator. scriptRepo / subFieldRepo 可为 nil——
+// 单测或不需要回写 mml_scripts / 不需要 auto-learn 的场景下传 nil，相应逻辑跳过。
 func NewResultAggregator(
 	taskRepo TaskRepository,
 	scriptRepo ScriptRepository,
+	subFieldRepo SubFieldRepository,
 	hub SSEPublisher,
 	logger *zap.Logger,
 ) *ResultAggregator {
 	return &ResultAggregator{
-		taskRepo:   taskRepo,
-		scriptRepo: scriptRepo,
-		hub:        hub,
-		logger:     logger.Named("mml-result-aggregator"),
+		taskRepo:     taskRepo,
+		scriptRepo:   scriptRepo,
+		subFieldRepo: subFieldRepo,
+		hub:          hub,
+		logger:       logger.Named("mml-result-aggregator"),
 	}
 }
 
@@ -71,7 +80,82 @@ func (a *ResultAggregator) OnTaskCompleted(ctx context.Context, dt *task.Task) {
 	// state; a 50-device task produces 50 frames over time.
 	a.publishDeviceFrame(ctx, mmlID, dt)
 
+	// T-0174 auto-learn: SetParameterValues 失败 + dt.Result.param_faults[9005]
+	// → 把对应 sub_field 标 is_supported=false。下一次同一命令进 UI 时该 path
+	// 被过滤，避免反复触发 atomic SPV 9003 失败把同批次其它 path 一起拖死。
+	if dt.Status == task.TaskStatusFailed {
+		a.autoLearnUnsupportedPaths(ctx, dt)
+	}
+
 	a.finalizeIfComplete(ctx, mmlID)
+}
+
+// spvFaultRecord 与 ACS handler.SPVFault 形态对齐（device_tasks.result.param_faults[]）。
+type spvFaultRecord struct {
+	ParameterName string `json:"parameter_name"`
+	FaultCode     int    `json:"fault_code"`
+	FaultString   string `json:"fault_string"`
+}
+
+type spvFaultPayload struct {
+	ParamFaults []spvFaultRecord `json:"param_faults"`
+}
+
+// CWMP fault code 9005 = "Invalid parameter name"。Baicells / 部分厂商描述为
+// "AttributeIdNotFound"。该 code 才能确定"path 在 CPE 数据模型中不存在"，从而
+// 安全地 auto-mark is_supported=false；其它 code（9007 值越界、9008 只读）含义不同
+// 不能映射到不支持，跳过即可。
+const cwmpFaultInvalidParameterName = 9005
+
+// autoLearnUnsupportedPaths 解析 dt.Result.param_faults，对 code=9005 的 path
+// 调 subFieldRepo.MarkUnsupportedByStandardPath。subFieldRepo 为 nil（未注入）
+// 或 dt.Result 不是 SPV fault 形态时 silent skip。
+func (a *ResultAggregator) autoLearnUnsupportedPaths(ctx context.Context, dt *task.Task) {
+	if a.subFieldRepo == nil {
+		return
+	}
+	if dt.Method != "SetParameterValues" || len(dt.Result) == 0 {
+		return
+	}
+	var payload spvFaultPayload
+	if err := json.Unmarshal(dt.Result, &payload); err != nil {
+		// dt.Result 是 ACS 写入的 {"param_faults":[...]}；解析失败说明 ACS 没写
+		// 或写错了形态（如旧版本仍调 MarkTaskFailed 不带 result），不报错跳过。
+		return
+	}
+	if len(payload.ParamFaults) == 0 {
+		return
+	}
+	learned := 0
+	for _, f := range payload.ParamFaults {
+		if f.FaultCode != cwmpFaultInvalidParameterName || f.ParameterName == "" {
+			continue
+		}
+		affected, err := a.subFieldRepo.MarkUnsupportedByStandardPath(ctx, f.ParameterName)
+		if err != nil {
+			a.logger.Warn("auto-learn mark sub_field unsupported failed",
+				zap.String("device_sn", dt.DeviceSN),
+				zap.String("path", f.ParameterName),
+				zap.Error(err))
+			continue
+		}
+		if affected > 0 {
+			learned++
+			a.logger.Info("auto-learned unsupported path",
+				zap.String("device_sn", dt.DeviceSN),
+				zap.String("device_task_id", dt.ID),
+				zap.String("path", f.ParameterName),
+				zap.Int("fault_code", f.FaultCode),
+				zap.Int64("sub_fields_updated", affected),
+			)
+		}
+	}
+	if learned > 0 {
+		a.logger.Info("auto-learn pass done",
+			zap.String("device_task_id", dt.ID),
+			zap.Int("paths_learned", learned),
+		)
+	}
 }
 
 // publishDeviceFrame emits one SSE frame per device_task terminal state.

@@ -25,6 +25,11 @@ type TaskService interface {
 	// MarkTaskFailed marks a task as failed with error details.
 	MarkTaskFailed(ctx context.Context, taskID string, errorCode int, errorMsg string) error
 
+	// MarkTaskFailedWithResult marks a task as failed AND attaches structured result
+	// (e.g. per-parameter SetParameterValuesFault detail). result 为空时等价于
+	// MarkTaskFailed —— 调用方按需选用。T-0174 引入。
+	MarkTaskFailedWithResult(ctx context.Context, taskID string, errorCode int, errorMsg string, result json.RawMessage) error
+
 	// GetTaskByCWMPID retrieves a task by its CWMP ID.
 	GetTaskByCWMPID(ctx context.Context, cwmpID string) (*task.Task, error)
 

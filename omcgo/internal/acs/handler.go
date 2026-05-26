@@ -1083,7 +1083,26 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 		if h.tryRecoverGPVFault(r.Context(), taskItem, badPath, log) {
 			// 自愈分支已标 task completed 并入队 retry batch，继续走 PopTask 推进队列。
 		} else {
-			if markErr := h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, faultCode, combinedFaultMsg); markErr != nil {
+			// T-0174 — SetParameterValues 失败时把 per-parameter 详情提取出来，让
+			// terminal 日志能定位真正出错的 path，并把结构化 result 落到 device_tasks
+			// 让下游 MML auto-learn 把 sub_field is_supported 翻 false。
+			// 非 SPV 方法（GPV / Download / ...）spvFaults 为空，走原路径保持不变。
+			finalMsg := combinedFaultMsg
+			var resultBytes json.RawMessage
+			if taskItem.Method == "SetParameterValues" {
+				if spvFaults := extractSPVFaults(body); len(spvFaults) > 0 {
+					finalMsg = enrichFaultMsgWithSPV(combinedFaultMsg, spvFaults)
+					if rb, mErr := json.Marshal(map[string]interface{}{
+						"param_faults": spvFaults,
+					}); mErr == nil {
+						resultBytes = rb
+					} else {
+						log.Warn("marshal spv_faults for task.result", zap.Error(mErr))
+					}
+				}
+			}
+
+			if markErr := h.taskService.MarkTaskFailedWithResult(r.Context(), taskItem.ID, faultCode, finalMsg, resultBytes); markErr != nil {
 				log.Error("mark task failed on fault", zap.Error(markErr), zap.String("task_id", taskItem.ID))
 			}
 			log.Info("task marked as failed on SOAP fault",
@@ -1091,14 +1110,15 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 				zap.String("method", taskItem.Method),
 				zap.Int("fault_code", faultCode),
 				zap.String("soap_fault_code", soapFaultCode),
-				zap.String("fault_msg", faultMsg))
+				zap.String("fault_msg", faultMsg),
+				zap.Int("spv_fault_paths", len(resultBytes)))
 
 			// 同步发出对应方法的 command.*.response 事件，把 fault_code / fault_string 透传给业务订阅者。
 			// 否则像 software.HandleUploadResponse / HandleSetParamsResponseForCollect 这种按
 			// "RPC 失败 → 立即 fail 子任务"的 handler 永远收不到 SOAP Fault，sub_task 卡 Uploading
-			// 直到 reaper 兜底（半小时级延迟）。fault_msg 用 combinedFaultMsg —— 即包含外层
-			// soap:faultcode 前缀的版本，让业务层能完整呈现「[Server.Internal] RPC handler failed: ...」。
-			h.publishRPCFaultEvent(r.Context(), session.DeviceSN, taskItem, faultCode, soapFaultCode, combinedFaultMsg, log)
+			// 直到 reaper 兜底（半小时级延迟）。fault_msg 用 finalMsg —— SPV fault 时含
+			// per-path 详情，让业务层能完整呈现「[Client] Invalid arguments — path faults: ...」。
+			h.publishRPCFaultEvent(r.Context(), session.DeviceSN, taskItem, faultCode, soapFaultCode, finalMsg, log)
 		}
 	} else {
 		log.Warn("SOAP fault but no task could be associated (neither cwmp_id nor session.last_task_id matched)",
@@ -2109,7 +2129,79 @@ var (
 	faultPathKeywordRegex = regexp.MustCompile(`(?i)(?:including|parameter|name)[\s:'"\x60]+([A-Za-z_]\w*(?:\.[A-Za-z0-9_]+)+\.?)`)
 	// faultPathGenericRegex 兜底：找任何 dot-separated 标识符（>=3 段）。最长匹配作为 path。
 	faultPathGenericRegex = regexp.MustCompile(`[A-Za-z_]\w*(?:\.[A-Za-z0-9_]+){2,}\.?`)
+
+	// T-0174 — extract per-parameter SetParameterValuesFault detail blocks.
+	// CPE returns one block per offending path; outer cwmp:FaultCode is always 9003
+	// for atomic SPV failure, but the inner per-path codes carry the real cause
+	// (9005=name not found, 9007=value out of range, 9008=read-only, ...).
+	spvFaultBlockRegex = regexp.MustCompile(`(?s)<(?:[a-zA-Z][\w-]*:)?SetParameterValuesFault>(.*?)</(?:[a-zA-Z][\w-]*:)?SetParameterValuesFault>`)
+	spvFaultNameRegex  = regexp.MustCompile(`(?s)<(?:[a-zA-Z][\w-]*:)?ParameterName>([^<]*)</(?:[a-zA-Z][\w-]*:)?ParameterName>`)
 )
+
+// SPVFault 携带 SetParameterValues 失败时 CPE 返回的 per-parameter 详情。
+// outer cwmp:Fault.FaultCode 一律 9003（SPV 是原子操作，任何一个 param 出错
+// 整条 RPC 失败），真实原因在每个 <SetParameterValuesFault> 块里。
+//
+// JSON tag 与 device_tasks.result.param_faults[] 形态对齐，下游 MML
+// ResultAggregator 直接反序列化消费做 auto-learn。
+type SPVFault struct {
+	ParameterName string `json:"parameter_name"`
+	FaultCode     int    `json:"fault_code"`
+	FaultString   string `json:"fault_string"`
+}
+
+// enrichFaultMsgWithSPV 把每个 per-path fault 拼到外层 fault msg 上，让
+// device_tasks.error_message / MML 终端日志能定位真正出错的 path。
+//
+// 输入:
+//   - base: 已经合并过 [soapFaultCode] 前缀的 outer fault msg
+//     （如 "[Client] Invalid arguments"）
+//   - faults: extractSPVFaults 解出的 per-path 详情
+//
+// 输出形如:
+//
+//	"[Client] Invalid arguments — path faults: [Device.DeviceInfo.UserLabel: 9005 AttributeIdNotFound : Device.DeviceInfo.UserLabel]"
+func enrichFaultMsgWithSPV(base string, faults []SPVFault) string {
+	if len(faults) == 0 {
+		return base
+	}
+	var b strings.Builder
+	b.WriteString(base)
+	b.WriteString(" — path faults:")
+	for _, f := range faults {
+		fmt.Fprintf(&b, " [%s: %d %s]", f.ParameterName, f.FaultCode, f.FaultString)
+	}
+	return b.String()
+}
+
+// extractSPVFaults 从 SOAP Fault body 抽取所有 <SetParameterValuesFault> 详情块。
+// 非 SPV fault（如 GPV / Download 的 fault）→ 返 nil。
+func extractSPVFaults(body []byte) []SPVFault {
+	blocks := spvFaultBlockRegex.FindAllSubmatch(body, -1)
+	if len(blocks) == 0 {
+		return nil
+	}
+	out := make([]SPVFault, 0, len(blocks))
+	for _, b := range blocks {
+		inner := b[1]
+		f := SPVFault{}
+		if m := spvFaultNameRegex.FindSubmatch(inner); m != nil {
+			f.ParameterName = strings.TrimSpace(string(m[1]))
+		}
+		if m := cwmpFaultCodeRegex.FindSubmatch(inner); m != nil {
+			if n, err := strconv.Atoi(strings.TrimSpace(string(m[1]))); err == nil {
+				f.FaultCode = n
+			}
+		}
+		if m := cwmpFaultStringRegex.FindSubmatch(inner); m != nil {
+			f.FaultString = strings.TrimSpace(string(m[1]))
+		}
+		if f.ParameterName != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
 
 // detectSOAPFault 解析 CPE 返回的 SOAP Fault，分别返回四层信息：
 //
