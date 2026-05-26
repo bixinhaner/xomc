@@ -168,6 +168,7 @@ const OpsTasks           = React.lazy(() => import('@/pages/ops/TaskManagement')
 const NetworkDiagnosis   = React.lazy(() => import('@/pages/ops/NetworkDiagnosis'));
 const OpsDownloads       = React.lazy(() => import('@/pages/ops/Downloads'));
 const OpsMessageTrace    = React.lazy(() => import('@/pages/ops/MessageTrace'));
+const OpsAggregationTrigger = React.lazy(() => import('@/pages/ops/AggregationTrigger'));
 
 // T-0098-P4 Product Center (super_admin only)
 const ProductsPage       = React.lazy(() => import('@/pages/product/products'));
@@ -404,6 +405,7 @@ export const routes: RouteObject[] = [
       { path: 'ops/network-diagnosis', element: withSuspense(NetworkDiagnosis) },
       { path: 'ops/downloads',         element: withSuspense(OpsDownloads) },
       { path: 'ops/message-trace',     element: withSuspense(OpsMessageTrace) },
+      { path: 'ops/aggregation-trigger', element: withSuspense(OpsAggregationTrigger) },
 
       // T-0098-P4 Product Center (super_admin only)
       { path: 'product/products',       element: withSuperAdmin(ProductsPage) },
