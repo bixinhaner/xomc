@@ -130,6 +130,56 @@ func newPMCmd() *cobra.Command {
 	kpiCmd.Flags().String("to", "", "End time (RFC3339)")
 	kpiCmd.Flags().Int("limit", 20, "Number of results")
 
-	cmd.AddCommand(countersCmd, kpiCmd)
+	// pm aggregate - 手动触发 PM 聚合 recompute
+	aggregateCmd := &cobra.Command{
+		Use:   "aggregate",
+		Short: "Manually trigger PM aggregation recompute",
+		Long:  "POST /api/v1/pm/aggregation/recompute to enqueue a recompute job. Returns the job_id; use SQL to poll async_jobs status (no LIST API yet).",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			granularity, _ := cmd.Flags().GetString("granularity")
+			dimension, _ := cmd.Flags().GetString("dimension")
+			start, _ := cmd.Flags().GetString("start")
+			end, _ := cmd.Flags().GetString("end")
+
+			client := getClient()
+			payload := map[string]interface{}{
+				"granularity": granularity,
+				"dimension":   dimension,
+				"start":       start,
+				"end":         end,
+			}
+			resp, err := client.Post("/api/v1/pm/aggregation/recompute", payload)
+			if err != nil {
+				return err
+			}
+
+			if flagOutput == "json" {
+				printJSON(resp)
+				return nil
+			}
+
+			jobID := getString(resp, "job_id")
+			if jobID == "" {
+				jobID = getString(resp, "id")
+			}
+			if jobID == "" {
+				printJSON(resp)
+				return nil
+			}
+			fmt.Println("job_id:", jobID)
+			fmt.Println("Status query (no UI yet):")
+			fmt.Printf("  docker exec omc-docker-postgres-1 psql -U omcgo -d omcgo -c \"SELECT id, status, started_at, finished_at FROM async_jobs WHERE id='%s'\"\n", jobID)
+			return nil
+		},
+	}
+	aggregateCmd.Flags().String("granularity", "", "Granularity: hourly | daily | weekly | monthly (required)")
+	aggregateCmd.Flags().String("dimension", "device", "Dimension: device | device_group")
+	aggregateCmd.Flags().String("start", "", "Window start (RFC3339, required)")
+	aggregateCmd.Flags().String("end", "", "Window end (RFC3339, required)")
+	_ = aggregateCmd.MarkFlagRequired("granularity")
+	_ = aggregateCmd.MarkFlagRequired("start")
+	_ = aggregateCmd.MarkFlagRequired("end")
+
+	cmd.AddCommand(countersCmd, kpiCmd, aggregateCmd)
 	return cmd
 }
