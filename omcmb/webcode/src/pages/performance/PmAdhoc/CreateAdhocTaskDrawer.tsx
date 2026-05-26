@@ -8,7 +8,7 @@
  */
 
 import { useEffect } from 'react';
-import { Button, DatePicker, Drawer, Form, Input, Select, message } from 'antd';
+import { Alert, Button, DatePicker, Drawer, Form, Input, Select, Switch, message } from 'antd';
 import dayjs from 'dayjs';
 import { useCreatePmAdhoc } from '@core/hooks/api/usePmAdhoc';
 import type { AdhocMode } from '@core/types/pmAdhoc';
@@ -38,6 +38,7 @@ interface CreateForm {
   metricPaths: string; // csv
   granularities: string[];
   window: [dayjs.Dayjs, dayjs.Dayjs];
+  aggregateGroup: boolean;
 }
 
 interface Props {
@@ -60,6 +61,7 @@ export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Prop
       metricPaths: (preset?.metricPaths ?? []).join(', '),
       granularities: preset?.granularities && preset.granularities.length > 0 ? preset.granularities : ['hourly'],
       window: [dayjs().subtract(1, 'day'), dayjs()],
+      aggregateGroup: false,
     });
   }, [open, preset, form]);
 
@@ -80,6 +82,7 @@ export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Prop
       granularities: v.granularities,
       windowStart: v.window[0].toISOString(),
       windowEnd: v.window[1].toISOString(),
+      dimension: v.aggregateGroup ? 'aggregate_group' : 'device',
     });
     message.success('任务已创建，worker 将开始执行');
     onClose();
@@ -100,6 +103,18 @@ export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Prop
       }
     >
       <Form form={form} layout="vertical">
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="按设备查询 vs 聚合到组"
+          description={
+            <ul style={{ paddingLeft: 18, margin: 0 }}>
+              <li><b>按设备查询</b>（默认）：每设备保留一条结果（既有行为）</li>
+              <li><b>聚合到组</b>：所有选中设备按时间桶聚合成一条（结果 device_sn=AGGREGATED）。仅支持 counter 类指标 (sum/avg/max/min)，KPI 类 (statis_type=pct) 暂不支持</li>
+            </ul>
+          }
+        />
         <Form.Item label="任务名称" name="name" rules={[{ required: true }]}>
           <Input />
         </Form.Item>
@@ -130,6 +145,14 @@ export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Prop
         </Form.Item>
         <Form.Item label="时间窗" name="window" rules={[{ required: true }]}>
           <DatePicker.RangePicker showTime style={{ width: '100%' }} />
+        </Form.Item>
+        <Form.Item
+          label="聚合到组"
+          name="aggregateGroup"
+          valuePropName="checked"
+          tooltip="勾选：所有选中 SN 临时组成一组聚合（按时间桶 + LDN GROUP BY），结果 device_sn=AGGREGATED；不勾：每设备一条结果"
+        >
+          <Switch checkedChildren="聚合到组" unCheckedChildren="按设备查询" />
         </Form.Item>
       </Form>
     </Drawer>

@@ -3,6 +3,13 @@
  */
 
 export type AdhocMode = 'oneshot' | 'continuous';
+
+/**
+ * 聚合维度：
+ *   - 'device' 每设备保留一条结果（默认，老任务兼容）
+ *   - 'aggregate_group' N 个 SN 临时组聚合成一条（按时间桶 + LDN GROUP BY）
+ */
+export type AdhocDimension = 'device' | 'aggregate_group';
 export type AdhocStatus =
   | 'pending'
   | 'running'
@@ -21,6 +28,7 @@ export interface AdhocTask {
   granularities: string[];
   windowStart: string;
   windowEnd: string;
+  dimension: AdhocDimension;
   status: AdhocStatus;
   progress: number;
   creator: string;
@@ -37,6 +45,7 @@ export interface CreateAdhocTaskInput {
   granularities: string[];
   windowStart: string;
   windowEnd: string;
+  dimension?: AdhocDimension;
 }
 
 export interface AdhocResultRow {
@@ -79,6 +88,7 @@ export interface BackendAdhocTask {
   granularities: string[];
   window_start: string;
   window_end: string;
+  dimension?: string;
   status: string;
   progress: number;
   creator: string;
@@ -112,6 +122,7 @@ export function mapBackendAdhocTask(b: BackendAdhocTask): AdhocTask {
     granularities: b.granularities,
     windowStart: b.window_start,
     windowEnd: b.window_end,
+    dimension: (b.dimension as AdhocDimension) ?? 'device',
     status: b.status as AdhocStatus,
     progress: b.progress,
     creator: b.creator,

@@ -41,6 +41,7 @@ export const pmAdhocApi = {
       granularities: input.granularities,
       window_start: input.windowStart,
       window_end: input.windowEnd,
+      dimension: input.dimension,
     });
   },
   async cancel(id: string): Promise<void> {
@@ -65,6 +66,7 @@ const mockTasks: AdhocTask[] = [
     granularities: ['hourly'],
     windowStart: '2026-05-22T00:00:00Z',
     windowEnd: '2026-05-23T00:00:00Z',
+    dimension: 'device',
     status: 'succeeded',
     progress: 100,
     creator: 'mock-owner',
@@ -94,6 +96,7 @@ export const pmAdhocMock: typeof pmAdhocApi = {
       granularities: input.granularities,
       windowStart: input.windowStart,
       windowEnd: input.windowEnd,
+      dimension: input.dimension ?? 'device',
       status: 'pending',
       progress: 0,
       creator: 'mock-owner',
