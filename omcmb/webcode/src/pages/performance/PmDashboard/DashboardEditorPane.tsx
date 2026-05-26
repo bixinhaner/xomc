@@ -90,8 +90,12 @@ export default function DashboardEditorPane({ dashboardId }: Props) {
   const canEditForAutoSave = currentUserId === dashboardOwnerId && !dashboardIsBuiltin;
   useEffect(() => {
     if (!unsavedChanges || !canEditForAutoSave || !dashboardIdSafe || !currentLayout) return;
-    setSaveState('saving');
+    // saving 状态在 debounce 完成后才进入，避免 effect 体内 setState 触发级联渲染。
+    // debounce 期间用户可能继续操作 reset timer，预先 saving 反而误导。
+    let cancelled = false;
     const timer = setTimeout(() => {
+      if (cancelled) return;
+      setSaveState('saving');
       updateMut.mutate(
         { id: dashboardIdSafe, input: { layout: currentLayout } },
         {
@@ -107,7 +111,10 @@ export default function DashboardEditorPane({ dashboardId }: Props) {
         },
       );
     }, 600);
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [unsavedChanges, canEditForAutoSave, dashboardIdSafe, currentLayout]);
 
