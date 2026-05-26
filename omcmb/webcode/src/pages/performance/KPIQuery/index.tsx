@@ -283,6 +283,10 @@ export default function KPIQuery() {
       message.warning('请输入模板名称');
       return;
     }
+    if (saveForm.payload.timeRangePreset === 'custom' && !saveForm.customRange) {
+      message.warning('请选择自定义时间范围');
+      return;
+    }
     // 保存时回填 custom 模式的绝对时间（使用 Modal 内部的 payload + customRange，不是主表单）
     const payloadToSave: QueryTemplatePayload = {
       ...saveForm.payload,
@@ -591,6 +595,7 @@ export default function KPIQuery() {
                     setCustomRange(null);
                     setActiveTemplateId(undefined);
                     setSubmittedPayload(null);
+                    setSubmittedRange(null);
                   }}
                 >
                   重置
