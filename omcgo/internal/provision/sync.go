@@ -121,12 +121,19 @@ func (s *SyncService) StartSync(ctx context.Context, dev *model.Device, paramPat
 	return err
 }
 
-// EnqueueGPVBatches 按统一 batchSize 把 paths 拆批，每批入队一个 GetParameterValues task。
-//
-// 这是参数同步流程的"批次拆分 + 入队"原子能力，对所有同步入口统一：
+// EnqueueGPVBatches 把 paths 拆批入队 GetParameterValues task。对所有同步入口统一：
 //   - StartSync（手动 / 北向显式 path 列表）
 //   - enqueueGPVPrefixes（Path B / Inform 触发，从 paramRegistry 抽 storable 前缀）
 //   - PullConfig（HTTP /config/sync/pull/{deviceId} 北向同步）
+//
+// 批次划分（object_param_classifier 引入）：
+//   - 标量参数（无尾点）按 s.batchSize 批量打包，效率优先
+//   - 对象前缀（尾点 "."，CPE 枚举实例）每条独立成批 size=1
+//
+// 对象前缀单独成批的原因：CPE 展开对象前缀返回所有当前实例的所有参数，单个对象就可能
+// 是几十上百个参数；且对象 0 实例时 CPE 回 9005 拒绝整批。混批等同于"一个对象 fault
+// 拖垮 49 个兄弟标量参数"。事后有 ACS handler.tryRecoverGPVFault 自愈兜底（处理对象
+// 有实例但其中某参数不支持等场景），事前 size=1 是对最常见 fault 模式的预防。
 //
 // commandKey 一律用 "sync-gpv-{sn}-{i}" 前缀。该前缀同时是 ACS handler 判定
 // "本任务允许 Fault 自愈"和 Path B "允许 reconcile" 的关键标识。
@@ -136,7 +143,7 @@ func (s *SyncService) EnqueueGPVBatches(ctx context.Context, deviceSN string, pa
 	if deviceSN == "" {
 		return nil, fmt.Errorf("EnqueueGPVBatches: empty deviceSN")
 	}
-	batches := batchPaths(paramPaths, s.batchSize)
+	batches := buildGPVBatches(paramPaths, s.batchSize)
 	taskIDs := make([]string, 0, len(batches))
 	for i, batch := range batches {
 		gpvParams, err := json.Marshal(map[string]interface{}{
@@ -208,11 +215,8 @@ func (s *SyncService) HandleSyncResult(ctx context.Context, dev *model.Device,
 // enqueueGPVPrefixes 把 paramRegistry 抽出的去重前缀分批入队 GPV。供 Path B 同步使用。
 //
 // 路径形态由 basePrefix 决定（含 "{i}" 截到对象前缀，其余原样）。CPE 收到对象前缀
-// 时自动展开子树，收到叶子时返回该叶子的值。
-//
-// 批次拆分：一刀切按 s.batchSize 打包，标量 / 对象前缀混编。
-// 历史上对"对象前缀（尾点 "."）"单独成批 size=1 以预防 9005 拖垮整批；引入
-// ACS handler.tryRecoverGPVFault 后改为事后自愈（剔除坏 path 续查），不再需要事前过度防护。
+// 时自动展开子树，收到叶子时返回该叶子的值。批次拆分逻辑由 EnqueueGPVBatches 统一
+// 实现（标量合并 + 对象前缀 size=1），ACS handler.tryRecoverGPVFault 在仍发生 fault 时兜底。
 func (s *SyncService) enqueueGPVPrefixes(ctx context.Context, dev *model.Device, prefixes []string, sourceID string) error {
 	log, _ := s.discoveryRepo.GetByDeviceID(ctx, dev.ID)
 	if log != nil {
@@ -232,6 +236,24 @@ func (s *SyncService) CompleteSyncLog(ctx context.Context, deviceID uuid.UUID) e
 		return s.discoveryRepo.UpdateStatus(ctx, log.ID, DiscoveryCompleted, "")
 	}
 	return nil
+}
+
+// buildGPVBatches 把 prefixes 划分为 GPV 批次：
+//   - scalar 参数合并到 batchSize 大小的批
+//   - object 前缀（尾点 "."）每条独立成批（size=1）—— 见 object_param_classifier.go 的说明
+//
+// 输出 [scalar 批... , object 单 path 批...]。空切片返回 nil（与 batchPaths 一致）。
+func buildGPVBatches(prefixes []string, batchSize int) [][]string {
+	scalars, objects := classifyPrefixes(prefixes)
+	if batchSize <= 0 {
+		batchSize = 50
+	}
+	var batches [][]string
+	batches = append(batches, batchPaths(scalars, batchSize)...)
+	for _, p := range objects {
+		batches = append(batches, []string{p})
+	}
+	return batches
 }
 
 // batchPaths splits parameter paths into batches of the given size.
