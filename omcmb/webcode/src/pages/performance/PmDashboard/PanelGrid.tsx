@@ -23,7 +23,13 @@ import { ComparePanel } from './ComparePanel';
 
 interface Props {
   panels: Panel[];
-  editMode: boolean;
+  /**
+   * 是否允许编辑（= isOwner && !isBuiltin）。
+   * 替代旧的 editMode：去编辑模式后只要 canEdit=true，panel 操作 (⚙/🗑) 与添加按钮即常驻显示。
+   */
+  canEdit: boolean;
+  /** 内置 dashboard 标记 — 决定空状态文案分流（引导派生 vs 添加 Panel）。 */
+  isBuiltin?: boolean;
   onConfigPanel?: (panel: Panel) => void;
   onDeletePanel?: (panel: Panel) => void;
 }
@@ -38,13 +44,13 @@ const GRAN_LABEL: Record<Granularity, string> = {
 
 function PanelCard({
   panel,
-  editMode,
+  canEdit,
   onConfigPanel,
   onDeletePanel,
   span,
 }: {
   panel: Panel;
-  editMode: boolean;
+  canEdit: boolean;
   onConfigPanel?: (panel: Panel) => void;
   onDeletePanel?: (panel: Panel) => void;
   span: number;
@@ -95,7 +101,7 @@ function PanelCard({
                 onClick={handleExportExcel}
               />
             </Tooltip>
-            {editMode && (
+            {canEdit && (
               <>
                 <Button
                   size="small"
@@ -131,10 +137,22 @@ function PanelCard({
   );
 }
 
-export function PanelGrid({ panels, editMode, onConfigPanel, onDeletePanel }: Props) {
+export function PanelGrid({ panels, canEdit, isBuiltin, onConfigPanel, onDeletePanel }: Props) {
   const layout = usePmDashboardStore((s) => s.currentDashboard?.layout.panels ?? []);
 
   if (panels.length === 0) {
+    if (isBuiltin) {
+      return (
+        <Empty
+          description={
+            <Space direction="vertical" align="center" size={4}>
+              <span>系统内置 dashboard 只读</span>
+              <span style={{ color: '#999', fontSize: 12 }}>请点击右上角"派生"复制后编辑</span>
+            </Space>
+          }
+        />
+      );
+    }
     return <Empty description='还没有 panel，点上方"+ 添加 Panel"创建第一个' />;
   }
 
@@ -159,7 +177,7 @@ export function PanelGrid({ panels, editMode, onConfigPanel, onDeletePanel }: Pr
           <PanelCard
             key={p.id}
             panel={p}
-            editMode={editMode}
+            canEdit={canEdit}
             onConfigPanel={onConfigPanel}
             onDeletePanel={onDeletePanel}
             span={span}

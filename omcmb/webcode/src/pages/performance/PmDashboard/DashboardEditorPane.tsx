@@ -8,18 +8,19 @@
  * 内部委托给本组件。
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Card, Modal, Segmented, Space, Spin, Tag, message } from 'antd';
 import {
   PlusOutlined,
-  EditOutlined,
-  SaveOutlined,
   ForkOutlined,
   ShareAltOutlined,
   ThunderboltOutlined,
   PrinterOutlined,
   FileExcelOutlined,
+  CloudSyncOutlined,
+  CheckCircleOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import {
   usePmDashboardDetail,
@@ -55,9 +56,8 @@ export default function DashboardEditorPane({ dashboardId }: Props) {
   const forkMut = useForkPmDashboard();
   const currentUserId = useUserStore((s) => s.currentUser?.id);
 
-  const { currentDashboard, currentPanels, editMode, unsavedChanges } = usePmDashboardStore();
+  const { currentDashboard, currentPanels, unsavedChanges } = usePmDashboardStore();
   const loadDashboard = usePmDashboardStore((s) => s.loadDashboard);
-  const toggleEditMode = usePmDashboardStore((s) => s.toggleEditMode);
   const markClean = usePmDashboardStore((s) => s.markClean);
   const removePanel = usePmDashboardStore((s) => s.removePanel);
   const reset = usePmDashboardStore((s) => s.reset);
@@ -66,6 +66,10 @@ export default function DashboardEditorPane({ dashboardId }: Props) {
   const [drawerMode, setDrawerMode] = useState<'create' | 'edit'>('edit');
   const [shareOpen, setShareOpen] = useState(false);
   const [adhocOpen, setAdhocOpen] = useState(false);
+
+  // 自动保存状态指示器（D4）：idle / saving / saved / error
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (data?.dashboard) {
@@ -76,6 +80,42 @@ export default function DashboardEditorPane({ dashboardId }: Props) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dashboardId, data?.dashboard.id]);
+
+  // 自动保存（D3）：unsavedChanges 为 true 时 debounce 600ms 调 update，仅写 layout。
+  // 失败不 markClean，UI 显示「保存失败」，下一次 dirty 变化触发新的 debounce 自动重试。
+  const currentLayout = usePmDashboardStore((s) => s.currentDashboard?.layout);
+  const dashboardOwnerId = data?.dashboard?.ownerId;
+  const dashboardIsBuiltin = !!data?.dashboard?.isBuiltin;
+  const dashboardIdSafe = data?.dashboard?.id;
+  const canEditForAutoSave = currentUserId === dashboardOwnerId && !dashboardIsBuiltin;
+  useEffect(() => {
+    if (!unsavedChanges || !canEditForAutoSave || !dashboardIdSafe || !currentLayout) return;
+    setSaveState('saving');
+    const timer = setTimeout(() => {
+      updateMut.mutate(
+        { id: dashboardIdSafe, input: { layout: currentLayout } },
+        {
+          onSuccess: () => {
+            markClean();
+            setSaveState('saved');
+            if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+            savedTimerRef.current = setTimeout(() => setSaveState('idle'), 3000);
+          },
+          onError: () => {
+            setSaveState('error');
+          },
+        },
+      );
+    }, 600);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unsavedChanges, canEditForAutoSave, dashboardIdSafe, currentLayout]);
+
+  useEffect(() => {
+    return () => {
+      if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+    };
+  }, []);
 
   if (isLoading || !currentDashboard) {
     return <Spin tip="加载仪表盘..." />;
@@ -88,16 +128,6 @@ export default function DashboardEditorPane({ dashboardId }: Props) {
   const handleTechChange = (tech: Technology) => {
     if (!canEdit) return;
     updateMut.mutate({ id: currentDashboard.id, input: { technology: tech } });
-  };
-
-  const handleSave = async () => {
-    if (!currentDashboard) return;
-    await updateMut.mutateAsync({
-      id: currentDashboard.id,
-      input: { layout: currentDashboard.layout },
-    });
-    markClean();
-    message.success('保存成功');
   };
 
   const handleAddPanel = () => {
@@ -143,7 +173,21 @@ export default function DashboardEditorPane({ dashboardId }: Props) {
           </Tag>
           {isBuiltin && <Tag color="blue">系统内置</Tag>}
           {!isOwner && !isBuiltin && <Tag color="orange">只读（来自分享）</Tag>}
-          {unsavedChanges && <Tag color="warning">未保存</Tag>}
+          {canEdit && saveState === 'saving' && (
+            <Tag icon={<CloudSyncOutlined spin />} color="processing">
+              自动保存中...
+            </Tag>
+          )}
+          {canEdit && saveState === 'saved' && (
+            <Tag icon={<CheckCircleOutlined />} color="success">
+              已自动保存
+            </Tag>
+          )}
+          {canEdit && saveState === 'error' && (
+            <Tag icon={<WarningOutlined />} color="error">
+              保存失败
+            </Tag>
+          )}
         </Space>
       }
       extra={
@@ -155,27 +199,8 @@ export default function DashboardEditorPane({ dashboardId }: Props) {
             disabled={!canEdit || updateMut.isPending}
           />
           {canEdit && (
-            <Button
-              icon={<EditOutlined />}
-              type={editMode ? 'primary' : 'default'}
-              onClick={toggleEditMode}
-            >
-              {editMode ? '退出编辑' : '编辑'}
-            </Button>
-          )}
-          {canEdit && editMode && (
-            <Button icon={<PlusOutlined />} onClick={handleAddPanel}>
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleAddPanel}>
               添加 Panel
-            </Button>
-          )}
-          {canEdit && (
-            <Button
-              icon={<SaveOutlined />}
-              onClick={handleSave}
-              disabled={!unsavedChanges}
-              loading={updateMut.isPending}
-            >
-              保存布局
             </Button>
           )}
           {/* G7-Gap-1：从仪表盘工具栏进入自定义聚合（结果可在 /performance/pm-adhoc 查看） */}
@@ -231,7 +256,8 @@ export default function DashboardEditorPane({ dashboardId }: Props) {
 
       <PanelGrid
         panels={currentPanels}
-        editMode={editMode && canEdit}
+        canEdit={canEdit}
+        isBuiltin={isBuiltin}
         onConfigPanel={handleConfigPanel}
         onDeletePanel={handleDeletePanel}
       />
