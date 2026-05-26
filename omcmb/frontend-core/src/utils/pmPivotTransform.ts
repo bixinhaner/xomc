@@ -18,7 +18,6 @@ import type { AggregatedRow } from '../types/pmDashboard';
 export interface PivotColumn {
   key: string;        // = metricPath
   title: string;      // = metricPath
-  metricPath: string;
 }
 
 export interface PivotRow {
@@ -36,22 +35,16 @@ export interface PivotRow {
 export interface PivotResult {
   columns: PivotColumn[];
   rows: PivotRow[];
-  // 多设备 / 多 LDN 标记，组件用来决定是否折叠固定列宽
-  hasMultiDevice: boolean;
-  hasMultiLdn: boolean;
-  hasPlmn: boolean;
 }
 
 /**
  * 解析 object_ldn 字符串 → { cellId, plmn }。
  *
- * 支持格式：
+ * 支持格式（大小写不敏感）：
  *   "Cellid=111172245"                  → { cellId: "111172245" }
  *   "Cellid=111172245,PLMN=46068"       → { cellId: "111172245", plmn: "46068" }
  *   "PLMN=46068,Cellid=111172245"       → { cellId: "111172245", plmn: "46068" } (顺序无关)
  *   ""  / null / undefined              → {}
- *
- * 大小写不敏感（cellid / Cellid / CELLID / plmn / PLMN）。
  */
 export function parseObjectLdn(ldn: string | null | undefined): { cellId?: string; plmn?: string } {
   if (!ldn) return {};
@@ -62,9 +55,9 @@ export function parseObjectLdn(ldn: string | null | undefined): { cellId?: strin
     const key = kv.slice(0, idx).trim().toLowerCase();
     const value = kv.slice(idx + 1).trim();
     if (!value) return;
-    if (key === 'cellid' || key === 'cell_id' || key === 'cell') {
+    if (key === 'cellid') {
       out.cellId = value;
-    } else if (key === 'plmn' || key === 'plmnid' || key === 'plmn_id') {
+    } else if (key === 'plmn') {
       out.plmn = value;
     }
   });
@@ -76,18 +69,8 @@ export function parseObjectLdn(ldn: string | null | undefined): { cellId?: strin
  */
 export function pivotLongToWide(rows: AggregatedRow[]): PivotResult {
   if (!rows || rows.length === 0) {
-    return { columns: [], rows: [], hasMultiDevice: false, hasMultiLdn: false, hasPlmn: false };
+    return { columns: [], rows: [] };
   }
-
-  const deviceSet = new Set<string>();
-  const ldnSet = new Set<string>();
-  let hasPlmn = false;
-  rows.forEach((r) => {
-    if (r.deviceSn) deviceSet.add(r.deviceSn);
-    if (r.objectLdn) ldnSet.add(r.objectLdn);
-    const { plmn } = parseObjectLdn(r.objectLdn);
-    if (plmn) hasPlmn = true;
-  });
 
   // 收集指标列（按 metricPath 唯一）
   const columnMap = new Map<string, PivotColumn>();
@@ -96,11 +79,10 @@ export function pivotLongToWide(rows: AggregatedRow[]): PivotResult {
       columnMap.set(r.metricPath, {
         key: r.metricPath,
         title: r.metricPath,
-        metricPath: r.metricPath,
       });
     }
   });
-  const columns = Array.from(columnMap.values()).sort((a, b) => a.metricPath.localeCompare(b.metricPath));
+  const columns = Array.from(columnMap.values()).sort((a, b) => a.key.localeCompare(b.key));
 
   // 收集行（按 time + sn + ldn 唯一）
   const rowMap = new Map<string, PivotRow>();
@@ -147,8 +129,5 @@ export function pivotLongToWide(rows: AggregatedRow[]): PivotResult {
   return {
     columns,
     rows: outRows,
-    hasMultiDevice: deviceSet.size > 1,
-    hasMultiLdn: ldnSet.size > 1,
-    hasPlmn,
   };
 }
