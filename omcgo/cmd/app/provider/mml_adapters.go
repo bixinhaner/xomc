@@ -188,3 +188,34 @@ func (a *mmlDeviceLookupAdapter) GetBySerialNumber(ctx context.Context, sn strin
 	}
 	return a.devSvc.GetBySerialNumber(ctx, sn)
 }
+
+// resolveDeviceByKey 把 MML console "deviceKey"（SN 或 UUID 字符串）解析为
+// *model.Device。
+//
+// 解析顺序：
+//  1. 尝试 uuid.Parse(deviceKey) — 成功则按 UUID 路径走 DeviceRepo.GetByID
+//     （未命中再退到 SN 兜底，因 SN 字面也可能是 UUID 形态字串）
+//  2. SN 路径走 DeviceService.GetBySerialNumber — 享受 DeviceCache L1 命中
+//     （前端 ConsoleDevice 入参仅 SN，是热路径）
+//
+// 未找到 → 返回 (nil, nil)（与原 SQL "OR + LIMIT 1" 未命中等价语义）。
+// 调用方据此 silent skip 到全集 sub_field 行为。
+func resolveDeviceByKey(ctx context.Context, c *Container, deviceKey string) (*model.Device, error) {
+	if deviceKey == "" {
+		return nil, nil
+	}
+	// 1) UUID 路径
+	if id, err := uuid.Parse(deviceKey); err == nil && c.DeviceRepo != nil {
+		dev, err := c.DeviceRepo.GetByID(ctx, id)
+		if err == nil && dev != nil {
+			return dev, nil
+		}
+		// UUID 路径未命中：可能 deviceKey 字面是 UUID 但实际是 SN（极少见），
+		// 不立即失败，继续退到 SN 路径兜底。
+	}
+	// 2) SN 路径（cache-aware via DeviceService）
+	if c.DeviceService == nil {
+		return nil, fmt.Errorf("device service not wired")
+	}
+	return c.DeviceService.GetBySerialNumber(ctx, deviceKey)
+}
