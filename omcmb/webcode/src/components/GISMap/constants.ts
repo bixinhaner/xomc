@@ -175,6 +175,33 @@ export const MAP_CONFIG = {
 };
 
 /**
+ * 渐进式缩放步骤配置
+ * 模拟从国家→省份→市→区→街道的视觉效果
+ * 每个步骤的zoom级别都会被限制在瓦片服务范围内
+ */
+export interface ProgressiveZoomStep {
+  /** 目标缩放级别 */
+  zoom: number;
+  /** 动画时长 (ms) */
+  duration: number;
+  /** 步骤间极短暂停，保持流畅感 */
+  pause: number;
+}
+
+/**
+ * 渐进式缩放配置
+ * 搜索定位时使用，形成"从宏观到微观"的视觉效果
+ * 流畅节奏：总时长约 1.1 秒，几乎无停顿感
+ */
+export const PROGRESSIVE_ZOOM_STEPS: ProgressiveZoomStep[] = [
+  { zoom: 5, duration: 280, pause: 10 },   // 国家级视图（缩小显示，地图占约80%）
+  { zoom: 8, duration: 240, pause: 10 },   // 省级/大区视图
+  { zoom: 11, duration: 200, pause: 10 },  // 市级视图
+  { zoom: 14, duration: 180, pause: 10 },  // 区级视图
+  { zoom: 16, duration: 180, pause: 0 },   // 街道视图（最终定位）
+];
+
+/**
  * 动画配置
  * 根据 UI 设计图
  */
@@ -197,6 +224,17 @@ export const ANIMATION_CONFIG = {
   highlightZoom: 15,
   /** 最大放大程度（用于搜索定位） */
   maxHighlightZoom: 18,
+  /**
+   * 是否启用渐进式缩放动画
+   * 启用后，搜索定位会使用多级缩放效果（国家→省→市→区→街道）
+   * 禁用后，使用单次平滑动画
+   */
+  enableProgressiveZoom: true,
+  /**
+   * 渐进式缩放最小触发zoom差值
+   * 当前zoom与目标zoom差值小于此值时，使用单次动画（避免不必要的多级动画）
+   */
+  progressiveZoomThreshold: 3,
 };
 
 /**

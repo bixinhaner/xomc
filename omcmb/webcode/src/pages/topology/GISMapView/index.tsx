@@ -12,7 +12,8 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { Checkbox, Spin, Empty, Collapse, Input } from 'antd';
 import { SearchOutlined, PlusOutlined, MinusOutlined, CaretDownOutlined } from '@ant-design/icons';
-import GISMap, { MAP_CONFIG } from '@/components/GISMap';
+import GISMap from '@/components/GISMap';
+import { MAP_CONFIG } from '@/components/GISMap/constants';
 import type { GISMapRef } from '@/components/GISMap';
 import type { MapDevice, DeviceGroupNode, DeviceGeo } from '@core/types/map';
 import type { Domain } from '@core/types/topology';
@@ -963,7 +964,7 @@ export default function GISMapView() {
                                 alarmCount: 0,
                                 type: undefined,
                               };
-                              mapRef.current?.highlightAndFlyTo(mapDevice);
+                              mapRef.current?.highlightAndFlyToWithCard(mapDevice);
                             }}
                           >
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

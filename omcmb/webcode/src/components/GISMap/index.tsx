@@ -4,13 +4,13 @@
  * @description 基于 OpenLayers 的设备地图组件，支持聚合显示、筛选、搜索
  */
 
-import React, { useState, useEffect, useMemo, useCallback, forwardRef, useImperativeHandle } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, forwardRef, useImperativeHandle, useRef } from 'react';
 import { Spin, Alert } from 'antd';
 import { LoadingOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import { useIntl } from 'react-intl';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import type { GISMapProps, MapDevice, MapViewport, MapStats } from '@core/types/map';
-import { MAP_CONFIG } from './constants';
+import { MAP_CONFIG, ANIMATION_CONFIG } from './constants';
 import { useOLMap } from './useOLMap';
 import MapPopup from './MapPopup';
 import MapControls from './MapControls';
@@ -18,15 +18,52 @@ import MapStatsPanel from './MapStatsPanel';
 import styles from './styles.module.css';
 
 /**
+ * 高亮并显示卡片的配置选项
+ */
+interface HighlightWithCardOptions {
+  /** 是否自动关闭旧卡片，默认 true */
+  autoCloseOldCard?: boolean;
+  /**
+   * 动画策略，默认 'progressive'
+   * - 'progressive': 渐进式缩放（国家→省→市→区→街道），视觉效果最佳
+   * - 'smooth': 直接平滑动画到目标位置
+   * - 'direct': 直接跳转，无动画
+   * - 'fast': 快速单阶段动画
+   */
+  animationMode?: 'progressive' | 'smooth' | 'direct' | 'fast';
+}
+
+/**
  * GISMap 组件暴露的方法接口
  */
-export interface GISMapRef {
+interface GISMapRef {
   /** 高亮设备并飞行到指定位置 */
   highlightAndFlyTo: (device: MapDevice) => void;
+  /**
+   * 高亮设备并飞行到指定位置，同时显示该设备的卡片
+   *
+   * 使用场景：搜索定位时，用户希望看到目标设备的详细信息
+   * - 清除旧的高亮和卡片
+   * - 飞行到目标设备
+   * - 显示该设备的卡片（方便复制信息）
+   *
+   * @example
+   * mapRef.current?.highlightAndFlyToWithCard(searchResult);
+   */
+  highlightAndFlyToWithCard: (device: MapDevice, options?: HighlightWithCardOptions) => void;
   /** 飞行到指定坐标 */
-  flyTo: (lng: number, lat: number, zoom?: number) => void;
+  flyTo: (lng: number, lat: number, zoom?: number, options?: {
+    /** 是否使用渐进式缩放动画（默认根据配置决定） */
+    progressive?: boolean;
+    /** 瓦片服务最大zoom（用于限制动画范围） */
+    maxZoom?: number;
+    /** 动画完成回调 */
+    onComplete?: () => void;
+  }) => void;
   /** 获取当前视图状态 */
   getViewport: () => MapViewport | null;
+  /** 关闭当前锁定的卡片 */
+  closeClickedCard: () => void;
 }
 
 /**
@@ -49,6 +86,12 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
 }, ref) => {
   const intl = useIntl();
   const token = useThemeToken();
+
+  // 定时器 refs，用于组件卸载时清理
+  const highlightTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const highlightWithCardTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const highlightWithCardInnerTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   const [hoveredDevice, setHoveredDevice] = useState<MapDevice | null>(null);
   const [popupPosition, setPopupPosition] = useState<{ x: number; y: number } | null>(null);
   const [, setHighlightedId] = useState<string | null>(null);
@@ -133,6 +176,19 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     return () => window.removeEventListener('resize', handleResize);
   }, [updateSize]);
 
+  // 组件卸载时清理所有定时器
+  useEffect(() => {
+    return () => {
+      const timer1 = highlightTimerRef.current;
+      const timer2 = highlightWithCardTimerRef.current;
+      const timer3 = highlightWithCardInnerTimerRef.current;
+
+      if (timer1) clearTimeout(timer1);
+      if (timer2) clearTimeout(timer2);
+      if (timer3) clearTimeout(timer3);
+    };
+  }, []);
+
   // 缩放控制
   const handleZoomIn = useCallback(() => {
     const map = mapInstanceRef.current;
@@ -160,23 +216,195 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
 
   // 高亮设备（用于搜索定位）
   const highlightAndFlyTo = useCallback((device: MapDevice) => {
+    // 清除之前的定时器
+    if (highlightTimerRef.current) {
+      clearTimeout(highlightTimerRef.current);
+    }
+
     // 使用新函数：自动展开聚合并显示脉冲效果
     highlightAndSpiderfyIfNeeded(device);
     setHighlightedId(device.id);
 
     // 5秒后取消高亮（延长时间以便用户查看）
-    setTimeout(() => {
+    highlightTimerRef.current = setTimeout(() => {
       clearHighlight();
       setHighlightedId(null);
+      highlightTimerRef.current = null;
     }, 5000);
   }, [highlightAndSpiderfyIfNeeded, clearHighlight]);
+
+  /**
+   * 计算设备在地图上的屏幕像素位置
+   * @param mapRef - OpenLayers 地图实例 ref
+   * @param lng - 经度
+   * @param lat - 纬度
+   * @returns 像素坐标 {x, y} 或 null
+   */
+  const calculateDevicePixelPosition = useCallback((
+    mapRef: typeof mapInstanceRef,
+    lng: number,
+    lat: number
+  ): { x: number; y: number } | null => {
+    const map = mapRef.current;
+    if (!map) return null;
+    try {
+      const coords = [lng, lat];
+      const pixel = map.getPixelFromCoordinate(coords);
+      return pixel ? { x: pixel[0], y: pixel[1] } : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  /**
+   * 高亮设备并显示卡片（用于搜索定位）
+   *
+   * 业内最佳实践：从当前有瓦片的视图开始，平滑地缩放和平移到目标位置
+   *
+   * 执行流程：
+   * 1. 清除当前的高亮和锁定的卡片
+   * 2. 两阶段动画：
+   *    - 阶段1：缩放到安全级别（保持在瓦片覆盖范围内）
+   *    - 阶段2：平移到目标设备位置
+   * 3. 添加脉冲标记效果，视觉反馈目标位置
+   * 4. 动画完成后显示设备卡片
+   *
+   * @param device - 目标设备
+   * @param options - 配置选项
+   */
+  const highlightAndFlyToWithCard = useCallback((
+    device: MapDevice,
+    options?: HighlightWithCardOptions
+  ) => {
+    const {
+      autoCloseOldCard = true,
+      animationMode = 'progressive', // 默认使用渐进式缩放
+    } = options ?? {};
+
+    // 1. 清除当前状态
+    clearHighlight();
+    if (autoCloseOldCard) {
+      setClickedDevice(null);
+      setClickedPosition(null);
+    }
+    setHighlightedId(null);
+
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    const view = map.getView();
+    if (!view) return;
+
+    // 2. 确定安全的缩放级别（不超出瓦片覆盖范围）
+    const metadataMaxZoom = metadata?.zoom?.max ?? MAP_CONFIG.maxZoom;
+    const safeTargetZoom = Math.min(
+      ANIMATION_CONFIG.highlightZoom,
+      metadataMaxZoom
+    );
+
+    // 3. 计算动画总时长（用于延迟显示卡片）
+    let totalDuration = 0;
+
+    // 4. 根据动画模式执行定位
+    if (animationMode === 'direct') {
+      // 直接跳转模式
+      view.setCenter([device.lng, device.lat]);
+      view.setZoom(safeTargetZoom);
+      totalDuration = 50;
+    } else if (animationMode === 'fast') {
+      // 快速单阶段动画
+      view.animate({
+        center: [device.lng, device.lat],
+        zoom: safeTargetZoom,
+        duration: 500,
+      });
+      totalDuration = 600;
+    } else if (animationMode === 'smooth') {
+      // smooth 模式：直接平滑动画到目标位置
+      view.animate({
+        center: [device.lng, device.lat],
+        zoom: safeTargetZoom,
+        duration: 800,
+        easing: (t) => {
+          // easeOutCubic 缓动函数
+          return 1 - Math.pow(1 - t, 3);
+        },
+      });
+      totalDuration = 900;
+    } else {
+      // progressive 模式：渐进式缩放（国家→省→市→区→街道）
+      // 使用 flyTo 的 progressive 选项
+      flyTo(device.lng, device.lat, safeTargetZoom, {
+        progressive: true,
+        maxZoom: metadataMaxZoom,
+        onComplete: () => {
+          // 动画完成后执行高亮和显示卡片
+          executeHighlightAndCard(0);
+        },
+      });
+      // 对于 progressive 模式，不在这里执行后续逻辑
+      // 而是在 onComplete 回调中执行
+      return;
+    }
+
+    // 非 progressive 模式，延迟执行高亮和显示卡片
+    executeHighlightAndCard(totalDuration);
+
+    // 统一的高亮和显示卡片逻辑
+    function executeHighlightAndCard(delay: number) {
+      // 清除之前的定时器
+      if (highlightWithCardTimerRef.current) {
+        clearTimeout(highlightWithCardTimerRef.current);
+      }
+      if (highlightWithCardInnerTimerRef.current) {
+        clearTimeout(highlightWithCardInnerTimerRef.current);
+      }
+
+      highlightWithCardTimerRef.current = setTimeout(() => {
+        // 高亮设备（展开聚合、脉冲动画）
+        // skipFlyTo: true 避免打断渐进式动画（动画由外层的 flyTo 完成）
+        highlightAndSpiderfyIfNeeded(device, true);
+        setHighlightedId(device.id);
+
+        // 计算屏幕位置并显示卡片
+        highlightWithCardInnerTimerRef.current = setTimeout(() => {
+          const pixel = calculateDevicePixelPosition(mapInstanceRef, device.lng, device.lat);
+          if (pixel) {
+            setClickedDevice(device);
+            setClickedPosition(pixel);
+          }
+
+          // 5秒后取消高亮（卡片保持显示）
+          setTimeout(() => {
+            clearHighlight();
+            setHighlightedId(null);
+          }, 5000);
+        }, 100);
+      }, delay);
+    }
+  }, [
+    clearHighlight,
+    highlightAndSpiderfyIfNeeded,
+    calculateDevicePixelPosition,
+    mapInstanceRef,
+    metadata,
+    defaultZoom,
+  ]);
+
+  // 关闭当前锁定的卡片
+  const closeClickedCard = useCallback(() => {
+    setClickedDevice(null);
+    setClickedPosition(null);
+  }, []);
 
   // 暴露方法给父组件
   useImperativeHandle(ref, () => ({
     highlightAndFlyTo,
+    highlightAndFlyToWithCard,
     flyTo,
     getViewport,
-  }), [highlightAndFlyTo, flyTo, getViewport]);
+    closeClickedCard,
+  }), [highlightAndFlyTo, highlightAndFlyToWithCard, flyTo, getViewport, closeClickedCard]);
 
   // 计算统计数据
   const stats = useMemo<MapStats>(() => {
@@ -325,7 +553,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
 
 // 导出组件和类型
 export default GISMap;
-export type { GISMapProps, MapDevice, MapViewport, MapStats } from '@core/types/map';
+export type { GISMapProps, MapDevice, MapViewport, MapStats, GISMapRef, HighlightWithCardOptions };
 
 // 导出子组件（可选）
 export { default as MapPopup } from './MapPopup';
@@ -334,9 +562,4 @@ export { default as MapStatsPanel } from './MapStatsPanel';
 export { default as GroupTree } from './GroupTree';
 export { default as DeviceSearch } from './DeviceSearch';
 
-// 导出 Hook
-export { useOLMap } from './useOLMap';
-
-// 导出常量和工具
-export * from './constants';
-export * from './styleUtils';
+// 导出 Hook、常量和工具已在各模块中直接导出，无需从主组件重导出

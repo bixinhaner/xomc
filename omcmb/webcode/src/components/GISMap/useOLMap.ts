@@ -41,6 +41,36 @@ import { useMapConfig, type MapMetadata } from './useMapConfig';
 // 用于 spiderfy 函数内部访问
 const SPIDERFY_CONFIG_REF = SPIDERFY_CONFIG;
 
+/**
+ * Easing 函数集合
+ * 用于地图动画的缓动效果
+ */
+const Easing = {
+  /** easeOutCubic：快速启动，平滑结束 */
+  easeOutCubic: (t: number): number => 1 - Math.pow(1 - t, 3),
+
+  /**
+   * 渐进式缩放 easing：模拟从宏观到微观的自然减速
+   * - 前25%：快速启动（快速离开当前视图）
+   * - 中间35%：匀速过渡（自然平滑）
+   * - 后40%：平滑减速（精确定位，节点自然出现）
+   */
+  progressive: (t: number): number => {
+    if (t < 0.25) {
+      // 前25%：快速启动
+      return t * t * (3 - 2 * t); // smoothstep
+    } else if (t < 0.6) {
+      // 中间35%：线性过渡
+      return 0.0625 + (t - 0.25) * 1.15;
+    } else {
+      // 后40%：更长、更平缓的减速
+      const u = (t - 0.6) / 0.4;
+      // 使用 easeOutCubic 让减速更平滑
+      return 0.46 + (1 - Math.pow(1 - u, 3)) * 0.54;
+    }
+  },
+};
+
 interface UseOLMapOptions {
   /** 瓦片服务地址（离线模式） */
   tileUrl?: string;
@@ -78,7 +108,14 @@ interface UseOLMapReturn {
   /** 获取当前视图状态 */
   getViewport: () => MapViewport | null;
   /** 飞行到指定位置 */
-  flyTo: (lng: number, lat: number, zoom?: number) => void;
+  flyTo: (lng: number, lat: number, zoom?: number, options?: {
+    /** 是否使用渐进式缩放动画（默认根据配置决定） */
+    progressive?: boolean;
+    /** 瓦片服务最大zoom（用于限制动画范围） */
+    maxZoom?: number;
+    /** 动画完成回调 */
+    onComplete?: () => void;
+  }) => void;
   /** 高亮设备 */
   highlightDevice: (deviceId: string) => void;
   /** 取消高亮 */
@@ -92,7 +129,7 @@ interface UseOLMapReturn {
   /** 适配边界 */
   fitBounds: (bounds: MapBounds) => void;
   /** 高亮设备并在需要时展开聚合 */
-  highlightAndSpiderfyIfNeeded: (device: MapDevice) => void;
+  highlightAndSpiderfyIfNeeded: (device: MapDevice, skipFlyTo?: boolean) => void;
   /** 地图元数据 */
   metadata: MapMetadata | null;
   /** 元数据加载状态 */
@@ -455,17 +492,114 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     };
   }, []);
 
+  /**
+   * 渐进式飞行到目标位置
+   *
+   * 实现从宏观到微观的多级缩放效果：国家→省份→市→区→街道
+   * 所有中间步骤的zoom级别都被限制在瓦片服务覆盖范围内
+   *
+   * @param lng - 目标经度
+   * @param lat - 目标纬度
+   * @param targetZoom - 最终缩放级别
+   * @param maxZoom - 瓦片服务最大zoom（确保不超出覆盖范围）
+   * @param onComplete - 动画完成回调
+   */
+  const progressiveFlyTo = useCallback((
+    lng: number,
+    lat: number,
+    targetZoom: number,
+    maxZoom: number,
+    onComplete?: () => void
+  ) => {
+    const map = mapInstanceRef.current;
+    if (!map) {
+      onComplete?.();
+      return;
+    }
+
+    const view = map.getView();
+    const currentZoom = view.getZoom() ?? MAP_CONFIG.defaultZoom;
+
+    // 智能判断：如果zoom差值太小，使用单次动画
+    if (Math.abs(currentZoom - targetZoom) < ANIMATION_CONFIG.progressiveZoomThreshold) {
+      const animateOptions = {
+        center: fromLonLat([lng, lat]),
+        zoom: targetZoom,
+        duration: 600,
+        easing: Easing.easeOutCubic,
+      };
+
+      if (onComplete) {
+        view.animate(animateOptions, () => onComplete());
+      } else {
+        view.animate(animateOptions);
+      }
+      return;
+    }
+
+    // 渐进式缩放：使用单次长动画 + 平滑 easing 曲线
+    // 模拟从宏观到微观的自然减速效果，避免分段感
+    const targetCoord = fromLonLat([lng, lat]);
+    const zoomDiff = targetZoom - currentZoom;
+
+    // 根据缩放幅度动态调整时长，稍微慢一点
+    const totalDuration = Math.min(1400, Math.max(900, zoomDiff * 90));
+
+    const animateOptions = {
+      center: targetCoord,
+      zoom: targetZoom,
+      duration: totalDuration,
+      easing: Easing.progressive,
+    };
+
+    if (onComplete) {
+      view.animate(animateOptions, () => onComplete());
+    } else {
+      view.animate(animateOptions);
+    }
+  }, [MAP_CONFIG.defaultZoom]);
+
   // 飞行到指定位置
-  const flyTo = useCallback((lng: number, lat: number, targetZoom?: number) => {
+  const flyTo = useCallback((lng: number, lat: number, targetZoom?: number, options?: {
+    /** 是否使用渐进式缩放动画（默认根据配置决定） */
+    progressive?: boolean;
+    /** 瓦片服务最大zoom（用于限制动画范围） */
+    maxZoom?: number;
+    /** 动画完成回调 */
+    onComplete?: () => void;
+  }) => {
     if (!mapInstanceRef.current) return;
 
+    const {
+      progressive = ANIMATION_CONFIG.enableProgressiveZoom,
+      maxZoom = MAP_CONFIG.maxZoom,
+      onComplete,
+    } = options ?? {};
+
+    const finalZoom = targetZoom ?? ANIMATION_CONFIG.highlightZoom;
+
+    // 使用渐进式缩放动画
+    if (progressive) {
+      progressiveFlyTo(lng, lat, finalZoom, maxZoom, onComplete);
+      return;
+    }
+
+    // 使用单次动画（保持向后兼容）
     const view = mapInstanceRef.current.getView();
-    view.animate({
-      center: fromLonLat([lng, lat]),
-      zoom: targetZoom ?? ANIMATION_CONFIG.highlightZoom,
-      duration: ANIMATION_CONFIG.flyDuration,
-    });
-  }, []);
+    if (onComplete) {
+      view.animate({
+        center: fromLonLat([lng, lat]),
+        zoom: finalZoom,
+        duration: ANIMATION_CONFIG.flyDuration,
+      }, () => onComplete());
+    } else {
+      view.animate({
+        center: fromLonLat([lng, lat]),
+        zoom: finalZoom,
+        duration: ANIMATION_CONFIG.flyDuration,
+      });
+    }
+  }, [progressiveFlyTo]);
 
   // 取消高亮（必须在 highlightDevice 之前定义）
   const clearHighlight = useCallback(() => {
@@ -594,7 +728,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   }, []);
 
   // 高亮设备并在需要时展开聚合（用于搜索定位）
-  const highlightAndSpiderfyIfNeeded = useCallback((device: MapDevice) => {
+  const highlightAndSpiderfyIfNeeded = useCallback((device: MapDevice, skipFlyTo = false) => {
     if (!mapInstanceRef.current || !clusterSourceRef.current || !spiderfySourceRef.current) return;
 
     // 递增请求 ID，用于防止竞态条件
@@ -611,8 +745,10 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
     const targetZoom = ANIMATION_CONFIG.maxHighlightZoom || 18;
     const needsZoomChange = Math.abs(currentZoom - targetZoom) > 0.5;
 
-    // 飞行到设备位置
-    flyTo(device.lng, device.lat, targetZoom);
+    // 飞行到设备位置（如果 skipFlyTo 为 true 则跳过，避免打断渐进式动画）
+    if (!skipFlyTo) {
+      flyTo(device.lng, device.lat, targetZoom);
+    }
 
     // 使用 moveend 事件确保在地图完全稳定后执行
     // 这样可以避免时序问题：聚合计算完成、zoom 变化检测等都已完成
