@@ -1053,8 +1053,9 @@ export const mmlApi = {
   /**
    * R-8.5 GET /mml/console/command-compatibility — 该 product_class 下不兼容的命令 ID 集合。
    *
-   * 404 product_class 无匹配 / 503 service nil — axios 抛出，调用方（React Query）兜底
-   * 走 retry / fallback；hook 层把数据转 Set<string> 给 CommandTree 装饰用。
+   * T-0177 起孤儿 productClass 后端返 200 + `param_model_id` 零值 + 空 unsupported 数组
+   * （不再 404），useCommandCompatibility 的 select 把空数组转空 Set，UI 视所有命令为
+   * "已知支持"。503 service nil 仍走 axios 异常 — React Query 兜底 retry / fallback。
    */
   async getCommandCompatibility(productClass: string): Promise<CommandCompatibility> {
     const { data } = await http.get<CommandCompatibility>(
