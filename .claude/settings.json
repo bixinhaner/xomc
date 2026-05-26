@@ -258,7 +258,27 @@
       "Bash(chmod +x /tmp/final_audit.sh)",
       "Bash(/tmp/final_audit.sh)",
       "Bash(xargs -I {} sh -c 'echo \"=== {} ===\" && grep -A 5 \"-- +goose Up\" {} | grep -E \"DROP|ALTER.*DROP\"')",
-      "Bash(awk '/CREATE TABLE devices \\\\\\(/,/^\\\\\\) PARTITION/' /Users/cb/code/baicells/goomc/omcgo/migrations/000003_devices.sql)"
+      "Bash(awk '/CREATE TABLE devices \\\\\\(/,/^\\\\\\) PARTITION/' /Users/cb/code/baicells/goomc/omcgo/migrations/000003_devices.sql)",
+      "Bash(bash -n /Users/cb/code/baicells/goomc/deployments/release/build-release.sh)",
+      "Bash(rm -f /Users/cb/code/baicells/goomc/.git/index.lock && git reset HEAD -- omcmb/frontend-core/src/i18n/zh-CN/index.ts omcmb/frontend-core/src/i18n/en-US/index.ts && git diff --cached --stat)",
+      "Bash(docker system *)",
+      "Bash(pkill -f \"ms-playwright/mcp-chrome\")",
+      "Bash(echo \"---exit $?---\")",
+      "Bash(echo \"build exit $?\")",
+      "Bash(echo \"vet exit $?\")",
+      "Bash(docker run *)",
+      "Bash(echo \"build $?\")",
+      "Bash(echo \"test $?\")",
+      "mcp__playwright__browser_take_screenshot",
+      "Bash(echo \"killed: $?\")",
+      "Bash(awk '{print $4}')",
+      "Bash(bash run/scripts/start-backend.sh)",
+      "Bash(bash run/scripts/restart-all.sh)",
+      "Bash(lsof -nP -iTCP:8081 -sTCP:LISTEN)",
+      "Bash(docker stop *)",
+      "Bash(lsof -nP -iTCP:8080 -sTCP:LISTEN)",
+      "Bash(bash run/scripts/stop-all.sh --keep-db)",
+      "Bash(docker cp *)"
     ],
     "deny": [
       "Bash(git push -f)",
@@ -280,7 +300,8 @@
       "Bash(git clean -f:*)"
     ],
     "additionalDirectories": [
-      "/tmp"
+      "/tmp",
+      "/Users/cb/code/baicells/goomc/.git"
     ]
   }
 }

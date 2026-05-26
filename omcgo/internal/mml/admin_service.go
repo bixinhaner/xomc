@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+
+	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // ============================================================
@@ -36,17 +39,28 @@ type noopAuditWriter struct{}
 
 func (noopAuditWriter) Write(ctx context.Context, op, resource string, detail map[string]any) {}
 
+// CommandLister 是 admin 端列表 / 详情读取所需的最小读接口，由现有
+// PgCommandRepository 满足。保留独立接口便于 mock。
+type CommandLister interface {
+	List(ctx context.Context, filter CommandFilter) (*model.ListResponse[MMLCommand], error)
+	GetByID(ctx context.Context, id uuid.UUID) (*MMLCommand, error)
+}
+
 // AdminService 提供 mml catalog 管理的业务编排（守护 + audit + log）。
 type AdminService struct {
-	groupRepo    AdminGroupRepository
-	commandRepo  AdminCommandRepository
-	subFieldRepo SubFieldRepository
-	audit        AdminAuditWriter
-	logger       *zap.Logger
+	groupRepo         AdminGroupRepository
+	commandRepo       AdminCommandRepository
+	commandReader     CommandLister           // T-Mml-Admin 列表 / 详情读路径
+	subFieldRepo      SubFieldRepository
+	standardParamRepo StandardParamRepository // T-Mml-Admin path 下拉 / autofill 兜底
+	audit             AdminAuditWriter
+	logger            *zap.Logger
 }
 
 // NewAdminService 构造 AdminService。
 // audit 可为 nil（用 noopAuditWriter 兜底）。
+// commandReader / standardParamRepo 可为 nil —— 老调用方（仅用写路径）不必传，
+// 但 admin List/StandardParams 端点不可用。新装配点（modules.go）必须注入。
 func NewAdminService(
 	groupRepo AdminGroupRepository,
 	commandRepo AdminCommandRepository,
@@ -68,6 +82,21 @@ func NewAdminService(
 		logger:       logger.Named("mml-admin-service"),
 	}
 }
+
+// SetCommandReader 装配命令读 Repository（List / GetByID）。modules.go 启动期调用。
+// nil-safe：未装配 → 相关 List 方法返 ErrAdminReaderNotConfigured。
+func (s *AdminService) SetCommandReader(r CommandLister) {
+	s.commandReader = r
+}
+
+// SetStandardParamRepo 装配 standard_params 只读 Repository。modules.go 启动期调用。
+func (s *AdminService) SetStandardParamRepo(r StandardParamRepository) {
+	s.standardParamRepo = r
+}
+
+// ErrAdminReaderNotConfigured 在装配期未注入 commandReader / standardParamRepo 时
+// 由 List 路径返回，避免 nil pointer panic。
+var ErrAdminReaderNotConfigured = errors.New("admin reader not configured")
 
 // ============================================================
 // Group
@@ -135,6 +164,214 @@ func (s *AdminService) UpdateGroup(ctx context.Context, id uuid.UUID, req Update
 		"group_code": existing.GroupCode,
 	})
 	return existing, nil
+}
+
+// ============================================================
+// Admin List 读路径（T-Mml-Admin）
+// ============================================================
+
+// ListGroupsReq 描述 GET /admin/groups 的过滤条件。空字段 = 不过滤。
+type ListGroupsReq struct {
+	Source       string `form:"source"`        // 仅看某 source（如 'standard'）
+	ParamVersion string `form:"param_version"` // 仅看某 param_version 下分组
+	Search       string `form:"q"`             // group_code / name 模糊匹配
+}
+
+// ListGroups admin 全集 group 列表（与 console group_tree 区别详见 repo 注释）。
+func (s *AdminService) ListGroups(ctx context.Context, req ListGroupsReq) ([]CommandGroup, error) {
+	return s.groupRepo.List(ctx, GroupFilter{
+		Source:       strings.TrimSpace(req.Source),
+		ParamVersion: strings.TrimSpace(req.ParamVersion),
+		Search:       strings.TrimSpace(req.Search),
+	})
+}
+
+// ListCommandsReq 描述 GET /admin/commands 的过滤条件。
+// admin 默认看 source='standard'（catalog 维护场景），调用方可显式置空看全集。
+type ListCommandsReq struct {
+	GroupID  *uuid.UUID // 按分组过滤
+	Source   string     `form:"source"`   // 默认 'standard'；传 'all' = 不过滤
+	Category string     `form:"category"` // 命令大类（query/config/...）
+	Search   string     `form:"q"`        // command_name / command_code / description ILIKE
+	model.ListRequest
+}
+
+// ListCommands admin 视角命令列表，默认仅返 standard 来源（不含 customized）。
+func (s *AdminService) ListCommands(ctx context.Context, req ListCommandsReq) (*model.ListResponse[MMLCommand], error) {
+	if s.commandReader == nil {
+		return nil, ErrAdminReaderNotConfigured
+	}
+	filter := CommandFilter{ListRequest: req.ListRequest}
+	if req.GroupID != nil {
+		gid := *req.GroupID
+		filter.GroupID = &gid
+	}
+	// 默认 'standard'；显式 source='all' / 'any' 时不过滤（暴露给 super_admin 调试用）。
+	src := strings.TrimSpace(req.Source)
+	if src == "" {
+		src = string(SourceStandard)
+	}
+	if src != "all" && src != "any" {
+		filter.Source = &src
+	}
+	if c := strings.TrimSpace(req.Category); c != "" {
+		filter.Category = &c
+	}
+	if q := strings.TrimSpace(req.Search); q != "" {
+		filter.Search = &q
+	}
+	// 默认按 created_at desc 走 CommandFilter.SortBy 缺省（pg_repository 已兜底）。
+	return s.commandReader.List(ctx, filter)
+}
+
+// ListSubFields admin 视角 sub_field 全集（含 is_supported=false 行）。
+func (s *AdminService) ListSubFields(ctx context.Context, commandID uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
+	return s.subFieldRepo.ListAdminByCommand(ctx, commandID)
+}
+
+// ListStandardParams 路径下拉数据源（path_id 必须从下拉选 — 用户规则 #3）。
+func (s *AdminService) ListStandardParams(ctx context.Context, filter StandardParamFilter) (*model.ListResponse[StandardParamView], error) {
+	if s.standardParamRepo == nil {
+		return nil, ErrAdminReaderNotConfigured
+	}
+	return s.standardParamRepo.List(ctx, filter)
+}
+
+// GetStandardParam 单条查询；前端 autofill miss / 校验场景使用。
+func (s *AdminService) GetStandardParam(ctx context.Context, id uuid.UUID) (*StandardParamView, error) {
+	if s.standardParamRepo == nil {
+		return nil, ErrAdminReaderNotConfigured
+	}
+	return s.standardParamRepo.GetByID(ctx, id)
+}
+
+// ============================================================
+// Batch Create SubFields（按 path 自动派生默认值 — 用户规则 #4）
+// ============================================================
+
+// BatchCreateSubFieldsReq 是 POST /admin/commands/:id/sub-fields/batch 的请求体。
+// 前端选完多个 standard_params 后传 ID 列表，后端逐 path 派生默认 mml_code / label。
+type BatchCreateSubFieldsReq struct {
+	// StandardPathIDs 必填。每个 id 派生一条 sub_field（command_id 由 URL 路径参数提供）。
+	StandardPathIDs []uuid.UUID `json:"standard_path_ids" binding:"required,min=1,max=200"`
+}
+
+// BatchCreateSubFields 给指定命令一次性创建 N 条 sub_field：
+//   - 取 standard_params 行元数据 → 派生 mml_code（path 末段大写下划线）/ label（zh 用
+//     description, 兜底 en humanize）/ sort_order（追加在末尾）
+//   - 单事务批量 INSERT；任意失败回滚
+//   - 重复 path（命令下已有同 standard_path_id）—— UNIQUE 约束触发回滚（命令字典禁止重复）
+func (s *AdminService) BatchCreateSubFields(ctx context.Context, commandID uuid.UUID, req BatchCreateSubFieldsReq) ([]MMLCommandSubField, error) {
+	if s.standardParamRepo == nil {
+		return nil, ErrAdminReaderNotConfigured
+	}
+	if len(req.StandardPathIDs) == 0 {
+		return nil, fmt.Errorf("standard_path_ids: %w", errors.New("empty"))
+	}
+
+	// 取末位 sort_order（避免与已有 sub_field 冲突）—— 复用 ListAdminByCommand 一次性拿全集。
+	existing, err := s.subFieldRepo.ListAdminByCommand(ctx, commandID)
+	if err != nil {
+		return nil, fmt.Errorf("list existing sub_fields: %w", err)
+	}
+	nextOrder := 1
+	for _, e := range existing {
+		if e.SortOrder >= nextOrder {
+			nextOrder = e.SortOrder + 1
+		}
+	}
+
+	items := make([]*MMLCommandSubField, 0, len(req.StandardPathIDs))
+	for _, pid := range req.StandardPathIDs {
+		sp, err := s.standardParamRepo.GetByID(ctx, pid)
+		if err != nil {
+			return nil, fmt.Errorf("get standard_param %s: %w", pid, err)
+		}
+		mmlCode := derivePathLeafCode(sp.StandardPath)
+		labelZh := sp.Description
+		if labelZh == "" {
+			labelZh = mmlCode
+		}
+		labelEn := humanizePathLeaf(sp.StandardPath)
+		items = append(items, &MMLCommandSubField{
+			CommandID:       commandID,
+			ParamID:         sp.ID,
+			MMLCode:         mmlCode,
+			LabelI18n:       map[string]string{"zh-CN": labelZh, "en-US": labelEn},
+			DefaultSelected: true,
+			IsRequired:      false,
+			SortOrder:       nextOrder,
+		})
+		nextOrder++
+	}
+	if err := s.subFieldRepo.BatchCreate(ctx, items); err != nil {
+		return nil, fmt.Errorf("batch create sub_fields: %w", err)
+	}
+	s.audit.Write(ctx, "mml.catalog.sub_field.batch_created",
+		"command:"+commandID.String(), map[string]any{"count": len(items)})
+
+	out := make([]MMLCommandSubField, 0, len(items))
+	for _, it := range items {
+		out = append(out, *it)
+	}
+	return out, nil
+}
+
+// derivePathLeafCode 把 standard_path 末段转 UPPER_SNAKE 作为 mml_code 默认值。
+// 例：Device.DeviceInfo.UserLabel → USER_LABEL；Device.X.YZ → Y_Z（CamelCase 拆词）。
+func derivePathLeafCode(path string) string {
+	idx := strings.LastIndex(path, ".")
+	leaf := path
+	if idx >= 0 && idx+1 < len(path) {
+		leaf = path[idx+1:]
+	}
+	// 1) CamelCase → 段间空格；2) snake → 空格；3) 大写 + _ 连接
+	var b strings.Builder
+	prevIsLower := false
+	for i, ch := range leaf {
+		isUpper := ch >= 'A' && ch <= 'Z'
+		isLower := ch >= 'a' && ch <= 'z'
+		isDigit := ch >= '0' && ch <= '9'
+		if i > 0 && prevIsLower && isUpper {
+			b.WriteByte('_')
+		}
+		if ch == '_' || ch == '-' {
+			b.WriteByte('_')
+		} else if isUpper || isLower || isDigit {
+			if isLower {
+				b.WriteRune(ch - 'a' + 'A')
+			} else {
+				b.WriteRune(ch)
+			}
+		}
+		prevIsLower = isLower
+	}
+	return b.String()
+}
+
+// humanizePathLeaf 把 path 末段拆成可读英文 label：UserLabel → "User Label"。
+func humanizePathLeaf(path string) string {
+	idx := strings.LastIndex(path, ".")
+	leaf := path
+	if idx >= 0 && idx+1 < len(path) {
+		leaf = path[idx+1:]
+	}
+	var b strings.Builder
+	prevIsLower := false
+	for i, ch := range leaf {
+		isUpper := ch >= 'A' && ch <= 'Z'
+		isLower := ch >= 'a' && ch <= 'z'
+		if i > 0 && prevIsLower && isUpper {
+			b.WriteByte(' ')
+		}
+		if ch == '_' || ch == '-' {
+			b.WriteByte(' ')
+		} else {
+			b.WriteRune(ch)
+		}
+		prevIsLower = isLower
+	}
+	return b.String()
 }
 
 // DeleteGroup 删除一个 group。

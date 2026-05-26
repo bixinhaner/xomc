@@ -80,12 +80,16 @@ describe('SubFieldChecklist', () => {
     expect(toggleSubField).toHaveBeenCalledWith('uid-1', 'sf-x');
   });
 
-  it('OnReboot field shows the "需重启生效" tag (via i18n key)', () => {
+  it('every row has a unified InfoCircle entry (replaces scattered # / OnReboot tag)', () => {
+    // 用户决策 2026-05-26：每行尾部统一一个 field-info 图标，
+    // OnReboot / 多实例 / access 等细节都在 popover 里。
     const fields = [
       sf({ id: 'r', label: 'RebootField', changeApplies: 'OnReboot' }),
       sf({ id: 'n', label: 'Normal', changeApplies: 'Immediate', sortOrder: 1 }),
+      sf({ id: 'm', label: 'Multi', tr069Path: 'Device.X.{i}.Y', sortOrder: 2 }),
     ];
     render(<SubFieldChecklist statement={stmt(fields)} />);
-    expect(screen.getByText('mml.console.subField.onReboot')).toBeInTheDocument();
+    const icons = screen.getAllByLabelText('field-info');
+    expect(icons).toHaveLength(3);
   });
 });

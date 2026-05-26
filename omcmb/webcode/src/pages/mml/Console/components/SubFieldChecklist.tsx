@@ -1,28 +1,16 @@
 import { useMemo } from 'react';
 import type { CSSProperties } from 'react';
-import { Checkbox, Tag, Tooltip, Empty } from 'antd';
-import { NumberOutlined } from '@ant-design/icons';
+import { Checkbox, Tooltip, Empty } from 'antd';
 type CheckboxValueType = string | number | boolean;
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
-import type { Statement, SubFieldDef } from '@core/types/mmlConsole';
-import { useT } from '@/hooks/useT';
+import type { Statement } from '@core/types/mmlConsole';
+import SubFieldInfoPopover from './SubFieldInfoPopover';
 
 export interface SubFieldChecklistProps {
   statement: Statement;
 }
 
-/** path 含 `.{i}.` 多实例占位符时渲染的提示图标（D35）。 */
-function multiInstanceHint(tr069Path: string, tip: string) {
-  if (!tr069Path.includes('.{i}.')) return null;
-  return (
-    <Tooltip title={tip}>
-      <NumberOutlined style={{ color: '#fa8c16' }} aria-label="multi-instance" />
-    </Tooltip>
-  );
-}
-
 export default function SubFieldChecklist({ statement }: SubFieldChecklistProps) {
-  const t = useT();
   const toggleSubField = useMmlConsoleStore((s) => s.toggleSubField);
 
   const sortedFields = useMemo(
@@ -96,22 +84,36 @@ export default function SubFieldChecklist({ statement }: SubFieldChecklistProps)
                 </span>
               </Tooltip>
               <span style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                <span style={{ color: '#888', fontFamily: 'monospace', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {sf.tr069Path}
-                </span>
+                {/* path 列宽度有限（操作面板 ~600px - label 200 - checkbox/icons 占用），
+                    超长 path 必然被 ellipsis 截断。统一加 Tooltip：hover/focus 任意 path
+                    都能看到完整 monospace 路径；点击文本可复制（用户决策 2026-05-26）。
+                    placement=topLeft 让 Tooltip 不遮挡当前行下方的 description / 下一行。 */}
+                <Tooltip title={sf.tr069Path} placement="topLeft" mouseEnterDelay={0.3}>
+                  <span
+                    style={{
+                      color: '#888',
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      cursor: 'default',
+                    }}
+                  >
+                    {sf.tr069Path}
+                  </span>
+                </Tooltip>
                 {sf.description && (
                   <span style={{ color: '#bfbfbf', fontSize: 11, marginTop: 1 }}>
                     {sf.description}
                   </span>
                 )}
               </span>
-              {multiInstanceHint(sf.tr069Path, t('mml.console.subField.multiInstanceTip'))}
-              {/* 用户决策 2026-05-23：LST 只读查询，访问类型 Tag（"读写 / 只读 + TYPE"）
-                  对用户无操作意义（用户只是查值，不存在编辑动作），移除以减少视觉噪音。
-                  MOD / ADD 行的 Tag 仍保留（用户决定要不要改的 path，access 类型有意义）。 */}
-              {sf.changeApplies === 'OnReboot' && (
-                <Tag color="warning">{t('mml.console.subField.onReboot')}</Tag>
-              )}
+              {/* 用户决策 2026-05-26：行尾散落的 # 多实例图标 + OnReboot 警告 Tag +
+                  access Tooltip 收敛为单个 InfoCircle 入口。每行都有同一个图标，
+                  hover/点击展开包含 path / 类型 / 访问 / 取值范围 / 多实例 / 生效方式 /
+                  描述的完整元数据，消除"为什么这行有 # 那行没有"的视觉割裂感。 */}
+              <SubFieldInfoPopover sf={sf} />
             </div>
           );
         })}

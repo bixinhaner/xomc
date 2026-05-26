@@ -215,9 +215,14 @@ type PathTranslationWarning struct {
 }
 
 // CommandFilter specifies criteria for listing MML commands.
+//
+// admin 端列表（T-Mml-Admin）通过 GroupID / Source 过滤实现"按分组浏览 + 仅看
+// standard 来源"的视图；为空 = 不过滤，保持现有 console 用法不变。
 type CommandFilter struct {
 	Category *string
 	Search   *string
+	GroupID  *uuid.UUID
+	Source   *string // 'standard' / 'extension' / 'admin'；用于 admin 视图过滤 customized 行
 	model.ListRequest
 }
 

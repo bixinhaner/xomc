@@ -191,6 +191,15 @@ func (r *PgCommandRepository) List(ctx context.Context, filter CommandFilter) (*
 		base = base.Where(cond)
 		countBase = countBase.Where(cond)
 	}
+	// admin 视图过滤（T-Mml-Admin）：按分组浏览 + 仅看 standard / 排除 customized。
+	if filter.GroupID != nil {
+		base = base.Where(sq.Eq{"group_id": *filter.GroupID})
+		countBase = countBase.Where(sq.Eq{"group_id": *filter.GroupID})
+	}
+	if filter.Source != nil {
+		base = base.Where(sq.Eq{"source": *filter.Source})
+		countBase = countBase.Where(sq.Eq{"source": *filter.Source})
+	}
 
 	// Count total
 	countSQL, countArgs, err := countBase.ToSql()

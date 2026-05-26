@@ -1,11 +1,15 @@
-import { Drawer, Descriptions, Table, Tag, Spin, Alert, Modal, message } from 'antd';
+import { useState } from 'react';
+import { Drawer, Descriptions, Table, Tag, Spin, Alert, Modal, Button, Space, message } from 'antd';
+import { PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import {
-  useCommandSubFields,
-} from '@core/hooks/api/useMmlConsole';
-import { useDeleteSubField } from '@core/hooks/api/useMmlAdmin';
-import type { SubFieldDef, GroupTreeCommand } from '@core/types/mmlConsole';
+  useDeleteSubField,
+  useAdminSubFieldList,
+} from '@core/hooks/api/useMmlAdmin';
+import type { AdminSubFieldEnriched } from '@core/types/mmlAdmin';
+import type { GroupTreeCommand } from '@core/types/mmlConsole';
 import { useT } from '@/hooks/useT';
+import AddSubFieldsModal from './AddSubFieldsModal';
 
 export interface CommandDetailDrawerProps {
   open: boolean;
@@ -15,10 +19,12 @@ export interface CommandDetailDrawerProps {
 
 export default function CommandDetailDrawer({ open, command, onClose }: CommandDetailDrawerProps) {
   const t = useT();
-  const { data: subFields = [], isLoading, refetch } = useCommandSubFields(command?.id, 'zh-CN');
+  // T-Mml-Admin: 使用 admin 视角 list（含 is_supported=false 行），与 console 端区分
+  const { data: subFields = [], isLoading, refetch } = useAdminSubFieldList(command?.id);
   const deleteMut = useDeleteSubField();
+  const [addOpen, setAddOpen] = useState(false);
 
-  const handleDelete = (sf: SubFieldDef) => {
+  const handleDelete = (sf: AdminSubFieldEnriched) => {
     if (!command) return;
     Modal.confirm({
       title: `${t('mml.admin.catalog.common.delete')} ${sf.mmlCode}?`,
@@ -37,9 +43,15 @@ export default function CommandDetailDrawer({ open, command, onClose }: CommandD
     });
   };
 
-  const subFieldColumns: ColumnsType<SubFieldDef> = [
+  const subFieldColumns: ColumnsType<AdminSubFieldEnriched> = [
     { title: t('mml.admin.catalog.subField.mmlCode'), dataIndex: 'mmlCode', key: 'mmlCode', width: 160 },
-    { title: t('mml.admin.catalog.subField.label'), dataIndex: 'label', key: 'label', ellipsis: true },
+    {
+      title: t('mml.admin.catalog.subField.label'),
+      dataIndex: 'label',
+      key: 'label',
+      ellipsis: true,
+      render: (_, sf) => sf.labelI18n?.['zh-CN'] || sf.labelI18n?.['en-US'] || sf.label || sf.mmlCode,
+    },
     { title: 'TR-069 Path', dataIndex: 'tr069Path', key: 'tr069Path', ellipsis: true },
     {
       title: t('mml.admin.catalog.subField.defaultSelected'),
@@ -54,6 +66,17 @@ export default function CommandDetailDrawer({ open, command, onClose }: CommandD
       key: 'isRequired',
       width: 70,
       render: (v: boolean) => (v ? <Tag color="red">*</Tag> : '-'),
+    },
+    {
+      // T-Mml-Admin: admin 视角必须显示 is_supported 标记，让维护人员能识别
+      // auto-learn / 手工关闭的 path（console 视图直接过滤不展示）。
+      title: t('mml.admin.catalog.subField.supported'),
+      dataIndex: 'isSupported',
+      key: 'isSupported',
+      width: 90,
+      render: (v: boolean) =>
+        v ? <Tag color="green">{t('mml.admin.catalog.subField.supportedYes')}</Tag>
+          : <Tag color="orange">{t('mml.admin.catalog.subField.supportedNo')}</Tag>,
     },
     {
       title: t('mml.admin.catalog.subField.sortOrder'),
@@ -108,16 +131,37 @@ export default function CommandDetailDrawer({ open, command, onClose }: CommandD
             </Descriptions.Item>
           </Descriptions>
 
-          <h4>{t('mml.admin.catalog.commands.subFieldsTitle')}</h4>
+          <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }}>
+            <h4 style={{ margin: 0 }}>{t('mml.admin.catalog.commands.subFieldsTitle')}</h4>
+            <Button
+              type="primary"
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={() => setAddOpen(true)}
+              disabled={!command || command.catalogProtected}
+              title={command?.catalogProtected ? t('mml.admin.catalog.common.lockedTip') : undefined}
+            >
+              {t('mml.admin.catalog.subField.batchAddBtn')}
+            </Button>
+          </Space>
           {isLoading ? (
             <Spin />
           ) : (
-            <Table<SubFieldDef>
+            <Table<AdminSubFieldEnriched>
               rowKey="id"
               columns={subFieldColumns}
               dataSource={subFields}
               pagination={false}
               size="small"
+            />
+          )}
+          {command && (
+            <AddSubFieldsModal
+              open={addOpen}
+              commandId={command.id}
+              existingPathIds={subFields.map((sf) => sf.paramId)}
+              onClose={() => setAddOpen(false)}
+              onSuccess={() => void refetch()}
             />
           )}
         </>

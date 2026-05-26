@@ -84,4 +84,10 @@ type MMLCommandSubFieldEnriched struct {
 	// 由 cmcc_tdlte_v23.json 等 spec seed 回填；MML 控制台 path 行 tooltip / 行内提示用）。
 	// 可为空（非 cmcc-td-lte 来源的 standard_params 行 description 未维护）。
 	Description string `json:"description,omitempty"`
+
+	// IsSupported 是 mml_command_sub_fields.is_supported 列原值。
+	// console 端 ListEnrichedByCommand 已硬过滤 is_supported=true，不暴露此字段；
+	// 但 admin 端 ListAdminByCommand 必须看见已被 auto-learn 关掉的 path，让维护人员
+	// 评估"是否手工恢复" / "是否真要永久隐藏"。json tag 与列名对齐。
+	IsSupported bool `json:"is_supported"`
 }

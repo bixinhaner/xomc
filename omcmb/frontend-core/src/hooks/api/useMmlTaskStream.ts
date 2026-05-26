@@ -23,6 +23,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useUserStore } from '@core/store/userStore';
 import { useMmlConsoleTerminalStore } from '@core/store/mmlConsoleTerminalStore';
+import { parseMmlDeviceTaskResult } from '@core/utils/mmlResultParser';
+import type { ParsedMmlResult, ParsedParamValue } from '@core/utils/mmlResultParser';
 
 export type MmlTerminalLineType = 'stdout' | 'stderr' | 'info' | 'success';
 
@@ -107,6 +109,66 @@ function formatTimestamp(): string {
   return new Date().toLocaleTimeString();
 }
 
+/** 把 ParsedMmlResult 翻译为多行可读输出（每 path 独立一行 / 状态摘要一行）。
+ *
+ * 用户决策（2026-05-26）：
+ *   1) 保留整段原始 response 输出（位置在解析行之后）
+ *   2) 增加按 path 拆分的解析行，每条 path 占一行，方便对照 LST 结果
+ */
+function parsedResultToLines(
+  parsed: ParsedMmlResult,
+  ts: string,
+  frameStatus: string,
+): MmlTerminalLine[] {
+  const out: MmlTerminalLine[] = [];
+  const lineType: MmlTerminalLineType = frameStatus === 'completed' ? 'stdout' : 'stderr';
+
+  if (parsed.kind === 'gpv' && parsed.params && parsed.params.length > 0) {
+    // GPV: 每个 path 一行；值为空显示 (empty)；类型作为括号注解（如有）
+    for (const p of parsed.params) {
+      out.push({
+        type: lineType,
+        text: formatGPVParamLine(p),
+        timestamp: ts,
+      });
+    }
+    return out;
+  }
+  if (parsed.kind === 'spv') {
+    // SPV 状态：0=立即生效；1=需重启生效；其它=原值
+    const tag =
+      parsed.status === 0 ? 'applied (immediate)'
+      : parsed.status === 1 ? 'applied (requires reboot)'
+      : parsed.status === undefined ? 'no status'
+      : `status=${parsed.status}`;
+    out.push({ type: lineType, text: `  → ${tag}`, timestamp: ts });
+    return out;
+  }
+  if (parsed.kind === 'add') {
+    const inst = parsed.instanceNumber != null ? `InstanceNumber=${parsed.instanceNumber}` : 'no instance';
+    const st = parsed.status === 0 ? 'applied' : parsed.status === 1 ? 'requires reboot' : `status=${parsed.status ?? '?'}`;
+    out.push({ type: lineType, text: `  → ${inst} (${st})`, timestamp: ts });
+    return out;
+  }
+  if (parsed.kind === 'delete') {
+    const st = parsed.status === 0 ? 'deleted (immediate)' : parsed.status === 1 ? 'deleted (requires reboot)' : `status=${parsed.status ?? '?'}`;
+    out.push({ type: lineType, text: `  → ${st}`, timestamp: ts });
+    return out;
+  }
+  if (parsed.kind === 'reboot') {
+    out.push({ type: lineType, text: `  → accepted`, timestamp: ts });
+    return out;
+  }
+  return out;
+}
+
+/** 单条 GPV path/值的可读化：`  Device.X = "foo" (xsd:string)` */
+function formatGPVParamLine(p: ParsedParamValue): string {
+  const displayValue = p.value === '' ? '(empty)' : JSON.stringify(p.value);
+  const suffix = p.type ? `  (${p.type})` : '';
+  return `  ${p.name} = ${displayValue}${suffix}`;
+}
+
 function deviceFrameToLines(
   frame: MmlDeviceFramePayload,
   statusLabels?: Record<string, string>,
@@ -124,6 +186,13 @@ function deviceFrameToLines(
     out.push({ type: 'stderr', text: frame.error_message, timestamp: ts });
   }
   if (frame.result !== undefined && frame.result !== null) {
+    // 先尝试结构化解析（GPV 逐 path / SPV/ADD/DEL/Reboot 状态摘要）。
+    // 解析成功 → 插入可读行；同时**保留**原始 response body 输出，便于排查协议层细节。
+    const parsed = parseMmlDeviceTaskResult(frame.result);
+    if (parsed) {
+      out.push(...parsedResultToLines(parsed, ts, frame.status));
+    }
+
     const body =
       typeof frame.result === 'string'
         ? frame.result

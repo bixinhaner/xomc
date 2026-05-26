@@ -943,11 +943,15 @@ func initMiscModules(c *Container) error {
 	mmlSubFieldRepo := mml.NewPgSubFieldRepository(c.PgPool)
 	mmlAdminGroupRepo := mml.NewPgAdminGroupRepository(c.PgPool)
 	mmlAdminCmdRepo := mml.NewPgAdminCommandRepository(c.PgPool)
+	mmlStandardParamRepo := mml.NewPgStandardParamRepository(c.PgPool)
 	mmlAdminService := mml.NewAdminService(
 		mmlAdminGroupRepo, mmlAdminCmdRepo, mmlSubFieldRepo,
 		nil, // AuditWriter — TODO: wire internal/admin/auditlog when admin module exposes interface
 		logger,
 	)
+	// T-Mml-Admin: 注入 admin 列表 / standard_params 路径下拉所需读 Repo。
+	mmlAdminService.SetCommandReader(mmlCmdRepo)
+	mmlAdminService.SetStandardParamRepo(mmlStandardParamRepo)
 	c.miscDeps.mmlAdminHandler = mml.NewAdminHandler(mmlAdminService, mmlCmdRepo, logger)
 
 	// T-0123-P1：Console 5 端点（group-tree / sub-fields / render / parse / execute-statements）。

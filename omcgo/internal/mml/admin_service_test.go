@@ -82,6 +82,13 @@ func (m *mockGroupRepo) GetByID(ctx context.Context, id uuid.UUID) (*CommandGrou
 func (m *mockGroupRepo) CountCommandsByGroup(ctx context.Context, id uuid.UUID) (int64, error) {
 	return m.commandCountByGrp[id], nil
 }
+func (m *mockGroupRepo) List(_ context.Context, _ GroupFilter) ([]CommandGroup, error) {
+	out := make([]CommandGroup, 0, len(m.groups))
+	for _, g := range m.groups {
+		out = append(out, *g)
+	}
+	return out, nil
+}
 
 type mockSubFieldRepo struct {
 	subFields    map[uuid.UUID]*MMLCommandSubField
@@ -143,6 +150,27 @@ func (m *mockSubFieldRepo) CountByParam(ctx context.Context, paramID uuid.UUID) 
 }
 func (m *mockSubFieldRepo) MarkUnsupportedByStandardPath(_ context.Context, _ string) (int64, error) {
 	return 0, nil
+}
+func (m *mockSubFieldRepo) ListAdminByCommand(_ context.Context, cmdID uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
+	out := make([]MMLCommandSubFieldEnriched, 0)
+	for _, sf := range m.subFields {
+		if sf.CommandID == cmdID {
+			out = append(out, MMLCommandSubFieldEnriched{MMLCommandSubField: *sf, IsSupported: true})
+		}
+	}
+	return out, nil
+}
+func (m *mockSubFieldRepo) BatchCreate(_ context.Context, items []*MMLCommandSubField) error {
+	if m.subFields == nil {
+		m.subFields = map[uuid.UUID]*MMLCommandSubField{}
+	}
+	for _, sf := range items {
+		if sf.ID == uuid.Nil {
+			sf.ID = uuid.New()
+		}
+		m.subFields[sf.ID] = sf
+	}
+	return nil
 }
 
 type mockAdminCmdRepo struct {

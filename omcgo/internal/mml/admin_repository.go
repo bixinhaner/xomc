@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
@@ -61,6 +62,21 @@ type SubFieldRepository interface {
 	//   - 同 path 不被 CPE A 支持，CPE B/C 多半也不支持
 	//   - 若需 per-device-family 粒度，未来迁移到 discovered_param_mappings 设备级表(T-0175)
 	MarkUnsupportedByStandardPath(ctx context.Context, standardPath string) (int64, error)
+
+	// ListAdminByCommand 是 admin 视角的 sub_field 列表 —— 与 ListEnrichedByCommand 区别：
+	//   · admin 端要看见 is_supported=false 的 path（catalog 维护人员需要审视哪条 path 被 auto-learn 关掉）
+	//   · 不做 paramModel 过滤（admin 视角与具体设备解耦）
+	//   · JOIN standard_params 返完整元数据，便于 admin UI 一次性渲染
+	ListAdminByCommand(ctx context.Context, commandID uuid.UUID) ([]MMLCommandSubFieldEnriched, error)
+
+	// BatchCreate 在单次 SQL 中批量插入 N 条 sub_field。T-Mml-Admin"按 path 列表
+	// 自动建命令字段"链路：前端选完多条 standard_params 后传 standard_path_id 数组，
+	// 后端逐 path 派生 mml_code / label / sort_order 等默认值。
+	//
+	// 触发器复 cost：mml_command_sub_fields 上有 AFTER INSERT trigger 重算
+	// mml_commands.target_paths（每行一次）。N 条 = N 次重算，对 N <= 50 量级
+	// 可接受；如未来需要超大批量，单独 disable trigger + 单次 UPDATE。
+	BatchCreate(ctx context.Context, items []*MMLCommandSubField) error
 }
 
 // PgSubFieldRepository PostgreSQL 实现。
@@ -336,6 +352,120 @@ func (r *PgSubFieldRepository) CountByParam(ctx context.Context, paramID uuid.UU
 	return n, nil
 }
 
+// ListAdminByCommand 返回 admin 视角的 sub_field 全集（含 is_supported=false 行），
+// 不做 paramModel 过滤。与 console 用 ListEnrichedByCommand 对应，但 admin 关心
+// "字典全貌"而非"该设备真实可执行"，所以两个查询路径分开。
+func (r *PgSubFieldRepository) ListAdminByCommand(ctx context.Context, commandID uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
+	const sqlText = `
+SELECT
+    csf.id, csf.command_id, csf.standard_path_id AS param_id, csf.mml_code, csf.label_i18n,
+    csf.default_selected, csf.is_required, csf.sort_order, csf.created_at, csf.updated_at,
+    sp.standard_path                      AS tr069_path,
+    COALESCE(sp.data_type, 'string')      AS value_type,
+    COALESCE(sp.access, 'READ_ONLY')      AS access_type,
+    (sp.entry_type = 'object')            AS is_object,
+    false                                 AS supports_add,
+    false                                 AS supports_delete,
+    COALESCE(sp.change_applies, 'Immediate') AS change_applies,
+    CASE
+        WHEN sp.min_value IS NOT NULL AND sp.max_value IS NOT NULL THEN
+            jsonb_build_object(
+                'zh-CN', '[' || sp.min_value::text || ', ' || sp.max_value::text || ']',
+                'en-US', '[' || sp.min_value::text || ', ' || sp.max_value::text || ']'
+            )
+        WHEN sp.min_value IS NOT NULL THEN
+            jsonb_build_object('zh-CN', '≥ ' || sp.min_value::text, 'en-US', '≥ ' || sp.min_value::text)
+        WHEN sp.max_value IS NOT NULL THEN
+            jsonb_build_object('zh-CN', '≤ ' || sp.max_value::text, 'en-US', '≤ ' || sp.max_value::text)
+        ELSE '{}'::jsonb
+    END                                   AS constraint_text_i18n,
+    NULL::text                            AS default_value,
+    NULL::text                            AS js_regex,
+    jsonb_build_object('zh-CN', sp.standard_path, 'en-US', sp.standard_path) AS name_i18n,
+    COALESCE(sp.description, '')          AS description,
+    csf.is_supported
+FROM mml_command_sub_fields csf
+JOIN standard_params sp ON sp.id = csf.standard_path_id
+WHERE csf.command_id = $1
+ORDER BY csf.sort_order ASC, csf.mml_code ASC`
+	rows, err := r.pool.Query(ctx, sqlText, commandID)
+	if err != nil {
+		return nil, fmt.Errorf("query admin sub_fields: %w", err)
+	}
+	defer rows.Close()
+
+	var out []MMLCommandSubFieldEnriched
+	for rows.Next() {
+		e := MMLCommandSubFieldEnriched{}
+		var labelI18n, constraintI18n, paramNameI18n []byte
+		if err := rows.Scan(
+			&e.ID, &e.CommandID, &e.ParamID, &e.MMLCode, &labelI18n,
+			&e.DefaultSelected, &e.IsRequired, &e.SortOrder, &e.CreatedAt, &e.UpdatedAt,
+			&e.Tr069Path, &e.ValueType,
+			&e.AccessType, &e.IsObject, &e.SupportsAdd, &e.SupportsDelete,
+			&e.ChangeApplies, &constraintI18n,
+			&e.DefaultValue, &e.JsRegex, &paramNameI18n,
+			&e.Description, &e.IsSupported,
+		); err != nil {
+			return nil, fmt.Errorf("scan admin sub_field row: %w", err)
+		}
+		if err := unmarshalI18n(labelI18n, &e.LabelI18n); err != nil {
+			return nil, fmt.Errorf("unmarshal label_i18n: %w", err)
+		}
+		if err := unmarshalI18n(constraintI18n, &e.ConstraintTextI18n); err != nil {
+			return nil, fmt.Errorf("unmarshal constraint_text_i18n: %w", err)
+		}
+		if err := unmarshalI18n(paramNameI18n, &e.ParamNameI18n); err != nil {
+			return nil, fmt.Errorf("unmarshal name_i18n: %w", err)
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate admin sub_fields rows: %w", err)
+	}
+	return out, nil
+}
+
+// BatchCreate 批量插入 sub_field。逐条 INSERT（squirrel 在同一事务里串行执行）；
+// 触发器 trg_mml_sub_fields_target_paths AFTER INSERT 会被触发 N 次重算
+// target_paths —— 接受这点性能成本（前端单次 batch 通常 <= 30 条），换换实现简洁。
+//
+// 任何一条失败 → 事务整体回滚（pgx Begin/Rollback/Commit 语义）。
+func (r *PgSubFieldRepository) BatchCreate(ctx context.Context, items []*MMLCommandSubField) error {
+	if len(items) == 0 {
+		return nil
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin batch tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	for _, sf := range items {
+		if sf.ID == uuid.Nil {
+			sf.ID = uuid.New()
+		}
+		labelI18n, err := marshalI18n(sf.LabelI18n)
+		if err != nil {
+			return fmt.Errorf("marshal label_i18n for %s: %w", sf.MMLCode, err)
+		}
+		_, err = tx.Exec(ctx, `
+INSERT INTO mml_command_sub_fields
+    (id, command_id, standard_path_id, mml_code, label_i18n,
+     default_selected, is_required, sort_order)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			sf.ID, sf.CommandID, sf.ParamID, sf.MMLCode, labelI18n,
+			sf.DefaultSelected, sf.IsRequired, sf.SortOrder)
+		if err != nil {
+			return fmt.Errorf("insert sub_field %s: %w", sf.MMLCode, err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit batch tx: %w", err)
+	}
+	return nil
+}
+
 // MarkUnsupportedByStandardPath 把所有引用 standardPath 的 sub_field 行标为
 // is_supported=false，仅更新当前 is_supported=true 的行（已 false 的不重复
 // 触动 updated_at）。返回受影响行数。
@@ -366,13 +496,23 @@ UPDATE mml_command_sub_fields csf
 // ============================================================
 
 // AdminGroupRepository 提供 mml_command_groups 的 admin CRUD。
-// Console 端读复用 ParamRepository.ListGroups；本接口承担写路径。
+// Console 端读复用 ParamRepository.ListGroups；本接口承担写路径 + admin 全集 List。
 type AdminGroupRepository interface {
 	Create(ctx context.Context, g *CommandGroup) error
 	Update(ctx context.Context, g *CommandGroup) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	GetByID(ctx context.Context, id uuid.UUID) (*CommandGroup, error)
 	CountCommandsByGroup(ctx context.Context, groupID uuid.UUID) (int64, error)
+	// List 返回 admin 视角全集 group（不过滤 chapter:%）。
+	// console 端的 group_tree 是按 chapter 过滤的子集；admin 创建非 chapter group 后必须能在管理页看到。
+	List(ctx context.Context, filter GroupFilter) ([]CommandGroup, error)
+}
+
+// GroupFilter 描述 admin 端列表的过滤维度。空字段 = 不过滤。
+type GroupFilter struct {
+	Source       string // 'standard' / 'admin' / 'extension'；空 = 全部
+	ParamVersion string
+	Search       string // group_code / name 任一匹配
 }
 
 // PgAdminGroupRepository PostgreSQL 实现。
@@ -468,6 +608,53 @@ func (r *PgAdminGroupRepository) CountCommandsByGroup(ctx context.Context, group
 		return 0, fmt.Errorf("count commands by group: %w", err)
 	}
 	return n, nil
+}
+
+// List 返回 admin 视角全集 group（不过滤 chapter:%），按 (param_version, display_order, group_code) 排序。
+// 与 console 端 group_tree 区分：那个只取 group_code LIKE 'chapter:%'，admin 需要看到全部。
+func (r *PgAdminGroupRepository) List(ctx context.Context, filter GroupFilter) ([]CommandGroup, error) {
+	base := storage.Psql.Select(
+		"id", "group_code", "group_name_zh", "group_name_en", "param_version",
+		"display_order", "source", "catalog_protected",
+	).From("mml_command_groups")
+	if s := strings.TrimSpace(filter.Source); s != "" {
+		base = base.Where(sq.Eq{"source": s})
+	}
+	if pv := strings.TrimSpace(filter.ParamVersion); pv != "" {
+		base = base.Where(sq.Eq{"param_version": pv})
+	}
+	if sr := strings.TrimSpace(filter.Search); sr != "" {
+		like := "%" + sr + "%"
+		base = base.Where(sq.Or{
+			sq.Expr("group_code ILIKE ?", like),
+			sq.Expr("group_name_zh ILIKE ?", like),
+			sq.Expr("group_name_en ILIKE ?", like),
+		})
+	}
+	base = base.OrderBy("param_version ASC", "display_order ASC", "group_code ASC")
+
+	query, args, err := base.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list groups SQL: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list groups: %w", err)
+	}
+	defer rows.Close()
+	out := make([]CommandGroup, 0, 32)
+	for rows.Next() {
+		var g CommandGroup
+		if err := rows.Scan(&g.ID, &g.GroupCode, &g.GroupNameZh, &g.GroupNameEn,
+			&g.ParamVersion, &g.DisplayOrder, &g.Source, &g.CatalogProtected); err != nil {
+			return nil, fmt.Errorf("scan group: %w", err)
+		}
+		out = append(out, g)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate group rows: %w", err)
+	}
+	return out, nil
 }
 
 // ============================================================

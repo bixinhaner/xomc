@@ -75,6 +75,12 @@ func (f *fakeSubFieldRepo) CountByParam(_ context.Context, _ uuid.UUID) (int64, 
 func (f *fakeSubFieldRepo) MarkUnsupportedByStandardPath(_ context.Context, _ string) (int64, error) {
 	return 0, nil
 }
+func (f *fakeSubFieldRepo) ListAdminByCommand(_ context.Context, _ uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
+	return nil, nil
+}
+func (f *fakeSubFieldRepo) BatchCreate(_ context.Context, _ []*MMLCommandSubField) error {
+	return nil
+}
 
 type fakeCommandRepo struct {
 	byID    map[uuid.UUID]*MMLCommand

@@ -203,3 +203,84 @@ export function mapBackendSubField(b: BackendSubFieldAdmin): SubFieldAdmin {
     sortOrder: b.sort_order,
   };
 }
+
+// ============================================================
+// T-Mml-Admin: standard_params 下拉 + admin List 返回值
+// ============================================================
+
+/** standard_params 下拉项（GET /admin/standard-params 单条）。 */
+export interface StandardParamView {
+  id: string;
+  standardPath: string;
+  entryType: string;
+  access: string;
+  dataType: string;
+  changeApplies: string;
+  minValue?: number | null;
+  maxValue?: number | null;
+  description: string;
+}
+
+/** Admin SubField enriched 列表行（GET /admin/commands/:id/sub-fields）。
+ * 与 console SubFieldDef 类似但多 isSupported 字段，便于管理员看到被 auto-learn 关闭的行。
+ */
+export interface AdminSubFieldEnriched {
+  id: string;
+  commandId: string;
+  paramId: string;
+  mmlCode: string;
+  label: string;
+  labelI18n: I18nMap;
+  tr069Path: string;
+  valueType: string;
+  accessType: string;
+  isObject: boolean;
+  changeApplies: string;
+  constraintText: string;
+  constraintTextI18n: I18nMap;
+  description: string;
+  defaultSelected: boolean;
+  isRequired: boolean;
+  sortOrder: number;
+  /** false = catalog 维护人员手工标 / auto-learn 关掉的"不支持" path。 */
+  isSupported: boolean;
+}
+
+/** GET /admin/groups 返回的"全集" group。
+ * 与 GroupAdmin 区别：backend 直接返 group_name_zh / group_name_en 而非 display_name_i18n。
+ */
+export interface AdminGroup {
+  id: string;
+  groupCode: string;
+  groupNameZh: string;
+  groupNameEn: string;
+  paramVersion: string;
+  displayOrder: number;
+  source: string;
+  catalogProtected: boolean;
+}
+
+/** GET /admin/commands 返回的命令行（含富字段）。 */
+export interface AdminCommand {
+  id: string;
+  commandName: string;
+  commandCode: string;
+  category: string;
+  description: string;
+  rpcMethod: string;
+  operationType: MMLOperationType;
+  targetObject?: string | null;
+  targetPaths: string[];
+  groupId?: string | null;
+  commandNameI18n: I18nMap;
+  logicalCode: string;
+  logicalNameI18n: I18nMap;
+  requireConfirm: boolean;
+  source: string;
+  catalogProtected: boolean;
+}
+
+/** 批量创建 sub-fields 请求 — 用户规则 #4 的入口。 */
+export interface BatchCreateSubFieldsRequest {
+  standardPathIds: string[];
+}

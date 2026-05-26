@@ -2,6 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { Tabs, Empty, Modal, App } from 'antd';
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
 import { useExecuteStatementsStructured } from '@core/hooks/api/useMmlConsole';
+import { useExecuteMMLCommand } from '@core/hooks/api/useMML';
 import { useMmlTaskStream } from '@core/hooks/api/useMmlTaskStream';
 import { statementToStructured } from '@core/types/mmlConsole';
 import type { Statement } from '@core/types/mmlConsole';
@@ -12,7 +13,7 @@ import SubFieldChecklist from './SubFieldChecklist';
 import SubFieldInputList from './SubFieldInputList';
 import InstancePicker from './InstancePicker';
 import TerminalPanel from './TerminalPanel';
-import ParamPathExpert from './ParameterPathCommand';
+import ParamPathExpert, { type ParamPathChangePayload } from './ParameterPathCommand';
 import { ConsoleActionBar } from './ConsoleActionBar';
 import {
   InstanceArityInput,
@@ -97,6 +98,18 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
   // R-9.2：ConsoleActionBar 走结构化通道；MmlEditor 仍用旧 useExecuteStatements。
   // 切换边界：activeStatement 由 CommandTree 加载并附带 subFields → 可做 structured 转换。
   const executeMutation = useExecuteStatementsStructured();
+  // "参数路径指定" tab 走旧的 POST /api/v1/mml/execute 裸路径模式：
+  // service.go ~L735 在 command_code 为空、param_paths 非空时合成 RAW LST/MOD/ADD/RMV 命令。
+  // 与结构化通道不同 —— 无 command_id，未经 sub_field 字典校验，让用户随手输入任意
+  // TR-069 path 临时下发（适合 sub_field 未维护、catalog 外路径的探测场景）。
+  const rawPathMutation = useExecuteMMLCommand();
+
+  // ParamPathExpert 受控状态：onChange 透传，让 RightPanel 这一层能拼装 execute payload。
+  const [rawPathPayload, setRawPathPayload] = useState<ParamPathChangePayload>({
+    operationType: 'LST',
+    paramPaths: [],
+    paramValues: [],
+  });
 
   // T-0123-P4 收尾 (2026-05-22)：execute 后用 task.id 订阅 /events/stream 的
   // mml_device_frame / mml_task_status / mml_task_completed 事件，把终端输出
@@ -235,6 +248,63 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
     }
     void runExecute();
   }, [runExecute, selectedDeviceSns.length, statements, t]);
+
+  // 裸路径模式执行：构造与 ExecuteHTTPRequest (handler.go) 一致的 snake_case payload，
+  // 由 axios 拦截器跳过转换直接送后端。后端走 service.go raw param_paths 分支生成
+  // RAW {LST/MOD/ADD/RMV} 命令，fanout 后下发到目标设备。
+  const handleRawPathExecute = useCallback(async () => {
+    if (selectedDeviceSns.length === 0) {
+      message.warning(t('mml.console.execute.noDevices'));
+      return;
+    }
+    const trimmedPaths = rawPathPayload.paramPaths
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (trimmedPaths.length === 0) {
+      message.warning(t('mml.console.execute.noParamPaths'));
+      return;
+    }
+    const op = rawPathPayload.operationType.toUpperCase();
+    // MOD 必填 value（后端 service.go ~L781 否则 400）；前端先拦下避免 toast 噪声
+    if (op === 'MOD') {
+      for (let i = 0; i < trimmedPaths.length; i += 1) {
+        const v = rawPathPayload.paramValues[i];
+        if (!v || v.trim() === '') {
+          message.warning(t('mml.console.execute.modValueRequired', { path: trimmedPaths[i] }));
+          return;
+        }
+      }
+    }
+    try {
+      const task = await rawPathMutation.mutateAsync({
+        payload: {
+          device_sns: selectedDeviceSns,
+          param_paths: trimmedPaths,
+          // ADD/RMV/LST 不消费 param_values，但保持下标对齐让后端正确按 i 配对
+          param_values: trimmedPaths.map((_, i) => rawPathPayload.paramValues[i] ?? ''),
+          operation_type: op,
+          execute_type: 'immediate',
+          task_name: `${op} ${trimmedPaths[0]}${
+            selectedDeviceSns.length === 1 ? ` ${selectedDeviceSns[0]}` : ` 等${selectedDeviceSns.length}台`
+          }`,
+        },
+      });
+      setCurrentTaskId(task.id);
+      appendLine({
+        type: 'info',
+        text: t('mml.console.terminal.dispatched', {
+          taskId: task.id,
+          devices: String(selectedDeviceSns.length),
+        }),
+        timestamp: new Date().toLocaleTimeString(),
+      });
+      message.success(t('mml.console.execute.success', { taskId: task.id }));
+      onExecuted?.(task);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      message.error(t('mml.console.execute.failed', { message: msg }));
+    }
+  }, [appendLine, message, onExecuted, rawPathMutation, rawPathPayload, selectedDeviceSns, t]);
 
   // R-4：从当前 activeStatement 的 subFields 推断 instance arity；
   // > 0 时在 ActiveSubView 之前渲染 InstanceArityInput，4 个 op 都适用。
@@ -378,7 +448,24 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
           {
             key: 'paramPath',
             label: t('mml.tabs.parameterPathCommand'),
-            children: <ParamPathExpert command={null} />,
+            children: (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <ParamPathExpert
+                  command={null}
+                  onChange={setRawPathPayload}
+                />
+                <ConsoleActionBar
+                  operationType={rawPathPayload.operationType as Statement['operationType']}
+                  deviceCount={selectedDeviceSns.length}
+                  disabled={
+                    selectedDeviceSns.length === 0 ||
+                    rawPathPayload.paramPaths.length === 0
+                  }
+                  loading={rawPathMutation.isPending}
+                  onExecute={handleRawPathExecute}
+                />
+              </div>
+            ),
           },
         ]}
       />
