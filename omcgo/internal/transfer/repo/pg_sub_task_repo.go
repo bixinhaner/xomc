@@ -29,6 +29,16 @@ var subTaskColumns = []string{
 
 var _ SubTaskRepo = (*PgSubTaskRepo)(nil)
 
+// nullableStr 把空字符串映射为 SQL NULL，避免占位 sub_task 把空 command_key 当
+// 字面值写入。command_key 列允许 NULL（migration 没加 NOT NULL），保持 NULL 语义
+// 让"行没装 CommandKey"和"装了空串"可区分。
+func nullableStr(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 // PgSubTaskRepo 是 SubTaskRepo 接口的 PostgreSQL 实现。
 // 持有两张物理表名：subTaskTable（本表）+ mainTable（List 的 JOIN 目标 / FailStale 关联用）。
 type PgSubTaskRepo struct {
@@ -101,11 +111,15 @@ func scanSubTask(row pgx.Row) (*software.UpgradeSubTask, error) {
 }
 
 func (r *PgSubTaskRepo) Create(ctx context.Context, task *software.UpgradeSubTask) error {
+	// command_key 必须落库：占位 sub_task 在 CreatePlaceholderTrackingTask 阶段就把
+	// CommandKey 算好（CONFIG_RESTORE_<id8>_<sn> / LICENSE_UPGRADE_*），TC 回流时
+	// handleTCBody → GetByCommandKey 全表 fan-out 反查 sub_task。早期实现漏了这列，
+	// DB 行 command_key=NULL → 永远 NotFound → 任务超时（实测 17:54 那次 CONFIG_RESTORE）。
 	builder := storage.Psql.Insert(r.subTaskTable).
 		Columns("task_id", "device_id", "firmware_id", "status", "max_retries",
-			"device_sn", "ori_version", "dest_version").
+			"device_sn", "ori_version", "dest_version", "command_key").
 		Values(task.TaskID, task.DeviceID, task.FirmwareID, task.Status, task.MaxRetries,
-			task.DeviceSN, task.OriVersion, task.DestVersion).
+			task.DeviceSN, task.OriVersion, task.DestVersion, nullableStr(task.CommandKey)).
 		Suffix("RETURNING " + joinColumns(subTaskColumns))
 
 	query, args, err := builder.ToSql()
@@ -337,13 +351,14 @@ func (r *PgSubTaskRepo) BatchCreate(ctx context.Context, tasks []*software.Upgra
 	if len(tasks) == 0 {
 		return nil
 	}
+	// 同 Create 注释：command_key 必须包含进 INSERT，否则 TC 回流命中失败。
 	builder := storage.Psql.Insert(r.subTaskTable).
 		Columns("task_id", "device_id", "firmware_id", "status", "max_retries",
-			"device_sn", "ori_version", "dest_version")
+			"device_sn", "ori_version", "dest_version", "command_key")
 	for _, t := range tasks {
 		builder = builder.Values(
 			t.TaskID, t.DeviceID, t.FirmwareID, t.Status, t.MaxRetries,
-			t.DeviceSN, t.OriVersion, t.DestVersion,
+			t.DeviceSN, t.OriVersion, t.DestVersion, nullableStr(t.CommandKey),
 		)
 	}
 	builder = builder.Suffix("RETURNING " + joinColumns(subTaskColumns))

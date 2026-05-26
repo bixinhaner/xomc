@@ -1949,5 +1949,105 @@ def main():
         cpe.run(once=args.once)
 
 
+# ============================================================================
+# F05 MR 直传模式（与完整 TR-069 会话解耦）
+# ----------------------------------------------------------------------------
+# 用途：E2E 验证 F05 MR 测量任务功能。OMC 开启 MR 任务后会下发 SPV，
+# 设备应按 UploadPeriod 周期 HTTP POST MR XML 到
+# `http://{OMC_HOST}/smallcell/FileUploadService?fileType=MR&cellCode=...&filename=...`
+# 这个函数模拟那个上传行为，但不跑完整 TR-069 会话，让 E2E 测试更快、更可控。
+#
+# 用法（独立 entrypoint）：
+#   python3 scripts/cpe_simulator.py --mr-direct-upload \
+#       --omc-base-url http://localhost:8088 \
+#       --cell-code CELL001 \
+#       --sn SN001 \
+#       --upload-period 15 \   # 间隔分钟数，1 表示每分钟一次
+#       --count 3              # 总共上传几次（0=无限循环到 Ctrl-C）
+# ============================================================================
+
+def _build_sample_mr_xml(cell_code, mr_type="MRS"):
+    """生成一份最小可解析的 MR XML（结构对齐 MR_Feature_Analysis.md §9）。"""
+    import datetime as _dt
+    now = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    return f'''<?xml version="1.0" encoding="UTF-8"?>
+<mfm>
+  <fileHeader startTime="{now}" endTime="{now}" period="900"/>
+  <eNB>
+    <measurement>
+      <smr>MR.LteScRSRP MR.DegreesLatitude MR.DegreesLongitude MR.LteScPCI</smr>
+      <object MmeUeS1apId="12345" TimeStamp="{now}">
+        <v>60 NIL NIL 101</v>
+      </object>
+    </measurement>
+  </eNB>
+</mfm>'''
+
+
+def _build_sample_mr_filename(cell_code, sn, mr_type="MRS"):
+    """按文档 §8 格式生成文件名：FDD-baicells-MRS-{IP}-{CellSN}-{SN}-{datetime}.xml"""
+    import datetime as _dt
+    ts = _dt.datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    return f"FDD-baicells-{mr_type}-127.0.0.1-{cell_code}-{sn}-{ts}.xml"
+
+
+def run_mr_direct_upload(omc_base_url, cell_code, sn, upload_period_minutes, count):
+    """循环上传 MR XML，用于 F05 E2E 验证。"""
+    import time as _time
+    import urllib.request as _ur
+    import urllib.parse as _up
+
+    interval_sec = max(upload_period_minutes * 60, 5)  # 测试时允许 5s 起步
+    base = omc_base_url.rstrip("/")
+    sent = 0
+    print(f"[mr-direct-upload] target={base}/smallcell/FileUploadService cell={cell_code} sn={sn} interval={interval_sec}s count={count or '∞'}")
+
+    try:
+        while count == 0 or sent < count:
+            filename = _build_sample_mr_filename(cell_code, sn)
+            body = _build_sample_mr_xml(cell_code).encode("utf-8")
+            url = (
+                f"{base}/smallcell/FileUploadService"
+                f"?fileType=MR&cellCode={_up.quote(cell_code)}"
+                f"&sn={_up.quote(sn)}&filename={_up.quote(filename)}"
+            )
+            req = _ur.Request(url, data=body, method="POST",
+                              headers={"Content-Type": "application/xml"})
+            try:
+                resp = _ur.urlopen(req, timeout=10)
+                status = resp.getcode()
+                print(f"[mr-direct-upload] #{sent + 1} POST {status} {filename}")
+            except Exception as e:
+                print(f"[mr-direct-upload] #{sent + 1} FAILED: {e}")
+            sent += 1
+            if count != 0 and sent >= count:
+                break
+            _time.sleep(interval_sec)
+    except KeyboardInterrupt:
+        print(f"[mr-direct-upload] interrupted after {sent} uploads")
+
+
+def _mr_direct_upload_entrypoint(argv=None):
+    p = argparse.ArgumentParser(description="F05 MR 直传模式（E2E 验证用）")
+    p.add_argument("--mr-direct-upload", action="store_true", required=True,
+                   help="启用 MR 直传模式")
+    p.add_argument("--omc-base-url", default="http://localhost:8088",
+                   help="OMC 主地址（不含 /smallcell/FileUploadService）")
+    p.add_argument("--cell-code", required=True, help="目标 cell code")
+    p.add_argument("--sn", required=True, help="设备 SN")
+    p.add_argument("--upload-period", type=int, default=15,
+                   help="上传间隔（分钟）；测试时可填 1 加快验证")
+    p.add_argument("--count", type=int, default=3,
+                   help="上传次数；0=无限循环到 Ctrl-C")
+    args = p.parse_args(argv)
+    run_mr_direct_upload(args.omc_base_url, args.cell_code, args.sn,
+                         args.upload_period, args.count)
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    # 子命令优先：sys.argv 含 --mr-direct-upload → 走独立 entrypoint
+    if "--mr-direct-upload" in sys.argv:
+        _mr_direct_upload_entrypoint()
+    else:
+        main()

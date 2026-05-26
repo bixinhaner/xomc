@@ -39,6 +39,7 @@ type MRRecordEntry struct {
 // MRFileFilter defines query parameters for MR file retrieval.
 type MRFileFilter struct {
 	DeviceID  *uuid.UUID
+	DeviceSN  *string // 给 File Management → MR Tab 的 per-device 抽屉用
 	MRType    *string
 	StartTime *time.Time
 	EndTime   *time.Time
@@ -56,6 +57,21 @@ type MRRecordFilter struct {
 	model.ListRequest
 }
 
+// MRFileDeviceAggregate 是某设备的 MR 文件聚合视图（mr_files GROUP BY device_sn）。
+// 给 File Management 的"按设备列出"列表用：每行 1 个设备，含起止时间 + 文件数。
+type MRFileDeviceAggregate struct {
+	DeviceSN         string    `db:"device_sn"          json:"device_sn"`
+	FirstCollectTime time.Time `db:"first_collect_time" json:"first_collect_time"`
+	LastCollectTime  time.Time `db:"last_collect_time"  json:"last_collect_time"`
+	FileCount        int64     `db:"file_count"         json:"file_count"`
+}
+
+// MRFileDeviceFilter 给 ListFileDeviceAggregates 用的过滤参数。
+type MRFileDeviceFilter struct {
+	Keyword *string // 按 device_sn ILIKE
+	model.ListRequest
+}
+
 // MRStore defines the interface for MR data persistence.
 type MRStore interface {
 	SaveFile(ctx context.Context, file *MRFileInfo) error
@@ -64,4 +80,13 @@ type MRStore interface {
 	ListFiles(ctx context.Context, filter MRFileFilter) (*model.ListResponse[MRFileInfo], error)
 	GetFileByID(ctx context.Context, fileID uuid.UUID) (*MRFileInfo, error)
 	QueryRecords(ctx context.Context, filter MRRecordFilter) (*model.ListResponse[MRRecordEntry], error)
+
+	// DeleteFilesBefore 删除 collect_time < cutoff 的 mr_files 行。
+	// 由 internal/mr/task/cleaner.go 在 MinIO 清理后调用，保持两端一致。
+	// 返回删除行数。
+	DeleteFilesBefore(ctx context.Context, cutoff time.Time) (int64, error)
+
+	// ListFileDeviceAggregates 按 device_sn 聚合 mr_files，返回每台设备的
+	// 起止 collect_time + 文件数。给 File Management → MR Tab 主列表用。
+	ListFileDeviceAggregates(ctx context.Context, filter MRFileDeviceFilter) (*model.ListResponse[MRFileDeviceAggregate], error)
 }

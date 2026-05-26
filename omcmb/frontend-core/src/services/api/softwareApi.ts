@@ -383,10 +383,27 @@ export const softwareApi = {
     const response = await http.get(`/firmware/${id}/download`, {
       responseType: 'blob',
     });
-    const url = window.URL.createObjectURL(new Blob([response.data as BlobPart]));
+    // 1) 优先从 Content-Disposition 拿文件名（与 mrApi.downloadFile 同款）。
+    //    后端 software.handler.go DownloadFirmware 已设 `attachment; filename="..."`,
+    //    解析失败再用调用方传入的 fileName 兜底。
+    const disposition = response.headers['content-disposition'] as string | undefined;
+    let resolved = fileName;
+    if (disposition) {
+      const m = /filename\*?=(?:UTF-8''|"?)([^";]+)"?/i.exec(disposition);
+      if (m && m[1]) resolved = decodeURIComponent(m[1].trim());
+    }
+    if (!resolved) resolved = `firmware_${id}`;
+    // 2) Blob 必须显式带 MIME type。原 `new Blob([response.data as BlobPart])` 没传
+    //    type → 新 Blob type="" → Chrome 见 blob URL 无 MIME 时按 text/html 推断 →
+    //    给 link.download 自动追加 .html（实测：testUpgrade.IMG → testUpgrade.IMG.html）。
+    //    用 application/octet-stream 让浏览器原样保存。
+    const blob = new Blob([response.data as BlobPart], {
+      type: 'application/octet-stream',
+    });
+    const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = fileName || `firmware_${id}`;
+    link.download = resolved;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

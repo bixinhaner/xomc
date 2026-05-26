@@ -152,7 +152,6 @@ export const componentRegistry: Record<string, ComponentType> = {
   'mr/DeviceMapping': lazy(() => import('@/pages/mr/DeviceMapping')),
   'mr/Variables': lazy(() => import('@/pages/mr/Variables')),
   'mr/Reports': lazy(() => import('@/pages/mr/Reports')),
-  'mr/Tasks': lazy(() => import('@/pages/mr/Tasks')),
   'mr/Files': lazy(() => import('@/pages/mr/Files')),
 
   // License Management

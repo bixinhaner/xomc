@@ -399,7 +399,15 @@ func (s *SoftwareService) CreatePlaceholderTrackingTask(
 	// 与立即派发的 in_progress。新增 scheduled 模式遵循"pending + create_status=timing"
 	// 与其他业务（BatchUpgrade/BatchCollect/RollbackDevices）一致，给 scheduler 抢占 hook。
 	initialStatus := TaskInProgress
-	subStatus := UpgradeDownloading
+	// CONFIG_RESTORE / LICENSE_UPGRADE 这类 placeholder 任务的派发链路是：
+	//   UFTE → device_tasks 队列 → ACS 同步发 Download SOAP → 设备秒回 DownloadResponse
+	//   → 设备拉文件 + 应用 + 重启 → 回 TransferComplete（整体可达 30 分钟级）
+	// 没有 executor 在中间推进状态，HandleDownloadResponse 只打日志不写库。所以语义
+	// 上 sub_task 从创建那一刻起就是"已派发，等 TC"——对应 UpgradeUploading（reaper
+	// 走 TransferComplete 30min 窗口）。早期实现用 UpgradeDownloading（reaper 走
+	// RPCResponse 5min 窗口）会在 TC 到来前就把任务标 failed → handleTCBody 见到
+	// 非 in-flight 状态后静默 return → "Task timeout: no TransferComplete" 假阴性。
+	subStatus := UpgradeUploading
 	switch mode {
 	case scheduleModeSuspended:
 		initialStatus = TaskSuspended

@@ -17,6 +17,7 @@ import (
 	"github.com/omcgo/omcgo/internal/core/middleware"
 	"github.com/omcgo/omcgo/internal/device"
 	"github.com/omcgo/omcgo/internal/mr"
+	mrtask "github.com/omcgo/omcgo/internal/mr/task"
 	"github.com/omcgo/omcgo/internal/pm"
 	"github.com/omcgo/omcgo/internal/provision"
 	"github.com/omcgo/omcgo/internal/quicksettings"
@@ -165,6 +166,14 @@ func Setup(r *gin.Engine, c *Container) error {
 		Name:    "alarmdef",
 		Depends: []string{"dictload"},
 		Init:    func() error { return initAlarmDefModule(c) },
+	})
+	// F05 MR Task management (PRD docs/project/prd/F05-mr-task-management.md)
+	// 依赖：mr（mrStore 给 cleaner 用）、paramregistry + productregistry（dispatcher 翻译）、
+	//      device、task、misc（CompletionRouter）
+	graph.Add(components.ModuleInitializer{
+		Name:    "mrtask",
+		Depends: []string{"mr", "paramregistry", "productregistry", "device", "task", "misc"},
+		Init:    func() error { return initMRTaskModule(c) },
 	})
 
 	totalStart := time.Now()
@@ -456,6 +465,13 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// ----- MR routes → resource "pm" -----
 	mrHandler := mr.NewHandler(md.mrStore, md.mrIndRepo, md.mrMapRepo, c.MinIO, c.Cfg.MinIO.Buckets.MRFiles, c.Logger)
 	mrHandler.RegisterRoutes(permGroup("pm"))
+
+	// ----- MR Task management (F05 测量任务) → resource "pm" -----
+	// 复用 initMRTaskModule 已构造的 repo（dispatcher / scheduler / heartbeat / cleaner 共享）。
+	if md.mrTaskRepo != nil {
+		mrTaskSvc := mrtask.NewService(md.mrTaskRepo, c.Logger)
+		mrtask.NewHandler(mrTaskSvc, c.Logger).RegisterRoutes(permGroup("pm"))
+	}
 
 	// ----- Software routes → resource "firmware" -----
 	md.softwareHandler.RegisterRoutes(permGroup("firmware"))

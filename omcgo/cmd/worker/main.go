@@ -269,13 +269,21 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 		logger.Info("task expired sweeper disabled (sweep_interval_seconds <= 0)")
 	}
 
-	// MR Collector
+	// MR Collector（worker 端保留 — 文件 I/O 类，与 PM collector 同进程更合理）
 	mrStore := mr.NewPgMRStore(w.PgPool, w.TsPool)
 	mrCollector := mrcollector.NewMRCollector(w.MinIO, cfg.MinIO.Buckets.MRFiles, mrStore, w.EventBus, logger)
+	// 注入 DeviceLookup：upload handler 直传路径的 mr.file.received payload 不带
+	// device_id，由 collector 按 device_sn 反查（参 internal/acs/upload publishMRFileReceivedEvent）。
+	mrCollector.SetDeviceLookup(device.NewPgDeviceRepository(w.PgPool))
 	if err := mrCollector.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe MR collector", zap.Error(err))
 	}
 	logger.Info("MR collector started")
+
+	// F05 MR 任务管理（scheduler / heartbeat / cleaner / completion）已迁到 app 进程，
+	// 详见 cmd/app/provider/modules.go 中的 mrtask 装配段。
+	// 原因：dispatcher 需要 ParamRegistry + ProductRegistry 做 standardPath → privatePath 翻译，
+	// 这两个 Registry 当前仅在 app 进程加载。worker 端不重复加载，避免字典加载放大。
 
 	// Transfer Bridge
 	deviceRepo := device.NewPgDeviceRepository(w.PgPool)
@@ -517,3 +525,4 @@ func loadEmailConfigFromEnv() alarm.EmailConfig {
 		UseSTARTTLS: os.Getenv("OMC_SMTP_USE_STARTTLS") == "true",
 	}
 }
+

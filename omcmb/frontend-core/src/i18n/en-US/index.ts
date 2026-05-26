@@ -2491,6 +2491,16 @@ const messages: Record<string, string> = {
   'mr.recordCount':                 'Record Count',
   'mr.filesSubtitle':               'View MR data files reported by devices',
   'mr.batchDownload':               'Batch download {count} files',
+  'mr.firstCollectTime':            'First Collect Time',
+  'mr.lastCollectTime':             'Last Collect Time',
+  'mr.fileCount':                   'File Count',
+  'mr.filesByDevice':               'By Device',
+  'mr.deviceFilesTitle':            'MR Files of {sn}',
+  'mr.filterByCollectTime':         'Filter by collect time',
+  'mr.noFilesInRange':              'No files in selected range',
+  'mr.viewFiles':                   'View Files',
+  'mr.batchDownloadHint':           'Select files to batch download',
+  'mr.searchDeviceSn':              'Search device SN',
 
   // -------------------------------------------------------------------------
   // Ops module
@@ -3545,6 +3555,7 @@ const messages: Record<string, string> = {
   'ufte.fileManagement.tab.version':          'Firmware Files',
   'ufte.fileManagement.tab.config':           'Config Files',
   'ufte.fileManagement.tab.license':          'License Files',
+  'ufte.fileManagement.tab.mr':               'MR Files',
   'ufte.form.openFirmwareManager':            'Manage firmware (new tab)',
   'ufte.form.refreshFirmwares':               'Refresh firmware list',
   'ufte.form.selectedCount':                  '{count} selected',
@@ -5060,6 +5071,116 @@ const messages: Record<string, string> = {
   'pmRetention.validate.tooShort':                  'Retention days must be at least 1 day',
   'pmRetention.validate.tooLong':                   'Retention days must be at most 3650 days (10 years)',
   'pmRetention.save.success':                       'Saved successfully; new retention policy is effective',
+
+  // -------------------------------------------------------------------------
+  // F05 MR Measurement Task Management
+  // -------------------------------------------------------------------------
+  'mrTask.page.title':                  'MR Task Management',
+  'mrTask.page.subtitle':               'Create, schedule, stop and delete MR measurement tasks',
+  'mrTask.action.create':               'Create',
+  'mrTask.action.viewDetail':           'Detail',
+  'mrTask.action.stop':                 'Stop',
+  'mrTask.action.delete':               'Delete',
+  'mrTask.action.refresh':              'Refresh',
+
+  'mrTask.field.taskId':                'Task ID',
+  'mrTask.field.taskName':              'Task Name',
+  'mrTask.field.taskNamePlaceholder':   'Enter task name',
+  'mrTask.field.status':                'Status',
+  'mrTask.field.cellCount':             'Cells',
+  'mrTask.field.cellCountValue':        'Cells={count}',
+  'mrTask.field.startTime':             'Start Time',
+  'mrTask.field.endTime':               'End Time',
+  'mrTask.field.endTimeUnlimited':      'Unlimited',
+  'mrTask.field.updateTime':            'Updated',
+  'mrTask.field.creator':               'Creator',
+  'mrTask.field.note':                  'Note',
+  'mrTask.field.operatorCode':          'Operator',
+  'mrTask.field.measureType':           'Measure Type',
+  'mrTask.field.statisPeriod':          'Statis Period',
+  'mrTask.field.reportPeriod':          'Report Period',
+  'mrTask.field.reportPeriodSuffix':    'min',
+
+  'mrTask.status.waitting':             'Waiting',
+  'mrTask.status.on':                   'Running',
+  'mrTask.status.off':                  'Closed',
+  'mrTask.status.suspend':              'Suspended',
+  'mrTask.status.termination':          'Terminating',
+
+  'mrTask.progress.pending':            'Pending',
+  'mrTask.progress.openSuccess':        'Open Success',
+  'mrTask.progress.openFailure':        'Open Failure',
+  'mrTask.progress.closeSuccess':       'Close Success',
+  'mrTask.progress.closeFailure':       'Close Failure',
+  'mrTask.progress.unsupport':          'Unsupported',
+  'mrTask.progress.timeOut':            'Timeout',
+  'mrTask.progress.noPermission':       'No Permission',
+
+  'mrTask.health.normal':               'Normal',
+  'mrTask.health.abnormal':             'Abnormal',
+  'mrTask.health.unknown':              'Unknown',
+
+  'mrTask.create.title':                'New MR Measurement Task',
+  'mrTask.create.section.basic':        'Task Info',
+  'mrTask.create.section.params':       'MR Parameters',
+  'mrTask.create.section.targets':      'Target Cells',
+  'mrTask.create.measureTypeHint':      'MRS / MRE / MRO required (spec §3.1)',
+  'mrTask.create.targetsRequired':      'Select at least one cell',
+  'mrTask.create.targetsCount':         '{count} cell(s) selected',
+  'mrTask.create.endTimeUnlimited':     'No end time',
+  'mrTask.create.success':              'Task created',
+  'mrTask.create.failed':               'Failed to create task',
+
+  'mrTask.detail.title':                'Task Detail',
+  'mrTask.detail.section.summary':      'Summary',
+  'mrTask.detail.section.progress':     'Cell Progress',
+  'mrTask.detail.progress.cellCode':    'Cell Code',
+  'mrTask.detail.progress.serialNumber': 'Serial Number',
+  'mrTask.detail.progress.hostName':    'Host Name',
+  'mrTask.detail.progress.status':      'Dispatch Result',
+  'mrTask.detail.progress.health':      'Heartbeat',
+  'mrTask.detail.progress.faultCode':   'Fault Code',
+  'mrTask.detail.progress.lastHeartbeat': 'Last Report',
+
+  'mrTask.confirm.stop':                'Stop task "{name}"?',
+  'mrTask.confirm.stopHint':            'Running tasks will send close SPV; waiting tasks terminate directly',
+  'mrTask.confirm.delete':              'Delete task "{name}"?',
+  'mrTask.confirm.deleteHint':          'Only Closed/Terminating tasks can be deleted',
+
+  'mrTask.toast.stopSuccess':           'Task stopped',
+  'mrTask.toast.stopFailed':            'Failed to stop: {msg}',
+  'mrTask.toast.deleteSuccess':         'Task deleted',
+  'mrTask.toast.deleteFailed':          'Failed to delete: {msg}',
+
+  'ufte.builtin.category.mr_measurement': 'MR Measurement',
+  'mrTask.transferEntry.recentTasks':   'Recent MR Tasks',
+  'mrTask.transferEntry.openManagement': 'Open MR Task Management',
+  'mrTask.transferEntry.empty':         'No MR tasks',
+
+  // Detail drawer
+  'mrTask.detail.section.targetDevices': 'Target Devices in This Task',
+
+  // Target Devices section (CreateDrawer)
+  'mrTask.create.section.targetDevice': 'Target Devices',
+  'mrTask.field.deviceSn':              'Device SN',
+  'mrTask.field.deviceName':            'Device Name',
+  'mrTask.field.productClass':          'Product Class',
+  'mrTask.action.batchSnInput':         'Batch SN Input',
+  'mrTask.placeholder.deviceSearch':    'Search by SN / Name',
+  'mrTask.create.selectedDeviceCount':  '{count} selected',
+  'mrTask.create.targetDeviceRequired': 'Select at least one target device',
+  'mrTask.create.conflictColumn':       'In Use By',
+  'mrTask.create.conflictTooltip':      'Already in task "{name}". Stop that task first or pick another device.',
+  'mrTask.create.conflictHasActive':    '{count} device(s) are in use by other active tasks ({samples}); resolve before submitting',
+
+  // Batch SN input modal
+  'mrTask.batchSN.title':         'Batch SN Input',
+  'mrTask.batchSN.hint':          'Separators: space / comma / semicolon / newline / tab. Only SNs matching the current candidates list will be added.',
+  'mrTask.batchSN.placeholder':   'One SN per line, or comma/semicolon separated',
+  'mrTask.batchSN.applyOk':       'Add to Selection',
+  'mrTask.batchSN.emptyInput':    'Paste SNs (separated by space / comma / semicolon / newline)',
+  'mrTask.batchSN.partialHits':   '{hits} SN(s) added; {misses} not in current candidates: {samples}',
+  'mrTask.batchSN.allHits':       'Added {count} device(s)',
 };
 
 export default messages;

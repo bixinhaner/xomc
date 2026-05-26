@@ -18,6 +18,7 @@ const (
 	DeviceTracerName    = "github.com/omcgo/omcgo/device"
 	ProvisionTracerName = "github.com/omcgo/omcgo/provision"
 	TaskTracerName      = "github.com/omcgo/omcgo/task"
+	MRTaskTracerName    = "github.com/omcgo/omcgo/mr/task"
 )
 
 // StartSpan creates a new span with the given tracer name, span name, and optional attributes.

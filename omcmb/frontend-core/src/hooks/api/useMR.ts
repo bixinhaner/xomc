@@ -81,6 +81,17 @@ export function useDownloadMRFile() {
   });
 }
 
+// 按设备聚合的 MR 文件视图 —— File Management → MR Tab 主列表
+export function useMRFileDevices(
+  params: { keyword?: string } & PageRequest,
+) {
+  return useQuery({
+    queryKey: ['mr', 'files', 'devices', params],
+    queryFn: () => mrApi.getFileDevices(params),
+    enabled: !useMock,
+  });
+}
+
 export function useExportMRData() {
   return useMutation({
     mutationFn: (params: { deviceSns: string[]; timeRange: [string, string] }) =>

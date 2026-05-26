@@ -237,6 +237,7 @@ type AppConfig struct {
 	BatchProcessor  BatchProcessorConfig  `mapstructure:"batch_processor"`
 	License         LicenseConfig         `mapstructure:"license"`
 	Task            TaskConfig            `mapstructure:"task"`
+	MR              MRConfig              `mapstructure:"mr"`
 	Notification    NotificationConfig    `mapstructure:"notification"`
 	Metrics         MetricsConfig         `mapstructure:"metrics"`
 	Tracer          TracerConfig          `mapstructure:"tracer"`
@@ -258,6 +259,49 @@ type AppConfig struct {
 type TaskConfig struct {
 	DefaultExpiresInSeconds int `mapstructure:"default_expires_in_seconds"`
 	SweepIntervalSeconds    int `mapstructure:"sweep_interval_seconds"`
+}
+
+// MRConfig 配置 F05 MR 测量任务（PRD docs/project/prd/F05-mr-task-management.md）。
+//
+// 字段语义对齐 MR_Feature_Analysis.md：
+//   - Vendor / OmcName：SPV 下发 Device.FAP.MRMgmt.Config.{i}.Vendor / OmcName 的值
+//   - URLBase：MR 文件上报 URL 前缀（不含 ?fileType=... 部分）；空时用 OMC 主地址
+//   - IndependentEnable：是否使用独立 MR 服务器（true → URLBase；false → OMC 主地址）
+//   - FileSaveDays：MR 文件保留天数，cleaner 删超期 {operatorCode}/mr/{date}/ 目录
+//   - SchedulerIntervalSeconds：worker 调度器扫描间隔，默认 30s
+//   - HeartbeatMissThreshold：连续未命中心跳次数，超过则标 abnormal，默认 2
+//
+// 取消原 sys_settings 表方案（项目无此表），改为 yaml + 环境变量驱动。
+type MRConfig struct {
+	Vendor                   string `mapstructure:"vendor"`
+	OmcName                  string `mapstructure:"omc_name"`
+	URLBase                  string `mapstructure:"url_base"`
+	IndependentEnable        bool   `mapstructure:"independent_enable"`
+	FileSaveDays             int    `mapstructure:"file_save_days"`
+	SchedulerIntervalSeconds int    `mapstructure:"scheduler_interval_seconds"`
+	HeartbeatMissThreshold   int    `mapstructure:"heartbeat_miss_threshold"`
+}
+
+// Defaults returns sensible defaults when yaml lacks the mr section.
+// 调用方在 service/dispatcher 构造时用本方法兜底。
+func (c MRConfig) Defaults() MRConfig {
+	out := c
+	if out.Vendor == "" {
+		out.Vendor = "Baicells"
+	}
+	if out.OmcName == "" {
+		out.OmcName = "Baicells-OMC"
+	}
+	if out.FileSaveDays <= 0 {
+		out.FileSaveDays = 3
+	}
+	if out.SchedulerIntervalSeconds <= 0 {
+		out.SchedulerIntervalSeconds = 30
+	}
+	if out.HeartbeatMissThreshold <= 0 {
+		out.HeartbeatMissThreshold = 2
+	}
+	return out
 }
 
 // NotificationConfig 配置通知中心（T-0152）：SMTP 邮件发送器 + Alertmanager

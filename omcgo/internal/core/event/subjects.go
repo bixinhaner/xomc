@@ -170,8 +170,14 @@ const (
 // 测量报告（Measurement Report）文件的采集与解析流转事件。
 const (
 	// SubjectMRFileReceived 是 MR 文件入库到 MinIO 后发布。
-	// 发布者：transfer.Bridge，订阅者：mr.Collector（解析并入库）
+	// 发布者：transfer.Bridge（AutonomousTransferComplete 路径），订阅者：mr.Collector（解析并入库）
 	SubjectMRFileReceived = "mr.file.received"
+
+	// SubjectMRFileUploaded 是设备通过 HTTP POST 直传 MR 文件成功后发布（F05 任务管理路径）。
+	// 与 SubjectMRFileReceived 区别：本事件由 acs/upload Handler 在收到 fileType=MR 上传时发出，
+	// payload 含 URL 查询参数里的 cellCode（任务管理用于写 Redis 心跳）。
+	// 发布者：acs.upload.Handler，订阅者：mr/task.HeartbeatSubscriber（Redis SET + PG TouchHeartbeat）
+	SubjectMRFileUploaded = "mr.file.uploaded"
 
 	// SubjectMRFileParsed 是 MR XML 解析完成后发布。
 	// 发布者：mr.Collector，订阅者：暂无

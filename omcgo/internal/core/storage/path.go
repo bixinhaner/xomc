@@ -95,3 +95,11 @@ func DataModelPath(carrier, oui, productClass, deviceSN string) string {
 func DatePrefix() string {
 	return time.Now().Format("2006/01/02")
 }
+
+// MRObjectPath 为 MR 文件构建对象路径，格式：{deviceSN}/{filename}
+// 用户要求 MR 桶下扁平按 SN 目录组织（2026-05-26 决策）。
+// 与 ObjectPath 的多层 {category}/{carrier}/{date}/{sn}/{filename} 不同 —
+// MR 走独立轻量路径，桶名 mr-files 本身即表示模块归属。
+func MRObjectPath(deviceSN, filename string) string {
+	return fmt.Sprintf("%s/%s", deviceSN, filename)
+}

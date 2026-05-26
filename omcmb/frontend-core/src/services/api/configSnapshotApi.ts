@@ -272,19 +272,23 @@ export const configSnapshotApi = {
    * 新 tab 不会带；改成 axios 调拿 URL，再用 <a download> 触发下载。
    */
   async download(sn: string): Promise<void> {
+    // 后端响应是 snake_case（snapshot_handler.go SnapshotDownloadResponse 的 json tag），
+    // http.ts 响应拦截器只拆 envelope 不做命名转换 → 这里必须按 snake_case 读，
+    // 否则 a.href = undefined → 浏览器下载当前页 HTML，a.download = undefined →
+    // 字符串 "undefined" + 自动 .html 后缀 = "undefined.html"。
     const { data } = await http.get<{
-      serialNumber: string;
-      fileName: string;
-      downloadUrl: string;
-      expiresInSeconds: number;
+      serial_number: string;
+      file_name: string;
+      download_url: string;
+      expires_in_seconds: number;
     }>(`/backup/config-snapshots/${encodeURIComponent(sn)}/download`);
     // MinIO presigned URL 本身已含临时凭据，直接打开新 tab 即可。
     // 用 <a> + click 触发，比 window.open 在某些浏览器更稳定（不被 popup blocker）。
     const a = document.createElement('a');
-    a.href = data.downloadUrl;
+    a.href = data.download_url;
     a.target = '_blank';
     a.rel = 'noopener';
-    a.download = data.fileName;
+    a.download = data.file_name;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

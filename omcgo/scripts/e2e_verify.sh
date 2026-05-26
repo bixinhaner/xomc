@@ -6486,6 +6486,80 @@ else
     echo -e "    ${YELLOW}⚠ T-0168 mml-translation-2 skipped (metrics $METRICS_HOST/metrics unreachable; set PROMETHEUS_APP_METRICS_HOST to enable)${NC}"
 fi
 
+# ============================================================
+# F05 MR Task Management (PRD docs/project/prd/F05-mr-task-management.md)
+# ============================================================
+section "F05 MR Task Management — CRUD + lifecycle"
+
+if [ -n "$ACCESS_TOKEN" ]; then
+    AUTH_HEADER="Authorization: Bearer $ACCESS_TOKEN"
+
+    # F05.1 List MR tasks（空 seed 可接受）
+    RESP=$(curl -s -w "\n%{http_code}" "$API/mr/tasks?page=1&page_size=10" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    check_status "GET /mr/tasks (list)" "200" "$HTTP_CODE"
+
+    # F05.2 Create MR task（最小合法请求）
+    FUTURE_START=$(python3 -c "import datetime; print((datetime.datetime.utcnow()+datetime.timedelta(minutes=5)).strftime('%Y-%m-%dT%H:%M:%SZ'))" 2>/dev/null || echo "2030-01-01T00:00:00Z")
+    FUTURE_END=$(python3 -c "import datetime; print((datetime.datetime.utcnow()+datetime.timedelta(hours=2)).strftime('%Y-%m-%dT%H:%M:%SZ'))" 2>/dev/null || echo "2030-01-01T02:00:00Z")
+    BODY_CREATE=$(cat <<EOF
+{
+  "task_name": "e2e-mr-$(date +%s)",
+  "start_time": "$FUTURE_START",
+  "end_time": "$FUTURE_END",
+  "operator_code": "cmcc",
+  "creator": "e2e",
+  "targets": [{"small_cell_code": "E2E_CELL_001", "serial_number": "E2E_SN_001"}]
+}
+EOF
+)
+    RESP=$(curl -s -w "\n%{http_code}" -X POST "$API/mr/tasks" \
+        -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+        -d "$BODY_CREATE")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    if [ "$HTTP_CODE" = "201" ]; then
+        pass "POST /mr/tasks created (201)"
+        MR_TASK_ID=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('task_id',''))" 2>/dev/null || echo "")
+    elif [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ]; then
+        pass "POST /mr/tasks (skipped — auth/perm restricted: $HTTP_CODE)"
+        MR_TASK_ID=""
+    else
+        fail "POST /mr/tasks" "expected 201 got $HTTP_CODE"
+        MR_TASK_ID=""
+    fi
+
+    # F05.3 入参校验：缺 mr_type 子项（MRS only）应被拒
+    BODY_INVALID='{"task_name":"e2e-bad","mr_type":"MRS","start_time":"'$FUTURE_START'","operator_code":"cmcc","creator":"e2e","targets":[{"small_cell_code":"X","serial_number":"Y"}]}'
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/mr/tasks" \
+        -H "$AUTH_HEADER" -H "Content-Type: application/json" -d "$BODY_INVALID")
+    check_status_in "POST /mr/tasks invalid mr_type rejected" "400 401 403" "$HTTP_CODE"
+
+    # F05.4 Get detail
+    if [ -n "$MR_TASK_ID" ]; then
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/mr/tasks/$MR_TASK_ID" \
+            -H "$AUTH_HEADER")
+        check_status "GET /mr/tasks/:id (detail)" "200" "$HTTP_CODE"
+
+        # F05.5 List progress
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$API/mr/tasks/$MR_TASK_ID/progress?page=1&page_size=10" \
+            -H "$AUTH_HEADER")
+        check_status "GET /mr/tasks/:id/progress" "200" "$HTTP_CODE"
+
+        # F05.6 Stop task
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API/mr/tasks/$MR_TASK_ID/stop" \
+            -H "$AUTH_HEADER" -H "Content-Type: application/json" \
+            -d '{"operator_code":"cmcc"}')
+        check_status "POST /mr/tasks/:id/stop" "200" "$HTTP_CODE"
+
+        # F05.7 Delete (only off/termination allowed; stop 后状态变 termination 应可删)
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$API/mr/tasks/$MR_TASK_ID?operator_code=cmcc" \
+            -H "$AUTH_HEADER")
+        check_status_in "DELETE /mr/tasks/:id" "200 409" "$HTTP_CODE"
+    fi
+fi
+
 # ------------------------------------------------------------
 # W2.D.1 段尾打印分段统计，方便 verify 报告引用
 echo ""

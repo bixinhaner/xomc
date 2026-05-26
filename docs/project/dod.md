@@ -96,6 +96,14 @@
 - [ ] 批量写入使用 `CopyFrom` 或批量 INSERT
 - [ ] 查询有时间范围限制（防全表扫描）
 
+### F05 MR 测量任务（`internal/mr/task/**`）
+- [ ] SPV 参数路径使用 standardPath 常量，下发前走 `Translator.ToPrivate` 翻译（CLAUDE.md §5.3）
+- [ ] dispatcher.Open + Close **都**走翻译路径（避免开 privatePath、关 standardPath 不对称）
+- [ ] 心跳 TTL 表严格按 MR_Feature_Analysis.md §7.3（900→1500 / 1800→2700 / 3600→5400），不简化
+- [ ] 调度器 cron 注册在 app 进程（ParamRegistry 所在），不在 worker
+- [ ] Prometheus 指标接入：dispatcher / scheduler / heartbeat / cleaner 四处
+- [ ] 新增 Repository 方法配套 fakeRepo 实现（保 service_test 编译）
+
 ### 数据库迁移（`migrations/**`）
 - [ ] 编号严格连续（当前已知缺 000010、000015-000018，新迁移必须衔接下一个可用编号）
 - [ ] 含 `-- +goose Up` / `-- +goose Down` 段

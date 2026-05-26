@@ -36,6 +36,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	mrGroup := rg.Group("/mr")
 	{
 		mrGroup.GET("/files", h.ListFiles)
+		mrGroup.GET("/files/devices", h.ListFileDevices) // 按设备聚合，给 File Management MR Tab 用
 		mrGroup.GET("/files/:id/download", h.DownloadFile)
 		mrGroup.GET("/data", h.QueryData)
 
@@ -51,6 +52,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 
 type fileQuery struct {
 	DeviceID  string `form:"device_id"`
+	DeviceSN  string `form:"device_sn"`
 	MRType    string `form:"mr_type"`
 	StartTime string `form:"start_time"`
 	EndTime   string `form:"end_time"`
@@ -74,6 +76,9 @@ func (h *Handler) ListFiles(c *gin.Context) {
 		}
 		filter.DeviceID = &id
 	}
+	if q.DeviceSN != "" {
+		filter.DeviceSN = &q.DeviceSN
+	}
 	if q.MRType != "" {
 		filter.MRType = &q.MRType
 	}
@@ -89,6 +94,27 @@ func (h *Handler) ListFiles(c *gin.Context) {
 	}
 
 	result, err := h.store.ListFiles(c.Request.Context(), filter)
+	if err != nil {
+		coreerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OK(c, result)
+}
+
+// ListFileDevices 给 File Management → MR Tab 主列表用。每行 1 个设备 +
+// 该设备 mr_files 起止 collect_time + 文件数。
+func (h *Handler) ListFileDevices(c *gin.Context) {
+	filter := MRFileDeviceFilter{
+		ListRequest: model.DefaultListRequest(),
+	}
+	if err := c.ShouldBindQuery(&filter.ListRequest); err != nil {
+		coreerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	if kw := c.Query("keyword"); kw != "" {
+		filter.Keyword = &kw
+	}
+	result, err := h.store.ListFileDeviceAggregates(c.Request.Context(), filter)
 	if err != nil {
 		coreerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return

@@ -1,232 +1,336 @@
 import { useState, useMemo } from 'react';
-import { Button, Card, Dropdown, Tag, Space, Progress, Modal, Form, Input, Select, message } from 'antd';
-import type { MenuProps } from 'antd';
-import { PlusOutlined, PlayCircleOutlined, PauseCircleOutlined, DeleteOutlined, EyeOutlined, MoreOutlined } from '@ant-design/icons';
-import ListPageLayout from '@/components/Layout/ListPageLayout';
+import { Button, Card, message, Modal, Tooltip, Badge, Space } from 'antd';
+import { PlusOutlined, StopOutlined, DeleteOutlined, EyeOutlined } from '@ant-design/icons';
 import FilterBar from '@/components/FilterBar';
 import type { FilterField } from '@/components/FilterBar';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
+import {
+  useMRTasks,
+  useStopMRTask,
+  useDeleteMRTask,
+} from '@core/hooks/api/useMrTasks';
+import type {
+  MRTask,
+  MRTaskStatus,
+} from '@core/types/mrTask';
 
-type TaskStatus = 'running' | 'paused' | 'completed' | 'failed' | 'pending';
+import CreateDrawer from './CreateDrawer';
+import DetailDrawer from './DetailDrawer';
 
-interface MRTask {
-  id: string;
-  taskName: string;
-  collectType: string;
-  deviceRange: number;
-  schedule: string;
-  status: TaskStatus;
-  progress?: number;
-  lastRun?: string;
-  nextRun?: string;
-  creator: string;
+/**
+ * MRTasksPanel — MR 任务管理面板（无 ListPageLayout 页面 chrome）。
+ *
+ * 用户决策（2026-05-25）："MR 只活在文件传输模块"，因此该面板设计为可被
+ * FileTransferCenter 内联嵌入；不再单独占用 /mr/tasks 路由 + sidebar 菜单。
+ *
+ * **受控/非受控模式**（2026-05-26）：
+ *   - 非受控（standalone 占位用法）：面板自己渲染"标题 + 新建按钮"
+ *   - 受控（嵌入 FileTransferCenter）：parent 传 createOpen/onCreateOpenChange，
+ *     面板隐藏内部触发按钮，让 parent 的顶部 "New Task" 按钮接管 — 与 UFTE 一致
+ *
+ * 流程：
+ *   - 列表：分页 + 状态/关键字筛选 + 行操作（查看/停止/删除）
+ *   - 新建：抽屉表单（task_name + MR 参数 + 起止时间 + 目标设备）
+ *   - 详情：抽屉（任务概要 + cell 进度表，10s 轮询）
+ *
+ * F05 PRD docs/project/prd/F05-mr-task-management.md
+ */
+interface MRTasksPanelProps {
+  /** parent 控制的"新建抽屉是否打开"。给值就是受控模式 — 面板内部不再渲染新建按钮 */
+  createOpen?: boolean;
+  /** 配合 createOpen — close 时由 parent setState(false) */
+  onCreateOpenChange?: (open: boolean) => void;
 }
 
-const mockTasks: MRTask[] = [
-  { id: 'mrt-001', taskName: '全网eNB MRO周期采集', collectType: 'MRO', deviceRange: 150, schedule: '每15分钟', status: 'running', progress: 72, lastRun: '2024-06-01T08:00:00.000Z', nextRun: '2024-06-01T08:15:00.000Z', creator: 'admin' },
-  { id: 'mrt-002', taskName: '北京eNB MRE切换分析', collectType: 'MRE', deviceRange: 35, schedule: '每小时', status: 'running', progress: 45, lastRun: '2024-06-01T08:00:00.000Z', nextRun: '2024-06-01T09:00:00.000Z', creator: 'admin' },
-  { id: 'mrt-003', taskName: 'gNB MRS统计采集', collectType: 'MRS', deviceRange: 18, schedule: '每天01:00', status: 'paused', lastRun: '2024-05-31T01:00:00.000Z', creator: 'operator1' },
-  { id: 'mrt-004', taskName: '全网MRO日报汇总', collectType: 'MRO', deviceRange: 215, schedule: '每天02:00', status: 'completed', lastRun: '2024-06-01T02:00:00.000Z', creator: 'admin' },
-  { id: 'mrt-005', taskName: '上海eNB覆���MR专项', collectType: 'MRO', deviceRange: 28, schedule: '一次性', status: 'failed', lastRun: '2024-06-01T06:00:00.000Z', creator: 'operator2' },
-  { id: 'mrt-006', taskName: '新增gNB MRE采集任务', collectType: 'MRE', deviceRange: 5, schedule: '待配置', status: 'pending', creator: 'admin' },
-];
-
-const statusColorMap: Record<TaskStatus, string> = {
-  running: 'processing',
-  paused: 'warning',
-  completed: 'green',
-  failed: 'red',
-  pending: 'default',
+// 状态 → Antd Badge 颜色映射
+const statusBadgeMap: Record<MRTaskStatus, 'default' | 'processing' | 'success' | 'warning' | 'error'> = {
+  waitting: 'default',
+  on: 'processing',
+  off: 'success',
+  suspend: 'warning',
+  termination: 'warning',
 };
 
-const mrTypeColorMap: Record<string, string> = { MRO: 'blue', MRE: 'green', MRS: 'orange' };
-
-export default function Tasks() {
+export default function MRTasksPanel(props: MRTasksPanelProps = {}) {
   const t = useT();
+  const isControlled = props.createOpen !== undefined;
+
+  // 列表筛选 / 分页
   const [filters, setFilters] = useState<Record<string, unknown>>({});
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [tasks, setTasks] = useState<MRTask[]>(mockTasks);
-  const [createVisible, setCreateVisible] = useState(false);
-  const [form] = Form.useForm();
+  const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
 
-  const statusLabelMap: Record<TaskStatus, string> = useMemo(() => ({
-    running: t('status.running'),
-    paused: t('mr.paused'),
-    completed: t('mr.completed'),
-    failed: t('status.failed'),
-    pending: t('status.pending'),
-  }), [t]);
+  // 抽屉
+  const [internalCreateOpen, setInternalCreateOpen] = useState(false);
+  const createOpen = isControlled ? Boolean(props.createOpen) : internalCreateOpen;
+  const setCreateOpen = (next: boolean) => {
+    if (isControlled) {
+      props.onCreateOpenChange?.(next);
+    } else {
+      setInternalCreateOpen(next);
+    }
+  };
+  const [detailTaskId, setDetailTaskId] = useState<string | undefined>(undefined);
 
-  const filterFields: FilterField[] = useMemo(() => [
-    { name: 'keyword', label: t('mr.taskName'), type: 'input', placeholder: t('mr.taskNamePlaceholder') },
-    {
-      name: 'collectType',
-      label: t('mr.collectType'),
-      type: 'select',
-      options: [
-        { label: 'MRO', value: 'MRO' },
-        { label: 'MRE', value: 'MRE' },
-        { label: 'MRS', value: 'MRS' },
-      ],
-    },
-    {
-      name: 'status',
-      label: t('table.status'),
-      type: 'select',
-      options: [
-        { label: t('status.running'), value: 'running' },
-        { label: t('mr.paused'), value: 'paused' },
-        { label: t('mr.completed'), value: 'completed' },
-        { label: t('status.failed'), value: 'failed' },
-        { label: t('status.pending'), value: 'pending' },
-      ],
-    },
-  ], [t]);
+  // 数据
+  const listFilter = useMemo(
+    () => ({
+      page,
+      pageSize,
+      keyword: filters.keyword ? String(filters.keyword) : undefined,
+      status: filters.status ? (filters.status as MRTaskStatus) : undefined,
+    }),
+    [page, pageSize, filters],
+  );
+  const { data, isLoading, refetch } = useMRTasks(listFilter);
 
-  const filtered = tasks.filter((tk) => {
-    if (filters.keyword && !tk.taskName.includes(String(filters.keyword))) return false;
-    if (filters.collectType && tk.collectType !== filters.collectType) return false;
-    if (filters.status && tk.status !== filters.status) return false;
-    return true;
-  });
+  const stopMutation = useStopMRTask();
+  const deleteMutation = useDeleteMRTask();
 
-  const startIndex = (page - 1) * pageSize;
-  const paginated = filtered.slice(startIndex, startIndex + pageSize);
+  // 筛选栏
+  const filterFields: FilterField[] = useMemo(
+    () => [
+      {
+        name: 'keyword',
+        label: t('mrTask.field.taskName'),
+        type: 'input',
+        placeholder: t('mrTask.field.taskNamePlaceholder'),
+      },
+      {
+        name: 'status',
+        label: t('mrTask.field.status'),
+        type: 'select',
+        options: [
+          { label: t('mrTask.status.waitting'), value: 'waitting' },
+          { label: t('mrTask.status.on'), value: 'on' },
+          { label: t('mrTask.status.off'), value: 'off' },
+          { label: t('mrTask.status.termination'), value: 'termination' },
+        ],
+      },
+    ],
+    [t],
+  );
 
-  const handleCreate = () => {
-    form.validateFields().then((vals) => {
-      const newTask: MRTask = {
-        id: `mrt-${Date.now()}`,
-        taskName: vals.taskName as string,
-        collectType: vals.collectType as string,
-        deviceRange: Number(vals.deviceRange ?? 0),
-        schedule: vals.schedule as string,
-        status: 'pending',
-        creator: 'admin',
-      };
-      setTasks((prev) => [newTask, ...prev]);
-      void message.success(t('mr.taskCreateSuccess'));
-      setCreateVisible(false);
-      form.resetFields();
+  // 操作 — 停止
+  const handleStop = (record: MRTask) => {
+    Modal.confirm({
+      title: t('mrTask.confirm.stop', { name: record.taskName }),
+      content: t('mrTask.confirm.stopHint'),
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          await stopMutation.mutateAsync(record.taskId);
+          void message.success(t('mrTask.toast.stopSuccess'));
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          void message.error(t('mrTask.toast.stopFailed', { msg }));
+        }
+      },
     });
   };
 
-  const columns: DataTableColumn<MRTask & Record<string, unknown>>[] = useMemo(() => [
-    { key: 'taskName', title: t('mr.taskName'), dataIndex: 'taskName', ellipsis: true, width: 220 },
-    {
-      key: 'collectType', title: t('mr.collectType'), dataIndex: 'collectType', width: 100,
-      render: (val) => <Tag color={mrTypeColorMap[String(val)] ?? 'default'}>{String(val)}</Tag>,
-    },
-    { key: 'deviceRange', title: t('mr.deviceScope'), dataIndex: 'deviceRange', width: 90, render: (val) => String(val) },
-    { key: 'schedule', title: t('mr.schedule'), dataIndex: 'schedule', width: 120 },
-    {
-      key: 'status', title: t('table.status'), dataIndex: 'status', width: 100,
-      render: (val) => {
-        const s = val as TaskStatus;
-        return <Tag color={statusColorMap[s]}>{statusLabelMap[s]}</Tag>;
+  // 操作 — 删除
+  const handleDelete = (record: MRTask) => {
+    Modal.confirm({
+      title: t('mrTask.confirm.delete', { name: record.taskName }),
+      content: t('mrTask.confirm.deleteHint'),
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          await deleteMutation.mutateAsync(record.taskId);
+          void message.success(t('mrTask.toast.deleteSuccess'));
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          void message.error(t('mrTask.toast.deleteFailed', { msg }));
+        }
       },
-    },
-    {
-      key: 'progress', title: t('mr.progress'), dataIndex: 'progress', width: 120,
-      render: (val) => val !== undefined ? <Progress percent={Number(val)} size="small" /> : '—',
-    },
-    {
-      key: 'lastRun', title: t('mr.lastRun'), dataIndex: 'lastRun', width: 160,
-      render: (val) => val ? new Date(String(val)).toLocaleString('zh-CN') : '—',
-    },
-    { key: 'creator', title: t('mr.creator'), dataIndex: 'creator', width: 90 },
-    {
-      key: 'actions', title: t('table.operation'), dataIndex: 'id', width: 100, fixed: 'right',
-      render: (_, record) => {
-        const tk = record as MRTask;
-        const moreItems: MenuProps['items'] = [
-          ...(tk.status === 'running'
-            ? [{ key: 'pause', label: t('mr.pause'), icon: <PauseCircleOutlined />, onClick: () => setTasks((prev) => prev.map((item) => item.id === tk.id ? { ...item, status: 'paused' } : item)) }]
-            : []),
-          ...(tk.status === 'paused' || tk.status === 'pending'
-            ? [{ key: 'resume', label: t('common.execute'), icon: <PlayCircleOutlined />, onClick: () => setTasks((prev) => prev.map((item) => item.id === tk.id ? { ...item, status: 'running' } : item)) }]
-            : []),
-          { type: 'divider' as const },
-          { key: 'delete', label: t('common.delete'), icon: <DeleteOutlined />, danger: true, onClick: () => { setTasks((prev) => prev.filter((item) => item.id !== tk.id)); void message.success(t('common.deleteSuccess')); } },
-        ];
-        return (
-          <Space size={4}>
-            <Button type="link" size="small" icon={<EyeOutlined />}>{t('common.detail')}</Button>
-            <Dropdown
-              menu={{ items: moreItems }}
-              trigger={['click']}
-            >
-              <Button type="text" size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
-            </Dropdown>
-          </Space>
-        );
+    });
+  };
+
+  const columns: DataTableColumn<MRTask & Record<string, unknown>>[] = useMemo(
+    () => [
+      {
+        key: 'taskName',
+        title: t('mrTask.field.taskName'),
+        dataIndex: 'taskName',
+        width: 260,
+        ellipsis: true,
       },
-    },
-  ], [t, statusLabelMap]);
+      {
+        key: 'taskStatus',
+        title: t('mrTask.field.status'),
+        dataIndex: 'taskStatus',
+        width: 100,
+        render: (val) => {
+          const s = val as MRTaskStatus;
+          return <Badge status={statusBadgeMap[s] ?? 'default'} text={t(`mrTask.status.${s}`)} />;
+        },
+      },
+      {
+        // 平铺成逗号文本，避免 3 个 Tag 在窄列里换行
+        key: 'mrType',
+        title: t('mrTask.field.measureType'),
+        dataIndex: 'mrType',
+        width: 160,
+        ellipsis: true,
+        render: (val) => (
+          <span style={{ whiteSpace: 'nowrap' }}>
+            {String(val).split(',').map((s) => s.trim()).join(' / ')}
+          </span>
+        ),
+      },
+      {
+        key: 'reportPeriod',
+        title: t('mrTask.field.reportPeriod'),
+        dataIndex: 'reportPeriod',
+        width: 100,
+        render: (val) => `${String(val)} ${t('mrTask.field.reportPeriodSuffix')}`,
+      },
+      {
+        key: 'startTime',
+        title: t('mrTask.field.startTime'),
+        dataIndex: 'startTime',
+        width: 170,
+        render: (val) => new Date(String(val)).toLocaleString(),
+      },
+      {
+        key: 'endTime',
+        title: t('mrTask.field.endTime'),
+        dataIndex: 'endTime',
+        width: 170,
+        render: (val) =>
+          val ? (
+            new Date(String(val)).toLocaleString()
+          ) : (
+            <span style={{ color: 'rgba(0,0,0,0.45)' }}>
+              {t('mrTask.field.endTimeUnlimited')}
+            </span>
+          ),
+      },
+      {
+        key: 'actions',
+        title: t('table.operation'),
+        dataIndex: 'taskId',
+        width: 220,
+        fixed: 'right',
+        render: (_, record) => {
+          const r = record as MRTask;
+          const stoppable = r.taskStatus === 'waitting' || r.taskStatus === 'on';
+          const deletable = r.taskStatus === 'off' || r.taskStatus === 'termination';
+          return (
+            <>
+              <Button
+                type="link"
+                size="small"
+                icon={<EyeOutlined />}
+                onClick={() => setDetailTaskId(r.taskId)}
+              >
+                {t('mrTask.action.viewDetail')}
+              </Button>
+              <Tooltip title={stoppable ? undefined : t('mrTask.confirm.stopHint')}>
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<StopOutlined />}
+                  disabled={!stoppable}
+                  onClick={() => handleStop(r)}
+                >
+                  {t('mrTask.action.stop')}
+                </Button>
+              </Tooltip>
+              <Tooltip title={deletable ? undefined : t('mrTask.confirm.deleteHint')}>
+                <Button
+                  type="link"
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  disabled={!deletable}
+                  onClick={() => handleDelete(r)}
+                >
+                  {t('mrTask.action.delete')}
+                </Button>
+              </Tooltip>
+            </>
+          );
+        },
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [t],
+  );
+
+  const items = (data?.items ?? []) as (MRTask & Record<string, unknown>)[];
+  const total = data?.total ?? 0;
 
   return (
-    <ListPageLayout
-      title={t('nav.mr.tasks')}
-      subtitle={t('mr.tasksSubtitle')}
-      extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateVisible(true)}>{t('mr.newTask')}</Button>}
-    >
+    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      {/* 非受控模式（standalone）显示自己的标题 + 新建按钮；
+          受控模式（嵌入 FileTransferCenter）由 parent 的顶部 New Task 按钮接管。 */}
+      {!isControlled && (
+        <Space style={{ justifyContent: 'space-between', width: '100%' }}>
+          <span style={{ fontWeight: 600, fontSize: 16 }}>{t('mrTask.page.title')}</span>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => setCreateOpen(true)}
+          >
+            {t('mrTask.action.create')}
+          </Button>
+        </Space>
+      )}
       <FilterBar
         filterId="mr-tasks-filter"
         fields={filterFields}
-        onSearch={(vals) => { setFilters(vals); setPage(1); }}
-        onReset={() => { setFilters({}); setPage(1); }}
+        onSearch={(vals) => {
+          setFilters(vals);
+          setPage(1);
+        }}
+        onReset={() => {
+          setFilters({});
+          setPage(1);
+        }}
       />
       <Card
         size="small"
         bordered
-        style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
-        styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' } }}
+        styles={{ body: { padding: 0 } }}
       >
         <DataTable
           tableId="mr-tasks-list"
           columns={columns}
-          dataSource={paginated as (MRTask & Record<string, unknown>)[]}
-          loading={false}
-          rowKey="id"
-          total={filtered.length}
+          dataSource={items}
+          loading={isLoading}
+          rowKey="taskId"
+          total={total}
           pageSize={pageSize}
           currentPage={page}
-          onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
-          onRefresh={() => setTasks([...mockTasks])}
-          scroll={{ x: 1100 }}
+          onPageChange={(p, s) => {
+            setPage(p);
+            setPageSize(s);
+          }}
+          selectable
+          selectedRowKeys={selectedKeys}
+          onSelectionChange={(keys) => setSelectedKeys(keys)}
+          scroll={{ x: 1500 }}
         />
       </Card>
 
-      <Modal
-        title={t('mr.newCollectTask')}
-        open={createVisible}
-        onOk={handleCreate}
-        onCancel={() => { setCreateVisible(false); form.resetFields(); }}
-        width={520}
-      >
-        <Form form={form} layout="vertical">
-          <Form.Item name="taskName" label={t('mr.taskName')} rules={[{ required: true }]}>
-            <Input placeholder={t('mr.taskNamePlaceholder')} />
-          </Form.Item>
-          <Form.Item name="collectType" label={t('mr.collectType')} rules={[{ required: true }]}>
-            <Select options={[{ label: 'MRO', value: 'MRO' }, { label: 'MRE', value: 'MRE' }, { label: 'MRS', value: 'MRS' }]} />
-          </Form.Item>
-          <Form.Item name="deviceRange" label={t('mr.deviceCount')}>
-            <Input type="number" placeholder={t('mr.deviceCountPlaceholder')} />
-          </Form.Item>
-          <Form.Item name="schedule" label={t('mr.collectSchedule')} rules={[{ required: true }]}>
-            <Select options={[
-              { label: t('mr.every15min'), value: '每15分钟' },
-              { label: t('mr.everyHour'), value: '每小时' },
-              { label: t('mr.dailyAt01'), value: '每天01:00' },
-              { label: t('mr.oneTime'), value: '一次性' },
-            ]} />
-          </Form.Item>
-        </Form>
-      </Modal>
-    </ListPageLayout>
+      <CreateDrawer
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={() => {
+          setCreateOpen(false);
+          void refetch();
+        }}
+      />
+
+      <DetailDrawer
+        taskId={detailTaskId}
+        onClose={() => setDetailTaskId(undefined)}
+      />
+    </Space>
   );
 }

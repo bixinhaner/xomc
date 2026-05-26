@@ -66,6 +66,10 @@ pm:
   periodic_upload_interval: 900
   auto_setup_on_online: true
 
+# F05 MR 测量任务的 scheduler / dispatcher / cleaner 已迁到 app 进程（B 方案，2026-05-25），
+# worker 端不再需要 mr 配置段。Collector（mr.file.received → 解析）仍在 worker，
+# 它本身不读 mr.* 配置。
+
 metrics:
   port: 9092
 

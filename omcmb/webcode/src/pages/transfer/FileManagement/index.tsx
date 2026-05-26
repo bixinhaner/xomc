@@ -5,9 +5,10 @@ import { useSearchParams } from 'react-router-dom';
 import ConfigSnapshotLibrary from '@/pages/backup/ConfigSnapshotLibrary';
 import DeviceLicenseLibrary from '@/pages/backup/DeviceLicenseLibrary';
 import FirmwareUpload from '@/pages/software/FirmwareUpload';
+import MRFilesPage from '@/pages/mr/Files';
 import { useT } from '@/hooks/useT';
 
-const VALID_TABS = new Set(['version', 'config', 'license']);
+const VALID_TABS = new Set(['version', 'config', 'license', 'mr']);
 
 const PANE_STYLE: React.CSSProperties = { paddingTop: 8 };
 
@@ -85,6 +86,11 @@ export default function FileManagementPage() {
             key: 'license',
             label: t('ufte.fileManagement.tab.license'),
             children: <div style={PANE_STYLE}><DeviceLicenseLibrary /></div>,
+          },
+          {
+            key: 'mr',
+            label: t('ufte.fileManagement.tab.mr'),
+            children: <div style={PANE_STYLE}><MRFilesPage embedded /></div>,
           },
         ].filter((item) => !fromUFTE || item.key === activeKey)}
       />

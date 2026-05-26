@@ -65,17 +65,30 @@ func ParseCommandKey(ck string) (CommandKeyKind, string) {
 		return CommandKeyKindUnknown, ""
 	}
 
-	// 新格式：以 `_BACKUP_` 或 `_RESTORE_` 作为分隔，末段为 8-hex。
+	// 新格式：以 `_BACKUP_` 或 `_RESTORE_` 作为分隔，紧跟其后为 8-hex。
+	//
+	// 容忍两种排布，因为 restore_service.go 既会用规范构造
+	// `{cellCode}_RESTORE_{taskID8}`（hex 在末尾），也存在历史捷径写法
+	// `CONFIG_RESTORE_{taskID8}_{sn}`（hex 在中间）。解析时取 `_RESTORE_`
+	// 之后的首段（首个 `_` 前）做 hex 校验即可两种格式兼容。
 	if idx := strings.LastIndex(ck, "_BACKUP_"); idx >= 0 {
 		tail := ck[idx+len("_BACKUP_"):]
-		if hex8Re.MatchString(tail) {
-			return CommandKeyKindBackup, strings.ToLower(tail)
+		head := tail
+		if u := strings.IndexByte(head, '_'); u >= 0 {
+			head = head[:u]
+		}
+		if hex8Re.MatchString(head) {
+			return CommandKeyKindBackup, strings.ToLower(head)
 		}
 	}
 	if idx := strings.LastIndex(ck, "_RESTORE_"); idx >= 0 {
 		tail := ck[idx+len("_RESTORE_"):]
-		if hex8Re.MatchString(tail) {
-			return CommandKeyKindRestore, strings.ToLower(tail)
+		head := tail
+		if u := strings.IndexByte(head, '_'); u >= 0 {
+			head = head[:u]
+		}
+		if hex8Re.MatchString(head) {
+			return CommandKeyKindRestore, strings.ToLower(head)
 		}
 	}
 

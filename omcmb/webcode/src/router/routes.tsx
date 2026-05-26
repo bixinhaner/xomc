@@ -148,7 +148,6 @@ const MRIndicators       = React.lazy(() => import('@/pages/mr/Indicators'));
 const MRDeviceMapping    = React.lazy(() => import('@/pages/mr/DeviceMapping'));
 const MRVariables        = React.lazy(() => import('@/pages/mr/Variables'));
 const MRReports          = React.lazy(() => import('@/pages/mr/Reports'));
-const MRTasks            = React.lazy(() => import('@/pages/mr/Tasks'));
 const MRFiles            = React.lazy(() => import('@/pages/mr/Files'));
 
 // License Management (F06 重构 Step 5 起：仅 singleton 模型)
@@ -374,7 +373,8 @@ export const routes: RouteObject[] = [
       { path: 'mr/device-mapping', element: withSuspense(MRDeviceMapping) },
       { path: 'mr/variables',      element: withSuspense(MRVariables) },
       { path: 'mr/reports',        element: withSuspense(MRReports) },
-      { path: 'mr/tasks',          element: withSuspense(MRTasks) },
+      // mr/tasks 路由已下线（2026-05-25）：MR 任务管理改为内嵌在
+      // /transfer/center 的 "MR 测量" Tab 内（@/pages/mr/Tasks 作为 Panel 组件被 import）
       { path: 'mr/files',          element: withSuspense(MRFiles) },
 
       // License Management — F06 重构 Step 5

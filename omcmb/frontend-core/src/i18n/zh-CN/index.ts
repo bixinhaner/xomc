@@ -2513,6 +2513,16 @@ const messages: Record<string, string> = {
   'mr.recordCount':                 '记录数',
   'mr.filesSubtitle':               '查看设备上报的MR数据文件',
   'mr.batchDownload':               '批量下载 {count} 个文件',
+  'mr.firstCollectTime':            '最早采集时间',
+  'mr.lastCollectTime':             '最近采集时间',
+  'mr.fileCount':                   '文件数',
+  'mr.filesByDevice':               '按设备查看',
+  'mr.deviceFilesTitle':            '{sn} 的 MR 文件',
+  'mr.filterByCollectTime':         '按采集时间筛选',
+  'mr.noFilesInRange':              '所选时间范围内无文件',
+  'mr.viewFiles':                   '查看文件',
+  'mr.batchDownloadHint':           '勾选文件后可批量下载',
+  'mr.searchDeviceSn':              '搜索设备SN',
 
   // -------------------------------------------------------------------------
   // Ops module
@@ -3569,6 +3579,7 @@ const messages: Record<string, string> = {
   'ufte.fileManagement.tab.version':          '版本文件',
   'ufte.fileManagement.tab.config':           '配置文件',
   'ufte.fileManagement.tab.license':          'License 文件',
+  'ufte.fileManagement.tab.mr':               'MR 文件',
   'ufte.form.openFirmwareManager':            '维护升级文件（新窗口）',
   'ufte.form.refreshFirmwares':               '刷新固件列表',
   'ufte.form.selectedCount':                  '已选 {count} 台',
@@ -5082,6 +5093,124 @@ const messages: Record<string, string> = {
   'pmRetention.validate.tooShort':                  '保留天数最少 1 天',
   'pmRetention.validate.tooLong':                   '保留天数最长 3650 天（10 年）',
   'pmRetention.save.success':                       '保存成功，新的保留策略已生效',
+
+  // -------------------------------------------------------------------------
+  // F05 MR 测量任务管理（PRD docs/project/prd/F05-mr-task-management.md）
+  // -------------------------------------------------------------------------
+  'mrTask.page.title':                  'MR 任务管理',
+  'mrTask.page.subtitle':               '管理 MR 测量任务的创建、调度、停止与删除',
+  'mrTask.action.create':               '新建',
+  'mrTask.action.viewDetail':           '查看',
+  'mrTask.action.stop':                 '停止',
+  'mrTask.action.delete':               '删除',
+  'mrTask.action.refresh':              '刷新',
+
+  'mrTask.field.taskId':                '任务 ID',
+  'mrTask.field.taskName':              '任务名称',
+  'mrTask.field.taskNamePlaceholder':   '请输入任务名称',
+  'mrTask.field.status':                '调度状态',
+  'mrTask.field.cellCount':             '涉及网元',
+  'mrTask.field.cellCountValue':        '网元数量={count}',
+  'mrTask.field.startTime':             '计划开始时间',
+  'mrTask.field.endTime':               '计划结束时间',
+  'mrTask.field.endTimeUnlimited':      '无限制',
+  'mrTask.field.updateTime':            '更新时间',
+  'mrTask.field.creator':               '创建者',
+  'mrTask.field.note':                  '备注',
+  'mrTask.field.operatorCode':          '所属运营商',
+  'mrTask.field.measureType':           '测量类型',
+  'mrTask.field.statisPeriod':          '采样周期',
+  'mrTask.field.reportPeriod':          '上报周期',
+  'mrTask.field.reportPeriodSuffix':    '分钟',
+
+  // 任务状态
+  'mrTask.status.waitting':             '待执行',
+  'mrTask.status.on':                   '执行中',
+  'mrTask.status.off':                  '已关闭',
+  'mrTask.status.suspend':              '已挂起',
+  'mrTask.status.termination':          '终止中',
+
+  // 进度状态
+  'mrTask.progress.pending':            '待下发',
+  'mrTask.progress.openSuccess':        '开启成功',
+  'mrTask.progress.openFailure':        '开启失败',
+  'mrTask.progress.closeSuccess':       '关闭成功',
+  'mrTask.progress.closeFailure':       '关闭失败',
+  'mrTask.progress.unsupport':          '平台不支持',
+  'mrTask.progress.timeOut':            '超时',
+  'mrTask.progress.noPermission':       '无权限',
+
+  // 心跳健康状态
+  'mrTask.health.normal':               '正常',
+  'mrTask.health.abnormal':             '异常',
+  'mrTask.health.unknown':              '未知',
+
+  // 新建抽屉
+  'mrTask.create.title':                '新建 MR 测量任务',
+  'mrTask.create.section.basic':        '任务信息',
+  'mrTask.create.section.params':       'MR 参数',
+  'mrTask.create.section.targets':      '目标小站',
+  'mrTask.create.measureTypeHint':      'MRS / MRE / MRO 强制全选（文档 §3.1）',
+  'mrTask.create.targetsRequired':      '请至少选择一个小站',
+  'mrTask.create.targetsCount':         '已选 {count} 个小站',
+  'mrTask.create.endTimeUnlimited':     '不设结束时间',
+  'mrTask.create.success':              '任务创建成功',
+  'mrTask.create.failed':               '任务创建失败',
+
+  // 详情抽屉
+  'mrTask.detail.title':                '任务详情',
+  'mrTask.detail.section.summary':      '任务概要',
+  'mrTask.detail.section.progress':     '小站进度',
+  'mrTask.detail.progress.cellCode':    '小站编码',
+  'mrTask.detail.progress.serialNumber': '设备序列号',
+  'mrTask.detail.progress.hostName':    '设备主机名',
+  'mrTask.detail.progress.status':      '下发结果',
+  'mrTask.detail.progress.health':      '上报心跳',
+  'mrTask.detail.progress.faultCode':   '故障码',
+  'mrTask.detail.progress.lastHeartbeat': '最近上报',
+
+  // 操作确认
+  'mrTask.confirm.stop':                '确认停止任务"{name}"?',
+  'mrTask.confirm.stopHint':            '执行中任务将下发关闭 SPV；待执行任务将直接终止',
+  'mrTask.confirm.delete':              '确认删除任务"{name}"?',
+  'mrTask.confirm.deleteHint':          '仅"已关闭"或"终止中"状态允许删除',
+
+  // 结果提示
+  'mrTask.toast.stopSuccess':           '任务已停止',
+  'mrTask.toast.stopFailed':            '停止任务失败：{msg}',
+  'mrTask.toast.deleteSuccess':         '任务已删除',
+  'mrTask.toast.deleteFailed':          '删除任务失败：{msg}',
+
+  // 文件传输中心 MR 入口聚合
+  'ufte.builtin.category.mr_measurement': 'MR 测量',
+  'mrTask.transferEntry.recentTasks':   '最近 MR 任务',
+  'mrTask.transferEntry.openManagement': '打开 MR 任务管理',
+  'mrTask.transferEntry.empty':         '暂无 MR 任务',
+
+  // 详情抽屉
+  'mrTask.detail.section.targetDevices': '本次任务的目标设备',
+
+  // 目标设备段（CreateDrawer）
+  'mrTask.create.section.targetDevice': '目标设备',
+  'mrTask.field.deviceSn':              '设备 SN',
+  'mrTask.field.deviceName':            '设备名称',
+  'mrTask.field.productClass':          '产品型号',
+  'mrTask.action.batchSnInput':         '批量 SN 输入',
+  'mrTask.placeholder.deviceSearch':    '按 SN / 名称搜索',
+  'mrTask.create.selectedDeviceCount':  '已选 {count} 台',
+  'mrTask.create.targetDeviceRequired': '请选择至少一个目标设备',
+  'mrTask.create.conflictColumn':       '占用任务',
+  'mrTask.create.conflictTooltip':      '已在任务"{name}"中，请先停止该任务或换其它设备',
+  'mrTask.create.conflictHasActive':    '{count} 个设备正被其它任务占用（{samples}），请先排除',
+
+  // 批量 SN 输入弹窗
+  'mrTask.batchSN.title':         '批量 SN 输入',
+  'mrTask.batchSN.hint':          '支持空格 / 逗号 / 分号 / 换行 / Tab 任意分隔；只有命中当前候选名单的 SN 会被加入。',
+  'mrTask.batchSN.placeholder':   '每行一个 SN，或用逗号/分号分隔',
+  'mrTask.batchSN.applyOk':       '加入选择',
+  'mrTask.batchSN.emptyInput':    '请粘贴 SN（支持空格 / 逗号 / 分号 / 换行分隔）',
+  'mrTask.batchSN.partialHits':   '{hits} 个 SN 已加入选择；{misses} 个不在当前候选名单：{samples}',
+  'mrTask.batchSN.allHits':       '已加入 {count} 个设备',
 };
 
 export default messages;

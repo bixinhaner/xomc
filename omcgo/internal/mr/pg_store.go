@@ -52,6 +52,82 @@ func (s *PgMRStore) UpdateFileParsed(ctx context.Context, fileID uuid.UUID, reco
 	return nil
 }
 
+// ListFileDeviceAggregates 按 device_sn 聚合查询。每设备 1 行，含起止 collect_time + 文件数。
+func (s *PgMRStore) ListFileDeviceAggregates(ctx context.Context, filter MRFileDeviceFilter) (*model.ListResponse[MRFileDeviceAggregate], error) {
+	// 先 count distinct device_sn 给分页用
+	countSQL := `SELECT COUNT(*) FROM (SELECT device_sn FROM mr_files`
+	args := make([]interface{}, 0, 2)
+	wherePieces := make([]string, 0, 1)
+	if filter.Keyword != nil && *filter.Keyword != "" {
+		wherePieces = append(wherePieces, `device_sn ILIKE $1`)
+		args = append(args, "%"+*filter.Keyword+"%")
+	}
+	whereClause := ""
+	if len(wherePieces) > 0 {
+		whereClause = " WHERE " + wherePieces[0]
+	}
+	countSQL += whereClause + ` GROUP BY device_sn) AS sub`
+
+	var total int64
+	if err := s.pool.QueryRow(ctx, countSQL, args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count mr_files devices: %w", err)
+	}
+
+	page := filter.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := filter.PageSize
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 1000 {
+		pageSize = 1000
+	}
+
+	listSQL := `SELECT device_sn,
+	                  MIN(collect_time) AS first_collect_time,
+	                  MAX(collect_time) AS last_collect_time,
+	                  COUNT(*)::bigint  AS file_count
+	            FROM mr_files` + whereClause + `
+	            GROUP BY device_sn
+	            ORDER BY MAX(collect_time) DESC
+	            LIMIT $` + fmt.Sprintf("%d", len(args)+1) + ` OFFSET $` + fmt.Sprintf("%d", len(args)+2)
+	args = append(args, pageSize, (page-1)*pageSize)
+
+	rows, err := s.pool.Query(ctx, listSQL, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list mr_files devices: %w", err)
+	}
+	defer rows.Close()
+	items := make([]MRFileDeviceAggregate, 0)
+	for rows.Next() {
+		var a MRFileDeviceAggregate
+		if err := rows.Scan(&a.DeviceSN, &a.FirstCollectTime, &a.LastCollectTime, &a.FileCount); err != nil {
+			return nil, fmt.Errorf("scan mr_files devices row: %w", err)
+		}
+		items = append(items, a)
+	}
+	return model.NewListResponse(items, total, page, pageSize), nil
+}
+
+// DeleteFilesBefore 删除 collect_time < cutoff 的 mr_files 行。返回删除行数。
+// 由 internal/mr/task/cleaner.go 在 MinIO 目录清理后调用，保持 MinIO 与 PG 一致。
+//
+// 注意：mr_records 是 TimescaleDB hypertable，通常按 time 列分区。本方法仅删
+// mr_files 元数据行；记录表的清理由 TimescaleDB retention policy 单独管（详见
+// migrations/000006_alarms_mr_firmware.sql 中 mr_records 的 add_retention_policy）。
+func (s *PgMRStore) DeleteFilesBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM mr_files WHERE collect_time < $1`,
+		cutoff,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("delete mr_files before %s: %w", cutoff.Format(time.RFC3339), err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 func (s *PgMRStore) BatchInsertRecords(ctx context.Context, fileID, deviceID uuid.UUID, mrType string, records []parser.MRRecord) error {
 	if len(records) == 0 {
 		return nil
@@ -103,6 +179,10 @@ func (s *PgMRStore) ListFiles(ctx context.Context, filter MRFileFilter) (*model.
 	if filter.DeviceID != nil {
 		qb = qb.Where(squirrel.Eq{"device_id": *filter.DeviceID})
 		countQb = countQb.Where(squirrel.Eq{"device_id": *filter.DeviceID})
+	}
+	if filter.DeviceSN != nil {
+		qb = qb.Where(squirrel.Eq{"device_sn": *filter.DeviceSN})
+		countQb = countQb.Where(squirrel.Eq{"device_sn": *filter.DeviceSN})
 	}
 	if filter.MRType != nil {
 		qb = qb.Where(squirrel.Eq{"mr_type": *filter.MRType})

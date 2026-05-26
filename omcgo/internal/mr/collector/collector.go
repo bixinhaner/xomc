@@ -10,6 +10,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	coremodel "github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/mr"
 	"github.com/omcgo/omcgo/internal/mr/parser"
 	"go.uber.org/zap"
@@ -26,12 +27,19 @@ type MRFilePayload struct {
 	FileSize   int64  `json:"file_size"`
 }
 
+// DeviceLookup 抽象按 SN 查设备的能力。device.DeviceRepository 满足。
+// 用于 payload.DeviceID 为空时（如 acs/upload 直传路径）由 collector 自己查。
+type DeviceLookup interface {
+	GetBySerialNumber(ctx context.Context, sn string) (*coremodel.Device, error)
+}
+
 // MRCollector handles MR file download, type detection, parsing, and storage.
 type MRCollector struct {
 	minioClient *minio.Client
 	bucket      string
 	parsers     map[string]parser.MRParser
 	store       mr.MRStore
+	devices     DeviceLookup // 可 nil；nil 时强制要求 payload.DeviceID 非空
 	eventBus    event.EventBus
 	logger      *zap.Logger
 }
@@ -57,6 +65,13 @@ func NewMRCollector(
 		eventBus:    eventBus,
 		logger:      logger,
 	}
+}
+
+// SetDeviceLookup 注入设备查询能力（可选）。注入后 payload.DeviceID 为空时
+// collector 会按 device_sn 反查 device_id / carrier。
+// 不注入则 payload.DeviceID 必须非空（保留旧 transfer/bridge 路径行为）。
+func (c *MRCollector) SetDeviceLookup(d DeviceLookup) {
+	c.devices = d
 }
 
 // Subscribe registers the collector for MR file received events.
@@ -91,9 +106,32 @@ func (c *MRCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 		return err
 	}
 
-	deviceID, err := uuid.Parse(payload.DeviceID)
-	if err != nil {
-		return fmt.Errorf("parse device_id: %w", err)
+	var deviceID uuid.UUID
+	carrier := payload.Carrier
+	if payload.DeviceID != "" {
+		var perr error
+		deviceID, perr = uuid.Parse(payload.DeviceID)
+		if perr != nil {
+			return fmt.Errorf("parse device_id: %w", perr)
+		}
+	} else if c.devices != nil && payload.DeviceSN != "" {
+		// upload handler 直传路径：payload 不带 device_id，按 SN 反查
+		dev, derr := c.devices.GetBySerialNumber(ctx, payload.DeviceSN)
+		if derr != nil {
+			return fmt.Errorf("lookup device by sn %s: %w", payload.DeviceSN, derr)
+		}
+		if dev == nil {
+			c.logger.Warn("MR file uploaded but device not found; skipping",
+				zap.String("device_sn", payload.DeviceSN),
+				zap.String("file", payload.FileName))
+			return nil
+		}
+		deviceID = dev.ID
+		if carrier == "" {
+			carrier = string(dev.Carrier)
+		}
+	} else {
+		return fmt.Errorf("mr file payload missing device_id and no DeviceLookup wired")
 	}
 
 	// Save file metadata
@@ -108,7 +146,7 @@ func (c *MRCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 		ID:          fileID,
 		DeviceID:    deviceID,
 		DeviceSN:    payload.DeviceSN,
-		Carrier:     payload.Carrier,
+		Carrier:     carrier,
 		MRType:      mrType,
 		FileName:    payload.FileName,
 		FileSize:    payload.FileSize,
@@ -134,7 +172,7 @@ func (c *MRCollector) handleFileReceived(ctx context.Context, evt event.Event) e
 		return fmt.Errorf("no parser for MR type: %s", mrType)
 	}
 
-	carrierCode := model.CarrierCode(payload.Carrier)
+	carrierCode := model.CarrierCode(carrier)
 	data, err := p.Parse(obj, carrierCode)
 	if err != nil {
 		c.logger.Warn("parse MR file",

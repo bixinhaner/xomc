@@ -30,6 +30,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useT } from '@/hooks/useT';
 
 import ListPageLayout from '@/components/Layout/ListPageLayout';
+import MRTasksPanel from '@/pages/mr/Tasks';
 import {
   useBatchDeleteUfteTasks,
   useCreateUnifiedFileTransferTask,
@@ -167,7 +168,21 @@ export default function FileTransferCenter() {
   const lastAutoFilledTaskNameRef = useRef<string>('');
   const { data: taskTypes = [], isLoading: taskTypesLoading } = useUnifiedFileTransferTaskTypes();
   const { data: productClasses = [] } = useProductClasses();
-  const categories = useMemo(() => buildCategoryTabs(taskTypes), [taskTypes]);
+  // 原始 categories 来自后端 ufte_task_types，新增一个虚拟分类 "mr_measurement"
+  // 作为入口聚合按钮（点击跳到独立的 MR 任务管理页 /mr/tasks）。MR 不走 UFTE
+  // 任务模板（PRD F05 决策 A — 独立引擎），这里只做"入口聚合"。
+  const categories = useMemo(() => {
+    const base = buildCategoryTabs(taskTypes);
+    // 末位插入虚拟项；templateCount=0 让现有 UFTE 模板渲染逻辑识别"无模板"
+    return [
+      ...base,
+      {
+        category: 'mr_measurement',
+        categoryLabel: 'MR 测量', // 通过 localizeBuiltinCategoryLabel 翻译
+        templateCount: 0,
+      },
+    ];
+  }, [taskTypes]);
   // URL 参数初始化：?category=...&typeCode=... 用于外部 deep link（如
   // 设备列表批量"日志收集"自动跳到 station_log + RUNTIME_LOG_COLLECT tab）。
   const [urlSearchParams] = useSearchParams();
@@ -186,6 +201,8 @@ export default function FileTransferCenter() {
   const [deviceProductClassFilter, setDeviceProductClassFilter] = useState<string>();
   const [viewMode, setViewMode] = useState<'tasks' | 'devices'>('tasks');
   const [taskDrawerOpen, setTaskDrawerOpen] = useState(false);
+  // MR 测量 Tab 的新建抽屉 — 受控状态，让顶部 "New Task" 按钮接管打开（与 UFTE 风格一致）
+  const [mrCreateOpen, setMrCreateOpen] = useState(false);
   const [taskForm] = Form.useForm<CreateUnifiedFileTransferTaskInput>();
   const drawerTypeCode = Form.useWatch('typeCode', taskForm);
   const drawerProductClass = Form.useWatch('productClass', taskForm);
@@ -1194,8 +1211,19 @@ export default function FileTransferCenter() {
         <Button
           type="primary"
           icon={<PlusOutlined />}
-          onClick={() => openTaskDrawer()}
-          disabled={taskTypesLoading || !activeTaskType}
+          onClick={() => {
+            // MR 测量 Tab：打开 MR 创建抽屉；其它 Tab：走 UFTE 任务抽屉
+            if (selectedCategory === 'mr_measurement') {
+              setMrCreateOpen(true);
+              return;
+            }
+            openTaskDrawer();
+          }}
+          disabled={
+            selectedCategory === 'mr_measurement'
+              ? false // MR 不依赖 activeTaskType
+              : (taskTypesLoading || !activeTaskType)
+          }
         >
           {t('ufte.action.newTask')}
         </Button>
@@ -1213,14 +1241,25 @@ export default function FileTransferCenter() {
               }))}
               onChange={(key) => setSelectedCategory(key)}
             />
-            <Tabs
-              activeKey={selectedTypeCode}
-              items={templateTabItems}
-              onChange={(key) => setSelectedTypeCode(key)}
-            />
+            {/* MR 测量 Tab 选中时：① 不显示 UFTE 模板子 Tab，② 直接在 Tabs 下方
+                内联渲染 MR 任务管理面板（视觉上就是 Tab 切换内容）。 */}
+            {selectedCategory === 'mr_measurement' ? (
+              <MRTasksPanel
+                createOpen={mrCreateOpen}
+                onCreateOpenChange={setMrCreateOpen}
+              />
+            ) : (
+              <Tabs
+                activeKey={selectedTypeCode}
+                items={templateTabItems}
+                onChange={(key) => setSelectedTypeCode(key)}
+              />
+            )}
           </Space>
         </Card>
 
+        {/* 下方"任务列表 / 设备列表"区域：MR 测量 Tab 选中时隐藏（MR 已内嵌在上方 Card） */}
+        {selectedCategory !== 'mr_measurement' && (
         <Card title={t('ufte.card.executionView')}>
           <Tabs
             activeKey={viewMode}
@@ -1407,6 +1446,7 @@ export default function FileTransferCenter() {
             ]}
           />
         </Card>
+        )}
       </Space>
 
       <Drawer

@@ -56,6 +56,25 @@ func (r *PgRepository) GetParamModelByName(ctx context.Context, name string) (*P
 	return &m, nil
 }
 
+// GetParamModelByID 按主键查 param_model（F05 MR dispatcher 用于
+// productClass → product.ParamModelID → param_models.name 链路）。
+func (r *PgRepository) GetParamModelByID(ctx context.Context, id uuid.UUID) (*ParamModel, error) {
+	const q = `SELECT id, name, total_entries, total_objects, total_params,
+	                 COALESCE(description,''), is_active, COALESCE(loaded_from,'')
+	          FROM param_models WHERE id = $1`
+	var m ParamModel
+	if err := r.pool.QueryRow(ctx, q, id).Scan(
+		&m.ID, &m.Name, &m.TotalEntries, &m.TotalObjects, &m.TotalParams,
+		&m.Description, &m.IsActive, &m.LoadedFrom,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNoParamModel
+		}
+		return nil, fmt.Errorf("get param_model id=%s: %w", id, err)
+	}
+	return &m, nil
+}
+
 // UpdateParamModelMeta 仅更新元信息（description / is_active），不动统计字段。
 func (r *PgRepository) UpdateParamModelMeta(ctx context.Context, name string, description *string, isActive *bool) (*ParamModel, error) {
 	psql := sq.StatementBuilder.PlaceholderFormat(sq.Dollar)

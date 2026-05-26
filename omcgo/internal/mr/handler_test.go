@@ -75,6 +75,17 @@ func (m *mockMRStore) QueryRecords(ctx context.Context, filter MRRecordFilter) (
 	return &model.ListResponse[MRRecordEntry]{Items: []MRRecordEntry{}, Total: 0, Page: 1, PageSize: 20, TotalPages: 0}, nil
 }
 
+// DeleteFilesBefore — F05 cleaner 集成新增的接口方法（P4.1）。
+// mock 默认无副作用，返 (0, nil)；如需断言可在此 struct 加 deleteFilesBeforeFn 字段。
+func (m *mockMRStore) DeleteFilesBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	return 0, nil
+}
+
+// ListFileDeviceAggregates — File Management MR Tab 新增接口方法。
+func (m *mockMRStore) ListFileDeviceAggregates(ctx context.Context, filter MRFileDeviceFilter) (*model.ListResponse[MRFileDeviceAggregate], error) {
+	return &model.ListResponse[MRFileDeviceAggregate]{Items: []MRFileDeviceAggregate{}, Total: 0, Page: 1, PageSize: 20, TotalPages: 0}, nil
+}
+
 // ---------------------------------------------------------------------------
 
 type mockIndicatorRepo struct {

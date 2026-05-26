@@ -682,14 +682,41 @@ func (e *UpgradeExecutor) ExecuteOneSetParamCollect(ctx context.Context, subTask
 				zap.String("standard_path", paramPath),
 				zap.Error(terr))
 		case len(translated) > 0:
-			dispatchPath = translated[0].Private
+			// 容错：翻译表里若存在 standardPath → "" 这类脏数据（不应发生但要兜底），
+			// 不能把空字符串当作合法 privatePath 下发——CPE 会回 "Empty parameter list"。
+			// 此处直接退化为 standardPath passthrough，并 WARN 出来便于查脏数据。
+			if translated[0].Private == "" {
+				e.logger.Warn("translator returned empty privatePath; falling back to standardPath",
+					zap.String("device_sn", dev.SerialNumber),
+					zap.String("product_class", dev.ProductClass),
+					zap.String("software_version", dev.FirmwareVersion),
+					zap.String("standard_path", translated[0].Standard),
+					zap.String("source", translated[0].Source))
+			} else {
+				dispatchPath = translated[0].Private
+			}
 			e.logger.Info("path translated for SPV collect",
 				zap.String("device_sn", dev.SerialNumber),
 				zap.String("product_class", dev.ProductClass),
+				zap.String("software_version", dev.FirmwareVersion),
 				zap.String("standard_path", translated[0].Standard),
 				zap.String("private_path", translated[0].Private),
+				zap.String("dispatch_path", dispatchPath),
 				zap.String("source", translated[0].Source))
 		}
+	}
+
+	// 最终防线：dispatchPath 必须非空。SOAP 渲染会照搬 Name 字段，空串
+	// 直接进 <Name></Name> → CPE 回 "Empty parameter list"，任务报错后还
+	// 不知道为啥失败。此处直接 fail，并把 productClass / standardPath 全打到
+	// failure_reason 里，便于运维查脏数据 / 漏映射。
+	if dispatchPath == "" {
+		e.releaseDeviceLock(ctx, dev.SerialNumber)
+		msg := fmt.Sprintf("SPV log-collect aborted: empty dispatch path (productClass=%s, fw=%s, standardPath=%q). Check param_mappings or task_type url_template.",
+			dev.ProductClass, dev.FirmwareVersion, paramPath)
+		e.logger.Error(msg, zap.String("device_sn", dev.SerialNumber))
+		e.failSubTask(ctx, subTask, msg, FailureInternalError)
+		return
 	}
 
 	// 构造 SetParameterValues 命令：参数 = dispatchPath（翻译后的 privatePath），值 = uploadURL。
@@ -877,15 +904,40 @@ func (e *UpgradeExecutor) HandleFileLandedForCollect(ctx context.Context, evt ev
 	if err != nil || dev == nil {
 		return nil
 	}
-	subTask, err := e.subTaskRepo.GetActiveByDeviceID(ctx, dev.ID)
-	if err != nil || subTask == nil {
+	// 按 (parent_task_id, device_id) 精确查 sub_task，不能用 GetActiveByDeviceID。
+	// 后者的 fan-out 顺序是 upgrade → config_backup → runtime_log → fault_log → config_restore；
+	// 一旦设备在前面的表里残留 pending sub_task（多业务表并存场景实测会发生：
+	// 老的 CONFIG_BACKUP / CONFIG_RESTORE pending 没清理），fan-out 直接返回那个，
+	// 永远走不到 fault_log_collect_sub_tasks → 当前 SPV 任务的 sub_task 推不动 →
+	// 反器 15 分钟后兜底标 failed → 用户看到"Awaiting TransferComplete"15 分钟后变失败。
+	listResp, err := e.subTaskRepo.ListByTaskID(ctx, parentID, SubTaskFilter{
+		ListRequest: model.DefaultListRequest(),
+	})
+	if err != nil || listResp == nil {
+		e.logger.Warn("file landed: list sub_tasks by parent_task_id failed",
+			zap.String("parent_task_id", parentID.String()),
+			zap.Error(err))
 		return nil
 	}
-	if subTask.TaskID != parentID {
-		// 在途任务不是当前事件所属的主任务（设备同时在跑别的 LogCollect 任务）→ 不动。
+	var subTask *UpgradeSubTask
+	for i := range listResp.Items {
+		if listResp.Items[i].DeviceID == dev.ID {
+			subTask = &listResp.Items[i].UpgradeSubTask
+			break
+		}
+	}
+	if subTask == nil {
+		e.logger.Warn("file landed: no sub_task matches (parent_task_id, device_id)",
+			zap.String("parent_task_id", parentID.String()),
+			zap.String("device_id", dev.ID.String()),
+			zap.String("device_sn", payload.DeviceSN),
+			zap.Int("scanned", len(listResp.Items)))
 		return nil
 	}
 	if subTask.Status != UpgradeUploading {
+		e.logger.Info("file landed: sub_task not in uploading status, skip",
+			zap.String("sub_task_id", subTask.ID.String()),
+			zap.String("status", string(subTask.Status)))
 		return nil
 	}
 

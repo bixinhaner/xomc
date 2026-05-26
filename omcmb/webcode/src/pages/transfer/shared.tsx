@@ -65,6 +65,8 @@ const BUILTIN_TYPE_CODES = new Set([
 const BUILTIN_CATEGORY_CODES = new Set([
   'enb_upgrade', 'gnb_upgrade', 'version_rollback',
   'station_log', 'config_backup', 'config_restore', 'license_upgrade',
+  // F05：MR 测量虚拟分类（不走 UFTE 模板，作为入口聚合按钮跳到 /mr/tasks）
+  'mr_measurement',
 ]);
 
 /** 内置 taskType displayName 翻译。非内置 typeCode（用户自定义）原样返回 fallback。 */
@@ -110,6 +112,7 @@ export const DEFAULT_CATEGORY_ORDER = [
   'station_log',
   'config_backup',
   'config_restore',
+  'mr_measurement', // F05 末位
 ];
 
 // typeCode 子 tab 顺序由后端 ufte_task_types.sort_order 字段控制

@@ -78,6 +78,14 @@ export interface MRFileItem {
   createdAt: string;
 }
 
+/** MR 文件按设备聚合视图（GET /mr/files/devices）。 */
+export interface MRFileDeviceItem {
+  deviceSn: string;
+  firstCollectTime: string;
+  lastCollectTime: string;
+  fileCount: number;
+}
+
 // MR data record (matches mock MRRecord shape)
 export interface MRDataRecord {
   id: string;
@@ -155,6 +163,7 @@ export const mrApi = {
       page: params.page,
       pageSize: params.pageSize,
     };
+    if (params.deviceSn) query.device_sn = params.deviceSn;
     if (params.mrType) query.mr_type = params.mrType;
     if (params.timeRange) {
       query.start_time = params.timeRange[0];
@@ -206,6 +215,38 @@ export const mrApi = {
   },
 
   // MR file download (blob)
+  // 设备聚合视图（File Management → MR Tab 主列表）
+  async getFileDevices(
+    params: { keyword?: string } & PageRequest,
+  ): Promise<PageResponse<MRFileDeviceItem>> {
+    const query: Record<string, unknown> = {
+      page: params.page,
+      pageSize: params.pageSize,
+    };
+    if (params.keyword) query.keyword = params.keyword;
+    interface BackendMRFileDevice {
+      device_sn: string;
+      first_collect_time: string;
+      last_collect_time: string;
+      file_count: number;
+    }
+    const { data } = await http.get<BackendListResponse<BackendMRFileDevice>>(
+      '/mr/files/devices',
+      { params: query },
+    );
+    return {
+      items: (data.items || []).map((d) => ({
+        deviceSn: d.device_sn,
+        firstCollectTime: d.first_collect_time,
+        lastCollectTime: d.last_collect_time,
+        fileCount: d.file_count,
+      })),
+      total: data.total,
+      page: data.page,
+      pageSize: data.page_size,
+    };
+  },
+
   async downloadFile(fileId: string): Promise<void> {
     const response = await http.get(`/mr/files/${fileId}/download`, {
       responseType: 'blob',
@@ -218,7 +259,10 @@ export const mrApi = {
       : `mr_${fileId}.xml`;
 
     // Trigger browser download
-    const url = window.URL.createObjectURL(new Blob([response.data as BlobPart]));
+    // Blob 必须显式带 type，否则 Chrome 会按 text/html 推断给 link.download 加 .html 后缀。
+    const url = window.URL.createObjectURL(
+      new Blob([response.data as BlobPart], { type: 'application/octet-stream' }),
+    );
     const link = document.createElement('a');
     link.href = url;
     link.download = filename || `mr_${fileId}.xml`;

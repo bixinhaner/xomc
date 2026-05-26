@@ -189,7 +189,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var objectPath string
-	if category != "" {
+	// F05 MR 走专用路径 {deviceSN}/{filename}（桶名 mr-files 自带模块归属，无需日期层级）
+	if ft == tr069.FileTypeMR {
+		querySN := r.URL.Query().Get("sn")
+		if querySN == "" {
+			querySN = "unknown"
+		}
+		objectPath = storage.MRObjectPath(querySN, filename)
+	} else if category != "" {
 		objectPath = fmt.Sprintf("%s/%s/%s%s", category, now.Format("2006/01/02"), taskSubdir, filename)
 	} else {
 		objectPath = fmt.Sprintf("%s/%s%s", now.Format("2006/01/02"), taskSubdir, filename)
@@ -351,6 +358,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			deviceSN = extractDeviceSNFromPMFilename(filename)
 		}
 		h.publishPMFileReceivedEvent(ctx, bucket, objectPath, filename, info.Size, deviceSN)
+	}
+
+	// 6.5. F05 MR Task: publish mr.file.uploaded with cellCode so the mr/task
+	// HeartbeatSubscriber can set Redis MRFileReport_{cellCode} TTL and bump
+	// PG last_heartbeat. cellCode comes from the URL query that OMC put into
+	// the device's MrUrl when opening the task.
+	if ft == tr069.FileTypeMR && h.eventBus != nil {
+		h.publishMRFileUploadedEvent(ctx, bucket, objectPath, filename,
+			r.URL.Query().Get("cellCode"), r.URL.Query().Get("sn"), info.Size)
+		// 同时发 mr.file.received，让 mr.Collector 走"下载 + 解析 + 入库"链路。
+		// device_id 留空，由 collector 注入的 DeviceLookup 按 SN 反查。
+		h.publishMRFileReceivedEvent(ctx, bucket, objectPath, filename,
+			r.URL.Query().Get("sn"), info.Size)
 	}
 
 	// 7. Return success
@@ -767,6 +787,77 @@ func extractDeviceSNFromPMFilename(filename string) string {
 		return m[1]
 	}
 	return ""
+}
+
+// publishMRFileReceivedEvent emits SubjectMRFileReceived for fileType=MR direct
+// uploads (CPE → OMC HTTP POST). With this, mr.Collector treats direct-upload
+// MR files identically to the transfer/bridge AutonomousTransferComplete path:
+// download from MinIO, detect MRO/MRS/MRE, parse XML, batch-insert mr_records.
+//
+// device_id is left empty because the upload handler doesn't have device repo
+// injection; mr.Collector's DeviceLookup (wired in cmd/worker) resolves it
+// from device_sn → device_id / carrier at consumption time.
+func (h *Handler) publishMRFileReceivedEvent(
+	ctx context.Context, bucket, objectPath, filename, deviceSN string, fileSize int64,
+) {
+	payload := map[string]interface{}{
+		"minio_path": objectPath,
+		"bucket":     bucket,
+		"device_id":  "", // 留空，让 collector 按 device_sn 反查
+		"device_sn":  deviceSN,
+		"carrier":    "", // 同上，由 collector 从 device 实体回填
+		"file_name":  filename,
+		"file_size":  fileSize,
+	}
+	evt, err := event.NewEvent(event.SubjectMRFileReceived, payload)
+	if err != nil {
+		h.logger.Error("create mr.file.received event", zap.Error(err))
+		return
+	}
+	if err := h.eventBus.Publish(ctx, event.SubjectMRFileReceived, evt); err != nil {
+		h.logger.Error("publish mr.file.received", zap.Error(err))
+		return
+	}
+	h.logger.Info("published mr.file.received",
+		zap.String("device_sn", deviceSN),
+		zap.String("path", objectPath))
+}
+
+// publishMRFileUploadedEvent emits SubjectMRFileUploaded after a fileType=MR
+// upload lands in MinIO. The mr/task HeartbeatSubscriber consumes it to refresh
+// the Redis MRFileReport_{cellCode} TTL and call repo.TouchHeartbeat.
+//
+// cellCode is sourced from the URL query (OMC set it in MrUrl when opening the
+// MR task via SPV). Empty cellCode → skip publish (defensive — the device sent
+// a non-task-driven MR file; no progress row to update).
+func (h *Handler) publishMRFileUploadedEvent(
+	ctx context.Context, bucket, objectPath, filename, cellCode, deviceSN string, fileSize int64,
+) {
+	if cellCode == "" {
+		h.logger.Debug("skip mr.file.uploaded: empty cellCode",
+			zap.String("path", objectPath), zap.String("filename", filename))
+		return
+	}
+	payload := map[string]interface{}{
+		"bucket":      bucket,
+		"object_path": objectPath,
+		"file_name":   filename,
+		"cell_code":   cellCode,
+		"device_sn":   deviceSN,
+		"file_size":   fileSize,
+	}
+	evt, err := event.NewEvent(event.SubjectMRFileUploaded, payload)
+	if err != nil {
+		h.logger.Error("create mr.file.uploaded event", zap.Error(err))
+		return
+	}
+	if err := h.eventBus.Publish(ctx, event.SubjectMRFileUploaded, evt); err != nil {
+		h.logger.Error("publish mr.file.uploaded", zap.Error(err))
+		return
+	}
+	h.logger.Info("published mr.file.uploaded",
+		zap.String("cell_code", cellCode),
+		zap.String("path", objectPath))
 }
 
 // publishLogFileReceivedEvent emits SubjectLogFileReceived after a

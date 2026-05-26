@@ -33,6 +33,7 @@ import (
 	"github.com/omcgo/omcgo/internal/license"
 	"github.com/omcgo/omcgo/internal/mml"
 	"github.com/omcgo/omcgo/internal/mr"
+	mrtask "github.com/omcgo/omcgo/internal/mr/task"
 	"github.com/omcgo/omcgo/internal/nedirect"
 	"github.com/omcgo/omcgo/internal/northbound"
 	"github.com/omcgo/omcgo/internal/northbound/push"
@@ -66,6 +67,90 @@ func initMRModule(c *Container) error {
 	c.miscDeps.mrMapRepo = mrMapRepo
 
 	logger.Info("MR module initialized")
+	return nil
+}
+
+// initMRTaskModule 装配 F05 MR 测量任务的调度链路：
+//   - Dispatcher：standardPath → ToPrivate → SPV 派发
+//   - Scheduler：@every 30s 触发开/关/心跳巡检（Redis SETNX 锁防并发）
+//   - HeartbeatSubscriber：订阅 mr.file.uploaded 写 Redis + PG 心跳
+//   - Cleaner：@daily 删超期 MR 文件
+//
+// 与 misc 模块的 CompletionRouter 注册解耦：mrtask CompletionCallback 在
+// initMiscModules 内部跟 MML aggregator 一起注册（共用 task.TaskSourceSystem）。
+//
+// 依赖项（ModuleGraph 强制 Depends）：
+//   - "paramregistry"：dispatcher 通过 TranslatorResolver 调 c.ParamRegistry
+//   - "productregistry"：同上，参与 productClass → product.id 匹配
+//   - "device"：c.DeviceRepo 已初始化
+//   - "task"：c.TaskSvc 已初始化（dispatcher 的 Enqueuer）
+//   - "misc"：CompletionRouter 已就绪（虽然回调注册在 misc 内部，本模块装配
+//     时只需要 TaskService / Repo，不直接读 CompletionRouter）
+func initMRTaskModule(c *Container) error {
+	logger := c.Logger.Named("mr-task")
+
+	mrCfg := c.Cfg.MR.Defaults()
+	taskRepo := mrtask.NewPgRepository(c.PgPool)
+	// Prometheus 指标（4 + 2 共 6 个）；c.MetricsReg 为 nil 时所有 IncXxx 退化为 no-op。
+	metrics := mrtask.NewMetrics(c.MetricsReg)
+
+	// Dispatcher：负责把 mrtask 操作转成 SPV，路径走 ParamRegistry 翻译。
+	dispatcher := mrtask.NewDispatcher(
+		mrCfg,
+		c.TaskSvc,
+		NewMRDeviceContext(c.DeviceRepo),
+		NewMRTranslatorResolver(c.ProductRegistry, c.ParamRegistry, logger),
+		taskRepo,
+		logger,
+	)
+	dispatcher.SetMetrics(metrics)
+	// 平台判断走"productClass → ProductRegistry → param_model.name → 允许列表"。
+	// c.ParamModelRepo 由 paramregistry 模块初始化（PgRepository）。
+	dispatcher.SetPlatformResolver(NewMRPlatformResolver(c.ProductRegistry, c.ParamModelRepo, logger))
+
+	// Scheduler：3 个 cron entry（open / close / heartbeat），Redis SETNX 互斥
+	scheduler := mrtask.NewScheduler(taskRepo, dispatcher, c.Redis,
+		mrtask.SchedulerConfig{
+			IntervalSeconds:        mrCfg.SchedulerIntervalSeconds,
+			HeartbeatMissThreshold: mrCfg.HeartbeatMissThreshold,
+		}, logger)
+	scheduler.SetMetrics(metrics)
+	// 简化模型：scheduler 在开启任务时从 mr_device_mappings 动态枚举 enabled cell
+	if c.miscDeps.mrMapRepo != nil {
+		scheduler.SetMappings(c.miscDeps.mrMapRepo)
+	}
+	if err := scheduler.Start(context.Background()); err != nil {
+		// Start 失败一般是 cron 注册错误，属配置类错误 — 升级为 error
+		// 避免静默漂移（与 worker 端原行为对齐）。
+		logger.Error("mr scheduler start failed", zap.Error(err))
+	} else {
+		logger.Info("mr scheduler started", zap.Int("interval_sec", mrCfg.SchedulerIntervalSeconds))
+	}
+
+	// HeartbeatSubscriber：订阅 mr.file.uploaded → Redis SET + PG TouchHeartbeat
+	heartbeat := mrtask.NewHeartbeatSubscriber(taskRepo, c.Redis, c.EventBus, c.Deduper, logger)
+	heartbeat.SetMetrics(metrics)
+	if err := heartbeat.Subscribe(); err != nil {
+		logger.Warn("mr heartbeat subscribe failed", zap.Error(err))
+	} else {
+		logger.Info("mr heartbeat subscriber started")
+	}
+
+	// Cleaner：@daily 删超期 MinIO 对象 + 同步删 mr_files PG 行
+	cleaner := mrtask.NewCleaner(c.MinIO, c.miscDeps.mrStore, mrtask.CleanerConfig{
+		Bucket:   c.Cfg.MinIO.Buckets.MRFiles,
+		SaveDays: mrCfg.FileSaveDays,
+	}, logger)
+	cleaner.SetMetrics(metrics)
+	if err := cleaner.Start(context.Background()); err != nil {
+		logger.Warn("mr cleaner start failed", zap.Error(err))
+	} else {
+		logger.Info("mr cleaner started", zap.Int("save_days", mrCfg.FileSaveDays))
+	}
+
+	// 暴露 repo 给 router.go 注册 REST handler（initMRTaskModule 也接管原 router.go
+	// 里直接 NewPgRepository 的那行 — 避免双实例）。
+	c.miscDeps.mrTaskRepo = taskRepo
 	return nil
 }
 
@@ -1166,6 +1251,14 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 			if c.miscDeps.provisionEngine != nil {
 				c.miscDeps.completionRouter.Register(task.TaskSourceSystem, c.miscDeps.provisionEngine)
 			}
+			// F05 MR 任务：SPV 完成事件按 CommandKey 前缀 mr-open- / mr-close- 触发
+			// progress 状态回写。复用 source=system（与 provision 共享通道），按 key 前缀过滤。
+			// 复用 initMRTaskModule 已构造的 repo 实例，避免双开 pool。
+			if c.miscDeps.mrTaskRepo != nil {
+				c.miscDeps.completionRouter.Register(task.TaskSourceSystem,
+					mrtask.NewCompletionCallback(c.miscDeps.mrTaskRepo, logger))
+			}
+
 			bridge := task.NewCompletionEventBridge(logger, c.miscDeps.completionRouter, c.Deduper)
 			if err := bridge.Subscribe(c.EventBus); err != nil {
 				logger.Warn("subscribe task completion bridge", zap.Error(err))
@@ -1438,9 +1531,10 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 // These are populated by initMiscModules and consumed during route registration.
 type miscDeps struct {
 	// MR
-	mrStore   *mr.PgMRStore
-	mrIndRepo *mr.PgIndicatorRepository
-	mrMapRepo *mr.PgMappingRepository
+	mrStore    *mr.PgMRStore
+	mrIndRepo  *mr.PgIndicatorRepository
+	mrMapRepo  *mr.PgMappingRepository
+	mrTaskRepo *mrtask.PgRepository // F05 任务管理（initMRTaskModule 装配）
 
 	// Software
 	softwareHandler     *software.Handler

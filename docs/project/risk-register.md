@@ -265,6 +265,38 @@
 - **未完待 P1+ 处理**（不阻塞 R-109 关闭）：GET /licenses/logs 端点（P1）+ 前端 LicenseLogs 真实数据（P1）+ 6 月保留 MinIO 归档（P4）
 - **关联 PRD**：`docs/project/prd/F06-license.md` §6.2 / §9.3 / §11.2 V13
 
+### R-110 MR 多 worker 调度并发（重复下发 SPV）
+- **描述**：F05 MR scheduler 跑 cron @every 30s，多 app 实例同时跑会导致同一任务被两次"开/关"下发 SPV，给 ACS 队列压力 + 给设备发重复命令
+- **等级**：P1
+- **概率**：高（启用 HA 双 app 实例时必然发生）
+- **影响**：ACS 队列堆积；设备 SOAP Fault；用户看到 cell 状态闪烁
+- **Owner**：后端 + 架构
+- **状态**：✅ Mitigated（已实现）
+- **缓解**：`internal/mr/task/scheduler.go runWithLock` Redis SETNX + TTL × 3 自动续期；scheduler 三个 tick（open/close/heartbeat）各占独立锁键 `mr:scheduler:lock:{branch}`
+- **关联 Task**：F05 Phase 2.2
+- **下次复盘**：HA 部署后第一次回顾
+
+### R-111 MR Redis 心跳误报（cell 标 abnormal 但实际在上报）
+- **描述**：scheduler 巡检 Redis `MRFileReport_{cellCode}` key TTL；Redis 抖动 / 临时不可用会把正在上报的 cell 误标 abnormal
+- **等级**：P1
+- **概率**：中
+- **影响**：用户对 UI 健康状态失去信任；触发不必要的运维介入
+- **Owner**：后端
+- **状态**：Mitigating
+- **缓解**：阈值机制 — `mr.heartbeat_miss_threshold`（默认 2 次），跨阈值才标 abnormal；运维可调高
+- **未做**：alert 应对短期 Redis 不可用时**暂停**心跳巡检（避免大量 abnormal 告警），需后续增强
+- **下次复盘**：上线后第一次 Redis 故障复盘
+
+### R-112 MR start_time 调度依赖系统时钟一致性
+- **描述**：scheduler 按 UTC `start_time<=now` 抓 due 任务；多 app 实例 NTP 漂移 > 30s 会导致一台抓到任务、另一台没抓，与分布式锁机制配合下不影响正确性，但漂移过大可能延迟首次下发
+- **等级**：P2
+- **概率**：低（生产环境强制 NTP）
+- **影响**：首次下发延迟 < 1 个 tick (30s)；累计无影响
+- **Owner**：运维
+- **状态**：Mitigated（依赖部署 NTP）
+- **缓解**：部署 runbook 要求 NTP；scheduler interval 默认 30s 给足容差
+- **下次复盘**：N/A
+
 ### R-108 个别迁移 Down 段缺失（误报，已撤销）
 - **描述**（初版）：`000001_extensions_functions.sql` 与 `000021_notifications.sql`
   的 Down 段被脚本标记为空
