@@ -129,6 +129,6 @@ func newDeviceCmd() *cobra.Command {
 		},
 	}
 
-	cmd.AddCommand(listCmd, getCmd, rebootCmd, deleteCmd, statsCmd)
+	cmd.AddCommand(listCmd, getCmd, rebootCmd, deleteCmd, statsCmd, newSweepPathsCmd())
 	return cmd
 }
