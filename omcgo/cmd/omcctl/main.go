@@ -20,8 +20,15 @@ func main() {
 		Long:  "Command-line tool for managing OMC devices, alarms, PM data, and system operations",
 	}
 
-	rootCmd.PersistentFlags().StringVar(&flagServer, "server", "http://localhost:8080", "OMC App server address")
-	rootCmd.PersistentFlags().StringVar(&flagAPIKey, "api-key", os.Getenv("OMCCTL_API_KEY"), "API key for authentication")
+	// --server 优先级:--server flag > OMCCTL_SERVER env > hardcoded localhost:8080
+	// 镜像内(Dockerfile.worker)已设 OMCCTL_SERVER=http://app:8081,operator 进
+	// worker 容器跑无需显式 --server。
+	defaultServer := os.Getenv("OMCCTL_SERVER")
+	if defaultServer == "" {
+		defaultServer = "http://localhost:8080"
+	}
+	rootCmd.PersistentFlags().StringVar(&flagServer, "server", defaultServer, "OMC App server address (env: OMCCTL_SERVER)")
+	rootCmd.PersistentFlags().StringVar(&flagAPIKey, "api-key", os.Getenv("OMCCTL_API_KEY"), "API key for authentication (env: OMCCTL_API_KEY)")
 	rootCmd.PersistentFlags().StringVar(&flagOutput, "output", "table", "Output format: table or json")
 
 	rootCmd.AddCommand(
