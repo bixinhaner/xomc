@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from 'react';
 import { Alert, Button, Drawer, Form, Input, InputNumber, Select, Space, Switch, Tag, Tooltip, message } from 'antd';
-import { ThunderboltOutlined, AppstoreOutlined, MobileOutlined } from '@ant-design/icons';
+import { ThunderboltOutlined, AppstoreOutlined, MobileOutlined, TeamOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import {
   useCreatePmPanel,
@@ -26,6 +26,8 @@ import type { DeviceType } from '@core/types/indicatorLibrary';
 import { usePmDashboardStore } from '@core/store/pmDashboardStore';
 import MetricPickerModal from '../KPIQuery/components/MetricPickerModal';
 import DevicePickerModal from '../KPIQuery/components/DevicePickerModal';
+import DeviceGroupPickerModal from '../KPIQuery/components/DeviceGroupPickerModal';
+import { useDeviceGroups } from '@core/hooks/api/useDevices';
 import { csvToArray, arrayToCsv, techToDeviceType } from './dashboardUtils';
 
 interface Props {
@@ -172,6 +174,49 @@ function DeviceSnPickerField({
         onClose={() => setOpen(false)}
         onConfirm={(sns) => {
           onChange?.(arrayToCsv(sns));
+          setOpen(false);
+        }}
+        initialSelected={arr}
+      />
+    </>
+  );
+}
+
+/**
+ * 设备组选择字段 — DeviceGroupPickerModal 含名称搜索 / 多选 / 已选面板。
+ */
+function DeviceGroupPickerField({
+  value,
+  onChange,
+}: {
+  value?: string;
+  onChange?: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const arr = csvToArray(value);
+  const { data } = useDeviceGroups();
+  const nameById = new Map((data?.groups ?? []).map((g) => [g.id, g.name] as const));
+  const labels = arr.map((id) => nameById.get(id) ?? id);
+  return (
+    <>
+      <Space wrap>
+        <Button icon={<TeamOutlined />} onClick={() => setOpen(true)}>
+          选择设备组（已选 {arr.length}）
+        </Button>
+        {arr.length > 0 && (
+          <Tooltip title={<div style={{ whiteSpace: 'pre-wrap' }}>{labels.join('\n')}</div>}>
+            <Tag>
+              {labels.slice(0, 3).join(', ')}
+              {labels.length > 3 ? ` 等 ${labels.length} 个` : ''}
+            </Tag>
+          </Tooltip>
+        )}
+      </Space>
+      <DeviceGroupPickerModal
+        open={open}
+        onClose={() => setOpen(false)}
+        onConfirm={(ids) => {
+          onChange?.(arrayToCsv(ids));
           setOpen(false);
         }}
         initialSelected={arr}
@@ -363,8 +408,12 @@ export function PanelConfigDrawer({ open, mode, panel, dashboardId, technology, 
               );
             }
             return (
-              <Form.Item label="设备组 ID（逗号分隔）" name="deviceGroupIds">
-                <Input placeholder="uuid-1, uuid-2" />
+              <Form.Item
+                label="设备组"
+                name="deviceGroupIds"
+                tooltip="点按钮弹出设备组选择器（支持名称搜索 / 多选）"
+              >
+                <DeviceGroupPickerField />
               </Form.Item>
             );
           }}
