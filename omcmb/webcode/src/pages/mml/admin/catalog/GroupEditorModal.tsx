@@ -3,13 +3,20 @@ import { Modal, Form, Input, InputNumber, message } from 'antd';
 import { useCreateGroup, useUpdateGroup } from '@core/hooks/api/useMmlAdmin';
 import { useT } from '@/hooks/useT';
 
-export type GroupEditorMode = 'create-root' | 'create-child' | 'rename';
+// 2026-05-27 重构（mml-admin-catalog-redesign-20260527）：移除 create-child mode。
+// 一级分组语义下，create 永远 parentId=null；rename 仅改 group_code / 显示名 / 排序。
+export type GroupEditorMode = 'create' | 'rename';
 
 export interface GroupEditorModalProps {
   open: boolean;
   mode: GroupEditorMode;
-  /** create-child / rename 时必填 — 父节点 id 或自身 id */
-  targetGroup?: { id: string; groupCode: string; displayNameI18n: Record<string, string>; displayOrder: number };
+  /** rename 时必填 — 自身 id；create 时忽略 */
+  targetGroup?: {
+    id: string;
+    groupCode: string;
+    displayNameI18n: Record<string, string>;
+    displayOrder: number;
+  };
   onClose: () => void;
   onSuccess?: () => void;
 }
@@ -50,10 +57,8 @@ export default function GroupEditorModal({
 
   const titleKey =
     mode === 'rename'
-      ? 'mml.admin.catalog.groups.rename'
-      : mode === 'create-child'
-        ? 'mml.admin.catalog.groups.addChild'
-        : 'mml.admin.catalog.groups.addRoot';
+      ? 'mml.admin.catalog.groups.editGroup'
+      : 'mml.admin.catalog.groups.add';
 
   const handleOk = async () => {
     try {
@@ -73,9 +78,9 @@ export default function GroupEditorModal({
           },
         });
       } else {
+        // R1: 新建分组永远顶层,parentId 不传（后端默认 null）
         await createMut.mutateAsync({
           groupCode: values.groupCode,
-          parentId: mode === 'create-child' ? targetGroup?.id : undefined,
           displayNameI18n,
           displayOrder: values.displayOrder,
         });
@@ -105,9 +110,15 @@ export default function GroupEditorModal({
         <Form.Item
           name="groupCode"
           label="group_code"
-          rules={[{ required: true }, { pattern: /^[A-Z0-9_]+$/, message: 'UPPER_SNAKE_CASE only' }]}
+          rules={[
+            { required: true },
+            { pattern: /^[A-Z0-9_]+$/, message: 'UPPER_SNAKE_CASE only' },
+          ]}
         >
-          <Input placeholder="BSC_CONFIGURATION" disabled={mode === 'rename' && targetGroup?.groupCode === 'ROOT'} />
+          <Input
+            placeholder="BSC_CONFIGURATION"
+            disabled={mode === 'rename' && targetGroup?.groupCode === 'ROOT'}
+          />
         </Form.Item>
         <Form.Item name="displayNameZh" label="zh-CN" rules={[{ required: true }]}>
           <Input placeholder="基站配置" />
@@ -115,7 +126,10 @@ export default function GroupEditorModal({
         <Form.Item name="displayNameEn" label="en-US" rules={[{ required: true }]}>
           <Input placeholder="BSC Configuration" />
         </Form.Item>
-        <Form.Item name="displayOrder" label={t('mml.admin.catalog.subField.sortOrder')}>
+        <Form.Item
+          name="displayOrder"
+          label={t('mml.admin.catalog.subField.sortOrder')}
+        >
           <InputNumber min={0} step={10} style={{ width: 160 }} />
         </Form.Item>
       </Form>
