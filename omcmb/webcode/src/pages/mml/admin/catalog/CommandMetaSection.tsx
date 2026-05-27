@@ -8,7 +8,6 @@ import {
   Input,
   Select,
   Switch,
-  Tooltip,
   message,
 } from 'antd';
 import { EditOutlined, DeleteOutlined } from '@ant-design/icons';
@@ -19,7 +18,10 @@ import { useT } from '@/hooks/useT';
 
 // 2026-05-27 mml-admin-catalog-redesign-20260527 §4.2-4.3：
 // 右栏顶部命令元数据 Descriptions（显示态）↔ Form（编辑态）内联切换。
-// 受 catalogProtected=true 保护的命令禁止进入编辑态。
+//
+// 2026-05-27 用户决策:取消 catalog_protected 在 UI 上的锁定逻辑。
+// 是否可编辑/删除由路由层 RBAC(withAdminRole)+ 后端 API 权限校验决定,
+// 不再在前端基于 catalogProtected 拦截。
 
 const OPERATION_TYPES: MMLOperationType[] = ['LST', 'MOD', 'ADD', 'RMV', 'DSP', 'ACT', 'DEA', 'RST', 'CLR', 'UPG'];
 
@@ -76,8 +78,6 @@ export default function CommandMetaSection({
   const [form] = Form.useForm<FormValues>();
   const updateMut = useUpdateCommand();
   const [submitting, setSubmitting] = useState(false);
-
-  const isProtected = command.catalogProtected === true;
 
   // 进入编辑态时填表 + 退出时清表
   useEffect(() => {
@@ -218,31 +218,15 @@ export default function CommandMetaSection({
       >
         <h3 style={{ margin: 0 }}>{command.displayName}</h3>
         <Space>
-          {isProtected ? (
-            <Tooltip title={t('mml.admin.catalog.common.lockedTooltip')}>
-              <Button icon={<EditOutlined />} disabled>
-                {t('mml.admin.catalog.commands.edit')}
-              </Button>
-            </Tooltip>
-          ) : (
-            <Button
-              icon={<EditOutlined />}
-              onClick={() => onEditingChange(true)}
-            >
-              {t('mml.admin.catalog.commands.edit')}
-            </Button>
-          )}
-          {isProtected ? (
-            <Tooltip title={t('mml.admin.catalog.common.lockedTooltip')}>
-              <Button icon={<DeleteOutlined />} danger disabled>
-                {t('mml.admin.catalog.common.delete')}
-              </Button>
-            </Tooltip>
-          ) : (
-            <Button icon={<DeleteOutlined />} danger onClick={onDeleteRequest}>
-              {t('mml.admin.catalog.common.delete')}
-            </Button>
-          )}
+          <Button
+            icon={<EditOutlined />}
+            onClick={() => onEditingChange(true)}
+          >
+            {t('mml.admin.catalog.commands.edit')}
+          </Button>
+          <Button icon={<DeleteOutlined />} danger onClick={onDeleteRequest}>
+            {t('mml.admin.catalog.common.delete')}
+          </Button>
         </Space>
       </Space>
       <Descriptions column={2} size="small" bordered>
@@ -276,13 +260,10 @@ export default function CommandMetaSection({
             'false'
           )}
         </Descriptions.Item>
-        <Descriptions.Item label="source">
+        <Descriptions.Item label="source" span={2}>
           <Tag color={command.source === 'admin' ? 'blue' : 'default'}>
             {command.source ?? 'standard'}
           </Tag>
-        </Descriptions.Item>
-        <Descriptions.Item label="catalog_protected">
-          {isProtected ? <Tag color="default">locked</Tag> : '-'}
         </Descriptions.Item>
       </Descriptions>
     </div>

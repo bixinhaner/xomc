@@ -93,14 +93,15 @@ export default function LeftNavTree({
 
   const buildGroupMenu = useCallback(
     (g: GroupTreeNode): MenuProps['items'] => {
-      const isProtected = g.catalogProtected === true;
+      // 2026-05-27 用户决策:取消 catalog_protected 在 UI 上的锁定逻辑。
+      // 权限由路由层 RBAC + 后端 API 校验决定,前端不再因 catalogProtected 拦截。
+      // 删除按钮仍保留"分组含命令不能删除"约束(后端 ErrGroupNotEmpty 兜底)。
       const hasCommands = (g.commands?.length ?? 0) > 0;
       return [
         {
           key: 'editGroup',
           label: t('mml.admin.catalog.groups.editGroup'),
           icon: <EditOutlined />,
-          disabled: isProtected,
         },
         {
           key: 'addCommand',
@@ -120,8 +121,8 @@ export default function LeftNavTree({
             t('mml.admin.catalog.common.delete')
           ),
           icon: <DeleteOutlined />,
-          disabled: hasCommands || isProtected,
-          danger: !hasCommands && !isProtected,
+          disabled: hasCommands,
+          danger: !hasCommands,
         },
       ];
     },
@@ -170,57 +171,46 @@ export default function LeftNavTree({
             </Dropdown>
           </span>
         ),
-        children: commands.map<TreeDataNode>((c) => {
-          const isProtected = c.catalogProtected === true;
-          return {
-            key: `cmd:${c.id}`,
-            title: (
+        children: commands.map<TreeDataNode>((c) => ({
+          key: `cmd:${c.id}`,
+          title: (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                width: '100%',
+              }}
+            >
+              <CodeOutlined />
               <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  width: '100%',
-                }}
+                style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}
               >
-                <CodeOutlined />
-                <span
-                  style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}
-                >
-                  {c.displayName}
-                </span>
-                <a
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCommandAction('editCommand', c);
-                  }}
-                  style={{ fontSize: 12 }}
-                  title={t('mml.admin.catalog.commands.edit')}
-                >
-                  {t('mml.admin.catalog.common.edit')}
-                </a>
-                {isProtected ? (
-                  <Tooltip title={t('mml.admin.catalog.common.lockedTooltip')}>
-                    <span style={{ color: '#bfbfbf', fontSize: 12 }}>
-                      {t('mml.admin.catalog.common.delete')}
-                    </span>
-                  </Tooltip>
-                ) : (
-                  <a
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onCommandAction('deleteCommand', c);
-                    }}
-                    style={{ fontSize: 12, color: '#ff4d4f' }}
-                  >
-                    {t('mml.admin.catalog.common.delete')}
-                  </a>
-                )}
+                {c.displayName}
               </span>
-            ),
-            isLeaf: true,
-          };
-        }),
+              <a
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onCommandAction('editCommand', c);
+                }}
+                style={{ fontSize: 12 }}
+                title={t('mml.admin.catalog.commands.edit')}
+              >
+                {t('mml.admin.catalog.common.edit')}
+              </a>
+              <a
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onCommandAction('deleteCommand', c);
+                }}
+                style={{ fontSize: 12, color: '#ff4d4f' }}
+              >
+                {t('mml.admin.catalog.common.delete')}
+              </a>
+            </span>
+          ),
+          isLeaf: true,
+        })),
       };
     });
   }, [visibleGroups, buildGroupMenu, onGroupAction, onCommandAction, t]);

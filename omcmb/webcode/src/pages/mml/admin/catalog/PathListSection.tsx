@@ -13,7 +13,12 @@ import AddSubFieldsModal from './AddSubFieldsModal';
 import EditSubFieldModal from './EditSubFieldModal';
 
 // 2026-05-27 mml-admin-catalog-redesign-20260527 §4.4：右栏下方 path 列表。
-// 列定义参考原 CommandDetailDrawer，新增单行 [编辑] 入口（设计文档 §5 EditSubFieldModal）。
+// 列定义参考原 CommandDetailDrawer。
+//
+// 2026-05-27 用户决策:
+//   - 显示名拆为"中文"+"英文"两列,各占独立列体现 i18n 全貌
+//   - 取消 catalog_protected 在 UI 上的所有锁定逻辑(行 / 表头按钮),
+//     权限交给路由层 RBAC(withAdminRole) + 后端 API 校验
 
 export interface PathListSectionProps {
   command: GroupTreeCommand;
@@ -28,8 +33,6 @@ export default function PathListSection({
 
   const [addOpen, setAddOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<AdminSubFieldEnriched | undefined>();
-
-  const isProtected = command.catalogProtected === true;
 
   const handleDelete = (sf: AdminSubFieldEnriched) => {
     Modal.confirm({
@@ -61,13 +64,20 @@ export default function PathListSection({
       ellipsis: true,
     },
     {
-      title: t('mml.admin.catalog.subField.label'),
-      dataIndex: 'label',
-      key: 'label',
-      width: 160,
+      title: t('mml.admin.catalog.subField.labelZh'),
+      key: 'labelZh',
+      width: 140,
       ellipsis: true,
       render: (_, sf) =>
-        sf.labelI18n?.['zh-CN'] || sf.labelI18n?.['en-US'] || sf.label || sf.mmlCode,
+        sf.labelI18n?.['zh-CN'] || sf.labelI18n?.zh || '-',
+    },
+    {
+      title: t('mml.admin.catalog.subField.labelEn'),
+      key: 'labelEn',
+      width: 140,
+      ellipsis: true,
+      render: (_, sf) =>
+        sf.labelI18n?.['en-US'] || sf.labelI18n?.en || '-',
     },
     {
       title: t('mml.admin.catalog.subField.standardPath'),
@@ -121,28 +131,12 @@ export default function PathListSection({
       align: 'center',
       render: (_, sf) => (
         <Space size={0} split="·">
-          {isProtected ? (
-            <Tooltip title={t('mml.admin.catalog.common.lockedTooltip')}>
-              <span style={{ color: '#bfbfbf' }}>
-                {t('mml.admin.catalog.common.edit')}
-              </span>
-            </Tooltip>
-          ) : (
-            <a onClick={() => setEditTarget(sf)}>
-              {t('mml.admin.catalog.common.edit')}
-            </a>
-          )}
-          {isProtected ? (
-            <Tooltip title={t('mml.admin.catalog.common.lockedTooltip')}>
-              <span style={{ color: '#bfbfbf' }}>
-                {t('mml.admin.catalog.common.delete')}
-              </span>
-            </Tooltip>
-          ) : (
-            <a onClick={() => handleDelete(sf)} style={{ color: '#ff4d4f' }}>
-              {t('mml.admin.catalog.common.delete')}
-            </a>
-          )}
+          <a onClick={() => setEditTarget(sf)}>
+            {t('mml.admin.catalog.common.edit')}
+          </a>
+          <a onClick={() => handleDelete(sf)} style={{ color: '#ff4d4f' }}>
+            {t('mml.admin.catalog.common.delete')}
+          </a>
         </Space>
       ),
     },
@@ -161,8 +155,6 @@ export default function PathListSection({
           size="small"
           icon={<PlusOutlined />}
           onClick={() => setAddOpen(true)}
-          disabled={isProtected}
-          title={isProtected ? t('mml.admin.catalog.common.lockedTip') : undefined}
         >
           {t('mml.admin.catalog.subField.batchAddBtn')}
         </Button>
