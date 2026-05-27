@@ -210,10 +210,13 @@ export default function DashboardEditorPane({ dashboardId }: Props) {
               添加 Panel
             </Button>
           )}
-          {/* G7-Gap-1：从仪表盘工具栏进入自定义聚合（结果可在 /performance/pm-adhoc 查看） */}
-          <Button icon={<ThunderboltOutlined />} onClick={() => setAdhocOpen(true)}>
-            + 自定义聚合
-          </Button>
+          {/* G7-Gap-1：从仪表盘工具栏进入自定义聚合（结果可在 /performance/pm-adhoc 查看）
+              仅在自有/可编辑仪表盘显示——内置仪表盘只读、创建任务上下文不强 */}
+          {canEdit && (
+            <Button icon={<ThunderboltOutlined />} onClick={() => setAdhocOpen(true)}>
+              + 自定义聚合
+            </Button>
+          )}
           {/* G6-Gap-10：导出仪表盘配置 Excel（panel 元数据；单 panel 数据由 PanelCard 的导出按钮承担）+ PDF 打印 */}
           <Button
             icon={<FileExcelOutlined />}
