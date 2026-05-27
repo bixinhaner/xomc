@@ -37,8 +37,10 @@ export default function MMLConsole() {
   return (
     <Card variant="borderless">
       <StepBar current={current} />
+      {/* 2026-05-27 用户决策:把更多空间留给"终端输出 + 操作面板",大屏(xl ≥ 1200)
+          下三栏从 6/8/10 调整为 5/7/12。lg 及更窄屏幕维持 6/8/10 不挤压设备/命令列表。 */}
       <Row gutter={12} style={{ marginTop: 12 }}>
-        <Col span={6}>
+        <Col xs={24} lg={6} xl={5}>
           <DeviceTree
             selectedDevices={dev.selectedDevices}
             filteredDevices={dev.filteredDevices}
@@ -60,10 +62,10 @@ export default function MMLConsole() {
             onBatchInput={() => setBatchModalOpen(true)}
           />
         </Col>
-        <Col span={8}>
+        <Col xs={24} lg={8} xl={7}>
           <CommandTree />
         </Col>
-        <Col span={10}>
+        <Col xs={24} lg={10} xl={12}>
           <RightPanel />
         </Col>
       </Row>
