@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/device"
 	devtask "github.com/omcgo/omcgo/internal/task"
@@ -104,6 +106,7 @@ type BackupExecutor struct {
 	eventBus         event.EventBus
 	transferProvider transfercfg.Provider // ACS 上传配置（来自 sys_configs acs_transfer，UI 可配置）
 	policyService    PolicyGetter         // optional (T-0073)
+	ftpConfigRepo    FTPConfigRepository  // optional; used when remote storage backend is selected
 	metrics          *PolicyMetrics       // optional (T-0073)
 	logger           *zap.Logger
 }
@@ -134,12 +137,83 @@ func (e *BackupExecutor) SetTransferProvider(p transfercfg.Provider) {
 	e.transferProvider = p
 }
 
+// SetFTPConfigRepository injects the remote FTP/SFTP config source used when
+// backup policy selects a non-local storage backend.
+func (e *BackupExecutor) SetFTPConfigRepository(repo FTPConfigRepository) {
+	e.ftpConfigRepo = repo
+}
+
 // SetPolicyEnforcement wires PolicyService + metrics post-construction so the
 // failure path can publish alarm.raised when AlertOnFailure=true. Either
 // argument may be nil to disable that side-effect (default is disabled).
 func (e *BackupExecutor) SetPolicyEnforcement(policyService PolicyGetter, metrics *PolicyMetrics) {
 	e.policyService = policyService
 	e.metrics = metrics
+}
+
+func normalizeRemoteProtocol(protocol string, storageBackend string) string {
+	if protocol != "" {
+		return strings.ToLower(protocol)
+	}
+	return strings.ToLower(storageBackend)
+}
+
+func buildRemoteUploadURL(cfg *FTPConfig, filename string, storageBackend string) string {
+	protocol := normalizeRemoteProtocol(cfg.Protocol, storageBackend)
+	host := cfg.Host
+	if cfg.Port > 0 {
+		host = fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+	}
+	remotePath := strings.TrimSpace(cfg.RemotePath)
+	if remotePath == "" {
+		remotePath = "/"
+	}
+	remotePath = "/" + strings.Trim(remotePath, "/")
+	if remotePath == "/" {
+		remotePath = ""
+	}
+	return fmt.Sprintf("%s://%s%s/%s", protocol, host, remotePath, url.PathEscape(filename))
+}
+
+func (e *BackupExecutor) resolveUploadTarget(ctx context.Context, spec *BackupTypeSpec, dev *model.Device, task *BackupTask, targetFilename string) (string, string, string, error) {
+	if e.policyService != nil {
+		policy, err := e.policyService.Get(ctx)
+		if err != nil {
+			return "", "", "", fmt.Errorf("get backup policy: %w", err)
+		}
+		if policy != nil {
+			switch policy.StorageBackend {
+			case "ftp", "sftp":
+				if policy.FTPConfigID == nil {
+					return "", "", "", fmt.Errorf("backup policy storage_backend=%s missing ftp_config_id", policy.StorageBackend)
+				}
+				if e.ftpConfigRepo == nil {
+					return "", "", "", fmt.Errorf("backup policy storage_backend=%s but ftp config repo is not wired", policy.StorageBackend)
+				}
+				cfg, err := e.ftpConfigRepo.GetByID(ctx, *policy.FTPConfigID)
+				if err != nil {
+					return "", "", "", fmt.Errorf("load ftp config %s: %w", policy.FTPConfigID.String(), err)
+				}
+				if cfg == nil {
+					return "", "", "", fmt.Errorf("ftp config %s not found", policy.FTPConfigID.String())
+				}
+				if !cfg.Enabled {
+					return "", "", "", fmt.Errorf("ftp config %s is disabled", cfg.ID.String())
+				}
+				password := ""
+				if cfg.PasswordEncrypted != nil {
+					password = *cfg.PasswordEncrypted
+				}
+				return buildRemoteUploadURL(cfg, targetFilename, policy.StorageBackend), cfg.Username, password, nil
+			}
+		}
+	}
+
+	var uploadSettings transfercfg.UploadSettings
+	if e.transferProvider != nil {
+		uploadSettings = e.transferProvider.Snapshot(ctx).Upload
+	}
+	return buildBackupUploadURL(uploadSettings, spec, dev.SerialNumber, task.ID.String(), targetFilename), uploadSettings.Username, uploadSettings.Password, nil
 }
 
 // Subscribe registers the executor to listen for backup task created events.
@@ -227,12 +301,14 @@ func (e *BackupExecutor) handleTaskCreated(ctx context.Context, evt event.Event)
 		spec := selectBackupType(dev.ProductClass)
 		targetFilename := fmt.Sprintf("backup-%s-%s%s", idPrefix, dev.SerialNumber, spec.FileExtension)
 
-		// 从 transfercfg.Provider 获取当前上传配置（sys_configs 动态值，UI 可配置）。
-		var uploadSettings transfercfg.UploadSettings
-		if e.transferProvider != nil {
-			uploadSettings = e.transferProvider.Snapshot(ctx).Upload
+		uploadURL, uploadUsername, uploadPassword, uploadErr := e.resolveUploadTarget(ctx, spec, dev, task, targetFilename)
+		if uploadErr != nil {
+			e.logger.Warn("resolve backup upload target",
+				zap.String("device_sn", dev.SerialNumber),
+				zap.String("task_id", task.ID.String()),
+				zap.Error(uploadErr))
+			continue
 		}
-		uploadURL := buildBackupUploadURL(uploadSettings, spec, dev.SerialNumber, task.ID.String(), targetFilename)
 
 		// TR-069 Upload FileType 来自 UFTE 内置模板（ufte/model.go 为唯一数据源），
 		// 运行时将模板中的 {OUI} 占位符替换为设备实际 OUI。
@@ -250,9 +326,9 @@ func (e *BackupExecutor) handleTaskCreated(ctx context.Context, evt event.Event)
 			"file_type": fileType,
 			"url":       uploadURL,
 		}
-		if uploadSettings.Username != "" {
-			params["username"] = uploadSettings.Username
-			params["password"] = uploadSettings.Password
+		if uploadUsername != "" {
+			params["username"] = uploadUsername
+			params["password"] = uploadPassword
 		}
 		paramsJSON, marshalErr := json.Marshal(params)
 		if marshalErr != nil {

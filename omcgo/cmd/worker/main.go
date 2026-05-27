@@ -325,6 +325,8 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	backupPolicyRepo := backup.NewPgPolicyRepository(w.PgPool)
 	backupPolicyService := backup.NewPolicyService(backupPolicyRepo, logger)
 	backupPolicyMetrics := backup.NewPolicyMetrics(w.MetricsReg)
+	backupFTPConfigRepo := backup.NewPgFTPConfigRepository(w.PgPool)
+	backupExecutor.SetFTPConfigRepository(backupFTPConfigRepo)
 	backupExecutor.SetPolicyEnforcement(backupPolicyService, backupPolicyMetrics)
 	if err := backupExecutor.Subscribe(w.EventBus); err != nil {
 		logger.Warn("subscribe backup executor", zap.Error(err))

@@ -170,6 +170,35 @@ func (m *execTransferProvider) Snapshot(_ context.Context) transfercfg.Snapshot 
 	return transfercfg.Snapshot{Upload: m.upload}
 }
 
+type execPolicyGetter struct {
+	policy *BackupPolicy
+	err    error
+}
+
+func (m *execPolicyGetter) Get(_ context.Context) (*BackupPolicy, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.policy, nil
+}
+
+type execFTPConfigRepo struct {
+	getByIDFn func(ctx context.Context, id uuid.UUID) (*FTPConfig, error)
+}
+
+func (m *execFTPConfigRepo) Create(_ context.Context, _ *FTPConfig) error { return nil }
+func (m *execFTPConfigRepo) GetByID(ctx context.Context, id uuid.UUID) (*FTPConfig, error) {
+	if m.getByIDFn != nil {
+		return m.getByIDFn(ctx, id)
+	}
+	return nil, nil
+}
+func (m *execFTPConfigRepo) Update(_ context.Context, _ *FTPConfig) error { return nil }
+func (m *execFTPConfigRepo) Delete(_ context.Context, _ uuid.UUID) error  { return nil }
+func (m *execFTPConfigRepo) List(_ context.Context, _ FTPConfigFilter) (*model.ListResponse[FTPConfig], error) {
+	return nil, nil
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -326,6 +355,62 @@ func TestHandleTask_NVPlatform(t *testing.T) {
 	assert.Equal(t, "12 0000B9 Configuration File", params["file_type"])
 	// URL 应包含 CONFIGBACKUP_NV
 	assert.Contains(t, params["url"], "CONFIGBACKUP_NV")
+}
+
+func TestHandleTask_RemoteFTPPolicyUsesRemoteURL(t *testing.T) {
+	taskID := uuid.New()
+	ftpID := uuid.New()
+	task := &BackupTask{
+		ID:        taskID,
+		Status:    TaskPending,
+		TargetIDs: []string{"SN_REMOTE"},
+	}
+
+	taskRepo := &execTaskRepo{
+		getByIDFn: func(_ context.Context, _ uuid.UUID) (*BackupTask, error) { return task, nil },
+		updateFn:  func(_ context.Context, _ *BackupTask) error { return nil },
+	}
+	deviceRepo := &execDeviceRepo{
+		getBySNFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{SerialNumber: sn, OUI: "0000B9", ProductClass: "FAP/BLQ/SC"}, nil
+		},
+	}
+	cmdQ := &execCmdQueue{}
+	executor := newTestExecutor(taskRepo, deviceRepo, cmdQ)
+	executor.SetPolicyEnforcement(&execPolicyGetter{policy: &BackupPolicy{
+		StorageBackend: "ftp",
+		FTPConfigID:    &ftpID,
+	}}, nil)
+	executor.SetFTPConfigRepository(&execFTPConfigRepo{
+		getByIDFn: func(_ context.Context, id uuid.UUID) (*FTPConfig, error) {
+			require.Equal(t, ftpID, id)
+			password := "ftp-pass"
+			return &FTPConfig{
+				ID:                id,
+				Host:              "10.0.0.8",
+				Port:              21,
+				Username:          "ftp-user",
+				PasswordEncrypted: &password,
+				Protocol:          "FTP",
+				RemotePath:        "/backup/omc",
+				Enabled:           true,
+			}, nil
+		},
+	})
+
+	payload, _ := json.Marshal(backupTaskPayload{TaskID: taskID.String()})
+	evt := event.Event{ID: uuid.New().String(), Subject: event.SubjectBackupTaskCreated, Payload: payload, Timestamp: time.Now()}
+
+	err := executor.handleTaskCreated(context.Background(), evt)
+	require.NoError(t, err)
+	require.Len(t, cmdQ.pushed, 1)
+
+	var params map[string]interface{}
+	require.NoError(t, json.Unmarshal(cmdQ.pushed[0].Req.Params, &params))
+	assert.Equal(t, "ftp-user", params["username"])
+	assert.Equal(t, "ftp-pass", params["password"])
+	assert.Contains(t, params["url"], "ftp://10.0.0.8:21/backup/omc/")
+	assert.NotContains(t, params["url"], "smallcell/FileUploadService")
 }
 
 func TestHandleTask_ProgressUpdate(t *testing.T) {
