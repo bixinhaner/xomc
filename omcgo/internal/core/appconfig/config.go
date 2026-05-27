@@ -582,6 +582,9 @@ type AppServerConfig struct {
 	TLSPort  int       `mapstructure:"tls_port"`
 	GRPCPort int       `mapstructure:"grpc_port"`
 	TLS      TLSConfig `mapstructure:"tls"`
+	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
+	WriteTimeout time.Duration `mapstructure:"write_timeout"`
+	IdleTimeout  time.Duration `mapstructure:"idle_timeout"`
 }
 
 // TLSConfig 配置 TLS 证书文件路径。

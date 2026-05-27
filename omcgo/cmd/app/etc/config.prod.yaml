@@ -3,6 +3,9 @@ server:
   port: 8081
   tls_port: 8444
   grpc_port: 50051
+  read_timeout: 5m
+  write_timeout: 5m
+  idle_timeout: 10m
   tls:
     enabled: false
     cert_file: ""

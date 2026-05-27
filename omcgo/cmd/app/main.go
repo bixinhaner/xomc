@@ -86,7 +86,7 @@ func runApp(cmd *cobra.Command, args []string) error {
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-	return app.ListenAndServe(engine, addr)
+	return app.ListenAndServe(engine, addr, cfg.Server.ReadTimeout, cfg.Server.WriteTimeout, cfg.Server.IdleTimeout)
 }
 
 // defaultJWTSecret is the placeholder secret shipped in dev/test config files.

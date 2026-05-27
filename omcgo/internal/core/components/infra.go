@@ -195,15 +195,24 @@ func (inf *Infra) CreateEventBus() {
 // ListenAndServe 启动 HTTP 服务器和 Prometheus 指标服务器，
 // 阻塞直到收到 SIGINT/SIGTERM 信号，然后依优先级逐步优雅关机。
 // 适用于 App/ACS 等需要外露 HTTP 端口的服务。
-func (inf *Infra) ListenAndServe(handler http.Handler, addr string) error {
+func (inf *Infra) ListenAndServe(handler http.Handler, addr string, readTimeout, writeTimeout, idleTimeout time.Duration) error {
 	inf.startMetrics()
+	if readTimeout <= 0 {
+		readTimeout = 30 * time.Second
+	}
+	if writeTimeout <= 0 {
+		writeTimeout = 30 * time.Second
+	}
+	if idleTimeout <= 0 {
+		idleTimeout = 120 * time.Second
+	}
 
 	httpServer := &http.Server{
 		Addr:         addr,
 		Handler:      handler,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		ReadTimeout:  readTimeout,
+		WriteTimeout: writeTimeout,
+		IdleTimeout:  idleTimeout,
 	}
 	inf.GS.Register("app-http", 1, func(ctx context.Context) error { return httpServer.Shutdown(ctx) })
 
