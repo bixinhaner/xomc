@@ -204,6 +204,45 @@ export function mapBackendSubField(b: BackendSubFieldAdmin): SubFieldAdmin {
   };
 }
 
+export function mapBackendAdminSubFieldEnriched(
+  b: BackendAdminSubFieldEnriched,
+): AdminSubFieldEnriched {
+  const labelI18n = b.label_i18n ?? {};
+  const constraintTextI18n = b.constraint_text_i18n ?? {};
+  return {
+    id: b.id,
+    commandId: b.command_id,
+    paramId: b.param_id,
+    mmlCode: b.mml_code,
+    label:
+      labelI18n['zh-CN'] ||
+      labelI18n['en-US'] ||
+      labelI18n.zh ||
+      labelI18n.en ||
+      b.mml_code,
+    labelI18n,
+    tr069Path: b.tr069_path,
+    valueType: b.value_type,
+    accessType: b.access_type,
+    isObject: b.is_object,
+    changeApplies: b.change_applies,
+    constraintText:
+      constraintTextI18n['zh-CN'] ||
+      constraintTextI18n['en-US'] ||
+      constraintTextI18n.zh ||
+      constraintTextI18n.en ||
+      '',
+    constraintTextI18n,
+    description: b.description ?? '',
+    defaultSelected: b.default_selected,
+    isRequired: b.is_required,
+    sortOrder: b.sort_order,
+    isSupported: b.is_supported,
+    supportedModelCount: b.supported_model_count,
+    totalModelCount: b.total_model_count,
+  };
+}
+
 // ============================================================
 // T-Mml-Admin: standard_params 下拉 + admin List 返回值
 // ============================================================
@@ -219,6 +258,35 @@ export interface StandardParamView {
   minValue?: number | null;
   maxValue?: number | null;
   description: string;
+}
+
+/** 后端 MMLCommandSubFieldEnriched 的 JSON 形态（snake_case）。
+ * 与 sub_field_model.go MMLCommandSubFieldEnriched 一一对应。
+ * 2026-05-27 修复:原先 listSubFields 直返 data.items 把它当 AdminSubFieldEnriched
+ * 使用,导致 mml_code/label_i18n/tr069_path/is_supported 等字段全为 undefined。
+ */
+export interface BackendAdminSubFieldEnriched {
+  id: string;
+  command_id: string;
+  param_id: string;
+  mml_code: string;
+  label_i18n: Record<string, string> | null;
+  default_selected: boolean;
+  is_required: boolean;
+  sort_order: number;
+  tr069_path: string;
+  value_type: string;
+  access_type: string;
+  is_object: boolean;
+  supports_add?: boolean;
+  supports_delete?: boolean;
+  change_applies: string;
+  constraint_text_i18n: Record<string, string> | null;
+  param_name_i18n?: Record<string, string> | null;
+  description?: string;
+  is_supported: boolean;
+  supported_model_count: number;
+  total_model_count: number;
 }
 
 /** Admin SubField enriched 列表行（GET /admin/commands/:id/sub-fields）。

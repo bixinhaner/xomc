@@ -42,6 +42,7 @@ import type {
   UpdateSubFieldRequest,
   StandardParamView,
   AdminSubFieldEnriched,
+  BackendAdminSubFieldEnriched,
   AdminGroup,
   AdminCommand,
   BatchCreateSubFieldsRequest,
@@ -50,6 +51,7 @@ import {
   mapBackendGroup,
   mapBackendCommand,
   mapBackendSubField,
+  mapBackendAdminSubFieldEnriched,
 } from '../../types/mmlAdmin';
 import type { PageResponse } from '../../types/pagination';
 
@@ -189,12 +191,16 @@ export const mmlAdminApi = {
     return data;
   },
 
-  /** Admin 视角 sub_fields 列表（含 is_supported=false 行）。 */
+  /** Admin 视角 sub_fields 列表（含 is_supported=false 行）。
+   * 后端返回 snake_case (BackendAdminSubFieldEnriched),前端用 camelCase
+   * (AdminSubFieldEnriched),用 mapBackendAdminSubFieldEnriched 显式转换。
+   * 修复 2026-05-27:此前直返 data.items 导致 PathListSection 所有字段 undefined。
+   */
   async listSubFields(commandId: string): Promise<AdminSubFieldEnriched[]> {
-    const { data } = await http.get<{ items: AdminSubFieldEnriched[] }>(
+    const { data } = await http.get<{ items: BackendAdminSubFieldEnriched[] }>(
       `${BASE}/commands/${commandId}/sub-fields`,
     );
-    return data.items ?? [];
+    return (data.items ?? []).map(mapBackendAdminSubFieldEnriched);
   },
 
   /** 用户规则 #4：按 standard_path_id 列表一次性创建 N 条 sub_field，后端
