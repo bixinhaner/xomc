@@ -106,12 +106,17 @@ export default function GISMapView() {
     offline: true,
   });
 
-  // 左侧筛选面板折叠状态（默认全部展开）
+  // 左侧筛选面板折叠状态（默认全部展开，但图例默认隐藏）
   const [filterPanelActiveKeys, setFilterPanelActiveKeys] = useState<string[]>([
     'deviceGroup',    // 设备组
     'deviceStatus',   // 设备状态
-    'legend',         // 图例
   ]);
+
+  // ========== 显示/隐藏控制配置 ==========
+  // 筛选Header显示配置（默认隐藏）
+  const SHOW_FILTER_HEADER = false;
+  // 图例模块显示配置（默认隐藏）
+  const SHOW_LEGEND = false;
 
   // 地图组件引用
   const mapRef = useRef<GISMapRef>(null);
@@ -569,19 +574,21 @@ export default function GISMapView() {
     <div style={{ display: 'flex', width: '100%', height: '100%', background: '#F0F2F5' }}>
       {/* 左侧筛选面板 */}
       <div style={leftPanelStyle}>
-        {/* Header */}
-        <div
-          style={{
-            height: 64,
-            background: '#FFF',
-            display: 'flex',
-            alignItems: 'center',
-            padding: '0 20px',
-            borderBottom: '1px solid #E8E8E8',
-          }}
-        >
-          <span style={{ fontSize: 18, fontWeight: 600, color: 'var(--color-neutral-800)' }}>筛选</span>
-        </div>
+        {/* Header - 可通过 SHOW_FILTER_HEADER 控制 */}
+        {SHOW_FILTER_HEADER && (
+          <div
+            style={{
+              height: 64,
+              background: '#FFF',
+              display: 'flex',
+              alignItems: 'center',
+              padding: '0 20px',
+              borderBottom: '1px solid #E8E8E8',
+            }}
+          >
+            <span style={{ fontSize: 18, fontWeight: 600, color: 'var(--color-neutral-800)' }}>筛选</span>
+          </div>
+        )}
 
         {/* 搜索设备组 */}
         <div style={searchBoxStyle}>
@@ -602,7 +609,7 @@ export default function GISMapView() {
           />
         </div>
 
-        {/* 折叠面板：设备组、设备状态、图例 */}
+        {/* 折叠面板：设备状态（调换位置到第一）、设备组（调换位置到第二）、图例（可选显示） */}
         <Collapse
           activeKey={filterPanelActiveKeys}
           onChange={(keys) => setFilterPanelActiveKeys(keys as string[])}
@@ -611,46 +618,7 @@ export default function GISMapView() {
           style={collapseContainerStyle}
           className="gismap-filter-collapse"
         >
-          {/* Panel 1: 设备组 */}
-          <Collapse.Panel
-            key="deviceGroup"
-            header={<span style={collapseHeaderStyle}>设备组</span>}
-            style={collapseItemStyle}
-          >
-            {/* 设备组树 */}
-            <div style={treeContainerStyle}>
-              {isLoadingTree ? (
-                <div style={{ padding: 20, textAlign: 'center' }}>
-                  <Spin size="small" />
-                </div>
-              ) : filteredGroupTree.length === 0 ? (
-                <Empty description="暂无设备组" style={{ padding: 20 }} />
-              ) : (
-                filteredGroupTree.map((node) => renderGroupNode(node))
-              )}
-            </div>
-
-            {/* 已选择汇总 */}
-            {selectedGroupIds.length > 0 && (
-              <div
-                style={{
-                  margin: '12px 8px 8px', // 与树节点保持一致的左右边距
-                  padding: '10px 12px',
-                  background: '#E6F7FF', // 蓝色背景
-                  borderRadius: 4,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <span style={{ fontSize: 13, color: '#595959' }}>
-                  已选择 <span style={{ color: '#1677FF', fontWeight: 500 }}>{selectedGroupIds.length}</span> 个设备组
-                </span>
-              </div>
-            )}
-          </Collapse.Panel>
-
-          {/* Panel 2: 设备状态 */}
+          {/* Panel 1: 设备状态（原第2位，现调至第1位） */}
           <Collapse.Panel
             key="deviceStatus"
             header={<span style={collapseHeaderStyle}>设备状态</span>}
@@ -722,90 +690,131 @@ export default function GISMapView() {
             </div>
           </Collapse.Panel>
 
-          {/* Panel 3: 图例 */}
+          {/* Panel 2: 设备组（原第1位，现调至第2位） */}
           <Collapse.Panel
-            key="legend"
-            header={<span style={collapseHeaderStyle}>图例</span>}
+            key="deviceGroup"
+            header={<span style={collapseHeaderStyle}>设备组</span>}
             style={collapseItemStyle}
           >
-            <div style={{ padding: '0 4px' }}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 24px' }}>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <div
-                style={{
-                  width: 20,
-                  height: 20,
-                  borderRadius: '50%',
-                  background: 'linear-gradient(180deg, #73D13D 0%, #52C41A 100%)',
-                  border: '2px solid #FFF',
-                  boxShadow: '0 0 0 1px #E8E8E8',
-                }}
-              />
-              <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>在线激活</span>
+            {/* 设备组树 */}
+            <div style={treeContainerStyle}>
+              {isLoadingTree ? (
+                <div style={{ padding: 20, textAlign: 'center' }}>
+                  <Spin size="small" />
+                </div>
+              ) : filteredGroupTree.length === 0 ? (
+                <Empty description="暂无设备组" style={{ padding: 20 }} />
+              ) : (
+                filteredGroupTree.map((node) => renderGroupNode(node))
+              )}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
+
+            {/* 已选择汇总 */}
+            {selectedGroupIds.length > 0 && (
               <div
                 style={{
-                  width: 20,
-                  height: 20,
-                  borderRadius: '50%',
-                  background: 'linear-gradient(180deg, #FFC53D 0%, #FAAD14 100%)',
-                  border: '2px solid #FFF',
-                  boxShadow: '0 0 0 1px #E8E8E8',
-                }}
-              />
-              <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>在线未激活</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <div
-                style={{
-                  width: 20,
-                  height: 20,
-                  borderRadius: '50%',
-                  background: '#b60808',
-                  border: '2px solid #FFF',
-                  boxShadow: '0 0 0 1px #E8E8E8',
-                }}
-              />
-              <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>离线设备</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <div
-                style={{
-                  width: 24,
-                  height: 24,
-                  borderRadius: '50%',
-                  background: 'linear-gradient(180deg, #40A9FF 0%, #1890FF 100%)',
-                  border: '2px solid #FFF',
-                  boxShadow: '0 0 0 1px #E8E8E8',
+                  margin: '12px 8px 8px', // 与树节点保持一致的左右边距
+                  padding: '10px 12px',
+                  background: '#E6F7FF', // 蓝色背景
+                  borderRadius: 4,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}
               >
-                <span style={{ fontSize: 9, fontWeight: 700, color: '#FFF' }}>N</span>
+                <span style={{ fontSize: 13, color: '#595959' }}>
+                  已选择 <span style={{ color: '#1677FF', fontWeight: 500 }}>{selectedGroupIds.length}</span> 个设备组
+                </span>
               </div>
-              <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>设备聚合</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center' }}>
-              <div
-                style={{
-                  width: 18,
-                  height: 18,
-                  borderRadius: '50%',
-                  background: 'linear-gradient(180deg, #FF7875 0%, #F5222D 100%)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <span style={{ fontSize: 9, fontWeight: 700, color: '#FFF' }}>3</span>
+            )}
+          </Collapse.Panel>
+
+          {/* Panel 3: 图例 - 可通过 SHOW_LEGEND 控制，默认隐藏 */}
+          {SHOW_LEGEND && (
+            <Collapse.Panel
+              key="legend"
+              header={<span style={collapseHeaderStyle}>图例</span>}
+              style={collapseItemStyle}
+            >
+              <div style={{ padding: '0 4px' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 24px' }}>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <div
+                  style={{
+                    width: 20,
+                    height: 20,
+                    borderRadius: '50%',
+                    background: 'linear-gradient(180deg, #73D13D 0%, #52C41A 100%)',
+                    border: '2px solid #FFF',
+                    boxShadow: '0 0 0 1px #E8E8E8',
+                  }}
+                />
+                <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>在线激活</span>
               </div>
-              <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>告警数量</span>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <div
+                  style={{
+                    width: 20,
+                    height: 20,
+                    borderRadius: '50%',
+                    background: 'linear-gradient(180deg, #FFC53D 0%, #FAAD14 100%)',
+                    border: '2px solid #FFF',
+                    boxShadow: '0 0 0 1px #E8E8E8',
+                  }}
+                />
+                <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>在线未激活</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <div
+                  style={{
+                    width: 20,
+                    height: 20,
+                    borderRadius: '50%',
+                    background: '#b60808',
+                    border: '2px solid #FFF',
+                    boxShadow: '0 0 0 1px #E8E8E8',
+                  }}
+                />
+                <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>离线设备</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <div
+                  style={{
+                    width: 24,
+                    height: 24,
+                    borderRadius: '50%',
+                    background: 'linear-gradient(180deg, #40A9FF 0%, #1890FF 100%)',
+                    border: '2px solid #FFF',
+                    boxShadow: '0 0 0 1px #E8E8E8',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <span style={{ fontSize: 9, fontWeight: 700, color: '#FFF' }}>N</span>
+                </div>
+                <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>设备聚合</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <div
+                  style={{
+                    width: 18,
+                    height: 18,
+                    borderRadius: '50%',
+                    background: 'linear-gradient(180deg, #FF7875 0%, #F5222D 100%)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <span style={{ fontSize: 9, fontWeight: 700, color: '#FFF' }}>3</span>
+                </div>
+                <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>告警数量</span>
+              </div>
             </div>
           </div>
-        </div>
-          </Collapse.Panel>
+            </Collapse.Panel>
+          )}
         </Collapse>
       </div>
 
