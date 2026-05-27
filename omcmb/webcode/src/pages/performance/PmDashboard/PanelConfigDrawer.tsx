@@ -28,6 +28,7 @@ import MetricPickerModal from '../KPIQuery/components/MetricPickerModal';
 import DevicePickerModal from '../KPIQuery/components/DevicePickerModal';
 import DeviceGroupPickerModal from '../KPIQuery/components/DeviceGroupPickerModal';
 import { useDeviceGroups } from '@core/hooks/api/useDevices';
+import { usePmAdhocList } from '@core/hooks/api/usePmAdhoc';
 import { csvToArray, arrayToCsv, techToDeviceType } from './dashboardUtils';
 
 interface Props {
@@ -74,6 +75,8 @@ const PANEL_TYPE_OPTIONS: { label: string; value: PanelType }[] = [
   // G6-Gap-5
   { label: '排行榜 (TopN)', value: 'topn' },
   { label: '数值大屏 (BigNumber)', value: 'big_number' },
+  // 独立 Panel 类型：数据源是 adhoc 任务结果，与实时指标库不同口径
+  { label: '自定义聚合结果', value: 'adhoc_result' },
 ];
 
 const GRANULARITY_OPTIONS: { label: string; value: Granularity }[] = [
@@ -228,6 +231,27 @@ function DeviceGroupPickerField({
 // G6-Gap-12：deviceSns 超过此阈值时弹"建议改用自定义聚合任务"提示
 const ADHOC_SUGGESTION_THRESHOLD = 10;
 
+/**
+ * 自定义聚合任务选择器 — 列出可用任务，仅在 adhoc_result Panel 类型下使用。
+ */
+function AdhocTaskSelect({ value, onChange }: { value?: string; onChange?: (v: string) => void }) {
+  const { data: tasks, isLoading } = usePmAdhocList();
+  return (
+    <Select
+      loading={isLoading}
+      value={value}
+      onChange={onChange}
+      placeholder="选择已创建的自定义聚合任务"
+      showSearch
+      optionFilterProp="label"
+      options={(tasks ?? []).map((t) => ({
+        value: t.id,
+        label: `${t.name}（${t.status}）`,
+      }))}
+    />
+  );
+}
+
 export function PanelConfigDrawer({ open, mode, panel, dashboardId, technology, onClose }: Props) {
   const [form] = Form.useForm<FormValues>();
   const createMut = useCreatePmPanel();
@@ -274,34 +298,46 @@ export function PanelConfigDrawer({ open, mode, panel, dashboardId, technology, 
 
   const handleSubmit = async () => {
     const values = await form.validateFields();
-    const compareMode = values.compareMode || undefined;
+    const isAdhocPanel = values.panelType === 'adhoc_result';
+    const compareMode = isAdhocPanel ? undefined : values.compareMode || undefined;
+    // 自定义聚合结果 Panel：除 panelType / title / adhocTaskId 外，其它字段强制兜底，不让用户填的脏数据入库
     const baseInput = {
       dashboardId,
       panelType: values.panelType,
       title: values.title,
-      metricPaths: splitCsv(values.metricPaths),
-      granularities: values.granularities,
-      dimension: values.dimension,
-      deviceSns: values.dimension === 'device' ? splitCsv(values.deviceSns) : undefined,
-      deviceGroupIds: values.dimension === 'device_group' ? splitCsv(values.deviceGroupIds) : undefined,
-      timeRange: { start_offset: values.windowOffset },
+      metricPaths: isAdhocPanel ? [] : splitCsv(values.metricPaths),
+      granularities: isAdhocPanel ? [] : values.granularities,
+      dimension: isAdhocPanel ? 'device' : values.dimension,
+      deviceSns: isAdhocPanel
+        ? undefined
+        : values.dimension === 'device'
+        ? splitCsv(values.deviceSns)
+        : undefined,
+      deviceGroupIds: isAdhocPanel
+        ? undefined
+        : values.dimension === 'device_group'
+        ? splitCsv(values.deviceGroupIds)
+        : undefined,
+      timeRange: { start_offset: isAdhocPanel ? '-24h' : values.windowOffset },
       compareMode,
       adhocTaskId: values.adhocTaskId,
-      config: {
-        unit: values.unit,
-        threshold: values.threshold,
-        // G6-Gap-9 时间轴
-        time_axis: values.timeAxis ?? 'end_time',
-        // G6-Gap-2 是否继承全局筛选
-        inherit_global: values.inheritGlobal ?? true,
-        // G6-Gap-5 类型化 config
-        ...(values.panelType === 'topn'
-          ? { n: values.topnN ?? 10, sort_desc: values.topnSortDesc ?? true }
-          : {}),
-        ...(values.panelType === 'big_number'
-          ? { font_size: values.bigNumberFontSize ?? 56, warning_threshold: values.warningThreshold }
-          : {}),
-      },
+      config: isAdhocPanel
+        ? { inherit_global: false }
+        : {
+            unit: values.unit,
+            threshold: values.threshold,
+            // G6-Gap-9 时间轴
+            time_axis: values.timeAxis ?? 'end_time',
+            // G6-Gap-2 是否继承全局筛选
+            inherit_global: values.inheritGlobal ?? true,
+            // G6-Gap-5 类型化 config
+            ...(values.panelType === 'topn'
+              ? { n: values.topnN ?? 10, sort_desc: values.topnSortDesc ?? true }
+              : {}),
+            ...(values.panelType === 'big_number'
+              ? { font_size: values.bigNumberFontSize ?? 56, warning_threshold: values.warningThreshold }
+              : {}),
+          },
     };
 
     if (mode === 'create' || !panel) {
@@ -338,29 +374,52 @@ export function PanelConfigDrawer({ open, mode, panel, dashboardId, technology, 
         <Form.Item label="标题" name="title" rules={[{ required: true }]}>
           <Input />
         </Form.Item>
-        <Form.Item
-          label="指标路径"
-          name="metricPaths"
-          rules={[
-            {
-              validator: (_r, v) => (csvToArray(v).length > 0 ? Promise.resolve() : Promise.reject(new Error('至少选择一个指标'))),
-            },
-          ]}
-          tooltip="点按钮弹出指标选择器（支持搜索 / 多选 / 分页）"
-        >
-          <MetricPickerField deviceType={techToDeviceType(technology)} />
+
+        {/* 自定义聚合结果 Panel 专用字段：任务选择器（必填） */}
+        <Form.Item shouldUpdate={(p, c) => p.panelType !== c.panelType} noStyle>
+          {() =>
+            form.getFieldValue('panelType') === 'adhoc_result' ? (
+              <Form.Item
+                label="自定义聚合任务"
+                name="adhocTaskId"
+                rules={[{ required: true, message: '请选择一个自定义聚合任务' }]}
+                tooltip="Panel 数据将直接显示该任务的聚合结果（设备/指标/粒度由任务定义决定）"
+              >
+                <AdhocTaskSelect />
+              </Form.Item>
+            ) : null
+          }
         </Form.Item>
-        <Form.Item
-          label="粒度（多选 — 前端 Tab 切换浏览）"
-          name="granularities"
-          rules={[{ required: true, message: '至少一个粒度' }]}
-          tooltip="可同时绑定多个粒度，PanelHeader 会显示 Tab，切换 Tab 时不重新请求 panel CRUD，只切换数据源"
-        >
-          <Select mode="multiple" options={GRANULARITY_OPTIONS} placeholder="hourly / daily / weekly / monthly" />
-        </Form.Item>
-        <Form.Item label="维度" name="dimension" rules={[{ required: true }]}>
-          <Select options={DIMENSION_OPTIONS} />
-        </Form.Item>
+
+        {/* 其它字段均仅适用实时指标库 Panel；adhoc_result 类型下全部隐藏 */}
+        <Form.Item shouldUpdate={(p, c) => p.panelType !== c.panelType} noStyle>
+          {() => {
+            if (form.getFieldValue('panelType') === 'adhoc_result') return null;
+            return (
+              <>
+                <Form.Item
+                  label="指标路径"
+                  name="metricPaths"
+                  rules={[
+                    {
+                      validator: (_r, v) => (csvToArray(v).length > 0 ? Promise.resolve() : Promise.reject(new Error('至少选择一个指标'))),
+                    },
+                  ]}
+                  tooltip="点按钮弹出指标选择器（支持搜索 / 多选 / 分页）"
+                >
+                  <MetricPickerField deviceType={techToDeviceType(technology)} />
+                </Form.Item>
+                <Form.Item
+                  label="粒度（多选 — 前端 Tab 切换浏览）"
+                  name="granularities"
+                  rules={[{ required: true, message: '至少一个粒度' }]}
+                  tooltip="可同时绑定多个粒度，PanelHeader 会显示 Tab，切换 Tab 时不重新请求 panel CRUD，只切换数据源"
+                >
+                  <Select mode="multiple" options={GRANULARITY_OPTIONS} placeholder="hourly / daily / weekly / monthly" />
+                </Form.Item>
+                <Form.Item label="维度" name="dimension" rules={[{ required: true }]}>
+                  <Select options={DIMENSION_OPTIONS} />
+                </Form.Item>
         <Form.Item shouldUpdate={(p, c) => p.dimension !== c.dimension || p.deviceSns !== c.deviceSns}>
           {() => {
             const dim = form.getFieldValue('dimension');
@@ -433,9 +492,6 @@ export function PanelConfigDrawer({ open, mode, panel, dashboardId, technology, 
         <Form.Item label="对比模式" name="compareMode">
           <Select options={COMPARE_OPTIONS} allowClear />
         </Form.Item>
-        <Form.Item label="关联自定义聚合任务 ID（可选）" name="adhocTaskId">
-          <Input placeholder="adhoc-task uuid" />
-        </Form.Item>
         <Form.Item label="单位" name="unit">
           <Input placeholder="%, Mbps..." />
         </Form.Item>
@@ -459,6 +515,10 @@ export function PanelConfigDrawer({ open, mode, panel, dashboardId, technology, 
               { label: '入库时间 (ingest_time)', value: 'ingest_time' },
             ]}
           />
+        </Form.Item>
+              </>
+            );
+          }}
         </Form.Item>
 
         {/* G6-Gap-5: TopN 类型专用 */}

@@ -11,11 +11,11 @@
  *   G6-Gap-9  pct 单位 / 阈值线 / 缺采断线 / 时间轴切换
  */
 
-import { Alert, Empty, Spin, Statistic, Table } from 'antd';
+import { Alert, Empty, Spin, Statistic, Table, Tag } from 'antd';
 import ReactECharts from 'echarts-for-react';
 import type { Granularity, Panel } from '@core/types/pmDashboard';
 import { usePmPanelData, type PanelSeries } from '@core/hooks/api/usePmPanelData';
-import { usePmAdhocDetail } from '@core/hooks/api/usePmAdhoc';
+import { usePmAdhocDetail, usePmAdhocResults } from '@core/hooks/api/usePmAdhoc';
 
 interface Props {
   panel: Panel;
@@ -60,6 +60,8 @@ export function PanelRenderer({ panel, activeGranularity }: Props) {
       return <TopNRenderer panel={panel} gran={gran} />;
     case 'big_number':
       return <BigNumberRenderer panel={panel} gran={gran} />;
+    case 'adhoc_result':
+      return <AdhocResultRenderer panel={panel} />;
     default:
       return <Empty description={`未支持的 panel type: ${panel.panelType}`} />;
   }
@@ -264,6 +266,60 @@ function TopNRenderer({ panel, gran }: RenderProps) {
         { title: panel.metricPaths[0] ?? '值', dataIndex: 'value' },
       ]}
       dataSource={sorted}
+    />
+  );
+}
+
+// 自定义聚合结果 Panel：数据源是 adhoc 任务结果，与实时指标库无关
+// 由表单约束保证只在 panel.adhocTaskId 存在时才会被路由到这里
+function AdhocResultRenderer({ panel }: { panel: Panel }) {
+  const taskId = panel.adhocTaskId;
+  const taskQuery = usePmAdhocDetail(taskId);
+  const resultsQuery = usePmAdhocResults(taskId);
+
+  if (!taskId) {
+    return <Empty description="请在 Panel 配置中选择一个自定义聚合任务" />;
+  }
+  if (taskQuery.isLoading || resultsQuery.isLoading) {
+    return <Spin tip="加载聚合结果..." />;
+  }
+  if (resultsQuery.isError) {
+    return <Alert type="error" showIcon message="加载结果失败" description={String(resultsQuery.error)} />;
+  }
+  const task = taskQuery.data;
+  const rows = (resultsQuery.data ?? []).map((r) => ({ key: r.id, ...r }));
+  if (rows.length === 0) {
+    return (
+      <Empty
+        description={
+          <div>
+            <div>该任务暂无结果</div>
+            <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>
+              任务状态：<Tag>{task?.status ?? 'unknown'}</Tag>
+              {typeof task?.progress === 'number' && `进度 ${Math.round(task.progress * 100)}%`}
+            </div>
+          </div>
+        }
+      />
+    );
+  }
+  return (
+    <Table
+      size="small"
+      pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (t) => `共 ${t} 行` }}
+      columns={[
+        { title: '时间桶', dataIndex: 'time', width: 170 },
+        { title: '粒度', dataIndex: 'granularity', width: 80 },
+        { title: '设备 SN', dataIndex: 'deviceSn', width: 200, ellipsis: true },
+        { title: '指标', dataIndex: 'metricPath', ellipsis: true },
+        {
+          title: '值',
+          dataIndex: 'metricValue',
+          width: 120,
+          render: (v: number | null) => (v === null || v === undefined ? <span style={{ color: '#bfbfbf' }}>-</span> : v),
+        },
+      ]}
+      dataSource={rows}
     />
   );
 }

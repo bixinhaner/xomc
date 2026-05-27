@@ -12,8 +12,8 @@
 // 顶层制式切换
 export type Technology = 'lte' | 'nr' | 'gsm';
 
-// 7 种 Panel 类型（T-0164 收尾 G6-Gap-5 加 topn + big_number）
-export type PanelType = 'kpi_card' | 'line_chart' | 'bar_chart' | 'table' | 'gauge' | 'topn' | 'big_number';
+// 8 种 Panel 类型：7 种实时指标类型 + adhoc_result 自定义聚合结果（数据源是 adhoc 任务结果而非实时指标库）
+export type PanelType = 'kpi_card' | 'line_chart' | 'bar_chart' | 'table' | 'gauge' | 'topn' | 'big_number' | 'adhoc_result';
 
 // 数据维度
 export type Dimension = 'device' | 'device_group';
