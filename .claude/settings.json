@@ -278,7 +278,18 @@
       "Bash(docker stop *)",
       "Bash(lsof -nP -iTCP:8080 -sTCP:LISTEN)",
       "Bash(bash run/scripts/stop-all.sh --keep-db)",
-      "Bash(docker cp *)"
+      "Bash(docker cp *)",
+      "Bash(echo \"Real exit: $?\")",
+      "Bash(echo \"Exit code with dup: $?\")",
+      "Bash(echo \"Exit code without dup \\(still 1 due to pre-existing gaps\\): $?\")",
+      "Bash(bash omcgo/scripts/check-migrations.sh --strict)",
+      "Bash(echo \"strict exit: $?\")",
+      "Bash(chmod +x omcgo/scripts/check-schema-drift.sh)",
+      "Bash(bash omcgo/scripts/check-schema-drift.sh)",
+      "Bash(echo \"Exit: $?\")",
+      "Bash(echo \"Drift script exit: $?\")",
+      "Bash(awk '$1 > 1 && $2 >= \"000200\" {print}')",
+      "Bash(echo \"strict check exit: $?\")"
     ],
     "deny": [
       "Bash(git push -f)",
