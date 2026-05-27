@@ -67,10 +67,45 @@
   animation: slideInRight 300ms ease-out;
 }
 
-/* Reduced motion */
+/* ============================================================================
+   Reduced motion — 系统开启"减少动画"时的兼容性处理
+   ============================================================================
+
+   问题：云桌面环境下系统通常开启"减少动画"以节省带宽和提升性能。
+   当 prefers-reduced-motion: reduce 生效时，原本的全局 0.01ms 动画时长
+   会导致 Ant Design 弹出类组件的下拉框定位计算失败，表现为：
+     - 点击下拉框时整个界面抖动
+     - 下拉框内容不显示
+     - 弹出位置异常
+
+   解决方案：为 Ant Design 弹出类组件保留正常的动画时长，
+   使用 unset 让组件使用其自身定义的默认值，避免硬编码不一致。
+=========================================================================== */
 @media (prefers-reduced-motion: reduce) {
+  /* 大多数元素保持极短的动画时长，尊重用户的减少动画偏好 */
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+
+  /* 例外：Ant Design 弹出类组件需要正常的过渡时长才能正常工作 */
+  .ant-select-dropdown,
+  .ant-dropdown,
+  .ant-picker-dropdown,
+  .ant-cascader-dropdown,
+  .ant-auto-complete-dropdown,
+  .ant-tooltip,
+  .ant-popover {
+    animation-duration: unset !important;
+    transition-duration: unset !important;
+  }
+
+  /* Ant Design 动画类也需要正常时长 */
+  .ant-motion-collapse,
+  .ant-motion-fade,
+  .ant-motion-slide,
+  .ant-motion-zoom {
+    animation-duration: unset !important;
+    transition-duration: unset !important;
   }
 }
