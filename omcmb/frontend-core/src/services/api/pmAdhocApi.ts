@@ -24,15 +24,15 @@ interface ResultsResponse {
 
 export const pmAdhocApi = {
   async list(): Promise<AdhocTask[]> {
-    const resp = await http.get<ListResponse>('/pm/adhoc/tasks');
-    return (resp.items ?? []).map(mapBackendAdhocTask);
+    const { data } = await http.get<ListResponse>('/pm/adhoc/tasks');
+    return (data.items ?? []).map(mapBackendAdhocTask);
   },
   async get(id: string): Promise<AdhocTask> {
-    const resp = await http.get<BackendAdhocTask>(`/pm/adhoc/tasks/${id}`);
-    return mapBackendAdhocTask(resp);
+    const { data } = await http.get<BackendAdhocTask>(`/pm/adhoc/tasks/${id}`);
+    return mapBackendAdhocTask(data);
   },
   async create(input: CreateAdhocTaskInput): Promise<{ id: string }> {
-    return http.post<{ id: string }>('/pm/adhoc/tasks', {
+    const { data } = await http.post<{ id: string }>('/pm/adhoc/tasks', {
       name: input.name,
       mode: input.mode,
       cron_expr: input.cronExpr,
@@ -43,15 +43,16 @@ export const pmAdhocApi = {
       window_end: input.windowEnd,
       dimension: input.dimension,
     });
+    return data;
   },
   async cancel(id: string): Promise<void> {
     await http.delete(`/pm/adhoc/tasks/${id}`);
   },
   async results(id: string, limit = 100, offset = 0): Promise<AdhocResultRow[]> {
-    const resp = await http.get<ResultsResponse>(`/pm/adhoc/tasks/${id}/results`, {
+    const { data } = await http.get<ResultsResponse>(`/pm/adhoc/tasks/${id}/results`, {
       params: { limit, offset },
     });
-    return (resp.items ?? []).map(mapBackendAdhocResult);
+    return (data.items ?? []).map(mapBackendAdhocResult);
   },
 };
 
