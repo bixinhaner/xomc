@@ -14,7 +14,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Button, Card, Empty, List, Modal, Form, Input, Select, Space, Tag, Tooltip, message } from 'antd';
+import { Button, Card, Empty, List, Modal, Form, Input, Select, Space, Tag, Tooltip, message, theme } from 'antd';
 import { PlusOutlined, AppstoreAddOutlined } from '@ant-design/icons';
 import {
   usePmDashboardList,
@@ -43,6 +43,7 @@ export default function PerformanceLayout() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const dashboardId = searchParams.get('dashboard') ?? undefined;
+  const { token } = theme.useToken();
 
   const { data: dashboards = [], isLoading } = usePmDashboardList();
   const createMut = useCreatePmDashboard();
@@ -188,7 +189,8 @@ export default function PerformanceLayout() {
                       style={{
                         cursor: 'pointer',
                         padding: '6px 8px',
-                        background: active ? '#e6f4ff' : undefined,
+                        background: active ? token.controlItemBgActive : undefined,
+                        color: active ? token.colorPrimary : undefined,
                         borderRadius: 4,
                       }}
                     >
