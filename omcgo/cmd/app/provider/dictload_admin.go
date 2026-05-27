@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/config/parammodel"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
 )
@@ -80,13 +81,30 @@ func registerDictLoadAdminRoutes(c *Container, superAdmin *gin.RouterGroup) {
 			zap.Int("files_loaded", report.FilesLoaded),
 			zap.Int("files_skipped", report.FilesSkipped))
 
+		// T-0183: param-model loader reload 完成后自动清 Redis L2 + bump
+		// cache_version,避免运维手工 redis-cli DEL(参考 parammodel iteration guide §2.2)。
+		// 其他 loader(mml-standard / indicator / 等)走自己的缓存策略,这里只兜底 param-model。
+		cacheKeysCleared := 0
+		var cacheVersion int64
+		if name == "param-model" && c.Redis != nil {
+			if cacheRes, cErr := parammodel.InvalidateCache(reloadCtx, c.Redis, c.Logger); cErr != nil {
+				logger.Warn("param-model cache invalidate failed (DB still consistent)",
+					zap.Error(cErr))
+			} else {
+				cacheKeysCleared = cacheRes.KeysCleared
+				cacheVersion = cacheRes.CacheVersionAfter
+			}
+		}
+
 		response.OK(ctx, gin.H{
-			"loader":        name,
-			"elapsed_ms":    elapsed.Milliseconds(),
-			"rows_affected": report.RowsAffected,
-			"files_loaded":  report.FilesLoaded,
-			"files_skipped": report.FilesSkipped,
-			"errors":        report.Errors,
+			"loader":              name,
+			"elapsed_ms":          elapsed.Milliseconds(),
+			"rows_affected":       report.RowsAffected,
+			"files_loaded":        report.FilesLoaded,
+			"files_skipped":       report.FilesSkipped,
+			"errors":              report.Errors,
+			"cache_keys_cleared":  cacheKeysCleared,
+			"cache_version_after": cacheVersion,
 		})
 	})
 }

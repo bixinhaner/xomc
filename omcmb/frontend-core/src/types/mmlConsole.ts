@@ -108,6 +108,13 @@ export interface BackendSubField {
   default_selected: boolean;
   is_required: boolean;
   sort_order: number;
+  /**
+   * T-0183: param_mappings.is_supported 派生 — 该 path 在当前 paramModel 是否支持。
+   * false 表示 sweep-paths 探测 / iteration guide 标过 supported="false"。
+   * console 默认不勾选 false 行(允许用户手动勾选作为兜底)。
+   * 缺映射兜底为 true(默认显示并可选)。
+   */
+  is_supported?: boolean;
 }
 
 /** POST /mml/parse 响应中的 parse_error 单条。 */
@@ -248,6 +255,12 @@ export interface SubFieldDef {
    * 前端 SubFieldChecklist / SubFieldInputList 行内 / Tooltip 渲染用。
    */
   description?: string;
+  /**
+   * T-0183: param_mappings.is_supported 派生(后端按 paramModel 维度聚合)。
+   * false → console 默认不勾选(用户可手动勾选);PathPicker / SubFieldChecklist 加视觉标记。
+   * undefined / true → 正常按 defaultSelected 决定。
+   */
+  isSupported?: boolean;
 }
 
 /**

@@ -60,31 +60,58 @@ make build              # 或 go build -o bin/omcctl ./cmd/omcctl
 | `device reboot <id>` | 远程重启 | `POST /api/v1/devices/{id}/reboot` |
 | `device delete <id>` | 删除设备 | `DELETE /api/v1/devices/{id}` |
 | `device stats` | 设备统计 | `GET /api/v1/devices/stats` |
-| `device sweep-paths <SN>` | GPV 探测参数支持度 | `POST /api/v1/devices/{SN}/sweep-paths` |
+| `device sweep-paths <SN>` | GPV 探测参数支持度 → 写 XML + 同步 DB + 清缓存 | **进程内直连 PG/Redis,不走 HTTP**(T-0183) |
 
 **`device list` flags**：`--carrier {cmcc|ctcc|cucc}` `--status xxx` `--limit 20`
 
-**`device sweep-paths`**（特别注意，有破坏性）：探测某设备对一组 TR-069 path 的支持情况，把"不支持"写回 param_mappings/discovered。
+**`device sweep-paths`**(T-0183 thick mode,运维三步合一,有破坏性):
+
+> ⚠️ 与历史不同:旧 sweep-paths 走 `POST /api/v1/devices/{SN}/sweep-paths` HTTP 端点,
+> T-0183 起 omcctl 进程内直连 PG + Redis,**不再依赖 app HTTP**。HTTP 端点已删除。
+>
+> `--apply` 语义升级:不再只写 DB,而是 **一步完成 XML + DB + 缓存清** —
+>   1. 写 `data/param-mappings/<paramModel>.xml`,标注 `supported="false"`(保留原格式,git diff 友好)
+>   2. UPDATE `param_mappings.is_supported=false` (default 来源)
+>   3. UPDATE `discovered_param_mappings.is_supported=false` (同步 product 反查)
+>   4. SCAN+UNLINK `parammodel:default:*` + `parammodel:discovered:*`
+>   5. INCR `parammodel:cache_version`(跨实例失效)
+>
+> XML 改动通过 docker-compose bind mount 持久化到宿主 `omcgo/data/param-mappings/`,
+> 容器重启 / 重建都不会丢标注;operator git diff 审阅后 commit 入库。
 
 ```
---apply              真正执行（缺省 dry-run）
+--apply              真正执行(缺省 dry-run,只探测不写)
 --prefix Device.X    只测前缀子集
---batch-size 1       每次 GPV 包含 path 数（>1 出 fault 9005 难定位）
+--batch-size 16      每次 GPV 包含 path 数(T-0180 起 batch>1 可靠)
 --rpc-timeout 30s    单次 RPC 超时
---rpc-rate 5.0       每秒最多发起任务数（速率限流）
+--rpc-rate 5.0       每秒最多发起任务数(速率限流)
 --operator $USER     审计字段
 --confirm-paramodel-wide  >10 设备 paramModel 必须显式确认
 --force              跳过 50% 比例保护门
 --json               JSON 输出
---verbose            详细日志
+--verbose            列每个 path 的探测明细 + XML 未命中清单
 ```
 
-示例：
+**端到端示例(无需 API key — 直连不走 HTTP)**:
 ```bash
-omcctl device list --carrier cmcc --limit 50
-omcctl device sweep-paths ABCD1234 --verbose                  # dry-run
-omcctl device sweep-paths ABCD1234 --apply --prefix Device.FAP --batch-size 1
+# Dry-run:仅探测,看哪些 path 不支持
+docker exec docker-worker-1 omcctl device sweep-paths 1202000240194DP0026 --verbose
+
+# Apply:写 XML + DB + 缓存
+docker exec docker-worker-1 omcctl device sweep-paths 1202000240194DP0026 --apply
+
+# 审阅 XML 改动(已通过 bind mount 反映到宿主源码)
+git -C /Users/cb/code/baicells/goomc diff omcgo/data/param-mappings/
+
+# DB 也已同步:
+docker exec docker-postgres-1 psql -U omcgo -d omcgo -c \
+  "SELECT standard_path FROM param_mappings WHERE is_supported=false LIMIT 10;"
 ```
+
+**与 iteration guide 的关系**:`docs/runbook/parammodel-iteration-annotation-guide.md` 手工流程
+(Edit XML + docker cp + redis-cli DEL + restart app + 软删设备)在 T-0183 后被 sweep-paths
+单命令替代;但若 operator 需要按 batch fault sample 手工标注(批量 sed 标整个对象子树),
+仍可走老路径。
 
 ---
 

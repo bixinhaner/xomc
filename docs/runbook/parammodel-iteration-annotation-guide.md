@@ -6,6 +6,35 @@
 
 ---
 
+## 0. T-0183 后的推荐路径(自动化优先)
+
+T-0183 起 `omcctl device sweep-paths --apply` 在 omcctl 进程内一步完成:
+1. GPV 探测设备 → 收集 9005 unsupported 集合
+2. 写 `data/param-mappings/<paramModel>.xml` 标注 `supported="false"`(text-based 保格式)
+3. UPDATE `param_mappings.is_supported=false` + `discovered_param_mappings.is_supported=false`
+4. 清 Redis L2 + bump `parammodel:cache_version`
+
+**优先用此路径**:
+```bash
+docker exec docker-worker-1 omcctl device sweep-paths "$SN" --apply
+git -C /Users/cb/code/baicells/goomc diff omcgo/data/param-mappings/   # 审阅
+git add omcgo/data/param-mappings/ && git commit -m "..."
+```
+
+XML 文件通过 docker-compose bind mount(`omcgo/data/param-mappings` → `/etc/omcgo/data/param-mappings`)
+直接反映到宿主源码,容器重建 / 重启都不会丢标注。
+
+**何时仍用本指南手工流程**:
+- 9005 fault 指向对象前缀(如 `Device.X.Y.{i}.Z.`,带末尾点),需要 sed 批量标整个子树
+- sweep-paths 探测覆盖不到的角落(如对象级 GPV,而非叶子)
+- 多 batch 多 sample 收敛(每轮只暴露 1 个,多轮迭代)
+
+下面的手工流程仍然有效,只是大多数单 leaf 场景已被 sweep-paths 自动化吸收。
+
+---
+
+---
+
 ## 1. 准备工作
 
 ### 1.1 确认 paramModel 已绑定产品
@@ -67,20 +96,34 @@ grep -c 'supported="false"' $XML   # 验证总数变化
 
 ### 2.2 部署 + 触发新 sync
 
+**T-0183 后简化路径**(XML 在宿主 bind mount 内,无需 docker cp;reload 端点自动清缓存):
+
 ```bash
-# 1. XML → 运行容器
+# 1. 触发后端 dictload 重读 XML(自动清 Redis L2 + bump cache_version)
+curl -H "X-API-Key: $(cat /var/lib/omcgo/secrets/.api-key)" \
+     -X POST http://app:8081/api/v1/admin/dictload/reload?name=param-model
+
+# 2. 软删 device 触发 fresh sync
+docker exec docker-postgres-1 psql -U omcgo -d omcgo -c "
+UPDATE devices SET deleted_at=now() WHERE serial_number='$SN' AND deleted_at IS NULL RETURNING id;"
+```
+
+或通过 UI:进 `/system/dict-loader` 页面,点击"参数模型字典"的"重新加载"按钮。
+
+---
+
+**历史手工路径**(T-0183 前)— 仅供回滚或非容器化环境参考:
+
+```bash
+# 1. XML → 运行容器(T-0183 前需要,现在 bind mount 自动同步)
 docker cp $XML omc-docker-app-1:/etc/omcgo/data/param-mappings/$(basename $XML)
 
-# 2. 清 Redis L2 缓存（pre-existing bug：L2 不消费 cache_version）
+# 2. 清 Redis L2 缓存(T-0183 后 reload 端点自动做)
 docker exec omc-docker-redis-1 redis-cli --scan --pattern "parammodel:default:*" | xargs -I {} docker exec omc-docker-redis-1 redis-cli DEL {}
 docker exec omc-docker-redis-1 redis-cli --scan --pattern "parammodel:discovered:*" | xargs -I {} docker exec omc-docker-redis-1 redis-cli DEL {}
 
-# 3. 重启 app（清 L1 + dictloader 重读 XML 写 DB）
+# 3. 重启 app(T-0183 后 reload 端点替代,不需要全 app 重启)
 cd /Users/shangyingbin/project/omc-docker && docker compose restart app
-
-# 4. 软删 device 触发 fresh sync
-docker exec omc-docker-postgres-1 psql -U omcgo -d omcgo -c "
-UPDATE devices SET deleted_at=now() WHERE serial_number='$SN' AND deleted_at IS NULL RETURNING id;"
 ```
 
 ### 2.3 等基站 inform + 抓 fault sample

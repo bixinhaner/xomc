@@ -83,12 +83,17 @@ export default function PathPicker({
   const { data: subFields = [] } = useCommandSubFields(commandId, lang);
   const pathOptions = useMemo<Option[]>(
     () =>
-      subFields.map((sf) => ({
-        value: sf.tr069Path,
+      subFields.map((sf) => {
         // path 主文 + 中文 description 灰副文（Cascader / Select 不支持复杂 label
         // 节点，这里用 " — descr" 拼接，AutoComplete 同款）
-        label: sf.description ? `${sf.tr069Path} — ${sf.description}` : sf.tr069Path,
-      })),
+        const base = sf.description ? `${sf.tr069Path} — ${sf.description}` : sf.tr069Path;
+        // T-0183: isSupported=false → 加 "[不支持]" 后缀,告知用户该 path 默认未勾选。
+        const suffix = sf.isSupported === false ? ' [不支持]' : '';
+        return {
+          value: sf.tr069Path,
+          label: base + suffix,
+        };
+      }),
     [subFields],
   );
 

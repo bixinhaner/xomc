@@ -149,6 +149,9 @@ func (s *Service) Run(ctx context.Context, opts Options) (*Result, error) {
 		return res, fmt.Errorf("get by param_model %s: %w", res.ParamModelID, err)
 	}
 	res.ParamModelName = "" // Registry 未直接返回 name；不阻塞流程
+	// 双源 mapping set:default(XML)与 discovered(运行时学习) 都可能存在,Applier 据
+	// Source 字段分流写 XML / discovered_param_mappings。Service 不再判定 source,
+	// 直接透传 set.Source 到每条候选(MappingSet 内部 Source 已合并标记)。
 	candidates := filterCandidates(set.Mappings, opts.Prefix)
 	res.CandidateCount = len(candidates)
 	if res.CandidateCount == 0 {
@@ -207,36 +210,19 @@ func (s *Service) Run(ctx context.Context, opts Options) (*Result, error) {
 		}
 	}
 
-	// Step 6: 写库（仅 --apply）
-	if opts.Apply && len(unsupportedPaths) > 0 {
-		affected, err := s.repo.MarkUnsupportedBatch(ctx, res.ParamModelID, unsupportedPaths)
-		if err != nil {
-			s.finalize(res)
-			return res, fmt.Errorf("mark unsupported batch: %w", err)
-		}
-		res.MarkedCount = int(affected)
-		s.logger.Info("devsweep applied",
-			zap.String("device_sn", opts.DeviceSN),
-			zap.String("operator", opts.Operator),
-			zap.String("param_model_id", res.ParamModelID.String()),
-			zap.Int("candidates", res.CandidateCount),
-			zap.Int("supported", res.SupportedCount),
-			zap.Int("unsupported", res.UnsupportedCount),
-			zap.Int("unknown", res.UnknownCount),
-			zap.Int("marked", res.MarkedCount),
-			zap.Int("paramodel_devices", int(devCount)),
-		)
-	} else {
-		s.logger.Info("devsweep dry-run",
-			zap.String("device_sn", opts.DeviceSN),
-			zap.String("operator", opts.Operator),
-			zap.Int("candidates", res.CandidateCount),
-			zap.Int("supported", res.SupportedCount),
-			zap.Int("unsupported", res.UnsupportedCount),
-			zap.Int("unknown", res.UnknownCount),
-			zap.Int("paramodel_devices", int(devCount)),
-		)
-	}
+	// Service.Run 仅产 Result — Apply 副作用(写 XML / 写 DB / 清缓存)由调用方
+	// (omcctl 进程内的 Applier)负责。这样 Service 保持纯探测,可测性 + 复用都好。
+	// 详见 internal/devsweep/applier.go。
+	s.logger.Info("devsweep probe finished",
+		zap.String("device_sn", opts.DeviceSN),
+		zap.String("operator", opts.Operator),
+		zap.Bool("apply_requested", opts.Apply),
+		zap.Int("candidates", res.CandidateCount),
+		zap.Int("supported", res.SupportedCount),
+		zap.Int("unsupported", res.UnsupportedCount),
+		zap.Int("unknown", res.UnknownCount),
+		zap.Int("paramodel_devices", int(devCount)),
+	)
 
 	s.finalize(res)
 	return res, nil

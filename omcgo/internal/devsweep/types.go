@@ -81,15 +81,22 @@ const (
 )
 
 // ProbeRecord 是单条 path 的探测明细，--verbose / --json per_path 输出用。
+//
+// Source 标记本条 path 的来源(default | discovered),Applier 据此分流:
+//   - default(来自 paramModel XML)→ 改 XML + param_mappings.is_supported
+//   - discovered(运行时学习的 product 私有映射)→ 只改 discovered_param_mappings.is_supported
 type ProbeRecord struct {
-	StandardPath string        `json:"standard_path"`
-	ProbePath    string        `json:"probe_path"`     // 实际发给 CPE 的 path（{i} → .0.）
-	Outcome      ProbeOutcome  `json:"outcome"`
-	FaultCode    int           `json:"fault_code,omitempty"`
-	FaultMessage string        `json:"fault_message,omitempty"`
-	Batch        int           `json:"batch"`
-	DurationMS   int64         `json:"duration_ms"`
-	TaskID       string        `json:"task_id,omitempty"`
+	StandardPath string       `json:"standard_path"`
+	PrivatePath  string       `json:"private_path,omitempty"`
+	Source       string       `json:"source,omitempty"` // "default" | "discovered"
+	ProductID    string       `json:"product_id,omitempty"`
+	ProbePath    string       `json:"probe_path"` // 实际发给 CPE 的 path（{i} → .0.）
+	Outcome      ProbeOutcome `json:"outcome"`
+	FaultCode    int          `json:"fault_code,omitempty"`
+	FaultMessage string       `json:"fault_message,omitempty"`
+	Batch        int          `json:"batch"`
+	DurationMS   int64        `json:"duration_ms"`
+	TaskID       string       `json:"task_id,omitempty"`
 }
 
 // Result 是 Service.Run 的返回，承载文本/JSON 渲染所需全部字段。

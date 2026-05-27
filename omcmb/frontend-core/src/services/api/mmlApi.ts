@@ -1198,6 +1198,7 @@ function mapSubField(s: BackendSubField): SubFieldDef {
     defaultSelected: s.default_selected,
     isRequired: s.is_required,
     sortOrder: s.sort_order,
+    isSupported: s.is_supported,
   };
 }
 

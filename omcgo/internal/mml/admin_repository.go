@@ -249,13 +249,22 @@ func (r *PgSubFieldRepository) ListByCommand(ctx context.Context, commandID uuid
 //   - 都为 NULL → 空（前端 AccessTypeTag Tooltip 走"无明确取值范围"兜底文案）
 // 数字内容 zh-CN / en-US 同形，i18n 两 key 同值即可。
 func (r *PgSubFieldRepository) ListEnrichedByCommand(ctx context.Context, commandID uuid.UUID, paramModelID *uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
-	// T-0170 / T-0176-PR-C: paramModelID 非 nil 时叠加 param_mappings 过滤，
-	// 让前端只看到"该 paramModel 真实支持的 sub_field"。设计哲学：
-	// param_mappings 是 product 实际支持 path 的单一真值源；
-	//   - is_active = true：映射处于激活态
-	//   - is_supported = true：CPE 实测支持（auto-learn 收敛后的能力位）
-	// 缺映射或被自动学习标 unsupported 都视为不可见。
+	// T-0183: 行为修改 — 不再过滤掉 is_supported=false 的 path,前端会"显示但默认不勾选"。
+	// 历史(T-0170/T-0176-PR-C):EXISTS 过滤 is_supported=true 让 unsupported 完全消失;
+	// 现在(T-0183):仍 EXISTS 过滤"该 paramModel 必须有 active mapping",但不卡 is_supported;
+	// 同时返回 is_supported 列让前端决定默认勾选状态。
+	//
+	// SQL 增量:
+	//   - EXISTS 子查询去掉 `AND pm.is_supported = true`
+	//   - 新增 SELECT `COALESCE((SELECT pm.is_supported FROM param_mappings pm ...), true) AS is_supported`
+	//   - paramModelID 为 nil 时(admin 端)is_supported 走聚合 BOOL_OR
 	paramModelFilter := ""
+	isSupportedExpr := `(
+        SELECT BOOL_OR(pm.is_supported)
+          FROM param_mappings pm
+         WHERE pm.standard_path = sp.standard_path
+           AND pm.is_active = true
+    )`
 	args := []any{commandID}
 	if paramModelID != nil {
 		paramModelFilter = `
@@ -264,8 +273,15 @@ func (r *PgSubFieldRepository) ListEnrichedByCommand(ctx context.Context, comman
        WHERE pm.standard_path  = sp.standard_path
          AND pm.param_model_id = $2
          AND pm.is_active      = true
-         AND pm.is_supported   = true
   )`
+		// console 端绑 paramModel — is_supported 直接取该 paramModel 的值,缺映射兜底 false
+		isSupportedExpr = `COALESCE((
+        SELECT pm.is_supported FROM param_mappings pm
+         WHERE pm.standard_path = sp.standard_path
+           AND pm.param_model_id = $2
+           AND pm.is_active = true
+         LIMIT 1
+    ), false)`
 		args = append(args, *paramModelID)
 	}
 
@@ -304,7 +320,8 @@ SELECT
         'zh-CN', sp.standard_path,
         'en-US', sp.standard_path
     )                                     AS name_i18n,
-    COALESCE(sp.description, '')          AS description
+    COALESCE(sp.description, '')          AS description,
+    COALESCE(` + isSupportedExpr + `, true)             AS is_supported
 FROM mml_command_sub_fields csf
 JOIN standard_params sp ON sp.id = csf.standard_path_id
 WHERE csf.command_id = $1` + paramModelFilter + `
@@ -328,6 +345,7 @@ ORDER BY csf.sort_order ASC, csf.mml_code ASC`
 			&e.ChangeApplies, &constraintI18n,
 			&e.DefaultValue, &e.JsRegex, &paramNameI18n,
 			&e.Description,
+			&e.IsSupported,
 		); err != nil {
 			return nil, fmt.Errorf("scan enriched sub_field row: %w", err)
 		}

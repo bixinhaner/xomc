@@ -89,12 +89,12 @@ func Test_ListByCommand_NoLongerFiltersBySubFieldIsSupported(t *testing.T) {
 
 // Test_ListEnrichedByCommand_ParamMappingsIsSupportedFilter 集成测试：
 //
-// 三组 standardPath：
-//   - PR-C.A：在 param_mappings is_active=true AND is_supported=true → 应返回
-//   - PR-C.B：is_active=true AND is_supported=false → 不应返回（PR-C 收敛真值源）
-//   - PR-C.C：不在 param_mappings → 不应返回（EXISTS 必然 false）
+// T-0183 行为变更:
+//   - PR-C.A：active + supported=true → 返回,is_supported=true
+//   - PR-C.B：active + supported=false → 返回(过去 PR-C 隐藏,现在显示让前端默认不勾),is_supported=false
+//   - PR-C.C：不在 param_mappings → 仍不返回(EXISTS 卡 "至少有一条 active mapping")
 //
-// sub_field 自身不论 is_supported 取值（PR-C 删了 csf 过滤）。
+// sub_field 自身 is_supported 取值不影响返回(csf.is_supported 列已不再读)。
 func Test_ListEnrichedByCommand_ParamMappingsIsSupportedFilter(t *testing.T) {
 	pool := newMMLTestPool(t)
 	if pool == nil {
@@ -107,26 +107,28 @@ func Test_ListEnrichedByCommand_ParamMappingsIsSupportedFilter(t *testing.T) {
 	paramModelID := fx.insertParamModel()
 	commandID := fx.insertCommand("LST_PRC_TEST_ENRICH", "chapter:PRC")
 
-	// 三个 sub_field，sub_field.is_supported 全部混合，证明 PR-C 不读 csf.is_supported。
 	fx.insertSubField(commandID, "Device.PRC-C.A", true, 1)
-	fx.insertSubField(commandID, "Device.PRC-C.B", false, 2) // 故意 csf.is_supported=false
+	fx.insertSubField(commandID, "Device.PRC-C.B", false, 2)
 	fx.insertSubField(commandID, "Device.PRC-C.C", true, 3)
 
-	// param_mappings 配置：
-	fx.insertParamMapping(paramModelID, "Device.PRC-C.A", true, true)  // active + supported → 命中
-	fx.insertParamMapping(paramModelID, "Device.PRC-C.B", true, false) // active + unsupported → 不命中
+	fx.insertParamMapping(paramModelID, "Device.PRC-C.A", true, true)  // active + supported
+	fx.insertParamMapping(paramModelID, "Device.PRC-C.B", true, false) // active + unsupported
 	// PRC-C.C 不建 mapping → EXISTS 假 → 不命中
 
 	repo := NewPgSubFieldRepository(pool)
 	rows, err := repo.ListEnrichedByCommand(ctx, commandID, &paramModelID)
 	require.NoError(t, err)
 
-	gotPaths := make([]string, 0, len(rows))
+	gotPaths := make(map[string]bool, len(rows))
 	for _, r := range rows {
-		gotPaths = append(gotPaths, r.Tr069Path)
+		gotPaths[r.Tr069Path] = r.IsSupported
 	}
-	assert.ElementsMatch(t, []string{"Device.PRC-C.A"}, gotPaths,
-		"PR-C: ListEnrichedByCommand must only return paths where param_mappings is_active=true AND is_supported=true")
+	assert.Equal(t, 2, len(gotPaths),
+		"T-0183: A + B 都返回(以前隐藏 B,现在显示 + is_supported=false)")
+	assert.True(t, gotPaths["Device.PRC-C.A"], "PRC-C.A is_supported should be true")
+	assert.False(t, gotPaths["Device.PRC-C.B"], "PRC-C.B is_supported should be false (default unchecked in UI)")
+	_, gotC := gotPaths["Device.PRC-C.C"]
+	assert.False(t, gotC, "PRC-C.C still filtered (no active mapping at all)")
 }
 
 // Test_ListEnrichedByCommand_NilParamModelReturnsAllSubFields 集成测试（健壮性）：

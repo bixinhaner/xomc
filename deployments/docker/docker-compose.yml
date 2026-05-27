@@ -171,6 +171,10 @@ services:
       # 全局 API 密钥共享卷:app 启动期幂等签发 .api-key,worker(omcctl) 只读消费。
       # 详见 omcgo/CLAUDE.md §5.6 全局 API 密钥约定。
       - omcgo-secrets:/var/lib/omcgo/secrets
+      # T-0183: paramModel XML 字典 bind-mount。omcctl sweep-paths --apply
+      # 在 worker 容器写 supported="false",通过 bind mount 反映到宿主源码目录,
+      # 容器重建/重启都不会丢标注;operator 用 git diff 审阅后 commit。
+      - ../../omcgo/data/param-mappings:/etc/omcgo/data/param-mappings
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed:
@@ -199,6 +203,9 @@ services:
       - ../../run/logs/worker:/run/logs/worker
       # 共享 secrets 卷只读 — omcctl/scripts 默认从此读 .api-key
       - omcgo-secrets:/var/lib/omcgo/secrets:ro
+      # T-0183: XML 字典 rw 挂载 — omcctl sweep-paths --apply 在 worker 容器内直接
+      # 写 supported="false",通过 bind mount 反映到宿主,git diff 审阅后 commit。
+      - ../../omcgo/data/param-mappings:/etc/omcgo/data/param-mappings
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed:

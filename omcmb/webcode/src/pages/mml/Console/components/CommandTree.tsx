@@ -678,8 +678,10 @@ export default function CommandTree({ lang }: CommandTreeProps) {
             'en-US': cmd.logicalNameI18n?.['en'] ?? cmd.logicalName ?? cmd.displayName,
           },
           subFields,
+          // T-0183: param_mappings.is_supported=false 的 path 默认不勾选(允许手动勾)。
+          // isSupported 缺省视 true(后端缺映射兜底)。
           selectedSubFieldIds: subFields
-            .filter((sf) => sf.defaultSelected)
+            .filter((sf) => sf.defaultSelected && sf.isSupported !== false)
             .map((sf) => sf.id),
           values: {},
           unknownCodes: [],

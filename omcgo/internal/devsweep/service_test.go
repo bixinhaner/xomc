@@ -2,7 +2,6 @@ package devsweep
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -182,10 +181,10 @@ func Test_Service_Run_Happy_Apply(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, res.Aborted)
 	require.Equal(t, 1, res.UnsupportedCount)
-	require.Equal(t, 1, res.MarkedCount)
-	require.Len(t, repo.marked, 1)
-	require.Equal(t, "Device.B", repo.marked[0])
-	require.Equal(t, set.ParamModelID, repo.pmID)
+	// T-0183: Service 不再触 DB,Apply 已移到 Applier。MarkedCount=0,
+	// repo.marked 留空(Applier 测试单独覆盖 DB 写)。
+	require.Equal(t, 0, res.MarkedCount)
+	require.Len(t, repo.marked, 0)
 }
 
 // Test_Service_Run_DeviceNotFound：device repo 返 nil → abort + device_not_found。
@@ -320,7 +319,8 @@ func Test_Service_Run_ThresholdAbort_Force(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.False(t, res.Aborted)
-	require.Equal(t, 3, res.MarkedCount)
+	// T-0183: Service 仅探测,Apply 已下移 — MarkedCount=0,DB 写由 Applier 覆盖。
+	require.Equal(t, 0, res.MarkedCount)
 }
 
 // Test_Service_Run_ParamModelWide_Unconfirmed：>10 设备且未确认 → abort。
@@ -376,7 +376,8 @@ func Test_Service_Run_ParamModelWide_Confirmed(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.False(t, res.Aborted)
-	require.Equal(t, 1, res.MarkedCount)
+	// T-0183: Apply 已移到 Applier — Service.Run 不再写 DB,MarkedCount=0。
+	require.Equal(t, 0, res.MarkedCount)
 }
 
 // Test_Service_Run_BatchPartialFailure：mix supported/unsupported/unknown 计数正确。
@@ -468,26 +469,8 @@ func Test_Service_Run_iPlaceholder_NormalizedForProbe(t *testing.T) {
 		"StandardPath in result keeps the {i} form for accurate DB UPDATE matching")
 }
 
-// Test_Service_Run_DBError：MarkUnsupportedBatch 失败 → 错误透传。
-// 单 path 100% unsupported 需要 --force 跳过 fraction gate；本测试目标是 DB 错。
-func Test_Service_Run_DBError(t *testing.T) {
-	set := mappingSet("Device.A")
-	devices := &stubDeviceLookup{dev: okDevice("SN1", "FAP/mBS31001/SC")}
-	products := &stubProductMatcher{match: productMatch(set.ParamModelID)}
-	params := &stubParamLookup{set: set}
-	prober := &scriptedProber{outcomes: map[string]ProbeOutcome{"Device.A": OutcomeUnsupported}}
-	repo := &stubRepository{deviceCount: 1, markErr: errors.New("pg conn lost")}
-
-	svc := NewService(devices, products, params, prober, repo, zap.NewNop())
-	_, err := svc.Run(context.Background(), Options{
-		DeviceSN: "SN1",
-		Apply:    true,
-		Force:    true,
-		RPCRate:  1000,
-	})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "mark unsupported batch")
-}
+// T-0183: 旧 Test_Service_Run_DBError 已废 — Service 不再写 DB,
+// DB error 现在由 Applier 测试覆盖(applier_test.go)。
 
 // Test_Service_Run_DefaultsFilled：normalizeOptions 在零值时填默认。
 // T-0180 起 BatchSize 默认从 1 调整为 16(prober retry 循环让 batch>1 可靠)。

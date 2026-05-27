@@ -136,6 +136,7 @@ const MenuManagement     = React.lazy(() => import('@/pages/system/MenuManagemen
 const SystemDashboard    = React.lazy(() => import('@/pages/system/SystemDashboard'));
 const ApiManagement      = React.lazy(() => import('@/pages/system/ApiManagement'));
 const DataDictionary     = React.lazy(() => import('@/pages/system/DataDictionary'));
+const DictLoaderPage     = React.lazy(() => import('@/pages/system/DictLoader'));
 
 // Report Management
 const LTEStandardReport  = React.lazy(() => import('@/pages/report/LTEStandardReport'));
@@ -362,6 +363,7 @@ export const routes: RouteObject[] = [
       { path: 'system/dashboard',      element: withSuspense(SystemDashboard) },
       { path: 'system/api-management', element: withSuspense(ApiManagement) },
       { path: 'system/data-dictionary', element: withSuspense(DataDictionary) },
+      { path: 'system/dict-loader',    element: withSuspense(DictLoaderPage) },
 
       // Report Management
       { path: 'report/lte-standard',   element: withSuspense(LTEStandardReport) },
