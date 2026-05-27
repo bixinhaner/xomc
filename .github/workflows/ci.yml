@@ -23,6 +23,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ─────────────────────────────────────────────────────────────
+  # migration-lint：strict 模式只拦"会让 goose / app 启动 panic"的硬错
+  #   · 同目录内重复 version_id（典型事故：2026-05-26 b00bd33a vs 7b8bb3b9 撞 191）
+  #   · 缺 goose Up / Down 标记
+  # 历史包袱（编号 gap / 命名不规范 / 跨目录同号）只 warn 不 fail，由 release-gate
+  # 或本地 ./check-migrations.sh（无 --strict）集中清理。
+  # ─────────────────────────────────────────────────────────────
+  migration-lint:
+    name: Migrations · strict lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Lint migration files (strict — 仅同目录撞号 + 缺 goose 标记报错)
+        run: bash omcgo/scripts/check-migrations.sh --strict
+
   backend-build:
     name: Backend · build + vet
     runs-on: ubuntu-latest

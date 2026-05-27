@@ -10,6 +10,18 @@
 
 set -euo pipefail
 
+# CI 模式（--strict / 环境变量 CHECK_MIG_STRICT=1）：
+#   只把"会让 goose / app 启动 panic"的硬错（重复版本号 + 缺 goose Up/Down 标记）
+#   归为非零退出码；老仓库里 pre-existing 的编号 gap（66-79 等）+ 命名不规范
+#   只 warn 不 fail。在 PR CI 上启用这个模式可以防止新的撞号事故，又不会因为
+#   旧的历史包袱反复挂红。
+#
+# 默认模式（无参数）保留 hard fail 全集，给本地开发 / release-gate 用。
+STRICT="${CHECK_MIG_STRICT:-0}"
+for arg in "$@"; do
+  [[ "$arg" == "--strict" ]] && STRICT=1
+done
+
 MIG_DIR="${MIG_DIR:-$(dirname "$0")/../migrations}"
 
 if [[ ! -d "$MIG_DIR" ]]; then
@@ -53,6 +65,28 @@ NUMS_LIST=$(echo "$SORTED" | tr '\n' ' ')
 echo "📊 编号区间：$MIN → $MAX"
 echo ""
 
+# ── ⚠️  HARD FAIL：同目录内禁止版本号重复 ─────────────────────────
+# 历史教训：
+#   · 2026-05-26 b00bd33a (mml) 与 7b8bb3b9 (pm) 撞 000191
+#       → docker-migrate-schema panic "duplicate version 191 detected"
+#       → 整条依赖链 acs / app / worker / web 全停
+#   · goose 启动时 sort migrations 走 Migrations.Less，撞号直接 panic 退出
+#     而不是跳过 —— PR 合并前必须拦住
+DUPS=$(printf '%s\n' "${NUMS[@]}" | sort | uniq -d)
+if [[ -n "$DUPS" ]]; then
+  echo "❌ 同目录内存在重复版本号（goose 启动 panic）："
+  while IFS= read -r d; do
+    echo "     - 版本 $d 重复："
+    for f in "${FILES[@]}"; do
+      [[ "$f" == "$d"* ]] && echo "         · $f"
+    done
+  done <<< "$DUPS"
+  echo ""
+  echo "   修复：把后合入的文件改名到下一个空闲版本号（§5.5 多人协作规则）"
+  echo ""
+  FAIL=1
+fi
+
 GAPS=()
 for ((i = 10#$MIN; i <= 10#$MAX; i++)); do
   NUM=$(printf "%06d" "$i")
@@ -73,7 +107,8 @@ if [[ ${#GAPS[@]} -gt 0 ]]; then
   echo "   (a) 创建占位迁移：在缺口写 \"-- noop: reserved\" 的 up/down，保持编号连续"
   echo "   (b) 重新编号：将现有迁移重编号使其连续（需同步更新 goose 记录，谨慎操作）"
   echo ""
-  FAIL=1
+  # CI strict 模式下编号 gap 是历史包袱，仅 warn 不 FAIL
+  [[ "$STRICT" == "1" ]] || FAIL=1
 else
   echo "✅ 编号连续（无跳跃）"
   echo ""
@@ -142,7 +177,8 @@ if [[ ${#BAD_NAME[@]} -gt 0 ]]; then
     echo "     - $b"
   done
   echo ""
-  FAIL=1
+  # CI strict：命名不规范是历史包袱，仅 warn 不 FAIL（影响审计但不影响启动）
+  [[ "$STRICT" == "1" ]] || FAIL=1
 else
   echo "✅ 命名规范"
   echo ""
@@ -216,6 +252,20 @@ if [[ -d "$SEED_DIR" ]]; then
       fi
     done
 
+    # seed/ 目录内自身同号重复（同主目录一样 hard fail）
+    SEED_DUPS=$(printf '%s\n' "${SEED_NUMS[@]}" | sort | uniq -d)
+    if [[ -n "$SEED_DUPS" ]]; then
+      echo "❌ seed/ 目录内存在重复版本号（goose 启动 panic）："
+      while IFS= read -r d; do
+        echo "     - 版本 $d 重复："
+        for f in "${SEED_FILES[@]}"; do
+          [[ "$f" == "$d"* ]] && echo "         · seed/$f"
+        done
+      done <<< "$SEED_DUPS"
+      echo ""
+      FAIL=1
+    fi
+
     if [[ ${#SEED_MISSING_GOOSE[@]} -gt 0 ]]; then
       echo "⚠️  seed 目录文件缺少 goose 标记："
       for m in "${SEED_MISSING_GOOSE[@]}"; do
@@ -230,7 +280,7 @@ if [[ -d "$SEED_DIR" ]]; then
         echo "     - $b"
       done
       echo ""
-      FAIL=1
+      [[ "$STRICT" == "1" ]] || FAIL=1
     fi
   fi
 fi
