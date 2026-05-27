@@ -77,7 +77,7 @@ type sweepPathsRequest struct {
 	Verbose               bool    `json:"verbose,omitempty"`
 }
 
-// sweepPathsResponse 解析 /api/v1/devices/:sn/sweep-paths 的标准信封 data 节点。
+// sweepPathsResponse 解析 /api/v1/devices/:id/sweep-paths（:id 实际承载 SN）的标准信封 data 节点。
 type sweepPathsResponse struct {
 	DeviceSN                  string   `json:"device_sn"`
 	ProductClass              string   `json:"product_class"`

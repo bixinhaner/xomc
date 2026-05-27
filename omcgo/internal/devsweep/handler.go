@@ -12,7 +12,8 @@ import (
 
 // Handler 是 devsweep 的 REST handler。
 //
-// 路由：POST /api/v1/devices/:sn/sweep-paths
+// 路由：POST /api/v1/devices/:id/sweep-paths（URL 段实际承载设备 SN；
+// gin 路由树要求 /api/v1/devices/ 之下同位置参数名必须统一为 :id）
 // 鉴权：与 device 路由组共享 RequireAPIPermission（router.go 挂在 permGroup("devices") 下）
 //
 // 设计：omcctl 子命令是 thin client，所有业务逻辑在 Service.Run 里。
@@ -27,7 +28,7 @@ func NewHandler(svc *Service) *Handler {
 
 // RegisterRoutes 挂到给定 router group 下（必须是已带 auth 中间件的组）。
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
-	rg.POST("/devices/:sn/sweep-paths", h.SweepPaths)
+	rg.POST("/devices/:id/sweep-paths", h.SweepPaths)
 }
 
 // sweepRequest 是 SweepPaths 的 JSON body。
@@ -46,12 +47,15 @@ type sweepRequest struct {
 	Verbose               bool    `json:"verbose"`
 }
 
-// SweepPaths handles POST /devices/:sn/sweep-paths.
+// SweepPaths handles POST /devices/:id/sweep-paths.
+//
+// 路径段虽然命名为 :id（gin 路由树约束），实际承载的是设备 SN，
+// 与 omcctl device sweep-paths <SN> 客户端契约一致。
 //
 // 响应信封：success/abort 都用 200 + ret=1，错误细节进 data.error_code。
 // 真正 4xx/5xx 只在解析失败/DB 错误时返回。
 func (h *Handler) SweepPaths(c *gin.Context) {
-	sn := c.Param("sn")
+	sn := c.Param("id")
 	if sn == "" {
 		response.Fail(c, http.StatusBadRequest, "missing device sn in path")
 		return
