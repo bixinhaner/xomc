@@ -90,6 +90,34 @@ func initMRTaskModule(c *Container) error {
 	logger := c.Logger.Named("mr-task")
 
 	mrCfg := c.Cfg.MR.Defaults()
+	// mr.url_base 为空时回退到 sys_configs.acs_transfer.uploadBaseURL（运行时配置，
+	// 跟 FAULT_LOG_COLLECT / CONFIG_RESTORE 等其它 ACS 上传链路共用同一个真值源）。
+	// YAML 里的 acs_upload_base_url 是 deploy-time 兜底，sys_configs 表才是
+	// "系统管理 → ACS 传输"页面修改后的真实运行时值。
+	// 原 dispatcher 在 base="" 时直接下发相对 path `/smallcell/...`，设备拿到
+	// 拒收 / 拼错 host → MR 文件 0 上传，progress 推到 openSuccess 但 health 永远 abnormal。
+	if mrCfg.URLBase == "" {
+		sysCfg := admin.NewPgSysConfigRepository(c.PgPool)
+		mrPolicy := transfercfg.NewPolicy(transfercfg.Snapshot{},
+			func(ctx context.Context, category, key string) (string, bool) {
+				row, err := sysCfg.GetByKey(ctx, category, key)
+				if err != nil || row == nil {
+					return "", false
+				}
+				return row.Value, true
+			})
+		if snap := mrPolicy.Snapshot(context.Background()); snap.Upload.BaseURL != "" {
+			mrCfg.URLBase = snap.Upload.BaseURL
+			logger.Info("mr.url_base empty; resolved via sys_configs.acs_transfer.uploadBaseURL",
+				zap.String("base", mrCfg.URLBase))
+		} else if c.Cfg.Upgrade.ACSUploadBaseURL != "" {
+			mrCfg.URLBase = c.Cfg.Upgrade.ACSUploadBaseURL
+			logger.Info("mr.url_base empty; sys_configs empty too, fell back to YAML acs_upload_base_url",
+				zap.String("base", mrCfg.URLBase))
+		} else {
+			logger.Warn("mr.url_base empty AND no fallback found; MrUrl will be path-only and devices will reject")
+		}
+	}
 	taskRepo := mrtask.NewPgRepository(c.PgPool)
 	// Prometheus 指标（4 + 2 共 6 个）；c.MetricsReg 为 nil 时所有 IncXxx 退化为 no-op。
 	metrics := mrtask.NewMetrics(c.MetricsReg)
@@ -151,6 +179,19 @@ func initMRTaskModule(c *Container) error {
 	// 暴露 repo 给 router.go 注册 REST handler（initMRTaskModule 也接管原 router.go
 	// 里直接 NewPgRepository 的那行 — 避免双实例）。
 	c.miscDeps.mrTaskRepo = taskRepo
+
+	// 注册 SPV 完成回调到 misc 模块的 CompletionRouter。
+	// 不能在 misc 模块 init 时注册（misc → mrtask 依赖图意味着 misc 先 init，
+	// 那时 mrTaskRepo 还是 nil → if 分支不进 → 回调永远不挂 → SPV fault 事件
+	// 拿不到，progress_status 卡 pending 让 reaper 兜底）。CompletionRouter.Register
+	// 加了 RWMutex，pre-traffic 阶段后挂 handler 无 race（cmd/app/provider 设计原则）。
+	if c.miscDeps.completionRouter != nil {
+		c.miscDeps.completionRouter.Register(task.TaskSourceSystem,
+			mrtask.NewCompletionCallback(taskRepo, logger))
+		logger.Info("mr completion callback registered to TaskSourceSystem")
+	} else {
+		logger.Warn("completion router not wired; MR SPV fault → openFailure routing disabled")
+	}
 	return nil
 }
 
@@ -1251,13 +1292,9 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 			if c.miscDeps.provisionEngine != nil {
 				c.miscDeps.completionRouter.Register(task.TaskSourceSystem, c.miscDeps.provisionEngine)
 			}
-			// F05 MR 任务：SPV 完成事件按 CommandKey 前缀 mr-open- / mr-close- 触发
-			// progress 状态回写。复用 source=system（与 provision 共享通道），按 key 前缀过滤。
-			// 复用 initMRTaskModule 已构造的 repo 实例，避免双开 pool。
-			if c.miscDeps.mrTaskRepo != nil {
-				c.miscDeps.completionRouter.Register(task.TaskSourceSystem,
-					mrtask.NewCompletionCallback(c.miscDeps.mrTaskRepo, logger))
-			}
+			// F05 MR 任务完成回调改由 initMRTaskModule 注册（依赖图 misc → mrtask，
+			// 这里 c.miscDeps.mrTaskRepo 还是 nil，原版 if 永远进不来）。CompletionRouter
+			// mutex-safe 支持后挂 handler。
 
 			bridge := task.NewCompletionEventBridge(logger, c.miscDeps.completionRouter, c.Deduper)
 			if err := bridge.Subscribe(c.EventBus); err != nil {

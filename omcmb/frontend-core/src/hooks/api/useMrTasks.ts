@@ -22,6 +22,9 @@ export function useMRTasks(filter: MRTaskListFilter) {
   return useQuery({
     queryKey: ['mrTask', 'list', filter],
     queryFn: () => (useMock ? mrTaskService.list(filter) : mrTaskApi.list(filter)),
+    // 列表轮询：scheduler 30s 周期推 waitting→on / on→off，progress 由 SPV / 心跳推。
+    // 10s 与 useMRTaskProgress 同步节拍，UI 不需要用户手动刷新就能看到状态变更。
+    refetchInterval: 10_000,
   });
 }
 
@@ -33,6 +36,8 @@ export function useMRTask(taskId: string | undefined) {
       return useMock ? mrTaskService.get(taskId) : mrTaskApi.get(taskId);
     },
     enabled: Boolean(taskId),
+    // 详情抽屉也加上 10s 轮询，跟列表 + 进度表节拍一致。
+    refetchInterval: 10_000,
   });
 }
 

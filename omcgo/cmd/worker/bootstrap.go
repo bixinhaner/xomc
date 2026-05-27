@@ -56,6 +56,13 @@ func initWorker(ctx context.Context, cfg *appconfig.WorkerConfig) (*workerInfra,
 	taskQueue := task.NewRedisTaskQueue(inf.Redis)
 	taskRepo := task.NewPgTaskRepository(inf.PgPool)
 	taskSvc := task.NewTaskService(taskQueue, taskRepo, inf.Logger)
+	// 关键：worker 的 ExpiredSweeper 调 TaskService.ExpireTask → notifyCompletion。
+	// 没注入 EventBus 时 notifyCompletion 走 fallback 同进程 callbacks（worker 没注册
+	// 任何 callback）→ 事件被静默丢弃 → app 端 CompletionEventBridge 永远收不到
+	// task.failed → MR / provision 等跨进程订阅者拿不到 expired 通知 → 子任务
+	// 进度卡 pending 直到下游 reaper 兜底（甚至永久卡住）。app 那边
+	// cmd/app/bootstrap.go:70 已设；这里补上同款注入。
+	taskSvc.SetEventBus(inf.EventBus)
 	w.TaskService = taskSvc
 	w.TaskRepo = taskRepo
 
