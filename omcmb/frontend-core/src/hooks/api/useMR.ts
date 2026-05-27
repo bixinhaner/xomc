@@ -82,6 +82,7 @@ export function useDownloadMRFile() {
 }
 
 // 按设备聚合的 MR 文件视图 —— File Management → MR Tab 主列表
+// 10s 轮询：reporting 字段会随 MR 任务 on/off 状态变化，文件数也会随设备上传新文件增加。
 export function useMRFileDevices(
   params: { keyword?: string } & PageRequest,
 ) {
@@ -89,6 +90,7 @@ export function useMRFileDevices(
     queryKey: ['mr', 'files', 'devices', params],
     queryFn: () => mrApi.getFileDevices(params),
     enabled: !useMock,
+    refetchInterval: 10_000,
   });
 }
 

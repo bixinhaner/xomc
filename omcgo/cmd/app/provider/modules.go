@@ -15,6 +15,8 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/backup"
+	"github.com/omcgo/omcgo/internal/bundle"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/config"
 	"github.com/omcgo/omcgo/internal/config/baseline"
 	"github.com/omcgo/omcgo/internal/core/components"
@@ -337,6 +339,18 @@ func initUFTEModule(c *Container) error {
 		c.DeviceRepo,
 		logger,
 	)
+	// 设备候选过滤的 productClass → tech 精确识别走 ProductRegistry，避免
+	// FAP/BSC7041C243 这种"非 5G/GNB 关键字命名但实际是 5G 产品"被关键字模糊
+	// 匹配漏选。Registry 缺失 → matchesTaskTypeScope 关键字兜底。
+	if c.ProductRegistry != nil {
+		service.SetProductTechLookup(func(ctx context.Context, productClass string) (string, bool) {
+			res, err := c.ProductRegistry.MatchProductClass(ctx, productClass)
+			if err != nil || res == nil || res.Product == nil {
+				return "", false
+			}
+			return res.Product.Tech, true
+		})
+	}
 	inserted, err := service.EnsureBuiltInTaskTypes(context.Background())
 	if err != nil {
 		return err
@@ -793,6 +807,134 @@ func initBackupModule(c *Container) error {
 		logger.Warn("subscribe backup file path recorder", zap.Error(err))
 	}
 	backupHandler.SetRestoreService(restoreService)
+
+	// ── 文件管理 4 Tab 批量下载（bundle 模块） ─────────────────────────────
+	// 同步流式: handler 直接打 zip 到 response writer,浏览器一次下载。
+	// 不存中间产物 / 不签 presigned URL / 不轮询 — 比异步方案干净得多。
+	if c.MinIO != nil {
+		bundleSvc := bundle.NewService(c.MinIO, logger)
+
+		// Source #1 firmware: targetIDs = firmware_versions.id (UUID 字符串)。
+		// 重建一个轻量 repo 避免依赖 initSoftwareModule 内的局部变量(那里
+		// firmwareRepo 不在 miscDeps 暴露)。Pg constructor 只是 &Pg{pool}, 无副作用。
+		firmwareBucket := c.Cfg.MinIO.Buckets.Firmware
+		firmwareRepoForBundle := software.NewPgFirmwareRepository(c.PgPool)
+		bundleSvc.Register(bundle.ModuleFirmware, func(ctx context.Context, ids []string) ([]bundle.BundleFile, error) {
+			out := make([]bundle.BundleFile, 0, len(ids))
+			for _, id := range ids {
+				uid, err := uuid.Parse(id)
+				if err != nil {
+					continue
+				}
+				fw, err := firmwareRepoForBundle.GetByID(ctx, uid)
+				if err != nil || fw == nil {
+					continue
+				}
+				out = append(out, bundle.BundleFile{
+					Bucket:     firmwareBucket,
+					ObjectPath: fw.MinIOPath,
+					EntryName:  fw.FileName,
+				})
+			}
+			return out, nil
+		})
+
+		// Source #2 config_snapshot: targetIDs = serial_number 列表
+		bundleSvc.Register(bundle.ModuleConfigSnapshot, func(ctx context.Context, sns []string) ([]bundle.BundleFile, error) {
+			res, err := snapshotRepo.BatchGetBySerialNumbers(ctx, sns)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]bundle.BundleFile, 0, len(res))
+			for _, snap := range res {
+				out = append(out, bundle.BundleFile{
+					Bucket:     snap.ObjectBucket,
+					ObjectPath: snap.ObjectPath,
+					EntryName:  snap.FileName,
+				})
+			}
+			return out, nil
+		})
+
+		// Source #3 device_license: targetIDs = serial_number 列表
+		bundleSvc.Register(bundle.ModuleDeviceLicense, func(ctx context.Context, sns []string) ([]bundle.BundleFile, error) {
+			res, err := licenseRepo.BatchGetBySerialNumbers(ctx, sns)
+			if err != nil {
+				return nil, err
+			}
+			out := make([]bundle.BundleFile, 0, len(res))
+			for _, lic := range res {
+				out = append(out, bundle.BundleFile{
+					Bucket:     lic.ObjectBucket,
+					ObjectPath: lic.ObjectPath,
+					EntryName:  lic.FileName,
+				})
+			}
+			return out, nil
+		})
+
+		// Source #4 mr: targetIDs = serial_number 列表,zip 里按
+		// {prefix}/{SN}/{filename} 三层嵌套。最外层 prefix=mr-bundle-<时间>
+		// 跟 zip 文件名一致,避免解压后直接撒一堆 SN 目录到当前文件夹。
+		mrBucket := c.Cfg.MinIO.Buckets.MRFiles
+		bundleSvc.Register(bundle.ModuleMR, func(ctx context.Context, sns []string) ([]bundle.BundleFile, error) {
+			prefix := fmt.Sprintf("mr-bundle-%s", time.Now().Format("20060102-150405"))
+			out := make([]bundle.BundleFile, 0, len(sns)*5)
+			for _, sn := range sns {
+				snCopy := sn
+				files, ferr := c.miscDeps.mrStore.ListFiles(ctx, mr.MRFileFilter{
+					DeviceSN:    &snCopy,
+					ListRequest: model.ListRequest{Page: 1, PageSize: 10000},
+				})
+				if ferr != nil {
+					logger.Warn("mr batch download: list files failed",
+						zap.String("sn", sn), zap.Error(ferr))
+					continue
+				}
+				for _, f := range files.Items {
+					out = append(out, bundle.BundleFile{
+						Bucket:     mrBucket,
+						ObjectPath: f.MinioPath,
+						EntryName:  prefix + "/" + sn + "/" + f.FileName,
+					})
+				}
+			}
+			return out, nil
+		})
+
+		// Source #5 mr_files: targetIDs = mr_files.id 列表,用户在 DeviceFilesDrawer
+		// 勾选具体若干个文件下载。EntryName 跟 ModuleMR 同结构 {prefix}/{SN}/{filename},
+		// 解压体验一致。GetFileByID N 次串行调用 — 一次 batch 通常 < 50 个文件,
+		// 网络往返可接受;后续若性能瓶颈再加 BatchGetByIDs。
+		bundleSvc.Register(bundle.ModuleMRFiles, func(ctx context.Context, ids []string) ([]bundle.BundleFile, error) {
+			prefix := fmt.Sprintf("mr-bundle-%s", time.Now().Format("20060102-150405"))
+			out := make([]bundle.BundleFile, 0, len(ids))
+			for _, idStr := range ids {
+				fid, perr := uuid.Parse(idStr)
+				if perr != nil {
+					logger.Warn("mr_files batch download: invalid uuid",
+						zap.String("id", idStr), zap.Error(perr))
+					continue
+				}
+				f, gerr := c.miscDeps.mrStore.GetFileByID(ctx, fid)
+				if gerr != nil || f == nil {
+					logger.Warn("mr_files batch download: get file failed",
+						zap.String("id", idStr), zap.Error(gerr))
+					continue
+				}
+				out = append(out, bundle.BundleFile{
+					Bucket:     mrBucket,
+					ObjectPath: f.MinioPath,
+					EntryName:  prefix + "/" + f.DeviceSN + "/" + f.FileName,
+				})
+			}
+			return out, nil
+		})
+
+		c.miscDeps.bundleSvc = bundleSvc
+		logger.Info("bundle service wired (sync streaming)",
+			zap.Int("sources_registered", 5))
+	}
 
 	// T-0032 + T-0093: FTP/SFTP/FTPS connection-test service with
 	// default 5s timeout. FTP path uses stdlib net/textproto; SFTP
@@ -1572,6 +1714,9 @@ type miscDeps struct {
 	mrIndRepo  *mr.PgIndicatorRepository
 	mrMapRepo  *mr.PgMappingRepository
 	mrTaskRepo *mrtask.PgRepository // F05 任务管理（initMRTaskModule 装配）
+
+	// 文件管理 4 Tab 批量下载（firmware / config_snapshot / device_license / mr）
+	bundleSvc *bundle.Service
 
 	// Software
 	softwareHandler     *software.Handler

@@ -23,6 +23,7 @@ import {
 } from '@core/hooks/api/useDeviceLicense';
 import type { DeviceLicense } from '@core/services/api/deviceLicenseApi';
 import { deviceLicenseApi } from '@core/services/api/deviceLicenseApi';
+import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
 import ImportDrawer from './ImportDrawer';
 
 export default function DeviceLicenseLibraryPage() {
@@ -34,6 +35,14 @@ export default function DeviceLicenseLibraryPage() {
   const [productFilter, setProductFilter] = useState('');
   const [importOpen, setImportOpen] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
+  const bundle = useBatchDownloadWithMessage();
+  const handleBatchDownload = () => {
+    if (selectedKeys.length === 0) {
+      void message.warning(t('bundle.selectFiles'));
+      return;
+    }
+    bundle.trigger({ module: 'device_license', targets: selectedKeys.map(String) });
+  };
 
   const queryParams = useMemo(
     () => ({
@@ -192,6 +201,14 @@ export default function DeviceLicenseLibraryPage() {
           <Space>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setImportOpen(true)}>
               {t('transfer.fileLib.action.importLicense')}
+            </Button>
+            <Button
+              icon={<DownloadOutlined />}
+              disabled={selectedKeys.length === 0 || bundle.isPending}
+              loading={bundle.isPending}
+              onClick={handleBatchDownload}
+            >
+              {t('bundle.batchDownload')} ({selectedKeys.length})
             </Button>
             <Button
               danger

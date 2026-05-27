@@ -67,6 +67,7 @@ minio:
     exchange: "omc-exchange"
     ui_assets: "ui-assets"
     trace_bulk: "trace-bulk"
+    file_bundles: "file-bundles"  # 文件管理 4 Tab 批量下载 zip 落地 bucket（bundle 模块）
 
 conn_req:
   server_addr: "acs:7547"  # ACS external address for CPE UDP CR URL

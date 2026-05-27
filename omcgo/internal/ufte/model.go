@@ -563,6 +563,9 @@ func matchesTaskTypeScope(item TaskType, productClass string) bool {
 	}
 	switch *item.techHint {
 	case coremodel.TechNR:
+		// 关键字模糊匹配只是兜底；真正的精确识别由 service.deviceMatchesTaskType
+		// 用 ProductRegistry 查 product.tech 完成。FAP/BSC7041C243 这种型号不在
+		// 关键字白名单里，靠 service 那条路径正确识别为 5G。
 		return strings.Contains(upper, "5G") || strings.Contains(upper, "GNB") || strings.Contains(upper, "QSS") || strings.Contains(upper, "XSS") || strings.Contains(upper, "BBU")
 	case coremodel.TechLTE:
 		return strings.Contains(upper, "4G") || strings.Contains(upper, "ENB") || strings.Contains(upper, "QAFA") || strings.Contains(upper, "QAFB") || strings.Contains(upper, "FAP") || strings.Contains(upper, "BM") || strings.Contains(upper, "BNQ") || strings.Contains(upper, "MLQ") || strings.Contains(upper, "MLN") || strings.Contains(upper, "BLQ")

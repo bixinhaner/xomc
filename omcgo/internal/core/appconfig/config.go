@@ -709,6 +709,10 @@ type BucketConfig struct {
 	// TraceBulk T-0137 M2：TR069 报文跟踪大报文外置 bucket（payload > 32KB 时 GZIP 存此处）。
 	// 默认 "trace-bulk"；空时禁用外置（所有报文 inline）。
 	TraceBulk string `mapstructure:"trace_bulk"`
+	// FileBundles 文件管理 4 Tab（firmware/config/license/MR）的批量下载 zip 落地 bucket。
+	// 默认 "file-bundles"；空时降级 = 关闭批量下载（前端按钮 disabled）。
+	// 路径模板：{module}/{YYYY}/{MM}/{DD}/{task_id}.zip
+	FileBundles string `mapstructure:"file_bundles"`
 }
 
 // MetricsConfig 配置 Prometheus 指标暴露端口。

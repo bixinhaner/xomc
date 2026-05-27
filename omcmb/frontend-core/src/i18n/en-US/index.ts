@@ -2546,6 +2546,9 @@ const messages: Record<string, string> = {
   'mr.firstCollectTime':            'First Collect Time',
   'mr.lastCollectTime':             'Last Collect Time',
   'mr.fileCount':                   'File Count',
+  'mr.reportingStatus':             'Status',
+  'mr.reporting':                   'Reporting',
+  'mr.reportStopped':               'Stopped',
   'mr.filesByDevice':               'By Device',
   'mr.deviceFilesTitle':            'MR Files of {sn}',
   'mr.filterByCollectTime':         'Filter by collect time',
@@ -5299,6 +5302,21 @@ const messages: Record<string, string> = {
   'mrTask.batchSN.partialHits':   '{hits} SN(s) added; {misses} not in current candidates: {samples}',
   'mrTask.batchSN.allHits':       'Added {count} device(s)',
   'ufte.taskCreatedAndNavigate':  'Task created, redirecting...',
+
+  // File Management batch download (bundle shared)
+  'bundle.batchDownload':         'Batch Download',
+  'bundle.creating':              'Creating bundle task',
+  'bundle.packing':               'Packing',
+  'bundle.completed':             'Bundle ready',
+  'bundle.failed':                'Bundle failed',
+  'bundle.progress':              'Packed {done} / {total} files',
+  'bundle.downloadStarted':       'Download started in browser',
+  'bundle.fileSummary':           '{count} files, {size}',
+  'bundle.unknownError':          'Unknown error',
+  'bundle.selectFiles':           'Select at least one item first',
+  'bundle.failedToast':           'Batch download failed: {msg}',
+  'bundle.downloading':           'Packing and downloading, received {size}...',
+  'bundle.downloaded':            'Download complete, {size}',
 };
 
 export default messages;

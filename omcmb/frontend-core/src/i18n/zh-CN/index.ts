@@ -2563,6 +2563,9 @@ const messages: Record<string, string> = {
   'mr.firstCollectTime':            '最早采集时间',
   'mr.lastCollectTime':             '最近采集时间',
   'mr.fileCount':                   '文件数',
+  'mr.reportingStatus':             '上报状态',
+  'mr.reporting':                   '上报中',
+  'mr.reportStopped':               '已停止',
   'mr.filesByDevice':               '按设备查看',
   'mr.deviceFilesTitle':            '{sn} 的 MR 文件',
   'mr.filterByCollectTime':         '按采集时间筛选',
@@ -5324,6 +5327,21 @@ const messages: Record<string, string> = {
   'mrTask.batchSN.partialHits':   '{hits} 个 SN 已加入选择；{misses} 个不在当前候选名单：{samples}',
   'mrTask.batchSN.allHits':       '已加入 {count} 个设备',
   'ufte.taskCreatedAndNavigate':  '任务已创建，即将跳转',
+
+  // 文件管理批量下载（bundle 模块共用）
+  'bundle.batchDownload':         '批量下载',
+  'bundle.creating':              '正在创建打包任务',
+  'bundle.packing':               '打包中',
+  'bundle.completed':             '打包完成',
+  'bundle.failed':                '打包失败',
+  'bundle.progress':              '已打包 {done} / {total} 个文件',
+  'bundle.downloadStarted':       '浏览器已开始下载',
+  'bundle.fileSummary':           '共 {count} 个文件,{size}',
+  'bundle.unknownError':          '未知错误',
+  'bundle.selectFiles':           '请先勾选要下载的项',
+  'bundle.failedToast':           '批量下载失败：{msg}',
+  'bundle.downloading':           '正在打包并下载,已接收 {size}...',
+  'bundle.downloaded':            '下载完成,共 {size}',
 };
 
 export default messages;

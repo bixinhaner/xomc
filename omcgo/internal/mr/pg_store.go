@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Masterminds/squirrel"
@@ -27,9 +28,13 @@ func NewPgMRStore(pool *pgxpool.Pool, tsPool *pgxpool.Pool) *PgMRStore {
 }
 
 func (s *PgMRStore) SaveFile(ctx context.Context, file *MRFileInfo) error {
+	// ON CONFLICT DO NOTHING：NATS mr.file.received QueueSubscribe 失败时会重投
+	// 最多 5 次，同一物理文件可能被 Collector 处理多次。db 端 uq_mr_files_sn_filename
+	// 唯一索引（migration 000204）+ ON CONFLICT 让重复插入幂等无副作用。
 	_, err := s.pool.Exec(ctx,
 		`INSERT INTO mr_files (id, device_id, device_sn, carrier, mr_type, file_name, file_size, collect_time, minio_path, parsed, record_count, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		 ON CONFLICT (device_sn, file_name) DO NOTHING`,
 		file.ID, file.DeviceID, file.DeviceSN, file.Carrier, file.MRType,
 		file.FileName, file.FileSize, file.CollectTime, file.MinioPath,
 		file.Parsed, file.RecordCount, file.CreatedAt,
@@ -85,13 +90,21 @@ func (s *PgMRStore) ListFileDeviceAggregates(ctx context.Context, filter MRFileD
 		pageSize = 1000
 	}
 
-	listSQL := `SELECT device_sn,
-	                  MIN(collect_time) AS first_collect_time,
-	                  MAX(collect_time) AS last_collect_time,
-	                  COUNT(*)::bigint  AS file_count
-	            FROM mr_files` + whereClause + `
-	            GROUP BY device_sn
-	            ORDER BY MAX(collect_time) DESC
+	// reporting 列：LEFT JOIN LATERAL 查 mr_customize_task task_status='on' 且
+	// device_sn 在 target_device_sns 数组里，存在即 true。EXISTS 子查询比
+	// JOIN + DISTINCT 简单，不影响外层 GROUP BY，分页和 ORDER BY 都不变。
+	listSQL := `SELECT m.device_sn,
+	                  MIN(m.collect_time) AS first_collect_time,
+	                  MAX(m.collect_time) AS last_collect_time,
+	                  COUNT(*)::bigint    AS file_count,
+	                  EXISTS (
+	                      SELECT 1 FROM mr_customize_task t
+	                      WHERE t.task_status = 'on'
+	                        AND m.device_sn = ANY(t.target_device_sns)
+	                  ) AS reporting
+	            FROM mr_files m` + strings.Replace(whereClause, "device_sn", "m.device_sn", 1) + `
+	            GROUP BY m.device_sn
+	            ORDER BY MAX(m.collect_time) DESC
 	            LIMIT $` + fmt.Sprintf("%d", len(args)+1) + ` OFFSET $` + fmt.Sprintf("%d", len(args)+2)
 	args = append(args, pageSize, (page-1)*pageSize)
 
@@ -103,7 +116,7 @@ func (s *PgMRStore) ListFileDeviceAggregates(ctx context.Context, filter MRFileD
 	items := make([]MRFileDeviceAggregate, 0)
 	for rows.Next() {
 		var a MRFileDeviceAggregate
-		if err := rows.Scan(&a.DeviceSN, &a.FirstCollectTime, &a.LastCollectTime, &a.FileCount); err != nil {
+		if err := rows.Scan(&a.DeviceSN, &a.FirstCollectTime, &a.LastCollectTime, &a.FileCount, &a.Reporting); err != nil {
 			return nil, fmt.Errorf("scan mr_files devices row: %w", err)
 		}
 		items = append(items, a)

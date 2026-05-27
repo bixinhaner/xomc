@@ -16,6 +16,15 @@ import (
 	"github.com/omcgo/omcgo/internal/software"
 )
 
+// ProductTechLookup 是 ufte 给设备候选列表 productClass 过滤用的最小依赖：
+// 输入 device.product_class 字符串，输出该产品在 products 字典里的 tech 标识
+// （"lte" / "nr" / "gsm"）。命中返回 (tech, true)；未注册 / 字典缺失 / 字典未装配
+// 都返回 ("", false)，调用方退化到关键字模糊匹配（matchesTaskTypeScope 内）。
+//
+// 抽小接口而不是直接持有 *product.Registry 是为单测和解耦——provider/modules.go
+// 用闭包把真实 Registry.MatchProductClass 包成这个签名注入。
+type ProductTechLookup func(ctx context.Context, productClass string) (tech string, ok bool)
+
 type Service struct {
 	softwareService *software.SoftwareService
 	taskTypeRepo    TaskTypeRepository
@@ -23,6 +32,10 @@ type Service struct {
 	subTaskRepo     software.SubTaskRepository
 	deviceRepo      device.DeviceRepository
 	logger          *zap.Logger
+	// productTechLookup 为 nil 时设备过滤退化为旧关键字匹配；推荐生产部署一定注入,
+	// 否则像 FAP/BSC7041C243 这种 BaiBNQ 5G 产品因为字符串没 "5G/GNB/BBU" 关键字,
+	// 5G 升级任务的设备候选会整批漏选（用户实测反馈过）。
+	productTechLookup ProductTechLookup
 	// downloadURLLookup 注入式回调：(sn, fileName) → presigned GET URL（1h 有效）。
 	// nil 表示部署未装配 backup.FileRepository / MinIO，DeviceItem.DownloadURL 留空。
 	// 返回 ("", nil) 表示元数据缺失（CPE 还没传完）；返回 ("", err) 仅在 DB/MinIO
@@ -132,6 +145,14 @@ func NewService(
 		deviceRepo:      deviceRepo,
 		logger:          logger.Named("ufte-service"),
 	}
+}
+
+// SetProductTechLookup 注入"按 productClass 查 product.tech"的回调。生产环境
+// 必装—— ufte 任务设备过滤的 5G/4G 识别会走该 lookup 调 ProductRegistry，避免
+// 老的 productClass 字符串模糊匹配漏识别（如 FAP/BSC7041C243 是 5G 但旧逻辑
+// 没 BSC 关键字会被漏掉）。
+func (s *Service) SetProductTechLookup(fn ProductTechLookup) {
+	s.productTechLookup = fn
 }
 
 // SetDownloadURLLookup 注入"按 (sn, fileName) 拿 presigned URL"的回调。
@@ -930,7 +951,7 @@ func (s *Service) ListDeviceCandidates(ctx context.Context, filter DeviceCandida
 	}
 	items := make([]DeviceItem, 0, len(devices.Items))
 	for _, item := range devices.Items {
-		if typeDef != nil && !matchesTaskTypeScope(*typeDef, item.ProductClass) {
+		if typeDef != nil && !s.deviceMatchesTaskType(ctx, *typeDef, item.ProductClass) {
 			continue
 		}
 		currentVersion := item.FirmwareVersion
@@ -1036,6 +1057,32 @@ func (s *Service) loadAllSubTasks(ctx context.Context, catalog []TaskType, categ
 		}
 	}
 	return items, nil
+}
+
+// deviceMatchesTaskType 判断 device 的 productClass 是否落在 taskType 的可选范围。
+//
+// 优先级：
+//  1. PlatformScope 字符串子串匹配（item.PlatformScope 配的"5G gNB" / "4G eNB"
+//     这种平台标签，与 productClass 大写后双向 Contains）—— matchesTaskTypeScope
+//     已实现这一段。
+//  2. techHint != nil 时，用 ProductRegistry 查 device.productClass → product.tech
+//     ("lte" / "nr" / "gsm")，与 techHint 严格相等才放行。这一步对了，BaiBNQ 5G 产品
+//     (pattern FAP/\w*BSC\w+, tech="nr") 在 5G 升级任务里就能命中，不再依赖
+//     "BSC" 是不是出现在关键字白名单。
+//  3. ProductRegistry 不可用 / productClass 字典里没注册 → 退回 matchesTaskTypeScope
+//     的旧关键字模糊匹配（保留向后兼容，避免新装环境 / 单测环境无 registry 时一刀切）。
+func (s *Service) deviceMatchesTaskType(ctx context.Context, item TaskType, productClass string) bool {
+	if matchesTaskTypeScope(item, productClass) {
+		return true
+	}
+	if item.techHint == nil || productClass == "" || s.productTechLookup == nil {
+		return false
+	}
+	tech, ok := s.productTechLookup(ctx, productClass)
+	if !ok || tech == "" {
+		return false
+	}
+	return coremodel.Technology(tech) == *item.techHint
 }
 
 func (s *Service) mapTask(catalog []TaskType, task *software.UpgradeTask) (*Task, error) {

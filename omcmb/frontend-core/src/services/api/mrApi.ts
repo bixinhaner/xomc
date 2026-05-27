@@ -84,6 +84,8 @@ export interface MRFileDeviceItem {
   firstCollectTime: string;
   lastCollectTime: string;
   fileCount: number;
+  /** 该设备当前是否在某个 task_status='on' 的 MR 任务里（上报中）。后端 EXISTS 子查询出。 */
+  reporting: boolean;
 }
 
 // MR data record (matches mock MRRecord shape)
@@ -229,6 +231,7 @@ export const mrApi = {
       first_collect_time: string;
       last_collect_time: string;
       file_count: number;
+      reporting: boolean;
     }
     const { data } = await http.get<BackendListResponse<BackendMRFileDevice>>(
       '/mr/files/devices',
@@ -240,6 +243,7 @@ export const mrApi = {
         firstCollectTime: d.first_collect_time,
         lastCollectTime: d.last_collect_time,
         fileCount: d.file_count,
+        reporting: !!d.reporting,
       })),
       total: data.total,
       page: data.page,

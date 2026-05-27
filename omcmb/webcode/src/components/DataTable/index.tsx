@@ -361,32 +361,44 @@ function DataTable<T>(
         renderCell: (_checked, _record, index, originNode) => {
           const rowNumber = (currentPage - 1) * pageSize + (index ?? 0) + 1;
           if (showRowNumber && selectable) {
+            // checkbox 放最左、序号放右侧:两者都靠 cell 左 padding 起,表头与
+            // 行的 checkbox 位置由 antd 自动一致,不再因序号 / "序号"二字宽度
+            // 差异而水平错位。
             return (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, lineHeight: '1' }}>
-                <span style={{ minWidth: 30, textAlign: 'center', color: 'var(--color-neutral-600)', fontSize: 13 }}>
+                {originNode}
+                <span style={{ color: 'var(--color-neutral-600)', fontSize: 13 }}>
                   {rowNumber}
                 </span>
-                {originNode}
               </div>
             );
           }
           if (showRowNumber) {
             return (
-              <span style={{ minWidth: 30, textAlign: 'center', color: 'var(--color-neutral-600)', fontSize: 12 }}>
+              <span style={{ display: 'inline-block', width: 30, textAlign: 'center', color: 'var(--color-neutral-600)', fontSize: 12 }}>
                 {rowNumber}
               </span>
             );
           }
           return originNode;
         },
-        columnTitle: showRowNumber && !selectable
-          ? () => (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ minWidth: 30, textAlign: 'center', fontSize: 12 }}>
-                  {rowNumberTitle ?? t('table.rowNumber')}
-                </span>
-              </div>
-            )
+        columnTitle: showRowNumber
+          ? selectable
+            ? (originNode) => (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, lineHeight: '1' }}>
+                  {originNode}
+                  <span style={{ fontSize: 12 }}>
+                    {rowNumberTitle ?? t('table.rowNumber')}
+                  </span>
+                </div>
+              )
+            : () => (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ flex: '0 0 30px', textAlign: 'center', fontSize: 12, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                    {rowNumberTitle ?? t('table.rowNumber')}
+                  </span>
+                </div>
+              )
           : undefined,
       }
     : undefined;

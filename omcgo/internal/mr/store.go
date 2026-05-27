@@ -58,12 +58,16 @@ type MRRecordFilter struct {
 }
 
 // MRFileDeviceAggregate 是某设备的 MR 文件聚合视图（mr_files GROUP BY device_sn）。
-// 给 File Management 的"按设备列出"列表用：每行 1 个设备，含起止时间 + 文件数。
+// 给 File Management 的"按设备列出"列表用：每行 1 个设备，含起止时间 + 文件数 + 上报状态。
 type MRFileDeviceAggregate struct {
 	DeviceSN         string    `db:"device_sn"          json:"device_sn"`
 	FirstCollectTime time.Time `db:"first_collect_time" json:"first_collect_time"`
 	LastCollectTime  time.Time `db:"last_collect_time"  json:"last_collect_time"`
 	FileCount        int64     `db:"file_count"         json:"file_count"`
+	// Reporting 表示该设备当前是否在某个 task_status='on' 的 MR 任务里。前端用来
+	// 在列表里 Badge 显示"上报中 / 已停止"。判定：mr_customize_task task_status='on'
+	// AND device_sn = ANY(target_device_sns) 存在即 true。
+	Reporting bool `db:"reporting" json:"reporting"`
 }
 
 // MRFileDeviceFilter 给 ListFileDeviceAggregates 用的过滤参数。

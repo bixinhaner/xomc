@@ -258,7 +258,24 @@
   color: var(--color-neutral-500);
 }
 
-/* Select all checkbox margin */
-:global(.omc-data-table) :global(.ant-table-thead > tr > th.ant-table-selection-column .ant-checkbox-wrapper) {
-  margin-left: 5px;
+/* 全选 checkbox 与每行 checkbox 水平对齐(根因解析):
+ * antd 5 selection-column 默认 align:'center' + paddingInline:8px,把表头的
+ * <Checkbox> 又套了一层 .ant-table-selection(inline-flex; flex-direction:column,
+ * 留 indeterminate / selections 扩展位)。inline-flex column 容器在 text-align:
+ * center 下,其"被居中的盒子"边界跟单独 .ant-checkbox-wrapper(行 cell)的边界算法
+ * 不一致 → 视觉错位几像素。
+ *
+ * 强制方案:把 selection-column 改成 text-align:left + 固定 padding-inline-start;
+ * 同时把表头的 .ant-table-selection wrapper 退化成 inline,让里面的 Checkbox 跟
+ * 行 cell 的 Checkbox 走同样的 inline-level 起点。两边都从 cell 左 padding 起步,
+ * 像素级对齐。 */
+:global(.omc-data-table) :global(.ant-table-selection-column) {
+  text-align: left;
+  padding-inline-start: 16px;
+  padding-inline-end: 8px;
+}
+:global(.omc-data-table) :global(.ant-table-selection) {
+  display: inline;
+  padding: 0;
+  margin: 0;
 }

@@ -28,6 +28,7 @@ import type {
   SnapshotSource,
 } from '@core/services/api/configSnapshotApi';
 import { configSnapshotApi } from '@core/services/api/configSnapshotApi';
+import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
 import ImportDrawer from './ImportDrawer';
 
 // 来源 Tag 颜色映射；label 走 i18n key 在渲染时按当前 locale 取。
@@ -46,6 +47,14 @@ export default function ConfigSnapshotLibraryPage() {
   const [sourceFilter, setSourceFilter] = useState<SnapshotSource | ''>('');
   const [importOpen, setImportOpen] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
+  const bundle = useBatchDownloadWithMessage();
+  const handleBatchDownload = () => {
+    if (selectedKeys.length === 0) {
+      void message.warning(t('bundle.selectFiles'));
+      return;
+    }
+    bundle.trigger({ module: 'config_snapshot', targets: selectedKeys.map(String) });
+  };
 
   const queryParams = useMemo(
     () => ({
@@ -219,6 +228,14 @@ export default function ConfigSnapshotLibraryPage() {
           <Space>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setImportOpen(true)}>
               {t('transfer.fileLib.action.importConfig')}
+            </Button>
+            <Button
+              icon={<DownloadOutlined />}
+              disabled={selectedKeys.length === 0 || bundle.isPending}
+              loading={bundle.isPending}
+              onClick={handleBatchDownload}
+            >
+              {t('bundle.batchDownload')} ({selectedKeys.length})
             </Button>
             <Button
               danger

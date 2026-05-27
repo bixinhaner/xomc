@@ -189,9 +189,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var objectPath string
-	// F05 MR 走专用路径 {deviceSN}/{filename}（桶名 mr-files 自带模块归属，无需日期层级）
+	// F05 MR 走专用路径 {deviceSN}/{filename}（桶名 mr-files 自带模块归属，无需日期层级）。
+	// SN 优先取 ?sn=，回退 ?cellCode=（dispatcher 拼的 MrUrl 只带 cellCode 没 sn，
+	// 而 MR 任务里 cellCode == 设备 SN，CellTarget 复用 SerialNumber）。
+	// 不回退的话所有 MR 文件都进 mr-files/unknown/ 桶子目录，跟前端按 SN 聚合 / 下载链路对不上。
 	if ft == tr069.FileTypeMR {
 		querySN := r.URL.Query().Get("sn")
+		if querySN == "" {
+			querySN = r.URL.Query().Get("cellCode")
+		}
 		if querySN == "" {
 			querySN = "unknown"
 		}
@@ -365,12 +371,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// PG last_heartbeat. cellCode comes from the URL query that OMC put into
 	// the device's MrUrl when opening the task.
 	if ft == tr069.FileTypeMR && h.eventBus != nil {
+		// MR 任务模型里 cellCode == 设备 SN（CellTarget.SmallCellCode 复用 SerialNumber）。
+		// dispatcher 拼的 MrUrl 只带 ?cellCode=...&filename=（没 ?sn=），设备 PUT 上来时
+		// URL query 也只有 cellCode。所以 SN 优先取 ?sn= 显式参数，空时回退 ?cellCode=。
+		// 不回退的话 mr.file.received payload device_sn 永远空 → worker Collector
+		// "missing device_id and no DeviceLookup wired" 报错 → NATS 重试 5 次后丢弃。
+		mrSN := r.URL.Query().Get("sn")
+		if mrSN == "" {
+			mrSN = r.URL.Query().Get("cellCode")
+		}
 		h.publishMRFileUploadedEvent(ctx, bucket, objectPath, filename,
-			r.URL.Query().Get("cellCode"), r.URL.Query().Get("sn"), info.Size)
+			r.URL.Query().Get("cellCode"), mrSN, info.Size)
 		// 同时发 mr.file.received，让 mr.Collector 走"下载 + 解析 + 入库"链路。
 		// device_id 留空，由 collector 注入的 DeviceLookup 按 SN 反查。
 		h.publishMRFileReceivedEvent(ctx, bucket, objectPath, filename,
-			r.URL.Query().Get("sn"), info.Size)
+			mrSN, info.Size)
 	}
 
 	// 7. Return success

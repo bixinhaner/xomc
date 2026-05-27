@@ -45,6 +45,7 @@ import {
   useUpdateFirmware,
 } from '@core/hooks/api/useSoftware';
 import { useProductClasses } from '@core/hooks/api/useDevices';
+import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
 import type { SoftwareVersion } from '@core/mock/data/software';
 
 const { Dragger } = Upload;
@@ -125,6 +126,17 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
   const toggleRecommendMutation = useToggleRecommend();
   const downloadMutation = useDownloadFirmware();
   const updateMutation = useUpdateFirmware();
+
+  // 批量下载 — 同步流式 POST,axios 拿 blob 自动触发浏览器下载。
+  const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
+  const bundle = useBatchDownloadWithMessage();
+  const handleBatchDownload = () => {
+    if (selectedKeys.length === 0) {
+      void message.warning(t('bundle.selectFiles'));
+      return;
+    }
+    bundle.trigger({ module: 'firmware', targets: selectedKeys.map(String) });
+  };
 
   // 获取列表数据
   const tableData = useMemo(() => {
@@ -450,9 +462,17 @@ export default function FirmwareUpload({ embedded = false }: FirmwareUploadProps
           pageSize={pageSize}
           onPageChange={(p, s) => { setPage(p); setPageSize(s); }}
           onRefresh={() => void refetch()}
+          selectable
+          selectedRowKeys={selectedKeys}
+          onSelectionChange={(keys) => setSelectedKeys(keys)}
+          batchActions={[{
+            key: 'batch-download',
+            label: t('bundle.batchDownload'),
+            icon: <DownloadOutlined />,
+            disabled: bundle.isPending,
+            onClick: () => handleBatchDownload(),
+          }]}
           scroll={{ x: 'max-content', y: 'calc(100vh - 400px)' }}
-          showRowNumber
-          rowNumberTitle={t('table.rowNumber')}
         />
       </Card>
 

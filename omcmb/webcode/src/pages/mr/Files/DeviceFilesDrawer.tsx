@@ -5,13 +5,14 @@
  * 底部按钮触发逐个 download（复用 useDownloadMRFile）。
  */
 import { useEffect, useMemo, useState } from 'react';
-import { Button, DatePicker, Drawer, Space, Table, Tag, message } from 'antd';
+import { Button, DatePicker, Drawer, Space, Table, Tag } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import type { ColumnsType } from 'antd/es/table';
 import { useT } from '@/hooks/useT';
 import { useMRFiles, useDownloadMRFile } from '@core/hooks/api/useMR';
 import type { MRFileItem, MRFileDeviceItem } from '@core/services/api/mrApi';
+import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
 
 const mrTypeColor: Record<string, string> = { MRO: 'blue', MRE: 'green', MRS: 'orange' };
 
@@ -58,18 +59,12 @@ export default function DeviceFilesDrawer({ open, device, onClose }: Props) {
     queryParams ?? { page: 1, pageSize: 20, deviceSn: '' },
   );
   const download = useDownloadMRFile();
+  const bundle = useBatchDownloadWithMessage();
 
-  const handleBatchDownload = async () => {
+  const handleBatchDownload = () => {
     const ids = selectedKeys.map(String);
     if (!ids.length) return;
-    for (const id of ids) {
-      try {
-        await download.mutateAsync(id);
-      } catch (err) {
-        void message.error(String(err));
-      }
-    }
-    void message.success(t('mr.batchDownload', { count: String(ids.length) }));
+    bundle.trigger({ module: 'mr_files', targets: ids });
   };
 
   const columns: ColumnsType<MRFileItem> = [
@@ -128,9 +123,9 @@ export default function DeviceFilesDrawer({ open, device, onClose }: Props) {
         <Button
           type="primary"
           icon={<DownloadOutlined />}
-          disabled={!selectedKeys.length}
-          loading={download.isPending}
-          onClick={() => void handleBatchDownload()}
+          disabled={!selectedKeys.length || bundle.isPending}
+          loading={bundle.isPending}
+          onClick={handleBatchDownload}
         >
           {t('common.batchExport')} ({selectedKeys.length})
         </Button>

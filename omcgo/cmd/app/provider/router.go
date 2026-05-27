@@ -11,6 +11,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/admin"
 	"github.com/omcgo/omcgo/internal/alarm"
+	"github.com/omcgo/omcgo/internal/bundle"
 	"github.com/omcgo/omcgo/internal/config/template"
 	"github.com/omcgo/omcgo/internal/core/components"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
@@ -493,6 +494,26 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 
 	// ----- Backup routes → resource "devices" -----
 	md.backupHandler.RegisterRoutes(permGroup("devices"))
+
+	// ----- 文件管理 4 Tab 批量下载（bundle 模块,同步流式） -----
+	// 每个模块 POST /<module>/batch-download 挂在各自资源下,鉴权独立。
+	// handler 直接流 zip 到 response writer,浏览器一次下载。
+	if md.bundleSvc != nil {
+		permGroup("firmware").POST("/firmware/batch-download",
+			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModuleFirmware))
+
+		bkGrp := permGroup("devices")
+		bkGrp.POST("/backup/config-snapshots/batch-download",
+			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModuleConfigSnapshot))
+		bkGrp.POST("/backup/device-licenses/batch-download",
+			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModuleDeviceLicense))
+
+		permGroup("pm").POST("/mr/files/batch-download",
+			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModuleMR))
+		// 按 file_id 粒度打包(DeviceFilesDrawer 抽屉用,跟按设备整盘下载语义不同)。
+		permGroup("pm").POST("/mr/files/by-id/batch-download",
+			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModuleMRFiles))
+	}
 
 	// ----- Station Log routes → resource "devices" -----
 	if md.stationlogHandler != nil {

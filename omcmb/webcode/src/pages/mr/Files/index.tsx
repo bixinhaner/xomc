@@ -5,13 +5,14 @@
  * 点"查看文件"打开 DeviceFilesDrawer，按时间筛选 + 多选批量下载。
  */
 import { useMemo, useState } from 'react';
-import { Button, Card, Input, Space, Tooltip } from 'antd';
+import { Badge, Button, Card, Input, Space, message } from 'antd';
 import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
 import { useMRFileDevices } from '@core/hooks/api/useMR';
+import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
 import type { MRFileDeviceItem } from '@core/services/api/mrApi';
 import DeviceFilesDrawer from './DeviceFilesDrawer';
 
@@ -32,6 +33,15 @@ export default function MRFilesPage({ embedded }: Props) {
     [page, pageSize, keyword],
   );
   const { data, isLoading, refetch } = useMRFileDevices(params);
+  const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
+  const bundle = useBatchDownloadWithMessage();
+  const handleBatchDownload = () => {
+    if (selectedKeys.length === 0) {
+      void message.warning(t('bundle.selectFiles'));
+      return;
+    }
+    bundle.trigger({ module: 'mr', targets: selectedKeys.map(String) });
+  };
 
   const columns: DataTableColumn<MRFileDeviceItem>[] = useMemo(
     () => [
@@ -40,8 +50,15 @@ export default function MRFilesPage({ embedded }: Props) {
         title: t('device.sn'),
         dataIndex: 'deviceSn',
         width: 220,
-        render: (v) => (
-          <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{String(v)}</span>
+        render: (_, record) => (
+          <Button
+            type="link"
+            size="small"
+            style={{ padding: 0, fontFamily: 'monospace', fontSize: 12 }}
+            onClick={() => setActiveDevice(record)}
+          >
+            {record.deviceSn}
+          </Button>
         ),
       },
       {
@@ -66,22 +83,17 @@ export default function MRFilesPage({ embedded }: Props) {
         render: (v) => Number(v ?? 0).toLocaleString(),
       },
       {
-        key: 'actions',
-        title: t('table.operation'),
-        width: 120,
+        key: 'reporting',
+        title: t('mr.reportingStatus'),
+        dataIndex: 'reporting',
+        width: 110,
         fixed: 'right',
-        render: (_, record) => (
-          <Tooltip title={t('mr.batchDownloadHint')}>
-            <Button
-              type="link"
-              size="small"
-              icon={<DownloadOutlined />}
-              onClick={() => setActiveDevice(record)}
-            >
-              {t('common.download')}
-            </Button>
-          </Tooltip>
-        ),
+        render: (_, record) =>
+          record.reporting ? (
+            <Badge status="processing" text={t('mr.reporting')} />
+          ) : (
+            <Badge status="default" text={t('mr.reportStopped')} />
+          ),
       },
     ],
     [t],
@@ -102,6 +114,15 @@ export default function MRFilesPage({ embedded }: Props) {
         <Button icon={<ReloadOutlined />} onClick={() => void refetch()}>
           {t('common.refresh')}
         </Button>
+        <Button
+          type="primary"
+          icon={<DownloadOutlined />}
+          disabled={selectedKeys.length === 0 || bundle.isPending}
+          loading={bundle.isPending}
+          onClick={handleBatchDownload}
+        >
+          {t('bundle.batchDownload')} ({selectedKeys.length})
+        </Button>
       </Space>
       <DataTable<MRFileDeviceItem>
         tableId="mr-file-devices"
@@ -116,6 +137,9 @@ export default function MRFilesPage({ embedded }: Props) {
           setPage(p);
           setPageSize(s);
         }}
+        selectable
+        selectedRowKeys={selectedKeys}
+        onSelectionChange={(keys) => setSelectedKeys(keys)}
         scroll={{ x: 900 }}
       />
       <DeviceFilesDrawer
