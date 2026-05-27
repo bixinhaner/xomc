@@ -129,7 +129,7 @@ export default function CreateDrawer({ open, onClose, onCreated }: CreateDrawerP
     [selectedSns, activeDeviceToTask],
   );
 
-  // 抽屉打开瞬间填默认 taskName。Drawer destroyOnClose 保证下次重开 form 已 reset，
+  // 抽屉打开瞬间填默认 taskName。Drawer destroyOnHidden 保证下次重开 form 已 reset，
   // 这时 taskName 是空，正好被此处填上；用户已输入则不覆盖。
   useEffect(() => {
     if (!open) return;
@@ -251,7 +251,7 @@ export default function CreateDrawer({ open, onClose, onCreated }: CreateDrawerP
       width={780}
       open={open}
       onClose={handleClose}
-      destroyOnClose
+      destroyOnHidden
       extra={
         <Space>
           <Button onClick={handleClose}>{t('common.cancel')}</Button>
@@ -435,7 +435,7 @@ export default function CreateDrawer({ open, onClose, onCreated }: CreateDrawerP
         onOk={applyBatchSNs}
         okText={t('mrTask.batchSN.applyOk')}
         cancelText={t('common.cancel')}
-        destroyOnClose
+        destroyOnHidden
       >
         <Space direction="vertical" size={8} style={{ width: '100%' }}>
           <Text type="secondary">{t('mrTask.batchSN.hint')}</Text>

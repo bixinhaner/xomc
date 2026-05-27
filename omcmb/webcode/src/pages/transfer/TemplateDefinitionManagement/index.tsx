@@ -342,7 +342,7 @@ export default function TemplateDefinitionManagement() {
         width={560}
         open={detailDrawerOpen}
         onClose={() => setDetailDrawerOpen(false)}
-        destroyOnClose
+        destroyOnHidden
         extra={detailType ? (
           <Space>
             {!detailType.builtIn ? (
@@ -411,7 +411,7 @@ export default function TemplateDefinitionManagement() {
           setTypeDrawerOpen(false);
           setEditingType(null);
         }}
-        destroyOnClose
+        destroyOnHidden
         extra={(
           <Space>
             <Button onClick={() => {

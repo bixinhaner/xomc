@@ -596,7 +596,7 @@ export default function AddDrawer({ open, onClose, onSubmit, loading, mode = 'ad
       open={open}
       onClose={handleClose}
       width={640}
-      destroyOnClose
+      destroyOnHidden
       footer={
         <div style={{ textAlign: 'right' }}>
           <Button style={{ marginRight: 8 }} onClick={handleClose}>

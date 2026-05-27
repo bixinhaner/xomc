@@ -81,7 +81,7 @@ export default function EditLevel2GroupDrawer({
       open={open}
       onClose={onClose}
       width={520}
-      destroyOnClose
+      destroyOnHidden
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <Button onClick={onClose}>{t('common.cancel')}</Button>

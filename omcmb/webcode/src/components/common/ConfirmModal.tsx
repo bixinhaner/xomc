@@ -100,7 +100,7 @@ const ConfirmModal: React.FC<ConfirmModalProps> = ({
       onCancel={onCancel}
       width={width}
       centered
-      destroyOnClose
+      destroyOnHidden
     >
       {content && (
         <div style={{ paddingLeft: 32, paddingTop: 4, fontSize: 14 }}>

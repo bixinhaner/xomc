@@ -251,7 +251,7 @@ const AlarmFilterDialog: React.FC<AlarmFilterDialogProps> = ({
       open={visible}
       onCancel={onCancel}
       width={800}
-      destroyOnClose
+      destroyOnHidden
       footer={
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Button onClick={handleReset}>{t('alarm.filter.resetAll')}</Button>

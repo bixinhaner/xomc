@@ -95,7 +95,7 @@ export default function BatchSnModal({
       okText={showResult ? t('common.finish') : t('common.confirm')}
       cancelText={showResult ? t('mml.console.continueAdd') : t('common.cancel')}
       width={480}
-      destroyOnClose
+      destroyOnHidden
     >
       {showResult ? (
         // 显示结果

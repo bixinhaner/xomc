@@ -270,7 +270,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
       width={720}
       open={open}
       onClose={onClose}
-      destroyOnClose
+      destroyOnHidden
       footer={
         <Space style={{ float: 'right' }}>
           <Button onClick={onClose}>取消</Button>

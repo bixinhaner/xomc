@@ -31,7 +31,7 @@ export default function AddGroupDrawer({ open, form, groups, onOk, onCancel, t }
       open={open}
       onClose={onCancel}
       width={520}
-      destroyOnClose
+      destroyOnHidden
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <Button onClick={onCancel}>{t('common.cancel')}</Button>

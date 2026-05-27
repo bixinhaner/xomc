@@ -145,7 +145,7 @@ function parseCsv(
     }
 
     // 枚举校验
-    let validRow = serialNumber && oui && carrier && technology;
+    let validRow: boolean = !!(serialNumber && oui && carrier && technology);
     if (carrier && !ALLOWED_CARRIERS.includes(carrier as CarrierCode)) {
       localErrors.push({
         row: userRow,
@@ -477,7 +477,7 @@ export default function BatchImportModal({
       width={600}
       maskClosable={!importing}
       closable={!importing}
-      destroyOnClose
+      destroyOnHidden
     >
       <div style={{ marginBottom: 12 }}>
         <Button icon={<DownloadOutlined />} size="small" onClick={onDownloadTemplate}>

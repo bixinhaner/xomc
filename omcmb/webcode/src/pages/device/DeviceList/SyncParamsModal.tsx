@@ -173,7 +173,7 @@ const NETWORK_TYPE_TAG: Record<SyncNetworkType, { color: string; label: string }
 export default function SyncParamsModal({ open, networkType, onClose, onConfirm, confirmLoading }: SyncParamsModalProps) {
   const t = useT();
   const [alarmSync, setAlarmSync] = useState(true);
-  // destroyOnClose 确保每次打开重新挂载，useState 初始值基于当前 networkType
+  // destroyOnHidden 确保每次打开重新挂载，useState 初始值基于当前 networkType
   const [selectedCodes, setSelectedCodes] = useState<Set<string>>(
     () => new Set(DEFAULT_CHECKED_CODES[networkType])
   );
@@ -284,7 +284,7 @@ export default function SyncParamsModal({ open, networkType, onClose, onConfirm,
       cancelText={t('common.cancel')}
       confirmLoading={confirmLoading}
       width={680}
-      destroyOnClose
+      destroyOnHidden
     >
       {/* 活动告警 */}
       <div

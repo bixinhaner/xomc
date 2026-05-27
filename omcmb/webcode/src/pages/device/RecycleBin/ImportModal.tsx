@@ -82,7 +82,7 @@ export default function ImportModal({ open, onClose, onConfirm, confirmLoading }
       cancelText={t('common.cancel')}
       confirmLoading={confirmLoading}
       width={520}
-      destroyOnClose
+      destroyOnHidden
     >
       <Dragger {...uploadProps}>
         <p className="ant-upload-drag-icon">

@@ -629,7 +629,7 @@ export default function AlarmRuleDrawer({ open, mode, rule, existingNames = [], 
       open={open}
       onClose={onClose}
       width={720}
-      destroyOnClose
+      destroyOnHidden
       footer={
         isViewMode ? null : (
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>

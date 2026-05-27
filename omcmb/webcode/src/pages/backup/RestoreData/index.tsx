@@ -242,7 +242,7 @@ export default function RestoreData() {
           setDrawerOpen(false);
           setRestoreMode('path');
         }}
-        destroyOnClose
+        destroyOnHidden
         extra={
           <Space>
             <Button onClick={() => setDrawerOpen(false)}>

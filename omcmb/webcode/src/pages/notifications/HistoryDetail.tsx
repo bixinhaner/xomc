@@ -38,7 +38,7 @@ export default function HistoryDetail({
       open={open}
       width={640}
       onClose={onClose}
-      destroyOnClose
+      destroyOnHidden
     >
       {history ? (
         <Descriptions bordered column={1} size="small">

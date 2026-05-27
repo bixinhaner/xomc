@@ -229,7 +229,7 @@ export default function MappingsTab({ selectedName }: Props) {
         }}
         confirmLoading={createMut.isPending || updateMut.isPending}
         width={680}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item

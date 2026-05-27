@@ -127,7 +127,7 @@ export default function ExportModal({ open, onClose, onConfirm, confirmLoading }
       confirmLoading={confirmLoading}
       okButtonProps={{ disabled: checkedKeys.length === 0 || groupsLoading }}
       width={600}
-      destroyOnClose
+      destroyOnHidden
     >
       {/* 1. 设备组选择 - 树形结构 */}
       <div style={{ marginBottom: 16 }}>

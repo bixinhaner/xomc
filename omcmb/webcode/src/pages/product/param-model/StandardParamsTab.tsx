@@ -139,7 +139,7 @@ export default function StandardParamsTab() {
         }}
         confirmLoading={upsertMut.isPending}
         width={620}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item

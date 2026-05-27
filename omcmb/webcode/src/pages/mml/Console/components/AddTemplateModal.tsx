@@ -184,7 +184,7 @@ export default function AddTemplateModal({
       open={open}
       onCancel={onClose}
       width={720}
-      destroyOnClose
+      destroyOnHidden
       footer={
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <Button onClick={onClose}>{t('common.cancel')}</Button>

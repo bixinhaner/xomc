@@ -419,7 +419,7 @@ export default function TaskRecord() {
           </Space>
         }
         width={820}
-        destroyOnClose
+        destroyOnHidden
       >
         {viewing && (
           <>

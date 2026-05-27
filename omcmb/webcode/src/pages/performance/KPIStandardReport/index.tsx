@@ -1313,7 +1313,7 @@ export default function KPIStandardReport() {
           setFormulaProductClass('');
         }}
         width={720}
-        destroyOnClose
+        destroyOnHidden
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <Button onClick={() => {
@@ -1729,7 +1729,7 @@ export default function KPIStandardReport() {
           setFormulaProductClass('');
         }}
         width={720}
-        destroyOnClose
+        destroyOnHidden
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <Button onClick={() => {

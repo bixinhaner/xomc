@@ -363,7 +363,7 @@ export default function MessageTrace() {
         }}
         onOk={handleCreate}
         confirmLoading={createMut.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item
@@ -389,7 +389,7 @@ export default function MessageTrace() {
         open={Boolean(drawerTask)}
         onClose={() => setDrawerTask(null)}
         width={960}
-        destroyOnClose
+        destroyOnHidden
       >
         {drawerTask && (
           <MessageList task={drawerTask} onSelect={setDetailMsg} t={t} />
@@ -402,7 +402,7 @@ export default function MessageTrace() {
         footer={null}
         width={900}
         onCancel={() => setDetailMsg(null)}
-        destroyOnClose
+        destroyOnHidden
       >
         {detailMsg && <MessageDetail msg={detailMsg} t={t} />}
       </Modal>
@@ -464,7 +464,7 @@ function ExportProgressModal({ jobId, onClose, t }: ExportProgressModalProps) {
       onCancel={onClose}
       footer={null}
       width={520}
-      destroyOnClose
+      destroyOnHidden
     >
       {!job && <Typography.Paragraph>{t('trace.export.queued')}</Typography.Paragraph>}
       {job?.status === 'queued' && <Typography.Paragraph>{t('trace.export.queued')}</Typography.Paragraph>}

@@ -108,7 +108,7 @@ export default function ModelsTab({ selectedName, onSelect }: Props) {
         onOk={() => void handleSave()}
         onCancel={() => setEditing(null)}
         confirmLoading={updateMut.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item name="description" label="描述">

@@ -199,7 +199,7 @@ export default function DeviceDialogs({
         open={addDeviceDrawerOpen}
         onClose={onAddDeviceDrawerClose}
         width={520}
-        destroyOnClose
+        destroyOnHidden
         footer={
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <Button onClick={onAddDeviceDrawerClose}>{t('common.cancel')}</Button>

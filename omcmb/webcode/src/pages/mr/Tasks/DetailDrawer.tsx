@@ -83,7 +83,7 @@ export default function DetailDrawer({ taskId, onClose }: DetailDrawerProps) {
       width={760}
       open={Boolean(taskId)}
       onClose={onClose}
-      destroyOnClose
+      destroyOnHidden
     >
       <div style={{ marginBottom: 16 }}>
         <h4 style={{ marginBottom: 8 }}>{t('mrTask.detail.section.summary')}</h4>

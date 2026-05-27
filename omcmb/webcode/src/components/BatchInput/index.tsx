@@ -70,7 +70,7 @@ const BatchInput: React.FC<BatchInputProps> = ({
       onCancel={handleCancel}
       okText="确认"
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
       width={520}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

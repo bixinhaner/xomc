@@ -122,7 +122,7 @@ export default function IndicatorDrawer({ open, deviceType, indicator, onClose }
       width={760}
       open={open}
       onClose={onClose}
-      destroyOnClose
+      destroyOnHidden
     >
       {!indicator ? (
         <Empty />
@@ -179,7 +179,7 @@ export default function IndicatorDrawer({ open, deviceType, indicator, onClose }
               form.resetFields();
             }}
             confirmLoading={upsertMut.isPending}
-            destroyOnClose
+            destroyOnHidden
             width={620}
           >
             <Form form={form} layout="vertical">

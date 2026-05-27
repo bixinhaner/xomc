@@ -187,7 +187,7 @@ export default function ParameterEditModal({
       okText="确认下发"
       cancelText="取消"
       okButtonProps={{ disabled: Boolean(validationError) }}
-      destroyOnClose
+      destroyOnHidden
     >
       <Space direction="vertical" style={{ width: '100%' }} size={16}>
         {changeApplies === 'RebootRequired' && (

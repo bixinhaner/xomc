@@ -90,7 +90,7 @@ const DeviceSelector: React.FC<DeviceSelectorProps> = ({
       width={960}
       okText="确认"
       cancelText="取消"
-      destroyOnClose
+      destroyOnHidden
       styles={{ body: { padding: '12px 24px' } }}
     >
       {/* Header counts */}

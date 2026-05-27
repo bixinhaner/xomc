@@ -301,7 +301,7 @@ export default function NorthboundManagement() {
         onOk={() => void handleAddTarget()}
         confirmLoading={addMutation.isPending}
         width={560}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" style={{ marginTop: 16 }} initialValues={{ authType: 'none', format: 'json', batchSize: 100, retryCount: 3, enabled: true }}>
           <Form.Item name="id" label="Target ID" rules={[{ required: true }]}>
@@ -345,7 +345,7 @@ export default function NorthboundManagement() {
         onCancel={() => setSyncModalOpen(false)}
         onOk={() => void handleSync()}
         confirmLoading={fullSyncMutation.isPending || incrementalSyncMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={syncForm} layout="vertical" style={{ marginTop: 16 }} initialValues={{ dataType: 'device' }}>
           <Form.Item name="dataType" label="Data Type" rules={[{ required: true }]}>

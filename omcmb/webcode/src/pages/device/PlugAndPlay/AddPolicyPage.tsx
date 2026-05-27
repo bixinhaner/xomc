@@ -1359,7 +1359,7 @@ export default function AddPolicyPage() {
           configForm.resetFields();
         }}
         width={720}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={configForm} layout="vertical" disabled={configDetailMode === 'view'} style={{ paddingBottom: 60 }}>
           {/* eNB specific fields */}

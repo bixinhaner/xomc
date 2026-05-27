@@ -109,7 +109,7 @@ export default function IndicatorUnitsTab() {
           form.resetFields();
         }}
         confirmLoading={upsertMut.isPending || updateMut.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item name="id" label="ID" rules={[{ required: true }]}>

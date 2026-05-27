@@ -165,7 +165,7 @@ export default function UpdateModal({ open, onClose }: UpdateModalProps) {
       cancelText={t('systemLicense.update.cancel')}
       okButtonProps={{ disabled: !canSubmit, loading: updateMutation.isPending }}
       width={680}
-      destroyOnClose
+      destroyOnHidden
     >
       <Dragger
         accept=".json,.lic"

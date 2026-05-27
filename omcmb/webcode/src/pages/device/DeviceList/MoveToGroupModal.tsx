@@ -106,7 +106,7 @@ export default function MoveToGroupModal({
       cancelText={t('common.cancel')}
       confirmLoading={confirmLoading}
       width={480}
-      destroyOnClose
+      destroyOnHidden
     >
       {selectedCount != null && selectedCount > 0 && (
         <div style={{ marginBottom: 12, color: 'rgba(0,0,0,0.45)', fontSize: 13 }}>

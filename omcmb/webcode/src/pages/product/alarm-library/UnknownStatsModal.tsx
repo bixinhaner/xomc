@@ -44,7 +44,7 @@ export default function UnknownStatsModal({ open, onClose }: Props) {
       onCancel={onClose}
       footer={null}
       width={920}
-      destroyOnClose
+      destroyOnHidden
     >
       <Space style={{ marginBottom: 12 }}>
         <Input

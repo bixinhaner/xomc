@@ -45,7 +45,7 @@ export default function MatchOrderDrawer({ open, onClose }: Props) {
       width={720}
       open={open}
       onClose={onClose}
-      destroyOnClose
+      destroyOnHidden
     >
       <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
         所有产品的所有正则规则按 sort_order 排列；命中由小到大优先级。修改顺序请到产品详情的"正则模式"段使用上下移按钮。

@@ -186,7 +186,7 @@ export default function ExportModal({ open, onClose, onConfirm, confirmLoading }
       cancelText={t('common.cancel')}
       confirmLoading={confirmLoading}
       width={780}
-      destroyOnClose
+      destroyOnHidden
     >
       {/* 1. 选择运营商 */}
       <div style={{ marginBottom: 16 }}>

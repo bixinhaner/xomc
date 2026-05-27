@@ -110,7 +110,7 @@ const NESelector: React.FC<NESelectorProps> = ({
       okText="确认"
       cancelText="取消"
       width={640}
-      destroyOnClose
+      destroyOnHidden
     >
       <div style={{ marginBottom: 12 }}>
         <Input

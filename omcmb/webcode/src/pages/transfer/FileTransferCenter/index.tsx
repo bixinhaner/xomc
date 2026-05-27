@@ -1454,7 +1454,7 @@ export default function FileTransferCenter() {
         width={520}
         open={taskDrawerOpen}
         onClose={() => setTaskDrawerOpen(false)}
-        destroyOnClose
+        destroyOnHidden
         extra={(
           <Space>
             <Button onClick={() => setTaskDrawerOpen(false)}>{t('common.cancel')}</Button>
@@ -1809,7 +1809,7 @@ export default function FileTransferCenter() {
           cancelText={t('common.cancel')}
           confirmLoading={batchSNApplying}
           width={520}
-          destroyOnClose
+          destroyOnHidden
         >
           <Form layout="vertical">
             <Form.Item label={t('ufte.batchSnModal.label')}>
@@ -1831,7 +1831,7 @@ export default function FileTransferCenter() {
         width={640}
         open={detailDrawerOpen}
         onClose={() => { setDetailDrawerOpen(false); setDetailTask(null); }}
-        destroyOnClose
+        destroyOnHidden
       >
         {detailTask ? (
           <Space direction="vertical" size={16} style={{ width: '100%' }}>

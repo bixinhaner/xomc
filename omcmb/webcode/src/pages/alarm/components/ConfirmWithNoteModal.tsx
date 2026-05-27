@@ -69,7 +69,7 @@ export default function ConfirmWithNoteModal({
       okType={confirmType}
       cancelText={t('common.cancel')}
       confirmLoading={loading}
-      destroyOnClose
+      destroyOnHidden
     >
       <Space direction="vertical" style={{ width: '100%' }} size="middle">
         <Text>{message}</Text>

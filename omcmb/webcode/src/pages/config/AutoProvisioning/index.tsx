@@ -251,7 +251,7 @@ export default function AutoProvisioning() {
         onCancel={() => setCreateModalOpen(false)}
         onOk={() => void handleCreate()}
         confirmLoading={createMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
           <Form.Item

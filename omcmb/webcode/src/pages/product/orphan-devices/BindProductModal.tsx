@@ -57,7 +57,7 @@ export default function BindProductModal({ open, devices, onClose, onDone }: Pro
       onOk={() => void handleSubmit()}
       onCancel={onClose}
       confirmLoading={bindMut.isPending}
-      destroyOnClose
+      destroyOnHidden
       width={520}
     >
       <Alert

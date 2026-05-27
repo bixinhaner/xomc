@@ -240,7 +240,7 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
         onCancel={() => { setDictModalOpen(false); dictForm.resetFields(); setEditingDict(null); }}
         confirmLoading={createDictMutation.isPending || updateDictMutation.isPending}
         width={480}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={dictForm} layout="vertical" style={{ marginTop: 16 }}>
           <Form.Item name="name" label={t('dictionary.name')} rules={[{ required: true }]}>
@@ -631,7 +631,7 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
         onCancel={() => { setDetailModalOpen(false); detailForm.resetFields(); setEditingDetail(null); }}
         confirmLoading={createDetailMutation.isPending || updateDetailMutation.isPending}
         width={480}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={detailForm} layout="vertical" style={{ marginTop: 16 }}>
           {/* PRD §10：父级字典项 — allowClear=切顶层；过滤掉自身+后代防环 */}

@@ -136,7 +136,7 @@ export default function TemplateForm({
       open={open}
       width={600}
       onClose={onClose}
-      destroyOnClose
+      destroyOnHidden
       footer={
         <div style={{ textAlign: 'right' }}>
           <Space>

@@ -257,7 +257,7 @@ export default function ScriptTaskDrawer({
       open={open}
       onClose={onClose}
       width={560}
-      destroyOnClose
+      destroyOnHidden
       footer={
         <div style={{ textAlign: 'right' }}>
           <Button onClick={onClose} style={{ marginRight: 8 }}>
