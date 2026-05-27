@@ -80,6 +80,22 @@ const messages: Record<string, string> = {
   'common.totalItems':     '共 {count} 条',
   'common.operation':      '操作',
   'common.basicInfo':      '基础信息',
+  'common.config':         '配置',
+  'common.day':            '天',
+  'common.days':           '天',
+  'common.descriptionPlaceholder': '请输入描述',
+  'common.file':           '文件',
+  'common.hour':           '小时',
+  'common.hours':          '小时',
+  'common.name':           '名称',
+  'common.nameMax100':     '名称最长100个字符',
+  'common.namePlaceholder': '请输入名称',
+  'common.nameRequired':   '请输入名称',
+  'common.noPermission':   '无权限',
+  'common.pleaseSelectFile': '请选择文件',
+  'common.progress':       '进度',
+  'common.selectHint':     '请选择',
+  'common.tree':           '树',
 
   // -------------------------------------------------------------------------
   // Table headers
@@ -150,6 +166,7 @@ const messages: Record<string, string> = {
   'alarm.severity.warning':  '警告',
   'alarm.ackStatus.acknowledged':   '已确认',
   'alarm.ackStatus.unacknowledged': '未确认',
+  'alarm.filter.vendor':    '厂商',
 
   // -------------------------------------------------------------------------
   // Navigation — module names
@@ -166,7 +183,11 @@ const messages: Record<string, string> = {
   'nav.file':          '文件管理',
   'nav.transfer':      '文件传输',
   'nav.log':           '日志管理',
+  'nav.log.alarm':     '告警日志',
+  'nav.log.heartbeat': '心跳日志',
+  'nav.log.neMessage': '网元消息日志',
   'nav.system':        '系统管理',
+  'nav.system.notifications': '通知设置',
   'nav.product':       '产品中心',
   'nav.product.products':       '产品管理',
   'nav.product.paramModel':     '参数模型',
@@ -1525,6 +1546,7 @@ const messages: Record<string, string> = {
   'perf.export.batchDeleteConfirmMsg': '确定要删除选中的 {count} 个文件吗？',
   'perf.export.selectAtLeastOne': '请至少选择一个文件',
   'perf.export.fileSize': '文件大小',
+  'perf.query.unit':               '单位',
 
   // KPI indicator names
   'kpi.rrcSetupSuccessRate':   'RRC建立成功率',
@@ -2129,6 +2151,7 @@ const messages: Record<string, string> = {
   'topology.site.latitude':    '纬度',
   'topology.site.coordinates': '坐标',
   'topology.site.deviceCount': '设备数量',
+  'topology.site.name':        '站点名称',
 
   // -------------------------------------------------------------------------
   // MML Command Categories
@@ -2938,6 +2961,8 @@ const messages: Record<string, string> = {
   // GSM specific
   'provision.dnsTimezoneConfig':      'DNS/时区配置',
   'provision.timezone':               '时区',
+  'provision.omIp':                   'OM IP地址',
+  'provision.omMask':                 'OM 子网掩码',
   // Common
 
   // Status
@@ -3059,6 +3084,8 @@ const messages: Record<string, string> = {
   'table.fileName':              '文件名',
   'table.deviceSnOrName':        '设备编码/名称',
   'table.executionTime':         '执行时间',
+  'table.manufacturer':          '厂商',
+  'table.totalCount':            '总计',
 
   // Device additions
   'device.stationCode':          '基站编码',
@@ -3321,6 +3348,7 @@ const messages: Record<string, string> = {
   'user.confirmDisableUser':                 '确定要禁用该用户吗？禁用后用户将无法登录系统。',
   'user.confirmEnableUser':                  '确定要启用该用户吗？',
   'user.permanent':                          '永久',
+  'user.lastLogin':                          '最后登录',
 
   // System - Device Classification
   'system.deviceClass.allDevices':           '全部设备',
@@ -3544,6 +3572,13 @@ const messages: Record<string, string> = {
   'software.status.verifying':               '校验中',
 
   'software.progress':                       '进度',
+  'software.canary.abort':                   '终止灰度',
+  'software.canary.advance':                 '推进下一阶段',
+  'software.canary.pause':                   '暂停灰度',
+  'software.canary.resume':                  '恢复灰度',
+  'software.canary.stage':                   '灰度阶段',
+  'software.firmware.importFailed':          '导入失败',
+  'software.firmware.modifyFailed':          '修改失败',
 
   // -------------------------------------------------------------------------
   // UFTE (Unified File Transfer Engine) - 任务管理 / 文件管理 P0+P1 文案
@@ -4657,6 +4692,14 @@ const messages: Record<string, string> = {
   'device.commission.bscServiceIp':          'BSC业务IP',
   'device.commission.bscIpLabel':            'BSC IP',
   'device.commission.bscIpPlaceholder':      'BSC业务IP地址',
+  'device.addDeviceSuccess':                 '添加设备成功',
+  'device.list':                             '设备列表',
+  'device.noGroups':                         '暂无设备组',
+  'device.noSearchResults':                  '无搜索结果',
+  'device.searchResultsCount':               '共 {count} 条结果',
+  'device.selectedGroups':                   '已选设备组',
+  'device.technology':                       '技术制式',
+  'device.tryOtherKeywords':                 '尝试其他关键词',
 
   // -------------------------------------------------------------------------
   // Alarm - CustomAlarmStats
@@ -5217,6 +5260,7 @@ const messages: Record<string, string> = {
   'mrTask.batchSN.emptyInput':    '请粘贴 SN（支持空格 / 逗号 / 分号 / 换行分隔）',
   'mrTask.batchSN.partialHits':   '{hits} 个 SN 已加入选择；{misses} 个不在当前候选名单：{samples}',
   'mrTask.batchSN.allHits':       '已加入 {count} 个设备',
+  'ufte.taskCreatedAndNavigate':  '任务已创建，即将跳转',
 };
 
 export default messages;

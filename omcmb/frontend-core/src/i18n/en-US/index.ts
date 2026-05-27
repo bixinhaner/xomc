@@ -80,6 +80,22 @@ const messages: Record<string, string> = {
   'common.totalItems':     '{count} items in total',
   'common.operation':      'Actions',
   'common.basicInfo':      'Basic Info',
+  'common.config':         'Config',
+  'common.day':            'day',
+  'common.days':           'days',
+  'common.descriptionPlaceholder': 'Please enter description',
+  'common.file':           'File',
+  'common.hour':           'hour',
+  'common.hours':          'hours',
+  'common.name':           'Name',
+  'common.nameMax100':     'Name max 100 characters',
+  'common.namePlaceholder': 'Please enter name',
+  'common.nameRequired':   'Name is required',
+  'common.noPermission':   'No permission',
+  'common.pleaseSelectFile': 'Please select a file',
+  'common.progress':       'Progress',
+  'common.selectHint':     'Please select',
+  'common.tree':           'Tree',
 
   // -------------------------------------------------------------------------
   // Table headers
@@ -150,6 +166,7 @@ const messages: Record<string, string> = {
   'alarm.severity.warning':  'Warning',
   'alarm.ackStatus.acknowledged':   'Acknowledged',
   'alarm.ackStatus.unacknowledged': 'Unacknowledged',
+  'alarm.filter.vendor':    'Vendor',
 
   // -------------------------------------------------------------------------
   // Navigation — module names
@@ -166,7 +183,11 @@ const messages: Record<string, string> = {
   'nav.file':          'File Management',
   'nav.transfer':      'File Transfer',
   'nav.log':           'Log Management',
+  'nav.log.alarm':     'Alarm Log',
+  'nav.log.heartbeat': 'Heartbeat Log',
+  'nav.log.neMessage': 'NE Message Log',
   'nav.system':        'System Management',
+  'nav.system.notifications': 'Notification Settings',
   'nav.product':       'Product Center',
   'nav.product.products':       'Products',
   'nav.product.paramModel':     'Parameter Models',
@@ -1520,6 +1541,7 @@ const messages: Record<string, string> = {
   'perf.export.batchDeleteConfirmMsg': 'Are you sure you want to delete {count} selected files?',
   'perf.export.selectAtLeastOne': 'Please select at least one file',
   'perf.export.fileSize': 'File Size',
+  'perf.query.unit':               'Unit',
 
   // KPI indicator names
   'kpi.rrcSetupSuccessRate':   'RRC Setup Success Rate',
@@ -2107,6 +2129,12 @@ const messages: Record<string, string> = {
   'topology.site.active':      'Active',
   'topology.site.inactive':    'Inactive',
   'topology.site.maintenance': 'Maintenance',
+  'topology.site.address':     'Address',
+  'topology.site.longitude':   'Longitude',
+  'topology.site.latitude':    'Latitude',
+  'topology.site.coordinates': 'Coordinates',
+  'topology.site.deviceCount': 'Device Count',
+  'topology.site.name':        'Site Name',
 
   // -------------------------------------------------------------------------
   // MML Command Categories
@@ -2915,6 +2943,8 @@ const messages: Record<string, string> = {
   // GSM specific
   'provision.dnsTimezoneConfig':      'DNS/Timezone Config',
   'provision.timezone':               'Timezone',
+  'provision.omIp':                   'OM IP Address',
+  'provision.omMask':                 'OM Subnet Mask',
   // Common
 
   // Status
@@ -3036,6 +3066,8 @@ const messages: Record<string, string> = {
   'table.fileName':              'File Name',
   'table.deviceSnOrName':        'Device SN/Name',
   'table.executionTime':         'Execution Time',
+  'table.manufacturer':          'Manufacturer',
+  'table.totalCount':            'Total',
 
   // Device additions
   'device.stationCode':          'Station Code',
@@ -3296,6 +3328,7 @@ const messages: Record<string, string> = {
   'user.confirmDisableUser':                 'Are you sure to disable this user? The user will not be able to login.',
   'user.confirmEnableUser':                  'Are you sure to enable this user?',
   'user.permanent':                          'Permanent',
+  'user.lastLogin':                          'Last Login',
 
   // System - Device Classification
   'system.deviceClass.allDevices':           'All Devices',
@@ -3520,6 +3553,13 @@ const messages: Record<string, string> = {
   'software.status.verifying':               'Verifying',
 
   'software.progress':                       'Progress',
+  'software.canary.abort':                   'Abort Canary',
+  'software.canary.advance':                 'Advance Stage',
+  'software.canary.pause':                   'Pause Canary',
+  'software.canary.resume':                  'Resume Canary',
+  'software.canary.stage':                   'Canary Stage',
+  'software.firmware.importFailed':          'Import failed',
+  'software.firmware.modifyFailed':          'Modification failed',
 
   // -------------------------------------------------------------------------
   // UFTE (Unified File Transfer Engine) - 任务管理 / 文件管理 P0+P1 文案
@@ -4635,6 +4675,14 @@ const messages: Record<string, string> = {
   'device.commission.bscServiceIp':          'BSC Service IP',
   'device.commission.bscIpLabel':            'BSC IP',
   'device.commission.bscIpPlaceholder':      'BSC service IP address',
+  'device.addDeviceSuccess':                 'Device added successfully',
+  'device.list':                             'Device List',
+  'device.noGroups':                         'No device groups',
+  'device.noSearchResults':                  'No search results',
+  'device.searchResultsCount':               '{count} results found',
+  'device.selectedGroups':                   'Selected groups',
+  'device.technology':                       'Technology',
+  'device.tryOtherKeywords':                 'Try other keywords',
 
   // -------------------------------------------------------------------------
   // Alarm - CustomAlarmStats
@@ -5187,6 +5235,7 @@ const messages: Record<string, string> = {
   'mrTask.batchSN.emptyInput':    'Paste SNs (separated by space / comma / semicolon / newline)',
   'mrTask.batchSN.partialHits':   '{hits} SN(s) added; {misses} not in current candidates: {samples}',
   'mrTask.batchSN.allHits':       'Added {count} device(s)',
+  'ufte.taskCreatedAndNavigate':  'Task created, redirecting...',
 };
 
 export default messages;
