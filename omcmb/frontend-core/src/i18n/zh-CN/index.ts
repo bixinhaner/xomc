@@ -2030,6 +2030,27 @@ const messages: Record<string, string> = {
   'topology.status.maintenance': '维护',
 
   // -------------------------------------------------------------------------
+  // GIS Map View
+  // -------------------------------------------------------------------------
+  'gis.filter.deviceStatus': '设备状态',
+  'gis.filter.deviceGroup':  '设备组',
+  'gis.filter.legend':       '图例',
+  'gis.status.onlineActive': '在线激活',
+  'gis.status.onlineInactive': '在线未激活',
+  'gis.status.offline':      '离线',
+  'gis.search.deviceGroupPlaceholder': '搜索设备组',
+  'gis.search.noDeviceGroup': '暂无设备组',
+  'gis.search.selectedGroups': '已选择 {count} 个设备组',
+  'gis.search.placeholder': 'SN / 名称 / IP / MAC / PCI（多个值用英文逗号分隔，最多 50 个）',
+  'gis.search.notFound': '未找到匹配的设备',
+  'gis.search.tryOther': '请尝试其他关键词',
+  'gis.search.resultsCount': '共找到 {count} 个结果',
+  'gis.loading': '加载设备数据...',
+  'gis.legend.deviceCluster': '设备聚合',
+  'gis.legend.alarmCount': '告警数量',
+  'gis.legend.offlineDevice': '离线设备',
+
+  // -------------------------------------------------------------------------
   // AlarmFilter
   // -------------------------------------------------------------------------
   'alarm.filter.title':    '告警筛选',

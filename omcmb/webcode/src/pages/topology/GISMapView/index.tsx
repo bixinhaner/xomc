@@ -10,6 +10,7 @@
  * - 可访问性增强
  */
 import { useState, useMemo, useRef, useEffect } from 'react';
+import { useIntl } from 'react-intl';
 import { Checkbox, Spin, Empty, Collapse, Input } from 'antd';
 import { SearchOutlined, PlusOutlined, MinusOutlined, CaretDownOutlined } from '@ant-design/icons';
 import GISMap from '@/components/GISMap';
@@ -83,6 +84,7 @@ function getAllDescendantIds(node: DeviceGroupNode): string[] {
 
 export default function GISMapView() {
   const token = useThemeToken();
+  const intl = useIntl();
 
   // ========== 状态管理 ==========
 
@@ -586,14 +588,16 @@ export default function GISMapView() {
               borderBottom: '1px solid #E8E8E8',
             }}
           >
-            <span style={{ fontSize: 18, fontWeight: 600, color: 'var(--color-neutral-800)' }}>筛选</span>
+            <span style={{ fontSize: 18, fontWeight: 600, color: 'var(--color-neutral-800)' }}>
+              {intl.formatMessage({ id: 'common.filter' })}
+            </span>
           </div>
         )}
 
         {/* 搜索设备组 */}
         <div style={searchBoxStyle}>
           <Input
-            placeholder="搜索设备组"
+            placeholder={intl.formatMessage({ id: 'gis.search.deviceGroupPlaceholder' })}
             value={groupSearchValue}
             onChange={(e) => setGroupSearchValue(e.target.value)}
             prefix={<SearchOutlined style={{ color: '#8C8C8C' }} />}
@@ -617,14 +621,14 @@ export default function GISMapView() {
           bordered={false}
           style={collapseContainerStyle}
           className="gismap-filter-collapse"
-        >
-          {/* Panel 1: 设备状态（原第2位，现调至第1位） */}
-          <Collapse.Panel
-            key="deviceStatus"
-            header={<span style={collapseHeaderStyle}>设备状态</span>}
-            style={collapseItemStyle}
-          >
-            <div style={{ padding: '0 4px' }}>
+          items={[
+            // Panel 1: 设备状态（原第2位，现调至第1位）
+            {
+              key: 'deviceStatus',
+              label: <span style={collapseHeaderStyle}>{intl.formatMessage({ id: 'gis.filter.deviceStatus' })}</span>,
+              style: collapseItemStyle,
+              children: (
+                <div style={{ padding: '0 4px' }}>
               {/* 在线激活 */}
               <div style={{ display: 'flex', alignItems: 'center', padding: '10px 0' }}>
                 <Checkbox
@@ -640,7 +644,7 @@ export default function GISMapView() {
                     margin: '0 8px 0 12px',
                   }}
                 />
-                <span style={{ fontSize: 14, color: 'var(--color-neutral-800)' }}>在线激活</span>
+                <span style={{ fontSize: 14, color: 'var(--color-neutral-800)' }}>{intl.formatMessage({ id: 'gis.status.onlineActive' })}</span>
                 <span style={{ marginLeft: 'auto', fontSize: 14, color: '#52C41A' }}>
                   {stats.statusCount.onlineActive.toLocaleString()}
                 </span>
@@ -661,7 +665,7 @@ export default function GISMapView() {
                     margin: '0 8px 0 12px',
                   }}
                 />
-                <span style={{ fontSize: 14, color: 'var(--color-neutral-800)' }}>在线未激活</span>
+                <span style={{ fontSize: 14, color: 'var(--color-neutral-800)' }}>{intl.formatMessage({ id: 'gis.status.onlineInactive' })}</span>
                 <span style={{ marginLeft: 'auto', fontSize: 14, color: '#FAAD14' }}>
                   {stats.statusCount.onlineInactive.toLocaleString()}
                 </span>
@@ -682,61 +686,62 @@ export default function GISMapView() {
                     margin: '0 8px 0 12px',
                   }}
                 />
-                <span style={{ fontSize: 14, color: 'var(--color-neutral-800)' }}>离线</span>
+                <span style={{ fontSize: 14, color: 'var(--color-neutral-800)' }}>{intl.formatMessage({ id: 'gis.status.offline' })}</span>
                 <span style={{ marginLeft: 'auto', fontSize: 14, color: '#b60808' }}>
                   {stats.statusCount.offline.toLocaleString()}
                 </span>
               </div>
             </div>
-          </Collapse.Panel>
+              ),
+            },
+            // Panel 2: 设备组（原第1位，现调至第2位）
+            {
+              key: 'deviceGroup',
+              label: <span style={collapseHeaderStyle}>{intl.formatMessage({ id: 'gis.filter.deviceGroup' })}</span>,
+              style: collapseItemStyle,
+              children: (
+                <>
+                  {/* 设备组树 */}
+                  <div style={treeContainerStyle}>
+                    {isLoadingTree ? (
+                      <div style={{ padding: 20, textAlign: 'center' }}>
+                        <Spin size="small" />
+                      </div>
+                    ) : filteredGroupTree.length === 0 ? (
+                      <Empty description={intl.formatMessage({ id: 'gis.search.noDeviceGroup' })} style={{ padding: 20 }} />
+                    ) : (
+                      filteredGroupTree.map((node) => renderGroupNode(node))
+                    )}
+                  </div>
 
-          {/* Panel 2: 设备组（原第1位，现调至第2位） */}
-          <Collapse.Panel
-            key="deviceGroup"
-            header={<span style={collapseHeaderStyle}>设备组</span>}
-            style={collapseItemStyle}
-          >
-            {/* 设备组树 */}
-            <div style={treeContainerStyle}>
-              {isLoadingTree ? (
-                <div style={{ padding: 20, textAlign: 'center' }}>
-                  <Spin size="small" />
-                </div>
-              ) : filteredGroupTree.length === 0 ? (
-                <Empty description="暂无设备组" style={{ padding: 20 }} />
-              ) : (
-                filteredGroupTree.map((node) => renderGroupNode(node))
-              )}
-            </div>
-
-            {/* 已选择汇总 */}
-            {selectedGroupIds.length > 0 && (
-              <div
-                style={{
-                  margin: '12px 8px 8px', // 与树节点保持一致的左右边距
-                  padding: '10px 12px',
-                  background: '#E6F7FF', // 蓝色背景
-                  borderRadius: 4,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <span style={{ fontSize: 13, color: '#595959' }}>
-                  已选择 <span style={{ color: '#1677FF', fontWeight: 500 }}>{selectedGroupIds.length}</span> 个设备组
-                </span>
-              </div>
-            )}
-          </Collapse.Panel>
-
-          {/* Panel 3: 图例 - 可通过 SHOW_LEGEND 控制，默认隐藏 */}
-          {SHOW_LEGEND && (
-            <Collapse.Panel
-              key="legend"
-              header={<span style={collapseHeaderStyle}>图例</span>}
-              style={collapseItemStyle}
-            >
-              <div style={{ padding: '0 4px' }}>
+                  {/* 已选择汇总 */}
+                  {selectedGroupIds.length > 0 && (
+                    <div
+                      style={{
+                        margin: '12px 8px 8px', // 与树节点保持一致的左右边距
+                        padding: '10px 12px',
+                        background: '#E6F7FF', // 蓝色背景
+                        borderRadius: 4,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <span style={{ fontSize: 13, color: '#595959' }}>
+                        {intl.formatMessage({ id: 'gis.search.selectedGroups' }, { count: selectedGroupIds.length })}
+                      </span>
+                    </div>
+                  )}
+                </>
+              ),
+            },
+            // Panel 3: 图例 - 可通过 SHOW_LEGEND 控制，默认隐藏
+            ...(SHOW_LEGEND ? [{
+              key: 'legend',
+              label: <span style={collapseHeaderStyle}>{intl.formatMessage({ id: 'gis.filter.legend' })}</span>,
+              style: collapseItemStyle,
+              children: (
+                <div style={{ padding: '0 4px' }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 24px' }}>
               <div style={{ display: 'flex', alignItems: 'center' }}>
                 <div
@@ -749,7 +754,7 @@ export default function GISMapView() {
                     boxShadow: '0 0 0 1px #E8E8E8',
                   }}
                 />
-                <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>在线激活</span>
+                <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>{intl.formatMessage({ id: 'gis.status.onlineActive' })}</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center' }}>
                 <div
@@ -762,7 +767,7 @@ export default function GISMapView() {
                     boxShadow: '0 0 0 1px #E8E8E8',
                   }}
                 />
-                <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>在线未激活</span>
+                <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>{intl.formatMessage({ id: 'gis.status.onlineInactive' })}</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center' }}>
                 <div
@@ -775,7 +780,7 @@ export default function GISMapView() {
                     boxShadow: '0 0 0 1px #E8E8E8',
                   }}
                 />
-                <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>离线设备</span>
+                <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>{intl.formatMessage({ id: 'gis.legend.offlineDevice' })}</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center' }}>
                 <div
@@ -793,7 +798,7 @@ export default function GISMapView() {
                 >
                   <span style={{ fontSize: 9, fontWeight: 700, color: '#FFF' }}>N</span>
                 </div>
-                <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>设备聚合</span>
+                <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>{intl.formatMessage({ id: 'gis.legend.deviceCluster' })}</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center' }}>
                 <div
@@ -809,13 +814,14 @@ export default function GISMapView() {
                 >
                   <span style={{ fontSize: 9, fontWeight: 700, color: '#FFF' }}>3</span>
                 </div>
-                <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>告警数量</span>
+                <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-neutral-600)' }}>{intl.formatMessage({ id: 'gis.legend.alarmCount' })}</span>
+              </div>
               </div>
             </div>
-          </div>
-            </Collapse.Panel>
-          )}
-        </Collapse>
+              ),
+            }] : []),
+          ]}
+        />
       </div>
 
       {/* 地图区域 */}
@@ -823,7 +829,9 @@ export default function GISMapView() {
         {/* 地图组件 */}
         {isLoading ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-            <Spin size="large" tip="加载设备数据..." />
+            <Spin size="large" tip={intl.formatMessage({ id: 'gis.loading' })}>
+              <span style={{ fontSize: 14, color: '#8C8C8C' }}>{intl.formatMessage({ id: 'common.loading' })}</span>
+            </Spin>
           </div>
         ) : (
           <GISMap
@@ -876,7 +884,7 @@ export default function GISMapView() {
                 type="text"
                 value={searchKeyword}
                 onChange={(e) => handleSearchInputChange(e.target.value)}
-                placeholder="SN / 名称 / IP / MAC / PCI（多个值用英文逗号分隔，最多 50 个）"
+                placeholder={intl.formatMessage({ id: 'gis.search.placeholder' })}
                 style={{
                   flex: 1,
                   border: 'none',
@@ -930,9 +938,9 @@ export default function GISMapView() {
                   <div style={{ padding: 24, textAlign: 'center', color: '#8C8C8C' }}>
                     🔍
                     <br />
-                    <span style={{ fontSize: 12 }}>未找到匹配的设备</span>
+                    <span style={{ fontSize: 12 }}>{intl.formatMessage({ id: 'gis.search.notFound' })}</span>
                     <br />
-                    <span style={{ fontSize: 11, color: '#BFBFBF' }}>请尝试其他关键词</span>
+                    <span style={{ fontSize: 11, color: '#BFBFBF' }}>{intl.formatMessage({ id: 'gis.search.tryOther' })}</span>
                   </div>
                 ) : (
                   <>
@@ -946,10 +954,10 @@ export default function GISMapView() {
                             ? 'linear-gradient(180deg, #FFC53D 0%, #FAAD14 100%)'
                             : '#b60808';
                         const statusText = result.status === 'onlineActive'
-                          ? '🟢 在线激活'
+                          ? `🟢 ${intl.formatMessage({ id: 'gis.status.onlineActive' })}`
                           : result.status === 'onlineInactive'
-                            ? '🟡 在线未激活'
-                            : '🔴 离线';
+                            ? `🟡 ${intl.formatMessage({ id: 'gis.status.onlineInactive' })}`
+                            : `🔴 ${intl.formatMessage({ id: 'gis.status.offline' })}`;
                         const statusTextColor = result.status === 'onlineActive'
                           ? '#52C41A'
                           : result.status === 'onlineInactive'
@@ -1013,7 +1021,7 @@ export default function GISMapView() {
                     {/* 固定在底部的结果统计 */}
                     <div style={searchResultsFooterStyle}>
                       <span style={{ fontSize: 11, color: '#8C8C8C' }}>
-                        共找到 {filteredSearchResults.length} 个结果
+                        {intl.formatMessage({ id: 'gis.search.resultsCount' }, { count: filteredSearchResults.length })}
                       </span>
                     </div>
                   </>

@@ -2025,6 +2025,27 @@ const messages: Record<string, string> = {
   'topology.status.maintenance': 'Maintenance',
 
   // -------------------------------------------------------------------------
+  // GIS Map View
+  // -------------------------------------------------------------------------
+  'gis.filter.deviceStatus': 'Device Status',
+  'gis.filter.deviceGroup':  'Device Group',
+  'gis.filter.legend':       'Legend',
+  'gis.status.onlineActive': 'Online Active',
+  'gis.status.onlineInactive': 'Online Inactive',
+  'gis.status.offline':      'Offline',
+  'gis.search.deviceGroupPlaceholder': 'Search device groups',
+  'gis.search.noDeviceGroup': 'No device groups',
+  'gis.search.selectedGroups': '{count} device group(s) selected',
+  'gis.search.placeholder': 'SN / Name / IP / MAC / PCI (separate multiple values with commas, max 50)',
+  'gis.search.notFound': 'No matching devices found',
+  'gis.search.tryOther': 'Please try other keywords',
+  'gis.search.resultsCount': 'Found {count} result(s)',
+  'gis.loading': 'Loading device data...',
+  'gis.legend.deviceCluster': 'Device Cluster',
+  'gis.legend.alarmCount': 'Alarm Count',
+  'gis.legend.offlineDevice': 'Offline Device',
+
+  // -------------------------------------------------------------------------
   // AlarmFilter
   // -------------------------------------------------------------------------
   'alarm.filter.title':    'Alarm Filter',
