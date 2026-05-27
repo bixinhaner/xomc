@@ -490,9 +490,10 @@ func Test_Service_Run_DBError(t *testing.T) {
 }
 
 // Test_Service_Run_DefaultsFilled：normalizeOptions 在零值时填默认。
+// T-0180 起 BatchSize 默认从 1 调整为 16(prober retry 循环让 batch>1 可靠)。
 func Test_Service_Run_DefaultsFilled(t *testing.T) {
 	opts := normalizeOptions(Options{DeviceSN: "x"})
-	require.Equal(t, 1, opts.BatchSize)
+	require.Equal(t, 16, opts.BatchSize)
 	require.Equal(t, 30*time.Second, opts.RPCTimeout)
 	require.Equal(t, 5.0, opts.RPCRate)
 	require.InEpsilon(t, SafetyDefaultMaxUnsupportedFraction, opts.Safety.MaxUnsupportedFraction, 1e-9)

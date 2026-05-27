@@ -241,3 +241,115 @@ func (w *wrappedSubmitter) CreateTask(ctx context.Context, req *task.CreateTaskR
 func (w *wrappedSubmitter) GetTask(ctx context.Context, id string) (*task.Task, error) {
 	return w.inner.GetTask(ctx, id)
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// T-0180: ACS GPV failure 写结构化 param_faults[] + Probe retry 收敛
+// ──────────────────────────────────────────────────────────────────────
+
+// Test_classifyGPVFailure_PrefersStructuredParamFaults: t.Result 含
+// param_faults[] 时优先用,而非 ErrorMessage 文本抽取。
+func Test_classifyGPVFailure_PrefersStructuredParamFaults(t *testing.T) {
+	// ErrorMessage 故意写错 path,如果优先级正确应被 result.param_faults 覆盖
+	tk := &task.Task{
+		Status:       task.TaskStatusFailed,
+		ErrorCode:    9005,
+		ErrorMessage: "Invalid parameter name: Device.WRONG",
+		Result: []byte(`{"param_faults":[{"parameter_name":"Device.B","fault_code":9005,"fault_string":"..."}]}`),
+	}
+	out := classifyGPVFailure(tk, []string{"Device.A", "Device.B", "Device.C"})
+	require.Equal(t, OutcomeUnknown, out[0], "A 不在 param_faults 应 unknown")
+	require.Equal(t, OutcomeUnsupported, out[1], "B 在 param_faults 应 unsupported")
+	require.Equal(t, OutcomeUnknown, out[2], "C 不在 param_faults 应 unknown")
+}
+
+// Test_classifyGPVFailure_FallsBackToErrorMessage: result 空时回退 ErrorMessage。
+func Test_classifyGPVFailure_FallsBackToErrorMessage(t *testing.T) {
+	tk := &task.Task{
+		Status:       task.TaskStatusFailed,
+		ErrorCode:    9005,
+		ErrorMessage: "Invalid parameter name: Device.B",
+		Result:       nil,
+	}
+	out := classifyGPVFailure(tk, []string{"Device.A", "Device.B"})
+	require.Equal(t, OutcomeUnknown, out[0])
+	require.Equal(t, OutcomeUnsupported, out[1])
+}
+
+// Test_classifyGPVFailure_IgnoresNon9005Faults: result 含非 9005 fault
+// (如 9007 值越界)不应映射到 unsupported。
+func Test_classifyGPVFailure_IgnoresNon9005Faults(t *testing.T) {
+	tk := &task.Task{
+		Status:    task.TaskStatusFailed,
+		ErrorCode: 9005,
+		Result:    []byte(`{"param_faults":[{"parameter_name":"Device.B","fault_code":9007}]}`),
+	}
+	out := classifyGPVFailure(tk, []string{"Device.A", "Device.B"})
+	require.Equal(t, OutcomeUnknown, out[0])
+	require.Equal(t, OutcomeUnknown, out[1], "9007 非 9005 应 unknown")
+}
+
+// Test_extractBadPathsFromResult_Empty: 空 / 损坏 JSON 返 nil 不 panic。
+func Test_extractBadPathsFromResult_Empty(t *testing.T) {
+	require.Nil(t, extractBadPathsFromResult(nil))
+	require.Nil(t, extractBadPathsFromResult([]byte(``)))
+	require.Nil(t, extractBadPathsFromResult([]byte(`not-json`)))
+	require.Nil(t, extractBadPathsFromResult([]byte(`{}`)))
+	require.Nil(t, extractBadPathsFromResult([]byte(`{"param_faults":[]}`)))
+}
+
+// Test_TaskProber_Probe_RetriesOnPartialFailure: batch=3,首次 9005 暴露 1 个
+// badPath,剩余 2 个进入下一轮 retry。下一轮全 supported → 总结果 1 unsupported + 2 supported。
+func Test_TaskProber_Probe_RetriesOnPartialFailure(t *testing.T) {
+	sub := newFakeTaskSubmitter()
+	iteration := 0
+	wrapped := &wrappedSubmitter{
+		inner: sub,
+		afterCreate: func(tk *task.Task) {
+			if iteration == 0 {
+				// 第 1 轮: 3 path 中 Device.B 不支持
+				tk.Status = task.TaskStatusFailed
+				tk.ErrorCode = 9005
+				tk.Result = []byte(`{"param_faults":[{"parameter_name":"Device.B","fault_code":9005,"fault_string":"..."}]}`)
+			} else {
+				// 第 2 轮: 剩余 [Device.A, Device.C] 全支持
+				tk.Status = task.TaskStatusCompleted
+			}
+			iteration++
+		},
+	}
+	p := NewTaskProber(wrapped, 1*time.Millisecond, 2*time.Second, nil)
+	got := p.Probe(context.Background(), "SN1",
+		[]string{"Device.A", "Device.B", "Device.C"}, 0)
+
+	require.Len(t, got, 3)
+	// 按入参顺序返回 — index 与 Probe input 一致
+	require.Equal(t, "Device.A", got[0].StandardPath)
+	require.Equal(t, OutcomeSupported, got[0].Outcome)
+	require.Equal(t, "Device.B", got[1].StandardPath)
+	require.Equal(t, OutcomeUnsupported, got[1].Outcome)
+	require.Equal(t, "Device.C", got[2].StandardPath)
+	require.Equal(t, OutcomeSupported, got[2].Outcome)
+	require.Equal(t, 2, sub.calls, "应有 2 次 CreateTask(原批 + retry)")
+}
+
+// Test_TaskProber_Probe_RetryStopsWhenNoProgress: 整批失败但无 path 归因
+// (param_faults 空,ErrorMessage 也无 badPath) → 剩余全 Unknown,不无限循环。
+func Test_TaskProber_Probe_RetryStopsWhenNoProgress(t *testing.T) {
+	sub := newFakeTaskSubmitter()
+	calls := 0
+	wrapped := &wrappedSubmitter{
+		inner: sub,
+		afterCreate: func(tk *task.Task) {
+			calls++
+			tk.Status = task.TaskStatusFailed
+			tk.ErrorCode = 9001 // 非 9005,classifyGPVFailure 全标 Unknown
+		},
+	}
+	p := NewTaskProber(wrapped, 1*time.Millisecond, 2*time.Second, nil)
+	got := p.Probe(context.Background(), "SN1",
+		[]string{"Device.A", "Device.B"}, 0)
+	require.Len(t, got, 2)
+	require.Equal(t, OutcomeUnknown, got[0].Outcome)
+	require.Equal(t, OutcomeUnknown, got[1].Outcome)
+	require.Equal(t, 1, sub.calls, "非 9005 fault 不应触发 retry")
+}

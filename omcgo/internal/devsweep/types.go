@@ -55,7 +55,7 @@ type Options struct {
 	DeviceSN string // 必填
 	Prefix   string // 可选 path 前缀过滤（如 "Device.FaultMgmt."）
 
-	BatchSize  int           // GPV 每批 path 数；默认 1（见 prober.go 说明）
+	BatchSize  int           // GPV 每批 path 数；默认 16（T-0180 起 batch>1 有 retry 收敛）
 	RPCTimeout time.Duration // 单 task 等待 terminal 状态的超时；默认 30s
 	RPCRate    float64       // 全局每秒最多入队几个 GPV task；默认 5/s
 

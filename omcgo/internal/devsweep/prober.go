@@ -68,21 +68,85 @@ func NewTaskProber(tasks TaskSubmitter, pollInterval, rpcTimeout time.Duration, 
 	}
 }
 
+// probeMaxIterations 是 Probe 内部 retry 的硬上限,防止 prober 卡死。
+//
+// T-0180: batch>1 失败时 CPE 只暴露 1 个 badPath, 剩余 path 标 Unknown 然后重发;
+// 收敛速度 O(N_bad_paths)。BLQ 765 path 含 11 unsupported 最坏 11 iters,留充足
+// safety margin。超过此值仍未收敛 → 视为环境异常,剩余 path 标 Unknown 不污染。
+const probeMaxIterations = 64
+
 // Probe 实现 Prober 接口。
 //
-// 入参 paths 已由 Service 做 {i} → .0. 替换后传入；这里直接发给 CPE。
-// outcome 解析规则：
-//   - task.Status=completed → 所有 path 均 supported
-//   - task.Status=failed && ErrorCode=9005 → 所有 path 均 unsupported
-//     （batch>1 时只能从 ErrorMessage 抽出一条 badPath；其余记 unknown
-//     以避免误标 — 因此推荐 BatchSize=1）
-//   - 其它 failed / expired / cancelled / timeout / 解析错 → 全 unknown
+// 入参 paths 已由 Service 做 {i} → .0. 替换后传入;这里直接发给 CPE。
+//
+// T-0180 后的批次重试语义:
+//   - 单次 GPV 失败时,ACS handler 把 badPath 写入 device_tasks.result 的
+//     param_faults[] (与 SPV schema 对齐)。classifyGPVFailure 据此可信归因。
+//   - batch>1 时:命中的 badPath 标 Unsupported,剩余 path 标 Unknown,Probe 自动
+//     用剩余 path 作为新 batch 再发一次(O(N_bad) 收敛)。无进展或达 max iter 时
+//     剩余 path 终态 Unknown,不污染真值源。
+//   - batch=1 时:9005 直接 Unsupported,无 retry。
 func (p *taskProber) Probe(ctx context.Context, deviceSN string, paths []string, batchIdx int) []ProbeRecord {
-	out := make([]ProbeRecord, 0, len(paths))
 	if len(paths) == 0 {
-		return out
+		return nil
 	}
 
+	classified := make(map[string]ProbeRecord, len(paths))
+	remaining := append([]string(nil), paths...)
+
+	for iter := 0; iter < probeMaxIterations && len(remaining) > 0; iter++ {
+		results := p.probeOnce(ctx, deviceSN, remaining, batchIdx, iter)
+		progressed := false
+		var nextRemaining []string
+		for _, r := range results {
+			if r.Outcome == OutcomeUnknown {
+				nextRemaining = append(nextRemaining, r.StandardPath)
+				continue
+			}
+			// Supported / Unsupported = 确定归因 → 落 classified
+			classified[r.StandardPath] = r
+			progressed = true
+		}
+		if !progressed {
+			// 整批没有任何 path 归因(网络错 / 非 9005 fault / param_faults 解析失败) —
+			// 不再重试,剩余 path 用本轮的 Unknown record 锁定。
+			for _, r := range results {
+				if _, ok := classified[r.StandardPath]; !ok {
+					classified[r.StandardPath] = r
+				}
+			}
+			remaining = nil
+			break
+		}
+		remaining = nextRemaining
+	}
+
+	// max iter 兜底:仍有 path 未归因 → 标 Unknown
+	for _, path := range remaining {
+		if _, ok := classified[path]; !ok {
+			classified[path] = ProbeRecord{
+				StandardPath: path, ProbePath: path,
+				Outcome: OutcomeUnknown, Batch: batchIdx,
+				FaultMessage: "probe max iterations exceeded",
+			}
+		}
+	}
+
+	// 按入参顺序返回
+	out := make([]ProbeRecord, 0, len(paths))
+	for _, path := range paths {
+		if r, ok := classified[path]; ok {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// probeOnce 单批 GPV 探测(不重试),返回 paths 中每条的 ProbeRecord。
+//
+// T-0180 前的旧 Probe 主体,被 retry 循环包成 helper。
+func (p *taskProber) probeOnce(ctx context.Context, deviceSN string, paths []string, batchIdx, iter int) []ProbeRecord {
+	out := make([]ProbeRecord, 0, len(paths))
 	start := time.Now()
 
 	params, err := json.Marshal(map[string]any{"names": paths})
@@ -92,7 +156,7 @@ func (p *taskProber) Probe(ctx context.Context, deviceSN string, paths []string,
 			out = append(out, ProbeRecord{
 				StandardPath: path, ProbePath: path,
 				Outcome: OutcomeUnknown, Batch: batchIdx,
-				DurationMS: time.Since(start).Milliseconds(),
+				DurationMS:   time.Since(start).Milliseconds(),
 				FaultMessage: "marshal gpv params: " + err.Error(),
 			})
 		}
@@ -106,12 +170,13 @@ func (p *taskProber) Probe(ctx context.Context, deviceSN string, paths []string,
 		Priority:    20,
 		ExpiresIn:   int(p.rpcTimeout.Seconds()),
 		Source:      task.TaskSourceOps,
-		Description: fmt.Sprintf("devsweep batch=%d size=%d", batchIdx, len(paths)),
+		Description: fmt.Sprintf("devsweep batch=%d iter=%d size=%d", batchIdx, iter, len(paths)),
 	})
 	if err != nil {
 		p.logger.Warn("enqueue gpv task",
 			zap.String("device_sn", deviceSN),
 			zap.Int("batch", batchIdx),
+			zap.Int("iter", iter),
 			zap.Error(err))
 		for _, path := range paths {
 			out = append(out, ProbeRecord{
@@ -128,7 +193,6 @@ func (p *taskProber) Probe(ctx context.Context, deviceSN string, paths []string,
 	dur := time.Since(start).Milliseconds()
 
 	if pollErr != nil {
-		// timeout / ctx cancel — 不标真值源
 		for _, path := range paths {
 			out = append(out, ProbeRecord{
 				StandardPath: path, ProbePath: path,
@@ -163,7 +227,6 @@ func (p *taskProber) Probe(ctx context.Context, deviceSN string, paths []string,
 			})
 		}
 	default:
-		// expired / cancelled — 不标真值源
 		for _, path := range paths {
 			out = append(out, ProbeRecord{
 				StandardPath: path, ProbePath: path,
@@ -209,32 +272,91 @@ func (p *taskProber) waitForTerminal(ctx context.Context, taskID string) (*task.
 
 // classifyGPVFailure 把 batch 的 paths 分配 Outcome。
 //
+// 真值源优先级 (T-0180 起):
+//  1. t.Result 的 {"param_faults":[{parameter_name,fault_code}]} —— ACS handler
+//     对 GPV 9005 同 SPV schema 写入结构化 fault (与 result_aggregator 同款)。
+//  2. 兜底:t.ErrorMessage 文本 extractBadPathFromMessage (向后兼容老 ACS)。
+//
 // 9005 + batch_size=1 → 该 path 必定 unsupported。
-// 9005 + batch_size>1 → 仅 ErrorMessage 中含的 badPath 标 unsupported，
-// 其余标 unknown（无法可靠归因；BatchSize 推荐 =1 的根因）。
+// 9005 + batch_size>1 → 仅命中 fault hint 的 path 标 unsupported,其余标 unknown
+// (上层 Probe retry 循环把这批 unknown 当下一轮 batch 重发,O(N_bad) 收敛)。
 func classifyGPVFailure(t *task.Task, paths []string) []ProbeOutcome {
 	out := make([]ProbeOutcome, len(paths))
-	if t.ErrorCode == cwmpFaultInvalidParameterName {
-		if len(paths) == 1 {
-			out[0] = OutcomeUnsupported
-			return out
-		}
-		// batch>1 时谨慎：仅 ErrorMessage 命中的 path 标 unsupported
-		bad := extractBadPathFromMessage(t.ErrorMessage)
-		for i, p := range paths {
-			switch {
-			case bad != "" && (p == bad || strings.HasPrefix(p, bad) || strings.HasPrefix(bad, p)):
-				out[i] = OutcomeUnsupported
-			default:
-				out[i] = OutcomeUnknown
-			}
+	if t.ErrorCode != cwmpFaultInvalidParameterName {
+		for i := range out {
+			out[i] = OutcomeUnknown
 		}
 		return out
 	}
-	for i := range out {
-		out[i] = OutcomeUnknown
+
+	// 收集所有 badPath: 先 result.param_faults, 再兜底 ErrorMessage
+	badSet := extractBadPathsFromResult(t.Result)
+	if len(badSet) == 0 {
+		if bad := extractBadPathFromMessage(t.ErrorMessage); bad != "" {
+			badSet = map[string]struct{}{bad: {}}
+		}
+	}
+
+	// batch=1: 9005 直接归因(badSet 即使空也归因,因 CPE 只对这 1 个 path 失败)
+	if len(paths) == 1 {
+		out[0] = OutcomeUnsupported
+		return out
+	}
+
+	for i, p := range paths {
+		if matchesAnyBadPath(p, badSet) {
+			out[i] = OutcomeUnsupported
+		} else {
+			out[i] = OutcomeUnknown
+		}
 	}
 	return out
+}
+
+// extractBadPathsFromResult 解析 ACS 写入的 {"param_faults":[...]} 结构 (T-0180
+// 起 SPV/GPV 同 schema)。仅取 fault_code==9005 的条目;其它 code 含义不同
+// (9007 类型错 / 9008 只读) 不能映射到 unsupported,跳过。
+func extractBadPathsFromResult(raw []byte) map[string]struct{} {
+	if len(raw) == 0 {
+		return nil
+	}
+	var payload struct {
+		ParamFaults []struct {
+			ParameterName string `json:"parameter_name"`
+			FaultCode     int    `json:"fault_code"`
+		} `json:"param_faults"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil
+	}
+	if len(payload.ParamFaults) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(payload.ParamFaults))
+	for _, f := range payload.ParamFaults {
+		if f.FaultCode == cwmpFaultInvalidParameterName && f.ParameterName != "" {
+			out[f.ParameterName] = struct{}{}
+		}
+	}
+	return out
+}
+
+// matchesAnyBadPath 判 path 是否被任一 badPath 命中。
+// 与既有 extract 路径一致:精确相等 / path 是 bad 的前缀 / bad 是 path 的前缀
+// (CPE 暴露的 badPath 可能是父对象前缀如 "Device.X.")。
+func matchesAnyBadPath(p string, badSet map[string]struct{}) bool {
+	if len(badSet) == 0 {
+		return false
+	}
+	if _, ok := badSet[p]; ok {
+		return true
+	}
+	for bad := range badSet {
+		if strings.HasPrefix(p, bad) || strings.HasPrefix(bad, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // extractBadPathFromMessage 从 ACS 写入的 ErrorMessage 中抽出 badPath。

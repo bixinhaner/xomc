@@ -244,9 +244,10 @@ func (s *Service) Run(ctx context.Context, opts Options) (*Result, error) {
 
 // probeAll 把 candidates 拆批 + rate-limit 后逐批 prober.Probe。
 //
-// 注意：opts.BatchSize=1 是设计推荐值（GPV 失败时 ErrorCode 只反映"整批失败"，
-// 仅 batch=1 才能精准归因每条 path）。BatchSize>1 时 prober 会用 ErrorMessage
-// 启发式抽 badPath，剩余 path 标 unknown。
+// T-0180 起 BatchSize 默认 16: ACS handler 对 GPV failure 写结构化 param_faults[]
+// (与 SPV schema 对齐),prober 内部 retry 循环把 unknown 子集递归重发,O(N_bad)
+// 收敛。BatchSize=1 仍可用(精准归因每条 path,但 765 path 全 sweep ~25min);
+// BatchSize=16 在含 11 bad path 的典型场景下 ~30s 完成。
 func (s *Service) probeAll(ctx context.Context, opts Options, candidates []parammodel.ParamMapping) []ProbeRecord {
 	out := make([]ProbeRecord, 0, len(candidates))
 	if len(candidates) == 0 {
@@ -256,7 +257,7 @@ func (s *Service) probeAll(ctx context.Context, opts Options, candidates []param
 	limiter := rate.NewLimiter(rate.Limit(opts.RPCRate), 1)
 	batchSize := opts.BatchSize
 	if batchSize <= 0 {
-		batchSize = 1
+		batchSize = 16
 	}
 
 	for batchIdx, start := 0, 0; start < len(candidates); start += batchSize {
@@ -328,7 +329,11 @@ func filterCandidates(mappings []parammodel.ParamMapping, prefix string) []param
 // normalizeOptions 设置 Options 的默认值（仅当字段为零值）。
 func normalizeOptions(opts Options) Options {
 	if opts.BatchSize <= 0 {
-		opts.BatchSize = 1
+		// T-0180: ACS handler 现已对 GPV failure 写结构化 param_faults[],prober
+		// 用 retry 循环把 unknown 子集重发 (O(N_bad) 收敛),BatchSize>1 可靠。
+		// 默认 16 平衡:速度(BLQ 765 path / 16 ≈ 48 batches) vs RPC 单包上限
+		// (主流 CPE 支持 32-100 names per GPV,16 留 safety margin)。
+		opts.BatchSize = 16
 	}
 	if opts.RPCTimeout <= 0 {
 		opts.RPCTimeout = 30 * time.Second

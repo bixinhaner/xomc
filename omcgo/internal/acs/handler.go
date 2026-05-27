@@ -1083,13 +1083,21 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 		if h.tryRecoverGPVFault(r.Context(), taskItem, badPath, log) {
 			// 自愈分支已标 task completed 并入队 retry batch，继续走 PopTask 推进队列。
 		} else {
-			// T-0174 — SetParameterValues 失败时把 per-parameter 详情提取出来，让
-			// terminal 日志能定位真正出错的 path，并把结构化 result 落到 device_tasks
-			// 让下游 MML auto-learn 把 sub_field is_supported 翻 false。
-			// 非 SPV 方法（GPV / Download / ...）spvFaults 为空，走原路径保持不变。
+			// T-0174 / T-0180 — SPV / GPV 失败时把 per-parameter 详情提取出来,
+			// schema 统一为 {"param_faults":[{parameter_name,fault_code,fault_string}]},
+			// terminal 日志能定位真正出错的 path,且结构化 result 落到 device_tasks
+			// 让下游(MML auto-learn / devsweep prober)按 paramModel 过滤掉该 path。
+			//
+			// SPV: CWMP 协议返多条 <SetParameterValuesFault>,extractSPVFaults 解出
+			//      per-param 全集。
+			// GPV: CWMP 协议不返结构化 per-param fault,仅在 FaultString 暴露 1 条
+			//      badPath 作为 hint(已被 detectSOAPFault 抽到 badPath 变量),这里
+			//      合成 1 个 SPVFault 写入,保持 schema 与 SPV 一致供下游统一消费。
+			//      badPath 为空时不写 result(下游兜底走 ErrorMessage 文本)。
 			finalMsg := combinedFaultMsg
 			var resultBytes json.RawMessage
-			if taskItem.Method == "SetParameterValues" {
+			switch taskItem.Method {
+			case "SetParameterValues":
 				if spvFaults := extractSPVFaults(body); len(spvFaults) > 0 {
 					finalMsg = enrichFaultMsgWithSPV(combinedFaultMsg, spvFaults)
 					if rb, mErr := json.Marshal(map[string]interface{}{
@@ -1098,6 +1106,21 @@ func (h *Handler) handleSOAPFault(w http.ResponseWriter, r *http.Request, body [
 						resultBytes = rb
 					} else {
 						log.Warn("marshal spv_faults for task.result", zap.Error(mErr))
+					}
+				}
+			case "GetParameterValues":
+				if badPath != "" && faultCode > 0 {
+					gpvFault := SPVFault{
+						ParameterName: badPath,
+						FaultCode:     faultCode,
+						FaultString:   faultMsg,
+					}
+					if rb, mErr := json.Marshal(map[string]interface{}{
+						"param_faults": []SPVFault{gpvFault},
+					}); mErr == nil {
+						resultBytes = rb
+					} else {
+						log.Warn("marshal gpv_fault for task.result", zap.Error(mErr))
 					}
 				}
 			}
