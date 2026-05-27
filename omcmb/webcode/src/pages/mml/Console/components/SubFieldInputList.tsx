@@ -48,13 +48,16 @@ export default function SubFieldInputList({ statement }: SubFieldInputListProps)
   // 固定高度容器（spec：操作面板限制 path 区域 10 行可视高度，<10 行也保留空间，
   // >10 行出现滚动条；MOD/ADD 行更高 — input 32px + flex gap 10 + 可选 constraint 行 ≈ 42-62px，
   // 取 420px = 10 行不带 constraint 的基准，constraint 多时自然出现滚动）。
+  //
+  // 2026-05-27 用户反馈:滚动条永远贴右,把右侧空间留给 path。
+  // 容器移除右内 padding,让行右边顶到 scrollbar 左缘;上下/左侧 padding 保留。
   const VIEWPORT_HEIGHT = 420;
   const VIEWPORT_STYLE: CSSProperties = {
     height: VIEWPORT_HEIGHT,
     overflowY: 'auto',
     border: '1px solid #f0f0f0',
     borderRadius: 4,
-    padding: 8,
+    padding: '8px 0 8px 8px',
   };
 
   if (sortedFields.length === 0) {
