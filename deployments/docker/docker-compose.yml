@@ -168,6 +168,9 @@ services:
       OMCGO_BATCH_PROCESSOR_ENABLED: "${OMCGO_BATCH_PROCESSOR_ENABLED:-true}"
     volumes:
       - ../../run/logs/app:/run/logs/app
+      # 全局 API 密钥共享卷:app 启动期幂等签发 .api-key,worker(omcctl) 只读消费。
+      # 详见 omcgo/CLAUDE.md §5.6 全局 API 密钥约定。
+      - omcgo-secrets:/var/lib/omcgo/secrets
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed:
@@ -188,16 +191,21 @@ services:
       - "9092:9092"
     environment:
       OMCGO_ENV: "${OMCGO_ENV:-dev}"
-      # omcctl 运维 CLI 默认 API key — 从宿主 .env / shell env 透传,
-      # operator docker exec docker-worker-1 omcctl ... 时 ENV 自动注入。
-      # 未设置时 omcctl 命令需显式 --api-key 或 docker exec -e OMCCTL_API_KEY=...
+      # omcctl 运维 CLI 默认从 /var/lib/omcgo/secrets/.api-key 文件读 key
+      # (由 app 启动期幂等签发,见 omcgo/CLAUDE.md §5.6)。
+      # OMCCTL_API_KEY env 仅作可选 override,适用 CI / 外部覆盖场景。
       OMCCTL_API_KEY: "${OMCCTL_API_KEY:-}"
     volumes:
       - ../../run/logs/worker:/run/logs/worker
+      # 共享 secrets 卷只读 — omcctl/scripts 默认从此读 .api-key
+      - omcgo-secrets:/var/lib/omcgo/secrets:ro
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed:
         condition: service_completed_successfully
+      app:
+        # 等 app 起来 — app 启动期签发 .api-key,worker(omcctl) 才能读到
+        condition: service_started
       redis:
         condition: service_healthy
       nats:
@@ -453,6 +461,9 @@ volumes:
   # promtaildata volume kept for migration safety; remove on next compose down --volumes
   promtaildata:
   tempodata:
+  # OMC 全局 API 密钥共享卷:app(rw) 启动期签发 .api-key,worker(ro) 通过 omcctl 消费。
+  # 详见 omcgo/CLAUDE.md §5.6。
+  omcgo-secrets:
 
 networks:
   default:

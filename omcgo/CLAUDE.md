@@ -598,6 +598,61 @@ TRUNCATE alarm_libraries CASCADE;
 - [ ] JSON 字符串无尾随逗号
 - [ ] **TRUNCATE 被 FK 引用的表时**：与所有引用方写在同一条语句，或加 `CASCADE`
 
+### 5.6 全局 API 密钥约定（.api-key）
+
+**目的**：容器内任何工具/脚本调用 OMC HTTP API 时零配置可用,免去 `OMCCTL_API_KEY` env 配置负担。
+
+**文件契约**：
+
+| 属性 | 值 |
+|------|------|
+| 路径 | `/var/lib/omcgo/secrets/.api-key` |
+| 格式 | 单行纯文本(`omk_` + 32 hex,共 36 字符),无尾换行 |
+| 权限 | `0640`(owner rw,group r) |
+| 签发者 | `omcgo-app` 启动期幂等签发(`admin.EnsureInternalAPIKey`) |
+| 关联实体 | DB 中 `system` 用户(UUID `00000000-...001`)的 `omc-internal` API key 行,scopes=['*'] |
+| 共享卷 | docker-compose named volume `omcgo-secrets`,app(rw) + worker(ro) |
+
+**签发流程**(app 启动期):
+
+1. 读 `.api-key` 文件 → 存在则 `APIKeyService.Validate` → 有效则直接 return
+2. 文件缺失 / 失效 → 吊销 system 用户名下所有 `omc-internal` 旧 key → `APIKeyService.Create` 签发新 key → 原子写文件(tmp + rename)
+3. 全程失败不阻塞 app 启动(`logger.Warn` 而非 fail-start)
+
+**消费规则**:
+
+- **omcctl**:`--api-key` flag > `OMCCTL_API_KEY` env > 文件 > 报错
+- **bash 脚本**:统一写法
+  ```bash
+  API_KEY="${OMCCTL_API_KEY:-$(cat /var/lib/omcgo/secrets/.api-key 2>/dev/null || true)}"
+  [ -z "$API_KEY" ] && { echo "no api key"; exit 1; }
+  curl -H "X-API-Key: $API_KEY" ...
+  ```
+- **future tools**:复用 `admin.LoadInternalAPIKey(path)`(Go)或上面的 bash 5 行
+
+**禁止**:
+
+- 永不入 git(`.gitignore` 已加 `.api-key` / `**/.api-key`)
+- 永不打日志明文(只允许 `key_prefix` = "omk_" + 前 4 hex)
+- 永不入迁移文件(明文不放 SQL,seed/000204 只建 user 与 role 绑定)
+
+**轮换**:
+
+- **被动**:重启 app 自动检测文件失效并轮换
+- **主动**(未来):`omcctl auth rotate` 调用 app 端 HTTP 显式轮换
+
+**K8s 部署**(未来):named volume 改用 K8s Secret + projected volume,路径 `/var/lib/omcgo/secrets/.api-key` 保持不变,代码无需调整。
+
+**测试**:`internal/admin/internal_apikey_test.go` 单测 atomic-write 与 load 行为;DB 相关签发逻辑由 docker-compose E2E 验证。
+
+**相关代码**:
+
+- `internal/admin/internal_apikey.go` — `EnsureInternalAPIKey` / `LoadInternalAPIKey` / `writeAPIKeyAtomic`
+- `cmd/app/provider/admin.go` — 启动期接入点
+- `cmd/omcctl/main.go` — fallback 三级查找
+- `migrations/seed/000204_system_internal_user.sql` — `system` 用户与 `admin` 角色绑定
+- `deployments/docker/docker-compose.yml` — `omcgo-secrets` named volume
+
 ---
 
 ## 6. Git 工作流

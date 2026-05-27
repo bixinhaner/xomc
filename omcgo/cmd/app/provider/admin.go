@@ -91,6 +91,15 @@ func initAdminModule(c *Container) error {
 	apiKeySvc := admin.NewAPIKeyService(apiKeyRepo, userRepo, logger)
 	apiKeyHandler := admin.NewAPIKeyHandler(apiKeySvc)
 
+	// 启动期幂等签发 omc-internal API key,写 /var/lib/omcgo/secrets/.api-key,
+	// 供容器内 omcctl / scripts 零配置使用 (详见 omcgo/CLAUDE.md §5.6)。
+	// 失败不阻塞 app 启动 — 业务接口仍可通过 --api-key / env 覆盖。
+	if err := admin.EnsureInternalAPIKey(context.Background(), apiKeySvc, apiKeyRepo,
+		admin.DefaultInternalAPIKeyPath, logger); err != nil {
+		logger.Warn("EnsureInternalAPIKey failed — omcctl 零配置入口不可用,但 app 启动继续",
+			zap.Error(err))
+	}
+
 	// Casbin RBAC engine — in-memory permission evaluation.
 	// 策略变更广播走 NATS JetStream（sys.casbin.policy.reload），替代原
 	// Redis Pub/Sub，获得持久化 + 订阅者断线重连回放。

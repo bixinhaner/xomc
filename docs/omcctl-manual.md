@@ -269,31 +269,49 @@ mml     import-standard-params | migrate-device-params | import-spec-md
 > compose up 之后 worker 容器长跑，operator 直接 `docker exec` 进去执行即可，**不需要独立镜像 / 独立 compose 服务**。
 > 镜像内 `ENV OMCCTL_SERVER=http://app:8081` 已预设 server 地址，命令行不必再传 `--server`（走 TLS / 外部 host 时仍可用 `--server` 覆盖）。
 
-### 7.0 一次性配置 API key（首次使用必读）
+### 7.0 API key 默认零配置（仅在特殊场景才需要 override）
 
-omcctl 调 app HTTP API 必须带 API key（管理面要鉴权）。配置方式：
+**默认行为：无需任何配置即可使用。**
 
-**方案 A：宿主 `.env` 文件（推荐，所有 exec 自动带）**
+`omcgo-app` 启动期会幂等签发一份名为 `omc-internal` 的 API key，关联到 `system` 内部账户（已绑 `admin` 角色全权限），plaintext 写入容器内共享卷 `/var/lib/omcgo/secrets/.api-key`（mode `0640`）。worker 容器以 ro 挂载该卷，omcctl 默认从此文件读取 key。
 
-在 `deployments/docker/.env`（gitignored）写一行：
+详见 [`omcgo/CLAUDE.md` §5.6 全局 API 密钥约定](../omcgo/CLAUDE.md)。
+
+**Key 查找优先级**：
+
 ```
-OMCCTL_API_KEY=你的key
+--api-key flag  >  OMCCTL_API_KEY env  >  /var/lib/omcgo/secrets/.api-key
 ```
 
-或在 shell 里 `export OMCCTL_API_KEY=...`（一次性）。`docker compose up -d worker` 重启后 worker 容器的 `OMCCTL_API_KEY` 环境变量从这里读，omcctl 内部默认值 `os.Getenv("OMCCTL_API_KEY")` 自动拿到。**之后 `docker exec docker-worker-1 omcctl ...` 不用再传 `--api-key`**。
-
-**方案 B：每次 `docker exec` 时显式 `-e` 传**
+所以 99% 场景下：
 ```bash
-docker exec -e OMCCTL_API_KEY=$YOUR_KEY docker-worker-1 \
-    omcctl device list
+docker exec docker-worker-1 omcctl device list   # 直接跑,无需配 key
 ```
 
-**方案 C：CLI flag 显式传**
+**何时需要 override**：
+
+| 场景 | 方法 |
+|---|---|
+| CI / 外部系统调用 OMC API | `export OMCCTL_API_KEY=...`（env 优先级高于文件） |
+| 用 admin UI 自己发的 key 测权限隔离 | `--api-key <KEY>` flag |
+| 容器外（宿主 Mac 上）直接跑 omcctl | `docker cp docker-worker-1:/var/lib/omcgo/secrets/.api-key ./local.api-key` 然后 `--api-key "$(cat local.api-key)"` |
+
+**Key 轮换**：重启 app 容器自动检测失效并重发，无需运维介入。
+
+**首次部署 troubleshoot**：
+
 ```bash
-docker exec docker-worker-1 omcctl device list --api-key $YOUR_KEY
-```
+# 确认 app 已写入文件
+docker exec docker-worker-1 ls -la /var/lib/omcgo/secrets/.api-key
+# 期望: -rw-r----- 1 ... .api-key (36 bytes)
 
-> Key 怎么生成 / 从哪儿拿？走管理面登录后端点（参 app 鉴权模块）；也可由超级管理员在 admin UI / SQL 直接发一份给 ops。
+# 确认 app 日志有签发记录
+docker logs docker-app-1 2>&1 | grep "internal api key provisioned"
+# 期望: ...key_prefix=omk_xxxx path=/var/lib/omcgo/secrets/.api-key
+
+# 没有 → 看 EnsureInternalAPIKey 报错日志
+docker logs docker-app-1 2>&1 | grep -i "EnsureInternalAPIKey\|internal-apikey"
+```
 
 
 ### 7.1 基本调用（推荐日常）
