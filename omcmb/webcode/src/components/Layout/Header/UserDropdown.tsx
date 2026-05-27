@@ -175,7 +175,7 @@ export default function UserDropdown() {
           pwdForm.resetFields();
         }}
         confirmLoading={changePasswordMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={pwdForm} layout="vertical" style={{ marginTop: 16 }}>
           <Form.Item

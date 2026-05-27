@@ -8,6 +8,8 @@ import { routes } from './routes';
 const router = createBrowserRouter(routes, {
   future: {
     v7_normalizeFormMethod: true,
+    // @ts-expect-error - v7_startTransition is supported in 6.30+ but types may lag
+    v7_startTransition: true,
   },
 });
 
