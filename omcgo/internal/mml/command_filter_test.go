@@ -30,7 +30,7 @@ func TestAnnotateCommand(t *testing.T) {
 		targetObject     string
 		supported        *SupportedSet
 		wantVisible      bool
-		wantTotal        int
+		wantSupported    int
 		wantUnsupported  []string
 		wantProductFlag  *bool
 	}{
@@ -40,7 +40,7 @@ func TestAnnotateCommand(t *testing.T) {
 			targetPathsJSON: `["Device.X.A","Device.X.NOT","Device.X.B"]`,
 			supported:       supported,
 			wantVisible:     true,
-			wantTotal:       3,
+			wantSupported:   2, // 3 paths - 1 unsupported = 2 supported
 			wantUnsupported: []string{"Device.X.NOT"},
 			wantProductFlag: ptrBool(true),
 		},
@@ -50,7 +50,7 @@ func TestAnnotateCommand(t *testing.T) {
 			targetPathsJSON: `["Device.X.A","Device.X.B"]`,
 			supported:       supported,
 			wantVisible:     true,
-			wantTotal:       2,
+			wantSupported:   2,
 			wantUnsupported: []string{},
 			wantProductFlag: ptrBool(true),
 		},
@@ -60,7 +60,7 @@ func TestAnnotateCommand(t *testing.T) {
 			targetPathsJSON: `["Device.NOPE.A","Device.NOPE.B"]`,
 			supported:       supported,
 			wantVisible:     false,
-			wantTotal:       2,
+			wantSupported:   0, // 0 in set
 			wantUnsupported: []string{"Device.NOPE.A", "Device.NOPE.B"},
 			wantProductFlag: ptrBool(true),
 		},
@@ -70,7 +70,7 @@ func TestAnnotateCommand(t *testing.T) {
 			targetObject:    "Device.Y.Parent.",
 			supported:       supported,
 			wantVisible:     true,
-			wantTotal:       1,
+			wantSupported:   1,
 			wantUnsupported: nil,
 			wantProductFlag: ptrBool(true),
 		},
@@ -80,7 +80,7 @@ func TestAnnotateCommand(t *testing.T) {
 			targetObject:    "Device.Z.Unknown.",
 			supported:       supported,
 			wantVisible:     false,
-			wantTotal:       1,
+			wantSupported:   0, // no prefix match → 0 supported
 			wantUnsupported: []string{"Device.Z.Unknown."},
 			wantProductFlag: ptrBool(true),
 		},
@@ -90,7 +90,7 @@ func TestAnnotateCommand(t *testing.T) {
 			targetPathsJSON: `["Device.X.A","Device.X.B"]`,
 			supported:       orphan,
 			wantVisible:     true,
-			wantTotal:       2,
+			wantSupported:   0, // 孤儿 supported set 空 → 0
 			wantUnsupported: []string{"Device.X.A", "Device.X.B"},
 			wantProductFlag: ptrBool(false),
 		},
@@ -100,7 +100,7 @@ func TestAnnotateCommand(t *testing.T) {
 			targetObject:    "Device.X.Y.",
 			supported:       orphan,
 			wantVisible:     true,
-			wantTotal:       1,
+			wantSupported:   0, // 孤儿 → 0
 			wantUnsupported: []string{"Device.X.Y."},
 			wantProductFlag: ptrBool(false),
 		},
@@ -110,7 +110,7 @@ func TestAnnotateCommand(t *testing.T) {
 			targetPathsJSON: `["Device.X.A"]`,
 			supported:       nil,
 			wantVisible:     true,
-			wantTotal:       0,
+			wantSupported:   0,
 			wantUnsupported: nil,
 			wantProductFlag: nil,
 		},
@@ -127,7 +127,7 @@ func TestAnnotateCommand(t *testing.T) {
 			targetPathsJSON: `[]`,
 			supported:       supported,
 			wantVisible:     false, // 0 supported / 0 total → hide (defensive)
-			wantTotal:       0,
+			wantSupported:   0,
 			wantUnsupported: []string{},
 			wantProductFlag: ptrBool(true),
 		},
@@ -138,7 +138,7 @@ func TestAnnotateCommand(t *testing.T) {
 			got := AnnotateCommand(tt.opType, []byte(tt.targetPathsJSON), tt.targetObject, tt.supported)
 			assert.Equal(t, tt.wantVisible, got.Visible, "Visible")
 			if tt.supported != nil {
-				assert.Equal(t, tt.wantTotal, got.TotalPathCount, "TotalPathCount")
+				assert.Equal(t, tt.wantSupported, got.SupportedPathCount, "SupportedPathCount")
 				if tt.wantUnsupported == nil {
 					assert.Empty(t, got.UnsupportedPaths, "UnsupportedPaths should be empty")
 				} else {

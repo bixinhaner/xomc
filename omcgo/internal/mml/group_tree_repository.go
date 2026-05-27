@@ -62,13 +62,13 @@ type GroupTreeCommand struct {
 
 	// T-0172 catalog 按产品过滤的标注字段（仅 BuildGroupTree 调用方传入
 	// product_class 时填充；否则全部 omit，老调用者无感）。
-	// TotalPathCount: 该命令操作的总 path 数（LST/MOD = len(target_paths);
-	//                 ADD/RMV = 1）。
-	// UnsupportedPaths: 当前产品不支持的具体 path 列表；前端用作 tooltip / banner。
+	// SupportedPathCount: 当前产品下 is_supported=true 且 is_active=true 的 path 数
+	//                     （LST/MOD = supported 交集大小; ADD/RMV = 0 或 1）。
+	// UnsupportedPaths: 当前产品不支持的具体 path 列表；保留供调试/日志，前端不渲染。
 	// ProductResolved: 入参 product_class 是否成功路由到 product；false=孤儿。
-	TotalPathCount   *int     `json:"total_path_count,omitempty"`
-	UnsupportedPaths []string `json:"unsupported_paths,omitempty"`
-	ProductResolved  *bool    `json:"product_resolved,omitempty"`
+	SupportedPathCount *int     `json:"supported_path_count,omitempty"`
+	UnsupportedPaths   []string `json:"unsupported_paths,omitempty"`
+	ProductResolved    *bool    `json:"product_resolved,omitempty"`
 	// rawTargetPaths 是 mml_commands.target_paths JSONB raw bytes，仅在
 	// repository → service 内部流转用于过滤；JSON 序列化时排除（- tag）。
 	rawTargetPaths []byte `json:"-"`

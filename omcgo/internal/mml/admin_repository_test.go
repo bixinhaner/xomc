@@ -89,10 +89,10 @@ func Test_ListByCommand_NoLongerFiltersBySubFieldIsSupported(t *testing.T) {
 
 // Test_ListEnrichedByCommand_ParamMappingsIsSupportedFilter 集成测试：
 //
-// T-0183 行为变更:
+// 2026-05-27 行为变更(撤销 T-0183，回到 T-0170):
 //   - PR-C.A：active + supported=true → 返回,is_supported=true
-//   - PR-C.B：active + supported=false → 返回(过去 PR-C 隐藏,现在显示让前端默认不勾),is_supported=false
-//   - PR-C.C：不在 param_mappings → 仍不返回(EXISTS 卡 "至少有一条 active mapping")
+//   - PR-C.B：active + supported=false → 不返回(物理过滤)
+//   - PR-C.C：不在 param_mappings → 不返回(EXISTS 卡 "至少有一条 active+supported mapping")
 //
 // sub_field 自身 is_supported 取值不影响返回(csf.is_supported 列已不再读)。
 func Test_ListEnrichedByCommand_ParamMappingsIsSupportedFilter(t *testing.T) {
@@ -112,7 +112,7 @@ func Test_ListEnrichedByCommand_ParamMappingsIsSupportedFilter(t *testing.T) {
 	fx.insertSubField(commandID, "Device.PRC-C.C", true, 3)
 
 	fx.insertParamMapping(paramModelID, "Device.PRC-C.A", true, true)  // active + supported
-	fx.insertParamMapping(paramModelID, "Device.PRC-C.B", true, false) // active + unsupported
+	fx.insertParamMapping(paramModelID, "Device.PRC-C.B", true, false) // active + unsupported → 物理过滤
 	// PRC-C.C 不建 mapping → EXISTS 假 → 不命中
 
 	repo := NewPgSubFieldRepository(pool)
@@ -123,10 +123,11 @@ func Test_ListEnrichedByCommand_ParamMappingsIsSupportedFilter(t *testing.T) {
 	for _, r := range rows {
 		gotPaths[r.Tr069Path] = r.IsSupported
 	}
-	assert.Equal(t, 2, len(gotPaths),
-		"T-0183: A + B 都返回(以前隐藏 B,现在显示 + is_supported=false)")
+	assert.Equal(t, 1, len(gotPaths),
+		"撤销 T-0183: 仅返 A(B 因 is_supported=false 物理过滤; C 无 mapping)")
 	assert.True(t, gotPaths["Device.PRC-C.A"], "PRC-C.A is_supported should be true")
-	assert.False(t, gotPaths["Device.PRC-C.B"], "PRC-C.B is_supported should be false (default unchecked in UI)")
+	_, gotB := gotPaths["Device.PRC-C.B"]
+	assert.False(t, gotB, "PRC-C.B should be physically filtered (is_supported=false)")
 	_, gotC := gotPaths["Device.PRC-C.C"]
 	assert.False(t, gotC, "PRC-C.C still filtered (no active mapping at all)")
 }

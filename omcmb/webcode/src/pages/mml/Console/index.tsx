@@ -16,9 +16,9 @@ export default function MMLConsole() {
     setSelectedDeviceSns(dev.selectedDevices.map((d) => d.sn));
   }, [dev.selectedDevices, setSelectedDeviceSns]);
 
-  // R-8.5：把 useDeviceSelection 的 productClassFilter（useState）单向镜像到 store，
-  // 让兄弟组件 CommandTree 能订阅当前选中的 product_class 调 useCommandCompatibility。
-  // useState 仍是设备列表逻辑的真相源，store 只读不写回。
+  // 把 useDeviceSelection 的 productClassFilter（useState）单向镜像到 store，
+  // 让兄弟组件 CommandTree 能订阅当前选中的 product_class 传给 useGroupTree
+  // (后端按 paramModel 过滤命令)。useState 仍是设备列表逻辑的真相源，store 只读不写回。
   useEffect(() => {
     setProductClassFilter(dev.productClassFilter);
   }, [dev.productClassFilter, setProductClassFilter]);

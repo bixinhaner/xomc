@@ -249,15 +249,18 @@ func (r *PgSubFieldRepository) ListByCommand(ctx context.Context, commandID uuid
 //   - 都为 NULL → 空（前端 AccessTypeTag Tooltip 走"无明确取值范围"兜底文案）
 // 数字内容 zh-CN / en-US 同形，i18n 两 key 同值即可。
 func (r *PgSubFieldRepository) ListEnrichedByCommand(ctx context.Context, commandID uuid.UUID, paramModelID *uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
-	// T-0183: 行为修改 — 不再过滤掉 is_supported=false 的 path,前端会"显示但默认不勾选"。
-	// 历史(T-0170/T-0176-PR-C):EXISTS 过滤 is_supported=true 让 unsupported 完全消失;
-	// 现在(T-0183):仍 EXISTS 过滤"该 paramModel 必须有 active mapping",但不卡 is_supported;
-	// 同时返回 is_supported 列让前端决定默认勾选状态。
+	// 2026-05-27 用户决策(撤销 T-0183): EXISTS 重新加上 `AND pm.is_supported = true`,
+	// 让 is_supported=false 的 path 物理过滤掉(不再返回给前端)。
+	// 与命令树命令名 (N) 计数口径对齐 — N = 该 paramModel 下 is_supported=true 的
+	// path 数 = 右栏 path 列表行数。
 	//
-	// SQL 增量:
-	//   - EXISTS 子查询去掉 `AND pm.is_supported = true`
-	//   - 新增 SELECT `COALESCE((SELECT pm.is_supported FROM param_mappings pm ...), true) AS is_supported`
-	//   - paramModelID 为 nil 时(admin 端)is_supported 走聚合 BOOL_OR
+	// 历史路径:
+	//   - T-0170/T-0176-PR-C: EXISTS 含 is_supported=true → 隐藏 unsupported(老行为)
+	//   - T-0183: 取消 is_supported=true 过滤,前端"显示但默认不勾"
+	//   - 本改: 回到 T-0170 行为,前端不再处理 unsupported 行
+	//
+	// paramModelID 为 nil (admin 视角)时:不叠加 param_mappings 过滤,is_supported
+	// 列走 BOOL_OR 聚合,与原行为一致(admin 看的是字典全貌)。
 	paramModelFilter := ""
 	isSupportedExpr := `(
         SELECT BOOL_OR(pm.is_supported)
@@ -273,13 +276,16 @@ func (r *PgSubFieldRepository) ListEnrichedByCommand(ctx context.Context, comman
        WHERE pm.standard_path  = sp.standard_path
          AND pm.param_model_id = $2
          AND pm.is_active      = true
+         AND pm.is_supported   = true
   )`
-		// console 端绑 paramModel — is_supported 直接取该 paramModel 的值,缺映射兜底 false
+		// console 端绑 paramModel — EXISTS 已物理过滤 is_supported=true 行,
+		// 返回行的 is_supported 列对返回行恒为 true。
 		isSupportedExpr = `COALESCE((
         SELECT pm.is_supported FROM param_mappings pm
          WHERE pm.standard_path = sp.standard_path
            AND pm.param_model_id = $2
            AND pm.is_active = true
+           AND pm.is_supported = true
          LIMIT 1
     ), false)`
 		args = append(args, *paramModelID)

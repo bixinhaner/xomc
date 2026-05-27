@@ -10,12 +10,11 @@ import {
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
-  WarningOutlined,
 } from '@ant-design/icons';
 import { AxiosError } from 'axios';
 import type { TreeDataNode } from 'antd';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
-import { useGroupTree, useCommandCompatibility, useSearchCommands } from '@core/hooks/api/useMmlConsole';
+import { useGroupTree, useSearchCommands } from '@core/hooks/api/useMmlConsole';
 import { useDeleteMMLTemplate } from '@core/hooks/api/useMML';
 import { mmlApi } from '@core/services/api/mmlApi';
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
@@ -51,52 +50,24 @@ const EMPTY_MATCH: { matchedKeys: Set<string>; expandKeys: string[] } = {
 };
 
 /**
- * R-8.5：命令叶子装饰上下文。在 buildTreeData 调用时由组件构造，沿渲染链传递，
- * 避免每个 helper 各自接 4-5 个独立参数。
- */
-interface LeafDecor {
-  /** 不兼容命令的 ID 集合；undefined = 兼容性数据未加载，全部不显示警告 */
-  unsupportedSet?: Set<string>;
-  /** R-8.5 Tooltip 文案（zh-CN / en-US 已 i18n 解析） */
-  unsupportedTooltip: string;
-}
-
-/**
- * commandId + decor 都 optional：
- *   - 标准命令叶子（buildTreeData 链路）传完整 4 参数 → R-8.5 警告生效
- *   - Customized 模板（buildCustomTreeData 链路）只传前 2 参数 →
- *     不显示兼容性警告（R-5 customized 不在 R-8.5 检查范围内，且语义不适用）
+ * 命令叶子渲染:OP Tag + Code 图标 + displayName + 可选 (N) 计数。
  *
- * T-0172：命令对象额外携带后端注解（totalPathCount / unsupportedPaths /
- * productResolved），在 displayName 后附加：
- *   - "(N)" 总 path 数（仅 LST/MOD；ADD/RMV 不显示）
- *   - ⚠ 部分不支持 tooltip（unsupportedPaths.length > 0 时）
+ * 2026-05-27 用户决策:取消命令名后所有提示图标(原孤儿红 ⚠ / 部分不支持黄 ⚠ /
+ * R-8.5 兼容性黄 ⚠ 全部下线),保留 OP Tag 颜色 + (N) 计数即可表达"该设备能跑几条 path"。
+ *
+ * (N) = supportedPathCount(后端按 param_mappings.is_supported=true 过滤后的计数);
+ * 仅 LST/MOD 显示,ADD/RMV 操作父对象无意义不显示。
+ *
+ * `cmd` 仅 standard 命令分支传入(buildCustomTreeData 链路不传 → 不显示 (N))。
  */
 function renderOpLeafTitle(
   op: MMLOperationType,
   displayName: string,
-  commandId?: string,
-  decor?: LeafDecor,
   cmd?: GroupTreeCommand,
 ): ReactNode {
   const color = OP_TAG_COLOR[op] ?? 'default';
-  const isUnsupported =
-    commandId != null && decor?.unsupportedSet?.has(commandId) === true;
-
-  // T-0172 标注：仅 LST/MOD 显示总 path 数（ADD/RMV 操作的是父对象，无意义）
   const showPathCount =
-    cmd?.totalPathCount != null && (op === 'LST' || op === 'MOD');
-  const partialUnsupported =
-    cmd != null &&
-    cmd.unsupportedPaths != null &&
-    cmd.unsupportedPaths.length > 0 &&
-    cmd.productResolved !== false; // 孤儿单独展示，不当 partial
-  const orphanFlag = cmd?.productResolved === false;
-
-  // unsupportedPaths 列表过长时 tooltip 截断显示
-  const unsupportedTooltipContent = partialUnsupported
-    ? `${cmd!.unsupportedPaths!.length} 条 path 不支持，执行时将自动忽略`
-    : '';
+    cmd?.supportedPathCount != null && (op === 'LST' || op === 'MOD');
 
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -107,32 +78,8 @@ function renderOpLeafTitle(
       {stripOpSuffix(displayName)}
       {showPathCount && (
         <span style={{ color: '#8c8c8c', fontSize: 11, marginLeft: 2 }}>
-          ({cmd!.totalPathCount})
+          ({cmd!.supportedPathCount})
         </span>
-      )}
-      {orphanFlag && (
-        <Tooltip title="该设备未匹配到已知产品，无可执行 path" placement="right">
-          <WarningOutlined
-            style={{ color: '#ff4d4f', marginLeft: 2 }}
-            aria-label="orphan-product-class"
-          />
-        </Tooltip>
-      )}
-      {partialUnsupported && (
-        <Tooltip title={unsupportedTooltipContent} placement="right">
-          <WarningOutlined
-            style={{ color: '#faad14', marginLeft: 2 }}
-            aria-label="partial-unsupported-paths"
-          />
-        </Tooltip>
-      )}
-      {isUnsupported && decor && (
-        <Tooltip title={decor.unsupportedTooltip} placement="right">
-          <WarningOutlined
-            style={{ color: '#faad14', marginLeft: 2 }}
-            aria-label="unsupported-for-product-class"
-          />
-        </Tooltip>
       )}
     </span>
   );
@@ -166,7 +113,7 @@ function collectAllCommands(group: GroupTreeNode): GroupTreeCommand[] {
 }
 
 /** 把命令叶子列表转 antd TreeDataNode（统一 OP 排序）。 */
-function commandsToLeafNodes(cmds: GroupTreeCommand[], decor: LeafDecor): TreeDataNode[] {
+function commandsToLeafNodes(cmds: GroupTreeCommand[]): TreeDataNode[] {
   return [...cmds]
     // R-2: 命令叶子按 (op_type, displayName) 双键排序，让同一对象的不同 op
     // 相邻显示（LST 设备信息 / MOD 设备信息 / ADD 设备信息 / RMV 设备信息）。
@@ -179,7 +126,7 @@ function commandsToLeafNodes(cmds: GroupTreeCommand[], decor: LeafDecor): TreeDa
     })
     .map<TreeDataNode>((c) => ({
       key: `${CMD_KEY_PREFIX}${c.id}`,
-      title: renderOpLeafTitle(c.operationType, c.displayName, c.id, decor, c),
+      title: renderOpLeafTitle(c.operationType, c.displayName, c),
       isLeaf: true,
     }));
 }
@@ -190,7 +137,7 @@ function isChapterNode(g: GroupTreeNode): boolean {
 }
 
 /** 将单个 group 节点（含其所有平铺命令）转为 antd TreeDataNode。 */
-function groupToTreeDataNode(g: GroupTreeNode, decor: LeafDecor): TreeDataNode {
+function groupToTreeDataNode(g: GroupTreeNode): TreeDataNode {
   return {
     key: `${GROUP_KEY_PREFIX}${g.id}`,
     title: (
@@ -200,7 +147,7 @@ function groupToTreeDataNode(g: GroupTreeNode, decor: LeafDecor): TreeDataNode {
       </span>
     ),
     selectable: false,
-    children: commandsToLeafNodes(collectAllCommands(g), decor),
+    children: commandsToLeafNodes(collectAllCommands(g)),
   };
 }
 
@@ -210,11 +157,11 @@ function groupToTreeDataNode(g: GroupTreeNode, decor: LeafDecor): TreeDataNode {
  * 不再有任何子分组（`g.children` 在 v2 永远为空）。早期 v1 视图遗留的 `g.children`
  * 仍兼容渲染（如老 catalog 没下线干净），让命令叶子和 sub-group 共存于章节下。
  */
-function chapterToTreeDataNode(g: GroupTreeNode, decor: LeafDecor): TreeDataNode {
+function chapterToTreeDataNode(g: GroupTreeNode): TreeDataNode {
   // 章节节点 key 仍走 GROUP_KEY_PREFIX + id（章节合成 id 也是 UUID，与 group 同空间
   // 不冲突；handleSelect 通过 isLeaf=false + selectable:false 防止误触发命令加载）
-  const directCmdLeaves = commandsToLeafNodes(g.commands ?? [], decor);
-  const subGroupNodes = (g.children ?? []).map((child) => groupToTreeDataNode(child, decor));
+  const directCmdLeaves = commandsToLeafNodes(g.commands ?? []);
+  const subGroupNodes = (g.children ?? []).map((child) => groupToTreeDataNode(child));
   return {
     key: `${GROUP_KEY_PREFIX}${g.id}`,
     title: (
@@ -234,7 +181,7 @@ function chapterToTreeDataNode(g: GroupTreeNode, decor: LeafDecor): TreeDataNode
  * - 普通 group → groupToTreeDataNode（含命令叶子）
  * - 老 catalog 空 chapter 的 group 后端未包装，仍保持顶层
  */
-function buildTreeData(nodes: GroupTreeNode[], decor: LeafDecor): TreeDataNode[] {
+function buildTreeData(nodes: GroupTreeNode[]): TreeDataNode[] {
   // 后端已按 chapter 排好序，前端再做一次防御性排序（按 chapterCode + displayOrder）
   const sorted = [...nodes].sort((a, b) => {
     const ac = chapterSortKey(a.chapterCode);
@@ -244,7 +191,7 @@ function buildTreeData(nodes: GroupTreeNode[], decor: LeafDecor): TreeDataNode[]
   });
 
   return sorted.map((g) =>
-    isChapterNode(g) ? chapterToTreeDataNode(g, decor) : groupToTreeDataNode(g, decor),
+    isChapterNode(g) ? chapterToTreeDataNode(g) : groupToTreeDataNode(g),
   );
 }
 
@@ -500,7 +447,7 @@ export default function CommandTree({ lang }: CommandTreeProps) {
   // 会让下游 useMemo / useEffect deps 引用变动，引发不必要重算甚至循环。useMemo 锚住引用。
   // 注：本作用域内 `treeData` 已被下方 buildTreeData 结果占用，这里用 rawTree 避免撞名。
   // T-0172: 传入 productClassFilter 让后端按"该产品族 default param_mappings"过滤
-  // 命令 + 给每条挂注解（totalPathCount / unsupportedPaths / productResolved）。
+  // 命令 + 给每条挂注解（supportedPathCount / unsupportedPaths / productResolved）。
   // productClassFilter 为空时不过滤（向后兼容）。
   const productClassForTree = useMmlConsoleStore((s) => s.productClassFilter);
   const { data: rawTree, isLoading } = useGroupTree(
@@ -516,17 +463,11 @@ export default function CommandTree({ lang }: CommandTreeProps) {
   const currentUsername = useUserStore((s) => s.currentUser?.username ?? '');
   const isSuperAdmin = useUserStore((s) => Boolean(s.currentUser?.isSuperAdmin));
 
-  // R-8.5：订阅当前选中 product_class（由 Console/index.tsx 单向镜像进 store），
-  // 调 useCommandCompatibility 取"该 product_class 下不兼容的命令 ID 集合"。
-  // productClassFilter 为空 / 加载中 → unsupportedSet 为 undefined → 不显示任何警告。
-  //
-  // T-0172：上面这套 useCommandCompatibility 仍保留作 sub_field 级提示；本次扩展
-  // 在 useGroupTree 直接传 productClassFilter，让后端按方案 X (default
-  // param_mappings) 过滤命令并给每条挂 totalPathCount/unsupportedPaths/productResolved
-  // 标注 — 命令树渲染据此显示总 path 数 + ⚠ 部分不支持图标。
-  const productClassFilter = useMmlConsoleStore((s) => s.productClassFilter);
-  const { data: unsupportedSet } = useCommandCompatibility(productClassFilter);
-  const unsupportedTooltip = t('mml.console.commandTree.unsupportedForProductClass');
+  // 2026-05-27 用户决策:取消命令名后所有提示图标。原 R-8.5
+  // useCommandCompatibility(productClassFilter) 调用 + unsupportedTooltip i18n 同步下线;
+  // sub_field 级"该 paramModel 不支持"的口径已收敛到后端 ListEnrichedByCommand 物理过滤
+  // (admin_repository.go EXISTS AND pm.is_supported = true),命令树只需 supportedPathCount
+  // 计数即可表达兼容性,不再需要客户端 set lookup。
 
   // Customized PrivateTemplate / PublicTemplate (T-0123-P4 集成)
   const { data: customResp } = useQuery({
@@ -584,8 +525,7 @@ export default function CommandTree({ lang }: CommandTreeProps) {
   );
 
   const treeData = useMemo(() => {
-    const leafDecor: LeafDecor = { unsupportedSet, unsupportedTooltip };
-    const groups = buildTreeData(tree, leafDecor);
+    const groups = buildTreeData(tree);
     const customRoot = buildCustomTreeData(
       customCommands,
       t,
@@ -603,8 +543,6 @@ export default function CommandTree({ lang }: CommandTreeProps) {
     handleDeleteTemplate,
     currentUsername,
     isSuperAdmin,
-    unsupportedSet,
-    unsupportedTooltip,
   ]);
   const commandsById = useMemo(() => flattenCommandsById(tree), [tree]);
   // Bundle C: matched 由后端搜索结果（commandId 集合）反推 expandKeys / matchedKeys。
@@ -678,10 +616,10 @@ export default function CommandTree({ lang }: CommandTreeProps) {
             'en-US': cmd.logicalNameI18n?.['en'] ?? cmd.logicalName ?? cmd.displayName,
           },
           subFields,
-          // T-0183: param_mappings.is_supported=false 的 path 默认不勾选(允许手动勾)。
-          // isSupported 缺省视 true(后端缺映射兜底)。
+          // 后端 ListEnrichedByCommand 已物理过滤 is_supported=false 的行,
+          // 这里只需按 defaultSelected 决定初始勾选状态。
           selectedSubFieldIds: subFields
-            .filter((sf) => sf.defaultSelected && sf.isSupported !== false)
+            .filter((sf) => sf.defaultSelected)
             .map((sf) => sf.id),
           values: {},
           unknownCodes: [],

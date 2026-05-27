@@ -938,7 +938,7 @@ export const mmlApi = {
    *   - 命令的 target_paths 至少 1 条在 supported set → 显示
    *   - ADD/RMV 的 target_object 是 supported set 中 path 前缀 → 显示
    *   - 孤儿设备（productClass 未匹配产品）→ 显示全部命令，每条 product_resolved=false
-   *   - 每条返回命令带 total_path_count / unsupported_paths / product_resolved 注解
+   *   - 每条返回命令带 supported_path_count / unsupported_paths / product_resolved 注解
    *   - 空 group（含 chapter）被剔除
    *
    * productClass 缺省 / 空串 → 不做过滤（向后兼容旧调用）。
@@ -1170,7 +1170,7 @@ function mapGroupTreeCommand(c: BackendGroupTreeNode['commands'][number]): Group
     // R-4.1.1：原样透传 instance_range_meta；后端 omitempty + 前端 helper 已把空数组归一为 undefined
     instanceRangeMeta: c.instance_range_meta,
     // T-0172 catalog filter annotations (后端 omitempty 时 c.* 为 undefined)
-    totalPathCount: c.total_path_count,
+    supportedPathCount: c.supported_path_count,
     unsupportedPaths: c.unsupported_paths,
     productResolved: c.product_resolved,
   };

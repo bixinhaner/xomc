@@ -75,7 +75,7 @@ func (s *ConsoleService) BuildGroupTree(ctx context.Context, rootCode, lang stri
 //   - 孤儿设备（productClass 未匹配产品）：全部命令显示，每条标 unsupported
 //   - 空 group（过滤后 0 命令且无 children）：从结果中剔除
 //
-// 在每条留下的命令上挂 TotalPathCount / UnsupportedPaths / ProductResolved 标注。
+// 在每条留下的命令上挂 SupportedPathCount / UnsupportedPaths / ProductResolved 标注。
 //
 // productClass 为空 / supportedPathsRepo 未装配时退化为 BuildGroupTree。
 func (s *ConsoleService) BuildGroupTreeFiltered(ctx context.Context, rootCode, lang, productClass string) ([]GroupTreeNode, error) {
@@ -106,8 +106,8 @@ func filterTreeInPlace(nodes []GroupTreeNode, supported *SupportedSet) {
 				continue
 			}
 			// 复制标注到响应字段（指针字段允许 omitempty 不出现在未过滤路径上）
-			total := ann.TotalPathCount
-			cmd.TotalPathCount = &total
+			supported := ann.SupportedPathCount
+			cmd.SupportedPathCount = &supported
 			resolved := ann.ProductResolved
 			cmd.ProductResolved = &resolved
 			cmd.UnsupportedPaths = ann.UnsupportedPaths

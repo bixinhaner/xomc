@@ -135,7 +135,7 @@ func (h *ConsoleHandler) GetCommandCompatibility(c *gin.Context) {
 // root 缺省时返回全树根节点（按 path 顶级 ltree 自动判定）。
 // format 缺省为 tree（向后兼容递归树）；format=flat 返 Task #4 扁平响应。
 // product_class 缺省时不做产品级过滤（向后兼容）；非空时按 T-0172 方案 X
-// 过滤命令并给每条命令挂 total_path_count / unsupported_paths / product_resolved。
+// 过滤命令并给每条命令挂 supported_path_count / unsupported_paths / product_resolved。
 type GroupTreeQuery struct {
 	Root         string `form:"root"`
 	Lang         string `form:"lang"`

@@ -76,12 +76,12 @@ export interface BackendGroupTreeCommand {
   /**
    * T-0172 catalog 按 product_class 过滤的标注（仅在 group-tree 请求带
    * product_class 入参时填充；缺省请求不返回）。
-   * - total_path_count: 命令操作的总 path 数（LST/MOD = len(target_paths);
-   *                     ADD/RMV = 1）
-   * - unsupported_paths: 当前产品不支持的具体 path 列表（完整返回，前端 tooltip 用）
+   * - supported_path_count: 该 paramModel 下 is_supported=true 的 path 数
+   *                         （LST/MOD = supported 交集大小；ADD/RMV = 0 或 1）
+   * - unsupported_paths: 当前产品不支持的具体 path 列表（保留供调试/日志，前端不渲染）
    * - product_resolved: false = 孤儿设备（productClass 未匹配产品）
    */
-  total_path_count?: number;
+  supported_path_count?: number;
   unsupported_paths?: string[];
   product_resolved?: boolean;
 }
@@ -189,11 +189,12 @@ export interface GroupTreeCommand {
   /**
    * T-0172 catalog 按 product_class 过滤的标注。仅在 useGroupTree 传入
    * productClass 时填充；缺省请求不返回。
-   * - totalPathCount: 命令操作的总 path 数（LST/MOD = target_paths 长度；ADD/RMV = 1）
-   * - unsupportedPaths: 当前产品不支持的具体 path 列表（完整返回，UI tooltip / banner 用）
-   * - productResolved: false = 孤儿设备（productClass 未匹配任何产品）；UI 据此降级显示
+   * - supportedPathCount: 该 paramModel 下 is_supported=true 的 path 数
+   *                       （LST/MOD = supported 交集大小；ADD/RMV = 0 或 1）
+   * - unsupportedPaths: 当前产品不支持的具体 path 列表（保留供调试/日志，前端不渲染）
+   * - productResolved: false = 孤儿设备（productClass 未匹配任何产品）
    */
-  totalPathCount?: number;
+  supportedPathCount?: number;
   unsupportedPaths?: string[];
   productResolved?: boolean;
 }

@@ -23,7 +23,7 @@ import (
 // 字段语义对应 GroupTreeCommand 上待补的同名字段。
 type CommandFilterAnnotation struct {
 	Visible            bool     // 是否在 UI 上显示该命令
-	TotalPathCount     int      // 命令操作的总 path 数（LST/MOD = len(target_paths); ADD/RMV = 1）
+	SupportedPathCount int      // 当前 productClass 下「is_supported=true 且 is_active=true」的 path 数；ADD/RMV 取值 0 或 1
 	UnsupportedPaths   []string // 不支持的具体 path 列表
 	ProductResolved    bool     // 该 productClass 是否成功匹配到 product
 }
@@ -46,7 +46,6 @@ func AnnotateCommand(opType string, targetPathsJSON []byte, targetObject string,
 	switch opType {
 	case "LST", "MOD":
 		paths := parseTargetPathsJSON(targetPathsJSON)
-		annotation.TotalPathCount = len(paths)
 		unsupported := make([]string, 0)
 		supportedCount := 0
 		for _, p := range paths {
@@ -56,6 +55,7 @@ func AnnotateCommand(opType string, targetPathsJSON []byte, targetObject string,
 				unsupported = append(unsupported, p)
 			}
 		}
+		annotation.SupportedPathCount = supportedCount
 		annotation.UnsupportedPaths = unsupported
 		// 孤儿设备：visible=true（user Q4 决定）
 		// 非孤儿且 supportedCount=0 → 隐藏（user Q1 决定）
@@ -66,22 +66,23 @@ func AnnotateCommand(opType string, targetPathsJSON []byte, targetObject string,
 		}
 
 	case "ADD", "RMV":
-		// ADD/RMV 的 path 数概念是 1（一个父对象）
-		annotation.TotalPathCount = 1
-		// 孤儿：visible=true，标 unsupported
+		// 孤儿：visible=true，标 unsupported，supported=0
 		if !supported.ProductResolved {
 			annotation.Visible = true
+			annotation.SupportedPathCount = 0
 			if targetObject != "" {
 				annotation.UnsupportedPaths = []string{targetObject}
 			}
 			break
 		}
-		// 非孤儿：set 中有 path 以 target_object 为前缀 → 可见
+		// 非孤儿：set 中有 path 以 target_object 为前缀 → 可见 + supported=1
 		// （user Q5/Option A 决定）
 		if supported.HasPathWithPrefix(targetObject) {
 			annotation.Visible = true
+			annotation.SupportedPathCount = 1
 		} else {
 			annotation.Visible = false
+			annotation.SupportedPathCount = 0
 			if targetObject != "" {
 				annotation.UnsupportedPaths = []string{targetObject}
 			}
