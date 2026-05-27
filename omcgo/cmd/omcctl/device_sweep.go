@@ -134,6 +134,9 @@ func runSweepPaths(cmd *cobra.Command, args []string) error {
 	}
 
 	client := getClient()
+	// sweep-paths 等设备 GPV 应答 + ACS 队列 + Inform 触发,server 端 15min 上限
+	// (devsweep/handler.go:87)。client 默认 30s 太短,提到 15min 对齐。
+	client.SetTimeout(15 * time.Minute)
 	resp, err := client.Post("/api/v1/devices/"+sn+"/sweep-paths", req)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[sweep] request failed:", err)

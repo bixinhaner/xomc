@@ -27,6 +27,12 @@ func NewOMCClient(baseURL, apiKey string) *OMCClient {
 	}
 }
 
+// SetTimeout 覆盖 HTTP client 超时,供 sweep-paths 等需要等设备 GPV 应答的慢
+// 命令使用 (server 端给 15min,默认 30s client timeout 会先 bail)。
+func (c *OMCClient) SetTimeout(d time.Duration) {
+	c.httpClient.Timeout = d
+}
+
 // Get performs an HTTP GET and returns the parsed JSON response.
 func (c *OMCClient) Get(path string) (map[string]interface{}, error) {
 	req, err := http.NewRequest(http.MethodGet, c.baseURL+path, nil)
