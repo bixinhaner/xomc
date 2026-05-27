@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTabStore } from '@core/store/tabStore';
 import { useQuickSettingsFeedbackStore } from '@core/store/quickSettingsFeedbackStore';
+import http from '@core/services/http';
 import {
   Badge,
   Button,
@@ -169,6 +170,48 @@ interface FieldGroup {
   fields: FieldItem[];
 }
 
+interface CellRecord {
+  key: string;
+  index: number;
+  values: Partial<Device>;
+}
+
+interface DeviceDetailCell {
+  index: number;
+  cellId?: string;
+  eci?: string;
+  pci?: string;
+  freqPoint?: string;
+  bandwidth?: string;
+  opState?: string;
+  rfTxStatus?: string;
+  adminState?: string;
+}
+
+interface DeviceDetailCompositeResponse {
+  cells?: DeviceDetailCell[];
+}
+
+interface CellSummaryColumn {
+  title: string;
+  key: string;
+  dataIndex?: string[];
+  width?: number;
+}
+
+const normalizeNetworkType = (networkType: string | undefined): string => {
+  switch (networkType) {
+    case 'lte':
+      return 'eNB';
+    case 'nr':
+      return 'gNB';
+    case 'gsm':
+      return 'GSM';
+    default:
+      return networkType ?? '';
+  }
+};
+
 // 格式化时间
 const fmtTime = (v: string | undefined | null) => (v ? new Date(v).toLocaleString('zh-CN') : '-');
 
@@ -227,21 +270,10 @@ const getStationFields = (t: ReturnType<typeof useT>, networkType: string): Fiel
     { key: 'ipAddress', label: t('device.ipAddress'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.ipAddress || '-'}</Text> },
   ];
 
-  // eNB/gNB 共享字段
-  if (networkType === 'eNB' || networkType === 'gNB') {
-    fields.push(
-      { key: 'ipsecAddr', label: t('device.ipsecAddr'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.ipsecAddr || '-'}</Text> },
-      { key: 'halobFlag', label: 'HaloB', render: (d) => <Tag color={d.halobFlag ? 'success' : 'default'}>{d.halobFlag ? t('status.enabled') : t('status.disabled')}</Tag> },
-      { key: 'adminState', label: 'Admin State', render: (d) => renderStatusTag(String(d.adminState), { '1': { label: 'Locked', color: 'warning' }, '2': { label: 'Unlocked', color: 'success' }, '3': { label: 'ShuttingDown', color: 'error' } }) },
-    );
-  }
-
   // eNB 独有字段
   if (networkType === 'eNB') {
     fields.push(
       { key: 'gpsVersion', label: t('device.gpsVersion'), render: (d) => d.gpsVersion ?? '-' },
-      { key: 'rom', label: 'ROM', render: (d) => d.rom ?? '-' },
-      { key: 'mmepoolIpsecAddr', label: t('device.mmepoolIpsecAddr'), render: (d) => <Text style={{ fontFamily: 'monospace' }}>{d.mmepoolIpsecAddr || '-'}</Text> },
     );
   }
 
@@ -331,9 +363,6 @@ const getCellFields = (t: ReturnType<typeof useT>, networkType: string): FieldGr
 const getStatusFields = (t: ReturnType<typeof useT>, networkType: string): FieldGroup => {
   const fields: FieldItem[] = [
     // 公共字段
-    { key: 'connStatus', label: t('device.connStatus'), render: (d) => <StatusIndicator status={d.connStatus === 'online' ? 'online' : 'offline'} /> },
-    { key: 'opState', label: t('device.opState'), render: (d) => renderStatusTag(d.opState, { '1': { label: t('status.active'), color: 'success' }, '0': { label: t('status.inactive'), color: 'error' }, active: { label: t('status.active'), color: 'success' }, inactive: { label: t('status.inactive'), color: 'error' } }) },
-    { key: 'rfStatus', label: t('device.rfStatus'), render: (d) => renderStatusTag(d.rfStatus, { on: { label: t('status.rfOn'), color: 'success' }, off: { label: t('status.rfOff'), color: 'error' }, '1': { label: t('status.rfOn'), color: 'success' }, '0': { label: t('status.rfOff'), color: 'error' } }) },
     { key: 'ueCount', label: t('device.ueCount'), render: (d) => d.ueCount ?? '-' },
     { key: 'syncStatus', label: t('device.syncStatus'), render: (d) => d.syncStatus || '-' },
   ];
@@ -346,8 +375,6 @@ const getStatusFields = (t: ReturnType<typeof useT>, networkType: string): Field
       { key: 'cpeCount', label: t('device.cpeCount'), render: (d) => d.cpeCount ?? '-' },
       { key: 'lockStatus', label: t('device.lockStatus'), render: (d) => renderStatusTag(d.lockStatus, { locked: { label: t('status.locked'), color: 'warning' }, unlocked: { label: t('status.unlocked'), color: 'success' } }) },
       { key: 'wanSpeed', label: t('device.wanSpeed'), render: (d) => d.wanSpeed ?? '-' },
-      { key: 'serviceStatus', label: t('device.serviceStatus'), render: (d) => d.serviceStatus ?? '-' },
-      { key: 'validity', label: t('device.validity'), render: (d) => d.validity ?? '-' },
     );
   }
 
@@ -397,20 +424,7 @@ const getOtherFields = (t: ReturnType<typeof useT>, networkType: string): FieldG
     { key: 'longitude', label: t('device.longitude'), render: (d) => d.longitude?.toFixed(4) || '-' },
     { key: 'latitude', label: t('device.latitude'), render: (d) => d.latitude?.toFixed(4) || '-' },
     { key: 'gpsHeight', label: t('device.gpsHeight'), render: (d) => d.gpsHeight ?? '-' },
-    // 备注
-    { key: 'remark', label: t('device.remark'), render: (d) => d.remark || '-' },
   ];
-
-  // eNB 独有字段
-  if (networkType === 'eNB') {
-    fields.push(
-      { key: 'mechanicalDowntilt', label: t('device.mechanicalDowntilt'), render: (d) => d.mechanicalDowntilt ?? '-' },
-      { key: 'electronicDowntilt', label: t('device.electronicDowntilt'), render: (d) => d.electronicDowntilt ?? '-' },
-      { key: 'verticalBeamWidth', label: t('device.verticalBeamWidth'), render: (d) => d.verticalBeamWidth ?? '-' },
-      { key: 'horizontalAzimuth', label: t('device.horizontalAzimuth'), render: (d) => d.horizontalAzimuth ?? '-' },
-      { key: 'installAddress', label: t('device.installAddress'), render: (d) => d.installAddress || '-' },
-    );
-  }
 
   // GSM 独有字段
   if (networkType === 'GSM') {
@@ -440,6 +454,104 @@ const renderFieldGroup = (group: FieldGroup, device: Device) => (
     ))}
   </Descriptions>
 );
+
+const buildCellRecords = (device: Device, detailCells?: DeviceDetailCell[]): CellRecord[] => {
+  if (Array.isArray(detailCells) && detailCells.length > 0) {
+    return detailCells.map((cell, idx) => ({
+      key: `${device.id}-cell-${cell.index || idx + 1}`,
+      index: cell.index || idx + 1,
+      values: {
+        cellId: cell.cellId ?? cell.eci ?? '',
+        eci: cell.eci ?? '',
+        pci: cell.pci ?? '',
+        bandwidth: cell.bandwidth ?? '',
+        opState: cell.opState || device.opState || '',
+        rfStatus: cell.rfTxStatus || device.rfStatus || '',
+        adminState: cell.adminState ?? '',
+        band: device.band,
+        nrCellId: device.nrCellId,
+      },
+    }));
+  }
+
+  const ext = device as Device & {
+    cellList?: Array<Partial<Device>>;
+    cells?: Array<Partial<Device>>;
+    cellInfos?: Array<Partial<Device>>;
+    cellInfoList?: Array<Partial<Device>>;
+  };
+
+  const source = ext.cellList ?? ext.cells ?? ext.cellInfos ?? ext.cellInfoList;
+  const rows = Array.isArray(source) && source.length > 0 ? source : [device];
+
+  return rows.map((row, idx) => ({
+    key: String((row as { id?: string }).id ?? `${device.id}-cell-${idx + 1}`),
+    index: idx + 1,
+    values: row,
+  }));
+};
+
+const renderCellOpState = (value: string | undefined, t: ReturnType<typeof useT>) =>
+  renderStatusTag(value, {
+    '1': { label: t('status.active'), color: 'success' },
+    '0': { label: t('status.inactive'), color: 'error' },
+    true: { label: t('status.active'), color: 'success' },
+    false: { label: t('status.inactive'), color: 'error' },
+    active: { label: t('status.active'), color: 'success' },
+    inactive: { label: t('status.inactive'), color: 'error' },
+  });
+
+const renderCellRfStatus = (value: string | undefined, t: ReturnType<typeof useT>) =>
+  renderStatusTag(value, {
+    on: { label: t('status.rfOn'), color: 'success' },
+    off: { label: t('status.rfOff'), color: 'error' },
+    '1': { label: t('status.rfOn'), color: 'success' },
+    '0': { label: t('status.rfOff'), color: 'error' },
+    true: { label: t('status.rfOn'), color: 'success' },
+    false: { label: t('status.rfOff'), color: 'error' },
+  });
+
+const getCellSummaryColumns = (networkType: string, t: ReturnType<typeof useT>): CellSummaryColumn[] => {
+  const base: CellSummaryColumn[] = [
+    { title: 'index', dataIndex: ['index'], key: 'index', width: 80 },
+    { title: t('device.cellId'), dataIndex: ['values', 'cellId'], key: 'cellId' },
+    { title: t('device.opState'), key: 'opState' },
+  ];
+
+  switch (networkType) {
+    case 'eNB':
+      return [
+        ...base,
+        { title: t('device.rfStatus'), dataIndex: ['values', 'rfStatus'], key: 'rfStatus' },
+        { title: 'PCI', dataIndex: ['values', 'pci'], key: 'pci' },
+        { title: 'bandwidth', dataIndex: ['values', 'bandwidth'], key: 'bandwidth' },
+        { title: 'band', dataIndex: ['values', 'band'], key: 'band' },
+      ];
+    case 'gNB':
+      return [
+        ...base,
+        { title: t('device.rfStatus'), dataIndex: ['values', 'rfStatus'], key: 'rfStatus' },
+        { title: 'PCI', dataIndex: ['values', 'pci'], key: 'pci' },
+        { title: 'band', dataIndex: ['values', 'band'], key: 'band' },
+        { title: 'NR Cell ID', dataIndex: ['values', 'nrCellId'], key: 'nrCellId' },
+      ];
+    case 'GSM':
+      return [
+        ...base,
+        { title: t('device.rfStatus'), dataIndex: ['values', 'rfStatus'], key: 'rfStatus' },
+        { title: 'LAC', dataIndex: ['values', 'lac'], key: 'lac' },
+        { title: t('device.arfcn'), dataIndex: ['values', 'arfcn'], key: 'arfcn' },
+        { title: t('device.btsNum'), dataIndex: ['values', 'btsNum'], key: 'btsNum' },
+      ];
+    default:
+      return [
+        ...base,
+        { title: t('device.rfStatus'), dataIndex: ['values', 'rfStatus'], key: 'rfStatus' },
+        { title: 'PCI', dataIndex: ['values', 'pci'], key: 'pci' },
+        { title: 'band', dataIndex: ['values', 'band'], key: 'band' },
+      ];
+  }
+};
 
 // ─── KPI Tab 组件─────────────────────────────────────────────────────────
 
@@ -534,6 +646,14 @@ export default function DeviceDetail() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const { data: device, isLoading, refetch } = useDeviceBySn(sn);
+  const { data: detailComposite } = useQuery({
+    queryKey: ['devices', 'detail-composite-v2', device?.id],
+    queryFn: async () => {
+      const { data } = await http.get<DeviceDetailCompositeResponse>(`/devices/${device?.id}/detail`);
+      return data;
+    },
+    enabled: Boolean(device?.id),
+  });
 
   // 内部 tab 以 URL ?tab= 作为单一真相源 ——
   // 1) 离开详情页（组件卸载）再切回时，能从 URL 还原内部 tab，不丢状态；
@@ -586,6 +706,9 @@ export default function DeviceDetail() {
   const handleHeaderRefresh = useCallback(() => {
     void refetch();
     const deviceId = device?.id;
+    if (deviceId) {
+      void queryClient.invalidateQueries({ queryKey: ['devices', 'detail-composite-v2', deviceId] });
+    }
     switch (activeTab) {
       case 'parameters':
         if (deviceId) {
@@ -783,15 +906,36 @@ export default function DeviceDetail() {
   // 根据设备制式获取字段组
   const detailGroups = useMemo((): FieldGroup[] => {
     if (!device) return [];
-    const networkType = device.networkType ?? '';
+    const networkType = normalizeNetworkType(device.networkType);
 
     return [
       getStationFields(t, networkType),
-      getCellFields(t, networkType),
       getStatusFields(t, networkType),
       getOtherFields(t, networkType),
     ];
   }, [device, t]);
+
+  const cellGroup = useMemo((): FieldGroup | null => {
+    if (!device) return null;
+    return getCellFields(t, normalizeNetworkType(device.networkType));
+  }, [device, t]);
+
+  const cellRecords = useMemo(() => {
+    if (!device) return [];
+    return buildCellRecords(device, detailComposite?.cells);
+  }, [device, detailComposite?.cells]);
+
+  const cellColumns = useMemo(
+    () => getCellSummaryColumns(normalizeNetworkType(device?.networkType), t).map((column) => ({
+      ...column,
+      render: column.key === 'opState'
+        ? (_: unknown, row: CellRecord) => renderCellOpState((row.values.opState as string | undefined) ?? device?.opState, t)
+        : column.key === 'rfStatus'
+          ? (_: unknown, row: CellRecord) => renderCellRfStatus((row.values.rfStatus as string | undefined) ?? device?.rfStatus, t)
+          : (value: string | number | undefined) => value ?? '-',
+    })),
+    [device?.networkType, device?.opState, device?.rfStatus, t],
+  );
 
   if (isLoading) {
     return (
@@ -872,7 +1016,19 @@ export default function DeviceDetail() {
               label: t('common.detail'),
               children: (
                 <div style={{ padding: '16px 0' }}>
-                  {detailGroups.map((group) => renderFieldGroup(group, device))}
+                  {detailGroups[0] && renderFieldGroup(detailGroups[0], device)}
+                  {cellGroup && (
+                    <Card size="small" title={cellGroup.title}>
+                      <Table<CellRecord>
+                        rowKey="key"
+                        columns={cellColumns}
+                        dataSource={cellRecords}
+                        pagination={false}
+                        size="small"
+                      />
+                    </Card>
+                  )}
+                  {detailGroups.slice(1).map((group) => renderFieldGroup(group, device))}
                 </div>
               ),
             },

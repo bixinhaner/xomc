@@ -189,6 +189,21 @@ func TestAssembleCells_LegacyOpStatePath(t *testing.T) {
 	assert.Equal(t, "true", cells[0].OpState)
 }
 
+func TestAssembleCells_DetectsHigherFAPServiceIndex(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID", ParameterValue: "11"},
+		{ParameterPath: "Device.Services.FAPService.6.CellConfig.LTE.RAN.RF.PhyCellID", ParameterValue: "66"},
+		{ParameterPath: "Device.Services.FAPService.6.FAPControl.LTE.CellOpState", ParameterValue: "1"},
+	}
+
+	// 设备表 num_of_cells 即使是 1，也应按参数路径探测到 6 个实例。
+	cells := AssembleCells(params, 1)
+	assert.Len(t, cells, 6)
+	assert.Equal(t, "11", cells[0].PCI)
+	assert.Equal(t, "66", cells[5].PCI)
+	assert.Equal(t, "1", cells[5].OpState)
+}
+
 func TestExtractIndexAndField(t *testing.T) {
 	tests := []struct {
 		path      string

@@ -157,6 +157,12 @@ func AssembleCells(params []model.DeviceParameter, numOfCells int) []CellInfo {
 		numOfCells = 1
 	}
 
+	// 某些设备的 num_of_cells 可能滞后于实际上报参数（例如仍为 1，
+	// 但 device_parameters 已存在 FAPService.2~N）；这里按参数路径探测最大实例号兜底。
+	if detected := detectMaxFAPServiceIndex(params); detected > numOfCells {
+		numOfCells = detected
+	}
+
 	// Build a lookup map for fast access
 	paramMap := make(map[string]string, len(params))
 	for _, p := range params {
@@ -233,6 +239,40 @@ func AssembleCells(params []model.DeviceParameter, numOfCells int) []CellInfo {
 		cells = append(cells, cell)
 	}
 	return cells
+}
+
+func detectMaxFAPServiceIndex(params []model.DeviceParameter) int {
+	const prefix = "Device.Services.FAPService."
+
+	maxIdx := 0
+	for _, p := range params {
+		path := p.ParameterPath
+		if !strings.HasPrefix(path, prefix) {
+			continue
+		}
+
+		rest := strings.TrimPrefix(path, prefix)
+		dot := strings.Index(rest, ".")
+		if dot <= 0 {
+			continue
+		}
+
+		idx, err := strconv.Atoi(rest[:dot])
+		if err != nil || idx <= 0 {
+			continue
+		}
+
+		if strings.Contains(path, ".CellConfig.LTE.") ||
+			strings.Contains(path, ".CellConfig.NR.") ||
+			strings.Contains(path, ".FAPControl.LTE.") ||
+			strings.Contains(path, ".FAPControl.NR.") {
+			if idx > maxIdx {
+				maxIdx = idx
+			}
+		}
+	}
+
+	return maxIdx
 }
 
 // extractIndexAndField parses a TR069 path to extract an instance index and the remaining field.
