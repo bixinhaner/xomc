@@ -359,9 +359,19 @@ func (r *PgSubFieldRepository) CountByParam(ctx context.Context, paramID uuid.UU
 	return n, nil
 }
 
-// ListAdminByCommand 返回 admin 视角的 sub_field 全集（含 is_supported=false 行），
-// 不做 paramModel 过滤。与 console 用 ListEnrichedByCommand 对应，但 admin 关心
-// "字典全貌"而非"该设备真实可执行"，所以两个查询路径分开。
+// ListAdminByCommand 返回 admin 视角的 sub_field 全集；is_supported 已从
+// mml_command_sub_fields.is_supported 改为按 param_mappings.is_supported 聚合
+// （T-0176-PR-A 之后 catalog 真值源就在 param_mappings 上，原 sub_field 列
+// 不再权威；2026-05-27 用户决策同步前端展示）。
+//
+// 聚合规则：
+//   - 每条 sub_field 关联 N 条 param_mappings 行（按 standard_path 维度，N = 注册
+//     该 path 的 paramModel 数；is_active=false 不计）
+//   - is_supported = BOOL_OR(pm.is_supported)，无行兜底 true
+//   - supported_model_count / total_model_count 给前端做细粒度提示用
+//
+// 不做 paramModel 过滤（与 console 端 ListEnrichedByCommand 区分），admin 看的是
+// "字典全貌 + 跨 paramModel 总体支持状况"。
 func (r *PgSubFieldRepository) ListAdminByCommand(ctx context.Context, commandID uuid.UUID) ([]MMLCommandSubFieldEnriched, error) {
 	const sqlText = `
 SELECT
@@ -390,10 +400,19 @@ SELECT
     NULL::text                            AS js_regex,
     jsonb_build_object('zh-CN', sp.standard_path, 'en-US', sp.standard_path) AS name_i18n,
     COALESCE(sp.description, '')          AS description,
-    csf.is_supported
+    -- is_supported 真值源：active param_mappings 上的 OR 聚合；无任何映射 → 兜底 true
+    COALESCE(
+        BOOL_OR(pm.is_supported) FILTER (WHERE pm.is_active),
+        true
+    )                                     AS is_supported,
+    COUNT(*) FILTER (WHERE pm.is_active AND pm.is_supported)::int AS supported_model_count,
+    COUNT(*) FILTER (WHERE pm.is_active)::int                     AS total_model_count
 FROM mml_command_sub_fields csf
 JOIN standard_params sp ON sp.id = csf.standard_path_id
+LEFT JOIN param_mappings pm ON pm.standard_path = sp.standard_path
 WHERE csf.command_id = $1
+GROUP BY csf.id, sp.standard_path, sp.data_type, sp.access, sp.entry_type,
+         sp.change_applies, sp.min_value, sp.max_value, sp.description
 ORDER BY csf.sort_order ASC, csf.mml_code ASC`
 	rows, err := r.pool.Query(ctx, sqlText, commandID)
 	if err != nil {
@@ -413,6 +432,7 @@ ORDER BY csf.sort_order ASC, csf.mml_code ASC`
 			&e.ChangeApplies, &constraintI18n,
 			&e.DefaultValue, &e.JsRegex, &paramNameI18n,
 			&e.Description, &e.IsSupported,
+			&e.SupportedModelCount, &e.TotalModelCount,
 		); err != nil {
 			return nil, fmt.Errorf("scan admin sub_field row: %w", err)
 		}

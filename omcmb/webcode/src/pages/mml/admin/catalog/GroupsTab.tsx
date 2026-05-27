@@ -1,17 +1,16 @@
 import { useMemo, useState, useCallback } from 'react';
-import { Tree, Empty, Spin, Alert, Button, Dropdown, Modal, message, Space, Tag, Tooltip } from 'antd';
+import { Tree, Empty, Spin, Alert, Button, Dropdown, message, Space } from 'antd';
 import {
   FolderOutlined,
   CodeOutlined,
   PlusOutlined,
   EllipsisOutlined,
-  LockOutlined,
 } from '@ant-design/icons';
 import type { TreeDataNode, MenuProps } from 'antd';
 import type { Key } from 'react';
 import { useGroupTree } from '@core/hooks/api/useMmlConsole';
 import type { GroupTreeNode } from '@core/types/mmlConsole';
-import { useDeleteGroup, useUpdateGroup } from '@core/hooks/api/useMmlAdmin';
+import { useUpdateGroup } from '@core/hooks/api/useMmlAdmin';
 import { useT } from '@/hooks/useT';
 import GroupEditorModal, { type GroupEditorMode } from './GroupEditorModal';
 
@@ -46,12 +45,11 @@ function buildAdminTreeData(
 ): TreeDataNode[] {
   const sorted = [...nodes].sort((a, b) => a.displayOrder - b.displayOrder);
   return sorted.map((g) => {
-    const locked = g.catalogProtected === true;
+    // 用户决策（2026-05-27）：已有分组不允许编辑/删除，只允许在其下"新增子分组"。
+    // 移除 rename / delete 入口（保留 Add Child 作为唯一菜单项）；同时去掉显示
+    // group.path 的 Tag（如 "chapter_SA"），避免用户被内部 LTREE 编码干扰。
     const items: MenuProps['items'] = [
       { key: 'addChild', label: t('mml.admin.catalog.groups.addChild') },
-      { key: 'rename', label: t('mml.admin.catalog.groups.rename'), disabled: locked },
-      { type: 'divider' },
-      { key: 'delete', label: t('mml.admin.catalog.groups.delete'), danger: true, disabled: locked },
     ];
     return {
       key: `group:${g.id}`,
@@ -59,12 +57,6 @@ function buildAdminTreeData(
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <FolderOutlined />
           <span>{g.displayName}</span>
-          {locked && (
-            <Tooltip title={t('mml.admin.catalog.common.lockedTooltip')}>
-              <LockOutlined style={{ color: '#999' }} />
-            </Tooltip>
-          )}
-          <Tag style={{ marginLeft: 2 }}>{g.path}</Tag>
           <Dropdown
             menu={{ items, onClick: ({ key, domEvent }) => { domEvent.stopPropagation(); onAction(key, g); } }}
             trigger={['click']}
@@ -103,18 +95,15 @@ export default function GroupsTab() {
   const t = useT();
   const { data: tree = [], isLoading, refetch } = useGroupTree(undefined, 'zh-CN');
   const updateMut = useUpdateGroup();
-  const deleteMut = useDeleteGroup();
 
   const [edit, setEdit] = useState<EditState>(initialEdit);
   const [expandedKeys, setExpandedKeys] = useState<Key[]>([]);
 
+  // 已有分组只允许"新增子分组"，rename/delete 入口已移除（用户决策 2026-05-27）。
+  // 因此本回调只处理 addChild。
   const handleAction = useCallback(
     (action: string, g: GroupTreeNode) => {
-      // catalog_protected 锁定 rename/delete（addChild 仍允许）
-      if (g.catalogProtected && (action === 'rename' || action === 'delete')) {
-        message.warning(t('mml.admin.catalog.common.lockedTooltip'));
-        return;
-      }
+      if (action !== 'addChild') return;
       const target: GroupTargetForEdit = {
         id: g.id,
         groupCode: g.groupCode,
@@ -124,29 +113,9 @@ export default function GroupsTab() {
         },
         displayOrder: g.displayOrder,
       };
-      if (action === 'addChild') {
-        setEdit({ open: true, mode: 'create-child', target });
-      } else if (action === 'rename') {
-        setEdit({ open: true, mode: 'rename', target });
-      } else if (action === 'delete') {
-        Modal.confirm({
-          title: t('mml.admin.catalog.groups.deleteConfirm'),
-          okText: t('mml.admin.catalog.common.confirm'),
-          okButtonProps: { danger: true },
-          cancelText: t('mml.admin.catalog.common.cancel'),
-          onOk: async () => {
-            try {
-              await deleteMut.mutateAsync(g.id);
-              message.success(t('mml.admin.catalog.common.deleteSuccess'));
-              void refetch();
-            } catch (e) {
-              if (e instanceof Error) message.error(e.message);
-            }
-          },
-        });
-      }
+      setEdit({ open: true, mode: 'create-child', target });
     },
-    [deleteMut, refetch, t],
+    [],
   );
 
   const treeData = useMemo(

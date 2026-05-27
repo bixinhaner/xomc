@@ -85,9 +85,21 @@ type MMLCommandSubFieldEnriched struct {
 	// 可为空（非 cmcc-td-lte 来源的 standard_params 行 description 未维护）。
 	Description string `json:"description,omitempty"`
 
-	// IsSupported 是 mml_command_sub_fields.is_supported 列原值。
-	// console 端 ListEnrichedByCommand 已硬过滤 is_supported=true，不暴露此字段；
-	// 但 admin 端 ListAdminByCommand 必须看见已被 auto-learn 关掉的 path，让维护人员
-	// 评估"是否手工恢复" / "是否真要永久隐藏"。json tag 与列名对齐。
+	// IsSupported 是 admin 视角的"支持状态"汇总位。
+	//
+	// 2026-05-27 用户决策：真值源从 mml_command_sub_fields.is_supported 改为
+	// param_mappings.is_supported —— 后者按 (param_model, standard_path) 维度
+	// 记录"该 paramModel 是否支持此 path"，是 T-0176-PR-A 之后 catalog 唯一权威。
+	//
+	// 聚合规则（admin 端不绑特定 paramModel，呈现"跨 model 总体支持状况"）：
+	//   - 若该 path 未在任何 active param_mapping 出现 → 视为 "支持"（默认 true）
+	//   - 若该 path 在至少一个 active param_mapping 中是 supported=true → true
+	//   - 否则（全 active 映射都标 false） → false
+	// 即 BOOL_OR(pm.is_supported) FILTER (WHERE pm.is_active)，无行兜底 true。
 	IsSupported bool `json:"is_supported"`
+
+	// SupportedModelCount / TotalModelCount 给前端做"X / Y 个 paramModel 支持"的
+	// 细粒度展示用。仅 admin ListAdminByCommand 填充；console 路径不写。
+	SupportedModelCount int `json:"supported_model_count"`
+	TotalModelCount     int `json:"total_model_count"`
 }

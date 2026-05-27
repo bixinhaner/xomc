@@ -242,8 +242,16 @@ export interface AdminSubFieldEnriched {
   defaultSelected: boolean;
   isRequired: boolean;
   sortOrder: number;
-  /** false = catalog 维护人员手工标 / auto-learn 关掉的"不支持" path。 */
+  /** 是否被 active param_mappings 中至少一个 paramModel 标为支持。
+   * 2026-05-27 后真值源已从 mml_command_sub_fields.is_supported 改为
+   * param_mappings.is_supported（T-0176-PR-A 单一真值源策略）。
+   * 无映射时兜底 true。 */
   isSupported: boolean;
+  /** 标该 path supported=true 的 active paramModel 数量。 */
+  supportedModelCount: number;
+  /** 注册该 path 的 active paramModel 总数。
+   * = 0 表示该 path 没在任何 paramModel 注册（兜底 isSupported=true，但用户应当留意）。 */
+  totalModelCount: number;
 }
 
 /** GET /admin/groups 返回的"全集" group。
