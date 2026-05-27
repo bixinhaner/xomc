@@ -89,6 +89,13 @@ func NewTranslator(set *MappingSet, metrics *registryMetrics, logger *zap.Logger
 }
 
 // ToPrivate 把 standardPath 翻译为 privatePath。Found=false → Translated=Original。
+//
+// 查找流程：
+//  1. 模板形态直接命中（map key 就是 standard.{i}.path 形态）→ 返 PrivatePath 原值
+//  2. 运行时实例号规范化（".0." → ".{i}."）后重试 —— 参 CLAUDE.md §5.3
+//     "{i} 占位符规范化：运行时实例号 .N. 与模板 .{i}. 折叠为同一索引键"。
+//     命中后按位置把数字回填到 private 模板的 {i} 槽。
+//  3. 都不中 → Found=false，Translated=Original 兜底（调用方据此决定 passthrough 或拒）。
 func (t *Translator) ToPrivate(standard string) TranslationResult {
 	if m, ok := t.standardToPrivate[standard]; ok {
 		if t.metrics != nil {
@@ -101,6 +108,21 @@ func (t *Translator) ToPrivate(standard string) TranslationResult {
 			Mapping:    m,
 		}
 	}
+	if norm := normalizeInstancePath(standard); norm != standard {
+		if m, ok := t.standardToPrivate[norm]; ok {
+			if translated, ok2 := substituteInstanceNumbers(standard, m.PrivatePath); ok2 {
+				if t.metrics != nil {
+					t.metrics.translateHit("to_private")
+				}
+				return TranslationResult{
+					Original:   standard,
+					Translated: translated,
+					Found:      true,
+					Mapping:    m,
+				}
+			}
+		}
+	}
 	if t.metrics != nil {
 		t.metrics.translateMiss("to_private")
 	}
@@ -108,6 +130,9 @@ func (t *Translator) ToPrivate(standard string) TranslationResult {
 }
 
 // ToStandard 把 privatePath 翻译为 standardPath。Found=false → Translated=Original。
+//
+// 同 ToPrivate：先直接命中模板形态，否则把运行时实例号规范化为 .{i}. 后重试，
+// 命中再把数字回填到 standard 模板的 {i} 槽。
 func (t *Translator) ToStandard(private string) TranslationResult {
 	if m, ok := t.privateToStandard[private]; ok {
 		if t.metrics != nil {
@@ -120,10 +145,60 @@ func (t *Translator) ToStandard(private string) TranslationResult {
 			Mapping:    m,
 		}
 	}
+	if norm := normalizeInstancePath(private); norm != private {
+		if m, ok := t.privateToStandard[norm]; ok {
+			if translated, ok2 := substituteInstanceNumbers(private, m.StandardPath); ok2 {
+				if t.metrics != nil {
+					t.metrics.translateHit("to_standard")
+				}
+				return TranslationResult{
+					Original:   private,
+					Translated: translated,
+					Found:      true,
+					Mapping:    m,
+				}
+			}
+		}
+	}
 	if t.metrics != nil {
 		t.metrics.translateMiss("to_standard")
 	}
 	return TranslationResult{Original: private, Translated: private, Found: false}
+}
+
+// substituteInstanceNumbers 把 srcWithNums 里各全数字段（运行时实例号）按顺序回填到
+// dstTemplate 的 `{i}` 槽。两侧占位符计数已被 validatePlaceholders 保证相等——本
+// 兜底只是把同序数字复制到对侧。
+//
+// 返回 ok=false 当：
+//   - 任一入参为空
+//   - src 抽出的数字段数 != dst 的 {i} 槽数（validator 已剔出 mismatch 条目，
+//     这里是双保险，命中此分支应记为 translator 数据异常）
+func substituteInstanceNumbers(srcWithNums, dstTemplate string) (string, bool) {
+	if srcWithNums == "" || dstTemplate == "" {
+		return "", false
+	}
+	nums := make([]string, 0, 4)
+	for _, seg := range strings.Split(srcWithNums, ".") {
+		if isAllDigits(seg) {
+			nums = append(nums, seg)
+		}
+	}
+	parts := strings.Split(dstTemplate, ".")
+	consumed := 0
+	for i, seg := range parts {
+		if seg == placeholderToken {
+			if consumed >= len(nums) {
+				return "", false
+			}
+			parts[i] = nums[consumed]
+			consumed++
+		}
+	}
+	if consumed != len(nums) {
+		return "", false
+	}
+	return strings.Join(parts, "."), true
 }
 
 // Mappings 返回构造时 MappingSet 的原始顺序（包含被占位符校验跳过的条目；
