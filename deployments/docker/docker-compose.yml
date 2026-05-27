@@ -188,6 +188,10 @@ services:
       - "9092:9092"
     environment:
       OMCGO_ENV: "${OMCGO_ENV:-dev}"
+      # omcctl 运维 CLI 默认 API key — 从宿主 .env / shell env 透传,
+      # operator docker exec docker-worker-1 omcctl ... 时 ENV 自动注入。
+      # 未设置时 omcctl 命令需显式 --api-key 或 docker exec -e OMCCTL_API_KEY=...
+      OMCCTL_API_KEY: "${OMCCTL_API_KEY:-}"
     volumes:
       - ../../run/logs/worker:/run/logs/worker
       - /etc/localtime:/etc/localtime:ro

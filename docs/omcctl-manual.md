@@ -269,6 +269,33 @@ mml     import-standard-params | migrate-device-params | import-spec-md
 > compose up 之后 worker 容器长跑，operator 直接 `docker exec` 进去执行即可，**不需要独立镜像 / 独立 compose 服务**。
 > 镜像内 `ENV OMCCTL_SERVER=http://app:8081` 已预设 server 地址，命令行不必再传 `--server`（走 TLS / 外部 host 时仍可用 `--server` 覆盖）。
 
+### 7.0 一次性配置 API key（首次使用必读）
+
+omcctl 调 app HTTP API 必须带 API key（管理面要鉴权）。配置方式：
+
+**方案 A：宿主 `.env` 文件（推荐，所有 exec 自动带）**
+
+在 `deployments/docker/.env`（gitignored）写一行：
+```
+OMCCTL_API_KEY=你的key
+```
+
+或在 shell 里 `export OMCCTL_API_KEY=...`（一次性）。`docker compose up -d worker` 重启后 worker 容器的 `OMCCTL_API_KEY` 环境变量从这里读，omcctl 内部默认值 `os.Getenv("OMCCTL_API_KEY")` 自动拿到。**之后 `docker exec docker-worker-1 omcctl ...` 不用再传 `--api-key`**。
+
+**方案 B：每次 `docker exec` 时显式 `-e` 传**
+```bash
+docker exec -e OMCCTL_API_KEY=$YOUR_KEY docker-worker-1 \
+    omcctl device list
+```
+
+**方案 C：CLI flag 显式传**
+```bash
+docker exec docker-worker-1 omcctl device list --api-key $YOUR_KEY
+```
+
+> Key 怎么生成 / 从哪儿拿？走管理面登录后端点（参 app 鉴权模块）；也可由超级管理员在 admin UI / SQL 直接发一份给 ops。
+
+
 ### 7.1 基本调用（推荐日常）
 
 ```bash

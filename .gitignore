@@ -55,3 +55,4 @@ deployments/release/bundle/docker/docker-*.tgz
 deployments/release/.serve.*
 
 deployments/docker/Tiles/
+deployments/docker/.env
