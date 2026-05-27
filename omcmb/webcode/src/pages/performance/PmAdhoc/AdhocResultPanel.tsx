@@ -9,9 +9,10 @@
  */
 
 import { useMemo, useState } from 'react';
-import { Alert, Button, Card, Empty, Space, Spin, Table, Tabs, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Empty, Space, Spin, Table, Tabs, Tag, Tooltip, Typography } from 'antd';
 import { FileExcelOutlined, PrinterOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
+import dayjs from 'dayjs';
 import { usePmAdhocDetail, usePmAdhocResults } from '@core/hooks/api/usePmAdhoc';
 import type { AdhocResultRow } from '@core/types/pmAdhoc';
 import { exportWorkbook, printAsPDF } from '@core/utils/excelExport';
@@ -149,6 +150,7 @@ export function AdhocResultPanel({ taskId }: Props) {
                 rows={rows}
                 granularity={g}
                 loading={rowsLoading}
+                taskDeviceSns={task.deviceSns}
               />
             ),
           }))}
@@ -162,10 +164,12 @@ function GranularityView({
   rows,
   granularity,
   loading,
+  taskDeviceSns,
 }: {
   rows: AdhocResultRow[];
   granularity: string;
   loading: boolean;
+  taskDeviceSns: string[];
 }) {
   const series = useMemo(() => buildSeriesByMetric(rows, granularity), [rows, granularity]);
   if (loading) return <Spin />;
@@ -197,10 +201,39 @@ function GranularityView({
         pagination={{ pageSize: 10, size: 'small' }}
         style={{ marginTop: 12 }}
         columns={[
-          { title: '设备', render: (_, r) => `${r.deviceOui}/${r.deviceSn}`, width: 200 },
+          {
+            title: '设备',
+            width: 200,
+            render: (_, r) => {
+              if (r.deviceSn === 'AGGREGATED') {
+                const list = taskDeviceSns.join('\n');
+                return (
+                  <Tooltip
+                    title={<pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{list}</pre>}
+                  >
+                    <Tag color="purple" style={{ cursor: 'help' }}>
+                      聚合组·{taskDeviceSns.length} 台
+                    </Tag>
+                  </Tooltip>
+                );
+              }
+              return r.deviceOui ? `${r.deviceOui}/${r.deviceSn}` : r.deviceSn;
+            },
+          },
           { title: '指标', dataIndex: 'metricPath' },
           { title: '值', dataIndex: 'metricValue', width: 120 },
-          { title: '时间', dataIndex: 'startTime', width: 200 },
+          {
+            title: '开始时间',
+            dataIndex: 'startTime',
+            width: 160,
+            render: (t?: string) => (t ? dayjs(t).format('YYYY-MM-DD HH:mm') : '-'),
+          },
+          {
+            title: '结束时间',
+            dataIndex: 'endTime',
+            width: 160,
+            render: (t?: string) => (t ? dayjs(t).format('YYYY-MM-DD HH:mm') : '-'),
+          },
         ]}
       />
     </>
