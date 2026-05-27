@@ -22,8 +22,8 @@ import { useT } from '@/hooks/useT';
 // 2026-05-27 用户决策:取消 catalog_protected 在 UI 上的锁定逻辑。
 // 是否可编辑/删除由路由层 RBAC(withAdminRole)+ 后端 API 权限校验决定,
 // 不再在前端基于 catalogProtected 拦截。
-
-const OPERATION_TYPES: MMLOperationType[] = ['LST', 'MOD', 'ADD', 'RMV', 'DSP', 'ACT', 'DEA', 'RST', 'CLR', 'UPG'];
+//
+// 编辑态:command_code / operation_type 后端 PATCH 不允许改 → readonly 展示。
 
 export interface CommandMetaSectionProps {
   command: GroupTreeCommand;
@@ -91,13 +91,13 @@ export default function CommandMetaSection({
     try {
       setSubmitting(true);
       const values = await form.validateFields();
+      // 后端 PATCH /commands/:id 不接受 command_code / operation_type(创建后不可改),
+      // 由 toBackendUpdateCommand 兜底剔除,这里同样不传以保持意图清晰。
       await updateMut.mutateAsync({
         id: command.id,
         req: {
           groupId: values.groupId,
-          commandCode: values.commandCode,
           logicalCode: values.logicalCode,
-          operationType: values.operationType,
           commandNameI18n: {
             'zh-CN': values.displayNameZh,
             'en-US': values.displayNameEn,
@@ -133,8 +133,8 @@ export default function CommandMetaSection({
         >
           <Form.Item
             name="groupId"
-            label={t('mml.admin.catalog.commands.group')}
-            rules={[{ required: true }]}
+            label={t('mml.admin.catalog.form.group')}
+            rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
           >
             <Select
               options={groupOptions.map((g) => ({
@@ -147,51 +147,47 @@ export default function CommandMetaSection({
           </Form.Item>
           <Form.Item
             name="commandCode"
-            label="command_code"
-            rules={[
-              { required: true },
-              { pattern: /^[A-Z0-9_]+$/, message: 'UPPER_SNAKE_CASE only' },
-            ]}
+            label={t('mml.admin.catalog.form.commandCode')}
+            extra={t('mml.admin.catalog.form.codeNotEditableHint')}
           >
-            <Input />
+            <Input disabled />
           </Form.Item>
           <Form.Item
             name="logicalCode"
-            label="logical_code"
-            rules={[{ required: true }]}
+            label={t('mml.admin.catalog.form.logicalCode')}
+            rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
           >
             <Input />
           </Form.Item>
           <Form.Item
             name="operationType"
-            label={t('mml.admin.catalog.commands.op')}
-            rules={[{ required: true }]}
+            label={t('mml.admin.catalog.form.opType')}
           >
-            <Select options={OPERATION_TYPES.map((op) => ({ label: op, value: op }))} />
+            <Input disabled />
           </Form.Item>
           <Form.Item
             name="displayNameZh"
-            label={t('mml.admin.catalog.commands.displayNameZh')}
-            rules={[{ required: true }]}
+            label={t('mml.admin.catalog.form.nameZh')}
+            rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
           >
             <Input />
           </Form.Item>
           <Form.Item
             name="displayNameEn"
-            label={t('mml.admin.catalog.commands.displayNameEn')}
-            rules={[{ required: true }]}
+            label={t('mml.admin.catalog.form.nameEn')}
+            rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
           >
             <Input />
           </Form.Item>
           <Form.Item
             name="targetObject"
-            label={t('mml.admin.catalog.commands.targetObject')}
+            label={t('mml.admin.catalog.form.targetObject')}
           >
             <Input />
           </Form.Item>
           <Form.Item
             name="requireConfirm"
-            label={t('mml.admin.catalog.commands.requireConfirm')}
+            label={t('mml.admin.catalog.form.requireConfirm')}
             valuePropName="checked"
           >
             <Switch />

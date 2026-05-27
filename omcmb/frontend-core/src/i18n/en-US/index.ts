@@ -5106,6 +5106,23 @@ const messages: Record<string, string> = {
   'mml.admin.catalog.empty.selectCommandHint': 'Or click [⋯] next to a group → Add Command',
   'mml.admin.catalog.empty.groupSelected':     'Selected group {name} ({count} commands)',
   'mml.admin.catalog.empty.groupHint':         'Select a command to view and edit its paths',
+  // form labels / friendly validation (2026-05-27 feedback)
+  'mml.admin.catalog.form.groupCode':          'Group Code',
+  'mml.admin.catalog.form.groupCodePlaceholder':'e.g. BSC_CONFIGURATION',
+  'mml.admin.catalog.form.commandCode':        'Command Code',
+  'mml.admin.catalog.form.commandCodePlaceholder':'e.g. QUERY_CELL_STATUS',
+  'mml.admin.catalog.form.logicalCode':        'Logical Code',
+  'mml.admin.catalog.form.logicalCodePlaceholder':'e.g. MML_QRY_CELL',
+  'mml.admin.catalog.form.nameZh':             'Display Name (zh-CN)',
+  'mml.admin.catalog.form.nameEn':             'Display Name (en-US)',
+  'mml.admin.catalog.form.targetObject':       'Target Object',
+  'mml.admin.catalog.form.requireConfirm':     'Require Confirmation',
+  'mml.admin.catalog.form.sortOrder':          'Sort Order',
+  'mml.admin.catalog.form.group':              'Group',
+  'mml.admin.catalog.form.opType':             'Operation Type',
+  'mml.admin.catalog.form.codeNotEditableHint':'Command Code / Operation Type cannot be modified after creation',
+  'mml.admin.catalog.validation.upperSnakeCase':'Use upper-case letters, digits and underscores only (e.g. BSC_CONFIG)',
+  'mml.admin.catalog.validation.required':     'Required',
 
   // -------------------------------------------------------------------------
   // System License (F06 redesign, singleton model)

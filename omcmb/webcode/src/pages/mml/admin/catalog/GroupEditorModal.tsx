@@ -109,26 +109,37 @@ export default function GroupEditorModal({
       <Form form={form} layout="vertical">
         <Form.Item
           name="groupCode"
-          label="group_code"
+          label={t('mml.admin.catalog.form.groupCode')}
           rules={[
-            { required: true },
-            { pattern: /^[A-Z0-9_]+$/, message: 'UPPER_SNAKE_CASE only' },
+            { required: true, message: t('mml.admin.catalog.validation.required') },
+            {
+              pattern: /^[A-Z0-9_]+$/,
+              message: t('mml.admin.catalog.validation.upperSnakeCase'),
+            },
           ]}
         >
           <Input
-            placeholder="BSC_CONFIGURATION"
-            disabled={mode === 'rename' && targetGroup?.groupCode === 'ROOT'}
+            placeholder={t('mml.admin.catalog.form.groupCodePlaceholder')}
+            disabled={mode === 'rename'}
           />
         </Form.Item>
-        <Form.Item name="displayNameZh" label="zh-CN" rules={[{ required: true }]}>
+        <Form.Item
+          name="displayNameZh"
+          label={t('mml.admin.catalog.form.nameZh')}
+          rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
+        >
           <Input placeholder="基站配置" />
         </Form.Item>
-        <Form.Item name="displayNameEn" label="en-US" rules={[{ required: true }]}>
+        <Form.Item
+          name="displayNameEn"
+          label={t('mml.admin.catalog.form.nameEn')}
+          rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
+        >
           <Input placeholder="BSC Configuration" />
         </Form.Item>
         <Form.Item
           name="displayOrder"
-          label={t('mml.admin.catalog.subField.sortOrder')}
+          label={t('mml.admin.catalog.form.sortOrder')}
         >
           <InputNumber min={0} step={10} style={{ width: 160 }} />
         </Form.Item>

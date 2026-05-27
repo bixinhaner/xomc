@@ -1,13 +1,19 @@
 import { useEffect } from 'react';
 import { Modal, Form, Input, Select, Switch, message } from 'antd';
 import { useCreateCommand } from '@core/hooks/api/useMmlAdmin';
+import {
+  BACKEND_ALLOWED_OPERATION_TYPES,
+  type BackendOperationType,
+} from '@core/types/mmlAdmin';
 import type { GroupTreeNode } from '@core/types/mmlConsole';
-import type { MMLOperationType } from '@core/types/mml';
 import { useT } from '@/hooks/useT';
 
 // 2026-05-27 mml-admin-catalog-redesign-20260527 §5.2：分组旁 [⋯] → 新增命令的入口。
 // 编辑命令通过 CommandMetaSection 内联表单完成（不复用此 Modal）。
-const OPERATION_TYPES: MMLOperationType[] = ['LST', 'MOD', 'ADD', 'RMV', 'DSP', 'ACT', 'DEA', 'RST', 'CLR', 'UPG'];
+//
+// 2026-05-27 修复:operationType 收窄到后端 binding 允许的 4 种(LST/MOD/ADD/RMV),
+// MML 其余 op 当前没有 admin 写端点支持。
+const OPERATION_TYPES = BACKEND_ALLOWED_OPERATION_TYPES;
 
 export interface CommandEditorModalProps {
   open: boolean;
@@ -23,7 +29,7 @@ interface FormValues {
   groupId: string;
   commandCode: string;
   logicalCode: string;
-  operationType: MMLOperationType;
+  operationType: BackendOperationType;
   displayNameZh: string;
   displayNameEn: string;
   targetObject?: string;
@@ -89,11 +95,11 @@ export default function CommandEditorModal({
       <Form form={form} layout="vertical">
         <Form.Item
           name="groupId"
-          label={t('mml.admin.catalog.commands.group')}
-          rules={[{ required: true }]}
+          label={t('mml.admin.catalog.form.group')}
+          rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
         >
           <Select
-            placeholder={t('mml.admin.catalog.commands.group')}
+            placeholder={t('mml.admin.catalog.form.group')}
             options={groupOptions.map((g) => ({
               label: g.displayName,
               value: g.id,
@@ -105,51 +111,55 @@ export default function CommandEditorModal({
         </Form.Item>
         <Form.Item
           name="commandCode"
-          label="command_code"
+          label={t('mml.admin.catalog.form.commandCode')}
+          extra={t('mml.admin.catalog.form.codeNotEditableHint')}
           rules={[
-            { required: true },
-            { pattern: /^[A-Z0-9_]+$/, message: 'UPPER_SNAKE_CASE only' },
+            { required: true, message: t('mml.admin.catalog.validation.required') },
+            {
+              pattern: /^[A-Z0-9_]+$/,
+              message: t('mml.admin.catalog.validation.upperSnakeCase'),
+            },
           ]}
         >
-          <Input placeholder="QUERY_CELL_STATUS" />
+          <Input placeholder={t('mml.admin.catalog.form.commandCodePlaceholder')} />
         </Form.Item>
         <Form.Item
           name="logicalCode"
-          label="logical_code"
-          rules={[{ required: true }]}
+          label={t('mml.admin.catalog.form.logicalCode')}
+          rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
         >
-          <Input placeholder="MML_QRY_CELL" />
+          <Input placeholder={t('mml.admin.catalog.form.logicalCodePlaceholder')} />
         </Form.Item>
         <Form.Item
           name="operationType"
-          label={t('mml.admin.catalog.commands.op')}
-          rules={[{ required: true }]}
+          label={t('mml.admin.catalog.form.opType')}
+          rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
         >
           <Select options={OPERATION_TYPES.map((op) => ({ label: op, value: op }))} />
         </Form.Item>
         <Form.Item
           name="displayNameZh"
-          label={t('mml.admin.catalog.commands.displayNameZh')}
-          rules={[{ required: true }]}
+          label={t('mml.admin.catalog.form.nameZh')}
+          rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
         >
           <Input placeholder="查询小区状态" />
         </Form.Item>
         <Form.Item
           name="displayNameEn"
-          label={t('mml.admin.catalog.commands.displayNameEn')}
-          rules={[{ required: true }]}
+          label={t('mml.admin.catalog.form.nameEn')}
+          rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
         >
           <Input placeholder="Query Cell Status" />
         </Form.Item>
         <Form.Item
           name="targetObject"
-          label={t('mml.admin.catalog.commands.targetObject')}
+          label={t('mml.admin.catalog.form.targetObject')}
         >
           <Input placeholder="Device.Services.X_CMCC_LTE.Cell.{i}." />
         </Form.Item>
         <Form.Item
           name="requireConfirm"
-          label={t('mml.admin.catalog.commands.requireConfirm')}
+          label={t('mml.admin.catalog.form.requireConfirm')}
           valuePropName="checked"
         >
           <Switch />

@@ -180,7 +180,10 @@ func (r *PgGroupTreeRepository) BuildTree(ctx context.Context, rootCode, lang st
 // queryGroupsAndCommands 单 SQL JOIN 抓 groups + commands。
 // rootCode 为空时拉所有 chapter 子树；非空时按 LTREE @> 拉指定子树。
 //
-// 始终通过 group_code LIKE 'chapter:%' 过滤为 chapter 顶层视图（spec v2.3 §R-1）。
+// 过滤规则:
+//   - standard 来源:LIKE 'chapter:%'(spec v2.3 §R-1)
+//   - admin 来源:全部纳入(2026-05-27 修复;此前 admin 在 mml/admin/catalog 页面
+//     新建的分组因不带 chapter: 前缀被排除,创建后看不见)
 func (r *PgGroupTreeRepository) queryGroupsAndCommands(ctx context.Context, rootCode string) ([]groupTreeRow, error) {
 	// LEFT JOIN：父容器 group（无 commands）扫出的 c.* 列全为 NULL。Scan 到
 	// 非指针 bool（RequireConfirm / CommandCatalogProtected）会报
@@ -211,7 +214,7 @@ SELECT
 FROM mml_command_groups g
 LEFT JOIN mml_commands c ON c.group_id = g.id
 WHERE g.path IS NOT NULL
-  AND g.group_code LIKE 'chapter:%%'
+  AND (g.group_code LIKE 'chapter:%%' OR g.source = 'admin')
 %s
 ORDER BY g.path, g.display_order, c.operation_type, c.logical_code, c.command_code`
 

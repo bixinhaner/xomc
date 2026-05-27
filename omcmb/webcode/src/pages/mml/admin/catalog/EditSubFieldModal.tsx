@@ -89,14 +89,14 @@ export default function EditSubFieldModal({
         <Form.Item
           name="labelZh"
           label={t('mml.admin.catalog.subField.labelZh')}
-          rules={[{ required: true }]}
+          rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
         >
           <Input placeholder="小区 ID" />
         </Form.Item>
         <Form.Item
           name="labelEn"
           label={t('mml.admin.catalog.subField.labelEn')}
-          rules={[{ required: true }]}
+          rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
         >
           <Input placeholder="Cell ID" />
         </Form.Item>

@@ -52,20 +52,37 @@ import {
   mapBackendCommand,
   mapBackendSubField,
   mapBackendAdminSubFieldEnriched,
+  mapBackendStandardParam,
+  toBackendCreateGroup,
+  toBackendUpdateGroup,
+  toBackendCreateCommand,
+  toBackendUpdateCommand,
+  toBackendCreateSubField,
+  toBackendUpdateSubField,
 } from '../../types/mmlAdmin';
+import type { BackendStandardParam } from '../../types/mmlAdmin';
 import type { PageResponse } from '../../types/pagination';
 
 const BASE = '/mml/admin';
 
 export const mmlAdminApi = {
   // ---------------- Groups ----------------
+  // 2026-05-27 修复:所有写端点通过 toBackend* 显式 camel→snake + 平铺 zh/en 字段,
+  // 因为后端 admin_service.go 用 snake_case JSON tag 且 ParamVersion required,
+  // HTTP 拦截器只转 query params 不转 body。
   async createGroup(req: CreateGroupRequest): Promise<GroupAdmin> {
-    const { data } = await http.post<BackendGroupAdmin>(`${BASE}/groups`, req);
+    const { data } = await http.post<BackendGroupAdmin>(
+      `${BASE}/groups`,
+      toBackendCreateGroup(req),
+    );
     return mapBackendGroup(data);
   },
 
   async updateGroup(id: string, req: UpdateGroupRequest): Promise<GroupAdmin> {
-    const { data } = await http.patch<BackendGroupAdmin>(`${BASE}/groups/${id}`, req);
+    const { data } = await http.patch<BackendGroupAdmin>(
+      `${BASE}/groups/${id}`,
+      toBackendUpdateGroup(req),
+    );
     return mapBackendGroup(data);
   },
 
@@ -75,12 +92,18 @@ export const mmlAdminApi = {
 
   // ---------------- Commands ----------------
   async createCommand(req: CreateCommandRequest): Promise<CommandAdmin> {
-    const { data } = await http.post<BackendCommandAdmin>(`${BASE}/commands`, req);
+    const { data } = await http.post<BackendCommandAdmin>(
+      `${BASE}/commands`,
+      toBackendCreateCommand(req),
+    );
     return mapBackendCommand(data);
   },
 
   async updateCommand(id: string, req: UpdateCommandRequest): Promise<CommandAdmin> {
-    const { data } = await http.patch<BackendCommandAdmin>(`${BASE}/commands/${id}`, req);
+    const { data } = await http.patch<BackendCommandAdmin>(
+      `${BASE}/commands/${id}`,
+      toBackendUpdateCommand(req),
+    );
     return mapBackendCommand(data);
   },
 
@@ -95,7 +118,7 @@ export const mmlAdminApi = {
   ): Promise<SubFieldAdmin> {
     const { data } = await http.post<BackendSubFieldAdmin>(
       `${BASE}/commands/${commandId}/sub-fields`,
-      req,
+      toBackendCreateSubField(req),
     );
     return mapBackendSubField(data);
   },
@@ -107,7 +130,7 @@ export const mmlAdminApi = {
   ): Promise<SubFieldAdmin> {
     const { data } = await http.patch<BackendSubFieldAdmin>(
       `${BASE}/commands/${commandId}/sub-fields/${subFieldId}`,
-      req,
+      toBackendUpdateSubField(req),
     );
     return mapBackendSubField(data);
   },
@@ -129,7 +152,7 @@ export const mmlAdminApi = {
     page?: number;
     pageSize?: number;
   } = {}): Promise<PageResponse<StandardParamView>> {
-    const { data } = await http.get<PageResponse<StandardParamView>>(
+    const { data } = await http.get<PageResponse<BackendStandardParam>>(
       `${BASE}/standard-params`,
       {
         params: {
@@ -140,13 +163,18 @@ export const mmlAdminApi = {
         },
       },
     );
-    return data;
+    // 2026-05-27 修复:后端 snake_case → 前端 camelCase 显式映射,
+    // 否则 standardPath/entryType 等字段全为 undefined。
+    return {
+      ...data,
+      items: (data.items ?? []).map(mapBackendStandardParam),
+    };
   },
 
   /** 单条 standard_param 查询 —— autofill 兜底 / 编辑表单 prefill。 */
   async getStandardParam(id: string): Promise<StandardParamView> {
-    const { data } = await http.get<StandardParamView>(`${BASE}/standard-params/${id}`);
-    return data;
+    const { data } = await http.get<BackendStandardParam>(`${BASE}/standard-params/${id}`);
+    return mapBackendStandardParam(data);
   },
 
   /** Admin 全集 group 列表（不过滤 chapter 前缀）。 */
@@ -210,9 +238,11 @@ export const mmlAdminApi = {
     commandId: string,
     req: BatchCreateSubFieldsRequest,
   ): Promise<SubFieldAdmin[]> {
+    // 2026-05-27 修复:后端 binding tag 是 snake_case (standard_path_ids),
+    // 前端类型用 camelCase (standardPathIds),HTTP 拦截器不转 body,显式映射。
     const { data } = await http.post<{ items: BackendSubFieldAdmin[] }>(
       `${BASE}/commands/${commandId}/sub-fields/batch`,
-      req,
+      { standard_path_ids: req.standardPathIds },
     );
     return (data.items ?? []).map(mapBackendSubField);
   },

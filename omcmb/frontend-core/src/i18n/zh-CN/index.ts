@@ -5123,6 +5123,23 @@ const messages: Record<string, string> = {
   'mml.admin.catalog.empty.selectCommandHint': '或点击分组旁的 [⋯] → 新增命令',
   'mml.admin.catalog.empty.groupSelected':     '已选中分组 {name}（{count} 条命令）',
   'mml.admin.catalog.empty.groupHint':         '请选择具体命令以查看与编辑 path',
+  // 表单 label / 友好校验提示(2026-05-27 测试反馈)
+  'mml.admin.catalog.form.groupCode':          '分组编码',
+  'mml.admin.catalog.form.groupCodePlaceholder':'例如 BSC_CONFIGURATION',
+  'mml.admin.catalog.form.commandCode':        '命令编码',
+  'mml.admin.catalog.form.commandCodePlaceholder':'例如 QUERY_CELL_STATUS',
+  'mml.admin.catalog.form.logicalCode':        '逻辑码',
+  'mml.admin.catalog.form.logicalCodePlaceholder':'例如 MML_QRY_CELL',
+  'mml.admin.catalog.form.nameZh':             '中文名称',
+  'mml.admin.catalog.form.nameEn':             '英文名称',
+  'mml.admin.catalog.form.targetObject':       '目标对象路径',
+  'mml.admin.catalog.form.requireConfirm':     '需二次确认',
+  'mml.admin.catalog.form.sortOrder':          '排序',
+  'mml.admin.catalog.form.group':              '所属分组',
+  'mml.admin.catalog.form.opType':             '操作类型',
+  'mml.admin.catalog.form.codeNotEditableHint':'命令编码 / 操作类型创建后不可修改',
+  'mml.admin.catalog.validation.upperSnakeCase':'请使用大写字母、数字和下划线（如 BSC_CONFIG）',
+  'mml.admin.catalog.validation.required':     '必填项',
 
   // -------------------------------------------------------------------------
   // System License (F06 重构，单例 license 模型)

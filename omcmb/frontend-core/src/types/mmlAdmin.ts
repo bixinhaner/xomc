@@ -51,13 +51,67 @@ export interface CreateGroupRequest {
   parentId?: string;
   displayNameI18n: I18nMap;
   displayOrder?: number;
+  /** Catalog 册版本(对应后端 param_version,目前只有 cmcc-td-lte-v2.3)。
+   * 不传则由 api 层用 catalogParamVersion 默认值。 */
+  paramVersion?: string;
 }
 
 export interface UpdateGroupRequest {
+  /** 注意:后端 PATCH 端点不接受 groupCode / parentId,字段保留是为了向前兼容
+   * 调用者(传了会被 api 层忽略,只把 displayNameI18n / displayOrder 转换后发送)。 */
   groupCode?: string;
   parentId?: string | null;
   displayNameI18n?: I18nMap;
   displayOrder?: number;
+}
+
+// ============================================================
+// 写端点 toBackend transform —— 2026-05-27 修复前后端契约错位
+// 后端 admin_service.go 用 snake_case + 平铺 zh/en 字段(非 i18n map);
+// HTTP 拦截器仅转 query params 不转 body,所以这里手动 map。
+// ============================================================
+
+/** 默认 catalog 册版本。当前数据库唯一一册为 cmcc-td-lte-v2.3。
+ * 后续 multi-catalog 时改为从 UI 选 / 后端 list-versions 拉。 */
+export const DEFAULT_CATALOG_PARAM_VERSION = 'cmcc-td-lte-v2.3';
+
+export interface BackendCreateGroupBody {
+  group_code: string;
+  group_name_zh: string;
+  group_name_en: string;
+  param_version: string;
+  display_order?: number;
+}
+
+export interface BackendUpdateGroupBody {
+  group_name_zh?: string;
+  group_name_en?: string;
+  display_order?: number;
+}
+
+export function toBackendCreateGroup(req: CreateGroupRequest): BackendCreateGroupBody {
+  const i18n = req.displayNameI18n ?? {};
+  const zh = i18n['zh-CN'] || i18n.zh || '';
+  const en = i18n['en-US'] || i18n.en || '';
+  return {
+    group_code: req.groupCode,
+    group_name_zh: zh,
+    group_name_en: en || zh,
+    param_version: req.paramVersion || DEFAULT_CATALOG_PARAM_VERSION,
+    display_order: req.displayOrder ?? 100,
+  };
+}
+
+export function toBackendUpdateGroup(req: UpdateGroupRequest): BackendUpdateGroupBody {
+  const out: BackendUpdateGroupBody = {};
+  if (req.displayNameI18n) {
+    const zh = req.displayNameI18n['zh-CN'] || req.displayNameI18n.zh;
+    const en = req.displayNameI18n['en-US'] || req.displayNameI18n.en;
+    if (zh !== undefined) out.group_name_zh = zh;
+    if (en !== undefined) out.group_name_en = en;
+  }
+  if (req.displayOrder !== undefined) out.display_order = req.displayOrder;
+  return out;
 }
 
 // ============================================================
@@ -101,13 +155,78 @@ export interface CreateCommandRequest {
 }
 
 export interface UpdateCommandRequest {
+  /** 后端 PATCH 不接受 commandCode / operationType(创建后不可改),传了会被 api 层忽略 */
   commandCode?: string;
-  logicalCode?: string;
   operationType?: MMLOperationType;
+  logicalCode?: string;
   commandNameI18n?: I18nMap;
   groupId?: string;
   targetObject?: string | null;
   requireConfirm?: boolean;
+}
+
+// ---- Command toBackend transforms ----
+
+/** 后端 binding 允许的 operation_type 子集。前端 select 应收窄。 */
+export const BACKEND_ALLOWED_OPERATION_TYPES = ['LST', 'MOD', 'ADD', 'RMV'] as const;
+export type BackendOperationType = (typeof BACKEND_ALLOWED_OPERATION_TYPES)[number];
+
+export interface BackendCreateCommandBody {
+  command_name: string;
+  command_code: string;
+  operation_type: string;
+  group_id?: string;
+  command_name_i18n?: Record<string, string>;
+  target_object?: string;
+  require_confirm?: boolean;
+  logical_code?: string;
+  logical_name_i18n?: Record<string, string>;
+}
+
+export interface BackendUpdateCommandBody {
+  command_name?: string;
+  group_id?: string;
+  command_name_i18n?: Record<string, string>;
+  target_object?: string;
+  require_confirm?: boolean;
+  logical_code?: string;
+  logical_name_i18n?: Record<string, string>;
+}
+
+function deriveCommandName(i18n: I18nMap | undefined, code: string): string {
+  if (!i18n) return code;
+  return i18n['zh-CN'] || i18n['en-US'] || i18n.zh || i18n.en || code;
+}
+
+export function toBackendCreateCommand(req: CreateCommandRequest): BackendCreateCommandBody {
+  return {
+    command_name: deriveCommandName(req.commandNameI18n, req.commandCode),
+    command_code: req.commandCode,
+    operation_type: req.operationType,
+    group_id: req.groupId,
+    command_name_i18n: req.commandNameI18n,
+    target_object: req.targetObject || undefined,
+    require_confirm: req.requireConfirm ?? false,
+    logical_code: req.logicalCode,
+    logical_name_i18n: req.commandNameI18n,
+  };
+}
+
+export function toBackendUpdateCommand(req: UpdateCommandRequest): BackendUpdateCommandBody {
+  const out: BackendUpdateCommandBody = {};
+  if (req.commandNameI18n) {
+    out.command_name_i18n = req.commandNameI18n;
+    out.logical_name_i18n = req.commandNameI18n;
+    const name = deriveCommandName(req.commandNameI18n, '');
+    if (name) out.command_name = name;
+  }
+  if (req.groupId !== undefined) out.group_id = req.groupId;
+  if (req.targetObject !== undefined && req.targetObject !== null) {
+    out.target_object = req.targetObject;
+  }
+  if (req.requireConfirm !== undefined) out.require_confirm = req.requireConfirm;
+  if (req.logicalCode !== undefined) out.logical_code = req.logicalCode;
+  return out;
 }
 
 // ============================================================
@@ -151,6 +270,46 @@ export interface UpdateSubFieldRequest {
   defaultSelected?: boolean;
   isRequired?: boolean;
   sortOrder?: number;
+}
+
+// ---- SubField toBackend transforms ----
+
+export interface BackendCreateSubFieldBody {
+  param_id: string;
+  mml_code: string;
+  label_i18n?: Record<string, string>;
+  default_selected?: boolean;
+  is_required?: boolean;
+  sort_order?: number;
+}
+
+export interface BackendUpdateSubFieldBody {
+  mml_code?: string;
+  label_i18n?: Record<string, string>;
+  default_selected?: boolean;
+  is_required?: boolean;
+  sort_order?: number;
+}
+
+export function toBackendCreateSubField(req: CreateSubFieldRequest): BackendCreateSubFieldBody {
+  return {
+    param_id: req.paramId,
+    mml_code: req.mmlCode,
+    label_i18n: req.labelI18n,
+    default_selected: req.defaultSelected,
+    is_required: req.isRequired,
+    sort_order: req.sortOrder ?? 100,
+  };
+}
+
+export function toBackendUpdateSubField(req: UpdateSubFieldRequest): BackendUpdateSubFieldBody {
+  const out: BackendUpdateSubFieldBody = {};
+  if (req.mmlCode !== undefined) out.mml_code = req.mmlCode;
+  if (req.labelI18n !== undefined) out.label_i18n = req.labelI18n;
+  if (req.defaultSelected !== undefined) out.default_selected = req.defaultSelected;
+  if (req.isRequired !== undefined) out.is_required = req.isRequired;
+  if (req.sortOrder !== undefined) out.sort_order = req.sortOrder;
+  return out;
 }
 
 // ============================================================
@@ -258,6 +417,33 @@ export interface StandardParamView {
   minValue?: number | null;
   maxValue?: number | null;
   description: string;
+}
+
+/** 后端 GET /admin/standard-params 单条原始字段(snake_case)。 */
+export interface BackendStandardParam {
+  id: string;
+  standard_path: string;
+  entry_type: string;
+  access: string;
+  data_type: string;
+  change_applies: string;
+  min_value?: number | null;
+  max_value?: number | null;
+  description: string;
+}
+
+export function mapBackendStandardParam(b: BackendStandardParam): StandardParamView {
+  return {
+    id: b.id,
+    standardPath: b.standard_path,
+    entryType: b.entry_type,
+    access: b.access,
+    dataType: b.data_type,
+    changeApplies: b.change_applies,
+    minValue: b.min_value ?? null,
+    maxValue: b.max_value ?? null,
+    description: b.description ?? '',
+  };
 }
 
 /** 后端 MMLCommandSubFieldEnriched 的 JSON 形态（snake_case）。

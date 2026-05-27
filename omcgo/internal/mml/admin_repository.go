@@ -585,19 +585,48 @@ func (r *PgAdminGroupRepository) Create(ctx context.Context, g *CommandGroup) er
 	if g.Source == "" {
 		g.Source = SourceAdmin
 	}
+	// path 是 ltree NOT NULL,顶层分组从 group_code 派生(冒号 / 空白 / 短横线
+	// 等非 ltree 合法字符替换为 '_',对外仍以 group_code 展示)。
+	// 2026-05-27 修复:此前 admin Create 漏填 path,导致 NULL 约束 500。
+	pathLabel := ltreeLabelFromCode(g.GroupCode)
 	const sqlText = `
 INSERT INTO mml_command_groups (
     id, group_code, group_name_zh, group_name_en, param_version,
-    display_order, name_i18n, source, catalog_protected
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+    display_order, name_i18n, source, catalog_protected, path
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::ltree)`
 	nameI18n := jsonOrEmpty(map[string]string{"zh-CN": g.GroupNameZh, "en-US": g.GroupNameEn})
 	if _, err := r.pool.Exec(ctx, sqlText,
 		g.ID, g.GroupCode, g.GroupNameZh, g.GroupNameEn, g.ParamVersion,
-		g.DisplayOrder, nameI18n, g.Source, g.CatalogProtected,
+		g.DisplayOrder, nameI18n, g.Source, g.CatalogProtected, pathLabel,
 	); err != nil {
 		return fmt.Errorf("insert group: %w", err)
 	}
 	return nil
+}
+
+// ltreeLabelFromCode 把 group_code 规范化为 ltree label。
+// ltree 仅允许 [A-Za-z0-9_],其他字符替换为 '_';开头是数字时前缀 'g_'。
+func ltreeLabelFromCode(code string) string {
+	if code == "" {
+		return "g_" + uuid.New().String()[:8]
+	}
+	out := make([]byte, 0, len(code))
+	for i := 0; i < len(code); i++ {
+		c := code[i]
+		switch {
+		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '_':
+			out = append(out, c)
+		default:
+			out = append(out, '_')
+		}
+	}
+	if len(out) == 0 {
+		return "g"
+	}
+	if out[0] >= '0' && out[0] <= '9' {
+		return "g_" + string(out)
+	}
+	return string(out)
 }
 
 func (r *PgAdminGroupRepository) Update(ctx context.Context, g *CommandGroup) error {
