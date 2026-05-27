@@ -23,6 +23,11 @@ COPY omcgo/ .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcgo-worker ./cmd/worker
 
+# omcctl 运维 CLI 与 worker 同镜像发布:operator 用 docker exec 进容器跑,
+# 省独立镜像 / 独立 compose 服务。worker 是长跑守护进程,始终可 exec。
+# 增量约 +10MB(单 Go 静态二进制)。
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /build/bin/omcctl ./cmd/omcctl
+
 # ---
 
 FROM alpine:3.19
@@ -36,6 +41,8 @@ RUN apk add --no-cache ca-certificates tzdata
 RUN mkdir -p /var/log/omcgo && chmod 777 /var/log/omcgo
 
 COPY --from=builder /build/bin/omcgo-worker /usr/local/bin/omcgo-worker
+# omcctl 运维 CLI(随 worker 镜像发布;用法: docker exec docker-worker-1 omcctl ...)
+COPY --from=builder /build/bin/omcctl /usr/local/bin/omcctl
 COPY --from=builder /build/cmd/worker/etc/config.dev.yaml /etc/omcgo/worker.dev.yaml
 COPY --from=builder /build/cmd/worker/etc/config.test.yaml /etc/omcgo/worker.test.yaml
 COPY --from=builder /build/cmd/worker/etc/config.prod.yaml /etc/omcgo/worker.prod.yaml
@@ -44,6 +51,8 @@ RUN chmod +x /entrypoint.sh
 
 ENV TZ=Asia/Shanghai
 ENV OMCGO_SERVICE=worker
+# omcctl 默认连 compose 内部 app:8081,命令行可用 --server / OMCCTL_SERVER 覆盖。
+ENV OMCCTL_SERVER=http://app:8081
 
 EXPOSE 9092
 
