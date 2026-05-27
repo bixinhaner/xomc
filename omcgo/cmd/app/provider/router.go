@@ -16,6 +16,7 @@ import (
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/middleware"
 	"github.com/omcgo/omcgo/internal/device"
+	"github.com/omcgo/omcgo/internal/devsweep"
 	"github.com/omcgo/omcgo/internal/mr"
 	mrtask "github.com/omcgo/omcgo/internal/mr/task"
 	"github.com/omcgo/omcgo/internal/pm"
@@ -355,6 +356,24 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// T-0098 P5-01：dmRegistry 已删除，直接注入 ParamRegistry / ProductRegistry。
 	paramTreeHandler := device.NewParameterTreeHandler(c.DeviceService, c.ParamRepo, c.ParamRegistry, c.ProductRegistry, c.Logger)
 	paramTreeHandler.RegisterRoutes(permGroup("devices"))
+
+	// T-0179: omcctl device sweep-paths — 单设备 GPV 探测 → 标 param_mappings.is_supported。
+	// 与 PR-E 被动 SPV-9005 auto-learn 互补：本端点主动探测，常用于设备入场后
+	// 一次性扫掉历史 BLQ 数据模型里那 11 个 CPE 实际不支持的 path。
+	if c.DeviceService != nil && c.ProductRegistry != nil && c.ParamRegistry != nil && c.TaskSvc != nil {
+		sweepRepo := devsweep.NewPgRepository(c.PgPool)
+		sweepProber := devsweep.NewTaskProber(c.TaskSvc, 0, 0, c.Logger)
+		sweepSvc := devsweep.NewService(
+			c.DeviceService,
+			c.ProductRegistry,
+			c.ParamRegistry,
+			sweepProber,
+			sweepRepo,
+			c.Logger,
+		)
+		sweepHandler := devsweep.NewHandler(sweepSvc)
+		sweepHandler.RegisterRoutes(permGroup("devices"))
+	}
 
 	// T-0138：「快速设置」分组元数据（设备运维人员可读）
 	if c.QuickSettingsRegistry != nil && c.DeviceService != nil && c.ProductRegistry != nil && c.ProductRepo != nil {
