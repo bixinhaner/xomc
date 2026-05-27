@@ -181,6 +181,8 @@ export default function KPIQuery() {
       startTime: submittedRange.start,
       endTime: submittedRange.end,
       limit: 5000,
+      // 让后端按 (时间桶 × 指标) 补齐占位行，避免该设备此时段全空时整张表"暂无数据"
+      fillEmpty: true,
     };
   }, [submittedPayload, submittedRange]);
 

@@ -237,6 +237,9 @@ export interface AggregatedQueryParams {
   endTime?: string;
   limit?: number;
   offset?: number;
+  // 后端按 (时间桶 × 指标) 补齐占位行（filled=true，metric_value 前端 mapper 设 null）。
+  // 适用 device 维度单设备查询；未启用时后端不补行。
+  fillEmpty?: boolean;
 }
 
 // 后端 aggregator.Row JSON（已加 snake_case json tag）。
@@ -256,6 +259,9 @@ export interface BackendAggregatedRow {
   ingest_time: string;
   object_ldn?: string | null;
   extra?: Record<string, unknown>;
+  // 后端 fill_empty 占位行（DB 无样本时补的空桶），前端 mapper 见 filled=true 把
+  // metricValue 设 null 用于"-"渲染。
+  filled?: boolean;
 }
 
 export interface AggregatedRow {
@@ -264,7 +270,8 @@ export interface AggregatedRow {
   deviceGroupId?: string;
   metricPath: string;
   metricType: 'counter' | 'kpi';
-  metricValue: number;
+  // null 表示该 (时间桶 × 指标) 占位（fill_empty 补行 / 兼容旧缺采渲染）。
+  metricValue: number | null;
   statisType?: string;
   granularity: Granularity;
   time: string;
@@ -273,6 +280,7 @@ export interface AggregatedRow {
   ingestTime: string;
   objectLdn?: string | null;
   extra?: Record<string, unknown>;
+  filled?: boolean;
 }
 
 const ZERO_UUID = '00000000-0000-0000-0000-000000000000';
@@ -284,7 +292,8 @@ export function mapBackendAggregatedRow(b: BackendAggregatedRow): AggregatedRow 
     deviceGroupId: !b.device_group_id || b.device_group_id === ZERO_UUID ? undefined : b.device_group_id,
     metricPath: b.metric_path,
     metricType: (b.metric_type as 'counter' | 'kpi') ?? 'counter',
-    metricValue: b.metric_value,
+    // filled=true 是 fill_empty 占位行，后端 metric_value 字段无意义，前端统一显示 "-"。
+    metricValue: b.filled ? null : b.metric_value,
     statisType: b.statis_type,
     granularity: b.granularity as Granularity,
     time: b.time,
@@ -293,5 +302,6 @@ export function mapBackendAggregatedRow(b: BackendAggregatedRow): AggregatedRow 
     ingestTime: b.ingest_time,
     objectLdn: b.object_ldn ?? null,
     extra: b.extra ?? {},
+    filled: b.filled,
   };
 }

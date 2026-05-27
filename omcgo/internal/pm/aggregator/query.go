@@ -44,6 +44,9 @@ type QueryRequest struct {
 // Row 是 Aggregator.Query 的输出行。device 维度填 DeviceOUI/DeviceSN/ObjectLDN；
 // device_group 维度填 DeviceGroupID。其余字段两维度共用。
 // JSON tag 统一 snake_case 对齐其它 REST 响应；前端 mapper 走 snake → camel。
+//
+// Filled=true 表示该行是 handler 的 fill_empty 补齐占位（DB 实际无样本），MetricValue
+// 字段被忽略；前端 mapper 见 filled=true 时把 metricValue 设为 null 以渲染"-"。
 type Row struct {
 	DeviceOUI     string              `json:"device_oui,omitempty"`
 	DeviceSN      string              `json:"device_sn,omitempty"`
@@ -59,6 +62,7 @@ type Row struct {
 	IngestTime    time.Time           `json:"ingest_time"`
 	ObjectLDN     *string             `json:"object_ldn,omitempty"`
 	Extra         map[string]any      `json:"extra,omitempty"`
+	Filled        bool                `json:"filled,omitempty"`
 }
 
 // Query 根据 (Granularity, Dimension) 路由到对应聚合表查询。

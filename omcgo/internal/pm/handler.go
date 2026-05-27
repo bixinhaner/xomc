@@ -292,7 +292,132 @@ func (h *Handler) ListAggregatedMetrics(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
+	// fill_empty=true：按 (时间桶 × 指标) 笛卡尔补齐占位行，让"该设备此时段无样本"也能在
+	// 透视表里看到行结构 — 区分"指标无值"与"设备此时段完全无采样"。
+	// 仅 device 维度（含单 OUI+SN 过滤）+ start/end + metric_paths 齐全时启用，避免补出超大笛卡尔积。
+	if c.Query("fill_empty") == "true" {
+		rows = fillEmptyBuckets(rows, req)
+	}
 	response.OK(c, gin.H{"items": rows, "total": len(rows)})
+}
+
+// fillEmptyBuckets 计算 (时间桶 × 指标) 笛卡尔积，对实际 rows 没覆盖的组合补一行
+// Filled=true 占位（DeviceOUI/SN 来自 req，MetricValue=0 仅占位，前端 mapper 见 filled=true
+// 渲染 "-"）。仅 device 维度生效。
+func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest) []aggregator.Row {
+	if req.Dimension == aggregator.DimensionDeviceGroup || req.Dimension == aggregator.DimensionAggregateGroup {
+		return rows
+	}
+	if len(req.MetricPaths) == 0 || req.StartTime.IsZero() || req.EndTime.IsZero() {
+		return rows
+	}
+	// 单 OUI+SN 过滤（前端 KPIQuery 总是 1:1 拆分发请求）— 多 SN 复合查询不补
+	if len(req.DeviceSNs) != 1 {
+		return rows
+	}
+	oui := ""
+	if len(req.DeviceOUIs) == 1 {
+		oui = req.DeviceOUIs[0]
+	}
+	sn := req.DeviceSNs[0]
+
+	buckets := bucketStartsBetween(req.StartTime, req.EndTime, req.Granularity)
+	if len(buckets) == 0 {
+		return rows
+	}
+
+	// 已有行的键集合（time-truncated-to-bucket + metric_path）
+	have := make(map[string]struct{}, len(rows))
+	for _, r := range rows {
+		// time 桶按 r.Time（aggregator 已对齐桶起点）
+		have[bucketKey(r.Time, r.MetricPath)] = struct{}{}
+	}
+
+	dur := granularityDuration(req.Granularity)
+	for _, b := range buckets {
+		for _, mp := range req.MetricPaths {
+			if _, ok := have[bucketKey(b, mp)]; ok {
+				continue
+			}
+			rows = append(rows, aggregator.Row{
+				DeviceOUI:   oui,
+				DeviceSN:    sn,
+				MetricPath:  mp,
+				Granularity: req.Granularity,
+				Time:        b,
+				StartTime:   b,
+				EndTime:     b.Add(dur),
+				Filled:      true,
+			})
+		}
+	}
+	return rows
+}
+
+func bucketKey(t time.Time, metricPath string) string {
+	return t.UTC().Format(time.RFC3339) + "||" + metricPath
+}
+
+// granularityDuration 返回粒度近似时长（用于 EndTime 占位；月按 30 天近似）。
+func granularityDuration(g metrics.Granularity) time.Duration {
+	switch g {
+	case metrics.Granularity15Min:
+		return 15 * time.Minute
+	case metrics.GranularityHourly:
+		return time.Hour
+	case metrics.GranularityDaily:
+		return 24 * time.Hour
+	case metrics.GranularityWeekly:
+		return 7 * 24 * time.Hour
+	case metrics.GranularityMonthly:
+		return 30 * 24 * time.Hour
+	}
+	return time.Hour
+}
+
+// bucketStartsBetween 枚举 [start, end) 内的所有桶起点，对齐到粒度边界。
+// 上限：1000 个桶（防止误用 15min 拉年区间炸笛卡尔积）。
+func bucketStartsBetween(start, end time.Time, g metrics.Granularity) []time.Time {
+	const maxBuckets = 1000
+	if !end.After(start) {
+		return nil
+	}
+	dur := granularityDuration(g)
+	if dur <= 0 {
+		return nil
+	}
+	// 把 start 对齐到桶边界
+	cur := alignToBucket(start.UTC(), g)
+	out := make([]time.Time, 0, 64)
+	for cur.Before(end) && len(out) < maxBuckets {
+		out = append(out, cur)
+		cur = cur.Add(dur)
+	}
+	return out
+}
+
+// alignToBucket 把时间向下对齐到粒度桶起点。
+func alignToBucket(t time.Time, g metrics.Granularity) time.Time {
+	switch g {
+	case metrics.Granularity15Min:
+		min := t.Minute()
+		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), (min/15)*15, 0, 0, t.Location())
+	case metrics.GranularityHourly:
+		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, t.Location())
+	case metrics.GranularityDaily:
+		return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+	case metrics.GranularityWeekly:
+		// 以周一为周起点（与 ISO week 一致）
+		offset := int(t.Weekday()) - 1
+		if offset < 0 {
+			offset = 6
+		}
+		base := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+		return base.AddDate(0, 0, -offset)
+	case metrics.GranularityMonthly:
+		return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location())
+	}
+	return t
 }
 
 // RecomputeAggregation POST /pm/aggregation/recompute（T-0164 收尾 G5-Gap-2）

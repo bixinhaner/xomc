@@ -196,6 +196,7 @@ export const pmDashboardApi = {
       end_time: params.endTime,
       limit: params.limit,
       offset: params.offset,
+      fill_empty: params.fillEmpty ? 'true' : undefined,
     };
     const { data } = await http.get<{ items: BackendAggregatedRow[] | null; total: number }>(
       '/pm/metrics/aggregated',
