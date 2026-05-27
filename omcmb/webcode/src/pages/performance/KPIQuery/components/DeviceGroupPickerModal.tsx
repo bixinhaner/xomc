@@ -28,7 +28,7 @@ export default function DeviceGroupPickerModal({
   const [selected, setSelected] = useState<string[]>(initialSelected);
 
   const { data, isLoading } = useDeviceGroups();
-  const allGroups = data?.groups ?? [];
+  const allGroups = useMemo(() => data?.groups ?? [], [data]);
 
   const filtered = useMemo(() => {
     const kw = search.trim().toLowerCase();
