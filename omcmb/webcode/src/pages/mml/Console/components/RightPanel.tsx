@@ -14,7 +14,7 @@ import SubFieldInputList from './SubFieldInputList';
 import InstancePicker from './InstancePicker';
 import TerminalPanel from './TerminalPanel';
 import ParamPathExpert, { type ParamPathChangePayload } from './ParameterPathCommand';
-import { ConsoleActionBar } from './ConsoleActionBar';
+import { ConsoleActionBar, type ExecutionMode } from './ConsoleActionBar';
 import {
   InstanceArityInput,
   deriveArityFromSubFields,
@@ -114,7 +114,12 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
   // T-0123-P4 收尾 (2026-05-22)：execute 后用 task.id 订阅 /events/stream 的
   // mml_device_frame / mml_task_status / mml_task_completed 事件，把终端输出
   // 接回来；da6c1c68 重构时这条路径被推到 P4 但从未落地。
-  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
+  //
+  // 2026-05-28 单PATH执行模式扩展:不再是单 task,而是数组 — 一次 per-path 派发
+  // 会产生 N 个 task,全部塞进 currentTaskIds 让 hook 监听所有事件。
+  const [currentTaskIds, setCurrentTaskIds] = useState<string[]>([]);
+  // 执行模式 Radio: 'batch'(默认整体执行) | 'per-path'(单PATH独立任务)
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>('batch');
   // 把 i18n 翻译后的文案传给 frontend-core hook —— hook 自身不依赖 i18n 系统。
   const streamMessages = useMemo(
     () => ({
@@ -150,7 +155,7 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
     lines: terminalLines,
     appendLine,
     clear: clearTerminal,
-  } = useMmlTaskStream(currentTaskId, streamMessages);
+  } = useMmlTaskStream(currentTaskIds, streamMessages);
 
   const activeStatement = useMemo(
     () => statements.find((s) => s.uid === activeStatementUid) ?? null,
@@ -205,15 +210,137 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
       // 把 UI 编辑态 Statement[] 翻译为 StructuredStatement[]，路径以 standardPath
       // 形式直传后端；后端按 device.product_class 翻译为 privatePath。
       const structured = statements.map(statementToStructured);
+
+      // ===== 单PATH执行模式(2026-05-28 用户决策):并发派发 N 个独立任务 =====
+      // 触发条件:executionMode='per-path' + 仅 LST/MOD(ADD/RMV 单实例语义,
+      // 即使用户切到 per-path 也按 batch 处理)。
+      const firstOp = statements[0]?.operationType;
+      const perPathEligible =
+        executionMode === 'per-path' && (firstOp === 'LST' || firstOp === 'MOD');
+
+      if (perPathEligible) {
+        // 把每个 statement 按 paths 拆成 N 个单 path 子 statement
+        const splits: Array<{ ss: typeof structured[number]; sourceStmt: typeof statements[number]; path: string }> = [];
+        for (let i = 0; i < structured.length; i++) {
+          const ss = structured[i];
+          const srcStmt = statements[i];
+          if (ss.paths.length === 0) {
+            splits.push({ ss, sourceStmt: srcStmt, path: '' });
+            continue;
+          }
+          for (const p of ss.paths) {
+            const splitValues: Record<string, string> | undefined =
+              ss.values && ss.values[p] !== undefined ? { [p]: ss.values[p] } : undefined;
+            const sub: typeof ss = {
+              ...ss,
+              paths: [p],
+            };
+            if (splitValues) sub.values = splitValues;
+            else delete sub.values;
+            splits.push({ ss: sub, sourceStmt: srcStmt, path: p });
+          }
+        }
+
+        const total = splits.length;
+        if (total === 0) {
+          message.warning(t('mml.console.execute.noStatements'));
+          return;
+        }
+
+        // 终端先打 header
+        appendLine({
+          type: 'info',
+          text: t('mml.console.terminal.perPathHeader', { count: total }),
+          timestamp: new Date().toLocaleTimeString(),
+        });
+
+        // 并发派发,Promise.allSettled 让部分失败不影响其它派发
+        const dispatchResults = await Promise.allSettled(
+          splits.map((s, idx) => {
+            const leafName = s.path.split('.').pop() || s.path || '';
+            const cmdName =
+              s.sourceStmt.logicalNameI18n?.['zh-CN'] ??
+              s.sourceStmt.logicalNameI18n?.['zh'] ??
+              s.sourceStmt.logicalCode ??
+              '';
+            const sn = selectedDeviceSns[0] ?? '';
+            const snPart =
+              selectedDeviceSns.length <= 1
+                ? sn
+                : `${sn} 等${selectedDeviceSns.length}台`;
+            // 任务名:{logicalName} [{leafName}] {sn}
+            const taskName = leafName
+              ? `${cmdName} [${leafName}] ${snPart}`.trim()
+              : `${cmdName} ${snPart}`.trim();
+            return executeMutation
+              .mutateAsync({
+                statements: [s.ss],
+                deviceSns: selectedDeviceSns,
+                executeType: 'immediate',
+                taskName,
+              })
+              .then((task) => ({ idx, task, leafName: leafName || s.path }));
+          }),
+        );
+
+        const taskIds: string[] = [];
+        let failedCount = 0;
+        dispatchResults.forEach((r, idx) => {
+          const split = splits[idx];
+          const leafName = split.path.split('.').pop() || split.path || '';
+          const i = idx + 1;
+          if (r.status === 'fulfilled') {
+            taskIds.push(r.value.task.id);
+            appendLine({
+              type: 'info',
+              text: t('mml.console.terminal.perPathDispatched', {
+                i: String(i),
+                total: String(total),
+                taskId: r.value.task.id,
+                path: split.path || leafName || '-',
+              }),
+              timestamp: new Date().toLocaleTimeString(),
+            });
+            // 注意:仅最后一次 onExecuted 回调(避免 N 次抖动)
+            if (idx === dispatchResults.length - 1) onExecuted?.(r.value.task);
+          } else {
+            failedCount += 1;
+            const errMsg = r.reason instanceof Error ? r.reason.message : String(r.reason);
+            appendLine({
+              type: 'stderr',
+              text: `[${i}/${total}] dispatch failed  path=${split.path || '-'}  error=${errMsg}`,
+              timestamp: new Date().toLocaleTimeString(),
+            });
+          }
+        });
+
+        if (taskIds.length > 0) {
+          // 把所有 task_id 塞给 SSE hook 监听
+          setCurrentTaskIds(taskIds);
+        }
+        appendLine({
+          type: failedCount > 0 ? 'stderr' : 'info',
+          text: t('mml.console.terminal.allPerPathDispatched', { count: taskIds.length }),
+          timestamp: new Date().toLocaleTimeString(),
+        });
+        if (taskIds.length > 0) {
+          message.success(
+            t('mml.console.execute.success', { taskId: `${taskIds.length} tasks` }),
+          );
+        }
+        return;
+      }
+
+      // ===== 整体执行模式(默认):1 个任务包含全部 statements =====
       const task = await executeMutation.mutateAsync({
         statements: structured,
         deviceSns: selectedDeviceSns,
         executeType: 'immediate',
         taskName: buildTaskName(statements, selectedDeviceSns),
       });
-      // 接入 SSE：先切 currentTaskId（hook 会复位 lines）再种一条"已派发"行，
+      // 接入 SSE:先切 currentTaskIds(hook 会复位 lines)再种一条"已派发"行,
       // 避免 task 创建瞬间到第一台设备完成之间终端是空白的体感。
-      setCurrentTaskId(task.id);
+      setCurrentTaskIds([task.id]);
       appendLine({
         type: 'info',
         text: t('mml.console.terminal.dispatched', {
@@ -228,7 +355,16 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
       const msg = e instanceof Error ? e.message : String(e);
       message.error(t('mml.console.execute.failed', { message: msg }));
     }
-  }, [appendLine, executeMutation, onExecuted, selectedDeviceSns, statements, t]);
+  }, [
+    appendLine,
+    executeMutation,
+    executionMode,
+    message,
+    onExecuted,
+    selectedDeviceSns,
+    statements,
+    t,
+  ]);
 
   const handleExecute = useCallback(() => {
     if (selectedDeviceSns.length === 0) {
@@ -289,7 +425,7 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
           }`,
         },
       });
-      setCurrentTaskId(task.id);
+      setCurrentTaskIds([task.id]);
       appendLine({
         type: 'info',
         text: t('mml.console.terminal.dispatched', {
@@ -384,7 +520,7 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
           lines={terminalLines}
           onClear={() => {
             clearTerminal();
-            setCurrentTaskId(null);
+            setCurrentTaskIds([]);
           }}
         />
       </div>
@@ -440,6 +576,8 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
                     onToggleAll={supportsToggleAll ? handleToggleAll : undefined}
                     allSelected={allSelected}
                     onExecute={handleExecute}
+                    executionMode={executionMode}
+                    onExecutionModeChange={setExecutionMode}
                   />
                 )}
               </div>

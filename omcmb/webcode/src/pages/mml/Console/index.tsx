@@ -35,7 +35,15 @@ export default function MMLConsole() {
   );
 
   return (
-    <Card variant="borderless">
+    // 2026-05-28 用户决策(path 列表贴浏览器右):
+    //   AppShell .content 的 padding-right: 24 + Card body padding-right: 16 共 40px,
+    //   让 path 列表滚动条距浏览器右 40px。仅 Console 页用 mr:-24 + bodyStyle 突破,
+    //   把操作面板这一栏的滚动条推到浏览器右边缘(其他页面布局不受影响)。
+    <div style={{ marginRight: -24 }}>
+      <Card
+        variant="borderless"
+        styles={{ body: { paddingRight: 0 } }}
+      >
       <StepBar current={current} />
       {/* 2026-05-27 用户决策:把更多空间留给"终端输出 + 操作面板",大屏(xl ≥ 1200)
           下三栏从 6/8/10 调整为 5/7/12。lg 及更窄屏幕维持 6/8/10 不挤压设备/命令列表。 */}
@@ -79,6 +87,7 @@ export default function MMLConsole() {
         existingSns={existingSns}
         allDeviceSns={dev.allDeviceSns}
       />
-    </Card>
+      </Card>
+    </div>
   );
 }

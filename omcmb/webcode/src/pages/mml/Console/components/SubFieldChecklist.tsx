@@ -21,7 +21,12 @@ export default function SubFieldChecklist({ statement }: SubFieldChecklistProps)
   // 固定高度容器（spec：操作面板限制 path 区域 10 行可视高度，<10 行也保留空间，
   // >10 行出现滚动条；每行约 38px = 行内 padding 4+4 + content ~24 + flex gap 6）。
   const VIEWPORT_HEIGHT = 380;
+  // 2026-05-28: antd Checkbox.Group 默认 display:inline-flex,内层 div 不显式
+  // width:100% 时会按内容自然收缩,导致 viewport 拿不到完整宽度(实测 578 vs 813)。
+  // 这里 width:100% + boxSizing:border-box 让 viewport 撑满父容器。
   const VIEWPORT_STYLE: CSSProperties = {
+    width: '100%',
+    boxSizing: 'border-box',
     height: VIEWPORT_HEIGHT,
     overflowY: 'auto',
     border: '1px solid #f0f0f0',
@@ -109,10 +114,19 @@ export default function SubFieldChecklist({ statement }: SubFieldChecklistProps)
                 </span>
               )}
             </span>
-            {/* 行尾 InfoCircle 入口:hover 展开完整 metadata(path/类型/访问/取值范围/
-                多实例/生效方式/描述)。padding-right 留 4 让图标不直接贴到滚动条。 */}
-            <SubFieldInfoPopover sf={sf} />
-            <span style={{ width: 4, flexShrink: 0 }} />
+            {/* 行尾"图标列"(2026-05-28 用户决策):固定 40px 宽,行间对齐,贴右紧靠
+                scrollbar。LST 用单个 InfoCircle popover 收纳完整 metadata。 */}
+            <div
+              style={{
+                flex: '0 0 40px',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <SubFieldInfoPopover sf={sf} />
+            </div>
           </div>
         ))}
       </div>

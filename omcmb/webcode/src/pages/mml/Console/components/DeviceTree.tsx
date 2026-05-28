@@ -58,10 +58,21 @@ export default function DeviceTree({
     [productClassDict]
   );
 
-  // R-8.1: 字典加载完成后若 productClassFilter 未设置，自动选中第一项
+  // R-8.1: 字典加载完成后若 productClassFilter 未设置,自动选中第一项
   // R-8.2: 字典为空时禁用整个 DeviceTree 操作
+  // 2026-05-28: useDeviceSelection 用 localStorage 持久化 filter,若旧值已不在
+  // 当前字典(产品类型被删/重命名),静默回退到第一项 — 同时写入 localStorage 让
+  // 下次刷新一致。
   useEffect(() => {
-    if (!isDictLoading && productClassFilter === '' && productClassOptions.length > 0) {
+    if (isDictLoading || productClassOptions.length === 0) return;
+    if (productClassFilter === '') {
+      onFilterChange(productClassOptions[0]?.label ?? '');
+      return;
+    }
+    const stillValid = productClassOptions.some(
+      (opt) => opt.label === productClassFilter || opt.value === productClassFilter,
+    );
+    if (!stillValid) {
       onFilterChange(productClassOptions[0]?.label ?? '');
     }
   }, [isDictLoading, productClassFilter, productClassOptions, onFilterChange]);

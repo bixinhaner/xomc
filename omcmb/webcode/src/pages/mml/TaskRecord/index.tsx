@@ -27,6 +27,11 @@ import {
   useMMLTaskResults,
   useDeleteMMLTask,
 } from '@core/hooks/api/useMML';
+import {
+  parseMmlDeviceTaskResult,
+  type ParsedMmlResult,
+  type ParsedParamValue,
+} from '@core/utils/mmlResultParser';
 
 // -------------------------------------------------------------------------
 // Display mappings — mml_tasks columns
@@ -637,6 +642,7 @@ function DeviceResultExpanded({ row, t }: DeviceResultExpandedProps) {
           }
         />
       )}
+      <ParsedResultPanel row={row} t={t} />
       {raw && (
         <>
           <div>
@@ -822,5 +828,180 @@ function PathTranslationTable({ rows, loading, t }: PathTranslationTableProps) {
         locale={{ emptyText: t('mml.translation.noData') }}
       />
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ParsedResultPanel — 2026-05-28 任务记录"查看"展开行新增"执行结果解析"区。
+//
+// 根据 device_tasks.result JSONB (透传到 row.result.parsedData) 的 method 字段
+// 分支渲染:
+//   - GetParameterValuesResponse(LST) → 三列表格 path/值/类型,固定高度+滚动
+//   - SetParameterValuesResponse (MOD) → status=0 立即生效 / =1 需重启
+//   - AddObjectResponse → 实例号 + status
+//   - DeleteObjectResponse → 成功
+//   - RebootResponse / FactoryResetResponse → 指令已下发
+//   - 其它 / 缺失 → 灰字提示"无法解析"
+//
+// 解析逻辑复用 frontend-core/src/utils/mmlResultParser.ts(已 unit-tested)。
+// ---------------------------------------------------------------------------
+
+interface ParsedResultPanelProps {
+  row: DeviceTaskResultItem;
+  t: CommandSummaryProps['t'];
+}
+
+function ParsedResultPanel({ row, t }: ParsedResultPanelProps) {
+  // result.parsedData 由后端 deviceTaskRowToResultMap 透传整个 device_tasks.result
+  // JSONB,内含 { method, raw_response, instance_number } —— 正是 parser 期望入参。
+  const parsed = useMemo<ParsedMmlResult | null>(
+    () => parseMmlDeviceTaskResult(row.result?.parsedData ?? null),
+    [row.result?.parsedData],
+  );
+
+  return (
+    <div>
+      <Typography.Text strong style={{ fontSize: 12, color: '#595959' }}>
+        {t('mml.taskResult.parsed.title')}
+      </Typography.Text>
+      <div style={{ marginTop: 4 }}>
+        {parsed === null ? (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {t('mml.taskResult.parsed.notParsable')}
+          </Typography.Text>
+        ) : (
+          <ParsedResultBody parsed={parsed} t={t} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ParsedResultBody({
+  parsed,
+  t,
+}: {
+  parsed: ParsedMmlResult;
+  t: CommandSummaryProps['t'];
+}) {
+  switch (parsed.kind) {
+    case 'gpv':
+      return <ParsedGpvTable params={parsed.params ?? []} t={t} />;
+    case 'spv':
+      return <ParsedStatusLine status={parsed.status} t={t} />;
+    case 'add':
+      return (
+        <Space size={8} wrap>
+          <Tag color="success">
+            {t('mml.taskResult.parsed.add.success', {
+              n: parsed.instanceNumber ?? '-',
+            })}
+          </Tag>
+          {parsed.status === 1 && (
+            <Tag color="warning">{t('mml.taskResult.parsed.spv.reboot')}</Tag>
+          )}
+        </Space>
+      );
+    case 'delete':
+      return <Tag color="success">{t('mml.taskResult.parsed.delete.success')}</Tag>;
+    case 'reboot':
+      return <Tag color="success">{t('mml.taskResult.parsed.reboot.success')}</Tag>;
+    default:
+      return (
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          {t('mml.taskResult.parsed.notParsable')}
+        </Typography.Text>
+      );
+  }
+}
+
+function ParsedStatusLine({
+  status,
+  t,
+}: {
+  status?: number;
+  t: CommandSummaryProps['t'];
+}) {
+  if (status === 0) {
+    return <Tag color="success">{t('mml.taskResult.parsed.spv.immediate')}</Tag>;
+  }
+  if (status === 1) {
+    return <Tag color="warning">{t('mml.taskResult.parsed.spv.reboot')}</Tag>;
+  }
+  return (
+    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+      {t('mml.taskResult.parsed.notParsable')}
+    </Typography.Text>
+  );
+}
+
+/** LST 解析表格:用户决策 2026-05-28 固定高度 280 + 滚动,
+ *  避免 20+ path 把展开行撑得很长。 */
+function ParsedGpvTable({
+  params,
+  t,
+}: {
+  params: ParsedParamValue[];
+  t: CommandSummaryProps['t'];
+}) {
+  const columns = [
+    {
+      key: 'name',
+      title: t('mml.taskResult.parsed.gpv.path'),
+      dataIndex: 'name',
+      render: (v: string) => (
+        <Typography.Text
+          code
+          style={{
+            fontSize: 12,
+            wordBreak: 'break-all',
+            whiteSpace: 'normal',
+          }}
+        >
+          {v}
+        </Typography.Text>
+      ),
+    },
+    {
+      key: 'value',
+      title: t('mml.taskResult.parsed.gpv.value'),
+      dataIndex: 'value',
+      width: 220,
+      render: (v: string) => (
+        <Typography.Text
+          style={{
+            fontFamily: 'monospace',
+            fontSize: 12,
+            wordBreak: 'break-all',
+            whiteSpace: 'normal',
+          }}
+        >
+          {v === '' ? <span style={{ color: '#bfbfbf' }}>(empty)</span> : v}
+        </Typography.Text>
+      ),
+    },
+    {
+      key: 'type',
+      title: t('mml.taskResult.parsed.gpv.type'),
+      dataIndex: 'type',
+      width: 120,
+      render: (v?: string) =>
+        v ? (
+          <Tag style={{ fontFamily: 'monospace', fontSize: 11 }}>{v}</Tag>
+        ) : (
+          <span style={{ color: '#bfbfbf' }}>-</span>
+        ),
+    },
+  ];
+  return (
+    <Table
+      size="small"
+      rowKey={(_, idx) => String(idx)}
+      dataSource={params}
+      columns={columns}
+      pagination={false}
+      scroll={{ y: 280 }}
+      locale={{ emptyText: t('mml.taskResult.parsed.gpv.empty') }}
+    />
   );
 }

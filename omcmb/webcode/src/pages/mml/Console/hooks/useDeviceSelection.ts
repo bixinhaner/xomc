@@ -3,10 +3,36 @@ import type { ConsoleDevice } from '../types';
 import { DEVICE_PAGE_SIZE } from '../constants';
 import { deviceApi } from '@core/services/api/deviceApi';
 
+// 2026-05-28 用户决策:产品类型选择 localStorage 持久化,刷新页面后默认选用户上次的选择。
+// key 命名沿用 mml-console 业务域前缀,与 useMmlConsoleTerminalStore 等其它 storage 区分。
+const PRODUCT_CLASS_FILTER_STORAGE_KEY = 'mml-console.productClassFilter';
+
+function readPersistedProductClass(): string {
+  try {
+    return localStorage.getItem(PRODUCT_CLASS_FILTER_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function writePersistedProductClass(value: string): void {
+  try {
+    if (value) localStorage.setItem(PRODUCT_CLASS_FILTER_STORAGE_KEY, value);
+    else localStorage.removeItem(PRODUCT_CLASS_FILTER_STORAGE_KEY);
+  } catch {
+    // 隐私模式 / 配额满 — 静默忽略,不影响功能
+  }
+}
+
 export function useDeviceSelection() {
   const [selectedDevices, setSelectedDevices] = useState<ConsoleDevice[]>([]);
   const [searchText, setSearchText] = useState('');
-  const [productClassFilter, setProductClassFilter] = useState<string>('');
+  // useState lazy initializer 读 localStorage;DeviceTree useEffect 仍兜底:
+  // 字典加载后若此值不在 options 里(如被删除),会被覆盖为 options[0],
+  // 同时 handleFilterChange 重新写入 localStorage 保持一致。
+  const [productClassFilter, setProductClassFilter] = useState<string>(
+    () => readPersistedProductClass(),
+  );
   const [currentPage, setCurrentPage] = useState(1);
   const [devices, setDevices] = useState<ConsoleDevice[]>([]);
   const [total, setTotal] = useState(0);
@@ -59,8 +85,10 @@ export function useDeviceSelection() {
   }, [productClassFilter, fetchDevices]);
 
   // R-8.3: 产品类型切换时除重置分页外，**清空已选设备**（不允许跨类型累积）。
+  // 2026-05-28 同步把选择写入 localStorage,刷新页面后默认恢复。
   const handleFilterChange = useCallback((filter: string) => {
     setProductClassFilter(filter);
+    writePersistedProductClass(filter);
     setCurrentPage(1);
     setSelectedDevices([]); // R-8.3 清空已选
     if (filter) {

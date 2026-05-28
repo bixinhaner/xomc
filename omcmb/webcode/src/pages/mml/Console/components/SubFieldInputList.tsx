@@ -126,18 +126,33 @@ export default function SubFieldInputList({ statement }: SubFieldInputListProps)
                 // MOD 未勾选行禁用输入（仍保留已有 value，避免误清）
                 disabled={isMod && !isSelected}
               />
-              {/* 填充剩余空间，把 path Tag 等推到右侧对齐 */}
+              {/* 填充剩余空间，把图标列推到右侧对齐 */}
               <div style={{ flex: 1 }} />
-              {multiInstanceHint(sf.tr069Path, t('mml.console.subField.multiInstanceTip'))}
-              <AccessTypeTag
-                accessType={sf.accessType}
-                valueType={sf.valueType}
-                constraintText={sf.constraintText}
-                tr069Path={sf.tr069Path}
-              />
-              {sf.changeApplies === 'OnReboot' && (
-                <Tag color="warning">{t('mml.console.subField.onReboot')}</Tag>
-              )}
+              {/* 行尾"图标列"(2026-05-28 用户决策,与 SubFieldChecklist 统一):
+                  固定 160px 宽,行间对齐贴右。内含 #多实例 + AccessTypeTag +
+                  OnReboot Tag(条件渲染)。宽度比 LST 单图标列大,因为 MOD/ADD 有
+                  多个标签集群。 */}
+              <div
+                style={{
+                  flex: '0 0 160px',
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  alignItems: 'center',
+                  gap: 4,
+                  flexShrink: 0,
+                }}
+              >
+                {multiInstanceHint(sf.tr069Path, t('mml.console.subField.multiInstanceTip'))}
+                <AccessTypeTag
+                  accessType={sf.accessType}
+                  valueType={sf.valueType}
+                  constraintText={sf.constraintText}
+                  tr069Path={sf.tr069Path}
+                />
+                {sf.changeApplies === 'OnReboot' && (
+                  <Tag color="warning">{t('mml.console.subField.onReboot')}</Tag>
+                )}
+              </div>
             </div>
             {/* 约束 / 取值范围已合并到 AccessTypeTag（用户决策 2026-05-22），
                 输入框下方不再重复渲染 hint 行，避免视觉冗余。 */}

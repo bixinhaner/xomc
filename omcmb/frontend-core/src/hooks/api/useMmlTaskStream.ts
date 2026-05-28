@@ -227,8 +227,22 @@ function parseEventData<T>(raw: string): T | null {
   }
 }
 
+/**
+ * 2026-05-28 用户决策"单PATH执行":hook 同时监听多个 task_id。
+ *
+ * 兼容性:
+ *   - 传 string | null → 单 task,完全等价于老行为
+ *   - 传 string[] → 多 task,所有事件按 frame.task_id ∈ Set 过滤
+ *   - taskIds 引用变化时,Set 重建;EventSource 连接不变(避免丢事件)
+ *
+ * status 单值的多 task 推断:
+ *   - 任一 task running → status = 'running'
+ *   - 全部 task completed → status = 'completed'
+ *   - 已 completed 数 < total 时保持 running
+ *   - 任一 task failed 且未有成功 → 'failed';mixed 维持 'running'/'completed'
+ */
 export function useMmlTaskStream(
-  taskId: string | null,
+  taskIds: string | string[] | null,
   messages?: MmlTaskStreamMessages,
 ): UseMmlTaskStreamReturn {
   // lines 走持久化 store —— 跨刷新 / 路由 / 新 execute 保留历史；只在用户点"清空"
@@ -244,30 +258,33 @@ export function useMmlTaskStream(
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
-  // 用 ref 保留最新 taskId，让 listener 闭包始终读到当前值（避免每次 taskId
-  // 变化重建 EventSource — 频繁重连会丢事件 + 增加后端连接开销）。
+  // 用 ref 保留最新 taskId 集合,让 listener 闭包始终读到当前值(避免每次 taskIds
+  // 变化重建 EventSource — 频繁重连会丢事件 + 增加后端连接开销)。
   //
-  // 关键：ref 写在 render body，而不是 useEffect。因为 EventSource 是浏览器侧
-  // 持久连接，事件可能在 setCurrentTaskId 之后、useEffect 触发之前就到达（后端
-  // CreateAndFanoutTask publishTaskStatus 在 HTTP 响应之前 publish 到 hub，
-  // 而 SSE 和 HTTP 走不同 TCP，事件抢跑常见）；放 effect 里会造成首条
-  // mml_task_status 事件被 taskIdRef.current === null 过滤丢弃。
-  // ref 在 render 期赋值合规：不触发 re-render，对其它 hook 无副作用。
-  const taskIdRef = useRef<string | null>(taskId);
-  taskIdRef.current = taskId;
+  // 关键:ref 写在 render body 而非 useEffect。EventSource 是浏览器持久连接,
+  // 事件可能在 setTaskIds 之后、useEffect 触发之前就到达(后端 publishTaskStatus
+  // 在 HTTP 响应之前已 publish 到 hub);放 effect 里会让首条 mml_task_status
+  // 被 set 过滤丢弃。ref 在 render 期赋值合规:不触发 re-render,对其它 hook 无副作用。
+  const normalizedIds = Array.isArray(taskIds)
+    ? taskIds
+    : taskIds
+      ? [taskIds]
+      : [];
+  const taskIdsRef = useRef<Set<string>>(new Set(normalizedIds));
+  taskIdsRef.current = new Set(normalizedIds);
+  const hasAnyTask = normalizedIds.length > 0;
+  // 用稳定 key (排序后 join) 跟踪 taskIds 变化,避免数组引用变化触发不必要的 effect
+  const idsKey = [...normalizedIds].sort().join(',');
 
-  // mml_task_status running 事件去重 ref。
-  // 之前在 setStatus((prev) => { ... appendLineStore(...) ... }) 里做 dedup，
-  // 但 React 18+ 并发渲染下 setState updater 可能被调用多次（docs 明确要求
-  // updater 必须纯函数），导致 appendLineStore 被调多次 → 终端出现两条
-  // "任务开始执行" 重复行。改用 ref 在 effect 外部做 dedup，与 React 状态机解耦。
-  const runningEmittedRef = useRef(false);
+  // mml_task_status running 事件按 task_id 去重(每个 task 第一次 running 才打印)。
+  // 改用 ref Set 而非单 bool,支持多 task 各自一次打印。
+  const runningEmittedSetRef = useRef<Set<string>>(new Set());
 
-  // taskId 变化只重置会话级 status + dedup 标记；lines 由持久化 store 托管，跨 task 累积。
+  // taskIds 变化只重置会话级 status + dedup 标记;lines 由持久化 store 托管,跨 task 累积。
   useEffect(() => {
-    runningEmittedRef.current = false;
-    setStatus(taskId ? 'dispatched' : 'idle');
-  }, [taskId]);
+    runningEmittedSetRef.current = new Set();
+    setStatus(hasAnyTask ? 'dispatched' : 'idle');
+  }, [idsKey, hasAnyTask]);
 
   const appendLine = useCallback(
     (line: MmlTerminalLine) => {
@@ -296,20 +313,18 @@ export function useMmlTaskStream(
 
     const onDeviceFrame = (ev: MessageEvent<string>): void => {
       const frame = parseEventData<MmlDeviceFramePayload>(ev.data);
-      if (!frame || frame.task_id !== taskIdRef.current) return;
+      if (!frame || !taskIdsRef.current.has(frame.task_id)) return;
       appendLinesStore(deviceFrameToLines(frame, messagesRef.current?.deviceStatusLabels));
     };
     const onTaskStatus = (ev: MessageEvent<string>): void => {
       const frame = parseEventData<MmlTaskStatusPayload>(ev.data);
-      if (!frame || frame.task_id !== taskIdRef.current) return;
+      if (!frame || !taskIdsRef.current.has(frame.task_id)) return;
       const msgs = messagesRef.current;
       if (frame.new_status === 'running') {
-        // running 状态首次到达 → 写一条"开始执行"提示行，让用户感知任务真的进入下发阶段
-        // （之前 silent → 用户体感是"派发后死寂"）。重复 running 事件不再写新行。
-        // dedup 用 ref 而非 setState updater：state updater 必须纯函数，
-        // appendLineStore 是副作用，并发渲染下可能被调多次（实测内网 HTTP 部署复现）。
-        if (!runningEmittedRef.current) {
-          runningEmittedRef.current = true;
+        // running 状态首次到达 → 写一条"开始执行"提示行(每个 task 各自打印 1 次)。
+        // 多 task 场景下用 Set<task_id> 去重,避免重复行。
+        if (!runningEmittedSetRef.current.has(frame.task_id)) {
+          runningEmittedSetRef.current.add(frame.task_id);
           if (msgs?.running) {
             appendLineStore({
               type: 'info',
@@ -330,7 +345,7 @@ export function useMmlTaskStream(
     };
     const onTaskCompleted = (ev: MessageEvent<string>): void => {
       const frame = parseEventData<MmlTaskCompletedPayload>(ev.data);
-      if (!frame || frame.task_id !== taskIdRef.current) return;
+      if (!frame || !taskIdsRef.current.has(frame.task_id)) return;
       const newStatus = statusFromCompleted(frame);
       setStatus(newStatus);
       const msgs = messagesRef.current;
