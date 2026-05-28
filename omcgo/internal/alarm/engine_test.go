@@ -225,6 +225,45 @@ func TestProcessDuplicateAlarm(t *testing.T) {
 	}
 }
 
+func TestProcessKeepsDistinctActiveAlarmsForSameIdentifierWithDifferentAdditionalInformation(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	ctx := context.Background()
+
+	deviceID := uuid.New()
+	alarm1 := &model.Alarm{
+		DeviceSN:        "TEST001",
+		DeviceID:        deviceID,
+		Carrier:         model.CarrierCMCC,
+		AlarmIdentifier: "11184",
+		AlarmType:       "equipment",
+		Severity:        model.AlarmMajor,
+		RaisedAt:        time.Now().Add(-time.Minute),
+		AdditionalInfo:  map[string]string{"additional_information": "cell=1"},
+	}
+	alarm2 := &model.Alarm{
+		DeviceSN:        "TEST001",
+		DeviceID:        deviceID,
+		Carrier:         model.CarrierCMCC,
+		AlarmIdentifier: "11184",
+		AlarmType:       "equipment",
+		Severity:        model.AlarmMajor,
+		RaisedAt:        time.Now(),
+		AdditionalInfo:  map[string]string{"additional_information": "cell=2"},
+	}
+
+	require.NoError(t, engine.Process(ctx, alarm1))
+	require.NoError(t, engine.Process(ctx, alarm2))
+
+	assert.Len(t, store.active, 2)
+	active := store.active[alarm1.ID]
+	require.NotNil(t, active)
+	assert.Equal(t, "cell=1", active.AdditionalInfo["additional_information"])
+	active = store.active[alarm2.ID]
+	require.NotNil(t, active)
+	assert.Equal(t, "cell=2", active.AdditionalInfo["additional_information"])
+}
+
 func TestAcknowledgeAlarm(t *testing.T) {
 	store := newMockAlarmStore()
 	engine := newTestEngine(store)

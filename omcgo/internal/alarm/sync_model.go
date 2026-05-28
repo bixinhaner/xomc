@@ -9,8 +9,8 @@ import (
 // AlarmDiff represents the difference between remote (device) and local (database) alarms.
 type AlarmDiff struct {
 	ToAdd    []*model.Alarm          // Remote exists, local doesn't → new alarm
-	ToUpdate map[string]*model.Alarm // alarm_identifier match, attributes changed → update
-	ToClear  []string               // alarm_identifiers in local but not in remote → clear (archive)
+	ToUpdate map[string]*model.Alarm // instance-level match key exists on both sides, attributes changed → update
+	ToClear  []string                // instance-level match key exists only locally → clear (archive)
 }
 
 // SyncResult summarizes the outcome of an alarm sync operation.
@@ -43,50 +43,37 @@ const (
 )
 
 // ComputeDiff compares remote alarms (from device) with local alarms (from DB)
-// and produces a three-way diff. Match key: alarm_identifier.
+// and produces a three-way diff. Match key: alarm_identifier + stable instance qualifier.
 func ComputeDiff(remote, local []*model.Alarm) *AlarmDiff {
 	diff := &AlarmDiff{
 		ToUpdate: make(map[string]*model.Alarm),
 	}
 
-	remoteMap := make(map[string]*model.Alarm, len(remote))
-	for i := range remote {
-		if remote[i] != nil {
-			remoteMap[remote[i].AlarmIdentifier] = remote[i]
-		}
-	}
-
-	localMap := make(map[string]*model.Alarm, len(local))
-	localIdentifiers := make(map[string]bool, len(local))
-	for i := range local {
-		if local[i] != nil {
-			localMap[local[i].AlarmIdentifier] = local[i]
-			localIdentifiers[local[i].AlarmIdentifier] = true
-		}
-	}
+	remoteMap := indexActiveAlarms(remote)
+	localMap := indexActiveAlarms(local)
 
 	// Find ToAdd: remote exists but local doesn't
-	for id, rAlarm := range remoteMap {
-		if !localIdentifiers[id] {
+	for key, rAlarm := range remoteMap {
+		if _, exists := localMap[key]; !exists {
 			diff.ToAdd = append(diff.ToAdd, rAlarm)
 		}
 	}
 
 	// Find ToUpdate: both exist, check if attributes changed
-	for id, rAlarm := range remoteMap {
-		lAlarm, exists := localMap[id]
+	for key, rAlarm := range remoteMap {
+		lAlarm, exists := localMap[key]
 		if !exists {
 			continue
 		}
 		if hasAlarmChanged(rAlarm, lAlarm) {
-			diff.ToUpdate[id] = rAlarm
+			diff.ToUpdate[key] = rAlarm
 		}
 	}
 
 	// Find ToClear: local exists but remote doesn't
-	for id := range localIdentifiers {
-		if _, exists := remoteMap[id]; !exists {
-			diff.ToClear = append(diff.ToClear, id)
+	for key := range localMap {
+		if _, exists := remoteMap[key]; !exists {
+			diff.ToClear = append(diff.ToClear, key)
 		}
 	}
 

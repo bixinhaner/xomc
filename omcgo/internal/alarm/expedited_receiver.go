@@ -153,7 +153,8 @@ func (r *ExpeditedEventReceiver) handleExpeditedAlarmEvent(ctx context.Context, 
 				zap.String("alarm_identifier", exp.AlarmIdentifier))
 
 		case NotificationClearedAlarm:
-			if err := r.engine.AutoClear(ctx, payload.DeviceSN, exp.AlarmIdentifier); err != nil {
+			alarm := exp.ToModel(dev.ID, payload.DeviceSN, dev.Carrier)
+			if err := r.engine.AutoClear(ctx, alarm); err != nil {
 				r.logger.Error("process ClearedAlarm",
 					zap.Error(err),
 					zap.String("device_sn", payload.DeviceSN),

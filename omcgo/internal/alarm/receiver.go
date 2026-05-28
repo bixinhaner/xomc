@@ -163,7 +163,12 @@ func (r *AlarmReceiver) handleAlarmEvent(ctx context.Context, evt event.Event) e
 func (r *AlarmReceiver) processAlarmPayload(ctx context.Context, payload AlarmPayload) error {
 	notificationType := payload.Additional["notification_type"]
 	if notificationType == NotificationClearedAlarm {
-		if err := r.engine.AutoClear(ctx, payload.DeviceSN, payload.AlarmIdentifier); err != nil {
+		clearAlarm := &model.Alarm{
+			DeviceSN:        payload.DeviceSN,
+			AlarmIdentifier: payload.AlarmIdentifier,
+			AdditionalInfo:  payload.Additional,
+		}
+		if err := r.engine.AutoClear(ctx, clearAlarm); err != nil {
 			r.logger.Error("clear alarm",
 				zap.Error(err),
 				zap.String("device_sn", payload.DeviceSN),

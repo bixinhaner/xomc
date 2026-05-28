@@ -93,3 +93,44 @@ func TestProcessSync_UsesExistingAlarmDeviceFieldsWhenLookupMissing(t *testing.T
 	assert.Equal(t, existingTech, *alarm.Technology)
 	assert.Equal(t, model.CarrierCode("cucc"), alarm.Carrier)
 }
+
+func TestProcessSync_AddsDistinctAlarmsForSameIdentifierWithDifferentAdditionalInformation(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	deviceID := uuid.New()
+	processor := NewAlarmSyncProcessor(engine, store, nil, nil, zap.NewNop()).WithDeviceReader(&rcvMockDeviceReader{
+		deviceBySN: map[string]*model.Device{
+			"SN-SYNC-003": {
+				ID:           deviceID,
+				SerialNumber: "SN-SYNC-003",
+				Carrier:      model.CarrierCode("cmcc"),
+				Technology:   model.TechLTE,
+			},
+		},
+	})
+
+	params := []tr069.ParameterValueStruct{
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.AlarmIdentifier", Value: "11184"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.AlarmRaisedTime", Value: "2026-05-19T06:04:11Z"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.PerceivedSeverity", Value: "Major"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.SpecificProblem", Value: "Cell unavailable"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.1.AdditionalInformation", Value: "cell=1"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.2.AlarmIdentifier", Value: "11184"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.2.AlarmRaisedTime", Value: "2026-05-19T06:05:11Z"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.2.PerceivedSeverity", Value: "Major"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.2.SpecificProblem", Value: "Cell unavailable"},
+		{Name: "Device.FaultMgmt.CurrentAlarm.2.AdditionalInformation", Value: "cell=2"},
+	}
+
+	result := processor.processSync(context.Background(), "SN-SYNC-003", params)
+	require.Equal(t, 2, result.Added)
+	require.Zero(t, result.FailedAdd)
+	assert.Len(t, store.active, 2)
+
+	seen := map[string]bool{}
+	for _, alarm := range store.active {
+		seen[alarm.AdditionalInfo["additional_information"]] = true
+	}
+	assert.True(t, seen["cell=1"])
+	assert.True(t, seen["cell=2"])
+}

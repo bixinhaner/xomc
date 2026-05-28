@@ -147,6 +147,7 @@ func (p *AlarmSyncProcessor) processSync(ctx context.Context, deviceSN string, p
 		result.FailedAdd = len(tr069Alarms)
 		return result
 	}
+	localAlarmByKey := indexActiveAlarms(localAlarms)
 
 	// 3. Resolve device-derived fields for any newly added alarms.
 	deviceID, carrier, technology := p.resolveDeviceFields(ctx, deviceSN, localAlarms)
@@ -175,55 +176,41 @@ func (p *AlarmSyncProcessor) processSync(ctx context.Context, deviceSN string, p
 	}
 
 	// 6. Apply diff: ToUpdate — merge remote fields into existing local alarm
-	for identifier, remoteAlarm := range diff.ToUpdate {
-			localAlarm, err := p.store.GetActiveByDeviceAndIdentifier(ctx, deviceSN, identifier)
-			if err != nil {
-				p.logger.Error("sync find alarm to update", zap.Error(err),
-					zap.String("device_sn", deviceSN),
-					zap.String("alarm_identifier", identifier))
-				result.FailedUpdate++
-				continue
-			}
-			if localAlarm == nil {
-				result.FailedUpdate++
-				continue
-			}
-			// Merge updatable fields from remote into local (preserves ID, status, ack state, etc.)
-			localAlarm.Severity = remoteAlarm.Severity
-			localAlarm.Description = remoteAlarm.Description
-			localAlarm.AlarmType = remoteAlarm.AlarmType
-			localAlarm.AlarmSource = remoteAlarm.AlarmSource
-			localAlarm.EventType = remoteAlarm.EventType
-			localAlarm.ProbableCause = remoteAlarm.ProbableCause
-			if remoteAlarm.RaisedAt.IsZero() {
-				// keep original raised_at
-			} else {
-				localAlarm.RaisedAt = remoteAlarm.RaisedAt
-			}
-			// Merge additional info
-			for k, v := range remoteAlarm.AdditionalInfo {
-				localAlarm.AdditionalInfo[k] = v
-			}
-			if err := p.engine.UpdateFromSync(ctx, localAlarm); err != nil {
-				p.logger.Error("sync update alarm", zap.Error(err),
-					zap.String("device_sn", deviceSN),
-					zap.String("alarm_identifier", identifier))
-				result.FailedUpdate++
-			} else {
-				result.Updated++
-			}
+	for matchKey, remoteAlarm := range diff.ToUpdate {
+		localAlarm := localAlarmByKey[matchKey]
+		if localAlarm == nil {
+			result.FailedUpdate++
+			continue
+		}
+		// Merge updatable fields from remote into local (preserves ID, status, ack state, etc.)
+		localAlarm.Severity = remoteAlarm.Severity
+		localAlarm.Description = remoteAlarm.Description
+		localAlarm.AlarmType = remoteAlarm.AlarmType
+		localAlarm.AlarmSource = remoteAlarm.AlarmSource
+		localAlarm.EventType = remoteAlarm.EventType
+		localAlarm.ProbableCause = remoteAlarm.ProbableCause
+		if remoteAlarm.RaisedAt.IsZero() {
+			// keep original raised_at
+		} else {
+			localAlarm.RaisedAt = remoteAlarm.RaisedAt
+		}
+		// Merge additional info
+		for k, v := range remoteAlarm.AdditionalInfo {
+			localAlarm.AdditionalInfo[k] = v
+		}
+		if err := p.engine.UpdateFromSync(ctx, localAlarm); err != nil {
+			p.logger.Error("sync update alarm", zap.Error(err),
+				zap.String("device_sn", deviceSN),
+				zap.String("alarm_identifier", remoteAlarm.AlarmIdentifier))
+			result.FailedUpdate++
+		} else {
+			result.Updated++
+		}
 	}
 
 	// 7. Apply diff: ToClear
-	for _, alarmIDStr := range diff.ToClear {
-		alarm, err := p.store.GetActiveByDeviceAndIdentifier(ctx, deviceSN, alarmIDStr)
-		if err != nil {
-			p.logger.Error("sync find alarm to clear", zap.Error(err),
-				zap.String("device_sn", deviceSN),
-				zap.String("alarm_identifier", alarmIDStr))
-			result.FailedClear++
-			continue
-		}
+	for _, matchKey := range diff.ToClear {
+		alarm := localAlarmByKey[matchKey]
 		if alarm == nil {
 			result.Cleared++
 			continue
@@ -231,7 +218,7 @@ func (p *AlarmSyncProcessor) processSync(ctx context.Context, deviceSN string, p
 		if err := p.engine.ClearBySync(ctx, alarm); err != nil {
 			p.logger.Error("sync clear alarm", zap.Error(err),
 				zap.String("device_sn", deviceSN),
-				zap.String("alarm_identifier", alarmIDStr))
+				zap.String("alarm_identifier", alarm.AlarmIdentifier))
 			result.FailedClear++
 		} else {
 			result.Cleared++

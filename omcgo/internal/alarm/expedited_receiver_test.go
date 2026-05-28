@@ -201,6 +201,59 @@ func TestExpeditedEventReceiver_ClearedAlarm(t *testing.T) {
 	assert.Len(t, store.history, 1)
 }
 
+func TestExpeditedEventReceiver_ClearedAlarmOnlyRemovesMatchingDuplicate(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	bus := newMockEventBus()
+	deviceLookup := &mockDeviceLookup{
+		devices: map[string]*model.Device{"SN-TEST": newTestDevice()},
+	}
+	receiver := NewExpeditedEventReceiver(engine, deviceLookup, bus, zap.NewNop())
+	ctx := context.Background()
+
+	deviceID := uuid.MustParse("550e8400-e29b-41d4-a716-446655440000")
+	require.NoError(t, engine.Process(ctx, &model.Alarm{
+		DeviceSN:        "SN-TEST",
+		DeviceID:        deviceID,
+		Carrier:         model.CarrierCMCC,
+		AlarmIdentifier: "11184",
+		Severity:        model.AlarmCritical,
+		RaisedAt:        mustParseTime(t, "2026-04-23T09:00:00Z"),
+		AdditionalInfo:  map[string]string{"additional_information": "cell=1"},
+	}))
+	require.NoError(t, engine.Process(ctx, &model.Alarm{
+		DeviceSN:        "SN-TEST",
+		DeviceID:        deviceID,
+		Carrier:         model.CarrierCMCC,
+		AlarmIdentifier: "11184",
+		Severity:        model.AlarmCritical,
+		RaisedAt:        mustParseTime(t, "2026-04-23T09:01:00Z"),
+		AdditionalInfo:  map[string]string{"additional_information": "cell=2"},
+	}))
+
+	params := []tr069.ParameterValueStruct{
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.NotificationType", "ClearedAlarm"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.AlarmIdentifier", "11184"),
+		makeParam("Device.FaultMgmt.ExpeditedEvent.10.AdditionalInformation", "cell=1"),
+	}
+
+	payload := ExpeditedEventPayload{
+		DeviceSN:        "SN-TEST",
+		ParameterValues: params,
+	}
+	payloadJSON, _ := json.Marshal(payload)
+	evt := event.Event{ID: "test-3-dup", Subject: event.SubjectDeviceExpeditedAlarm, Payload: payloadJSON}
+
+	err := receiver.handleExpeditedAlarmEvent(ctx, evt)
+	require.NoError(t, err)
+
+	assert.Len(t, store.active, 1)
+	for _, alarm := range store.active {
+		assert.Equal(t, "cell=2", alarm.AdditionalInfo["additional_information"])
+	}
+	assert.Len(t, store.history, 1)
+}
+
 func TestExpeditedEventReceiver_DeviceNotFound(t *testing.T) {
 	store := newMockAlarmStore()
 	engine := newTestEngine(store)

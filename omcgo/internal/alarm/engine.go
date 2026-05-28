@@ -118,14 +118,16 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 		}
 	}
 
+	dedupKey := activeAlarmMatchKey(alarm)
+
 	// 2. Deduplication check via Redis
 	if e.redisStore != nil {
-		exists, err := e.redisStore.Exists(ctx, alarm.DeviceSN, alarm.AlarmIdentifier)
+		exists, err := e.redisStore.Exists(ctx, alarm.DeviceSN, dedupKey)
 		if err != nil {
 			e.logger.Warn("redis dedup check failed, falling back to DB",
 				zap.Error(err))
 		} else if exists {
-			existingIDStr, _ := e.redisStore.Get(ctx, alarm.DeviceSN, alarm.AlarmIdentifier)
+			existingIDStr, _ := e.redisStore.Get(ctx, alarm.DeviceSN, dedupKey)
 			if existingIDStr != "" {
 				existingID, parseErr := uuid.Parse(existingIDStr)
 				if parseErr == nil {
@@ -146,14 +148,14 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 	}
 
 	// 3. Also check DB in case Redis missed it
-	existing, err := e.store.GetActiveByDeviceAndIdentifier(ctx, alarm.DeviceSN, alarm.AlarmIdentifier)
+	existing, err := loadMatchingActiveAlarm(ctx, e.store, alarm)
 	if err == nil && existing != nil {
 		applyIncomingAlarmState(existing, alarm)
 		if updateErr := e.store.UpdateActive(ctx, existing); updateErr != nil {
 			return fmt.Errorf("update existing alarm: %w", updateErr)
 		}
 		if e.redisStore != nil {
-			if redisErr := e.redisStore.Set(ctx, alarm.DeviceSN, alarm.AlarmIdentifier, existing.ID.String()); redisErr != nil {
+			if redisErr := e.redisStore.Set(ctx, alarm.DeviceSN, dedupKey, existing.ID.String()); redisErr != nil {
 				e.logger.Warn("redis set alarm dedup key", zap.Error(redisErr))
 			}
 		}
@@ -181,7 +183,7 @@ func (e *AlarmEngine) Process(ctx context.Context, alarm *model.Alarm) error {
 	}
 
 	if e.redisStore != nil {
-		if redisErr := e.redisStore.Set(ctx, alarm.DeviceSN, alarm.AlarmIdentifier, alarm.ID.String()); redisErr != nil {
+		if redisErr := e.redisStore.Set(ctx, alarm.DeviceSN, dedupKey, alarm.ID.String()); redisErr != nil {
 			e.logger.Warn("redis set new alarm dedup key", zap.Error(redisErr))
 		}
 	}
@@ -296,16 +298,17 @@ func (e *AlarmEngine) Clear(ctx context.Context, alarmID uuid.UUID) error {
 	return nil
 }
 
-// AutoClear clears an alarm by device serial and alarm identifier (device-initiated).
-func (e *AlarmEngine) AutoClear(ctx context.Context, deviceSN, alarmIdentifier string) error {
-	alarm, err := e.store.GetActiveByDeviceAndIdentifier(ctx, deviceSN, alarmIdentifier)
+// AutoClear clears a device-originated alarm using the same instance-level key
+// as creation and update flows.
+func (e *AlarmEngine) AutoClear(ctx context.Context, alarm *model.Alarm) error {
+	existing, err := loadMatchingActiveAlarm(ctx, e.store, alarm)
 	if err != nil {
 		return fmt.Errorf("get alarm by device and identifier: %w", err)
 	}
-	if alarm == nil {
+	if existing == nil {
 		return nil // No active alarm to clear
 	}
-	return e.Clear(ctx, alarm.ID)
+	return e.Clear(ctx, existing.ID)
 }
 
 func (e *AlarmEngine) archiveAutoClearedAlarm(ctx context.Context, alarm *model.Alarm) error {
@@ -313,7 +316,7 @@ func (e *AlarmEngine) archiveAutoClearedAlarm(ctx context.Context, alarm *model.
 	clearNote := "auto-cleared by filter"
 	clearedBy := "system:auto_filter"
 
-	existing, err := e.store.GetActiveByDeviceAndIdentifier(ctx, alarm.DeviceSN, alarm.AlarmIdentifier)
+	existing, err := loadMatchingActiveAlarm(ctx, e.store, alarm)
 	if err != nil {
 		if !errors.Is(err, commonerrors.ErrNotFound) {
 			return fmt.Errorf("lookup auto-cleared alarm: %w", err)
@@ -332,7 +335,7 @@ func (e *AlarmEngine) archiveAutoClearedAlarm(ctx context.Context, alarm *model.
 			return fmt.Errorf("remove existing auto-cleared alarm: %w", err)
 		}
 		if e.redisStore != nil {
-			if err := e.redisStore.Delete(ctx, existing.DeviceSN, existing.AlarmIdentifier); err != nil {
+			if err := e.redisStore.Delete(ctx, existing.DeviceSN, activeAlarmMatchKey(existing)); err != nil {
 				e.logger.Warn("redis delete auto-cleared alarm", zap.Error(err))
 			}
 		}
@@ -417,7 +420,7 @@ func (e *AlarmEngine) ClearBySync(ctx context.Context, alarm *model.Alarm) error
 // on the existing active alarm and publishes an alarm.updated event for northbound push.
 // If no matching active alarm is found, it falls back to Process() (race with NewAlarm).
 func (e *AlarmEngine) UpdateByEvent(ctx context.Context, alarm *model.Alarm) error {
-	existing, err := e.store.GetActiveByDeviceAndIdentifier(ctx, alarm.DeviceSN, alarm.AlarmIdentifier)
+	existing, err := loadMatchingActiveAlarm(ctx, e.store, alarm)
 	if err != nil {
 		return fmt.Errorf("lookup alarm for update: %w", err)
 	}
