@@ -81,6 +81,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   onMapClick,
   showStats = true,
   showControls = true,
+  showMetadataTip = true,
   className,
   style,
 }, ref) => {
@@ -96,7 +97,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
   const [popupPosition, setPopupPosition] = useState<{ x: number; y: number } | null>(null);
   const [, setHighlightedId] = useState<string | null>(null);
   const [viewport, setViewport] = useState<MapViewport | null>(null);
-  const [showMetadataTip, setShowMetadataTip] = useState(false);
+  const [shouldShowMetadataAlert, setShouldShowMetadataAlert] = useState(false);
   // 点击锁定的设备（优先显示，支持复制）
   const [clickedDevice, setClickedDevice] = useState<MapDevice | null>(null);
   const [clickedPosition, setClickedPosition] = useState<{ x: number; y: number } | null>(null);
@@ -158,14 +159,14 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
 
   // 元数据加载完成日志（用于调试）
   useEffect(() => {
-    if (metadata) {
+    if (metadata && showMetadataTip) {
       console.log('[GISMap] Metadata loaded:', metadata.region, metadata.bounds);
       // 显示短暂的元数据加载提示
-      setShowMetadataTip(true);
-      const timer = setTimeout(() => setShowMetadataTip(false), 3000);
+      setShouldShowMetadataAlert(true);
+      const timer = setTimeout(() => setShouldShowMetadataAlert(false), 3000);
       return () => clearTimeout(timer);
     }
-  }, [metadata]);
+  }, [metadata, showMetadataTip]);
 
   // 窗口大小变化时更新地图
   useEffect(() => {
@@ -441,6 +442,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     height: '100%',
     overflow: 'hidden', // 地图容器内部保持裁剪
     borderRadius: 8,
+    ...(isReady ? { opacity: 1, transition: 'opacity 0.5s ease-in' } : { opacity: 0 }),
   };
 
   const loadingStyle: React.CSSProperties = {
@@ -451,17 +453,9 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     zIndex: 1000,
   };
 
-  // 加载提示文本
-  const getLoadingText = () => {
-    if (metadataLoading) {
-      return intl.formatMessage({ id: 'map.loadingConfig' });
-    }
-    return intl.formatMessage({ id: 'map.initializing' });
-  };
-
   // 元数据信息提示
   const metadataAlert = useMemo(() => {
-    if (!metadata || !showMetadataTip) return null;
+    if (!metadata || !shouldShowMetadataAlert) return null;
     return {
       message: intl.formatMessage(
         { id: 'map.loaded' },
@@ -477,7 +471,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
         }
       ),
     };
-  }, [metadata, showMetadataTip, intl]);
+  }, [metadata, shouldShowMetadataAlert, intl]);
 
   return (
     <div
@@ -491,9 +485,6 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
       {!isReady && (
         <div style={loadingStyle}>
           <Spin size="large" indicator={<LoadingOutlined spin />} />
-          <div style={{ marginTop: 16, color: token.colorTextSecondary }}>
-            {getLoadingText()}
-          </div>
         </div>
       )}
 
@@ -514,7 +505,7 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
             icon={<InfoCircleOutlined />}
             showIcon
             closable
-            onClose={() => setShowMetadataTip(false)}
+            onClose={() => setShouldShowMetadataAlert(false)}
             style={{ fontSize: 12 }}
           />
         </div>

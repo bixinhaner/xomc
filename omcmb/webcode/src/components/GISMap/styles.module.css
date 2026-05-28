@@ -24,6 +24,20 @@
   overflow: hidden;
 }
 
+/* 地图容器淡入动画 */
+.mapFadeIn {
+  animation: mapFadeIn 0.6s ease-out;
+}
+
+@keyframes mapFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 /* ============ Map Popup ============ */
 .mapPopup {
   animation: fadeIn 0.2s ease-out;

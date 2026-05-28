@@ -570,8 +570,6 @@ export default function GISMapView() {
 
   // ========== 渲染 ==========
 
-  const isLoading = isLoadingTree || isLoadingDevices || isLoadingStats;
-
   return (
     <div style={{ display: 'flex', width: '100%', height: '100%', background: '#F0F2F5' }}>
       {/* 左侧筛选面板 */}
@@ -826,30 +824,21 @@ export default function GISMapView() {
 
       {/* 地图区域 */}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-        {/* 地图组件 */}
-        {isLoading ? (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-            <Spin size="large" tip={intl.formatMessage({ id: 'gis.loading' })}>
-              <span style={{ fontSize: 14, color: '#8C8C8C' }}>{intl.formatMessage({ id: 'common.loading' })}</span>
-            </Spin>
-          </div>
-        ) : (
-          <GISMap
-            ref={mapRef}
-            devices={mapDevices}
-            height="100%"
-            defaultCenter={[26, -13] as [number, number]}
-            defaultZoom={MAP_CONFIG.defaultZoom}
-            showStats={false}
-            showControls={false}
-            tileUrl={MAP_CONFIG.tileUrl}
-            onDeviceClick={undefined}
-            onMapClick={() => {
-              // 点击地图时收起搜索结果面板
-              setDeviceSearchExpanded(false);
-            }}
-          />
-        )}
+        <GISMap
+          ref={mapRef}
+          devices={mapDevices}
+          height="100%"
+          defaultCenter={[26, -13] as [number, number]}
+          defaultZoom={MAP_CONFIG.defaultZoom}
+          showStats={false}
+          showControls={false}
+          tileUrl={MAP_CONFIG.tileUrl}
+          onDeviceClick={undefined}
+          onMapClick={() => {
+            // 点击地图时收起搜索结果面板
+            setDeviceSearchExpanded(false);
+          }}
+        />
 
         {/* 设备搜索 */}
         <div ref={searchContainerRef} style={deviceSearchStyle}>
@@ -1055,7 +1044,7 @@ export default function GISMapView() {
           >
             <span style={{ fontSize: 16, fontWeight: 600, color: COLORS.neutral[800] }}>+</span>
           </button>
-          <div style={{ width: 24, height: 1, background: COLORS.neutral[100] }} />
+          <div style={{ width: 24, height: 1, backgroundColor: COLORS.neutral[100] }} />
           <button
             style={zoomButtonStyle}
             onMouseEnter={(e) => {
@@ -1092,6 +1081,7 @@ export default function GISMapView() {
             transform: 'translateX(-50%)',
             fontSize: 11,
             color: '#BFBFBF',
+            width: 'fit-content',
           }}
         >
           OMC GIS Map - Topology View v2.0 (Real API)

@@ -301,6 +301,8 @@ export interface GISMapProps {
   showStats?: boolean;
   /** 是否显示控制按钮 */
   showControls?: boolean;
+  /** 是否显示元数据加载提示（默认 true，仪表板小地图可设为 false） */
+  showMetadataTip?: boolean;
   /** 自定义样式 */
   className?: string;
   /** 自定义样式对象 */

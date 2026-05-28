@@ -32,9 +32,12 @@ import PieChart from '@/components/Charts/PieChart';
 import BarChart from '@/components/Charts/BarChart';
 import LineChart from '@/components/Charts/LineChart';
 import GISMap from '@/components/GISMap';
+import { MAP_CONFIG } from '@/components/GISMap/constants';
 import type { MapDevice } from '@/components/GISMap';
+import type { DeviceGeo } from '@core/types/map';
 import { useDashboardData } from '@core/hooks/api/useDashboard';
 import { useAlarmCount, useCurrentAlarms } from '@core/hooks/api/useAlarms';
+import { useMapDevicesGeo } from '@core/hooks/api/useTopology';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { TiltCard } from '@/components/Effects';
@@ -82,19 +85,6 @@ const QUICK_ACCESS_ITEMS = [
   { labelKey: 'nav.mml.console',       icon: <PlayCircleOutlined />,  path: '/mml/console',               color: '#08979C' },
 ];
 
-const MOCK_MAP_DEVICES: MapDevice[] = [
-  { id: '1', lat: 39.9, lng: 116.4, status: 'onlineActive', name: '北京基站-001', sn: 'SN-BJ001' },
-  { id: '2', lat: 31.2, lng: 121.5, status: 'onlineActive', name: '上海基站-002', sn: 'SN-SH002' },
-  { id: '3', lat: 23.1, lng: 113.3, status: 'onlineActive', name: '广州基站-003', sn: 'SN-GZ003', alarmCount: 2 },
-  { id: '4', lat: 22.5, lng: 114.1, status: 'onlineActive', name: '深圳基站-004', sn: 'SN-SZ004' },
-  { id: '5', lat: 30.7, lng: 104.1, status: 'offline', name: '成都基站-005', sn: 'SN-CD005', alarmCount: 5 },
-  { id: '6', lat: 36.1, lng: 103.8, status: 'offline', name: '兰州基站-006', sn: 'SN-LZ006' },
-  { id: '7', lat: 34.3, lng: 108.9, status: 'onlineActive', name: '西安基站-007', sn: 'SN-XA007' },
-  { id: '8', lat: 32.0, lng: 118.8, status: 'onlineActive', name: '南京基站-008', sn: 'SN-NJ008' },
-  { id: '9', lat: 45.8, lng: 126.5, status: 'offline', name: '哈尔滨基站-009', sn: 'SN-HRB009' },
-  { id: '10', lat: 25.0, lng: 102.7, status: 'onlineActive', name: '昆明基站-010', sn: 'SN-KM010', alarmCount: 1 },
-];
-
 export default function DashboardPage() {
   const navigate = useNavigate();
   const { data: dashboardData, isLoading } = useDashboardData();
@@ -105,6 +95,38 @@ export default function DashboardPage() {
   });
   const t = useT();
   const token = useThemeToken();
+
+  // 获取设备地理数据（与 GISMapView 相同的数据源）
+  const mapFilterParams = useMemo(() => ({
+    // 仪表板场景：获取所有状态的设备
+    status: undefined,
+    // 获取所有设备组的设备
+    groupIds: undefined,
+    // 启用请求
+    enabled: true,
+    // 限制数量，避免仪表板加载过慢
+    pageSize: 100,
+  }), []);
+
+  const { data: devicesGeoData } = useMapDevicesGeo(mapFilterParams);
+
+  // 转换 DeviceGeo 为 MapDevice 格式
+  const mapDevices = useMemo(() => {
+    if (!devicesGeoData?.items?.length) return [];
+    return devicesGeoData.items.map((device: DeviceGeo) => ({
+      id: device.id,
+      lat: device.latitude,
+      lng: device.longitude,
+      name: device.name,
+      status: device.status,
+      sn: device.sn,
+      groupName: device.groupName,
+      address: device.address,
+      alarmCount: device.alarmCount,
+      type: device.type,
+      groupId: device.groupId,
+    }));
+  }, [devicesGeoData]);
 
   // KPI values — use real data when available, fall back to sensible defaults
   const totalDevices = dashboardData?.summary?.deviceCounts?.total ?? 1284;
@@ -413,9 +435,13 @@ export default function DashboardPage() {
           <TiltCard maxTilt={5}>
           <Card title={t('dashboard.deviceMap')} size="small" styles={{ body: { padding: 8 } }}>
             <GISMap
-              devices={MOCK_MAP_DEVICES}
+              devices={mapDevices}
               height={280}
+              defaultCenter={MAP_CONFIG.defaultCenter}
+              defaultZoom={MAP_CONFIG.defaultZoom}
+              tileUrl={MAP_CONFIG.tileUrl}
               showStats={false}
+              showMetadataTip={false}
               onDeviceClick={handleDeviceClick}
             />
           </Card>

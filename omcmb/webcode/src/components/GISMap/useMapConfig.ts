@@ -6,6 +6,7 @@
  * 1. 从服务端加载 Maperitive 生成的 tiles.json (TileJSON 格式)
  * 2. 自动转换为内部 MapMetadata 格式
  * 3. 异常场景自动降级到 DEFAULT_METADATA
+ * 4. 全局缓存避免重复请求（React StrictMode 双重渲染）
  *
  * 异常场景处理：
  * - tiles.json 不存在（404）→ 降级到默认配置
@@ -15,6 +16,10 @@
  */
 
 import { useState, useEffect } from 'react';
+
+// 全局缓存状态，避免 React StrictMode 双重渲染导致重复请求
+let globalMetadataCache: MapMetadata | null = null;
+let globalFetchPromise: Promise<void> | null = null;
 
 /**
  * TileJSON 格式（Maperitive / TileServer GL 生成）
@@ -159,13 +164,33 @@ export type LoadStatus =
  * - isUsingDefault: 是否使用了默认配置（用于调试）
  */
 export function useMapConfig() {
-  const [metadata, setMetadata] = useState<MapMetadata | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [metadata, setMetadata] = useState<MapMetadata | null>(() => globalMetadataCache);
+  const [loading, setLoading] = useState(() => globalMetadataCache === null);
   const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<LoadStatus>('idle');
+  const [status, setStatus] = useState<LoadStatus>(() => globalMetadataCache ? 'success' : 'idle');
   const [isUsingDefault, setIsUsingDefault] = useState(false);
 
   useEffect(() => {
+    // 如果已有缓存，直接使用
+    if (globalMetadataCache) {
+      setMetadata(globalMetadataCache);
+      setLoading(false);
+      setStatus('success');
+      return;
+    }
+
+    // 如果正在获取中，等待同一个 Promise
+    if (globalFetchPromise) {
+      globalFetchPromise.then(() => {
+        if (globalMetadataCache) {
+          setMetadata(globalMetadataCache);
+          setLoading(false);
+          setStatus('success');
+        }
+      });
+      return;
+    }
+
     const fetchMetadata = async () => {
       setStatus('loading');
       setIsUsingDefault(false);
@@ -179,10 +204,12 @@ export function useMapConfig() {
           // 验证 TileJSON 基本结构
           if (tilejson && (tilejson.bounds || tilejson.center)) {
             const converted = tileJsonToMetadata(tilejson);
+            globalMetadataCache = converted; // 缓存结果
             setMetadata(converted);
             setStatus('success');
           } else {
             // TileJSON 格式不完整，使用默认值
+            globalMetadataCache = DEFAULT_METADATA; // 缓存默认值
             setMetadata(DEFAULT_METADATA);
             setStatus('error');
             setIsUsingDefault(true);
@@ -190,6 +217,7 @@ export function useMapConfig() {
           }
         } else {
           // HTTP 错误（404/500 等），使用默认值
+          globalMetadataCache = DEFAULT_METADATA; // 缓存默认值
           setMetadata(DEFAULT_METADATA);
           setStatus('error');
           setIsUsingDefault(true);
@@ -199,16 +227,21 @@ export function useMapConfig() {
         // 网络错误或其他异常，使用默认值
         const errorMessage =
           err instanceof Error ? err.message : 'Unknown error';
+        globalMetadataCache = DEFAULT_METADATA; // 缓存默认值
         setMetadata(DEFAULT_METADATA);
         setStatus('error');
         setIsUsingDefault(true);
         setError(errorMessage);
       } finally {
         setLoading(false);
+        globalFetchPromise = null; // 清空 Promise
       }
     };
 
-    fetchMetadata();
+    globalFetchPromise = fetchMetadata();
+    globalFetchPromise.catch(() => {
+      // 错误已在 fetchMetadata 中处理
+    });
   }, []);
 
   return {
