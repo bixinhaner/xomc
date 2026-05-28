@@ -8,7 +8,7 @@
  * 与 G6 panel 一致的视觉：ECharts Line + 缺采 '-' 断线
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Alert, Button, Card, Empty, Space, Spin, Table, Tabs, Tag, Tooltip, Typography } from 'antd';
 import { FileExcelOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
@@ -60,6 +60,53 @@ function buildSeriesByMetric(rows: AdhocResultRow[], granularity: string): Metri
   return out;
 }
 
+// 结果表的列定义：页面表格与导出 Excel 共用同一份，保证列集合 / 列名 / 格式不漂移。
+// toText 给出导出用纯文本（含时间格式化、聚合组文案）；renderCell 仅页面展示需要富渲染时提供。
+interface AdhocCol {
+  header: string;
+  width?: number;
+  toText: (r: AdhocResultRow) => string | number;
+  renderCell?: (r: AdhocResultRow) => ReactNode;
+}
+
+function buildAdhocColumns(taskDeviceSns: string[]): AdhocCol[] {
+  const deviceText = (r: AdhocResultRow) =>
+    r.deviceSn === 'AGGREGATED'
+      ? `聚合组·${taskDeviceSns.length} 台`
+      : r.deviceOui
+        ? `${r.deviceOui}/${r.deviceSn}`
+        : r.deviceSn;
+  return [
+    {
+      header: '设备',
+      width: 200,
+      toText: deviceText,
+      renderCell: (r) =>
+        r.deviceSn === 'AGGREGATED' ? (
+          <Tooltip title={<pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{taskDeviceSns.join('\n')}</pre>}>
+            <Tag color="purple" style={{ cursor: 'help' }}>
+              {deviceText(r)}
+            </Tag>
+          </Tooltip>
+        ) : (
+          deviceText(r)
+        ),
+    },
+    { header: '指标', toText: (r) => r.metricPath },
+    { header: '值', width: 120, toText: (r) => r.metricValue },
+    {
+      header: '开始时间',
+      width: 160,
+      toText: (r) => (r.startTime ? dayjs(r.startTime).format('YYYY-MM-DD HH:mm') : '-'),
+    },
+    {
+      header: '结束时间',
+      width: 160,
+      toText: (r) => (r.endTime ? dayjs(r.endTime).format('YYYY-MM-DD HH:mm') : '-'),
+    },
+  ];
+}
+
 export function AdhocResultPanel({ taskId, embedded = false }: Props) {
   const taskQuery = usePmAdhocDetail(taskId);
   const { data: rows = [], isLoading: rowsLoading } = usePmAdhocResults(taskId);
@@ -83,22 +130,20 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
   const task = taskQuery.data;
 
   // G7-Gap-4：导出 adhoc 结果（多 sheet，按粒度分）
+  // 列集合 / 列名 / 时间格式与页面表格 (GranularityView) 共用 buildAdhocColumns，保持一致
   const handleExportExcel = () => {
+    const cols = buildAdhocColumns(task.deviceSns);
     const sheets = granularities.map((g) => ({
       name: g,
       rows: rows
         .filter((r) => r.granularity === g)
-        .map((r) => ({
-          device_oui: r.deviceOui,
-          device_sn: r.deviceSn,
-          metric_path: r.metricPath,
-          metric_type: r.metricType,
-          metric_value: r.metricValue,
-          statis_type: r.statisType ?? '',
-          time: r.time,
-          start_time: r.startTime,
-          end_time: r.endTime,
-        })),
+        .map((r) => {
+          const row: Record<string, string | number> = {};
+          cols.forEach((c) => {
+            row[c.header] = c.toText(r);
+          });
+          return row;
+        }),
     }));
     exportWorkbook(`adhoc_${task.name}_${task.id.slice(0, 8)}`, sheets);
   };
@@ -186,6 +231,7 @@ function GranularityView({
   taskDeviceSns: string[];
 }) {
   const series = useMemo(() => buildSeriesByMetric(rows, granularity), [rows, granularity]);
+  const cols = useMemo(() => buildAdhocColumns(taskDeviceSns), [taskDeviceSns]);
   if (loading) return <Spin />;
   if (series.length === 0) {
     return <Empty description={`${granularity} 粒度暂无数据`} />;
@@ -214,41 +260,12 @@ function GranularityView({
         dataSource={rows.filter((r) => r.granularity === granularity)}
         pagination={{ pageSize: 10, size: 'small' }}
         style={{ marginTop: 12 }}
-        columns={[
-          {
-            title: '设备',
-            width: 200,
-            render: (_, r) => {
-              if (r.deviceSn === 'AGGREGATED') {
-                const list = taskDeviceSns.join('\n');
-                return (
-                  <Tooltip
-                    title={<pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{list}</pre>}
-                  >
-                    <Tag color="purple" style={{ cursor: 'help' }}>
-                      聚合组·{taskDeviceSns.length} 台
-                    </Tag>
-                  </Tooltip>
-                );
-              }
-              return r.deviceOui ? `${r.deviceOui}/${r.deviceSn}` : r.deviceSn;
-            },
-          },
-          { title: '指标', dataIndex: 'metricPath' },
-          { title: '值', dataIndex: 'metricValue', width: 120 },
-          {
-            title: '开始时间',
-            dataIndex: 'startTime',
-            width: 160,
-            render: (t?: string) => (t ? dayjs(t).format('YYYY-MM-DD HH:mm') : '-'),
-          },
-          {
-            title: '结束时间',
-            dataIndex: 'endTime',
-            width: 160,
-            render: (t?: string) => (t ? dayjs(t).format('YYYY-MM-DD HH:mm') : '-'),
-          },
-        ]}
+        columns={cols.map((c) => ({
+          title: c.header,
+          key: c.header,
+          width: c.width,
+          render: (_: unknown, r: AdhocResultRow) => (c.renderCell ? c.renderCell(r) : c.toText(r)),
+        }))}
       />
     </>
   );

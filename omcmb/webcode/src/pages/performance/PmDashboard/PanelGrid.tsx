@@ -74,9 +74,11 @@ function PanelCard({
       }
       const buckets = panelData.series[0]?.points.map((p) => p.label) ?? [];
       const rows = buckets.map((label, i) => {
-        const row: Record<string, string | number | null> = { time: label };
+        // 列名 / 缺采占位与页面表格 (PanelRenderer.TableRenderer) 保持一致
+        const row: Record<string, string | number | null> = { 时间: label };
         panelData.series.forEach((s) => {
-          row[s.name] = s.points[i]?.value ?? null;
+          const v = s.points[i]?.value;
+          row[s.name] = v === null || v === undefined ? '缺采' : v;
         });
         return row;
       });
