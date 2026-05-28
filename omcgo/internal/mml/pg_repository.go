@@ -686,8 +686,10 @@ func (r *PgTaskRepository) Create(ctx context.Context, task *MMLTask) error {
 			"total_devices",
 			"next_trigger_at", "parent_task_id",
 			"product_resolved", "matched_product_id", "matched_product_class", "path_translation_source").
-		Values(task.TaskName, task.ScriptID, deviceSNsJSON,
-			commandsJSON, task.Status, resultsJSON, task.Creator, task.Executor,
+		// 2026-05-28 修复:JSONB 列用 string 传(详见 Update 函数注释)。
+		// Create 当前能工作是 pgx prepare-cache 路径行为巧合,显式 string 防退化。
+		Values(task.TaskName, task.ScriptID, string(deviceSNsJSON),
+			string(commandsJSON), task.Status, string(resultsJSON), task.Creator, task.Executor,
 			task.ExecuteType, task.ScheduledAt,
 			task.PeriodStart, task.PeriodEnd, task.PeriodTime,
 			task.OfflineRetry, task.OfflineRetryWait,
@@ -743,13 +745,19 @@ func (r *PgTaskRepository) Update(ctx context.Context, task *MMLTask) error {
 		return fmt.Errorf("marshal results: %w", err)
 	}
 
+	// 2026-05-28 修复:三个 JSONB 列必须用 string 而非 []byte 传入,否则 pgx v5 把
+	// []byte 默认按 BYTEA wire format 编码,PG 把 BYTEA 字节流当 text 反解析为 JSON
+	// 失败 → "invalid input syntax for type json (SQLSTATE 22P02)" → 整个 UPDATE
+	// 失败 → finalizeIfComplete 无法更新 status/result/finished_at → 任务永远卡
+	// status=running 虽然 success_count 已等于 total_devices(独立 UPDATE 增 counter
+	// 不受影响)。string(...) 让 pgx 当 text 传,PG 自动 parse JSON。
 	query, args, err := storage.Psql.Update("mml_tasks").
 		Set("task_name", task.TaskName).
 		Set("script_id", task.ScriptID).
-		Set("device_sns", deviceSNsJSON).
-		Set("commands", commandsJSON).
+		Set("device_sns", string(deviceSNsJSON)).
+		Set("commands", string(commandsJSON)).
 		Set("status", task.Status).
-		Set("results", resultsJSON).
+		Set("results", string(resultsJSON)).
 		Set("creator", task.Creator).
 		Set("execute_type", task.ExecuteType).
 		Set("scheduled_at", task.ScheduledAt).
