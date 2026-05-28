@@ -773,13 +773,25 @@ export default function DeviceDetail() {
   const acknowledgeAlarms = useAcknowledgeAlarms();
   const unacknowledgeAlarms = useUnacknowledgeAlarms();
   const clearAlarms = useClearAlarms();
+  const [alarmPage, setAlarmPage] = useState(1);
+  const [alarmPageSize, setAlarmPageSize] = useState(20);
 
   const alarmParams = useMemo(
-    () => ({ deviceSn: sn, page: 1, pageSize: 20 } as Parameters<typeof useCurrentAlarms>[0]),
-    [sn]
+    () => ({ deviceSn: sn, page: alarmPage, pageSize: alarmPageSize } as Parameters<typeof useCurrentAlarms>[0]),
+    [alarmPage, alarmPageSize, sn]
   );
   const { data: alarmData, isLoading: alarmsLoading, refetch: refetchAlarms } = useCurrentAlarms(alarmParams);
   const alarms: Alarm[] = alarmData?.items ?? [];
+
+  useEffect(() => {
+    setAlarmPage(1);
+    setAlarmPageSize(20);
+  }, [sn]);
+
+  const handleAlarmPageChange = useCallback((page: number, size: number) => {
+    setAlarmPage(page);
+    setAlarmPageSize(size);
+  }, []);
 
   const handleShowAlarmDetail = useCallback((alarm: Alarm) => {
     setDetailAlarm(alarm);
@@ -1082,6 +1094,9 @@ export default function DeviceDetail() {
                     loading={alarmsLoading}
                     rowKey="id"
                     total={alarmData?.total ?? 0}
+                    currentPage={alarmPage}
+                    pageSize={alarmPageSize}
+                    onPageChange={handleAlarmPageChange}
                     showPagination
                     defaultDensity="default"
                     alarmRowStyle={(record) => record.severity as 'critical' | 'major' | 'minor' | 'warning'}

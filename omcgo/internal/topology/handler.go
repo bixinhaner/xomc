@@ -1,6 +1,7 @@
 package topology
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -16,6 +17,12 @@ import (
 	"go.uber.org/zap"
 )
 
+// VisibleGroupsResolver resolves which L2 device groups a user can see.
+// nil slice means unrestricted (super admin), empty slice means no visible groups.
+type VisibleGroupsResolver interface {
+	GetUserVisibleGroupIDs(ctx context.Context, userID uuid.UUID, isSuperAdmin bool) ([]uuid.UUID, error)
+}
+
 // Handler provides HTTP handlers for topology (device group) REST API.
 type Handler struct {
 	repo     DeviceGroupRepository
@@ -25,11 +32,17 @@ type Handler struct {
 	edgeRepo TopoEdgeRepository
 	syncSvc  *DeviceSyncService
 	logger   *zap.Logger
+	permSvc  VisibleGroupsResolver
 }
 
 // NewHandler creates a new topology REST API handler.
 func NewHandler(repo DeviceGroupRepository, service *DeviceGroupService, siteRepo SiteRepository, nodeRepo TopoNodeRepository, edgeRepo TopoEdgeRepository, syncSvc *DeviceSyncService, logger *zap.Logger) *Handler {
 	return &Handler{repo: repo, service: service, siteRepo: siteRepo, nodeRepo: nodeRepo, edgeRepo: edgeRepo, syncSvc: syncSvc, logger: logger}
+}
+
+// SetPermissionService sets the data permission service for group-tree filtering.
+func (h *Handler) SetPermissionService(ps VisibleGroupsResolver) {
+	h.permSvc = ps
 }
 
 // RegisterRoutes registers topology routes on the given router group.
@@ -101,6 +114,75 @@ func getOperator(c *gin.Context) string {
 	return ""
 }
 
+func (h *Handler) resolveVisibleGroups(c *gin.Context) ([]uuid.UUID, bool, error) {
+	if h.permSvc == nil {
+		return nil, false, nil
+	}
+	userIDVal, ok := c.Get(admin.CtxKeyUserID)
+	if !ok {
+		return nil, false, nil
+	}
+	userID, ok := userIDVal.(uuid.UUID)
+	if !ok {
+		return nil, false, nil
+	}
+	isSuperVal, _ := c.Get(admin.CtxKeyIsSuperAdmin)
+	isSuper, _ := isSuperVal.(bool)
+	visibleGroups, err := h.permSvc.GetUserVisibleGroupIDs(c.Request.Context(), userID, isSuper)
+	if err != nil {
+		return nil, false, err
+	}
+	return visibleGroups, visibleGroups != nil, nil
+}
+
+func filterVisibleGroups(tree []DeviceGroup, visibleGroups []uuid.UUID) []DeviceGroup {
+	if visibleGroups == nil {
+		return tree
+	}
+	visibleSet := make(map[uuid.UUID]struct{}, len(visibleGroups))
+	for _, id := range visibleGroups {
+		visibleSet[id] = struct{}{}
+	}
+	return filterVisibleGroupNodes(tree, visibleSet)
+}
+
+func filterVisibleGroupNodes(nodes []DeviceGroup, visibleSet map[uuid.UUID]struct{}) []DeviceGroup {
+	filtered := make([]DeviceGroup, 0, len(nodes))
+	for _, node := range nodes {
+		node.Children = filterVisibleGroupNodes(node.Children, visibleSet)
+		_, selfVisible := visibleSet[node.ID]
+		if !selfVisible && len(node.Children) == 0 {
+			continue
+		}
+		if len(node.Children) > 0 {
+			childCount := 0
+			for _, child := range node.Children {
+				childCount += child.DeviceCount
+			}
+			node.DeviceCount = childCount
+		}
+		filtered = append(filtered, node)
+	}
+	return filtered
+}
+
+func buildVisibleGroupStats(tree []DeviceGroup) *GroupStats {
+	stats := &GroupStats{}
+	var walk func(nodes []DeviceGroup)
+	walk = func(nodes []DeviceGroup) {
+		for _, node := range nodes {
+			stats.TotalGroups++
+			if len(node.Children) == 0 {
+				stats.GroupedDevices += node.DeviceCount
+				continue
+			}
+			walk(node.Children)
+		}
+	}
+	walk(tree)
+	return stats
+}
+
 // --- Device Group handlers ---
 
 // GetTreeWithCounts handles GET /device-groups/tree.
@@ -109,6 +191,15 @@ func (h *Handler) GetTreeWithCounts(c *gin.Context) {
 	if err != nil {
 		commonerrors.AbortWithError(c, commonerrors.HTTPStatusFromError(err), err)
 		return
+	}
+	visibleGroups, shouldFilter, err := h.resolveVisibleGroups(c)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if shouldFilter {
+		tree = filterVisibleGroups(tree, visibleGroups)
+		stats = buildVisibleGroupStats(tree)
 	}
 	response.OK(c, TreeResponse{Items: tree, Stats: stats})
 }
@@ -119,6 +210,14 @@ func (h *Handler) ListTree(c *gin.Context) {
 	if err != nil {
 		response.Fail(c, http.StatusInternalServerError, err.Error())
 		return
+	}
+	visibleGroups, shouldFilter, err := h.resolveVisibleGroups(c)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if shouldFilter {
+		tree = filterVisibleGroups(tree, visibleGroups)
 	}
 	response.OK(c, gin.H{"items": tree})
 }

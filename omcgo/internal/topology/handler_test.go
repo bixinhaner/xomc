@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/admin"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/response"
@@ -409,6 +410,30 @@ func setupRouter(h *Handler) *gin.Engine {
 	return r
 }
 
+func setupRouterWithAuth(h *Handler, userID uuid.UUID, isSuperAdmin bool) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set(admin.CtxKeyUserID, userID)
+		c.Set(admin.CtxKeyIsSuperAdmin, isSuperAdmin)
+		c.Next()
+	})
+	h.RegisterRoutes(r.Group("/api/v1"))
+	return r
+}
+
+type mockVisibleGroupsResolver struct {
+	visibleGroups []uuid.UUID
+	err           error
+}
+
+func (m *mockVisibleGroupsResolver) GetUserVisibleGroupIDs(_ context.Context, _ uuid.UUID, _ bool) ([]uuid.UUID, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.visibleGroups, nil
+}
+
 func newTestHandler() (*Handler, *mockDeviceGroupRepo, *mockSiteRepo, *mockTopoNodeRepo, *mockTopoEdgeRepo) {
 	groupRepo := newMockDeviceGroupRepo()
 	siteRepo := newMockSiteRepo()
@@ -478,6 +503,43 @@ func TestHandler_ListTree(t *testing.T) {
 	var resp map[string]json.RawMessage
 	response.DecodeData(t, w.Body, &resp)
 	assert.Contains(t, resp, "items")
+}
+
+func TestHandler_GetTreeWithCounts_FiltersVisibleGroups(t *testing.T) {
+	h, groupRepo, _, _, _ := newTestHandler()
+	visibleChildID := uuid.New()
+	h.SetPermissionService(&mockVisibleGroupsResolver{visibleGroups: []uuid.UUID{visibleChildID}})
+	router := setupRouterWithAuth(h, uuid.New(), false)
+
+	rootID := uuid.New()
+	hiddenChildID := uuid.New()
+	otherRootID := uuid.New()
+	otherChildID := uuid.New()
+
+	seedGroup(groupRepo, rootID, "Root", nil)
+	seedGroup(groupRepo, visibleChildID, "Visible Child", &rootID).DeviceCount = 3
+	seedGroup(groupRepo, hiddenChildID, "Hidden Child", &rootID).DeviceCount = 5
+	seedGroup(groupRepo, otherRootID, "Other Root", nil)
+	seedGroup(groupRepo, otherChildID, "Other Child", &otherRootID).DeviceCount = 7
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/device-groups/tree", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var resp TreeResponse
+	response.DecodeData(t, w.Body, &resp)
+	require.Len(t, resp.Items, 1)
+	assert.Equal(t, rootID, resp.Items[0].ID)
+	assert.Equal(t, 3, resp.Items[0].DeviceCount)
+	require.Len(t, resp.Items[0].Children, 1)
+	assert.Equal(t, visibleChildID, resp.Items[0].Children[0].ID)
+	assert.Equal(t, 3, resp.Items[0].Children[0].DeviceCount)
+	require.NotNil(t, resp.Stats)
+	assert.Equal(t, 2, resp.Stats.TotalGroups)
+	assert.Equal(t, 3, resp.Stats.GroupedDevices)
+	assert.Equal(t, 0, resp.Stats.UngroupedDevices)
 }
 
 func TestHandler_Create(t *testing.T) {

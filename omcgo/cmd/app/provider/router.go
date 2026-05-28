@@ -394,6 +394,7 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 	// ----- Topology routes → resource "devices" -----
 	th := c.topologyHandlerDeps
 	topologyHandler := topology.NewHandler(th.groupRepo, th.groupService, th.siteRepo, th.topoNodeRepo, th.topoEdgeRepo, th.syncSvc, th.logger)
+	topologyHandler.SetPermissionService(c.PermService)
 	topologyHandler.RegisterRoutes(permGroup("devices"))
 
 	// ----- PM routes → resource "pm" -----

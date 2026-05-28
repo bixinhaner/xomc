@@ -474,6 +474,7 @@ function DataTable<T>(
               showQuickJumper
               pageSizeOptions={['10', '20', '50', '100']}
               onChange={onPageChange ?? (() => {})}
+              onShowSizeChange={onPageChange}
             />
           </div>
         </div>
