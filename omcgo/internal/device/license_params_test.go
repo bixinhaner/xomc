@@ -3,6 +3,7 @@ package device
 import (
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -26,6 +27,11 @@ func TestLicensePartialPrefix(t *testing.T) {
 			name: "standard LICENSE leaf → father object prefix",
 			path: "Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.Author",
 			want: "Device.Services.FAPService.{i}.FAPControl.LTE.LICENSE.",
+		},
+		{
+			name: "mixed-case vendor License leaf → father object prefix",
+			path: "Device.FAP.License.Author",
+			want: "Device.FAP.License.",
 		},
 		{
 			name: "private keyword preferred over standard when both present",
@@ -60,6 +66,8 @@ func TestIsLicensePath(t *testing.T) {
 		{"Device.Services.FAPService.1.FAPControl.LTE.X_COM_LICENSE.Author", true},
 		{"Device.Services.FAPService.1.FAPControl.LTE.X_COM_LICENSE.Capacity.1.RemainDays", true},
 		{"Device.Services.FAPService.1.FAPControl.LTE.LICENSE.Author", true},
+		{"Device.FAP.License.Author", true},
+		{"Device.FAP.License.LicenseItem.1.Description", true},
 		{"Device.WiFi.SSID.1.Enabled", false},
 		{"Device.X_LICENSE_AGREEMENT.Status", false}, // 不含 ".LICENSE." 严格父对象
 		{"", false},
@@ -69,4 +77,10 @@ func TestIsLicensePath(t *testing.T) {
 			assert.Equal(t, tc.want, isLicensePath(tc.path))
 		})
 	}
+}
+
+func TestNewManualLicenseRefreshSourceID(t *testing.T) {
+	sourceID := newManualLicenseRefreshSourceID()
+	_, err := uuid.Parse(sourceID)
+	assert.NoError(t, err)
 }

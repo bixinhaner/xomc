@@ -643,6 +643,7 @@ export default function DeviceDetail() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const openTab = useTabStore((s) => s.openTab);
+  const closeTab = useTabStore((s) => s.closeTab);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const { data: device, isLoading, refetch } = useDeviceBySn(sn);
@@ -654,6 +655,21 @@ export default function DeviceDetail() {
     },
     enabled: Boolean(device?.id),
   });
+
+  useEffect(() => {
+    if (!device?.id || !device.macAddress) return;
+    void queryClient.invalidateQueries({ queryKey: ['devices', 'list'] });
+  }, [device?.id, device?.macAddress, queryClient]);
+
+  const handleBackToList = useCallback(() => {
+    openTab({
+      key: 'device-list',
+      label: 'nav.device.list',
+      path: '/device/list',
+    });
+    closeTab('device-detail');
+    void navigate('/device/list');
+  }, [closeTab, navigate, openTab]);
 
   // 内部 tab 以 URL ?tab= 作为单一真相源 ——
   // 1) 离开详情页（组件卸载）再切回时，能从 URL 还原内部 tab，不丢状态；
@@ -953,7 +969,7 @@ export default function DeviceDetail() {
           message={t('common.noData')}
           description={`SN: "${sn}"`}
           action={
-            <Button onClick={() => void navigate('/device/list')}>{t('common.back')}</Button>
+            <Button onClick={handleBackToList}>{t('common.back')}</Button>
           }
         />
       </div>
@@ -968,7 +984,7 @@ export default function DeviceDetail() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <Button
               icon={<ArrowLeftOutlined />}
-              onClick={() => void navigate('/device/list')}
+              onClick={handleBackToList}
             >
               {t('common.back')}
             </Button>
@@ -1081,6 +1097,7 @@ export default function DeviceDetail() {
             {
               key: 'license',
               label: t('device.licenseParam.title'),
+              forceRender: true,
               children: (
                 <div style={{ padding: '0 0 16px' }}>
                   <LicenseParamsTab deviceId={device.id} />

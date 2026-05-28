@@ -37,11 +37,13 @@ import (
 	"github.com/omcgo/omcgo/internal/product"
 )
 
-// licenseKeywordPrivate / licenseKeywordStandard — path 包含这两个子串之一就
-// 视为 license 类参数（约定 §LICENSE 父对象命名规则）。
+// licenseKeywordPrivate / licenseKeywordStandard — path 包含这两个父对象关键字之一就
+// 视为 license 类参数（约定 §LICENSE 父对象命名规则）。标准关键字带前导 dot，
+// 避免误命中 `X_LICENSE_AGREEMENT` 等非 license 子树；匹配时大小写不敏感，兼容
+// `Device.FAP.License.*` 一类厂商路径。
 const (
 	licenseKeywordPrivate  = "X_COM_LICENSE."
-	licenseKeywordStandard = "LICENSE."
+	licenseKeywordStandard = ".LICENSE."
 )
 
 // licenseRefreshLockTTL — POST /refresh 的 Redis 防抖锁 TTL（PRD Q5）。
@@ -205,10 +207,22 @@ func (s *LicenseParamService) TriggerLicenseRefresh(ctx context.Context, deviceI
 		return nil, commonerrors.NewBusinessError(global.ErrCodeDeviceNotFound, "device not found", commonerrors.ErrNotFound)
 	}
 
+	lockKey := fmt.Sprintf(licenseRefreshLockKeyFmt, deviceID.String())
+	lockHeld := false
+	keepLock := false
+	defer func() {
+		if s.redis != nil && lockHeld && !keepLock {
+			if err := s.redis.Del(ctx, lockKey).Err(); err != nil {
+				s.logger.Warn("license refresh lock release failed",
+					zap.String("device_id", deviceID.String()),
+					zap.Error(err))
+			}
+		}
+	}()
+
 	// Redis 防抖锁（nil-safe — dev 环境无 Redis 时跳过）。
 	if s.redis != nil {
-		key := fmt.Sprintf(licenseRefreshLockKeyFmt, deviceID.String())
-		ok, lockErr := s.redis.SetNX(ctx, key, operator, licenseRefreshLockTTL).Result()
+		ok, lockErr := s.redis.SetNX(ctx, lockKey, operator, licenseRefreshLockTTL).Result()
 		if lockErr != nil {
 			s.logger.Warn("license refresh lock acquire failed (proceeding without lock)",
 				zap.String("device_id", deviceID.String()), zap.Error(lockErr))
@@ -218,6 +232,8 @@ func (s *LicenseParamService) TriggerLicenseRefresh(ctx context.Context, deviceI
 				"license refresh already running for this device, try again in a few seconds",
 				commonerrors.ErrAlreadyExists,
 			)
+		} else {
+			lockHeld = true
 		}
 	}
 
@@ -235,19 +251,21 @@ func (s *LicenseParamService) TriggerLicenseRefresh(ctx context.Context, deviceI
 		return &LicenseRefreshResult{Reason: "manual_license_refresh"}, nil
 	}
 
-	const sourceID = "manual_license_refresh"
+	sourceID := newManualLicenseRefreshSourceID()
 	if err := s.syncStarter.StartSync(ctx, dev, prefixes, sourceID); err != nil {
 		return nil, fmt.Errorf("start GPV for license prefixes: %w", err)
 	}
+	keepLock = true
 	s.logger.Info("license refresh GPV submitted",
 		zap.String("device_id", deviceID.String()),
+		zap.String("source_id", sourceID),
 		zap.Int("prefix_count", len(prefixes)),
 		zap.String("operator", operator))
 
 	return &LicenseRefreshResult{
 		PrefixCount: len(prefixes),
 		TaskCount:   len(prefixes), // 实际批数由 syncStarter 决定；上层 UI 仅展示 prefix 数
-		Reason:      sourceID,
+		Reason:      "manual_license_refresh",
 	}, nil
 }
 
@@ -327,10 +345,10 @@ func (s *LicenseParamService) collectLicensePrefixes(ctx context.Context, dev *m
 // 同时识别私有 `X_COM_LICENSE.` 和 标准 `LICENSE.` 两种关键字，前者优先（更长
 // 子串，更精确）。
 func licensePartialPrefix(path string) string {
-	if idx := strings.Index(path, licenseKeywordPrivate); idx > 0 {
+	if idx := indexFold(path, licenseKeywordPrivate); idx > 0 {
 		return path[:idx+len(licenseKeywordPrivate)]
 	}
-	if idx := strings.Index(path, licenseKeywordStandard); idx > 0 {
+	if idx := indexFold(path, licenseKeywordStandard); idx > 0 {
 		return path[:idx+len(licenseKeywordStandard)]
 	}
 	return ""
@@ -342,5 +360,13 @@ func licensePartialPrefix(path string) string {
 // 避免误命中（如某厂商私有定义里 path 含 "LICENSE_AGREEMENT" 但与 license
 // 子树无关）。
 func isLicensePath(path string) bool {
-	return strings.Contains(path, licenseKeywordPrivate) || strings.Contains(path, licenseKeywordStandard)
+	return licensePartialPrefix(path) != ""
+}
+
+func newManualLicenseRefreshSourceID() string {
+	return uuid.NewString()
+}
+
+func indexFold(s, substr string) int {
+	return strings.Index(strings.ToUpper(s), strings.ToUpper(substr))
 }

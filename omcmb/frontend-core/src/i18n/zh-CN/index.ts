@@ -1892,6 +1892,11 @@ const messages: Record<string, string> = {
 
   // DeviceDetail "License 参数" tab（后端 GET/POST /devices/:id/license-params）
   'device.licenseParam.title':          'License 参数',
+  'device.licenseParam.col.id':         'ID',
+  'device.licenseParam.col.description': 'Description',
+  'device.licenseParam.col.capacity':   'Capacity',
+  'device.licenseParam.col.remainTime': 'Remain Time(unit:day)',
+  'device.licenseParam.col.operate':    'Operate',
   'device.licenseParam.col.path':       'Path',
   'device.licenseParam.col.value':      '当前值',
   'device.licenseParam.col.dataType':   '数据类型',

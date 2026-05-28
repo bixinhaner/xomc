@@ -8,7 +8,7 @@
  * 替换 DeviceDetail/index.tsx 里的硬编码 mock license tab。
  */
 import { useMemo } from 'react';
-import { Alert, Button, Card, Empty, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Empty, Spin, Table, Typography, message } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 
 import { useT } from '@/hooks/useT';
@@ -22,6 +22,67 @@ const { Text } = Typography;
 
 interface LicenseParamsTabProps {
   deviceId: string;
+}
+
+interface LicenseRow {
+  key: string;
+  order: number;
+  id: string;
+  description: string;
+  capacity: string;
+  remainTime: string;
+}
+
+const licenseItemFieldPattern = /(?:^|\.)(?:LicenseItem|Capacity)\.(\d+)\.(ID|Description|Value|RemainingPeriod|State)$/i;
+
+function buildLicenseRows(items: DeviceLicenseParam[]): LicenseRow[] {
+  const rowMap = new Map<string, LicenseRow>();
+
+  for (const item of items) {
+    const match = item.standardPath.match(licenseItemFieldPattern);
+    if (!match) continue;
+
+    const order = Number.parseInt(match[1], 10);
+    const field = match[2].toLowerCase();
+    const key = match[1];
+    const row = rowMap.get(key) ?? {
+      key,
+      order,
+      id: '',
+      description: '',
+      capacity: '',
+      remainTime: '',
+    };
+
+    switch (field) {
+      case 'id':
+        row.id = item.value || row.id;
+        break;
+      case 'description':
+        row.description = item.value || row.description;
+        break;
+      case 'value':
+      case 'state':
+        if (!row.capacity && item.value) {
+          row.capacity = item.value;
+        }
+        break;
+      case 'remainingperiod':
+        row.remainTime = item.value || row.remainTime;
+        break;
+      default:
+        break;
+    }
+
+    rowMap.set(key, row);
+  }
+
+  return Array.from(rowMap.values())
+    .sort((left, right) => left.order - right.order)
+    .map((row) => ({
+      ...row,
+      id: row.id || `#${row.order}`,
+    }));
 }
 
 function extractBizCode(err: unknown): number {
@@ -39,11 +100,6 @@ function extractBizCode(err: unknown): number {
   return 0;
 }
 
-function formatDateTime(iso: string | undefined | null): string {
-  if (!iso) return '-';
-  return new Date(iso).toLocaleString();
-}
-
 export default function LicenseParamsTab({ deviceId }: LicenseParamsTabProps) {
   const t = useT();
   const listQuery = useDeviceLicenseParams(deviceId);
@@ -57,60 +113,60 @@ export default function LicenseParamsTab({ deviceId }: LicenseParamsTabProps) {
       onError: (err) => {
         // 后端 ErrCodeRuleTaskRunning 复用为"刷新进行中"标识
         const code = extractBizCode(err);
-        if (code === 1205) {
+        const msg = err instanceof Error ? err.message : '';
+        if (code === 1205 || msg.includes('license refresh already running')) {
           void message.warning(t('device.licenseParam.refreshThrottled'));
           return;
         }
-        const msg = err instanceof Error ? err.message : '';
         void message.error(msg ? `${t('device.licenseParam.refreshFailed')}: ${msg}` : t('device.licenseParam.refreshFailed'));
       },
     });
   };
 
+  const items = listQuery.data?.items ?? [];
+  const rows = useMemo(() => buildLicenseRows(items), [items]);
   const columns = useMemo(
     () => [
       {
-        title: t('device.licenseParam.col.path'),
-        dataIndex: 'standardPath',
-        key: 'standardPath',
-        width: 400,
-        render: (v: string) => <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</Text>,
+        title: t('device.licenseParam.col.id'),
+        dataIndex: 'id',
+        key: 'id',
+        width: 140,
+        render: (value: string) => <Text style={{ fontFamily: 'monospace' }}>{value || '-'}</Text>,
       },
       {
-        title: t('device.licenseParam.col.dataType'),
-        dataIndex: 'dataType',
-        key: 'dataType',
-        width: 110,
-        render: (v: string | undefined) => v || '-',
-      },
-      {
-        title: t('device.licenseParam.col.access'),
-        dataIndex: 'access',
-        key: 'access',
-        width: 110,
-        render: (v: string | undefined) => v || '-',
-      },
-      {
-        title: t('device.licenseParam.col.value'),
-        dataIndex: 'value',
-        key: 'value',
+        title: t('device.licenseParam.col.description'),
+        dataIndex: 'description',
+        key: 'description',
         ellipsis: true,
-        render: (v: string | undefined) =>
-          v && v !== '' ? <Text>{v}</Text> : <Tag>{t('device.licenseParam.valueNotFetched')}</Tag>,
+        render: (value: string) => value || '-',
       },
       {
-        title: t('device.licenseParam.col.updatedAt'),
-        dataIndex: 'lastUpdatedAt',
-        key: 'lastUpdatedAt',
+        title: t('device.licenseParam.col.capacity'),
+        dataIndex: 'capacity',
+        key: 'capacity',
         width: 180,
-        render: formatDateTime,
+        render: (value: string) => value || '-',
+      },
+      {
+        title: t('device.licenseParam.col.remainTime'),
+        dataIndex: 'remainTime',
+        key: 'remainTime',
+        width: 180,
+        render: (value: string) => value || '-',
+      },
+      {
+        title: t('device.licenseParam.col.operate'),
+        key: 'operate',
+        width: 120,
+        render: () => '-',
       },
     ],
     [t],
   );
 
-  const items = listQuery.data?.items ?? [];
-  const isEmpty = !listQuery.isLoading && items.length === 0 && !listQuery.isError;
+  const isEmpty = !listQuery.isLoading && rows.length === 0 && !listQuery.isError;
+  const isInitialLoading = listQuery.isLoading && items.length === 0;
 
   return (
     <Card
@@ -126,7 +182,7 @@ export default function LicenseParamsTab({ deviceId }: LicenseParamsTabProps) {
         </Button>
       }
     >
-      {listQuery.isError && !isEmpty ? (
+      {listQuery.isError ? (
         <Alert
           type="error"
           showIcon
@@ -135,17 +191,21 @@ export default function LicenseParamsTab({ deviceId }: LicenseParamsTabProps) {
         />
       ) : null}
 
-      {isEmpty ? (
+      {isInitialLoading ? (
+        <div style={{ padding: '32px 0', display: 'flex', justifyContent: 'center' }}>
+          <Spin />
+        </div>
+      ) : isEmpty ? (
         <Empty description={t('device.licenseParam.empty')} />
       ) : (
-        <Table<DeviceLicenseParam>
-          rowKey="standardPath"
-          dataSource={items}
+        <Table<LicenseRow>
+          rowKey="key"
+          dataSource={rows}
           columns={columns}
           loading={listQuery.isLoading}
           size="small"
           pagination={false}
-          scroll={{ x: 1100 }}
+          scroll={{ x: 980 }}
         />
       )}
     </Card>

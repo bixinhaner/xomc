@@ -1887,6 +1887,11 @@ const messages: Record<string, string> = {
 
   // DeviceDetail "License Params" tab (backend GET/POST /devices/:id/license-params)
   'device.licenseParam.title':          'License Params',
+  'device.licenseParam.col.id':         'ID',
+  'device.licenseParam.col.description': 'Description',
+  'device.licenseParam.col.capacity':   'Capacity',
+  'device.licenseParam.col.remainTime': 'Remain Time(unit:day)',
+  'device.licenseParam.col.operate':    'Operate',
   'device.licenseParam.col.path':       'Path',
   'device.licenseParam.col.value':      'Value',
   'device.licenseParam.col.dataType':   'Type',
