@@ -427,8 +427,15 @@ export default function GISMapView() {
     overflow: 'hidden',
   };
 
+  // 左侧面板中间可滚动区域
+  const leftPanelMiddleStyle: React.CSSProperties = {
+    flex: 1,
+    overflowY: 'auto',
+    overflowX: 'hidden',
+  };
+
   const searchBoxStyle: React.CSSProperties = {
-    margin: `${SPACING.md}px ${SPACING.md}px 0`,
+    margin: `${SPACING.md}px ${SPACING.md}px ${SPACING.md}px`,
     padding: `${SPACING.md}px ${SPACING.lg}px`,
     background: '#FFF',
     border: '1px solid #E8E8E8',
@@ -438,30 +445,13 @@ export default function GISMapView() {
     gap: SPACING.md,
   };
 
-  const treeContainerStyle: React.CSSProperties = {
-    flex: '0 0 auto',
-    maxHeight: 280,
-    overflow: 'auto',
-    padding: `${SPACING.xs}px 0`,
-  };
-
   // ========== Collapse 组件样式 ==========
-
-  // Collapse 容器样式
-  const collapseContainerStyle: React.CSSProperties = {
-    background: 'transparent',
-    border: 'none',
-    flex: 1,
-    overflow: 'auto',
-    padding: `0 ${SPACING.md}px`,
-  };
 
   // Collapse.Panel 头部样式
   const collapseHeaderStyle: React.CSSProperties = {
     fontSize: 13,
     fontWeight: 600,
     color: '#595959',
-    padding: `${SPACING.md}px 0`,
     transition: transitionString(['color'], 'fast'),
   };
 
@@ -471,6 +461,14 @@ export default function GISMapView() {
     borderRadius: RADIUS.md,
     overflow: 'hidden',
     transition: transitionString(['background', 'box-shadow'], 'fast'),
+    background: '#FFF',
+    border: '1px solid #E8E8E8',
+  };
+
+  // 设备组面板特殊样式（避免被搜索框遮挡）
+  const deviceGroupCollapseStyle: React.CSSProperties = {
+    ...collapseItemStyle,
+    marginTop: 0,
   };
 
   // 自定义折叠图标（红色向下箭头，与图片中的设计一致）
@@ -516,6 +514,7 @@ export default function GISMapView() {
     transition: transitionString(['background', 'transform'], 'fast'),
   };
 
+  // 地图设备搜索框样式
   const deviceSearchStyle: React.CSSProperties = {
     position: 'absolute',
     left: 20,
@@ -528,8 +527,9 @@ export default function GISMapView() {
     background: '#FFF',
     borderRadius: RADIUS.lg,
     boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
-    border: '2px solid rgb(217, 217, 217)',
+    border: `2px solid ${deviceSearchExpanded ? token.colorPrimary : '#D9D9D9'}`,
     overflow: 'hidden',
+    transition: 'border-color 0.2s',
   };
 
   const searchInputContainerStyle: React.CSSProperties = {
@@ -592,35 +592,22 @@ export default function GISMapView() {
           </div>
         )}
 
-        {/* 搜索设备组 */}
-        <div style={searchBoxStyle}>
-          <Input
-            placeholder={intl.formatMessage({ id: 'gis.search.deviceGroupPlaceholder' })}
-            value={groupSearchValue}
-            onChange={(e) => setGroupSearchValue(e.target.value)}
-            prefix={<SearchOutlined style={{ color: '#8C8C8C' }} />}
-            allowClear
-            style={{
-              border: 'none',
-              padding: 0,
-              background: 'transparent',
-              color: '#262626',
+        {/* 中间可滚动区域 */}
+        <div style={leftPanelMiddleStyle}>
+          {/* 折叠面板：设备状态 */}
+          <Collapse
+            activeKey={filterPanelActiveKeys.includes('deviceStatus') ? ['deviceStatus'] : []}
+            onChange={(keys) => {
+              const newKeys = keys.length > 0
+                ? [...filterPanelActiveKeys.filter(k => k !== 'deviceStatus'), 'deviceStatus']
+                : filterPanelActiveKeys.filter(k => k !== 'deviceStatus');
+              setFilterPanelActiveKeys(newKeys as string[]);
             }}
-            variant="borderless"
-            className="device-group-search-input"
-          />
-        </div>
-
-        {/* 折叠面板：设备状态（调换位置到第一）、设备组（调换位置到第二）、图例（可选显示） */}
-        <Collapse
-          activeKey={filterPanelActiveKeys}
-          onChange={(keys) => setFilterPanelActiveKeys(keys as string[])}
-          expandIcon={customExpandIcon}
-          bordered={false}
-          style={collapseContainerStyle}
-          className="gismap-filter-collapse"
-          items={[
-            // Panel 1: 设备状态（原第2位，现调至第1位）
+            expandIcon={customExpandIcon}
+            bordered={false}
+            style={{ margin: `0 ${SPACING.md}px ${SPACING.md}px`, padding: 0 }}
+            className="gismap-filter-collapse"
+            items={[
             {
               key: 'deviceStatus',
               label: <span style={collapseHeaderStyle}>{intl.formatMessage({ id: 'gis.filter.deviceStatus' })}</span>,
@@ -692,15 +679,50 @@ export default function GISMapView() {
             </div>
               ),
             },
-            // Panel 2: 设备组（原第1位，现调至第2位）
+          ]}
+        />
+
+        {/* 搜索设备组 */}
+        <div style={searchBoxStyle}>
+          <Input
+            placeholder={intl.formatMessage({ id: 'gis.search.deviceGroupPlaceholder' })}
+            value={groupSearchValue}
+            onChange={(e) => setGroupSearchValue(e.target.value)}
+            prefix={<SearchOutlined style={{ color: '#8C8C8C' }} />}
+            allowClear
+            style={{
+              border: 'none',
+              padding: 0,
+              background: 'transparent',
+              color: '#262626',
+            }}
+            variant="borderless"
+            className="device-group-search-input"
+          />
+        </div>
+
+        {/* 折叠面板：设备组 */}
+        <Collapse
+          activeKey={filterPanelActiveKeys.includes('deviceGroup') ? ['deviceGroup'] : []}
+          onChange={(keys) => {
+            const newKeys = keys.length > 0
+              ? [...filterPanelActiveKeys.filter(k => k !== 'deviceGroup'), 'deviceGroup']
+              : filterPanelActiveKeys.filter(k => k !== 'deviceGroup');
+            setFilterPanelActiveKeys(newKeys as string[]);
+          }}
+          expandIcon={customExpandIcon}
+          bordered={false}
+          style={{ margin: `0 ${SPACING.md}px ${SPACING.md}px`, padding: 0 }}
+          className="gismap-filter-collapse"
+          items={[
             {
               key: 'deviceGroup',
               label: <span style={collapseHeaderStyle}>{intl.formatMessage({ id: 'gis.filter.deviceGroup' })}</span>,
-              style: collapseItemStyle,
+              style: deviceGroupCollapseStyle,
               children: (
-                <>
-                  {/* 设备组树 */}
-                  <div style={treeContainerStyle}>
+                <div style={{ display: 'flex', flexDirection: 'column', maxHeight: '50vh' }}>
+                  {/* 可滚动的设备组列表 */}
+                  <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: `${SPACING.xs}px 0` }}>
                     {isLoadingTree ? (
                       <div style={{ padding: 20, textAlign: 'center' }}>
                         <Spin size="small" />
@@ -711,29 +733,18 @@ export default function GISMapView() {
                       filteredGroupTree.map((node) => renderGroupNode(node))
                     )}
                   </div>
-
-                  {/* 已选择汇总 */}
+                  {/* 固定在底部的汇总 */}
                   {selectedGroupIds.length > 0 && (
-                    <div
-                      style={{
-                        margin: '12px 8px 8px', // 与树节点保持一致的左右边距
-                        padding: '10px 12px',
-                        background: '#E6F7FF', // 蓝色背景
-                        borderRadius: 4,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
+                    <div style={{ padding: '28px 12px 0', borderTop: '1px solid #E8E8E8', background: '#FFF', flexShrink: 0 }}>
                       <span style={{ fontSize: 13, color: '#595959' }}>
                         {intl.formatMessage({ id: 'gis.search.selectedGroups' }, { count: selectedGroupIds.length })}
                       </span>
                     </div>
                   )}
-                </>
+                </div>
               ),
             },
-            // Panel 3: 图例 - 可通过 SHOW_LEGEND 控制，默认隐藏
+            // 图例 - 可通过 SHOW_LEGEND 控制，默认隐藏
             ...(SHOW_LEGEND ? [{
               key: 'legend',
               label: <span style={collapseHeaderStyle}>{intl.formatMessage({ id: 'gis.filter.legend' })}</span>,
@@ -820,6 +831,7 @@ export default function GISMapView() {
             }] : []),
           ]}
         />
+        </div>
       </div>
 
       {/* 地图区域 */}
@@ -841,7 +853,7 @@ export default function GISMapView() {
         />
 
         {/* 设备搜索 */}
-        <div ref={searchContainerRef} style={deviceSearchStyle}>
+        <div ref={searchContainerRef} style={deviceSearchStyle} onClick={(e) => e.stopPropagation()}>
           <div style={searchBoxOuterStyle}>
             <div style={searchInputContainerStyle}>
               {/* 搜索图标 */}
@@ -905,11 +917,13 @@ export default function GISMapView() {
 
               {/* 展开箭头 */}
               <div
+                onClick={() => setDeviceSearchExpanded(!deviceSearchExpanded)}
                 style={{
                   fontSize: 12,
                   color: token.colorPrimary,
                   transform: deviceSearchExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
                   transition: 'transform 0.2s',
+                  cursor: 'pointer',
                 }}
               >
                 ▼
