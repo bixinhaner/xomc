@@ -221,7 +221,14 @@ export default function CurrentAlarms() {
     [filterParams, currentPage, pageSize]
   );
 
-  const { data, isLoading, refetch } = useCurrentAlarms(queryParams as unknown as Parameters<typeof useCurrentAlarms>[0]);
+  const { data, isLoading, refetch } = useCurrentAlarms(
+    queryParams as unknown as Parameters<typeof useCurrentAlarms>[0],
+    {
+      refetchIntervalMs: autoRefresh ? refreshInterval * 1000 : false,
+      refetchIntervalInBackground: autoRefresh,
+      refetchOnWindowFocus: true,
+    }
+  );
   const acknowledgeAlarms = useAcknowledgeAlarms();
   const clearAlarms = useClearAlarms();
   const markAlarmRead = useMarkAlarmRead();
@@ -231,15 +238,10 @@ export default function CurrentAlarms() {
   const rawAlarms: Alarm[] = useMemo(() => data?.items ?? [], [data]);
   const total = data?.total ?? 0;
 
-  // 自动刷新
+  // 开启自动刷新或切换间隔时立即拉一次，避免用户等待下一轮轮询。
   useEffect(() => {
     if (!autoRefresh) return;
-
-    const timer = setInterval(() => {
-      void refetch();
-    }, refreshInterval * 1000);
-
-    return () => clearInterval(timer);
+    void refetch();
   }, [autoRefresh, refreshInterval, refetch]);
 
   // 未读告警排在最前面

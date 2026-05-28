@@ -15,6 +15,7 @@ import (
 	"github.com/omcgo/omcgo/internal/acs/rpc"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/task"
+	"github.com/omcgo/omcgo/pkg/tr069"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -430,6 +431,29 @@ func TestServeHTTP_Inform_Periodic_PublishesPeriodicEvent(t *testing.T) {
 	defer bus.mu.Unlock()
 	require.Len(t, bus.published, 1)
 	assert.Equal(t, event.SubjectDevicePeriodic, bus.published[0].Subject)
+}
+
+func TestHasExpeditedEventParams_InternetGatewayDevicePrefix(t *testing.T) {
+	params := []tr069.ParameterValueStruct{
+		{Name: "InternetGatewayDevice.DeviceInfo.Manufacturer", Value: "Baicells"},
+		{Name: "InternetGatewayDevice.FaultMgmt.ExpeditedEvent.10.NotificationType", Value: "NewAlarm"},
+	}
+
+	assert.True(t, hasExpeditedEventParams(params))
+}
+
+func TestFilterExpeditedEventParams_InternetGatewayDevicePrefix(t *testing.T) {
+	params := []tr069.ParameterValueStruct{
+		{Name: "InternetGatewayDevice.DeviceInfo.Manufacturer", Value: "Baicells"},
+		{Name: "InternetGatewayDevice.FaultMgmt.ExpeditedEvent.10.NotificationType", Value: "NewAlarm"},
+		{Name: "InternetGatewayDevice.FaultMgmt.ExpeditedEvent.10.AlarmIdentifier", Value: "50003"},
+	}
+
+	filtered := filterExpeditedEventParams(params)
+	assert.Len(t, filtered, 2)
+	for _, p := range filtered {
+		assert.Contains(t, p.Name, "FaultMgmt.ExpeditedEvent.")
+	}
 }
 
 func TestServeHTTP_Inform_MalformedXML_Returns400(t *testing.T) {

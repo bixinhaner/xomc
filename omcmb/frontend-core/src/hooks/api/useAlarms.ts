@@ -20,13 +20,22 @@ function scheduleAlarmRefresh(queryClient: ReturnType<typeof useQueryClient>) {
   });
 }
 
-export function useCurrentAlarms(params: AlarmFilter & PageRequest) {
+interface AlarmQueryOptions {
+  refetchIntervalMs?: number | false;
+  refetchIntervalInBackground?: boolean;
+  refetchOnWindowFocus?: boolean;
+}
+
+export function useCurrentAlarms(
+  params: AlarmFilter & PageRequest,
+  options?: AlarmQueryOptions
+) {
   return useQuery({
     queryKey: ['alarms', 'current', params],
     queryFn: () => api.getCurrentAlarms(params),
-    refetchInterval: 30000,
-    refetchIntervalInBackground: true,
-    refetchOnWindowFocus: true,
+    refetchInterval: options?.refetchIntervalMs ?? 30000,
+    refetchIntervalInBackground: options?.refetchIntervalInBackground ?? true,
+    refetchOnWindowFocus: options?.refetchOnWindowFocus ?? true,
   });
 }
 

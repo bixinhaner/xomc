@@ -110,7 +110,8 @@ func (s *HistoryRetentionService) resolveDays(ctx context.Context) (int, error) 
 	if row == nil {
 		return DefaultHistoryRetentionDays, nil
 	}
-	if row.ValueType != "" && row.ValueType != "int" {
+	// 兼容旧库里 alarmHisMaxHoldTime 被存成 string 的历史数据；值仍按整数天数解析。
+	if row.ValueType != "" && row.ValueType != "int" && row.ValueType != "string" {
 		return DefaultHistoryRetentionDays, fmt.Errorf("sys_configs (%s,%s) value_type must be int, got %q", HistoryRetentionCategory, HistoryRetentionKey, row.ValueType)
 	}
 	days, err := strconv.Atoi(row.Value)

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/pkg/tr069"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -195,6 +196,115 @@ func TestHandleAlarmEvent_BackfillsTechnologyFromDevice(t *testing.T) {
 
 	require.Len(t, store.active, 1)
 	for _, alarm := range store.active {
+		require.NotNil(t, alarm.Technology)
+		assert.Equal(t, string(model.TechNR), *alarm.Technology)
+	}
+}
+
+func TestHandleAlarmEvent_GenericInformPayloadAlarmInfo(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	deviceID := uuid.New()
+	deviceSN := "1202000534228JB0007"
+	receiver := NewAlarmReceiver(engine, nil, zap.NewNop()).WithDeviceReader(&rcvMockDeviceReader{
+		deviceBySN: map[string]*model.Device{
+			deviceSN: {
+				ID:           deviceID,
+				SerialNumber: deviceSN,
+				Carrier:      model.CarrierCMCC,
+				Technology:   model.TechNR,
+				ProductClass: "GNB",
+				DeviceName:   "gNB-7",
+			},
+		},
+	})
+
+	payload := informAlarmEventPayload{
+		DeviceID: tr069.DeviceId{
+			ProductClass: "GNB",
+			SerialNumber: deviceSN,
+		},
+		Events:      []string{"101 ALARM"},
+		CurrentTime: time.Date(2026, 5, 28, 13, 27, 27, 0, time.UTC),
+		ParameterList: []tr069.ParameterValueStruct{
+			{Name: "Device.Services.FAPService.1.FAPControl.LTE.AlarmInfo.1.NotificationType", Value: NotificationNewAlarm},
+			{Name: "Device.Services.FAPService.1.FAPControl.LTE.AlarmInfo.1.AlarmIdentifier", Value: "50003"},
+			{Name: "Device.Services.FAPService.1.FAPControl.LTE.AlarmInfo.1.PerceivedSeverity", Value: "Minor"},
+			{Name: "Device.Services.FAPService.1.FAPControl.LTE.AlarmInfo.1.EventType", Value: "equipment"},
+			{Name: "Device.Services.FAPService.1.FAPControl.LTE.AlarmInfo.1.SpecificProblem", Value: "时间同步失败告警"},
+			{Name: "Device.Services.FAPService.1.FAPControl.LTE.AlarmInfo.1.EventTime", Value: "2026-05-28T13:27:27Z"},
+		},
+	}
+
+	evt := makeRcvEvent(t, payload)
+	err := receiver.handleAlarmEvent(context.Background(), evt)
+	require.NoError(t, err)
+
+	require.Len(t, store.active, 1)
+	for _, alarm := range store.active {
+		assert.Equal(t, deviceID, alarm.DeviceID)
+		assert.Equal(t, deviceSN, alarm.DeviceSN)
+		assert.Equal(t, model.CarrierCMCC, alarm.Carrier)
+		assert.Equal(t, "50003", alarm.AlarmIdentifier)
+		assert.Equal(t, "equipment", alarm.AlarmType)
+		assert.Equal(t, "时间同步失败告警", alarm.Description)
+		assert.Equal(t, model.AlarmMinor, alarm.Severity)
+		require.NotNil(t, alarm.Technology)
+		assert.Equal(t, string(model.TechNR), *alarm.Technology)
+	}
+}
+
+func TestHandleAlarmEvent_GenericInformPayloadExpeditedEvent(t *testing.T) {
+	store := newMockAlarmStore()
+	engine := newTestEngine(store)
+	deviceID := uuid.New()
+	deviceSN := "1202000534228JB0007"
+	receiver := NewAlarmReceiver(engine, nil, zap.NewNop()).WithDeviceReader(&rcvMockDeviceReader{
+		deviceBySN: map[string]*model.Device{
+			deviceSN: {
+				ID:           deviceID,
+				SerialNumber: deviceSN,
+				Carrier:      model.CarrierCMCC,
+				Technology:   model.TechNR,
+				ProductClass: "FAP/BSC7041C243",
+				DeviceName:   "gNB-7",
+			},
+		},
+	})
+
+	payload := informAlarmEventPayload{
+		DeviceID: tr069.DeviceId{
+			ProductClass: "FAP/BSC7041C243",
+			SerialNumber: deviceSN,
+		},
+		Events:      []string{"101 ALARM"},
+		CurrentTime: time.Date(2026, 5, 28, 13, 50, 38, 0, time.UTC),
+		ParameterList: []tr069.ParameterValueStruct{
+			{Name: "Device.FaultMgmt.ExpeditedEvent.8.NotificationType", Value: NotificationNewAlarm},
+			{Name: "Device.FaultMgmt.ExpeditedEvent.8.AlarmIdentifier", Value: "50003"},
+			{Name: "Device.FaultMgmt.ExpeditedEvent.8.PerceivedSeverity", Value: "Minor"},
+			{Name: "Device.FaultMgmt.ExpeditedEvent.8.EventType", Value: "Communications Alarm"},
+			{Name: "Device.FaultMgmt.ExpeditedEvent.8.ProbableCause", Value: "Time synchronization failed"},
+			{Name: "Device.FaultMgmt.ExpeditedEvent.8.SpecificProblem", Value: "specificProblem"},
+			{Name: "Device.FaultMgmt.ExpeditedEvent.8.EventTime", Value: "2026-05-28T05:50:32Z"},
+		},
+	}
+
+	evt := makeRcvEvent(t, payload)
+	err := receiver.handleAlarmEvent(context.Background(), evt)
+	require.NoError(t, err)
+
+	require.Len(t, store.active, 1)
+	for _, alarm := range store.active {
+		assert.Equal(t, deviceID, alarm.DeviceID)
+		assert.Equal(t, deviceSN, alarm.DeviceSN)
+		assert.Equal(t, model.CarrierCMCC, alarm.Carrier)
+		assert.Equal(t, "50003", alarm.AlarmIdentifier)
+		assert.Equal(t, "Communications Alarm", alarm.AlarmType)
+		assert.Equal(t, "specificProblem", alarm.Description)
+		assert.Equal(t, model.AlarmMinor, alarm.Severity)
+		require.NotNil(t, alarm.ProbableCause)
+		assert.Equal(t, "Time synchronization failed", *alarm.ProbableCause)
 		require.NotNil(t, alarm.Technology)
 		assert.Equal(t, string(model.TechNR), *alarm.Technology)
 	}

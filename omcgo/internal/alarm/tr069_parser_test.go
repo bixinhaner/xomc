@@ -75,6 +75,22 @@ func TestParseCurrentAlarmParams_FourAlarms(t *testing.T) {
 	assert.Equal(t, 5, alarms[3].Index)
 }
 
+func TestParseCurrentAlarmParams_InternetGatewayDevicePrefix(t *testing.T) {
+	params := []tr069.ParameterValueStruct{
+		makeParam("InternetGatewayDevice.FaultMgmt.CurrentAlarm.1.AlarmIdentifier", "ALM-IGD-001"),
+		makeParam("InternetGatewayDevice.FaultMgmt.CurrentAlarm.1.PerceivedSeverity", "Major"),
+		makeParam("InternetGatewayDevice.FaultMgmt.CurrentAlarm.1.SpecificProblem", "NTP sync lost"),
+	}
+
+	alarms, err := ParseCurrentAlarmParams(params)
+	assert.NoError(t, err)
+	assert.Len(t, alarms, 1)
+	assert.Equal(t, "ALM-IGD-001", alarms[0].AlarmIdentifier)
+	assert.Equal(t, "Major", alarms[0].PerceivedSeverity)
+	assert.Equal(t, "NTP sync lost", alarms[0].SpecificProblem)
+	assert.Equal(t, 1, alarms[0].Index)
+}
+
 func TestParseCurrentAlarmParams_Empty(t *testing.T) {
 	alarms, err := ParseCurrentAlarmParams(nil)
 	assert.NoError(t, err)
@@ -307,6 +323,15 @@ func TestHasExpeditedEventParams(t *testing.T) {
 		assert.True(t, HasExpeditedEventParams(params))
 	})
 
+	t.Run("has expedited event params with igd root", func(t *testing.T) {
+		params := []tr069.ParameterValueStruct{
+			makeParam("InternetGatewayDevice.DeviceInfo.Manufacturer", "Baicells"),
+			makeParam("InternetGatewayDevice.FaultMgmt.ExpeditedEvent.10.NotificationType", "NewAlarm"),
+			makeParam("InternetGatewayDevice.FaultMgmt.ExpeditedEvent.10.AlarmIdentifier", "11184"),
+		}
+		assert.True(t, HasExpeditedEventParams(params))
+	})
+
 	t.Run("no expedited event params", func(t *testing.T) {
 		params := []tr069.ParameterValueStruct{
 			makeParam("Device.DeviceInfo.Manufacturer", "Baicells"),
@@ -333,6 +358,21 @@ func TestFilterExpeditedEventParams(t *testing.T) {
 	assert.Len(t, filtered, 3)
 	for _, p := range filtered {
 		assert.True(t, len(p.Name) > len("Device.FaultMgmt.ExpeditedEvent."))
+	}
+}
+
+func TestFilterExpeditedEventParams_InternetGatewayDevicePrefix(t *testing.T) {
+	params := []tr069.ParameterValueStruct{
+		makeParam("InternetGatewayDevice.DeviceInfo.Manufacturer", "Baicells"),
+		makeParam("InternetGatewayDevice.FaultMgmt.ExpeditedEvent.10.NotificationType", "NewAlarm"),
+		makeParam("InternetGatewayDevice.FaultMgmt.ExpeditedEvent.10.AlarmIdentifier", "11184"),
+		makeParam("InternetGatewayDevice.Services.FAPService.1.FAPControl.LTE.CellOpState", "1"),
+	}
+
+	filtered := FilterExpeditedEventParams(params)
+	assert.Len(t, filtered, 2)
+	for _, p := range filtered {
+		assert.Contains(t, p.Name, "FaultMgmt.ExpeditedEvent.")
 	}
 }
 
@@ -368,6 +408,24 @@ func TestParseExpeditedEventParams_NewAlarm(t *testing.T) {
 	assert.Equal(t, "LTE0", ev.AdditionalText)
 	assert.False(t, ev.EventTime.IsZero())
 	assert.Equal(t, "Device.FaultMgmt.ExpeditedEvent.", ev.ManagedObjectInstance)
+}
+
+func TestParseExpeditedEventParams_InternetGatewayDevicePrefix(t *testing.T) {
+	params := []tr069.ParameterValueStruct{
+		makeParam("InternetGatewayDevice.FaultMgmt.ExpeditedEvent.10.NotificationType", "NewAlarm"),
+		makeParam("InternetGatewayDevice.FaultMgmt.ExpeditedEvent.10.AlarmIdentifier", "50003"),
+		makeParam("InternetGatewayDevice.FaultMgmt.ExpeditedEvent.10.PerceivedSeverity", "Minor"),
+		makeParam("InternetGatewayDevice.FaultMgmt.ExpeditedEvent.10.SpecificProblem", "Time synchronization failed"),
+	}
+
+	events, err := ParseExpeditedEventParams(params)
+	assert.NoError(t, err)
+	assert.Len(t, events, 1)
+	assert.Equal(t, 10, events[0].Index)
+	assert.Equal(t, "NewAlarm", events[0].NotificationType)
+	assert.Equal(t, "50003", events[0].AlarmIdentifier)
+	assert.Equal(t, "Minor", events[0].PerceivedSeverity)
+	assert.Equal(t, "Time synchronization failed", events[0].SpecificProblem)
 }
 
 func TestParseExpeditedEventParams_MultipleEvents(t *testing.T) {

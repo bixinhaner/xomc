@@ -44,6 +44,16 @@ func TestHistoryRetentionServiceReloadAndApplyUsesConfiguredDays(t *testing.T) {
 	require.Equal(t, 90, svc.CurrentDays())
 }
 
+func TestHistoryRetentionServiceReloadAndApplyAcceptsLegacyStringValueType(t *testing.T) {
+	reader := &stubHistoryRetentionReader{row: &HistoryRetentionConfigRow{Value: "45", ValueType: "string"}}
+	applier := &stubHistoryRetentionApplier{}
+	svc := NewHistoryRetentionService(reader, applier, nil)
+
+	require.NoError(t, svc.ReloadAndApply(context.Background()))
+	require.Equal(t, []int{45}, applier.calledWith)
+	require.Equal(t, 45, svc.CurrentDays())
+}
+
 func TestHistoryRetentionServiceReloadAndApplyFallsBackToDefaultWhenMissing(t *testing.T) {
 	reader := &stubHistoryRetentionReader{}
 	applier := &stubHistoryRetentionApplier{}

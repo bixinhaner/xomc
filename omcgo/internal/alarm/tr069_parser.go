@@ -14,6 +14,13 @@ import (
 	"github.com/omcgo/omcgo/pkg/tr069"
 )
 
+const (
+	currentAlarmDevicePrefix       = "Device.FaultMgmt.CurrentAlarm."
+	currentAlarmIGDPrefix          = "InternetGatewayDevice.FaultMgmt.CurrentAlarm."
+	expeditedEventDevicePrefix     = "Device.FaultMgmt.ExpeditedEvent."
+	expeditedEventIGDPrefix        = "InternetGatewayDevice.FaultMgmt.ExpeditedEvent."
+)
+
 // TR069Alarm represents a single alarm parsed from Device.FaultMgmt.CurrentAlarm.{i}.* parameters.
 type TR069Alarm struct {
 	Index                 int
@@ -31,7 +38,7 @@ type TR069Alarm struct {
 
 // currentAlarmFieldRE extracts the index and field name from a parameter path
 // like "Device.FaultMgmt.CurrentAlarm.3.PerceivedSeverity".
-var currentAlarmFieldRE = regexp.MustCompile(`^Device\.FaultMgmt\.CurrentAlarm\.(\d+)\.(.+)$`)
+var currentAlarmFieldRE = regexp.MustCompile(`^(?:Device|InternetGatewayDevice)\.FaultMgmt\.CurrentAlarm\.(\d+)\.(.+)$`)
 
 // ParseCurrentAlarmParams parses a GPV response parameter list into structured alarms.
 // Parameters are grouped by their index ({i} in the CurrentAlarm path.
@@ -238,13 +245,18 @@ type ExpeditedEvent struct {
 
 // expeditedEventFieldRE extracts the index and field name from a parameter path
 // like "Device.FaultMgmt.ExpeditedEvent.10.NotificationType".
-var expeditedEventFieldRE = regexp.MustCompile(`^Device\.FaultMgmt\.ExpeditedEvent\.(\d+)\.(.+)$`)
+var expeditedEventFieldRE = regexp.MustCompile(`^(?:Device|InternetGatewayDevice)\.FaultMgmt\.ExpeditedEvent\.(\d+)\.(.+)$`)
+
+func isExpeditedEventParamName(name string) bool {
+	return strings.HasPrefix(name, expeditedEventDevicePrefix) ||
+		strings.HasPrefix(name, expeditedEventIGDPrefix)
+}
 
 // HasExpeditedEventParams returns true if any parameter in the list belongs to
 // the ExpeditedEvent subtree (Device.FaultMgmt.ExpeditedEvent.*).
 func HasExpeditedEventParams(params []tr069.ParameterValueStruct) bool {
 	for _, p := range params {
-		if strings.HasPrefix(p.Name, "Device.FaultMgmt.ExpeditedEvent.") {
+		if isExpeditedEventParamName(p.Name) {
 			return true
 		}
 	}
@@ -256,7 +268,7 @@ func HasExpeditedEventParams(params []tr069.ParameterValueStruct) bool {
 func FilterExpeditedEventParams(params []tr069.ParameterValueStruct) []tr069.ParameterValueStruct {
 	filtered := make([]tr069.ParameterValueStruct, 0, len(params))
 	for _, p := range params {
-		if strings.HasPrefix(p.Name, "Device.FaultMgmt.ExpeditedEvent.") {
+		if isExpeditedEventParamName(p.Name) {
 			filtered = append(filtered, p)
 		}
 	}

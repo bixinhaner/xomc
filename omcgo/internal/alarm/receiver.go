@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,6 +15,7 @@ import (
 	"github.com/omcgo/omcgo/internal/alarm/definition"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/model"
+	"github.com/omcgo/omcgo/pkg/tr069"
 )
 
 // AlarmPayload is the event payload for device alarm events.
@@ -30,6 +34,29 @@ type AlarmPayload struct {
 	RaisedAt        time.Time         `json:"raised_at"`
 	Additional      map[string]string `json:"additional,omitempty"`
 }
+
+type informAlarmEventPayload struct {
+	DeviceID      tr069.DeviceId               `json:"device_id"`
+	Events        []string                     `json:"events"`
+	ParameterList []tr069.ParameterValueStruct `json:"parameter_list"`
+	CurrentTime   time.Time                    `json:"current_time"`
+}
+
+type alarmInfoEvent struct {
+	Index                 int
+	NotificationType      string
+	AlarmIdentifier       string
+	PerceivedSeverity     string
+	EventType             string
+	ProbableCause         string
+	SpecificProblem       string
+	AdditionalInformation string
+	AdditionalText        string
+	EventTime             time.Time
+	ManagedObjectInstance string
+}
+
+var alarmInfoFieldRE = regexp.MustCompile(`^(?:Device|InternetGatewayDevice)\.Services\.FAPService\.\d+\.FAPControl\.[^.]+\.AlarmInfo\.(\d+)\.(.+)$`)
 
 // AlarmReceiver subscribes to device alarm events and processes them.
 //
@@ -102,9 +129,48 @@ func (r *AlarmReceiver) Subscribe(eventBus event.EventBus) error {
 
 func (r *AlarmReceiver) handleAlarmEvent(ctx context.Context, evt event.Event) error {
 	var payload AlarmPayload
-	if err := evt.DecodePayload(&payload); err != nil {
+	if err := evt.DecodePayload(&payload); err == nil && payload.AlarmIdentifier != "" {
+		if err := r.processAlarmPayload(ctx, payload); err != nil {
+			return err
+		}
+		r.publishAlarmSyncRequest(ctx, payload.DeviceSN)
+		return nil
+	}
+
+	var informPayload informAlarmEventPayload
+	if err := evt.DecodePayload(&informPayload); err != nil {
 		r.logger.Error("decode alarm payload", zap.Error(err))
 		return fmt.Errorf("decode alarm payload: %w", err)
+	}
+
+	payloads, err := r.buildAlarmPayloadsFromInform(ctx, informPayload)
+	if err != nil {
+		r.logger.Error("build alarm payloads from inform",
+			zap.Error(err),
+			zap.String("device_sn", informPayload.DeviceID.SerialNumber))
+		return err
+	}
+
+	for _, normalized := range payloads {
+		if err := r.processAlarmPayload(ctx, normalized); err != nil {
+			return err
+		}
+	}
+	r.publishAlarmSyncRequest(ctx, informPayload.DeviceID.SerialNumber)
+	return nil
+}
+
+func (r *AlarmReceiver) processAlarmPayload(ctx context.Context, payload AlarmPayload) error {
+	notificationType := payload.Additional["notification_type"]
+	if notificationType == NotificationClearedAlarm {
+		if err := r.engine.AutoClear(ctx, payload.DeviceSN, payload.AlarmIdentifier); err != nil {
+			r.logger.Error("clear alarm",
+				zap.Error(err),
+				zap.String("device_sn", payload.DeviceSN),
+				zap.String("alarm_identifier", payload.AlarmIdentifier))
+			return fmt.Errorf("clear alarm: %w", err)
+		}
+		return nil
 	}
 
 	deviceID, err := uuid.Parse(payload.DeviceID)
@@ -128,7 +194,20 @@ func (r *AlarmReceiver) handleAlarmEvent(ctx context.Context, evt event.Event) e
 		RaisedAt:        payload.RaisedAt,
 		AdditionalInfo:  payload.Additional,
 	}
+	probableCause := firstNonEmpty(payload.Additional["probable_cause"], payload.Description, payload.AlarmIdentifier)
+	alarm.ProbableCause = strPtr(probableCause)
 	r.backfillDeviceFields(ctx, alarm)
+
+	if notificationType == NotificationChangedAlarm {
+		if err := r.engine.UpdateByEvent(ctx, alarm); err != nil {
+			r.logger.Error("update alarm",
+				zap.Error(err),
+				zap.String("device_sn", payload.DeviceSN),
+				zap.String("alarm_identifier", payload.AlarmIdentifier))
+			return fmt.Errorf("update alarm: %w", err)
+		}
+		return nil
+	}
 
 	// T-0098 P2-10 fallback 决策：identifier 不在 alarm_definitions → 查 product.enable_unknown_alarm
 	if drop, err := r.applyFallback(ctx, alarm, payload); err != nil {
@@ -148,17 +227,268 @@ func (r *AlarmReceiver) handleAlarmEvent(ctx context.Context, evt event.Event) e
 		return fmt.Errorf("process alarm: %w", err)
 	}
 
-	// Publish alarm.sync.requested to trigger a full alarm sync via GPV
-	if r.eventBus != nil {
-		syncPayload := map[string]string{"device_sn": payload.DeviceSN}
-		if syncEvt, err := event.NewEvent(event.SubjectAlarmSyncRequested, syncPayload); err == nil {
-			if pubErr := r.eventBus.Publish(ctx, event.SubjectAlarmSyncRequested, syncEvt); pubErr != nil {
-				r.logger.Warn("publish alarm sync request", zap.Error(pubErr))
-			}
+	return nil
+}
+
+func (r *AlarmReceiver) publishAlarmSyncRequest(ctx context.Context, deviceSN string) {
+	if r.eventBus == nil || deviceSN == "" {
+		return
+	}
+	syncPayload := map[string]string{"device_sn": deviceSN}
+	if syncEvt, err := event.NewEvent(event.SubjectAlarmSyncRequested, syncPayload); err == nil {
+		if pubErr := r.eventBus.Publish(ctx, event.SubjectAlarmSyncRequested, syncEvt); pubErr != nil {
+			r.logger.Warn("publish alarm sync request", zap.Error(pubErr))
+		}
+	}
+}
+
+func (r *AlarmReceiver) buildAlarmPayloadsFromInform(ctx context.Context, payload informAlarmEventPayload) ([]AlarmPayload, error) {
+	currentAlarms, err := ParseCurrentAlarmParams(payload.ParameterList)
+	if err != nil {
+		return nil, fmt.Errorf("parse current alarm params: %w", err)
+	}
+	if len(currentAlarms) > 0 {
+		device, err := r.lookupDeviceBySN(ctx, payload.DeviceID.SerialNumber)
+		if err != nil {
+			return nil, err
+		}
+		return currentAlarmPayloads(device, currentAlarms, payload.CurrentTime), nil
+	}
+
+	alarmInfos, err := parseAlarmInfoParams(payload.ParameterList)
+	if err != nil {
+		return nil, fmt.Errorf("parse alarm info params: %w", err)
+	}
+	if len(alarmInfos) == 0 {
+		expeditedParams := FilterExpeditedEventParams(payload.ParameterList)
+		expeditedEvents, err := ParseExpeditedEventParams(expeditedParams)
+		if err != nil {
+			return nil, fmt.Errorf("parse expedited event params: %w", err)
+		}
+		if len(expeditedEvents) == 0 {
+			return nil, nil
+		}
+
+		device, err := r.lookupDeviceBySN(ctx, payload.DeviceID.SerialNumber)
+		if err != nil {
+			return nil, err
+		}
+		return expeditedEventPayloads(device, expeditedEvents, payload.CurrentTime), nil
+	}
+
+	device, err := r.lookupDeviceBySN(ctx, payload.DeviceID.SerialNumber)
+	if err != nil {
+		return nil, err
+	}
+	return alarmInfoPayloads(device, alarmInfos, payload.CurrentTime), nil
+}
+
+func (r *AlarmReceiver) lookupDeviceBySN(ctx context.Context, deviceSN string) (*model.Device, error) {
+	if deviceSN == "" {
+		return nil, fmt.Errorf("alarm inform payload missing device serial number")
+	}
+	if r.deviceReader == nil {
+		return nil, fmt.Errorf("alarm inform payload requires device reader for %s", deviceSN)
+	}
+	device, err := r.deviceReader.GetBySerialNumber(ctx, deviceSN)
+	if err != nil {
+		return nil, fmt.Errorf("lookup device by serial number %s: %w", deviceSN, err)
+	}
+	if device == nil {
+		return nil, fmt.Errorf("device not found for serial number %s", deviceSN)
+	}
+	return device, nil
+}
+
+func currentAlarmPayloads(device *model.Device, alarms []TR069Alarm, fallbackRaisedAt time.Time) []AlarmPayload {
+	result := make([]AlarmPayload, 0, len(alarms))
+	for _, alarm := range alarms {
+		raisedAt := alarm.AlarmRaisedTime
+		if raisedAt.IsZero() {
+			raisedAt = alarm.AlarmChangedTime
+		}
+		if raisedAt.IsZero() {
+			raisedAt = fallbackRaisedAt
+		}
+		description := firstNonEmpty(alarm.SpecificProblem, alarm.ProbableCause, alarm.AlarmIdentifier)
+		additional := map[string]string{}
+		if alarm.AdditionalInformation != "" {
+			additional["additional_information"] = alarm.AdditionalInformation
+		}
+		if alarm.AdditionalText != "" {
+			additional["additional_text"] = alarm.AdditionalText
+		}
+		if alarm.ManagedObjectInstance != "" {
+			additional["managed_object_instance"] = alarm.ManagedObjectInstance
+		}
+		result = append(result, AlarmPayload{
+			DeviceID:        device.ID.String(),
+			DeviceSN:        device.SerialNumber,
+			DeviceName:      device.DeviceName,
+			Carrier:         string(device.Carrier),
+			Technology:      string(device.Technology),
+			AlarmIdentifier: alarm.AlarmIdentifier,
+			AlarmType:       firstNonEmpty(strings.TrimSpace(alarm.EventType), "alarm"),
+			AlarmSource:     device.ProductClass,
+			EventType:       alarm.EventType,
+			Description:     description,
+			Severity:        int(mapSeverity(alarm.PerceivedSeverity)),
+			RaisedAt:        raisedAt,
+			Additional:      additional,
+		})
+	}
+	return result
+}
+
+func alarmInfoPayloads(device *model.Device, alarms []alarmInfoEvent, fallbackRaisedAt time.Time) []AlarmPayload {
+	result := make([]AlarmPayload, 0, len(alarms))
+	for _, alarm := range alarms {
+		raisedAt := alarm.EventTime
+		if raisedAt.IsZero() {
+			raisedAt = fallbackRaisedAt
+		}
+		additional := map[string]string{}
+		if alarm.AdditionalInformation != "" {
+			additional["additional_information"] = alarm.AdditionalInformation
+		}
+		if alarm.AdditionalText != "" {
+			additional["additional_text"] = alarm.AdditionalText
+		}
+		if alarm.ManagedObjectInstance != "" {
+			additional["managed_object_instance"] = alarm.ManagedObjectInstance
+		}
+		if alarm.NotificationType != "" {
+			additional["notification_type"] = alarm.NotificationType
+		}
+		result = append(result, AlarmPayload{
+			DeviceID:        device.ID.String(),
+			DeviceSN:        device.SerialNumber,
+			DeviceName:      device.DeviceName,
+			Carrier:         string(device.Carrier),
+			Technology:      string(device.Technology),
+			AlarmIdentifier: alarm.AlarmIdentifier,
+			AlarmType:       firstNonEmpty(strings.TrimSpace(alarm.EventType), "alarm"),
+			AlarmSource:     device.ProductClass,
+			EventType:       alarm.EventType,
+			Description:     firstNonEmpty(alarm.SpecificProblem, alarm.ProbableCause, alarm.AlarmIdentifier),
+			Severity:        int(mapSeverity(alarm.PerceivedSeverity)),
+			RaisedAt:        raisedAt,
+			Additional:      additional,
+		})
+	}
+	return result
+}
+
+func expeditedEventPayloads(device *model.Device, alarms []ExpeditedEvent, fallbackRaisedAt time.Time) []AlarmPayload {
+	result := make([]AlarmPayload, 0, len(alarms))
+	for _, alarm := range alarms {
+		raisedAt := alarm.EventTime
+		if raisedAt.IsZero() {
+			raisedAt = fallbackRaisedAt
+		}
+		additional := map[string]string{}
+		if alarm.AdditionalInformation != "" {
+			additional["additional_information"] = alarm.AdditionalInformation
+		}
+		if alarm.AdditionalText != "" {
+			additional["additional_text"] = alarm.AdditionalText
+		}
+		if alarm.ManagedObjectInstance != "" {
+			additional["managed_object_instance"] = alarm.ManagedObjectInstance
+		}
+		if alarm.ProbableCause != "" {
+			additional["probable_cause"] = alarm.ProbableCause
+		}
+		if alarm.NotificationType != "" {
+			additional["notification_type"] = alarm.NotificationType
+		}
+
+		result = append(result, AlarmPayload{
+			DeviceID:        device.ID.String(),
+			DeviceSN:        device.SerialNumber,
+			DeviceName:      device.DeviceName,
+			Carrier:         string(device.Carrier),
+			Technology:      string(device.Technology),
+			AlarmIdentifier: alarm.AlarmIdentifier,
+			AlarmType:       firstNonEmpty(strings.TrimSpace(alarm.EventType), "alarm"),
+			AlarmSource:     device.ProductClass,
+			EventType:       alarm.EventType,
+			Description:     firstNonEmpty(alarm.SpecificProblem, alarm.ProbableCause, alarm.AlarmIdentifier),
+			Severity:        int(mapSeverity(alarm.PerceivedSeverity)),
+			RaisedAt:        raisedAt,
+			Additional:      additional,
+		})
+	}
+	return result
+}
+
+func parseAlarmInfoParams(params []tr069.ParameterValueStruct) ([]alarmInfoEvent, error) {
+	indexMap := make(map[int]*alarmInfoEvent)
+	for _, p := range params {
+		m := alarmInfoFieldRE.FindStringSubmatch(p.Name)
+		if m == nil {
+			continue
+		}
+		idx, err := strconv.Atoi(m[1])
+		if err != nil {
+			continue
+		}
+		field := m[2]
+
+		ev, ok := indexMap[idx]
+		if !ok {
+			ev = &alarmInfoEvent{Index: idx}
+			indexMap[idx] = ev
+		}
+
+		switch field {
+		case "NotificationType":
+			ev.NotificationType = p.Value
+		case "AlarmIdentifier":
+			ev.AlarmIdentifier = p.Value
+		case "PerceivedSeverity":
+			ev.PerceivedSeverity = p.Value
+		case "EventType":
+			ev.EventType = p.Value
+		case "ProbableCause":
+			ev.ProbableCause = p.Value
+		case "SpecificProblem":
+			ev.SpecificProblem = p.Value
+		case "AdditionalInformation":
+			ev.AdditionalInformation = p.Value
+		case "AdditionalText":
+			ev.AdditionalText = p.Value
+		case "EventTime":
+			ev.EventTime = parseTR069Time(p.Value)
+		case "ManagedObjectInstance", "FaultLocation":
+			ev.ManagedObjectInstance = p.Value
 		}
 	}
 
-	return nil
+	result := make([]alarmInfoEvent, 0, len(indexMap))
+	for _, ev := range indexMap {
+		if ev.AlarmIdentifier == "" {
+			continue
+		}
+		result = append(result, *ev)
+	}
+	for i := 0; i < len(result)-1; i++ {
+		for j := i + 1; j < len(result); j++ {
+			if result[j].Index < result[i].Index {
+				result[i], result[j] = result[j], result[i]
+			}
+		}
+	}
+	return result, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (r *AlarmReceiver) backfillDeviceFields(ctx context.Context, alarm *model.Alarm) {

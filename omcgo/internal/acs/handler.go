@@ -2316,7 +2316,7 @@ func isLocalhost(url string) bool {
 // Device.FaultMgmt.ExpeditedEvent.* subtree.
 func hasExpeditedEventParams(params []tr069.ParameterValueStruct) bool {
 	for _, p := range params {
-		if strings.HasPrefix(p.Name, "Device.FaultMgmt.ExpeditedEvent.") {
+		if isExpeditedEventParamName(p.Name) {
 			return true
 		}
 	}
@@ -2328,11 +2328,16 @@ func hasExpeditedEventParams(params []tr069.ParameterValueStruct) bool {
 func filterExpeditedEventParams(params []tr069.ParameterValueStruct) []tr069.ParameterValueStruct {
 	filtered := make([]tr069.ParameterValueStruct, 0, len(params))
 	for _, p := range params {
-		if strings.HasPrefix(p.Name, "Device.FaultMgmt.ExpeditedEvent.") {
+		if isExpeditedEventParamName(p.Name) {
 			filtered = append(filtered, p)
 		}
 	}
 	return filtered
+}
+
+func isExpeditedEventParamName(name string) bool {
+	return strings.HasPrefix(name, "Device.FaultMgmt.ExpeditedEvent.") ||
+		strings.HasPrefix(name, "InternetGatewayDevice.FaultMgmt.ExpeditedEvent.")
 }
 
 // translateTaskParamsInPlace 在 ACS 出队时把 task.Params 内的 standardPath 翻译为 privatePath。
