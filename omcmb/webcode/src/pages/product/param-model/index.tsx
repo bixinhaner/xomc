@@ -20,7 +20,6 @@ export default function ParamModelPage() {
       <Card
         size="small"
         style={{ marginBottom: 12 }}
-        title="参数模型浏览器 / Parameter Models"
         extra={
           <Space>
             <Popconfirm

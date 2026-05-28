@@ -201,7 +201,6 @@ export default function AlarmLibraryPage() {
     <div style={{ padding: 16 }}>
       <Card
         size="small"
-        title="告警库 / Alarm Definitions"
         extra={
           <Space wrap size={12}>
             <Input.Search

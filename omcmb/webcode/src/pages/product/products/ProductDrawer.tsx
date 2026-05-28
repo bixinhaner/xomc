@@ -220,6 +220,24 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
       ),
     },
     {
+      title: '启用',
+      dataIndex: 'isActive',
+      width: 70,
+      render: (v: boolean, row: ProductPattern) => (
+        <Switch
+          size="small"
+          checked={v}
+          onChange={(checked) => {
+            if (!product) return;
+            updPatMut
+              .mutateAsync({ productId: product.id, patternId: row.id, isActive: checked })
+              .then(() => message.success(checked ? '已启用' : '已禁用'))
+              .catch((er) => message.error((er as Error).message));
+          }}
+        />
+      ),
+    },
+    {
       title: '操作',
       width: 200,
       render: (_: unknown, row: ProductPattern) => (

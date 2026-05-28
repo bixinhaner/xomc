@@ -1,10 +1,51 @@
 import { useState, useEffect } from 'react';
-import { Card, Input, Tag, Typography, Space } from 'antd';
+import { Input, Tag, Typography, Space, Spin } from 'antd';
 import { ThunderboltOutlined } from '@ant-design/icons';
 import { productApi } from '@core/services/api/productApi';
 import type { ProductMatchResult } from '@core/types/product';
 
 const { Text } = Typography;
+
+interface MatchResultInlineProps {
+  result: ProductMatchResult | null;
+  loading: boolean;
+}
+
+function MatchResultInline({ result, loading }: MatchResultInlineProps) {
+  if (loading) {
+    return (
+      <Space size={4}>
+        <Spin size="small" />
+        <Text type="secondary">匹配中…</Text>
+      </Space>
+    );
+  }
+  if (!result) {
+    return null;
+  }
+  if (result.matched && result.product) {
+    return (
+      <Space size={6} wrap>
+        <Tag color="success" style={{ marginRight: 0 }}>
+          命中
+        </Tag>
+        <Text strong>{result.product.name}</Text>
+        <Text code>{result.matchedPattern}</Text>
+        <Text type="secondary">
+          全局序号 {result.globalOrder} · {result.product.vendor}/{result.product.tech}
+        </Text>
+      </Space>
+    );
+  }
+  return (
+    <Space size={4}>
+      <Tag color="warning" style={{ marginRight: 0 }}>
+        未命中
+      </Tag>
+      <Text type="secondary">进入孤儿设备列表，请到「正则模式」段添加规则</Text>
+    </Space>
+  );
+}
 
 export default function MatchTester() {
   const [value, setValue] = useState('');
@@ -31,46 +72,19 @@ export default function MatchTester() {
   }, [debounced]);
 
   return (
-    <Card
-      size="small"
-      style={{ marginBottom: 12 }}
-      title={
-        <Space>
-          <ThunderboltOutlined />
-          <span>测试匹配 / Test Match</span>
-        </Space>
-      }
-    >
-      <Space direction="vertical" style={{ width: '100%' }}>
-        <Input
-          placeholder="输入 productClass（如 PicoCell-LTE-V2-001）查看命中规则"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          allowClear
-          style={{ maxWidth: 480 }}
-        />
-        {debounced && (
-          <div>
-            {loading && <Text type="secondary">匹配中…</Text>}
-            {!loading && result && result.matched && result.product && (
-              <Space wrap>
-                <Tag color="success">命中</Tag>
-                <Text strong>{result.product.name}</Text>
-                <Text code>{result.matchedPattern}</Text>
-                <Text type="secondary">全局序号 {result.globalOrder}</Text>
-                <Text type="secondary">vendor={result.product.vendor}</Text>
-                <Text type="secondary">tech={result.product.tech}</Text>
-              </Space>
-            )}
-            {!loading && result && !result.matched && (
-              <Space>
-                <Tag color="warning">未命中</Tag>
-                <Text type="secondary">该 productClass 将进入孤儿设备列表，请在产品的"正则模式"段添加规则。</Text>
-              </Space>
-            )}
-          </div>
-        )}
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+      <Space>
+        <ThunderboltOutlined style={{ color: '#1677ff' }} />
+        <Text>产品匹配</Text>
       </Space>
-    </Card>
+      <Input
+        placeholder="输入 productClass 匹配现有规则"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        allowClear
+        style={{ width: 280 }}
+      />
+      <MatchResultInline result={result} loading={loading} />
+    </div>
   );
 }

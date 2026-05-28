@@ -5,7 +5,6 @@ import {
   Button,
   Space,
   Input,
-  Select,
   Tag,
   Popconfirm,
   message,
@@ -17,7 +16,6 @@ import {
   ReloadOutlined,
   EditOutlined,
   DeleteOutlined,
-  AppstoreOutlined,
   ClearOutlined,
   CloudDownloadOutlined,
 } from '@ant-design/icons';
@@ -27,29 +25,30 @@ import {
   useResetDiscovered,
   useProductCacheRefresh,
   useProductImportDirectory,
+  useMatchOrder,
 } from '@core/hooks/api/useProducts';
 import type { Product, ProductListFilter } from '@core/types/product';
 import ProductDrawer from './ProductDrawer';
-import MatchOrderDrawer from './MatchOrderDrawer';
 import MatchTester from './MatchTester';
 
 const { Text } = Typography;
 
-const TECH_OPTIONS = [
-  { label: '全部', value: '' },
-  { label: 'LTE', value: 'lte' },
-  { label: 'NR', value: 'nr' },
-  { label: 'GSM', value: 'gsm' },
-];
+interface PatternStats {
+  minSortOrder: number;
+  total: number;
+  active: number;
+}
+
+const SORT_TAIL = Number.MAX_SAFE_INTEGER;
 
 export default function ProductsPage() {
   const [filter, setFilter] = useState<ProductListFilter>({});
   const [keyword, setKeyword] = useState('');
   const { data, isLoading, refetch } = useProductList(filter);
+  const { data: matchOrderData } = useMatchOrder();
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [matchOrderOpen, setMatchOrderOpen] = useState(false);
 
   const delMut = useDeleteProduct();
   const resetDiscMut = useResetDiscovered();
@@ -58,7 +57,46 @@ export default function ProductsPage() {
 
   const items = useMemo(() => data?.items || [], [data]);
 
+  const patternStats = useMemo(() => {
+    const stats = new Map<string, PatternStats>();
+    for (const row of matchOrderData?.items || []) {
+      const cur = stats.get(row.productId);
+      if (!cur) {
+        stats.set(row.productId, {
+          minSortOrder: row.sortOrder,
+          total: 1,
+          active: row.isActive ? 1 : 0,
+        });
+      } else {
+        cur.minSortOrder = Math.min(cur.minSortOrder, row.sortOrder);
+        cur.total += 1;
+        if (row.isActive) cur.active += 1;
+      }
+    }
+    return stats;
+  }, [matchOrderData]);
+
+  const sortedItems = useMemo(() => {
+    return [...items].sort((a, b) => {
+      const sa = patternStats.get(a.id)?.minSortOrder ?? SORT_TAIL;
+      const sb = patternStats.get(b.id)?.minSortOrder ?? SORT_TAIL;
+      return sa - sb;
+    });
+  }, [items, patternStats]);
+
   const columns = [
+    {
+      title: '序号',
+      width: 80,
+      align: 'center' as const,
+      render: (_: unknown, row: Product) => {
+        const stats = patternStats.get(row.id);
+        if (!stats) {
+          return <Text type="secondary">—</Text>;
+        }
+        return <Tag color="blue">{stats.minSortOrder}</Tag>;
+      },
+    },
     {
       title: '产品名',
       dataIndex: 'name',
@@ -90,7 +128,7 @@ export default function ProductsPage() {
     {
       title: '告警网元类型',
       dataIndex: 'alarmNeType',
-      width: 120,
+      width: 130,
     },
     {
       title: '正则规则',
@@ -116,6 +154,27 @@ export default function ProductsPage() {
               </Tooltip>
             )}
           </Space>
+        );
+      },
+    },
+    {
+      title: '激活',
+      width: 110,
+      render: (_: unknown, row: Product) => {
+        const stats = patternStats.get(row.id);
+        if (!stats || stats.total === 0) {
+          return <Tag>无规则</Tag>;
+        }
+        if (stats.active === stats.total) {
+          return <Tag color="success">激活</Tag>;
+        }
+        if (stats.active === 0) {
+          return <Tag>禁用</Tag>;
+        }
+        return (
+          <Tag color="warning">
+            部分 {stats.active}/{stats.total}
+          </Tag>
         );
       },
     },
@@ -188,9 +247,18 @@ export default function ProductsPage() {
       <Card
         size="small"
         style={{ marginBottom: 12 }}
-        title="产品管理 / Products"
-        extra={
-          <Space>
+        styles={{ body: { padding: '8px 12px' } }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <Space size={8} wrap>
             <Input.Search
               placeholder="搜索：产品名 / 厂商 / 描述"
               allowClear
@@ -199,17 +267,9 @@ export default function ProductsPage() {
               onSearch={(v) => setFilter((f) => ({ ...f, keyword: v || undefined }))}
               style={{ width: 240 }}
             />
-            <Select
-              placeholder="制式"
-              allowClear
-              options={TECH_OPTIONS}
-              value={filter.tech || ''}
-              onChange={(v) => setFilter((f) => ({ ...f, tech: v || undefined }))}
-              style={{ width: 100 }}
-            />
-            <Button icon={<AppstoreOutlined />} onClick={() => setMatchOrderOpen(true)}>
-              全局匹配顺序
-            </Button>
+            <MatchTester />
+          </Space>
+          <Space size={8}>
             <Popconfirm
               title="确认重载 XML？"
               description={
@@ -261,17 +321,15 @@ export default function ProductsPage() {
               新增产品
             </Button>
           </Space>
-        }
-      />
-
-      <MatchTester />
+        </div>
+      </Card>
 
       <Card size="small">
         <Table<Product>
           rowKey="id"
           loading={isLoading}
           columns={columns}
-          dataSource={items}
+          dataSource={sortedItems}
           pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
           size="small"
         />
@@ -285,7 +343,6 @@ export default function ProductsPage() {
           setEditingProduct(null);
         }}
       />
-      <MatchOrderDrawer open={matchOrderOpen} onClose={() => setMatchOrderOpen(false)} />
     </div>
   );
 }

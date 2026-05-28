@@ -18,7 +18,6 @@ export default function KpiLibraryPage() {
       <Card
         size="small"
         style={{ marginBottom: 12 }}
-        title="KPI 指标库 / KPI Library"
         extra={
           <Space>
             <Popconfirm
