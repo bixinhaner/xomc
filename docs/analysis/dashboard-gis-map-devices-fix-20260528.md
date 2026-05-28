@@ -710,7 +710,7 @@ func (h *Handler) GetDeviceStatusByType(c *gin.Context) {
 }
 ```
 
-**临时方案**：使用全 0 数组代替硬编码，避免误导用户，等待后端 API 支持。
+**最终方案**：后端新增 `GET /dashboard/device-status-by-type` 接口，前端使用真实 API 数据。
 
 ### 9.6 修复状态总结
 
@@ -720,23 +720,104 @@ func (h *Handler) GetDeviceStatusByType(c *gin.Context) {
 | 告警级别分布空数据 | ✅ 已完成 | 默认值改为 0，无数据时饼图显示为空 |
 | 近7天告警趋势 | ✅ 已完成 | 使用 useAlarmTrend(7) hook 获取真实数据 |
 | 近7天告警趋势空数据 | ✅ 已完成 | 无数据使用全 0 数组，保留坐标轴框架和图例 |
-| 设备状态分布 | ✅ 已完成 | 移除硬编码数据，使用全 0 数组，等待后端 API 支持 |
-| Y 轴优化 | ✅ 已完成 | 添加 min:0, minInterval:1, 动态 max 设置 |
+| 设备状态分布 | ✅ 已完成 | 后端新增 API，前端使用真实数据 |
+| Y 轴优化 | ✅ 已完成 | 添加 min:0, interval:1，强制显示整数刻度 |
 
-### 9.6.1 后端 API 需求
+### 9.6.1 后端 API 实现
 
-| 接口 | 用途 | 优先级 |
-|------|------|--------|
-| `GET /dashboard/device-status-by-type` | 按设备类型分组的状态统计 | 中 |
+| 接口 | 用途 | 状态 |
+|------|------|------|
+| `GET /dashboard/device-status-by-type` | 按制式（technology）分组的状态统计 | ✅ 已实现 |
 
-期望返回格式：
+**实际返回格式**：
 ```json
 {
-  "eNB": { "online": 432, "offline": 45, "alarm": 12 },
-  "gNB": { "online": 318, "offline": 28, "alarm": 8 },
-  "CPE": { "online": 265, "offline": 33, "alarm": 15 },
-  "eGW": { "online": 122, "offline": 14, "alarm": 8 }
+  "lte": { "online": 432, "offline": 45, "alarm": 12 },
+  "nr":  { "online": 318, "offline": 28, "alarm": 8 },
+  "gsm": { "online": 50,  "offline": 5,  "alarm": 0 }
 }
+```
+
+**后端实现** (`omcgo/internal/dashboard/service.go`):
+```go
+type DeviceStatusByType map[string]DeviceStatusCounts
+
+type DeviceStatusCounts struct {
+    Online  int64 `json:"online"`
+    Offline int64 `json:"offline"`
+    Alarm   int64 `json:"alarm"`
+}
+
+func (s *Service) GetDeviceStatusByType(ctx context.Context) (DeviceStatusByType, error)
+```
+
+**SQL 查询**：
+```sql
+SELECT
+    technology,
+    COUNT(*) FILTER (WHERE status = 'active') AS online,
+    COUNT(*) FILTER (WHERE status IN ('offline', 'decommissioned')) AS offline,
+    COUNT(*) FILTER (WHERE EXISTS (
+        SELECT 1 FROM alarms_active aa WHERE aa.device_id = devices.id
+    )) AS alarm
+FROM devices
+WHERE deleted_at IS NULL
+GROUP BY technology
+ORDER BY technology;
+```
+
+**前端实现** (`omcmb/frontend-core/src/services/api/dashboardApi.ts`):
+```typescript
+type BackendDeviceStatusCounts = {
+  online: number;
+  offline: number;
+  alarm: number;
+};
+
+type BackendDeviceStatusByType = Record<string, BackendDeviceStatusCounts>;
+
+async getDeviceStatusByType(): Promise<BackendDeviceStatusByType> {
+  const { data } = await http.get<BackendDeviceStatusByType>(
+    '/dashboard/device-status-by-type'
+  );
+  return data;
+}
+```
+
+**前端 Hook** (`omcmb/frontend-core/src/hooks/api/useDashboard.ts`):
+```typescript
+export function useDeviceStatusByType() {
+  return useQuery({
+    queryKey: ['dashboard', 'device-status-by-type'],
+    queryFn: () => api.getDeviceStatusByType(),
+    refetchInterval: 30000,
+  });
+}
+```
+
+**前端页面使用** (`omcmb/webcode/src/pages/dashboard/index.tsx`):
+```typescript
+const { data: deviceStatusByTypeData } = useDeviceStatusByType();
+
+const deviceStatusData = useMemo(() => {
+  if (!deviceStatusByTypeData) {
+    return { xData: [], series: [] };
+  }
+
+  const xData = Object.keys(deviceStatusByTypeData);
+  const onlineData = xData.map(key => deviceStatusByTypeData[key]?.online ?? 0);
+  const offlineData = xData.map(key => deviceStatusByTypeData[key]?.offline ?? 0);
+  const alarmData = xData.map(key => deviceStatusByTypeData[key]?.alarm ?? 0);
+
+  return {
+    xData,
+    series: [
+      { name: t('dashboard.chart.online'), data: onlineData, color: '#52C41A' },
+      { name: t('dashboard.chart.offline'), data: offlineData, color: '#8C8C8C' },
+      { name: t('dashboard.chart.alarm'), data: alarmData, color: '#FA8C16' },
+    ],
+  };
+}, [deviceStatusByTypeData, t]);
 ```
 
 ### 9.7 空数据展示行为
@@ -1305,6 +1386,344 @@ filter.SortDir = "desc"
 | 移除硬编码数据 | ✅ 已完成 | 已删除硬编码的设备名称和告警次数 |
 | 空状态展示 | ✅ 已完成 | 无数据时显示 EmptyState 组件 |
 | 标题优化 | ✅ 已完成 | 将"TOP10告警设备"改为"高频告警设备"，避免与实际数据量不符 |
+
+---
+
+## 12. 系统管理员卡片数据分析与修复方案
+
+> **分析日期**: 2026-05-28
+> **分析范围**: 仪表板系统管理员卡片数据源
+
+### 12.1 数据对齐状态
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                    系统管理员卡片数据对齐状态                                 │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                            │
+│  数据项              │ 当前值      │ 数据来源   │ 是否有API  │ 修复优先级    │
+│  ───────────────────┼─────────────┼────────────┼────────────┼──────────────│
+│  用户头像             │ 静态图标     │ 硬编码     │ ✅ userStore │ P1           │
+│  用户名/显示名        │ "系统管理员"  │ 硬编码     │ ✅ userStore │ P1           │
+│  邮箱                │ admin@omc.com │ 硬编码     │ ✅ userStore │ P1           │
+│  在线状态            │ "在线"       │ 硬编码     │ ⚠️  暂无API  │ P2           │
+│  最后登录时间        │ "09:00"      │ 硬编码     │ ✅ userStore │ P1           │
+│  今日操作数          │ 156          │ 硬编码     │ ✅ audit_logs │ P1          │
+│  已处理告警数        │ 23           │ 硬编码     │ ❌ 需新增API │ P3           │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 12.2 详细分析
+
+#### 12.2.1 卡片位置
+
+`omcmb/webcode/src/pages/dashboard/index.tsx` 第 527-573 行
+
+#### 12.2.2 当前实现（全部硬编码）
+
+```typescript
+// 第 536-570 行
+<Avatar size={64} icon={<UserOutlined />} style={{ background: token.colorPrimary }} />
+<Title level={5} style={{ margin: 0 }}>
+  {t('dashboard.sysAdmin')}
+</Title>
+<Text type="secondary" style={{ fontSize: 13 }}>
+  admin@omc.com  {/* ❌ 硬编码邮箱 */}
+</Text>
+<div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+  <Badge color="green" text={t('status.online')} />  {/* ❌ 硬编码在线状态 */}
+  <Text type="secondary" style={{ fontSize: 12 }}>
+    {t('dashboard.lastLogin')} 09:00  {/* ❌ 硬编码登录时间 */}
+  </Text>
+</div>
+<div style={{ /* 统计数据网格 */ }}>
+  <div style={{ textAlign: 'center' }}>
+    <div style={{ fontWeight: 700, fontSize: 18, color: token.colorPrimary }}>156</div>
+    {/* ❌ 硬编码今日操作数 */}
+    <div style={{ fontSize: 12, color: token.colorTextSecondary }}>{t('dashboard.todayOps')}</div>
+  </div>
+  <div style={{ textAlign: 'center' }}>
+    <div style={{ fontWeight: 700, fontSize: 18, color: '#52C41A' }}>23</div>
+    {/* ❌ 硬编码已处理告警数 */}
+    <div style={{ fontSize: 12, color: token.colorTextSecondary }}>{t('dashboard.processedAlarms')}</div>
+  </div>
+</div>
+```
+
+### 12.3 可用的现有资源
+
+#### 12.3.1 用户数据 (userStore)
+
+**位置**: `omcmb/frontend-core/src/store/userStore.ts`
+
+**可用字段**:
+```typescript
+interface User {
+  id: string;
+  username: string;
+  displayName: string;      // ✅ 显示名称
+  email: string;             // ✅ 邮箱
+  role: UserRole;            // ✅ 角色
+  avatar?: string;           // ✅ 头像 URL (可选)
+  lastLoginTime?: string;    // ✅ 最后登录时间 (ISO 8601)
+  // ... 其他字段
+}
+```
+
+**使用方式**:
+```typescript
+import { useUserStore } from '@core/store/userStore';
+
+const { currentUser } = useUserStore();
+// currentUser?.displayName  → 显示名称
+// currentUser?.email         → 邮箱
+// currentUser?.lastLoginTime → 最后登录时间
+// currentUser?.avatar        → 头像 URL
+```
+
+#### 12.3.2 操作日志统计 (audit_logs)
+
+**后端表**: `audit_logs` (PostgreSQL)
+
+**后端 API**: `GET /api/v1/audit-logs`
+- 位置: `omcgo/internal/admin/handler.go:259`
+- Repository: `omcgo/internal/admin/pg_audit_repository.go`
+- 支持按用户、操作类型、时间范围过滤
+
+**可用字段**:
+```sql
+CREATE TABLE audit_logs (
+    id UUID PRIMARY KEY,
+    user_id UUID,
+    username VARCHAR(100),
+    action VARCHAR(50),          -- login, config, upgrade, reboot, delete
+    resource VARCHAR(100),
+    resource_id VARCHAR(100),
+    details JSONB,
+    ip_address VARCHAR(45),
+    user_agent TEXT,
+    created_at TIMESTAMPTZ
+);
+```
+
+**统计今日操作数 SQL**:
+```sql
+SELECT COUNT(*) as today_ops
+FROM audit_logs
+WHERE user_id = $1
+  AND DATE(created_at) = CURRENT_DATE;
+```
+
+### 12.4 修复方案
+
+#### 方案 A：前端修复（P1 - 立即可实施）
+
+**修复范围**: 用户信息、最后登录时间
+
+| 数据项 | 修复方式 |
+|--------|---------|
+| 用户头像/邮箱/显示名 | 从 `useUserStore().currentUser` 获取 |
+| 最后登录时间 | 从 `currentUser.lastLoginTime` 格式化 |
+| 在线状态 | 登录即为在线（显示固定"在线"徽章） |
+
+**代码变更**:
+```typescript
+// 1. 添加导入
+import { useUserStore } from '@core/store/userStore';
+
+// 2. 获取当前用户信息
+const { currentUser } = useUserStore();
+
+// 3. 格式化最后登录时间
+const formatLastLogin = useCallback((lastLoginTime?: string): string => {
+  if (!lastLoginTime) return '--';
+  const date = new Date(lastLoginTime);
+  return date.toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}, []);
+
+// 4. 更新 JSX
+<Avatar
+  size={64}
+  src={currentUser?.avatar}
+  icon={!currentUser?.avatar ? <UserOutlined /> : undefined}
+  style={{ background: currentUser?.avatar ? undefined : token.colorPrimary }}
+/>
+<Title level={5} style={{ margin: 0 }}>
+  {currentUser?.displayName || currentUser?.username || t('dashboard.sysAdmin')}
+</Title>
+<Text type="secondary" style={{ fontSize: 13 }}>
+  {currentUser?.email || '--'}
+</Text>
+<div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+  <Badge color="green" text={t('status.online')} />
+  <Text type="secondary" style={{ fontSize: 12 }}>
+    {t('dashboard.lastLogin')} {formatLastLogin(currentUser?.lastLoginTime)}
+  </Text>
+</div>
+```
+
+#### 方案 B：今日操作数（P1 - 需后端支持）
+
+**后端需求**: 新增 `GET /api/v1/dashboard/user-stats` 接口
+
+**请求**: 无参数（从 JWT token 获取当前用户 ID）
+
+**响应**:
+```json
+{
+  "today_ops": 156,
+  "processed_alarms": 23
+}
+```
+
+**后端实现** (`omcgo/internal/dashboard/`):
+```go
+// handler.go
+dashboard.GET("/user-stats", h.GetUserStats)
+
+// service.go
+func (s *Service) GetUserStats(ctx context.Context, userID uuid.UUID) (*UserStats, error) {
+    // 今日操作数
+    todayOps, err := s.getTodayOpsCount(ctx, userID)
+    // 已处理告警数 (需要告警模块支持，暂时返回 0 或 NULL)
+    processedAlarms := int64(0) // TODO: 等待告警处理记录表
+
+    return &UserStats{
+        TodayOps:        todayOps,
+        ProcessedAlarms: processedAlarms,
+    }, nil
+}
+
+func (s *Service) getTodayOpsCount(ctx context.Context, userID uuid.UUID) (int64, error) {
+    query := `
+        SELECT COUNT(*)
+        FROM audit_logs
+        WHERE user_id = $1
+          AND DATE(created_at) = CURRENT_DATE
+    `
+    var count int64
+    err := s.pool.QueryRow(ctx, query, userID).Scan(&count)
+    return count, err
+}
+```
+
+**前端适配**:
+```typescript
+// frontend-core/src/services/api/dashboardApi.ts
+async getUserStats(): Promise<{ today_ops: number; processed_alarms: number }> {
+  const { data } = await http.get('/dashboard/user-stats');
+  return data;
+}
+
+// frontend-core/src/hooks/api/useDashboard.ts
+export function useUserStats() {
+  return useQuery({
+    queryKey: ['dashboard', 'user-stats'],
+    queryFn: () => api.getUserStats(),
+    refetchInterval: 60000, // 60秒刷新
+  });
+}
+
+// pages/dashboard/index.tsx
+const { data: userStats } = useUserStats();
+
+// 统计数据
+<div style={{ fontWeight: 700, fontSize: 18, color: token.colorPrimary }}>
+  {userStats?.today_ops ?? 0}
+</div>
+<div style={{ fontWeight: 700, fontSize: 18, color: '#52C41A' }}>
+  {userStats?.processed_alarms ?? 0}
+</div>
+```
+
+#### 方案 C：已处理告警数（P3 - 需告警模块支持）
+
+**问题**: 后端当前没有"告警处理记录"表，无法统计用户已处理的告警数量
+
+**解决方案**:
+1. 后端新增 `alarm_handled` 表记录告警处理操作
+2. 或者使用 `audit_logs` 表统计 `action='ack'` 或 `action='clear'` 的告警数量
+
+**临时方案**: 暂时显示 0 或不显示此字段
+
+### 12.5 修复优先级
+
+| 优先级 | 修复项 | 工作量 | 阻塞 |
+|--------|--------|--------|------|
+| **P1** | 用户信息从 userStore 获取 | 前端 0.5h | 无 |
+| **P1** | 今日操作数 API | 后端 1h + 前端 0.5h | 无 |
+| **P2** | 在线状态（可选） | 前端 0.5h | 需后端支持会话管理 |
+| **P3** | 已处理告警数 | 后端 2h + 前端 0.5h | 需告警模块配合 |
+
+### 12.6 实施建议
+
+**第一阶段**（立即实施）:
+- 修复用户信息显示（头像、邮箱、显示名、最后登录时间）
+- 今日操作数暂时显示 0，等待后端 API
+
+**第二阶段**（后续迭代）:
+- 后端实现 `GET /api/v1/dashboard/user-stats` 接口
+- 前端对接真实数据
+
+**第三阶段**（可选）:
+- 实现在线状态检测
+- 实现已处理告警数统计
+
+### 12.7 数据源关系图
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                         系统管理员卡片数据流                                 │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                            │
+│  用户信息 (P1):                                                           │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │ 登录时: authApi.getMe() → userStore.login(user)                      │  │
+│  │ 运行时: useUserStore().currentUser                                   │  │
+│  │   ├─ displayName / email / avatar                                     │  │
+│  │   └─ lastLoginTime                                                   │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                              │                                             │
+│                              ↓                                             │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │ 仪表板系统管理员卡片                                                   │  │
+│  │   ├─ 头像: currentUser?.avatar ?? UserOutlined                        │  │
+│  │   ├─ 显示名: currentUser?.displayName ?? username                      │  │
+│  │   ├─ 邮箱: currentUser?.email                                         │  │
+│  │   └─ 最后登录: formatLastLogin(currentUser.lastLoginTime)            │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                            │
+│  今日操作数 (P1):                                                         │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │ audit_logs 表 (后端已有)                                              │  │
+│  │   ├─ user_id                                                         │  │
+│  │   ├─ action                                                          │  │
+│  │   └─ created_at                                                      │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                              │                                             │
+│                              ↓ 需新增接口                                   │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │ GET /api/v1/dashboard/user-stats (待实现)                             │  │
+│  │   SELECT COUNT(*) FROM audit_logs                                    │  │
+│  │   WHERE user_id = $1 AND DATE(created_at) = CURRENT_DATE             │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                              │                                             │
+│                              ↓                                             │
+│  今日操作数: userStats?.today_ops ?? 0                                   │
+│                                                                            │
+│  已处理告警数 (P3):                                                       │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │ 暂无数据源，需要后端新增 alarm_handled 表或使用 audit_logs 统计        │  │
+│  │ 临时方案: 显示 0 或隐藏此字段                                         │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 

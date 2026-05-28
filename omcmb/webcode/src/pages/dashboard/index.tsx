@@ -36,7 +36,7 @@ import EmptyState from '@/components/common/EmptyState';
 import { MAP_CONFIG } from '@/components/GISMap/constants';
 import type { MapDevice } from '@/components/GISMap';
 import type { DeviceGeo } from '@core/types/map';
-import { useDashboardData, useAlarmTrend, useTopAlarmDevices } from '@core/hooks/api/useDashboard';
+import { useDashboardData, useAlarmTrend, useTopAlarmDevices, useDeviceStatusByType } from '@core/hooks/api/useDashboard';
 import { useAlarmCount, useCurrentAlarms } from '@core/hooks/api/useAlarms';
 import { useMapDevicesGeo } from '@core/hooks/api/useTopology';
 import { useUserStore } from '@core/store/userStore';
@@ -52,6 +52,13 @@ const SEVERITY_COLOR: Record<string, string> = {
   major: '#FA8C16',
   minor: '#FADB14',
   warning: '#1677FF',
+};
+
+// Technology display name mapping
+const TECH_DISPLAY_NAME: Record<string, string> = {
+  lte: 'LTE',
+  nr: '5G NR',
+  gsm: 'GSM',
 };
 
 function formatAlarmTime(value: string | undefined): string {
@@ -122,6 +129,9 @@ export default function DashboardPage() {
 
   // 获取TOP10告警设备真实数据
   const { data: topAlarmDevicesData } = useTopAlarmDevices();
+
+  // 获取设备按技术类型分组的状态数据
+  const { data: deviceStatusByTypeData } = useDeviceStatusByType();
 
   // 获取设备地理数据（与 GISMapView 相同的数据源）
   const mapFilterParams = useMemo(() => ({
@@ -198,20 +208,31 @@ export default function DashboardPage() {
     [critical, major, minor, warning, t]
   );
 
-  // Device status bar chart data
-  // TODO: 设备状态分布（按类型）需要后端提供按 technology 分组的统计数据
-  // 当前后端 GET /dashboard/device-status 只返回总体状态计数，不包含设备类型分组
-  // 待后端新增 API: GET /dashboard/device-status-by-type 返回 { technology: { online, offline, alarm } }
-  const deviceStatusXData = ['eNB', 'gNB', 'CPE', 'eGW'];
-  const deviceStatusSeries = useMemo(() => {
-    // 暂无真实接口，使用全 0 数据避免误导用户
-    const zeroData = new Array(deviceStatusXData.length).fill(0);
-    return [
-      { name: t('dashboard.chart.online'), data: zeroData, color: '#52C41A' },
-      { name: t('dashboard.chart.offline'), data: zeroData, color: '#8C8C8C' },
-      { name: t('dashboard.chart.alarm'), data: zeroData, color: '#FA8C16' },
+  // Device status bar chart data - 按技术类型分组
+  const deviceStatusData = useMemo(() => {
+    if (!deviceStatusByTypeData || Object.keys(deviceStatusByTypeData).length === 0) {
+      return { isEmpty: true, xData: [], series: [] };
+    }
+
+    // technology 键作为 X 轴数据，映射为友好显示名称
+    const xData = Object.keys(deviceStatusByTypeData).map(
+      key => TECH_DISPLAY_NAME[key] || key
+    );
+
+    // 提取各状态的数据（保持原始顺序）
+    const technologyKeys = Object.keys(deviceStatusByTypeData);
+    const onlineData = technologyKeys.map(key => deviceStatusByTypeData[key]?.online ?? 0);
+    const offlineData = technologyKeys.map(key => deviceStatusByTypeData[key]?.offline ?? 0);
+    const alarmData = technologyKeys.map(key => deviceStatusByTypeData[key]?.alarm ?? 0);
+
+    const series = [
+      { name: t('dashboard.chart.online'), data: onlineData, color: '#52C41A' },
+      { name: t('dashboard.chart.offline'), data: offlineData, color: '#8C8C8C' },
+      { name: t('dashboard.chart.alarm'), data: alarmData, color: '#FA8C16' },
     ];
-  }, [t, deviceStatusXData.length]);
+
+    return { isEmpty: false, xData, series };
+  }, [deviceStatusByTypeData, t]);
 
   // 7-day alarm trend
   const trendXData = useMemo(() => {
@@ -467,12 +488,16 @@ export default function DashboardPage() {
             styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
             style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
           >
-            <BarChart
-              title=""
-              xData={deviceStatusXData}
-              series={deviceStatusSeries}
-              height={260}
-            />
+            {deviceStatusData.isEmpty ? (
+              <EmptyState description={t('common.noData')} />
+            ) : (
+              <BarChart
+                title=""
+                xData={deviceStatusData.xData}
+                series={deviceStatusData.series}
+                height={260}
+              />
+            )}
           </Card>
           </TiltCard>
         </Col>

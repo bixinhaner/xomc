@@ -14,8 +14,8 @@ import (
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/device"
-	"github.com/omcgo/omcgo/internal/topology"
 	"github.com/omcgo/omcgo/internal/pm/kpi"
+	"github.com/omcgo/omcgo/internal/topology"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
@@ -55,7 +55,7 @@ type DashboardSummary struct {
 
 // AlarmTrendEntry represents alarm counts for a single day, broken down by severity.
 type AlarmTrendEntry struct {
-	Date     string `json:"date"`     // "2026-03-07"
+	Date     string `json:"date"` // "2026-03-07"
 	Critical int64  `json:"critical"`
 	Major    int64  `json:"major"`
 	Minor    int64  `json:"minor"`
@@ -64,7 +64,7 @@ type AlarmTrendEntry struct {
 
 // KPITrendEntry represents a single KPI data point in a time series.
 type KPITrendEntry struct {
-	Time  string  `json:"time"`  // ISO 8601 timestamp
+	Time  string  `json:"time"` // ISO 8601 timestamp
 	Value float64 `json:"value"`
 }
 
@@ -137,10 +137,10 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 	}
 
 	var (
-		rawDeviceCounts map[model.DeviceStatus]int64
-		rawAlarmStats   *alarm.AlarmStatistics
-		rawKPIValues    []model.KPIValue
-		rawAlarms       []model.Alarm
+		rawDeviceCounts  map[model.DeviceStatus]int64
+		rawAlarmStats    *alarm.AlarmStatistics
+		rawKPIValues     []model.KPIValue
+		rawAlarms        []model.Alarm
 		alarmDeviceCount int64
 	)
 
@@ -443,14 +443,15 @@ func (s *Service) GetRegionStats(ctx context.Context) ([]RegionStatEntry, error)
 		entry.DeviceCount = int64(len(deviceIDs))
 
 		if len(deviceIDs) > 0 {
-			// Count online devices (status = 'active') in this group
+			// Count online devices (is_online = TRUE) in this group
+			// T-0162: 使用 is_online 字段（migration 000137 替换了原 status 列）
 			g2, gctx := errgroup.WithContext(ctx)
 
 			g2.Go(func() error {
 				onlineQuery, args, err := storage.Psql.Select("COUNT(*)").
 					From("devices").
 					Where("id = ANY(?)", deviceIDs).
-					Where(sq.Eq{"status": "active"}).
+					Where(sq.Eq{"is_online": true}).
 					ToSql()
 				if err != nil {
 					s.logger.Warn("dashboard: build online devices query failed",
@@ -631,4 +632,55 @@ func parseKPINames(raw string) []string {
 		}
 	}
 	return names
+}
+
+// DeviceStatusByType is device status statistics grouped by technology.
+type DeviceStatusByType map[string]DeviceStatusCounts
+
+// DeviceStatusCounts represents device counts for a single technology.
+type DeviceStatusCounts struct {
+	Online  int64 `json:"online"`
+	Offline int64 `json:"offline"`
+	Alarm   int64 `json:"alarm"`
+}
+
+// GetDeviceStatusByType returns device status counts grouped by technology.
+// T-0162: 使用 is_online 字段（migration 000137 替换了原 status 列）
+func (s *Service) GetDeviceStatusByType(ctx context.Context) (DeviceStatusByType, error) {
+	// PostgreSQL FILTER syntax for conditional aggregation
+	query := `
+		SELECT
+			technology,
+			COUNT(*) FILTER (WHERE is_online = TRUE) AS online,
+			COUNT(*) FILTER (WHERE is_online = FALSE) AS offline,
+			COUNT(*) FILTER (WHERE EXISTS (
+				SELECT 1 FROM alarms_active aa WHERE aa.device_id = devices.id
+			)) AS alarm
+		FROM devices
+		WHERE deleted_at IS NULL
+		GROUP BY technology
+		ORDER BY technology`
+
+	rows, err := s.pgPool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("query device status by type: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(DeviceStatusByType)
+	for rows.Next() {
+		var technology string
+		var counts DeviceStatusCounts
+		if err := rows.Scan(&technology, &counts.Online, &counts.Offline, &counts.Alarm); err != nil {
+			return nil, fmt.Errorf("scan device status by type row: %w", err)
+		}
+		result[technology] = counts
+	}
+
+	// Check for errors during iteration
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate device status by type rows: %w", err)
+	}
+
+	return result, nil
 }

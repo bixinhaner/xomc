@@ -52,6 +52,14 @@ export function useDeviceStatusPie() {
   });
 }
 
+export function useDeviceStatusByType() {
+  return useQuery({
+    queryKey: ['dashboard', 'device-status-by-type'],
+    queryFn: () => api.getDeviceStatusByType(),
+    refetchInterval: 30000,
+  });
+}
+
 export function useTopAlarmDevices() {
   return useQuery({
     queryKey: ['dashboard', 'top-alarm-devices'],

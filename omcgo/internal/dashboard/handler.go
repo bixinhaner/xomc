@@ -32,6 +32,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		dashboard.GET("/summary", h.GetSummary)
 		dashboard.GET("/alarm-trend", h.GetAlarmTrend)
 		dashboard.GET("/device-status", h.GetDeviceStatus)
+		dashboard.GET("/device-status-by-type", h.GetDeviceStatusByType)
 		dashboard.GET("/kpi-trend", h.GetKPITrend)
 		dashboard.GET("/region-stats", h.GetRegionStats)
 		dashboard.GET("/widgets", h.GetWidgets)
@@ -225,4 +226,14 @@ func getUserID(c *gin.Context) (uuid.UUID, error) {
 		return uuid.UUID{}, fmt.Errorf("invalid user ID in context")
 	}
 	return userID, nil
+}
+
+// GetDeviceStatusByType handles GET /api/v1/dashboard/device-status-by-type.
+func (h *Handler) GetDeviceStatusByType(c *gin.Context) {
+	result, err := h.service.GetDeviceStatusByType(c.Request.Context())
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OK(c, result)
 }

@@ -2983,6 +2983,36 @@ print('yes' if isinstance(d, dict) and len(d) > 0 else 'no')
             fail "Device status has status count keys" "empty or invalid response"
         fi
     fi
+
+    # 40.3 GET /dashboard/device-status-by-type → 200
+    RESP=$(curl -s -w "\n%{http_code}" "$API/dashboard/device-status-by-type" \
+        -H "$AUTH_HEADER")
+    HTTP_CODE=$(echo "$RESP" | tail -1)
+    BODY=$(echo "$RESP" | sed '$d')
+    check_status "GET /dashboard/device-status-by-type" "200" "$HTTP_CODE"
+
+    # 40.4 Verify response structure (technology -> {online, offline, alarm})
+    if [ "$HTTP_CODE" = "200" ]; then
+        VALID_STRUCTURE=$(echo "$BODY" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+if not isinstance(d, dict):
+    print('no')
+else:
+    # Check each value has online, offline, alarm keys
+    valid = all(
+        isinstance(v, dict) and
+        'online' in v and 'offline' in v and 'alarm' in v
+        for v in d.values()
+    )
+    print('yes' if valid else 'no')
+" 2>/dev/null || echo "no")
+        if [ "$VALID_STRUCTURE" = "yes" ]; then
+            pass "Device status by type has valid structure"
+        else
+            fail "Device status by type has valid structure" "invalid structure"
+        fi
+    fi
 else
     fail "S40 Dashboard Device Status" "skipped — no access token"
 fi

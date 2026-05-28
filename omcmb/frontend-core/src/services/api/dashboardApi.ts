@@ -56,6 +56,16 @@ interface BackendAlarmTrendItem {
 /** GET /dashboard/device-status returns a map of status label → count */
 type BackendDeviceStatusMap = Record<string, number>;
 
+/** Device status counts for a single technology */
+interface BackendDeviceStatusCounts {
+  online: number;
+  offline: number;
+  alarm: number;
+}
+
+/** GET /dashboard/device-status-by-type returns { [technology]: { online, offline, alarm } } */
+type BackendDeviceStatusByType = Record<string, BackendDeviceStatusCounts>;
+
 interface BackendKPITrendItem {
   time: string;
   value: number;
@@ -254,6 +264,14 @@ export const dashboardApi = {
       '/dashboard/device-status'
     );
     return mapDeviceStatusMap(data);
+  },
+
+  /** Device status by technology type from GET /dashboard/device-status-by-type */
+  async getDeviceStatusByType(): Promise<BackendDeviceStatusByType> {
+    const { data } = await http.get<BackendDeviceStatusByType>(
+      '/dashboard/device-status-by-type'
+    );
+    return data;
   },
 
   /** Top alarm devices — extracted from /dashboard/summary recent_alarms */
