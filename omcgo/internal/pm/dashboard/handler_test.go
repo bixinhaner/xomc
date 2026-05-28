@@ -118,6 +118,66 @@ func Test_Handler_UpdateOnlyOwner(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, w.Code)
 }
 
+// createDashboard 是 panel 测试的公共前置：owner 建一个 dashboard，返回其 ID。
+func createDashboard(t *testing.T, r *gin.Engine) string {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{"name": "panel-host", "technology": "lte"})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/pm/dashboards", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	return resp["data"].(map[string]any)["id"].(string)
+}
+
+// adhoc_result 类型的 panel 不挂指标路径 / 粒度（数据来自已存的聚合任务），
+// 前端按设计提交空数组，后端不应再按 min=1 拒绝。
+func Test_Handler_CreatePanel_AdhocResultAllowsEmptyMetrics(t *testing.T) {
+	repo := newStubRepo()
+	svc := NewService(repo, nil)
+	owner := uuid.New()
+	r := newRouterWithUser(svc, owner)
+	dashID := createDashboard(t, r)
+
+	body, _ := json.Marshal(map[string]any{
+		"panel_type":    "adhoc_result",
+		"title":         "自定义聚合结果",
+		"dimension":     "device",
+		"metric_paths":  []string{},
+		"granularities": []string{},
+		"adhoc_task_id": uuid.New().String(),
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/pm/dashboards/"+dashID+"/panels", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusCreated, w.Code, "adhoc_result panel 空指标应被接受")
+}
+
+// 非 adhoc_result 类型仍必须带指标路径 / 粒度，空数组应被拒（回归守护）。
+func Test_Handler_CreatePanel_NonAdhocRequiresMetrics(t *testing.T) {
+	repo := newStubRepo()
+	svc := NewService(repo, nil)
+	owner := uuid.New()
+	r := newRouterWithUser(svc, owner)
+	dashID := createDashboard(t, r)
+
+	body, _ := json.Marshal(map[string]any{
+		"panel_type":    "line_chart",
+		"title":         "趋势图",
+		"dimension":     "device",
+		"metric_paths":  []string{},
+		"granularities": []string{},
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/pm/dashboards/"+dashID+"/panels", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "非 adhoc 类型空指标仍应拒绝")
+}
+
 func Test_Handler_GetPreferencesReturnsEmpty(t *testing.T) {
 	repo := newStubRepo()
 	svc := NewService(repo, nil)

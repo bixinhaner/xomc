@@ -404,8 +404,8 @@ func (h *Handler) Unshare(c *gin.Context) {
 type panelInputDTO struct {
 	PanelType      string          `json:"panel_type" binding:"required"`
 	Title          string          `json:"title" binding:"required"`
-	MetricPaths    []string        `json:"metric_paths" binding:"required,min=1"`
-	Granularities  []string        `json:"granularities" binding:"required,min=1,dive,oneof=15min hourly daily weekly monthly"`
+	MetricPaths    []string        `json:"metric_paths"`
+	Granularities  []string        `json:"granularities" binding:"omitempty,dive,oneof=15min hourly daily weekly monthly"`
 	Dimension      string          `json:"dimension" binding:"required,oneof=device device_group"`
 	DeviceSNs      []string        `json:"device_sns"`
 	DeviceGroupIDs []string        `json:"device_group_ids"`
@@ -413,6 +413,18 @@ type panelInputDTO struct {
 	CompareMode    *string         `json:"compare_mode"`
 	AdhocTaskID    *string         `json:"adhoc_task_id"`
 	Config         json.RawMessage `json:"config"`
+}
+
+// validate 做 binding tag 之外的条件校验：adhoc_result panel 的数据来自已存聚合任务，
+// 不挂指标路径 / 粒度（前端按设计提交空数组）；其余类型必须各带至少一个。
+func (d panelInputDTO) validate() error {
+	if PanelType(d.PanelType) == PanelAdhocResult {
+		return nil
+	}
+	if len(d.MetricPaths) == 0 || len(d.Granularities) == 0 {
+		return errors.New("metric_paths and granularities are required")
+	}
+	return nil
 }
 
 func (d panelInputDTO) toReq(dashID uuid.UUID) (CreatePanelRequest, error) {
@@ -467,6 +479,10 @@ func (h *Handler) CreatePanel(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
+	if err := dto.validate(); err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
 	req, err := dto.toReq(dashID)
 	if err != nil {
 		response.Fail(c, http.StatusBadRequest, "invalid uuid in input")
@@ -494,6 +510,10 @@ func (h *Handler) UpdatePanel(c *gin.Context) {
 	var dto panelInputDTO
 	if err := c.ShouldBindJSON(&dto); err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	if err := dto.validate(); err != nil {
+		response.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	req, err := dto.toReq(uuid.Nil) // service 内会用 panel 现存的 dashboard_id 防越权

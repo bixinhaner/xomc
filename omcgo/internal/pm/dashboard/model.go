@@ -29,17 +29,18 @@ const (
 	TechGSM Technology = "gsm"
 )
 
-// PanelType 7 种受支持图表类型（T-0164 收尾 G6-Gap-5 加 topn + big_number）。
+// PanelType 受支持图表类型（T-0164 收尾 G6-Gap-5 加 topn + big_number；方向 B 加 adhoc_result）。
 type PanelType string
 
 const (
-	PanelKPICard   PanelType = "kpi_card"
-	PanelLineChart PanelType = "line_chart"
-	PanelBarChart  PanelType = "bar_chart"
-	PanelTable     PanelType = "table"
-	PanelGauge     PanelType = "gauge"
-	PanelTopN      PanelType = "topn"        // 排行榜 — config.n + config.sort_desc
-	PanelBigNumber PanelType = "big_number"  // 数值大屏 — config.font_size + config.warning_threshold
+	PanelKPICard     PanelType = "kpi_card"
+	PanelLineChart   PanelType = "line_chart"
+	PanelBarChart    PanelType = "bar_chart"
+	PanelTable       PanelType = "table"
+	PanelGauge       PanelType = "gauge"
+	PanelTopN        PanelType = "topn"          // 排行榜 — config.n + config.sort_desc
+	PanelBigNumber   PanelType = "big_number"    // 数值大屏 — config.font_size + config.warning_threshold
+	PanelAdhocResult PanelType = "adhoc_result"  // 自定义聚合结果 — 数据来自已存聚合任务，不挂指标路径/粒度
 )
 
 // Dimension 数据维度。
