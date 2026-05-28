@@ -47,6 +47,8 @@ export interface PanelSeries {
 export interface PanelSeriesData {
   // 已展开为多 series（单 series + 对比 series；或多设备对比时多个 compare）。
   series: PanelSeries[];
+  // 原始聚合行（long 格式）；导出 Excel 时按指标查询页透视格式输出。
+  rows: AggregatedRow[];
   // 当前 panel 是否处于对比模式（非空 = 渲染时多 series 处理）。
   compareMode: CompareMode | undefined;
   isLoading: boolean;
@@ -200,6 +202,7 @@ export function usePmPanelData(panel: Panel, activeGranularity: Granularity): Pa
     const series = rowsToSeries(rows, panel, activeGranularity);
     return {
       series,
+      rows,
       compareMode: panel.compareMode,
       isLoading: query.isLoading,
       isError: query.isError,

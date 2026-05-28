@@ -11,7 +11,7 @@ import { Table, Tooltip, Empty, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import type { AggregatedRow } from '@core/types/pmDashboard';
-import { pivotLongToWide, type PivotColumn, type PivotRow } from '@core/utils/pmPivotTransform';
+import { pivotLongToWide, formatPivotNumber, type PivotColumn, type PivotRow } from '@core/utils/pmPivotTransform';
 
 const { Text } = Typography;
 
@@ -43,12 +43,6 @@ function estimateMetricColWidth(title: string): number {
     textWidth += /[一-鿿]/.test(ch) ? 14 : 8;
   }
   return Math.max(120, textWidth + 32);
-}
-
-function formatNumber(v: number | null | undefined): string {
-  if (v === null || v === undefined) return '-';
-  if (Number.isInteger(v)) return String(v);
-  return v.toFixed(4).replace(/\.?0+$/, '');
 }
 
 export default function PivotTable({ rows, loading }: PivotTableProps) {
@@ -105,7 +99,7 @@ export default function PivotTable({ rows, loading }: PivotTableProps) {
       key: c.key,
       width: estimateMetricColWidth(c.title),
       align: 'right',
-      render: (_: unknown, row: PivotRow) => formatNumber(row.cells[c.key]),
+      render: (_: unknown, row: PivotRow) => formatPivotNumber(row.cells[c.key]),
     }));
 
     return [...fixed, ...metricCols];

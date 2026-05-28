@@ -65,6 +65,16 @@ export function parseObjectLdn(ldn: string | null | undefined): { cellId?: strin
 }
 
 /**
+ * 透视表数值显示格式：整数原样，小数保留 4 位去尾零，缺采显示 "-"。
+ * 指标查询页表格与仪表盘普通 Panel 导出共用，保证两处数值格式一致。
+ */
+export function formatPivotNumber(v: number | null | undefined): string {
+  if (v === null || v === undefined) return '-';
+  if (Number.isInteger(v)) return String(v);
+  return v.toFixed(4).replace(/\.?0+$/, '');
+}
+
+/**
  * 把 long format AggregatedRow[] 转成 wide format（行=时间×设备×LDN，列=N 指标）。
  */
 export function pivotLongToWide(rows: AggregatedRow[]): PivotResult {

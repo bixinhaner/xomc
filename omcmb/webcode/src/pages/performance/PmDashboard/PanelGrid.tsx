@@ -18,6 +18,7 @@ import type { Granularity, Panel, PanelGridItem } from '@core/types/pmDashboard'
 import { usePmDashboardStore } from '@core/store/pmDashboardStore';
 import { usePmPanelData } from '@core/hooks/api/usePmPanelData';
 import { exportWorkbook } from '@core/utils/excelExport';
+import { pivotRowsToSheet } from '@core/utils/pmPivotExport';
 import { PanelRenderer } from './PanelRenderer';
 import { ComparePanel } from './ComparePanel';
 import 'react-grid-layout/css/styles.css';
@@ -68,21 +69,12 @@ function PanelCard({
 
   const panelData = usePmPanelData(panel, active);
   const handleExportExcel = () => {
+    // 导出列与「指标查询页」透视表一致：开始时间 / 结束时间 / 设备 SN / Cell ID / PLMN + N 指标列
     const sheets = (panel.granularities ?? [active]).map((g) => {
       if (g !== active) {
         return { name: g, rows: [{ note: '切到该粒度 Tab 后再次点击导出可获取本粒度数据' }] };
       }
-      const buckets = panelData.series[0]?.points.map((p) => p.label) ?? [];
-      const rows = buckets.map((label, i) => {
-        // 列名 / 缺采占位与页面表格 (PanelRenderer.TableRenderer) 保持一致
-        const row: Record<string, string | number | null> = { 时间: label };
-        panelData.series.forEach((s) => {
-          const v = s.points[i]?.value;
-          row[s.name] = v === null || v === undefined ? '缺采' : v;
-        });
-        return row;
-      });
-      return { name: g, rows };
+      return { name: g, rows: pivotRowsToSheet(panelData.rows) };
     });
     exportWorkbook(`panel_${panel.title}_${panel.id.slice(0, 8)}`, sheets);
   };
