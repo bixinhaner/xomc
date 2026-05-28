@@ -944,12 +944,12 @@ func (s *DeviceService) applyProductMetadata(ctx context.Context, device *model.
 	if s == nil || s.productMatcher == nil || device == nil {
 		return
 	}
-	if device.ModelName != "" {
-		return
-	}
 	if device.ProductClass == "" {
 		return
 	}
+	// 不能在 ModelName 已回填时早返回 — Technology 可能还错着(老设备首次 Inform
+	// 时 ProductRegistry 还没识别 productClass,Technology 被默认推断成 LTE;后来
+	// ModelName 被补上,但 Technology 没人改)。两个字段独立判断。
 	matchRes, err := s.productMatcher.MatchProductClass(ctx, device.ProductClass)
 	if err != nil {
 		// ErrOrphan 是合法业务态（productClass 未登记）；其他错误也都视为 soft fail：
@@ -962,14 +962,25 @@ func (s *DeviceService) applyProductMetadata(ctx context.Context, device *model.
 		}
 		return
 	}
-	if matchRes == nil || matchRes.Product == nil || matchRes.Product.Name == "" {
+	if matchRes == nil || matchRes.Product == nil {
 		return
 	}
-	device.ModelName = matchRes.Product.Name
-	s.logger.Debug("applyProductMetadata: model_name backfilled from ProductRegistry",
-		zap.String("serial_number", device.SerialNumber),
-		zap.String("product_class", device.ProductClass),
-		zap.String("model_name", device.ModelName))
+	if device.ModelName == "" && matchRes.Product.Name != "" {
+		device.ModelName = matchRes.Product.Name
+	}
+	// Technology 回填:产品字典里登记了 tech("lte"/"nr"/"gsm")就以字典为权威覆盖,
+	// 避免 5G 设备(productClass=FAP/BSC7041C243)的 technology 被首次 Inform 默认
+	// 推断为 lte → UFTE 5G 升级 device-candidates 过滤(WHERE technology='nr')0 行。
+	if matchRes.Product.Tech != "" {
+		if normalized := model.NormalizeTechnology(matchRes.Product.Tech); normalized != "" && device.Technology != normalized {
+			s.logger.Info("applyProductMetadata: technology corrected from ProductRegistry",
+				zap.String("serial_number", device.SerialNumber),
+				zap.String("product_class", device.ProductClass),
+				zap.String("old", string(device.Technology)),
+				zap.String("new", string(normalized)))
+			device.Technology = normalized
+		}
+	}
 }
 
 // GetDeviceInfo retrieves extended info for a device.

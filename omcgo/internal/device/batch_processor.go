@@ -191,10 +191,11 @@ func (p *BatchInformProcessor) Submit(device *model.Device, inform *tr069.Inform
 		p.reconciler.RefreshHeartbeat(context.Background(), device.SerialNumber, device.InformInterval)
 	}
 
-	// Phase 6 (设计文档 §4.3 方案 X): ProductRegistry 回填 device.ModelName。
-	// 与 UpdateFromInform 非 batch 路径 device_service.go:635 行为对齐。
+	// Phase 6 (设计文档 §4.3 方案 X): ProductRegistry 回填 device.ModelName + Technology。
+	// 与 UpdateFromInform 非 batch 路径 device_service.go:applyProductMetadata 行为对齐。
 	// helper 内部已 nil-safe + 空字段检查，调用代价小（多数情况 cache 命中即 return）。
-	if p.productMatcher != nil && device.ModelName == "" && device.ProductClass != "" {
+	// 不在这里早返回 ModelName != "" — Technology 可能还错着,需要 inline 内独立判断。
+	if p.productMatcher != nil && device.ProductClass != "" {
 		applyProductMetadataInline(context.Background(), p.productMatcher, device, p.logger)
 	}
 
@@ -692,10 +693,24 @@ func applyProductMetadataInline(ctx context.Context, matcher ProductClassMatcher
 		}
 		return
 	}
-	if matchRes == nil || matchRes.Product == nil || matchRes.Product.Name == "" {
+	if matchRes == nil || matchRes.Product == nil {
 		return
 	}
-	device.ModelName = matchRes.Product.Name
+	if device.ModelName == "" && matchRes.Product.Name != "" {
+		device.ModelName = matchRes.Product.Name
+	}
+	// 跟 device_service.applyProductMetadata 对齐:产品字典登记了 tech 就以字典覆盖,
+	// 修正首次 Inform 时被错误推断的 Technology(5G 设备被推成 lte 的根因)。
+	if matchRes.Product.Tech != "" {
+		if normalized := model.NormalizeTechnology(matchRes.Product.Tech); normalized != "" && device.Technology != normalized {
+			logger.Info("batch path applyProductMetadata: technology corrected from ProductRegistry",
+				zap.String("serial_number", device.SerialNumber),
+				zap.String("product_class", device.ProductClass),
+				zap.String("old", string(device.Technology)),
+				zap.String("new", string(normalized)))
+			device.Technology = normalized
+		}
+	}
 }
 
 // asyncSyncDeviceInfo 在 batch flush 成功后异步把 device_parameters 投影到
