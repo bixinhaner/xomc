@@ -62,7 +62,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
       minioBucket: 'omc-data',
       minioRegion: 'us-east-1',
       minioPathStyle: true,
-      alarmHisMaxHoldTime: 90,
+      alarmHisMaxHoldTime: 365,
       kpiFilesSaveDays: 7,
       kpiReportDataSaveDays: 7,
       kpiStorge15DataDays: 30,
@@ -208,7 +208,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
           <Space>
             <span>历史告警存储：历史告警在数据库最多存储</span>
             <Form.Item name="alarmHisMaxHoldTime" noStyle>
-              <InputNumber min={1} max={365} style={{ width: 70 }} disabled />
+              <InputNumber min={1} max={365} style={{ width: 70 }} />
             </Form.Item>
             <span>天</span>
           </Space>

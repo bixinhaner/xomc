@@ -64,6 +64,11 @@ func Setup(r *gin.Engine, c *Container) error {
 		Init: func() error { return initAlarmModule(c) },
 	})
 	graph.Add(components.ModuleInitializer{
+		Name:    "alarm-retention",
+		Depends: []string{"admin", "alarm"},
+		Init:    func() error { return initAlarmRetentionModule(c) },
+	})
+	graph.Add(components.ModuleInitializer{
 		Name: "pm",
 		// T-0164-P1：KPIEngine 现在依赖 ProductRegistry / DeviceRepo / IndicatorRepo
 		// 三者构造 KPI Router。productregistry / device 必须先就绪。

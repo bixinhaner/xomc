@@ -127,8 +127,9 @@ type Container struct {
 	InformHandler *device.InformHandler
 
 	// AlarmModule 设置
-	AlarmPgStore *alarm.PgAlarmStore
-	AlarmEngine  *alarm.AlarmEngine
+	AlarmPgStore             *alarm.PgAlarmStore
+	AlarmEngine              *alarm.AlarmEngine
+	AlarmHistoryRetentionSvc *alarm.HistoryRetentionService
 
 	// PMModule 设置
 	PMCounterRepo *counter.PgCounterRepository
