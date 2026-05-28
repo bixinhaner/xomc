@@ -88,11 +88,13 @@ export function useUpdatePattern() {
       productId,
       patternId,
       productClass,
+      isActive,
     }: {
       productId: string;
       patternId: string;
-      productClass: string;
-    }) => api.updatePattern(productId, patternId, productClass),
+      productClass?: string;
+      isActive?: boolean;
+    }) => api.updatePattern(productId, patternId, { productClass, isActive }),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({ queryKey: [...PRODUCTS_KEY, 'detail', vars.productId] });
       void qc.invalidateQueries({ queryKey: [...PRODUCTS_KEY, 'match-order'] });
@@ -146,10 +148,26 @@ export function useMatchOrder() {
   });
 }
 
-export function useOrphanDevices(limit = 200) {
+/** 2026-05-28: server-side 分页 + SN 模糊搜索。
+ *  staleTime=0 + refetchOnMount 让每次进入页面都拉最新数据(用户决策:取消"刷新"
+ *  按钮,实时性靠 hook 自身保证)。
+ */
+export function useOrphanDevices(params: {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+} = {}) {
   return useQuery({
-    queryKey: [...PRODUCTS_KEY, 'orphan-devices', limit],
-    queryFn: () => api.listOrphan(limit),
+    queryKey: [
+      ...PRODUCTS_KEY,
+      'orphan-devices',
+      params.page ?? 1,
+      params.pageSize ?? 50,
+      params.search ?? '',
+    ],
+    queryFn: () => api.listOrphan(params),
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
 }
 

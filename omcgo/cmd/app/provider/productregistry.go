@@ -72,6 +72,11 @@ func initProductRegistryModule(c *Container) error {
 		&productReloader{reg: c.DictLoaderRegistry},
 		logger,
 	)
+	// 2026-05-28 注入 Redis 客户端用于 per-admin rematch 锁(跨进程互斥防反复点击)。
+	// Redis 健康检查由 alarm 模块兜底,这里 c.Redis 在 modules.go init 时已 ping 过。
+	if c.Redis != nil {
+		c.ProductHandler.SetRematchRedis(c.Redis)
+	}
 	return nil
 }
 

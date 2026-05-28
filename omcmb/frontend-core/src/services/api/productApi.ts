@@ -205,10 +205,17 @@ export const productApi = {
     return mapBackendPattern(data);
   },
 
-  async updatePattern(productId: string, patternId: string, productClass: string): Promise<ProductPattern> {
+  async updatePattern(
+    productId: string,
+    patternId: string,
+    fields: { productClass?: string; isActive?: boolean }
+  ): Promise<ProductPattern> {
+    const body: Record<string, unknown> = {};
+    if (fields.productClass !== undefined) body.product_class = fields.productClass;
+    if (fields.isActive !== undefined) body.is_active = fields.isActive;
     const { data } = await http.put<BackendPattern>(
       `/products/${productId}/patterns/${patternId}`,
-      { product_class: productClass }
+      body
     );
     return mapBackendPattern(data);
   },
@@ -252,19 +259,40 @@ export const productApi = {
     };
   },
 
-  async listOrphan(limit = 200): Promise<{ items: OrphanDevice[]; total: number }> {
-    const { data } = await http.get<{ items: BackendOrphanDevice[]; total: number }>(
-      '/products/orphan-devices',
-      { params: { limit } }
-    );
+  /** 2026-05-28 重构:server-side 分页 + SN 模糊搜索。
+   *  page < 1 时后端兜底 1;pageSize 上限后端 1000;search 透传到 serial_number ILIKE。
+   */
+  async listOrphan(params: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+  } = {}): Promise<{ items: OrphanDevice[]; total: number; page: number; pageSize: number }> {
+    const { data } = await http.get<{
+      items: BackendOrphanDevice[];
+      total: number;
+      page: number;
+      page_size: number;
+    }>('/products/orphan-devices', {
+      params: {
+        page: params.page ?? 1,
+        page_size: params.pageSize ?? 50,
+        search: params.search?.trim() || undefined,
+      },
+    });
     return {
       items: (data.items || []).map(mapBackendOrphan),
       total: data.total || 0,
+      page: data.page || params.page || 1,
+      pageSize: data.page_size || params.pageSize || 50,
     };
   },
 
-  async rematchOrphan(): Promise<{ rebound: number; scanned?: number }> {
-    const { data } = await http.post<{ rebound: number; scanned?: number }>(
+  /** 2026-05-28: 后端改异步执行,API 立即返 202 {status:"accepted"}。
+   *  HTTP 409 = 同一管理员已有 in-flight rematch,由 axios 抛 error 由调用方 catch。
+   *  真正的 rebound 结果靠下一次进页面刷新体现。
+   */
+  async rematchOrphan(): Promise<{ status: string; message?: string }> {
+    const { data } = await http.post<{ status: string; message?: string }>(
       '/products/orphan-devices/rematch'
     );
     return data;

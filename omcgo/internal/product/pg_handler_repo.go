@@ -378,7 +378,7 @@ func (r *PgRepository) CreatePattern(ctx context.Context, productID uuid.UUID, p
 	}, nil
 }
 
-// UpdatePattern 修改 product_class 文本（不改 sort_order/is_active；后者走 Move）。
+// UpdatePattern 修改 product_class 文本（不改 sort_order/is_active；后者走 Move/SetPatternActive）。
 func (r *PgRepository) UpdatePattern(ctx context.Context, patternID uuid.UUID, productClass string) (*PatternView, error) {
 	productClass = strings.TrimSpace(productClass)
 	if productClass == "" {
@@ -390,6 +390,21 @@ func (r *PgRepository) UpdatePattern(ctx context.Context, patternID uuid.UUID, p
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update pattern %s: %w", patternID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, fmt.Errorf("pattern %s not found", patternID)
+	}
+	return r.GetPatternByID(ctx, patternID)
+}
+
+// SetPatternActive 切换单条 pattern 的启用/禁用状态。
+func (r *PgRepository) SetPatternActive(ctx context.Context, patternID uuid.UUID, isActive bool) (*PatternView, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE product_class_patterns SET is_active = $1 WHERE id = $2`,
+		isActive, patternID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("set pattern active %s: %w", patternID, err)
 	}
 	if tag.RowsAffected() == 0 {
 		return nil, fmt.Errorf("pattern %s not found", patternID)
@@ -544,29 +559,69 @@ func (r *PgRepository) ListMatchOrder(ctx context.Context) ([]MatchOrderRow, err
 
 // ── Orphan device ───────────────────────────────────────────────────
 
-// ListOrphanDevices 返回 product_id IS NULL 且 product_class 非空的活跃设备。
-func (r *PgRepository) ListOrphanDevices(ctx context.Context, limit int) ([]OrphanDevice, error) {
-	if limit <= 0 || limit > 1000 {
-		limit = 200
+// ListOrphanDevices 返回 product_id IS NULL 的活跃设备(不限定 product_class
+// 非空,真孤儿同样需要可见以便手工绑定)。返回 (items, total)。
+//
+// 2026-05-28 重构:从"limit=200 一刀切"改为 server-side 分页 + SN 模糊搜索。
+//   - page < 1 兜底 1;pageSize <= 0 兜底 50;pageSize 上限 1000 防过载
+//   - searchSN 非空 → serial_number ILIKE '%xxx%' 过滤
+//   - total 是过滤后总数(用于前端 Pagination total)
+func (r *PgRepository) ListOrphanDevices(
+	ctx context.Context,
+	page, pageSize int,
+	searchSN string,
+) ([]OrphanDevice, int, error) {
+	if page < 1 {
+		page = 1
 	}
-	const q = `SELECT id, serial_number, oui, COALESCE(product_class,''),
-	                  carrier, COALESCE(manufacturer,''), last_inform_at
-	          FROM devices
-	          WHERE product_id IS NULL AND deleted_at IS NULL
-	          ORDER BY last_inform_at DESC NULLS LAST
-	          LIMIT $1`
-	rows, err := r.pool.Query(ctx, q, limit)
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	if pageSize > 1000 {
+		pageSize = 1000
+	}
+
+	// WHERE clause + 参数动态拼接 — squirrel 此处过度,直接 string + args 简洁。
+	where := "WHERE product_id IS NULL AND deleted_at IS NULL"
+	args := []any{}
+	idx := 1
+	if s := strings.TrimSpace(searchSN); s != "" {
+		where += fmt.Sprintf(" AND serial_number ILIKE $%d", idx)
+		args = append(args, "%"+s+"%")
+		idx++
+	}
+
+	// total
+	var total int
+	countSQL := "SELECT COUNT(*) FROM devices " + where
+	if err := r.pool.QueryRow(ctx, countSQL, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count orphan devices: %w", err)
+	}
+	if total == 0 {
+		return []OrphanDevice{}, 0, nil
+	}
+
+	// items
+	offset := (page - 1) * pageSize
+	listSQL := "SELECT id, serial_number, oui, COALESCE(product_class,''), " +
+		"carrier, COALESCE(manufacturer,''), last_inform_at " +
+		"FROM devices " + where +
+		" ORDER BY last_inform_at DESC NULLS LAST " +
+		fmt.Sprintf("LIMIT $%d OFFSET $%d", idx, idx+1)
+	args = append(args, pageSize, offset)
+
+	rows, err := r.pool.Query(ctx, listSQL, args...)
 	if err != nil {
-		return nil, fmt.Errorf("query orphan devices: %w", err)
+		return nil, 0, fmt.Errorf("query orphan devices: %w", err)
 	}
 	defer rows.Close()
-	var out []OrphanDevice
+	out := make([]OrphanDevice, 0, pageSize)
 	for rows.Next() {
 		var d OrphanDevice
 		var lastInform *time.Time
 		if err := rows.Scan(&d.ID, &d.SerialNumber, &d.OUI, &d.ProductClass,
 			&d.Carrier, &d.Manufacturer, &lastInform); err != nil {
-			return nil, fmt.Errorf("scan orphan device: %w", err)
+			return nil, 0, fmt.Errorf("scan orphan device: %w", err)
 		}
 		if lastInform != nil {
 			s := lastInform.Format(time.RFC3339)
@@ -574,7 +629,7 @@ func (r *PgRepository) ListOrphanDevices(ctx context.Context, limit int) ([]Orph
 		}
 		out = append(out, d)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
 // GetDeviceSerialByID 取设备 SN（T-0176-PR-D：BindOrphan / RematchOrphan 写库后

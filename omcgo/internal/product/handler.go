@@ -8,14 +8,31 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
 )
+
+// CtxKeyUserID 是 gin context 里 admin middleware 写入用户 UUID 的 key。
+// 与 internal/admin/middleware.go CtxKeyUserID 同字面量,在此重声明避免反向 import。
+const CtxKeyUserID = "user_id"
+
+// rematchLockTTL 是 rematch 任务 Redis 锁的兜底 TTL。
+// goroutine 正常完成会主动 DEL key;异常 crash 时 TTL 自动释放,防止管理员永久卡死。
+// 10 分钟足够覆盖 1000 设备 rematch + 一些保险冗余(实测 60ms / 1000 设备)。
+const rematchLockTTL = 10 * time.Minute
+
+// rematchLockKey 构造 per-admin rematch 锁的 Redis key。
+func rematchLockKey(userID uuid.UUID) string {
+	return "product:rematch:lock:" + userID.String()
+}
 
 // Handler 暴露 /api/v1/products/* (设计 §4.4)。
 //
@@ -25,13 +42,23 @@ import (
 // DiscoveredCleaner 由 provider 注入 parammodel.PgRepository.DeleteDiscoveredAll 来
 // 实现 reset 端点（避免 product 反向 import parammodel 包）。
 type Handler struct {
-	repo         *PgRepository
-	registry     *Registry
-	cleaner      DiscoveredCleaner
-	rematcher    Rematcher
-	reloader     Reloader
-	deviceCache  DeviceCacheInvalidator // T-0176-PR-D：BindOrphan 后失效 SN cache（nil = 禁用）
-	logger       *zap.Logger
+	repo        *PgRepository
+	registry    *Registry
+	cleaner     DiscoveredCleaner
+	rematcher   Rematcher
+	reloader    Reloader
+	deviceCache DeviceCacheInvalidator // T-0176-PR-D：BindOrphan 后失效 SN cache（nil = 禁用）
+	logger      *zap.Logger
+	// 2026-05-28 异步 rematch per-admin 锁(优先 Redis,兜底 sync.Map)。
+	//
+	// 设计:
+	//   - SetRematchRedis 注入 redis.UniversalClient → SET NX EX 跨进程互斥
+	//   - Redis 未注入(单测 / fallback) → sync.Map 进程内排重
+	//
+	// 业务码语义:首次成功 → "accepted"(异步派发) / 已被锁住 → "running"(等刷新)。
+	// 兜底 TTL 10 分钟,防止 goroutine panic 后死锁。
+	rematchRedis    redis.UniversalClient
+	inflightRematch sync.Map
 }
 
 // DeviceCacheInvalidator 是 product handler 写设备绑定字段后清 SN 缓存的最小依赖
@@ -80,6 +107,12 @@ func NewHandler(repo *PgRepository, registry *Registry, cleaner DiscoveredCleane
 // nil 表示禁用 — BindOrphan / RematchOrphan 写完 DB 后不清 cache。
 func (h *Handler) SetDeviceCacheInvalidator(c DeviceCacheInvalidator) {
 	h.deviceCache = c
+}
+
+// SetRematchRedis 注入 Redis 客户端用于 per-admin rematch 锁(跨进程互斥)。
+// nil 时退化为 sync.Map 进程内排重(开发/单测场景)。
+func (h *Handler) SetRematchRedis(rc redis.UniversalClient) {
+	h.rematchRedis = rc
 }
 
 // invalidateDeviceCacheBySN 是 BindOrphan / RematchOrphan 写完 product_id 后清
@@ -475,7 +508,8 @@ func (h *Handler) CreatePattern(c *gin.Context) {
 }
 
 type updatePatternReq struct {
-	ProductClass string `json:"product_class" binding:"required"`
+	ProductClass *string `json:"product_class,omitempty"`
+	IsActive     *bool   `json:"is_active,omitempty"`
 }
 
 func (h *Handler) UpdatePattern(c *gin.Context) {
@@ -489,16 +523,36 @@ func (h *Handler) UpdatePattern(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	pv, err := h.repo.UpdatePattern(c.Request.Context(), patternID, req.ProductClass)
-	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
-			return
-		}
-		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+	if req.ProductClass == nil && req.IsActive == nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("at least one of product_class / is_active is required"))
 		return
 	}
-	h.refreshAsync(c.Request.Context(), "update-pattern")
+	ctx := c.Request.Context()
+	var pv *PatternView
+	if req.ProductClass != nil {
+		pv, err = h.repo.UpdatePattern(ctx, patternID, *req.ProductClass)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+				return
+			}
+			commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+			return
+		}
+	}
+	if req.IsActive != nil {
+		pv, err = h.repo.SetPatternActive(ctx, patternID, *req.IsActive)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+				return
+			}
+			commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+			return
+		}
+	}
+	h.refreshAsync(ctx, "update-pattern")
 	response.OK(c, pv)
 }
 
@@ -595,39 +649,170 @@ func (h *Handler) MatchOrder(c *gin.Context) {
 
 // ── Orphan devices ──────────────────────────────────────────────────
 
+// ListOrphan GET /products/orphan-devices?page=&page_size=&search=
+//
+// 2026-05-28 改造:支持 server-side 分页 + SN 模糊搜索。
+//   - page (default 1) / page_size (default 50, max 1000)
+//   - search: 对 serial_number 做 ILIKE '%xxx%' 过滤
+//   - 旧 limit 参数兼容:若 page_size 未传但 limit 传了,以 limit 作为 page_size。
 func (h *Handler) ListOrphan(c *gin.Context) {
-	limit := 200
-	if v := c.Query("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			limit = n
+	page := 1
+	if v := c.Query("page"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			page = n
 		}
 	}
-	orphans, err := h.repo.ListOrphanDevices(c.Request.Context(), limit)
+	pageSize := 50
+	if v := c.Query("page_size"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			pageSize = n
+		}
+	} else if v := c.Query("limit"); v != "" {
+		// 兼容老前端传 limit
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			pageSize = n
+		}
+	}
+	search := c.Query("search")
+
+	orphans, total, err := h.repo.ListOrphanDevices(c.Request.Context(), page, pageSize, search)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	response.OK(c, gin.H{"items": orphans, "total": len(orphans)})
+	response.OK(c, gin.H{
+		"items":     orphans,
+		"total":     total,
+		"page":      page,
+		"page_size": pageSize,
+	})
 }
 
+// RematchOrphan POST /products/orphan-devices/rematch
+//
+// 2026-05-28 防止反复刷新:per-admin 锁优先用 Redis SET NX EX(跨进程互斥),
+// 未注入 Redis 时回落 sync.Map 进程内排重。统一返 200 + 业务 status 区分:
+//   - "accepted" → 锁获取成功,goroutine 已派发,前端 toast "正在后台执行,请稍等"
+//   - "running"  → 锁被占用,有任务在跑,前端 toast "正在执行中,请等待刷新完成"
+//
+// 不使用 HTTP 409 — running 是"业务上正常的等待态",不是错误,axios 也不会进 catch。
 func (h *Handler) RematchOrphan(c *gin.Context) {
-	if h.rematcher != nil {
-		n, err := h.rematcher.RematchOrphans(c.Request.Context())
-		if err != nil {
-			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
-			return
-		}
-		response.OK(c, gin.H{"rebound": n})
+	userIDVal, exists := c.Get(CtxKeyUserID)
+	if !exists {
+		commonerrors.AbortWithError(c, http.StatusUnauthorized, commonerrors.ErrUnauthorized)
 		return
 	}
-	// 内置 fallback：本端按 Registry.MatchProductClass 重算
-	if h.registry == nil {
-		commonerrors.AbortWithError(c, http.StatusServiceUnavailable, fmt.Errorf("registry not wired"))
+	userID, ok := userIDVal.(uuid.UUID)
+	if !ok {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError,
+			fmt.Errorf("user_id in context is not uuid.UUID"))
 		return
 	}
-	orphans, err := h.repo.ListOrphanDevices(c.Request.Context(), 1000)
+
+	acquired, err := h.acquireRematchLock(c.Request.Context(), userID)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if !acquired {
+		response.OK(c, gin.H{
+			"status":  "running",
+			"message": "rematch already running for this admin",
+		})
+		return
+	}
+
+	// 异步执行 — context.Background 避免 HTTP 关闭后被取消。
+	go h.runRematchAsync(userID)
+
+	response.OK(c, gin.H{
+		"status":  "accepted",
+		"message": "rematch started in background",
+	})
+}
+
+// acquireRematchLock 尝试为当前 admin 抢一把 rematch 锁。
+//
+//	返回 (true, nil)  → 拿到锁,可以派发 goroutine
+//	返回 (false, nil) → 锁被占用(已有 in-flight 任务,前端应提示等待)
+//	返回 (_, err)     → Redis 故障,handler 应 500
+//
+// 优先 Redis SET NX EX,Redis 未注入(nil)时回落 sync.Map。
+// Redis 用 TTL 兜底防 goroutine crash 后死锁;sync.Map 路径由 defer Delete 释放。
+func (h *Handler) acquireRematchLock(ctx context.Context, userID uuid.UUID) (bool, error) {
+	if h.rematchRedis != nil {
+		ok, err := h.rematchRedis.SetNX(ctx, rematchLockKey(userID),
+			time.Now().UTC().Format(time.RFC3339), rematchLockTTL).Result()
+		if err != nil {
+			return false, fmt.Errorf("redis SETNX rematch lock: %w", err)
+		}
+		return ok, nil
+	}
+	_, loaded := h.inflightRematch.LoadOrStore(userID, time.Now())
+	return !loaded, nil
+}
+
+// releaseRematchLock goroutine 完成后释放锁。Redis DEL / sync.Map Delete 均
+// 静默失败 — 锁本身有 TTL 兜底,DEL 失败最多让用户多等 10 分钟。
+func (h *Handler) releaseRematchLock(userID uuid.UUID) {
+	if h.rematchRedis != nil {
+		if err := h.rematchRedis.Del(context.Background(), rematchLockKey(userID)).Err(); err != nil {
+			h.logger.Warn("redis DEL rematch lock failed (TTL will release)",
+				zap.String("admin_user_id", userID.String()),
+				zap.Error(err))
+		}
+		return
+	}
+	h.inflightRematch.Delete(userID)
+}
+
+// runRematchAsync 在独立 goroutine 跑 rematch,完成后释放锁。
+// 任何错误只写日志,不向上抛(没有调用方等结果)。
+func (h *Handler) runRematchAsync(userID uuid.UUID) {
+	startedAt := time.Now()
+	defer func() {
+		h.releaseRematchLock(userID)
+		h.logger.Info("rematch finished",
+			zap.String("admin_user_id", userID.String()),
+			zap.Duration("duration", time.Since(startedAt)))
+	}()
+	// recover 任何 panic 避免拖垮整个 app
+	defer func() {
+		if p := recover(); p != nil {
+			h.logger.Error("rematch panic",
+				zap.String("admin_user_id", userID.String()),
+				zap.Any("panic", p))
+		}
+	}()
+
+	ctx := context.Background()
+
+	if h.rematcher != nil {
+		n, err := h.rematcher.RematchOrphans(ctx)
+		if err != nil {
+			h.logger.Error("rematch (injected) failed",
+				zap.String("admin_user_id", userID.String()),
+				zap.Error(err))
+			return
+		}
+		h.logger.Info("rematch (injected) ok",
+			zap.String("admin_user_id", userID.String()),
+			zap.Int("rebound", n))
+		return
+	}
+
+	if h.registry == nil {
+		h.logger.Warn("rematch skipped: registry not wired",
+			zap.String("admin_user_id", userID.String()))
+		return
+	}
+
+	// 内置 fallback:本端按 Registry.MatchProductClass 重算。
+	orphans, _, err := h.repo.ListOrphanDevices(ctx, 1, 1000, "")
+	if err != nil {
+		h.logger.Error("rematch list orphans failed",
+			zap.String("admin_user_id", userID.String()),
+			zap.Error(err))
 		return
 	}
 	rebound := 0
@@ -635,17 +820,19 @@ func (h *Handler) RematchOrphan(c *gin.Context) {
 		if d.ProductClass == "" {
 			continue
 		}
-		mr, err := h.registry.MatchProductClass(c.Request.Context(), d.ProductClass)
+		mr, err := h.registry.MatchProductClass(ctx, d.ProductClass)
 		if err != nil || mr == nil || mr.Product == nil {
 			continue
 		}
-		if err := h.repo.BindOrphanDevice(c.Request.Context(), d.ID, mr.Product.ID); err == nil {
+		if err := h.repo.BindOrphanDevice(ctx, d.ID, mr.Product.ID); err == nil {
 			rebound++
-			// T-0176-PR-D：批量重绑后逐个失效 SN cache（d.SerialNumber 已在 OrphanDevice 中）。
-			h.invalidateDeviceCacheBySN(c.Request.Context(), d.SerialNumber)
+			h.invalidateDeviceCacheBySN(ctx, d.SerialNumber)
 		}
 	}
-	response.OK(c, gin.H{"rebound": rebound, "scanned": len(orphans)})
+	h.logger.Info("rematch (fallback) ok",
+		zap.String("admin_user_id", userID.String()),
+		zap.Int("scanned", len(orphans)),
+		zap.Int("rebound", rebound))
 }
 
 func (h *Handler) BindOrphan(c *gin.Context) {

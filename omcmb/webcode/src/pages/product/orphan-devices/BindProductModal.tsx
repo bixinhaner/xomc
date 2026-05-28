@@ -50,9 +50,17 @@ export default function BindProductModal({ open, devices, onClose, onDone }: Pro
     }
   };
 
+  // 2026-05-28: 标题 / Alert 文案明确"用户已选数量"语义,避免与分页 pageSize
+  // 混淆。devices.length 始终等于父组件传入的 selectedRows.length(已选行)。
+  const count = devices.length;
+
   return (
     <Modal
-      title={`绑定产品 — ${devices.length} 台设备`}
+      title={
+        count === 1
+          ? `绑定产品 — 1 台已选设备`
+          : `绑定产品 — 共 ${count} 台已选设备`
+      }
       open={open}
       onOk={() => void handleSubmit()}
       onCancel={onClose}
@@ -65,9 +73,9 @@ export default function BindProductModal({ open, devices, onClose, onDone }: Pro
         showIcon
         style={{ marginBottom: 12 }}
         message={
-          devices.length === 1
-            ? `设备：${devices[0].serialNumber}（productClass=${devices[0].productClass}）`
-            : `批量绑定 ${devices.length} 台；将串行调用单台 bind 接口`
+          count === 1
+            ? `已选设备:${devices[0].serialNumber}(productClass=${devices[0].productClass || '—'})`
+            : `已选 ${count} 台设备,将串行调用单台 bind 接口逐一绑定`
         }
       />
       <Form<FormValues> form={form} layout="vertical">
@@ -81,7 +89,7 @@ export default function BindProductModal({ open, devices, onClose, onDone }: Pro
             placeholder="选择要绑定的产品"
             optionFilterProp="label"
             options={(productData?.items || []).map((p) => ({
-              label: `${p.name}（${p.vendor || '—'} · ${p.tech.toUpperCase()}）`,
+              label: `${p.name}(${p.vendor || '—'} · ${p.tech.toUpperCase()})`,
               value: p.id,
             }))}
           />
