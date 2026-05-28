@@ -289,7 +289,9 @@
       "Bash(echo \"Exit: $?\")",
       "Bash(echo \"Drift script exit: $?\")",
       "Bash(awk '$1 > 1 && $2 >= \"000200\" {print}')",
-      "Bash(echo \"strict check exit: $?\")"
+      "Bash(echo \"strict check exit: $?\")",
+      "mcp__playwright__browser_press_key",
+      "mcp__playwright__browser_resize"
     ],
     "deny": [
       "Bash(git push -f)",
