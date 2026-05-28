@@ -254,7 +254,7 @@ export default function PivotTable({ rows, loading }: PivotTableProps) {
         columns={columns}
         components={{ header: { cell: ResizableTitle } }}
         dataSource={pivoted.rows}
-        pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `共 ${t} 行` }}
+        pagination={{ defaultPageSize: 50, showSizeChanger: true, showTotal: (t) => `共 ${t} 行` }}
         tableLayout="fixed"
         scroll={{ x: totalWidth }}
         bordered
