@@ -28,18 +28,18 @@ auth:
 
 redis:
   addrs:
-    - "redis:6379"
+    - "172.19.1.73:6379"
   password: ""
   db: 0
   pool_size: 100
 
 nats:
-  url: "nats://nats:4222"
+  url: "nats://172.19.1.73:4222"
   max_reconnect: -1
   reconnect_wait: 2s
 
 db:
-  dsn: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
+  dsn: "postgres://omcgo:omcgo123@172.19.1.73:5432/omcgo?sslmode=disable"
   max_conns: 20
   min_conns: 5
   max_conn_lifetime: 30m
@@ -47,7 +47,7 @@ db:
   health_check_interval: 30s
 
 minio:
-  endpoint: "minio:9000"
+  endpoint: "172.19.1.73:9000"
   access_key: "minioadmin"
   secret_key: "minioadmin"
   use_ssl: false

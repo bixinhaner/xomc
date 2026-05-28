@@ -12,7 +12,7 @@ server:
     key_file: ""
 
 db:
-  dsn: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
+  dsn: "postgres://omcgo:omcgo123@172.19.1.73:5432/omcgo?sslmode=disable"
   max_conns: 50
   min_conns: 10
   max_conn_lifetime: 30m
@@ -23,7 +23,7 @@ db:
   log_sql_slow_threshold: 500
 
 tsdb:
-  dsn: "postgres://omcgo:omcgo123@postgres:5432/omcgo?sslmode=disable"
+  dsn: "postgres://omcgo:omcgo123@172.19.1.73:5432/omcgo?sslmode=disable"
   max_conns: 30
   min_conns: 5
   max_conn_lifetime: 30m
@@ -35,19 +35,19 @@ tsdb:
 
 redis:
   addrs:
-    - "redis:6379"
+    - "172.19.1.73:6379"
   password: ""
   db: 0
   pool_size: 200
 
 nats:
-  url: "nats://nats:4222"
+  url: "nats://172.19.1.73:4222"
   max_reconnect: -1
   reconnect_wait: 2s
   allow_stream_rebuild: true
 
 minio:
-  endpoint: "minio:9000"
+  endpoint: "172.19.1.73:9000"
   access_key: "minioadmin"
   secret_key: "minioadmin"
   use_ssl: false

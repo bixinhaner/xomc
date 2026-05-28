@@ -475,3 +475,13 @@ volumes:
 networks:
   default:
     driver: bridge
+    ipam:
+      driver: default
+      config:
+        # 2026-05-28 修复:此前未指定 subnet,docker 自动分配 172.19.0.0/16,
+        # 与外部测试环境 PG(172.19.1.73)同段,容器把外部 IP 当作内部桥接地址,
+        # 发包 ARP 失败导致 "no route to host"。显式锁到 172.28 段(Docker
+        # 推荐的扩展私有段),与常见办公网/IDC 网段都不冲突。
+        # 如未来再撞段,可改 10.250.0.0/16 / 192.168.250.0/24 等空闲段。
+        - subnet: 172.28.0.0/16
+          gateway: 172.28.0.1
