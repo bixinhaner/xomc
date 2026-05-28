@@ -14,10 +14,7 @@ import { Button, Card, Modal, Segmented, Space, Spin, Tag, message } from 'antd'
 import {
   PlusOutlined,
   ForkOutlined,
-  ShareAltOutlined,
   ThunderboltOutlined,
-  PrinterOutlined,
-  FileExcelOutlined,
   CloudSyncOutlined,
   CheckCircleOutlined,
   WarningOutlined,
@@ -33,10 +30,8 @@ import { useUserStore } from '@core/store/userStore';
 import type { Panel, Technology } from '@core/types/pmDashboard';
 import { PanelGrid } from './PanelGrid';
 import { PanelConfigDrawer } from './PanelConfigDrawer';
-import { ShareDialog } from './ShareDialog';
 import { GlobalFilterBar } from './GlobalFilterBar';
 import { CreateAdhocTaskDrawer } from '../PmAdhoc/CreateAdhocTaskDrawer';
-import { exportWorkbook, printAsPDF } from '@core/utils/excelExport';
 
 const TECH_OPTIONS = [
   { label: 'LTE', value: 'lte' as Technology },
@@ -64,7 +59,6 @@ export default function DashboardEditorPane({ dashboardId }: Props) {
 
   const [configPanel, setConfigPanel] = useState<Panel | null>(null);
   const [drawerMode, setDrawerMode] = useState<'create' | 'edit'>('edit');
-  const [shareOpen, setShareOpen] = useState(false);
   const [adhocOpen, setAdhocOpen] = useState(false);
 
   // 自动保存状态指示器（D4）：idle / saving / saved / error
@@ -217,48 +211,9 @@ export default function DashboardEditorPane({ dashboardId }: Props) {
               + 自定义聚合
             </Button>
           )}
-          {/* G6-Gap-10：导出仪表盘配置 Excel（panel 元数据；单 panel 数据由 PanelCard 的导出按钮承担）+ PDF 打印 */}
-          <Button
-            icon={<FileExcelOutlined />}
-            onClick={() => {
-              exportWorkbook(`dashboard_${currentDashboard.name}_${currentDashboard.id.slice(0, 8)}_config`, [
-                {
-                  name: 'dashboard',
-                  rows: [
-                    { id: currentDashboard.id, name: currentDashboard.name, technology: currentDashboard.technology, is_builtin: currentDashboard.isBuiltin ? 1 : 0, panels_count: currentPanels.length },
-                  ],
-                },
-                {
-                  name: 'panels',
-                  rows: currentPanels.map((p) => ({
-                    id: p.id,
-                    title: p.title,
-                    panel_type: p.panelType,
-                    metric_paths: p.metricPaths.join(' | '),
-                    granularities: (p.granularities ?? []).join(' | '),
-                    dimension: p.dimension,
-                    device_sns: (p.deviceSns ?? []).join(' | '),
-                    device_group_ids: (p.deviceGroupIds ?? []).join(' | '),
-                    compare_mode: p.compareMode ?? '',
-                    adhoc_task_id: p.adhocTaskId ?? '',
-                  })),
-                },
-              ]);
-            }}
-          >
-            导出配置
-          </Button>
-          <Button icon={<PrinterOutlined />} onClick={() => printAsPDF(`dashboard_${currentDashboard.name}`)}>
-            打印 / PDF
-          </Button>
           <Button icon={<ForkOutlined />} onClick={handleFork}>
             派生
           </Button>
-          {canEdit && (
-            <Button icon={<ShareAltOutlined />} onClick={() => setShareOpen(true)}>
-              分享
-            </Button>
-          )}
         </Space>
       }
     >
@@ -284,7 +239,6 @@ export default function DashboardEditorPane({ dashboardId }: Props) {
         }}
       />
 
-      <ShareDialog open={shareOpen} dashboard={currentDashboard} onClose={() => setShareOpen(false)} />
 
       <CreateAdhocTaskDrawer
         open={adhocOpen}

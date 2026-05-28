@@ -10,12 +10,12 @@
 
 import { useMemo, useState } from 'react';
 import { Alert, Button, Card, Empty, Space, Spin, Table, Tabs, Tag, Tooltip, Typography } from 'antd';
-import { FileExcelOutlined, PrinterOutlined } from '@ant-design/icons';
+import { FileExcelOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import dayjs from 'dayjs';
 import { usePmAdhocDetail, usePmAdhocResults } from '@core/hooks/api/usePmAdhoc';
 import type { AdhocResultRow } from '@core/types/pmAdhoc';
-import { exportWorkbook, printAsPDF } from '@core/utils/excelExport';
+import { exportWorkbook } from '@core/utils/excelExport';
 
 interface Props {
   taskId: string;
@@ -116,13 +116,6 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
         disabled={rows.length === 0}
       >
         导出 Excel
-      </Button>
-      <Button
-        size="small"
-        icon={<PrinterOutlined />}
-        onClick={() => printAsPDF(`adhoc_${task.name}`)}
-      >
-        导出 PDF
       </Button>
     </Space>
   );
