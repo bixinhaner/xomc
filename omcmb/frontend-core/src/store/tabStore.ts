@@ -6,6 +6,24 @@ export type { TabItem };
 
 const MAX_TABS = 10;
 
+function dedupeTabsByExactPath(tabs: TabItem[]) {
+  const seenPathToKey = new Map<string, string>();
+  const deduped: TabItem[] = [];
+  const removedKeyToKeptKey = new Map<string, string>();
+
+  for (const tab of tabs) {
+    const existingKey = seenPathToKey.get(tab.path);
+    if (!existingKey) {
+      seenPathToKey.set(tab.path, tab.key);
+      deduped.push(tab);
+      continue;
+    }
+    removedKeyToKeptKey.set(tab.key, existingKey);
+  }
+
+  return { deduped, removedKeyToKeptKey };
+}
+
 // 仪表板 tab 的稳定标识。使用 'dashboard'（与 navConfig 中其他菜单项的 key 命名风格一致）。
 // 动态菜单使用 routePath（'/dashboard'）作为 key，但通过 path 匹配兼容静态菜单的 'dashboard' key。
 const DASHBOARD_TAB_KEY = 'dashboard';
@@ -44,13 +62,16 @@ export const useTabStore = create<TabState>()(
         // 兼容动态菜单：动态菜单使用 routePath（'/dashboard'）作为 key，
         // 静态菜单使用 'dashboard' 作为 key。通过 path 匹配确保两者指向同一个 tab。
         const existsIdx = tabs.findIndex(
-          (t) => t.key === tab.key || (tab.path === '/dashboard' && t.path === '/dashboard'),
+          (t) =>
+            t.key === tab.key ||
+            t.path === tab.path ||
+            (tab.path === '/dashboard' && t.path === '/dashboard'),
         );
         if (existsIdx !== -1) {
           // 命中同 key（或同 path 的 /dashboard）时，同步 path/label/labelRaw/closable，
-          // 让"复用 tab 显示不同记录详情"场景的 URL 与标题正确刷新。
+          // 让静态/动态菜单别名和"复用 tab 显示不同记录详情"场景的 URL 与标题正确刷新。
           // 注意：key 始终保留原 tab 的 key —— 防止静态/动态菜单两种 key 形态
-          // （'dashboard' vs '/dashboard'）互相覆盖导致 activeTabKey 漂移。
+          // （如 'device-list' vs '/device/list'）互相覆盖导致 activeTabKey 漂移。
           const merged = tabs.slice();
           const existing = merged[existsIdx];
           merged[existsIdx] = {
@@ -127,12 +148,21 @@ export const useTabStore = create<TabState>()(
     {
       name: 'omc-tab-store',
       storage: createJSONStorage(() => sessionStorage),
-      version: 3,
+      version: 4,
       migrate: (persisted: unknown, version: number) => {
         if (!persisted || typeof persisted !== 'object') return persisted as TabState;
         const p = persisted as { tabs?: TabItem[]; activeTabKey?: string };
         // 确保 tabs 始终有值，避免后续代码中的类型错误
         p.tabs = p.tabs ?? [];
+
+        // v3 → v4：按完全相同 path 去重，收敛历史上静态/动态菜单别名造成的重复 tab。
+        if (version < 4) {
+          const { deduped, removedKeyToKeptKey } = dedupeTabsByExactPath(p.tabs);
+          p.tabs = deduped;
+          if (p.activeTabKey) {
+            p.activeTabKey = removedKeyToKeptKey.get(p.activeTabKey) ?? p.activeTabKey;
+          }
+        }
 
         // v2 → v3：DASHBOARD_TAB_KEY 从 '/dashboard' 改回 'dashboard'（与 navConfig 命名风格一致）。
         if (version < 3) {

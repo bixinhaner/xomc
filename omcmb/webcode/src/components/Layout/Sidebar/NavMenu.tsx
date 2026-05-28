@@ -392,7 +392,7 @@ export default function NavMenu({
     } else {
       const child = staticKeyToChild.get(key);
       if (!child) return;
-      openTab({ key: child.key, label: child.label, path: child.path, closable: true, labelRaw: true });
+      openTab({ key: child.key, label: child.label, path: child.path, closable: true, labelRaw: false });
       void navigate(child.path);
     }
     if (isMobile) setMobileOverlayOpen(false);

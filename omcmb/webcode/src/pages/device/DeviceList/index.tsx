@@ -23,7 +23,7 @@ import StatusIndicator from '@/components/StatusIndicator';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useDeviceList, useBatchRebootDevices, useDeviceGroups } from '@core/hooks/api/useDevices';
 import { useDictionary, useDictionaryBatch } from '@core/hooks/api/useSystem';
-import { useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
+import { useAlarmCount, useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
 import { useCreateUnifiedFileTransferTask } from '@core/hooks/api/useUnifiedFileTransfer';
 import { useDownloadStationLog } from '@core/hooks/api/useStationLog';
 import { stationLogApi } from '@core/services/api/stationLogApi';
@@ -337,6 +337,7 @@ export default function DeviceList() {
   const devices = useMemo(() => data?.items ?? [], [data?.items]);
   const total = data?.total ?? 0;
   const stats = useMemo(() => data?.stats ?? { total: 0, online: 0, offline: 0, alarmed: 0, online_count: 0, offline_count: 0 }, [data?.stats]);
+  const { data: alarmCount } = useAlarmCount();
 
   // R6b: 设备分组下拉接入 device/group API（device-list-and-group-improvements-20260520.md R6b）
   const { data: groupsResp } = useDeviceGroups();
@@ -522,8 +523,8 @@ export default function DeviceList() {
     { label: t('device.count.total'), value: stats.total },
     { label: t('status.online'), value: stats.online_count ?? stats.online ?? 0, color: '#52C41A' },
     { label: t('status.offline'), value: stats.offline_count ?? stats.offline ?? 0, color: '#8C8C8C' },
-    { label: t('common.hasAlarm'), value: stats.alarmed, color: '#FA8C16' },
-  ], [stats, t]);
+    { label: t('common.hasAlarm'), value: alarmCount?.total_active ?? stats.alarmed, color: '#FA8C16' },
+  ], [alarmCount?.total_active, stats, t]);
 
   const handleSearch = useCallback((values: Record<string, unknown>) => {
     // 关键字上限校验：后端 BuildSearchOR 限定 ≤50 keyword × 6 fields = 300 ILIKE

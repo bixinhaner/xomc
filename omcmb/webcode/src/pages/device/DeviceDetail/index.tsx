@@ -162,7 +162,7 @@ const generateCategoryTrendSeries = (kpis: KPIConfig[], mode: 'day' | 'week') =>
 interface FieldItem {
   key: string;
   label: string;
-  render: (device: Device) => React.ReactNode;
+  render: (device: DetailDevice) => React.ReactNode;
 }
 
 interface FieldGroup {
@@ -176,6 +176,10 @@ interface CellRecord {
   values: Partial<Device>;
 }
 
+type DetailDevice = Device & {
+  ppsTimeMode?: string;
+};
+
 interface DeviceDetailCell {
   index: number;
   cellId?: string;
@@ -188,8 +192,212 @@ interface DeviceDetailCell {
   adminState?: string;
 }
 
+interface DeviceDetailInfo {
+  deviceName?: string;
+  remark?: string;
+  eci?: string;
+  pci?: string;
+  cellId?: string;
+  freqPoint?: string;
+  bandwidth?: number;
+  transmitPower?: number;
+  plmn?: string;
+  rfStatus?: string;
+  mmeStatus?: string;
+  syncStatus?: string;
+  firstOnlineTime?: string;
+  lastOnlineTime?: string;
+  lastOfflineTime?: string;
+  runTime?: number;
+  cumulativeOnlineDuration?: number;
+  tac?: string;
+  band?: string;
+  ulEarfcn?: string;
+  subframeAssignment?: string;
+  specialSubframe?: string;
+  rootIndex?: string;
+  gpsSatellites?: number;
+  gpsHeight?: number;
+  lockStatus?: string;
+  enbId?: string;
+  networkModel?: string;
+  mac?: string;
+  amfStatus?: string;
+  multiPlmnEnable?: string;
+  gpsVersion?: string;
+  ppsTimeMode?: string;
+  rollbackVersion?: string;
+  wanSpeed?: string;
+}
+
+interface BackendDeviceDetailCell {
+  index: number;
+  cell_id?: string;
+  eci?: string;
+  pci?: string;
+  freq_point?: string;
+  bandwidth?: string;
+  op_state?: string;
+  rf_tx_status?: string;
+  admin_state?: string;
+}
+
+interface BackendDeviceDetailInfo {
+  device_name?: string;
+  remark?: string;
+  eci?: string;
+  pci?: string;
+  cell_id?: string;
+  freq_point?: string;
+  bandwidth?: number;
+  transmit_power?: number;
+  plmn?: string;
+  rf_status?: string;
+  mme_status?: string;
+  amf_status?: string;
+  sync_status?: string;
+  first_online_time?: string;
+  last_online_time?: string;
+  last_offline_time?: string;
+  run_time?: number;
+  cumulative_online_duration?: number;
+  tac?: string;
+  band?: string;
+  ul_earfcn?: string;
+  subframe_assignment?: string;
+  special_subframe?: string;
+  root_index?: string;
+  gps_satellites?: number;
+  gps_height?: number;
+  lock_status?: string;
+  enb_id?: string;
+  network_model?: string;
+  mac?: string;
+  multi_plmn_enable?: string;
+  gps_version?: string;
+  pps_time_mode?: string;
+  rollback_version?: string;
+  wan_status?: string;
+}
+
+interface BackendDeviceDetailCompositeResponse {
+  info?: BackendDeviceDetailInfo;
+  cells?: BackendDeviceDetailCell[];
+}
+
 interface DeviceDetailCompositeResponse {
+  info?: DeviceDetailInfo;
   cells?: DeviceDetailCell[];
+}
+
+function mapDeviceDetailInfo(info?: BackendDeviceDetailInfo): DeviceDetailInfo | undefined {
+  if (!info) return undefined;
+
+  return {
+    deviceName: info.device_name,
+    remark: info.remark,
+    eci: info.eci,
+    pci: info.pci,
+    cellId: info.cell_id,
+    freqPoint: info.freq_point,
+    bandwidth: info.bandwidth,
+    transmitPower: info.transmit_power,
+    plmn: info.plmn,
+    rfStatus: info.rf_status,
+    mmeStatus: info.mme_status,
+    amfStatus: info.amf_status,
+    syncStatus: info.sync_status,
+    firstOnlineTime: info.first_online_time,
+    lastOnlineTime: info.last_online_time,
+    lastOfflineTime: info.last_offline_time,
+    runTime: info.run_time,
+    cumulativeOnlineDuration: info.cumulative_online_duration,
+    tac: info.tac,
+    band: info.band,
+    ulEarfcn: info.ul_earfcn,
+    subframeAssignment: info.subframe_assignment,
+    specialSubframe: info.special_subframe,
+    rootIndex: info.root_index,
+    gpsSatellites: info.gps_satellites,
+    gpsHeight: info.gps_height,
+    lockStatus: info.lock_status,
+    enbId: info.enb_id,
+    networkModel: info.network_model,
+    mac: info.mac,
+    multiPlmnEnable: info.multi_plmn_enable,
+    gpsVersion: info.gps_version,
+    ppsTimeMode: info.pps_time_mode,
+    rollbackVersion: info.rollback_version,
+    wanSpeed: info.wan_status,
+  };
+}
+
+function mapDeviceDetailCell(cell: BackendDeviceDetailCell): DeviceDetailCell {
+  return {
+    index: cell.index,
+    cellId: cell.cell_id,
+    eci: cell.eci,
+    pci: cell.pci,
+    freqPoint: cell.freq_point,
+    bandwidth: cell.bandwidth,
+    opState: cell.op_state,
+    rfTxStatus: cell.rf_tx_status,
+    adminState: cell.admin_state,
+  };
+}
+
+function mapDeviceDetailCompositeResponse(data: BackendDeviceDetailCompositeResponse): DeviceDetailCompositeResponse {
+  return {
+    info: mapDeviceDetailInfo(data.info),
+    cells: data.cells?.map(mapDeviceDetailCell),
+  };
+}
+
+function mergeDeviceDetailInfo(device: Device, info?: DeviceDetailInfo): DetailDevice {
+  if (!info) return device;
+
+  return {
+    ...device,
+    deviceName: info.deviceName || device.deviceName,
+    remark: info.remark || device.remark,
+    macAddress: info.mac || device.macAddress,
+    gpsVersion: info.gpsVersion || device.gpsVersion,
+    eci: info.eci || device.eci,
+    pci: info.pci || device.pci,
+    cellId: info.cellId || device.cellId,
+    plmnId: info.plmn || device.plmnId,
+    tac: info.tac || device.tac,
+    subframeAssignment: info.subframeAssignment || device.subframeAssignment,
+    specialSubframe: info.specialSubframe || device.specialSubframe,
+    rootIndex: info.rootIndex || device.rootIndex,
+    bandwidth: info.bandwidth != null ? String(info.bandwidth) : device.bandwidth,
+    dlEarfcn: info.freqPoint || device.dlEarfcn,
+    ulEarfcn: info.ulEarfcn || device.ulEarfcn,
+    networkModel: info.networkModel || device.networkModel,
+    txPower: info.transmitPower != null ? String(info.transmitPower) : device.txPower,
+    band: info.band || device.band,
+    mmeStatus: info.mmeStatus || device.mmeStatus,
+    amfStatus: info.amfStatus || info.mmeStatus || device.amfStatus,
+    rfStatus: info.rfStatus || device.rfStatus,
+    syncStatus: info.syncStatus || device.syncStatus,
+    lockStatus: info.lockStatus || device.lockStatus,
+    multiPlmnEnable: info.multiPlmnEnable || device.multiPlmnEnable,
+    firstOnlineTime: info.firstOnlineTime || device.firstOnlineTime,
+    onlineTime: info.lastOnlineTime || device.onlineTime,
+    offlineTime: info.lastOfflineTime || device.offlineTime,
+    upTime: info.runTime ?? device.upTime,
+    cumulativeOnlineDuration: info.cumulativeOnlineDuration ?? device.cumulativeOnlineDuration,
+    gpsHeight: info.gpsHeight ?? device.gpsHeight,
+    gpsSatelliteCount: info.gpsSatellites ?? device.gpsSatelliteCount,
+    ppsTimeMode: info.ppsTimeMode,
+    enbId: info.enbId || device.enbId,
+    rollbackVersion: info.rollbackVersion || device.rollbackVersion,
+    wanSpeed: info.wanSpeed || device.wanSpeed,
+  };
+}
+
+function shouldShowGpsLocation(device: DetailDevice): boolean {
+  return device.ppsTimeMode?.trim().toUpperCase().includes('GPS') ?? false;
 }
 
 interface CellSummaryColumn {
@@ -281,12 +489,6 @@ const getStationFields = (t: ReturnType<typeof useT>, networkType: string): Fiel
   if (networkType === 'gNB') {
     fields.push(
       { key: 'rollbackVersion', label: t('device.rollbackVersion'), render: (d) => d.rollbackVersion ?? '-' },
-      { key: 'sasParam', label: t('device.sasParam'), render: (d) => d.sasParam ?? '-' },
-      { key: 'euRu', label: t('device.euRu'), render: (d) => d.euRu ?? '-' },
-      { key: 'halobLicense', label: t('device.halobLicense'), render: (d) => d.halobLicense ?? '-' },
-      { key: 'energySaving', label: t('device.energySaving'), render: (d) => d.energySaving ?? '-' },
-      { key: 'gnbTopoCellmgr', label: t('device.gnbTopoCellmgr'), render: (d) => d.gnbTopoCellmgr ?? '-' },
-      { key: 'sslCertValidity', label: t('device.sslCertValidity'), render: (d) => d.sslCertValidity ?? '-' },
     );
   }
 
@@ -381,10 +583,9 @@ const getStatusFields = (t: ReturnType<typeof useT>, networkType: string): Field
   // gNB 独有字段
   if (networkType === 'gNB') {
     fields.push(
-      { key: 'amfStatus', label: t('device.amfStatus'), render: (d) => d.amfStatus ?? '-' },
+      { key: 'mmeStatus', label: t('device.amfStatus'), render: (d) => d.mmeStatus ?? d.amfStatus ?? '-' },
+      { key: 'wanSpeed', label: t('device.wanSpeed'), render: (d) => renderStatusTag(d.wanSpeed, { connected: { label: t('status.connected'), color: 'success' }, disconnected: { label: t('status.disconnected'), color: 'error' } }) },
       { key: 'multiPlmnEnable', label: 'Multi PLMN', render: (d) => renderStatusTag(d.multiPlmnEnable, { enabled: { label: t('status.enabled'), color: 'success' }, disabled: { label: t('status.disabled'), color: 'default' } }) },
-      { key: 'euCount', label: t('device.euCount'), render: (d) => d.euCount ?? '-' },
-      { key: 'ruCount', label: t('device.ruCount'), render: (d) => d.ruCount ?? '-' },
     );
   }
 
@@ -401,7 +602,7 @@ const getStatusFields = (t: ReturnType<typeof useT>, networkType: string): Field
 
 // ─── 其他信息组 ────────────────────────────────────────────────────────
 
-const getOtherFields = (t: ReturnType<typeof useT>, networkType: string): FieldGroup => {
+const getOtherFields = (t: ReturnType<typeof useT>, networkType: string, device: DetailDevice): FieldGroup => {
   const fields: FieldItem[] = [
     // 时间信息
     { key: 'onlineTime', label: t('device.onlineTime'), render: (d) => fmtTime(d.onlineTime) },
@@ -420,11 +621,15 @@ const getOtherFields = (t: ReturnType<typeof useT>, networkType: string): FieldG
     { key: 'lastInformTime', label: t('device.lastInformTime'), render: (d) => fmtTime(d.lastInformTime) },
     // 站址信息
     { key: 'siteName', label: t('device.siteName'), render: (d) => d.deviceName || '-' },
-    // 位置信息
-    { key: 'longitude', label: t('device.longitude'), render: (d) => d.longitude?.toFixed(4) || '-' },
-    { key: 'latitude', label: t('device.latitude'), render: (d) => d.latitude?.toFixed(4) || '-' },
-    { key: 'gpsHeight', label: t('device.gpsHeight'), render: (d) => d.gpsHeight ?? '-' },
   ];
+
+  if (shouldShowGpsLocation(device)) {
+    fields.push(
+      { key: 'longitude', label: t('device.longitude'), render: (d) => d.longitude?.toFixed(4) || '-' },
+      { key: 'latitude', label: t('device.latitude'), render: (d) => d.latitude?.toFixed(4) || '-' },
+      { key: 'gpsHeight', label: t('device.gpsHeight'), render: (d) => d.gpsHeight ?? '-' },
+    );
+  }
 
   // GSM 独有字段
   if (networkType === 'GSM') {
@@ -438,7 +643,7 @@ const getOtherFields = (t: ReturnType<typeof useT>, networkType: string): FieldG
 
 // ─── 渲染字段组 ────────────────────────────────────────────────────────
 
-const renderFieldGroup = (group: FieldGroup, device: Device) => (
+const renderFieldGroup = (group: FieldGroup, device: DetailDevice) => (
   <Descriptions
     key={group.title}
     title={group.title}
@@ -639,6 +844,7 @@ export default function DeviceDetail() {
   const t = useT();
   const { modal, message } = App.useApp();
   const { sn = '' } = useParams<{ sn: string }>();
+  const detailTabKey = sn ? `device-detail:${sn}` : 'device-detail';
   const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -650,11 +856,16 @@ export default function DeviceDetail() {
   const { data: detailComposite } = useQuery({
     queryKey: ['devices', 'detail-composite-v2', device?.id],
     queryFn: async () => {
-      const { data } = await http.get<DeviceDetailCompositeResponse>(`/devices/${device?.id}/detail`);
-      return data;
+      const { data } = await http.get<BackendDeviceDetailCompositeResponse>(`/devices/${device?.id}/detail`);
+      return mapDeviceDetailCompositeResponse(data);
     },
     enabled: Boolean(device?.id),
   });
+
+  const displayDevice = useMemo(() => {
+    if (!device) return null;
+    return mergeDeviceDetailInfo(device, detailComposite?.info);
+  }, [detailComposite?.info, device]);
 
   useEffect(() => {
     if (!device?.id || !device.macAddress) return;
@@ -665,11 +876,13 @@ export default function DeviceDetail() {
     openTab({
       key: 'device-list',
       label: 'nav.device.list',
+      labelRaw: false,
       path: '/device/list',
+      closable: true,
     });
-    closeTab('device-detail');
+    closeTab(detailTabKey);
     void navigate('/device/list');
-  }, [closeTab, navigate, openTab]);
+  }, [closeTab, detailTabKey, navigate, openTab]);
 
   // 内部 tab 以 URL ?tab= 作为单一真相源 ——
   // 1) 离开详情页（组件卸载）再切回时，能从 URL 还原内部 tab，不丢状态；
@@ -685,34 +898,34 @@ export default function DeviceDetail() {
     }, { replace: true });
   }, [setSearchParams]);
 
-  // 将设备详情页注册为 TabBar 的共享 tab（key='device-detail'）。
-  // 同 key 复用槽位、按 sn 替换 path/label —— 避免每台设备各占一个 tab；
-  // path 带 location.search 以保留 ?tab=alarm/gps 等深链接进入时的子 tab。
+  // 将设备详情页注册为按 SN 唯一的 TabBar 项。
+  // 同一设备复用同 key，并用 path 刷新当前 ?tab=alarm/gps 等深链接；
+  // 不同设备使用不同 key，允许从设备列表同时打开多个详情页。
   useEffect(() => {
     if (!sn) return;
     const displayName = device?.name || sn;
     openTab({
-      key: 'device-detail',
+      key: detailTabKey,
       label: `${t('common.detail')} · ${displayName}`,
       labelRaw: true,
       path: `/device/detail/${sn}${location.search}`,
       closable: true,
     });
-  }, [sn, location.search, device?.name, openTab, t]);
+  }, [sn, detailTabKey, location.search, device?.name, openTab, t]);
 
-  // 关闭"详情"页（用户点 × 关 device-detail tab）时清掉该设备的 form 草稿 + 反馈状态。
-  // 与"切到其他 tab"区分：切走时 tabStore 里 device-detail tab 仍存在；关闭后才被移除。
+  // 关闭当前设备详情页（用户点 × 关当前详情 tab）时清掉该设备的 form 草稿 + 反馈状态。
+  // 与"切到其他 tab"区分：切走时当前设备 tab 仍存在；关闭后才被移除。
   // unmount 时检查 tabStore 当前 state，按存在性判断意图。
   const did = device?.id;
   useEffect(() => {
     if (!did) return;
     return () => {
-      const hasTab = useTabStore.getState().tabs.some((tb) => tb.key === 'device-detail');
+      const hasTab = useTabStore.getState().tabs.some((tb) => tb.key === detailTabKey);
       if (!hasTab) {
         useQuickSettingsFeedbackStore.getState().clearByDevice(did);
       }
     };
-  }, [did]);
+  }, [detailTabKey, did]);
 
   // T-0138:快速设置 tab 显示规则 —— 只在该设备对应 paramModel 有 quicksettings XML 时显示
   // (后端 GET /quicksettings/groups?device_id=... 返回空 groups 即视为未配置)
@@ -933,36 +1146,36 @@ export default function DeviceDetail() {
 
   // 根据设备制式获取字段组
   const detailGroups = useMemo((): FieldGroup[] => {
-    if (!device) return [];
-    const networkType = normalizeNetworkType(device.networkType);
+    if (!displayDevice) return [];
+    const networkType = normalizeNetworkType(displayDevice.networkType);
 
     return [
       getStationFields(t, networkType),
       getStatusFields(t, networkType),
-      getOtherFields(t, networkType),
+      getOtherFields(t, networkType, displayDevice),
     ];
-  }, [device, t]);
+  }, [displayDevice, t]);
 
   const cellGroup = useMemo((): FieldGroup | null => {
-    if (!device) return null;
-    return getCellFields(t, normalizeNetworkType(device.networkType));
-  }, [device, t]);
+    if (!displayDevice) return null;
+    return getCellFields(t, normalizeNetworkType(displayDevice.networkType));
+  }, [displayDevice, t]);
 
   const cellRecords = useMemo(() => {
-    if (!device) return [];
-    return buildCellRecords(device, detailComposite?.cells);
-  }, [device, detailComposite?.cells]);
+    if (!displayDevice) return [];
+    return buildCellRecords(displayDevice, detailComposite?.cells);
+  }, [displayDevice, detailComposite?.cells]);
 
   const cellColumns = useMemo(
-    () => getCellSummaryColumns(normalizeNetworkType(device?.networkType), t).map((column) => ({
+    () => getCellSummaryColumns(normalizeNetworkType(displayDevice?.networkType), t).map((column) => ({
       ...column,
       render: column.key === 'opState'
-        ? (_: unknown, row: CellRecord) => renderCellOpState((row.values.opState as string | undefined) ?? device?.opState, t)
+        ? (_: unknown, row: CellRecord) => renderCellOpState((row.values.opState as string | undefined) ?? displayDevice?.opState, t)
         : column.key === 'rfStatus'
-          ? (_: unknown, row: CellRecord) => renderCellRfStatus((row.values.rfStatus as string | undefined) ?? device?.rfStatus, t)
+          ? (_: unknown, row: CellRecord) => renderCellRfStatus((row.values.rfStatus as string | undefined) ?? displayDevice?.rfStatus, t)
           : (value: string | number | undefined) => value ?? '-',
     })),
-    [device?.networkType, device?.opState, device?.rfStatus, t],
+    [displayDevice?.networkType, displayDevice?.opState, displayDevice?.rfStatus, t],
   );
 
   if (isLoading) {
@@ -973,7 +1186,7 @@ export default function DeviceDetail() {
     );
   }
 
-  if (!device) {
+  if (!device || !displayDevice) {
     return (
       <div style={{ padding: 24 }}>
         <Alert
@@ -1002,19 +1215,19 @@ export default function DeviceDetail() {
             </Button>
             <div>
               <Title level={4} style={{ margin: 0 }}>
-                {device.name}
+                {displayDevice.name}
               </Title>
               <Text type="secondary" style={{ fontFamily: 'monospace', fontSize: 13 }}>
-                {device.sn}
+                {displayDevice.sn}
               </Text>
             </div>
             <StatusIndicator
-              status={device.connStatus === 'online' ? 'online' : 'offline'}
+              status={displayDevice.connStatus === 'online' ? 'online' : 'offline'}
               variant="tag"
             />
-            {device.alarmLevel !== 'none' && (
-              <Tag color={SEVERITY_COLOR[device.alarmLevel]}>
-                {SEVERITY_LABEL[device.alarmLevel]}
+            {displayDevice.alarmLevel !== 'none' && (
+              <Tag color={SEVERITY_COLOR[displayDevice.alarmLevel]}>
+                {SEVERITY_LABEL[displayDevice.alarmLevel]}
               </Tag>
             )}
           </div>
@@ -1044,7 +1257,7 @@ export default function DeviceDetail() {
               label: t('common.detail'),
               children: (
                 <div style={{ padding: '16px 0' }}>
-                  {detailGroups[0] && renderFieldGroup(detailGroups[0], device)}
+                  {detailGroups[0] && renderFieldGroup(detailGroups[0], displayDevice)}
                   {cellGroup && (
                     <Card size="small" title={cellGroup.title}>
                       <Table<CellRecord>
@@ -1056,7 +1269,7 @@ export default function DeviceDetail() {
                       />
                     </Card>
                   )}
-                  {detailGroups.slice(1).map((group) => renderFieldGroup(group, device))}
+                  {detailGroups.slice(1).map((group) => renderFieldGroup(group, displayDevice))}
                 </div>
               ),
             },
@@ -1107,7 +1320,7 @@ export default function DeviceDetail() {
             {
               key: 'performance',
               label: 'KPI',
-              children: <KPITabContent device={device} t={t} />,
+              children: <KPITabContent device={displayDevice} t={t} />,
             },
             {
               key: 'license',
