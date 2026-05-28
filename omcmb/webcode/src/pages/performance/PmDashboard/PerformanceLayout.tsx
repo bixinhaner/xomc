@@ -14,11 +14,12 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Button, Card, Empty, List, Modal, Form, Input, Select, Space, Tag, Tooltip, message, theme } from 'antd';
-import { PlusOutlined, AppstoreAddOutlined } from '@ant-design/icons';
+import { Button, Card, Empty, List, Modal, Form, Input, Popconfirm, Select, Space, Tag, Tooltip, message, theme } from 'antd';
+import { PlusOutlined, AppstoreAddOutlined, DeleteOutlined } from '@ant-design/icons';
 import {
   usePmDashboardList,
   useCreatePmDashboard,
+  useDeletePmDashboard,
 } from '@core/hooks/api/usePmDashboard';
 import { useUserStore } from '@core/store/userStore';
 import { usePmDashboardStore } from '@core/store/pmDashboardStore';
@@ -47,11 +48,13 @@ export default function PerformanceLayout() {
 
   const { data: dashboards = [], isLoading } = usePmDashboardList();
   const createMut = useCreatePmDashboard();
+  const deleteMut = useDeletePmDashboard();
   const currentUserId = useUserStore((s) => s.currentUser?.id);
 
   const [form] = Form.useForm<{ name: string; technology: Technology; description?: string }>();
   const [createOpen, setCreateOpen] = useState(false);
   const [kpiMgrOpen, setKpiMgrOpen] = useState(false);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
 
   // G6-Gap-11 URL 复现：把 globalFilter 同步进 URL，反之亦然
   const globalFilter = usePmDashboardStore((s) => s.globalFilter);
@@ -128,19 +131,36 @@ export default function PerformanceLayout() {
     ];
   }, [dashboards, currentUserId]);
 
-  // 默认选中：URL 没指定时取首个 builtin（再退化为 owned 第一个）
-  if (!dashboardId && dashboards.length > 0) {
+  // 默认选中：URL 没指定、或指向的仪表盘已不存在（被删除 / 失效链接）时，
+  // 回退到首个 builtin（再退化为 owned 第一个），避免编辑区加载已删 dashboard 报错。
+  const selectedMissing = Boolean(dashboardId) && !dashboards.some((d) => d.id === dashboardId);
+  if (!isLoading && dashboards.length > 0 && (!dashboardId || selectedMissing)) {
     const first =
       groups.find((g) => g.key === 'builtin')?.items[0] ??
       groups.find((g) => g.key === 'owned')?.items[0] ??
       dashboards[0];
-    if (first) {
+    if (first && first.id !== dashboardId) {
       setSearchParams({ dashboard: first.id }, { replace: true });
     }
   }
 
   const handleSelect = (d: Dashboard) => {
     setSearchParams({ dashboard: d.id });
+  };
+
+  const handleDelete = async (d: Dashboard) => {
+    try {
+      await deleteMut.mutateAsync(d.id);
+      message.success('已删除');
+      // 删的是当前打开的仪表盘：清掉选中，让默认选中逻辑回退到第一个
+      if (d.id === dashboardId) {
+        const next = new URLSearchParams(searchParams);
+        next.delete('dashboard');
+        setSearchParams(next, { replace: true });
+      }
+    } catch {
+      message.error('删除失败');
+    }
   };
 
   const handleCreate = async () => {
@@ -183,9 +203,12 @@ export default function PerformanceLayout() {
                 dataSource={g.items}
                 renderItem={(d) => {
                   const active = d.id === dashboardId;
+                  const canDelete = g.key === 'owned'; // 仅自有仪表盘可删（内置只读、分享非 owner）
                   return (
                     <List.Item
                       onClick={() => handleSelect(d)}
+                      onMouseEnter={() => setHoveredId(d.id)}
+                      onMouseLeave={() => setHoveredId((prev) => (prev === d.id ? null : prev))}
                       style={{
                         cursor: 'pointer',
                         padding: '6px 8px',
@@ -199,6 +222,24 @@ export default function PerformanceLayout() {
                         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {d.name}
                         </span>
+                        {canDelete && (
+                          <Popconfirm
+                            title="删除该仪表盘？"
+                            description="删除后不可恢复（含全部 Panel 和分享关系）"
+                            okText="删除"
+                            okButtonProps={{ danger: true, loading: deleteMut.isPending }}
+                            cancelText="取消"
+                            onConfirm={() => handleDelete(d)}
+                          >
+                            <DeleteOutlined
+                              onClick={(e) => e.stopPropagation()}
+                              style={{
+                                color: token.colorError,
+                                opacity: hoveredId === d.id || active ? 1 : 0.3,
+                              }}
+                            />
+                          </Popconfirm>
+                        )}
                       </Space>
                     </List.Item>
                   );
