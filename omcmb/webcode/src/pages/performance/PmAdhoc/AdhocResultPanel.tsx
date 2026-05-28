@@ -19,6 +19,11 @@ import { exportWorkbook, printAsPDF } from '@core/utils/excelExport';
 
 interface Props {
   taskId: string;
+  /**
+   * 嵌入仪表盘 Panel 时为 true：去掉外层 Card（Panel 自身已是卡片，避免卡中卡 + 标题重复），
+   * 只渲染「摘要 + 导出」头行 + 粒度 Tab。默认 false（独立结果弹窗用，带完整 Card）。
+   */
+  embedded?: boolean;
 }
 
 interface MetricSeries {
@@ -55,7 +60,7 @@ function buildSeriesByMetric(rows: AdhocResultRow[], granularity: string): Metri
   return out;
 }
 
-export function AdhocResultPanel({ taskId }: Props) {
+export function AdhocResultPanel({ taskId, embedded = false }: Props) {
   const taskQuery = usePmAdhocDetail(taskId);
   const { data: rows = [], isLoading: rowsLoading } = usePmAdhocResults(taskId);
 
@@ -98,6 +103,63 @@ export function AdhocResultPanel({ taskId }: Props) {
     exportWorkbook(`adhoc_${task.name}_${task.id.slice(0, 8)}`, sheets);
   };
 
+  // 摘要 + 导出，Card 模式放 extra，嵌入模式单起一行
+  const summary = (
+    <Space size={6}>
+      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+        {task.deviceSns.length} 设备 × {task.metricPaths.length} 指标 × {granularities.length} 粒度
+      </Typography.Text>
+      <Button
+        size="small"
+        icon={<FileExcelOutlined />}
+        onClick={handleExportExcel}
+        disabled={rows.length === 0}
+      >
+        导出 Excel
+      </Button>
+      <Button
+        size="small"
+        icon={<PrinterOutlined />}
+        onClick={() => printAsPDF(`adhoc_${task.name}`)}
+      >
+        导出 PDF
+      </Button>
+    </Space>
+  );
+
+  const body =
+    granularities.length === 0 ? (
+      <Empty description="任务无粒度信息" />
+    ) : (
+      <Tabs
+        size="small"
+        activeKey={effectiveGran}
+        onChange={setActiveGran}
+        items={granularities.map((g) => ({
+          key: g,
+          label: g,
+          children: (
+            <GranularityView
+              rows={rows}
+              granularity={g}
+              loading={rowsLoading}
+              taskDeviceSns={task.deviceSns}
+            />
+          ),
+        }))}
+      />
+    );
+
+  // 嵌入仪表盘 Panel：外层卡片由 Panel 提供，这里不再套 Card
+  if (embedded) {
+    return (
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>{summary}</div>
+        {body}
+      </div>
+    );
+  }
+
   return (
     <Card
       size="small"
@@ -112,50 +174,9 @@ export function AdhocResultPanel({ taskId }: Props) {
           </Tag>
         </span>
       }
-      extra={
-        <Space size={6}>
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            {task.deviceSns.length} 设备 × {task.metricPaths.length} 指标 × {granularities.length} 粒度
-          </Typography.Text>
-          <Button
-            size="small"
-            icon={<FileExcelOutlined />}
-            onClick={handleExportExcel}
-            disabled={rows.length === 0}
-          >
-            导出 Excel
-          </Button>
-          <Button
-            size="small"
-            icon={<PrinterOutlined />}
-            onClick={() => printAsPDF(`adhoc_${task.name}`)}
-          >
-            导出 PDF
-          </Button>
-        </Space>
-      }
+      extra={summary}
     >
-      {granularities.length === 0 ? (
-        <Empty description="任务无粒度信息" />
-      ) : (
-        <Tabs
-          size="small"
-          activeKey={effectiveGran}
-          onChange={setActiveGran}
-          items={granularities.map((g) => ({
-            key: g,
-            label: g,
-            children: (
-              <GranularityView
-                rows={rows}
-                granularity={g}
-                loading={rowsLoading}
-                taskDeviceSns={task.deviceSns}
-              />
-            ),
-          }))}
-        />
-      )}
+      {body}
     </Card>
   );
 }
