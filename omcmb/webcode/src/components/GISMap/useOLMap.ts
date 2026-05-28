@@ -27,7 +27,6 @@ import {
   COLORS,
   DEVICE_STATUS_CONFIG,
   SPIDERFY_CONFIG,
-  buildMapConfigFromMetadata,
 } from './constants';
 import {
   clusterStyleFunction,
@@ -37,6 +36,11 @@ import {
   createSpiderfyPointHoverStyle,
 } from './styleUtils';
 import { useMapConfig, type MapMetadata } from './useMapConfig';
+import {
+  isValidMapMetadata,
+  buildSafeConfig,
+  checkTileAvailability,
+} from '@/utils/mapValidation';
 
 // 用于 spiderfy 函数内部访问
 const SPIDERFY_CONFIG_REF = SPIDERFY_CONFIG;
@@ -143,13 +147,47 @@ interface UseOLMapReturn {
 export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
   // 加载地图元数据
   const { metadata, loading: metadataLoading } = useMapConfig();
+  // 瓦片可用性检查状态
+  const [tilesAvailable, setTilesAvailable] = useState<boolean | null>(null);
 
-  // 根据元数据或传入的 options 获取配置
-  const config = useMemo(() => {
-    if (metadata) {
-      return buildMapConfigFromMetadata(metadata);
+  // 检查瓦片文件是否实际可用（仅在 metadata 验证通过后执行）
+  useEffect(() => {
+    // metadata 未加载完成或无效，跳过检查
+    if (metadataLoading || !isValidMapMetadata(metadata)) {
+      return;
     }
-    // 降级到硬编码配置
+
+    let cancelled = false;
+
+    const checkAvailability = async () => {
+      try {
+        const available = await checkTileAvailability(metadata);
+        if (!cancelled) {
+          setTilesAvailable(available);
+        }
+      } catch {
+        // 检查失败，保守降级到在线地图
+        if (!cancelled) {
+          setTilesAvailable(false);
+        }
+      }
+    };
+
+    checkAvailability();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [metadata, metadataLoading]);
+
+  // 根据元数据、瓦片可用性或传入的 options 获取配置
+  const config = useMemo(() => {
+    // 验证 metadata 是否有效，且瓦片文件实际可用
+    if (isValidMapMetadata(metadata) && tilesAvailable === true) {
+      return buildSafeConfig(metadata);
+    }
+
+    // 降级到在线 OSM
     return {
       defaultCenter: MAP_CONFIG.defaultCenter,
       defaultZoom: MAP_CONFIG.defaultZoom,
@@ -159,7 +197,7 @@ export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
       attribution: MAP_CONFIG.attribution || '© OpenStreetMap contributors',
       bounds: MAP_CONFIG.bounds,
     };
-  }, [metadata]);
+  }, [metadata, tilesAvailable]);
 
   const {
     tileUrl,

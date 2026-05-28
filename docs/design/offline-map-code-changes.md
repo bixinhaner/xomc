@@ -1,11 +1,11 @@
 # 离线地图优化代码修改清单
 
-> **文档版本**：v2.0
+> **文档版本**：v2.1
 > **创建日期**：2026-05-22
-> **更新日期**：2026-05-22
+> **更新日期**：2026-05-28
 > **基于文档**：[离线地图完整部署指南](./offline-map-complete-guide.md)
 
-> **目的**：根据最新部署指南，分析当前代码需要做的修改，实现元数据驱动的零配置切换。使用 Maperitive 生成的 tiles.json 作为元数据源。
+> **目的**：根据最新部署指南，分析当前代码需要做的修改，实现元数据驱动的零配置切换。使用 Maperitive 生成的 tiles.json 作为元数据源，并添加瓦片可用性验证。
 
 ---
 
@@ -19,10 +19,40 @@
 | **前端** | `.env.production` | 修改路径 | P0 | 1 分钟 |
 | **前端** | `vite.config.ts` | 修改代理 | P0 | 1 分钟 |
 | **前端** | `components/GISMap/useMapConfig.ts` | 新建文件 | P0 | 30 分钟 |
-| **前端** | `components/GISMap/useOLMap.ts` | 集成元数据 | P1 | 30 分钟 |
+| **前端** | `utils/mapValidation.ts` | 新建验证模块 | P0 | 20 分钟 |
+| **前端** | `components/GISMap/useOLMap.ts` | 集成验证逻辑 | P1 | 30 分钟 |
 | **前端** | `components/GISMap/constants.ts` | 新增默认配置 | P1 | 10 分钟 |
 
-> **变更说明**：v2.0 使用 Maperitive 自动生成的 `tiles.json` 作为元数据源，无需手动创建 `metadata.json`。
+> **变更说明**：
+> - v2.0 使用 Maperitive 自动生成的 `tiles.json` 作为元数据源，无需手动创建 `metadata.json`
+> - v2.1 新增 `mapValidation.ts` 验证模块，支持瓦片文件可用性检查和元数据验证
+
+---
+
+## 1.1 待实现功能：License 控制离线地图
+
+> **状态**：待开发
+> **优先级**：P1
+> **依赖**：License 模块
+
+**功能说明**：
+当前版本自动检测瓦片可用性并降级到在线地图。未来版本将支持通过 License 控制离线地图功能：
+
+| License 状态 | 行为 |
+|-------------|------|
+| 支持离线地图 | 启用离线地图功能，使用 `/tiles/` 瓦片 |
+| 不支持离线地图 | 禁用离线地图，强制使用在线 OSM |
+
+**实施流程**（License 功能完成后）：
+1. 用户导入支持离线地图的 License
+2. 从 SVN 下载离线包 tiles 并解压到 `/tiles/`
+3. 重启 nginx 使配置生效
+4. 前端检测 License 状态，决定使用离线还是在线地图
+
+**代码变更点**（预留）：
+- `useOLMap.ts`：添加 License 检查逻辑
+- `mapValidation.ts`：添加 `checkOfflineMapLicense` 函数
+- 配置决策优先级：License 检查 → 瓦片可用性检查 → 降级到在线
 
 ---
 
@@ -249,11 +279,135 @@ export function useMapConfig() {
     fetchMetadata();
   }, []);
 
-  return { metadata, loading, error };
+  return { metadata, loading, error, status, isUsingDefault };
 }
 ```
 
-### 3.2 修改 constants.ts - 添加元数据构建函数
+### 3.2 新建验证工具模块（mapValidation.ts）
+
+**文件**：`goomc/omcmb/webcode/src/utils/mapValidation.ts`（新建）
+
+**功能说明**：
+- 元数据有效性验证（`isValidMapMetadata`）
+- 从元数据构建安全配置（`buildSafeConfig`）
+- 瓦片文件可用性检查（`checkTileAvailability`）
+
+```typescript
+/**
+ * 地图元数据验证工具
+ * @module utils/mapValidation
+ */
+
+import type { MapMetadata } from '@/components/GISMap/useMapConfig';
+
+/**
+ * 验证地图元数据是否有效
+ * 验证规则：
+ * 1. metadata 不为 null/undefined
+ * 2. center 存在且 lon/lat/zoom 为有效数字
+ * 3. bounds 存在且四个边界值为有效数字
+ * 4. zoom 存在且 min/max 为有效数字
+ */
+export function isValidMapMetadata(data: MapMetadata | null): data is MapMetadata {
+  if (!data) return false;
+
+  const { center, bounds, zoom } = data;
+
+  // 验证 center
+  const validCenter = center &&
+    typeof center.lon === 'number' && !isNaN(center.lon) &&
+    typeof center.lat === 'number' && !isNaN(center.lat) &&
+    typeof center.zoom === 'number' && !isNaN(center.zoom);
+
+  if (!validCenter) return false;
+
+  // 验证 bounds
+  const validBounds = bounds &&
+    typeof bounds.minLon === 'number' && !isNaN(bounds.minLon) &&
+    typeof bounds.maxLon === 'number' && !isNaN(bounds.maxLon) &&
+    typeof bounds.minLat === 'number' && !isNaN(bounds.minLat) &&
+    typeof bounds.maxLat === 'number' && !isNaN(bounds.maxLat);
+
+  if (!validBounds) return false;
+
+  // 验证 zoom
+  const validZoom = zoom &&
+    typeof zoom.min === 'number' && !isNaN(zoom.min) &&
+    typeof zoom.max === 'number' && !isNaN(zoom.max);
+
+  return validZoom;
+}
+
+/**
+ * 从验证通过的 metadata 构建安全的地图配置
+ */
+export function buildSafeConfig(metadata: MapMetadata) {
+  return {
+    defaultCenter: [metadata.center.lon, metadata.center.lat] as [number, number],
+    defaultZoom: metadata.center.zoom,
+    minZoom: metadata.zoom.min,
+    maxZoom: metadata.zoom.max,
+    tileUrl: import.meta.env.VITE_MAP_TILE_URL || '/tiles/{z}/{x}/{y}.png',
+    attribution: metadata.attribution || '© OpenStreetMap contributors',
+    bounds: metadata.bounds,
+  };
+}
+
+/**
+ * 将经纬度转换为瓦片坐标（XYZ tile scheme）
+ */
+function lonLatToTileXY(lon: number, lat: number, zoom: number): [number, number] {
+  const n = Math.pow(2, zoom);
+  const x = Math.floor((lon + 180) / 360 * n);
+  const latRad = (lat * Math.PI) / 180;
+  const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
+  return [x, y];
+}
+
+/**
+ * 检查离线瓦片文件是否实际可用
+ * 采样策略：使用 metadata.center 对应的瓦片坐标进行检查
+ */
+export async function checkTileAvailability(
+  metadata: MapMetadata | null,
+  timeout = 800
+): Promise<boolean> {
+  if (!metadata) return false;
+
+  // 使用 metadata 的默认缩放级别作为采样级别
+  const sampleZoom = metadata.zoom.default || Math.floor((metadata.zoom.min + metadata.zoom.max) / 2);
+
+  // 从 metadata.center 计算瓦片坐标（确保采样点在覆盖区域内）
+  const [x, y] = lonLatToTileXY(metadata.center.lon, metadata.center.lat, sampleZoom);
+
+  const tileUrl = `/tiles/${sampleZoom}/${x}/${y}.png`;
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+    const response = await fetch(tileUrl, {
+      method: 'HEAD',
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+```
+
+**关键特性**：
+1. `isValidMapMetadata`：类型守卫函数，验证元数据完整性
+2. `buildSafeConfig`：从验证通过的元数据构建配置对象
+3. `checkTileAvailability`：通过 HEAD 请求检查瓦片文件是否存在
+   - 从 metadata.center 计算瓦片坐标，确保采样点在覆盖区域内
+   - 800ms 超时保护
+   - 失败时自动降级到在线 OSM
+
+### 3.3 修改 constants.ts - 添加元数据构建函数
 
 **文件**：`goomc/omcmb/webcode/src/components/GISMap/constants.ts`
 
@@ -282,66 +436,106 @@ export function buildMapConfigFromMetadata(metadata: MapMetadata) {
 import type { MapMetadata } from './useMapConfig';
 ```
 
-### 3.3 修改 useOLMap.ts - 集成元数据
+### 3.3 修改 useOLMap.ts - 集成验证逻辑
 
 **文件**：`goomc/omcmb/webcode/src/components/GISMap/useOLMap.ts`
 
 **修改 1**：添加导入
 ```typescript
 import { useMapConfig, type MapMetadata } from './useMapConfig';
-import { buildMapConfigFromMetadata } from './constants';
+import {
+  isValidMapMetadata,
+  buildSafeConfig,
+  checkTileAvailability,
+} from '@/utils/mapValidation';
 ```
 
-**修改 2**：在 `useOLMap` 函数开始处添加元数据加载
+**修改 2**：添加瓦片可用性状态
 ```typescript
 export function useOLMap(options: UseOLMapOptions = {}): UseOLMapReturn {
+  // 加载地图元数据
   const { metadata, loading: metadataLoading } = useMapConfig();
-
-  // 原有的 ref 和 state 定义...
-  const mapRef = useRef<HTMLDivElement | null>(null);
-  // ...
+  // 瓦片可用性检查状态
+  const [tilesAvailable, setTilesAvailable] = useState<boolean | null>(null);
 ```
 
-**修改 3**：修改地图初始化逻辑，使用元数据配置
+**修改 3**：添加瓦片可用性检查 useEffect
 ```typescript
-// 找到 useEffect 中的地图初始化部分
+// 检查瓦片文件是否实际可用（仅在 metadata 验证通过后执行）
 useEffect(() => {
-  if (!mapRef.current || mapInstanceRef.current || !metadata) return;
+  // metadata 未加载完成或无效，跳过检查
+  if (metadataLoading || !isValidMapMetadata(metadata)) {
+    return;
+  }
 
-  // 使用元数据中的配置或传入的 options
-  const center = options.center || [metadata.center.lon, metadata.center.lat];
-  const zoom = options.zoom || metadata.center.zoom;
-  const minZoom = options.minZoom ?? metadata.zoom.min;
-  const maxZoom = options.maxZoom ?? metadata.zoom.max;
+  let cancelled = false;
 
-  // 创建瓦片图层
-  const tileLayer = new TileLayer({
-    source: new XYZ({
-      url: options.tileUrl || import.meta.env.VITE_MAP_TILE_URL || MAP_CONFIG.osmTileUrl,
-      attributions: metadata.attribution,
-    }),
-  });
+  const checkAvailability = async () => {
+    try {
+      const available = await checkTileAvailability(metadata);
+      if (!cancelled) {
+        setTilesAvailable(available);
+      }
+    } catch {
+      // 检查失败，保守降级到在线地图
+      if (!cancelled) {
+        setTilesAvailable(false);
+      }
+    }
+  };
 
-  // ... 其余代码保持不变
-}, [metadata, options]);
+  checkAvailability();
+
+  return () => {
+    cancelled = true;
+  };
+}, [metadata, metadataLoading]);
 ```
 
-**修改 4**：修改返回值，添加元数据加载状态
+**修改 4**：配置决策逻辑（使用 useMemo）
+```typescript
+// 根据元数据、瓦片可用性或传入的 options 获取配置
+const config = useMemo(() => {
+  // 验证 metadata 是否有效，且瓦片文件实际可用
+  if (isValidMapMetadata(metadata) && tilesAvailable === true) {
+    return buildSafeConfig(metadata);
+  }
+
+  // 降级到在线 OSM
+  return {
+    defaultCenter: MAP_CONFIG.defaultCenter,
+    defaultZoom: MAP_CONFIG.defaultZoom,
+    minZoom: MAP_CONFIG.minZoom,
+    maxZoom: MAP_CONFIG.maxZoom,
+    tileUrl: MAP_CONFIG.osmTileUrl,
+    attribution: MAP_CONFIG.attribution || '© OpenStreetMap contributors',
+    bounds: MAP_CONFIG.bounds,
+  };
+}, [metadata, tilesAvailable]);
+```
+
+**修改 5**：地图初始化条件（只等待 metadata 加载完成）
+```typescript
+useEffect(() => {
+  if (isMapInitializedRef.current) return;
+  if (!mapRef.current || mapInstanceRef.current) return;
+  // 只等待元数据加载完成，不阻塞等待瓦片检查
+  if (metadataLoading) return;
+
+  // 标记初始化开始
+  isMapInitializedRef.current = true;
+
+  // ... 地图初始化代码
+}, [metadataLoading]);
+```
+
+**修改 6**：返回值添加元数据相关状态
 ```typescript
 return {
-  mapRef,
-  mapInstanceRef,
-  updateDevices,
-  getViewport,
-  flyTo,
-  highlightDevice,
-  clearHighlight,
-  isReady: isReady && !metadataLoading,  // ← 等待元数据加载完成
-  updateSize,
-  getZoom,
-  fitBounds,
-  highlightAndSpiderfyIfNeeded,
-  metadata,  // ← 新增：暴露元数据
+  // ... 其他返回值
+  isReady: isReady && !metadataLoading,
+  metadata,
+  metadataLoading,
 };
 ```
 
@@ -421,6 +615,8 @@ useEffect(() => {
 | tiles 目录未挂载 | Nginx 404/500 | 使用 DEFAULT_METADATA | 地图正常显示，使用默认配置 |
 | tiles.json 格式错误 | JSON 解析失败 | 使用 DEFAULT_METADATA | 地图正常显示，使用默认配置 |
 | tiles.json 字段缺失 | 字段验证失败 | 部分使用默认值 | 地图正常显示，部分字段用默认值 |
+| tiles.json 字段值为 NaN | isNaN 检查 | 验证失败，降级到默认 | 地图正常显示，使用默认配置 |
+| 瓦片文件不存在 | checkTileAvailability HEAD 请求失败 | 自动降级到在线 OSM | 地图正常显示，使用在线瓦片 |
 | 网络请求失败 | fetch catch | 使用 DEFAULT_METADATA | 地图正常显示，使用默认配置 |
 | Nginx 未配置 location | HTTP 404 | 使用 DEFAULT_METADATA | 地图正常显示，使用默认配置 |
 
@@ -482,25 +678,11 @@ if (isUsingDefault) {
 }
 ```
 
-### 5.6 控制台日志
-
-正常启动：
-```
-[MapConfig] ✓ Loaded TileJSON: My Map center: [27.85, -13.16] zoom: 6-15
-```
-
-异常降级：
-```
-[MapConfig] ⚠ Failed to fetch metadata (HTTP 404), using defaults
-[MapConfig] ⚠ TileJSON format incomplete, using defaults
-[MapConfig] ✗ Error fetching metadata: Network error
-```
-
 ---
 
 ## 六、修改前后对比
 
-### 5.1 当前架构（修改前）
+### 6.1 当前架构（修改前）
 
 ```
 前端硬编码配置：
@@ -516,7 +698,7 @@ if (isUsingDefault) {
   4. 重启服务
 ```
 
-### 5.2 优化后架构（修改后）
+### 6.2 优化后架构（修改后）
 
 ```
 服务端元数据：
@@ -603,13 +785,20 @@ curl http://localhost:8081/tiles-metadata | jq
 #    - 集成 useMapConfig Hook
 #    - 使用元数据初始化地图
 
-# 4. 类型检查
+# 4. 创建 mapValidation.ts
+#    （复制文档中的完整代码）
+
+# 5. 修改 useOLMap.ts
+#    - 集成验证逻辑
+#    - 添加瓦片可用性检查
+
+# 6. 类型检查
 cd goomc/omcmb/webcode
 npm run typecheck
 
-# 5. 开发环境测试
+# 7. 开发环境测试
 npm run dev
-# 打开浏览器，检查控制台日志
+# 打开浏览器，验证地图正常加载
 ```
 
 ---
@@ -627,11 +816,13 @@ npm run dev
 ### 9.2 前端验证
 
 - [ ] `useMapConfig.ts` 文件存在
+- [ ] `mapValidation.ts` 文件存在
 - [ ] `npm run typecheck` 无错误
-- [ ] 浏览器控制台显示 `[MapConfig] Loaded TileJSON: My Map`
+- [ ] `npx eslint` 无错误
 - [ ] 地图正常加载，中心点在预期位置
 - [ ] 缩放级别在预期范围内
 - [ ] TileJSON 加载失败时降级到默认配置
+- [ ] 瓦片文件不存在时降级到在线 OSM
 
 ---
 
@@ -642,6 +833,7 @@ npm run dev
 | tiles.json 加载失败 | 低 | 中 | 降级到 DEFAULT_METADATA |
 | tiles 目录未挂载 | 中 | 高 | docker-compose 验证脚本 |
 | TileJSON 格式不匹配 | 低 | 中 | 转换函数容错处理 |
+| 瓦片文件不存在 | 中 | 中 | checkTileAvailability 检查，自动降级到在线 OSM |
 | 向后兼容性破坏 | 低 | 高 | 保持 props 覆盖机制 |
 
 ---
@@ -659,7 +851,7 @@ docker-compose restart web
 # 前端回滚
 git checkout src/components/GISMap/useMapConfig.ts
 git checkout src/components/GISMap/useOLMap.ts
-git checkout src/components/GISMap/constants.ts
+git checkout src/utils/mapValidation.ts
 ```
 
 ---
@@ -670,4 +862,4 @@ git checkout src/components/GISMap/constants.ts
 |------|------|---------|
 | v1.0 | 2026-05-22 | 初始版本，使用 metadata.json |
 | v2.0 | 2026-05-22 | 改用 Maperitive 自动生成的 tiles.json，简化部署流程 |
-| v2.1 | 2026-05-22 | 添加完善的异常场景处理和降级方案，确保地图始终可用 |
+| v2.1 | 2026-05-28 | 新增 mapValidation.ts 验证模块，支持瓦片可用性检查；优化地图初始化逻辑，移除阻塞条件 |

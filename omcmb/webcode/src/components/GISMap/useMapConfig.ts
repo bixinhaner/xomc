@@ -181,17 +181,8 @@ export function useMapConfig() {
             const converted = tileJsonToMetadata(tilejson);
             setMetadata(converted);
             setStatus('success');
-            console.log(
-              '[MapConfig] ✓ Loaded TileJSON:',
-              converted.name,
-              `center: [${converted.center.lon}, ${converted.center.lat}]`,
-              `zoom: ${converted.zoom.min}-${converted.zoom.max}`
-            );
           } else {
             // TileJSON 格式不完整，使用默认值
-            console.warn(
-              '[MapConfig] ⚠ TileJSON format incomplete, using defaults'
-            );
             setMetadata(DEFAULT_METADATA);
             setStatus('error');
             setIsUsingDefault(true);
@@ -199,9 +190,6 @@ export function useMapConfig() {
           }
         } else {
           // HTTP 错误（404/500 等），使用默认值
-          console.warn(
-            `[MapConfig] ⚠ Failed to fetch metadata (HTTP ${response.status}), using defaults`
-          );
           setMetadata(DEFAULT_METADATA);
           setStatus('error');
           setIsUsingDefault(true);
@@ -211,7 +199,6 @@ export function useMapConfig() {
         // 网络错误或其他异常，使用默认值
         const errorMessage =
           err instanceof Error ? err.message : 'Unknown error';
-        console.error('[MapConfig] ✗ Error fetching metadata:', errorMessage);
         setMetadata(DEFAULT_METADATA);
         setStatus('error');
         setIsUsingDefault(true);

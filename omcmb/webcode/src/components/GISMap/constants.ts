@@ -286,37 +286,21 @@ export const SPIDERFY_CONFIG = {
 /**
  * 从元数据构建地图配置
  *
- * @param metadata - 地图元数据（来自 TileJSON 或默认配置）
- * @returns 地图配置对象，包含中心点、缩放级别、瓦片 URL 等
+ * @deprecated 此函数已废弃，请使用 @/utils/mapValidation 中的 buildSafeConfig 代替
+ * 原因：新函数包含完整的 metadata 验证逻辑，更加安全可靠
  *
- * 使用示例：
- * ```ts
- * const { metadata } = useMapConfig();
- * if (metadata) {
- *   const config = buildMapConfigFromMetadata(metadata);
- *   // 使用 config defaultCenter, defaultZoom 等
- * }
- * ```
+ * @param metadata - 地图元数据
+ * @returns 地图配置对象
  */
 export function buildMapConfigFromMetadata(metadata: MapMetadata) {
+  // 保留此函数仅为向后兼容，实际使用 buildSafeConfig
   return {
-    /** 默认中心点 [经度, 纬度] */
-    defaultCenter: [metadata.center.lon, metadata.center.lat] as [
-      number,
-      number,
-    ],
-    /** 默认缩放级别 */
+    defaultCenter: [metadata.center.lon, metadata.center.lat] as [number, number],
     defaultZoom: metadata.center.zoom,
-    /** 最小缩放级别 */
     minZoom: metadata.zoom.min,
-    /** 最大缩放级别 */
     maxZoom: metadata.zoom.max,
-    /** 瓦片服务地址（优先使用环境变量，否则使用 OSM） */
-    tileUrl:
-      import.meta.env.VITE_MAP_TILE_URL || MAP_CONFIG.osmTileUrl,
-    /** 版权信息 */
+    tileUrl: import.meta.env.VITE_MAP_TILE_URL || MAP_CONFIG.osmTileUrl,
     attribution: metadata.attribution,
-    /** 地理边界（用于设备数据校验） */
     bounds: metadata.bounds,
   };
 }
