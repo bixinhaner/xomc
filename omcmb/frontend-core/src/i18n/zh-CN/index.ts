@@ -1767,7 +1767,7 @@ const messages: Record<string, string> = {
   'dashboard.alarmDistribution': '告警级别分布',
   'dashboard.deviceStatusByType':'设备状态分布（按类型）',
   'dashboard.alarmTrend7d':      '近7天告警趋势',
-  'dashboard.top10AlarmDevices': 'TOP10告警设备',
+  'dashboard.top10AlarmDevices': '高频告警设备',
   'dashboard.deviceMap':         '设备地图',
   'dashboard.quickAccess':       '快速入口',
   'dashboard.sysAdmin':          '系统管理员',

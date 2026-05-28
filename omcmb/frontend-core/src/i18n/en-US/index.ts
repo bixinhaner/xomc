@@ -1762,7 +1762,7 @@ const messages: Record<string, string> = {
   'dashboard.alarmDistribution': 'Alarm Distribution',
   'dashboard.deviceStatusByType':'Device Status by Type',
   'dashboard.alarmTrend7d':      '7-Day Alarm Trend',
-  'dashboard.top10AlarmDevices': 'TOP 10 Alarm Devices',
+  'dashboard.top10AlarmDevices': 'Top Alarm Devices',
   'dashboard.deviceMap':         'Device Map',
   'dashboard.quickAccess':       'Quick Access',
   'dashboard.sysAdmin':          'System Admin',

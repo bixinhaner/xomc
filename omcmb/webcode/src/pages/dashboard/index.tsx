@@ -32,10 +32,11 @@ import PieChart from '@/components/Charts/PieChart';
 import BarChart from '@/components/Charts/BarChart';
 import LineChart from '@/components/Charts/LineChart';
 import GISMap from '@/components/GISMap';
+import EmptyState from '@/components/common/EmptyState';
 import { MAP_CONFIG } from '@/components/GISMap/constants';
 import type { MapDevice } from '@/components/GISMap';
 import type { DeviceGeo } from '@core/types/map';
-import { useDashboardData } from '@core/hooks/api/useDashboard';
+import { useDashboardData, useAlarmTrend, useTopAlarmDevices } from '@core/hooks/api/useDashboard';
 import { useAlarmCount, useCurrentAlarms } from '@core/hooks/api/useAlarms';
 import { useMapDevicesGeo } from '@core/hooks/api/useTopology';
 import { useT } from '@/hooks/useT';
@@ -96,6 +97,12 @@ export default function DashboardPage() {
   const t = useT();
   const token = useThemeToken();
 
+  // 获取告警趋势数据
+  const { data: alarmTrendData } = useAlarmTrend(7);
+
+  // 获取TOP10告警设备真实数据
+  const { data: topAlarmDevicesData } = useTopAlarmDevices();
+
   // 获取设备地理数据（与 GISMapView 相同的数据源）
   const mapFilterParams = useMemo(() => ({
     // 仪表板场景：获取所有状态的设备
@@ -134,11 +141,11 @@ export default function DashboardPage() {
   const activeAlarms = dashboardData?.summary?.alarmCounts?.total ?? 43;
   const runningTasks = dashboardData?.summary?.taskSummary?.running ?? 7;
 
-  // Alarm severity counts
-  const critical = alarmCount?.critical ?? 8;
-  const major = alarmCount?.major ?? 15;
-  const minor = alarmCount?.minor ?? 12;
-  const warning = alarmCount?.warning ?? 8;
+  // Alarm severity counts - 没有数据时默认为 0，不显示虚假数据
+  const critical = alarmCount?.critical ?? 0;
+  const major = alarmCount?.major ?? 0;
+  const minor = alarmCount?.minor ?? 0;
+  const warning = alarmCount?.warning ?? 0;
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
@@ -163,21 +170,28 @@ export default function DashboardPage() {
   // Donut chart data for alarm severity
   const alarmPieData = useMemo(
     () => [
-      { name: t('alarm.severity.critical'), value: critical },
-      { name: t('alarm.severity.major'), value: major },
-      { name: t('alarm.severity.minor'), value: minor },
-      { name: t('alarm.severity.warning'), value: warning },
+      { name: t('alarm.severity.critical'), value: critical, color: SEVERITY_COLOR.critical },
+      { name: t('alarm.severity.major'), value: major, color: SEVERITY_COLOR.major },
+      { name: t('alarm.severity.minor'), value: minor, color: SEVERITY_COLOR.minor },
+      { name: t('alarm.severity.warning'), value: warning, color: SEVERITY_COLOR.warning },
     ],
     [critical, major, minor, warning, t]
   );
 
   // Device status bar chart data
+  // TODO: 设备状态分布（按类型）需要后端提供按 technology 分组的统计数据
+  // 当前后端 GET /dashboard/device-status 只返回总体状态计数，不包含设备类型分组
+  // 待后端新增 API: GET /dashboard/device-status-by-type 返回 { technology: { online, offline, alarm } }
   const deviceStatusXData = ['eNB', 'gNB', 'CPE', 'eGW'];
-  const deviceStatusSeries = useMemo(() => [
-    { name: t('dashboard.chart.online'), data: [432, 318, 265, 122], color: '#52C41A' },
-    { name: t('dashboard.chart.offline'), data: [45, 28, 33, 14], color: '#8C8C8C' },
-    { name: t('dashboard.chart.alarm'), data: [12, 8, 15, 8], color: '#FA8C16' },
-  ], [t]);
+  const deviceStatusSeries = useMemo(() => {
+    // 暂无真实接口，使用全 0 数据避免误导用户
+    const zeroData = new Array(deviceStatusXData.length).fill(0);
+    return [
+      { name: t('dashboard.chart.online'), data: zeroData, color: '#52C41A' },
+      { name: t('dashboard.chart.offline'), data: zeroData, color: '#8C8C8C' },
+      { name: t('dashboard.chart.alarm'), data: zeroData, color: '#FA8C16' },
+    ];
+  }, [t, deviceStatusXData.length]);
 
   // 7-day alarm trend
   const trendXData = useMemo(() => {
@@ -190,21 +204,51 @@ export default function DashboardPage() {
     return days;
   }, []);
 
-  const alarmTrendSeries = useMemo(() => [
-    { name: t('alarm.severity.critical'), data: [5, 8, 6, 9, 7, 10, 8], color: '#F5222D' },
-    { name: t('alarm.severity.major'), data: [12, 15, 11, 18, 14, 17, 15], color: '#FA8C16' },
-    { name: t('alarm.severity.minor'), data: [8, 10, 9, 12, 11, 13, 12], color: '#FADB14' },
-    { name: t('alarm.severity.warning'), data: [6, 7, 5, 8, 6, 9, 8], color: '#1677FF' },
-  ], [t]);
+  const alarmTrendSeries = useMemo(() => {
+    // 获取 X 轴天数作为数据长度基准
+    const daysCount = 7;
 
-  // TOP10 alarm devices horizontal bar chart
-  const top10Devices = [
-    '成都基站-005', '广州基站-003', '昆明基站-010', '哈尔滨-009',
-    '北京-001', '上海-002', '西安-007', '南京-008', '深圳-004', '兰州-006',
-  ];
-  const top10Series = useMemo(() => [
-    { name: t('dashboard.alarmCount'), data: [24, 21, 18, 16, 14, 12, 10, 8, 6, 4] },
-  ], [t]);
+    // 没有数据时使用全 0 数组，保留坐标轴框架
+    if (!alarmTrendData?.length) {
+      const zeroData = new Array(daysCount).fill(0);
+      return [
+        { name: t('alarm.severity.critical'), data: zeroData, color: SEVERITY_COLOR.critical },
+        { name: t('alarm.severity.major'), data: zeroData, color: SEVERITY_COLOR.major },
+        { name: t('alarm.severity.minor'), data: zeroData, color: SEVERITY_COLOR.minor },
+        { name: t('alarm.severity.warning'), data: zeroData, color: SEVERITY_COLOR.warning },
+      ];
+    }
+
+    // 从真实数据中提取各级别的趋势
+    const critical = alarmTrendData.map((d) => d.critical ?? 0);
+    const major = alarmTrendData.map((d) => d.major ?? 0);
+    const minor = alarmTrendData.map((d) => d.minor ?? 0);
+    const warning = alarmTrendData.map((d) => d.warning ?? 0);
+
+    return [
+      { name: t('alarm.severity.critical'), data: critical, color: SEVERITY_COLOR.critical },
+      { name: t('alarm.severity.major'), data: major, color: SEVERITY_COLOR.major },
+      { name: t('alarm.severity.minor'), data: minor, color: SEVERITY_COLOR.minor },
+      { name: t('alarm.severity.warning'), data: warning, color: SEVERITY_COLOR.warning },
+    ];
+  }, [alarmTrendData, t]);
+
+  // TOP10 alarm devices horizontal bar chart - 使用真实API数据
+  const top10Devices = useMemo(() => {
+    if (!topAlarmDevicesData?.length) return [];
+    return topAlarmDevicesData.map(d => d.deviceName);
+  }, [topAlarmDevicesData]);
+
+  const top10Series = useMemo(() => {
+    if (!topAlarmDevicesData?.length) {
+      // 无数据时返回空数组
+      return [{ name: t('dashboard.alarmCount'), data: [] }];
+    }
+    return [{
+      name: t('dashboard.alarmCount'),
+      data: topAlarmDevicesData.map(d => d.alarmCount),
+    }];
+  }, [topAlarmDevicesData, t]);
 
   const dashboardRef = useRef<HTMLDivElement>(null);
   useScrollReveal(dashboardRef);
@@ -280,9 +324,9 @@ export default function DashboardPage() {
       </Row>
 
       {/* Row 2: Alarm Summary */}
-      <Row gutter={[16, 16]} className="omc-scroll-reveal" data-delay="1">
-        <Col xs={24} lg={16}>
-          <TiltCard maxTilt={6}>
+      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="1">
+        <Col xs={24} lg={16} style={{ display: 'flex' }}>
+          <TiltCard maxTilt={6} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
           <Card
             title={t('dashboard.alarmSummary')}
             size="small"
@@ -291,7 +335,8 @@ export default function DashboardPage() {
                 {t('dashboard.viewAll')}
               </a>
             }
-            styles={{ body: { padding: 0 } }}
+            styles={{ body: { padding: 0, flex: 1, display: 'flex', flexDirection: 'column' } }}
+            style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
           >
             {/* Severity count tags */}
             <div style={{ padding: '12px 16px', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
@@ -373,9 +418,14 @@ export default function DashboardPage() {
           </TiltCard>
         </Col>
 
-        <Col xs={24} lg={8}>
-          <TiltCard maxTilt={8}>
-          <Card title={t('dashboard.alarmDistribution')} size="small" styles={{ body: { padding: '8px 0 0' } }}>
+        <Col xs={24} lg={8} style={{ display: 'flex' }}>
+          <TiltCard maxTilt={8} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+          <Card
+            title={t('dashboard.alarmDistribution')}
+            size="small"
+            styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
+            style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+          >
             <PieChart
               title=""
               data={alarmPieData}
@@ -388,10 +438,15 @@ export default function DashboardPage() {
       </Row>
 
       {/* Row 3: Device Status Chart + Alarm Trend */}
-      <Row gutter={[16, 16]} className="omc-scroll-reveal" data-delay="2">
-        <Col xs={24} lg={12}>
-          <TiltCard maxTilt={7}>
-          <Card title={t('dashboard.deviceStatusByType')} size="small" styles={{ body: { padding: '8px 0 0' } }}>
+      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="2">
+        <Col xs={24} lg={12} style={{ display: 'flex' }}>
+          <TiltCard maxTilt={7} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+          <Card
+            title={t('dashboard.deviceStatusByType')}
+            size="small"
+            styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
+            style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+          >
             <BarChart
               title=""
               xData={deviceStatusXData}
@@ -401,9 +456,14 @@ export default function DashboardPage() {
           </Card>
           </TiltCard>
         </Col>
-        <Col xs={24} lg={12}>
-          <TiltCard maxTilt={7}>
-          <Card title={t('dashboard.alarmTrend7d')} size="small" styles={{ body: { padding: '8px 0 0' } }}>
+        <Col xs={24} lg={12} style={{ display: 'flex' }}>
+          <TiltCard maxTilt={7} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+          <Card
+            title={t('dashboard.alarmTrend7d')}
+            size="small"
+            styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
+            style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+          >
             <LineChart
               title=""
               xData={trendXData}
@@ -417,23 +477,37 @@ export default function DashboardPage() {
       </Row>
 
       {/* Row 4: TOP10 Devices + GIS Map */}
-      <Row gutter={[16, 16]} className="omc-scroll-reveal" data-delay="3">
-        <Col xs={24} lg={10}>
-          <TiltCard maxTilt={7}>
-          <Card title={t('dashboard.top10AlarmDevices')} size="small" styles={{ body: { padding: '8px 0 0' } }}>
-            <BarChart
-              title=""
-              xData={top10Devices}
-              series={top10Series}
-              height={280}
-              horizontal
-            />
+      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="3">
+        <Col xs={24} lg={10} style={{ display: 'flex' }}>
+          <TiltCard maxTilt={7} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+          <Card
+            title={t('dashboard.top10AlarmDevices')}
+            size="small"
+            styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
+            style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+          >
+            {top10Devices.length > 0 ? (
+              <BarChart
+                title=""
+                xData={top10Devices}
+                series={top10Series}
+                height={280}
+                horizontal
+              />
+            ) : (
+              <EmptyState variant="no-data" description="" style={{ flex: 1 }} />
+            )}
           </Card>
           </TiltCard>
         </Col>
-        <Col xs={24} lg={14}>
-          <TiltCard maxTilt={5}>
-          <Card title={t('dashboard.deviceMap')} size="small" styles={{ body: { padding: 8 } }}>
+        <Col xs={24} lg={14} style={{ display: 'flex' }}>
+          <TiltCard maxTilt={5} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+          <Card
+            title={t('dashboard.deviceMap')}
+            size="small"
+            styles={{ body: { padding: 8, flex: 1, display: 'flex', flexDirection: 'column' } }}
+            style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+          >
             <GISMap
               devices={mapDevices}
               height={280}
@@ -450,10 +524,14 @@ export default function DashboardPage() {
       </Row>
 
       {/* Row 5: User Profile + Quick Access */}
-      <Row gutter={[16, 16]} className="omc-scroll-reveal" data-delay="4">
-        <Col xs={24} lg={6}>
-          <TiltCard maxTilt={8}>
-          <Card size="small" styles={{ body: { padding: '20px 16px' } }}>
+      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="4">
+        <Col xs={24} lg={6} style={{ display: 'flex' }}>
+          <TiltCard maxTilt={8} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+          <Card
+            size="small"
+            styles={{ body: { padding: '20px 16px', flex: 1, display: 'flex', flexDirection: 'column' } }}
+            style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+          >
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
               <Avatar size={64} icon={<UserOutlined />} style={{ background: token.colorPrimary }} />
               <Title level={5} style={{ margin: 0 }}>
@@ -494,9 +572,14 @@ export default function DashboardPage() {
           </TiltCard>
         </Col>
 
-        <Col xs={24} lg={18}>
-          <TiltCard maxTilt={5}>
-          <Card title={t('dashboard.quickAccess')} size="small">
+        <Col xs={24} lg={18} style={{ display: 'flex' }}>
+          <TiltCard maxTilt={5} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+          <Card
+            title={t('dashboard.quickAccess')}
+            size="small"
+            styles={{ body: { flex: 1, display: 'flex', flexDirection: 'column' } }}
+            style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+          >
             <div
               style={{
                 display: 'grid',

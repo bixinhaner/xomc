@@ -122,6 +122,12 @@ const LineChart: React.FC<LineChartProps> = ({
         type: 'value',
         name: yAxisName,
         nameTextStyle: { color: secondaryText, fontSize: 12 },
+        min: 0,
+        minInterval: 1,
+        max: (value: { max: number; min: number }) => {
+          // 当最大值为 0 时，设置默认上限为 10，避免刻度太密集
+          return value.max === 0 ? 10 : value.max;
+        },
         splitLine: {
           lineStyle: {
             type: 'dashed',
