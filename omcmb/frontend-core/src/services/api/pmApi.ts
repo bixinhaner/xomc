@@ -374,4 +374,146 @@ export const pmApi = {
     const { data } = await http.post<BackendPMTask>('/pm/tasks', mapToBackendPMTask(taskData));
     return mapBackendPMTask(data);
   },
+
+  // --- PM Files (File Management → PM Tab) ---
+
+  // 单个设备的 PM 文件列表（DeviceFilesDrawer 用）
+  async getFiles(
+    params: {
+      deviceSn?: string;
+      timeRange?: [string, string];
+    } & PageRequest,
+  ): Promise<PageResponse<PMFileItem>> {
+    const query: Record<string, unknown> = {
+      page: params.page,
+      pageSize: params.pageSize,
+    };
+    if (params.deviceSn) query.device_sn = params.deviceSn;
+    if (params.timeRange) {
+      query.start_time = params.timeRange[0];
+      query.end_time = params.timeRange[1];
+    }
+    const { data } = await http.get<BackendListResponse<BackendPMFileInfo>>(
+      '/pm/files',
+      { params: query },
+    );
+    return {
+      items: (data.items || []).map(mapPMFile),
+      total: data.total,
+      page: data.page,
+      pageSize: data.page_size,
+    };
+  },
+
+  // 按设备聚合（File Management → PM Tab 主列表）
+  async getFileDevices(
+    params: { keyword?: string } & PageRequest,
+  ): Promise<PageResponse<PMFileDeviceItem>> {
+    const query: Record<string, unknown> = {
+      page: params.page,
+      pageSize: params.pageSize,
+    };
+    if (params.keyword) query.keyword = params.keyword;
+    const { data } = await http.get<BackendListResponse<BackendPMFileDevice>>(
+      '/pm/files/devices',
+      { params: query },
+    );
+    return {
+      items: (data.items || []).map((d) => ({
+        deviceSn: d.device_sn,
+        firstCollectTime: d.first_collect_time,
+        lastCollectTime: d.last_collect_time,
+        fileCount: d.file_count,
+        reporting: !!d.reporting,
+      })),
+      total: data.total,
+      page: data.page,
+      pageSize: data.page_size,
+    };
+  },
+
+  async downloadFile(fileId: string): Promise<void> {
+    const response = await http.get(`/pm/files/${fileId}/download`, {
+      responseType: 'blob',
+    });
+    const disposition = response.headers['content-disposition'] as string | undefined;
+    const filename = disposition
+      ? disposition.split('filename=')[1]?.replace(/['"]/g, '')
+      : `pm_${fileId}.xml`;
+    // Blob 必须显式带 type，否则 Chrome 会按 text/html 推断给 link.download 加 .html 后缀。
+    const url = window.URL.createObjectURL(
+      new Blob([response.data as BlobPart], { type: 'application/octet-stream' }),
+    );
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename || `pm_${fileId}.xml`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  },
 };
+
+// --- PM file types ---
+
+interface BackendPMFileInfo {
+  id: string;
+  device_id: string;
+  device_sn: string;
+  carrier: string;
+  technology: string;
+  file_name: string;
+  file_size: number;
+  collect_time: string;
+  minio_path: string;
+  parsed: boolean;
+  parsed_at?: string;
+  counter_count: number;
+  created_at: string;
+}
+
+interface BackendPMFileDevice {
+  device_sn: string;
+  first_collect_time: string;
+  last_collect_time: string;
+  file_count: number;
+  reporting: boolean;
+}
+
+export interface PMFileItem {
+  id: string;
+  deviceSn: string;
+  carrier: string;
+  technology: string;
+  fileName: string;
+  fileSize: number;
+  collectTime: string;
+  parsed: boolean;
+  counterCount: number;
+  createdAt: string;
+}
+
+/** PM 文件按设备聚合视图（GET /pm/files/devices）。 */
+export interface PMFileDeviceItem {
+  deviceSn: string;
+  firstCollectTime: string;
+  lastCollectTime: string;
+  fileCount: number;
+  /** 最近 2 小时内有新 PM 文件视为"上报中"，由后端用 last_collect_time 判定。 */
+  reporting: boolean;
+}
+
+function mapPMFile(f: BackendPMFileInfo): PMFileItem {
+  return {
+    id: f.id,
+    deviceSn: f.device_sn,
+    carrier: f.carrier,
+    technology: f.technology,
+    fileName: f.file_name,
+    fileSize: f.file_size,
+    collectTime: f.collect_time,
+    parsed: f.parsed,
+    counterCount: f.counter_count,
+    createdAt: f.created_at,
+  };
+}

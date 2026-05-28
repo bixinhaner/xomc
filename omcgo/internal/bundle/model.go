@@ -21,6 +21,10 @@ const (
 	// ModuleMRFiles: 跟 ModuleMR 同样打 MR 文件,但 targetIDs 是 mr_files.id
 	// (用户在 DeviceFilesDrawer 勾选具体文件),粒度比按设备整盘下载更细。
 	ModuleMRFiles Module = "mr_files"
+	// PM 文件批量下载: ModulePM 按设备 SN 整盘打,ModulePMFiles 按 pm_files.id 勾选打,
+	// 跟 MR 双 module 同构。
+	ModulePM      Module = "pm"
+	ModulePMFiles Module = "pm_files"
 )
 
 // BundleFile —— 一个 zip 条目: 从 MinIO {Bucket}/{ObjectPath} 拉,在 zip 里写为 EntryName。

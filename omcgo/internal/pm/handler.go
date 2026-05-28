@@ -105,6 +105,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		pm.GET("/tasks", h.ListTasks)
 		pm.POST("/tasks", h.CreateTask)
 		pm.GET("/files", h.ListPMFiles)
+		pm.GET("/files/devices", h.ListPMFileDevices) // 按设备聚合，给 File Management PM Tab 用
 		pm.GET("/files/:id/download", h.DownloadPMFile)
 	}
 }
@@ -753,6 +754,7 @@ func (h *Handler) CreateTask(c *gin.Context) {
 
 type pmFileQuery struct {
 	DeviceID  string `form:"device_id"`
+	DeviceSN  string `form:"device_sn"`
 	StartTime string `form:"start_time"`
 	EndTime   string `form:"end_time"`
 	model.ListRequest
@@ -776,6 +778,9 @@ func (h *Handler) ListPMFiles(c *gin.Context) {
 		}
 		filter.DeviceID = &id
 	}
+	if q.DeviceSN != "" {
+		filter.DeviceSN = &q.DeviceSN
+	}
 	if q.StartTime != "" {
 		if t, err := time.Parse(time.RFC3339, q.StartTime); err == nil {
 			filter.StartTime = &t
@@ -788,6 +793,27 @@ func (h *Handler) ListPMFiles(c *gin.Context) {
 	}
 
 	result, err := h.fileStore.ListFiles(c.Request.Context(), filter)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OK(c, result)
+}
+
+// ListPMFileDevices 给 File Management → PM Tab 主列表用。每行 1 个设备 +
+// 该设备 pm_files 起止 collect_time + 文件数 + reporting 标志。
+func (h *Handler) ListPMFileDevices(c *gin.Context) {
+	filter := PMFileDeviceFilter{
+		ListRequest: model.DefaultListRequest(),
+	}
+	if err := c.ShouldBindQuery(&filter.ListRequest); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	if kw := c.Query("keyword"); kw != "" {
+		filter.Keyword = &kw
+	}
+	result, err := h.fileStore.ListFileDeviceAggregates(c.Request.Context(), filter)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return

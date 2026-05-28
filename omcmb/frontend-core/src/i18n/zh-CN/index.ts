@@ -2582,6 +2582,26 @@ const messages: Record<string, string> = {
   'mr.batchDownloadHint':           '勾选文件后可批量下载',
   'mr.searchDeviceSn':              '搜索设备SN',
 
+  // PM 文件页面（File Management → PM Tab）
+  'pm.firstCollectTime':            '最早采集时间',
+  'pm.lastCollectTime':             '最近采集时间',
+  'pm.startTime':                   '开始时间',
+  'pm.updateTime':                  '更新时间',
+  'pm.measurementPeriod':           '测量周期（分钟）',
+  'pm.measurementPeriodValue':      '15 分钟',
+  'pm.fileCount':                   '文件数',
+  'pm.reportingStatus':             '上报状态',
+  'pm.reporting':                   '上报中',
+  'pm.reportStopped':               '已停止',
+  'pm.deviceFilesTitle':            '{sn} 的 PM 文件',
+  'pm.searchDeviceSn':              '搜索设备SN',
+  'pm.fileName':                    '文件名',
+  'pm.fileSize':                    '文件大小',
+  'pm.collectTime':                 '采集时间',
+  'pm.counterCount':                '计数器数',
+  'pm.parsed':                      '已解析',
+  'pm.parsing':                     '待解析',
+
   // -------------------------------------------------------------------------
   // Ops module
   // -------------------------------------------------------------------------
@@ -3650,6 +3670,7 @@ const messages: Record<string, string> = {
   'ufte.fileManagement.tab.config':           '配置文件',
   'ufte.fileManagement.tab.license':          'License 文件',
   'ufte.fileManagement.tab.mr':               'MR 文件',
+  'ufte.fileManagement.tab.pm':               'PM 文件',
   'ufte.form.openFirmwareManager':            '维护升级文件（新窗口）',
   'ufte.form.refreshFirmwares':               '刷新固件列表',
   'ufte.form.selectedCount':                  '已选 {count} 台',

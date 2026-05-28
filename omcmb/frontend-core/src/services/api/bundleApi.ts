@@ -20,7 +20,10 @@ export type BundleModule =
   | 'device_license'
   | 'mr'
   // mr_files: 按 mr_files.id 粒度打包(DeviceFilesDrawer 用户勾选若干文件下载)
-  | 'mr_files';
+  | 'mr_files'
+  // PM 与 MR 双 module 同构: pm 按 SN 整盘打,pm_files 按 pm_files.id 勾选打。
+  | 'pm'
+  | 'pm_files';
 
 interface BundleEndpointSpec {
   url: string;
@@ -53,6 +56,16 @@ const ENDPOINTS: Record<BundleModule, BundleEndpointSpec> = {
     url: '/mr/files/by-id/batch-download',
     body: (ids) => ({ ids }),
     filenamePrefix: 'mr-files',
+  },
+  pm: {
+    url: '/pm/files/batch-download',
+    body: (sns) => ({ serial_numbers: sns }),
+    filenamePrefix: 'pm-files',
+  },
+  pm_files: {
+    url: '/pm/files/by-id/batch-download',
+    body: (ids) => ({ ids }),
+    filenamePrefix: 'pm-files',
   },
 };
 

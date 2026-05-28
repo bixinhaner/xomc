@@ -142,3 +142,34 @@ export function useCalculateKPI() {
       pmApi.calculateKPI(params),
   });
 }
+
+// --- PM Files (File Management → PM Tab) ---
+
+export function usePMFiles(
+  params: { deviceSn?: string; timeRange?: [string, string] } & PageRequest,
+) {
+  return useQuery({
+    queryKey: ['pm', 'files', params],
+    queryFn: () => pmApi.getFiles(params),
+    enabled: !useMock,
+  });
+}
+
+// 按设备聚合的 PM 文件视图 —— File Management → PM Tab 主列表。
+// 10s 轮询：reporting 字段依赖 last_collect_time，文件数也会随设备上传变化。
+export function usePMFileDevices(
+  params: { keyword?: string } & PageRequest,
+) {
+  return useQuery({
+    queryKey: ['pm', 'files', 'devices', params],
+    queryFn: () => pmApi.getFileDevices(params),
+    enabled: !useMock,
+    refetchInterval: 10_000,
+  });
+}
+
+export function useDownloadPMFile() {
+  return useMutation({
+    mutationFn: (fileId: string) => pmApi.downloadFile(fileId),
+  });
+}

@@ -519,6 +519,12 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 		// 按 file_id 粒度打包(DeviceFilesDrawer 抽屉用,跟按设备整盘下载语义不同)。
 		permGroup("pm").POST("/mr/files/by-id/batch-download",
 			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModuleMRFiles))
+
+		// PM 批量下载（按设备 SN / 按 file_id），跟 MR 同构。
+		permGroup("pm").POST("/pm/files/batch-download",
+			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModulePM))
+		permGroup("pm").POST("/pm/files/by-id/batch-download",
+			bundle.NewBatchDownloadHandler(md.bundleSvc, bundle.ModulePMFiles))
 	}
 
 	// ----- Station Log routes → resource "devices" -----

@@ -2565,6 +2565,26 @@ const messages: Record<string, string> = {
   'mr.batchDownloadHint':           'Select files to batch download',
   'mr.searchDeviceSn':              'Search device SN',
 
+  // PM files page (File Management → PM Tab)
+  'pm.firstCollectTime':            'First Collect Time',
+  'pm.lastCollectTime':             'Last Collect Time',
+  'pm.startTime':                   'Start Time',
+  'pm.updateTime':                  'Update Time',
+  'pm.measurementPeriod':           'Measurement Period (min)',
+  'pm.measurementPeriodValue':      '15 min',
+  'pm.fileCount':                   'File Count',
+  'pm.reportingStatus':             'Status',
+  'pm.reporting':                   'Reporting',
+  'pm.reportStopped':               'Stopped',
+  'pm.deviceFilesTitle':            'PM Files of {sn}',
+  'pm.searchDeviceSn':              'Search device SN',
+  'pm.fileName':                    'File Name',
+  'pm.fileSize':                    'File Size',
+  'pm.collectTime':                 'Collection Time',
+  'pm.counterCount':                'Counters',
+  'pm.parsed':                      'Parsed',
+  'pm.parsing':                     'Pending',
+
   // -------------------------------------------------------------------------
   // Ops module
   // -------------------------------------------------------------------------
@@ -3631,6 +3651,7 @@ const messages: Record<string, string> = {
   'ufte.fileManagement.tab.config':           'Config Files',
   'ufte.fileManagement.tab.license':          'License Files',
   'ufte.fileManagement.tab.mr':               'MR Files',
+  'ufte.fileManagement.tab.pm':               'PM Files',
   'ufte.form.openFirmwareManager':            'Manage firmware (new tab)',
   'ufte.form.refreshFirmwares':               'Refresh firmware list',
   'ufte.form.selectedCount':                  '{count} selected',

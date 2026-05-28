@@ -61,7 +61,10 @@ task:
 # upload_url_template 支持 ${VAR} / ${VAR:-default} 环境变量插值
 # OMC_PUBLIC_HOST 由 docker-compose 注入（生产部署填本机对外 IP，如 172.19.1.132）
 pm:
-  upload_url_template: "http://${OMC_PUBLIC_HOST:-localhost}:7557/smallcell/FileUploadService?fileType=PM&filename="
+  # 端口走 :8080 — CPE 通过 web 容器的 nginx 反代到 acs:7557（设计标准）。
+  # 与 ACS 自身 config.{dev,prod}.yaml 的 upload.base_url=:8080 保持一致，
+  # 享受 nginx 500MB client_max_body_size 限制与统一访问日志。
+  upload_url_template: "http://${OMC_PUBLIC_HOST:-localhost}:8080/smallcell/FileUploadService?fileType=PM&filename="
   enable_value: "1"
   periodic_upload_interval: 900
   auto_setup_on_online: true

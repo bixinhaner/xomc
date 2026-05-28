@@ -6,9 +6,10 @@ import ConfigSnapshotLibrary from '@/pages/backup/ConfigSnapshotLibrary';
 import DeviceLicenseLibrary from '@/pages/backup/DeviceLicenseLibrary';
 import FirmwareUpload from '@/pages/software/FirmwareUpload';
 import MRFilesPage from '@/pages/mr/Files';
+import PMFilesPage from '@/pages/pm/Files';
 import { useT } from '@/hooks/useT';
 
-const VALID_TABS = new Set(['version', 'config', 'license', 'mr']);
+const VALID_TABS = new Set(['version', 'config', 'license', 'mr', 'pm']);
 
 const PANE_STYLE: React.CSSProperties = { paddingTop: 8 };
 
@@ -91,6 +92,11 @@ export default function FileManagementPage() {
             key: 'mr',
             label: t('ufte.fileManagement.tab.mr'),
             children: <div style={PANE_STYLE}><MRFilesPage embedded /></div>,
+          },
+          {
+            key: 'pm',
+            label: t('ufte.fileManagement.tab.pm'),
+            children: <div style={PANE_STYLE}><PMFilesPage embedded /></div>,
           },
         ].filter((item) => !fromUFTE || item.key === activeKey)}
       />

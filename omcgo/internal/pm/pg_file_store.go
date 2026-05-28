@@ -3,6 +3,7 @@ package pm
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
@@ -77,6 +78,10 @@ func (s *PgPMFileStore) ListFiles(ctx context.Context, filter PMFileFilter) (*mo
 		qb = qb.Where(sq.Eq{"device_id": *filter.DeviceID})
 		countQb = countQb.Where(sq.Eq{"device_id": *filter.DeviceID})
 	}
+	if filter.DeviceSN != nil && *filter.DeviceSN != "" {
+		qb = qb.Where(sq.Eq{"device_sn": *filter.DeviceSN})
+		countQb = countQb.Where(sq.Eq{"device_sn": *filter.DeviceSN})
+	}
 	if filter.StartTime != nil {
 		qb = qb.Where(sq.GtOrEq{"collect_time": *filter.StartTime})
 		countQb = countQb.Where(sq.GtOrEq{"collect_time": *filter.StartTime})
@@ -111,6 +116,67 @@ func (s *PgPMFileStore) ListFiles(ctx context.Context, filter PMFileFilter) (*mo
 		items = append(items, f)
 	}
 	return model.NewListResponse(items, total, filter.Page, filter.PageSize), nil
+}
+
+// ListFileDeviceAggregates 按 device_sn 聚合 pm_files，每设备 1 行。
+// 给 File Management → PM Tab 主列表用：起止 collect_time + 文件数 + 是否最近活跃。
+func (s *PgPMFileStore) ListFileDeviceAggregates(ctx context.Context, filter PMFileDeviceFilter) (*model.ListResponse[PMFileDeviceAggregate], error) {
+	args := make([]interface{}, 0, 2)
+	wherePieces := make([]string, 0, 1)
+	if filter.Keyword != nil && *filter.Keyword != "" {
+		wherePieces = append(wherePieces, `device_sn ILIKE $1`)
+		args = append(args, "%"+*filter.Keyword+"%")
+	}
+	whereClause := ""
+	if len(wherePieces) > 0 {
+		whereClause = " WHERE " + wherePieces[0]
+	}
+
+	countSQL := `SELECT COUNT(*) FROM (SELECT device_sn FROM pm_files` + whereClause + ` GROUP BY device_sn) AS sub`
+	var total int64
+	if err := s.pool.QueryRow(ctx, countSQL, args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count pm_files devices: %w", err)
+	}
+
+	page := filter.Page
+	if page < 1 {
+		page = 1
+	}
+	pageSize := filter.PageSize
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 1000 {
+		pageSize = 1000
+	}
+
+	// reporting 判定：最近一次 collect_time 距 now() 不到 2 小时即视为在传。
+	// PM 没有 MR 那样的订阅任务表，用活跃度代理。
+	listSQL := `SELECT device_sn,
+	                  MIN(collect_time) AS first_collect_time,
+	                  MAX(collect_time) AS last_collect_time,
+	                  COUNT(*)::bigint    AS file_count,
+	                  (MAX(collect_time) > NOW() - INTERVAL '2 hours') AS reporting
+	             FROM pm_files` + strings.Replace(whereClause, "device_sn", "device_sn", 1) + `
+	             GROUP BY device_sn
+	             ORDER BY MAX(collect_time) DESC
+	             LIMIT $` + fmt.Sprintf("%d", len(args)+1) + ` OFFSET $` + fmt.Sprintf("%d", len(args)+2)
+	args = append(args, pageSize, (page-1)*pageSize)
+
+	rows, err := s.pool.Query(ctx, listSQL, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list pm_files devices: %w", err)
+	}
+	defer rows.Close()
+	items := make([]PMFileDeviceAggregate, 0)
+	for rows.Next() {
+		var a PMFileDeviceAggregate
+		if err := rows.Scan(&a.DeviceSN, &a.FirstCollectTime, &a.LastCollectTime, &a.FileCount, &a.Reporting); err != nil {
+			return nil, fmt.Errorf("scan pm_files devices row: %w", err)
+		}
+		items = append(items, a)
+	}
+	return model.NewListResponse(items, total, page, pageSize), nil
 }
 
 func (s *PgPMFileStore) UpdateFileParsed(ctx context.Context, id uuid.UUID, counterCount int) error {

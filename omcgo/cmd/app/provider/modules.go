@@ -931,9 +931,66 @@ func initBackupModule(c *Container) error {
 			return out, nil
 		})
 
+		// Source #6 pm: targetIDs = serial_number 列表,zip 里按
+		// {prefix}/{SN}/{filename} 三层嵌套,语义跟 ModuleMR 同构。
+		// 用独立的 PMFileStore（NewPgPMFileStore 是无状态构造器，可与 ph.pmFileStore
+		// 并存，不会产生竞争）。
+		pmBucket := c.Cfg.MinIO.Buckets.PMFiles
+		pmFileStoreForBundle := pm.NewPgPMFileStore(c.PgPool)
+		bundleSvc.Register(bundle.ModulePM, func(ctx context.Context, sns []string) ([]bundle.BundleFile, error) {
+			prefix := fmt.Sprintf("pm-bundle-%s", time.Now().Format("20060102-150405"))
+			out := make([]bundle.BundleFile, 0, len(sns)*5)
+			for _, sn := range sns {
+				snCopy := sn
+				files, ferr := pmFileStoreForBundle.ListFiles(ctx, pm.PMFileFilter{
+					DeviceSN:    &snCopy,
+					ListRequest: model.ListRequest{Page: 1, PageSize: 10000},
+				})
+				if ferr != nil {
+					logger.Warn("pm batch download: list files failed",
+						zap.String("sn", sn), zap.Error(ferr))
+					continue
+				}
+				for _, f := range files.Items {
+					out = append(out, bundle.BundleFile{
+						Bucket:     pmBucket,
+						ObjectPath: f.MinioPath,
+						EntryName:  prefix + "/" + sn + "/" + f.FileName,
+					})
+				}
+			}
+			return out, nil
+		})
+
+		// Source #7 pm_files: targetIDs = pm_files.id 列表（DeviceFilesDrawer 勾选）。
+		bundleSvc.Register(bundle.ModulePMFiles, func(ctx context.Context, ids []string) ([]bundle.BundleFile, error) {
+			prefix := fmt.Sprintf("pm-bundle-%s", time.Now().Format("20060102-150405"))
+			out := make([]bundle.BundleFile, 0, len(ids))
+			for _, idStr := range ids {
+				fid, perr := uuid.Parse(idStr)
+				if perr != nil {
+					logger.Warn("pm_files batch download: invalid uuid",
+						zap.String("id", idStr), zap.Error(perr))
+					continue
+				}
+				f, gerr := pmFileStoreForBundle.GetFileByID(ctx, fid)
+				if gerr != nil || f == nil {
+					logger.Warn("pm_files batch download: get file failed",
+						zap.String("id", idStr), zap.Error(gerr))
+					continue
+				}
+				out = append(out, bundle.BundleFile{
+					Bucket:     pmBucket,
+					ObjectPath: f.MinioPath,
+					EntryName:  prefix + "/" + f.DeviceSN + "/" + f.FileName,
+				})
+			}
+			return out, nil
+		})
+
 		c.miscDeps.bundleSvc = bundleSvc
 		logger.Info("bundle service wired (sync streaming)",
-			zap.Int("sources_registered", 5))
+			zap.Int("sources_registered", 7))
 	}
 
 	// T-0032 + T-0093: FTP/SFTP/FTPS connection-test service with

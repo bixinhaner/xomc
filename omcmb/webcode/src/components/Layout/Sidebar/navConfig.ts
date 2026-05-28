@@ -101,7 +101,7 @@ export const NAV_CONFIG: NavConfig = [
       { key: 'perf-query',      label: 'nav.performance.query',        path: '/performance/query' },
       { key: 'perf-adhoc',      label: 'nav.performance.adhoc',        path: '/performance/pm-adhoc' },
       { key: 'perf-kpi-std',    label: 'nav.performance.kpiStandard',  path: '/performance/kpi-standard' },
-      { key: 'perf-kpi-bs',     label: 'nav.performance.kpiStation',   path: '/performance/kpi-station' },
+      // { key: 'perf-kpi-bs',     label: 'nav.performance.kpiStation',   path: '/performance/kpi-station' },  // 隐藏测量任务管理
       // { key: 'perf-chart',      label: 'nav.performance.charts',       path: '/performance/charts' },  // 隐藏性能图表
       // { key: 'perf-threshold',  label: 'nav.performance.threshold',    path: '/performance/threshold' },  // 隐藏
       // { key: 'perf-file',       label: 'nav.performance.files',        path: '/performance/files' },  // 隐藏
