@@ -592,12 +592,14 @@ export default function CommandTree({ lang }: CommandTreeProps) {
       if (!cmd) return;
 
       try {
-        // T-0170: 取首个选中设备的 SN 作为 deviceKey，让后端按设备 paramModel 过滤 sub_field
-        // （缺 param_mappings 映射的不返）。0 设备时不传 deviceKey 走全集兼容。
+        // 2026-05-28 改:与命令树命令名 (N) 计数口径对齐 — 主传 productClass(dropdown
+        // 永远有值),后端 supportedPathsRepo 走与 BuildGroupTreeFiltered 同源的解析链路。
+        // deviceKey 同步带上,留给后端做 audit / 未来扩展(本路径暂不消耗)。
         const deviceKey = selectedDeviceSns[0];
+        const productClass = productClassForTree;
         const subFields = await queryClient.fetchQuery<SubFieldDef[]>({
-          queryKey: ['mml', 'console', 'sub-fields', commandId, effectiveLang, deviceKey ?? ''],
-          queryFn: () => mmlApi.getCommandSubFields(commandId, effectiveLang, deviceKey),
+          queryKey: ['mml', 'console', 'sub-fields', commandId, effectiveLang, productClass ?? '', deviceKey ?? ''],
+          queryFn: () => mmlApi.getCommandSubFields(commandId, effectiveLang, deviceKey, productClass),
           staleTime: 30 * 60 * 1000,
         });
 
@@ -633,7 +635,7 @@ export default function CommandTree({ lang }: CommandTreeProps) {
         message.error(msg);
       }
     },
-    [replaceStatement, commandsById, customById, effectiveLang, queryClient],
+    [replaceStatement, commandsById, customById, effectiveLang, queryClient, productClassForTree, selectedDeviceSns],
   );
 
   if (isLoading) {

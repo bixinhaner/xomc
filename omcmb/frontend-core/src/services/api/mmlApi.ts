@@ -985,19 +985,24 @@ export const mmlApi = {
   },
 
   /**
-   * GET /mml/commands/:id/sub-fields?lang=&device_id= — 命令的 sub-fields。
+   * GET /mml/commands/:id/sub-fields?lang=&product_class=&device_sn= — 命令的 sub-fields。
    *
-   * T-0170: 可选 deviceId 让后端按设备 paramModel 过滤 — 只返该 product 实际支持的
-   * sub_field（缺 param_mappings 映射的不返），避免用户勾选必失败的 path。
-   * 不传 deviceId → 返全集（admin 视图兼容）。
+   * 后端 paramModelID 解析优先级:
+   *   1. product_class 非空 → 与命令树命令名计数同源(supportedPathsRepo)
+   *   2. device_sn / device_id 非空 → 老 T-0170 路径(admin 工具兼容)
+   *   3. 都不传 → admin 视图全集
+   *
+   * console 前端始终传 productClass(从 productClassFilter dropdown 取),
+   * 让右栏 path 列表行数严格等于命令名 (N)。
    */
   async getCommandSubFields(
     commandId: string,
     lang: string = 'zh-CN',
-    deviceKey?: string
+    deviceKey?: string,
+    productClass?: string,
   ): Promise<SubFieldDef[]> {
-    // T-0170: deviceKey 可以是 SN 或 UUID；后端 SQL 自动判定（serial_number 或 id::text）
     const params: Record<string, string> = { lang };
+    if (productClass) params.product_class = productClass;
     if (deviceKey) params.device_sn = deviceKey;
     const { data } = await http.get<{ sub_fields: BackendSubField[] } | BackendSubField[]>(
       `/mml/commands/${commandId}/sub-fields`,

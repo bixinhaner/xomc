@@ -279,18 +279,53 @@ type SubFieldDTO struct {
 
 // GetCommandSubFields 加载命令的 sub_fields（含 JOIN standard_params 元数据），按 lang 派生
 // 顶级 label / constraint_text。
-func (s *ConsoleService) GetCommandSubFields(ctx context.Context, commandID uuid.UUID, deviceKey string, lang string) ([]SubFieldDTO, error) {
+//
+// paramModelID 解析优先级（2026-05-28 用户决策，两路孤儿处理对齐）：
+//  1. productClass 非空 → supportedPathsRepo.ResolveByProductClass → SupportedSet.ParamModelID
+//     · 孤儿（ProductResolved=false 或 ParamModelID=nil）→ 返空集 []
+//  2. productClass 为空 + deviceKey 非空 → resolveParamModelByDevice
+//     · 孤儿(silent skip:SN 不存在 / dev.ProductClass="" / 孤儿 productClass / 无 paramModel)
+//       → 返空集 []（与分支 1 对齐）
+//     · 真实错误（DB / 网络）→ log warn 后退化全集（容错，避免硬错误反馈给前端）
+//  3. 两者都空（或 resolver 未装配）→ admin 视图全集
+//
+// console 前端始终传 productClass(走分支 1);omcctl / admin 工具用 deviceKey(走分支 2)。
+//
+// console 前端始终传 productClass（来自 productClassFilter dropdown），
+// omcctl / admin 工具用 deviceKey。
+func (s *ConsoleService) GetCommandSubFields(ctx context.Context, commandID uuid.UUID, deviceKey, productClass, lang string) ([]SubFieldDTO, error) {
 	if lang == "" {
 		lang = "zh-CN"
 	}
-	// T-0170: deviceKey 非空时反查 paramModelID → repo SQL 叠加 param_mappings 过滤。
-	// deviceKey 可以是 SN 或 UUID。反查闭包未注入 / 反查失败 → 退化为全集（不阻塞 admin 视图）。
 	var paramModelID *uuid.UUID
-	if deviceKey != "" && s.resolveParamModelByDevice != nil {
+	if productClass != "" && s.supportedPathsRepo != nil {
+		set, err := s.supportedPathsRepo.ResolveByProductClass(ctx, productClass)
+		if err != nil {
+			s.logger.Warn("resolve productClass for sub_fields failed, fallback to deviceKey",
+				zap.String("product_class", productClass), zap.Error(err))
+		} else if set != nil {
+			if !set.ProductResolved || set.ParamModelID == nil {
+				// 孤儿:命令在树里已被 hide,但前端可能通过搜索/深链点到该叶子;
+				// 返空集与"无可执行 path"语义一致。
+				return []SubFieldDTO{}, nil
+			}
+			paramModelID = set.ParamModelID
+		}
+	}
+	if paramModelID == nil && deviceKey != "" && s.resolveParamModelByDevice != nil {
+		// T-0170: deviceKey-based 反查（productClass 未提供时的兼容路径）。
+		// 闭包返回值分类(modules.go 实际实现):
+		//   - (nil, nil)   silent skip:SN 不存在 / dev.ProductClass="" / 孤儿 productClass / 无 paramModel
+		//   - (nil, err)   真实错误(DB / 网络等)
+		//   - (*uuid, nil) 正常
 		pmID, err := s.resolveParamModelByDevice(ctx, deviceKey)
 		if err != nil {
+			// 容错:真实错误退化全集,不让前端因暂时故障看到空集误以为"无 path 可执行"。
 			s.logger.Warn("resolve param_model by device failed, fallback to unfiltered",
 				zap.String("device_key", deviceKey), zap.Error(err))
+		} else if pmID == nil {
+			// 孤儿 silent skip → 与分支 1 对齐,返空集。
+			return []SubFieldDTO{}, nil
 		}
 		paramModelID = pmID
 	}
