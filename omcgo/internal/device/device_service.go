@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -492,13 +494,17 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		return s.UpdateFromInform(ctx, inform)
 	}
 
-	// Detect technology from parameters
-	tech := detectTechnology(inform.ParameterList)
+	modelName := findParamValue(inform.ParameterList, "Device.DeviceInfo.ModelName")
+	firmwareVersion := findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion")
+
+	// Detect technology from Inform paths first, then known product identities.
+	tech := detectTechnologyForInform(inform.DeviceId.ProductClass, modelName, firmwareVersion, inform.ParameterList)
 	s.logger.Debug("RegisterFromInform: technology detected",
 		zap.String("technology", string(tech)))
 
 	now := time.Now()
 	udpAddr := findParamValue(inform.ParameterList, "Device.ManagementServer.UDPConnectionRequestAddress")
+	connReqURL := findParamValue(inform.ParameterList, "Device.ManagementServer.ConnectionRequestURL")
 
 	device := &model.Device{
 		ID:                          uuid.New(),
@@ -510,9 +516,9 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 		Technology:                  tech,
 		Status:                      model.DeviceActive,
 		OpState:                     model.DeriveOpState(model.DeviceActive),
-		FirmwareVersion:             findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion"),
-		ConnectionRequestURL:        findParamValue(inform.ParameterList, "Device.ManagementServer.ConnectionRequestURL"),
-		IPAddress:                   udpAddr,
+		FirmwareVersion:             firmwareVersion,
+		ConnectionRequestURL:        connReqURL,
+		IPAddress:                   deriveInformIPAddress(udpAddr, connReqURL),
 		NatDetected:                 udpAddr != "",
 		UDPConnectionRequestAddress: udpAddr,
 		LastInformAt:                &now,
@@ -640,6 +646,20 @@ func (s *DeviceService) RegisterFromInform(ctx context.Context, inform *tr069.In
 	return device, nil
 }
 
+func deriveInformIPAddress(udpAddr, connReqURL string) string {
+	if udpAddr != "" {
+		return udpAddr
+	}
+	if connReqURL == "" {
+		return ""
+	}
+	parsed, err := url.Parse(connReqURL)
+	if err != nil {
+		return ""
+	}
+	return parsed.Hostname()
+}
+
 // UpdateFromInform updates an existing device from a periodic Inform message.
 func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.InformMessage) (*model.Device, error) {
 	s.logger.Debug("UpdateFromInform: looking up device",
@@ -670,6 +690,20 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	device.OUI = inform.DeviceId.OUI
 	device.ProductClass = inform.DeviceId.ProductClass
 	device.Manufacturer = inform.DeviceId.Manufacturer
+	if inferredTech, ok := detectTechnologyFromPaths(inform.ParameterList); ok && device.Technology != inferredTech {
+		s.logger.Info("UpdateFromInform: correcting device technology from inform paths",
+			zap.String("serial_number", device.SerialNumber),
+			zap.String("old_technology", string(device.Technology)),
+			zap.String("new_technology", string(inferredTech)))
+		device.Technology = inferredTech
+	} else if inferredTech, ok := detectTechnologyFromIdentity(inform.DeviceId.ProductClass, findParamValue(inform.ParameterList, "Device.DeviceInfo.ModelName"), findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion")); ok && device.Technology != inferredTech {
+		s.logger.Info("UpdateFromInform: correcting device technology from product identity",
+			zap.String("serial_number", device.SerialNumber),
+			zap.String("old_technology", string(device.Technology)),
+			zap.String("new_technology", string(inferredTech)),
+			zap.String("product_class", inform.DeviceId.ProductClass))
+		device.Technology = inferredTech
+	}
 	// Phase 6: ProductRegistry 回填 model_name（仅在 ModelName 为空时尝试）
 	s.applyProductMetadata(ctx, device)
 	device.FirmwareVersion = findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion")
@@ -680,6 +714,7 @@ func (s *DeviceService) UpdateFromInform(ctx context.Context, inform *tr069.Info
 	// normalizeDeviceForPersist 不会再从老 Status 反推新双字段；这里必须显式置 true，
 	// 否则设备一旦被 OfflineDetector 标记成 is_online=false，后续正常 Inform 也无法恢复在线展示。
 	device.IsOnline = true
+	device.IPAddress = deriveInformIPAddress("", device.ConnectionRequestURL)
 
 	udpAddr := findParamValue(inform.ParameterList, "Device.ManagementServer.UDPConnectionRequestAddress")
 	if udpAddr != "" {
@@ -1388,16 +1423,62 @@ func hasEventCode(events []string, target string) bool {
 	return false
 }
 
+var nrCellConfigPathPattern = regexp.MustCompile(`(?i)\.cellconfig\.\d+\.nr\.`)
+var baiBNQProductClassPattern = regexp.MustCompile(`(?i)^fap/\w*bsc\w+`)
+
+func detectTechnologyFromPaths(params []tr069.ParameterValueStruct) (model.Technology, bool) {
+	hasLTE := false
+	hasNR := false
+
+	for _, p := range params {
+		path := strings.ToLower(p.Name)
+		if strings.Contains(path, ".cellconfig.lte.") || strings.Contains(path, ".fapcontrol.lte.") {
+			hasLTE = true
+		}
+		if nrCellConfigPathPattern.MatchString(path) || strings.Contains(path, ".fapcontrol.nr.") {
+			hasNR = true
+		}
+	}
+	if hasNR {
+		return model.TechNR, true
+	}
+	if hasLTE {
+		return model.TechLTE, true
+	}
+	return "", false
+}
+
+func detectTechnologyFromIdentity(productClass, modelName, firmwareVersion string) (model.Technology, bool) {
+	productClassLower := strings.ToLower(productClass)
+	modelNameLower := strings.ToLower(modelName)
+	firmwareLower := strings.ToLower(firmwareVersion)
+
+	if baiBNQProductClassPattern.MatchString(productClass) ||
+		strings.Contains(productClassLower, "bnq") ||
+		strings.Contains(productClassLower, "bnx") ||
+		strings.Contains(modelNameLower, "bnq") ||
+		strings.Contains(modelNameLower, "bnx") ||
+		strings.Contains(firmwareLower, "bnq") ||
+		strings.Contains(firmwareLower, "bnx") {
+		return model.TechNR, true
+	}
+
+	return "", false
+}
+
 // detectTechnology tries to determine the radio technology from Inform parameters.
 //
-// 设备从来不直接送 Technology = "LTE"/"NR" 这种参数值（TR-069 协议层面没
-// 这种参数）；只送 Device.DeviceInfo.ModelName / Description 字符串。这里
-// 用 substring 启发式从 model 名字推断 5G/NR vs 4G/LTE。
+// 首次 Inform 通常已经带有比 ModelName/Description 更稳定的路径特征：
+//   - LTE: ...CellConfig.LTE... / ...FAPControl.LTE...
+//   - NR:  ...CellConfig.{i}.NR... / ...FAPControl.NR...
 //
-// 大小写不敏感：Ericsson AIR6488 写 "AIR6488 5G NR"，华为 AAU5613 可能写
-// "5g nr" 小写 — 全部转 lower 后再匹配。返回的 model.Technology 是内部
-// canonical 小写常量。
+// 因此优先按参数路径判定；只有路径没有提供制式信号时，才退回到
+// ModelName/Description 的关键字启发式。
 func detectTechnology(params []tr069.ParameterValueStruct) model.Technology {
+	if tech, ok := detectTechnologyFromPaths(params); ok {
+		return tech
+	}
+
 	for _, p := range params {
 		if p.Name == "Device.DeviceInfo.ModelName" || p.Name == "Device.DeviceInfo.Description" {
 			v := strings.ToLower(p.Value)
@@ -1407,6 +1488,16 @@ func detectTechnology(params []tr069.ParameterValueStruct) model.Technology {
 		}
 	}
 	return model.TechLTE
+}
+
+func detectTechnologyForInform(productClass, modelName, firmwareVersion string, params []tr069.ParameterValueStruct) model.Technology {
+	if tech, ok := detectTechnologyFromPaths(params); ok {
+		return tech
+	}
+	if tech, ok := detectTechnologyFromIdentity(productClass, modelName, firmwareVersion); ok {
+		return tech
+	}
+	return detectTechnology(params)
 }
 
 func findParamValue(params []tr069.ParameterValueStruct, name string) string {

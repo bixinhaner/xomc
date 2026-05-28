@@ -538,6 +538,9 @@ func prepareDeviceUpdate(device *model.Device, inform *tr069.InformMessage) ([]m
 	device.OUI = inform.DeviceId.OUI
 	device.ProductClass = inform.DeviceId.ProductClass
 	device.Manufacturer = inform.DeviceId.Manufacturer
+	if inferredTech, ok := detectTechnologyFromPaths(inform.ParameterList); ok {
+		device.Technology = inferredTech
+	}
 	device.FirmwareVersion = findParamValue(inform.ParameterList, "Device.DeviceInfo.SoftwareVersion")
 	device.ConnectionRequestURL = findParamValue(inform.ParameterList, "Device.ManagementServer.ConnectionRequestURL")
 	device.LastInformAt = &now
@@ -639,16 +642,18 @@ func (r *PgDeviceRepository) BatchUpdateDevices(ctx context.Context, devices []*
 		// Phase 6 follow-up：与 batchUpdateDevices 对齐,加 model_name。
 		query := `UPDATE devices SET
 			oui = $1, product_class = $2, manufacturer = $3,
-			lifecycle_state = $4, is_online = $5, firmware_version = $6,
-			ip_address = $7, connection_request_url = $8,
-			nat_detected = $9, udp_connection_request_address = $10,
-			last_inform_at = $11, last_inform_events = $12,
-			model_name = CASE WHEN $13::text <> '' THEN $13 ELSE model_name END,
+			technology = $4,
+			lifecycle_state = $5, is_online = $6, firmware_version = $7,
+			ip_address = $8, connection_request_url = $9,
+			nat_detected = $10, udp_connection_request_address = $11,
+			last_inform_at = $12, last_inform_events = $13,
+			model_name = CASE WHEN $14::text <> '' THEN $14 ELSE model_name END,
 			updated_at = NOW()
-		WHERE id = $14 AND deleted_at IS NULL`
+		WHERE id = $15 AND deleted_at IS NULL`
 
 		batch.Queue(query,
 			dev.OUI, dev.ProductClass, dev.Manufacturer,
+			dev.Technology,
 			dev.LifecycleState, dev.IsOnline, dev.FirmwareVersion,
 			ipAddr, dev.ConnectionRequestURL,
 			dev.NatDetected, udpAddr,

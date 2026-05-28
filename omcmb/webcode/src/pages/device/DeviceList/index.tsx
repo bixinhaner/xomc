@@ -984,14 +984,11 @@ export default function DeviceList() {
       },
       { key: 'deviceModel', title: t('device.model'), dataIndex: 'deviceModel', width: 120, ellipsis: true, group: 'common' },
       { key: 'softwareVersion', title: t('device.softwareVersion'), dataIndex: 'softwareVersion', width: 140, ellipsis: true, group: 'common' },
-      { key: 'macAddress', title: t('device.macAddress'), dataIndex: 'macAddress', width: 150, mono: true, copyable: true, group: 'common' },
-      { key: 'groupName', title: t('device.groupName'), dataIndex: 'groupName', width: 120, group: 'common' },
       {
         key: 'ipAddress',
         title: t('device.ipAddress'),
         dataIndex: 'ipAddress',
         width: 140,
-        hidden: true,
         mono: true,
         copyable: true,
         group: 'common',
@@ -1008,6 +1005,8 @@ export default function DeviceList() {
           );
         },
       },
+      { key: 'macAddress', title: t('device.macAddress'), dataIndex: 'macAddress', width: 150, mono: true, copyable: true, group: 'common' },
+      { key: 'groupName', title: t('device.groupName'), dataIndex: 'groupName', width: 120, group: 'common' },
       {
         key: 'onlineTime',
         title: t('device.onlineTime'),

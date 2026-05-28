@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -94,6 +95,8 @@ var gpsHeightCandidatePaths = []string{
 	"Device.FAP.GPS.Height",
 }
 
+var ethernetInterfaceMACPath = regexp.MustCompile(`^Device\.Ethernet\.Interface\.(\d+)\.MACAddress$`)
+
 // deriveEnbID 从 LTE ECI 派生 eNodeB ID。
 //
 // TR-36.413 / 3GPP 标准：28-bit ECI = 20-bit eNB-ID + 8-bit Cell-ID。
@@ -137,6 +140,99 @@ func lookupGPSHeight(paramValues map[string]string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+type ethernetInterfaceCandidate struct {
+	index string
+	mac   string
+	score int
+}
+
+func lookupWANMAC(paramValues map[string]string) (string, bool) {
+	if v, ok := paramValues["Device.Ethernet.Interface.MACAddress"]; ok && v != "" {
+		return v, true
+	}
+
+	candidates := make([]ethernetInterfaceCandidate, 0)
+	for path, mac := range paramValues {
+		if mac == "" {
+			continue
+		}
+		matches := ethernetInterfaceMACPath.FindStringSubmatch(path)
+		if matches == nil {
+			continue
+		}
+
+		index := matches[1]
+		candidates = append(candidates, ethernetInterfaceCandidate{
+			index: index,
+			mac:   mac,
+			score: scoreEthernetInterface(index, paramValues),
+		})
+	}
+
+	if len(candidates) == 0 {
+		return "", false
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].score != candidates[j].score {
+			return candidates[i].score > candidates[j].score
+		}
+		left, errLeft := strconv.Atoi(candidates[i].index)
+		right, errRight := strconv.Atoi(candidates[j].index)
+		switch {
+		case errLeft == nil && errRight == nil:
+			return left < right
+		case errLeft == nil:
+			return true
+		case errRight == nil:
+			return false
+		default:
+			return candidates[i].index < candidates[j].index
+		}
+	})
+
+	return candidates[0].mac, true
+}
+
+func scoreEthernetInterface(index string, paramValues map[string]string) int {
+	score := 0
+	prefix := "Device.Ethernet.Interface." + index + "."
+
+	for _, suffix := range []string{"Name", "UserLabel", "PortLocation"} {
+		if containsWANKeyword(paramValues[prefix+suffix]) {
+			score += 20
+		}
+	}
+
+	for path, value := range paramValues {
+		if value == "" || !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		if strings.HasSuffix(path, ".PortType") && containsWANKeyword(value) {
+			score += 100
+			continue
+		}
+		if strings.HasSuffix(path, ".IPAddress") || strings.HasSuffix(path, ".DefaultGateway") {
+			score += 5
+		}
+	}
+
+	return score
+}
+
+func containsWANKeyword(val string) bool {
+	if val == "" {
+		return false
+	}
+	normalized := strings.ToLower(strings.TrimSpace(val))
+	for _, keyword := range []string{"wan", "uplink", "up-link", "internet", "external"} {
+		if strings.Contains(normalized, keyword) {
+			return true
+		}
+	}
+	return false
 }
 
 // TR069 parameter paths for run_time with priority
@@ -221,6 +317,11 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 	for paramPath, infoColumn := range universalInformMapping {
 		if val, ok := paramValues[paramPath]; ok && val != "" {
 			fields[infoColumn] = val
+		}
+	}
+	if tech == model.TechNR {
+		if mac, ok := lookupWANMAC(paramValues); ok {
+		fields["mac"] = mac
 		}
 	}
 

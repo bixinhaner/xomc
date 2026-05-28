@@ -299,6 +299,7 @@ func TestDeviceService_RegisterFromInform_NewDevice(t *testing.T) {
 	assert.Equal(t, model.DeviceActive, device.Status)
 	assert.Equal(t, "1.0.0", device.FirmwareVersion)
 	assert.Equal(t, "http://192.168.1.1:7547", device.ConnectionRequestURL)
+	assert.Equal(t, "192.168.1.1", device.IPAddress)
 	assert.NotNil(t, device.LastInformAt)
 	assert.Equal(t, model.TechLTE, device.Technology)
 
@@ -352,6 +353,7 @@ func TestDeviceService_UpdateFromInform_Success(t *testing.T) {
 			return &model.Device{
 				ID:             deviceID,
 				SerialNumber:   sn,
+				Technology:     model.TechLTE,
 				LifecycleState: model.LifecycleCommissioned,
 				IsOnline:       false,
 				Status:         model.DeviceOffline, // should auto-transition to active
@@ -379,6 +381,7 @@ func TestDeviceService_UpdateFromInform_Success(t *testing.T) {
 	assert.Equal(t, "AABBCC", updatedDevice.OUI)
 	assert.Equal(t, "SmallCell", updatedDevice.ProductClass)
 	assert.Equal(t, "TestVendor", updatedDevice.Manufacturer)
+	assert.Equal(t, model.TechLTE, updatedDevice.Technology)
 	assert.Equal(t, "1.0.0", updatedDevice.FirmwareVersion)
 	assert.Equal(t, "http://192.168.1.1:7547", updatedDevice.ConnectionRequestURL)
 	assert.Equal(t, "10.0.0.5", updatedDevice.IPAddress)
@@ -386,6 +389,48 @@ func TestDeviceService_UpdateFromInform_Success(t *testing.T) {
 
 	// Auto-transition: offline -> active
 	assert.Equal(t, model.DeviceActive, updatedDevice.Status)
+	assert.True(t, updatedDevice.IsOnline)
+}
+
+func TestDeviceService_UpdateFromInform_FallsBackToConnectionRequestURLHost(t *testing.T) {
+	deviceID := uuid.New()
+	var updatedDevice *model.Device
+
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(ctx context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:                   deviceID,
+				SerialNumber:         sn,
+				Technology:           model.TechLTE,
+				LifecycleState:       model.LifecycleCommissioned,
+				IsOnline:             false,
+				Status:               model.DeviceOffline,
+				InformInterval:       300,
+				ConnectionRequestURL: "http://172.19.3.81:7547/69F5E1319CDAF252",
+			}, nil
+		},
+		updateFn: func(ctx context.Context, device *model.Device) error {
+			updatedDevice = device
+			return nil
+		},
+	}
+
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	inform := sampleInform("SN002-FALLBACK")
+	inform.ParameterList = []tr069.ParameterValueStruct{
+		{Name: "Device.DeviceInfo.SoftwareVersion", Value: "1.0.0"},
+		{Name: "Device.ManagementServer.ConnectionRequestURL", Value: "http://172.19.3.81:7547/69F5E1319CDAF252"},
+	}
+
+	device, err := svc.UpdateFromInform(context.Background(), inform)
+	require.NoError(t, err)
+	require.NotNil(t, device)
+	require.NotNil(t, updatedDevice)
+
+	assert.Equal(t, "http://172.19.3.81:7547/69F5E1319CDAF252", updatedDevice.ConnectionRequestURL)
+	assert.Equal(t, "172.19.3.81", updatedDevice.IPAddress)
+	assert.Empty(t, updatedDevice.UDPConnectionRequestAddress)
+	assert.False(t, updatedDevice.NatDetected)
 	assert.True(t, updatedDevice.IsOnline)
 }
 
@@ -403,6 +448,78 @@ func TestDeviceService_UpdateFromInform_NotFound(t *testing.T) {
 	device, err := svc.UpdateFromInform(context.Background(), inform)
 	assert.NoError(t, err)
 	assert.Nil(t, device)
+}
+
+func TestDeviceService_UpdateFromInform_CorrectsTechnologyFromStrongPath(t *testing.T) {
+	deviceID := uuid.New()
+	var updatedDevice *model.Device
+
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:             deviceID,
+				SerialNumber:   sn,
+				Technology:     model.TechLTE,
+				LifecycleState: model.LifecycleCommissioned,
+				IsOnline:       false,
+				Status:         model.DeviceOffline,
+				InformInterval: 300,
+			}, nil
+		},
+		updateFn: func(_ context.Context, device *model.Device) error {
+			updatedDevice = device
+			return nil
+		},
+	}
+
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	inform := sampleInform("SN002-NR")
+	inform.ParameterList = append(inform.ParameterList,
+		tr069.ParameterValueStruct{Name: "Device.Services.FAPService.1.CellConfig.1.NR.RAN.Common.gNBId", Value: "123"},
+	)
+
+	device, err := svc.UpdateFromInform(context.Background(), inform)
+	require.NoError(t, err)
+	require.NotNil(t, device)
+	require.NotNil(t, updatedDevice)
+	assert.Equal(t, model.TechNR, updatedDevice.Technology)
+}
+
+func TestDeviceService_UpdateFromInform_DoesNotDowngradeWithoutStrongPath(t *testing.T) {
+	deviceID := uuid.New()
+	var updatedDevice *model.Device
+
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:             deviceID,
+				SerialNumber:   sn,
+				Technology:     model.TechNR,
+				LifecycleState: model.LifecycleCommissioned,
+				IsOnline:       false,
+				Status:         model.DeviceOffline,
+				InformInterval: 300,
+			}, nil
+		},
+		updateFn: func(_ context.Context, device *model.Device) error {
+			updatedDevice = device
+			return nil
+		},
+	}
+
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	inform := sampleInform("SN002-NR-KEEP")
+	inform.ParameterList = []tr069.ParameterValueStruct{
+		{Name: "Device.DeviceInfo.SoftwareVersion", Value: "1.0.0"},
+		{Name: "Device.ManagementServer.ConnectionRequestURL", Value: "http://192.168.1.1:7547"},
+		{Name: "Device.DeviceInfo.ModelName", Value: "Legacy-LTE-Name"},
+	}
+
+	device, err := svc.UpdateFromInform(context.Background(), inform)
+	require.NoError(t, err)
+	require.NotNil(t, device)
+	require.NotNil(t, updatedDevice)
+	assert.Equal(t, model.TechNR, updatedDevice.Technology)
 }
 
 // ---------------------------------------------------------------------------
@@ -611,6 +728,44 @@ func TestDetectTechnology(t *testing.T) {
 			want:   model.TechLTE,
 		},
 		{
+			name: "LTE path wins without model name",
+			params: []tr069.ParameterValueStruct{
+				{Name: "Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity", Value: "123"},
+			},
+			want: model.TechLTE,
+		},
+		{
+			name: "NR path with instance wins without model name",
+			params: []tr069.ParameterValueStruct{
+				{Name: "Device.Services.FAPService.1.CellConfig.1.NR.RAN.Common.gNBId", Value: "456"},
+			},
+			want: model.TechNR,
+		},
+		{
+			name: "NR path on second instance wins",
+			params: []tr069.ParameterValueStruct{
+				{Name: "Device.Services.FAPService.1.CellConfig.2.NR.RAN.Common.NRARFCN", Value: "789"},
+			},
+			want: model.TechNR,
+		},
+		{
+			name: "NR wins when LTE and NR paths coexist",
+			params: []tr069.ParameterValueStruct{
+				{Name: "Device.Services.FAPService.1.FAPControl.LTE.OpState", Value: "1"},
+				{Name: "Device.Services.FAPService.1.CellConfig.1.NR.RAN.Common.gNBId", Value: "456"},
+			},
+			want: model.TechNR,
+		},
+		{
+			name: "actual dengyo nr paths infer NR without model name",
+			params: []tr069.ParameterValueStruct{
+				{Name: "Device.Services.FAPService.1.CellConfig.1.NR.RAN.PHY.Antenna.NumOfRxAntenna", Value: "2"},
+				{Name: "Device.Services.FAPService.1.CellConfig.1.NR.RAN.rftxEnable", Value: "1"},
+				{Name: "Device.Services.FAPService.1.FAPControl.NR.LgwFwdCfg.LgwEnable", Value: "0"},
+			},
+			want: model.TechNR,
+		},
+		{
 			name: "LTE model name",
 			params: []tr069.ParameterValueStruct{
 				{Name: "Device.DeviceInfo.ModelName", Value: "PicoCell-LTE-3000"},
@@ -645,6 +800,21 @@ func TestDetectTechnology(t *testing.T) {
 			},
 			want: model.TechLTE,
 		},
+		{
+			name: "path detection beats misleading model name",
+			params: []tr069.ParameterValueStruct{
+				{Name: "Device.DeviceInfo.ModelName", Value: "Legacy-LTE-Name"},
+				{Name: "Device.Services.FAPService.1.CellConfig.1.NR.RAN.Common.gNBId", Value: "999"},
+			},
+			want: model.TechNR,
+		},
+		{
+			name: "firmware bnq alone does not affect legacy helper",
+			params: []tr069.ParameterValueStruct{
+				{Name: "Device.DeviceInfo.SoftwareVersion", Value: "DENGYO_BNQ_2.6.12.47.5"},
+			},
+			want: model.TechLTE,
+		},
 	}
 
 	for _, tc := range tests {
@@ -653,6 +823,85 @@ func TestDetectTechnology(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestDetectTechnologyFromIdentity(t *testing.T) {
+	tests := []struct {
+		name            string
+		productClass    string
+		modelName       string
+		firmwareVersion string
+		want            model.Technology
+		ok              bool
+	}{
+		{
+			name:            "BSC product class maps to NR",
+			productClass:    "FAP/BSC7079B243",
+			firmwareVersion: "DENGYO_BNQ_2.6.12.47.5",
+			want:            model.TechNR,
+			ok:              true,
+		},
+		{
+			name:      "BNQ model name maps to NR",
+			modelName: "Dengyo-BNQ-Indoor",
+			want:      model.TechNR,
+			ok:        true,
+		},
+		{
+			name:            "irrelevant identity returns false",
+			productClass:    "SmallCell",
+			modelName:       "Legacy-LTE-Name",
+			firmwareVersion: "1.0.0",
+			want:            "",
+			ok:              false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := detectTechnologyFromIdentity(tc.productClass, tc.modelName, tc.firmwareVersion)
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestDeviceService_UpdateFromInform_CorrectsTechnologyFromProductIdentity(t *testing.T) {
+	deviceID := uuid.New()
+	var updatedDevice *model.Device
+
+	deviceRepo := &mockDeviceRepo{
+		getBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			return &model.Device{
+				ID:             deviceID,
+				SerialNumber:   sn,
+				ProductClass:   "FAP/BSC7079B243",
+				Technology:     model.TechLTE,
+				LifecycleState: model.LifecycleCommissioned,
+				IsOnline:       false,
+				Status:         model.DeviceOffline,
+				InformInterval: 300,
+			}, nil
+		},
+		updateFn: func(_ context.Context, device *model.Device) error {
+			updatedDevice = device
+			return nil
+		},
+	}
+
+	svc := newTestDeviceService(deviceRepo, &mockParamRepo{})
+	inform := sampleInform("SN002-BSC-NR")
+	inform.DeviceId.ProductClass = "FAP/BSC7079B243"
+	inform.ParameterList = []tr069.ParameterValueStruct{
+		{Name: "Device.DeviceInfo.SoftwareVersion", Value: "DENGYO_BNQ_2.6.12.47.5"},
+		{Name: "Device.ManagementServer.ConnectionRequestURL", Value: "http://172.19.3.81:7547/69F5E1319CDAF252"},
+	}
+
+	device, err := svc.UpdateFromInform(context.Background(), inform)
+	require.NoError(t, err)
+	require.NotNil(t, device)
+	require.NotNil(t, updatedDevice)
+	assert.Equal(t, model.TechNR, updatedDevice.Technology)
 }
 
 // ---------------------------------------------------------------------------

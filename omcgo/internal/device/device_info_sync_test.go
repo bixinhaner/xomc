@@ -1,10 +1,104 @@
 package device
 
 import (
+	"context"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/omcgo/omcgo/internal/core/carrier"
+	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
+
+type testCarrier struct{}
+
+func (testCarrier) Code() model.CarrierCode { return model.CarrierCMCC }
+func (testCarrier) Name() string { return "test" }
+func (testCarrier) SupportedTechnologies() []model.Technology { return []model.Technology{model.TechLTE, model.TechNR} }
+func (testCarrier) DefaultDataModelVersions(model.Technology) []string { return nil }
+func (testCarrier) KnownOUIProductClasses(model.Technology) []carrier.OUIProductClassInfo { return nil }
+func (testCarrier) MapParameterToUnified(carrierPath string) string { return carrierPath }
+func (testCarrier) MapUnifiedToParameter(unifiedName string) string { return unifiedName }
+func (testCarrier) ProvisioningTemplates(model.Technology) []*carrier.ProvisionTemplate { return nil }
+func (testCarrier) AlarmSeverityMapping(string) model.AlarmSeverity { return 0 }
+func (testCarrier) ValidateParameter(string, string) error { return nil }
+func (testCarrier) GetInfoParamMapping(model.Technology) map[string]string { return nil }
+func (testCarrier) RFControlPath(model.Technology) string { return "" }
+
+type stubDeviceInfoRepo struct {
+	updateSyncFields func(ctx context.Context, deviceID uuid.UUID, fields map[string]interface{}) error
+}
+
+func (s stubDeviceInfoRepo) GetByDeviceID(context.Context, uuid.UUID) (*DeviceInfo, error) {
+	return nil, nil
+}
+
+func (s stubDeviceInfoRepo) Create(context.Context, *DeviceInfo) error { return nil }
+
+func (s stubDeviceInfoRepo) UpdateManualFields(context.Context, uuid.UUID, UpdateDeviceInfoRequest, string) error {
+	return nil
+}
+
+func (s stubDeviceInfoRepo) UpdateSyncFields(ctx context.Context, deviceID uuid.UUID, fields map[string]interface{}) error {
+	if s.updateSyncFields != nil {
+		return s.updateSyncFields(ctx, deviceID, fields)
+	}
+	return nil
+}
+
+func (s stubDeviceInfoRepo) GetTopologyAttributes(context.Context, uuid.UUID) (map[string]string, error) {
+	return nil, nil
+}
+
+func (s stubDeviceInfoRepo) ListDevicesWithInfo(context.Context, DeviceFilter) (*model.ListResponse[DeviceWithInfo], error) {
+	return nil, nil
+}
+
+func (s stubDeviceInfoRepo) GetByIDWithInfo(context.Context, uuid.UUID) (*DeviceWithInfo, error) {
+	return nil, nil
+}
+
+func (s stubDeviceInfoRepo) ComputeListStats(context.Context, DeviceFilter) (*DeviceListStats, error) {
+	return nil, nil
+}
+
+type stubDeviceParamRepo struct {
+	params []model.DeviceParameter
+}
+
+func (s stubDeviceParamRepo) BatchUpsert(context.Context, uuid.UUID, []model.DeviceParameter) error { return nil }
+func (s stubDeviceParamRepo) GetByDevice(context.Context, uuid.UUID) ([]model.DeviceParameter, error) {
+	return s.params, nil
+}
+func (s stubDeviceParamRepo) GetByPath(context.Context, uuid.UUID, string) (*model.DeviceParameter, error) {
+	return nil, nil
+}
+func (s stubDeviceParamRepo) DeleteByDevice(context.Context, uuid.UUID) error { return nil }
+func (s stubDeviceParamRepo) DeleteByPathPrefix(context.Context, uuid.UUID, string) (int64, error) {
+	return 0, nil
+}
+func (s stubDeviceParamRepo) GetByPathPrefix(context.Context, uuid.UUID, string) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
+func (s stubDeviceParamRepo) CountByPathPrefix(context.Context, uuid.UUID, string) (int, error) {
+	return 0, nil
+}
+func (s stubDeviceParamRepo) SearchByKeyword(context.Context, uuid.UUID, string, int) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
+func (s stubDeviceParamRepo) GetDirectChildLeaves(context.Context, uuid.UUID, string, int, int) ([]model.DeviceParameter, int, error) {
+	return nil, 0, nil
+}
+func (s stubDeviceParamRepo) GetByGroup(context.Context, uuid.UUID, string) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
+func (s stubDeviceParamRepo) GetByFAPInstance(context.Context, uuid.UUID, int) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
+func (s stubDeviceParamRepo) GetByFAPInstanceAndGroup(context.Context, uuid.UUID, int, string) ([]model.DeviceParameter, error) {
+	return nil, nil
+}
 
 // TestDeriveEnbID covers Phase 3 (设计文档 §4.2 Layer C) — eNodeB ID 派生。
 // LTE 28-bit ECI = 20-bit eNB-ID + 8-bit Cell-ID，即 enb_id = eci >> 8。
@@ -115,6 +209,104 @@ func TestLookupGPSHeight(t *testing.T) {
 			assert.Equal(t, tt.ok, ok)
 		})
 	}
+}
+
+func TestLookupWANMAC(t *testing.T) {
+	cases := []struct {
+		name  string
+		paths map[string]string
+		want  string
+		ok    bool
+	}{
+		{
+			name: "prefer interface marked as WAN by port type",
+			paths: map[string]string{
+				"Device.Ethernet.Interface.1.MACAddress":                               "00:11:22:33:44:55",
+				"Device.Ethernet.Interface.1.Name":                                     "LAN1",
+				"Device.Ethernet.Interface.2.MACAddress":                               "66:77:88:99:AA:BB",
+				"Device.Ethernet.Interface.2.Name":                                     "GE2",
+				"Device.Ethernet.Interface.2.IPv4Address.1.PortType":                   "WAN",
+				"Device.Ethernet.Interface.2.IPv4Address.1.IPAddress":                  "10.0.0.2",
+				"Device.Ethernet.Interface.2.IPv4Address.1.DefaultGateway":             "10.0.0.1",
+				"Device.Ethernet.Interface.2.VlanInterface.1.IPv4Address.1.PortType":   "WAN_VLAN",
+				"Device.Ethernet.Interface.2.VlanInterface.1.IPv4Address.1.IPAddress":  "192.168.1.2",
+				"Device.Ethernet.Interface.2.VlanInterface.1.IPv4Address.1.DefaultGateway": "192.168.1.1",
+			},
+			want: "66:77:88:99:AA:BB",
+			ok:   true,
+		},
+		{
+			name: "single ethernet interface falls back to its mac",
+			paths: map[string]string{
+				"Device.Ethernet.Interface.1.MACAddress": "AA:BB:CC:DD:EE:FF",
+			},
+			want: "AA:BB:CC:DD:EE:FF",
+			ok:   true,
+		},
+		{
+			name: "name based WAN hint wins when port type missing",
+			paths: map[string]string{
+				"Device.Ethernet.Interface.1.MACAddress": "00:00:00:00:00:01",
+				"Device.Ethernet.Interface.1.Name":       "LAN1",
+				"Device.Ethernet.Interface.2.MACAddress": "00:00:00:00:00:02",
+				"Device.Ethernet.Interface.2.UserLabel":  "WAN uplink",
+			},
+			want: "00:00:00:00:00:02",
+			ok:   true,
+		},
+		{
+			name:  "no ethernet mac path",
+			paths: map[string]string{"Device.DeviceInfo.SoftwareVersion": "1.0"},
+			want:  "",
+			ok:    false,
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := lookupWANMAC(tt.paths)
+			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.ok, ok)
+		})
+	}
+}
+
+func TestInfoSyncer_SyncFromParameters_OnlyNRUsesWANMACTraversal(t *testing.T) {
+	deviceID := uuid.New()
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Ethernet.Interface.1.MACAddress", ParameterValue: "00:11:22:33:44:55"},
+		{ParameterPath: "Device.Ethernet.Interface.1.Name", ParameterValue: "LAN1"},
+		{ParameterPath: "Device.Ethernet.Interface.2.MACAddress", ParameterValue: "66:77:88:99:AA:BB"},
+		{ParameterPath: "Device.Ethernet.Interface.2.IPv4Address.1.PortType", ParameterValue: "WAN"},
+	}
+
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	t.Run("nr overrides mac with WAN traversal", func(t *testing.T) {
+		infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
+			assert.Equal(t, "66:77:88:99:AA:BB", fields["mac"])
+			return nil
+		}}
+		paramRepo := stubDeviceParamRepo{params: params}
+		syncer := NewInfoSyncer(infoRepo, paramRepo, registry, zap.NewNop())
+
+		_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechNR)
+		assert.NoError(t, err)
+	})
+
+	t.Run("lte keeps legacy fixed-path behavior", func(t *testing.T) {
+		infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
+			_, exists := fields["mac"]
+			assert.False(t, exists)
+			return nil
+		}}
+		paramRepo := stubDeviceParamRepo{params: params}
+		syncer := NewInfoSyncer(infoRepo, paramRepo, registry, zap.NewNop())
+
+		_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
+		assert.NoError(t, err)
+	})
 }
 
 func TestParseRunTimeToSeconds(t *testing.T) {

@@ -350,6 +350,7 @@ func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) e
 		Set("product_class", device.ProductClass).
 		Set("manufacturer", device.Manufacturer).
 		Set("model_name", device.ModelName).
+		Set("technology", device.Technology).
 		Set("lifecycle_state", device.LifecycleState). // T-0162: 替代 status
 		Set("is_online", device.IsOnline).              // T-0162: 新增
 		Set("firmware_version", device.FirmwareVersion).
