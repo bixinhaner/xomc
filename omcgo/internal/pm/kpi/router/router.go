@@ -31,6 +31,7 @@ import (
 
 	"github.com/omcgo/omcgo/internal/core/model"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
+	"github.com/omcgo/omcgo/internal/pm/kpi/expr"
 	"github.com/omcgo/omcgo/internal/product"
 )
 
@@ -342,35 +343,17 @@ func derefStr(p *string) string {
 
 // extractFormulaDeps 从公式字符串提取去重的 counter 标识符。
 //
-// 实现走轻量级 token 扫描而非调 kpi.ParseFormula 是为了打破 pm/kpi → pm/kpi/router
-// → pm/indicator → pm/kpi 这条循环依赖（formula_validator 已经依赖 pm/kpi）。
-// 识别规则与 kpi/formula.go 的 parser 一致：标识符 = 字母 / 下划线开头 +
-// 字母 / 数字 / 下划线序列；其余字符 / 纯数字字面量被跳过。
-func extractFormulaDeps(expr string) []string {
-	seen := make(map[string]struct{})
-	out := make([]string, 0)
-	i, n := 0, len(expr)
-	for i < n {
-		ch := expr[i]
-		switch {
-		case ch == '_' || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z'):
-			start := i
-			for i < n {
-				c := expr[i]
-				if c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
-					i++
-					continue
-				}
-				break
-			}
-			name := expr[start:i]
-			if _, dup := seen[name]; !dup {
-				seen[name] = struct{}{}
-				out = append(out, name)
-			}
-		default:
-			i++
-		}
+// 复用 pm/kpi/expr 的解析器作为标识符的单一真源：返回的依赖名与 KPIEngine 求值时
+// 在 counter map 里查找的 key 一字不差，从而避免"提取规则"与"求值规则"漂移
+// （历史 bug：手写 token 扫描把 3GPP 点分名 MAC.RachSuccess 切成 MAC / RachSuccess，
+// 导致 QueryForKPI 用错误 metric_path 查不到 counter → 全库零 KPI）。
+//
+// expr 是零依赖叶子包，router 直接 import 不构成 pm/kpi → router → indicator → kpi 循环。
+// 公式解析失败时返回 nil（该 KPI 在 KPIEngine 侧也会被同样的解析失败跳过并 log）。
+func extractFormulaDeps(formula string) []string {
+	f, err := expr.Parse(formula)
+	if err != nil {
+		return nil
 	}
-	return out
+	return f.Identifiers()
 }

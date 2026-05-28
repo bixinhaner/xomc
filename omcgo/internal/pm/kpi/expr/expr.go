@@ -208,8 +208,22 @@ func (p *parser) parseFactor() (node, error) {
 
 	if ch == '_' || unicode.IsLetter(rune(ch)) {
 		start := p.pos
-		for p.pos < len(p.input) && (p.input[p.pos] == '_' || unicode.IsLetter(rune(p.input[p.pos])) || unicode.IsDigit(rune(p.input[p.pos]))) {
-			p.pos++
+		for p.pos < len(p.input) {
+			c := p.input[p.pos]
+			if c == '_' || unicode.IsLetter(rune(c)) || unicode.IsDigit(rune(c)) {
+				p.pos++
+				continue
+			}
+			// 3GPP 点分计数名（如 MAC.RachSuccess / ERAB.EstabInitSuccNbr.Sum / Cqi.00）：
+			// 仅当 '.' 后紧跟名字字符时并入标识符，避免误吞乘除后的数字常量。
+			if c == '.' && p.pos+1 < len(p.input) {
+				nc := p.input[p.pos+1]
+				if nc == '_' || unicode.IsLetter(rune(nc)) || unicode.IsDigit(rune(nc)) {
+					p.pos++ // consume '.'
+					continue
+				}
+			}
+			break
 		}
 		return &identNode{name: p.input[start:p.pos]}, nil
 	}
