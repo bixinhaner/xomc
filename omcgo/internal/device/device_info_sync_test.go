@@ -14,17 +14,19 @@ import (
 type testCarrier struct{}
 
 func (testCarrier) Code() model.CarrierCode { return model.CarrierCMCC }
-func (testCarrier) Name() string { return "test" }
-func (testCarrier) SupportedTechnologies() []model.Technology { return []model.Technology{model.TechLTE, model.TechNR} }
-func (testCarrier) DefaultDataModelVersions(model.Technology) []string { return nil }
+func (testCarrier) Name() string            { return "test" }
+func (testCarrier) SupportedTechnologies() []model.Technology {
+	return []model.Technology{model.TechLTE, model.TechNR}
+}
+func (testCarrier) DefaultDataModelVersions(model.Technology) []string                    { return nil }
 func (testCarrier) KnownOUIProductClasses(model.Technology) []carrier.OUIProductClassInfo { return nil }
-func (testCarrier) MapParameterToUnified(carrierPath string) string { return carrierPath }
-func (testCarrier) MapUnifiedToParameter(unifiedName string) string { return unifiedName }
-func (testCarrier) ProvisioningTemplates(model.Technology) []*carrier.ProvisionTemplate { return nil }
-func (testCarrier) AlarmSeverityMapping(string) model.AlarmSeverity { return 0 }
-func (testCarrier) ValidateParameter(string, string) error { return nil }
-func (testCarrier) GetInfoParamMapping(model.Technology) map[string]string { return nil }
-func (testCarrier) RFControlPath(model.Technology) string { return "" }
+func (testCarrier) MapParameterToUnified(carrierPath string) string                       { return carrierPath }
+func (testCarrier) MapUnifiedToParameter(unifiedName string) string                       { return unifiedName }
+func (testCarrier) ProvisioningTemplates(model.Technology) []*carrier.ProvisionTemplate   { return nil }
+func (testCarrier) AlarmSeverityMapping(string) model.AlarmSeverity                       { return 0 }
+func (testCarrier) ValidateParameter(string, string) error                                { return nil }
+func (testCarrier) GetInfoParamMapping(model.Technology) map[string]string                { return nil }
+func (testCarrier) RFControlPath(model.Technology) string                                 { return "" }
 
 type stubDeviceInfoRepo struct {
 	updateSyncFields func(ctx context.Context, deviceID uuid.UUID, fields map[string]interface{}) error
@@ -67,7 +69,20 @@ type stubDeviceParamRepo struct {
 	params []model.DeviceParameter
 }
 
-func (s stubDeviceParamRepo) BatchUpsert(context.Context, uuid.UUID, []model.DeviceParameter) error { return nil }
+type stubDeviceCoordinateWriter struct {
+	updateCoordinates func(ctx context.Context, deviceID uuid.UUID, latitude, longitude float64) error
+}
+
+func (s stubDeviceCoordinateWriter) UpdateCoordinates(ctx context.Context, deviceID uuid.UUID, latitude, longitude float64) error {
+	if s.updateCoordinates != nil {
+		return s.updateCoordinates(ctx, deviceID, latitude, longitude)
+	}
+	return nil
+}
+
+func (s stubDeviceParamRepo) BatchUpsert(context.Context, uuid.UUID, []model.DeviceParameter) error {
+	return nil
+}
 func (s stubDeviceParamRepo) GetByDevice(context.Context, uuid.UUID) ([]model.DeviceParameter, error) {
 	return s.params, nil
 }
@@ -211,6 +226,54 @@ func TestLookupGPSHeight(t *testing.T) {
 	}
 }
 
+func TestLookupGPSCoordinates(t *testing.T) {
+	cases := []struct {
+		name    string
+		paths   map[string]string
+		wantLat float64
+		wantLng float64
+		ok      bool
+	}{
+		{
+			name: "decimal degrees",
+			paths: map[string]string{
+				"Device.FAP.GPS.LockedLatitude":  "39.9042",
+				"Device.FAP.GPS.LockedLongitude": "116.4074",
+			},
+			wantLat: 39.9042,
+			wantLng: 116.4074,
+			ok:      true,
+		},
+		{
+			name: "microdegrees are normalized",
+			paths: map[string]string{
+				"Device.FAP.GPS.LockedLatitude":  "39904200",
+				"Device.FAP.GPS.LockedLongitude": "116407400",
+			},
+			wantLat: 39.9042,
+			wantLng: 116.4074,
+			ok:      true,
+		},
+		{
+			name: "invalid latitude rejects pair",
+			paths: map[string]string{
+				"Device.FAP.GPS.LockedLatitude":  "abc",
+				"Device.FAP.GPS.LockedLongitude": "116.4074",
+			},
+			ok: false,
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			lat, lng, ok := lookupGPSCoordinates(tt.paths)
+			assert.Equal(t, tt.wantLat, lat)
+			assert.Equal(t, tt.wantLng, lng)
+			assert.Equal(t, tt.ok, ok)
+		})
+	}
+}
+
 func TestLookupWANMAC(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -221,15 +284,15 @@ func TestLookupWANMAC(t *testing.T) {
 		{
 			name: "prefer interface marked as WAN by port type",
 			paths: map[string]string{
-				"Device.Ethernet.Interface.1.MACAddress":                               "00:11:22:33:44:55",
-				"Device.Ethernet.Interface.1.Name":                                     "LAN1",
-				"Device.Ethernet.Interface.2.MACAddress":                               "66:77:88:99:AA:BB",
-				"Device.Ethernet.Interface.2.Name":                                     "GE2",
-				"Device.Ethernet.Interface.2.IPv4Address.1.PortType":                   "WAN",
-				"Device.Ethernet.Interface.2.IPv4Address.1.IPAddress":                  "10.0.0.2",
-				"Device.Ethernet.Interface.2.IPv4Address.1.DefaultGateway":             "10.0.0.1",
-				"Device.Ethernet.Interface.2.VlanInterface.1.IPv4Address.1.PortType":   "WAN_VLAN",
-				"Device.Ethernet.Interface.2.VlanInterface.1.IPv4Address.1.IPAddress":  "192.168.1.2",
+				"Device.Ethernet.Interface.1.MACAddress":                                   "00:11:22:33:44:55",
+				"Device.Ethernet.Interface.1.Name":                                         "LAN1",
+				"Device.Ethernet.Interface.2.MACAddress":                                   "66:77:88:99:AA:BB",
+				"Device.Ethernet.Interface.2.Name":                                         "GE2",
+				"Device.Ethernet.Interface.2.IPv4Address.1.PortType":                       "WAN",
+				"Device.Ethernet.Interface.2.IPv4Address.1.IPAddress":                      "10.0.0.2",
+				"Device.Ethernet.Interface.2.IPv4Address.1.DefaultGateway":                 "10.0.0.1",
+				"Device.Ethernet.Interface.2.VlanInterface.1.IPv4Address.1.PortType":       "WAN_VLAN",
+				"Device.Ethernet.Interface.2.VlanInterface.1.IPv4Address.1.IPAddress":      "192.168.1.2",
 				"Device.Ethernet.Interface.2.VlanInterface.1.IPv4Address.1.DefaultGateway": "192.168.1.1",
 			},
 			want: "66:77:88:99:AA:BB",
@@ -289,7 +352,7 @@ func TestInfoSyncer_SyncFromParameters_OnlyNRUsesWANMACTraversal(t *testing.T) {
 			return nil
 		}}
 		paramRepo := stubDeviceParamRepo{params: params}
-		syncer := NewInfoSyncer(infoRepo, paramRepo, registry, zap.NewNop())
+		syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
 
 		_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechNR)
 		assert.NoError(t, err)
@@ -302,11 +365,39 @@ func TestInfoSyncer_SyncFromParameters_OnlyNRUsesWANMACTraversal(t *testing.T) {
 			return nil
 		}}
 		paramRepo := stubDeviceParamRepo{params: params}
-		syncer := NewInfoSyncer(infoRepo, paramRepo, registry, zap.NewNop())
+		syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
 
 		_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechLTE)
 		assert.NoError(t, err)
 	})
+}
+
+func TestInfoSyncer_SyncFromParameters_BackfillsCoordinates(t *testing.T) {
+	deviceID := uuid.New()
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	paramRepo := stubDeviceParamRepo{params: []model.DeviceParameter{
+		{ParameterPath: "Device.FAP.GPS.LockedLatitude", ParameterValue: "39904200"},
+		{ParameterPath: "Device.FAP.GPS.LockedLongitude", ParameterValue: "116407400"},
+	}}
+
+	coordinateWriter := stubDeviceCoordinateWriter{updateCoordinates: func(_ context.Context, gotDeviceID uuid.UUID, latitude, longitude float64) error {
+		assert.Equal(t, deviceID, gotDeviceID)
+		assert.Equal(t, 39.9042, latitude)
+		assert.Equal(t, 116.4074, longitude)
+		return nil
+	}}
+
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, _ uuid.UUID, fields map[string]interface{}) error {
+		assert.NotEmpty(t, fields)
+		return nil
+	}}
+
+	syncer := NewInfoSyncer(infoRepo, paramRepo, coordinateWriter, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechNR)
+	assert.NoError(t, err)
 }
 
 func TestParseRunTimeToSeconds(t *testing.T) {

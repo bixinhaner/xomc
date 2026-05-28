@@ -2,11 +2,23 @@ package device
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/omcgo/omcgo/internal/core/model"
 )
+
+const nrMultiPlmnEnablePath = "Device.Services.FAPService.1.FAPControl.NR.MultiPlmnEnable"
+
+const (
+	amfsStatusPath           = "Device.Services.FAPService.1.AmfsStatus"
+	gpsSoftVersionPath       = "Device.FAP.GPS.SoftVersion"
+	ppsTimeModePath          = "Device.FAP.Synchronization.PpsTimeMode"
+	systemBackupVersionPath  = "Device.SoftwareCtrl.SystemBackupVersion"
+)
+
+var ethernetInterfaceStatusPath = regexp.MustCompile(`^Device\.Ethernet\.Interface\.(\d+)\.Status$`)
 
 // AssembleMMEPool builds MME pool entries from device_parameters with the MME prefix.
 // params should be the result of GetByPathPrefix("...MmePoolConfigParam.").
@@ -147,6 +159,188 @@ func AssembleAntennaInfo(params []model.DeviceParameter) *AntennaInfo {
 		return nil
 	}
 	return info
+}
+
+// AssembleMultiPlmnEnable normalizes the NR Multi PLMN switch from device_parameters.
+// Supported raw values: 1/true/enabled/on and 0/false/disabled/off.
+func AssembleMultiPlmnEnable(params []model.DeviceParameter) string {
+	for _, p := range params {
+		if p.ParameterPath != nrMultiPlmnEnablePath {
+			continue
+		}
+		return normalizeBinaryState(p.ParameterValue)
+	}
+	return ""
+}
+
+func AssembleAMFStatus(params []model.DeviceParameter) string {
+	for _, p := range params {
+		if p.ParameterPath == amfsStatusPath && p.ParameterValue != "" {
+			return normalizeAMFStatus(p.ParameterValue)
+		}
+	}
+	return ""
+}
+
+func AssembleGPSVersion(params []model.DeviceParameter) string {
+	for _, p := range params {
+		if p.ParameterPath == gpsSoftVersionPath && p.ParameterValue != "" {
+			return p.ParameterValue
+		}
+	}
+	return ""
+}
+
+func AssemblePPSTimeMode(params []model.DeviceParameter) string {
+	for _, p := range params {
+		if p.ParameterPath == ppsTimeModePath && p.ParameterValue != "" {
+			return p.ParameterValue
+		}
+	}
+	return ""
+}
+
+func AssembleRollbackVersion(params []model.DeviceParameter) string {
+	for _, p := range params {
+		if p.ParameterPath == systemBackupVersionPath && p.ParameterValue != "" {
+			return p.ParameterValue
+		}
+	}
+	return ""
+}
+
+func AssembleWANStatus(params []model.DeviceParameter) string {
+	paramValues := make(map[string]string, len(params))
+	for _, p := range params {
+		if p.ParameterValue == "" {
+			continue
+		}
+		paramValues[p.ParameterPath] = p.ParameterValue
+	}
+
+	bestIndex := ""
+	bestScore := -1
+	bestStatus := ""
+	for path, value := range paramValues {
+		matches := ethernetInterfaceStatusPath.FindStringSubmatch(path)
+		if matches == nil {
+			continue
+		}
+
+		index := matches[1]
+		score := scoreEthernetInterfaceForDetail(index, paramValues)
+		if score > bestScore || (score == bestScore && bestIndex != "" && index < bestIndex) || bestIndex == "" {
+			bestIndex = index
+			bestScore = score
+			bestStatus = normalizeWANStatus(value)
+		}
+	}
+
+	return bestStatus
+}
+
+func scoreEthernetInterfaceForDetail(index string, paramValues map[string]string) int {
+	score := 0
+	prefix := "Device.Ethernet.Interface." + index + "."
+
+	for _, suffix := range []string{"Name", "UserLabel", "PortLocation"} {
+		if containsWANKeywordForDetail(paramValues[prefix+suffix]) {
+			score += 20
+		}
+	}
+
+	for path, value := range paramValues {
+		if value == "" || !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		if strings.HasSuffix(path, ".PortType") && containsWANKeywordForDetail(value) {
+			score += 100
+			continue
+		}
+		if strings.HasSuffix(path, ".IPAddress") || strings.HasSuffix(path, ".DefaultGateway") {
+			score += 5
+		}
+	}
+
+	return score
+}
+
+func containsWANKeywordForDetail(val string) bool {
+	if val == "" {
+		return false
+	}
+	normalized := strings.ToLower(strings.TrimSpace(val))
+	for _, keyword := range []string{"wan", "uplink", "up-link", "internet", "external"} {
+		if strings.Contains(normalized, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeWANStatus(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "up", "connected", "1", "true":
+		return "connected"
+	case "down", "disconnected", "0", "false":
+		return "disconnected"
+	default:
+		return raw
+	}
+}
+
+func normalizeAMFStatus(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+
+	if strings.Contains(trimmed, ";") || strings.Contains(trimmed, "=") {
+		allZero := true
+		for _, segment := range strings.Split(trimmed, ";") {
+			segment = strings.TrimSpace(segment)
+			if segment == "" {
+				continue
+			}
+
+			statusValue := segment
+			if idx := strings.LastIndex(segment, "="); idx >= 0 {
+				statusValue = strings.TrimSpace(segment[idx+1:])
+			}
+
+			switch strings.ToLower(statusValue) {
+			case "1", "true", "connected", "up":
+				return "connected"
+			case "0", "false", "disconnected", "down":
+				continue
+			default:
+				allZero = false
+			}
+		}
+		if allZero {
+			return "disconnected"
+		}
+	}
+
+	switch strings.ToLower(trimmed) {
+	case "1", "true", "connected", "up":
+		return "connected"
+	case "0", "false", "disconnected", "down":
+		return "disconnected"
+	default:
+		return trimmed
+	}
+}
+
+func normalizeBinaryState(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "enabled", "on":
+		return "enabled"
+	case "0", "false", "disabled", "off":
+		return "disabled"
+	default:
+		return ""
+	}
 }
 
 // AssembleCells builds cell info for multi-carrier devices from device_parameters.

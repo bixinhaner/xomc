@@ -59,7 +59,7 @@ func initDeviceModule(c *Container) error {
 	deviceService.SetMetrics(deviceMetrics)
 
 	// InfoSyncer
-	infoSyncer := device.NewInfoSyncer(deviceInfoRepo, paramRepo, c.Carriers, logger)
+	infoSyncer := device.NewInfoSyncer(deviceInfoRepo, paramRepo, deviceRepo, c.Carriers, logger)
 	deviceService.SetInfoSyncer(infoSyncer)
 
 	// T-0173: OfflineDetector 已合并入 DeviceStatusReconciler（见上方 reconciler 初始化）。

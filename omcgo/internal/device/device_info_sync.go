@@ -3,6 +3,7 @@ package device
 import (
 	"context"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strconv"
@@ -65,19 +66,19 @@ func parseRunTimeToSeconds(val string) int64 {
 // X_CMCC_MACAddress 兜底）— InfoSyncer 用 universal 后写覆盖 carrier
 // 的语义：标准 path 优先（若 CPE 同时上报两种，标准胜出）。
 var universalInformMapping = map[string]string{
-	"Device.Services.FAPService.1.FAPControl.X_RADISYS_COM_AlarmStatus":                      "alarm_severity",
+	"Device.Services.FAPService.1.FAPControl.X_RADISYS_COM_AlarmStatus": "alarm_severity",
 	// TR-181 Ethernet 标准 path（取代 CMCC X_CMCC_MACAddress，多数 CPE 上报此 path）
 	"Device.Ethernet.Interface.MACAddress": "mac",
 	// 发射功率：CPE 实际上报 MaxTxPower（Capabilities 子树）而非 ReferenceSignalPower
 	"Device.Services.FAPService.1.Capabilities.MaxTxPower": "transmit_power",
 	// LTE 小区配置（device_info 表 Phase 2 新增列）
-	"Device.Services.FAPService.1.CellConfig.LTE.EPC.TAC":                  "tac",
+	"Device.Services.FAPService.1.CellConfig.LTE.EPC.TAC": "tac",
 	// GSM 位置区码：补全 device_groups LAC 匹配模式所需的设备侧数据源（T-2026-05-25）。
 	// 与 TAC 平行，CPE 同时上报时 LAC 多见于双模 / GSM 设备。
-	"Device.DeviceInfo.BTS.CurrentLac":                                     "lac",
-	"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.FreqBandIndicator": "band",
-	"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.EARFCNUL":          "ul_earfcn",
-	"Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment":    "subframe_assignment",
+	"Device.DeviceInfo.BTS.CurrentLac":                                                     "lac",
+	"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.FreqBandIndicator":                 "band",
+	"Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.EARFCNUL":                          "ul_earfcn",
+	"Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment":      "subframe_assignment",
 	"Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.TDDFrame.SpecialSubframePatterns": "special_subframe",
 	"Device.Services.FAPService.1.CellConfig.LTE.RAN.PHY.PRACH.ZeroCorrelationZoneConfig":  "root_index",
 	// GPS（卫星数 + 高度）
@@ -94,6 +95,12 @@ var gpsHeightCandidatePaths = []string{
 	"Device.FAP.GPS.Altitude", // TR-181 spec 标准拼写
 	"Device.FAP.GPS.Height",
 }
+
+const (
+	gpsLockedLatitudePath  = "Device.FAP.GPS.LockedLatitude"
+	gpsLockedLongitudePath = "Device.FAP.GPS.LockedLongitude"
+	gpsCoordinateScale     = 1_000_000
+)
 
 var ethernetInterfaceMACPath = regexp.MustCompile(`^Device\.Ethernet\.Interface\.(\d+)\.MACAddress$`)
 
@@ -140,6 +147,42 @@ func lookupGPSHeight(paramValues map[string]string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func lookupGPSCoordinates(paramValues map[string]string) (float64, float64, bool) {
+	latitude, ok := parseGPSCoordinate(paramValues[gpsLockedLatitudePath], 90)
+	if !ok {
+		return 0, 0, false
+	}
+
+	longitude, ok := parseGPSCoordinate(paramValues[gpsLockedLongitudePath], 180)
+	if !ok {
+		return 0, 0, false
+	}
+
+	return latitude, longitude, true
+}
+
+func parseGPSCoordinate(raw string, maxAbs float64) (float64, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return 0, false
+	}
+
+	value, err := strconv.ParseFloat(trimmed, 64)
+	if err != nil {
+		return 0, false
+	}
+
+	absValue := math.Abs(value)
+	if absValue <= maxAbs {
+		return value, true
+	}
+	if absValue <= maxAbs*gpsCoordinateScale {
+		return value / gpsCoordinateScale, true
+	}
+
+	return 0, false
 }
 
 type ethernetInterfaceCandidate struct {
@@ -245,25 +288,32 @@ const (
 
 // InfoSyncer extracts key TR069 parameters from device_parameters
 // and updates the corresponding device_info columns for fast query access.
+type DeviceCoordinateWriter interface {
+	UpdateCoordinates(ctx context.Context, id uuid.UUID, latitude, longitude float64) error
+}
+
 type InfoSyncer struct {
-	infoRepo        DeviceInfoRepository
-	paramRepo       DeviceParameterRepository
-	carrierRegistry *carrier.CarrierRegistry
-	logger          *zap.Logger
+	infoRepo         DeviceInfoRepository
+	paramRepo        DeviceParameterRepository
+	coordinateWriter DeviceCoordinateWriter
+	carrierRegistry  *carrier.CarrierRegistry
+	logger           *zap.Logger
 }
 
 // NewInfoSyncer creates a new InfoSyncer.
 func NewInfoSyncer(
 	infoRepo DeviceInfoRepository,
 	paramRepo DeviceParameterRepository,
+	coordinateWriter DeviceCoordinateWriter,
 	carrierRegistry *carrier.CarrierRegistry,
 	logger *zap.Logger,
 ) *InfoSyncer {
 	return &InfoSyncer{
-		infoRepo:        infoRepo,
-		paramRepo:       paramRepo,
-		carrierRegistry: carrierRegistry,
-		logger:          logger,
+		infoRepo:         infoRepo,
+		paramRepo:        paramRepo,
+		coordinateWriter: coordinateWriter,
+		carrierRegistry:  carrierRegistry,
+		logger:           logger,
 	}
 }
 
@@ -321,7 +371,7 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 	}
 	if tech == model.TechNR {
 		if mac, ok := lookupWANMAC(paramValues); ok {
-		fields["mac"] = mac
+			fields["mac"] = mac
 		}
 	}
 
@@ -364,7 +414,9 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 		fields["network_model"] = model
 	}
 
-	if len(fields) == 0 {
+	latitude, longitude, hasCoordinates := lookupGPSCoordinates(paramValues)
+
+	if len(fields) == 0 && !hasCoordinates {
 		return nil, nil
 	}
 
@@ -392,8 +444,16 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 		}
 	}
 
-	if err := s.infoRepo.UpdateSyncFields(ctx, deviceID, fields); err != nil {
-		return nil, fmt.Errorf("update device info sync fields: %w", err)
+	if len(fields) > 0 {
+		if err := s.infoRepo.UpdateSyncFields(ctx, deviceID, fields); err != nil {
+			return nil, fmt.Errorf("update device info sync fields: %w", err)
+		}
+	}
+
+	if hasCoordinates && s.coordinateWriter != nil {
+		if err := s.coordinateWriter.UpdateCoordinates(ctx, deviceID, latitude, longitude); err != nil {
+			return nil, fmt.Errorf("update device coordinates: %w", err)
+		}
 	}
 
 	s.logger.Debug("synced device info from parameters",

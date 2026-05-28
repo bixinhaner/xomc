@@ -189,6 +189,22 @@ func TestCalcSyncStatus(t *testing.T) {
 			want:   "error",
 		},
 		{
+			name: "NR PLL sync state takes precedence",
+			params: map[string]string{
+				"Device.Services.FAPService.1.FAPControl.PLLSyncState":         "LOCKED",
+				"Device.FAP.Synchronization.ClockSourceSyncState":              "HOLDOVER",
+				"Device.Services.FAPService.1.FAPControl.NR.Gateway.X_COM_tfcsSyncState": "1",
+			},
+			want: "LOCKED",
+		},
+		{
+			name: "NR clock source sync state fallback",
+			params: map[string]string{
+				"Device.FAP.Synchronization.ClockSourceSyncState": "SYNCED",
+			},
+			want: "SYNCED",
+		},
+		{
 			name: "GPS synced",
 			params: map[string]string{
 				"Device.Services.FAPService.1.FAPControl.LTE.Gateway.X_COM_tfcsSyncState": "1",

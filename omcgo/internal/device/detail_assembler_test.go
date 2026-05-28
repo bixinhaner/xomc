@@ -123,6 +123,59 @@ func TestAssembleAntennaInfo_Empty(t *testing.T) {
 	assert.Nil(t, info)
 }
 
+func TestAssembleMultiPlmnEnable(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: nrMultiPlmnEnablePath, ParameterValue: "0"},
+	}
+	assert.Equal(t, "disabled", AssembleMultiPlmnEnable(params))
+}
+
+func TestAssembleMultiPlmnEnable_TrueValue(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: nrMultiPlmnEnablePath, ParameterValue: "true"},
+	}
+	assert.Equal(t, "enabled", AssembleMultiPlmnEnable(params))
+}
+
+func TestAssembleAMFStatus(t *testing.T) {
+	params := []model.DeviceParameter{{ParameterPath: amfsStatusPath, ParameterValue: "connected"}}
+	assert.Equal(t, "connected", AssembleAMFStatus(params))
+}
+
+func TestAssembleAMFStatus_AnyPeerConnected(t *testing.T) {
+	params := []model.DeviceParameter{{ParameterPath: amfsStatusPath, ParameterValue: "0.0.0.0=0;0.0.0.1=1"}}
+	assert.Equal(t, "connected", AssembleAMFStatus(params))
+}
+
+func TestAssembleAMFStatus_AllPeersDisconnected(t *testing.T) {
+	params := []model.DeviceParameter{{ParameterPath: amfsStatusPath, ParameterValue: "0.0.0.0=0;0.0.0.1=0"}}
+	assert.Equal(t, "disconnected", AssembleAMFStatus(params))
+}
+
+func TestAssembleGPSVersion(t *testing.T) {
+	params := []model.DeviceParameter{{ParameterPath: gpsSoftVersionPath, ParameterValue: "GPS_2.0.1"}}
+	assert.Equal(t, "GPS_2.0.1", AssembleGPSVersion(params))
+}
+
+func TestAssemblePPSTimeMode(t *testing.T) {
+	params := []model.DeviceParameter{{ParameterPath: ppsTimeModePath, ParameterValue: "GPS"}}
+	assert.Equal(t, "GPS", AssemblePPSTimeMode(params))
+}
+
+func TestAssembleRollbackVersion(t *testing.T) {
+	params := []model.DeviceParameter{{ParameterPath: systemBackupVersionPath, ParameterValue: "DENGYO_BNQ_2.6.12"}}
+	assert.Equal(t, "DENGYO_BNQ_2.6.12", AssembleRollbackVersion(params))
+}
+
+func TestAssembleWANStatus(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Ethernet.Interface.1.Status", ParameterValue: "DOWN"},
+		{ParameterPath: "Device.Ethernet.Interface.2.Status", ParameterValue: "UP"},
+		{ParameterPath: "Device.Ethernet.Interface.2.Name", ParameterValue: "WAN"},
+	}
+	assert.Equal(t, "connected", AssembleWANStatus(params))
+}
+
 func TestAssembleCells(t *testing.T) {
 	params := []model.DeviceParameter{
 		// Cell 1 (LTE)

@@ -1721,6 +1721,9 @@
         <param standardPath="Device.Services.FAPService.{i}.FAPControl.NR.LgwFwdCfg.LgwFwdIpv6Enable" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Services.FAPService.{i}.FAPControl.NR.LgwFwdCfg.LgwFwdIpv6PrefixLen" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Services.FAPService.{i}.FAPControl.NR.LgwFwdCfg.LgwFwdMode" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="Device.Services.FAPService.{i}.AmfsStatus" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="Device.Services.FAPService.{i}.FAPControl.PLLSyncState" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
+        <param standardPath="Device.FAP.Synchronization.ClockSourceSyncState" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Services.FAPService.{i}.FAPControl.NR.MultiPlmnEnable" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Services.FAPService.{i}.FAPControl.NR.NgapDscp.Dscp" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param standardPath="Device.Services.FAPService.{i}.FAPControl.NR.NgapDscp.VlanPrio" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>

@@ -171,6 +171,27 @@ type DeviceInfo struct {
 	// NetworkModel "TDD" / "FDD"（派生：根据 PHY 子帧 path 是否存在）
 	NetworkModel *string `json:"network_model,omitempty"`
 
+	// AMFStatus 详情页展示别名。
+	// NR 设备把 AMF 状态回写到统一的 mme_status 口径后，这里仅作为详情页别名透出，
+	// 避免前端文案层必须感知 LTE/NR 共用字段名。
+	AMFStatus string `json:"amf_status,omitempty"`
+
+	// MultiPlmnEnable NR Multi PLMN 开关状态（详情页按参数现值投影，非 device_info 持久列）。
+	// 取值规范化为 "enabled" / "disabled"。
+	MultiPlmnEnable string `json:"multi_plmn_enable,omitempty"`
+
+	// GPSVersion GPS 软件版本（详情页按 Device.FAP.GPS.SoftVersion 参数临时投影）。
+	GPSVersion string `json:"gps_version,omitempty"`
+
+	// PPSTimeMode PPS 授时模式（详情页按 Device.FAP.Synchronization.PpsTimeMode 参数临时投影）。
+	PPSTimeMode string `json:"pps_time_mode,omitempty"`
+
+	// RollbackVersion 备用系统/回滚版本（详情页按 Device.SoftwareCtrl.SystemBackupVersion 参数临时投影）。
+	RollbackVersion string `json:"rollback_version,omitempty"`
+
+	// WANStatus WAN 口链路状态（详情页按 Device.Ethernet.Interface.{i}.Status 参数临时投影）。
+	WANStatus string `json:"wan_status,omitempty"`
+
 	// ===== 审计字段 =====
 
 	// Creator 创建人用户名

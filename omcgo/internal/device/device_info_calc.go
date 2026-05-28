@@ -112,6 +112,13 @@ func CalcLicenseStatus(params map[string]string) string {
 // CalcSyncStatus computes the sync_status quick-query column from device_parameters.
 // Checks GPS, BDS, GLONASS, 1588v2, and tfcsSyncState to determine sync source.
 func CalcSyncStatus(params map[string]string) string {
+	if nrSyncStatus := firstNonEmpty(
+		params["Device.Services.FAPService.1.FAPControl.PLLSyncState"],
+		params["Device.FAP.Synchronization.ClockSourceSyncState"],
+	); nrSyncStatus != "" {
+		return nrSyncStatus
+	}
+
 	tfcsSync := params["Device.Services.FAPService.1.FAPControl.LTE.Gateway.X_COM_tfcsSyncState"]
 	if tfcsSync == "" {
 		tfcsSync = params["Device.Services.FAPService.1.FAPControl.NR.Gateway.X_COM_tfcsSyncState"]
@@ -205,4 +212,13 @@ func CalcNumOfCells(params map[string]string) int {
 // isTrueValue checks if a TR069 parameter value represents a boolean true.
 func isTrueValue(v string) bool {
 	return v == "1" || strings.EqualFold(v, "true")
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

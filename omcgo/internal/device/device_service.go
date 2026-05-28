@@ -1591,6 +1591,45 @@ func (s *DeviceService) GetDeviceDetailComposite(ctx context.Context, deviceID u
 			zap.Error(err))
 		return result, nil
 	}
+	if device.Technology == model.TechNR {
+		if result.Info == nil {
+			result.Info = &DeviceInfo{DeviceID: deviceID}
+		}
+		if amfStatus := AssembleAMFStatus(allParams); amfStatus != "" {
+			result.Info.MMEStatus = amfStatus
+			result.Info.AMFStatus = amfStatus
+		}
+		if result.Info.AMFStatus == "" && result.Info.MMEStatus != "" {
+			result.Info.AMFStatus = result.Info.MMEStatus
+		}
+		if multiPlmnEnable := AssembleMultiPlmnEnable(allParams); multiPlmnEnable != "" {
+			result.Info.MultiPlmnEnable = multiPlmnEnable
+		}
+	}
+	if gpsVersion := AssembleGPSVersion(allParams); gpsVersion != "" {
+		if result.Info == nil {
+			result.Info = &DeviceInfo{DeviceID: deviceID}
+		}
+		result.Info.GPSVersion = gpsVersion
+	}
+	if ppsTimeMode := AssemblePPSTimeMode(allParams); ppsTimeMode != "" {
+		if result.Info == nil {
+			result.Info = &DeviceInfo{DeviceID: deviceID}
+		}
+		result.Info.PPSTimeMode = ppsTimeMode
+	}
+	if rollbackVersion := AssembleRollbackVersion(allParams); rollbackVersion != "" {
+		if result.Info == nil {
+			result.Info = &DeviceInfo{DeviceID: deviceID}
+		}
+		result.Info.RollbackVersion = rollbackVersion
+	}
+	if wanStatus := AssembleWANStatus(allParams); wanStatus != "" {
+		if result.Info == nil {
+			result.Info = &DeviceInfo{DeviceID: deviceID}
+		}
+		result.Info.WANStatus = wanStatus
+	}
 	result.Cells = AssembleCells(allParams, numOfCells)
 
 	return result, nil

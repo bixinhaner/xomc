@@ -546,7 +546,7 @@ func extractStorablePrefixes(mappings []parammodel.ParamMapping) []string {
 		if !m.IsStorable || !m.IsSupported {
 			continue
 		}
-		prefix := basePrefix(m.PrivatePath)
+		prefix := basePrefix(expandSingletonLeafPath(m.PrivatePath))
 		if prefix == "" {
 			continue
 		}
@@ -565,6 +565,19 @@ func extractStorablePrefixes(mappings []parammodel.ParamMapping) []string {
 		}
 	}
 	return out
+}
+
+// expandSingletonLeafPath preserves exact GPV leaf requests for well-known
+// singleton instance tables. Some CPEs do not return singleton leaf values when
+// querying only the parent object prefix, so these paths must stay leaf-shaped.
+func expandSingletonLeafPath(privatePath string) string {
+	if strings.Count(privatePath, "{i}") != 1 {
+		return privatePath
+	}
+	if strings.HasPrefix(privatePath, "Device.Services.FAPService.{i}.") && !strings.HasSuffix(privatePath, ".") {
+		return strings.Replace(privatePath, "{i}", "1", 1)
+	}
+	return privatePath
 }
 
 // basePrefix 从一条 privatePath 提取 GPV 下发用的路径。

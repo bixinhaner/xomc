@@ -352,7 +352,7 @@ func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) e
 		Set("model_name", device.ModelName).
 		Set("technology", device.Technology).
 		Set("lifecycle_state", device.LifecycleState). // T-0162: 替代 status
-		Set("is_online", device.IsOnline).              // T-0162: 新增
+		Set("is_online", device.IsOnline).             // T-0162: 新增
 		Set("firmware_version", device.FirmwareVersion).
 		Set("ip_address", ipAddr).
 		Set("connection_request_url", device.ConnectionRequestURL).
@@ -381,6 +381,28 @@ func (r *PgDeviceRepository) Update(ctx context.Context, device *model.Device) e
 	if ct.RowsAffected() == 0 {
 		return commonerrors.ErrNotFound
 	}
+	return nil
+}
+
+func (r *PgDeviceRepository) UpdateCoordinates(ctx context.Context, id uuid.UUID, latitude, longitude float64) error {
+	query, args, err := storage.Psql.Update("devices").
+		Set("latitude", latitude).
+		Set("longitude", longitude).
+		Where(sq.Eq{"id": id}).
+		Where(sq.Eq{"deleted_at": nil}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update coordinates query: %w", err)
+	}
+
+	ct, err := r.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update device coordinates: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return commonerrors.ErrNotFound
+	}
+
 	return nil
 }
 

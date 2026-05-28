@@ -82,6 +82,14 @@ func TestExtractStorablePrefixes_LeafKeptAsIs(t *testing.T) {
 	assert.Equal(t, []string{"Device.X.Y.Z"}, got)
 }
 
+func TestExtractStorablePrefixes_SingletonLeafExpanded(t *testing.T) {
+	mappings := []parammodel.ParamMapping{
+		{PrivatePath: "Device.Services.FAPService.{i}.AmfsStatus", IsStorable: true, IsSupported: true, EntryType: "parameter"},
+	}
+	got := extractStorablePrefixes(mappings)
+	assert.Equal(t, []string{"Device.Services.FAPService.1.AmfsStatus"}, got)
+}
+
 func TestExtractStorablePrefixes_LeavesNotMerged(t *testing.T) {
 	// 同父对象下的多个叶子参数 → 各自原样保留，不合并到父前缀
 	mappings := []parammodel.ParamMapping{
