@@ -63,7 +63,6 @@ const ThresholdConfig    = React.lazy(() => import('@/pages/performance/Threshol
 const PerformanceFiles   = React.lazy(() => import('@/pages/performance/PerformanceFiles'));
 const PerfTaskConfig     = React.lazy(() => import('@/pages/performance/PerformanceTaskConfig'));
 // T-0164-P6 G6 PM 仪表盘（新单 tab "性能查看"）
-const PmDashboardList    = React.lazy(() => import('@/pages/performance/PmDashboard/DashboardList'));
 const PmDashboardEditor  = React.lazy(() => import('@/pages/performance/PmDashboard/DashboardEditor'));
 // T-0164 收尾 G6-Gap-1：左右栏布局 — `/performance?dashboard=:id`
 const PerformanceLayout  = React.lazy(() => import('@/pages/performance/PmDashboard/PerformanceLayout'));
@@ -295,8 +294,8 @@ export const routes: RouteObject[] = [
       // T-0164-P6 G6 PM 仪表盘（单 tab "性能查看"）
       // G6-Gap-1 主入口：左右栏布局 + ?dashboard=:id query
       { path: 'performance',                   element: withSuspense(PerformanceLayout) },
-      // 旧路由保留兼容（重定向到新路由）
-      { path: 'performance/pm-dashboard',      element: withSuspense(PmDashboardList) },
+      // 旧路由保留兼容（重定向到新左右栏布局，避免历史链接 404）
+      { path: 'performance/pm-dashboard',      element: <Navigate to="/performance" replace /> },
       { path: 'performance/pm-dashboard/:id',  element: withSuspense(PmDashboardEditor) },
       // T-0164-P7 G7 自定义聚合任务
       { path: 'performance/pm-adhoc',          element: withSuspense(PmAdhocPage) },
