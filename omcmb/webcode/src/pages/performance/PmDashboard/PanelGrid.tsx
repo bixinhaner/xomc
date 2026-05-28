@@ -172,18 +172,27 @@ export function PanelGrid({ panels, canEdit, isBuiltin, onConfigPanel, onDeleteP
   const layoutItems = usePmDashboardStore((s) => s.currentDashboard?.layout.panels ?? []);
   const replaceLayout = usePmDashboardStore((s) => s.replaceLayout);
 
-  // panel 没有 layout 时补一个默认（自动追加到底部）
+  // panel 没有 layout 时补一个默认半宽布局：行内先填左半(x=0)再填右半(x=6)，
+  // 每两个换行（而非一律塞 x=0 纵向堆在左列）。
   const effectiveLayout = useMemo(() => {
     const known = new Map(layoutItems.map((l) => [l.i, l] as const));
-    let nextY = layoutItems.reduce((m, l) => Math.max(m, l.y + l.h), 0);
+    const baseY = layoutItems.reduce((m, l) => Math.max(m, l.y + l.h), 0);
+    const half = GRID_COLS / 2;
     const out: PanelGridItem[] = [];
+    let slot = 0; // 新 panel 的填充序号：偶数=左半，奇数=右半
     panels.forEach((p) => {
       const existing = known.get(p.id);
       if (existing) {
         out.push(existing);
       } else {
-        out.push({ i: p.id, x: 0, y: nextY, w: 6, h: 4 });
-        nextY += 4;
+        out.push({
+          i: p.id,
+          x: slot % 2 === 0 ? 0 : half,
+          y: baseY + Math.floor(slot / 2) * 4,
+          w: half,
+          h: 4,
+        });
+        slot += 1;
       }
     });
     return out;
