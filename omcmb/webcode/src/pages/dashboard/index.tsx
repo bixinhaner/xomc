@@ -39,6 +39,7 @@ import type { DeviceGeo } from '@core/types/map';
 import { useDashboardData, useAlarmTrend, useTopAlarmDevices } from '@core/hooks/api/useDashboard';
 import { useAlarmCount, useCurrentAlarms } from '@core/hooks/api/useAlarms';
 import { useMapDevicesGeo } from '@core/hooks/api/useTopology';
+import { useUserStore } from '@core/store/userStore';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
 import { TiltCard } from '@/components/Effects';
@@ -71,6 +72,22 @@ function formatAlarmTime(value: string | undefined): string {
   });
 }
 
+/** 格式化最后登录时间 */
+function formatLastLogin(lastLoginTime?: string): string {
+  if (!lastLoginTime) {
+    return '--';
+  }
+  const parsed = new Date(lastLoginTime);
+  if (Number.isNaN(parsed.getTime())) {
+    return '--';
+  }
+  return parsed.toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
 const QUICK_ACCESS_ITEMS = [
   { labelKey: 'nav.device.list',       icon: <AppstoreOutlined />,    path: '/device/list',               color: '#1677FF' },
   { labelKey: 'nav.alarm.current',     icon: <AlertOutlined />,       path: '/alarm/current',             color: '#F5222D' },
@@ -96,6 +113,9 @@ export default function DashboardPage() {
   });
   const t = useT();
   const token = useThemeToken();
+
+  // 获取当前登录用户信息
+  const currentUser = useUserStore((state) => state.currentUser);
 
   // 获取告警趋势数据
   const { data: alarmTrendData } = useAlarmTrend(7);
@@ -533,17 +553,22 @@ export default function DashboardPage() {
             style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
           >
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-              <Avatar size={64} icon={<UserOutlined />} style={{ background: token.colorPrimary }} />
+              <Avatar
+                size={64}
+                src={currentUser?.avatar}
+                icon={!currentUser?.avatar ? <UserOutlined /> : undefined}
+                style={{ background: currentUser?.avatar ? undefined : token.colorPrimary }}
+              />
               <Title level={5} style={{ margin: 0 }}>
-                {t('dashboard.sysAdmin')}
+                {currentUser?.displayName || currentUser?.username || t('dashboard.sysAdmin')}
               </Title>
               <Text type="secondary" style={{ fontSize: 13 }}>
-                admin@omc.com
+                {currentUser?.email || '--'}
               </Text>
               <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
                 <Badge color="green" text={t('status.online')} />
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  {t('dashboard.lastLogin')} 09:00
+                  {t('dashboard.lastLogin')} {formatLastLogin(currentUser?.lastLoginTime)}
                 </Text>
               </div>
               <div
