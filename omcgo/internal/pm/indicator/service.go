@@ -60,7 +60,8 @@ func (s *IndicatorManagementService) GetGroupTree(ctx context.Context, req Indic
 		return nil, fmt.Errorf("parse device type: %w", err)
 	}
 
-	groups, err := s.groupRepo.List(ctx, dt)
+	// platform 非空时,只返有该 platform 公式关联的指标所属分组(前端下拉过滤用)
+	groups, err := s.groupRepo.ListByPlatform(ctx, dt, req.Platform)
 	if err != nil {
 		return nil, err
 	}
@@ -491,6 +492,14 @@ func buildTree(groups []*IndicatorGroup) []*IndicatorGroup {
 			roots = append(roots, g)
 		} else if parent, ok := nodeMap[g.ParentID]; ok {
 			parent.Children = append(parent.Children, g)
+		} else {
+			// 2026-05-29:父节点缺失 → 作为根节点回退,避免悄悄吞掉数据。
+			// 历史 bug:seed/000062 把 22+8+15 个 ENB/GSM/GNB 分组的 parent_id
+			// 都设成 'e1e2466f156f44cfa116985008f2f298' 这一硬编码 root,但该
+			// root 自身未 seeded → 原 buildTree 把所有 45 个分组全 strip,
+			// /indicator-groups 端点返 [],前端"按分组筛选"下拉始终空。
+			// fail-open 后,孤儿分组仍可作根节点露出,UI 至少能看见 HO/EQPT/...
+			roots = append(roots, g)
 		}
 	}
 	return roots

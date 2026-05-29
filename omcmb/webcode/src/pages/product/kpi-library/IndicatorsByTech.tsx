@@ -75,12 +75,8 @@ export default function IndicatorsByTech({ deviceType, filter }: Props) {
       render: (v: string, row: IndicatorInfo) =>
         v || row.groupId ? <Tag color="purple">{v || row.groupId}</Tag> : <span>—</span>,
     },
-    {
-      title: '平台',
-      dataIndex: 'productClass',
-      width: 130,
-      render: (v: string) => (v ? <Tag color="cyan">{v}</Tag> : <span>—</span>),
-    },
+    // 2026-05-29 用户决策:删除"平台"列 — 详情态由 URL ?platform= 锁定,
+    // 同一视图下所有行都属同一 platform,列冗余。
     { title: '计数器类型', dataIndex: 'counterType', width: 110 },
     ...(deviceType === 'GNB'
       ? []
