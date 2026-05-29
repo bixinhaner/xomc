@@ -23,9 +23,10 @@ const LoaderName = "param-model"
 
 // Loader 实现 dictloader.Loader（T-0098 P1-06）。
 //
-// 加载语义（设计 §1.7）：
-//   1. 扫描 ParamModelFiles 白名单 → 每个 XML 一次事务（DELETE param_mappings + UPSERT param_models + 批量 INSERT param_mappings）
-//   2. 加载 StandardModelFile → standard_params 全量重写
+// 加载语义（设计 §1.7 + T-0178 §9.1 分层目录）：
+//  1. 扫描 builtin (cfg.Directory) + custom (Loader.customDir) → mergeFileLists
+//     → 每个 XML 一次事务（DELETE param_mappings + UPSERT param_models + 批量 INSERT param_mappings）
+//  2. 加载 StandardModelFile → standard_params 全量重写（仅 builtin 目录）
 //
 // 注意：本 P1-06 baseline 不实现 `{i}` 占位符校验、跨 XML 字段冲突合并（设计 §1.7.1 / §1.9）；
 // 这两项放在 Phase 2 P2-02 ParamRegistry / Intersect。
@@ -34,6 +35,12 @@ type Loader struct {
 	cfg    appconfig.ParamModelLoaderConfig
 	base   string
 	logger *zap.Logger
+
+	// T-0178 分层目录: customDir 是 host bind mount 持久化目录,custom XML 落地处。
+	// 默认值 "param-mappings-custom" 由 NewLoader 注入。后续 appconfig 字段补齐后,
+	// NewLoader 改从 cfg 读;现阶段保持 struct 字段以避免改跨包结构体。
+	customDir       string
+	customOverrides bool
 }
 
 // NewLoader 构造 ParamModel Loader。
@@ -48,7 +55,14 @@ func NewLoader(pool *pgxpool.Pool, cfg appconfig.ParamModelLoaderConfig, baseDir
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Loader{pool: pool, cfg: cfg, base: baseDir, logger: logger.Named(LoaderName)}
+	return &Loader{
+		pool:            pool,
+		cfg:             cfg,
+		base:            baseDir,
+		logger:          logger.Named(LoaderName),
+		customDir:       "param-mappings-custom", // T-0178 默认 host 持久化目录
+		customOverrides: true,                    // T-0178 默认决策 1: 同名 custom 胜出
+	}
 }
 
 // Name implements dictloader.Loader.
@@ -72,41 +86,53 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	rep := dictloader.NewReport(LoaderName)
 	defer rep.Finish()
 
-	dir := filepath.Join(l.base, l.cfg.Directory)
+	builtinDir := filepath.Join(l.base, l.cfg.Directory)
+	customSub := l.customDir
+	if customSub == "" {
+		// 直接构造 Loader 字面量(测试 / 未来 cfg 改造)绕过 NewLoader 时的兜底
+		customSub = "param-mappings-custom"
+	}
+	customDir := filepath.Join(l.base, customSub)
 
-	// Pass 1: 9 个 paramModel.xml
-	files := l.cfg.ParamModelFiles
-	if len(files) == 0 {
-		// 缺省白名单：所有非保留文件。Scanner 已剔除 dotfiles 与子目录；
-		// 我们再排除 standard-model.xml / products.xml / 旧 routing。
-		all, err := scanXMLFiles(dir)
-		if err != nil {
-			return rep, fmt.Errorf("scan param-mappings: %w", err)
-		}
-		files = pruneReserved(all, []string{
-			l.cfg.StandardModelFile,
-			"products.xml",
-			"product-name-routing.xml",
-			"param-model-routing.xml",
-		})
+	reserved := []string{
+		l.cfg.StandardModelFile,
+		"products.xml",
+		"product-name-routing.xml",
+		"param-model-routing.xml",
 	}
 
-	for _, name := range files {
-		path := filepath.Join(dir, name)
+	// Pass 1: builtin + custom 双目录解析 + 同名合并(T-0178 §9.3)
+	files, warnings, err := resolveLoaderFiles(
+		builtinDir, customDir,
+		l.cfg.ParamModelFiles,
+		reserved,
+		l.customOverrides,
+	)
+	if err != nil {
+		return rep, fmt.Errorf("resolve param-model files: %w", err)
+	}
+	for _, w := range warnings {
+		// custom dir 非 ENOENT 异常(权限/类型错误)走 WARN 不阻塞 builtin 加载
+		l.logger.Warn("param-model file resolve warning", zap.String("detail", w))
+	}
+
+	for _, absPath := range files {
 		rep.FilesScanned++
-		rows, err := l.loadParamModelFile(ctx, path)
+		rows, err := l.loadParamModelFile(ctx, absPath)
 		if err != nil {
-			rep.AddError(name, "parse-or-persist", err)
+			rep.AddError(filepath.Base(absPath), "parse-or-persist", err)
 			rep.FilesSkipped++
-			l.logger.Error("param-model file failed", zap.String("file", name), zap.Error(err))
+			l.logger.Error("param-model file failed",
+				zap.String("file", absPath),
+				zap.Error(err))
 			continue
 		}
 		rep.FilesLoaded++
 		rep.RowsAffected += rows
 	}
 
-	// Pass 2: standard-model.xml（单文件）
-	stdPath := filepath.Join(dir, l.cfg.StandardModelFile)
+	// Pass 2: standard-model.xml(单文件;仅 builtin 目录,custom 不允许覆盖 standard)
+	stdPath := filepath.Join(builtinDir, l.cfg.StandardModelFile)
 	rep.FilesScanned++
 	if rows, err := l.loadStandardModelFile(ctx, stdPath); err != nil {
 		rep.AddError(l.cfg.StandardModelFile, "parse-or-persist", err)
@@ -137,7 +163,10 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, erro
 		return 0, fmt.Errorf("paramModel attribute empty in %s", path)
 	}
 
-	loadedFrom := filepath.Base(path)
+	// T-0178: loaded_from 写"<dir>/<file>" 相对 base 的 slash 路径
+	// (源代码契约:source.go 的 ClassifySource / IsDeletable 据此判定 builtin/custom)。
+	// 退化情况(base/path 跨盘等)由 resolveLoadedFrom 兜底为裸 basename。
+	loadedFrom := resolveLoadedFrom(l.base, path)
 	totalObjects := len(doc.Objects)
 	totalParams := len(doc.Params)
 	totalEntries := doc.TotalEntries
@@ -320,8 +349,8 @@ func batchInsertMappings(ctx context.Context, tx pgx.Tx, modelID string, entries
 				nullIfEmpty(e.EnumValues), // T-0158: 枚举值 CSV
 				nullIfEmpty(e.EnumLabels), // T-0158: 枚举标签 CSV
 				nullIfEmpty(e.MirrorWith), // T-0159: 交叉镜像目标 standardPath
-				!strings.EqualFold(strings.TrimSpace(e.Store), "false"),     // 缺省 / 任意非 "false" → true
-				true,                                                        // is_active
+				!strings.EqualFold(strings.TrimSpace(e.Store), "false"), // 缺省 / 任意非 "false" → true
+				true, // is_active
 				!strings.EqualFold(strings.TrimSpace(e.Supported), "false"), // T-0103: 缺省 / 任意非 "false" → true
 			)
 		}
