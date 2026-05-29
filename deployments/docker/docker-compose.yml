@@ -179,6 +179,10 @@ services:
       # dev 环境直接 bind mount 到源码 data/param-mappings-custom/,改 XML 立刻生效;
       # prod compose 走 /opt/omc/data/param-mappings-custom (release/bundle/deploy 配置)
       - ../../omcgo/data/param-mappings-custom:/etc/omcgo/data/param-mappings-custom
+      # T-0180: 自定义 indicator XML 分层目录(enb/gsm/gnb 三制式子目录)
+      # 与 builtin 镜像层 /etc/omcgo/data/indicator-library/ 物理隔离;
+      # dev 直接 bind mount 到源码;prod 走 /opt/omc/data/indicator-library-custom
+      - ../../omcgo/data/indicator-library-custom:/etc/omcgo/data/indicator-library-custom
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed:
@@ -212,6 +216,8 @@ services:
       - ../../omcgo/data/param-mappings:/etc/omcgo/data/param-mappings
       # T-0178: 自定义 paramModel XML(worker BackupCleanup cron 需 rw 清理 .deleted/.bak/.tmp)
       - ../../omcgo/data/param-mappings-custom:/etc/omcgo/data/param-mappings-custom
+      # T-0180: 自定义 indicator XML(worker BackupCleanup cron 需 rw 清理三制式子目录残留)
+      - ../../omcgo/data/indicator-library-custom:/etc/omcgo/data/indicator-library-custom
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed:

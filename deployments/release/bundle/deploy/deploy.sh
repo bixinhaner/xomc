@@ -252,6 +252,7 @@ if [ "$UNINSTALL" = 1 ]; then
   log "        · Docker 引擎本身:sudo bash install-docker.sh --uninstall"
   log "        · /etc/systemd/system/omcgo*.service(早期 systemd 单元):sudo systemctl disable --now omcgo*; sudo rm /etc/systemd/system/omcgo*.service"
   log "        · /opt/omc/data/param-mappings-custom(若不在 $OMC_ROOT 下的 host bind mount):sudo rm -rf"
+  log "        · /opt/omc/data/indicator-library-custom(T-0180 indicator 三制式 host bind mount):sudo rm -rf"
   exit 0
 fi
 
@@ -407,6 +408,22 @@ if [ ! -d "$OMC_ROOT/data/param-mappings-custom" ]; then
   chmod 0750 "$OMC_ROOT/data/param-mappings-custom"
 else
   log "$OMC_ROOT/data/param-mappings-custom 已存在,保留运维已设权限不动(T-0178)"
+fi
+
+# T-0180: 自定义 indicator XML 分层目录(host 主权,enb/gsm/gnb 三制式分桶)
+# 容器内挂载点 = /etc/omcgo/data/indicator-library-custom (compose 已配)
+# 与 T-0178 同样仅首次创建时设权限;三个子目录确保 Upload 端点首次写入不报 ENOENT。
+# 应用启动期 EnsureBaseDir 会幂等 mkdir,本步骤是 host 侧前置兜底(权限不能在容器内调)。
+if [ ! -d "$OMC_ROOT/data/indicator-library-custom" ]; then
+  log "首次部署：初始化 T-0180 自定义 indicator XML 目录 $OMC_ROOT/data/indicator-library-custom/{enb,gsm,gnb}"
+  mkdir -p "$OMC_ROOT/data/indicator-library-custom/enb" \
+           "$OMC_ROOT/data/indicator-library-custom/gsm" \
+           "$OMC_ROOT/data/indicator-library-custom/gnb"
+  chown -R 10001:10001 "$OMC_ROOT/data/indicator-library-custom" 2>/dev/null \
+    || warn "chown 10001:10001 失败(UID 不存在 host 上属正常);容器内仍以 10001 写入"
+  chmod -R 0750 "$OMC_ROOT/data/indicator-library-custom"
+else
+  log "$OMC_ROOT/data/indicator-library-custom 已存在,保留运维已设权限不动(T-0180)"
 fi
 
 RELEASE_DIR="$OMC_ROOT/releases/$VERSION"
