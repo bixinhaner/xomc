@@ -42,7 +42,13 @@ interface BackendIndicator {
 
 interface BackendGroup {
   id: string;
-  name: string;
+  // 2026-05-29:后端 IndicatorGroup struct 字段是 EnName / CnName(JSON:
+  // en_name / cn_name),没有 `name` 字段。前端 mapGroup 合成
+  // name = cn_name || en_name || id 给下拉 label 用。`name` 保留可选,
+  // 兼容未来后端补字段;DB 表 indicator_group_enb/gsm/gnb 也只有 en_name/cn_name。
+  name?: string;
+  en_name?: string;
+  cn_name?: string;
   parent_id?: string;
   description?: string;
   operator_code?: string;
@@ -87,7 +93,10 @@ function mapIndicator(b: BackendIndicator, deviceType: DeviceType): IndicatorInf
 function mapGroup(b: BackendGroup, deviceType: DeviceType): IndicatorGroup {
   return {
     id: b.id,
-    name: b.name,
+    // 2026-05-29 修复:后端只给 en_name/cn_name,前端原本读 b.name 永远 undefined
+    // 导致分组下拉显示为 id 哈希(用户实测列表里看到 HO/EQPT,下拉里全是 hex)。
+    // 优先中文名,再 fallback 英文,最后 id。
+    name: b.cn_name || b.en_name || b.name || b.id,
     parentId: b.parent_id,
     description: b.description,
     operatorCode: b.operator_code,
@@ -407,7 +416,12 @@ export const indicatorLibraryApi = {
       reloaded: boolean;
     }>('/indicators/upload-xml', form, {
       params,
-      // FormData 自带 multipart/form-data;axios 自动处理 boundary
+      // 必须显式声明 multipart/form-data — http.ts axios.create 设了
+      // 默认 'Content-Type': 'application/json',不显式覆盖会沿用 JSON
+      // 导致 body 被序列化为 "{}" + Gin c.FormFile("file") 返
+      // "Content-Type isn't multipart/form-data"(与 paramModelApi.uploadXML / fileApi /
+      // adminApi / softwareApi 等 8 处上传同范式;历史漏掉本处)。
+      headers: { 'Content-Type': 'multipart/form-data' },
     });
     return {
       uploaded: data.uploaded,

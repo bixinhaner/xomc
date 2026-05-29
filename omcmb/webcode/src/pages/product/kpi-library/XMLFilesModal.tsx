@@ -40,9 +40,11 @@ export default function XMLFilesModal({ open, tech, onClose }: Props) {
 
   const columns = [
     {
+      // 2026-05-29 用户决策:文件名列显示后端 API 给的完整路径
+      // (如 "indicator-library/enb/ALL.xml"),不再截 basename。
       title: '文件名',
       dataIndex: 'loadedFrom',
-      render: (v: string) => <Tooltip title={v}>{v.split('/').slice(-1)[0]}</Tooltip>,
+      render: (v: string) => <code>{v}</code>,
     },
     {
       title: '来源',

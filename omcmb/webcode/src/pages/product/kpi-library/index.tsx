@@ -191,6 +191,14 @@ export default function KpiLibraryPage() {
                 </span>
               </Space>
               <Space wrap>
+                {/* 2026-05-29 用户决策:搜索框放在分组筛选前面(主要操作前置) */}
+                <Input.Search
+                  placeholder="搜索 ID / 名称"
+                  allowClear
+                  value={detailKeyword}
+                  onChange={(e) => setDetailKeyword(e.target.value)}
+                  style={{ width: 240 }}
+                />
                 <Select
                   placeholder="按分组筛选"
                   allowClear
@@ -200,13 +208,6 @@ export default function KpiLibraryPage() {
                   style={{ width: 180 }}
                   showSearch
                   optionFilterProp="label"
-                />
-                <Input.Search
-                  placeholder="搜索 ID / 名称"
-                  allowClear
-                  value={detailKeyword}
-                  onChange={(e) => setDetailKeyword(e.target.value)}
-                  style={{ width: 240 }}
                 />
               </Space>
             </>
