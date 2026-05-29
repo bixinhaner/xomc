@@ -13,9 +13,16 @@ import {
   message,
   Popconfirm,
   Tooltip,
+  Typography,
   Empty,
 } from 'antd';
-import { ExclamationCircleFilled, PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
+import {
+  ArrowLeftOutlined,
+  ExclamationCircleFilled,
+  PlusOutlined,
+  DeleteOutlined,
+  EditOutlined,
+} from '@ant-design/icons';
 import {
   useParamMappings,
   useCreateMapping,
@@ -24,8 +31,13 @@ import {
 } from '@core/hooks/api/useParamModels';
 import type { ParamMapping, CreateMappingInput, UpdateMappingInput } from '@core/types/paramModel';
 
+const { Text } = Typography;
+
 interface Props {
   selectedName?: string;
+  // 2026-05-29 用户决策:返回 button 下沉到本组件,与 search/filter/新增映射 合并为单行
+  // (代替旧的"顶部 toolbar + Card 标题"双行结构,且 Card 不再带"默认映射 / Mappings — X" 标题)。
+  onBack?: () => void;
 }
 
 const STORABLE_OPTIONS = [
@@ -50,7 +62,7 @@ function countPlaceholder(p: string): number {
   return m ? m.length : 0;
 }
 
-export default function MappingsTab({ selectedName }: Props) {
+export default function MappingsTab({ selectedName, onBack }: Props) {
   const { data, isLoading } = useParamMappings(selectedName);
   const createMut = useCreateMapping();
   const updateMut = useUpdateMapping();
@@ -179,7 +191,18 @@ export default function MappingsTab({ selectedName }: Props) {
   return (
     <Card
       size="small"
-      title={`默认映射 / Mappings — ${selectedName}`}
+      // 2026-05-29 用户决策:旧"默认映射 / Mappings — X"标题删除;改用 返回 + 模型名
+      // 占左,合并原顶部 toolbar 行 + 原 Card extra 筛选行为单行布局。
+      title={
+        <Space>
+          {onBack && (
+            <Button icon={<ArrowLeftOutlined />} onClick={onBack} size="small">
+              返回
+            </Button>
+          )}
+          <Text strong>{selectedName}</Text>
+        </Space>
+      }
       extra={
         <Space>
           <Input.Search

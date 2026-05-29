@@ -18,12 +18,17 @@
  *     "重载 XML" = 后端扫 datamodels/ 全量 destructive 重载(行为不变,与旧版一致)。
  *   - 后端 import-directory?mode=import 端点物理保留(API contract 不破坏),
  *     UI 不再调用;import-directory?mode=reload 由"重载 XML"继续使用。
+ *
+ * 2026-05-29 用户决策(详情态收敛):
+ *   - 详情态删除"导入 XML / 重载 XML / 刷新缓存"按钮 — 全局动作,只放列表态
+ *   - "返回"按钮 + 模型名下沉到 MappingsTab Card 标题区,与 search/filter/新增映射
+ *     合并为单行(避免上下两条 toolbar)
+ *   - 详情态彻底不渲染顶部 toolbar Card
  */
 import { useState } from 'react';
-import { Card, Input, Button, Space, Popconfirm, message, Typography, Upload, Modal } from 'antd';
+import { Card, Input, Button, Space, Popconfirm, message, Upload, Modal } from 'antd';
 import type { UploadProps } from 'antd';
 import {
-  ArrowLeftOutlined,
   CloudDownloadOutlined,
   InboxOutlined,
   ReloadOutlined,
@@ -36,8 +41,6 @@ import {
 import type { AxiosError } from 'axios';
 import ModelsTab from './ModelsTab';
 import MappingsTab from './MappingsTab';
-
-const { Text } = Typography;
 
 export default function ParamModelPage() {
   const [selectedModelName, setSelectedModelName] = useState<string | undefined>();
@@ -100,20 +103,10 @@ export default function ParamModelPage() {
 
   return (
     <div style={{ padding: 16 }}>
-      {/* 顶部 toolbar:列表态展示搜索;详情态展示返回 + 当前模型名 */}
-      <Card size="small" style={{ marginBottom: 12 }}>
-        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-          {inDetail ? (
-            <Space>
-              <Button
-                icon={<ArrowLeftOutlined />}
-                onClick={() => setSelectedModelName(undefined)}
-              >
-                返回
-              </Button>
-              <Text strong>{selectedModelName} 的参数列表</Text>
-            </Space>
-          ) : (
+      {/* 顶部 toolbar:仅列表态。详情态由 MappingsTab 自带头部(返回 + 模型名 + 筛选/新增 同行) */}
+      {!inDetail && (
+        <Card size="small" style={{ marginBottom: 12 }}>
+          <Space style={{ width: '100%', justifyContent: 'space-between' }}>
             <Input.Search
               placeholder="搜索参数模型名称 / 描述"
               allowClear
@@ -121,66 +114,67 @@ export default function ParamModelPage() {
               onChange={(e) => setKeyword(e.target.value)}
               style={{ width: 280 }}
             />
-          )}
-          <Space>
-            {/* 2026-05-29 用户决策:"导入 XML" = 用户选本地 XML 上传,落 host
-                /opt/omc/data/param-mappings-custom/(升级不丢),作为自定义参数模型。
-                旧的"上传 XML"按钮已合并进来 — 同一个 multipart upload 链路。 */}
-            <Upload {...uploadProps}>
-              <Button icon={<InboxOutlined />} loading={uploadMut.isPending}>
-                导入 XML
+            <Space>
+              {/* "导入 XML" = 用户选本地 XML 上传,落 host /opt/omc/data/param-mappings-custom/ */}
+              <Upload {...uploadProps}>
+                <Button icon={<InboxOutlined />} loading={uploadMut.isPending}>
+                  导入 XML
+                </Button>
+              </Upload>
+              <Popconfirm
+                title="确认重载 XML?"
+                description={
+                  <div style={{ maxWidth: 360 }}>
+                    从 <code>datamodels/</code> <b>destructive 全量重载</b>:
+                    <br />· 当前 XML 中的模型 → UPSERT (覆盖 UI 编辑)
+                    <br />· DB 中已无 XML 对应的孤儿模型 → <b>删除</b>
+                    <br />· 关联的 <code>param_mappings</code> 级联删除
+                    <br />· 关联的 <code>products.param_model_id</code> 被置空 (SET NULL)
+                    <br />操作不可撤销!
+                  </div>
+                }
+                okText="确认重载"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+                placement="bottomRight"
+                onConfirm={() => {
+                  reloadMut
+                    .mutateAsync()
+                    .then((r) =>
+                      message.success(
+                        `已重载:${r.reloaded}${r.orphans_deleted > 0 ? ` (清理 ${r.orphans_deleted} 个孤儿模型)` : ''}`,
+                      ),
+                    )
+                    .catch((e) => message.error((e as Error).message));
+                }}
+              >
+                <Button icon={<CloudDownloadOutlined />} loading={reloadMut.isPending} danger>
+                  重载 XML
+                </Button>
+              </Popconfirm>
+              <Button
+                icon={<ReloadOutlined />}
+                loading={cacheMut.isPending}
+                onClick={() =>
+                  cacheMut
+                    .mutateAsync()
+                    .then(() => message.success('已刷新参数模型缓存'))
+                    .catch((e) => message.error((e as Error).message))
+                }
+              >
+                刷新缓存
               </Button>
-            </Upload>
-            <Popconfirm
-              title="确认重载 XML?"
-              description={
-                <div style={{ maxWidth: 360 }}>
-                  从 <code>datamodels/</code> <b>destructive 全量重载</b>:
-                  <br />· 当前 XML 中的模型 → UPSERT (覆盖 UI 编辑)
-                  <br />· DB 中已无 XML 对应的孤儿模型 → <b>删除</b>
-                  <br />· 关联的 <code>param_mappings</code> 级联删除
-                  <br />· 关联的 <code>products.param_model_id</code> 被置空 (SET NULL)
-                  <br />操作不可撤销!
-                </div>
-              }
-              okText="确认重载"
-              cancelText="取消"
-              okButtonProps={{ danger: true }}
-              placement="bottomRight"
-              onConfirm={() => {
-                reloadMut
-                  .mutateAsync()
-                  .then((r) =>
-                    message.success(
-                      `已重载:${r.reloaded}${r.orphans_deleted > 0 ? ` (清理 ${r.orphans_deleted} 个孤儿模型)` : ''}`,
-                    ),
-                  )
-                  .catch((e) => message.error((e as Error).message));
-              }}
-            >
-              <Button icon={<CloudDownloadOutlined />} loading={reloadMut.isPending} danger>
-                重载 XML
-              </Button>
-            </Popconfirm>
-            <Button
-              icon={<ReloadOutlined />}
-              loading={cacheMut.isPending}
-              onClick={() =>
-                cacheMut
-                  .mutateAsync()
-                  .then(() => message.success('已刷新参数模型缓存'))
-                  .catch((e) => message.error((e as Error).message))
-              }
-            >
-              刷新缓存
-            </Button>
+            </Space>
           </Space>
-        </Space>
-      </Card>
+        </Card>
+      )}
 
       {/* drill-down 主体:列表态 ↔ 详情态 二选一 */}
       {inDetail ? (
-        <MappingsTab selectedName={selectedModelName} />
+        <MappingsTab
+          selectedName={selectedModelName}
+          onBack={() => setSelectedModelName(undefined)}
+        />
       ) : (
         <ModelsTab
           selectedName={selectedModelName}
