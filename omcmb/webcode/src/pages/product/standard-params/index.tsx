@@ -105,21 +105,32 @@ export default function StandardParamsPage() {
   return (
     <div style={{ padding: 16 }}>
       <Card size="small">
-        {/* 2026-05-28 用户决策:去掉 Card title,筛选栏靠左 */}
-        <Space style={{ marginBottom: 12 }}>
-          <Input.Search
-            placeholder="搜索 standard_path"
-            allowClear
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
-            style={{ width: 240 }}
-          />
-          <Select
-            value={entryType}
-            onChange={(v) => setEntryType(v)}
-            options={ENTRY_OPTIONS}
-            style={{ width: 120 }}
-          />
+        {/* 2026-05-28 用户决策:筛选栏靠左,「新增」按钮靠右 */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            flexWrap: 'wrap',
+            marginBottom: 12,
+          }}
+        >
+          <Space>
+            <Input.Search
+              placeholder="搜索 standard_path"
+              allowClear
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              style={{ width: 240 }}
+            />
+            <Select
+              value={entryType}
+              onChange={(v) => setEntryType(v)}
+              options={ENTRY_OPTIONS}
+              style={{ width: 120 }}
+            />
+          </Space>
           <Button
             type="primary"
             icon={<PlusOutlined />}
@@ -137,7 +148,7 @@ export default function StandardParamsPage() {
           >
             新增
           </Button>
-        </Space>
+        </div>
         <Table<StandardParam>
           rowKey="standardPath"
           loading={isLoading}
