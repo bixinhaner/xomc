@@ -27,6 +27,14 @@ const (
 	CustomDirPrefix  = "param-mappings-custom/"
 )
 
+// BuiltinDirSubdir / CustomDirSubdir 是 XMLBaseDir 下的子目录名(不含末尾 /)。
+// Loader 扫描目录、Handler Upload 写入目标路径、deploy.sh 初始化目录均引用这两个常量;
+// 与 *DirPrefix 保持一致(后者多一个 / 用于字符串前缀匹配)。
+const (
+	BuiltinDirSubdir = "param-mappings"        // 镜像层只读 builtin XML 目录
+	CustomDirSubdir  = "param-mappings-custom" // host bind mount 持久化 custom XML 目录
+)
+
 // ClassifySource 根据 param_models.loaded_from 列值判定物理来源。
 //
 // 输入约定:loaded_from 应为相对 XMLBaseDir 的 slash 路径

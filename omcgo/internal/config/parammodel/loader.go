@@ -60,8 +60,8 @@ func NewLoader(pool *pgxpool.Pool, cfg appconfig.ParamModelLoaderConfig, baseDir
 		cfg:             cfg,
 		base:            baseDir,
 		logger:          logger.Named(LoaderName),
-		customDir:       "param-mappings-custom", // T-0178 默认 host 持久化目录
-		customOverrides: true,                    // T-0178 默认决策 1: 同名 custom 胜出
+		customDir:       CustomDirSubdir, // T-0178 默认 host 持久化目录
+		customOverrides: true,            // T-0178 默认决策 1: 同名 custom 胜出
 	}
 }
 
@@ -90,7 +90,7 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	customSub := l.customDir
 	if customSub == "" {
 		// 直接构造 Loader 字面量(测试 / 未来 cfg 改造)绕过 NewLoader 时的兜底
-		customSub = "param-mappings-custom"
+		customSub = CustomDirSubdir
 	}
 	customDir := filepath.Join(l.base, customSub)
 

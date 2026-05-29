@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -75,6 +76,7 @@ func (o *optInt64) Ptr() *int64 {
 // Reloader 接口注入（dictloader.Registry.ReloadOne 适配器）。
 //
 // T-0178: baseDir 与 Loader 共用,DELETE/Upload 物理路径解析基础;
+// customDir 是 Upload 落地的绝对路径(NewHandler 一次性算出);
 // fileLocks 提供 per-filename 进程内互斥(Upload + Delete + ReloadOne 三方共用,
 // 避免同名文件并发写入竞态)。
 type Handler struct {
@@ -83,6 +85,7 @@ type Handler struct {
 	reloader  Reloader
 	logger    *zap.Logger
 	baseDir   string
+	customDir string   // absolute path = filepath.Join(baseDir, CustomDirSubdir)
 	fileLocks sync.Map // map[basename]*sync.Mutex
 }
 
@@ -98,11 +101,12 @@ func NewHandler(repo *PgRepository, registry *Registry, reloader Reloader, baseD
 		logger = zap.NewNop()
 	}
 	return &Handler{
-		repo:     repo,
-		registry: registry,
-		reloader: reloader,
-		baseDir:  baseDir,
-		logger:   logger.Named("parammodel.handler"),
+		repo:      repo,
+		registry:  registry,
+		reloader:  reloader,
+		baseDir:   baseDir,
+		customDir: filepath.Join(baseDir, CustomDirSubdir),
+		logger:    logger.Named("parammodel.handler"),
 	}
 }
 
@@ -124,6 +128,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	// 集中操作（无 :name）
 	g.GET("", h.ListModels)
 	g.POST("/import-directory", h.ImportDirectory)
+	g.POST("/upload-xml", h.UploadXML) // T-0178: 上传自定义 paramModel XML
 	g.POST("/cache/refresh", h.CacheRefresh)
 	g.POST("/translate", h.Translate)
 	// 标准参数树（位于 /param-models/standard 子路径）
@@ -160,6 +165,13 @@ type modelView struct {
 	Description  string    `json:"description"`
 	IsActive     bool      `json:"is_active"`
 	LoadedFrom   string    `json:"loaded_from"`
+
+	// T-0178: source 与 deletable 是后端唯一真值源,前端直接渲染:
+	//   - source ∈ {"builtin","custom","unknown"} — UI 来源列 Tag
+	//   - deletable: 操作列删除按钮可见性(builtin/unknown 一律置灰 + Tooltip)
+	// 改判定规则只动 source.go::ClassifySource / IsDeletable,无需重新发版前端
+	Source    Source `json:"source"`
+	Deletable bool   `json:"deletable"`
 }
 
 func toModelView(m *ParamModel) modelView {
@@ -167,6 +179,8 @@ func toModelView(m *ParamModel) modelView {
 		ID: m.ID, Name: m.Name,
 		TotalEntries: m.TotalEntries, TotalObjects: m.TotalObjects, TotalParams: m.TotalParams,
 		Description: m.Description, IsActive: m.IsActive, LoadedFrom: m.LoadedFrom,
+		Source:    ClassifySource(m.LoadedFrom),
+		Deletable: IsDeletable(m.LoadedFrom),
 	}
 }
 
@@ -327,6 +341,217 @@ func (h *Handler) DeleteModel(c *gin.Context) {
 		"name":    name,
 		"backup":  filepath.Base(backupPath),
 	})
+}
+
+// UploadXML 接收用户上传的自定义 paramModel XML(T-0178 §9.4)。
+//
+// POST /api/v1/param-models/upload-xml[?force=true]
+// Content-Type: multipart/form-data
+// Field: file
+//
+// 校验链(顺序敏感,任一失败即 400/409,审计明确拒绝原因):
+//  1. 文件名:filepath.Base + uploadFilenamePattern 白名单正则 +
+//     reservedUploadFilenames 保留名拦截
+//  2. 大小:file.Size <= MaxUploadXMLSize (1 MiB)
+//  3. 内容:validateUploadXML 根元素 = <paramModel>
+//  4. 路径:filepath.Join(customDir, base) 经 pathContainedIn 二次验证不逃逸 customDir
+//
+// 写入流程(全程 per-filename 锁):
+//  1. 确保 customDir 存在(MkdirAll,首次上传场景)
+//  2. 检查同名:存在但无 ?force=true → 409 Conflict
+//  3. 写 tmp 文件:targetPath + .tmp.<uuid>(原子写第一步)
+//     defer os.Remove(tmp) — 任何路径退出都清掉残留
+//  4. 若同名存在 + force=true:os.Rename(target, target+.bak.<ts>) 备份
+//  5. os.Rename(tmp, target) 原子上线;失败 → 反向 rename 还原 .bak
+//  6. 触发全量 ReloadOne("param-model") 更新 DB(reload 失败不算 upload 失败,
+//     文件已落地用户可手动 reload 重试)
+//  7. registry.Refresh
+//
+// 安全:
+//   - 文件名正则拒绝路径分隔符 / 点开头 / 空白 / 多扩展名
+//   - pathContainedIn 二次防御 filepath.Clean 解释差异
+//   - encoding/xml Strict + 不处理外部实体(Go 标准库默认安全,无 XXE)
+//   - 单文件大小硬上限 1 MiB(Gin engine MaxMultipartMemory 应配 4 MiB)
+//   - per-filename 锁保证同名 Upload/Delete/Reload 串行
+func (h *Handler) UploadXML(c *gin.Context) {
+	file, err := c.FormFile("file")
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("missing or invalid 'file' multipart field: %w", err))
+		return
+	}
+
+	// 校验 1: 文件名
+	base := filepath.Base(file.Filename)
+	if err := validateUploadFilename(base); err != nil {
+		h.logger.Info("audit: upload rejected (invalid filename)",
+			zap.String("audit_action", "parammodel.upload.rejected_invalid_name"),
+			zap.String("raw_filename", file.Filename),
+			zap.String("basename", base),
+			zap.Error(err))
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	// 校验 2: 大小
+	if file.Size <= 0 {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("file size must be positive, got %d", file.Size))
+		return
+	}
+	if file.Size > MaxUploadXMLSize {
+		h.logger.Info("audit: upload rejected (size limit)",
+			zap.String("audit_action", "parammodel.upload.rejected_too_large"),
+			zap.String("filename", base),
+			zap.Int64("size", file.Size),
+			zap.Int64("limit", MaxUploadXMLSize))
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("file size %d exceeds limit %d bytes (%.2f MiB)",
+				file.Size, MaxUploadXMLSize, float64(MaxUploadXMLSize)/float64(1<<20)))
+		return
+	}
+
+	// 校验 3: 读全文 + XML 内容校验
+	src, err := file.Open()
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError,
+			fmt.Errorf("open uploaded file: %w", err))
+		return
+	}
+	// LimitReader: 防 Content-Length 与 Size 撒谎导致 OOM
+	raw, err := io.ReadAll(io.LimitReader(src, MaxUploadXMLSize+1))
+	_ = src.Close()
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError,
+			fmt.Errorf("read uploaded file: %w", err))
+		return
+	}
+	if int64(len(raw)) > MaxUploadXMLSize {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("file size exceeds limit during stream read"))
+		return
+	}
+	if err := validateUploadXML(raw); err != nil {
+		h.logger.Info("audit: upload rejected (invalid xml)",
+			zap.String("audit_action", "parammodel.upload.rejected_invalid_xml"),
+			zap.String("filename", base),
+			zap.Error(err))
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+
+	// 校验 4: 路径包含性二次防御
+	targetPath := filepath.Join(h.customDir, base)
+	if !pathContainedIn(h.customDir, targetPath) {
+		h.logger.Error("audit: upload rejected (path traversal detected)",
+			zap.String("audit_action", "parammodel.upload.rejected_path_traversal"),
+			zap.String("filename", base),
+			zap.String("computed_path", targetPath),
+			zap.String("custom_dir", h.customDir))
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("path traversal detected for filename %q", base))
+		return
+	}
+
+	// per-filename 锁(与 Delete / 单文件 Reload 共用)
+	unlock := h.acquireFileLock(base)
+	defer unlock()
+
+	// 确保 custom 目录存在(首次部署 + 0750 = owner rwx,group rx,others -)
+	if err := os.MkdirAll(h.customDir, 0o750); err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError,
+			fmt.Errorf("ensure custom dir: %w", err))
+		return
+	}
+
+	// 同名冲突检测
+	force := strings.EqualFold(c.Query("force"), "true")
+	_, statErr := os.Stat(targetPath)
+	exists := statErr == nil
+	if exists && !force {
+		commonerrors.AbortWithError(c, http.StatusConflict,
+			fmt.Errorf("custom xml %q already exists; use ?force=true to overwrite "+
+				"(existing file will be backed up to .bak.<ts>)", base))
+		return
+	}
+
+	// 1. tmp 写入(失败不影响现有文件)
+	tmpPath := targetPath + ".tmp." + uuid.New().String()
+	defer os.Remove(tmpPath) // 兜底:rename 成功后 tmp 已不存在,Remove 返 ENOENT 无害
+	if err := os.WriteFile(tmpPath, raw, 0o640); err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError,
+			fmt.Errorf("write tmp file: %w", err))
+		return
+	}
+
+	// 2. 备份现有(若 overwrite)
+	var backupPath string
+	if exists {
+		backupPath = targetPath + ".bak." + time.Now().Format("20060102150405")
+		if err := os.Rename(targetPath, backupPath); err != nil {
+			h.logger.Error("audit: upload aborted (backup existing failed)",
+				zap.String("audit_action", "parammodel.upload.aborted_backup_failed"),
+				zap.String("filename", base),
+				zap.Error(err))
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				fmt.Errorf("backup existing file failed: %w", err))
+			return
+		}
+	}
+
+	// 3. tmp → target 原子上线
+	if err := os.Rename(tmpPath, targetPath); err != nil {
+		// 还原备份(若有)
+		if backupPath != "" {
+			if rbErr := os.Rename(backupPath, targetPath); rbErr != nil {
+				h.logger.Error("rollback rename failed; host state inconsistent",
+					zap.String("backup_path", backupPath),
+					zap.String("target_path", targetPath),
+					zap.Error(rbErr))
+			}
+		}
+		commonerrors.AbortWithError(c, http.StatusInternalServerError,
+			fmt.Errorf("rename tmp → target: %w", err))
+		return
+	}
+
+	// 4. 触发全量 ReloadOne(文件级 reload 当前未支持;全量 reload 幂等且 <1s)
+	if h.reloader != nil {
+		if err := h.reloader.ReloadOne(c.Request.Context(), LoaderName); err != nil {
+			// 文件已落地,reload 失败不阻塞 upload 响应,用户可手动 reload 重试
+			h.logger.Warn("post-upload reload failed",
+				zap.String("filename", base),
+				zap.Error(err))
+		}
+	}
+	if h.registry != nil {
+		if err := h.registry.Refresh(c.Request.Context()); err != nil {
+			h.logger.Warn("post-upload registry refresh failed",
+				zap.String("filename", base),
+				zap.Error(err))
+		}
+	}
+
+	action := "parammodel.upload.success"
+	if exists {
+		action = "parammodel.upload.overwrite"
+	}
+	h.logger.Info("audit: param-model uploaded",
+		zap.String("audit_action", action),
+		zap.String("filename", base),
+		zap.Int64("size", file.Size),
+		zap.Bool("overwrite", exists),
+		zap.String("backup", filepath.Base(backupPath)))
+
+	out := gin.H{
+		"filename":  base,
+		"size":      file.Size,
+		"overwrite": exists,
+	}
+	if backupPath != "" {
+		out["backup"] = filepath.Base(backupPath)
+	}
+	response.OK(c, out)
 }
 
 // ── Mappings ────────────────────────────────────────────────────────
