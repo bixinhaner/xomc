@@ -26,6 +26,34 @@ type FileRepository interface {
 	//
 	// 返回 perf_indicators_<tech> 主表删除的行数(供日志与响应体)。
 	DeleteByLoadedFrom(ctx context.Context, tech, loadedFrom string) (int, error)
+
+	// SummaryByTech 聚合三制式 perf_indicators_<tech> 的总数/builtin/custom 计数,
+	// 加上对应 indicator_group_<tech> 行数与 rela_platform_indicator_formula_<tech>
+	// 的 distinct platform_name 列表,供一级 SummaryTab 直接渲染。
+	// 一次扫表 + 一次平台 distinct,~3-5 行返回。
+	SummaryByTech(ctx context.Context) ([]TechSummary, error)
+
+	// ListFilesByTech 按 (loaded_from) GROUP BY 列出指定 tech 下所有 XML 文件的
+	// 指标计数。NULL loaded_from(历史数据未回填)归到 ""(由调用方决定如何展示)。
+	ListFilesByTech(ctx context.Context, tech string) ([]FileGroup, error)
+}
+
+// TechSummary 是 /indicators/summary 端点一行(对应一个制式)。
+type TechSummary struct {
+	Tech         string   `json:"tech"`             // enb / gsm / gnb
+	Indicators   int      `json:"indicators"`       // perf_indicators_<tech> 总行数
+	BuiltinCount int      `json:"builtin_count"`    // loaded_from LIKE 'indicator-library/%'
+	CustomCount  int      `json:"custom_count"`     // loaded_from LIKE 'indicator-library-custom/%'
+	UnknownCount int      `json:"unknown_count"`    // loaded_from IS NULL 或不带前缀
+	Groups       int      `json:"groups"`           // indicator_group_<tech> 行数
+	Platforms    []string `json:"platforms"`        // distinct platform_name
+}
+
+// FileGroup 是 /indicators/files?tech= 单行 — DB 聚合视角。
+// 物理目录扫描的合并由 FileHandler.ListFiles 完成(uploaded-but-not-loaded 场景)。
+type FileGroup struct {
+	LoadedFrom string `json:"loaded_from"`
+	Count      int    `json:"count"`
 }
 
 // PgFileRepository 是 FileRepository 的 PostgreSQL 实现。
@@ -111,4 +139,83 @@ DELETE FROM enabled_pm_indicators_%s
 		return 0, fmt.Errorf("commit delete tx: %w", err)
 	}
 	return int(tag.RowsAffected()), nil
+}
+
+// SummaryByTech 实现 FileRepository — 三制式分别一行,顺序固定 enb/gsm/gnb。
+//
+// 每行用单 SQL 一次扫表算出 4 个 COUNT;platforms distinct 走第二次查询;
+// indicator_group_<tech> 行数走第三次。表都不大(< 2000 行级别),不引性能瓶颈。
+func (r *PgFileRepository) SummaryByTech(ctx context.Context) ([]TechSummary, error) {
+	out := make([]TechSummary, 0, 3)
+	for _, tech := range []string{"enb", "gsm", "gnb"} {
+		// counts(loaded_from 前缀分类 + 总数)
+		countSQL := fmt.Sprintf(`
+SELECT COUNT(*) AS total,
+       COUNT(*) FILTER (WHERE loaded_from LIKE 'indicator-library/%%')        AS builtin,
+       COUNT(*) FILTER (WHERE loaded_from LIKE 'indicator-library-custom/%%') AS custom,
+       COUNT(*) FILTER (WHERE loaded_from IS NULL
+                          OR (loaded_from NOT LIKE 'indicator-library/%%'
+                              AND loaded_from NOT LIKE 'indicator-library-custom/%%')) AS unknown
+  FROM perf_indicators_%s`, tech)
+		ts := TechSummary{Tech: tech}
+		if err := r.pool.QueryRow(ctx, countSQL).Scan(&ts.Indicators, &ts.BuiltinCount, &ts.CustomCount, &ts.UnknownCount); err != nil {
+			return nil, fmt.Errorf("summary counts (%s): %w", tech, err)
+		}
+
+		// groups
+		groupSQL := fmt.Sprintf(`SELECT COUNT(*) FROM indicator_group_%s`, tech)
+		if err := r.pool.QueryRow(ctx, groupSQL).Scan(&ts.Groups); err != nil {
+			return nil, fmt.Errorf("summary groups (%s): %w", tech, err)
+		}
+
+		// platforms distinct
+		platSQL := fmt.Sprintf(`SELECT DISTINCT platform_name FROM rela_platform_indicator_formula_%s ORDER BY platform_name`, tech)
+		rows, err := r.pool.Query(ctx, platSQL)
+		if err != nil {
+			return nil, fmt.Errorf("summary platforms (%s): %w", tech, err)
+		}
+		ts.Platforms = make([]string, 0, 8)
+		for rows.Next() {
+			var p string
+			if err := rows.Scan(&p); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan platform (%s): %w", tech, err)
+			}
+			ts.Platforms = append(ts.Platforms, p)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("iterate platforms (%s): %w", tech, err)
+		}
+
+		out = append(out, ts)
+	}
+	return out, nil
+}
+
+// ListFilesByTech 实现 FileRepository — 按 loaded_from GROUP BY 单查询。
+// NULL loaded_from 通过 COALESCE 归到 ""(调用方决定展示策略)。
+func (r *PgFileRepository) ListFilesByTech(ctx context.Context, tech string) ([]FileGroup, error) {
+	if err := validateTech(tech); err != nil {
+		return nil, err
+	}
+	sqlStr := fmt.Sprintf(`
+SELECT COALESCE(loaded_from, '') AS lf, COUNT(*) AS c
+  FROM perf_indicators_%s
+ GROUP BY COALESCE(loaded_from, '')
+ ORDER BY lf`, tech)
+	rows, err := r.pool.Query(ctx, sqlStr)
+	if err != nil {
+		return nil, fmt.Errorf("list files by tech (%s): %w", tech, err)
+	}
+	defer rows.Close()
+	out := make([]FileGroup, 0, 8)
+	for rows.Next() {
+		var fg FileGroup
+		if err := rows.Scan(&fg.LoadedFrom, &fg.Count); err != nil {
+			return nil, fmt.Errorf("scan file group (%s): %w", tech, err)
+		}
+		out = append(out, fg)
+	}
+	return out, rows.Err()
 }

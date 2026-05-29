@@ -1,10 +1,12 @@
 package indicator
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,7 +21,7 @@ import (
 	"github.com/omcgo/omcgo/global"
 )
 
-// mockFileRepository 是 FileRepository 的内存 stub,可注入 countByLoadedFrom / err 行为。
+// mockFileRepository 是 FileRepository 的内存 stub,可注入各方法返回值/错误。
 type mockFileRepository struct {
 	count        int
 	countErr     error
@@ -28,6 +30,11 @@ type mockFileRepository struct {
 	calledDelete bool
 	calledTech   string
 	calledPath   string
+
+	summary       []TechSummary
+	summaryErr    error
+	listByTech    map[string][]FileGroup // tech → groups
+	listByTechErr error
 }
 
 func (m *mockFileRepository) CountByLoadedFrom(ctx context.Context, tech, loadedFrom string) (int, error) {
@@ -47,13 +54,49 @@ func (m *mockFileRepository) DeleteByLoadedFrom(ctx context.Context, tech, loade
 	return m.deleteRows, nil
 }
 
+func (m *mockFileRepository) SummaryByTech(ctx context.Context) ([]TechSummary, error) {
+	if m.summaryErr != nil {
+		return nil, m.summaryErr
+	}
+	return m.summary, nil
+}
+
+func (m *mockFileRepository) ListFilesByTech(ctx context.Context, tech string) ([]FileGroup, error) {
+	if m.listByTechErr != nil {
+		return nil, m.listByTechErr
+	}
+	if m.listByTech == nil {
+		return nil, nil
+	}
+	return m.listByTech[tech], nil
+}
+
+// stubReloader 是测试用 Reloader,可注入失败行为或记录调用。
+type stubReloader struct {
+	calls   int
+	lastCtx context.Context
+	err     error
+}
+
+func (s *stubReloader) ReloadOne(ctx context.Context, name string) error {
+	s.calls++
+	s.lastCtx = ctx
+	return s.err
+}
+
 // newTestRouter 装配 FileHandler + 测试 gin engine(silent mode)。
+// reloader 可传 nil,DELETE/Summary/ListFiles 测试不需要 Reload。
 func newTestRouter(t *testing.T, repo FileRepository, baseDir string) *gin.Engine {
+	t.Helper()
+	return newTestRouterWithReloader(t, repo, nil, baseDir)
+}
+
+func newTestRouterWithReloader(t *testing.T, repo FileRepository, reloader Reloader, baseDir string) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	rg := r.Group("/api/v1")
-	h := NewFileHandler(repo, baseDir, zap.NewNop())
+	h := NewFileHandler(repo, reloader, baseDir, zap.NewNop())
 	h.RegisterRoutes(rg)
 	return r
 }
@@ -283,4 +326,292 @@ func TestValidateTech(t *testing.T) {
 	assert.Error(t, validateTech("lte"))
 	assert.Error(t, validateTech(""))
 	assert.Error(t, validateTech("ENB")) // 大小写敏感
+}
+
+// ── P1.4 Summary HTTP 行为 ───────────────────────────────────────────────
+
+func TestSummary_HappyPath(t *testing.T) {
+	baseDir := t.TempDir()
+	repo := &mockFileRepository{
+		summary: []TechSummary{
+			{Tech: "enb", Indicators: 1163, BuiltinCount: 1100, CustomCount: 63, Groups: 12, Platforms: []string{"ALL", "BLQ"}},
+			{Tech: "gsm", Indicators: 73, BuiltinCount: 73, CustomCount: 0, Groups: 1, Platforms: []string{"BSC"}},
+			{Tech: "gnb", Indicators: 211, BuiltinCount: 211, CustomCount: 0, Groups: 6, Platforms: []string{"BaiBNQ"}},
+		},
+	}
+	r := newTestRouter(t, repo, baseDir)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/indicators/summary", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+
+	var resp struct {
+		Data struct {
+			Items []TechSummary `json:"items"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.Len(t, resp.Data.Items, 3)
+	assert.Equal(t, "enb", resp.Data.Items[0].Tech)
+	assert.Equal(t, 1163, resp.Data.Items[0].Indicators)
+	assert.Equal(t, 63, resp.Data.Items[0].CustomCount)
+}
+
+func TestSummary_RepoError_500(t *testing.T) {
+	baseDir := t.TempDir()
+	repo := &mockFileRepository{summaryErr: errors.New("db down")}
+	r := newTestRouter(t, repo, baseDir)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/indicators/summary", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+// ── P1.4 ListFiles HTTP 行为 ─────────────────────────────────────────────
+
+func TestListFiles_DBAndDiskMerge(t *testing.T) {
+	baseDir := t.TempDir()
+	// 物理:builtin/enb/ALL.xml + custom/enb/UPLOADED_NOT_LOADED.xml
+	writeCustomXML(t, baseDir, "enb", "UPLOADED_NOT_LOADED.xml")
+	// DB:builtin/enb/ALL.xml(123 条)+ custom/enb/LOADED.xml(7 条)
+	repo := &mockFileRepository{
+		listByTech: map[string][]FileGroup{
+			"enb": {
+				{LoadedFrom: "indicator-library/enb/ALL.xml", Count: 123},
+				{LoadedFrom: "indicator-library-custom/enb/LOADED.xml", Count: 7},
+			},
+		},
+	}
+	r := newTestRouter(t, repo, baseDir)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/indicators/files?tech=enb", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+
+	var resp struct {
+		Data struct {
+			Items []fileEntry `json:"items"`
+			Tech  string      `json:"tech"`
+		} `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.Equal(t, "enb", resp.Data.Tech)
+	// 3 行:DB 2 行 + 物理 uploaded-not-loaded 1 行
+	assert.Len(t, resp.Data.Items, 3)
+
+	// 索引便于断言
+	byLF := map[string]fileEntry{}
+	for _, it := range resp.Data.Items {
+		byLF[it.LoadedFrom] = it
+	}
+
+	// 1. builtin/ALL — DB 有 + 物理无(没在 baseDir 下) → OnDisk=false
+	if it, ok := byLF["indicator-library/enb/ALL.xml"]; ok {
+		assert.Equal(t, "builtin", it.Source)
+		assert.False(t, it.Deletable)
+		assert.Equal(t, 123, it.Count)
+	}
+	// 2. custom/LOADED — DB 有 + 物理无(测试中没写) → OnDisk=false 但 Source/Deletable 正确
+	if it, ok := byLF["indicator-library-custom/enb/LOADED.xml"]; ok {
+		assert.Equal(t, "custom", it.Source)
+		assert.True(t, it.Deletable)
+		assert.Equal(t, 7, it.Count)
+	}
+	// 3. uploaded-not-loaded — DB 无 + 物理有 → Count=0 OnDisk=true
+	if it, ok := byLF["indicator-library-custom/enb/UPLOADED_NOT_LOADED.xml"]; ok {
+		assert.Equal(t, "custom", it.Source)
+		assert.True(t, it.Deletable)
+		assert.Equal(t, 0, it.Count)
+		assert.True(t, it.OnDisk)
+	}
+}
+
+func TestListFiles_InvalidTech_400(t *testing.T) {
+	baseDir := t.TempDir()
+	repo := &mockFileRepository{}
+	r := newTestRouter(t, repo, baseDir)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/indicators/files?tech=lte", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// ── P1.4 UploadXML HTTP 行为 ─────────────────────────────────────────────
+
+// buildMultipart 构造 multipart/form-data,body 含 "file" part 的内容。
+func buildMultipart(t *testing.T, filename string, content []byte) (*bytes.Buffer, string) {
+	t.Helper()
+	buf := &bytes.Buffer{}
+	w := multipart.NewWriter(buf)
+	part, err := w.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	_, _ = part.Write(content)
+	_ = w.Close()
+	return buf, w.FormDataContentType()
+}
+
+func TestUpload_HappyPath_201(t *testing.T) {
+	baseDir := t.TempDir()
+	reloader := &stubReloader{}
+	repo := &mockFileRepository{}
+	r := newTestRouterWithReloader(t, repo, reloader, baseDir)
+
+	xml := []byte(`<indicatorModel platform="MY_PLATFORM" indicatorCount="0"></indicatorModel>`)
+	body, ct := buildMultipart(t, "MY.xml", xml)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=enb", body)
+	req.Header.Set("Content-Type", ct)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusCreated, w.Code, "body=%s", w.Body.String())
+
+	// 物理文件应在 baseDir/indicator-library-custom/enb/MY.xml
+	target := filepath.Join(baseDir, CustomDirSubdir, "enb", "MY.xml")
+	got, err := os.ReadFile(target)
+	assert.NoError(t, err)
+	assert.Equal(t, xml, got)
+
+	// Reloader 被调一次
+	assert.Equal(t, 1, reloader.calls)
+
+	// 响应体含 loaded_from / overwrite=false
+	var resp struct {
+		Data map[string]any `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.Equal(t, "indicator-library-custom/enb/MY.xml", resp.Data["loaded_from"])
+	assert.Equal(t, false, resp.Data["overwrite"])
+}
+
+func TestUpload_OverwriteWithBackup_200(t *testing.T) {
+	baseDir := t.TempDir()
+	// 预置同名旧文件
+	writeCustomXML(t, baseDir, "enb", "MY.xml")
+	reloader := &stubReloader{}
+	repo := &mockFileRepository{}
+	r := newTestRouterWithReloader(t, repo, reloader, baseDir)
+
+	xml := []byte(`<indicatorModel platform="NEW" indicatorCount="0"></indicatorModel>`)
+	body, ct := buildMultipart(t, "MY.xml", xml)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=enb&force=true", body)
+	req.Header.Set("Content-Type", ct)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+
+	// 原文件被新内容覆盖
+	got, _ := os.ReadFile(filepath.Join(baseDir, CustomDirSubdir, "enb", "MY.xml"))
+	assert.Equal(t, xml, got)
+
+	// 同目录下有 .bak.* 备份
+	entries, _ := os.ReadDir(filepath.Join(baseDir, CustomDirSubdir, "enb"))
+	hasBackup := false
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".bak.") {
+			hasBackup = true
+		}
+	}
+	assert.True(t, hasBackup)
+}
+
+func TestUpload_ConflictWithoutForce_409(t *testing.T) {
+	baseDir := t.TempDir()
+	writeCustomXML(t, baseDir, "enb", "MY.xml")
+	reloader := &stubReloader{}
+	repo := &mockFileRepository{}
+	r := newTestRouterWithReloader(t, repo, reloader, baseDir)
+
+	xml := []byte(`<indicatorModel platform="X" indicatorCount="0"></indicatorModel>`)
+	body, ct := buildMultipart(t, "MY.xml", xml)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=enb", body)
+	req.Header.Set("Content-Type", ct)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Equal(t, 0, reloader.calls, "冲突时不触发 Reload")
+}
+
+func TestUpload_InvalidTech_400(t *testing.T) {
+	baseDir := t.TempDir()
+	r := newTestRouter(t, &mockFileRepository{}, baseDir)
+	body, ct := buildMultipart(t, "MY.xml", []byte(`<indicatorModel platform="X"></indicatorModel>`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=lte", body)
+	req.Header.Set("Content-Type", ct)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), fmt.Sprintf("code=%d", global.ErrCodeIndicatorUploadInvalidTech))
+}
+
+func TestUpload_InvalidFilename_400(t *testing.T) {
+	baseDir := t.TempDir()
+	r := newTestRouter(t, &mockFileRepository{}, baseDir)
+	// 路径分隔符在文件名 → 被 filepath.Base 简化为最末段 → 但同时校验仍能拦
+	body, ct := buildMultipart(t, "../escape.xml", []byte(`<indicatorModel platform="X"></indicatorModel>`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=enb", body)
+	req.Header.Set("Content-Type", ct)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	// 注:filepath.Base 把 "../escape.xml" → "escape.xml"(合法名)
+	// 这测的是 multi-extension 拒绝路径
+	_ = w
+	// 改测 multi-extension
+	body2, ct2 := buildMultipart(t, "MY.xml.sh", []byte(`<indicatorModel platform="X"></indicatorModel>`))
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=enb", body2)
+	req2.Header.Set("Content-Type", ct2)
+	w2 := httptest.NewRecorder()
+	r.ServeHTTP(w2, req2)
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assert.Contains(t, w2.Body.String(), fmt.Sprintf("code=%d", global.ErrCodeIndicatorUploadInvalidName))
+}
+
+func TestUpload_DeviceTypeMismatch_400(t *testing.T) {
+	baseDir := t.TempDir()
+	r := newTestRouter(t, &mockFileRepository{}, baseDir)
+	// 上传 tech=enb 但 XML 内 deviceType="GSM"
+	body, ct := buildMultipart(t, "MY.xml", []byte(`<indicatorModel platform="X" deviceType="GSM"></indicatorModel>`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=enb", body)
+	req.Header.Set("Content-Type", ct)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), fmt.Sprintf("code=%d", global.ErrCodeIndicatorUploadInvalidRoot))
+}
+
+func TestUpload_NoFile_400(t *testing.T) {
+	baseDir := t.TempDir()
+	r := newTestRouter(t, &mockFileRepository{}, baseDir)
+	// 空 multipart(无 file part)
+	buf := &bytes.Buffer{}
+	mw := multipart.NewWriter(buf)
+	_ = mw.WriteField("garbage", "value")
+	_ = mw.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=enb", buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestUpload_ReloadFailedStillSucceeds(t *testing.T) {
+	baseDir := t.TempDir()
+	reloader := &stubReloader{err: errors.New("simulated reload fail")}
+	r := newTestRouterWithReloader(t, &mockFileRepository{}, reloader, baseDir)
+	xml := []byte(`<indicatorModel platform="X" indicatorCount="0"></indicatorModel>`)
+	body, ct := buildMultipart(t, "MY.xml", xml)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/indicators/upload-xml?tech=enb", body)
+	req.Header.Set("Content-Type", ct)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	// Upload 成功(文件已写),Reload 失败仅响应 reloaded=false
+	assert.Equal(t, http.StatusCreated, w.Code)
+	var resp struct {
+		Data map[string]any `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	assert.Equal(t, false, resp.Data["reloaded"])
+	assert.Equal(t, 1, reloader.calls)
 }
