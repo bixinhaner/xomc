@@ -110,17 +110,14 @@ export function techToDeviceType(t: TechLower): DeviceType {
   return t.toUpperCase() as DeviceType;
 }
 
-// IndicatorTechSummary 是 /indicators/summary 端点单行(对应一个制式)。
-// 后端 backend.SummaryByTech 返回 { tech, indicators, builtin_count, custom_count,
-//                                  unknown_count, groups, platforms[] }
-export interface IndicatorTechSummary {
+// IndicatorPlatformSummary 是 /indicators/summary 端点单行 — (制式, 平台) 二元组。
+// 2026-05-29 用户决策:从"3 行/制式"调为"N 行/(制式, 平台)"粒度。
+// 后端 backend.SummaryByTech 返回 { tech, platform, loaded_from, indicators }
+export interface IndicatorPlatformSummary {
   tech: TechLower;
-  indicators: number;     // 总行数
-  builtinCount: number;   // loaded_from LIKE 'indicator-library/%'
-  customCount: number;    // loaded_from LIKE 'indicator-library-custom/%'
-  unknownCount: number;   // loaded_from IS NULL 或不带前缀
-  groups: number;         // indicator_group_<tech> 总行数
-  platforms: string[];    // distinct platform_name
+  platform: string;       // platform_name(rela_platform_indicator_formula_*.platform_name)
+  loadedFrom: string;     // XML 文件路径(含前缀),如 "indicator-library/enb/ALL.xml"
+  indicators: number;     // 该 (loaded_from, platform) 指标计数
 }
 
 // IndicatorFile 是 /indicators/files?tech= 单行 — 含 source/deletable 派生 + DB 计数。

@@ -28,11 +28,13 @@ type FileRepository interface {
 	// 返回 perf_indicators_<tech> 主表删除的行数(供日志与响应体)。
 	DeleteByLoadedFrom(ctx context.Context, tech, loadedFrom string) (int, error)
 
-	// SummaryByTech 聚合三制式 perf_indicators_<tech> 的总数/builtin/custom 计数,
-	// 加上对应 indicator_group_<tech> 行数与 rela_platform_indicator_formula_<tech>
-	// 的 distinct platform_name 列表,供一级 SummaryTab 直接渲染。
-	// 一次扫表 + 一次平台 distinct,~3-5 行返回。
-	SummaryByTech(ctx context.Context) ([]TechSummary, error)
+	// SummaryByTech 聚合三制式所有 (loaded_from, platform) 组合,每个 (制式, 平台)
+	// 一行(2026-05-29 用户决策从"三行/制式"调为"N 行/(制式,平台)粒度")。
+	//
+	// JOIN perf_indicators_<tech> ⨝ rela_platform_indicator_formula_<tech> GROUP BY
+	// (loaded_from, platform_name);只返带 builtin/custom 前缀的 loaded_from(过滤 unknown);
+	// INNER JOIN 排除无 platform 的 indicator(罕见,通常 Loader 入库即建公式)。
+	SummaryByTech(ctx context.Context) ([]PlatformSummary, error)
 
 	// ListFilesByTech 按 (loaded_from) GROUP BY 列出指定 tech 下所有 XML 文件的
 	// 指标计数。NULL loaded_from(历史数据未回填)归到 ""(由调用方决定如何展示)。
@@ -50,15 +52,17 @@ type FileRepository interface {
 	DeleteOrphansBefore(ctx context.Context, tech string, before time.Time) (int, error)
 }
 
-// TechSummary 是 /indicators/summary 端点一行(对应一个制式)。
-type TechSummary struct {
-	Tech         string   `json:"tech"`             // enb / gsm / gnb
-	Indicators   int      `json:"indicators"`       // perf_indicators_<tech> 总行数
-	BuiltinCount int      `json:"builtin_count"`    // loaded_from LIKE 'indicator-library/%'
-	CustomCount  int      `json:"custom_count"`     // loaded_from LIKE 'indicator-library-custom/%'
-	UnknownCount int      `json:"unknown_count"`    // loaded_from IS NULL 或不带前缀
-	Groups       int      `json:"groups"`           // indicator_group_<tech> 行数
-	Platforms    []string `json:"platforms"`        // distinct platform_name
+// PlatformSummary 是 /indicators/summary 端点单行 — (制式, 平台) 二元组粒度。
+//
+// 2026-05-29 用户决策:从"三行/制式"(TechSummary)调为"N 行/(制式, 平台)"
+//   - 每个 (tech, platform_name) 唯一一行
+//   - LoadedFrom 是该 (tech, platform) 对应的 XML 文件 rel 路径(理论上 1:1 映射)
+//   - Indicators 是该文件入库的指标计数
+type PlatformSummary struct {
+	Tech       string `json:"tech"`        // enb / gsm / gnb
+	Platform   string `json:"platform"`    // 平台名(从 rela_platform_indicator_formula_*.platform_name)
+	LoadedFrom string `json:"loaded_from"` // XML 文件相对路径(含前缀),如 "indicator-library/enb/ALL.xml"
+	Indicators int    `json:"indicators"`  // 该 (loaded_from, platform_name) 的指标计数
 }
 
 // FileGroup 是 /indicators/files?tech= 单行 — DB 聚合视角。
@@ -153,54 +157,46 @@ DELETE FROM enabled_pm_indicators_%s
 	return int(tag.RowsAffected()), nil
 }
 
-// SummaryByTech 实现 FileRepository — 三制式分别一行,顺序固定 enb/gsm/gnb。
+// SummaryByTech 实现 FileRepository — 按 (tech, loaded_from, platform_name) GROUP BY,
+// 每 (制式, 平台) 一行(2026-05-29 用户决策粒度调整)。
 //
-// 每行用单 SQL 一次扫表算出 4 个 COUNT;platforms distinct 走第二次查询;
-// indicator_group_<tech> 行数走第三次。表都不大(< 2000 行级别),不引性能瓶颈。
-func (r *PgFileRepository) SummaryByTech(ctx context.Context) ([]TechSummary, error) {
-	out := make([]TechSummary, 0, 3)
+// JOIN 策略:
+//   - INNER JOIN perf_indicators_<tech> 与 rela_platform_indicator_formula_<tech>
+//   - 排除 loaded_from 不带 builtin/custom 前缀的"未知"行
+//   - GROUP BY (loaded_from, platform_name) → 一文件一平台 = 一行
+//   - 实践中每 XML <indicatorModel platform="X"> 单一 platform,但允许多平台也兼容
+//
+// 顺序:tech 升序(enb/gsm/gnb)→ loaded_from 升序 → platform 升序,UX 稳定。
+func (r *PgFileRepository) SummaryByTech(ctx context.Context) ([]PlatformSummary, error) {
+	out := make([]PlatformSummary, 0, 16)
 	for _, tech := range []string{"enb", "gsm", "gnb"} {
-		// counts(loaded_from 前缀分类 + 总数)
-		countSQL := fmt.Sprintf(`
-SELECT COUNT(*) AS total,
-       COUNT(*) FILTER (WHERE loaded_from LIKE 'indicator-library/%%')        AS builtin,
-       COUNT(*) FILTER (WHERE loaded_from LIKE 'indicator-library-custom/%%') AS custom,
-       COUNT(*) FILTER (WHERE loaded_from IS NULL
-                          OR (loaded_from NOT LIKE 'indicator-library/%%'
-                              AND loaded_from NOT LIKE 'indicator-library-custom/%%')) AS unknown
-  FROM perf_indicators_%s`, tech)
-		ts := TechSummary{Tech: tech}
-		if err := r.pool.QueryRow(ctx, countSQL).Scan(&ts.Indicators, &ts.BuiltinCount, &ts.CustomCount, &ts.UnknownCount); err != nil {
-			return nil, fmt.Errorf("summary counts (%s): %w", tech, err)
-		}
+		sqlStr := fmt.Sprintf(`
+SELECT pi.loaded_from,
+       rf.platform_name,
+       COUNT(DISTINCT pi.id) AS indicators
+  FROM perf_indicators_%s pi
+ INNER JOIN rela_platform_indicator_formula_%s rf ON rf.indicator_id = pi.id
+ WHERE pi.loaded_from LIKE 'indicator-library/%%'
+    OR pi.loaded_from LIKE 'indicator-library-custom/%%'
+ GROUP BY pi.loaded_from, rf.platform_name
+ ORDER BY pi.loaded_from, rf.platform_name`, tech, tech)
 
-		// groups
-		groupSQL := fmt.Sprintf(`SELECT COUNT(*) FROM indicator_group_%s`, tech)
-		if err := r.pool.QueryRow(ctx, groupSQL).Scan(&ts.Groups); err != nil {
-			return nil, fmt.Errorf("summary groups (%s): %w", tech, err)
-		}
-
-		// platforms distinct
-		platSQL := fmt.Sprintf(`SELECT DISTINCT platform_name FROM rela_platform_indicator_formula_%s ORDER BY platform_name`, tech)
-		rows, err := r.pool.Query(ctx, platSQL)
+		rows, err := r.pool.Query(ctx, sqlStr)
 		if err != nil {
 			return nil, fmt.Errorf("summary platforms (%s): %w", tech, err)
 		}
-		ts.Platforms = make([]string, 0, 8)
 		for rows.Next() {
-			var p string
-			if err := rows.Scan(&p); err != nil {
+			row := PlatformSummary{Tech: tech}
+			if err := rows.Scan(&row.LoadedFrom, &row.Platform, &row.Indicators); err != nil {
 				rows.Close()
-				return nil, fmt.Errorf("scan platform (%s): %w", tech, err)
+				return nil, fmt.Errorf("scan platform summary row (%s): %w", tech, err)
 			}
-			ts.Platforms = append(ts.Platforms, p)
+			out = append(out, row)
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
-			return nil, fmt.Errorf("iterate platforms (%s): %w", tech, err)
+			return nil, fmt.Errorf("iterate platform summary (%s): %w", tech, err)
 		}
-
-		out = append(out, ts)
 	}
 	return out, nil
 }

@@ -25,7 +25,7 @@ import IndicatorDrawer from './IndicatorDrawer';
 
 interface Filter {
   keyword?: string;
-  platform?: string;
+  platform?: string;  // 2026-05-29:由 URL ?platform= 注入并锁定;不在 UI 提供切换
   groupId?: string;
 }
 

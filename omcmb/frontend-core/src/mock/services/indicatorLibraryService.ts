@@ -11,7 +11,7 @@ import type {
   UpdateGroupInput,
   EnabledIndicatorsRequest,
   UnitInput,
-  IndicatorTechSummary,
+  IndicatorPlatformSummary,
   IndicatorFile,
   IndicatorReloadMode,
   IndicatorReloadResult,
@@ -248,25 +248,28 @@ export const indicatorLibraryService = {
     return { reloaded: 'indicator', mode: 'import' };
   },
 
-  async summary(): Promise<{ items: IndicatorTechSummary[] }> {
-    // mock 3 行制式聚合 — 数据由 mockIndicators 派生
+  async summary(): Promise<{ items: IndicatorPlatformSummary[] }> {
+    // mock (制式, 平台) 多行聚合 — 按 indicator.productClass 分组,每组生成一行
+    const items: IndicatorPlatformSummary[] = [];
     const techRows: TechLower[] = ['enb', 'gsm', 'gnb'];
-    const items = techRows.map((tech): IndicatorTechSummary => {
+    for (const tech of techRows) {
       const dt = tech.toUpperCase() as DeviceType;
       const arr = indicators[dt] || [];
-      const platforms = Array.from(
-        new Set(arr.map((i) => i.productClass).filter(Boolean) as string[])
-      );
-      return {
-        tech,
-        indicators: arr.length,
-        builtinCount: arr.length, // mock 默认全部内置
-        customCount: 0,
-        unknownCount: 0,
-        groups: (groups[dt] || []).length,
-        platforms,
-      };
-    });
+      const byPlatform = new Map<string, number>();
+      for (const i of arr) {
+        const p = i.productClass || '';
+        if (!p) continue;
+        byPlatform.set(p, (byPlatform.get(p) || 0) + 1);
+      }
+      for (const [platform, count] of Array.from(byPlatform.entries()).sort(([a], [b]) => a.localeCompare(b))) {
+        // mock loaded_from:ENB 走 enb 子目录,GSM/GNB 走单文件根
+        const loadedFrom =
+          tech === 'enb'
+            ? `indicator-library/enb/${platform}.xml`
+            : `indicator-library/${tech.toUpperCase()}.xml`;
+        items.push({ tech, platform, loadedFrom, indicators: count });
+      }
+    }
     return { items };
   },
 

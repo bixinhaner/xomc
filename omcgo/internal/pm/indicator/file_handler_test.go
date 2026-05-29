@@ -32,7 +32,7 @@ type mockFileRepository struct {
 	calledTech   string
 	calledPath   string
 
-	summary       []TechSummary
+	summary       []PlatformSummary
 	summaryErr    error
 	listByTech    map[string][]FileGroup // tech → groups
 	listByTechErr error
@@ -61,7 +61,7 @@ func (m *mockFileRepository) DeleteByLoadedFrom(ctx context.Context, tech, loade
 	return m.deleteRows, nil
 }
 
-func (m *mockFileRepository) SummaryByTech(ctx context.Context) ([]TechSummary, error) {
+func (m *mockFileRepository) SummaryByTech(ctx context.Context) ([]PlatformSummary, error) {
 	if m.summaryErr != nil {
 		return nil, m.summaryErr
 	}
@@ -356,10 +356,12 @@ func TestValidateTech(t *testing.T) {
 func TestSummary_HappyPath(t *testing.T) {
 	baseDir := t.TempDir()
 	repo := &mockFileRepository{
-		summary: []TechSummary{
-			{Tech: "enb", Indicators: 1163, BuiltinCount: 1100, CustomCount: 63, Groups: 12, Platforms: []string{"ALL", "BLQ"}},
-			{Tech: "gsm", Indicators: 73, BuiltinCount: 73, CustomCount: 0, Groups: 1, Platforms: []string{"BSC"}},
-			{Tech: "gnb", Indicators: 211, BuiltinCount: 211, CustomCount: 0, Groups: 6, Platforms: []string{"BaiBNQ"}},
+		// 2026-05-29:Summary 调整为 (制式, 平台) 粒度,每平台一行
+		summary: []PlatformSummary{
+			{Tech: "enb", Platform: "ALL", LoadedFrom: "indicator-library/enb/ALL.xml", Indicators: 700},
+			{Tech: "enb", Platform: "BLQ", LoadedFrom: "indicator-library/enb/BLQ.xml", Indicators: 463},
+			{Tech: "gsm", Platform: "BSC", LoadedFrom: "indicator-library/GSM.xml", Indicators: 73},
+			{Tech: "gnb", Platform: "BaiBNQ", LoadedFrom: "indicator-library/GNB.xml", Indicators: 211},
 		},
 	}
 	r := newTestRouter(t, repo, baseDir)
@@ -371,14 +373,15 @@ func TestSummary_HappyPath(t *testing.T) {
 
 	var resp struct {
 		Data struct {
-			Items []TechSummary `json:"items"`
+			Items []PlatformSummary `json:"items"`
 		} `json:"data"`
 	}
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	assert.Len(t, resp.Data.Items, 3)
+	assert.Len(t, resp.Data.Items, 4)
 	assert.Equal(t, "enb", resp.Data.Items[0].Tech)
-	assert.Equal(t, 1163, resp.Data.Items[0].Indicators)
-	assert.Equal(t, 63, resp.Data.Items[0].CustomCount)
+	assert.Equal(t, "ALL", resp.Data.Items[0].Platform)
+	assert.Equal(t, "indicator-library/enb/ALL.xml", resp.Data.Items[0].LoadedFrom)
+	assert.Equal(t, 700, resp.Data.Items[0].Indicators)
 }
 
 func TestSummary_RepoError_500(t *testing.T) {

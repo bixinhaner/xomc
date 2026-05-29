@@ -12,7 +12,7 @@ import type {
   EnabledIndicatorsRequest,
   UnitInput,
   DeviceType,
-  IndicatorTechSummary,
+  IndicatorPlatformSummary,
   IndicatorFile,
   IndicatorReloadMode,
   IndicatorReloadResult,
@@ -341,28 +341,23 @@ export const indicatorLibraryApi = {
     };
   },
 
-  // T-0180 P1.4: 三制式聚合(builtin/custom/groups/platforms);一级 SummaryTab 渲染
-  async summary(): Promise<{ items: IndicatorTechSummary[] }> {
+  // T-0180 P1.4(2026-05-29 用户调整粒度):一级 SummaryTab 数据源 — (制式, 平台) 一行
+  // 后端返 { tech, platform, loaded_from, indicators },前端原样映射 camelCase
+  async summary(): Promise<{ items: IndicatorPlatformSummary[] }> {
     const { data } = await http.get<{
       items: Array<{
         tech: string;
+        platform: string;
+        loaded_from: string;
         indicators: number;
-        builtin_count: number;
-        custom_count: number;
-        unknown_count: number;
-        groups: number;
-        platforms: string[];
       }>;
     }>('/indicators/summary');
     return {
       items: (data.items || []).map((b) => ({
         tech: b.tech as TechLower,
+        platform: b.platform,
+        loadedFrom: b.loaded_from,
         indicators: b.indicators,
-        builtinCount: b.builtin_count,
-        customCount: b.custom_count,
-        unknownCount: b.unknown_count,
-        groups: b.groups,
-        platforms: b.platforms || [],
       })),
     };
   },
