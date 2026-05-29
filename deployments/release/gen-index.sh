@@ -164,7 +164,26 @@ $LEGACY_NOTE
 </div>
 
 <div class="tab-content" id="tab-deploy">
+<h2>🧰 0. 系统准备(最小化系统必看)</h2>
+<p class="lead">最小化安装的 Linux(尤其 Ubuntu Server / Debian netinst / RHEL minimal /
+cloud-image)往往不带 <code>iptables</code>,Docker daemon 启动 bridge 驱动时会直接 panic:
+<code>failed to start daemon: Error initializing network controller:
+failed to register "bridge" driver: failed to create NAT chain DOCKER: iptables not found</code>。
+请在装 Docker <b>之前</b>先执行对应发行版的命令补齐内核网络工具。</p>
+<pre># Ubuntu / Debian
+sudo apt update
+sudo apt install -y iptables nftables bridge-utils
+
+# RHEL / CentOS / Rocky / openEuler
+sudo yum install -y iptables nftables bridge-utils
+# 或 sudo dnf install -y iptables nftables bridge-utils</pre>
+<p class="tip">标准 Server / Desktop ISO 装出来的系统通常已带这些工具,可
+<code>which iptables nft brctl</code> 检查后再决定是否跳过本步。</p>
+
 <h2>🔐 1. 校验完整性</h2>
+<p class="tip">每个交付包对应 <b>2 个文件</b>:<code>.tar.xz</code>(产物) +
+<code>.tar.xz.sha256</code>(校验和),两个都要下载;校验命令里的
+<code>.sha256</code> 后缀不能省。</p>
 <pre>sha256sum -c omc-infra-&lt;版本&gt;-&lt;架构&gt;.tar.xz.sha256
 sha256sum -c omc-&lt;test|release&gt;-&lt;版本&gt;-&lt;架构&gt;.tar.xz.sha256</pre>
 
@@ -181,6 +200,10 @@ sudo bash install-docker.sh                         # 交互式：装完会引�
 sudo bash install-docker.sh --mirror daocloud       # 非交互：装完直接配 DaoCloud 加速
 sudo bash install-docker.sh -h                      # 查看所有参数</pre>
 <p class="tip">install-docker.sh 自动：解压二进制 → 写 containerd / docker 的 systemd 单元 → <code>enable --now</code> 开机自启 → 验证 → 引导加速镜像。</p>
+<div class="danger">⚠️ 若 <code>docker.service</code> 启动报
+<code>failed to create NAT chain DOCKER: iptables not found</code>,
+说明系统缺 iptables —— 回到 <b>0. 系统准备</b> 跑一遍 apt/yum 命令,然后
+<code>sudo systemctl start docker</code> 即可继续。</div>
 
 <h2>⚡ 4. 系统加速设置（可选）— Docker / npm / Golang 三合一</h2>
 <p class="lead"><code>setup-mirrors.sh</code> 位于 infra 包顶层（非 Docker 专属），一次性配置 3 类加速器（每项可独立选择"不设置 = 走官方"）：</p>
@@ -363,6 +386,7 @@ docker compose -p omcgo exec postgres psql -U omcgo -d omcgo</pre>
 <li>重跑健康检查：<code>bash /opt/omc/current/deploy/healthcheck.sh</code></li>
 <li>停止全栈：<code>cd /opt/omc/current/deploy && docker compose -p omcgo -f docker-compose.infra.yml -f docker-compose.app.yml -f docker-compose.web.yml -f docker-compose.monitoring.yml down</code></li>
 <li>查看脚本帮助：<code>bash &lt;脚本&gt; -h</code>（install-docker.sh / setup-mirrors.sh / deploy.sh / healthcheck.sh 均支持）</li>
+<li>Docker 装好却起不来报 <code>iptables not found</code>：最小化系统漏装 iptables，跑 <code>sudo apt install -y iptables nftables bridge-utils</code>（Ubuntu/Debian）或 <code>sudo yum install -y iptables nftables bridge-utils</code>（RHEL 系），再 <code>sudo systemctl start docker</code>。</li>
 <li>完整运维手册：见随项目包附带 <code>docs/OMC内网离线部署手册（运维侧）.md</code></li>
 </ul>
 </div>
