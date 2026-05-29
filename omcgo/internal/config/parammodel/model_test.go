@@ -2,6 +2,8 @@ package parammodel
 
 import (
 	"encoding/xml"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -39,4 +41,25 @@ func TestXMLParamEntry_SupportedAttribute(t *testing.T) {
 	assert.Equal(t, "false", byName["A.SupportedFalse"].Supported)
 	// 显式 true
 	assert.Equal(t, "true", byName["A.SupportedTrue"].Supported)
+}
+
+func TestBMNeighborListHasPrivateArfcnAlias(t *testing.T) {
+	xmlPath := filepath.Join("..", "..", "..", "data", "param-mappings", "BM.xml")
+	body, err := os.ReadFile(xmlPath)
+	require.NoError(t, err)
+
+	var doc xmlParameterModel
+	require.NoError(t, xml.Unmarshal(body, &doc))
+
+	const privatePath = "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.X_COM_EUTRAULEarfcn"
+	const standardPath = "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.EUTRACarrierARFCN"
+
+	for _, param := range doc.Params {
+		if param.Name == privatePath {
+			assert.Equal(t, standardPath, param.StandardPath)
+			return
+		}
+	}
+
+	t.Fatalf("expected BM.xml to define alias %s -> %s", privatePath, standardPath)
 }

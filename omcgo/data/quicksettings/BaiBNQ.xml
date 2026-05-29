@@ -43,4 +43,46 @@
     <param name="ULSubCarrierSpacing" titleZh="上行子载波间隔" titleEn="UL SubCarrier Spacing"
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoULSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.SubcarrierSpacing"/>
   </group>
+       <group id="gnb-nr-neighbor-cell" titleZh="NR 邻区列表" titleEn="NR Neighbor Cell List"
+                             multiInstance="true"
+                             objectPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.">
+              <param name="PLMNID" titleZh="PLMN" titleEn="PLMN" leaf="PLMNID"/>
+              <param name="CID" titleZh="小区 ID" titleEn="Cell ID" leaf="CID"/>
+              <param name="NRCarrierARFCN" titleZh="NR 频点" titleEn="NR ARFCN" leaf="NRCarrierARFCN"/>
+              <param name="ssbFrequency" titleZh="SSB 频点" titleEn="SSB Frequency" leaf="ssbFrequency"/>
+              <param name="PhyCellID" titleZh="PCI" titleEn="PCI" leaf="PhyCellID"/>
+              <param name="Qoffset" titleZh="QOffset" titleEn="QOffset" leaf="Qoffset"/>
+              <param name="TAC" titleZh="TAC" titleEn="TAC" leaf="TAC"/>
+       </group>
+       <group id="gnb-nr-interfreq" titleZh="NR 异频邻频" titleEn="NR Inter-Frequency Carrier List"
+                             multiInstance="true"
+                             objectPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier.{i}.">
+              <param name="Enable" titleZh="启用" titleEn="Enable" leaf="Enable"/>
+              <param name="SSBFrequency" titleZh="SSB 频点" titleEn="SSB Frequency" leaf="SSBFrequency"/>
+              <param name="SubcarrierSpacing" titleZh="子载波间隔" titleEn="Subcarrier Spacing" leaf="SubcarrierSpacing"/>
+              <param name="SmtcPeriodicity" titleZh="SMTC 周期" titleEn="SMTC Periodicity" leaf="SmtcPeriodicity"/>
+              <param name="SmtcOffset" titleZh="SMTC 偏移" titleEn="SMTC Offset" leaf="SmtcOffset"/>
+              <param name="FreqBandIndicatorNR" titleZh="频段" titleEn="Band" leaf="FreqBandIndicatorNR"/>
+       </group>
+       <group id="gnb-lte-neighbor-cell" titleZh="LTE 邻区列表" titleEn="LTE Neighbor Cell List"
+                             multiInstance="true"
+                             objectPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.{i}.">
+              <param name="PLMNID" titleZh="PLMN" titleEn="PLMN" leaf="PLMNID"/>
+              <param name="CID" titleZh="小区 ID" titleEn="Cell ID" leaf="CID"/>
+              <param name="EUTRACarrierARFCN" titleZh="EARFCN" titleEn="EARFCN" leaf="EUTRACarrierARFCN"/>
+              <param name="PhyCellID" titleZh="PCI" titleEn="PCI" leaf="PhyCellID"/>
+              <param name="Qoffset" titleZh="QOffset" titleEn="QOffset" leaf="Qoffset"/>
+              <param name="TAC" titleZh="TAC" titleEn="TAC" leaf="TAC"/>
+       </group>
+       <group id="gnb-lte-neighbor-freq" titleZh="LTE 邻频列表" titleEn="LTE Neighbor Frequency List"
+                             multiInstance="true"
+                             objectPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.{i}.">
+              <param name="CarrierFreq" titleZh="频点" titleEn="Carrier Frequency" leaf="CarrierFreq"/>
+              <param name="AllowedMeasBandwidth" titleZh="测量带宽" titleEn="Allowed Meas Bandwidth" leaf="AllowedMeasBandwidth"/>
+              <param name="PresenceAntennaPort1" titleZh="天线端口 1" titleEn="Antenna Port 1" leaf="PresenceAntennaPort1"/>
+              <param name="Qoffset" titleZh="QOffset" titleEn="QOffset" leaf="Qoffset"/>
+              <param name="ThreshXHigh" titleZh="高门限" titleEn="Thresh X High" leaf="ThreshXHigh"/>
+              <param name="ThreshXLow" titleZh="低门限" titleEn="Thresh X Low" leaf="ThreshXLow"/>
+              <param name="CellReselectionPriority" titleZh="重选优先级" titleEn="Cell Reselection Priority" leaf="CellReselectionPriority"/>
+       </group>
 </quickSettings>

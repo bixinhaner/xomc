@@ -699,7 +699,7 @@ func extractStorablePrefixes(mappings []parammodel.ParamMapping) []string {
 		if !m.IsStorable || !m.IsSupported {
 			continue
 		}
-		prefix := basePrefix(expandSingletonLeafPath(m.PrivatePath))
+		prefix := basePrefix(normalizeSingletonFAPServicePath(m.PrivatePath))
 		if prefix == "" {
 			continue
 		}
@@ -720,17 +720,23 @@ func extractStorablePrefixes(mappings []parammodel.ParamMapping) []string {
 	return out
 }
 
-// expandSingletonLeafPath preserves exact GPV leaf requests for well-known
-// singleton instance tables. Some CPEs do not return singleton leaf values when
-// querying only the parent object prefix, so these paths must stay leaf-shaped.
-func expandSingletonLeafPath(privatePath string) string {
-	if strings.Count(privatePath, "{i}") != 1 {
+// normalizeSingletonFAPServicePath replaces the leading FAPService instance
+// placeholder with a concrete singleton instance before basePrefix() runs.
+//
+// Without this normalization, paths such as:
+//   - Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.
+//   - Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.CID
+//
+// would both be truncated at the first {i} and collapse to the over-broad
+// prefix "Device.Services.FAPService.", which lets unsupported NR children fault
+// otherwise valid LTE fetches.
+func normalizeSingletonFAPServicePath(privatePath string) string {
+	const templ = "Device.Services.FAPService.{i}."
+	const inst = "Device.Services.FAPService.1."
+	if !strings.HasPrefix(privatePath, templ) {
 		return privatePath
 	}
-	if strings.HasPrefix(privatePath, "Device.Services.FAPService.{i}.") && !strings.HasSuffix(privatePath, ".") {
-		return strings.Replace(privatePath, "{i}", "1", 1)
-	}
-	return privatePath
+	return strings.Replace(privatePath, templ, inst, 1)
 }
 
 // basePrefix 从一条 privatePath 提取 GPV 下发用的路径。

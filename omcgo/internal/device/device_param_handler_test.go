@@ -188,7 +188,7 @@ func TestParameterTreeHandler_UsesDefaultParamModelForTreeAndChildren(t *testing
 		assert.Equal(t, "SN-PARAM-001", payload.Items[1].ParameterValue)
 	})
 
-	t.Run("schema includes model-only parameter", func(t *testing.T) {
+	t.Run("schema only includes actual parameters", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(
 			http.MethodGet,
@@ -204,16 +204,40 @@ func TestParameterTreeHandler_UsesDefaultParamModelForTreeAndChildren(t *testing
 			Total      int                   `json:"total"`
 		}
 		response.DecodeData(t, w.Body, &payload)
-		require.Len(t, payload.Parameters, 2)
+		require.Len(t, payload.Parameters, 1)
 		assert.Empty(t, payload.Objects)
-		assert.Equal(t, 2, payload.Total)
-		assert.Equal(t, "Device.DeviceInfo.ManufacturerOUI", payload.Parameters[0].Path)
+		assert.Equal(t, 1, payload.Total)
+		assert.Equal(t, "Device.DeviceInfo.SerialNumber", payload.Parameters[0].Path)
 		require.NotNil(t, payload.Parameters[0].CurrentValue)
-		assert.Equal(t, "", *payload.Parameters[0].CurrentValue)
-		assert.True(t, payload.Parameters[0].Writable)
+		assert.Equal(t, "SN-PARAM-001", *payload.Parameters[0].CurrentValue)
+		assert.False(t, payload.Parameters[0].Writable)
 		assert.Equal(t, string(model.ParamString), payload.Parameters[0].Type)
-		assert.Equal(t, "Device.DeviceInfo.SerialNumber", payload.Parameters[1].Path)
-		require.NotNil(t, payload.Parameters[1].CurrentValue)
-		assert.Equal(t, "SN-PARAM-001", *payload.Parameters[1].CurrentValue)
 	})
+}
+
+func TestBuildObjectSchema_IgnoresModelOnlyPlaceholderInstances(t *testing.T) {
+	params := []model.DeviceParameter{
+		{
+			ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.DLBandwidth",
+			LastUpdatedAt: time.Date(2026, 5, 29, 15, 55, 40, 0, time.UTC),
+		},
+		{
+			ParameterPath: "Device.Services.FAPService.6.FAPControl.LTE.InUse",
+			LastUpdatedAt: time.Date(2026, 5, 29, 15, 55, 41, 0, time.UTC),
+		},
+		{
+			ParameterPath: "Device.Services.FAPService.7.CellConfig.LTE.RAN.RF.DLBandwidth",
+		},
+		{
+			ParameterPath: "Device.Services.FAPService.8.CellConfig.LTE.RAN.RF.DLBandwidth",
+		},
+		{
+			ParameterPath: "Device.Services.FAPService.9.CellConfig.LTE.RAN.RF.DLBandwidth",
+		},
+	}
+
+	objects := buildObjectSchema(nil, params, "Device.Services.FAPService.")
+	require.Len(t, objects, 1)
+	assert.Equal(t, "Device.Services.FAPService.", objects[0].Path)
+	assert.Equal(t, []int{1, 6}, objects[0].CurrentInstances)
 }

@@ -22,12 +22,21 @@ export interface MultiFeedback {
   /** save 动作专用:记录被保存的实例号,task=completed 时据此清掉对应行的 rowEdits + draft,
       避免切 tab 走回后乐观显示的旧用户输入覆盖 schema 新值。 */
   savedInstId?: string;
+  /** 批量 save 动作:一次保存多个新增实例时,在任务完成后一起清掉乐观编辑态。 */
+  savedInstIds?: string[];
 }
 
 export type Feedback = CellFeedback | MultiFeedback;
 
-export function feedbackKey(deviceId: string, groupId: string, fapInstance: number): string {
-  return `${deviceId}::${groupId}::${fapInstance}`;
+export function feedbackKey(
+  deviceId: string,
+  groupId: string,
+  fapInstance: number,
+  cellInstance?: number,
+): string {
+  return cellInstance === undefined
+    ? `${deviceId}::${groupId}::${fapInstance}`
+    : `${deviceId}::${groupId}::${fapInstance}::${cellInstance}`;
 }
 
 interface FeedbackState {

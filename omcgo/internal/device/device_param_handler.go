@@ -88,6 +88,16 @@ func (h *ParameterTreeHandler) resolveDefaultMappingValidator(ctx context.Contex
 	return parammodel.NewMappingValidator(set)
 }
 
+// resolveDisplayMappingValidator 优先返回设备当前命中的 discovered 映射；
+// 若设备尚未学习到 discovered，则退回产品默认映射。
+// UI 展示链路需要既看到默认标准化路径，也要尽可能匹配设备真实上报路径。
+func (h *ParameterTreeHandler) resolveDisplayMappingValidator(ctx context.Context, dev *model.Device) *parammodel.MappingValidator {
+	if mv := h.resolveMappingValidator(ctx, dev); mv != nil {
+		return mv
+	}
+	return h.resolveDefaultMappingValidator(ctx, dev)
+}
+
 // Constraints 是参数取值范围的简化表示，对齐前端字段（路径上 JSON key=constraints）。
 // 承载数值上下限 + 枚举 (T-0158)；字符串长度复用 min_value/max_value 由前端按 type 解释；
 // 正则 / 显式 minLength/maxLength 暂不支持（§11 L-04）。
@@ -237,7 +247,7 @@ func (h *ParameterTreeHandler) GetParameterTree(c *gin.Context) {
 		return
 	}
 
-	displayMV := h.resolveDefaultMappingValidator(c.Request.Context(), dev)
+	displayMV := h.resolveDisplayMappingValidator(c.Request.Context(), dev)
 	displayParams := buildDisplayParameters(params, displayMV)
 
 	// Check if client wants flat or tree format.
@@ -588,8 +598,11 @@ func buildDisplayParameters(params []model.DeviceParameter, mv *parammodel.Mappi
 		}
 
 		paths := []string{mapping.PrivatePath}
-		if strings.Contains(mapping.PrivatePath, "{i}") {
+		if strings.Contains(mapping.PrivatePath, "{i}") || strings.Contains(mapping.StandardPath, "{i}") {
 			matched := actualByTemplate[normalizeDisplayPath(mapping.PrivatePath)]
+			if len(matched) == 0 && mapping.StandardPath != "" {
+				matched = actualByTemplate[normalizeDisplayPath(mapping.StandardPath)]
+			}
 			if len(matched) == 0 {
 				continue
 			}
@@ -607,6 +620,13 @@ func buildDisplayParameters(params []model.DeviceParameter, mv *parammodel.Mappi
 				display = append(display, actual)
 				seen[path] = struct{}{}
 				continue
+			}
+			if mapping.StandardPath != "" {
+				if actual, ok := actualByPath[mapping.StandardPath]; ok {
+					display = append(display, actual)
+					seen[path] = struct{}{}
+					continue
+				}
 			}
 			display = append(display, model.DeviceParameter{
 				ParameterPath: path,
@@ -754,7 +774,7 @@ func (h *ParameterTreeHandler) GetDirectChildren(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	displayMV := h.resolveDefaultMappingValidator(c.Request.Context(), dev)
+	displayMV := h.resolveDisplayMappingValidator(c.Request.Context(), dev)
 	displayParams := buildDisplayParameters(params, displayMV)
 
 	leaves, total := getDirectChildLeaves(displayParams, pathPrefix, pageSize, offset)
@@ -850,20 +870,19 @@ func (h *ParameterTreeHandler) GetParameterSchema(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	displayMV := h.resolveDefaultMappingValidator(c.Request.Context(), dev)
-	displayParams := buildDisplayParameters(params, displayMV)
+	schemaMV := h.resolveDisplayMappingValidator(c.Request.Context(), dev)
 
 	var schemaItems []ParameterSchemaItem
 	var objectItems []ObjectSchemaItem
 
-	if displayMV != nil {
-		schemaItems = mergeSchemaWithValues(displayMV, displayParams, pathPrefix)
-		objectItems = buildObjectSchema(displayMV, displayParams, pathPrefix)
+	if schemaMV != nil {
+		schemaItems = mergeSchemaWithValues(schemaMV, params, pathPrefix)
+		objectItems = buildObjectSchema(schemaMV, params, pathPrefix)
 	}
 
 	if schemaItems == nil {
-		schemaItems = make([]ParameterSchemaItem, 0, len(displayParams))
-		for _, p := range displayParams {
+		schemaItems = make([]ParameterSchemaItem, 0, len(params))
+		for _, p := range params {
 			if pathPrefix != "" && !strings.HasPrefix(p.ParameterPath, pathPrefix) {
 				continue
 			}
@@ -928,6 +947,9 @@ func buildObjectSchema(mv *parammodel.MappingValidator, params []model.DevicePar
 	objectInstances := make(map[string]map[int]bool)
 
 	for _, p := range params {
+		if p.LastUpdatedAt.IsZero() {
+			continue
+		}
 		refs := extractInstanceRefs(p.ParameterPath)
 		path := p.ParameterPath
 		for _, ref := range refs {

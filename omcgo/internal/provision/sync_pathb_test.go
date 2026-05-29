@@ -90,6 +90,20 @@ func TestExtractStorablePrefixes_SingletonLeafExpanded(t *testing.T) {
 	assert.Equal(t, []string{"Device.Services.FAPService.1.AmfsStatus"}, got)
 }
 
+func TestExtractStorablePrefixes_FAPServiceNeighborObjectsStayScoped(t *testing.T) {
+	mappings := []parammodel.ParamMapping{
+		{PrivatePath: "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.", IsStorable: true, IsSupported: true, EntryType: "object"},
+		{PrivatePath: "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.", IsStorable: true, IsSupported: true, EntryType: "object"},
+		{PrivatePath: "Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.CID", IsStorable: true, IsSupported: true, EntryType: "parameter"},
+	}
+	got := extractStorablePrefixes(mappings)
+	sort.Strings(got)
+	assert.Equal(t, []string{
+		"Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.5GCell.",
+		"Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.LTECell.",
+	}, got)
+}
+
 func TestExtractStorablePrefixes_LeavesNotMerged(t *testing.T) {
 	// 同父对象下的多个叶子参数 → 各自原样保留，不合并到父前缀
 	mappings := []parammodel.ParamMapping{
@@ -137,6 +151,22 @@ func TestBasePrefix_Cases(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.in, func(t *testing.T) {
 			assert.Equal(t, c.out, basePrefix(c.in))
+		})
+	}
+}
+
+func TestNormalizeSingletonFAPServicePath_Cases(t *testing.T) {
+	cases := []struct {
+		in, out string
+	}{
+		{"Device.Services.FAPService.{i}.AmfsStatus", "Device.Services.FAPService.1.AmfsStatus"},
+		{"Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell.", "Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.5GCell."},
+		{"Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.CID", "Device.Services.FAPService.1.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.CID"},
+		{"Device.DeviceInfo.SerialNumber", "Device.DeviceInfo.SerialNumber"},
+	}
+	for _, c := range cases {
+		t.Run(c.in, func(t *testing.T) {
+			assert.Equal(t, c.out, normalizeSingletonFAPServicePath(c.in))
 		})
 	}
 }

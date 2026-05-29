@@ -1,5 +1,11 @@
 import type { ParameterType, ParameterConstraints } from '@core/types/deviceParameter';
 
+export interface QuickSettingsInstanceContext {
+  networkType: string;
+  fapInstance: number;
+  cellInstance?: number;
+}
+
 /**
  * 校验单个参数输入值。返回错误信息字符串或 null（表示通过）。
  *
@@ -67,15 +73,42 @@ export function validateValue(
   return null;
 }
 
+interface ApplyInstanceContextOptions {
+  preserveTrailingInstance?: boolean;
+}
+
 /**
- * 把 group.params 的 standardPath 中 {i} 占位符按外层 FAPService 实例号替换。
+ * 根据当前网络制式把快速设置路径中的实例占位符解析成具体路径。
  *
- * - ENB 路径含一层 {i}（FAPService.{i}）→ 用 fapInstance 替换
- * - GNB 路径已写死 FAPService.1，内层 CellConfig.{i} 暂保持原样（v1 不渲染 NR 小区下拉）
+ * - LTE: 仅替换最外层 FAPService.{i}
+ * - NR: 先解析 FAPService / CellConfig 两层实例，再把更深层未区分的列表实例保守落到 1
  *
- * 多实例分组的内层 {i} 由表格行驱动，调用方在拼接 objectPath 时按 row index 处理，不走本函数。
+ * preserveTrailingInstance 用于多实例 objectPath，保留末尾那层 {i}. 给表格行实例继续拼接。
  */
-export function applyFapInstance(path: string, fapInstance: number): string {
-  // 仅替换第一个 {i}（最外层 FAPService）。GNB 路径无 FAPService.{i}（已是 FAPService.1），不受影响。
-  return path.replace('{i}', String(fapInstance));
+export function applyInstanceContext(
+  path: string,
+  context: QuickSettingsInstanceContext,
+  options?: ApplyInstanceContextOptions,
+): string {
+  const preserveTrailingInstance = options?.preserveTrailingInstance && path.endsWith('{i}.');
+  const trailingPlaceholder = '__QS_TRAILING_INSTANCE__';
+
+  let resolved = preserveTrailingInstance
+    ? `${path.slice(0, -4)}${trailingPlaceholder}.`
+    : path;
+
+  if (context.networkType === 'nr') {
+    const cellInstance = context.cellInstance ?? 1;
+    resolved = resolved.replace('FAPService.{i}', `FAPService.${context.fapInstance}`);
+    resolved = resolved.replace('CellConfig.{i}', `CellConfig.${cellInstance}`);
+    resolved = resolved.replace(/\{i\}/g, '1');
+  } else {
+    resolved = resolved.replace('{i}', String(context.fapInstance));
+  }
+
+  if (preserveTrailingInstance) {
+    resolved = resolved.replace(trailingPlaceholder, '{i}');
+  }
+
+  return resolved;
 }

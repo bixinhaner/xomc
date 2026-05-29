@@ -13,9 +13,10 @@ import {
 import type { ParameterSchemaItem, ParameterUpdateRequest } from '@core/types/deviceParameter';
 import type { DeviceTaskStatus } from '@core/types/deviceTask';
 import type { QuickSettingsGroup } from '@core/types/quicksettings';
-import { applyFapInstance, validateValue } from './validators';
+import { applyInstanceContext, validateValue, type QuickSettingsInstanceContext } from './validators';
 
 const { Text } = Typography;
+const ERROR_FEEDBACK_DURATION_SECONDS = 2;
 
 // "上次提交"状态形状由 frontend-core/store/quickSettingsFeedbackStore (CellFeedback) 定义,
 // 提升至 store 持久化,顶层 TabBar 切走再切回不丢反馈。
@@ -57,8 +58,8 @@ function statusTagSpec(submit: CellFeedback, taskStatus: DeviceTaskStatus | unde
 
 interface CellParameterFormProps {
   deviceId: string;
-  fapInstance: number;
   group: QuickSettingsGroup;
+  instanceContext: QuickSettingsInstanceContext;
   locale: 'zh-CN' | 'en-US';
 }
 
@@ -72,22 +73,25 @@ interface CellParameterFormProps {
  *  4. 顶部"保存"按钮收集本表单全部脏字段，一次性 SetParameterValues
  *  5. Save 部分失败时按字段标红保留输入值（继承 Antd Form 校验/状态行为）
  */
-export default function CellParameterForm({ deviceId, fapInstance, group, locale }: CellParameterFormProps) {
+export default function CellParameterForm({ deviceId, group, instanceContext, locale }: CellParameterFormProps) {
   const [form] = Form.useForm();
   const updateMutation = useUpdateParameters();
   const queryClient = useQueryClient();
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   // lastSubmit 由 zustand store 托管 —— DeviceDetail 整个被卸载(切顶层 tab)也保留反馈。
-  const fbKey = feedbackKey(deviceId, group.id, fapInstance);
+  const fbKey = feedbackKey(
+    deviceId,
+    group.id,
+    instanceContext.fapInstance,
+    instanceContext.networkType === 'nr' ? instanceContext.cellInstance : undefined,
+  );
   const lastSubmit = useQuickSettingsFeedbackStore((s) => {
     const f = s.entries[fbKey];
     return f && f.kind === 'cell' ? f : null;
   });
   const setFeedback = useQuickSettingsFeedbackStore((s) => s.setFeedback);
   const patchFeedback = useQuickSettingsFeedbackStore((s) => s.patchFeedback);
-  // 表单草稿（未保存）也持久化到 store —— 跨顶层 TabBar 切走切回时 DeviceDetail
-  // 整树卸载，form 内部 state 丢失；store 持久化让重挂载后能恢复用户输入。
   const draft = useQuickSettingsFeedbackStore((s) => s.drafts[fbKey]);
   const setDraftField = useQuickSettingsFeedbackStore((s) => s.setDraftField);
   const clearDraft = useQuickSettingsFeedbackStore((s) => s.clearDraft);
@@ -95,8 +99,11 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
   // 单实例分组：每条 standardPath 单独查 schema（少量字段，不批量优化）
   // 注：useParameterSchema 接受 pathPrefix，前缀匹配即可；这里以分组共用前缀粗查再过滤
   // 为简化，取 group 中 standardPath 的公共前缀作 pathPrefix
-  const commonPrefix = useMemo(() => commonPathPrefix(group.params.map((p) => applyFapInstance(p.standardPath || '', fapInstance))), [group, fapInstance]);
-  const { data: schemaResp, isLoading } = useParameterSchema(deviceId, commonPrefix);
+  const commonPrefix = useMemo(
+    () => commonPathPrefix(group.params.map((p) => applyInstanceContext(p.standardPath || '', instanceContext))),
+    [group, instanceContext],
+  );
+  const { data: schemaResp, isLoading, refetch } = useParameterSchema(deviceId, commonPrefix);
 
   const schemaByPath = useMemo(() => {
     const map = new Map<string, ParameterSchemaItem>();
@@ -109,22 +116,17 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
   const paramNameByPath = useMemo(() => {
     const map = new Map<string, string>();
     for (const p of group.params) {
-      const path = applyFapInstance(p.standardPath || '', fapInstance);
+      const path = applyInstanceContext(p.standardPath || '', instanceContext);
       map.set(path, p.name);
     }
     return map;
-  }, [group, fapInstance]);
+  }, [group, instanceContext]);
 
-  // 初始化字段值 —— 优先级：store draft > form 已 touched > schema 原值。
-  //
-  // 跨场景说明：
-  //  1) 跨顶层 TabBar 切走切回（DeviceDetail 整树卸载）：form state 全丢；从 store draft 恢复
-  //  2) 内部 tab 切走切回（forceRender 保活）：form state 仍在内存；isFieldTouched 跳过覆盖
-  //  3) schema refetch 触发 effect：上述两条规则都防止覆盖用户输入
+  // 初始化字段值 —— 优先级：store draft > 当前会话已 touched > schema 原值。
+  // 未保存草稿在跨顶层 TabBar 切换后恢复；任务终态回读后再 clearDraft，统一回到设备侧值。
   useEffect(() => {
     if (!schemaResp) return;
     group.params.forEach((p) => {
-      // 优先级 1: store draft
       if (draft && draft[p.name] !== undefined) {
         form.setFieldValue(p.name, draft[p.name]);
         return;
@@ -132,11 +134,11 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
       // 优先级 2: 用户在当前会话已 touched
       if (form.isFieldTouched(p.name)) return;
       // 优先级 3: schema 原值
-      const path = applyFapInstance(p.standardPath || '', fapInstance);
+      const path = applyInstanceContext(p.standardPath || '', instanceContext);
       const item = schemaByPath.get(path);
       form.setFieldValue(p.name, item?.currentValue ?? '');
     });
-  }, [schemaResp, group, fapInstance, form, schemaByPath, draft]);
+  }, [schemaResp, group, instanceContext, form, schemaByPath, draft]);
 
   const handleSave = async () => {
     const values = form.getFieldsValue() as Record<string, string>;
@@ -144,7 +146,7 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
     const errors: Record<string, string> = {};
 
     for (const p of group.params) {
-      const path = applyFapInstance(p.standardPath || '', fapInstance);
+      const path = applyInstanceContext(p.standardPath || '', instanceContext);
       const item = schemaByPath.get(path);
       const newVal = values[p.name] ?? '';
       const oldVal = item?.currentValue ?? '';
@@ -164,7 +166,7 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
 
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
-      message.error({ content: '校验失败,请检查标红字段', duration: 6 });
+      message.error({ content: '校验失败,请检查标红字段', duration: ERROR_FEEDBACK_DURATION_SECONDS });
       return;
     }
 
@@ -187,15 +189,12 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
         count: updates.length,
         at: Date.now(),
       });
-      // 保存成功后清 draft（避免下次进入仍恢复旧编辑值覆盖 schema 新值）
-      clearDraft(fbKey);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      // T-0144 改用 notification.error 持久化弹窗(用户需点击关闭,失败信息不丢)
       notification.error({
         message: `下发失败(${group.titleZh})`,
         description: `${updates.length} 项变更入队失败:${errMsg}。输入值已保留,可修正后重试。`,
-        duration: 0, // 不自动消失
+        duration: ERROR_FEEDBACK_DURATION_SECONDS,
       });
       setFeedback(fbKey, {
         kind: 'cell',
@@ -216,6 +215,40 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
   // T-0146:Save 后用 task_id 轮询真实 CPE 应答状态;到终态后停轮询。
   const { data: lastTask } = useDeviceTaskStatus(lastSubmit?.taskId);
 
+  useEffect(() => {
+    if (!lastTask || !['completed', 'failed', 'expired', 'cancelled'].includes(lastTask.status)) return;
+    let cancelled = false;
+    void (async () => {
+      let refreshed;
+      try {
+        refreshed = await refetch();
+      } catch (err) {
+        if (!cancelled) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          notification.error({
+            message: `设备侧数据回读失败(${group.titleZh})`,
+            description: errMsg,
+            duration: ERROR_FEEDBACK_DURATION_SECONDS,
+          });
+        }
+        return;
+      }
+      if (cancelled) return;
+      const nextValues: Record<string, string> = {};
+      const refreshedSchemaByPath = new Map((refreshed.data?.parameters ?? []).map((item) => [item.path, item]));
+      for (const p of group.params) {
+        const path = applyInstanceContext(p.standardPath || '', instanceContext);
+        nextValues[p.name] = refreshedSchemaByPath.get(path)?.currentValue ?? '';
+      }
+      form.setFieldsValue(nextValues);
+      clearDraft(fbKey);
+      setFieldErrors({});
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [lastTask?.id, lastTask?.status, refetch, group.params, instanceContext, form, clearDraft, fbKey, group.titleZh]);
+
   // T-0146:基站应答失败时弹一次 notification(只在 status 第一次变成 failed 时触发,避免重复弹)
   // notifiedFailedTaskId 同样存 store —— 切顶层 tab 再切回不会重复弹。
   useEffect(() => {
@@ -228,7 +261,7 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
       notification.error({
         message: `基站应答失败(${group.titleZh})`,
         description: lastTask.errorMessage || '未知错误,可在通知中心查看任务详情',
-        duration: 0,
+        duration: ERROR_FEEDBACK_DURATION_SECONDS,
       });
       patchFeedback(fbKey, { notifiedFailedTaskId: lastTask.id });
     }
@@ -271,11 +304,11 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
           for (const [name, value] of Object.entries(changedValues)) {
             const p = group.params.find((q) => q.name === name);
             if (!p) continue;
-            const path = applyFapInstance(p.standardPath || '', fapInstance);
+            const path = applyInstanceContext(p.standardPath || '', instanceContext);
             const sItem = schemaByPath.get(path);
             const mirrorPath = sItem?.constraints?.mirrorWith;
             if (!mirrorPath) continue;
-            const resolvedMirror = applyFapInstance(mirrorPath, fapInstance);
+            const resolvedMirror = applyInstanceContext(mirrorPath, instanceContext);
             const mirrorName = paramNameByPath.get(resolvedMirror);
             if (!mirrorName || mirrorName === name) continue;
             const current = form.getFieldValue(mirrorName);
@@ -289,7 +322,7 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
             for (const [name, value] of Object.entries(changedValues)) {
               const p = group.params.find((q) => q.name === name);
               if (!p) continue;
-              const path = applyFapInstance(p.standardPath || '', fapInstance);
+              const path = applyInstanceContext(p.standardPath || '', instanceContext);
               const sItem = schemaByPath.get(path);
               const err = validateValue(
                 String(value ?? ''),
@@ -301,7 +334,7 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
               // 镜像字段同时清/重新校验（值刚被程序性写入，旧 error 应失效）
               const mirrorPath = sItem?.constraints?.mirrorWith;
               if (mirrorPath) {
-                const resolvedMirror = applyFapInstance(mirrorPath, fapInstance);
+                const resolvedMirror = applyInstanceContext(mirrorPath, instanceContext);
                 const mirrorName = paramNameByPath.get(resolvedMirror);
                 if (mirrorName && mirrorName !== name) {
                   const mItem = schemaByPath.get(resolvedMirror);
@@ -321,7 +354,7 @@ export default function CellParameterForm({ deviceId, fapInstance, group, locale
       >
         <Row gutter={16}>
           {group.params.map((p) => {
-            const path = applyFapInstance(p.standardPath || '', fapInstance);
+            const path = applyInstanceContext(p.standardPath || '', instanceContext);
             const item = schemaByPath.get(path);
             const writable = item?.writable ?? false;
             const error = fieldErrors[p.name];

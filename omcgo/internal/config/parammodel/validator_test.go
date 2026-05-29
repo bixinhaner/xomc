@@ -103,6 +103,26 @@ func TestMappingValidator_ValidateValue_NoRange_NoTypeCheck(t *testing.T) {
 	assert.Nil(t, v.ValidateValue("Dev.A", "anyfreeform")) // 无 min/max → 跳过类型检查
 }
 
+func TestMappingValidator_ValidateValue_StringLengthRange(t *testing.T) {
+	min := int64(1)
+	max := int64(6)
+	v := NewMappingValidator(mkSet([]ParamMapping{
+		{PrivatePath: "Dev.A", EntryType: "parameter", Access: "readWrite", DataType: "string", MinValue: &min, MaxValue: &max},
+	}))
+
+	assert.Nil(t, v.ValidateValue("Dev.A", "46000"))
+
+	ve := v.ValidateValue("Dev.A", "")
+	require.NotNil(t, ve)
+	assert.Equal(t, "out_of_range", ve.Code)
+	assert.Contains(t, ve.Message, "length 0 < min 1")
+
+	ve = v.ValidateValue("Dev.A", "1234567")
+	require.NotNil(t, ve)
+	assert.Equal(t, "out_of_range", ve.Code)
+	assert.Contains(t, ve.Message, "length 7 > max 6")
+}
+
 func TestMappingValidator_ValidateAddObject_OK(t *testing.T) {
 	v := NewMappingValidator(mkSet([]ParamMapping{
 		{PrivatePath: "Dev.WiFi.SSID.", EntryType: "object", Access: "readWrite"},

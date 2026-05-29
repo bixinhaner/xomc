@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // MappingValidator 是 P2-07 T-0098 引入的"映射型"参数校验器，等价于旧
@@ -80,15 +81,28 @@ func (v *MappingValidator) LookupObject(privatePath string) *ParamMapping {
 	if v == nil {
 		return nil
 	}
-	if m, ok := v.byPrivateExact[privatePath]; ok && m.EntryType == "object" {
-		cp := m
-		return &cp
-	}
-	if m, ok := v.byPrivateNorm[normalizeInstancePath(privatePath)]; ok && m.EntryType == "object" {
-		cp := m
-		return &cp
+	for _, candidate := range objectLookupCandidates(privatePath) {
+		if m, ok := v.byPrivateExact[candidate]; ok && m.EntryType == "object" {
+			cp := m
+			return &cp
+		}
+		if m, ok := v.byPrivateNorm[normalizeInstancePath(candidate)]; ok && m.EntryType == "object" {
+			cp := m
+			return &cp
+		}
 	}
 	return nil
+}
+
+func objectLookupCandidates(privatePath string) []string {
+	trimmed := strings.TrimSpace(privatePath)
+	if trimmed == "" {
+		return nil
+	}
+	if strings.HasSuffix(trimmed, ".") {
+		return []string{trimmed, strings.TrimSuffix(trimmed, ".")}
+	}
+	return []string{trimmed, trimmed + "."}
 }
 
 // ValidateValue 按 ParamMapping 的元属性校验单条 set 请求。
@@ -113,6 +127,16 @@ func (v *MappingValidator) ValidateValue(privatePath, value string) *MappingVali
 		return &MappingValidationError{Path: privatePath, Code: "not_writable", Message: fmt.Sprintf("access=%s", m.Access)}
 	}
 	if m.MinValue == nil && m.MaxValue == nil {
+		return nil
+	}
+	if strings.EqualFold(m.DataType, "string") {
+		length := int64(utf8.RuneCountInString(value))
+		if m.MinValue != nil && length < *m.MinValue {
+			return &MappingValidationError{Path: privatePath, Code: "out_of_range", Message: fmt.Sprintf("length %d < min %d", length, *m.MinValue)}
+		}
+		if m.MaxValue != nil && length > *m.MaxValue {
+			return &MappingValidationError{Path: privatePath, Code: "out_of_range", Message: fmt.Sprintf("length %d > max %d", length, *m.MaxValue)}
+		}
 		return nil
 	}
 	num, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)

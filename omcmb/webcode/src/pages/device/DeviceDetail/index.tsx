@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTabStore } from '@core/store/tabStore';
@@ -31,7 +31,8 @@ import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import LineChart from '@/components/Charts/LineChart';
 import StatusIndicator from '@/components/StatusIndicator';
-import { useDeviceBySn } from '@core/hooks/api/useDevices';
+import { useSyncStatus } from '@core/hooks/api/useDeviceParameters';
+import { useDeviceBySn, useSyncDeviceParams } from '@core/hooks/api/useDevices';
 import { useQuickSettingsGroups } from '@core/hooks/api/useQuickSettings';
 import { useAcknowledgeAlarms, useClearAlarms, useCurrentAlarms, useUnacknowledgeAlarms } from '@core/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
@@ -896,6 +897,10 @@ export default function DeviceDetail() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const { data: device, isLoading, refetch } = useDeviceBySn(sn);
+  const syncMutation = useSyncDeviceParams();
+  const { data: paramSyncStatus, refetch: refetchParamSyncStatus } = useSyncStatus(device?.id ?? '');
+  const [quickSettingsSyncPending, setQuickSettingsSyncPending] = useState(false);
+  const quickSettingsSyncBaselineRef = useRef<{ lastParamSyncAt?: string; lastParamSyncFailedAt?: string }>({});
   const { data: detailComposite } = useQuery({
     queryKey: ['devices', 'detail-composite-v2', device?.id],
     queryFn: async () => {
@@ -978,6 +983,46 @@ export default function DeviceDetail() {
   } = useQuickSettingsGroups(device?.id);
   const showQuickSettingsTab = !quickSettingsLoading && (quickSettingsData?.groups?.length ?? 0) > 0;
 
+  useEffect(() => {
+    if (activeTab !== 'quickSettings' || !quickSettingsSyncPending) return;
+    const timer = window.setInterval(() => {
+      void refetchParamSyncStatus();
+    }, 2000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [activeTab, quickSettingsSyncPending, refetchParamSyncStatus]);
+
+  useEffect(() => {
+    const deviceId = device?.id;
+    if (!deviceId || activeTab !== 'quickSettings' || !quickSettingsSyncPending || !paramSyncStatus) return;
+    if (paramSyncStatus.status === 'syncing') return;
+
+    const { lastParamSyncAt: baselineSyncAt, lastParamSyncFailedAt: baselineFailedAt } = quickSettingsSyncBaselineRef.current;
+    const hasNewSuccess = Boolean(
+      paramSyncStatus.lastParamSyncAt && paramSyncStatus.lastParamSyncAt !== baselineSyncAt,
+    );
+    const hasNewFailure = Boolean(
+      paramSyncStatus.lastParamSyncFailedAt && paramSyncStatus.lastParamSyncFailedAt !== baselineFailedAt,
+    );
+
+    if (!hasNewSuccess && !hasNewFailure) return;
+
+    setQuickSettingsSyncPending(false);
+
+    if (hasNewFailure && !hasNewSuccess) {
+      message.error(paramSyncStatus.lastParamSyncError || '设备侧取数失败');
+      return;
+    }
+
+    useQuickSettingsFeedbackStore.getState().clearByDevice(deviceId);
+    useQuickSettingsFeedbackStore.getState().bumpRefreshTick(deviceId);
+    void queryClient.invalidateQueries({ queryKey: ['devices', 'detail-composite-v2', deviceId] });
+    void queryClient.invalidateQueries({ queryKey: ['quicksettings', 'groups', deviceId] });
+    void queryClient.invalidateQueries({ queryKey: ['devices', 'parameter-schema', deviceId] });
+    message.success('已获取设备侧最新数据');
+  }, [activeTab, device?.id, message, paramSyncStatus, queryClient, quickSettingsSyncPending]);
+
   const handleHeaderRefresh = useCallback(() => {
     void refetch();
     const deviceId = device?.id;
@@ -997,20 +1042,31 @@ export default function DeviceDetail() {
         break;
       case 'quickSettings':
         if (deviceId) {
-          // 方案 B：刷新 = 回到服务器状态，丢前端临时编辑（drafts + 组件内 form/rowEdits 全清）
-          useQuickSettingsFeedbackStore.getState().clearByDevice(deviceId);
-          // bump refreshTick → QuickSettingsTab 拼进子组件 key 触发 CellParameterForm / MultiInstanceTable 整体 remount，
-          // 清掉 form.isFieldTouched / rowEdits 等组件内 state；React Query schema 失效后会重拉最新值
-          useQuickSettingsFeedbackStore.getState().bumpRefreshTick(deviceId);
-          void queryClient.invalidateQueries({ queryKey: ['quicksettings', 'groups', deviceId] });
-          // CellParameterForm + MultiInstanceTable 都用 useParameterSchema(deviceId, prefix) — 按 deviceId 前缀失效
-          void queryClient.invalidateQueries({ queryKey: ['devices', 'parameter-schema', deviceId] });
+          quickSettingsSyncBaselineRef.current = {
+            lastParamSyncAt: paramSyncStatus?.lastParamSyncAt,
+            lastParamSyncFailedAt: paramSyncStatus?.lastParamSyncFailedAt,
+          };
+          setQuickSettingsSyncPending(true);
+          syncMutation.mutate(
+            { deviceId },
+            {
+              onSuccess: (data) => {
+                message.success(`设备取数已入队（${data.sourceId}）`);
+                void refetchParamSyncStatus();
+              },
+              onError: (err) => {
+                setQuickSettingsSyncPending(false);
+                const errMsg = err instanceof Error ? err.message : '设备取数触发失败';
+                message.error(errMsg);
+              },
+            },
+          );
         }
         break;
       default:
         break;
     }
-  }, [activeTab, refetch, queryClient, device?.id]);
+  }, [activeTab, device?.id, message, paramSyncStatus?.lastParamSyncAt, paramSyncStatus?.lastParamSyncFailedAt, queryClient, refetch, refetchParamSyncStatus, syncMutation]);
 
   const SEVERITY_LABEL: Record<string, string> = useMemo(() => ({
     critical: t('alarm.severity.critical'),
@@ -1286,7 +1342,11 @@ export default function DeviceDetail() {
           <Space>
             {/* license tab 自带"刷新"按钮，此处头部刷新隐藏，避免同页两个刷新按钮 */}
             {activeTab !== 'license' && (
-              <Button icon={<ReloadOutlined />} onClick={handleHeaderRefresh}>
+              <Button
+                icon={<ReloadOutlined />}
+                onClick={handleHeaderRefresh}
+                loading={activeTab === 'quickSettings' && (quickSettingsSyncPending || syncMutation.isPending)}
+              >
                 {t('common.refresh')}
               </Button>
             )}

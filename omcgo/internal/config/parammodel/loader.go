@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
 	sq "github.com/Masterminds/squirrel"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
@@ -231,18 +233,20 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, erro
 		}
 	}
 
-	// §1.9 对账：param_mappings 已被本事务整体替换，需同步 discovered_param_mappings
-	// 按 private_path 锚定 DELETE / UPDATE。失败仅记 WARN，不阻断 reload（DB 已落地）。
-	delN, updN, recErr := reconcileDiscoveredForModel(ctx, tx, modelID)
+	// §1.9 对账：param_mappings 已被本事务整体替换，需同步 discovered_param_mappings。
+	// 除 DELETE / UPDATE 外，还要为已有子参数但缺失父 object 的 discovered 集合补插 object 行。
+	// 失败仅记 WARN，不阻断 reload（DB 已落地）。
+	delN, updN, insN, recErr := reconcileDiscoveredForModel(ctx, tx, modelID)
 	if recErr != nil {
 		l.logger.Warn("reconcile discovered_param_mappings failed",
 			zap.String("model", doc.ParamModel),
 			zap.Error(recErr))
-	} else if delN > 0 || updN > 0 {
+	} else if delN > 0 || updN > 0 || insN > 0 {
 		l.logger.Info("reconciled discovered_param_mappings",
 			zap.String("model", doc.ParamModel),
 			zap.Int64("deleted", delN),
-			zap.Int64("updated", updN))
+			zap.Int64("updated", updN),
+			zap.Int64("inserted", insN))
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -267,7 +271,7 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, erro
 //
 // 范围限定：仅处理 products.param_model_id = modelID 引用的产品。
 // 调用时机：每个 paramModel 重写 param_mappings 后、commit 前。
-func reconcileDiscoveredForModel(ctx context.Context, tx pgx.Tx, modelID string) (deleted, updated int64, err error) {
+func reconcileDiscoveredForModel(ctx context.Context, tx pgx.Tx, modelID string) (deleted, updated, inserted int64, err error) {
 	const delSQL = `
 DELETE FROM discovered_param_mappings d
 USING products pr
@@ -280,7 +284,7 @@ WHERE d.product_id = pr.id
   )`
 	delTag, err := tx.Exec(ctx, delSQL, modelID)
 	if err != nil {
-		return 0, 0, fmt.Errorf("reconcile DELETE: %w", err)
+		return 0, 0, 0, fmt.Errorf("reconcile DELETE: %w", err)
 	}
 	deleted = delTag.RowsAffected()
 
@@ -322,10 +326,204 @@ WHERE d.product_id = pr.id
   )`
 	updTag, err := tx.Exec(ctx, updSQL, modelID)
 	if err != nil {
-		return deleted, 0, fmt.Errorf("reconcile UPDATE: %w", err)
+		return deleted, 0, 0, fmt.Errorf("reconcile UPDATE: %w", err)
 	}
 	updated = updTag.RowsAffected()
-	return deleted, updated, nil
+
+	objectMappings, discoveredRows, err := loadDiscoveredObjectReconcileRows(ctx, tx, modelID)
+	if err != nil {
+		return deleted, updated, 0, err
+	}
+	pending := planDiscoveredObjectInserts(objectMappings, discoveredRows)
+	inserted, err = batchInsertDiscoveredObjects(ctx, tx, pending)
+	if err != nil {
+		return deleted, updated, 0, err
+	}
+	return deleted, updated, inserted, nil
+}
+
+type discoveredMappingRef struct {
+	ProductID       uuid.UUID
+	SoftwareVersion string
+	PrivatePath     string
+}
+
+type discoveredObjectInsert struct {
+	ProductID       uuid.UUID
+	SoftwareVersion string
+	Mapping         ParamMapping
+}
+
+func loadDiscoveredObjectReconcileRows(ctx context.Context, tx pgx.Tx, modelID string) ([]ParamMapping, []discoveredMappingRef, error) {
+	objectRows, err := tx.Query(ctx, `
+SELECT standard_path, private_path, entry_type, access, data_type, change_applies,
+       min_value, max_value, enum_values, enum_labels, mirror_with,
+       is_storable, is_active, is_supported
+FROM param_mappings
+WHERE param_model_id = $1
+  AND entry_type = 'object'`, modelID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reconcile INSERT load objects: %w", err)
+	}
+	defer objectRows.Close()
+
+	objectMappings := make([]ParamMapping, 0)
+	for objectRows.Next() {
+		var mapping ParamMapping
+		if err := objectRows.Scan(
+			&mapping.StandardPath,
+			&mapping.PrivatePath,
+			&mapping.EntryType,
+			&mapping.Access,
+			&mapping.DataType,
+			&mapping.ChangeApplies,
+			&mapping.MinValue,
+			&mapping.MaxValue,
+			&mapping.EnumValues,
+			&mapping.EnumLabels,
+			&mapping.MirrorWith,
+			&mapping.IsStorable,
+			&mapping.IsActive,
+			&mapping.IsSupported,
+		); err != nil {
+			return nil, nil, fmt.Errorf("reconcile INSERT scan object: %w", err)
+		}
+		objectMappings = append(objectMappings, mapping)
+	}
+	if err := objectRows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("reconcile INSERT iterate objects: %w", err)
+	}
+
+	discoveredQueryRows, err := tx.Query(ctx, `
+SELECT d.product_id, d.software_version, d.private_path
+FROM discovered_param_mappings d
+JOIN products pr
+  ON pr.id = d.product_id
+WHERE pr.param_model_id = $1`, modelID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reconcile INSERT load discovered: %w", err)
+	}
+	defer discoveredQueryRows.Close()
+
+	discoveredRows := make([]discoveredMappingRef, 0)
+	for discoveredQueryRows.Next() {
+		var row discoveredMappingRef
+		if err := discoveredQueryRows.Scan(&row.ProductID, &row.SoftwareVersion, &row.PrivatePath); err != nil {
+			return nil, nil, fmt.Errorf("reconcile INSERT scan discovered: %w", err)
+		}
+		discoveredRows = append(discoveredRows, row)
+	}
+	if err := discoveredQueryRows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("reconcile INSERT iterate discovered: %w", err)
+	}
+
+	return objectMappings, discoveredRows, nil
+}
+
+func planDiscoveredObjectInserts(objectMappings []ParamMapping, discoveredRows []discoveredMappingRef) []discoveredObjectInsert {
+	if len(objectMappings) == 0 || len(discoveredRows) == 0 {
+		return nil
+	}
+
+	existing := make(map[string]struct{}, len(discoveredRows))
+	for _, row := range discoveredRows {
+		existing[discoveredInsertKey(row.ProductID, row.SoftwareVersion, row.PrivatePath)] = struct{}{}
+	}
+
+	pending := make(map[string]discoveredObjectInsert)
+	for _, row := range discoveredRows {
+		normalized := normalizeInstancePath(row.PrivatePath)
+		for _, mapping := range objectMappings {
+			if !strings.HasPrefix(normalized, mapping.PrivatePath) {
+				continue
+			}
+			key := discoveredInsertKey(row.ProductID, row.SoftwareVersion, mapping.PrivatePath)
+			if _, ok := existing[key]; ok {
+				continue
+			}
+			if _, ok := pending[key]; ok {
+				continue
+			}
+			pending[key] = discoveredObjectInsert{
+				ProductID:       row.ProductID,
+				SoftwareVersion: row.SoftwareVersion,
+				Mapping:         mapping,
+			}
+		}
+	}
+
+	if len(pending) == 0 {
+		return nil
+	}
+
+	keys := make([]string, 0, len(pending))
+	for key := range pending {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	out := make([]discoveredObjectInsert, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, pending[key])
+	}
+	return out
+}
+
+func discoveredInsertKey(productID uuid.UUID, softwareVersion, privatePath string) string {
+	return productID.String() + "|" + softwareVersion + "|" + privatePath
+}
+
+func batchInsertDiscoveredObjects(ctx context.Context, tx pgx.Tx, pending []discoveredObjectInsert) (int64, error) {
+	if len(pending) == 0 {
+		return 0, nil
+	}
+
+	const chunkSize = 200
+	var total int64
+	for i := 0; i < len(pending); i += chunkSize {
+		end := i + chunkSize
+		if end > len(pending) {
+			end = len(pending)
+		}
+
+		ib := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).Insert("discovered_param_mappings").Columns(
+			"product_id", "software_version", "standard_path", "private_path",
+			"entry_type", "access", "data_type", "change_applies",
+			"min_value", "max_value", "enum_values", "enum_labels", "mirror_with",
+			"is_storable", "is_active", "is_supported",
+		)
+		for _, ins := range pending[i:end] {
+			mapping := ins.Mapping
+			ib = ib.Values(
+				ins.ProductID,
+				ins.SoftwareVersion,
+				mapping.StandardPath,
+				mapping.PrivatePath,
+				mapping.EntryType,
+				mapping.Access,
+				mapping.DataType,
+				mapping.ChangeApplies,
+				mapping.MinValue,
+				mapping.MaxValue,
+				mapping.EnumValues,
+				mapping.EnumLabels,
+				mapping.MirrorWith,
+				mapping.IsStorable,
+				mapping.IsActive,
+				mapping.IsSupported,
+			)
+		}
+		sqlStr, args, err := ib.ToSql()
+		if err != nil {
+			return total, fmt.Errorf("reconcile INSERT build SQL: %w", err)
+		}
+		tag, err := tx.Exec(ctx, sqlStr, args...)
+		if err != nil {
+			return total, fmt.Errorf("reconcile INSERT exec: %w", err)
+		}
+		total += tag.RowsAffected()
+	}
+	return total, nil
 }
 
 // batchInsertMappings 把 entries 批量插入 param_mappings；entryType 固定。

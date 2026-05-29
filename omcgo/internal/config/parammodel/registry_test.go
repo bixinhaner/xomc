@@ -16,12 +16,12 @@ import (
 // ─── 内存 fakes ────────────────────────────────────────────────────
 
 type fakeRepo struct {
-	defaultByModel        map[uuid.UUID][]ParamMapping
-	discoveredByDevice    map[discoveredKey][]ParamMapping
-	listDefaultCalls      int
-	listDiscoveredCalls   int
-	listDefaultErr        error
-	listDiscoveredErr     error
+	defaultByModel      map[uuid.UUID][]ParamMapping
+	discoveredByDevice  map[discoveredKey][]ParamMapping
+	listDefaultCalls    int
+	listDiscoveredCalls int
+	listDefaultErr      error
+	listDiscoveredErr   error
 }
 
 func newFakeRepo() *fakeRepo {
