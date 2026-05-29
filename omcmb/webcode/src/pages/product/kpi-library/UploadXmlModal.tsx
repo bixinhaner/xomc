@@ -36,6 +36,22 @@ interface FormValues {
   tech?: TechLower;
 }
 
+// 2026-05-29:从 XML 头部 4 KB 抽 <indicatorModel deviceType="..."> 属性。
+// 用途:beforeUpload 阶段自动同步表单"目标制式",避免用户手选 ENB 但传 GNB
+// 文件导致后端 2044 (ErrCodeIndicatorUploadInvalidRoot) 拒收的来回。
+// 容错:正则不匹配 / deviceType 不在三制式白名单 → 返 null,沿用用户当前选项。
+async function detectTechFromXml(file: File): Promise<TechLower | null> {
+  try {
+    const head = await file.slice(0, 4096).text();
+    const m = head.match(/<indicatorModel[^>]*\bdeviceType\s*=\s*"([^"]+)"/i);
+    if (!m) return null;
+    const t = m[1].toLowerCase() as TechLower;
+    return (['enb', 'gsm', 'gnb'] as TechLower[]).includes(t) ? t : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function UploadXmlModal({ open, onClose }: Props) {
   const [form] = Form.useForm<FormValues>();
   const [fileList, setFileList] = useState<UploadFile[]>([]);
@@ -78,7 +94,9 @@ export default function UploadXmlModal({ open, onClose }: Props) {
         });
         return;
       }
-      const msg = ax.response?.data?.message ?? (e instanceof Error ? e.message : String(e));
+      // 后端信封字段名是 msg(非 message);message 保留兼容老链路。
+      const body = ax.response?.data as { msg?: string; message?: string } | undefined;
+      const msg = body?.msg ?? body?.message ?? (e instanceof Error ? e.message : String(e));
       message.error(msg);
     }
   };
@@ -106,6 +124,18 @@ export default function UploadXmlModal({ open, onClose }: Props) {
         message.error(`文件超过 1 MiB(实际 ${(f.size / 1024).toFixed(1)} KiB)`);
         return Upload.LIST_IGNORE;
       }
+      // 2026-05-29:选文件即抽 deviceType,自动同步"目标制式",避免后端 2044
+      // (e.g. ENB 上下文选 GNB.xml 必拒)。fire-and-forget,不阻塞 UI。
+      void detectTechFromXml(f).then((detected) => {
+        if (!detected) return;
+        const current = form.getFieldValue('tech') as TechLower | undefined;
+        if (!current) {
+          form.setFieldsValue({ tech: detected });
+        } else if (current !== detected) {
+          form.setFieldsValue({ tech: detected });
+          message.info(`已根据文件 deviceType=${detected.toUpperCase()} 自动切换目标制式`);
+        }
+      });
       return false; // 阻止 antd 自动上传 — 我们走 customRequest in handleSubmit
     },
     onChange: ({ fileList: newList }) => setFileList(newList.slice(-1)),
