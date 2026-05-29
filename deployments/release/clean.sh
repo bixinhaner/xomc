@@ -12,6 +12,10 @@
 #
 # project / infra 两类**各自独立**询问/保留,互不影响。
 #
+# 询问前先做一轮预清理:扫描两类归档,删除"0 个交付文件"的空版本目录
+# (build 失败常残留的空壳,下载索引上显示"0 个交付文件"),这步无须确认,
+# --dry-run 时同样只列不删。
+#
 # 用法:
 #   ./clean.sh                              # 交互式询问保留数量
 #   ./clean.sh -y                           # 非交互,按 --default-keep
@@ -118,6 +122,52 @@ ask_keep() {
   echo "$keep"
 }
 
+# has_artifact <ver_dir> — 该版本目录下是否存在至少一个交付包(.tar.*,
+# 排除 .sha256 校验文件)。与 gen-index.sh 对"交付文件"的定义口径一致:
+# build-release.sh 失败时常留空版本目录(只有 .work 或不留任何东西),
+# 这些目录在下载索引上显示"0 个交付文件",清理时应优先删除。
+has_artifact() {
+  local d="$1"
+  [ -d "$d" ] || return 1
+  local f
+  for f in "$d"/*.tar.xz "$d"/*.tar.gz "$d"/*.tar.zst "$d"/*.tgz; do
+    [ -f "$f" ] || continue
+    case "$f" in *.sha256) continue ;; esac
+    return 0
+  done
+  return 1
+}
+
+# prune_empty <label> <dir> — 扫描 <dir> 下所有版本子目录,删除不含任何
+# 交付包的"空壳"(通常是 build 中途 die 留下的)。
+# 此步骤无须用户确认,因为这些目录从下载视角看就是垃圾;在 keep-N 询问
+# 之前先跑一遍,让交互列表只包含"真有产物"的版本。
+prune_empty() {
+  local label="$1"
+  local d="$2"
+  local versions empty=()
+  [ -d "$d" ] || return 0
+  versions=$(list_versions "$d") || return 0
+  [ -z "$versions" ] && return 0
+  while IFS= read -r ver; do
+    [ -z "$ver" ] && continue
+    has_artifact "$d/$ver" || empty+=( "$ver" )
+  done <<< "$versions"
+  [ "${#empty[@]}" -eq 0 ] && return 0
+
+  log ""
+  log "[$label] 检测到 ${#empty[@]} 个空版本目录(无 .tar.* 交付文件),将清理:"
+  printf '  - %s\n' "${empty[@]}" >&2
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "[$label] --dry-run,未实际删除。"
+    return 0
+  fi
+  for ver in "${empty[@]}"; do
+    rm -rf "$d/$ver"
+  done
+  log "[$label] 空目录已清理。"
+}
+
 # clean_kind <label> <dir> <keep>
 clean_kind() {
   local label="$1"
@@ -171,6 +221,13 @@ fi
 
 log "归档目录: $ARCHIVE"
 [ "$DRY_RUN" -eq 1 ] && log "模式: dry-run(只列不删)"
+
+# ── 0. 预清理:删除"0 个交付文件"的空版本目录 ───────────────────────
+# build 失败时常留下空版本目录(下载索引上显示"0 个交付文件"),
+# 它们既不属于"最新 N 个版本",在 keep-N 询问列表里又会占位、误导。
+# 先在 keep-N 询问之前把它们扫掉。
+prune_empty "项目交付包" "$ARCHIVE/project"
+prune_empty "基础设施包" "$ARCHIVE/infra"
 
 # ── project (build-release.sh 产出) ─────────────────────────────────
 PROJECT_DIR="$ARCHIVE/project"
