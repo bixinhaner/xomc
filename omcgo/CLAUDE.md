@@ -412,6 +412,91 @@ Loader.loadParamModelFile
 - `omcmb/frontend-core/src/types/paramModel.ts` — ParamModelSource union + source/deletable
 - `omcmb/webcode/src/pages/product/param-model/{index,ModelsTab}.tsx` — Upload + 来源 + 置灰
 
+#### 5.3.2 Indicator 自定义 XML 分层目录（T-0180）
+
+**核心契约**:builtin XML 与 custom XML 物理隔离两套目录,Loader 启动期合并扫描;后端唯一真值源 + 前端零代码同步。结构与 T-0178 ParamModel 同范式,**关键差异**:custom 侧三制式子目录化(`enb/gsm/gnb/`)而非扁平。
+
+| 目录 | 位置 | 来源 | 生命周期 |
+|------|------|------|---------|
+| `data/indicator-library/` | 镜像层 `COPY` 进 `/etc/omcgo/data` | 发版构建 | 跟随镜像版本 |
+| └── `enb/*.xml` | 镜像层 | LTE 多文件(ALL/BLQ/...) | 同上 |
+| └── `GSM.xml` | 镜像层 | GSM 单文件(根级) | 同上 |
+| └── `GNB.xml` | 镜像层 | GNB 单文件(根级) | 同上 |
+| `data/indicator-library-custom/` | host bind mount `/opt/omc/data/...` | 运维通过 UI 上传 | 跟随 host(升级不丢) |
+| └── `enb/*.xml` | host | 用户自定义 LTE 指标 | 同上 |
+| └── `gsm/*.xml` | host | 用户自定义 GSM 指标(全统一子目录化) | 同上 |
+| └── `gnb/*.xml` | host | 用户自定义 NR 指标 | 同上 |
+
+**5 项设计决策**(D1-D5 锁定):
+1. `custom_overrides_builtin = true`(默认 custom 胜出;`indicator-library/enb/ALL.xml` ↔ `indicator-library-custom/enb/ALL.xml` 同名时 custom 替换)
+2. 强制 `<indicatorModel platform="..." [deviceType="..."]>` 根元素:`platform` 必填;`deviceType` 若 present 必须(大小写不敏感)匹配 `?tech=` query,absent 则容忍(ENB legacy XML 历史无 deviceType)
+3. `.deleted.<ts>` / `.bak.<ts>` 备份保留 **30 天**(worker cron `0 3 * * *`);`.tmp.<纳秒ts>` 残留 1 小时即清
+4. DELETE 备份失败 → 全流程**保守回滚**(500 `ErrCodeIndicatorBackupFailed=2041`,不删 DB)
+5. source 唯一真值源在后端(`source.go::IsDeletable`);前端只渲染 API 返回的 `deletable` bool
+
+**唯一真值源链路**(改判定规则只动 `source.go`):
+```
+Loader.parseDocs
+  → fileSource{AbsPath, LoadedFrom="indicator-library/enb/X.xml" or "indicator-library-custom/enb/Y.xml"}
+  → indicatorRecord{Ind, LoadedFrom}(first-seen 锁定)
+  → perf_indicators_{enb,gsm,gnb}.loaded_from 列写入
+  → ClassifySource(loadedFrom) 返 builtin/custom/unknown
+  → IsDeletable(loadedFrom) 守门 DELETE handler + 填充 fileEntry.deletable
+  → 前端 XMLFilesModal 渲染来源 Tag + 删除按钮可见性
+```
+
+**端到端 commit 链路**(9 个 commit 合计 +5313/-211 LOC):
+- 立项: `35ee4d51`(PRD + 设计文档入库)
+- P1.1 后端: `69101bcb`(source 分类器 73 LOC + 29 sub-test)
+- P1.2 后端: `351cf0b2`(Loader 双目录 + filelist + migration 217 加 loaded_from 三表)
+- P1.3 后端: `311bde18`(Delete 守门 + 6 错误码 2040-2045 + 22 sub-test)
+- P1.4 后端: `a58f7833`(Upload + Summary + Files 3 端点 + 38 sub-test)
+- P1.5 后端: `c929a760`(import-directory ?mode=reload 三表孤儿删除 + 12 sub-test)
+- P2 worker: `96ca95bd`(BackupCleanup 三制式子目录 + indicator_backup_cleanup_total + 16 sub-test)
+- P3 部署: `1b742aa7`(dev/prod compose volume + deploy.sh mkdir 三子目录)
+- P4 前端: `df2dd814`(business 层 4 件套 + UI 壳 6 文件 drill-down + URL 同步)
+
+**单实例假设**:Upload/Delete/单文件 Reload 通过 `acquireFileLock(basename)` 进程内 `sync.Map[name]*sync.Mutex` 互斥。**多实例横扩前必须**补 PG advisory lock(R-NEW-T0180-5 Open)。
+
+**新增错误码**(`global/errors.go` Data Model 块 2040-2049 段):
+- `ErrCodeIndicatorBuiltinNotDeletable = 2040` — DELETE 内置返 403
+- `ErrCodeIndicatorBackupFailed = 2041` — DELETE 备份失败保守回滚返 500
+- `ErrCodeIndicatorUploadInvalidTech = 2042` — upload-xml ?tech= 非 enb/gsm/gnb → 400
+- `ErrCodeIndicatorUploadInvalidName = 2043` — 文件名违规 → 400
+- `ErrCodeIndicatorUploadInvalidRoot = 2044` — XML 根非 `<indicatorModel>` 或 D2 校验失败 → 400
+- `ErrCodeIndicatorUploadTooLarge = 2045` — 文件 > 1 MiB → 400
+
+**新增 Prometheus 指标**:
+- `indicator_backup_cleanup_total{kind="deleted|bak|tmp", result="swept|error|skipped"}` (worker)
+
+**新增 HTTP 端点**(/api/v1):
+- `GET /indicators/summary` — 三制式聚合(builtin/custom/groups/platforms)
+- `GET /indicators/files?tech=enb|gsm|gnb` — 该制式 XML 文件列表(DB GROUP BY + 盘扫描合并)
+- `POST /indicators/upload-xml?tech=&force=` — multipart 上传,同步 Loader.Reload
+- `POST /indicators/import-directory?mode=import|reload` — mode=reload 加孤儿删除
+- `DELETE /indicators/files/{loadedFrom}` — IsDeletable 守门 + 三表级联
+
+**相关代码索引**:
+- `internal/pm/indicator/source.go` — Source / ClassifySource / IsDeletable + 4 共享常量
+- `internal/pm/indicator/filelist.go` — resolveENBSources / resolveSingleTechSources(三制式双源合并)
+- `internal/pm/indicator/upload.go` — Upload 4 个纯函数校验器(filename/tech/XML root+D2/path-containment)
+- `internal/pm/indicator/file_handler.go` — FileHandler:DeleteFile / Summary / ListFiles / UploadXML + acquireFileLock + EnsureBaseDir
+- `internal/pm/indicator/file_repository.go` — FileRepository 接口 + Pg 实现(Count/Delete/Summary/ListFiles/DeleteOrphansBefore)
+- `internal/pm/indicator/backup_cleanup.go` — BackupCleanup(三制式子目录步进)+ 指标
+- `internal/pm/indicator/reload.go` — PerformReloadWithOrphans + ParseReloadMode
+- `internal/pm/indicator/loader.go` — Loader.run 双目录合并 + parseDocs 写前缀 + flushIndicators 写 loaded_from
+- `internal/pm/indicator/rest_handler.go` — ImportDirectory 加 ?mode= 分支(P1.5)
+- `migrations/000217_perf_indicators_loaded_from.sql` — perf_indicators_{enb,gsm,gnb} ADD COLUMN loaded_from
+- `cmd/worker/main.go::startIndicatorBackupCleanup` — cron 注册 + 30s catch-up
+- `cmd/app/provider/pm.go` — RESTHandler + FileHandler 接入 + EnsureBaseDir 启动期
+- `deployments/docker/docker-compose.yml` — dev bind mount(app + worker)
+- `deployments/release/bundle/deploy/docker-compose.app.yml` — prod bind mount(app + worker)
+- `deployments/release/bundle/deploy/deploy.sh` — 首次部署 mkdir 三制式 + chown 10001 + chmod 0750
+- `omcmb/frontend-core/src/types/indicatorLibrary.ts` — TechLower + 双向映射 + 5 个新 type
+- `omcmb/frontend-core/src/services/api/indicatorLibraryApi.ts` — +5 API 方法 + importDirectory(mode) 改造
+- `omcmb/frontend-core/src/hooks/api/useIndicatorsLibrary.ts` — +5 React Query hooks
+- `omcmb/webcode/src/pages/product/kpi-library/{index,SummaryTab,IndicatorsByTech,XMLFilesModal,UploadXmlModal,UnitsDrawer}.tsx` — drill-down + URL 同步
+
 ### 5.4 事件驱动规范
 
 **EventBus 双实现**：

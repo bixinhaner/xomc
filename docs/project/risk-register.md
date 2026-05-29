@@ -677,11 +677,86 @@
 
 ---
 
+---
+
+## T-0180 kpi-library 重设计 + 自定义 indicator XML 持久化专属风险(R-NEW-T0180-01..06)
+
+> T-0180 PRD `docs/project/prd/F03-kpi-library-redesign.md` §11 已列 6 项风险,S7 关闭时登记到本表。
+
+### R-NEW-T0180-01 三表(enb/gsm/gnb)分表导致 handler 重复代码激增
+- **描述**:perf_indicators_{enb,gsm,gnb} / rela_platform_indicator_formula_{enb,gsm,gnb} / enabled_pm_indicators_{enb,gsm,gnb} 三套表结构相同,handler/repo SQL 三份重复
+- **等级**:P3
+- **概率**:已发生(P1.2/P1.3 实施时)
+- **影响**:维护成本 +20%;改 schema 需同步三份
+- **Owner**:Go 工程专家
+- **状态**:Mitigated(2026-05-29)
+- **关联 Task**:T-0180
+- **缓解**:① `validateTech` 白名单 + `fmt.Sprintf("perf_indicators_%s", tech)` 模板化 SQL,接受 ~20% 重复换 schema 简单;② FileRepository 接口里 tech 是参数而非分支(单一方法签名);③ 三表合一是长期重构(PRD §5 非目标 #2),与 T-0166 PM 规模化容量重审一起讨论
+- **下次复盘**:三表合一立项时
+
+### R-NEW-T0180-02 loaded_from NULL 历史数据被 reload 模式误删
+- **描述**:migration 000217 加 loaded_from 列后,历史行均为 NULL;mode=reload 算 orphan 时 `updated_at < start` 命中所有未被 Loader 触碰的旧行;若旧行未在 XML 中(运维曾手工 INSERT 等)会被误删
+- **等级**:P2
+- **概率**:中(取决于运维历史是否手工写过 perf_indicators_*)
+- **影响**:手工记录在 reload 后消失
+- **Owner**:数据与存储专家
+- **状态**:**Open**
+- **关联 Task**:T-0180
+- **缓解**:① UI 红色 danger Popconfirm + 文案"操作不可撤销"(已落 P4 index.tsx);② 响应体返回三制式孤儿删除计数,前端 message.success 显示便于发现异常;③ **建议运维**:首次升级到含本特性的版本后,先做一次 mode=import 而非 reload,让 Loader 写 loaded_from 后再判断是否 mode=reload
+- **下次复盘**:GA 前(若运维 SOP 含"首次 import 再 reload"则转 Mitigated)
+
+### R-NEW-T0180-03 reload 操作误伤运维手动启用的孤儿指标
+- **描述**:mode=reload 不仅删 perf_indicators 主表,还级联删 enabled_pm_indicators_*(启用记录) + rela_platform_indicator_formula_*(公式);若运维手动启用了被 reload 判为孤儿的指标,启用状态一并丢失
+- **等级**:P2
+- **概率**:中(reload 操作本身是低频但确实会发生)
+- **影响**:运维需重新启用 + 手工配置的公式丢失
+- **Owner**:产品经理
+- **状态**:Mitigated(2026-05-29)
+- **关联 Task**:T-0180
+- **缓解**:① Popconfirm 描述明确列出"级联清理公式 + 启用记录"(P4 index.tsx 已落);② Prometheus `indicator_reload_orphans_deleted_total{tech}` (PRD §7 列出,P2 起预留指标 slot 后续补);③ 沿用 T-0178 destructive 语义,与 param-model 一致 SOP
+- **下次复盘**:GA 前
+
+### R-NEW-T0180-04 删除时备份失败导致 DB 与文件状态不一致
+- **描述**:DeleteFile handler 先 mv .deleted.<ts>,再 DB 三表级联删;若 mv 失败但 DB 删成功(理论上 mv 失败已 return),会出现文件存在 DB 行已删的状态
+- **等级**:P2
+- **概率**:低(代码已保守回滚 mv 失败 → return 500,不动 DB)
+- **影响**:DB 与 host 文件分叉
+- **Owner**:Go 工程专家
+- **状态**:Mitigated(2026-05-29)
+- **关联 Task**:T-0180
+- **缓解**:① 代码硬约束:mv 返 ENOENT 视为"已 gone"继续清 DB(file_already_gone audit_action);mv 其他失败 → 500 ErrCodeIndicatorBackupFailed + 不动 DB(`indicator.delete.aborted_backup_failed` audit);② DB 失败时反向 rename 恢复(若反向 rename 也失败仅 log,真分叉);③ 8 个 sub-test 覆盖三层错误路径
+- **下次复盘**:多实例横扩立项时(R-NEW-T0180-05 同期)
+
+### R-NEW-T0180-05 单实例假设下同名 Upload 并发竞态
+- **描述**:UploadXML + DeleteFile + Reload 用 `acquireFileLock(basename)` 进程内 sync.Map mutex 互斥;多实例横扩(同一 host 路径多 app 容器)时锁失效,同名上传可能丢更新
+- **等级**:P2
+- **概率**:低(当前单 app 单 worker 部署)
+- **影响**:同名并发 Upload 时一份覆盖另一份(原子 rename 保证不撕裂,但语义上丢更新)
+- **Owner**:数据与存储专家
+- **状态**:**Open**
+- **关联 Task**:T-0180(与 T-0178 R-NEW-T0178-6 同源)
+- **缓解**:多实例横扩前补 PG advisory lock `pg_try_advisory_xact_lock(hashtext('indicator:'+basename))`,与 T-0178 ParamModel 同模式;当前部署架构未规模化,无需立即解决
+- **下次复盘**:app 横扩立项时(可能 T-0165 OUI+SN 切换后)
+
+### R-NEW-T0180-06 三皮肤 alarm-library / kpi-library 一致性漂移
+- **描述**:本次只改造 webcode 主皮肤的 `pages/product/kpi-library/*`;webcode-v2 / v3 皮肤的同名页面(若存在)未做 drill-down 改造,UX 与主皮肤不一致
+- **等级**:P2
+- **概率**:中(取决于 v2/v3 是否暴露 kpi-library 入口)
+- **影响**:多皮肤场景用户体验割裂
+- **Owner**:前端专家 + PgM
+- **状态**:**Open**
+- **关联 Task**:T-0180(与 T-0179 R-NEW-T0179-05 同源)
+- **缓解**:① 验证 v2/v3 实际是否有 kpi-library 页面入口(本次 typecheck 仅证 frontend-core 业务层改动兼容,UI 壳未触及);② 由 PgM 决策是否要镜像改造到两个候选皮肤;③ 至少在 `docs/project/frontend-multi-skin-plan-20260422.md` 加一行 T-0180 改造记录
+- **下次复盘**:多皮肤策略评审时(与 T-0179 R-NEW-T0179-05 一并讨论)
+
+---
+
 ## 复盘节奏
 
 - **每 Sprint 回顾**：更新 Open/Mitigating 状态，检查 Owner 有无变更
 - **每月第一个 Sprint**：审视 P0 列表，确保 <14 天已关闭或有明确进展
 - **每季度**：深度复盘 P1/P2，决定是否升级或关闭
 
-**当前版本**：v1.5（2026-05-29，T-0179 6 条 R-NEW-T0179-* 风险登记;**4 条 Mitigated + 2 条 Open** — Mitigated: 01(XSS) / 03(loaded_from NULL) / 04(Drawer lock) ;Open: 02(规模化 P99) / 05(三皮肤一致性) / 06(ne-types 鉴权)；累计 R-NEW-T0178-* + R-NEW-T0179-* 共 14 条新增风险 11 Mitigated + 3 Open）
+**当前版本**：v1.6（2026-05-29,T-0180 6 条 R-NEW-T0180-* 风险登记;**3 条 Mitigated + 3 条 Open** — Mitigated: 01(三表重复)/ 03(级联清理 UI 提示)/ 04(保守回滚 + 测试);Open: 02(NULL loaded_from 误删) / 05(多实例横扩 PG advisory lock,与 T-0178/T-0179 同源)/ 06(三皮肤一致性,与 T-0179 同源);累计 R-NEW-T0178-* + R-NEW-T0179-* + R-NEW-T0180-* 共 **20** 条新增风险 **14 Mitigated + 6 Open**)
+**v1.5**（2026-05-29，T-0179 6 条 R-NEW-T0179-* 风险登记;**4 条 Mitigated + 2 条 Open** — Mitigated: 01(XSS) / 03(loaded_from NULL) / 04(Drawer lock) ;Open: 02(规模化 P99) / 05(三皮肤一致性) / 06(ne-types 鉴权)；累计 R-NEW-T0178-* + R-NEW-T0179-* 共 14 条新增风险 11 Mitigated + 3 Open）
 **v1.4**（2026-05-29，T-0178 8 条 R-NEW-T0178-* 风险登记;R-NEW-T0178-3 Prometheus 告警 + R-NEW-T0178-8 Loader 启动期 WARN 兑现;**7 条 Mitigated + 1 条 Open**（仅 R-NEW-T0178-6 多实例横扩 PG advisory lock 仍 Open,横扩立项时关闭））
