@@ -165,6 +165,21 @@ type ParamModelLoaderConfig struct {
 	Directory         string   `mapstructure:"directory"`           // 默认 "param-mappings"
 	ParamModelFiles   []string `mapstructure:"param_model_files"`   // 9 个白名单（空即扫除已知 routing/products 之外）
 	StandardModelFile string   `mapstructure:"standard_model_file"` // 默认 "standard-model.xml"
+
+	// T-0178 自定义 XML 分层目录(用户上传 paramModel 的持久化目录)
+	CustomDirectory string `mapstructure:"custom_directory"` // 默认 "param-mappings-custom"
+	// CustomOverrides 使用 *bool 三态:
+	//   yaml 不写  → nil  → CustomOverridesEnabled() = true(默认 custom 胜出,用户决策 1)
+	//   yaml true  → 显式 true,等同默认
+	//   yaml false → 显式 false,同名时 builtin 胜出
+	// 避免 Go bool 零值 false 与"默认 true"语义冲突的陷阱(PRD §一)。
+	CustomOverrides *bool `mapstructure:"custom_overrides_builtin"`
+}
+
+// CustomOverridesEnabled 是 Loader 与测试调用方的唯一入口,不直接读 *bool。
+// 改默认值只动这里。
+func (c ParamModelLoaderConfig) CustomOverridesEnabled() bool {
+	return c.CustomOverrides == nil || *c.CustomOverrides
 }
 
 // IndicatorLoaderConfig 控制 KPI 指标库 Loader 行为（T-0098 P1-06）。

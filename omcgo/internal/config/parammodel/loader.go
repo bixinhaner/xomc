@@ -49,6 +49,10 @@ func NewLoader(pool *pgxpool.Pool, cfg appconfig.ParamModelLoaderConfig, baseDir
 	if cfg.Directory == "" {
 		cfg.Directory = "param-mappings"
 	}
+	if cfg.CustomDirectory == "" {
+		// yaml 不写 custom_directory → 走默认值;允许用户改为非默认目录但极少需要
+		cfg.CustomDirectory = CustomDirSubdir
+	}
 	if cfg.StandardModelFile == "" {
 		cfg.StandardModelFile = "standard-model.xml"
 	}
@@ -60,8 +64,8 @@ func NewLoader(pool *pgxpool.Pool, cfg appconfig.ParamModelLoaderConfig, baseDir
 		cfg:             cfg,
 		base:            baseDir,
 		logger:          logger.Named(LoaderName),
-		customDir:       CustomDirSubdir, // T-0178 默认 host 持久化目录
-		customOverrides: true,            // T-0178 默认决策 1: 同名 custom 胜出
+		customDir:       cfg.CustomDirectory,         // T-0178 host 持久化目录(子路径)
+		customOverrides: cfg.CustomOverridesEnabled(), // T-0178 决策 1: 默认 custom 胜出
 	}
 }
 

@@ -144,6 +144,36 @@ datamodel_expiry:
   manual_max_idle_days: 60
   cleanup_cron: "0 3 * * *"
 
+# T-0098 P1-06 + T-0178: 4 域字典启动期加载 + 自定义 paramModel XML 分层目录
+# (LATENT BUG fix: 此前 prod.yaml 未配 dict_loader,XMLBaseDir 走零值导致
+# Loader 实际扫描路径退化为 cwd 下"param-mappings/",与 Dockerfile.app 的
+# COPY data/ → /etc/omcgo/data 不一致。本节修复 + 引入 T-0178 字段。)
+dict_loader:
+  xml_base_dir: "data"           # 相对 cwd /etc/omcgo;Dockerfile.app COPY 至 /etc/omcgo/data
+  auto_load_on_startup: true
+  cache_version_poll_interval: 30s
+  load_concurrency: 4
+  param_model:
+    directory: "param-mappings"
+    standard_model_file: "standard-model.xml"
+    param_model_files: []        # 空 → Loader 扫除 standard-model.xml/products.xml/旧 routing 之外的 *.xml
+    # T-0178 自定义 XML 分层目录(host bind mount /opt/omc/data/param-mappings-custom → 容器内 /etc/omcgo/data/param-mappings-custom)
+    custom_directory: "param-mappings-custom"
+    # 同名时 custom 是否压制 builtin(默认 true,删 custom 自动回退 builtin 的 self-healing 依赖此项)
+    custom_overrides_builtin: true
+  indicator:
+    base_directory: "indicator-library"
+    enb_subdir: "enb"
+    gsm_file: "GSM.xml"
+    gnb_file: "GNB.xml"
+  alarm_definition:
+    directory: "alarm-definitions"
+  product:
+    directory: "param-mappings"
+    file: "products.xml"
+  quick_settings:
+    directory: "quicksettings"
+
 batch_processor:
   enabled: true           # 启用 Periodic Inform 批量处理
   workers: 8              # 生产环境建议 CPU 核数 / 2

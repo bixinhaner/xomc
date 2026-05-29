@@ -191,6 +191,12 @@ dict_loader:
     directory: "param-mappings"
     standard_model_file: "standard-model.xml"
     param_model_files: []        # 空 → Loader 扫除 standard-model.xml/products.xml/旧 routing 之外的 *.xml
+    # T-0178 自定义 XML 分层目录:custom_directory 是 host bind mount 持久化路径,
+    # 与 builtin 的 directory 物理隔离,Loader 启动期合并扫描。
+    # custom_overrides_builtin: 同名时 custom 是否压制 builtin(默认 true);
+    # 设 false 时 builtin 胜出。删 custom 自动回退 builtin 的 self-healing 仅在 true 时生效。
+    custom_directory: "param-mappings-custom"
+    custom_overrides_builtin: true
   indicator:
     base_directory: "indicator-library"
     enb_subdir: "enb"
