@@ -15,6 +15,9 @@
 #   sudo bash install-docker.sh --mirror daocloud        # 一气呵成，装完直接配 DaoCloud 加速
 #   sudo bash install-docker.sh --no-mirror              # 装完不动 daemon.json，跳过加速
 #   sudo bash install-docker.sh --skip-if-installed      # 已装则静默 0 退出（脚本里调）
+#   sudo bash install-docker.sh --uninstall              # 卸载 docker 引擎(默认 dry-run)
+#   sudo bash install-docker.sh --uninstall --no-dry-run --keep-data
+#                                                        # 真删 dockerd / 二进制 / systemd unit,但保留 /var/lib/docker
 #   sudo bash install-docker.sh -h | --help              # 本帮助
 #
 # 参数：
@@ -25,6 +28,11 @@
 #   --no-mirror           装完不引导加速、不动 daemon.json（用户后期可单独运行
 #                         ../setup-mirrors.sh）
 #   --skip-if-installed   已检测到 docker 时静默 0 退出（deploy.sh 调用时用）
+#
+#   ── 卸载模式 ─────────────────────────────────────────────────────────────
+#   --uninstall           进入卸载模式(默认 dry-run,仅打印将要做的动作,不实际执行)
+#   --no-dry-run          关闭 dry-run(必须显式加上才会真删,且会再做一次交互确认)
+#   --keep-data           不删 /var/lib/docker / /var/lib/containerd / /home/{docker,containerd}-data
 #   -h | --help           本帮助
 #
 # 数据目录（自动检测 + 交互选择，无 CLI 选项）：
@@ -59,11 +67,17 @@ die()  { echo -e "\033[1;31m[install-docker][错误]\033[0m $*" >&2; exit 1; }
 MIRROR=""
 NO_MIRROR=0
 SKIP_IF_INSTALLED=0
+UNINSTALL=0
+NO_DRY_RUN=0
+KEEP_DATA=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --mirror)              MIRROR="$2"; shift 2 ;;
     --no-mirror)           NO_MIRROR=1; shift ;;
     --skip-if-installed)   SKIP_IF_INSTALLED=1; shift ;;
+    --uninstall)           UNINSTALL=1; shift ;;
+    --no-dry-run)          NO_DRY_RUN=1; shift ;;
+    --keep-data)           KEEP_DATA=1; shift ;;
     -h|--help)             awk 'NR>=3 && /^# ====/ {exit} NR>=3 {print}' "$SELF"; exit 0 ;;
     *)                     die "未知参数：$1（-h 查看用法）" ;;
   esac
@@ -72,6 +86,152 @@ done
 cd "$(dirname "$SELF")"
 
 [ "$(id -u)" = 0 ] || die "请以 root 执行（sudo bash $0 ...）"
+
+# ── 卸载模式 — 在所有"已装跳过"逻辑之前分流 ──────────────────────────
+if [ "$UNINSTALL" = 1 ]; then
+  echo
+  log "Docker 卸载模式"
+
+  DRY="[dry-run]"
+  REAL=0
+  if [ "$NO_DRY_RUN" = 1 ]; then
+    REAL=1
+    DRY=""
+  fi
+
+  # 扫描当前状态
+  DOCKER_VER="(未装)"
+  command -v docker >/dev/null 2>&1 && DOCKER_VER="$(docker --version 2>/dev/null || echo unknown)"
+  RUNNING_CONTAINERS="$(docker ps -q 2>/dev/null | wc -l | tr -d ' ' 2>/dev/null || echo 0)"
+
+  # daemon.json 里 data-root 真实路径(可能被用户切到 /home)
+  DOCKER_ROOT_DEFAULT="/var/lib/docker"
+  CONTAINERD_ROOT_DEFAULT="/var/lib/containerd"
+  ACTUAL_DOCKER_ROOT="$DOCKER_ROOT_DEFAULT"
+  if [ -f /etc/docker/daemon.json ] && command -v python3 >/dev/null 2>&1; then
+    DR="$(python3 -c "import json; d=json.load(open('/etc/docker/daemon.json')); print(d.get('data-root',''))" 2>/dev/null || true)"
+    [ -n "$DR" ] && ACTUAL_DOCKER_ROOT="$DR"
+  fi
+  # containerd root 在 systemd unit 里(ExecStart ... --root /home/containerd-data)
+  ACTUAL_CONTAINERD_ROOT="$CONTAINERD_ROOT_DEFAULT"
+  if [ -f /etc/systemd/system/containerd.service ]; then
+    CR="$(grep -oE -- '--root[ =]+\S+' /etc/systemd/system/containerd.service | head -1 | awk '{print $2}')"
+    [ -n "$CR" ] && ACTUAL_CONTAINERD_ROOT="$CR"
+  fi
+
+  DOCKER_DATA_SIZE=""
+  [ -d "$ACTUAL_DOCKER_ROOT" ] && DOCKER_DATA_SIZE="$(du -sh "$ACTUAL_DOCKER_ROOT" 2>/dev/null | awk '{print $1}')"
+  CONTAINERD_DATA_SIZE=""
+  [ -d "$ACTUAL_CONTAINERD_ROOT" ] && CONTAINERD_DATA_SIZE="$(du -sh "$ACTUAL_CONTAINERD_ROOT" 2>/dev/null | awk '{print $1}')"
+
+  echo
+  log "${DRY}卸载计划:"
+  log "${DRY}  · 当前 Docker:$DOCKER_VER"
+  log "${DRY}  · 运行中容器数:$RUNNING_CONTAINERS"
+  log "${DRY}  · docker data-root:$ACTUAL_DOCKER_ROOT $([ -n "$DOCKER_DATA_SIZE" ] && echo "($DOCKER_DATA_SIZE)")"
+  log "${DRY}  · containerd root:$ACTUAL_CONTAINERD_ROOT $([ -n "$CONTAINERD_DATA_SIZE" ] && echo "($CONTAINERD_DATA_SIZE)")"
+  echo
+
+  if [ "$RUNNING_CONTAINERS" -gt 0 ] 2>/dev/null; then
+    log "${DRY}1) 将停止 + 删除 $RUNNING_CONTAINERS 个运行中容器(包含可能的 OMC 业务容器)"
+  else
+    log "${DRY}1) 无运行中容器"
+  fi
+  log "${DRY}2) systemctl disable --now docker containerd"
+  log "${DRY}3) 删 systemd unit:/etc/systemd/system/docker.service / containerd.service"
+  log "${DRY}4) 删 /usr/local/bin/{docker,dockerd,containerd,runc,docker-init,docker-proxy,ctr,containerd-shim*}"
+  log "${DRY}5) 删 /usr/local/lib/docker/cli-plugins/(docker-compose V2 + buildx)"
+  if [ "$KEEP_DATA" = 1 ]; then
+    log "${DRY}6) --keep-data 保留 docker / containerd 数据目录(可日后重装恢复镜像 / 容器)"
+  else
+    log "${DRY}6) 将删:"
+    log "${DRY}     - $ACTUAL_DOCKER_ROOT($DOCKER_DATA_SIZE)"
+    log "${DRY}     - $ACTUAL_CONTAINERD_ROOT($CONTAINERD_DATA_SIZE)"
+    [ "$ACTUAL_DOCKER_ROOT"     != "/var/lib/docker"     ] && log "${DRY}     - /var/lib/docker(若残留)"
+    [ "$ACTUAL_CONTAINERD_ROOT" != "/var/lib/containerd" ] && log "${DRY}     - /var/lib/containerd(若残留)"
+  fi
+  log "${DRY}7) 删 /etc/docker(daemon.json + certs.d/)"
+  log "${DRY}8) 删 docker 用户组"
+  echo
+  log "${DRY}注意:本脚本【不删 /opt/omc 等 OMC 业务数据】,如需一并清理:"
+  log "${DRY}        先跑 sudo bash deploy.sh --uninstall --no-dry-run --keep-data,再跑本脚本"
+  echo
+
+  if [ "$REAL" = 0 ]; then
+    log "[dry-run] 未实际执行任何动作。要真删,加 --no-dry-run 再跑一次:"
+    log "[dry-run]   sudo bash $0 --uninstall --no-dry-run $([ "$KEEP_DATA" = 1 ] && echo "--keep-data")"
+    exit 0
+  fi
+
+  # 真删 — 二次交互确认
+  if [ -t 0 ]; then
+    echo
+    warn "以上操作【不可逆】,确认后立即执行。"
+    read -rp "确认卸载 Docker 引擎?(默认 N) [y/N] " yn
+    case "${yn:-N}" in
+      [Yy]*) ;;
+      *)     log "用户取消,未执行任何操作。"; exit 0 ;;
+    esac
+  else
+    log "(非交互模式 + --no-dry-run:跳过二次确认,直接执行)"
+  fi
+
+  cd /tmp
+
+  # 1) 停所有容器
+  log "[1/8] 停止所有运行中容器 ..."
+  CONTAINERS="$(docker ps -q 2>/dev/null || true)"
+  [ -n "$CONTAINERS" ] && echo "$CONTAINERS" | xargs -r docker stop >/dev/null 2>&1 || true
+
+  # 2) systemctl
+  log "[2/8] systemctl disable --now docker containerd ..."
+  systemctl disable --now docker      >/dev/null 2>&1 || true
+  systemctl disable --now containerd  >/dev/null 2>&1 || true
+
+  # 3) systemd unit
+  log "[3/8] 删 systemd unit ..."
+  rm -f /etc/systemd/system/docker.service /etc/systemd/system/containerd.service
+  systemctl daemon-reload >/dev/null 2>&1 || true
+
+  # 4) 二进制
+  log "[4/8] 删 /usr/local/bin/ 下 docker 二进制 ..."
+  rm -f /usr/local/bin/docker          /usr/local/bin/dockerd \
+        /usr/local/bin/containerd      /usr/local/bin/containerd-shim \
+        /usr/local/bin/containerd-shim-runc-v2 \
+        /usr/local/bin/runc            /usr/local/bin/docker-init \
+        /usr/local/bin/docker-proxy    /usr/local/bin/ctr
+
+  # 5) cli-plugins
+  log "[5/8] 删 /usr/local/lib/docker/cli-plugins/ ..."
+  rm -rf /usr/local/lib/docker/cli-plugins
+  rmdir /usr/local/lib/docker 2>/dev/null || true
+
+  # 6) 数据目录
+  if [ "$KEEP_DATA" = 0 ]; then
+    log "[6/8] 删数据目录 $ACTUAL_DOCKER_ROOT / $ACTUAL_CONTAINERD_ROOT ..."
+    rm -rf "$ACTUAL_DOCKER_ROOT"      "$ACTUAL_CONTAINERD_ROOT"
+    # 兜底:如果默认路径也存在(用户中途切过),一并清
+    [ "$ACTUAL_DOCKER_ROOT"     != "/var/lib/docker"     ] && rm -rf /var/lib/docker     2>/dev/null || true
+    [ "$ACTUAL_CONTAINERD_ROOT" != "/var/lib/containerd" ] && rm -rf /var/lib/containerd 2>/dev/null || true
+  else
+    log "[6/8] --keep-data 保留数据目录"
+  fi
+
+  # 7) /etc/docker
+  log "[7/8] 删 /etc/docker ..."
+  rm -rf /etc/docker
+
+  # 8) docker 组
+  log "[8/8] 删 docker 用户组 ..."
+  groupdel docker >/dev/null 2>&1 || true
+
+  echo
+  log "Docker 卸载完成。"
+  log "残留(若需要彻底清):"
+  log "  · OMC 业务数据 /opt/omc/(若用 deploy.sh --uninstall 时 --keep-data 保留过)"
+  log "  · /home/{docker,containerd}-data 自定义数据路径(若用户改过)"
+  exit 0
+fi
 
 # ── 已装则按需返回 ──────────────────────────────────────────────────────
 # 2026-05-29 改：docker 已装的环境(尤其 apt 装 docker.io + docker-compose 老仓

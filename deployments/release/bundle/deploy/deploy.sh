@@ -21,6 +21,9 @@
 #   sudo bash deploy/deploy.sh --check-only             # 仅检查环境，不做修改
 #   sudo bash deploy/deploy.sh --infra-dir /opt/omc/infra   # 自定义 infra 目录
 #   sudo bash deploy/deploy.sh --overwrite-etc          # 用新包模板覆盖 /opt/omc/etc
+#   sudo bash deploy/deploy.sh --uninstall              # 卸载 OMC(默认 dry-run,只列要做的)
+#   sudo bash deploy/deploy.sh --uninstall --no-dry-run --keep-data --keep-images
+#                                                       # 真删容器 + /opt/omc,但保留数据卷与业务镜像
 #   sudo bash deploy/deploy.sh -h | --help              # 本帮助
 #
 # 参数：
@@ -34,6 +37,12 @@
 #   --omc-root <p>    OMC 安装根（默认 /opt/omc）
 #   --overwrite-etc   用新包 etc/ 模板覆盖 /opt/omc/etc/（旧 etc 自动备份）
 #   --yes             所有交互式提示直接默认（适合 CI / 批处理）
+#
+#   ── 卸载模式 ─────────────────────────────────────────────────────────────
+#   --uninstall       进入卸载模式(默认 dry-run,仅打印将要做的动作,不实际执行)
+#   --no-dry-run      关闭 dry-run(必须显式加上才会真删,且会再做一次交互确认)
+#   --keep-data       不删 docker 数据卷(pgdata/miniodata/redisdata/tempodata/...)
+#   --keep-images     不删 omcgo/* 业务镜像
 #   -h | --help       本帮助
 #
 # 退出码：
@@ -64,6 +73,10 @@ OVERWRITE_ETC=0
 INFRA_DIR="/opt/omc/infra"
 OMC_ROOT="/opt/omc"
 COMPOSE_PROJECT="omcgo"
+UNINSTALL=0
+NO_DRY_RUN=0
+KEEP_DATA=0
+KEEP_IMAGES=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -76,7 +89,11 @@ while [ $# -gt 0 ]; do
     --omc-root)        OMC_ROOT="$2"; shift 2 ;;
     --overwrite-etc)   OVERWRITE_ETC=1; shift ;;
     --yes)             ASSUME_YES=1; shift ;;
-    -h|--help)         sed -n '3,49p' "$0"; exit 0 ;;
+    --uninstall)       UNINSTALL=1; shift ;;
+    --no-dry-run)      NO_DRY_RUN=1; shift ;;
+    --keep-data)       KEEP_DATA=1; shift ;;
+    --keep-images)     KEEP_IMAGES=1; shift ;;
+    -h|--help)         sed -n '3,62p' "$0"; exit 0 ;;
     *)                 die "未知参数：$1（-h 查看用法）" ;;
   esac
 done
@@ -89,6 +106,154 @@ confirm() {
   read -rp "$1 [Y/n] " yn
   case "${yn:-Y}" in [Yy]*|"") return 0 ;; *) return 1 ;; esac
 }
+
+# =============================================================================
+# 卸载模式 — 在所有 precheck 之前分流;dry-run 默认开,只有 --no-dry-run 真删。
+# =============================================================================
+if [ "$UNINSTALL" = 1 ]; then
+  sep "OMC 卸载模式"
+
+  DRY="[dry-run]"
+  REAL=0
+  if [ "$NO_DRY_RUN" = 1 ]; then
+    REAL=1
+    DRY=""
+  fi
+
+  # 工具自检 — 卸载只需要 docker / docker compose
+  command -v docker >/dev/null 2>&1 || die "未检测到 docker,无法卸载" 1
+
+  # compose 命令(沿用前面的检测;卸载场景里不要求 V2,V1 也能 down)
+  if docker compose version >/dev/null 2>&1; then
+    UN_COMPOSE="docker compose"
+  elif command -v docker-compose >/dev/null 2>&1; then
+    UN_COMPOSE="docker-compose"
+  else
+    warn "未检测到 compose 命令;容器停止步骤将跳过(可能本就没起过)"
+    UN_COMPOSE=""
+  fi
+
+  # 收集"将要删除"的清单
+  log "扫描当前状态 ..."
+  RUNNING_CONTAINERS="$(docker ps -a --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" --format '{{.Names}}' 2>/dev/null || true)"
+  VOLUMES_LIST="$(docker volume ls -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" 2>/dev/null || true)"
+  NETWORKS_LIST="$(docker network ls -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" 2>/dev/null || true)"
+  BUSINESS_IMAGES_LIST="$(docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null | grep '^omcgo/' || true)"
+  OMC_SIZE=""
+  [ -d "$OMC_ROOT" ] && OMC_SIZE="$(du -sh "$OMC_ROOT" 2>/dev/null | awk '{print $1}')"
+
+  echo
+  log "${DRY}卸载计划:"
+  log "${DRY}  · 项目:$COMPOSE_PROJECT"
+  log "${DRY}  · OMC 根目录:$OMC_ROOT $([ -n "$OMC_SIZE" ] && echo "($OMC_SIZE)")"
+  log "${DRY}  · compose 命令:${UN_COMPOSE:-(无)}"
+  echo
+
+  if [ -n "$RUNNING_CONTAINERS" ]; then
+    log "${DRY}1) 将停止 + 删除以下容器($(echo "$RUNNING_CONTAINERS" | wc -l | tr -d ' ') 个):"
+    echo "$RUNNING_CONTAINERS" | sed 's/^/     - /'
+  else
+    log "${DRY}1) 无运行中容器(可能已 down 过或本就没起)"
+  fi
+
+  if [ "$KEEP_DATA" = 1 ]; then
+    log "${DRY}2) --keep-data 保留以下数据卷($(echo "$VOLUMES_LIST" | grep -c . || echo 0) 个):"
+    [ -n "$VOLUMES_LIST" ] && echo "$VOLUMES_LIST" | sed 's/^/     · /'
+  else
+    if [ -n "$VOLUMES_LIST" ]; then
+      log "${DRY}2) 将删除以下数据卷($(echo "$VOLUMES_LIST" | wc -l | tr -d ' ') 个,含 pg / minio / redis / tempo / loki 所有持久化数据):"
+      echo "$VOLUMES_LIST" | sed 's/^/     - /'
+    else
+      log "${DRY}2) 无数据卷可删"
+    fi
+  fi
+
+  if [ -n "$NETWORKS_LIST" ]; then
+    log "${DRY}3) 将删除以下 docker 网络($(echo "$NETWORKS_LIST" | wc -l | tr -d ' ') 个):"
+    echo "$NETWORKS_LIST" | sed 's/^/     - /'
+  fi
+
+  if [ "$KEEP_IMAGES" = 1 ]; then
+    log "${DRY}4) --keep-images 保留 omcgo/* 业务镜像($(echo "$BUSINESS_IMAGES_LIST" | grep -c . || echo 0) 个)"
+  else
+    if [ -n "$BUSINESS_IMAGES_LIST" ]; then
+      log "${DRY}4) 将删除以下业务镜像($(echo "$BUSINESS_IMAGES_LIST" | wc -l | tr -d ' ') 个):"
+      echo "$BUSINESS_IMAGES_LIST" | sed 's/^/     - /'
+    else
+      log "${DRY}4) 无 omcgo/* 业务镜像可删"
+    fi
+  fi
+
+  if [ -d "$OMC_ROOT" ]; then
+    log "${DRY}5) 将删除 OMC 根目录:$OMC_ROOT(含 etc/ current/ releases/ data/ run/ 等)"
+  else
+    log "${DRY}5) $OMC_ROOT 不存在"
+  fi
+
+  echo
+  log "${DRY}注意:本脚本【不卸载 Docker 引擎本身】,如需卸载请额外跑 install-docker.sh --uninstall"
+  if [ "$KEEP_DATA" = 0 ]; then
+    log "${DRY}注意:数据卷一旦删除,数据库 / 对象存储 / 监控历史全部不可恢复"
+  fi
+  echo
+
+  if [ "$REAL" = 0 ]; then
+    log "[dry-run] 未实际执行任何动作。要真删,加 --no-dry-run 再跑一次:"
+    log "[dry-run]   sudo bash $0 --uninstall --no-dry-run \\"
+    log "[dry-run]     $([ "$KEEP_DATA" = 1 ]   && echo "--keep-data ")\\"
+    log "[dry-run]     $([ "$KEEP_IMAGES" = 1 ] && echo "--keep-images ")"
+    exit 0
+  fi
+
+  # 真删 — 二次交互确认(--yes 跳过)
+  if [ "$ASSUME_YES" != 1 ]; then
+    echo
+    warn "以上操作【不可逆】,确认后立即执行。"
+    confirm "确认卸载 $OMC_ROOT 与上述容器/卷/镜像?(默认 N)" || {
+      log "用户取消,未执行任何操作。"
+      exit 0
+    }
+  fi
+
+  # 真删前 cd 到 /tmp,避免 cwd 在被删目录(脚本本体所在的 deploy/ 也属于 $OMC_ROOT)
+  cd /tmp
+
+  # 1) compose down(若 cwd 此前在 deploy/,这里要带 compose 文件绝对路径)
+  if [ -n "$UN_COMPOSE" ] && [ -d "$DEPLOY_DIR" ]; then
+    log "[1/5] $UN_COMPOSE down(stop + remove 容器/网络) ..."
+    DOWN_FILES=( -f "$DEPLOY_DIR/docker-compose.infra.yml" -f "$DEPLOY_DIR/docker-compose.app.yml" )
+    [ -f "$DEPLOY_DIR/docker-compose.web.yml" ]        && DOWN_FILES+=( -f "$DEPLOY_DIR/docker-compose.web.yml" )
+    [ -f "$DEPLOY_DIR/docker-compose.monitoring.yml" ] && DOWN_FILES+=( -f "$DEPLOY_DIR/docker-compose.monitoring.yml" )
+    DOWN_ARGS=( down --remove-orphans )
+    [ "$KEEP_DATA" = 0 ] && DOWN_ARGS+=( -v )
+    ( cd "$DEPLOY_DIR" && $UN_COMPOSE -p "$COMPOSE_PROJECT" "${DOWN_FILES[@]}" "${DOWN_ARGS[@]}" ) || warn "compose down 报错,继续"
+  elif [ -n "$RUNNING_CONTAINERS" ]; then
+    log "[1/5] compose 文件丢失,fallback 用 docker rm -f 强删容器 ..."
+    echo "$RUNNING_CONTAINERS" | xargs -r docker rm -f >/dev/null 2>&1 || true
+    [ "$KEEP_DATA" = 0 ] && [ -n "$VOLUMES_LIST" ] && echo "$VOLUMES_LIST" | xargs -r docker volume rm >/dev/null 2>&1 || true
+    [ -n "$NETWORKS_LIST" ] && echo "$NETWORKS_LIST" | xargs -r docker network rm >/dev/null 2>&1 || true
+  fi
+
+  # 2) 业务镜像
+  if [ "$KEEP_IMAGES" = 0 ] && [ -n "$BUSINESS_IMAGES_LIST" ]; then
+    log "[2/5] 删 omcgo/* 业务镜像 ..."
+    echo "$BUSINESS_IMAGES_LIST" | xargs -r docker rmi 2>/dev/null || warn "部分镜像删失败(可能被其他容器引用),继续"
+  fi
+
+  # 3) /opt/omc 目录
+  if [ -d "$OMC_ROOT" ]; then
+    log "[3/5] 删 $OMC_ROOT ..."
+    rm -rf "$OMC_ROOT"
+  fi
+
+  # 4) 完成
+  log "[4/5] 卸载完成。"
+  log "[5/5] 残留(若需要彻底清):"
+  log "        · Docker 引擎本身:sudo bash install-docker.sh --uninstall"
+  log "        · /etc/systemd/system/omcgo*.service(早期 systemd 单元):sudo systemctl disable --now omcgo*; sudo rm /etc/systemd/system/omcgo*.service"
+  log "        · /opt/omc/data/param-mappings-custom(若不在 $OMC_ROOT 下的 host bind mount):sudo rm -rf"
+  exit 0
+fi
 
 # =============================================================================
 # Step 1. precheck
