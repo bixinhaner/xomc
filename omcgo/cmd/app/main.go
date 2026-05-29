@@ -62,6 +62,10 @@ func runApp(cmd *cobra.Command, args []string) error {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	engine := gin.New()
+	// T-0178 S5 安全审计:multipart 上传内存上限 4 MiB(Gin 默认 32 MiB 太宽,
+	// 配 N 并发上传时易耗内存)。单文件硬上限 1 MiB 在 parammodel.handler.go
+	// UploadXML 内额外卡;此处 engine 层卡总 multipart 大小(N 个 form 字段 + 文件)。
+	engine.MaxMultipartMemory = 4 << 20 // 4 MiB
 	// 自定义 recovery 中间件取代 gin.Recovery()：panic 走 zap.Error 而非
 	// stdlib log，确保 panic 同时进入 stdout（docker logs）和 zap output_paths
 	// 配置的 app.log 文件，运维只在 docker logs 看不到 app.log 的体验消除。
