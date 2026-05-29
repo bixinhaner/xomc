@@ -91,6 +91,7 @@ func initParamRegistryModule(c *Container) error {
 		repo,
 		registry,
 		&paramModelReloader{reg: c.DictLoaderRegistry},
+		c.Cfg.DictLoader.XMLBaseDir, // T-0178: 为 DELETE/Upload 提供物理路径根
 		logger,
 	)
 	return nil

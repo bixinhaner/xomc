@@ -48,6 +48,13 @@ const (
 	ErrCodeTemplateNotFound      = 2004
 	ErrCodeTemplateInvalidParams = 2005
 	ErrCodeConfigSyncFailed      = 2006
+
+	// T-0178 ParamModel 自定义 XML 分层目录 (2030-2039 段)
+	// 业务码与 HTTP 状态码解耦:前端按业务码决定友好提示文案,handler 决定 HTTP 状态。
+	// ParamModelBuiltinNotDeletable: DELETE /param-models/:name 命中内置模型 → 403
+	// ParamModelBackupFailed:         DELETE 物理备份失败,流程已保守回滚 → 500
+	ErrCodeParamModelBuiltinNotDeletable = 2030
+	ErrCodeParamModelBackupFailed        = 2031
 )
 
 // ACS / TR069 (3000-3999)

@@ -56,7 +56,7 @@ T-0098 P1-06 落地后,9 个出厂 paramModel XML 与 `standard-model.xml` 通�
 ### GWT-3(内置不可删 — 后端硬拦截)
 - **Given** 数据库存在内置 paramModel `BTS`(`loaded_from='param-mappings/BTS.xml'`)
 - **When** 任何客户端调用 `DELETE /api/v1/param-models/BTS`
-- **Then** 返回 `403 Forbidden`,响应 `code=40310 ErrCodeBuiltinNotDeletable`,审计日志写 `parammodel.delete.rejected_builtin`,数据库行**不被删除**,镜像 XML **不被删除**
+- **Then** 返回 `403 Forbidden`,响应 `code=2030 ErrCodeParamModelBuiltinNotDeletable`,审计日志写 `parammodel.delete.rejected_builtin`,数据库行**不被删除**,镜像 XML **不被删除**
 
 ### GWT-4(自定义可删 + 物理备份)
 - **Given** 数据库存在自定义 paramModel `CBQQ`(`loaded_from='param-mappings-custom/CBQQ.xml'`)
@@ -78,7 +78,7 @@ T-0098 P1-06 落地后,9 个出厂 paramModel XML 与 `standard-model.xml` 通�
 ### GWT-7(备份失败 → 保守回滚)
 - **Given** host `param-mappings-custom/` 目录因磁盘满或权限问题导致 rename 失败(`EACCES/ENOSPC/EROFS` 等非 ENOENT errno)
 - **When** 管理员 DELETE 一个自定义 paramModel
-- **Then** ① 返回 500,`code=50031 ErrCodeBackupFailed`;② host 原 XML **不被删除**;③ DB 行 **不被删除**;④ 审计 `parammodel.delete.aborted_backup_failed` 含 errno;⑤ Prometheus 告警 `ParamModelBackupFailedSurge` 触发
+- **Then** ① 返回 500,`code=2031 ErrCodeParamModelBackupFailed`;② host 原 XML **不被删除**;③ DB 行 **不被删除**;④ 审计 `parammodel.delete.aborted_backup_failed` 含 errno;⑤ Prometheus 告警 `ParamModelBackupFailedSurge` 触发
 
 ### GWT-8(备份 30 天清理)
 - **Given** `param-mappings-custom/` 下存在 `CBQQ.xml.deleted.20260101030405`(40 天前的备份)
@@ -218,11 +218,11 @@ func IsDeletable(loadedFrom string) bool {
 
 ```
 1. GetParamModelByName(name) → ErrNotFound → 404
-2. !IsDeletable(loaded_from) → 403 ErrCodeBuiltinNotDeletable
+2. !IsDeletable(loaded_from) → 403 ErrCodeParamModelBuiltinNotDeletable
 3. acquire per-filename lock
 4. rename(absPath, backupPath):
      ENOENT      → log Warn, 容忍,继续
-     other errno → 500 ErrCodeBackupFailed, 不删 DB, 严格回滚 ←保守语义
+     other errno → 500 ErrCodeParamModelBackupFailed, 不删 DB, 严格回滚 ←保守语义
 5. DELETE param_models WHERE name=$1 (事务,FK CASCADE 生效)
      failed → 反向 rename(backup → original) + 500
 6. audit + registry.Refresh
@@ -309,15 +309,17 @@ dict_loader:
 | `omcmb/webcode/src/pages/product/param-model/index.tsx` | toolbar 加 `<Upload>` 按钮(导入 XML 左侧) |
 | `omcmb/webcode/src/pages/product/param-model/ModelsTab.tsx` | "来源" 列;操作列删除按钮按 `row.deletable` 渲染(`<a>` vs `<span style="cursor:not-allowed">` + `<Tooltip>`) |
 | `omcmb/frontend-core/src/mock/services/paramModelService.ts` | mock `uploadXML` / list 返回 `source/deletable` |
-| `omcmb/webcode/src/services/http.ts`(或拦截器) | 按 `code=40310/50031` 渲染友好弹窗 |
+| `omcmb/webcode/src/services/http.ts`(或拦截器) | 按 `code=2030/2031` 渲染友好弹窗 |
 
 ### 9.10 错误码
 
 `omcgo/global/errors.go` 加:
 
 ```go
-ErrCodeBuiltinNotDeletable = 40310   // F02:内置 XML 不可删除
-ErrCodeBackupFailed        = 50031   // F02:删除前备份失败,流程已回滚
+// 接续 Data Model / Config 块(2000-2999),T-0178 占 2030-2039 段
+// (40310/50031 在分域规则下与 PM/Alarm 块冲突 — 实施期调整)
+ErrCodeParamModelBuiltinNotDeletable = 2030 // F02:内置 XML 不可删除 → 403
+ErrCodeParamModelBackupFailed        = 2031 // F02:删除前备份失败,保守回滚 → 500
 ```
 
 ### 9.11 Prometheus 监控 + 告警

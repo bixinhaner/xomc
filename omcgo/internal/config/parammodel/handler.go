@@ -5,15 +5,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/global"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
 )
@@ -68,11 +73,17 @@ func (o *optInt64) Ptr() *int64 {
 //
 // 写路径会自动调用 Registry.Refresh 同步内存映射缓存；XML 重载通过
 // Reloader 接口注入（dictloader.Registry.ReloadOne 适配器）。
+//
+// T-0178: baseDir 与 Loader 共用,DELETE/Upload 物理路径解析基础;
+// fileLocks 提供 per-filename 进程内互斥(Upload + Delete + ReloadOne 三方共用,
+// 避免同名文件并发写入竞态)。
 type Handler struct {
-	repo     *PgRepository
-	registry *Registry
-	reloader Reloader
-	logger   *zap.Logger
+	repo      *PgRepository
+	registry  *Registry
+	reloader  Reloader
+	logger    *zap.Logger
+	baseDir   string
+	fileLocks sync.Map // map[basename]*sync.Mutex
 }
 
 // Reloader 抽象 dictloader.Registry.ReloadOne — 让 handler 不强依赖 dictloader 包。
@@ -81,11 +92,30 @@ type Reloader interface {
 }
 
 // NewHandler 构造 Handler；reloader 可为 nil（import-directory 端点会返回 503）。
-func NewHandler(repo *PgRepository, registry *Registry, reloader Reloader, logger *zap.Logger) *Handler {
+// baseDir 来自 DictLoaderConfig.XMLBaseDir,用于 T-0178 Custom XML 物理删除/上传定位。
+func NewHandler(repo *PgRepository, registry *Registry, reloader Reloader, baseDir string, logger *zap.Logger) *Handler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Handler{repo: repo, registry: registry, reloader: reloader, logger: logger.Named("parammodel.handler")}
+	return &Handler{
+		repo:     repo,
+		registry: registry,
+		reloader: reloader,
+		baseDir:  baseDir,
+		logger:   logger.Named("parammodel.handler"),
+	}
+}
+
+// acquireFileLock 取/建一个 per-basename mutex,返回 unlock 函数。
+// T-0178: Upload / Delete / 单文件 Reload 三方共享同一把锁,避免:
+//   - 同时上传同名文件的 lost update
+//   - Delete 与 Upload 并发产生半截状态
+//   - Reload 期间 Upload 写入被 Loader 读半截
+func (h *Handler) acquireFileLock(basename string) func() {
+	mu, _ := h.fileLocks.LoadOrStore(basename, &sync.Mutex{})
+	m := mu.(*sync.Mutex)
+	m.Lock()
+	return m.Unlock
 }
 
 // RegisterRoutes 挂在 /api/v1 下；内部使用 /param-models 子路径。
@@ -192,19 +222,111 @@ func (h *Handler) UpdateModel(c *gin.Context) {
 	response.OK(c, toModelView(m))
 }
 
+// DeleteModel 删除 paramModel(T-0178 §9.5 守门顺序)。
+//
+// 守门规则:
+//  1. 仅 Source=custom(loaded_from 以 "param-mappings-custom/" 开头)的模型可删
+//     →内置 / 历史无前缀数据返 403 ErrCodeParamModelBuiltinNotDeletable
+//  2. per-filename mutex 与 Upload / 单文件 Reload 互斥
+//  3. 物理 rename → "<file>.deleted.<14位ts>" 备份(可回滚)
+//     · ENOENT 容忍:文件已被外部 rm,视为"已备份",继续删 DB
+//     · 其他 errno(EACCES/ENOSPC/EROFS):保守回滚(用户决策 4)→ 500
+//     ErrCodeParamModelBackupFailed,不删 DB
+//  4. DELETE param_models 行
+//     · CASCADE 删 param_mappings、SET NULL 写 products.param_model_id
+//     · DB 失败 → 反向 rename(backup → original)+ 500
+//  5. registry.Refresh + 结构化审计日志(audit_action)
 func (h *Handler) DeleteModel(c *gin.Context) {
 	name := c.Param("name")
-	ok, err := h.repo.DeleteParamModel(c.Request.Context(), name)
+
+	// 1. 先取出 loaded_from,判定 Source
+	pm, err := h.repo.GetParamModelByName(c.Request.Context(), name)
+	if errors.Is(err, ErrNoParamModel) {
+		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+		return
+	}
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	if !ok {
-		commonerrors.AbortWithError(c, http.StatusNotFound, commonerrors.ErrNotFound)
+
+	if !IsDeletable(pm.LoadedFrom) {
+		h.logger.Info("audit: param-model delete rejected (builtin)",
+			zap.String("audit_action", "parammodel.delete.rejected_builtin"),
+			zap.String("name", name),
+			zap.String("loaded_from", pm.LoadedFrom),
+			zap.String("source", string(ClassifySource(pm.LoadedFrom))))
+		commonerrors.AbortWithError(c, http.StatusForbidden,
+			fmt.Errorf("builtin param model %q (loaded_from=%s) is not deletable; "+
+				"to remove, delete the XML in data/param-mappings/ in the release image "+
+				"and re-deploy [code=%d]",
+				name, pm.LoadedFrom, global.ErrCodeParamModelBuiltinNotDeletable))
 		return
 	}
+
+	// 2. per-filename 互斥锁(Upload / Reload 共用)
+	unlock := h.acquireFileLock(filepath.Base(pm.LoadedFrom))
+	defer unlock()
+
+	// 3. 物理备份 — rename 是原子操作,无需中间状态
+	absPath := filepath.Join(h.baseDir, pm.LoadedFrom)
+	backupPath := absPath + ".deleted." + time.Now().Format("20060102150405")
+	if renameErr := os.Rename(absPath, backupPath); renameErr != nil {
+		switch {
+		case errors.Is(renameErr, fs.ErrNotExist):
+			// 文件已不在(外部 rm / 上次中断的 Delete)→ 视为"无需备份",继续删 DB 清理残留行
+			h.logger.Warn("audit: custom xml already gone before delete; proceeding to remove DB row",
+				zap.String("audit_action", "parammodel.delete.custom.file_already_gone"),
+				zap.String("name", name),
+				zap.String("loaded_from", pm.LoadedFrom),
+				zap.String("path", absPath))
+		default:
+			// EACCES / ENOSPC / EROFS / 其他 IO → 保守回滚,绝不删 DB
+			h.logger.Error("audit: param-model delete aborted (backup failed)",
+				zap.String("audit_action", "parammodel.delete.aborted_backup_failed"),
+				zap.String("name", name),
+				zap.String("loaded_from", pm.LoadedFrom),
+				zap.String("path", absPath),
+				zap.Error(renameErr))
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				fmt.Errorf("backup custom xml failed; refusing to delete DB row to avoid data loss; "+
+					"please fix the filesystem (check disk space / permissions / mount RO state) and retry: %w [code=%d]",
+					renameErr, global.ErrCodeParamModelBackupFailed))
+			return
+		}
+	}
+
+	// 4. DELETE DB 行,失败回滚文件
+	ok, err := h.repo.DeleteParamModel(c.Request.Context(), name)
+	if err != nil {
+		// 反向 rename(忽略 rename 失败 — 此时只能 log 告警,DB 与 host 已分叉)
+		if rbErr := os.Rename(backupPath, absPath); rbErr != nil {
+			h.logger.Error("rollback rename failed; DB and host state diverged",
+				zap.String("backup_path", backupPath),
+				zap.String("orig_path", absPath),
+				zap.Error(rbErr))
+		}
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	if !ok {
+		// DB 已无该行(竞态:并发 Delete),与 ENOENT 同款处理 — 文件备份保留,行不存在不报错
+		h.logger.Warn("param-model already deleted by concurrent request",
+			zap.String("name", name))
+	}
+
+	h.logger.Info("audit: param-model deleted (custom)",
+		zap.String("audit_action", "parammodel.delete.custom"),
+		zap.String("name", name),
+		zap.String("loaded_from", pm.LoadedFrom),
+		zap.String("backup", filepath.Base(backupPath)))
+
 	h.refreshAsync(c.Request.Context(), "delete-model")
-	response.OK(c, gin.H{"deleted": true, "name": name})
+	response.OK(c, gin.H{
+		"deleted": true,
+		"name":    name,
+		"backup":  filepath.Base(backupPath),
+	})
 }
 
 // ── Mappings ────────────────────────────────────────────────────────
