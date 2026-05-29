@@ -605,10 +605,83 @@
 
 ---
 
+## T-0179 alarm-library 页面 drill-down 重设计专属风险(R-NEW-T0179-01..06)
+
+> T-0179 PRD `docs/project/prd/F04-alarm-library-redesign.md` §6 已列 6 项风险,S7 关闭时登记到本表。
+
+### R-NEW-T0179-01 ne_type URL 参数被劫持(XSS / open-redirect)
+- **描述**:用户访问 `/product/alarm-library?neType=<script>...` 时,React 直接渲染该字符串到 Tag/Text/搜索框 — JSX 默认 escape 阻止 XSS,但需确认无 dangerouslySetInnerHTML 误用
+- **等级**:P3
+- **概率**:低(React JSX 默认 escape;无 dangerouslySetInnerHTML 调用点)
+- **影响**:理论上 XSS;实际无利用面(无 dangerouslySetInnerHTML)
+- **Owner**:Claude(前端) + 安全合规专家
+- **状态**:Mitigated(2026-05-29)
+- **关联 Task**:T-0179
+- **缓解**:React JSX 默认 escape 保护;searchParams 仅作为 query filter 传递不拼字符串;后端 ne_type 参数走 squirrel 参数化查询不拼 SQL
+- **下次复盘**:T-0180+ 引入新 URL 参数时审查同模式
+
+### R-NEW-T0179-02 ne-types 聚合 API 在 alarm_definitions 规模膨胀时 P99 抬高
+- **描述**:当前 ~442 行 / 7 ne_type,单 SQL `<50ms`。运营商接入扩展(如新增 BSC/BTS GSM/5G CU/DU 等)若 ne_type 数 > 50 或行数 > 50000,COUNT FILTER GROUP BY 可能慢
+- **等级**:P2
+- **概率**:中(运营商接入扩展自然推动)
+- **影响**:一级页面加载慢(>500ms)
+- **Owner**:数据与存储专家
+- **状态**:Open
+- **关联 Task**:T-0179
+- **缓解**:① 现有索引 `idx_alarm_definitions_severity_show` 覆盖 severity 反查;② 行数 >50000 时考虑加 `(ne_type, severity_id)` 复合索引;③ 极端情况(>200000 行)走物化视图 + 触发器刷新;④ Prometheus 加 `alarm_def_ne_types_agg_duration_seconds` 指标监控 P99
+- **下次复盘**:运营商接入扩展提案评审时,或 P99 > 200ms 告警触发时
+
+### R-NEW-T0179-03 loaded_from 历史数据 NULL 大量存在(Loader 未重跑环境)
+- **描述**:migration 216 加 loaded_from 列后,历史行均为 NULL(不强制回填),需 Loader.Reload 才写入;运维若未触发 Reload,一级表大量行显示"未回填(请重载)"
+- **等级**:P3
+- **概率**:高(部署后必发生)
+- **影响**:UX 不佳 — 首次访问看不到 XML 来源标签
+- **Owner**:Claude(实施时已加 warning Tag) + 运维与可观测性专家
+- **状态**:Mitigated(2026-05-29)
+- **关联 Task**:T-0179
+- **缓解**:① 前端一级表 loaded_from 为空时显示 `<Tag color="warning">未回填(请重载)</Tag>` 显式引导用户点"重载 XML";② 部署后默认触发一次 Loader.Reload(deploy.sh 末尾可加 curl `/import-directory`,但留运维决策);③ 文档明确"升级到含 migration 216 的版本后建议立即重载告警 XML"
+- **下次复盘**:GA 前(确认运维 SOP 含 Reload 步骤后转 Closed)
+
+### R-NEW-T0179-04 Drawer lockNeType 在编辑模式被误启用导致用户改不了 ne_type
+- **描述**:Drawer Props `lockNeType` 仅在新增模式生效(代码 `!isEdit && Boolean(lockNeType)`),若未来引入"从一级页面编辑"路径误传 lockNeType=true,编辑模式 ne_type 会被锁定
+- **等级**:P3
+- **概率**:低(目前编辑模式入口只在二级表,不传 lockNeType)
+- **影响**:编辑流程 ne_type 字段不可改 — 用户无法修复 ne_type 字段错误
+- **Owner**:Claude(前端)
+- **状态**:Mitigated(2026-05-29)
+- **关联 Task**:T-0179
+- **缓解**:代码硬约束 `!isEdit && Boolean(lockNeType)` 强制编辑模式忽略 lockNeType;后续如改造路径需补单测覆盖
+- **下次复盘**:T-0180+ Drawer 增强时审查
+
+### R-NEW-T0179-05 三皮肤(webcode/v2/v3)alarm-library 页面 UX 不一致
+- **描述**:本次仅改造 webcode 主皮肤的 alarm-library/index.tsx,frontend-core 业务层修改对 webcode-v2/v3 透明可用,但两个候选皮肤的 alarm-library 页面(若存在)仍是老 UI 与主皮肤体验不一致
+- **等级**:P2
+- **概率**:中(取决于 PgM 是否决策同步改造)
+- **影响**:多皮肤场景下用户体验割裂
+- **Owner**:前端专家 + PgM
+- **状态**:Open
+- **关联 Task**:T-0179
+- **缓解**:① 验证 webcode-v2/v3 是否存在 alarm-library 页面(本次 typecheck 仅证业务层兼容);② 由 PgM 决策是否要镜像 drill-down 改造到两个候选皮肤;③ 至少在多皮肤决策文档 `docs/project/frontend-multi-skin-plan-20260422.md` 加一行 T-0179 改造记录
+- **下次复盘**:多皮肤策略评审时
+
+### R-NEW-T0179-06 ne-types 聚合 API 未走鉴权中间件
+- **描述**:新增 GET `/alarm-definitions/ne-types` 端点跟随既有 `alarm-definitions` 路由组,需确认鉴权中间件覆盖;若 router.go 该 group 未挂 JWT/RBAC,该端点会暴露
+- **等级**:P2
+- **概率**:低(承袭 group 中间件,既有 `/alarm-definitions` 已挂鉴权则本端点自动覆盖)
+- **影响**:未鉴权访问可获取告警类型 + XML 来源 + 各级别计数(信息泄露)
+- **Owner**:安全合规专家
+- **状态**:Open
+- **关联 Task**:T-0179
+- **缓解**:① 后续 review 时 grep `RegisterRoutes` 调用点(`cmd/app/router/router.go` 或 `provider/alarmdef.go`),确认挂在受 JWT/RBAC 保护的 `/api/v1` 分组下;② 加 E2E 用例:未带 token 访问 `/alarm-definitions/ne-types` 应返 401
+- **下次复盘**:S5 安全审计补做时,或 GA 前
+
+---
+
 ## 复盘节奏
 
 - **每 Sprint 回顾**：更新 Open/Mitigating 状态，检查 Owner 有无变更
 - **每月第一个 Sprint**：审视 P0 列表，确保 <14 天已关闭或有明确进展
 - **每季度**：深度复盘 P1/P2，决定是否升级或关闭
 
-**当前版本**：v1.4（2026-05-29，T-0178 8 条 R-NEW-T0178-* 风险登记;R-NEW-T0178-3 Prometheus 告警 + R-NEW-T0178-8 Loader 启动期 WARN 兑现;**7 条 Mitigated + 1 条 Open**（仅 R-NEW-T0178-6 多实例横扩 PG advisory lock 仍 Open,横扩立项时关闭））
+**当前版本**：v1.5（2026-05-29，T-0179 6 条 R-NEW-T0179-* 风险登记;**4 条 Mitigated + 2 条 Open** — Mitigated: 01(XSS) / 03(loaded_from NULL) / 04(Drawer lock) ;Open: 02(规模化 P99) / 05(三皮肤一致性) / 06(ne-types 鉴权)；累计 R-NEW-T0178-* + R-NEW-T0179-* 共 14 条新增风险 11 Mitigated + 3 Open）
+**v1.4**（2026-05-29，T-0178 8 条 R-NEW-T0178-* 风险登记;R-NEW-T0178-3 Prometheus 告警 + R-NEW-T0178-8 Loader 启动期 WARN 兑现;**7 条 Mitigated + 1 条 Open**（仅 R-NEW-T0178-6 多实例横扩 PG advisory lock 仍 Open,横扩立项时关闭））
