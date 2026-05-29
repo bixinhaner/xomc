@@ -119,20 +119,36 @@ func (s *PgPMFileStore) ListFiles(ctx context.Context, filter PMFileFilter) (*mo
 }
 
 // ListFileDeviceAggregates 按 device_sn 聚合 pm_files，每设备 1 行。
-// 给 File Management → PM Tab 主列表用：起止 collect_time + 文件数 + 是否最近活跃。
+// 给 File Management → PM Tab 主列表用：起止 collect_time + 文件数 + 是否最近活跃
+// + 站名 + 产品类（LEFT JOIN devices）。
+//
+// 性能：devices.serial_number 有索引，10 万级 device 表 + 每页 20 个 SN 的 JOIN
+// 命中索引 sub-ms。
 func (s *PgPMFileStore) ListFileDeviceAggregates(ctx context.Context, filter PMFileDeviceFilter) (*model.ListResponse[PMFileDeviceAggregate], error) {
-	args := make([]interface{}, 0, 2)
-	wherePieces := make([]string, 0, 1)
+	args := make([]interface{}, 0, 4)
+	wherePieces := make([]string, 0, 3)
 	if filter.Keyword != nil && *filter.Keyword != "" {
-		wherePieces = append(wherePieces, `device_sn ILIKE $1`)
 		args = append(args, "%"+*filter.Keyword+"%")
+		wherePieces = append(wherePieces, fmt.Sprintf("m.device_sn ILIKE $%d", len(args)))
+	}
+	if filter.SiteName != nil && *filter.SiteName != "" {
+		args = append(args, "%"+*filter.SiteName+"%")
+		wherePieces = append(wherePieces, fmt.Sprintf("d.site_name ILIKE $%d", len(args)))
+	}
+	if filter.ProductClass != nil && *filter.ProductClass != "" {
+		args = append(args, "%"+*filter.ProductClass+"%")
+		wherePieces = append(wherePieces, fmt.Sprintf("d.product_class ILIKE $%d", len(args)))
 	}
 	whereClause := ""
 	if len(wherePieces) > 0 {
-		whereClause = " WHERE " + wherePieces[0]
+		whereClause = " WHERE " + strings.Join(wherePieces, " AND ")
 	}
 
-	countSQL := `SELECT COUNT(*) FROM (SELECT device_sn FROM pm_files` + whereClause + ` GROUP BY device_sn) AS sub`
+	// JOIN 在 count 与 list 两段同时存在，保证基于 devices 的过滤一致。
+	// devices.deleted_at 过滤掉软删行（同 device repository 通用做法）。
+	joinClause := " LEFT JOIN devices d ON d.serial_number = m.device_sn AND d.deleted_at IS NULL"
+
+	countSQL := `SELECT COUNT(*) FROM (SELECT m.device_sn FROM pm_files m` + joinClause + whereClause + ` GROUP BY m.device_sn) AS sub`
 	var total int64
 	if err := s.pool.QueryRow(ctx, countSQL, args...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("count pm_files devices: %w", err)
@@ -150,16 +166,19 @@ func (s *PgPMFileStore) ListFileDeviceAggregates(ctx context.Context, filter PMF
 		pageSize = 1000
 	}
 
-	// reporting 判定：最近一次 collect_time 距 now() 不到 2 小时即视为在传。
-	// PM 没有 MR 那样的订阅任务表，用活跃度代理。
-	listSQL := `SELECT device_sn,
-	                  MIN(collect_time) AS first_collect_time,
-	                  MAX(collect_time) AS last_collect_time,
-	                  COUNT(*)::bigint    AS file_count,
-	                  (MAX(collect_time) > NOW() - INTERVAL '2 hours') AS reporting
-	             FROM pm_files` + strings.Replace(whereClause, "device_sn", "device_sn", 1) + `
-	             GROUP BY device_sn
-	             ORDER BY MAX(collect_time) DESC
+	// site_name / product_class 用 MAX() 包：device_sn 与 devices 是 1:N 实际上 1:1
+	// （devices.serial_number 唯一），MAX 取那唯一一行的值，等价于 ANY_VALUE；
+	// 这样保留 GROUP BY device_sn 不增加分组维度。
+	listSQL := `SELECT m.device_sn,
+	                  COALESCE(MAX(d.site_name), '')     AS site_name,
+	                  COALESCE(MAX(d.product_class), '') AS product_class,
+	                  MIN(m.collect_time)                AS first_collect_time,
+	                  MAX(m.collect_time)                AS last_collect_time,
+	                  COUNT(*)::bigint                   AS file_count,
+	                  (MAX(m.collect_time) > NOW() - INTERVAL '2 hours') AS reporting
+	             FROM pm_files m` + joinClause + whereClause + `
+	             GROUP BY m.device_sn
+	             ORDER BY MAX(m.collect_time) DESC
 	             LIMIT $` + fmt.Sprintf("%d", len(args)+1) + ` OFFSET $` + fmt.Sprintf("%d", len(args)+2)
 	args = append(args, pageSize, (page-1)*pageSize)
 
@@ -171,12 +190,45 @@ func (s *PgPMFileStore) ListFileDeviceAggregates(ctx context.Context, filter PMF
 	items := make([]PMFileDeviceAggregate, 0)
 	for rows.Next() {
 		var a PMFileDeviceAggregate
-		if err := rows.Scan(&a.DeviceSN, &a.FirstCollectTime, &a.LastCollectTime, &a.FileCount, &a.Reporting); err != nil {
+		if err := rows.Scan(&a.DeviceSN, &a.SiteName, &a.ProductClass,
+			&a.FirstCollectTime, &a.LastCollectTime, &a.FileCount, &a.Reporting); err != nil {
 			return nil, fmt.Errorf("scan pm_files devices row: %w", err)
 		}
 		items = append(items, a)
 	}
 	return model.NewListResponse(items, total, page, pageSize), nil
+}
+
+// ListFilesBySN 取某个 SN 名下全部 pm_files 元数据（无分页）。
+func (s *PgPMFileStore) ListFilesBySN(ctx context.Context, sn string) ([]PMFileInfo, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id, device_id, device_sn, carrier, technology, file_name, file_size,
+		        collect_time, minio_path, parsed, parsed_at, counter_count, created_at
+		 FROM pm_files WHERE device_sn = $1`, sn)
+	if err != nil {
+		return nil, fmt.Errorf("query pm_files by sn: %w", err)
+	}
+	defer rows.Close()
+	var items []PMFileInfo
+	for rows.Next() {
+		var f PMFileInfo
+		if err := rows.Scan(&f.ID, &f.DeviceID, &f.DeviceSN, &f.Carrier, &f.Technology,
+			&f.FileName, &f.FileSize, &f.CollectTime, &f.MinioPath,
+			&f.Parsed, &f.ParsedAt, &f.CounterCount, &f.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan pm_files: %w", err)
+		}
+		items = append(items, f)
+	}
+	return items, nil
+}
+
+// DeleteFilesBySN 删除该 SN 下所有 pm_files 元数据行。返回删除行数。
+func (s *PgPMFileStore) DeleteFilesBySN(ctx context.Context, sn string) (int64, error) {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM pm_files WHERE device_sn = $1`, sn)
+	if err != nil {
+		return 0, fmt.Errorf("delete pm_files by sn %s: %w", sn, err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 func (s *PgPMFileStore) UpdateFileParsed(ctx context.Context, id uuid.UUID, counterCount int) error {

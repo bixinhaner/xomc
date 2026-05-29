@@ -81,10 +81,21 @@ export function useDownloadMRFile() {
   });
 }
 
+// 按设备 SN 批量删除 MR 文件（PG + MinIO）。成功后 invalidate 设备聚合列表。
+export function useBatchDeleteMRFiles() {
+  const qc = useQueryClient();
+  return useMutation<{ succeeded: string[]; failed: string[] }, Error, string[]>({
+    mutationFn: (sns: string[]) => mrApi.batchDeleteFiles(sns),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['mr', 'files'] });
+    },
+  });
+}
+
 // 按设备聚合的 MR 文件视图 —— File Management → MR Tab 主列表
 // 10s 轮询：reporting 字段会随 MR 任务 on/off 状态变化，文件数也会随设备上传新文件增加。
 export function useMRFileDevices(
-  params: { keyword?: string } & PageRequest,
+  params: { keyword?: string; siteName?: string; productClass?: string } & PageRequest,
 ) {
   return useQuery({
     queryKey: ['mr', 'files', 'devices', params],

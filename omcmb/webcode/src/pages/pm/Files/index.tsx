@@ -8,13 +8,16 @@
  * 判定，PM 无 MR 那样的订阅任务表。
  */
 import { useMemo, useState } from 'react';
-import { Badge, Button, Card, Input, Space, message } from 'antd';
-import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Badge, Button, Card, Input, Modal, Space, message } from 'antd';
+import { DeleteOutlined, DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
-import { usePMFileDevices } from '@core/hooks/api/usePerformance';
+import {
+  useBatchDeletePMFiles,
+  usePMFileDevices,
+} from '@core/hooks/api/usePerformance';
 import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
 import type { PMFileDeviceItem } from '@core/services/api/pmApi';
 import DeviceFilesDrawer from './DeviceFilesDrawer';
@@ -29,21 +32,60 @@ export default function PMFilesPage({ embedded }: Props) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [keyword, setKeyword] = useState('');
+  const [siteName, setSiteName] = useState('');
+  const [productClass, setProductClass] = useState('');
   const [activeDevice, setActiveDevice] = useState<PMFileDeviceItem | null>(null);
 
   const params = useMemo(
-    () => ({ page, pageSize, keyword: keyword || undefined }),
-    [page, pageSize, keyword],
+    () => ({
+      page,
+      pageSize,
+      keyword: keyword || undefined,
+      siteName: siteName || undefined,
+      productClass: productClass || undefined,
+    }),
+    [page, pageSize, keyword, siteName, productClass],
   );
   const { data, isLoading, refetch } = usePMFileDevices(params);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const bundle = useBatchDownloadWithMessage();
+  const batchDelete = useBatchDeletePMFiles();
   const handleBatchDownload = () => {
     if (selectedKeys.length === 0) {
       void message.warning(t('bundle.selectFiles'));
       return;
     }
     bundle.trigger({ module: 'pm', targets: selectedKeys.map(String) });
+  };
+
+  // 与 License/Config 的 confirmDelete 模式一致：Modal.confirm 二次确认 +
+  // 调 batch-delete → 按 succeeded/failed 分情况 toast。
+  const confirmDelete = (sns: string[]) => {
+    Modal.confirm({
+      title: t('transfer.fileLib.msg.deleteConfirmTitle'),
+      content: t('transfer.fileLib.msg.deletePMConfirm', { count: sns.length }),
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          const res = await batchDelete.mutateAsync(sns);
+          if (res.failed.length > 0) {
+            void message.warning(
+              t('transfer.fileLib.msg.deletePartial', {
+                count: res.succeeded.length,
+                failedCount: res.failed.length,
+              }),
+            );
+          } else {
+            void message.success(
+              t('transfer.fileLib.msg.deleteSuccess', { count: res.succeeded.length }),
+            );
+          }
+          setSelectedKeys([]);
+        } catch {
+          void message.error(t('transfer.fileLib.msg.deleteFailed'));
+        }
+      },
+    });
   };
 
   const columns: DataTableColumn<PMFileDeviceItem>[] = useMemo(
@@ -63,6 +105,22 @@ export default function PMFilesPage({ embedded }: Props) {
             {record.deviceSn}
           </Button>
         ),
+      },
+      {
+        key: 'siteName',
+        title: t('pm.siteName'),
+        dataIndex: 'siteName',
+        width: 180,
+        ellipsis: true,
+        render: (v) => v || '—',
+      },
+      {
+        key: 'productClass',
+        title: t('pm.productClass'),
+        dataIndex: 'productClass',
+        width: 160,
+        ellipsis: true,
+        render: (v) => v || '—',
       },
       {
         // 测量周期目前是固定值：CPE 默认 PM 上传间隔 900s = 15 分钟（worker
@@ -114,29 +172,43 @@ export default function PMFilesPage({ embedded }: Props) {
 
   const body = (
     <>
-      <Space style={{ marginBottom: 12 }}>
-        <Input.Search
-          allowClear
-          placeholder={t('pm.searchDeviceSn')}
-          style={{ width: 260 }}
-          onSearch={(v) => {
-            setKeyword(v.trim());
-            setPage(1);
-          }}
-        />
-        <Button icon={<ReloadOutlined />} onClick={() => void refetch()}>
-          {t('common.refresh')}
-        </Button>
-        <Button
-          type="primary"
-          icon={<DownloadOutlined />}
-          disabled={selectedKeys.length === 0 || bundle.isPending}
-          loading={bundle.isPending}
-          onClick={handleBatchDownload}
-        >
-          {t('bundle.batchDownload')} ({selectedKeys.length})
-        </Button>
-      </Space>
+      <Card size="small" style={{ marginBottom: 12 }}>
+        <Space wrap>
+          <Input
+            allowClear
+            placeholder={t('pm.searchDeviceSn')}
+            style={{ width: 180 }}
+            value={keyword}
+            onChange={(e) => {
+              setKeyword(e.target.value);
+              setPage(1);
+            }}
+          />
+          <Input
+            allowClear
+            placeholder={t('pm.searchSiteName')}
+            style={{ width: 180 }}
+            value={siteName}
+            onChange={(e) => {
+              setSiteName(e.target.value);
+              setPage(1);
+            }}
+          />
+          <Input
+            allowClear
+            placeholder={t('pm.searchProductClass')}
+            style={{ width: 180 }}
+            value={productClass}
+            onChange={(e) => {
+              setProductClass(e.target.value);
+              setPage(1);
+            }}
+          />
+          <Button icon={<ReloadOutlined />} onClick={() => void refetch()}>
+            {t('transfer.fileLib.action.refresh')}
+          </Button>
+        </Space>
+      </Card>
       <DataTable<PMFileDeviceItem>
         tableId="pm-file-devices"
         columns={columns}
@@ -154,6 +226,27 @@ export default function PMFilesPage({ embedded }: Props) {
         selectedRowKeys={selectedKeys}
         onSelectionChange={(keys) => setSelectedKeys(keys)}
         scroll={{ x: 900 }}
+        extraToolbarLeft={
+          <Space>
+            <Button
+              icon={<DownloadOutlined />}
+              disabled={selectedKeys.length === 0 || bundle.isPending}
+              loading={bundle.isPending}
+              onClick={handleBatchDownload}
+            >
+              {t('bundle.batchDownload')} ({selectedKeys.length})
+            </Button>
+            <Button
+              danger
+              icon={<DeleteOutlined />}
+              disabled={selectedKeys.length === 0 || batchDelete.isPending}
+              loading={batchDelete.isPending}
+              onClick={() => confirmDelete(selectedKeys.map(String))}
+            >
+              {t('transfer.fileLib.action.batchDelete', { count: selectedKeys.length })}
+            </Button>
+          </Space>
+        }
       />
       <DeviceFilesDrawer
         open={!!activeDevice}

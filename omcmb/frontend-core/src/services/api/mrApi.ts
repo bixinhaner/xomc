@@ -81,6 +81,10 @@ export interface MRFileItem {
 /** MR 文件按设备聚合视图（GET /mr/files/devices）。 */
 export interface MRFileDeviceItem {
   deviceSn: string;
+  /** 基站名称（来自 devices.site_name，允许空） */
+  siteName: string;
+  /** 产品类（来自 devices.product_class，允许空） */
+  productClass: string;
   firstCollectTime: string;
   lastCollectTime: string;
   fileCount: number;
@@ -219,15 +223,19 @@ export const mrApi = {
   // MR file download (blob)
   // 设备聚合视图（File Management → MR Tab 主列表）
   async getFileDevices(
-    params: { keyword?: string } & PageRequest,
+    params: { keyword?: string; siteName?: string; productClass?: string } & PageRequest,
   ): Promise<PageResponse<MRFileDeviceItem>> {
     const query: Record<string, unknown> = {
       page: params.page,
       pageSize: params.pageSize,
     };
     if (params.keyword) query.keyword = params.keyword;
+    if (params.siteName) query.site_name = params.siteName;
+    if (params.productClass) query.product_class = params.productClass;
     interface BackendMRFileDevice {
       device_sn: string;
+      site_name: string;
+      product_class: string;
       first_collect_time: string;
       last_collect_time: string;
       file_count: number;
@@ -240,6 +248,8 @@ export const mrApi = {
     return {
       items: (data.items || []).map((d) => ({
         deviceSn: d.device_sn,
+        siteName: d.site_name || '',
+        productClass: d.product_class || '',
         firstCollectTime: d.first_collect_time,
         lastCollectTime: d.last_collect_time,
         fileCount: d.file_count,
@@ -249,6 +259,15 @@ export const mrApi = {
       page: data.page,
       pageSize: data.page_size,
     };
+  },
+
+  // 按设备 SN 批量删除（PG + MinIO），后端逐 SN 处理，返回成功/失败列表。
+  async batchDeleteFiles(serialNumbers: string[]): Promise<{ succeeded: string[]; failed: string[] }> {
+    const { data } = await http.post<{ succeeded: string[]; failed: string[] }>(
+      '/mr/files/batch-delete',
+      { serial_numbers: serialNumbers },
+    );
+    return { succeeded: data.succeeded || [], failed: data.failed || [] };
   },
 
   async downloadFile(fileId: string): Promise<void> {

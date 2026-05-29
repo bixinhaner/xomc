@@ -38,6 +38,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		mrGroup.GET("/files", h.ListFiles)
 		mrGroup.GET("/files/devices", h.ListFileDevices) // 按设备聚合，给 File Management MR Tab 用
 		mrGroup.GET("/files/:id/download", h.DownloadFile)
+		mrGroup.POST("/files/batch-delete", h.BatchDeleteFiles) // 按 SN 批量删除（PG + MinIO）
 		mrGroup.GET("/data", h.QueryData)
 
 		mrGroup.GET("/indicators", h.ListIndicators)
@@ -102,7 +103,7 @@ func (h *Handler) ListFiles(c *gin.Context) {
 }
 
 // ListFileDevices 给 File Management → MR Tab 主列表用。每行 1 个设备 +
-// 该设备 mr_files 起止 collect_time + 文件数。
+// 该设备 mr_files 起止 collect_time + 文件数 + 站名/产品类。
 func (h *Handler) ListFileDevices(c *gin.Context) {
 	filter := MRFileDeviceFilter{
 		ListRequest: model.DefaultListRequest(),
@@ -113,6 +114,12 @@ func (h *Handler) ListFileDevices(c *gin.Context) {
 	}
 	if kw := c.Query("keyword"); kw != "" {
 		filter.Keyword = &kw
+	}
+	if sn := c.Query("site_name"); sn != "" {
+		filter.SiteName = &sn
+	}
+	if pc := c.Query("product_class"); pc != "" {
+		filter.ProductClass = &pc
 	}
 	result, err := h.store.ListFileDeviceAggregates(c.Request.Context(), filter)
 	if err != nil {
@@ -156,6 +163,53 @@ func (h *Handler) DownloadFile(c *gin.Context) {
 	c.Header("Content-Disposition", "attachment; filename="+fileInfo.FileName)
 	c.Header("Content-Type", "application/xml")
 	c.DataFromReader(http.StatusOK, stat.Size, "application/xml", obj, nil)
+}
+
+// BatchDeleteFilesRequest body.
+type BatchDeleteFilesRequest struct {
+	SerialNumbers []string `json:"serial_numbers" binding:"required,min=1"`
+}
+
+// BatchDeleteFilesResponse 报告每条结果（与 license/pm batch-delete 对齐）。
+type BatchDeleteFilesResponse struct {
+	Succeeded []string `json:"succeeded"`
+	Failed    []string `json:"failed"`
+}
+
+// BatchDeleteFiles handles POST /mr/files/batch-delete.
+// 每个 SN → 列文件 → 删 MinIO 对象 → 删 PG 行。MinIO 删失败也继续删 PG
+// （MinIO 残留靠 retention policy 兜底，比保留孤儿 PG 行更干净）。
+func (h *Handler) BatchDeleteFiles(c *gin.Context) {
+	var req BatchDeleteFilesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		coreerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	succeeded := make([]string, 0, len(req.SerialNumbers))
+	failed := make([]string, 0)
+	for _, sn := range req.SerialNumbers {
+		files, err := h.store.ListFilesBySN(c.Request.Context(), sn)
+		if err != nil {
+			h.logger.Warn("mr batch delete: list files failed",
+				zap.String("sn", sn), zap.Error(err))
+			failed = append(failed, sn)
+			continue
+		}
+		for _, f := range files {
+			if rmErr := h.minioClient.RemoveObject(c.Request.Context(), h.bucket, f.MinioPath, minio.RemoveObjectOptions{}); rmErr != nil {
+				h.logger.Warn("mr batch delete: minio remove failed",
+					zap.String("sn", sn), zap.String("path", f.MinioPath), zap.Error(rmErr))
+			}
+		}
+		if _, err := h.store.DeleteFilesBySN(c.Request.Context(), sn); err != nil {
+			h.logger.Warn("mr batch delete: pg delete failed",
+				zap.String("sn", sn), zap.Error(err))
+			failed = append(failed, sn)
+			continue
+		}
+		succeeded = append(succeeded, sn)
+	}
+	response.OK(c, BatchDeleteFilesResponse{Succeeded: succeeded, Failed: failed})
 }
 
 type dataQuery struct {

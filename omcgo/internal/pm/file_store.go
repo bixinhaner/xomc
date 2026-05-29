@@ -36,8 +36,13 @@ type PMFileFilter struct {
 
 // PMFileDeviceAggregate 是某设备的 PM 文件聚合视图（pm_files GROUP BY device_sn）。
 // 给 File Management 的 "按设备列出" 列表用：每行 1 个设备，含起止时间 + 文件数 + 上报状态。
+//
+// SiteName / ProductClass 来自 devices 表 LEFT JOIN（早期导入设备允许为空，
+// 前端用 "—" 兜底渲染）。
 type PMFileDeviceAggregate struct {
 	DeviceSN         string    `db:"device_sn"          json:"device_sn"`
+	SiteName         string    `db:"site_name"          json:"site_name"`
+	ProductClass     string    `db:"product_class"      json:"product_class"`
 	FirstCollectTime time.Time `db:"first_collect_time" json:"first_collect_time"`
 	LastCollectTime  time.Time `db:"last_collect_time"  json:"last_collect_time"`
 	FileCount        int64     `db:"file_count"         json:"file_count"`
@@ -48,7 +53,9 @@ type PMFileDeviceAggregate struct {
 
 // PMFileDeviceFilter 给 ListFileDeviceAggregates 用。
 type PMFileDeviceFilter struct {
-	Keyword *string // 按 device_sn ILIKE
+	Keyword      *string // 按 device_sn ILIKE
+	SiteName     *string // 按 devices.site_name ILIKE
+	ProductClass *string // 按 devices.product_class ILIKE
 	model.ListRequest
 }
 
@@ -59,4 +66,10 @@ type PMFileStore interface {
 	ListFiles(ctx context.Context, filter PMFileFilter) (*model.ListResponse[PMFileInfo], error)
 	ListFileDeviceAggregates(ctx context.Context, filter PMFileDeviceFilter) (*model.ListResponse[PMFileDeviceAggregate], error)
 	UpdateFileParsed(ctx context.Context, id uuid.UUID, counterCount int) error
+	// ListFilesBySN 返回某个设备 SN 下全部 pm_files 元数据（不分页），给 handler
+	// 批量删除时先收集 MinIO 路径用。
+	ListFilesBySN(ctx context.Context, sn string) ([]PMFileInfo, error)
+	// DeleteFilesBySN 删除该 SN 的所有 pm_files 行，返回删除行数。MinIO 对象由
+	// handler 在调用前后清理（参考 backup.LicenseService.BatchDelete 模式）。
+	DeleteFilesBySN(ctx context.Context, sn string) (int64, error)
 }

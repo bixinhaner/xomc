@@ -158,7 +158,7 @@ export function usePMFiles(
 // 按设备聚合的 PM 文件视图 —— File Management → PM Tab 主列表。
 // 10s 轮询：reporting 字段依赖 last_collect_time，文件数也会随设备上传变化。
 export function usePMFileDevices(
-  params: { keyword?: string } & PageRequest,
+  params: { keyword?: string; siteName?: string; productClass?: string } & PageRequest,
 ) {
   return useQuery({
     queryKey: ['pm', 'files', 'devices', params],
@@ -171,5 +171,16 @@ export function usePMFileDevices(
 export function useDownloadPMFile() {
   return useMutation({
     mutationFn: (fileId: string) => pmApi.downloadFile(fileId),
+  });
+}
+
+// 按设备 SN 批量删除 PM 文件（PG + MinIO）。成功后 invalidate 设备聚合列表。
+export function useBatchDeletePMFiles() {
+  const qc = useQueryClient();
+  return useMutation<{ succeeded: string[]; failed: string[] }, Error, string[]>({
+    mutationFn: (sns: string[]) => pmApi.batchDeleteFiles(sns),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['pm', 'files'] });
+    },
   });
 }

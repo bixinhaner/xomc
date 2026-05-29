@@ -5,13 +5,13 @@
  * 点"查看文件"打开 DeviceFilesDrawer，按时间筛选 + 多选批量下载。
  */
 import { useMemo, useState } from 'react';
-import { Badge, Button, Card, Input, Space, message } from 'antd';
-import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Badge, Button, Card, Input, Modal, Space, message } from 'antd';
+import { DeleteOutlined, DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
-import { useMRFileDevices } from '@core/hooks/api/useMR';
+import { useBatchDeleteMRFiles, useMRFileDevices } from '@core/hooks/api/useMR';
 import { useBatchDownloadWithMessage } from '@/hooks/useBatchDownloadWithMessage';
 import type { MRFileDeviceItem } from '@core/services/api/mrApi';
 import DeviceFilesDrawer from './DeviceFilesDrawer';
@@ -26,21 +26,59 @@ export default function MRFilesPage({ embedded }: Props) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [keyword, setKeyword] = useState('');
+  const [siteName, setSiteName] = useState('');
+  const [productClass, setProductClass] = useState('');
   const [activeDevice, setActiveDevice] = useState<MRFileDeviceItem | null>(null);
 
   const params = useMemo(
-    () => ({ page, pageSize, keyword: keyword || undefined }),
-    [page, pageSize, keyword],
+    () => ({
+      page,
+      pageSize,
+      keyword: keyword || undefined,
+      siteName: siteName || undefined,
+      productClass: productClass || undefined,
+    }),
+    [page, pageSize, keyword, siteName, productClass],
   );
   const { data, isLoading, refetch } = useMRFileDevices(params);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
   const bundle = useBatchDownloadWithMessage();
+  const batchDelete = useBatchDeleteMRFiles();
   const handleBatchDownload = () => {
     if (selectedKeys.length === 0) {
       void message.warning(t('bundle.selectFiles'));
       return;
     }
     bundle.trigger({ module: 'mr', targets: selectedKeys.map(String) });
+  };
+
+  // 与 License/Config 的 confirmDelete 模式一致。
+  const confirmDelete = (sns: string[]) => {
+    Modal.confirm({
+      title: t('transfer.fileLib.msg.deleteConfirmTitle'),
+      content: t('transfer.fileLib.msg.deleteMRConfirm', { count: sns.length }),
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          const res = await batchDelete.mutateAsync(sns);
+          if (res.failed.length > 0) {
+            void message.warning(
+              t('transfer.fileLib.msg.deletePartial', {
+                count: res.succeeded.length,
+                failedCount: res.failed.length,
+              }),
+            );
+          } else {
+            void message.success(
+              t('transfer.fileLib.msg.deleteSuccess', { count: res.succeeded.length }),
+            );
+          }
+          setSelectedKeys([]);
+        } catch {
+          void message.error(t('transfer.fileLib.msg.deleteFailed'));
+        }
+      },
+    });
   };
 
   const columns: DataTableColumn<MRFileDeviceItem>[] = useMemo(
@@ -60,6 +98,22 @@ export default function MRFilesPage({ embedded }: Props) {
             {record.deviceSn}
           </Button>
         ),
+      },
+      {
+        key: 'siteName',
+        title: t('mr.siteName'),
+        dataIndex: 'siteName',
+        width: 180,
+        ellipsis: true,
+        render: (v) => v || '—',
+      },
+      {
+        key: 'productClass',
+        title: t('mr.productClass'),
+        dataIndex: 'productClass',
+        width: 160,
+        ellipsis: true,
+        render: (v) => v || '—',
       },
       {
         key: 'firstCollectTime',
@@ -101,29 +155,43 @@ export default function MRFilesPage({ embedded }: Props) {
 
   const body = (
     <>
-      <Space style={{ marginBottom: 12 }}>
-        <Input.Search
-          allowClear
-          placeholder={t('mr.searchDeviceSn')}
-          style={{ width: 260 }}
-          onSearch={(v) => {
-            setKeyword(v.trim());
-            setPage(1);
-          }}
-        />
-        <Button icon={<ReloadOutlined />} onClick={() => void refetch()}>
-          {t('common.refresh')}
-        </Button>
-        <Button
-          type="primary"
-          icon={<DownloadOutlined />}
-          disabled={selectedKeys.length === 0 || bundle.isPending}
-          loading={bundle.isPending}
-          onClick={handleBatchDownload}
-        >
-          {t('bundle.batchDownload')} ({selectedKeys.length})
-        </Button>
-      </Space>
+      <Card size="small" style={{ marginBottom: 12 }}>
+        <Space wrap>
+          <Input
+            allowClear
+            placeholder={t('mr.searchDeviceSn')}
+            style={{ width: 180 }}
+            value={keyword}
+            onChange={(e) => {
+              setKeyword(e.target.value);
+              setPage(1);
+            }}
+          />
+          <Input
+            allowClear
+            placeholder={t('mr.searchSiteName')}
+            style={{ width: 180 }}
+            value={siteName}
+            onChange={(e) => {
+              setSiteName(e.target.value);
+              setPage(1);
+            }}
+          />
+          <Input
+            allowClear
+            placeholder={t('mr.searchProductClass')}
+            style={{ width: 180 }}
+            value={productClass}
+            onChange={(e) => {
+              setProductClass(e.target.value);
+              setPage(1);
+            }}
+          />
+          <Button icon={<ReloadOutlined />} onClick={() => void refetch()}>
+            {t('transfer.fileLib.action.refresh')}
+          </Button>
+        </Space>
+      </Card>
       <DataTable<MRFileDeviceItem>
         tableId="mr-file-devices"
         columns={columns}
@@ -141,6 +209,27 @@ export default function MRFilesPage({ embedded }: Props) {
         selectedRowKeys={selectedKeys}
         onSelectionChange={(keys) => setSelectedKeys(keys)}
         scroll={{ x: 900 }}
+        extraToolbarLeft={
+          <Space>
+            <Button
+              icon={<DownloadOutlined />}
+              disabled={selectedKeys.length === 0 || bundle.isPending}
+              loading={bundle.isPending}
+              onClick={handleBatchDownload}
+            >
+              {t('bundle.batchDownload')} ({selectedKeys.length})
+            </Button>
+            <Button
+              danger
+              icon={<DeleteOutlined />}
+              disabled={selectedKeys.length === 0 || batchDelete.isPending}
+              loading={batchDelete.isPending}
+              onClick={() => confirmDelete(selectedKeys.map(String))}
+            >
+              {t('transfer.fileLib.action.batchDelete', { count: selectedKeys.length })}
+            </Button>
+          </Space>
+        }
       />
       <DeviceFilesDrawer
         open={!!activeDevice}

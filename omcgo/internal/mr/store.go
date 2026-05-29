@@ -58,9 +58,12 @@ type MRRecordFilter struct {
 }
 
 // MRFileDeviceAggregate 是某设备的 MR 文件聚合视图（mr_files GROUP BY device_sn）。
-// 给 File Management 的"按设备列出"列表用：每行 1 个设备，含起止时间 + 文件数 + 上报状态。
+// 给 File Management 的"按设备列出"列表用：每行 1 个设备，含起止时间 + 文件数 + 上报状态
+// + 站名 + 产品类（LEFT JOIN devices）。
 type MRFileDeviceAggregate struct {
 	DeviceSN         string    `db:"device_sn"          json:"device_sn"`
+	SiteName         string    `db:"site_name"          json:"site_name"`
+	ProductClass     string    `db:"product_class"      json:"product_class"`
 	FirstCollectTime time.Time `db:"first_collect_time" json:"first_collect_time"`
 	LastCollectTime  time.Time `db:"last_collect_time"  json:"last_collect_time"`
 	FileCount        int64     `db:"file_count"         json:"file_count"`
@@ -72,7 +75,9 @@ type MRFileDeviceAggregate struct {
 
 // MRFileDeviceFilter 给 ListFileDeviceAggregates 用的过滤参数。
 type MRFileDeviceFilter struct {
-	Keyword *string // 按 device_sn ILIKE
+	Keyword      *string // 按 device_sn ILIKE
+	SiteName     *string // 按 devices.site_name ILIKE
+	ProductClass *string // 按 devices.product_class ILIKE
 	model.ListRequest
 }
 
@@ -93,4 +98,12 @@ type MRStore interface {
 	// ListFileDeviceAggregates 按 device_sn 聚合 mr_files，返回每台设备的
 	// 起止 collect_time + 文件数。给 File Management → MR Tab 主列表用。
 	ListFileDeviceAggregates(ctx context.Context, filter MRFileDeviceFilter) (*model.ListResponse[MRFileDeviceAggregate], error)
+
+	// ListFilesBySN 取某 SN 下全部 mr_files 元数据（无分页），给 handler 批量
+	// 删除时收集 MinIO 路径用。
+	ListFilesBySN(ctx context.Context, sn string) ([]MRFileInfo, error)
+
+	// DeleteFilesBySN 删除该 SN 下所有 mr_files 元数据行。返回删除行数。
+	// MinIO 对象由 handler 在调用前删除（参考 backup.LicenseService.BatchDelete 模式）。
+	DeleteFilesBySN(ctx context.Context, sn string) (int64, error)
 }

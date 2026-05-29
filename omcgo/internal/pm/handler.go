@@ -107,6 +107,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		pm.GET("/files", h.ListPMFiles)
 		pm.GET("/files/devices", h.ListPMFileDevices) // 按设备聚合，给 File Management PM Tab 用
 		pm.GET("/files/:id/download", h.DownloadPMFile)
+		pm.POST("/files/batch-delete", h.BatchDeletePMFiles) // 按 SN 批量删除（PG + MinIO）
 	}
 }
 
@@ -801,7 +802,7 @@ func (h *Handler) ListPMFiles(c *gin.Context) {
 }
 
 // ListPMFileDevices 给 File Management → PM Tab 主列表用。每行 1 个设备 +
-// 该设备 pm_files 起止 collect_time + 文件数 + reporting 标志。
+// 该设备 pm_files 起止 collect_time + 文件数 + reporting 标志 + 站名/产品类。
 func (h *Handler) ListPMFileDevices(c *gin.Context) {
 	filter := PMFileDeviceFilter{
 		ListRequest: model.DefaultListRequest(),
@@ -813,12 +814,66 @@ func (h *Handler) ListPMFileDevices(c *gin.Context) {
 	if kw := c.Query("keyword"); kw != "" {
 		filter.Keyword = &kw
 	}
+	if sn := c.Query("site_name"); sn != "" {
+		filter.SiteName = &sn
+	}
+	if pc := c.Query("product_class"); pc != "" {
+		filter.ProductClass = &pc
+	}
 	result, err := h.fileStore.ListFileDeviceAggregates(c.Request.Context(), filter)
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
 	response.OK(c, result)
+}
+
+// BatchDeletePMFilesRequest body.
+type BatchDeletePMFilesRequest struct {
+	SerialNumbers []string `json:"serial_numbers" binding:"required,min=1"`
+}
+
+// BatchDeletePMFilesResponse 报告每条结果（与 license batch-delete 对齐）。
+type BatchDeletePMFilesResponse struct {
+	Succeeded []string `json:"succeeded"`
+	Failed    []string `json:"failed"`
+}
+
+// BatchDeletePMFiles handles POST /pm/files/batch-delete.
+// 流程：每个 SN → 列文件 → 删 MinIO 对象 → 删 PG 行。MinIO 删失败也继续删 PG
+// （MinIO 残留靠 retention policy 兜底，比保留孤儿 PG 行更干净）。
+func (h *Handler) BatchDeletePMFiles(c *gin.Context) {
+	var req BatchDeletePMFilesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	succeeded := make([]string, 0, len(req.SerialNumbers))
+	failed := make([]string, 0)
+	for _, sn := range req.SerialNumbers {
+		files, err := h.fileStore.ListFilesBySN(c.Request.Context(), sn)
+		if err != nil {
+			h.logger.Warn("batch delete: list files failed",
+				zap.String("sn", sn), zap.Error(err))
+			failed = append(failed, sn)
+			continue
+		}
+		// 先删 MinIO 对象（删失败仅 warn 不中断，目的是别留孤儿 PG 行）
+		for _, f := range files {
+			if rmErr := h.minioClient.RemoveObject(c.Request.Context(), h.pmBucket, f.MinioPath, minio.RemoveObjectOptions{}); rmErr != nil {
+				h.logger.Warn("batch delete: minio remove failed",
+					zap.String("sn", sn), zap.String("path", f.MinioPath), zap.Error(rmErr))
+			}
+		}
+		if _, err := h.fileStore.DeleteFilesBySN(c.Request.Context(), sn); err != nil {
+			h.logger.Warn("batch delete: pg delete failed",
+				zap.String("sn", sn), zap.Error(err))
+			failed = append(failed, sn)
+			continue
+		}
+		succeeded = append(succeeded, sn)
+	}
+	response.OK(c, BatchDeletePMFilesResponse{Succeeded: succeeded, Failed: failed})
 }
 
 // DownloadPMFile handles GET /pm/files/:id/download.
