@@ -44,8 +44,8 @@ const PieChart: React.FC<PieChartProps> = ({
       },
     }));
 
-    const innerRadius = donut ? '55%' : '0%';
-    const outerRadius = '72%';
+    const innerRadius = donut ? '50%' : '0%';
+    const outerRadius = '80%';  // 增大饼图尺寸
 
     return {
       ...base,
@@ -93,16 +93,12 @@ const PieChart: React.FC<PieChartProps> = ({
           radius: [innerRadius, outerRadius],
           center: showLegend ? ['40%', '50%'] : ['50%', '50%'],
           data: formattedData,
+          // 环形图模式下完全不显示标签和引导线
           label: {
-            show: !donut,
-            formatter: '{b}\n{d}%',
-            fontSize: 12,
-            color: isDark ? '#C9D1D9' : undefined,
+            show: false,
           },
           labelLine: {
-            show: !donut,
-            length: 10,
-            length2: 10,
+            show: false,
           },
           itemStyle: {
             shadowBlur: isDark ? 12 : 8,

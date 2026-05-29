@@ -234,44 +234,49 @@ export default function DashboardPage() {
     return { isEmpty: false, xData, series };
   }, [deviceStatusByTypeData, t]);
 
-  // 7-day alarm trend
-  const trendXData = useMemo(() => {
-    const days: string[] = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      days.push(`${d.getMonth() + 1}/${d.getDate()}`);
-    }
-    return days;
-  }, []);
-
-  const alarmTrendSeries = useMemo(() => {
-    // 获取 X 轴天数作为数据长度基准
-    const daysCount = 7;
-
-    // 没有数据时使用全 0 数组，保留坐标轴框架
+  // 7-day alarm trend - 根据后端返回数据动态生成X轴
+  const { trendXData, alarmTrendSeries } = useMemo(() => {
+    // 没有数据时生成默认7天X轴和全0数据
     if (!alarmTrendData?.length) {
-      const zeroData = new Array(daysCount).fill(0);
-      return [
-        { name: t('alarm.severity.critical'), data: zeroData, color: SEVERITY_COLOR.critical },
-        { name: t('alarm.severity.major'), data: zeroData, color: SEVERITY_COLOR.major },
-        { name: t('alarm.severity.minor'), data: zeroData, color: SEVERITY_COLOR.minor },
-        { name: t('alarm.severity.warning'), data: zeroData, color: SEVERITY_COLOR.warning },
-      ];
+      const days: string[] = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        days.push(`${d.getMonth() + 1}/${d.getDate()}`);
+      }
+      const zeroData = new Array(7).fill(0);
+      return {
+        trendXData: days,
+        alarmTrendSeries: [
+          { name: t('alarm.severity.critical'), data: zeroData, color: SEVERITY_COLOR.critical },
+          { name: t('alarm.severity.major'), data: zeroData, color: SEVERITY_COLOR.major },
+          { name: t('alarm.severity.minor'), data: zeroData, color: SEVERITY_COLOR.minor },
+          { name: t('alarm.severity.warning'), data: zeroData, color: SEVERITY_COLOR.warning },
+        ],
+      };
     }
 
-    // 从真实数据中提取各级别的趋势
+    // 从后端数据提取日期并转换为 月/日 格式
+    const xData = alarmTrendData.map((d) => {
+      const date = new Date(d.date);
+      return `${date.getMonth() + 1}/${date.getDate()}`;
+    });
+
+    // 提取各级别的趋势数据
     const critical = alarmTrendData.map((d) => d.critical ?? 0);
     const major = alarmTrendData.map((d) => d.major ?? 0);
     const minor = alarmTrendData.map((d) => d.minor ?? 0);
     const warning = alarmTrendData.map((d) => d.warning ?? 0);
 
-    return [
-      { name: t('alarm.severity.critical'), data: critical, color: SEVERITY_COLOR.critical },
-      { name: t('alarm.severity.major'), data: major, color: SEVERITY_COLOR.major },
-      { name: t('alarm.severity.minor'), data: minor, color: SEVERITY_COLOR.minor },
-      { name: t('alarm.severity.warning'), data: warning, color: SEVERITY_COLOR.warning },
-    ];
+    return {
+      trendXData: xData,
+      alarmTrendSeries: [
+        { name: t('alarm.severity.critical'), data: critical, color: SEVERITY_COLOR.critical },
+        { name: t('alarm.severity.major'), data: major, color: SEVERITY_COLOR.major },
+        { name: t('alarm.severity.minor'), data: minor, color: SEVERITY_COLOR.minor },
+        { name: t('alarm.severity.warning'), data: warning, color: SEVERITY_COLOR.warning },
+      ],
+    };
   }, [alarmTrendData, t]);
 
   // TOP10 alarm devices horizontal bar chart - 使用真实API数据

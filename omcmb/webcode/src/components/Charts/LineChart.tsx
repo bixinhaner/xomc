@@ -4,6 +4,7 @@ import type { EChartsOption } from 'echarts';
 import { getBaseOption, getChartPalette } from './chartTheme';
 import { useIsDark } from '@/hooks/useThemeToken';
 import { useAppStore } from '@core/store/appStore';
+import { calculateSmartTicks } from '@/utils/chartUtils';
 
 export interface LineSeries {
   name: string;
@@ -44,6 +45,10 @@ const LineChart: React.FC<LineChartProps> = ({
     const base = getBaseOption(isDark, appTheme);
     const secondaryText = isDark ? '#8B949E' : '#8c8c8c';
     const titleColor = isDark ? '#E6EDF3' : '#262626';
+
+    // 使用工具函数计算智能刻度
+    const seriesData = series.map((s) => s.data.filter((v): v is number => v !== null));
+    const { interval, max: yMax } = calculateSmartTicks(seriesData);
 
     // Legend always at top with scroll enabled for multiple rows
     const getLegendConfig = () => {
@@ -123,11 +128,8 @@ const LineChart: React.FC<LineChartProps> = ({
         name: yAxisName,
         nameTextStyle: { color: secondaryText, fontSize: 12 },
         min: 0,
-        interval: 1,
-        max: (value: { max: number; min: number }) => {
-          // 当最大值为 0 时，设置默认上限为 10，避免刻度太密集
-          return value.max === 0 ? 10 : value.max;
-        },
+        interval: interval,
+        max: yMax,
         axisLabel: {
           formatter: (value: number) => Number.isInteger(value) ? value.toString() : '',
         },

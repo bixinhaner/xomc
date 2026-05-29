@@ -84,6 +84,11 @@ const BarChart: React.FC<BarChartProps> = ({
       type: 'value',
       name: yAxisName,
       nameTextStyle: { color: secondaryText, fontSize: 12 },
+      // 确保数值轴刻度为整数（适用于告警数量等离散值）
+      minInterval: 1,
+      axisLabel: {
+        formatter: (value: number) => Number.isInteger(value) ? value.toString() : '',
+      },
     };
 
     return {
