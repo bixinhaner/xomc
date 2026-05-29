@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -35,6 +36,12 @@ type mockFileRepository struct {
 	summaryErr    error
 	listByTech    map[string][]FileGroup // tech → groups
 	listByTechErr error
+
+	// T-0180 P1.5: DeleteOrphansBefore stub
+	orphanRows    map[string]int // tech → rows to "delete" (deterministic per tech)
+	orphanErr     error
+	orphanCalls   []string  // 记录每次调用的 tech 序列
+	orphanCutoffs []time.Time // 记录每次 before 时刻
 }
 
 func (m *mockFileRepository) CountByLoadedFrom(ctx context.Context, tech, loadedFrom string) (int, error) {
@@ -71,16 +78,32 @@ func (m *mockFileRepository) ListFilesByTech(ctx context.Context, tech string) (
 	return m.listByTech[tech], nil
 }
 
+func (m *mockFileRepository) DeleteOrphansBefore(ctx context.Context, tech string, before time.Time) (int, error) {
+	m.orphanCalls = append(m.orphanCalls, tech)
+	m.orphanCutoffs = append(m.orphanCutoffs, before)
+	if m.orphanErr != nil {
+		return 0, m.orphanErr
+	}
+	if m.orphanRows == nil {
+		return 0, nil
+	}
+	return m.orphanRows[tech], nil
+}
+
 // stubReloader 是测试用 Reloader,可注入失败行为或记录调用。
 type stubReloader struct {
 	calls   int
 	lastCtx context.Context
 	err     error
+	sleep   time.Duration // 模拟 Reload 耗时,验证 start/before 时序(P1.5 StartMonotonicity)
 }
 
 func (s *stubReloader) ReloadOne(ctx context.Context, name string) error {
 	s.calls++
 	s.lastCtx = ctx
+	if s.sleep > 0 {
+		time.Sleep(s.sleep)
+	}
 	return s.err
 }
 

@@ -3,6 +3,7 @@ package indicator
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -36,6 +37,17 @@ type FileRepository interface {
 	// ListFilesByTech 按 (loaded_from) GROUP BY 列出指定 tech 下所有 XML 文件的
 	// 指标计数。NULL loaded_from(历史数据未回填)归到 ""(由调用方决定如何展示)。
 	ListFilesByTech(ctx context.Context, tech string) ([]FileGroup, error)
+
+	// DeleteOrphansBefore 删除 perf_indicators_<tech> 中 updated_at < before 的行
+	// 与级联的 rela_platform_indicator_formula_<tech> + enabled_pm_indicators_<tech>。
+	//
+	// 使用场景:ImportDirectory ?mode=reload 期间,先记录 start := time.Now(),
+	// 然后触发 Loader.ReloadOne(UPSERT 触发 BEFORE UPDATE trigger 自动刷 updated_at),
+	// 再调本方法删除 updated_at < start 的指标 — 即"Reload 未覆盖到的孤儿"。
+	//
+	// 单事务三步级联(formula → enabled → main,逆依赖顺序);
+	// 返回 perf_indicators_<tech> 主表删除行数(供日志与响应体)。
+	DeleteOrphansBefore(ctx context.Context, tech string, before time.Time) (int, error)
 }
 
 // TechSummary 是 /indicators/summary 端点一行(对应一个制式)。
@@ -191,6 +203,51 @@ SELECT COUNT(*) AS total,
 		out = append(out, ts)
 	}
 	return out, nil
+}
+
+// DeleteOrphansBefore 实现 FileRepository(T-0180 P1.5)。
+//
+// 单事务三步级联(逆依赖顺序);全部基于 perf_indicators_<tech>.updated_at < $1 子查询,
+// 该列由 trigger_perf_indicators_<tech>_updated_at(migrations/000035 §Triggers)
+// 在 BEFORE UPDATE 时自动刷新 — Loader.Reload 走 ON CONFLICT DO UPDATE 路径必触发。
+func (r *PgFileRepository) DeleteOrphansBefore(ctx context.Context, tech string, before time.Time) (int, error) {
+	if err := validateTech(tech); err != nil {
+		return 0, err
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	formulaSQL := fmt.Sprintf(`
+DELETE FROM rela_platform_indicator_formula_%s
+ WHERE indicator_id IN (
+   SELECT id FROM perf_indicators_%s WHERE updated_at < $1
+ )`, tech, tech)
+	if _, err := tx.Exec(ctx, formulaSQL, before); err != nil {
+		return 0, fmt.Errorf("cascade delete orphan formula (%s): %w", tech, err)
+	}
+
+	enabledSQL := fmt.Sprintf(`
+DELETE FROM enabled_pm_indicators_%s
+ WHERE indicator_id IN (
+   SELECT id FROM perf_indicators_%s WHERE updated_at < $1
+ )`, tech, tech)
+	if _, err := tx.Exec(ctx, enabledSQL, before); err != nil {
+		return 0, fmt.Errorf("cascade delete orphan enabled (%s): %w", tech, err)
+	}
+
+	mainSQL := fmt.Sprintf(`DELETE FROM perf_indicators_%s WHERE updated_at < $1`, tech)
+	tag, err := tx.Exec(ctx, mainSQL, before)
+	if err != nil {
+		return 0, fmt.Errorf("delete orphan perf_indicators_%s: %w", tech, err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit orphan delete tx (%s): %w", tech, err)
+	}
+	return int(tag.RowsAffected()), nil
 }
 
 // ListFilesByTech 实现 FileRepository — 按 loaded_from GROUP BY 单查询。

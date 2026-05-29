@@ -24,6 +24,7 @@ type RESTHandler struct {
 	formula  PlatformFormulaRepository
 	units    *PgUnitRepository
 	reloader Reloader
+	fileRepo FileRepository // T-0180 P1.5: 供 ImportDirectory ?mode=reload 调 DeleteOrphansBefore
 	logger   *zap.Logger
 }
 
@@ -33,17 +34,19 @@ type Reloader interface {
 }
 
 // NewRESTHandler 构造 P3-03 REST handler。
+// fileRepo 可为 nil — 此时 ImportDirectory ?mode=reload 返 503(测试场景常用)。
 func NewRESTHandler(
 	svc *IndicatorManagementService,
 	formula PlatformFormulaRepository,
 	units *PgUnitRepository,
 	reloader Reloader,
+	fileRepo FileRepository,
 	logger *zap.Logger,
 ) *RESTHandler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &RESTHandler{svc: svc, formula: formula, units: units, reloader: reloader, logger: logger.Named("indicator.rest")}
+	return &RESTHandler{svc: svc, formula: formula, units: units, reloader: reloader, fileRepo: fileRepo, logger: logger.Named("indicator.rest")}
 }
 
 // RegisterRoutes 挂在 /api/v1 下。
@@ -574,16 +577,54 @@ func (h *RESTHandler) DeleteUnit(c *gin.Context) {
 
 // ── Cache + Import ──────────────────────────────────────────────────
 
+// ImportDirectory POST /api/v1/indicators/import-directory?mode=import|reload
+//
+// T-0180 P1.5: 解析 ?mode= 路由两种语义:
+//   - import(默认,向后兼容)— 仅 Loader.Reload(加法 UPSERT);不删孤儿
+//   - reload — Loader.Reload + 三制式 DeleteOrphansBefore(destructive 全量重载)
+//     依赖 perf_indicators_<tech> BEFORE UPDATE trigger 自动刷 updated_at
 func (h *RESTHandler) ImportDirectory(c *gin.Context) {
 	if h.reloader == nil {
 		commonerrors.AbortWithError(c, http.StatusServiceUnavailable, errors.New("dictloader registry not wired"))
 		return
 	}
-	if err := h.reloader.ReloadOne(c.Request.Context(), "indicator"); err != nil {
-		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+
+	mode, err := ParseReloadMode(c.Query("mode"))
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	response.OK(c, gin.H{"reloaded": "indicator"})
+
+	switch mode {
+	case ReloadModeImport:
+		// 老行为:仅 UPSERT,不删孤儿
+		if err := h.reloader.ReloadOne(c.Request.Context(), LoaderName); err != nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+			return
+		}
+		response.OK(c, gin.H{
+			"reloaded": LoaderName,
+			"mode":     string(ReloadModeImport),
+		})
+
+	case ReloadModeReload:
+		// destructive 模式需 fileRepo 才能删孤儿
+		if h.fileRepo == nil {
+			commonerrors.AbortWithError(c, http.StatusServiceUnavailable,
+				errors.New("file repository not wired; reload mode unavailable"))
+			return
+		}
+		result, err := PerformReloadWithOrphans(c.Request.Context(), h.fileRepo, h.reloader, h.logger)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+			return
+		}
+		response.OK(c, gin.H{
+			"reloaded": LoaderName,
+			"mode":     string(result.Mode),
+			"orphans":  result.Orphans,
+		})
+	}
 }
 
 func (h *RESTHandler) CacheRefresh(c *gin.Context) {

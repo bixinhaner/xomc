@@ -113,14 +113,16 @@ func initPMModule(c *Container) error {
 	// 新增 PgUnitRepository 承担 indicator_unit CRUD。
 	indicatorUnitRepo := indicator.NewPgUnitRepository(c.PgPool)
 	indicatorReloader := &indicatorReloader{reg: c.DictLoaderRegistry}
+	// T-0180 P1.5: 提前构造 fileRepo,RESTHandler 和 FileHandler 共用同一实例
+	indicatorFileRepo := indicator.NewPgFileRepository(c.PgPool)
 	indicatorRESTHandler := indicator.NewRESTHandler(
-		indicatorSvc, platformFormulaRepo, indicatorUnitRepo, indicatorReloader, logger.Named("indicator-rest"),
+		indicatorSvc, platformFormulaRepo, indicatorUnitRepo, indicatorReloader,
+		indicatorFileRepo, logger.Named("indicator-rest"),
 	)
 
 	// T-0180 P1.3+P1.4: XML 文件粒度管理(DELETE 守门 + 级联清理 + 上传 + 聚合 + 列表)
 	// XMLBaseDir 与 dictloader 共用,确保 loaded_from 相对路径能 join 到正确绝对路径
 	// reloader 同 indicatorReloader(P1.4 Upload 成功后同步 Reload Loader,让 DB 立即可见新指标)
-	indicatorFileRepo := indicator.NewPgFileRepository(c.PgPool)
 	indicatorFileHandler := indicator.NewFileHandler(
 		indicatorFileRepo, indicatorReloader, c.Cfg.DictLoader.XMLBaseDir, logger.Named("indicator-file"),
 	)
