@@ -26,6 +26,10 @@
 -- 误判为已完成。
 -- ============================================================
 
+-- 注意:result 列是 JSONB,app 侧 TaskResult string 经 json.Marshal 写入
+-- 实际是 JSON 字符串(含外层引号,如 "success")。直接给 JSONB 列赋裸 text
+-- 会报 SQLSTATE 42804:column "result" is of type jsonb but expression is of
+-- type text。用 to_jsonb(text) 在 server 侧转 JSON 字符串。
 UPDATE mml_tasks
    SET status      = CASE
                        WHEN failed_count  = 0 THEN 'completed'
@@ -33,9 +37,9 @@ UPDATE mml_tasks
                        ELSE 'completed'
                      END,
        result      = CASE
-                       WHEN failed_count  = 0 THEN 'success'
-                       WHEN success_count = 0 THEN 'failed'
-                       ELSE 'partial'
+                       WHEN failed_count  = 0 THEN to_jsonb('success'::text)
+                       WHEN success_count = 0 THEN to_jsonb('failed'::text)
+                       ELSE to_jsonb('partial'::text)
                      END,
        finished_at = COALESCE(finished_at, updated_at, NOW())
  WHERE status = 'running'
