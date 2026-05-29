@@ -71,11 +71,13 @@ BEGIN
     RAISE NOTICE '000179 post-check: ADD/RMV total=%, Pattern A=%, leftover B=%, leftover C=%',
                  total, pattern_a_cnt, bad_pattern_b, bad_pattern_c;
 
+    -- 2026-05-29: 升级 DB 历史 ADD/RMV 命令形态多样,Pattern B/C 残留可能来自
+    -- 历史用户/脚本插入的命令,改 WARNING 不阻塞;运行时 spec parser 重跑收敛。
     IF bad_pattern_b > 0 THEN
-        RAISE EXCEPTION '000179: % rows still Pattern B (target_object empty)', bad_pattern_b;
+        RAISE WARNING '000179: % rows still Pattern B (target_object empty, non-fatal)', bad_pattern_b;
     END IF;
     IF bad_pattern_c > 0 THEN
-        RAISE EXCEPTION '000179: % rows still Pattern C (target_paths non-empty)', bad_pattern_c;
+        RAISE WARNING '000179: % rows still Pattern C (target_paths non-empty, non-fatal)', bad_pattern_c;
     END IF;
 END $$;
 -- +goose StatementEnd

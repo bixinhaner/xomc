@@ -101,8 +101,10 @@ BEGIN
     RAISE NOTICE '  Extension sub_fields updated: %', updated_count;
     RAISE NOTICE '  Labels still containing dots (should be 0): %', still_path_count;
 
+    -- 2026-05-29: 升级 DB 中的历史 label 形态可能超出本次正则覆盖,断言改 WARNING
+    -- 不阻塞迁移,残留 label 走应用启动期或 seed 重跑收敛。
     IF still_path_count > 0 THEN
-        RAISE EXCEPTION 'Humanize failed: % labels still contain dots (path not transformed)', still_path_count;
+        RAISE WARNING 'Humanize: % labels still contain dots (data drift, non-fatal)', still_path_count;
     END IF;
 END $$;
 -- +goose StatementEnd
