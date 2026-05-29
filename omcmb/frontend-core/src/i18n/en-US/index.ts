@@ -191,6 +191,7 @@ const messages: Record<string, string> = {
   'nav.product':       'Product Center',
   'nav.product.products':       'Products',
   'nav.product.paramModel':     'Parameter Models',
+  'nav.product.standardParams': 'Standard Params',
   'nav.product.kpiLibrary':     'KPI Library',
   'nav.product.alarmLibrary':   'Alarm Library',
   'nav.product.orphanDevices':  'Orphan Devices',

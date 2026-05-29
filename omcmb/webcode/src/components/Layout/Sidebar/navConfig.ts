@@ -183,6 +183,8 @@ export const NAV_CONFIG: NavConfig = [
     iconName: 'AppstoreAddOutlined',
     requireSuperAdmin: true,  // T-0098-P4-02：仅超管可见的字典治理菜单
     children: [
+      // 2026-05-28: 标准参数树排首位(与 seed/000211 sort_order=0 一致)
+      { key: 'product-standard-params', label: 'nav.product.standardParams', path: '/product/standard-params' },
       { key: 'product-param-model',    label: 'nav.product.paramModel',     path: '/product/param-model' },
       { key: 'product-kpi-library',    label: 'nav.product.kpiLibrary',     path: '/product/kpi-library' },
       { key: 'product-alarm-library',  label: 'nav.product.alarmLibrary',   path: '/product/alarm-library' },

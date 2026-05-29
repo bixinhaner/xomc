@@ -171,7 +171,7 @@ export default function MappingsTab({ selectedName }: Props) {
   if (!selectedName) {
     return (
       <Card size="small">
-        <Empty description="请先在「参数模型清单」Tab 选择一个模型" />
+        <Empty description="请先在上方「参数模型清单」中选择一个模型" />
       </Card>
     );
   }

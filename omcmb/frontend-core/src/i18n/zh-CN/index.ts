@@ -191,6 +191,7 @@ const messages: Record<string, string> = {
   'nav.product':       '产品中心',
   'nav.product.products':       '产品管理',
   'nav.product.paramModel':     '参数模型',
+  'nav.product.standardParams': '标准参数树',
   'nav.product.kpiLibrary':     'KPI 指标库',
   'nav.product.alarmLibrary':   '告警库',
   'nav.product.orphanDevices':  '孤儿设备',

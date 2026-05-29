@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -590,22 +591,59 @@ func (h *Handler) Translate(c *gin.Context) {
 
 // ── Cache + Import ──────────────────────────────────────────────────
 
+// ImportDirectory 从 datamodels/ 目录加载 XML。
+//
+// Query params:
+//   - mode=import (默认): 加法 UPSERT —— 仅写入/更新现有 XML 中的模型，
+//     不删除 DB 中不在 XML 文件里的孤儿模型（手工 UI 添加项保留）。
+//   - mode=reload: destructive 全量重载 —— 完成 UPSERT 后，
+//     删除 DB 中所有未被本次加载触达的 param_models（孤儿模型）；
+//     param_mappings CASCADE 删除；products.param_model_id SET NULL。
 func (h *Handler) ImportDirectory(c *gin.Context) {
 	if h.reloader == nil {
 		commonerrors.AbortWithError(c, http.StatusServiceUnavailable,
 			fmt.Errorf("dictloader registry not wired"))
 		return
 	}
+	mode := strings.ToLower(strings.TrimSpace(c.Query("mode")))
+	if mode == "" {
+		mode = "import"
+	}
+	if mode != "import" && mode != "reload" {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("invalid mode %q (expected import|reload)", mode))
+		return
+	}
+
+	// destructive 模式：记录开始时间，便于事后按 updated_at 识别孤儿
+	startedAt := time.Now()
+
 	if err := h.reloader.ReloadOne(c.Request.Context(), "param-model"); err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
+
+	var orphansDeleted int64
+	if mode == "reload" {
+		var err error
+		orphansDeleted, err = h.repo.DeleteOrphansSince(c.Request.Context(), startedAt)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				fmt.Errorf("cleanup orphan param_models: %w", err))
+			return
+		}
+	}
+
 	if h.registry != nil {
 		if err := h.registry.Refresh(c.Request.Context()); err != nil {
 			h.logger.Warn("post-reload param registry refresh failed", zap.Error(err))
 		}
 	}
-	response.OK(c, gin.H{"reloaded": "param-model"})
+	response.OK(c, gin.H{
+		"reloaded":         "param-model",
+		"mode":             mode,
+		"orphans_deleted":  orphansDeleted,
+	})
 }
 
 func (h *Handler) CacheRefresh(c *gin.Context) {

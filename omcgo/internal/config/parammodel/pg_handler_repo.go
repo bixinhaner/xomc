@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
@@ -112,6 +113,25 @@ func (r *PgRepository) DeleteParamModel(ctx context.Context, name string) (bool,
 		return false, fmt.Errorf("delete param_model %q: %w", name, err)
 	}
 	return tag.RowsAffected() > 0, nil
+}
+
+// DeleteOrphansSince 删除自 since 以来未被 UPSERT 触及的 param_models 行（孤儿）。
+// 用途：destructive reload — 重载 XML 后，若 DB 中存在不再于 XML 目录中的模型，
+//      它们的 updated_at 不会被 BEFORE UPDATE 触发器更新，可作为孤儿判定标志。
+// 副作用：
+//   - param_mappings 通过 FK CASCADE 自动删除
+//   - products.param_model_id 通过 FK SET NULL 置空（产品本身保留）
+//   - devices.param_model_id 是软引用（无 FK），调用方需自行处理（推荐 Inform 时重新解析）
+//   - parameter_discovery_log.param_model_id 通过 FK SET NULL 置空
+func (r *PgRepository) DeleteOrphansSince(ctx context.Context, since time.Time) (int64, error) {
+	tag, err := r.pool.Exec(ctx,
+		`DELETE FROM param_models WHERE updated_at < $1`,
+		since,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("delete orphan param_models: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }
 
 // ── Mapping CRUD ────────────────────────────────────────────────────

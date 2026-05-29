@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, Table, Tag, Button, Space, Modal, Form, Input, Switch, message, Popconfirm } from 'antd';
 import { EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import {
@@ -11,9 +11,12 @@ import type { ParamModel, UpdateParamModelInput } from '@core/types/paramModel';
 interface Props {
   selectedName?: string;
   onSelect: (name: string) => void;
+  /** 2026-05-28: 由 param-model index 顶部统一 toolbar 提供的关键字过滤
+   *  (取消 Tabs 后,搜索框上提到容器外,client-side 过滤 name / description)。 */
+  keyword?: string;
 }
 
-export default function ModelsTab({ selectedName, onSelect }: Props) {
+export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
   const { data, isLoading } = useParamModelList();
   const updateMut = useUpdateParamModel();
   const deleteMut = useDeleteParamModel();
@@ -21,7 +24,14 @@ export default function ModelsTab({ selectedName, onSelect }: Props) {
   const [editing, setEditing] = useState<ParamModel | null>(null);
   const [form] = Form.useForm<UpdateParamModelInput>();
 
-  const items = data?.items || [];
+  const items = useMemo(() => {
+    const raw = data?.items || [];
+    const k = keyword?.trim().toLowerCase();
+    if (!k) return raw;
+    return raw.filter((m) =>
+      (m.name + ' ' + (m.description || '')).toLowerCase().includes(k),
+    );
+  }, [data, keyword]);
 
   const columns = [
     {
@@ -93,7 +103,7 @@ export default function ModelsTab({ selectedName, onSelect }: Props) {
   };
 
   return (
-    <Card size="small" title="参数模型清单 / Param Models">
+    <Card size="small">
       <Table<ParamModel>
         rowKey="id"
         loading={isLoading}

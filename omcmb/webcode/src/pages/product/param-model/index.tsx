@@ -1,34 +1,102 @@
+/**
+ * ParamModelPage — 参数模型主页面。
+ *
+ * 2026-05-28 用户决策(布局调整):
+ *   1. "标准参数树"已拆为独立菜单页 product/standard-params,本页不再渲染
+ *   2. drill-down 主从导航:
+ *      - 默认显示参数模型清单(ModelsTab); 点击模型名 → 进入该模型的参数列表
+ *      - 进入参数列表后,toolbar 左侧显示"返回"按钮 + 当前模型名;
+ *        点击返回 → 清空 selectedModelName → 回到清单
+ *   3. 顶部 toolbar 单行:
+ *      - 列表态: [搜索 + 重载/刷新按钮]
+ *      - 详情态: [返回 + 模型名 + 重载/刷新按钮]
+ */
 import { useState } from 'react';
-import { Tabs, Card, Button, Space, message, Popconfirm } from 'antd';
-import { CloudDownloadOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Card, Input, Button, Space, Popconfirm, message, Typography } from 'antd';
+import {
+  ArrowLeftOutlined,
+  CloudDownloadOutlined,
+  CloudUploadOutlined,
+  ReloadOutlined,
+} from '@ant-design/icons';
 import {
   useParamModelImportDirectory,
+  useParamModelReloadDirectory,
   useParamModelCacheRefresh,
 } from '@core/hooks/api/useParamModels';
 import ModelsTab from './ModelsTab';
 import MappingsTab from './MappingsTab';
-import StandardParamsTab from './StandardParamsTab';
+
+const { Text } = Typography;
 
 export default function ParamModelPage() {
-  const [tab, setTab] = useState('models');
   const [selectedModelName, setSelectedModelName] = useState<string | undefined>();
+  const [keyword, setKeyword] = useState('');
   const importMut = useParamModelImportDirectory();
+  const reloadMut = useParamModelReloadDirectory();
   const cacheMut = useParamModelCacheRefresh();
+
+  const inDetail = Boolean(selectedModelName);
 
   return (
     <div style={{ padding: 16 }}>
-      <Card
-        size="small"
-        style={{ marginBottom: 12 }}
-        extra={
+      {/* 顶部 toolbar:列表态展示搜索;详情态展示返回 + 当前模型名 */}
+      <Card size="small" style={{ marginBottom: 12 }}>
+        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+          {inDetail ? (
+            <Space>
+              <Button
+                icon={<ArrowLeftOutlined />}
+                onClick={() => setSelectedModelName(undefined)}
+              >
+                返回
+              </Button>
+              <Text strong>{selectedModelName} 的参数列表</Text>
+            </Space>
+          ) : (
+            <Input.Search
+              placeholder="搜索参数模型名称 / 描述"
+              allowClear
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              style={{ width: 280 }}
+            />
+          )}
           <Space>
             <Popconfirm
-              title="确认重载 XML？"
+              title="确认导入 XML?"
               description={
                 <div style={{ maxWidth: 320 }}>
-                  将从 <code>datamodels/</code> 重新加载所有参数模型 XML。
-                  <br />
-                  UI 中对参数模型 / 映射的编辑将被 XML 值覆盖；操作不可撤销。
+                  从 <code>datamodels/</code> <b>加法 UPSERT</b> 当前 XML 文件中的模型:
+                  <br />· 新增模型 → 插入
+                  <br />· 已存在模型 → 更新(UI 中的手工编辑会被 XML 覆盖)
+                  <br />· DB 中已无 XML 对应的孤儿模型 → <b>保留不删除</b>
+                </div>
+              }
+              okText="确认导入"
+              cancelText="取消"
+              placement="bottomRight"
+              onConfirm={() => {
+                importMut
+                  .mutateAsync()
+                  .then((r) => message.success(`已导入:${r.reloaded}`))
+                  .catch((e) => message.error((e as Error).message));
+              }}
+            >
+              <Button icon={<CloudUploadOutlined />} loading={importMut.isPending}>
+                导入 XML
+              </Button>
+            </Popconfirm>
+            <Popconfirm
+              title="确认重载 XML?"
+              description={
+                <div style={{ maxWidth: 360 }}>
+                  从 <code>datamodels/</code> <b>destructive 全量重载</b>:
+                  <br />· 当前 XML 中的模型 → UPSERT (覆盖 UI 编辑)
+                  <br />· DB 中已无 XML 对应的孤儿模型 → <b>删除</b>
+                  <br />· 关联的 <code>param_mappings</code> 级联删除
+                  <br />· 关联的 <code>products.param_model_id</code> 被置空 (SET NULL)
+                  <br />操作不可撤销!
                 </div>
               }
               okText="确认重载"
@@ -36,15 +104,18 @@ export default function ParamModelPage() {
               okButtonProps={{ danger: true }}
               placement="bottomRight"
               onConfirm={() => {
-                // 不返回 Promise — 让 Popconfirm 立即关闭；loading 反馈交给触发按钮
-                importMut
+                reloadMut
                   .mutateAsync()
-                  .then((r) => message.success(`已重载：${r.reloaded}`))
+                  .then((r) =>
+                    message.success(
+                      `已重载:${r.reloaded}${r.orphans_deleted > 0 ? ` (清理 ${r.orphans_deleted} 个孤儿模型)` : ''}`,
+                    ),
+                  )
                   .catch((e) => message.error((e as Error).message));
               }}
             >
-              <Button icon={<CloudDownloadOutlined />} loading={importMut.isPending} danger>
-                XML 导入 / 重载
+              <Button icon={<CloudDownloadOutlined />} loading={reloadMut.isPending} danger>
+                重载 XML
               </Button>
             </Popconfirm>
             <Button
@@ -60,38 +131,19 @@ export default function ParamModelPage() {
               刷新缓存
             </Button>
           </Space>
-        }
-      />
+        </Space>
+      </Card>
 
-      <Tabs
-        activeKey={tab}
-        onChange={setTab}
-        items={[
-          {
-            key: 'models',
-            label: '参数模型清单',
-            children: (
-              <ModelsTab
-                selectedName={selectedModelName}
-                onSelect={(name) => {
-                  setSelectedModelName(name);
-                  setTab('mappings');
-                }}
-              />
-            ),
-          },
-          {
-            key: 'mappings',
-            label: '默认映射',
-            children: <MappingsTab selectedName={selectedModelName} />,
-          },
-          {
-            key: 'standard',
-            label: '标准参数树',
-            children: <StandardParamsTab />,
-          },
-        ]}
-      />
+      {/* drill-down 主体:列表态 ↔ 详情态 二选一 */}
+      {inDetail ? (
+        <MappingsTab selectedName={selectedModelName} />
+      ) : (
+        <ModelsTab
+          selectedName={selectedModelName}
+          onSelect={setSelectedModelName}
+          keyword={keyword}
+        />
+      )}
     </div>
   );
 }

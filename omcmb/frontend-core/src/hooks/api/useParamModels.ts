@@ -176,3 +176,15 @@ export function useParamModelImportDirectory() {
     },
   });
 }
+
+// 2026-05-28: destructive 全量重载;成功后 invalidate 所有 param-model 查询,
+// 让前端立刻看到孤儿模型被删除后的最新清单。
+export function useParamModelReloadDirectory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.reloadDirectory(),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: PM_KEY });
+    },
+  });
+}

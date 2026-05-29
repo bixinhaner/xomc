@@ -309,8 +309,20 @@ export const paramModelApi = {
     return data;
   },
 
-  async importDirectory(): Promise<{ reloaded: string }> {
-    const { data } = await http.post<{ reloaded: string }>('/param-models/import-directory');
+  async importDirectory(): Promise<{ reloaded: string; mode: string; orphans_deleted: number }> {
+    const { data } = await http.post<{ reloaded: string; mode: string; orphans_deleted: number }>(
+      '/param-models/import-directory?mode=import',
+    );
+    return data;
+  },
+
+  // 2026-05-28: 与 importDirectory 同端点,mode=reload 触发 destructive 全量重载:
+  // 完成 UPSERT 后会删除 DB 中所有未在本次扫描中被触达的 param_models 孤儿,
+  // CASCADE 删 param_mappings,SET NULL 写 products.param_model_id。
+  async reloadDirectory(): Promise<{ reloaded: string; mode: string; orphans_deleted: number }> {
+    const { data } = await http.post<{ reloaded: string; mode: string; orphans_deleted: number }>(
+      '/param-models/import-directory?mode=reload',
+    );
     return data;
   },
 };
