@@ -23,6 +23,13 @@
 #   ./clean.sh --keep-project 3 --keep-infra 1
 #                                           # 非交互,显式指定保留数
 #   ./clean.sh --keep-project 0             # 全部清理 project,infra 走默认
+#   ./clean.sh --list                       # 仅列出当前版本(含 mtime / 大小 / 文件数),退出
+#   ./clean.sh --delete-project v1,v2       # 精确删 project 下指定版本(逗号分隔多个)
+#   ./clean.sh --delete-infra v3            # 精确删 infra 下指定版本
+#   ./clean.sh --delete-project v1 --delete-infra v3
+#                                           # 两类同时精确删
+#   ./clean.sh --delete-project v1 --dry-run
+#                                           # 列要删但不真删
 #   ./clean.sh --dry-run                    # 只列要删的,不实际 rm
 #   ./clean.sh --archive <dir>              # 自定义 archive 目录(测试用)
 #   ./clean.sh -h | --help                  # 本帮助
@@ -32,6 +39,11 @@
 #   --default-keep <N>         交互回车 / -y 时的默认保留数(默认 3)
 #   --keep-project <N>         显式保留 project 最新 N 个(0=全删)
 #   --keep-infra <N>           显式保留 infra 最新 N 个(0=全删)
+#   -l, --list                 仅列出 project + infra 下所有版本,退出(不做任何修改)
+#   --delete-project <vs>      精确删 project 下指定版本(逗号分隔多个);
+#                              与 keep-N / 询问流程互斥,也跳过空目录预清理。
+#                              指定的版本不存在 → 整体报错退出 1,避免静默无操作。
+#   --delete-infra <vs>        同上,但作用于 infra
 #   --dry-run                  只列要删的目录,不真删
 #   --archive <dir>            归档目录(默认 deployments/release/archive)
 #   -h, --help                 本帮助
@@ -45,17 +57,23 @@ NON_INTERACTIVE=0
 KEEP_PROJECT_OPT=""   # 空 = 未显式指定,交互/-y 取 DEFAULT_KEEP
 KEEP_INFRA_OPT=""
 DRY_RUN=0
+LIST_ONLY=0
+DELETE_PROJECT_VERS=""   # 逗号分隔列表;非空 = 精确删模式
+DELETE_INFRA_VERS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    -y|--yes)         NON_INTERACTIVE=1; shift ;;
-    --default-keep)   DEFAULT_KEEP="$2"; shift 2 ;;
-    --keep-project)   KEEP_PROJECT_OPT="$2"; shift 2 ;;
-    --keep-infra)     KEEP_INFRA_OPT="$2"; shift 2 ;;
-    --dry-run)        DRY_RUN=1; shift ;;
-    --archive)        ARCHIVE="$2"; shift 2 ;;
-    -h|--help)        sed -n '3,40p' "$0"; exit 0 ;;
-    *)                echo "未知参数:$1(-h 查看用法)" >&2; exit 1 ;;
+    -y|--yes)             NON_INTERACTIVE=1; shift ;;
+    --default-keep)       DEFAULT_KEEP="$2"; shift 2 ;;
+    --keep-project)       KEEP_PROJECT_OPT="$2"; shift 2 ;;
+    --keep-infra)         KEEP_INFRA_OPT="$2"; shift 2 ;;
+    -l|--list)            LIST_ONLY=1; shift ;;
+    --delete-project)     DELETE_PROJECT_VERS="$2"; shift 2 ;;
+    --delete-infra)       DELETE_INFRA_VERS="$2"; shift 2 ;;
+    --dry-run)            DRY_RUN=1; shift ;;
+    --archive)            ARCHIVE="$2"; shift 2 ;;
+    -h|--help)            sed -n '3,55p' "$0"; exit 0 ;;
+    *)                    echo "未知参数:$1(-h 查看用法)" >&2; exit 1 ;;
   esac
 done
 
@@ -205,6 +223,101 @@ clean_kind() {
   log "[$label] 已清理。"
 }
 
+# list_versions_detailed <label> <dir> — 列出 <dir> 下所有版本目录,
+# 含 mtime / 大小 / 交付文件数,便于 --list 一眼看清现状。
+# 列宽固定,适合脚本输出对齐。
+list_versions_detailed() {
+  local label="$1"
+  local d="$2"
+  local versions count v size mtime n_artifacts
+  log ""
+  log "[$label] $d"
+  versions=$(list_versions "$d") || versions=""
+  if [ -z "$versions" ]; then
+    log "  (空,无版本目录)"
+    return 0
+  fi
+  count=$(echo "$versions" | wc -l | tr -d ' ')
+  log "  共 $count 个(按 mtime 倒序,最新在前):"
+  printf '  %-4s  %-32s  %-16s  %-6s  %s\n' "#" "版本目录" "修改时间" "大小" "交付文件数" >&2
+  local i=0
+  while IFS= read -r v; do
+    [ -z "$v" ] && continue
+    i=$((i + 1))
+    size=$(du -sh "$d/$v" 2>/dev/null | awk '{print $1}')
+    # date -r 在 macOS BSD 和 GNU coreutils 上都支持
+    mtime=$(date -r "$d/$v" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '-')
+    n_artifacts=0
+    local f
+    for f in "$d/$v"/*.tar.xz "$d/$v"/*.tar.gz "$d/$v"/*.tar.zst "$d/$v"/*.tgz; do
+      [ -f "$f" ] || continue
+      case "$f" in *.sha256) continue ;; esac
+      n_artifacts=$((n_artifacts + 1))
+    done
+    printf '  %-4s  %-32s  %-16s  %-6s  %s\n' "$i" "$v" "$mtime" "$size" "$n_artifacts" >&2
+  done <<< "$versions"
+}
+
+# delete_specific <label> <dir> <comma-separated versions>
+# 精确删指定版本。任何一个不存在 → 整体报错退出 1(避免静默无操作)。
+# --dry-run 时只列要删的目录,不真删。
+delete_specific() {
+  local label="$1"
+  local d="$2"
+  local vers_csv="$3"
+  local versions_input=()
+  local missing=()
+  local found=()
+
+  if [ ! -d "$d" ]; then
+    echo "[$label] 错误:$d 不存在" >&2
+    return 1
+  fi
+
+  # 逗号 / 空白分割
+  IFS=', ' read -r -a versions_input <<< "$vers_csv"
+
+  local v
+  for v in "${versions_input[@]}"; do
+    [ -z "$v" ] && continue
+    # 安全:禁止 .. / 绝对路径 / 含 /
+    case "$v" in
+      */*|.|..|/*) echo "[$label] 错误:非法版本名 '$v'(含路径分隔符)" >&2; return 1 ;;
+    esac
+    if [ -d "$d/$v" ]; then
+      found+=( "$v" )
+    else
+      missing+=( "$v" )
+    fi
+  done
+
+  if [ "${#missing[@]}" -gt 0 ]; then
+    echo "[$label] 错误:以下版本不存在,中止整批删除:" >&2
+    printf '  - %s\n' "${missing[@]}" >&2
+    log ""
+    log "[$label] $d 下当前可选版本:"
+    list_versions "$d" | sed 's/^/  - /' >&2
+    return 1
+  fi
+
+  if [ "${#found[@]}" -eq 0 ]; then
+    log "[$label] 未指定任何版本,跳过。"
+    return 0
+  fi
+
+  log ""
+  log "[$label] 将精确删除 ${#found[@]} 个版本:"
+  printf '  - %s\n' "${found[@]}" >&2
+  if [ "$DRY_RUN" -eq 1 ]; then
+    log "[$label] --dry-run,未实际删除。"
+    return 0
+  fi
+  for v in "${found[@]}"; do
+    rm -rf "$d/$v"
+  done
+  log "[$label] 已清理。"
+}
+
 # 验证 --keep-project / --keep-infra 显式值
 if [ -n "$KEEP_PROJECT_OPT" ] && ! is_non_negative_int "$KEEP_PROJECT_OPT"; then
   echo "--keep-project 必须是非负整数:$KEEP_PROJECT_OPT" >&2
@@ -222,15 +335,46 @@ fi
 log "归档目录: $ARCHIVE"
 [ "$DRY_RUN" -eq 1 ] && log "模式: dry-run(只列不删)"
 
+PROJECT_DIR="$ARCHIVE/project"
+INFRA_DIR="$ARCHIVE/infra"
+
+# ── 仅列出模式 — 跳过所有修改性步骤 ────────────────────────────────
+if [ "$LIST_ONLY" -eq 1 ]; then
+  list_versions_detailed "项目交付包" "$PROJECT_DIR"
+  list_versions_detailed "基础设施包" "$INFRA_DIR"
+  log ""
+  log "完成(仅列出,未修改任何文件)。"
+  exit 0
+fi
+
+# ── 精确删除模式 — 与 keep-N 互斥,也跳过空目录预清理 ──────────────
+if [ -n "$DELETE_PROJECT_VERS" ] || [ -n "$DELETE_INFRA_VERS" ]; then
+  if [ -n "$KEEP_PROJECT_OPT$KEEP_INFRA_OPT" ] || [ "$NON_INTERACTIVE" -eq 1 ]; then
+    log "(提示:--delete-* 与 --keep-* / -y 互斥,忽略后者)"
+  fi
+  [ -n "$DELETE_PROJECT_VERS" ] && delete_specific "项目交付包" "$PROJECT_DIR" "$DELETE_PROJECT_VERS"
+  [ -n "$DELETE_INFRA_VERS"   ] && delete_specific "基础设施包" "$INFRA_DIR"   "$DELETE_INFRA_VERS"
+
+  # 刷新下载索引
+  if [ "$DRY_RUN" -ne 1 ] && [ -x "$SCRIPT_DIR/gen-index.sh" ]; then
+    log ""
+    log "刷新下载索引 archive/index.html ..."
+    "$SCRIPT_DIR/gen-index.sh" --archive "$ARCHIVE" >/dev/null
+    log "已刷新。"
+  fi
+  log ""
+  log "完成。"
+  exit 0
+fi
+
 # ── 0. 预清理:删除"0 个交付文件"的空版本目录 ───────────────────────
 # build 失败时常留下空版本目录(下载索引上显示"0 个交付文件"),
 # 它们既不属于"最新 N 个版本",在 keep-N 询问列表里又会占位、误导。
 # 先在 keep-N 询问之前把它们扫掉。
-prune_empty "项目交付包" "$ARCHIVE/project"
-prune_empty "基础设施包" "$ARCHIVE/infra"
+prune_empty "项目交付包" "$PROJECT_DIR"
+prune_empty "基础设施包" "$INFRA_DIR"
 
 # ── project (build-release.sh 产出) ─────────────────────────────────
-PROJECT_DIR="$ARCHIVE/project"
 if [ -n "$KEEP_PROJECT_OPT" ]; then
   keep_project="$KEEP_PROJECT_OPT"
   log ""
@@ -241,7 +385,6 @@ fi
 [ "$keep_project" = "-" ] || clean_kind "项目交付包" "$PROJECT_DIR" "$keep_project"
 
 # ── infra (build-images.sh 产出) ────────────────────────────────────
-INFRA_DIR="$ARCHIVE/infra"
 if [ -n "$KEEP_INFRA_OPT" ]; then
   keep_infra="$KEEP_INFRA_OPT"
   log ""
