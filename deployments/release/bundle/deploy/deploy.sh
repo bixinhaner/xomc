@@ -192,6 +192,20 @@ mkdir -p "$OMC_ROOT/releases" "$OMC_ROOT/etc" "$OMC_ROOT/packages" \
          "$OMC_ROOT/run/logs/app"   "$OMC_ROOT/run/logs/acs" \
          "$OMC_ROOT/run/logs/worker" "$OMC_ROOT/run/logs/nginx"
 
+# T-0178: 自定义 paramModel XML 持久化目录(host 主权,与镜像层 builtin XML 物理隔离)
+# 容器内挂载点 = /etc/omcgo/data/param-mappings-custom (compose 已配)
+# 仅首次创建时设权限,升级保留运维已设置 ACL 不动。
+# UID 10001 = Dockerfile.app 内创建的 omcgo 非 root 用户
+if [ ! -d "$OMC_ROOT/data/param-mappings-custom" ]; then
+  log "首次部署：初始化 T-0178 自定义 XML 目录 $OMC_ROOT/data/param-mappings-custom"
+  mkdir -p "$OMC_ROOT/data/param-mappings-custom"
+  chown 10001:10001 "$OMC_ROOT/data/param-mappings-custom" 2>/dev/null \
+    || warn "chown 10001:10001 失败(UID 不存在 host 上属正常);容器内仍以 10001 写入"
+  chmod 0750 "$OMC_ROOT/data/param-mappings-custom"
+else
+  log "$OMC_ROOT/data/param-mappings-custom 已存在,保留运维已设权限不动(T-0178)"
+fi
+
 RELEASE_DIR="$OMC_ROOT/releases/$VERSION"
 if [ -d "$RELEASE_DIR" ] && [ "$(readlink -f "$PKG_ROOT" 2>/dev/null)" != "$(readlink -f "$RELEASE_DIR" 2>/dev/null)" ]; then
   warn "已存在版本目录 $RELEASE_DIR，将覆盖（旧文件 → .bak.<时间戳>）"

@@ -175,6 +175,10 @@ services:
       # 在 worker 容器写 supported="false",通过 bind mount 反映到宿主源码目录,
       # 容器重建/重启都不会丢标注;operator 用 git diff 审阅后 commit。
       - ../../omcgo/data/param-mappings:/etc/omcgo/data/param-mappings
+      # T-0178: 自定义 paramModel XML 持久化(host 主权,与 builtin 物理隔离)。
+      # dev 环境直接 bind mount 到源码 data/param-mappings-custom/,改 XML 立刻生效;
+      # prod compose 走 /opt/omc/data/param-mappings-custom (release/bundle/deploy 配置)
+      - ../../omcgo/data/param-mappings-custom:/etc/omcgo/data/param-mappings-custom
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed:
@@ -206,6 +210,8 @@ services:
       # T-0183: XML 字典 rw 挂载 — omcctl sweep-paths --apply 在 worker 容器内直接
       # 写 supported="false",通过 bind mount 反映到宿主,git diff 审阅后 commit。
       - ../../omcgo/data/param-mappings:/etc/omcgo/data/param-mappings
+      # T-0178: 自定义 paramModel XML(worker BackupCleanup cron 需 rw 清理 .deleted/.bak/.tmp)
+      - ../../omcgo/data/param-mappings-custom:/etc/omcgo/data/param-mappings-custom
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed:

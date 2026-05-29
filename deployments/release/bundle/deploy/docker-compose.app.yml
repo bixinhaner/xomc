@@ -87,6 +87,10 @@ services:
       - /opt/omc/etc/app.prod.yaml:/etc/omcgo/app.prod.yaml:ro
       # 日志卷（promtail / otelcol filelog 同样路径采集）
       - /opt/omc/run/logs/app:/run/logs/app
+      # T-0178: 自定义 paramModel XML 持久化(host 主权)
+      # 与镜像内 /etc/omcgo/data/param-mappings/(builtin,只读) 物理隔离,
+      # 升级 docker compose up -d 重建容器时 host 目录不动,custom XML 不丢
+      - /opt/omc/data/param-mappings-custom:/etc/omcgo/data/param-mappings-custom
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed-sql:
@@ -141,6 +145,9 @@ services:
     volumes:
       - /opt/omc/etc/worker.prod.yaml:/etc/omcgo/worker.prod.yaml:ro
       - /opt/omc/run/logs/worker:/run/logs/worker
+      # T-0178: worker BackupCleanup cron(P2 阶段实施)需 unlink .deleted/.bak/.tmp
+      # 残留文件,因此 rw 挂载与 app 共享同一目录(单实例假设,CLAUDE.md §5.3 TODO)
+      - /opt/omc/data/param-mappings-custom:/etc/omcgo/data/param-mappings-custom
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       migrate-seed-sql:
