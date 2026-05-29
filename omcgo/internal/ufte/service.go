@@ -585,7 +585,7 @@ func (s *Service) CreateTask(ctx context.Context, req CreateTaskRequest, createU
 	if err != nil {
 		return nil, err
 	}
-	return s.mapTask(catalog, createdTask)
+	return s.mapTask(ctx, catalog, createdTask)
 }
 
 // createConfigRestoreTask (T-0164) 处理 CONFIG_RESTORE 任务创建。
@@ -648,7 +648,7 @@ func (s *Service) createConfigRestoreTask(
 	// 2) Suspended / scheduled：到此结束；等用户点"开始"或 scheduler 到点触发 dispatcher。
 	if createSuspended || (scheduledAt != nil && scheduledAt.After(time.Now())) {
 		catalog, _ := s.loadTaskTypeCatalog(ctx)
-		return s.mapTask(catalog, placeholder)
+		return s.mapTask(ctx, catalog, placeholder)
 	}
 
 	// 3) 派发 device_tasks（CommandKey 与 sub_task 一致 → TC 自动推进）。
@@ -664,7 +664,7 @@ func (s *Service) createConfigRestoreTask(
 	s.persistDispatchedFiles(ctx, "CONFIG_RESTORE", placeholder.ID, dispatchedFiles)
 
 	catalog, _ := s.loadTaskTypeCatalog(ctx)
-	return s.mapTask(catalog, placeholder)
+	return s.mapTask(ctx, catalog, placeholder)
 }
 
 // createLicenseUpgradeTask (T-0165) 处理 LICENSE_UPGRADE 任务创建。
@@ -718,7 +718,7 @@ func (s *Service) createLicenseUpgradeTask(
 	// 2) Suspended / scheduled：到此结束；等用户点"开始"或 scheduler 到点触发 dispatcher。
 	if createSuspended || (scheduledAt != nil && scheduledAt.After(time.Now())) {
 		catalog, _ := s.loadTaskTypeCatalog(ctx)
-		return s.mapTask(catalog, placeholder)
+		return s.mapTask(ctx, catalog, placeholder)
 	}
 
 	// 3) 派发 device_tasks（CommandKey 与 sub_task 一致 → TC 自动推进）。
@@ -734,7 +734,7 @@ func (s *Service) createLicenseUpgradeTask(
 	s.persistDispatchedFiles(ctx, "LICENSE_UPGRADE", placeholder.ID, dispatchedFiles)
 
 	catalog, _ := s.loadTaskTypeCatalog(ctx)
-	return s.mapTask(catalog, placeholder)
+	return s.mapTask(ctx, catalog, placeholder)
 }
 
 // persistDispatchedFiles 把 dispatcher 返回的 sn → 文件名映射写回 upgrade_sub_tasks.dest_version。
@@ -775,7 +775,7 @@ func (s *Service) ListTasks(ctx context.Context, filter TaskListFilter) (*coremo
 	items := make([]Task, 0, len(tasks))
 	for _, task := range tasks {
 		taskCopy := task
-		mapped, err := s.mapTask(catalog, &taskCopy)
+		mapped, err := s.mapTask(ctx, catalog, &taskCopy)
 		if err != nil {
 			s.logger.Debug("skip UFTE task", zap.String("task_id", task.ID.String()), zap.Error(err))
 			continue
@@ -1085,8 +1085,42 @@ func (s *Service) deviceMatchesTaskType(ctx context.Context, item TaskType, prod
 	return coremodel.Technology(tech) == *item.techHint
 }
 
-func (s *Service) mapTask(catalog []TaskType, task *software.UpgradeTask) (*Task, error) {
-	typeDef, ok := resolveTaskType(catalog, task.TaskType, task.ProductClass, task.DownloadFileType)
+// resolveTaskTypeForTask 是 mapTask / mapDeviceItem 用的"读路径"分类入口。
+//
+// 修 BUG: FAP/BSC7041C243 这种 5G 产品在 matchesTaskTypeScope 关键字白名单里
+// "FAP" 子串先命中 LTE → resolveTaskType 把任务误归 ENB_IMG_UPGRADE → 5G 升级
+// 任务跑进了 4G tab。修法是 read 路径上跟 create 路径（deviceMatchesTaskType）
+// 对齐：先查 ProductRegistry 拿 tech，按 tech 直接选 catalog 里 techHint 匹配的
+// catalog 项（GNB_IMG_UPGRADE / ENB_IMG_UPGRADE）；查不到才回退 resolveTaskType
+// 的关键字模糊匹配。
+//
+// 只针对 TaskTypeUpgrade 走这条路径（升级类才有 4G/5G 之分；备份/日志/恢复等
+// LogCollect 类不区分 tech）。
+func (s *Service) resolveTaskTypeForTask(
+	ctx context.Context,
+	catalog []TaskType,
+	taskType software.TaskType,
+	productClass string,
+	fileType string,
+) (TaskType, bool) {
+	if taskType == software.TaskTypeUpgrade && s.productTechLookup != nil && productClass != "" {
+		if tech, ok := s.productTechLookup(ctx, productClass); ok && tech != "" {
+			techCode := coremodel.Technology(tech)
+			for _, item := range catalog {
+				if item.softwareTaskType != taskType {
+					continue
+				}
+				if item.techHint != nil && *item.techHint == techCode {
+					return item, true
+				}
+			}
+		}
+	}
+	return resolveTaskType(catalog, taskType, productClass, fileType)
+}
+
+func (s *Service) mapTask(ctx context.Context, catalog []TaskType, task *software.UpgradeTask) (*Task, error) {
+	typeDef, ok := s.resolveTaskTypeForTask(ctx, catalog, task.TaskType, task.ProductClass, task.DownloadFileType)
 	if !ok {
 		return nil, fmt.Errorf("unsupported software task type %d", task.TaskType)
 	}
@@ -1144,7 +1178,7 @@ func (s *Service) mapDeviceItem(
 	parent *software.UpgradeTask,
 	deviceCache map[uuid.UUID]*coremodel.Device,
 ) (*DeviceItem, error) {
-	typeDef, ok := resolveTaskType(catalog, parent.TaskType, parent.ProductClass, parent.DownloadFileType)
+	typeDef, ok := s.resolveTaskTypeForTask(ctx, catalog, parent.TaskType, parent.ProductClass, parent.DownloadFileType)
 	if !ok {
 		return nil, fmt.Errorf("unsupported software task type %d", parent.TaskType)
 	}

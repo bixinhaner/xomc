@@ -563,10 +563,12 @@ func matchesTaskTypeScope(item TaskType, productClass string) bool {
 	}
 	switch *item.techHint {
 	case coremodel.TechNR:
-		// 关键字模糊匹配只是兜底；真正的精确识别由 service.deviceMatchesTaskType
-		// 用 ProductRegistry 查 product.tech 完成。FAP/BSC7041C243 这种型号不在
-		// 关键字白名单里，靠 service 那条路径正确识别为 5G。
-		return strings.Contains(upper, "5G") || strings.Contains(upper, "GNB") || strings.Contains(upper, "QSS") || strings.Contains(upper, "XSS") || strings.Contains(upper, "BBU")
+		// 关键字模糊匹配只是兜底；真正的精确识别由 service.resolveTaskTypeForTask
+		// 用 ProductRegistry 查 product.tech 完成。FAP/BSC7041C243 这种 5G 产品
+		// "FAP" 子串也命中 LTE 白名单（line 571），所以 read 路径过去一直把它错归
+		// 4G —— 修复 commit 把 BSC 也加进 NR 兜底，并让 mapTask 走 ProductRegistry
+		// 优先识别（model.go 关键字只在 registry 不可用时兜底）。
+		return strings.Contains(upper, "5G") || strings.Contains(upper, "GNB") || strings.Contains(upper, "QSS") || strings.Contains(upper, "XSS") || strings.Contains(upper, "BBU") || strings.Contains(upper, "BSC")
 	case coremodel.TechLTE:
 		return strings.Contains(upper, "4G") || strings.Contains(upper, "ENB") || strings.Contains(upper, "QAFA") || strings.Contains(upper, "QAFB") || strings.Contains(upper, "FAP") || strings.Contains(upper, "BM") || strings.Contains(upper, "BNQ") || strings.Contains(upper, "MLQ") || strings.Contains(upper, "MLN") || strings.Contains(upper, "BLQ")
 	default:
