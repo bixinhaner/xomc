@@ -174,6 +174,13 @@ type ParamModelLoaderConfig struct {
 	//   yaml false → 显式 false,同名时 builtin 胜出
 	// 避免 Go bool 零值 false 与"默认 true"语义冲突的陷阱(PRD §一)。
 	CustomOverrides *bool `mapstructure:"custom_overrides_builtin"`
+
+	// T-0178 worker BackupCleanup cron(PRD §9.6):
+	//   - .deleted.<ts> / .bak.<ts> 文件超过 N 天即清理(默认 30)
+	//   - .tmp.<uuid> 文件超过 1 小时即清理(写盘中断残留)
+	// cron 表达式默认 "0 3 * * *"(每天凌晨 3 点)。
+	BackupRetentionDays int    `mapstructure:"backup_retention_days"`
+	BackupCleanupCron   string `mapstructure:"backup_cleanup_cron"`
 }
 
 // CustomOverridesEnabled 是 Loader 与测试调用方的唯一入口,不直接读 *bool。
@@ -263,14 +270,16 @@ type AppConfig struct {
 // TaskConfig 配置 task 子系统的全局默认行为（T-0157 C1 引入）。
 //
 // DefaultExpiresInSeconds: CreateTask 调用方未显式传 ExpiresIn 时使用的默认超时秒数。
-//   调用方语义:
-//     - req.ExpiresIn > 0  → 直接采用该值
-//     - req.ExpiresIn == 0 → 用本配置默认值兜底；本配置 <= 0 时表示"永不超时"
-//   实测 CPE 应答落在 5-60 秒区间，默认 120s 给慢响应留两倍缓冲又不让用户傻等。
-//   各业务（ops/alarm）可在 CreateTaskRequest 中显式覆盖（如告警同步 600s）。
+//
+//	调用方语义:
+//	  - req.ExpiresIn > 0  → 直接采用该值
+//	  - req.ExpiresIn == 0 → 用本配置默认值兜底；本配置 <= 0 时表示"永不超时"
+//	实测 CPE 应答落在 5-60 秒区间，默认 120s 给慢响应留两倍缓冲又不让用户傻等。
+//	各业务（ops/alarm）可在 CreateTaskRequest 中显式覆盖（如告警同步 600s）。
 //
 // SweepIntervalSeconds: worker 进程 task_sweeper 周期扫描过期 task 的间隔（秒）。
-//   <= 0 时 sweeper 不启动（C2 引入；C1 阶段先建配置项占位）。
+//
+//	<= 0 时 sweeper 不启动（C2 引入；C1 阶段先建配置项占位）。
 type TaskConfig struct {
 	DefaultExpiresInSeconds int `mapstructure:"default_expires_in_seconds"`
 	SweepIntervalSeconds    int `mapstructure:"sweep_interval_seconds"`
@@ -534,17 +543,18 @@ type DataModelExpiryConfig struct {
 // Worker 服务负责后台异步任务：PM 文件解析入库、MR 文件处理、
 // 告警聚合/OSS 推送、定时 KPI 计算等，不对外提供 HTTP API。
 type WorkerConfig struct {
-	DB              PostgresConfig `mapstructure:"db"`
-	TSDB            PostgresConfig `mapstructure:"tsdb"`
-	Redis           RedisConfig    `mapstructure:"redis"`
-	NATS            NATSConfig     `mapstructure:"nats"`
-	MinIO           MinIOConfig    `mapstructure:"minio"`
-	Task            TaskConfig     `mapstructure:"task"` // T-0157 C2: 任务过期扫描器配置
-	PM              PMConfig       `mapstructure:"pm"`   // 设备上线时自动下发 PM 上传配置
-	Metrics         MetricsConfig  `mapstructure:"metrics"`
-	Tracer          TracerConfig   `mapstructure:"tracer"`
-	Log             LogConfig      `mapstructure:"log"`
-	RequestIDPrefix string         `mapstructure:"request_id_prefix"` // 请求 ID 前缀，如 "worker"
+	DB              PostgresConfig   `mapstructure:"db"`
+	TSDB            PostgresConfig   `mapstructure:"tsdb"`
+	Redis           RedisConfig      `mapstructure:"redis"`
+	NATS            NATSConfig       `mapstructure:"nats"`
+	MinIO           MinIOConfig      `mapstructure:"minio"`
+	Task            TaskConfig       `mapstructure:"task"`        // T-0157 C2: 任务过期扫描器配置
+	PM              PMConfig         `mapstructure:"pm"`          // 设备上线时自动下发 PM 上传配置
+	DictLoader      DictLoaderConfig `mapstructure:"dict_loader"` // T-0178: worker BackupCleanup 需读 XMLBaseDir + ParamModel 子配置
+	Metrics         MetricsConfig    `mapstructure:"metrics"`
+	Tracer          TracerConfig     `mapstructure:"tracer"`
+	Log             LogConfig        `mapstructure:"log"`
+	RequestIDPrefix string           `mapstructure:"request_id_prefix"` // 请求 ID 前缀，如 "worker"
 }
 
 // PMConfig 配置 PM 文件上传自动下发流程。
@@ -592,11 +602,11 @@ type ACSServerConfig struct {
 // GRPCPort 提供 gRPC 接口（如与其他微服务通信）；
 // TLSPort 提供 HTTPS REST API（生产环境推荐启用）。
 type AppServerConfig struct {
-	Host     string    `mapstructure:"host"`
-	Port     int       `mapstructure:"port"`
-	TLSPort  int       `mapstructure:"tls_port"`
-	GRPCPort int       `mapstructure:"grpc_port"`
-	TLS      TLSConfig `mapstructure:"tls"`
+	Host         string        `mapstructure:"host"`
+	Port         int           `mapstructure:"port"`
+	TLSPort      int           `mapstructure:"tls_port"`
+	GRPCPort     int           `mapstructure:"grpc_port"`
+	TLS          TLSConfig     `mapstructure:"tls"`
 	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
 	WriteTimeout time.Duration `mapstructure:"write_timeout"`
 	IdleTimeout  time.Duration `mapstructure:"idle_timeout"`

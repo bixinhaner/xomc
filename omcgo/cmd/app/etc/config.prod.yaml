@@ -161,6 +161,9 @@ dict_loader:
     custom_directory: "param-mappings-custom"
     # 同名时 custom 是否压制 builtin(默认 true,删 custom 自动回退 builtin 的 self-healing 依赖此项)
     custom_overrides_builtin: true
+    # T-0178 P2: 备份清理(worker 进程消费,app 进程不动 — 双向写入两份 yaml 与代码契约对齐)
+    backup_retention_days: 30
+    backup_cleanup_cron: "0 3 * * *"
   indicator:
     base_directory: "indicator-library"
     enb_subdir: "enb"

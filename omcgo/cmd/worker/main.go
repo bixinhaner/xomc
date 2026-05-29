@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
-	"strconv"
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
@@ -15,6 +16,7 @@ import (
 	"github.com/omcgo/omcgo/internal/alarm"
 	"github.com/omcgo/omcgo/internal/alarm/definition"
 	"github.com/omcgo/omcgo/internal/backup"
+	"github.com/omcgo/omcgo/internal/config/parammodel"
 	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/core/event"
 	"github.com/omcgo/omcgo/internal/core/reliability"
@@ -35,6 +37,7 @@ import (
 	"github.com/omcgo/omcgo/internal/task"
 	"github.com/omcgo/omcgo/internal/trace"
 	"github.com/omcgo/omcgo/internal/transfer"
+	"github.com/robfig/cron/v3"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 )
@@ -452,6 +455,71 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	taskReaper := backup.NewTaskReaper(backupTaskRepo, w.EventBus, schedulerMetrics, 0, 0, logger)
 	taskReaper.Start()
 	logger.Info("backup task reaper started")
+
+	// T-0178 P2: parammodel 自定义 XML 备份清理 cron(每天默认 03:00)。
+	// 扫 customDir 下 .deleted.<ts>/.bak.<ts>(> retentionDays 清) + .tmp.<uuid>(> 1h 清)。
+	startParamModelBackupCleanup(w, cfg, logger)
+}
+
+// startParamModelBackupCleanup 启动 T-0178 自定义 XML 备份清理 cron。
+//
+// 行为:
+//   - 注册 cron(默认 "0 3 * * *");无效表达式 fallback 默认值
+//   - 启动期延迟 30s 跑一次 catch-up:防 worker 长期宕机后备份堆积
+//   - 单实例(单 worker 部署)假设,无锁保护;横扩需加 PG advisory lock(P1 不做)
+func startParamModelBackupCleanup(w *workerInfra, cfg *appconfig.WorkerConfig, logger *zap.Logger) {
+	// 解析配置 + 应用默认值
+	pmCfg := cfg.DictLoader.ParamModel
+	customSub := pmCfg.CustomDirectory
+	if customSub == "" {
+		customSub = parammodel.CustomDirSubdir
+	}
+	customDir := filepath.Join(cfg.DictLoader.XMLBaseDir, customSub)
+	cronExpr := pmCfg.BackupCleanupCron
+	if cronExpr == "" {
+		cronExpr = parammodel.DefaultBackupCleanupCron
+	}
+
+	metrics := parammodel.NewBackupCleanupMetrics(w.MetricsReg)
+	cleanup := parammodel.NewBackupCleanup(customDir, pmCfg.BackupRetentionDays, metrics, logger)
+
+	c := cron.New()
+	if _, err := c.AddFunc(cronExpr, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if _, runErr := cleanup.Run(ctx); runErr != nil {
+			logger.Warn("parammodel backup cleanup run failed", zap.Error(runErr))
+		}
+	}); err != nil {
+		logger.Warn("invalid parammodel backup cleanup cron; using default",
+			zap.String("cron", cronExpr), zap.Error(err))
+		_, _ = c.AddFunc(parammodel.DefaultBackupCleanupCron, func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			_, _ = cleanup.Run(ctx)
+		})
+	}
+	c.Start()
+	logger.Info("parammodel backup cleanup cron started",
+		zap.String("custom_dir", customDir),
+		zap.String("cron", cronExpr),
+		zap.Int("retention_days", pmCfg.BackupRetentionDays))
+
+	// 启动期延迟 catch-up(给 app + 字典加载 30s 缓冲)
+	go func() {
+		time.Sleep(30 * time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		swept, err := cleanup.Run(ctx)
+		if err != nil {
+			logger.Warn("parammodel backup cleanup startup catch-up failed", zap.Error(err))
+			return
+		}
+		if swept > 0 {
+			logger.Info("parammodel backup cleanup startup catch-up",
+				zap.Int("swept", swept))
+		}
+	}()
 }
 
 func wireUnknownAlarmFallback(
@@ -527,4 +595,3 @@ func loadEmailConfigFromEnv() alarm.EmailConfig {
 		UseSTARTTLS: os.Getenv("OMC_SMTP_USE_STARTTLS") == "true",
 	}
 }
-

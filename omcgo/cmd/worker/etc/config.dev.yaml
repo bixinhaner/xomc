@@ -81,6 +81,16 @@ tracer:
   endpoint: "otelcol:4317"
   sample_rate: 1.0
 
+# T-0178 P2: worker 自定义 XML 备份清理 cron 需读 XMLBaseDir + ParamModel 子配置
+# (app yaml 同名段在 cmd/app/etc/config.dev.yaml 维护;两份配置保持一致)
+dict_loader:
+  xml_base_dir: "data"
+  param_model:
+    directory: "param-mappings"
+    custom_directory: "param-mappings-custom"
+    backup_retention_days: 30          # .deleted/.bak 保留天数(空→默认 30)
+    backup_cleanup_cron: "0 3 * * *"   # 每天凌晨 3 点扫(空→默认同左)
+
 log:
   level: "info"
   format: "json"
