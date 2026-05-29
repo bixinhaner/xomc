@@ -167,18 +167,12 @@ export function useParamModelCacheRefresh() {
   });
 }
 
-export function useParamModelImportDirectory() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => api.importDirectory(),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: PM_KEY });
-    },
-  });
-}
-
 // 2026-05-28: destructive 全量重载;成功后 invalidate 所有 param-model 查询,
 // 让前端立刻看到孤儿模型被删除后的最新清单。
+// 注:旧的 useParamModelImportDirectory(加法 UPSERT 服务端目录扫,
+// 端点 import-directory?mode=import) 已于 2026-05-29 因 UI 语义重叠下线;
+// 后端端点物理保留,如需恢复请直接 wrap api.importDirectory(已在 paramModelApi 里删除,
+// 恢复时需同步重建)。
 export function useParamModelReloadDirectory() {
   const qc = useQueryClient();
   return useMutation({

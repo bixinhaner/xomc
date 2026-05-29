@@ -309,16 +309,12 @@ export const paramModelApi = {
     return data;
   },
 
-  async importDirectory(): Promise<{ reloaded: string; mode: string; orphans_deleted: number }> {
-    const { data } = await http.post<{ reloaded: string; mode: string; orphans_deleted: number }>(
-      '/param-models/import-directory?mode=import',
-    );
-    return data;
-  },
-
-  // 2026-05-28: 与 importDirectory 同端点,mode=reload 触发 destructive 全量重载:
-  // 完成 UPSERT 后会删除 DB 中所有未在本次扫描中被触达的 param_models 孤儿,
-  // CASCADE 删 param_mappings,SET NULL 写 products.param_model_id。
+  // 2026-05-28: mode=reload 触发 destructive 全量重载:完成 UPSERT 后删除 DB
+  // 中所有未在本次扫描中被触达的 param_models 孤儿,CASCADE 删 param_mappings,
+  // SET NULL 写 products.param_model_id。
+  // 2026-05-29 注:同端点的 mode=import(加法 UPSERT 不删孤儿)前端不再使用 —
+  // UI 上"导入 XML"语义已切到 uploadXML(用户选文件上传);后端端点物理保留,
+  // 如需恢复"目录扫加法导入",在此重建 importDirectory() 即可。
   async reloadDirectory(): Promise<{ reloaded: string; mode: string; orphans_deleted: number }> {
     const { data } = await http.post<{ reloaded: string; mode: string; orphans_deleted: number }>(
       '/param-models/import-directory?mode=reload',

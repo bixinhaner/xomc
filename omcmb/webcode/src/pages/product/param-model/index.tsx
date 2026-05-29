@@ -10,6 +10,14 @@
  *   3. 顶部 toolbar 单行:
  *      - 列表态: [搜索 + 重载/刷新按钮]
  *      - 详情态: [返回 + 模型名 + 重载/刷新按钮]
+ *
+ * 2026-05-29 用户决策(语义对齐):
+ *   - 原"上传 XML"和"导入 XML"两个按钮语义重叠,合并为单个"导入 XML"按钮;
+ *     "导入 XML" = 用户选本地 XML 文件 → host /opt/omc/data/param-mappings-custom/
+ *     上传链路(端点 POST /param-models/upload-xml,multipart);
+ *     "重载 XML" = 后端扫 datamodels/ 全量 destructive 重载(行为不变,与旧版一致)。
+ *   - 后端 import-directory?mode=import 端点物理保留(API contract 不破坏),
+ *     UI 不再调用;import-directory?mode=reload 由"重载 XML"继续使用。
  */
 import { useState } from 'react';
 import { Card, Input, Button, Space, Popconfirm, message, Typography, Upload, Modal } from 'antd';
@@ -17,12 +25,10 @@ import type { UploadProps } from 'antd';
 import {
   ArrowLeftOutlined,
   CloudDownloadOutlined,
-  CloudUploadOutlined,
   InboxOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import {
-  useParamModelImportDirectory,
   useParamModelReloadDirectory,
   useParamModelCacheRefresh,
   useUploadParamModelXML,
@@ -36,15 +42,16 @@ const { Text } = Typography;
 export default function ParamModelPage() {
   const [selectedModelName, setSelectedModelName] = useState<string | undefined>();
   const [keyword, setKeyword] = useState('');
-  const importMut = useParamModelImportDirectory();
   const reloadMut = useParamModelReloadDirectory();
   const cacheMut = useParamModelCacheRefresh();
   const uploadMut = useUploadParamModelXML();
 
   const inDetail = Boolean(selectedModelName);
 
-  // T-0178: Upload customRequest — 用 antd Upload 触发 multipart,409 时弹同名 Modal
-  // 确认后再用 force=true 重试。校验失败 / 网络错误统一 antd message。
+  // 2026-05-29:"导入 XML" 按钮的 Upload customRequest — 用 antd Upload 触发
+  // multipart 上传到 POST /param-models/upload-xml(host bind mount
+  // /opt/omc/data/param-mappings-custom/,升级不丢);409 同名 → Modal 确认 →
+  // force=true 覆盖(旧文件备份 .bak.<ts>)。文案 / 提示统一走 antd message。
   const uploadProps: UploadProps = {
     accept: '.xml',
     maxCount: 1,
@@ -57,8 +64,8 @@ export default function ParamModelPage() {
           .then((r) => {
             message.success(
               r.overwrite && r.backup
-                ? `已覆盖上传:${r.filename}(旧版备份 ${r.backup})`
-                : `已上传:${r.filename}`,
+                ? `已覆盖导入:${r.filename}(旧版备份 ${r.backup})`
+                : `已导入:${r.filename}`,
             );
             onSuccess?.(r);
           })
@@ -116,36 +123,14 @@ export default function ParamModelPage() {
             />
           )}
           <Space>
-            {/* T-0178: 上传自定义 paramModel XML(落 host /opt/omc/data/param-mappings-custom) */}
+            {/* 2026-05-29 用户决策:"导入 XML" = 用户选本地 XML 上传,落 host
+                /opt/omc/data/param-mappings-custom/(升级不丢),作为自定义参数模型。
+                旧的"上传 XML"按钮已合并进来 — 同一个 multipart upload 链路。 */}
             <Upload {...uploadProps}>
               <Button icon={<InboxOutlined />} loading={uploadMut.isPending}>
-                上传 XML
-              </Button>
-            </Upload>
-            <Popconfirm
-              title="确认导入 XML?"
-              description={
-                <div style={{ maxWidth: 320 }}>
-                  从 <code>datamodels/</code> <b>加法 UPSERT</b> 当前 XML 文件中的模型:
-                  <br />· 新增模型 → 插入
-                  <br />· 已存在模型 → 更新(UI 中的手工编辑会被 XML 覆盖)
-                  <br />· DB 中已无 XML 对应的孤儿模型 → <b>保留不删除</b>
-                </div>
-              }
-              okText="确认导入"
-              cancelText="取消"
-              placement="bottomRight"
-              onConfirm={() => {
-                importMut
-                  .mutateAsync()
-                  .then((r) => message.success(`已导入:${r.reloaded}`))
-                  .catch((e) => message.error((e as Error).message));
-              }}
-            >
-              <Button icon={<CloudUploadOutlined />} loading={importMut.isPending}>
                 导入 XML
               </Button>
-            </Popconfirm>
+            </Upload>
             <Popconfirm
               title="确认重载 XML?"
               description={
