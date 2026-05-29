@@ -369,14 +369,20 @@ WHERE param_model_id = $1
 
 	objectMappings := make([]ParamMapping, 0)
 	for objectRows.Next() {
+		// 2026-05-29 bug fix:`access` / `data_type` / `change_applies` 三列在 DB 是
+		// NULL-able(见 information_schema)。entry_type='object' 行的 data_type 全部
+		// 为 NULL(对象本无数据类型);而 ParamMapping 的对应字段是 plain string,
+		// 直接 Scan 会 "cannot scan NULL into *string" 报错,导致整个 reload XML 终止。
+		// 仿 pg_handler_repo.go::getMappingByID 模式:用 *string 收 + strDeref 转回。
 		var mapping ParamMapping
+		var access, dataType, changeApplies *string
 		if err := objectRows.Scan(
 			&mapping.StandardPath,
 			&mapping.PrivatePath,
 			&mapping.EntryType,
-			&mapping.Access,
-			&mapping.DataType,
-			&mapping.ChangeApplies,
+			&access,
+			&dataType,
+			&changeApplies,
 			&mapping.MinValue,
 			&mapping.MaxValue,
 			&mapping.EnumValues,
@@ -388,6 +394,9 @@ WHERE param_model_id = $1
 		); err != nil {
 			return nil, nil, fmt.Errorf("reconcile INSERT scan object: %w", err)
 		}
+		mapping.Access = strDeref(access)
+		mapping.DataType = strDeref(dataType)
+		mapping.ChangeApplies = strDeref(changeApplies)
 		objectMappings = append(objectMappings, mapping)
 	}
 	if err := objectRows.Err(); err != nil {
