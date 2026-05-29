@@ -459,6 +459,10 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// T-0178 P2: parammodel 自定义 XML 备份清理 cron(每天默认 03:00)。
 	// 扫 customDir 下 .deleted.<ts>/.bak.<ts>(> retentionDays 清) + .tmp.<uuid>(> 1h 清)。
 	startParamModelBackupCleanup(w, cfg, logger)
+
+	// T-0180 P2: indicator 自定义 XML 备份清理 cron(对标 T-0178,同样 03:00 默认)。
+	// 扫 customDir/<enb,gsm,gnb>/ 三制式子目录下 .deleted/.bak/.tmp 残留。
+	startIndicatorBackupCleanup(w, cfg, logger)
 }
 
 // startParamModelBackupCleanup 启动 T-0178 自定义 XML 备份清理 cron。
@@ -517,6 +521,69 @@ func startParamModelBackupCleanup(w *workerInfra, cfg *appconfig.WorkerConfig, l
 		}
 		if swept > 0 {
 			logger.Info("parammodel backup cleanup startup catch-up",
+				zap.Int("swept", swept))
+		}
+	}()
+}
+
+// startIndicatorBackupCleanup 启动 T-0180 自定义 indicator XML 备份清理 cron。
+//
+// 行为(对标 T-0178 startParamModelBackupCleanup):
+//   - 注册 cron(默认 "0 3 * * *");无效表达式 fallback 默认值
+//   - 启动期延迟 30s 跑一次 catch-up:防 worker 长期宕机后备份堆积
+//   - 单实例假设;横扩需加 PG advisory lock(P1 不做)
+//   - customDir 是三制式子目录的根 (.../indicator-library-custom),
+//     Run() 遍历 enb/gsm/gnb 各自的子目录
+func startIndicatorBackupCleanup(w *workerInfra, cfg *appconfig.WorkerConfig, logger *zap.Logger) {
+	// 解析配置 + 应用默认值
+	indCfg := cfg.DictLoader.Indicator
+	customSub := indCfg.CustomBaseDirectory
+	if customSub == "" {
+		customSub = indicator.CustomDirSubdir
+	}
+	customDir := filepath.Join(cfg.DictLoader.XMLBaseDir, customSub)
+	cronExpr := indCfg.BackupCleanupCron
+	if cronExpr == "" {
+		cronExpr = indicator.DefaultIndicatorBackupCleanupCron
+	}
+
+	metrics := indicator.NewBackupCleanupMetrics(w.MetricsReg)
+	cleanup := indicator.NewBackupCleanup(customDir, indCfg.BackupRetentionDays, metrics, logger)
+
+	c := cron.New()
+	if _, err := c.AddFunc(cronExpr, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if _, runErr := cleanup.Run(ctx); runErr != nil {
+			logger.Warn("indicator backup cleanup run failed", zap.Error(runErr))
+		}
+	}); err != nil {
+		logger.Warn("invalid indicator backup cleanup cron; using default",
+			zap.String("cron", cronExpr), zap.Error(err))
+		_, _ = c.AddFunc(indicator.DefaultIndicatorBackupCleanupCron, func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			_, _ = cleanup.Run(ctx)
+		})
+	}
+	c.Start()
+	logger.Info("indicator backup cleanup cron started",
+		zap.String("custom_dir", customDir),
+		zap.String("cron", cronExpr),
+		zap.Int("retention_days", indCfg.BackupRetentionDays))
+
+	// 启动期延迟 catch-up(给 app + 字典加载 30s 缓冲)
+	go func() {
+		time.Sleep(30 * time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		swept, err := cleanup.Run(ctx)
+		if err != nil {
+			logger.Warn("indicator backup cleanup startup catch-up failed", zap.Error(err))
+			return
+		}
+		if swept > 0 {
+			logger.Info("indicator backup cleanup startup catch-up",
 				zap.Int("swept", swept))
 		}
 	}()

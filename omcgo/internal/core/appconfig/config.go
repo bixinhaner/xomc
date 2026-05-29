@@ -209,6 +209,13 @@ type IndicatorLoaderConfig struct {
 	//   yaml true  → 显式 true,等同默认
 	//   yaml false → 显式 false,同名时 builtin 胜出
 	CustomOverrides *bool `mapstructure:"custom_overrides"`
+
+	// T-0180 P2 worker BackupCleanup cron(PRD §9.6,对标 T-0178 ParamModel):
+	//   - .deleted.<ts> / .bak.<ts> 文件超过 N 天即清理(默认 30)
+	//   - .tmp.<uuid> 文件超过 1 小时即清理(写盘中断残留)
+	// cron 表达式默认 "0 3 * * *"(每天凌晨 3 点;与 ParamModel cron 错峰)。
+	BackupRetentionDays int    `mapstructure:"backup_retention_days"`
+	BackupCleanupCron   string `mapstructure:"backup_cleanup_cron"`
 }
 
 // CustomOverridesEnabled 返回是否启用 custom 胜出语义。
