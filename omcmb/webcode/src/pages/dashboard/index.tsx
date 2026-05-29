@@ -579,48 +579,64 @@ export default function DashboardPage() {
           <TiltCard maxTilt={8} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
           <Card
             size="small"
-            styles={{ body: { padding: '20px 16px', flex: 1, display: 'flex', flexDirection: 'column' } }}
+            styles={{ body: { padding: '24px 20px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' } }}
             style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
           >
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
               <Avatar
-                size={64}
+                size={80}
                 src={currentUser?.avatar}
                 icon={!currentUser?.avatar ? <UserOutlined /> : undefined}
-                style={{ background: currentUser?.avatar ? undefined : token.colorPrimary }}
+                style={{
+                  background: currentUser?.avatar ? undefined : token.colorPrimary,
+                  border: `3px solid ${token.colorBgContainer}`,
+                  boxShadow: `0 4px 12px ${token.colorPrimary}20`,
+                }}
               />
-              <Title level={5} style={{ margin: 0 }}>
+              <Title level={5} style={{ margin: 0, fontSize: 16 }}>
                 {currentUser?.displayName || currentUser?.username || t('dashboard.sysAdmin')}
               </Title>
               <Text type="secondary" style={{ fontSize: 13 }}>
                 {currentUser?.email || '--'}
               </Text>
-              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                <Badge color="green" text={t('status.online')} />
+              <div style={{ display: 'flex', gap: 12, marginTop: 4, alignItems: 'center' }}>
+                <Badge
+                  color="green"
+                  text={t('status.online')}
+                  style={{ fontSize: 12 }}
+                />
                 <Text type="secondary" style={{ fontSize: 12 }}>
                   {t('dashboard.lastLogin')} {formatLastLogin(currentUser?.lastLoginTime)}
                 </Text>
               </div>
+              {/* 装饰性分隔线 */}
+              <div
+                style={{
+                  width: '60%',
+                  height: 1,
+                  background: `linear-gradient(90deg, transparent, ${token.colorBorder}, transparent)`,
+                  marginTop: 8,
+                }}
+              />
+              {/* 系统状态指示 */}
               <div
                 style={{
                   width: '100%',
-                  marginTop: 8,
-                  padding: '8px 12px',
-                  background: token.colorBgLayout,
-                  borderRadius: 6,
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 1fr',
-                  gap: 8,
+                  display: 'flex',
+                  justifyContent: 'space-around',
+                  padding: '8px 0',
+                  fontSize: 12,
+                  color: token.colorTextSecondary,
                 }}
               >
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontWeight: 700, fontSize: 18, color: token.colorPrimary }}>156</div>
-                  <div style={{ fontSize: 12, color: token.colorTextSecondary }}>{t('dashboard.todayOps')}</div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontWeight: 700, fontSize: 18, color: '#52C41A' }}>23</div>
-                  <div style={{ fontSize: 12, color: token.colorTextSecondary }}>{t('dashboard.processedAlarms')}</div>
-                </div>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#52C41A' }} />
+                  {t('status.normal')}
+                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: token.colorPrimary }} />
+                  {t('status.running')}
+                </span>
               </div>
             </div>
           </Card>
