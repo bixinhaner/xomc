@@ -492,3 +492,23 @@ func scanResolvedDefs(rows pgx.Rows) ([]ResolvedDefinition, error) {
 	}
 	return out, rows.Err()
 }
+
+// DeleteOrphansSince 删除 updated_at < since 的 alarm_definitions 行 — reload
+// destructive 语义对齐 parammodel:Loader UPSERT 触发 BEFORE UPDATE 触发器把
+// updated_at 改 NOW(),所以本次未被触达的旧定义 updated_at 会保留旧值 < since。
+//
+// 副作用:
+//   - alarm_definitions 行物理删除
+//   - 若 alarm_history / alarms_active 有外键 ON DELETE SET NULL/CASCADE 由 FK
+//     自身保证;repo 不做手工 cascade
+//   - Loader 下次扫描发现 XML 仍在会重建对应行(self-healing,与 parammodel 一致)
+func (r *PgRepository) DeleteOrphansSince(ctx context.Context, since time.Time) (int64, error) {
+	tag, err := r.pool.Exec(ctx,
+		`DELETE FROM alarm_definitions WHERE updated_at < $1`,
+		since,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("delete orphan alarm_definitions: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}

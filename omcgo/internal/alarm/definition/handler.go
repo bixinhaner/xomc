@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -324,23 +325,61 @@ func (h *Handler) NeTypes(c *gin.Context) {
 
 // ImportDirectory POST /api/v1/alarm-definitions/import-directory
 //
-// 调用 dictloader.Reload(LoaderName)：扫描 XML 目录 → upsert alarm_definitions →
-// Registry.Refresh。等价于"重新跑启动期 LoadOnce"。
+// Query params:
+//   - mode=import (默认): 加法 UPSERT — 仅写入/更新现有 XML 中的告警定义,
+//     不删除 DB 中不在 XML 文件里的孤儿(运维手工 UI 添加的告警保留)。
+//   - mode=reload: destructive 全量重载 — 完成 UPSERT 后删除 DB 中所有未被
+//     本次加载触达的 alarm_definitions(按 updated_at < startedAt 判定);
+//     与 parammodel ImportDirectory 同语义。
+//
+// 调用 dictloader.Reload(LoaderName):扫描 XML 目录 → UPSERT alarm_definitions →
+// (可选)删孤儿 → RefreshCache。
 func (h *Handler) ImportDirectory(c *gin.Context) {
 	if h.reloader == nil {
 		commonerrors.AbortWithError(c, http.StatusServiceUnavailable,
 			fmt.Errorf("dictloader registry not wired"))
 		return
 	}
+	mode := strings.ToLower(strings.TrimSpace(c.Query("mode")))
+	if mode == "" {
+		mode = "import"
+	}
+	if mode != "import" && mode != "reload" {
+		commonerrors.AbortWithError(c, http.StatusBadRequest,
+			fmt.Errorf("invalid mode %q (expected import|reload)", mode))
+		return
+	}
+
+	// destructive 模式:记录开始时间,Loader UPSERT 后用 updated_at < startedAt
+	// 判定孤儿。BEFORE UPDATE 触发器保证 UPSERT 写 updated_at = NOW() > startedAt,
+	// 所以本次未被触达的旧定义 updated_at 会保留旧值,被纳入"孤儿"删除。
+	startedAt := time.Now()
+
 	if err := h.reloader.ReloadOne(c.Request.Context(), LoaderName); err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
+
+	var orphansDeleted int64
+	if mode == "reload" {
+		n, err := h.service.DeleteOrphansSince(c.Request.Context(), startedAt)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError,
+				fmt.Errorf("cleanup orphan alarm_definitions: %w", err))
+			return
+		}
+		orphansDeleted = n
+	}
+
 	if err := h.service.RefreshCache(c.Request.Context()); err != nil {
-		// 不阻断：DB 已 upsert 成功，缓存最多落后一拍
+		// 不阻断:DB 已 UPSERT 成功,缓存最多落后一拍
 		h.logger.Warn("post-reload registry refresh failed", zap.Error(err))
 	}
-	response.OK(c, gin.H{"reloaded": LoaderName})
+	response.OK(c, gin.H{
+		"reloaded":        LoaderName,
+		"mode":            mode,
+		"orphans_deleted": orphansDeleted,
+	})
 }
 
 // CacheRefresh POST /api/v1/alarm-definitions/cache/refresh

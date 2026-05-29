@@ -31,6 +31,7 @@ import {
 import {
   ArrowLeftOutlined,
   CloudDownloadOutlined,
+  CloudUploadOutlined,
   DeleteOutlined,
   EyeOutlined,
   PlusOutlined,
@@ -41,6 +42,7 @@ import {
   useAlarmNeTypeStats,
   useDeleteAlarmDefinition,
   useAlarmDefinitionImportDirectory,
+  useAlarmDefinitionReloadDirectory,
   useAlarmDefinitionCacheRefresh,
 } from '@core/hooks/api/useAlarmDefinitions';
 import type {
@@ -120,7 +122,11 @@ export default function AlarmLibraryPage() {
   // statsOpen 暂时移除 — "未识别频次"功能未完工(见 backlog T-0181)
 
   const delMut = useDeleteAlarmDefinition();
+  // 2026-05-29:与 parammodel 对齐拆 import / reload 两个 mutation,UI 拆两按钮:
+  //   - 导入 XML(import):加法 UPSERT,不删孤儿(UI 中手工添加的告警保留)
+  //   - 重载 XML(reload):destructive 全量重载,删 DB 中无 XML 对应的孤儿
   const importMut = useAlarmDefinitionImportDirectory();
+  const reloadMut = useAlarmDefinitionReloadDirectory();
   const cacheMut = useAlarmDefinitionCacheRefresh();
 
   // 2026-05-29 用户决策:过滤下拉的源不再走 /alarm-severity-levels(后端原始数组
@@ -316,13 +322,39 @@ export default function AlarmLibraryPage() {
               </>
             ) : (
               <>
+                {/* 2026-05-29 与 parammodel 对齐拆两按钮:导入 = 加法 UPSERT;重载 = destructive 删孤儿 */}
+                <Popconfirm
+                  title="确认导入 XML?"
+                  description={
+                    <div style={{ maxWidth: 320 }}>
+                      从 <code>datamodels/</code> <b>加法 UPSERT</b> 当前 XML 文件中的告警定义:
+                      <br />· 新增告警 → 插入
+                      <br />· 已存在告警 → 更新(UI 中的手工编辑会被 XML 覆盖)
+                      <br />· DB 中已无 XML 对应的孤儿告警 → <b>保留不删除</b>
+                    </div>
+                  }
+                  okText="确认导入"
+                  cancelText="取消"
+                  placement="bottomRight"
+                  onConfirm={() => {
+                    importMut
+                      .mutateAsync()
+                      .then((r) => message.success(`已导入:${r.reloaded}`))
+                      .catch((error) => message.error((error as Error).message));
+                  }}
+                >
+                  <Button icon={<CloudUploadOutlined />} loading={importMut.isPending}>
+                    导入 XML
+                  </Button>
+                </Popconfirm>
                 <Popconfirm
                   title="确认重载 XML?"
                   description={
-                    <div style={{ maxWidth: 320 }}>
-                      将从 <code>datamodels/</code> 重新加载所有告警定义 XML。
-                      <br />
-                      UI 中对告警定义的编辑将被 XML 值覆盖;操作不可撤销。
+                    <div style={{ maxWidth: 360 }}>
+                      从 <code>datamodels/</code> <b>destructive 全量重载</b>:
+                      <br />· 当前 XML 中的告警 → UPSERT (覆盖 UI 编辑)
+                      <br />· DB 中已无 XML 对应的孤儿告警 → <b>删除</b>
+                      <br />操作不可撤销!
                     </div>
                   }
                   okText="确认重载"
@@ -330,13 +362,17 @@ export default function AlarmLibraryPage() {
                   okButtonProps={{ danger: true }}
                   placement="bottomRight"
                   onConfirm={() => {
-                    importMut
+                    reloadMut
                       .mutateAsync()
-                      .then((result) => message.success(`已重载:${result.reloaded}`))
+                      .then((r) =>
+                        message.success(
+                          `已重载:${r.reloaded}${r.orphans_deleted > 0 ? ` (清理 ${r.orphans_deleted} 个孤儿告警)` : ''}`,
+                        ),
+                      )
                       .catch((error) => message.error((error as Error).message));
                   }}
                 >
-                  <Button icon={<CloudDownloadOutlined />} loading={importMut.isPending} danger>
+                  <Button icon={<CloudDownloadOutlined />} loading={reloadMut.isPending} danger>
                     重载 XML
                   </Button>
                 </Popconfirm>

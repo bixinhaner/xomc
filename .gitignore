@@ -62,6 +62,12 @@ deployments/docker/.env
 **/.api-key
 **/*.api-key.tmp
 
+# T-0178 / T-0180 自定义 XML 的备份/暂存/删除残留 — 开发机本地状态,不入库;
+# 容器运行时 host bind mount 遮盖镜像层,这些文件就算入库也不会被加载。
+omcgo/data/**/*.deleted.*
+omcgo/data/**/*.bak.*
+omcgo/data/**/*.tmp.*
+
 # 根目录散落的临时截图(playwright / 手动调试用,不入库;
 # 子目录里前端 / 文档资产里的 png 不受影响,因为前缀 / 限定根目录)
 /*.png

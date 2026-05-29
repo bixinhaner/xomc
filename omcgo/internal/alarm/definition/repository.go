@@ -3,6 +3,7 @@ package definition
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -52,6 +53,13 @@ type WriteRepository interface {
 	// ListNeTypes 聚合 alarm_definitions 按 ne_type + loaded_from 双键统计。
 	// T-0179 drill-down 一级视图;每个 ne_type 一行,含告警总数与各严重级计数。
 	ListNeTypes(ctx context.Context) ([]NeTypeStat, error)
+
+	// DeleteOrphansSince 删除 updated_at < since 的 alarm_definitions 行(reload
+	// destructive 语义对齐 parammodel)。返回受影响行数。
+	// 用法:reload 入口在 ReloadOne 之前记录 startedAt,Loader UPSERT 完成后
+	// 调本方法把"本次未被 UPSERT 触达"的旧定义清掉(BEFORE UPDATE 触发器
+	// 保证 UPSERT 写 updated_at = NOW(),所以孤儿的 updated_at 必然 < startedAt)。
+	DeleteOrphansSince(ctx context.Context, since time.Time) (int64, error)
 }
 
 // ListFilter 控制 ListWithFilter 行为。

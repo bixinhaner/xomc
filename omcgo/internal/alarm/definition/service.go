@@ -3,6 +3,7 @@ package definition
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
@@ -97,6 +98,13 @@ func (s *Service) UnknownStats(ctx context.Context, productID *uuid.UUID, days i
 // ListNeTypes 按 ne_type + loaded_from 聚合(T-0179 drill-down 一级视图)。
 func (s *Service) ListNeTypes(ctx context.Context) ([]NeTypeStat, error) {
 	return s.repo.ListNeTypes(ctx)
+}
+
+// DeleteOrphansSince 透传 repo,供 handler 的 ?mode=reload 在 Loader UPSERT 完
+// 成后调用 — 把"本次未被 Loader 触达"的旧定义清掉(destructive 重载语义)。
+// 单一职责:只删,缓存刷新交给 handler 后续调 RefreshCache。
+func (s *Service) DeleteOrphansSince(ctx context.Context, since time.Time) (int64, error) {
+	return s.repo.DeleteOrphansSince(ctx, since)
 }
 
 // RefreshCache 手动刷新（HTTP cache/refresh）。

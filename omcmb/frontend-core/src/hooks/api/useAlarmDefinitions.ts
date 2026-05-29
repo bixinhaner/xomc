@@ -104,3 +104,15 @@ export function useAlarmDefinitionImportDirectory() {
     },
   });
 }
+
+// 2026-05-29:destructive 全量重载;成功后 invalidate 所有 alarm-defs 查询,
+// 让前端立刻看到孤儿告警被删除后的最新清单(与 useParamModelReloadDirectory 同形)。
+export function useAlarmDefinitionReloadDirectory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.reloadDirectory(),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: AD_KEY });
+    },
+  });
+}
