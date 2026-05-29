@@ -1,0 +1,65 @@
+package parammodel
+
+import "strings"
+
+// Source 描述一行 param_model 的物理来源(T-0178)。
+//
+// 三态语义:
+//   - SourceBuiltin: XML 来自镜像层 data/param-mappings/,只读,不可在线删
+//   - SourceCustom:  XML 来自 host bind mount data/param-mappings-custom/,可读写,可在线删
+//   - SourceUnknown: 历史数据或异常(loaded_from 不带目录前缀),按 builtin 对待(拒删)
+type Source string
+
+const (
+	SourceBuiltin Source = "builtin"
+	SourceCustom  Source = "custom"
+	SourceUnknown Source = "unknown"
+)
+
+// BuiltinDirPrefix / CustomDirPrefix 是 loaded_from 列的目录前缀约定。
+// Loader 写入时 = filepath.Rel(XMLBaseDir, absPath) | ToSlash,
+// 因此一定以 "param-mappings/" 或 "param-mappings-custom/" 开头。
+//
+// 改前缀只动这里;handler / loader / 前端 DTO 均通过 ClassifySource / IsDeletable
+// 间接判定,不直接 strings.Contains。
+const (
+	BuiltinDirPrefix = "param-mappings/"
+	CustomDirPrefix  = "param-mappings-custom/"
+)
+
+// ClassifySource 根据 param_models.loaded_from 列值判定物理来源。
+//
+// 输入约定:loaded_from 应为相对 XMLBaseDir 的 slash 路径
+// (Loader 用 filepath.ToSlash 规范化,Windows 反斜杠也兼容)。
+//
+// 行为:
+//   - 以 CustomDirPrefix 开头 → SourceCustom
+//   - 以 BuiltinDirPrefix 开头 → SourceBuiltin
+//   - 其他(空串 / 裸文件名 / 路径遍历模式)→ SourceUnknown
+//
+// SourceUnknown 包括历史数据(T-0098 P1-06 入库时未带前缀,
+// 由 T-0178 数据迁移回填 builtin/ 前缀;迁移前 / 跨重启过渡期可能见到)。
+func ClassifySource(loadedFrom string) Source {
+	switch {
+	case strings.HasPrefix(loadedFrom, CustomDirPrefix):
+		return SourceCustom
+	case strings.HasPrefix(loadedFrom, BuiltinDirPrefix):
+		return SourceBuiltin
+	default:
+		return SourceUnknown
+	}
+}
+
+// IsDeletable 是 DELETE /param-models/:name 端点与前端 deletable 字段的
+// 唯一判定函数(T-0178 §9.5 守门规则)。
+//
+// 当前规则:仅 SourceCustom 可删。SourceBuiltin / SourceUnknown 一律不可删
+// (后者从安全侧考虑:无法确认来源时按保守语义拒绝,避免误删用户/历史数据)。
+//
+// 调用方:
+//   - 后端 handler.DeleteParamModel 入口守门(返 403 ErrCodeBuiltinNotDeletable)
+//   - List/Detail DTO 的 deletable 字段填值
+//   - 前端不重新推导,直接渲染 deletable bool
+func IsDeletable(loadedFrom string) bool {
+	return ClassifySource(loadedFrom) == SourceCustom
+}
