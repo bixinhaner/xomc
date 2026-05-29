@@ -11,6 +11,13 @@ import type {
   UpdateGroupInput,
   EnabledIndicatorsRequest,
   UnitInput,
+  IndicatorTechSummary,
+  IndicatorFile,
+  IndicatorReloadMode,
+  IndicatorReloadResult,
+  IndicatorUploadResult,
+  IndicatorDeleteFileResult,
+  TechLower,
 } from '../../types/indicatorLibrary';
 import {
   mockIndicators,
@@ -230,7 +237,78 @@ export const indicatorLibraryService = {
     return { refreshed: true, note: 'mock refresh' };
   },
 
-  async importDirectory() {
-    return { reloaded: 'indicator' };
+  async importDirectory(mode: IndicatorReloadMode = 'import'): Promise<IndicatorReloadResult> {
+    if (mode === 'reload') {
+      return {
+        reloaded: 'indicator',
+        mode: 'reload',
+        orphans: { enb: 0, gsm: 0, gnb: 0 },
+      };
+    }
+    return { reloaded: 'indicator', mode: 'import' };
+  },
+
+  async summary(): Promise<{ items: IndicatorTechSummary[] }> {
+    // mock 3 行制式聚合 — 数据由 mockIndicators 派生
+    const techRows: TechLower[] = ['enb', 'gsm', 'gnb'];
+    const items = techRows.map((tech): IndicatorTechSummary => {
+      const dt = tech.toUpperCase() as DeviceType;
+      const arr = indicators[dt] || [];
+      const platforms = Array.from(
+        new Set(arr.map((i) => i.productClass).filter(Boolean) as string[])
+      );
+      return {
+        tech,
+        indicators: arr.length,
+        builtinCount: arr.length, // mock 默认全部内置
+        customCount: 0,
+        unknownCount: 0,
+        groups: (groups[dt] || []).length,
+        platforms,
+      };
+    });
+    return { items };
+  },
+
+  async listFiles(tech: TechLower): Promise<{ items: IndicatorFile[]; tech: TechLower }> {
+    // mock 单个内置文件 + 0 行自定义
+    const items: IndicatorFile[] = [
+      {
+        loadedFrom: `indicator-library/${tech === 'enb' ? 'enb/ALL.xml' : tech.toUpperCase() + '.xml'}`,
+        source: 'builtin',
+        deletable: false,
+        count: (indicators[tech.toUpperCase() as DeviceType] || []).length,
+        onDisk: true,
+      },
+    ];
+    return { items, tech };
+  },
+
+  async uploadXml(
+    tech: TechLower,
+    file: File,
+    options: { force?: boolean } = {}
+  ): Promise<IndicatorUploadResult> {
+    return {
+      uploaded: true,
+      filename: file.name,
+      loadedFrom: `indicator-library-custom/${tech}/${file.name}`,
+      tech,
+      overwrite: Boolean(options.force),
+      backup: options.force ? `${file.name}.bak.20260101120000` : '',
+      reloaded: true,
+    };
+  },
+
+  async deleteFile(loadedFrom: string): Promise<IndicatorDeleteFileResult> {
+    const seg = loadedFrom.split('/');
+    const tech = (seg.length >= 2 ? seg[1] : 'enb') as TechLower;
+    return {
+      deleted: true,
+      loadedFrom,
+      tech,
+      rowsAffected: 0,
+      backup: `${seg[seg.length - 1]}.deleted.20260101120000`,
+    };
   },
 };

@@ -11,6 +11,8 @@ import type {
   UpdateGroupInput,
   EnabledIndicatorsRequest,
   UnitInput,
+  IndicatorReloadMode,
+  TechLower,
 } from '../../types/indicatorLibrary';
 
 const api = createApiSwitch(indicatorLibraryService, indicatorLibraryApi);
@@ -246,7 +248,48 @@ export function useIndicatorCacheRefresh() {
 export function useIndicatorImportDirectory() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.importDirectory(),
+    // T-0180 P1.5: 默认 "import"(向后兼容);UI "重载 XML" 按钮传 "reload"
+    mutationFn: (mode: IndicatorReloadMode = 'import') => api.importDirectory(mode),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: IL_KEY });
+    },
+  });
+}
+
+// T-0180 P4: drill-down 一级 SummaryTab 数据源
+export function useIndicatorSummary() {
+  return useQuery({
+    queryKey: [...IL_KEY, 'summary'],
+    queryFn: () => api.summary(),
+  });
+}
+
+// T-0180 P4: "管理 XML 文件" Modal 数据源(per tech)
+export function useIndicatorFiles(tech: TechLower | undefined) {
+  return useQuery({
+    queryKey: [...IL_KEY, 'files', tech],
+    queryFn: () => api.listFiles(tech as TechLower),
+    enabled: Boolean(tech),
+  });
+}
+
+// T-0180 P4: 上传自定义 XML;成功后 invalidate summary + files + indicators
+export function useIndicatorUploadXml() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ tech, file, force }: { tech: TechLower; file: File; force?: boolean }) =>
+      api.uploadXml(tech, file, { force }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: IL_KEY });
+    },
+  });
+}
+
+// T-0180 P4: 删除自定义 XML 文件
+export function useIndicatorDeleteFile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (loadedFrom: string) => api.deleteFile(loadedFrom),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: IL_KEY });
     },

@@ -95,3 +95,68 @@ export interface UnitInput {
   enName: string;
   cnName: string;
 }
+
+// ── T-0180 P4: 自定义 XML 分层目录 + drill-down 视图类型 ──────────────────
+
+// 后端 ?tech= query 用 enb/gsm/gnb 小写;前端 DeviceType 用 ENB/GSM/GNB 大写
+// (历史保留)。techFromDeviceType 在 API 层做映射,UI 用 DeviceType 即可。
+export type TechLower = 'enb' | 'gsm' | 'gnb';
+
+export function deviceTypeToTech(dt: DeviceType): TechLower {
+  return dt.toLowerCase() as TechLower;
+}
+
+export function techToDeviceType(t: TechLower): DeviceType {
+  return t.toUpperCase() as DeviceType;
+}
+
+// IndicatorTechSummary 是 /indicators/summary 端点单行(对应一个制式)。
+// 后端 backend.SummaryByTech 返回 { tech, indicators, builtin_count, custom_count,
+//                                  unknown_count, groups, platforms[] }
+export interface IndicatorTechSummary {
+  tech: TechLower;
+  indicators: number;     // 总行数
+  builtinCount: number;   // loaded_from LIKE 'indicator-library/%'
+  customCount: number;    // loaded_from LIKE 'indicator-library-custom/%'
+  unknownCount: number;   // loaded_from IS NULL 或不带前缀
+  groups: number;         // indicator_group_<tech> 总行数
+  platforms: string[];    // distinct platform_name
+}
+
+// IndicatorFile 是 /indicators/files?tech= 单行 — 含 source/deletable 派生 + DB 计数。
+export interface IndicatorFile {
+  loadedFrom: string;
+  source: 'builtin' | 'custom' | 'unknown';
+  deletable: boolean;
+  count: number;
+  onDisk: boolean;
+}
+
+// IndicatorReloadMode 对应后端 ReloadMode("import" | "reload");
+// import = 加法 UPSERT(默认/向后兼容);reload = destructive 全量重载 + 删孤儿
+export type IndicatorReloadMode = 'import' | 'reload';
+
+export interface IndicatorReloadResult {
+  reloaded: string;  // "indicator"
+  mode: IndicatorReloadMode;
+  // reload 模式下三制式孤儿删除计数;import 模式不返
+  orphans?: Record<TechLower, number>;
+}
+
+export interface IndicatorUploadResult {
+  uploaded: boolean;
+  filename: string;
+  loadedFrom: string;
+  tech: TechLower;
+  overwrite: boolean;
+  backup: string;     // ".bak.<ts>" 文件名,空串=无备份
+  reloaded: boolean;  // 同步触发 Loader.Reload 是否成功
+}
+
+export interface IndicatorDeleteFileResult {
+  deleted: boolean;
+  loadedFrom: string;
+  tech: TechLower;
+  rowsAffected: number;
+  backup: string;     // ".deleted.<ts>" 文件名,空串=无备份(文件已 gone)
+}
