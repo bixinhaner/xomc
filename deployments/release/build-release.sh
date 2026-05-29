@@ -134,6 +134,13 @@ for ARCH in $ARCHES; do
 
   # 1.1 构建业务镜像（amd64-only：host 已在入口断言为 amd64，docker build 默认
   # 按 host 架构产出，无需 --platform；arm64 host 上自行恢复 buildx 跨架构逻辑）
+  #
+  # --network host：build container 共用宿主网络栈，绕开默认 bridge 网络
+  # （172.17.0.0/16）。某些服务器的 FORWARD/DOCKER-FORWARD 链被 ufw / fail2ban
+  # / 自家安全脚本改坏，bridge → 公网包被 DROP，表现为容器内 DNS 超时、apk/
+  # go mod download 全失败，而宿主网络完全正常（典型症状：
+  # `dial tcp: lookup goproxy.cn on 223.6.6.6:53: i/o timeout`）。
+  # 走 host 网络后只要宿主能联网就能 build，免去现场排查 iptables。
   log "[$ARCH] docker build 业务镜像（${BUSINESS_IMAGES[*]}）..."
   IMG_REFS=()
   for SVC in "${BUSINESS_IMAGES[@]}"; do
@@ -142,6 +149,7 @@ for ARCH in $ARCHES; do
     TAG="$PROJECT_IMAGE_PREFIX/$SVC:$VERSION"
     log "[$ARCH]   docker build -t $TAG -f $DOCKERFILE"
     ( cd "$REPO_ROOT" && docker build \
+        --network host \
         -t "$TAG" \
         -f "$DOCKERFILE" \
         --build-arg APK_MIRROR=mirrors.aliyun.com \
