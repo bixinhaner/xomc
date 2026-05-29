@@ -74,17 +74,30 @@ cd "$(dirname "$SELF")"
 [ "$(id -u)" = 0 ] || die "请以 root 执行（sudo bash $0 ...）"
 
 # ── 已装则按需返回 ──────────────────────────────────────────────────────
+# 2026-05-29 改：docker 已装的环境(尤其 apt 装 docker.io + docker-compose 老仓
+# 库),Compose 是 Python V1,无法解析 compose v3.x 语法。这里把"已装跳过"拆为
+# 两档:
+#   - --skip-if-installed (deploy.sh 内部探测用):docker 已装就完全 exit 0
+#   - 默认(运维直跑):跳过 dockerd/containerd 二进制 + systemd unit 安装,
+#                     但**继续**走到下面的 cli-plugins 安装(docker-compose V2
+#                     plugin + docker-buildx),保证 `docker compose` 可用。
+SKIP_DOCKERD=0
 if command -v docker >/dev/null 2>&1; then
   if [ "$SKIP_IF_INSTALLED" = 1 ]; then
     log "已检测到 Docker：$(docker --version)，跳过（--skip-if-installed）"
     exit 0
   fi
-  log "已检测到 Docker：$(docker --version)，跳过安装"
-  log "如需配置加速：bash ../setup-mirrors.sh                    # Docker / npm / Golang 三合一"
-  exit 0
+  log "已检测到 Docker：$(docker --version)，跳过 dockerd/containerd 二进制与 systemd unit 安装"
+  log "继续补装 docker compose V2 / docker buildx 插件,确保 \`docker compose\` 可用"
+  SKIP_DOCKERD=1
 fi
 
 # ── 离线包定位（必须本目录有且仅一个 docker-*.tgz）────────────────────────
+# SKIP_DOCKERD=1 时不解 dockerd/containerd 二进制,但仍需进到下面安装 cli-plugins,
+# 所以离线包定位也跳过,直接走到 plugin 安装段。
+if [ "$SKIP_DOCKERD" = 1 ]; then
+  TGZ=""
+else
 TGZ_COUNT="$(ls docker-*.tgz 2>/dev/null | wc -l | tr -d ' ')"
 if [ "$TGZ_COUNT" = 0 ]; then
   echo "错误：本目录未找到 docker-*.tgz。"
@@ -100,6 +113,9 @@ elif [ "$TGZ_COUNT" -gt 1 ]; then
 fi
 TGZ="$(ls docker-*.tgz)"
 log "使用 Docker 安装包：$TGZ"
+fi
+
+if [ "$SKIP_DOCKERD" = 0 ]; then
 
 # ── 数据目录选择（/var 紧时引导切到 /home，避免装完撑爆）─────────────────
 # 默认 docker → /var/lib/docker，containerd → /var/lib/containerd（不动）。
@@ -161,17 +177,28 @@ tar xzf "$TGZ"
 install -m 0755 docker/* /usr/local/bin/
 rm -rf docker/
 
-# docker compose 插件（若交付包内提供）
+fi  # ← end "if [ \"$SKIP_DOCKERD\" = 0 ]" 包住数据目录选择 + 解压二进制
+
+# ── docker compose / buildx 插件 ──────────────────────────────────────
+# 2026-05-29:无论 SKIP_DOCKERD 与否,**永远安装** cli-plugins。已装 docker 的
+# 环境最常见的坑就是系统的 docker-compose 是老 V1 Python(`apt install
+# docker-compose`),不识别 compose v3 写法,部署 OMC 时报
+# "Unsupported config option for services/networks/volumes"。
+# 在 /usr/local/lib/docker/cli-plugins/ 下放 V2 binary 后,`docker compose`
+# (带空格)即可走 V2,deploy.sh 的检测会优先用它。
 if [ -f docker-compose ]; then
   install -d /usr/local/lib/docker/cli-plugins
   install -m 0755 docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
+  log "已安装 docker compose V2 插件:$(docker compose version 2>&1 | head -1 || echo '稍后启动 dockerd 后验证')"
 fi
 
-# docker buildx 插件（若交付包内提供）——Docker 23+ 在 BuildKit 开启时必需
+# docker buildx 插件 —— Docker 23+ 在 BuildKit 开启时必需
 if [ -f docker-buildx ]; then
   install -d /usr/local/lib/docker/cli-plugins
   install -m 0755 docker-buildx /usr/local/lib/docker/cli-plugins/docker-buildx
 fi
+
+if [ "$SKIP_DOCKERD" = 0 ]; then
 
 # ── systemd 单元：containerd ────────────────────────────────────────────
 # ExecStart 按需附加 --root <DIR>（来自上面的数据目录选择）
@@ -262,6 +289,8 @@ systemctl enable --now docker
 echo
 docker version
 log "Docker 安装完成。"
+
+fi  # ← end "if [ \"$SKIP_DOCKERD\" = 0 ]" 包住 systemd unit + daemon.json + systemctl 启动
 
 # ── 加速镜像配置 ────────────────────────────────────────────────────────
 if [ "$NO_MIRROR" = 1 ]; then

@@ -100,11 +100,49 @@ for tool in docker tar sha256sum; do
   command -v "$tool" >/dev/null 2>&1 || die "缺少工具：$tool（请先装 Docker 等基础工具）" 1
 done
 
-# docker compose v2
+# docker compose 命令选择
+# 2026-05-29:V1 Python (apt 装的 docker-compose) 不识别 compose v3 写法,部署
+# 时报 "Unsupported config option for services/networks/volumes"。优先用
+# `docker compose` V2 plugin;若只有 V1 standalone,尝试从 infra bundle 自动装
+# V2 plugin,装不上则硬退出并给出修复指引。
 if docker compose version >/dev/null 2>&1; then
   COMPOSE="docker compose"
 elif command -v docker-compose >/dev/null 2>&1; then
-  COMPOSE="docker-compose"
+  COMPOSE_VER="$(docker-compose version --short 2>/dev/null || true)"
+  case "$COMPOSE_VER" in
+    2.*)
+      # standalone V2 binary,OK 直接用
+      COMPOSE="docker-compose"
+      ;;
+    1.*|"")
+      log "检测到 docker-compose V1 (Python: $COMPOSE_VER),不兼容 compose v3 文件,尝试自动安装 V2 插件 ..."
+      BUNDLE_V2=""
+      for cand in "$INFRA_DIR/docker/docker-compose" "$PKG_ROOT/../infra/docker/docker-compose"; do
+        if [ -f "$cand" ]; then BUNDLE_V2="$cand"; break; fi
+      done
+      if [ -n "$BUNDLE_V2" ]; then
+        install -d /usr/local/lib/docker/cli-plugins
+        install -m 0755 "$BUNDLE_V2" /usr/local/lib/docker/cli-plugins/docker-compose
+        if docker compose version >/dev/null 2>&1; then
+          COMPOSE="docker compose"
+          log "自动安装 V2 插件成功:$(docker compose version | head -1)"
+        else
+          die "V2 插件安装到 cli-plugins/ 后 \`docker compose version\` 仍失败,请手动排查 dockerd 状态" 1
+        fi
+      else
+        die "docker-compose 是 V1 (Python),无法解析 compose v3 文件;
+        infra bundle 中未找到 V2 binary($INFRA_DIR/docker/docker-compose 不存在)。
+        修复方法二选一:
+          1. 重跑 sudo bash /opt/omc/infra/docker/install-docker.sh
+             (V2 plugin 会自动装到 /usr/local/lib/docker/cli-plugins/)
+          2. 手动 apt install docker-compose-plugin
+                 (Ubuntu 22.04+ docker 官方源)" 1
+      fi
+      ;;
+    *)
+      die "无法识别 docker-compose 版本:$COMPOSE_VER" 1
+      ;;
+  esac
 else
   die "未检测到 docker compose v2 / docker-compose v1（请先 install-docker.sh）" 1
 fi
