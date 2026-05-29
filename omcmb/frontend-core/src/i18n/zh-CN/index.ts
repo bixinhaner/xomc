@@ -889,6 +889,20 @@ const messages: Record<string, string> = {
   'alarm.library.edit':          '编辑告警',
   'alarm.library.deleteConfirm': '确定要删除该告警吗？',
   'alarm.library.alarmSource':   '告警源',
+
+  // T-0179 alarm-library 表头(product/alarm-library 页面)
+  'alarmLibrary.col.neType':         '网元类型',
+  'alarmLibrary.col.xmlSource':      'XML 来源',
+  'alarmLibrary.col.totalCount':     '告警总数',
+  'alarmLibrary.col.cnName':         '中文名',
+  'alarmLibrary.col.enName':         '英文名',
+  'alarmLibrary.col.severityLevel':  '严重级别',
+  'alarmLibrary.col.eventType':      '事件类型',
+  'alarmLibrary.col.uiVisible':      'UI 可见',
+  'alarmLibrary.col.actions':        '操作',
+  'alarmLibrary.cell.unfilled':      '未回填(请重载)',
+  'alarmLibrary.cell.yes':           '是',
+  'alarmLibrary.cell.no':            '否',
   'alarm.detail':            '详细',
   'alarm.markRead':          '标记为已读',
 

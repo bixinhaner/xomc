@@ -7,8 +7,14 @@
  *   3. 二级页面:AlarmDefinitionTable — 按 ne_type 过滤,toolbar 含返回 + 新增(预填+锁定 ne_type)
  *   4. URL 同步 ?neType=ENB(刷新不回列表;返回按钮显式回一级)
  *   5. 8 个 icon 对齐 param-model 风格(返回 / 上传 / 重载 / 刷新 / 删除 / 详情 / 新增 / 警告)
+ *
+ * 2026-05-29 二次调整(本次):
+ *   a. "重载 XML" / "刷新缓存" 只在一级页面保留,详情页面不显示
+ *   b. 列表头改 i18n,中英文随站点语言切换
+ *   c. 取消"搜索网元类型"输入框 — 数据极少(LTE/GSM/NR 等),无搜索必要
  */
 import { useMemo, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { useSearchParams } from 'react-router-dom';
 import {
   Card,
@@ -20,7 +26,6 @@ import {
   Select,
   Popconfirm,
   message,
-  Tooltip,
   Typography,
 } from 'antd';
 import {
@@ -30,7 +35,6 @@ import {
   EyeOutlined,
   PlusOutlined,
   ReloadOutlined,
-  WarningOutlined,
 } from '@ant-design/icons';
 import {
   useAlarmDefinitionList,
@@ -46,7 +50,11 @@ import type {
   AlarmNeTypeStat,
 } from '@core/types/alarmDefinition';
 import AlarmDefinitionDrawer from './AlarmDefinitionDrawer';
-import UnknownStatsModal from './UnknownStatsModal';
+// 2026-05-29:"未识别频次"入口暂时隐藏(后端聚合 / 统计逻辑未完工,详见
+// backlog T-0181)。组件文件 UnknownStatsModal.tsx 保留备用,功能就绪后:
+//   1) 取消下方 import 注释  2) 恢复一级 toolbar 的 <Tooltip>+<Button>
+//   3) 恢复 <UnknownStatsModal /> 渲染  4) 恢复 statsOpen state
+// import UnknownStatsModal from './UnknownStatsModal';
 
 const { Text } = Typography;
 
@@ -68,6 +76,9 @@ const FILTER_LABEL_STYLE = {
 };
 
 export default function AlarmLibraryPage() {
+  const intl = useIntl();
+  const t = (id: string) => intl.formatMessage({ id });
+
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedNeType = searchParams.get('neType') || undefined;
   const inDetail = Boolean(selectedNeType);
@@ -83,16 +94,12 @@ export default function AlarmLibraryPage() {
   };
 
   // ── 一级(NeTypes 聚合) ─────────────────────────────────────────
+  // 2026-05-29 调整:LTE/GSM/NR 三五行数据,搜索框无意义,已删除。
   const { data: neTypesData, isLoading: isNeTypesLoading } = useAlarmNeTypeStats();
-  const [neTypesKeyword, setNeTypesKeyword] = useState('');
-  const neTypesItems = useMemo<AlarmNeTypeStat[]>(() => {
-    const items = neTypesData?.items || [];
-    const k = neTypesKeyword.trim().toLowerCase();
-    if (!k) return items;
-    return items.filter(
-      (it) => it.neType.toLowerCase().includes(k) || it.loadedFrom.toLowerCase().includes(k)
-    );
-  }, [neTypesData, neTypesKeyword]);
+  const neTypesItems = useMemo<AlarmNeTypeStat[]>(
+    () => neTypesData?.items || [],
+    [neTypesData],
+  );
 
   // ── 二级(AlarmDefinition 详情) ─────────────────────────────────
   const [detailFilter, setDetailFilter] = useState<AlarmDefinitionFilter>({
@@ -112,7 +119,7 @@ export default function AlarmLibraryPage() {
   // ── 公共 ───────────────────────────────────────────────────────
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<AlarmDefinition | null>(null);
-  const [statsOpen, setStatsOpen] = useState(false);
+  // statsOpen 暂时移除 — "未识别频次"功能未完工(见 backlog T-0181)
 
   const delMut = useDeleteAlarmDefinition();
   const importMut = useAlarmDefinitionImportDirectory();
@@ -130,9 +137,10 @@ export default function AlarmLibraryPage() {
   );
 
   // ── 一级表列 ────────────────────────────────────────────────────
+  // Critical/Major/Minor/Warning 是 ITU-T/3GPP 行业标准术语,中英文都保留英文字面。
   const neTypesColumns = [
     {
-      title: '网元类型',
+      title: t('alarmLibrary.col.neType'),
       dataIndex: 'neType',
       width: 160,
       render: (v: string, row: AlarmNeTypeStat) => (
@@ -147,13 +155,13 @@ export default function AlarmLibraryPage() {
       ),
     },
     {
-      title: 'XML 来源',
+      title: t('alarmLibrary.col.xmlSource'),
       dataIndex: 'loadedFrom',
       width: 200,
       render: (v: string) =>
-        v ? <Tag>{v}</Tag> : <Tag color="warning">未回填(请重载)</Tag>,
+        v ? <Tag>{v}</Tag> : <Tag color="warning">{t('alarmLibrary.cell.unfilled')}</Tag>,
     },
-    { title: '告警总数', dataIndex: 'total', width: 100 },
+    { title: t('alarmLibrary.col.totalCount'), dataIndex: 'total', width: 100 },
     {
       title: 'Critical',
       dataIndex: 'criticalCnt',
@@ -188,10 +196,10 @@ export default function AlarmLibraryPage() {
       width: 140,
       render: (v: string) => <Tag color="blue">{v}</Tag>,
     },
-    { title: '中文名', dataIndex: 'cnName', width: 200 },
-    { title: '英文名', dataIndex: 'enName', width: 220, ellipsis: true },
+    { title: t('alarmLibrary.col.cnName'), dataIndex: 'cnName', width: 200 },
+    { title: t('alarmLibrary.col.enName'), dataIndex: 'enName', width: 220, ellipsis: true },
     {
-      title: '严重级别',
+      title: t('alarmLibrary.col.severityLevel'),
       dataIndex: 'severityCode',
       width: 110,
       render: (v: number, row: AlarmDefinition) => (
@@ -200,15 +208,16 @@ export default function AlarmLibraryPage() {
         </Tag>
       ),
     },
-    { title: '事件类型', dataIndex: 'eventType', width: 130 },
+    { title: t('alarmLibrary.col.eventType'), dataIndex: 'eventType', width: 130 },
     {
-      title: 'UI 可见',
+      title: t('alarmLibrary.col.uiVisible'),
       dataIndex: 'isShow',
       width: 80,
-      render: (v: boolean) => (v ? <Tag color="success">是</Tag> : <Tag>否</Tag>),
+      render: (v: boolean) =>
+        v ? <Tag color="success">{t('alarmLibrary.cell.yes')}</Tag> : <Tag>{t('alarmLibrary.cell.no')}</Tag>,
     },
     {
-      title: '操作',
+      title: t('alarmLibrary.col.actions'),
       width: 130,
       render: (_: unknown, row: AlarmDefinition) => (
         <Space>
@@ -238,7 +247,9 @@ export default function AlarmLibraryPage() {
 
   return (
     <div style={{ padding: 16 }}>
-      {/* 顶部 toolbar:列表态展示搜索;详情态展示返回 + 当前 ne_type + 新增 */}
+      {/* 顶部 toolbar:
+           · 列表态:重载 XML + 刷新缓存(全局操作放一级);"未识别频次"功能未完工,已隐藏
+           · 详情态:返回 + 当前 ne_type + 过滤/搜索 + 新增(只对当前 ne_type 操作) */}
       <Card size="small" style={{ marginBottom: 12 }}>
         <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
           {inDetail ? (
@@ -273,23 +284,12 @@ export default function AlarmLibraryPage() {
               />
             </Space>
           ) : (
-            <Space wrap>
-              <Input.Search
-                placeholder="搜索网元类型 / XML 来源"
-                allowClear
-                value={neTypesKeyword}
-                onChange={(e) => setNeTypesKeyword(e.target.value)}
-                style={{ width: 280 }}
-              />
-              <Tooltip title="按 productId / days 聚合的未识别告警频次">
-                <Button icon={<WarningOutlined />} onClick={() => setStatsOpen(true)}>
-                  未识别频次
-                </Button>
-              </Tooltip>
-            </Space>
+            // 列表态左侧空 — 占位让 space-between 把右侧按钮推到最右
+            <span />
           )}
           <Space wrap>
-            {inDetail && (
+            {inDetail ? (
+              // 详情态:只显示"新增定义"。重载 XML / 刷新缓存 都是全局动作,留在一级。
               <Button
                 type="primary"
                 icon={<PlusOutlined />}
@@ -300,43 +300,46 @@ export default function AlarmLibraryPage() {
               >
                 新增定义
               </Button>
+            ) : (
+              <>
+                <Popconfirm
+                  title="确认重载 XML?"
+                  description={
+                    <div style={{ maxWidth: 320 }}>
+                      将从 <code>datamodels/</code> 重新加载所有告警定义 XML。
+                      <br />
+                      UI 中对告警定义的编辑将被 XML 值覆盖;操作不可撤销。
+                    </div>
+                  }
+                  okText="确认重载"
+                  cancelText="取消"
+                  okButtonProps={{ danger: true }}
+                  placement="bottomRight"
+                  onConfirm={() => {
+                    importMut
+                      .mutateAsync()
+                      .then((result) => message.success(`已重载:${result.reloaded}`))
+                      .catch((error) => message.error((error as Error).message));
+                  }}
+                >
+                  <Button icon={<CloudDownloadOutlined />} loading={importMut.isPending} danger>
+                    重载 XML
+                  </Button>
+                </Popconfirm>
+                <Button
+                  icon={<ReloadOutlined />}
+                  loading={cacheMut.isPending}
+                  onClick={() =>
+                    cacheMut
+                      .mutateAsync()
+                      .then(() => message.success('已刷新缓存'))
+                      .catch((e) => message.error((e as Error).message))
+                  }
+                >
+                  刷新缓存
+                </Button>
+              </>
             )}
-            <Popconfirm
-              title="确认重载 XML?"
-              description={
-                <div style={{ maxWidth: 320 }}>
-                  将从 <code>datamodels/</code> 重新加载所有告警定义 XML。
-                  <br />
-                  UI 中对告警定义的编辑将被 XML 值覆盖;操作不可撤销。
-                </div>
-              }
-              okText="确认重载"
-              cancelText="取消"
-              okButtonProps={{ danger: true }}
-              placement="bottomRight"
-              onConfirm={() => {
-                importMut
-                  .mutateAsync()
-                  .then((result) => message.success(`已重载:${result.reloaded}`))
-                  .catch((error) => message.error((error as Error).message));
-              }}
-            >
-              <Button icon={<CloudDownloadOutlined />} loading={importMut.isPending} danger>
-                重载 XML
-              </Button>
-            </Popconfirm>
-            <Button
-              icon={<ReloadOutlined />}
-              loading={cacheMut.isPending}
-              onClick={() =>
-                cacheMut
-                  .mutateAsync()
-                  .then(() => message.success('已刷新缓存'))
-                  .catch((e) => message.error((e as Error).message))
-              }
-            >
-              刷新缓存
-            </Button>
           </Space>
         </Space>
       </Card>
@@ -381,7 +384,7 @@ export default function AlarmLibraryPage() {
           setEditing(null);
         }}
       />
-      <UnknownStatsModal open={statsOpen} onClose={() => setStatsOpen(false)} />
+      {/* <UnknownStatsModal open={statsOpen} onClose={() => setStatsOpen(false)} /> */}
     </div>
   );
 }

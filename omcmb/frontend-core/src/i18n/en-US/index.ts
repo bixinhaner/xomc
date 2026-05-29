@@ -891,6 +891,20 @@ const messages: Record<string, string> = {
   'alarm.library.deleteConfirm': 'Are you sure you want to delete this alarm?',
   'alarm.library.alarmSource':   'Alarm Source',
 
+  // T-0179 alarm-library table headers (product/alarm-library page)
+  'alarmLibrary.col.neType':         'NE Type',
+  'alarmLibrary.col.xmlSource':      'XML Source',
+  'alarmLibrary.col.totalCount':     'Total',
+  'alarmLibrary.col.cnName':         'Chinese Name',
+  'alarmLibrary.col.enName':         'English Name',
+  'alarmLibrary.col.severityLevel':  'Severity',
+  'alarmLibrary.col.eventType':      'Event Type',
+  'alarmLibrary.col.uiVisible':      'UI Visible',
+  'alarmLibrary.col.actions':        'Actions',
+  'alarmLibrary.cell.unfilled':      'Not filled (reload XML)',
+  'alarmLibrary.cell.yes':           'Yes',
+  'alarmLibrary.cell.no':            'No',
+
   // Deal states
   'alarm.dealState.unconfirmedUncleared': 'Unconfirmed & Active',
   'alarm.dealState.confirmedUncleared':   'Confirmed & Active',
