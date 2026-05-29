@@ -510,10 +510,105 @@
 
 ---
 
+## P2 风险 — T-0178 自定义 paramModel XML 分层目录（2026-05-29 登记）
+
+> 源:PRD `docs/project/prd/F02-param-model-custom-xml.md` §8。
+> 8 条 R-NEW-T0178-* 风险全部 Open,T-0178 进 done 时由 Owner 复盘并标记 Mitigated/Closed。
+
+### R-NEW-T0178-1 客户端上传超大 XML 触发 OOM
+- **描述**:恶意客户端构造 Content-Length 大于上限或 chunked 编码绕过的大文件,可能让 app 进程 buffer 满 OOM
+- **等级**:P2
+- **概率**:低
+- **影响**:app 进程崩溃 → docker 重启 → 短暂不可用
+- **Owner**:Go 工程专家 + 安全合规专家
+- **状态**:Mitigated(已实现 Gin `MaxMultipartMemory=4MiB` + handler 内 `file.Size <= 1<<20` 双层门禁 + `io.LimitReader(MaxUploadXMLSize+1)` 流式校验)
+- **关联 Task**:T-0178(commit 16f95d46 `handler.go::UploadXML` 校验 2)
+- **缓解**:三层防御已就位,生产部署前需设 Gin engine.MaxMultipartMemory(P3 deploy 任务)
+- **下次复盘**:T-0178 S7 收尾
+
+### R-NEW-T0178-2 上传成功但 Loader 解析失败 → DB 与文件状态不一致
+- **描述**:`validateUploadXML` 是入口"形态检查",`xml.Unmarshal` 二次解析可能因 XSD-违反等失败
+- **等级**:P2
+- **概率**:低
+- **影响**:文件落 host 但 DB 行缺失 → 用户看到列表无新模型 → 重试上传或手动 reload
+- **Owner**:Go 工程专家
+- **状态**:Mitigated(Upload handler 触发全量 ReloadOne 失败仅 Warn 不阻塞 upload 响应;用户可手动 reload 重试)
+- **关联 Task**:T-0178(commit 16f95d46 `handler.go::UploadXML` step 4)
+- **缓解**:`validateUploadXML` 扫到 EOF 验完整形态(commit fix),与 Loader 解析对齐避免分叉
+- **下次复盘**:T-0178 S7 收尾
+
+### R-NEW-T0178-3 备份失败导致用户反复点击 DELETE 全部失败
+- **描述**:host 磁盘满 / 权限错 / 只读挂载等导致 rename 失败,所有 DELETE 返 500,用户重试无果
+- **等级**:P2
+- **概率**:中(运维误配场景常见)
+- **影响**:用户无法删除自定义 XML,需运维介入排查 fs 状态
+- **Owner**:运维与可观测性专家
+- **状态**:Open
+- **关联 Task**:T-0178(commit d1349c3c `handler.go::DeleteModel` step 4 audit_action=parammodel.delete.aborted_backup_failed)
+- **缓解**:① 结构化审计日志含 errno;② 待补 Prometheus 告警规则 `ParamModelBackupFailedSurge`(P5/P6 任务);③ 运维手册补"备份失败排障"段
+- **下次复盘**:T-0178 S7 收尾
+
+### R-NEW-T0178-4 host 目录 `param-mappings-custom` 首次部署被遗漏初始化 → app 启动期 Loader 扫描非存目录报错
+- **描述**:deploy.sh 跳过初始化 + docker compose v2 不自动创建 bind mount source 时,Loader 扫到 customDir = ENOENT
+- **等级**:P2
+- **概率**:低
+- **影响**:启动期 Loader 报 warning 但不阻塞 builtin 加载(Loader 已对 ENOENT 容忍);用户上传时报"目录不存在"
+- **Owner**:运维专家
+- **状态**:Mitigated(commit aab7245b `deploy.sh` Step 3/9 主动 `mkdir -p` + chown 10001 + chmod 0750;Loader 内 `resolveLoaderFiles` 已对 ENOENT 静默跳过)
+- **关联 Task**:T-0178
+- **缓解**:Loader 容忍 + deploy.sh 双保险
+- **下次复盘**:T-0178 S7 收尾
+
+### R-NEW-T0178-5 bool 字段 `custom_overrides_builtin` 默认值陷阱
+- **描述**:Go bool 零值是 false,yaml 不写时拿到 false,与设计意图(默认 true)反转,导致 self-healing 链路失效
+- **等级**:P2
+- **概率**:中(改回普通 bool 类型即触发)
+- **影响**:删 custom 不会自动回退 builtin,用户体验 degrade
+- **Owner**:Go 工程专家
+- **状态**:Mitigated(commit 61a0e5aa `*bool` 三态 + `CustomOverridesEnabled()` access method + `TestCustomOverridesEnabled_TriState` 编译期守护)
+- **关联 Task**:T-0178
+- **缓解**:防御性测试守护字段类型不会被改回 bool(改回则测试编译失败)
+- **下次复盘**:T-0178 S7 收尾
+
+### R-NEW-T0178-6 多实例横扩时同名上传并发竞态
+- **描述**:当前 Upload/Delete/单文件 Reload 用 `sync.Map[basename]*sync.Mutex` 进程内互斥;多 app 实例横扩时同名 Upload 会丢更新
+- **等级**:P2
+- **概率**:低(当前生产仅单 app 实例)
+- **影响**:同名文件两个上传请求同时打,后写入的覆盖前写入,可能丢用户最新版本
+- **Owner**:架构专家
+- **状态**:Open(单实例假设,横扩前必须补)
+- **关联 Task**:T-0178(`CLAUDE.md §5.3.1` 单实例假设注记)
+- **缓解**:`CLAUDE.md §5.3.1` 写明假设;横扩 PRD 中明确需补 PG advisory lock `pg_try_advisory_xact_lock(hashtext('parammodel:'+basename))`
+- **下次复盘**:横扩立项时
+
+### R-NEW-T0178-7 Upload 过程中容器 OOM-Killed 留下 `.tmp.<uuid>` 残留
+- **描述**:Upload handler 用 tmp + rename 实现原子写;若 WriteFile 后 rename 前容器崩溃,tmp 文件留在 host
+- **等级**:P2
+- **概率**:中(容器 OOM 在低内存配额下可能发生)
+- **影响**:host 长期堆积 .tmp.<uuid> 文件,占盘
+- **Owner**:运维专家
+- **状态**:Mitigated(commit 2c27253b worker `BackupCleanup` 扩展 `.tmp.<uuid>` 分支,mtime > `TmpResidualMaxAge`=1h 即清)
+- **关联 Task**:T-0178
+- **缓解**:1 小时上限远大于健康 Upload 周期(<1s),避免长期占盘
+- **下次复盘**:T-0178 S7 收尾
+
+### R-NEW-T0178-8 builtin 同名 XML 与 custom XML 同时存在,且 `custom_overrides_builtin=false` 时
+- **描述**:运维误把 `custom_overrides_builtin` 改 false,导致同名 custom 被 builtin 压制,但 host 上 custom 文件还在,用户困惑"明明上传了为什么生效不了"
+- **等级**:P2
+- **概率**:低(默认 true,极少有人主动改 false)
+- **影响**:用户上传后看不到 source=custom,只看到 source=builtin
+- **Owner**:产品经理
+- **状态**:Open(待补 Loader 启动期 WARN 日志)
+- **关联 Task**:T-0178(后续补强)
+- **缓解**:Loader 启动期日志 WARN 记录"custom 文件因 customOverrides=false 被压制"的清单;UI Source 列内置行可加 Tooltip 提示
+- **下次复盘**:T-0178 S7 收尾
+
+---
+
 ## 复盘节奏
 
 - **每 Sprint 回顾**：更新 Open/Mitigating 状态，检查 Owner 有无变更
 - **每月第一个 Sprint**：审视 P0 列表，确保 <14 天已关闭或有明确进展
 - **每季度**：深度复盘 P1/P2，决定是否升级或关闭
 
-**当前版本**：v1.1（2026-04-20，全部 Open 风险补"关联 Task"字段，双向链通 Backlog）
+**当前版本**：v1.2（2026-05-29，T-0178 8 条 R-NEW-T0178-* 风险登记,5 条 Mitigated + 3 条 Open）

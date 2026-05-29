@@ -359,6 +359,59 @@ ratelimit:inform:{device_serial}     — 限流计数器
 - 文件白名单 → 单事务幂等 UPSERT
 - ModuleGraph 编排：dictload → productregistry → paramregistry → 等
 
+#### 5.3.1 ParamModel 自定义 XML 分层目录（T-0178）
+
+**核心契约**：builtin XML 与 custom XML **物理隔离**两个目录,Loader 启动期合并扫描;后端唯一真值源 + 前端零代码同步规则改动。
+
+| 目录 | 位置 | 来源 | 生命周期 |
+|------|------|------|---------|
+| `data/param-mappings/` | 镜像层 `COPY` 进 `/etc/omcgo/data` | 发版构建 | 跟随镜像版本 |
+| `data/param-mappings-custom/` | host bind mount `/opt/omc/data/...` | 运维通过 UI 上传 | 跟随 host(升级不丢) |
+
+**5 项设计决策**（5 轮 ULTRATHINK 已敲定,改前看历史而非提出新选项）：
+1. `custom_overrides_builtin = true`（默认 custom 胜出;删 custom 自动回退 builtin 的 self-healing 链路依赖此项）
+2. builtin 行删除按钮 UI 上**置灰 + Tooltip**(不隐藏 — 让用户知道功能存在但不可用)
+3. `.deleted.<ts>` / `.bak.<ts>` 备份保留 **30 天**(worker cron `0 3 * * *`);`.tmp.<uuid>` 残留 1 小时即清
+4. DELETE 备份失败 → 全流程**保守回滚**(500 `ErrCodeParamModelBackupFailed=2031`,不删 DB)
+5. source 唯一真值源在后端(`source.go::IsDeletable`);前端只渲染 API 返回的 `deletable` bool
+
+**唯一真值源链路**(改判定规则只动 `source.go`,无需改前端):
+```
+Loader.loadParamModelFile
+  → resolveLoadedFrom(base, absPath) 写 "param-mappings/X.xml" 或 "param-mappings-custom/X.xml"
+  → param_models.loaded_from 列
+  → ClassifySource(loadedFrom) 返 builtin/custom/unknown
+  → IsDeletable(loadedFrom) 守门 DELETE handler + 填充 modelView.deletable
+  → 前端 ModelsTab 渲染来源 Tag + 删除按钮可见性
+```
+
+**端到端 commit 链路**(8 个 commit 合计 +2960/-99 LOC):
+- P1 后端: 58640fb3(source 分类器) → 944c6d4c(Loader 双目录) → d1349c3c(Delete 守门 + 迁移 215) → 16f95d46(Upload + DTO source/deletable) → 61a0e5aa(*bool 三态 yaml)
+- P2 worker: 2c27253b(BackupCleanup cron + Prometheus 指标)
+- P3 部署: aab7245b(bind mount + deploy.sh 初始化)
+- P4 前端: 84cf6950(Upload 按钮 + 来源列 + 置灰)
+
+**单实例假设**:Upload/Delete/单文件 Reload 通过 `acquireFileLock(basename)` 进程内 `sync.Map[name]*sync.Mutex` 互斥。**多实例横扩前必须**补 PG advisory lock `pg_try_advisory_xact_lock(hashtext('parammodel:'+basename))`,否则同名 Upload 会丢更新。
+
+**新增错误码**(`global/errors.go` Data Model 块 2030-2039 段):
+- `ErrCodeParamModelBuiltinNotDeletable = 2030` — DELETE 内置返 403
+- `ErrCodeParamModelBackupFailed = 2031` — DELETE 备份失败保守回滚返 500
+
+**新增 Prometheus 指标**:
+- `parammodel_backup_cleanup_total{kind="deleted|bak|tmp", result="swept|error|skipped"}` (worker)
+
+**相关代码索引**:
+- `internal/config/parammodel/source.go` — Source / ClassifySource / IsDeletable + 4 个共享常量
+- `internal/config/parammodel/filelist.go` — mergeFileLists / resolveLoadedFrom / resolveLoaderFiles
+- `internal/config/parammodel/upload.go` — Upload 4 个纯函数校验器(文件名/XML/路径/保留名)
+- `internal/config/parammodel/handler.go` — DeleteModel 守门 / UploadXML / acquireFileLock
+- `internal/config/parammodel/backup_cleanup.go` — BackupCleanup + 指标 + 3 个默认常量
+- `internal/config/parammodel/loader.go` — Loader.run 双目录合并 + loadParamModelFile 写前缀
+- `migrations/000215_param_models_loaded_from_prefix.sql` — `loaded_from` 历史数据回填
+- `cmd/worker/main.go::startParamModelBackupCleanup` — cron 注册 + 30s catch-up
+- `omcmb/frontend-core/src/types/paramModel.ts` — ParamModelSource union + source/deletable
+- `omcmb/webcode/src/pages/product/param-model/{index,ModelsTab}.tsx` — Upload + 来源 + 置灰
+
 ### 5.4 事件驱动规范
 
 **EventBus 双实现**：
