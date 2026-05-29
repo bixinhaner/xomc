@@ -1346,6 +1346,12 @@ func recycleBinColumns() []string {
 }
 
 // scanRecycleBinRow scans a recycle bin device row including group_name.
+//
+// 2026-05-29 修复:Scan dest 漏 6 列(last_boot_at / boot_count /
+// last_param_sync_at / last_param_sync_failed_at / last_param_sync_error /
+// last_offline_reason),导致 GET /api/v1/devices/recycle 返
+// "number of field descriptions must equal number of destinations, got 34 and 28"。
+// 严格对齐 deviceColumns() 顺序 + scanDeviceFromRow,末尾追加 group_name。
 func scanRecycleBinRow(rows pgx.Rows) (*model.Device, error) {
 	var d model.Device
 	var extData, eventsData []byte
@@ -1363,9 +1369,13 @@ func scanRecycleBinRow(rows pgx.Rows) (*model.Device, error) {
 		&ipAddr, &connReqURL,
 		&d.NatDetected, &udpAddr,
 		&d.LastInformAt, &eventsData,
+		&d.LastBootAt, &d.BootCount, // T-0158: 新增的两列(deviceColumns 行 18-19)
 		&d.InformInterval, &siteName, &siteID, &d.Latitude, &d.Longitude,
 		&extData, &d.CreatedAt, &d.UpdatedAt, &d.DeletedAt, &deletedBy,
-		&groupName,
+		&d.LastParamSyncAt,                                 // T-0124
+		&d.LastParamSyncFailedAt, &d.LastParamSyncError,    // migration 000142
+		&d.LastOfflineReason,                                // T-0173 / migration 000184
+		&groupName,                                          // recycleBinColumns 追加的 JOIN 列
 	)
 	if err != nil {
 		return nil, err
