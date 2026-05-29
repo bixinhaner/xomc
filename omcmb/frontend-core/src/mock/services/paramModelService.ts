@@ -161,4 +161,40 @@ export const paramModelService = {
   async importDirectory() {
     return { reloaded: 'param-model' };
   },
+
+  // T-0178: mock 上传 — 不真存盘,模拟成功返回。force=true 时设 overwrite=true。
+  async uploadXML(
+    file: File,
+    force = false,
+  ): Promise<{ filename: string; size: number; overwrite: boolean; backup?: string }> {
+    const name = file.name;
+    const existing = paramModels.find((p) => p.name.toLowerCase() === name.replace(/\.xml$/i, '').toLowerCase());
+    if (existing && !force) {
+      throw new Error(`file ${name} already exists; use force=true to overwrite`);
+    }
+    const overwrite = Boolean(existing);
+    if (!existing) {
+      paramModels = [
+        ...paramModels,
+        {
+          id: `pm-mock-${Date.now()}`,
+          name: name.replace(/\.xml$/i, ''),
+          totalEntries: 50,
+          totalObjects: 10,
+          totalParams: 40,
+          description: 'Mock 自定义 paramModel(上传成功)',
+          isActive: true,
+          loadedFrom: `param-mappings-custom/${name}`,
+          source: 'custom',
+          deletable: true,
+        },
+      ];
+    }
+    return {
+      filename: name,
+      size: file.size,
+      overwrite,
+      ...(overwrite ? { backup: `${name}.bak.${Date.now()}` } : {}),
+    };
+  },
 };

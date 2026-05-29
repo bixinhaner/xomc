@@ -12,18 +12,22 @@
  *      - 详情态: [返回 + 模型名 + 重载/刷新按钮]
  */
 import { useState } from 'react';
-import { Card, Input, Button, Space, Popconfirm, message, Typography } from 'antd';
+import { Card, Input, Button, Space, Popconfirm, message, Typography, Upload, Modal } from 'antd';
+import type { UploadProps } from 'antd';
 import {
   ArrowLeftOutlined,
   CloudDownloadOutlined,
   CloudUploadOutlined,
+  InboxOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import {
   useParamModelImportDirectory,
   useParamModelReloadDirectory,
   useParamModelCacheRefresh,
+  useUploadParamModelXML,
 } from '@core/hooks/api/useParamModels';
+import type { AxiosError } from 'axios';
 import ModelsTab from './ModelsTab';
 import MappingsTab from './MappingsTab';
 
@@ -35,8 +39,57 @@ export default function ParamModelPage() {
   const importMut = useParamModelImportDirectory();
   const reloadMut = useParamModelReloadDirectory();
   const cacheMut = useParamModelCacheRefresh();
+  const uploadMut = useUploadParamModelXML();
 
   const inDetail = Boolean(selectedModelName);
+
+  // T-0178: Upload customRequest — 用 antd Upload 触发 multipart,409 时弹同名 Modal
+  // 确认后再用 force=true 重试。校验失败 / 网络错误统一 antd message。
+  const uploadProps: UploadProps = {
+    accept: '.xml',
+    maxCount: 1,
+    showUploadList: false,
+    customRequest: ({ file, onSuccess, onError }) => {
+      const realFile = file as File;
+      const runUpload = (force: boolean): Promise<void> =>
+        uploadMut
+          .mutateAsync({ file: realFile, force })
+          .then((r) => {
+            message.success(
+              r.overwrite && r.backup
+                ? `已覆盖上传:${r.filename}(旧版备份 ${r.backup})`
+                : `已上传:${r.filename}`,
+            );
+            onSuccess?.(r);
+          })
+          .catch((e: unknown) => {
+            const ax = e as AxiosError<{ message?: string }>;
+            // 409 → 同名冲突,弹二次确认走 force=true
+            if (ax.response?.status === 409 && !force) {
+              Modal.confirm({
+                title: '同名 XML 已存在',
+                content: (
+                  <div style={{ maxWidth: 360 }}>
+                    检测到 <code>{realFile.name}</code> 已存在,确认覆盖?
+                    <br />旧文件会自动备份为 <code>.bak.&lt;ts&gt;</code>。
+                  </div>
+                ),
+                okText: '覆盖',
+                okButtonProps: { danger: true },
+                onOk: () => runUpload(true),
+              });
+              onError?.(ax);
+              return;
+            }
+            const msg =
+              ax.response?.data?.message ??
+              (e instanceof Error ? e.message : String(e));
+            message.error(msg);
+            onError?.(ax);
+          });
+      void runUpload(false);
+    },
+  };
 
   return (
     <div style={{ padding: 16 }}>
@@ -63,6 +116,12 @@ export default function ParamModelPage() {
             />
           )}
           <Space>
+            {/* T-0178: 上传自定义 paramModel XML(落 host /opt/omc/data/param-mappings-custom) */}
+            <Upload {...uploadProps}>
+              <Button icon={<InboxOutlined />} loading={uploadMut.isPending}>
+                上传 XML
+              </Button>
+            </Upload>
             <Popconfirm
               title="确认导入 XML?"
               description={

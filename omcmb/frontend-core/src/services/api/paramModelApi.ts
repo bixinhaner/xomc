@@ -325,4 +325,25 @@ export const paramModelApi = {
     );
     return data;
   },
+
+  // T-0178: 上传自定义 paramModel XML(multipart/form-data, field name "file")。
+  // force=true 时同名覆盖,旧版本自动备份为 .bak.<ts>;false(默认)同名返 409。
+  // 后端校验:文件名白名单 + 大小 ≤ 1MiB + XML 根元素 = paramModel + 路径包含。
+  async uploadXML(
+    file: File,
+    force = false,
+  ): Promise<{ filename: string; size: number; overwrite: boolean; backup?: string }> {
+    const fd = new FormData();
+    fd.append('file', file);
+    const url = force ? '/param-models/upload-xml?force=true' : '/param-models/upload-xml';
+    const { data } = await http.post<{
+      filename: string;
+      size: number;
+      overwrite: boolean;
+      backup?: string;
+    }>(url, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data;
+  },
 };

@@ -188,3 +188,17 @@ export function useParamModelReloadDirectory() {
     },
   });
 }
+
+// T-0178: 上传自定义 paramModel XML。force=true 同名强制覆盖(后端备份 .bak.<ts>),
+// 默认 false 同名返 409,前端可弹 Modal 二次确认后重试 force=true。
+// 成功后 invalidate 所有 param-model 查询,新模型立即出现在列表。
+export function useUploadParamModelXML() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ file, force }: { file: File; force?: boolean }) =>
+      api.uploadXML(file, force ?? false),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: PM_KEY });
+    },
+  });
+}
