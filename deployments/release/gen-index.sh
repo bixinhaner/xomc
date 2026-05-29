@@ -195,11 +195,26 @@ sudo tar -xJf omc-&lt;test|release&gt;-&lt;版本&gt;-&lt;架构&gt;.tar.xz -C /
 
 <h2>🐳 3. 安装 Docker（仅首次部署）</h2>
 <p class="lead">目标机已装 Docker（<code>docker --version</code> 返 ≥ 20.10）时跳过本步。</p>
+
+<h3>3.1 install-docker.sh 用法</h3>
 <pre>cd /opt/omc/infra/docker
-sudo bash install-docker.sh                         # 交互式：装完会引导选加速镜像
-sudo bash install-docker.sh --mirror daocloud       # 非交互：装完直接配 DaoCloud 加速
+sudo bash install-docker.sh                         # 交互式:装完引导选加速镜像;/var &lt; 15G 询问切到 /home
+sudo bash install-docker.sh --mirror daocloud       # 一气呵成:装完直接配 DaoCloud 加速
+sudo bash install-docker.sh --mirror official       # 装完不配镜像,回归 Docker Hub 官方
+sudo bash install-docker.sh --no-mirror             # 装完不动 daemon.json,跳过加速引导
+sudo bash install-docker.sh --skip-if-installed     # 已装 docker 时静默 0 退出(脚本里调用)
 sudo bash install-docker.sh -h                      # 查看所有参数</pre>
-<p class="tip">install-docker.sh 自动：解压二进制 → 写 containerd / docker 的 systemd 单元 → <code>enable --now</code> 开机自启 → 验证 → 引导加速镜像。</p>
+<p class="tip">install-docker.sh 自动:解压二进制 → 写 containerd / docker 的 systemd 单元 → <code>enable --now</code> 开机自启 → 验证 → 引导加速镜像。<br>
+<b>已装 docker 时</b>:跳过 dockerd 安装,但**仍补装** docker compose V2 + buildx plugin 到 <code>/usr/local/lib/docker/cli-plugins/</code>,解决系统 apt 装的 V1 Python compose 不识别 v3.x 写法问题。</p>
+
+<h3>3.2 卸载 Docker(install-docker.sh --uninstall)</h3>
+<p class="lead">支持彻底卸载:同时清掉 install-docker.sh 装的二进制 <b>和</b> 系统包管理器(apt/yum/dnf)装的 docker。默认 dry-run 安全,需 <code>--no-dry-run</code> 才真删。</p>
+<pre>sudo bash install-docker.sh --uninstall                              # dry-run:列要做的 9 步,不实际执行
+sudo bash install-docker.sh --uninstall --no-dry-run                 # 真删 + 删 /var/lib/docker(数据)
+sudo bash install-docker.sh --uninstall --no-dry-run --keep-data     # 真删 dockerd 但保留 /var/lib/docker</pre>
+<p class="tip"><b>卸载 9 步</b>:① 停所有容器 → ② <code>systemctl disable</code> docker/containerd → ③ 删 install-docker.sh 写的 systemd unit → ④ <code>apt/yum/dnf remove</code> 系统装的 docker.io / docker-ce / docker-compose-plugin / buildx-plugin / containerd.io 等 → ⑤ 删 <code>/usr/local/bin/</code> 下 docker 二进制 → ⑥ 删 <code>/usr/local/lib/docker/cli-plugins/</code> → ⑦ (可选)删 data-root + containerd root 数据目录 → ⑧ 删 <code>/etc/docker/</code> → ⑨ 删 docker 用户组。<br>
+<b>不删 /opt/omc 业务数据</b>。要一并清:先跑 <code>sudo bash deploy.sh --uninstall --no-dry-run</code>,再跑本脚本。</p>
+
 <div class="danger">⚠️ 若 <code>docker.service</code> 启动报
 <code>failed to create NAT chain DOCKER: iptables not found</code>,
 说明系统缺 iptables —— 回到 <b>0. 系统准备</b> 跑一遍 apt/yum 命令,然后
@@ -246,6 +261,35 @@ sudo bash deploy/deploy.sh -h                        # 查看所有参数</pre>
 <p class="tip">deploy.sh 自动：环境检查 → 目录布局 → 智能 load 镜像（已有则跳过并重启）→ 默认口令检查 → 启动 infra → 等就绪 → migrate → seed → <code>docker compose up -d</code> 全栈 → 健康检查。<b>全 docker compose 部署，宿主机不再放业务二进制。</b></p>
 <div class="danger">⚠️ 生产环境首次部署前请编辑 <code>/opt/omc/current/deploy/.env</code> 与 <code>/opt/omc/etc/*.prod.yaml</code>，改 <b>PostgreSQL / MinIO / Grafana / JWT</b> 默认口令为强口令。</div>
 
+<h3>5.4 svc.sh — 日常服务控制(部署完成后用)</h3>
+<p class="lead">部署完成后,用 <code>svc.sh</code> 做日常启停 / 重启 / 查日志,无须再跑 deploy.sh。
+脚本必须从 <code>/opt/omc/current/deploy/</code>(含 4 个 compose 文件那层)运行,自动按存在性拼 4 个 compose 文件,compose project 名固定 <code>omcgo</code>(与 deploy.sh 一致)。
+不需要 root(除非 docker daemon 本身需 sudo)。</p>
+
+<pre>cd /opt/omc/current/deploy
+
+# ── 状态 / 启停 ──
+bash svc.sh status                   # 查所有服务状态(默认子命令,等价 ps)
+bash svc.sh start                    # 启全栈
+bash svc.sh start app                # 只启 app(可跟多个服务名,如 app acs worker)
+bash svc.sh stop                     # 停全栈
+bash svc.sh restart                  # 重启全栈
+bash svc.sh restart app worker       # 只重启指定服务
+bash svc.sh up                       # 同 start,等价 docker compose up -d
+bash svc.sh down                     # 关栈 + 清容器(保留数据卷)
+
+# ── 日志 ──
+bash svc.sh logs app                 # 看 app 最近 50 行
+bash svc.sh logs app --tail 200      # 看 app 最近 200 行
+bash svc.sh logs app -f              # 跟随 app 日志(Ctrl-C 退出)
+
+# ── 选项(任意子命令前后皆可) ──
+bash svc.sh restart --skip-monitoring        # 重启时不动监控栈
+bash svc.sh status --skip-web                # 不算 web compose
+bash svc.sh -h                                # 完整帮助</pre>
+<p class="tip">常用服务名:<code>app</code> / <code>acs</code> / <code>worker</code> / <code>web</code>(业务);<code>postgres</code> / <code>redis</code> / <code>nats</code> / <code>minio</code>(基础设施);<code>prometheus</code> / <code>alertmanager</code> / <code>grafana</code> / <code>loki</code> / <code>tempo</code> / <code>otelcol</code>(监控栈)。<br>
+要看完整 compose ps 列表(全 17 个容器),直接跑 <code>bash svc.sh status</code>。</p>
+
 <h2>✅ 6. 验证部署</h2>
 <pre>bash /opt/omc/current/deploy/healthcheck.sh</pre>
 <p class="lead">应输出全部 <code>[OK]</code>：业务容器（app/acs/worker）+ 基础设施容器（postgres/redis/nats/minio）+ 监控容器（prometheus/grafana/loki/...）+ 4 个健康端点（app /health, acs /healthz, app /metrics, 前端首页）。</p>
@@ -253,13 +297,37 @@ sudo bash deploy/deploy.sh -h                        # 查看所有参数</pre>
 
 <div class="tab-content" id="tab-config">
 <h2>🌐 7. 部署后访问地址</h2>
-<div class="kv">
-<b>Web 管理页：</b>http://&lt;服务器IP&gt;:8080<br>
-<b>MinIO Console：</b>http://&lt;服务器IP&gt;:9001<br>
-<b>App 健康端点：</b>http://&lt;服务器IP&gt;:8081/health<br>
-<b>ACS 健康端点：</b>http://&lt;服务器IP&gt;:9090/healthz<br>
-<b>Grafana（监控）：</b>http://&lt;服务器IP&gt;:3000　<span class="sz">仅启用监控栈时</span>
-</div>
+
+<h3>7.1 内网可达(0.0.0.0 绑定 — 运营 / 客户 / 集成方使用)</h3>
+<table>
+<thead><tr><th>端口</th><th>用途</th><th>URL / 接入方式</th><th>使用方</th></tr></thead>
+<tbody>
+<tr><td><b>8081</b></td><td>Web 管理界面 + REST + SSE</td><td>http://&lt;服务器IP&gt;:8081</td><td>运维浏览器登录(默认 admin/admin123)</td></tr>
+<tr><td><b>8080</b></td><td>基站连接(TR-069 ACS)</td><td>http://&lt;服务器IP&gt;:8080</td><td><b>基站设备侧</b>填这个作 ACS URL,人不浏览</td></tr>
+<tr><td>5432</td><td>PostgreSQL</td><td><code>psql -h &lt;IP&gt; -p 5432 -U omcgo omcgo</code></td><td>数据中台拉数据 / 备份回填 / 跨机调试</td></tr>
+<tr><td>6379</td><td>Redis</td><td><code>redis-cli -h &lt;IP&gt; -p 6379</code></td><td>缓存监控 / 跨机调试</td></tr>
+<tr><td>4222</td><td>NATS 客户端</td><td>nats CLI / SDK 连 <code>&lt;IP&gt;:4222</code></td><td>外部消费 JetStream / 跨机集成</td></tr>
+<tr><td>9000</td><td>MinIO S3 API</td><td>mc / S3 SDK 连 <code>http://&lt;IP&gt;:9000</code></td><td>S3 客户端;Console 浏览器上传/下载也依赖此端口</td></tr>
+<tr><td>9001</td><td>MinIO Console UI</td><td>http://&lt;服务器IP&gt;:9001</td><td>对象存储管理(默认 minioadmin/minioadmin)</td></tr>
+<tr><td>9090</td><td>Prometheus</td><td>http://&lt;服务器IP&gt;:9090</td><td>指标查询 / 告警规则</td></tr>
+<tr><td>9093</td><td>Alertmanager</td><td>http://&lt;服务器IP&gt;:9093</td><td>告警静默 / receiver 状态</td></tr>
+<tr><td>3030</td><td>Grafana 监控大盘</td><td>http://&lt;服务器IP&gt;:3030 <span class="sz">仅启用监控栈时</span></td><td>默认 admin/admin,宿主 3030 → 容器 3000</td></tr>
+<tr><td>3100</td><td>Loki</td><td>http://&lt;服务器IP&gt;:3100</td><td>日志 API,一般通过 Grafana 查询不直浏览</td></tr>
+</tbody>
+</table>
+<div class="danger">⚠️ <b>5432 / 6379 / 4222 / 9000 / 9001 对内网全开</b> — 部署前必须改强口令(详 §9)。Redis 当前无密码,仅受信任内网可接受;公网 / DMZ 须配 <code>requirepass</code> 同步 etc/*.prod.yaml。防火墙 / 安全组在出公网前必须 deny 这 5 个端口。</div>
+
+<h3>7.2 仅本机回环 127.0.0.1(从工作机访问需 SSH 隧道)</h3>
+<table>
+<thead><tr><th>端口</th><th>服务</th><th>接入方式</th></tr></thead>
+<tbody>
+<tr><td>9091</td><td>app 健康 / metrics</td><td><code>curl 127.0.0.1:9091/healthz</code> 或 <code>/metrics</code></td></tr>
+<tr><td>9095</td><td>acs 健康 / metrics</td><td><code>curl 127.0.0.1:9095/healthz</code>(容器内是 9090)</td></tr>
+<tr><td>9092</td><td>worker 健康 / metrics</td><td><code>curl 127.0.0.1:9092/healthz</code></td></tr>
+<tr><td>8222</td><td>NATS HTTP 监控</td><td>http://127.0.0.1:8222(server info / JetStream 状态)</td></tr>
+</tbody>
+</table>
+<p class="tip">健康检查一键过:<code>bash /opt/omc/current/deploy/healthcheck.sh</code></p>
 
 <h2>👤 8. 初始账号 / 口令</h2>
 <div class="danger">⚠️ 全部默认口令<b>首次登录后必须改</b>。生产部署前需重新生成强口令并同步到 deploy/.env 与 *.prod.yaml。</div>
@@ -287,8 +355,8 @@ sudo bash deploy/deploy.sh -h                        # 查看所有参数</pre>
 <tr><td>MinIO 账号</td><td><code>MINIO_ROOT_USER=minioadmin</code></td><td><code>minio.access_key</code></td><td>三个 yaml（app/acs/worker）都要改</td></tr>
 <tr><td>MinIO 口令</td><td><code>MINIO_ROOT_PASSWORD=minioadmin</code></td><td><code>minio.secret_key</code></td><td>同上</td></tr>
 <tr><td>JWT 密钥</td><td><code>OMCGO_JWT_SECRET=...</code></td><td><code>jwt.secret</code>（同值）</td><td>必须 ≥ 32 字符；产生：<code>openssl rand -base64 48</code></td></tr>
-<tr><td>Grafana 管理员</td><td><code>GRAFANA_ADMIN_PASSWORD=admin</code></td><td>—</td><td>仅监控栈使用；首次登录 :3000 也会强制提示改口令</td></tr>
-<tr><td>Web 管理员 admin</td><td>—</td><td>—</td><td>首次登录 <code>http://&lt;IP&gt;:8080</code> 后在「个人中心 → 修改密码」里改，<b>不需改配置文件</b></td></tr>
+<tr><td>Grafana 管理员</td><td><code>GRAFANA_ADMIN_PASSWORD=admin</code></td><td>—</td><td>仅监控栈使用；首次登录 :3030 也会强制提示改口令(宿主 3030 → 容器 3000)</td></tr>
+<tr><td>Web 管理员 admin</td><td>—</td><td>—</td><td>首次登录 <code>http://&lt;IP&gt;:8081</code> 后在「个人中心 → 修改密码」里改，<b>不需改配置文件</b>(注意:8080 是基站 ACS 入口,人不要去登)</td></tr>
 </tbody>
 </table>
 

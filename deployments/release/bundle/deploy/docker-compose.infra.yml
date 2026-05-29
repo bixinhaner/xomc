@@ -6,10 +6,20 @@
 # 【全 docker compose 部署】：业务容器（app / acs / worker / web）与本文件中
 # 的基础服务同处一个 docker compose project（deploy.sh -p omcgo 拉起），
 # 走 docker network 内部 service 名互联（postgres / redis / nats / minio）。
-# 宿主侧 publish 到 127.0.0.1: 仅供运维调试使用。
 #
-# ⚠️ 部署前必须修改 POSTGRES_PASSWORD / MINIO_ROOT_USER / MINIO_ROOT_PASSWORD
-#    为强口令，并与 /opt/omc/etc/*.prod.yaml 保持一致。
+# 【端口绑定策略】2026-05-29 用户决策：基础服务对内网开放(0.0.0.0)而非仅
+# 本机回环(127.0.0.1)。受影响端口：postgres 5432 / redis 6379 / nats 4222 /
+# minio 9000+9001。原因：内网其它服务器需要直接访问这些服务（数据中台
+# 拉数据 / 监控集成 / 备份回填 / 容灾切换 / 跨机调试）。
+# NATS 监控端口 8222 保持 127.0.0.1（运维 HTTP 仪表盘，无客户端通信需求）。
+#
+# ⚠️ 安全要求：以 0.0.0.0 绑定后,内网任何主机均可触达,**必须**：
+#    1. 部署前修改 POSTGRES_PASSWORD / MINIO_ROOT_USER /
+#       MINIO_ROOT_PASSWORD 为强口令,并与 /opt/omc/etc/*.prod.yaml 同步
+#    2. Redis 当前无密码 — 仅在受信任内网部署可接受；公网 / DMZ 必须
+#       配 `--requirepass` 并同步 etc/*.prod.yaml 的 redis.password
+#    3. 防火墙 / 安全组在出公网前 deny 这些端口（5432 / 6379 / 4222 /
+#       9000 / 9001）
 
 networks:
   omcgo-net:
@@ -26,7 +36,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "127.0.0.1:5432:5432"              # 仅本机回环可达（运维调试）
+      - "5432:5432"                        # 内网开放(0.0.0.0),供其它服务器直连
     command: ["postgres", "-c", "timezone=Asia/Shanghai", "-c", "log_timezone=Asia/Shanghai"]
     volumes:
       - pgdata:/var/lib/postgresql/data    # 生产建议改为数据盘 bind mount，如 /data/omc/pg
@@ -45,7 +55,7 @@ services:
     environment:
       TZ: "Asia/Shanghai"
     ports:
-      - "127.0.0.1:6379:6379"
+      - "6379:6379"                        # 内网开放(0.0.0.0),供其它服务器直连
     command: redis-server --appendonly yes
     volumes:
       - redisdata:/data
@@ -64,8 +74,8 @@ services:
     environment:
       TZ: "Asia/Shanghai"
     ports:
-      - "127.0.0.1:4222:4222"
-      - "127.0.0.1:8222:8222"
+      - "4222:4222"                        # NATS 客户端,内网开放(0.0.0.0)
+      - "127.0.0.1:8222:8222"              # NATS HTTP 监控,仅本机回环(运维 dashboard)
     command: --jetstream --store_dir /data --http_port 8222
     volumes:
       - natsdata:/data
@@ -88,8 +98,8 @@ services:
       # MinIO 自带 Prometheus 指标端点 /minio/v2/metrics/*；public 模式免 token 抓取（T-0151）。
       MINIO_PROMETHEUS_AUTH_TYPE: "public"
     ports:
-      - "127.0.0.1:9000:9000"
-      - "127.0.0.1:9001:9001"
+      - "9000:9000"                        # MinIO S3 API,内网开放(0.0.0.0);Console 浏览器上传/下载依赖此端口
+      - "9001:9001"                        # MinIO Console UI,内网开放(0.0.0.0)
     command: server /data --console-address ":9001"
     volumes:
       - miniodata:/data

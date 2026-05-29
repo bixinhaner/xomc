@@ -31,6 +31,12 @@
 #
 #   ── 卸载模式 ─────────────────────────────────────────────────────────────
 #   --uninstall           进入卸载模式(默认 dry-run,仅打印将要做的动作,不实际执行)
+#                         覆盖 9 步:停容器 → disable systemd → 删 install-docker.sh
+#                         的 systemd unit → **apt/yum/dnf 卸载系统 docker 包**
+#                         (docker.io / docker-ce / docker-compose-plugin /
+#                         buildx-plugin / containerd.io 等,全自动检测) →
+#                         删 /usr/local/bin docker 二进制 → 删 cli-plugins →
+#                         (可选)删数据目录 → 删 /etc/docker → 删 docker 组
 #   --no-dry-run          关闭 dry-run(必须显式加上才会真删,且会再做一次交互确认)
 #   --keep-data           不删 /var/lib/docker / /var/lib/containerd / /home/{docker,containerd}-data
 #   -h | --help           本帮助
@@ -132,26 +138,52 @@ if [ "$UNINSTALL" = 1 ]; then
   log "${DRY}  · containerd root:$ACTUAL_CONTAINERD_ROOT $([ -n "$CONTAINERD_DATA_SIZE" ] && echo "($CONTAINERD_DATA_SIZE)")"
   echo
 
+  # 系统包管理器检测 + 已装 docker 包扫描
+  SYS_PKG_MGR=""
+  SYS_DOCKER_PKGS=""
+  # Debian/Ubuntu 系包列表(覆盖发行版仓库 + Docker 官方仓库)
+  DPKG_CANDIDATES="docker.io docker-doc docker-compose podman-docker docker-ce docker-ce-cli docker-ce-rootless-extras docker-compose-plugin docker-buildx-plugin docker-scan-plugin containerd containerd.io runc"
+  # RHEL/CentOS/Rocky/openEuler 系包列表
+  RPM_CANDIDATES="docker docker-client docker-client-latest docker-common docker-latest docker-latest-logrotate docker-logrotate docker-engine docker-ce docker-ce-cli docker-ce-rootless-extras docker-compose-plugin docker-buildx-plugin docker-compose containerd containerd.io runc"
+  if command -v dpkg >/dev/null 2>&1; then
+    SYS_PKG_MGR="apt"
+    for p in $DPKG_CANDIDATES; do
+      dpkg -s "$p" >/dev/null 2>&1 && SYS_DOCKER_PKGS="$SYS_DOCKER_PKGS $p"
+    done
+  elif command -v rpm >/dev/null 2>&1; then
+    if command -v dnf >/dev/null 2>&1; then SYS_PKG_MGR="dnf"; else SYS_PKG_MGR="yum"; fi
+    for p in $RPM_CANDIDATES; do
+      rpm -q "$p" >/dev/null 2>&1 && SYS_DOCKER_PKGS="$SYS_DOCKER_PKGS $p"
+    done
+  fi
+  SYS_DOCKER_PKGS="$(echo "$SYS_DOCKER_PKGS" | xargs)"   # trim
+
   if [ "$RUNNING_CONTAINERS" -gt 0 ] 2>/dev/null; then
     log "${DRY}1) 将停止 + 删除 $RUNNING_CONTAINERS 个运行中容器(包含可能的 OMC 业务容器)"
   else
     log "${DRY}1) 无运行中容器"
   fi
   log "${DRY}2) systemctl disable --now docker containerd"
-  log "${DRY}3) 删 systemd unit:/etc/systemd/system/docker.service / containerd.service"
-  log "${DRY}4) 删 /usr/local/bin/{docker,dockerd,containerd,runc,docker-init,docker-proxy,ctr,containerd-shim*}"
-  log "${DRY}5) 删 /usr/local/lib/docker/cli-plugins/(docker-compose V2 + buildx)"
-  if [ "$KEEP_DATA" = 1 ]; then
-    log "${DRY}6) --keep-data 保留 docker / containerd 数据目录(可日后重装恢复镜像 / 容器)"
+  log "${DRY}3) 删 systemd unit:/etc/systemd/system/docker.service / containerd.service(install-docker.sh 写的)"
+  if [ -n "$SYS_DOCKER_PKGS" ]; then
+    log "${DRY}4) 卸载系统包(${SYS_PKG_MGR}):$SYS_DOCKER_PKGS"
+    log "${DRY}     (含 apt 装的 docker.io / docker-compose V1 / cli-plugins 等;卸载会自动清掉系统 systemd unit)"
   else
-    log "${DRY}6) 将删:"
+    log "${DRY}4) 未检测到系统包管理器装的 docker(${SYS_PKG_MGR:-未知}),跳过"
+  fi
+  log "${DRY}5) 删 /usr/local/bin/{docker,dockerd,containerd,runc,docker-init,docker-proxy,ctr,containerd-shim*}(install-docker.sh 装的)"
+  log "${DRY}6) 删 /usr/local/lib/docker/cli-plugins/(docker-compose V2 + buildx)"
+  if [ "$KEEP_DATA" = 1 ]; then
+    log "${DRY}7) --keep-data 保留 docker / containerd 数据目录(可日后重装恢复镜像 / 容器)"
+  else
+    log "${DRY}7) 将删:"
     log "${DRY}     - $ACTUAL_DOCKER_ROOT($DOCKER_DATA_SIZE)"
     log "${DRY}     - $ACTUAL_CONTAINERD_ROOT($CONTAINERD_DATA_SIZE)"
     [ "$ACTUAL_DOCKER_ROOT"     != "/var/lib/docker"     ] && log "${DRY}     - /var/lib/docker(若残留)"
     [ "$ACTUAL_CONTAINERD_ROOT" != "/var/lib/containerd" ] && log "${DRY}     - /var/lib/containerd(若残留)"
   fi
-  log "${DRY}7) 删 /etc/docker(daemon.json + certs.d/)"
-  log "${DRY}8) 删 docker 用户组"
+  log "${DRY}8) 删 /etc/docker(daemon.json + certs.d/)"
+  log "${DRY}9) 删 docker 用户组"
   echo
   log "${DRY}注意:本脚本【不删 /opt/omc 等 OMC 业务数据】,如需一并清理:"
   log "${DRY}        先跑 sudo bash deploy.sh --uninstall --no-dry-run --keep-data,再跑本脚本"
@@ -179,50 +211,70 @@ if [ "$UNINSTALL" = 1 ]; then
   cd /tmp
 
   # 1) 停所有容器
-  log "[1/8] 停止所有运行中容器 ..."
+  log "[1/9] 停止所有运行中容器 ..."
   CONTAINERS="$(docker ps -q 2>/dev/null || true)"
   [ -n "$CONTAINERS" ] && echo "$CONTAINERS" | xargs -r docker stop >/dev/null 2>&1 || true
 
   # 2) systemctl
-  log "[2/8] systemctl disable --now docker containerd ..."
+  log "[2/9] systemctl disable --now docker containerd ..."
   systemctl disable --now docker      >/dev/null 2>&1 || true
   systemctl disable --now containerd  >/dev/null 2>&1 || true
 
-  # 3) systemd unit
-  log "[3/8] 删 systemd unit ..."
+  # 3) systemd unit(install-docker.sh 写入的)
+  log "[3/9] 删 systemd unit(install-docker.sh 写入的) ..."
   rm -f /etc/systemd/system/docker.service /etc/systemd/system/containerd.service
   systemctl daemon-reload >/dev/null 2>&1 || true
 
-  # 4) 二进制
-  log "[4/8] 删 /usr/local/bin/ 下 docker 二进制 ..."
+  # 4) 系统包管理器卸载(apt / yum / dnf 装的 docker.io / docker-ce / compose-plugin 等)
+  if [ -n "$SYS_DOCKER_PKGS" ]; then
+    log "[4/9] 用 $SYS_PKG_MGR 卸载系统 docker 包:$SYS_DOCKER_PKGS ..."
+    case "$SYS_PKG_MGR" in
+      apt)
+        # shellcheck disable=SC2086
+        DEBIAN_FRONTEND=noninteractive apt-get remove --purge -y $SYS_DOCKER_PKGS >/dev/null 2>&1 || \
+          warn "apt remove 部分失败,可能因依赖锁定;手动 'apt purge $SYS_DOCKER_PKGS' 重试"
+        apt-get autoremove --purge -y >/dev/null 2>&1 || true
+        ;;
+      yum|dnf)
+        # shellcheck disable=SC2086
+        "$SYS_PKG_MGR" remove -y $SYS_DOCKER_PKGS >/dev/null 2>&1 || \
+          warn "$SYS_PKG_MGR remove 部分失败,可能因依赖锁定;手动重试"
+        ;;
+    esac
+  else
+    log "[4/9] 系统包管理器未检测到 docker 包,跳过"
+  fi
+
+  # 5) /usr/local/bin/(install-docker.sh 装的二进制;apt remove 不会动这里)
+  log "[5/9] 删 /usr/local/bin/ 下 docker 二进制(install-docker.sh 装的) ..."
   rm -f /usr/local/bin/docker          /usr/local/bin/dockerd \
         /usr/local/bin/containerd      /usr/local/bin/containerd-shim \
         /usr/local/bin/containerd-shim-runc-v2 \
         /usr/local/bin/runc            /usr/local/bin/docker-init \
         /usr/local/bin/docker-proxy    /usr/local/bin/ctr
 
-  # 5) cli-plugins
-  log "[5/8] 删 /usr/local/lib/docker/cli-plugins/ ..."
+  # 6) cli-plugins(install-docker.sh 装的;apt 装的 plugin 已被步骤 4 清掉)
+  log "[6/9] 删 /usr/local/lib/docker/cli-plugins/ ..."
   rm -rf /usr/local/lib/docker/cli-plugins
   rmdir /usr/local/lib/docker 2>/dev/null || true
 
-  # 6) 数据目录
+  # 7) 数据目录
   if [ "$KEEP_DATA" = 0 ]; then
-    log "[6/8] 删数据目录 $ACTUAL_DOCKER_ROOT / $ACTUAL_CONTAINERD_ROOT ..."
+    log "[7/9] 删数据目录 $ACTUAL_DOCKER_ROOT / $ACTUAL_CONTAINERD_ROOT ..."
     rm -rf "$ACTUAL_DOCKER_ROOT"      "$ACTUAL_CONTAINERD_ROOT"
     # 兜底:如果默认路径也存在(用户中途切过),一并清
     [ "$ACTUAL_DOCKER_ROOT"     != "/var/lib/docker"     ] && rm -rf /var/lib/docker     2>/dev/null || true
     [ "$ACTUAL_CONTAINERD_ROOT" != "/var/lib/containerd" ] && rm -rf /var/lib/containerd 2>/dev/null || true
   else
-    log "[6/8] --keep-data 保留数据目录"
+    log "[7/9] --keep-data 保留数据目录"
   fi
 
-  # 7) /etc/docker
-  log "[7/8] 删 /etc/docker ..."
+  # 8) /etc/docker
+  log "[8/9] 删 /etc/docker ..."
   rm -rf /etc/docker
 
-  # 8) docker 组
-  log "[8/8] 删 docker 用户组 ..."
+  # 9) docker 组
+  log "[9/9] 删 docker 用户组 ..."
   groupdel docker >/dev/null 2>&1 || true
 
   echo
