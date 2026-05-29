@@ -20,6 +20,13 @@ const TECH_LABEL: Record<TechLower, string> = {
   gnb: 'GNB (5G NR)',
 };
 
+// 2026-05-29 用户决策:制式列加业务说明便于运维识别 3GPP 网元类型
+const TECH_DESC: Record<TechLower, string> = {
+  enb: '4G LTE 基站(eNodeB);采集 LTE 性能计数器,如切换/上下行流量/RRC 连接数',
+  gsm: '2G GSM 基站控制器(BSC);采集 GSM 接入/呼叫/切换计数器',
+  gnb: '5G NR 基站(gNodeB);采集 5G 接入/PDCP 流量/NSA-SA 切换计数器',
+};
+
 export default function SummaryTab({ onSelect }: Props) {
   const { data, isLoading } = useIndicatorSummary();
   const items = data?.items || [];
@@ -38,6 +45,15 @@ export default function SummaryTab({ onSelect }: Props) {
         >
           {TECH_LABEL[v]}
         </Button>
+      ),
+    },
+    {
+      title: '说明',
+      dataIndex: 'tech',
+      key: 'desc',
+      width: 360,
+      render: (v: TechLower) => (
+        <span style={{ color: 'rgba(0, 0, 0, 0.65)', fontSize: 12 }}>{TECH_DESC[v]}</span>
       ),
     },
     { title: '指标数', dataIndex: 'indicators', width: 100 },
@@ -68,15 +84,7 @@ export default function SummaryTab({ onSelect }: Props) {
           <span>—</span>
         ),
     },
-    {
-      title: '操作',
-      width: 100,
-      render: (_: unknown, row: IndicatorTechSummary) => (
-        <Button size="small" type="link" onClick={() => onSelect(row.tech)}>
-          详情
-        </Button>
-      ),
-    },
+    // 2026-05-29 用户决策:删除"操作"列 — 制式名 button.link 已可点击进入详情,操作列冗余
   ];
 
   return (

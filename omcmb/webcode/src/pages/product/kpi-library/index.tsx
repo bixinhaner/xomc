@@ -1,26 +1,23 @@
 /**
- * KpiLibraryPage — T-0180 P4 KPI 指标库主页面重设计。
+ * KpiLibraryPage — T-0180 KPI 指标库主页面。
  *
- * 用户决策(PRD §8 D1-D5 锁定):
- *   D1 不设保留名 custom 可覆盖内置同名
- *   D2 强制 platform 必填 + deviceType 与 ?tech= 一致
- *   D3 reload 简化(沿用 destructive 语义,Popconfirm danger 红按钮 + 不可撤销)
- *   D4 单位定义抽屉 width=720
- *   D5 详情平表 + 来源列(留给 XMLFilesModal 实现"按文件管理")
- *
- * UI 拓扑:
- *   一级 SummaryTab — 三制式 (ENB/GSM/GNB) 行,点击 drill-down
- *   二级 IndicatorsByTech — 指标 CRUD + 启用切换;toolbar 显[返回 + 制式名 + 管理 XML 文件]
- *   抽屉 UnitsDrawer — 单位定义(跨制式共享)
- *   弹窗 UploadXmlModal / XMLFilesModal
- *
- * URL 同步: ?tech=enb/gsm/gnb 让 F5 刷新仍停在二级,显式"返回"按钮才回一级。
- * 8 个 icon 对齐 param-model 风格(ArrowLeft / Inbox / CloudUpload / CloudDownload /
- *   Reload / Delete / Eye / Plus + AppstoreOutlined 管理 XML)。
+ * 2026-05-29 用户调整(P4 后续):
+ *   1. 删除"三制式聚合"文字标签
+ *   2. "上传 XML" 与 "导入 XML" 合并 — "导入 XML" 触发自定义 XML 文件上传(原 Upload 行为);
+ *      旧"导入 XML" mode=import(纯 UPSERT 不删孤儿) UI 入口下线;
+ *      "重载 XML" 继续 mode=reload(系统内置 + custom XML 全量 + 删孤儿)
+ *   3. SummaryTab 删除"操作"列(制式名 button.link 已可点击进入详情)
+ *   4. 制式行加业务说明文字
+ *   5. 详情页:
+ *      a) 顶部 toolbar 增加 分组筛选 + 平台筛选 + 关键字搜索,与"返回"同一行
+ *      b) 详情页表格加"平台"列 + "分组"列
+ *      c) "详情"列改名为"操作",EyeOutlined → EditOutlined
+ *      d) 详情态隐藏 [导入 XML][重载 XML][刷新缓存] — 这些是全局操作,仅在列表态显示
+ *      e) 单位定义按钮仍在列表态可用
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Card, Button, Space, Popconfirm, message, Typography } from 'antd';
+import { Card, Button, Space, Popconfirm, message, Typography, Select, Input } from 'antd';
 import {
   ArrowLeftOutlined,
   AppstoreOutlined,
@@ -32,6 +29,8 @@ import {
 import {
   useIndicatorImportDirectory,
   useIndicatorCacheRefresh,
+  usePlatformList,
+  useIndicatorGroups,
 } from '@core/hooks/api/useIndicatorsLibrary';
 import type { DeviceType, TechLower } from '@core/types/indicatorLibrary';
 import { techToDeviceType } from '@core/types/indicatorLibrary';
@@ -50,6 +49,8 @@ const TECH_LABEL: Record<TechLower, string> = {
 };
 
 const VALID_TECHS: TechLower[] = ['enb', 'gsm', 'gnb'];
+
+const OPERATOR_CODE = 'default';
 
 function parseTech(raw: string | null): TechLower | undefined {
   if (!raw) return undefined;
@@ -75,6 +76,19 @@ export default function KpiLibraryPage() {
     setSearchParams(params, { replace: false });
   };
 
+  // ── 详情态 filter 状态(上提到 toolbar,与返回同一行) ──────────────────────
+  const [detailKeyword, setDetailKeyword] = useState('');
+  const [detailPlatform, setDetailPlatform] = useState<string | undefined>(undefined);
+  const [detailGroupId, setDetailGroupId] = useState<string | undefined>(undefined);
+
+  // 切换制式时重置详情过滤,避免上一制式的 group/platform 漏到下一制式
+  const onSwitchTech = (next: TechLower | undefined) => {
+    setDetailKeyword('');
+    setDetailPlatform(undefined);
+    setDetailGroupId(undefined);
+    setTech(next);
+  };
+
   // ── 公共状态 ────────────────────────────────────────────────
   const [unitsOpen, setUnitsOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -84,14 +98,37 @@ export default function KpiLibraryPage() {
   const importMut = useIndicatorImportDirectory();
   const cacheMut = useIndicatorCacheRefresh();
 
+  // 详情态可用的过滤数据源(平台列表 + 分组树)
+  const { data: platformData } = usePlatformList(selectedDeviceType ?? 'ENB');
+  const platformOptions = useMemo(
+    () =>
+      (selectedDeviceType ? platformData?.items || [] : []).map((p) => ({ label: p, value: p })),
+    [platformData, selectedDeviceType]
+  );
+
+  const { data: groupData } = useIndicatorGroups(selectedDeviceType ?? 'ENB', OPERATOR_CODE);
+  const groupOptions = useMemo(() => {
+    if (!selectedDeviceType) return [];
+    // 扁平化分组树(本期只支持一级筛选,后续可加层级 indent)
+    const flat: { label: string; value: string }[] = [];
+    const walk = (nodes: { id: string; name: string; children?: typeof nodes }[] | undefined) => {
+      (nodes || []).forEach((n) => {
+        flat.push({ label: n.name || n.id, value: n.id });
+        if (n.children) walk(n.children);
+      });
+    };
+    walk(groupData?.items as never);
+    return flat;
+  }, [groupData, selectedDeviceType]);
+
   return (
     <div style={{ padding: 16 }}>
-      {/* 顶部 toolbar:列表态 vs 详情态 */}
+      {/* 顶部 toolbar:列表态 vs 详情态;详情态把过滤器与返回放在同一行 */}
       <Card size="small" style={{ marginBottom: 12 }}>
         <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
           {inDetail && selectedTech ? (
             <Space wrap>
-              <Button icon={<ArrowLeftOutlined />} onClick={() => setTech(undefined)}>
+              <Button icon={<ArrowLeftOutlined />} onClick={() => onSwitchTech(undefined)}>
                 返回
               </Button>
               <Text strong>{TECH_LABEL[selectedTech]} 的指标列表</Text>
@@ -101,109 +138,119 @@ export default function KpiLibraryPage() {
               >
                 管理 XML 文件
               </Button>
+              <Select
+                placeholder="按分组筛选"
+                allowClear
+                value={detailGroupId}
+                onChange={(v) => setDetailGroupId(v)}
+                options={groupOptions}
+                style={{ width: 180 }}
+                showSearch
+                optionFilterProp="label"
+              />
+              <Select
+                placeholder="按平台筛选"
+                allowClear
+                value={detailPlatform}
+                onChange={(v) => setDetailPlatform(v)}
+                options={platformOptions}
+                style={{ width: 180 }}
+                showSearch
+                optionFilterProp="label"
+              />
+              <Input.Search
+                placeholder="搜索 ID / 名称"
+                allowClear
+                value={detailKeyword}
+                onChange={(e) => setDetailKeyword(e.target.value)}
+                style={{ width: 240 }}
+              />
             </Space>
           ) : (
+            // 列表态不再显"三制式聚合"标签(用户决策);左侧仅留单位定义入口
             <Space wrap>
-              <Text strong>三制式聚合</Text>
-            </Space>
-          )}
-          <Space wrap>
-            {/* 单位定义按钮(列表态显示;详情态隐藏避免视觉噪声) */}
-            {!inDetail && (
               <Button icon={<AppstoreOutlined />} onClick={() => setUnitsOpen(true)}>
                 单位定义
               </Button>
-            )}
-            <Button icon={<InboxOutlined />} onClick={() => setUploadOpen(true)}>
-              上传 XML
-            </Button>
-            {/* 导入 XML — 加法 UPSERT(mode=import) */}
-            <Popconfirm
-              title="确认导入 XML?"
-              description={
-                <div style={{ maxWidth: 320 }}>
-                  从 <code>datamodels/</code> <b>加法 UPSERT</b> 当前 XML 文件:
-                  <br />· 新增指标 → 插入
-                  <br />· 已存在指标 → 更新
-                  <br />· DB 中已无 XML 对应的孤儿 → <b>保留不删</b>
-                </div>
-              }
-              okText="确认导入"
-              cancelText="取消"
-              placement="bottomRight"
-              onConfirm={() => {
-                importMut
-                  .mutateAsync('import')
-                  .then((r) => message.success(`已导入:${r.reloaded}`))
-                  .catch((e) => message.error((e as Error).message));
-              }}
-            >
-              <Button loading={importMut.isPending && importMut.variables === 'import'}>
+            </Space>
+          )}
+          {/* 详情态隐藏全局操作按钮(导入/重载/刷新)— 仅列表态显示 */}
+          {!inDetail && (
+            <Space wrap>
+              {/* 用户决策:删除独立"上传 XML"按钮,"导入 XML" 即触发自定义 XML 上传 */}
+              <Button icon={<InboxOutlined />} onClick={() => setUploadOpen(true)}>
                 导入 XML
               </Button>
-            </Popconfirm>
-            {/* 重载 XML — destructive(mode=reload) */}
-            <Popconfirm
-              title="确认重载 XML?"
-              description={
-                <div style={{ maxWidth: 360 }}>
-                  从 <code>datamodels/</code> <b>destructive 全量重载</b>:
-                  <br />· 当前 XML 中的指标 → UPSERT(覆盖 UI 编辑)
-                  <br />· DB 中已无 XML 对应的孤儿 → <b>删除</b>
-                  <br />· 关联的公式 / 启用记录级联清理
-                  <br />操作不可撤销!
-                </div>
-              }
-              okText="确认重载"
-              cancelText="取消"
-              okButtonProps={{ danger: true }}
-              placement="bottomRight"
-              onConfirm={() => {
-                importMut
-                  .mutateAsync('reload')
-                  .then((r) => {
-                    const orphans = r.orphans;
-                    const total = orphans
-                      ? (orphans.enb || 0) + (orphans.gsm || 0) + (orphans.gnb || 0)
-                      : 0;
-                    message.success(
-                      total > 0
-                        ? `已重载,清理 ${total} 个孤儿(enb=${orphans?.enb ?? 0} gsm=${orphans?.gsm ?? 0} gnb=${orphans?.gnb ?? 0})`
-                        : '已重载,无孤儿'
-                    );
-                  })
-                  .catch((e) => message.error((e as Error).message));
-              }}
-            >
-              <Button
-                icon={<CloudDownloadOutlined />}
-                loading={importMut.isPending && importMut.variables === 'reload'}
-                danger
+              {/* 重载 XML — 系统内置 + custom 全量重新加载 + 删孤儿(destructive mode=reload) */}
+              <Popconfirm
+                title="确认重载 XML?"
+                description={
+                  <div style={{ maxWidth: 360 }}>
+                    重新加载 <b>系统内置</b> + <b>自定义</b> 所有 XML:
+                    <br />· 当前 XML 中的指标 → UPSERT(覆盖 UI 编辑)
+                    <br />· DB 中已无 XML 对应的孤儿 → <b>删除</b>
+                    <br />· 关联的公式 / 启用记录级联清理
+                    <br />操作不可撤销!
+                  </div>
+                }
+                okText="确认重载"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+                placement="bottomRight"
+                onConfirm={() => {
+                  importMut
+                    .mutateAsync('reload')
+                    .then((r) => {
+                      const orphans = r.orphans;
+                      const total = orphans
+                        ? (orphans.enb || 0) + (orphans.gsm || 0) + (orphans.gnb || 0)
+                        : 0;
+                      message.success(
+                        total > 0
+                          ? `已重载,清理 ${total} 个孤儿(enb=${orphans?.enb ?? 0} gsm=${orphans?.gsm ?? 0} gnb=${orphans?.gnb ?? 0})`
+                          : '已重载,无孤儿'
+                      );
+                    })
+                    .catch((e) => message.error((e as Error).message));
+                }}
               >
-                重载 XML
+                <Button
+                  icon={<CloudDownloadOutlined />}
+                  loading={importMut.isPending && importMut.variables === 'reload'}
+                  danger
+                >
+                  重载 XML
+                </Button>
+              </Popconfirm>
+              <Button
+                icon={<ReloadOutlined />}
+                loading={cacheMut.isPending}
+                onClick={() =>
+                  cacheMut
+                    .mutateAsync()
+                    .then((r) => message.success(r.note ? `${r.note}` : '已刷新缓存'))
+                    .catch((e) => message.error((e as Error).message))
+                }
+              >
+                刷新缓存
               </Button>
-            </Popconfirm>
-            <Button
-              icon={<ReloadOutlined />}
-              loading={cacheMut.isPending}
-              onClick={() =>
-                cacheMut
-                  .mutateAsync()
-                  .then((r) => message.success(r.note ? `${r.note}` : '已刷新缓存'))
-                  .catch((e) => message.error((e as Error).message))
-              }
-            >
-              刷新缓存
-            </Button>
-          </Space>
+            </Space>
+          )}
         </Space>
       </Card>
 
-      {/* 主区域:列表态(SummaryTab)↔ 详情态(IndicatorsByTech) */}
+      {/* 主区域:列表态 vs 详情态二选一 */}
       {inDetail && selectedDeviceType ? (
-        <IndicatorsByTech deviceType={selectedDeviceType} />
+        <IndicatorsByTech
+          deviceType={selectedDeviceType}
+          filter={{
+            keyword: detailKeyword,
+            platform: detailPlatform,
+            groupId: detailGroupId,
+          }}
+        />
       ) : (
-        <SummaryTab onSelect={setTech} />
+        <SummaryTab onSelect={onSwitchTech} />
       )}
 
       {/* 抽屉与弹窗 */}

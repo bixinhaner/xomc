@@ -1,47 +1,55 @@
 /**
- * IndicatorsByTech — T-0180 P4 二级 drill-down 详情页面。
+ * IndicatorsByTech — T-0180 二级 drill-down 详情页面(2026-05-29 用户调整)。
  *
- * 行为基础来自原 IndicatorTab.tsx(T-0098 P3-03);本组件保留全部 CRUD/启用/平台过滤逻辑,
- * 删除"行级"操作改在 XMLFilesModal 走"按文件删"粒度(对齐 PRD §5 非目标 #3)。
+ * 本组件本身不渲染 filter / toolbar — index.tsx 顶部 Card 统一承载
+ * "返回 + 制式名 + 管理 XML 文件 + 分组筛选 + 平台筛选 + 关键字搜索"。
+ * 本组件仅作受控 Table:接受 keyword/platform/groupId props,过滤变化时
+ * 自动 reset pagination page=1。
  *
- * 顶部 Card 标题去除(由 index.tsx 顶部 toolbar 承担"返回 + 制式名"),
- * extra 保留平台筛选 + 搜索框。
+ * 列调整(用户决策):
+ *   - 新增"分组"列(groupName,与分组筛选字段对齐)
+ *   - 新增"平台"列(productClass,与平台筛选字段对齐)
+ *   - "详情"列改名为"操作",EyeOutlined → EditOutlined,
+ *     表明 IndicatorDrawer 内含公式 CRUD 支持修改
  */
-import { useMemo, useState } from 'react';
-import { Card, Table, Input, Switch, Button, Space, Select, message } from 'antd';
-import { EyeOutlined } from '@ant-design/icons';
+import { useEffect, useMemo, useState } from 'react';
+import { Card, Table, Switch, Button, Space, Tag, message } from 'antd';
+import { EditOutlined } from '@ant-design/icons';
 import {
   useIndicatorList,
   useEnabledIndicators,
   useSetEnabledIndicators,
-  usePlatformList,
 } from '@core/hooks/api/useIndicatorsLibrary';
 import type { DeviceType, IndicatorInfo } from '@core/types/indicatorLibrary';
 import IndicatorDrawer from './IndicatorDrawer';
 
+interface Filter {
+  keyword?: string;
+  platform?: string;
+  groupId?: string;
+}
+
 interface Props {
   deviceType: DeviceType;
+  filter: Filter;
 }
 
 // 启用状态走 default 行(XML 真相源)
 const OPERATOR_CODE = 'default';
 
-export default function IndicatorsByTech({ deviceType }: Props) {
-  const [keyword, setKeyword] = useState('');
-  const [platform, setPlatform] = useState<string | undefined>(undefined);
+export default function IndicatorsByTech({ deviceType, filter }: Props) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
 
-  const { data: platformData } = usePlatformList(deviceType);
-  const platformOptions = useMemo(
-    () => (platformData?.items || []).map((p) => ({ label: p, value: p })),
-    [platformData]
-  );
-  const showPlatformFilter = platformOptions.length > 1;
+  // filter 任意变化即 reset page=1(避免分页 + 过滤错位返空)
+  useEffect(() => {
+    setPage(1);
+  }, [filter.keyword, filter.platform, filter.groupId, deviceType]);
 
   const { data, isLoading } = useIndicatorList(deviceType, {
-    keyword: keyword || undefined,
-    platformName: platform,
+    keyword: filter.keyword || undefined,
+    platformName: filter.platform || undefined,
+    groupId: filter.groupId || undefined,
     page,
     pageSize,
   });
@@ -58,13 +66,20 @@ export default function IndicatorsByTech({ deviceType }: Props) {
 
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 140 },
-    { title: '中文名', dataIndex: 'cnName', width: 200 },
-    { title: '英文名', dataIndex: 'enName', width: 240, ellipsis: true },
+    { title: '中文名', dataIndex: 'cnName', width: 180 },
+    { title: '英文名', dataIndex: 'enName', width: 220, ellipsis: true },
     {
       title: '分组',
       dataIndex: 'groupName',
       width: 140,
-      render: (v: string, row: IndicatorInfo) => v || row.groupId || '—',
+      render: (v: string, row: IndicatorInfo) =>
+        v || row.groupId ? <Tag color="purple">{v || row.groupId}</Tag> : <span>—</span>,
+    },
+    {
+      title: '平台',
+      dataIndex: 'productClass',
+      width: 130,
+      render: (v: string) => (v ? <Tag color="cyan">{v}</Tag> : <span>—</span>),
     },
     { title: '计数器类型', dataIndex: 'counterType', width: 110 },
     ...(deviceType === 'GNB'
@@ -99,12 +114,12 @@ export default function IndicatorsByTech({ deviceType }: Props) {
       ),
     },
     {
-      title: '详情',
+      title: '操作',
       width: 80,
       render: (_: unknown, row: IndicatorInfo) => (
         <Button
           size="small"
-          icon={<EyeOutlined />}
+          icon={<EditOutlined />}
           onClick={() => {
             setSelected(row);
             setDrawerOpen(true);
@@ -115,36 +130,7 @@ export default function IndicatorsByTech({ deviceType }: Props) {
   ];
 
   return (
-    <Card
-      size="small"
-      extra={
-        <Space>
-          {showPlatformFilter && (
-            <Select
-              placeholder="按平台筛选"
-              allowClear
-              value={platform}
-              onChange={(v) => {
-                setPlatform(v);
-                setPage(1);
-              }}
-              options={platformOptions}
-              style={{ width: 200 }}
-            />
-          )}
-          <Input.Search
-            placeholder="搜索 ID / 名称"
-            allowClear
-            value={keyword}
-            onChange={(e) => {
-              setKeyword(e.target.value);
-              setPage(1);
-            }}
-            style={{ width: 260 }}
-          />
-        </Space>
-      }
-    >
+    <Card size="small">
       <Table<IndicatorInfo>
         rowKey="id"
         loading={isLoading}
@@ -175,3 +161,6 @@ export default function IndicatorsByTech({ deviceType }: Props) {
     </Card>
   );
 }
+
+// 删除原 Props.deviceType 的 platform/keyword 内嵌过滤,改为受控
+export type { Filter as IndicatorsByTechFilter };
