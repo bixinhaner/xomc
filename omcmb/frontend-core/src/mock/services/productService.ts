@@ -13,6 +13,8 @@ import { mockProducts, mockPatterns, mockMatchOrder, mockOrphans } from '../data
 let products = [...mockProducts];
 const patterns: Record<string, ProductPattern[]> = JSON.parse(JSON.stringify(mockPatterns));
 let orphans = [...mockOrphans];
+// 2026-05-29:mock rematch 排重标志(模拟真后端 per-admin Redis 锁的并发行为)
+let mockRematchInflight = false;
 
 function clone<T>(v: T): T {
   return JSON.parse(JSON.stringify(v)) as T;
@@ -170,10 +172,21 @@ export const productService = {
     return { items: clone(orphans), total: orphans.length };
   },
 
+  /** 2026-05-29 对齐真 API:返 { status: 'accepted' | 'running', message }。
+   *  后端 (handler.go) 用 Redis SET NX EX per-admin 锁排重;mock 模拟一个
+   *  2 秒并发窗口让 UI 能测到 running 分支 — 第一次点返 accepted 并设置
+   *  inflight 标志,2 秒内重复点返 running,2 秒后自动释放。 */
   async rematchOrphan() {
-    const before = orphans.length;
+    if (mockRematchInflight) {
+      return { status: 'running', message: 'mock rematch already running' };
+    }
+    mockRematchInflight = true;
+    // 同步清 orphans 模拟"重匹配完成";真后端是异步 goroutine 跑。
     orphans = [];
-    return { rebound: before, scanned: before };
+    setTimeout(() => {
+      mockRematchInflight = false;
+    }, 2000);
+    return { status: 'accepted', message: 'mock rematch started' };
   },
 
   async bindOrphan(deviceId: string, productId: string) {

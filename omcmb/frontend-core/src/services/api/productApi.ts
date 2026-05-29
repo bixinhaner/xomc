@@ -287,9 +287,14 @@ export const productApi = {
     };
   },
 
-  /** 2026-05-28: 后端改异步执行,API 立即返 202 {status:"accepted"}。
-   *  HTTP 409 = 同一管理员已有 in-flight rematch,由 axios 抛 error 由调用方 catch。
-   *  真正的 rebound 结果靠下一次进页面刷新体现。
+  /** 2026-05-29 修正:后端永远返 HTTP 200,业务码区分:
+   *    - status="accepted" → per-admin Redis 锁获取成功,异步 goroutine 已派发
+   *    - status="running"  → 该 admin 已有 in-flight rematch,前端 toast 等待
+   *  故意不用 409 — running 是正常等待态,不让 axios 进 catch 分支。
+   *  真正的 rebound 结果靠下一次进页面 invalidate 刷新体现(useRematchOrphan
+   *  onSuccess 已 invalidate orphan-devices + list 查询)。
+   *  锁实现见 omcgo/internal/product/handler.go::acquireRematchLock,
+   *  Redis 路径 TTL 10min 兜底防 goroutine 崩溃死锁。
    */
   async rematchOrphan(): Promise<{ status: string; message?: string }> {
     const { data } = await http.post<{ status: string; message?: string }>(
