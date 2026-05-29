@@ -213,8 +213,68 @@ func Test_AggregateKPIs_EvaluatesFormulaAndInserts(t *testing.T) {
 	assert.Equal(t, 1, n)
 	// 求值结果 0.8 应出现在 Exec args 中（KPI 行 metric_value 位）
 	require.Len(t, db.execArgs, 8) // oui, sn, path, val, stype, gran, bktStart, bktEnd
-	assert.Equal(t, "L.Cell.Avail.Rate", db.execArgs[2])
+	// metric_path 落库用 K 编号(IndicatorID)，不再用显示名
+	assert.Equal(t, "K1", db.execArgs[2])
 	assert.Equal(t, float64(0.8), db.execArgs[3])
 	assert.Equal(t, "pct", db.execArgs[4])
 	assert.Equal(t, "hourly", db.execArgs[5])
+}
+
+// 同显示名、不同编号的两个 KPI（device 级 + plmn 级变体）在同一桶内，
+// metric_path 必须各自落各自的 K 编号——否则一条多行 INSERT 内撞 ON CONFLICT 唯一键，
+// PostgreSQL 报 21000，整设备整桶 KPI 全失败（聚合层 KPI 长期 0 行的根因）。
+func Test_AggregateKPIs_SameDisplayNameUsesDistinctIndicatorID(t *testing.T) {
+	rt := &router.KPIRoute{
+		KPIs: []router.KPIDef{
+			{
+				IndicatorID:  "K900010029",
+				Name:         "RRC连接建立成功率",
+				StatisType:   "pct",
+				Formula:      "numerator / denominator",
+				Dependencies: []string{"numerator", "denominator"},
+			},
+			{
+				// plmn 级变体：显示名完全相同，编号不同
+				IndicatorID:  "K900010059",
+				Name:         "RRC连接建立成功率",
+				StatisType:   "pct",
+				Formula:      "numerator / denominator",
+				Dependencies: []string{"numerator", "denominator"},
+			},
+		},
+	}
+	kr := &stubKPIRouter{byDevice: map[string]*router.KPIRoute{"S1": rt}}
+
+	queryCalls := 0
+	db := &stubDB{
+		execTag: pgconn.NewCommandTag("INSERT 0 2"),
+		queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+			queryCalls++
+			switch queryCalls {
+			case 1:
+				return &fakeRows{rows: [][]any{{"A", "S1"}}}, nil
+			case 2:
+				return &fakeRows{rows: [][]any{
+					{"numerator", float64(95)},
+					{"denominator", float64(100)},
+				}}, nil
+			}
+			return nil, errors.New("unexpected Query")
+		},
+	}
+
+	a := New(db, kr, nil)
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+	_, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
+	require.NoError(t, err)
+	// 两行各 8 个参数；两个 path 位（idx 2、idx 10）必须是不同编号，不能都是同一显示名
+	require.Len(t, db.execArgs, 16)
+	assert.Equal(t, "K900010029", db.execArgs[2])
+	assert.Equal(t, "K900010059", db.execArgs[10])
+	assert.NotEqual(t, db.execArgs[2], db.execArgs[10],
+		"两个同显示名 KPI 的 metric_path 必须按编号区分，否则撞 ON CONFLICT 唯一键")
 }

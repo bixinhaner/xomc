@@ -173,7 +173,7 @@ func kpiValueToMetric(v model.KPIValue) metrics.PMMetric {
 	return metrics.PMMetric{
 		DeviceOUI:   v.OUI,
 		DeviceSN:    v.DeviceSN,
-		MetricPath:  v.KPIName,
+		MetricPath:  v.IndicatorID,
 		MetricType:  metrics.MetricTypeKPI,
 		MetricValue: v.KPIValue,
 		Granularity: metrics.Granularity15Min,
@@ -186,12 +186,14 @@ func kpiValueToMetric(v model.KPIValue) metrics.PMMetric {
 }
 
 func metricToKPIValue(m metrics.PMMetric) model.KPIValue {
+	// metric_path 现在存 K 编号；显示名由查询层按编号回填，本层无法还原。
 	v := model.KPIValue{
-		Time:     m.Time,
-		OUI:      m.DeviceOUI,
-		DeviceSN: m.DeviceSN,
-		KPIName:  m.MetricPath,
-		KPIValue: m.MetricValue,
+		Time:        m.Time,
+		OUI:         m.DeviceOUI,
+		DeviceSN:    m.DeviceSN,
+		IndicatorID: m.MetricPath,
+		KPIName:     m.MetricPath,
+		KPIValue:    m.MetricValue,
 	}
 	if m.ObjectLDN != nil {
 		v.CellID = *m.ObjectLDN

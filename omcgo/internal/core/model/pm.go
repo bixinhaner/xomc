@@ -41,15 +41,16 @@ type PMCounter struct {
 // 设备唯一标识：按 TR-069 标准使用 (OUI, DeviceSN) 双键（T-0164-P3 fix 引入），
 // 与 PMCounter 一致。
 type KPIValue struct {
-	Time       time.Time   `json:"time" db:"time"`
-	DeviceID   uuid.UUID   `json:"device_id" db:"device_id"`
-	OUI        string      `json:"oui" db:"device_oui"`
-	DeviceSN   string      `json:"device_sn" db:"device_sn"`
-	CellID     string      `json:"cell_id" db:"cell_id"`
-	KPIName    string      `json:"kpi_name" db:"kpi_name"`
-	KPIValue   float64     `json:"kpi_value" db:"kpi_value"`
-	Carrier    CarrierCode `json:"carrier" db:"carrier"`
-	Technology Technology  `json:"technology" db:"technology"`
+	Time        time.Time   `json:"time" db:"time"`
+	DeviceID    uuid.UUID   `json:"device_id" db:"device_id"`
+	OUI         string      `json:"oui" db:"device_oui"`
+	DeviceSN    string      `json:"device_sn" db:"device_sn"`
+	CellID      string      `json:"cell_id" db:"cell_id"`
+	IndicatorID string      `json:"indicator_id" db:"indicator_id"` // K 编号，落库 metric_path 用
+	KPIName     string      `json:"kpi_name" db:"kpi_name"`         // 显示名（en_name），日志/兼容用
+	KPIValue    float64     `json:"kpi_value" db:"kpi_value"`
+	Carrier     CarrierCode `json:"carrier" db:"carrier"`
+	Technology  Technology  `json:"technology" db:"technology"`
 }
 
 // KPIDefinition 描述 KPI 的计算公式和元数据。

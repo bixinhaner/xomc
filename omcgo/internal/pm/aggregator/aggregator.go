@@ -235,7 +235,7 @@ func (a *Aggregator) evalAndInsertKPIs(
 		if statis == "" {
 			statis = string(metrics.StatisPct) // KPI 缺省按 pct 写
 		}
-		rows = append(rows, kpiRow{path: k.Name, value: val, stype: statis})
+		rows = append(rows, kpiRow{path: k.IndicatorID, value: val, stype: statis})
 	}
 	if len(rows) == 0 {
 		return 0, nil

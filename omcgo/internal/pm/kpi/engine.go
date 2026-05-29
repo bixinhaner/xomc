@@ -111,15 +111,16 @@ func (e *KPIEngine) Calculate(
 			continue
 		}
 		results = append(results, model.KPIValue{
-			Time:       endTime,
-			DeviceID:   deviceID,
-			OUI:        oui,
-			DeviceSN:   deviceSN,
-			CellID:     cellID,
-			KPIName:    k.Name,
-			KPIValue:   value,
-			Carrier:    carrierCode,
-			Technology: tech,
+			Time:        endTime,
+			DeviceID:    deviceID,
+			OUI:         oui,
+			DeviceSN:    deviceSN,
+			CellID:      cellID,
+			IndicatorID: k.IndicatorID,
+			KPIName:     k.Name,
+			KPIValue:    value,
+			Carrier:     carrierCode,
+			Technology:  tech,
 		})
 	}
 	return results, nil
