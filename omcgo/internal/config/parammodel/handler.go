@@ -2,9 +2,11 @@ package parammodel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +17,52 @@ import (
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/response"
 )
+
+// optInt64 在 JSON 解码时同时接受 number、numeric string、null、""。
+//   - 字段缺省                → *optInt64 为 nil(语义:不提供)
+//   - JSON `null` / `""`      → 非 nil 指针但 Valid=false(语义:显式清空)
+//   - JSON number / 数字字符串 → 非 nil 指针且 Valid=true,Value=对应 int64
+//
+// 用于 min_value / max_value 这类 BIGINT 列:前端 Antd <Input> 总是吐字符串,
+// 不能直接绑 *int64,否则 JSON 解码报 "cannot unmarshal string into ... int64"。
+type optInt64 struct {
+	Value int64
+	Valid bool
+}
+
+func (o *optInt64) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		return nil
+	}
+	var n int64
+	if err := json.Unmarshal(data, &n); err == nil {
+		o.Value, o.Valid = n, true
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return fmt.Errorf("expected number or numeric string, got %s", string(data))
+	}
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	parsed, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return fmt.Errorf("parse int64 from %q: %w", s, err)
+	}
+	o.Value, o.Valid = parsed, true
+	return nil
+}
+
+// Ptr 把 *optInt64 转 *int64:nil 或 Valid=false 都返回 nil,否则返回拷贝指针。
+func (o *optInt64) Ptr() *int64 {
+	if o == nil || !o.Valid {
+		return nil
+	}
+	v := o.Value
+	return &v
+}
 
 // Handler 暴露 /api/v1/param-models/* 与 standard_params CRUD（设计 §1.13）。
 //
@@ -212,15 +260,15 @@ func (h *Handler) ListMappings(c *gin.Context) {
 }
 
 type createMappingReq struct {
-	StandardPath  string `json:"standard_path" binding:"required"`
-	PrivatePath   string `json:"private_path" binding:"required"`
-	EntryType     string `json:"entry_type" binding:"required"`
-	Access        string `json:"access"`
-	DataType      string `json:"data_type"`
-	ChangeApplies string `json:"change_applies"`
-	MinValue      *int64 `json:"min_value"`
-	MaxValue      *int64 `json:"max_value"`
-	IsStorable    *bool  `json:"is_storable"`
+	StandardPath  string    `json:"standard_path" binding:"required"`
+	PrivatePath   string    `json:"private_path" binding:"required"`
+	EntryType     string    `json:"entry_type" binding:"required"`
+	Access        string    `json:"access"`
+	DataType      string    `json:"data_type"`
+	ChangeApplies string    `json:"change_applies"`
+	MinValue      *optInt64 `json:"min_value"`
+	MaxValue      *optInt64 `json:"max_value"`
+	IsStorable    *bool     `json:"is_storable"`
 }
 
 func (h *Handler) CreateMapping(c *gin.Context) {
@@ -246,8 +294,8 @@ func (h *Handler) CreateMapping(c *gin.Context) {
 		Access:        req.Access,
 		DataType:      req.DataType,
 		ChangeApplies: req.ChangeApplies,
-		MinValue:      req.MinValue,
-		MaxValue:      req.MaxValue,
+		MinValue:      req.MinValue.Ptr(),
+		MaxValue:      req.MaxValue.Ptr(),
 		IsStorable:    true,
 	}
 	if req.IsStorable != nil {
@@ -263,14 +311,14 @@ func (h *Handler) CreateMapping(c *gin.Context) {
 }
 
 type updateMappingReq struct {
-	PrivatePath   *string `json:"private_path"`
-	Access        *string `json:"access"`
-	DataType      *string `json:"data_type"`
-	ChangeApplies *string `json:"change_applies"`
-	MinValue      *int64  `json:"min_value"`
-	MaxValue      *int64  `json:"max_value"`
-	IsStorable    *bool   `json:"is_storable"`
-	IsActive      *bool   `json:"is_active"`
+	PrivatePath   *string   `json:"private_path"`
+	Access        *string   `json:"access"`
+	DataType      *string   `json:"data_type"`
+	ChangeApplies *string   `json:"change_applies"`
+	MinValue      *optInt64 `json:"min_value"`
+	MaxValue      *optInt64 `json:"max_value"`
+	IsStorable    *bool     `json:"is_storable"`
+	IsActive      *bool     `json:"is_active"`
 }
 
 func (h *Handler) UpdateMapping(c *gin.Context) {
@@ -289,8 +337,8 @@ func (h *Handler) UpdateMapping(c *gin.Context) {
 		Access:        req.Access,
 		DataType:      req.DataType,
 		ChangeApplies: req.ChangeApplies,
-		MinValue:      req.MinValue,
-		MaxValue:      req.MaxValue,
+		MinValue:      req.MinValue.Ptr(),
+		MaxValue:      req.MaxValue.Ptr(),
 		IsStorable:    req.IsStorable,
 		IsActive:      req.IsActive,
 	})
@@ -445,13 +493,13 @@ func (h *Handler) GetStandard(c *gin.Context) {
 }
 
 type upsertStandardReq struct {
-	StandardPath  string `json:"standard_path" binding:"required"`
-	EntryType     string `json:"entry_type" binding:"required"`
-	Access        string `json:"access"`
-	DataType      string `json:"data_type"`
-	ChangeApplies string `json:"change_applies"`
-	MinValue      *int64 `json:"min_value"`
-	MaxValue      *int64 `json:"max_value"`
+	StandardPath  string    `json:"standard_path" binding:"required"`
+	EntryType     string    `json:"entry_type" binding:"required"`
+	Access        string    `json:"access"`
+	DataType      string    `json:"data_type"`
+	ChangeApplies string    `json:"change_applies"`
+	MinValue      *optInt64 `json:"min_value"`
+	MaxValue      *optInt64 `json:"max_value"`
 }
 
 func (h *Handler) UpsertStandard(c *gin.Context) {
@@ -466,8 +514,8 @@ func (h *Handler) UpsertStandard(c *gin.Context) {
 		Access:        req.Access,
 		DataType:      req.DataType,
 		ChangeApplies: req.ChangeApplies,
-		MinValue:      req.MinValue,
-		MaxValue:      req.MaxValue,
+		MinValue:      req.MinValue.Ptr(),
+		MaxValue:      req.MaxValue.Ptr(),
 	})
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
@@ -497,8 +545,8 @@ func (h *Handler) UpdateStandard(c *gin.Context) {
 		Access:        req.Access,
 		DataType:      req.DataType,
 		ChangeApplies: req.ChangeApplies,
-		MinValue:      req.MinValue,
-		MaxValue:      req.MaxValue,
+		MinValue:      req.MinValue.Ptr(),
+		MaxValue:      req.MaxValue.Ptr(),
 	})
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
