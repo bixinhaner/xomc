@@ -1126,6 +1126,55 @@ func TestHandleDeviceOnline_RedisDown_StillProceeds(t *testing.T) {
 	assert.NoError(t, err, "Redis 失败应不阻塞主流程（容忍 Redis 抖动）")
 }
 
+func TestHandleGPVResponse_EmptySyncGPVStillFinalizesPathB(t *testing.T) {
+	deviceID := uuid.New()
+	deviceSN := "SN-NR-EMPTY-GPV"
+	originalDebounce := pathBSyncFinalizeDebounce
+	pathBSyncFinalizeDebounce = 50 * time.Millisecond
+	defer func() {
+		pathBSyncFinalizeDebounce = originalDebounce
+	}()
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer func() { _ = rdb.Close() }()
+
+	deviceRepo := &mockDeviceRepo{
+		GetBySerialNumberFn: func(_ context.Context, sn string) (*model.Device, error) {
+			if sn != deviceSN {
+				return nil, nil
+			}
+			return &model.Device{
+				ID:           deviceID,
+				SerialNumber: deviceSN,
+				Carrier:      model.CarrierCMCC,
+				Technology:   model.TechNR,
+			}, nil
+		},
+	}
+	h := newEngineHarness(deviceRepo)
+	writer := &fakeParamSyncWriter{}
+	h.engine.SetSyncService((&SyncService{redisClient: rdb, logger: zap.NewNop()}).SetParamSyncWriter(writer))
+	require.NoError(t, rdb.Set(context.Background(), pathBSyncPendingBatchesKey(deviceID), 1, time.Minute).Err())
+
+	evt, err := event.NewEvent(event.SubjectCommandGetParamsResponse, map[string]interface{}{
+		"device_sn":        deviceSN,
+		"method":           "GetParameterValuesResponse",
+		"command_key":      "sync-gpv-test-0",
+		"parameter_values": []map[string]any{},
+	})
+	require.NoError(t, err)
+
+	err = h.engine.handleGPVResponse(context.Background(), evt)
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		return len(writer.calls) == 1
+	}, time.Second, 20*time.Millisecond, "empty sync-gpv response should still finalize Path B after debounce")
+	_, redisErr := rdb.Get(context.Background(), pathBSyncPendingBatchesKey(deviceID)).Result()
+	assert.Error(t, redisErr, "pending batch key should be cleared after final empty sync-gpv response")
+}
+
 // ---------------------------------------------------------------------------
 // Tests: T-0125 HandleFirmwareChanged — Redis 串行锁 + reason hint + fallback Path B
 // ---------------------------------------------------------------------------

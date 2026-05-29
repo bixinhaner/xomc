@@ -187,6 +187,7 @@ interface DeviceDetailCell {
   pci?: string;
   freqPoint?: string;
   bandwidth?: string;
+  band?: string;
   opState?: string;
   rfTxStatus?: string;
   adminState?: string;
@@ -237,6 +238,7 @@ interface BackendDeviceDetailCell {
   pci?: string;
   freq_point?: string;
   bandwidth?: string;
+  band?: string;
   op_state?: string;
   rf_tx_status?: string;
   admin_state?: string;
@@ -340,6 +342,7 @@ function mapDeviceDetailCell(cell: BackendDeviceDetailCell): DeviceDetailCell {
     pci: cell.pci,
     freqPoint: cell.freq_point,
     bandwidth: cell.bandwidth,
+    band: cell.band,
     opState: cell.op_state,
     rfTxStatus: cell.rf_tx_status,
     adminState: cell.admin_state,
@@ -456,7 +459,8 @@ const computeTotalOnline = (
 // 状态渲染
 const renderStatusTag = (value: string | undefined, map: Record<string, { label: string; color: string }>) => {
   if (!value) return '-';
-  const entry = map[value];
+  const raw = value.trim();
+  const entry = map[raw] ?? map[raw.toLowerCase()];
   if (!entry) return value;
   return <Tag color={entry.color}>{entry.label}</Tag>;
 };
@@ -573,8 +577,6 @@ const getStatusFields = (t: ReturnType<typeof useT>, networkType: string): Field
   if (networkType === 'eNB') {
     fields.push(
       { key: 'mmeStatus', label: t('device.mmeStatus'), render: (d) => d.mmeStatus ?? '-' },
-      { key: 'pmReportStatus', label: t('device.pmReportStatus'), render: (d) => d.pmReportStatus ?? '-' },
-      { key: 'cpeCount', label: t('device.cpeCount'), render: (d) => d.cpeCount ?? '-' },
       { key: 'lockStatus', label: t('device.lockStatus'), render: (d) => renderStatusTag(d.lockStatus, { locked: { label: t('status.locked'), color: 'warning' }, unlocked: { label: t('status.unlocked'), color: 'success' } }) },
       { key: 'wanSpeed', label: t('device.wanSpeed'), render: (d) => d.wanSpeed ?? '-' },
     );
@@ -584,7 +586,7 @@ const getStatusFields = (t: ReturnType<typeof useT>, networkType: string): Field
   if (networkType === 'gNB') {
     fields.push(
       { key: 'mmeStatus', label: t('device.amfStatus'), render: (d) => d.mmeStatus ?? d.amfStatus ?? '-' },
-      { key: 'wanSpeed', label: t('device.wanSpeed'), render: (d) => renderStatusTag(d.wanSpeed, { connected: { label: t('status.connected'), color: 'success' }, disconnected: { label: t('status.disconnected'), color: 'error' } }) },
+      { key: 'wanSpeed', label: t('device.wanSpeed'), render: (d) => d.wanSpeed ?? '-' },
       { key: 'multiPlmnEnable', label: 'Multi PLMN', render: (d) => renderStatusTag(d.multiPlmnEnable, { enabled: { label: t('status.enabled'), color: 'success' }, disabled: { label: t('status.disabled'), color: 'default' } }) },
     );
   }
@@ -667,14 +669,15 @@ const buildCellRecords = (device: Device, detailCells?: DeviceDetailCell[]): Cel
       index: cell.index || idx + 1,
       values: {
         cellId: cell.cellId ?? cell.eci ?? '',
+        nrCellId: cell.cellId ?? cell.eci ?? '',
         eci: cell.eci ?? '',
         pci: cell.pci ?? '',
+        freqPoint: cell.freqPoint ?? '',
         bandwidth: cell.bandwidth ?? '',
-        opState: cell.opState || device.opState || '',
-        rfStatus: cell.rfTxStatus || device.rfStatus || '',
+        band: cell.band ?? device.band ?? '',
+        opState: cell.opState ?? '',
+        rfStatus: cell.rfTxStatus ?? '',
         adminState: cell.adminState ?? '',
-        band: device.band,
-        nrCellId: device.nrCellId,
       },
     }));
   }
@@ -716,44 +719,84 @@ const renderCellRfStatus = (value: string | undefined, t: ReturnType<typeof useT
     false: { label: t('status.rfOff'), color: 'error' },
   });
 
+const renderCellAdminState = (
+  value: string | undefined,
+  networkType: string,
+  t: ReturnType<typeof useT>,
+) => {
+  const normalizedNetworkType = normalizeNetworkType(networkType);
+
+  if (normalizedNetworkType === 'gNB') {
+    return renderStatusTag(value, {
+      '1': { label: 'Locked', color: 'warning' },
+      '2': { label: 'Unlocked', color: 'success' },
+      '3': { label: 'ShuttingDown', color: 'error' },
+      locked: { label: 'Locked', color: 'warning' },
+      unlocked: { label: 'Unlocked', color: 'success' },
+      shuttingdown: { label: 'ShuttingDown', color: 'error' },
+    });
+  }
+
+  return renderStatusTag(value, {
+    '1': { label: t('status.enabled'), color: 'success' },
+    '0': { label: t('status.disabled'), color: 'default' },
+    true: { label: t('status.enabled'), color: 'success' },
+    false: { label: t('status.disabled'), color: 'default' },
+    enabled: { label: t('status.enabled'), color: 'success' },
+    disabled: { label: t('status.disabled'), color: 'default' },
+  });
+};
+
 const getCellSummaryColumns = (networkType: string, t: ReturnType<typeof useT>): CellSummaryColumn[] => {
   const base: CellSummaryColumn[] = [
     { title: 'index', dataIndex: ['index'], key: 'index', width: 80 },
-    { title: t('device.cellId'), dataIndex: ['values', 'cellId'], key: 'cellId' },
-    { title: t('device.opState'), key: 'opState' },
+    { title: t('device.opState'), key: 'opState', width: 120 },
   ];
 
   switch (networkType) {
     case 'eNB':
       return [
-        ...base,
-        { title: t('device.rfStatus'), dataIndex: ['values', 'rfStatus'], key: 'rfStatus' },
-        { title: 'PCI', dataIndex: ['values', 'pci'], key: 'pci' },
-        { title: 'bandwidth', dataIndex: ['values', 'bandwidth'], key: 'bandwidth' },
-        { title: 'band', dataIndex: ['values', 'band'], key: 'band' },
+        { title: 'index', dataIndex: ['index'], key: 'index', width: 80 },
+        { title: t('device.cellId'), dataIndex: ['values', 'cellId'], key: 'cellId', width: 120 },
+        { title: 'Admin State', dataIndex: ['values', 'adminState'], key: 'adminState', width: 140 },
+        { title: t('device.opState'), key: 'opState', width: 120 },
+        { title: t('device.rfStatus'), dataIndex: ['values', 'rfStatus'], key: 'rfStatus', width: 140 },
+        { title: 'PCI', dataIndex: ['values', 'pci'], key: 'pci', width: 100 },
+        { title: 'Freq Point', dataIndex: ['values', 'freqPoint'], key: 'freqPoint', width: 140 },
+        { title: t('device.bandwidth'), dataIndex: ['values', 'bandwidth'], key: 'bandwidth', width: 120 },
+        { title: 'band', dataIndex: ['values', 'band'], key: 'band', width: 100 },
       ];
     case 'gNB':
       return [
-        ...base,
-        { title: t('device.rfStatus'), dataIndex: ['values', 'rfStatus'], key: 'rfStatus' },
-        { title: 'PCI', dataIndex: ['values', 'pci'], key: 'pci' },
-        { title: 'band', dataIndex: ['values', 'band'], key: 'band' },
-        { title: 'NR Cell ID', dataIndex: ['values', 'nrCellId'], key: 'nrCellId' },
+        { title: 'index', dataIndex: ['index'], key: 'index', width: 80 },
+        { title: t('device.opState'), key: 'opState', width: 120 },
+        { title: t('device.rfStatus'), dataIndex: ['values', 'rfStatus'], key: 'rfStatus', width: 140 },
+        { title: 'PCI', dataIndex: ['values', 'pci'], key: 'pci', width: 100 },
+        { title: 'NRARFCN', dataIndex: ['values', 'freqPoint'], key: 'freqPoint', width: 140 },
+        { title: 'band', dataIndex: ['values', 'band'], key: 'band', width: 100 },
+        { title: 'NR Cell ID', dataIndex: ['values', 'nrCellId'], key: 'nrCellId', width: 160 },
+        { title: 'Admin State', dataIndex: ['values', 'adminState'], key: 'adminState', width: 140 },
+        { title: t('device.bandwidth'), dataIndex: ['values', 'bandwidth'], key: 'bandwidth', width: 120 },
       ];
     case 'GSM':
       return [
-        ...base,
-        { title: t('device.rfStatus'), dataIndex: ['values', 'rfStatus'], key: 'rfStatus' },
-        { title: 'LAC', dataIndex: ['values', 'lac'], key: 'lac' },
-        { title: t('device.arfcn'), dataIndex: ['values', 'arfcn'], key: 'arfcn' },
-        { title: t('device.btsNum'), dataIndex: ['values', 'btsNum'], key: 'btsNum' },
+        { title: 'index', dataIndex: ['index'], key: 'index', width: 80 },
+        { title: t('device.cellId'), dataIndex: ['values', 'cellId'], key: 'cellId', width: 120 },
+        { title: 'Admin State', dataIndex: ['values', 'adminState'], key: 'adminState', width: 140 },
+        { title: t('device.opState'), key: 'opState', width: 120 },
+        { title: t('device.rfStatus'), dataIndex: ['values', 'rfStatus'], key: 'rfStatus', width: 140 },
+        { title: 'LAC', dataIndex: ['values', 'lac'], key: 'lac', width: 120 },
+        { title: t('device.arfcn'), dataIndex: ['values', 'arfcn'], key: 'arfcn', width: 120 },
+        { title: t('device.btsNum'), dataIndex: ['values', 'btsNum'], key: 'btsNum', width: 120 },
       ];
     default:
       return [
         ...base,
-        { title: t('device.rfStatus'), dataIndex: ['values', 'rfStatus'], key: 'rfStatus' },
-        { title: 'PCI', dataIndex: ['values', 'pci'], key: 'pci' },
-        { title: 'band', dataIndex: ['values', 'band'], key: 'band' },
+        { title: t('device.cellId'), dataIndex: ['values', 'cellId'], key: 'cellId', width: 120 },
+        { title: 'Admin State', dataIndex: ['values', 'adminState'], key: 'adminState', width: 140 },
+        { title: t('device.rfStatus'), dataIndex: ['values', 'rfStatus'], key: 'rfStatus', width: 140 },
+        { title: 'PCI', dataIndex: ['values', 'pci'], key: 'pci', width: 100 },
+        { title: 'band', dataIndex: ['values', 'band'], key: 'band', width: 100 },
       ];
   }
 };
@@ -929,8 +972,11 @@ export default function DeviceDetail() {
 
   // T-0138:快速设置 tab 显示规则 —— 只在该设备对应 paramModel 有 quicksettings XML 时显示
   // (后端 GET /quicksettings/groups?device_id=... 返回空 groups 即视为未配置)
-  const { data: quickSettingsData } = useQuickSettingsGroups(device?.id);
-  const showQuickSettingsTab = (quickSettingsData?.groups?.length ?? 0) > 0;
+  const {
+    data: quickSettingsData,
+    isLoading: quickSettingsLoading,
+  } = useQuickSettingsGroups(device?.id);
+  const showQuickSettingsTab = !quickSettingsLoading && (quickSettingsData?.groups?.length ?? 0) > 0;
 
   const handleHeaderRefresh = useCallback(() => {
     void refetch();
@@ -1170,12 +1216,18 @@ export default function DeviceDetail() {
     () => getCellSummaryColumns(normalizeNetworkType(displayDevice?.networkType), t).map((column) => ({
       ...column,
       render: column.key === 'opState'
-        ? (_: unknown, row: CellRecord) => renderCellOpState((row.values.opState as string | undefined) ?? displayDevice?.opState, t)
+        ? (_: unknown, row: CellRecord) => renderCellOpState(row.values.opState as string | undefined, t)
+        : column.key === 'adminState'
+          ? (_: unknown, row: CellRecord) => renderCellAdminState(
+            row.values.adminState as string | undefined,
+            displayDevice?.networkType ?? '',
+            t,
+          )
         : column.key === 'rfStatus'
-          ? (_: unknown, row: CellRecord) => renderCellRfStatus((row.values.rfStatus as string | undefined) ?? displayDevice?.rfStatus, t)
+          ? (_: unknown, row: CellRecord) => renderCellRfStatus(row.values.rfStatus as string | undefined, t)
           : (value: string | number | undefined) => value ?? '-',
     })),
-    [displayDevice?.networkType, displayDevice?.opState, displayDevice?.rfStatus, t],
+    [displayDevice?.networkType, t],
   );
 
   if (isLoading) {
@@ -1266,6 +1318,7 @@ export default function DeviceDetail() {
                         dataSource={cellRecords}
                         pagination={false}
                         size="small"
+                        scroll={{ x: 'max-content' }}
                       />
                     </Card>
                   )}

@@ -6,43 +6,40 @@ import (
 	"strings"
 )
 
-// CalcCellStatus computes the cell_status quick-query column from device_parameters.
-// Three-dimensional judgment: FAP AdminState + OpState + CellOpState.
+// CalcCellStatus computes the list-page activation summary from device_parameters.
+// It intentionally follows device detail page semantics: iterate all cells/FAPService
+// instances and treat the device as active when any cell OpState is active.
 //
 // Logic:
 //
-//	AdminState=false                                     → "inactive"
-//	AdminState=true && OpState=false                     → "fault"
-//	AdminState=true && OpState=true && CellOpState="0"   → "decommissioned"
-//	AdminState=true && OpState=true && CellOpState="1"   → "normal"
+//	Any cell OpState active   → "normal"
+//	All observed cells inactive → "inactive"
+//	No cell data                → "inactive"
 func CalcCellStatus(params map[string]string) string {
-	adminState := params["Device.Services.FAPService.1.FAPControl.LTE.AdminState"]
-	if adminState == "" {
-		adminState = params["Device.Services.FAPService.1.FAPControl.NR.AdminState"]
+	maxIndex := detectMaxFAPServiceIndexFromMap(params)
+	if count := CalcNumOfCells(params); count > maxIndex {
+		maxIndex = count
 	}
-	opState := params["Device.Services.FAPService.1.FAPControl.LTE.OpState"]
-	if opState == "" {
-		opState = params["Device.Services.FAPService.1.FAPControl.NR.OpState"]
-	}
-	cellOpState := params["Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellOpState"]
-	if cellOpState == "" {
-		cellOpState = params["Device.Services.FAPService.1.CellConfig.NR.RAN.Common.CellOpState"]
+	if maxIndex <= 0 {
+		maxIndex = 1
 	}
 
-	if !isTrueValue(adminState) {
+	hasObservedCell := false
+
+	for i := 1; i <= maxIndex; i++ {
+		isActive, ok := isCellActiveForIndex(params, i)
+		if !ok {
+			continue
+		}
+		hasObservedCell = true
+		if isActive {
+			return "normal"
+		}
+	}
+	if !hasObservedCell {
 		return "inactive"
 	}
-	if !isTrueValue(opState) {
-		return "fault"
-	}
-	if cellOpState == "0" || strings.EqualFold(cellOpState, "false") {
-		return "decommissioned"
-	}
-	if cellOpState == "1" || strings.EqualFold(cellOpState, "true") {
-		return "normal"
-	}
-	// Default when CellOpState is absent
-	return "normal"
+	return "inactive"
 }
 
 // CalcMMEStatus computes the mme_status quick-query column from device_parameters.
@@ -111,6 +108,8 @@ func CalcLicenseStatus(params map[string]string) string {
 
 // CalcSyncStatus computes the sync_status quick-query column from device_parameters.
 // Checks GPS, BDS, GLONASS, 1588v2, and tfcsSyncState to determine sync source.
+// 对于设备直接上报的文本态（如 LOCKED / HOLDOVER / SYNCED），保留原始值，
+// 避免被错误折叠成 error。
 func CalcSyncStatus(params map[string]string) string {
 	if nrSyncStatus := firstNonEmpty(
 		params["Device.Services.FAPService.1.FAPControl.PLLSyncState"],
@@ -119,9 +118,15 @@ func CalcSyncStatus(params map[string]string) string {
 		return nrSyncStatus
 	}
 
-	tfcsSync := params["Device.Services.FAPService.1.FAPControl.LTE.Gateway.X_COM_tfcsSyncState"]
+	tfcsSync := firstNonEmpty(
+		params["Device.ManagementServer.tfcsSyncState"],
+		params["Device.Services.FAPService.1.FAPControl.LTE.Gateway.X_COM_tfcsSyncState"],
+	)
 	if tfcsSync == "" {
 		tfcsSync = params["Device.Services.FAPService.1.FAPControl.NR.Gateway.X_COM_tfcsSyncState"]
+	}
+	if tfcsSync != "" && !isBooleanLikeValue(tfcsSync) {
+		return tfcsSync
 	}
 
 	gpsStatus := params["Device.DeviceInfo.X_COM_GPS_Status"]
@@ -212,6 +217,53 @@ func CalcNumOfCells(params map[string]string) int {
 // isTrueValue checks if a TR069 parameter value represents a boolean true.
 func isTrueValue(v string) bool {
 	return v == "1" || strings.EqualFold(v, "true")
+}
+
+func isCellActiveForIndex(params map[string]string, index int) (bool, bool) {
+	ctrlPrefix := fmt.Sprintf("Device.Services.FAPService.%d.FAPControl.", index)
+	lteConfigPrefix := fmt.Sprintf("Device.Services.FAPService.%d.CellConfig.LTE.", index)
+	nrConfigPrefix := fmt.Sprintf("Device.Services.FAPService.%d.CellConfig.NR.", index)
+	nrIndexedConfigPrefix := fmt.Sprintf("Device.Services.FAPService.%d.CellConfig.1.NR.", index)
+
+	cellOpState := firstNonEmpty(
+		params[ctrlPrefix+"LTE.CellOpState"],
+		params[ctrlPrefix+"LTE.OpState"],
+		params[lteConfigPrefix+"RAN.Common.CellOpState"],
+		params[nrIndexedConfigPrefix+"RAN.OpState"],
+		params[nrConfigPrefix+"RAN.OpState"],
+		params[ctrlPrefix+"NR.CellOpState"],
+		params[ctrlPrefix+"NR.OpState"],
+		params[nrConfigPrefix+"RAN.Common.CellOpState"],
+	)
+
+	if cellOpState == "" {
+		return false, false
+	}
+	return isTrueValue(cellOpState) || strings.EqualFold(cellOpState, "active"), true
+}
+
+func detectMaxFAPServiceIndexFromMap(params map[string]string) int {
+	maxIndex := 0
+	for path := range params {
+		const prefix = "Device.Services.FAPService."
+		if !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		remainder := path[len(prefix):]
+		dot := strings.IndexByte(remainder, '.')
+		if dot <= 0 {
+			continue
+		}
+		index, err := strconv.Atoi(remainder[:dot])
+		if err == nil && index > maxIndex {
+			maxIndex = index
+		}
+	}
+	return maxIndex
+}
+
+func isBooleanLikeValue(v string) bool {
+	return v == "1" || v == "0" || strings.EqualFold(v, "true") || strings.EqualFold(v, "false")
 }
 
 func firstNonEmpty(values ...string) string {

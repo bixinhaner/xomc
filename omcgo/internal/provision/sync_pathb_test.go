@@ -597,6 +597,23 @@ func (f *fakeParamSyncWriter) UpdateLastParamSyncAt(_ context.Context, id uuid.U
 	return f.err
 }
 
+type fakeDeviceInfoRefresher struct{}
+
+func (f *fakeDeviceInfoRefresher) SyncFromParameters(_ context.Context, _ uuid.UUID, _ model.CarrierCode, _ model.Technology) ([]string, error) {
+	return nil, nil
+}
+
+type fakePathBSyncTaskReader struct {
+	hasOpen bool
+	err     error
+	calls   []string
+}
+
+func (f *fakePathBSyncTaskReader) HasIncompleteSyncGPVTasksByDevice(_ context.Context, deviceSN string) (bool, error) {
+	f.calls = append(f.calls, deviceSN)
+	return f.hasOpen, f.err
+}
+
 func TestSetParamSyncWriter_ChainableReturnsSyncService(t *testing.T) {
 	svc := &SyncService{}
 	got := svc.SetParamSyncWriter(&fakeParamSyncWriter{})
@@ -607,4 +624,86 @@ func TestSetParamSyncWriter_NilSafe(t *testing.T) {
 	svc := &SyncService{}
 	assert.NotPanics(t, func() { svc.SetParamSyncWriter(nil) }, "nil 注入应不 panic（dev/test 场景接受禁用回写）")
 	assert.Nil(t, svc.paramSyncWriter, "nil 注入后字段应为 nil")
+}
+
+func TestSetDeviceInfoRefresher_ChainableReturnsSyncService(t *testing.T) {
+	svc := &SyncService{}
+	got := svc.SetDeviceInfoRefresher(&fakeDeviceInfoRefresher{})
+	assert.Same(t, svc, got, "SetDeviceInfoRefresher 应返回 *SyncService 支持链式调用")
+}
+
+func TestSetDeviceInfoRefresher_NilSafe(t *testing.T) {
+	svc := &SyncService{}
+	assert.NotPanics(t, func() { svc.SetDeviceInfoRefresher(nil) }, "nil 注入应不 panic")
+	assert.Nil(t, svc.deviceInfoRefresher, "nil 注入后字段应为 nil")
+}
+
+func TestSetPathBSyncTaskReader_ChainableReturnsSyncService(t *testing.T) {
+	svc := &SyncService{}
+	got := svc.SetPathBSyncTaskReader(&fakePathBSyncTaskReader{})
+	assert.Same(t, svc, got)
+}
+
+func TestSetPathBSyncTaskReader_NilSafe(t *testing.T) {
+	svc := &SyncService{}
+	assert.NotPanics(t, func() { svc.SetPathBSyncTaskReader(nil) })
+	assert.Nil(t, svc.pathBSyncTaskReader)
+}
+
+func TestShouldFinalizePathBSync_WaitsUntilLastBatch(t *testing.T) {
+	svc, _, _ := newDiffTestService(t, nil, nil)
+	ctx := context.Background()
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-1"}
+
+	svc.recordPathBSyncPendingBatches(ctx, dev.ID, 3)
+
+	assert.False(t, svc.shouldFinalizePathBSync(ctx, dev, "sync-gpv-sn-0"))
+	assert.False(t, svc.shouldFinalizePathBSync(ctx, dev, "sync-gpv-sn-1"))
+	assert.True(t, svc.shouldFinalizePathBSync(ctx, dev, "sync-gpv-sn-2"))
+	assert.True(t, svc.shouldFinalizePathBSync(ctx, dev, "sync-gpv-sn-3"), "缺少 pending key 时应降级为允许 finalize")
+}
+
+func TestShouldFinalizePathBSync_NonFullSyncBypassesPendingCounter(t *testing.T) {
+	svc, _, _ := newDiffTestService(t, nil, nil)
+	assert.True(t, svc.shouldFinalizePathBSync(context.Background(), &model.Device{ID: uuid.New(), SerialNumber: "SN-2"}, "auto-gpv-after-spv-1"))
+}
+
+func TestShouldFinalizePathBSync_UsesTaskReaderWhenAvailable(t *testing.T) {
+	svc, _, _ := newDiffTestService(t, nil, nil)
+	reader := &fakePathBSyncTaskReader{hasOpen: true}
+	svc.SetPathBSyncTaskReader(reader)
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-reader"}
+
+	assert.False(t, svc.shouldFinalizePathBSync(context.Background(), dev, "sync-gpv-sn-0"))
+	assert.Equal(t, []string{"SN-reader"}, reader.calls)
+
+	reader.hasOpen = false
+	assert.True(t, svc.shouldFinalizePathBSync(context.Background(), dev, "sync-gpv-sn-1"))
+}
+
+func TestHandleSyncResultPathB_EmptyFullSyncWaitsForRemainingTasks(t *testing.T) {
+	originalDebounce := pathBSyncFinalizeDebounce
+	pathBSyncFinalizeDebounce = 50 * time.Millisecond
+	defer func() {
+		pathBSyncFinalizeDebounce = originalDebounce
+	}()
+
+	svc, _, mr := newDiffTestService(t, nil, nil)
+	writer := &fakeParamSyncWriter{}
+	svc.SetParamSyncWriter(writer)
+	reader := &fakePathBSyncTaskReader{hasOpen: true}
+	svc.SetPathBSyncTaskReader(reader)
+	dev := &model.Device{ID: uuid.New(), SerialNumber: "SN-empty", Carrier: model.CarrierCMCC, Technology: model.TechNR}
+
+	handled, err := svc.HandleSyncResultPathB(context.Background(), dev, nil, "sync-gpv-sn-empty-0")
+	require.NoError(t, err)
+	assert.True(t, handled)
+	assert.Equal(t, []string{"SN-empty"}, reader.calls)
+	assert.Never(t, func() bool {
+		return len(writer.calls) > 0
+	}, 200*time.Millisecond, 20*time.Millisecond, "empty full-sync response must not finalize while sync-gpv tasks remain open")
+	if mr != nil {
+		_, redisErr := mr.Get(pathBSyncFinalizeDebounceKey(dev.ID))
+		assert.Error(t, redisErr, "should not schedule deferred finalize while tasks remain open")
+	}
 }

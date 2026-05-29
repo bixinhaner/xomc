@@ -339,9 +339,6 @@ func (s *InfoSyncer) SyncFromParameters(ctx context.Context, deviceID uuid.UUID,
 	}
 
 	mapping := c.GetInfoParamMapping(tech)
-	if len(mapping) == 0 {
-		return nil, nil
-	}
 
 	// Get all parameters for this device
 	params, err := s.paramRepo.GetByDevice(ctx, deviceID)

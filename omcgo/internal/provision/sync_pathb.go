@@ -3,6 +3,7 @@ package provision
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -89,6 +90,7 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 	if err := s.enqueueGPVPrefixes(ctx, dev, prefixes, sourceID); err != nil {
 		return true, fmt.Errorf("enqueue path-b GPV: %w", err)
 	}
+	s.recordPathBSyncPendingBatches(ctx, dev.ID, len(buildGPVBatches(prefixes, s.batchSize)))
 
 	s.logger.Info("path-b sync started",
 		zap.String("device_sn", dev.SerialNumber),
@@ -121,8 +123,20 @@ func (s *SyncService) StartPathBSync(ctx context.Context, dev *model.Device, sou
 // 返回 nil 即视为成功；底层 BatchUpsert 错误向上传。
 func (s *SyncService) HandleSyncResultPathB(ctx context.Context, dev *model.Device,
 	paramValues []tr069.ParameterValueStruct, triggerCommandKey string) (bool, error) {
+	fullSyncTrigger := isFullSyncTrigger(triggerCommandKey)
+	finalizeSync := true
+	if fullSyncTrigger {
+		finalizeSync = s.shouldFinalizePathBSync(ctx, dev, triggerCommandKey)
+	}
+
 	if len(paramValues) == 0 {
-		return false, nil
+		if !fullSyncTrigger {
+			return false, nil
+		}
+		if finalizeSync {
+			s.finalizeOrDebouncePathBSync(dev, fullSyncTrigger)
+		}
+		return true, nil
 	}
 
 	set, ok := s.resolveMappingSet(ctx, dev)
@@ -185,7 +199,6 @@ func (s *SyncService) HandleSyncResultPathB(ctx context.Context, dev *model.Devi
 			return true, fmt.Errorf("path-b batch upsert: %w", err)
 		}
 	}
-
 	s.logger.Debug("path-b sync result handled",
 		zap.String("device_sn", dev.SerialNumber),
 		zap.String("source", string(set.Source)),
@@ -196,7 +209,10 @@ func (s *SyncService) HandleSyncResultPathB(ctx context.Context, dev *model.Devi
 	)
 
 	// T-0127: 差异日志 — 把"之前上报、本次未上报"的 standardPath 差集写应用日志。
-	s.logPathBSyncDiff(ctx, dev, prevPaths, params)
+	// 分批 GPV 响应只覆盖局部子树；仅在整轮 sync-gpv 最后一批完成后再记录，避免中途噪声。
+	if !fullSyncTrigger || finalizeSync {
+		s.logPathBSyncDiff(ctx, dev, prevPaths, params)
+	}
 
 	// line 52 (2026-05-20): 全量同步对象级差集删除 — 基于本次响应数据自动推导对象 prefix，
 	// 在该 prefix 范围内对账（DB 有但 CPE 未返回 → 物理删除）。设计原则：
@@ -217,6 +233,87 @@ func (s *SyncService) HandleSyncResultPathB(ctx context.Context, dev *model.Devi
 	// T-0124: 回写 last_param_sync_at（统一口径，不区分触发源）。
 	// 仅在 BatchUpsert 成功（含本次未变化时 len(params)=0 也算成功）后回写；
 	// GPV 部分失败 / 超时 / 取消时不回写，让下一轮周期或上线重试自动覆盖。
+	if finalizeSync {
+		s.finalizeOrDebouncePathBSync(dev, fullSyncTrigger)
+	}
+
+	return true, nil
+}
+
+const pathBSyncPendingBatchesTTL = 10 * time.Minute
+
+var pathBSyncFinalizeDebounce = 15 * time.Second
+
+func pathBSyncPendingBatchesKey(deviceID uuid.UUID) string {
+	return fmt.Sprintf("provision:pathb:pending:%s", deviceID.String())
+}
+
+func pathBSyncFinalizeDebounceKey(deviceID uuid.UUID) string {
+	return fmt.Sprintf("provision:pathb:finalize:%s", deviceID.String())
+}
+
+func (s *SyncService) recordPathBSyncPendingBatches(ctx context.Context, deviceID uuid.UUID, totalBatches int) {
+	if s.redisClient == nil || deviceID == uuid.Nil || totalBatches <= 0 {
+		return
+	}
+	if err := s.redisClient.Set(ctx, pathBSyncPendingBatchesKey(deviceID), totalBatches, pathBSyncPendingBatchesTTL).Err(); err != nil {
+		s.logger.Warn("record path-b pending batches failed",
+			zap.String("device_id", deviceID.String()),
+			zap.Int("total_batches", totalBatches),
+			zap.Error(err))
+	}
+}
+
+func (s *SyncService) shouldFinalizePathBSync(ctx context.Context, dev *model.Device, triggerCommandKey string) bool {
+	if !isFullSyncTrigger(triggerCommandKey) || dev == nil {
+		return true
+	}
+	if s.pathBSyncTaskReader != nil {
+		hasOpen, err := s.pathBSyncTaskReader.HasIncompleteSyncGPVTasksByDevice(ctx, dev.SerialNumber)
+		if err != nil {
+			s.logger.Warn("query incomplete path-b tasks failed",
+				zap.String("device_id", dev.ID.String()),
+				zap.String("device_sn", dev.SerialNumber),
+				zap.Error(err))
+		} else {
+			return !hasOpen
+		}
+	}
+	deviceID := dev.ID
+	if s.redisClient == nil || deviceID == uuid.Nil {
+		return true
+	}
+	remaining, err := s.redisClient.Decr(ctx, pathBSyncPendingBatchesKey(deviceID)).Result()
+	if err != nil {
+		s.logger.Warn("decrement path-b pending batches failed",
+			zap.String("device_id", deviceID.String()),
+			zap.Error(err))
+		return true
+	}
+	if remaining > 0 {
+		return false
+	}
+	if err := s.redisClient.Del(ctx, pathBSyncPendingBatchesKey(deviceID)).Err(); err != nil {
+		s.logger.Warn("delete path-b pending batches key failed",
+			zap.String("device_id", deviceID.String()),
+			zap.Error(err))
+	}
+	return true
+}
+
+func (s *SyncService) finalizePathBSync(ctx context.Context, dev *model.Device) error {
+	if s.redisClient != nil && dev != nil && dev.ID != uuid.Nil {
+		if err := s.redisClient.Del(ctx, pathBSyncPendingBatchesKey(dev.ID)).Err(); err != nil {
+			s.logger.Warn("delete path-b pending batches key failed during finalize",
+				zap.String("device_id", dev.ID.String()),
+				zap.Error(err))
+		}
+	}
+	if s.deviceInfoRefresher != nil {
+		if _, err := s.deviceInfoRefresher.SyncFromParameters(ctx, dev.ID, dev.Carrier, dev.Technology); err != nil {
+			return fmt.Errorf("refresh device_info from parameters: %w", err)
+		}
+	}
 	if s.paramSyncWriter != nil {
 		if err := s.paramSyncWriter.UpdateLastParamSyncAt(ctx, dev.ID, time.Now()); err != nil {
 			s.logger.Warn("update last_param_sync_at failed",
@@ -227,8 +324,64 @@ func (s *SyncService) HandleSyncResultPathB(ctx context.Context, dev *model.Devi
 				zap.String("device_id", dev.ID.String()))
 		}
 	}
+	return nil
+}
 
-	return true, nil
+func (s *SyncService) finalizeOrDebouncePathBSync(dev *model.Device, fullSyncTrigger bool) {
+	if !fullSyncTrigger {
+		if err := s.finalizePathBSync(context.Background(), dev); err != nil {
+			s.logger.Warn("finalize path-b sync failed",
+				zap.String("device_id", dev.ID.String()),
+				zap.String("device_sn", dev.SerialNumber),
+				zap.Error(err))
+		}
+		return
+	}
+	s.scheduleDeferredPathBSyncFinalize(dev)
+}
+
+func (s *SyncService) scheduleDeferredPathBSyncFinalize(dev *model.Device) {
+	if dev == nil || dev.ID == uuid.Nil {
+		return
+	}
+	if s.redisClient == nil {
+		if err := s.finalizePathBSync(context.Background(), dev); err != nil {
+			s.logger.Warn("finalize path-b sync without debounce failed",
+				zap.String("device_id", dev.ID.String()),
+				zap.String("device_sn", dev.SerialNumber),
+				zap.Error(err))
+		}
+		return
+	}
+	key := pathBSyncFinalizeDebounceKey(dev.ID)
+	token := strconv.FormatInt(time.Now().UnixNano(), 10)
+	if err := s.redisClient.Set(context.Background(), key, token, pathBSyncPendingBatchesTTL).Err(); err != nil {
+		s.logger.Warn("schedule deferred path-b finalize failed",
+			zap.String("device_id", dev.ID.String()),
+			zap.String("device_sn", dev.SerialNumber),
+			zap.Error(err))
+		return
+	}
+	go func(expectedToken string, deviceSnapshot model.Device) {
+		<-time.After(pathBSyncFinalizeDebounce)
+		ctx := context.Background()
+		currentToken, err := s.redisClient.Get(ctx, key).Result()
+		if err != nil || currentToken != expectedToken {
+			return
+		}
+		if err := s.redisClient.Del(ctx, key).Err(); err != nil {
+			s.logger.Warn("delete deferred path-b finalize key failed",
+				zap.String("device_id", deviceSnapshot.ID.String()),
+				zap.String("device_sn", deviceSnapshot.SerialNumber),
+				zap.Error(err))
+		}
+		if err := s.finalizePathBSync(ctx, &deviceSnapshot); err != nil {
+			s.logger.Warn("deferred finalize path-b sync failed",
+				zap.String("device_id", deviceSnapshot.ID.String()),
+				zap.String("device_sn", deviceSnapshot.SerialNumber),
+				zap.Error(err))
+		}
+	}(token, *dev)
 }
 
 // snapshotStandardPaths 拉取 device_parameters 中本设备的 standardPath 集合（T-0127 差异日志用）。

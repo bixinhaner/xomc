@@ -19,6 +19,7 @@ const (
 )
 
 var ethernetInterfaceStatusPath = regexp.MustCompile(`^Device\.Ethernet\.Interface\.(\d+)\.Status$`)
+var ipInterfaceStatusPath = regexp.MustCompile(`^Device\.IP\.Interface\.(\d+)\.Status$`)
 
 // AssembleMMEPool builds MME pool entries from device_parameters with the MME prefix.
 // params should be the result of GetByPathPrefix("...MmePoolConfigParam.").
@@ -222,13 +223,19 @@ func AssembleWANStatus(params []model.DeviceParameter) string {
 	bestScore := -1
 	bestStatus := ""
 	for path, value := range paramValues {
-		matches := ethernetInterfaceStatusPath.FindStringSubmatch(path)
-		if matches == nil {
+		index := ""
+		score := -1
+
+		if matches := ethernetInterfaceStatusPath.FindStringSubmatch(path); matches != nil {
+			index = matches[1]
+			score = scoreEthernetInterfaceForDetail(index, paramValues)
+		} else if matches := ipInterfaceStatusPath.FindStringSubmatch(path); matches != nil {
+			index = matches[1]
+			score = scoreIPInterfaceForDetail(index, paramValues)
+		} else {
 			continue
 		}
 
-		index := matches[1]
-		score := scoreEthernetInterfaceForDetail(index, paramValues)
 		if score > bestScore || (score == bestScore && bestIndex != "" && index < bestIndex) || bestIndex == "" {
 			bestIndex = index
 			bestScore = score
@@ -265,6 +272,25 @@ func scoreEthernetInterfaceForDetail(index string, paramValues map[string]string
 	return score
 }
 
+func scoreIPInterfaceForDetail(index string, paramValues map[string]string) int {
+	score := 1
+	prefix := "Device.IP.Interface." + index + "."
+
+	for path := range paramValues {
+		if !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		if strings.Contains(path, ".IPv4Address.") || strings.Contains(path, ".IPv6Address.") {
+			score += 5
+		}
+		if strings.HasSuffix(path, ".DefaultGateway") {
+			score += 5
+		}
+	}
+
+	return score
+}
+
 func containsWANKeywordForDetail(val string) bool {
 	if val == "" {
 		return false
@@ -281,11 +307,11 @@ func containsWANKeywordForDetail(val string) bool {
 func normalizeWANStatus(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "up", "connected", "1", "true":
-		return "connected"
+		return "up"
 	case "down", "disconnected", "0", "false":
-		return "disconnected"
+		return "down"
 	default:
-		return raw
+		return strings.ToLower(strings.TrimSpace(raw))
 	}
 }
 
@@ -368,24 +394,42 @@ func AssembleCells(params []model.DeviceParameter, numOfCells int) []CellInfo {
 		// Try LTE paths first, then NR
 		ltePrefix := fmt.Sprintf("Device.Services.FAPService.%d.CellConfig.LTE.", i)
 		nrPrefix := fmt.Sprintf("Device.Services.FAPService.%d.CellConfig.NR.", i)
+		nrIndexedPrefix := fmt.Sprintf("Device.Services.FAPService.%d.CellConfig.1.NR.", i)
 		ctrlPrefix := fmt.Sprintf("Device.Services.FAPService.%d.FAPControl.", i)
 
 		cell := CellInfo{Index: i}
 
 		// ECI
-		cell.ECI = paramMap[ltePrefix+"RAN.Common.CellIdentity"]
+		cell.CellID = paramMap[ltePrefix+"RAN.Common.CellIdentity"]
+		cell.ECI = cell.CellID
 		if cell.ECI == "" {
-			cell.ECI = paramMap[nrPrefix+"RAN.Common.CellLocalId"]
+			cell.CellID = paramMap[nrIndexedPrefix+"CN.TA.1.NrcellIdentity"]
+			if cell.CellID == "" {
+				cell.CellID = paramMap[nrIndexedPrefix+"RAN.Common.CellLocalId"]
+			}
+			if cell.CellID == "" {
+				cell.CellID = paramMap[nrPrefix+"RAN.Common.CellLocalId"]
+			}
+			cell.ECI = cell.CellID
 		}
 
 		// PCI
 		cell.PCI = paramMap[ltePrefix+"RAN.RF.PhyCellID"]
 		if cell.PCI == "" {
+			cell.PCI = paramMap[nrIndexedPrefix+"RAN.RF.PhyCellID"]
+		}
+		if cell.PCI == "" {
 			cell.PCI = paramMap[nrPrefix+"RAN.RF.NRPCI"]
 		}
 
 		// FreqPoint
-		cell.FreqPoint = paramMap[ltePrefix+"RAN.Common.EARFCNDL"]
+		cell.FreqPoint = paramMap[ltePrefix+"RAN.RF.EARFCNDL"]
+		if cell.FreqPoint == "" {
+			cell.FreqPoint = paramMap[ltePrefix+"RAN.Common.EARFCNDL"]
+		}
+		if cell.FreqPoint == "" {
+			cell.FreqPoint = paramMap[nrIndexedPrefix+"RAN.RF.NRARFCNDL"]
+		}
 		if cell.FreqPoint == "" {
 			cell.FreqPoint = paramMap[nrPrefix+"RAN.Common.NRARFCN"]
 		}
@@ -393,7 +437,16 @@ func AssembleCells(params []model.DeviceParameter, numOfCells int) []CellInfo {
 		// Bandwidth
 		cell.Bandwidth = paramMap[ltePrefix+"RAN.RF.DLBandwidth"]
 		if cell.Bandwidth == "" {
+			cell.Bandwidth = paramMap[nrIndexedPrefix+"RAN.RF.ChannelBandwidth"]
+		}
+		if cell.Bandwidth == "" {
 			cell.Bandwidth = paramMap[nrPrefix+"RAN.RF.ChannelBandwidth"]
+		}
+
+		// Band
+		cell.Band = paramMap[ltePrefix+"RAN.RF.FreqBandIndicator"]
+		if cell.Band == "" {
+			cell.Band = paramMap[nrIndexedPrefix+"RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.1.FreqBandIndicatorNR"]
 		}
 
 		// OpState — Baicells 等 BaiBLQ 设备实际上报 CellOpState（FAPControl 子树）
@@ -402,6 +455,9 @@ func AssembleCells(params []model.DeviceParameter, numOfCells int) []CellInfo {
 		cell.OpState = paramMap[ctrlPrefix+"LTE.CellOpState"]
 		if cell.OpState == "" {
 			cell.OpState = paramMap[ctrlPrefix+"LTE.OpState"]
+		}
+		if cell.OpState == "" {
+			cell.OpState = paramMap[nrIndexedPrefix+"RAN.OpState"]
 		}
 		if cell.OpState == "" {
 			cell.OpState = paramMap[ctrlPrefix+"NR.CellOpState"]
@@ -414,6 +470,9 @@ func AssembleCells(params []model.DeviceParameter, numOfCells int) []CellInfo {
 		// 设计文档 §3.3。
 		cell.RFTxStatus = paramMap[ctrlPrefix+"LTE.RFTxStatus"]
 		if cell.RFTxStatus == "" {
+			cell.RFTxStatus = paramMap[nrIndexedPrefix+"RAN.rftxEnable"]
+		}
+		if cell.RFTxStatus == "" {
 			cell.RFTxStatus = paramMap[ctrlPrefix+"NR.RFTxStatus"]
 		}
 		if cell.RFTxStatus == "" {
@@ -423,16 +482,82 @@ func AssembleCells(params []model.DeviceParameter, numOfCells int) []CellInfo {
 		if cell.RFTxStatus == "" {
 			cell.RFTxStatus = paramMap[nrPrefix+"RAN.RF.RFTxStatus"]
 		}
+		if cell.RFTxStatus == "" {
+			// 某些 LTE 设备只上报 RU 级射频状态，且无更细粒度 cell 关联；
+			// 仅当所有 RU 值一致时才回填到 cell，避免多 RU 状态冲突时误导前端。
+			cell.RFTxStatus = uniformDeviceInfoRUValue(paramMap, "RFTxStatus")
+		}
 
 		// AdminState
 		cell.AdminState = paramMap[ctrlPrefix+"LTE.AdminState"]
 		if cell.AdminState == "" {
+			cell.AdminState = paramMap[nrIndexedPrefix+"RAN.CellEnable.AdminState"]
+		}
+		if cell.AdminState == "" {
 			cell.AdminState = paramMap[ctrlPrefix+"NR.AdminState"]
+		}
+		if cell.AdminState == "" {
+			// 某些 LTE 设备只上报一个全局 AdminState（如 FAPService.1），
+			// 多小区共享该状态时回填到所有 cell 行，避免后续小区显示为空。
+			cell.AdminState = uniformFAPControlValue(paramMap, "LTE.AdminState")
 		}
 
 		cells = append(cells, cell)
 	}
 	return cells
+}
+
+func uniformFAPControlValue(paramMap map[string]string, field string) string {
+	prefix := "Device.Services.FAPService."
+	marker := ".FAPControl."
+	wantSuffix := "." + field
+	var value string
+	matched := false
+
+	for path, current := range paramMap {
+		if !strings.HasPrefix(path, prefix) || !strings.Contains(path, marker) || !strings.HasSuffix(path, wantSuffix) {
+			continue
+		}
+		if !matched {
+			value = current
+			matched = true
+			continue
+		}
+		if current != value {
+			return ""
+		}
+	}
+
+	if !matched {
+		return ""
+	}
+	return value
+}
+
+func uniformDeviceInfoRUValue(paramMap map[string]string, field string) string {
+	prefix := "Device.DeviceInfo.RU."
+	wantSuffix := "." + field
+	var value string
+	matched := false
+
+	for path, current := range paramMap {
+		if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, wantSuffix) {
+			continue
+		}
+		if !matched {
+			value = current
+			matched = true
+			continue
+		}
+		if current != value {
+			return ""
+		}
+	}
+
+	if !matched {
+		return ""
+	}
+	return value
 }
 
 func detectMaxFAPServiceIndex(params []model.DeviceParameter) int {

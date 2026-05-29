@@ -173,7 +173,15 @@ func TestAssembleWANStatus(t *testing.T) {
 		{ParameterPath: "Device.Ethernet.Interface.2.Status", ParameterValue: "UP"},
 		{ParameterPath: "Device.Ethernet.Interface.2.Name", ParameterValue: "WAN"},
 	}
-	assert.Equal(t, "connected", AssembleWANStatus(params))
+	assert.Equal(t, "up", AssembleWANStatus(params))
+}
+
+func TestAssembleWANStatus_IPInterfaceFallback(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.IP.Interface.1.Status", ParameterValue: "Down"},
+		{ParameterPath: "Device.IP.Interface.1.IPv4Address.1.Status", ParameterValue: "Disabled"},
+	}
+	assert.Equal(t, "down", AssembleWANStatus(params))
 }
 
 func TestAssembleCells(t *testing.T) {
@@ -193,12 +201,14 @@ func TestAssembleCells(t *testing.T) {
 	assert.Len(t, cells, 2)
 
 	assert.Equal(t, 1, cells[0].Index)
+	assert.Equal(t, "12345", cells[0].CellID)
 	assert.Equal(t, "12345", cells[0].ECI)
 	assert.Equal(t, "100", cells[0].PCI)
 	assert.Equal(t, "38950", cells[0].FreqPoint)
 	assert.Equal(t, "true", cells[0].OpState)
 
 	assert.Equal(t, 2, cells[1].Index)
+	assert.Equal(t, "12346", cells[1].CellID)
 	assert.Equal(t, "12346", cells[1].ECI)
 	assert.Equal(t, "false", cells[1].OpState)
 }
@@ -218,14 +228,17 @@ func TestAssembleCells_FAPControlPaths(t *testing.T) {
 	params := []model.DeviceParameter{
 		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity", ParameterValue: "654321"},
 		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID", ParameterValue: "2"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.EARFCNDL", ParameterValue: "1500"},
 		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.CellOpState", ParameterValue: "0"},
 		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.RFTxStatus", ParameterValue: "false"},
 		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.AdminState", ParameterValue: "false"},
 	}
 	cells := AssembleCells(params, 1)
 	assert.Len(t, cells, 1)
+	assert.Equal(t, "654321", cells[0].CellID)
 	assert.Equal(t, "654321", cells[0].ECI)
 	assert.Equal(t, "2", cells[0].PCI)
+	assert.Equal(t, "1500", cells[0].FreqPoint)
 	assert.Equal(t, "0", cells[0].OpState)
 	assert.Equal(t, "false", cells[0].RFTxStatus)
 	assert.Equal(t, "false", cells[0].AdminState)
@@ -242,6 +255,43 @@ func TestAssembleCells_LegacyOpStatePath(t *testing.T) {
 	assert.Equal(t, "true", cells[0].OpState)
 }
 
+func TestAssembleCells_RFTxStatusFallsBackToUniformRUValue(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity", ParameterValue: "210922753"},
+		{ParameterPath: "Device.DeviceInfo.RU.1.RFTxStatus", ParameterValue: "false"},
+		{ParameterPath: "Device.DeviceInfo.RU.2.RFTxStatus", ParameterValue: "false"},
+	}
+
+	cells := AssembleCells(params, 1)
+	assert.Len(t, cells, 1)
+	assert.Equal(t, "false", cells[0].RFTxStatus)
+}
+
+func TestAssembleCells_RFTxStatusDoesNotFallbackWhenRUValuesConflict(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity", ParameterValue: "210922753"},
+		{ParameterPath: "Device.DeviceInfo.RU.1.RFTxStatus", ParameterValue: "false"},
+		{ParameterPath: "Device.DeviceInfo.RU.2.RFTxStatus", ParameterValue: "true"},
+	}
+
+	cells := AssembleCells(params, 1)
+	assert.Len(t, cells, 1)
+	assert.Equal(t, "", cells[0].RFTxStatus)
+}
+
+func TestAssembleCells_AdminStateFallsBackToUniformFAPControlValue(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellIdentity", ParameterValue: "210922753"},
+		{ParameterPath: "Device.Services.FAPService.2.CellConfig.LTE.RAN.Common.CellIdentity", ParameterValue: "210922754"},
+		{ParameterPath: "Device.Services.FAPService.1.FAPControl.LTE.AdminState", ParameterValue: "false"},
+	}
+
+	cells := AssembleCells(params, 2)
+	assert.Len(t, cells, 2)
+	assert.Equal(t, "false", cells[0].AdminState)
+	assert.Equal(t, "false", cells[1].AdminState)
+}
+
 func TestAssembleCells_DetectsHigherFAPServiceIndex(t *testing.T) {
 	params := []model.DeviceParameter{
 		{ParameterPath: "Device.Services.FAPService.1.CellConfig.LTE.RAN.RF.PhyCellID", ParameterValue: "11"},
@@ -256,6 +306,29 @@ func TestAssembleCells_DetectsHigherFAPServiceIndex(t *testing.T) {
 	assert.Equal(t, "66", cells[5].PCI)
 	assert.Equal(t, "1", cells[5].OpState)
 }
+
+func TestAssembleCells_NRIndexedPaths(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.1.NR.CN.TA.1.NrcellIdentity", ParameterValue: "1153"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.PhyCellID", ParameterValue: "21"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.1.NR.RAN.RF.NRARFCNDL", ParameterValue: "513000"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.1.NR.RAN.PHY.FrequencyInfoDLSIB.MultiFrequencyBandListNRSIB.1.FreqBandIndicatorNR", ParameterValue: "41"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.1.NR.RAN.OpState", ParameterValue: "0"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.1.NR.RAN.rftxEnable", ParameterValue: "0"},
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.1.NR.RAN.CellEnable.AdminState", ParameterValue: "1"},
+	}
+	cells := AssembleCells(params, 1)
+	assert.Len(t, cells, 1)
+	assert.Equal(t, "1153", cells[0].CellID)
+	assert.Equal(t, "21", cells[0].PCI)
+	assert.Equal(t, "513000", cells[0].FreqPoint)
+	assert.Equal(t, "41", cells[0].Band)
+	assert.Equal(t, "0", cells[0].OpState)
+	assert.Equal(t, "0", cells[0].RFTxStatus)
+	assert.Equal(t, "1", cells[0].AdminState)
+	assert.Equal(t, "1153", cells[0].ECI)
+	assert.Equal(t, "", cells[0].Bandwidth)
+	}
 
 func TestExtractIndexAndField(t *testing.T) {
 	tests := []struct {

@@ -184,6 +184,7 @@ export interface Device {
   downlinkFrequency: string;
 
   // 状态信息组 (Status)
+  cellStatus: string;
   opState: string;
   mmeStatus: string;
   amfStatus: string;

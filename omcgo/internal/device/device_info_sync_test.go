@@ -400,6 +400,28 @@ func TestInfoSyncer_SyncFromParameters_BackfillsCoordinates(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestInfoSyncer_SyncFromParameters_ComputesQuickFieldsWithoutCarrierMapping(t *testing.T) {
+	deviceID := uuid.New()
+	registry := carrier.NewRegistry()
+	registry.Register(testCarrier{})
+
+	paramRepo := stubDeviceParamRepo{params: []model.DeviceParameter{
+		{ParameterPath: "Device.Services.FAPService.1.CellConfig.1.NR.RAN.OpState", ParameterValue: "1"},
+	}}
+
+	infoRepo := stubDeviceInfoRepo{updateSyncFields: func(_ context.Context, gotDeviceID uuid.UUID, fields map[string]interface{}) error {
+		assert.Equal(t, deviceID, gotDeviceID)
+		assert.Equal(t, "normal", fields["cell_status"])
+		assert.Equal(t, 1, fields["num_of_cells"])
+		return nil
+	}}
+
+	syncer := NewInfoSyncer(infoRepo, paramRepo, nil, registry, zap.NewNop())
+
+	_, err := syncer.SyncFromParameters(context.Background(), deviceID, model.CarrierCMCC, model.TechNR)
+	assert.NoError(t, err)
+}
+
 func TestParseRunTimeToSeconds(t *testing.T) {
 	tests := []struct {
 		name  string

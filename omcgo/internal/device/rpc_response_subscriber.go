@@ -41,6 +41,7 @@ type RPCResponseSubscriber struct {
 	translatorFactory ParamModelTranslatorFactory
 	deviceLookup      RPCDeviceLookup
 	paramRepo         DeviceParameterRepository
+	infoRefresher     rpcResponseDeviceInfoRefresher
 	deviceWriter      DeviceSyncFailureWriter // migration 000146: 写 last_param_sync_failed_at + error
 	logger            *zap.Logger
 
@@ -72,6 +73,10 @@ type RPCDeviceLookup interface {
 	GetBySerialNumber(ctx context.Context, sn string) (*model.Device, error)
 }
 
+type rpcResponseDeviceInfoRefresher interface {
+	SyncFromParameters(ctx context.Context, deviceID uuid.UUID, carrierCode model.CarrierCode, tech model.Technology) ([]string, error)
+}
+
 // NewRPCResponseSubscriber 构造订阅者。Start() 时才真正订阅 bus。
 // 任一依赖为 nil 时订阅者会跳过翻译，CPE 响应仍按 privatePath 入库（兼容
 // 启动早期 / 测试场景）。
@@ -81,6 +86,7 @@ func NewRPCResponseSubscriber(
 	translatorFactory ParamModelTranslatorFactory,
 	deviceLookup RPCDeviceLookup,
 	paramRepo DeviceParameterRepository,
+	infoRefresher rpcResponseDeviceInfoRefresher,
 	deviceWriter DeviceSyncFailureWriter,
 	logger *zap.Logger,
 ) *RPCResponseSubscriber {
@@ -90,6 +96,7 @@ func NewRPCResponseSubscriber(
 		translatorFactory: translatorFactory,
 		deviceLookup:      deviceLookup,
 		paramRepo:         paramRepo,
+		infoRefresher:     infoRefresher,
 		deviceWriter:      deviceWriter,
 		logger:            logger.Named("device-rpc-resp-sub"),
 	}
@@ -256,6 +263,7 @@ func (s *RPCResponseSubscriber) handleGPVResponse(ctx context.Context, evt event
 	if !ok {
 		return nil
 	}
+	commandKey, _ := payload["command_key"].(string)
 	paramValues, err := decodeParameterValues(rawParams)
 	if err != nil {
 		s.logger.Warn("decode parameter_values from event",
@@ -274,7 +282,7 @@ func (s *RPCResponseSubscriber) handleGPVResponse(ctx context.Context, evt event
 			zap.String("device_sn", deviceSN),
 			zap.Error(err),
 		)
-		return s.persist(ctx, uuid.Nil, paramValues, false /*translated*/)
+		return nil
 	}
 
 	translator := s.resolveTranslator(ctx, device)
@@ -303,7 +311,7 @@ func (s *RPCResponseSubscriber) handleGPVResponse(ctx context.Context, evt event
 		)
 	}
 
-	return s.persist(ctx, device.ID, persistParams, translated)
+	return s.persist(ctx, device, persistParams, translated, !isPathBSyncCommandKey(commandKey))
 }
 
 // resolveTranslator 重复 mml/fanout.go translateParamRefs 的路由解析；
@@ -342,9 +350,9 @@ func (s *RPCResponseSubscriber) resolveTranslator(ctx context.Context, device *m
 // persist 把翻译后的参数批量写 device_parameters。translated 参数仅供日志，
 // 区分本次入库的 parameter_path 是 standardPath 还是 privatePath。
 func (s *RPCResponseSubscriber) persist(
-	ctx context.Context, deviceID uuid.UUID, params []tr069.ParameterValueStruct, translated bool,
+	ctx context.Context, device *model.Device, params []tr069.ParameterValueStruct, translated bool, refreshInfo bool,
 ) error {
-	if deviceID == uuid.Nil || len(params) == 0 {
+	if device == nil || device.ID == uuid.Nil || len(params) == 0 {
 		return nil
 	}
 	now := time.Now()
@@ -354,7 +362,7 @@ func (s *RPCResponseSubscriber) persist(
 			continue
 		}
 		rows = append(rows, model.DeviceParameter{
-			DeviceID:       deviceID,
+			DeviceID:       device.ID,
 			ParameterPath:  p.Name,
 			ParameterValue: p.Value,
 			ParameterType:  model.ParamString,
@@ -365,21 +373,34 @@ func (s *RPCResponseSubscriber) persist(
 	if len(rows) == 0 {
 		return nil
 	}
-	if err := s.paramRepo.BatchUpsert(ctx, deviceID, rows); err != nil {
+	if err := s.paramRepo.BatchUpsert(ctx, device.ID, rows); err != nil {
 		s.logger.Error("batch upsert device parameters from rpc response",
-			zap.String("device_id", deviceID.String()),
+			zap.String("device_id", device.ID.String()),
 			zap.Bool("translated", translated),
 			zap.Int("rows", len(rows)),
 			zap.Error(err),
 		)
 		return err
 	}
+	if refreshInfo && s.infoRefresher != nil {
+		if _, err := s.infoRefresher.SyncFromParameters(ctx, device.ID, device.Carrier, device.Technology); err != nil {
+			s.logger.Warn("refresh device_info snapshot after rpc response persist failed",
+				zap.String("device_id", device.ID.String()),
+				zap.String("device_sn", device.SerialNumber),
+				zap.Error(err),
+			)
+		}
+	}
 	s.logger.Info("rpc response parameters persisted",
-		zap.String("device_id", deviceID.String()),
+		zap.String("device_id", device.ID.String()),
 		zap.Bool("translated_to_standard", translated),
 		zap.Int("rows", len(rows)),
 	)
 	return nil
+}
+
+func isPathBSyncCommandKey(commandKey string) bool {
+	return strings.HasPrefix(commandKey, "sync-gpv-")
 }
 
 // decodeParameterValues 容忍多种 payload 形态（rawParams 可能是

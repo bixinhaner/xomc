@@ -589,7 +589,9 @@ func initProvisionModule(c *Container) error {
 			c.Cfg.Provision.AutoSync, c.Cfg.Provision.AutoSync.GPVBatchSize, logger,
 		).WithParamRegistry(c.ParamRegistry, c.ProductRegistry, true).
 			SetRedisClient(c.Redis).
-			SetParamSyncWriter(c.DeviceRepo) // T-0124: 注入 last_param_sync_at 回写器
+			SetParamSyncWriter(c.DeviceRepo).
+			SetPathBSyncTaskReader(task.NewPgTaskRepository(c.PgPool)).
+			SetDeviceInfoRefresher(device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger)) // Path B 参数落库后立即刷新 device_info 快照
 		c.SyncSvc = syncSvc
 		provisionEngine.SetSyncService(syncSvc)
 		// T-0126: 注入 ParamSyncStarter 让 device.handler.SyncDeviceParams 调 Path B 手动同步（reason="manual"）
@@ -1416,6 +1418,7 @@ func initMiscModules(c *Container) error {
 			c.ParamRegistry,
 			c.DeviceService,
 			c.ParamRepo,
+			device.NewInfoSyncer(c.DeviceInfoRepo, c.ParamRepo, device.NewPgDeviceRepository(c.PgPool), c.Carriers, logger),
 			c.DeviceRepo, // migration 000146: 写 last_param_sync_failed_at + error
 			logger,
 		)

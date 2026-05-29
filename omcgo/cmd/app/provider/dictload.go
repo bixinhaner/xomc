@@ -33,7 +33,8 @@ import (
 //   AlarmDef   ┘
 //
 // 失败语义：
-//   - DictLoaderConfig.AutoLoadOnStartup=false 时跳过 LoadOnce，仅创建+注册 Loader
+//   - DictLoaderConfig.AutoLoadOnStartup=false 时跳过 DB 字典 LoadOnce，仅创建+注册 Loader；
+//     quicksettings 因为只存在进程内存中，仍需在启动时加载
 //   - 任一字典 Loader 失败 → 启动失败（DoD：字典是 RC 必备）
 //   - Product Loader 单 product 校验失败 → 跳过 + ERROR 日志（设计 §4.5），不阻塞启动
 func initDictLoadModule(c *Container) error {
@@ -87,14 +88,24 @@ func initDictLoadModule(c *Container) error {
 		}
 	}
 
-	if !c.Cfg.DictLoader.AutoLoadOnStartup {
-		logger.Info("dictload skipped startup load (AutoLoadOnStartup=false)")
-		return nil
-	}
-
 	// 启动期加载：5 分钟超时为安全上限（实际 1.5 万行级别 < 30s）
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+
+	if !c.Cfg.DictLoader.AutoLoadOnStartup {
+		t0 := time.Now()
+		rep, err := quickSettingsLoader.LoadOnce(ctx)
+		logger.Info("dictload skipped DB startup load; quick-settings loaded only",
+			zap.Int("rows", rep.RowsAffected),
+			zap.Int("files_loaded", rep.FilesLoaded),
+			zap.Int("files_skipped", rep.FilesSkipped),
+			zap.Duration("duration", time.Since(t0)),
+			zap.Error(err))
+		if err != nil {
+			return fmt.Errorf("load quick-settings on startup: %w", err)
+		}
+		return nil
+	}
 
 	startTotal := time.Now()
 

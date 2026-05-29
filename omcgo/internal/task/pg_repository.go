@@ -242,6 +242,24 @@ func (r *PgTaskRepository) GetPendingByDevice(ctx context.Context, deviceSN stri
 	return tasks, nil
 }
 
+func (r *PgTaskRepository) HasIncompleteSyncGPVTasksByDevice(ctx context.Context, deviceSN string) (bool, error) {
+	prefix := fmt.Sprintf("sync-gpv-%s", deviceSN)
+	query, args, err := storage.Psql.Select("COUNT(*)").
+		From("device_tasks").
+		Where(sq.Eq{"device_sn": deviceSN}).
+		Where(sq.Like{"command_key": prefix + "%"}).
+		Where(sq.Eq{"status": []TaskStatus{TaskStatusPending, TaskStatusSent}}).
+		ToSql()
+	if err != nil {
+		return false, fmt.Errorf("build incomplete sync-gpv query: %w", err)
+	}
+	var count int64
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&count); err != nil {
+		return false, fmt.Errorf("query incomplete sync-gpv tasks: %w", err)
+	}
+	return count > 0, nil
+}
+
 // ListOpenByDeviceAndMethods 列出指定设备的 pending/sent 状态任务（用于 RebootCloser）。
 func (r *PgTaskRepository) ListOpenByDeviceAndMethods(ctx context.Context, deviceSN string, methods []string) ([]*Task, error) {
 	q := storage.Psql.Select(taskColumns()...).

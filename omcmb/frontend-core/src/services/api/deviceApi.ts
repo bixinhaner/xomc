@@ -297,6 +297,7 @@ function mapBackendDevice(bd: BackendDevice): Device {
     uplinkFrequency: bd.uplink_frequency || '',
     downlinkFrequency: bd.downlink_frequency || '',
 
+    cellStatus: bd.cell_status || '',
     opState: bd.op_state || 'unknown',
     mmeStatus: bd.mme_status || '',
     amfStatus: bd.amf_status || '',

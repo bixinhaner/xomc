@@ -13,32 +13,27 @@ func TestCalcCellStatus(t *testing.T) {
 		want   string
 	}{
 		{
-			name:   "admin disabled",
-			params: map[string]string{"Device.Services.FAPService.1.FAPControl.LTE.AdminState": "false"},
+			name:   "empty params",
+			params: map[string]string{},
 			want:   "inactive",
 		},
 		{
-			name: "admin on, opstate off",
+			name: "single cell inactive",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.AdminState": "true",
-				"Device.Services.FAPService.1.FAPControl.LTE.OpState":    "false",
+				"Device.Services.FAPService.1.FAPControl.LTE.CellOpState": "0",
 			},
-			want: "fault",
+			want: "inactive",
 		},
 		{
-			name: "all on, cell decommissioned",
+			name: "single cell active via fapcontrol path",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.AdminState":          "true",
-				"Device.Services.FAPService.1.FAPControl.LTE.OpState":             "true",
-				"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellOpState": "0",
+				"Device.Services.FAPService.1.FAPControl.LTE.CellOpState": "1",
 			},
-			want: "decommissioned",
+			want: "normal",
 		},
 		{
-			name: "all normal",
+			name: "single cell active via config path",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.LTE.AdminState":          "1",
-				"Device.Services.FAPService.1.FAPControl.LTE.OpState":             "1",
 				"Device.Services.FAPService.1.CellConfig.LTE.RAN.Common.CellOpState": "1",
 			},
 			want: "normal",
@@ -46,16 +41,32 @@ func TestCalcCellStatus(t *testing.T) {
 		{
 			name: "NR paths",
 			params: map[string]string{
-				"Device.Services.FAPService.1.FAPControl.NR.AdminState":          "true",
-				"Device.Services.FAPService.1.FAPControl.NR.OpState":             "true",
 				"Device.Services.FAPService.1.CellConfig.NR.RAN.Common.CellOpState": "1",
 			},
 			want: "normal",
 		},
 		{
-			name:   "empty params",
-			params: map[string]string{},
-			want:   "inactive",
+			name: "NR indexed ran op state path matches detail page semantics",
+			params: map[string]string{
+				"Device.Services.FAPService.1.CellConfig.1.NR.RAN.OpState": "1",
+			},
+			want: "normal",
+		},
+		{
+			name: "multi-cell any active returns normal",
+			params: map[string]string{
+				"Device.Services.FAPService.1.FAPControl.LTE.CellOpState": "0",
+				"Device.Services.FAPService.2.FAPControl.LTE.CellOpState": "1",
+			},
+			want: "normal",
+		},
+		{
+			name: "multi-cell all inactive returns inactive",
+			params: map[string]string{
+				"Device.Services.FAPService.1.FAPControl.LTE.CellOpState": "0",
+				"Device.Services.FAPService.2.FAPControl.LTE.CellOpState": "false",
+			},
+			want: "inactive",
 		},
 	}
 	for _, tt := range tests {
@@ -203,6 +214,24 @@ func TestCalcSyncStatus(t *testing.T) {
 				"Device.FAP.Synchronization.ClockSourceSyncState": "SYNCED",
 			},
 			want: "SYNCED",
+		},
+		{
+			name: "LTE management server tfcs sync state",
+			params: map[string]string{
+				"Device.ManagementServer.tfcsSyncState": "1",
+				"Device.DeviceInfo.X_COM_GPS_Status":  "1",
+			},
+			want: "gps",
+		},
+		{
+			name: "LTE management server raw textual sync state is preserved",
+			params: map[string]string{
+				"Device.ManagementServer.tfcsSyncState": "LOCKED",
+				"Device.DeviceInfo.X_COM_GPS_Status":  "0",
+				"Device.DeviceInfo.X_COM_BDS_Status":  "0",
+				"Device.DeviceInfo.X_COM_1588_Status": "0",
+			},
+			want: "LOCKED",
 		},
 		{
 			name: "GPS synced",

@@ -28,12 +28,14 @@ type SyncService struct {
 	paramRepo            device.DeviceParameterRepository
 	discoveryRepo        ParameterDiscoveryLogRepository
 	taskSvc              task.Enqueuer
+	pathBSyncTaskReader  PathBSyncTaskReader
 	planStore            *SyncPlanStore
 	paramRegistry        *parammodel.Registry
 	productRegistry      *product.Registry
 	paramRegistryEnabled bool
 	redisClient          redis.UniversalClient
 	paramSyncWriter      ParamSyncWriter
+	deviceInfoRefresher  DeviceInfoRefresher
 	config               appconfig.AutoSyncConfig
 	batchSize            int
 	logger               *zap.Logger
@@ -53,11 +55,34 @@ type ParamSyncWriter interface {
 	UpdateLastParamSyncAt(ctx context.Context, id uuid.UUID, at time.Time) error
 }
 
+// DeviceInfoRefresher 在 Path B 参数全量落库后，把 device_parameters 投影刷新到
+// device_info，避免列表/详情读取到旧快照。
+type DeviceInfoRefresher interface {
+	SyncFromParameters(ctx context.Context, deviceID uuid.UUID, carrierCode model.CarrierCode, tech model.Technology) ([]string, error)
+}
+
+// PathBSyncTaskReader 查询某设备是否仍有未完成的 sync-gpv 任务。
+// 用真实任务状态而不是预估批次数判断收尾，覆盖 ACS SOAP Fault 自愈产生的 -r 重试任务。
+type PathBSyncTaskReader interface {
+	HasIncompleteSyncGPVTasksByDevice(ctx context.Context, deviceSN string) (bool, error)
+}
+
 // SetParamSyncWriter 注入 ParamSyncWriter（T-0124）。nil 表示禁用回写
 // （PeriodicSyncer 会因 last_param_sync_at 永远为 NULL 而每轮都重新入队，
 // dev/test 环境可接受；生产建议注入 DeviceRepository）。
 func (s *SyncService) SetParamSyncWriter(w ParamSyncWriter) *SyncService {
 	s.paramSyncWriter = w
+	return s
+}
+
+// SetDeviceInfoRefresher 注入 device_info 刷新器，使 Path B 同步完成后立即刷新快照列。
+func (s *SyncService) SetDeviceInfoRefresher(r DeviceInfoRefresher) *SyncService {
+	s.deviceInfoRefresher = r
+	return s
+}
+
+func (s *SyncService) SetPathBSyncTaskReader(r PathBSyncTaskReader) *SyncService {
+	s.pathBSyncTaskReader = r
 	return s
 }
 

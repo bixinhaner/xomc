@@ -973,10 +973,6 @@ func (e *ProvisioningEngine) handleGPVResponse(ctx context.Context, evt event.Ev
 		zap.Int("parameter_count", len(payload.ParameterValues)),
 	)
 
-	if len(payload.ParameterValues) == 0 {
-		return nil
-	}
-
 	dev, err := e.deviceService.GetBySerialNumber(ctx, payload.DeviceSN)
 	if err != nil {
 		e.logger.Error("find device for GPV response", zap.Error(err), zap.String("device_sn", payload.DeviceSN))

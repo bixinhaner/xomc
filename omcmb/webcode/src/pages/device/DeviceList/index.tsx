@@ -891,6 +891,12 @@ export default function DeviceList() {
     [parseCellValues, getCellSummary]
   );
 
+  const renderActivationStatus = useCallback((cellStatus: string | undefined | null) => {
+    if (!cellStatus || cellStatus === '--') return '-';
+    const isActive = cellStatus === 'normal';
+    return <Tag color={isActive ? 'success' : 'error'}>{isActive ? t('status.active') : t('status.inactive')}</Tag>;
+  }, [t]);
+
   const columns = useMemo(
     (): DataTableColumn<Device>[] => [
       // =====================================================================
@@ -1031,20 +1037,9 @@ export default function DeviceList() {
         title: t('device.opState'),
         dataIndex: 'opState',
         width: 140,
-        // 默认显示：激活状态（opState）和在线状态（connStatus）是两个独立维度：
-        //   - opState='1' = 已激活（完成 provisioning）
-        //   - connStatus='active' = 当前在线（最近 inform 过）
-        // 一台设备可以"已激活但暂时离线"，两列都应可见。
-        // 历史：commit ee12a32f9 把本列默认隐藏，本次按用户反馈恢复显示。
         group: 'common',
-        // 原始 JSP: 支持多小区 "1,0,1"，汇总 + [N/M] Popover
-        // 兼容 active/inactive 文本值和 1/0 数值
-        render: (_val, record) => renderMultiCellStatus(
-          record.opState,
-          ['1', 'active'],
-          { on: t('status.active'), off: t('status.inactive'), title: t('device.multiCellStatus') },
-          { on: 'success', off: 'error', mixed: 'warning' },
-        ),
+        // 与详情页保持一致：按小区激活状态聚合，只要任一小区激活就显示激活。
+        render: (_val, record) => renderActivationStatus(record.cellStatus),
       },
       {
         key: 'offlineDuration',
@@ -1322,7 +1317,7 @@ export default function DeviceList() {
       },
 
     ],
-    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, remarkHeaderRender, message, downloadStationLog, mapConnStatus, getSeverityLabel]
+    [navigate, t, fmtTime, fmtDuration, fmtStatus, renderMultiCellStatus, renderActivationStatus, remarkHeaderRender, message, downloadStationLog, mapConnStatus, getSeverityLabel]
   );
 
   const batchActions = useMemo((): BatchAction[] => [

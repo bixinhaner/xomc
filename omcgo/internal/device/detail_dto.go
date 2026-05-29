@@ -57,10 +57,12 @@ type AntennaInfo struct {
 // CellInfo represents configuration for a single cell/carrier.
 type CellInfo struct {
 	Index      int    `json:"index"`
+	CellID     string `json:"cell_id"`
 	ECI        string `json:"eci"`
 	PCI        string `json:"pci"`
 	FreqPoint  string `json:"freq_point"`
 	Bandwidth  string `json:"bandwidth"`
+	Band       string `json:"band"`
 	OpState    string `json:"op_state"`
 	RFTxStatus string `json:"rf_tx_status"`
 	AdminState string `json:"admin_state"`

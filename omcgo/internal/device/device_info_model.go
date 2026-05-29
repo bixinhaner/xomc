@@ -79,7 +79,8 @@ type DeviceInfo struct {
 	MMEStatus string `json:"mme_status"`
 
 	// SyncStatus 时钟同步源状态
-	// 可能值: SyncStatusGPS, SyncStatusBeidou, SyncStatusNTP, SyncStatusError
+	// 可能值: SyncStatusGPS, SyncStatusBeidou, SyncStatusNTP, SyncStatusError；
+	// 对于设备直接上报的文本态（如 LOCKED / HOLDOVER / SYNCED），保留原始值。
 	// 计算逻辑: CalcSyncStatus()
 	SyncStatus string `json:"sync_status"`
 
