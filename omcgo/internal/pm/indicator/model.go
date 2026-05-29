@@ -172,6 +172,10 @@ type TemplateRelArithmetic struct {
 type IndicatorGroupTreeRequest struct {
 	DeviceType   string `form:"device_type" binding:"required,oneof=ENB GSM GNB"`
 	OperatorCode string `form:"operator_code"`
+	// 2026-05-29 用户决策:分组下拉按当前 platform 过滤,只显示有该 platform 公式
+	// 关联的 group(否则下拉里全 23 个分组,但当前 platform 实际只覆盖其中几个)。
+	// 空 = 不过滤,返全部分组。
+	Platform string `form:"platform"`
 }
 
 type CreateGroupRequest struct {

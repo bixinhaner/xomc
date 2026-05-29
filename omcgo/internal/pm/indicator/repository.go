@@ -12,6 +12,9 @@ import (
 type GroupRepository interface {
 	// List returns all groups for a device type.
 	List(ctx context.Context, dt DeviceType) ([]*IndicatorGroup, error)
+	// ListByPlatform returns only groups that have at least one indicator with a
+	// formula bound to the given platform. Empty platform = same as List.
+	ListByPlatform(ctx context.Context, dt DeviceType, platform string) ([]*IndicatorGroup, error)
 	// GetByID returns a single group by ID.
 	GetByID(ctx context.Context, dt DeviceType, id string) (*IndicatorGroup, error)
 	// Create inserts a new group.

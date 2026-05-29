@@ -133,10 +133,16 @@ export function useDeleteFormula() {
   });
 }
 
-export function useIndicatorGroups(deviceType: DeviceType, operatorCode?: string) {
+/** 2026-05-29:platform 进入 queryKey,平台切换时自动重新拉数据;不传 platform
+ *  时等价于全量(后端 OR 短路) — 列表态全量 + 详情态按平台都可以共用此 hook。 */
+export function useIndicatorGroups(
+  deviceType: DeviceType,
+  operatorCode?: string,
+  platform?: string,
+) {
   return useQuery({
-    queryKey: [...IL_KEY, 'groups', deviceType, operatorCode ?? ''],
-    queryFn: () => api.listGroups(deviceType, operatorCode),
+    queryKey: [...IL_KEY, 'groups', deviceType, operatorCode ?? '', platform ?? ''],
+    queryFn: () => api.listGroups(deviceType, operatorCode, platform),
   });
 }
 

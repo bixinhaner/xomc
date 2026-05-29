@@ -264,6 +264,8 @@ func (h *RESTHandler) ListGroups(c *gin.Context) {
 	groups, err := h.svc.GetGroupTree(c.Request.Context(), IndicatorGroupTreeRequest{
 		DeviceType:   string(dt),
 		OperatorCode: strings.TrimSpace(c.Query("operatorCode")),
+		// 2026-05-29:平台过滤 — 与 ListIndicators 的 PlatformName 同语义
+		Platform: strings.TrimSpace(c.Query("platform")),
 	})
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)

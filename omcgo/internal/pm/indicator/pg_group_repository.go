@@ -29,12 +29,40 @@ func NewPgGroupRepository(pool *pgxpool.Pool) *PgGroupRepository {
 	return &PgGroupRepository{db: storage.NewPoolDB(pool)}
 }
 
+// List 列出该 device type 下全部分组(平台无关)。
 func (r *PgGroupRepository) List(ctx context.Context, dt DeviceType) ([]*IndicatorGroup, error) {
+	return r.listInternal(ctx, dt, "")
+}
+
+// ListByPlatform 列出**有该 platform 公式关联的指标所属**的分组。
+// 用途:product/kpi-library 详情态下拉,只显示当前 platform 实际涉及的分组。
+// 实现:WHERE EXISTS (SELECT 1 FROM perf_indicators_X i WHERE i.group_id = g.id
+//                    AND EXISTS (SELECT 1 FROM rela_platform_indicator_formula_X f
+//                                 WHERE f.indicator_id = i.id AND f.platform_name = $1))
+// platform 空时等价于 List(全量)。
+func (r *PgGroupRepository) ListByPlatform(ctx context.Context, dt DeviceType, platform string) ([]*IndicatorGroup, error) {
+	return r.listInternal(ctx, dt, platform)
+}
+
+func (r *PgGroupRepository) listInternal(ctx context.Context, dt DeviceType, platform string) ([]*IndicatorGroup, error) {
 	table := dt.GroupTable()
-	query, args, err := storage.Psql.Select(groupColumns...).
-		From(table).
-		OrderBy("en_name").
-		ToSql()
+	prefixedCols := make([]string, len(groupColumns))
+	for i, c := range groupColumns {
+		prefixedCols[i] = "g." + c
+	}
+	builder := storage.Psql.Select(prefixedCols...).From(table + " g")
+	if platform != "" {
+		// EXISTS 嵌套 EXISTS 与 pg_indicator_repository.go::PlatformName 过滤一致语义
+		builder = builder.Where(sq.Expr(
+			fmt.Sprintf(
+				"EXISTS (SELECT 1 FROM %s i WHERE i.group_id = g.id "+
+					"AND EXISTS (SELECT 1 FROM %s f WHERE f.indicator_id = i.id AND f.platform_name = ?))",
+				dt.IndicatorTable(), dt.FormulaTable(),
+			),
+			platform,
+		))
+	}
+	query, args, err := builder.OrderBy("g.en_name").ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build list %s SQL: %w", table, err)
 	}
@@ -54,9 +82,9 @@ func (r *PgGroupRepository) List(ctx context.Context, dt DeviceType) ([]*Indicat
 		groups = append(groups, g)
 	}
 	if err := rows.Err(); err != nil {
-				return nil, fmt.Errorf("iterating group rows: %w", err)
-		}
-		return groups, nil
+		return nil, fmt.Errorf("iterating group rows: %w", err)
+	}
+	return groups, nil
 }
 
 func (r *PgGroupRepository) GetByID(ctx context.Context, dt DeviceType, id string) (*IndicatorGroup, error) {

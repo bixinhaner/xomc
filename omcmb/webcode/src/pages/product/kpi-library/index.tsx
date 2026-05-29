@@ -96,8 +96,14 @@ export default function KpiLibraryPage() {
   const importMut = useIndicatorImportDirectory();
   const cacheMut = useIndicatorCacheRefresh();
 
-  // 详情态分组筛选数据源
-  const { data: groupData } = useIndicatorGroups(selectedDeviceType ?? 'ENB', OPERATOR_CODE);
+  // 2026-05-29 详情态分组筛选数据源 — 平台过滤,只显示当前 platform 涉及的分组,
+  // 避免下拉里 23 个 group 中 ~16 个选了返空。selectedPlatform 不存在(列表态)时
+  // 传 undefined → 后端返全量 23 个,本组件也不会用到(只渲在详情态)。
+  const { data: groupData } = useIndicatorGroups(
+    selectedDeviceType ?? 'ENB',
+    OPERATOR_CODE,
+    selectedPlatform || undefined,
+  );
   const groupOptions = useMemo(() => {
     if (!selectedDeviceType) return [];
     const flat: { label: string; value: string }[] = [];
