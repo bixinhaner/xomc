@@ -125,8 +125,7 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
             <Tooltip
               title={
                 <div style={{ maxWidth: 240 }}>
-                  内置参数模型不可在线删除。如需移除,请在下一版镜像的{' '}
-                  <code>data/param-mappings/</code> 中删掉对应 XML,重新构建并发布。
+                  内置参数模型不可在线删除。如需移除,请联系管理员
                 </div>
               }
               placement="topRight"

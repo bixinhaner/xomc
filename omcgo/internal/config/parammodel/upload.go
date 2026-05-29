@@ -63,15 +63,17 @@ func validateUploadFilename(name string) error {
 	return nil
 }
 
-// validateUploadXML 验证上传字节流是合法的 paramModel XML:
+// validateUploadXML 验证上传字节流是合法的 parameterModel XML:
 //   - encoding/xml.Decoder Strict=true:严格 well-formedness,
 //     拒绝 mismatched closing tag / 半截 XML / 控制字符等异常
 //   - 不处理外部实体(Go 标准库默认安全,无 XXE 风险)
-//   - 第一个 StartElement 的 Local Name 必须是 "paramModel"(namespace 不限,
-//     与 Loader.xml.Unmarshal 默认行为对齐,避免上传通过但 Reload 失败)
+//   - 第一个 StartElement 的 Local Name 必须是 "parameterModel"(namespace 不限,
+//     与 Loader 的 `xml:"parameterModel"` struct tag 对齐 — 真值源在 model.go
+//     的 xmlParameterModel,任何文件无论 builtin 还是 custom 上传都以此为准,
+//     否则 Reload 时 xml.Unmarshal 会得到空 doc)
 //   - 找到根元素后继续扫到 EOF,捕获后续结构错误
 //
-// 性能:typical paramModel XML ≤ 200 KB,完整扫描 ~ms 级,不构成瓶颈。
+// 性能:typical parameterModel XML ≤ 200 KB,完整扫描 ~ms 级,不构成瓶颈。
 func validateUploadXML(raw []byte) error {
 	if len(raw) == 0 {
 		return fmt.Errorf("upload body empty")
@@ -99,8 +101,8 @@ func validateUploadXML(raw []byte) error {
 			// ProcessingInstruction / CharData / Comment 之类 — 继续找根元素
 			continue
 		}
-		if start.Name.Local != "paramModel" {
-			return fmt.Errorf("root element must be <paramModel>, got <%s>", start.Name.Local)
+		if start.Name.Local != "parameterModel" {
+			return fmt.Errorf("root element must be <parameterModel>, got <%s>", start.Name.Local)
 		}
 		rootSeen = true
 	}

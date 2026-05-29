@@ -71,23 +71,27 @@ func TestValidateUploadXML(t *testing.T) {
 		input   string
 		wantErr bool
 	}{
-		// 通过
-		{"valid empty paramModel", `<paramModel/>`, false},
-		{"valid with attrs", `<paramModel name="CBQQ" version="1"/>`, false},
-		{"valid with children", `<paramModel><object name="x"/></paramModel>`, false},
-		{"valid with xml decl", `<?xml version="1.0"?><paramModel/>`, false},
-		{"valid with comment before root", `<!-- header --><paramModel/>`, false},
-		{"valid with whitespace", "  \n  <paramModel/>  ", false},
+		// 通过 — 真值源 model.go xmlParameterModel `xml:"parameterModel"`,
+		// builtin BLQ.xml 等所有真实 XML 根元素均为 <parameterModel paramModel="..." ...>。
+		{"valid empty parameterModel", `<parameterModel/>`, false},
+		{"valid with attrs", `<parameterModel paramModel="CBQQ" totalEntries="100"/>`, false},
+		{"valid with children", `<parameterModel><object name="x"/></parameterModel>`, false},
+		{"valid with xml decl", `<?xml version="1.0"?><parameterModel/>`, false},
+		{"valid with comment before root", `<!-- header --><parameterModel/>`, false},
+		{"valid with whitespace", "  \n  <parameterModel/>  ", false},
 
 		// 拒绝 — 形态错
 		{"empty body", "", true},
-		{"malformed not closed", `<paramModel`, true},
-		{"malformed mismatched", `<paramModel></paramModl>`, true},
+		{"malformed not closed", `<parameterModel`, true},
+		{"malformed mismatched", `<parameterModel></parameterModl>`, true},
 		{"not xml html", `<html><body/></html>`, true},
-		{"wrong root", `<products/>`, true},
+		{"wrong root products", `<products/>`, true},
+		// 历史踩坑:曾误把 paramModel(attribute 名)当作 root,导致 Upload 拒绝
+		// 所有真实 builtin XML(BLQ.xml 等)。Root 必须是 parameterModel。
+		{"wrong root paramModel", `<paramModel/>`, true},
 		// namespace 不参与判定(与 Loader.xml.Unmarshal 默认行为一致,
-		// xml struct tag `xml:"paramModel"` 也只匹配 Local Name):
-		{"namespaced root accepted", `<x:paramModel xmlns:x="urn:test"/>`, false},
+		// xml struct tag `xml:"parameterModel"` 也只匹配 Local Name):
+		{"namespaced root accepted", `<x:parameterModel xmlns:x="urn:test"/>`, false},
 		{"plain text", `just text content`, true},
 		{"json content", `{"name":"X"}`, true},
 	}

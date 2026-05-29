@@ -22,6 +22,12 @@ interface BackendParamModel {
   description: string;
   is_active: boolean;
   loaded_from: string;
+  // T-0178:后端 handler.go::toModelView 派生的 source / deletable 真值源,
+  // 前端"来源"列 Tag + 删除按钮可见性都依赖这两个字段。
+  // mapBackendParamModel 必须把它们映射出去,否则 ModelsTab 的
+  // .filter((m) => (m.source ?? 'unknown') !== 'unknown') 会把全部数据过滤掉。
+  source?: 'builtin' | 'custom' | 'unknown';
+  deletable?: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -76,6 +82,10 @@ function mapModel(b: BackendParamModel): ParamModel {
     description: b.description,
     isActive: b.is_active,
     loadedFrom: b.loaded_from,
+    // 2026-05-29 修复:漏映射 source / deletable 导致 ModelsTab.filter 把所有
+    // 行当 unknown 隐藏 — 用户实测页面变空(DB 9 行 + API 200 但 UI 0 条)。
+    source: b.source,
+    deletable: b.deletable,
     createdAt: b.created_at,
     updatedAt: b.updated_at,
   };
