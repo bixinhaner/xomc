@@ -24,8 +24,11 @@ export interface AlarmDefinition {
 export interface AlarmSeverityLevel {
   id: string;
   code: number;
-  cnName: string;
-  enName: string;
+  // 真后端 alarm_severity_levels.name 是单列(ITU-T X.733 英文 Critical/Major/...);
+  // mock 数据走 cnName/enName/colorHex 分列(便于看)。两套渲染都按 cnName ?? name 回退。
+  name?: string;
+  cnName?: string;
+  enName?: string;
   colorHex?: string;
 }
 

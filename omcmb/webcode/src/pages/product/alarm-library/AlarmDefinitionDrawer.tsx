@@ -161,10 +161,14 @@ export default function AlarmDefinitionDrawer({
         </Form.Item>
         <Form.Item name="severityCode" label="严重级别" rules={[{ required: true }]}>
           <Select
-            options={(sevData?.items || []).map((s) => ({
-              label: `${s.code} - ${s.cnName} / ${s.enName}`,
-              value: s.code,
-            }))}
+            options={(sevData?.items || []).map((s) => {
+              // 真后端单列 name(Critical/Major/...);mock 双列 cnName/enName。
+              // 渲染时三段优雅 fallback:cnName ?? name ?? code 字符串。
+              const cn = s.cnName ?? s.name ?? String(s.code);
+              const en = s.enName ?? s.name ?? '';
+              const label = en && en !== cn ? `${s.code} - ${cn} / ${en}` : `${s.code} - ${cn}`;
+              return { label, value: s.code };
+            })}
           />
         </Form.Item>
         <Form.Item name="eventType" label="事件类型 (event_type)">

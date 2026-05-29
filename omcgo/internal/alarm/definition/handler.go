@@ -269,13 +269,16 @@ func (h *Handler) Delete(c *gin.Context) {
 }
 
 // SeverityLevels GET /api/v1/alarm-severity-levels — 只读 4 行种子。
+// 返回包装 {items: [...]} 与 list-style 端点(/alarm-definitions, /ne-types)对齐;
+// 前端 severityLevels() 读 data.items,原裸数组返回时 data.items=undefined → 空下拉
+// (2026-05-29 用户报告)。
 func (h *Handler) SeverityLevels(c *gin.Context) {
 	levels, err := h.service.ListSeverityLevels(c.Request.Context())
 	if err != nil {
 		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
 		return
 	}
-	response.OK(c, levels)
+	response.OK(c, gin.H{"items": levels})
 }
 
 // UnknownStats GET /api/v1/alarm-definitions/unknown-stats?productId=&days=7

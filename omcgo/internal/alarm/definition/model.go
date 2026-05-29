@@ -30,11 +30,14 @@ type AlarmDefinition struct {
 }
 
 // SeverityLevel 对应 alarm_severity_levels 表（设计 §3.2.1，4 行种子由 P1-04 写入）。
+// JSON tag 必填：前端 alarmDefinitionApi.ts::BackendSeverityLevel 期望 snake_case
+// 字段名（id/code/name/display_order），缺 tag 时 encoding/json 输出 PascalCase，
+// 前端读 cn_name/en_name 全 undefined → 下拉为空（2026-05-29 用户报告）。
 type SeverityLevel struct {
-	ID           uuid.UUID
-	Code         int
-	Name         string
-	DisplayOrder int
+	ID           uuid.UUID `json:"id"`
+	Code         int       `json:"code"`
+	Name         string    `json:"name"`
+	DisplayOrder int       `json:"display_order"`
 }
 
 // xmlAlarmModel 解析 7 个 ne_type 的 alarm xml（设计 §3.4）。

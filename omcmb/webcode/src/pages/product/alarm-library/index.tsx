@@ -40,7 +40,6 @@ import {
   useAlarmDefinitionList,
   useAlarmNeTypeStats,
   useDeleteAlarmDefinition,
-  useAlarmSeverityLevels,
   useAlarmDefinitionImportDirectory,
   useAlarmDefinitionCacheRefresh,
 } from '@core/hooks/api/useAlarmDefinitions';
@@ -113,7 +112,6 @@ export default function AlarmLibraryPage() {
   const { data: detailData, isLoading: isDetailLoading } = useAlarmDefinitionList(
     inDetail ? detailQueryFilter : { page: 1, pageSize: 1 }
   );
-  const { data: sevData } = useAlarmSeverityLevels();
   const detailItems = useMemo(() => detailData?.items || [], [detailData]);
 
   // ── 公共 ───────────────────────────────────────────────────────
@@ -125,16 +123,27 @@ export default function AlarmLibraryPage() {
   const importMut = useAlarmDefinitionImportDirectory();
   const cacheMut = useAlarmDefinitionCacheRefresh();
 
-  const severityOptions = useMemo(
-    () =>
-      (sevData?.items || [])
-        .map((level) => ({
-          label: `${level.code} - ${level.cnName} / ${level.enName}`,
-          value: level.code,
-        }))
-        .sort((left, right) => left.value - right.value),
-    [sevData]
-  );
+  // 2026-05-29 用户决策:过滤下拉的源不再走 /alarm-severity-levels(后端原始数组
+  // + 无 json tag + 缺 cn/en 拆分,前端 sevData 永远空 → 下拉为空);改为从当前
+  // 页 detailItems 的 severityCode/severityName 排重派生 — 与表格"严重级别"列
+  // 100% 一致,不出现"有选项但表里没数据"的悖论。
+  // 局限:服务端分页时其它页存在但本页缺失的 severity 不会进下拉。考虑到
+  // 单 ne_type 的 severity 多为 4 个低基数(Critical/Major/Minor/Warning),
+  // pageSize=20 的首页通常已全覆盖。
+  const severityOptions = useMemo(() => {
+    const byCode = new Map<number, string>();
+    detailItems.forEach((row) => {
+      if (!byCode.has(row.severityCode)) {
+        byCode.set(row.severityCode, row.severityName ?? '');
+      }
+    });
+    return Array.from(byCode.entries())
+      .map(([code, label]) => ({
+        label: label ? `${code} - ${label}` : String(code),
+        value: code,
+      }))
+      .sort((left, right) => left.value - right.value);
+  }, [detailItems]);
 
   // ── 一级表列 ────────────────────────────────────────────────────
   // 2026-05-29:严重级别列头改 i18n;en 仍是 Critical/Major/Minor/Warning
@@ -269,8 +278,18 @@ export default function AlarmLibraryPage() {
           )}
           <Space wrap>
             {inDetail ? (
-              // 详情态右侧:严重级别筛选 + 搜索 + 新增。重载 XML / 刷新缓存 都是全局动作,留在一级。
+              // 详情态右侧:搜索 + 严重级别筛选 + 新增。重载 XML / 刷新缓存 都是全局动作,留在一级。
+              // 2026-05-29 用户决策:搜索框置于"严重级别"前(主操作前置,与 kpi-library
+              // 详情态 toolbar 范式一致)。
               <>
+                <Input.Search
+                  placeholder="搜索 identifier / 名称"
+                  allowClear
+                  onSearch={(v) =>
+                    setDetailFilter((f) => ({ ...f, keyword: v || undefined, page: 1 }))
+                  }
+                  style={{ width: 220 }}
+                />
                 <Space size={4}>
                   <span style={FILTER_LABEL_STYLE}>严重级别</span>
                   <Select
@@ -284,14 +303,6 @@ export default function AlarmLibraryPage() {
                     style={{ width: 180 }}
                   />
                 </Space>
-                <Input.Search
-                  placeholder="搜索 identifier / 名称"
-                  allowClear
-                  onSearch={(v) =>
-                    setDetailFilter((f) => ({ ...f, keyword: v || undefined, page: 1 }))
-                  }
-                  style={{ width: 220 }}
-                />
                 <Button
                   type="primary"
                   icon={<PlusOutlined />}

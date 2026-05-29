@@ -33,8 +33,11 @@ interface BackendDefinition {
 interface BackendSeverityLevel {
   id: string;
   code: number;
-  cn_name: string;
-  en_name: string;
+  // 后端 SeverityLevel struct 只有单 name 列(DB alarm_severity_levels.name);
+  // cn_name/en_name/color_hex 仅 mock 数据用,可选保留兼容。
+  name?: string;
+  cn_name?: string;
+  en_name?: string;
   color_hex?: string;
 }
 
@@ -94,6 +97,7 @@ function mapSeverity(b: BackendSeverityLevel): AlarmSeverityLevel {
   return {
     id: b.id,
     code: b.code,
+    name: b.name,
     cnName: b.cn_name,
     enName: b.en_name,
     colorHex: b.color_hex,
