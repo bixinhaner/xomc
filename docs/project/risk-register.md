@@ -543,10 +543,10 @@
 - **概率**:中(运维误配场景常见)
 - **影响**:用户无法删除自定义 XML,需运维介入排查 fs 状态
 - **Owner**:运维与可观测性专家
-- **状态**:Open
+- **状态**:**Mitigated**(2026-05-29 兑现)
 - **关联 Task**:T-0178(commit d1349c3c `handler.go::DeleteModel` step 4 audit_action=parammodel.delete.aborted_backup_failed)
-- **缓解**:① 结构化审计日志含 errno;② 待补 Prometheus 告警规则 `ParamModelBackupFailedSurge`(P5/P6 任务);③ 运维手册补"备份失败排障"段
-- **下次复盘**:T-0178 S7 收尾
+- **缓解**:① 结构化审计日志含 errno ✓;② Prometheus 告警 `ParamModelBackupFailedSurge` 已落 `deployments/monitoring/alerts/omc-rules.yml`(`increase(parammodel_backup_cleanup_total{result="error"}[10m]) > 0 for 5m`,含 4 步 Action + Runbook 链接)✓;③ 运维手册"备份失败排障"段:待补到 `docs/operations/告警处置Runbook.md#ParamModelBackupFailedSurge`(留 ops 任务,告警 description 已内联完整排查步骤)
+- **下次复盘**:GA 前(运维手册落地后转 Closed)
 
 ### R-NEW-T0178-4 host 目录 `param-mappings-custom` 首次部署被遗漏初始化 → app 启动期 Loader 扫描非存目录报错
 - **描述**:deploy.sh 跳过初始化 + docker compose v2 不自动创建 bind mount source 时,Loader 扫到 customDir = ENOENT
@@ -611,4 +611,4 @@
 - **每月第一个 Sprint**：审视 P0 列表，确保 <14 天已关闭或有明确进展
 - **每季度**：深度复盘 P1/P2，决定是否升级或关闭
 
-**当前版本**：v1.2（2026-05-29，T-0178 8 条 R-NEW-T0178-* 风险登记,5 条 Mitigated + 3 条 Open）
+**当前版本**：v1.3（2026-05-29，T-0178 8 条 R-NEW-T0178-* 风险登记;R-NEW-T0178-3 Prometheus 告警 `ParamModelBackupFailedSurge` 落地后转 Mitigated;**6 条 Mitigated + 2 条 Open**（R-NEW-T0178-6 多实例横扩 + R-NEW-T0178-8 customOverrides=false WARN 仍 Open））

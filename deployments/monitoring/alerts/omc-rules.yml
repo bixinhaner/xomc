@@ -135,6 +135,40 @@ groups:
               3. 历史 orphan 任务的执行结果可在任务记录页查看（详情展开 → 路径转换详情）
             Runbook: docs/operations/告警处置Runbook.md#MMLPathTranslationOrphan
 
+      - alert: ParamModelBackupFailedSurge
+        # T-0178 R-NEW-T0178-3 兑现。DELETE /param-models/:name 时若物理 rename
+        # 失败(EACCES / ENOSPC / EROFS 等非 ENOENT errno)，handler 走保守回滚
+        # 不删 DB 行，返 500 + ErrCodeParamModelBackupFailed=2031。worker
+        # BackupCleanup 单文件 unlink 失败也累加 result=error。两路径共用
+        # parammodel_backup_cleanup_total{result="error"} 指标。
+        # 持续 > 0/10min 通常表示 host fs 真实问题(权限丢失 / 磁盘满 / 只读挂载)，
+        # 用户反复点 DELETE 全部失败，运维需介入排障。
+        expr: |
+          increase(parammodel_backup_cleanup_total{result="error"}[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          domain: omc
+          subsystem: parammodel
+        annotations:
+          summary: "ParamModel 自定义 XML 备份失败 surge(host fs 异常)"
+          description: |
+            过去 10 分钟内 parammodel_backup_cleanup_total{result="error"} 持续累加,
+            表示 worker 清扫器 unlink 残留文件失败,或 DELETE handler 物理备份失败
+            触发保守回滚(500 ErrCodeParamModelBackupFailed=2031)。
+            可能原因(按概率排序):
+              1. /opt/omc/data/param-mappings-custom/ 磁盘满 — 跑 df -h /opt/omc
+              2. 目录权限被运维误改(不再是 0750 / chown 10001:10001)
+              3. 挂载点变只读(ro remount) — 跑 mount | grep param-mappings-custom
+              4. 容器内 UID 与 host 不对齐(K8s 部署后常见)
+            Action:
+              1. ssh 到对应 host,验证 customDir 的 mount / 权限 / 磁盘空间
+              2. 查 worker 容器日志:docker logs <worker> | grep parammodel.backup-cleanup
+              3. 查 app 容器日志:docker logs <app> | grep parammodel.delete.aborted_backup_failed
+              4. 修复 fs 状态后告警自动消;若持久化故障,临时把 cron 间隔拉大
+                 (backup_cleanup_cron: "0 3 * * 0" 改为每周一次)避免噪声
+            Runbook: docs/operations/告警处置Runbook.md#ParamModelBackupFailedSurge
+
   - name: omc.meta
     interval: 30s
     rules:
