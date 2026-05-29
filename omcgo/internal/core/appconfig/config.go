@@ -189,13 +189,35 @@ func (c ParamModelLoaderConfig) CustomOverridesEnabled() bool {
 	return c.CustomOverrides == nil || *c.CustomOverrides
 }
 
-// IndicatorLoaderConfig 控制 KPI 指标库 Loader 行为（T-0098 P1-06）。
+// IndicatorLoaderConfig 控制 KPI 指标库 Loader 行为（T-0098 P1-06；T-0180 加自定义 XML 分层目录）。
 // EnbDirectory 内的所有 *.xml 视为 ENB 平台文件；GsmFile / GnbFile 单文件加载。
+// T-0180 P1.2: 镜像层 builtin 与 host bind mount custom 双目录合并扫描;
+// 同名文件由 CustomOverrides 控制(默认 custom 胜出,与 T-0178 一致)。
 type IndicatorLoaderConfig struct {
 	BaseDirectory string `mapstructure:"base_directory"` // 默认 "indicator-library"
 	EnbSubdir     string `mapstructure:"enb_subdir"`     // 默认 "enb"
 	GsmFile       string `mapstructure:"gsm_file"`       // 默认 "GSM.xml"
 	GnbFile       string `mapstructure:"gnb_file"`       // 默认 "GNB.xml"
+
+	// T-0180 自定义 XML 分层目录(用户上传 indicator XML 的持久化目录)
+	CustomBaseDirectory string `mapstructure:"custom_base_directory"` // 默认 "indicator-library-custom"
+	CustomEnbSubdir     string `mapstructure:"custom_enb_subdir"`     // 默认 "enb"
+	CustomGsmSubdir     string `mapstructure:"custom_gsm_subdir"`     // 默认 "gsm"
+	CustomGnbSubdir     string `mapstructure:"custom_gnb_subdir"`     // 默认 "gnb"
+	// CustomOverrides 使用 *bool 三态(与 ParamModelLoaderConfig 同口径):
+	//   yaml 不写  → nil  → CustomOverridesEnabled() = true(默认 custom 胜出,T-0180 决策 D1)
+	//   yaml true  → 显式 true,等同默认
+	//   yaml false → 显式 false,同名时 builtin 胜出
+	CustomOverrides *bool `mapstructure:"custom_overrides"`
+}
+
+// CustomOverridesEnabled 返回是否启用 custom 胜出语义。
+// nil(yaml 不写) → true 默认 custom 胜出(T-0180 决策 D1,与 T-0178 ParamModel 一致)。
+func (c IndicatorLoaderConfig) CustomOverridesEnabled() bool {
+	if c.CustomOverrides == nil {
+		return true
+	}
+	return *c.CustomOverrides
 }
 
 // AlarmDefinitionLoaderConfig 控制告警库 Loader 行为（T-0098 P1-06）。

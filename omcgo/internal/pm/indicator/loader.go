@@ -56,6 +56,19 @@ func NewLoader(pool *pgxpool.Pool, cfg appconfig.IndicatorLoaderConfig, baseDir 
 	if cfg.GnbFile == "" {
 		cfg.GnbFile = "GNB.xml"
 	}
+	// T-0180 P1.2: 自定义 XML 分层目录默认值(host bind mount /opt/omc/data/indicator-library-custom/{enb,gsm,gnb})
+	if cfg.CustomBaseDirectory == "" {
+		cfg.CustomBaseDirectory = CustomDirSubdir // "indicator-library-custom"
+	}
+	if cfg.CustomEnbSubdir == "" {
+		cfg.CustomEnbSubdir = "enb"
+	}
+	if cfg.CustomGsmSubdir == "" {
+		cfg.CustomGsmSubdir = "gsm"
+	}
+	if cfg.CustomGnbSubdir == "" {
+		cfg.CustomGnbSubdir = "gnb"
+	}
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -69,11 +82,17 @@ func (l *Loader) LoadOnce(ctx context.Context) (dictloader.Report, error) { retu
 func (l *Loader) Reload(ctx context.Context) (dictloader.Report, error)   { return l.run(ctx) }
 
 // xmlIndicatorModel 解析 indicator 单文件 XML（设计 §2.6）。
+//
+// LoadedFrom 是 T-0180 P1.2 在 Loader 内存中追加的来源标记(xml:"-" 不参与 XML 解析),
+// 形如 "indicator-library/enb/ALL.xml" 或 "indicator-library-custom/enb/MY.xml",
+// 由 resolveENBSources / resolveSingleTechSources 在文件扫描阶段写入,
+// 由 flattenDocsByDeviceType 透传到 indicatorRecord 最终落 perf_indicators_*.loaded_from 列。
 type xmlIndicatorModel struct {
 	XMLName        xml.Name       `xml:"indicatorModel"`
 	Platform       string         `xml:"platform,attr"`
 	IndicatorCount int            `xml:"indicatorCount,attr"`
 	Indicators     []xmlIndicator `xml:"indicators>indicator"`
+	LoadedFrom     string         `xml:"-"`
 }
 
 type xmlIndicator struct {
@@ -97,54 +116,43 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	rep := dictloader.NewReport(LoaderName)
 	defer rep.Finish()
 
-	// 1) ENB 子目录：所有 *.xml
-	enbDir := filepath.Join(l.base, l.cfg.BaseDirectory, l.cfg.EnbSubdir)
-	enbFiles, err := scanXMLFiles(enbDir)
+	// T-0180 P1.2: 三制式双目录合并扫描
+	// ENB 多文件双目录合并(同名按 CustomOverrides 决定胜负;默认 custom 胜出)
+	enbSources, err := resolveENBSources(
+		l.base,
+		filepath.Join(l.cfg.BaseDirectory, l.cfg.EnbSubdir),
+		filepath.Join(l.cfg.CustomBaseDirectory, l.cfg.CustomEnbSubdir),
+		l.cfg.CustomOverridesEnabled(),
+	)
 	if err != nil {
-		rep.AddError(l.cfg.EnbSubdir, "scan", err)
-		return rep, fmt.Errorf("scan enb dir: %w", err)
+		rep.AddError("enb", "resolve", err)
+		return rep, fmt.Errorf("resolve enb sources: %w", err)
 	}
-	enbDocs := make([]xmlIndicatorModel, 0, len(enbFiles))
-	for _, f := range enbFiles {
-		rep.FilesScanned++
-		var doc xmlIndicatorModel
-		if err := readXML(filepath.Join(enbDir, f), &doc); err != nil {
-			rep.AddError(f, "parse", err)
-			rep.FilesSkipped++
-			continue
-		}
-		// 文件名（去 .xml）作为 platform_name fallback；XML 里 platform 属性优先
-		if doc.Platform == "" {
-			doc.Platform = strings.TrimSuffix(f, filepath.Ext(f))
-		}
-		enbDocs = append(enbDocs, doc)
-		rep.FilesLoaded++
-	}
+	enbDocs := l.parseDocs(enbSources, &rep, "" /*platformFallback inferred per-file*/)
 
-	// 2) GSM / GNB 单文件
-	var gsmDoc, gnbDoc xmlIndicatorModel
-	gsmPath := filepath.Join(l.base, l.cfg.BaseDirectory, l.cfg.GsmFile)
-	rep.FilesScanned++
-	if err := readXML(gsmPath, &gsmDoc); err != nil {
-		rep.AddError(l.cfg.GsmFile, "parse", err)
-		rep.FilesSkipped++
-	} else {
-		if gsmDoc.Platform == "" {
-			gsmDoc.Platform = "BSC"
-		}
-		rep.FilesLoaded++
+	// GSM:builtin 单文件 + custom 子目录多文件(rel 路径不同,不可能撞名)
+	gsmSources, err := resolveSingleTechSources(
+		l.base,
+		filepath.Join(l.cfg.BaseDirectory, l.cfg.GsmFile),
+		filepath.Join(l.cfg.CustomBaseDirectory, l.cfg.CustomGsmSubdir),
+	)
+	if err != nil {
+		rep.AddError("gsm", "resolve", err)
+		return rep, fmt.Errorf("resolve gsm sources: %w", err)
 	}
-	gnbPath := filepath.Join(l.base, l.cfg.BaseDirectory, l.cfg.GnbFile)
-	rep.FilesScanned++
-	if err := readXML(gnbPath, &gnbDoc); err != nil {
-		rep.AddError(l.cfg.GnbFile, "parse", err)
-		rep.FilesSkipped++
-	} else {
-		if gnbDoc.Platform == "" {
-			gnbDoc.Platform = "BaiBNQ"
-		}
-		rep.FilesLoaded++
+	gsmDocs := l.parseDocs(gsmSources, &rep, "BSC")
+
+	// GNB:同 GSM 结构
+	gnbSources, err := resolveSingleTechSources(
+		l.base,
+		filepath.Join(l.cfg.BaseDirectory, l.cfg.GnbFile),
+		filepath.Join(l.cfg.CustomBaseDirectory, l.cfg.CustomGnbSubdir),
+	)
+	if err != nil {
+		rep.AddError("gnb", "resolve", err)
+		return rep, fmt.Errorf("resolve gnb sources: %w", err)
 	}
+	gnbDocs := l.parseDocs(gnbSources, &rep, "BaiBNQ")
 
 	// 3) 单事务写入 4 类表
 	tx, err := l.pool.Begin(ctx)
@@ -153,9 +161,10 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// 3a) units — 收集所有 distinct unitId
+	// 3a) units — 收集所有 distinct unitId(三制式合并)
 	allDocs := append([]xmlIndicatorModel{}, enbDocs...)
-	allDocs = append(allDocs, gsmDoc, gnbDoc)
+	allDocs = append(allDocs, gsmDocs...)
+	allDocs = append(allDocs, gnbDocs...)
 	unitsLoaded, err := upsertUnits(ctx, tx, allDocs)
 	if err != nil {
 		return rep, fmt.Errorf("upsert indicator_unit: %w", err)
@@ -167,22 +176,23 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 		return rep, fmt.Errorf("ensure default groups: %w", err)
 	}
 
-	// 3c) ENB indicators + formulas — 多文件 dedupe 取最后一份；formula 每 platform 一行
-	enbIndicators, enbFormulas := flattenDocsByDeviceType(enbDocs, false /*hasIndicatorLevel=true for ENB but not GNB*/)
-	gsmIndicators, gsmFormulas := flattenDocsByDeviceType([]xmlIndicatorModel{gsmDoc}, false)
-	gnbIndicators, gnbFormulas := flattenDocsByDeviceType([]xmlIndicatorModel{gnbDoc}, true)
+	// 3c) ENB indicators + formulas — 多文件 dedupe 取 first-seen;formula 每 platform 一行
+	// T-0180 P1.2: flattenDocsByDeviceType 现返回 indicatorRecord(含 LoadedFrom),供 flushIndicators 写 loaded_from 列
+	enbRecords, enbFormulas := flattenDocsByDeviceType(enbDocs, false /*hasIndicatorLevel=true for ENB but not GNB*/)
+	gsmRecords, gsmFormulas := flattenDocsByDeviceType(gsmDocs, false)
+	gnbRecords, gnbFormulas := flattenDocsByDeviceType(gnbDocs, true)
 
-	if n, err := upsertIndicators(ctx, tx, "perf_indicators_enb", enbIndicators, false); err != nil {
+	if n, err := upsertIndicators(ctx, tx, "perf_indicators_enb", enbRecords, false); err != nil {
 		return rep, err
 	} else {
 		rep.RowsAffected += n
 	}
-	if n, err := upsertIndicators(ctx, tx, "perf_indicators_gsm", gsmIndicators, false); err != nil {
+	if n, err := upsertIndicators(ctx, tx, "perf_indicators_gsm", gsmRecords, false); err != nil {
 		return rep, err
 	} else {
 		rep.RowsAffected += n
 	}
-	if n, err := upsertIndicators(ctx, tx, "perf_indicators_gnb", gnbIndicators, true); err != nil {
+	if n, err := upsertIndicators(ctx, tx, "perf_indicators_gnb", gnbRecords, true); err != nil {
 		return rep, err
 	} else {
 		rep.RowsAffected += n
@@ -206,8 +216,8 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 
 	// T-0098 P2-09：enabled 属性 OR 合并 + operator_code='default' 桶刷新（设计 §2.6 + 实施计划 §1.2）
 	enbEnabled := aggregateEnabledOR(enbDocs)
-	gsmEnabled := aggregateEnabledOR([]xmlIndicatorModel{gsmDoc})
-	gnbEnabled := aggregateEnabledOR([]xmlIndicatorModel{gnbDoc})
+	gsmEnabled := aggregateEnabledOR(gsmDocs)
+	gnbEnabled := aggregateEnabledOR(gnbDocs)
 	if n, err := refreshDefaultEnabledBucket(ctx, tx, "enabled_pm_indicators_enb", enbEnabled); err != nil {
 		return rep, fmt.Errorf("refresh enabled_pm_indicators_enb: %w", err)
 	} else {
@@ -229,15 +239,47 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	}
 
 	l.logger.Info("indicators loaded",
-		zap.Int("enb_indicators", len(enbIndicators)), zap.Int("enb_formulas", len(enbFormulas)),
-		zap.Int("gsm_indicators", len(gsmIndicators)), zap.Int("gsm_formulas", len(gsmFormulas)),
-		zap.Int("gnb_indicators", len(gnbIndicators)), zap.Int("gnb_formulas", len(gnbFormulas)),
+		zap.Int("enb_indicators", len(enbRecords)), zap.Int("enb_formulas", len(enbFormulas)),
+		zap.Int("gsm_indicators", len(gsmRecords)), zap.Int("gsm_formulas", len(gsmFormulas)),
+		zap.Int("gnb_indicators", len(gnbRecords)), zap.Int("gnb_formulas", len(gnbFormulas)),
 		zap.Int("units", unitsLoaded))
 
 	if rep.HasErrors() {
 		return rep, rep.FirstError()
 	}
 	return rep, nil
+}
+
+// parseDocs 是 T-0180 P1.2 引入的内聚 helper:把 resolveXxxSources 返回的 []fileSource
+// 一次性解析为 []xmlIndicatorModel,每份 doc 写入 LoadedFrom + Platform fallback。
+//
+// platformFallback 用于 GSM("BSC")/ GNB("BaiBNQ") 的常量 fallback;ENB 传 ""
+// 表示按文件名(去 .xml + 不含目录路径)推断 platform。
+//
+// 解析失败仅记录 rep.AddError 并 FilesSkipped++,不阻塞其他文件,保留与旧 Loader 容错语义一致。
+func (l *Loader) parseDocs(srcs []fileSource, rep *dictloader.Report, platformFallback string) []xmlIndicatorModel {
+	docs := make([]xmlIndicatorModel, 0, len(srcs))
+	for _, src := range srcs {
+		rep.FilesScanned++
+		var doc xmlIndicatorModel
+		if err := readXML(src.AbsPath, &doc); err != nil {
+			rep.AddError(src.LoadedFrom, "parse", err)
+			rep.FilesSkipped++
+			continue
+		}
+		doc.LoadedFrom = src.LoadedFrom
+		if doc.Platform == "" {
+			if platformFallback != "" {
+				doc.Platform = platformFallback
+			} else {
+				base := filepath.Base(src.LoadedFrom)
+				doc.Platform = strings.TrimSuffix(base, filepath.Ext(base))
+			}
+		}
+		docs = append(docs, doc)
+		rep.FilesLoaded++
+	}
+	return docs
 }
 
 func readXML(path string, out interface{}) error {
@@ -251,28 +293,21 @@ func readXML(path string, out interface{}) error {
 	return nil
 }
 
-func scanXMLFiles(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]string, 0, len(entries))
-	for _, e := range entries {
-		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		if !strings.EqualFold(filepath.Ext(e.Name()), ".xml") {
-			continue
-		}
-		out = append(out, e.Name())
-	}
-	return out, nil
+// indicatorRecord 是 T-0180 P1.2 引入的 dedupe 单元:
+// 把 xmlIndicator 与其来源 LoadedFrom 配对,供 flushIndicators 写 loaded_from 列。
+type indicatorRecord struct {
+	Ind        xmlIndicator
+	LoadedFrom string
 }
 
-// flattenDocsByDeviceType 跨多文件去重 indicator（按 id），并产生 formula 列表。
-// 后处理（dedupe）策略：first-seen 胜出（与 alarm 模式一致）；formula 全量保留（设计 §2.6 多平台公式）。
-func flattenDocsByDeviceType(docs []xmlIndicatorModel, isGnb bool) (map[string]xmlIndicator, []formulaRow) {
-	indicators := make(map[string]xmlIndicator, 256)
+// flattenDocsByDeviceType 跨多文件去重 indicator(按 id),并产生 formula 列表。
+// 后处理(dedupe)策略:first-seen 胜出(与 alarm 模式一致);formula 全量保留(设计 §2.6 多平台公式)。
+//
+// T-0180 P1.2: 返回 map[string]indicatorRecord(替代旧 map[string]xmlIndicator),
+// 让 LoadedFrom 与 indicator 同生命周期,first-seen 的来源被锁定;后续同 id 的 doc
+// 即使 LoadedFrom 不同也不覆盖(保留首个文件作为权威源)。
+func flattenDocsByDeviceType(docs []xmlIndicatorModel, isGnb bool) (map[string]indicatorRecord, []formulaRow) {
+	records := make(map[string]indicatorRecord, 256)
 	formulas := make([]formulaRow, 0, 1024)
 	for _, doc := range docs {
 		platform := doc.Platform
@@ -280,8 +315,8 @@ func flattenDocsByDeviceType(docs []xmlIndicatorModel, isGnb bool) (map[string]x
 			if ind.ID == "" {
 				continue
 			}
-			if _, exists := indicators[ind.ID]; !exists {
-				indicators[ind.ID] = ind
+			if _, exists := records[ind.ID]; !exists {
+				records[ind.ID] = indicatorRecord{Ind: ind, LoadedFrom: doc.LoadedFrom}
 			}
 			if ind.Formula == "" {
 				continue
@@ -293,8 +328,8 @@ func flattenDocsByDeviceType(docs []xmlIndicatorModel, isGnb bool) (map[string]x
 			})
 		}
 	}
-	_ = isGnb // GNB 处理差异由 upsertIndicators 接管（无 indicator_level 列）
-	return indicators, formulas
+	_ = isGnb // GNB 处理差异由 upsertIndicators 接管(无 indicator_level 列)
+	return records, formulas
 }
 
 type formulaRow struct {
@@ -344,14 +379,14 @@ func ensureDefaultGroups(ctx context.Context, tx pgx.Tx) error {
 	return nil
 }
 
-func upsertIndicators(ctx context.Context, tx pgx.Tx, table string, indicators map[string]xmlIndicator, isGnb bool) (int, error) {
-	if len(indicators) == 0 {
+func upsertIndicators(ctx context.Context, tx pgx.Tx, table string, records map[string]indicatorRecord, isGnb bool) (int, error) {
+	if len(records) == 0 {
 		return 0, nil
 	}
 	const chunkSize = 200
-	var batch []xmlIndicator
-	for _, ind := range indicators {
-		batch = append(batch, ind)
+	var batch []indicatorRecord
+	for _, rec := range records {
+		batch = append(batch, rec)
 		if len(batch) >= chunkSize {
 			if err := flushIndicators(ctx, tx, table, batch, isGnb); err != nil {
 				return 0, err
@@ -364,20 +399,23 @@ func upsertIndicators(ctx context.Context, tx pgx.Tx, table string, indicators m
 			return 0, err
 		}
 	}
-	return len(indicators), nil
+	return len(records), nil
 }
 
-func flushIndicators(ctx context.Context, tx pgx.Tx, table string, batch []xmlIndicator, isGnb bool) error {
+func flushIndicators(ctx context.Context, tx pgx.Tx, table string, batch []indicatorRecord, isGnb bool) error {
+	// T-0180 P1.2: 列顺序与 ON CONFLICT 子句严格对齐;loaded_from 始终在 indicator_level 之前(非 GNB 时尾列追加)
 	cols := []string{
 		"id", "en_name", "cn_name", "group_id",
 		"data_type", "unit_id", "is_build_in", "is_counter",
 		"arithmetic", "statis_type",
+		"loaded_from",
 	}
 	if !isGnb {
 		cols = append(cols, "indicator_level")
 	}
 	ib := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).Insert(table).Columns(cols...)
-	for _, ind := range batch {
+	for _, rec := range batch {
+		ind := rec.Ind
 		enName := ind.EnName
 		if enName == "" {
 			enName = ind.ID // NOT NULL fallback
@@ -402,6 +440,7 @@ func flushIndicators(ctx context.Context, tx pgx.Tx, table string, batch []xmlIn
 			ind.ID, enName, cnName, groupID,
 			nullIfEmpty(ind.DataType), nullIfEmpty(ind.UnitID), isBuiltIn, isCounter,
 			nullIfEmpty(ind.Arithmetic), nullIfEmpty(ind.StatisType),
+			nullIfEmpty(rec.LoadedFrom),
 		}
 		if !isGnb {
 			row = append(row, nullIfEmpty(ind.IndicatorLevel))
@@ -418,7 +457,8 @@ func flushIndicators(ctx context.Context, tx pgx.Tx, table string, batch []xmlIn
 	    is_build_in  = EXCLUDED.is_build_in,
 	    is_counter   = EXCLUDED.is_counter,
 	    arithmetic   = EXCLUDED.arithmetic,
-	    statis_type  = EXCLUDED.statis_type`
+	    statis_type  = EXCLUDED.statis_type,
+	    loaded_from  = EXCLUDED.loaded_from`
 	if !isGnb {
 		updateClause += `, indicator_level = EXCLUDED.indicator_level`
 	}
