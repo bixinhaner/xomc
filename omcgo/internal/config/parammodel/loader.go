@@ -64,7 +64,7 @@ func NewLoader(pool *pgxpool.Pool, cfg appconfig.ParamModelLoaderConfig, baseDir
 		cfg:             cfg,
 		base:            baseDir,
 		logger:          logger.Named(LoaderName),
-		customDir:       cfg.CustomDirectory,         // T-0178 host 持久化目录(子路径)
+		customDir:       cfg.CustomDirectory,          // T-0178 host 持久化目录(子路径)
 		customOverrides: cfg.CustomOverridesEnabled(), // T-0178 决策 1: 默认 custom 胜出
 	}
 }
@@ -106,7 +106,7 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	}
 
 	// Pass 1: builtin + custom 双目录解析 + 同名合并(T-0178 §9.3)
-	files, warnings, err := resolveLoaderFiles(
+	files, shadowedCustom, warnings, err := resolveLoaderFiles(
 		builtinDir, customDir,
 		l.cfg.ParamModelFiles,
 		reserved,
@@ -118,6 +118,17 @@ func (l *Loader) run(ctx context.Context) (dictloader.Report, error) {
 	for _, w := range warnings {
 		// custom dir 非 ENOENT 异常(权限/类型错误)走 WARN 不阻塞 builtin 加载
 		l.logger.Warn("param-model file resolve warning", zap.String("detail", w))
+	}
+	// T-0178 R-NEW-T0178-8: customOverrides=false 时同名 custom 文件被 builtin 压制
+	// 但 host 上文件还在,运维容易困惑"上传了为何不生效"。启动期 WARN 出清单,
+	// 让 Loki/grep 一查即知;UI 端的提示由后续任务跟进。
+	if !l.customOverrides && len(shadowedCustom) > 0 {
+		l.logger.Warn(
+			"custom param-model XML files are SUPPRESSED by builtin (custom_overrides_builtin=false)",
+			zap.Strings("suppressed_files", shadowedCustom),
+			zap.String("custom_dir", customDir),
+			zap.String("hint", "either delete the shadowed custom files or set custom_overrides_builtin=true to let custom win"),
+		)
 	}
 
 	for _, absPath := range files {

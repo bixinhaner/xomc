@@ -598,10 +598,10 @@
 - **概率**:低(默认 true,极少有人主动改 false)
 - **影响**:用户上传后看不到 source=custom,只看到 source=builtin
 - **Owner**:产品经理
-- **状态**:Open(待补 Loader 启动期 WARN 日志)
-- **关联 Task**:T-0178(后续补强)
-- **缓解**:Loader 启动期日志 WARN 记录"custom 文件因 customOverrides=false 被压制"的清单;UI Source 列内置行可加 Tooltip 提示
-- **下次复盘**:T-0178 S7 收尾
+- **状态**:**Mitigated**(2026-05-29 兑现)
+- **关联 Task**:T-0178(follow-up `c9eec280` 后续)
+- **缓解**:Loader 启动期 WARN 日志 `customOverrides=false` 时输出 `shadowed_files` 清单 + `custom_dir` + `hint`(`internal/config/parammodel/loader.go::run`),Loki / grep 一查即知;后续 UI Tooltip 提示走 PM 任务跟进
+- **下次复盘**:GA 前(UI 提示落地后转 Closed)
 
 ---
 
@@ -611,4 +611,4 @@
 - **每月第一个 Sprint**：审视 P0 列表，确保 <14 天已关闭或有明确进展
 - **每季度**：深度复盘 P1/P2，决定是否升级或关闭
 
-**当前版本**：v1.3（2026-05-29，T-0178 8 条 R-NEW-T0178-* 风险登记;R-NEW-T0178-3 Prometheus 告警 `ParamModelBackupFailedSurge` 落地后转 Mitigated;**6 条 Mitigated + 2 条 Open**（R-NEW-T0178-6 多实例横扩 + R-NEW-T0178-8 customOverrides=false WARN 仍 Open））
+**当前版本**：v1.4（2026-05-29，T-0178 8 条 R-NEW-T0178-* 风险登记;R-NEW-T0178-3 Prometheus 告警 + R-NEW-T0178-8 Loader 启动期 WARN 兑现;**7 条 Mitigated + 1 条 Open**（仅 R-NEW-T0178-6 多实例横扩 PG advisory lock 仍 Open,横扩立项时关闭））

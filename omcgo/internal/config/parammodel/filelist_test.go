@@ -238,7 +238,7 @@ func TestResolveLoadedFrom_ClassifierIntegration(t *testing.T) {
 
 // TestResolveLoaderFiles_Whitelist 覆盖白名单模式:custom 不参与,builtin 严格按列表。
 func TestResolveLoaderFiles_Whitelist(t *testing.T) {
-	files, warnings, err := resolveLoaderFiles(
+	files, _, warnings, err := resolveLoaderFiles(
 		"/b", "/c",
 		[]string{"BTS.xml", "BLQ.xml"},
 		[]string{"standard-model.xml"},
@@ -269,7 +269,7 @@ func TestResolveLoaderFiles_AutoScan_BuiltinOnly(t *testing.T) {
 	writeStub(t, builtinDir, "BLQ.xml")
 	writeStub(t, builtinDir, "standard-model.xml") // reserved,应被排除
 
-	files, warnings, err := resolveLoaderFiles(
+	files, _, warnings, err := resolveLoaderFiles(
 		builtinDir, customDir,
 		nil,
 		[]string{"standard-model.xml", "products.xml"},
@@ -305,7 +305,7 @@ func TestResolveLoaderFiles_AutoScan_CustomOverride(t *testing.T) {
 	writeStub(t, customDir, "BTS.xml")  // 同名覆盖
 	writeStub(t, customDir, "CBQQ.xml") // 新增
 
-	files, warnings, err := resolveLoaderFiles(
+	files, _, warnings, err := resolveLoaderFiles(
 		builtinDir, customDir,
 		nil,
 		[]string{"standard-model.xml"},
@@ -357,7 +357,7 @@ func TestResolveLoaderFiles_AutoScan_BuiltinWinsOnFalse(t *testing.T) {
 	writeStub(t, customDir, "BTS.xml")
 	writeStub(t, customDir, "CBQQ.xml")
 
-	files, _, err := resolveLoaderFiles(
+	files, _, _, err := resolveLoaderFiles(
 		builtinDir, customDir,
 		nil,
 		[]string{"standard-model.xml"},
@@ -401,7 +401,7 @@ func TestResolveLoaderFiles_AutoScan_CustomIsFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	files, warnings, err := resolveLoaderFiles(
+	files, _, warnings, err := resolveLoaderFiles(
 		builtinDir, customDir,
 		nil,
 		[]string{"standard-model.xml"},
@@ -425,9 +425,92 @@ func TestResolveLoaderFiles_BuiltinDirMissing(t *testing.T) {
 	base := t.TempDir()
 	builtinDir := filepath.Join(base, "no-such")
 	customDir := filepath.Join(base, "param-mappings-custom")
-	_, _, err := resolveLoaderFiles(builtinDir, customDir, nil, nil, true)
+	_, _, _, err := resolveLoaderFiles(builtinDir, customDir, nil, nil, true)
 	if err == nil {
 		t.Errorf("expected error when builtin dir missing, got nil")
+	}
+}
+
+// TestFindShadowedCustom 覆盖 T-0178 R-NEW-T0178-8 检测函数(纯字符串集合操作)。
+func TestFindShadowedCustom(t *testing.T) {
+	cases := []struct {
+		name    string
+		builtin []string
+		custom  []string
+		want    []string
+	}{
+		{"both empty", nil, nil, nil},
+		{"only builtin", []string{"BTS.xml"}, nil, nil},
+		{"only custom", nil, []string{"CBQQ.xml"}, nil},
+		{"no overlap", []string{"BTS.xml"}, []string{"CBQQ.xml"}, nil},
+		{"full overlap", []string{"BTS.xml", "BLQ.xml"}, []string{"BLQ.xml", "BTS.xml"},
+			[]string{"BLQ.xml", "BTS.xml"}},
+		{"partial overlap order preserved",
+			[]string{"BTS.xml", "BLQ.xml"},
+			[]string{"CBQQ.xml", "BTS.xml", "NEW.xml"},
+			[]string{"BTS.xml"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := findShadowedCustom(tc.builtin, tc.custom)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("findShadowedCustom(%v, %v) = %v, want %v",
+					tc.builtin, tc.custom, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestResolveLoaderFiles_ShadowedCustom 验证 resolveLoaderFiles 在双目录扫描下
+// 返回同名 custom 文件清单(供 Loader.run 决定是否 WARN)。
+func TestResolveLoaderFiles_ShadowedCustom(t *testing.T) {
+	base := t.TempDir()
+	builtinDir := filepath.Join(base, "param-mappings")
+	customDir := filepath.Join(base, "param-mappings-custom")
+	if err := os.Mkdir(builtinDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(customDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeStub(t, builtinDir, "BTS.xml")
+	writeStub(t, builtinDir, "BLQ.xml")
+	writeStub(t, customDir, "BTS.xml")  // shadow
+	writeStub(t, customDir, "CBQQ.xml") // not shadow
+
+	// customOverrides=true 时 shadowed 仍返(算法不依赖该 flag,由 caller 决定是否 log)
+	_, shadowed, _, err := resolveLoaderFiles(
+		builtinDir, customDir, nil, nil, true,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"BTS.xml"}
+	if !reflect.DeepEqual(shadowed, want) {
+		t.Errorf("shadowed = %v, want %v", shadowed, want)
+	}
+
+	// customOverrides=false 时一样返(算法不依赖该 flag)
+	_, shadowed, _, err = resolveLoaderFiles(
+		builtinDir, customDir, nil, nil, false,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !reflect.DeepEqual(shadowed, want) {
+		t.Errorf("shadowed (override=false) = %v, want %v", shadowed, want)
+	}
+
+	// 白名单模式 shadowed 应为 nil(白名单不扫 custom)
+	_, shadowed, _, err = resolveLoaderFiles(
+		builtinDir, customDir,
+		[]string{"BLQ.xml"}, nil, true,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if shadowed != nil {
+		t.Errorf("whitelist mode shadowed should be nil, got %v", shadowed)
 	}
 }
 

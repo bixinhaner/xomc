@@ -60,6 +60,32 @@ func resolveLoadedFrom(base, absPath string) string {
 	return filepath.ToSlash(rel)
 }
 
+// findShadowedCustom 返回 custom basename 集合中,与 builtin basename 同名的子集
+// (按 custom 输入顺序保留;不去重,假设输入已去重)。
+//
+// 用途(T-0178 R-NEW-T0178-8 缓解):Loader 启动期当 customOverrides=false 时,
+// 同名 custom 文件被 builtin 压制 → host 上文件仍在但行为不生效,用户上传后
+// 看不到生效。本函数列出受影响清单,供 Loader.run 写 WARN 日志,运维一眼能
+// 看到哪些 custom 文件被静默忽略。
+//
+// 纯函数,无 FS 依赖。两个空切片输入返空切片。
+func findShadowedCustom(builtinFiles, customFiles []string) []string {
+	if len(builtinFiles) == 0 || len(customFiles) == 0 {
+		return nil
+	}
+	builtinSet := make(map[string]struct{}, len(builtinFiles))
+	for _, b := range builtinFiles {
+		builtinSet[b] = struct{}{}
+	}
+	var out []string
+	for _, c := range customFiles {
+		if _, ok := builtinSet[c]; ok {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
 // resolveLoaderFiles 是 Loader.run 文件枚举步骤的纯函数封装(T-0178)。
 //
 // 两种模式:
@@ -70,22 +96,25 @@ func resolveLoadedFrom(base, absPath string) string {
 // custom 目录缺失(ENOENT)视为"首次部署未初始化",静默跳过 — builtin 仍正常加载。
 // 其他 custom 错误(权限 / IO)→ warnings 返回,不阻塞 builtin。
 // builtin 目录错误 → 直接 error,因为 builtin 应该永远可读。
+//
+// shadowedCustom 始终返回(不论 customOverrides),让调用方按当前配置决定是否
+// 写 WARN(T-0178 R-NEW-T0178-8 缓解)。
 func resolveLoaderFiles(
 	builtinDir, customDir string,
 	whitelist, reserved []string,
 	customOverrides bool,
-) (files []string, warnings []string, err error) {
+) (files, shadowedCustom, warnings []string, err error) {
 	if len(whitelist) > 0 {
 		files = make([]string, 0, len(whitelist))
 		for _, name := range whitelist {
 			files = append(files, filepath.Join(builtinDir, name))
 		}
-		return files, nil, nil
+		return files, nil, nil, nil
 	}
 
 	builtinFiles, err := scanXMLFiles(builtinDir)
 	if err != nil {
-		return nil, nil, fmt.Errorf("scan builtin %s: %w", builtinDir, err)
+		return nil, nil, nil, fmt.Errorf("scan builtin %s: %w", builtinDir, err)
 	}
 	builtinFiles = pruneReserved(builtinFiles, reserved)
 
@@ -112,6 +141,7 @@ func resolveLoaderFiles(
 		}
 	}
 
+	shadowedCustom = findShadowedCustom(builtinFiles, customFiles)
 	files = mergeFileLists(builtinDir, builtinFiles, customDir, customFiles, customOverrides)
-	return files, warnings, nil
+	return files, shadowedCustom, warnings, nil
 }
