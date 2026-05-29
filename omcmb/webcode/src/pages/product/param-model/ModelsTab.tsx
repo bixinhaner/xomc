@@ -25,7 +25,10 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
   const [form] = Form.useForm<UpdateParamModelInput>();
 
   const items = useMemo(() => {
-    const raw = data?.items || [];
+    // 2026-05-29 用户决策:前端隐藏"无加载源"(source=unknown)的孤儿模型。
+    // 后端 ListParamModels SQL 已加 WHERE 前缀过滤 + migration 218 一次性物理清理,
+    // 本 .filter 是双保险,防止 stale cache / 老版本 API 漏出 unknown 行。
+    const raw = (data?.items || []).filter((m) => (m.source ?? 'unknown') !== 'unknown');
     const k = keyword?.trim().toLowerCase();
     if (!k) return raw;
     return raw.filter((m) =>
@@ -57,22 +60,20 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
       title: '来源',
       dataIndex: 'source',
       width: 90,
+      // 2026-05-29 用户决策:unknown 行已在数据层被过滤,filter 选项去掉"未知"
       filters: [
         { text: '内置', value: 'builtin' as ParamModelSource },
         { text: '自定义', value: 'custom' as ParamModelSource },
-        { text: '未知', value: 'unknown' as ParamModelSource },
       ],
       onFilter: (val: boolean | React.Key, row: ParamModel) => row.source === val,
       render: (s: ParamModelSource | undefined, row: ParamModel) => {
-        // 防御:老缓存可能无 source 字段,fallback unknown
-        const src = s ?? 'unknown';
+        // 防御:理论上 unknown 已被双层过滤(后端 SQL + 前端 useMemo)拦掉,
+        // 这里只可能命中 builtin / custom;留 fallback 防御老缓存边界场景
         const tag =
-          src === 'custom' ? (
+          s === 'custom' ? (
             <Tag color="blue">自定义</Tag>
-          ) : src === 'builtin' ? (
-            <Tag>内置</Tag>
           ) : (
-            <Tag color="warning">未知</Tag>
+            <Tag>内置</Tag>
           );
         return <Tooltip title={row.loadedFrom}>{tag}</Tooltip>;
       },

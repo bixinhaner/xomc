@@ -17,11 +17,21 @@ import (
 
 // ── ParamModel ──────────────────────────────────────────────────────
 
-// ListParamModels 列出全部 param_models（含统计字段）。
+// ListParamModels 列出全部 param_models(含统计字段)。
+//
+// 2026-05-29 用户决策:仅返回 loaded_from 带 builtin / custom 前缀的行,
+// 隐藏历史"无加载源"(loaded_from NULL 或非 param-mappings[-custom]/ 前缀)的孤儿。
+// 这些孤儿由 migration 000218 一次性物理清理;本 WHERE 子句是双保险,
+// 防止 migration 执行前的实例 + 测试期手工插入的脏数据泄漏到 UI。
+//
+// 唯一真值源仍是 source.go::ClassifySource(loadedFrom);SQL 前缀匹配与之严格对齐。
 func (r *PgRepository) ListParamModels(ctx context.Context) ([]ParamModel, error) {
 	const q = `SELECT id, name, total_entries, total_objects, total_params,
 	                 COALESCE(description,''), is_active, COALESCE(loaded_from,'')
-	          FROM param_models ORDER BY name ASC`
+	          FROM param_models
+	         WHERE loaded_from LIKE 'param-mappings/%'
+	            OR loaded_from LIKE 'param-mappings-custom/%'
+	         ORDER BY name ASC`
 	rows, err := r.pool.Query(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("query param_models: %w", err)
