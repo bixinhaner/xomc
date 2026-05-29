@@ -40,24 +40,24 @@
 
 ### 1.2 现场截图索引
 
-| 页面 | 截图（仓库根目录相对路径） |
-|------|---------------------------|
-| 产品管理（基准） | `product-products-reference.png` |
-| 产品管理 — 编辑 Drawer | `product-products-edit-modal.png` |
-| 参数模型 — Tab1 清单 | `product-param-model.png` |
-| 参数模型 — Tab2 默认映射 | `product-param-model-tab2-default-mapping.png` |
-| 参数模型 — Tab3 标准参数树 | `product-param-model-tab3-standard-tree.png` |
-| KPI 指标库 — Tab1 ENB | `product-kpi-library.png` |
-| KPI 指标库 — Tab4 单位定义 | `product-kpi-library-tab4-units.png` |
-| 告警库 | `product-alarm-library.png` |
-| 孤儿设备 | `product-orphan-devices.png` |
+| 页面 | 截图（相对本文档路径） |
+|------|------------------------|
+| 产品管理（基准） | `assets/product-products-reference.png` |
+| 产品管理 — 编辑 Drawer | `assets/product-products-edit-modal.png` |
+| 参数模型 — Tab1 清单 | `assets/product-param-model.png` |
+| 参数模型 — Tab2 默认映射 | `assets/product-param-model-tab2-default-mapping.png` |
+| 参数模型 — Tab3 标准参数树 | `assets/product-param-model-tab3-standard-tree.png` |
+| KPI 指标库 — Tab1 ENB | `assets/product-kpi-library.png` |
+| KPI 指标库 — Tab4 单位定义 | `assets/product-kpi-library-tab4-units.png` |
+| 告警库 | `assets/product-alarm-library.png` |
+| 孤儿设备 | `assets/product-orphan-devices.png` |
 
 ---
 
 ## 2. 产品管理（基准候选）逐层结构剖析
 
 > 源：`pages/product/products/index.tsx`(291 行) + `ProductDrawer.tsx`(555 行) + `MatchOrderDrawer.tsx`(68 行) + `MatchTester.tsx`(76 行)。
-> 截图：`product-products-reference.png`（页面）、`product-products-edit-modal.png`（编辑 Drawer）。
+> 截图：`assets/product-products-reference.png`（页面）、`assets/product-products-edit-modal.png`（编辑 Drawer）。
 > 本节目的：**在固化基准规范之前**，把页面每一层的真实结构、尺寸、字段、交互全摊开，便于用户识别哪些细节需要调整。
 
 ### 2.1 整体页面骨架（合并 + M1 常驻紧凑）
