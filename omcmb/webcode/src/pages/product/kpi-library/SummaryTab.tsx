@@ -1,16 +1,28 @@
 /**
- * SummaryTab — T-0180 一级 (制式, 平台) 聚合表(2026-05-29 粒度调整)。
+ * SummaryTab — T-0180 一级 (制式, 平台) 聚合表(2026-05-29 第四轮调整)。
  *
- * 用户决策:
- *   - 每个 (制式, 平台) 唯一一行(替代原"每制式一行")
- *   - 点击平台 → 进入 platform 的 KPI 详情页面(?tech=X&platform=Y URL)
- *   - 列顺序:制式 / 平台(可点) / XML 文件名 / 指标数 / 说明(最后,简洁)
- *   - 删除"操作"列(平台名 button.link 已可点击 drill-down)
- *   - 删除"分组数 / builtin/custom 计数 / 平台 distinct" 等冗余列
+ * 本轮(用户决策,对齐 T-0178 param-model 范式):
+ *   1. 新增"来源"列:Tag 内置 / 自定义(后端 source.go::ClassifySource 派生)
+ *   2. "XML 文件"列改名"加载源",显示完整 loaded_from(原来只显 basename)
+ *   3. 新增"操作"列:仅 deletable=true(custom)显红色删除;builtin 置灰 + Tooltip
+ *      "内置 KPI XML 不可在线删除。如需移除,请联系管理员"
+ *
+ * 历史决策(沿用):
+ *   - 列粒度:每个 (制式, 平台) 唯一一行
+ *   - 平台名是 type=link Button,点击 → onSelect(tech, platform)
  */
-import { Card, Table, Tag, Button, Tooltip } from 'antd';
-import type { IndicatorPlatformSummary, TechLower } from '@core/types/indicatorLibrary';
-import { useIndicatorSummary } from '@core/hooks/api/useIndicatorsLibrary';
+import { Card, Table, Tag, Button, Tooltip, Popconfirm, message } from 'antd';
+import { DeleteOutlined } from '@ant-design/icons';
+import type { AxiosError } from 'axios';
+import type {
+  IndicatorPlatformSummary,
+  IndicatorSource,
+  TechLower,
+} from '@core/types/indicatorLibrary';
+import {
+  useIndicatorSummary,
+  useIndicatorDeleteFile,
+} from '@core/hooks/api/useIndicatorsLibrary';
 
 interface Props {
   onSelect: (tech: TechLower, platform: string) => void;
@@ -28,27 +40,16 @@ const TECH_DESC: Record<TechLower, string> = {
   gnb: '5G NR 基站(gNodeB)',
 };
 
-// 按 (loaded_from, platform) 拼一个文件名展示串(尾段 basename)
-function basenameOf(loadedFrom: string): string {
-  const idx = loadedFrom.lastIndexOf('/');
-  return idx >= 0 ? loadedFrom.slice(idx + 1) : loadedFrom;
-}
-
 export default function SummaryTab({ onSelect }: Props) {
   const { data, isLoading } = useIndicatorSummary();
+  const deleteMut = useIndicatorDeleteFile();
   const items = data?.items || [];
 
   const columns = [
     {
-      title: '制式',
-      dataIndex: 'tech',
-      width: 140,
-      render: (v: TechLower) => <Tag color="geekblue">{TECH_LABEL[v]}</Tag>,
-    },
-    {
       title: '平台',
       dataIndex: 'platform',
-      width: 180,
+      width: 160,
       render: (v: string, row: IndicatorPlatformSummary) => (
         <Button
           type="link"
@@ -61,16 +62,34 @@ export default function SummaryTab({ onSelect }: Props) {
       ),
     },
     {
-      title: 'XML文件',
-      dataIndex: 'loadedFrom',
-      width: 220,
-      render: (v: string) => (
-        <Tooltip title={v}>
-          <Tag>{basenameOf(v)}</Tag>
-        </Tooltip>
-      ),
+      title: '制式',
+      dataIndex: 'tech',
+      width: 130,
+      render: (v: TechLower) => <Tag color="geekblue">{TECH_LABEL[v]}</Tag>,
     },
-    { title: '指标数', dataIndex: 'indicators', width: 100 },
+    {
+      // 后端 source.go::ClassifySource 派生,前端只渲染
+      title: '来源',
+      dataIndex: 'source',
+      width: 90,
+      filters: [
+        { text: '内置', value: 'builtin' as IndicatorSource },
+        { text: '自定义', value: 'custom' as IndicatorSource },
+      ],
+      onFilter: (val: boolean | React.Key, row: IndicatorPlatformSummary) =>
+        row.source === val,
+      render: (s: IndicatorSource | undefined) =>
+        s === 'custom' ? <Tag color="blue">自定义</Tag> : <Tag>内置</Tag>,
+    },
+    {
+      // 2026-05-29:从"XML 文件"(只显 basename)改为"加载源"(全路径,ellipsis)
+      title: '加载源',
+      dataIndex: 'loadedFrom',
+      width: 260,
+      ellipsis: true,
+      render: (v: string) => <Tooltip title={v}><code>{v}</code></Tooltip>,
+    },
+    { title: '指标数', dataIndex: 'indicators', width: 90 },
     {
       title: '说明',
       ellipsis: true,
@@ -79,6 +98,57 @@ export default function SummaryTab({ onSelect }: Props) {
           {TECH_DESC[row.tech]} · 平台 {row.platform}
         </span>
       ),
+    },
+    {
+      title: '操作',
+      width: 80,
+      render: (_: unknown, row: IndicatorPlatformSummary) =>
+        row.deletable ? (
+          <Popconfirm
+            title={`确认删除自定义 KPI XML?`}
+            description={
+              <div style={{ maxWidth: 320 }}>
+                · 文件 <code>{row.loadedFrom}</code> 将 rename 为
+                <code>.deleted.&lt;ts&gt;</code> 备份
+                <br />· 关联的 {row.indicators} 条指标 + 公式级联删除
+                <br />· 若存在同名内置 XML,删除后将自动回退到内置版本
+              </div>
+            }
+            okButtonProps={{ danger: true }}
+            okText="确认删除"
+            onConfirm={() =>
+              deleteMut
+                .mutateAsync(row.loadedFrom)
+                .then(() => message.success('已删除'))
+                .catch((e) => {
+                  const ax = e as AxiosError<{ msg?: string; message?: string }>;
+                  const msg =
+                    ax.response?.data?.msg ??
+                    ax.response?.data?.message ??
+                    (e instanceof Error ? e.message : String(e));
+                  message.error(msg);
+                })
+            }
+          >
+            <Button size="small" danger icon={<DeleteOutlined />} />
+          </Popconfirm>
+        ) : (
+          <Tooltip
+            title={
+              <div style={{ maxWidth: 240 }}>
+                内置 KPI XML 不可在线删除。如需移除,请联系管理员
+              </div>
+            }
+            placement="topRight"
+          >
+            <Button
+              size="small"
+              icon={<DeleteOutlined />}
+              disabled
+              aria-label="builtin XML not deletable"
+            />
+          </Tooltip>
+        ),
     },
   ];
 

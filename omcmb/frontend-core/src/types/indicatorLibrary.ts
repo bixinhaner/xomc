@@ -110,14 +110,21 @@ export function techToDeviceType(t: TechLower): DeviceType {
   return t.toUpperCase() as DeviceType;
 }
 
+// IndicatorSource 与 ParamModelSource 同枚举(builtin/custom/unknown);
+// 后端 source.go::ClassifySource 派生,前端 SummaryTab 渲染"来源"列 + 守门删除。
+export type IndicatorSource = 'builtin' | 'custom' | 'unknown';
+
 // IndicatorPlatformSummary 是 /indicators/summary 端点单行 — (制式, 平台) 二元组。
 // 2026-05-29 用户决策:从"3 行/制式"调为"N 行/(制式, 平台)"粒度。
-// 后端 backend.SummaryByTech 返回 { tech, platform, loaded_from, indicators }
+// 2026-05-29 二次扩展:对齐 T-0178 param-model,补 source/deletable
+// (后端唯一真值源,前端只渲染)。
 export interface IndicatorPlatformSummary {
   tech: TechLower;
   platform: string;       // platform_name(rela_platform_indicator_formula_*.platform_name)
   loadedFrom: string;     // XML 文件路径(含前缀),如 "indicator-library/enb/ALL.xml"
   indicators: number;     // 该 (loaded_from, platform) 指标计数
+  source: IndicatorSource;
+  deletable: boolean;
 }
 
 // IndicatorFile 是 /indicators/files?tech= 单行 — 含 source/deletable 派生 + DB 计数。

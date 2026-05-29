@@ -58,11 +58,16 @@ type FileRepository interface {
 //   - 每个 (tech, platform_name) 唯一一行
 //   - LoadedFrom 是该 (tech, platform) 对应的 XML 文件 rel 路径(理论上 1:1 映射)
 //   - Indicators 是该文件入库的指标计数
+//
+// 2026-05-29 二次扩展:对齐 T-0178 param-model 范式补 Source/Deletable —
+// 后端唯一真值源(`source.go::ClassifySource` + `IsDeletable`),前端只渲染。
 type PlatformSummary struct {
 	Tech       string `json:"tech"`        // enb / gsm / gnb
 	Platform   string `json:"platform"`    // 平台名(从 rela_platform_indicator_formula_*.platform_name)
 	LoadedFrom string `json:"loaded_from"` // XML 文件相对路径(含前缀),如 "indicator-library/enb/ALL.xml"
 	Indicators int    `json:"indicators"`  // 该 (loaded_from, platform_name) 的指标计数
+	Source     string `json:"source"`      // builtin / custom / unknown(ClassifySource 派生)
+	Deletable  bool   `json:"deletable"`   // IsDeletable(LoadedFrom):仅 custom 为 true
 }
 
 // FileGroup 是 /indicators/files?tech= 单行 — DB 聚合视角。
@@ -191,6 +196,9 @@ SELECT pi.loaded_from,
 				rows.Close()
 				return nil, fmt.Errorf("scan platform summary row (%s): %w", tech, err)
 			}
+			// 2026-05-29:source/deletable 后端唯一真值源(对齐 T-0178 paramModel)
+			row.Source = string(ClassifySource(row.LoadedFrom))
+			row.Deletable = IsDeletable(row.LoadedFrom)
 			out = append(out, row)
 		}
 		rows.Close()

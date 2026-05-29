@@ -242,9 +242,17 @@ export const indicatorLibraryApi = {
     });
   },
 
-  async listGroups(deviceType: DeviceType, operatorCode?: string): Promise<{ items: IndicatorGroup[]; total: number }> {
+  /** 2026-05-29:加 platform 过滤 — 详情态(?tech=&platform=)下拉只显示当前
+   *  platform 实际涉及的分组,避免下拉里有 23 个 group 但选 16 个都返空。
+   *  后端 EXISTS 嵌套 EXISTS 与 ListIndicators 的 PlatformName 同语义。 */
+  async listGroups(
+    deviceType: DeviceType,
+    operatorCode?: string,
+    platform?: string,
+  ): Promise<{ items: IndicatorGroup[]; total: number }> {
     const params: Record<string, unknown> = { deviceType };
     if (operatorCode) params.operatorCode = operatorCode;
+    if (platform) params.platform = platform;
     const { data } = await http.get<{ items: BackendGroup[]; total: number }>('/indicator-groups', { params });
     return {
       items: (data.items || []).map((b) => mapGroup(b, deviceType)),
@@ -351,7 +359,7 @@ export const indicatorLibraryApi = {
   },
 
   // T-0180 P1.4(2026-05-29 用户调整粒度):一级 SummaryTab 数据源 — (制式, 平台) 一行
-  // 后端返 { tech, platform, loaded_from, indicators },前端原样映射 camelCase
+  // 后端返 { tech, platform, loaded_from, indicators, source, deletable },原样映射 camelCase
   async summary(): Promise<{ items: IndicatorPlatformSummary[] }> {
     const { data } = await http.get<{
       items: Array<{
@@ -359,6 +367,8 @@ export const indicatorLibraryApi = {
         platform: string;
         loaded_from: string;
         indicators: number;
+        source?: string;
+        deletable?: boolean;
       }>;
     }>('/indicators/summary');
     return {
@@ -367,6 +377,8 @@ export const indicatorLibraryApi = {
         platform: b.platform,
         loadedFrom: b.loaded_from,
         indicators: b.indicators,
+        source: (b.source ?? 'unknown') as IndicatorPlatformSummary['source'],
+        deletable: Boolean(b.deletable),
       })),
     };
   },
