@@ -278,3 +278,26 @@ func Test_AggregateKPIs_SameDisplayNameUsesDistinctIndicatorID(t *testing.T) {
 	assert.NotEqual(t, db.execArgs[2], db.execArgs[10],
 		"两个同显示名 KPI 的 metric_path 必须按编号区分，否则撞 ON CONFLICT 唯一键")
 }
+
+// backfillDisplayNames：KPI 行按编号回填指标库 cn_name，counter 行用 metric_path 本身，
+// 查不到的编号回退用编号。
+func Test_backfillDisplayNames(t *testing.T) {
+	db := &stubDB{
+		queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+			// 模拟三表 UNION 查询，只 K900010029 命中友好名，K_UNKNOWN 查不到
+			return &fakeRows{rows: [][]any{
+				{"K900010029", "RRC连接建立成功率"},
+			}}, nil
+		},
+	}
+	a := New(db, nil, nil)
+	rows := []Row{
+		{MetricPath: "K900010029", MetricType: metrics.MetricTypeKPI},
+		{MetricPath: "K_UNKNOWN", MetricType: metrics.MetricTypeKPI},
+		{MetricPath: "L.Cell.RrcConn", MetricType: metrics.MetricTypeCounter},
+	}
+	a.backfillDisplayNames(context.Background(), rows)
+	assert.Equal(t, "RRC连接建立成功率", rows[0].DisplayName, "命中编号回填 cn_name")
+	assert.Equal(t, "K_UNKNOWN", rows[1].DisplayName, "查不到的编号回退用编号本身")
+	assert.Equal(t, "L.Cell.RrcConn", rows[2].DisplayName, "counter 行用 metric_path")
+}

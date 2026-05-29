@@ -8,6 +8,7 @@ import (
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/core/storage"
 	"github.com/omcgo/omcgo/internal/pm/metrics"
@@ -52,7 +53,10 @@ type Row struct {
 	DeviceSN      string              `json:"device_sn,omitempty"`
 	DeviceGroupID uuid.UUID           `json:"device_group_id,omitempty"`
 	MetricPath    string              `json:"metric_path"`
-	MetricType    metrics.MetricType  `json:"metric_type"`
+	// DisplayName 是给前端展示的友好名：KPI 行按 metric_path(=K 编号)回填指标库 cn_name；
+	// counter 行 = metric_path 本身。前端列头/系列名用它，避免露出 K 编号。
+	DisplayName string             `json:"display_name,omitempty"`
+	MetricType  metrics.MetricType `json:"metric_type"`
 	MetricValue   float64             `json:"metric_value"`
 	StatisType    *metrics.StatisType `json:"statis_type,omitempty"`
 	Granularity   metrics.Granularity `json:"granularity"`
@@ -85,13 +89,83 @@ func (a *Aggregator) Query(ctx context.Context, q QueryRequest) ([]Row, error) {
 		return nil, err
 	}
 
-	if q.Dimension == DimensionDeviceGroup {
-		return a.queryGroupTable(ctx, table, q)
+	var rows []Row
+	switch q.Dimension {
+	case DimensionDeviceGroup:
+		rows, err = a.queryGroupTable(ctx, table, q)
+	case DimensionAggregateGroup:
+		rows, err = a.queryAggregateGroupTable(ctx, table, q)
+	default:
+		rows, err = a.queryDeviceTable(ctx, table, q)
 	}
-	if q.Dimension == DimensionAggregateGroup {
-		return a.queryAggregateGroupTable(ctx, table, q)
+	if err != nil {
+		return nil, err
 	}
-	return a.queryDeviceTable(ctx, table, q)
+	a.backfillDisplayNames(ctx, rows)
+	return rows, nil
+}
+
+// backfillDisplayNames 给结果行补 DisplayName：
+//   - counter 行：DisplayName = metric_path（本身就是可读名）
+//   - kpi 行：metric_path 是 K 编号，按编号批量查指标库 cn_name 回填
+//
+// 编号在 perf_indicators_{enb,gnb,gsm} 三表全局唯一（无跨表重叠），故一次 UNION 查询
+// 即可覆盖，无需按设备类型分别解析。查不到的编号回退用编号本身，保证不空白。
+func (a *Aggregator) backfillDisplayNames(ctx context.Context, rows []Row) {
+	codeSet := make(map[string]struct{})
+	for i := range rows {
+		if rows[i].MetricType == metrics.MetricTypeKPI {
+			if rows[i].MetricPath != "" {
+				codeSet[rows[i].MetricPath] = struct{}{}
+			}
+		} else {
+			rows[i].DisplayName = rows[i].MetricPath
+		}
+	}
+	if len(codeSet) == 0 {
+		return
+	}
+	codes := make([]string, 0, len(codeSet))
+	for c := range codeSet {
+		codes = append(codes, c)
+	}
+	nameByCode := a.lookupIndicatorNames(ctx, codes)
+	for i := range rows {
+		if rows[i].MetricType != metrics.MetricTypeKPI {
+			continue
+		}
+		if name, ok := nameByCode[rows[i].MetricPath]; ok && name != "" {
+			rows[i].DisplayName = name
+		} else {
+			rows[i].DisplayName = rows[i].MetricPath // 回退：编号本身
+		}
+	}
+}
+
+// lookupIndicatorNames 按编号集合一次性查三张指标表，返回 code → cn_name（缺则 en_name）。
+func (a *Aggregator) lookupIndicatorNames(ctx context.Context, codes []string) map[string]string {
+	out := make(map[string]string, len(codes))
+	const tmpl = `
+SELECT id, COALESCE(NULLIF(cn_name, ''), en_name) AS display_name FROM perf_indicators_enb  WHERE id = ANY($1)
+UNION ALL
+SELECT id, COALESCE(NULLIF(cn_name, ''), en_name) AS display_name FROM perf_indicators_gnb  WHERE id = ANY($1)
+UNION ALL
+SELECT id, COALESCE(NULLIF(cn_name, ''), en_name) AS display_name FROM perf_indicators_gsm  WHERE id = ANY($1)`
+	rows, err := a.db.Query(ctx, tmpl, codes)
+	if err != nil {
+		a.logger.Warn("backfill display names query failed; fall back to codes", zap.Error(err))
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			a.logger.Warn("backfill display names scan failed", zap.Error(err))
+			return out
+		}
+		out[id] = name
+	}
+	return out
 }
 
 // ErrPctNotSupportedInAggregateGroup 表示 aggregate_group 维度不支持 KPI 类指标

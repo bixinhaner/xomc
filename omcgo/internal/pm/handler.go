@@ -328,11 +328,16 @@ func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest) []aggr
 		return rows
 	}
 
-	// 已有行的键集合（time-truncated-to-bucket + metric_path）
+	// 已有行的键集合（time-truncated-to-bucket + metric_path）+ 各 metric_path 的显示名，
+	// 让补齐占位行沿用真实行同款 DisplayName（KPI 列头不致一半友好名一半 K 编号）。
 	have := make(map[string]struct{}, len(rows))
+	nameByPath := make(map[string]string, len(req.MetricPaths))
 	for _, r := range rows {
 		// time 桶按 r.Time（aggregator 已对齐桶起点）
 		have[bucketKey(r.Time, r.MetricPath)] = struct{}{}
+		if r.DisplayName != "" {
+			nameByPath[r.MetricPath] = r.DisplayName
+		}
 	}
 
 	dur := granularityDuration(req.Granularity)
@@ -345,6 +350,7 @@ func fillEmptyBuckets(rows []aggregator.Row, req aggregator.QueryRequest) []aggr
 				DeviceOUI:   oui,
 				DeviceSN:    sn,
 				MetricPath:  mp,
+				DisplayName: nameByPath[mp],
 				Granularity: req.Granularity,
 				Time:        b,
 				StartTime:   b,
