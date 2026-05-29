@@ -468,6 +468,11 @@ func registerRoutes(r *gin.Engine, c *Container) error {
 		ph.indicatorRESTHandler.RegisterRoutes(superAdminGroup)
 	}
 
+	// ----- T-0180 P1.3: Indicator XML file management (DELETE 守门) → super_admin only -----
+	if ph.indicatorFileHandler != nil {
+		ph.indicatorFileHandler.RegisterRoutes(superAdminGroup)
+	}
+
 	// ----- Dashboard routes → resource "devices" -----
 	md.dashboardHandler.RegisterRoutes(permGroup("devices"))
 

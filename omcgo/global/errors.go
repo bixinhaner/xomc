@@ -55,6 +55,20 @@ const (
 	// ParamModelBackupFailed:         DELETE 物理备份失败,流程已保守回滚 → 500
 	ErrCodeParamModelBuiltinNotDeletable = 2030
 	ErrCodeParamModelBackupFailed        = 2031
+
+	// T-0180 Indicator 自定义 XML 分层目录 (2040-2049 段,对标 T-0178 范式)
+	// IndicatorBuiltinNotDeletable: DELETE /indicators/files/{path} 命中内置 XML → 403
+	// IndicatorBackupFailed:         DELETE 物理备份失败,流程已保守回滚 → 500
+	// IndicatorUploadInvalidTech:    upload-xml ?tech= 不在 enb/gsm/gnb → 400 (P1.4 占位声明)
+	// IndicatorUploadInvalidName:    上传文件名违反 ^[A-Za-z0-9_-]{1,64}\.xml$ → 400 (P1.4)
+	// IndicatorUploadInvalidRoot:    上传 XML 根元素 ≠ <indicatorModel> → 400 (P1.4)
+	// IndicatorUploadTooLarge:       上传文件 > MaxUploadXMLSize (1 MiB) → 400 (P1.4)
+	ErrCodeIndicatorBuiltinNotDeletable = 2040
+	ErrCodeIndicatorBackupFailed        = 2041
+	ErrCodeIndicatorUploadInvalidTech   = 2042
+	ErrCodeIndicatorUploadInvalidName   = 2043
+	ErrCodeIndicatorUploadInvalidRoot   = 2044
+	ErrCodeIndicatorUploadTooLarge      = 2045
 )
 
 // ACS / TR069 (3000-3999)

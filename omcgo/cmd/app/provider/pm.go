@@ -117,6 +117,18 @@ func initPMModule(c *Container) error {
 		indicatorSvc, platformFormulaRepo, indicatorUnitRepo, indicatorReloader, logger.Named("indicator-rest"),
 	)
 
+	// T-0180 P1.3: XML 文件粒度管理(DELETE 守门 + 级联清理 + 文件锁)
+	// XMLBaseDir 与 dictloader 共用,确保 loaded_from 相对路径能 join 到正确绝对路径
+	indicatorFileRepo := indicator.NewPgFileRepository(c.PgPool)
+	indicatorFileHandler := indicator.NewFileHandler(
+		indicatorFileRepo, c.Cfg.DictLoader.XMLBaseDir, logger.Named("indicator-file"),
+	)
+	// 启动期幂等 mkdir host bind mount 三制式子目录,首次部署不报错
+	if err := indicator.EnsureBaseDir(context.Background(), c.Cfg.DictLoader.XMLBaseDir); err != nil {
+		// 不阻塞启动:host bind mount 未挂载是部署问题,handler 后续 Upload/Delete 仍会显式报错
+		logger.Warn("ensure indicator custom dir failed; uploads/deletes may fail until host bind mount is ready")
+	}
+
 	// Store deps for route registration
 	c.pmHandlerDeps = &pmHandlerDeps{
 		pmCounterRepo:          pmCounterRepo,
@@ -132,6 +144,7 @@ func initPMModule(c *Container) error {
 		pmQueryTemplateHandler: pmQueryTemplateHandler,
 		indicatorHandler:       indicatorHandler,
 		indicatorRESTHandler:   indicatorRESTHandler,
+		indicatorFileHandler:   indicatorFileHandler,
 	}
 
 	logger.Info("PM module initialized")
@@ -168,4 +181,5 @@ type pmHandlerDeps struct {
 	// Indicator management handler
 	indicatorHandler     *indicator.IndicatorHandler
 	indicatorRESTHandler *indicator.RESTHandler
+	indicatorFileHandler *indicator.FileHandler // T-0180 P1.3 XML 文件粒度管理
 }
