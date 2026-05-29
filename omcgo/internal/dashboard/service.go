@@ -20,6 +20,13 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// Dashboard display constants
+const (
+	// Device name display thresholds
+	deviceSNTruncateThreshold = 12 // SN length threshold for truncation
+	deviceSNTailLength        = 8  // Number of characters to keep when truncating SN
+)
+
 // FrontendDeviceStats matches the frontend's expected device_stats format.
 type FrontendDeviceStats struct {
 	Total   int64 `json:"total"`
@@ -276,7 +283,7 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 			}
 		} else {
 			deviceAlarms[key] = &FrontendRecentAlarm{
-				DeviceName: a.DeviceSN,
+				DeviceName: coalesceDeviceName(a.DeviceName, a.DeviceSN),
 				AlarmCount: 1,
 				Severity:   severityToLabel(a.Severity),
 			}
@@ -322,6 +329,40 @@ func severityFromLabel(label string) int {
 	default:
 		return 5
 	}
+}
+
+// coalesceDeviceName returns a user-friendly device identifier.
+//
+// Priority order:
+//  1. Device name (if available and non-empty)
+//  2. Device SN (truncated if too long)
+//
+// Truncation rules:
+//  - SN length > deviceSNTruncateThreshold (12): returns "..." + last N characters
+//  - SN length <= deviceSNTruncateThreshold: returns full SN
+//
+// Parameters:
+//   - name: pointer to device name from database, may be nil or empty string
+//   - sn: device serial number as fallback identifier
+//
+// Returns:
+//   A human-readable device identifier suitable for UI display.
+//
+// Examples:
+//   - coalesceDeviceName(strPtr("基站-A区"), "SN123456789012") → "基站-A区"
+//   - coalesceDeviceName(nil, "SN123456789012")               → "...56789012"
+//   - coalesceDeviceName(nil, "SN12345678")                   → "SN12345678"
+//   - coalesceDeviceName(nil, "")                             → ""
+func coalesceDeviceName(name *string, sn string) string {
+	// Priority 1: Use device_name if available and non-empty
+	if name != nil && *name != "" {
+		return *name
+	}
+	// Priority 2: Use device_sn, truncating if too long
+	if len(sn) > deviceSNTruncateThreshold {
+		return "..." + sn[len(sn)-deviceSNTailLength:]
+	}
+	return sn
 }
 
 // GetAlarmTrend returns alarm counts grouped by date and severity for the last N days.

@@ -1727,4 +1727,176 @@ const { data: userStats } = useUserStats();
 
 ---
 
+## 13. 仪表板系统管理员卡片数据来源状态
+
+> **更新日期**: 2026-05-29
+> **分析范围**: 邮箱、今日操作数、处理告警数
+
+### 13.1 数据对齐状态总览
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                    系统管理员卡片数据来源状态                                 │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                            │
+│  数据项           │ 当前状态      │ 数据来源                     │ 实施状态   │
+│  ────────────────┼─────────────┼─────────────────────────────┼────────────│
+│  用户头像         │ ✅ 已完成    │ userStore.currentUser.avatar │ 已使用真实API│
+│  用户名/显示名    │ ✅ 已完成    │ userStore.currentUser.displayName │ 已使用真实API│
+│  邮箱            │ ✅ 无需修改   │ userStore.currentUser.email  │ 有数据显示/无显示--│
+│  最后登录时间     │ ✅ 已完成    │ userStore.currentUser.lastLoginTime │ 已使用真实API│
+│  在线状态        │ ✅ 已完成    │ 固定显示"在线"（登录即在线）  │ 已使用真实API│
+│  今日操作数      │ ❌ 硬编码     │ 需后端新增 /dashboard/user-stats │ 待实施    │
+│  处理告警数      │ ❌ 硬编码     │ 需后端新增 alarm_handled 表   │ 待实施    │
+│                                                                            │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 13.2 已完成项详情
+
+#### 13.2.1 邮箱 ✅ 无需修改
+
+**前端实现**: `omcmb/webcode/src/pages/dashboard/index.tsx:596`
+```typescript
+<Text type="secondary" style={{ fontSize: 13 }}>
+  {currentUser?.email || '--'}
+</Text>
+```
+
+**数据来源**:
+- API: `GET /api/v1/auth/me`
+- 后端: `omcgo/internal/admin/auth_handler.go:Me()`
+- 前端 Store: `userStore.currentUser.email`
+- 类型: `frontend-core/src/types/system.ts:User.email`
+
+**说明**:
+
+前端代码已正确实现，无需修改。
+- **生产环境有邮箱数据** → 显示邮箱地址
+- **生产环境没有邮箱数据** → 显示 `--`
+
+现有逻辑已完美处理两种情况，只需确保生产环境初始化时 users 表的 email 字段有值即可（如需要显示邮箱）。
+
+#### 13.2.2 其他已完成项
+
+| 数据项 | 前端代码位置 | 数据字段 |
+|--------|-------------|---------|
+| 用户头像/显示名 | `index.tsx:586-593` | `currentUser?.avatar / displayName / username` |
+| 最后登录时间 | `index.tsx:601` | `currentUser?.lastLoginTime` |
+| 在线状态 | `index.tsx:599` | 固定显示"在线"徽章 |
+
+### 13.3 待实施项详情
+
+#### 13.3.1 今日操作数 ❌
+
+**当前状态**: 硬编码 `156`（`index.tsx:617`）
+
+**所需后端接口**:
+```go
+// GET /api/v1/dashboard/user-stats
+// 返回: { "today_ops": 156, "processed_alarms": 23 }
+
+type UserStats struct {
+    TodayOps        int64 `json:"today_ops"`
+    ProcessedAlarms int64 `json:"processed_alarms"`  // 暂时返回 0
+}
+
+func (s *Service) GetUserStats(ctx context.Context, userID uuid.UUID) (*UserStats, error) {
+    // 今日操作数
+    query := `
+        SELECT COUNT(*)
+        FROM audit_logs
+        WHERE user_id = $1
+          AND DATE(created_at) = CURRENT_DATE
+    `
+    var todayOps int64
+    err := s.pool.QueryRow(ctx, query, userID).Scan(&todayOps)
+
+    // 已处理告警数（暂时返回 0，等待告警处理记录表）
+    return &UserStats{
+        TodayOps:        todayOps,
+        ProcessedAlarms: 0,
+    }, nil
+}
+```
+
+**前端实现**:
+```typescript
+// frontend-core/src/services/api/dashboardApi.ts
+async getUserStats(): Promise<{ today_ops: number; processed_alarms: number }> {
+  const { data } = await http.get('/dashboard/user-stats');
+  return data;
+}
+
+// frontend-core/src/hooks/api/useDashboard.ts
+export function useUserStats() {
+  return useQuery({
+    queryKey: ['dashboard', 'user-stats'],
+    queryFn: () => api.getUserStats(),
+    refetchInterval: 60000,
+  });
+}
+
+// pages/dashboard/index.tsx
+const { data: userStats } = useUserStats();
+
+// JSX
+<div style={{ fontWeight: 700, fontSize: 18, color: token.colorPrimary }}>
+  {userStats?.today_ops ?? 0}
+</div>
+```
+
+#### 13.3.2 处理告警数 ❌
+
+**当前状态**: 硬编码 `23`（`index.tsx:621`）
+
+**问题**: 后端当前没有"告警处理记录"表，无法统计用户已处理的告警数量。
+
+**解决方案**（二选一）:
+
+**方案 A**: 新建 `alarm_handled` 表
+```sql
+CREATE TABLE alarm_handled (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    alarm_id UUID NOT NULL,
+    user_id UUID NOT NULL,
+    handled_at TIMESTAMPTZ DEFAULT NOW(),
+    action VARCHAR(20),  -- 'ack', 'clear'
+    notes TEXT
+);
+```
+
+**方案 B**: 使用 `audit_logs` 表统计
+```sql
+-- 统计 action='ack' 或 'clear' 的告警操作
+SELECT COUNT(*)
+FROM audit_logs
+WHERE user_id = $1
+  AND action IN ('alarm_ack', 'alarm_clear')
+  AND DATE(created_at) = CURRENT_DATE;
+```
+
+**临时方案**: 暂时显示 0，等待后端实现。
+
+### 13.4 实施优先级
+
+| 优先级 | 数据项 | 工作量 | 阻塞 |
+|--------|--------|--------|------|
+| **P1** | 今日操作数 | 后端 1h + 前端 0.5h | 无 |
+| **P2** | 处理告警数 | 方案A 2h / 方案B 0.5h | 需确认方案 |
+| **--** | 邮箱等用户信息 | ✅ 无需修改 | - |
+
+### 13.5 相关文件
+
+| 文件路径 | 说明 |
+|---------|------|
+| `omcmb/webcode/src/pages/dashboard/index.tsx:580-627` | 仪表板系统管理员卡片 UI |
+| `omcmb/frontend-core/src/store/userStore.ts` | 用户状态管理 |
+| `omcmb/frontend-core/src/types/system.ts` | User 类型定义 |
+| `omcgo/internal/admin/auth_handler.go:243-264` | GET /auth/me 接口 |
+| `omcgo/internal/dashboard/service.go` | 用户统计接口（待新增） |
+| `omcgo/migrations/` | alarm_handled 表迁移（待新增，如选方案 A） |
+
+---
+
 **文档结束**
