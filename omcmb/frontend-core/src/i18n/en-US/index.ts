@@ -904,6 +904,11 @@ const messages: Record<string, string> = {
   'alarmLibrary.cell.unfilled':      'Not filled (reload XML)',
   'alarmLibrary.cell.yes':           'Yes',
   'alarmLibrary.cell.no':            'No',
+  // ITU-T X.733 severity levels (standard industry terms, English form retained)
+  'alarmLibrary.col.critical':       'Critical',
+  'alarmLibrary.col.major':          'Major',
+  'alarmLibrary.col.minor':          'Minor',
+  'alarmLibrary.col.warning':        'Warning',
 
   // Deal states
   'alarm.dealState.unconfirmedUncleared': 'Unconfirmed & Active',

@@ -137,7 +137,8 @@ export default function AlarmLibraryPage() {
   );
 
   // ── 一级表列 ────────────────────────────────────────────────────
-  // Critical/Major/Minor/Warning 是 ITU-T/3GPP 行业标准术语,中英文都保留英文字面。
+  // 2026-05-29:严重级别列头改 i18n;en 仍是 Critical/Major/Minor/Warning
+  // (ITU-T X.733 标准术语),zh 翻成 严重/主要/次要/警告。
   const neTypesColumns = [
     {
       title: t('alarmLibrary.col.neType'),
@@ -163,25 +164,25 @@ export default function AlarmLibraryPage() {
     },
     { title: t('alarmLibrary.col.totalCount'), dataIndex: 'total', width: 100 },
     {
-      title: 'Critical',
+      title: t('alarmLibrary.col.critical'),
       dataIndex: 'criticalCnt',
       width: 100,
       render: (v: number) => (v > 0 ? <Tag color="red">{v}</Tag> : <span>—</span>),
     },
     {
-      title: 'Major',
+      title: t('alarmLibrary.col.major'),
       dataIndex: 'majorCnt',
       width: 100,
       render: (v: number) => (v > 0 ? <Tag color="orange">{v}</Tag> : <span>—</span>),
     },
     {
-      title: 'Minor',
+      title: t('alarmLibrary.col.minor'),
       dataIndex: 'minorCnt',
       width: 100,
       render: (v: number) => (v > 0 ? <Tag color="gold">{v}</Tag> : <span>—</span>),
     },
     {
-      title: 'Warning',
+      title: t('alarmLibrary.col.warning'),
       dataIndex: 'warningCnt',
       width: 100,
       render: (v: number) => (v > 0 ? <Tag color="blue">{v}</Tag> : <span>—</span>),
@@ -249,7 +250,7 @@ export default function AlarmLibraryPage() {
     <div style={{ padding: 16 }}>
       {/* 顶部 toolbar:
            · 列表态:重载 XML + 刷新缓存(全局操作放一级);"未识别频次"功能未完工,已隐藏
-           · 详情态:返回 + 当前 ne_type + 过滤/搜索 + 新增(只对当前 ne_type 操作) */}
+           · 详情态:左 [返回 + 当前 ne_type] / 右 [严重级别 + 搜索 + 新增](筛选靠右,与列表态视觉一致) */}
       <Card size="small" style={{ marginBottom: 12 }}>
         <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
           {inDetail ? (
@@ -261,27 +262,6 @@ export default function AlarmLibraryPage() {
                 返回
               </Button>
               <Text strong>{selectedNeType} 的告警定义</Text>
-              <Space size={4}>
-                <span style={FILTER_LABEL_STYLE}>严重级别</span>
-                <Select
-                  placeholder="全部"
-                  allowClear
-                  options={severityOptions}
-                  value={detailFilter.severityCode}
-                  onChange={(value) =>
-                    setDetailFilter((current) => ({ ...current, severityCode: value, page: 1 }))
-                  }
-                  style={{ width: 180 }}
-                />
-              </Space>
-              <Input.Search
-                placeholder="搜索 identifier / 名称"
-                allowClear
-                onSearch={(v) =>
-                  setDetailFilter((f) => ({ ...f, keyword: v || undefined, page: 1 }))
-                }
-                style={{ width: 220 }}
-              />
             </Space>
           ) : (
             // 列表态左侧空 — 占位让 space-between 把右侧按钮推到最右
@@ -289,17 +269,40 @@ export default function AlarmLibraryPage() {
           )}
           <Space wrap>
             {inDetail ? (
-              // 详情态:只显示"新增定义"。重载 XML / 刷新缓存 都是全局动作,留在一级。
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={() => {
-                  setEditing(null);
-                  setDrawerOpen(true);
-                }}
-              >
-                新增定义
-              </Button>
+              // 详情态右侧:严重级别筛选 + 搜索 + 新增。重载 XML / 刷新缓存 都是全局动作,留在一级。
+              <>
+                <Space size={4}>
+                  <span style={FILTER_LABEL_STYLE}>严重级别</span>
+                  <Select
+                    placeholder="全部"
+                    allowClear
+                    options={severityOptions}
+                    value={detailFilter.severityCode}
+                    onChange={(value) =>
+                      setDetailFilter((current) => ({ ...current, severityCode: value, page: 1 }))
+                    }
+                    style={{ width: 180 }}
+                  />
+                </Space>
+                <Input.Search
+                  placeholder="搜索 identifier / 名称"
+                  allowClear
+                  onSearch={(v) =>
+                    setDetailFilter((f) => ({ ...f, keyword: v || undefined, page: 1 }))
+                  }
+                  style={{ width: 220 }}
+                />
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => {
+                    setEditing(null);
+                    setDrawerOpen(true);
+                  }}
+                >
+                  新增定义
+                </Button>
+              </>
             ) : (
               <>
                 <Popconfirm

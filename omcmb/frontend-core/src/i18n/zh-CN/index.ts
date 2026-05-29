@@ -903,6 +903,11 @@ const messages: Record<string, string> = {
   'alarmLibrary.cell.unfilled':      '未回填(请重载)',
   'alarmLibrary.cell.yes':           '是',
   'alarmLibrary.cell.no':            '否',
+  // ITU-T X.733 严重级别 — 列头中文化,数据列里的 severityName 仍按后端取
+  'alarmLibrary.col.critical':       '严重',
+  'alarmLibrary.col.major':          '主要',
+  'alarmLibrary.col.minor':          '次要',
+  'alarmLibrary.col.warning':        '警告',
   'alarm.detail':            '详细',
   'alarm.markRead':          '标记为已读',
 
