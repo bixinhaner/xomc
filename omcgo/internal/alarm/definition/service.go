@@ -94,6 +94,11 @@ func (s *Service) UnknownStats(ctx context.Context, productID *uuid.UUID, days i
 	return s.repo.UnknownStats(ctx, productID, days)
 }
 
+// ListNeTypes 按 ne_type + loaded_from 聚合(T-0179 drill-down 一级视图)。
+func (s *Service) ListNeTypes(ctx context.Context) ([]NeTypeStat, error) {
+	return s.repo.ListNeTypes(ctx)
+}
+
 // RefreshCache 手动刷新（HTTP cache/refresh）。
 // 行为：本实例 Registry.Refresh + 跨实例 cache_version INCR。
 func (s *Service) RefreshCache(ctx context.Context) error {

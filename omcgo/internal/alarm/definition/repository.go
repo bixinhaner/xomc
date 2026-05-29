@@ -48,6 +48,10 @@ type WriteRepository interface {
 	// UnknownStats 聚合 alarms_active 中 is_unknown=true 的 identifier 频次。
 	// productID 为 nil 时不按 product 过滤；days 限制 raised_at 时间窗口。
 	UnknownStats(ctx context.Context, productID *uuid.UUID, days int) ([]UnknownAlarmStat, error)
+
+	// ListNeTypes 聚合 alarm_definitions 按 ne_type + loaded_from 双键统计。
+	// T-0179 drill-down 一级视图;每个 ne_type 一行,含告警总数与各严重级计数。
+	ListNeTypes(ctx context.Context) ([]NeTypeStat, error)
 }
 
 // ListFilter 控制 ListWithFilter 行为。
@@ -94,6 +98,20 @@ type UnknownAlarmStat struct {
 	Count      int    `json:"count"`
 	LastSeenAt string `json:"last_seen_at"`
 	NeType     string `json:"ne_type,omitempty"`
+}
+
+// NeTypeStat 是 ne-types 聚合端点的单条结果(T-0179 drill-down 一级视图)。
+//
+// LoadedFrom 为空表示该 ne_type 下存在历史数据未回填(Loader 未重跑)。前端按
+// (ne_type, loaded_from) 双键展示;Total 是按 ne_type 单键的合计。
+type NeTypeStat struct {
+	NeType       string `json:"ne_type"`
+	LoadedFrom   string `json:"loaded_from"`
+	Total        int    `json:"total"`
+	CriticalCnt  int    `json:"critical_cnt"`
+	MajorCnt     int    `json:"major_cnt"`
+	MinorCnt     int    `json:"minor_cnt"`
+	WarningCnt   int    `json:"warning_cnt"`
 }
 
 // ResolvedDefinition 是 AlarmDefinition + severity 反查后的合成结构，供 Registry 直接缓存。

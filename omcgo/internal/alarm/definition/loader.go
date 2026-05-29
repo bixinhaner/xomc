@@ -119,7 +119,8 @@ func (l *Loader) loadAlarmFile(ctx context.Context, path string, severityMap map
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	rows, err := batchUpsertAlarms(ctx, tx, neType, doc.Alarms, severityMap, seen, l.logger)
+	loadedFrom := filepath.Base(path)
+	rows, err := batchUpsertAlarms(ctx, tx, neType, loadedFrom, doc.Alarms, severityMap, seen, l.logger)
 	if err != nil {
 		return 0, err
 	}
@@ -134,7 +135,7 @@ func (l *Loader) loadAlarmFile(ctx context.Context, path string, severityMap map
 	return rows, nil
 }
 
-func batchUpsertAlarms(ctx context.Context, tx pgx.Tx, neType string, alarms []xmlAlarm, severityMap map[string]string, seen map[string]string, logger *zap.Logger) (int, error) {
+func batchUpsertAlarms(ctx context.Context, tx pgx.Tx, neType, loadedFrom string, alarms []xmlAlarm, severityMap map[string]string, seen map[string]string, logger *zap.Logger) (int, error) {
 	const chunkSize = 200
 	rows := 0
 	pending := make([]xmlAlarm, 0, chunkSize)
@@ -148,6 +149,7 @@ func batchUpsertAlarms(ctx context.Context, tx pgx.Tx, neType string, alarms []x
 			"severity_id", "event_type",
 			"cn_probable_cause", "en_probable_cause",
 			"cn_suggestion", "en_suggestion", "is_show",
+			"loaded_from",
 		)
 		for _, a := range pending {
 			sevID, ok := severityMap[a.Severity]
@@ -168,6 +170,7 @@ func batchUpsertAlarms(ctx context.Context, tx pgx.Tx, neType string, alarms []x
 				nullIfEmpty(a.CnProbableCause), nullIfEmpty(a.EnProbableCause),
 				nullIfEmpty(a.CnSuggestion), nullIfEmpty(a.EnSuggestion),
 				isShow,
+				nullIfEmpty(loadedFrom),
 			)
 		}
 		// ON CONFLICT DO UPDATE 保 idempotent；冲突 identifier 同 file 内不可能（XML 单文件唯一），跨文件已被 seen 拦截
@@ -181,7 +184,8 @@ func batchUpsertAlarms(ctx context.Context, tx pgx.Tx, neType string, alarms []x
 		    en_probable_cause = EXCLUDED.en_probable_cause,
 		    cn_suggestion     = EXCLUDED.cn_suggestion,
 		    en_suggestion     = EXCLUDED.en_suggestion,
-		    is_show           = EXCLUDED.is_show`)
+		    is_show           = EXCLUDED.is_show,
+		    loaded_from       = EXCLUDED.loaded_from`)
 		sqlStr, args, err := ib.ToSql()
 		if err != nil {
 			return fmt.Errorf("build sql alarm_definitions: %w", err)

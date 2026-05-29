@@ -14,6 +14,10 @@ import type {
 interface Props {
   open: boolean;
   definition: AlarmDefinition | null;
+  /** 新增模式下的默认网元类型(从二级页面 drill-down 上下文带入)。 */
+  defaultNeType?: string;
+  /** 新增模式下是否锁定 ne_type 输入框(由二级页面预填后禁止改写)。 */
+  lockNeType?: boolean;
   onClose: () => void;
 }
 
@@ -31,7 +35,13 @@ interface FormValues {
   isShow: boolean;
 }
 
-export default function AlarmDefinitionDrawer({ open, definition, onClose }: Props) {
+export default function AlarmDefinitionDrawer({
+  open,
+  definition,
+  defaultNeType,
+  lockNeType,
+  onClose,
+}: Props) {
   const isEdit = Boolean(definition);
   const [form] = Form.useForm<FormValues>();
   const { data: sevData } = useAlarmSeverityLevels();
@@ -56,9 +66,13 @@ export default function AlarmDefinitionDrawer({ open, definition, onClose }: Pro
       });
     } else {
       form.resetFields();
-      form.setFieldsValue({ isShow: true, severityCode: 4 });
+      form.setFieldsValue({
+        isShow: true,
+        severityCode: 4,
+        neType: defaultNeType ?? '',
+      });
     }
-  }, [open, definition, form]);
+  }, [open, definition, defaultNeType, form]);
 
   const handleSave = async () => {
     try {
@@ -137,7 +151,7 @@ export default function AlarmDefinitionDrawer({ open, definition, onClose }: Pro
           <Input disabled={isEdit} placeholder="如 101001 (主键，不可改)" />
         </Form.Item>
         <Form.Item name="neType" label="网元类型 (ne_type)" rules={[{ required: true }]}>
-          <Input placeholder="eNodeB / gNodeB / BTS / ..." />
+          <Input placeholder="eNodeB / gNodeB / BTS / ..." disabled={!isEdit && Boolean(lockNeType)} />
         </Form.Item>
         <Form.Item name="cnName" label="中文名" rules={[{ required: true }]}>
           <Input />

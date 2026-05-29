@@ -51,6 +51,7 @@ func NewHandler(service *Service, reloader Reloader, logger *zap.Logger) *Handle
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	g := rg.Group("/alarm-definitions")
 	g.GET("", h.List)
+	g.GET("/ne-types", h.NeTypes)
 	g.GET("/unknown-stats", h.UnknownStats)
 	g.POST("/import-directory", h.ImportDirectory)
 	g.POST("/cache/refresh", h.CacheRefresh)
@@ -303,6 +304,19 @@ func (h *Handler) UnknownStats(c *gin.Context) {
 		"items": stats,
 		"days":  days,
 	})
+}
+
+// NeTypes GET /api/v1/alarm-definitions/ne-types
+//
+// T-0179 drill-down 一级视图聚合端点:按 (ne_type, loaded_from) 双键统计行数 +
+// 4 个严重级计数。前端 alarm-library 一级表格直接渲染本接口返回的 items 数组。
+func (h *Handler) NeTypes(c *gin.Context) {
+	stats, err := h.service.ListNeTypes(c.Request.Context())
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OK(c, gin.H{"items": stats})
 }
 
 // ImportDirectory POST /api/v1/alarm-definitions/import-directory

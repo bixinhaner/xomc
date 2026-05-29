@@ -1,6 +1,7 @@
 import type {
   AlarmDefinition,
   AlarmDefinitionFilter,
+  AlarmNeTypeStat,
   CreateAlarmDefinitionInput,
   UpdateAlarmDefinitionInput,
   UnknownStatsFilter,
@@ -102,6 +103,34 @@ export const alarmDefinitionService = {
 
   async severityLevels() {
     return { items: clone(mockAlarmSeverityLevels) };
+  },
+
+  async listNeTypes(): Promise<{ items: AlarmNeTypeStat[] }> {
+    const grouped = new Map<string, AlarmNeTypeStat>();
+    for (const d of definitions) {
+      const key = `${d.neType}__`;
+      let stat = grouped.get(key);
+      if (!stat) {
+        stat = {
+          neType: d.neType,
+          loadedFrom: `${d.neType}.xml`,
+          total: 0,
+          criticalCnt: 0,
+          majorCnt: 0,
+          minorCnt: 0,
+          warningCnt: 0,
+        };
+        grouped.set(key, stat);
+      }
+      stat.total += 1;
+      switch (d.severityCode) {
+        case 31001: stat.criticalCnt += 1; break;
+        case 31002: stat.majorCnt += 1; break;
+        case 31003: stat.minorCnt += 1; break;
+        case 31004: stat.warningCnt += 1; break;
+      }
+    }
+    return { items: Array.from(grouped.values()).sort((a, b) => a.neType.localeCompare(b.neType)) };
   },
 
   async cacheRefresh() {

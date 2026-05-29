@@ -390,6 +390,46 @@ func (r *PgRepository) UnknownStats(ctx context.Context, productID *uuid.UUID, d
 	return out, rows.Err()
 }
 
+// ListNeTypes 实现 WriteRepository(T-0179 drill-down 一级视图)。
+//
+// 按 (ne_type, loaded_from) 双键聚合;COUNT FILTER 一次扫表算 4 个严重级计数。
+// loaded_from NULL 通过 COALESCE 为 '' 归到"未知 XML 来源"行。
+//
+// 期望规模 ~442 行 7 个 ne_type → 7-14 行返回,无需分页。
+func (r *PgRepository) ListNeTypes(ctx context.Context) ([]NeTypeStat, error) {
+	const aggSQL = `
+SELECT d.ne_type,
+       COALESCE(d.loaded_from, '')                                 AS loaded_from,
+       COUNT(*)                                                    AS total,
+       COUNT(*) FILTER (WHERE l.code = 31001)                      AS critical_cnt,
+       COUNT(*) FILTER (WHERE l.code = 31002)                      AS major_cnt,
+       COUNT(*) FILTER (WHERE l.code = 31003)                      AS minor_cnt,
+       COUNT(*) FILTER (WHERE l.code = 31004)                      AS warning_cnt
+  FROM alarm_definitions d
+  JOIN alarm_severity_levels l ON d.severity_id = l.id
+ GROUP BY d.ne_type, COALESCE(d.loaded_from, '')
+ ORDER BY d.ne_type ASC, loaded_from ASC`
+
+	rows, err := r.pool.Query(ctx, aggSQL)
+	if err != nil {
+		return nil, fmt.Errorf("query ne-types agg: %w", err)
+	}
+	defer rows.Close()
+
+	var out []NeTypeStat
+	for rows.Next() {
+		var s NeTypeStat
+		if err := rows.Scan(
+			&s.NeType, &s.LoadedFrom, &s.Total,
+			&s.CriticalCnt, &s.MajorCnt, &s.MinorCnt, &s.WarningCnt,
+		); err != nil {
+			return nil, fmt.Errorf("scan ne-type-stat row: %w", err)
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
 // ── helpers ─────────────────────────────────────────────────────────
 
 // nullIfEmptyAny 是 P3-04 的辅助：空字符串 → nil（用于 SQL NULL）；

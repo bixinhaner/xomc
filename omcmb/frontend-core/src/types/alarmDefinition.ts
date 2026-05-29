@@ -66,3 +66,15 @@ export interface UnknownStatsFilter {
   productId?: string;
   days?: number;
 }
+
+// T-0179 drill-down 一级视图聚合行(后端 NeTypeStat)。
+// loadedFrom 为空字符串表示历史数据未回填(Loader 未重跑过 → 显示"未知 XML 来源")。
+export interface AlarmNeTypeStat {
+  neType: string;
+  loadedFrom: string;
+  total: number;
+  criticalCnt: number;
+  majorCnt: number;
+  minorCnt: number;
+  warningCnt: number;
+}

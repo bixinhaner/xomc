@@ -74,6 +74,13 @@ export function useUnknownAlarmStats(filter?: UnknownStatsFilter) {
   });
 }
 
+export function useAlarmNeTypeStats() {
+  return useQuery({
+    queryKey: [...AD_KEY, 'ne-types'],
+    queryFn: () => api.listNeTypes(),
+  });
+}
+
 export function useAlarmSeverityLevels() {
   return useQuery({
     queryKey: [...AD_KEY, 'severity-levels'],

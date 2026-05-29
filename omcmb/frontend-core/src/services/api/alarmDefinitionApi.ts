@@ -1,6 +1,7 @@
 import http from '../http';
 import type {
   AlarmDefinition,
+  AlarmNeTypeStat,
   AlarmSeverityLevel,
   UnknownAlarmStat,
   AlarmDefinitionFilter,
@@ -43,6 +44,28 @@ interface BackendUnknownStat {
   identifier: string;
   count: number;
   last_seen_at?: string;
+}
+
+interface BackendNeTypeStat {
+  ne_type: string;
+  loaded_from: string;
+  total: number;
+  critical_cnt: number;
+  major_cnt: number;
+  minor_cnt: number;
+  warning_cnt: number;
+}
+
+function mapNeTypeStat(b: BackendNeTypeStat): AlarmNeTypeStat {
+  return {
+    neType: b.ne_type,
+    loadedFrom: b.loaded_from,
+    total: b.total,
+    criticalCnt: b.critical_cnt,
+    majorCnt: b.major_cnt,
+    minorCnt: b.minor_cnt,
+    warningCnt: b.warning_cnt,
+  };
 }
 
 function mapDef(b: BackendDefinition): AlarmDefinition {
@@ -206,6 +229,11 @@ export const alarmDefinitionApi = {
       items: (data.items || []).map(mapUnknown),
       days: data.days || 7,
     };
+  },
+
+  async listNeTypes(): Promise<{ items: AlarmNeTypeStat[] }> {
+    const { data } = await http.get<{ items: BackendNeTypeStat[] }>('/alarm-definitions/ne-types');
+    return { items: (data.items || []).map(mapNeTypeStat) };
   },
 
   async severityLevels(): Promise<{ items: AlarmSeverityLevel[] }> {

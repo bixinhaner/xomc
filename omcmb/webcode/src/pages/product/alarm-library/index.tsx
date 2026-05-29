@@ -1,4 +1,15 @@
+/**
+ * AlarmLibraryPage — 告警库主页面(T-0179 drill-down 重设计)。
+ *
+ * 2026-05-29 用户决策:
+ *   1. 与 product/param-model 页面 UI 对齐(drill-down 主从)
+ *   2. 一级页面:NeTypesTable — 按 (ne_type, loaded_from) 聚合,每行点击下钻
+ *   3. 二级页面:AlarmDefinitionTable — 按 ne_type 过滤,toolbar 含返回 + 新增(预填+锁定 ne_type)
+ *   4. URL 同步 ?neType=ENB(刷新不回列表;返回按钮显式回一级)
+ *   5. 8 个 icon 对齐 param-model 风格(返回 / 上传 / 重载 / 刷新 / 删除 / 详情 / 新增 / 警告)
+ */
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Card,
   Table,
@@ -10,31 +21,34 @@ import {
   Popconfirm,
   message,
   Tooltip,
+  Typography,
 } from 'antd';
 import {
-  PlusOutlined,
-  EyeOutlined,
-  DeleteOutlined,
+  ArrowLeftOutlined,
   CloudDownloadOutlined,
+  DeleteOutlined,
+  EyeOutlined,
+  PlusOutlined,
   ReloadOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
 import {
   useAlarmDefinitionList,
+  useAlarmNeTypeStats,
   useDeleteAlarmDefinition,
   useAlarmSeverityLevels,
   useAlarmDefinitionImportDirectory,
   useAlarmDefinitionCacheRefresh,
-  useUnknownAlarmStats,
 } from '@core/hooks/api/useAlarmDefinitions';
-import type { AlarmDefinition, AlarmDefinitionFilter } from '@core/types/alarmDefinition';
+import type {
+  AlarmDefinition,
+  AlarmDefinitionFilter,
+  AlarmNeTypeStat,
+} from '@core/types/alarmDefinition';
 import AlarmDefinitionDrawer from './AlarmDefinitionDrawer';
 import UnknownStatsModal from './UnknownStatsModal';
 
-const UNKNOWN_OPTIONS = [
-  { label: '已识别', value: 'false' },
-  { label: '未识别 fallback', value: 'true' },
-];
+const { Text } = Typography;
 
 const SEVERITY_TAG_COLORS: Record<number, string> = {
   1: 'red',
@@ -53,22 +67,49 @@ const FILTER_LABEL_STYLE = {
   whiteSpace: 'nowrap' as const,
 };
 
-const OPTION_CATALOG_FILTER: AlarmDefinitionFilter = {
-  page: 1,
-  pageSize: 1000,
-};
-
 export default function AlarmLibraryPage() {
-  const [filter, setFilter] = useState<AlarmDefinitionFilter>({ page: 1, pageSize: 20 });
-  const [keyword, setKeyword] = useState('');
-  const [unknownOpt, setUnknownOpt] = useState<'true' | 'false'>();
-  const { data, isLoading } = useAlarmDefinitionList(filter);
-  const { data: optionCatalogData } = useAlarmDefinitionList(OPTION_CATALOG_FILTER);
-  const { data: unknownStatsData, isLoading: isUnknownStatsLoading } = useUnknownAlarmStats({
-    days: 7,
-  });
-  const { data: sevData } = useAlarmSeverityLevels();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedNeType = searchParams.get('neType') || undefined;
+  const inDetail = Boolean(selectedNeType);
 
+  const setSelectedNeType = (next: string | undefined) => {
+    const params = new URLSearchParams(searchParams);
+    if (next) {
+      params.set('neType', next);
+    } else {
+      params.delete('neType');
+    }
+    setSearchParams(params, { replace: false });
+  };
+
+  // ── 一级(NeTypes 聚合) ─────────────────────────────────────────
+  const { data: neTypesData, isLoading: isNeTypesLoading } = useAlarmNeTypeStats();
+  const [neTypesKeyword, setNeTypesKeyword] = useState('');
+  const neTypesItems = useMemo<AlarmNeTypeStat[]>(() => {
+    const items = neTypesData?.items || [];
+    const k = neTypesKeyword.trim().toLowerCase();
+    if (!k) return items;
+    return items.filter(
+      (it) => it.neType.toLowerCase().includes(k) || it.loadedFrom.toLowerCase().includes(k)
+    );
+  }, [neTypesData, neTypesKeyword]);
+
+  // ── 二级(AlarmDefinition 详情) ─────────────────────────────────
+  const [detailFilter, setDetailFilter] = useState<AlarmDefinitionFilter>({
+    page: 1,
+    pageSize: 20,
+  });
+  const detailQueryFilter = useMemo<AlarmDefinitionFilter>(
+    () => (selectedNeType ? { ...detailFilter, neType: selectedNeType } : detailFilter),
+    [detailFilter, selectedNeType]
+  );
+  const { data: detailData, isLoading: isDetailLoading } = useAlarmDefinitionList(
+    inDetail ? detailQueryFilter : { page: 1, pageSize: 1 }
+  );
+  const { data: sevData } = useAlarmSeverityLevels();
+  const detailItems = useMemo(() => detailData?.items || [], [detailData]);
+
+  // ── 公共 ───────────────────────────────────────────────────────
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<AlarmDefinition | null>(null);
   const [statsOpen, setStatsOpen] = useState(false);
@@ -76,81 +117,79 @@ export default function AlarmLibraryPage() {
   const delMut = useDeleteAlarmDefinition();
   const importMut = useAlarmDefinitionImportDirectory();
   const cacheMut = useAlarmDefinitionCacheRefresh();
-  const isUnknownOnly = unknownOpt === 'true';
 
-  const items = useMemo(() => data?.items || [], [data]);
-  const optionCatalogItems = useMemo(() => optionCatalogData?.items || [], [optionCatalogData]);
-  const unknownFallbackItems = useMemo(() => {
-    const keywordFilter = filter.keyword?.trim().toLowerCase();
-    return (unknownStatsData?.items || [])
-      .filter((item) => {
-        if (!keywordFilter) {
-          return true;
-        }
-        return item.identifier.toLowerCase().includes(keywordFilter);
-      })
-      .map((item) => ({
-        id: `unknown-${item.productId || 'all'}-${item.identifier}`,
-        identifier: item.identifier,
-        neType: item.productName || '未知产品',
-        cnName: '未识别 fallback 告警',
-        enName: 'Unknown fallback alarm',
-        severityCode: 31004,
-        severityName: 'Warning',
-        cnProbableCause: item.lastSeenAt ? `最近出现时间：${item.lastSeenAt}` : undefined,
-        enProbableCause: item.lastSeenAt ? `Last seen at: ${item.lastSeenAt}` : undefined,
-        cnSuggestion: '请通过“未识别频次”确认产品后补充告警字典。',
-        enSuggestion: 'Check unknown stats and add a matching alarm definition.',
-        isShow: true,
-        isUnknown: true,
-      })) satisfies AlarmDefinition[];
-  }, [filter.keyword, unknownStatsData]);
-  const tableItems = isUnknownOnly ? unknownFallbackItems : items;
-  const tableLoading = isUnknownOnly ? isUnknownStatsLoading : isLoading;
-  const neTypeOptions = useMemo(
+  const severityOptions = useMemo(
     () =>
-      Array.from(new Set(optionCatalogItems.map((item) => item.neType).filter(Boolean)))
-        .sort((left, right) => left.localeCompare(right))
-        .map((value) => ({ label: value, value })),
-    [optionCatalogItems]
+      (sevData?.items || [])
+        .map((level) => ({
+          label: `${level.code} - ${level.cnName} / ${level.enName}`,
+          value: level.code,
+        }))
+        .sort((left, right) => left.value - right.value),
+    [sevData]
   );
-  const severityOptions = useMemo(() => {
-    const apiOptions = (sevData?.items || []).map((level) => ({
-      label: `${level.code} - ${level.cnName} / ${level.enName}`,
-      value: level.code,
-    }));
-    if (apiOptions.length > 0) {
-      return apiOptions;
-    }
 
-    return Array.from(
-      new Map(
-        optionCatalogItems.map((item) => [
-          item.severityCode,
-          {
-            label: `${item.severityCode} - ${item.severityName}`,
-            value: item.severityCode,
-          },
-        ])
-      ).values()
-    ).sort((left, right) => left.value - right.value);
-  }, [optionCatalogItems, sevData]);
+  // ── 一级表列 ────────────────────────────────────────────────────
+  const neTypesColumns = [
+    {
+      title: '网元类型',
+      dataIndex: 'neType',
+      width: 160,
+      render: (v: string, row: AlarmNeTypeStat) => (
+        <Button
+          type="link"
+          size="small"
+          onClick={() => setSelectedNeType(row.neType)}
+          style={{ padding: 0, fontWeight: 600 }}
+        >
+          {v}
+        </Button>
+      ),
+    },
+    {
+      title: 'XML 来源',
+      dataIndex: 'loadedFrom',
+      width: 200,
+      render: (v: string) =>
+        v ? <Tag>{v}</Tag> : <Tag color="warning">未回填(请重载)</Tag>,
+    },
+    { title: '告警总数', dataIndex: 'total', width: 100 },
+    {
+      title: 'Critical',
+      dataIndex: 'criticalCnt',
+      width: 100,
+      render: (v: number) => (v > 0 ? <Tag color="red">{v}</Tag> : <span>—</span>),
+    },
+    {
+      title: 'Major',
+      dataIndex: 'majorCnt',
+      width: 100,
+      render: (v: number) => (v > 0 ? <Tag color="orange">{v}</Tag> : <span>—</span>),
+    },
+    {
+      title: 'Minor',
+      dataIndex: 'minorCnt',
+      width: 100,
+      render: (v: number) => (v > 0 ? <Tag color="gold">{v}</Tag> : <span>—</span>),
+    },
+    {
+      title: 'Warning',
+      dataIndex: 'warningCnt',
+      width: 100,
+      render: (v: number) => (v > 0 ? <Tag color="blue">{v}</Tag> : <span>—</span>),
+    },
+  ];
 
-  const columns = [
+  // ── 二级表列 ────────────────────────────────────────────────────
+  const detailColumns = [
     {
       title: 'identifier',
       dataIndex: 'identifier',
       width: 140,
-      render: (v: string, row: AlarmDefinition) => (
-        <Space>
-          <Tag color="blue">{v}</Tag>
-          {row.isUnknown && <Tag color="warning">未识别</Tag>}
-        </Space>
-      ),
+      render: (v: string) => <Tag color="blue">{v}</Tag>,
     },
     { title: '中文名', dataIndex: 'cnName', width: 200 },
     { title: '英文名', dataIndex: 'enName', width: 220, ellipsis: true },
-    { title: '网元类型', dataIndex: 'neType', width: 110 },
     {
       title: '严重级别',
       dataIndex: 'severityCode',
@@ -182,7 +221,7 @@ export default function AlarmLibraryPage() {
             }}
           />
           <Popconfirm
-            title={`确认删除告警定义「${row.identifier}」？`}
+            title={`确认删除告警定义「${row.identifier}」?`}
             onConfirm={() =>
               delMut
                 .mutateAsync(row.identifier)
@@ -199,153 +238,144 @@ export default function AlarmLibraryPage() {
 
   return (
     <div style={{ padding: 16 }}>
-      <Card
-        size="small"
-        extra={
-          <Space wrap size={12}>
-            <Input.Search
-              placeholder="搜索 identifier / 名称"
-              allowClear
-              value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
-              onSearch={(v) => setFilter((f) => ({ ...f, keyword: v || undefined, page: 1 }))}
-              style={{ width: 220 }}
-            />
-            <Space size={4}>
-              <span style={FILTER_LABEL_STYLE}>网元类型</span>
-              <Select
-                placeholder="全部"
+      {/* 顶部 toolbar:列表态展示搜索;详情态展示返回 + 当前 ne_type + 新增 */}
+      <Card size="small" style={{ marginBottom: 12 }}>
+        <Space style={{ width: '100%', justifyContent: 'space-between' }} wrap>
+          {inDetail ? (
+            <Space wrap>
+              <Button
+                icon={<ArrowLeftOutlined />}
+                onClick={() => setSelectedNeType(undefined)}
+              >
+                返回
+              </Button>
+              <Text strong>{selectedNeType} 的告警定义</Text>
+              <Space size={4}>
+                <span style={FILTER_LABEL_STYLE}>严重级别</span>
+                <Select
+                  placeholder="全部"
+                  allowClear
+                  options={severityOptions}
+                  value={detailFilter.severityCode}
+                  onChange={(value) =>
+                    setDetailFilter((current) => ({ ...current, severityCode: value, page: 1 }))
+                  }
+                  style={{ width: 180 }}
+                />
+              </Space>
+              <Input.Search
+                placeholder="搜索 identifier / 名称"
                 allowClear
-                disabled={isUnknownOnly}
-                options={neTypeOptions}
-                value={filter.neType}
-                onChange={(value) =>
-                  setFilter((current) => ({ ...current, neType: value, page: 1 }))
+                onSearch={(v) =>
+                  setDetailFilter((f) => ({ ...f, keyword: v || undefined, page: 1 }))
                 }
-                style={{ width: 140 }}
+                style={{ width: 220 }}
               />
             </Space>
-            <Space size={4}>
-              <span style={FILTER_LABEL_STYLE}>严重级别</span>
-              <Select
-                placeholder="全部"
+          ) : (
+            <Space wrap>
+              <Input.Search
+                placeholder="搜索网元类型 / XML 来源"
                 allowClear
-                disabled={isUnknownOnly}
-                options={severityOptions}
-                value={filter.severityCode}
-                onChange={(value) =>
-                  setFilter((current) => ({ ...current, severityCode: value, page: 1 }))
-                }
-                style={{ width: 180 }}
+                value={neTypesKeyword}
+                onChange={(e) => setNeTypesKeyword(e.target.value)}
+                style={{ width: 280 }}
               />
-            </Space>
-            <Space size={4}>
-              <span style={FILTER_LABEL_STYLE}>识别状态</span>
-              <Select
-                placeholder="全部"
-                allowClear
-                value={unknownOpt}
-                onChange={(value: 'true' | 'false' | undefined) => {
-                  const nextIsUnknown = value === undefined ? undefined : value === 'true';
-                  setUnknownOpt(value);
-                  setFilter((current) => ({
-                    ...current,
-                    neType: value === 'true' ? undefined : current.neType,
-                    severityCode: value === 'true' ? undefined : current.severityCode,
-                    isUnknown: nextIsUnknown,
-                    page: 1,
-                  }));
-                }}
-                options={UNKNOWN_OPTIONS}
-                style={{ width: 150 }}
-              />
-            </Space>
-            <Space size={4}>
-              <span style={FILTER_LABEL_STYLE}>统计</span>
               <Tooltip title="按 productId / days 聚合的未识别告警频次">
                 <Button icon={<WarningOutlined />} onClick={() => setStatsOpen(true)}>
                   未识别频次
                 </Button>
               </Tooltip>
             </Space>
-            <Space size={4}>
-              <span style={FILTER_LABEL_STYLE}>维护</span>
-              <Popconfirm
-                title="确认重载 XML？"
-                description={
-                  <div style={{ maxWidth: 320 }}>
-                    将从 <code>datamodels/</code> 重新加载所有告警定义 XML。
-                    <br />
-                    UI 中对告警定义的编辑将被 XML 值覆盖；操作不可撤销。
-                  </div>
-                }
-                okText="确认重载"
-                cancelText="取消"
-                okButtonProps={{ danger: true }}
-                placement="bottomRight"
-                onConfirm={() => {
-                  importMut
-                    .mutateAsync()
-                    .then((result) => message.success(`已重载：${result.reloaded}`))
-                    .catch((error) => message.error((error as Error).message));
+          )}
+          <Space wrap>
+            {inDetail && (
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => {
+                  setEditing(null);
+                  setDrawerOpen(true);
                 }}
               >
-                <Button icon={<CloudDownloadOutlined />} loading={importMut.isPending} danger>
-                  重载 XML
-                </Button>
-              </Popconfirm>
-              <Button
-                icon={<ReloadOutlined />}
-                loading={cacheMut.isPending}
-                onClick={() =>
-                  cacheMut
-                    .mutateAsync()
-                    .then(() => message.success('已刷新缓存'))
-                    .catch((e) => message.error((e as Error).message))
-                }
-              >
-                刷新缓存
+                新增定义
               </Button>
-            </Space>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => {
-                setEditing(null);
-                setDrawerOpen(true);
+            )}
+            <Popconfirm
+              title="确认重载 XML?"
+              description={
+                <div style={{ maxWidth: 320 }}>
+                  将从 <code>datamodels/</code> 重新加载所有告警定义 XML。
+                  <br />
+                  UI 中对告警定义的编辑将被 XML 值覆盖;操作不可撤销。
+                </div>
+              }
+              okText="确认重载"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+              placement="bottomRight"
+              onConfirm={() => {
+                importMut
+                  .mutateAsync()
+                  .then((result) => message.success(`已重载:${result.reloaded}`))
+                  .catch((error) => message.error((error as Error).message));
               }}
             >
-              新增定义
+              <Button icon={<CloudDownloadOutlined />} loading={importMut.isPending} danger>
+                重载 XML
+              </Button>
+            </Popconfirm>
+            <Button
+              icon={<ReloadOutlined />}
+              loading={cacheMut.isPending}
+              onClick={() =>
+                cacheMut
+                  .mutateAsync()
+                  .then(() => message.success('已刷新缓存'))
+                  .catch((e) => message.error((e as Error).message))
+              }
+            >
+              刷新缓存
             </Button>
           </Space>
-        }
-      >
-        <Table<AlarmDefinition>
-          rowKey="id"
-          loading={tableLoading}
-          columns={columns}
-          dataSource={tableItems}
-          size="small"
-          pagination={
-            isUnknownOnly
-              ? {
-                  pageSize: 20,
-                  showSizeChanger: false,
-                }
-              : {
-                  current: data?.page || 1,
-                  pageSize: data?.pageSize || 20,
-                  total: data?.total || 0,
-                  showSizeChanger: true,
-                  onChange: (page, pageSize) => setFilter((f) => ({ ...f, page, pageSize })),
-                }
-          }
-        />
+        </Space>
+      </Card>
+
+      {/* drill-down 主体:列表态 ↔ 详情态 二选一 */}
+      <Card size="small">
+        {inDetail ? (
+          <Table<AlarmDefinition>
+            rowKey="id"
+            loading={isDetailLoading}
+            columns={detailColumns}
+            dataSource={detailItems}
+            size="small"
+            pagination={{
+              current: detailData?.page || 1,
+              pageSize: detailData?.pageSize || 20,
+              total: detailData?.total || 0,
+              showSizeChanger: true,
+              onChange: (page, pageSize) =>
+                setDetailFilter((f) => ({ ...f, page, pageSize })),
+            }}
+          />
+        ) : (
+          <Table<AlarmNeTypeStat>
+            rowKey={(r) => `${r.neType}__${r.loadedFrom}`}
+            loading={isNeTypesLoading}
+            columns={neTypesColumns}
+            dataSource={neTypesItems}
+            size="small"
+            pagination={{ pageSize: 20, showTotal: (t) => `共 ${t} 个网元类型` }}
+          />
+        )}
       </Card>
 
       <AlarmDefinitionDrawer
         open={drawerOpen}
         definition={editing}
+        defaultNeType={!editing ? selectedNeType : undefined}
+        lockNeType={!editing && Boolean(selectedNeType)}
         onClose={() => {
           setDrawerOpen(false);
           setEditing(null);
