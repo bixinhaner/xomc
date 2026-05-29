@@ -309,6 +309,8 @@ WHERE task_id = $1`
 		DeviceOUI   string    `json:"device_oui"`
 		DeviceSN    string    `json:"device_sn"`
 		MetricPath  string    `json:"metric_path"`
+		// KPI 行 metric_path 是 K 编号；display_name 为按编号回填的友好名（PLMN 级带标记）。counter 行 = metric_path。
+		DisplayName string    `json:"display_name,omitempty"`
 		MetricType  string    `json:"metric_type"`
 		MetricValue float64   `json:"metric_value"`
 		StatisType  *string   `json:"statis_type,omitempty"`
@@ -336,7 +338,62 @@ WHERE task_id = $1`
 		dto.TaskID = taskID.String()
 		items = append(items, dto)
 	}
+
+	// 回填 display_name：KPI 行 metric_path 是 K 编号，按编号查指标库取友好名；counter 行 = metric_path。
+	codeSet := make(map[string]struct{})
+	for i := range items {
+		if items[i].MetricType == "kpi" && items[i].MetricPath != "" {
+			codeSet[items[i].MetricPath] = struct{}{}
+		} else {
+			items[i].DisplayName = items[i].MetricPath
+		}
+	}
+	if len(codeSet) > 0 {
+		codes := make([]string, 0, len(codeSet))
+		for code := range codeSet {
+			codes = append(codes, code)
+		}
+		nameByCode := h.lookupIndicatorNames(c.Request.Context(), codes)
+		for i := range items {
+			if items[i].MetricType != "kpi" {
+				continue
+			}
+			if name, ok := nameByCode[items[i].MetricPath]; ok && name != "" {
+				items[i].DisplayName = name
+			} else {
+				items[i].DisplayName = items[i].MetricPath
+			}
+		}
+	}
+
 	response.OK(c, gin.H{"items": items, "total": len(items)})
+}
+
+// lookupIndicatorNames 按编号集合一次性查三张指标表，返回 code → cn_name（缺则 en_name）。
+// K 编号在 perf_indicators_{enb,gnb,gsm} 三表全局唯一，一次 UNION 即可覆盖（与 aggregator 查询层一致）。
+func (h *Handler) lookupIndicatorNames(ctx context.Context, codes []string) map[string]string {
+	out := make(map[string]string, len(codes))
+	const tmpl = `
+SELECT id, COALESCE(NULLIF(cn_name, ''), en_name) AS display_name FROM perf_indicators_enb  WHERE id = ANY($1)
+UNION ALL
+SELECT id, COALESCE(NULLIF(cn_name, ''), en_name) AS display_name FROM perf_indicators_gnb  WHERE id = ANY($1)
+UNION ALL
+SELECT id, COALESCE(NULLIF(cn_name, ''), en_name) AS display_name FROM perf_indicators_gsm  WHERE id = ANY($1)`
+	rows, err := h.pool.Query(ctx, tmpl, codes)
+	if err != nil {
+		h.logger.Warn("backfill adhoc display names query failed; fall back to codes", zap.Error(err))
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			h.logger.Warn("backfill adhoc display names scan failed", zap.Error(err))
+			return out
+		}
+		out[id] = name
+	}
+	return out
 }
 
 // Progress GET /pm/adhoc/tasks/:id/progress（SSE）

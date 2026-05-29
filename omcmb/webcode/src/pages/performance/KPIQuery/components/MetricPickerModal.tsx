@@ -25,10 +25,23 @@ import type { DeviceType, IndicatorInfo } from '@core/types/indicatorLibrary';
 
 const { Text } = Typography;
 
+// 选中值 = 该指标在 pm_metrics 里的 metric_path：
+//   KPI 落库键是 K 编号（id），counter 落库键是点分名（en_name）。
+//   这样选中值直接作为查询过滤条件即可命中，无需再做映射。
+function metricValueOf(r: IndicatorInfo): string {
+  return r.isCounter ? r.enName ?? r.id : r.id;
+}
+
+// 选中标签的友好显示名：优先中文名，回退英文名 / 编号。
+function metricLabelOf(r: IndicatorInfo): string {
+  return r.cnName || r.enName || r.id;
+}
+
 interface MetricPickerModalProps {
   open: boolean;
   onClose: () => void;
-  onConfirm: (selectedPaths: string[]) => void;
+  // labels: 选中值 → 友好名（KPI 友好名带 PLMN 标记）。调用方可用于摘要展示，不需要时可忽略。
+  onConfirm: (selectedPaths: string[], labels: Record<string, string>) => void;
   initialSelected?: string[];
   initialDeviceType?: DeviceType;
 }
@@ -61,25 +74,41 @@ export default function MetricPickerModal({
     pageSize,
   });
 
-  const items = data?.items ?? [];
+  const items = useMemo(() => data?.items ?? [], [data]);
   const total = data?.total ?? 0;
+
+  // 选中值 → 友好名 映射：items 变化时在渲染期幂等累积（与 PivotTable 列宽同款 render-phase sync，
+  // 不用 useEffect），供「已选」面板标签显示友好名，避免露出 K 编号。
+  const [labelMap, setLabelMap] = useState<Record<string, string>>({});
+  const [seenItems, setSeenItems] = useState(items);
+  if (seenItems !== items) {
+    setSeenItems(items);
+    if (items.length > 0) {
+      setLabelMap((prev) => {
+        const next = { ...prev };
+        for (const it of items) next[metricValueOf(it)] = metricLabelOf(it);
+        return next;
+      });
+    }
+  }
 
   const columns = useMemo(
     () => [
       {
-        title: '指标路径',
-        dataIndex: 'enName',
-        key: 'path',
-        width: 280,
-        ellipsis: true,
-        render: (n: string) => <Text code>{n}</Text>,
-      },
-      {
         title: '中文名',
         dataIndex: 'cnName',
         key: 'cn',
-        width: 200,
+        width: 240,
         ellipsis: true,
+        render: (n: string, r: IndicatorInfo) => n || <Text type="secondary">{r.enName}</Text>,
+      },
+      {
+        title: '英文名 / 路径',
+        dataIndex: 'enName',
+        key: 'path',
+        width: 260,
+        ellipsis: true,
+        render: (n: string) => <Text code>{n}</Text>,
       },
       {
         title: '类型',
@@ -98,7 +127,11 @@ export default function MetricPickerModal({
   };
 
   const handleConfirm = () => {
-    onConfirm(selected);
+    const labels: Record<string, string> = {};
+    selected.forEach((v) => {
+      labels[v] = labelMap[v] ?? v;
+    });
+    onConfirm(selected, labels);
     onClose();
   };
 
@@ -151,7 +184,7 @@ export default function MetricPickerModal({
         </Space>
 
         <Table<IndicatorInfo>
-          rowKey="enName"
+          rowKey={metricValueOf}
           size="small"
           loading={isLoading}
           columns={columns}
@@ -206,7 +239,7 @@ export default function MetricPickerModal({
                   onClose={() => setSelected(selected.filter((p) => p !== path))}
                   style={{ marginBottom: 4 }}
                 >
-                  {path}
+                  {labelMap[path] ?? path}
                 </Tag>
               ))
             )}

@@ -49,6 +49,8 @@ export interface PanelSeriesData {
   series: PanelSeries[];
   // 原始聚合行（long 格式）；导出 Excel 时按指标查询页透视格式输出。
   rows: AggregatedRow[];
+  // metricPath（KPI=K 编号）→ 友好显示名（PLMN 级带标记）。渲染器据此把标题/系列名映射回友好名。
+  displayNameByPath: Record<string, string>;
   // 当前 panel 是否处于对比模式（非空 = 渲染时多 series 处理）。
   compareMode: CompareMode | undefined;
   isLoading: boolean;
@@ -153,8 +155,23 @@ function buildQueryParams(panel: Panel, granularity: Granularity): AggregatedQue
   return params;
 }
 
+// rows 里收集 metricPath → displayName（KPI 友好名 / PLMN 标记）；counter 行 displayName = metricPath。
+function buildDisplayNameMap(rows: AggregatedRow[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const r of rows) {
+    if (r.displayName && !out[r.metricPath]) out[r.metricPath] = r.displayName;
+  }
+  return out;
+}
+
 // AggregatedRow[] → PanelSeries[]：按 metricPath 分组，按 time 升序，去重同桶取最后一条。
-function rowsToSeries(rows: AggregatedRow[], panel: Panel, granularity: Granularity): PanelSeries[] {
+// series.name 用友好名（displayName），不露 K 编号。
+function rowsToSeries(
+  rows: AggregatedRow[],
+  panel: Panel,
+  granularity: Granularity,
+  nameByPath: Record<string, string>,
+): PanelSeries[] {
   const byMetric = new Map<string, AggregatedRow[]>();
   for (const r of rows) {
     if (!byMetric.has(r.metricPath)) byMetric.set(r.metricPath, []);
@@ -172,7 +189,7 @@ function rowsToSeries(rows: AggregatedRow[], panel: Panel, granularity: Granular
         ingestLagSeconds: lagSec > 0 ? lagSec : undefined,
       };
     });
-    return { name: metric, kind: 'primary', points };
+    return { name: nameByPath[metric] ?? metric, kind: 'primary', points };
   });
 }
 
@@ -199,10 +216,12 @@ export function usePmPanelData(panel: Panel, activeGranularity: Granularity): Pa
 
   return useMemo(() => {
     const rows = query.data ?? [];
-    const series = rowsToSeries(rows, panel, activeGranularity);
+    const displayNameByPath = buildDisplayNameMap(rows);
+    const series = rowsToSeries(rows, panel, activeGranularity, displayNameByPath);
     return {
       series,
       rows,
+      displayNameByPath,
       compareMode: panel.compareMode,
       isLoading: query.isLoading,
       isError: query.isError,

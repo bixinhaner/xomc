@@ -73,10 +73,19 @@ interface RenderProps {
   gran: Granularity;
 }
 
-// G6-Gap-9: 自动判断指标是否为百分比类（path 含 .Rate / .SuccRate / Pct / .Ratio 等关键词）。
-function inferPctUnit(metricPath: string, configUnit?: string): string {
+// 把指标 metricPath 列表映射成友好名（KPI 为友好名，counter 为点分名），用 ' / ' 连接做标题。
+function friendlyTitle(paths: string[], nameByPath: Record<string, string>): string {
+  return paths.map((p) => nameByPath[p] ?? p).join(' / ');
+}
+
+// G6-Gap-9: 自动判断指标是否为百分比类。KPI 落库改编号后 metricPath 是 K 编号无法正则，
+// 改对友好名判断：中文名以「率 / 比」结尾（可带「（PLMN级）」级别标记），或英文名含 Rate/Pct/Ratio 等。
+function inferPctUnit(metricName: string, configUnit?: string): string {
   if (configUnit) return configUnit;
-  if (/(\.|^)(Rate|SuccRate|FailRate|DropRate|Pct|Percentage|Ratio)(\.|$)/i.test(metricPath)) {
+  if (/(率|比)(（[^（）]*）)?$/.test(metricName)) {
+    return '%';
+  }
+  if (/(\.|^)(Rate|SuccRate|FailRate|DropRate|Pct|Percentage|Ratio)(\.|$)/i.test(metricName)) {
     return '%';
   }
   return '';
@@ -103,9 +112,10 @@ function bucketLabels(series: PanelSeries[]): string[] {
 }
 
 function KpiCardRenderer({ panel, gran }: RenderProps) {
-  const { series } = usePmPanelData(panel, gran);
+  const { series, displayNameByPath } = usePmPanelData(panel, gran);
   const path0 = panel.metricPaths[0] ?? '';
-  const unit = inferPctUnit(path0, panel.config?.unit as string | undefined);
+  const title0 = displayNameByPath[path0] ?? path0;
+  const unit = inferPctUnit(title0, panel.config?.unit as string | undefined);
   const threshold = panel.config?.threshold as number | undefined;
   // 取主 series 最后一个非缺采点
   const primary = series.find((s) => s.kind === 'primary');
@@ -122,7 +132,7 @@ function KpiCardRenderer({ panel, gran }: RenderProps) {
   return (
     <div style={{ position: 'relative' }}>
       <Statistic
-        title={panel.metricPaths.join(' / ')}
+        title={friendlyTitle(panel.metricPaths, displayNameByPath)}
         value={value}
         suffix={unit}
         precision={2}
@@ -223,10 +233,11 @@ function TableRenderer({ panel, gran }: RenderProps) {
 }
 
 function GaugeRenderer({ panel, gran }: RenderProps) {
-  const { series } = usePmPanelData(panel, gran);
+  const { series, displayNameByPath } = usePmPanelData(panel, gran);
   const primary = series.find((s) => s.kind === 'primary');
   const last = primary?.points.slice().reverse().find((p) => p.value !== null);
   const value = (last?.value as number | undefined) ?? 0;
+  const path0 = panel.metricPaths[0] ?? '';
   const option = {
     series: [
       {
@@ -234,7 +245,7 @@ function GaugeRenderer({ panel, gran }: RenderProps) {
         progress: { show: true, width: 14 },
         axisLine: { lineStyle: { width: 14 } },
         detail: { formatter: '{value}%', fontSize: 18 },
-        data: [{ value, name: panel.metricPaths[0] ?? '' }],
+        data: [{ value, name: displayNameByPath[path0] ?? path0 }],
         min: 0,
         max: 100,
       },
@@ -246,7 +257,8 @@ function GaugeRenderer({ panel, gran }: RenderProps) {
 // G6-Gap-5: TopN 排行榜
 // config.n (number, 默认 10)；config.sort_desc (bool, 默认 true 表示降序)
 function TopNRenderer({ panel, gran }: RenderProps) {
-  void gran;
+  const { displayNameByPath } = usePmPanelData(panel, gran);
+  const path0 = panel.metricPaths[0] ?? '';
   const n = (panel.config?.n as number) ?? 10;
   const sortDesc = (panel.config?.sort_desc as boolean) ?? true;
   // mock 数据：N 条 (device, value) 行
@@ -264,7 +276,7 @@ function TopNRenderer({ panel, gran }: RenderProps) {
       columns={[
         { title: '#', dataIndex: 'rank', width: 50 },
         { title: '设备', dataIndex: 'device' },
-        { title: panel.metricPaths[0] ?? '值', dataIndex: 'value' },
+        { title: displayNameByPath[path0] ?? path0 ?? '值', dataIndex: 'value' },
       ]}
       dataSource={sorted}
     />
@@ -286,7 +298,7 @@ function AdhocResultRenderer({ panel }: { panel: Panel }) {
 // G6-Gap-5: BigNumber 数值大屏
 // config.font_size (number, 默认 56)；config.warning_threshold (number, 低于此值红色)
 function BigNumberRenderer({ panel, gran }: RenderProps) {
-  const { series } = usePmPanelData(panel, gran);
+  const { series, displayNameByPath } = usePmPanelData(panel, gran);
   const fontSize = (panel.config?.font_size as number) ?? 56;
   const warningThreshold = panel.config?.warning_threshold as number | undefined;
   const unit = (panel.config?.unit as string) ?? '';
@@ -305,7 +317,7 @@ function BigNumberRenderer({ panel, gran }: RenderProps) {
         <span style={{ fontSize: fontSize * 0.4, marginLeft: 4 }}>{unit}</span>
       </div>
       <div style={{ marginTop: 8, color: '#888', fontSize: 12 }}>
-        {panel.metricPaths.join(' / ')}
+        {friendlyTitle(panel.metricPaths, displayNameByPath)}
       </div>
       {compare && compareLast && (
         <div style={{ marginTop: 4, color: '#888', fontSize: 12 }}>

@@ -53,6 +53,8 @@ import {
   useAggregatedMetricsByDevices,
 } from '@core/hooks/api/usePmQuery';
 import { useUserStore } from '@core/store/userStore';
+import { indicatorLibraryApi } from '@core/services/api/indicatorLibraryApi';
+import type { DeviceType } from '@core/types/indicatorLibrary';
 import type { Granularity } from '@core/types/pmDashboard';
 import type {
   QueryTemplate,
@@ -108,6 +110,51 @@ interface SaveTemplateFormState {
   customRange: [dayjs.Dayjs, dayjs.Dayjs] | null;
 }
 
+// KPI 编号格式（如 K900010043）。
+const KPI_CODE_RE = /^K\d+$/;
+
+// 模板历史兼容：旧模板里 KPI 存的是显示名（落库改编号前），新链路按编号过滤会查空。
+// 载入时把非编号项尝试映射回编号——按显示名在指标库找唯一 KPI 项则换成其编号；
+// counter（点分名 = metric_path）与查不到的项原样保留；同名无法唯一映射的项记入 ambiguous 提示重选。
+async function resolveTemplateMetricPaths(
+  deviceType: DeviceType,
+  paths: string[],
+): Promise<{ paths: string[]; labels: Record<string, string>; ambiguous: string[] }> {
+  const outPaths: string[] = [];
+  const labels: Record<string, string> = {};
+  const ambiguous: string[] = [];
+  for (const p of paths) {
+    if (KPI_CODE_RE.test(p)) {
+      outPaths.push(p);
+      continue;
+    }
+    let exact: Awaited<ReturnType<typeof indicatorLibraryApi.list>>['items'] = [];
+    try {
+      const { items } = await indicatorLibraryApi.list(deviceType, { keyword: p, pageSize: 50 });
+      exact = items.filter((it) => it.enName === p || it.cnName === p);
+    } catch {
+      // 查询失败时原样保留，不阻断模板载入
+      outPaths.push(p);
+      continue;
+    }
+    const kpiMatches = exact.filter((it) => !it.isCounter);
+    if (kpiMatches.length === 1) {
+      const m = kpiMatches[0];
+      outPaths.push(m.id);
+      labels[m.id] = m.cnName || m.enName || m.id;
+    } else if (kpiMatches.length > 1) {
+      ambiguous.push(p);
+      outPaths.push(p);
+    } else {
+      // counter 或查不到：原样保留（counter 的 metric_path 即点分名）
+      outPaths.push(p);
+      const counter = exact.find((it) => it.isCounter);
+      if (counter) labels[p] = counter.cnName || p;
+    }
+  }
+  return { paths: outPaths, labels, ambiguous };
+}
+
 function presetToRange(preset: TimeRangePreset): { start: string; end: string } | null {
   const now = dayjs();
   switch (preset) {
@@ -133,6 +180,8 @@ export default function KPIQuery() {
   // ── 查询表单状态 ─────────────────────────────────────────────────
   const [payload, setPayload] = useState<QueryTemplatePayload>(DEFAULT_PAYLOAD);
   const [customRange, setCustomRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
+  // 指标选中值（KPI=编号）→ 友好名，供「已选 N 个」摘要展示，避免露出 K 编号。
+  const [metricLabels, setMetricLabels] = useState<Record<string, string>>({});
   const [devicePickerOpen, setDevicePickerOpen] = useState(false);
   const [metricPickerOpen, setMetricPickerOpen] = useState(false);
   // 设备/指标选择器的目标：'main' = 主查询表单；'modal' = 模板编辑 Modal
@@ -241,13 +290,20 @@ export default function KPIQuery() {
     setSubmittedRange(range);
   };
 
-  const handleSelectTemplate = (tpl: QueryTemplate) => {
+  const handleSelectTemplate = async (tpl: QueryTemplate) => {
     setActiveTemplateId(tpl.id);
-    setPayload(tpl.payload);
     if (tpl.payload.timeRangePreset === 'custom' && tpl.payload.absoluteStart && tpl.payload.absoluteEnd) {
       setCustomRange([dayjs(tpl.payload.absoluteStart), dayjs(tpl.payload.absoluteEnd)]);
     } else {
       setCustomRange(null);
+    }
+    // 历史兼容：旧模板里 KPI 可能存的是显示名，映射回编号后再回填表单
+    const dt = (tpl.payload.deviceType ?? 'ENB') as DeviceType;
+    const { paths, labels, ambiguous } = await resolveTemplateMetricPaths(dt, tpl.payload.metricPaths);
+    setMetricLabels((prev) => ({ ...prev, ...labels }));
+    setPayload({ ...tpl.payload, metricPaths: paths });
+    if (ambiguous.length > 0) {
+      message.warning(`模板中以下指标存在同名、无法唯一确定，请在「指标」里重新选择：${ambiguous.join('、')}`);
     }
   };
 
@@ -348,6 +404,15 @@ export default function KPIQuery() {
     }
   };
 
+  // 「已选 N 个」摘要：KPI 用友好名（metricLabels）替代编号显示。
+  const metricSummary = (paths: string[], head: number): string =>
+    paths.length === 0
+      ? ''
+      : `已选 ${paths.length} 个：${paths
+          .slice(0, head)
+          .map((p) => metricLabels[p] ?? p)
+          .join(', ')}${paths.length > head ? ' ...' : ''}`;
+
   // ── 渲染辅助 ─────────────────────────────────────────────────────
   const renderTemplateItem = (tpl: QueryTemplate) => {
     const canEdit = isSuperAdmin || tpl.creatorId === currentUser?.id;
@@ -360,7 +425,7 @@ export default function KPIQuery() {
           background: activeTemplateId === tpl.id ? token.colorBgTextHover : 'transparent',
           borderRadius: 4,
         }}
-        onClick={() => handleSelectTemplate(tpl)}
+        onClick={() => void handleSelectTemplate(tpl)}
         actions={
           canEdit
             ? [
@@ -533,11 +598,7 @@ export default function KPIQuery() {
                 <Space.Compact style={{ width: 360 }}>
                   <Input
                     readOnly
-                    value={
-                      payload.metricPaths.length === 0
-                        ? ''
-                        : `已选 ${payload.metricPaths.length} 个：${payload.metricPaths.slice(0, 2).join(', ')}${payload.metricPaths.length > 2 ? ' ...' : ''}`
-                    }
+                    value={metricSummary(payload.metricPaths, 2)}
                     placeholder="点击右侧按钮选择指标"
                   />
                   <Button onClick={() => { setPickerTarget('main'); setMetricPickerOpen(true); }}>列表选</Button>
@@ -627,7 +688,8 @@ export default function KPIQuery() {
         <MetricPickerModal
           open={metricPickerOpen}
           onClose={() => setMetricPickerOpen(false)}
-          onConfirm={(paths) => {
+          onConfirm={(paths, labels) => {
+            setMetricLabels((prev) => ({ ...prev, ...labels }));
             if (pickerTarget === 'modal') {
               setSaveForm((s) => ({ ...s, payload: { ...s.payload, metricPaths: paths } }));
             } else {
@@ -761,11 +823,7 @@ export default function KPIQuery() {
               <Space.Compact style={{ width: '100%' }}>
                 <Input
                   readOnly
-                  value={
-                    saveForm.payload.metricPaths.length === 0
-                      ? ''
-                      : `已选 ${saveForm.payload.metricPaths.length} 个：${saveForm.payload.metricPaths.slice(0, 3).join(', ')}${saveForm.payload.metricPaths.length > 3 ? ' ...' : ''}`
-                  }
+                  value={metricSummary(saveForm.payload.metricPaths, 3)}
                   placeholder="点击右侧按钮选择指标"
                 />
                 <Button

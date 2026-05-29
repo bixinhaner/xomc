@@ -115,7 +115,10 @@ function MetricPickerField({
   deviceType: DeviceType;
 }) {
   const [open, setOpen] = useState(false);
+  // 选中值（KPI=编号）→ 友好名，供展示用，避免露出 K 编号。
+  const [labels, setLabels] = useState<Record<string, string>>({});
   const arr = csvToArray(value);
+  const display = (p: string) => labels[p] ?? p;
   return (
     <>
       <Space wrap>
@@ -123,9 +126,9 @@ function MetricPickerField({
           选择指标（已选 {arr.length}）
         </Button>
         {arr.length > 0 && (
-          <Tooltip title={<div style={{ whiteSpace: 'pre-wrap' }}>{arr.join('\n')}</div>}>
+          <Tooltip title={<div style={{ whiteSpace: 'pre-wrap' }}>{arr.map(display).join('\n')}</div>}>
             <Tag>
-              {arr.slice(0, 3).join(', ')}
+              {arr.slice(0, 3).map(display).join(', ')}
               {arr.length > 3 ? ` 等 ${arr.length} 个` : ''}
             </Tag>
           </Tooltip>
@@ -134,7 +137,8 @@ function MetricPickerField({
       <MetricPickerModal
         open={open}
         onClose={() => setOpen(false)}
-        onConfirm={(paths) => {
+        onConfirm={(paths, pickedLabels) => {
+          setLabels((prev) => ({ ...prev, ...pickedLabels }));
           onChange?.(arrayToCsv(paths));
           setOpen(false);
         }}

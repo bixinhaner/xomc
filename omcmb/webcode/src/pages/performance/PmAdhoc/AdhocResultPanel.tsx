@@ -39,23 +39,23 @@ function buildSeriesByMetric(rows: AdhocResultRow[], granularity: string): Metri
   const bucketSet = new Set<string>();
   filtered.forEach((r) => bucketSet.add(r.startTime));
   const buckets = Array.from(bucketSet).sort();
-  // 按 metricPath 分组
-  const byMetric = new Map<string, Map<string, number>>();
+  // 按 metricPath 分组；系列名用友好名（displayName，KPI 不露 K 编号），回退 metricPath。
+  const byMetric = new Map<string, { name: string; points: Map<string, number> }>();
   filtered.forEach((r) => {
     let m = byMetric.get(r.metricPath);
     if (!m) {
-      m = new Map();
+      m = { name: r.displayName || r.metricPath, points: new Map() };
       byMetric.set(r.metricPath, m);
     }
-    m.set(r.startTime, r.metricValue);
+    m.points.set(r.startTime, r.metricValue);
   });
   const out: MetricSeries[] = [];
-  byMetric.forEach((m, name) => {
+  byMetric.forEach((m) => {
     const values: Array<number | '-'> = buckets.map((b) => {
-      const v = m.get(b);
+      const v = m.points.get(b);
       return v === undefined ? '-' : v;
     });
-    out.push({ name, buckets, values });
+    out.push({ name: m.name, buckets, values });
   });
   return out;
 }
@@ -92,7 +92,7 @@ function buildAdhocColumns(taskDeviceSns: string[]): AdhocCol[] {
           deviceText(r)
         ),
     },
-    { header: '指标', toText: (r) => r.metricPath },
+    { header: '指标', toText: (r) => r.displayName || r.metricPath },
     { header: '值', width: 120, toText: (r) => r.metricValue },
     {
       header: '开始时间',

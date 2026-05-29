@@ -54,6 +54,8 @@ export interface AdhocResultRow {
   deviceOui: string;
   deviceSn: string;
   metricPath: string;
+  // KPI 行 metricPath 是 K 编号；displayName 为后端回填的友好名（PLMN 级带标记）。counter 行 = metricPath。
+  displayName?: string;
   metricType: string;
   metricValue: number;
   statisType?: string;
@@ -102,6 +104,7 @@ export interface BackendAdhocResultRow {
   device_oui: string;
   device_sn: string;
   metric_path: string;
+  display_name?: string;
   metric_type: string;
   metric_value: number;
   statis_type?: string;
@@ -138,6 +141,7 @@ export function mapBackendAdhocResult(b: BackendAdhocResultRow): AdhocResultRow 
     deviceOui: b.device_oui,
     deviceSn: b.device_sn,
     metricPath: b.metric_path,
+    displayName: b.display_name || undefined,
     metricType: b.metric_type,
     metricValue: b.metric_value,
     statisType: b.statis_type,

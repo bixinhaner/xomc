@@ -249,6 +249,9 @@ export interface BackendAggregatedRow {
   // device 维度查询时是全零 UUID；分组维度才有实际值。前端在 mapper 里把全零规整成 undefined。
   device_group_id?: string;
   metric_path: string;
+  // KPI 行 metric_path 是 K 编号；display_name 为后端按编号回填的友好名（PLMN 级带「（PLMN级）」标记）。
+  // counter 行 display_name = metric_path（本身可读）。
+  display_name?: string;
   metric_type: string;
   metric_value: number;
   statis_type?: string;
@@ -269,6 +272,8 @@ export interface AggregatedRow {
   deviceSn?: string;
   deviceGroupId?: string;
   metricPath: string;
+  // KPI 行 metricPath 是 K 编号；displayName 为后端回填的友好名（展示层用 displayName，不露编号）。
+  displayName?: string;
   metricType: 'counter' | 'kpi';
   // null 表示该 (时间桶 × 指标) 占位（fill_empty 补行 / 兼容旧缺采渲染）。
   metricValue: number | null;
@@ -291,6 +296,7 @@ export function mapBackendAggregatedRow(b: BackendAggregatedRow): AggregatedRow 
     deviceSn: b.device_sn || undefined,
     deviceGroupId: !b.device_group_id || b.device_group_id === ZERO_UUID ? undefined : b.device_group_id,
     metricPath: b.metric_path,
+    displayName: b.display_name || undefined,
     metricType: (b.metric_type as 'counter' | 'kpi') ?? 'counter',
     // filled=true 是 fill_empty 占位行，后端 metric_value 字段无意义，前端统一显示 "-"。
     metricValue: b.filled ? null : b.metric_value,

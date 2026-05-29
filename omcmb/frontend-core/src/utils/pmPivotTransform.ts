@@ -16,8 +16,8 @@
 import type { AggregatedRow } from '../types/pmDashboard';
 
 export interface PivotColumn {
-  key: string;        // = metricPath
-  title: string;      // = metricPath
+  key: string;        // = metricPath（稳定标识：KPI 为 K 编号，counter 为点分名）；用于单元格取值 + 列宽持久化
+  title: string;      // = displayName 友好名（KPI 友好名 / PLMN 级带标记），回退 metricPath
 }
 
 export interface PivotRow {
@@ -88,8 +88,12 @@ export function pivotLongToWide(rows: AggregatedRow[]): PivotResult {
     if (!columnMap.has(r.metricPath)) {
       columnMap.set(r.metricPath, {
         key: r.metricPath,
-        title: r.metricPath,
+        title: r.displayName || r.metricPath,
       });
+    } else if (r.displayName) {
+      // 占位行可能无 displayName 先建了列；真实行带 displayName 时补上友好名
+      const col = columnMap.get(r.metricPath)!;
+      if (col.title === col.key) col.title = r.displayName;
     }
   });
   const columns = Array.from(columnMap.values()).sort((a, b) => a.key.localeCompare(b.key));
