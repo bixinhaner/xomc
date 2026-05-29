@@ -287,13 +287,16 @@ func (fx *mmlFixture) insertParamMapping(paramModelID uuid.UUID, standardPath st
 	// 同时建 standard_params 行（如果还没有），与 EXISTS subquery 的 JOIN 对齐。
 	_ = fx.getOrInsertStandardParam(standardPath)
 	id := uuid.New()
+	// 2026-05-29 migration 000219:唯一约束改 (param_model_id, private_path),
+	// ON CONFLICT 同步切到新键(本 fixture 里 standard_path 与 private_path 同值,
+	// 行为不变)。
 	_, err := fx.pool.Exec(context.Background(), `
 INSERT INTO param_mappings
     (id, param_model_id, standard_path, private_path,
      entry_type, is_active, is_supported)
 VALUES
     ($1, $2, $3, $4, 'parameter', $5, $6)
-ON CONFLICT (param_model_id, standard_path) DO UPDATE
+ON CONFLICT (param_model_id, private_path) DO UPDATE
    SET is_active = EXCLUDED.is_active,
        is_supported = EXCLUDED.is_supported`,
 		id, paramModelID, standardPath, standardPath, isActive, isSupported)

@@ -217,16 +217,28 @@ func (l *Loader) loadParamModelFile(ctx context.Context, path string) (int, erro
 		return 0, fmt.Errorf("clear param_mappings for %q: %w", doc.ParamModel, err)
 	}
 
+	// 2026-05-29 防御:同 XML 文件内 private_path 重复(撞新约束
+	// uniq_param_mappings_model_private,见 migration 000219)。批量 INSERT 任意
+	// 一条撞约束整批回滚 → paramModel reload 失败 → dictload module init failed
+	// → app 拒启动。
+	// 注:standard_path 允许多 private_path 别名(BM.xml 的 X_COM_EUTRAULEarfcn →
+	// EUTRACarrierARFCN 就是有意为之,Translator 接受 last-wins);约束改 private_path
+	// 后,业务上"私有路径在 paramModel 内必须唯一"也是真要求。
+	// 策略:first-seen 胜出 + WARN 日志,跨 objects/params 两批次共享去重集。
+	dedupSet := make(map[string]struct{}, len(doc.Objects)+len(doc.Params))
+	dedupObjects := dedupByPrivatePath(doc.Objects, dedupSet, path, "object", l.logger)
+	dedupParams := dedupByPrivatePath(doc.Params, dedupSet, path, "parameter", l.logger)
+
 	rows := 0
-	if len(doc.Objects) > 0 {
-		if n, err := batchInsertMappings(ctx, tx, modelID, doc.Objects, "object"); err != nil {
+	if len(dedupObjects) > 0 {
+		if n, err := batchInsertMappings(ctx, tx, modelID, dedupObjects, "object"); err != nil {
 			return 0, err
 		} else {
 			rows += n
 		}
 	}
-	if len(doc.Params) > 0 {
-		if n, err := batchInsertMappings(ctx, tx, modelID, doc.Params, "parameter"); err != nil {
+	if len(dedupParams) > 0 {
+		if n, err := batchInsertMappings(ctx, tx, modelID, dedupParams, "parameter"); err != nil {
 			return 0, err
 		} else {
 			rows += n
@@ -533,6 +545,36 @@ func batchInsertDiscoveredObjects(ctx context.Context, tx pgx.Tx, pending []disc
 		total += tag.RowsAffected()
 	}
 	return total, nil
+}
+
+// dedupByPrivatePath 同 XML 文件内按 private_path(xmlParamEntry.Name)去重
+// (first-seen 胜出),防止 batch INSERT 撞 uniq_param_mappings_model_private
+// 约束(migration 000219)让整批回滚。
+// 注:standard_path 不参与去重 — 允许多个 private 别名映射到同一 standard
+// (BM.xml 的 X_COM_EUTRAULEarfcn → EUTRACarrierARFCN 即此设计)。
+// 同一 private_path 在 objects 与 params 之间也会去重(共享 seen set)。
+// 重复行写 WARN 日志,包含文件路径 / entryType / Name / standardPath,运维可对照修 XML。
+func dedupByPrivatePath(entries []xmlParamEntry, seen map[string]struct{}, path, entryType string, logger *zap.Logger) []xmlParamEntry {
+	out := make([]xmlParamEntry, 0, len(entries))
+	for _, e := range entries {
+		// private_path = e.Name(xml `name` 属性);唯一标识 paramModel 内的物理路径
+		priv := e.Name
+		if priv == "" {
+			// 极端兜底:name 缺失时退到 standardPath,跟 batchInsertMappings 的反向 fallback 同
+			priv = e.StandardPath
+		}
+		if _, dup := seen[priv]; dup {
+			logger.Warn("duplicate privatePath in XML, skipping (first-seen kept)",
+				zap.String("file", path),
+				zap.String("entry_type", entryType),
+				zap.String("private_path", priv),
+				zap.String("skipped_standard_path", e.StandardPath))
+			continue
+		}
+		seen[priv] = struct{}{}
+		out = append(out, e)
+	}
+	return out
 }
 
 // batchInsertMappings 把 entries 批量插入 param_mappings；entryType 固定。
