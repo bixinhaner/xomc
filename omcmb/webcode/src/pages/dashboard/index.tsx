@@ -30,13 +30,12 @@ import {
 import KPICard from '@/components/KPICard';
 import PieChart from '@/components/Charts/PieChart';
 import BarChart from '@/components/Charts/BarChart';
-import LineChart from '@/components/Charts/LineChart';
 import GISMap from '@/components/GISMap';
 import EmptyState from '@/components/common/EmptyState';
 import { MAP_CONFIG } from '@/components/GISMap/constants';
 import type { MapDevice } from '@/components/GISMap';
 import type { DeviceGeo } from '@core/types/map';
-import { useDashboardData, useAlarmTrend, useTopAlarmDevices, useDeviceStatusByType } from '@core/hooks/api/useDashboard';
+import { useDashboardData, useDeviceStatusByType } from '@core/hooks/api/useDashboard';
 import { useAlarmCount, useCurrentAlarms } from '@core/hooks/api/useAlarms';
 import { useMapDevicesGeo } from '@core/hooks/api/useTopology';
 import { useUserStore } from '@core/store/userStore';
@@ -60,6 +59,14 @@ const TECH_DISPLAY_NAME: Record<string, string> = {
   nr: '5G NR',
   gsm: 'GSM',
 };
+
+// Dashboard feature visibility configuration
+// This is a temporary measure to hide certain modules. Set to true to re-enable.
+const DASHBOARD_CONFIG = {
+  showAlarmDistribution: false,  // 告警级别分布 - Alarm severity distribution pie chart
+  showAlarmTrend7d: false,       // 近7天告警趋势 - 7-day alarm trend line chart
+  showTopAlarmDevices: false,    // 高频告警设备 - Top alarm devices bar chart
+} as const;
 
 function formatAlarmTime(value: string | undefined): string {
   if (!value) {
@@ -123,12 +130,6 @@ export default function DashboardPage() {
 
   // 获取当前登录用户信息
   const currentUser = useUserStore((state) => state.currentUser);
-
-  // 获取告警趋势数据
-  const { data: alarmTrendData } = useAlarmTrend(7);
-
-  // 获取TOP10告警设备真实数据
-  const { data: topAlarmDevicesData } = useTopAlarmDevices();
 
   // 获取设备按技术类型分组的状态数据
   const { data: deviceStatusByTypeData } = useDeviceStatusByType();
@@ -234,75 +235,6 @@ export default function DashboardPage() {
     return { isEmpty: false, xData, series };
   }, [deviceStatusByTypeData, t]);
 
-  // 7-day alarm trend - 根据后端返回数据动态生成X轴
-  const { trendXData, alarmTrendSeries } = useMemo(() => {
-    // 没有数据时生成默认7天X轴和全0数据
-    if (!alarmTrendData?.length) {
-      const days: string[] = [];
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        days.push(`${d.getMonth() + 1}/${d.getDate()}`);
-      }
-      const zeroData = new Array(7).fill(0);
-      return {
-        trendXData: days,
-        alarmTrendSeries: [
-          { name: t('alarm.severity.critical'), data: zeroData, color: SEVERITY_COLOR.critical },
-          { name: t('alarm.severity.major'), data: zeroData, color: SEVERITY_COLOR.major },
-          { name: t('alarm.severity.minor'), data: zeroData, color: SEVERITY_COLOR.minor },
-          { name: t('alarm.severity.warning'), data: zeroData, color: SEVERITY_COLOR.warning },
-        ],
-      };
-    }
-
-    // 从后端数据提取日期并转换为 月/日 格式
-    const xData = alarmTrendData.map((d) => {
-      const date = new Date(d.date);
-      return `${date.getMonth() + 1}/${date.getDate()}`;
-    });
-
-    // 提取各级别的趋势数据
-    const critical = alarmTrendData.map((d) => d.critical ?? 0);
-    const major = alarmTrendData.map((d) => d.major ?? 0);
-    const minor = alarmTrendData.map((d) => d.minor ?? 0);
-    const warning = alarmTrendData.map((d) => d.warning ?? 0);
-
-    return {
-      trendXData: xData,
-      alarmTrendSeries: [
-        { name: t('alarm.severity.critical'), data: critical, color: SEVERITY_COLOR.critical },
-        { name: t('alarm.severity.major'), data: major, color: SEVERITY_COLOR.major },
-        { name: t('alarm.severity.minor'), data: minor, color: SEVERITY_COLOR.minor },
-        { name: t('alarm.severity.warning'), data: warning, color: SEVERITY_COLOR.warning },
-      ],
-    };
-  }, [alarmTrendData, t]);
-
-  // TOP10 alarm devices horizontal bar chart - 使用真实API数据
-  const top10Devices = useMemo(() => {
-    if (!topAlarmDevicesData?.length) return [];
-    return topAlarmDevicesData.map(d => {
-      const techDisplay = TECH_DISPLAY_NAME[d.technology] || d.technology;
-      const deviceNumber = d.deviceSN?.slice(-4) || "????";
-      return `${techDisplay}-${deviceNumber}`;
-    });
-  }, [topAlarmDevicesData]);
-
-  const top10Series = useMemo(() => {
-    if (!topAlarmDevicesData?.length) {
-      // 无数据时返回空数组
-      return [{ name: t('dashboard.alarmCount'), data: [] }];
-    }
-    return [{
-      name: t('dashboard.alarmCount'),
-      data: topAlarmDevicesData.map(d => ({
-        value: d.alarmCount,
-        name: d.deviceSN
-      })),
-    }];
-  }, [topAlarmDevicesData, t]);
-
   const dashboardRef = useRef<HTMLDivElement>(null);
   useScrollReveal(dashboardRef);
 
@@ -313,22 +245,6 @@ export default function DashboardPage() {
       }
     },
     [navigate]
-  );
-
-  const tooltipFormatter = useCallback(
-    (params: Array<{ dataIndex: number; color: string; seriesName: string; value: number; name: string }>) => {
-      const dataIndex = params[0]?.dataIndex;
-      const device = topAlarmDevicesData?.[dataIndex];
-      if (!device) return params[0]?.name ?? '';
-      return `
-        <div style="color: #8c8c8c; font-size: 12px; margin-bottom: 4px;">${device.deviceSN || '--'}</div>
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: ${params[0]?.color}"></span>
-          <span>${params[0]?.seriesName}: ${params[0]?.value}</span>
-        </div>
-      `;
-    },
-    [topAlarmDevicesData]
   );
 
   return (
@@ -392,9 +308,56 @@ export default function DashboardPage() {
         </Col>
       </Row>
 
-      {/* Row 2: Alarm Summary */}
+      {/* Row 2: Device Status Chart + Device Map */}
       <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="1">
-        <Col xs={24} lg={16} style={{ display: 'flex' }}>
+        <Col xs={24} lg={12} style={{ display: 'flex' }}>
+          <TiltCard maxTilt={7} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+          <Card
+            title={t('dashboard.deviceStatusByType')}
+            size="small"
+            styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
+            style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+          >
+            {deviceStatusData.isEmpty ? (
+              <EmptyState description={t('common.noData')} />
+            ) : (
+              <BarChart
+                title=""
+                xData={deviceStatusData.xData}
+                series={deviceStatusData.series}
+                height={260}
+              />
+            )}
+          </Card>
+          </TiltCard>
+        </Col>
+
+        <Col xs={24} lg={12} style={{ display: 'flex' }}>
+          <TiltCard maxTilt={5} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+          <Card
+            title={t('dashboard.deviceMap')}
+            size="small"
+            styles={{ body: { padding: 8, flex: 1, display: 'flex', flexDirection: 'column' } }}
+            style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+          >
+            <GISMap
+              devices={mapDevices}
+              height={260}
+              defaultCenter={MAP_CONFIG.defaultCenter}
+              defaultZoom={MAP_CONFIG.defaultZoom}
+              tileUrl={MAP_CONFIG.tileUrl}
+              showStats={false}
+              showMetadataTip={false}
+              onDeviceClick={handleDeviceClick}
+            />
+          </Card>
+          </TiltCard>
+        </Col>
+      </Row>
+
+      {/* Row 3: Alarm Summary */}
+      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="2">
+        <Col xs={24} lg={DASHBOARD_CONFIG.showAlarmDistribution ? 16 : 24} style={{ display: 'flex' }}>
           <TiltCard maxTilt={6} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
           <Card
             title={t('dashboard.alarmSummary')}
@@ -487,118 +450,30 @@ export default function DashboardPage() {
           </TiltCard>
         </Col>
 
-        <Col xs={24} lg={8} style={{ display: 'flex' }}>
-          <TiltCard maxTilt={8} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
-          <Card
-            title={t('dashboard.alarmDistribution')}
-            size="small"
-            styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
-            style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
-          >
-            <PieChart
-              title=""
-              data={alarmPieData}
-              height={220}
-              donut
-            />
-          </Card>
-          </TiltCard>
-        </Col>
-      </Row>
-
-      {/* Row 3: Device Status Chart + Alarm Trend */}
-      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="2">
-        <Col xs={24} lg={12} style={{ display: 'flex' }}>
-          <TiltCard maxTilt={7} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
-          <Card
-            title={t('dashboard.deviceStatusByType')}
-            size="small"
-            styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
-            style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
-          >
-            {deviceStatusData.isEmpty ? (
-              <EmptyState description={t('common.noData')} />
-            ) : (
-              <BarChart
+        {/* Alarm Distribution - Conditionally rendered */}
+        {DASHBOARD_CONFIG.showAlarmDistribution && (
+          <Col xs={24} lg={8} style={{ display: 'flex' }}>
+            <TiltCard maxTilt={8} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+            <Card
+              title={t('dashboard.alarmDistribution')}
+              size="small"
+              styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
+              style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+            >
+              <PieChart
                 title=""
-                xData={deviceStatusData.xData}
-                series={deviceStatusData.series}
-                height={260}
+                data={alarmPieData}
+                height={220}
+                donut
               />
-            )}
-          </Card>
-          </TiltCard>
-        </Col>
-        <Col xs={24} lg={12} style={{ display: 'flex' }}>
-          <TiltCard maxTilt={7} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
-          <Card
-            title={t('dashboard.alarmTrend7d')}
-            size="small"
-            styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
-            style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
-          >
-            <LineChart
-              title=""
-              xData={trendXData}
-              series={alarmTrendSeries}
-              height={260}
-              areaFill
-            />
-          </Card>
-          </TiltCard>
-        </Col>
+            </Card>
+            </TiltCard>
+          </Col>
+        )}
       </Row>
 
-      {/* Row 4: TOP10 Devices + GIS Map */}
+      {/* Row 4: User Profile + Quick Access */}
       <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="3">
-        <Col xs={24} lg={10} style={{ display: 'flex' }}>
-          <TiltCard maxTilt={7} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
-          <Card
-            title={t('dashboard.top10AlarmDevices')}
-            size="small"
-            styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
-            style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
-          >
-            {top10Devices.length > 0 ? (
-              <BarChart
-                title=""
-                xData={top10Devices}
-                series={top10Series}
-                height={280}
-                horizontal
-                tooltipFormatter={tooltipFormatter}
-              />
-            ) : (
-              <EmptyState variant="no-data" description="" style={{ flex: 1 }} />
-            )}
-          </Card>
-          </TiltCard>
-        </Col>
-        <Col xs={24} lg={14} style={{ display: 'flex' }}>
-          <TiltCard maxTilt={5} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
-          <Card
-            title={t('dashboard.deviceMap')}
-            size="small"
-            styles={{ body: { padding: 8, flex: 1, display: 'flex', flexDirection: 'column' } }}
-            style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
-          >
-            <GISMap
-              devices={mapDevices}
-              height={280}
-              defaultCenter={MAP_CONFIG.defaultCenter}
-              defaultZoom={MAP_CONFIG.defaultZoom}
-              tileUrl={MAP_CONFIG.tileUrl}
-              showStats={false}
-              showMetadataTip={false}
-              onDeviceClick={handleDeviceClick}
-            />
-          </Card>
-          </TiltCard>
-        </Col>
-      </Row>
-
-      {/* Row 5: User Profile + Quick Access */}
-      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="4">
         <Col xs={24} lg={6} style={{ display: 'flex' }}>
           <TiltCard maxTilt={8} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
           <Card

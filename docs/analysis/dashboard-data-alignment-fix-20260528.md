@@ -1,10 +1,11 @@
-# 仪表板 GIS 地图设备点位显示问题分析与解决方案
+# 仪表板数据对齐与修复方案
 
-> **文档版本**: v1.0
+> **文档版本**: v2.0
 > **创建日期**: 2026-05-28
+> **最后更新**: 2026-05-30
 > **系统名称**: OMC 统一网管系统
-> **模块名称**: 仪表板 (Dashboard) - 设备地图模块
-> **问题类型**: 数据源不一致导致点位不显示
+> **模块名称**: 仪表板 (Dashboard)
+> **问题类型**: 数据源不一致、显示优化
 
 ---
 
@@ -17,6 +18,15 @@
 5. [实施步骤](#5-实施步骤)
 6. [测试验证](#6-测试验证)
 7. [相关文件](#7-相关文件)
+8. [附录](#8-附录)
+9. [仪表板告警模块数据一致性分析](#9-仪表板告警模块数据一致性分析)
+10. [接口分析：GET /api/v1/dashboard/device-status](#10-接口分析get-api-v1dashboarddevice-status)
+11. [TOP10告警设备数据一致性分析](#11-top10告警设备数据一致性分析)
+12. [系统管理员卡片数据分析与修复方案](#12-系统管理员卡片数据分析与修复方案)
+13. [仪表板系统管理员卡片数据来源状态](#13-仪表板系统管理员卡片数据来源状态)
+14. [高频告警设备显示优化方案 V1](#14-高频告警设备显示优化方案-v1)
+15. [字段命名规范与影响分析](#15-字段命名规范与影响分析)
+16. [高频告警设备显示优化方案 V2（简化版）](#16-高频告警设备显示优化方案-v2简化版)
 
 ---
 
@@ -1896,6 +1906,394 @@ WHERE user_id = $1
 | `omcgo/internal/admin/auth_handler.go:243-264` | GET /auth/me 接口 |
 | `omcgo/internal/dashboard/service.go` | 用户统计接口（待新增） |
 | `omcgo/migrations/` | alarm_handled 表迁移（待新增，如选方案 A） |
+
+---
+
+## 14. 高频告警设备显示优化方案
+
+> **更新日期**: 2026-05-30  
+> **状态**: ✅ 已实施  
+> **说明**: 后端返回 device_sn、device_name（完整 SN）、technology；前端使用 formatBaseStationTypeLabel 格式化显示
+
+### 14.1 方案说明
+
+| 维度 | 说明 |
+|------|------|
+| **数据需求** | device_sn + technology |
+| **显示格式** | `eNB (LTE)-0060` |
+| **后端改动** | 1 处（结构体 + 聚合逻辑） |
+| **前端改动** | 2 处（类型 + 格式化函数） |
+
+**显示格式**：`eNB (LTE)-0060`
+
+**组成部分**：
+- `eNB (LTE)`: 从 `technology` 字段映射而来
+- `0060`: 从 `device_sn` 末尾 4 位提取
+
+**示例对照**：
+
+| device_sn | technology | 显示结果 |
+|-----------|-----------|---------|
+| `120288069823C4B0060` | `lte` | `eNB (LTE)-0060` |
+| `1202000534228JB0007` | `lte` | `eNB (LTE)-0007` |
+| `1202000534228JB0007` | `nr` | `gNB (NR)-0007` |
+| `1001000534228ENB0026` | `lte` | `eNB (LTE)-0026` |
+
+### 14.2 后端修改
+
+**文件**: `omcgo/internal/dashboard/service.go`
+
+**FrontendRecentAlarm 结构体**：
+```go
+type FrontendRecentAlarm struct {
+    DeviceSN   string `json:"device_sn"`   // 完整设备 SN
+    Technology string `json:"technology"`  // 技术类型 (lte/nr/gsm)
+    DeviceName string `json:"device_name"` // 完整设备 SN（与 device_sn 相同）
+    AlarmCount int64  `json:"alarm_count"` // 告警数量
+    Severity   string `json:"severity"`    // 严重程度
+}
+```
+
+**聚合逻辑**：
+```go
+deviceAlarms[key] = &FrontendRecentAlarm{
+    DeviceSN:   a.DeviceSN,                    // 完整设备 SN
+    Technology: derefOrEmpty(a.Technology),    // 技术类型
+    DeviceName: a.DeviceSN,                    // 与 device_sn 相同
+    AlarmCount: 1,
+    Severity:   severityToLabel(a.Severity),
+}
+```
+
+### 14.3 前端修改
+
+**文件**: `omcmb/webcode/src/pages/dashboard/index.tsx`
+
+**导入格式化函数**：
+```typescript
+import { formatBaseStationTypeLabel } from '@/pages/alarm/utils/baseStationType';
+```
+
+**格式化设备显示名称**：
+```typescript
+const formatDeviceDisplayName = useCallback((device: { deviceSN: string; technology: string }): string => {
+  const techDisplay = formatBaseStationTypeLabel(device.technology);
+  const deviceNumber = device.deviceSN?.slice(-4) || "????";
+  return `${techDisplay}-${deviceNumber}`;
+}, []);
+```
+
+### 14.4 修改文件清单
+
+| 文件 | 修改类型 | 说明 |
+|------|---------|------|
+| `omcgo/internal/dashboard/service.go` | 修改 | `FrontendRecentAlarm` 结构体 + 聚合逻辑 |
+| `omcmb/webcode/src/pages/dashboard/index.tsx` | 新增 | 导入 `formatBaseStationTypeLabel` + 格式化函数 |
+| `omcmb/webcode/src/pages/alarm/utils/baseStationType.ts` | 修改 | 添加大小写不敏感匹配 |
+
+### 14.5 效果示例
+
+**后端返回**：
+```json
+{
+    "recent_alarms": [
+        {
+            "device_sn": "120288069823C4B0060",
+            "technology": "lte",
+            "device_name": "120288069823C4B0060",
+            "alarm_count": 5,
+            "severity": "critical"
+        }
+    ]
+}
+```
+
+**前端显示**：`eNB (LTE)-0060`
+鼠标hover时：
+显示完整SN：`120288069823C4B0060`
+告警数量：`5
+
+---
+
+## 15. 仪表板告警模块隐藏方案
+
+> **创建日期**: 2026-05-30
+> **状态**: 📋 方案设计阶段
+> **需求**: 隐藏告警级别分布、近7天告警趋势、高频告警设备三个模块
+> **说明**: 本方案为**临时隐藏措施**，保留恢复显示的灵活性。后续需要时可通过修改配置常量重新启用这些模块。
+
+### 15.1 隐藏模块清单
+
+| 模块 | i18n键 | Card位置 | Hook调用 | API接口 |
+|------|-------|---------|---------|---------|
+| 告警级别分布 | `dashboard.alarmDistribution` | 第490-506行 | `useAlarmCount()` (L116) | GET /alarms/statistics |
+| 近7天告警趋势 | `dashboard.alarmTrend7d` | 第532-549行 | `useAlarmTrend(7)` (L128) | GET /dashboard/alarm-trend |
+| 高频告警设备 | `dashboard.top10AlarmDevices` | 第553-576行 | `useTopAlarmDevices()` (L131) | GET /dashboard/summary |
+
+### 15.2 当前代码位置分析
+
+#### 15.2.1 告警级别分布 (Row 2, Col 2)
+
+```typescript
+// omcmb/webcode/src/pages/dashboard/index.tsx:490-506
+<Col xs={24} lg={8} style={{ display: 'flex' }}>
+  <TiltCard maxTilt={8} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+  <Card
+    title={t('dashboard.alarmDistribution')}
+    size="small"
+    styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
+    style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+  >
+    <PieChart
+      title=""
+      data={alarmPieData}
+      height={220}
+      donut
+    />
+  </Card>
+  </TiltCard>
+</Col>
+```
+
+#### 15.2.2 近7天告警趋势 (Row 3, Col 2)
+
+```typescript
+// omcmb/webcode/src/pages/dashboard/index.tsx:532-549
+<Col xs={24} lg={12} style={{ display: 'flex' }}>
+  <TiltCard maxTilt={7} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+  <Card
+    title={t('dashboard.alarmTrend7d')}
+    size="small"
+    styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
+    style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+  >
+    <LineChart
+      title=""
+      xData={trendXData}
+      series={alarmTrendSeries}
+      height={260}
+      areaFill
+    />
+  </Card>
+  </TiltCard>
+</Col>
+```
+
+#### 15.2.3 高频告警设备 (Row 4, Col 1)
+
+```typescript
+// omcmb/webcode/src/pages/dashboard/index.tsx:553-576
+<Col xs={24} lg={10} style={{ display: 'flex' }}>
+  <TiltCard maxTilt={7} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+  <Card
+    title={t('dashboard.top10AlarmDevices')}
+    size="small"
+    styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
+    style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+  >
+    {top10Devices.length > 0 ? (
+      <BarChart
+        title=""
+        xData={top10Devices}
+        series={top10Series}
+        height={280}
+        horizontal
+        tooltipFormatter={tooltipFormatter}
+      />
+    ) : (
+      <EmptyState variant="no-data" description="" style={{ flex: 1 }} />
+    )}
+  </Card>
+  </TiltCard>
+</Col>
+```
+
+### 15.3 隐藏方案（简化版）
+
+#### 设计原则
+
+| 原则 | 说明 |
+|------|------|
+| **不修改Hook签名** | 保持 `useAlarmTrend` 和 `useTopAlarmDevices` 的API不变 |
+| **不禁用API请求** | API请求继续发送，但响应被React Query缓存，开销很小 |
+| **条件渲染UI** | 通过配置常量控制Card组件的显示/隐藏 |
+| **动态布局调整** | 隐藏模块时相邻组件自动扩展填充空间 |
+
+#### 方案实施
+
+**步骤1：添加配置常量**
+
+```typescript
+// webcode/src/pages/dashboard/index.tsx 文件顶部
+const DASHBOARD_CONFIG = {
+  showAlarmDistribution: false,  // 告警级别分布
+  showAlarmTrend7d: false,       // 近7天告警趋势
+  showTopAlarmDevices: false,    // 高频告警设备
+} as const;
+```
+
+**步骤2：Row 2 - 告警汇总 + 告警级别分布**
+
+```typescript
+<Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="1">
+  {/* 告警汇总 - 隐藏告警级别分布时全宽 */}
+  <Col xs={24} lg={DASHBOARD_CONFIG.showAlarmDistribution ? 16 : 24} style={{ display: 'flex' }}>
+    <TiltCard maxTilt={6} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+      {/* ... 告警汇总内容 ... */}
+    </TiltCard>
+  </Col>
+
+  {/* 告警级别分布 - 条件渲染 */}
+  {DASHBOARD_CONFIG.showAlarmDistribution && (
+    <Col xs={24} lg={8} style={{ display: 'flex' }}>
+      <TiltCard maxTilt={8} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+        <Card title={t('dashboard.alarmDistribution')} size="small">
+          <PieChart title="" data={alarmPieData} height={220} donut />
+        </Card>
+      </TiltCard>
+    </Col>
+  )}
+</Row>
+```
+
+**步骤3：Row 3 - 设备状态 + 告警趋势**
+
+```typescript
+<Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="2">
+  {/* 设备状态 - 隐藏告警趋势时全宽 */}
+  <Col xs={24} lg={DASHBOARD_CONFIG.showAlarmTrend7d ? 12 : 24} style={{ display: 'flex' }}>
+    <TiltCard maxTilt={7} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+      <Card title={t('dashboard.deviceStatusByType')} size="small">
+        {/* ... 设备状态图表 ... */}
+      </Card>
+    </TiltCard>
+  </Col>
+
+  {/* 告警趋势 - 条件渲染 */}
+  {DASHBOARD_CONFIG.showAlarmTrend7d && (
+    <Col xs={24} lg={12} style={{ display: 'flex' }}>
+      <TiltCard maxTilt={7} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+        <Card title={t('dashboard.alarmTrend7d')} size="small">
+          <LineChart title="" xData={trendXData} series={alarmTrendSeries} height={260} areaFill />
+        </Card>
+      </TiltCard>
+    </Col>
+  )}
+</Row>
+```
+
+**步骤4：Row 4 - 高频告警设备 + GIS地图**
+
+```typescript
+<Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="3">
+  {/* 高频告警设备 - 条件渲染 */}
+  {DASHBOARD_CONFIG.showTopAlarmDevices && (
+    <Col xs={24} lg={10} style={{ display: 'flex' }}>
+      <TiltCard maxTilt={7} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+        <Card title={t('dashboard.top10AlarmDevices')} size="small">
+          {/* ... 高频告警设备图表 ... */}
+        </Card>
+      </TiltCard>
+    </Col>
+  )}
+
+  {/* GIS地图 - 隐藏高频告警设备时全宽 */}
+  <Col xs={24} lg={DASHBOARD_CONFIG.showTopAlarmDevices ? 14 : 24} style={{ display: 'flex' }}>
+    <TiltCard maxTilt={5} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
+      <Card title={t('dashboard.deviceMap')} size="small">
+        <GISMap devices={mapDevices} height={280} {...mapProps} />
+      </Card>
+    </TiltCard>
+  </Col>
+</Row>
+```
+
+#### 方案优点
+
+| 方面 | 优点 |
+|------|------|
+| Hook签名 | 无需修改，保持向后兼容 |
+| API请求 | 虽然仍然发送，但响应会被React Query缓存，影响很小 |
+| 响应式布局 | 明确处理 xs/lg 断点，确保各屏幕尺寸正确 |
+| 可恢复性 | 修改配置常量即可恢复显示 |
+| 代码复杂度 | 最小化修改，降低出错风险 |
+| 维护成本 | 集中配置，易于管理 |
+
+#### API开销评估
+
+| Hook | 刷新频率 | 数据量 | 开销评估 |
+|------|---------|--------|---------|
+| `useAlarmTrend` | 60秒 | 7天 × 4级别 = 28数据点 | 极小 |
+| `useTopAlarmDevices` | 60秒 | 最多10条设备记录 | 极小 |
+
+**结论**：API请求的开销很小，禁用的收益有限。建议采用简化方案，只隐藏UI不禁用API。
+
+### 15.4 布局调整建议
+
+隐藏模块后需要调整相关行的布局：
+
+| 行 | 原布局 | 隐藏后布局调整 |
+|----|-------|--------------|
+| Row 2 | 告警汇总(16) + 告警级别分布(8) | 告警汇总改为24（全宽）或保持16居中 |
+| Row 3 | 设备状态(12) + 告警趋势(12) | 设备状态改为24（全宽）或保持12居中 |
+| Row 4 | 高频告警设备(10) + GIS地图(14) | GIS地图改为24（全宽） |
+
+```typescript
+// 示例：Row 2 调整
+<Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="1">
+  {/* 告警汇总 */}
+  <Col xs={24} lg={DASHBOARD_CONFIG.showAlarmDistribution ? 16 : 24} style={{ display: 'flex' }}>
+    {/* ... */}
+  </Col>
+
+  {/* 告警级别分布 - 条件渲染 */}
+  {DASHBOARD_CONFIG.showAlarmDistribution && (
+    <Col xs={24} lg={8} style={{ display: 'flex' }}>
+      {/* ... */}
+    </Col>
+  )}
+</Row>
+```
+
+### 15.4 完整修改清单
+
+| 文件 | 修改类型 | 说明 |
+|------|---------|------|
+| `webcode/src/pages/dashboard/index.tsx` | 修改 | 添加配置常量、条件渲染、动态布局调整 |
+
+**无需修改的文件**：
+- `frontend-core/src/hooks/api/useDashboard.ts` - Hook签名保持不变
+- 其他业务层文件 - 无影响
+
+### 15.5 布局效果示意
+
+```
+隐藏前:
+┌────────────────────────────────────────────────────────────────────┐
+│ Row 1: KPI Cards (4列，各6)                                        │
+├────────────────────────────────────────────────────────────────────┤
+│ Row 2: [告警汇总 16][告警级别分布 8]                               │
+├────────────────────────────────────────────────────────────────────┤
+│ Row 3: [设备状态 12][告警趋势 12]                                  │
+├────────────────────────────────────────────────────────────────────┤
+│ Row 4: [高频告警设备 10][GIS地图 14]                               │
+├────────────────────────────────────────────────────────────────────┤
+│ Row 5: [系统管理员 6][快捷入口 18]                                  │
+└────────────────────────────────────────────────────────────────────┘
+
+隐藏后:
+┌────────────────────────────────────────────────────────────────────┐
+│ Row 1: KPI Cards (4列，各6)                                        │
+├────────────────────────────────────────────────────────────────────┤
+│ Row 2: [告警汇总 24] ─── 或保持16居中 ───                          │
+├────────────────────────────────────────────────────────────────────┤
+│ Row 3: [设备状态 24] ─── 或保持12居中 ───                          │
+├────────────────────────────────────────────────────────────────────┤
+│ Row 4: [GIS地图 24]                                                 │
+├────────────────────────────────────────────────────────────────────┤
+│ Row 5: [系统管理员 6][快捷入口 18]                                  │
+└────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 

@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState, useLayoutEffect } from 'react';
 import ReactECharts from 'echarts-for-react';
 import type { EChartsOption } from 'echarts';
+import type { CallbackDataParams } from 'echarts/types/dist/shared';
 import { getBaseOption, getChartPalette } from './chartTheme';
 import { useIsDark } from '@/hooks/useThemeToken';
 import { useAppStore } from '@core/store/appStore';
@@ -24,8 +25,8 @@ export interface BarChartProps {
   barWidth?: number | string;
   /** 圆角大小，默认 6，设为 0 则无圆角 */
   borderRadius?: number;
-  /** 自定义 tooltip formatter，接收 ECharts tooltip params */
-  tooltipFormatter?: (params: any) => string;
+  /** 自定义 tooltip formatter，兼容 ECharts 原生类型 */
+  tooltipFormatter?: (params: CallbackDataParams | CallbackDataParams[]) => string;
 }
 
 const BarChart: React.FC<BarChartProps> = ({
@@ -76,10 +77,20 @@ const BarChart: React.FC<BarChartProps> = ({
     const secondaryText = isDark ? '#8B949E' : '#8c8c8c';
     const titleColor = isDark ? '#E6EDF3' : '#262626';
 
+    // 当 X 轴数据项超过 6 个时，启用自动间隔显示标签，防止重叠
+    const shouldOptimizeLabels = !horizontal && xData.length > 6;
     const categoryAxis = {
       ...(base.xAxis as object),
       type: 'category',
       data: xData,
+      axisLabel: {
+        color: isDark ? '#C9D1D9' : '#595959',
+        fontSize: 12,
+        // 自动间隔显示标签，防止重叠
+        interval: shouldOptimizeLabels ? 'auto' : 0,
+        // 当标签非常多时，可选择旋转标签（可选，当前未启用）
+        // rotate: shouldOptimizeLabels && xData.length > 10 ? 30 : 0,
+      },
     };
 
     const valueAxis = {
