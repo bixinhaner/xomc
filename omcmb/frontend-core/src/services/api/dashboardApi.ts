@@ -30,6 +30,8 @@ interface BackendKPIOverview {
 }
 
 interface BackendRecentAlarm {
+  device_sn: string;
+  technology: string;
   device_name: string;
   alarm_count: number;
   severity: string;
@@ -141,6 +143,8 @@ function mapRecentAlarmsToTopDevices(
   recentAlarms: BackendRecentAlarm[]
 ): DashboardChartData['topAlarmDevices'] {
   return recentAlarms.map((a) => ({
+    deviceSN: a.device_sn,
+    technology: a.technology,
     deviceName: a.device_name,
     alarmCount: a.alarm_count,
     severity: a.severity,

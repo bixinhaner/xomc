@@ -38,7 +38,7 @@ export interface DashboardChartData {
   kpiTimeSeries: Record<string, Array<[string, number]>>;
   alarmTypePie: Array<{ name: string; value: number }>;
   deviceByRegion: Array<{ region: string; total: number; online: number; offline: number }>;
-  topAlarmDevices: Array<{ deviceName: string; alarmCount: number; severity: string }>;
+  topAlarmDevices: Array<{ deviceSN: string; technology: string; deviceName: string; alarmCount: number; severity: string }>;
 }
 
 export const mockDashboardSummary: DashboardSummary = {
@@ -120,11 +120,11 @@ export const mockDashboardChartData: DashboardChartData = {
     { region: '西北', total: 20, online: 13, offline: 7 },
   ],
   topAlarmDevices: [
-    { deviceName: '广州-eNB-0020', alarmCount: 8, severity: 'critical' },
-    { deviceName: '上海-gNB-0010', alarmCount: 6, severity: 'major' },
-    { deviceName: '西安-eNB-0040', alarmCount: 5, severity: 'major' },
-    { deviceName: '深圳-CPE-0020', alarmCount: 4, severity: 'minor' },
-    { deviceName: '武汉-eNB-0080', alarmCount: 3, severity: 'minor' },
+    { deviceSN: '120288069823C4B0020', technology: 'lte', deviceName: '120288069823C4B0020', alarmCount: 8, severity: 'critical' },
+    { deviceSN: '1202000534228GNB0010', technology: 'nr', deviceName: '1202000534228GNB0010', alarmCount: 6, severity: 'major' },
+    { deviceSN: '120288069823C4B0040', technology: 'lte', deviceName: '120288069823C4B0040', alarmCount: 5, severity: 'major' },
+    { deviceSN: '1202000534228E0020', technology: 'lte', deviceName: '1202000534228E0020', alarmCount: 4, severity: 'minor' },
+    { deviceSN: '120288069823C4B0080', technology: 'lte', deviceName: '120288069823C4B0080', alarmCount: 3, severity: 'minor' },
   ],
 };
 

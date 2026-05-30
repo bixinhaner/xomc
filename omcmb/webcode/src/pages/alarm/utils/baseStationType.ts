@@ -21,5 +21,20 @@ export function formatBaseStationTypeLabel(value?: string | null): string {
 		return '-';
 	}
 
-	return BASE_STATION_TYPE_LABELS[value] || value;
+	// Try exact match first
+	if (BASE_STATION_TYPE_LABELS[value]) {
+		return BASE_STATION_TYPE_LABELS[value];
+	}
+
+	// Try case-insensitive match as fallback
+	const lowerKey = value.toLowerCase();
+	const matchedKey = Object.keys(BASE_STATION_TYPE_LABELS).find(
+		key => key.toLowerCase() === lowerKey
+	);
+	if (matchedKey) {
+		return BASE_STATION_TYPE_LABELS[matchedKey];
+	}
+
+	// Return original value if no match found
+	return value;
 }
