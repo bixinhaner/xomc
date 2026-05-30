@@ -43,15 +43,19 @@ const (
 // TaskSubtype 标记 pm_tasks 行属于 G7 adhoc 任务（区别于老 extraction/report 等）。
 const TaskSubtype = "adhoc_aggregation"
 
-// Dimension 标识 adhoc 任务聚合维度（device / aggregate_group）。
+// Dimension 标识 adhoc 任务聚合维度。
 //
 //   - 'device'：每设备一条结果（既有行为，默认值）
 //   - 'aggregate_group'：N 个 SN 临时组聚合成一条（按时间桶 + LDN GROUP BY，不 GROUP BY device_sn）
+//   - 'product'：按设备所属产品 (devices.product_id) 分组（T-0182）
+//   - 'band'：按小区频段分组（T-0182 仅入枚举，聚合实现见 T-0183）
 type Dimension string
 
 const (
 	DimensionDevice         Dimension = "device"
 	DimensionAggregateGroup Dimension = "aggregate_group"
+	DimensionProduct        Dimension = "product"
+	DimensionBand           Dimension = "band"
 )
 
 // Task 是 pm_tasks 表中 task_subtype='adhoc_aggregation' 行的 Go 域模型。
@@ -67,7 +71,10 @@ type Task struct {
 	Granularities []string  // 多粒度多选（如 ['hourly','daily']）
 	WindowStart   time.Time // 单次执行的源数据时窗起
 	WindowEnd     time.Time // 源数据时窗止
-	Dimension     Dimension // 'device' 或 'aggregate_group'，默认 'device'
+	Dimension     Dimension // 维度，默认 'device'
+	Technology    string    // T-0182：任务制式（lte/nr/gsm），空=不限制式；建后不可改
+	IsBuiltin     bool      // T-0182：内置任务标记（T-0184 预置 12 个内置任务）
+	ExpireDays    int       // T-0182：非持续型任务过期天数（默认 60，约束任务定义层）
 	Status        Status
 	Progress      int    // 0-100
 	Creator       string // user_id 字符串或用户名（与 pm_tasks 既有 creator 列对齐）
@@ -92,6 +99,9 @@ type CreateRequest struct {
 	WindowStart   time.Time
 	WindowEnd     time.Time
 	Dimension     Dimension // 默认 device
+	Technology    string    // T-0182：lte/nr/gsm，空=不限
+	IsBuiltin     bool      // T-0182：内置任务标记
+	ExpireDays    int       // T-0182：非持续型过期天数，<=0 时 repository 兜底为 60
 	Creator       string
 }
 
@@ -109,6 +119,9 @@ type ResultRow struct {
 	TaskID      uuid.UUID
 	DeviceOUI   string
 	DeviceSN    string
+	// ProductID 是 product 维度聚合的分组键（T-0182-fix）。
+	// device / aggregate_group 维度为 uuid.Nil（落库 NULL）；product 维度填 devices.product_id。
+	ProductID   uuid.UUID
 	MetricPath  string
 	MetricType  string // 'counter' / 'kpi'
 	MetricValue float64

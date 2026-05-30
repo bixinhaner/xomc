@@ -52,3 +52,38 @@ func Test_SelectTable_UnknownGranularity(t *testing.T) {
 	_, err := SelectTable(metrics.Granularity("xyz"), DimensionDevice)
 	assert.Error(t, err)
 }
+
+// T-0182：product 维度走 device 维度表（同 pm_metrics*，查询层 JOIN devices GROUP BY product_id）。
+func Test_SelectTable_ProductDimension(t *testing.T) {
+	cases := []struct {
+		gran metrics.Granularity
+		want string
+	}{
+		{metrics.Granularity15Min, "pm_metrics"},
+		{metrics.GranularityHourly, "pm_metrics_hourly"},
+		{metrics.GranularityDaily, "pm_metrics_daily"},
+		{metrics.GranularityWeekly, "pm_metrics_weekly"},
+		{metrics.GranularityMonthly, "pm_metrics_monthly"},
+	}
+	for _, c := range cases {
+		t.Run(string(c.gran), func(t *testing.T) {
+			got, err := SelectTable(c.gran, DimensionProduct)
+			require.NoError(t, err)
+			assert.Equal(t, c.want, got)
+		})
+	}
+}
+
+// T-0182：band 维度本任务仅入枚举，聚合实现拆到 T-0183 → SelectTable 必须返 ErrBandNotImplemented。
+func Test_SelectTable_BandNotImplemented(t *testing.T) {
+	for _, g := range []metrics.Granularity{
+		metrics.Granularity15Min, metrics.GranularityHourly, metrics.GranularityDaily,
+		metrics.GranularityWeekly, metrics.GranularityMonthly,
+	} {
+		t.Run(string(g), func(t *testing.T) {
+			got, err := SelectTable(g, DimensionBand)
+			assert.ErrorIs(t, err, ErrBandNotImplemented)
+			assert.Empty(t, got)
+		})
+	}
+}

@@ -6,6 +6,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/omcgo/omcgo/internal/core/appconfig"
 	"github.com/omcgo/omcgo/internal/pm/adhoc"
 	"github.com/omcgo/omcgo/internal/pm/aggregator"
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
@@ -27,6 +28,7 @@ func startPMAdhocPipeline(
 	ctx context.Context,
 	w *workerInfra,
 	kpiRouter *router.Router,
+	cfg *appconfig.WorkerConfig,
 ) {
 	logger := w.Logger.Named("pm-adhoc")
 
@@ -34,7 +36,9 @@ func startPMAdhocPipeline(
 	repo := adhoc.NewPgRepository(w.PgPool)
 	aggr := aggregator.NewWithPool(w.TsPool, kpiRouter, logger)
 	publisher := &adhoc.EventBusPublisher{Bus: w.EventBus}
-	executor := adhoc.NewExecutor(aggr, repo, publisher, logger)
+	// T-0182：存储范围全局开关（全存默认 / 仅存所选）。
+	executor := adhoc.NewExecutor(aggr, repo, publisher, logger).
+		SetStoreAllMetrics(cfg.PM.Storage.StoreAllMetrics)
 
 	// 4 worker goroutine（共享 repo，LockNextPending SKIP LOCKED 保证不重复抢同一行）
 	hostname := buildLockOwner()

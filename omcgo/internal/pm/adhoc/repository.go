@@ -70,7 +70,8 @@ var _ Repository = (*PgRepository)(nil)
 var taskCols = []string{
 	"id", "task_name", "task_subtype", "mode", "cron_expr",
 	"device_sns", "metric_paths", "granularities",
-	"window_start", "window_end", "dimension", "status", "progress",
+	"window_start", "window_end", "dimension", "technology", "is_builtin", "expire_days",
+	"status", "progress",
 	"creator", "created_at", "updated_at",
 }
 
@@ -87,16 +88,22 @@ func (r *PgRepository) Create(ctx context.Context, req CreateRequest) (uuid.UUID
 	if dim == "" {
 		dim = DimensionDevice
 	}
+	expireDays := req.ExpireDays
+	if expireDays <= 0 {
+		expireDays = 60 // 默认 60 天（约束任务定义层，与结果数据 PM 保留期分离）
+	}
 	q, args, err := storage.Psql.Insert("pm_tasks").
 		Columns(
 			"task_name", "task_type", "task_subtype", "mode", "cron_expr",
 			"device_sns", "metric_paths", "granularities",
-			"window_start", "window_end", "dimension", "status", "progress", "creator",
+			"window_start", "window_end", "dimension", "technology", "is_builtin", "expire_days",
+			"status", "progress", "creator",
 		).
 		Values(
 			req.Name, "extraction", TaskSubtype, string(req.Mode), nullableString(req.CronExpr),
 			deviceSNsJSON, req.MetricPaths, req.Granularities,
-			req.WindowStart, req.WindowEnd, string(dim), string(StatusPending), 0, req.Creator,
+			req.WindowStart, req.WindowEnd, string(dim), nullableTech(req.Technology), req.IsBuiltin, expireDays,
+			string(StatusPending), 0, req.Creator,
 		).
 		Suffix("RETURNING id").
 		ToSql()
@@ -264,7 +271,7 @@ func (r *PgRepository) InsertResults(ctx context.Context, rows []ResultRow) erro
 		return nil
 	}
 	ib := storage.Psql.Insert("pm_adhoc_aggregation_results").Columns(
-		"task_id", "device_oui", "device_sn", "metric_path", "metric_type", "metric_value",
+		"task_id", "device_oui", "device_sn", "product_id", "metric_path", "metric_type", "metric_value",
 		"statis_type", "granularity", "time", "start_time", "end_time", "object_ldn", "extra",
 	)
 	for _, row := range rows {
@@ -288,7 +295,7 @@ func (r *PgRepository) InsertResults(ctx context.Context, rows []ResultRow) erro
 			t = row.EndTime
 		}
 		ib = ib.Values(
-			row.TaskID, row.DeviceOUI, row.DeviceSN, row.MetricPath, row.MetricType, row.MetricValue,
+			row.TaskID, row.DeviceOUI, row.DeviceSN, nullableUUID(row.ProductID), row.MetricPath, row.MetricType, row.MetricValue,
 			stype, row.Granularity, t, row.StartTime, row.EndTime, ldn, extra,
 		)
 	}
@@ -315,18 +322,26 @@ func scanTask(row rowScanner) (*Task, error) {
 	var metricPaths, granularities []string
 	var windowStart, windowEnd *time.Time
 	var dimension string
+	var technology *string
+	var isBuiltin bool
+	var expireDays int
 	var status string
 	var creator *string
 
 	err := row.Scan(
 		&t.ID, &t.Name, &subtype, &mode, &cronExpr,
 		&deviceSNsJSON, &metricPaths, &granularities,
-		&windowStart, &windowEnd, &dimension, &status, &t.Progress,
+		&windowStart, &windowEnd, &dimension, &technology, &isBuiltin, &expireDays, &status, &t.Progress,
 		&creator, &t.CreatedAt, &t.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
+	if technology != nil {
+		t.Technology = *technology
+	}
+	t.IsBuiltin = isBuiltin
+	t.ExpireDays = expireDays
 	if mode != nil {
 		t.Mode = Mode(*mode)
 	}
@@ -372,6 +387,23 @@ func nullableString(s *string) any {
 		return nil
 	}
 	return *s
+}
+
+// nullableTech 把空制式串映射为 SQL NULL（technology 列可空，约束 NULL or lte/nr/gsm）。
+func nullableTech(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// nullableUUID 把 uuid.Nil 映射为 SQL NULL（product_id 列可空，T-0182-fix）。
+// device / aggregate_group 维度结果无 product_id，落 NULL；product 维度落真实分组键。
+func nullableUUID(id uuid.UUID) any {
+	if id == uuid.Nil {
+		return nil
+	}
+	return id
 }
 
 // ── ContinuousScheduler 用 SQL 适配器 ────────────────────────────────────

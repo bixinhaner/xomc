@@ -632,6 +632,19 @@ type PMConfig struct {
 	// AutoSetupOnOnline 是否启用 device.online → 自动下发流程。
 	// 关闭时 OnlineSubscriber 不订阅事件（兜底开关，回归 / 排查时可关）。
 	AutoSetupOnOnline bool `mapstructure:"auto_setup_on_online"`
+
+	// Storage 聚合任务结果落库范围配置（T-0182，全局开关，非任务级）。
+	Storage PMStorageConfig `mapstructure:"storage"`
+}
+
+// PMStorageConfig PM 聚合结果落库范围配置（T-0182）。
+type PMStorageConfig struct {
+	// StoreAllMetrics 控制聚合任务结果落库范围：
+	//   - true（默认）：所有指标都落库，便于事后改任务指标集时无需重算
+	//   - false（仅存所选）：只落任务定义的 N 个指标，省存储
+	// 只影响"落哪些指标"，不影响"查看/导出限 N 个"收口规则（设计 §2.4）。
+	// 注意：viper 缺省 bool 零值为 false；worker yaml 显式写 true 保证默认全存。
+	StoreAllMetrics bool `mapstructure:"store_all_metrics"`
 }
 
 // ACSServerConfig 配置 ACS HTTP/HTTPS 服务器监听参数。

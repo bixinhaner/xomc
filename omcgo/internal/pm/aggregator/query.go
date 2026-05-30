@@ -14,13 +14,15 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/metrics"
 )
 
-// Dimension 标识查询维度（device / device_group）。
+// Dimension 标识查询维度（device / device_group / product / band）。
 type Dimension string
 
 const (
 	DimensionDevice         Dimension = "device"
 	DimensionDeviceGroup    Dimension = "device_group"
 	DimensionAggregateGroup Dimension = "aggregate_group" // adhoc 临时组：N 个 SN 现场聚合成一条
+	DimensionProduct        Dimension = "product"         // T-0182：按设备所属产品 (devices.product_id) 现场聚合
+	DimensionBand           Dimension = "band"            // T-0182：仅入枚举，聚合实现见 T-0183
 )
 
 // QueryRequest 是 Aggregator.Query 的输入。
@@ -34,12 +36,16 @@ type QueryRequest struct {
 	DeviceOUIs     []string
 	DeviceSNs      []string
 	DeviceGroupIDs []uuid.UUID
+	ProductIDs     []uuid.UUID // product 维度过滤（空 = 不限产品，按全部 product_id 分组）
 	MetricPaths    []string
 	MetricType     *metrics.MetricType
-	StartTime      time.Time
-	EndTime        time.Time
-	Limit          int
-	Offset         int
+	// Technologies 是制式过滤（lte/nr/gsm，小写对齐 devices.technology）。
+	// 非空时所有维度（device/product 等需 JOIN devices 的路径）只取该制式的设备。
+	Technologies []string
+	StartTime    time.Time
+	EndTime      time.Time
+	Limit        int
+	Offset       int
 }
 
 // Row 是 Aggregator.Query 的输出行。device 维度填 DeviceOUI/DeviceSN/ObjectLDN；
@@ -52,6 +58,7 @@ type Row struct {
 	DeviceOUI     string              `json:"device_oui,omitempty"`
 	DeviceSN      string              `json:"device_sn,omitempty"`
 	DeviceGroupID uuid.UUID           `json:"device_group_id,omitempty"`
+	ProductID     uuid.UUID           `json:"product_id,omitempty"` // product 维度填该产品 id
 	MetricPath    string              `json:"metric_path"`
 	// DisplayName 是给前端展示的友好名：KPI 行按 metric_path(=K 编号)回填指标库 cn_name；
 	// counter 行 = metric_path 本身。前端列头/系列名用它，避免露出 K 编号。
@@ -95,6 +102,11 @@ func (a *Aggregator) Query(ctx context.Context, q QueryRequest) ([]Row, error) {
 		rows, err = a.queryGroupTable(ctx, table, q)
 	case DimensionAggregateGroup:
 		rows, err = a.queryAggregateGroupTable(ctx, table, q)
+	case DimensionProduct:
+		rows, err = a.queryProductTable(ctx, table, q)
+	case DimensionBand:
+		// T-0182 仅入枚举；band 聚合实现拆到 T-0183。
+		return nil, ErrBandNotImplemented
 	default:
 		rows, err = a.queryDeviceTable(ctx, table, q)
 	}
@@ -173,6 +185,10 @@ SELECT id, COALESCE(NULLIF(cn_name, ''), en_name) AS display_name FROM perf_indi
 var ErrPctNotSupportedInAggregateGroup = fmt.Errorf(
 	"aggregate_group 维度暂不支持 KPI 类 (statis_type=pct)，请改用 counter 类指标 (sum/avg/max/min)",
 )
+
+// ErrBandNotImplemented 表示 band 维度聚合尚未实现（拆到 T-0183）。
+// T-0182 只把 band 加进维度枚举与 DB CHECK 约束，不实现聚合逻辑。
+var ErrBandNotImplemented = fmt.Errorf("aggregator: band 维度聚合尚未实现（见 T-0183）")
 
 // queryAggregateGroupTable 现场聚合：从 device 维度表 (pm_metrics / pm_metrics_hourly / 等)
 // 按 metric_path + granularity + time + object_ldn GROUP BY，不 GROUP BY device_sn。
@@ -395,6 +411,130 @@ func (a *Aggregator) queryGroupTable(ctx context.Context, table string, q QueryR
 	return out, rows.Err()
 }
 
+// queryProductTable 现场聚合：从 device 维度表 (pm_metrics / pm_metrics_hourly / 等)
+// JOIN devices 按 d.product_id 分组，把同产品所有设备的 counter 行聚到一起。
+//
+// 照搬 device_group 模式：
+//   - JOIN devices d ON d.oui = m.device_oui AND d.serial_number = m.device_sn
+//   - GROUP BY d.product_id, metric_path, granularity, time, statis_type
+//   - 算子按 statis_type 路由（sum/avg/max/min；pct 不支持，预检查报错）
+//
+// 只聚 counter 行（KPI 跨设备求和无意义，与 device_group 一致）。
+// product_id 为 NULL 的设备（seed 假设备）被 JOIN 自动排除。
+//
+// 制式过滤通过 d.technology IN (...) 在 JOIN 后施加（Technologies 非空时）。
+func (a *Aggregator) queryProductTable(ctx context.Context, table string, q QueryRequest) ([]Row, error) {
+	// 预检查：扫描目标 metric 的 statis_type，若有 pct 立即报错（与 aggregate_group 一致）。
+	if err := a.precheckStatisType(ctx, table, q); err != nil {
+		return nil, err
+	}
+
+	const aggValueExpr = `
+		CASE MIN(m.statis_type)
+			WHEN 'sum' THEN SUM(m.metric_value)
+			WHEN 'avg' THEN AVG(m.metric_value)
+			WHEN 'max' THEN MAX(m.metric_value)
+			WHEN 'min' THEN MIN(m.metric_value)
+			ELSE SUM(m.metric_value)
+		END`
+
+	args := []any{}
+	pos := 1
+	add := func(v any) string {
+		args = append(args, v)
+		p := fmt.Sprintf("$%d", pos)
+		pos++
+		return p
+	}
+
+	where := []string{"d.product_id IS NOT NULL"}
+	if len(q.MetricPaths) > 0 {
+		where = append(where, fmt.Sprintf("m.metric_path = ANY(%s)", add(q.MetricPaths)))
+	}
+	if q.MetricType != nil {
+		where = append(where, fmt.Sprintf("m.metric_type = %s", add(string(*q.MetricType))))
+	}
+	if q.Granularity != "" {
+		where = append(where, fmt.Sprintf("m.granularity = %s", add(string(q.Granularity))))
+	}
+	if !q.StartTime.IsZero() {
+		where = append(where, fmt.Sprintf("m.time >= %s", add(q.StartTime)))
+	}
+	if !q.EndTime.IsZero() {
+		where = append(where, fmt.Sprintf("m.time <= %s", add(q.EndTime)))
+	}
+	if len(q.ProductIDs) > 0 {
+		where = append(where, fmt.Sprintf("d.product_id = ANY(%s)", add(q.ProductIDs)))
+	}
+	if len(q.Technologies) > 0 {
+		where = append(where, fmt.Sprintf("d.technology = ANY(%s)", add(q.Technologies)))
+	}
+
+	whereSQL := ""
+	for i, w := range where {
+		if i == 0 {
+			whereSQL = "WHERE " + w
+		} else {
+			whereSQL += "\n  AND " + w
+		}
+	}
+
+	limitSQL := ""
+	if q.Limit > 0 {
+		limitSQL += fmt.Sprintf("\nLIMIT %s", add(q.Limit))
+	}
+	if q.Offset > 0 {
+		limitSQL += fmt.Sprintf("\nOFFSET %s", add(q.Offset))
+	}
+
+	sqlStr := fmt.Sprintf(`
+SELECT
+    d.product_id,
+    m.metric_path,
+    MIN(m.metric_type) AS metric_type,
+    %s AS metric_value,
+    MIN(m.statis_type) AS statis_type,
+    m.granularity,
+    m.time,
+    MIN(m.start_time) AS start_time,
+    MIN(m.end_time) AS end_time,
+    MAX(m.ingest_time) AS ingest_time
+FROM %s m
+JOIN devices d
+  ON d.oui = m.device_oui AND d.serial_number = m.device_sn
+%s
+GROUP BY d.product_id, m.metric_path, m.granularity, m.time
+ORDER BY m.time DESC%s`,
+		aggValueExpr, table, whereSQL, limitSQL)
+
+	rows, err := a.db.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("aggregator.Query exec %s (product): %w", table, err)
+	}
+	defer rows.Close()
+
+	var out []Row
+	for rows.Next() {
+		var r Row
+		var statis *string
+		var metricType, granularity string
+		if err := rows.Scan(
+			&r.ProductID, &r.MetricPath, &metricType, &r.MetricValue,
+			&statis, &granularity, &r.Time, &r.StartTime, &r.EndTime, &r.IngestTime,
+		); err != nil {
+			return nil, fmt.Errorf("aggregator.Query scan %s (product): %w", table, err)
+		}
+		r.MetricType = metrics.MetricType(metricType)
+		r.Granularity = metrics.Granularity(granularity)
+		if statis != nil {
+			st := metrics.StatisType(*statis)
+			r.StatisType = &st
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // ── 过滤条件 ───────────────────────────────────────────────────────────────
 
 func applyDeviceFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
@@ -442,6 +582,14 @@ func applyCommonFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
 	if !q.EndTime.IsZero() {
 		qb = qb.Where(sq.LtOrEq{"time": q.EndTime})
 	}
+	// 制式过滤：限定到指定制式的设备（device 维度表行没有 technology 列，
+	// 用 (device_oui, device_sn) 子查询 JOIN devices 收口，不改 SELECT 列形态）。
+	if len(q.Technologies) > 0 {
+		qb = qb.Where(
+			"(device_oui, device_sn) IN (SELECT oui, serial_number FROM devices WHERE technology = ANY(?))",
+			q.Technologies,
+		)
+	}
 	return qb
 }
 
@@ -459,12 +607,16 @@ func SelectTable(g metrics.Granularity, dim Dimension) (string, error) {
 	if dim == "" {
 		dim = DimensionDevice
 	}
+	if dim == DimensionBand {
+		// band 维度聚合实现拆到 T-0183，本任务只把它加进枚举/约束。
+		return "", ErrBandNotImplemented
+	}
 	switch g {
 	case metrics.Granularity15Min:
 		if dim == DimensionDeviceGroup {
 			return "", fmt.Errorf("%w: 15min × device_group", ErrUnsupportedQuery)
 		}
-		// device 与 aggregate_group 都走 pm_metrics raw 表
+		// device / aggregate_group / product 都走 pm_metrics raw 表
 		return "pm_metrics", nil
 	case metrics.GranularityHourly:
 		if dim == DimensionDeviceGroup {

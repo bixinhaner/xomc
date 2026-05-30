@@ -68,6 +68,12 @@ pm:
   enable_value: "1"
   periodic_upload_interval: 900
   auto_setup_on_online: true
+  storage:
+    # 聚合任务结果落库范围（T-0182，全局开关，非任务级）：
+    #   true  = 全存（默认）：所有指标都落库，事后改任务指标集无需重算
+    #   false = 仅存所选：只落任务定义的 N 个指标，省存储
+    # 只影响"落哪些指标"，不影响"查看/导出限 N 个"收口规则。
+    store_all_metrics: true
 
 # F05 MR 测量任务的 scheduler / dispatcher / cleaner 已迁到 app 进程（B 方案，2026-05-25），
 # worker 端不再需要 mr 配置段。Collector（mr.file.received → 解析）仍在 worker，

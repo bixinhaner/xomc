@@ -60,8 +60,14 @@ type createRequestDTO struct {
 	Granularities []string  `json:"granularities" binding:"required,min=1"`
 	WindowStart   time.Time `json:"window_start" binding:"required"`
 	WindowEnd     time.Time `json:"window_end" binding:"required"`
-	// 维度：'device' (默认，每设备一条) / 'aggregate_group' (N 个 SN 临时组聚合成一条)
-	Dimension string `json:"dimension" binding:"omitempty,oneof=device aggregate_group"`
+	// 维度：'device' (默认) / 'aggregate_group' (N 个 SN 临时组) / 'product' (按产品) / 'band' (按频段，T-0183)
+	Dimension string `json:"dimension" binding:"omitempty,oneof=device aggregate_group product band"`
+	// 制式：lte/nr/gsm，空=不限；建后不可改（T-0182）
+	Technology string `json:"technology" binding:"omitempty,oneof=lte nr gsm"`
+	// 内置任务标记（T-0182，由内置任务预置流程使用；普通用户建任务忽略）
+	IsBuiltin bool `json:"is_builtin"`
+	// 非持续型过期天数（T-0182，默认 60）
+	ExpireDays int `json:"expire_days" binding:"omitempty,min=1"`
 }
 
 type taskResponseDTO struct {
@@ -75,6 +81,9 @@ type taskResponseDTO struct {
 	WindowStart   time.Time `json:"window_start"`
 	WindowEnd     time.Time `json:"window_end"`
 	Dimension     string    `json:"dimension"`
+	Technology    string    `json:"technology,omitempty"`
+	IsBuiltin     bool      `json:"is_builtin"`
+	ExpireDays    int       `json:"expire_days"`
 	Status        string    `json:"status"`
 	Progress      int       `json:"progress"`
 	Creator       string    `json:"creator"`
@@ -98,6 +107,9 @@ func taskToDTO(t *Task) taskResponseDTO {
 		WindowStart:   t.WindowStart,
 		WindowEnd:     t.WindowEnd,
 		Dimension:     dim,
+		Technology:    t.Technology,
+		IsBuiltin:     t.IsBuiltin,
+		ExpireDays:    t.ExpireDays,
 		Status:        string(t.Status),
 		Progress:      t.Progress,
 		Creator:       t.Creator,
@@ -119,6 +131,18 @@ func (h *Handler) Create(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "window_end must be after window_start")
 		return
 	}
+	// 单粒度（设计 §2.4/§2.6 单选一个；要别的粒度另建任务）。保留数组结构不动 executor 循环。
+	if len(req.Granularities) != 1 {
+		response.Fail(c, http.StatusBadRequest, "granularities must contain exactly one value (single granularity per task)")
+		return
+	}
+	// 制式过滤：建任务拒跨制式 —— 选定制式后，范围内的设备必须全部属于该制式（设计 §2.5）。
+	if req.Technology != "" && len(req.DeviceSNs) > 0 {
+		if err := h.rejectCrossTechnology(c.Request.Context(), req.Technology, req.DeviceSNs); err != nil {
+			response.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	var cronPtr *string
 	if req.CronExpr != "" {
 		cronPtr = &req.CronExpr
@@ -138,6 +162,9 @@ func (h *Handler) Create(c *gin.Context) {
 		WindowStart:   req.WindowStart,
 		WindowEnd:     req.WindowEnd,
 		Dimension:     dim,
+		Technology:    req.Technology,
+		IsBuiltin:     req.IsBuiltin,
+		ExpireDays:    req.ExpireDays,
 		Creator:       creator,
 	})
 	if err != nil {
@@ -145,6 +172,48 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 	response.OKWithStatus(c, http.StatusCreated, gin.H{"id": id.String()})
+}
+
+// rejectCrossTechnology 校验 deviceSNs 全部属于指定制式 tech（lte/nr/gsm）。
+//
+// 任一设备制式不符（或在 devices 表查不到 → 无法确认制式）即返错，实现"建任务拒跨制式"（设计 §2.5）。
+// devices.technology 为小写 lte/nr/gsm。
+func (h *Handler) rejectCrossTechnology(ctx context.Context, tech string, deviceSNs []string) error {
+	const q = `
+SELECT serial_number, technology
+FROM devices
+WHERE serial_number = ANY($1)`
+	rows, err := h.pool.Query(ctx, q, deviceSNs)
+	if err != nil {
+		return fmt.Errorf("verify device technology: %w", err)
+	}
+	defer rows.Close()
+	found := make(map[string]string, len(deviceSNs))
+	for rows.Next() {
+		var sn string
+		var t *string
+		if err := rows.Scan(&sn, &t); err != nil {
+			return fmt.Errorf("verify device technology: %w", err)
+		}
+		if t != nil {
+			found[sn] = *t
+		} else {
+			found[sn] = ""
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("verify device technology: %w", err)
+	}
+	for _, sn := range deviceSNs {
+		dt, ok := found[sn]
+		if !ok {
+			return fmt.Errorf("device %s not found; cannot create %s task with unknown-technology device", sn, tech)
+		}
+		if dt != tech {
+			return fmt.Errorf("device %s is technology %q, mismatch task technology %q (cross-technology not allowed)", sn, dt, tech)
+		}
+	}
+	return nil
 }
 
 // List GET /pm/adhoc/tasks?mode=&status=&limit=&offset=&all=true
@@ -272,7 +341,7 @@ func (h *Handler) Results(c *gin.Context) {
 
 	// 直接 SQL 查 — adhoc results 只读用例，不值得再拆 repo
 	q := `
-SELECT id, task_id, device_oui, device_sn, metric_path, metric_type, metric_value,
+SELECT id, task_id, device_oui, device_sn, product_id, metric_path, metric_type, metric_value,
        statis_type, granularity, time, start_time, end_time, ingest_time, object_ldn, extra
 FROM pm_adhoc_aggregation_results
 WHERE task_id = $1`
@@ -308,6 +377,8 @@ WHERE task_id = $1`
 		TaskID      string    `json:"task_id"`
 		DeviceOUI   string    `json:"device_oui"`
 		DeviceSN    string    `json:"device_sn"`
+		// product 维度结果的分组键（T-0182-fix）；device/aggregate_group 维度为空。
+		ProductID   string    `json:"product_id,omitempty"`
 		MetricPath  string    `json:"metric_path"`
 		// KPI 行 metric_path 是 K 编号；display_name 为按编号回填的友好名（PLMN 级带标记）。counter 行 = metric_path。
 		DisplayName string    `json:"display_name,omitempty"`
@@ -325,9 +396,10 @@ WHERE task_id = $1`
 	for rows.Next() {
 		var dto resultDTO
 		var resultID, taskID uuid.UUID
+		var productID *uuid.UUID // product_id 列可空（仅 product 维度有值）
 		var extraBytes []byte
 		if err := rows.Scan(
-			&resultID, &taskID, &dto.DeviceOUI, &dto.DeviceSN, &dto.MetricPath,
+			&resultID, &taskID, &dto.DeviceOUI, &dto.DeviceSN, &productID, &dto.MetricPath,
 			&dto.MetricType, &dto.MetricValue, &dto.StatisType, &dto.Granularity,
 			&dto.Time, &dto.StartTime, &dto.EndTime, &dto.IngestTime, &dto.ObjectLDN, &extraBytes,
 		); err != nil {
@@ -336,6 +408,9 @@ WHERE task_id = $1`
 		}
 		dto.ID = resultID.String()
 		dto.TaskID = taskID.String()
+		if productID != nil && *productID != uuid.Nil {
+			dto.ProductID = productID.String()
+		}
 		items = append(items, dto)
 	}
 

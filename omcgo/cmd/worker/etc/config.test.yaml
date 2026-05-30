@@ -58,6 +58,9 @@ pm:
   enable_value: "1"
   periodic_upload_interval: 900
   auto_setup_on_online: false
+  storage:
+    # T-0182 聚合结果落库范围：true=全存（默认），false=仅存所选
+    store_all_metrics: true
 
 metrics:
   port: 9092

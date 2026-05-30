@@ -47,14 +47,34 @@ type Executor struct {
 	repo      Repository
 	publisher ProgressPublisher
 	logger    *zap.Logger
+
+	// storeAllMetrics 控制落库范围（T-0182，全局配置 pm.storage.store_all_metrics）：
+	//   - true（默认）：聚合结果全部指标都落库，便于事后改任务指标集时无需重算
+	//   - false（仅存所选）：落库前按 task.MetricPaths 过滤，只存任务定义的 N 个指标
+	// 注意：此开关只影响"落哪些指标"，不影响"查看/导出限 N 个"那条收口规则（设计 §2.4）。
+	storeAllMetrics bool
 }
 
 // NewExecutor 构造 Executor。publisher 可为 nil（不上报进度事件）。
+// storeAllMetrics 默认 true（见字段说明），调用方可用 SetStoreAllMetrics 覆盖。
 func NewExecutor(aggr AggregatorQuerier, repo Repository, publisher ProgressPublisher, logger *zap.Logger) *Executor {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &Executor{aggr: aggr, repo: repo, publisher: publisher, logger: logger.Named("pm.adhoc.executor")}
+	return &Executor{
+		aggr:            aggr,
+		repo:            repo,
+		publisher:       publisher,
+		logger:          logger.Named("pm.adhoc.executor"),
+		storeAllMetrics: true,
+	}
+}
+
+// SetStoreAllMetrics 配置落库范围开关（worker 启动期按 pm.storage.store_all_metrics 注入）。
+// 返回自身便于链式调用。
+func (e *Executor) SetStoreAllMetrics(v bool) *Executor {
+	e.storeAllMetrics = v
+	return e
 }
 
 // ExecuteOneshot 单次执行任务（不切换终态，由 caller 根据 mode 决定 succeeded/scheduled）。
@@ -73,6 +93,10 @@ func (e *Executor) ExecuteOneshot(ctx context.Context, task *Task) (int, error) 
 		rows, err := e.queryAndConvert(ctx, task, g)
 		if err != nil {
 			return totalRows, fmt.Errorf("query %s: %w", g, err)
+		}
+		// 存储范围开关：仅存所选时落库前按 task.MetricPaths 过滤（设计 §2.4）。
+		if !e.storeAllMetrics {
+			rows = filterByMetricPaths(rows, task.MetricPaths)
 		}
 		if len(rows) > 0 {
 			if err := e.repo.InsertResults(ctx, rows); err != nil {
@@ -97,19 +121,29 @@ func (e *Executor) ExecuteOneshot(ctx context.Context, task *Task) (int, error) 
 // device 维度过滤：DeviceSNs。OUI 未在 task 中存储，aggregator 接受空 OUI + 非空 SN
 // 走 `device_sn IN (...)` 路径（参见 aggregator/query.go applyDeviceFilters）。
 func (e *Executor) queryAndConvert(ctx context.Context, task *Task, g metrics.Granularity) ([]ResultRow, error) {
-	// 默认 device 维度（兼容老任务）；aggregate_group 走聚合到组路径。
+	// 默认 device 维度（兼容老任务）；其余维度按 task.Dimension 映射到 aggregator 侧枚举。
 	dim := aggregator.DimensionDevice
-	if task.Dimension == DimensionAggregateGroup {
+	switch task.Dimension {
+	case DimensionAggregateGroup:
 		dim = aggregator.DimensionAggregateGroup
+	case DimensionProduct:
+		dim = aggregator.DimensionProduct
+	case DimensionBand:
+		dim = aggregator.DimensionBand
+	}
+	var techs []string
+	if task.Technology != "" {
+		techs = []string{task.Technology}
 	}
 	req := aggregator.QueryRequest{
-		Granularity: g,
-		Dimension:   dim,
-		DeviceSNs:   task.DeviceSNs,
-		MetricPaths: task.MetricPaths,
-		StartTime:   task.WindowStart,
-		EndTime:     task.WindowEnd,
-		Limit:       100000,
+		Granularity:  g,
+		Dimension:    dim,
+		DeviceSNs:    task.DeviceSNs,
+		MetricPaths:  task.MetricPaths,
+		Technologies: techs,
+		StartTime:    task.WindowStart,
+		EndTime:      task.WindowEnd,
+		Limit:        100000,
 	}
 	rows, err := e.aggr.Query(ctx, req)
 	if err != nil {
@@ -126,6 +160,7 @@ func (e *Executor) queryAndConvert(ctx context.Context, task *Task, g metrics.Gr
 			TaskID:      task.ID,
 			DeviceOUI:   r.DeviceOUI,
 			DeviceSN:    r.DeviceSN,
+			ProductID:   r.ProductID, // T-0182-fix: product 维度分组键透传（device/aggregate_group 维度为 Nil）
 			MetricPath:  r.MetricPath,
 			MetricType:  string(r.MetricType),
 			MetricValue: r.MetricValue,
@@ -139,6 +174,25 @@ func (e *Executor) queryAndConvert(ctx context.Context, task *Task, g metrics.Gr
 		})
 	}
 	return out, nil
+}
+
+// filterByMetricPaths 只保留 metric_path 在 allowed 集合里的结果行（"仅存所选"模式用）。
+// allowed 为空时不过滤（视为不限制）。
+func filterByMetricPaths(rows []ResultRow, allowed []string) []ResultRow {
+	if len(allowed) == 0 {
+		return rows
+	}
+	set := make(map[string]struct{}, len(allowed))
+	for _, p := range allowed {
+		set[p] = struct{}{}
+	}
+	out := rows[:0]
+	for _, r := range rows {
+		if _, ok := set[r.MetricPath]; ok {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 func (e *Executor) publishProgress(ctx context.Context, taskID uuid.UUID, progress int, granularity string, rows int) {
