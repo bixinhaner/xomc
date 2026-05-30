@@ -102,7 +102,7 @@ func (r *PgRepository) Create(ctx context.Context, req CreateRequest) (uuid.UUID
 		Values(
 			req.Name, "extraction", TaskSubtype, string(req.Mode), nullableString(req.CronExpr),
 			deviceSNsJSON, req.MetricPaths, req.Granularities,
-			req.WindowStart, req.WindowEnd, string(dim), nullableTech(req.Technology), req.IsBuiltin, expireDays,
+			nullableTime(req.WindowStart), nullableTime(req.WindowEnd), string(dim), nullableTech(req.Technology), req.IsBuiltin, expireDays,
 			string(StatusPending), 0, req.Creator,
 		).
 		Suffix("RETURNING id").
@@ -398,6 +398,18 @@ func nullableTech(s string) any {
 		return nil
 	}
 	return s
+}
+
+// nullableTime 把零值 time 映射为 SQL NULL（T-0185）。
+//
+// continuous 任务不带固定窗口（handler 已清零 window_start/window_end），存 NULL 让
+// aggregator 不加 time>=/time<= 边界、每次滚动捕获最新数据；若直插零值 time 会落成
+// 0001-01-01（非 NULL），破坏开窗滚动语义。
+func nullableTime(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return t
 }
 
 // nullableUUID 把 uuid.Nil 映射为 SQL NULL（product_id 列可空，T-0182-fix）。

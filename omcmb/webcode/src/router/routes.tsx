@@ -68,6 +68,8 @@ const PmDashboardEditor  = React.lazy(() => import('@/pages/performance/PmDashbo
 const PerformanceLayout  = React.lazy(() => import('@/pages/performance/PmDashboard/PerformanceLayout'));
 // T-0164-P7 G7 自定义聚合任务
 const PmAdhocPage        = React.lazy(() => import('@/pages/performance/PmAdhoc'));
+// T-0185 新建向导整页 5 步
+const PmAdhocWizard      = React.lazy(() => import('@/pages/performance/PmAdhoc/PmAdhocWizard'));
 
 // MML Management
 const MMLConsole         = React.lazy(() => import('@/pages/mml/Console'));
@@ -300,6 +302,8 @@ export const routes: RouteObject[] = [
       { path: 'performance/pm-dashboard/:id',  element: withSuspense(PmDashboardEditor) },
       // T-0164-P7 G7 自定义聚合任务
       { path: 'performance/pm-adhoc',          element: withSuspense(PmAdhocPage) },
+      // T-0185 新建向导整页 5 步
+      { path: 'performance/pm-adhoc/new',      element: withSuspense(PmAdhocWizard) },
 
       // MML Management
       { path: 'mml/console',         element: withSuspense(MMLConsole) },

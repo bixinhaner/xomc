@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -115,4 +116,117 @@ func Test_Handler_Create_DeviceGroupDimension_OK(t *testing.T) {
 	b["dimension"] = "device_group"
 	w := postCreate(t, b)
 	assert.Equal(t, http.StatusCreated, w.Code)
+}
+
+// ── T-0185：device_sns / window 放宽校验 ──────────────────────────────────
+
+// postCreateWithRepo 用注入的 stub repo 跑建任务（用于捕获 CreateRequest 验证派生值）。
+func postCreateWithRepo(t *testing.T, repo Repository, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	r := newTestRouter(repo)
+	jsonBody, err := json.Marshal(body)
+	require.NoError(t, err)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/pm/adhoc/tasks", bytes.NewReader(jsonBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	return w
+}
+
+// 成功路径：非 device 维度（network）+ 空 device_sns → 201（T-0185 放宽：
+// network/product/band/device_group 按制式全量聚合，不必填设备）。
+func Test_Handler_Create_NonDeviceDimension_EmptyDeviceSNs_OK(t *testing.T) {
+	b := baseCreateBody()
+	delete(b, "device_sns")
+	b["granularities"] = []string{"hourly"}
+	b["dimension"] = "network"
+	w := postCreate(t, b)
+	assert.Equal(t, http.StatusCreated, w.Code)
+}
+
+// 失败路径：device 维度（默认）+ 空 device_sns → 400（自选设备维度必须给设备）。
+func Test_Handler_Create_DeviceDimension_EmptyDeviceSNs_Rejected(t *testing.T) {
+	b := baseCreateBody()
+	delete(b, "device_sns")
+	b["granularities"] = []string{"hourly"}
+	// dimension 不填 → 默认 device
+	w := postCreate(t, b)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// 失败路径：aggregate_group 维度 + 空 device_sns → 400（与 device 同，临时组也要设备）。
+func Test_Handler_Create_AggregateGroupDimension_EmptyDeviceSNs_Rejected(t *testing.T) {
+	b := baseCreateBody()
+	delete(b, "device_sns")
+	b["granularities"] = []string{"hourly"}
+	b["dimension"] = "aggregate_group"
+	w := postCreate(t, b)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// 成功路径：continuous + 无 window → 201，且 cron 按粒度派生、window 清零（存 NULL 开窗滚动）。
+func Test_Handler_Create_Continuous_NoWindow_DerivesCron_ClearsWindow(t *testing.T) {
+	var captured CreateRequest
+	repo := &handlerStubRepo{
+		create: func(req CreateRequest) (uuid.UUID, error) {
+			captured = req
+			return uuid.New(), nil
+		},
+	}
+	b := map[string]any{
+		"name": "c", "mode": "continuous",
+		"dimension":    "network",
+		"metric_paths": []string{"M1"},
+		"granularities": []string{"daily"},
+		// 不带 device_sns / window
+	}
+	w := postCreateWithRepo(t, repo, b)
+	assert.Equal(t, http.StatusCreated, w.Code)
+	// continuous 强制清零 window → 存 NULL 开窗
+	assert.True(t, captured.WindowStart.IsZero(), "continuous window_start 应清零")
+	assert.True(t, captured.WindowEnd.IsZero(), "continuous window_end 应清零")
+	// cron 按粒度派生（daily → "10 0 * * *"）
+	require.NotNil(t, captured.CronExpr)
+	assert.Equal(t, cronForGranularity("daily"), *captured.CronExpr)
+}
+
+// 失败路径：oneshot + 无 window → 400（oneshot 必须给有效时间窗）。
+func Test_Handler_Create_Oneshot_NoWindow_Rejected(t *testing.T) {
+	b := map[string]any{
+		"name": "o", "mode": "oneshot",
+		"dimension":     "network",
+		"metric_paths":  []string{"M1"},
+		"granularities": []string{"hourly"},
+		// 不带 window
+	}
+	w := postCreate(t, b)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+// 成功路径：oneshot + 有效 window（end>start）→ 201。
+func Test_Handler_Create_Oneshot_ValidWindow_OK(t *testing.T) {
+	b := map[string]any{
+		"name": "o", "mode": "oneshot",
+		"dimension":     "network",
+		"metric_paths":  []string{"M1"},
+		"granularities": []string{"hourly"},
+		"window_start":  "2026-05-22T10:00:00Z",
+		"window_end":    "2026-05-22T11:00:00Z",
+	}
+	w := postCreate(t, b)
+	assert.Equal(t, http.StatusCreated, w.Code)
+}
+
+// 失败路径：oneshot + window_end <= window_start → 400。
+func Test_Handler_Create_Oneshot_InvalidWindow_Rejected(t *testing.T) {
+	b := map[string]any{
+		"name": "o", "mode": "oneshot",
+		"dimension":     "network",
+		"metric_paths":  []string{"M1"},
+		"granularities": []string{"hourly"},
+		"window_start":  "2026-05-22T11:00:00Z",
+		"window_end":    "2026-05-22T10:00:00Z",
+	}
+	w := postCreate(t, b)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
 }

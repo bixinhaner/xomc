@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button, Card, Drawer, Modal, Space, Table, Tag, Progress, message } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import {
@@ -34,6 +34,7 @@ const statusColor: Record<AdhocStatus, string> = {
 export default function PmAdhocPage() {
   const { data: tasks = [], isLoading } = usePmAdhocList({ refetchInterval: 5000 });
   const cancelMut = useCancelPmAdhoc();
+  const navigate = useNavigate();
 
   const [searchParams, setSearchParams] = useSearchParams();
   const [createOpen, setCreateOpen] = useState(false);
@@ -91,10 +92,7 @@ export default function PmAdhocPage() {
         <Button
           type="primary"
           icon={<PlusOutlined />}
-          onClick={() => {
-            setCreatePreset(undefined);
-            setCreateOpen(true);
-          }}
+          onClick={() => navigate('/performance/pm-adhoc/new')}
         >
           新建任务
         </Button>

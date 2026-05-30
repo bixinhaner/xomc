@@ -32,17 +32,22 @@ export const pmAdhocApi = {
     return mapBackendAdhocTask(data);
   },
   async create(input: CreateAdhocTaskInput): Promise<{ id: string }> {
-    const { data } = await http.post<{ id: string }>('/pm/adhoc/tasks', {
+    // T-0185：window 仅在有值时发（oneshot）；continuous 不带 → 后端开窗滚动聚合。
+    const payload: Record<string, unknown> = {
       name: input.name,
       mode: input.mode,
       cron_expr: input.cronExpr,
       device_sns: input.deviceSns,
       metric_paths: input.metricPaths,
       granularities: input.granularities,
-      window_start: input.windowStart,
-      window_end: input.windowEnd,
       dimension: input.dimension,
-    });
+      technology: input.technology,
+      is_builtin: input.isBuiltin,
+      expire_days: input.expireDays,
+    };
+    if (input.windowStart) payload.window_start = input.windowStart;
+    if (input.windowEnd) payload.window_end = input.windowEnd;
+    const { data } = await http.post<{ id: string }>('/pm/adhoc/tasks', payload);
     return data;
   },
   async cancel(id: string): Promise<void> {
@@ -68,6 +73,9 @@ const mockTasks: AdhocTask[] = [
     windowStart: '2026-05-22T00:00:00Z',
     windowEnd: '2026-05-23T00:00:00Z',
     dimension: 'device',
+    technology: 'lte',
+    isBuiltin: false,
+    expireDays: 60,
     status: 'succeeded',
     progress: 100,
     creator: 'mock-owner',
@@ -95,9 +103,12 @@ export const pmAdhocMock: typeof pmAdhocApi = {
       deviceSns: input.deviceSns,
       metricPaths: input.metricPaths,
       granularities: input.granularities,
-      windowStart: input.windowStart,
-      windowEnd: input.windowEnd,
+      windowStart: input.windowStart ?? '',
+      windowEnd: input.windowEnd ?? '',
       dimension: input.dimension ?? 'device',
+      technology: input.technology,
+      isBuiltin: input.isBuiltin ?? false,
+      expireDays: input.expireDays ?? 60,
       status: 'pending',
       progress: 0,
       creator: 'mock-owner',

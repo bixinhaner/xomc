@@ -5,11 +5,21 @@
 export type AdhocMode = 'oneshot' | 'continuous';
 
 /**
- * 聚合维度：
+ * 聚合维度（T-0185 扩展至 6 维，对齐后端 binding oneof）：
  *   - 'device' 每设备保留一条结果（默认，老任务兼容）
  *   - 'aggregate_group' N 个 SN 临时组聚合成一条（按时间桶 + LDN GROUP BY）
+ *   - 'product' 按产品分组（T-0182，每产品一条线，全量聚合）
+ *   - 'band' 按频段分组（T-0183，自动分组）
+ *   - 'network' 全网汇总一条总线（T-0184）
+ *   - 'device_group' 按设备组分组（T-0184，每组一条线，全量聚合）
  */
-export type AdhocDimension = 'device' | 'aggregate_group';
+export type AdhocDimension =
+  | 'device'
+  | 'aggregate_group'
+  | 'product'
+  | 'band'
+  | 'network'
+  | 'device_group';
 export type AdhocStatus =
   | 'pending'
   | 'running'
@@ -29,6 +39,12 @@ export interface AdhocTask {
   windowStart: string;
   windowEnd: string;
   dimension: AdhocDimension;
+  // 制式 lte/nr/gsm，空=不限（T-0182，建后只读）
+  technology?: string;
+  // 内置任务标记（T-0182，前端列表分内置/自建区用）
+  isBuiltin: boolean;
+  // 非持续型过期天数（T-0182，默认 60）
+  expireDays: number;
   status: AdhocStatus;
   progress: number;
   creator: string;
@@ -43,9 +59,13 @@ export interface CreateAdhocTaskInput {
   deviceSns: string[];
   metricPaths: string[];
   granularities: string[];
-  windowStart: string;
-  windowEnd: string;
+  // T-0185：window 仅 oneshot 必填；continuous 不传 → 后端开窗滚动聚合。
+  windowStart?: string;
+  windowEnd?: string;
   dimension?: AdhocDimension;
+  technology?: string;
+  isBuiltin?: boolean;
+  expireDays?: number;
 }
 
 export interface AdhocResultRow {
@@ -91,6 +111,9 @@ export interface BackendAdhocTask {
   window_start: string;
   window_end: string;
   dimension?: string;
+  technology?: string;
+  is_builtin?: boolean;
+  expire_days?: number;
   status: string;
   progress: number;
   creator: string;
@@ -126,6 +149,9 @@ export function mapBackendAdhocTask(b: BackendAdhocTask): AdhocTask {
     windowStart: b.window_start,
     windowEnd: b.window_end,
     dimension: (b.dimension as AdhocDimension) ?? 'device',
+    technology: b.technology,
+    isBuiltin: b.is_builtin ?? false,
+    expireDays: b.expire_days ?? 60,
     status: b.status as AdhocStatus,
     progress: b.progress,
     creator: b.creator,

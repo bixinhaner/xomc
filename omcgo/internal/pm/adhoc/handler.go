@@ -52,14 +52,17 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 // ── 请求/响应 DTO ─────────────────────────────────────────────────────────
 
 type createRequestDTO struct {
-	Name          string    `json:"name" binding:"required"`
-	Mode          string    `json:"mode" binding:"required,oneof=oneshot continuous"`
-	CronExpr      string    `json:"cron_expr"`
-	DeviceSNs     []string  `json:"device_sns" binding:"required,min=1"`
+	Name     string `json:"name" binding:"required"`
+	Mode     string `json:"mode" binding:"required,oneof=oneshot continuous"`
+	CronExpr string `json:"cron_expr"`
+	// T-0185：device_sns 仅在 device/aggregate_group 维度必填（向导期放宽）；
+	// network/product/band/device_group 维度按制式全量聚合，不限设备，device_sns 可空。
+	DeviceSNs     []string  `json:"device_sns"`
 	MetricPaths   []string  `json:"metric_paths" binding:"required,min=1"`
 	Granularities []string  `json:"granularities" binding:"required,min=1"`
-	WindowStart   time.Time `json:"window_start" binding:"required"`
-	WindowEnd     time.Time `json:"window_end" binding:"required"`
+	// T-0185：window 仅 oneshot 必填；continuous 不填 → 存 NULL 开窗滚动聚合（与内置任务同语义）。
+	WindowStart time.Time `json:"window_start"`
+	WindowEnd   time.Time `json:"window_end"`
 	// 维度：'device' (默认) / 'aggregate_group' (N 个 SN 临时组) / 'product' (按产品) /
 	//       'band' (按频段，T-0183) / 'network' (全网，T-0184) / 'device_group' (设备组，T-0184)
 	Dimension string `json:"dimension" binding:"omitempty,oneof=device aggregate_group product band network device_group"`
@@ -128,14 +131,30 @@ func (h *Handler) Create(c *gin.Context) {
 		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
 		return
 	}
-	if !req.WindowEnd.After(req.WindowStart) {
-		response.Fail(c, http.StatusBadRequest, "window_end must be after window_start")
-		return
-	}
 	// 单粒度（设计 §2.4/§2.6 单选一个；要别的粒度另建任务）。保留数组结构不动 executor 循环。
 	if len(req.Granularities) != 1 {
 		response.Fail(c, http.StatusBadRequest, "granularities must contain exactly one value (single granularity per task)")
 		return
+	}
+	dim := Dimension(req.Dimension)
+	if dim == "" {
+		dim = DimensionDevice
+	}
+	// T-0185：device_sns 仅 device/aggregate_group（自选设备）维度必填；其余维度按制式全量聚合。
+	if (dim == DimensionDevice || dim == DimensionAggregateGroup) && len(req.DeviceSNs) == 0 {
+		response.Fail(c, http.StatusBadRequest, "device_sns is required for device/aggregate_group dimension")
+		return
+	}
+	// T-0185：oneshot 必须给有效时间窗（end > start）；continuous 留空 → NULL 开窗滚动聚合。
+	if Mode(req.Mode) == ModeOneshot {
+		if !req.WindowEnd.After(req.WindowStart) {
+			response.Fail(c, http.StatusBadRequest, "window_end must be after window_start for oneshot task")
+			return
+		}
+	} else {
+		// continuous：忽略传入窗口，强制开窗（与内置任务一致，每次滚动聚合最新可用桶）。
+		req.WindowStart = time.Time{}
+		req.WindowEnd = time.Time{}
 	}
 	// 制式过滤：建任务拒跨制式 —— 选定制式后，范围内的设备必须全部属于该制式（设计 §2.5）。
 	if req.Technology != "" && len(req.DeviceSNs) > 0 {
@@ -144,15 +163,16 @@ func (h *Handler) Create(c *gin.Context) {
 			return
 		}
 	}
+	// T-0185：continuous 任务的 cron 由粒度自动派生（向导不暴露 cron 字段）；显式传 cron 则尊重。
+	cronExpr := req.CronExpr
+	if Mode(req.Mode) == ModeContinuous && cronExpr == "" {
+		cronExpr = cronForGranularity(req.Granularities[0])
+	}
 	var cronPtr *string
-	if req.CronExpr != "" {
-		cronPtr = &req.CronExpr
+	if cronExpr != "" {
+		cronPtr = &cronExpr
 	}
 	creator := extractCreator(c)
-	dim := Dimension(req.Dimension)
-	if dim == "" {
-		dim = DimensionDevice
-	}
 	id, err := h.repo.Create(c.Request.Context(), CreateRequest{
 		Name:          req.Name,
 		Mode:          Mode(req.Mode),
@@ -173,6 +193,27 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 	response.OKWithStatus(c, http.StatusCreated, gin.H{"id": id.String()})
+}
+
+// cronForGranularity 把粒度映射成 continuous 任务的滚动触发 cron（5 字段：m h dom mon dow）。
+//
+// 各档都在桶边界之后留几分钟，等下级数据落齐再聚合（hourly 对齐内置任务的 '5 * * * *'）。
+// 未知粒度兜底按小时滚动。
+func cronForGranularity(g string) string {
+	switch g {
+	case "15min":
+		return "5,20,35,50 * * * *" // 每刻钟过 5 分
+	case "hourly":
+		return "5 * * * *" // 每小时第 5 分
+	case "daily":
+		return "10 0 * * *" // 每天 00:10
+	case "weekly":
+		return "15 0 * * 1" // 每周一 00:15
+	case "monthly":
+		return "20 0 1 * *" // 每月 1 号 00:20
+	default:
+		return "5 * * * *"
+	}
 }
 
 // rejectCrossTechnology 校验 deviceSNs 全部属于指定制式 tech（lte/nr/gsm）。
