@@ -134,10 +134,10 @@ export default function DashboardPage() {
   const currentUser = useUserStore((state) => state.currentUser);
 
   // 获取告警趋势数据（条件渲染时使用）
-  const { data: alarmTrendData } = useAlarmTrend(7);
+  const { data: alarmTrendData } = useAlarmTrend(7, DASHBOARD_CONFIG.showAlarmTrend7d);
 
   // 获取TOP10告警设备数据（条件渲染时使用）
-  const { data: topAlarmDevicesData } = useTopAlarmDevices();
+  const { data: topAlarmDevicesData } = useTopAlarmDevices(DASHBOARD_CONFIG.showTopAlarmDevices);
 
   // 获取设备按技术类型分组的状态数据
   const { data: deviceStatusByTypeData } = useDeviceStatusByType();

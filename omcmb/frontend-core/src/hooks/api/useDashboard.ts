@@ -36,10 +36,11 @@ export function useDashboardChartData() {
   });
 }
 
-export function useAlarmTrend(days = 7) {
+export function useAlarmTrend(days = 7, enabled = true) {
   return useQuery({
     queryKey: ['dashboard', 'alarm-trend', days],
     queryFn: () => api.getAlarmTrend(days),
+    enabled,
     refetchInterval: 60000,
   });
 }
@@ -60,10 +61,11 @@ export function useDeviceStatusByType() {
   });
 }
 
-export function useTopAlarmDevices() {
+export function useTopAlarmDevices(enabled = true) {
   return useQuery({
     queryKey: ['dashboard', 'top-alarm-devices'],
     queryFn: () => api.getTopAlarmDevices(),
+    enabled,
     refetchInterval: 60000,
   });
 }
