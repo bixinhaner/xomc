@@ -27,6 +27,7 @@ import (
 	mrcollector "github.com/omcgo/omcgo/internal/mr/collector"
 	"github.com/omcgo/omcgo/internal/notification"
 	"github.com/omcgo/omcgo/internal/pm"
+	"github.com/omcgo/omcgo/internal/pm/adhoc"
 	"github.com/omcgo/omcgo/internal/pm/collector"
 	"github.com/omcgo/omcgo/internal/pm/counter"
 	"github.com/omcgo/omcgo/internal/pm/indicator"
@@ -471,6 +472,53 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// 遍历所有 source_table != NULL AND status=true 的字典,SyncEngine 拉源表
 	// distinct 行 → upsert/delete auto 项。失败发 dictionary.refresh.failed 事件。
 	startDictSourceDailySync(w, cfg, logger)
+
+	// T-0184: adhoc 过期任务定义清理 cron(每天 03:00)。
+	// 删 mode='oneshot' 且 is_builtin=false 且 created_at < now()-expire_days 天 的任务定义行；
+	// 只删 pm_tasks 行,绝不碰结果表 pm_adhoc_aggregation_results(两层口径分离,设计 §2.3)。
+	startPMAdhocExpireCleanup(w, logger)
+}
+
+// startPMAdhocExpireCleanup 启动 T-0184 adhoc 过期任务定义清理 cron。
+//
+// 行为(对标备份清理 cron):
+//   - 注册 cron(默认 "0 3 * * *");无效表达式 fallback 默认值(此处固定默认,无配置项)
+//   - 启动期延迟 30s 跑一次 catch-up:防 worker 长期宕机后过期任务堆积
+//   - 单实例假设(单 worker 部署),无锁保护;横扩需加 PG advisory lock
+func startPMAdhocExpireCleanup(w *workerInfra, logger *zap.Logger) {
+	cleanup := adhoc.NewExpireCleanup(w.PgPool, logger)
+
+	c := cron.New()
+	if _, err := c.AddFunc(adhoc.DefaultExpireCleanupCron, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if _, runErr := cleanup.Run(ctx); runErr != nil {
+			logger.Warn("adhoc expire cleanup run failed", zap.Error(runErr))
+		}
+	}); err != nil {
+		logger.Warn("invalid adhoc expire cleanup cron; skipping",
+			zap.String("cron", adhoc.DefaultExpireCleanupCron), zap.Error(err))
+		return
+	}
+	c.Start()
+	logger.Info("adhoc expire cleanup cron started",
+		zap.String("cron", adhoc.DefaultExpireCleanupCron))
+
+	// 启动期延迟 catch-up(给 app + 字典加载 30s 缓冲)
+	go func() {
+		time.Sleep(30 * time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		deleted, err := cleanup.Run(ctx)
+		if err != nil {
+			logger.Warn("adhoc expire cleanup startup catch-up failed", zap.Error(err))
+			return
+		}
+		if deleted > 0 {
+			logger.Info("adhoc expire cleanup startup catch-up",
+				zap.Int64("deleted", deleted))
+		}
+	}()
 }
 
 // startParamModelBackupCleanup 启动 T-0178 自定义 XML 备份清理 cron。

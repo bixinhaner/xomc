@@ -23,6 +23,7 @@ const (
 	DimensionAggregateGroup Dimension = "aggregate_group" // adhoc 临时组：N 个 SN 现场聚合成一条
 	DimensionProduct        Dimension = "product"         // T-0182：按设备所属产品 (devices.product_id) 现场聚合
 	DimensionBand           Dimension = "band"            // T-0182：仅入枚举，聚合实现见 T-0183
+	DimensionNetwork        Dimension = "network"         // T-0184：全网，现场汇总成一条总线（仅制式过滤，无实体键）
 )
 
 // QueryRequest 是 Aggregator.Query 的输入。
@@ -106,6 +107,8 @@ func (a *Aggregator) Query(ctx context.Context, q QueryRequest) ([]Row, error) {
 		rows, err = a.queryProductTable(ctx, table, q)
 	case DimensionBand:
 		rows, err = a.queryBandTable(ctx, table, q)
+	case DimensionNetwork:
+		rows, err = a.queryNetworkTable(ctx, table, q)
 	default:
 		rows, err = a.queryDeviceTable(ctx, table, q)
 	}
@@ -189,6 +192,12 @@ var ErrPctNotSupportedInAggregateGroup = fmt.Errorf(
 // 重算，与 aggregate_group / product 维度一致，本阶段不实现）。
 var ErrPctNotSupportedInBand = fmt.Errorf(
 	"band 维度暂不支持 KPI 类 (statis_type=pct)，请改用 counter 类指标 (sum/avg/max/min)",
+)
+
+// ErrPctNotSupportedInNetwork 表示 network（全网）维度不支持 KPI 类指标（statis_type=pct
+// 需公式重算，跨全网求和无意义，与 aggregate_group / product / band 维度一致）。
+var ErrPctNotSupportedInNetwork = fmt.Errorf(
+	"network 维度暂不支持 KPI 类 (statis_type=pct)，请改用 counter 类指标 (sum/avg/max/min)",
 )
 
 // queryAggregateGroupTable 现场聚合：从 device 维度表 (pm_metrics / pm_metrics_hourly / 等)
@@ -537,6 +546,90 @@ ORDER BY m.time DESC%s`,
 	return out, rows.Err()
 }
 
+// queryNetworkTable 现场汇总「全网一条总线」：从 device 维度表 (pm_metrics / pm_metrics_hourly / 等)
+// 只按 metric_path + granularity + time GROUP BY（**不带 object_ldn、不带任何实体键**），
+// 把全网所有设备/小区的同指标同时间桶 counter 行汇总成一条。
+//
+// 与 product 维度的区别：去掉 d.product_id 分组与 JOIN devices（产品键不需要），
+// 分组键只剩 metric_path/granularity/time —— 这是最简单的聚合维度。
+//
+// 制式过滤：device 维度表行无 technology 列，用 (device_oui, device_sn) 子查询 JOIN devices 收口
+// （与 applyCommonFilters 同范式）。Technologies 非空时只汇总该制式设备的行。
+//
+// 只聚 counter 行（KPI 跨全网求和无意义，与 product/band/aggregate_group 一致，pct 预检查报错）。
+// 输出 Row.DeviceSN="AGGREGATED"，DeviceOUI=""，无 ObjectLDN（全网无实体身份）。
+func (a *Aggregator) queryNetworkTable(ctx context.Context, table string, q QueryRequest) ([]Row, error) {
+	// 预检查：扫描目标 metric 的 statis_type，若有 pct 立即报错（与其它聚合维度一致）。
+	if err := a.precheckStatisType(ctx, table, q, ErrPctNotSupportedInNetwork); err != nil {
+		return nil, err
+	}
+
+	// 算子按 statis_type 路由（与 aggregate_group 一致）。
+	const aggValueExpr = `
+		CASE MIN(statis_type)
+			WHEN 'sum' THEN SUM(metric_value)
+			WHEN 'avg' THEN AVG(metric_value)
+			WHEN 'max' THEN MAX(metric_value)
+			WHEN 'min' THEN MIN(metric_value)
+			ELSE SUM(metric_value)
+		END`
+
+	qb := storage.Psql.Select(
+		"metric_path",
+		"MIN(metric_type) AS metric_type",
+		aggValueExpr+" AS metric_value",
+		"MIN(statis_type) AS statis_type",
+		"granularity",
+		"time",
+		"MIN(start_time) AS start_time",
+		"MIN(end_time) AS end_time",
+		"MAX(ingest_time) AS ingest_time",
+	).From(table)
+	// 复用 device 维度公共过滤（含制式子查询收口），但不带任何设备/组实体过滤。
+	qb = applyCommonFilters(qb, q)
+	qb = qb.GroupBy("metric_path", "granularity", "time")
+	qb = qb.OrderBy("time DESC")
+	if q.Limit > 0 {
+		qb = qb.Limit(uint64(q.Limit))
+	}
+	if q.Offset > 0 {
+		qb = qb.Offset(uint64(q.Offset))
+	}
+	sqlStr, args, err := qb.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("aggregator.Query build %s (network): %w", table, err)
+	}
+	rows, err := a.db.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("aggregator.Query exec %s (network): %w", table, err)
+	}
+	defer rows.Close()
+
+	var out []Row
+	for rows.Next() {
+		var r Row
+		var statis *string
+		var metricType, granularity string
+		if err := rows.Scan(
+			&r.MetricPath, &metricType, &r.MetricValue,
+			&statis, &granularity, &r.Time, &r.StartTime, &r.EndTime, &r.IngestTime,
+		); err != nil {
+			return nil, fmt.Errorf("aggregator.Query scan %s (network): %w", table, err)
+		}
+		r.DeviceSN = "AGGREGATED" // 全网无单设备身份
+		r.DeviceOUI = ""
+		r.MetricType = metrics.MetricType(metricType)
+		r.Granularity = metrics.Granularity(granularity)
+		if statis != nil {
+			st := metrics.StatisType(*statis)
+			r.StatisType = &st
+		}
+		// 无 ObjectLDN：全网汇总不带任何实体键。
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // band 维度参数路径后缀（小区频段标识来自设备参数）。
 //
 //   - bandPathSuffixes：FreqBandIndicator(LTE) / FreqBandIndicatorNR(NR)，取值 = band 值
@@ -799,8 +892,9 @@ func SelectTable(g metrics.Granularity, dim Dimension) (string, error) {
 		if dim == DimensionDeviceGroup {
 			return "", fmt.Errorf("%w: 15min × device_group", ErrUnsupportedQuery)
 		}
-		// device / aggregate_group / product / band 都走 pm_metrics raw 表
-		// （band 维度按小区行 JOIN device_parameters，源同 device 维度表）
+		// device / aggregate_group / product / band / network 都走 pm_metrics raw 表
+		// （band 维度按小区行 JOIN device_parameters，源同 device 维度表；
+		//   network 维度全网汇总，同样查 device 维度表再现场 GROUP BY 折叠）
 		return "pm_metrics", nil
 	case metrics.GranularityHourly:
 		if dim == DimensionDeviceGroup {

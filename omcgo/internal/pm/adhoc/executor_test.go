@@ -291,6 +291,84 @@ func Test_Executor_EmptyTechnology_NoTechnologiesPassed(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// T-0184：network 维度路由 + device_group 维度路由（复用 G5 预聚合）
+// ---------------------------------------------------------------------------
+
+// network 维度映射到 aggregator 侧 network 枚举，制式透传，DeviceGroupIDs 留空。
+func Test_Executor_NetworkDimension_RoutesAndPassesTechnology(t *testing.T) {
+	stype := metrics.StatisSum
+	aggr := &stubAggr{
+		rowsByGran: map[metrics.Granularity][]aggregator.Row{
+			metrics.GranularityHourly: {{
+				DeviceSN: "AGGREGATED",
+				MetricPath: "C000060011", MetricType: metrics.MetricTypeCounter,
+				MetricValue: 99999, StatisType: &stype, Granularity: metrics.GranularityHourly,
+				Time: time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+			}},
+		},
+	}
+	repo := &stubRepo{}
+	e := NewExecutor(aggr, repo, nil, nil)
+	task := &Task{
+		ID:            uuid.New(),
+		Granularities: []string{"hourly"},
+		Dimension:     DimensionNetwork,
+		Technology:    "lte",
+		MetricPaths:   []string{"C000060011"},
+		WindowStart:   time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		WindowEnd:     time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+	_, err := e.ExecuteOneshot(context.Background(), task)
+	require.NoError(t, err)
+
+	assert.Equal(t, aggregator.DimensionNetwork, aggr.lastReq.Dimension, "network 维度映射到 aggregator network")
+	assert.Equal(t, []string{"lte"}, aggr.lastReq.Technologies, "制式透传")
+	assert.Empty(t, aggr.lastReq.DeviceGroupIDs, "network 不带 DeviceGroupIDs")
+	// 全网总线落库行无 group 身份键（ObjectLDN 不被改写）
+	require.Len(t, repo.insertedRows, 1)
+	assert.Nil(t, repo.insertedRows[0].ObjectLDN, "network 总线落库行无 object_ldn")
+}
+
+// device_group 维度映射到 aggregator 既有 device_group 枚举（复用 pm_group_metrics_*），
+// DeviceGroupIDs 留空=全部组；hour 粒度可跑；组 id 经 ObjectLDN='DeviceGroup=<uuid>' 承载。
+func Test_Executor_DeviceGroupDimension_ReusesPreaggAndCarriesGroupID(t *testing.T) {
+	gid := uuid.New()
+	stype := metrics.StatisSum
+	aggr := &stubAggr{
+		rowsByGran: map[metrics.Granularity][]aggregator.Row{
+			metrics.GranularityHourly: {{
+				DeviceGroupID: gid, // group 维度产出的分组键
+				MetricPath:    "C000060011", MetricType: metrics.MetricTypeCounter,
+				MetricValue: 500, StatisType: &stype, Granularity: metrics.GranularityHourly,
+				Time: time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+			}},
+		},
+	}
+	repo := &stubRepo{}
+	e := NewExecutor(aggr, repo, nil, nil)
+	task := &Task{
+		ID:            uuid.New(),
+		Granularities: []string{"hourly"},
+		Dimension:     DimensionDeviceGroup,
+		Technology:    "lte",
+		MetricPaths:   []string{"C000060011"},
+		WindowStart:   time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		WindowEnd:     time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+	_, err := e.ExecuteOneshot(context.Background(), task)
+	require.NoError(t, err)
+
+	assert.Equal(t, aggregator.DimensionDeviceGroup, aggr.lastReq.Dimension, "device_group 映射到 aggregator 既有 device_group")
+	assert.Empty(t, aggr.lastReq.DeviceGroupIDs, "DeviceGroupIDs 留空=按全部组分组")
+	assert.Equal(t, []string{"lte"}, aggr.lastReq.Technologies, "制式透传")
+	// 组身份经 ObjectLDN 承载（无独立 device_group_id 列，复用 object_ldn）
+	require.Len(t, repo.insertedRows, 1)
+	require.NotNil(t, repo.insertedRows[0].ObjectLDN)
+	assert.Equal(t, "DeviceGroup="+gid.String(), *repo.insertedRows[0].ObjectLDN, "组 id 编入 object_ldn")
+	assert.Equal(t, float64(500), repo.insertedRows[0].MetricValue)
+}
+
+// ---------------------------------------------------------------------------
 // T-0182：filterByMetricPaths 纯函数（空 allowed 不过滤 / 非空只留匹配）
 // ---------------------------------------------------------------------------
 

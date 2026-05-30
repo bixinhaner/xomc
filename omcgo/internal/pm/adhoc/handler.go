@@ -60,8 +60,9 @@ type createRequestDTO struct {
 	Granularities []string  `json:"granularities" binding:"required,min=1"`
 	WindowStart   time.Time `json:"window_start" binding:"required"`
 	WindowEnd     time.Time `json:"window_end" binding:"required"`
-	// 维度：'device' (默认) / 'aggregate_group' (N 个 SN 临时组) / 'product' (按产品) / 'band' (按频段，T-0183)
-	Dimension string `json:"dimension" binding:"omitempty,oneof=device aggregate_group product band"`
+	// 维度：'device' (默认) / 'aggregate_group' (N 个 SN 临时组) / 'product' (按产品) /
+	//       'band' (按频段，T-0183) / 'network' (全网，T-0184) / 'device_group' (设备组，T-0184)
+	Dimension string `json:"dimension" binding:"omitempty,oneof=device aggregate_group product band network device_group"`
 	// 制式：lte/nr/gsm，空=不限；建后不可改（T-0182）
 	Technology string `json:"technology" binding:"omitempty,oneof=lte nr gsm"`
 	// 内置任务标记（T-0182，由内置任务预置流程使用；普通用户建任务忽略）
@@ -235,9 +236,22 @@ func (h *Handler) List(c *gin.Context) {
 	// - 默认按当前用户过滤（"我的任务"）
 	// - admin 角色传 ?all=true 可看全部
 	// - 显式传 ?creator=xxx 时尊重（向后兼容老 client + 运维筛查特定用户场景）
+	// T-0184：内置任务过滤（前端分"内置区"/"自建区"）。
+	//   ?is_builtin=true  → 只看内置 12 个预置任务（全用户可见，不按 creator 过滤）
+	//   ?is_builtin=false → 只看自建任务（仍按 creator 默认过滤）
+	var builtinOnly bool
+	if v := c.Query("is_builtin"); v != "" {
+		b := v == "true"
+		filter.IsBuiltin = &b
+		builtinOnly = b
+	}
+
 	currentUser := extractCreator(c)
 	all := c.Query("all") == "true"
 	switch {
+	case builtinOnly:
+		// 内置任务无 per-user 归属，全用户共享可见 → 不按 creator 过滤
+		filter.Creator = ""
 	case c.Query("creator") != "":
 		filter.Creator = c.Query("creator")
 	case all && isAdmin(c):

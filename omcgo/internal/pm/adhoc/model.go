@@ -49,6 +49,8 @@ const TaskSubtype = "adhoc_aggregation"
 //   - 'aggregate_group'：N 个 SN 临时组聚合成一条（按时间桶 + LDN GROUP BY，不 GROUP BY device_sn）
 //   - 'product'：按设备所属产品 (devices.product_id) 分组（T-0182）
 //   - 'band'：按小区频段分组（T-0182 仅入枚举，聚合实现见 T-0183）
+//   - 'network'：全网汇总成一条总线（T-0184，仅制式过滤，无实体键）
+//   - 'device_group'：按设备组分组（T-0184，复用 G5 设备组预聚合 pm_group_metrics_*）
 type Dimension string
 
 const (
@@ -56,6 +58,8 @@ const (
 	DimensionAggregateGroup Dimension = "aggregate_group"
 	DimensionProduct        Dimension = "product"
 	DimensionBand           Dimension = "band"
+	DimensionNetwork        Dimension = "network"
+	DimensionDeviceGroup    Dimension = "device_group"
 )
 
 // Task 是 pm_tasks 表中 task_subtype='adhoc_aggregation' 行的 Go 域模型。
@@ -107,11 +111,12 @@ type CreateRequest struct {
 
 // ListFilter 是 Repository.List 的过滤条件。
 type ListFilter struct {
-	Mode    *Mode
-	Status  *Status
-	Creator string
-	Limit   int
-	Offset  int
+	Mode      *Mode
+	Status    *Status
+	Creator   string
+	IsBuiltin *bool // T-0184：内置任务过滤（前端分内置区/自建区）；nil=不过滤
+	Limit     int
+	Offset    int
 }
 
 // ResultRow 是 pm_adhoc_aggregation_results 表的一行（写入用）。

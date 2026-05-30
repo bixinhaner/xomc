@@ -98,3 +98,21 @@ func Test_Handler_Create_ProductDimension_OK(t *testing.T) {
 	w := postCreate(t, b)
 	assert.Equal(t, http.StatusCreated, w.Code)
 }
+
+// 成功路径：dimension=network 合法 → 201（T-0184 全网维度已入 binding oneof）。
+func Test_Handler_Create_NetworkDimension_OK(t *testing.T) {
+	b := baseCreateBody()
+	b["granularities"] = []string{"hourly"}
+	b["dimension"] = "network"
+	w := postCreate(t, b)
+	assert.Equal(t, http.StatusCreated, w.Code)
+}
+
+// 成功路径：dimension=device_group 合法 → 201（T-0184 设备组维度已入 binding oneof）。
+func Test_Handler_Create_DeviceGroupDimension_OK(t *testing.T) {
+	b := baseCreateBody()
+	b["granularities"] = []string{"hourly"}
+	b["dimension"] = "device_group"
+	w := postCreate(t, b)
+	assert.Equal(t, http.StatusCreated, w.Code)
+}

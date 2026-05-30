@@ -130,6 +130,13 @@ func (e *Executor) queryAndConvert(ctx context.Context, task *Task, g metrics.Gr
 		dim = aggregator.DimensionProduct
 	case DimensionBand:
 		dim = aggregator.DimensionBand
+	case DimensionNetwork:
+		// T-0184：全网维度，现场汇总成一条总线（仅制式过滤）。
+		dim = aggregator.DimensionNetwork
+	case DimensionDeviceGroup:
+		// T-0184：设备组维度，复用 G5 设备组预聚合（pm_group_metrics_*，每组一条）。
+		// DeviceGroupIDs 留空 = 按全部组分组；制式过滤照常透传。
+		dim = aggregator.DimensionDeviceGroup
 	}
 	var techs []string
 	if task.Technology != "" {
@@ -156,6 +163,14 @@ func (e *Executor) queryAndConvert(ctx context.Context, task *Task, g metrics.Gr
 			s := string(*r.StatisType)
 			statisStr = &s
 		}
+		ldn := r.ObjectLDN
+		// T-0184：device_group 维度结果以组 id 为身份键。结果表无独立 device_group_id 列，
+		// 复用 object_ldn 承载（形如 'DeviceGroup=<uuid>'，与 band 维度 'Band=<值>' 同范式），
+		// 不新增迁移列。其它维度透传 aggregator 原 ObjectLDN（device/band 等）。
+		if task.Dimension == DimensionDeviceGroup && r.DeviceGroupID != uuid.Nil {
+			s := "DeviceGroup=" + r.DeviceGroupID.String()
+			ldn = &s
+		}
 		out = append(out, ResultRow{
 			TaskID:      task.ID,
 			DeviceOUI:   r.DeviceOUI,
@@ -169,7 +184,7 @@ func (e *Executor) queryAndConvert(ctx context.Context, task *Task, g metrics.Gr
 			Time:        r.Time,
 			StartTime:   r.StartTime,
 			EndTime:     r.EndTime,
-			ObjectLDN:   r.ObjectLDN,
+			ObjectLDN:   ldn,
 			Extra:       r.Extra,
 		})
 	}

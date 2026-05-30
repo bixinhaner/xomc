@@ -150,6 +150,9 @@ func (r *PgRepository) List(ctx context.Context, filter ListFilter) ([]Task, err
 	if filter.Creator != "" {
 		qb = qb.Where(sq.Eq{"creator": filter.Creator})
 	}
+	if filter.IsBuiltin != nil {
+		qb = qb.Where(sq.Eq{"is_builtin": *filter.IsBuiltin})
+	}
 	if filter.Limit > 0 {
 		qb = qb.Limit(uint64(filter.Limit))
 	}
