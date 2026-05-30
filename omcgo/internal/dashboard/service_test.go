@@ -89,94 +89,42 @@ func TestSeverityFromLabel(t *testing.T) {
 	}
 }
 
+// strPtr is a helper function to create a string pointer.
+func strPtr(s string) *string {
+	return &s
+}
+
 // ---------------------------------------------------------------------------
-// coalesceDeviceName
+// derefOrEmpty
 // ---------------------------------------------------------------------------
 
-func TestCoalesceDeviceName(t *testing.T) {
+func TestDerefOrEmpty(t *testing.T) {
 	tests := []struct {
-		name     string
-		inputName *string
-		inputSN   string
-		want     string
+		name string
+		input *string
+		want string
 	}{
 		{
-			name:     "有设备名称时返回设备名称",
-			inputName: strPtr("基站-A区"),
-			inputSN:   "SN123456789012",
-			want:     "基站-A区",
+			name: "非空指针返回值",
+			input: strPtr("test-value"),
+			want: "test-value",
 		},
 		{
-			name:     "设备名称为空字符串时使用SN",
-			inputName: strPtr(""),
-			inputSN:   "SN123456789012",
-			want:     "...56789012",
+			name: "nil指针返回空字符串",
+			input: nil,
+			want: "",
 		},
 		{
-			name:     "设备名称为nil时使用SN",
-			inputName: nil,
-			inputSN:   "SN123456789012",
-			want:     "...56789012",
-		},
-		{
-			name:     "SN长度大于阈值时截断",
-			inputName: nil,
-			inputSN:   "SN12345678901",  // 13 chars
-			want:     "...45678901",
-		},
-		{
-			name:     "SN长度小于阈值时完整返回",
-			inputName: nil,
-			inputSN:   "SN12345678",
-			want:     "SN12345678",
-		},
-		{
-			name:     "SN长度远大于阈值时截断",
-			inputName: nil,
-			inputSN:   "SN12345678901234",
-			want:     "...78901234",
-		},
-		{
-			name:     "SN为空字符串时返回空",
-			inputName: nil,
-			inputSN:   "",
-			want:     "",
-		},
-		{
-			name:     "SN刚好等于阈值长度时不截断",
-			inputName: nil,
-			inputSN:   "123456789012",  // exactly 12 chars
-			want:     "123456789012",
-		},
-		{
-			name:     "SN刚好超过阈值长度一位时截断",
-			inputName: nil,
-			inputSN:   "1234567890123",  // 13 chars
-			want:     "...67890123",
-		},
-		{
-			name:     "中文设备名称",
-			inputName: strPtr("北京基站-001"),
-			inputSN:   "BJ001SN1234567",
-			want:     "北京基站-001",
-		},
-		{
-			name:     "设备名称包含特殊字符",
-			inputName: strPtr("基站-A区_测试"),
-			inputSN:   "SN123456789012",
-			want:     "基站-A区_测试",
+			name: "空字符串指针返回空字符串",
+			input: strPtr(""),
+			want: "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := coalesceDeviceName(tt.inputName, tt.inputSN)
-			assert.Equal(t, tt.want, got, "coalesceDeviceName() mismatch")
+			got := derefOrEmpty(tt.input)
+			assert.Equal(t, tt.want, got)
 		})
 	}
-}
-
-// strPtr is a helper function to create a string pointer.
-func strPtr(s string) *string {
-	return &s
 }

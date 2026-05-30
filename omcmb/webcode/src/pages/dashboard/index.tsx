@@ -315,6 +315,22 @@ export default function DashboardPage() {
     [navigate]
   );
 
+  const tooltipFormatter = useCallback(
+    (params: Array<{ dataIndex: number; color: string; seriesName: string; value: number; name: string }>) => {
+      const dataIndex = params[0]?.dataIndex;
+      const device = topAlarmDevicesData?.[dataIndex];
+      if (!device) return params[0]?.name ?? '';
+      return `
+        <div style="color: #8c8c8c; font-size: 12px; margin-bottom: 4px;">${device.deviceSN || '--'}</div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: ${params[0]?.color}"></span>
+          <span>${params[0]?.seriesName}: ${params[0]?.value}</span>
+        </div>
+      `;
+    },
+    [topAlarmDevicesData]
+  );
+
   return (
     <div ref={dashboardRef} style={{ padding: '0 0 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Row 1: KPI Cards */}
@@ -550,18 +566,7 @@ export default function DashboardPage() {
                 series={top10Series}
                 height={280}
                 horizontal
-                tooltipFormatter={(params) => {
-                  const dataIndex = params[0].dataIndex;
-                  const device = topAlarmDevicesData?.[dataIndex];
-                  if (!device) return params[0].name;
-                  return `
-                    <div style="color: #8c8c8c; font-size: 12px; margin-bottom: 4px;">${device.deviceSN || '--'}</div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                      <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: ${params[0].color};"></span>
-                      <span>${params[0].seriesName}: ${params[0].value}</span>
-                    </div>
-                  `;
-                }}
+                tooltipFormatter={tooltipFormatter}
               />
             ) : (
               <EmptyState variant="no-data" description="" style={{ flex: 1 }} />
