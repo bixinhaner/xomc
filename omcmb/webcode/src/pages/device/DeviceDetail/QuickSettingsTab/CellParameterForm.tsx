@@ -13,7 +13,7 @@ import {
 import type { ParameterSchemaItem, ParameterUpdateRequest } from '@core/types/deviceParameter';
 import type { DeviceTaskStatus } from '@core/types/deviceTask';
 import type { QuickSettingsGroup } from '@core/types/quicksettings';
-import { applyInstanceContext, validateValue, type QuickSettingsInstanceContext } from './validators';
+import { applyInstanceContext, getEffectiveEnumMeta, validateValue, type QuickSettingsInstanceContext } from './validators';
 
 const { Text } = Typography;
 const ERROR_FEEDBACK_DURATION_SECONDS = 2;
@@ -370,9 +370,8 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
                 )}
               </Space>
             );
-            const enumVals = item?.constraints?.enumValues;
-            const enumLabels = item?.constraints?.enumLabels;
-            const isEnum = Array.isArray(enumVals) && enumVals.length > 0;
+            const enumMeta = getEffectiveEnumMeta(item?.constraints, path);
+            const isEnum = Boolean(enumMeta && enumMeta.values.length > 0);
             return (
               <Col span={12} key={p.name}>
                 <Form.Item
@@ -385,9 +384,9 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
                     <Select
                       disabled={!writable}
                       placeholder={item?.defaultValue || ''}
-                      options={enumVals.map((v, idx) => ({
+                      options={enumMeta!.values.map((v, idx) => ({
                         value: v,
-                        label: enumLabels?.[idx] || v,
+                        label: enumMeta!.labels[idx] || v,
                       }))}
                     />
                   ) : (

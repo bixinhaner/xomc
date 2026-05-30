@@ -912,6 +912,7 @@ func (h *ParameterTreeHandler) GetParameterSchema(c *gin.Context) {
 // 这些字段在响应里会留空（向前兼容）。
 func mergeSchemaWithValues(mv *parammodel.MappingValidator, params []model.DeviceParameter, pathPrefix string) []ParameterSchemaItem {
 	items := make([]ParameterSchemaItem, 0, len(params))
+	seen := make(map[string]struct{}, len(params))
 
 	for _, p := range params {
 		if pathPrefix != "" && !strings.HasPrefix(p.ParameterPath, pathPrefix) {
@@ -937,19 +938,101 @@ func mergeSchemaWithValues(mv *parammodel.MappingValidator, params []model.Devic
 		}
 
 		items = append(items, item)
+		seen[item.Path] = struct{}{}
+	}
+
+	if mv == nil || pathPrefix == "" {
+		return items
+	}
+
+	for _, def := range mv.Mappings() {
+		if def.EntryType != "parameter" {
+			continue
+		}
+		privatePath, ok := instantiatePrivatePathForPrefix(def.PrivatePath, pathPrefix)
+		if !ok || !strings.HasPrefix(privatePath, pathPrefix) {
+			continue
+		}
+		if _, exists := seen[privatePath]; exists {
+			continue
+		}
+		items = append(items, ParameterSchemaItem{
+			Path:          privatePath,
+			Type:          def.DataType,
+			Writable:      parammodel.IsAccessWritable(def.Access),
+			ChangeApplies: def.ChangeApplies,
+			Constraints:   constraintsFromMapping(&def),
+		})
+		seen[privatePath] = struct{}{}
 	}
 	return items
 }
 
+func instantiatePrivatePathForPrefix(template, pathPrefix string) (string, bool) {
+	if template == "" {
+		return "", false
+	}
+	numbers := extractNumericSegments(pathPrefix)
+	parts := strings.Split(template, ".")
+	placeholderCount := 0
+	for _, part := range parts {
+		if part == "{i}" {
+			placeholderCount++
+		}
+	}
+	if placeholderCount == 0 {
+		return template, true
+	}
+	if len(numbers) != placeholderCount {
+		return "", false
+	}
+	idx := 0
+	for i, part := range parts {
+		if part == "{i}" {
+			parts[i] = numbers[idx]
+			idx++
+		}
+	}
+	return strings.Join(parts, "."), true
+}
+
+func extractNumericSegments(path string) []string {
+	parts := strings.Split(path, ".")
+	segments := make([]string, 0, 4)
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		if isNumericName(part) {
+			segments = append(segments, part)
+		}
+	}
+	return segments
+}
+
 // buildObjectSchema 从实际参数路径推断多实例对象 + 用 MappingValidator 补 access / writable。
 // MappingValidator 不存 max/min instances；本响应字段设 0，前端做空值处理。
+//
+// Phantom-instance 过滤：某些 CPE 固件会对未真正配置的 cell 槽位也回伪数据，导致 UI 伪实例。
+// 规则：实例下 writable 参数数=0 → phantom（覆盖 NR `CellConfig.{2,3,4}` 仅回 Tx0VswrStatus 等只读计数器）。
+//
+// 单标量 phantom（如 BAIBLQ `FAPService.{3..12}` 仅回 1 个 NumOfCells writable 标量）由前端
+// 结合 `LTE.RAN.CA.PARAMS.NumOfCells` + 各 FAP 的 `FAPControl.LTE.InUse` 在 UI 层精确过滤，
+// 不在此处做启发式 5x 落差判断，避免误伤真实但配置极少的实例。
 func buildObjectSchema(mv *parammodel.MappingValidator, params []model.DeviceParameter, pathPrefix string) []ObjectSchemaItem {
-	objectInstances := make(map[string]map[int]bool)
+	// objectWritableCount[objPrefix][instance] = 该实例下 writable 参数计数（用于全只读 phantom 过滤）
+	objectWritableCount := make(map[string]map[int]int)
 
 	for _, p := range params {
 		if p.LastUpdatedAt.IsZero() {
 			continue
 		}
+		// 判断该叶子是否 writable：mapping access 优先，回退到 DB 标记
+		paramWritable := p.Writable
+		if def := mv.LookupParam(p.ParameterPath); def != nil {
+			paramWritable = parammodel.IsAccessWritable(def.Access)
+		}
+
 		refs := extractInstanceRefs(p.ParameterPath)
 		path := p.ParameterPath
 		for _, ref := range refs {
@@ -957,22 +1040,31 @@ func buildObjectSchema(mv *parammodel.MappingValidator, params []model.DevicePar
 			idx := strings.Index(path, search)
 			if idx >= 0 {
 				objPrefix := path[:idx+len(ref.Segment)+1]
-				if _, ok := objectInstances[objPrefix]; !ok {
-					objectInstances[objPrefix] = make(map[int]bool)
+				if _, ok := objectWritableCount[objPrefix]; !ok {
+					objectWritableCount[objPrefix] = make(map[int]int)
 				}
-				objectInstances[objPrefix][ref.Instance] = true
+				if _, exists := objectWritableCount[objPrefix][ref.Instance]; !exists {
+					objectWritableCount[objPrefix][ref.Instance] = 0
+				}
+				if paramWritable {
+					objectWritableCount[objPrefix][ref.Instance]++
+				}
 			}
 		}
 	}
 
-	items := make([]ObjectSchemaItem, 0, len(objectInstances))
-	for objPrefix, instSet := range objectInstances {
+	items := make([]ObjectSchemaItem, 0, len(objectWritableCount))
+	for objPrefix, instCounts := range objectWritableCount {
 		if pathPrefix != "" && !strings.HasPrefix(objPrefix, pathPrefix) && !strings.HasPrefix(pathPrefix, objPrefix) {
 			continue
 		}
 
-		instances := make([]int, 0, len(instSet))
-		for inst := range instSet {
+		instances := make([]int, 0, len(instCounts))
+		for inst, wcount := range instCounts {
+			// mv==nil（部分单元测试）退化为不过滤；生产路径总有 mv，全只读 phantom 过滤生效。
+			if mv != nil && wcount == 0 {
+				continue
+			}
 			instances = append(instances, inst)
 		}
 		sort.Ints(instances)

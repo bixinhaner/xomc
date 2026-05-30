@@ -706,67 +706,91 @@ func (h *Handler) handleRPCResponse(w http.ResponseWriter, r *http.Request, body
 	h.sessionStore.UpdateByID(r.Context(), sessionID, session)
 
 	// 检查是否为基于任务的 RPC（新任务队列系统）
+	//   优先用 SOAP Header cwmp:ID 反查（spec 标准路径：response.cwmp:ID == request.cwmp:ID）。
+	//   fallback 用 session.LastTaskID：实测 BAIBLQ 等厂商在 AddObjectResponse 中
+	//     回填空 cwmp:ID（违反 TR-069 §3.4.1.5 EchoBack 约束），cwmp_id 反查失败导致
+	//     task 永远停在 sent，前端 waitForTaskTerminal 60s 超时。
+	//     TR-069 一个 session 内 RPC 严格串行，session.LastTaskID 必定就是这次响应所对应的 task。
 	var taskItem *task.Task
 	if cwmpID != "" {
 		var err error
 		taskItem, err = h.taskService.GetTaskByCWMPID(r.Context(), cwmpID)
 		if err != nil {
 			log.Warn("get task by cwmp_id", zap.Error(err), zap.String("cwmp_id", cwmpID))
-		} else if taskItem != nil {
-			// 检查响应中是否有 SOAP Fault
-			if isFault, faultCode, soapFaultCode, faultMsg, badPath := detectSOAPFault(body); isFault {
-				// 把 SOAP 1.1 outer faultcode（如 "Server.Internal"）合进 error message，
-				// 否则丢失诊断信息；DB 落盘的 error_message 也能完整呈现。
-				combinedMsg := faultMsg
-				if soapFaultCode != "" && !strings.Contains(faultMsg, soapFaultCode) {
-					combinedMsg = fmt.Sprintf("[%s] %s", soapFaultCode, faultMsg)
+		}
+	}
+	if taskItem == nil && session.LastTaskID != "" {
+		t, err := h.taskService.GetTask(r.Context(), session.LastTaskID)
+		if err != nil {
+			log.Warn("get task by session.last_task_id (cwmp_id missing/mismatch)",
+				zap.Error(err),
+				zap.String("cpe_cwmp_id", cwmpID),
+				zap.String("acs_cwmp_id", session.LastTaskCWMPID),
+				zap.String("last_task_id", session.LastTaskID))
+		} else if t != nil {
+			taskItem = t
+			log.Warn("RPC response associated via session.last_task_id (CPE returned empty/mismatched cwmp:ID)",
+				zap.String("device_sn", deviceSN),
+				zap.String("method", string(method)),
+				zap.String("cpe_cwmp_id", cwmpID),
+				zap.String("acs_cwmp_id", session.LastTaskCWMPID),
+				zap.String("task_id", t.ID))
+		}
+	}
+	if taskItem != nil {
+		// 检查响应中是否有 SOAP Fault
+		if isFault, faultCode, soapFaultCode, faultMsg, badPath := detectSOAPFault(body); isFault {
+			// 把 SOAP 1.1 outer faultcode（如 "Server.Internal"）合进 error message，
+			// 否则丢失诊断信息；DB 落盘的 error_message 也能完整呈现。
+			combinedMsg := faultMsg
+			if soapFaultCode != "" && !strings.Contains(faultMsg, soapFaultCode) {
+				combinedMsg = fmt.Sprintf("[%s] %s", soapFaultCode, faultMsg)
+			}
+			// 参数同步 GPV 自愈：剔除坏 path 后续查，命中即跳过 MarkTaskFailed
+			if !h.tryRecoverGPVFault(r.Context(), taskItem, badPath, log) {
+				if markErr := h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, faultCode, combinedMsg); markErr != nil {
+					log.Error("mark task failed", zap.Error(markErr), zap.String("task_id", taskItem.ID))
 				}
-				// 参数同步 GPV 自愈：剔除坏 path 后续查，命中即跳过 MarkTaskFailed
-				if !h.tryRecoverGPVFault(r.Context(), taskItem, badPath, log) {
-					if markErr := h.taskService.MarkTaskFailed(r.Context(), taskItem.ID, faultCode, combinedMsg); markErr != nil {
-						log.Error("mark task failed", zap.Error(markErr), zap.String("task_id", taskItem.ID))
-					}
-					log.Warn("task failed with SOAP fault",
-						zap.String("task_id", taskItem.ID),
-						zap.Int("fault_code", faultCode),
-						zap.String("soap_fault_code", soapFaultCode),
-						zap.String("fault_msg", faultMsg))
+				log.Warn("task failed with SOAP fault",
+					zap.String("task_id", taskItem.ID),
+					zap.Int("fault_code", faultCode),
+					zap.String("soap_fault_code", soapFaultCode),
+					zap.String("fault_msg", faultMsg))
+			}
+		} else {
+			// 任务成功完成 - 将原始响应存为结果
+			resultMap := map[string]interface{}{
+				"method":       string(method),
+				"raw_response": string(body),
+			}
+			// AddObject 提前解析 InstanceNumber 写入 result,供 notification 渲染
+			// 标题"InterFreq.Carrier.6"等场景使用,避免下游再解一次 SOAP body。
+			if method == soap.MethodAddObjectResp {
+				if instanceNumber, _, _, decErr := soap.DecodeAddObjectResponse(bytes.NewReader(body)); decErr == nil && instanceNumber > 0 {
+					resultMap["instance_number"] = instanceNumber
 				}
-			} else {
-				// 任务成功完成 - 将原始响应存为结果
-				resultMap := map[string]interface{}{
-					"method":       string(method),
-					"raw_response": string(body),
-				}
-				// AddObject 提前解析 InstanceNumber 写入 result,供 notification 渲染
-				// 标题"InterFreq.Carrier.6"等场景使用,避免下游再解一次 SOAP body。
-				if method == soap.MethodAddObjectResp {
-					if instanceNumber, _, _, decErr := soap.DecodeAddObjectResponse(bytes.NewReader(body)); decErr == nil && instanceNumber > 0 {
-						resultMap["instance_number"] = instanceNumber
-					}
-				}
-				resultJSON, _ := json.Marshal(resultMap)
-				if markErr := h.taskService.MarkTaskCompleted(r.Context(), taskItem.ID, resultJSON); markErr != nil {
-					log.Error("mark task completed", zap.Error(markErr), zap.String("task_id", taskItem.ID))
-				}
-				log.Info("task completed", zap.String("task_id", taskItem.ID), zap.String("method", taskItem.Method))
+			}
+			resultJSON, _ := json.Marshal(resultMap)
+			if markErr := h.taskService.MarkTaskCompleted(r.Context(), taskItem.ID, resultJSON); markErr != nil {
+				log.Error("mark task completed", zap.Error(markErr), zap.String("task_id", taskItem.ID))
+			}
+			log.Info("task completed", zap.String("task_id", taskItem.ID), zap.String("method", taskItem.Method))
 
-				// T-0147:SetParameterValues 成功后,自动入队 GPV 回读改过的 path。
-				// 原因:SetParameterValuesResponse 仅含 Status(无 path/value),CPE 端真已应用但
-				// OMC device_parameters.current_value 未更新;期望 Inform 自动同步但
-				// BaiBLQ inform_interval=300s + Inform 不全量上报 → UI 长时间看到旧值。
-				// 回读由已有 RPCResponseSubscriber.handleGPVResponse 写库,本 hook 仅入队。
-				if method == soap.MethodSetParameterValuesResp {
-					h.queueAutoGPVAfterSPV(r.Context(), taskItem, log)
-				}
-				// AddObject 成功后,自动入队 GPV 回读新实例参数。
-				// 原因:AddObjectResponse 仅含 InstanceNumber(无参数值),CPE 上对象已建但
-				// device_parameters 表无新实例记录,导致"快速设置"等列表看不到新增项,
-				// 用户须手动点"同步参数"全量 Path B 才能恢复。本 hook 针对新实例 path
-				// 入队 GPV,由已有 handleGPVResponse 写库。
-				if method == soap.MethodAddObjectResp {
-					h.queueAutoGPVAfterAddObject(r.Context(), taskItem, body, log)
-				}
+			// T-0147:SetParameterValues 成功后,自动入队 GPV 回读改过的 path。
+			// 原因:SetParameterValuesResponse 仅含 Status(无 path/value),CPE 端真已应用但
+			// OMC device_parameters.current_value 未更新;期望 Inform 自动同步但
+			// BaiBLQ inform_interval=300s + Inform 不全量上报 → UI 长时间看到旧值。
+			// 回读由已有 RPCResponseSubscriber.handleGPVResponse 写库,本 hook 仅入队。
+			if method == soap.MethodSetParameterValuesResp {
+				h.queueAutoGPVAfterSPV(r.Context(), taskItem, log)
+			}
+			// AddObject 成功后,自动入队 GPV 回读新实例参数。
+			// 原因:AddObjectResponse 仅含 InstanceNumber(无参数值),CPE 上对象已建但
+			// device_parameters 表无新实例记录,导致"快速设置"等列表看不到新增项,
+			// 用户须手动点"同步参数"全量 Path B 才能恢复。本 hook 针对新实例 path
+			// 入队 GPV,由已有 handleGPVResponse 写库。
+			if method == soap.MethodAddObjectResp {
+				h.queueAutoGPVAfterAddObject(r.Context(), taskItem, body, log)
 			}
 		}
 	}

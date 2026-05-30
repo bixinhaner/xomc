@@ -34,6 +34,7 @@ import StatusIndicator from '@/components/StatusIndicator';
 import { useSyncStatus } from '@core/hooks/api/useDeviceParameters';
 import { useDeviceBySn, useSyncDeviceParams } from '@core/hooks/api/useDevices';
 import { useQuickSettingsGroups } from '@core/hooks/api/useQuickSettings';
+import { useResolvedCellInstances } from '@core/hooks/api/useResolvedCellInstances';
 import { useAcknowledgeAlarms, useClearAlarms, useCurrentAlarms, useUnacknowledgeAlarms } from '@core/hooks/api/useAlarms';
 import { useT } from '@/hooks/useT';
 import type { Alarm } from '@core/types/alarm';
@@ -41,6 +42,7 @@ import type { Device } from '@core/types/device';
 import ParameterTreeTab from './ParameterTreeTab';
 import QuickSettingsTab from './QuickSettingsTab';
 import LicenseParamsTab from './LicenseParamsTab';
+import { formatLteBandwidthDisplay } from './QuickSettingsTab/validators';
 import AlarmDetail from '@/pages/alarm/AlarmDetail';
 import ConfirmWithNoteModal from '@/pages/alarm/components/ConfirmWithNoteModal';
 
@@ -424,6 +426,19 @@ const normalizeNetworkType = (networkType: string | undefined): string => {
   }
 };
 
+const normalizeQuickSettingsNetworkType = (networkType: string | undefined): string => {
+  switch (networkType) {
+    case 'eNB':
+      return 'lte';
+    case 'gNB':
+      return 'nr';
+    case 'GSM':
+      return 'gsm';
+    default:
+      return networkType ?? '';
+  }
+};
+
 // 格式化时间
 const fmtTime = (v: string | undefined | null) => (v ? new Date(v).toLocaleString('zh-CN') : '-');
 
@@ -539,7 +554,7 @@ const getCellFields = (t: ReturnType<typeof useT>, networkType: string): FieldGr
       { key: 'specialSubframe', label: t('device.specialSubframe'), render: (d) => d.specialSubframe ?? '-' },
       { key: 'rootIndex', label: t('device.rootIndex'), render: (d) => d.rootIndex ?? '-' },
       { key: 'siteId', label: 'Site ID', render: (d) => d.siteId ?? '-' },
-      { key: 'bandwidth', label: t('device.bandwidth'), render: (d) => d.bandwidth ?? '-' },
+      { key: 'bandwidth', label: t('device.bandwidth'), render: (d) => formatLteBandwidthDisplay(d.bandwidth) },
     );
   }
 
@@ -983,6 +998,18 @@ export default function DeviceDetail() {
   } = useQuickSettingsGroups(device?.id);
   const showQuickSettingsTab = !quickSettingsLoading && (quickSettingsData?.groups?.length ?? 0) > 0;
 
+  const detailQuickSettingsNetworkType = normalizeQuickSettingsNetworkType(displayDevice?.networkType);
+
+  // 概览页小区列表的实例过滤规则与「快速设置」tab 完全一致，统一走 useResolvedCellInstances。
+  const detailResolved = useResolvedCellInstances({
+    deviceId: device?.id ?? '',
+    networkType: detailQuickSettingsNetworkType,
+    paramModel: quickSettingsData?.paramModel ?? '',
+  });
+
+  const detailQuickSettingsCellInstances = detailResolved.instances;
+  const detailQuickSettingsRuleReady = showQuickSettingsTab && detailResolved.ready;
+
   useEffect(() => {
     if (activeTab !== 'quickSettings' || !quickSettingsSyncPending) return;
     const timer = window.setInterval(() => {
@@ -1268,21 +1295,35 @@ export default function DeviceDetail() {
     return buildCellRecords(displayDevice, detailComposite?.cells);
   }, [displayDevice, detailComposite?.cells]);
 
+  const displayCellRecords = useMemo(() => {
+    if (!detailQuickSettingsRuleReady) {
+      return cellRecords;
+    }
+    const allowed = new Set(detailQuickSettingsCellInstances);
+    return cellRecords.filter((row) => allowed.has(Number(row.index)));
+  }, [cellRecords, detailQuickSettingsCellInstances, detailQuickSettingsRuleReady]);
+
   const cellColumns = useMemo(
-    () => getCellSummaryColumns(normalizeNetworkType(displayDevice?.networkType), t).map((column) => ({
-      ...column,
-      render: column.key === 'opState'
-        ? (_: unknown, row: CellRecord) => renderCellOpState(row.values.opState as string | undefined, t)
-        : column.key === 'adminState'
-          ? (_: unknown, row: CellRecord) => renderCellAdminState(
-            row.values.adminState as string | undefined,
-            displayDevice?.networkType ?? '',
-            t,
-          )
-        : column.key === 'rfStatus'
-          ? (_: unknown, row: CellRecord) => renderCellRfStatus(row.values.rfStatus as string | undefined, t)
-          : (value: string | number | undefined) => value ?? '-',
-    })),
+    () => getCellSummaryColumns(normalizeNetworkType(displayDevice?.networkType), t).map((column) => {
+      // LTE 小区列表里的带宽列与详情字段、快速设置共享同一个枚举映射（仅 eNB）。
+      const isLteBandwidth = column.key === 'bandwidth' && normalizeNetworkType(displayDevice?.networkType) === 'eNB';
+      return {
+        ...column,
+        render: column.key === 'opState'
+          ? (_: unknown, row: CellRecord) => renderCellOpState(row.values.opState as string | undefined, t)
+          : column.key === 'adminState'
+            ? (_: unknown, row: CellRecord) => renderCellAdminState(
+              row.values.adminState as string | undefined,
+              displayDevice?.networkType ?? '',
+              t,
+            )
+          : column.key === 'rfStatus'
+            ? (_: unknown, row: CellRecord) => renderCellRfStatus(row.values.rfStatus as string | undefined, t)
+          : isLteBandwidth
+            ? (_: unknown, row: CellRecord) => formatLteBandwidthDisplay(row.values.bandwidth as string | undefined)
+            : (value: string | number | undefined) => value ?? '-',
+      };
+    }),
     [displayDevice?.networkType, t],
   );
 
@@ -1375,7 +1416,7 @@ export default function DeviceDetail() {
                       <Table<CellRecord>
                         rowKey="key"
                         columns={cellColumns}
-                        dataSource={cellRecords}
+                        dataSource={displayCellRecords}
                         pagination={false}
                         size="small"
                         scroll={{ x: 'max-content' }}

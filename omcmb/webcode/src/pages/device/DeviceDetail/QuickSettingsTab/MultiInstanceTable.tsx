@@ -20,7 +20,13 @@ import {
 import type { ParameterSchemaItem, ParameterUpdateRequest } from '@core/types/deviceParameter';
 import { isDeviceTaskTerminal, type DeviceTaskStatus } from '@core/types/deviceTask';
 import type { QuickSettingsGroup } from '@core/types/quicksettings';
-import { applyInstanceContext, validateValue, type QuickSettingsInstanceContext } from './validators';
+import {
+  applyInstanceContext,
+  formatEnumDisplayValue,
+  getEffectiveEnumMeta,
+  validateValue,
+  type QuickSettingsInstanceContext,
+} from './validators';
 
 const { Text } = Typography;
 const ERROR_FEEDBACK_DURATION_SECONDS = 2;
@@ -624,7 +630,14 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
           const value = leaf
             ? (row.instanceId ? cellValue(row.instanceId, leaf) : '')
             : (column.getValue?.(row, instanceContext) ?? '');
-          const formattedValue = column.formatValue ? column.formatValue(value) : value;
+          const item = leaf && row.instanceId
+            ? (schemaByPath.get(`${objectPath}${row.instanceId}.${leaf}`) ?? leafSchemaByLeaf.get(leaf))
+            : leafSchemaByLeaf.get(leaf);
+          // 列自定义 formatValue 接收原始值；若未定义，再退到 enum label 兜底。
+          // 这两者互斥：列已经声明 formatValue 表示有自定义显示，不应再被 enum 兜底改写。
+          const formattedValue = column.formatValue
+            ? column.formatValue(value)
+            : (leaf ? formatEnumDisplayValue(value, item?.constraints, item?.path) : value);
           return <Text>{formattedValue || '-'}</Text>;
         },
       };
@@ -711,22 +724,24 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
               : (editModal.instanceId ? (column.getValue?.({ key: editModal.instanceId, instanceId: editModal.instanceId }, instanceContext) ?? '') : '');
             const item = leaf && editModal.instanceId ? (schemaByPath.get(`${objectPath}${editModal.instanceId}.${leaf}`) ?? leafSchemaByLeaf.get(leaf)) : leafSchemaByLeaf.get(leaf);
             const isEditable = Boolean(leaf) && groupParamLeafSet.has(leaf) && !column.readOnly && (editModal.mode === 'add' ? true : (item?.writable ?? true));
-            const enumVals = item?.constraints?.enumValues;
-            const enumLabels = item?.constraints?.enumLabels;
+            const enumMeta = getEffectiveEnumMeta(item?.constraints, item?.path);
             const error = leaf ? editModal.errors[leaf] : '';
             const label = locale === 'zh-CN' ? column.titleZh : column.titleEn;
-            const displayValue = column.formatValue ? column.formatValue(value) : value;
+            // 同列渲染：column.formatValue 收原始值；未提供则退到 enum 兜底。
+            const displayValue = column.formatValue
+              ? column.formatValue(value)
+              : (leaf ? formatEnumDisplayValue(value, item?.constraints, item?.path) : value);
 
             return (
               <div key={column.key} style={{ minWidth: 0 }}>
                 <div style={{ marginBottom: 6, fontWeight: 500 }}>{label}</div>
-                {isEditable && enumVals && enumVals.length > 0 ? (
+                {isEditable && enumMeta && enumMeta.values.length > 0 ? (
                   <Select
                     value={value || undefined}
                     onChange={(next) => leaf && setEditModalValue(leaf, String(next))}
                     style={{ width: '100%' }}
                     status={error ? 'error' : undefined}
-                    options={enumVals.map((enumValue, idx) => ({ value: enumValue, label: enumLabels?.[idx] ?? enumValue }))}
+                    options={enumMeta.values.map((enumValue, idx) => ({ value: enumValue, label: enumMeta.labels[idx] ?? enumValue }))}
                   />
                 ) : isEditable ? (
                   <Input

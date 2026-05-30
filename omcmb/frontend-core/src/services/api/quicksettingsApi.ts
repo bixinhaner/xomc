@@ -1,6 +1,12 @@
 import http from '../http';
 import type { QuickSettingsGroupsResponse } from '../../types/quicksettings';
 
+type QuickSettingsGroupsResponseRaw = {
+  paramModel?: string;
+  param_model?: string;
+  groups?: QuickSettingsGroupsResponse['groups'];
+};
+
 /**
  * 快速设置分组元数据 API(T-0138)。
  *
@@ -13,14 +19,18 @@ import type { QuickSettingsGroupsResponse } from '../../types/quicksettings';
  * 字段中英文 label 来自后端 XML(titleZh / titleEn),不进 i18n 文件。
  * 字段元属性(类型 / 约束 / 枚举)由 useParameterSchema 拉,与本接口分离。
  *
- * 后端字段返回 snake_case `param_model`,axios 拦截器自动转 camelCase `paramModel`。
+ * 后端字段返回 snake_case `param_model`,此处需显式映射到 `paramModel`。
+ * TODO: axios 拦截器本应全局 snake→camel转换但此处未生效，需追查为何该端点未被覆盖；还原后可刪除下方手工映射。
  */
 export const quicksettingsApi = {
   async getGroups(deviceId: string): Promise<QuickSettingsGroupsResponse> {
-    const { data } = await http.get<QuickSettingsGroupsResponse>(
+    const { data } = await http.get<QuickSettingsGroupsResponseRaw>(
       '/quicksettings/groups',
       { params: { device_id: deviceId } },
     );
-    return data;
+    return {
+      paramModel: data.paramModel ?? data.param_model ?? '',
+      groups: data.groups ?? [],
+    };
   },
 };

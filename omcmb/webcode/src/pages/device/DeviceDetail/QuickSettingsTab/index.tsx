@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Alert, Empty, Select, Space, Spin, Typography } from 'antd';
 import { useIntl } from 'react-intl';
 import { useQuickSettingsGroups } from '@core/hooks/api/useQuickSettings';
-import { useParameterSchema } from '@core/hooks/api/useDeviceParameters';
+import { useResolvedCellInstances } from '@core/hooks/api/useResolvedCellInstances';
 import { useQuickSettingsFeedbackStore } from '@core/store/quickSettingsFeedbackStore';
 import CellParameterForm from './CellParameterForm';
 import MultiInstanceTable from './MultiInstanceTable';
@@ -29,8 +29,7 @@ function normalizeQuickSettingsNetworkType(networkType: string): string {
   }
 }
 
-const LTE_FAPSERVICE_PREFIX = 'Device.Services.FAPService.';
-const NR_CELLCONFIG_PREFIX = 'Device.Services.FAPService.1.CellConfig.';
+const LTE_NUM_OF_CELLS_PATH = 'Device.Services.FAPService.1.CellConfig.LTE.RAN.CA.PARAMS.NumOfCells';
 
 /**
  * 设备详情「快速设置」tab — T-0138 per-paramModel 架构。
@@ -43,74 +42,88 @@ const NR_CELLCONFIG_PREFIX = 'Device.Services.FAPService.1.CellConfig.';
  *  4. GNB(networkType='nr'):按 Device.Services.FAPService.1.CellConfig.{i}. 枚举小区实例并允许切换
  *  5. 单实例分组 → CellParameterForm(整组 Save)
  *  6. 多实例分组 → MultiInstanceTable(行级 Save / AddObject + Set 两步 / DeleteObject)
+ *
+ * 小区实例解析（lte/nr/BM/cellModeIdx/InUse 联合规则）已统一到
+ * useResolvedCellInstances，DeviceDetail 概览页与本组件共享同一计算路径。
  */
 export default function QuickSettingsTab({ deviceId, networkType }: QuickSettingsTabProps) {
   const intl = useIntl();
   const locale: 'zh-CN' | 'en-US' = intl.locale === 'en-US' ? 'en-US' : 'zh-CN';
   const normalizedNetworkType = normalizeQuickSettingsNetworkType(networkType);
 
-  const isENB = normalizedNetworkType === 'lte';
-  const isNR = normalizedNetworkType === 'nr';
-
   // LTE 选择 FAPService，NR 选择 CellConfig 小区实例。
   const [userPickedInstance, setUserPickedInstance] = useState<number | null>(null);
+  const [bmTech, setBmTech] = useState<'LTE' | 'GSM'>('LTE');
 
   // 头部"刷新"按钮 bump 的 tick → 拼进子组件 key 强制 remount，清掉 form/rowEdits 等组件内 state
   const refreshTick = useQuickSettingsFeedbackStore((s) => s.refreshTicks[deviceId] ?? 0);
 
   const { data, isLoading, error } = useQuickSettingsGroups(deviceId);
+  const paramModel = data?.paramModel ?? '';
 
-  // ENB 才查 FAPService 实例 schema；GNB 直接跳过（避免 path_prefix 为空时拉全量 schema）
-  const { data: fapSchema, isLoading: fapSchemaLoading } = useParameterSchema(
+  // BM 模式下根据 quicksettings groups 的 path 判定是否存在 LTE/GSM 分组（影响制式选择器可见性）
+  const bmHasGsmGroups = useMemo(() => {
+    if (!paramModel.toUpperCase().startsWith('BM')) return false;
+    return (data?.groups ?? []).some((group) => {
+      if (group.objectPath?.startsWith('Device.Services.GsmBTSCellDT.')) return true;
+      return group.params.some((param) =>
+        (param.standardPath ?? '').startsWith('Device.Services.GsmBTSCellDT.'),
+      );
+    });
+  }, [paramModel, data?.groups]);
+
+  const bmHasLteGroups = useMemo(() => {
+    if (!paramModel.toUpperCase().startsWith('BM')) return false;
+    return (data?.groups ?? []).some((group) => {
+      if (group.objectPath?.startsWith('Device.Services.FAPService.')) return true;
+      return group.params.some((param) =>
+        (param.standardPath ?? '').startsWith('Device.Services.FAPService.'),
+      );
+    });
+  }, [paramModel, data?.groups]);
+
+  const resolved = useResolvedCellInstances({
     deviceId,
-    LTE_FAPSERVICE_PREFIX,
+    networkType: normalizedNetworkType,
+    paramModel,
+    bmTech,
+    hasBmGsmGroups: bmHasGsmGroups,
+    hasBmLteGroups: bmHasLteGroups,
+  });
+
+  const {
     isENB,
-  );
-
-  const { data: nrCellSchema, isLoading: nrCellSchemaLoading } = useParameterSchema(
-    deviceId,
-    NR_CELLCONFIG_PREFIX,
     isNR,
-  );
+    isBM,
+    instances: selectableInstances,
+    lteInstances,
+    lteConfiguredCellCount,
+    nrCellInstances,
+    bmCellMode,
+    bmTechOptions,
+    loading: selectorLoading,
+  } = resolved;
 
-  const lteInstances = useMemo(() => {
-    if (!isENB || !fapSchema) {
-      return [] as number[];
+  const activeBmTech = bmTechOptions.includes(bmTech)
+    ? bmTech
+    : (bmTechOptions[0] ?? (bmHasGsmGroups && !bmHasLteGroups ? 'GSM' : 'LTE'));
+
+  const visibleGroups = useMemo(() => {
+    const groups = data?.groups ?? [];
+    if (!isENB || !isBM) {
+      return groups;
     }
-    const objEntry = fapSchema.objects.find((o) => o.path === LTE_FAPSERVICE_PREFIX);
-    const candidateInstances = objEntry?.currentInstances ?? [];
-    // 即便 objects 没给出 currentInstances(老 schema 数据),也尝试从 parameters 路径推断
-    const fallbackSet = new Set<number>();
-    if (candidateInstances.length === 0) {
-      for (const p of fapSchema.parameters) {
-        const m = /^Device\.Services\.FAPService\.(\d+)\./.exec(p.path);
-        if (m) fallbackSet.add(Number(m[1]));
+    const prefix = activeBmTech === 'GSM'
+      ? 'Device.Services.GsmBTSCellDT.'
+      : 'Device.Services.FAPService.';
+    return groups.filter((group) => {
+      if ((group.objectPath ?? '').startsWith(prefix)) {
+        return true;
       }
-    }
-    const allInstances = candidateInstances.length > 0 ? candidateInstances : Array.from(fallbackSet).sort((a, b) => a - b);
+      return group.params.some((param) => (param.standardPath ?? '').startsWith(prefix));
+    });
+  }, [data?.groups, isENB, isBM, activeBmTech]);
 
-    return allInstances;
-  }, [isENB, fapSchema]);
-
-  const nrCellInstances = useMemo(() => {
-    if (!isNR || !nrCellSchema) {
-      return [] as number[];
-    }
-    const objEntry = nrCellSchema.objects.find((o) => o.path === NR_CELLCONFIG_PREFIX);
-    const candidateInstances = objEntry?.currentInstances ?? [];
-    if (candidateInstances.length > 0) {
-      return [...candidateInstances].sort((a, b) => a - b);
-    }
-
-    const fallbackSet = new Set<number>();
-    for (const p of nrCellSchema.parameters) {
-      const m = /^Device\.Services\.FAPService\.1\.CellConfig\.(\d+)\./.exec(p.path);
-      if (m) fallbackSet.add(Number(m[1]));
-    }
-    return Array.from(fallbackSet).sort((a, b) => a - b);
-  }, [isNR, nrCellSchema]);
-
-  const selectableInstances = isENB ? lteInstances : isNR ? nrCellInstances : [];
   const selectedInstance =
     userPickedInstance !== null && selectableInstances.includes(userPickedInstance)
       ? userPickedInstance
@@ -121,11 +134,18 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
     fapInstance: isENB ? selectedInstance : 1,
     cellInstance: isNR ? selectedInstance : undefined,
   };
-  const selectorLabel = isENB ? 'FAPService 实例:' : '小区实例:';
+  const selectorLabel = isENB
+    ? (isBM
+      ? (activeBmTech === 'GSM' ? 'GSM小区实例:' : 'LTE小区实例:')
+      : (lteConfiguredCellCount !== null ? '小区实例:' : 'FAPService 实例:'))
+    : '小区实例:';
   const selectorHint = isENB
-    ? `(显示设备上实际存在的 FAPService 实例 · 共 ${lteInstances.length} 个)`
+    ? (isBM
+      ? `(BM: cellModeIdx=${bmCellMode ? `${bmCellMode.gsmNum}/${bmCellMode.lteNum}` : '-'}(GSM/LTE) · 当前${activeBmTech}已启用 ${selectableInstances.length} 个)`
+      : (lteConfiguredCellCount !== null
+        ? `(按 ${LTE_NUM_OF_CELLS_PATH}=${lteConfiguredCellCount} 显示 · 共 ${selectableInstances.length} 个小区)`
+        : `(显示设备上实际存在的 FAPService 实例 · 共 ${lteInstances.length} 个)`))
     : `(按 Device.Services.FAPService.1.CellConfig.{i}. 枚举 · 共 ${nrCellInstances.length} 个小区)`;
-  const selectorLoading = isENB ? fapSchemaLoading : nrCellSchemaLoading;
   const selectedKey = isNR
     ? `${instanceContext.fapInstance}-${instanceContext.cellInstance ?? 1}`
     : String(instanceContext.fapInstance);
@@ -146,11 +166,13 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
     );
   }
 
-  const groups = data?.groups ?? [];
-  if (groups.length === 0) {
+  if (visibleGroups.length === 0) {
+    const emptyDesc = isENB && isBM && activeBmTech === 'GSM'
+      ? `该设备的 paramModel(${data?.paramModel ?? '未知'})未配置 GSM 快速设置分组`
+      : `该设备的 paramModel(${data?.paramModel ?? '未知'})未配置快速设置分组`;
     return (
       <div style={{ padding: 16 }}>
-        <Empty description={`该设备的 paramModel(${data?.paramModel ?? '未知'})未配置快速设置分组`} />
+        <Empty description={emptyDesc} />
       </div>
     );
   }
@@ -159,6 +181,20 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
     <div style={{ padding: 16 }}>
       {(isENB || isNR) && (
         <Space style={{ marginBottom: 16 }}>
+          {isENB && isBM && bmTechOptions.length > 1 && (
+            <>
+              <Text strong>制式:</Text>
+              <Select
+                value={activeBmTech}
+                onChange={(v) => {
+                  setBmTech(v as 'LTE' | 'GSM');
+                  setUserPickedInstance(null);
+                }}
+                style={{ width: 120 }}
+                options={bmTechOptions.map((t) => ({ value: t, label: t }))}
+              />
+            </>
+          )}
           <Text strong>{selectorLabel}</Text>
           <Select
             value={selectableInstances.includes(selectedInstance) ? selectedInstance : undefined}
@@ -174,7 +210,7 @@ export default function QuickSettingsTab({ deviceId, networkType }: QuickSetting
         </Space>
       )}
 
-      {groups.map((group) =>
+      {visibleGroups.map((group) =>
         group.multiInstance ? (
           <MultiInstanceTable
             key={`${group.id}::${refreshTick}::${selectedKey}`}
