@@ -8,10 +8,11 @@
  *     默认集 = 选中制式的内置任务指标集（usePmAdhocList isBuiltin，按 technology 找一个取 metricPaths）。
  *     用户未手动改过指标时，切制式默认集随之切换；手动改过则保留用户选择。
  *   - 粒度选择（默认 15min）。
- *   - 时间范围（默认近 7 天，起止可调 RangePicker）。
- *   - 出图：取数 useAggregatedMetricsByDevices → buildDeviceMetricCharts → 每指标一张 ChartCard（每设备一条线）。
+ *   - 共用三级筛选（DashboardFilterBar）：大时间段（默认近 7 天）+ 星期多选 + 小时段多选 + 周期对比开关（T-0189）。
+ *   - 出图：取数 useAggregatedMetricsByDevices → 星期/小时段前端筛 → buildDeviceMetricCharts → 每指标一张 ChartCard（每设备一条线）。
+ *   - 周期对比开关打开：再拉上一周期窗口数据，套同口径星期/小时段，叠加虚线（T-0189）。
  *
- * 不做（→ T-0189）：顶部三级筛选（星期/小时段）+ 周期对比。本任务到 SN 级，不下钻小区/PLMN。
+ * 本任务到 SN 级，不下钻小区/PLMN。
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -19,7 +20,6 @@ import {
   App,
   Button,
   Card,
-  DatePicker,
   Empty,
   Form,
   Input,
@@ -40,8 +40,14 @@ import DevicePickerModal from '../KPIQuery/components/DevicePickerModal';
 import MetricPickerModal from '../KPIQuery/components/MetricPickerModal';
 import ChartCard from './ChartCard';
 import { buildDeviceMetricCharts } from './deviceListUtils';
-
-const { RangePicker } = DatePicker;
+import DashboardFilterBar, { type DashboardFilterValue } from './DashboardFilterBar';
+import {
+  ALL_HOURS,
+  ALL_WEEKDAYS,
+  attachCompareSeries,
+  filterRowsByWeekdayHour,
+  previousWindow,
+} from './dashboardFilterUtils';
 
 // 制式 ↔ 设备类型 ↔ 内置任务 technology 三者映射。
 type Tech = 'lte' | 'nr' | 'gsm';
@@ -78,10 +84,13 @@ export default function DeviceListPane() {
   // 用户是否手动改过指标——改过则切制式不再覆盖默认集。
   const [metricsTouched, setMetricsTouched] = useState(false);
   const [granularity, setGranularity] = useState<Granularity>('15min');
-  const [range, setRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([
-    dayjs().subtract(7, 'day'),
-    dayjs(),
-  ]);
+  // 共用三级筛选 + 周期对比开关（大时间段 + 星期 + 小时段 + 对比）。
+  const [filter, setFilter] = useState<DashboardFilterValue>({
+    range: [dayjs().subtract(7, 'day'), dayjs()],
+    weekdays: [...ALL_WEEKDAYS],
+    hours: [...ALL_HOURS],
+    compare: false,
+  });
   const [devicePickerOpen, setDevicePickerOpen] = useState(false);
   const [metricPickerOpen, setMetricPickerOpen] = useState(false);
 
@@ -106,6 +115,12 @@ export default function DeviceListPane() {
     granularity: Granularity;
     startTime: string;
     endTime: string;
+    weekdays: number[];
+    hours: number[];
+    compare: boolean;
+    offsetMs: number;
+    prevStartTime: string;
+    prevEndTime: string;
   } | null>(null);
 
   const baseParams = useMemo(() => {
@@ -121,7 +136,7 @@ export default function DeviceListPane() {
   }, [submitted]);
 
   const {
-    data: rows = [],
+    data: rawRows = [],
     isLoading,
     isFetching,
     errors,
@@ -132,6 +147,28 @@ export default function DeviceListPane() {
     Boolean(baseParams),
   );
 
+  // 周期对比：上一周期窗口同样取数（同设备/指标/粒度，窗口换为 previousWindow）。
+  const prevParams = useMemo(() => {
+    if (!submitted || !submitted.compare) return null;
+    return {
+      granularity: submitted.granularity,
+      metricPaths: submitted.metricPaths,
+      startTime: submitted.prevStartTime,
+      endTime: submitted.prevEndTime,
+      limit: 5000,
+      fillEmpty: true,
+    };
+  }, [submitted]);
+
+  const {
+    data: rawPrevRows = [],
+    isFetching: prevFetching,
+  } = useAggregatedMetricsByDevices(
+    prevParams ?? { granularity: '15min', metricPaths: [], startTime: undefined, endTime: undefined },
+    prevParams ? (submitted?.deviceSns ?? []) : [],
+    Boolean(prevParams),
+  );
+
   useEffect(() => {
     if (errors.length > 0) {
       const first = errors[0] as Error;
@@ -139,10 +176,22 @@ export default function DeviceListPane() {
     }
   }, [errors, message]);
 
+  // 星期/小时段=纯前端在已取行里筛命中点（全选不过滤），当前与上一周期套同口径。
   const charts = useMemo(() => {
     if (!submitted) return [];
-    return buildDeviceMetricCharts(rows, submitted.granularity);
-  }, [rows, submitted]);
+    const wd = new Set(submitted.weekdays);
+    const hr = new Set(submitted.hours);
+    const cur = buildDeviceMetricCharts(
+      filterRowsByWeekdayHour(rawRows, wd, hr),
+      submitted.granularity,
+    );
+    if (!submitted.compare) return cur;
+    const prev = buildDeviceMetricCharts(
+      filterRowsByWeekdayHour(rawPrevRows, wd, hr),
+      submitted.granularity,
+    );
+    return attachCompareSeries(cur, prev, submitted.offsetMs);
+  }, [rawRows, rawPrevRows, submitted]);
 
   // ── 行为 ───────────────────────────────────────────────────────────
   const handleTechChange = (v: Tech) => {
@@ -160,12 +209,20 @@ export default function DeviceListPane() {
       message.warning('请选择至少一个指标');
       return;
     }
+    const [start, end] = filter.range;
+    const [prevStart, prevEnd] = previousWindow(filter.range);
     setSubmitted({
       deviceSns,
       metricPaths,
       granularity,
-      startTime: range[0].toISOString(),
-      endTime: range[1].toISOString(),
+      startTime: start.toISOString(),
+      endTime: end.toISOString(),
+      weekdays: filter.weekdays,
+      hours: filter.hours,
+      compare: filter.compare,
+      offsetMs: end.valueOf() - start.valueOf(),
+      prevStartTime: prevStart.toISOString(),
+      prevEndTime: prevEnd.toISOString(),
     });
   };
 
@@ -222,17 +279,11 @@ export default function DeviceListPane() {
               />
             </Form.Item>
 
-            <Form.Item label="时间范围" style={{ marginBottom: 0 }}>
-              <RangePicker
-                showTime
-                value={range}
-                allowClear={false}
-                onChange={(v) => {
-                  if (v && v[0] && v[1]) setRange([v[0], v[1]]);
-                }}
-              />
-            </Form.Item>
           </Space>
+
+          <div style={{ marginTop: 16 }}>
+            <DashboardFilterBar value={filter} onChange={setFilter} />
+          </div>
 
           <div style={{ marginTop: 16 }}>
             <Space>
@@ -260,7 +311,7 @@ export default function DeviceListPane() {
         <Card>
           <Empty description="选择制式 / 设备 / 指标后点「出图」" style={{ marginTop: 40 }} />
         </Card>
-      ) : isLoading || isFetching ? (
+      ) : isLoading || isFetching || prevFetching ? (
         <Card>
           <Spin tip="加载中..." />
         </Card>

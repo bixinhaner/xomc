@@ -16,18 +16,29 @@ export default function ChartCard({ chart }: { chart: MetricChart }) {
     () => chart.buckets.map((b) => (dayjs(b).isValid() ? dayjs(b).format('MM-DD HH:mm') : b)),
     [chart.buckets],
   );
+  const currentSeries = chart.series.map((s) => ({
+    name: s.name,
+    type: 'line',
+    smooth: true,
+    showSymbol: chart.buckets.length <= 30,
+    data: s.values,
+    connectNulls: false,
+  }));
+  // T-0189 周期对比：上一周期系列画虚线（已在上游按 +L 对齐到当前轴）。
+  const compareSeries = (chart.compareSeries ?? []).map((s) => ({
+    name: s.name,
+    type: 'line',
+    smooth: true,
+    showSymbol: chart.buckets.length <= 30,
+    data: s.values,
+    connectNulls: false,
+    lineStyle: { type: 'dashed' as const },
+  }));
   const option = {
     grid: { left: 56, right: 16, top: 36, bottom: 40 },
     xAxis: { type: 'category', data: xLabels, boundaryGap: false },
     yAxis: { type: 'value', scale: true },
-    series: chart.series.map((s) => ({
-      name: s.name,
-      type: 'line',
-      smooth: true,
-      showSymbol: chart.buckets.length <= 30,
-      data: s.values,
-      connectNulls: false,
-    })),
+    series: [...currentSeries, ...compareSeries],
     tooltip: { trigger: 'axis' },
     legend: { type: 'scroll', top: 4 },
   };

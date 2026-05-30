@@ -35,6 +35,8 @@ export interface MetricChart {
   /** 该图横轴桶（startTime 升序去重） */
   buckets: string[];
   series: MetricSeries[];
+  /** T-0189 周期对比：上一周期系列（已按 +L 偏移对齐到当前轴），ChartCard 渲染为虚线。 */
+  compareSeries?: MetricSeries[];
 }
 
 /**

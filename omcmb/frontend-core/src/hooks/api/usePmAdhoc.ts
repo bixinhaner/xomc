@@ -51,13 +51,16 @@ export function useCancelPmAdhoc() {
 
 export function usePmAdhocResults(
   taskId: string | undefined,
-  opts?: { limit?: number },
+  opts?: { limit?: number; startTime?: string; endTime?: string },
 ) {
   // T-0187 仪表盘自动出图要取更多结果行（默认 100 保持 AdhocResultPanel 现状）。
   const limit = opts?.limit ?? 100;
+  // T-0189 大时间段驱动取数：startTime/endTime 透传后端 + 并入 queryKey（窗口变化即重取）。
+  const startTime = opts?.startTime;
+  const endTime = opts?.endTime;
   return useQuery({
-    queryKey: [...ADHOC_KEY, 'results', taskId, { limit }],
-    queryFn: () => api.results(taskId as string, limit),
+    queryKey: [...ADHOC_KEY, 'results', taskId, { limit, startTime, endTime }],
+    queryFn: () => api.results(taskId as string, limit, 0, startTime, endTime),
     enabled: Boolean(taskId),
   });
 }

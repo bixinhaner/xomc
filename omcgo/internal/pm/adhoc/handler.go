@@ -365,7 +365,62 @@ func (h *Handler) Cancel(c *gin.Context) {
 	response.OK(c, gin.H{"id": id.String(), "status": string(StatusCanceled)})
 }
 
-// Results GET /pm/adhoc/tasks/:id/results?device_sn=&metric_path=&granularity=&limit=&offset=
+// resultsFilter 是 Results 端点的可选过滤项（均为原始 query 字符串，空串=不过滤）。
+type resultsFilter struct {
+	DeviceSN    string
+	MetricPath  string
+	Granularity string
+	StartTime   string // RFC3339；非法/空则忽略
+	EndTime     string // RFC3339；非法/空则忽略
+}
+
+// buildResultsQuery 纯函数：拼 adhoc results 查询 SQL + 占位参数。
+// 抽出来便于单测（带/不带大时间段两路）；时间段非法值容错忽略而非报错。
+func buildResultsQuery(taskID uuid.UUID, f resultsFilter, limit, offset int) (string, []any) {
+	q := `
+SELECT id, task_id, device_oui, device_sn, product_id, metric_path, metric_type, metric_value,
+       statis_type, granularity, time, start_time, end_time, ingest_time, object_ldn, extra
+FROM pm_adhoc_aggregation_results
+WHERE task_id = $1`
+	args := []any{taskID}
+	pos := 2
+	if f.DeviceSN != "" {
+		q += fmt.Sprintf(" AND device_sn = $%d", pos)
+		args = append(args, f.DeviceSN)
+		pos++
+	}
+	if f.MetricPath != "" {
+		q += fmt.Sprintf(" AND metric_path = $%d", pos)
+		args = append(args, f.MetricPath)
+		pos++
+	}
+	if f.Granularity != "" {
+		q += fmt.Sprintf(" AND granularity = $%d", pos)
+		args = append(args, f.Granularity)
+		pos++
+	}
+	// 可选大时间段过滤（页签1 仪表盘大时间段驱动取数）：start_time/end_time 用 RFC3339 解析，
+	// 命中则按 time 列窗口过滤，与现有 ORDER BY time DESC 同列；非法值忽略（容错而非 400）。
+	if f.StartTime != "" {
+		if t, err := time.Parse(time.RFC3339, f.StartTime); err == nil {
+			q += fmt.Sprintf(" AND time >= $%d", pos)
+			args = append(args, t)
+			pos++
+		}
+	}
+	if f.EndTime != "" {
+		if t, err := time.Parse(time.RFC3339, f.EndTime); err == nil {
+			q += fmt.Sprintf(" AND time <= $%d", pos)
+			args = append(args, t)
+			pos++
+		}
+	}
+	q += fmt.Sprintf(" ORDER BY time DESC LIMIT $%d OFFSET $%d", pos, pos+1)
+	args = append(args, limit, offset)
+	return q, args
+}
+
+// Results GET /pm/adhoc/tasks/:id/results?device_sn=&metric_path=&granularity=&start_time=&end_time=&limit=&offset=
 func (h *Handler) Results(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -396,30 +451,13 @@ func (h *Handler) Results(c *gin.Context) {
 	}
 
 	// 直接 SQL 查 — adhoc results 只读用例，不值得再拆 repo
-	q := `
-SELECT id, task_id, device_oui, device_sn, product_id, metric_path, metric_type, metric_value,
-       statis_type, granularity, time, start_time, end_time, ingest_time, object_ldn, extra
-FROM pm_adhoc_aggregation_results
-WHERE task_id = $1`
-	args := []any{id}
-	pos := 2
-	if v := c.Query("device_sn"); v != "" {
-		q += fmt.Sprintf(" AND device_sn = $%d", pos)
-		args = append(args, v)
-		pos++
-	}
-	if v := c.Query("metric_path"); v != "" {
-		q += fmt.Sprintf(" AND metric_path = $%d", pos)
-		args = append(args, v)
-		pos++
-	}
-	if v := c.Query("granularity"); v != "" {
-		q += fmt.Sprintf(" AND granularity = $%d", pos)
-		args = append(args, v)
-		pos++
-	}
-	q += fmt.Sprintf(" ORDER BY time DESC LIMIT $%d OFFSET $%d", pos, pos+1)
-	args = append(args, limit, offset)
+	q, args := buildResultsQuery(id, resultsFilter{
+		DeviceSN:    c.Query("device_sn"),
+		MetricPath:  c.Query("metric_path"),
+		Granularity: c.Query("granularity"),
+		StartTime:   c.Query("start_time"),
+		EndTime:     c.Query("end_time"),
+	}, limit, offset)
 
 	rows, err := h.pool.Query(c.Request.Context(), q, args...)
 	if err != nil {

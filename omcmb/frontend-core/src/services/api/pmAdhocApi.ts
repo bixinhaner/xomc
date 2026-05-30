@@ -72,9 +72,19 @@ export const pmAdhocApi = {
   async cancel(id: string): Promise<void> {
     await http.delete(`/pm/adhoc/tasks/${id}`);
   },
-  async results(id: string, limit = 100, offset = 0): Promise<AdhocResultRow[]> {
+  async results(
+    id: string,
+    limit = 100,
+    offset = 0,
+    startTime?: string,
+    endTime?: string,
+  ): Promise<AdhocResultRow[]> {
+    // 大时间段（页签1 仪表盘）：startTime/endTime 为 RFC3339，透传为 start_time/end_time query 参数。
+    const params: Record<string, unknown> = { limit, offset };
+    if (startTime) params.start_time = startTime;
+    if (endTime) params.end_time = endTime;
     const { data } = await http.get<ResultsResponse>(`/pm/adhoc/tasks/${id}/results`, {
-      params: { limit, offset },
+      params,
     });
     return (data.items ?? []).map(mapBackendAdhocResult);
   },

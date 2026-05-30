@@ -11,13 +11,24 @@
 
 import { useMemo, useState } from 'react';
 import { Alert, Card, Empty, Segmented, Space, Spin, Tag, Typography } from 'antd';
+import dayjs from 'dayjs';
 import { usePmAdhocDetail, usePmAdhocResults } from '@core/hooks/api/usePmAdhoc';
 import { buildMetricCharts } from './taskDashboardUtils';
 import ChartCard from './ChartCard';
+import DashboardFilterBar, { type DashboardFilterValue } from './DashboardFilterBar';
+import {
+  ALL_HOURS,
+  ALL_WEEKDAYS,
+  attachCompareSeries,
+  filterRowsByWeekdayHour,
+  previousWindow,
+} from './dashboardFilterUtils';
 
 interface Props {
   taskId: string;
 }
+
+const RESULTS_LIMIT = 10000;
 
 const GRAN_LABEL: Record<string, string> = {
   '15min': '15 分',
@@ -29,8 +40,50 @@ const GRAN_LABEL: Record<string, string> = {
 
 export default function TaskDashboardPane({ taskId }: Props) {
   const taskQuery = usePmAdhocDetail(taskId);
-  // 仪表盘取较多结果行用于画线（最近 N 行）。
-  const { data: rows = [], isLoading: rowsLoading } = usePmAdhocResults(taskId, { limit: 10000 });
+
+  // ── 共用三级筛选 + 周期对比开关（本 Pane 持状态，驱动取数 + 二拉）──────
+  const [filter, setFilter] = useState<DashboardFilterValue>({
+    range: [dayjs().subtract(7, 'day'), dayjs()],
+    weekdays: [...ALL_WEEKDAYS],
+    hours: [...ALL_HOURS],
+    compare: false,
+  });
+  const [start, end] = filter.range;
+  const startISO = start.toISOString();
+  const endISO = end.toISOString();
+  const offsetMs = end.valueOf() - start.valueOf();
+  const [prevStart, prevEnd] = previousWindow(filter.range);
+
+  // 大时间段驱动取数（后端按 time 窗口过滤）。仪表盘取较多结果行用于画线。
+  const { data: rawRows = [], isLoading: rowsLoading } = usePmAdhocResults(taskId, {
+    limit: RESULTS_LIMIT,
+    startTime: startISO,
+    endTime: endISO,
+  });
+  // 周期对比开关打开时再拉一次上一周期（同任务、上一周期窗口）。
+  const { data: rawPrevRows = [], isLoading: prevLoading } = usePmAdhocResults(
+    filter.compare ? taskId : undefined,
+    {
+      limit: RESULTS_LIMIT,
+      startTime: prevStart.toISOString(),
+      endTime: prevEnd.toISOString(),
+    },
+  );
+
+  // 星期/小时段=纯前端在已取行里筛命中点（全选不过滤），当前与上一周期套同口径。
+  const weekdaySet = useMemo(() => new Set(filter.weekdays), [filter.weekdays]);
+  const hourSet = useMemo(() => new Set(filter.hours), [filter.hours]);
+  const rows = useMemo(
+    () => filterRowsByWeekdayHour(rawRows, weekdaySet, hourSet),
+    [rawRows, weekdaySet, hourSet],
+  );
+  const prevRows = useMemo(
+    () => filterRowsByWeekdayHour(rawPrevRows, weekdaySet, hourSet),
+    [rawPrevRows, weekdaySet, hourSet],
+  );
+
+  // 触顶提示：结果接口 LIMIT 上限，触顶可能截断 → 给可见提示，不静默。
+  const truncated = rawRows.length >= RESULTS_LIMIT;
 
   const granularities = useMemo(
     () => taskQuery.data?.granularities ?? [],
@@ -41,8 +94,11 @@ export default function TaskDashboardPane({ taskId }: Props) {
 
   const charts = useMemo(() => {
     if (!taskQuery.data || !effectiveGran) return [];
-    return buildMetricCharts(rows, taskQuery.data.dimension, effectiveGran);
-  }, [rows, taskQuery.data, effectiveGran]);
+    const cur = buildMetricCharts(rows, taskQuery.data.dimension, effectiveGran);
+    if (!filter.compare) return cur;
+    const prev = buildMetricCharts(prevRows, taskQuery.data.dimension, effectiveGran);
+    return attachCompareSeries(cur, prev, offsetMs);
+  }, [rows, prevRows, taskQuery.data, effectiveGran, filter.compare, offsetMs]);
 
   if (taskQuery.isLoading) {
     return (
@@ -87,7 +143,21 @@ export default function TaskDashboardPane({ taskId }: Props) {
         </Space>
       </Card>
 
-      {rowsLoading ? (
+      <Card size="small" style={{ marginBottom: 12 }}>
+        <DashboardFilterBar value={filter} onChange={setFilter} />
+      </Card>
+
+      {truncated && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="结果可能不全"
+          description={`本次时间段命中的结果行已达上限（${RESULTS_LIMIT} 行），图中可能未包含全部数据。请缩小时间段或减少指标/系列。`}
+        />
+      )}
+
+      {rowsLoading || (filter.compare && prevLoading) ? (
         <Card>
           <Spin tip="加载结果..." />
         </Card>
