@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, Fragment } from 'react';
 import { Button, Card, Col, Form, Input, Row, Select, Space, Spin, Tag, Typography, message, notification } from 'antd';
+import type { FormInstance } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { useParameterSchema, useUpdateParameters } from '@core/hooks/api/useDeviceParameters';
@@ -18,8 +19,180 @@ import { applyInstanceContext, getEffectiveEnumMeta, validateValue, type QuickSe
 const { Text } = Typography;
 const ERROR_FEEDBACK_DURATION_SECONDS = 2;
 
+/**
+ * GSM ARFCN -> 上下行频率(MHz) 派生计算。
+ * 字典里没有 Frequency 叶子,这里按 3GPP TS 45.005 §2 的频段公式从 ARFCN 反推显示。
+ * 参考: GSM-850/P-GSM/E-GSM/R-GSM/DCS-1800/PCS-1900。
+ * 返回 null 表示落在保留段,UI 渲染为 "-"。
+ */
+function arfcnToFrequencyMHz(arfcnRaw: unknown): { ul: number; dl: number } | null {
+  const n = Number(arfcnRaw);
+  if (!Number.isFinite(n)) return null;
+  // P-GSM 900: 1..124, UL = 890 + 0.2*n, DL = UL + 45
+  if (n >= 1 && n <= 124) return { ul: 890 + 0.2 * n, dl: 890 + 0.2 * n + 45 };
+  // E-GSM 900: 975..1023, UL = 890 + 0.2*(n-1024), DL = UL + 45
+  if (n >= 975 && n <= 1023) return { ul: 890 + 0.2 * (n - 1024), dl: 890 + 0.2 * (n - 1024) + 45 };
+  // GSM-850: 128..251, UL = 824.2 + 0.2*(n-128), DL = UL + 45
+  if (n >= 128 && n <= 251) return { ul: 824.2 + 0.2 * (n - 128), dl: 824.2 + 0.2 * (n - 128) + 45 };
+  // DCS-1800: 512..885, UL = 1710.2 + 0.2*(n-512), DL = UL + 95
+  if (n >= 512 && n <= 885) return { ul: 1710.2 + 0.2 * (n - 512), dl: 1710.2 + 0.2 * (n - 512) + 95 };
+  // PCS-1900: 512..810 (重叠 DCS,这里仅 PCS 命中区间留给设备侧约定)
+  return null;
+}
+
+function formatFreqMHz(v: number): string {
+  // 0.2 步长导致浮点误差,保留 1 位小数足够。
+  return `${Math.round(v * 10) / 10}MHz`;
+}
+
+// FrequencyDisplay: 跟随表单内 CurrentArfcn 变化重算 UL/DL。独立组件避免整表单重渲染。
+function FrequencyDisplay({ form, locale }: { form: FormInstance; locale: 'zh-CN' | 'en-US' }) {
+  const arfcn = Form.useWatch('CurrentArfcn', form);
+  const freq = arfcnToFrequencyMHz(arfcn);
+  const labelText = locale === 'zh-CN' ? '频率 (MHz)' : 'Frequency (MHz)';
+  const ulText = locale === 'zh-CN' ? '上行' : 'Uplink';
+  const dlText = locale === 'zh-CN' ? '下行' : 'Downlink';
+  const display = freq
+    ? `${ulText}: ${formatFreqMHz(freq.ul)}  ${dlText}: ${formatFreqMHz(freq.dl)}`
+    : '-';
+  return (
+    <Col span={12}>
+      <Form.Item
+        label={
+          <Space size={4}>
+            <span>{labelText}</span>
+            <Text type="secondary" style={{ fontSize: 12 }}>(只读)</Text>
+          </Space>
+        }
+      >
+        <Input value={display} disabled />
+      </Form.Item>
+    </Col>
+  );
+}
+
+// BoundRuRouteIndexDisplay: BM GSM 专属。监听表单 GsmCellWithRuRelation,
+// 用其值作为 RU 实例 idx,从外部传入的 ruRouteByIdx 中取出 RouteIndex 显示。
+function BoundRuRouteIndexDisplay({
+  form,
+  ruRouteByIdx,
+  locale,
+}: {
+  form: FormInstance;
+  ruRouteByIdx: Map<string, string>;
+  locale: 'zh-CN' | 'en-US';
+}) {
+  const ruRel = Form.useWatch('GsmCellWithRuRelation', form);
+  const ruIdx = ruRel == null ? '' : String(ruRel).trim();
+  const routeIndex = ruIdx && ruRouteByIdx.has(ruIdx) ? ruRouteByIdx.get(ruIdx)! : '-';
+  const labelText = locale === 'zh-CN' ? 'Route Index (绑定 RU)' : 'Route Index (Bound RU)';
+  const display = ruIdx ? `RU ${ruIdx} → ${routeIndex}` : '-';
+  return (
+    <Col span={12}>
+      <Form.Item
+        label={
+          <Space size={4}>
+            <span>{labelText}</span>
+            <Text type="secondary" style={{ fontSize: 12 }}>(只读)</Text>
+          </Space>
+        }
+      >
+        <Input value={display} disabled />
+      </Form.Item>
+    </Col>
+  );
+}
+
 // "上次提交"状态形状由 frontend-core/store/quickSettingsFeedbackStore (CellFeedback) 定义,
 // 提升至 store 持久化,顶层 TabBar 切走再切回不丢反馈。
+
+// LTE EARFCN -> DL 频率(MHz)映射表(3GPP TS 36.101 §5.7.3 子集,常用 BM 频段)。
+const LTE_BAND_DL_BASE: Record<number, { earfcnLow: number; freqLow: number }> = {
+  1: { earfcnLow: 0, freqLow: 2110 },
+  3: { earfcnLow: 1200, freqLow: 1805 },
+  5: { earfcnLow: 2400, freqLow: 869 },
+  7: { earfcnLow: 2750, freqLow: 2620 },
+  8: { earfcnLow: 3450, freqLow: 925 },
+  38: { earfcnLow: 37750, freqLow: 2570 },
+  39: { earfcnLow: 38250, freqLow: 1880 },
+  40: { earfcnLow: 38650, freqLow: 2300 },
+  41: { earfcnLow: 39650, freqLow: 2496 },
+};
+function lteEarfcnToMHz(band: unknown, earfcn: unknown): number | null {
+  const b = Number(band);
+  const e = Number(earfcn);
+  if (!Number.isFinite(b) || !Number.isFinite(e)) return null;
+  const base = LTE_BAND_DL_BASE[b];
+  if (!base) return null;
+  return base.freqLow + 0.1 * (e - base.earfcnLow);
+}
+
+// LteFrequencyDisplay: 跟随 BandIndicator + DLEarfcn 派生 DL 中心频率。
+function LteFrequencyDisplay({ form, locale }: { form: FormInstance; locale: 'zh-CN' | 'en-US' }) {
+  const band = Form.useWatch('BandIndicator', form);
+  const earfcn = Form.useWatch('DLEarfcn', form);
+  const f = lteEarfcnToMHz(band, earfcn);
+  const labelText = locale === 'zh-CN' ? '频率 (MHz)' : 'Frequency (MHz)';
+  const display = f != null ? formatFreqMHz(f) : '-';
+  return (
+    <Col span={12}>
+      <Form.Item
+        label={
+          <Space size={4}>
+            <span>{labelText}</span>
+            <Text type="secondary" style={{ fontSize: 12 }}>(只读)</Text>
+          </Space>
+        }
+      >
+        <Input value={display} disabled />
+      </Form.Item>
+    </Col>
+  );
+}
+
+// CellIdDerivedDisplay: 从 ECI(CellIdentity) 反推每小区 8 位 Cell ID(ECI mod 256)。
+function CellIdDerivedDisplay({ form, locale }: { form: FormInstance; locale: 'zh-CN' | 'en-US' }) {
+  const eci = Form.useWatch('ECI', form);
+  const n = Number(eci);
+  const cid = Number.isFinite(n) ? n % 256 : null;
+  const labelText = locale === 'zh-CN' ? 'Cell ID (ECI%256)' : 'Cell ID (ECI%256)';
+  return (
+    <Col span={12}>
+      <Form.Item
+        label={
+          <Space size={4}>
+            <span>{labelText}</span>
+            <Text type="secondary" style={{ fontSize: 12 }}>(只读)</Text>
+          </Space>
+        }
+      >
+        <Input value={cid != null ? String(cid) : '-'} disabled />
+      </Form.Item>
+    </Col>
+  );
+}
+
+// AntennaPortsAs2T4RDisplay: 由 AntennaPortsCount 派生 2T4R 开关(2 -> OFF, 4 -> ON)。
+function AntennaPortsAs2T4RDisplay({ form, locale }: { form: FormInstance; locale: 'zh-CN' | 'en-US' }) {
+  const ports = Form.useWatch('AntennaPortsCount', form);
+  const n = Number(ports);
+  const labelText = locale === 'zh-CN' ? '2T4R 开关' : '2T4R Switch';
+  const v = n === 4 ? 'ON' : n === 2 ? 'OFF' : '-';
+  return (
+    <Col span={12}>
+      <Form.Item
+        label={
+          <Space size={4}>
+            <span>{labelText}</span>
+            <Text type="secondary" style={{ fontSize: 12 }}>(只读)</Text>
+          </Space>
+        }
+      >
+        <Input value={v} disabled />
+      </Form.Item>
+    </Col>
+  );
+}
 
 function formatTime(at: number): string {
   const d = new Date(at);
@@ -104,6 +277,27 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
     [group, instanceContext],
   );
   const { data: schemaResp, isLoading, refetch } = useParameterSchema(deviceId, commonPrefix);
+
+  // BM GSM 专属:并行拉 RU 节点 schema,用于在 gsm-cell 表单中展示"绑定 RU 的 Route Index"。
+  // 拉取与主 schema 解耦,避免污染 commonPrefix 退化成 Device. 触发全量拉取。
+  const isGsmCell = group.id === 'gsm-cell';
+  const { data: ruSchemaResp } = useParameterSchema(
+    deviceId,
+    'Device.DeviceInfo.RU.',
+    isGsmCell,
+  );
+  const ruRouteByIdx = useMemo(() => {
+    const map = new Map<string, string>();
+    ruSchemaResp?.parameters.forEach((p) => {
+      // 形如 Device.DeviceInfo.RU.<n>.RouteIndex
+      const m = /^Device\.DeviceInfo\.RU\.(\d+)\.RouteIndex$/.exec(p.path);
+      if (m) {
+        const v = p.currentValue ?? '';
+        map.set(m[1], typeof v === 'string' ? v : String(v));
+      }
+    });
+    return map;
+  }, [ruSchemaResp]);
 
   const schemaByPath = useMemo(() => {
     const map = new Map<string, ParameterSchemaItem>();
@@ -356,6 +550,15 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
           {group.params.map((p) => {
             const path = applyInstanceContext(p.standardPath || '', instanceContext);
             const item = schemaByPath.get(path);
+            // 紧贴 ARFCN 之后插入派生的 Frequency(MHz) 显示行(GSM 空口分组专属)。
+            const renderFrequencyAfter = group.id === 'gsm-cell' && p.name === 'CurrentArfcn';
+            // BM GSM 专属:在 BscSelect 后插入"绑定 RU 的 Route Index"派生行。
+            const renderRuRouteAfter = isGsmCell && p.name === 'BscSelect';
+            // BM LTE 派生显示:Frequency / Cell ID / 2T4R 开关。
+            const isLteCell = group.id === 'enb-cell';
+            const renderLteFreqAfter = isLteCell && p.name === 'DLEarfcn';
+            const renderCellIdAfter = isLteCell && p.name === 'ECI';
+            const render2T4RAfter = isLteCell && p.name === 'AntennaPortsCount';
             const writable = item?.writable ?? false;
             const error = fieldErrors[p.name];
             const constraintHint = formatConstraintHint(item);
@@ -372,7 +575,7 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
             );
             const enumMeta = getEffectiveEnumMeta(item?.constraints, path);
             const isEnum = Boolean(enumMeta && enumMeta.values.length > 0);
-            return (
+            const input = (
               <Col span={12} key={p.name}>
                 <Form.Item
                   label={label}
@@ -395,6 +598,32 @@ export default function CellParameterForm({ deviceId, group, instanceContext, lo
                 </Form.Item>
               </Col>
             );
+            return renderFrequencyAfter ? (
+              <Fragment key={p.name}>
+                {input}
+                <FrequencyDisplay form={form} locale={locale} />
+              </Fragment>
+            ) : renderRuRouteAfter ? (
+              <Fragment key={p.name}>
+                {input}
+                <BoundRuRouteIndexDisplay form={form} ruRouteByIdx={ruRouteByIdx} locale={locale} />
+              </Fragment>
+            ) : renderLteFreqAfter ? (
+              <Fragment key={p.name}>
+                {input}
+                <LteFrequencyDisplay form={form} locale={locale} />
+              </Fragment>
+            ) : renderCellIdAfter ? (
+              <Fragment key={p.name}>
+                {input}
+                <CellIdDerivedDisplay form={form} locale={locale} />
+              </Fragment>
+            ) : render2T4RAfter ? (
+              <Fragment key={p.name}>
+                {input}
+                <AntennaPortsAs2T4RDisplay form={form} locale={locale} />
+              </Fragment>
+            ) : input;
           })}
         </Row>
       </Form>
@@ -417,7 +646,8 @@ function formatConstraintHint(schema?: ParameterSchemaItem): string {
   const min = c.minLength ?? (isString ? c.minValue : c.minValue);
   const max = c.maxLength ?? (isString ? c.maxValue : c.maxValue);
   if (min !== undefined || max !== undefined) {
-    const lo = min ?? '-∞';
+    // 字典里没有 min 时按 0 显示（避免对用户出现 -∞ 这种无意义下界）。
+    const lo = min ?? 0;
     const hi = max ?? '∞';
     return isString ? `[长度 ${lo} ~ ${hi}]` : `[${lo} ~ ${hi}]`;
   }

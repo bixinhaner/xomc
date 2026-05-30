@@ -133,6 +133,7 @@ type xmlGroup struct {
 	TitleEn       string     `xml:"titleEn,attr"`
 	MultiInstance string     `xml:"multiInstance,attr"`
 	ObjectPath    string     `xml:"objectPath,attr"`
+	MaxInstances  int        `xml:"maxInstances,attr"`
 	Params        []xmlParam `xml:"param"`
 }
 
@@ -183,6 +184,7 @@ func buildGroups(doc xmlQuickSettings, fileName string) ([]Group, error) {
 			TitleEn:       g.TitleEn,
 			MultiInstance: multi,
 			ObjectPath:    g.ObjectPath,
+			MaxInstances:  g.MaxInstances,
 			Params:        params,
 		})
 	}

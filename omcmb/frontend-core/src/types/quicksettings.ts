@@ -30,6 +30,8 @@ export interface QuickSettingsGroup {
   multiInstance: boolean;
   /** 多实例分组的对象路径前缀(含 {i} 占位符)。 */
   objectPath?: string;
+  /** 多实例分组的最大实例数(仅 multiInstance=true 生效);未配置时为 undefined。 */
+  maxInstances?: number;
   params: QuickSettingsParam[];
 }
 

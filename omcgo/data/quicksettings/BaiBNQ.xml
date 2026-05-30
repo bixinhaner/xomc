@@ -42,7 +42,7 @@
            standardPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.PHY.FrequencyInfoULSIB.ScsSpecificCarrierList.{i}.SCSSpecificCarrier.SubcarrierSpacing"/>
   </group>
        <group id="gnb-nr-neighbor-cell" titleZh="NR 邻区列表" titleEn="NR Neighbor Cell List"
-                             multiInstance="true"
+                             multiInstance="true" maxInstances="32"
                              objectPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.NRCell.{i}.">
               <param name="PLMNID" titleZh="PLMN" titleEn="PLMN" leaf="PLMNID"/>
               <param name="CID" titleZh="小区 ID" titleEn="Cell ID" leaf="CID"/>
@@ -53,7 +53,7 @@
               <param name="TAC" titleZh="TAC" titleEn="TAC" leaf="TAC"/>
        </group>
        <group id="gnb-nr-interfreq" titleZh="NR 异频邻频" titleEn="NR Inter-Frequency Carrier List"
-                             multiInstance="true"
+                             multiInstance="true" maxInstances="8"
                              objectPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.NR.InterFreq.Carrier.{i}.">
               <param name="Enable" titleZh="启用" titleEn="Enable" leaf="Enable"/>
               <param name="SSBFrequency" titleZh="SSB 频点" titleEn="SSB Frequency" leaf="SSBFrequency"/>
@@ -63,7 +63,7 @@
               <param name="FreqBandIndicatorNR" titleZh="频段" titleEn="Band" leaf="FreqBandIndicatorNR"/>
        </group>
        <group id="gnb-lte-neighbor-cell" titleZh="LTE 邻区列表" titleEn="LTE Neighbor Cell List"
-                             multiInstance="true"
+                             multiInstance="true" maxInstances="32"
                              objectPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.NeighborList.LTECell.{i}.">
               <param name="PLMNID" titleZh="PLMN" titleEn="PLMN" leaf="PLMNID"/>
               <param name="CID" titleZh="小区 ID" titleEn="Cell ID" leaf="CID"/>
@@ -73,7 +73,7 @@
               <param name="TAC" titleZh="TAC" titleEn="TAC" leaf="TAC"/>
        </group>
        <group id="gnb-lte-neighbor-freq" titleZh="LTE 邻频列表" titleEn="LTE Neighbor Frequency List"
-                             multiInstance="true"
+                             multiInstance="true" maxInstances="8"
                              objectPath="Device.Services.FAPService.{i}.CellConfig.{i}.NR.RAN.Mobility.ConnMode.EUTRA.Carrier.{i}.">
               <param name="CarrierFreq" titleZh="频点" titleEn="Carrier Frequency" leaf="CarrierFreq"/>
               <param name="AllowedMeasBandwidth" titleZh="测量带宽" titleEn="Allowed Meas Bandwidth" leaf="AllowedMeasBandwidth"/>

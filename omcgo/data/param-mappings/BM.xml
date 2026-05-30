@@ -5,6 +5,7 @@
         <object name="Device.DeviceInfo.EU.{i}.RU." standardPath="Device.DeviceInfo.EU.{i}.RU." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FaultMgmt.CurrentAlarm." standardPath="Device.FaultMgmt.CurrentAlarm." access="READ_ONLY" changeApplies="Immediate"/>
         <object name="Device.FaultMgmt.ExpeditedEvent." standardPath="Device.FaultMgmt.ExpeditedEvent." access="READ_ONLY" changeApplies="Immediate"/>
+        <object name="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.5GCell." access="READ_WRITE" changeApplies="Immediate"/>
         <object name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM." standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.InterRATCell.GSM." access="READ_ONLY" changeApplies="Immediate"/>
@@ -238,6 +239,9 @@
         <param name="Device.Services.FAPService.{i}.Capabilities.LTE.DuplexMode" standardPath="Device.Services.FAPService.{i}.Capabilities.LTE.DuplexMode" access="READ_ONLY" type="STRING" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.Capabilities.MaxTxPower" standardPath="Device.Services.FAPService.{i}.Capabilities.MaxTxPower" access="READ_ONLY" type="U_INT"/>
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.PLMNID" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.PLMNID" access="READ_WRITE" type="STRING" changeApplies="Immediate" min="5" max="6"/>
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.Enable" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.Enable" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.IsPrimary" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.IsPrimary" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.CellReservedForOperatorUse" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.CellReservedForOperatorUse" access="READ_WRITE" type="BOOLEAN" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.TAC" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.TAC" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.CellIdentity" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.CellIdentity" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.NCellChangeHigh" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.Common.NCellChangeHigh" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
@@ -287,6 +291,7 @@
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNDL" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNDL" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNUL" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNUL" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.FreqBandIndicator" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.FreqBandIndicator" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
+        <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.LteCellWithRuList" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.LteCellWithRuList" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="64"/>
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID" access="READ_WRITE" type="U_INT" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ReferenceSignalPower" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ReferenceSignalPower" access="READ_WRITE" type="INT" changeApplies="Immediate" min="-60" max="50"/>
         <param name="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth" standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ULBandwidth" access="READ_WRITE" type="INT" changeApplies="Immediate" mirrorWith="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth"/>
@@ -359,6 +364,7 @@
         <param name="Device.Services.GsmBTSCellDT.{i}.GsmMACTraceMsgType" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmMACTraceMsgType" access="READ_WRITE" type="INT" changeApplies="Immediate" max="255"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.GsmMACTraceNum" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmMACTraceNum" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="128"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.GsmMACTtiSwitch" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmMACTtiSwitch" access="READ_WRITE" type="INT" changeApplies="Immediate" max="1"/>
+        <param name="Device.Services.GsmBTSCellDT.{i}.GsmTxAntNum" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmTxAntNum" access="READ_ONLY" type="INT" changeApplies="Immediate" max="16"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.GsmUlPhyDelayTime" standardPath="Device.Services.GsmBTSCellDT.{i}.GsmUlPhyDelayTime" access="READ_WRITE" type="INT" changeApplies="Immediate"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.IPAUnitID" standardPath="Device.Services.GsmBTSCellDT.{i}.IPAUnitID" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="64"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.InUse" standardPath="Device.Services.GsmBTSCellDT.{i}.InUse" access="READ_WRITE" type="INT" changeApplies="Immediate" max="1"/>
@@ -366,7 +372,7 @@
         <param name="Device.Services.GsmBTSCellDT.{i}.NetworkCountryCode" standardPath="Device.Services.GsmBTSCellDT.{i}.NetworkCountryCode" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="8"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.OMLRemoteIP" standardPath="Device.Services.GsmBTSCellDT.{i}.OMLRemoteIP" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="64"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.OMLRemoteIPBak" standardPath="Device.Services.GsmBTSCellDT.{i}.OMLRemoteIPBak" access="READ_WRITE" type="STRING" changeApplies="Immediate" max="64"/>
-        <param name="Device.Services.GsmBTSCellDT.{i}.OpState" standardPath="Device.Services.GsmBTSCellDT.{i}.OpState" access="READ_WRITE" type="INT" changeApplies="Immediate" max="7"/>
+        <param name="Device.Services.GsmBTSCellDT.{i}.OpState" standardPath="Device.Services.GsmBTSCellDT.{i}.OpState" access="READ_ONLY" type="INT" changeApplies="Immediate" max="7"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.PhyCatchIq" standardPath="Device.Services.GsmBTSCellDT.{i}.PhyCatchIq" access="READ_WRITE" type="INT" changeApplies="Immediate" max="2"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.PhyStop" standardPath="Device.Services.GsmBTSCellDT.{i}.PhyStop" access="READ_WRITE" type="INT" changeApplies="Immediate" max="1"/>
         <param name="Device.Services.GsmBTSCellDT.{i}.RTPJitterBuffer" standardPath="Device.Services.GsmBTSCellDT.{i}.RTPJitterBuffer" access="READ_WRITE" type="INT" changeApplies="Immediate" max="1000"/>
@@ -485,68 +491,5 @@
         <param name="Device.Services.FAPService.9.CellConfig.LTE.RAN.RF.X_COM_RadioEnable" standardPath="Device.Services.FAPService.9.CellConfig.LTE.RAN.RF.X_COM_RadioEnable" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.9.FAPControl.LTE.Gateway.ExistPlmnidList" standardPath="Device.Services.FAPService.9.FAPControl.LTE.Gateway.ExistPlmnidList" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
         <param name="Device.Services.FAPService.9.FAPControl.LTE.InUse" standardPath="Device.Services.FAPService.9.FAPControl.LTE.InUse" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.BscSelect" standardPath="Device.Services.GsmBTSCellDT.1.BscSelect" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.CellStateControl" standardPath="Device.Services.GsmBTSCellDT.1.CellStateControl" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.CurrLocAreaCode" standardPath="Device.Services.GsmBTSCellDT.1.CurrLocAreaCode" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.CurrentArfcn" standardPath="Device.Services.GsmBTSCellDT.1.CurrentArfcn" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.GsmBSIC" standardPath="Device.Services.GsmBTSCellDT.1.GsmBSIC" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.GsmBtsRFPower" standardPath="Device.Services.GsmBTSCellDT.1.GsmBtsRFPower" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.GsmCellID" standardPath="Device.Services.GsmBTSCellDT.1.GsmCellID" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.GsmCellWithRuRelation" standardPath="Device.Services.GsmBTSCellDT.1.GsmCellWithRuRelation" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.GsmMACStubVal" standardPath="Device.Services.GsmBTSCellDT.1.GsmMACStubVal" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.GsmMACTraceMsgType" standardPath="Device.Services.GsmBTSCellDT.1.GsmMACTraceMsgType" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.GsmMACTraceNum" standardPath="Device.Services.GsmBTSCellDT.1.GsmMACTraceNum" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.GsmMACTtiSwitch" standardPath="Device.Services.GsmBTSCellDT.1.GsmMACTtiSwitch" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.IPAUnitID" standardPath="Device.Services.GsmBTSCellDT.1.IPAUnitID" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.InUse" standardPath="Device.Services.GsmBTSCellDT.1.InUse" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.MobileNetworkCode" standardPath="Device.Services.GsmBTSCellDT.1.MobileNetworkCode" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.NetworkCountryCode" standardPath="Device.Services.GsmBTSCellDT.1.NetworkCountryCode" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.OMLRemoteIP" standardPath="Device.Services.GsmBTSCellDT.1.OMLRemoteIP" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.OMLRemoteIPBak" standardPath="Device.Services.GsmBTSCellDT.1.OMLRemoteIPBak" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.OpState" standardPath="Device.Services.GsmBTSCellDT.1.OpState" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.RfState" standardPath="Device.Services.GsmBTSCellDT.1.RfState" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.1.UeCount" standardPath="Device.Services.GsmBTSCellDT.1.UeCount" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.BscSelect" standardPath="Device.Services.GsmBTSCellDT.2.BscSelect" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.CellStateControl" standardPath="Device.Services.GsmBTSCellDT.2.CellStateControl" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.CurrLocAreaCode" standardPath="Device.Services.GsmBTSCellDT.2.CurrLocAreaCode" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.CurrentArfcn" standardPath="Device.Services.GsmBTSCellDT.2.CurrentArfcn" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.GsmBSIC" standardPath="Device.Services.GsmBTSCellDT.2.GsmBSIC" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.GsmBtsRFPower" standardPath="Device.Services.GsmBTSCellDT.2.GsmBtsRFPower" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.GsmCellID" standardPath="Device.Services.GsmBTSCellDT.2.GsmCellID" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.GsmCellWithRuRelation" standardPath="Device.Services.GsmBTSCellDT.2.GsmCellWithRuRelation" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.GsmMACStubVal" standardPath="Device.Services.GsmBTSCellDT.2.GsmMACStubVal" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.GsmMACTraceMsgType" standardPath="Device.Services.GsmBTSCellDT.2.GsmMACTraceMsgType" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.GsmMACTraceNum" standardPath="Device.Services.GsmBTSCellDT.2.GsmMACTraceNum" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.GsmMACTtiSwitch" standardPath="Device.Services.GsmBTSCellDT.2.GsmMACTtiSwitch" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.IPAUnitID" standardPath="Device.Services.GsmBTSCellDT.2.IPAUnitID" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.InUse" standardPath="Device.Services.GsmBTSCellDT.2.InUse" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.MobileNetworkCode" standardPath="Device.Services.GsmBTSCellDT.2.MobileNetworkCode" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.NetworkCountryCode" standardPath="Device.Services.GsmBTSCellDT.2.NetworkCountryCode" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.OMLRemoteIP" standardPath="Device.Services.GsmBTSCellDT.2.OMLRemoteIP" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.OMLRemoteIPBak" standardPath="Device.Services.GsmBTSCellDT.2.OMLRemoteIPBak" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.OpState" standardPath="Device.Services.GsmBTSCellDT.2.OpState" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.RfState" standardPath="Device.Services.GsmBTSCellDT.2.RfState" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.2.UeCount" standardPath="Device.Services.GsmBTSCellDT.2.UeCount" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.BscSelect" standardPath="Device.Services.GsmBTSCellDT.3.BscSelect" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.CellStateControl" standardPath="Device.Services.GsmBTSCellDT.3.CellStateControl" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.CurrLocAreaCode" standardPath="Device.Services.GsmBTSCellDT.3.CurrLocAreaCode" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.CurrentArfcn" standardPath="Device.Services.GsmBTSCellDT.3.CurrentArfcn" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.GsmBSIC" standardPath="Device.Services.GsmBTSCellDT.3.GsmBSIC" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.GsmBtsRFPower" standardPath="Device.Services.GsmBTSCellDT.3.GsmBtsRFPower" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.GsmCellID" standardPath="Device.Services.GsmBTSCellDT.3.GsmCellID" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.GsmCellWithRuRelation" standardPath="Device.Services.GsmBTSCellDT.3.GsmCellWithRuRelation" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.GsmMACStubVal" standardPath="Device.Services.GsmBTSCellDT.3.GsmMACStubVal" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.GsmMACTraceMsgType" standardPath="Device.Services.GsmBTSCellDT.3.GsmMACTraceMsgType" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.GsmMACTraceNum" standardPath="Device.Services.GsmBTSCellDT.3.GsmMACTraceNum" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.GsmMACTtiSwitch" standardPath="Device.Services.GsmBTSCellDT.3.GsmMACTtiSwitch" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.IPAUnitID" standardPath="Device.Services.GsmBTSCellDT.3.IPAUnitID" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.InUse" standardPath="Device.Services.GsmBTSCellDT.3.InUse" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.MobileNetworkCode" standardPath="Device.Services.GsmBTSCellDT.3.MobileNetworkCode" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.NetworkCountryCode" standardPath="Device.Services.GsmBTSCellDT.3.NetworkCountryCode" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.OMLRemoteIP" standardPath="Device.Services.GsmBTSCellDT.3.OMLRemoteIP" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.OMLRemoteIPBak" standardPath="Device.Services.GsmBTSCellDT.3.OMLRemoteIPBak" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.OpState" standardPath="Device.Services.GsmBTSCellDT.3.OpState" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.RfState" standardPath="Device.Services.GsmBTSCellDT.3.RfState" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
-        <param name="Device.Services.GsmBTSCellDT.3.UeCount" standardPath="Device.Services.GsmBTSCellDT.3.UeCount" access="READ_WRITE" type="STRING" changeApplies="Immediate"/>
     </parameters>
 </parameterModel>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Card, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography, message, notification } from 'antd';
+import { Button, Card, Input, Modal, Popconfirm, Select, Space, Table, Tag, Tooltip, Typography, message, notification } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CloseCircleOutlined, DeleteOutlined, EditOutlined, PlusOutlined, SendOutlined, SyncOutlined } from '@ant-design/icons';
 import type { ColumnType } from 'antd/es/table';
 import { useQueryClient } from '@tanstack/react-query';
@@ -422,7 +422,7 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
     }
   };
 
-  const displayColumns = useMemo(() => {
+  const displayColumns = useMemo<SpecialColumnSpec[]>(() => {
     if (!specialColumns) {
       return group.params.map((param) => ({
         key: param.leaf || param.name,
@@ -663,10 +663,21 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
   ];
 
   const title = locale === 'zh-CN' ? group.titleZh : group.titleEn;
+  const maxInstances = group.maxInstances && group.maxInstances > 0 ? group.maxInstances : undefined;
+  const reachedMax = maxInstances !== undefined && instanceIds.length >= maxInstances;
+  const cardTitle = maxInstances !== undefined
+    ? `${title}（${instanceIds.length}/${maxInstances}）`
+    : title;
+  const addDisabled = !canAdd || reachedMax || updateMutation.isPending || addMutation.isPending;
+  const addBtn = (
+    <Button type="default" icon={<PlusOutlined />} onClick={openAddModal} disabled={addDisabled}>
+      新 增
+    </Button>
+  );
 
   return (
     <Card
-      title={title}
+      title={cardTitle}
       size="small"
       extra={
         <Space>
@@ -678,9 +689,13 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
               </Tag>
             );
           })()}
-          <Button type="default" icon={<PlusOutlined />} onClick={openAddModal} disabled={!canAdd || updateMutation.isPending || addMutation.isPending}>
-            新 增
-          </Button>
+          {reachedMax ? (
+            <Tooltip title={`已达上限 ${maxInstances}，如需新增请先删除其它实例`}>
+              <span style={{ display: 'inline-block', cursor: 'not-allowed' }}>{addBtn}</span>
+            </Tooltip>
+          ) : (
+            addBtn
+          )}
         </Space>
       }
       style={{ marginBottom: 16 }}
@@ -692,7 +707,8 @@ export default function MultiInstanceTable({ deviceId, group, instanceContext, l
         loading={isLoading}
         size="small"
         pagination={false}
-        scroll={{ x: 'max-content' }}
+        scroll={{ x: 'max-content', y: 240 }}
+        sticky
       />
       <Modal
         title={editModal?.mode === 'add' ? `${title} · 新增实例` : `${title} · 修改实例 ${editModal?.instanceId ?? ''}`}

@@ -19,7 +19,9 @@ type Group struct {
 	TitleEn       string  `json:"titleEn"`
 	MultiInstance bool    `json:"multiInstance"`
 	ObjectPath    string  `json:"objectPath,omitempty"` // 仅 multiInstance=true 时填,含 {i} 占位符
-	Params        []Param `json:"params"`
+	// MaxInstances 多实例分组的最大实例数(仅 multiInstance=true 生效)。0 表示未指定。
+	MaxInstances int     `json:"maxInstances,omitempty"`
+	Params       []Param `json:"params"`
 }
 
 // Param 是分组下的单个参数。

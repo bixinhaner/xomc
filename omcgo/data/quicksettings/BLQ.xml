@@ -32,7 +32,7 @@
   </group>
 
   <group id="enb-neighbor-freq" titleZh="异频载波列表" titleEn="Inter-Frequency Carrier List"
-         multiInstance="true"
+         multiInstance="true" maxInstances="8"
          objectPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.">
     <param name="EARFCN" titleZh="频点" titleEn="EARFCN" leaf="EUTRACarrierARFCN"/>
     <param name="QOffsetRange" titleZh="频点偏移" titleEn="Q-OffsetRange" leaf="QOffsetFreq"/>
@@ -46,7 +46,7 @@
   </group>
 
   <group id="enb-neighbor-cell" titleZh="邻区列表" titleEn="Neighbor Cell List"
-         multiInstance="true"
+         multiInstance="true" maxInstances="32"
          objectPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.">
     <param name="CellID" titleZh="小区ID" titleEn="Cell ID" leaf="CID"/>
     <param name="PLMN" titleZh="PLMN" titleEn="PLMN" leaf="PLMNID"/>

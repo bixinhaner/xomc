@@ -29,7 +29,7 @@
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.RootSequenceIndex"/>
   </group>
   <group id="enb-neighbor-cell" titleZh="邻区列表" titleEn="Neighbor Cell List"
-         multiInstance="true"
+         multiInstance="true" maxInstances="32"
          objectPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.">
     <param name="CellID" titleZh="小区ID" titleEn="Cell ID" leaf="CID"/>
     <param name="PLMN" titleZh="PLMN" titleEn="PLMN" leaf="PLMNID"/>

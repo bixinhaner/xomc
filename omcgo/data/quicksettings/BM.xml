@@ -5,35 +5,53 @@
 -->
 <quickSettings paramModel="BM">
   <group id="enb-cell" titleZh="小区参数" titleEn="Cell Parameters">
-    <param name="ECI" titleZh="ECI" titleEn="ECI"
+    <param name="LteCellWithRuList" titleZh="Route Index" titleEn="Route Index"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.LteCellWithRuList"/>
+    <param name="BandIndicator" titleZh="频段标识" titleEn="Band"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.FreqBandIndicator"/>
+    <param name="DLBandWidth" titleZh="带宽" titleEn="Bandwidth"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth"/>
+    <param name="DLEarfcn" titleZh="频点" titleEn="EARFCN"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNDL"/>
+    <param name="ULEarfcn" titleZh="频点(UL)" titleEn="EARFCN UL"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNUL"/>
+    <param name="PCI" titleZh="PCI" titleEn="PCI"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID"/>
+    <param name="ECI" titleZh="ECI" titleEn="ECI(ECI=eNB_ID*256+Cell_ID)"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Common.CellIdentity"/>
     <param name="CellName" titleZh="小区名称" titleEn="Cell Name"
            standardPath="Device.Services.FAPService.{i}.AccessMgmt.LTE.HNBName"/>
     <param name="TAC" titleZh="TAC" titleEn="TAC"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.TAC"/>
-    <param name="PCI" titleZh="PCI" titleEn="PCI"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.PhyCellID"/>
+    <param name="RadioEnable" titleZh="RU 射频开关" titleEn="RU RF Switch"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_RadioEnable"/>
+    <param name="AntennaPortsCount" titleZh="天线端口数" titleEn="Antenna Ports"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.AntennaInfo.AntennaPortsCount"/>
     <param name="MaxTxPower" titleZh="最大发射功率" titleEn="Max Tx Power"
            standardPath="Device.Services.FAPService.{i}.Capabilities.MaxTxPower"/>
+    <param name="PowerClass" titleZh="发射功率(dBm)" titleEn="Transmission Power(dBm)"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_MaxTxPowerExpanded"/>
+    <param name="ReferenceSignalPower" titleZh="参考信号功率" titleEn="Reference Signal Power"
+           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.ReferenceSignalPower"/>
     <param name="BandSupport" titleZh="频段支持" titleEn="Band Support"
            standardPath="Device.Services.FAPService.{i}.Capabilities.LTE.BandsSupported"/>
-    <param name="BandIndicator" titleZh="频段标识" titleEn="Band Indicator"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.FreqBandIndicator"/>
-    <param name="DLEarfcn" titleZh="频点" titleEn="EARFCN"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.EARFCNDL"/>
-    <param name="DLBandWidth" titleZh="带宽" titleEn="Bandwidth"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.DLBandwidth"/>
     <param name="SubFrameAssignment" titleZh="子帧配比" titleEn="SubFrame Assignment"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SubFrameAssignment"/>
     <param name="SpecialSubFramePatterns" titleZh="特殊子帧配置" titleEn="Special SubFrame Patterns"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.TDDFrame.SpecialSubframePatterns"/>
     <param name="RootSequenceIndex" titleZh="根序列索引" titleEn="Root Sequence Index"
            standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.PHY.PRACH.RootSequenceIndex"/>
-    <param name="PowerClass" titleZh="功率等级(*2dbm)" titleEn="Power Class (*2dbm)"
-           standardPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.RF.X_COM_MaxTxPowerExpanded"/>
+  </group>
+  <group id="enb-plmn" titleZh="PLMN 列表" titleEn="PLMN List"
+         multiInstance="true" maxInstances="6"
+         objectPath="Device.Services.FAPService.{i}.CellConfig.LTE.EPC.PLMNList.{i}.">
+    <param name="PLMNID" titleZh="PLMN" titleEn="PLMN" leaf="PLMNID"/>
+    <param name="Enable" titleZh="启用" titleEn="Enable" leaf="Enable"/>
+    <param name="IsPrimary" titleZh="主 PLMN" titleEn="Is Primary" leaf="IsPrimary"/>
+    <param name="CellReservedForOperatorUse" titleZh="运营商保留" titleEn="Operator Reserved" leaf="CellReservedForOperatorUse"/>
   </group>
   <group id="enb-neighbor-freq" titleZh="异频载波列表" titleEn="Inter-Frequency Carrier List"
-         multiInstance="true"
+         multiInstance="true" maxInstances="8"
          objectPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.Mobility.IdleMode.InterFreq.Carrier.{i}.">
     <param name="EARFCN" titleZh="频点" titleEn="EARFCN" leaf="EUTRACarrierARFCN"/>
     <param name="QOffsetRange" titleZh="频点偏移" titleEn="Q-OffsetRange" leaf="QOffsetFreq"/>
@@ -45,7 +63,7 @@
     <param name="ReselectionPriority" titleZh="重选优先级" titleEn="Reselection Priority" leaf="CellReselectionPriority"/>
   </group>
   <group id="enb-neighbor-cell" titleZh="邻区列表" titleEn="Neighbor Cell List"
-         multiInstance="true"
+         multiInstance="true" maxInstances="32"
          objectPath="Device.Services.FAPService.{i}.CellConfig.LTE.RAN.NeighborList.LTECell.{i}.">
     <param name="CellID" titleZh="小区ID" titleEn="Cell ID" leaf="CID"/>
     <param name="PLMN" titleZh="PLMN" titleEn="PLMN" leaf="PLMNID"/>
@@ -53,5 +71,81 @@
     <param name="PCI" titleZh="PCI" titleEn="PCI" leaf="PhyCellID"/>
     <param name="QOffset" titleZh="QOffset" titleEn="QOffset" leaf="QOffset"/>
     <param name="CIO" titleZh="CIO" titleEn="CIO" leaf="CIO"/>
+  </group>
+  <!--
+    GSM 小区参数（BM 制式切换 GSM 时显示）。
+    前端按 group.objectPath/standardPath 是否以 Device.Services.GsmBTSCellDT. 起始
+    判定 GSM 分组，进而启用"制式: LTE/GSM"切换器（见 QuickSettingsTab/index.tsx）。
+    字段对照截图 GSM Cell Settings 表：
+      Cell Status   ← OpState           (READ_WRITE,   max=7)
+      RF Status     ← RfState           (READ_WRITE,   max=2)
+      UE Connections← UeCount           (READ_ONLY)
+      Band          ← GsmBtsBand        (READ_WRITE)
+      Cell ID       ← GsmCellID         (READ_ONLY,    max=65535)
+      LAC           ← CurrLocAreaCode   (READ_WRITE,   max=65535)
+      MNC           ← MobileNetworkCode (READ_WRITE,   max=8)
+      MCC           ← NetworkCountryCode(READ_WRITE,   max=8)
+      BSIC          ← GsmBSIC           (READ_ONLY,    max=65535)
+      CPRI ID       ← IPAUnitID         (READ_WRITE)
+      BSC Select    ← BscSelect         (READ_ONLY,    max=255)
+      ARFCN         ← CurrentArfcn      (READ_WRITE,   max=65535)
+      RF Power      ← GsmBtsRFPower     (READ_WRITE,   max=43)
+      TRX 数量      ← TrxNum            (READ_ONLY,    max=16)
+    Abis Link Status 截图字段在 BM 字典中无对应 standardPath，先不暴露，后续若设备
+    侧补齐 LinkState 等节点再追加。
+  -->
+  <group id="gsm-cell" titleZh="GSM 空口参数" titleEn="Air Interface Settings">
+    <param name="OpState" titleZh="小区状态" titleEn="Cell Status"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.OpState"/>
+    <param name="RfState" titleZh="RF 状态" titleEn="RF Status"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.RfState"/>
+    <param name="UeCount" titleZh="UE 连接数" titleEn="UE Connections"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.UeCount"/>
+    <param name="GsmBtsBand" titleZh="频段" titleEn="Band"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.GsmBtsBand"/>
+    <param name="GsmCellID" titleZh="小区ID" titleEn="Cell ID"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.GsmCellID"/>
+    <param name="CurrLocAreaCode" titleZh="位置区域码 LAC" titleEn="Location Area Code"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.CurrLocAreaCode"/>
+    <param name="MobileNetworkCode" titleZh="MNC" titleEn="MNC"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.MobileNetworkCode"/>
+    <param name="NetworkCountryCode" titleZh="MCC" titleEn="MCC"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.NetworkCountryCode"/>
+    <param name="GsmBSIC" titleZh="BSIC" titleEn="BSIC"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.GsmBSIC"/>
+    <param name="BscSelect" titleZh="BSC Select" titleEn="BSC Select"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.BscSelect"/>
+    <param name="CurrentArfcn" titleZh="ARFCN" titleEn="ARFCN"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.CurrentArfcn"/>
+    <param name="GsmBtsRFPower" titleZh="发射功率(dBm)" titleEn="Transmission Power(dBm)"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.GsmBtsRFPower"/>
+    <!-- TRX 数量: BM 实际上报 GsmTxAntNum,字典中同样走该路径;TrxNum 未上报默认 0,已废弃。 -->
+    <param name="GsmTxAntNum" titleZh="TRX 数量" titleEn="TRX Count"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.GsmTxAntNum"/>
+    <param name="GsmCellWithRuRelation" titleZh="RU 天线通道(AXC ID)" titleEn="RU Antenna Path AXC ID"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.GsmCellWithRuRelation"/>
+  </group>
+  <!--
+    Abis 接口配置：截图中的 ipa / Unit ID 在字典里合并为单字段 IPAUnitID（值形如 "8282-36"）。
+    Remote IP / Remote IP Backup 直接对应 OMLRemoteIP / OMLRemoteIPBak。
+  -->
+  <group id="gsm-abis" titleZh="Abis 接口" titleEn="Abis Settings">
+    <param name="IPAUnitID" titleZh="ipa-Unit ID" titleEn="ipa-Unit ID"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.IPAUnitID"/>
+    <param name="OMLRemoteIP" titleZh="Remote IP" titleEn="Remote IP"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.OMLRemoteIP"/>
+    <param name="OMLRemoteIPBak" titleZh="Remote IP 备份" titleEn="Remote IP Backup"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.OMLRemoteIPBak"/>
+  </group>
+  <!-- Trace Log: CellDt 开关用 GsmMACTtiSwitch（INT max=1，0=OFF/1=ON）。 -->
+  <group id="gsm-trace" titleZh="跟踪日志" titleEn="Trace Log">
+    <param name="GsmMACTtiSwitch" titleZh="CellDt" titleEn="CellDt"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.GsmMACTtiSwitch"/>
+    <param name="GsmMACTraceMsgType" titleZh="跟踪消息类型" titleEn="Trace Message Type"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.GsmMACTraceMsgType"/>
+    <param name="GsmMACStubVal" titleZh="桩值 Stub Value" titleEn="Stub Value"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.GsmMACStubVal"/>
+    <param name="GsmMACTraceNum" titleZh="跟踪编号 Trace Num" titleEn="Trace Num"
+           standardPath="Device.Services.GsmBTSCellDT.{i}.GsmMACTraceNum"/>
   </group>
 </quickSettings>
