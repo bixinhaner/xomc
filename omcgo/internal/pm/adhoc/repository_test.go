@@ -208,3 +208,51 @@ func Test_Repository_InsertResultsRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, count)
 }
+
+// T-0186：运行历史写入 + 倒序查询 + 分页 round-trip。
+func Test_Repository_TaskRuns_OrderAndPaginate(t *testing.T) {
+	pool := openPoolOrSkip(t)
+	defer pool.Close()
+	r := NewPgRepository(pool)
+	ctx := context.Background()
+
+	taskID := uuid.New()
+	defer func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM pm_adhoc_task_runs WHERE task_id=$1`, taskID)
+	}()
+
+	// run_seq 自增：连续插 3 次
+	base := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	for i := 0; i < 3; i++ {
+		seq, err := r.NextRunSeq(ctx, taskID)
+		require.NoError(t, err)
+		assert.Equal(t, i+1, seq, "run_seq 应自增")
+		started := base.Add(time.Duration(i) * time.Hour)
+		runID, err := r.InsertRun(ctx, TaskRun{
+			TaskID: taskID, RunSeq: seq, Granularity: "hourly", Dimension: "device",
+			Status: StatusRunning, StartedAt: started,
+		})
+		require.NoError(t, err)
+		// 偶数成功，最后一个失败
+		if i == 2 {
+			require.NoError(t, r.FinishRun(ctx, runID, StatusFailed, 0, "boom"))
+		} else {
+			require.NoError(t, r.FinishRun(ctx, runID, StatusSucceeded, 10, ""))
+		}
+	}
+
+	// 倒序：最新（run_seq=3，started 最大）在最前
+	runs, err := r.ListRuns(ctx, taskID, 50, 0)
+	require.NoError(t, err)
+	require.Len(t, runs, 3)
+	assert.Equal(t, 3, runs[0].RunSeq, "倒序首行应是最新一次")
+	assert.Equal(t, StatusFailed, runs[0].Status)
+	assert.Equal(t, "boom", runs[0].Error)
+	assert.Equal(t, 1, runs[2].RunSeq)
+
+	// 分页：limit=1 offset=1 → 中间那次（run_seq=2）
+	page, err := r.ListRuns(ctx, taskID, 1, 1)
+	require.NoError(t, err)
+	require.Len(t, page, 1)
+	assert.Equal(t, 2, page[0].RunSeq)
+}

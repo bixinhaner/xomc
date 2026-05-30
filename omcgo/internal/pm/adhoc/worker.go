@@ -3,8 +3,10 @@ package adhoc
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 )
@@ -91,12 +93,22 @@ func (w *Worker) runOne(ctx context.Context, task *Task) {
 		zap.Int("granularity_count", len(task.Granularities)),
 	)
 
+	// T-0186：跑前落一行运行记录（status=running），快照粒度/维度/时间窗。
+	// queued_at 取 worker 抢到任务的时刻（best-effort，pm_tasks 不单独记入队时间）。
+	runID := w.insertRun(ctx, task)
+
 	rowsTotal, err := w.executor.ExecuteOneshot(ctx, task)
 
 	finalStatus := w.terminalStatus(task, err)
 	errMsg := ""
 	if err != nil {
 		errMsg = err.Error()
+	}
+
+	// T-0186：跑后把运行记录切终态。run 是"单次执行视角"——continuous 任务整体终态
+	// 是 scheduled（等下次 tick），但本次 run 已成功执行完毕，记 succeeded。
+	if runID != uuid.Nil {
+		w.finishRun(ctx, runID, runTerminalStatus(err), rowsTotal, errMsg)
 	}
 
 	// 切终态时不动 progress（executor 内已设到 100）
@@ -115,7 +127,7 @@ func (w *Worker) runOne(ctx context.Context, task *Task) {
 		zap.Error(err))
 }
 
-// terminalStatus 按 mode + error 决定终态。
+// terminalStatus 按 mode + error 决定 pm_tasks 任务终态。
 func (w *Worker) terminalStatus(task *Task, err error) Status {
 	if err != nil {
 		return StatusFailed
@@ -124,6 +136,61 @@ func (w *Worker) terminalStatus(task *Task, err error) Status {
 		return StatusScheduled
 	}
 	return StatusSucceeded
+}
+
+// runTerminalStatus 决定单次运行记录（pm_adhoc_task_runs）的终态。
+// 与任务终态不同：run 是单次执行视角，无 scheduled 概念 —— 跑成功就是 succeeded（含 continuous），失败为 failed。
+func runTerminalStatus(err error) Status {
+	if err != nil {
+		return StatusFailed
+	}
+	return StatusSucceeded
+}
+
+// insertRun 跑前落一行运行记录（status=running）。失败仅 log 不阻塞执行，返回 uuid.Nil。
+func (w *Worker) insertRun(ctx context.Context, task *Task) uuid.UUID {
+	seq, err := w.repo.NextRunSeq(ctx, task.ID)
+	if err != nil {
+		w.logger.Warn("next run seq failed; skip run record",
+			zap.String("task_id", task.ID.String()), zap.Error(err))
+		return uuid.Nil
+	}
+	now := time.Now()
+	run := TaskRun{
+		TaskID:      task.ID,
+		RunSeq:      seq,
+		Granularity: strings.Join(task.Granularities, ","),
+		Dimension:   string(task.Dimension),
+		Status:      StatusRunning,
+		QueuedAt:    &now, // best-effort：worker 抢到任务时刻
+		StartedAt:   now,
+	}
+	if !task.WindowStart.IsZero() {
+		ws := task.WindowStart
+		run.WindowStart = &ws
+	}
+	if !task.WindowEnd.IsZero() {
+		we := task.WindowEnd
+		run.WindowEnd = &we
+	}
+	runID, err := w.repo.InsertRun(ctx, run)
+	if err != nil {
+		w.logger.Warn("insert run record failed; continue execution",
+			zap.String("task_id", task.ID.String()), zap.Error(err))
+		return uuid.Nil
+	}
+	return runID
+}
+
+// finishRun 跑后把运行记录切终态。失败仅 log。
+func (w *Worker) finishRun(ctx context.Context, runID uuid.UUID, status Status, rowsTotal int, errMsg string) {
+	if err := w.repo.FinishRun(context.Background(), runID, status, rowsTotal, errMsg); err != nil {
+		w.logger.Error("finish run record failed",
+			zap.String("run_id", runID.String()),
+			zap.String("status", string(status)),
+			zap.Error(err))
+	}
+	_ = ctx
 }
 
 // ── ContinuousScheduler ──────────────────────────────────────────────────

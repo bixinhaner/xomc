@@ -6,11 +6,18 @@ import http from '../http';
 import type {
   AdhocTask,
   AdhocResultRow,
+  AdhocTaskRun,
+  AdhocStatus,
   CreateAdhocTaskInput,
   BackendAdhocTask,
   BackendAdhocResultRow,
+  BackendAdhocTaskRun,
 } from '../../types/pmAdhoc';
-import { mapBackendAdhocTask, mapBackendAdhocResult } from '../../types/pmAdhoc';
+import {
+  mapBackendAdhocTask,
+  mapBackendAdhocResult,
+  mapBackendAdhocTaskRun,
+} from '../../types/pmAdhoc';
 
 interface ListResponse {
   items: BackendAdhocTask[];
@@ -22,9 +29,21 @@ interface ResultsResponse {
   total: number;
 }
 
+interface RunsResponse {
+  items: BackendAdhocTaskRun[];
+  total: number;
+}
+
+/** list 过滤入参（T-0186：分内置区/自建区）。 */
+export interface AdhocListFilter {
+  isBuiltin?: boolean;
+}
+
 export const pmAdhocApi = {
-  async list(): Promise<AdhocTask[]> {
-    const { data } = await http.get<ListResponse>('/pm/adhoc/tasks');
+  async list(filter?: AdhocListFilter): Promise<AdhocTask[]> {
+    const params: Record<string, unknown> = {};
+    if (filter?.isBuiltin !== undefined) params.is_builtin = filter.isBuiltin;
+    const { data } = await http.get<ListResponse>('/pm/adhoc/tasks', { params });
     return (data.items ?? []).map(mapBackendAdhocTask);
   },
   async get(id: string): Promise<AdhocTask> {
@@ -59,6 +78,12 @@ export const pmAdhocApi = {
     });
     return (data.items ?? []).map(mapBackendAdhocResult);
   },
+  async runs(id: string, limit = 50, offset = 0): Promise<AdhocTaskRun[]> {
+    const { data } = await http.get<RunsResponse>(`/pm/adhoc/tasks/${id}/runs`, {
+      params: { limit, offset },
+    });
+    return (data.items ?? []).map(mapBackendAdhocTaskRun);
+  },
 };
 
 // Mock — 简化版（不实现完整生命周期，仅保证 UI 可调）
@@ -85,7 +110,10 @@ const mockTasks: AdhocTask[] = [
 ];
 
 export const pmAdhocMock: typeof pmAdhocApi = {
-  async list() {
+  async list(filter?: AdhocListFilter) {
+    if (filter?.isBuiltin !== undefined) {
+      return mockTasks.filter((t) => t.isBuiltin === filter.isBuiltin);
+    }
     return [...mockTasks];
   },
   async get(id) {
@@ -123,5 +151,38 @@ export const pmAdhocMock: typeof pmAdhocApi = {
   },
   async results() {
     return [];
+  },
+  async runs(id: string) {
+    // 简化 mock：返回两条运行记录（一成一败）便于 UI 调试
+    const now = Date.now();
+    return [
+      {
+        id: `${id}-run-2`,
+        taskId: id,
+        runSeq: 2,
+        granularity: 'hourly',
+        dimension: 'device',
+        windowStart: new Date(now - 3600_000).toISOString(),
+        windowEnd: new Date(now).toISOString(),
+        status: 'succeeded' as AdhocStatus,
+        queuedAt: new Date(now - 120_000).toISOString(),
+        startedAt: new Date(now - 110_000).toISOString(),
+        finishedAt: new Date(now - 100_000).toISOString(),
+        rowsTotal: 24,
+      },
+      {
+        id: `${id}-run-1`,
+        taskId: id,
+        runSeq: 1,
+        granularity: 'hourly',
+        dimension: 'device',
+        status: 'failed' as AdhocStatus,
+        queuedAt: new Date(now - 7200_000).toISOString(),
+        startedAt: new Date(now - 7190_000).toISOString(),
+        finishedAt: new Date(now - 7180_000).toISOString(),
+        error: '聚合源数据缺失（模拟失败）',
+        rowsTotal: 0,
+      },
+    ];
   },
 };

@@ -1,24 +1,45 @@
 /**
  * T-0164-P7 / G7 自定义聚合任务管理页面。
  *
- * 左侧 TaskList 列表 + 右侧 ResultsViewer + 顶部 CreateTaskDrawer。
+ * T-0186：
+ *   - 列表分两区：内置区（is_builtin=true）+ 自建区（is_builtin=false），各一张 Table。
+ *   - 任务详情 Drawer 加 Tabs：运行历史（pm_adhoc_task_runs）+ 结果（AdhocResultPanel）。
+ *   - 详情顶部制式渲染为只读 Tag（建后不可改、无切换控件）。
  *
  * T-0164 收尾：
- *   G7-Gap-1  创建抽屉抽到 CreateAdhocTaskDrawer 公共组件（DashboardEditorPane 复用）
  *   G7-Gap-2  结果查看用 AdhocResultPanel（G6 panel 风格，多指标多 series ECharts）
- *   G7-Gap-3  AdhocResultPanel 内置粒度 Tab（与 G6-Gap-6 一致）
- *   G6-Gap-12 联动：PanelConfigDrawer 跳转时携带 ?preset=panel&device_sns=...&metric_paths=...&granularities=...
+ *   G6-Gap-12 联动：PanelConfigDrawer 跳转携带 ?preset=panel&device_sns=...&metric_paths=...&granularities=...
  */
 
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Button, Card, Drawer, Modal, Space, Table, Tag, Progress, message } from 'antd';
+import {
+  Button,
+  Card,
+  Drawer,
+  Modal,
+  Space,
+  Table,
+  Tabs,
+  Tag,
+  Progress,
+  Descriptions,
+  Typography,
+  message,
+} from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import {
   usePmAdhocList,
+  usePmAdhocRuns,
   useCancelPmAdhoc,
 } from '@core/hooks/api/usePmAdhoc';
-import type { AdhocMode, AdhocStatus, AdhocTask } from '@core/types/pmAdhoc';
+import type {
+  AdhocMode,
+  AdhocStatus,
+  AdhocTask,
+  AdhocTaskRun,
+} from '@core/types/pmAdhoc';
 import { CreateAdhocTaskDrawer, type CreateAdhocPreset } from './CreateAdhocTaskDrawer';
 import { AdhocResultPanel } from './AdhocResultPanel';
 
@@ -31,8 +52,189 @@ const statusColor: Record<AdhocStatus, string> = {
   canceled: 'warning',
 };
 
+const statusLabel: Record<AdhocStatus, string> = {
+  pending: '待执行',
+  running: '执行中',
+  scheduled: '已排期',
+  succeeded: '成功',
+  failed: '失败',
+  canceled: '已取消',
+};
+
+const dimensionLabel: Record<string, string> = {
+  device: '按设备',
+  aggregate_group: '临时组',
+  product: '按产品',
+  band: '按频段',
+  network: '全网',
+  device_group: '设备组',
+};
+
+const technologyLabel: Record<string, string> = {
+  lte: 'LTE (4G)',
+  nr: '5G NR',
+  gsm: 'GSM (2G)',
+};
+
+function fmtTime(v?: string): string {
+  if (!v) return '—';
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? v : d.toLocaleString();
+}
+
+/** 运行历史表（任务详情 Tab）。 */
+function RunHistoryTab({ taskId }: { taskId: string }) {
+  // 运行中任务会持续产生 run，轮询刷新
+  const { data: runs = [], isLoading } = usePmAdhocRuns(taskId, { refetchInterval: 10000 });
+
+  const columns: ColumnsType<AdhocTaskRun> = [
+    { title: '编号', dataIndex: 'runSeq', width: 70 },
+    {
+      title: '粒度',
+      dataIndex: 'granularity',
+      width: 100,
+      render: (g: string) => g || '—',
+    },
+    {
+      title: '维度',
+      dataIndex: 'dimension',
+      width: 100,
+      render: (d: string) => dimensionLabel[d] ?? d ?? '—',
+    },
+    {
+      title: '时间窗',
+      width: 240,
+      render: (_, r) =>
+        r.windowStart || r.windowEnd
+          ? `${fmtTime(r.windowStart)} ~ ${fmtTime(r.windowEnd)}`
+          : '滚动窗口',
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 90,
+      render: (s: AdhocStatus) => <Tag color={statusColor[s]}>{statusLabel[s] ?? s}</Tag>,
+    },
+    { title: '入队时间', dataIndex: 'queuedAt', width: 180, render: (v: string) => fmtTime(v) },
+    { title: '完成时间', dataIndex: 'finishedAt', width: 180, render: (v: string) => fmtTime(v) },
+    { title: '结果行数', dataIndex: 'rowsTotal', width: 90 },
+    {
+      title: '失败原因',
+      dataIndex: 'error',
+      ellipsis: true,
+      render: (e: string) => (e ? <Typography.Text type="danger">{e}</Typography.Text> : '—'),
+    },
+  ];
+
+  return (
+    <Table<AdhocTaskRun>
+      rowKey="id"
+      size="small"
+      loading={isLoading}
+      dataSource={runs}
+      columns={columns}
+      pagination={{ pageSize: 10, size: 'small' }}
+      expandable={{
+        // failed 行 error 全文可展开
+        rowExpandable: (r) => Boolean(r.error),
+        expandedRowRender: (r) => (
+          <Typography.Paragraph
+            type="danger"
+            style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}
+          >
+            {r.error}
+          </Typography.Paragraph>
+        ),
+      }}
+    />
+  );
+}
+
+/** 单张任务表（内置区 / 自建区共用）。 */
+function TaskTable({
+  tasks,
+  loading,
+  onView,
+  onCancel,
+}: {
+  tasks: AdhocTask[];
+  loading: boolean;
+  onView: (t: AdhocTask) => void;
+  onCancel: (id: string) => void;
+}) {
+  const columns: ColumnsType<AdhocTask> = [
+    { title: '名称', dataIndex: 'name' },
+    {
+      title: '模式',
+      dataIndex: 'mode',
+      width: 90,
+      render: (m: AdhocMode) =>
+        m === 'continuous' ? <Tag color="purple">持续</Tag> : <Tag>单次</Tag>,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 100,
+      render: (s: AdhocStatus) => <Tag color={statusColor[s]}>{statusLabel[s] ?? s}</Tag>,
+    },
+    {
+      title: '进度',
+      dataIndex: 'progress',
+      width: 140,
+      render: (p: number, r) =>
+        r.status === 'running' || r.status === 'succeeded' ? (
+          <Progress percent={p} size="small" />
+        ) : (
+          '—'
+        ),
+    },
+    { title: '设备数', render: (_, r) => r.deviceSns.length, width: 80 },
+    {
+      title: '指标 × 粒度',
+      render: (_, r) => `${r.metricPaths.length} × ${r.granularities.length}`,
+      width: 110,
+    },
+    { title: '创建时间', dataIndex: 'createdAt', width: 180, render: (v: string) => fmtTime(v) },
+    {
+      title: '操作',
+      width: 180,
+      render: (_, r) => (
+        <Space>
+          <Button size="small" onClick={() => onView(r)}>
+            查看详情
+          </Button>
+          {(r.status === 'pending' || r.status === 'running' || r.status === 'scheduled') && (
+            <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onCancel(r.id)}>
+              取消
+            </Button>
+          )}
+        </Space>
+      ),
+    },
+  ];
+
+  return (
+    <Table<AdhocTask>
+      rowKey="id"
+      size="small"
+      loading={loading}
+      dataSource={tasks}
+      columns={columns}
+      pagination={{ pageSize: 10, size: 'small' }}
+    />
+  );
+}
+
 export default function PmAdhocPage() {
-  const { data: tasks = [], isLoading } = usePmAdhocList({ refetchInterval: 5000 });
+  // T-0186：分两区，各发一次 list（内置 / 自建）。
+  const { data: builtinTasks = [], isLoading: builtinLoading } = usePmAdhocList({
+    refetchInterval: 5000,
+    isBuiltin: true,
+  });
+  const { data: customTasks = [], isLoading: customLoading } = usePmAdhocList({
+    refetchInterval: 5000,
+    isBuiltin: false,
+  });
   const cancelMut = useCancelPmAdhoc();
   const navigate = useNavigate();
 
@@ -63,7 +265,6 @@ export default function PmAdhocPage() {
         granularities,
       });
       setCreateOpen(true);
-      // 清除 query 避免刷新页面重复打开
       const next = new URLSearchParams(searchParams);
       next.delete('preset');
       next.delete('device_sns');
@@ -86,73 +287,40 @@ export default function PmAdhocPage() {
   };
 
   return (
-    <Card
-      title="自定义聚合任务"
-      extra={
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => navigate('/performance/pm-adhoc/new')}
-        >
-          新建任务
-        </Button>
-      }
-    >
-      <Table<AdhocTask>
-        rowKey="id"
+    <Space direction="vertical" size="large" style={{ width: '100%' }}>
+      <Card
+        title="内置聚合任务"
         size="small"
-        loading={isLoading}
-        dataSource={tasks}
-        columns={[
-          { title: '名称', dataIndex: 'name' },
-          {
-            title: '模式',
-            dataIndex: 'mode',
-            width: 90,
-            render: (m: AdhocMode) => (m === 'continuous' ? <Tag color="purple">持续</Tag> : <Tag>单次</Tag>),
-          },
-          {
-            title: '状态',
-            dataIndex: 'status',
-            width: 100,
-            render: (s: AdhocStatus) => <Tag color={statusColor[s]}>{s}</Tag>,
-          },
-          {
-            title: '进度',
-            dataIndex: 'progress',
-            width: 140,
-            render: (p: number, r) =>
-              r.status === 'running' || r.status === 'succeeded' ? (
-                <Progress percent={p} size="small" />
-              ) : (
-                '—'
-              ),
-          },
-          { title: '设备数', render: (_, r) => r.deviceSns.length, width: 80 },
-          {
-            title: '指标 × 粒度',
-            render: (_, r) => `${r.metricPaths.length} × ${r.granularities.length}`,
-            width: 110,
-          },
-          { title: '创建时间', dataIndex: 'createdAt', width: 180 },
-          {
-            title: '操作',
-            width: 180,
-            render: (_, r) => (
-              <Space>
-                <Button size="small" onClick={() => setSelectedTask(r)}>
-                  查看结果
-                </Button>
-                {(r.status === 'pending' || r.status === 'running' || r.status === 'scheduled') && (
-                  <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleCancel(r.id)}>
-                    取消
-                  </Button>
-                )}
-              </Space>
-            ),
-          },
-        ]}
-      />
+        extra={<Tag color="blue">系统预置</Tag>}
+      >
+        <TaskTable
+          tasks={builtinTasks}
+          loading={builtinLoading}
+          onView={setSelectedTask}
+          onCancel={handleCancel}
+        />
+      </Card>
+
+      <Card
+        title="自建聚合任务"
+        size="small"
+        extra={
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => navigate('/performance/pm-adhoc/new')}
+          >
+            新建任务
+          </Button>
+        }
+      >
+        <TaskTable
+          tasks={customTasks}
+          loading={customLoading}
+          onView={setSelectedTask}
+          onCancel={handleCancel}
+        />
+      </Card>
 
       <CreateAdhocTaskDrawer
         open={createOpen}
@@ -164,13 +332,56 @@ export default function PmAdhocPage() {
       />
 
       <Drawer
-        title={selectedTask ? `结果：${selectedTask.name}` : '结果'}
-        width={820}
+        title={selectedTask ? `任务详情：${selectedTask.name}` : '任务详情'}
+        width={920}
         open={Boolean(selectedTask)}
         onClose={() => setSelectedTask(null)}
+        destroyOnClose
       >
-        {selectedTask && <AdhocResultPanel taskId={selectedTask.id} />}
+        {selectedTask && (
+          <>
+            <Descriptions size="small" column={2} bordered style={{ marginBottom: 16 }}>
+              <Descriptions.Item label="模式">
+                {selectedTask.mode === 'continuous' ? '持续' : '单次'}
+              </Descriptions.Item>
+              <Descriptions.Item label="维度">
+                {dimensionLabel[selectedTask.dimension] ?? selectedTask.dimension}
+              </Descriptions.Item>
+              <Descriptions.Item label="制式">
+                {/* T-0186：制式只读，建后不可改，无切换控件 */}
+                {selectedTask.technology ? (
+                  <Tag color="geekblue">
+                    {technologyLabel[selectedTask.technology] ?? selectedTask.technology}
+                  </Tag>
+                ) : (
+                  <Tag>不限制式</Tag>
+                )}
+              </Descriptions.Item>
+              <Descriptions.Item label="当前状态">
+                <Tag color={statusColor[selectedTask.status]}>
+                  {statusLabel[selectedTask.status] ?? selectedTask.status}
+                </Tag>
+              </Descriptions.Item>
+            </Descriptions>
+
+            <Tabs
+              defaultActiveKey="runs"
+              items={[
+                {
+                  key: 'runs',
+                  label: '运行历史',
+                  children: <RunHistoryTab taskId={selectedTask.id} />,
+                },
+                {
+                  key: 'results',
+                  label: '结果',
+                  children: <AdhocResultPanel taskId={selectedTask.id} />,
+                },
+              ]}
+            />
+          </>
+        )}
       </Drawer>
-    </Card>
+    </Space>
   );
 }

@@ -42,6 +42,18 @@ type Repository interface {
 
 	// InsertResults 批量写 pm_adhoc_aggregation_results。
 	InsertResults(ctx context.Context, rows []ResultRow) error
+
+	// NextRunSeq 返回该任务下一个运行编号（已有 run 数 + 1）。
+	NextRunSeq(ctx context.Context, taskID uuid.UUID) (int, error)
+
+	// InsertRun 写一行运行记录（status=running，跑前调用），返回该 run 的 ID。
+	InsertRun(ctx context.Context, run TaskRun) (uuid.UUID, error)
+
+	// FinishRun 更新运行记录为终态（status/finished_at/rows_total/error，跑后调用）。
+	FinishRun(ctx context.Context, runID uuid.UUID, status Status, rowsTotal int, errMsg string) error
+
+	// ListRuns 按 task_id 取运行历史，倒序 started_at，支持 limit/offset。
+	ListRuns(ctx context.Context, taskID uuid.UUID, limit, offset int) ([]TaskRun, error)
 }
 
 // Errors
@@ -310,6 +322,117 @@ func (r *PgRepository) InsertResults(ctx context.Context, rows []ResultRow) erro
 		return fmt.Errorf("adhoc.InsertResults: exec: %w", err)
 	}
 	return nil
+}
+
+// ── 运行历史（pm_adhoc_task_runs，T-0186）─────────────────────────────────
+
+var taskRunCols = []string{
+	"id", "task_id", "run_seq", "granularity", "dimension",
+	"window_start", "window_end", "status", "queued_at",
+	"started_at", "finished_at", "error", "rows_total", "created_at",
+}
+
+func (r *PgRepository) NextRunSeq(ctx context.Context, taskID uuid.UUID) (int, error) {
+	const q = `SELECT COALESCE(MAX(run_seq), 0) + 1 FROM pm_adhoc_task_runs WHERE task_id = $1`
+	var seq int
+	if err := r.pool.QueryRow(ctx, q, taskID).Scan(&seq); err != nil {
+		return 0, fmt.Errorf("adhoc.NextRunSeq: %w", err)
+	}
+	return seq, nil
+}
+
+func (r *PgRepository) InsertRun(ctx context.Context, run TaskRun) (uuid.UUID, error) {
+	q, args, err := storage.Psql.Insert("pm_adhoc_task_runs").
+		Columns(
+			"task_id", "run_seq", "granularity", "dimension",
+			"window_start", "window_end", "status", "queued_at", "started_at",
+		).
+		Values(
+			run.TaskID, run.RunSeq, run.Granularity, run.Dimension,
+			nullablePtrTime(run.WindowStart), nullablePtrTime(run.WindowEnd),
+			string(run.Status), nullablePtrTime(run.QueuedAt), run.StartedAt,
+		).
+		Suffix("RETURNING id").
+		ToSql()
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("adhoc.InsertRun: build SQL: %w", err)
+	}
+	var id uuid.UUID
+	if err := r.pool.QueryRow(ctx, q, args...).Scan(&id); err != nil {
+		return uuid.Nil, fmt.Errorf("adhoc.InsertRun: insert: %w", err)
+	}
+	return id, nil
+}
+
+func (r *PgRepository) FinishRun(ctx context.Context, runID uuid.UUID, status Status, rowsTotal int, errMsg string) error {
+	q, args, err := storage.Psql.Update("pm_adhoc_task_runs").
+		Set("status", string(status)).
+		Set("finished_at", time.Now()).
+		Set("rows_total", rowsTotal).
+		Set("error", errMsg).
+		Where(sq.Eq{"id": runID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("adhoc.FinishRun: build SQL: %w", err)
+	}
+	tag, err := r.pool.Exec(ctx, q, args...)
+	if err != nil {
+		return fmt.Errorf("adhoc.FinishRun: exec: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// buildListRunsSQL 构建运行历史查询（倒序 started_at + 分页）。抽出便于单测断言排序/分页。
+func buildListRunsSQL(taskID uuid.UUID, limit, offset int) (string, []any, error) {
+	qb := storage.Psql.Select(taskRunCols...).
+		From("pm_adhoc_task_runs").
+		Where(sq.Eq{"task_id": taskID}).
+		OrderBy("started_at DESC")
+	if limit > 0 {
+		qb = qb.Limit(uint64(limit))
+	}
+	if offset > 0 {
+		qb = qb.Offset(uint64(offset))
+	}
+	return qb.ToSql()
+}
+
+func (r *PgRepository) ListRuns(ctx context.Context, taskID uuid.UUID, limit, offset int) ([]TaskRun, error) {
+	q, args, err := buildListRunsSQL(taskID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("adhoc.ListRuns: build SQL: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("adhoc.ListRuns: query: %w", err)
+	}
+	defer rows.Close()
+	out := make([]TaskRun, 0)
+	for rows.Next() {
+		var run TaskRun
+		var status string
+		if err := rows.Scan(
+			&run.ID, &run.TaskID, &run.RunSeq, &run.Granularity, &run.Dimension,
+			&run.WindowStart, &run.WindowEnd, &status, &run.QueuedAt,
+			&run.StartedAt, &run.FinishedAt, &run.Error, &run.RowsTotal, &run.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("adhoc.ListRuns: scan: %w", err)
+		}
+		run.Status = Status(status)
+		out = append(out, run)
+	}
+	return out, rows.Err()
+}
+
+// nullablePtrTime 把 nil 或零值 *time.Time 映射为 SQL NULL。
+func nullablePtrTime(t *time.Time) any {
+	if t == nil || t.IsZero() {
+		return nil
+	}
+	return *t
 }
 
 // ── scan helper ───────────────────────────────────────────────────────────

@@ -85,6 +85,26 @@ export interface AdhocResultRow {
   endTime: string;
 }
 
+/**
+ * 运行历史一行（T-0186）：每次 worker 执行落一条。
+ * run 是"单次执行视角"——continuous 任务整体状态可为 scheduled，但每次 run 终态只 running/succeeded/failed。
+ */
+export interface AdhocTaskRun {
+  id: string;
+  taskId: string;
+  runSeq: number;
+  granularity: string;
+  dimension: string;
+  windowStart?: string;
+  windowEnd?: string;
+  status: AdhocStatus;
+  queuedAt?: string;
+  startedAt: string;
+  finishedAt?: string;
+  error?: string;
+  rowsTotal: number;
+}
+
 export interface AdhocProgressEvent {
   task_id: string;
   progress: number;
@@ -135,6 +155,40 @@ export interface BackendAdhocResultRow {
   time: string;
   start_time: string;
   end_time: string;
+}
+
+export interface BackendAdhocTaskRun {
+  id: string;
+  task_id: string;
+  run_seq: number;
+  granularity: string;
+  dimension: string;
+  window_start?: string;
+  window_end?: string;
+  status: string;
+  queued_at?: string;
+  started_at: string;
+  finished_at?: string;
+  error?: string;
+  rows_total: number;
+}
+
+export function mapBackendAdhocTaskRun(b: BackendAdhocTaskRun): AdhocTaskRun {
+  return {
+    id: b.id,
+    taskId: b.task_id,
+    runSeq: b.run_seq,
+    granularity: b.granularity,
+    dimension: b.dimension,
+    windowStart: b.window_start || undefined,
+    windowEnd: b.window_end || undefined,
+    status: b.status as AdhocStatus,
+    queuedAt: b.queued_at || undefined,
+    startedAt: b.started_at,
+    finishedAt: b.finished_at || undefined,
+    error: b.error || undefined,
+    rowsTotal: b.rows_total,
+  };
 }
 
 export function mapBackendAdhocTask(b: BackendAdhocTask): AdhocTask {

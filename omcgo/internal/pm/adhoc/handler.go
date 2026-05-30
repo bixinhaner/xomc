@@ -45,6 +45,7 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		adhoc.GET("/tasks/:id", h.Get)
 		adhoc.DELETE("/tasks/:id", h.Cancel)
 		adhoc.GET("/tasks/:id/results", h.Results)
+		adhoc.GET("/tasks/:id/runs", h.Runs) // T-0186：运行历史
 		adhoc.GET("/tasks/:id/progress", h.Progress) // SSE
 	}
 }
@@ -524,6 +525,83 @@ SELECT id, COALESCE(NULLIF(cn_name, ''), en_name) AS display_name FROM perf_indi
 		out[id] = name
 	}
 	return out
+}
+
+// taskRunDTO 是 pm_adhoc_task_runs 一行的响应体（T-0186，snake_case 对齐前端 mapper）。
+type taskRunDTO struct {
+	ID          string     `json:"id"`
+	TaskID      string     `json:"task_id"`
+	RunSeq      int        `json:"run_seq"`
+	Granularity string     `json:"granularity"`
+	Dimension   string     `json:"dimension"`
+	WindowStart *time.Time `json:"window_start,omitempty"`
+	WindowEnd   *time.Time `json:"window_end,omitempty"`
+	Status      string     `json:"status"`
+	QueuedAt    *time.Time `json:"queued_at,omitempty"`
+	StartedAt   time.Time  `json:"started_at"`
+	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	Error       string     `json:"error,omitempty"`
+	RowsTotal   int        `json:"rows_total"`
+}
+
+func taskRunToDTO(r *TaskRun) taskRunDTO {
+	return taskRunDTO{
+		ID:          r.ID.String(),
+		TaskID:      r.TaskID.String(),
+		RunSeq:      r.RunSeq,
+		Granularity: r.Granularity,
+		Dimension:   r.Dimension,
+		WindowStart: r.WindowStart,
+		WindowEnd:   r.WindowEnd,
+		Status:      string(r.Status),
+		QueuedAt:    r.QueuedAt,
+		StartedAt:   r.StartedAt,
+		FinishedAt:  r.FinishedAt,
+		Error:       r.Error,
+		RowsTotal:   r.RowsTotal,
+	}
+}
+
+// Runs GET /pm/adhoc/tasks/:id/runs?limit=&offset=
+//
+// 返回该任务运行历史，倒序 started_at，支持分页（T-0186）。
+func (h *Handler) Runs(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, "invalid id")
+		return
+	}
+	// 任务存在校验
+	if _, err := h.repo.Get(c.Request.Context(), id); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			response.Fail(c, http.StatusNotFound, "task not found")
+			return
+		}
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	limit := 50
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
+			limit = n
+		}
+	}
+	offset := 0
+	if v := c.Query("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	runs, err := h.repo.ListRuns(c.Request.Context(), id, limit, offset)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	items := make([]taskRunDTO, 0, len(runs))
+	for i := range runs {
+		items = append(items, taskRunToDTO(&runs[i]))
+	}
+	response.OK(c, gin.H{"items": items, "total": len(items)})
 }
 
 // Progress GET /pm/adhoc/tasks/:id/progress（SSE）

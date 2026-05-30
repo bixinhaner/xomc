@@ -76,6 +76,16 @@ func (s *handlerStubRepo) UpdateStatus(context.Context, uuid.UUID, Status, *int,
 	return nil
 }
 func (s *handlerStubRepo) InsertResults(context.Context, []ResultRow) error { return nil }
+func (s *handlerStubRepo) NextRunSeq(context.Context, uuid.UUID) (int, error) { return 1, nil }
+func (s *handlerStubRepo) InsertRun(context.Context, TaskRun) (uuid.UUID, error) {
+	return uuid.New(), nil
+}
+func (s *handlerStubRepo) FinishRun(context.Context, uuid.UUID, Status, int, string) error {
+	return nil
+}
+func (s *handlerStubRepo) ListRuns(context.Context, uuid.UUID, int, int) ([]TaskRun, error) {
+	return nil, nil
+}
 
 func newTestRouter(repo Repository) *gin.Engine {
 	gin.SetMode(gin.TestMode)

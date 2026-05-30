@@ -11,10 +11,12 @@ const api = createApiSwitch(pmAdhocMock, pmAdhocApi);
 
 const ADHOC_KEY = ['pm-adhoc-tasks'] as const;
 
-export function usePmAdhocList(opts?: { refetchInterval?: number }) {
+export function usePmAdhocList(opts?: { refetchInterval?: number; isBuiltin?: boolean }) {
   return useQuery({
-    queryKey: [...ADHOC_KEY, 'list'],
-    queryFn: () => api.list(),
+    // 查询键带 isBuiltin，内置区/自建区两次调用各自独立缓存（T-0186）
+    queryKey: [...ADHOC_KEY, 'list', { isBuiltin: opts?.isBuiltin ?? null }],
+    queryFn: () =>
+      api.list(opts?.isBuiltin === undefined ? undefined : { isBuiltin: opts.isBuiltin }),
     refetchInterval: opts?.refetchInterval,
   });
 }
@@ -52,5 +54,17 @@ export function usePmAdhocResults(taskId: string | undefined) {
     queryKey: [...ADHOC_KEY, 'results', taskId],
     queryFn: () => api.results(taskId as string),
     enabled: Boolean(taskId),
+  });
+}
+
+export function usePmAdhocRuns(
+  taskId: string | undefined,
+  opts?: { refetchInterval?: number },
+) {
+  return useQuery({
+    queryKey: [...ADHOC_KEY, 'runs', taskId],
+    queryFn: () => api.runs(taskId as string),
+    enabled: Boolean(taskId),
+    refetchInterval: opts?.refetchInterval,
   });
 }

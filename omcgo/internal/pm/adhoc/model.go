@@ -119,6 +119,27 @@ type ListFilter struct {
 	Offset    int
 }
 
+// TaskRun 是 pm_adhoc_task_runs 表一行的 Go 域模型（T-0186）。
+//
+// 每次 worker 执行一个 adhoc 任务落一行：跑前 INSERT(status=running)，跑后 UPDATE 终态。
+// 与 pm_tasks 的 status 循环解耦——pm_tasks 只反映"任务当前状态"，本表保留逐次执行历史。
+type TaskRun struct {
+	ID          uuid.UUID
+	TaskID      uuid.UUID
+	RunSeq      int
+	Granularity string
+	Dimension   string
+	WindowStart *time.Time
+	WindowEnd   *time.Time
+	Status      Status
+	QueuedAt    *time.Time
+	StartedAt   time.Time
+	FinishedAt  *time.Time
+	Error       string
+	RowsTotal   int
+	CreatedAt   time.Time
+}
+
 // ResultRow 是 pm_adhoc_aggregation_results 表的一行（写入用）。
 type ResultRow struct {
 	TaskID      uuid.UUID

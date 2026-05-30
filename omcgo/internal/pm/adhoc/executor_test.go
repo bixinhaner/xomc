@@ -62,6 +62,15 @@ func (s *stubRepo) InsertResults(_ context.Context, rows []ResultRow) error {
 	return nil
 }
 
+func (s *stubRepo) NextRunSeq(context.Context, uuid.UUID) (int, error)  { return 1, nil }
+func (s *stubRepo) InsertRun(context.Context, TaskRun) (uuid.UUID, error) {
+	return uuid.New(), nil
+}
+func (s *stubRepo) FinishRun(context.Context, uuid.UUID, Status, int, string) error { return nil }
+func (s *stubRepo) ListRuns(context.Context, uuid.UUID, int, int) ([]TaskRun, error) {
+	return nil, nil
+}
+
 type stubPublisher struct {
 	mu     sync.Mutex
 	events []struct {
