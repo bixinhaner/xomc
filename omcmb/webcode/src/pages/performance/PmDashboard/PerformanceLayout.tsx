@@ -6,7 +6,7 @@
  * 页签1 · 任务仪表盘：
  *   - 左 240px 任务列表（内置区 / 自建区，usePmAdhocList isBuiltin 两次拉取，字段 is_builtin）。
  *   - 右侧 = <TaskDashboardPane taskId={selected} />，选中任务按 N 指标自动出图。
- * 页签2 · 设备列表：占位空态（建设中，T-0188 实现）。
+ * 页签2 · 设备列表：<DeviceListPane/>（T-0188 实现，独立即席查看，不依赖聚合任务）。
  *
  * 旧拖拽编辑器 / 仪表盘列表 / KpiCardManager 在本入口不再 import（文件保留，清理见 T-0190）。
  */
@@ -17,6 +17,7 @@ import { Card, Empty, List, Space, Tabs, Tag, theme } from 'antd';
 import { usePmAdhocList } from '@core/hooks/api/usePmAdhoc';
 import type { AdhocTask } from '@core/types/pmAdhoc';
 import TaskDashboardPane from './TaskDashboardPane';
+import DeviceListPane from './DeviceListPane';
 
 interface TaskGroup {
   key: 'builtin' | 'custom';
@@ -139,21 +140,13 @@ function TaskDashboardTab() {
   );
 }
 
-function DeviceListTab() {
-  return (
-    <Card style={{ height: 'calc(100vh - 190px)' }}>
-      <Empty description="设备列表（建设中）" style={{ marginTop: 80 }} />
-    </Card>
-  );
-}
-
 export default function PerformanceLayout() {
   return (
     <Tabs
       defaultActiveKey="task"
       items={[
         { key: 'task', label: '任务仪表盘', children: <TaskDashboardTab /> },
-        { key: 'device', label: '设备列表', children: <DeviceListTab /> },
+        { key: 'device', label: '设备列表', children: <DeviceListPane /> },
       ]}
     />
   );

@@ -11,10 +11,9 @@
 
 import { useMemo, useState } from 'react';
 import { Alert, Card, Empty, Segmented, Space, Spin, Tag, Typography } from 'antd';
-import ReactECharts from 'echarts-for-react';
-import dayjs from 'dayjs';
 import { usePmAdhocDetail, usePmAdhocResults } from '@core/hooks/api/usePmAdhoc';
-import { buildMetricCharts, type MetricChart } from './taskDashboardUtils';
+import { buildMetricCharts } from './taskDashboardUtils';
+import ChartCard from './ChartCard';
 
 interface Props {
   taskId: string;
@@ -27,33 +26,6 @@ const GRAN_LABEL: Record<string, string> = {
   weekly: '周',
   monthly: '月',
 };
-
-function ChartCard({ chart }: { chart: MetricChart }) {
-  const xLabels = useMemo(
-    () => chart.buckets.map((b) => (dayjs(b).isValid() ? dayjs(b).format('MM-DD HH:mm') : b)),
-    [chart.buckets],
-  );
-  const option = {
-    grid: { left: 56, right: 16, top: 36, bottom: 40 },
-    xAxis: { type: 'category', data: xLabels, boundaryGap: false },
-    yAxis: { type: 'value', scale: true },
-    series: chart.series.map((s) => ({
-      name: s.name,
-      type: 'line',
-      smooth: true,
-      showSymbol: chart.buckets.length <= 30,
-      data: s.values,
-      connectNulls: false,
-    })),
-    tooltip: { trigger: 'axis' },
-    legend: { type: 'scroll', top: 4 },
-  };
-  return (
-    <Card size="small" title={chart.displayName} style={{ marginBottom: 12 }}>
-      <ReactECharts option={option} style={{ height: 260 }} notMerge />
-    </Card>
-  );
-}
 
 export default function TaskDashboardPane({ taskId }: Props) {
   const taskQuery = usePmAdhocDetail(taskId);
