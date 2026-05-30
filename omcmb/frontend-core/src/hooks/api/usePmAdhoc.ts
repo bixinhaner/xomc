@@ -49,10 +49,15 @@ export function useCancelPmAdhoc() {
   });
 }
 
-export function usePmAdhocResults(taskId: string | undefined) {
+export function usePmAdhocResults(
+  taskId: string | undefined,
+  opts?: { limit?: number },
+) {
+  // T-0187 仪表盘自动出图要取更多结果行（默认 100 保持 AdhocResultPanel 现状）。
+  const limit = opts?.limit ?? 100;
   return useQuery({
-    queryKey: [...ADHOC_KEY, 'results', taskId],
-    queryFn: () => api.results(taskId as string),
+    queryKey: [...ADHOC_KEY, 'results', taskId, { limit }],
+    queryFn: () => api.results(taskId as string, limit),
     enabled: Boolean(taskId),
   });
 }

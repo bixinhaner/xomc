@@ -83,6 +83,9 @@ export interface AdhocResultRow {
   time: string;
   startTime: string;
   endTime: string;
+  // T-0187 多线系列键来源：product 维度的产品 id、band/device_group/aggregate_group 维度的 object_ldn。
+  productId?: string;
+  objectLdn?: string;
 }
 
 /**
@@ -155,6 +158,9 @@ export interface BackendAdhocResultRow {
   time: string;
   start_time: string;
   end_time: string;
+  // T-0187：后端 resultDTO 已吐这两个分组键（handler.go），前端补透传。
+  product_id?: string;
+  object_ldn?: string;
 }
 
 export interface BackendAdhocTaskRun {
@@ -229,5 +235,7 @@ export function mapBackendAdhocResult(b: BackendAdhocResultRow): AdhocResultRow 
     time: b.time,
     startTime: b.start_time,
     endTime: b.end_time,
+    productId: b.product_id || undefined,
+    objectLdn: b.object_ldn || undefined,
   };
 }
