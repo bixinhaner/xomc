@@ -7,7 +7,7 @@ import { useAppStore } from '@core/store/appStore';
 
 export interface BarSeries {
   name: string;
-  data: (number | null)[];
+  data: ((number | null) | { value: number; name: string })[];
   color?: string;
   stack?: string;
   /** 单独设置该系列的圆角，覆盖全局 borderRadius */
@@ -24,6 +24,8 @@ export interface BarChartProps {
   barWidth?: number | string;
   /** 圆角大小，默认 6，设为 0 则无圆角 */
   borderRadius?: number;
+  /** 自定义 tooltip formatter，接收 ECharts tooltip params */
+  tooltipFormatter?: (params: any) => string;
 }
 
 const BarChart: React.FC<BarChartProps> = ({
@@ -35,6 +37,7 @@ const BarChart: React.FC<BarChartProps> = ({
   yAxisName,
   barWidth,
   borderRadius = 6,
+  tooltipFormatter,
 }) => {
   const isDark = useIsDark();
   const appTheme = useAppStore((s) => s.theme);
@@ -93,6 +96,12 @@ const BarChart: React.FC<BarChartProps> = ({
 
     return {
       ...base,
+      tooltip: tooltipFormatter
+        ? {
+            ...base.tooltip,
+            formatter: tooltipFormatter,
+          }
+        : base.tooltip,
       title: title
         ? {
             text: title,
@@ -145,7 +154,7 @@ const BarChart: React.FC<BarChartProps> = ({
         };
       }),
     };
-  }, [title, xData, series, horizontal, yAxisName, barWidth, borderRadius, isDark, appTheme, palette]);
+  }, [title, xData, series, horizontal, yAxisName, barWidth, borderRadius, isDark, appTheme, palette, tooltipFormatter]);
 
   return (
     <div ref={containerRef} style={{ height: typeof height === 'string' ? height : undefined, width: '100%', minHeight: 0 }}>

@@ -282,7 +282,11 @@ export default function DashboardPage() {
   // TOP10 alarm devices horizontal bar chart - 使用真实API数据
   const top10Devices = useMemo(() => {
     if (!topAlarmDevicesData?.length) return [];
-    return topAlarmDevicesData.map(d => d.deviceName);
+    return topAlarmDevicesData.map(d => {
+      const techDisplay = TECH_DISPLAY_NAME[d.technology] || d.technology;
+      const deviceNumber = d.deviceSN?.slice(-4) || "????";
+      return `${techDisplay}-${deviceNumber}`;
+    });
   }, [topAlarmDevicesData]);
 
   const top10Series = useMemo(() => {
@@ -292,7 +296,10 @@ export default function DashboardPage() {
     }
     return [{
       name: t('dashboard.alarmCount'),
-      data: topAlarmDevicesData.map(d => d.alarmCount),
+      data: topAlarmDevicesData.map(d => ({
+        value: d.alarmCount,
+        name: d.deviceSN
+      })),
     }];
   }, [topAlarmDevicesData, t]);
 
@@ -543,6 +550,18 @@ export default function DashboardPage() {
                 series={top10Series}
                 height={280}
                 horizontal
+                tooltipFormatter={(params) => {
+                  const dataIndex = params[0].dataIndex;
+                  const device = topAlarmDevicesData?.[dataIndex];
+                  if (!device) return params[0].name;
+                  return `
+                    <div style="color: #8c8c8c; font-size: 12px; margin-bottom: 4px;">${device.deviceSN || '--'}</div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: ${params[0].color};"></span>
+                      <span>${params[0].seriesName}: ${params[0].value}</span>
+                    </div>
+                  `;
+                }}
               />
             ) : (
               <EmptyState variant="no-data" description="" style={{ flex: 1 }} />

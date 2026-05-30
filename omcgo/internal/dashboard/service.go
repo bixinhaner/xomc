@@ -20,13 +20,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// Dashboard display constants
-const (
-	// Device name display thresholds
-	deviceSNTruncateThreshold = 12 // SN length threshold for truncation
-	deviceSNTailLength        = 8  // Number of characters to keep when truncating SN
-)
-
 // FrontendDeviceStats matches the frontend's expected device_stats format.
 type FrontendDeviceStats struct {
 	Total   int64 `json:"total"`
@@ -46,9 +39,11 @@ type FrontendAlarmStats struct {
 
 // FrontendRecentAlarm matches the frontend's expected recent_alarms format.
 type FrontendRecentAlarm struct {
-	DeviceName string `json:"device_name"`
-	AlarmCount int64  `json:"alarm_count"`
-	Severity   string `json:"severity"`
+	DeviceSN   string `json:"device_sn"`   // 完整设备 SN
+	Technology string `json:"technology"`  // 技术类型 (lte/nr/gsm)
+	DeviceName string `json:"device_name"` // 完整设备 SN（与 device_sn 相同）
+	AlarmCount int64  `json:"alarm_count"` // 告警数量
+	Severity   string `json:"severity"`    // 严重程度
 }
 
 // DashboardSummary is the aggregated dashboard response.
@@ -283,7 +278,9 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 			}
 		} else {
 			deviceAlarms[key] = &FrontendRecentAlarm{
-				DeviceName: coalesceDeviceName(a.DeviceName, a.DeviceSN),
+				DeviceSN:   a.DeviceSN,                         // 完整设备 SN
+				Technology: derefOrEmpty(a.Technology),         // 技术类型
+				DeviceName: a.DeviceSN,                         // 与 device_sn 相同，使用完整 SN
 				AlarmCount: 1,
 				Severity:   severityToLabel(a.Severity),
 			}
@@ -331,38 +328,12 @@ func severityFromLabel(label string) int {
 	}
 }
 
-// coalesceDeviceName returns a user-friendly device identifier.
-//
-// Priority order:
-//  1. Device name (if available and non-empty)
-//  2. Device SN (truncated if too long)
-//
-// Truncation rules:
-//  - SN length > deviceSNTruncateThreshold (12): returns "..." + last N characters
-//  - SN length <= deviceSNTruncateThreshold: returns full SN
-//
-// Parameters:
-//   - name: pointer to device name from database, may be nil or empty string
-//   - sn: device serial number as fallback identifier
-//
-// Returns:
-//   A human-readable device identifier suitable for UI display.
-//
-// Examples:
-//   - coalesceDeviceName(strPtr("基站-A区"), "SN123456789012") → "基站-A区"
-//   - coalesceDeviceName(nil, "SN123456789012")               → "...56789012"
-//   - coalesceDeviceName(nil, "SN12345678")                   → "SN12345678"
-//   - coalesceDeviceName(nil, "")                             → ""
-func coalesceDeviceName(name *string, sn string) string {
-	// Priority 1: Use device_name if available and non-empty
-	if name != nil && *name != "" {
-		return *name
+// derefOrEmpty safely dereferences a string pointer, returning empty string if nil.
+func derefOrEmpty(s *string) string {
+	if s == nil {
+		return ""
 	}
-	// Priority 2: Use device_sn, truncating if too long
-	if len(sn) > deviceSNTruncateThreshold {
-		return "..." + sn[len(sn)-deviceSNTailLength:]
-	}
-	return sn
+	return *s
 }
 
 // GetAlarmTrend returns alarm counts grouped by date and severity for the last N days.
