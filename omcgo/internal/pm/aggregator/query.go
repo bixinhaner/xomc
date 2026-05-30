@@ -105,8 +105,7 @@ func (a *Aggregator) Query(ctx context.Context, q QueryRequest) ([]Row, error) {
 	case DimensionProduct:
 		rows, err = a.queryProductTable(ctx, table, q)
 	case DimensionBand:
-		// T-0182 仅入枚举；band 聚合实现拆到 T-0183。
-		return nil, ErrBandNotImplemented
+		rows, err = a.queryBandTable(ctx, table, q)
 	default:
 		rows, err = a.queryDeviceTable(ctx, table, q)
 	}
@@ -186,9 +185,11 @@ var ErrPctNotSupportedInAggregateGroup = fmt.Errorf(
 	"aggregate_group 维度暂不支持 KPI 类 (statis_type=pct)，请改用 counter 类指标 (sum/avg/max/min)",
 )
 
-// ErrBandNotImplemented 表示 band 维度聚合尚未实现（拆到 T-0183）。
-// T-0182 只把 band 加进维度枚举与 DB CHECK 约束，不实现聚合逻辑。
-var ErrBandNotImplemented = fmt.Errorf("aggregator: band 维度聚合尚未实现（见 T-0183）")
+// ErrPctNotSupportedInBand 表示 band 维度不支持 KPI 类指标（statis_type=pct 需公式
+// 重算，与 aggregate_group / product 维度一致，本阶段不实现）。
+var ErrPctNotSupportedInBand = fmt.Errorf(
+	"band 维度暂不支持 KPI 类 (statis_type=pct)，请改用 counter 类指标 (sum/avg/max/min)",
+)
 
 // queryAggregateGroupTable 现场聚合：从 device 维度表 (pm_metrics / pm_metrics_hourly / 等)
 // 按 metric_path + granularity + time + object_ldn GROUP BY，不 GROUP BY device_sn。
@@ -200,7 +201,7 @@ var ErrBandNotImplemented = fmt.Errorf("aggregator: band 维度聚合尚未实�
 // 15min 也支持（pm_metrics raw 表本身就是 15min 粒度，GROUP BY 同样规则）。
 func (a *Aggregator) queryAggregateGroupTable(ctx context.Context, table string, q QueryRequest) ([]Row, error) {
 	// 预检查：扫描目标 metric 的 statis_type，若有 pct 立即报错。
-	if err := a.precheckStatisType(ctx, table, q); err != nil {
+	if err := a.precheckStatisType(ctx, table, q, ErrPctNotSupportedInAggregateGroup); err != nil {
 		return nil, err
 	}
 
@@ -271,8 +272,9 @@ func (a *Aggregator) queryAggregateGroupTable(ctx context.Context, table string,
 	return out, rows.Err()
 }
 
-// precheckStatisType 扫描 target metric_path 的 statis_type，若有 pct 立即报错。
-func (a *Aggregator) precheckStatisType(ctx context.Context, table string, q QueryRequest) error {
+// precheckStatisType 扫描 target metric_path 的 statis_type，若有 pct 立即返回 pctErr。
+// pctErr 由调用方传入（不同维度的不支持文案不同）。
+func (a *Aggregator) precheckStatisType(ctx context.Context, table string, q QueryRequest, pctErr error) error {
 	if len(q.MetricPaths) == 0 {
 		return nil
 	}
@@ -299,7 +301,7 @@ func (a *Aggregator) precheckStatisType(ctx context.Context, table string, q Que
 			return fmt.Errorf("aggregator.precheckStatisType scan: %w", err)
 		}
 		if s != nil && *s == "pct" {
-			return ErrPctNotSupportedInAggregateGroup
+			return pctErr
 		}
 	}
 	return rows.Err()
@@ -425,7 +427,7 @@ func (a *Aggregator) queryGroupTable(ctx context.Context, table string, q QueryR
 // 制式过滤通过 d.technology IN (...) 在 JOIN 后施加（Technologies 非空时）。
 func (a *Aggregator) queryProductTable(ctx context.Context, table string, q QueryRequest) ([]Row, error) {
 	// 预检查：扫描目标 metric 的 statis_type，若有 pct 立即报错（与 aggregate_group 一致）。
-	if err := a.precheckStatisType(ctx, table, q); err != nil {
+	if err := a.precheckStatisType(ctx, table, q, ErrPctNotSupportedInAggregateGroup); err != nil {
 		return nil, err
 	}
 
@@ -535,6 +537,191 @@ ORDER BY m.time DESC%s`,
 	return out, rows.Err()
 }
 
+// band 维度参数路径后缀（小区频段标识来自设备参数）。
+//
+//   - bandPathSuffixes：FreqBandIndicator(LTE) / FreqBandIndicatorNR(NR)，取值 = band 值
+//   - cellIDPathSuffixes：CellIdentity(LTE)，取值 = 小区号（= PM object_ldn 里的 Cellid）
+//
+// 用后缀（LIKE '%suffix'）匹配而非全路径，因 {i} 实例号在路径中会被实例化为具体数字。
+var (
+	bandPathSuffixes = []string{
+		".CellConfig.LTE.RAN.RF.FreqBandIndicator", // LTE
+		".FreqBandIndicatorNR",                     // NR（MultiFrequencyBandListNRSIB.{i}.FreqBandIndicatorNR）
+	}
+	cellIDPathSuffixes = []string{
+		".CellConfig.LTE.RAN.Common.CellIdentity", // LTE 小区标识
+		// NR 小区标识路径本仓库暂无真机样本，待确认后补；当前 LTE 链路已闭环。
+	}
+)
+
+// queryBandTable 现场聚合：按频段（band）把同频段所有小区的 PM counter 行聚到一起。
+//
+// band 不在 PM 数据里，来自设备参数：
+//  1. 从 device_parameters 取每个小区（device_id + fap_instance）的
+//     CellIdentity（= 小区号）与 FreqBandIndicator（= band）两行，配成「小区号→band」映射。
+//  2. PM 行 object_ldn 形如 'Cellid=111172245,PLMN=46068'，正则抽出 Cellid（= 小区号）。
+//  3. 用 (device_oui,device_sn)→devices.id 把 PM 行挂到设备，再用 小区号 JOIN 映射得 band。
+//  4. 按 band GROUP BY，算子照搬 statis_type 路由（sum/avg/max/min；pct 预检查报错）。
+//
+// join 未命中兜底：小区无频段参数（映射里查不到该小区号）→ INNER JOIN 自动跳过该小区，
+// 不产出任何 band 行（行为固定，单测覆盖）。
+//
+// 结果行 ObjectLDN = 'Band=<值>'（复用已有列，不加迁移）；DeviceSN='AGGREGATED'。
+// 只聚 counter 行（KPI 跨小区求和无意义，与 product/aggregate_group 一致）。
+func (a *Aggregator) queryBandTable(ctx context.Context, table string, q QueryRequest) ([]Row, error) {
+	// 预检查：扫描目标 metric 的 statis_type，若有 pct 立即报错（与其它聚合维度一致）。
+	if err := a.precheckStatisType(ctx, table, q, ErrPctNotSupportedInBand); err != nil {
+		return nil, err
+	}
+
+	const aggValueExpr = `
+		CASE MIN(m.statis_type)
+			WHEN 'sum' THEN SUM(m.metric_value)
+			WHEN 'avg' THEN AVG(m.metric_value)
+			WHEN 'max' THEN MAX(m.metric_value)
+			WHEN 'min' THEN MIN(m.metric_value)
+			ELSE SUM(m.metric_value)
+		END`
+
+	args := []any{}
+	pos := 1
+	add := func(v any) string {
+		args = append(args, v)
+		p := fmt.Sprintf("$%d", pos)
+		pos++
+		return p
+	}
+
+	// 小区→band 映射的路径过滤（LIKE '%suffix'）。
+	bandLike := make([]string, 0, len(bandPathSuffixes))
+	for _, s := range bandPathSuffixes {
+		bandLike = append(bandLike, fmt.Sprintf("bp.parameter_path LIKE %s", add("%"+s)))
+	}
+	cellLike := make([]string, 0, len(cellIDPathSuffixes))
+	for _, s := range cellIDPathSuffixes {
+		cellLike = append(cellLike, fmt.Sprintf("cp.parameter_path LIKE %s", add("%"+s)))
+	}
+
+	// PM 行过滤条件（与 product 维度同构）。
+	where := []string{"m.object_ldn IS NOT NULL"}
+	if len(q.MetricPaths) > 0 {
+		where = append(where, fmt.Sprintf("m.metric_path = ANY(%s)", add(q.MetricPaths)))
+	}
+	if q.MetricType != nil {
+		where = append(where, fmt.Sprintf("m.metric_type = %s", add(string(*q.MetricType))))
+	}
+	if q.Granularity != "" {
+		where = append(where, fmt.Sprintf("m.granularity = %s", add(string(q.Granularity))))
+	}
+	if !q.StartTime.IsZero() {
+		where = append(where, fmt.Sprintf("m.time >= %s", add(q.StartTime)))
+	}
+	if !q.EndTime.IsZero() {
+		where = append(where, fmt.Sprintf("m.time <= %s", add(q.EndTime)))
+	}
+	if len(q.Technologies) > 0 {
+		where = append(where, fmt.Sprintf("d.technology = ANY(%s)", add(q.Technologies)))
+	}
+	whereSQL := ""
+	for i, w := range where {
+		if i == 0 {
+			whereSQL = "WHERE " + w
+		} else {
+			whereSQL += "\n  AND " + w
+		}
+	}
+
+	limitSQL := ""
+	if q.Limit > 0 {
+		limitSQL += fmt.Sprintf("\nLIMIT %s", add(q.Limit))
+	}
+	if q.Offset > 0 {
+		limitSQL += fmt.Sprintf("\nOFFSET %s", add(q.Offset))
+	}
+
+	// cell_band CTE：device_id + fap_instance 上把 CellIdentity 与 FreqBandIndicator 配对。
+	sqlStr := fmt.Sprintf(`
+WITH cell_band AS (
+    SELECT
+        cp.device_id,
+        cp.parameter_value AS cell_id,
+        bp.parameter_value AS band
+    FROM device_parameters cp
+    JOIN device_parameters bp
+      ON bp.device_id = cp.device_id AND bp.fap_instance = cp.fap_instance
+    WHERE (%s)
+      AND (%s)
+      AND cp.parameter_value IS NOT NULL
+      AND bp.parameter_value IS NOT NULL
+)
+SELECT
+    cb.band,
+    m.metric_path,
+    MIN(m.metric_type) AS metric_type,
+    %s AS metric_value,
+    MIN(m.statis_type) AS statis_type,
+    m.granularity,
+    m.time,
+    MIN(m.start_time) AS start_time,
+    MIN(m.end_time) AS end_time,
+    MAX(m.ingest_time) AS ingest_time
+FROM %s m
+JOIN devices d
+  ON d.oui = m.device_oui AND d.serial_number = m.device_sn
+JOIN cell_band cb
+  ON cb.device_id = d.id
+ AND cb.cell_id = substring(m.object_ldn FROM 'Cellid=([0-9]+)')
+%s
+GROUP BY cb.band, m.metric_path, m.granularity, m.time
+ORDER BY m.time DESC%s`,
+		joinOr(cellLike), joinOr(bandLike), aggValueExpr, table, whereSQL, limitSQL)
+
+	rows, err := a.db.Query(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("aggregator.Query exec %s (band): %w", table, err)
+	}
+	defer rows.Close()
+
+	var out []Row
+	for rows.Next() {
+		var r Row
+		var band string
+		var statis *string
+		var metricType, granularity string
+		if err := rows.Scan(
+			&band, &r.MetricPath, &metricType, &r.MetricValue,
+			&statis, &granularity, &r.Time, &r.StartTime, &r.EndTime, &r.IngestTime,
+		); err != nil {
+			return nil, fmt.Errorf("aggregator.Query scan %s (band): %w", table, err)
+		}
+		r.DeviceSN = "AGGREGATED"
+		r.DeviceOUI = ""
+		r.MetricType = metrics.MetricType(metricType)
+		r.Granularity = metrics.Granularity(granularity)
+		if statis != nil {
+			st := metrics.StatisType(*statis)
+			r.StatisType = &st
+		}
+		ldn := "Band=" + band
+		r.ObjectLDN = &ldn
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// joinOr 把多个 LIKE 条件用 OR 连接成 "(a OR b OR ...)" 的括号体（去掉外层括号，由调用方加）。
+func joinOr(conds []string) string {
+	out := ""
+	for i, c := range conds {
+		if i == 0 {
+			out = c
+		} else {
+			out += " OR " + c
+		}
+	}
+	return out
+}
+
 // ── 过滤条件 ───────────────────────────────────────────────────────────────
 
 func applyDeviceFilters(qb sq.SelectBuilder, q QueryRequest) sq.SelectBuilder {
@@ -607,16 +794,13 @@ func SelectTable(g metrics.Granularity, dim Dimension) (string, error) {
 	if dim == "" {
 		dim = DimensionDevice
 	}
-	if dim == DimensionBand {
-		// band 维度聚合实现拆到 T-0183，本任务只把它加进枚举/约束。
-		return "", ErrBandNotImplemented
-	}
 	switch g {
 	case metrics.Granularity15Min:
 		if dim == DimensionDeviceGroup {
 			return "", fmt.Errorf("%w: 15min × device_group", ErrUnsupportedQuery)
 		}
-		// device / aggregate_group / product 都走 pm_metrics raw 表
+		// device / aggregate_group / product / band 都走 pm_metrics raw 表
+		// （band 维度按小区行 JOIN device_parameters，源同 device 维度表）
 		return "pm_metrics", nil
 	case metrics.GranularityHourly:
 		if dim == DimensionDeviceGroup {

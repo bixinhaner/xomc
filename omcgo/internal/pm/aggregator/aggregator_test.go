@@ -154,7 +154,8 @@ func (f *fakeRows) Values() ([]any, error)               { return nil, nil }
 func (f *fakeRows) RawValues() [][]byte                  { return nil }
 func (f *fakeRows) Conn() *pgx.Conn                      { return nil }
 
-// scanInto copies row values into dest pointers, supporting string and float64.
+// scanInto copies row values into dest pointers, supporting string, float64,
+// time.Time, and nullable *string (dest **string).
 func scanInto(row []any, dest []any) error {
 	for i, d := range dest {
 		switch dp := d.(type) {
@@ -162,6 +163,15 @@ func scanInto(row []any, dest []any) error {
 			*dp = row[i].(string)
 		case *float64:
 			*dp = row[i].(float64)
+		case *time.Time:
+			*dp = row[i].(time.Time)
+		case **string:
+			if row[i] == nil {
+				*dp = nil
+			} else {
+				v := row[i].(string)
+				*dp = &v
+			}
 		default:
 			return errors.New("scanInto: unsupported dest type")
 		}
