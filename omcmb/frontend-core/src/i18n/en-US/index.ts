@@ -203,6 +203,47 @@ const messages: Record<string, string> = {
   'sysconfig.security.noLoginPrefix':      'consecutive days of not logging into omc exceeds',
   'sysconfig.security.daysLockAccount':    'days, account will be locked',
 
+  // F3 batch 4 — system/MenuManagement (113 strings, 33 unique)
+  'menu.modal.title':              'Menu Management',
+  'menu.showIcon':                 'Show menu icons',
+
+  // Form labels
+  'menu.form.nameZh':              'Menu name (Chinese)',
+  'menu.form.type':                'Type',
+  'menu.form.menuType':            'Menu type',
+  'menu.form.sortOrder':           'Sort order',
+  'menu.form.isExternal':          'External link',
+  'menu.form.routePath':           'Route path',
+  'menu.form.showStatus':          'Display state',
+  'menu.form.status':              'Menu state',
+  'menu.form.apiPermission':       'API permission',
+  'menu.form.componentPath':       'Component path',
+  'menu.form.permissionKey':       'Permission key',
+  'menu.form.routeParams':         'Route params',
+  'menu.form.parent':              'Parent menu',
+
+  // Placeholders
+  'menu.placeholder.name':           'Please enter menu name',
+  'menu.placeholder.sortOrder':      'Please enter sort order',
+  'menu.placeholder.routePath':      'Please enter route path',
+  'menu.placeholder.componentPath':  'Please enter component path',
+  'menu.placeholder.permissionKey':  'Please enter permission key',
+  'menu.placeholder.routeParams':    'Please enter route params',
+  'menu.placeholder.parent':         'Please select parent menu',
+
+  // Radio values
+  'menu.radio.yes':                'Yes',
+  'menu.radio.no':                 'No',
+  'menu.radio.show':               'Show',
+  'menu.radio.hide':               'Hide',
+  'menu.radio.normal':             'Normal',
+  'menu.radio.disabled':           'Disabled',
+  'menu.radio.required':           'Required',
+  'menu.radio.none':               'None',
+  'menu.radio.directory':          'Directory',
+  'menu.radio.menu':               'Menu',
+  'menu.radio.button':             'Button',
+
   // -------------------------------------------------------------------------
   // Table headers
   // -------------------------------------------------------------------------

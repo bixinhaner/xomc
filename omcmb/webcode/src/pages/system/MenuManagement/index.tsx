@@ -669,10 +669,10 @@ export default function MenuManagement() {
 
   return (
     <ListPageLayout
-      title="菜单管理"
+      title={t('menu.modal.title')}
       extra={
         <Space>
-          <span style={{ color: 'var(--color-text-secondary)' }}>显示菜单图标</span>
+          <span style={{ color: 'var(--color-text-secondary)' }}>{t('menu.showIcon')}</span>
           <Switch
             checked={showMenuIcon}
             onChange={handleToggleMenuIcon}
@@ -737,15 +737,15 @@ export default function MenuManagement() {
         <Form form={form} layout="vertical">
           <Form.Item
             name="name"
-            label="菜单名称（中文）"
+            label={t('menu.form.nameZh')}
             rules={[{ required: true, message: '请输入菜单名称' }]}
           >
-            <Input placeholder="请输入菜单名称" maxLength={50} />
+            <Input placeholder={t('menu.placeholder.name')} maxLength={50} />
           </Form.Item>
           {i18nFields}
           <Form.Item
             name="type"
-            label="类型"
+            label={t('menu.form.type')}
             rules={[{ required: true, message: '请选择类型' }]}
           >
             <Select options={MENU_TYPE_OPTIONS} disabled />
@@ -762,10 +762,10 @@ export default function MenuManagement() {
                   <>
                     <Form.Item
                       name="sort"
-                      label="显示排序"
+                      label={t('menu.form.sortOrder')}
                       rules={[{ required: true, message: '请输入显示排序' }]}
                     >
-                      <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder="请输入显示排序" />
+                      <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder={t('menu.placeholder.sortOrder')} />
                     </Form.Item>
                     <Form.Item
                       name="icon"
@@ -776,49 +776,49 @@ export default function MenuManagement() {
                     </Form.Item>
                     <Form.Item
                       name="isExternal"
-                      label="是否外链"
+                      label={t('menu.form.isExternal')}
                       rules={[{ required: true, message: '请选择是否外链' }]}
                     >
                       <Radio.Group>
-                        <Radio value="yes">是</Radio>
-                        <Radio value="no">否</Radio>
+                        <Radio value="yes">{t('menu.radio.yes')}</Radio>
+                        <Radio value="no">{t('menu.radio.no')}</Radio>
                       </Radio.Group>
                     </Form.Item>
                     <Form.Item
                       name="routePath"
-                      label="路由地址"
+                      label={t('menu.form.routePath')}
                       rules={[{ required: true, message: '请输入路由地址' }]}
                     >
-                      <Input placeholder="请输入路由地址" maxLength={200} />
+                      <Input placeholder={t('menu.placeholder.routePath')} maxLength={200} />
                     </Form.Item>
                     <Form.Item
                       name="showStatus"
-                      label="显示状态"
+                      label={t('menu.form.showStatus')}
                       rules={[{ required: true, message: '请选择显示状态' }]}
                     >
                       <Radio.Group>
-                        <Radio value="show">显示</Radio>
-                        <Radio value="hide">隐藏</Radio>
+                        <Radio value="show">{t('menu.radio.show')}</Radio>
+                        <Radio value="hide">{t('menu.radio.hide')}</Radio>
                       </Radio.Group>
                     </Form.Item>
                     <Form.Item
                       name="status"
-                      label="菜单状态"
+                      label={t('menu.form.status')}
                       rules={[{ required: true, message: '请选择菜单状态' }]}
                     >
                       <Radio.Group>
-                        <Radio value="normal">正常</Radio>
-                        <Radio value="disabled">停用</Radio>
+                        <Radio value="normal">{t('menu.radio.normal')}</Radio>
+                        <Radio value="disabled">{t('menu.radio.disabled')}</Radio>
                       </Radio.Group>
                     </Form.Item>
                     <Form.Item
                       name="apiPermission"
-                      label="API权限"
+                      label={t('menu.form.apiPermission')}
                       rules={[{ required: true, message: '请选择API权限' }]}
                     >
                       <Radio.Group>
-                        <Radio value="required">需要</Radio>
-                        <Radio value="none">无需</Radio>
+                        <Radio value="required">{t('menu.radio.required')}</Radio>
+                        <Radio value="none">{t('menu.radio.none')}</Radio>
                       </Radio.Group>
                     </Form.Item>
                   </>
@@ -831,10 +831,10 @@ export default function MenuManagement() {
                   <>
                     <Form.Item
                       name="sort"
-                      label="显示排序"
+                      label={t('menu.form.sortOrder')}
                       rules={[{ required: true, message: '请输入显示排序' }]}
                     >
-                      <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder="请输入显示排序" />
+                      <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder={t('menu.placeholder.sortOrder')} />
                     </Form.Item>
                     <Form.Item
                       name="icon"
@@ -845,67 +845,67 @@ export default function MenuManagement() {
                     </Form.Item>
                     <Form.Item
                       name="isExternal"
-                      label="是否外链"
+                      label={t('menu.form.isExternal')}
                       rules={[{ required: true, message: '请选择是否外链' }]}
                     >
                       <Radio.Group>
-                        <Radio value="yes">是</Radio>
-                        <Radio value="no">否</Radio>
+                        <Radio value="yes">{t('menu.radio.yes')}</Radio>
+                        <Radio value="no">{t('menu.radio.no')}</Radio>
                       </Radio.Group>
                     </Form.Item>
                     <Form.Item
                       name="routePath"
-                      label="路由地址"
+                      label={t('menu.form.routePath')}
                       rules={[{ required: true, message: '请输入路由地址' }]}
                     >
-                      <Input placeholder="请输入路由地址" maxLength={200} />
+                      <Input placeholder={t('menu.placeholder.routePath')} maxLength={200} />
                     </Form.Item>
                     <Form.Item
                       name="componentPath"
-                      label="组件路径"
+                      label={t('menu.form.componentPath')}
                     >
-                      <Input placeholder="请输入组件路径" maxLength={200} />
+                      <Input placeholder={t('menu.placeholder.componentPath')} maxLength={200} />
                     </Form.Item>
                     <Form.Item
                       name="permissionKey"
-                      label="权限字符"
+                      label={t('menu.form.permissionKey')}
                     >
-                      <Input placeholder="请输入权限字符" maxLength={100} />
+                      <Input placeholder={t('menu.placeholder.permissionKey')} maxLength={100} />
                     </Form.Item>
                     <Form.Item
                       name="routeParams"
-                      label="路由参数"
+                      label={t('menu.form.routeParams')}
                     >
-                      <Input placeholder="请输入路由参数" maxLength={200} />
+                      <Input placeholder={t('menu.placeholder.routeParams')} maxLength={200} />
                     </Form.Item>
                     <Form.Item
                       name="showStatus"
-                      label="显示状态"
+                      label={t('menu.form.showStatus')}
                       rules={[{ required: true, message: '请选择显示状态' }]}
                     >
                       <Radio.Group>
-                        <Radio value="show">显示</Radio>
-                        <Radio value="hide">隐藏</Radio>
+                        <Radio value="show">{t('menu.radio.show')}</Radio>
+                        <Radio value="hide">{t('menu.radio.hide')}</Radio>
                       </Radio.Group>
                     </Form.Item>
                     <Form.Item
                       name="status"
-                      label="菜单状态"
+                      label={t('menu.form.status')}
                       rules={[{ required: true, message: '请选择菜单状态' }]}
                     >
                       <Radio.Group>
-                        <Radio value="normal">正常</Radio>
-                        <Radio value="disabled">停用</Radio>
+                        <Radio value="normal">{t('menu.radio.normal')}</Radio>
+                        <Radio value="disabled">{t('menu.radio.disabled')}</Radio>
                       </Radio.Group>
                     </Form.Item>
                     <Form.Item
                       name="apiPermission"
-                      label="API权限"
+                      label={t('menu.form.apiPermission')}
                       rules={[{ required: true, message: '请选择API权限' }]}
                     >
                       <Radio.Group>
-                        <Radio value="required">需要</Radio>
-                        <Radio value="none">无需</Radio>
+                        <Radio value="required">{t('menu.radio.required')}</Radio>
+                        <Radio value="none">{t('menu.radio.none')}</Radio>
                       </Radio.Group>
                     </Form.Item>
                   </>
@@ -918,35 +918,35 @@ export default function MenuManagement() {
                   <>
                     <Form.Item
                       name="sort"
-                      label="显示排序"
+                      label={t('menu.form.sortOrder')}
                       rules={[{ required: true, message: '请输入显示排序' }]}
                     >
-                      <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder="请输入显示排序" />
+                      <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder={t('menu.placeholder.sortOrder')} />
                     </Form.Item>
                     <Form.Item
                       name="permissionKey"
-                      label="权限字符"
+                      label={t('menu.form.permissionKey')}
                     >
-                      <Input placeholder="请输入权限字符" maxLength={100} />
+                      <Input placeholder={t('menu.placeholder.permissionKey')} maxLength={100} />
                     </Form.Item>
                     <Form.Item
                       name="status"
-                      label="菜单状态"
+                      label={t('menu.form.status')}
                       rules={[{ required: true, message: '请选择菜单状态' }]}
                     >
                       <Radio.Group>
-                        <Radio value="normal">正常</Radio>
-                        <Radio value="disabled">停用</Radio>
+                        <Radio value="normal">{t('menu.radio.normal')}</Radio>
+                        <Radio value="disabled">{t('menu.radio.disabled')}</Radio>
                       </Radio.Group>
                     </Form.Item>
                     <Form.Item
                       name="apiPermission"
-                      label="API权限"
+                      label={t('menu.form.apiPermission')}
                       rules={[{ required: true, message: '请选择API权限' }]}
                     >
                       <Radio.Group>
-                        <Radio value="required">需要</Radio>
-                        <Radio value="none">无需</Radio>
+                        <Radio value="required">{t('menu.radio.required')}</Radio>
+                        <Radio value="none">{t('menu.radio.none')}</Radio>
                       </Radio.Group>
                     </Form.Item>
                   </>
@@ -988,24 +988,24 @@ export default function MenuManagement() {
         <Form form={addForm} layout="vertical">
           <Form.Item
             name="parentId"
-            label="上级菜单"
+            label={t('menu.form.parent')}
             rules={[{ required: true, message: '请选择上级菜单' }]}
           >
             <TreeSelect
               treeData={menuTreeData}
-              placeholder="请选择上级菜单"
+              placeholder={t('menu.placeholder.parent')}
               treeDefaultExpandAll
             />
           </Form.Item>
           <Form.Item
             name="type"
-            label="菜单类型"
+            label={t('menu.form.menuType')}
             rules={[{ required: true, message: '请选择菜单类型' }]}
           >
             <Radio.Group>
-              <Radio value="directory">目录</Radio>
-              <Radio value="menu">菜单</Radio>
-              <Radio value="button">按钮</Radio>
+              <Radio value="directory">{t('menu.radio.directory')}</Radio>
+              <Radio value="menu">{t('menu.radio.menu')}</Radio>
+              <Radio value="button">{t('menu.radio.button')}</Radio>
             </Radio.Group>
           </Form.Item>
 
@@ -1020,17 +1020,17 @@ export default function MenuManagement() {
                   <>
                     <Form.Item
                       name="sort"
-                      label="显示排序"
+                      label={t('menu.form.sortOrder')}
                       rules={[{ required: true, message: '请输入显示排序' }]}
                     >
-                      <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder="请输入显示排序" />
+                      <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder={t('menu.placeholder.sortOrder')} />
                     </Form.Item>
                     <Form.Item
                       name="name"
-                      label="菜单名称（中文）"
+                      label={t('menu.form.nameZh')}
                       rules={[{ required: true, message: '请输入菜单名称' }]}
                     >
-                      <Input placeholder="请输入菜单名称" maxLength={50} />
+                      <Input placeholder={t('menu.placeholder.name')} maxLength={50} />
                     </Form.Item>
                     {i18nFields}
                     <Form.Item
@@ -1042,53 +1042,53 @@ export default function MenuManagement() {
                     </Form.Item>
                     <Form.Item
                       name="isExternal"
-                      label="是否外链"
+                      label={t('menu.form.isExternal')}
                       rules={[{ required: true, message: '请选择是否外链' }]}
                       initialValue="no"
                     >
                       <Radio.Group>
-                        <Radio value="yes">是</Radio>
-                        <Radio value="no">否</Radio>
+                        <Radio value="yes">{t('menu.radio.yes')}</Radio>
+                        <Radio value="no">{t('menu.radio.no')}</Radio>
                       </Radio.Group>
                     </Form.Item>
                     <Form.Item
                       name="routePath"
-                      label="路由地址"
+                      label={t('menu.form.routePath')}
                       rules={[{ required: true, message: '请输入路由地址' }]}
                     >
-                      <Input placeholder="请输入路由地址" maxLength={200} />
+                      <Input placeholder={t('menu.placeholder.routePath')} maxLength={200} />
                     </Form.Item>
                     <Form.Item
                       name="showStatus"
-                      label="显示状态"
+                      label={t('menu.form.showStatus')}
                       rules={[{ required: true, message: '请选择显示状态' }]}
                       initialValue="show"
                     >
                       <Radio.Group>
-                        <Radio value="show">显示</Radio>
-                        <Radio value="hide">隐藏</Radio>
+                        <Radio value="show">{t('menu.radio.show')}</Radio>
+                        <Radio value="hide">{t('menu.radio.hide')}</Radio>
                       </Radio.Group>
                     </Form.Item>
                     <Form.Item
                       name="status"
-                      label="菜单状态"
+                      label={t('menu.form.status')}
                       rules={[{ required: true, message: '请选择菜单状态' }]}
                       initialValue="normal"
                     >
                       <Radio.Group>
-                        <Radio value="normal">正常</Radio>
-                        <Radio value="disabled">停用</Radio>
+                        <Radio value="normal">{t('menu.radio.normal')}</Radio>
+                        <Radio value="disabled">{t('menu.radio.disabled')}</Radio>
                       </Radio.Group>
                     </Form.Item>
                     <Form.Item
                       name="apiPermission"
-                      label="API权限"
+                      label={t('menu.form.apiPermission')}
                       rules={[{ required: true, message: '请选择API权限' }]}
                       initialValue="none"
                     >
                       <Radio.Group>
-                        <Radio value="required">需要</Radio>
-                        <Radio value="none">无需</Radio>
+                        <Radio value="required">{t('menu.radio.required')}</Radio>
+                        <Radio value="none">{t('menu.radio.none')}</Radio>
                       </Radio.Group>
                     </Form.Item>
                   </>
@@ -1101,17 +1101,17 @@ export default function MenuManagement() {
                   <>
                     <Form.Item
                       name="sort"
-                      label="显示排序"
+                      label={t('menu.form.sortOrder')}
                       rules={[{ required: true, message: '请输入显示排序' }]}
                     >
-                      <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder="请输入显示排序" />
+                      <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder={t('menu.placeholder.sortOrder')} />
                     </Form.Item>
                     <Form.Item
                       name="name"
-                      label="菜单名称（中文）"
+                      label={t('menu.form.nameZh')}
                       rules={[{ required: true, message: '请输入菜单名称' }]}
                     >
-                      <Input placeholder="请输入菜单名称" maxLength={50} />
+                      <Input placeholder={t('menu.placeholder.name')} maxLength={50} />
                     </Form.Item>
                     {i18nFields}
                     <Form.Item
@@ -1123,71 +1123,71 @@ export default function MenuManagement() {
                     </Form.Item>
                     <Form.Item
                       name="isExternal"
-                      label="是否外链"
+                      label={t('menu.form.isExternal')}
                       rules={[{ required: true, message: '请选择是否外链' }]}
                       initialValue="no"
                     >
                       <Radio.Group>
-                        <Radio value="yes">是</Radio>
-                        <Radio value="no">否</Radio>
+                        <Radio value="yes">{t('menu.radio.yes')}</Radio>
+                        <Radio value="no">{t('menu.radio.no')}</Radio>
                       </Radio.Group>
                     </Form.Item>
                     <Form.Item
                       name="routePath"
-                      label="路由地址"
+                      label={t('menu.form.routePath')}
                       rules={[{ required: true, message: '请输入路由地址' }]}
                     >
-                      <Input placeholder="请输入路由地址" maxLength={200} />
+                      <Input placeholder={t('menu.placeholder.routePath')} maxLength={200} />
                     </Form.Item>
                     <Form.Item
                       name="componentPath"
-                      label="组件路径"
+                      label={t('menu.form.componentPath')}
                     >
-                      <Input placeholder="请输入组件路径" maxLength={200} />
+                      <Input placeholder={t('menu.placeholder.componentPath')} maxLength={200} />
                     </Form.Item>
                     <Form.Item
                       name="permissionKey"
-                      label="权限字符"
+                      label={t('menu.form.permissionKey')}
                     >
-                      <Input placeholder="请输入权限字符" maxLength={100} />
+                      <Input placeholder={t('menu.placeholder.permissionKey')} maxLength={100} />
                     </Form.Item>
                     <Form.Item
                       name="routeParams"
-                      label="路由参数"
+                      label={t('menu.form.routeParams')}
                     >
-                      <Input placeholder="请输入路由参数" maxLength={200} />
+                      <Input placeholder={t('menu.placeholder.routeParams')} maxLength={200} />
                     </Form.Item>
                     <Form.Item
                       name="showStatus"
-                      label="显示状态"
+                      label={t('menu.form.showStatus')}
                       rules={[{ required: true, message: '请选择显示状态' }]}
                       initialValue="show"
                     >
                       <Radio.Group>
-                        <Radio value="show">显示</Radio>
-                        <Radio value="hide">隐藏</Radio>
+                        <Radio value="show">{t('menu.radio.show')}</Radio>
+                        <Radio value="hide">{t('menu.radio.hide')}</Radio>
                       </Radio.Group>
                     </Form.Item>
                     <Form.Item
                       name="status"
-                      label="菜单状态"
+                      label={t('menu.form.status')}
                       rules={[{ required: true, message: '请选择菜单状态' }]}
                       initialValue="normal"
                     >
                       <Radio.Group>
-                        <Radio value="normal">正常</Radio>
-                        <Radio value="disabled">停用</Radio>
+                        <Radio value="normal">{t('menu.radio.normal')}</Radio>
+                        <Radio value="disabled">{t('menu.radio.disabled')}</Radio>
                       </Radio.Group>
                     </Form.Item>
                     <Form.Item
                       name="apiPermission"
-                      label="API权限"
+                      label={t('menu.form.apiPermission')}
                       rules={[{ required: true, message: '请选择API权限' }]}
                       initialValue="none"
                     >
                       <Radio.Group>
-                        <Radio value="required">需要</Radio>
-                        <Radio value="none">无需</Radio>
+                        <Radio value="required">{t('menu.radio.required')}</Radio>
+                        <Radio value="none">{t('menu.radio.none')}</Radio>
                       </Radio.Group>
                     </Form.Item>
                   </>
@@ -1200,45 +1200,45 @@ export default function MenuManagement() {
                   <>
                     <Form.Item
                       name="sort"
-                      label="显示排序"
+                      label={t('menu.form.sortOrder')}
                       rules={[{ required: true, message: '请输入显示排序' }]}
                     >
-                      <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder="请输入显示排序" />
+                      <InputNumber min={1} max={999} style={{ width: '100%' }} placeholder={t('menu.placeholder.sortOrder')} />
                     </Form.Item>
                     <Form.Item
                       name="name"
-                      label="菜单名称（中文）"
+                      label={t('menu.form.nameZh')}
                       rules={[{ required: true, message: '请输入菜单名称' }]}
                     >
-                      <Input placeholder="请输入菜单名称" maxLength={50} />
+                      <Input placeholder={t('menu.placeholder.name')} maxLength={50} />
                     </Form.Item>
                     {i18nFields}
                     <Form.Item
                       name="permissionKey"
-                      label="权限字符"
+                      label={t('menu.form.permissionKey')}
                     >
-                      <Input placeholder="请输入权限字符" maxLength={100} />
+                      <Input placeholder={t('menu.placeholder.permissionKey')} maxLength={100} />
                     </Form.Item>
                     <Form.Item
                       name="status"
-                      label="菜单状态"
+                      label={t('menu.form.status')}
                       rules={[{ required: true, message: '请选择菜单状态' }]}
                       initialValue="normal"
                     >
                       <Radio.Group>
-                        <Radio value="normal">正常</Radio>
-                        <Radio value="disabled">停用</Radio>
+                        <Radio value="normal">{t('menu.radio.normal')}</Radio>
+                        <Radio value="disabled">{t('menu.radio.disabled')}</Radio>
                       </Radio.Group>
                     </Form.Item>
                     <Form.Item
                       name="apiPermission"
-                      label="API权限"
+                      label={t('menu.form.apiPermission')}
                       rules={[{ required: true, message: '请选择API权限' }]}
                       initialValue="none"
                     >
                       <Radio.Group>
-                        <Radio value="required">需要</Radio>
-                        <Radio value="none">无需</Radio>
+                        <Radio value="required">{t('menu.radio.required')}</Radio>
+                        <Radio value="none">{t('menu.radio.none')}</Radio>
                       </Radio.Group>
                     </Form.Item>
                   </>

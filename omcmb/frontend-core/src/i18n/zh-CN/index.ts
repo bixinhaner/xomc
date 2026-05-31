@@ -203,6 +203,47 @@ const messages: Record<string, string> = {
   'sysconfig.security.noLoginPrefix':      '连续未登录omc超过',
   'sysconfig.security.daysLockAccount':    '天，锁定账户',
 
+  // F3 第 4 批 — system/MenuManagement (113 处,33 个唯一 key)
+  'menu.modal.title':              '菜单管理',
+  'menu.showIcon':                 '显示菜单图标',
+
+  // Form labels
+  'menu.form.nameZh':              '菜单名称（中文）',
+  'menu.form.type':                '类型',
+  'menu.form.menuType':            '菜单类型',
+  'menu.form.sortOrder':           '显示排序',
+  'menu.form.isExternal':          '是否外链',
+  'menu.form.routePath':           '路由地址',
+  'menu.form.showStatus':          '显示状态',
+  'menu.form.status':              '菜单状态',
+  'menu.form.apiPermission':       'API权限',
+  'menu.form.componentPath':       '组件路径',
+  'menu.form.permissionKey':       '权限字符',
+  'menu.form.routeParams':         '路由参数',
+  'menu.form.parent':              '上级菜单',
+
+  // Placeholders
+  'menu.placeholder.name':           '请输入菜单名称',
+  'menu.placeholder.sortOrder':      '请输入显示排序',
+  'menu.placeholder.routePath':      '请输入路由地址',
+  'menu.placeholder.componentPath':  '请输入组件路径',
+  'menu.placeholder.permissionKey':  '请输入权限字符',
+  'menu.placeholder.routeParams':    '请输入路由参数',
+  'menu.placeholder.parent':         '请选择上级菜单',
+
+  // Radio values
+  'menu.radio.yes':                '是',
+  'menu.radio.no':                 '否',
+  'menu.radio.show':               '显示',
+  'menu.radio.hide':               '隐藏',
+  'menu.radio.normal':             '正常',
+  'menu.radio.disabled':           '停用',
+  'menu.radio.required':           '需要',
+  'menu.radio.none':               '无需',
+  'menu.radio.directory':          '目录',
+  'menu.radio.menu':               '菜单',
+  'menu.radio.button':             '按钮',
+
   // -------------------------------------------------------------------------
   // Table headers
   // -------------------------------------------------------------------------
