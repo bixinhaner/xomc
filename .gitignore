@@ -71,3 +71,6 @@ omcgo/data/**/*.tmp.*
 # 根目录散落的临时截图(playwright / 手动调试用,不入库;
 # 子目录里前端 / 文档资产里的 png 不受影响,因为前缀 / 限定根目录)
 /*.png
+
+# Migration baseline backups (consolidation snapshots, kept locally for rollback only)
+omcgo/migrations.backup-*/
