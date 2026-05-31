@@ -98,7 +98,7 @@ export const NAV_CONFIG: NavConfig = [
       // 与 seed/000189 同步：5 项 name + sort_order 走 menus 表 name_i18n。
       // 性能仪表盘对齐 seed/000188 的 route_path=/performance（T-0164 G6 主入口）。
       { key: 'perf-dashboard',  label: 'nav.performance.dashboard',    path: '/performance' },
-      { key: 'perf-query',      label: 'nav.performance.query',        path: '/performance/query' },
+      // { key: 'perf-query',      label: 'nav.performance.query',        path: '/performance/query' },  // T-0190 隐藏指标查询（旧入口，页面代码保留）
       { key: 'perf-adhoc',      label: 'nav.performance.adhoc',        path: '/performance/pm-adhoc' },
       { key: 'perf-kpi-std',    label: 'nav.performance.kpiStandard',  path: '/performance/kpi-standard' },
       // { key: 'perf-kpi-bs',     label: 'nav.performance.kpiStation',   path: '/performance/kpi-station' },  // 隐藏测量任务管理

@@ -62,8 +62,7 @@ const PerformanceCharts  = React.lazy(() => import('@/pages/performance/Performa
 const ThresholdConfig    = React.lazy(() => import('@/pages/performance/ThresholdConfig'));
 const PerformanceFiles   = React.lazy(() => import('@/pages/performance/PerformanceFiles'));
 const PerfTaskConfig     = React.lazy(() => import('@/pages/performance/PerformanceTaskConfig'));
-// T-0164-P6 G6 PM 仪表盘（新单 tab "性能查看"）
-const PmDashboardEditor  = React.lazy(() => import('@/pages/performance/PmDashboard/DashboardEditor'));
+// T-0190 旧拖拽仪表盘编辑器已下线（DashboardEditor 等文件删除），原 PmDashboardEditor lazy 声明移除。
 // T-0164 收尾 G6-Gap-1：左右栏布局 — `/performance?dashboard=:id`
 const PerformanceLayout  = React.lazy(() => import('@/pages/performance/PmDashboard/PerformanceLayout'));
 // T-0164-P7 G7 自定义聚合任务
@@ -299,7 +298,7 @@ export const routes: RouteObject[] = [
       { path: 'performance',                   element: withSuspense(PerformanceLayout) },
       // 旧路由保留兼容（重定向到新左右栏布局，避免历史链接 404）
       { path: 'performance/pm-dashboard',      element: <Navigate to="/performance" replace /> },
-      { path: 'performance/pm-dashboard/:id',  element: withSuspense(PmDashboardEditor) },
+      { path: 'performance/pm-dashboard/:id',  element: <Navigate to="/performance" replace /> },
       // T-0164-P7 G7 自定义聚合任务
       { path: 'performance/pm-adhoc',          element: withSuspense(PmAdhocPage) },
       // T-0185 新建向导整页 5 步
