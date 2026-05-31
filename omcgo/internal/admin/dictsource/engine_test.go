@@ -290,7 +290,7 @@ func TestSyncAll_SkipsFailedDictsAndUpdatesMetadata(t *testing.T) {
 	dicts := []SyncDict{
 		{ID: 1, Name: "A", SourceTable: "devices", LabelField: "product_class", ValueField: "product_class"},
 		{ID: 2, Name: "B", SourceTable: "evil", LabelField: "x", ValueField: "x"},
-		{ID: 3, Name: "C", SourceTable: "products", LabelField: "code", ValueField: "code"},
+		{ID: 3, Name: "C", SourceTable: "products", LabelField: "product_name", ValueField: "product_name"},
 	}
 	reader := &fakeReader{rows: [][2]string{{"l", "v"}}}
 	writer := &fakeWriter{countVal: 1}

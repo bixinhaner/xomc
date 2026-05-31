@@ -145,8 +145,14 @@ func translateEngineError(err error) error {
 }
 
 // DefaultDictSourceDailyCron 是 worker 每日同步字典数据源的默认 cron 表达式。
-// PRD §3.4:每日 02:00 BJT,业务低峰;robfig/cron 6 段语法(秒/分/时/日/月/周)。
-const DefaultDictSourceDailyCron = "0 0 2 * * *"
+// PRD §3.4:每日 02:00 BJT,业务低峰。
+//
+// 用 5 字段标准 cron 格式(分/时/日/月/周),与 parammodel.DefaultBackupCleanupCron
+// 等同款 robfig/cron/v3 默认解析器对齐。6 字段(带秒)格式需要 cron.WithSeconds() 构造选项,
+// 当前 worker 调用方未启用,误用 6 字段会导致"expected exactly 5 fields, found 6"启动期
+// warning 并 fallback 到 default(仍然是同一个表达式 → 调度静默不生效)。
+// P5 真机验收抓到的 bug,2026-05-31 修正。
+const DefaultDictSourceDailyCron = "0 2 * * *"
 
 // LoadDictSourceRegistry 加载内置白名单(embed sources.yaml)。
 // 是 internal/admin 包向 cmd/app/provider 暴露的最小入口 — provider 不直接 import dictsource 包。

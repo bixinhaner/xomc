@@ -19,17 +19,22 @@ import (
 var defaultYAML []byte
 
 // FieldSpec 描述源表中一个可作为字典 label/value 的字段。
+//
+// JSON 标签匹配前端 frontend-core DictionarySourceField 接口(snake_case),P5 真机
+// 抓 bug 修(2026-05-31):原本只有 yaml 标签 → JSON 序列化按 Go 字段名走 PascalCase,
+// 前端 SourcePicker 拿到 `Field` / `DisplayName` 全是 undefined。
 type FieldSpec struct {
-	Column      string `yaml:"column"`
-	DisplayName string `yaml:"display"`
-	Type        string `yaml:"type"`
+	Column      string `yaml:"column"      json:"column"`
+	DisplayName string `yaml:"display"     json:"display"`
+	Type        string `yaml:"type"        json:"type"`
 }
 
 // TableSpec 描述一张可作为字典数据源的白名单表。
+// JSON 标签同 FieldSpec 注释。
 type TableSpec struct {
-	Table       string      `yaml:"table"`
-	DisplayName string      `yaml:"display_name"`
-	Fields      []FieldSpec `yaml:"fields"`
+	Table       string      `yaml:"table"        json:"table"`
+	DisplayName string      `yaml:"display_name" json:"display_name"`
+	Fields      []FieldSpec `yaml:"fields"       json:"fields"`
 }
 
 // fileShape 是 sources.yaml 的根节点。

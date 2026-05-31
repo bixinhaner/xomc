@@ -8,6 +8,8 @@
 # - 添加新表 → 在此追加一项,加 PR 评审
 # - 敏感表(用户密码 hash / API key / 审计日志 / login_logs / system_license) 绝不入此清单
 # - 字段必须是原生类型(string / int / bool / time);v1 不支持 jsonb / array
+# - 字段名必须与 PostgreSQL 实际列名一致;否则同步时 SQL 报错 column does not exist
+#   (P5 真机抓 bug 修正 2026-05-31:原 yaml 直接照 PRD 起草,与实际 schema 错位了 6 个字段)
 
 sources:
   - table: devices
@@ -15,15 +17,15 @@ sources:
     fields:
       - { column: serial_number,    display: "序列号",     type: string }
       - { column: product_class,    display: "设备型号",   type: string }
-      - { column: vendor_id,        display: "厂商 OUI",   type: string }
-      - { column: software_version, display: "软件版本",   type: string }
+      - { column: oui,              display: "厂商 OUI",   type: string }
+      - { column: manufacturer,     display: "厂商",       type: string }
 
   - table: products
     display_name: "产品"
     fields:
-      - { column: code,             display: "产品 code",  type: string }
-      - { column: name,             display: "产品名",     type: string }
+      - { column: product_name,     display: "产品名",     type: string }
       - { column: vendor,           display: "厂商",       type: string }
+      - { column: tech,             display: "制式",       type: string }
 
   - table: param_models
     display_name: "参数模型"
@@ -33,7 +35,7 @@ sources:
   - table: topo_nodes
     display_name: "拓扑节点"
     fields:
-      - { column: name,             display: "节点名",     type: string }
+      - { column: label,            display: "节点名",     type: string }
       - { column: node_type,        display: "节点类型",   type: string }
 
   - table: alarm_definitions
@@ -41,42 +43,42 @@ sources:
     fields:
       - { column: identifier,       display: "告警标识",   type: string }
       - { column: ne_type,          display: "网元类型",   type: string }
-      - { column: severity,         display: "严重级",     type: string }
+      - { column: event_type,       display: "事件类型",   type: string }
 
   - table: device_groups
     display_name: "设备组"
     fields:
       - { column: name,             display: "组名",       type: string }
-      - { column: group_type,       display: "组类型",     type: string }
 
   - table: sites
     display_name: "站点"
     fields:
       - { column: name,             display: "站点名",     type: string }
-      - { column: region,           display: "区域",       type: string }
+      - { column: address,          display: "地址",       type: string }
 
   - table: product_class_patterns
     display_name: "产品 productClass pattern"
     fields:
-      - { column: pattern,          display: "正则",       type: string }
+      - { column: product_class,    display: "productClass", type: string }
 
   - table: firmware_versions
     display_name: "固件版本"
     fields:
       - { column: version,          display: "版本号",     type: string }
-      - { column: vendor,           display: "厂商",       type: string }
+      - { column: product_class,    display: "设备型号",   type: string }
 
   - table: kpi_definitions
     display_name: "KPI 定义"
     fields:
-      - { column: code,             display: "KPI code",   type: string }
       - { column: name,             display: "KPI 名",     type: string }
+      - { column: display_name,     display: "显示名",     type: string }
+      - { column: category,         display: "分类",       type: string }
 
   - table: users
     display_name: "用户"
     fields:
       - { column: username,         display: "用户名",     type: string }
-      - { column: nickname,         display: "昵称",       type: string }
+      - { column: display_name,     display: "显示名",     type: string }
 
   - table: roles
     display_name: "角色"
