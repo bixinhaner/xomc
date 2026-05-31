@@ -31,6 +31,7 @@ func startPMRetentionCleanup(
 	cronStateRepo asyncjob.CronStateRepository,
 	registry *asyncjob.Registry,
 	asyncMetrics *asyncjob.Metrics,
+	loc *time.Location,
 ) {
 	logger := w.Logger.Named("pm-retention")
 
@@ -49,7 +50,7 @@ func startPMRetentionCleanup(
 	go runJobTypeWorker(ctx, registry, retention.JobTypeCleanup, w.Logger.Named("pm-retention"))
 
 	// cron 触发器（每日 03:00）+ 启动补跑
-	startRetentionCleanupCron(ctx, jobRepo, cronStateRepo, logger, asyncMetrics)
+	startRetentionCleanupCron(ctx, jobRepo, cronStateRepo, logger, asyncMetrics, loc)
 
 	logger.Info("PM retention cleanup pipeline ready (1 runner + 1 cron + catchup)")
 }
@@ -81,8 +82,9 @@ func startRetentionCleanupCron(
 	stateRepo asyncjob.CronStateRepository,
 	logger *zap.Logger,
 	asyncMetrics *asyncjob.Metrics,
+	loc *time.Location,
 ) {
-	const spec = "0 3 * * *" // 每日 03:00
+	const spec = "0 3 * * *" // 每日 03:00（业务时区，T-0192）
 	jobType := retention.JobTypeCleanup
 
 	entry := cronEntry{
@@ -90,20 +92,20 @@ func startRetentionCleanupCron(
 		jobType: jobType,
 		window: func(now time.Time) (time.Time, time.Time) {
 			// cleanup 不读时间窗 payload（runner 内自己算 cutoff），但保持与 G5 同接口形态
-			today := truncateDay(now)
+			today := truncateDay(now.In(loc))
 			return today.AddDate(0, 0, -1), today
 		},
 		advance: func(prev time.Time) time.Time { return prev.AddDate(0, 0, 1) },
 	}
 
 	// 启动补跑（complementary 防丢）
-	now := time.Now().UTC()
+	now := time.Now().In(loc)
 	catchupCronEntry(ctx, jobRepo, stateRepo, entry, now, logger, asyncMetrics)
 
-	// 正常 cron
-	c := cron.New()
+	// 正常 cron（WithLocation 与业务时区一致，T-0192）
+	c := cron.New(cron.WithLocation(loc))
 	_, err := c.AddFunc(spec, func() {
-		triggerCron(ctx, jobRepo, stateRepo, entry, logger)
+		triggerCron(ctx, jobRepo, stateRepo, entry, logger, loc)
 	})
 	if err != nil {
 		logger.Error("retention cleanup cron AddFunc failed", zap.Error(err))

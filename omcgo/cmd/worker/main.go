@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	_ "time/tzdata" // T-0192 兜底：内嵌 IANA 时区库，万一 base 镜像无 /usr/share/zoneinfo 也不静默回落 UTC
 
 	"github.com/omcgo/omcgo/internal/acs/connreq"
 	"github.com/omcgo/omcgo/internal/acs/transfercfg"
@@ -432,7 +433,9 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// T-0164-P5 / G5 + T-0164-P8 / G8：PM 自然桶聚合 cron + asyncjob 框架接入。
 	// 复用上文已构造的 pmKPIRouter（KPI 反算依赖路由）；新开 4 个 cron runner +
 	// sweeper + 触发器（hourly @:05 / daily 00:05 / weekly 周一 00:10 / monthly 1日 00:15）。
-	startPMAggregatorPipeline(context.Background(), w, pmKPIRouter)
+	// T-0192：日/周/月桶按业务时区切本地零点，loc 同时穿入窗口计算与 cron 调度。
+	pmLoc := resolvePMTimezone(cfg.PM.Timezone, logger)
+	startPMAggregatorPipeline(context.Background(), w, pmKPIRouter, pmLoc)
 
 	// T-0164-P7 / G7：自定义聚合任务（oneshot + continuous）。
 	// 复用同一 kpiRouter；4 个 worker 抢 pm_tasks 中 task_subtype='adhoc_aggregation' 的 pending 行；

@@ -60,6 +60,8 @@ pm:
   enable_value: "1"
   periodic_upload_interval: 900
   auto_setup_on_online: true
+  # 日/周/月聚合桶业务时区（T-0192）；空默认 Asia/Shanghai。
+  timezone: Asia/Shanghai
   storage:
     # T-0182 聚合结果落库范围：true=全存（默认），false=仅存所选
     store_all_metrics: true

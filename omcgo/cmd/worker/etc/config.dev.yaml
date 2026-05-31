@@ -68,6 +68,9 @@ pm:
   enable_value: "1"
   periodic_upload_interval: 900
   auto_setup_on_online: true
+  # 日/周/月聚合桶按业务时区切本地零点（T-0192）；空值代码默认 Asia/Shanghai。
+  # 影响日/周/月桶的本地零点对齐（北京 00:00 = UTC 前一日 16:00）；hourly 整点对齐时区无关。
+  timezone: Asia/Shanghai
   storage:
     # 聚合任务结果落库范围（T-0182，全局开关，非任务级）：
     #   true  = 全存（默认）：所有指标都落库，事后改任务指标集无需重算

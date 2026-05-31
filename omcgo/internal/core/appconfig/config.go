@@ -633,6 +633,11 @@ type PMConfig struct {
 	// 关闭时 OnlineSubscriber 不订阅事件（兜底开关，回归 / 排查时可关）。
 	AutoSetupOnOnline bool `mapstructure:"auto_setup_on_online"`
 
+	// Timezone 是 PM 日/周/月聚合桶的业务时区（T-0192）。
+	// 空值默认 "Asia/Shanghai"；worker 启动期 LoadLocation，失败回落 UTC。
+	// 决定日/周/月桶的本地零点对齐（北京 00:00 = UTC 前一日 16:00）；hourly 整点对齐时区无关，不受影响。
+	Timezone string `mapstructure:"timezone"`
+
 	// Storage 聚合任务结果落库范围配置（T-0182，全局开关，非任务级）。
 	Storage PMStorageConfig `mapstructure:"storage"`
 }

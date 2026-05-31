@@ -17,6 +17,24 @@ import (
 	"github.com/omcgo/omcgo/internal/pm/kpi/router"
 )
 
+// resolvePMTimezone 解析 PM 业务时区（T-0192）。
+//
+// 空值默认 "Asia/Shanghai"；LoadLocation 失败回落 time.UTC + Warn（不 panic）。
+// 容器内有 tzdata + worker 已 import _ "time/tzdata" 兜底，正常不会回落。
+func resolvePMTimezone(tz string, logger *zap.Logger) *time.Location {
+	if tz == "" {
+		tz = "Asia/Shanghai"
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		logger.Warn("load pm timezone failed; fall back to UTC",
+			zap.String("timezone", tz), zap.Error(err))
+		return time.UTC
+	}
+	logger.Info("pm aggregation timezone resolved", zap.String("timezone", loc.String()))
+	return loc
+}
+
 // startPMAggregatorPipeline wire 起 T-0164-P5 / G5 自然桶聚合 + T-0164-P8 / G8 asyncjob 框架。
 //
 // 三个组件协作：
@@ -35,6 +53,7 @@ func startPMAggregatorPipeline(
 	ctx context.Context,
 	w *workerInfra,
 	kpiRouter *router.Router,
+	loc *time.Location,
 ) {
 	logger := w.Logger.Named("pm-aggregator")
 
@@ -112,10 +131,10 @@ func startPMAggregatorPipeline(
 	}
 
 	// 5) 启动 cron 调度器（含启动补跑）
-	startCronScheduler(ctx, jobRepo, cronStateRepo, logger, asyncMetrics)
+	startCronScheduler(ctx, jobRepo, cronStateRepo, logger, asyncMetrics, loc)
 
 	// 6) PM retention cleanup（T-0164 收尾 G2-Gap-2）— 共享 jobRepo / cronStateRepo / registry / asyncMetrics
-	startPMRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry, asyncMetrics)
+	startPMRetentionCleanup(ctx, w, jobRepo, cronStateRepo, registry, asyncMetrics, loc)
 
 	logger.Info("PM aggregator pipeline ready (8 aggregator runners + 1 retention runner + sweeper + cron triggers + catchup)")
 }
@@ -163,26 +182,30 @@ type cronEntry struct {
 //   设备级 daily 00:05 → 设备组级 daily 00:15
 //   设备级 weekly Mon 00:10 → 设备组级 weekly Mon 00:20
 //   设备级 monthly 1日 00:15 → 设备组级 monthly 1日 00:25
-func pmAggregatorCronEntries() []cronEntry {
+func pmAggregatorCronEntries(loc *time.Location) []cronEntry {
 	hourlyAdvance := func(prev time.Time) time.Time { return prev.Add(time.Hour) }
 	dailyAdvance := func(prev time.Time) time.Time { return prev.AddDate(0, 0, 1) }
 	weeklyAdvance := func(prev time.Time) time.Time { return prev.AddDate(0, 0, 7) }
 	monthlyAdvance := func(prev time.Time) time.Time { return prev.AddDate(0, 1, 0) }
 
+	// hourly 整点对齐与时区无关（整点 UTC = 整点北京同一瞬间），不需 loc。
 	hourlyWindow := func(now time.Time) (time.Time, time.Time) {
 		end := now.Truncate(time.Hour)
 		return end.Add(-time.Hour), end
 	}
+	// daily/weekly/monthly 把 now 归一到业务时区后再截零点，
+	// 使 truncateDay/truncateWeekISO/monthlyWindow 经 t.Location() 自然产本地零点（T-0192）。
 	dailyWindow := func(now time.Time) (time.Time, time.Time) {
-		today := truncateDay(now)
+		today := truncateDay(now.In(loc))
 		return today.AddDate(0, 0, -1), today
 	}
 	weeklyWindow := func(now time.Time) (time.Time, time.Time) {
-		thisMon := truncateWeekISO(now)
+		thisMon := truncateWeekISO(now.In(loc))
 		return thisMon.AddDate(0, 0, -7), thisMon
 	}
 	monthlyWindow := func(now time.Time) (time.Time, time.Time) {
-		thisMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+		n := now.In(loc)
+		thisMonth := time.Date(n.Year(), n.Month(), 1, 0, 0, 0, 0, n.Location())
 		return thisMonth.AddDate(0, -1, 0), thisMonth
 	}
 
@@ -214,21 +237,24 @@ func startCronScheduler(
 	stateRepo asyncjob.CronStateRepository,
 	logger *zap.Logger,
 	asyncMetrics *asyncjob.Metrics,
+	loc *time.Location,
 ) {
-	entries := pmAggregatorCronEntries()
+	entries := pmAggregatorCronEntries(loc)
 
 	// === 1. 启动补跑 ===
-	now := time.Now().UTC()
+	now := time.Now().In(loc)
 	for _, e := range entries {
 		catchupCronEntry(ctx, jobRepo, stateRepo, e, now, logger, asyncMetrics)
 	}
 
 	// === 2. 启动正常 cron 调度 ===
-	c := cron.New()
+	// WithLocation(loc)：cron spec 的 wall-clock 时刻按业务时区解释，
+	// 不再隐式依赖容器 TZ env（T-0192）。
+	c := cron.New(cron.WithLocation(loc))
 	for _, e := range entries {
 		entry := e // 闭包变量捕获
 		_, err := c.AddFunc(entry.spec, func() {
-			triggerCron(ctx, jobRepo, stateRepo, entry, logger)
+			triggerCron(ctx, jobRepo, stateRepo, entry, logger, loc)
 		})
 		if err != nil {
 			logger.Error("cron AddFunc failed",
@@ -334,8 +360,9 @@ func triggerCron(
 	stateRepo asyncjob.CronStateRepository,
 	entry cronEntry,
 	logger *zap.Logger,
+	loc *time.Location,
 ) {
-	now := time.Now().UTC()
+	now := time.Now().In(loc)
 	start, end := entry.window(now)
 	enqueueAggregationJob(context.Background(), jobRepo, entry.jobType, start, end, logger)
 
