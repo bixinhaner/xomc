@@ -11,7 +11,8 @@
  *   G6-Gap-12 联动：PanelConfigDrawer 跳转携带 ?preset=panel&device_sns=...&metric_paths=...&granularities=...
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useIntl, type IntlShape } from 'react-intl';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Button,
@@ -52,29 +53,45 @@ const statusColor: Record<AdhocStatus, string> = {
   canceled: 'warning',
 };
 
-const statusLabel: Record<AdhocStatus, string> = {
-  pending: '待执行',
-  running: '执行中',
-  scheduled: '已排期',
-  succeeded: '成功',
-  failed: '失败',
-  canceled: '已取消',
+// 状态 / 维度 / 制式 标签：保留"无键回退原值"语义（未命中映射时显原始枚举）。
+const STATUS_LABEL_KEY: Record<string, string> = {
+  pending: 'perf.adhoc.statusPending',
+  running: 'perf.adhoc.statusRunning',
+  scheduled: 'perf.adhoc.statusScheduled',
+  succeeded: 'perf.adhoc.statusSucceeded',
+  failed: 'perf.adhoc.statusFailed',
+  canceled: 'perf.adhoc.statusCanceled',
 };
 
-const dimensionLabel: Record<string, string> = {
-  device: '按设备',
-  aggregate_group: '临时组',
-  product: '按产品',
-  band: '按频段',
-  network: '全网',
-  device_group: '设备组',
+const DIMENSION_LABEL_KEY: Record<string, string> = {
+  device: 'perf.adhoc.dimDevice',
+  aggregate_group: 'perf.adhoc.dimAggregateGroup',
+  product: 'perf.adhoc.dimProduct',
+  band: 'perf.adhoc.dimBand',
+  network: 'perf.adhoc.dimNetwork',
+  device_group: 'perf.adhoc.dimDeviceGroup',
 };
 
-const technologyLabel: Record<string, string> = {
-  lte: 'LTE (4G)',
-  nr: '5G NR',
-  gsm: 'GSM (2G)',
+const TECHNOLOGY_LABEL_KEY: Record<string, string> = {
+  lte: 'perf.adhoc.techLte',
+  nr: 'perf.adhoc.techNr',
+  gsm: 'perf.adhoc.techGsm',
 };
+
+function statusLabel(intl: IntlShape, s?: string): string {
+  const id = s ? STATUS_LABEL_KEY[s] : undefined;
+  return id ? intl.formatMessage({ id }) : (s ?? '');
+}
+
+function dimensionLabel(intl: IntlShape, d?: string): string {
+  const id = d ? DIMENSION_LABEL_KEY[d] : undefined;
+  return id ? intl.formatMessage({ id }) : (d ?? '');
+}
+
+function technologyLabel(intl: IntlShape, t?: string): string {
+  const id = t ? TECHNOLOGY_LABEL_KEY[t] : undefined;
+  return id ? intl.formatMessage({ id }) : (t ?? '');
+}
 
 function fmtTime(v?: string): string {
   if (!v) return '—';
@@ -84,47 +101,51 @@ function fmtTime(v?: string): string {
 
 /** 运行历史表（任务详情 Tab）。 */
 function RunHistoryTab({ taskId }: { taskId: string }) {
+  const intl = useIntl();
   // 运行中任务会持续产生 run，轮询刷新
   const { data: runs = [], isLoading } = usePmAdhocRuns(taskId, { refetchInterval: 10000 });
 
-  const columns: ColumnsType<AdhocTaskRun> = [
-    { title: '编号', dataIndex: 'runSeq', width: 70 },
-    {
-      title: '粒度',
-      dataIndex: 'granularity',
-      width: 100,
-      render: (g: string) => g || '—',
-    },
-    {
-      title: '维度',
-      dataIndex: 'dimension',
-      width: 100,
-      render: (d: string) => dimensionLabel[d] ?? d ?? '—',
-    },
-    {
-      title: '时间窗',
-      width: 240,
-      render: (_, r) =>
-        r.windowStart || r.windowEnd
-          ? `${fmtTime(r.windowStart)} ~ ${fmtTime(r.windowEnd)}`
-          : '滚动窗口',
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      width: 90,
-      render: (s: AdhocStatus) => <Tag color={statusColor[s]}>{statusLabel[s] ?? s}</Tag>,
-    },
-    { title: '入队时间', dataIndex: 'queuedAt', width: 180, render: (v: string) => fmtTime(v) },
-    { title: '完成时间', dataIndex: 'finishedAt', width: 180, render: (v: string) => fmtTime(v) },
-    { title: '结果行数', dataIndex: 'rowsTotal', width: 90 },
-    {
-      title: '失败原因',
-      dataIndex: 'error',
-      ellipsis: true,
-      render: (e: string) => (e ? <Typography.Text type="danger">{e}</Typography.Text> : '—'),
-    },
-  ];
+  const columns: ColumnsType<AdhocTaskRun> = useMemo(
+    () => [
+      { title: intl.formatMessage({ id: 'perf.adhoc.colSeq' }), dataIndex: 'runSeq', width: 70 },
+      {
+        title: intl.formatMessage({ id: 'perf.adhoc.colGranularity' }),
+        dataIndex: 'granularity',
+        width: 100,
+        render: (g: string) => g || '—',
+      },
+      {
+        title: intl.formatMessage({ id: 'perf.adhoc.colDimension' }),
+        dataIndex: 'dimension',
+        width: 100,
+        render: (d: string) => (d ? dimensionLabel(intl, d) : '—'),
+      },
+      {
+        title: intl.formatMessage({ id: 'perf.adhoc.colWindow' }),
+        width: 240,
+        render: (_, r) =>
+          r.windowStart || r.windowEnd
+            ? `${fmtTime(r.windowStart)} ~ ${fmtTime(r.windowEnd)}`
+            : intl.formatMessage({ id: 'perf.adhoc.rollingWindow' }),
+      },
+      {
+        title: intl.formatMessage({ id: 'perf.adhoc.colStatus' }),
+        dataIndex: 'status',
+        width: 90,
+        render: (s: AdhocStatus) => <Tag color={statusColor[s]}>{statusLabel(intl, s)}</Tag>,
+      },
+      { title: intl.formatMessage({ id: 'perf.adhoc.colQueuedAt' }), dataIndex: 'queuedAt', width: 180, render: (v: string) => fmtTime(v) },
+      { title: intl.formatMessage({ id: 'perf.adhoc.colFinishedAt' }), dataIndex: 'finishedAt', width: 180, render: (v: string) => fmtTime(v) },
+      { title: intl.formatMessage({ id: 'perf.adhoc.colRowsTotal' }), dataIndex: 'rowsTotal', width: 90 },
+      {
+        title: intl.formatMessage({ id: 'perf.adhoc.colError' }),
+        dataIndex: 'error',
+        ellipsis: true,
+        render: (e: string) => (e ? <Typography.Text type="danger">{e}</Typography.Text> : '—'),
+      },
+    ],
+    [intl],
+  );
 
   return (
     <Table<AdhocTaskRun>
@@ -162,56 +183,64 @@ function TaskTable({
   onView: (t: AdhocTask) => void;
   onCancel: (id: string) => void;
 }) {
-  const columns: ColumnsType<AdhocTask> = [
-    { title: '名称', dataIndex: 'name' },
-    {
-      title: '模式',
-      dataIndex: 'mode',
-      width: 90,
-      render: (m: AdhocMode) =>
-        m === 'continuous' ? <Tag color="purple">持续</Tag> : <Tag>单次</Tag>,
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      width: 100,
-      render: (s: AdhocStatus) => <Tag color={statusColor[s]}>{statusLabel[s] ?? s}</Tag>,
-    },
-    {
-      title: '进度',
-      dataIndex: 'progress',
-      width: 140,
-      render: (p: number, r) =>
-        r.status === 'running' || r.status === 'succeeded' ? (
-          <Progress percent={p} size="small" />
-        ) : (
-          '—'
-        ),
-    },
-    { title: '设备数', render: (_, r) => r.deviceSns.length, width: 80 },
-    {
-      title: '指标 × 粒度',
-      render: (_, r) => `${r.metricPaths.length} × ${r.granularities.length}`,
-      width: 110,
-    },
-    { title: '创建时间', dataIndex: 'createdAt', width: 180, render: (v: string) => fmtTime(v) },
-    {
-      title: '操作',
-      width: 180,
-      render: (_, r) => (
-        <Space>
-          <Button size="small" onClick={() => onView(r)}>
-            查看详情
-          </Button>
-          {(r.status === 'pending' || r.status === 'running' || r.status === 'scheduled') && (
-            <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onCancel(r.id)}>
-              取消
+  const intl = useIntl();
+  const columns: ColumnsType<AdhocTask> = useMemo(
+    () => [
+      { title: intl.formatMessage({ id: 'perf.adhoc.colName' }), dataIndex: 'name' },
+      {
+        title: intl.formatMessage({ id: 'perf.adhoc.colMode' }),
+        dataIndex: 'mode',
+        width: 90,
+        render: (m: AdhocMode) =>
+          m === 'continuous' ? (
+            <Tag color="purple">{intl.formatMessage({ id: 'perf.adhoc.modeContinuous' })}</Tag>
+          ) : (
+            <Tag>{intl.formatMessage({ id: 'perf.adhoc.modeOneshot' })}</Tag>
+          ),
+      },
+      {
+        title: intl.formatMessage({ id: 'perf.adhoc.colStatus' }),
+        dataIndex: 'status',
+        width: 100,
+        render: (s: AdhocStatus) => <Tag color={statusColor[s]}>{statusLabel(intl, s)}</Tag>,
+      },
+      {
+        title: intl.formatMessage({ id: 'perf.adhoc.colProgress' }),
+        dataIndex: 'progress',
+        width: 140,
+        render: (p: number, r) =>
+          r.status === 'running' || r.status === 'succeeded' ? (
+            <Progress percent={p} size="small" />
+          ) : (
+            '—'
+          ),
+      },
+      { title: intl.formatMessage({ id: 'perf.adhoc.colDeviceCount' }), render: (_, r) => r.deviceSns.length, width: 80 },
+      {
+        title: intl.formatMessage({ id: 'perf.adhoc.colMetricByGran' }),
+        render: (_, r) => `${r.metricPaths.length} × ${r.granularities.length}`,
+        width: 110,
+      },
+      { title: intl.formatMessage({ id: 'perf.adhoc.colCreatedAt' }), dataIndex: 'createdAt', width: 180, render: (v: string) => fmtTime(v) },
+      {
+        title: intl.formatMessage({ id: 'perf.adhoc.colOperation' }),
+        width: 180,
+        render: (_, r) => (
+          <Space>
+            <Button size="small" onClick={() => onView(r)}>
+              {intl.formatMessage({ id: 'perf.adhoc.btnViewDetail' })}
             </Button>
-          )}
-        </Space>
-      ),
-    },
-  ];
+            {(r.status === 'pending' || r.status === 'running' || r.status === 'scheduled') && (
+              <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onCancel(r.id)}>
+                {intl.formatMessage({ id: 'perf.adhoc.btnCancel' })}
+              </Button>
+            )}
+          </Space>
+        ),
+      },
+    ],
+    [intl, onView, onCancel],
+  );
 
   return (
     <Table<AdhocTask>
@@ -226,6 +255,7 @@ function TaskTable({
 }
 
 export default function PmAdhocPage() {
+  const intl = useIntl();
   // T-0186：分两区，各发一次 list（内置 / 自建）。
   const { data: builtinTasks = [], isLoading: builtinLoading } = usePmAdhocList({
     refetchInterval: 5000,
@@ -259,7 +289,7 @@ export default function PmAdhocPage() {
         .map((s) => s.trim())
         .filter(Boolean);
       setCreatePreset({
-        name: `从 panel 派生 (${deviceSns.length} 设备)`,
+        name: intl.formatMessage({ id: 'perf.adhoc.derivedName' }, { count: deviceSns.length }),
         deviceSns,
         metricPaths,
         granularities,
@@ -277,11 +307,11 @@ export default function PmAdhocPage() {
 
   const handleCancel = (id: string) => {
     Modal.confirm({
-      title: '取消任务',
-      content: '已在运行的任务取消后不会回滚已写入结果',
+      title: intl.formatMessage({ id: 'perf.adhoc.cancelTaskTitle' }),
+      content: intl.formatMessage({ id: 'perf.adhoc.cancelTaskContent' }),
       onOk: async () => {
         await cancelMut.mutateAsync(id);
-        message.success('已取消');
+        message.success(intl.formatMessage({ id: 'perf.adhoc.canceled' }));
       },
     });
   };
@@ -289,9 +319,9 @@ export default function PmAdhocPage() {
   return (
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
       <Card
-        title="内置聚合任务"
+        title={intl.formatMessage({ id: 'perf.adhoc.cardBuiltin' })}
         size="small"
-        extra={<Tag color="blue">系统预置</Tag>}
+        extra={<Tag color="blue">{intl.formatMessage({ id: 'perf.adhoc.systemPreset' })}</Tag>}
       >
         <TaskTable
           tasks={builtinTasks}
@@ -302,7 +332,7 @@ export default function PmAdhocPage() {
       </Card>
 
       <Card
-        title="自建聚合任务"
+        title={intl.formatMessage({ id: 'perf.adhoc.cardCustom' })}
         size="small"
         extra={
           <Button
@@ -310,7 +340,7 @@ export default function PmAdhocPage() {
             icon={<PlusOutlined />}
             onClick={() => navigate('/performance/pm-adhoc/new')}
           >
-            新建任务
+            {intl.formatMessage({ id: 'perf.adhoc.btnNewTask' })}
           </Button>
         }
       >
@@ -332,7 +362,11 @@ export default function PmAdhocPage() {
       />
 
       <Drawer
-        title={selectedTask ? `任务详情：${selectedTask.name}` : '任务详情'}
+        title={
+          selectedTask
+            ? intl.formatMessage({ id: 'perf.adhoc.detailTitle' }, { name: selectedTask.name })
+            : intl.formatMessage({ id: 'perf.adhoc.detailTitleDefault' })
+        }
         width={920}
         open={Boolean(selectedTask)}
         onClose={() => setSelectedTask(null)}
@@ -341,25 +375,25 @@ export default function PmAdhocPage() {
         {selectedTask && (
           <>
             <Descriptions size="small" column={2} bordered style={{ marginBottom: 16 }}>
-              <Descriptions.Item label="模式">
-                {selectedTask.mode === 'continuous' ? '持续' : '单次'}
+              <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.descMode' })}>
+                {selectedTask.mode === 'continuous'
+                  ? intl.formatMessage({ id: 'perf.adhoc.modeContinuous' })
+                  : intl.formatMessage({ id: 'perf.adhoc.modeOneshot' })}
               </Descriptions.Item>
-              <Descriptions.Item label="维度">
-                {dimensionLabel[selectedTask.dimension] ?? selectedTask.dimension}
+              <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.descDimension' })}>
+                {dimensionLabel(intl, selectedTask.dimension)}
               </Descriptions.Item>
-              <Descriptions.Item label="制式">
+              <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.descTech' })}>
                 {/* T-0186：制式只读，建后不可改，无切换控件 */}
                 {selectedTask.technology ? (
-                  <Tag color="geekblue">
-                    {technologyLabel[selectedTask.technology] ?? selectedTask.technology}
-                  </Tag>
+                  <Tag color="geekblue">{technologyLabel(intl, selectedTask.technology)}</Tag>
                 ) : (
-                  <Tag>不限制式</Tag>
+                  <Tag>{intl.formatMessage({ id: 'perf.adhoc.anyTech' })}</Tag>
                 )}
               </Descriptions.Item>
-              <Descriptions.Item label="当前状态">
+              <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.descStatus' })}>
                 <Tag color={statusColor[selectedTask.status]}>
-                  {statusLabel[selectedTask.status] ?? selectedTask.status}
+                  {statusLabel(intl, selectedTask.status)}
                 </Tag>
               </Descriptions.Item>
             </Descriptions>
@@ -369,12 +403,12 @@ export default function PmAdhocPage() {
               items={[
                 {
                   key: 'runs',
-                  label: '运行历史',
+                  label: intl.formatMessage({ id: 'perf.adhoc.tabRuns' }),
                   children: <RunHistoryTab taskId={selectedTask.id} />,
                 },
                 {
                   key: 'results',
-                  label: '结果',
+                  label: intl.formatMessage({ id: 'perf.adhoc.tabResults' }),
                   children: <AdhocResultPanel taskId={selectedTask.id} />,
                 },
               ]}

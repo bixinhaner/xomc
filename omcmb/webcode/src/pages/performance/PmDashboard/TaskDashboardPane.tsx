@@ -10,6 +10,7 @@
  */
 
 import { useMemo, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { Alert, Card, Empty, Segmented, Space, Spin, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { usePmAdhocDetail, usePmAdhocResults } from '@core/hooks/api/usePmAdhoc';
@@ -30,15 +31,20 @@ interface Props {
 
 const RESULTS_LIMIT = 10000;
 
-const GRAN_LABEL: Record<string, string> = {
-  '15min': '15 分',
-  hourly: '小时',
-  daily: '日',
-  weekly: '周',
-  monthly: '月',
+// 粒度短标签语料键（与旧 GRAN_LABEL 一一对应）。
+const GRAN_MSG_IDS: Record<string, string> = {
+  '15min': 'perf.dashboard.gran15min',
+  hourly: 'perf.dashboard.granHourly',
+  daily: 'perf.dashboard.granDaily',
+  weekly: 'perf.dashboard.granWeekly',
+  monthly: 'perf.dashboard.granMonthly',
 };
 
 export default function TaskDashboardPane({ taskId }: Props) {
+  const intl = useIntl();
+  // 粒度短标签：有对应键走语料，无键回退原值（等价旧 GRAN_LABEL[g] ?? g）。
+  const granLabel = (g: string) =>
+    GRAN_MSG_IDS[g] ? intl.formatMessage({ id: GRAN_MSG_IDS[g] }) : g;
   const taskQuery = usePmAdhocDetail(taskId);
 
   // ── 共用三级筛选 + 周期对比开关（本 Pane 持状态，驱动取数 + 二拉）──────
@@ -103,7 +109,7 @@ export default function TaskDashboardPane({ taskId }: Props) {
   if (taskQuery.isLoading) {
     return (
       <Card>
-        <Spin tip="加载任务..." />
+        <Spin tip={intl.formatMessage({ id: 'perf.dashboard.loadingTask' })} />
       </Card>
     );
   }
@@ -113,8 +119,8 @@ export default function TaskDashboardPane({ taskId }: Props) {
         <Alert
           type="warning"
           showIcon
-          message="任务不可用"
-          description="任务已被删除或结果已超出保留期。"
+          message={intl.formatMessage({ id: 'perf.dashboard.taskUnavailable' })}
+          description={intl.formatMessage({ id: 'perf.dashboard.taskUnavailableDesc' })}
         />
       </Card>
     );
@@ -128,16 +134,23 @@ export default function TaskDashboardPane({ taskId }: Props) {
         <Space size={8} wrap>
           <Typography.Text strong>{task.name}</Typography.Text>
           {task.technology && <Tag color="geekblue">{task.technology.toUpperCase()}</Tag>}
-          <Tag color="purple">{task.mode === 'continuous' ? '持续' : '单次'}</Tag>
+          <Tag color="purple">
+            {task.mode === 'continuous'
+              ? intl.formatMessage({ id: 'perf.dashboard.modeContinuous' })
+              : intl.formatMessage({ id: 'perf.dashboard.modeOneshot' })}
+          </Tag>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            {task.metricPaths.length} 指标
+            {intl.formatMessage(
+              { id: 'perf.dashboard.metricCount' },
+              { count: task.metricPaths.length },
+            )}
           </Typography.Text>
           {granularities.length > 1 && (
             <Segmented
               size="small"
               value={effectiveGran}
               onChange={(v) => setActiveGran(v as string)}
-              options={granularities.map((g) => ({ label: GRAN_LABEL[g] ?? g, value: g }))}
+              options={granularities.map((g) => ({ label: granLabel(g), value: g }))}
             />
           )}
         </Space>
@@ -152,18 +165,30 @@ export default function TaskDashboardPane({ taskId }: Props) {
           type="warning"
           showIcon
           style={{ marginBottom: 12 }}
-          message="结果可能不全"
-          description={`本次时间段命中的结果行已达上限（${RESULTS_LIMIT} 行），图中可能未包含全部数据。请缩小时间段或减少指标/系列。`}
+          message={intl.formatMessage({ id: 'perf.dashboard.truncated' })}
+          description={intl.formatMessage(
+            { id: 'perf.dashboard.truncatedDesc' },
+            { limit: RESULTS_LIMIT },
+          )}
         />
       )}
 
       {rowsLoading || (filter.compare && prevLoading) ? (
         <Card>
-          <Spin tip="加载结果..." />
+          <Spin tip={intl.formatMessage({ id: 'perf.dashboard.loadingResult' })} />
         </Card>
       ) : charts.length === 0 ? (
         <Card>
-          <Empty description={effectiveGran ? `${GRAN_LABEL[effectiveGran] ?? effectiveGran} 粒度暂无数据` : '任务暂无数据'} />
+          <Empty
+            description={
+              effectiveGran
+                ? intl.formatMessage(
+                    { id: 'perf.dashboard.emptyGranNoData' },
+                    { gran: granLabel(effectiveGran) },
+                  )
+                : intl.formatMessage({ id: 'perf.dashboard.emptyTaskNoData' })
+            }
+          />
         </Card>
       ) : (
         charts.map((c) => <ChartCard key={c.metricPath} chart={c} />)

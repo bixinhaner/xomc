@@ -7,6 +7,7 @@
  */
 
 import { useMemo, useState } from 'react';
+import { useIntl } from 'react-intl';
 import {
   Modal,
   Input,
@@ -63,6 +64,7 @@ export default function MetricPickerModal({
   initialDeviceType = 'ENB',
   lockDeviceType = false,
 }: MetricPickerModalProps) {
+  const intl = useIntl();
   // 非锁定态：用户可在弹窗内自行切换设备类型（KPIQuery 用法），用内部 state。
   const [deviceTypeState, setDeviceType] = useState<DeviceType>(initialDeviceType);
   const [keyword, setKeyword] = useState('');
@@ -103,7 +105,7 @@ export default function MetricPickerModal({
   const columns = useMemo(
     () => [
       {
-        title: '中文名',
+        title: intl.formatMessage({ id: 'perf.picker.colCnName' }),
         dataIndex: 'cnName',
         key: 'cn',
         width: 240,
@@ -111,7 +113,7 @@ export default function MetricPickerModal({
         render: (n: string, r: IndicatorInfo) => n || <Text type="secondary">{r.enName}</Text>,
       },
       {
-        title: '英文名 / 路径',
+        title: intl.formatMessage({ id: 'perf.picker.colEnPath' }),
         dataIndex: 'enName',
         key: 'path',
         width: 260,
@@ -119,14 +121,14 @@ export default function MetricPickerModal({
         render: (n: string) => <Text code>{n}</Text>,
       },
       {
-        title: '类型',
+        title: intl.formatMessage({ id: 'perf.picker.colType' }),
         key: 'type',
         width: 80,
         render: (_: unknown, r: IndicatorInfo) =>
           r.isCounter ? <Tag color="blue">Counter</Tag> : <Tag color="orange">KPI</Tag>,
       },
     ],
-    [],
+    [intl],
   );
 
   const handleSearch = () => {
@@ -151,12 +153,12 @@ export default function MetricPickerModal({
 
   return (
     <Modal
-      title={`选择指标（已选 ${selected.length} 个）`}
+      title={intl.formatMessage({ id: 'perf.picker.metricTitle' }, { count: selected.length })}
       open={open}
       onCancel={onClose}
       onOk={handleConfirm}
-      okText="确定"
-      cancelText="取消"
+      okText={intl.formatMessage({ id: 'common.confirm' })}
+      cancelText={intl.formatMessage({ id: 'common.cancel' })}
       width={820}
       destroyOnHidden
     >
@@ -164,7 +166,7 @@ export default function MetricPickerModal({
         <Space>
           {lockDeviceType ? null : (
             <>
-              <Text>设备类型：</Text>
+              <Text>{intl.formatMessage({ id: 'perf.picker.deviceTypeLabel' })}</Text>
               <Select<DeviceType>
                 value={deviceType}
                 onChange={(v) => {
@@ -177,7 +179,7 @@ export default function MetricPickerModal({
             </>
           )}
           <Input
-            placeholder="按指标路径 / 中文名 搜索"
+            placeholder={intl.formatMessage({ id: 'perf.picker.searchMetricPlaceholder' })}
             prefix={<SearchOutlined />}
             value={keywordDraft}
             onChange={(e) => setKeywordDraft(e.target.value)}
@@ -191,7 +193,7 @@ export default function MetricPickerModal({
             }}
           />
           <Button onClick={handleSearch} type="primary">
-            搜索
+            {intl.formatMessage({ id: 'common.search' })}
           </Button>
         </Space>
 
@@ -211,7 +213,7 @@ export default function MetricPickerModal({
           pageSize={pageSize}
           total={total}
           showSizeChanger
-          showTotal={(t) => `共 ${t} 条`}
+          showTotal={(t) => intl.formatMessage({ id: 'perf.picker.totalCount' }, { total: t })}
           onChange={(p, s) => {
             setPage(p);
             setPageSize(s);
@@ -222,14 +224,14 @@ export default function MetricPickerModal({
 
         <div>
           <Space style={{ marginBottom: 6 }}>
-            <Text strong>已选指标：</Text>
+            <Text strong>{intl.formatMessage({ id: 'perf.picker.selectedMetric' })}</Text>
             <Button
               size="small"
               icon={<ClearOutlined />}
               onClick={() => setSelected([])}
               disabled={selected.length === 0}
             >
-              全部清空
+              {intl.formatMessage({ id: 'common.clear' })}
             </Button>
           </Space>
           <div
@@ -242,7 +244,7 @@ export default function MetricPickerModal({
             }}
           >
             {selected.length === 0 ? (
-              <Text type="secondary">未选择任何指标</Text>
+              <Text type="secondary">{intl.formatMessage({ id: 'perf.picker.noSelectedMetric' })}</Text>
             ) : (
               selected.map((path) => (
                 <Tag

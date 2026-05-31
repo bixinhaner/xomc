@@ -9,6 +9,7 @@
  */
 
 import { useMemo, useState, type ReactNode } from 'react';
+import { useIntl, type IntlShape } from 'react-intl';
 import { Alert, Button, Card, Empty, Space, Spin, Table, Tabs, Tag, Tooltip, Typography } from 'antd';
 import { FileExcelOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
@@ -69,16 +70,16 @@ interface AdhocCol {
   renderCell?: (r: AdhocResultRow) => ReactNode;
 }
 
-function buildAdhocColumns(taskDeviceSns: string[]): AdhocCol[] {
+function buildAdhocColumns(intl: IntlShape, taskDeviceSns: string[]): AdhocCol[] {
   const deviceText = (r: AdhocResultRow) =>
     r.deviceSn === 'AGGREGATED'
-      ? `聚合组·${taskDeviceSns.length} 台`
+      ? intl.formatMessage({ id: 'perf.adhoc.aggregateGroupUnit' }, { count: taskDeviceSns.length })
       : r.deviceOui
         ? `${r.deviceOui}/${r.deviceSn}`
         : r.deviceSn;
   return [
     {
-      header: '设备',
+      header: intl.formatMessage({ id: 'perf.adhoc.colDevice' }),
       width: 200,
       toText: deviceText,
       renderCell: (r) =>
@@ -92,15 +93,15 @@ function buildAdhocColumns(taskDeviceSns: string[]): AdhocCol[] {
           deviceText(r)
         ),
     },
-    { header: '指标', toText: (r) => r.displayName || r.metricPath },
-    { header: '值', width: 120, toText: (r) => r.metricValue },
+    { header: intl.formatMessage({ id: 'perf.adhoc.colMetric' }), toText: (r) => r.displayName || r.metricPath },
+    { header: intl.formatMessage({ id: 'perf.adhoc.colValue' }), width: 120, toText: (r) => r.metricValue },
     {
-      header: '开始时间',
+      header: intl.formatMessage({ id: 'perf.adhoc.colStartTime' }),
       width: 160,
       toText: (r) => (r.startTime ? dayjs(r.startTime).format('YYYY-MM-DD HH:mm') : '-'),
     },
     {
-      header: '结束时间',
+      header: intl.formatMessage({ id: 'perf.adhoc.colEndTime' }),
       width: 160,
       toText: (r) => (r.endTime ? dayjs(r.endTime).format('YYYY-MM-DD HH:mm') : '-'),
     },
@@ -108,6 +109,7 @@ function buildAdhocColumns(taskDeviceSns: string[]): AdhocCol[] {
 }
 
 export function AdhocResultPanel({ taskId, embedded = false }: Props) {
+  const intl = useIntl();
   const taskQuery = usePmAdhocDetail(taskId);
   const { data: rows = [], isLoading: rowsLoading } = usePmAdhocResults(taskId);
 
@@ -115,14 +117,14 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
   const [activeGran, setActiveGran] = useState<string | undefined>(undefined);
   const effectiveGran = activeGran ?? granularities[0];
 
-  if (taskQuery.isLoading) return <Spin tip="加载任务..." />;
+  if (taskQuery.isLoading) return <Spin tip={intl.formatMessage({ id: 'perf.dashboard.loadingTask' })} />;
   if (taskQuery.isError || !taskQuery.data) {
     return (
       <Alert
         type="warning"
         showIcon
-        message="任务不可用"
-        description="任务已被删除或结果已超出保留期。"
+        message={intl.formatMessage({ id: 'perf.dashboard.taskUnavailable' })}
+        description={intl.formatMessage({ id: 'perf.dashboard.taskUnavailableDesc' })}
       />
     );
   }
@@ -132,7 +134,7 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
   // G7-Gap-4：导出 adhoc 结果（多 sheet，按粒度分）
   // 列集合 / 列名 / 时间格式与页面表格 (GranularityView) 共用 buildAdhocColumns，保持一致
   const handleExportExcel = () => {
-    const cols = buildAdhocColumns(task.deviceSns);
+    const cols = buildAdhocColumns(intl, task.deviceSns);
     const sheets = granularities.map((g) => ({
       name: g,
       rows: rows
@@ -152,7 +154,14 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
   const summary = (
     <Space size={6}>
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-        {task.deviceSns.length} 设备 × {task.metricPaths.length} 指标 × {granularities.length} 粒度
+        {intl.formatMessage(
+          { id: 'perf.adhoc.resultSummary' },
+          {
+            deviceCount: task.deviceSns.length,
+            metricCount: task.metricPaths.length,
+            granCount: granularities.length,
+          },
+        )}
       </Typography.Text>
       <Button
         size="small"
@@ -160,14 +169,14 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
         onClick={handleExportExcel}
         disabled={rows.length === 0}
       >
-        导出 Excel
+        {intl.formatMessage({ id: 'perf.adhoc.exportExcel' })}
       </Button>
     </Space>
   );
 
   const body =
     granularities.length === 0 ? (
-      <Empty description="任务无粒度信息" />
+      <Empty description={intl.formatMessage({ id: 'perf.adhoc.noGranInfo' })} />
     ) : (
       <Tabs
         size="small"
@@ -205,7 +214,9 @@ export function AdhocResultPanel({ taskId, embedded = false }: Props) {
         <span>
           {task.name}
           <Tag color="purple" style={{ marginLeft: 8 }}>
-            {task.mode === 'continuous' ? '持续' : '单次'}
+            {task.mode === 'continuous'
+              ? intl.formatMessage({ id: 'perf.adhoc.modeContinuous' })
+              : intl.formatMessage({ id: 'perf.adhoc.modeOneshot' })}
           </Tag>
           <Tag color={task.status === 'succeeded' ? 'success' : task.status === 'failed' ? 'error' : 'processing'}>
             {task.status}
@@ -230,11 +241,12 @@ function GranularityView({
   loading: boolean;
   taskDeviceSns: string[];
 }) {
+  const intl = useIntl();
   const series = useMemo(() => buildSeriesByMetric(rows, granularity), [rows, granularity]);
-  const cols = useMemo(() => buildAdhocColumns(taskDeviceSns), [taskDeviceSns]);
+  const cols = useMemo(() => buildAdhocColumns(intl, taskDeviceSns), [intl, taskDeviceSns]);
   if (loading) return <Spin />;
   if (series.length === 0) {
-    return <Empty description={`${granularity} 粒度暂无数据`} />;
+    return <Empty description={intl.formatMessage({ id: 'perf.adhoc.emptyGranNoData' }, { gran: granularity })} />;
   }
   const buckets = series[0].buckets;
   const option = {

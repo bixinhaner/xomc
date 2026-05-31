@@ -13,6 +13,7 @@
  */
 
 import { useMemo, useState } from 'react';
+import { useIntl } from 'react-intl';
 import { useNavigate } from 'react-router-dom';
 import {
   Alert,
@@ -40,34 +41,12 @@ import type { DeviceType } from '@core/types/indicatorLibrary';
 // 制式（含 GSM，networkType 过滤直接用小写值）
 type WizardTech = 'lte' | 'nr' | 'gsm';
 
-const TECH_OPTIONS: { label: string; value: WizardTech }[] = [
-  { label: 'LTE (4G)', value: 'lte' },
-  { label: '5G NR', value: 'nr' },
-  { label: 'GSM (2G)', value: 'gsm' },
-];
-
 // 制式 → 指标库 deviceType（大写枚举）。
 const TECH_TO_DEVICE_TYPE: Record<WizardTech, DeviceType> = {
   lte: 'ENB',
   nr: 'GNB',
   gsm: 'GSM',
 };
-
-const DIMENSION_OPTIONS: { label: string; value: AdhocDimension; hint: string }[] = [
-  { label: '全网汇总', value: 'network', hint: '全网所有设备汇总成一条总线，无需选范围。' },
-  { label: '设备组', value: 'device_group', hint: '按设备组分组，每组一条聚合线（同制式全量聚合，无需选子集）。' },
-  { label: '产品', value: 'product', hint: '按产品分组，每产品一条聚合线（同制式全量聚合，无需选子集）。' },
-  { label: '频段', value: 'band', hint: '按频段自动分组，每频段一条聚合线，无需手选。' },
-  { label: '自选设备', value: 'device', hint: '多选具体设备（受制式过滤），每设备一条结果。' },
-];
-
-const GRANULARITY_OPTIONS = [
-  { label: '15 分钟', value: '15min' },
-  { label: '小时', value: 'hourly' },
-  { label: '天', value: 'daily' },
-  { label: '周', value: 'weekly' },
-  { label: '月', value: 'monthly' },
-];
 
 interface DeviceTransferItem {
   key: string; // SN
@@ -76,8 +55,61 @@ interface DeviceTransferItem {
 }
 
 export default function PmAdhocWizard() {
+  const intl = useIntl();
   const navigate = useNavigate();
   const createMut = useCreatePmAdhoc();
+
+  // 制式 / 维度 / 粒度选项：value 不变，仅 label / hint 走 i18n。
+  const TECH_OPTIONS = useMemo<{ label: string; value: WizardTech }[]>(
+    () => [
+      { label: intl.formatMessage({ id: 'perf.adhoc.techLte' }), value: 'lte' },
+      { label: intl.formatMessage({ id: 'perf.adhoc.techNr' }), value: 'nr' },
+      { label: intl.formatMessage({ id: 'perf.adhoc.techGsm' }), value: 'gsm' },
+    ],
+    [intl],
+  );
+
+  const DIMENSION_OPTIONS = useMemo<{ label: string; value: AdhocDimension; hint: string }[]>(
+    () => [
+      {
+        label: intl.formatMessage({ id: 'perf.adhoc.dimNetworkLabel' }),
+        value: 'network',
+        hint: intl.formatMessage({ id: 'perf.adhoc.dimNetworkHint' }),
+      },
+      {
+        label: intl.formatMessage({ id: 'perf.adhoc.dimDeviceGroupLabel' }),
+        value: 'device_group',
+        hint: intl.formatMessage({ id: 'perf.adhoc.dimDeviceGroupHint' }),
+      },
+      {
+        label: intl.formatMessage({ id: 'perf.adhoc.dimProductLabel' }),
+        value: 'product',
+        hint: intl.formatMessage({ id: 'perf.adhoc.dimProductHint' }),
+      },
+      {
+        label: intl.formatMessage({ id: 'perf.adhoc.dimBandLabel' }),
+        value: 'band',
+        hint: intl.formatMessage({ id: 'perf.adhoc.dimBandHint' }),
+      },
+      {
+        label: intl.formatMessage({ id: 'perf.adhoc.dimDeviceLabel' }),
+        value: 'device',
+        hint: intl.formatMessage({ id: 'perf.adhoc.dimDeviceHint' }),
+      },
+    ],
+    [intl],
+  );
+
+  const GRANULARITY_OPTIONS = useMemo(
+    () => [
+      { label: intl.formatMessage({ id: 'perf.adhoc.granular15min' }), value: '15min' },
+      { label: intl.formatMessage({ id: 'perf.adhoc.granularHourly' }), value: 'hourly' },
+      { label: intl.formatMessage({ id: 'perf.adhoc.granularDaily' }), value: 'daily' },
+      { label: intl.formatMessage({ id: 'perf.adhoc.granularWeekly' }), value: 'weekly' },
+      { label: intl.formatMessage({ id: 'perf.adhoc.granularMonthly' }), value: 'monthly' },
+    ],
+    [intl],
+  );
 
   const [current, setCurrent] = useState(0);
 
@@ -137,7 +169,7 @@ export default function PmAdhocWizard() {
 
   const handleSubmit = async () => {
     if (!step1Valid || !step2Valid || !step3Valid || !step4Valid) {
-      message.error('请检查各步骤填写是否完整');
+      message.error(intl.formatMessage({ id: 'perf.adhoc.checkStepsIncomplete' }));
       return;
     }
     try {
@@ -155,10 +187,10 @@ export default function PmAdhocWizard() {
         // 过期天数仅非持续型生效
         expireDays: mode === 'oneshot' ? expireDays : undefined,
       });
-      message.success('任务已创建，worker 将开始执行');
+      message.success(intl.formatMessage({ id: 'perf.adhoc.taskCreated' }));
       navigate('/performance/pm-adhoc');
     } catch (e) {
-      message.error(`创建失败：${(e as Error).message}`);
+      message.error(intl.formatMessage({ id: 'perf.adhoc.createFailed' }, { msg: (e as Error).message }));
     }
   };
 
@@ -166,11 +198,15 @@ export default function PmAdhocWizard() {
   const renderStep1 = () => (
     <Space direction="vertical" size="large" style={{ width: '100%', maxWidth: 560 }}>
       <div>
-        <div style={{ marginBottom: 8, fontWeight: 500 }}>任务名称 *</div>
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="如：小时级 RRC 成功率" />
+        <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldTaskName' })}</div>
+        <Input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={intl.formatMessage({ id: 'perf.adhoc.taskNamePlaceholder' })}
+        />
       </div>
       <div>
-        <div style={{ marginBottom: 8, fontWeight: 500 }}>制式 *</div>
+        <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldTechReq' })}</div>
         <Radio.Group
           optionType="button"
           buttonStyle="solid"
@@ -185,28 +221,28 @@ export default function PmAdhocWizard() {
         />
       </div>
       <div>
-        <div style={{ marginBottom: 8, fontWeight: 500 }}>持续性 *</div>
+        <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldModeReq' })}</div>
         <Radio.Group
           optionType="button"
           buttonStyle="solid"
           value={mode}
           onChange={(e) => setMode(e.target.value as AdhocMode)}
           options={[
-            { label: '非持续（单次）', value: 'oneshot' },
-            { label: '持续（滚动）', value: 'continuous' },
+            { label: intl.formatMessage({ id: 'perf.adhoc.modeOneshotFull' }), value: 'oneshot' },
+            { label: intl.formatMessage({ id: 'perf.adhoc.modeContinuousFull' }), value: 'continuous' },
           ]}
         />
       </div>
       {mode === 'oneshot' && (
         <div>
-          <div style={{ marginBottom: 8, fontWeight: 500 }}>过期天数</div>
+          <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldExpireDays' })}</div>
           <Input
             type="number"
             min={1}
             style={{ width: 160 }}
             value={expireDays}
             onChange={(e) => setExpireDays(Number(e.target.value) || 60)}
-            addonAfter="天"
+            addonAfter={intl.formatMessage({ id: 'perf.adhoc.daySuffix' })}
           />
         </div>
       )}
@@ -218,7 +254,7 @@ export default function PmAdhocWizard() {
     return (
       <Space direction="vertical" size="large" style={{ width: '100%' }}>
         <div>
-          <div style={{ marginBottom: 8, fontWeight: 500 }}>聚合维度 *</div>
+          <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldDimensionReq' })}</div>
           <Radio.Group
             value={dimension}
             onChange={(e) => setDimension(e.target.value as AdhocDimension)}
@@ -236,7 +272,10 @@ export default function PmAdhocWizard() {
         {needsDevicePick ? (
           <div>
             <div style={{ marginBottom: 8, fontWeight: 500 }}>
-              自选设备（{technology.toUpperCase()}，已选 {selectedSns.length}）*
+              {intl.formatMessage(
+                { id: 'perf.adhoc.devicePickLabel' },
+                { tech: technology.toUpperCase(), count: selectedSns.length },
+              )}
             </div>
             <Spin spinning={devicesLoading}>
               <Transfer<DeviceTransferItem>
@@ -248,7 +287,10 @@ export default function PmAdhocWizard() {
                 filterOption={(inputValue, item) =>
                   item.title.toLowerCase().includes(inputValue.toLowerCase())
                 }
-                titles={['可选设备', '已选设备']}
+                titles={[
+                  intl.formatMessage({ id: 'perf.adhoc.transferAvailable' }),
+                  intl.formatMessage({ id: 'perf.adhoc.transferSelected' }),
+                ]}
                 listStyle={{ width: 320, height: 360 }}
               />
             </Spin>
@@ -257,8 +299,8 @@ export default function PmAdhocWizard() {
           <Alert
             type="success"
             showIcon
-            message="该维度按制式全量聚合，无需手选设备子集"
-            description="后端会对该制式范围内的设备自动分组聚合，每组/每产品/每频段一条结果线。"
+            message={intl.formatMessage({ id: 'perf.adhoc.scopeAutoMessage' })}
+            description={intl.formatMessage({ id: 'perf.adhoc.scopeAutoDesc' })}
           />
         )}
       </Space>
@@ -270,12 +312,15 @@ export default function PmAdhocWizard() {
       <Alert
         type="info"
         showIcon
-        message={`按 ${technology.toUpperCase()} 制式列出指标库（${deviceType}），至少选 1 个`}
+        message={intl.formatMessage(
+          { id: 'perf.adhoc.metricHint' },
+          { tech: technology.toUpperCase(), deviceType },
+        )}
       />
       <Select
         mode="multiple"
         style={{ width: '100%' }}
-        placeholder="选择指标（可搜索编号 / 名称）"
+        placeholder={intl.formatMessage({ id: 'perf.adhoc.metricSelectPlaceholder' })}
         loading={indicatorsLoading}
         value={metricPaths}
         onChange={(v: string[]) => setMetricPaths(v)}
@@ -286,14 +331,16 @@ export default function PmAdhocWizard() {
         }))}
         maxTagCount="responsive"
       />
-      <div style={{ color: '#888' }}>已选 {metricPaths.length} 个指标</div>
+      <div style={{ color: '#888' }}>
+        {intl.formatMessage({ id: 'perf.adhoc.metricSelectedCount' }, { count: metricPaths.length })}
+      </div>
     </Space>
   );
 
   const renderStep4 = () => (
     <Space direction="vertical" size="large" style={{ width: '100%', maxWidth: 560 }}>
       <div>
-        <div style={{ marginBottom: 8, fontWeight: 500 }}>聚合粒度 *</div>
+        <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldGranReq' })}</div>
         <Radio.Group
           optionType="button"
           buttonStyle="solid"
@@ -304,7 +351,7 @@ export default function PmAdhocWizard() {
       </div>
       {mode === 'oneshot' ? (
         <div>
-          <div style={{ marginBottom: 8, fontWeight: 500 }}>时间范围 *</div>
+          <div style={{ marginBottom: 8, fontWeight: 500 }}>{intl.formatMessage({ id: 'perf.adhoc.fieldTimeRangeReq' })}</div>
           <DatePicker.RangePicker
             showTime
             style={{ width: '100%' }}
@@ -318,8 +365,8 @@ export default function PmAdhocWizard() {
         <Alert
           type="info"
           showIcon
-          message="持续型任务无需时间范围"
-          description="后端按粒度自动滚动聚合最新数据（不固定时间窗）。"
+          message={intl.formatMessage({ id: 'perf.adhoc.continuousNoRange' })}
+          description={intl.formatMessage({ id: 'perf.adhoc.continuousNoRangeDesc' })}
         />
       )}
     </Space>
@@ -332,23 +379,38 @@ export default function PmAdhocWizard() {
     });
     return (
       <Descriptions bordered column={1} size="middle">
-        <Descriptions.Item label="任务名称">{name || <Tag>未填</Tag>}</Descriptions.Item>
-        <Descriptions.Item label="制式">{technology.toUpperCase()}</Descriptions.Item>
-        <Descriptions.Item label="持续性">
-          {mode === 'continuous' ? <Tag color="purple">持续（滚动）</Tag> : <Tag>非持续（单次）</Tag>}
+        <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmTaskName' })}>
+          {name || <Tag>{intl.formatMessage({ id: 'perf.adhoc.confirmNotFilled' })}</Tag>}
+        </Descriptions.Item>
+        <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmTech' })}>{technology.toUpperCase()}</Descriptions.Item>
+        <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmMode' })}>
+          {mode === 'continuous' ? (
+            <Tag color="purple">{intl.formatMessage({ id: 'perf.adhoc.modeContinuousFull' })}</Tag>
+          ) : (
+            <Tag>{intl.formatMessage({ id: 'perf.adhoc.modeOneshotFull' })}</Tag>
+          )}
         </Descriptions.Item>
         {mode === 'oneshot' && (
-          <Descriptions.Item label="过期天数">{expireDays} 天</Descriptions.Item>
+          <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmExpireDays' })}>
+            {expireDays} {intl.formatMessage({ id: 'perf.adhoc.daySuffix' })}
+          </Descriptions.Item>
         )}
-        <Descriptions.Item label="聚合维度">
+        <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmDimension' })}>
           {DIMENSION_OPTIONS.find((d) => d.value === dimension)?.label ?? dimension}
         </Descriptions.Item>
         {needsDevicePick && (
-          <Descriptions.Item label="选中设备">
-            {selectedSns.length > 0 ? `${selectedSns.length} 台：${selectedSns.join(', ')}` : <Tag>未选</Tag>}
+          <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmSelectedDevices' })}>
+            {selectedSns.length > 0 ? (
+              intl.formatMessage(
+                { id: 'perf.adhoc.confirmDeviceCount' },
+                { count: selectedSns.length, sns: selectedSns.join(', ') },
+              )
+            ) : (
+              <Tag>{intl.formatMessage({ id: 'perf.adhoc.confirmNotSelected' })}</Tag>
+            )}
           </Descriptions.Item>
         )}
-        <Descriptions.Item label="指标">
+        <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmMetric' })}>
           {metricNames.length > 0 ? (
             <Space size={[4, 4]} wrap>
               {metricNames.map((m) => (
@@ -356,14 +418,14 @@ export default function PmAdhocWizard() {
               ))}
             </Space>
           ) : (
-            <Tag>未选</Tag>
+            <Tag>{intl.formatMessage({ id: 'perf.adhoc.confirmNotSelected' })}</Tag>
           )}
         </Descriptions.Item>
-        <Descriptions.Item label="粒度">
+        <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmGranularity' })}>
           {GRANULARITY_OPTIONS.find((g) => g.value === granularity)?.label ?? granularity}
         </Descriptions.Item>
         {mode === 'oneshot' && (
-          <Descriptions.Item label="时间范围">
+          <Descriptions.Item label={intl.formatMessage({ id: 'perf.adhoc.confirmTimeRange' })}>
             {window[0]?.format('YYYY-MM-DD HH:mm')} ~ {window[1]?.format('YYYY-MM-DD HH:mm')}
           </Descriptions.Item>
         )}
@@ -372,17 +434,21 @@ export default function PmAdhocWizard() {
   };
 
   const steps = [
-    { title: '基本信息', content: renderStep1 },
-    { title: '聚合范围', content: renderStep2 },
-    { title: '指标选择', content: renderStep3 },
-    { title: '聚合设置', content: renderStep4 },
-    { title: '确认', content: renderStep5 },
+    { title: intl.formatMessage({ id: 'perf.adhoc.stepBasic' }), content: renderStep1 },
+    { title: intl.formatMessage({ id: 'perf.adhoc.stepScope' }), content: renderStep2 },
+    { title: intl.formatMessage({ id: 'perf.adhoc.stepMetric' }), content: renderStep3 },
+    { title: intl.formatMessage({ id: 'perf.adhoc.stepSetting' }), content: renderStep4 },
+    { title: intl.formatMessage({ id: 'perf.adhoc.stepConfirm' }), content: renderStep5 },
   ];
 
   return (
     <Card
-      title="新建自定义聚合任务"
-      extra={<Button onClick={() => navigate('/performance/pm-adhoc')}>返回列表</Button>}
+      title={intl.formatMessage({ id: 'perf.adhoc.wizardTitle' })}
+      extra={
+        <Button onClick={() => navigate('/performance/pm-adhoc')}>
+          {intl.formatMessage({ id: 'perf.adhoc.backToList' })}
+        </Button>
+      }
     >
       <Steps current={current} items={steps.map((s) => ({ title: s.title }))} style={{ marginBottom: 24 }} />
 
@@ -392,15 +458,15 @@ export default function PmAdhocWizard() {
 
       <div style={{ marginTop: 24, display: 'flex', justifyContent: 'space-between' }}>
         <Button disabled={current === 0} onClick={() => setCurrent((c) => c - 1)}>
-          上一步
+          {intl.formatMessage({ id: 'perf.adhoc.btnPrev' })}
         </Button>
         {current < steps.length - 1 ? (
           <Button type="primary" disabled={!canNext} onClick={() => setCurrent((c) => c + 1)}>
-            下一步
+            {intl.formatMessage({ id: 'perf.adhoc.btnNext' })}
           </Button>
         ) : (
           <Button type="primary" loading={createMut.isPending} onClick={handleSubmit}>
-            提交
+            {intl.formatMessage({ id: 'perf.adhoc.btnSubmit' })}
           </Button>
         )}
       </div>

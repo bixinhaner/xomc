@@ -6,6 +6,7 @@
  */
 
 import { useMemo, useState } from 'react';
+import { useIntl } from 'react-intl';
 import {
   Modal,
   Input,
@@ -43,6 +44,7 @@ export default function DevicePickerModal({
   initialSelected = [],
   technology,
 }: DevicePickerModalProps) {
+  const intl = useIntl();
   const { message } = App.useApp();
   const [search, setSearch] = useState('');
   const [searchDraft, setSearchDraft] = useState('');
@@ -62,20 +64,24 @@ export default function DevicePickerModal({
 
   const columns = useMemo(
     () => [
-      { title: 'SN', dataIndex: 'sn', key: 'sn', width: 200, ellipsis: true },
-      { title: '主机名', dataIndex: 'hostName', key: 'host', width: 180, ellipsis: true },
-      { title: '制式', dataIndex: 'networkType', key: 'tech', width: 90 },
-      { title: '运营商', dataIndex: 'carrier', key: 'carrier', width: 90 },
+      { title: intl.formatMessage({ id: 'perf.picker.colSn' }), dataIndex: 'sn', key: 'sn', width: 200, ellipsis: true },
+      { title: intl.formatMessage({ id: 'perf.picker.colHostName' }), dataIndex: 'hostName', key: 'host', width: 180, ellipsis: true },
+      { title: intl.formatMessage({ id: 'perf.picker.colTech' }), dataIndex: 'networkType', key: 'tech', width: 90 },
+      { title: intl.formatMessage({ id: 'perf.picker.colCarrier' }), dataIndex: 'carrier', key: 'carrier', width: 90 },
       {
-        title: '在线状态',
+        title: intl.formatMessage({ id: 'perf.picker.colOnline' }),
         dataIndex: 'isOnline',
         key: 'online',
         width: 90,
         render: (v: boolean) =>
-          v ? <Tag color="green">在线</Tag> : <Tag color="default">离线</Tag>,
+          v ? (
+            <Tag color="green">{intl.formatMessage({ id: 'perf.picker.online' })}</Tag>
+          ) : (
+            <Tag color="default">{intl.formatMessage({ id: 'perf.picker.offline' })}</Tag>
+          ),
       },
     ],
-    [],
+    [intl],
   );
 
   const handleSearch = () => {
@@ -86,7 +92,7 @@ export default function DevicePickerModal({
   const handleBatchPaste = () => {
     const raw = pasteText.trim();
     if (!raw) {
-      message.warning('请粘贴 SN 列表');
+      message.warning(intl.formatMessage({ id: 'perf.picker.pasteSnList' }));
       return;
     }
     const sns = raw
@@ -94,7 +100,7 @@ export default function DevicePickerModal({
       .map((s) => s.trim())
       .filter(Boolean);
     if (sns.length === 0) {
-      message.warning('未解析到 SN');
+      message.warning(intl.formatMessage({ id: 'perf.picker.noSnParsed' }));
       return;
     }
     const merged = Array.from(new Set([...selected, ...sns]));
@@ -102,7 +108,9 @@ export default function DevicePickerModal({
     setSelected(merged);
     setPasteOpen(false);
     setPasteText('');
-    message.success(`已加入 ${added} 个 SN（共选中 ${merged.length} 个）`);
+    message.success(
+      intl.formatMessage({ id: 'perf.picker.snAdded' }, { added, total: merged.length }),
+    );
   };
 
   const handleConfirm = () => {
@@ -119,19 +127,19 @@ export default function DevicePickerModal({
   return (
     <>
       <Modal
-        title={`选择设备（已选 ${selected.length} 个）`}
+        title={intl.formatMessage({ id: 'perf.picker.deviceTitle' }, { count: selected.length })}
         open={open}
         onCancel={onClose}
         onOk={handleConfirm}
-        okText="确定"
-        cancelText="取消"
+        okText={intl.formatMessage({ id: 'common.confirm' })}
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
         width={900}
         destroyOnHidden
       >
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           <Space>
             <Input
-              placeholder="按 SN / OUI / 主机名 搜索"
+              placeholder={intl.formatMessage({ id: 'perf.picker.searchDevicePlaceholder' })}
               prefix={<SearchOutlined />}
               value={searchDraft}
               onChange={(e) => setSearchDraft(e.target.value)}
@@ -144,10 +152,10 @@ export default function DevicePickerModal({
               }}
             />
             <Button onClick={handleSearch} type="primary">
-              搜索
+              {intl.formatMessage({ id: 'common.search' })}
             </Button>
             <Button icon={<CopyOutlined />} onClick={() => setPasteOpen(true)}>
-              批量粘贴
+              {intl.formatMessage({ id: 'perf.picker.batchPaste' })}
             </Button>
           </Space>
 
@@ -167,7 +175,7 @@ export default function DevicePickerModal({
             pageSize={pageSize}
             total={total}
             showSizeChanger
-            showTotal={(t) => `共 ${t} 条`}
+            showTotal={(t) => intl.formatMessage({ id: 'perf.picker.totalCount' }, { total: t })}
             onChange={(p, s) => {
               setPage(p);
               setPageSize(s);
@@ -178,14 +186,14 @@ export default function DevicePickerModal({
 
           <div>
             <Space style={{ marginBottom: 6 }}>
-              <Text strong>已选 SN：</Text>
+              <Text strong>{intl.formatMessage({ id: 'perf.picker.selectedSn' })}</Text>
               <Button
                 size="small"
                 icon={<ClearOutlined />}
                 onClick={() => setSelected([])}
                 disabled={selected.length === 0}
               >
-                全部清空
+                {intl.formatMessage({ id: 'common.clear' })}
               </Button>
             </Space>
             <div
@@ -198,7 +206,7 @@ export default function DevicePickerModal({
               }}
             >
               {selected.length === 0 ? (
-                <Text type="secondary">未选择任何设备</Text>
+                <Text type="secondary">{intl.formatMessage({ id: 'perf.picker.noSelectedDevice' })}</Text>
               ) : (
                 selected.map((sn) => (
                   <Tooltip key={sn} title={sn}>
@@ -218,16 +226,16 @@ export default function DevicePickerModal({
       </Modal>
 
       <Modal
-        title="批量粘贴 SN"
+        title={intl.formatMessage({ id: 'perf.picker.batchPasteTitle' })}
         open={pasteOpen}
         onCancel={() => setPasteOpen(false)}
         onOk={handleBatchPaste}
-        okText="加入已选"
-        cancelText="取消"
+        okText={intl.formatMessage({ id: 'perf.picker.addToSelected' })}
+        cancelText={intl.formatMessage({ id: 'common.cancel' })}
         width={520}
         destroyOnHidden
       >
-        <Text type="secondary">支持逗号、分号、空白字符或换行分隔；自动去重</Text>
+        <Text type="secondary">{intl.formatMessage({ id: 'perf.picker.batchPasteHint' })}</Text>
         <TextArea
           rows={8}
           value={pasteText}

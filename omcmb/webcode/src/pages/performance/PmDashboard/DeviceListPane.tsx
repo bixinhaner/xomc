@@ -16,6 +16,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { useIntl } from 'react-intl';
 import {
   App,
   Button,
@@ -64,18 +65,29 @@ const TECH_TO_DEVICE_TYPE: Record<Tech, DeviceType> = {
   gsm: 'GSM',
 };
 
-const GRANULARITY_OPTIONS: { label: string; value: Granularity }[] = [
-  { label: '15 分钟', value: '15min' },
-  { label: '小时', value: 'hourly' },
-  { label: '日', value: 'daily' },
-  { label: '周', value: 'weekly' },
-  { label: '月', value: 'monthly' },
+// 粒度选项语料键（label 走 i18n，value 不变）。
+const GRANULARITY_MSG_IDS: { id: string; value: Granularity }[] = [
+  { id: 'perf.dashboard.granular15min', value: '15min' },
+  { id: 'perf.dashboard.granularHourly', value: 'hourly' },
+  { id: 'perf.dashboard.granularDaily', value: 'daily' },
+  { id: 'perf.dashboard.granularWeekly', value: 'weekly' },
+  { id: 'perf.dashboard.granularMonthly', value: 'monthly' },
 ];
 
 const MAX_DEVICES = 10;
 
 export default function DeviceListPane() {
+  const intl = useIntl();
   const { message } = App.useApp();
+
+  const granularityOptions = useMemo(
+    () =>
+      GRANULARITY_MSG_IDS.map(({ id, value }) => ({
+        label: intl.formatMessage({ id }),
+        value,
+      })),
+    [intl],
+  );
 
   // ── 选择条件 ───────────────────────────────────────────────────────
   const [tech, setTech] = useState<Tech>('lte');
@@ -172,9 +184,18 @@ export default function DeviceListPane() {
   useEffect(() => {
     if (errors.length > 0) {
       const first = errors[0] as Error;
-      message.error(`查询失败：${first?.message ?? '未知错误'}`);
+      message.error(
+        intl.formatMessage(
+          { id: 'perf.dashboard.queryFailed' },
+          {
+            msg:
+              first?.message ??
+              intl.formatMessage({ id: 'perf.dashboard.queryUnknownError' }),
+          },
+        ),
+      );
     }
-  }, [errors, message]);
+  }, [errors, message, intl]);
 
   // 星期/小时段=纯前端在已取行里筛命中点（全选不过滤），当前与上一周期套同口径。
   const charts = useMemo(() => {
@@ -202,11 +223,11 @@ export default function DeviceListPane() {
 
   const handleQuery = () => {
     if (deviceSns.length === 0) {
-      message.warning('请选择至少一个设备');
+      message.warning(intl.formatMessage({ id: 'perf.dashboard.selectAtLeastOneDevice' }));
       return;
     }
     if (metricPaths.length === 0) {
-      message.warning('请选择至少一个指标');
+      message.warning(intl.formatMessage({ id: 'perf.dashboard.selectAtLeastOneMetric' }));
       return;
     }
     const [start, end] = filter.range;
@@ -231,7 +252,10 @@ export default function DeviceListPane() {
       <Card size="small" style={{ marginBottom: 12 }}>
         <Form layout="vertical" size="middle">
           <Space wrap size="middle" align="start">
-            <Form.Item label="制式" style={{ marginBottom: 0 }}>
+            <Form.Item
+              label={intl.formatMessage({ id: 'perf.dashboard.fieldTech' })}
+              style={{ marginBottom: 0 }}
+            >
               <Segmented
                 value={tech}
                 onChange={(v) => handleTechChange(v as Tech)}
@@ -239,41 +263,68 @@ export default function DeviceListPane() {
               />
             </Form.Item>
 
-            <Form.Item label="设备（≤10）" style={{ marginBottom: 0 }}>
+            <Form.Item
+              label={intl.formatMessage({ id: 'perf.dashboard.fieldDevice' })}
+              style={{ marginBottom: 0 }}
+            >
               <Space.Compact style={{ width: 360 }}>
                 <Input
                   readOnly
                   value={
                     deviceSns.length === 0
                       ? ''
-                      : `已选 ${deviceSns.length} 个：${deviceSns.slice(0, 2).join(', ')}${deviceSns.length > 2 ? ' ...' : ''}`
+                      : intl.formatMessage(
+                          { id: 'perf.dashboard.deviceSummary' },
+                          {
+                            count: deviceSns.length,
+                            preview: deviceSns.slice(0, 2).join(', '),
+                            more: deviceSns.length > 2 ? ' ...' : '',
+                          },
+                        )
                   }
-                  placeholder="点击右侧按钮选择设备"
+                  placeholder={intl.formatMessage({ id: 'perf.dashboard.devicePlaceholder' })}
                 />
-                <Button onClick={() => setDevicePickerOpen(true)}>列表选</Button>
+                <Button onClick={() => setDevicePickerOpen(true)}>
+                  {intl.formatMessage({ id: 'perf.dashboard.pickFromList' })}
+                </Button>
               </Space.Compact>
             </Form.Item>
 
-            <Form.Item label="指标" style={{ marginBottom: 0 }}>
+            <Form.Item
+              label={intl.formatMessage({ id: 'perf.dashboard.fieldMetric' })}
+              style={{ marginBottom: 0 }}
+            >
               <Space.Compact style={{ width: 360 }}>
                 <Input
                   readOnly
                   value={
                     metricPaths.length === 0
                       ? ''
-                      : `已选 ${metricPaths.length} 个${metricsTouched ? '' : '（默认集）'}`
+                      : intl.formatMessage(
+                          {
+                            id: metricsTouched
+                              ? 'perf.dashboard.metricSummary'
+                              : 'perf.dashboard.metricSummaryDefault',
+                          },
+                          { count: metricPaths.length },
+                        )
                   }
-                  placeholder="默认取该制式内置任务指标集"
+                  placeholder={intl.formatMessage({ id: 'perf.dashboard.metricPlaceholder' })}
                 />
-                <Button onClick={() => setMetricPickerOpen(true)}>列表选</Button>
+                <Button onClick={() => setMetricPickerOpen(true)}>
+                  {intl.formatMessage({ id: 'perf.dashboard.pickFromList' })}
+                </Button>
               </Space.Compact>
             </Form.Item>
 
-            <Form.Item label="粒度" style={{ marginBottom: 0 }}>
+            <Form.Item
+              label={intl.formatMessage({ id: 'perf.dashboard.fieldGranularity' })}
+              style={{ marginBottom: 0 }}
+            >
               <Radio.Group
                 value={granularity}
                 onChange={(e) => setGranularity(e.target.value)}
-                options={GRANULARITY_OPTIONS}
+                options={granularityOptions}
                 optionType="button"
                 buttonStyle="solid"
               />
@@ -293,14 +344,14 @@ export default function DeviceListPane() {
                 loading={isFetching}
                 onClick={handleQuery}
               >
-                出图
+                {intl.formatMessage({ id: 'perf.dashboard.btnPlot' })}
               </Button>
               <Button
                 icon={<ReloadOutlined />}
                 onClick={() => void refetch()}
                 disabled={!submitted}
               >
-                刷新
+                {intl.formatMessage({ id: 'common.refresh' })}
               </Button>
             </Space>
           </div>
@@ -309,25 +360,38 @@ export default function DeviceListPane() {
 
       {!submitted ? (
         <Card>
-          <Empty description="选择制式 / 设备 / 指标后点「出图」" style={{ marginTop: 40 }} />
+          <Empty
+            description={intl.formatMessage({ id: 'perf.dashboard.emptyPickConditions' })}
+            style={{ marginTop: 40 }}
+          />
         </Card>
       ) : isLoading || isFetching || prevFetching ? (
         <Card>
-          <Spin tip="加载中..." />
+          <Spin tip={intl.formatMessage({ id: 'common.loading' })} />
         </Card>
       ) : charts.length === 0 ? (
         <Card>
-          <Empty description="所选条件下暂无数据" />
+          <Empty description={intl.formatMessage({ id: 'perf.dashboard.emptyNoDataForCondition' })} />
         </Card>
       ) : (
         <>
           <Card size="small" style={{ marginBottom: 12 }}>
             <Space size={8} wrap>
-              <Typography.Text strong>设备列表出图</Typography.Text>
+              <Typography.Text strong>
+                {intl.formatMessage({ id: 'perf.dashboard.deviceListSummary' })}
+              </Typography.Text>
               <Tag color="geekblue">{tech.toUpperCase()}</Tag>
-              <Tag color="blue">{submitted.deviceSns.length} 设备</Tag>
+              <Tag color="blue">
+                {intl.formatMessage(
+                  { id: 'perf.dashboard.deviceUnit' },
+                  { count: submitted.deviceSns.length },
+                )}
+              </Tag>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {charts.length} 指标
+                {intl.formatMessage(
+                  { id: 'perf.dashboard.metricCount' },
+                  { count: charts.length },
+                )}
               </Typography.Text>
             </Space>
           </Card>
@@ -342,7 +406,12 @@ export default function DeviceListPane() {
         onClose={() => setDevicePickerOpen(false)}
         onConfirm={(sns) => {
           if (sns.length > MAX_DEVICES) {
-            message.warning(`最多选择 ${MAX_DEVICES} 个设备，已自动截取前 ${MAX_DEVICES} 个`);
+            message.warning(
+              intl.formatMessage(
+                { id: 'perf.dashboard.maxDevicesTruncated' },
+                { max: MAX_DEVICES },
+              ),
+            );
             setDeviceSns(sns.slice(0, MAX_DEVICES));
           } else {
             setDeviceSns(sns);

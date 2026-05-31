@@ -10,26 +10,24 @@
  * 不复用旧 GlobalFilterBar（绑死旧拖拽编辑器 store，T-0190 清理）。中英文先不做，硬编码中文。
  */
 
+import { useMemo } from 'react';
+import { useIntl } from 'react-intl';
 import { DatePicker, Select, Space, Switch, Typography } from 'antd';
 import type { Dayjs } from 'dayjs';
 import { ALL_HOURS, ALL_WEEKDAYS } from './dashboardFilterUtils';
 
 const { RangePicker } = DatePicker;
 
-const WEEKDAY_OPTIONS = [
-  { label: '周日', value: 0 },
-  { label: '周一', value: 1 },
-  { label: '周二', value: 2 },
-  { label: '周三', value: 3 },
-  { label: '周四', value: 4 },
-  { label: '周五', value: 5 },
-  { label: '周六', value: 6 },
+// 星期 0..6 对应的语料键（dayjs().day() 口径：0=周日..6=周六）。
+const WEEKDAY_MSG_IDS = [
+  'perf.dashboard.weekdaySun',
+  'perf.dashboard.weekdayMon',
+  'perf.dashboard.weekdayTue',
+  'perf.dashboard.weekdayWed',
+  'perf.dashboard.weekdayThu',
+  'perf.dashboard.weekdayFri',
+  'perf.dashboard.weekdaySat',
 ];
-
-const HOUR_OPTIONS = ALL_HOURS.map((h) => ({
-  label: `${String(h).padStart(2, '0')} 点`,
-  value: h,
-}));
 
 export interface DashboardFilterValue {
   range: [Dayjs, Dayjs];
@@ -44,13 +42,35 @@ interface Props {
 }
 
 export default function DashboardFilterBar({ value, onChange }: Props) {
+  const intl = useIntl();
   const patch = (p: Partial<DashboardFilterValue>) => onChange({ ...value, ...p });
+
+  const weekdayOptions = useMemo(
+    () =>
+      WEEKDAY_MSG_IDS.map((id, value) => ({
+        label: intl.formatMessage({ id }),
+        value,
+      })),
+    [intl],
+  );
+
+  const hourOptions = useMemo(
+    () =>
+      ALL_HOURS.map((h) => ({
+        label: intl.formatMessage(
+          { id: 'perf.dashboard.hourSuffix' },
+          { hour: String(h).padStart(2, '0') },
+        ),
+        value: h,
+      })),
+    [intl],
+  );
 
   return (
     <Space wrap size="middle" align="center">
       <Space size={4} align="center">
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          时间段
+          {intl.formatMessage({ id: 'perf.dashboard.filterTimeRange' })}
         </Typography.Text>
         <RangePicker
           showTime
@@ -64,39 +84,39 @@ export default function DashboardFilterBar({ value, onChange }: Props) {
 
       <Space size={4} align="center">
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          星期
+          {intl.formatMessage({ id: 'perf.dashboard.filterWeekday' })}
         </Typography.Text>
         <Select
           mode="multiple"
           allowClear
           maxTagCount="responsive"
           style={{ minWidth: 180 }}
-          placeholder="全部星期"
+          placeholder={intl.formatMessage({ id: 'perf.dashboard.allWeekdays' })}
           value={value.weekdays}
-          options={WEEKDAY_OPTIONS}
+          options={weekdayOptions}
           onChange={(v) => patch({ weekdays: v.length === 0 ? [...ALL_WEEKDAYS] : v })}
         />
       </Space>
 
       <Space size={4} align="center">
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          小时段
+          {intl.formatMessage({ id: 'perf.dashboard.filterHour' })}
         </Typography.Text>
         <Select
           mode="multiple"
           allowClear
           maxTagCount="responsive"
           style={{ minWidth: 200 }}
-          placeholder="全部小时"
+          placeholder={intl.formatMessage({ id: 'perf.dashboard.allHours' })}
           value={value.hours}
-          options={HOUR_OPTIONS}
+          options={hourOptions}
           onChange={(v) => patch({ hours: v.length === 0 ? [...ALL_HOURS] : v })}
         />
       </Space>
 
       <Space size={4} align="center">
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-          周期对比
+          {intl.formatMessage({ id: 'perf.dashboard.filterCompare' })}
         </Typography.Text>
         <Switch checked={value.compare} onChange={(c) => patch({ compare: c })} />
       </Space>

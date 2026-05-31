@@ -7,17 +7,14 @@
  * preset 入参支持从 panel 配置预填（G6-Gap-12 跳转场景）。
  */
 
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
+import { useIntl } from 'react-intl';
 import { Alert, Button, DatePicker, Drawer, Form, Input, Select, Switch, message } from 'antd';
 import dayjs from 'dayjs';
 import { useCreatePmAdhoc } from '@core/hooks/api/usePmAdhoc';
 import type { AdhocMode } from '@core/types/pmAdhoc';
 
-const MODE_OPTIONS: { label: string; value: AdhocMode }[] = [
-  { label: '单次执行', value: 'oneshot' },
-  { label: '持续执行', value: 'continuous' },
-];
-
+// 纯枚举（label = value），不译，保持原样。
 const GRANULARITY_OPTIONS = ['hourly', 'daily', 'weekly', 'monthly'].map((g) => ({
   label: g,
   value: g,
@@ -49,8 +46,17 @@ interface Props {
 }
 
 export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Props) {
+  const intl = useIntl();
   const [form] = Form.useForm<CreateForm>();
   const createMut = useCreatePmAdhoc();
+
+  const MODE_OPTIONS = useMemo<{ label: string; value: AdhocMode }[]>(
+    () => [
+      { label: intl.formatMessage({ id: 'perf.adhoc.modeOneshotOpt' }), value: 'oneshot' },
+      { label: intl.formatMessage({ id: 'perf.adhoc.modeContinuousOpt' }), value: 'continuous' },
+    ],
+    [intl],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -84,7 +90,7 @@ export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Prop
       windowEnd: v.window[1].toISOString(),
       dimension: v.aggregateGroup ? 'aggregate_group' : 'device',
     });
-    message.success('任务已创建，worker 将开始执行');
+    message.success(intl.formatMessage({ id: 'perf.adhoc.taskCreated' }));
     onClose();
     form.resetFields();
     onCreated?.(task.id);
@@ -92,13 +98,13 @@ export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Prop
 
   return (
     <Drawer
-      title="新建自定义聚合任务"
+      title={intl.formatMessage({ id: 'perf.adhoc.wizardTitle' })}
       width={600}
       open={open}
       onClose={onClose}
       extra={
         <Button type="primary" loading={createMut.isPending} onClick={handleCreate}>
-          创建
+          {intl.formatMessage({ id: 'perf.adhoc.btnCreate' })}
         </Button>
       }
     >
@@ -107,52 +113,73 @@ export function CreateAdhocTaskDrawer({ open, preset, onClose, onCreated }: Prop
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
-          message="按设备查询 vs 聚合到组"
+          message={intl.formatMessage({ id: 'perf.adhoc.byDeviceVsGroup' })}
           description={
             <ul style={{ paddingLeft: 18, margin: 0 }}>
-              <li><b>按设备查询</b>（默认）：每设备保留一条结果（既有行为）</li>
-              <li><b>聚合到组</b>：所有选中设备按时间桶聚合成一条（结果 device_sn=AGGREGATED）。仅支持 counter 类指标 (sum/avg/max/min)，KPI 类 (statis_type=pct) 暂不支持</li>
+              <li>
+                <b>{intl.formatMessage({ id: 'perf.adhoc.byDeviceTitle' })}</b>
+                {intl.formatMessage({ id: 'perf.adhoc.byDeviceDesc' })}
+              </li>
+              <li>
+                <b>{intl.formatMessage({ id: 'perf.adhoc.toGroupTitle' })}</b>
+                {intl.formatMessage({ id: 'perf.adhoc.toGroupDesc' })}
+              </li>
             </ul>
           }
         />
-        <Form.Item label="任务名称" name="name" rules={[{ required: true }]}>
+        <Form.Item label={intl.formatMessage({ id: 'perf.adhoc.drawerTaskName' })} name="name" rules={[{ required: true }]}>
           <Input />
         </Form.Item>
-        <Form.Item label="模式" name="mode" rules={[{ required: true }]}>
+        <Form.Item label={intl.formatMessage({ id: 'perf.adhoc.drawerMode' })} name="mode" rules={[{ required: true }]}>
           <Select options={MODE_OPTIONS} />
         </Form.Item>
         <Form.Item shouldUpdate={(p, c) => p.mode !== c.mode}>
           {() =>
             form.getFieldValue('mode') === 'continuous' ? (
               <Form.Item
-                label="Cron 表达式（5 字段：m h dom mon dow）"
+                label={intl.formatMessage({ id: 'perf.adhoc.cronLabel' })}
                 name="cronExpr"
-                rules={[{ required: true, message: 'continuous 必须填 cron_expr' }]}
+                rules={[{ required: true, message: intl.formatMessage({ id: 'perf.adhoc.cronRequired' }) }]}
               >
-                <Input placeholder="0 * * * *（每小时整点）" />
+                <Input placeholder={intl.formatMessage({ id: 'perf.adhoc.cronPlaceholder' })} />
               </Form.Item>
             ) : null
           }
         </Form.Item>
-        <Form.Item label="设备 SN（逗号分隔）" name="deviceSns" rules={[{ required: true }]}>
-          <Input placeholder="BLQ-001, BLQ-002" />
+        <Form.Item
+          label={intl.formatMessage({ id: 'perf.adhoc.deviceSnsLabel' })}
+          name="deviceSns"
+          rules={[{ required: true }]}
+        >
+          <Input placeholder={intl.formatMessage({ id: 'perf.adhoc.deviceSnsPlaceholder' })} />
         </Form.Item>
-        <Form.Item label="指标路径（逗号分隔）" name="metricPaths" rules={[{ required: true }]}>
-          <Input placeholder="L.RRC.SuccRate, L.ERAB.SuccRate" />
+        <Form.Item
+          label={intl.formatMessage({ id: 'perf.adhoc.metricPathsLabel' })}
+          name="metricPaths"
+          rules={[{ required: true }]}
+        >
+          <Input placeholder={intl.formatMessage({ id: 'perf.adhoc.metricPathsPlaceholder' })} />
         </Form.Item>
-        <Form.Item label="粒度（多选）" name="granularities" rules={[{ required: true }]}>
+        <Form.Item
+          label={intl.formatMessage({ id: 'perf.adhoc.granMultiLabel' })}
+          name="granularities"
+          rules={[{ required: true }]}
+        >
           <Select mode="multiple" options={GRANULARITY_OPTIONS} />
         </Form.Item>
-        <Form.Item label="时间窗" name="window" rules={[{ required: true }]}>
+        <Form.Item label={intl.formatMessage({ id: 'perf.adhoc.windowLabel' })} name="window" rules={[{ required: true }]}>
           <DatePicker.RangePicker showTime style={{ width: '100%' }} />
         </Form.Item>
         <Form.Item
-          label="聚合到组"
+          label={intl.formatMessage({ id: 'perf.adhoc.aggregateGroupLabel' })}
           name="aggregateGroup"
           valuePropName="checked"
-          tooltip="勾选：所有选中 SN 临时组成一组聚合（按时间桶 + LDN GROUP BY），结果 device_sn=AGGREGATED；不勾：每设备一条结果"
+          tooltip={intl.formatMessage({ id: 'perf.adhoc.aggregateGroupTooltip' })}
         >
-          <Switch checkedChildren="聚合到组" unCheckedChildren="按设备查询" />
+          <Switch
+            checkedChildren={intl.formatMessage({ id: 'perf.adhoc.switchToGroup' })}
+            unCheckedChildren={intl.formatMessage({ id: 'perf.adhoc.switchByDevice' })}
+          />
         </Form.Item>
       </Form>
     </Drawer>

@@ -13,6 +13,7 @@
 
 import { useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useIntl } from 'react-intl';
 import { Card, Empty, List, Space, Tabs, Tag, theme } from 'antd';
 import { usePmAdhocList } from '@core/hooks/api/usePmAdhoc';
 import type { AdhocTask } from '@core/types/pmAdhoc';
@@ -27,6 +28,7 @@ interface TaskGroup {
 }
 
 function TaskDashboardTab() {
+  const intl = useIntl();
   const [searchParams, setSearchParams] = useSearchParams();
   const taskId = searchParams.get('task') ?? undefined;
   const { token } = theme.useToken();
@@ -42,10 +44,20 @@ function TaskDashboardTab() {
 
   const groups: TaskGroup[] = useMemo(
     () => [
-      { key: 'builtin', title: '内置', color: 'blue', items: builtinTasks },
-      { key: 'custom', title: '自建', color: 'green', items: customTasks },
+      {
+        key: 'builtin',
+        title: intl.formatMessage({ id: 'perf.dashboard.groupBuiltin' }),
+        color: 'blue',
+        items: builtinTasks,
+      },
+      {
+        key: 'custom',
+        title: intl.formatMessage({ id: 'perf.dashboard.groupCustom' }),
+        color: 'green',
+        items: customTasks,
+      },
     ],
-    [builtinTasks, customTasks],
+    [builtinTasks, customTasks, intl],
   );
 
   const allTasks = useMemo(
@@ -74,7 +86,7 @@ function TaskDashboardTab() {
     <div style={{ display: 'flex', gap: 12, height: 'calc(100vh - 190px)' }}>
       <Card
         size="small"
-        title="任务"
+        title={intl.formatMessage({ id: 'perf.dashboard.taskListTitle' })}
         style={{ width: 240, flexShrink: 0, overflow: 'auto' }}
         styles={{ body: { padding: 8 } }}
         loading={isLoading}
@@ -124,7 +136,9 @@ function TaskDashboardTab() {
             </div>
           ),
         )}
-        {allTasks.length === 0 && !isLoading && <Empty description="暂无聚合任务" />}
+        {allTasks.length === 0 && !isLoading && (
+          <Empty description={intl.formatMessage({ id: 'perf.dashboard.emptyNoTask' })} />
+        )}
       </Card>
 
       <div style={{ flex: 1, overflow: 'auto' }}>
@@ -132,7 +146,7 @@ function TaskDashboardTab() {
           <TaskDashboardPane taskId={taskId} />
         ) : (
           <Card>
-            <Empty description="左侧选择一个聚合任务查看自动出图" />
+            <Empty description={intl.formatMessage({ id: 'perf.dashboard.emptySelectTask' })} />
           </Card>
         )}
       </div>
@@ -141,12 +155,21 @@ function TaskDashboardTab() {
 }
 
 export default function PerformanceLayout() {
+  const intl = useIntl();
   return (
     <Tabs
       defaultActiveKey="task"
       items={[
-        { key: 'task', label: '任务仪表盘', children: <TaskDashboardTab /> },
-        { key: 'device', label: '设备列表', children: <DeviceListPane /> },
+        {
+          key: 'task',
+          label: intl.formatMessage({ id: 'perf.dashboard.tabTask' }),
+          children: <TaskDashboardTab />,
+        },
+        {
+          key: 'device',
+          label: intl.formatMessage({ id: 'perf.dashboard.tabDevice' }),
+          children: <DeviceListPane />,
+        },
       ]}
     />
   );
