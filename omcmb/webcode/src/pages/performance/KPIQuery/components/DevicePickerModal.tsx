@@ -67,7 +67,6 @@ export default function DevicePickerModal({
       { title: intl.formatMessage({ id: 'perf.picker.colSn' }), dataIndex: 'sn', key: 'sn', width: 200, ellipsis: true },
       { title: intl.formatMessage({ id: 'perf.picker.colHostName' }), dataIndex: 'hostName', key: 'host', width: 180, ellipsis: true },
       { title: intl.formatMessage({ id: 'perf.picker.colTech' }), dataIndex: 'networkType', key: 'tech', width: 90 },
-      { title: intl.formatMessage({ id: 'perf.picker.colCarrier' }), dataIndex: 'carrier', key: 'carrier', width: 90 },
       {
         title: intl.formatMessage({ id: 'perf.picker.colOnline' }),
         dataIndex: 'isOnline',

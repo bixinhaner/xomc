@@ -6249,7 +6249,6 @@ const messages: Record<string, string> = {
   'perf.picker.colSn':                   'SN',
   'perf.picker.colHostName':             '主机名',
   'perf.picker.colTech':                 '制式',
-  'perf.picker.colCarrier':              '运营商',
   'perf.picker.colOnline':               '在线状态',
   'perf.picker.online':                  '在线',
   'perf.picker.offline':                 '离线',

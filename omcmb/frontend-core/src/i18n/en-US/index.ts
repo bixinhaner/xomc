@@ -6215,7 +6215,6 @@ const messages: Record<string, string> = {
   'perf.picker.colSn':                   'SN',
   'perf.picker.colHostName':             'Host Name',
   'perf.picker.colTech':                 'Technology',
-  'perf.picker.colCarrier':              'Carrier',
   'perf.picker.colOnline':               'Online Status',
   'perf.picker.online':                  'Online',
   'perf.picker.offline':                 'Offline',
