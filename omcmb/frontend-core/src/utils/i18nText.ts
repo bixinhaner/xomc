@@ -47,13 +47,22 @@ export function getI18nText(
  * 例: getRecordI18n(group, 'name', 'en-US') →
  *   group.name_i18n['en-US'] ?? group.name_i18n.en ?? group.name_i18n['zh-CN'] ?? group.name_i18n.zh ?? group.name
  */
+/** snake_case 转 camelCase 后追加 I18n。'name' → 'nameI18n', 'name_suffix' → 'nameSuffixI18n'。 */
+function toCamelI18nKey(fieldBase: string): string {
+  const camel = fieldBase.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+  return `${camel}I18n`;
+}
+
 export function getRecordI18n<T extends Record<string, unknown>>(
   record: T | null | undefined,
   fieldBase: string,
   locale: Locale,
 ): string {
   if (!record) return '';
-  const i18n = record[`${fieldBase}_i18n`] as I18nMap;
+  // 后端原样 (snake_case `name_i18n`) 与 Axios camelCase 转换后 (`nameI18n`) 两种 key 都吃。
+  const i18n =
+    (record[`${fieldBase}_i18n`] as I18nMap) ??
+    (record[toCamelI18nKey(fieldBase)] as I18nMap);
   const legacy = record[fieldBase] as string | null | undefined;
   return getI18nText(i18n, locale, legacy);
 }

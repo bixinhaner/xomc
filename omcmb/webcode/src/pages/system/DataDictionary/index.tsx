@@ -29,6 +29,7 @@ import {
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
 import { useT } from '@/hooks/useT';
+import { useI18nText } from '@/hooks/useI18nText';
 import { adminApi } from '@core/services/api/adminApi';
 import type {
   Dictionary,
@@ -48,6 +49,7 @@ interface DictListPanelProps {
 
 function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
   const t = useT();
+  const { fromRecord } = useI18nText();
   const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
 
@@ -326,9 +328,9 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
                         whiteSpace: 'nowrap',
                         maxWidth: 130,
                       }}
-                      title={dict.name}
+                      title={fromRecord(dict as unknown as Record<string, unknown>, 'name') || dict.name}
                     >
-                      {dict.name}
+                      {fromRecord(dict as unknown as Record<string, unknown>, 'name') || dict.name}
                     </span>
                     <Space size={2}>
                       {/* T-0182 手动刷新:仅托管字典(sourceTable != null)显示;按钮放在编辑前 */}
@@ -431,6 +433,7 @@ interface DictDetailPanelProps {
 
 function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
   const t = useT();
+  const { fromRecord } = useI18nText();
   const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
 
@@ -578,6 +581,8 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
         title: t('dictionary.label'),
         dataIndex: 'label',
         width: 140,
+        render: (_val, record) =>
+          fromRecord(record as unknown as Record<string, unknown>, 'label') || record.label,
       },
       {
         key: 'value',

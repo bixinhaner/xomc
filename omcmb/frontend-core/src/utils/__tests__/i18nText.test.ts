@@ -30,10 +30,15 @@ describe('getI18nText', () => {
 });
 
 describe('getRecordI18n', () => {
-  it('reads name_i18n then falls back to name', () => {
+  it('reads name_i18n then falls back to name (snake_case backend payload)', () => {
     const record = { name: '默认设备组', name_i18n: { 'en-US': 'Default Group', 'zh-CN': '默认设备组' } };
     expect(getRecordI18n(record, 'name', 'en-US')).toBe('Default Group');
     expect(getRecordI18n(record, 'name', 'zh-CN')).toBe('默认设备组');
+  });
+
+  it('reads nameI18n (camelCase after Axios snake→camel transform)', () => {
+    const record = { name: '默认设备组', nameI18n: { 'en-US': 'Default Group', 'zh-CN': '默认设备组' } };
+    expect(getRecordI18n(record, 'name', 'en-US')).toBe('Default Group');
   });
 
   it('falls back to legacy when i18n missing', () => {

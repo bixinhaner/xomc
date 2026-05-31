@@ -32,6 +32,9 @@ import type { PageRequest, PageResponse } from '../../types/pagination';
 export interface Dictionary {
   id: number;
   name: string;
+  /** i18n JSONB (migration 000003)。Axios camel 转换后字段名,前端 useI18nText 兼容两种形态。 */
+  nameI18n?: Record<string, string>;
+  descriptionI18n?: Record<string, string>;
   type: string;
   status: boolean;
   desc: string;
@@ -55,6 +58,8 @@ export type DictionaryDetailOrigin = 'manual' | 'auto';
 export interface DictionaryDetail {
   id: number;
   label: string;
+  /** i18n JSONB (migration 000003)。 */
+  labelI18n?: Record<string, string>;
   value: string;
   extend: string;
   status: boolean;

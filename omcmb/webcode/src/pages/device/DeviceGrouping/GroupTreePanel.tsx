@@ -13,6 +13,8 @@ import {
 import type { MenuProps } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import type { GroupItem } from './types';
+import { getRecordI18n, type Locale } from '@core/utils/i18nText';
+import { useAppStore } from '@core/store/appStore';
 import styles from './DeviceGrouping.module.css';
 
 void Typography;
@@ -34,9 +36,11 @@ function buildTreeData(
   groups: GroupItem[],
   _selectedId: string | null,
   onContextMenu: (groupId: string) => void,
-  t: (id: string, values?: Record<string, string | number>) => string
+  t: (id: string, values?: Record<string, string | number>) => string,
+  locale: Locale
 ): DataNode[] {
   const rootGroups = groups.filter((g) => !g.parentId);
+  const displayName = (g: GroupItem) => getRecordI18n(g as unknown as Record<string, unknown>, 'name', locale) || g.name;
 
   function buildNode(group: GroupItem, isRootLevel: boolean): DataNode {
     const children = groups.filter((g) => g.parentId === group.id);
@@ -120,14 +124,14 @@ function buildTreeData(
       selectable: true,
       title: (
         <div className={`${styles.groupNode} ${isL1 ? styles.groupNodeLevel1 : styles.groupNodeLevel2}`}>
-          <Tooltip title={group.name} mouseEnterDelay={0.8} placement="right">
+          <Tooltip title={displayName(group)} mouseEnterDelay={0.8} placement="right">
             <span className={styles.treeNodeContent}>
               {isL1 ? (
                 <FolderOutlined style={{ marginRight: 3, fontSize: 12, color: '#FA8C16' }} />
               ) : (
                 <span className="group-tree-dot" />
               )}
-              <span className={styles.treeNodeText}>{group.name}</span>
+              <span className={styles.treeNodeText}>{displayName(group)}</span>
             </span>
           </Tooltip>
           <span className={styles.groupCountBadge}>{group.deviceCount}</span>
@@ -169,10 +173,11 @@ export default function GroupTreePanel({
 }: GroupTreePanelProps) {
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(() => ['__all__', ...groups.filter((g) => !g.parentId).map((g) => g.id)]);
   const [searchVisible, setSearchVisible] = useState(false);
+  const locale = useAppStore((s) => s.locale);
 
   const filteredTreeData = useMemo(
-    () => buildTreeData(filteredGroups, selectedGroupId, onContextMenu, t),
-    [filteredGroups, selectedGroupId, onContextMenu, t]
+    () => buildTreeData(filteredGroups, selectedGroupId, onContextMenu, t, locale),
+    [filteredGroups, selectedGroupId, onContextMenu, t, locale]
   );
 
   return (

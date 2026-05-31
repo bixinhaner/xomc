@@ -6,6 +6,10 @@ export type { NameFilterItem };
 export interface GroupItem {
   id: string;
   name: string;
+  /** i18n JSONB (后端 migration 000003)。Axios camel 转换 + useI18nText 兼容两种 key 形态。 */
+  nameI18n?: Record<string, string>;
+  descriptionI18n?: Record<string, string>;
+  remarkI18n?: Record<string, string>;
   parentId: string | null;
   deviceCount: number;
   description: string;

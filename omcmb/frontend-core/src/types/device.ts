@@ -264,6 +264,11 @@ export interface NE {
 export interface DeviceGroup {
   id: string;
   name: string;
+  /** i18n JSONB 列(后端 migration 000003)。snake_case key 形如 'zh-CN' / 'en-US'。
+   *  Axios camelCase 转换后字段名变 nameI18n,前端组件通过 useI18nText().fromRecord 自动兼容两种。 */
+  nameI18n?: Record<string, string>;
+  descriptionI18n?: Record<string, string>;
+  remarkI18n?: Record<string, string>;
   parentId: string | null;
   deviceCount: number;
   description: string;

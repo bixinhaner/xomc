@@ -550,6 +550,10 @@ export const deviceApi = {
       remark: string;
       is_default: boolean;
       level: number;
+      // i18n JSONB (migration 000003 + topology repo READ)
+      name_i18n?: Record<string, string>;
+      description_i18n?: Record<string, string>;
+      remark_i18n?: Record<string, string>;
       // 匹配规则字段（service.go DeviceGroup 反序列化）
       matching_mode?: 'deviceName' | 'lac' | 'tac' | 'serialNumber';
       name_rule_list?: NameFilterItem[];
@@ -568,6 +572,9 @@ export const deviceApi = {
         flat.push({
           id: g.id,
           name: g.name,
+          nameI18n: g.name_i18n,
+          descriptionI18n: g.description_i18n,
+          remarkI18n: g.remark_i18n,
           parentId: g.parent_id,
           deviceCount: g.device_count ?? 0,
           description: g.remark || g.description || '',
