@@ -851,10 +851,10 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
       >
         <Form form={detailForm} layout="vertical" style={{ marginTop: 16 }}>
           {/* PRD §10：父级字典项 — allowClear=切顶层；过滤掉自身+后代防环 */}
-          <Form.Item name="parentId" label="父级字典项">
+          <Form.Item name="parentId" label={t('dictionary.detail.parentLabel')}>
             <Select
               allowClear
-              placeholder="（顶层项）"
+              placeholder={t('dictionary.detail.parentPlaceholder')}
               options={parentOptions}
               showSearch
               optionFilterProp="label"

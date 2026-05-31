@@ -142,7 +142,7 @@ export default function CommandEditorModal({
           label={t('mml.admin.catalog.form.nameZh')}
           rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
         >
-          <Input placeholder="查询小区状态" />
+          <Input placeholder={t('mml.admin.catalog.placeholder.queryCellStatus')} />
         </Form.Item>
         <Form.Item
           name="displayNameEn"

@@ -26,6 +26,7 @@ import {
   isModObjectPath,
   isStringObjectPath,
 } from '@core/types/mmlConsole';
+import { useT } from '@/hooks/useT';
 
 const { Text, Paragraph } = Typography;
 
@@ -70,12 +71,13 @@ const LST_COLUMNS: ColumnsType<LstRow> = [
 ];
 
 function LstView({ paths }: { paths: string[] }) {
+  const t = useT();
   const rows = useMemo<LstRow[]>(
     () => paths.map((p, i) => ({ key: String(i + 1), path: p })),
     [paths],
   );
   if (rows.length === 0) {
-    return <Empty description="该命令未声明参数路径" />;
+    return <Empty description={t('mml.console.empty.noPaths')} />;
   }
   return (
     <Table
@@ -117,8 +119,9 @@ function ModView({
   values: Record<string, string>;
   onChange: (path: string, value: string) => void;
 }) {
+  const t = useT();
   if (params.length === 0) {
-    return <Empty description="该命令未声明可修改参数" />;
+    return <Empty description={t('mml.console.empty.noWritable')} />;
   }
   return (
     <Form layout="vertical" size="small">
@@ -194,6 +197,7 @@ function ObjectPathView({ op, path }: { op: 'ADD' | 'RMV'; path: string }) {
 /* ----------------------------- 主组件 ----------------------------- */
 
 export default function CommandPanelFlat({ command, onValuesChange }: CommandPanelFlatProps) {
+  const t = useT();
   // MOD 表单本地值；切换命令时重置
   const [modValues, setModValues] = useState<Record<string, string>>({});
 
@@ -202,7 +206,7 @@ export default function CommandPanelFlat({ command, onValuesChange }: CommandPan
   }, [command?.id]);
 
   if (!command) {
-    return <Empty description="请从左侧命令树选择一条命令" style={{ padding: 24 }} />;
+    return <Empty description={t('mml.console.empty.selectFromTree')} style={{ padding: 24 }} />;
   }
 
   const op = parseOpFromCommandName(command.name);

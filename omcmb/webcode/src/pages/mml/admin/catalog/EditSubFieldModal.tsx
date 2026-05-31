@@ -91,7 +91,7 @@ export default function EditSubFieldModal({
           label={t('mml.admin.catalog.subField.labelZh')}
           rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
         >
-          <Input placeholder="小区 ID" />
+          <Input placeholder={t('mml.admin.catalog.placeholder.cellId')} />
         </Form.Item>
         <Form.Item
           name="labelEn"

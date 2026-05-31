@@ -102,6 +102,31 @@ const messages: Record<string, string> = {
   'i18nInput.placeholderZh': '请输入中文 (Chinese)',
   'i18nInput.placeholderEn': 'Please enter English',
 
+  // F3 — Static text i18n migration (batched, see commit log)
+  // mml/admin/catalog modal placeholders
+  'mml.admin.catalog.placeholder.cellId':          'Cell ID',
+  'mml.admin.catalog.placeholder.bsConfig':        'Base Station Config',
+  'mml.admin.catalog.placeholder.queryCellStatus': 'Query Cell Status',
+
+  // mml/Console empty states and search
+  'mml.console.empty.noPaths':       'This command has no parameter paths declared',
+  'mml.console.empty.noWritable':    'This command has no writable parameters',
+  'mml.console.empty.selectFromTree': 'Please select a command from the left tree',
+  'mml.console.empty.noGroups':      'No command groups',
+  'mml.console.searchPlaceholder':   'Search command name',
+
+  // system/DataDictionary
+  'dictionary.detail.parentLabel':       'Parent item',
+  'dictionary.detail.parentPlaceholder': '(top level)',
+
+  // system/RolePermission - builtin role alert + device group binding alert
+  'role.builtinAlert.title':              'Built-in role',
+  'role.builtinAlert.desc':               'Only menu / API / data permissions are adjustable; name, description, and deletion are locked. Changes apply immediately to all users assigned this role.',
+  'role.noGroupBinding.title':            'This role has no device-group binding',
+  'role.noGroupBinding.editDesc':         'Users with this role will not see any device data. Please pick at least one level-2 device group in the Data Permission tab.',
+  'role.noGroupBinding.viewDesc':         'Users with this role will not see any device data.',
+  'role.noGroupBinding.tag':              '⚠️ No group',
+
   // -------------------------------------------------------------------------
   // Table headers
   // -------------------------------------------------------------------------

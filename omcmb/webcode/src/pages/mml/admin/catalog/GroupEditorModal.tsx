@@ -128,7 +128,7 @@ export default function GroupEditorModal({
           label={t('mml.admin.catalog.form.nameZh')}
           rules={[{ required: true, message: t('mml.admin.catalog.validation.required') }]}
         >
-          <Input placeholder="基站配置" />
+          <Input placeholder={t('mml.admin.catalog.placeholder.bsConfig')} />
         </Form.Item>
         <Form.Item
           name="displayNameEn"

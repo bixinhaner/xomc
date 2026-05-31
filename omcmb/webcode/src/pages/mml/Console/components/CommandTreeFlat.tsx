@@ -23,6 +23,7 @@ import {
 import type { TreeDataNode } from 'antd';
 import { useGroupTreeFlat } from '@core/hooks/api/useMmlConsole';
 import { useI18nText } from '@/hooks/useI18nText';
+import { useT } from '@/hooks/useT';
 import type {
   FlatCommand,
   FlatGroup,
@@ -143,6 +144,7 @@ export default function CommandTreeFlat({
   selectedCommandId,
   lang,
 }: CommandTreeFlatProps) {
+  const t = useT();
   const { locale: appLocale } = useI18nText();
   const effectiveLang = lang ?? appLocale;
   const { data, isLoading } = useGroupTreeFlat(effectiveLang);
@@ -201,14 +203,14 @@ export default function CommandTreeFlat({
     return <Spin />;
   }
   if (groups.length === 0) {
-    return <Empty description="暂无命令分组" />;
+    return <Empty description={t('mml.console.empty.noGroups')} />;
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <Input
         prefix={<SearchOutlined />}
-        placeholder="搜索命令名"
+        placeholder={t('mml.console.searchPlaceholder')}
         value={searchText}
         onChange={(e) => onSearchChange(e.target.value)}
         allowClear

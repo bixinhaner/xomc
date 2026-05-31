@@ -875,7 +875,7 @@ export default function RoleManagement() {
             {String(val)}
             {isBuiltIn(role) && <Tag color="blue" style={{ marginLeft: 8 }}>{t('role.builtIn')}</Tag>}
             {!isBuiltIn(role) && noGroups && (
-              <Tag color="warning" style={{ marginLeft: 8 }}>⚠️ 未绑分组</Tag>
+              <Tag color="warning" style={{ marginLeft: 8 }}>{t('role.noGroupBinding.tag')}</Tag>
             )}
           </span>
         );
@@ -1453,8 +1453,8 @@ export default function RoleManagement() {
             type="info"
             showIcon
             style={{ marginBottom: 16 }}
-            message="内置角色"
-            description="仅可调整菜单/API/数据权限，不允许修改名称、描述或删除。修改将立即影响所有分配此角色的用户。"
+            message={t('role.builtinAlert.title')}
+            description={t('role.builtinAlert.desc')}
           />
         )}
         {/* §11.2 决议 ① 触点 2：未绑设备分组的角色 banner 提示 */}
@@ -1463,8 +1463,8 @@ export default function RoleManagement() {
             type="warning"
             showIcon
             style={{ marginBottom: 16 }}
-            message="该角色未绑定任何设备分组"
-            description="分配该角色的用户将无法查看任何设备数据。请在「数据权限」标签页选择至少一个二级设备分组。"
+            message={t('role.noGroupBinding.title')}
+            description={t('role.noGroupBinding.editDesc')}
           />
         )}
         <Form form={form} layout="vertical">
@@ -1530,8 +1530,8 @@ export default function RoleManagement() {
             type="warning"
             showIcon
             style={{ marginBottom: 16 }}
-            message="该角色未绑定任何设备分组"
-            description="分配该角色的用户将无法查看任何设备数据。"
+            message={t('role.noGroupBinding.title')}
+            description={t('role.noGroupBinding.viewDesc')}
           />
         )}
         <Form form={form} layout="vertical">

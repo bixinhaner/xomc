@@ -102,6 +102,31 @@ const messages: Record<string, string> = {
   'i18nInput.placeholderZh': '请输入中文',
   'i18nInput.placeholderEn': 'Please enter English',
 
+  // F3 — 静态文案 i18n 化(分批迁移,详见 commit 链)
+  // mml/admin/catalog 模态框占位符
+  'mml.admin.catalog.placeholder.cellId':          '小区 ID',
+  'mml.admin.catalog.placeholder.bsConfig':        '基站配置',
+  'mml.admin.catalog.placeholder.queryCellStatus': '查询小区状态',
+
+  // mml/Console 空态与搜索
+  'mml.console.empty.noPaths':       '该命令未声明参数路径',
+  'mml.console.empty.noWritable':    '该命令未声明可修改参数',
+  'mml.console.empty.selectFromTree': '请从左侧命令树选择一条命令',
+  'mml.console.empty.noGroups':      '暂无命令分组',
+  'mml.console.searchPlaceholder':   '搜索命令名',
+
+  // system/DataDictionary
+  'dictionary.detail.parentLabel':       '父级字典项',
+  'dictionary.detail.parentPlaceholder': '（顶层项）',
+
+  // system/RolePermission - 内置角色提示 + 设备分组绑定提示
+  'role.builtinAlert.title':              '内置角色',
+  'role.builtinAlert.desc':               '仅可调整菜单/API/数据权限，不允许修改名称、描述或删除。修改将立即影响所有分配此角色的用户。',
+  'role.noGroupBinding.title':            '该角色未绑定任何设备分组',
+  'role.noGroupBinding.editDesc':         '分配该角色的用户将无法查看任何设备数据。请在「数据权限」标签页选择至少一个二级设备分组。',
+  'role.noGroupBinding.viewDesc':         '分配该角色的用户将无法查看任何设备数据。',
+  'role.noGroupBinding.tag':              '⚠️ 未绑分组',
+
   // -------------------------------------------------------------------------
   // Table headers
   // -------------------------------------------------------------------------
