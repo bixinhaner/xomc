@@ -55,8 +55,8 @@ func counterType() *metrics.MetricType {
 // INNER JOIN（未命中跳过）、按 band GROUP BY。
 func Test_queryBandTable_SQLShape(t *testing.T) {
 	db := &recordingDB{
-		// call#1 = precheckStatisType（返回空，无 pct）；call#2 = 主聚合查询
-		results: []pgx.Rows{&fakeRows{}, &fakeRows{}},
+		// T-0191：不再有 precheck 调用；call#0 = 主聚合查询（只聚 counter）
+		results: []pgx.Rows{&fakeRows{}},
 	}
 	a := New(db, nil, nil)
 	mt := counterType()
@@ -66,16 +66,16 @@ func Test_queryBandTable_SQLShape(t *testing.T) {
 		MetricType:  mt,
 	})
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(db.sqls), 2, "应先 precheck 再主查询")
+	require.GreaterOrEqual(t, len(db.sqls), 1, "主查询")
 
-	sql := db.sqls[1]
+	sql := db.sqls[0]
 	assert.Contains(t, sql, "WITH cell_band AS", "需 cell_band 映射 CTE")
 	// CellIdentity 与 FreqBandIndicator 同 device_id + fap_instance 配对
 	assert.Contains(t, sql, "bp.fap_instance = cp.fap_instance")
 	// 路径后缀匹配（LTE band 路径 + CellIdentity 路径）
 	foundBandSuffix := false
 	foundCellSuffix := false
-	for _, a := range db.argsLog[1] {
+	for _, a := range db.argsLog[0] {
 		if s, ok := a.(string); ok {
 			if strings.HasSuffix(s, ".CellConfig.LTE.RAN.RF.FreqBandIndicator") {
 				foundBandSuffix = true
@@ -101,7 +101,6 @@ func Test_queryBandTable_JoinHit_LabelsBand(t *testing.T) {
 	now := time.Date(2026, 5, 30, 10, 0, 0, 0, time.UTC)
 	db := &recordingDB{
 		results: []pgx.Rows{
-			&fakeRows{}, // precheck 无 pct
 			&fakeRows{rows: [][]any{
 				bandRow("42", "L.Cell.A", "counter", 1500, "sum", "hourly", now),
 			}},
@@ -128,7 +127,6 @@ func Test_queryBandTable_JoinHit_LabelsBand(t *testing.T) {
 func Test_queryBandTable_JoinMiss_SkipsCell(t *testing.T) {
 	db := &recordingDB{
 		results: []pgx.Rows{
-			&fakeRows{}, // precheck 无 pct
 			&fakeRows{}, // 主查询无命中行
 		},
 	}
@@ -148,7 +146,6 @@ func Test_queryBandTable_MultiCellSameBand(t *testing.T) {
 	now := time.Date(2026, 5, 30, 10, 0, 0, 0, time.UTC)
 	db := &recordingDB{
 		results: []pgx.Rows{
-			&fakeRows{}, // precheck
 			// 两小区（111172245 + 111172145）同 band=42，SQL GROUP BY 后折叠为 1 行，
 			// metric_value = 两小区 sum 合计（800+700）。
 			&fakeRows{rows: [][]any{
@@ -168,30 +165,14 @@ func Test_queryBandTable_MultiCellSameBand(t *testing.T) {
 	assert.Equal(t, float64(1500), rows[0].MetricValue, "同 band 多小区合计")
 }
 
-// Test_queryBandTable_PctRejected：band 维度遇 KPI 类(pct)指标预检查报错（与其它聚合维度一致）。
-func Test_queryBandTable_PctRejected(t *testing.T) {
-	db := &recordingDB{
-		results: []pgx.Rows{
-			// precheck 返回含 pct 的 statis_type
-			&fakeRows{rows: [][]any{{"pct"}}},
-		},
-	}
-	a := New(db, nil, nil)
-	_, err := a.queryBandTable(context.Background(), "pm_metrics_hourly", QueryRequest{
-		Granularity: metrics.GranularityHourly,
-		MetricPaths: []string{"K900010029"},
-	})
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrPctNotSupportedInBand)
-}
-
 // Test_Query_BandDimension_EndToEnd：经 Query 入口（不再返 ErrBandNotImplemented），
 // 走 band 分支并完成 DisplayName 回填。
+// T-0191：Query 入口现先调 resolveKPIMetadata（call#0，无派生 KPI 返空），再调 band 主查询（call#1）。
 func Test_Query_BandDimension_EndToEnd(t *testing.T) {
 	now := time.Date(2026, 5, 30, 10, 0, 0, 0, time.UTC)
 	db := &recordingDB{
 		results: []pgx.Rows{
-			&fakeRows{}, // precheck
+			&fakeRows{}, // resolveKPIMetadata：无派生 KPI
 			&fakeRows{rows: [][]any{
 				bandRow("42", "L.Cell.A", "counter", 1500, "sum", "hourly", now),
 			}},

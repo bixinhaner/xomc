@@ -100,15 +100,15 @@ func (a *Aggregator) Query(ctx context.Context, q QueryRequest) ([]Row, error) {
 	var rows []Row
 	switch q.Dimension {
 	case DimensionDeviceGroup:
-		rows, err = a.queryGroupTable(ctx, table, q)
+		rows, err = a.queryWithKPIRecompute(ctx, table, q, a.queryGroupTable)
 	case DimensionAggregateGroup:
-		rows, err = a.queryAggregateGroupTable(ctx, table, q)
+		rows, err = a.queryWithKPIRecompute(ctx, table, q, a.queryAggregateGroupTable)
 	case DimensionProduct:
-		rows, err = a.queryProductTable(ctx, table, q)
+		rows, err = a.queryWithKPIRecompute(ctx, table, q, a.queryProductTable)
 	case DimensionBand:
-		rows, err = a.queryBandTable(ctx, table, q)
+		rows, err = a.queryWithKPIRecompute(ctx, table, q, a.queryBandTable)
 	case DimensionNetwork:
-		rows, err = a.queryNetworkTable(ctx, table, q)
+		rows, err = a.queryWithKPIRecompute(ctx, table, q, a.queryNetworkTable)
 	default:
 		rows, err = a.queryDeviceTable(ctx, table, q)
 	}
@@ -182,24 +182,6 @@ SELECT id, COALESCE(NULLIF(cn_name, ''), en_name) AS display_name FROM perf_indi
 	return out
 }
 
-// ErrPctNotSupportedInAggregateGroup 表示 aggregate_group 维度不支持 KPI 类指标
-// （statis_type=pct 需公式重算，本阶段未实现）。
-var ErrPctNotSupportedInAggregateGroup = fmt.Errorf(
-	"aggregate_group 维度暂不支持 KPI 类 (statis_type=pct)，请改用 counter 类指标 (sum/avg/max/min)",
-)
-
-// ErrPctNotSupportedInBand 表示 band 维度不支持 KPI 类指标（statis_type=pct 需公式
-// 重算，与 aggregate_group / product 维度一致，本阶段不实现）。
-var ErrPctNotSupportedInBand = fmt.Errorf(
-	"band 维度暂不支持 KPI 类 (statis_type=pct)，请改用 counter 类指标 (sum/avg/max/min)",
-)
-
-// ErrPctNotSupportedInNetwork 表示 network（全网）维度不支持 KPI 类指标（statis_type=pct
-// 需公式重算，跨全网求和无意义，与 aggregate_group / product / band 维度一致）。
-var ErrPctNotSupportedInNetwork = fmt.Errorf(
-	"network 维度暂不支持 KPI 类 (statis_type=pct)，请改用 counter 类指标 (sum/avg/max/min)",
-)
-
 // queryAggregateGroupTable 现场聚合：从 device 维度表 (pm_metrics / pm_metrics_hourly / 等)
 // 按 metric_path + granularity + time + object_ldn GROUP BY，不 GROUP BY device_sn。
 // 算子按 statis_type 路由（sum/avg/max/min；pct 报错）。
@@ -209,10 +191,8 @@ var ErrPctNotSupportedInNetwork = fmt.Errorf(
 // 与 G5 cron 路径无关：直接查 device 表的已聚合（hourly/daily/...）数据再做 GROUP BY 折叠。
 // 15min 也支持（pm_metrics raw 表本身就是 15min 粒度，GROUP BY 同样规则）。
 func (a *Aggregator) queryAggregateGroupTable(ctx context.Context, table string, q QueryRequest) ([]Row, error) {
-	// 预检查：扫描目标 metric 的 statis_type，若有 pct 立即报错。
-	if err := a.precheckStatisType(ctx, table, q, ErrPctNotSupportedInAggregateGroup); err != nil {
-		return nil, err
-	}
+	// T-0191：pct/KPI 类不再在此报错；Query 入口已通过 queryWithKPIRecompute 把派生 KPI 拆成
+	// counter deps，本函数只聚 counter 行（metric_type='counter' 由 wrapper 强制）。
 
 	// 算子按 statis_type 选择。CASE 在 SQL 内做路由，避免多次查询。
 	// 各 statis_type 同一 metric_path 应该一致（来自指标定义），MIN(statis_type) 取代表值。
@@ -279,41 +259,6 @@ func (a *Aggregator) queryAggregateGroupTable(ctx context.Context, table string,
 		out = append(out, r)
 	}
 	return out, rows.Err()
-}
-
-// precheckStatisType 扫描 target metric_path 的 statis_type，若有 pct 立即返回 pctErr。
-// pctErr 由调用方传入（不同维度的不支持文案不同）。
-func (a *Aggregator) precheckStatisType(ctx context.Context, table string, q QueryRequest, pctErr error) error {
-	if len(q.MetricPaths) == 0 {
-		return nil
-	}
-	qb := storage.Psql.Select("DISTINCT statis_type").From(table).
-		Where(sq.Eq{"metric_path": q.MetricPaths})
-	if !q.StartTime.IsZero() {
-		qb = qb.Where(sq.GtOrEq{"time": q.StartTime})
-	}
-	if !q.EndTime.IsZero() {
-		qb = qb.Where(sq.LtOrEq{"time": q.EndTime})
-	}
-	sqlStr, args, err := qb.ToSql()
-	if err != nil {
-		return fmt.Errorf("aggregator.precheckStatisType build: %w", err)
-	}
-	rows, err := a.db.Query(ctx, sqlStr, args...)
-	if err != nil {
-		return fmt.Errorf("aggregator.precheckStatisType exec: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var s *string
-		if err := rows.Scan(&s); err != nil {
-			return fmt.Errorf("aggregator.precheckStatisType scan: %w", err)
-		}
-		if s != nil && *s == "pct" {
-			return pctErr
-		}
-	}
-	return rows.Err()
 }
 
 func (a *Aggregator) queryDeviceTable(ctx context.Context, table string, q QueryRequest) ([]Row, error) {
@@ -435,10 +380,7 @@ func (a *Aggregator) queryGroupTable(ctx context.Context, table string, q QueryR
 //
 // 制式过滤通过 d.technology IN (...) 在 JOIN 后施加（Technologies 非空时）。
 func (a *Aggregator) queryProductTable(ctx context.Context, table string, q QueryRequest) ([]Row, error) {
-	// 预检查：扫描目标 metric 的 statis_type，若有 pct 立即报错（与 aggregate_group 一致）。
-	if err := a.precheckStatisType(ctx, table, q, ErrPctNotSupportedInAggregateGroup); err != nil {
-		return nil, err
-	}
+	// T-0191：pct/KPI 类由 Query 入口的 queryWithKPIRecompute 拆成 counter deps 后重算，本函数只聚 counter。
 
 	const aggValueExpr = `
 		CASE MIN(m.statis_type)
@@ -559,10 +501,7 @@ ORDER BY m.time DESC%s`,
 // 只聚 counter 行（KPI 跨全网求和无意义，与 product/band/aggregate_group 一致，pct 预检查报错）。
 // 输出 Row.DeviceSN="AGGREGATED"，DeviceOUI=""，无 ObjectLDN（全网无实体身份）。
 func (a *Aggregator) queryNetworkTable(ctx context.Context, table string, q QueryRequest) ([]Row, error) {
-	// 预检查：扫描目标 metric 的 statis_type，若有 pct 立即报错（与其它聚合维度一致）。
-	if err := a.precheckStatisType(ctx, table, q, ErrPctNotSupportedInNetwork); err != nil {
-		return nil, err
-	}
+	// T-0191：pct/KPI 类由 Query 入口的 queryWithKPIRecompute 拆成 counter deps 后重算，本函数只聚 counter。
 
 	// 算子按 statis_type 路由（与 aggregate_group 一致）。
 	const aggValueExpr = `
@@ -662,10 +601,7 @@ var (
 // 结果行 ObjectLDN = 'Band=<值>'（复用已有列，不加迁移）；DeviceSN='AGGREGATED'。
 // 只聚 counter 行（KPI 跨小区求和无意义，与 product/aggregate_group 一致）。
 func (a *Aggregator) queryBandTable(ctx context.Context, table string, q QueryRequest) ([]Row, error) {
-	// 预检查：扫描目标 metric 的 statis_type，若有 pct 立即报错（与其它聚合维度一致）。
-	if err := a.precheckStatisType(ctx, table, q, ErrPctNotSupportedInBand); err != nil {
-		return nil, err
-	}
+	// T-0191：pct/KPI 类由 Query 入口的 queryWithKPIRecompute 拆成 counter deps 后重算，本函数只聚 counter。
 
 	const aggValueExpr = `
 		CASE MIN(m.statis_type)

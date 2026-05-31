@@ -24,8 +24,8 @@ func networkRow(path, mtype string, val float64, statis, gran string, t time.Tim
 // 走 CASE statis_type 路由算子。
 func Test_queryNetworkTable_SQLShape(t *testing.T) {
 	db := &recordingDB{
-		// call#1 = precheckStatisType（空，无 pct）；call#2 = 主聚合查询
-		results: []pgx.Rows{&fakeRows{}, &fakeRows{}},
+		// T-0191：不再有 precheck；call#0 = 主聚合查询（只聚 counter）
+		results: []pgx.Rows{&fakeRows{}},
 	}
 	a := New(db, nil, nil)
 	_, err := a.queryNetworkTable(context.Background(), "pm_metrics_hourly", QueryRequest{
@@ -34,9 +34,9 @@ func Test_queryNetworkTable_SQLShape(t *testing.T) {
 		MetricType:  counterType(),
 	})
 	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(db.sqls), 2, "应先 precheck 再主查询")
+	require.GreaterOrEqual(t, len(db.sqls), 1, "主查询")
 
-	sql := db.sqls[1]
+	sql := db.sqls[0]
 	// 分组键仅 metric_path/granularity/time（全网无实体键）
 	assert.Contains(t, sql, "GROUP BY metric_path, granularity, time")
 	assert.NotContains(t, sql, "object_ldn", "全网汇总不带 object_ldn 实体键")
@@ -48,7 +48,7 @@ func Test_queryNetworkTable_SQLShape(t *testing.T) {
 
 // Test_queryNetworkTable_TechnologyFilter：制式过滤通过 (device_oui, device_sn) 子查询收口。
 func Test_queryNetworkTable_TechnologyFilter(t *testing.T) {
-	db := &recordingDB{results: []pgx.Rows{&fakeRows{}, &fakeRows{}}}
+	db := &recordingDB{results: []pgx.Rows{&fakeRows{}}}
 	a := New(db, nil, nil)
 	_, err := a.queryNetworkTable(context.Background(), "pm_metrics_hourly", QueryRequest{
 		Granularity:  metrics.GranularityHourly,
@@ -57,13 +57,13 @@ func Test_queryNetworkTable_TechnologyFilter(t *testing.T) {
 		Technologies: []string{"lte"},
 	})
 	require.NoError(t, err)
-	sql := db.sqls[1]
+	sql := db.sqls[0]
 	assert.True(t,
 		strings.Contains(sql, "SELECT oui, serial_number FROM devices WHERE technology"),
 		"制式过滤走 devices 子查询收口")
 	// args 含制式值
 	foundTech := false
-	for _, a := range db.argsLog[1] {
+	for _, a := range db.argsLog[0] {
 		if ss, ok := a.([]string); ok {
 			for _, s := range ss {
 				if s == "lte" {
@@ -81,7 +81,6 @@ func Test_queryNetworkTable_AggregatesToOneBus(t *testing.T) {
 	now := time.Date(2026, 5, 30, 10, 0, 0, 0, time.UTC)
 	db := &recordingDB{
 		results: []pgx.Rows{
-			&fakeRows{}, // precheck 无 pct
 			// 全网所有设备/小区的 C000060011 在 10:00 桶汇总成一条（值=全网合计）
 			&fakeRows{rows: [][]any{
 				networkRow("C000060011", "counter", 99999, "sum", "hourly", now),
@@ -108,7 +107,6 @@ func Test_queryNetworkTable_AggregatesToOneBus(t *testing.T) {
 func Test_queryNetworkTable_EmptyData(t *testing.T) {
 	db := &recordingDB{
 		results: []pgx.Rows{
-			&fakeRows{}, // precheck
 			&fakeRows{}, // 主查询无行
 		},
 	}
@@ -122,28 +120,13 @@ func Test_queryNetworkTable_EmptyData(t *testing.T) {
 	assert.Empty(t, rows)
 }
 
-// Test_queryNetworkTable_PctRejected：network 维度遇 KPI 类(pct)指标预检查报错。
-func Test_queryNetworkTable_PctRejected(t *testing.T) {
-	db := &recordingDB{
-		results: []pgx.Rows{
-			&fakeRows{rows: [][]any{{"pct"}}}, // precheck 返回含 pct
-		},
-	}
-	a := New(db, nil, nil)
-	_, err := a.queryNetworkTable(context.Background(), "pm_metrics_hourly", QueryRequest{
-		Granularity: metrics.GranularityHourly,
-		MetricPaths: []string{"K900010002"},
-	})
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrPctNotSupportedInNetwork)
-}
-
 // Test_Query_NetworkDimension_EndToEnd：经 Query 入口走 network 分支并完成 DisplayName 回填。
+// T-0191：Query 入口现先调 resolveKPIMetadata（call#0，无派生 KPI 返空），再调 network 主查询（call#1）。
 func Test_Query_NetworkDimension_EndToEnd(t *testing.T) {
 	now := time.Date(2026, 5, 30, 10, 0, 0, 0, time.UTC)
 	db := &recordingDB{
 		results: []pgx.Rows{
-			&fakeRows{}, // precheck
+			&fakeRows{}, // resolveKPIMetadata：无派生 KPI
 			&fakeRows{rows: [][]any{
 				networkRow("C000060011", "counter", 99999, "sum", "hourly", now),
 			}},

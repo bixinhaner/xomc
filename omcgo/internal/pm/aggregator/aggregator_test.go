@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
@@ -171,6 +172,25 @@ func scanInto(row []any, dest []any) error {
 			} else {
 				v := row[i].(string)
 				*dp = &v
+			}
+		case *uuid.UUID:
+			switch v := row[i].(type) {
+			case uuid.UUID:
+				*dp = v
+			case string:
+				*dp = uuid.MustParse(v)
+			case nil:
+				*dp = uuid.Nil
+			default:
+				return errors.New("scanInto: unsupported uuid source")
+			}
+		case *[]byte:
+			if row[i] == nil {
+				*dp = nil
+			} else if b, ok := row[i].([]byte); ok {
+				*dp = b
+			} else {
+				return errors.New("scanInto: unsupported []byte source")
 			}
 		default:
 			return errors.New("scanInto: unsupported dest type")
