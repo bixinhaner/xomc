@@ -485,4 +485,10 @@ const (
 	// 发布者：app.trace.Handler.ExportXML 异步路径，
 	// 订阅者：worker.TraceExporter（生成 XML 写 MinIO exchange + 更新 job 状态）。
 	SubjectTraceExportRequested = "trace.export.requested"
+
+	// SubjectDictionaryRefreshFailed 是数据字典数据源同步失败时发布(T-0182)。
+	// 发布者：worker daily cron(SyncSourceBoundAll)单字典失败 + 总览失败,
+	// 订阅者：notification 中心(P3+/F04 后续接入,把字典同步失败通过邮件/Webhook 通知运维)。
+	// Payload: {dict_id, dict_name, error_summary, when}。
+	SubjectDictionaryRefreshFailed = "dictionary.refresh.failed"
 )

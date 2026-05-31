@@ -154,6 +154,7 @@ func initAdminModule(c *Container) error {
 		logger.Warn("dict_source_registry_disabled", zap.Error(err))
 	} else {
 		engine := admin.NewDictSyncEngine(reg, c.PgPool, dictRepo, dictDetailRepo, logger.Named("dict_source"))
+		engine.SetMetrics(admin.NewDictSourceMetrics(c.MetricsReg))
 		dictService.SetSourceWiring(reg, engine, logger.Named("dict_source"))
 	}
 	dictHandler := admin.NewDictionaryHandler(dictService)

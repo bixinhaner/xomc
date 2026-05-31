@@ -463,6 +463,11 @@ func registerSubscribers(w *workerInfra, cfg *appconfig.WorkerConfig) {
 	// T-0180 P2: indicator 自定义 XML 备份清理 cron(对标 T-0178,同样 03:00 默认)。
 	// 扫 customDir/<enb,gsm,gnb>/ 三制式子目录下 .deleted/.bak/.tmp 残留。
 	startIndicatorBackupCleanup(w, cfg, logger)
+
+	// T-0182 P2: 数据字典数据源每日同步 cron(每天 02:00 BJT)。
+	// 遍历所有 source_table != NULL AND status=true 的字典,SyncEngine 拉源表
+	// distinct 行 → upsert/delete auto 项。失败发 dictionary.refresh.failed 事件。
+	startDictSourceDailySync(w, cfg, logger)
 }
 
 // startParamModelBackupCleanup 启动 T-0178 自定义 XML 备份清理 cron。
@@ -586,6 +591,74 @@ func startIndicatorBackupCleanup(w *workerInfra, cfg *appconfig.WorkerConfig, lo
 			logger.Info("indicator backup cleanup startup catch-up",
 				zap.Int("swept", swept))
 		}
+	}()
+}
+
+// startDictSourceDailySync 启动 T-0182 数据字典数据源每日同步 cron。
+//
+// 行为:
+//   - 注册 cron(默认 "0 0 2 * * *",每日 02:00 BJT);无效表达式 fallback 默认值
+//   - 启动期延迟 30s 跑一次 catch-up:防 worker 长期宕机后字典数据严重落后
+//   - 单字典 5s 超时,任一失败不中断其它字典(SyncEngine 内部已实现)
+//   - 失败的字典 SyncEngine 已写 last_refresh_error 列;此处额外通过 EventBus
+//     发 dictionary.refresh.failed 事件预留给 notification 通道(P3+/F04)
+//   - 单实例假设;横扩前要么用 Redis SETNX 选 leader,要么按"app 进程直接调"
+//     而不是 worker 多实例同时跑 — v1 接受单 worker 部署
+func startDictSourceDailySync(w *workerInfra, cfg *appconfig.WorkerConfig, logger *zap.Logger) {
+	// v1 用包内常量,不入 appconfig(P3+ 真有用户改需求再迁配置项)。
+	cronExpr := admin.DefaultDictSourceDailyCron
+	_ = cfg // 预留
+
+	// 构造 admin DictionaryService(worker 自有,与 app 进程独立)。
+	// 仅注入 SyncAll 路径需要的最小依赖:dict repo + detail repo + Registry + SyncEngine。
+	dictRepo := admin.NewPgDictionaryRepository(w.PgPool)
+	dictDetailRepo := admin.NewPgDictionaryDetailRepository(w.PgPool)
+	dictService := admin.NewDictionaryService(dictRepo, dictDetailRepo)
+	reg, err := admin.LoadDictSourceRegistry()
+	if err != nil {
+		logger.Warn("dict_source_daily_skipped_registry_failed", zap.Error(err))
+		return
+	}
+	engine := admin.NewDictSyncEngine(reg, w.PgPool, dictRepo, dictDetailRepo, logger.Named("dict_source"))
+	engine.SetMetrics(admin.NewDictSourceMetrics(w.MetricsReg))
+	dictService.SetSourceWiring(reg, engine, logger.Named("dict_source"))
+
+	runOnce := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		ok, failed := dictService.SyncSourceBoundAll(ctx)
+		logger.Info("dict_source_daily_finished",
+			zap.Int("ok", ok), zap.Int("failed", failed))
+		// 失败时发 EventBus 事件预留给 notification(payload 由订阅方按需消费;
+		// v1 不主动遍历失败明细 — last_refresh_error 列已存,P3 通知中心如需逐条
+		// 推送可订阅本事件 + 查询 DB 拿明细)。
+		if failed > 0 && w.EventBus != nil {
+			evt, evtErr := event.NewEvent(event.SubjectDictionaryRefreshFailed, map[string]any{
+				"ok":     ok,
+				"failed": failed,
+			})
+			if evtErr != nil {
+				logger.Warn("dict_source_build_failed_event_failed", zap.Error(evtErr))
+			} else if pubErr := w.EventBus.Publish(context.Background(),
+				event.SubjectDictionaryRefreshFailed, evt); pubErr != nil {
+				logger.Warn("dict_source_publish_failed_event_failed", zap.Error(pubErr))
+			}
+		}
+	}
+
+	c := cron.New()
+	if _, err := c.AddFunc(cronExpr, runOnce); err != nil {
+		logger.Warn("invalid dict_source daily cron; using default",
+			zap.String("cron", cronExpr), zap.Error(err))
+		_, _ = c.AddFunc(admin.DefaultDictSourceDailyCron, runOnce)
+	}
+	c.Start()
+	logger.Info("dict_source daily cron started", zap.String("cron", cronExpr))
+
+	// 启动期延迟 catch-up(给 app + 字典加载 30s 缓冲)。
+	go func() {
+		time.Sleep(30 * time.Second)
+		runOnce()
 	}()
 }
 

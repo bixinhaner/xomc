@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
 	"github.com/omcgo/omcgo/internal/admin/dictsource"
@@ -143,6 +144,10 @@ func translateEngineError(err error) error {
 	}
 }
 
+// DefaultDictSourceDailyCron 是 worker 每日同步字典数据源的默认 cron 表达式。
+// PRD §3.4:每日 02:00 BJT,业务低峰;robfig/cron 6 段语法(秒/分/时/日/月/周)。
+const DefaultDictSourceDailyCron = "0 0 2 * * *"
+
 // LoadDictSourceRegistry 加载内置白名单(embed sources.yaml)。
 // 是 internal/admin 包向 cmd/app/provider 暴露的最小入口 — provider 不直接 import dictsource 包。
 func LoadDictSourceRegistry() (*dictsource.Registry, error) {
@@ -160,4 +165,11 @@ func NewDictSyncEngine(
 ) *dictsource.SyncEngine {
 	writer := newSyncWriterAdapter(detailRepo, dictRepo)
 	return dictsource.NewSyncEngine(pool, writer, reg, log)
+}
+
+// NewDictSourceMetrics 注册 dictionary_source_sync_total 指标。
+// nil registerer 走匿名 Registry(测试)。app + worker 各自注册一份对应自己进程的
+// /metrics 端点(否则 worker 失败永远不会暴露到 app 的 Prometheus)。
+func NewDictSourceMetrics(reg prometheus.Registerer) *dictsource.Metrics {
+	return dictsource.NewMetrics(reg)
 }

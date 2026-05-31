@@ -83,9 +83,11 @@ type SyncEngine struct {
 	writer   SyncWriter
 	registry *Registry
 	log      *zap.Logger
+	metrics  *Metrics // 可为 nil(测试 / 未注入)
 }
 
 // NewSyncEngine 构造同步引擎。registry 必须不为 nil。
+// metrics 可为 nil(测试不需要 Prometheus);生产由 provider/worker 用 NewMetrics(reg) 注入。
 func NewSyncEngine(reader SyncRowReader, writer SyncWriter, registry *Registry, log *zap.Logger) *SyncEngine {
 	if log == nil {
 		log = zap.NewNop()
@@ -93,27 +95,51 @@ func NewSyncEngine(reader SyncRowReader, writer SyncWriter, registry *Registry, 
 	return &SyncEngine{reader: reader, writer: writer, registry: registry, log: log}
 }
 
+// SetMetrics 注入 Prometheus 指标(provider 启动期调用一次)。
+// 留作 setter 而非构造参数,避免 NewSyncEngine 签名变动影响现有测试。
+func (e *SyncEngine) SetMetrics(m *Metrics) {
+	e.metrics = m
+}
+
 // SyncOne 同步单张托管字典。
 // 失败时 SyncResult 仍返回(零值字段),err 携带原因;调用方负责 UpdateMetadata。
 // 已包 5s 超时;调用方传入的 ctx 是 daily cron 的整体 ctx,本方法 derive。
+//
+// trigger 默认 "manual";调用方(daily cron/initial/switch)传特定标签让 Prometheus
+// 维度更精确(SyncAll 内部传 "daily",service Create/Update 路径用 SyncOneWithTrigger)。
 func (e *SyncEngine) SyncOne(parentCtx context.Context, d SyncDict) (SyncResult, error) {
+	return e.SyncOneWithTrigger(parentCtx, d, TriggerManual)
+}
+
+// SyncOneWithTrigger 与 SyncOne 等价,但允许调用方显式声明 trigger label。
+// 留作扩展点,默认 SyncOne 把 trigger 钉在 manual(用户手动刷新场景)。
+func (e *SyncEngine) SyncOneWithTrigger(parentCtx context.Context, d SyncDict, trigger string) (SyncResult, error) {
 	ctx, cancel := context.WithTimeout(parentCtx, SingleDictTimeout)
 	defer cancel()
 
 	start := time.Now()
 	res := SyncResult{}
 
+	// 包装,任何 path 退出前都打 metric。
+	observeFn := func(result string) {
+		e.metrics.Observe(result, trigger)
+	}
+
 	// 1. 白名单校验 —— 必须三个字段都过,任意失败立即拒绝。
 	if d.SourceTable == "" || d.LabelField == "" || d.ValueField == "" {
+		observeFn(ResultFailed)
 		return res, fmt.Errorf("sync dict %d: missing source binding", d.ID)
 	}
 	if _, ok := e.registry.Resolve(d.SourceTable); !ok {
+		observeFn(ResultFailed)
 		return res, fmt.Errorf("sync dict %d: %w (%q)", d.ID, ErrInvalidSourceTable, d.SourceTable)
 	}
 	if _, ok := e.registry.ResolveField(d.SourceTable, d.LabelField); !ok {
+		observeFn(ResultFailed)
 		return res, fmt.Errorf("sync dict %d: %w (%q)", d.ID, ErrInvalidLabelField, d.LabelField)
 	}
 	if _, ok := e.registry.ResolveField(d.SourceTable, d.ValueField); !ok {
+		observeFn(ResultFailed)
 		return res, fmt.Errorf("sync dict %d: %w (%q)", d.ID, ErrInvalidValueField, d.ValueField)
 	}
 
@@ -129,16 +155,23 @@ func (e *SyncEngine) SyncOne(parentCtx context.Context, d SyncDict) (SyncResult,
 	//    - LIMIT 5000 硬上限 —— 超出即返 ErrLimitExceeded(调用方记 failed)。
 	pairs, err := e.fetchSource(ctx, d)
 	if err != nil {
+		// 区分 ctx 超时 (timeout) vs 真错误 (failed)
+		if errors.Is(err, context.DeadlineExceeded) {
+			observeFn(ResultTimeout)
+		} else {
+			observeFn(ResultFailed)
+		}
 		return res, err
 	}
 	if len(pairs) >= MaxSourceRows {
+		observeFn(ResultFailed)
 		return res, fmt.Errorf("sync dict %d: %w (got %d rows)", d.ID, ErrLimitExceeded, len(pairs))
 	}
 
 	// 3. 写库:upsert 入库 + 删孤儿 + 回读总数。
-	//    UpsertAuto 用 ON CONFLICT 区分 inserted/updated;DeleteAutoNotIn 删 keepValues 之外的。
 	inserted, updated, err := e.writer.UpsertAuto(ctx, d.ID, pairs)
 	if err != nil {
+		observeFn(ResultFailed)
 		return res, fmt.Errorf("upsert auto details: %w", err)
 	}
 	res.Inserted = inserted
@@ -150,16 +183,19 @@ func (e *SyncEngine) SyncOne(parentCtx context.Context, d SyncDict) (SyncResult,
 	}
 	deleted, err := e.writer.DeleteAutoNotIn(ctx, d.ID, keepValues)
 	if err != nil {
+		observeFn(ResultFailed)
 		return res, fmt.Errorf("delete orphan auto details: %w", err)
 	}
 	res.Deleted = deleted
 
 	total, err := e.writer.CountAuto(ctx, d.ID)
 	if err != nil {
+		observeFn(ResultFailed)
 		return res, fmt.Errorf("count auto details: %w", err)
 	}
 	res.TotalAuto = total
 	res.DurationMS = time.Since(start).Milliseconds()
+	observeFn(ResultOK)
 
 	e.log.Info("dict_source_sync_completed",
 		zap.Int64("dict_id", d.ID),
@@ -266,7 +302,7 @@ func (e *SyncEngine) SyncAll(parentCtx context.Context, lister func(context.Cont
 		return 0, 0
 	}
 	for _, d := range dicts {
-		res, err := e.SyncOne(parentCtx, d)
+		res, err := e.SyncOneWithTrigger(parentCtx, d, TriggerDaily)
 		if err != nil {
 			failed++
 			e.log.Warn("dict_source_sync_failed",
