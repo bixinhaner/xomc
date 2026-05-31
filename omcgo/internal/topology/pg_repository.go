@@ -25,6 +25,7 @@ var groupColumns = []string{
 	"created_at", "updated_at",
 	"matching_mode", "name_rule_list", "lac_list", "tac_list",
 	"serial_number_list", // migration 000124
+	"name_i18n", "description_i18n", "remark_i18n", // migration 000003
 }
 
 // PgDeviceGroupRepository implements DeviceGroupRepository using PostgreSQL.
@@ -236,7 +237,8 @@ func (r *PgDeviceGroupRepository) GetTreeWithCounts(ctx context.Context) ([]Devi
 		       dg.created_at, dg.updated_at,
 		       dg.matching_mode, dg.name_rule_list, dg.lac_list, dg.tac_list,
 		       dg.serial_number_list,
-		       COALESCE(device_counts.count, 0) AS device_count
+		       COALESCE(device_counts.count, 0) AS device_count,
+		       dg.name_i18n, dg.description_i18n, dg.remark_i18n
 		FROM device_groups dg
 		LEFT JOIN LATERAL (
 			SELECT COUNT(*) AS count
@@ -714,6 +716,9 @@ func scanGroup(row pgx.Row) (*DeviceGroup, error) {
 		lacList          []int
 		tacList          []int
 		serialNumberList []string // migration 000124
+		nameI18n         []byte   // migration 000003 i18n columns
+		descI18n         []byte
+		remarkI18n       []byte
 	)
 
 	err := row.Scan(
@@ -722,12 +727,22 @@ func scanGroup(row pgx.Row) (*DeviceGroup, error) {
 		&remark, &createdBy, &updatedBy,
 		&g.CreatedAt, &g.UpdatedAt,
 		&matchingMode, &nameRuleList, &lacList, &tacList, &serialNumberList,
+		&nameI18n, &descI18n, &remarkI18n,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, commonerrors.ErrNotFound
 		}
 		return nil, fmt.Errorf("scan group row: %w", err)
+	}
+	if len(nameI18n) > 0 {
+		_ = json.Unmarshal(nameI18n, &g.NameI18n)
+	}
+	if len(descI18n) > 0 {
+		_ = json.Unmarshal(descI18n, &g.DescriptionI18n)
+	}
+	if len(remarkI18n) > 0 {
+		_ = json.Unmarshal(remarkI18n, &g.RemarkI18n)
 	}
 
 	if parentID.Valid {
@@ -780,6 +795,9 @@ func scanGroups(rows pgx.Rows) ([]DeviceGroup, error) {
 			lacList          []int
 			tacList          []int
 			serialNumberList []string // migration 000124
+			nameI18n         []byte   // migration 000003 i18n columns
+			descI18n         []byte
+			remarkI18n       []byte
 		)
 
 		err := rows.Scan(
@@ -788,9 +806,19 @@ func scanGroups(rows pgx.Rows) ([]DeviceGroup, error) {
 			&remark, &createdBy, &updatedBy,
 			&g.CreatedAt, &g.UpdatedAt,
 			&matchingMode, &nameRuleList, &lacList, &tacList, &serialNumberList,
+			&nameI18n, &descI18n, &remarkI18n,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan group row: %w", err)
+		}
+		if len(nameI18n) > 0 {
+			_ = json.Unmarshal(nameI18n, &g.NameI18n)
+		}
+		if len(descI18n) > 0 {
+			_ = json.Unmarshal(descI18n, &g.DescriptionI18n)
+		}
+		if len(remarkI18n) > 0 {
+			_ = json.Unmarshal(remarkI18n, &g.RemarkI18n)
 		}
 
 		if parentID.Valid {
@@ -845,6 +873,9 @@ func scanGroupsWithCount(rows pgx.Rows) ([]DeviceGroup, error) {
 			lacList          []int
 			tacList          []int
 			serialNumberList []string // migration 000124
+			nameI18n         []byte   // migration 000003 i18n columns
+			descI18n         []byte
+			remarkI18n       []byte
 		)
 
 		err := rows.Scan(
@@ -854,9 +885,19 @@ func scanGroupsWithCount(rows pgx.Rows) ([]DeviceGroup, error) {
 			&g.CreatedAt, &g.UpdatedAt,
 			&matchingMode, &nameRuleList, &lacList, &tacList, &serialNumberList,
 			&g.DeviceCount,
+			&nameI18n, &descI18n, &remarkI18n,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan group with count: %w", err)
+		}
+		if len(nameI18n) > 0 {
+			_ = json.Unmarshal(nameI18n, &g.NameI18n)
+		}
+		if len(descI18n) > 0 {
+			_ = json.Unmarshal(descI18n, &g.DescriptionI18n)
+		}
+		if len(remarkI18n) > 0 {
+			_ = json.Unmarshal(remarkI18n, &g.RemarkI18n)
 		}
 
 		if parentID.Valid {

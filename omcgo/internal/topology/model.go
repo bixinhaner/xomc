@@ -64,9 +64,15 @@ func (nr *NameRule) UnmarshalJSON(data []byte) error {
 
 // DeviceGroup represents a hierarchical group for organizing devices.
 type DeviceGroup struct {
-	ID           uuid.UUID         `json:"id"`
-	Name         string            `json:"name"`
-	ParentID     *uuid.UUID        `json:"parent_id,omitempty"`
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+	// i18n JSONB 列 (migration 000003)。形态 {"zh-CN": "...", "en-US": "..."},
+	// 前端按 appLocale 取;不存在时 fallback 到单语言列 Name/Description/Remark。
+	// 目前 GetTreeWithCounts 路径填充;其它路径暂不填,前端兜底中文。
+	NameI18n        map[string]string `json:"name_i18n,omitempty"`
+	DescriptionI18n map[string]string `json:"description_i18n,omitempty"`
+	RemarkI18n      map[string]string `json:"remark_i18n,omitempty"`
+	ParentID        *uuid.UUID        `json:"parent_id,omitempty"`
 	Carrier      model.CarrierCode `json:"carrier,omitempty"`
 	Description  string            `json:"description,omitempty"`
 	SortOrder    int               `json:"sort_order"`

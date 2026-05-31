@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -57,15 +58,27 @@ var dictColumns = []string{
 	"id", "name", "type", "status", "description", "created_at", "updated_at",
 	"source_table", "source_label_field", "source_value_field",
 	"last_refresh_at", "last_refresh_status", "last_refresh_error", "last_refresh_count",
+	"name_i18n", "description_i18n", // migration 000003 i18n columns
 }
 
 // scanDict 把 dictColumns 对应的列读到 Dictionary。
 func scanDict(dst *Dictionary, scan func(...any) error) error {
-	return scan(
+	var nameI18n, descI18n []byte
+	if err := scan(
 		&dst.ID, &dst.Name, &dst.Type, &dst.Status, &dst.Description, &dst.CreatedAt, &dst.UpdatedAt,
 		&dst.SourceTable, &dst.SourceLabelField, &dst.SourceValueField,
 		&dst.LastRefreshAt, &dst.LastRefreshStatus, &dst.LastRefreshError, &dst.LastRefreshCount,
-	)
+		&nameI18n, &descI18n,
+	); err != nil {
+		return err
+	}
+	if len(nameI18n) > 0 {
+		_ = json.Unmarshal(nameI18n, &dst.NameI18n)
+	}
+	if len(descI18n) > 0 {
+		_ = json.Unmarshal(descI18n, &dst.DescriptionI18n)
+	}
+	return nil
 }
 
 func (r *PgDictionaryRepository) GetByID(ctx context.Context, id int64) (*Dictionary, error) {
@@ -274,7 +287,7 @@ func (r *PgDictionaryRepository) Delete(ctx context.Context, id int64) error {
 
 // listActiveDetails returns enabled details for a dictionary, sorted by sort_order.
 func (r *PgDictionaryRepository) listActiveDetails(ctx context.Context, dictID int64) ([]DictionaryDetail, error) {
-	query, args, err := storage.Psql.Select("id", "label", "value", "extend", "status", "sort", "sys_dictionary_id", "parent_id", "level", "origin", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select("id", "label", "value", "extend", "status", "sort", "sys_dictionary_id", "parent_id", "level", "origin", "created_at", "updated_at", "label_i18n").
 		From("sys_dictionary_details").
 		Where(sq.And{sq.Eq{"sys_dictionary_id": dictID}, sq.Eq{"deleted_at": nil}, sq.Eq{"status": true}}).
 		OrderBy("sort ASC").
@@ -292,8 +305,12 @@ func (r *PgDictionaryRepository) listActiveDetails(ctx context.Context, dictID i
 	var details []DictionaryDetail
 	for rows.Next() {
 		var d DictionaryDetail
-		if err := rows.Scan(&d.ID, &d.Label, &d.Value, &d.Extend, &d.Status, &d.Sort, &d.SysDictionaryID, &d.ParentID, &d.Level, &d.Origin, &d.CreatedAt, &d.UpdatedAt); err != nil {
+		var labelI18n []byte
+		if err := rows.Scan(&d.ID, &d.Label, &d.Value, &d.Extend, &d.Status, &d.Sort, &d.SysDictionaryID, &d.ParentID, &d.Level, &d.Origin, &d.CreatedAt, &d.UpdatedAt, &labelI18n); err != nil {
 			return nil, fmt.Errorf("scan detail: %w", err)
+		}
+		if len(labelI18n) > 0 {
+			_ = json.Unmarshal(labelI18n, &d.LabelI18n)
 		}
 		details = append(details, d)
 	}
@@ -338,7 +355,7 @@ func (r *PgDictionaryDetailRepository) Create(ctx context.Context, detail *Dicti
 }
 
 func (r *PgDictionaryDetailRepository) GetByID(ctx context.Context, id int64) (*DictionaryDetail, error) {
-	query, args, err := storage.Psql.Select("id", "label", "value", "extend", "status", "sort", "sys_dictionary_id", "parent_id", "level", "origin", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select("id", "label", "value", "extend", "status", "sort", "sys_dictionary_id", "parent_id", "level", "origin", "created_at", "updated_at", "label_i18n").
 		From("sys_dictionary_details").
 		Where(sq.And{sq.Eq{"id": id}, sq.Eq{"deleted_at": nil}}).
 		ToSql()
@@ -347,14 +364,18 @@ func (r *PgDictionaryDetailRepository) GetByID(ctx context.Context, id int64) (*
 	}
 
 	var d DictionaryDetail
+	var labelI18n []byte
 	err = r.pool.QueryRow(ctx, query, args...).Scan(
-		&d.ID, &d.Label, &d.Value, &d.Extend, &d.Status, &d.Sort, &d.SysDictionaryID, &d.ParentID, &d.Level, &d.CreatedAt, &d.UpdatedAt,
+		&d.ID, &d.Label, &d.Value, &d.Extend, &d.Status, &d.Sort, &d.SysDictionaryID, &d.ParentID, &d.Level, &d.Origin, &d.CreatedAt, &d.UpdatedAt, &labelI18n,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, commonerrors.ErrNotFound
 		}
 		return nil, fmt.Errorf("get detail: %w", err)
+	}
+	if len(labelI18n) > 0 {
+		_ = json.Unmarshal(labelI18n, &d.LabelI18n)
 	}
 	return &d, nil
 }
@@ -391,7 +412,7 @@ func (r *PgDictionaryDetailRepository) List(ctx context.Context, req DictionaryD
 	offset := req.Offset()
 	limit := req.Limit()
 
-	query, args, err := storage.Psql.Select("id", "label", "value", "extend", "status", "sort", "sys_dictionary_id", "parent_id", "level", "origin", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select("id", "label", "value", "extend", "status", "sort", "sys_dictionary_id", "parent_id", "level", "origin", "created_at", "updated_at", "label_i18n").
 		From("sys_dictionary_details").
 		Where(where).
 		OrderBy("sort ASC").
@@ -411,8 +432,12 @@ func (r *PgDictionaryDetailRepository) List(ctx context.Context, req DictionaryD
 	var items []DictionaryDetail
 	for rows.Next() {
 		var d DictionaryDetail
-		if err := rows.Scan(&d.ID, &d.Label, &d.Value, &d.Extend, &d.Status, &d.Sort, &d.SysDictionaryID, &d.ParentID, &d.Level, &d.Origin, &d.CreatedAt, &d.UpdatedAt); err != nil {
+		var labelI18n []byte
+		if err := rows.Scan(&d.ID, &d.Label, &d.Value, &d.Extend, &d.Status, &d.Sort, &d.SysDictionaryID, &d.ParentID, &d.Level, &d.Origin, &d.CreatedAt, &d.UpdatedAt, &labelI18n); err != nil {
 			return nil, 0, fmt.Errorf("scan detail: %w", err)
+		}
+		if len(labelI18n) > 0 {
+			_ = json.Unmarshal(labelI18n, &d.LabelI18n)
 		}
 		items = append(items, d)
 	}

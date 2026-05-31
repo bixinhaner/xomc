@@ -18,6 +18,10 @@ type Dictionary struct {
 	Type        string    `json:"type"`
 	Status      bool      `json:"status"`
 	Description string    `json:"desc"`
+	// i18n JSONB 列 (migration 000003)。形态 {"zh-CN": "...", "en-US": "..."},
+	// 前端按 appLocale 取;不存在时 fallback 到 Name/Description。
+	NameI18n        map[string]string `json:"name_i18n,omitempty"`
+	DescriptionI18n map[string]string `json:"description_i18n,omitempty"`
 	Details     []DictionaryDetail `json:"sysDictionaryDetails,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -39,6 +43,8 @@ type Dictionary struct {
 type DictionaryDetail struct {
 	ID              int64     `json:"id"`
 	Label           string    `json:"label"`
+	// LabelI18n: i18n JSONB 列 (migration 000003)。前端按 appLocale 取;不存在时 fallback 到 Label。
+	LabelI18n       map[string]string `json:"label_i18n,omitempty"`
 	Value           string    `json:"value"`
 	Extend          string    `json:"extend"`
 	Status          bool      `json:"status"`
