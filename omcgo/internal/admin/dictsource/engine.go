@@ -86,9 +86,15 @@ type SyncEngine struct {
 	metrics  *Metrics // 可为 nil(测试 / 未注入)
 }
 
-// NewSyncEngine 构造同步引擎。registry 必须不为 nil。
+// NewSyncEngine 构造同步引擎。registry 必须不为 nil(否则 SyncOne nil-deref)。
 // metrics 可为 nil(测试不需要 Prometheus);生产由 provider/worker 用 NewMetrics(reg) 注入。
 func NewSyncEngine(reader SyncRowReader, writer SyncWriter, registry *Registry, log *zap.Logger) *SyncEngine {
+	if registry == nil {
+		// Fail-fast:让启动期立刻发现 wiring bug,而不是 runtime nil-deref。
+		// S5 review MEDIUM-3 — defensive guard,与 provider 的 silent fallback 互补:
+		// provider 在 LoadDefault 失败时根本不调本构造函数,所以正常路径不会触发 panic。
+		panic("dictsource.NewSyncEngine: registry must not be nil (use LoadDefault or LoadFromBytes)")
+	}
 	if log == nil {
 		log = zap.NewNop()
 	}
@@ -166,6 +172,18 @@ func (e *SyncEngine) SyncOneWithTrigger(parentCtx context.Context, d SyncDict, t
 	if len(pairs) >= MaxSourceRows {
 		observeFn(ResultFailed)
 		return res, fmt.Errorf("sync dict %d: %w (got %d rows)", d.ID, ErrLimitExceeded, len(pairs))
+	}
+
+	// S5 review MEDIUM-2:防御源表"瞬时为空"导致全量清空 auto 项。
+	// 触发场景:长事务/FK cascade in progress/replication lag。让管理员看到
+	// last_refresh_error 而不是默默丢数据,等下次 cron 再尝试。
+	// 排除合法场景:首次同步(currentCount==0)或源表本来就空,不视为瞬时。
+	if len(pairs) == 0 {
+		currentCount, cntErr := e.writer.CountAuto(ctx, d.ID)
+		if cntErr == nil && currentCount > 0 {
+			observeFn(ResultFailed)
+			return res, fmt.Errorf("sync dict %d: source returned 0 rows but existing auto count is %d (transient empty? aborting to avoid mass-delete)", d.ID, currentCount)
+		}
 	}
 
 	// 3. 写库:upsert 入库 + 删孤儿 + 回读总数。
@@ -302,18 +320,34 @@ func (e *SyncEngine) SyncAll(parentCtx context.Context, lister func(context.Cont
 		return 0, 0
 	}
 	for _, d := range dicts {
-		res, err := e.SyncOneWithTrigger(parentCtx, d, TriggerDaily)
-		if err != nil {
-			failed++
-			e.log.Warn("dict_source_sync_failed",
-				zap.Int64("dict_id", d.ID), zap.String("name", d.Name), zap.Error(err),
-			)
-			// 把失败原因写到 last_refresh_* 元数据(允许这一步失败,不影响整体)。
-			_ = e.writer.UpdateMetadata(parentCtx, d.ID, "failed", truncateErr(err.Error()), 0)
-			continue
-		}
-		ok++
-		_ = e.writer.UpdateMetadata(parentCtx, d.ID, "ok", "", res.TotalAuto)
+		// S5 review MEDIUM-1:per-iteration panic recover。SyncOne 在 nil writer /
+		// 上下游接口签名漂移 / pgx 反序列化异常等小概率路径可能 panic;不包裹
+		// 会让整个 daily 同步在某张失败字典处中断,后续字典全部漏跑。
+		// 包裹后单字典 panic 视同失败处理,继续下一条。
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					failed++
+					e.log.Error("dict_source_sync_panic",
+						zap.Int64("dict_id", d.ID),
+						zap.String("name", d.Name),
+						zap.Any("panic", r),
+					)
+					_ = e.writer.UpdateMetadata(parentCtx, d.ID, "failed", truncateErr(fmt.Sprintf("panic: %v", r)), 0)
+				}
+			}()
+			res, err := e.SyncOneWithTrigger(parentCtx, d, TriggerDaily)
+			if err != nil {
+				failed++
+				e.log.Warn("dict_source_sync_failed",
+					zap.Int64("dict_id", d.ID), zap.String("name", d.Name), zap.Error(err),
+				)
+				_ = e.writer.UpdateMetadata(parentCtx, d.ID, "failed", truncateErr(err.Error()), 0)
+				return
+			}
+			ok++
+			_ = e.writer.UpdateMetadata(parentCtx, d.ID, "ok", "", res.TotalAuto)
+		}()
 	}
 	e.log.Info("dict_source_daily_summary",
 		zap.Int("total", len(dicts)), zap.Int("ok", ok), zap.Int("failed", failed),

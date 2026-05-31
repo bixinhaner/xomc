@@ -313,3 +313,39 @@ func TestTruncateErr_ClampsToMaxLen(t *testing.T) {
 	got := truncateErr(long)
 	assert.Equal(t, 500, len(got))
 }
+
+// S5 review MEDIUM-3:nil registry → NewSyncEngine 应立即 panic 而不是 runtime nil-deref。
+func TestNewSyncEngine_PanicsOnNilRegistry(t *testing.T) {
+	assert.Panics(t, func() {
+		NewSyncEngine(&fakeReader{}, &fakeWriter{}, nil, nil)
+	})
+}
+
+// S5 review MEDIUM-2:源表瞬时为空但 auto 已有行 → 拒绝同步,防误删。
+func TestSyncOne_RejectsTransientEmptySourceWhenAutoNonZero(t *testing.T) {
+	// fetchSource 返 0 行,writer.CountAuto 返已有 5 行 auto → 应拒绝
+	reader := &fakeReader{rows: nil}
+	writer := &fakeWriter{countVal: 5}
+	eng := newEngineWithMocks(t, reader, writer)
+	_, err := eng.SyncOne(context.Background(), SyncDict{
+		ID: 1, SourceTable: "devices", LabelField: "product_class", ValueField: "product_class",
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "transient empty")
+	// 关键:writer.UpsertAuto / DeleteAutoNotIn 都不应被调用(没动数据)
+	assert.Equal(t, 0, writer.upsertCalls)
+	assert.Equal(t, 0, writer.deleteCalls)
+}
+
+// 排除合法"首次同步源表也是空"场景:auto count=0 + source 也=0 → 直接成功,no-op。
+func TestSyncOne_EmptySourceFirstSyncIsNoOp(t *testing.T) {
+	reader := &fakeReader{rows: nil}
+	writer := &fakeWriter{countVal: 0}
+	eng := newEngineWithMocks(t, reader, writer)
+	res, err := eng.SyncOne(context.Background(), SyncDict{
+		ID: 1, SourceTable: "devices", LabelField: "product_class", ValueField: "product_class",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 0, res.Inserted)
+	assert.Equal(t, 0, res.TotalAuto)
+}
