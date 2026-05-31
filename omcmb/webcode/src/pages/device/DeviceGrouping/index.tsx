@@ -14,6 +14,7 @@ import {
   useUpdateDevice,
 } from '@core/hooks/api/useDevices';
 import { useT } from '@/hooks/useT';
+import { useI18nText } from '@/hooks/useI18nText';
 import type { Device } from '@core/types/device';
 import GroupTreePanel from './GroupTreePanel';
 import DeviceListPanel from './DeviceListPanel';
@@ -36,6 +37,7 @@ import { useImportExportHandlers } from './useImportExportHandlers';
  */
 export default function DeviceGrouping() {
   const t = useT();
+  const { fromRecord } = useI18nText();
   const { modal, message } = App.useApp();
   const { data: groupsData, refetch: refetchGroups } = useDeviceGroups();
   const groups = groupsData?.groups ?? [];
@@ -204,7 +206,7 @@ export default function DeviceGrouping() {
     t,
     refetch,
     selectedGroupId,
-    selectedGroupName: selectedGroup?.name,
+    selectedGroupName: selectedGroup ? (fromRecord(selectedGroup as unknown as Record<string, unknown>, 'name') || selectedGroup.name) : undefined,
   });
 
   // ── Tree panel ──
@@ -237,7 +239,7 @@ export default function DeviceGrouping() {
           currentPage={currentPage}
           pageSize={pageSize}
           selectedGroupId={selectedGroupId}
-          selectedGroupName={selectedGroup?.name}
+          selectedGroupName={selectedGroup ? (fromRecord(selectedGroup as unknown as Record<string, unknown>, 'name') || selectedGroup.name) : undefined}
           batchActions={batchActions}
           onSelectionChange={setSelectedDeviceIds}
           onPageChange={(page, size) => {
