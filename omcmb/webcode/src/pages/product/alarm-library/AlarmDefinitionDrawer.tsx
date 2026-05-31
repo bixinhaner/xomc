@@ -123,11 +123,11 @@ export default function AlarmDefinitionDrawer({
       title={
         isEdit ? (
           <Space>
-            告警定义详情：<Tag color="blue">{definition?.identifier}</Tag>
+            {t('product.alarm.def.detailPrefix')}<Tag color="blue">{definition?.identifier}</Tag>
             {definition?.isUnknown && <Tag color="warning">{t('product.alarm.def.unknownTag')}</Tag>}
           </Space>
         ) : (
-          '新增告警定义'
+          t('product.alarm.def.titleCreate')
         )
       }
       placement="right"
@@ -143,7 +143,7 @@ export default function AlarmDefinitionDrawer({
             loading={createMut.isPending || updateMut.isPending}
             onClick={() => void handleSave()}
           >
-            保存
+            {t('common.save')}
           </Button>
         </Space>
       }

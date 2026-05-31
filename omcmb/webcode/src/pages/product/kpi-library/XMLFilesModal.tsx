@@ -22,10 +22,10 @@ interface Props {
   onClose: () => void;
 }
 
-const SOURCE_TAG: Record<IndicatorFile['source'], { color: string; label: string }> = {
-  builtin: { color: 'default', label: '内置' },
-  custom: { color: 'blue', label: '自定义' },
-  unknown: { color: 'warning', label: '未知' },
+const SOURCE_TAG: Record<IndicatorFile['source'], { color: string }> = {
+  builtin: { color: 'default' },
+  custom: { color: 'blue' },
+  unknown: { color: 'warning' },
 };
 
 const TECH_LABEL: Record<TechLower, string> = {
@@ -44,32 +44,32 @@ export default function XMLFilesModal({ open, tech, onClose }: Props) {
     {
       // 2026-05-29 用户决策:文件名列显示后端 API 给的完整路径
       // (如 "indicator-library/enb/ALL.xml"),不再截 basename。
-      title: '文件名',
+      title: t('common.fileName'),
       dataIndex: 'loadedFrom',
       render: (v: string) => <code>{v}</code>,
     },
     {
-      title: '来源',
+      title: t('common.source'),
       dataIndex: 'source',
       width: 100,
       render: (v: IndicatorFile['source']) => (
-        <Tag color={SOURCE_TAG[v].color}>{SOURCE_TAG[v].label}</Tag>
+        <Tag color={SOURCE_TAG[v].color}>{t(`common.${v}`)}</Tag>
       ),
     },
     {
-      title: '指标数',
+      title: t('common.indicators'),
       dataIndex: 'count',
       width: 90,
     },
     {
-      title: '在盘',
+      title: t('product.kpi.xml.colInDisk'),
       dataIndex: 'onDisk',
       width: 80,
       render: (v: boolean) =>
         v ? <Tag color="success">{t('common.yes')}</Tag> : <Tag color="warning">{t('common.no')}</Tag>,
     },
     {
-      title: '操作',
+      title: t('common.action'),
       width: 100,
       render: (_: unknown, row: IndicatorFile) => {
         if (!row.deletable) {
@@ -84,9 +84,9 @@ export default function XMLFilesModal({ open, tech, onClose }: Props) {
             title={t('product.kpi.xml.delTitle')}
             description={
               <div style={{ maxWidth: 280 }}>
-                文件备份为 <code>.deleted.&lt;ts&gt;</code>;
+                {t('product.kpi.xml.deleteBullet1Pre')}<code>.deleted.&lt;ts&gt;</code>{t('product.kpi.xml.deleteBullet1Post')}
                 <br />
-                关联 {row.count} 个指标 + 公式 + 启用记录会一并清理。
+                {t('product.kpi.xml.deleteBullet2', { count: row.count })}
               </div>
             }
             okText={t('common.delete')}
@@ -97,7 +97,7 @@ export default function XMLFilesModal({ open, tech, onClose }: Props) {
                 .mutateAsync(row.loadedFrom)
                 .then((r) => {
                   message.success(
-                    r.backup ? `已删除(备份 ${r.backup})` : '已删除'
+                    r.backup ? t('product.kpi.xml.deleteSuccessWithBackup', { backup: r.backup }) : t('common.deleted')
                   );
                   void refetch();
                 })

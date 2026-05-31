@@ -5,7 +5,7 @@
  *   1. 新增"来源"列:Tag 内置 / 自定义(后端 source.go::ClassifySource 派生)
  *   2. "XML 文件"列改名"加载源",显示完整 loaded_from(原来只显 basename)
  *   3. 新增"操作"列:仅 deletable=true(custom)显红色删除;builtin 置灰 + Tooltip
- *      "内置 KPI XML 不可在线删除。如需移除,请联系管理员"
+ *      "{t('product.kpi.summary.builtinHint')}"
  *
  * 历史决策(沿用):
  *   - 列粒度:每个 (制式, 平台) 唯一一行
@@ -35,12 +35,6 @@ const TECH_LABEL: Record<TechLower, string> = {
   gnb: 'GNB (5G NR)',
 };
 
-const TECH_DESC: Record<TechLower, string> = {
-  enb: '4G LTE 基站(eNodeB)',
-  gsm: '2G GSM 基站控制器(BSC)',
-  gnb: '5G NR 基站(gNodeB)',
-};
-
 export default function SummaryTab({ onSelect }: Props) {
   const t = useT();
   const { data, isLoading } = useIndicatorSummary();
@@ -49,7 +43,7 @@ export default function SummaryTab({ onSelect }: Props) {
 
   const columns = [
     {
-      title: '平台',
+      title: t('common.platform'),
       dataIndex: 'platform',
       width: 160,
       render: (v: string, row: IndicatorPlatformSummary) => (
@@ -64,19 +58,19 @@ export default function SummaryTab({ onSelect }: Props) {
       ),
     },
     {
-      title: '制式',
+      title: t('common.tech'),
       dataIndex: 'tech',
       width: 130,
       render: (v: TechLower) => <Tag color="geekblue">{TECH_LABEL[v]}</Tag>,
     },
     {
       // 后端 source.go::ClassifySource 派生,前端只渲染
-      title: '来源',
+      title: t('common.source'),
       dataIndex: 'source',
       width: 90,
       filters: [
-        { text: '内置', value: 'builtin' as IndicatorSource },
-        { text: '自定义', value: 'custom' as IndicatorSource },
+        { text: t('common.builtin'), value: 'builtin' as IndicatorSource },
+        { text: t('common.custom'), value: 'custom' as IndicatorSource },
       ],
       onFilter: (val: boolean | React.Key, row: IndicatorPlatformSummary) =>
         row.source === val,
@@ -85,35 +79,38 @@ export default function SummaryTab({ onSelect }: Props) {
     },
     {
       // 2026-05-29:从"XML 文件"(只显 basename)改为"加载源"(全路径,ellipsis)
-      title: '加载源',
+      // 2026-05-31:列宽 260→420,容纳 `indicator-library-custom/enb/<basename>.xml`
+      //            等 50+ 字符的全路径,典型 builtin `indicator-library/enb/ALL.xml`
+      //            (32 char) 也保留余量。
+      title: t('common.loadedFrom'),
       dataIndex: 'loadedFrom',
-      width: 260,
+      width: 420,
       ellipsis: true,
       render: (v: string) => <Tooltip title={v}><code>{v}</code></Tooltip>,
     },
-    { title: '指标数', dataIndex: 'indicators', width: 90 },
+    { title: t('common.indicators'), dataIndex: 'indicators', width: 90 },
     {
-      title: '说明',
+      title: t('common.note'),
       ellipsis: true,
       render: (_: unknown, row: IndicatorPlatformSummary) => (
         <span style={{ color: 'rgba(0, 0, 0, 0.65)', fontSize: 12 }}>
-          {TECH_DESC[row.tech]} · 平台 {row.platform}
+          {t(`product.kpi.summary.tech.${row.tech}`)} · {t('common.platform')} {row.platform}
         </span>
       ),
     },
     {
-      title: '操作',
+      title: t('common.action'),
       width: 80,
       render: (_: unknown, row: IndicatorPlatformSummary) =>
         row.deletable ? (
           <Popconfirm
-            title={`确认删除自定义 KPI XML?`}
+            title={t('product.kpi.summary.confirmDeleteXml')}
             description={
               <div style={{ maxWidth: 320 }}>
-                · 文件 <code>{row.loadedFrom}</code> 将 rename 为
-                <code>.deleted.&lt;ts&gt;</code> 备份
-                <br />· 关联的 {row.indicators} 条指标 + 公式级联删除
-                <br />· 若存在同名内置 XML,删除后将自动回退到内置版本
+                · {t('product.kpi.summary.deleteBullet1Pre')} <code>{row.loadedFrom}</code> {t('product.kpi.summary.deleteBullet1Post')}
+                <code>.deleted.&lt;ts&gt;</code> {t('product.kpi.summary.backupSuffix')}
+                <br />· {t('product.kpi.summary.deleteBullet2', { count: row.indicators })}
+                <br />· {t('product.kpi.summary.deleteBullet3')}
               </div>
             }
             okButtonProps={{ danger: true }}
@@ -138,7 +135,7 @@ export default function SummaryTab({ onSelect }: Props) {
           <Tooltip
             title={
               <div style={{ maxWidth: 240 }}>
-                内置 KPI XML 不可在线删除。如需移除,请联系管理员
+                {t('product.kpi.summary.builtinHint')}
               </div>
             }
             placement="topRight"

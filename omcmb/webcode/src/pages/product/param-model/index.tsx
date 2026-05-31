@@ -69,8 +69,8 @@ export default function ParamModelPage() {
           .then((r) => {
             message.success(
               r.overwrite && r.backup
-                ? `已覆盖导入:${r.filename}(旧版备份 ${r.backup})`
-                : `已导入:${r.filename}`,
+                ? t('product.paramModel.importOverride', { file: r.filename, backup: r.backup ?? '' })
+                : t('product.paramModel.importSuccess', { file: r.filename }),
             );
             onSuccess?.(r);
           })
@@ -79,14 +79,14 @@ export default function ParamModelPage() {
             // 409 → 同名冲突,弹二次确认走 force=true
             if (ax.response?.status === 409 && !force) {
               Modal.confirm({
-                title: '同名 XML 已存在',
+                title: t('product.paramModel.overrideTitle'),
                 content: (
                   <div style={{ maxWidth: 360 }}>
-                    检测到 <code>{realFile.name}</code> 已存在,确认覆盖?
+                    {t('product.paramModel.overrideContentPre')}<code>{realFile.name}</code>{t('product.paramModel.overrideContentPost')}
                     <br />{t('product.paramModel.reloadHint')}
                   </div>
                 ),
-                okText: '覆盖',
+                okText: t('common.override'),
                 okButtonProps: { danger: true },
                 onOk: () => runUpload(true),
               });
@@ -120,19 +120,19 @@ export default function ParamModelPage() {
               {/* "导入 XML" = 用户选本地 XML 上传,落 host /opt/omc/data/param-mappings-custom/ */}
               <Upload {...uploadProps}>
                 <Button icon={<InboxOutlined />} loading={uploadMut.isPending}>
-                  导入 XML
+                  {t('common.importXml')}
                 </Button>
               </Upload>
               <Popconfirm
                 title={t('product.paramModel.reloadTitle')}
                 description={
                   <div style={{ maxWidth: 360 }}>
-                    从 <code>datamodels/</code> <b>destructive 全量重载</b>:
-                    <br />· 当前 XML 中的模型 → UPSERT (覆盖 UI 编辑)
-                    <br />· DB 中已无 XML 对应的孤儿模型 → <b>删除</b>
-                    <br />· 关联的 <code>param_mappings</code> 级联删除
-                    <br />· 关联的 <code>products.param_model_id</code> 被置空 (SET NULL)
-                    <br />操作不可撤销!
+                    {t('product.paramModel.reloadHint1Pre')}<code>datamodels/</code><b>{t('product.paramModel.reloadHint1Post')}</b>
+                    <br />{t('product.paramModel.bullet.upsert')}
+                    <br />{t('product.paramModel.bullet.orphan1')}<b>{t('product.paramModel.bullet.orphan2')}</b>
+                    <br />{t('product.paramModel.bullet.cascade1')}<code>param_mappings</code>{t('product.paramModel.bullet.cascade2')}
+                    <br />{t('product.paramModel.bullet.setnull1')}<code>products.param_model_id</code>{t('product.paramModel.bullet.setnull2')}
+                    <br />{t('common.actionUndoable')}
                   </div>
                 }
                 okText={t('product.products.reloadOk')}
@@ -142,16 +142,19 @@ export default function ParamModelPage() {
                 onConfirm={() => {
                   reloadMut
                     .mutateAsync()
-                    .then((r) =>
-                      message.success(
-                        `已重载:${r.reloaded}${r.orphans_deleted > 0 ? ` (清理 ${r.orphans_deleted} 个孤儿模型)` : ''}`,
-                      ),
-                    )
+                    .then((raw) => {
+                      const r = raw as { reloaded: number; orphans_deleted: number };
+                      return message.success(
+                        r.orphans_deleted > 0
+                          ? t('product.paramModel.reloadOrphans', { count: r.reloaded, orphans: r.orphans_deleted })
+                          : t('product.paramModel.reloadSuccess', { count: r.reloaded }),
+                      );
+                    })
                     .catch((e) => message.error((e as Error).message));
                 }}
               >
                 <Button icon={<CloudDownloadOutlined />} loading={reloadMut.isPending} danger>
-                  重载 XML
+                  {t('common.reloadXml')}
                 </Button>
               </Popconfirm>
               <Button
@@ -164,7 +167,7 @@ export default function ParamModelPage() {
                     .catch((e) => message.error((e as Error).message))
                 }
               >
-                刷新缓存
+                {t('common.refreshCache')}
               </Button>
             </Space>
           </Space>

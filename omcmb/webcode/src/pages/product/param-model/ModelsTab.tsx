@@ -40,7 +40,7 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
 
   const columns = [
     {
-      title: '名称',
+      title: t('common.name'),
       dataIndex: 'name',
       width: 240,
       render: (v: string, row: ParamModel) => (
@@ -54,18 +54,18 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
         </Button>
       ),
     },
-    { title: '总条目', dataIndex: 'totalEntries', width: 90 },
-    { title: '对象数', dataIndex: 'totalObjects', width: 90 },
-    { title: '参数数', dataIndex: 'totalParams', width: 90 },
+    { title: t('product.paramModel.models.colTotalEntries'), dataIndex: 'totalEntries', width: 90 },
+    { title: t('product.paramModel.models.colTotalObjects'), dataIndex: 'totalObjects', width: 90 },
+    { title: t('product.paramModel.models.colTotalParams'), dataIndex: 'totalParams', width: 90 },
     {
       // T-0178: 来源列 — 后端 source.go::ClassifySource 派生,前端只渲染
-      title: '来源',
+      title: t('common.source'),
       dataIndex: 'source',
       width: 90,
       // 2026-05-29 用户决策:unknown 行已在数据层被过滤,filter 选项去掉"未知"
       filters: [
-        { text: '内置', value: 'builtin' as ParamModelSource },
-        { text: '自定义', value: 'custom' as ParamModelSource },
+        { text: t('common.builtin'), value: 'builtin' as ParamModelSource },
+        { text: t('common.custom'), value: 'custom' as ParamModelSource },
       ],
       onFilter: (val: boolean | React.Key, row: ParamModel) => row.source === val,
       render: (s: ParamModelSource | undefined, row: ParamModel) => {
@@ -80,16 +80,16 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
         return <Tooltip title={row.loadedFrom}>{tag}</Tooltip>;
       },
     },
-    { title: '加载源', dataIndex: 'loadedFrom', width: 260, ellipsis: true },
+    { title: t('common.loadedFrom'), dataIndex: 'loadedFrom', width: 260, ellipsis: true },
     {
-      title: '激活',
+      title: t('common.activate'),
       dataIndex: 'isActive',
       width: 80,
       render: (v: boolean) => (v ? <Tag color="success">{t('common.active')}</Tag> : <Tag>{t('common.inactive')}</Tag>),
     },
-    { title: '描述', dataIndex: 'description', ellipsis: true },
+    { title: t('common.description'), dataIndex: 'description', ellipsis: true },
     {
-      title: '操作',
+      title: t('common.action'),
       width: 160,
       render: (_: unknown, row: ParamModel) => (
         <Space>
@@ -104,12 +104,12 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
           {/* T-0178: 仅 deletable=true(custom)行可点击删除;内置/未知置灰 + Tooltip */}
           {row.deletable ? (
             <Popconfirm
-              title={`确认删除自定义参数模型「${row.name}」?`}
+              title={t('product.paramModel.models.confirmDeleteCustom', { name: row.name })}
               description={
                 <div style={{ maxWidth: 320 }}>
-                  · 物理文件将 rename 为 <code>.deleted.&lt;ts&gt;</code> 备份
+                  · {t('product.paramModel.models.deleteBullet1Pre')} <code>.deleted.&lt;ts&gt;</code> {t('product.paramModel.models.deleteBullet1Post')}
                   <br />· {t('product.paramModel.cascadeHint')}
-                  <br />· 若存在同名内置 XML,删除后将自动回退到内置版本
+                  <br />· {t('product.paramModel.models.deleteBullet2')}
                 </div>
               }
               okButtonProps={{ danger: true }}
@@ -127,7 +127,7 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
             <Tooltip
               title={
                 <div style={{ maxWidth: 240 }}>
-                  内置参数模型不可在线删除。如需移除,请联系管理员
+                  {t('product.paramModel.models.builtinHint')}
                 </div>
               }
               placement="topRight"
@@ -166,10 +166,10 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
         columns={columns}
         dataSource={items}
         size="small"
-        pagination={{ pageSize: 20, showTotal: (t) => `共 ${t} 条` }}
+        pagination={{ pageSize: 20, showTotal: (total) => t('common.totalCount', { count: total }) }}
       />
       <Modal
-        title={`编辑参数模型：${editing?.name}`}
+        title={t('product.paramModel.models.editTitle', { name: editing?.name ?? '' })}
         open={Boolean(editing)}
         onOk={() => void handleSave()}
         onCancel={() => setEditing(null)}

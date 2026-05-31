@@ -60,7 +60,7 @@ export default function IndicatorDrawer({ open, deviceType, indicator, onClose }
       render: (v: string) => <code style={{ fontSize: 12 }}>{v}</code>,
     },
     {
-      title: '操作',
+      title: t('common.action'),
       width: 120,
       render: (_: unknown, row: PlatformFormula) => (
         <Space>
@@ -73,7 +73,7 @@ export default function IndicatorDrawer({ open, deviceType, indicator, onClose }
             }}
           />
           <Popconfirm
-            title={`确认删除「${row.platformName}」公式？`}
+            title={t('product.kpi.confirmDeletePlatformFormula', { name: row.platformName })}
             onConfirm={() =>
               indicator &&
               deleteMut
@@ -98,16 +98,16 @@ export default function IndicatorDrawer({ open, deviceType, indicator, onClose }
       for (const ch of v.formula) {
         if (ch === '(') depth++;
         else if (ch === ')') depth--;
-        if (depth < 0) throw new Error('公式括号不匹配');
+        if (depth < 0) throw new Error(t('product.kpi.formulaBracketMismatch'));
       }
-      if (depth !== 0) throw new Error('公式括号不匹配');
+      if (depth !== 0) throw new Error(t('product.kpi.formulaBracketMismatch'));
       await upsertMut.mutateAsync({
         deviceType,
         indicatorId: indicator.id,
         platform: v.platform.trim(),
         formula: v.formula.trim(),
       });
-      message.success(editing ? '已更新' : '已创建');
+      message.success(editing ? t('common.updated') : t('common.created'));
       setEditing(null);
       setCreating(false);
       form.resetFields();
@@ -119,7 +119,7 @@ export default function IndicatorDrawer({ open, deviceType, indicator, onClose }
 
   return (
     <Drawer
-      title={indicator ? `指标详情：${indicator.id} ${indicator.cnName || indicator.name}` : '指标详情'}
+      title={indicator ? t('product.kpi.indicatorDetailFull', { id: indicator.id, name: indicator.cnName || indicator.name }) : t('product.kpi.indicatorDetail')}
       placement="right"
       width={760}
       open={open}
@@ -159,7 +159,7 @@ export default function IndicatorDrawer({ open, deviceType, indicator, onClose }
                 form.resetFields();
               }}
             >
-              新增公式
+              {t('product.kpi.newFormula')}
             </Button>
           </Space>
 
@@ -172,7 +172,7 @@ export default function IndicatorDrawer({ open, deviceType, indicator, onClose }
           />
 
           <Modal
-            title={editing ? `编辑公式：${editing.platformName}` : '新增平台公式'}
+            title={editing ? t('product.kpi.editFormulaTitle', { name: editing.platformName }) : t('product.kpi.newPlatformFormula')}
             open={Boolean(editing) || creating}
             onOk={() => void handleSave()}
             onCancel={() => {
@@ -188,16 +188,16 @@ export default function IndicatorDrawer({ open, deviceType, indicator, onClose }
               <Form.Item
                 name="platform"
                 label={t('product.kpi.indicator.platformName')}
-                rules={[{ required: true, message: '必填' }]}
-                extra="对应 product 的 indicator_platform 字段；如 enb-default / gnb-comba"
+                rules={[{ required: true, message: t('common.required') }]}
+                extra={t('product.kpi.platformExtra')}
               >
                 <Input disabled={Boolean(editing)} />
               </Form.Item>
               <Form.Item
                 name="formula"
                 label={t('product.kpi.indicator.formulaLabel')}
-                rules={[{ required: true, message: '必填' }]}
-                extra="支持基础四则、括号、计数器名；前端做括号匹配校验，后端做完整语法验证"
+                rules={[{ required: true, message: t('common.required') }]}
+                extra={t('product.kpi.formulaExtra')}
               >
                 <Input.TextArea rows={4} placeholder={t('product.kpi.indicator.formulaPh')} />
               </Form.Item>

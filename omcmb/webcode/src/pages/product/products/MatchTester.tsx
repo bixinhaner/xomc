@@ -29,12 +29,12 @@ function MatchResultInline({ result, loading }: MatchResultInlineProps) {
     return (
       <Space size={6} wrap>
         <Tag color="success" style={{ marginRight: 0 }}>
-          命中
+          {t('product.matchTester.hit')}
         </Tag>
         <Text strong>{result.product.name}</Text>
         <Text code>{result.matchedPattern}</Text>
         <Text type="secondary">
-          全局序号 {result.globalOrder} · {result.product.vendor}/{result.product.tech}
+          {t('product.matchTester.globalNo', { no: result.globalOrder ?? '', vendor: result.product.vendor, tech: result.product.tech })}
         </Text>
       </Space>
     );
@@ -42,7 +42,7 @@ function MatchResultInline({ result, loading }: MatchResultInlineProps) {
   return (
     <Space size={4}>
       <Tag color="warning" style={{ marginRight: 0 }}>
-        未命中
+        {t('product.matchTester.missTag')}
       </Tag>
       <Text type="secondary">{t('product.matchTester.noMatch')}</Text>
     </Space>

@@ -41,12 +41,6 @@ interface Props {
   onBack?: () => void;
 }
 
-const STORABLE_OPTIONS = [
-  { label: '全部', value: 'all' },
-  { label: '仅可存储', value: 'true' },
-  { label: '仅不可存储', value: 'false' },
-];
-
 const ENTRY_OPTIONS = [
   { label: 'parameter', value: 'parameter' },
   { label: 'object', value: 'object' },
@@ -65,6 +59,11 @@ function countPlaceholder(p: string): number {
 
 export default function MappingsTab({ selectedName, onBack }: Props) {
   const t = useT();
+  const STORABLE_OPTIONS = [
+    { label: t('common.all'), value: 'all' },
+    { label: t('product.paramModel.mappings.filterStorable'), value: 'true' },
+    { label: t('product.paramModel.mappings.filterNotStorable'), value: 'false' },
+  ];
   const { data, isLoading } = useParamMappings(selectedName);
   const createMut = useCreateMapping();
   const updateMut = useUpdateMapping();
@@ -99,7 +98,7 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
         return (
           <Space>
             {mismatch && (
-              <Tooltip title={`占位符 {i} 数量不匹配：standard=${stdCount} private=${privCount}`}>
+              <Tooltip title={t('product.paramModel.mappings.placeholderMismatch', { std: stdCount, priv: privCount })}>
                 <ExclamationCircleFilled style={{ color: '#ff4d4f' }} />
               </Tooltip>
             )}
@@ -120,7 +119,7 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
     },
     { title: 'sw', dataIndex: 'softwareVersion', width: 80 },
     {
-      title: '操作',
+      title: t('common.action'),
       width: 120,
       render: (_: unknown, row: ParamMapping) => (
         <Space>
@@ -199,7 +198,7 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
         <Space>
           {onBack && (
             <Button icon={<ArrowLeftOutlined />} onClick={onBack} size="small">
-              返回
+              {t('common.back')}
             </Button>
           )}
           <Text strong>{selectedName}</Text>
@@ -230,7 +229,7 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
               form.setFieldsValue({ entryType: 'parameter', access: 'readWrite', isStorable: true, isActive: true });
             }}
           >
-            新增映射
+            {t('product.paramModel.mappings.newBtn')}
           </Button>
         </Space>
       }
@@ -241,10 +240,10 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
         columns={columns}
         dataSource={filtered}
         size="small"
-        pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
+        pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (total) => t('common.totalCount', { count: total }) }}
       />
       <Modal
-        title={editing ? '编辑映射' : '新增映射'}
+        title={editing ? t('product.paramModel.mappings.editTitle') : t('product.paramModel.mappings.newTitle')}
         open={Boolean(editing) || creating}
         onOk={() => void handleSave()}
         onCancel={() => {
@@ -260,15 +259,15 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
           <Form.Item
             name="standardPath"
             label="standard_path"
-            rules={[{ required: true, message: '必填' }]}
-            extra="支持 {i} 占位符；与 private_path 的 {i} 数量必须一致"
+            rules={[{ required: true, message: t('common.required') }]}
+            extra={t('product.paramModel.mappings.privatePathExtra')}
           >
             <Input placeholder="Device.Cellular.AccessPoint.{i}.PLMN" />
           </Form.Item>
           <Form.Item
             name="privatePath"
             label="private_path"
-            rules={[{ required: true, message: '必填' }]}
+            rules={[{ required: true, message: t('common.required') }]}
           >
             <Input placeholder="X_VENDOR_AccessPoint.{i}.PLMNID" />
           </Form.Item>

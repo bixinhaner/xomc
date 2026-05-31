@@ -204,7 +204,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
       render: (v: number) => <Tag color="blue">{v}</Tag>,
     },
     {
-      title: '正则规则',
+      title: t('product.products.col.regex'),
       dataIndex: 'productClass',
       render: (v: string, row: ProductPattern) => (
         <Input
@@ -222,7 +222,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
       ),
     },
     {
-      title: '启用',
+      title: t('common.enable'),
       dataIndex: 'isActive',
       width: 70,
       render: (v: boolean, row: ProductPattern) => (
@@ -233,14 +233,14 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
             if (!product) return;
             updPatMut
               .mutateAsync({ productId: product.id, patternId: row.id, isActive: checked })
-              .then(() => message.success(checked ? '已启用' : '已禁用'))
+              .then(() => message.success(checked ? t('common.enabled') : t('common.disabled')))
               .catch((er) => message.error((er as Error).message));
           }}
         />
       ),
     },
     {
-      title: '操作',
+      title: t('common.action'),
       width: 200,
       render: (_: unknown, row: ProductPattern) => (
         <Space>
@@ -285,7 +285,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
 
   return (
     <Drawer
-      title={isEdit ? `编辑产品：${product?.name}` : '新增产品'}
+      title={isEdit ? t('product.product.drawer.editTitle', { name: product?.name ?? '' }) : t('product.product.drawer.createTitle')}
       placement="right"
       width={720}
       open={open}
@@ -299,7 +299,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
             loading={createMut.isPending || updateMut.isPending}
             onClick={() => void handleSubmit()}
           >
-            保存
+            {t('common.save')}
           </Button>
         </Space>
       }
@@ -311,7 +311,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
           items={[
             {
               key: 'basic',
-              label: '基本信息',
+              label: t('product.product.drawer.tabBasic'),
               children: (
                 <>
                   <Form.Item name="name" label={t('product.products.name')} rules={[{ required: true, message: t('product.products.nameRequired') }]}>
@@ -332,13 +332,13 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                   <Form.Item
                     name="paramModelId"
                     label={t('product.products.paramModel')}
-                    extra="选择该产品默认参数模型；P4-04 可在参数模型浏览器维护映射"
+                    extra={t('product.product.drawer.paramModelExtra')}
                   >
                     <Select
                       allowClear
                       placeholder={t('product.products.paramModelPh')}
                       options={(paramModels?.items || []).map((m) => ({
-                        label: `${m.name}（${m.totalParams} 参数）`,
+                        label: t('product.product.drawer.paramModelOption', { name: m.name, count: m.totalParams }),
                         value: m.id,
                       }))}
                       showSearch
@@ -349,7 +349,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                     name="indicatorDeviceType"
                     label={t('product.products.indicatorDevType')}
                     rules={[{ required: true }]}
-                    extra="决定 KPI 库 5 Tabs 中加载哪一类计数器/公式"
+                    extra={t('product.product.drawer.indicatorPlatformExtra')}
                   >
                     <Select
                       options={DEVICE_TYPE_OPTIONS}
@@ -364,15 +364,15 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                     <Form.Item
                       name="indicatorPlatform"
                       label={t('product.products.indicatorPlatform')}
-                      rules={[{ required: true, message: '指标平台名必填' }]}
-                      extra="对应 KPI 库公式的 platform_name（仅 ENB 类型需要）"
+                      rules={[{ required: true, message: t('product.product.drawer.indicatorPlatformRequired') }]}
+                      extra={t('product.product.drawer.indicatorPlatformExtraLong')}
                     >
                       <Select
                         placeholder={t('product.products.indicatorPlatformPh')}
                         options={(indicatorPlatforms || []).map((p) => ({ label: p, value: p }))}
                         showSearch
                         optionFilterProp="label"
-                        notFoundContent={indicatorPlatforms ? '无可用平台，请先在 KPI 公式表中维护' : '加载中...'}
+                        notFoundContent={indicatorPlatforms ? t('product.product.drawer.notFoundPlatforms') : t('common.loading')}
                       />
                     </Form.Item>
                   )}
@@ -382,7 +382,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                       options={(alarmNeTypes || []).map((n) => ({ label: n, value: n }))}
                       showSearch
                       optionFilterProp="label"
-                      notFoundContent={alarmNeTypes ? '告警定义库为空' : '加载中...'}
+                      notFoundContent={alarmNeTypes ? t('product.product.drawer.notFoundAlarms') : t('common.loading')}
                     />
                   </Form.Item>
                 </>
@@ -390,40 +390,40 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
             },
             {
               key: 'refs',
-              label: '字典引用',
+              label: t('product.product.drawer.tabDict'),
               children: (
                 <Space direction="vertical" style={{ width: '100%' }}>
                   <Text>
-                    参数模型：{' '}
+                    {t('product.product.drawer.paramModelLine')}{' '}
                     {form.getFieldValue('paramModelId')
                       ? (paramModels?.items || []).find((m) => m.id === form.getFieldValue('paramModelId'))
                           ?.name || '—'
-                      : '未指定'}
+                      : t('product.product.drawer.notAssigned')}
                   </Text>
-                  <Text>指标设备类型 / 平台：{form.getFieldValue('indicatorDeviceType')} / {form.getFieldValue('indicatorPlatform')}</Text>
-                  <Text>告警网元类型：{form.getFieldValue('alarmNeType')}</Text>
+                  <Text>{t('product.product.drawer.indicatorDeviceTypeLine', { type: form.getFieldValue('indicatorDeviceType') ?? '', platform: form.getFieldValue('indicatorPlatform') ?? '' })}</Text>
+                  <Text>{t('product.product.drawer.alarmNeTypeLine', { type: form.getFieldValue('alarmNeType') ?? '' })}</Text>
                   <Text type="secondary">
-                    引用条目数 / 指标数 / 告警数将在 P4-04 / P4-05 / P4-06 实现统计聚合后可见。
+                    {t('product.product.drawer.refCountHint')}
                   </Text>
                 </Space>
               ),
             },
             {
               key: 'upload',
-              label: '上传策略',
+              label: t('product.product.drawer.tabUpload'),
               children: (
                 <>
                   <Form.Item
                     name="enableFiletype11"
                     label={t('product.products.enableFt11')}
                     valuePropName="checked"
-                    extra="false 时跳过 Upload 流程；true 时设备不支持 SOAP Fault 触发降级到默认映射"
+                    extra={t('product.product.drawer.uploadEnabledExtra')}
                   >
                     <Switch />
                   </Form.Item>
                   <Form.Item
                     label={t('product.products.attrsOverride')}
-                    extra="勾选后 Intersect 时该属性以设备实际上传值为准；未勾选用默认参数模型属性"
+                    extra={t('product.product.drawer.intersectAttrExtra')}
                   >
                     <Space wrap>
                       <Form.Item name="override_access" valuePropName="checked" noStyle>
@@ -447,7 +447,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                     name="enableUnknownAlarm"
                     label={t('product.products.acceptUnknown')}
                     valuePropName="checked"
-                    extra="true 时未匹配 alarm_definitions 的告警写 fallback (severity=Warning, is_unknown=true)；false 直接丢弃"
+                    extra={t('product.product.drawer.unknownAlarmExtra')}
                   >
                     <Switch />
                   </Form.Item>
@@ -456,11 +456,11 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
             },
             {
               key: 'patterns',
-              label: '正则模式',
+              label: t('product.product.drawer.tabPatterns'),
               children: !isEdit ? (
                 <>
                   <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-                    在此填写的正则将随产品一并保存（后端事务原子）。保存后可在编辑模式下调整顺序、启停。
+                    {t('product.product.drawer.patternsHint')}
                   </Text>
                   <Space style={{ marginBottom: 12 }}>
                     <Input
@@ -493,7 +493,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                         setNewPattern('');
                       }}
                     >
-                      添加
+                      {t('common.add')}
                     </Button>
                   </Space>
                   <Table<{ key: number; productClass: string }>
@@ -501,14 +501,14 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                     size="small"
                     columns={[
                       {
-                        title: '序号',
+                        title: t('common.sortOrder'),
                         dataIndex: 'key',
                         width: 70,
                         render: (v: number) => <Tag color="blue">{v + 1}</Tag>,
                       },
-                      { title: '正则', dataIndex: 'productClass' },
+                      { title: t('product.products.col.regex'), dataIndex: 'productClass' },
                       {
-                        title: '操作',
+                        title: t('common.action'),
                         width: 80,
                         render: (_: unknown, _row, idx: number) => (
                           <Button
@@ -524,7 +524,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                     ]}
                     dataSource={pendingPatterns.map((pc, idx) => ({ key: idx, productClass: pc }))}
                     pagination={false}
-                    locale={{ emptyText: '尚未添加正则' }}
+                    locale={{ emptyText: t('product.product.drawer.emptyPatterns') }}
                   />
                 </>
               ) : (
@@ -554,7 +554,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                         }
                       }}
                     >
-                      添加
+                      {t('common.add')}
                     </Button>
                   </Space>
                   <Table<ProductPattern>

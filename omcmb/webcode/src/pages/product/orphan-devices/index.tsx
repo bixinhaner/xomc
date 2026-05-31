@@ -48,16 +48,16 @@ export default function OrphanDevicesPage() {
       dataIndex: 'productClass',
       render: (v: string) => <Tag color="orange">{v || '—'}</Tag>,
     },
-    { title: '运营商', dataIndex: 'carrier', width: 90 },
-    { title: '厂商', dataIndex: 'manufacturer', width: 130 },
+    { title: t('common.carrier'), dataIndex: 'carrier', width: 90 },
+    { title: t('common.vendor'), dataIndex: 'manufacturer', width: 130 },
     {
-      title: '最后 Inform',
+      title: t('common.lastInform'),
       dataIndex: 'lastInformAt',
       width: 180,
       render: (v?: string) => v || '—',
     },
     {
-      title: '操作',
+      title: t('common.action'),
       width: 120,
       render: (_: unknown, row: OrphanDevice) => (
         <Button
@@ -68,7 +68,7 @@ export default function OrphanDevicesPage() {
             setBindOpen(true);
           }}
         >
-          绑定
+          {t('common.bind')}
         </Button>
       ),
     },
@@ -119,12 +119,12 @@ export default function OrphanDevicesPage() {
                         }
                       })
                       .catch((e) =>
-                        message.error((e as Error).message || '触发失败'),
+                        message.error((e as Error).message || t('product.orphan.triggerFailed')),
                       )
                   }
                 >
                   <Button icon={<ThunderboltOutlined />} loading={rematchMut.isPending}>
-                    全量重新匹配
+                    {t('product.orphan.batchRematch')}
                   </Button>
                 </Popconfirm>
               </Tooltip>
@@ -137,7 +137,7 @@ export default function OrphanDevicesPage() {
                   setBindOpen(true);
                 }}
               >
-                {selectedCount > 0 ? `批量绑定 ${selectedCount} 台` : '批量绑定'}
+                {selectedCount > 0 ? t('product.orphan.batchBindCount', { count: selectedCount }) : t('product.orphan.batchBind')}
               </Button>
             </Space>
           </Col>
@@ -146,8 +146,8 @@ export default function OrphanDevicesPage() {
           <Empty
             description={
               search
-                ? `未找到 SN 包含 "${search}" 的孤儿设备`
-                : '无孤儿设备 — 所有设备 productClass 已被 ProductRegistry 命中'
+                ? t('product.orphan.notFoundSearch', { search })
+                : t('product.orphan.emptyState')
             }
           />
         ) : (
@@ -163,7 +163,7 @@ export default function OrphanDevicesPage() {
               total,
               showSizeChanger: true,
               pageSizeOptions: ['10', '20', '50', '1000'],
-              showTotal: (t) => `共 ${t} 台`,
+              showTotal: (total) => t('product.orphan.totalDevices', { count: total }),
               onChange: (p, ps) => {
                 setPage(p);
                 if (ps !== pageSize) setPageSize(ps);

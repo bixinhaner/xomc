@@ -245,7 +245,7 @@ export default function AlarmLibraryPage() {
             }}
           />
           <Popconfirm
-            title={`确认删除告警定义「${row.identifier}」?`}
+            title={t('product.alarm.confirmDeleteDef', { id: row.identifier })}
             onConfirm={() =>
               delMut
                 .mutateAsync(row.identifier)
@@ -273,9 +273,9 @@ export default function AlarmLibraryPage() {
                 icon={<ArrowLeftOutlined />}
                 onClick={() => setSelectedNeType(undefined)}
               >
-                返回
+                {t('common.back')}
               </Button>
-              <Text strong>{selectedNeType} 的告警定义</Text>
+              <Text strong>{t('product.alarm.defsOf', { neType: selectedNeType ?? '' })}</Text>
             </Space>
           ) : (
             // 列表态左侧空 — 占位让 space-between 把右侧按钮推到最右
@@ -316,7 +316,7 @@ export default function AlarmLibraryPage() {
                     setDrawerOpen(true);
                   }}
                 >
-                  新增定义
+                  {t('product.alarm.btnNewDef')}
                 </Button>
               </>
             ) : (
@@ -327,8 +327,8 @@ export default function AlarmLibraryPage() {
                   description={
                     <div style={{ maxWidth: 320 }}>
                       {t('product.alarm.importDesc')}
-                      <br />· 新增告警 → 插入
-                      <br />· 已存在告警 → 更新(UI 中的手工编辑会被 XML 覆盖)
+                      <br />{t('product.alarm.bullet.importAdd')}
+                      <br />{t('product.alarm.bullet.importUpdate')}
                       
                     </div>
                   }
@@ -338,12 +338,12 @@ export default function AlarmLibraryPage() {
                   onConfirm={() => {
                     importMut
                       .mutateAsync()
-                      .then((r) => message.success(`已导入:${r.reloaded}`))
+                      .then((r) => message.success(t('product.alarm.importSuccess', { count: r.reloaded })))
                       .catch((error) => message.error((error as Error).message));
                   }}
                 >
                   <Button icon={<CloudUploadOutlined />} loading={importMut.isPending}>
-                    导入 XML
+                    {t('common.importXml')}
                   </Button>
                 </Popconfirm>
                 <Popconfirm
@@ -351,9 +351,9 @@ export default function AlarmLibraryPage() {
                   description={
                     <div style={{ maxWidth: 360 }}>
                       {t('product.alarm.reloadDesc')}
-                      <br />· 当前 XML 中的告警 → UPSERT (覆盖 UI 编辑)
+                      <br />{t('product.alarm.bullet.reloadUpsert')}
                       
-                      <br />操作不可撤销!
+                      <br />{t('common.actionUndoable')}
                     </div>
                   }
                   okText={t('product.products.reloadOk')}
@@ -363,16 +363,19 @@ export default function AlarmLibraryPage() {
                   onConfirm={() => {
                     reloadMut
                       .mutateAsync()
-                      .then((r) =>
-                        message.success(
-                          `已重载:${r.reloaded}${r.orphans_deleted > 0 ? ` (清理 ${r.orphans_deleted} 个孤儿告警)` : ''}`,
-                        ),
-                      )
+                      .then((raw) => {
+                        const r = raw as { reloaded: number; orphans_deleted: number };
+                        return message.success(
+                          r.orphans_deleted > 0
+                            ? t('product.alarm.reloadOrphans', { count: r.reloaded, orphans: r.orphans_deleted })
+                            : t('product.alarm.reloadSuccess', { count: r.reloaded }),
+                        );
+                      })
                       .catch((error) => message.error((error as Error).message));
                   }}
                 >
                   <Button icon={<CloudDownloadOutlined />} loading={reloadMut.isPending} danger>
-                    重载 XML
+                    {t('common.reloadXml')}
                   </Button>
                 </Popconfirm>
                 <Button
@@ -385,7 +388,7 @@ export default function AlarmLibraryPage() {
                       .catch((e) => message.error((e as Error).message))
                   }
                 >
-                  刷新缓存
+                  {t('common.refreshCache')}
                 </Button>
               </>
             )}
@@ -418,7 +421,7 @@ export default function AlarmLibraryPage() {
             columns={neTypesColumns}
             dataSource={neTypesItems}
             size="small"
-            pagination={{ pageSize: 20, showTotal: (t) => `共 ${t} 个网元类型` }}
+            pagination={{ pageSize: 20, showTotal: (total) => t('product.alarm.totalNeTypes', { count: total }) }}
           />
         )}
       </Card>

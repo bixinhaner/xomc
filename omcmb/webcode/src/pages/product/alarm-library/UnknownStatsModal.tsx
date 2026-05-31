@@ -9,14 +9,13 @@ interface Props {
   onClose: () => void;
 }
 
-const DAYS_OPTIONS = [
-  { label: '近 1 天', value: 1 },
-  { label: '近 7 天', value: 7 },
-  { label: '近 30 天', value: 30 },
-];
-
 export default function UnknownStatsModal({ open, onClose }: Props) {
   const t = useT();
+  const DAYS_OPTIONS = [
+    { label: t('product.alarm.unknown.day1'), value: 1 },
+    { label: t('product.alarm.unknown.day7'), value: 7 },
+    { label: t('product.alarm.unknown.day30'), value: 30 },
+  ];
   const [productId, setProductId] = useState('');
   const [days, setDays] = useState(7);
   const { data, isLoading } = useUnknownAlarmStats({
@@ -27,16 +26,16 @@ export default function UnknownStatsModal({ open, onClose }: Props) {
   const items = data?.items || [];
 
   const columns = [
-    { title: '产品 ID', dataIndex: 'productId', width: 220, ellipsis: true, render: (v?: string) => v || '—' },
-    { title: '产品名', dataIndex: 'productName', width: 200, render: (v?: string) => v || '—' },
+    { title: t('product.alarm.unknown.colProductId'), dataIndex: 'productId', width: 220, ellipsis: true, render: (v?: string) => v || '—' },
+    { title: t('product.alarm.unknown.colProductName'), dataIndex: 'productName', width: 200, render: (v?: string) => v || '—' },
     {
-      title: '告警标识 (identifier)',
+      title: t('product.alarm.unknown.colIdentifier'),
       dataIndex: 'identifier',
       width: 180,
       render: (v: string) => <Tag color="orange">{v}</Tag>,
     },
-    { title: '出现次数', dataIndex: 'count', width: 100 },
-    { title: '最后一次', dataIndex: 'lastSeenAt', render: (v?: string) => v || '—' },
+    { title: t('product.alarm.unknown.colCount'), dataIndex: 'count', width: 100 },
+    { title: t('product.alarm.unknown.colLastSeen'), dataIndex: 'lastSeenAt', render: (v?: string) => v || '—' },
   ];
 
   return (

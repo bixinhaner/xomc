@@ -30,14 +30,13 @@ import {
 import type { StandardParam, UpsertStandardInput } from '@core/types/paramModel';
 import { useT } from '@/hooks/useT';
 
-const ENTRY_OPTIONS = [
-  { label: '全部', value: '' },
-  { label: 'parameter', value: 'parameter' },
-  { label: 'object', value: 'object' },
-];
-
 export default function StandardParamsPage() {
   const t = useT();
+  const ENTRY_OPTIONS = [
+    { label: t('common.all'), value: '' },
+    { label: 'parameter', value: 'parameter' },
+    { label: 'object', value: 'object' },
+  ];
   const [keyword, setKeyword] = useState('');
   const [entryType, setEntryType] = useState('');
   const { data, isLoading } = useStandardParams({
@@ -62,7 +61,7 @@ export default function StandardParamsPage() {
     { title: 'min', dataIndex: 'minValue', width: 80 },
     { title: 'max', dataIndex: 'maxValue', width: 80 },
     {
-      title: '操作',
+      title: t('common.action'),
       width: 120,
       render: (_: unknown, row: StandardParam) => (
         <Space>
@@ -75,7 +74,7 @@ export default function StandardParamsPage() {
             }}
           />
           <Popconfirm
-            title={`确认删除「${row.standardPath}」?`}
+            title={t('common.confirmDeleteName', { name: row.standardPath })}
             onConfirm={() =>
               deleteMut
                 .mutateAsync(row.standardPath)
@@ -94,7 +93,7 @@ export default function StandardParamsPage() {
     try {
       const v = await form.validateFields();
       await upsertMut.mutateAsync({ input: v, path: editing?.standardPath });
-      message.success(editing ? '已保存' : '已创建');
+      message.success(editing ? t('common.saved') : t('common.created'));
       setEditing(null);
       setCreating(false);
       form.resetFields();
@@ -148,7 +147,7 @@ export default function StandardParamsPage() {
               });
             }}
           >
-            新增
+            {t('common.create')}
           </Button>
         </div>
         <Table<StandardParam>
@@ -157,10 +156,10 @@ export default function StandardParamsPage() {
           columns={columns}
           dataSource={items}
           size="small"
-          pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
+          pagination={{ pageSize: 50, showSizeChanger: true, showTotal: (total) => t('common.totalCount', { count: total }) }}
         />
         <Modal
-          title={editing ? '编辑标准参数' : '新增标准参数'}
+          title={editing ? t('product.standardParams.editTitle') : t('product.standardParams.newTitle')}
           open={Boolean(editing) || creating}
           onOk={() => void handleSave()}
           onCancel={() => {
@@ -176,7 +175,7 @@ export default function StandardParamsPage() {
             <Form.Item
               name="standardPath"
               label="standard_path"
-              rules={[{ required: true, message: '必填' }]}
+              rules={[{ required: true, message: t('common.required') }]}
             >
               <Input disabled={Boolean(editing)} />
             </Form.Item>

@@ -123,20 +123,20 @@ export default function KpiLibraryPage() {
   const globalActions = (
     <Space wrap>
       <Button icon={<AppstoreOutlined />} onClick={() => setUnitsOpen(true)}>
-        单位定义
+        {t('product.kpi.unitsDefinition')}
       </Button>
       <Button icon={<InboxOutlined />} onClick={() => setUploadOpen(true)}>
-        导入 XML
+        {t('common.importXml')}
       </Button>
       <Popconfirm
         title={t('product.paramModel.reloadTitle')}
         description={
           <div style={{ maxWidth: 360 }}>
             {t('product.kpi.reloadDesc')}
-            <br />· 当前 XML 中的指标 → UPSERT(覆盖 UI 编辑)
+            <br />{t('product.kpi.bullet.reloadUpsert')}
             
-            <br />· 关联的公式 / 启用记录级联清理
-            <br />操作不可撤销!
+            <br />{t('product.kpi.bullet.reloadCascade')}
+            <br />{t('common.actionUndoable')}
           </div>
         }
         okText={t('product.products.reloadOk')}
@@ -153,8 +153,8 @@ export default function KpiLibraryPage() {
                 : 0;
               message.success(
                 total > 0
-                  ? `已重载,清理 ${total} 个孤儿(enb=${orphans?.enb ?? 0} gsm=${orphans?.gsm ?? 0} gnb=${orphans?.gnb ?? 0})`
-                  : '已重载,无孤儿'
+                  ? t('product.kpi.reloadOrphansSummary', { total, enb: orphans?.enb ?? 0, gsm: orphans?.gsm ?? 0, gnb: orphans?.gnb ?? 0 })
+                  : t('product.kpi.reloadNoOrphans')
               );
             })
             .catch((e) => message.error((e as Error).message));
@@ -165,7 +165,7 @@ export default function KpiLibraryPage() {
           loading={importMut.isPending && importMut.variables === 'reload'}
           danger
         >
-          重载 XML
+          {t('common.reloadXml')}
         </Button>
       </Popconfirm>
       <Button
@@ -174,11 +174,11 @@ export default function KpiLibraryPage() {
         onClick={() =>
           cacheMut
             .mutateAsync()
-            .then((r) => message.success(r.note ? `${r.note}` : '已刷新缓存'))
+            .then((r) => message.success(r.note ? r.note : t('common.cacheRefreshed')))
             .catch((e) => message.error((e as Error).message))
         }
       >
-        刷新缓存
+        {t('common.refreshCache')}
       </Button>
     </Space>
   );
@@ -192,7 +192,7 @@ export default function KpiLibraryPage() {
             <>
               <Space wrap>
                 <Button icon={<ArrowLeftOutlined />} onClick={onBack}>
-                  返回
+                  {t('common.back')}
                 </Button>
                 <span style={{ fontWeight: 600 }}>
                   {TECH_LABEL[selectedTech]} · {selectedPlatform}

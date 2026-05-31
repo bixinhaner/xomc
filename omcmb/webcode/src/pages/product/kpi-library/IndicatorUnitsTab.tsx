@@ -25,10 +25,10 @@ export default function IndicatorUnitsTab() {
 
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 200 },
-    { title: '英文名', dataIndex: 'enName', width: 240 },
-    { title: '中文名', dataIndex: 'cnName' },
+    { title: t('common.enName'), dataIndex: 'enName', width: 240 },
+    { title: t('common.cnName'), dataIndex: 'cnName' },
     {
-      title: '操作',
+      title: t('common.action'),
       width: 130,
       render: (_: unknown, row: IndicatorUnit) => (
         <Space>
@@ -41,7 +41,7 @@ export default function IndicatorUnitsTab() {
             }}
           />
           <Popconfirm
-            title={`确认删除单位「${row.id}」？`}
+            title={t('product.kpi.confirmDeleteUnit', { id: row.id })}
             onConfirm={() =>
               deleteMut
                 .mutateAsync(row.id)
@@ -89,7 +89,7 @@ export default function IndicatorUnitsTab() {
             form.resetFields();
           }}
         >
-          新增单位
+          {t('product.kpi.newUnit')}
         </Button>
       }
     >
@@ -102,7 +102,7 @@ export default function IndicatorUnitsTab() {
         pagination={false}
       />
       <Modal
-        title={editing ? `编辑单位：${editing.id}` : '新增单位'}
+        title={editing ? t('product.kpi.editUnitTitle', { id: editing.id }) : t('product.kpi.newUnit')}
         open={Boolean(editing) || creating}
         onOk={() => void handleSave()}
         onCancel={() => {

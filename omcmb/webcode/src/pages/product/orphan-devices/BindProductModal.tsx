@@ -40,9 +40,9 @@ export default function BindProductModal({ open, devices, onClose, onDone }: Pro
         }
       }
       if (failed === 0) {
-        message.success(`已绑定 ${success}/${devices.length} 台`);
+        message.success(t('product.orphan.bind.success', { success, total: devices.length }));
       } else {
-        message.warning(`成功 ${success} / 失败 ${failed}`);
+        message.warning(t('product.orphan.bind.partial', { success, failed }));
       }
       onDone();
       onClose();
@@ -60,8 +60,8 @@ export default function BindProductModal({ open, devices, onClose, onDone }: Pro
     <Modal
       title={
         count === 1
-          ? `绑定产品 — 1 台已选设备`
-          : `绑定产品 — 共 ${count} 台已选设备`
+          ? t('product.orphan.bind.titleSingle')
+          : t('product.orphan.bind.titleMulti', { count })
       }
       open={open}
       onOk={() => void handleSubmit()}
@@ -76,15 +76,15 @@ export default function BindProductModal({ open, devices, onClose, onDone }: Pro
         style={{ marginBottom: 12 }}
         message={
           count === 1
-            ? `已选设备:${devices[0].serialNumber}(productClass=${devices[0].productClass || '—'})`
-            : `已选 ${count} 台设备,将串行调用单台 bind 接口逐一绑定`
+            ? t('product.orphan.bind.descSingle', { sn: devices[0].serialNumber, pc: devices[0].productClass || '—' })
+            : t('product.orphan.bind.descMulti', { count })
         }
       />
       <Form<FormValues> form={form} layout="vertical">
         <Form.Item
           name="productId"
           label={t('product.orphan.targetProduct')}
-          rules={[{ required: true, message: '请选择产品' }]}
+          rules={[{ required: true, message: t('product.orphan.bind.targetProductRequired') }]}
         >
           <Select
             showSearch

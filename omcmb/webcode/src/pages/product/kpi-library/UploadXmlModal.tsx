@@ -74,8 +74,8 @@ export default function UploadXmlModal({ open, onClose }: Props) {
       const r = await uploadMut.mutateAsync({ tech, file, force });
       message.success(
         r.overwrite && r.backup
-          ? `已覆盖上传:${r.filename}(旧版备份 ${r.backup})`
-          : `已上传:${r.filename}`
+          ? t('product.kpi.upload.overrideSuccess', { file: r.filename, backup: r.backup ?? '' })
+          : t('product.kpi.upload.uploadSuccess', { file: r.filename })
       );
       handleClose();
     } catch (e: unknown) {
@@ -83,14 +83,14 @@ export default function UploadXmlModal({ open, onClose }: Props) {
       // 409 → 弹覆盖确认,force=true 重试
       if (ax.response?.status === 409 && !force) {
         Modal.confirm({
-          title: '同名 XML 已存在',
+          title: t('product.kpi.upload.overrideTitle'),
           content: (
             <div style={{ maxWidth: 360 }}>
-              检测到 <code>{file.name}</code> 已存在,确认覆盖?
+              {t('product.kpi.upload.overrideContentPre')}<code>{file.name}</code>{t('product.kpi.upload.overrideContentPost')}
               <br />{t('product.kpi.upload.backupHint')}
             </div>
           ),
-          okText: '覆盖',
+          okText: t('common.override'),
           okButtonProps: { danger: true },
           onOk: () => doUpload(tech, file, true),
         });
@@ -123,7 +123,7 @@ export default function UploadXmlModal({ open, onClose }: Props) {
     fileList,
     beforeUpload: (f) => {
       if (f.size > MAX_SIZE) {
-        message.error(`文件超过 1 MiB(实际 ${(f.size / 1024).toFixed(1)} KiB)`);
+        message.error(t('product.kpi.upload.fileTooLarge', { size: (f.size / 1024).toFixed(1) }));
         return Upload.LIST_IGNORE;
       }
       // 2026-05-29:选文件即抽 deviceType,自动同步"目标制式",避免后端 2044
@@ -135,7 +135,7 @@ export default function UploadXmlModal({ open, onClose }: Props) {
           form.setFieldsValue({ tech: detected });
         } else if (current !== detected) {
           form.setFieldsValue({ tech: detected });
-          message.info(`已根据文件 deviceType=${detected.toUpperCase()} 自动切换目标制式`);
+          message.info(t('product.kpi.upload.autoSyncTech', { tech: detected.toUpperCase() }));
         }
       });
       return false; // 阻止 antd 自动上传 — 我们走 customRequest in handleSubmit
@@ -158,7 +158,7 @@ export default function UploadXmlModal({ open, onClose }: Props) {
         <Space>
           <Button onClick={handleClose}>{t('common.cancel')}</Button>
           <Button type="primary" onClick={() => void handleSubmit()} loading={uploadMut.isPending}>
-            上传
+            {t('common.upload')}
           </Button>
         </Space>
       }
@@ -169,7 +169,7 @@ export default function UploadXmlModal({ open, onClose }: Props) {
         <Form.Item
           name="tech"
           label={t('product.kpi.upload.targetTech')}
-          rules={[{ required: true, message: '请选择目标制式' }]}
+          rules={[{ required: true, message: t('product.kpi.upload.techRequired') }]}
         >
           <Select options={TECH_OPTIONS} placeholder={t('product.kpi.upload.techPh')} />
         </Form.Item>
@@ -180,7 +180,7 @@ export default function UploadXmlModal({ open, onClose }: Props) {
             </p>
             <p className="ant-upload-text">{t('product.kpi.upload.dropHint')}</p>
             <p className="ant-upload-hint">
-              单文件 ≤ 1 MiB;根元素必须为 <code>&lt;indicatorModel&gt;</code>;
+              {t('product.kpi.upload.sizeHintPre')}<code>&lt;indicatorModel&gt;</code>{t('product.kpi.upload.sizeHintPost')}
               <br />
               {t('product.kpi.upload.platformHint')}
             </p>

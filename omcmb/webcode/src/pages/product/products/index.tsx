@@ -88,7 +88,7 @@ export default function ProductsPage() {
 
   const columns = [
     {
-      title: '序号',
+      title: t('common.sortOrder'),
       width: 80,
       align: 'center' as const,
       render: (_: unknown, row: Product) => {
@@ -100,40 +100,40 @@ export default function ProductsPage() {
       },
     },
     {
-      title: '产品名',
+      title: t('product.products.col.productName'),
       dataIndex: 'name',
       width: 220,
       render: (v: string) => <Text strong>{v}</Text>,
     },
     {
-      title: '厂商',
+      title: t('common.vendor'),
       dataIndex: 'vendor',
       width: 120,
     },
     {
-      title: '制式',
+      title: t('common.tech'),
       dataIndex: 'tech',
       width: 80,
       render: (v: string) => <Tag>{v.toUpperCase()}</Tag>,
     },
     {
-      title: '指标设备类型',
+      title: t('product.products.col.indicatorDeviceType'),
       dataIndex: 'indicatorDeviceType',
       width: 130,
       render: (v: string) => <Tag color="cyan">{v?.toUpperCase()}</Tag>,
     },
     {
-      title: '指标平台',
+      title: t('product.products.col.indicatorPlatform'),
       dataIndex: 'indicatorPlatform',
       width: 140,
     },
     {
-      title: '告警网元类型',
+      title: t('product.products.col.alarmNeType'),
       dataIndex: 'alarmNeType',
       width: 130,
     },
     {
-      title: '正则规则',
+      title: t('product.products.col.regex'),
       dataIndex: 'patterns',
       width: 280,
       render: (list?: string[]) => {
@@ -160,7 +160,7 @@ export default function ProductsPage() {
       },
     },
     {
-      title: '激活',
+      title: t('common.activate'),
       width: 110,
       render: (_: unknown, row: Product) => {
         const stats = patternStats.get(row.id);
@@ -175,31 +175,31 @@ export default function ProductsPage() {
         }
         return (
           <Tag color="warning">
-            部分 {stats.active}/{stats.total}
+            {t('product.products.col.partial', { active: stats.active, total: stats.total })}
           </Tag>
         );
       },
     },
     {
-      title: '上传',
+      title: t('product.products.col.upload'),
       dataIndex: 'enableFiletype11',
       width: 70,
       render: (v: boolean) => (v ? <Tag color="success">{t('common.on')}</Tag> : <Tag>{t('common.off')}</Tag>),
     },
     {
-      title: '未知告警',
+      title: t('product.products.col.unknownAlarm'),
       dataIndex: 'enableUnknownAlarm',
       width: 90,
       render: (v: boolean) => (v ? <Tag color="warning">{t('common.accept')}</Tag> : <Tag>{t('common.discard')}</Tag>),
     },
     {
-      title: '设备数',
+      title: t('product.products.col.deviceCount'),
       dataIndex: 'deviceCount',
       width: 80,
       render: (v: number) => <Tag color="blue">{v}</Tag>,
     },
     {
-      title: '操作',
+      title: t('common.action'),
       width: 220,
       render: (_: unknown, row: Product) => (
         <Space>
@@ -211,25 +211,25 @@ export default function ProductsPage() {
               setDrawerOpen(true);
             }}
           >
-            编辑
+            {t('common.edit')}
           </Button>
           <Tooltip title={t('product.products.clearTooltip')}>
             <Popconfirm
-              title={`确认重置产品「${row.name}」的发现映射？`}
+              title={t('product.products.confirmReset', { name: row.name })}
               onConfirm={() =>
                 resetDiscMut
                   .mutateAsync(row.id)
-                  .then((r) => message.success(`已重置 ${r.deletedRows} 条`))
+                  .then((r) => message.success(t('product.products.resetSuccess', { count: r.deletedRows })))
                   .catch((e) => message.error((e as Error).message))
               }
             >
               <Button size="small" icon={<ClearOutlined />}>
-                重置发现
+                {t('product.products.resetBtn')}
               </Button>
             </Popconfirm>
           </Tooltip>
           <Popconfirm
-            title={`确认删除产品「${row.name}」？关联设备需先解绑`}
+            title={t('product.products.confirmDelete', { name: row.name })}
             onConfirm={() =>
               delMut
                 .mutateAsync(row.id)
@@ -276,7 +276,7 @@ export default function ProductsPage() {
               title={t('product.products.reloadXmlTitle')}
               description={
                 <div style={{ maxWidth: 320 }}>
-                  将从 <code>datamodels/param-mappings/products.xml</code> 重新装配所有产品。
+                  {t('product.products.reloadHint1Pre')}<code>datamodels/param-mappings/products.xml</code>{t('product.products.reloadHint1Post')}
                   <br />
                   {t('product.products.reloadDesc')}
                 </div>
@@ -289,12 +289,12 @@ export default function ProductsPage() {
                 // 不返回 Promise — 让 Popconfirm 立即关闭；loading 反馈交给触发按钮
                 importMut
                   .mutateAsync()
-                  .then((r) => message.success(`已重载：${r.reloaded}`))
+                  .then((r) => message.success(t('product.products.reloadSuccess', { count: r.reloaded })))
                   .catch((e) => message.error((e as Error).message));
               }}
             >
               <Button icon={<CloudDownloadOutlined />} loading={importMut.isPending} danger>
-                重载 XML
+                {t('common.reloadXml')}
               </Button>
             </Popconfirm>
             <Button
@@ -310,7 +310,7 @@ export default function ProductsPage() {
                   .catch((e) => message.error((e as Error).message));
               }}
             >
-              刷新缓存
+              {t('common.refreshCache')}
             </Button>
             <Button
               type="primary"
@@ -320,7 +320,7 @@ export default function ProductsPage() {
                 setDrawerOpen(true);
               }}
             >
-              新增产品
+              {t('product.products.createBtn')}
             </Button>
           </Space>
         </div>
@@ -332,7 +332,7 @@ export default function ProductsPage() {
           loading={isLoading}
           columns={columns}
           dataSource={sortedItems}
-          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
+          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => t('common.totalCount', { count: total }) }}
           size="small"
         />
       </Card>

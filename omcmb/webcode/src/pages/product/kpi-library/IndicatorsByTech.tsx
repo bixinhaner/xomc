@@ -13,7 +13,7 @@
  *     表明 IndicatorDrawer 内含公式 CRUD 支持修改
  */
 import { useEffect, useMemo, useState } from 'react';
-import { Card, Table, Switch, Button, Space, Tag, message } from 'antd';
+import { Card, Table, Switch, Button, Tag, message } from 'antd';
 import { EditOutlined } from '@ant-design/icons';
 import {
   useIndicatorList,
@@ -22,6 +22,7 @@ import {
 } from '@core/hooks/api/useIndicatorsLibrary';
 import type { DeviceType, IndicatorInfo } from '@core/types/indicatorLibrary';
 import IndicatorDrawer from './IndicatorDrawer';
+import { useT } from '@/hooks/useT';
 
 interface Filter {
   keyword?: string;
@@ -38,6 +39,7 @@ interface Props {
 const OPERATOR_CODE = 'default';
 
 export default function IndicatorsByTech({ deviceType, filter }: Props) {
+  const t = useT();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
 
@@ -66,10 +68,10 @@ export default function IndicatorsByTech({ deviceType, filter }: Props) {
 
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 140 },
-    { title: '中文名', dataIndex: 'cnName', width: 180 },
-    { title: '英文名', dataIndex: 'enName', width: 220, ellipsis: true },
+    { title: t('common.cnName'), dataIndex: 'cnName', width: 180 },
+    { title: t('common.enName'), dataIndex: 'enName', width: 220, ellipsis: true },
     {
-      title: '分组',
+      title: t('common.group'),
       dataIndex: 'groupName',
       width: 140,
       render: (v: string, row: IndicatorInfo) =>
@@ -77,13 +79,13 @@ export default function IndicatorsByTech({ deviceType, filter }: Props) {
     },
     // 2026-05-29 用户决策:删除"平台"列 — 详情态由 URL ?platform= 锁定,
     // 同一视图下所有行都属同一 platform,列冗余。
-    { title: '计数器类型', dataIndex: 'counterType', width: 110 },
+    { title: t('product.kpi.col.counterType'), dataIndex: 'counterType', width: 110 },
     ...(deviceType === 'GNB'
       ? []
-      : [{ title: '级别', dataIndex: 'indicatorLevel', width: 90 }]),
-    { title: '单位', dataIndex: 'unit', width: 80 },
+      : [{ title: t('common.level'), dataIndex: 'indicatorLevel', width: 90 }]),
+    { title: t('common.unit'), dataIndex: 'unit', width: 80 },
     {
-      title: '启用',
+      title: t('common.enable'),
       dataIndex: 'id',
       width: 80,
       render: (id: string) => (
@@ -110,7 +112,7 @@ export default function IndicatorsByTech({ deviceType, filter }: Props) {
       ),
     },
     {
-      title: '操作',
+      title: t('common.action'),
       width: 80,
       render: (_: unknown, row: IndicatorInfo) => (
         <Button
@@ -138,7 +140,7 @@ export default function IndicatorsByTech({ deviceType, filter }: Props) {
           pageSize,
           total: data?.total || 0,
           showSizeChanger: true,
-          showTotal: (t) => `共 ${t} 条`,
+          showTotal: (total) => t('common.totalCount', { count: total }),
           onChange: (p, ps) => {
             setPage(p);
             setPageSize(ps);

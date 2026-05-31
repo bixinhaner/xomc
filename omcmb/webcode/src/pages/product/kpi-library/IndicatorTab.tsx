@@ -50,21 +50,21 @@ export default function IndicatorTab({ deviceType }: Props) {
 
   const columns = [
     { title: 'ID', dataIndex: 'id', width: 140 },
-    { title: '中文名', dataIndex: 'cnName', width: 200 },
-    { title: '英文名', dataIndex: 'enName', width: 240, ellipsis: true },
+    { title: t('common.cnName'), dataIndex: 'cnName', width: 200 },
+    { title: t('common.enName'), dataIndex: 'enName', width: 240, ellipsis: true },
     {
-      title: '分组',
+      title: t('common.group'),
       dataIndex: 'groupName',
       width: 140,
       render: (v: string, row: IndicatorInfo) => v || row.groupId || '—',
     },
-    { title: '计数器类型', dataIndex: 'counterType', width: 110 },
+    { title: t('product.kpi.col.counterType'), dataIndex: 'counterType', width: 110 },
     ...(deviceType === 'GNB'
       ? []
-      : [{ title: '级别', dataIndex: 'indicatorLevel', width: 90 }]),
-    { title: '单位', dataIndex: 'unit', width: 80 },
+      : [{ title: t('common.level'), dataIndex: 'indicatorLevel', width: 90 }]),
+    { title: t('common.unit'), dataIndex: 'unit', width: 80 },
     {
-      title: '启用',
+      title: t('common.enable'),
       dataIndex: 'id',
       width: 80,
       render: (id: string) => (
@@ -91,7 +91,7 @@ export default function IndicatorTab({ deviceType }: Props) {
       ),
     },
     {
-      title: '操作',
+      title: t('common.action'),
       width: 140,
       render: (_: unknown, row: IndicatorInfo) => (
         <Space>
@@ -103,10 +103,10 @@ export default function IndicatorTab({ deviceType }: Props) {
               setDrawerOpen(true);
             }}
           >
-            详情
+            {t('common.detail')}
           </Button>
           <Popconfirm
-            title={`确认删除指标「${row.id}」？关联公式会一并删除`}
+            title={t('product.kpi.confirmDeleteIndicator', { id: row.id })}
             onConfirm={() =>
               deleteMut
                 .mutateAsync({ deviceType, id: row.id })
@@ -124,7 +124,7 @@ export default function IndicatorTab({ deviceType }: Props) {
   return (
     <Card
       size="small"
-      title={`${deviceType} 指标列表`}
+      title={t('product.kpi.indicatorsByDevice', { deviceType })}
       extra={
         <Space>
           {showPlatformFilter && (
@@ -164,7 +164,7 @@ export default function IndicatorTab({ deviceType }: Props) {
           pageSize,
           total: data?.total || 0,
           showSizeChanger: true,
-          showTotal: (t) => `共 ${t} 条`,
+          showTotal: (total) => t('common.totalCount', { count: total }),
           onChange: (p, ps) => {
             setPage(p);
             setPageSize(ps);
