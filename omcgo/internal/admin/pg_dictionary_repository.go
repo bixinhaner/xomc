@@ -562,50 +562,58 @@ func (r *PgDictionaryDetailRepository) ShiftLevelDelta(ctx context.Context, ids 
 // === T-0182 数据源同步专用方法 ===
 
 // UpsertAutoBatch 对一批 (label, value) 做 upsert(origin='auto'):
-//   - 自然键 (sys_dictionary_id, value, origin='auto', deleted_at IS NULL) 单行
-//   - 命中存在行 → label 不同时 UPDATE,否则不动
-//   - 未命中 → INSERT 新行 (status=true, sort=0, parent_id=NULL, level=0)
+//   - 自然键 (sys_dictionary_id, value, parent_id=NULL, deleted_at IS NULL) 单行
+//     —— 跟 uniq_dict_detail_top_value 部分唯一约束对齐(不分 origin)
+//   - 命中已有 manual 行(同 value 顶层) → **跳过插入**,manual 优先(PRD §3.2.4
+//     方案 A:托管字典里 manual 项保留;同 value 时 manual 占位赢,auto 不挤兑)
+//   - 命中已有 auto 行 → label 不同时 UPDATE,否则不动
+//   - 未命中 → INSERT 新行 (status=true, sort=0, parent_id=NULL, level=0, origin='auto')
 //
 // 返回 (inserted, updated)。空 rows 直接返 0,0。
 //
-// 实现:不走 ON CONFLICT(没有适合的 UNIQUE 约束,且 v1 允许 manual 行与 auto 行
-// 共存同 value),而是按 dict+value 分桶 SELECT → 逐条决策 → 写。N <= 5000 行内
-// 可接受。后续可改为 batch CopyFrom + Diff 优化。
+// 实现:不走 ON CONFLICT(uniq_dict_detail_top_value 部分唯一约束不在
+// (sys_dictionary_id, value, origin) 上,无法借力),而是按 dict+value 分桶
+// SELECT(查全部 origin)→ 逐条决策 → 写。N <= 5000 行内可接受。
+//
+// 历史 bug(2026-05-31 T-0182 上线后真机抓):原实现只查 origin='auto' 现存行,
+// manual 同 value 不在 existing 集合 → 直接 INSERT → 撞 uniq_dict_detail_top_value
+// 报 23505。修复改为查全部 origin + manual 跳过策略。
 func (r *PgDictionaryDetailRepository) UpsertAutoBatch(ctx context.Context, dictID int64, rows []AutoDetailRow) (int, int, error) {
 	if len(rows) == 0 {
 		return 0, 0, nil
 	}
 
-	// 1. 拉当前 auto 行的 (value → id, label) 映射,O(n) 比对。
-	existing := make(map[string]struct {
-		ID    int64
-		Label string
-	}, len(rows))
+	// 1. 拉当前所有 origin 的顶层未删除行 (value → id, origin, label) 映射,O(n) 比对。
+	// 必须查全部 origin(不只 'auto')才能跟 uniq_dict_detail_top_value 唯一约束
+	// 对齐 —— 否则 manual 同 value 会被 INSERT 撞约束。
+	type existingRow struct {
+		ID     int64
+		Origin string
+		Label  string
+	}
+	existing := make(map[string]existingRow, len(rows))
 	const existsSQL = `
-SELECT id, label, value
+SELECT id, label, value, origin
 FROM sys_dictionary_details
 WHERE sys_dictionary_id = $1
-  AND origin = 'auto'
+  AND parent_id IS NULL
   AND deleted_at IS NULL`
 	qRows, err := r.pool.Query(ctx, existsSQL, dictID)
 	if err != nil {
-		return 0, 0, fmt.Errorf("load existing auto rows: %w", err)
+		return 0, 0, fmt.Errorf("load existing top-level rows: %w", err)
 	}
 	for qRows.Next() {
 		var id int64
-		var label, value string
-		if err := qRows.Scan(&id, &label, &value); err != nil {
+		var label, value, origin string
+		if err := qRows.Scan(&id, &label, &value, &origin); err != nil {
 			qRows.Close()
-			return 0, 0, fmt.Errorf("scan existing auto: %w", err)
+			return 0, 0, fmt.Errorf("scan existing row: %w", err)
 		}
-		existing[value] = struct {
-			ID    int64
-			Label string
-		}{ID: id, Label: label}
+		existing[value] = existingRow{ID: id, Origin: origin, Label: label}
 	}
 	qRows.Close()
 	if err := qRows.Err(); err != nil {
-		return 0, 0, fmt.Errorf("iter existing auto: %w", err)
+		return 0, 0, fmt.Errorf("iter existing rows: %w", err)
 	}
 
 	// 2. 分桶 + 批量执行 INSERT / UPDATE。事务包裹,任意一步失败回滚。
@@ -619,7 +627,9 @@ WHERE sys_dictionary_id = $1
 	inserted, updated := 0, 0
 	for _, row := range rows {
 		cur, ok := existing[row.Value]
-		if !ok {
+		switch {
+		case !ok:
+			// 无现存行 → 插入新 auto 行
 			_, err := tx.Exec(ctx,
 				`INSERT INTO sys_dictionary_details
 				 (label, value, extend, status, sort, sys_dictionary_id, parent_id, level, origin, created_at, updated_at)
@@ -630,7 +640,12 @@ WHERE sys_dictionary_id = $1
 				return 0, 0, fmt.Errorf("insert auto detail value=%s: %w", row.Value, err)
 			}
 			inserted++
-		} else if cur.Label != row.Label {
+		case cur.Origin == OriginManual:
+			// 已有 manual 行 → 跳过(manual 优先,PRD §3.2.4 方案 A)。
+			// 不计入 inserted/updated/deleted。注意:DeleteAutoNotIn 不会
+			// 删 manual 行(WHERE origin='auto'),manual 永远在。
+		case cur.Label != row.Label:
+			// 已有 auto 行且 label 变化 → UPDATE
 			_, err := tx.Exec(ctx,
 				`UPDATE sys_dictionary_details SET label = $1, updated_at = $2 WHERE id = $3`,
 				row.Label, now, cur.ID,
@@ -640,6 +655,7 @@ WHERE sys_dictionary_id = $1
 			}
 			updated++
 		}
+		// 已有 auto 行 + label 相同 → no-op
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, 0, fmt.Errorf("commit upsert tx: %w", err)
