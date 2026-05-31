@@ -38,7 +38,19 @@ export interface Dictionary {
   sysDictionaryDetails?: DictionaryDetail[];
   createdAt?: string;
   updatedAt?: string;
+  // T-0182 数据源绑定。三字段全 null/undefined = 手工字典；
+  // 三字段全 string 非空 = 托管字典(后端同步 auto 项)。
+  sourceTable?: string | null;
+  sourceLabelField?: string | null;
+  sourceValueField?: string | null;
+  lastRefreshAt?: string | null;
+  lastRefreshStatus?: 'ok' | 'failed' | 'running' | 'timeout' | null;
+  lastRefreshError?: string | null;
+  lastRefreshCount?: number | null;
 }
+
+// 字典项来源 — T-0182
+export type DictionaryDetailOrigin = 'manual' | 'auto';
 
 export interface DictionaryDetail {
   id: number;
@@ -51,6 +63,8 @@ export interface DictionaryDetail {
   // PRD docs/prd/system/data-dictionary.md §10 v0.2 新增字段
   parentId?: number | null; // null/undefined = 顶层项
   level: number;            // 0 = 顶层 / 1 = 一级子 / 2 = 二级子（最大深度 3）
+  // T-0182:manual=手工录入 / auto=数据源同步;UI 据此渲染来源 Tag + 禁用编辑/删除。
+  origin: DictionaryDetailOrigin;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -60,6 +74,10 @@ export interface CreateDictionaryPayload {
   type: string;
   status?: boolean;
   desc?: string;
+  // T-0182:三字段同时空 = 手工字典;同时非空 = 托管字典。部分填写后端 400。
+  sourceTable?: string;
+  sourceLabelField?: string;
+  sourceValueField?: string;
 }
 
 export interface UpdateDictionaryPayload {
@@ -68,6 +86,44 @@ export interface UpdateDictionaryPayload {
   type?: string;
   status?: boolean;
   desc?: string;
+  // T-0182:
+  //   - 三字段都不传 → 不动数据源绑定
+  //   - 三字段都传非空 → 绑定/切换
+  //   - 三字段都传空字符串 → 解绑(删 auto 项,保留 manual)
+  sourceTable?: string | null;
+  sourceLabelField?: string | null;
+  sourceValueField?: string | null;
+}
+
+// T-0182 数据源白名单 ListSources 返回结构。
+export interface DictionarySourceField {
+  column: string;
+  display: string;
+  type: string;
+}
+export interface DictionarySource {
+  table: string;
+  display_name: string;
+  fields: DictionarySourceField[];
+}
+
+// T-0182 预览(dry-run)返回结构。
+export interface DictionaryPreviewRow {
+  label: string;
+  value: string;
+}
+export interface DictionaryPreviewResponse {
+  rows: DictionaryPreviewRow[];
+  total: number;
+}
+
+// T-0182 手动刷新返回结构。
+export interface DictionaryRefreshResponse {
+  inserted: number;
+  updated: number;
+  deleted: number;
+  total: number;
+  duration_ms: number;
 }
 
 export interface CreateDictionaryDetailPayload {
@@ -125,6 +181,14 @@ interface BackendDictionary {
   desc: string;
   created_at?: string;
   updated_at?: string;
+  // T-0182 数据源字段(后端 JSON tag 用 snake_case)。
+  source_table?: string | null;
+  source_label_field?: string | null;
+  source_value_field?: string | null;
+  last_refresh_at?: string | null;
+  last_refresh_status?: string | null;
+  last_refresh_error?: string | null;
+  last_refresh_count?: number | null;
 }
 
 interface BackendDictionaryDetail {
@@ -138,6 +202,8 @@ interface BackendDictionaryDetail {
   // PRD §10 v0.2：parent_id (snake) + level
   parent_id?: number | null;
   level?: number;
+  // T-0182 数据源同步:origin = manual / auto
+  origin?: DictionaryDetailOrigin;
   created_at?: string;
   updated_at?: string;
 }
@@ -151,6 +217,13 @@ function mapBackendDictionary(b: BackendDictionary): Dictionary {
     desc: b.desc || '',
     createdAt: b.created_at,
     updatedAt: b.updated_at,
+    sourceTable: b.source_table ?? null,
+    sourceLabelField: b.source_label_field ?? null,
+    sourceValueField: b.source_value_field ?? null,
+    lastRefreshAt: b.last_refresh_at ?? null,
+    lastRefreshStatus: (b.last_refresh_status as Dictionary['lastRefreshStatus']) ?? null,
+    lastRefreshError: b.last_refresh_error ?? null,
+    lastRefreshCount: b.last_refresh_count ?? null,
   };
 }
 
@@ -165,9 +238,32 @@ function mapBackendDictionaryDetail(b: BackendDictionaryDetail): DictionaryDetai
     sysDictionaryId: b.sysDictionaryId,
     parentId: b.parent_id ?? null,
     level: b.level ?? 0,
+    origin: (b.origin as DictionaryDetailOrigin) ?? 'manual',
     createdAt: b.created_at,
     updatedAt: b.updated_at,
   };
+}
+
+// 把前端 Dictionary 创建/更新 payload 转为后端 JSON(snake_case)。
+// source_* 字段始终携带(undefined 跳过、null 携带 null = 解绑),让后端区分"未传"vs"显式置空"。
+//
+// 用 union 而非 Partial<Create & Update> — Create.sourceTable 是 string,
+// Update.sourceTable 是 string|null,Partial<Create & Update> 交集后 sourceTable
+// 落到 string,导致 Update payload 传 null 时不通过(v2 严格 typecheck 暴露此问题)。
+function toBackendDictionaryBody(
+  p: CreateDictionaryPayload | UpdateDictionaryPayload,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  const anyP = p as CreateDictionaryPayload & UpdateDictionaryPayload;
+  if (anyP.id !== undefined) body.id = anyP.id;
+  if (anyP.name !== undefined) body.name = anyP.name;
+  if (anyP.type !== undefined) body.type = anyP.type;
+  if (anyP.status !== undefined) body.status = anyP.status;
+  if (anyP.desc !== undefined) body.desc = anyP.desc;
+  if (Object.prototype.hasOwnProperty.call(p, 'sourceTable')) body.source_table = anyP.sourceTable;
+  if (Object.prototype.hasOwnProperty.call(p, 'sourceLabelField')) body.source_label_field = anyP.sourceLabelField;
+  if (Object.prototype.hasOwnProperty.call(p, 'sourceValueField')) body.source_value_field = anyP.sourceValueField;
+  return body;
 }
 
 // 把前端 camelCase payload 转成后端 JSON：parentId → parent_id（仅当字段存在时携带）。
@@ -914,12 +1010,18 @@ export const adminApi = {
   },
 
   async createDictionary(req: CreateDictionaryPayload): Promise<Dictionary> {
-    const { data } = await http.post<BackendDictionary>('/admin/sysDictionary/createSysDictionary', req);
+    const { data } = await http.post<BackendDictionary>(
+      '/admin/sysDictionary/createSysDictionary',
+      toBackendDictionaryBody(req),
+    );
     return mapBackendDictionary(data);
   },
 
   async updateDictionary(req: UpdateDictionaryPayload): Promise<Dictionary> {
-    const { data } = await http.put<BackendDictionary>('/admin/sysDictionary/updateSysDictionary', req);
+    const { data } = await http.put<BackendDictionary>(
+      '/admin/sysDictionary/updateSysDictionary',
+      toBackendDictionaryBody(req),
+    );
     return mapBackendDictionary(data);
   },
 
@@ -965,6 +1067,46 @@ export const adminApi = {
     const dict = mapBackendDictionary(data);
     dict.sysDictionaryDetails = (data.sysDictionaryDetails || []).map(mapBackendDictionaryDetail);
     return dict;
+  },
+
+  // ---- T-0182 数据字典数据源 ----
+  // 白名单 + dry-run 预览 + 手动刷新 3 个端点。所有调用方都在 /system/data-dictionary
+  // 页面;sourceTable 为 null 的字典不会触发这些路径(UI 隐藏对应入口)。
+
+  async listDictionarySources(): Promise<DictionarySource[]> {
+    const { data } = await http.get<{ sources: DictionarySource[] }>(
+      '/admin/sysDictionary/sources',
+    );
+    return data.sources || [];
+  },
+
+  async previewDictionarySource(params: {
+    table: string;
+    label: string;
+    value: string;
+    limit?: number;
+  }): Promise<DictionaryPreviewResponse> {
+    const { data } = await http.get<DictionaryPreviewResponse>(
+      '/admin/sysDictionary/sources/preview',
+      {
+        params: {
+          table: params.table,
+          label: params.label,
+          value: params.value,
+          limit: params.limit ?? 10,
+        },
+      },
+    );
+    return { rows: data.rows || [], total: data.total ?? 0 };
+  },
+
+  async refreshDictionarySource(id: number): Promise<DictionaryRefreshResponse> {
+    const { data } = await http.post<DictionaryRefreshResponse>(
+      '/admin/sysDictionary/refreshSource',
+      undefined,
+      { params: { id } },
+    );
+    return data;
   },
 
   // ---- Batch dictionary queries ----

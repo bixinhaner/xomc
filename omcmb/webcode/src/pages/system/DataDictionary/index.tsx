@@ -24,6 +24,7 @@ import {
   DeleteOutlined,
   SearchOutlined,
   PlusSquareOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import DataTable from '@/components/DataTable';
 import type { DataTableColumn } from '@/components/DataTable';
@@ -37,6 +38,7 @@ import type {
   CreateDictionaryDetailPayload,
   UpdateDictionaryDetailPayload,
 } from '@core/services/api/adminApi';
+import SourcePicker, { type SourcePickerValue } from './SourcePicker';
 
 // ---- Dictionary List (Left Panel) ----
 interface DictListPanelProps {
@@ -53,6 +55,10 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
   const [dictModalOpen, setDictModalOpen] = useState(false);
   const [editingDict, setEditingDict] = useState<Dictionary | null>(null);
   const [dictForm] = Form.useForm<CreateDictionaryPayload>();
+  // T-0182 数据源绑定:与表单解耦的受控状态(避免 antd Form.Item 嵌套 SourcePicker 的复杂性)
+  const [sourcePickerValue, setSourcePickerValue] = useState<SourcePickerValue>({});
+  // T-0182 手动刷新中的字典 ID(loading + 禁用其它操作)
+  const [refreshingId, setRefreshingId] = useState<number | null>(null);
 
   const { data: dictData, isLoading } = useQuery({
     queryKey: ['dictionaries'],
@@ -81,6 +87,29 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
     onError: () => void message.error(t('common.saveFailed') || '保存失败'),
   });
 
+  // T-0182 手动刷新单字典的数据源同步。
+  const refreshSourceMutation = useMutation({
+    mutationFn: (id: number) => adminApi.refreshDictionarySource(id),
+    onMutate: (id) => setRefreshingId(id),
+    onSettled: () => setRefreshingId(null),
+    onSuccess: (res) => {
+      void queryClient.invalidateQueries({ queryKey: ['dictionaries'] });
+      // 字典项列表也要刷新(同步可能改了 auto 项)
+      void queryClient.invalidateQueries({ queryKey: ['dictionary-details'] });
+      void message.success(
+        t('dictionary.source.refreshSuccess', {
+          inserted: res.inserted,
+          deleted: res.deleted,
+          total: res.total,
+        }),
+      );
+    },
+    onError: (err) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      void message.error(t('dictionary.source.refreshFailed', { error: msg }));
+    },
+  });
+
   const deleteDictMutation = useMutation({
     mutationFn: (id: number) => adminApi.deleteDictionary(id),
     onSuccess: () => {
@@ -105,6 +134,7 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
     setEditingDict(null);
     dictForm.resetFields();
     dictForm.setFieldsValue({ status: true });
+    setSourcePickerValue({});
     setDictModalOpen(true);
   };
 
@@ -115,6 +145,12 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
       type: dict.type,
       status: dict.status,
       desc: dict.desc,
+    });
+    // 编辑现有字典:回填已有源绑定;手工字典三字段全 null
+    setSourcePickerValue({
+      sourceTable: dict.sourceTable ?? null,
+      sourceLabelField: dict.sourceLabelField ?? null,
+      sourceValueField: dict.sourceValueField ?? null,
     });
     setDictModalOpen(true);
   };
@@ -128,12 +164,105 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
     });
   };
 
+  // T-0182 手动刷新按钮:仅托管字典显示。
+  const handleRefreshSource = (dict: Dictionary) => {
+    refreshSourceMutation.mutate(dict.id);
+  };
+
+  // 组合 form fields + source picker state 提交。
+  // 校验三字段同时空或同时填(部分填写阻拦在前端,避免后端 400 噪声)。
+  const collectSourceFields = (): {
+    valid: boolean;
+    fields: {
+      sourceTable?: string | null;
+      sourceLabelField?: string | null;
+      sourceValueField?: string | null;
+    };
+  } => {
+    const t1 = sourcePickerValue.sourceTable;
+    const l = sourcePickerValue.sourceLabelField;
+    const v = sourcePickerValue.sourceValueField;
+    const all = [t1, l, v];
+    const filled = all.filter((x) => x && x !== '').length;
+    if (filled === 0) {
+      // 未绑定:create 不传字段,update 传 null 表示解绑(若原来是托管字典)
+      return { valid: true, fields: {} };
+    }
+    if (filled === 3) {
+      return {
+        valid: true,
+        fields: {
+          sourceTable: t1 || undefined,
+          sourceLabelField: l || undefined,
+          sourceValueField: v || undefined,
+        },
+      };
+    }
+    return { valid: false, fields: {} };
+  };
+
   const handleSave = () => {
     void dictForm.validateFields().then((vals) => {
-      if (editingDict) {
-        updateDictMutation.mutate({ id: editingDict.id, ...vals });
+      const sc = collectSourceFields();
+      if (!sc.valid) {
+        void message.error(t('dictionary.source.partialFieldsError'));
+        return;
+      }
+
+      // 编辑时:旧绑定 → 新绑定切表 → 弹确认(auto 项会被清空重建)
+      const isSwitchingTable =
+        !!editingDict &&
+        !!editingDict.sourceTable &&
+        !!sc.fields.sourceTable &&
+        editingDict.sourceTable !== sc.fields.sourceTable;
+      // 编辑时:旧绑定 → 解绑 → 弹确认
+      const isUnbinding =
+        !!editingDict &&
+        !!editingDict.sourceTable &&
+        Object.keys(sc.fields).length === 0;
+
+      const doSave = () => {
+        if (editingDict) {
+          // update 路径:解绑时显式发空字符串触发后端 sourceCleared 分支
+          const updateBody: UpdateDictionaryPayload = { id: editingDict.id, ...vals };
+          if (Object.keys(sc.fields).length === 0 && editingDict.sourceTable) {
+            updateBody.sourceTable = '';
+            updateBody.sourceLabelField = '';
+            updateBody.sourceValueField = '';
+          } else if (sc.fields.sourceTable) {
+            updateBody.sourceTable = sc.fields.sourceTable;
+            updateBody.sourceLabelField = sc.fields.sourceLabelField;
+            updateBody.sourceValueField = sc.fields.sourceValueField;
+          }
+          updateDictMutation.mutate(updateBody);
+        } else {
+          // create 路径
+          const createBody: CreateDictionaryPayload = vals as CreateDictionaryPayload;
+          if (sc.fields.sourceTable) {
+            createBody.sourceTable = sc.fields.sourceTable;
+            createBody.sourceLabelField = sc.fields.sourceLabelField;
+            createBody.sourceValueField = sc.fields.sourceValueField;
+          }
+          createDictMutation.mutate(createBody);
+        }
+      };
+
+      if (isSwitchingTable) {
+        modal.confirm({
+          title: t('dictionary.source.switchTableConfirm'),
+          content: t('dictionary.source.switchTableContent'),
+          okType: 'danger',
+          onOk: doSave,
+        });
+      } else if (isUnbinding) {
+        modal.confirm({
+          title: t('dictionary.source.unbindConfirm'),
+          content: t('dictionary.source.unbindContent'),
+          okType: 'danger',
+          onOk: doSave,
+        });
       } else {
-        createDictMutation.mutate(vals as CreateDictionaryPayload);
+        doSave();
       }
     });
   };
@@ -202,6 +331,21 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
                       {dict.name}
                     </span>
                     <Space size={2}>
+                      {/* T-0182 手动刷新:仅托管字典(sourceTable != null)显示;按钮放在编辑前 */}
+                      {dict.sourceTable && (
+                        <Tooltip title={t('dictionary.source.refreshBtn')}>
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<SyncOutlined spin={refreshingId === dict.id} />}
+                            disabled={refreshingId !== null}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRefreshSource(dict);
+                            }}
+                          />
+                        </Tooltip>
+                      )}
                       <Tooltip title={t('common.edit')}>
                         <Button
                           type="text"
@@ -224,6 +368,20 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
                   <div style={{ fontSize: 11, color: '#8c8c8c', marginTop: 2 }}>
                     <Tag color="blue" style={{ fontSize: 11, lineHeight: '18px' }}>{dict.type}</Tag>
                     {!dict.status && <Tag color="default" style={{ fontSize: 11, lineHeight: '18px' }}>{t('status.disabled')}</Tag>}
+                    {/* T-0182 托管字典标记 + 上次同步时间 */}
+                    {dict.sourceTable && (
+                      <Tooltip
+                        title={
+                          dict.lastRefreshAt
+                            ? t('dictionary.source.lastRefreshAt', { time: dict.lastRefreshAt })
+                            : t('dictionary.source.notSyncedYet')
+                        }
+                      >
+                        <Tag color="cyan" style={{ fontSize: 11, lineHeight: '18px' }}>
+                          {t('dictionary.source.managedTag')}
+                        </Tag>
+                      </Tooltip>
+                    )}
                   </div>
                 </div>
               </List.Item>
@@ -255,6 +413,11 @@ function DictListPanel({ selectedId, onSelect }: DictListPanelProps) {
           <Form.Item name="desc" label={t('dictionary.desc')}>
             <Input.TextArea rows={2} placeholder={t('dictionary.desc')} />
           </Form.Item>
+          {/* T-0182 数据源(可选):三字段同时空 = 手工字典;同时填 = 托管字典 */}
+          <SourcePicker
+            value={sourcePickerValue}
+            onChange={setSourcePickerValue}
+          />
         </Form>
       </Modal>
     </div>
@@ -275,6 +438,9 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
   const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [editingDetail, setEditingDetail] = useState<DictionaryDetail | null>(null);
   const [detailForm] = Form.useForm<CreateDictionaryDetailPayload>();
+  // T-0182:托管字典(source_table != null)隐藏"+添加详情" / "+添加子项";
+  // auto 行编辑/删除禁用(只读),manual 行仍允许(方案 A 兼容历史数据)。
+  const isManaged = !!selectedDict?.sourceTable;
 
   const { data: detailData, isLoading } = useQuery({
     queryKey: ['dictionary-details', selectedDict?.id, searchLabel],
@@ -438,19 +604,39 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
         render: (val) => Number(val ?? 0),
       },
       {
+        // T-0182:来源列(auto=自动同步 / manual=手工录入)
+        key: 'origin',
+        title: t('dictionary.detail.originColumn'),
+        dataIndex: 'origin',
+        width: 100,
+        render: (val) => {
+          const o = (val as string) ?? 'manual';
+          return o === 'auto' ? (
+            <Tag color="cyan">{t('dictionary.detail.originAuto')}</Tag>
+          ) : (
+            <Tag color="default">{t('dictionary.detail.originManual')}</Tag>
+          );
+        },
+      },
+      {
         key: 'status',
         title: t('dictionary.status'),
         dataIndex: 'status',
         width: 90,
         render: (val, record) => {
           const detail = record as DictionaryDetail;
+          // T-0182:auto 行的 status 也不允许手工切换 — 同步任务才能改
+          const isAuto = detail.origin === 'auto';
           return (
-            <Switch
-              size="small"
-              checked={Boolean(val)}
-              loading={updateDetailMutation.isPending}
-              onChange={(checked) => handleStatusChange(detail, checked)}
-            />
+            <Tooltip title={isAuto ? t('dictionary.detail.autoReadOnly') : ''}>
+              <Switch
+                size="small"
+                checked={Boolean(val)}
+                loading={updateDetailMutation.isPending}
+                disabled={isAuto}
+                onChange={(checked) => handleStatusChange(detail, checked)}
+              />
+            </Tooltip>
           );
         },
       },
@@ -470,43 +656,55 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
           const detail = record as DictionaryDetail;
           // PRD §10：仅当 detail.level < MaxDepth-1 (=2) 时允许加子项。
           const canAddChild = (detail.level ?? 0) < 2;
+          // T-0182:托管字典里 auto 行禁编辑/删除/+子项;manual 行(历史补录)仍可改
+          const isAuto = detail.origin === 'auto';
+          const autoTip = t('dictionary.detail.autoReadOnly');
           return (
             <Space size={4}>
-              <Tooltip title={canAddChild ? '' : '已达最大深度'}>
+              {/* 托管字典下"+ 添加子项"按钮整体隐藏(托管字典不支持层级,参 PRD §3.2.5) */}
+              {!isManaged && (
+                <Tooltip title={canAddChild ? '' : '已达最大深度'}>
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<PlusSquareOutlined />}
+                    onClick={() => openAdd(detail)}
+                    disabled={!canAddChild}
+                  >
+                    添加子项
+                  </Button>
+                </Tooltip>
+              )}
+              <Tooltip title={isAuto ? autoTip : ''}>
                 <Button
                   type="link"
                   size="small"
-                  icon={<PlusSquareOutlined />}
-                  onClick={() => openAdd(detail)}
-                  disabled={!canAddChild}
+                  icon={<EditOutlined />}
+                  disabled={isAuto}
+                  onClick={() => openEdit(detail)}
                 >
-                  添加子项
+                  {t('common.edit')}
                 </Button>
               </Tooltip>
-              <Button
-                type="link"
-                size="small"
-                icon={<EditOutlined />}
-                onClick={() => openEdit(detail)}
-              >
-                {t('common.edit')}
-              </Button>
-              <Button
-                type="link"
-                size="small"
-                danger
-                icon={<DeleteOutlined />}
-                onClick={() => handleDelete(detail)}
-              >
-                {t('common.delete')}
-              </Button>
+              <Tooltip title={isAuto ? autoTip : ''}>
+                <Button
+                  type="link"
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  disabled={isAuto}
+                  onClick={() => handleDelete(detail)}
+                >
+                  {t('common.delete')}
+                </Button>
+              </Tooltip>
             </Space>
           );
         },
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [t, updateDetailMutation.isPending],
+    [t, updateDetailMutation.isPending, isManaged],
   );
 
   // PRD §10 v0.2：把扁平的字典项列表构建成 parentId → children 的树形结构，
@@ -581,15 +779,23 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
             allowClear
             disabled={!selectedDict}
           />
-          <Button
-            type="primary"
-            size="small"
-            icon={<PlusOutlined />}
-            disabled={!selectedDict}
-            onClick={() => openAdd()}
-          >
-            {t('dictionary.addDetail')}
-          </Button>
+          {/* T-0182:托管字典隐藏顶部"+ 添加详情"按钮(整托管 = 不能手工增 auto 项) */}
+          {!isManaged && (
+            <Button
+              type="primary"
+              size="small"
+              icon={<PlusOutlined />}
+              disabled={!selectedDict}
+              onClick={() => openAdd()}
+            >
+              {t('dictionary.addDetail')}
+            </Button>
+          )}
+          {isManaged && (
+            <Tooltip title={t('dictionary.source.managedTip')}>
+              <Tag color="cyan">{t('dictionary.source.managedTag')}</Tag>
+            </Tooltip>
+          )}
         </Space>
       </div>
 
