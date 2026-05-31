@@ -595,6 +595,10 @@ export const deviceApi = {
 
   async createGroup(data: {
     name: string;
+    /** i18n 三件套 (i18n B1 WRITE 路径)。{"zh-CN":"...","en-US":"..."}。 */
+    name_i18n?: Record<string, string>;
+    description_i18n?: Record<string, string>;
+    remark_i18n?: Record<string, string>;
     parent_id?: string;
     remark?: string;
     matching_mode?: 'deviceName' | 'lac' | 'tac';
@@ -608,6 +612,10 @@ export const deviceApi = {
 
   async updateGroup(id: string, data: {
     name?: string;
+    /** i18n 三件套 (i18n B1 WRITE 路径)。 */
+    name_i18n?: Record<string, string>;
+    description_i18n?: Record<string, string>;
+    remark_i18n?: Record<string, string>;
     parent_id?: string;
     remark?: string;
     matching_mode?: 'deviceName' | 'lac' | 'tac';

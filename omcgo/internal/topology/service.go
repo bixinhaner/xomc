@@ -141,6 +141,9 @@ func (s *DeviceGroupService) CreateGroup(ctx context.Context, req CreateGroupReq
 
 	group := &DeviceGroup{
 		Name:         req.Name,
+		NameI18n:        req.NameI18n,
+		DescriptionI18n: req.DescriptionI18n,
+		RemarkI18n:      req.RemarkI18n,
 		ParentID:     parentID,
 		Carrier:      carrier(req.Carrier),
 		Remark:       req.Remark,
@@ -254,6 +257,15 @@ func (s *DeviceGroupService) UpdateGroup(ctx context.Context, id uuid.UUID, req 
 			return nil, commonerrors.NewBusinessError(global.ErrCodeGroupNameDuplicate, "group name already exists under this parent", nil)
 		}
 		group.Name = *req.Name
+	}
+	if req.NameI18n != nil {
+		group.NameI18n = req.NameI18n
+	}
+	if req.DescriptionI18n != nil {
+		group.DescriptionI18n = req.DescriptionI18n
+	}
+	if req.RemarkI18n != nil {
+		group.RemarkI18n = req.RemarkI18n
 	}
 	if req.Remark != nil {
 		group.Remark = *req.Remark

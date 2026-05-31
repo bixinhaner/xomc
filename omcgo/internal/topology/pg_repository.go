@@ -65,6 +65,10 @@ func (r *PgDeviceGroupRepository) Create(ctx context.Context, group *DeviceGroup
 			return fmt.Errorf("marshal name_rule_list: %w", err)
 		}
 	}
+	// i18n JSONB 列 — migration 000003
+	nameI18nJSON := marshalI18n(group.NameI18n)
+	descI18nJSON := marshalI18n(group.DescriptionI18n)
+	remarkI18nJSON := marshalI18n(group.RemarkI18n)
 
 	query, args, err := storage.Psql.Insert("device_groups").
 		Columns(groupColumns...).
@@ -80,6 +84,7 @@ func (r *PgDeviceGroupRepository) Create(ctx context.Context, group *DeviceGroup
 			nullableIntArray(group.LACList),
 			nullableIntArray(group.TACList),
 			nullableStringArray(group.SerialNumberList),
+			nameI18nJSON, descI18nJSON, remarkI18nJSON,
 		).
 		ToSql()
 	if err != nil {
@@ -137,6 +142,9 @@ func (r *PgDeviceGroupRepository) Update(ctx context.Context, group *DeviceGroup
 		Set("lac_list", nullableIntArray(group.LACList)).
 		Set("tac_list", nullableIntArray(group.TACList)).
 		Set("serial_number_list", nullableStringArray(group.SerialNumberList)).
+		Set("name_i18n", marshalI18n(group.NameI18n)).             // migration 000003 i18n
+		Set("description_i18n", marshalI18n(group.DescriptionI18n)).
+		Set("remark_i18n", marshalI18n(group.RemarkI18n)).
 		Where(sq.Eq{"id": group.ID}).
 		ToSql()
 	if err != nil {
@@ -684,6 +692,20 @@ func nullableJSONB(data []byte) interface{} {
 		return nil
 	}
 	return data
+}
+
+// marshalI18n: map[string]string → JSONB bytes for direct pgx insert.
+// Empty/nil map → '{}'::jsonb (not NULL) since DB column is NOT NULL DEFAULT '{}'.
+func marshalI18n(m map[string]string) []byte {
+	if len(m) == 0 {
+		return []byte(`{}`)
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		// Marshal of map[string]string never fails in practice; fall back to empty JSON to keep INSERT safe.
+		return []byte(`{}`)
+	}
+	return b
 }
 
 func nullableIntArray(arr []int) interface{} {

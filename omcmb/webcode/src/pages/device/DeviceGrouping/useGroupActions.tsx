@@ -5,9 +5,10 @@ import { parseRangeString } from './types';
 import type { UseNameFiltersReturn } from './useNameFilters';
 
 export interface AddGroupFormValues {
-  name: string;
+  /** i18n dual-language inputs — I18nInput 嵌套字段。 */
+  name_i18n?: Record<string, string>;
+  description_i18n?: Record<string, string>;
   parentId?: string;
-  description: string;
 }
 
 export interface AddChildFormValues {
@@ -18,6 +19,9 @@ export interface AddChildFormValues {
 
 interface CreateGroupArgs {
   name: string;
+  name_i18n?: Record<string, string>;
+  description_i18n?: Record<string, string>;
+  remark_i18n?: Record<string, string>;
   parent_id?: string;
   remark: string;
   matching_mode?: string;
@@ -30,6 +34,9 @@ interface UpdateGroupArgs {
   id: string;
   data: {
     name?: string;
+    name_i18n?: Record<string, string>;
+    description_i18n?: Record<string, string>;
+    remark_i18n?: Record<string, string>;
     parent_id?: string;
     remark?: string;
     /**
@@ -152,10 +159,15 @@ export function useGroupActions(deps: {
       const grp = groups.find((g) => g.id === groupId);
       if (!grp) return;
       setEditingGroupId(groupId);
+      // i18n 表单值兜底:已有 nameI18n 用之;否则把 legacy name/description 套进 zh-CN
       editForm.setFieldsValue({
-        name: grp.name,
+        name_i18n: grp.nameI18n && Object.keys(grp.nameI18n).length > 0
+          ? grp.nameI18n
+          : { 'zh-CN': grp.name, 'en-US': grp.name },
+        description_i18n: grp.descriptionI18n && Object.keys(grp.descriptionI18n).length > 0
+          ? grp.descriptionI18n
+          : { 'zh-CN': grp.description, 'en-US': grp.description },
         parentId: grp.parentId || undefined,
-        description: grp.description,
       });
       setEditModalOpen(true);
     },
@@ -237,10 +249,16 @@ export function useGroupActions(deps: {
   const handleAddGroup = useCallback(async () => {
     try {
       const values = await addForm.validateFields();
+      // 从 i18n form 字段中提取 legacy 字段(zh-CN 作 fallback),保留完整 i18n map 发后端。
+      const nameZh = values.name_i18n?.['zh-CN'] || '';
+      const descZh = values.description_i18n?.['zh-CN'] || '';
       await createGroupMutation.mutateAsync({
-        name: values.name,
+        name: nameZh,
+        name_i18n: values.name_i18n,
+        description_i18n: values.description_i18n,
         parent_id: values.parentId || undefined,
-        remark: values.description,
+        remark: descZh,
+        remark_i18n: values.description_i18n,
       });
       void message.success(t('common.success'));
       setAddModalOpen(false);
@@ -253,12 +271,17 @@ export function useGroupActions(deps: {
     try {
       if (!editingGroupId) return;
       const values = await editForm.validateFields();
+      const nameZh = values.name_i18n?.['zh-CN'] || '';
+      const descZh = values.description_i18n?.['zh-CN'] || '';
       await updateGroupMutation.mutateAsync({
         id: editingGroupId,
         data: {
-          name: values.name,
+          name: nameZh,
+          name_i18n: values.name_i18n,
+          description_i18n: values.description_i18n,
           parent_id: values.parentId || undefined,
-          remark: values.description,
+          remark: descZh,
+          remark_i18n: values.description_i18n,
         },
       });
       void message.success(t('common.success'));

@@ -106,6 +106,11 @@ type DeviceGroupMember struct {
 // CreateGroupRequest is the payload for creating a device group.
 type CreateGroupRequest struct {
 	Name      string          `json:"name" binding:"required"`
+	// i18n 三件套(可选)。后端 INSERT 时写入 {name,description,remark}_i18n JSONB 列。
+	// 形态 {"zh-CN":"...","en-US":"..."}。空 map 落 '{}' 表示无 i18n,前端 fallback 单语言列。
+	NameI18n        map[string]string `json:"name_i18n,omitempty"`
+	DescriptionI18n map[string]string `json:"description_i18n,omitempty"`
+	RemarkI18n      map[string]string `json:"remark_i18n,omitempty"`
 	ParentID  string          `json:"parent_id"`
 	Carrier   string          `json:"carrier"`
 	Remark    string          `json:"remark"`
@@ -128,6 +133,10 @@ type SubGroupInput struct {
 // UpdateGroupRequest is the payload for updating a device group.
 type UpdateGroupRequest struct {
 	Name      *string    `json:"name"`
+	// i18n 三件套(可选)。nil = 不修改;非空 map = 覆盖整张 JSONB。
+	NameI18n        map[string]string `json:"name_i18n,omitempty"`
+	DescriptionI18n map[string]string `json:"description_i18n,omitempty"`
+	RemarkI18n      map[string]string `json:"remark_i18n,omitempty"`
 	ParentID  *string    `json:"parent_id"` // 修改父级分组（L1 转 L2 或 L2 转 L1）
 	Remark    *string    `json:"remark"`
 	SortOrder *int       `json:"sort_order"`

@@ -1,11 +1,16 @@
 import { useMemo } from 'react';
-import { Button, Drawer, Form, Input, TreeSelect } from 'antd';
+import { Button, Drawer, Form, TreeSelect } from 'antd';
 import type { FormInstance } from 'antd';
 import type { GroupItem } from './types';
+import I18nInput from '@/components/I18nInput';
 
 export interface AddGroupDrawerProps {
   open: boolean;
-  form: FormInstance<{ name: string; parentId?: string; description: string }>;
+  form: FormInstance<{
+    name_i18n?: Record<string, string>;
+    description_i18n?: Record<string, string>;
+    parentId?: string;
+  }>;
   groups: GroupItem[];
   onOk: () => void;
   onCancel: () => void;
@@ -52,13 +57,8 @@ export default function AddGroupDrawer({ open, form, groups, onOk, onCancel, t }
           <div style={{ marginBottom: 12, fontWeight: 500, color: 'var(--color-text)' }}>
             {t('device.basicInfo')}
           </div>
-          <Form.Item
-            name="name"
-            label={t('table.name')}
-            rules={[{ required: true, message: t('common.placeholder') }]}
-            style={{ marginBottom: 12 }}
-          >
-            <Input placeholder={t('common.placeholder')} maxLength={50} />
+          <Form.Item label={t('table.name')} required style={{ marginBottom: 12 }}>
+            <I18nInput name="name_i18n" required maxLength={50} />
           </Form.Item>
           <Form.Item
             name="parentId"
@@ -86,8 +86,8 @@ export default function AddGroupDrawer({ open, form, groups, onOk, onCancel, t }
           <div style={{ marginBottom: 12, fontWeight: 500, color: 'var(--color-text)' }}>
             {t('table.description')}
           </div>
-          <Form.Item name="description" style={{ marginBottom: 0 }}>
-            <Input.TextArea rows={3} placeholder={t('common.placeholder')} maxLength={200} />
+          <Form.Item style={{ marginBottom: 0 }}>
+            <I18nInput name="description_i18n" required={false} textarea rows={3} maxLength={200} />
           </Form.Item>
         </div>
       </Form>
