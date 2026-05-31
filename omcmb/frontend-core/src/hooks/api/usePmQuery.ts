@@ -8,12 +8,17 @@
 import { useQuery, useMutation, useQueryClient, useQueries } from '@tanstack/react-query';
 import { pmQueryApi } from '../../services/api/pmQueryApi';
 import { pmDashboardApi } from '../../services/api/pmDashboardApi';
+import { pmObjectsApi, pmObjectsMock } from '../../services/api/pmObjectsApi';
+import { createApiSwitch } from '../../services/apiSwitch';
 import type {
   ListTemplateParams,
   CreateTemplateInput,
   UpdateTemplateInput,
 } from '../../types/pmQuery';
 import type { AggregatedQueryParams, AggregatedRow } from '../../types/pmDashboard';
+import type { MetricObject } from '../../types/pmObject';
+
+const objectsApi = createApiSwitch(pmObjectsMock, pmObjectsApi);
 
 const KEY = ['pm-query-templates'] as const;
 
@@ -78,4 +83,41 @@ export function useAggregatedMetricsByDevices(
   const data: AggregatedRow[] = queries.flatMap((q) => q.data ?? []);
   const refetch = () => queries.forEach((q) => void q.refetch());
   return { data, isLoading, isFetching, isError, errors, refetch };
+}
+
+/**
+ * T-0193：列出一批设备实际出现过的「小区+PLMN」清单（下钻选择器用）。
+ * - enabled 仅当 deviceSns 非空（空设备不发请求，向后兼容「不下钻」语义）。
+ * - 查询键层级式 ['pm','metricObjects',{deviceSns,technology}]——设备/制式变化即重取。
+ */
+export function useMetricObjects(deviceSns: string[], technology?: string) {
+  return useQuery({
+    queryKey: ['pm', 'metricObjects', { deviceSns, technology }] as const,
+    queryFn: () => objectsApi.listMetricObjects(deviceSns, technology),
+    enabled: deviceSns.length > 0,
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * T-0193 下钻选择器用：按设备分别取小区清单（列小区接口本身不带 device_sn，
+ * 所以两层「设备→小区」必须每设备一查），合并成 Record<deviceSn, MetricObject[]>。
+ * 单设备并发 N 次（N=选中设备数，通常 1~10）。
+ */
+export function useMetricObjectsByDevices(deviceSns: string[], technology?: string) {
+  const queries = useQueries({
+    queries: deviceSns.map((sn) => ({
+      queryKey: ['pm', 'metricObjects', { deviceSns: [sn], technology }] as const,
+      queryFn: () => objectsApi.listMetricObjects([sn], technology),
+      enabled: deviceSns.length > 0,
+      staleTime: 30_000,
+    })),
+  });
+  const isLoading = queries.some((q) => q.isLoading);
+  const isFetching = queries.some((q) => q.isFetching);
+  const byDevice: Record<string, MetricObject[]> = {};
+  deviceSns.forEach((sn, i) => {
+    byDevice[sn] = queries[i]?.data ?? [];
+  });
+  return { byDevice, isLoading, isFetching };
 }

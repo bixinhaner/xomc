@@ -1,19 +1,21 @@
 /**
  * T-0188 设备列表页签出图 — 纯函数（聚合直查行转置），与 React 解耦便于单测。
  *
- * 转置语义：pm_metrics 直查行（AggregatedRow，long 格式，每行一指标一桶一设备）
- *   → 按指标分图、图内按 deviceSn 分线（每设备一条线）。
+ * 转置语义：pm_metrics 直查行（AggregatedRow，long 格式，每行一指标一桶一设备一小区）
+ *   → 按指标分图、图内按「设备 + 小区/PLMN」分线（T-0193：每设备每小区一条线）。
  *   - 过滤：只取选中 granularity 的行。
  *   - 分图：按 metricPath。
- *   - 分线：系列键恒 = deviceSn、系列名恒 = deviceSn（缺 SN 回退固定键，不丢线、不抛错）。
+ *   - 分线（T-0193）：系列键 = `deviceSn|objectLdn` 组合键；系列名 = 友好名「设备尾号 · 小区X · PLMNY」。
+ *     缺 object_ldn 的行兜底退化为按设备单线（键仅 deviceSn，名仅尾号），不丢线、不抛错。
  *   - 对齐：每条线 values 对齐该图全桶集合（startTime 升序去重），缺桶补 '-'（断线，不连）。
  *   - null 值：metricValue==null（fill_empty 占位行 / 缺采）当缺桶 '-'（不画点、断线）。
  *
  * 复用 taskDashboardUtils 的 MetricChart / MetricSeries 类型（同 shape，下游 ChartCard 共享）。
- * 与 buildMetricCharts 差异：吃 AggregatedRow（非 AdhocResultRow），系列键恒 = deviceSn。
+ * 与 buildMetricCharts 差异：吃 AggregatedRow（非 AdhocResultRow），系列键 = 设备+小区组合键。
  */
 
 import type { AggregatedRow } from '@core/types/pmDashboard';
+import { buildDeviceSeriesName, deviceSnTail } from '@core/types/pmObject';
 import type { MetricChart, MetricSeries, MetricSeriesValue } from './taskDashboardUtils';
 
 export type { MetricChart, MetricSeries, MetricSeriesValue } from './taskDashboardUtils';
@@ -40,7 +42,8 @@ export function buildDeviceMetricCharts(
       displayName: string;
       buckets: Set<string>;
       seriesOrder: string[];
-      points: Map<string, Map<string, number>>;
+      // seriesKey → { name, points }；name 是友好名（设备尾号 · 小区 · PLMN）。
+      series: Map<string, { name: string; points: Map<string, number> }>;
     }
   >();
 
@@ -51,37 +54,60 @@ export function buildDeviceMetricCharts(
         displayName: r.displayName || r.metricPath,
         buckets: new Set(),
         seriesOrder: [],
-        points: new Map(),
+        series: new Map(),
       };
       byMetric.set(r.metricPath, m);
       metricOrder.push(r.metricPath);
     }
     m.buckets.add(r.startTime);
-    const key = r.deviceSn || UNKNOWN_SN;
-    let pts = m.points.get(key);
-    if (!pts) {
-      pts = new Map();
-      m.points.set(key, pts);
+    // T-0193 分线键：设备 + 小区/PLMN 组合。缺 object_ldn → 兜底退化为按设备单线。
+    const sn = r.deviceSn || UNKNOWN_SN;
+    const ldn = r.objectLdn ?? '';
+    // 纯 fill_empty 占位行（无小区归属 + 无值）只用于对齐桶轴，不单独成线——
+    // 否则按小区分线时这些无小区占位行会聚成一条空的「仅设备」兜底线（T-0193）。
+    if (!ldn && r.metricValue === null) return;
+    const key = ldn ? `${sn}|${ldn}` : sn;
+    let s = m.series.get(key);
+    if (!s) {
+      // 系列名：有小区 → 「尾号 · 小区X · PLMNY」；无小区 → 仅尾号（兜底单线）。
+      const name = ldn ? buildDeviceSeriesName(sn, ldn) : deviceSnTail(sn) || sn;
+      s = { name, points: new Map() };
+      m.series.set(key, s);
       m.seriesOrder.push(key);
     }
-    // null（fill_empty / 缺采）不入点表 → 对齐时该桶补 '-' 断线；同 (设备, 桶) 多行取后到值。
+    // null（fill_empty / 缺采）不入点表 → 对齐时该桶补 '-' 断线；同 (系列, 桶) 多行取后到值。
     if (r.metricValue !== null) {
-      pts.set(r.startTime, r.metricValue);
+      s.points.set(r.startTime, r.metricValue);
     }
   });
 
   return metricOrder.map((metricPath) => {
     const m = byMetric.get(metricPath)!;
     const buckets = Array.from(m.buckets).sort();
-    const series: MetricSeries[] = m.seriesOrder.map((sn) => {
-      const pts = m.points.get(sn)!;
+    const series: MetricSeries[] = m.seriesOrder.map((key) => {
+      const s = m.series.get(key)!;
       const values: MetricSeriesValue[] = buckets.map((b) => {
-        const v = pts.get(b);
+        const v = s.points.get(b);
         return v === undefined ? '-' : v;
       });
-      // 系列键恒 = deviceSn，系列名恒 = deviceSn。
-      return { key: sn, name: sn, values };
+      return { key, name: s.name, values };
     });
     return { metricPath, displayName: m.displayName, buckets, series };
   });
+}
+
+/**
+ * T-0193 即席小区/PLMN 过滤（纯前端，不落库）：在已取的聚合行里只保留命中白名单的行。
+ *   - allowedLdns 为空 → 不过滤，原样返回（向后兼容「不下钻」）。
+ *   - 非空 → 仅保留 objectLdn ∈ allowedLdns 的行；无 objectLdn 的行在过滤模式下丢弃
+ *     （用户既然挑了具体小区，没有小区归属的行不应混入）。
+ * 与设备列表页签的下钻勾选配合：勾选子集时生效，全选时上层传空数组。
+ */
+export function filterRowsByObjectLdns(
+  rows: AggregatedRow[],
+  allowedLdns: string[],
+): AggregatedRow[] {
+  if (allowedLdns.length === 0) return rows;
+  const allow = new Set(allowedLdns);
+  return rows.filter((r) => (r.objectLdn ? allow.has(r.objectLdn) : false));
 }

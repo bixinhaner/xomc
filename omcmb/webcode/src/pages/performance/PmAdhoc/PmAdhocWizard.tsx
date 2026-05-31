@@ -9,7 +9,8 @@
  *   ④ 聚合设置   — 粒度单选；oneshot 额外给时间范围（RangePicker），continuous 不给（滚动）
  *   ⑤ 确认       — 预览汇总 → 提交
  *
- * 用户拍板不做（独立待办）：自选设备下钻到小区/PLMN；设备组/产品子集选择。
+ * T-0193：第2步自选设备（device/aggregate_group）分支接下钻勾选小区/PLMN；
+ *   提交时把各设备选中 objectLdn 汇成 objectLdns 随 create 落库（默认全勾→不传，保持现状语义）。
  */
 
 import { useMemo, useState } from 'react';
@@ -34,9 +35,12 @@ import {
 import dayjs from 'dayjs';
 import { useCreatePmAdhoc } from '@core/hooks/api/usePmAdhoc';
 import { useDeviceList } from '@core/hooks/api/useDevices';
+import { useMetricObjectsByDevices } from '@core/hooks/api/usePmQuery';
 import { useIndicatorList } from '@core/hooks/api/useIndicatorsLibrary';
 import type { AdhocDimension, AdhocMode } from '@core/types/pmAdhoc';
 import type { DeviceType } from '@core/types/indicatorLibrary';
+import CellDrilldownSelector from '../PmDashboard/CellDrilldownSelector';
+import { getEffectiveLdns, type CellSelection } from '../PmDashboard/cellDrilldownUtils';
 
 // 制式（含 GSM，networkType 过滤直接用小写值）
 type WizardTech = 'lte' | 'nr' | 'gsm';
@@ -122,6 +126,8 @@ export default function PmAdhocWizard() {
   // ② 聚合范围
   const [dimension, setDimension] = useState<AdhocDimension>('network');
   const [selectedSns, setSelectedSns] = useState<string[]>([]);
+  // T-0193 下钻：每设备选中的小区/PLMN 子集（缺席=全选不过滤）。
+  const [cellSel, setCellSel] = useState<CellSelection>({});
 
   // ③ 指标选择（收集指标 id = K/C 码）
   const [metricPaths, setMetricPaths] = useState<string[]>([]);
@@ -150,6 +156,12 @@ export default function PmAdhocWizard() {
     [deviceResp],
   );
 
+  // T-0193：下钻白名单计算用的「按设备小区清单」（与选择器内部同 query key 去重，无额外请求）。
+  const { byDevice: objectsByDevice } = useMetricObjectsByDevices(
+    needsDevicePick ? selectedSns : [],
+    technology,
+  );
+
   // 指标库（按制式 → deviceType）。
   const deviceType = TECH_TO_DEVICE_TYPE[technology];
   const { data: indicatorResp, isLoading: indicatorsLoading } = useIndicatorList(deviceType, {
@@ -173,6 +185,8 @@ export default function PmAdhocWizard() {
       return;
     }
     try {
+      // T-0193：自选设备分支下钻白名单——全勾→空数组→api 层不传（保持现状语义）。
+      const objectLdns = needsDevicePick ? getEffectiveLdns(cellSel, objectsByDevice) : [];
       await createMut.mutateAsync({
         name: name.trim(),
         mode,
@@ -186,6 +200,8 @@ export default function PmAdhocWizard() {
         windowEnd: mode === 'oneshot' ? window[1].toISOString() : undefined,
         // 过期天数仅非持续型生效
         expireDays: mode === 'oneshot' ? expireDays : undefined,
+        // 小区/PLMN 白名单（空=不传）
+        objectLdns: objectLdns.length > 0 ? objectLdns : undefined,
       });
       message.success(intl.formatMessage({ id: 'perf.adhoc.taskCreated' }));
       navigate('/performance/pm-adhoc');
@@ -216,6 +232,7 @@ export default function PmAdhocWizard() {
             setTechnology(e.target.value);
             // 制式切换后清空已选设备 / 指标（避免跨制式残留）
             setSelectedSns([]);
+            setCellSel({}); // 下钻选择重置（全选）
             setMetricPaths([]);
           }}
         />
@@ -281,7 +298,10 @@ export default function PmAdhocWizard() {
               <Transfer<DeviceTransferItem>
                 dataSource={deviceItems}
                 targetKeys={selectedSns}
-                onChange={(keys: React.Key[]) => setSelectedSns(keys.map(String))}
+                onChange={(keys: React.Key[]) => {
+                  setSelectedSns(keys.map(String));
+                  setCellSel({}); // 设备集变更 → 下钻选择重置（全选）。
+                }}
                 render={(item) => item.title}
                 showSearch
                 filterOption={(inputValue, item) =>
@@ -294,6 +314,19 @@ export default function PmAdhocWizard() {
                 listStyle={{ width: 320, height: 360 }}
               />
             </Spin>
+            {selectedSns.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ marginBottom: 8, fontWeight: 500 }}>
+                  {intl.formatMessage({ id: 'perf.drilldown.label' })}
+                </div>
+                <CellDrilldownSelector
+                  deviceSns={selectedSns}
+                  technology={technology}
+                  value={cellSel}
+                  onChange={setCellSel}
+                />
+              </div>
+            )}
           </div>
         ) : (
           <Alert
@@ -373,6 +406,7 @@ export default function PmAdhocWizard() {
   );
 
   const renderStep5 = () => {
+    const effectiveLdns = needsDevicePick ? getEffectiveLdns(cellSel, objectsByDevice) : [];
     const metricNames = metricPaths.map((id) => {
       const ind = indicatorItems.find((x) => x.id === id);
       return ind ? `${ind.id} ${ind.name ?? ''}`.trim() : id;
@@ -407,6 +441,18 @@ export default function PmAdhocWizard() {
               )
             ) : (
               <Tag>{intl.formatMessage({ id: 'perf.adhoc.confirmNotSelected' })}</Tag>
+            )}
+          </Descriptions.Item>
+        )}
+        {needsDevicePick && (
+          <Descriptions.Item label={intl.formatMessage({ id: 'perf.drilldown.confirmCells' })}>
+            {effectiveLdns.length > 0 ? (
+              intl.formatMessage(
+                { id: 'perf.drilldown.confirmCellSubset' },
+                { count: effectiveLdns.length },
+              )
+            ) : (
+              <Tag>{intl.formatMessage({ id: 'perf.drilldown.confirmCellAll' })}</Tag>
             )}
           </Descriptions.Item>
         )}

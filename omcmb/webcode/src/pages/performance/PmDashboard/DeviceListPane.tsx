@@ -12,7 +12,8 @@
  *   - 出图：取数 useAggregatedMetricsByDevices → 星期/小时段前端筛 → buildDeviceMetricCharts → 每指标一张 ChartCard（每设备一条线）。
  *   - 周期对比开关打开：再拉上一周期窗口数据，套同口径星期/小时段，叠加虚线（T-0189）。
  *
- * 本任务到 SN 级，不下钻小区/PLMN。
+ * T-0193：选设备后可下钻勾选小区/PLMN（CellDrilldownSelector），即席纯前端过滤
+ *   （在已取的聚合行里筛命中行，不落库）；出图按「设备+小区+PLMN」分线（deviceListUtils）。
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -33,14 +34,19 @@ import {
 } from 'antd';
 import { ReloadOutlined, LineChartOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { useAggregatedMetricsByDevices } from '@core/hooks/api/usePmQuery';
+import {
+  useAggregatedMetricsByDevices,
+  useMetricObjectsByDevices,
+} from '@core/hooks/api/usePmQuery';
 import { usePmAdhocList } from '@core/hooks/api/usePmAdhoc';
 import type { DeviceType } from '@core/types/indicatorLibrary';
 import type { Granularity } from '@core/types/pmDashboard';
 import DevicePickerModal from '../KPIQuery/components/DevicePickerModal';
 import MetricPickerModal from '../KPIQuery/components/MetricPickerModal';
 import ChartCard from './ChartCard';
-import { buildDeviceMetricCharts } from './deviceListUtils';
+import { buildDeviceMetricCharts, filterRowsByObjectLdns } from './deviceListUtils';
+import CellDrilldownSelector from './CellDrilldownSelector';
+import { getEffectiveLdns, type CellSelection } from './cellDrilldownUtils';
 import DashboardFilterBar, { type DashboardFilterValue } from './DashboardFilterBar';
 import {
   ALL_HOURS,
@@ -92,6 +98,8 @@ export default function DeviceListPane() {
   // ── 选择条件 ───────────────────────────────────────────────────────
   const [tech, setTech] = useState<Tech>('lte');
   const [deviceSns, setDeviceSns] = useState<string[]>([]);
+  // T-0193 下钻：每设备选中的小区/PLMN 子集（缺席=全选不过滤）。
+  const [cellSel, setCellSel] = useState<CellSelection>({});
   const [metricPaths, setMetricPaths] = useState<string[]>([]);
   // 用户是否手动改过指标——改过则切制式不再覆盖默认集。
   const [metricsTouched, setMetricsTouched] = useState(false);
@@ -133,7 +141,12 @@ export default function DeviceListPane() {
     offsetMs: number;
     prevStartTime: string;
     prevEndTime: string;
+    // T-0193：提交时定格的小区/PLMN 白名单（空=不过滤）。
+    allowedLdns: string[];
   } | null>(null);
+
+  // 下钻选择器与有效白名单计算共用的「按设备小区清单」（react-query 与选择器内部同 key 去重，无额外请求）。
+  const { byDevice: objectsByDevice } = useMetricObjectsByDevices(deviceSns, tech);
 
   const baseParams = useMemo(() => {
     if (!submitted) return null;
@@ -202,15 +215,20 @@ export default function DeviceListPane() {
     if (!submitted) return [];
     const wd = new Set(submitted.weekdays);
     const hr = new Set(submitted.hours);
-    const cur = buildDeviceMetricCharts(
-      filterRowsByWeekdayHour(rawRows, wd, hr),
-      submitted.granularity,
+    // T-0193：先按小区/PLMN 白名单即席过滤，再套星期/小时段，再转置分线。
+    const curRows = filterRowsByWeekdayHour(
+      filterRowsByObjectLdns(rawRows, submitted.allowedLdns),
+      wd,
+      hr,
     );
+    const cur = buildDeviceMetricCharts(curRows, submitted.granularity);
     if (!submitted.compare) return cur;
-    const prev = buildDeviceMetricCharts(
-      filterRowsByWeekdayHour(rawPrevRows, wd, hr),
-      submitted.granularity,
+    const prevRows = filterRowsByWeekdayHour(
+      filterRowsByObjectLdns(rawPrevRows, submitted.allowedLdns),
+      wd,
+      hr,
     );
+    const prev = buildDeviceMetricCharts(prevRows, submitted.granularity);
     return attachCompareSeries(cur, prev, submitted.offsetMs);
   }, [rawRows, rawPrevRows, submitted]);
 
@@ -219,6 +237,7 @@ export default function DeviceListPane() {
     setTech(v);
     // 切制式清空已选设备（设备制式与图制式应一致），指标默认集由 effect 随制式切换。
     setDeviceSns([]);
+    setCellSel({}); // 设备清空 → 下钻选择重置（全选）。
   };
 
   const handleQuery = () => {
@@ -244,6 +263,8 @@ export default function DeviceListPane() {
       offsetMs: end.valueOf() - start.valueOf(),
       prevStartTime: prevStart.toISOString(),
       prevEndTime: prevEnd.toISOString(),
+      // 定格当前下钻白名单（空=全选不过滤）。
+      allowedLdns: getEffectiveLdns(cellSel, objectsByDevice),
     });
   };
 
@@ -332,6 +353,22 @@ export default function DeviceListPane() {
 
           </Space>
 
+          {deviceSns.length > 0 && (
+            <div style={{ marginTop: 16 }}>
+              <Form.Item
+                label={intl.formatMessage({ id: 'perf.drilldown.label' })}
+                style={{ marginBottom: 0 }}
+              >
+                <CellDrilldownSelector
+                  deviceSns={deviceSns}
+                  technology={tech}
+                  value={cellSel}
+                  onChange={setCellSel}
+                />
+              </Form.Item>
+            </div>
+          )}
+
           <div style={{ marginTop: 16 }}>
             <DashboardFilterBar value={filter} onChange={setFilter} />
           </div>
@@ -405,6 +442,7 @@ export default function DeviceListPane() {
         open={devicePickerOpen}
         onClose={() => setDevicePickerOpen(false)}
         onConfirm={(sns) => {
+          setCellSel({}); // 设备变更 → 重置下钻选择为全选。
           if (sns.length > MAX_DEVICES) {
             message.warning(
               intl.formatMessage(

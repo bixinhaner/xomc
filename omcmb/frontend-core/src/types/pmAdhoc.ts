@@ -50,6 +50,9 @@ export interface AdhocTask {
   creator: string;
   createdAt: string;
   updatedAt: string;
+  // T-0193 小区/PLMN 白名单：完整 object_ldn 字符串数组，仅 device/aggregate_group 维度生效；
+  // 空/缺 = 不过滤（全小区，向后兼容旧任务）。
+  objectLdns?: string[];
 }
 
 export interface CreateAdhocTaskInput {
@@ -66,6 +69,8 @@ export interface CreateAdhocTaskInput {
   technology?: string;
   isBuiltin?: boolean;
   expireDays?: number;
+  // T-0193 小区/PLMN 白名单（完整 object_ldn 字符串数组）。空/缺 = 不传 → 全小区（现状语义）。
+  objectLdns?: string[];
 }
 
 export interface AdhocResultRow {
@@ -142,6 +147,8 @@ export interface BackendAdhocTask {
   creator: string;
   created_at: string;
   updated_at: string;
+  // T-0193 任务白名单回吐。
+  object_ldns?: string[];
 }
 
 export interface BackendAdhocResultRow {
@@ -217,6 +224,7 @@ export function mapBackendAdhocTask(b: BackendAdhocTask): AdhocTask {
     creator: b.creator,
     createdAt: b.created_at,
     updatedAt: b.updated_at,
+    objectLdns: b.object_ldns && b.object_ldns.length > 0 ? b.object_ldns : undefined,
   };
 }
 

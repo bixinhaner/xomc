@@ -6051,6 +6051,20 @@ const messages: Record<string, string> = {
   'perf.dashboard.deviceUnit':           '{count} devices',
 
   // -------------------------------------------------------------------------
+  // T-0193 Cell / PLMN drill-down selector
+  // -------------------------------------------------------------------------
+  'perf.drilldown.label':                'Cell / PLMN (all by default)',
+  'perf.drilldown.hint':                 'All cells/PLMNs of the device are selected by default; expand a device to pick a subset.',
+  'perf.drilldown.pickDeviceFirst':      'Select devices first, then drill down to cell/PLMN',
+  'perf.drilldown.noCells':              'No cell/PLMN data for this device',
+  'perf.drilldown.selectAll':            'Select All',
+  'perf.drilldown.headerAll':            'All cells',
+  'perf.drilldown.headerSubset':         '{count} cells selected',
+  'perf.drilldown.confirmCells':         'Cell / PLMN',
+  'perf.drilldown.confirmCellAll':       'All cells',
+  'perf.drilldown.confirmCellSubset':    '{count} cells/PLMNs selected',
+
+  // -------------------------------------------------------------------------
   // Performance adhoc tasks (PmAdhoc) — i18n-dashboard
   // -------------------------------------------------------------------------
   'perf.adhoc.statusPending':            'Pending',

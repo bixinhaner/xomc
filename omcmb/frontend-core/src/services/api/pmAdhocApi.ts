@@ -66,6 +66,10 @@ export const pmAdhocApi = {
     };
     if (input.windowStart) payload.window_start = input.windowStart;
     if (input.windowEnd) payload.window_end = input.windowEnd;
+    // T-0193：小区/PLMN 白名单——非空才透传（空=不过滤，保持现状语义）。
+    if (input.objectLdns && input.objectLdns.length > 0) {
+      payload.object_ldns = input.objectLdns;
+    }
     const { data } = await http.post<{ id: string }>('/pm/adhoc/tasks', payload);
     return data;
   },
@@ -147,6 +151,7 @@ export const pmAdhocMock: typeof pmAdhocApi = {
       technology: input.technology,
       isBuiltin: input.isBuiltin ?? false,
       expireDays: input.expireDays ?? 60,
+      objectLdns: input.objectLdns && input.objectLdns.length > 0 ? input.objectLdns : undefined,
       status: 'pending',
       progress: 0,
       creator: 'mock-owner',

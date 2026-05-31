@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { AggregatedRow } from '@core/types/pmDashboard';
-import { buildDeviceMetricCharts } from './deviceListUtils';
+import { buildDeviceMetricCharts, filterRowsByObjectLdns } from './deviceListUtils';
 
 // 构造聚合行的小工厂——只填测试关心的字段，其余给确定默认值。
 function row(p: Partial<AggregatedRow>): AggregatedRow {
@@ -16,7 +16,7 @@ function row(p: Partial<AggregatedRow>): AggregatedRow {
     startTime: p.startTime ?? '2026-05-30T00:00:00Z',
     endTime: '2026-05-30T00:15:00Z',
     ingestTime: '2026-05-30T00:16:00Z',
-    objectLdn: null,
+    objectLdn: p.objectLdn ?? null,
     filled: p.filled,
   };
 }
@@ -111,5 +111,113 @@ describe('buildDeviceMetricCharts — 设备级转置', () => {
     const charts = buildDeviceMetricCharts(rows, '15min');
     expect(charts.find((c) => c.metricPath === 'K900010015')!.displayName).toBe('上行流量');
     expect(charts.find((c) => c.metricPath === 'C000060216')!.displayName).toBe('C000060216');
+  });
+});
+
+describe('buildDeviceMetricCharts — T-0193 按设备+小区/PLMN 分线', () => {
+  const LDN1 = 'Cellid=111172245,PLMN=46068';
+  const LDN2 = 'Cellid=111172246,PLMN=46068';
+
+  it('单设备多小区 → 每小区一条线，系列键含 objectLdn、名带友好名', () => {
+    const rows: AggregatedRow[] = [
+      row({ deviceSn: '1202000240194DP0015', metricPath: 'M1', startTime: 'T1', metricValue: 1, objectLdn: LDN1 }),
+      row({ deviceSn: '1202000240194DP0015', metricPath: 'M1', startTime: 'T1', metricValue: 2, objectLdn: LDN2 }),
+    ];
+    const charts = buildDeviceMetricCharts(rows, '15min');
+    expect(charts[0].series).toHaveLength(2);
+    expect(charts[0].series.map((s) => s.key)).toEqual([
+      `1202000240194DP0015|${LDN1}`,
+      `1202000240194DP0015|${LDN2}`,
+    ]);
+    // 友好名：设备尾号（末6位）· 小区 · PLMN
+    expect(charts[0].series[0].name).toBe('DP0015 · 小区111172245 · PLMN46068');
+    expect(charts[0].series[1].name).toBe('DP0015 · 小区111172246 · PLMN46068');
+  });
+
+  it('多设备 × 多小区 → 设备×小区笛卡尔分线（4 条）', () => {
+    const rows: AggregatedRow[] = [
+      row({ deviceSn: 'SN-AAAAAA', metricPath: 'M1', startTime: 'T1', metricValue: 1, objectLdn: LDN1 }),
+      row({ deviceSn: 'SN-AAAAAA', metricPath: 'M1', startTime: 'T1', metricValue: 2, objectLdn: LDN2 }),
+      row({ deviceSn: 'SN-BBBBBB', metricPath: 'M1', startTime: 'T1', metricValue: 3, objectLdn: LDN1 }),
+      row({ deviceSn: 'SN-BBBBBB', metricPath: 'M1', startTime: 'T1', metricValue: 4, objectLdn: LDN2 }),
+    ];
+    const charts = buildDeviceMetricCharts(rows, '15min');
+    expect(charts[0].series).toHaveLength(4);
+    expect(new Set(charts[0].series.map((s) => s.key))).toEqual(
+      new Set([
+        `SN-AAAAAA|${LDN1}`,
+        `SN-AAAAAA|${LDN2}`,
+        `SN-BBBBBB|${LDN1}`,
+        `SN-BBBBBB|${LDN2}`,
+      ]),
+    );
+  });
+
+  it('缺 object_ldn 行 → 兜底退化为按设备单线（键仅 SN、名仅尾号）', () => {
+    const rows: AggregatedRow[] = [
+      row({ deviceSn: 'SN-AAAAAA', metricPath: 'M1', startTime: 'T1', metricValue: 1, objectLdn: null }),
+      row({ deviceSn: 'SN-AAAAAA', metricPath: 'M1', startTime: 'T2', metricValue: 2, objectLdn: null }),
+    ];
+    const charts = buildDeviceMetricCharts(rows, '15min');
+    expect(charts[0].series).toHaveLength(1);
+    expect(charts[0].series[0].key).toBe('SN-AAAAAA');
+    expect(charts[0].series[0].name).toBe('AAAAAA'); // 末6位
+    expect(charts[0].series[0].values).toEqual([1, 2]);
+  });
+
+  it('同设备小区行 + 缺 object_ldn 行混合 → 小区行分线、缺行单独兜底线', () => {
+    const rows: AggregatedRow[] = [
+      row({ deviceSn: 'SN-AAAAAA', metricPath: 'M1', startTime: 'T1', metricValue: 1, objectLdn: LDN1 }),
+      row({ deviceSn: 'SN-AAAAAA', metricPath: 'M1', startTime: 'T1', metricValue: 9, objectLdn: null }),
+    ];
+    const charts = buildDeviceMetricCharts(rows, '15min');
+    expect(charts[0].series.map((s) => s.key)).toEqual([`SN-AAAAAA|${LDN1}`, 'SN-AAAAAA']);
+  });
+
+  it('纯 fill_empty 占位行（无小区 + null 值）→ 只对齐桶轴，不聚成「仅设备」空线', () => {
+    const rows: AggregatedRow[] = [
+      // 真实小区行只在 T1 有值；T2 只有无小区归属的 fill_empty 占位（null 值）
+      row({ deviceSn: 'SN-AAAAAA', metricPath: 'M1', startTime: 'T1', metricValue: 1, objectLdn: LDN1 }),
+      row({ deviceSn: 'SN-AAAAAA', metricPath: 'M1', startTime: 'T2', metricValue: null, filled: true, objectLdn: null }),
+    ];
+    const charts = buildDeviceMetricCharts(rows, '15min');
+    // 只剩 1 条小区线（占位行不单独成线），但 T2 桶仍进桶集合用于对齐
+    expect(charts[0].series).toHaveLength(1);
+    expect(charts[0].series[0].key).toBe(`SN-AAAAAA|${LDN1}`);
+    expect(charts[0].buckets).toEqual(['T1', 'T2']);
+    expect(charts[0].series[0].values).toEqual([1, '-']);
+  });
+});
+
+describe('filterRowsByObjectLdns — T-0193 即席小区过滤', () => {
+  const LDN1 = 'Cellid=111172245,PLMN=46068';
+  const LDN2 = 'Cellid=111172246,PLMN=46068';
+
+  it('空白名单 → 不过滤，原样返回', () => {
+    const rows: AggregatedRow[] = [
+      row({ startTime: 'T1', objectLdn: LDN1 }),
+      row({ startTime: 'T1', objectLdn: LDN2 }),
+    ];
+    expect(filterRowsByObjectLdns(rows, [])).toHaveLength(2);
+  });
+
+  it('非空白名单 → 只保留命中行', () => {
+    const rows: AggregatedRow[] = [
+      row({ startTime: 'T1', metricValue: 1, objectLdn: LDN1 }),
+      row({ startTime: 'T1', metricValue: 2, objectLdn: LDN2 }),
+    ];
+    const out = filterRowsByObjectLdns(rows, [LDN1]);
+    expect(out).toHaveLength(1);
+    expect(out[0].objectLdn).toBe(LDN1);
+  });
+
+  it('过滤模式下无 object_ldn 的行被丢弃', () => {
+    const rows: AggregatedRow[] = [
+      row({ startTime: 'T1', objectLdn: LDN1 }),
+      row({ startTime: 'T1', objectLdn: null }),
+    ];
+    const out = filterRowsByObjectLdns(rows, [LDN1]);
+    expect(out).toHaveLength(1);
+    expect(out[0].objectLdn).toBe(LDN1);
   });
 });

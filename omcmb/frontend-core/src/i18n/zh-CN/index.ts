@@ -6085,6 +6085,20 @@ const messages: Record<string, string> = {
   'perf.dashboard.deviceUnit':           '{count} 设备',
 
   // -------------------------------------------------------------------------
+  // T-0193 小区/PLMN 下钻选择器
+  // -------------------------------------------------------------------------
+  'perf.drilldown.label':                '小区 / PLMN（默认全选）',
+  'perf.drilldown.hint':                 '默认全选该设备所有小区/PLMN；如只看部分，展开设备勾选子集。',
+  'perf.drilldown.pickDeviceFirst':      '请先选择设备，再下钻小区/PLMN',
+  'perf.drilldown.noCells':              '该设备暂无小区/PLMN 数据',
+  'perf.drilldown.selectAll':            '全选',
+  'perf.drilldown.headerAll':            '全部小区',
+  'perf.drilldown.headerSubset':         '已选 {count} 个小区',
+  'perf.drilldown.confirmCells':         '小区 / PLMN',
+  'perf.drilldown.confirmCellAll':       '全部小区',
+  'perf.drilldown.confirmCellSubset':    '已选 {count} 个小区/PLMN',
+
+  // -------------------------------------------------------------------------
   // Performance adhoc tasks (PmAdhoc) — i18n-dashboard
   // -------------------------------------------------------------------------
   'perf.adhoc.statusPending':            '待执行',
