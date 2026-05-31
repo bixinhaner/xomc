@@ -16,7 +16,7 @@ sources:
     display_name: "设备"
     fields:
       - { column: serial_number,    display: "序列号",     type: string }
-      - { column: product_class,    display: "设备型号",   type: string }
+      - { column: product_class,    display: "产品类型",   type: string }
       - { column: oui,              display: "厂商 OUI",   type: string }
       - { column: manufacturer,     display: "厂商",       type: string }
 
@@ -65,7 +65,7 @@ sources:
     display_name: "固件版本"
     fields:
       - { column: version,          display: "版本号",     type: string }
-      - { column: product_class,    display: "设备型号",   type: string }
+      - { column: product_class,    display: "产品类型",   type: string }
 
   - table: kpi_definitions
     display_name: "KPI 定义"
