@@ -5408,6 +5408,62 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     "$API/admin/sysDictionaryDetail/getSysDictionaryDetailList?page=1&page_size=5" -H "$W2D_AUTH")
 check_status_in "W2D adminx-5: GET /admin/sysDictionaryDetail/list" "200 401" "$HTTP_CODE"
 
+# ------------------------------------------------------------
+# T-0182 数据字典数据源(P1+P3 新增 3 端点)
+# AC-1..AC-8 见 PRD docs/project/prd/F06-data-dictionary-source.md §8
+# 此处只覆盖端点存活性(200/401),完整 AC 由 P5 真机/手动验收
+
+claim "T-0182: list dictionary sources whitelist returns 200/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/sysDictionary/sources" -H "$W2D_AUTH")
+check_status_in "T-0182 dict-source-1: GET /admin/sysDictionary/sources" "200 401" "$HTTP_CODE"
+
+claim "T-0182: preview dictionary source dry-run returns 200/400/401"
+# 用白名单内的 devices.product_class 做 dry-run(无设备时返空但仍 200)
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/sysDictionary/sources/preview?table=devices&label=product_class&value=product_class&limit=5" \
+    -H "$W2D_AUTH")
+check_status_in "T-0182 dict-source-2: GET /admin/sysDictionary/sources/preview" "200 400 401" "$HTTP_CODE"
+
+claim "T-0182: preview rejects unknown table with 400/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/sysDictionary/sources/preview?table=evil_table&label=x&value=x&limit=5" \
+    -H "$W2D_AUTH")
+check_status_in "T-0182 dict-source-3: GET /admin/sysDictionary/sources/preview (whitelist reject)" "400 401" "$HTTP_CODE"
+
+claim "T-0182: preview rejects non-whitelist field with 400/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    "$API/admin/sysDictionary/sources/preview?table=devices&label=password_hash&value=product_class&limit=5" \
+    -H "$W2D_AUTH")
+check_status_in "T-0182 dict-source-4: GET /admin/sysDictionary/sources/preview (field whitelist reject)" "400 401" "$HTTP_CODE"
+
+claim "T-0182: refresh non-existent dict id returns 4xx/401/500"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/admin/sysDictionary/refreshSource?id=999999999" -H "$W2D_AUTH")
+check_status_in "T-0182 dict-source-5: POST /admin/sysDictionary/refreshSource (no such dict)" "400 401 404 500" "$HTTP_CODE"
+
+claim "T-0182: refresh without id query returns 400/401"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/admin/sysDictionary/refreshSource" -H "$W2D_AUTH")
+check_status_in "T-0182 dict-source-6: POST /admin/sysDictionary/refreshSource (missing id)" "400 401" "$HTTP_CODE"
+
+claim "T-0182: create dict with partial source fields returns 400/401"
+# 只填 source_table,缺 label/value → 后端应 400
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/admin/sysDictionary/createSysDictionary" \
+    -H "$W2D_AUTH" -H "Content-Type: application/json" \
+    -d '{"name":"e2e-partial","type":"e2e_partial_'"$(date +%s)"'","source_table":"devices"}')
+check_status_in "T-0182 dict-source-7: POST createSysDictionary (partial source)" "400 401 500" "$HTTP_CODE"
+
+claim "T-0182: create dict with full valid source binding returns 200/401"
+# 三字段全填 + 白名单匹配 → 应当创建成功(同步可能因 devices 表空而 last_refresh_count=0 也算 ok)
+DICT_TYPE_T0182="e2e_dict_source_$(date +%s)"
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$API/admin/sysDictionary/createSysDictionary" \
+    -H "$W2D_AUTH" -H "Content-Type: application/json" \
+    -d "{\"name\":\"e2e dict source\",\"type\":\"$DICT_TYPE_T0182\",\"source_table\":\"devices\",\"source_label_field\":\"product_class\",\"source_value_field\":\"product_class\"}")
+check_status_in "T-0182 dict-source-8: POST createSysDictionary (full valid source)" "200 401" "$HTTP_CODE"
+
 claim "admin: list system config returns 200/401"
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     "$API/admin/sysConfig?page=1&page_size=5" -H "$W2D_AUTH")

@@ -824,6 +824,11 @@ function DictDetailPanel({ selectedDict }: DictDetailPanelProps) {
                 onExpandedRowsChange: (keys) => setExpandedRowKeys([...keys]),
                 indentSize: 24,
               }}
+              // T-0182 P4 工具栏精简:关掉实时刷新/列设置/密度 — 字典数据量小、
+              // 字段固定,这三件套对管理员无价值,反而是视觉噪声。刷新按钮保留。
+              hideRealtime
+              hideColumnSettings
+              hideDensity
             />
           </Card>
         )}

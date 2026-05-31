@@ -39,6 +39,13 @@ interface ToolbarProps {
   onDensityChange: (d: Density) => void;
   extraLeft?: React.ReactNode;
   extraRight?: React.ReactNode;
+  // T-0182 P4:细粒度隐藏三个右侧按钮(默认 false,保持现行为)。
+  // 字典页这类小表+固定列+无需实时刷新的场景关掉,减少视觉噪声;
+  // 其它页面零行为变化。已有 hideToolbar 是粗粒度一刀切(连刷新+导出都关),
+  // 不能复用。
+  hideRealtime?: boolean;
+  hideColumnSettings?: boolean;
+  hideDensity?: boolean;
 }
 
 const Toolbar: React.FC<ToolbarProps> = ({
@@ -55,6 +62,9 @@ const Toolbar: React.FC<ToolbarProps> = ({
   onDensityChange,
   extraLeft,
   extraRight,
+  hideRealtime = false,
+  hideColumnSettings = false,
+  hideDensity = false,
 }) => {
   const t = useT();
   const hasSelection = selectedRowKeys.length > 0;
@@ -91,26 +101,30 @@ const Toolbar: React.FC<ToolbarProps> = ({
       {/* Right side */}
       <Space size={4} className={styles.toolbarRight}>
         {extraRight}
-        <Tooltip title={realtimeRefreshEnabled ? t('table.disableRealtimeRefresh') : t('table.enableRealtimeRefresh')}>
-          <Button
-            icon={<SyncOutlined spin={realtimeRefreshEnabled} />}
-            size="small"
-            type={realtimeRefreshEnabled ? 'primary' : 'default'}
-            ghost={realtimeRefreshEnabled}
-            onClick={() => {
-              const next = !realtimeRefreshEnabled;
-              setRealtimeRefreshEnabled(next);
-              onRefreshLockChange?.(next);
-            }}
+        {!hideRealtime && (
+          <Tooltip title={realtimeRefreshEnabled ? t('table.disableRealtimeRefresh') : t('table.enableRealtimeRefresh')}>
+            <Button
+              icon={<SyncOutlined spin={realtimeRefreshEnabled} />}
+              size="small"
+              type={realtimeRefreshEnabled ? 'primary' : 'default'}
+              ghost={realtimeRefreshEnabled}
+              onClick={() => {
+                const next = !realtimeRefreshEnabled;
+                setRealtimeRefreshEnabled(next);
+                onRefreshLockChange?.(next);
+              }}
+            />
+          </Tooltip>
+        )}
+        {!hideColumnSettings && (
+          <ColumnVisibility
+            tableId={tableId}
+            columns={columns}
+            onChange={onColumnVisibilityChange}
+            onOrderChange={onColumnOrderChange}
           />
-        </Tooltip>
-        <ColumnVisibility
-          tableId={tableId}
-          columns={columns}
-          onChange={onColumnVisibilityChange}
-          onOrderChange={onColumnOrderChange}
-        />
-        <DensityToggle density={density} onChange={onDensityChange} />
+        )}
+        {!hideDensity && <DensityToggle density={density} onChange={onDensityChange} />}
         {onExport && <ExportButton onExport={onExport} />}
         {onRefresh && (
           <Tooltip title={t('common.refresh')}>

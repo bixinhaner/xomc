@@ -63,6 +63,12 @@ export interface DataTableProps<T> {
   /** 整体隐藏工具栏（批量操作 + 列设置 / 密度 / 导出 / 实时刷新 / 刷新按钮 全部不渲染）。
    *  适用于：详情页/简单展示页/页面 extra 已自带导出+刷新按钮的场景。 */
   hideToolbar?: boolean;
+  /** T-0182 P4:细粒度隐藏右侧三件套(默认 false 保持现行为)。
+   *  小表/固定列/无需实时刷新的页面单独关掉,避免视觉噪声 — 同时保留刷新+导出按钮。
+   *  与 hideToolbar 互不影响,后者优先级更高(整体隐藏时这三个 props 无效)。 */
+  hideRealtime?: boolean;
+  hideColumnSettings?: boolean;
+  hideDensity?: boolean;
   scroll?: { x?: number | string; y?: number | string };
   size?: 'small' | 'middle' | 'large';
   showPagination?: boolean;
@@ -117,6 +123,9 @@ function DataTable<T>(
     extraToolbarLeft,
     extraToolbarRight,
     hideToolbar = false,
+    hideRealtime = false,
+    hideColumnSettings = false,
+    hideDensity = false,
     scroll,
     size,
     showPagination = true,
@@ -439,6 +448,9 @@ function DataTable<T>(
           onDensityChange={setDensity}
           extraLeft={extraToolbarLeft}
           extraRight={extraToolbarRight}
+          hideRealtime={hideRealtime}
+          hideColumnSettings={hideColumnSettings}
+          hideDensity={hideDensity}
         />
       )}
 
