@@ -64,6 +64,33 @@ export interface MmlTaskStreamMessages {
    * 取代过去 header 里直显英文 raw status；未传 / 无对应 key 时回落 raw 值。
    */
   deviceStatusLabels?: Record<string, string>;
+  /**
+   * mml_device_frame header 行的可注入模板：
+   * 默认 `[{deviceSn}] {method} → {statusLabel}`；
+   * 调用方传入后可附带任务 ID 等信息（例如 `[SN] GPV → 任务完成  (任务ID: xxx)`）。
+   */
+  deviceHeader?: (args: {
+    deviceSn: string;
+    method: string;
+    statusLabel: string;
+    taskId: string;
+  }) => string;
+  /**
+   * 多 task 全部完成后的聚合摘要文案（仅在 taskIds 全部 mml_task_completed 后触发一次）。
+   * 返回空串则不写行（让调用方在单任务场景下抑制聚合输出）。
+   * results 顺序与 taskIds 一致；调用方可结合自身 pathByTaskId 映射打印"哪些 path 成功 / 失败"。
+   */
+  aggregateSummary?: (args: {
+    results: ReadonlyArray<{
+      taskId: string;
+      status: string;
+      successCount: number;
+      failedCount: number;
+    }>;
+    successCount: number;
+    failedCount: number;
+    total: number;
+  }) => string;
 }
 
 export interface UseMmlTaskStreamReturn {
@@ -172,6 +199,7 @@ function formatGPVParamLine(p: ParsedParamValue): string {
 function deviceFrameToLines(
   frame: MmlDeviceFramePayload,
   statusLabels?: Record<string, string>,
+  deviceHeader?: MmlTaskStreamMessages['deviceHeader'],
 ): MmlTerminalLine[] {
   const ts = frame.completed_at
     ? new Date(frame.completed_at).toLocaleTimeString()
@@ -180,7 +208,14 @@ function deviceFrameToLines(
   // status 翻译：completed → 任务完成，failed → 任务失败 等；未提供 / 未命中
   // 时落回 raw 字串（兼容老调用方 / 后端新增状态码）。
   const statusLabel = statusLabels?.[frame.status] ?? frame.status;
-  const header = `[${frame.device_sn}] ${frame.method ?? ''} → ${statusLabel}`.trimEnd();
+  const header = deviceHeader
+    ? deviceHeader({
+        deviceSn: frame.device_sn,
+        method: frame.method ?? '',
+        statusLabel,
+        taskId: frame.task_id,
+      })
+    : `[${frame.device_sn}] ${frame.method ?? ''} → ${statusLabel}`.trimEnd();
   out.push({ type: 'info', text: header, timestamp: ts });
   if (frame.error_message) {
     out.push({ type: 'stderr', text: frame.error_message, timestamp: ts });
@@ -280,9 +315,21 @@ export function useMmlTaskStream(
   // 改用 ref Set 而非单 bool,支持多 task 各自一次打印。
   const runningEmittedSetRef = useRef<Set<string>>(new Set());
 
+  // 单PATH执行模式:聚合摘要需要等所有 task 都 completed 后再写一行。
+  // Map<task_id, {status, successCount, failedCount}>;size 等于 taskIdsRef.current.size 时触发。
+  type CompletedRecord = {
+    status: string;
+    successCount: number;
+    failedCount: number;
+  };
+  const completedResultsRef = useRef<Map<string, CompletedRecord>>(new Map());
+  const aggregateEmittedRef = useRef<boolean>(false);
+
   // taskIds 变化只重置会话级 status + dedup 标记;lines 由持久化 store 托管,跨 task 累积。
   useEffect(() => {
     runningEmittedSetRef.current = new Set();
+    completedResultsRef.current = new Map();
+    aggregateEmittedRef.current = false;
     setStatus(hasAnyTask ? 'dispatched' : 'idle');
   }, [idsKey, hasAnyTask]);
 
@@ -314,7 +361,10 @@ export function useMmlTaskStream(
     const onDeviceFrame = (ev: MessageEvent<string>): void => {
       const frame = parseEventData<MmlDeviceFramePayload>(ev.data);
       if (!frame || !taskIdsRef.current.has(frame.task_id)) return;
-      appendLinesStore(deviceFrameToLines(frame, messagesRef.current?.deviceStatusLabels));
+      const msgs = messagesRef.current;
+      appendLinesStore(
+        deviceFrameToLines(frame, msgs?.deviceStatusLabels, msgs?.deviceHeader),
+      );
     };
     const onTaskStatus = (ev: MessageEvent<string>): void => {
       const frame = parseEventData<MmlTaskStatusPayload>(ev.data);
@@ -362,6 +412,54 @@ export function useMmlTaskStream(
         text,
         timestamp: formatTimestamp(),
       });
+
+      // 聚合摘要:登记本次结果,所有 task 都到齐后写一行总览(只触发一次)。
+      completedResultsRef.current.set(frame.task_id, {
+        status: frame.status,
+        successCount: frame.success_count,
+        failedCount: frame.failed_count,
+      });
+      const subscribed = taskIdsRef.current;
+      const completedMap = completedResultsRef.current;
+      const allDone =
+        !aggregateEmittedRef.current &&
+        subscribed.size > 0 &&
+        completedMap.size >= subscribed.size &&
+        [...subscribed].every((id) => completedMap.has(id));
+      if (allDone) {
+        aggregateEmittedRef.current = true;
+        // 保持订阅顺序输出 results,便于调用方按 dispatch 顺序映射 path
+        const orderedIds = [...subscribed];
+        const results = orderedIds.map((id) => {
+          const r = completedMap.get(id)!;
+          return {
+            taskId: id,
+            status: r.status,
+            successCount: r.successCount,
+            failedCount: r.failedCount,
+          };
+        });
+        // task 级 "成功" 判定:status='completed' 且 failed_count==0
+        const failedTasks = results.filter(
+          (r) => !(r.status === 'completed' && r.failedCount === 0),
+        );
+        const successCount = results.length - failedTasks.length;
+        const failedCount = failedTasks.length;
+        const aggText = msgs?.aggregateSummary?.({
+          results,
+          successCount,
+          failedCount,
+          total: results.length,
+        });
+        // formatter 返回空串 → 抑制聚合行(单任务场景不需要)
+        if (aggText) {
+          appendLineStore({
+            type: failedCount === 0 ? 'success' : 'stderr',
+            text: aggText,
+            timestamp: formatTimestamp(),
+          });
+        }
+      }
     };
 
     source.addEventListener('mml_device_frame', onDeviceFrame as EventListener);

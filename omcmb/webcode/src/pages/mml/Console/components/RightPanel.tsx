@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import { Tabs, Empty, Modal, App } from 'antd';
 import { useMmlConsoleStore } from '@core/store/mmlConsoleStore';
 import { useExecuteStatementsStructured } from '@core/hooks/api/useMmlConsole';
@@ -120,6 +120,10 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
   const [currentTaskIds, setCurrentTaskIds] = useState<string[]>([]);
   // 执行模式 Radio: 'batch'(默认整体执行) | 'per-path'(单PATH独立任务)
   const [executionMode, setExecutionMode] = useState<ExecutionMode>('batch');
+  // 单PATH 模式下 taskId → path 映射,聚合摘要时把"哪些 path 成功/失败"翻译成可读 path 串。
+  // ref 在 dispatch 循环里写入,在 streamMessages.aggregateSummary 闭包里只读;
+  // 不进入 React 状态避免触发 hook 闭包重建。
+  const pathByTaskIdRef = useRef<Map<string, string>>(new Map());
   // 把 i18n 翻译后的文案传给 frontend-core hook —— hook 自身不依赖 i18n 系统。
   const streamMessages = useMemo(
     () => ({
@@ -147,6 +151,75 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
         failed: t('mml.console.terminal.deviceStatus.failed'),
         expired: t('mml.console.terminal.deviceStatus.expired'),
         cancelled: t('mml.console.terminal.deviceStatus.cancelled'),
+      },
+      // 设备帧 header:`[SN] METHOD → 任务完成  (任务ID: xxx)`
+      deviceHeader: ({
+        deviceSn,
+        method,
+        statusLabel,
+        taskId,
+      }: {
+        deviceSn: string;
+        method: string;
+        statusLabel: string;
+        taskId: string;
+      }) =>
+        t('mml.console.terminal.deviceHeader', {
+          sn: deviceSn,
+          method,
+          statusLabel,
+          taskId,
+        }),
+      // 所有 task 完成后的聚合摘要:仅在 path 映射齐全(per-path 多任务)时输出;
+      // 单 task 场景返回 '' 让 hook 抑制,避免与 completedSummary 重复。
+      aggregateSummary: ({
+        results,
+        successCount,
+        failedCount,
+        total,
+      }: {
+        results: ReadonlyArray<{
+          taskId: string;
+          status: string;
+          successCount: number;
+          failedCount: number;
+        }>;
+        successCount: number;
+        failedCount: number;
+        total: number;
+      }) => {
+        const map = pathByTaskIdRef.current;
+        if (total <= 1 || map.size === 0) return '';
+        const successPaths: string[] = [];
+        const failedPaths: string[] = [];
+        for (const r of results) {
+          const path = map.get(r.taskId) ?? r.taskId;
+          if (r.status === 'completed' && r.failedCount === 0) {
+            successPaths.push(path);
+          } else {
+            failedPaths.push(path);
+          }
+        }
+        const head = t('mml.console.terminal.aggregateSummary', {
+          total: String(total),
+          success: String(successCount),
+          failed: String(failedCount),
+        });
+        const successLine =
+          successPaths.length > 0
+            ? '\n' +
+              t('mml.console.terminal.aggregateSuccessPaths', {
+                paths: successPaths.join(', '),
+              })
+            : '';
+        const failedLine =
+          failedPaths.length > 0
+            ? '\n' +
+              t('mml.console.terminal.aggregateFailedPaths', {
+                paths: failedPaths.join(', '),
+              })
+            : '';
+        return `${head}${successLine}${failedLine}`;
       },
     }),
     [t],
@@ -284,6 +357,7 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
         );
 
         const taskIds: string[] = [];
+        const newPathByTaskId = new Map<string, string>();
         let failedCount = 0;
         dispatchResults.forEach((r, idx) => {
           const split = splits[idx];
@@ -291,6 +365,7 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
           const i = idx + 1;
           if (r.status === 'fulfilled') {
             taskIds.push(r.value.task.id);
+            newPathByTaskId.set(r.value.task.id, split.path || leafName || '-');
             appendLine({
               type: 'info',
               text: t('mml.console.terminal.perPathDispatched', {
@@ -316,6 +391,9 @@ export default function RightPanel({ onExecuted }: RightPanelProps) {
 
         if (taskIds.length > 0) {
           // 把所有 task_id 塞给 SSE hook 监听
+          // 先写 pathByTaskId 映射(给 aggregateSummary 闭包用),再 setCurrentTaskIds
+          // 触发 hook idsKey 变化重置 completedResultsRef + aggregateEmittedRef。
+          pathByTaskIdRef.current = newPathByTaskId;
           setCurrentTaskIds(taskIds);
         }
         appendLine({

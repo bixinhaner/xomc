@@ -5042,6 +5042,12 @@ const messages: Record<string, string> = {
   'mml.console.terminal.deviceStatus.failed':    '任务失败',
   'mml.console.terminal.deviceStatus.expired':   '任务超时',
   'mml.console.terminal.deviceStatus.cancelled': '任务已取消',
+  // device_task header 行模板：在 statusLabel 之后追加任务 ID，便于到「任务记录」页对照
+  'mml.console.terminal.deviceHeader':            '[{sn}] {method} → {statusLabel}  (任务ID: {taskId})',
+  // 单PATH 模式所有 task 完成后的聚合摘要（success/failed 计数 + 各自 path 清单）
+  'mml.console.terminal.aggregateSummary':        '全部 {total} 个 PATH 执行完成：成功 {success} 个 / 失败 {failed} 个',
+  'mml.console.terminal.aggregateSuccessPaths':   '  ✓ 成功 PATH: {paths}',
+  'mml.console.terminal.aggregateFailedPaths':    '  ✗ 失败 PATH: {paths}',
   'mml.console.subField.onReboot':             '需重启生效',
   'mml.console.subField.readOnly':             '只读',
   'mml.console.subField.readOnlyTip':          '只读字段（GetParameterValues 可查，SetParameterValues 不可改）',

@@ -5019,6 +5019,12 @@ const messages: Record<string, string> = {
   'mml.console.terminal.deviceStatus.failed':    'task failed',
   'mml.console.terminal.deviceStatus.expired':   'task timed out',
   'mml.console.terminal.deviceStatus.cancelled': 'task cancelled',
+  // device_task header line template: include taskId after statusLabel so users can cross-reference with Task Records page
+  'mml.console.terminal.deviceHeader':            '[{sn}] {method} → {statusLabel}  (taskId: {taskId})',
+  // Per-path mode aggregate summary after all tasks complete (success/failed counts + path lists)
+  'mml.console.terminal.aggregateSummary':        'All {total} PATH(s) completed: {success} succeeded / {failed} failed',
+  'mml.console.terminal.aggregateSuccessPaths':   '  ✓ succeeded PATH(s): {paths}',
+  'mml.console.terminal.aggregateFailedPaths':    '  ✗ failed PATH(s): {paths}',
   'mml.console.execute.partial':               'Partial failure: {failed}/{total} devices failed',
   'mml.console.execute.failed':                'Command submission failed: {message}',
   'mml.console.execute.noDevices':             'Please select at least one device',
