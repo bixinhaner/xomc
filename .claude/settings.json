@@ -292,7 +292,12 @@
       "Bash(bash deployments/release/clean.sh --archive /tmp/t-empty/archive --keep-project 1 --keep-infra 1 --dry-run)",
       "Bash(bash deployments/release/clean.sh --archive /tmp/t-clean/archive -y --default-keep 1 --dry-run)",
       "Bash(bash deployments/release/clean.sh --archive /tmp/t-clean/archive --keep-project 2 --keep-infra 1 -y)",
-      "Bash(sed -i '' -e 's| | |g' -e 's|||g' .claude/settings.json)"
+      "Bash(sed -i '' -e 's| | |g' -e 's|||g' .claude/settings.json)",
+      "Bash(awk '{print $NF}')",
+      "Bash(bash -n omcgo/scripts/e2e_verify.sh)",
+      "Bash(export API_KEY=\"omk_51c36850a07304b36952cf70a74151eb\")",
+      "Bash(bash omcgo/scripts/e2e_verify.sh http://localhost:8081)",
+      "Bash(awk '{print $1}')"
     ],
     "deny": [
       "Bash(git push -f)",
