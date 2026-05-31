@@ -147,6 +147,15 @@ func initAdminModule(c *Container) error {
 	dictRepo := admin.NewPgDictionaryRepository(c.PgPool)
 	dictDetailRepo := admin.NewPgDictionaryDetailRepository(c.PgPool)
 	dictService := admin.NewDictionaryService(dictRepo, dictDetailRepo)
+	// T-0182 数据字典数据源:启动期加载白名单 + 注入 SyncEngine。
+	// 失败仅警告,字典模块继续按"无数据源"模式运行,避免阻塞 app 启动。
+	// worker daily cron(P2 阶段加入)会通过 grpc/直接调本 service 的 SyncSourceBoundAll。
+	if reg, err := admin.LoadDictSourceRegistry(); err != nil {
+		logger.Warn("dict_source_registry_disabled", zap.Error(err))
+	} else {
+		engine := admin.NewDictSyncEngine(reg, c.PgPool, dictRepo, dictDetailRepo, logger.Named("dict_source"))
+		dictService.SetSourceWiring(reg, engine, logger.Named("dict_source"))
+	}
 	dictHandler := admin.NewDictionaryHandler(dictService)
 
 	// System config module

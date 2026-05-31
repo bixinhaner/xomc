@@ -30,6 +30,10 @@ func (h *DictionaryHandler) RegisterRoutes(rg *gin.RouterGroup) {
 		dict.GET("/findSysDictionary", h.FindDictionary)
 		dict.GET("/getSysDictionaryList", h.GetDictionaryList)
 		dict.GET("/batch", h.BatchGetDicts)
+		// T-0182 数据源
+		dict.GET("/sources", h.ListSources)
+		dict.GET("/sources/preview", h.PreviewSource)
+		dict.POST("/refreshSource", h.RefreshSource)
 	}
 
 	detail := rg.Group("/sysDictionaryDetail")
@@ -228,6 +232,54 @@ func (h *DictionaryHandler) GetDictionaryDetailList(c *gin.Context) {
 		"list":  result.Items,
 		"total": result.Total,
 	}, "查询成功")
+}
+
+// ListSources handles GET /sysDictionary/sources
+// Returns the dictionary source whitelist (table + fields) for the Modal dropdown (T-0182).
+func (h *DictionaryHandler) ListSources(c *gin.Context) {
+	sources, err := h.service.ListDictionarySources(c.Request.Context())
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	response.OKWithMsg(c, gin.H{"sources": sources}, "查询成功")
+}
+
+// PreviewSource handles GET /sysDictionary/sources/preview?table=&label=&value=&limit=10
+// Dry-run preview: returns the first N (label, value) pairs and the total distinct count (T-0182).
+func (h *DictionaryHandler) PreviewSource(c *gin.Context) {
+	var req PreviewSourceRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	resp, err := h.service.PreviewDictionarySource(c.Request.Context(), req.Table, req.LabelField, req.ValueField, req.Limit)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, err)
+		return
+	}
+	response.OKWithMsg(c, resp, "预览成功")
+}
+
+// RefreshSource handles POST /sysDictionary/refreshSource?id=123
+// Manually triggers a sync run for one source-bound dictionary (T-0182).
+func (h *DictionaryHandler) RefreshSource(c *gin.Context) {
+	idStr := c.Query("id")
+	if idStr == "" {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.NewBusinessError(7, "id is required", nil))
+		return
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusBadRequest, commonerrors.NewBusinessError(7, "invalid id", err))
+		return
+	}
+	resp, err := h.service.RefreshDictionarySource(c.Request.Context(), id)
+	if err != nil {
+		commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+		return
+	}
+	response.OKWithMsg(c, resp, "刷新成功")
 }
 
 // BatchGetDicts handles GET /sysDictionary/batch?codes=is_online,op_state,...

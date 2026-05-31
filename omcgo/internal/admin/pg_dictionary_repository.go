@@ -29,8 +29,16 @@ func (r *PgDictionaryRepository) Create(ctx context.Context, dict *Dictionary) e
 	now := time.Now()
 
 	query, args, err := storage.Psql.Insert("sys_dictionaries").
-		Columns("name", "type", "status", "description", "created_at", "updated_at").
-		Values(dict.Name, dict.Type, dict.Status, dict.Description, now, now).
+		Columns(
+			"name", "type", "status", "description",
+			"source_table", "source_label_field", "source_value_field",
+			"created_at", "updated_at",
+		).
+		Values(
+			dict.Name, dict.Type, dict.Status, dict.Description,
+			dict.SourceTable, dict.SourceLabelField, dict.SourceValueField,
+			now, now,
+		).
 		Suffix("RETURNING id, created_at, updated_at").
 		ToSql()
 	if err != nil {
@@ -44,8 +52,24 @@ func (r *PgDictionaryRepository) Create(ctx context.Context, dict *Dictionary) e
 	return nil
 }
 
+// dictColumns 是所有读路径的列清单 — 单点维护避免 SELECT/scan 错位。
+var dictColumns = []string{
+	"id", "name", "type", "status", "description", "created_at", "updated_at",
+	"source_table", "source_label_field", "source_value_field",
+	"last_refresh_at", "last_refresh_status", "last_refresh_error", "last_refresh_count",
+}
+
+// scanDict 把 dictColumns 对应的列读到 Dictionary。
+func scanDict(dst *Dictionary, scan func(...any) error) error {
+	return scan(
+		&dst.ID, &dst.Name, &dst.Type, &dst.Status, &dst.Description, &dst.CreatedAt, &dst.UpdatedAt,
+		&dst.SourceTable, &dst.SourceLabelField, &dst.SourceValueField,
+		&dst.LastRefreshAt, &dst.LastRefreshStatus, &dst.LastRefreshError, &dst.LastRefreshCount,
+	)
+}
+
 func (r *PgDictionaryRepository) GetByID(ctx context.Context, id int64) (*Dictionary, error) {
-	query, args, err := storage.Psql.Select("id", "name", "type", "status", "description", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select(dictColumns...).
 		From("sys_dictionaries").
 		Where(sq.And{sq.Eq{"id": id}, sq.Eq{"deleted_at": nil}}).
 		ToSql()
@@ -54,10 +78,8 @@ func (r *PgDictionaryRepository) GetByID(ctx context.Context, id int64) (*Dictio
 	}
 
 	var dict Dictionary
-	err = r.pool.QueryRow(ctx, query, args...).Scan(
-		&dict.ID, &dict.Name, &dict.Type, &dict.Status, &dict.Description, &dict.CreatedAt, &dict.UpdatedAt,
-	)
-	if err != nil {
+	row := r.pool.QueryRow(ctx, query, args...)
+	if err := scanDict(&dict, row.Scan); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, commonerrors.ErrNotFound
 		}
@@ -67,7 +89,7 @@ func (r *PgDictionaryRepository) GetByID(ctx context.Context, id int64) (*Dictio
 }
 
 func (r *PgDictionaryRepository) GetByType(ctx context.Context, dictType string) (*Dictionary, error) {
-	query, args, err := storage.Psql.Select("id", "name", "type", "status", "description", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select(dictColumns...).
 		From("sys_dictionaries").
 		Where(sq.And{sq.Eq{"type": dictType}, sq.Eq{"deleted_at": nil}}).
 		ToSql()
@@ -76,10 +98,8 @@ func (r *PgDictionaryRepository) GetByType(ctx context.Context, dictType string)
 	}
 
 	var dict Dictionary
-	err = r.pool.QueryRow(ctx, query, args...).Scan(
-		&dict.ID, &dict.Name, &dict.Type, &dict.Status, &dict.Description, &dict.CreatedAt, &dict.UpdatedAt,
-	)
-	if err != nil {
+	row := r.pool.QueryRow(ctx, query, args...)
+	if err := scanDict(&dict, row.Scan); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, commonerrors.ErrNotFound
 		}
@@ -96,7 +116,7 @@ func (r *PgDictionaryRepository) GetByType(ctx context.Context, dictType string)
 }
 
 func (r *PgDictionaryRepository) List(ctx context.Context) ([]Dictionary, error) {
-	query, args, err := storage.Psql.Select("id", "name", "type", "status", "description", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select(dictColumns...).
 		From("sys_dictionaries").
 		Where(sq.Eq{"deleted_at": nil}).
 		OrderBy("id ASC").
@@ -114,12 +134,72 @@ func (r *PgDictionaryRepository) List(ctx context.Context) ([]Dictionary, error)
 	var dicts []Dictionary
 	for rows.Next() {
 		var d Dictionary
-		if err := rows.Scan(&d.ID, &d.Name, &d.Type, &d.Status, &d.Description, &d.CreatedAt, &d.UpdatedAt); err != nil {
+		if err := scanDict(&d, rows.Scan); err != nil {
 			return nil, fmt.Errorf("scan dictionary: %w", err)
 		}
 		dicts = append(dicts, d)
 	}
 	return dicts, rows.Err()
+}
+
+// ListSourceBound 返所有 source_table IS NOT NULL AND status=true 的字典(T-0182)。
+// 由 worker daily cron 通过 SyncEngine.SyncAll 间接调用。
+func (r *PgDictionaryRepository) ListSourceBound(ctx context.Context) ([]Dictionary, error) {
+	query, args, err := storage.Psql.Select(dictColumns...).
+		From("sys_dictionaries").
+		Where(sq.And{
+			sq.Eq{"deleted_at": nil},
+			sq.Eq{"status": true},
+			sq.NotEq{"source_table": nil},
+		}).
+		OrderBy("id ASC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build list source-bound dicts SQL: %w", err)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list source-bound dicts: %w", err)
+	}
+	defer rows.Close()
+
+	var dicts []Dictionary
+	for rows.Next() {
+		var d Dictionary
+		if err := scanDict(&d, rows.Scan); err != nil {
+			return nil, fmt.Errorf("scan source-bound dict: %w", err)
+		}
+		dicts = append(dicts, d)
+	}
+	return dicts, rows.Err()
+}
+
+// UpdateRefreshMetadata 单次同步收尾时写 last_refresh_* 列(T-0182)。
+// status: ok / failed / timeout(SyncEngine 决定);count: ok 时为 auto 项总数,
+// failed 时为 0。errMsg 已被 SyncEngine 截到 500 字符。
+func (r *PgDictionaryRepository) UpdateRefreshMetadata(ctx context.Context, dictID int64, status, errMsg string, count int) error {
+	now := time.Now()
+	var errMsgArg any
+	if errMsg == "" {
+		errMsgArg = nil
+	} else {
+		errMsgArg = errMsg
+	}
+	query, args, err := storage.Psql.Update("sys_dictionaries").
+		Set("last_refresh_at", now).
+		Set("last_refresh_status", status).
+		Set("last_refresh_error", errMsgArg).
+		Set("last_refresh_count", count).
+		Set("updated_at", now).
+		Where(sq.Eq{"id": dictID}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build update refresh metadata SQL: %w", err)
+	}
+	if _, err := r.pool.Exec(ctx, query, args...); err != nil {
+		return fmt.Errorf("update refresh metadata: %w", err)
+	}
+	return nil
 }
 
 func (r *PgDictionaryRepository) Update(ctx context.Context, dict *Dictionary) error {
@@ -136,6 +216,11 @@ func (r *PgDictionaryRepository) Update(ctx context.Context, dict *Dictionary) e
 	}
 	builder = builder.Set("status", dict.Status)
 	builder = builder.Set("description", dict.Description)
+	// T-0182:source_* 直接覆盖入库(nil 也写,让"解绑"语义生效)。
+	// 校验三字段一致性已在 service 层完成。
+	builder = builder.Set("source_table", dict.SourceTable)
+	builder = builder.Set("source_label_field", dict.SourceLabelField)
+	builder = builder.Set("source_value_field", dict.SourceValueField)
 
 	query, args, err := builder.
 		Where(sq.And{sq.Eq{"id": dict.ID}, sq.Eq{"deleted_at": nil}}).
@@ -189,7 +274,7 @@ func (r *PgDictionaryRepository) Delete(ctx context.Context, id int64) error {
 
 // listActiveDetails returns enabled details for a dictionary, sorted by sort_order.
 func (r *PgDictionaryRepository) listActiveDetails(ctx context.Context, dictID int64) ([]DictionaryDetail, error) {
-	query, args, err := storage.Psql.Select("id", "label", "value", "extend", "status", "sort", "sys_dictionary_id", "parent_id", "level", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select("id", "label", "value", "extend", "status", "sort", "sys_dictionary_id", "parent_id", "level", "origin", "created_at", "updated_at").
 		From("sys_dictionary_details").
 		Where(sq.And{sq.Eq{"sys_dictionary_id": dictID}, sq.Eq{"deleted_at": nil}, sq.Eq{"status": true}}).
 		OrderBy("sort ASC").
@@ -207,7 +292,7 @@ func (r *PgDictionaryRepository) listActiveDetails(ctx context.Context, dictID i
 	var details []DictionaryDetail
 	for rows.Next() {
 		var d DictionaryDetail
-		if err := rows.Scan(&d.ID, &d.Label, &d.Value, &d.Extend, &d.Status, &d.Sort, &d.SysDictionaryID, &d.ParentID, &d.Level, &d.CreatedAt, &d.UpdatedAt); err != nil {
+		if err := rows.Scan(&d.ID, &d.Label, &d.Value, &d.Extend, &d.Status, &d.Sort, &d.SysDictionaryID, &d.ParentID, &d.Level, &d.Origin, &d.CreatedAt, &d.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan detail: %w", err)
 		}
 		details = append(details, d)
@@ -231,10 +316,14 @@ func NewPgDictionaryDetailRepository(pool *pgxpool.Pool) *PgDictionaryDetailRepo
 
 func (r *PgDictionaryDetailRepository) Create(ctx context.Context, detail *DictionaryDetail) error {
 	now := time.Now()
+	origin := detail.Origin
+	if origin == "" {
+		origin = OriginManual
+	}
 
 	query, args, err := storage.Psql.Insert("sys_dictionary_details").
-		Columns("label", "value", "extend", "status", "sort", "sys_dictionary_id", "parent_id", "level", "created_at", "updated_at").
-		Values(detail.Label, detail.Value, detail.Extend, detail.Status, detail.Sort, detail.SysDictionaryID, detail.ParentID, detail.Level, now, now).
+		Columns("label", "value", "extend", "status", "sort", "sys_dictionary_id", "parent_id", "level", "origin", "created_at", "updated_at").
+		Values(detail.Label, detail.Value, detail.Extend, detail.Status, detail.Sort, detail.SysDictionaryID, detail.ParentID, detail.Level, origin, now, now).
 		Suffix("RETURNING id, created_at, updated_at").
 		ToSql()
 	if err != nil {
@@ -249,7 +338,7 @@ func (r *PgDictionaryDetailRepository) Create(ctx context.Context, detail *Dicti
 }
 
 func (r *PgDictionaryDetailRepository) GetByID(ctx context.Context, id int64) (*DictionaryDetail, error) {
-	query, args, err := storage.Psql.Select("id", "label", "value", "extend", "status", "sort", "sys_dictionary_id", "parent_id", "level", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select("id", "label", "value", "extend", "status", "sort", "sys_dictionary_id", "parent_id", "level", "origin", "created_at", "updated_at").
 		From("sys_dictionary_details").
 		Where(sq.And{sq.Eq{"id": id}, sq.Eq{"deleted_at": nil}}).
 		ToSql()
@@ -302,7 +391,7 @@ func (r *PgDictionaryDetailRepository) List(ctx context.Context, req DictionaryD
 	offset := req.Offset()
 	limit := req.Limit()
 
-	query, args, err := storage.Psql.Select("id", "label", "value", "extend", "status", "sort", "sys_dictionary_id", "parent_id", "level", "created_at", "updated_at").
+	query, args, err := storage.Psql.Select("id", "label", "value", "extend", "status", "sort", "sys_dictionary_id", "parent_id", "level", "origin", "created_at", "updated_at").
 		From("sys_dictionary_details").
 		Where(where).
 		OrderBy("sort ASC").
@@ -322,7 +411,7 @@ func (r *PgDictionaryDetailRepository) List(ctx context.Context, req DictionaryD
 	var items []DictionaryDetail
 	for rows.Next() {
 		var d DictionaryDetail
-		if err := rows.Scan(&d.ID, &d.Label, &d.Value, &d.Extend, &d.Status, &d.Sort, &d.SysDictionaryID, &d.ParentID, &d.Level, &d.CreatedAt, &d.UpdatedAt); err != nil {
+		if err := rows.Scan(&d.ID, &d.Label, &d.Value, &d.Extend, &d.Status, &d.Sort, &d.SysDictionaryID, &d.ParentID, &d.Level, &d.Origin, &d.CreatedAt, &d.UpdatedAt); err != nil {
 			return nil, 0, fmt.Errorf("scan detail: %w", err)
 		}
 		items = append(items, d)
@@ -443,4 +532,139 @@ func (r *PgDictionaryDetailRepository) ShiftLevelDelta(ctx context.Context, ids 
 		return fmt.Errorf("shift level delta: %w", err)
 	}
 	return nil
+}
+
+// === T-0182 数据源同步专用方法 ===
+
+// UpsertAutoBatch 对一批 (label, value) 做 upsert(origin='auto'):
+//   - 自然键 (sys_dictionary_id, value, origin='auto', deleted_at IS NULL) 单行
+//   - 命中存在行 → label 不同时 UPDATE,否则不动
+//   - 未命中 → INSERT 新行 (status=true, sort=0, parent_id=NULL, level=0)
+//
+// 返回 (inserted, updated)。空 rows 直接返 0,0。
+//
+// 实现:不走 ON CONFLICT(没有适合的 UNIQUE 约束,且 v1 允许 manual 行与 auto 行
+// 共存同 value),而是按 dict+value 分桶 SELECT → 逐条决策 → 写。N <= 5000 行内
+// 可接受。后续可改为 batch CopyFrom + Diff 优化。
+func (r *PgDictionaryDetailRepository) UpsertAutoBatch(ctx context.Context, dictID int64, rows []AutoDetailRow) (int, int, error) {
+	if len(rows) == 0 {
+		return 0, 0, nil
+	}
+
+	// 1. 拉当前 auto 行的 (value → id, label) 映射,O(n) 比对。
+	existing := make(map[string]struct {
+		ID    int64
+		Label string
+	}, len(rows))
+	const existsSQL = `
+SELECT id, label, value
+FROM sys_dictionary_details
+WHERE sys_dictionary_id = $1
+  AND origin = 'auto'
+  AND deleted_at IS NULL`
+	qRows, err := r.pool.Query(ctx, existsSQL, dictID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("load existing auto rows: %w", err)
+	}
+	for qRows.Next() {
+		var id int64
+		var label, value string
+		if err := qRows.Scan(&id, &label, &value); err != nil {
+			qRows.Close()
+			return 0, 0, fmt.Errorf("scan existing auto: %w", err)
+		}
+		existing[value] = struct {
+			ID    int64
+			Label string
+		}{ID: id, Label: label}
+	}
+	qRows.Close()
+	if err := qRows.Err(); err != nil {
+		return 0, 0, fmt.Errorf("iter existing auto: %w", err)
+	}
+
+	// 2. 分桶 + 批量执行 INSERT / UPDATE。事务包裹,任意一步失败回滚。
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, 0, fmt.Errorf("begin upsert tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	now := time.Now()
+	inserted, updated := 0, 0
+	for _, row := range rows {
+		cur, ok := existing[row.Value]
+		if !ok {
+			_, err := tx.Exec(ctx,
+				`INSERT INTO sys_dictionary_details
+				 (label, value, extend, status, sort, sys_dictionary_id, parent_id, level, origin, created_at, updated_at)
+				 VALUES ($1, $2, '', true, 0, $3, NULL, 0, 'auto', $4, $4)`,
+				row.Label, row.Value, dictID, now,
+			)
+			if err != nil {
+				return 0, 0, fmt.Errorf("insert auto detail value=%s: %w", row.Value, err)
+			}
+			inserted++
+		} else if cur.Label != row.Label {
+			_, err := tx.Exec(ctx,
+				`UPDATE sys_dictionary_details SET label = $1, updated_at = $2 WHERE id = $3`,
+				row.Label, now, cur.ID,
+			)
+			if err != nil {
+				return 0, 0, fmt.Errorf("update auto detail id=%d: %w", cur.ID, err)
+			}
+			updated++
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, 0, fmt.Errorf("commit upsert tx: %w", err)
+	}
+	return inserted, updated, nil
+}
+
+// DeleteAutoNotIn 软删 sys_dictionary_id 下所有 origin='auto' 且 value 不在
+// keepValues 集合的行。keepValues 为空 → 软删全部 auto 行(表示用户解绑数据源)。
+// 返回被软删的行数。
+func (r *PgDictionaryDetailRepository) DeleteAutoNotIn(ctx context.Context, dictID int64, keepValues []string) (int, error) {
+	now := time.Now()
+	if len(keepValues) == 0 {
+		tag, err := r.pool.Exec(ctx,
+			`UPDATE sys_dictionary_details
+			 SET deleted_at = $1, updated_at = $1
+			 WHERE sys_dictionary_id = $2 AND origin = 'auto' AND deleted_at IS NULL`,
+			now, dictID,
+		)
+		if err != nil {
+			return 0, fmt.Errorf("delete all auto details: %w", err)
+		}
+		return int(tag.RowsAffected()), nil
+	}
+
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE sys_dictionary_details
+		 SET deleted_at = $1, updated_at = $1
+		 WHERE sys_dictionary_id = $2
+		   AND origin = 'auto'
+		   AND deleted_at IS NULL
+		   AND NOT (value = ANY($3))`,
+		now, dictID, keepValues,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("delete orphan auto details: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// CountAutoActive 回读当前 auto 行数(未软删)用于写 last_refresh_count。
+func (r *PgDictionaryDetailRepository) CountAutoActive(ctx context.Context, dictID int64) (int, error) {
+	var n int
+	err := r.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM sys_dictionary_details
+		 WHERE sys_dictionary_id = $1 AND origin = 'auto' AND deleted_at IS NULL`,
+		dictID,
+	).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count auto details: %w", err)
+	}
+	return n, nil
 }

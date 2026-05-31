@@ -4,22 +4,46 @@ import (
 	"context"
 	"fmt"
 
+	"go.uber.org/zap"
+
+	"github.com/omcgo/omcgo/internal/admin/dictsource"
 	commonerrors "github.com/omcgo/omcgo/internal/core/errors"
 	"github.com/omcgo/omcgo/internal/core/model"
 )
 
 // DictionaryService provides business logic for dictionary management.
+//
+// T-0182:增加 sourceRegistry / syncEngine 两个可选依赖。
+//   - sourceRegistry 不为 nil 时,Create/Update 启用 source_* 字段校验,以及 ListDictionarySources / Preview / Refresh / SyncAll 4 个新接口。
+//   - 为 nil 时所有 source 相关方法返 BusinessError "dictionary source feature disabled" — 保留运行时回退能力。
 type DictionaryService struct {
-	dictRepo   DictionaryRepository
-	detailRepo DictionaryDetailRepository
+	dictRepo       DictionaryRepository
+	detailRepo     DictionaryDetailRepository
+	sourceRegistry *dictsource.Registry
+	syncEngine     *dictsource.SyncEngine
+	log            *zap.Logger
 }
 
 // NewDictionaryService creates a new DictionaryService.
 func NewDictionaryService(dictRepo DictionaryRepository, detailRepo DictionaryDetailRepository) *DictionaryService {
-	return &DictionaryService{dictRepo: dictRepo, detailRepo: detailRepo}
+	return &DictionaryService{dictRepo: dictRepo, detailRepo: detailRepo, log: zap.NewNop()}
+}
+
+// SetSourceWiring 注入数据源 Registry + SyncEngine + logger。
+// provider 启动期调用一次;v1 nil 检查保留运行时退化为"无数据源功能"模式。
+func (s *DictionaryService) SetSourceWiring(reg *dictsource.Registry, engine *dictsource.SyncEngine, log *zap.Logger) {
+	s.sourceRegistry = reg
+	s.syncEngine = engine
+	if log != nil {
+		s.log = log
+	}
 }
 
 // CreateDictionary creates a new dictionary entry.
+//
+// T-0182:如 source_* 三字段填写,校验白名单后写入并立即触发首次同步。
+// 首次同步失败不阻塞创建 — 字典已落库,前端可看到 last_refresh_error,
+// 用户可点"刷新"按钮重试。
 func (s *DictionaryService) CreateDictionary(ctx context.Context, req CreateDictionaryRequest) (*Dictionary, error) {
 	dict := &Dictionary{
 		Name:        req.Name,
@@ -31,9 +55,29 @@ func (s *DictionaryService) CreateDictionary(ctx context.Context, req CreateDict
 		dict.Status = *req.Status
 	}
 
+	// T-0182 — 数据源校验(可选,需启用 sourceRegistry)。
+	if s.sourceRegistry != nil {
+		t, l, v, bound, err := validateSourceFields(s.sourceRegistry, req.SourceTable, req.SourceLabelField, req.SourceValueField, false)
+		if err != nil {
+			return nil, err
+		}
+		if bound {
+			dict.SourceTable = &t
+			dict.SourceLabelField = &l
+			dict.SourceValueField = &v
+		}
+	}
+
 	if err := s.dictRepo.Create(ctx, dict); err != nil {
 		return nil, fmt.Errorf("create dictionary: %w", err)
 	}
+
+	// T-0182 — 首次同步(异步? 同步? v1 决策:同步)。
+	// 同步语义让前端立刻看到 auto 项,体验最直接;失败也不影响字典创建本身。
+	if dict.SourceTable != nil && s.syncEngine != nil {
+		s.runSyncOne(ctx, dict)
+	}
+
 	return dict, nil
 }
 
@@ -48,6 +92,12 @@ func (s *DictionaryService) ListDictionaries(ctx context.Context) ([]Dictionary,
 }
 
 // UpdateDictionary updates an existing dictionary.
+//
+// T-0182 source 字段语义(参 model.go UpdateDictionaryRequest 注释):
+//   - 三个字段都不传 → 不动数据源绑定
+//   - 三个字段都传非空 → 绑定/切换;切换时清空旧 auto 项 + 立即触发同步
+//   - 三个字段都传空字符串 → 解绑,删所有 auto 项,保留 manual 项
+//   - 部分填写 → 400
 func (s *DictionaryService) UpdateDictionary(ctx context.Context, req UpdateDictionaryRequest) (*Dictionary, error) {
 	dict, err := s.dictRepo.GetByID(ctx, req.ID)
 	if err != nil {
@@ -67,10 +117,67 @@ func (s *DictionaryService) UpdateDictionary(ctx context.Context, req UpdateDict
 		dict.Description = *req.Description
 	}
 
+	// T-0182 — 数据源 update 路径。
+	sourceChanged := false
+	sourceCleared := false
+	if s.sourceRegistry != nil && (req.SourceTable != nil || req.SourceLabelField != nil || req.SourceValueField != nil) {
+		t, l, v, bound, err := validateSourceFields(s.sourceRegistry, req.SourceTable, req.SourceLabelField, req.SourceValueField, true)
+		if err != nil {
+			return nil, err
+		}
+		if bound {
+			// 绑定 / 切换
+			oldTable := derefString(dict.SourceTable)
+			if oldTable != t || derefString(dict.SourceLabelField) != l || derefString(dict.SourceValueField) != v {
+				sourceChanged = true
+			}
+			dict.SourceTable = &t
+			dict.SourceLabelField = &l
+			dict.SourceValueField = &v
+		} else {
+			// 解绑(三字段都空字符串)
+			if dict.SourceTable != nil {
+				sourceCleared = true
+			}
+			dict.SourceTable = nil
+			dict.SourceLabelField = nil
+			dict.SourceValueField = nil
+		}
+	}
+
 	if err := s.dictRepo.Update(ctx, dict); err != nil {
 		return nil, fmt.Errorf("update dictionary: %w", err)
 	}
+
+	// 解绑 → 清空 auto 项(manual 项保留)。
+	if sourceCleared {
+		if _, err := s.detailRepo.DeleteAutoNotIn(ctx, dict.ID, nil); err != nil {
+			// 解绑过程已经写库,删 auto 失败只记日志不阻塞返回
+			s.log.Warn("dict_source_unbind_cleanup_failed",
+				zap.Int64("dict_id", dict.ID), zap.Error(err))
+		}
+	}
+
+	// 绑定/切换 → 删除旧 auto 项 + 触发同步。
+	if sourceChanged && s.syncEngine != nil {
+		// 切换源表:旧 auto 项与新源 value 大概率全不匹配,DeleteAutoNotIn(keep=nil)
+		// 直接全软删,后续 SyncOne 重建。
+		if _, err := s.detailRepo.DeleteAutoNotIn(ctx, dict.ID, nil); err != nil {
+			s.log.Warn("dict_source_switch_cleanup_failed",
+				zap.Int64("dict_id", dict.ID), zap.Error(err))
+		}
+		s.runSyncOne(ctx, dict)
+	}
+
 	return dict, nil
+}
+
+// derefString 解引用 *string;nil 视为空串。
+func derefString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 // DeleteDictionary soft-deletes a dictionary and its details.
@@ -83,11 +190,18 @@ func (s *DictionaryService) DeleteDictionary(ctx context.Context, id int64) erro
 // PRD §10：支持 ParentID 创建子项，校验：
 //   - 父明细存在且属于同一 sys_dictionary
 //   - 新明细 level = parent.level + 1，且 level < MaxDictionaryDetailDepth (3)
+//
+// T-0182:托管字典(source_table != NULL)只接受 origin='manual' 项,且 auto 项不能
+// 通过前端入口创建 — handler 不向用户开放写 origin,service 强制为 'manual'。
+// (托管字典 v1 是否允许补录 manual 项?方案 A 接受 — UI 隐藏 + 按钮,但 service
+// 不直接禁绝,留作未来"运营临时补录"的口子。)
 func (s *DictionaryService) CreateDictionaryDetail(ctx context.Context, req CreateDictionaryDetailRequest) (*DictionaryDetail, error) {
 	// Verify parent dictionary exists
-	if _, err := s.dictRepo.GetByID(ctx, req.SysDictionaryID); err != nil {
+	parentDict, err := s.dictRepo.GetByID(ctx, req.SysDictionaryID)
+	if err != nil {
 		return nil, commonerrors.NewBusinessError(7003, "parent dictionary not found", err)
 	}
+	_ = parentDict // 后续可能加管理字典补录策略校验,目前方案 A 允许
 
 	detail := &DictionaryDetail{
 		Label:           req.Label,
@@ -97,6 +211,7 @@ func (s *DictionaryService) CreateDictionaryDetail(ctx context.Context, req Crea
 		Sort:            0,
 		SysDictionaryID: req.SysDictionaryID,
 		Level:           0,
+		Origin:          OriginManual, // 前端入口只能创建 manual 项,auto 项由 SyncEngine 创建
 	}
 	if req.Status != nil {
 		detail.Status = *req.Status
@@ -341,4 +456,150 @@ func trimSpace(s string) string {
 		end--
 	}
 	return s[start:end]
+}
+
+// ====================================================================
+// T-0182 数据源相关方法
+// ====================================================================
+
+// ListDictionarySources 返白名单全部表 + 字段(GET /sysDictionary/sources)。
+func (s *DictionaryService) ListDictionarySources(ctx context.Context) ([]dictsource.TableSpec, error) {
+	if s.sourceRegistry == nil {
+		return nil, commonerrors.NewBusinessError(errCodeSourceSyncFailed,
+			"dictionary source feature disabled", nil)
+	}
+	return s.sourceRegistry.ListTables(), nil
+}
+
+// PreviewDictionarySource 调用 SyncEngine.Preview,返前 N 条 + 总数。
+func (s *DictionaryService) PreviewDictionarySource(ctx context.Context, table, labelField, valueField string, limit int) (*PreviewSourceResponse, error) {
+	if s.syncEngine == nil {
+		return nil, commonerrors.NewBusinessError(errCodeSourceSyncFailed,
+			"dictionary source feature disabled", nil)
+	}
+	pairs, total, err := s.syncEngine.Preview(ctx, table, labelField, valueField, limit)
+	if err != nil {
+		return nil, translateEngineError(err)
+	}
+	out := &PreviewSourceResponse{
+		Rows:  make([]PreviewSourceRow, len(pairs)),
+		Total: total,
+	}
+	for i, p := range pairs {
+		out.Rows[i] = PreviewSourceRow{Label: p.Label, Value: p.Value}
+	}
+	return out, nil
+}
+
+// RefreshDictionarySource 手动触发单字典同步。
+// 字典必须已绑定数据源,否则返 400。
+func (s *DictionaryService) RefreshDictionarySource(ctx context.Context, dictID int64) (*RefreshSourceResponse, error) {
+	if s.syncEngine == nil {
+		return nil, commonerrors.NewBusinessError(errCodeSourceSyncFailed,
+			"dictionary source feature disabled", nil)
+	}
+	dict, err := s.dictRepo.GetByID(ctx, dictID)
+	if err != nil {
+		return nil, fmt.Errorf("get dictionary for refresh: %w", err)
+	}
+	if dict.SourceTable == nil {
+		return nil, commonerrors.NewBusinessError(errCodeSourcePartialFields,
+			"dictionary has no source binding", nil)
+	}
+	res, err := s.runSyncOneStrict(ctx, dict)
+	if err != nil {
+		return nil, translateEngineError(err)
+	}
+	return &RefreshSourceResponse{
+		Inserted:   res.Inserted,
+		Updated:    res.Updated,
+		Deleted:    res.Deleted,
+		Total:      res.TotalAuto,
+		DurationMS: res.DurationMS,
+	}, nil
+}
+
+// SyncSourceBoundAll 是 worker daily cron 入口(P2 接入)。
+// 遍历所有 source_table != NULL AND status=true 的字典,调 SyncEngine.SyncAll。
+// 返 (ok, failed)。单字典失败不中断,失败原因写 last_refresh_error。
+func (s *DictionaryService) SyncSourceBoundAll(ctx context.Context) (ok, failed int) {
+	if s.syncEngine == nil {
+		s.log.Warn("dict_source_daily_skip_engine_nil")
+		return 0, 0
+	}
+	return s.syncEngine.SyncAll(ctx, s.listSourceBoundForSync)
+}
+
+// listSourceBoundForSync 把 DB Dictionary 行映射为 dictsource.SyncDict(SyncEngine 接口形状)。
+func (s *DictionaryService) listSourceBoundForSync(ctx context.Context) ([]dictsource.SyncDict, error) {
+	dicts, err := s.dictRepo.ListSourceBound(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list source-bound dicts: %w", err)
+	}
+	out := make([]dictsource.SyncDict, 0, len(dicts))
+	for _, d := range dicts {
+		// 防御:DB 应保证三字段同时非空(由 service 写入逻辑保证),稳妥仍判一下。
+		if d.SourceTable == nil || d.SourceLabelField == nil || d.SourceValueField == nil {
+			continue
+		}
+		out = append(out, dictsource.SyncDict{
+			ID:          d.ID,
+			Name:        d.Name,
+			SourceTable: *d.SourceTable,
+			LabelField:  *d.SourceLabelField,
+			ValueField:  *d.SourceValueField,
+		})
+	}
+	return out, nil
+}
+
+// runSyncOne 是 Create/Update 路径用的"宽容同步":失败只记日志 + 写 last_refresh_*。
+// 不影响 Create/Update 的成功返回。
+func (s *DictionaryService) runSyncOne(ctx context.Context, dict *Dictionary) {
+	if s.syncEngine == nil || dict.SourceTable == nil {
+		return
+	}
+	sd := dictsource.SyncDict{
+		ID:          dict.ID,
+		Name:        dict.Name,
+		SourceTable: *dict.SourceTable,
+		LabelField:  derefString(dict.SourceLabelField),
+		ValueField:  derefString(dict.SourceValueField),
+	}
+	res, err := s.syncEngine.SyncOne(ctx, sd)
+	if err != nil {
+		s.log.Warn("dict_source_initial_sync_failed",
+			zap.Int64("dict_id", dict.ID), zap.Error(err))
+		_ = s.dictRepo.UpdateRefreshMetadata(ctx, dict.ID, "failed", truncateErrMsg(err.Error()), 0)
+		return
+	}
+	_ = s.dictRepo.UpdateRefreshMetadata(ctx, dict.ID, "ok", "", res.TotalAuto)
+}
+
+// runSyncOneStrict 是 RefreshSource(用户手动)路径用的"严格同步":失败返 err 让前端
+// 看到 toast;同时也写 last_refresh_*。
+func (s *DictionaryService) runSyncOneStrict(ctx context.Context, dict *Dictionary) (*dictsource.SyncResult, error) {
+	sd := dictsource.SyncDict{
+		ID:          dict.ID,
+		Name:        dict.Name,
+		SourceTable: derefString(dict.SourceTable),
+		LabelField:  derefString(dict.SourceLabelField),
+		ValueField:  derefString(dict.SourceValueField),
+	}
+	res, err := s.syncEngine.SyncOne(ctx, sd)
+	if err != nil {
+		_ = s.dictRepo.UpdateRefreshMetadata(ctx, dict.ID, "failed", truncateErrMsg(err.Error()), 0)
+		return nil, err
+	}
+	_ = s.dictRepo.UpdateRefreshMetadata(ctx, dict.ID, "ok", "", res.TotalAuto)
+	return &res, nil
+}
+
+// truncateErrMsg 把错误摘要截到 500 字符(避免 last_refresh_error 列被超长字符串撑爆)。
+func truncateErrMsg(msg string) string {
+	const maxLen = 500
+	if len(msg) <= maxLen {
+		return msg
+	}
+	return msg[:maxLen]
 }

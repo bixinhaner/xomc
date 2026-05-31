@@ -1,0 +1,85 @@
+# 数据字典数据源白名单 — T-0182
+# PRD: docs/project/prd/F06-data-dictionary-source.md §13 A.1
+#
+# 这是字典页面"数据源"下拉的唯一真实来源。
+# 任何不在此清单的表 / 字段不会出现在 UI,后端 Resolve 时也会拒绝。
+#
+# 维护规则:
+# - 添加新表 → 在此追加一项,加 PR 评审
+# - 敏感表(用户密码 hash / API key / 审计日志 / login_logs / system_license) 绝不入此清单
+# - 字段必须是原生类型(string / int / bool / time);v1 不支持 jsonb / array
+
+sources:
+  - table: devices
+    display_name: "设备"
+    fields:
+      - { column: serial_number,    display: "序列号",     type: string }
+      - { column: product_class,    display: "设备型号",   type: string }
+      - { column: vendor_id,        display: "厂商 OUI",   type: string }
+      - { column: software_version, display: "软件版本",   type: string }
+
+  - table: products
+    display_name: "产品"
+    fields:
+      - { column: code,             display: "产品 code",  type: string }
+      - { column: name,             display: "产品名",     type: string }
+      - { column: vendor,           display: "厂商",       type: string }
+
+  - table: param_models
+    display_name: "参数模型"
+    fields:
+      - { column: name,             display: "模型名",     type: string }
+
+  - table: topo_nodes
+    display_name: "拓扑节点"
+    fields:
+      - { column: name,             display: "节点名",     type: string }
+      - { column: node_type,        display: "节点类型",   type: string }
+
+  - table: alarm_definitions
+    display_name: "告警定义"
+    fields:
+      - { column: identifier,       display: "告警标识",   type: string }
+      - { column: ne_type,          display: "网元类型",   type: string }
+      - { column: severity,         display: "严重级",     type: string }
+
+  - table: device_groups
+    display_name: "设备组"
+    fields:
+      - { column: name,             display: "组名",       type: string }
+      - { column: group_type,       display: "组类型",     type: string }
+
+  - table: sites
+    display_name: "站点"
+    fields:
+      - { column: name,             display: "站点名",     type: string }
+      - { column: region,           display: "区域",       type: string }
+
+  - table: product_class_patterns
+    display_name: "产品 productClass pattern"
+    fields:
+      - { column: pattern,          display: "正则",       type: string }
+
+  - table: firmware_versions
+    display_name: "固件版本"
+    fields:
+      - { column: version,          display: "版本号",     type: string }
+      - { column: vendor,           display: "厂商",       type: string }
+
+  - table: kpi_definitions
+    display_name: "KPI 定义"
+    fields:
+      - { column: code,             display: "KPI code",   type: string }
+      - { column: name,             display: "KPI 名",     type: string }
+
+  - table: users
+    display_name: "用户"
+    fields:
+      - { column: username,         display: "用户名",     type: string }
+      - { column: nickname,         display: "昵称",       type: string }
+
+  - table: roles
+    display_name: "角色"
+    fields:
+      - { column: code,             display: "角色 code",  type: string }
+      - { column: name,             display: "角色名",     type: string }

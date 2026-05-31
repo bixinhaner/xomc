@@ -121,6 +121,23 @@ func (r *mockDictDetailRepository) DeleteByDictionaryID(ctx context.Context, dic
 	return nil
 }
 
+// T-0182 数据源同步专用 — no-op shims,handler/service 老测试不触发这些路径。
+func (r *mockDictRepository) ListSourceBound(ctx context.Context) ([]Dictionary, error) {
+	return nil, nil
+}
+func (r *mockDictRepository) UpdateRefreshMetadata(ctx context.Context, dictID int64, status, errMsg string, count int) error {
+	return nil
+}
+func (r *mockDictDetailRepository) UpsertAutoBatch(ctx context.Context, dictID int64, rows []AutoDetailRow) (int, int, error) {
+	return 0, 0, nil
+}
+func (r *mockDictDetailRepository) DeleteAutoNotIn(ctx context.Context, dictID int64, keepValues []string) (int, error) {
+	return 0, nil
+}
+func (r *mockDictDetailRepository) CountAutoActive(ctx context.Context, dictID int64) (int, error) {
+	return 0, nil
+}
+
 // =============================================================
 // BatchGetDicts Tests
 // =============================================================
