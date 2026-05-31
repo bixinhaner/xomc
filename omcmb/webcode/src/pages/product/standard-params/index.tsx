@@ -77,7 +77,7 @@ export default function StandardParamsPage() {
             onConfirm={() =>
               deleteMut
                 .mutateAsync(row.standardPath)
-                .then(() => message.success('已删除'))
+                .then(() => message.success(t('common.deleted')))
                 .catch((e) => message.error((e as Error).message))
             }
           >
@@ -118,7 +118,7 @@ export default function StandardParamsPage() {
         >
           <Space>
             <Input.Search
-              placeholder="搜索 standard_path"
+              placeholder={t('product.standardParams.searchPh')}
               allowClear
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}

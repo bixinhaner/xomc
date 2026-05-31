@@ -83,7 +83,7 @@ export default function OrphanDevicesPage() {
         <Row align="middle" justify="space-between" style={{ marginBottom: 12 }} gutter={8}>
           <Col>
             <Input.Search
-              placeholder="按 SN 模糊搜索"
+              placeholder={t('product.orphan.searchPh')}
               allowClear
               style={{ width: 240 }}
               onSearch={(v) => {
@@ -100,9 +100,9 @@ export default function OrphanDevicesPage() {
                   - API 立即返 202,前端 toast"正在匹配中,请稍等"
                   - 同一管理员重复触发 → 后端返 409,前端 toast 提醒等待
                   - 真实绑定结果靠下一次刷新页面体现(staleTime:0 进页自动拉) */}
-              <Tooltip title="扫描所有 product_class 不空,但 product_id 仍为 NULL 的设备">
+              <Tooltip title={t('product.orphan.scanTooltip')}>
                 <Popconfirm
-                  title="确认触发全量重新匹配?"
+                  title={t('product.orphan.rematchTitle')}
                   onConfirm={() =>
                     rematchMut
                       .mutateAsync()
@@ -111,9 +111,9 @@ export default function OrphanDevicesPage() {
                         //   accepted → 锁获取成功,goroutine 已派发
                         //   running  → 已有 rematch 在执行中,提示用户等待
                         if (r.status === 'running') {
-                          message.warning('正在执行中,请等待刷新完成');
+                          message.warning(t('product.orphan.runningWarn'));
                         } else {
-                          message.info('正在后台执行,请稍等');
+                          message.info(t('product.orphan.bgInfo'));
                         }
                       })
                       .catch((e) =>

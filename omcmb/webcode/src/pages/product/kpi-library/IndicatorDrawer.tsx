@@ -76,7 +76,7 @@ export default function IndicatorDrawer({ open, deviceType, indicator, onClose }
               indicator &&
               deleteMut
                 .mutateAsync({ deviceType, indicatorId: indicator.id, platform: row.platformName })
-                .then(() => message.success('已删除'))
+                .then(() => message.success(t('common.deleted')))
                 .catch((e) => message.error((e as Error).message))
             }
           >
@@ -130,23 +130,23 @@ export default function IndicatorDrawer({ open, deviceType, indicator, onClose }
         <>
           <Descriptions column={2} size="small" bordered style={{ marginBottom: 16 }}>
             <Descriptions.Item label="ID">{indicator.id}</Descriptions.Item>
-            <Descriptions.Item label="设备类型">{indicator.deviceType}</Descriptions.Item>
-            <Descriptions.Item label="中文名">{indicator.cnName || '—'}</Descriptions.Item>
-            <Descriptions.Item label="英文名">{indicator.enName || '—'}</Descriptions.Item>
-            <Descriptions.Item label="分组">{indicator.groupName || indicator.groupId || '—'}</Descriptions.Item>
-            <Descriptions.Item label="单位">{indicator.unit || '—'}</Descriptions.Item>
-            <Descriptions.Item label="计数器类型">{indicator.counterType || '—'}</Descriptions.Item>
-            <Descriptions.Item label="级别">{indicator.indicatorLevel || '—'}</Descriptions.Item>
-            <Descriptions.Item label="启用" span={2}>
-              {indicator.isEnabled ? <Tag color="success">已启用</Tag> : <Tag>未启用</Tag>}
+            <Descriptions.Item label={t('product.kpi.indicator.deviceType')}>{indicator.deviceType}</Descriptions.Item>
+            <Descriptions.Item label={t('common.cnName')}>{indicator.cnName || '—'}</Descriptions.Item>
+            <Descriptions.Item label={t('common.enName')}>{indicator.enName || '—'}</Descriptions.Item>
+            <Descriptions.Item label={t('product.kpi.indicator.group')}>{indicator.groupName || indicator.groupId || '—'}</Descriptions.Item>
+            <Descriptions.Item label={t('common.unit')}>{indicator.unit || '—'}</Descriptions.Item>
+            <Descriptions.Item label={t('product.kpi.indicator.counterType')}>{indicator.counterType || '—'}</Descriptions.Item>
+            <Descriptions.Item label={t('product.kpi.indicator.level')}>{indicator.indicatorLevel || '—'}</Descriptions.Item>
+            <Descriptions.Item label={t('product.kpi.indicator.enabledTag')} span={2}>
+              {indicator.isEnabled ? <Tag color="success">{t('product.kpi.indicator.enabledTag')}</Tag> : <Tag>{t('product.kpi.indicator.disabledTag')}</Tag>}
             </Descriptions.Item>
-            <Descriptions.Item label="描述" span={2}>
+            <Descriptions.Item label={t('common.description')} span={2}>
               {indicator.description || '—'}
             </Descriptions.Item>
           </Descriptions>
 
           <Space style={{ marginBottom: 12, justifyContent: 'space-between', width: '100%' }}>
-            <strong>全平台公式 / Per-Platform Formulas</strong>
+            <strong>{t('product.kpi.indicator.formulasTitle')}</strong>
             <Button
               size="small"
               type="primary"
@@ -185,7 +185,7 @@ export default function IndicatorDrawer({ open, deviceType, indicator, onClose }
             <Form form={form} layout="vertical">
               <Form.Item
                 name="platform"
-                label="平台名 (platform_name)"
+                label={t('product.kpi.indicator.platformName')}
                 rules={[{ required: true, message: '必填' }]}
                 extra="对应 product 的 indicator_platform 字段；如 enb-default / gnb-comba"
               >
@@ -193,11 +193,11 @@ export default function IndicatorDrawer({ open, deviceType, indicator, onClose }
               </Form.Item>
               <Form.Item
                 name="formula"
-                label="公式 (formula)"
+                label={t('product.kpi.indicator.formulaLabel')}
                 rules={[{ required: true, message: '必填' }]}
                 extra="支持基础四则、括号、计数器名；前端做括号匹配校验，后端做完整语法验证"
               >
-                <Input.TextArea rows={4} placeholder="如 C1 / (C1 + C2) * 100" />
+                <Input.TextArea rows={4} placeholder={t('product.kpi.indicator.formulaPh')} />
               </Form.Item>
             </Form>
           </Modal>

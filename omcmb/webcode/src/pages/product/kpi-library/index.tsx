@@ -127,18 +127,18 @@ export default function KpiLibraryPage() {
         导入 XML
       </Button>
       <Popconfirm
-        title="确认重载 XML?"
+        title={t('product.paramModel.reloadTitle')}
         description={
           <div style={{ maxWidth: 360 }}>
-            重新加载 <b>系统内置</b> + <b>自定义</b> 所有 XML:
+            {t('product.kpi.reloadDesc')}
             <br />· 当前 XML 中的指标 → UPSERT(覆盖 UI 编辑)
-            <br />· DB 中已无 XML 对应的孤儿 → <b>删除</b>
+            
             <br />· 关联的公式 / 启用记录级联清理
             <br />操作不可撤销!
           </div>
         }
-        okText="确认重载"
-        cancelText="取消"
+        okText={t('product.products.reloadOk')}
+        cancelText={t('common.cancel')}
         okButtonProps={{ danger: true }}
         placement="bottomRight"
         onConfirm={() => {
@@ -199,14 +199,14 @@ export default function KpiLibraryPage() {
               <Space wrap>
                 {/* 2026-05-29 用户决策:搜索框放在分组筛选前面(主要操作前置) */}
                 <Input.Search
-                  placeholder="搜索 ID / 名称"
+                  placeholder={t('product.kpi.idNameSearchPh')}
                   allowClear
                   value={detailKeyword}
                   onChange={(e) => setDetailKeyword(e.target.value)}
                   style={{ width: 240 }}
                 />
                 <Select
-                  placeholder="按分组筛选"
+                  placeholder={t('product.kpi.groupFilterPh')}
                   allowClear
                   value={detailGroupId}
                   onChange={(v) => setDetailGroupId(v)}

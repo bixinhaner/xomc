@@ -64,7 +64,7 @@ export default function XMLFilesModal({ open, tech, onClose }: Props) {
       dataIndex: 'onDisk',
       width: 80,
       render: (v: boolean) =>
-        v ? <Tag color="success">是</Tag> : <Tag color="warning">否</Tag>,
+        v ? <Tag color="success">{t('common.yes')}</Tag> : <Tag color="warning">{t('common.no')}</Tag>,
     },
     {
       title: '操作',
@@ -72,14 +72,14 @@ export default function XMLFilesModal({ open, tech, onClose }: Props) {
       render: (_: unknown, row: IndicatorFile) => {
         if (!row.deletable) {
           return (
-            <Tooltip title="内置 XML 不可在线删除(由镜像版本管理)">
+            <Tooltip title={t('product.kpi.xml.builtinTip')}>
               <Button size="small" danger disabled icon={<DeleteOutlined />} />
             </Tooltip>
           );
         }
         return (
           <Popconfirm
-            title="确认删除该自定义 XML?"
+            title={t('product.kpi.xml.delTitle')}
             description={
               <div style={{ maxWidth: 280 }}>
                 文件备份为 <code>.deleted.&lt;ts&gt;</code>;
@@ -87,8 +87,8 @@ export default function XMLFilesModal({ open, tech, onClose }: Props) {
                 关联 {row.count} 个指标 + 公式 + 启用记录会一并清理。
               </div>
             }
-            okText="删除"
-            cancelText="取消"
+            okText={t('common.delete')}
+            cancelText={t('common.cancel')}
             okButtonProps={{ danger: true }}
             onConfirm={() =>
               deleteMut
@@ -113,7 +113,7 @@ export default function XMLFilesModal({ open, tech, onClose }: Props) {
     <Modal
       title={
         <Space>
-          <span>管理 XML 文件</span>
+          <span>{t('product.kpi.xml.manageTitle')}</span>
           {tech && <Tag color="blue">{TECH_LABEL[tech]}</Tag>}
         </Space>
       }

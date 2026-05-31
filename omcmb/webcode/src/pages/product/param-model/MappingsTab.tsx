@@ -114,7 +114,7 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
       title: 'storable',
       dataIndex: 'isStorable',
       width: 90,
-      render: (v: boolean) => (v ? <Tag color="success">是</Tag> : <Tag>否</Tag>),
+      render: (v: boolean) => (v ? <Tag color="success">{t('common.yes')}</Tag> : <Tag>{t('common.no')}</Tag>),
     },
     { title: 'sw', dataIndex: 'softwareVersion', width: 80 },
     {
@@ -131,12 +131,12 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
             }}
           />
           <Popconfirm
-            title="确认删除该映射？"
+            title={t('product.paramModel.mappingDelTitle')}
             onConfirm={() =>
               selectedName &&
               deleteMut
                 .mutateAsync({ name: selectedName, id: row.id })
-                .then(() => message.success('已删除'))
+                .then(() => message.success(t('common.deleted')))
                 .catch((e) => message.error((e as Error).message))
             }
           >
@@ -166,10 +166,10 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
       };
       if (editing) {
         await updateMut.mutateAsync({ name: selectedName, id: editing.id, input });
-        message.success('已保存');
+        message.success(t('common.saved'));
       } else {
         await createMut.mutateAsync({ name: selectedName, input });
-        message.success('已创建');
+        message.success(t('common.created'));
       }
       setEditing(null);
       setCreating(false);
@@ -183,7 +183,7 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
   if (!selectedName) {
     return (
       <Card size="small">
-        <Empty description="请先在上方「参数模型清单」中选择一个模型" />
+        <Empty description={t('product.paramModel.selectModelHint')} />
       </Card>
     );
   }
@@ -206,7 +206,7 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
       extra={
         <Space>
           <Input.Search
-            placeholder="搜索 path"
+            placeholder={t('product.paramModel.pathSearchPh')}
             allowClear
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
@@ -297,7 +297,7 @@ export default function MappingsTab({ selectedName, onBack }: Props) {
             <Form.Item name="isStorable" label="storable" valuePropName="checked">
               <Switch />
             </Form.Item>
-            <Form.Item name="isActive" label="激活" valuePropName="checked">
+            <Form.Item name="isActive" label={t('common.active')} valuePropName="checked">
               <Switch />
             </Form.Item>
           </Space>

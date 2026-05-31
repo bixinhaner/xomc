@@ -108,7 +108,7 @@ export default function IndicatorTab({ deviceType }: Props) {
             onConfirm={() =>
               deleteMut
                 .mutateAsync({ deviceType, id: row.id })
-                .then(() => message.success('已删除'))
+                .then(() => message.success(t('common.deleted')))
                 .catch((e) => message.error((e as Error).message))
             }
           >
@@ -127,7 +127,7 @@ export default function IndicatorTab({ deviceType }: Props) {
         <Space>
           {showPlatformFilter && (
             <Select
-              placeholder="按平台筛选"
+              placeholder={t('product.kpi.platformFilterPh')}
               allowClear
               value={platform}
               onChange={(v) => {
@@ -139,7 +139,7 @@ export default function IndicatorTab({ deviceType }: Props) {
             />
           )}
           <Input.Search
-            placeholder="搜索 ID / 名称"
+            placeholder={t('product.kpi.idNameSearchPh')}
             allowClear
             value={keyword}
             onChange={(e) => {

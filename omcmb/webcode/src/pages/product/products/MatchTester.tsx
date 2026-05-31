@@ -16,7 +16,7 @@ function MatchResultInline({ result, loading }: MatchResultInlineProps) {
     return (
       <Space size={4}>
         <Spin size="small" />
-        <Text type="secondary">匹配中…</Text>
+        <Text type="secondary">{t('product.matchTester.matching')}</Text>
       </Space>
     );
   }
@@ -42,7 +42,7 @@ function MatchResultInline({ result, loading }: MatchResultInlineProps) {
       <Tag color="warning" style={{ marginRight: 0 }}>
         未命中
       </Tag>
-      <Text type="secondary">进入孤儿设备列表，请到「正则模式」段添加规则</Text>
+      <Text type="secondary">{t('product.matchTester.noMatch')}</Text>
     </Space>
   );
 }
@@ -75,10 +75,10 @@ export default function MatchTester() {
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
       <Space>
         <ThunderboltOutlined style={{ color: '#1677ff' }} />
-        <Text>产品匹配</Text>
+        <Text>{t('product.matchTester.matched')}</Text>
       </Space>
       <Input
-        placeholder="输入 productClass 匹配现有规则"
+        placeholder={t('product.matchTester.inputPh')}
         value={value}
         onChange={(e) => setValue(e.target.value)}
         allowClear

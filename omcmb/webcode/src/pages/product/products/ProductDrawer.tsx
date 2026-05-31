@@ -165,7 +165,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
           clearParamModel: !v.paramModelId,
         };
         await updateMut.mutateAsync({ id: product.id, input });
-        message.success('已保存');
+        message.success(t('common.saved'));
       } else {
         const input: CreateProductInput = {
           name: v.name,
@@ -183,7 +183,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
           patterns: pendingPatterns.length > 0 ? pendingPatterns : undefined,
         };
         await createMut.mutateAsync(input);
-        message.success('已创建');
+        message.success(t('common.created'));
       }
       onClose();
     } catch (err) {
@@ -212,7 +212,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
             if (next && next !== v && product) {
               updPatMut
                 .mutateAsync({ productId: product.id, patternId: row.id, productClass: next })
-                .then(() => message.success('已更新'))
+                .then(() => message.success(t('common.updated')))
                 .catch((er) => message.error((er as Error).message));
             }
           }}
@@ -265,12 +265,12 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
             }
           />
           <Popconfirm
-            title="确认删除该正则？"
+            title={t('product.products.delRegexTitle')}
             onConfirm={() =>
               product &&
               delPatMut
                 .mutateAsync({ productId: product.id, patternId: row.id })
-                .then(() => message.success('已删除'))
+                .then(() => message.success(t('common.deleted')))
                 .catch((er) => message.error((er as Error).message))
             }
           >
@@ -291,7 +291,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
       destroyOnHidden
       footer={
         <Space style={{ float: 'right' }}>
-          <Button onClick={onClose}>取消</Button>
+          <Button onClick={onClose}>{t('common.cancel')}</Button>
           <Button
             type="primary"
             loading={createMut.isPending || updateMut.isPending}
@@ -312,16 +312,16 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
               label: '基本信息',
               children: (
                 <>
-                  <Form.Item name="name" label="产品名" rules={[{ required: true, message: '产品名必填' }]}>
-                    <Input placeholder="如 PicoCell-LTE-V2" />
+                  <Form.Item name="name" label={t('product.products.name')} rules={[{ required: true, message: t('product.products.nameRequired') }]}>
+                    <Input placeholder={t('product.products.namePh')} />
                   </Form.Item>
-                  <Form.Item name="description" label="描述">
+                  <Form.Item name="description" label={t('common.description')}>
                     <Input.TextArea rows={2} />
                   </Form.Item>
-                  <Form.Item name="vendor" label="厂商">
+                  <Form.Item name="vendor" label={t('common.vendor')}>
                     <Input placeholder="Comba / Baicells / ..." />
                   </Form.Item>
-                  <Form.Item name="tech" label="制式" rules={[{ required: true }]}>
+                  <Form.Item name="tech" label={t('common.tech')} rules={[{ required: true }]}>
                     <Select options={TECH_OPTIONS} />
                   </Form.Item>
                   <Form.Item name="radioModes" label="Radio Modes">
@@ -329,12 +329,12 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                   </Form.Item>
                   <Form.Item
                     name="paramModelId"
-                    label="参数模型"
+                    label={t('product.products.paramModel')}
                     extra="选择该产品默认参数模型；P4-04 可在参数模型浏览器维护映射"
                   >
                     <Select
                       allowClear
-                      placeholder="选择参数模型"
+                      placeholder={t('product.products.paramModelPh')}
                       options={(paramModels?.items || []).map((m) => ({
                         label: `${m.name}（${m.totalParams} 参数）`,
                         value: m.id,
@@ -345,7 +345,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                   </Form.Item>
                   <Form.Item
                     name="indicatorDeviceType"
-                    label="指标设备类型"
+                    label={t('product.products.indicatorDevType')}
                     rules={[{ required: true }]}
                     extra="决定 KPI 库 5 Tabs 中加载哪一类计数器/公式"
                   >
@@ -361,12 +361,12 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                   {isENB && (
                     <Form.Item
                       name="indicatorPlatform"
-                      label="指标平台名"
+                      label={t('product.products.indicatorPlatform')}
                       rules={[{ required: true, message: '指标平台名必填' }]}
                       extra="对应 KPI 库公式的 platform_name（仅 ENB 类型需要）"
                     >
                       <Select
-                        placeholder="选择指标平台"
+                        placeholder={t('product.products.indicatorPlatformPh')}
                         options={(indicatorPlatforms || []).map((p) => ({ label: p, value: p }))}
                         showSearch
                         optionFilterProp="label"
@@ -374,9 +374,9 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                       />
                     </Form.Item>
                   )}
-                  <Form.Item name="alarmNeType" label="告警网元类型" rules={[{ required: true }]}>
+                  <Form.Item name="alarmNeType" label={t('product.products.alarmNeType')} rules={[{ required: true }]}>
                     <Select
-                      placeholder="选择告警网元类型"
+                      placeholder={t('product.products.alarmNeTypePh')}
                       options={(alarmNeTypes || []).map((n) => ({ label: n, value: n }))}
                       showSearch
                       optionFilterProp="label"
@@ -413,14 +413,14 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                 <>
                   <Form.Item
                     name="enableFiletype11"
-                    label="启用参数文件上传 (Upload FileType=11)"
+                    label={t('product.products.enableFt11')}
                     valuePropName="checked"
                     extra="false 时跳过 Upload 流程；true 时设备不支持 SOAP Fault 触发降级到默认映射"
                   >
                     <Switch />
                   </Form.Item>
                   <Form.Item
-                    label="设备属性覆盖（device_attrs_override）"
+                    label={t('product.products.attrsOverride')}
                     extra="勾选后 Intersect 时该属性以设备实际上传值为准；未勾选用默认参数模型属性"
                   >
                     <Space wrap>
@@ -437,13 +437,13 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                         <Checkbox>max_value</Checkbox>
                       </Form.Item>
                       <Form.Item name="override_data_type" valuePropName="checked" noStyle>
-                        <Checkbox disabled>data_type（禁止覆盖）</Checkbox>
+                        <Checkbox disabled>{t('product.products.dataTypeLock')}</Checkbox>
                       </Form.Item>
                     </Space>
                   </Form.Item>
                   <Form.Item
                     name="enableUnknownAlarm"
-                    label="接纳未识别告警"
+                    label={t('product.products.acceptUnknown')}
                     valuePropName="checked"
                     extra="true 时未匹配 alarm_definitions 的告警写 fallback (severity=Warning, is_unknown=true)；false 直接丢弃"
                   >
@@ -462,14 +462,14 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                   </Text>
                   <Space style={{ marginBottom: 12 }}>
                     <Input
-                      placeholder="新规则（如 PicoCell-LTE-.+）"
+                      placeholder={t('product.products.newRegexPh')}
                       value={newPattern}
                       onChange={(e) => setNewPattern(e.target.value)}
                       onPressEnter={() => {
                         const v = newPattern.trim();
                         if (!v) return;
                         if (pendingPatterns.includes(v)) {
-                          message.warning('正则已存在');
+                          message.warning(t('common.regexExists'));
                           return;
                         }
                         setPendingPatterns([...pendingPatterns, v]);
@@ -484,7 +484,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                         const v = newPattern.trim();
                         if (!v) return;
                         if (pendingPatterns.includes(v)) {
-                          message.warning('正则已存在');
+                          message.warning(t('common.regexExists'));
                           return;
                         }
                         setPendingPatterns([...pendingPatterns, v]);
@@ -529,7 +529,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                 <>
                   <Space style={{ marginBottom: 12 }}>
                     <Input
-                      placeholder="新规则（如 PicoCell-LTE-.+）"
+                      placeholder={t('product.products.newRegexPh')}
                       value={newPattern}
                       onChange={(e) => setNewPattern(e.target.value)}
                       style={{ width: 320 }}
@@ -546,7 +546,7 @@ export default function ProductDrawer({ open, product, onClose }: Props) {
                             productClass: newPattern.trim(),
                           });
                           setNewPattern('');
-                          message.success('已添加');
+                          message.success(t('common.added'));
                         } catch (er) {
                           message.error((er as Error).message);
                         }

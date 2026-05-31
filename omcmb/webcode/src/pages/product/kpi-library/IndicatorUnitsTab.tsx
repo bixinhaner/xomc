@@ -43,7 +43,7 @@ export default function IndicatorUnitsTab() {
             onConfirm={() =>
               deleteMut
                 .mutateAsync(row.id)
-                .then(() => message.success('已删除'))
+                .then(() => message.success(t('common.deleted')))
                 .catch((e) => message.error((e as Error).message))
             }
           >
@@ -59,10 +59,10 @@ export default function IndicatorUnitsTab() {
       const v = await form.validateFields();
       if (editing) {
         await updateMut.mutateAsync({ id: editing.id, input: v });
-        message.success('已更新');
+        message.success(t('common.updated'));
       } else {
         await upsertMut.mutateAsync(v);
-        message.success('已创建');
+        message.success(t('common.created'));
       }
       setEditing(null);
       setCreating(false);
@@ -76,7 +76,7 @@ export default function IndicatorUnitsTab() {
   return (
     <Card
       size="small"
-      title="单位定义 / Indicator Units"
+      title={t('product.kpi.units.title')}
       extra={
         <Button
           type="primary"
@@ -113,13 +113,13 @@ export default function IndicatorUnitsTab() {
       >
         <Form form={form} layout="vertical">
           <Form.Item name="id" label="ID" rules={[{ required: true }]}>
-            <Input disabled={Boolean(editing)} placeholder="如 percent / count / mbps" />
+            <Input disabled={Boolean(editing)} placeholder={t('product.kpi.units.codePh')} />
           </Form.Item>
-          <Form.Item name="enName" label="英文名" rules={[{ required: true }]}>
-            <Input placeholder="如 % / Count / Mbps" />
+          <Form.Item name="enName" label={t('common.enName')} rules={[{ required: true }]}>
+            <Input placeholder={t('product.kpi.units.enPh')} />
           </Form.Item>
-          <Form.Item name="cnName" label="中文名" rules={[{ required: true }]}>
-            <Input placeholder="如 百分比 / 次数 / 兆比特每秒" />
+          <Form.Item name="cnName" label={t('common.cnName')} rules={[{ required: true }]}>
+            <Input placeholder={t('product.kpi.units.cnPh')} />
           </Form.Item>
         </Form>
       </Modal>

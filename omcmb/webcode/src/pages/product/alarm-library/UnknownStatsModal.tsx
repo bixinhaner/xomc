@@ -39,7 +39,7 @@ export default function UnknownStatsModal({ open, onClose }: Props) {
 
   return (
     <Modal
-      title="未识别告警频次 / Unknown Alarm Stats"
+      title={t('product.alarm.unknown.title')}
       open={open}
       onCancel={onClose}
       footer={null}
@@ -48,7 +48,7 @@ export default function UnknownStatsModal({ open, onClose }: Props) {
     >
       <Space style={{ marginBottom: 12 }}>
         <Input
-          placeholder="按产品 ID 过滤（可选）"
+          placeholder={t('product.alarm.unknown.filterPh')}
           allowClear
           value={productId}
           onChange={(e) => setProductId(e.target.value)}
@@ -57,7 +57,7 @@ export default function UnknownStatsModal({ open, onClose }: Props) {
         <Select value={days} onChange={(v) => setDays(v)} options={DAYS_OPTIONS} style={{ width: 120 }} />
       </Space>
       {items.length === 0 && !isLoading ? (
-        <Empty description="近期无未识别告警" />
+        <Empty description={t('product.alarm.unknown.empty')} />
       ) : (
         <Table<UnknownAlarmStat>
           rowKey={(r) => `${r.productId || 'all'}-${r.identifier}`}

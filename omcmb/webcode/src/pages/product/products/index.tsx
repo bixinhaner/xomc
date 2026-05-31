@@ -163,13 +163,13 @@ export default function ProductsPage() {
       render: (_: unknown, row: Product) => {
         const stats = patternStats.get(row.id);
         if (!stats || stats.total === 0) {
-          return <Tag>无规则</Tag>;
+          return <Tag>{t('common.noRule')}</Tag>;
         }
         if (stats.active === stats.total) {
-          return <Tag color="success">激活</Tag>;
+          return <Tag color="success">{t('common.active')}</Tag>;
         }
         if (stats.active === 0) {
-          return <Tag>禁用</Tag>;
+          return <Tag>{t('common.inactive')}</Tag>;
         }
         return (
           <Tag color="warning">
@@ -182,13 +182,13 @@ export default function ProductsPage() {
       title: '上传',
       dataIndex: 'enableFiletype11',
       width: 70,
-      render: (v: boolean) => (v ? <Tag color="success">开</Tag> : <Tag>关</Tag>),
+      render: (v: boolean) => (v ? <Tag color="success">{t('common.on')}</Tag> : <Tag>{t('common.off')}</Tag>),
     },
     {
       title: '未知告警',
       dataIndex: 'enableUnknownAlarm',
       width: 90,
-      render: (v: boolean) => (v ? <Tag color="warning">接纳</Tag> : <Tag>丢弃</Tag>),
+      render: (v: boolean) => (v ? <Tag color="warning">{t('common.accept')}</Tag> : <Tag>{t('common.discard')}</Tag>),
     },
     {
       title: '设备数',
@@ -211,7 +211,7 @@ export default function ProductsPage() {
           >
             编辑
           </Button>
-          <Tooltip title="清空所有 swVersion 的 discovered 映射；下次 Bootstrap 重新建">
+          <Tooltip title={t('product.products.clearTooltip')}>
             <Popconfirm
               title={`确认重置产品「${row.name}」的发现映射？`}
               onConfirm={() =>
@@ -231,7 +231,7 @@ export default function ProductsPage() {
             onConfirm={() =>
               delMut
                 .mutateAsync(row.id)
-                .then(() => message.success('已删除'))
+                .then(() => message.success(t('common.deleted')))
                 .catch((e) => message.error((e as Error).message))
             }
           >
@@ -260,7 +260,7 @@ export default function ProductsPage() {
         >
           <Space size={8} wrap>
             <Input.Search
-              placeholder="搜索：产品名 / 厂商 / 描述"
+              placeholder={t('product.products.searchPh')}
               allowClear
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
@@ -271,16 +271,16 @@ export default function ProductsPage() {
           </Space>
           <Space size={8}>
             <Popconfirm
-              title="确认重载 XML？"
+              title={t('product.products.reloadXmlTitle')}
               description={
                 <div style={{ maxWidth: 320 }}>
                   将从 <code>datamodels/param-mappings/products.xml</code> 重新装配所有产品。
                   <br />
-                  UI 中对 <b>指标平台 / 告警网元类型 / 正则规则</b> 等字段的手工修改将被 XML 值覆盖。
+                  {t('product.products.reloadDesc')}
                 </div>
               }
-              okText="确认重载"
-              cancelText="取消"
+              okText={t('product.products.reloadOk')}
+              cancelText={t('common.cancel')}
               okButtonProps={{ danger: true }}
               placement="bottomRight"
               onConfirm={() => {
@@ -303,7 +303,7 @@ export default function ProductsPage() {
                   .mutateAsync()
                   .then(() => {
                     void refetch();
-                    message.success('已刷新缓存');
+                    message.success(t('common.cacheRefreshed'));
                   })
                   .catch((e) => message.error((e as Error).message));
               }}

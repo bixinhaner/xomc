@@ -81,7 +81,7 @@ export default function ParamModelPage() {
                 content: (
                   <div style={{ maxWidth: 360 }}>
                     检测到 <code>{realFile.name}</code> 已存在,确认覆盖?
-                    <br />旧文件会自动备份为 <code>.bak.&lt;ts&gt;</code>。
+                    <br />{t('product.paramModel.reloadHint')}
                   </div>
                 ),
                 okText: '覆盖',
@@ -108,7 +108,7 @@ export default function ParamModelPage() {
         <Card size="small" style={{ marginBottom: 12 }}>
           <Space style={{ width: '100%', justifyContent: 'space-between' }}>
             <Input.Search
-              placeholder="搜索参数模型名称 / 描述"
+              placeholder={t('product.paramModel.searchPh')}
               allowClear
               value={keyword}
               onChange={(e) => setKeyword(e.target.value)}
@@ -122,7 +122,7 @@ export default function ParamModelPage() {
                 </Button>
               </Upload>
               <Popconfirm
-                title="确认重载 XML?"
+                title={t('product.paramModel.reloadTitle')}
                 description={
                   <div style={{ maxWidth: 360 }}>
                     从 <code>datamodels/</code> <b>destructive 全量重载</b>:
@@ -133,8 +133,8 @@ export default function ParamModelPage() {
                     <br />操作不可撤销!
                   </div>
                 }
-                okText="确认重载"
-                cancelText="取消"
+                okText={t('product.products.reloadOk')}
+                cancelText={t('common.cancel')}
                 okButtonProps={{ danger: true }}
                 placement="bottomRight"
                 onConfirm={() => {
@@ -158,7 +158,7 @@ export default function ParamModelPage() {
                 onClick={() =>
                   cacheMut
                     .mutateAsync()
-                    .then(() => message.success('已刷新参数模型缓存'))
+                    .then(() => message.success(t('product.paramModel.cacheRefreshed')))
                     .catch((e) => message.error((e as Error).message))
                 }
               >

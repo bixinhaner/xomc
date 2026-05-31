@@ -81,12 +81,12 @@ export default function BindProductModal({ open, devices, onClose, onDone }: Pro
       <Form<FormValues> form={form} layout="vertical">
         <Form.Item
           name="productId"
-          label="目标产品"
+          label={t('product.orphan.targetProduct')}
           rules={[{ required: true, message: '请选择产品' }]}
         >
           <Select
             showSearch
-            placeholder="选择要绑定的产品"
+            placeholder={t('product.orphan.bindPh')}
             optionFilterProp="label"
             options={(productData?.items || []).map((p) => ({
               label: `${p.name}(${p.vendor || '—'} · ${p.tech.toUpperCase()})`,

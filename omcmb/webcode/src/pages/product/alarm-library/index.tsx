@@ -250,7 +250,7 @@ export default function AlarmLibraryPage() {
             onConfirm={() =>
               delMut
                 .mutateAsync(row.identifier)
-                .then(() => message.success('已删除'))
+                .then(() => message.success(t('common.deleted')))
                 .catch((e) => message.error((e as Error).message))
             }
           >
@@ -289,7 +289,7 @@ export default function AlarmLibraryPage() {
               // 详情态 toolbar 范式一致)。
               <>
                 <Input.Search
-                  placeholder="搜索 identifier / 名称"
+                  placeholder={t('product.alarm.searchPh')}
                   allowClear
                   onSearch={(v) =>
                     setDetailFilter((f) => ({ ...f, keyword: v || undefined, page: 1 }))
@@ -297,9 +297,9 @@ export default function AlarmLibraryPage() {
                   style={{ width: 220 }}
                 />
                 <Space size={4}>
-                  <span style={FILTER_LABEL_STYLE}>严重级别</span>
+                  <span style={FILTER_LABEL_STYLE}>{t('product.alarm.severityLabel')}</span>
                   <Select
-                    placeholder="全部"
+                    placeholder={t('product.alarm.allFilter')}
                     allowClear
                     options={severityOptions}
                     value={detailFilter.severityCode}
@@ -324,17 +324,17 @@ export default function AlarmLibraryPage() {
               <>
                 {/* 2026-05-29 与 parammodel 对齐拆两按钮:导入 = 加法 UPSERT;重载 = destructive 删孤儿 */}
                 <Popconfirm
-                  title="确认导入 XML?"
+                  title={t('product.kpi.importTitle')}
                   description={
                     <div style={{ maxWidth: 320 }}>
-                      从 <code>datamodels/</code> <b>加法 UPSERT</b> 当前 XML 文件中的告警定义:
+                      {t('product.alarm.importDesc')}
                       <br />· 新增告警 → 插入
                       <br />· 已存在告警 → 更新(UI 中的手工编辑会被 XML 覆盖)
-                      <br />· DB 中已无 XML 对应的孤儿告警 → <b>保留不删除</b>
+                      
                     </div>
                   }
-                  okText="确认导入"
-                  cancelText="取消"
+                  okText={t('product.kpi.importOk')}
+                  cancelText={t('common.cancel')}
                   placement="bottomRight"
                   onConfirm={() => {
                     importMut
@@ -348,17 +348,17 @@ export default function AlarmLibraryPage() {
                   </Button>
                 </Popconfirm>
                 <Popconfirm
-                  title="确认重载 XML?"
+                  title={t('product.paramModel.reloadTitle')}
                   description={
                     <div style={{ maxWidth: 360 }}>
-                      从 <code>datamodels/</code> <b>destructive 全量重载</b>:
+                      {t('product.alarm.reloadDesc')}
                       <br />· 当前 XML 中的告警 → UPSERT (覆盖 UI 编辑)
-                      <br />· DB 中已无 XML 对应的孤儿告警 → <b>删除</b>
+                      
                       <br />操作不可撤销!
                     </div>
                   }
-                  okText="确认重载"
-                  cancelText="取消"
+                  okText={t('product.products.reloadOk')}
+                  cancelText={t('common.cancel')}
                   okButtonProps={{ danger: true }}
                   placement="bottomRight"
                   onConfirm={() => {
@@ -382,7 +382,7 @@ export default function AlarmLibraryPage() {
                   onClick={() =>
                     cacheMut
                       .mutateAsync()
-                      .then(() => message.success('已刷新缓存'))
+                      .then(() => message.success(t('common.cacheRefreshed')))
                       .catch((e) => message.error((e as Error).message))
                   }
                 >

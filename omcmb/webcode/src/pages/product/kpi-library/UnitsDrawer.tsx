@@ -16,7 +16,7 @@ interface Props {
 export default function UnitsDrawer({ open, onClose }: Props) {
   return (
     <Drawer
-      title="单位定义"
+      title={t('product.kpi.units.short')}
       placement="right"
       width={720}
       open={open}

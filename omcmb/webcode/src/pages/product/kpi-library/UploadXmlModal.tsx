@@ -85,7 +85,7 @@ export default function UploadXmlModal({ open, onClose }: Props) {
           content: (
             <div style={{ maxWidth: 360 }}>
               检测到 <code>{file.name}</code> 已存在,确认覆盖?
-              <br />旧文件会自动备份为 <code>.bak.&lt;ts&gt;</code>。
+              <br />{t('product.kpi.upload.backupHint')}
             </div>
           ),
           okText: '覆盖',
@@ -106,7 +106,7 @@ export default function UploadXmlModal({ open, onClose }: Props) {
       const v = await form.validateFields();
       if (!v.tech) return;
       if (fileList.length === 0 || !fileList[0].originFileObj) {
-        message.error('请选择 XML 文件');
+        message.error(t('product.kpi.upload.selectXmlMsg'));
         return;
       }
       await doUpload(v.tech, fileList[0].originFileObj, false);
@@ -146,7 +146,7 @@ export default function UploadXmlModal({ open, onClose }: Props) {
     <Modal
       title={
         <Space>
-          <span>上传自定义 XML</span>
+          <span>{t('product.kpi.upload.title')}</span>
           <Tag color="blue">indicator-library-custom</Tag>
         </Space>
       }
@@ -154,7 +154,7 @@ export default function UploadXmlModal({ open, onClose }: Props) {
       onCancel={handleClose}
       footer={
         <Space>
-          <Button onClick={handleClose}>取消</Button>
+          <Button onClick={handleClose}>{t('common.cancel')}</Button>
           <Button type="primary" onClick={() => void handleSubmit()} loading={uploadMut.isPending}>
             上传
           </Button>
@@ -166,21 +166,21 @@ export default function UploadXmlModal({ open, onClose }: Props) {
       <Form<FormValues> form={form} layout="vertical" requiredMark>
         <Form.Item
           name="tech"
-          label="目标制式"
+          label={t('product.kpi.upload.targetTech')}
           rules={[{ required: true, message: '请选择目标制式' }]}
         >
-          <Select options={TECH_OPTIONS} placeholder="选择 ENB / GSM / GNB" />
+          <Select options={TECH_OPTIONS} placeholder={t('product.kpi.upload.techPh')} />
         </Form.Item>
-        <Form.Item label="XML 文件" required>
+        <Form.Item label={t('product.kpi.upload.xmlFile')} required>
           <Upload.Dragger {...uploadProps}>
             <p className="ant-upload-drag-icon">
               <InboxOutlined />
             </p>
-            <p className="ant-upload-text">拖拽 .xml 到此处或点击选择</p>
+            <p className="ant-upload-text">{t('product.kpi.upload.dropHint')}</p>
             <p className="ant-upload-hint">
               单文件 ≤ 1 MiB;根元素必须为 <code>&lt;indicatorModel&gt;</code>;
               <br />
-              <code>platform</code> 属性必填,<code>deviceType</code> 若有必须匹配目标制式。
+              {t('product.kpi.upload.platformHint')}
             </p>
           </Upload.Dragger>
         </Form.Item>

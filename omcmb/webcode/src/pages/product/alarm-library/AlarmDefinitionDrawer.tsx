@@ -91,7 +91,7 @@ export default function AlarmDefinitionDrawer({
           isShow: v.isShow,
         };
         await updateMut.mutateAsync({ identifier: definition.identifier, input });
-        message.success('已更新');
+        message.success(t('common.updated'));
       } else {
         const input: CreateAlarmDefinitionInput = {
           identifier: v.identifier,
@@ -107,7 +107,7 @@ export default function AlarmDefinitionDrawer({
           isShow: v.isShow,
         };
         await createMut.mutateAsync(input);
-        message.success('已创建');
+        message.success(t('common.created'));
       }
       onClose();
     } catch (e) {
@@ -122,7 +122,7 @@ export default function AlarmDefinitionDrawer({
         isEdit ? (
           <Space>
             告警定义详情：<Tag color="blue">{definition?.identifier}</Tag>
-            {definition?.isUnknown && <Tag color="warning">未识别 fallback</Tag>}
+            {definition?.isUnknown && <Tag color="warning">{t('product.alarm.def.unknownTag')}</Tag>}
           </Space>
         ) : (
           '新增告警定义'
@@ -135,7 +135,7 @@ export default function AlarmDefinitionDrawer({
       destroyOnHidden
       footer={
         <Space style={{ float: 'right' }}>
-          <Button onClick={onClose}>取消</Button>
+          <Button onClick={onClose}>{t('common.cancel')}</Button>
           <Button
             type="primary"
             loading={createMut.isPending || updateMut.isPending}
@@ -147,19 +147,19 @@ export default function AlarmDefinitionDrawer({
       }
     >
       <Form<FormValues> form={form} layout="vertical">
-        <Form.Item name="identifier" label="标识符 (identifier)" rules={[{ required: true }]}>
-          <Input disabled={isEdit} placeholder="如 101001 (主键，不可改)" />
+        <Form.Item name="identifier" label={t('product.alarm.def.identifier')} rules={[{ required: true }]}>
+          <Input disabled={isEdit} placeholder={t('product.alarm.def.identifierPh')} />
         </Form.Item>
-        <Form.Item name="neType" label="网元类型 (ne_type)" rules={[{ required: true }]}>
+        <Form.Item name="neType" label={t('product.alarm.def.neType')} rules={[{ required: true }]}>
           <Input placeholder="eNodeB / gNodeB / BTS / ..." disabled={!isEdit && Boolean(lockNeType)} />
         </Form.Item>
-        <Form.Item name="cnName" label="中文名" rules={[{ required: true }]}>
+        <Form.Item name="cnName" label={t('common.cnName')} rules={[{ required: true }]}>
           <Input />
         </Form.Item>
-        <Form.Item name="enName" label="英文名" rules={[{ required: true }]}>
+        <Form.Item name="enName" label={t('common.enName')} rules={[{ required: true }]}>
           <Input />
         </Form.Item>
-        <Form.Item name="severityCode" label="严重级别" rules={[{ required: true }]}>
+        <Form.Item name="severityCode" label={t('product.alarm.severityLabel')} rules={[{ required: true }]}>
           <Select
             options={(sevData?.items || []).map((s) => {
               // 真后端单列 name(Critical/Major/...);mock 双列 cnName/enName。
@@ -171,22 +171,22 @@ export default function AlarmDefinitionDrawer({
             })}
           />
         </Form.Item>
-        <Form.Item name="eventType" label="事件类型 (event_type)">
+        <Form.Item name="eventType" label={t('product.alarm.def.eventType')}>
           <Input placeholder="communication / qualityOfService / processingError / ..." />
         </Form.Item>
-        <Form.Item name="cnProbableCause" label="可能原因（中）">
+        <Form.Item name="cnProbableCause" label={t('product.alarm.def.cnCause')}>
           <Input.TextArea rows={2} />
         </Form.Item>
         <Form.Item name="enProbableCause" label="Probable Cause (EN)">
           <Input.TextArea rows={2} />
         </Form.Item>
-        <Form.Item name="cnSuggestion" label="处置建议（中）">
+        <Form.Item name="cnSuggestion" label={t('product.alarm.def.cnSuggest')}>
           <Input.TextArea rows={2} />
         </Form.Item>
         <Form.Item name="enSuggestion" label="Suggestion (EN)">
           <Input.TextArea rows={2} />
         </Form.Item>
-        <Form.Item name="isShow" label="UI 可见" valuePropName="checked">
+        <Form.Item name="isShow" label={t('product.alarm.def.uiShow')} valuePropName="checked">
           <Switch />
         </Form.Item>
       </Form>

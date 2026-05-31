@@ -79,7 +79,7 @@ export default function SummaryTab({ onSelect }: Props) {
       onFilter: (val: boolean | React.Key, row: IndicatorPlatformSummary) =>
         row.source === val,
       render: (s: IndicatorSource | undefined) =>
-        s === 'custom' ? <Tag color="blue">自定义</Tag> : <Tag>内置</Tag>,
+        s === 'custom' ? <Tag color="blue">{t('common.custom')}</Tag> : <Tag>{t('common.builtin')}</Tag>,
     },
     {
       // 2026-05-29:从"XML 文件"(只显 basename)改为"加载源"(全路径,ellipsis)
@@ -115,11 +115,11 @@ export default function SummaryTab({ onSelect }: Props) {
               </div>
             }
             okButtonProps={{ danger: true }}
-            okText="确认删除"
+            okText={t('product.paramModel.delConfirm')}
             onConfirm={() =>
               deleteMut
                 .mutateAsync(row.loadedFrom)
-                .then(() => message.success('已删除'))
+                .then(() => message.success(t('common.deleted')))
                 .catch((e) => {
                   const ax = e as AxiosError<{ msg?: string; message?: string }>;
                   const msg =

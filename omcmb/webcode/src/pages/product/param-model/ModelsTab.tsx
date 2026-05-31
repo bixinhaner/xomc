@@ -71,9 +71,9 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
         // 这里只可能命中 builtin / custom;留 fallback 防御老缓存边界场景
         const tag =
           s === 'custom' ? (
-            <Tag color="blue">自定义</Tag>
+            <Tag color="blue">{t('common.custom')}</Tag>
           ) : (
-            <Tag>内置</Tag>
+            <Tag>{t('common.builtin')}</Tag>
           );
         return <Tooltip title={row.loadedFrom}>{tag}</Tooltip>;
       },
@@ -83,7 +83,7 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
       title: '激活',
       dataIndex: 'isActive',
       width: 80,
-      render: (v: boolean) => (v ? <Tag color="success">激活</Tag> : <Tag>禁用</Tag>),
+      render: (v: boolean) => (v ? <Tag color="success">{t('common.active')}</Tag> : <Tag>{t('common.inactive')}</Tag>),
     },
     { title: '描述', dataIndex: 'description', ellipsis: true },
     {
@@ -106,16 +106,16 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
               description={
                 <div style={{ maxWidth: 320 }}>
                   · 物理文件将 rename 为 <code>.deleted.&lt;ts&gt;</code> 备份
-                  <br />· 关联 <code>param_mappings</code> 级联删除
+                  <br />· {t('product.paramModel.cascadeHint')}
                   <br />· 若存在同名内置 XML,删除后将自动回退到内置版本
                 </div>
               }
               okButtonProps={{ danger: true }}
-              okText="确认删除"
+              okText={t('product.paramModel.delConfirm')}
               onConfirm={() =>
                 deleteMut
                   .mutateAsync(row.name)
-                  .then(() => message.success('已删除'))
+                  .then(() => message.success(t('common.deleted')))
                   .catch((e) => message.error((e as Error).message))
               }
             >
@@ -148,7 +148,7 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
     try {
       const v = await form.validateFields();
       await updateMut.mutateAsync({ name: editing.name, input: v });
-      message.success('已保存');
+      message.success(t('common.saved'));
       setEditing(null);
     } catch (e) {
       const msg = (e as Error).message;
@@ -175,10 +175,10 @@ export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
         destroyOnHidden
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="description" label="描述">
+          <Form.Item name="description" label={t('common.description')}>
             <Input.TextArea rows={3} />
           </Form.Item>
-          <Form.Item name="isActive" label="激活" valuePropName="checked">
+          <Form.Item name="isActive" label={t('common.active')} valuePropName="checked">
             <Switch />
           </Form.Item>
         </Form>
