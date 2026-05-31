@@ -96,6 +96,11 @@ const messages: Record<string, string> = {
   'common.progress':       'Progress',
   'common.selectHint':     'Please select',
   'common.tree':           'Tree',
+  'common.required':       'This field is required',
+
+  // I18nInput dual-language input component
+  'i18nInput.placeholderZh': '请输入中文 (Chinese)',
+  'i18nInput.placeholderEn': 'Please enter English',
 
   // -------------------------------------------------------------------------
   // Table headers

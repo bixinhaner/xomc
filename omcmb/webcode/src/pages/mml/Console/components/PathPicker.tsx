@@ -24,6 +24,7 @@ import { Empty, Select, Tag, Tooltip, Typography } from 'antd';
 import { useGroupTree, useCommandSubFields, useSearchCommands } from '@core/hooks/api/useMmlConsole';
 import type { GroupTreeNode } from '@core/types/mmlConsole';
 import { useT } from '@/hooks/useT';
+import { useI18nText } from '@/hooks/useI18nText';
 
 export interface PathPickerProps {
   /** 已选 path 集合（受控）。 */
@@ -44,11 +45,13 @@ interface Option {
 export default function PathPicker({
   value,
   onChange,
-  lang = 'zh-CN',
+  lang,
   disabled,
 }: PathPickerProps): JSX.Element {
   const t = useT();
-  const { data: tree = [] } = useGroupTree(undefined, lang);
+  const { locale: appLocale } = useI18nText();
+  const effectiveLang = lang ?? appLocale;
+  const { data: tree = [] } = useGroupTree(undefined, effectiveLang);
 
   // ----- Browse 模式 state -----
   const [groupCode, setGroupCode] = useState<string | undefined>();

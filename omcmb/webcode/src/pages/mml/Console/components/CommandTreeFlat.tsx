@@ -22,6 +22,7 @@ import {
 } from '@ant-design/icons';
 import type { TreeDataNode } from 'antd';
 import { useGroupTreeFlat } from '@core/hooks/api/useMmlConsole';
+import { useI18nText } from '@/hooks/useI18nText';
 import type {
   FlatCommand,
   FlatGroup,
@@ -140,9 +141,11 @@ export interface CommandTreeFlatProps {
 export default function CommandTreeFlat({
   onSelectCommand,
   selectedCommandId,
-  lang = 'zh-CN',
+  lang,
 }: CommandTreeFlatProps) {
-  const { data, isLoading } = useGroupTreeFlat(lang);
+  const { locale: appLocale } = useI18nText();
+  const effectiveLang = lang ?? appLocale;
+  const { data, isLoading } = useGroupTreeFlat(effectiveLang);
   const groups = useMemo(() => data?.groups ?? [], [data]);
 
   const [searchText, setSearchText] = useState('');

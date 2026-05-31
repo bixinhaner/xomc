@@ -28,6 +28,7 @@ import type {
 import type { MMLCustomCommand, MMLOperationType } from '@core/types/mml';
 import { generateUid } from '@core/utils/uid';
 import { useT } from '@/hooks/useT';
+import { useI18nText } from '@/hooks/useI18nText';
 import AddTemplateModal from './AddTemplateModal';
 
 // R-2: per-op 命令树叶子统一前缀 `<OP> <Object>`。OpTagColor 按操作语义着色，
@@ -435,13 +436,14 @@ export interface CommandTreeProps {
 
 export default function CommandTree({ lang }: CommandTreeProps) {
   const t = useT();
-  const storeLang = useMmlConsoleStore((s) => s.lang);
+  const { locale: appLocale } = useI18nText();
   // 用户决策（2026-05-18）：连续点击命令是**覆盖**而非追加。
   // 老 OMC 行为：用户点一个命令 → 控制面板只显示这一条；要多语句脚本走 textbox。
   const replaceStatement = useMmlConsoleStore((s) => s.replaceStatement);
   // T-0170: 取选中设备 SN（首条）传给 sub-fields 端点做 paramModel 过滤
   const selectedDeviceSns = useMmlConsoleStore((s) => s.selectedDeviceSns);
-  const effectiveLang = lang ?? storeLang;
+  // i18n: prop > app locale (从 appStore 自动跟随,不再硬编 zh-CN)
+  const effectiveLang = lang ?? appLocale;
 
   // 稳定 tree 引用：destructuring `= []` default 在 data=undefined 期间每 render 新建数组，
   // 会让下游 useMemo / useEffect deps 引用变动，引发不必要重算甚至循环。useMemo 锚住引用。

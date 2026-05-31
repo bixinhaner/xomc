@@ -16,6 +16,7 @@ import {
 } from '@core/hooks/api/useMmlAdmin';
 import type { GroupTreeNode, GroupTreeCommand } from '@core/types/mmlConsole';
 import { useT } from '@/hooks/useT';
+import { useI18nText } from '@/hooks/useI18nText';
 import LeftNavTree, {
   type GroupAction,
   type CommandAction,
@@ -61,9 +62,10 @@ function findGroup(
 
 export default function MMLAdminCatalog() {
   const t = useT();
+  const { locale } = useI18nText();
   const { data: tree = [], isLoading, refetch, isFetching } = useGroupTree(
     undefined,
-    'zh-CN',
+    locale,
   );
   const deleteGroupMut = useDeleteGroup();
   const deleteCommandMut = useDeleteCommand();
