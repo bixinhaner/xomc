@@ -155,15 +155,8 @@ func (a *Aggregator) AggregateKPIs(ctx context.Context, target string, w WindowS
 type deviceKey struct{ oui, sn string }
 
 func (a *Aggregator) listDevicesInBucket(ctx context.Context, target string, w WindowSpec) ([]deviceKey, error) {
-	const tmpl = `
-SELECT DISTINCT device_oui, device_sn
-FROM %s
-WHERE metric_type = 'counter'
-  AND granularity = $1
-  AND end_time >= $2
-  AND end_time <  $3`
-	sql := fmt.Sprintf(tmpl, target)
-	rows, err := a.db.Query(ctx, sql, string(w.Granularity), w.Start, w.End)
+	sql, args := buildListDevicesInBucketSQL(target, w)
+	rows, err := a.db.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -180,17 +173,8 @@ WHERE metric_type = 'counter'
 }
 
 func (a *Aggregator) loadCountersForDevice(ctx context.Context, target, oui, sn string, w WindowSpec) (map[string]float64, error) {
-	const tmpl = `
-SELECT metric_path, metric_value
-FROM %s
-WHERE device_oui = $1
-  AND device_sn  = $2
-  AND metric_type = 'counter'
-  AND granularity = $3
-  AND end_time >= $4
-  AND end_time <  $5`
-	sql := fmt.Sprintf(tmpl, target)
-	rows, err := a.db.Query(ctx, sql, oui, sn, string(w.Granularity), w.Start, w.End)
+	sql, args := buildLoadCountersForDeviceSQL(target, oui, sn, w)
+	rows, err := a.db.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -312,6 +296,44 @@ ON CONFLICT %s DO UPDATE SET
 		conflictTarget,
 	)
 	return sql, []any{string(w.Granularity), w.Start, w.End, w.Start, w.End}
+}
+
+// buildListDevicesInBucketSQL 构造"列出本桶有计数的设备" SELECT。
+//
+// 读的是 target 表（每行即一个已聚合完整桶，桶尾时刻 end_time = w.End），
+// 因此必须**精确命中本桶**（end_time = w.End），而非源表式半开区间扫描。
+// 叠加 time = w.Start（hourly 表 PK 含 time，daily/weekly/monthly 该列恒为桶起点）
+// 既无害又自证锁定到唯一本桶；配合 granularity = $1 唯一定位。
+//
+// 参数顺序：$1=granularity, $2=bucket_end(=w.End), $3=bucket_start(=w.Start)
+func buildListDevicesInBucketSQL(target string, w WindowSpec) (string, []any) {
+	sql := fmt.Sprintf(`
+SELECT DISTINCT device_oui, device_sn
+FROM %s
+WHERE metric_type = 'counter'
+  AND granularity = $1
+  AND end_time = $2
+  AND time = $3`, target)
+	return sql, []any{string(w.Granularity), w.End, w.Start}
+}
+
+// buildLoadCountersForDeviceSQL 构造"取某设备本桶各 counter 值" SELECT。
+//
+// 与 buildListDevicesInBucketSQL 同理：读 target 表必须精确命中本桶
+// （end_time = w.End），不能用半开区间——否则会命中上一桶（其 end_time = 本桶 w.Start）。
+//
+// 参数顺序：$1=oui, $2=sn, $3=granularity, $4=bucket_end(=w.End), $5=bucket_start(=w.Start)
+func buildLoadCountersForDeviceSQL(target, oui, sn string, w WindowSpec) (string, []any) {
+	sql := fmt.Sprintf(`
+SELECT metric_path, metric_value
+FROM %s
+WHERE device_oui = $1
+  AND device_sn  = $2
+  AND metric_type = 'counter'
+  AND granularity = $3
+  AND end_time = $4
+  AND time = $5`, target)
+	return sql, []any{oui, sn, string(w.Granularity), w.End, w.Start}
 }
 
 // buildKPIInsertSQL 给 target 表构造批量 KPI INSERT。

@@ -309,6 +309,235 @@ func Test_AggregateKPIs_SameDisplayNameUsesDistinctIndicatorID(t *testing.T) {
 		"两个同显示名 KPI 的 metric_path 必须按编号区分，否则撞 ON CONFLICT 唯一键")
 }
 
+// ---------------------------------------------------------------------------
+// 路子 A：两个读本桶 counter 的 helper SQL 谓词断言（精确命中本桶，不再半开区间）
+// ---------------------------------------------------------------------------
+
+// listDevicesInBucket / loadCountersForDevice 读的是 target 表（每行即完整桶，
+// end_time=w.End）。修复前用源表式半开区间 end_time>=w.Start AND end_time<w.End，
+// 会把本桶行（end_time=w.End）排除、反而命中上一桶（end_time=本桶 w.Start）。
+// 修复后必须精确命中本桶：end_time = w.End（叠加 time = w.Start 自证），
+// 且 args 携带 w.End（不再是半开的 w.Start/w.End 对）。
+
+func Test_buildListDevicesInBucketSQL_PreciseBucketMatch_Hourly(t *testing.T) {
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+	sql, args := buildListDevicesInBucketSQL("pm_metrics_hourly", w)
+
+	// 精确命中本桶：end_time = $N（不再是半开 >= ... AND < ...）
+	assert.Contains(t, sql, "end_time = $2")
+	assert.Contains(t, sql, "time = $3")
+	assert.NotContains(t, sql, "end_time >=", "不应再有半开下界")
+	assert.NotContains(t, sql, "end_time <", "不应再有半开上界")
+	assert.Contains(t, sql, "FROM pm_metrics_hourly")
+	// args：granularity / w.End / w.Start —— 桶尾 w.End 进了谓词，不再是半开 w.Start/w.End 对
+	assert.Equal(t, []any{"hourly", w.End, w.Start}, args)
+}
+
+func Test_buildListDevicesInBucketSQL_PreciseBucketMatch_AllGranularities(t *testing.T) {
+	cases := []struct {
+		name        string
+		granularity metrics.Granularity
+		target      string
+		start, end  time.Time
+	}{
+		{
+			name:        "daily",
+			granularity: metrics.GranularityDaily,
+			target:      "pm_metrics_daily",
+			start:       time.Date(2026, 5, 22, 0, 0, 0, 0, time.UTC),
+			end:         time.Date(2026, 5, 23, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:        "weekly",
+			granularity: metrics.GranularityWeekly,
+			target:      "pm_metrics_weekly",
+			start:       time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC),
+			end:         time.Date(2026, 5, 25, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:        "monthly",
+			granularity: metrics.GranularityMonthly,
+			target:      "pm_metrics_monthly",
+			start:       time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
+			end:         time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := WindowSpec{Granularity: c.granularity, Start: c.start, End: c.end}
+			sql, args := buildListDevicesInBucketSQL(c.target, w)
+			assert.Contains(t, sql, "end_time = $2")
+			assert.NotContains(t, sql, "end_time >=")
+			assert.NotContains(t, sql, "end_time <")
+			assert.Equal(t, []any{string(c.granularity), c.end, c.start}, args)
+		})
+	}
+}
+
+func Test_buildLoadCountersForDeviceSQL_PreciseBucketMatch_Hourly(t *testing.T) {
+	w := WindowSpec{
+		Granularity: metrics.GranularityHourly,
+		Start:       time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC),
+	}
+	sql, args := buildLoadCountersForDeviceSQL("pm_metrics_hourly", "A", "S1", w)
+
+	assert.Contains(t, sql, "end_time = $4")
+	assert.Contains(t, sql, "time = $5")
+	assert.NotContains(t, sql, "end_time >=", "不应再有半开下界")
+	assert.NotContains(t, sql, "end_time <", "不应再有半开上界")
+	assert.Contains(t, sql, "FROM pm_metrics_hourly")
+	// args：oui / sn / granularity / w.End / w.Start
+	assert.Equal(t, []any{"A", "S1", "hourly", w.End, w.Start}, args)
+}
+
+func Test_buildLoadCountersForDeviceSQL_PreciseBucketMatch_Daily(t *testing.T) {
+	w := WindowSpec{
+		Granularity: metrics.GranularityDaily,
+		Start:       time.Date(2026, 5, 22, 0, 0, 0, 0, time.UTC),
+		End:         time.Date(2026, 5, 23, 0, 0, 0, 0, time.UTC),
+	}
+	sql, args := buildLoadCountersForDeviceSQL("pm_metrics_daily", "A", "S1", w)
+
+	assert.Contains(t, sql, "end_time = $4")
+	assert.NotContains(t, sql, "end_time >=")
+	assert.NotContains(t, sql, "end_time <")
+	assert.Contains(t, sql, "FROM pm_metrics_daily")
+	assert.Equal(t, []any{"A", "S1", "daily", w.End, w.Start}, args)
+}
+
+// ---------------------------------------------------------------------------
+// 路子 B：行为单测——智能桩按 end_time 精确过滤，证明 KPI 取本桶值、孤立桶也能算
+// ---------------------------------------------------------------------------
+
+// bucketRow 是智能桩里 target 表的一行（带 end_time，供按桶精确过滤）。
+type bucketRow struct {
+	oui, sn  string
+	path     string
+	value    float64
+	endTime  time.Time
+	timeCol  time.Time
+}
+
+// preciseBucketDB 模拟"按 end_time 精确过滤"的 target 表：
+// listDevicesInBucket / loadCountersForDevice 传入 w.End（args 第二/第四位），
+// 只返回 end_time == 该值的行——复现真实 PG 谓词行为，从而验证修复后只读到本桶。
+type preciseBucketDB struct {
+	rows    []bucketRow
+	execTag pgconn.CommandTag
+	execSQL string
+	execArg []any
+}
+
+func (db *preciseBucketDB) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	db.execSQL = sql
+	db.execArg = args
+	return db.execTag, nil
+}
+
+func (db *preciseBucketDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	// listDevicesInBucket: args = [granularity, end_time, time]
+	// loadCountersForDevice: args = [oui, sn, granularity, end_time, time]
+	if len(args) == 3 {
+		want := args[1].(time.Time)
+		seen := map[deviceKey]bool{}
+		var out [][]any
+		for _, r := range db.rows {
+			if r.endTime.Equal(want) {
+				k := deviceKey{r.oui, r.sn}
+				if !seen[k] {
+					seen[k] = true
+					out = append(out, []any{r.oui, r.sn})
+				}
+			}
+		}
+		return &fakeRows{rows: out}, nil
+	}
+	if len(args) == 5 {
+		oui := args[0].(string)
+		sn := args[1].(string)
+		want := args[3].(time.Time)
+		var out [][]any
+		for _, r := range db.rows {
+			if r.oui == oui && r.sn == sn && r.endTime.Equal(want) {
+				out = append(out, []any{r.path, r.value})
+			}
+		}
+		return &fakeRows{rows: out}, nil
+	}
+	return nil, errors.New("preciseBucketDB.Query unexpected args len")
+}
+
+func avilRateRoute() *router.KPIRoute {
+	return &router.KPIRoute{
+		KPIs: []router.KPIDef{
+			{
+				IndicatorID:  "K1",
+				Name:         "L.Cell.Avail.Rate",
+				StatisType:   "pct",
+				Formula:      "numerator / denominator",
+				Dependencies: []string{"numerator", "denominator"},
+			},
+		},
+	}
+}
+
+// 本桶有计数 + 上一桶有不同计数 → KPI 必须取本桶值（修复前会错取上一桶）。
+func Test_AggregateKPIs_TakesCurrentBucket_NotPrevious(t *testing.T) {
+	prevEnd := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC) // 上一桶桶尾 = 本桶桶起
+	curStart := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	curEnd := time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC)
+
+	db := &preciseBucketDB{
+		execTag: pgconn.NewCommandTag("INSERT 0 1"),
+		rows: []bucketRow{
+			// 上一桶 [09:00,10:00)：numerator=10, denominator=100 → 若被错读 KPI=0.1
+			{oui: "A", sn: "S1", path: "numerator", value: 10, endTime: prevEnd, timeCol: prevEnd.Add(-time.Hour)},
+			{oui: "A", sn: "S1", path: "denominator", value: 100, endTime: prevEnd, timeCol: prevEnd.Add(-time.Hour)},
+			// 本桶 [10:00,11:00)：numerator=80, denominator=100 → 正确 KPI=0.8
+			{oui: "A", sn: "S1", path: "numerator", value: 80, endTime: curEnd, timeCol: curStart},
+			{oui: "A", sn: "S1", path: "denominator", value: 100, endTime: curEnd, timeCol: curStart},
+		},
+	}
+	kr := &stubKPIRouter{byDevice: map[string]*router.KPIRoute{"S1": avilRateRoute()}}
+	a := New(db, kr, nil)
+	w := WindowSpec{Granularity: metrics.GranularityHourly, Start: curStart, End: curEnd}
+
+	n, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n)
+	require.Len(t, db.execArg, 8)
+	assert.Equal(t, float64(0.8), db.execArg[3], "KPI 必须取本桶值 0.8，而非上一桶 0.1")
+}
+
+// 孤立桶：上一桶为空、本桶有计数 → 本桶 KPI 仍能算出（修复前因谓词排除本桶行而算不出）。
+func Test_AggregateKPIs_IsolatedBucket_StillComputes(t *testing.T) {
+	curStart := time.Date(2026, 5, 22, 10, 0, 0, 0, time.UTC)
+	curEnd := time.Date(2026, 5, 22, 11, 0, 0, 0, time.UTC)
+
+	db := &preciseBucketDB{
+		execTag: pgconn.NewCommandTag("INSERT 0 1"),
+		rows: []bucketRow{
+			// 仅本桶有数据，上一桶完全为空（孤立桶）
+			{oui: "A", sn: "S1", path: "numerator", value: 75, endTime: curEnd, timeCol: curStart},
+			{oui: "A", sn: "S1", path: "denominator", value: 100, endTime: curEnd, timeCol: curStart},
+		},
+	}
+	kr := &stubKPIRouter{byDevice: map[string]*router.KPIRoute{"S1": avilRateRoute()}}
+	a := New(db, kr, nil)
+	w := WindowSpec{Granularity: metrics.GranularityHourly, Start: curStart, End: curEnd}
+
+	n, err := a.AggregateKPIs(context.Background(), "pm_metrics_hourly", w)
+	require.NoError(t, err)
+	assert.Equal(t, 1, n, "孤立桶本桶 KPI 仍应算出 1 行")
+	require.Len(t, db.execArg, 8)
+	assert.Equal(t, float64(0.75), db.execArg[3])
+}
+
 // backfillDisplayNames：KPI 行按编号回填指标库 cn_name，counter 行用 metric_path 本身，
 // 查不到的编号回退用编号。
 func Test_backfillDisplayNames(t *testing.T) {
