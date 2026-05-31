@@ -73,6 +73,9 @@ type Task struct {
 	DeviceSNs     []string
 	MetricPaths   []string
 	Granularities []string  // 多粒度多选（如 ['hourly','daily']）
+	// ObjectLDNs T-0193：小区/PLMN 白名单（完整 object_ldn 字符串）。空 = 不过滤 = 全小区。
+	// 纯查看级过滤，仅 device/aggregate_group 维度承载，不改聚合/落库。
+	ObjectLDNs    []string
 	WindowStart   time.Time // 单次执行的源数据时窗起
 	WindowEnd     time.Time // 源数据时窗止
 	Dimension     Dimension // 维度，默认 'device'
@@ -100,6 +103,8 @@ type CreateRequest struct {
 	DeviceSNs     []string
 	MetricPaths   []string
 	Granularities []string
+	// ObjectLDNs T-0193：小区/PLMN 白名单（完整 object_ldn 字符串）。空 = 不过滤 = 全小区。
+	ObjectLDNs    []string
 	WindowStart   time.Time
 	WindowEnd     time.Time
 	Dimension     Dimension // 默认 device

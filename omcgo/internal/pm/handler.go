@@ -97,6 +97,8 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 		// T-0164-P5 / G5：按粒度路由的聚合查询接口（pm_metrics_hourly / daily / weekly / monthly
 		// + pm_group_metrics_*）。15min 粒度直查 pm_metrics；其余粒度走聚合表。
 		pm.GET("/metrics/aggregated", h.ListAggregatedMetrics)
+		// T-0193 自选设备下钻：列设备在 PM 数据里实际出现过的 distinct 小区/PLMN（object_ldn）。
+		pm.GET("/metrics/objects", h.ListMetricObjects)
 		// T-0164 收尾 G5-Gap-2：手动重算入口（晚到数据 / 补传场景运维触发）。
 		pm.POST("/aggregation/recompute", h.RecomputeAggregation)
 		pm.GET("/kpi", h.ListKPIValues)

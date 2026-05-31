@@ -61,6 +61,9 @@ type createRequestDTO struct {
 	DeviceSNs     []string  `json:"device_sns"`
 	MetricPaths   []string  `json:"metric_paths" binding:"required,min=1"`
 	Granularities []string  `json:"granularities" binding:"required,min=1"`
+	// T-0193：小区/PLMN 白名单（完整 object_ldn 字符串）。可选，不传/空 = 全小区（向后兼容）。
+	// 仅 device/aggregate_group 维度生效；其他维度忽略（不落库、不报错）。
+	ObjectLDNs    []string  `json:"object_ldns"`
 	// T-0185：window 仅 oneshot 必填；continuous 不填 → 存 NULL 开窗滚动聚合（与内置任务同语义）。
 	WindowStart time.Time `json:"window_start"`
 	WindowEnd   time.Time `json:"window_end"`
@@ -83,6 +86,7 @@ type taskResponseDTO struct {
 	DeviceSNs     []string  `json:"device_sns"`
 	MetricPaths   []string  `json:"metric_paths"`
 	Granularities []string  `json:"granularities"`
+	ObjectLDNs    []string  `json:"object_ldns"` // T-0193：小区/PLMN 白名单回吐（空=全小区）
 	WindowStart   time.Time `json:"window_start"`
 	WindowEnd     time.Time `json:"window_end"`
 	Dimension     string    `json:"dimension"`
@@ -109,6 +113,7 @@ func taskToDTO(t *Task) taskResponseDTO {
 		DeviceSNs:     t.DeviceSNs,
 		MetricPaths:   t.MetricPaths,
 		Granularities: t.Granularities,
+		ObjectLDNs:    t.ObjectLDNs,
 		WindowStart:   t.WindowStart,
 		WindowEnd:     t.WindowEnd,
 		Dimension:     dim,
@@ -173,6 +178,12 @@ func (h *Handler) Create(c *gin.Context) {
 	if cronExpr != "" {
 		cronPtr = &cronExpr
 	}
+	// T-0193：小区/PLMN 白名单仅在 device/aggregate_group（自选设备）维度承载；
+	// 其他维度无单设备小区语义，忽略传入值（不落库、不报错，保持简单）。
+	objectLDNs := req.ObjectLDNs
+	if dim != DimensionDevice && dim != DimensionAggregateGroup {
+		objectLDNs = nil
+	}
 	creator := extractCreator(c)
 	id, err := h.repo.Create(c.Request.Context(), CreateRequest{
 		Name:          req.Name,
@@ -181,6 +192,7 @@ func (h *Handler) Create(c *gin.Context) {
 		DeviceSNs:     req.DeviceSNs,
 		MetricPaths:   req.MetricPaths,
 		Granularities: req.Granularities,
+		ObjectLDNs:    objectLDNs,
 		WindowStart:   req.WindowStart,
 		WindowEnd:     req.WindowEnd,
 		Dimension:     dim,
@@ -372,6 +384,9 @@ type resultsFilter struct {
 	Granularity string
 	StartTime   string // RFC3339；非法/空则忽略
 	EndTime     string // RFC3339；非法/空则忽略
+	// ObjectLDNs T-0193：任务自带的小区/PLMN 白名单。非空时叠加 object_ldn = ANY(...) 过滤；
+	// 空 = 不过滤（全小区）。与"只看 N 指标"同一层查看级收口。
+	ObjectLDNs  []string
 }
 
 // buildResultsQuery 纯函数：拼 adhoc results 查询 SQL + 占位参数。
@@ -415,6 +430,13 @@ WHERE task_id = $1`
 			pos++
 		}
 	}
+	// T-0193：任务小区/PLMN 白名单（查看级收口）。非空时只返回选中 object_ldn 行；
+	// 空 = 不过滤（全小区，向后兼容旧任务）。与上面"只看 N 指标"同层。
+	if len(f.ObjectLDNs) > 0 {
+		q += fmt.Sprintf(" AND object_ldn = ANY($%d)", pos)
+		args = append(args, f.ObjectLDNs)
+		pos++
+	}
 	q += fmt.Sprintf(" ORDER BY time DESC LIMIT $%d OFFSET $%d", pos, pos+1)
 	args = append(args, limit, offset)
 	return q, args
@@ -427,8 +449,9 @@ func (h *Handler) Results(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, "invalid id")
 		return
 	}
-	// 任务存在校验
-	if _, err := h.repo.Get(c.Request.Context(), id); err != nil {
+	// 任务存在校验 + 取出白名单（T-0193：结果查询按任务自带 object_ldns 收口）
+	task, err := h.repo.Get(c.Request.Context(), id)
+	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			response.Fail(c, http.StatusNotFound, "task not found")
 			return
@@ -457,6 +480,7 @@ func (h *Handler) Results(c *gin.Context) {
 		Granularity: c.Query("granularity"),
 		StartTime:   c.Query("start_time"),
 		EndTime:     c.Query("end_time"),
+		ObjectLDNs:  task.ObjectLDNs, // 任务自带白名单（空=全小区）
 	}, limit, offset)
 
 	rows, err := h.pool.Query(c.Request.Context(), q, args...)

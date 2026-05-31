@@ -60,6 +60,48 @@ func Test_buildResultsQuery_InvalidTimeIgnored(t *testing.T) {
 	assert.Equal(t, []any{id, 100, 0}, args)
 }
 
+// T-0193：任务无白名单（ObjectLDNs 空）时 SQL 不含 object_ldn 谓词。
+func Test_buildResultsQuery_NoObjectLDNWhitelist(t *testing.T) {
+	id := uuid.New()
+	q, args := buildResultsQuery(id, resultsFilter{}, 100, 0)
+
+	assert.NotContains(t, q, "object_ldn = ANY")
+	assert.Equal(t, []any{id, 100, 0}, args)
+}
+
+// T-0193：任务有白名单时 SQL 含 object_ldn = ANY 谓词，占位号顺延，白名单切片入 args。
+func Test_buildResultsQuery_WithObjectLDNWhitelist(t *testing.T) {
+	id := uuid.New()
+	ldns := []string{"Cellid=111172245,PLMN=46068", "Cellid=222,PLMN=46000"}
+	q, args := buildResultsQuery(id, resultsFilter{ObjectLDNs: ldns}, 100, 0)
+
+	assert.Contains(t, q, "AND object_ldn = ANY($2)")
+	assert.Contains(t, q, "ORDER BY time DESC LIMIT $3 OFFSET $4")
+	if assert.Len(t, args, 4) {
+		assert.Equal(t, id, args[0])
+		assert.Equal(t, ldns, args[1])
+		assert.Equal(t, 100, args[2])
+		assert.Equal(t, 0, args[3])
+	}
+}
+
+// T-0193：白名单与其他过滤项叠加时占位号连续递增，object_ldn 排在时间窗口之后。
+func Test_buildResultsQuery_ObjectLDNWithOtherFilters(t *testing.T) {
+	id := uuid.New()
+	q, args := buildResultsQuery(id, resultsFilter{
+		DeviceSN:   "SN-1",
+		StartTime:  "2026-05-20T00:00:00Z",
+		ObjectLDNs: []string{"Cellid=111172245,PLMN=46068"},
+	}, 100, 0)
+
+	assert.Contains(t, q, "AND device_sn = $2")
+	assert.Contains(t, q, "AND time >= $3")
+	assert.Contains(t, q, "AND object_ldn = ANY($4)")
+	assert.Contains(t, q, "LIMIT $5 OFFSET $6")
+	assert.Len(t, args, 6)
+	assert.True(t, strings.Index(q, "time >=") < strings.Index(q, "object_ldn = ANY"))
+}
+
 // 与其他可选过滤项叠加时占位号连续递增。
 func Test_buildResultsQuery_CombinedFilters(t *testing.T) {
 	id := uuid.New()

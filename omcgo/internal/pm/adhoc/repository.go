@@ -85,6 +85,7 @@ var taskCols = []string{
 	"window_start", "window_end", "dimension", "technology", "is_builtin", "expire_days",
 	"status", "progress",
 	"creator", "created_at", "updated_at",
+	"object_ldns", // T-0193：小区/PLMN 白名单（TEXT[]，NULL=不过滤）
 }
 
 func (r *PgRepository) Create(ctx context.Context, req CreateRequest) (uuid.UUID, error) {
@@ -109,13 +110,13 @@ func (r *PgRepository) Create(ctx context.Context, req CreateRequest) (uuid.UUID
 			"task_name", "task_type", "task_subtype", "mode", "cron_expr",
 			"device_sns", "metric_paths", "granularities",
 			"window_start", "window_end", "dimension", "technology", "is_builtin", "expire_days",
-			"status", "progress", "creator",
+			"status", "progress", "creator", "object_ldns",
 		).
 		Values(
 			req.Name, "extraction", TaskSubtype, string(req.Mode), nullableString(req.CronExpr),
 			deviceSNsJSON, req.MetricPaths, req.Granularities,
 			nullableTime(req.WindowStart), nullableTime(req.WindowEnd), string(dim), nullableTech(req.Technology), req.IsBuiltin, expireDays,
-			string(StatusPending), 0, req.Creator,
+			string(StatusPending), 0, req.Creator, nullableStrSlice(req.ObjectLDNs),
 		).
 		Suffix("RETURNING id").
 		ToSql()
@@ -453,16 +454,18 @@ func scanTask(row rowScanner) (*Task, error) {
 	var expireDays int
 	var status string
 	var creator *string
+	var objectLDNs []string // T-0193：白名单列，NULL → nil（不过滤）
 
 	err := row.Scan(
 		&t.ID, &t.Name, &subtype, &mode, &cronExpr,
 		&deviceSNsJSON, &metricPaths, &granularities,
 		&windowStart, &windowEnd, &dimension, &technology, &isBuiltin, &expireDays, &status, &t.Progress,
-		&creator, &t.CreatedAt, &t.UpdatedAt,
+		&creator, &t.CreatedAt, &t.UpdatedAt, &objectLDNs,
 	)
 	if err != nil {
 		return nil, err
 	}
+	t.ObjectLDNs = objectLDNs
 	if technology != nil {
 		t.Technology = *technology
 	}
@@ -513,6 +516,15 @@ func nullableString(s *string) any {
 		return nil
 	}
 	return *s
+}
+
+// nullableStrSlice 把 nil / 空切片映射为 SQL NULL（T-0193 object_ldns 列）。
+// 空数组与 NULL 都表"不过滤=全小区"，统一落 NULL 保持语义单一、便于 scanTask 读回 nil。
+func nullableStrSlice(s []string) any {
+	if len(s) == 0 {
+		return nil
+	}
+	return s
 }
 
 // nullableTech 把空制式串映射为 SQL NULL（technology 列可空，约束 NULL or lte/nr/gsm）。
