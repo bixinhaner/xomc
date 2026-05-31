@@ -44,6 +44,9 @@ interface MetricPickerModalProps {
   onConfirm: (selectedPaths: string[], labels: Record<string, string>) => void;
   initialSelected?: string[];
   initialDeviceType?: DeviceType;
+  // 制式联动锁定（T-0188）：true 时隐藏内部「设备类型」下拉，deviceType 固定为
+  // initialDeviceType 不可手动切换；不传/false 保持原下拉可切换行为（向后兼容 KPIQuery）。
+  lockDeviceType?: boolean;
 }
 
 const DEVICE_TYPE_OPTIONS: { label: string; value: DeviceType }[] = [
@@ -58,15 +61,20 @@ export default function MetricPickerModal({
   onConfirm,
   initialSelected = [],
   initialDeviceType = 'ENB',
+  lockDeviceType = false,
 }: MetricPickerModalProps) {
-  const [deviceType, setDeviceType] = useState<DeviceType>(initialDeviceType);
+  // 非锁定态：用户可在弹窗内自行切换设备类型（KPIQuery 用法），用内部 state。
+  const [deviceTypeState, setDeviceType] = useState<DeviceType>(initialDeviceType);
   const [keyword, setKeyword] = useState('');
   const [keywordDraft, setKeywordDraft] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [selected, setSelected] = useState<string[]>(initialSelected);
 
-  // 不用 useEffect 同步 — Modal destroyOnHidden 关闭即卸载，useState 初值在下次打开时取到最新 initialSelected/initialDeviceType。
+  // 制式联动锁定（T-0188）：锁定态 deviceType 恒等于外部制式入参 initialDeviceType。
+  // 本组件在调用页常驻不卸载（Modal 的 destroyOnHidden 只销毁弹窗 DOM 内容、不重挂载本组件），
+  // 内部 state 仅首挂载赋值一次、不随外部制式切换更新；故锁定态直接取 prop，避免停留在首挂载制式。
+  const deviceType = lockDeviceType ? initialDeviceType : deviceTypeState;
 
   const { data, isLoading } = useIndicatorList(deviceType, {
     keyword: keyword || undefined,
@@ -154,16 +162,20 @@ export default function MetricPickerModal({
     >
       <Space direction="vertical" style={{ width: '100%' }} size="middle">
         <Space>
-          <Text>设备类型：</Text>
-          <Select<DeviceType>
-            value={deviceType}
-            onChange={(v) => {
-              setDeviceType(v);
-              setPage(1);
-            }}
-            options={DEVICE_TYPE_OPTIONS}
-            style={{ width: 140 }}
-          />
+          {lockDeviceType ? null : (
+            <>
+              <Text>设备类型：</Text>
+              <Select<DeviceType>
+                value={deviceType}
+                onChange={(v) => {
+                  setDeviceType(v);
+                  setPage(1);
+                }}
+                options={DEVICE_TYPE_OPTIONS}
+                style={{ width: 140 }}
+              />
+            </>
+          )}
           <Input
             placeholder="按指标路径 / 中文名 搜索"
             prefix={<SearchOutlined />}

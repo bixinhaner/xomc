@@ -31,6 +31,9 @@ interface DevicePickerModalProps {
   onClose: () => void;
   onConfirm: (selectedSns: string[]) => void;
   initialSelected?: string[];
+  // 制式联动锁定（T-0188）：传入时按制式过滤设备列表（透传 useDeviceList 的 networkType，
+  // 直接用小写 'lte'/'nr'/'gsm'）；不传时列全部设备，保持原行为（向后兼容 KPIQuery）。
+  technology?: 'lte' | 'nr' | 'gsm';
 }
 
 export default function DevicePickerModal({
@@ -38,6 +41,7 @@ export default function DevicePickerModal({
   onClose,
   onConfirm,
   initialSelected = [],
+  technology,
 }: DevicePickerModalProps) {
   const { message } = App.useApp();
   const [search, setSearch] = useState('');
@@ -48,10 +52,8 @@ export default function DevicePickerModal({
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
 
-  // 不用 useEffect 同步 — Modal destroyOnHidden 关闭即卸载，useState 初值在下次打开时取到最新 initialSelected。
-
   const { data, isLoading } = useDeviceList(
-    { page, pageSize, searchText: search || undefined },
+    { page, pageSize, searchText: search || undefined, networkType: technology },
     { enabled: open },
   );
 

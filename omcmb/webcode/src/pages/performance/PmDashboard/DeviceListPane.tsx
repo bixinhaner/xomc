@@ -349,6 +349,7 @@ export default function DeviceListPane() {
           }
         }}
         initialSelected={deviceSns}
+        technology={tech}
       />
 
       <MetricPickerModal
@@ -360,6 +361,7 @@ export default function DeviceListPane() {
         }}
         initialSelected={metricPaths}
         initialDeviceType={TECH_TO_DEVICE_TYPE[tech]}
+        lockDeviceType
       />
     </div>
   );
