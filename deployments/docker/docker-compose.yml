@@ -18,7 +18,14 @@
 
 services:
   postgres:
-    image: timescale/timescaledb:latest-pg16
+    # 必须 pin 到 2.25.2-pg16 — seed/000001_init_seed.sql 是从此版本 pg_dump 的,
+    # 含 _timescaledb_catalog.continuous_agg_migrate_plan / continuous_agg_migrate_plan_step
+    # 等内部 catalog 的 DISABLE/ENABLE TRIGGER 调用 + 末尾 timescaledb_post_restore()
+    # 探这些表;`latest-pg16` 会随上游推新漂到不同版本(用户实测 2026-05-31 报
+    # "relation _timescaledb_catalog.continuous_agg_migrate_plan does not exist"
+    # 就是上游推了更新/老版本导致 catalog schema 不一致)。当 schema/seed dump 升级时
+    # 同步动这里。
+    image: timescale/timescaledb:2.25.2-pg16
     environment:
       TZ: "Asia/Shanghai"
       POSTGRES_USER: omcgo
