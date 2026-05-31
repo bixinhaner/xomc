@@ -18,6 +18,7 @@ import { InboxOutlined } from '@ant-design/icons';
 import type { AxiosError } from 'axios';
 import { useIndicatorUploadXml } from '@core/hooks/api/useIndicatorsLibrary';
 import type { TechLower } from '@core/types/indicatorLibrary';
+import { useT } from '@/hooks/useT';
 
 interface Props {
   open: boolean;
@@ -53,6 +54,7 @@ async function detectTechFromXml(file: File): Promise<TechLower | null> {
 }
 
 export default function UploadXmlModal({ open, onClose }: Props) {
+  const t = useT();
   const [form] = Form.useForm<FormValues>();
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const uploadMut = useIndicatorUploadXml();

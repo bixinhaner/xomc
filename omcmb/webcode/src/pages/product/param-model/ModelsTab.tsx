@@ -7,6 +7,7 @@ import {
   useDeleteParamModel,
 } from '@core/hooks/api/useParamModels';
 import type { ParamModel, ParamModelSource, UpdateParamModelInput } from '@core/types/paramModel';
+import { useT } from '@/hooks/useT';
 
 interface Props {
   selectedName?: string;
@@ -17,6 +18,7 @@ interface Props {
 }
 
 export default function ModelsTab({ selectedName, onSelect, keyword }: Props) {
+  const t = useT();
   const { data, isLoading } = useParamModelList();
   const updateMut = useUpdateParamModel();
   const deleteMut = useDeleteParamModel();

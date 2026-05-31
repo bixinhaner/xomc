@@ -30,6 +30,7 @@ import {
   useDeleteMapping,
 } from '@core/hooks/api/useParamModels';
 import type { ParamMapping, CreateMappingInput, UpdateMappingInput } from '@core/types/paramModel';
+import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
 
@@ -63,6 +64,7 @@ function countPlaceholder(p: string): number {
 }
 
 export default function MappingsTab({ selectedName, onBack }: Props) {
+  const t = useT();
   const { data, isLoading } = useParamMappings(selectedName);
   const createMut = useCreateMapping();
   const updateMut = useUpdateMapping();

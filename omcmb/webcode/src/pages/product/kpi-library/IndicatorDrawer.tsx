@@ -20,6 +20,7 @@ import {
   useDeleteFormula,
 } from '@core/hooks/api/useIndicatorsLibrary';
 import type { DeviceType, IndicatorInfo, PlatformFormula } from '@core/types/indicatorLibrary';
+import { useT } from '@/hooks/useT';
 
 interface Props {
   open: boolean;
@@ -34,6 +35,7 @@ interface FormulaFormValues {
 }
 
 export default function IndicatorDrawer({ open, deviceType, indicator, onClose }: Props) {
+  const t = useT();
   const { data: formulasData } = useFormulas(deviceType, indicator?.id);
   const upsertMut = useUpsertFormula();
   const deleteMut = useDeleteFormula();

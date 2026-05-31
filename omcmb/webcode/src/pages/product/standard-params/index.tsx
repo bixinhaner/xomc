@@ -28,6 +28,7 @@ import {
   useDeleteStandard,
 } from '@core/hooks/api/useParamModels';
 import type { StandardParam, UpsertStandardInput } from '@core/types/paramModel';
+import { useT } from '@/hooks/useT';
 
 const ENTRY_OPTIONS = [
   { label: '全部', value: '' },
@@ -36,6 +37,7 @@ const ENTRY_OPTIONS = [
 ];
 
 export default function StandardParamsPage() {
+  const t = useT();
   const [keyword, setKeyword] = useState('');
   const [entryType, setEntryType] = useState('');
   const { data, isLoading } = useStandardParams({

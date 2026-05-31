@@ -7,6 +7,7 @@
  */
 import { Drawer } from 'antd';
 import IndicatorUnitsTab from './IndicatorUnitsTab';
+import { useT } from '@/hooks/useT';
 
 interface Props {
   open: boolean;
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export default function UnitsDrawer({ open, onClose }: Props) {
+  const t = useT();
   return (
     <Drawer
       title={t('product.kpi.units.short')}

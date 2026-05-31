@@ -23,6 +23,7 @@ import {
   useIndicatorSummary,
   useIndicatorDeleteFile,
 } from '@core/hooks/api/useIndicatorsLibrary';
+import { useT } from '@/hooks/useT';
 
 interface Props {
   onSelect: (tech: TechLower, platform: string) => void;
@@ -41,6 +42,7 @@ const TECH_DESC: Record<TechLower, string> = {
 };
 
 export default function SummaryTab({ onSelect }: Props) {
+  const t = useT();
   const { data, isLoading } = useIndicatorSummary();
   const deleteMut = useIndicatorDeleteFile();
   const items = data?.items || [];

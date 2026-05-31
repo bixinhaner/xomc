@@ -30,6 +30,7 @@ import {
 import type { Product, ProductListFilter } from '@core/types/product';
 import ProductDrawer from './ProductDrawer';
 import MatchTester from './MatchTester';
+import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
 
@@ -42,6 +43,7 @@ interface PatternStats {
 const SORT_TAIL = Number.MAX_SAFE_INTEGER;
 
 export default function ProductsPage() {
+  const t = useT();
   const [filter, setFilter] = useState<ProductListFilter>({});
   const [keyword, setKeyword] = useState('');
   const { data, isLoading, refetch } = useProductList(filter);

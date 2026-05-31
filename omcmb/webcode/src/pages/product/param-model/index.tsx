@@ -41,8 +41,10 @@ import {
 import type { AxiosError } from 'axios';
 import ModelsTab from './ModelsTab';
 import MappingsTab from './MappingsTab';
+import { useT } from '@/hooks/useT';
 
 export default function ParamModelPage() {
+  const t = useT();
   const [selectedModelName, setSelectedModelName] = useState<string | undefined>();
   const [keyword, setKeyword] = useState('');
   const reloadMut = useParamModelReloadDirectory();

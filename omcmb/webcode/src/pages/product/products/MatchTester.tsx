@@ -3,6 +3,7 @@ import { Input, Tag, Typography, Space, Spin } from 'antd';
 import { ThunderboltOutlined } from '@ant-design/icons';
 import { productApi } from '@core/services/api/productApi';
 import type { ProductMatchResult } from '@core/types/product';
+import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
 
@@ -12,6 +13,7 @@ interface MatchResultInlineProps {
 }
 
 function MatchResultInline({ result, loading }: MatchResultInlineProps) {
+  const t = useT();
   if (loading) {
     return (
       <Space size={4}>
@@ -48,14 +50,15 @@ function MatchResultInline({ result, loading }: MatchResultInlineProps) {
 }
 
 export default function MatchTester() {
+  const t = useT();
   const [value, setValue] = useState('');
   const [debounced, setDebounced] = useState('');
   const [result, setResult] = useState<ProductMatchResult | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(value.trim()), 300);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setDebounced(value.trim()), 300);
+    return () => clearTimeout(timer);
   }, [value]);
 
   useEffect(() => {

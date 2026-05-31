@@ -35,6 +35,7 @@ import type {
   UpdateProductInput,
   DeviceAttrsOverride,
 } from '@core/types/product';
+import { useT } from '@/hooks/useT';
 
 const { Text } = Typography;
 
@@ -76,6 +77,7 @@ const TECH_OPTIONS = [
 ];
 
 export default function ProductDrawer({ open, product, onClose }: Props) {
+  const t = useT();
   const isEdit = Boolean(product);
   const [form] = Form.useForm<FormValues>();
   const [activeTab, setActiveTab] = useState('basic');

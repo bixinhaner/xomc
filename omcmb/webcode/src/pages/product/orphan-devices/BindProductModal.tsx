@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Modal, Form, Select, message, Alert } from 'antd';
 import { useProductList, useBindOrphan } from '@core/hooks/api/useProducts';
 import type { OrphanDevice } from '@core/types/product';
+import { useT } from '@/hooks/useT';
 
 interface Props {
   open: boolean;
@@ -15,6 +16,7 @@ interface FormValues {
 }
 
 export default function BindProductModal({ open, devices, onClose, onDone }: Props) {
+  const t = useT();
   const { data: productData } = useProductList();
   const bindMut = useBindOrphan();
   const [form] = Form.useForm<FormValues>();

@@ -14,7 +14,6 @@
  *   c. 取消"搜索网元类型"输入框 — 数据极少(LTE/GSM/NR 等),无搜索必要
  */
 import { useMemo, useState } from 'react';
-import { useIntl } from 'react-intl';
 import { useSearchParams } from 'react-router-dom';
 import {
   Card,
@@ -51,6 +50,7 @@ import type {
   AlarmNeTypeStat,
 } from '@core/types/alarmDefinition';
 import AlarmDefinitionDrawer from './AlarmDefinitionDrawer';
+import { useT } from '@/hooks/useT';
 // 2026-05-29:"未识别频次"入口暂时隐藏(后端聚合 / 统计逻辑未完工,详见
 // backlog T-0181)。组件文件 UnknownStatsModal.tsx 保留备用,功能就绪后:
 //   1) 取消下方 import 注释  2) 恢复一级 toolbar 的 <Tooltip>+<Button>
@@ -77,8 +77,7 @@ const FILTER_LABEL_STYLE = {
 };
 
 export default function AlarmLibraryPage() {
-  const intl = useIntl();
-  const t = (id: string) => intl.formatMessage({ id });
+  const t = useT();
 
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedNeType = searchParams.get('neType') || undefined;

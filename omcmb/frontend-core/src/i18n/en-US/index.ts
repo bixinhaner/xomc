@@ -251,8 +251,6 @@ const messages: Record<string, string> = {
   'common.created':          'Created',
   'common.updated':          'Updated',
   'common.cacheRefreshed':   'Cache refreshed',
-  'common.on':               'On',
-  'common.off':              'Off',
   'common.accept':           'Accept',
   'common.discard':          'Discard',
   'common.custom':           'Custom',

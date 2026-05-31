@@ -10,6 +10,7 @@ import {
 } from '@core/hooks/api/useIndicatorsLibrary';
 import type { DeviceType, IndicatorInfo } from '@core/types/indicatorLibrary';
 import IndicatorDrawer from './IndicatorDrawer';
+import { useT } from '@/hooks/useT';
 
 interface Props {
   deviceType: DeviceType;
@@ -19,6 +20,7 @@ interface Props {
 const OPERATOR_CODE = 'default';
 
 export default function IndicatorTab({ deviceType }: Props) {
+  const t = useT();
   const [keyword, setKeyword] = useState('');
   const [platform, setPlatform] = useState<string | undefined>(undefined);
   const [page, setPage] = useState(1);

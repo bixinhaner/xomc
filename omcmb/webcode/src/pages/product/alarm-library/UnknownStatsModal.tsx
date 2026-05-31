@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Modal, Table, Input, Select, Tag, Space, Empty } from 'antd';
 import { useUnknownAlarmStats } from '@core/hooks/api/useAlarmDefinitions';
 import type { UnknownAlarmStat } from '@core/types/alarmDefinition';
+import { useT } from '@/hooks/useT';
 
 interface Props {
   open: boolean;
@@ -15,6 +16,7 @@ const DAYS_OPTIONS = [
 ];
 
 export default function UnknownStatsModal({ open, onClose }: Props) {
+  const t = useT();
   const [productId, setProductId] = useState('');
   const [days, setDays] = useState(7);
   const { data, isLoading } = useUnknownAlarmStats({

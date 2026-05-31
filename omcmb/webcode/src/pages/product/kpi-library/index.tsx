@@ -32,6 +32,7 @@ import SummaryTab from './SummaryTab';
 import IndicatorsByTech from './IndicatorsByTech';
 import UploadXmlModal from './UploadXmlModal';
 import UnitsDrawer from './UnitsDrawer';
+import { useT } from '@/hooks/useT';
 
 const TECH_LABEL: Record<TechLower, string> = {
   enb: 'ENB (LTE)',
@@ -50,6 +51,7 @@ function parseTech(raw: string | null): TechLower | undefined {
 }
 
 export default function KpiLibraryPage() {
+  const t = useT();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedTech = parseTech(searchParams.get('tech'));
   const selectedPlatform = searchParams.get('platform') || undefined;

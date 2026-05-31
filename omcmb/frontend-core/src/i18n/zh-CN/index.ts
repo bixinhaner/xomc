@@ -251,8 +251,6 @@ const messages: Record<string, string> = {
   'common.created':          '已创建',
   'common.updated':          '已更新',
   'common.cacheRefreshed':   '已刷新缓存',
-  'common.on':               '开',
-  'common.off':              '关',
   'common.accept':           '接纳',
   'common.discard':          '丢弃',
   'common.custom':           '自定义',

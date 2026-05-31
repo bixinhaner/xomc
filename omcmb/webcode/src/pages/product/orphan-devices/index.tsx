@@ -17,8 +17,10 @@ import { ThunderboltOutlined, LinkOutlined } from '@ant-design/icons';
 import { useOrphanDevices, useRematchOrphan } from '@core/hooks/api/useProducts';
 import type { OrphanDevice } from '@core/types/product';
 import BindProductModal from './BindProductModal';
+import { useT } from '@/hooks/useT';
 
 export default function OrphanDevicesPage() {
+  const t = useT();
   // 2026-05-28 改造:
   //   1. server-side 分页 (10/20/50/1000)
   //   2. SN 模糊搜索

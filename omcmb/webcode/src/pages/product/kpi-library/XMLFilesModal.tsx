@@ -14,6 +14,7 @@ import {
   useIndicatorDeleteFile,
 } from '@core/hooks/api/useIndicatorsLibrary';
 import type { IndicatorFile, TechLower } from '@core/types/indicatorLibrary';
+import { useT } from '@/hooks/useT';
 
 interface Props {
   open: boolean;
@@ -34,6 +35,7 @@ const TECH_LABEL: Record<TechLower, string> = {
 };
 
 export default function XMLFilesModal({ open, tech, onClose }: Props) {
+  const t = useT();
   const { data, isLoading, refetch } = useIndicatorFiles(open ? tech : undefined);
   const deleteMut = useIndicatorDeleteFile();
   const items = data?.items || [];

@@ -8,8 +8,10 @@ import {
   useDeleteUnit,
 } from '@core/hooks/api/useIndicatorsLibrary';
 import type { IndicatorUnit, UnitInput } from '@core/types/indicatorLibrary';
+import { useT } from '@/hooks/useT';
 
 export default function IndicatorUnitsTab() {
+  const t = useT();
   const { data, isLoading } = useIndicatorUnits();
   const upsertMut = useUpsertUnit();
   const updateMut = useUpdateUnit();

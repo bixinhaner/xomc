@@ -10,6 +10,7 @@ import type {
   CreateAlarmDefinitionInput,
   UpdateAlarmDefinitionInput,
 } from '@core/types/alarmDefinition';
+import { useT } from '@/hooks/useT';
 
 interface Props {
   open: boolean;
@@ -42,6 +43,7 @@ export default function AlarmDefinitionDrawer({
   lockNeType,
   onClose,
 }: Props) {
+  const t = useT();
   const isEdit = Boolean(definition);
   const [form] = Form.useForm<FormValues>();
   const { data: sevData } = useAlarmSeverityLevels();
