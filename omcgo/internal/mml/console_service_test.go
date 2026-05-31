@@ -452,6 +452,24 @@ func TestPickI18n_LangHit(t *testing.T) {
 	assert.Equal(t, "EN", pickI18n(m, "en-US", "", "", ""))
 }
 
+func TestPickI18n_ShortKeyFallbackSameFamily(t *testing.T) {
+	// seed/000002 mml_i18n_en.sql 写入的是短 key 'en'/'zh',前端约定长 key 'en-US'/'zh-CN'。
+	// 同语言族短/长形态必须互相 fallback,否则英文模式过早降级到 zh-CN(中文)。
+	shortKey := map[string]string{"zh": "中", "en": "EN"}
+	assert.Equal(t, "EN", pickI18n(shortKey, "en-US", "", "", ""), "en-US should match short 'en' before falling back to zh")
+	assert.Equal(t, "中", pickI18n(shortKey, "zh-CN", "", "", ""), "zh-CN should match short 'zh'")
+
+	longKey := map[string]string{"zh-CN": "中长", "en-US": "ENLong"}
+	assert.Equal(t, "ENLong", pickI18n(longKey, "en", "", "", ""), "en should match long 'en-US' if short missing")
+	assert.Equal(t, "中长", pickI18n(longKey, "zh", "", "", ""), "zh should match long 'zh-CN' if short missing")
+
+	// 同语言族都没有时才跨族 fallback (zh > en)
+	onlyEn := map[string]string{"en": "ENOnly"}
+	assert.Equal(t, "ENOnly", pickI18n(onlyEn, "zh-CN", "", "", ""), "zh-CN with no zh/zh-CN should fallback to en")
+	onlyZh := map[string]string{"zh": "ZhOnly"}
+	assert.Equal(t, "ZhOnly", pickI18n(onlyZh, "en-US", "", "", ""), "en-US with no en/en-US should fallback to zh")
+}
+
 func TestPickI18n_FallbackChain(t *testing.T) {
 	// 完全未命中 → 走 fallback chain
 	assert.Equal(t, "fallback_zh",

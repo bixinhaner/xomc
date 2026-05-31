@@ -451,7 +451,24 @@ func pickI18n(m map[string]string, lang, fallbackZh, fallbackEn, fallbackCode st
 		return v
 	}
 	// seed/000152 注入的 i18n key 是 'zh' / 'en'（短码），而 API/前端约定用 'zh-CN' / 'en-US'。
-	// 两套兼容：lang 命中失败时短码 + 长码各回落一次，避免按命令中文名搜索/展示全空白。
+	// 优先尝试同语言族的短/长替代形态(en-US ↔ en, zh-CN ↔ zh),否则会过早 fallback 到 zh,
+	// 让英文模式始终看不到 seed 翻译。
+	if strings.HasPrefix(lang, "en") {
+		if v, ok := m["en"]; ok && v != "" {
+			return v
+		}
+		if v, ok := m["en-US"]; ok && v != "" {
+			return v
+		}
+	} else if strings.HasPrefix(lang, "zh") {
+		if v, ok := m["zh"]; ok && v != "" {
+			return v
+		}
+		if v, ok := m["zh-CN"]; ok && v != "" {
+			return v
+		}
+	}
+	// 跨语言族兜底:zh 优先(系统主语言),再 en,最后 legacy fallback
 	if v, ok := m["zh-CN"]; ok && v != "" {
 		return v
 	}
