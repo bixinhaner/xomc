@@ -30,11 +30,17 @@ services:
       - pgdata:/var/lib/postgresql/data
       - /etc/localtime:/etc/localtime:ro
     command: ["postgres", "-c", "timezone=Asia/Shanghai", "-c", "log_timezone=Asia/Shanghai"]
+    # TimescaleDB 冷启动期间会重启一次让 shared_preload_libraries 生效;
+    # `pg_isready -U omcgo` 默认走 Unix socket,socket 可能先 ready 但 TCP
+    # 监听还在内部 restart 周期 → 下游 migrate-schema 撞 connection refused。
+    # 必须 `-h 127.0.0.1 -p 5432 -d omcgo` 强制走 TCP + 验证目标库存在;
+    # start_period=30s 给冷 init 容器足够缓冲,失败不计入 unhealthy。
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U omcgo"]
-      interval: 5s
+      test: ["CMD-SHELL", "pg_isready -U omcgo -d omcgo -h 127.0.0.1 -p 5432"]
+      interval: 3s
       timeout: 5s
-      retries: 5
+      retries: 20
+      start_period: 30s
 
   redis:
     image: redis:7-alpine
