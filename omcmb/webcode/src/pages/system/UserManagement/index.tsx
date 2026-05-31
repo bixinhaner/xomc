@@ -96,7 +96,7 @@ export default function UserManagement() {
         label: noGroups ? (
           <span>
             {r.roleName}
-            <Tag color="warning" style={{ marginLeft: 4 }}>⚠️ 无设备权限</Tag>
+            <Tag color="warning" style={{ marginLeft: 4 }}>{t('user.tag.noDeviceAccess')}</Tag>
           </span>
         ) : (
           r.roleName
@@ -427,7 +427,7 @@ export default function UserManagement() {
           {
             key: 'status',
             label: !canChangeStatus ? (
-              <Tooltip title="内置用户不可禁用，避免锁死系统登录入口" placement="left">
+              <Tooltip title={t('user.tooltip.builtinNoDisable')} placement="left">
                 <span>{user.status === 'active' ? '禁用' : '启用'}</span>
               </Tooltip>
             ) : (
@@ -471,7 +471,7 @@ export default function UserManagement() {
           {
             key: 'resetPwd',
             label: !canResetPwd ? (
-              <Tooltip title="LDAP 用户密码由外部域管理，无法在本系统重置" placement="left">
+              <Tooltip title={t('user.tooltip.ldapNoReset')} placement="left">
                 <span>{t('user.resetPassword')}</span>
               </Tooltip>
             ) : (
@@ -488,7 +488,7 @@ export default function UserManagement() {
           {
             key: 'delete',
             label: !canDelete ? (
-              <Tooltip title="内置用户不可删除" placement="left">
+              <Tooltip title={t('user.tooltip.builtinNoDelete')} placement="left">
                 <span>{t('common.delete')}</span>
               </Tooltip>
             ) : (
@@ -737,7 +737,7 @@ export default function UserManagement() {
       {/* 添加用户 Drawer (PRD §5.1 / §11.12)：v1.1 起取消"导入用户"模式切换；
           字段顺序与 §5.2 编辑表单完全对齐（创建独有的 password / confirmPassword 紧随 username 之后）。 */}
       <Drawer
-        title="添加用户"
+        title={t('user.modal.add')}
         open={createVisible}
         onClose={() => {
           setCreateVisible(false);
@@ -770,13 +770,13 @@ export default function UserManagement() {
         <Form form={form} layout="vertical">
             <Form.Item
               name="username"
-              label="用户账号"
+              label={t('user.form.username')}
               rules={[
                 { required: true, message: t('user.pleaseInputUserName') },
                 { pattern: /^[a-zA-Z0-9_-]{3,32}$/, message: t('user.userNameRule') },
               ]}
             >
-              <Input placeholder="用户账号" maxLength={32} />
+              <Input placeholder={t('user.form.username')} maxLength={32} />
             </Form.Item>
             <Form.Item
               name="password"
@@ -804,8 +804,8 @@ export default function UserManagement() {
             >
               <Input.Password placeholder={t('user.confirmPassword')} maxLength={20} />
             </Form.Item>
-            <Form.Item name="displayName" label="用户昵称">
-              <Input placeholder="留空则与用户账号相同" maxLength={64} />
+            <Form.Item name="displayName" label={t('user.form.displayName')}>
+              <Input placeholder={t('user.form.displayNamePlaceholder')} maxLength={64} />
             </Form.Item>
             <Form.Item
               name="email"
@@ -825,7 +825,7 @@ export default function UserManagement() {
             </Form.Item>
             <Form.Item
               name="roleIds"
-              label="角色"
+              label={t('user.form.role')}
               rules={[{ required: true, message: t('user.pleaseSelectGroup') }]}
             >
               <Select
@@ -834,13 +834,13 @@ export default function UserManagement() {
                 options={roleOptions}
               />
             </Form.Item>
-            <Form.Item name="status" label="状态" initialValue="active">
+            <Form.Item name="status" label={t('user.form.status')} initialValue="active">
               <Radio.Group>
-                <Radio value="active">激活</Radio>
-                <Radio value="disabled">禁用</Radio>
+                <Radio value="active">{t('user.form.statusActive')}</Radio>
+                <Radio value="disabled">{t('user.form.statusDisabled')}</Radio>
               </Radio.Group>
             </Form.Item>
-            <Form.Item name="expireTime" label="过期时间" extra="留空表示永久有效；过期后该用户将无法登录">
+            <Form.Item name="expireTime" label={t('user.form.expireTime')} extra={t('user.form.expireExtra')}>
               <DatePicker
                 showTime
                 format="YYYY-MM-DD HH:mm:ss"
@@ -848,8 +848,8 @@ export default function UserManagement() {
                 style={{ width: '100%' }}
               />
             </Form.Item>
-            <Form.Item name="description" label="备注">
-              <Input.TextArea rows={3} placeholder="备注，可选" maxLength={500} showCount />
+            <Form.Item name="description" label={t('user.form.description')}>
+              <Input.TextArea rows={3} placeholder={t('user.form.descriptionPlaceholder')} maxLength={500} showCount />
             </Form.Item>
           </Form>
       </Drawer>
@@ -886,11 +886,11 @@ export default function UserManagement() {
           {/* 编辑表单字段与后端 admin.UpdateUserRequest 对齐：
               display_name / email / phone / status / role_ids（v1.0：carrier 已删除）。
               role_ids 由后端 service.syncUserRoles 做差量同步。 */}
-          <Form.Item name="username" label="用户账号">
+          <Form.Item name="username" label={t('user.form.username')}>
             <Input readOnly />
           </Form.Item>
-          <Form.Item name="displayName" label="用户昵称">
-            <Input placeholder="用户昵称" maxLength={64} />
+          <Form.Item name="displayName" label={t('user.form.displayName')}>
+            <Input placeholder={t('user.form.displayNameInputPlaceholder')} maxLength={64} />
           </Form.Item>
           <Form.Item
             name="email"
@@ -908,7 +908,7 @@ export default function UserManagement() {
           >
             <Input placeholder={t('user.phone')} maxLength={11} />
           </Form.Item>
-          <Form.Item name="roleIds" label="角色">
+          <Form.Item name="roleIds" label={t('user.form.role')}>
             <Select
               mode="multiple"
               placeholder={t('common.pleaseSelect')}
@@ -916,13 +916,13 @@ export default function UserManagement() {
               allowClear
             />
           </Form.Item>
-          <Form.Item name="status" label="状态">
+          <Form.Item name="status" label={t('user.form.status')}>
             <Radio.Group>
-              <Radio value="active">激活</Radio>
-              <Radio value="disabled">禁用</Radio>
+              <Radio value="active">{t('user.form.statusActive')}</Radio>
+              <Radio value="disabled">{t('user.form.statusDisabled')}</Radio>
             </Radio.Group>
           </Form.Item>
-          <Form.Item name="expireTime" label="过期时间" extra="留空表示永久有效；过期后该用户将无法登录">
+          <Form.Item name="expireTime" label={t('user.form.expireTime')} extra={t('user.form.expireExtra')}>
             <DatePicker
               showTime
               format="YYYY-MM-DD HH:mm:ss"
@@ -930,8 +930,8 @@ export default function UserManagement() {
               style={{ width: '100%' }}
             />
           </Form.Item>
-          <Form.Item name="description" label="备注">
-            <Input.TextArea rows={3} placeholder="备注（可选）" maxLength={500} showCount />
+          <Form.Item name="description" label={t('user.form.description')}>
+            <Input.TextArea rows={3} placeholder={t('user.form.descriptionEditPlaceholder')} maxLength={500} showCount />
           </Form.Item>
         </Form>
       </Drawer>
@@ -959,7 +959,7 @@ export default function UserManagement() {
         }
       >
         <Form form={form} layout="vertical">
-          <Form.Item label="状态">
+          <Form.Item label={t('user.form.status')}>
             <Tag color={selectedUser?.status === 'active' ? 'success' : 'error'}>
               {selectedUser?.status === 'active' ? '激活' : '禁用'}
             </Tag>
@@ -970,10 +970,10 @@ export default function UserManagement() {
             {selectedUser?.source === 'admin' && <Tag>{t('user.source.admin')}</Tag>}
             {!selectedUser?.source && <span>—</span>}
           </Form.Item>
-          <Form.Item name="username" label="用户账号">
+          <Form.Item name="username" label={t('user.form.username')}>
             <Input readOnly />
           </Form.Item>
-          <Form.Item label="用户昵称">
+          <Form.Item label={t('user.form.displayName')}>
             <span>{selectedUser?.displayName || '-'}</span>
           </Form.Item>
           <Form.Item name="email" label={t('user.email')}>
@@ -982,28 +982,28 @@ export default function UserManagement() {
           <Form.Item label={t('user.phone')}>
             <span>{selectedUser?.phone || '-'}</span>
           </Form.Item>
-          <Form.Item label="角色">
+          <Form.Item label={t('user.form.role')}>
             <span>{selectedUser?.roles?.join(', ') || '-'}</span>
           </Form.Item>
-          <Form.Item label="过期时间">
+          <Form.Item label={t('user.form.expireTime')}>
             <span>{selectedUser?.expireTime ? new Date(selectedUser.expireTime).toLocaleString('zh-CN') : '永久'}</span>
           </Form.Item>
           <Form.Item label={t('user.lastLoginTime')}>
             <span>{selectedUser?.lastLoginTime ? new Date(selectedUser.lastLoginTime).toLocaleString('zh-CN') : '-'}</span>
           </Form.Item>
-          <Form.Item label="创建时间">
+          <Form.Item label={t('user.form.createdAt')}>
             <span>{selectedUser?.createTime ? new Date(selectedUser.createTime).toLocaleString('zh-CN') : '-'}</span>
           </Form.Item>
-          <Form.Item label="更新时间">
+          <Form.Item label={t('user.form.updatedAt')}>
             <span>{selectedUser?.updateTime ? new Date(selectedUser.updateTime).toLocaleString('zh-CN') : '-'}</span>
           </Form.Item>
-          <Form.Item label="创建人">
+          <Form.Item label={t('user.form.createdBy')}>
             <span>{renderOperator(selectedUser?.creatorUsername)}</span>
           </Form.Item>
-          <Form.Item label="更新人">
+          <Form.Item label={t('user.form.updatedBy')}>
             <span>{renderOperator(selectedUser?.updaterUsername)}</span>
           </Form.Item>
-          <Form.Item label="备注">
+          <Form.Item label={t('user.form.description')}>
             <span>{selectedUser?.description || '-'}</span>
           </Form.Item>
         </Form>
@@ -1053,7 +1053,7 @@ export default function UserManagement() {
 
       {/* 批量分配角色 Modal（PRD §5.5 / §11.5：原"移动到组"重命名） */}
       <Modal
-        title="批量分配角色"
+        title={t('user.modal.batchAssignRole')}
         open={moveGroupVisible}
         onOk={handleMoveGroup}
         onCancel={() => {
@@ -1066,7 +1066,7 @@ export default function UserManagement() {
         <Form form={moveGroupForm} layout="vertical">
           <Form.Item
             name="targetRoleIds"
-            label="目标角色"
+            label={t('user.form.targetRole')}
             rules={[{ required: true, message: t('common.pleaseSelect') }]}
             extra="选择后将整体替换所选用户的角色集合"
           >

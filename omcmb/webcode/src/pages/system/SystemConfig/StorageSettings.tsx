@@ -80,7 +80,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.storage.logSettings')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Space>
-            <span>原始文件：设备上报的源文件将存储</span>
+            <span>{t('sysconfig.storage.rawFileLabel')}</span>
             <Form.Item name="logDataSaveDays" noStyle>
               <Select style={{ width: 70 }}>
                 <Option value={30}>1</Option>
@@ -88,13 +88,13 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
                 <Option value={180}>6</Option>
               </Select>
             </Form.Item>
-            <span>月</span>
+            <span>{t('sysconfig.storage.unit.month')}</span>
           </Space>
         </div>
 
         <div style={settingRowStyle}>
           <Space>
-            <span>异常日志存储：设备上报的源文件将存储</span>
+            <span>{t('sysconfig.storage.errorLogLabel')}</span>
             <Form.Item name="rebootLogDataSaveDays" noStyle>
               <Select style={{ width: 70 }}>
                 <Option value={1}>1</Option>
@@ -104,13 +104,13 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
                 <Option value={90}>90</Option>
               </Select>
             </Form.Item>
-            <span>天</span>
+            <span>{t('sysconfig.storage.unit.day')}</span>
           </Space>
         </div>
 
         <div style={settingRowStyle}>
           <Space>
-            <span>每个设备最多保留最近</span>
+            <span>{t('sysconfig.storage.devErrorLogPrefix')}</span>
             <Form.Item name="rebootLogSaveCount" noStyle>
               <Select style={{ width: 70 }}>
                 <Option value={1}>1</Option>
@@ -120,13 +120,13 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
                 <Option value={5}>5</Option>
               </Select>
             </Form.Item>
-            <span>次异常日志，更多的日志则将覆盖最早的那次</span>
+            <span>{t('sysconfig.storage.devErrorLogSuffix')}</span>
           </Space>
         </div>
 
         <div style={settingRowStyle}>
           <Space>
-            <span>用户操作日志将存储</span>
+            <span>{t('sysconfig.storage.userOpLogLabel')}</span>
             <Form.Item name="sysOperateLogDataSaveDays" noStyle>
               <Select style={{ width: 70 }}>
                 <Option value={90}>3</Option>
@@ -136,7 +136,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
                 <Option value={1080}>36</Option>
               </Select>
             </Form.Item>
-            <span>月</span>
+            <span>{t('sysconfig.storage.unit.month')}</span>
           </Space>
         </div>
 
@@ -206,11 +206,11 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.storage.alarm')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Space>
-            <span>历史告警存储：历史告警在数据库最多存储</span>
+            <span>{t('sysconfig.storage.alarmHistoryLabel')}</span>
             <Form.Item name="alarmHisMaxHoldTime" noStyle>
               <InputNumber min={1} max={365} style={{ width: 70 }} />
             </Form.Item>
-            <span>天</span>
+            <span>{t('sysconfig.storage.unit.day')}</span>
           </Space>
         </div>
       </Card>
@@ -219,57 +219,57 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.storage.kpi')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Space>
-            <span>KPI文件存储：设备上报的原始文件在服务器最多存储</span>
+            <span>{t('sysconfig.storage.kpiFileLabel')}</span>
             <Form.Item name="kpiFilesSaveDays" noStyle>
               <InputNumber min={1} max={365} style={{ width: 70 }} disabled />
             </Form.Item>
-            <span>天</span>
+            <span>{t('sysconfig.storage.unit.day')}</span>
           </Space>
         </div>
 
         <div style={settingRowStyle}>
           <Space>
-            <span>KPI报表文件存储：根据KPI查询模板生成的报表文件将在服务器最多存储</span>
+            <span>{t('sysconfig.storage.kpiReportLabel')}</span>
             <Form.Item name="kpiReportDataSaveDays" noStyle>
               <InputNumber min={1} max={365} style={{ width: 70 }} disabled />
             </Form.Item>
-            <span>天</span>
+            <span>{t('sysconfig.storage.unit.day')}</span>
           </Space>
         </div>
 
         <div style={settingRowStyle}>
           <Space>
-            <span>KPI原始数据存储：KPI原始数据在服务器最多存储</span>
+            <span>{t('sysconfig.storage.kpiRawLabel')}</span>
             <Form.Item name="kpiStorge15DataDays" noStyle>
               <InputNumber min={1} max={365} style={{ width: 70 }} disabled />
             </Form.Item>
-            <span>天</span>
+            <span>{t('sysconfig.storage.unit.day')}</span>
           </Space>
         </div>
 
         <div style={settingRowStyle}>
           <Space>
-            <span>KPI小时数据存储：KPI小时数据在服务器最多存储</span>
+            <span>{t('sysconfig.storage.kpiHourLabel')}</span>
             <Form.Item name="kpiStorge60DataDays" noStyle>
               <InputNumber min={1} max={365} style={{ width: 70 }} />
             </Form.Item>
-            <span>天</span>
+            <span>{t('sysconfig.storage.unit.day')}</span>
           </Space>
         </div>
 
         <div style={settingRowStyle}>
           <Space>
-            <span>KPI天数据存储：KPI天数据在服务器最多存储</span>
+            <span>{t('sysconfig.storage.kpiDayLabel')}</span>
             <Form.Item name="kpiStorge1440DataDays" noStyle>
               <InputNumber min={1} max={730} style={{ width: 70 }} disabled />
             </Form.Item>
-            <span>天</span>
+            <span>{t('sysconfig.storage.unit.day')}</span>
           </Space>
         </div>
 
         <div style={settingRowStyle}>
           <Form.Item name="kpiWeekAndMonthSwitch" valuePropName="checked" noStyle>
-            <Checkbox>支持周和月统计粒度</Checkbox>
+            <Checkbox>{t('sysconfig.storage.weekMonthGranularity')}</Checkbox>
           </Form.Item>
         </div>
       </Card>
@@ -278,11 +278,11 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.storage.mr')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Space>
-            <span>MR原始文件存储：设备上报的原始文件将在服务器最多存储</span>
+            <span>{t('sysconfig.storage.mrRawLabel')}</span>
             <Form.Item name="mrFileSaveDays" noStyle>
               <InputNumber min={1} max={365} style={{ width: 70 }} disabled />
             </Form.Item>
-            <span>天</span>
+            <span>{t('sysconfig.storage.unit.day')}</span>
           </Space>
         </div>
       </Card>
@@ -291,11 +291,11 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.storage.signalingTrace')}</span>} style={{ marginBottom: 16 }}>
         <div style={settingRowStyle}>
           <Space>
-            <span>信令追踪文件存储：设备上报的原始文件在服务器最多存储</span>
+            <span>{t('sysconfig.storage.traceLabel')}</span>
             <Form.Item name="signalingTraceSaveDays" noStyle>
               <InputNumber min={1} max={365} style={{ width: 70 }} disabled />
             </Form.Item>
-            <span>天</span>
+            <span>{t('sysconfig.storage.unit.day')}</span>
           </Space>
         </div>
       </Card>
@@ -304,7 +304,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
       <Card size="small" title={<span style={{ fontSize: 14, fontWeight: 600 }}>{t('system.storage.diskAlarm')}</span>}>
         <div style={settingRowStyle}>
           <Space>
-            <span>日志目录磁盘可用存储百分比</span>
+            <span>{t('sysconfig.storage.diskLog')}</span>
             <Form.Item name="varDiskAlarmThresHold" noStyle>
               <Select style={{ width: 100 }}>
                 {diskSpaceOptions.map(opt => (
@@ -317,7 +317,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
 
         <div style={settingRowStyle}>
           <Space>
-            <span>数据目录磁盘可用存储百分比</span>
+            <span>{t('sysconfig.storage.diskData')}</span>
             <Form.Item name="homeDiskAlarmThresHold" noStyle>
               <Select style={{ width: 100 }}>
                 {diskSpaceOptions.map(opt => (
@@ -330,7 +330,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
 
         <div style={settingRowStyle}>
           <Space>
-            <span>应用目录磁盘可用存储百分比</span>
+            <span>{t('sysconfig.storage.diskApp')}</span>
             <Form.Item name="usrDiskAlarmThresHold" noStyle>
               <Select style={{ width: 100 }}>
                 {diskSpaceOptions.map(opt => (
@@ -343,7 +343,7 @@ export default function StorageSettings({ form }: StorageSettingsProps) {
 
         <div style={settingRowStyle}>
           <Space>
-            <span>根目录磁盘可用存储百分比</span>
+            <span>{t('sysconfig.storage.diskRoot')}</span>
             <Form.Item name="rootDiskAlarmThresHold" noStyle>
               <Select style={{ width: 100 }}>
                 {diskSpaceOptions.map(opt => (

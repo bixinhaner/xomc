@@ -138,11 +138,11 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
             <Form.Item name="sumTimes" noStyle>
               <InputNumber min={1} max={20} style={{ width: 60 }} />
             </Form.Item>
-            <span>次，将锁定账户</span>
+            <span>{t('sysconfig.security.lockAccountSuffix')}</span>
             <Form.Item name="unlockMinu" noStyle>
               <InputNumber min={1} max={1440} style={{ width: 60 }} />
             </Form.Item>
-            <span>分钟</span>
+            <span>{t('sysconfig.security.minutes')}</span>
           </Space>
         </div>
       </Card>
@@ -155,15 +155,15 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
             <Form.Item name="limitMinus" noStyle>
               <InputNumber min={1} max={60} style={{ width: 60 }} />
             </Form.Item>
-            <span>分钟内连续输入错误的密码或用户名</span>
+            <span>{t('sysconfig.security.passwordRetryPrefix')}</span>
             <Form.Item name="limitCount" noStyle>
               <InputNumber min={1} max={100} style={{ width: 60 }} />
             </Form.Item>
-            <span>次，登录IP将被锁定，</span>
+            <span>{t('sysconfig.security.ipLockSuffix')}</span>
             <Form.Item name="limitTimes" noStyle>
               <InputNumber min={1} max={1440} style={{ width: 60 }} />
             </Form.Item>
-            <span>分钟后自动解锁</span>
+            <span>{t('sysconfig.security.autoUnlockSuffix')}</span>
           </Space>
         </div>
       </Card>
@@ -176,7 +176,7 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
             <Form.Item name="userSessionExpirationMin" noStyle>
               <InputNumber min={0} max={480} style={{ width: 60 }} />
             </Form.Item>
-            <span>分钟没有任何操作，系统将会自动锁屏</span>
+            <span>{t('sysconfig.security.idleLockSuffix')}</span>
           </Space>
         </div>
       </Card>
@@ -195,12 +195,12 @@ export default function SecuritySettings({ form }: SecuritySettingsProps) {
         <div style={settingRowStyle}>
           <Space>
             <Form.Item name="autoLockUserDayEnable" noStyle valuePropName="checked">
-              <Checkbox>连续未登录omc超过</Checkbox>
+              <Checkbox>{t('sysconfig.security.noLoginPrefix')}</Checkbox>
             </Form.Item>
             <Form.Item name="autoLockUserDay" noStyle>
               <InputNumber min={1} max={365} style={{ width: 60 }} />
             </Form.Item>
-            <span>天，锁定账户</span>
+            <span>{t('sysconfig.security.daysLockAccount')}</span>
           </Space>
         </div>
       </Card>

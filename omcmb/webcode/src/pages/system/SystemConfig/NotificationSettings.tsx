@@ -125,10 +125,10 @@ export default function NotificationSettings({ form }: NotificationSettingsProps
           <div style={formGroupStyle}>
             <Form.Item label={t('system.notification.smsProvider')} name="smsProvider" style={{ marginBottom: 0 }}>
               <Select style={{ width: 160 }} disabled={!smsEnable}>
-                <Select.Option value="aliyun">阿里云</Select.Option>
-                <Select.Option value="tencent">腾讯云</Select.Option>
-                <Select.Option value="huawei">华为云</Select.Option>
-                <Select.Option value="custom">自定义</Select.Option>
+                <Select.Option value="aliyun">{t('sysconfig.notification.provider.aliyun')}</Select.Option>
+                <Select.Option value="tencent">{t('sysconfig.notification.provider.tencent')}</Select.Option>
+                <Select.Option value="huawei">{t('sysconfig.notification.provider.huawei')}</Select.Option>
+                <Select.Option value="custom">{t('sysconfig.notification.provider.custom')}</Select.Option>
               </Select>
             </Form.Item>
             <Form.Item label={t('system.notification.smsApiUrl')} name="smsApiUrl" style={{ marginBottom: 0 }}>
@@ -156,7 +156,7 @@ export default function NotificationSettings({ form }: NotificationSettingsProps
 
           <div style={formGroupStyle}>
             <Form.Item label={t('system.notification.smsSignName')} name="smsSignName" style={{ marginBottom: 0 }}>
-              <Input style={{ width: 200 }} placeholder="OMC告警" disabled={!smsEnable} />
+              <Input style={{ width: 200 }} placeholder={t('sysconfig.notification.omcAlertPlaceholder')} disabled={!smsEnable} />
             </Form.Item>
             <Form.Item label={t('system.notification.smsTemplateCode')} name="smsTemplateCode" style={{ marginBottom: 0 }}>
               <Input style={{ width: 220 }} placeholder="SMS_123456789" disabled={!smsEnable} />

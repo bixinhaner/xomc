@@ -172,7 +172,7 @@ export default function SystemConfig() {
     }
     const items = buildBatchItems(values, configList);
     if (items.length === 0) {
-      void message.warning('当前页面无可保存字段');
+      void message.warning(t('sysconfig.warn.noSaveable'));
       return;
     }
     try {

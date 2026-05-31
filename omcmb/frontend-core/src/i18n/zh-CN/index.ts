@@ -127,6 +127,82 @@ const messages: Record<string, string> = {
   'role.noGroupBinding.viewDesc':         '分配该角色的用户将无法查看任何设备数据。',
   'role.noGroupBinding.tag':              '⚠️ 未绑分组',
 
+  // F3 第 2 批 — system/UserManagement (38 处)
+  'user.tooltip.builtinNoDisable':  '内置用户不可禁用，避免锁死系统登录入口',
+  'user.tooltip.ldapNoReset':       'LDAP 用户密码由外部域管理，无法在本系统重置',
+  'user.tooltip.builtinNoDelete':   '内置用户不可删除',
+  'user.tag.noDeviceAccess':        '⚠️ 无设备权限',
+  'user.modal.add':                 '添加用户',
+  'user.modal.batchAssignRole':     '批量分配角色',
+  'user.form.username':             '用户账号',
+  'user.form.displayName':          '用户昵称',
+  'user.form.displayNamePlaceholder': '留空则与用户账号相同',
+  'user.form.displayNameInputPlaceholder': '用户昵称',
+  'user.form.role':                 '角色',
+  'user.form.status':               '状态',
+  'user.form.statusActive':         '激活',
+  'user.form.statusDisabled':       '禁用',
+  'user.form.expireTime':           '过期时间',
+  'user.form.expireExtra':          '留空表示永久有效；过期后该用户将无法登录',
+  'user.form.description':          '备注',
+  'user.form.descriptionPlaceholder': '备注，可选',
+  'user.form.descriptionEditPlaceholder': '备注（可选）',
+  'user.form.createdAt':            '创建时间',
+  'user.form.updatedAt':            '更新时间',
+  'user.form.createdBy':            '创建人',
+  'user.form.updatedBy':            '更新人',
+  'user.form.targetRole':           '目标角色',
+
+  // F3 第 3 批 — system/SystemConfig (52 处)
+  'sysconfig.warn.noSaveable':      '当前页面无可保存字段',
+
+  // Notification settings
+  'sysconfig.notification.omcAlertPlaceholder': 'OMC告警',
+  'sysconfig.notification.provider.aliyun':     '阿里云',
+  'sysconfig.notification.provider.tencent':    '腾讯云',
+  'sysconfig.notification.provider.huawei':     '华为云',
+  'sysconfig.notification.provider.custom':     '自定义',
+
+  // OMC settings
+  'sysconfig.omc.ipPlaceholder':           '请输入IP地址',
+  'sysconfig.omc.dirLog':                  '日志目录（/var）超过',
+  'sysconfig.omc.dirData':                 '数据目录（/home）超过',
+  'sysconfig.omc.dirApp':                  '应用目录（/usr）超过',
+  'sysconfig.omc.dirRoot':                 '根目录（/）超过',
+  'sysconfig.omc.alarmSuffix':             '时产生告警',
+
+  // Storage settings
+  'sysconfig.storage.rawFileLabel':        '原始文件：设备上报的源文件将存储',
+  'sysconfig.storage.unit.month':          '月',
+  'sysconfig.storage.unit.day':            '天',
+  'sysconfig.storage.errorLogLabel':       '异常日志存储：设备上报的源文件将存储',
+  'sysconfig.storage.devErrorLogPrefix':   '每个设备最多保留最近',
+  'sysconfig.storage.devErrorLogSuffix':   '次异常日志，更多的日志则将覆盖最早的那次',
+  'sysconfig.storage.userOpLogLabel':      '用户操作日志将存储',
+  'sysconfig.storage.alarmHistoryLabel':   '历史告警存储：历史告警在数据库最多存储',
+  'sysconfig.storage.kpiFileLabel':        'KPI文件存储：设备上报的原始文件在服务器最多存储',
+  'sysconfig.storage.kpiReportLabel':      'KPI报表文件存储：根据KPI查询模板生成的报表文件将在服务器最多存储',
+  'sysconfig.storage.kpiRawLabel':         'KPI原始数据存储：KPI原始数据在服务器最多存储',
+  'sysconfig.storage.kpiHourLabel':        'KPI小时数据存储：KPI小时数据在服务器最多存储',
+  'sysconfig.storage.kpiDayLabel':         'KPI天数据存储：KPI天数据在服务器最多存储',
+  'sysconfig.storage.weekMonthGranularity':'支持周和月统计粒度',
+  'sysconfig.storage.mrRawLabel':          'MR原始文件存储：设备上报的原始文件将在服务器最多存储',
+  'sysconfig.storage.traceLabel':          '信令追踪文件存储：设备上报的原始文件在服务器最多存储',
+  'sysconfig.storage.diskLog':             '日志目录磁盘可用存储百分比',
+  'sysconfig.storage.diskData':            '数据目录磁盘可用存储百分比',
+  'sysconfig.storage.diskApp':             '应用目录磁盘可用存储百分比',
+  'sysconfig.storage.diskRoot':            '根目录磁盘可用存储百分比',
+
+  // Security settings
+  'sysconfig.security.lockAccountSuffix':  '次，将锁定账户',
+  'sysconfig.security.minutes':            '分钟',
+  'sysconfig.security.passwordRetryPrefix':'分钟内连续输入错误的密码或用户名',
+  'sysconfig.security.ipLockSuffix':       '次，登录IP将被锁定，',
+  'sysconfig.security.autoUnlockSuffix':   '分钟后自动解锁',
+  'sysconfig.security.idleLockSuffix':     '分钟没有任何操作，系统将会自动锁屏',
+  'sysconfig.security.noLoginPrefix':      '连续未登录omc超过',
+  'sysconfig.security.daysLockAccount':    '天，锁定账户',
+
   // -------------------------------------------------------------------------
   // Table headers
   // -------------------------------------------------------------------------

@@ -81,7 +81,7 @@ export default function OmcSettings({ form }: OmcSettingsProps) {
               <Space>
                 <span>{t('common.ip')}</span>
                 <Form.Item name="rsysLogIp" noStyle>
-                  <Input style={{ width: 150 }} placeholder="请输入IP地址" />
+                  <Input style={{ width: 150 }} placeholder={t('sysconfig.omc.ipPlaceholder')} />
                 </Form.Item>
               </Space>
               <Space>
@@ -101,7 +101,7 @@ export default function OmcSettings({ form }: OmcSettingsProps) {
           <div style={{ marginBottom: 12 }}>{t('system.omc.diskAlarmThreshold')}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center' }}>
-              <span style={{ width: 200 }}>日志目录（/var）超过</span>
+              <span style={{ width: 200 }}>{t('sysconfig.omc.dirLog')}</span>
               <Form.Item name="varDiskAlarmThresHold" noStyle>
                 <Select style={{ width: 80 }} size="small">
                   {diskSpaceOptions.map(opt => (
@@ -109,10 +109,10 @@ export default function OmcSettings({ form }: OmcSettingsProps) {
                   ))}
                 </Select>
               </Form.Item>
-              <span style={{ marginLeft: 8 }}>时产生告警</span>
+              <span style={{ marginLeft: 8 }}>{t('sysconfig.omc.alarmSuffix')}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center' }}>
-              <span style={{ width: 200 }}>数据目录（/home）超过</span>
+              <span style={{ width: 200 }}>{t('sysconfig.omc.dirData')}</span>
               <Form.Item name="homeDiskAlarmThresHold" noStyle>
                 <Select style={{ width: 80 }} size="small">
                   {diskSpaceOptions.map(opt => (
@@ -120,10 +120,10 @@ export default function OmcSettings({ form }: OmcSettingsProps) {
                   ))}
                 </Select>
               </Form.Item>
-              <span style={{ marginLeft: 8 }}>时产生告警</span>
+              <span style={{ marginLeft: 8 }}>{t('sysconfig.omc.alarmSuffix')}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center' }}>
-              <span style={{ width: 200 }}>应用目录（/usr）超过</span>
+              <span style={{ width: 200 }}>{t('sysconfig.omc.dirApp')}</span>
               <Form.Item name="usrDiskAlarmThresHold" noStyle>
                 <Select style={{ width: 80 }} size="small">
                   {diskSpaceOptions.map(opt => (
@@ -131,10 +131,10 @@ export default function OmcSettings({ form }: OmcSettingsProps) {
                   ))}
                 </Select>
               </Form.Item>
-              <span style={{ marginLeft: 8 }}>时产生告警</span>
+              <span style={{ marginLeft: 8 }}>{t('sysconfig.omc.alarmSuffix')}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center' }}>
-              <span style={{ width: 200 }}>根目录（/）超过</span>
+              <span style={{ width: 200 }}>{t('sysconfig.omc.dirRoot')}</span>
               <Form.Item name="rootDiskAlarmThresHold" noStyle>
                 <Select style={{ width: 80 }} size="small">
                   {diskSpaceOptions.map(opt => (
@@ -142,7 +142,7 @@ export default function OmcSettings({ form }: OmcSettingsProps) {
                   ))}
                 </Select>
               </Form.Item>
-              <span style={{ marginLeft: 8 }}>时产生告警</span>
+              <span style={{ marginLeft: 8 }}>{t('sysconfig.omc.alarmSuffix')}</span>
             </div>
           </div>
         </div>
