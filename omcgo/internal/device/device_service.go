@@ -31,26 +31,26 @@ type GroupAssigner interface {
 
 // DeviceService provides business logic for device management.
 type DeviceService struct {
-	deviceRepo       DeviceRepository
-	paramRepo        DeviceParameterRepository
-	deviceInfoRepo   DeviceInfoRepository
-	regRepo          RegistrationRepository
-	groupAssigner    GroupAssigner
-	infoSyncer       *InfoSyncer
-	reconciler       *DeviceStatusReconciler
-	eventBus         event.EventBus
-	taskSvc          task.Enqueuer
-	connReq          ConnectionRequester
-	stunUpdater      StunAddressUpdater
-	cache            *DeviceCache
-	metrics          *DeviceMetrics
-	licenseEnforcer  LicenseEnforcer
-	carrierRegistry  *carrier.CarrierRegistry // T-0029: RF control path lookup by carrier+tech
-	paramSyncStarter ParamSyncStarter         // T-0126: 注入 *provision.SyncService 触发 Path B 手动同步
-	abnormalRecorder  AbnormalRebootRecorder // T-0158: 异常重启识别即落库（nil = 禁用）
-	bootEventRecorder BootEventRecorder      // 普通 1 BOOT 事件日志写入（nil = 禁用）
-	productMatcher    ProductClassMatcher    // Phase 6 ModelName 回填（nil = 禁用）
-	productBinder     ProductBinder          // T-0176-PR-D：CreateDevice inline match 后写回 product_id（nil = 禁用）
+	deviceRepo        DeviceRepository
+	paramRepo         DeviceParameterRepository
+	deviceInfoRepo    DeviceInfoRepository
+	regRepo           RegistrationRepository
+	groupAssigner     GroupAssigner
+	infoSyncer        *InfoSyncer
+	reconciler        *DeviceStatusReconciler
+	eventBus          event.EventBus
+	taskSvc           task.Enqueuer
+	connReq           ConnectionRequester
+	stunUpdater       StunAddressUpdater
+	cache             *DeviceCache
+	metrics           *DeviceMetrics
+	licenseEnforcer   LicenseEnforcer
+	carrierRegistry   *carrier.CarrierRegistry // T-0029: RF control path lookup by carrier+tech
+	paramSyncStarter  ParamSyncStarter         // T-0126: 注入 *provision.SyncService 触发 Path B 手动同步
+	abnormalRecorder  AbnormalRebootRecorder   // T-0158: 异常重启识别即落库（nil = 禁用）
+	bootEventRecorder BootEventRecorder        // 普通 1 BOOT 事件日志写入（nil = 禁用）
+	productMatcher    ProductClassMatcher      // Phase 6 ModelName 回填（nil = 禁用）
+	productBinder     ProductBinder            // T-0176-PR-D：CreateDevice inline match 后写回 product_id（nil = 禁用）
 	logger            *zap.Logger
 }
 
@@ -193,7 +193,8 @@ func (s *DeviceService) SetProductMatcher(m ProductClassMatcher) {
 // 注：BindDevice 与 *product.PgRepository.BindDevice 的签名保持一致 —— 当 INSERT
 // 已完成（device.ID 已分配）后才被调用，写库失败仅 warn 不回滚 device 行
 // （PR-D 事实修正：product_id 列只服务 admin/审计/未来 denorm 消费，
-//  不再是 Go 运行路径关键 — PR-C 切完 resolver 后 Go 路径不读它）。
+//
+//	不再是 Go 运行路径关键 — PR-C 切完 resolver 后 Go 路径不读它）。
 type ProductBinder interface {
 	BindDevice(ctx context.Context, deviceID, productID uuid.UUID, paramModelID *uuid.UUID) error
 }
@@ -1631,6 +1632,7 @@ func (s *DeviceService) GetDeviceDetailComposite(ctx context.Context, deviceID u
 		result.Info.WANStatus = wanStatus
 	}
 	result.Cells = AssembleCells(allParams, numOfCells)
+	result.GSMCells = AssembleGSMCells(allParams)
 
 	return result, nil
 }

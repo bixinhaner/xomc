@@ -12,10 +12,10 @@ import (
 const nrMultiPlmnEnablePath = "Device.Services.FAPService.1.FAPControl.NR.MultiPlmnEnable"
 
 const (
-	amfsStatusPath           = "Device.Services.FAPService.1.AmfsStatus"
-	gpsSoftVersionPath       = "Device.FAP.GPS.SoftVersion"
-	ppsTimeModePath          = "Device.FAP.Synchronization.PpsTimeMode"
-	systemBackupVersionPath  = "Device.SoftwareCtrl.SystemBackupVersion"
+	amfsStatusPath          = "Device.Services.FAPService.1.AmfsStatus"
+	gpsSoftVersionPath      = "Device.FAP.GPS.SoftVersion"
+	ppsTimeModePath         = "Device.FAP.Synchronization.PpsTimeMode"
+	systemBackupVersionPath = "Device.SoftwareCtrl.SystemBackupVersion"
 )
 
 var ethernetInterfaceStatusPath = regexp.MustCompile(`^Device\.Ethernet\.Interface\.(\d+)\.Status$`)
@@ -507,6 +507,53 @@ func AssembleCells(params []model.DeviceParameter, numOfCells int) []CellInfo {
 	return cells
 }
 
+// AssembleGSMCells builds BM GSM cell info from Device.Services.GsmBTSCellDT.{i}.*
+// object parameters. The returned rows preserve the TR-069 instance index so the
+// frontend can align them with quick-settings visibility rules.
+func AssembleGSMCells(params []model.DeviceParameter) []CellInfo {
+	maxIdx := detectMaxGSMBTSCellIndex(params)
+	if maxIdx <= 0 {
+		return nil
+	}
+
+	paramMap := make(map[string]string, len(params))
+	hasAnyGSMInUse := false
+	for _, p := range params {
+		paramMap[p.ParameterPath] = p.ParameterValue
+		if strings.HasSuffix(p.ParameterPath, ".InUse") && strings.Contains(p.ParameterPath, "Device.Services.GsmBTSCellDT.") {
+			hasAnyGSMInUse = true
+		}
+	}
+
+	var cells []CellInfo
+	for i := 1; i <= maxIdx; i++ {
+		prefix := fmt.Sprintf("Device.Services.GsmBTSCellDT.%d.", i)
+		if hasAnyGSMInUse && normalizeBinaryState(paramMap[prefix+"InUse"]) != "enabled" {
+			continue
+		}
+		cell := CellInfo{
+			Index:      i,
+			CellID:     paramMap[prefix+"GsmCellID"],
+			Band:       paramMap[prefix+"GsmBtsBand"],
+			OpState:    paramMap[prefix+"OpState"],
+			RFTxStatus: paramMap[prefix+"RfState"],
+			LAC:        paramMap[prefix+"CurrLocAreaCode"],
+			ARFCN:      paramMap[prefix+"CurrentArfcn"],
+		}
+		if trxNum := strings.TrimSpace(paramMap[prefix+"TrxNum"]); trxNum != "" {
+			if parsed, err := strconv.Atoi(trxNum); err == nil {
+				cell.BTSNum = parsed
+			}
+		}
+		if !hasGSMCellData(cell) {
+			continue
+		}
+		cells = append(cells, cell)
+	}
+
+	return cells
+}
+
 func uniformFAPControlValue(paramMap map[string]string, field string) string {
 	prefix := "Device.Services.FAPService."
 	marker := ".FAPControl."
@@ -592,6 +639,44 @@ func detectMaxFAPServiceIndex(params []model.DeviceParameter) int {
 	}
 
 	return maxIdx
+}
+
+func detectMaxGSMBTSCellIndex(params []model.DeviceParameter) int {
+	const prefix = "Device.Services.GsmBTSCellDT."
+
+	maxIdx := 0
+	for _, p := range params {
+		path := p.ParameterPath
+		if !strings.HasPrefix(path, prefix) {
+			continue
+		}
+
+		rest := strings.TrimPrefix(path, prefix)
+		dot := strings.Index(rest, ".")
+		if dot <= 0 {
+			continue
+		}
+
+		idx, err := strconv.Atoi(rest[:dot])
+		if err != nil || idx <= 0 {
+			continue
+		}
+		if idx > maxIdx {
+			maxIdx = idx
+		}
+	}
+
+	return maxIdx
+}
+
+func hasGSMCellData(cell CellInfo) bool {
+	return cell.CellID != "" ||
+		cell.Band != "" ||
+		cell.OpState != "" ||
+		cell.RFTxStatus != "" ||
+		cell.LAC != "" ||
+		cell.ARFCN != "" ||
+		cell.BTSNum > 0
 }
 
 // extractIndexAndField parses a TR069 path to extract an instance index and the remaining field.

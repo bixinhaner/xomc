@@ -6,12 +6,13 @@ import "github.com/omcgo/omcgo/internal/core/model"
 // for the device detail page. Quick-query columns come from device_info;
 // complex/multi-instance data is assembled from device_parameters prefix queries.
 type DeviceDetailComposite struct {
-	Device  *model.Device `json:"device"`
-	Info    *DeviceInfo   `json:"info"`
-	MMEPool []MMEEntry    `json:"mme_pool"`
-	License *LicenseDetail `json:"license,omitempty"`
-	Antenna *AntennaInfo   `json:"antenna,omitempty"`
-	Cells   []CellInfo     `json:"cells"`
+	Device   *model.Device  `json:"device"`
+	Info     *DeviceInfo    `json:"info"`
+	MMEPool  []MMEEntry     `json:"mme_pool"`
+	License  *LicenseDetail `json:"license,omitempty"`
+	Antenna  *AntennaInfo   `json:"antenna,omitempty"`
+	Cells    []CellInfo     `json:"cells"`
+	GSMCells []CellInfo     `json:"gsm_cells,omitempty"`
 }
 
 // MMEEntry represents a single MME connection in the MME pool.
@@ -66,4 +67,7 @@ type CellInfo struct {
 	OpState    string `json:"op_state"`
 	RFTxStatus string `json:"rf_tx_status"`
 	AdminState string `json:"admin_state"`
+	LAC        string `json:"lac,omitempty"`
+	ARFCN      string `json:"arfcn,omitempty"`
+	BTSNum     int    `json:"bts_num,omitempty"`
 }

@@ -223,6 +223,7 @@ func TestAssembleCells_SingleCell(t *testing.T) {
 // 实际上报路径：
 //   - OpState 来自 `FAPControl.LTE.CellOpState`
 //   - RFTxStatus 来自 `FAPControl.LTE.RFTxStatus`（非 RAN.RF 子树）
+//
 // 设计文档 §3.3。
 func TestAssembleCells_FAPControlPaths(t *testing.T) {
 	params := []model.DeviceParameter{
@@ -328,7 +329,59 @@ func TestAssembleCells_NRIndexedPaths(t *testing.T) {
 	assert.Equal(t, "1", cells[0].AdminState)
 	assert.Equal(t, "1153", cells[0].ECI)
 	assert.Equal(t, "", cells[0].Bandwidth)
+}
+
+func TestAssembleGSMCells(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.InUse", ParameterValue: "1"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.GsmCellID", ParameterValue: "1001"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.CurrLocAreaCode", ParameterValue: "2001"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.CurrentArfcn", ParameterValue: "45"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.OpState", ParameterValue: "1"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.RfState", ParameterValue: "1"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.GsmBtsBand", ParameterValue: "GSM900"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.TrxNum", ParameterValue: "2"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.2.InUse", ParameterValue: "0"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.2.GsmCellID", ParameterValue: "1002"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.2.CurrLocAreaCode", ParameterValue: "2002"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.2.CurrentArfcn", ParameterValue: "47"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.2.OpState", ParameterValue: "1"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.3.GsmCellID", ParameterValue: "1003"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.3.InUse", ParameterValue: "true"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.3.CurrLocAreaCode", ParameterValue: "2003"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.3.CurrentArfcn", ParameterValue: "49"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.3.OpState", ParameterValue: "0"},
 	}
+
+	cells := AssembleGSMCells(params)
+	assert.Len(t, cells, 2)
+	assert.Equal(t, 1, cells[0].Index)
+	assert.Equal(t, "1001", cells[0].CellID)
+	assert.Equal(t, "2001", cells[0].LAC)
+	assert.Equal(t, "45", cells[0].ARFCN)
+	assert.Equal(t, "1", cells[0].OpState)
+	assert.Equal(t, "1", cells[0].RFTxStatus)
+	assert.Equal(t, "GSM900", cells[0].Band)
+	assert.Equal(t, 2, cells[0].BTSNum)
+
+	assert.Equal(t, 3, cells[1].Index)
+	assert.Equal(t, "1003", cells[1].CellID)
+	assert.Equal(t, "2003", cells[1].LAC)
+	assert.Equal(t, "49", cells[1].ARFCN)
+	assert.Equal(t, "0", cells[1].OpState)
+}
+
+func TestAssembleGSMCells_FallbackWithoutInUse(t *testing.T) {
+	params := []model.DeviceParameter{
+		{ParameterPath: "Device.Services.GsmBTSCellDT.1.GsmCellID", ParameterValue: "1001"},
+		{ParameterPath: "Device.Services.GsmBTSCellDT.3.GsmCellID", ParameterValue: "1003"},
+	}
+
+	cells := AssembleGSMCells(params)
+	assert.Len(t, cells, 2)
+	assert.Equal(t, 1, cells[0].Index)
+	assert.Equal(t, 3, cells[1].Index)
+}
 
 func TestExtractIndexAndField(t *testing.T) {
 	tests := []struct {
