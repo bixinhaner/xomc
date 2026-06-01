@@ -20,6 +20,7 @@ export interface LineChartProps {
   areaFill?: boolean;
   smooth?: boolean;
   yAxisName?: string;
+  unit?: string; // 单位，如 "Mbps", "%" 等
   showLegend?: boolean;
 }
 
@@ -35,6 +36,7 @@ const LineChart: React.FC<LineChartProps> = ({
   areaFill = false,
   smooth = true,
   yAxisName,
+  unit,
   showLegend = true,
 }) => {
   const isDark = useIsDark();
@@ -48,7 +50,10 @@ const LineChart: React.FC<LineChartProps> = ({
 
     // 使用工具函数计算智能刻度
     const seriesData = series.map((s) => s.data.filter((v): v is number => v !== null));
-    const { interval, max: yMax } = calculateSmartTicks(seriesData);
+    // 对于百分比数据，固定Y轴最大值为100
+    const isPercentage = unit === '%';
+    const { interval, max: calculatedMax } = calculateSmartTicks(seriesData);
+    const yMax = isPercentage ? 100 : calculatedMax;
 
     // Legend always at top with scroll enabled for multiple rows
     const getLegendConfig = () => {
@@ -190,7 +195,7 @@ const LineChart: React.FC<LineChartProps> = ({
         };
       }),
     };
-  }, [title, xData, series, areaFill, smooth, yAxisName, isDark, appTheme, palette, showLegend]);
+  }, [title, xData, series, areaFill, smooth, yAxisName, unit, isDark, appTheme, palette, showLegend]);
 
   return (
     <ReactECharts

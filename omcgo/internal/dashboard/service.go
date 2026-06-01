@@ -46,11 +46,22 @@ type FrontendRecentAlarm struct {
 	Severity   string `json:"severity"`    // 严重程度
 }
 
+// KPIDelta represents the trend comparison data for a single KPI metric.
+// 用于KPI卡片显示趋势数据（如设备总数、活跃告警等的变化趋势）
+type KPIDelta struct {
+	CurrentValue  float64  `json:"current_value"`
+	PreviousValue float64  `json:"previous_value"`
+	ChangePercent float64  `json:"change_percent"`  // 变化百分比，正数表示增长
+	Trend         string   `json:"trend"`           // "up" | "down" | "stable"
+	CompareType   string   `json:"compare_type"`    // "yesterday" | "last_week"
+}
+
 // DashboardSummary is the aggregated dashboard response.
 type DashboardSummary struct {
 	DeviceStats  FrontendDeviceStats   `json:"device_stats"`
 	AlarmStats   FrontendAlarmStats    `json:"alarm_stats"`
 	KPIOverview  map[string]float64    `json:"kpi_overview"`
+	KPIDeltas    map[string]KPIDelta   `json:"kpi_deltas"`     // KPI趋势数据（新增）
 	RecentAlarms []FrontendRecentAlarm `json:"recent_alarms"`
 	Timestamp    time.Time             `json:"timestamp"`
 }
@@ -68,6 +79,20 @@ type AlarmTrendEntry struct {
 type KPITrendEntry struct {
 	Time  string  `json:"time"` // ISO 8601 timestamp
 	Value float64 `json:"value"`
+}
+
+// KPITrendComparison represents KPI trend data with comparison.
+type KPITrendComparison struct {
+	Current  []KPITrendEntry        `json:"current"`
+	Compare  []KPITrendEntry        `json:"compare"`
+	Metadata KPITrendComparisonMeta `json:"metadata"`
+}
+
+// KPITrendComparisonMeta represents metadata for KPI trend comparison.
+type KPITrendComparisonMeta struct {
+	KPIName       string  `json:"kpi_name"`
+	CompareType   string  `json:"compare_type"`   // "yesterday" or "last_week"
+	ChangePercent *float64 `json:"change_percent,omitempty"`
 }
 
 // RegionStatEntry represents aggregated statistics for a device group/region.
@@ -291,6 +316,9 @@ func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 		summary.RecentAlarms = append(summary.RecentAlarms, *entry)
 	}
 
+	// Calculate KPI deltas (trend data for cards)
+	summary.KPIDeltas = s.calculateKPIDeltas(ctx, total, summary.AlarmStats.Total)
+
 	return summary, nil
 }
 
@@ -334,6 +362,140 @@ func derefOrEmpty(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// calculateKPIDeltas calculates trend data for dashboard KPI cards.
+// Compares current values with previous period (yesterday for real-time metrics, last week for daily metrics).
+func (s *Service) calculateKPIDeltas(ctx context.Context, currentTotalDevices int64, currentTotalAlarms int64) map[string]KPIDelta {
+	now := time.Now()
+	yesterdayStart := now.Add(-24 * time.Hour).Truncate(24 * time.Hour)
+	yesterdayEnd := yesterdayStart.Add(24 * time.Hour)
+	lastWeekStart := now.Add(-7 * 24 * time.Hour).Truncate(24 * time.Hour)
+	lastWeekEnd := lastWeekStart.Add(24 * time.Hour)
+
+	deltas := make(map[string]KPIDelta)
+
+	// 1. Total devices trend (compare with last week same time)
+	prevTotalDevices, err := s.countDevicesAtTime(ctx, lastWeekEnd)
+	if err == nil && prevTotalDevices > 0 {
+		deltas["total_devices"] = computeKPIDelta(float64(currentTotalDevices), float64(prevTotalDevices), "last_week")
+	} else {
+		// Fallback: no trend data if query fails
+		deltas["total_devices"] = KPIDelta{
+			CurrentValue:  float64(currentTotalDevices),
+			PreviousValue: 0,
+			ChangePercent: 0,
+			Trend:         "stable",
+			CompareType:   "last_week",
+		}
+	}
+
+	// 2. Active alarms trend (compare with yesterday)
+	prevTotalAlarms, err := s.countAlarmsAtTime(ctx, yesterdayEnd)
+	if err == nil {
+		deltas["active_alarms"] = computeKPIDelta(float64(currentTotalAlarms), float64(prevTotalAlarms), "yesterday")
+	} else {
+		deltas["active_alarms"] = KPIDelta{
+			CurrentValue:  float64(currentTotalAlarms),
+			PreviousValue: 0,
+			ChangePercent: 0,
+			Trend:         "stable",
+			CompareType:   "yesterday",
+		}
+	}
+
+	return deltas
+}
+
+// countDevicesAtTime counts total devices at a specific point in time.
+//
+// TODO(T-0164-P4): Implement historical device count query.
+// Current implementation returns current device count regardless of time parameter,
+// which means trend comparison data is not accurate.
+//
+// Future implementation options:
+//   Option 1: Add device_history table to track device status changes over time
+//   Option 2: Use time-series database (TimescaleDB) to store historical device counts
+//   Option 3: Query device lifecycle events to reconstruct historical counts
+//
+// For now, this serves as a baseline implementation for UI development.
+func (s *Service) countDevicesAtTime(ctx context.Context, t time.Time) (int64, error) {
+	// Log warning that this is not accurate historical data
+	s.logger.Warn(
+		"countDevicesAtTime: returning current count, historical data not available",
+		"requested_time", t.Format(time.RFC3339),
+		"note", "TODO: implement historical device count query (see T-0164-P4)",
+	)
+
+	counts, err := s.deviceService.CountByStatus(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	for _, cnt := range counts {
+		total += cnt
+	}
+	return total, nil
+}
+
+// countAlarmsAtTime counts active alarms at a specific point in time.
+//
+// TODO(T-0164-P4): Implement historical alarm count query using alarm_history table.
+// Current implementation returns current alarm count regardless of time parameter,
+// which means trend comparison data is not accurate.
+//
+// Future implementation:
+//   Query alarm_history table with time filter: raised_at <= t AND (cleared_at IS NULL OR cleared_at > t)
+//
+// For now, this serves as a baseline implementation for UI development.
+func (s *Service) countAlarmsAtTime(ctx context.Context, t time.Time) (int64, error) {
+	// Log warning that this is not accurate historical data
+	s.logger.Warn(
+		"countAlarmsAtTime: returning current count, historical data not available",
+		"requested_time", t.Format(time.RFC3339),
+		"note", "TODO: implement historical alarm count query (see T-0164-P4)",
+	)
+
+	stats, err := s.alarmStore.Statistics(ctx, alarm.AlarmFilter{})
+	if err != nil {
+		return 0, err
+	}
+	return stats.TotalActive, nil
+}
+
+// computeKPIDelta calculates delta values for a single KPI metric.
+func computeKPIDelta(current, previous float64, compareType string) KPIDelta {
+	delta := KPIDelta{
+		CurrentValue:  current,
+		PreviousValue: previous,
+		CompareType:   compareType,
+	}
+
+	if previous == 0 {
+		// Avoid division by zero
+		if current > 0 {
+			delta.ChangePercent = 100
+			delta.Trend = "up"
+		} else {
+			delta.ChangePercent = 0
+			delta.Trend = "stable"
+		}
+		return delta
+	}
+
+	delta.ChangePercent = ((current - previous) / previous) * 100
+
+	// Determine trend direction with a small threshold for "stable"
+	const threshold = 0.5 // 0.5% threshold for stable
+	if delta.ChangePercent > threshold {
+		delta.Trend = "up"
+	} else if delta.ChangePercent < -threshold {
+		delta.Trend = "down"
+	} else {
+		delta.Trend = "stable"
+	}
+
+	return delta
 }
 
 // GetAlarmTrend returns alarm counts grouped by date and severity for the last N days.
@@ -426,6 +588,116 @@ func (s *Service) GetKPITrend(ctx context.Context, kpiName string, days int) ([]
 		})
 	}
 	return entries, nil
+}
+
+// GetKPITrendComparison returns KPI trend data with comparison (today vs yesterday/last week).
+func (s *Service) GetKPITrendComparison(ctx context.Context, kpiName string, compareWith string) (*KPITrendComparison, error) {
+	now := time.Now()
+	var compareStart, compareEnd time.Time
+
+	// Determine comparison period
+	switch compareWith {
+	case "yesterday":
+		// Current: today 00:00 to now
+		// Compare: yesterday 00:00 to 23:59:59
+		compareStart = now.AddDate(0, 0, -1).Truncate(24 * time.Hour)
+		compareEnd = now.Truncate(24 * time.Hour).Add(-time.Second)
+	case "last_week":
+		// Current: this week (Monday to now)
+		// Compare: last week (Monday to Sunday)
+		weekday := int(now.Weekday())
+		if weekday == 0 {
+			weekday = 7 // Sunday = 7
+		}
+		compareStart = now.AddDate(0, 0, -weekday-6).Truncate(24 * time.Hour) // Last Monday
+		compareEnd = compareStart.AddDate(0, 0, 6).Add(24*time.Hour - time.Second) // Last Sunday
+	default:
+		// Default to yesterday
+		compareWith = "yesterday"
+		compareStart = now.AddDate(0, 0, -1).Truncate(24 * time.Hour)
+		compareEnd = now.Truncate(24 * time.Hour).Add(-time.Second)
+	}
+
+	// Query current period data (today 00:00 to now)
+	currentStart := now.Truncate(24 * time.Hour)
+	currentFilter := kpi.KPIFilter{
+		KPIName:   &kpiName,
+		StartTime: currentStart,
+		EndTime:   now,
+	}
+	currentFilter.Page = 1
+	currentFilter.PageSize = 100
+	currentFilter.SortBy = "time"
+	currentFilter.SortDir = "asc"
+
+	currentResult, err := s.kpiRepo.Query(ctx, currentFilter)
+	if err != nil {
+		return nil, fmt.Errorf("query current kpi trend: %w", err)
+	}
+
+	currentEntries := make([]KPITrendEntry, 0, len(currentResult.Items))
+	for _, v := range currentResult.Items {
+		currentEntries = append(currentEntries, KPITrendEntry{
+			Time:  v.Time.Format(time.RFC3339),
+			Value: v.KPIValue,
+		})
+	}
+
+	// Query comparison period data
+	compareFilter := kpi.KPIFilter{
+		KPIName:   &kpiName,
+		StartTime: compareStart,
+		EndTime:   compareEnd,
+	}
+	compareFilter.Page = 1
+	compareFilter.PageSize = 100
+	compareFilter.SortBy = "time"
+	compareFilter.SortDir = "asc"
+
+	compareResult, err := s.kpiRepo.Query(ctx, compareFilter)
+	if err != nil {
+		return nil, fmt.Errorf("query compare kpi trend: %w", err)
+	}
+
+	compareEntries := make([]KPITrendEntry, 0, len(compareResult.Items))
+	for _, v := range compareResult.Items {
+		compareEntries = append(compareEntries, KPITrendEntry{
+			Time:  v.Time.Format(time.RFC3339),
+			Value: v.KPIValue,
+		})
+	}
+
+	// Calculate change percent if both periods have data
+	var changePercent *float64
+	if len(currentEntries) > 0 && len(compareEntries) > 0 {
+		// Use average values for comparison
+		currentSum := 0.0
+		for _, e := range currentEntries {
+			currentSum += e.Value
+		}
+		currentAvg := currentSum / float64(len(currentEntries))
+
+		compareSum := 0.0
+		for _, e := range compareEntries {
+			compareSum += e.Value
+		}
+		compareAvg := compareSum / float64(len(compareEntries))
+
+		if compareAvg != 0 {
+			change := ((currentAvg - compareAvg) / compareAvg) * 100
+			changePercent = &change
+		}
+	}
+
+	return &KPITrendComparison{
+		Current:  currentEntries,
+		Compare:  compareEntries,
+		Metadata: KPITrendComparisonMeta{
+			KPIName:       kpiName,
+			CompareType:   compareWith,
+			ChangePercent: changePercent,
+		},
+	}, nil
 }
 
 // GetRegionStats returns device and alarm statistics per device group.

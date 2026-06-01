@@ -2099,11 +2099,68 @@ const messages: Record<string, string> = {
   'dashboard.processedAlarms':   'Processed Alarms',
   'dashboard.lastLogin':         'Last login:',
   'dashboard.alarmCount':        'Alarm Count',
+  'dashboard.kpiOverview':        'Network Quality Metrics',
+  'dashboard.dlThroughput':      'DL Throughput',
+  'dashboard.ulThroughput':      'UL Throughput',
+  'dashboard.rrcSuccRate':       'RRC Success Rate',
+  'dashboard.erabSuccRate':      'E-RAB Success Rate',
+  'dashboard.hoSuccRate':        'Handover Success Rate',
+  'dashboard.prbUtil':            'PRB Utilization',
+  'unit.mbps':                    'Mbps',
+  'unit.percent':                 '%',
 
   // Dashboard chart labels
   'dashboard.chart.online':  'Online',
   'dashboard.chart.offline': 'Offline',
   'dashboard.chart.alarm':   'Alarm',
+
+  // Dashboard refresh提示
+  'dashboard.lastUpdate':    'Last Update',
+  'dashboard.refresh':       'Refresh',
+  'dashboard.justNow':       'Just now',
+  'dashboard.minutesAgo':    '{count} min ago',
+  'dashboard.hoursAgo':      '{count} hr ago',
+  'dashboard.daysAgo':       '{count} day{count, plural, one{} other{s}} ago',
+  'dashboard.refreshSuccess':'Refresh successful',
+  'dashboard.refreshFailed': 'Refresh failed',
+
+  // Dashboard trend chart labels
+  'dashboard.throughputTrend':    'Throughput Trend',
+  'dashboard.qualityTrend':       'Network Quality Trend',
+  'dashboard.timeRange.label':    'Compare Period',
+  'dashboard.timeRange.today':   'Today',
+  'dashboard.timeRange.yesterday':'Yesterday',
+  'dashboard.timeRange.lastWeek': 'Last Week',
+  'dashboard.timeRange.thisWeek': 'This Week',
+  'dashboard.status.normal':     'Normal',
+  'dashboard.status.warning':    'Warning',
+  'dashboard.status.critical':    'Critical',
+
+  // Dashboard device status types
+  'dashboard.deviceStatus.online_normal': 'Online Normal',
+  'dashboard.deviceStatus.online_alarm':  'Online Alarm',
+  'dashboard.deviceStatus.offline':       'Offline',
+
+  // Dashboard alarm types
+  'dashboard.alarmType.wireless':      'Wireless',
+  'dashboard.alarmType.transmission':  'Transmission',
+  'dashboard.alarmType.hardware':      'Hardware',
+  'dashboard.alarmType.system':        'System',
+  'dashboard.alarmType.rf':            'RF',
+  'dashboard.alarmType.other':         'Other',
+
+  // Dashboard regions
+  'dashboard.region.North':     'North',
+  'dashboard.region.East':      'East',
+  'dashboard.region.South':     'South',
+  'dashboard.region.Southwest':'Southwest',
+  'dashboard.region.Northwest':'Northwest',
+
+  // Dashboard widgets
+  'dashboard.widget.onlineRate':        'Online Rate',
+  'dashboard.widget.alarmHandleRate':    'Alarm Handle Rate',
+  'dashboard.widget.networkAvailability':'Network Availability',
+  'dashboard.widget.avgAlarmClearTime':  'Avg Alarm Clear Time',
 
   // -------------------------------------------------------------------------
   // Common page labels

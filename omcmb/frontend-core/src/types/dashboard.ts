@@ -1,0 +1,483 @@
+/**
+ * Dashboard 类型定义
+ * 包含仪表板相关的所有 TypeScript 类型
+ *
+ * 注意：这些类型与后端 API 响应结构保持一致
+ * Mock 数据使用相同的类型定义，确保类型安全
+ */
+
+import { type UseQueryResult } from '@tanstack/react-query';
+
+// ============================================================================
+// 从 mock/data/dashboard.ts 导入的核心类型
+// ============================================================================
+
+/**
+ * 设备状态统计
+ */
+export interface DeviceStats {
+  total: number;
+  online: number;
+  offline: number;
+  alarm: number;
+}
+
+/**
+ * 告警状态统计
+ */
+export interface AlarmStats {
+  critical: number;
+  major: number;
+  minor: number;
+  warning: number;
+  total: number;
+}
+
+/**
+ * KPI 概览（支持动态字段）
+ * 后端返回的 kpi_overview 是 map[string]float64，支持自定义 KPI
+ */
+export interface KPIOverview {
+  [key: string]: number | undefined;
+}
+
+/**
+ * KPI 趋势增量数据
+ * 用于 KPI 卡片显示趋势（上升/下降/稳定）
+ */
+export interface KPIDelta {
+  /** 当前值 */
+  current_value: number;
+  /** 对比周期的值 */
+  previous_value: number;
+  /** 变化百分比（正数表示增长） */
+  change_percent: number;
+  /** 趋势方向: "up" | "down" | "stable" */
+  trend: 'up' | 'down' | 'stable';
+  /** 对比类型: "yesterday" | "last_week" */
+  compare_type: 'yesterday' | 'last_week';
+}
+
+/**
+ * 任务状态统计
+ */
+export interface TaskStats {
+  running: number;
+  pending: number;
+  success: number;
+  failed: number;
+}
+
+/**
+ * Dashboard 汇总数据
+ */
+export interface DashboardSummary {
+  deviceCounts: DeviceStats;
+  alarmCounts: AlarmStats;
+  kpiSummary: KPIOverview;
+  kpiDeltas: Record<string, KPIDelta>;  // KPI趋势数据（新增）
+  taskSummary: TaskStats;
+}
+
+/**
+ * 告警趋势数据点
+ */
+export interface AlarmTrendItem {
+  date: string;
+  critical: number;
+  major: number;
+  minor: number;
+  warning: number;
+}
+
+/**
+ * 设备状态分布（用于饼图）
+ */
+export interface DeviceStatusItem {
+  name: string;
+  value: number;
+}
+
+/**
+ * KPI 时序数据点
+ * 支持两种格式：
+ * - Mock/内部: [string, number] (元组格式，节省空间)
+ * - API: { time: string, value: number } (对象格式，更清晰)
+ */
+export type KPITimeSeriesPoint = { time: string; value: number } | [string, number];
+
+/**
+ * 告警类型分布
+ */
+export interface AlarmTypeItem {
+  name: string;
+  value: number;
+}
+
+/**
+ * 区域设备统计
+ */
+export interface RegionDeviceStats {
+  region: string;
+  total: number;
+  online: number;
+  offline: number;
+}
+
+/**
+ * Top 告警设备
+ */
+export interface TopAlarmDevice {
+  deviceSN: string;
+  technology: string;
+  deviceName: string;
+  alarmCount: number;
+  severity: string;
+}
+
+/**
+ * Dashboard 图表数据
+ */
+export interface DashboardChartData {
+  alarmTrend: AlarmTrendItem[];
+  deviceStatusPie: DeviceStatusItem[];
+  kpiTimeSeries: Record<string, KPITimeSeriesPoint[]>;
+  alarmTypePie: AlarmTypeItem[];
+  deviceByRegion: RegionDeviceStats[];
+  topAlarmDevices: TopAlarmDevice[];
+}
+
+// ============================================================================
+// 后端 API 响应类型（用于映射和类型安全）
+// ============================================================================
+
+/**
+ * 后端设备状态统计
+ */
+export interface BackendDeviceStats {
+  total: number;
+  online: number;
+  offline: number;
+  alarm: number;
+}
+
+/**
+ * 后端告警状态统计
+ */
+export interface BackendAlarmStats {
+  critical: number;
+  major: number;
+  minor: number;
+  warning: number;
+  total: number;
+}
+
+/**
+ * 后端 KPI 概览（动态字段）
+ */
+export interface BackendKPIOverview {
+  [key: string]: number | undefined;
+}
+
+/**
+ * 后端近期告警
+ */
+export interface BackendRecentAlarm {
+  device_sn: string;
+  technology: string;
+  device_name: string;
+  alarm_count: number;
+  severity: string;
+}
+
+/**
+ * 后端 Dashboard 汇总响应
+ */
+export interface BackendDashboardSummary {
+  device_stats: BackendDeviceStats;
+  alarm_stats: BackendAlarmStats;
+  kpi_overview: BackendKPIOverview;
+  kpi_deltas: Record<string, BackendKPIDelta>;  // KPI趋势数据（新增）
+  recent_alarms: BackendRecentAlarm[];
+  timestamp: string;
+}
+
+/**
+ * 后端 KPI 趋势增量数据
+ */
+export interface BackendKPIDelta {
+  current_value: number;
+  previous_value: number;
+  change_percent: number;
+  trend: string;  // "up" | "down" | "stable"
+  compare_type: string;  // "yesterday" | "last_week"
+}
+
+/**
+ * 后端告警趋势项
+ */
+export interface BackendAlarmTrendItem {
+  date: string;
+  critical: number;
+  major: number;
+  minor: number;
+  warning: number;
+}
+
+/**
+ * 后端设备状态映射（用于饼图）
+ */
+export type BackendDeviceStatusMap = Record<string, number>;
+
+/**
+ * 单个制式的设备状态计数
+ */
+export interface BackendDeviceStatusCounts {
+  online: number;
+  offline: number;
+  alarm: number;
+}
+
+/**
+ * 后端按制式分组的设备状态
+ */
+export type BackendDeviceStatusByType = Record<string, BackendDeviceStatusCounts>;
+
+/**
+ * 后端 KPI 趋势项
+ */
+export interface BackendKPITrendItem {
+  time: string;
+  value: number;
+}
+
+/**
+ * 后端 KPI 趋势对比响应
+ */
+export interface BackendKPITrendComparison {
+  current: BackendKPITrendItem[];
+  compare: BackendKPITrendItem[];
+  metadata: {
+    kpi_name: string;
+    compare_type: string; // 后端返回普通字符串，需要断言为字面量类型
+    change_percent?: number;
+  };
+}
+
+/**
+ * 前端使用的 KPI 趋势对比类型（正确的字面量类型）
+ */
+export interface KPITrendComparison {
+  current: Array<{ time: string; value: number }>;
+  compare: Array<{ time: string; value: number }>;
+  metadata: {
+    kpi_name: string;
+    compare_type: 'yesterday' | 'last_week';
+    change_percent?: number;
+  };
+}
+
+/**
+ * 后端区域统计项
+ */
+export interface BackendRegionStatsItem {
+  region: string;
+  device_count: number;
+  online_count: number;
+  alarm_count: number;
+}
+
+/**
+ * 后端 Widget 布局
+ */
+export interface BackendWidgetLayout {
+  id: string;
+  user_id: string;
+  layout: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * 后端告警类型饼图项
+ */
+export interface BackendAlarmTypePieItem {
+  name: string;
+  value: number;
+}
+
+/**
+ * 后端 KPI 时序数据条目
+ */
+export interface BackendKPITimeSeriesEntry {
+  time: string;
+  value: number;
+}
+
+/**
+ * 后端 KPI 时序响应
+ */
+export type BackendKPITimeSeriesResponse = Record<string, BackendKPITimeSeriesEntry[]>;
+
+// ============================================================================
+// KPI 时序数据类型
+// ============================================================================
+
+/**
+ * KPI 时序请求参数
+ */
+export interface KPITimeSeriesRequest {
+  kpi_names?: string[];
+  start_time?: string;
+  end_time?: string;
+  granularity?: '15min' | 'hourly' | 'daily';
+  device_type?: string;
+}
+
+/**
+ * KPI 时序数据点（对象格式）
+ */
+export interface KPITimeSeriesDataPoint {
+  time: string;
+  values: Record<string, number>;
+}
+
+/**
+ * KPI 时序响应
+ */
+export interface KPITimeSeriesResponse {
+  data: KPITimeSeriesDataPoint[];
+  metadata: {
+    start_time: string;
+    end_time: string;
+    granularity: string;
+    kpi_names: string[];
+  };
+}
+
+// ============================================================================
+// KPI 趋势对比类型（v3.5 新增）
+// ============================================================================
+
+/**
+ * KPI 趋势对比数据
+ * 用于表示"今日 vs 昨日"或"本周 vs 上周"的对比结果
+ */
+export interface TrendComparisonData {
+  /** 当前时段数据 */
+  current: Array<{ time: string; value: number }>;
+  /** 对比时段数据 */
+  compare: Array<{ time: string; value: number }>;
+  /** 元数据 */
+  metadata: {
+    kpi_name: string;
+    compare_type: 'yesterday' | 'last_week';
+    /** 变化百分比 (正数表示上升，负数表示下降) */
+    change_percent?: number;
+  };
+}
+
+/**
+ * 多 KPI 趋势对比数据
+ * key 为 KPI 名称，value 为对应的对比数据
+ */
+export interface MultiTrendComparisonData {
+  [kpiName: string]: TrendComparisonData;
+}
+
+/**
+ * KPI 趋势对比请求参数
+ */
+export interface KPITrendComparisonRequest {
+  kpi_name: string;
+  start_time?: string;
+  end_time?: string;
+  compare_with?: 'yesterday' | 'last_week';
+}
+
+/**
+ * KPI 趋势对比响应（后端返回格式）
+ */
+export interface KPITrendComparisonResponse {
+  current: Array<{ time: string; value: number }>;
+  compare: Array<{ time: string; value: number }>;
+  metadata: {
+    kpi_name: string;
+    compare_type: string;
+    change_percent?: number;
+  };
+}
+
+// ============================================================================
+// Hook 返回类型
+// ============================================================================
+
+/**
+ * useKPITrendComparisonV2 Hook 返回类型
+ */
+export interface UseKPITrendComparisonV2Result {
+  /** 对比数据 */
+  data: TrendComparisonData | undefined;
+  /** 是否加载中 */
+  isLoading: boolean;
+  /** 错误数组（可能包含多个请求的错误） */
+  errors: Array<Error | unknown>;
+}
+
+/**
+ * useMultiKPITrendComparison Hook 返回类型
+ */
+export interface UseMultiKPITrendComparisonResult {
+  /** 多 KPI 对比数据字典 */
+  data: MultiTrendComparisonData | undefined;
+  /** 是否加载中 */
+  isLoading: boolean;
+  /** 错误数组 */
+  errors: Array<Error | unknown>;
+}
+
+// ============================================================================
+// 时间范围参数类型（内部使用）
+// ============================================================================
+
+/**
+ * KPI 时序查询参数（内部使用）
+ */
+export interface KPITimeSeriesParams {
+  kpi_names: string[];
+  start_time: string;
+  end_time: string;
+}
+
+/**
+ * 时间范围计算结果（内部使用）
+ */
+export interface TimeRangesResult {
+  currentParams: KPITimeSeriesParams;
+  compareParams: KPITimeSeriesParams;
+}
+
+// ============================================================================
+// Dashboard Widget 类型
+// ============================================================================
+
+/**
+ * Dashboard Widget 项
+ */
+export interface DashboardWidgetItem {
+  id: string;
+  type: string;
+  title: string;
+  config?: Record<string, unknown>;
+}
+
+/**
+ * Widget 布局配置
+ */
+export interface WidgetLayout {
+  widgets: DashboardWidgetItem[];
+  layout: {
+    columns: number;
+    rows: number;
+  };
+}

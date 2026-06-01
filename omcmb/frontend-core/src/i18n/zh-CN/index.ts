@@ -2104,11 +2104,68 @@ const messages: Record<string, string> = {
   'dashboard.processedAlarms':   '处理告警',
   'dashboard.lastLogin':         '上次登录:',
   'dashboard.alarmCount':        '告警次数',
+  'dashboard.kpiOverview':        '网络质量指标',
+  'dashboard.dlThroughput':      '下行速率',
+  'dashboard.ulThroughput':      '上行速率',
+  'dashboard.rrcSuccRate':       'RRC建立成功率',
+  'dashboard.erabSuccRate':      'E-RAB建立成功率',
+  'dashboard.hoSuccRate':        '切换成功率',
+  'dashboard.prbUtil':            'PRB利用率',
+  'unit.mbps':                    'Mbps',
+  'unit.percent':                 '%',
 
   // Dashboard chart labels
   'dashboard.chart.online':  '在线',
   'dashboard.chart.offline': '离线',
   'dashboard.chart.alarm':   '告警',
+
+  // Dashboard refresh提示
+  'dashboard.lastUpdate':    '最后更新',
+  'dashboard.refresh':       '刷新',
+  'dashboard.justNow':       '刚刚',
+  'dashboard.minutesAgo':    '{count} 分钟前',
+  'dashboard.hoursAgo':      '{count} 小时前',
+  'dashboard.daysAgo':       '{count} 天前',
+  'dashboard.refreshSuccess':'刷新成功',
+  'dashboard.refreshFailed': '刷新失败',
+
+  // Dashboard trend chart labels
+  'dashboard.throughputTrend':    '上下行速率趋势',
+  'dashboard.qualityTrend':       '无线质量指标趋势',
+  'dashboard.timeRange.label':    '对比周期',
+  'dashboard.timeRange.today':   '今日',
+  'dashboard.timeRange.yesterday':'昨日',
+  'dashboard.timeRange.lastWeek': '上周',
+  'dashboard.timeRange.thisWeek': '本周',
+  'dashboard.status.normal':     '正常',
+  'dashboard.status.warning':    '关注',
+  'dashboard.status.critical':    '异常',
+
+  // Dashboard device status types
+  'dashboard.deviceStatus.online_normal': '在线正常',
+  'dashboard.deviceStatus.online_alarm':  '在线告警',
+  'dashboard.deviceStatus.offline':       '离线',
+
+  // Dashboard alarm types
+  'dashboard.alarmType.wireless':      '无线告警',
+  'dashboard.alarmType.transmission':  '传输告警',
+  'dashboard.alarmType.hardware':      '硬件告警',
+  'dashboard.alarmType.system':        '系统告警',
+  'dashboard.alarmType.rf':            '射频告警',
+  'dashboard.alarmType.other':         '其他告警',
+
+  // Dashboard regions
+  'dashboard.region.North':     '华北',
+  'dashboard.region.East':      '华东',
+  'dashboard.region.South':     '华南',
+  'dashboard.region.Southwest':'西南',
+  'dashboard.region.Northwest':'西北',
+
+  // Dashboard widgets
+  'dashboard.widget.onlineRate':        '设备在线率',
+  'dashboard.widget.alarmHandleRate':    '告警处置率',
+  'dashboard.widget.networkAvailability':'网络可用性',
+  'dashboard.widget.avgAlarmClearTime':  '平均告警清除时间',
 
   // -------------------------------------------------------------------------
   // Common page labels

@@ -1,16 +1,19 @@
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { CallbackDataParams } from 'echarts/types/dist/shared';
 import {
   Avatar,
   Badge,
+  Button,
   Card,
   Col,
   List,
   Row,
   Space,
+  Spin,
   Tag,
   Typography,
+  message,
 } from 'antd';
 import {
   AlertOutlined,
@@ -21,6 +24,7 @@ import {
   FileTextOutlined,
   MonitorOutlined,
   PlayCircleOutlined,
+  ReloadOutlined,
   RocketOutlined,
   SettingOutlined,
   TeamOutlined,
@@ -37,14 +41,17 @@ import EmptyState from '@/components/common/EmptyState';
 import { MAP_CONFIG } from '@/components/GISMap/constants';
 import type { MapDevice } from '@/components/GISMap';
 import type { DeviceGeo } from '@core/types/map';
-import { useDashboardData, useAlarmTrend, useTopAlarmDevices, useDeviceStatusByType } from '@core/hooks/api/useDashboard';
+import { useDashboardData, useAlarmTrend, useTopAlarmDevices, useDeviceStatusByType, useKPIGroupTrend } from '@core/hooks/api/useDashboard';
+import { MultiKPITrendChart } from '@/components/dashboard';
 import { useAlarmCount, useCurrentAlarms } from '@core/hooks/api/useAlarms';
 import { useMapDevicesGeo } from '@core/hooks/api/useTopology';
 import { useUserStore } from '@core/store/userStore';
 import { useT } from '@/hooks/useT';
 import { useThemeToken } from '@/hooks/useThemeToken';
+import { useQueryClient } from '@tanstack/react-query';
 import { TiltCard } from '@/components/Effects';
 import { useScrollReveal } from '@/hooks/useScrollReveal';
+import { formatTimeAgo } from '@core/utils/format';
 
 const { Title, Text } = Typography;
 
@@ -69,6 +76,9 @@ const DASHBOARD_CONFIG = {
   showAlarmTrend7d: false,       // 近7天告警趋势 - 7-day alarm trend line chart
   showTopAlarmDevices: false,    // 高频告警设备 - Top alarm devices bar chart
   showRunningTasks: false,       // 任务执行中 - Running tasks KPI card
+  showQualityTrend: false,       // 无线质量指标趋势 - Quality KPI trend chart (RRC + E-RAB + Handover)
+  showPRBUtil: false,            // PRB利用率趋势 - PRB utilization trend chart
+  showRefreshControls: false,    // 刷新控制栏 - Refresh controls (last update time + refresh button)
 } as const;
 
 function formatAlarmTime(value: string | undefined): string {
@@ -130,6 +140,45 @@ export default function DashboardPage() {
   });
   const t = useT();
   const token = useThemeToken();
+  const queryClient = useQueryClient();
+
+  // 各图表独立的时间范围状态：yesterday(昨日对比) 或 last_week(上周对比)
+  const [throughputTimeRange, setThroughputTimeRange] = useState<'yesterday' | 'last_week'>('yesterday');
+
+  // 刷新提示状态
+  const [lastUpdateTime, setLastUpdateTime] = useState<Date>(new Date());
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [timeAgoText, setTimeAgoText] = useState('');
+
+  // 更新时间倒计时文案
+  useEffect(() => {
+    const updateTime = () => {
+      setTimeAgoText(formatTimeAgo(lastUpdateTime, t));
+    };
+
+    updateTime(); // 立即更新一次
+    const interval = setInterval(updateTime, 10000); // 每10秒更新一次
+
+    return () => clearInterval(interval);
+  }, [lastUpdateTime, formatTimeAgo, t]);
+
+  // 手动刷新处理
+  const handleManualRefresh = useCallback(async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      // 刷新所有 dashboard 相关的查询
+      await queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+      setLastUpdateTime(new Date());
+      message.success(t('dashboard.refreshSuccess'));
+    } catch (error) {
+      message.error(t('dashboard.refreshFailed'));
+      console.error('Dashboard refresh failed:', error);
+    } finally {
+      // 延迟重置刷新状态，让用户看到反馈
+      setTimeout(() => setIsRefreshing(false), 500);
+    }
+  }, [queryClient, isRefreshing, t]);
 
   // 获取当前登录用户信息
   const currentUser = useUserStore((state) => state.currentUser);
@@ -141,7 +190,13 @@ export default function DashboardPage() {
   const { data: topAlarmDevicesData } = useTopAlarmDevices(DASHBOARD_CONFIG.showTopAlarmDevices);
 
   // 获取设备按技术类型分组的状态数据
-  const { data: deviceStatusByTypeData } = useDeviceStatusByType();
+  const { data: deviceStatusByTypeData, isLoading: isDeviceStatusLoading } = useDeviceStatusByType();
+
+  // 获取 KPI 趋势数据 - 每个图表独立调用
+  const [throughputData, isThroughputLoading] = useKPIGroupTrend(
+    ['NR_PDCP_RATE_DL', 'NR_PDCP_RATE_UL'],
+    throughputTimeRange
+  );
 
   // 获取设备地理数据（与 GISMapView 相同的数据源）
   const mapFilterParams = useMemo(() => ({
@@ -180,6 +235,11 @@ export default function DashboardPage() {
   const onlineDevices = dashboardData?.summary?.deviceCounts?.online ?? 1137;
   const activeAlarms = dashboardData?.summary?.alarmCounts?.total ?? 43;
   const runningTasks = dashboardData?.summary?.taskSummary?.running ?? 7;
+
+  // KPI trend data — 用于卡片显示趋势
+  const kpiDeltas = dashboardData?.summary?.kpiDeltas ?? {};
+  const totalDevicesDelta = kpiDeltas['total_devices'];
+  const activeAlarmsDelta = kpiDeltas['active_alarms'];
 
   // Alarm severity counts - 没有数据时默认为 0，不显示虚假数据
   const critical = alarmCount?.critical ?? 0;
@@ -344,6 +404,29 @@ export default function DashboardPage() {
 
   return (
     <div ref={dashboardRef} style={{ padding: '0 0 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Dashboard Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <Title level={4} style={{ margin: 0 }}>
+          {t('nav.dashboard')}
+        </Title>
+        {/* 刷新控制栏 */}
+        {DASHBOARD_CONFIG.showRefreshControls && (
+        <Space size="middle">
+          <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+            {t('dashboard.lastUpdate')}: {timeAgoText || formatTimeAgo(lastUpdateTime, t)}
+          </Typography.Text>
+          <Button
+            icon={<ReloadOutlined />}
+            loading={isRefreshing || isLoading}
+            onClick={handleManualRefresh}
+            size="small"
+          >
+            {t('dashboard.refresh')}
+          </Button>
+        </Space>
+        )}
+      </div>
+
       {/* Row 1: KPI Cards */}
       <Row gutter={[16, 16]} className="omc-scroll-reveal" data-delay="0">
         <Col xs={24} sm={12} lg={DASHBOARD_CONFIG.showRunningTasks ? 6 : 8}>
@@ -354,9 +437,9 @@ export default function DashboardPage() {
             iconBgColor="#e6f4ff"
             iconColor={token.colorPrimary}
             loading={isLoading}
-            trend="up"
-            delta="+12"
-            deltaLabel={t('dashboard.vsLastWeek')}
+            trend={totalDevicesDelta?.trend ?? 'stable'}
+            delta={totalDevicesDelta ? `${totalDevicesDelta.changePercent.toFixed(1)}%` : undefined}
+            deltaLabel={totalDevicesDelta?.compareType === 'last_week' ? t('dashboard.vsLastWeek') : t('dashboard.vsYesterday')}
             onClick={() => void navigate('/device/list')}
           />
         </Col>
@@ -382,9 +465,9 @@ export default function DashboardPage() {
             iconBgColor="#fff2f0"
             iconColor="#F5222D"
             loading={isLoading}
-            trend="down"
-            delta="-5"
-            deltaLabel={t('dashboard.vsYesterday')}
+            trend={activeAlarmsDelta?.trend ?? 'stable'}
+            delta={activeAlarmsDelta ? `${activeAlarmsDelta.changePercent.toFixed(1)}%` : undefined}
+            deltaLabel={activeAlarmsDelta?.compareType === 'yesterday' ? t('dashboard.vsYesterday') : t('dashboard.vsLastWeek')}
             onClick={() => void navigate('/alarm/current')}
           />
         </Col>
@@ -397,7 +480,7 @@ export default function DashboardPage() {
             iconBgColor="#f9f0ff"
             iconColor="#722ED1"
             loading={isLoading}
-            trend="neutral"
+            trend="stable"
             minHeight={20}
             onClick={() => void navigate('/ops/tasks')}
           />
@@ -405,8 +488,26 @@ export default function DashboardPage() {
         )}
       </Row>
 
-      {/* Row 2: Device Status Chart + Device Map */}
-      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="1">
+      {/* Row 2: 上下行速率趋势图 */}
+      <Row gutter={[16, 16]} className="omc-scroll-reveal" data-delay="1">
+        <Col xs={24} style={{ display: 'flex' }}>
+          <MultiKPITrendChart
+            title={t('dashboard.throughputTrend')}
+            kpis={[
+              { key: 'NR_PDCP_RATE_DL', label: t('dashboard.dlThroughput'), color: '#1677FF', unit: t('unit.mbps') },
+              { key: 'NR_PDCP_RATE_UL', label: t('dashboard.ulThroughput'), color: '#10B981', unit: t('unit.mbps') },
+            ]}
+            trendDataMap={throughputData}
+            timeRange={throughputTimeRange}
+            onTimeRangeChange={setThroughputTimeRange}
+            loading={isThroughputLoading}
+            height={280}
+          />
+        </Col>
+      </Row>
+
+      {/* Row 3: Device Status + Device Map */}
+      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="2">
         <Col xs={24} lg={12} style={{ display: 'flex' }}>
           <TiltCard maxTilt={7} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
           <Card
@@ -415,7 +516,11 @@ export default function DashboardPage() {
             styles={{ body: { padding: '8px 0 0', flex: 1, display: 'flex', flexDirection: 'column' } }}
             style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
           >
-            {deviceStatusData.isEmpty ? (
+            {isDeviceStatusLoading ? (
+              <div style={{ height: 260, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Spin tip={t('common.loading')} />
+              </div>
+            ) : deviceStatusData.isEmpty ? (
               <EmptyState description={t('common.noData')} />
             ) : (
               <BarChart
@@ -452,9 +557,9 @@ export default function DashboardPage() {
         </Col>
       </Row>
 
-      {/* Row 3: Alarm Summary + (条件渲染) Alarm Distribution */}
-      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="2">
-        <Col xs={24} lg={DASHBOARD_CONFIG.showAlarmDistribution ? 16 : 24} style={{ display: 'flex' }}>
+      {/* Row 4: Alarm Summary (Full Width) */}
+      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="3">
+        <Col xs={24} lg={24} style={{ display: 'flex' }}>
           <TiltCard maxTilt={6} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
           <Card
             title={t('dashboard.alarmSummary')}
@@ -569,8 +674,8 @@ export default function DashboardPage() {
         )}
       </Row>
 
-      {/* Row 4: (条件渲染) Alarm Trend + (条件渲染) Top10 Devices */}
-      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="3">
+      {/* Row 5: (条件渲染) Alarm Trend + (条件渲染) Top10 Devices */}
+      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="4">
         {/* 7-day Alarm Trend - Conditionally rendered */}
         {DASHBOARD_CONFIG.showAlarmTrend7d && (
           <Col xs={24} lg={DASHBOARD_CONFIG.showTopAlarmDevices ? 12 : 24} style={{ display: 'flex' }}>
@@ -621,8 +726,8 @@ export default function DashboardPage() {
         )}
       </Row>
 
-      {/* Row 5: User Profile + Quick Access */}
-      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="4">
+      {/* Row 6: User Profile + Quick Access */}
+      <Row gutter={[16, 16]} align="stretch" className="omc-scroll-reveal" data-delay="5">
         <Col xs={24} lg={6} style={{ display: 'flex' }}>
           <TiltCard maxTilt={8} style={{ width: '100%', display: 'flex', flexDirection: 'column' }}>
           <Card

@@ -78,8 +78,55 @@ export const dashboardService = {
     return mockDashboardChartData.alarmTypePie;
   },
 
-  async getKPITimeSeries(): Promise<DashboardChartData['kpiTimeSeries']> {
+  async getKPITimeSeries(
+    kpiNames?: string[],
+    startTime?: string,
+    endTime?: string
+  ): Promise<DashboardChartData['kpiTimeSeries']> {
     await delay(100, 200);
+
+    // 如果指定了 kpiNames，只返回指定的 KPI 数据
+    if (kpiNames && kpiNames.length > 0) {
+      const result: DashboardChartData['kpiTimeSeries'] = {};
+      for (const name of kpiNames) {
+        result[name] = mockDashboardChartData.kpiTimeSeries[name] || [];
+      }
+      return result;
+    }
+
     return mockDashboardChartData.kpiTimeSeries;
+  },
+
+  async getDeviceStatusByType(): Promise<Record<string, { online: number; offline: number; alarm: number }>> {
+    await delay(80, 150);
+    return {
+      lte: { online: 120, offline: 15, alarm: 8 },
+      nr: { online: 45, offline: 5, alarm: 3 },
+      gsm: { online: 10, offline: 10, alarm: 0 },
+    };
+  },
+
+  async getKPITrendComparison(kpiName: string, compareWith: 'yesterday' | 'last_week' = 'yesterday'): Promise<{
+    current: Array<{ time: string; value: number }>;
+    compare: Array<{ time: string; value: number }>;
+    metadata: { kpi_name: string; compare_type: string; change_percent?: number };
+  }> {
+    await delay(100, 200);
+    console.log('getKPITrendComparison called with:', kpiName);
+    console.log('Available keys:', Object.keys(mockDashboardChartData.kpiTimeSeries));
+    const baseData = mockDashboardChartData.kpiTimeSeries[kpiName] || [];
+    console.log('baseData length:', baseData.length);
+    const current = baseData.slice(-24).map(([time, value]) => ({ time, value }));
+    const compare = baseData.slice(-48, -24).map(([time, value]) => ({ time, value }));
+    console.log('Returning data:', { current: current.length, compare: compare.length });
+    return {
+      current,
+      compare,
+      metadata: {
+        kpi_name: kpiName,
+        compare_type: compareWith,
+        change_percent: Math.random() * 10 - 5,
+      },
+    };
   },
 };

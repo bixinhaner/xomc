@@ -10,7 +10,7 @@ export interface KPICardProps {
   icon: React.ReactNode;
   iconBgColor?: string;
   iconColor?: string;
-  trend?: 'up' | 'down' | 'neutral';
+  trend?: 'up' | 'down' | 'stable';
   delta?: string | number;
   deltaLabel?: string;
   unit?: string;

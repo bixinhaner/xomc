@@ -83,7 +83,7 @@ func (h *Handler) GetDeviceStatus(c *gin.Context) {
 	response.OK(c, counts)
 }
 
-// GetKPITrend handles GET /api/v1/dashboard/kpi-trend?kpi_name=...&days=7.
+// GetKPITrend handles GET /api/v1/dashboard/kpi-trend?kpi_name=...&days=7 or &compare_with=yesterday.
 func (h *Handler) GetKPITrend(c *gin.Context) {
 	kpiName := c.Query("kpi_name")
 	if kpiName == "" {
@@ -92,6 +92,25 @@ func (h *Handler) GetKPITrend(c *gin.Context) {
 		return
 	}
 
+	// Check if compare_with parameter is present
+	compareWith := c.Query("compare_with")
+	if compareWith != "" {
+		// Use comparison API
+		if compareWith != "yesterday" && compareWith != "last_week" {
+			commonerrors.AbortWithError(c, http.StatusBadRequest,
+				fmt.Errorf("compare_with must be 'yesterday' or 'last_week'"))
+			return
+		}
+		result, err := h.service.GetKPITrendComparison(c.Request.Context(), kpiName, compareWith)
+		if err != nil {
+			commonerrors.AbortWithError(c, http.StatusInternalServerError, err)
+			return
+		}
+		response.OK(c, result)
+		return
+	}
+
+	// Original behavior: use days parameter
 	days := 7
 	if daysStr := c.Query("days"); daysStr != "" {
 		parsed, err := strconv.Atoi(daysStr)

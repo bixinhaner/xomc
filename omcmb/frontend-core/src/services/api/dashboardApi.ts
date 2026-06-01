@@ -1,5 +1,6 @@
 import http from '../http';
-import type { DashboardSummary, DashboardChartData } from '../../mock/data/dashboard';
+import type { DashboardSummary, KPIDelta } from '../../types/dashboard';
+import type { DashboardChartData } from '../../mock/data/dashboard';
 
 // --- Backend response types ---
 
@@ -18,15 +19,10 @@ interface BackendAlarmStats {
   total: number;
 }
 
+// Backend returns kpi_overview as map[string]float64 with dynamic keys
+// like "NR_PDCP_RATE_DL", "RRC_CONN_SETUP_SR", etc.
 interface BackendKPIOverview {
-  rrc_succ_rate?: number;
-  erab_succ_rate?: number;
-  ho_succ_rate?: number;
-  dl_throughput?: number;
-  ul_throughput?: number;
-  radio_drop?: number;
-  prb_util?: number;
-  volte_succ_rate?: number;
+  [key: string]: number | undefined;
 }
 
 interface BackendRecentAlarm {
@@ -41,8 +37,18 @@ interface BackendDashboardSummary {
   device_stats: BackendDeviceStats;
   alarm_stats: BackendAlarmStats;
   kpi_overview: BackendKPIOverview;
+  kpi_deltas: Record<string, BackendKPIDelta>;
   recent_alarms: BackendRecentAlarm[];
   timestamp: string;
+}
+
+/** 后端 KPI 趋势增量数据 */
+interface BackendKPIDelta {
+  current_value: number;
+  previous_value: number;
+  change_percent: number;
+  trend: string;  // "up" | "down" | "stable"
+  compare_type: string;  // "yesterday" | "last_week"
 }
 
 // Backend response types for Sprint 7 chart endpoints
@@ -71,6 +77,28 @@ type BackendDeviceStatusByType = Record<string, BackendDeviceStatusCounts>;
 interface BackendKPITrendItem {
   time: string;
   value: number;
+}
+
+/** KPI trend comparison response - 今日vs昨日对比 */
+interface BackendKPITrendComparison {
+  current: BackendKPITrendItem[];
+  compare: BackendKPITrendItem[];
+  metadata: {
+    kpi_name: string;
+    compare_type: string; // 后端返回普通字符串，需要断言为字面量类型
+    change_percent?: number;
+  };
+}
+
+/** 前端使用的 KPI 趋势对比类型（正确的字面量类型） */
+interface KPITrendComparison {
+  current: Array<{ time: string; value: number }>;
+  compare: Array<{ time: string; value: number }>;
+  metadata: {
+    kpi_name: string;
+    compare_type: 'yesterday' | 'last_week';
+    change_percent?: number;
+  };
 }
 
 interface BackendRegionStatsItem {
@@ -121,15 +149,25 @@ function mapBackendSummary(b: BackendDashboardSummary): DashboardSummary {
       total: b.alarm_stats.total,
     },
     kpiSummary: {
-      rrcSuccRate: b.kpi_overview.rrc_succ_rate ?? 0,
-      erabSuccRate: b.kpi_overview.erab_succ_rate ?? 0,
-      hoSuccRate: b.kpi_overview.ho_succ_rate ?? 0,
-      dlThroughput: b.kpi_overview.dl_throughput ?? 0,
-      ulThroughput: b.kpi_overview.ul_throughput ?? 0,
-      radioDrop: b.kpi_overview.radio_drop ?? 0,
-      prbUtil: b.kpi_overview.prb_util ?? 0,
-      voLteSuccRate: b.kpi_overview.volte_succ_rate ?? 0,
+      rrcSuccRate: b.kpi_overview.RRC_CONN_SETUP_SR ?? 0,
+      erabSuccRate: b.kpi_overview.ERAB_SETUP_SR ?? 0,
+      hoSuccRate: b.kpi_overview.NR_SA_HO_SR ?? 0,
+      dlThroughput: b.kpi_overview.NR_PDCP_RATE_DL ?? 0,
+      ulThroughput: 0, // 数据库中暂无上行速率KPI
+      radioDrop: b.kpi_overview.CALL_DROP_RATE ?? 0,
+      prbUtil: b.kpi_overview.NR_PRB_UTIL_DL ?? 0,
+      voLteSuccRate: 0, // 数据库中暂无VoLTE KPI
     },
+    kpiDeltas: Object.entries(b.kpi_deltas || {}).reduce((acc, [kpiName, delta]) => {
+      acc[kpiName] = {
+        current_value: delta.current_value,
+        previous_value: delta.previous_value,
+        change_percent: delta.change_percent,
+        trend: delta.trend as 'up' | 'down' | 'stable',
+        compare_type: delta.compare_type as 'yesterday' | 'last_week',
+      };
+      return acc;
+    }, {} as Record<string, KPIDelta>),
     taskSummary: {
       running: 0,
       pending: 0,
@@ -161,6 +199,24 @@ function mapKPITrend(
   items: BackendKPITrendItem[]
 ): Array<[string, number]> {
   return items.map((item) => [item.time, item.value]);
+}
+
+/**
+ * 映射 KPI 趋势对比数据
+ * 将后端的普通字符串 compare_type 转换为字面量类型
+ */
+function mapKPITrendComparison(
+  data: BackendKPITrendComparison
+): KPITrendComparison {
+  return {
+    current: data.current,
+    compare: data.compare,
+    metadata: {
+      kpi_name: data.metadata.kpi_name,
+      compare_type: data.metadata.compare_type as 'yesterday' | 'last_week',
+      change_percent: data.metadata.change_percent,
+    },
+  };
 }
 
 function mapRegionStats(
@@ -215,7 +271,10 @@ export const dashboardApi = {
         dashboardApi.getTopAlarmDevices(),
         dashboardApi.getRegionStats(),
         dashboardApi.getAlarmTypePie(),
-        dashboardApi.getKPITimeSeries(),
+        // 暂时注释：PRB利用率、无线质量指标图表已隐藏，不需要获取全部KPI时序数据
+        // 如需恢复显示，取消下面注释即可
+        // dashboardApi.getKPITimeSeries(),
+        {} as Record<string, BackendKPITimeSeriesEntry[]>,
         dashboardApi.getWidgets(),
       ]);
     return {
@@ -332,12 +391,11 @@ export const dashboardApi = {
     endTime?: string
   ): Promise<DashboardChartData['kpiTimeSeries']> {
     const defaultNames = [
-      'rrcSuccRate',
-      'erabSuccRate',
-      'hoSuccRate',
-      'dlThroughput',
-      'ulThroughput',
-      'prbUtil',
+      'RRC_CONN_SETUP_SR',
+      'ERAB_SETUP_SR',
+      'NR_SA_HO_SR',
+      'NR_PDCP_RATE_DL',
+      'NR_PRB_UTIL_DL',
     ];
     const names = kpiNames ?? defaultNames;
     const { data } = await http.get<BackendKPITimeSeriesResponse>(
@@ -351,5 +409,20 @@ export const dashboardApi = {
       }
     );
     return mapKPITimeSeries(data);
+  },
+
+  /**
+   * 获取 KPI 趋势对比数据（今日vs昨日）
+   * 用于 KPITrendChart 组件
+   */
+  async getKPITrendComparison(
+    kpiName: string,
+    compareWith: 'yesterday' | 'last_week' = 'yesterday'
+  ): Promise<KPITrendComparison> {
+    const { data } = await http.get<BackendKPITrendComparison>(
+      '/dashboard/kpi-trend',
+      { params: { kpi_name: kpiName, compare_with: compareWith } }
+    );
+    return mapKPITrendComparison(data);
   },
 };
