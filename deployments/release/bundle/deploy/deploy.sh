@@ -680,9 +680,10 @@ log "  · 查看日志：  cd $OMC_ROOT/current/deploy && ${DC[*]} logs -f <serv
 log "  · 停止全栈：  cd $OMC_ROOT/current/deploy && ${DC[*]} down"
 echo
 log "访问地址："
-log "  · Web UI ：       http://<服务器IP>:8080"
+log "  · Web 管理界面：  http://<服务器IP>:8081   （运维浏览器登录）"
+log "  · 基站 ACS URL：  http://<服务器IP>:8080   （TR-069，基站设备侧填，人不浏览）"
 log "  · MinIO Console：http://<服务器IP>:9001"
-[ "$SKIP_MONITORING" = 0 ] && log "  · Grafana：       http://<服务器IP>:3000"
+[ "$SKIP_MONITORING" = 0 ] && log "  · Grafana：       http://<服务器IP>:3030   （宿主 3030 → 容器 3000）"
 log "  · 健康检查：       bash $OMC_ROOT/current/deploy/healthcheck.sh"
 echo
 log "初始账号（首次登录强制改）："
