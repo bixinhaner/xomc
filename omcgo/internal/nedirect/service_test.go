@@ -271,6 +271,9 @@ func (m *mockAlarmStore) SaveActive(ctx context.Context, a *model.Alarm) error {
 func (m *mockAlarmStore) GetActiveByID(ctx context.Context, id uuid.UUID) (*model.Alarm, error) {
 	return nil, nil
 }
+func (m *mockAlarmStore) GetHistoryByID(ctx context.Context, id uuid.UUID) (*model.Alarm, error) {
+	return nil, nil
+}
 func (m *mockAlarmStore) GetActiveByDeviceAndIdentifier(ctx context.Context, deviceSN, alarmIdentifier string) (*model.Alarm, error) {
 	return nil, nil
 }

@@ -86,6 +86,16 @@ func (m *mockMRStore) ListFileDeviceAggregates(ctx context.Context, filter MRFil
 	return &model.ListResponse[MRFileDeviceAggregate]{Items: []MRFileDeviceAggregate{}, Total: 0, Page: 1, PageSize: 20, TotalPages: 0}, nil
 }
 
+// ListFilesBySN — 自选设备下钻新增接口方法，mock 默认返空切片。
+func (m *mockMRStore) ListFilesBySN(ctx context.Context, sn string) ([]MRFileInfo, error) {
+	return nil, nil
+}
+
+// DeleteFilesBySN — 自选设备下钻新增接口方法，mock 默认返 (0, nil)。
+func (m *mockMRStore) DeleteFilesBySN(ctx context.Context, sn string) (int64, error) {
+	return 0, nil
+}
+
 // ---------------------------------------------------------------------------
 
 type mockIndicatorRepo struct {
