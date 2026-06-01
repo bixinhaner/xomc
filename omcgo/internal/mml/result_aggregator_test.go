@@ -58,10 +58,11 @@ func (h *fakeSSEHub) byType(eventType string) []fakeSSEEvent {
 // and a default GetByID that returns a sensible MMLTask snapshot.
 type aggregatorTestRepo struct {
 	*mockTaskRepo
-	incCalls   []incCall
-	incErr     error
-	getMMLTask *MMLTask
-	getErr     error
+	incCalls    []incCall
+	incErr      error
+	getMMLTask  *MMLTask
+	getErr      error
+	updatedTask *MMLTask // 最近一次 Update 的快照（finalize 断言用）
 }
 
 type incCall struct {
@@ -82,7 +83,26 @@ func (r *aggregatorTestRepo) GetByID(_ context.Context, _ uuid.UUID) (*MMLTask, 
 	return r.getMMLTask, nil
 }
 
-func (r *aggregatorTestRepo) Update(_ context.Context, _ *MMLTask) error { return nil }
+func (r *aggregatorTestRepo) Update(_ context.Context, t *MMLTask) error {
+	if t != nil {
+		snap := *t
+		r.updatedTask = &snap
+	}
+	return nil
+}
+
+// fakeDeviceStats 实现 DeviceTaskStatsReader，按 sourceID 返回预置的终态聚合，
+// 用于验证 finalizeIfComplete 以实际 device_tasks 终态为完成判据。
+type fakeDeviceStats struct {
+	stats task.DeviceTaskSourceStats
+	err   error
+	calls int
+}
+
+func (f *fakeDeviceStats) AggregateStatusBySourceID(_ context.Context, _ task.TaskSource, _ string) (task.DeviceTaskSourceStats, error) {
+	f.calls++
+	return f.stats, f.err
+}
 
 func newAggregatorTestRepo(mmlTask *MMLTask) *aggregatorTestRepo {
 	return &aggregatorTestRepo{mockTaskRepo: &mockTaskRepo{}, getMMLTask: mmlTask}
@@ -478,4 +498,79 @@ func TestAggregator_OnTaskCompleted_GetByIDError_StillIncrements(t *testing.T) {
 	require.Len(t, repo.incCalls, 1, "stat increment must commit even if frame lookup fails")
 	assert.Empty(t, hub.byType("mml_device_frame"),
 		"GetByID error → skip frame publish, do not crash")
+}
+
+// =============================================================================
+// finalize 判据：以实际 device_tasks 终态为准（修复理论 total 卡死 running）
+// =============================================================================
+
+// 回归：fanout/sequencer 跳过了某设备 → 实际派发 < 理论 total（设备数×命令数），
+// 但已派发的全部成功并进入终态。旧逻辑 done(2) < total(3) 永远不 finalize → 卡
+// running；新逻辑以 device_tasks 终态判定（Active==0）→ 正常 finalize 为成功。
+func TestAggregator_Finalize_UsesActualDeviceTasks_NotTheoreticalTotal(t *testing.T) {
+	mmlID := uuid.New()
+	repo := newAggregatorTestRepo(&MMLTask{
+		ID:           mmlID,
+		Status:       TaskRunning,
+		TotalDevices: 3, // 理论 total = 3×1 = 3
+		Commands:     []map[string]interface{}{{}},
+		SuccessCount: 2, FailedCount: 0, // 仅 2 台真正派发并完成（1 台 fanout 跳过）
+	})
+	agg := newAggregatorWithHub(repo, &fakeSSEHub{})
+	// 实际 device_tasks：仅 2 条，均 completed，无在途。
+	agg.SetDeviceTaskStatsReader(&fakeDeviceStats{
+		stats: task.DeviceTaskSourceStats{Total: 2, Completed: 2, Failed: 0, Active: 0},
+	})
+
+	dt := &task.Task{SourceID: mmlID.String(), DeviceSN: "SN-2", Status: task.TaskStatusCompleted}
+	agg.OnTaskCompleted(context.Background(), dt)
+
+	require.NotNil(t, repo.updatedTask, "应以实际 device_tasks 终态 finalize，而非卡 running")
+	assert.Equal(t, TaskCompleted, repo.updatedTask.Status)
+	require.NotNil(t, repo.updatedTask.Result)
+	assert.Equal(t, ResultSuccess, *repo.updatedTask.Result)
+	assert.NotNil(t, repo.updatedTask.FinishedAt)
+	// 计数器以真值覆盖
+	assert.Equal(t, 2, repo.updatedTask.SuccessCount)
+}
+
+// 仍有在途 device_task（Active>0）→ 不 finalize（顺序模式中途等待下一行）。
+func TestAggregator_Finalize_ActiveInFlight_NoFinalize(t *testing.T) {
+	mmlID := uuid.New()
+	repo := newAggregatorTestRepo(&MMLTask{
+		ID: mmlID, Status: TaskRunning, TotalDevices: 1,
+		Commands: []map[string]interface{}{{}, {}}, // 2 命令（顺序链）
+	})
+	agg := newAggregatorWithHub(repo, &fakeSSEHub{})
+	agg.SetDeviceTaskStatsReader(&fakeDeviceStats{
+		stats: task.DeviceTaskSourceStats{Total: 2, Completed: 1, Failed: 0, Active: 1},
+	})
+
+	dt := &task.Task{SourceID: mmlID.String(), DeviceSN: "SN-1", Status: task.TaskStatusCompleted, CommandIndex: 0}
+	agg.OnTaskCompleted(context.Background(), dt)
+
+	assert.Nil(t, repo.updatedTask, "仍有在途 device_task 时不得 finalize")
+}
+
+// 部分成功部分失败、全部终态 → finalize 为 partial。
+func TestAggregator_Finalize_MixedTerminal_Partial(t *testing.T) {
+	mmlID := uuid.New()
+	repo := newAggregatorTestRepo(&MMLTask{
+		ID: mmlID, Status: TaskRunning, TotalDevices: 3,
+		Commands: []map[string]interface{}{{}},
+	})
+	agg := newAggregatorWithHub(repo, &fakeSSEHub{})
+	agg.SetDeviceTaskStatsReader(&fakeDeviceStats{
+		stats: task.DeviceTaskSourceStats{Total: 3, Completed: 2, Failed: 1, Active: 0},
+	})
+
+	dt := &task.Task{SourceID: mmlID.String(), DeviceSN: "SN-3", Status: task.TaskStatusFailed}
+	agg.OnTaskCompleted(context.Background(), dt)
+
+	require.NotNil(t, repo.updatedTask)
+	assert.Equal(t, TaskCompleted, repo.updatedTask.Status)
+	require.NotNil(t, repo.updatedTask.Result)
+	assert.Equal(t, ResultPartial, *repo.updatedTask.Result)
+	assert.Equal(t, 2, repo.updatedTask.SuccessCount)
+	assert.Equal(t, 1, repo.updatedTask.FailedCount)
 }

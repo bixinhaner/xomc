@@ -1482,13 +1482,18 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 			}
 			return pmID, nil
 		})
+		// 让聚合器以"实际 device_tasks 全部终态"判定完成，修复理论 total 因 fanout/
+		// sequencer 跳过而永远到不了导致的任务卡 running（见 ResultAggregator.finalizeIfComplete）。
+		aggregator.SetDeviceTaskStatsReader(task.NewPgTaskRepository(c.PgPool))
 		if c.EventBus != nil {
 			// 注：completionRouter 通过 miscDeps 持有，方便 ops 模块（在本块之后初始化）
 			// 也注册自己的 TaskSourceOps 聚合器。CompletionRouter.Register 是 mutex-safe，
 			// 允许 bridge.Subscribe 之后再追加 handler — 启动序无 race（pre-traffic 阶段）。
 			c.miscDeps.completionRouter = task.NewCompletionRouter(logger)
-			c.miscDeps.completionRouter.Register(task.TaskSourceMML, aggregator)
+			// 顺序关键：Sequencer 必须先注册——某行完成时它先把下一行 device_task 入队，
+			// 聚合器随后判定"无在途"才不会在顺序链中途误判完成（见 finalizeIfComplete 注释）。
 			c.miscDeps.completionRouter.Register(task.TaskSourceMML, sequencer) // Sprint B Q-V3-3
+			c.miscDeps.completionRouter.Register(task.TaskSourceMML, aggregator)
 			// D2 修复：provision 创建的 device_task（GPV / Upload / SPV / Reboot）source=system，
 			// 失败时由 ProvisioningEngine 回查 source_id（=ProvisioningTask.id）联动 fail。
 			if c.miscDeps.provisionEngine != nil {
@@ -1503,9 +1508,10 @@ SELECT COALESCE(d.param_model_id, p.param_model_id) AS effective_param_model_id
 				logger.Warn("subscribe task completion bridge", zap.Error(err))
 			}
 		} else {
-			// 单进程部署（单测/无 NATS）下退化为同进程回调
-			c.miscDeps.taskSvc.AddCompletionCallback(aggregator)
+			// 单进程部署（单测/无 NATS）下退化为同进程回调。
+			// 顺序同上：Sequencer 先注册，聚合器后注册（见 finalizeIfComplete 注释）。
 			c.miscDeps.taskSvc.AddCompletionCallback(sequencer) // Sprint B Q-V3-3
+			c.miscDeps.taskSvc.AddCompletionCallback(aggregator)
 			if c.miscDeps.provisionEngine != nil {
 				c.miscDeps.taskSvc.AddCompletionCallback(c.miscDeps.provisionEngine)
 			}

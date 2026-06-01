@@ -536,6 +536,38 @@ LIMIT $2 OFFSET $3`
 	return items, total, nil
 }
 
+// DeviceTaskSourceStats 是按 source_id 聚合的 device_tasks 终态统计，
+// 供上层（如 MML ResultAggregator）以"实际派发的 device_tasks 全部进入终态"
+// 作为来源任务的完成判据 —— 替代"理论 total = 设备数 × 命令数"那种在 fanout /
+// sequencer 跳过任意 (设备,命令) 时永远到不了的脆弱判据。
+type DeviceTaskSourceStats struct {
+	Total     int // 该 source_id 下所有 device_tasks
+	Completed int // status='completed'
+	Failed    int // status IN ('failed','expired')
+	Active    int // 非终态（Total-Completed-Failed），即仍在 pending/在途
+}
+
+// AggregateStatusBySourceID 统计某 (source, source_id) 下 device_tasks 的终态分布。
+// 终态 = completed / failed / expired；其余（pending 等）计入 Active。
+func (r *PgTaskRepository) AggregateStatusBySourceID(
+	ctx context.Context, source TaskSource, sourceID string,
+) (DeviceTaskSourceStats, error) {
+	const q = `
+SELECT
+  COUNT(*)                                                AS total,
+  COUNT(*) FILTER (WHERE status = 'completed')            AS completed,
+  COUNT(*) FILTER (WHERE status IN ('failed','expired'))  AS failed
+FROM device_tasks
+WHERE source = $1 AND source_id = $2`
+	var s DeviceTaskSourceStats
+	if err := r.pool.QueryRow(ctx, q, string(source), sourceID).
+		Scan(&s.Total, &s.Completed, &s.Failed); err != nil {
+		return DeviceTaskSourceStats{}, fmt.Errorf("aggregate device_tasks by source: %w", err)
+	}
+	s.Active = s.Total - s.Completed - s.Failed
+	return s, nil
+}
+
 // CountByStatus 统计各状态任务数量
 func (r *PgTaskRepository) CountByStatus(ctx context.Context, deviceSN string) (map[TaskStatus]int64, error) {
 	query, args, err := storage.Psql.Select("status", "COUNT(*) as count").

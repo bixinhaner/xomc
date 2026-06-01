@@ -37,6 +37,17 @@ type ResultAggregator struct {
 	// autoLearnUnsupportedPaths 在写 param_mappings 之前解析 paramModelID。
 	// nil → silent skip 整个 auto-learn。
 	paramModelResolver func(ctx context.Context, deviceKey string) (*uuid.UUID, error)
+
+	// deviceStats 注入后，finalizeIfComplete 以"该任务实际派发的 device_tasks
+	// 全部进入终态"为完成判据（而非理论 total=设备数×命令数）。nil（单测）时退回
+	// 旧的理论 total 计数判据，保持向后兼容。详见 finalizeIfComplete。
+	deviceStats DeviceTaskStatsReader
+}
+
+// DeviceTaskStatsReader 按 (source, source_id) 聚合 device_tasks 终态。
+// 由 *task.PgTaskRepository 实现（消费者侧小接口，避免 mml 硬依赖其构造器）。
+type DeviceTaskStatsReader interface {
+	AggregateStatusBySourceID(ctx context.Context, source task.TaskSource, sourceID string) (task.DeviceTaskSourceStats, error)
 }
 
 // NewResultAggregator creates a new ResultAggregator. scriptRepo / subFieldRepo 可为 nil——
@@ -65,6 +76,13 @@ func (a *ResultAggregator) SetParamModelResolver(
 	fn func(ctx context.Context, deviceKey string) (*uuid.UUID, error),
 ) {
 	a.paramModelResolver = fn
+}
+
+// SetDeviceTaskStatsReader 注入 device_tasks 终态聚合器（生产由 *task.PgTaskRepository
+// 提供）。注入后 finalizeIfComplete 以实际 device_tasks 终态为完成判据；不注入则退回
+// 理论 total 计数判据（单测向后兼容）。
+func (a *ResultAggregator) SetDeviceTaskStatsReader(r DeviceTaskStatsReader) {
+	a.deviceStats = r
 }
 
 // OnTaskCompleted is called when a device_task reaches a terminal state.
@@ -240,24 +258,57 @@ func (a *ResultAggregator) publishDeviceFrame(ctx context.Context, mmlID uuid.UU
 }
 
 // finalizeIfComplete transitions the MML task to completed/failed when all sub-tasks finish.
+//
+// 完成判据（deviceStats 注入时，生产路径）：以该任务【实际派发的 device_tasks 全部
+// 进入终态】为准，而非理论 total=设备数×命令数。后者在 fanout（BuildTR069Params 失败
+// continue 跳过某设备）或 sequencer（buildNextRequest 返回 nil 时仅虚拟推进、不真正派发）
+// 跳过任意 (设备,命令) 时会让 done 永远到不了 total，导致任务永久卡在 running —— 即
+// "查看到执行结果成功、状态却一直执行中"的根因。
+//
+// 顺序模式正确性依赖回调顺序：Sequencer 必须在本聚合器【之前】注册（见 provider
+// modules.go），这样某行完成时 Sequencer 先把下一行 device_task 入队（Active>0），
+// 本函数再判定时才不会在链路中途误判为已完成。
+//
+// deviceStats 未注入（单测）时退回旧的理论 total 计数判据，保持向后兼容。
 func (a *ResultAggregator) finalizeIfComplete(ctx context.Context, mmlID uuid.UUID) {
 	mmlTask, err := a.taskRepo.GetByID(ctx, mmlID)
 	if err != nil || mmlTask == nil {
 		return
 	}
-
-	total := mmlTask.TotalDevices * len(mmlTask.Commands)
-	done := mmlTask.SuccessCount + mmlTask.FailedCount
-	if done < total {
+	// 已是终态：幂等返回，避免重复 finalize 覆盖已写结果。
+	switch mmlTask.Status {
+	case TaskCompleted, TaskFailed, TaskCancelled:
 		return
+	}
+
+	var successCnt, failedCnt int
+	if a.deviceStats != nil {
+		stats, err := a.deviceStats.AggregateStatusBySourceID(ctx, task.TaskSourceMML, mmlID.String())
+		if err != nil {
+			a.logger.Error("aggregate device_task stats for finalize", zap.Error(err))
+			return
+		}
+		// 还没派发任何 device_task（fanout 进行中）或仍有在途 → 等下次完成事件。
+		if stats.Total == 0 || stats.Active > 0 {
+			return
+		}
+		successCnt, failedCnt = stats.Completed, stats.Failed
+	} else {
+		// 向后兼容：未注入 deviceStats 时沿用理论 total 计数判据（保持单测行为）。
+		total := mmlTask.TotalDevices * len(mmlTask.Commands)
+		done := mmlTask.SuccessCount + mmlTask.FailedCount
+		if done < total {
+			return
+		}
+		successCnt, failedCnt = mmlTask.SuccessCount, mmlTask.FailedCount
 	}
 
 	var finalStatus TaskStatus
 	var finalResult TaskResult
-	if mmlTask.FailedCount == 0 {
+	if failedCnt == 0 {
 		finalStatus = TaskCompleted
 		finalResult = ResultSuccess
-	} else if mmlTask.SuccessCount == 0 {
+	} else if successCnt == 0 {
 		finalStatus = TaskFailed
 		finalResult = ResultFailed
 	} else {
@@ -269,6 +320,9 @@ func (a *ResultAggregator) finalizeIfComplete(ctx context.Context, mmlID uuid.UU
 	mmlTask.Status = finalStatus
 	mmlTask.Result = &finalResult
 	mmlTask.FinishedAt = &now
+	// 用真实 device_tasks 统计覆盖计数器列，消除事件丢失/重复导致的漂移。
+	mmlTask.SuccessCount = successCnt
+	mmlTask.FailedCount = failedCnt
 	if err := a.taskRepo.Update(ctx, mmlTask); err != nil {
 		a.logger.Error("finalize mml task", zap.Error(err))
 		return
