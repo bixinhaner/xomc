@@ -423,8 +423,8 @@ func (s *Service) countDevicesAtTime(ctx context.Context, t time.Time) (int64, e
 	// Log warning that this is not accurate historical data
 	s.logger.Warn(
 		"countDevicesAtTime: returning current count, historical data not available",
-		"requested_time", t.Format(time.RFC3339),
-		"note", "TODO: implement historical device count query (see T-0164-P4)",
+		zap.String("requested_time", t.Format(time.RFC3339)),
+		zap.String("note", "TODO: implement historical device count query (see T-0164-P4)"),
 	)
 
 	counts, err := s.deviceService.CountByStatus(ctx, nil)
@@ -452,8 +452,8 @@ func (s *Service) countAlarmsAtTime(ctx context.Context, t time.Time) (int64, er
 	// Log warning that this is not accurate historical data
 	s.logger.Warn(
 		"countAlarmsAtTime: returning current count, historical data not available",
-		"requested_time", t.Format(time.RFC3339),
-		"note", "TODO: implement historical alarm count query (see T-0164-P4)",
+		zap.String("requested_time", t.Format(time.RFC3339)),
+		zap.String("note", "TODO: implement historical alarm count query (see T-0164-P4)"),
 	)
 
 	stats, err := s.alarmStore.Statistics(ctx, alarm.AlarmFilter{})

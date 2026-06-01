@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<indicatorModel platform="BaiBNQ" deviceType="GNB" indicatorCount="282">
+<indicatorModel platform="BaiBNQ" deviceType="GNB" indicatorCount="284">
     <indicators>
         <indicator id="C010000001" groupId="f942ce91d529d43aaf1521067a058828" enName="RRU.RachPreambleRcvd" reportKey="RRU.RachPreambleRcvd" cnName="前导码接收数" isBuildIn="1" isCounter="1" dataType="整数" unitId="number" statisType="sum" arithmetic="C010000001" formula="RRU.RachPreambleRcvd" />
         <indicator id="C010000002" groupId="f942ce91d529d43aaf1521067a058828" enName="RRU.PdcchCceAvail" reportKey="RRU.PdcchCceAvail" cnName="PDCCH信道CCE可用个数" isBuildIn="1" isCounter="1" dataType="整数" unitId="number" statisType="sum" arithmetic="C010000002" formula="RRU.PdcchCceAvail" />
@@ -283,5 +283,8 @@
         <indicator id="KGNB0565" groupId="3aa8d56f20205678977003cf6ab17081" enName="KPI.FullBWPAvgDataRateDl" reportKey="KPI.FullBWPAvgDataRateDl" cnName="下行用户平均速率(全带宽)" isBuildIn="1" isCounter="0" unitId="Mbps" statisType="avg" arithmetic="(C010020011-C010020015)*8/C010020013" formula="(RLC.FullBwpUpOctDl-RLC.FullBwpUpLastTtiOctDl)*8/RLC.FullBwpThrpTimeDL" />
         <indicator id="KGNB0566" groupId="3aa8d56f20205678977003cf6ab17081" enName="KPI.AvgEffectUserNum" reportKey="KPI.AvgEffectUserNum" cnName="平均激活用户数" isBuildIn="1" isCounter="0" unitId="number" statisType="avg" arithmetic="C010070014" formula="RRC.NbrMeanActiveUE" />
         <indicator id="KGNB0567" groupId="3aa8d56f20205678977003cf6ab17081" enName="KPI.MaxEffectUserNum" reportKey="KPI.MaxEffectUserNum" cnName="最大激活用户数" isBuildIn="1" isCounter="0" unitId="number" statisType="max" arithmetic="C010070015" formula="RRC.NbrMaxActiveUE" />
+        <!-- UE Dashboard Indicators -->
+        <indicator id="KGNB0568" groupId="3aa8d56f20205678977003cf6ab17081" enName="UE_ACTIVE" reportKey="UE_ACTIVE" cnName="活跃UE数" isBuildIn="1" isCounter="0" unitId="number" statisType="avg" arithmetic="C010070014" formula="RRC.NbrMeanActiveUE" />
+        <indicator id="KGNB0569" groupId="3aa8d56f20205678977003cf6ab17081" enName="UE_PEAK" reportKey="UE_PEAK" cnName="峰值UE数" isBuildIn="1" isCounter="0" unitId="number" statisType="max" arithmetic="C010070015" formula="RRC.NbrMaxActiveUE" />
     </indicators>
 </indicatorModel>

@@ -219,7 +219,9 @@ func (r *PgKPIRepository) kpiFilterToMetricsQuery(ctx context.Context, filter KP
 	mt := metrics.MetricTypeKPI
 	q := metrics.QueryRequest{
 		MetricType:  &mt,
-		Granularity: metrics.Granularity15Min,
+		// Don't hardcode granularity - let the caller specify or query all granularities
+		// This fixes the issue where Dashboard KPI data (hourly granularity) was not being returned
+		// because the query was filtering for 15min granularity only
 		StartTime:   filter.StartTime,
 		EndTime:     filter.EndTime,
 	}

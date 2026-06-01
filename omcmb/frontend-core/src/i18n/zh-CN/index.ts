@@ -2113,6 +2113,7 @@ const messages: Record<string, string> = {
   'dashboard.prbUtil':            'PRB利用率',
   'unit.mbps':                    'Mbps',
   'unit.percent':                 '%',
+  'unit.count':                   '个',
 
   // Dashboard chart labels
   'dashboard.chart.online':  '在线',
@@ -2131,6 +2132,9 @@ const messages: Record<string, string> = {
 
   // Dashboard trend chart labels
   'dashboard.throughputTrend':    '上下行速率趋势',
+  'dashboard.ueTrend':            'UE用户数趋势',
+  'dashboard.activeUE':           '活跃UE',
+  'dashboard.peakUE':             '峰值UE',
   'dashboard.qualityTrend':       '无线质量指标趋势',
   'dashboard.timeRange.label':    '对比周期',
   'dashboard.timeRange.today':   '今日',

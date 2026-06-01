@@ -78,6 +78,7 @@ const DASHBOARD_CONFIG = {
   showRunningTasks: false,       // 任务执行中 - Running tasks KPI card
   showQualityTrend: false,       // 无线质量指标趋势 - Quality KPI trend chart (RRC + E-RAB + Handover)
   showPRBUtil: false,            // PRB利用率趋势 - PRB utilization trend chart
+  showUETrend: true,             // UE用户数趋势 - UE user trend chart (Phase 2 feature, backend not implemented)
   showRefreshControls: false,    // 刷新控制栏 - Refresh controls (last update time + refresh button)
 } as const;
 
@@ -144,6 +145,7 @@ export default function DashboardPage() {
 
   // 各图表独立的时间范围状态：yesterday(昨日对比) 或 last_week(上周对比)
   const [throughputTimeRange, setThroughputTimeRange] = useState<'yesterday' | 'last_week'>('yesterday');
+  const [ueTimeRange, setUETimeRange] = useState<'yesterday' | 'last_week'>('yesterday');
 
   // 刷新提示状态
   const [lastUpdateTime, setLastUpdateTime] = useState<Date>(new Date());
@@ -160,7 +162,7 @@ export default function DashboardPage() {
     const interval = setInterval(updateTime, 10000); // 每10秒更新一次
 
     return () => clearInterval(interval);
-  }, [lastUpdateTime, formatTimeAgo, t]);
+  }, [lastUpdateTime, t]);
 
   // 手动刷新处理
   const handleManualRefresh = useCallback(async () => {
@@ -196,6 +198,12 @@ export default function DashboardPage() {
   const [throughputData, isThroughputLoading] = useKPIGroupTrend(
     ['NR_PDCP_RATE_DL', 'NR_PDCP_RATE_UL'],
     throughputTimeRange
+  );
+
+  // 获取UE趋势数据
+  const [ueTrendData, isUETrendLoading] = useKPIGroupTrend(
+    ['UE_ACTIVE', 'UE_PEAK'],
+    ueTimeRange
   );
 
   // 获取设备地理数据（与 GISMapView 相同的数据源）
@@ -240,6 +248,13 @@ export default function DashboardPage() {
   const kpiDeltas = dashboardData?.summary?.kpiDeltas ?? {};
   const totalDevicesDelta = kpiDeltas['total_devices'];
   const activeAlarmsDelta = kpiDeltas['active_alarms'];
+  const ueTrendDelta = kpiDeltas['UE_ACTIVE'];
+
+  // UE 当前值 — 优先从 kpiSummary 获取，否则从趋势数据的最新值获取（取整显示）
+  const kpiSummary = dashboardData?.summary?.kpiSummary ?? {};
+  const currentActiveUE = Math.floor(
+    (kpiSummary['UE_ACTIVE'] ?? ueTrendData['UE_ACTIVE']?.current?.slice(-1)[0]?.value) ?? 0
+  );
 
   // Alarm severity counts - 没有数据时默认为 0，不显示虚假数据
   const critical = alarmCount?.critical ?? 0;
@@ -429,7 +444,7 @@ export default function DashboardPage() {
 
       {/* Row 1: KPI Cards */}
       <Row gutter={[16, 16]} className="omc-scroll-reveal" data-delay="0">
-        <Col xs={24} sm={12} lg={DASHBOARD_CONFIG.showRunningTasks ? 6 : 8}>
+        <Col xs={24} sm={12} lg={6}>
           <KPICard
             title={t('dashboard.totalDevices')}
             value={totalDevices}
@@ -438,12 +453,12 @@ export default function DashboardPage() {
             iconColor={token.colorPrimary}
             loading={isLoading}
             trend={totalDevicesDelta?.trend ?? 'stable'}
-            delta={totalDevicesDelta ? `${totalDevicesDelta.changePercent.toFixed(1)}%` : undefined}
+            delta={totalDevicesDelta?.changePercent !== undefined ? `${totalDevicesDelta.changePercent.toFixed(1)}%` : undefined}
             deltaLabel={totalDevicesDelta?.compareType === 'last_week' ? t('dashboard.vsLastWeek') : t('dashboard.vsYesterday')}
             onClick={() => void navigate('/device/list')}
           />
         </Col>
-        <Col xs={24} sm={12} lg={DASHBOARD_CONFIG.showRunningTasks ? 6 : 8}>
+        <Col xs={24} sm={12} lg={6}>
           <KPICard
             title={t('dashboard.onlineDevices')}
             value={onlineDevices}
@@ -457,7 +472,7 @@ export default function DashboardPage() {
             onClick={() => void navigate('/device/list')}
           />
         </Col>
-        <Col xs={24} sm={12} lg={DASHBOARD_CONFIG.showRunningTasks ? 6 : 8}>
+        <Col xs={24} sm={12} lg={6}>
           <KPICard
             title={t('dashboard.activeAlarms')}
             value={activeAlarms}
@@ -466,9 +481,24 @@ export default function DashboardPage() {
             iconColor="#F5222D"
             loading={isLoading}
             trend={activeAlarmsDelta?.trend ?? 'stable'}
-            delta={activeAlarmsDelta ? `${activeAlarmsDelta.changePercent.toFixed(1)}%` : undefined}
+            delta={activeAlarmsDelta?.changePercent !== undefined ? `${activeAlarmsDelta.changePercent.toFixed(1)}%` : undefined}
             deltaLabel={activeAlarmsDelta?.compareType === 'yesterday' ? t('dashboard.vsYesterday') : t('dashboard.vsLastWeek')}
             onClick={() => void navigate('/alarm/current')}
+          />
+        </Col>
+        {/* UE用户卡片 - 显示当前活跃UE数 */}
+        <Col xs={24} sm={12} lg={6}>
+          <KPICard
+            title={t('dashboard.activeUE')}
+            value={currentActiveUE}
+            icon={<TeamOutlined />}
+            iconBgColor="#f6ffed"
+            iconColor="#10B981"
+            loading={isUETrendLoading}
+            trend={ueTrendDelta?.trend ?? 'stable'}
+            delta={ueTrendDelta?.changePercent !== undefined ? `${ueTrendDelta.changePercent.toFixed(1)}%` : undefined}
+            deltaLabel={ueTrendDelta?.changePercent !== undefined ? t('dashboard.vsLastWeek') : undefined}
+            minHeight={20}
           />
         </Col>
         {DASHBOARD_CONFIG.showRunningTasks && (
@@ -488,9 +518,10 @@ export default function DashboardPage() {
         )}
       </Row>
 
-      {/* Row 2: 上下行速率趋势图 */}
+      {/* Row 2: KPI趋势区（左右各50%） */}
       <Row gutter={[16, 16]} className="omc-scroll-reveal" data-delay="1">
-        <Col xs={24} style={{ display: 'flex' }}>
+        {/* 左侧：上下行速率趋势 */}
+        <Col xs={24} lg={12} style={{ display: 'flex' }}>
           <MultiKPITrendChart
             title={t('dashboard.throughputTrend')}
             kpis={[
@@ -504,6 +535,23 @@ export default function DashboardPage() {
             height={280}
           />
         </Col>
+        {/* 右侧：UE用户数趋势 (Phase 2 feature - hidden until backend implemented) */}
+        {DASHBOARD_CONFIG.showUETrend && (
+        <Col xs={24} lg={12} style={{ display: 'flex' }}>
+          <MultiKPITrendChart
+            title={t('dashboard.ueTrend')}
+            kpis={[
+              { key: 'UE_ACTIVE', label: t('dashboard.activeUE'), color: '#10B981', unit: t('unit.count') },
+              { key: 'UE_PEAK', label: t('dashboard.peakUE'), color: '#F5222D', unit: t('unit.count') },
+            ]}
+            trendDataMap={ueTrendData}
+            timeRange={ueTimeRange}
+            onTimeRangeChange={setUETimeRange}
+            loading={isUETrendLoading}
+            height={280}
+          />
+        </Col>
+        )}
       </Row>
 
       {/* Row 3: Device Status + Device Map */}

@@ -105,8 +105,11 @@ const LineChart: React.FC<LineChartProps> = ({
         formatter: (params: unknown) => {
           const items = params as Array<{ marker: string; seriesName: string; value: unknown; axisValue: string }>;
           if (!Array.isArray(items) || items.length === 0) return '';
+          // 附加单位到数值后（如果单位不为空且不是"%"）
+          const displayUnit = (unit && unit !== '%') ? `${unit}` : '';
+          const unitSuffix = displayUnit ? ` ${displayUnit}` : '';
           const lines = items.map(item =>
-            `${item.marker} ${item.seriesName}: <strong>${item.value}</strong>`
+            `${item.marker} ${item.seriesName}: <strong>${item.value}${unitSuffix}</strong>`
           );
           return `<div style="max-height: 200px; overflow-y: auto;">
             <div style="font-weight: 600; margin-bottom: 4px;">${items[0].axisValue}</div>
