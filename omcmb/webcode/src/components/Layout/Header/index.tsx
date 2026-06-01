@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Badge, Popover } from 'antd';
 import {
   BellOutlined,
@@ -9,7 +9,9 @@ import {
   MenuUnfoldOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '@core/store/appStore';
+import { useAlarmStore } from '@core/store/alarmStore';
 import { useNotificationUnreadCount, useSyncStaleNotifications } from '@core/hooks/api/useNotificationCenter';
+import { useAlarmCount } from '@core/hooks/api/useAlarms';
 import { useResponsive } from '@/hooks/useResponsive';
 import { useT } from '@/hooks/useT';
 import NotificationCenter from '@/components/NotificationCenter';
@@ -42,6 +44,16 @@ export default function Header() {
   const unreadCount = unreadQuery.data ?? 0;
   // T-0157 stale sync: 打开 Popover 时反查 task 状态修正卡死的 queued/sent 消息
   const syncStale = useSyncStaleNotifications();
+
+  // 获取告警统计数据并同步到 store
+  const { data: alarmCount } = useAlarmCount();
+  const setAlarmCounts = useAlarmStore((s) => s.setCounts);
+
+  useEffect(() => {
+    if (alarmCount) {
+      setAlarmCounts(alarmCount);
+    }
+  }, [alarmCount, setAlarmCounts]);
 
   const deviceLabel = DEVICE_TYPE_KEY[deviceType] ? t(DEVICE_TYPE_KEY[deviceType]) : deviceType;
 
