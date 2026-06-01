@@ -108,9 +108,8 @@ export default function GISMapView() {
     offline: true,
   });
 
-  // 左侧筛选面板折叠状态（默认全部展开，但图例默认隐藏）
+  // 左侧筛选面板折叠状态（默认设备组收起，设备状态展开）
   const [filterPanelActiveKeys, setFilterPanelActiveKeys] = useState<string[]>([
-    'deviceGroup',    // 设备组
     'deviceStatus',   // 设备状态
   ]);
 
