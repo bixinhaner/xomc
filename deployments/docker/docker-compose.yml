@@ -420,6 +420,10 @@ services:
   # ──────────────────────────────────────────────────────────────────
   otelcol:
     image: otel/opentelemetry-collector-contrib:0.103.0
+    # 以 root 跑：otel-contrib 默认非 root(UID 10001)，读不了业务进程(root)经
+    # lumberjack 写的 0600 日志(/run/logs/<svc>/<svc>.log)，导致 Loki 里只有
+    # nginx(0644 可读)。root 才能读全 app/acs/worker 日志。
+    user: "0:0"
     environment:
       TZ: "Asia/Shanghai"
     # 仅容器内对接 SDK 与 Tempo，不对外暴露端口（trace 不上公网）。

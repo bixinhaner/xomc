@@ -132,6 +132,11 @@ services:
   #         同时 otelcol filelog 采集 /run/logs → loki，pg/redisreceiver → prometheus
   otelcol:
     image: ${IMAGE_OTELCOL}
+    # otel-contrib 镜像默认以非 root(UID 10001)运行；而业务进程(root)经 lumberjack
+    # 写的 /run/logs/<svc>/<svc>.log 是 0600(仅 root 可读)。非 root 的 otelcol 读不了
+    # 业务日志 → Loki 里只有 nginx(其日志 0644 可读)。以 root 跑即可读全部业务日志，
+    # 让 Grafana 的 service_name 出现 omcgo-app/acs/worker。
+    user: "0:0"
     restart: unless-stopped
     environment:
       TZ: "Asia/Shanghai"
