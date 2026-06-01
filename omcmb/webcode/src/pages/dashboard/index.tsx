@@ -68,6 +68,7 @@ const DASHBOARD_CONFIG = {
   showAlarmDistribution: false,  // 告警级别分布 - Alarm severity distribution pie chart
   showAlarmTrend7d: false,       // 近7天告警趋势 - 7-day alarm trend line chart
   showTopAlarmDevices: false,    // 高频告警设备 - Top alarm devices bar chart
+  showRunningTasks: false,       // 任务执行中 - Running tasks KPI card
 } as const;
 
 function formatAlarmTime(value: string | undefined): string {
@@ -345,7 +346,7 @@ export default function DashboardPage() {
     <div ref={dashboardRef} style={{ padding: '0 0 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Row 1: KPI Cards */}
       <Row gutter={[16, 16]} className="omc-scroll-reveal" data-delay="0">
-        <Col xs={24} sm={12} lg={6}>
+        <Col xs={24} sm={12} lg={DASHBOARD_CONFIG.showRunningTasks ? 6 : 8}>
           <KPICard
             title={t('dashboard.totalDevices')}
             value={totalDevices}
@@ -359,7 +360,7 @@ export default function DashboardPage() {
             onClick={() => void navigate('/device/list')}
           />
         </Col>
-        <Col xs={24} sm={12} lg={6}>
+        <Col xs={24} sm={12} lg={DASHBOARD_CONFIG.showRunningTasks ? 6 : 8}>
           <KPICard
             title={t('dashboard.onlineDevices')}
             value={onlineDevices}
@@ -373,7 +374,7 @@ export default function DashboardPage() {
             onClick={() => void navigate('/device/list')}
           />
         </Col>
-        <Col xs={24} sm={12} lg={6}>
+        <Col xs={24} sm={12} lg={DASHBOARD_CONFIG.showRunningTasks ? 6 : 8}>
           <KPICard
             title={t('dashboard.activeAlarms')}
             value={activeAlarms}
@@ -387,6 +388,7 @@ export default function DashboardPage() {
             onClick={() => void navigate('/alarm/current')}
           />
         </Col>
+        {DASHBOARD_CONFIG.showRunningTasks && (
         <Col xs={24} sm={12} lg={6}>
           <KPICard
             title={t('dashboard.runningTasks')}
@@ -400,6 +402,7 @@ export default function DashboardPage() {
             onClick={() => void navigate('/ops/tasks')}
           />
         </Col>
+        )}
       </Row>
 
       {/* Row 2: Device Status Chart + Device Map */}
