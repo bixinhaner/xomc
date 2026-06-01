@@ -49,10 +49,10 @@ import {
   localizeBuiltinCategoryLabel,
   localizeBuiltinDescription,
   localizeBuiltinTypeName,
-  TransferTemplateCard,
   TYPE_DRAWER_DEFAULT_STEPS,
 } from '../shared';
 import type { TaskTypeFormValues } from '../shared';
+import { TransferTemplateCard } from '../TransferTemplateCard';
 
 const { Paragraph, Text, Title } = Typography;
 

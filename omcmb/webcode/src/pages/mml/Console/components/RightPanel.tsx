@@ -15,10 +15,8 @@ import InstancePicker from './InstancePicker';
 import TerminalPanel from './TerminalPanel';
 import ParamPathExpert, { type ParamPathChangePayload } from './ParameterPathCommand';
 import { ConsoleActionBar, type ExecutionMode } from './ConsoleActionBar';
-import {
-  InstanceArityInput,
-  deriveArityFromSubFields,
-} from './InstanceArityInput';
+import { InstanceArityInput } from './InstanceArityInput';
+import { deriveArityFromSubFields } from './instanceArity';
 import { useT } from '@/hooks/useT';
 
 type RightTab = 'control' | 'paramPath';

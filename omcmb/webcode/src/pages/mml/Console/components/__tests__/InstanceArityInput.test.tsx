@@ -1,10 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import { InstanceArityInput } from '../InstanceArityInput';
 import {
-  InstanceArityInput,
   deriveArityFromSubFields,
   selectorKeysForArity,
-} from '../InstanceArityInput';
+} from '../instanceArity';
 
 vi.mock('@/hooks/useT', () => ({
   useT:

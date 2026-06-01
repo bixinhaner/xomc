@@ -47,7 +47,6 @@ type ExecuteType = '0' | '1';
 type EnableType = '0' | '1';
 
 // T-0136: 保留为 export 占位，避免 TS6196 同时不破坏未来可能复用
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export interface _PolicyForm {
   selfStartEnable: EnableType;
   policyName: string;
@@ -120,7 +119,6 @@ interface WanBindingItem {
 }
 
 // eNB WAN固定分组类型 (T-0136: 保留为 export 占位避免 TS6196)
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export type _EnbWanGroup = 'wanOamTr069' | 'wanS1c' | 'wanS1u' | 'wanX2ap';
 
 // 自定义参数项
@@ -572,16 +570,8 @@ const MOCK_PARAM_CONFIGS: ParamConfig[] = [
   },
 ];
 
-// Bandwidth options (T-0136: 保留为 export 占位避免 TS6133)
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export const _BANDWIDTH_OPTIONS_DXDF = [
-  { label: '6', value: '6' },
-  { label: '15', value: '15' },
-  { label: '25', value: '25' },
-  { label: '50', value: '50' },
-  { label: '75', value: '75' },
-  { label: '100', value: '100' },
-];
+// _BANDWIDTH_OPTIONS_DXDF 占位常量已拆到同级 ./constants.ts
+// （react-refresh/only-export-components：页面文件只导出组件）。
 
 const BANDWIDTH_OPTIONS_OTHER = [
   { label: '5MHz', value: 'n25' },

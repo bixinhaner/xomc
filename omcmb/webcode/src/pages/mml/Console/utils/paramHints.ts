@@ -29,10 +29,10 @@ function humanizeRaw(raw: string, t: TFn): string | null {
   let m = trimmed.match(/^strint-?\[(.+)\]$/i);
   if (m) return t('mml.console.hint.numericStringRange', { range: m[1] });
 
-  m = trimmed.match(/^unsignedInt\[(\d+)\s*[:\-]\s*(\d+)\]$/i);
+  m = trimmed.match(/^unsignedInt\[(\d+)\s*[:-]\s*(\d+)\]$/i);
   if (m) return t('mml.console.hint.integerRange', { min: m[1], max: m[2] });
 
-  m = trimmed.match(/^int\[(-?\d+)\s*[:\-]\s*(-?\d+)\]$/i);
+  m = trimmed.match(/^int\[(-?\d+)\s*[:-]\s*(-?\d+)\]$/i);
   if (m) return t('mml.console.hint.integerRange', { min: m[1], max: m[2] });
 
   return null;

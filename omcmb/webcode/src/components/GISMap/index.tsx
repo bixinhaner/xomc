@@ -114,7 +114,6 @@ const GISMap = forwardRef<GISMapRef, GISMapProps>(({
     updateSize,
     highlightAndSpiderfyIfNeeded,
     metadata,
-    metadataLoading,
   } = useOLMap({
     center: defaultCenter,
     zoom: defaultZoom,

@@ -141,18 +141,8 @@ const MENU_STATUS_OPTIONS = [
   { label: '停用', value: 'disabled' },
 ];
 
-// 默认的操作按钮（三级节点）(T-0136: 保留为 export 占位避免 TS6133)
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export const DEFAULT_OPERATIONS = [
-  { key: 'query', name: '查询' },
-  { key: 'add', name: '添加' },
-  { key: 'edit', name: '修改' },
-  { key: 'delete', name: '删除' },
-  { key: 'export', name: '导出' },
-  { key: 'import', name: '导入' },
-];
-
-
+// DEFAULT_OPERATIONS 占位常量已拆到同级 ./constants.ts
+// （react-refresh/only-export-components：页面文件只导出组件）。
 
 // 后端 GET /admin/menus/tree 响应。handler 把树包了一层 {data: [...]}（参 menu_handler.go GetMenuTree），
 // 与外层信封 {ret,msg,data} 由 http.ts 拦截器拆包后，response.data 是内层 {data: BackendMenu[]}。

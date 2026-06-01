@@ -27,7 +27,6 @@ interface ExportModalProps {
 // 通过 Tree.checkedKeys prop 由 antd 自带处理；保留参数兼容签名）
 function buildTreeData(
   groups: DeviceGroup[],
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _checkedKeys: string[]
 ): DataNode[] {
   // 找出根节点：允许 null / undefined / 空字符串，或父节点不在当前可见集合内。

@@ -37,7 +37,7 @@ const mockData: NeighborRow[] = [
 
 export default function NeighborParams() {
   const t = useT();
-  const [_filters, setFilters] = useState<Record<string, unknown>>({});
+  const [, setFilters] = useState<Record<string, unknown>>({});
   const [modalVisible, setModalVisible] = useState(false);
   const [editingRow, setEditingRow] = useState<NeighborRow | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);

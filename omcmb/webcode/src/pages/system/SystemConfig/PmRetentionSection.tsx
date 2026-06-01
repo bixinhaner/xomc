@@ -88,7 +88,7 @@ export default function PmRetentionSection() {
         })),
       });
       message.success(t('pmRetention.save.success'));
-    } catch (err) {
+    } catch {
       // validateFields 失败或网络错误：交给 antd 自身的 UI 提示，不再额外弹错
     } finally {
       setSubmitting(false);

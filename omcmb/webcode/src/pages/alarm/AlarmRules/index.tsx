@@ -4,7 +4,6 @@ import type { MenuProps } from 'antd';
 import {
   CheckCircleOutlined,
   DeleteOutlined,
-  EyeOutlined,
   MoreOutlined,
   PlusOutlined,
   StopOutlined,

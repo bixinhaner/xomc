@@ -14,7 +14,7 @@ import { DownOutlined, SearchOutlined, UpOutlined } from '@ant-design/icons';
 import styles from './FilterBar.module.css';
 
 const { RangePicker } = DatePicker;
-type FormFieldValues = Record<string, {} | undefined>;
+type FormFieldValues = Record<string, unknown>;
 
 export interface FilterField {
   name: string;

@@ -1,29 +1,11 @@
 import { useEffect, useRef, type ReactNode } from 'react';
-import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { useUserStore } from '@core/store/userStore';
+import { queryClient } from './queryClient';
 
 interface QueryProviderProps {
   children: ReactNode;
 }
-
-/**
- * Shared QueryClient instance.
- * - staleTime: 30 000 ms — cached data is considered fresh for 30 seconds.
- * - retry: 2 — failed requests are retried up to 2 times before surfacing an error.
- * - refetchOnWindowFocus: false — avoid unexpected re-fetches on tab switch.
- */
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30_000,
-      retry: 2,
-      refetchOnWindowFocus: false,
-    },
-    mutations: {
-      retry: 0,
-    },
-  },
-});
 
 /**
  * AuthQueryBridge — 监听用户登录态从 true → false 时炸掉所有 React Query 缓存。
@@ -64,5 +46,3 @@ export default function QueryProvider({ children }: QueryProviderProps) {
     </QueryClientProvider>
   );
 }
-
-export { queryClient };

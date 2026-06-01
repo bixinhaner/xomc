@@ -125,11 +125,6 @@ export default function PathPicker({
   }, [searchResults]);
 
   // ----- 已选 path 操作 -----
-  const handleAddPaths = (newPaths: string[]) => {
-    if (newPaths.length === 0) return;
-    const merged = Array.from(new Set([...value, ...newPaths]));
-    if (merged.length !== value.length) onChange(merged);
-  };
   const handleRemove = (p: string) => {
     onChange(value.filter((x) => x !== p));
   };

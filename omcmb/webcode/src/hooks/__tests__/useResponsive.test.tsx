@@ -14,7 +14,7 @@ type MqInstance = {
   dispatchEvent: ReturnType<typeof vi.fn>;
 };
 
-let activeWidth = 1280; // desktop default
+const activeWidth = 1280; // desktop default
 
 function createMatchMedia(query: string): MqInstance {
   const minWidthMatch = /min-width:\s*(\d+)px/.exec(query);

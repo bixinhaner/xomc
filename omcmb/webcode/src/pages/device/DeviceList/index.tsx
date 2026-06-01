@@ -22,7 +22,7 @@ import StatisticsPanel from '@/components/StatisticsPanel';
 import StatusIndicator from '@/components/StatusIndicator';
 import ListPageLayout from '@/components/Layout/ListPageLayout';
 import { useDeviceList, useBatchRebootDevices, useDeviceGroups } from '@core/hooks/api/useDevices';
-import { useDictionary, useDictionaryBatch } from '@core/hooks/api/useSystem';
+import { useDictionaryBatch } from '@core/hooks/api/useSystem';
 import { useAlarmCount, useTriggerAlarmSync } from '@core/hooks/api/useAlarms';
 import { useCreateUnifiedFileTransferTask } from '@core/hooks/api/useUnifiedFileTransfer';
 import { useDownloadStationLog } from '@core/hooks/api/useStationLog';

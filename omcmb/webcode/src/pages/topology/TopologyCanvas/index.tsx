@@ -49,7 +49,7 @@ export default function TopologyCanvasPage() {
   const [nodeTypeFilter, setNodeTypeFilter] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [showLabels, setShowLabels] = useState(true);
-  const [_zoomLevel, setZoomLevel] = useState(1);
+  const [, setZoomLevel] = useState(1);
   const [limit, setLimit] = useState(500); // 默认 500 个节点
 
   // 使用服务端筛选：将 nodeType、status 和 limit 传递给 API

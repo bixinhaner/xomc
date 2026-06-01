@@ -62,7 +62,7 @@ const JSONNode: React.FC<JSONNodeProps> = ({
       ? (data as unknown[]).map((v, i) => [String(i), v] as [string, unknown])
       : [];
 
-  const renderValue = (val: unknown, _keyStr?: string, isLastItem = true, _itemDepth = depth): React.ReactNode => {
+  const renderValue = (val: unknown, _keyStr?: string, isLastItem = true): React.ReactNode => {
     if (val === null) return <span style={{ color: colors.null, fontFamily: 'monospace', fontSize: 13 }}>null{isLastItem ? '' : ','}</span>;
     if (typeof val === 'boolean')
       return (
@@ -98,7 +98,7 @@ const JSONNode: React.FC<JSONNodeProps> = ({
     return (
       <div style={{ paddingLeft: depth * INDENT }}>
         {keyLabel}
-        {renderValue(data, keyName, isLast, depth)}
+        {renderValue(data, keyName, isLast)}
       </div>
     );
   }
@@ -167,7 +167,7 @@ const JSONNode: React.FC<JSONNodeProps> = ({
                     </span>
                   </span>
                 )}
-                {renderValue(v, k, isLastChild, depth + 1)}
+                {renderValue(v, k, isLastChild)}
               </div>
             );
           })}

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { login, logout, MOCK_CREDENTIALS } from './helpers/auth';
+import { login, logout } from './helpers/auth';
 
 test.describe('Authentication flow', () => {
   test('should display the login page with form fields', async ({ page }) => {

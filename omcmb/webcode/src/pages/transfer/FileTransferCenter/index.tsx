@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dayjs from 'dayjs';
 import {
-  Alert,
   Button,
   Card,
   Checkbox,
@@ -26,7 +25,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import { DeleteOutlined, DownloadOutlined, EyeOutlined, PlusOutlined, ExportOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useQueryClient } from '@tanstack/react-query';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useT } from '@/hooks/useT';
 
 import ListPageLayout from '@/components/Layout/ListPageLayout';
@@ -68,11 +67,13 @@ import {
   getStepLabels,
   localizeBuiltinCategoryLabel,
   localizeBuiltinTypeName,
+  UPGRADE_LIKE_CATEGORIES,
+} from '../shared';
+import {
   renderDeviceStatus,
   renderEllipsisCell,
   renderTaskStatus,
-  UPGRADE_LIKE_CATEGORIES,
-} from '../shared';
+} from '../shared.render';
 import type { TransferStepId } from '@core/types/unifiedFileTransfer';
 
 const { Text, Title } = Typography;
@@ -156,7 +157,6 @@ function getUpgradeTypeLabel(category: string, fallback: string, t: (id: string)
 }
 
 export default function FileTransferCenter() {
-  const navigate = useNavigate();
   const t = useT();
   const queryClient = useQueryClient();
   // 任务名称自动填充用：取登录用户名拼前缀，displayName / username 哪个有用哪个。
@@ -477,10 +477,6 @@ export default function FileTransferCenter() {
     ],
     [t],
   );
-
-  // Failure reason i18n — mirrors UpgradePlan renderFailureReason
-  const DEVICE_CODES = new Set(['DOWNLOAD_FAULT', 'TC_FAULT', 'UPGRADE_5G_FAILED']);
-  const TIMEOUT_CODES = new Set(['DOWNLOAD_TIMEOUT', 'TASK_TIMEOUT']);
 
   const failureReasonColumn = {
     title: t('software.failureReason'),

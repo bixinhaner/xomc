@@ -1,10 +1,10 @@
 import React, { Suspense } from 'react';
 import { Navigate, type RouteObject } from 'react-router-dom';
-import { Spin } from 'antd';
 import AppShell from '@/components/Layout';
 import PrivateRoute from './PrivateRoute';
 import MenuBootstrap from '@/components/MenuBootstrap';
 import ErrorBoundary from '@/components/common/ErrorBoundary';
+import { PageLoader } from './PageLoader';
 import LoginPage from '@/pages/login';
 import NotFound from '@/pages/error/NotFound';
 import Forbidden from '@/pages/error/Forbidden';
@@ -180,13 +180,8 @@ const AlarmLibraryPage   = React.lazy(() => import('@/pages/product/alarm-librar
 const OrphanDevicesPage  = React.lazy(() => import('@/pages/product/orphan-devices'));
 
 // ---------------------------------------------------------------------------
-// Loading fallback
+// Loading fallback（组件已拆到 ./PageLoader.tsx）
 // ---------------------------------------------------------------------------
-const PageLoader = () => (
-  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', minHeight: 300 }}>
-    <Spin size="large" />
-  </div>
-);
 
 function withSuspense(Component: React.ComponentType) {
   return (

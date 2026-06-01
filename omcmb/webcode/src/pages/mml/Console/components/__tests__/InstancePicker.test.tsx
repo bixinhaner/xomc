@@ -44,10 +44,11 @@ vi.mock('@core/hooks/api/useGPVProbe', () => ({
   useGPVProbe: () => mockProbeResult,
 }));
 
-import InstancePicker, {
+import InstancePicker from '../InstancePicker';
+import {
   effectiveIndices,
   parseTagValues,
-} from '../InstancePicker';
+} from '../instanceSelection';
 
 function rmvStmt(opts?: {
   rmvInstanceIndex?: number;

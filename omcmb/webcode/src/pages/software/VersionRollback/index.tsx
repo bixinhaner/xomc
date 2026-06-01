@@ -67,27 +67,8 @@ const TASK_STATUS_COLORS: Record<number, string> = {
   4: 'success',     // ended
 };
 
-// Task result display color (T-0136: 保留为 export 占位避免 TS6133)
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export const TASK_RESULT_COLORS: Record<string, string> = {
-  success: 'success',
-  partial: 'warning',
-  failed: 'error',
-  terminated: 'default',
-};
-
-// Sub-task status display color (T-0136: 保留为 export 占位避免 TS6133)
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export const SUB_TASK_STATUS_COLORS: Record<string, string> = {
-  pending: 'default',
-  downloading: 'processing',
-  rebooting: 'processing',
-  verifying: 'processing',
-  completed: 'success',
-  failed: 'error',
-  suspended: 'warning',
-  terminated: 'default',
-};
+// TASK_RESULT_COLORS / SUB_TASK_STATUS_COLORS 占位常量已拆到同级 ./constants.ts
+// （react-refresh/only-export-components：页面文件只导出组件）。
 
 export default function VersionRollback() {
   const t = useT();

@@ -170,10 +170,10 @@ export default function GISMapView() {
     };
   }, [selectedGroupIds, statusFilter, isInitialized, allGroupIds]);
 
-  const { data: devicesGeoData, isLoading: isLoadingDevices } = useMapDevicesGeo(filterParams);
+  const { data: devicesGeoData } = useMapDevicesGeo(filterParams);
 
   // 获取地图统计数据
-  const { data: mapStatsData, isLoading: isLoadingStats } = useMapStats({
+  const { data: mapStatsData } = useMapStats({
     groupIds: selectedGroupIds.length > 0 ? selectedGroupIds : undefined,
   });
 
