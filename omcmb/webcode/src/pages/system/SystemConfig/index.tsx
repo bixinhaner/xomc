@@ -105,8 +105,11 @@ export default function SystemConfig() {
   const [transferForm] = Form.useForm();
   const [northboundForm] = Form.useForm();
 
-  // tab → form 映射（稳定引用，因为每个 form 都来自 useForm()）
-  const formMap = useMemo<Record<SettingsTab, ReturnType<typeof Form.useForm>[0]>>(
+  // tab → form 映射（稳定引用，因为每个 form 都来自 useForm()）。
+  // 注意：自管表单的页签（如 pm_retention，PmRetentionSection 内部自带 form +
+  // 保存/重置按钮）【不在此映射内】，故用 Partial —— formMap[activeTab] 可能为
+  // undefined，下面 useEffect / handleSave / 底部保存按钮均按是否存在 form 做守卫。
+  const formMap = useMemo<Partial<Record<SettingsTab, ReturnType<typeof Form.useForm>[0]>>>(
     () => ({
       basic: basicForm,
       security: securityForm,
@@ -126,6 +129,9 @@ export default function SystemConfig() {
   // 把后端返回的 KV 灌进对应 tab 的 form。空数据也照样 reset，避免显示其他 tab 的残留值。
   useEffect(() => {
     const form = formMap[activeTab];
+    // 自管表单页签（pm_retention）无对应 form，跳过 —— 否则 form.resetFields()
+    // 会抛 "Cannot read properties of undefined (reading 'resetFields')"。
+    if (!form) return;
     form.resetFields();
     if (!configList || configList.length === 0) return;
     const fields: Record<string, unknown> = {};
@@ -163,6 +169,8 @@ export default function SystemConfig() {
   // 保存当前设置
   const handleSave = useCallback(async () => {
     const form = formMap[activeTab];
+    // 自管表单页签（pm_retention）由其组件内部按钮保存，不走这里的全局保存。
+    if (!form) return;
     let values: Record<string, unknown>;
     try {
       values = (await form.validateFields()) as Record<string, unknown>;
@@ -229,19 +237,22 @@ export default function SystemConfig() {
       <Spin spinning={isFetching}>
         {renderSettingsContent()}
       </Spin>
-      {/* 底部保存按钮 */}
-      <div style={{ marginTop: 16, textAlign: 'center' }}>
-        <Space>
-          <Button
-            type="primary"
-            icon={<SaveOutlined />}
-            loading={batchUpdate.isPending}
-            onClick={handleSave}
-          >
-            {t('common.save')}
-          </Button>
-        </Space>
-      </div>
+      {/* 底部保存按钮：仅对走全局表单的页签显示；自管表单页签（pm_retention）
+          由其组件内部的保存/重置按钮负责，避免重复且避免对 undefined form 操作。 */}
+      {formMap[activeTab] && (
+        <div style={{ marginTop: 16, textAlign: 'center' }}>
+          <Space>
+            <Button
+              type="primary"
+              icon={<SaveOutlined />}
+              loading={batchUpdate.isPending}
+              onClick={handleSave}
+            >
+              {t('common.save')}
+            </Button>
+          </Space>
+        </div>
+      )}
     </ListPageLayout>
   );
 }
