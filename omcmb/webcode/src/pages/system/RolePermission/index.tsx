@@ -692,6 +692,10 @@ export default function RoleManagement() {
         }
         // 让当前用户的侧边栏菜单立即刷新（非 builtIn 用户）。
         await invalidateUserMenus();
+        // 刷新角色列表：createRole 的 invalidate 在专项端点（设备分组/菜单/API）写入
+        // 之前就触发了，列表里的 deviceGroupIds / ⚠️ 标记会是旧值；这里在整条流程结束
+        // 后再 refetch 一次，确保当前页数据为最新。
+        void refetch();
         message.success(t('common.save'));
         setCreateVisible(false);
         form.resetFields();
@@ -706,7 +710,7 @@ export default function RoleManagement() {
         message.error(msg);
       }
     });
-  }, [form, createRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, hasAnyPermission, allSecondLevelIds, permissionsToMenuIds, setRoleMenusMut, setRoleDeviceGroupsMut, setRoleApiPermissions, invalidateUserMenus, message, t]);
+  }, [form, createRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, hasAnyPermission, allSecondLevelIds, permissionsToMenuIds, setRoleMenusMut, setRoleDeviceGroupsMut, setRoleApiPermissions, invalidateUserMenus, refetch, message, t]);
 
   // doEditSubmit 拆出实际提交逻辑，配合下方"清空设备分组二次确认"复用。
   // 必须先于 handleEdit 声明，否则 React 的 useCallback 会触发 react-hooks/refs：
@@ -743,6 +747,10 @@ export default function RoleManagement() {
         });
         // 让当前用户的侧边栏菜单立即刷新（非 builtIn 用户）。
         await invalidateUserMenus();
+        // 刷新角色列表：updateRole 的 invalidate 在专项端点（设备分组/菜单/API）写入
+        // 之前就触发了，列表里的 deviceGroupIds / ⚠️ 标记会是旧值；这里在整条流程结束
+        // 后再 refetch 一次，确保当前页数据为最新。
+        void refetch();
         message.success(t('common.save'));
         setEditVisible(false);
         form.resetFields();
@@ -758,7 +766,7 @@ export default function RoleManagement() {
         message.error(msg);
       }
     });
-  }, [selectedRole, form, updateRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, permissionsToMenuIds, setRoleMenusMut, setRoleDeviceGroupsMut, setRoleApiPermissions, invalidateUserMenus, message, t]);
+  }, [selectedRole, form, updateRole, checkedPermissionKeys, selectedDeviceGroupIds, selectedNetworkTypes, selectedApiEndpointIds, permissionsToMenuIds, setRoleMenusMut, setRoleDeviceGroupsMut, setRoleApiPermissions, invalidateUserMenus, refetch, message, t]);
 
   // 校验并提交编辑
   const handleEdit = useCallback(() => {

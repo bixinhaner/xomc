@@ -88,21 +88,27 @@ export default function UserManagement() {
 
   // PRD §11.7 决议 ①：未绑定任何设备分组的角色，下拉 option 追加 ⚠️ 标记，
   // 防止管理员误以为"分配了角色就能看到设备"。
+  //
+  // 与 RolePermission 列表保持一致（同一判据 + 同一文案 role.noGroupBinding.tag）：
+  // 内置角色（admin 等，builtIn=1/2）有隐含的全设备访问权，不算"未绑定设备分组"，
+  // 故内置角色不打该标记 —— 否则会出现"用户页 admin 提示无设备权限、角色页 admin
+  // 却不提示"的两处判断不一致问题。builtIn 由 mapBackendRole(role.is_system) 填充。
   const roleOptions = useMemo(() =>
     (allRoles ?? []).map((r) => {
-      const noGroups = !r.deviceGroupIds || r.deviceGroupIds.length === 0;
+      const isBuiltInRole = r.builtIn === 1 || r.builtIn === 2;
+      const noGroups = !isBuiltInRole && (!r.deviceGroupIds || r.deviceGroupIds.length === 0);
       return {
         value: r.id,
         label: noGroups ? (
           <span>
             {r.roleName}
-            <Tag color="warning" style={{ marginLeft: 4 }}>{t('user.tag.noDeviceAccess')}</Tag>
+            <Tag color="warning" style={{ marginLeft: 4 }}>{t('role.noGroupBinding.tag')}</Tag>
           </span>
         ) : (
           r.roleName
         ),
       };
-    }), [allRoles]);
+    }), [allRoles, t]);
 
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();

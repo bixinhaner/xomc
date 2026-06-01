@@ -125,7 +125,7 @@ const messages: Record<string, string> = {
   'role.noGroupBinding.title':            '该角色未绑定任何设备分组',
   'role.noGroupBinding.editDesc':         '分配该角色的用户将无法查看任何设备数据。请在「数据权限」标签页选择至少一个二级设备分组。',
   'role.noGroupBinding.viewDesc':         '分配该角色的用户将无法查看任何设备数据。',
-  'role.noGroupBinding.tag':              '⚠️ 未绑分组',
+  'role.noGroupBinding.tag':              '⚠️ 未绑定设备分组',
 
   // F3 第 2 批 — system/UserManagement (38 处)
   'user.tooltip.builtinNoDisable':  '内置用户不可禁用，避免锁死系统登录入口',
