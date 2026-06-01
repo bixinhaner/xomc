@@ -194,6 +194,9 @@ interface DeviceDetailCell {
   opState?: string;
   rfTxStatus?: string;
   adminState?: string;
+  lac?: string;
+  arfcn?: string;
+  btsNum?: number;
 }
 
 interface DeviceDetailInfo {
@@ -245,6 +248,9 @@ interface BackendDeviceDetailCell {
   op_state?: string;
   rf_tx_status?: string;
   admin_state?: string;
+  lac?: string;
+  arfcn?: string;
+  bts_num?: number;
 }
 
 interface BackendDeviceDetailInfo {
@@ -288,11 +294,13 @@ interface BackendDeviceDetailInfo {
 interface BackendDeviceDetailCompositeResponse {
   info?: BackendDeviceDetailInfo;
   cells?: BackendDeviceDetailCell[];
+  gsm_cells?: BackendDeviceDetailCell[];
 }
 
 interface DeviceDetailCompositeResponse {
   info?: DeviceDetailInfo;
   cells?: DeviceDetailCell[];
+  gsmCells?: DeviceDetailCell[];
 }
 
 function mapDeviceDetailInfo(info?: BackendDeviceDetailInfo): DeviceDetailInfo | undefined {
@@ -349,6 +357,9 @@ function mapDeviceDetailCell(cell: BackendDeviceDetailCell): DeviceDetailCell {
     opState: cell.op_state,
     rfTxStatus: cell.rf_tx_status,
     adminState: cell.admin_state,
+    lac: cell.lac,
+    arfcn: cell.arfcn,
+    btsNum: cell.bts_num,
   };
 }
 
@@ -356,6 +367,7 @@ function mapDeviceDetailCompositeResponse(data: BackendDeviceDetailCompositeResp
   return {
     info: mapDeviceDetailInfo(data.info),
     cells: data.cells?.map(mapDeviceDetailCell),
+    gsmCells: data.gsm_cells?.map(mapDeviceDetailCell),
   };
 }
 
@@ -412,6 +424,8 @@ interface CellSummaryColumn {
   dataIndex?: string[];
   width?: number;
 }
+
+type BmCellTech = 'LTE' | 'GSM';
 
 const normalizeNetworkType = (networkType: string | undefined): string => {
   switch (networkType) {
@@ -684,6 +698,7 @@ const buildCellRecords = (device: Device, detailCells?: DeviceDetailCell[]): Cel
       key: `${device.id}-cell-${cell.index || idx + 1}`,
       index: cell.index || idx + 1,
       values: {
+        ...device,
         cellId: cell.cellId ?? cell.eci ?? '',
         nrCellId: cell.cellId ?? cell.eci ?? '',
         eci: cell.eci ?? '',
@@ -694,6 +709,9 @@ const buildCellRecords = (device: Device, detailCells?: DeviceDetailCell[]): Cel
         opState: cell.opState ?? '',
         rfStatus: cell.rfTxStatus ?? '',
         adminState: cell.adminState ?? '',
+        lac: cell.lac ?? device.lac ?? '',
+        arfcn: cell.arfcn ?? device.arfcn ?? '',
+        btsNum: cell.btsNum ?? device.btsNum ?? 0,
       },
     }));
   }
@@ -997,15 +1015,41 @@ export default function DeviceDetail() {
     isLoading: quickSettingsLoading,
   } = useQuickSettingsGroups(device?.id);
   const showQuickSettingsTab = !quickSettingsLoading && (quickSettingsData?.groups?.length ?? 0) > 0;
+  const [activeBmTech, setActiveBmTech] = useState<BmCellTech>('LTE');
 
   const detailQuickSettingsNetworkType = normalizeQuickSettingsNetworkType(displayDevice?.networkType);
+  const isBmProduct = ((quickSettingsData?.paramModel
+    ?? displayDevice?.productClass
+    ?? device?.productClass
+    ?? '')
+    .trim()
+    .toUpperCase()
+    .startsWith('BM'));
 
   // 概览页小区列表的实例过滤规则与「快速设置」tab 完全一致，统一走 useResolvedCellInstances。
   const detailResolved = useResolvedCellInstances({
     deviceId: device?.id ?? '',
     networkType: detailQuickSettingsNetworkType,
     paramModel: quickSettingsData?.paramModel ?? '',
+    bmTech: activeBmTech,
   });
+
+  const bmCellTechOptions = useMemo<BmCellTech[]>(() => {
+    if (!isBmProduct) return [];
+    if (detailResolved.bmTechOptions.length > 0) return detailResolved.bmTechOptions;
+    return ['LTE', 'GSM'];
+  }, [detailResolved.bmTechOptions, isBmProduct]);
+
+  useEffect(() => {
+    if (!isBmProduct) {
+      if (activeBmTech !== 'LTE') setActiveBmTech('LTE');
+      return;
+    }
+    if (bmCellTechOptions.length === 0) return;
+    if (!bmCellTechOptions.includes(activeBmTech)) {
+      setActiveBmTech(bmCellTechOptions[0]);
+    }
+  }, [activeBmTech, bmCellTechOptions, isBmProduct]);
 
   const detailQuickSettingsCellInstances = detailResolved.instances;
   const detailQuickSettingsRuleReady = showQuickSettingsTab && detailResolved.ready;
@@ -1287,26 +1331,41 @@ export default function DeviceDetail() {
 
   const cellGroup = useMemo((): FieldGroup | null => {
     if (!displayDevice) return null;
-    return getCellFields(t, normalizeNetworkType(displayDevice.networkType));
-  }, [displayDevice, t]);
+    const networkType = isBmProduct && activeBmTech === 'GSM'
+      ? 'GSM'
+      : normalizeNetworkType(displayDevice.networkType);
+    return getCellFields(t, networkType);
+  }, [activeBmTech, displayDevice, isBmProduct, t]);
+
+  const displayCellNetworkType = useMemo(() => {
+    if (isBmProduct) {
+      return activeBmTech === 'GSM' ? 'GSM' : 'eNB';
+    }
+    return normalizeNetworkType(displayDevice?.networkType);
+  }, [activeBmTech, displayDevice?.networkType, isBmProduct]);
+
+  const activeDetailCells = isBmProduct && activeBmTech === 'GSM'
+    ? detailComposite?.gsmCells
+    : detailComposite?.cells;
+  const useCompositeCellRecords = Array.isArray(activeDetailCells) && activeDetailCells.length > 0;
 
   const cellRecords = useMemo(() => {
     if (!displayDevice) return [];
-    return buildCellRecords(displayDevice, detailComposite?.cells);
-  }, [displayDevice, detailComposite?.cells]);
+    return buildCellRecords(displayDevice, useCompositeCellRecords ? activeDetailCells : undefined);
+  }, [activeDetailCells, displayDevice, useCompositeCellRecords]);
 
   const displayCellRecords = useMemo(() => {
-    if (!detailQuickSettingsRuleReady) {
+    if (!detailQuickSettingsRuleReady || !useCompositeCellRecords) {
       return cellRecords;
     }
     const allowed = new Set(detailQuickSettingsCellInstances);
     return cellRecords.filter((row) => allowed.has(Number(row.index)));
-  }, [cellRecords, detailQuickSettingsCellInstances, detailQuickSettingsRuleReady]);
+  }, [cellRecords, detailQuickSettingsCellInstances, detailQuickSettingsRuleReady, useCompositeCellRecords]);
 
   const cellColumns = useMemo(
-    () => getCellSummaryColumns(normalizeNetworkType(displayDevice?.networkType), t).map((column) => {
+    () => getCellSummaryColumns(displayCellNetworkType, t).map((column) => {
       // LTE 小区列表里的带宽列与详情字段、快速设置共享同一个枚举映射（仅 eNB）。
-      const isLteBandwidth = column.key === 'bandwidth' && normalizeNetworkType(displayDevice?.networkType) === 'eNB';
+      const isLteBandwidth = column.key === 'bandwidth' && displayCellNetworkType === 'eNB';
       return {
         ...column,
         render: column.key === 'opState'
@@ -1314,7 +1373,7 @@ export default function DeviceDetail() {
           : column.key === 'adminState'
             ? (_: unknown, row: CellRecord) => renderCellAdminState(
               row.values.adminState as string | undefined,
-              displayDevice?.networkType ?? '',
+              displayCellNetworkType,
               t,
             )
           : column.key === 'rfStatus'
@@ -1324,7 +1383,7 @@ export default function DeviceDetail() {
             : (value: string | number | undefined) => value ?? '-',
       };
     }),
-    [displayDevice?.networkType, t],
+    [displayCellNetworkType, t],
   );
 
   if (isLoading) {
@@ -1412,7 +1471,28 @@ export default function DeviceDetail() {
                 <div style={{ padding: '16px 0' }}>
                   {detailGroups[0] && renderFieldGroup(detailGroups[0], displayDevice)}
                   {cellGroup && (
-                    <Card size="small" title={cellGroup.title}>
+                    <Card
+                      size="small"
+                      title={cellGroup.title}
+                      extra={bmCellTechOptions.length > 1 ? (
+                        <Space size={8}>
+                          <Text type="secondary">{t('device.cellViewTech')}</Text>
+                          <Radio.Group
+                            size="small"
+                            optionType="button"
+                            buttonStyle="solid"
+                            value={activeBmTech}
+                            onChange={(event) => setActiveBmTech(event.target.value as BmCellTech)}
+                          >
+                            {bmCellTechOptions.map((tech) => (
+                              <Radio.Button key={tech} value={tech}>
+                                {tech === 'LTE' ? t('device.cellViewTech.lte') : t('device.cellViewTech.gsm')}
+                              </Radio.Button>
+                            ))}
+                          </Radio.Group>
+                        </Space>
+                      ) : undefined}
+                    >
                       <Table<CellRecord>
                         rowKey="key"
                         columns={cellColumns}
