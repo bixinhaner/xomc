@@ -110,33 +110,47 @@ cd deployments/release
 
 `serve.sh` 提供两种常驻方式，互不干扰，**只选其一**：
 
-| 方式 | 适用场景 | 关 ssh 后 | 机器重启后 | 谁监管崩溃 |
+| 方式 | 适用场景 | 关 ssh / 退出登录后 | 机器重启后 | 谁监管崩溃 |
 |------|---------|----------|-----------|----------|
-| **A. `./serve.sh start`** | 临时常驻、机器上没 systemd / 没 root | 不掉（setsid 隔离） | **不自启** | 无 |
+| **A. `./serve.sh start`** | 临时常驻（含 `build-release.sh` 末尾自动起的下载服务） | 不掉 | **不自启** | 无 |
 | **B. systemd unit** | 长期挂着、要开机自启、要崩溃重启 | 不掉 | 自启 | systemd `Restart=on-failure` |
 
-> ⚠️ **两种方式不要并存**。systemd 接管后再用 `./serve.sh start` 会出现端口冲突 + PID 文件互不知情。要切换先把另一种停干净。
+> ⚠️ **两种方式不要并存**。systemd 接管后再用 `./serve.sh start` 会出现端口冲突。要切换先把另一种停干净。
 
 ### 方式 A：`./serve.sh` 自管（脚本内置 daemon）
 
 ```bash
-./serve.sh start                   # 启动；默认 8000；setsid detach，关 ssh 不带走
+./serve.sh start                   # 启动；默认 8000；关 ssh / 退出登录不带走
 ./serve.sh start -p 9000           # 启动并指定端口
-./serve.sh status                  # 查看运行状态（PID / 端口 / 日志路径）
-./serve.sh stop                    # 停止（SIGTERM → 10s 超时 → SIGKILL）
+./serve.sh status                  # 查看运行状态（unit/PID / 端口 / 日志路径）
+./serve.sh stop                    # 停止
 ./serve.sh restart                 # 重启；不传 -p 时沿用上次端口
 ./serve.sh restart -p 9001         # 重启并换端口
 ```
+
+**后台保活怎么实现的（start / restart 自动选择，无需关心）**：
+
+| 运行环境 | 后台托管方式 | 关 ssh / 退出登录 | 日志 |
+|---------|------------|------------------|------|
+| **root + systemd**（构建机常见） | **systemd 瞬态服务 `omc-serve-auto`**（脱离登录会话，挺过 `logind` 的 `KillUserProcesses=yes`） | 不掉 | `journalctl -u omc-serve-auto -f` |
+| 非 root / 无 systemd | `setsid`+`nohup`（写 `.serve.pid`/`.serve.log`） | 一般不掉；但开了 `KillUserProcesses=yes` 的 systemd 系统登出仍可能被带走 → 用方式 B | `tail -f .serve.log` |
+
+> 历史坑：`build-release.sh` 末尾会自动 `serve.sh restart` 刷新下载服务。早期只用
+> `setsid`+`nohup`，在 **root + systemd** 机器上 `KillUserProcesses=yes` 会在登出时
+> 连带杀掉它，表现为"构建完关 ssh 后 8000 端口就访问不了"。现已改为 root+systemd 下
+> 走 systemd 瞬态服务托管，登出 / 关 ssh 不再带走。
 
 相关文件（均在 `deployments/release/` 下，已加 `.gitignore`）：
 
 | 文件 | 用途 |
 |------|------|
-| `.serve.pid`  | 后台进程 PID |
+| `.serve.unit` | systemd 瞬态服务模式标记（内容=unit 名；存在即走 systemd） |
+| `.serve.pid`  | `setsid`/`nohup` 模式的后台进程 PID |
 | `.serve.port` | 上次启动的端口（`restart` 沿用） |
-| `.serve.log`  | 后台模式的请求日志（`tail -f` 看实时请求） |
+| `.serve.log`  | `setsid`/`nohup` 模式的请求日志（systemd 模式日志在 journald） |
 
-**适合谁**：临时把构建机变成下载源，开发 / 测试场景。**不适合**机器重启后自动起来——A 方式不写 init 系统，重启就没了。
+**适合谁**：临时把构建机变成下载源，开发 / 测试场景。**不适合**机器重启后自动起来——
+瞬态服务和 `setsid`/`nohup` 都不写开机自启，重启就没了；要**重启后自启**用方式 B。
 
 ### 方式 B：systemd unit（生产推荐）
 

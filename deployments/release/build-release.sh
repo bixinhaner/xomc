@@ -304,11 +304,14 @@ log "  归档位置 ：archive/project/$VERSION/"
 ls -lh "$OUT"/omc-*."$EXT" 2>/dev/null || true
 echo
 
-# ── 4. 自动重启 HTTP 下载服务，让新包立刻可被下载 ───────────────────────
-# serve.sh restart：未启动 → 启动；已在跑 → kill 旧进程后用上次端口重启。
+# ── 4. 自动刷新 HTTP 下载服务（daemon 模式），让新包立刻可被下载 ──────────
+# 走 serve.sh restart（= 内部 daemon 化的 serve.sh start）：未启动→启动；已在跑→
+# 停旧实例后用上次端口重启。serve.sh 在 root+systemd 机器上用 systemd 瞬态服务托管
+# （脱离登录会话，关 ssh / 退出登录不掉），非 root/无 systemd 才回退 setsid+nohup。
+# 本脚本【不自己 nohup】，统一交给 serve.sh 的 daemon 逻辑。
 # 即使重启失败也不报错（build 主流程已完成，serve 只是便利）。
 if [ -x "$SCRIPT_DIR/serve.sh" ]; then
-  log "刷新 HTTP 下载服务（serve.sh restart）..."
+  log "刷新 HTTP 下载服务（serve.sh restart，daemon 模式）..."
   if "$SCRIPT_DIR/serve.sh" restart; then
     log "HTTP 下载服务已重启，可访问 http://<构建机IP>:$(cat "$SCRIPT_DIR/.serve.port" 2>/dev/null || echo 8000)/"
   else

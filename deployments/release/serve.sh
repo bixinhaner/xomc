@@ -10,15 +10,25 @@
 #   ./serve.sh -h | --help           # 本帮助
 #
 # 用法（后台守护）：
-#   ./serve.sh start [-p PORT|PORT]  # 启动并 detach；写 PID/端口到隐藏文件
+#   ./serve.sh start [-p PORT|PORT]  # 启动并 detach
 #   ./serve.sh stop                  # 停止后台进程
 #   ./serve.sh restart [-p PORT]     # 重启（不传端口时沿用上次端口）
 #   ./serve.sh status                # 查看运行状态
 #
-# 后台模式相关文件：
-#   PID 文件 ：  <脚本目录>/.serve.pid
-#   端口缓存 ：  <脚本目录>/.serve.port
-#   日志文件 ：  <脚本目录>/.serve.log
+# 后台保活策略（start / restart 自动选择）：
+#   · root + systemd 机器 → 用 systemd 瞬态服务 omc-serve-auto 托管，后台进程
+#     脱离登录会话，关 ssh / 退出登录都不掉（挺过 logind KillUserProcesses=yes）。
+#     这是 build-release.sh 末尾自动 restart 后下载服务能持续在线的关键。
+#     日志走 journald：journalctl -u omc-serve-auto -f
+#   · 非 root / 无 systemd → 回退 setsid+nohup（写 .serve.pid/.serve.log）。
+#     注意：开了 KillUserProcesses=yes 的 systemd 系统上，此回退路径登出仍可能
+#     被带走；需要登出后/重启后保活请装静态 unit（见 README「下载服务长期运行」）。
+#
+# 后台模式相关文件（隐藏在脚本目录）：
+#   .serve.unit ：  systemd 瞬态服务模式标记（内容=unit 名；存在即走 systemd）
+#   .serve.pid  ：  setsid/nohup 模式的后台进程 PID
+#   .serve.port ：  上次启动端口（restart 沿用）
+#   .serve.log  ：  setsid/nohup 模式的请求日志（systemd 模式日志在 journald）
 # =============================================================================
 set -euo pipefail
 
@@ -27,12 +37,32 @@ ARCHIVE="$SCRIPT_DIR/archive"
 PID_FILE="$SCRIPT_DIR/.serve.pid"
 PORT_FILE="$SCRIPT_DIR/.serve.port"
 LOG_FILE="$SCRIPT_DIR/.serve.log"
+UNIT_FILE="$SCRIPT_DIR/.serve.unit"   # 存在则后台用 systemd 瞬态服务托管；内容=unit 名
+RUN_UNIT="omc-serve-auto"             # systemd 瞬态服务名（区别于仓库内的静态 omc-serve.service）
 DEFAULT_PORT=8000
 
 die()   { echo "错误：$*" >&2; exit 1; }
-usage() { sed -n '3,23p' "$0"; }
+usage() { sed -n '3,31p' "$0"; }
+
+# 是否具备 systemd 托管条件：root + systemd-run 可用 + systemd 是 1 号进程。
+# 满足时后台进程交给 systemd 瞬态服务（脱离登录会话），可挺过 SSH 退出 /
+# logind 的 KillUserProcesses=yes —— 这是 setsid/nohup 单独做不到的。
+systemd_capable() {
+  [ "$(id -u)" = 0 ] || return 1
+  command -v systemd-run >/dev/null 2>&1 || return 1
+  [ -d /run/systemd/system ] || return 1
+  return 0
+}
 
 is_running() {
+  # systemd 瞬态服务模式
+  if [ -f "$UNIT_FILE" ]; then
+    local unit; unit="$(cat "$UNIT_FILE" 2>/dev/null || true)"
+    [ -n "$unit" ] || return 1
+    systemctl is-active --quiet "$unit" 2>/dev/null
+    return
+  fi
+  # 传统 setsid/nohup 模式
   [ -f "$PID_FILE" ] || return 1
   local pid; pid="$(cat "$PID_FILE" 2>/dev/null || true)"
   [ -n "$pid" ] || return 1
@@ -155,19 +185,39 @@ PYEOF
 # ── action 路由 ─────────────────────────────────────────────────────────
 case "$ACTION" in
   status)
+    port="$(cat "$PORT_FILE" 2>/dev/null || echo "?")"
     if is_running; then
-      pid="$(cat "$PID_FILE")"
-      port="$(cat "$PORT_FILE" 2>/dev/null || echo "?")"
-      echo "运行中：PID=$pid，端口=$port"
-      echo "日志：$LOG_FILE"
+      if [ -f "$UNIT_FILE" ]; then
+        unit="$(cat "$UNIT_FILE")"
+        echo "运行中（systemd 瞬态服务 $unit），端口=$port"
+        echo "日志：journalctl -u $unit -f"
+      else
+        echo "运行中：PID=$(cat "$PID_FILE")，端口=$port"
+        echo "日志：$LOG_FILE"
+      fi
     else
       echo "未运行"
-      [ -f "$PID_FILE" ] && echo "（残留 PID 文件 $PID_FILE，可手动清理）"
+      [ -f "$UNIT_FILE" ] && echo "（残留 unit 标记 $UNIT_FILE，可手动清理）"
+      [ -f "$PID_FILE" ]  && echo "（残留 PID 文件 $PID_FILE，可手动清理）"
     fi
     exit 0
     ;;
 
   stop)
+    # systemd 瞬态服务模式
+    if [ -f "$UNIT_FILE" ]; then
+      unit="$(cat "$UNIT_FILE" 2>/dev/null || true)"
+      if [ -n "$unit" ] && systemctl is-active --quiet "$unit" 2>/dev/null; then
+        systemctl stop "$unit" 2>/dev/null || true
+        echo "已停止（systemd 瞬态服务 $unit）"
+      else
+        echo "未运行"
+      fi
+      systemctl reset-failed "$unit" 2>/dev/null || true
+      rm -f "$UNIT_FILE"
+      exit 0
+    fi
+    # 传统 setsid/nohup 模式
     if is_running; then
       pid="$(cat "$PID_FILE")"
       kill "$pid" 2>/dev/null || true
@@ -196,12 +246,47 @@ case "$ACTION" in
 
   start)
     if is_running; then
-      echo "已在运行 (PID=$(cat "$PID_FILE"))，请先 stop 或 restart" >&2
+      if [ -f "$UNIT_FILE" ]; then
+        echo "已在运行（systemd 瞬态服务 $(cat "$UNIT_FILE")），请先 stop 或 restart" >&2
+      else
+        echo "已在运行 (PID=$(cat "$PID_FILE"))，请先 stop 或 restart" >&2
+      fi
       exit 1
     fi
     prepare_env
-    print_banner "$PORT" "$LOG_FILE（tail -f 查看）"
-    # 用 setsid 摆脱终端组；nohup 也行但 setsid 更彻底，关 ssh 不带走进程。
+    print_banner "$PORT" "见下方提示"
+
+    # 优先：systemd 瞬态服务托管（root + systemd）。后台进程进入独立的
+    # systemd cgroup，脱离登录会话 —— 关 ssh / 退出登录都不会被 logind 的
+    # KillUserProcesses 带走（setsid/nohup 在开了该选项的系统上挺不过登出）。
+    if systemd_capable; then
+      systemctl reset-failed "$RUN_UNIT" 2>/dev/null || true
+      if systemd-run --quiet --unit="$RUN_UNIT" \
+           --description="OMC 离线版本下载服务 (serve.sh :$PORT)" \
+           --working-directory="$ARCHIVE" \
+           bash "$0" __serve -p "$PORT" 2>/dev/null; then
+        echo "$RUN_UNIT" > "$UNIT_FILE"
+        echo "$PORT"     > "$PORT_FILE"
+        rm -f "$PID_FILE"
+        sleep 0.5
+        if systemctl is-active --quiet "$RUN_UNIT"; then
+          echo "已启动（systemd 瞬态服务 $RUN_UNIT，端口 $PORT）—— 关 ssh / 退出登录不掉。"
+          echo "停止：$0 stop   |   状态：$0 status   |   日志：journalctl -u $RUN_UNIT -f"
+          echo "（开机自启 / 崩溃重启请装静态 unit：见 deployments/release/README.md「下载服务长期运行」）"
+          exit 0
+        fi
+        rm -f "$UNIT_FILE"
+        echo "systemd 瞬态服务未就绪，回退到 setsid/nohup ..." >&2
+        echo "排查：journalctl -u $RUN_UNIT --no-pager | tail -n 20" >&2
+      else
+        echo "systemd-run 启动失败，回退到 setsid/nohup（关 ssh 可能不保活）..." >&2
+      fi
+    fi
+
+    # 回退：setsid 摆脱终端组（nohup 兜底）。非 root / 无 systemd 时用此路径；
+    # 注意：systemd 系统若开启 KillUserProcesses=yes，登出仍可能带走本进程，
+    # 此时建议改用静态 systemd unit（见 README）。
+    rm -f "$UNIT_FILE"
     if command -v setsid >/dev/null 2>&1; then
       setsid bash "$0" __serve -p "$PORT" >>"$LOG_FILE" 2>&1 </dev/null &
     else
